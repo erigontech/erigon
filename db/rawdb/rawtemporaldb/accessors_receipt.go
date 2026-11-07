@@ -61,9 +61,30 @@ func ReceiptAsOf(tx kv.TemporalTx, txNum uint64) (cumGasUsed uint64, cumBlobGasu
 	return
 }
 
-// ReceiptGasAsOf returns the cumulative gas and blob gas of the last receipt
-// before txNum, and whether the receipt domain holds them.
+// ReceiptGasAsOf returns the cumulative gas and blob gas of the receipt of the
+// txn at txNum-1, and whether the receipt domain holds it. Where the domain
+// ends before txNum-1, it reports none rather than its latest record, an
+// earlier block's; it also does where the domain ends with a receipt that left
+// the cumulative gas unchanged.
 func ReceiptGasAsOf(tx kv.TemporalTx, txNum uint64) (cumGasUsed, cumBlobGasUsed uint64, ok bool, err error) {
+	if txNum == 0 {
+		return 0, 0, false, nil
+	}
+	// The domain is written in txNum order: a persisted record from txNum-1 on,
+	// or one up to txNum-1 in the in-memory batch a block overlay reads first,
+	// shows it covers txNum-1. HistorySeek(ts) finds the former, and from that
+	// batch, one before ts.
+	for _, ts := range []uint64{txNum - 1, txNum} {
+		if _, ok, err = tx.HistorySeek(kv.ReceiptDomain, CumulativeGasUsedInBlockKey, ts); err != nil {
+			return 0, 0, false, err
+		}
+		if ok {
+			break
+		}
+	}
+	if !ok {
+		return 0, 0, false, nil
+	}
 	v, ok, err := tx.GetAsOf(kv.ReceiptDomain, CumulativeGasUsedInBlockKey, txNum)
 	if err != nil || !ok || len(v) == 0 {
 		return 0, 0, false, err

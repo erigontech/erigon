@@ -176,6 +176,82 @@ func uvarint(in []byte) (res uint64) {
 	return res
 }
 
+// TestReceiptGasAsOf checks that the gas before a txn is read from the receipt
+// of the txn before it, and reported missing where the receipt domain ends
+// before that txn instead of read from an earlier block.
+func TestReceiptGasAsOf(t *testing.T) {
+	dirs, require := datadir.New(t.TempDir()), require.New(t)
+	db := temporaltest.NewTestDB(t, dirs)
+	tx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(err)
+	defer tx.Rollback()
+
+	doms, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
+	require.NoError(err)
+	defer doms.Close()
+
+	// block1: txn0 at txNum 1, txn1 at txNum 2 with a blob; block2 spans txNums
+	// 4 (start) to 7 (end), and the domain holds none of its receipts.
+	require.NoError(rawtemporaldb.AppendReceiptMetadata(doms.AsPutDel(tx), 0, 10, 0, 1))
+	require.NoError(rawtemporaldb.AppendReceiptMetadata(doms.AsPutDel(tx), 0, 30, 5, 2))
+	require.NoError(doms.Flush(t.Context(), tx))
+
+	for _, tc := range []struct {
+		txNum, gas, blobGas uint64
+		ok                  bool
+	}{
+		{0, 0, 0, false},
+		{1, 0, 0, false},
+		{2, 10, 0, true},
+		{3, 30, 5, true},
+		{6, 0, 0, false},
+	} {
+		gas, blobGas, ok, err := rawtemporaldb.ReceiptGasAsOf(tx, tc.txNum)
+		require.NoError(err)
+		require.Equal(tc.ok, ok, "txNum %d", tc.txNum)
+		require.Equal(tc.gas, gas, "txNum %d", tc.txNum)
+		require.Equal(tc.blobGas, blobGas, "txNum %d", tc.txNum)
+	}
+}
+
+// TestReceiptGasAsOfOverlay checks that the gas before a txn is read through
+// the block overlay, which holds a block executed but not yet flushed.
+func TestReceiptGasAsOfOverlay(t *testing.T) {
+	dirs, require := datadir.New(t.TempDir()), require.New(t)
+	db := temporaltest.NewTestDB(t, dirs)
+	tx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(err)
+	defer tx.Rollback()
+
+	// block1: txn0 at txNum 1, flushed by its own batch, which would otherwise
+	// still answer for it; block2: txn0 at txNum 4 and txn1 at txNum 5, in
+	// memory only.
+	flushed, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
+	require.NoError(err)
+	require.NoError(rawtemporaldb.AppendReceiptMetadata(flushed.AsPutDel(tx), 0, 10, 0, 1))
+	require.NoError(flushed.Flush(t.Context(), tx))
+	flushed.Close()
+
+	doms, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
+	require.NoError(err)
+	defer doms.Close()
+	require.NoError(rawtemporaldb.AppendReceiptMetadata(doms.AsPutDel(tx), 0, 20, 0, 4))
+	require.NoError(rawtemporaldb.AppendReceiptMetadata(doms.AsPutDel(tx), 0, 30, 0, 5))
+	require.NoError(doms.InitBlockOverlay(tx))
+	overlay := doms.BlockOverlayTemporalTx(tx)
+
+	for _, tc := range []struct{ txNum, gas uint64 }{{5, 20}, {6, 30}} {
+		gas, _, ok, err := rawtemporaldb.ReceiptGasAsOf(overlay, tc.txNum)
+		require.NoError(err)
+		require.True(ok, "txNum %d", tc.txNum)
+		require.Equal(tc.gas, gas, "txNum %d", tc.txNum)
+
+		_, _, ok, err = rawtemporaldb.ReceiptGasAsOf(tx, tc.txNum)
+		require.NoError(err)
+		require.False(ok, "txNum %d without the overlay", tc.txNum)
+	}
+}
+
 // TestFirstLogIndex pins the two things the callers must not re-derive: the
 // first txn of a block gets 0 rather than the previous block's tail count, and
 // a txNum the receipt domain has no record for is an error, not a silent 0.

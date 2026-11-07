@@ -77,6 +77,8 @@ const (
 	// resumeBALStepSize makes the first step, txNums [0, 4), end right after tx0.
 	resumeBALStepSize = uint64(4)
 	resumeBlockTime   = uint64(10)
+	// earlierReceiptGas is the cumulative gas of the receipt earlierReceipt seeds.
+	earlierReceiptGas = uint64(1_000_000)
 )
 
 // resumePoint is how far into block 1 the state is committed when execution
@@ -114,6 +116,9 @@ type resumeBALFixture struct {
 	fromStateFiles bool
 	// noPrefixReceipts leaves the prefix's receipts out of the seed.
 	noPrefixReceipts bool
+	// earlierReceipt seeds the receipt of a transaction before the block, which
+	// a receipt domain that does not reach the block leaves as its latest.
+	earlierReceipt bool
 	// inspect, when set, sees the state each exec and execSerial run leaves.
 	inspect func(t *testing.T, sd *execctx.SharedDomains, tx kv.TemporalTx)
 }
@@ -244,6 +249,11 @@ func (fx *resumeBALFixture) seed(t *testing.T, db kv.TemporalRwDB, point resumeP
 		if point != fromBlockStart {
 			if err := rawdbv3.TxNums.Append(tx, 1, resumeBALBlockStartTxNum+uint64(len(fx.block.Transactions()))+1); err != nil {
 				return err
+			}
+			if fx.earlierReceipt {
+				if err := rawtemporaldb.AppendReceiptMetadata(domains.AsPutDel(tx), 0, earlierReceiptGas, 0, resumeBALGenesisTxNum); err != nil {
+					return err
+				}
 			}
 			var logIndex uint32
 			var blobGas uint64
@@ -988,8 +998,8 @@ func (fx *resumeBALFixture) recordGas(t *testing.T, have *uint256.Int) uint256.I
 // TestResumedBlockGasFromBlock checks that both executors, resuming a block
 // after transactions that left less gas than a later message's limit, give
 // that message, which takes its gas from the block, what the transactions
-// left, also when their receipts are missing, and check the message's bound
-// gas limit against it.
+// left, also when their receipts are missing, the latest one then an earlier
+// block's, and check the message's bound gas limit against it.
 func TestResumedBlockGasFromBlock(t *testing.T) {
 	for _, prefix := range []struct {
 		name  string
@@ -1013,10 +1023,12 @@ func TestResumedBlockGasFromBlock(t *testing.T) {
 			name             string
 			point            resumePoint
 			noPrefixReceipts bool
+			earlierReceipt   bool
 		}{
-			{"full", fromBlockStart, false},
-			{"after prefix", resumePoint(last), false},
-			{"after prefix without receipts", resumePoint(last), true},
+			{"full", fromBlockStart, false, false},
+			{"after prefix", resumePoint(last), false, false},
+			{"after prefix without receipts", resumePoint(last), true, false},
+			{"after prefix with only an earlier block's receipt", resumePoint(last), true, true},
 		} {
 			for _, serial := range []bool{false, true} {
 				name := prefix.name + "/parallel/" + tc.name
@@ -1025,7 +1037,7 @@ func TestResumedBlockGasFromBlock(t *testing.T) {
 				}
 				t.Run(name, func(t *testing.T) {
 					left, recorded = 0, uint256.Int{}
-					fx.noPrefixReceipts = tc.noPrefixReceipts
+					fx.noPrefixReceipts, fx.earlierReceipt = tc.noPrefixReceipts, tc.earlierReceipt
 					err := fx.run(t, fx.block, tc.point, serial)
 					require.Equal(t, want, recorded, "gas recorded by the message")
 					require.NoError(t, err)
@@ -1200,6 +1212,9 @@ func TestRestorePriorGas(t *testing.T) {
 		{"resumed without receipts or history before later gas from the block", chain.TestChainOsakaConfig, 4, 1, types.Transactions{tx0, tx1, fromBlockTxn{tx2}}, state.ErrPruned, false, 0, 0},
 		// Executing the transaction without a message rejects the block first.
 		{"resumed without receipts before a transaction without a message", chain.TestChainOsakaConfig, 4, 1, types.Transactions{tx0, badMessageTxn{tx1}, fromBlockTxn{tx2}}, nil, true, 0, 0},
+		// The block starts at txNum 6, after the one of the receipt at txNum 4.
+		{"resumed with only an earlier block's receipt", chain.TestChainOsakaConfig, 8, 1, types.Transactions{tx0, tx1, tx2}, nil, true, 0, 0},
+		{"resumed with only an earlier block's receipt before gas from the block", chain.TestChainOsakaConfig, 8, 1, types.Transactions{tx0, fromBlockTxn{tx1}}, state.ErrPruned, false, 0, 0},
 		{"resumed from amsterdam", amsterdam, 5, 1, types.Transactions{tx0, fromBlockTxn{tx1}}, nil, true, 0, 0},
 		// The receipt before the first transaction is the parent block's last.
 		{"first transaction", chain.TestChainOsakaConfig, 5, 0, types.Transactions{fromBlockTxn{tx0}}, nil, false, 0, 0},
@@ -1244,8 +1259,9 @@ func TestParallelResumedAtOtherTask(t *testing.T) {
 
 // TestResumedBlockBlobGas checks that both executors, resuming a block after a
 // transaction that used blob gas, reject a later one whose blobs the rest of
-// the block's blob gas does not fit, also without the first one's receipt when
-// the later one takes its gas from the block.
+// the block's blob gas does not fit, also without the first one's receipt,
+// the latest one then an earlier block's, when the later one takes its gas
+// from the block.
 func TestResumedBlockBlobGas(t *testing.T) {
 	fx := newResumeFixture(t, chain.TestChainOsakaConfig, nil)
 	target := common.HexToAddress("0x0000000000000000000000000000000000000a11")
@@ -1286,10 +1302,12 @@ func TestResumedBlockBlobGas(t *testing.T) {
 		block            *types.Block
 		point            resumePoint
 		noPrefixReceipts bool
+		earlierReceipt   bool
 	}{
-		{"full", block, fromBlockStart, false},
-		{"after tx0", block, afterTx0, false},
-		{"after tx0 without receipts/gas from block", fromBlock, afterTx0, true},
+		{"full", block, fromBlockStart, false, false},
+		{"after tx0", block, afterTx0, false, false},
+		{"after tx0 without receipts/gas from block", fromBlock, afterTx0, true, false},
+		{"after tx0 with only an earlier block's receipt/gas from block", fromBlock, afterTx0, true, true},
 	} {
 		for _, serial := range []bool{false, true} {
 			name := "parallel/" + tc.name
@@ -1297,7 +1315,7 @@ func TestResumedBlockBlobGas(t *testing.T) {
 				name = "serial/" + tc.name
 			}
 			t.Run(name, func(t *testing.T) {
-				fx.block, fx.noPrefixReceipts = tc.block, tc.noPrefixReceipts
+				fx.block, fx.noPrefixReceipts, fx.earlierReceipt = tc.block, tc.noPrefixReceipts, tc.earlierReceipt
 				require.ErrorIs(t, fx.run(t, tc.block, tc.point, serial), protocol.ErrBlobGasLimitReached)
 			})
 		}
