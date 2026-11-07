@@ -1941,6 +1941,58 @@ func generateRandomTxNum(r *rndGen, maxTxNum uint64, usedTxNums map[uint64]bool)
 	return txNum
 }
 
+// GetAsOf at every txNum returns the last write before it, whether that write sits in files, in the DB, in the
+// queried txNum's own step, or after it.
+func TestDomain_GetAsOfEveryTxNum(t *testing.T) {
+	for _, filesUpTo := range []uint64{0, 160} {
+		t.Run(fmt.Sprintf("files_up_to_%d", filesUpTo), func(t *testing.T) {
+			db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, 16, log.New())
+			tx, err := db.BeginRw(t.Context())
+			require.NoError(t, err)
+			defer tx.Rollback()
+
+			const totalTx = 320
+			data := generateTestData(t, length.Addr, length.Addr+length.Hash, totalTx, 12, 40)
+			domainRoTx := d.beginForTests()
+			writer := domainRoTx.NewWriter(db)
+			for key, updates := range data {
+				var prev []byte
+				for i := range updates {
+					if i > 0 {
+						prev = updates[i-1].value
+					}
+					require.NoError(t, writer.PutWithPrev([]byte(key), updates[i].value, updates[i].txNum, prev))
+				}
+			}
+			require.NoError(t, writer.Flush(t.Context(), tx))
+			writer.Close()
+			domainRoTx.Close()
+			if filesUpTo > 0 {
+				collateAndMerge(t, tx, d, filesUpTo)
+			}
+
+			domainRoTx = d.beginForTests()
+			defer domainRoTx.Close()
+			for key, updates := range data {
+				for txNum := uint64(0); txNum <= totalTx+d.stepSize; txNum++ {
+					var want []byte
+					for _, u := range updates {
+						if u.txNum < txNum {
+							want = u.value
+						}
+					}
+					v, ok, err := domainRoTx.GetAsOf([]byte(key), txNum, tx)
+					require.NoError(t, err)
+					require.Truef(t, bytes.Equal(want, v), "key %x txNum %d: want %x, got %x", []byte(key), txNum, want, v)
+					if len(want) > 0 {
+						require.Truef(t, ok, "key %x txNum %d", []byte(key), txNum)
+					}
+				}
+			}
+		})
+	}
+}
+
 func TestDomain_GetAfterAggregation(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
