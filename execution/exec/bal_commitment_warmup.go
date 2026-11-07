@@ -463,8 +463,13 @@ func prefetchCommitment(ctx context.Context, db kv.RoDB, hashedKeys [][]byte) er
 		if !ok || trieMostlyResident(ctx, p, hashedKeys) {
 			return
 		}
-		if err = prefetchKeys(ctx, db, ttx, kv.CommitmentDomain, flatPrefixes(hashedKeys)); err != nil {
+		flat := flatPrefixes(hashedKeys)
+		before := pfPages.Load()
+		if err = prefetchKeys(ctx, db, ttx, kv.CommitmentDomain, flat); err != nil {
 			return
+		}
+		if pfInfo {
+			log.Info("[warmBAL] trie prefetch level", "part", "flat", "prefixes", len(flat), "pages", pfPages.Load()-before)
 		}
 		var storageKeys [][]byte
 		for _, k := range hashedKeys {
@@ -487,8 +492,13 @@ func walkTriePrefixes(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, keys [
 	active := keys
 	for depth := start; len(active) > 0 && depth <= commitment.WarmupMaxDepth; depth++ {
 		if depth > prefetchFlatDepth {
-			if err := prefetchKeys(ctx, db, ttx, kv.CommitmentDomain, compactPrefixes(active, depth)); err != nil {
+			prefixes := compactPrefixes(active, depth)
+			before := pfPages.Load()
+			if err := prefetchKeys(ctx, db, ttx, kv.CommitmentDomain, prefixes); err != nil {
 				return err
+			}
+			if pfInfo {
+				log.Info("[warmBAL] trie prefetch level", "part", "walk", "start", start, "depth", depth, "prefixes", len(prefixes), "pages", pfPages.Load()-before)
 			}
 		}
 		if depth >= prefetchFlatDepth {
