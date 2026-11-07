@@ -12,7 +12,6 @@ import (
 
 const (
 	// overlay parameters
-	gossipSubDlo  = 6  // topic stable mesh low watermark
 	gossipSubDhi  = 12 // topic stable mesh high watermark
 	gossipSubDout = 1  // topic stable mesh target out degree. // Dout must be set below Dlo, and must not exceed D / 2.
 
@@ -77,7 +76,7 @@ func (p *p2pManager) pubsubOptions(beaconConfig *clparams.BeaconChainConfig) []p
 // creates a custom gossipsub parameter set.
 func pubsubGossipParam() pubsub.GossipSubParams {
 	gParams := pubsub.DefaultGossipSubParams()
-	gParams.Dlo = gossipSubDlo
+	gParams.Dlo = gossip.GossipSubDlo
 	gParams.Dhi = gossipSubDhi
 	gParams.D = gossip.GossipSubD
 	gParams.Dout = gossipSubDout
