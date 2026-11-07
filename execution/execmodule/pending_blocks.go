@@ -193,19 +193,20 @@ func (e *ExecModule) publishSeededContext(sd *execctx.SharedDomains) {
 	}
 }
 
-func (e *ExecModule) dropBadChain(badHead, latestValidHash common.Hash) {
+func (e *ExecModule) dropBadChain(badHead, latestValidHash common.Hash) common.Hash {
 	if latestValidHash == (common.Hash{}) {
 		delete(e.pendingBlocks, badHead)
-		return
+		return common.Hash{}
 	}
 	for hash := badHead; hash != latestValidHash; {
 		block, ok := e.pendingBlocks[hash]
 		if !ok {
-			return
+			return hash
 		}
 		delete(e.pendingBlocks, hash)
 		hash = block.parent
 	}
+	return common.Hash{}
 }
 
 func (e *ExecModule) dropPendingBlocks() {

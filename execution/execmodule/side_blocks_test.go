@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ecdsa"
+	"errors"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -31,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
@@ -73,6 +75,32 @@ func TestForkChoiceReorgsToRetainedSideBlock(t *testing.T) {
 	header, err := m.ExecModule.GetHeader(t.Context(), &hash, &number)
 	require.NoError(t, err)
 	require.NotNil(t, header)
+	has, err := m.ExecModule.HasBlock(t.Context(), &hash, nil)
+	require.NoError(t, err)
+	require.True(t, has)
+
+	updateForkChoiceTo(t, m, side)
+	requireCanonicalWithTransactions(t, m, side)
+}
+
+func TestForkChoiceCommitFailureKeepsRetainedSideBlock(t *testing.T) {
+	m, key, _ := newMetricsTester(t)
+	side := generateTransferBlocks(t, m, key, 1, 0x0b)[0]
+	winner := generateTransferBlocks(t, m, key, 1, 0x0a)[0]
+	insertAndValidateBlocks(t, m, side, winner)
+	updateForkChoiceTo(t, m, winner)
+
+	db, ok := m.DB.(*temporal.DB)
+	require.True(t, ok)
+	failingDB := &failOnceCommitDB{RwDB: db.InternalDB()}
+	failingDB.fail.Store(true)
+	db.RwDB = failingDB
+
+	result, err := m.ExecModule.UpdateForkChoice(t.Context(), side.Hash(), common.Hash{}, common.Hash{})
+	require.Error(t, err)
+	require.Equal(t, execmodule.ForkChoiceResult{}, result)
+
+	hash := side.Hash()
 	has, err := m.ExecModule.HasBlock(t.Context(), &hash, nil)
 	require.NoError(t, err)
 	require.True(t, has)
@@ -387,6 +415,64 @@ func TestForkChoicePersistsSideBlockBeyondReorgDepth(t *testing.T) {
 	m.ExecModule.WaitIdle(t.Context())
 }
 
+func TestValidateChainPurgesPersistedSideAncestor(t *testing.T) {
+	const maxReorgDepth = 4
+	m, _, _ := newMetricsTester(t,
+		execmoduletester.WithMaxReorgDepth(maxReorgDepth),
+		execmoduletester.WithAlwaysGenerateChangesets(true),
+	)
+	prefixPack, err := m.GenerateChain(6, func(i int, block *blockgen.BlockGen) {
+		block.SetExtra([]byte{0x01, byte(i)})
+	})
+	require.NoError(t, err)
+	for _, block := range prefixPack.Blocks {
+		insertAndValidateBlocks(t, m, block)
+		updateForkChoiceTo(t, m, block)
+	}
+
+	sidePack, err := m.GenerateChainFrom(prefixPack.Blocks[3], 2, func(i int, block *blockgen.BlockGen) {
+		block.SetExtra([]byte{0x0b, byte(i)})
+	})
+	require.NoError(t, err)
+	persisted := tamperBlockGasUsed(t, sidePack.Blocks[0], 21_000)
+	childHeader := types.CopyHeader(sidePack.Blocks[1].HeaderNoCopy())
+	childHeader.ParentHash = persisted.Hash()
+	badChild := types.NewBlockFromNetwork(childHeader, sidePack.Blocks[1].Body(), sidePack.Blocks[1].BlockAccessListSidecar())
+	alternatePack, err := m.GenerateChainFrom(prefixPack.Blocks[5], 1, func(_ int, block *blockgen.BlockGen) {
+		block.SetExtra([]byte{0x0c})
+	})
+	require.NoError(t, err)
+	canonicalPack, err := m.GenerateChainFrom(prefixPack.Blocks[5], maxReorgDepth, func(i int, block *blockgen.BlockGen) {
+		block.SetExtra([]byte{0x0a, byte(i)})
+	})
+	require.NoError(t, err)
+
+	blocks := []*types.Block{persisted, badChild, alternatePack.Blocks[0]}
+	blocks = append(blocks, canonicalPack.Blocks...)
+	_, err = m.InsertBlocks(t.Context(), blocks)
+	require.NoError(t, err)
+	canonicalHead := canonicalPack.Blocks[len(canonicalPack.Blocks)-1]
+	updateForkChoiceTo(t, m, canonicalHead)
+
+	require.NoError(t, m.DB.View(t.Context(), func(tx kv.Tx) error {
+		require.NotNil(t, rawdb.ReadHeaderNumber(tx, persisted.Hash()))
+		require.Nil(t, rawdb.ReadHeaderNumber(tx, badChild.Hash()))
+		return nil
+	}))
+	updateForkChoiceTo(t, m, alternatePack.Blocks[0])
+
+	result, err := m.ValidateChain(t.Context(), badChild.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusBadBlock, result.ValidationStatus)
+
+	for _, block := range []*types.Block{persisted, badChild} {
+		hash := block.Hash()
+		has, err := m.ExecModule.HasBlock(t.Context(), &hash, nil)
+		require.NoError(t, err)
+		require.False(t, has)
+	}
+}
+
 func TestForkChoiceBoundsRetainedSideBlocks(t *testing.T) {
 	const maxReorgDepth = 4
 	m, _, _ := newMetricsTester(t, execmoduletester.WithMaxReorgDepth(maxReorgDepth))
@@ -507,4 +593,37 @@ func requireStoredTransactions(t *testing.T, tx kv.Tx, block *types.Block) {
 	for i, txn := range body.Transactions {
 		require.Equal(t, block.Transactions()[i].Hash(), txn.Hash())
 	}
+}
+
+type failOnceCommitDB struct {
+	kv.RwDB
+	fail atomic.Bool
+}
+
+func (db *failOnceCommitDB) BeginRw(ctx context.Context) (kv.RwTx, error) {
+	tx, err := db.RwDB.BeginRw(ctx) //nolint:gocritic
+	if err != nil {
+		return nil, err
+	}
+	rollback := true
+	defer func() {
+		if rollback {
+			tx.Rollback()
+		}
+	}()
+	if db.fail.CompareAndSwap(true, false) {
+		rollback = false
+		return &failOnceCommitTx{RwTx: tx}, nil
+	}
+	rollback = false
+	return tx, nil
+}
+
+type failOnceCommitTx struct {
+	kv.RwTx
+}
+
+func (tx *failOnceCommitTx) Commit() error {
+	tx.RwTx.Rollback()
+	return errors.New("forced commit failure")
 }

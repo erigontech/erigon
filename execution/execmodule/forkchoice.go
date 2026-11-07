@@ -806,11 +806,6 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			}
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, fmt.Errorf("fcu: dispatch notifications: %w", dispatchErr), stateFlushingInParallel)
 		}
-		e.swapSideBlocks(side, retained)
-		if hasOverlay {
-			e.closeModuleContext()
-		}
-
 		// Hand the semaphore to a background goroutine: FCU cleanup runs first,
 		// so the next acquirer observes settled state whenever it gets in.
 		handOffSemaphore := func(work func() error) {
@@ -829,7 +824,14 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		persistStart := time.Now()
 		commitTimings, err := e.runForkchoiceFlushCommit(currentContext, roTx)
 		if err != nil {
+			if retained != nil {
+				retained.Close()
+			}
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
+		}
+		e.swapSideBlocks(side, retained)
+		if hasOverlay {
+			e.closeModuleContext()
 		}
 		restoreRecentReceipts = nil
 		// Update head and announce block range (notifications already dispatched).

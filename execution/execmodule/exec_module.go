@@ -718,7 +718,17 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		}
 		e.logger.Warn("ethereumExecutionModule.ValidateChain: chain is invalid", "hash", blockHash)
 		validationStatus = ExecutionStatusBadBlock
-		e.dropBadChain(blockHash, lvh)
+		missingAncestor := e.dropBadChain(blockHash, lvh)
+		if missingAncestor != (common.Hash{}) && missingAncestor != lvh {
+			if err := e.purgeBadChain(ctx, purgeTx, lvh, missingAncestor); err != nil {
+				return ValidationResult{}, err
+			}
+			if e.currentContext != nil && e.currentContext.BlockOverlay() != nil {
+				if err := e.purgeBadChain(ctx, e.currentContext.BlockOverlay(), lvh, missingAncestor); err != nil {
+					return ValidationResult{}, err
+				}
+			}
+		}
 		if e.retainedBlocks != nil {
 			side, retained, err := e.prepareSideBlocks(roTx, nil, nil, 0, 0)
 			if err != nil {
