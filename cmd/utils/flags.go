@@ -2106,11 +2106,7 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 		dbg.FilesBlockingAsyncIO = false
 		dbg.FilesBlockingAsyncIOMultiPage = false
 	}
-	if dbg.BALBatchPrefetch && runtime.GOOS == "linux" && !iouring.Available() {
-		log.Info("BAL batch prefetch needs io_uring, which is unavailable (unsupported kernel, or blocked by a seccomp sandbox such as Docker's default profile); disabling it")
-		dbg.BALBatchPrefetch = false
-		mmap.BatchPrefetch = false
-	}
+	disableBALBatchPrefetchWithoutIOUring(iouring.Available())
 	if c := ctx.Int(DBReadConcurrencyFlag.Name); c > 0 {
 		warmupWorkers := dbg.BALCommitmentWarmupReaders()
 		blockReadAheadWorkers := dbg.ReadAheadWorkerReaders()
@@ -2504,4 +2500,17 @@ func CobraFlags(cmd *cobra.Command, urfaveCliFlagsLists ...[]cli.Flag) {
 			}
 		}
 	}
+}
+
+// disableBALBatchPrefetchWithoutIOUring turns the BAL batch prefetch off on every platform where io_uring cannot run
+// its reads, so the exec-side planner does not walk the BAL keys for nothing.
+func disableBALBatchPrefetchWithoutIOUring(ioUring bool) {
+	if !dbg.BALBatchPrefetch || ioUring {
+		return
+	}
+	if runtime.GOOS == "linux" {
+		log.Info("BAL batch prefetch needs io_uring, which is unavailable (unsupported kernel, or blocked by a seccomp sandbox such as Docker's default profile); disabling it")
+	}
+	dbg.BALBatchPrefetch = false
+	mmap.BatchPrefetch = false
 }
