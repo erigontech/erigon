@@ -27,11 +27,12 @@ import (
 // Accumulator collects state changes per block in native Go types.
 // Protobuf conversion happens only at the gRPC boundary via ToProto methods.
 type Accumulator struct {
-	plainStateID       uint64
-	changes            []StateChange
-	latestChange       *StateChange
-	accountChangeIndex map[common.Address]int // For the latest change, allows finding account change by address
-	storageChangeIndex map[common.Address]map[common.Hash]int
+	plainStateID           uint64
+	changes                []StateChange
+	stateChangesIncomplete bool
+	latestChange           *StateChange
+	accountChangeIndex     map[common.Address]int // For the latest change, allows finding account change by address
+	storageChangeIndex     map[common.Address]map[common.Hash]int
 }
 
 func NewAccumulator() *Accumulator {
@@ -44,6 +45,7 @@ func (a *Accumulator) Changes() []StateChange {
 
 func (a *Accumulator) Reset(plainStateID uint64) {
 	a.changes = nil
+	a.stateChangesIncomplete = false
 	a.latestChange = nil
 	a.accountChangeIndex = nil
 	a.storageChangeIndex = nil
@@ -57,21 +59,28 @@ func (a *Accumulator) SendAndReset(ctx context.Context, c StateChangeConsumer, p
 		return
 	}
 	batch := &BlockBatchNotification{
-		StateVersionID:      a.plainStateID,
-		Changes:             a.changes,
-		PendingBlockBaseFee: pendingBaseFee,
-		PendingBlobFee:      pendingBlobFee,
-		BlockGasLimit:       blockGasLimit,
-		FinalizedBlock:      finalizedBlock,
+		StateVersionID:         a.plainStateID,
+		Changes:                a.changes,
+		StateChangesIncomplete: a.stateChangesIncomplete,
+		PendingBlockBaseFee:    pendingBaseFee,
+		PendingBlobFee:         pendingBlobFee,
+		BlockGasLimit:          blockGasLimit,
+		FinalizedBlock:         finalizedBlock,
 	}
 	if c != nil {
 		c.SendStateChanges(ctx, batch.ToProtoBatch())
 	}
-	a.Reset(0) // reset here for GC, but there will be another Reset with correct viewID
+	a.Reset(0)
 }
 
 func (a *Accumulator) SetStateID(stateID uint64) {
 	a.plainStateID = stateID
+}
+
+// MarkIncomplete records omitted state changes for the whole batch. Later
+// complete blocks cannot restore completeness; only a reset starts a new batch.
+func (a *Accumulator) MarkIncomplete() {
+	a.stateChangesIncomplete = true
 }
 
 // StartChange begins accumulation of changes for a new block.
@@ -82,6 +91,9 @@ func (a *Accumulator) StartChange(h *types.Header, txs [][]byte, unwind bool) {
 		BlockTime:   h.Time,
 	})
 	a.latestChange = &a.changes[len(a.changes)-1]
+	if h.SlotNumber != nil {
+		a.latestChange.SlotNumber = common.NewUint64(*h.SlotNumber)
+	}
 	if unwind {
 		a.latestChange.Direction = DirectionUnwind
 	}
@@ -189,14 +201,15 @@ func (a *Accumulator) ChangeStorage(address common.Address, incarnation uint64, 
 	accountChange.StorageChanges[j].Data = data
 }
 
-// CopyAndReset moves accumulated data from this instance into target, then resets this instance.
-func (a *Accumulator) CopyAndReset(target *Accumulator) {
-	target.changes = a.changes
-	a.changes = nil
-	target.latestChange = a.latestChange
-	a.latestChange = nil
-	target.accountChangeIndex = a.accountChangeIndex
-	a.accountChangeIndex = nil
-	target.storageChangeIndex = a.storageChangeIndex
-	a.storageChangeIndex = nil
+// AppendAndReset appends accumulated changes to target, then resets this instance.
+// Existing changes must stay before the appended changes, including any unwind.
+func (a *Accumulator) AppendAndReset(target *Accumulator) {
+	if len(a.changes) > 0 {
+		target.changes = append(target.changes, a.changes...)
+		target.latestChange = &target.changes[len(target.changes)-1]
+		target.accountChangeIndex = a.accountChangeIndex
+		target.storageChangeIndex = a.storageChangeIndex
+	}
+	target.stateChangesIncomplete = target.stateChangesIncomplete || a.stateChangesIncomplete
+	a.Reset(0)
 }

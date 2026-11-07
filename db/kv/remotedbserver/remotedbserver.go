@@ -69,7 +69,8 @@ const MaxTxTTL = 60 * time.Second
 // 7.3.0 - Remove HasPrefix from the remote KV service
 // 7.3.1 - Include pinned history-file generations in transaction replies
 // 7.3.2 - Add IndexJoin
-var KvServiceAPIVersion = &typesproto.VersionReply{Major: 7, Minor: 3, Patch: 2}
+// 7.4.0 - Include block slots and completeness in state-change notifications
+var KvServiceAPIVersion = &typesproto.VersionReply{Major: 7, Minor: 4, Patch: 0}
 
 type KvServer struct {
 	remoteproto.UnimplementedKVServer // must be embedded to have forward compatible implementations.
@@ -452,12 +453,21 @@ type SubscriptionReadyNotifier interface {
 func (s *KvServer) StateChanges(_ *remoteproto.StateChangeRequest, server remoteproto.KV_StateChangesServer) error {
 	ch, remove := s.stateChangeStreams.Sub()
 	defer remove()
+	var lastSequence uint64
 	if n, ok := server.(SubscriptionReadyNotifier); ok {
 		n.NotifySubscribed()
 	}
 	for {
 		select {
-		case reply := <-ch:
+		case event := <-ch:
+			reply := event.batch
+			// A new subscription may have missed changes before it connected.
+			// Batches are shared, so mark only this subscriber's response incomplete.
+			if lastSequence == 0 || event.sequence != lastSequence+1 {
+				reply = proto.Clone(reply).(*remoteproto.StateChangeBatch)
+				reply.StateChangesIncomplete = true
+			}
+			lastSequence = event.sequence
 			if err := server.Send(reply); err != nil {
 				return err
 			}
@@ -512,34 +522,43 @@ func (s *KvServer) Sequence(_ context.Context, req *remoteproto.SequenceReq) (re
 	return reply, nil
 }
 
+// Sequence numbers detect queue drops; block heights and state versions can repeat.
+type stateChangeEvent struct {
+	sequence uint64
+	batch    *remoteproto.StateChangeBatch
+}
+
 type StateChangePubSub struct {
-	chans map[uint]chan *remoteproto.StateChangeBatch
-	id    uint
-	mu    sync.RWMutex
+	chans    map[uint]chan stateChangeEvent
+	id       uint
+	sequence uint64
+	mu       sync.RWMutex
 }
 
 func newStateChangeStreams() *StateChangePubSub {
 	return &StateChangePubSub{}
 }
 
-func (s *StateChangePubSub) Sub() (ch chan *remoteproto.StateChangeBatch, remove func()) {
+func (s *StateChangePubSub) Sub() (ch chan stateChangeEvent, remove func()) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.chans == nil {
-		s.chans = make(map[uint]chan *remoteproto.StateChangeBatch)
+		s.chans = make(map[uint]chan stateChangeEvent)
 	}
 	s.id++
 	id := s.id
-	ch = make(chan *remoteproto.StateChangeBatch, 8)
+	ch = make(chan stateChangeEvent, 8)
 	s.chans[id] = ch
 	return ch, func() { s.remove(id) }
 }
 
 func (s *StateChangePubSub) Pub(reply *remoteproto.StateChangeBatch) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sequence++
+	event := stateChangeEvent{sequence: s.sequence, batch: reply}
 	for _, ch := range s.chans {
-		common.PrioritizedSend(ch, reply)
+		common.PrioritizedSend(ch, event)
 	}
 }
 

@@ -46,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -94,6 +95,13 @@ func (b *frameValidationBackend) FrameValidation(ctx context.Context, req *remot
 			expiry = binary.BigEndian.Uint64(first.Data)
 			dependencies = append(dependencies, gointerfaces.ConvertAddressToH160(types.FrameExpiryVerifier))
 		}
+		roots, err := protocol.FrameTransactionRecentRoots(frame)
+		if err != nil {
+			return &remoteproto.FrameValidationReply{}, nil
+		}
+		if len(roots) > 0 {
+			dependencies = append(dependencies, gointerfaces.ConvertAddressToH160(types.FrameRecentRootVerifier))
+		}
 	}
 	cost := new(uint256.Int).Mul(uint256.NewInt(tx.GetGasLimit()), tx.GetFeeCap())
 	return &remoteproto.FrameValidationReply{
@@ -120,9 +128,14 @@ func framePoolSlotWithNonce(t *testing.T, sender common.Address, nonce, tip, fee
 		Frames: []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 100}}},
 		Fees:   types.FrameFees{TipCap: *uint256.NewInt(tip), FeeCap: *uint256.NewInt(fee)},
 	}
+	return framePoolSlotFromTransaction(t, tx)
+}
+
+func framePoolSlotFromTransaction(t *testing.T, tx *types.FrameTransaction) *TxnSlot {
+	t.Helper()
 	var data bytes.Buffer
 	require.NoError(t, tx.MarshalBinary(&data))
-	return &TxnSlot{Txn: tx, Nonce: nonce, Rlp: data.Bytes(), IDHash: tx.Hash(), Size: uint32(data.Len())}
+	return &TxnSlot{Txn: tx, Nonce: tx.Nonce, Rlp: data.Bytes(), IDHash: tx.Hash(), Size: uint32(data.Len())}
 }
 
 func TestFramePoolPrecheckBeforeSignatures(t *testing.T) {
@@ -2024,6 +2037,34 @@ func TestFramePoolRevalidationAllowsResubmission(t *testing.T) {
 			require.Equal(t, frame.frameValidation.MaxCost, pool.frameReservations[sender].cost)
 		})
 	}
+}
+
+func TestFramePoolIncompleteNotifications(t *testing.T) {
+	ctx, pool, sender := keyedFramePoolEnv(t)
+	backend := pool.ethBackend.(*frameValidationBackend)
+	frame := framePoolSlot(t, sender, 1, 2, uint256.Int{1})
+	var txns TxnSlots
+	txns.Append(frame, sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+	require.Empty(t, frame.frameValidation.RecentRoots)
+
+	backend.valid, backend.calls = false, nil
+	backend.onValidate = func() {
+		require.Zero(t, pool.byHash[string(frame.IDHash[:])].currentSubPool, "park before simulation")
+	}
+	change := newBlockChangeForAccounts(common.Hash{1}, 0)
+	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	require.Empty(t, backend.calls)
+	require.Contains(t, pool.byHash, string(frame.IDHash[:]))
+
+	change = newBlockChangeForAccounts(common.Hash{2}, 0)
+	change.StateChangesIncomplete = true
+	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	require.Equal(t, []common.Hash{frame.IDHash}, backend.calls)
+	require.NotContains(t, pool.byHash, string(frame.IDHash[:]))
+	require.Empty(t, pool.frameReservations)
 }
 
 func TestFramePoolKeyedNonceIsNotAccountNonce(t *testing.T) {

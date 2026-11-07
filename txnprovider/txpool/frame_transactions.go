@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"math"
 	"slices"
 	"sort"
 	"time"
@@ -337,6 +338,12 @@ func (p *TxPool) simulateFrame(ctx context.Context, txn *TxnSlot, generation uin
 			Address: address, MinNonce: dependency.MinNonce, MaxNonce: dependency.MaxNonce,
 		})
 	}
+	// Root storage references are derived locally from frame calldata. The RPC
+	// reply records the verifier address so code changes also trigger revalidation.
+	v.RecentRoots, err = protocol.FrameTransactionRecentRoots(txn.Txn.(*types.FrameTransaction))
+	if err != nil {
+		return nil, err
+	}
 	return v, nil
 }
 
@@ -495,16 +502,26 @@ func (p *TxPool) refreshFrameAccounts(cacheView kvcache.CacheView) error {
 // invalidateFrames drops expired transactions and parks those whose validation may be stale.
 // The caller holds the pool lock; revalidateFrames performs the EVM work later.
 func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*metaTxn {
+	head := changes.ChangeBatch[len(changes.ChangeBatch)-1]
+	headIsBogota := p.chainConfig.IsBogota(head.BlockTime)
+	activationUnwound := p.headIsBogota && !headIsBogota
+	p.headIsBogota = headIsBogota
 	if len(p.all.senderIDFrameTxn) == 0 {
 		return nil
 	}
-	blockTime := changes.ChangeBatch[len(changes.ChangeBatch)-1].BlockTime
-	// Match validation's pending-block time so expired frames release their reservations.
+	blockTime := head.BlockTime
+	// Expiry uses the same block time as validation.
 	pendingTime := max(blockTime+p.chainConfig.SecondsPerSlot(), uint64(time.Now().Unix()))
+	var pendingSlot uint64
+	hasPendingSlot := head.SlotNumber != nil && *head.SlotNumber != math.MaxUint64
+	if hasPendingSlot {
+		pendingSlot = *head.SlotNumber + 1
+	}
 	touched := make(map[common.Address]struct{})
 	codeChanged := make(map[common.Address]struct{})
 	accountChanges := make(map[common.Address][]byte)
 	nonceSlots := make(map[common.Hash]struct{})
+	rootSlots := make(map[common.Hash]struct{})
 	for _, batch := range changes.ChangeBatch {
 		for _, change := range batch.Changes {
 			address := gointerfaces.ConvertH160toAddress(change.Address)
@@ -521,6 +538,11 @@ func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*meta
 					nonceSlots[gointerfaces.ConvertH256ToHash(storage.Location)] = struct{}{}
 				}
 			}
+			if address == types.FrameRecentRootVerifier {
+				for _, storage := range change.StorageChanges {
+					rootSlots[gointerfaces.ConvertH256ToHash(storage.Location)] = struct{}{}
+				}
+			}
 		}
 	}
 	var parked []*metaTxn
@@ -531,6 +553,19 @@ func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*meta
 			continue
 		}
 		frame := mt.TxnSlot.Txn.(*types.FrameTransaction)
+		// Blob costs can change with the block context even when none
+		// of the validation's account dependencies changed.
+		affected := mt.currentSubPool == 0 || frame.GetBlobGas() != 0 || changes.StateChangesIncomplete
+		if len(previous.RecentRoots) > 0 {
+			invalidRoots := activationUnwound || !hasPendingSlot || slices.ContainsFunc(previous.RecentRoots, func(ref protocol.RecentRootReference) bool {
+				return !ref.ValidAt(pendingSlot)
+			})
+			if invalidRoots {
+				p.removeFromSubPool(mt, "recent root no longer usable")
+				p.discardLocked(mt, txpoolcfg.FrameStateChanged)
+				continue
+			}
+		}
 		// The signed deadline needs only a timestamp check. Changes to the verifier's
 		// code still trigger validation through its recorded dependency below.
 		if frame.Frames[0].IsExpiryVerifier() && previous.Deadline < pendingTime {
@@ -539,11 +574,9 @@ func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*meta
 			continue
 		}
 		keyedNonce := !frame.UsesLegacyNonce()
-		// Blob costs can change with the block context even when none
-		// of the validation's account dependencies changed.
-		affected := mt.currentSubPool == 0 || frame.GetBlobGas() != 0
-		// Helpers depend only on code. Sender and payer state can also change
-		// approval or funding; creation nonces are checked separately below.
+		// Helper account changes matter only when code changes. Sender and payer
+		// state can also affect approval or funding. Storage slots and creation
+		// nonces are checked separately below.
 		for _, dependency := range previous.Dependencies {
 			changed := codeChanged
 			if dependency == frame.SenderAddress || dependency == previous.Payer {
@@ -570,6 +603,14 @@ func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*meta
 		if !affected && keyedNonce && len(nonceSlots) > 0 {
 			for _, key := range frame.NonceKeys {
 				if _, ok := nonceSlots[types.FrameNonceSlot(frame.SenderAddress, key)]; ok {
+					affected = true
+					break
+				}
+			}
+		}
+		if !affected && len(rootSlots) > 0 {
+			for _, ref := range previous.RecentRoots {
+				if _, ok := rootSlots[ref.StorageKey]; ok {
 					affected = true
 					break
 				}

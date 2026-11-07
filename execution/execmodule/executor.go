@@ -112,6 +112,14 @@ func (pe *PipelineExecutor) RunUnwind(sd *execctx.SharedDomains, tx kv.TemporalR
 	return pe.sync.RunUnwind(sd, tx)
 }
 
+// UnwindForValidation keeps speculative progress and notifications off the main pipeline.
+func (pe *PipelineExecutor) UnwindForValidation(sd *execctx.SharedDomains, tx kv.TemporalRwTx, unwindPoint uint64) error {
+	if err := pe.validationSync.UnwindTo(unwindPoint, stagedsync.ExecUnwind, tx); err != nil {
+		return err
+	}
+	return pe.validationSync.RunUnwind(sd, tx)
+}
+
 // RunPrune executes pruning on the main pipeline.
 func (pe *PipelineExecutor) RunPrune(ctx context.Context, tx kv.RwTx, initialCycle bool, timeout time.Duration) (kv.FinalityContext, error) {
 	finalityCtx, err := execfinality.Resolve(tx, pe.sync.Cfg().MaxReorgDepth, initialCycle, pe.blockReader.TxnumReader())

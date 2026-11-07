@@ -147,6 +147,7 @@ type TxPool struct {
 	chainConfig             *chain.Config
 	stateGeneration         uint64
 	stateBlockHash          common.Hash // Head of the pool's state view; pins frame validation to the same block
+	headIsBogota            bool        // Canonical activation, independent of pending-block time
 	lastSeenBlock           atomic.Uint64
 	lastSeenCond            *sync.Cond
 	lastFinalizedBlock      atomic.Uint64
@@ -2971,6 +2972,13 @@ func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.
 	if p.stateBlockHash == (common.Hash{}) {
 		// Header sync can run ahead of execution, so pin validation to the executed head.
 		p.stateBlockHash = rawdb.ReadHeadBlockHash(coreTx)
+		header, err := rawdb.ReadHeaderByHash(coreTx, p.stateBlockHash)
+		if err != nil {
+			return err
+		}
+		if header != nil {
+			p.headIsBogota = p.chainConfig.IsBogota(header.Time)
+		}
 	}
 	if p.lastSeenBlock.Load() == 0 {
 		lastSeenBlock, err := LastSeenBlock(tx)
