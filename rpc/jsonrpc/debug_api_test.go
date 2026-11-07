@@ -1333,6 +1333,17 @@ func TestGetModifiedAccountsByNumber(t *testing.T) {
 		require.NoError(t, err)
 		require.Contains(t, result, tokenContract, "storage-only modified contract must be included")
 	})
+	t.Run("empty range is []", func(t *testing.T) {
+		tx, err := m.DB.BeginTemporalRo(m.Ctx)
+		require.NoError(t, err)
+		defer tx.Rollback()
+
+		result, err := getModifiedAccounts(tx, 1, 1)
+		require.NoError(t, err)
+		encoded, err := json.Marshal(result)
+		require.NoError(t, err)
+		require.Equal(t, "[]", string(encoded))
+	})
 	t.Run("invalid input", func(t *testing.T) {
 		n := rpc.BlockNumber(1_000_000)
 		_, err := api.GetModifiedAccountsByNumber(m.Ctx, n, nil)

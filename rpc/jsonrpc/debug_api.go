@@ -415,7 +415,7 @@ func (api *DebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context, startN
 //     and not deleted. Filters are applied cheapest-first to minimise GetAsOf I/O calls.
 func getModifiedAccounts(tx kv.TemporalTx, startTxNum, endTxNum uint64) ([]common.Address, error) {
 	saw := make(map[common.Address]struct{})
-	var result []common.Address
+	result := []common.Address{} // non-nil, so an empty range is encoded as [] and not null
 
 	const addrLen = len(common.Address{})
 	addAddr := func(k []byte) {
