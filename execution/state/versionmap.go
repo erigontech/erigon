@@ -237,11 +237,20 @@ func markCellComplete[T any](cells *btree.Map[int, *WriteCell[T]], addr accounts
 		if ci.incarnation > incarnation {
 			panic(fmt.Sprintf("markComplete: incarnation addr=%x path=%s txIdx=%d have=%d want=%d", addr.Value(), path, txIdx, ci.incarnation, incarnation))
 		}
-		if !reflect.DeepEqual(ci.Value, value) {
+		if !sameCellValue(ci.Value, value) {
 			panic(fmt.Sprintf("markComplete: value changed at published version addr=%x path=%s txIdx=%d inc=%d old=%v new=%v", addr.Value(), path, txIdx, incarnation, ci.Value, value))
 		}
 	}
 	ci.flag.Store(uint32(FlagDone))
+}
+
+// sameCellValue compares accounts with Account.Equals: their Root is derived by commitment, not part of the value.
+func sameCellValue(a, b any) bool {
+	if x, ok := a.(*accounts.Account); ok {
+		y, _ := b.(*accounts.Account)
+		return x == y || eqAccount(x, y)
+	}
+	return reflect.DeepEqual(a, b)
 }
 
 type VersionMap struct {
@@ -716,13 +725,15 @@ func readFloor[T any](vm *VersionMap, addr accounts.Address, txIdx int, sel func
 	}
 	res.depIdx = fk
 	res.valStatus = fv.valStatus
-	res.accSource = fv.accSource
+	if fv.accSource == AccountFromBAL {
+		res.flags |= readFromBAL
+	}
 	switch fv.loadFlag() {
 	case FlagDone:
 		res.incarnation = fv.incarnation
 	case FlagValidated:
 		res.incarnation = fv.incarnation
-		res.validated = true
+		res.flags |= readValidated
 	case FlagEstimate:
 	default:
 		panic("unknown flag value")
@@ -752,7 +763,7 @@ type accountFloors struct {
 	codeHash                                                      accounts.CodeHash
 	address                                                       *accounts.Account
 	hasBalance, hasNonce, hasIncarnation, hasCodeHash, hasAddress bool
-	balanceDeleted, addressFromBAL                                bool
+	balanceDeleted, addressFromBAL, wasDeleted                    bool
 }
 
 // accountFloorsAt reads addr's floor cells under one entry lock instead of one lock per field.
@@ -781,6 +792,8 @@ func (vm *VersionMap) accountFloorsAt(addr accounts.Address, txIdx int) (f accou
 	if _, c := floorCell(e.Address, txIdx); c != nil {
 		f.address, f.hasAddress, f.addressFromBAL = c.Value, true, c.accSource == AccountFromBAL
 	}
+	life, _, _, _ := accountLifecycleLocked(e, txIdx, false)
+	f.wasDeleted = life != LifecycleLive
 	return f
 }
 
@@ -862,13 +875,15 @@ func readFloorLife[T any](vm *VersionMap, addr accounts.Address, txIdx int, sel 
 	}
 	res.depIdx = fk
 	res.valStatus = fv.valStatus
-	res.accSource = fv.accSource
+	if fv.accSource == AccountFromBAL {
+		res.flags |= readFromBAL
+	}
 	switch fv.loadFlag() {
 	case FlagDone:
 		res.incarnation = fv.incarnation
 	case FlagValidated:
 		res.incarnation = fv.incarnation
-		res.validated = true
+		res.flags |= readValidated
 	case FlagEstimate:
 	default:
 		panic("unknown flag value")
@@ -2317,11 +2332,26 @@ const (
 type ReadResult struct {
 	depIdx      int
 	incarnation Incarnation
-	// validated: the floor cell was Validated (pre-seal, revertible); the reader
+	valStatus   valueStatus
+	flags       readFlags
+}
+
+// readFlags packs a read's boolean facts into one field: ReadResult stays at 4 fields, so the compiler keeps it in
+// registers.
+type readFlags uint8
+
+const (
+	// readValidated: the floor cell was Validated (pre-seal, revertible); the reader
 	// continues on it like Done but the dep is not yet final.
-	validated bool
-	valStatus valueStatus
-	accSource AccountSource
+	readValidated readFlags = 1 << iota
+	readFromBAL             // the cell's record is an AccountFromBAL existence marker
+)
+
+func (res ReadResult) accSource() AccountSource {
+	if res.flags&readFromBAL != 0 {
+		return AccountFromBAL
+	}
+	return AccountFromBase
 }
 
 func (res *ReadResult) DepString() string {
@@ -2353,7 +2383,7 @@ func (res *ReadResult) ValStatus() valueStatus {
 
 func (res ReadResult) Status() int {
 	if res.depIdx != UnknownDep {
-		if res.validated {
+		if res.flags&readValidated != 0 {
 			return MVReadResultValidated
 		}
 		if res.incarnation == -1 {

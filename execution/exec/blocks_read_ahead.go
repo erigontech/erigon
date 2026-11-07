@@ -463,22 +463,57 @@ func (bra *BlockReadAheader) warmBAL(ctx context.Context, db kv.RoDB, bal types.
 		txCodeDestinations = uniqueTransactionDestinations(txns)
 	}
 	tasks, balWorkers := makeBALWarmupPlan(bal, workers)
-	var group errgroup.Group
-	if mmap.NewProbe() != nil {
-		group.Go(func() error {
-			prefetchBAL(ctx, db, bal)
+	trieKeys := sync.OnceValue(func() [][]byte {
+		if ctx.Err() != nil {
 			return nil
-		})
-	}
-	group.Go(func() error {
-		return bra.warmBALState(ctx, db, bal, tasks, codeMode, txCodeDestinations, balWorkers)
+		}
+		return balCommitmentWarmupKeys(bal)
 	})
+	var group errgroup.Group
 	if dbg.TrieBALWarmupers > 0 {
 		group.Go(func() error {
-			return warmBALCommitment(ctx, db, bal, dbg.TrieBALWarmupers)
+			return warmBALCommitment(ctx, db, trieKeys(), dbg.TrieBALWarmupers)
 		})
 	}
+	var cold coldState
+	if mmap.NewProbe() != nil {
+		group.Go(func() error {
+			prefetchBALCommitment(ctx, db, trieKeys())
+			return nil
+		})
+		cold = stateKeysCold(ctx, db, bal)
+	}
+	group.Go(func() error {
+		warm, warmTasks, warmWorkers := bal, tasks, balWorkers
+		if cold.any() {
+			var stripped bool
+			if warm, stripped = perKeyWarmupBAL(bal, cold, prefetchBALState(ctx, db, bal, cold)); stripped {
+				warmTasks, warmWorkers = makeBALWarmupPlan(warm, workers)
+			}
+		}
+		return bra.warmBALState(ctx, db, warm, warmTasks, codeMode, txCodeDestinations, warmWorkers)
+	})
 	return group.Wait()
+}
+
+// balAccounts returns the BAL without its storage changes and reads.
+func balAccounts(bal types.BlockAccessList) types.BlockAccessList {
+	accs := make(types.BlockAccessList, len(bal))
+	for i := range bal {
+		accs[i] = bal[i]
+		accs[i].StorageChanges, accs[i].StorageReads = nil, nil
+	}
+	return accs
+}
+
+// perKeyWarmupBAL is the part of the BAL the per-key warmup reads after the batch. The batch only reads pages, so the
+// per-key warmup still fills the state cache, but not with the slots the batch read: a per-key read of them that
+// starts after the batch only competes with exec.
+func perKeyWarmupBAL(bal types.BlockAccessList, cold coldState, storageRead bool) (warm types.BlockAccessList, stripped bool) {
+	if cold.storage && storageRead {
+		return balAccounts(bal), true
+	}
+	return bal, false
 }
 
 func (bra *BlockReadAheader) warmBALState(ctx context.Context, db kv.RoDB, bal types.BlockAccessList, tasks []balWarmupTask, codeMode balCodeWarmupMode, txCodeDestinations map[accounts.Address]struct{}, workers int) error {

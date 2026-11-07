@@ -390,23 +390,19 @@ func (c *ChainEndpoint) Run(ctx context.Context) error {
 					break
 				}
 
-				blindedBlockRoot, err := block.Block.HashSSZ()
-				if err != nil {
-					return false, err
-				}
-				// check if we have all the blobs
+				// Look the blobs up under the walked root: before Gloas the stored body has no execution
+				// transactions or withdrawals, so its own hash is not the block root.
 				kzgCommitments := 0
 				if c := block.Block.Body.GetBlobKzgCommitments(); c != nil {
 					kzgCommitments = c.Len()
 				}
-				kzgCommitmentsInDB, err := blobDB.KzgCommitmentsCount(ctx, blindedBlockRoot)
+				stored, err := localBlobsStored(ctx, blobDB, *slot, currentRoot, kzgCommitments)
 				if err != nil {
 					return false, err
 				}
-				if kzgCommitmentsInDB != uint32(kzgCommitments) {
+				if !stored {
 					break
 				}
-
 			}
 			currentRoot, err = beacon_indicies.ReadParentBlockRoot(tx, currentRoot)
 			if err != nil {
@@ -1068,7 +1064,7 @@ func (b *BlobArchiveStoreCheck) Run(ctx context.Context) error {
 	}
 	snr := freezeblocks.NewBeaconSnapshotReader(csn, nil, beaconConfig)
 
-	targetSlot := beaconConfig.DenebForkEpoch * beaconConfig.SlotsPerEpoch
+	targetSlot := storeCheckFloor(beaconConfig, csn.FrozenBlobs())
 	tx, err := db.BeginRo(ctx)
 	if err != nil {
 		return err
@@ -1080,12 +1076,21 @@ func (b *BlobArchiveStoreCheck) Run(ctx context.Context) error {
 	return err
 }
 
+// storeCheckFloor is the lowest slot the store check scans. Below the frozen blob frontier the API
+// serves sidecars from segments and the store holds none by design, so a slot there could only be
+// reported as a false mismatch, and --remove-mismatched would delete what the store holds.
+func storeCheckFloor(beaconConfig *clparams.BeaconChainConfig, frozenBlobs uint64) uint64 {
+	return max(beaconConfig.DenebForkEpoch*beaconConfig.SlotsPerEpoch, frozenBlobs)
+}
+
 // checkBlobStore reports how many blob-bearing slots hold a different number of sidecars than
 // their block commits to, and how many could not be checked at all. Unresolved slots are an error:
 // an audit that silently skips them reports completeness it never established.
 func checkBlobStore(ctx context.Context, tx kv.Tx, snr freezeblocks.BeaconSnapshotReader, blobStorage blob_storage.BlobStorage, fromSlot, targetSlot uint64, removeMismatched bool) (uint64, uint64, error) {
 	var mismatched, unresolved uint64
-	for i := fromSlot; i >= targetSlot; i-- {
+	// done is set from the slot just checked, so the countdown neither wraps below a floor of 0 (a
+	// chain with Deneb at genesis) nor overflows at the largest fromSlot.
+	for i, done := fromSlot, fromSlot < targetSlot; !done; i, done = i-1, i == targetSlot {
 		blk, err := snr.ReadBeaconBlockBodyBySlot(ctx, tx, i)
 		if err != nil {
 			return mismatched, unresolved, err
@@ -1119,7 +1124,7 @@ func checkBlobStore(ctx context.Context, tx kv.Tx, snr freezeblocks.BeaconSnapsh
 		if c := blk.Block.Body.GetBlobKzgCommitments(); c != nil {
 			wantBlobs = c.Len()
 		}
-		// PruneBelow drops sidecar files but leaves their count rows, so a matching count is not
+		// A count row does not prove its sidecar files are on disk, so a matching count is not
 		// evidence the store can still serve the slot. Stat each expected file rather than reading
 		// it back: the scan runs to the Deneb fork, so decoding every blob is not affordable, and
 		// an absent file is the failure this has to catch.
