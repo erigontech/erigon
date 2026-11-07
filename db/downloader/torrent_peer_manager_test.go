@@ -36,7 +36,12 @@ func addTorrentPeerManagerTestTorrent(t *testing.T, client *torrent.Client, hash
 }
 
 func TestTorrentPeerManager_AddAndRemove(t *testing.T) {
-	client, err := torrent.NewClient(newTestClientConfig(t, t.TempDir()))
+	// Create a minimal torrent client.
+	cfg := torrent.NewDefaultClientConfig()
+	cfg.DataDir = t.TempDir()
+	cfg.ListenPort = 0
+	cfg.NoDHT = true
+	client, err := torrent.NewClient(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +81,11 @@ func TestTorrentPeerManager_AddAndRemove(t *testing.T) {
 }
 
 func TestTorrentPeerManager_NilNodeSource(t *testing.T) {
-	client, err := torrent.NewClient(newTestClientConfig(t, t.TempDir()))
+	cfg := torrent.NewDefaultClientConfig()
+	cfg.DataDir = t.TempDir()
+	cfg.ListenPort = 0
+	cfg.NoDHT = true
+	client, err := torrent.NewClient(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,6 +132,24 @@ func TestTorrentPeerManager_RefreshesChangedPeerEndpoint(t *testing.T) {
 	source.nodes = []*enode.Node{updatedPeer}
 	m.sync()
 	assert.Contains(t, torrentPeerAddresses(tor), "127.0.0.2:42070")
+}
+
+func TestTorrentPeerManager_ForgetsDroppedTorrentsAndLeftPeers(t *testing.T) {
+	client := newTorrentPeerManagerTestClient(t)
+	tor := addTorrentPeerManagerTestTorrent(t, client, 4)
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	peer := makeNodeWithBT(t, key, []byte{127, 0, 0, 1}, &enr.ChainToml{KnownBlocks: 100}, enr.BT(42069))
+	source := &mockNodeSource{nodes: []*enode.Node{peer}}
+	m := NewTorrentPeerManager(client, func() NodeSource { return source }, log.New())
+	m.sync()
+	require.Contains(t, m.torrents, tor)
+
+	tor.Drop()
+	source.nodes = nil
+	m.sync()
+	require.NotContains(t, m.torrents, tor)
+	require.Zero(t, m.PeerCount())
 }
 
 func torrentPeerAddresses(tor *torrent.Torrent) []string {

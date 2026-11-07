@@ -2,7 +2,6 @@ package downloader
 
 import (
 	"context"
-	"maps"
 	"net"
 	"sync"
 	"time"
@@ -24,9 +23,9 @@ type TorrentPeerManager struct {
 	nodeSourceFn func() NodeSource
 	logger       log.Logger
 
-	mu           sync.Mutex
-	knownPeers   map[enode.ID]btPeerInfo
-	torrentPeers map[*torrent.Torrent]map[enode.ID]string
+	mu         sync.Mutex
+	knownPeers map[enode.ID]btPeerInfo       // peers we've added to the torrent client
+	torrents   map[*torrent.Torrent]struct{} // torrents that already have every known peer
 }
 
 type btPeerInfo struct {
@@ -39,7 +38,6 @@ func NewTorrentPeerManager(client *torrent.Client, nodeSourceFn func() NodeSourc
 		nodeSourceFn: nodeSourceFn,
 		logger:       logger,
 		knownPeers:   make(map[enode.ID]btPeerInfo),
-		torrentPeers: make(map[*torrent.Torrent]map[enode.ID]string),
 	}
 }
 
@@ -86,67 +84,35 @@ func (m *TorrentPeerManager) sync() {
 			continue
 		}
 
-		id := node.ID()
-		pi := torrent.PeerInfo{
-			Addr:    ipPortAddr{IP: ip, Port: int(bt)},
-			Trusted: true,
-		}
-		currentPeers[id] = btPeerInfo{addr: pi}
+		currentPeers[node.ID()] = btPeerInfo{addr: torrent.PeerInfo{Addr: ipPortAddr{IP: ip, Port: int(bt)}, Trusted: true}}
 	}
 
-	torrents := m.client.Torrents()
-	activeTorrents := make(map[*torrent.Torrent]struct{}, len(torrents))
-	for _, t := range torrents {
-		activeTorrents[t] = struct{}{}
-	}
-
+	// A new or moved peer goes to every torrent; a torrent new since the last sync gets every peer.
+	var changed, all []torrent.PeerInfo
 	m.mu.Lock()
-	for id := range m.knownPeers {
-		if _, exists := currentPeers[id]; !exists {
-			delete(m.knownPeers, id)
-			for _, peers := range m.torrentPeers {
-				delete(peers, id)
-			}
-			m.logger.Debug("[bt-peers] peer left DevP2P, removed from tracking",
-				"node", id.TerminalString())
+	for id, p := range currentPeers {
+		all = append(all, p.addr)
+		if old, ok := m.knownPeers[id]; !ok || old.addr.Addr.String() != p.addr.Addr.String() {
+			changed = append(changed, p.addr)
+			m.logger.Debug("[bt-peers] added torrent peer from ENR", "node", id.TerminalString(), "addr", p.addr.Addr)
 		}
 	}
-	maps.Copy(m.knownPeers, currentPeers)
-	for t := range m.torrentPeers {
-		if _, exists := activeTorrents[t]; !exists {
-			delete(m.torrentPeers, t)
-		}
-	}
-	var pendingAdds []torrentPeerAdd
-	for _, t := range torrents {
-		processedPeers := m.torrentPeers[t]
-		if processedPeers == nil {
-			processedPeers = make(map[enode.ID]string)
-			m.torrentPeers[t] = processedPeers
-		}
-		for id, peer := range m.knownPeers {
-			processed, exists := processedPeers[id]
-			if exists && processed == peer.addr.Addr.String() {
-				continue
-			}
-			processedPeers[id] = peer.addr.Addr.String()
-			pendingAdds = append(pendingAdds, torrentPeerAdd{torrent: t, id: id, peer: peer.addr})
-		}
-	}
+	m.knownPeers = currentPeers
+	known := m.torrents
 	m.mu.Unlock()
 
-	for _, add := range pendingAdds {
-		add.torrent.AddPeers([]torrent.PeerInfo{add.peer})
-		m.logger.Debug("[bt-peers] added torrent peer from ENR",
-			"node", add.id.TerminalString(),
-			"addr", add.peer.Addr)
+	seen := make(map[*torrent.Torrent]struct{})
+	for _, t := range m.client.Torrents() {
+		seen[t] = struct{}{}
+		if _, ok := known[t]; !ok {
+			t.AddPeers(all)
+		} else if len(changed) > 0 {
+			t.AddPeers(changed)
+		}
 	}
-}
-
-type torrentPeerAdd struct {
-	torrent *torrent.Torrent
-	id      enode.ID
-	peer    torrent.PeerInfo
+	m.mu.Lock()
+	m.torrents = seen
+	m.mu.Unlock()
 }
 
 // PeerCount returns the number of tracked torrent peers.
