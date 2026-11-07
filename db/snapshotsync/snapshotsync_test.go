@@ -659,3 +659,15 @@ func TestBlobRetentionDownloadFloorKeepsTheServingWindow(t *testing.T) {
 		})
 	}
 }
+
+func TestSkipBlobDownload(t *testing.T) {
+	for _, name := range []string{"v1.1-008620-008630-blobsidecars.seg", "v1.1-008620-008630-blocksidecars.idx"} {
+		require.True(t, skipBlobDownload(name, false, 0), "a node without a blob archive downloads no blob file: %s", name)
+		require.False(t, skipBlobDownload(name, true, 0), name)
+		require.True(t, skipBlobDownload(name, true, 8_630_000), name)
+		require.False(t, skipBlobDownload(name, true, 8_629_999), name)
+	}
+	for _, name := range []string{"v1.1-008620-008630-beaconblocks.seg", "v1.1-000000-000500-bodies.seg"} {
+		require.False(t, skipBlobDownload(name, false, 8_630_000), name)
+	}
+}

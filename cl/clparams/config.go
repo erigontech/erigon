@@ -50,9 +50,9 @@ type CaplinConfig struct {
 	ArchiveStates             bool
 	ImmediateBlobsBackfilling bool
 	BlobPruningDisabled       bool
-	// BlobsArchiveFromSlot bounds ArchiveBlobs: blob sidecars below this slot are neither
-	// downloaded nor backfilled, and are pruned once they leave the spec serving window.
-	// Zero keeps the whole history since Deneb.
+	// BlobsArchiveFromSlot bounds ArchiveBlobs: blob sidecars are kept from the lower of this
+	// slot and the spec serving-window floor, and dropped below it. Zero keeps the whole
+	// history since Deneb.
 	BlobsArchiveFromSlot      uint64
 	SnapshotGenerationEnabled bool
 	// ColumnKeepSlots is the number of slots to keep PeerDAS data column sidecars.

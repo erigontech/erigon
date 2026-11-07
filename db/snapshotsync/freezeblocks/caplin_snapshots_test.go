@@ -881,7 +881,7 @@ func TestRetireBlobsBelowDropsSegmentsUnderTheFloor(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dirs := datadir.New(t.TempDir())
-			for i := uint64(0); i < 3; i++ {
+			for i := range uint64(3) {
 				writeEmptyBlobSidecarsSegment(t, dirs, i*limit, (i+1)*limit)
 			}
 			sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
@@ -911,4 +911,24 @@ func TestRetireBlobsBelowDropsSegmentsUnderTheFloor(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRetireBlobsBelowWaitsForOverlapCleanup(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+	dirs := datadir.New(t.TempDir())
+	writeEmptyBlobSidecarsSegment(t, dirs, 0, limit)
+	writeEmptyBlobSidecarsSegment(t, dirs, limit, 2*limit)
+	writeEmptyBlobSidecarsSegment(t, dirs, 0, 2*limit)
+	writeEmptyBlobSidecarsSegment(t, dirs, 2*limit, 3*limit)
+	sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
+	t.Cleanup(sn.Close)
+	require.NoError(t, sn.OpenFolder())
+
+	retired, err := sn.RetireBlobsBelow(10*limit, func([]string) error {
+		t.Fatal("no file may be handed to the seeder while superseded segments remain")
+		return nil
+	})
+	require.NoError(t, err)
+	require.False(t, retired)
+	require.Equal(t, uint64(3*limit), sn.FrozenBlobs())
 }

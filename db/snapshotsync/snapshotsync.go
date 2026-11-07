@@ -130,6 +130,12 @@ func (r BlobRetention) downloadFloor(items snapcfg.PreverifiedItems) uint64 {
 
 // blobSegmentBelow reports whether a blob sidecar segment ends at or before floor,
 // so it holds nothing a bounded blob archive keeps.
+// skipBlobDownload reports whether a preverified file is a blob segment or index the node does
+// not download: every one when blobs are not archived, else those below floor.
+func skipBlobDownload(name string, blobs bool, floor uint64) bool {
+	return isBlobSidecarFile(name) && (!blobs || blobSegmentBelow(name, floor))
+}
+
 func blobSegmentBelow(name string, floor uint64) bool {
 	if floor == 0 {
 		return false
@@ -575,7 +581,7 @@ func SyncSnapshots(
 			if isStateSnapshot(p.Name) && blockReader.FreezingCfg().DisableDownloadE3 {
 				continue
 			}
-			if isBlobSidecarFile(p.Name) && (!blobs || blobSegmentBelow(p.Name, blobFloor)) {
+			if skipBlobDownload(p.Name, blobs, blobFloor) {
 				continue
 			}
 			if !caplinState && strings.Contains(p.Name, "caplin/") {
