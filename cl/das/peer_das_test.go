@@ -2151,3 +2151,161 @@ func TestResolveColumnSidecarSlotAndRoot(t *testing.T) {
 		require.Equal(t, common.HexToHash("0xabc"), blockRoot)
 	})
 }
+
+type recoveredColumnsPublish struct {
+	ctx      context.Context
+	sidecars []*cltypes.DataColumnSidecar
+}
+
+type failingColumnWrites struct {
+	blob_storage.DataColumnStorage
+}
+
+func (failingColumnWrites) WriteColumnSidecars(context.Context, common.Hash, int64, *cltypes.DataColumnSidecar) error {
+	return errors.New("column write failed")
+}
+
+// startRecoveryWithPublisher stores half of a Fulu block's columns, all outside custody, and runs a blob recovery
+// worker whose column publisher blocks until the test ends. With failColumnWrites, every column write of the recovery
+// fails.
+func startRecoveryWithPublisher(t *testing.T, caplinConfig *clparams.CaplinConfig, failColumnWrites bool) (d *peerdas, root common.Hash, stored map[uint64]bool, published <-chan recoveredColumnsPublish, stopWorker context.CancelFunc) {
+	t.Helper()
+	cfg := clparams.MainnetBeaconConfig
+	cfg.FuluForkEpoch = 0
+	cfg.InitializeForkSchedule()
+	initTestBeaconConfig(&cfg)
+	const slot = uint64(100)
+	block, root, _, columns := recoverableFuluDataAtSlot(t, &cfg, slot)
+
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	nodeDB, err := enode.OpenDB("")
+	require.NoError(t, err)
+	t.Cleanup(func() { nodeDB.Close() })
+	state := peerdasstate.NewPeerDasState(&cfg, &clparams.NetworkConfig{})
+	state.SetLocalNodeID(enode.NewLocalNode(nodeDB, key))
+	custodyColumns, err := state.GetMyCustodyColumns()
+	require.NoError(t, err)
+
+	columnStorage := blob_storage.NewDataColumnStore(afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter())
+	stored = make(map[uint64]bool)
+	for index, sidecar := range columns {
+		if custodyColumns[uint64(index)] || len(stored) == int((cfg.NumberOfColumns+1)/2) {
+			continue
+		}
+		require.NoError(t, columnStorage.WriteColumnSidecars(t.Context(), root, int64(index), sidecar))
+		stored[uint64(index)] = true
+	}
+	metadata, err := newBlobRecoveryMetadata(block, root)
+	require.NoError(t, err)
+	var recoveryColumnStorage blob_storage.DataColumnStorage = columnStorage
+	if failColumnWrites {
+		recoveryColumnStorage = failingColumnWrites{columnStorage}
+	}
+	d = &peerdas{
+		beaconConfig:      &cfg,
+		caplinConfig:      caplinConfig,
+		state:             state,
+		columnStorage:     recoveryColumnStorage,
+		blobStorage:       blob_storage.NewBlobStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs()),
+		recoverBlobsQueue: make(chan recoverBlobsRequest, 1),
+		isRecovering:      make(map[common.Hash]bool),
+	}
+	calls := make(chan recoveredColumnsPublish, 1)
+	unblock := make(chan struct{})
+	d.SetColumnPublisher(func(ctx context.Context, sidecars []*cltypes.DataColumnSidecar) {
+		calls <- recoveredColumnsPublish{ctx: ctx, sidecars: sidecars}
+		<-unblock
+	})
+	require.NoError(t, d.enqueueBlobRecovery(recoverBlobsRequest{slot: slot, blockRoot: root, metadata: metadata}))
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() {
+		d.blobsRecoverWorker(ctx)
+		close(done)
+	}()
+	t.Cleanup(func() { close(unblock); cancel(); <-done })
+	return d, root, stored, calls, cancel
+}
+
+func receiveRecoveredColumnsPublish(t *testing.T, published <-chan recoveredColumnsPublish) recoveredColumnsPublish {
+	t.Helper()
+	select {
+	case call := <-published:
+		return call
+	case <-time.After(30 * time.Second):
+		t.Fatal("recovered columns were not published")
+		return recoveredColumnsPublish{}
+	}
+}
+
+func publishedColumnIndices(sidecars []*cltypes.DataColumnSidecar) []uint64 {
+	indices := make([]uint64, 0, len(sidecars))
+	for _, sidecar := range sidecars {
+		indices = append(indices, sidecar.Index)
+	}
+	return indices
+}
+
+// An archive node subscribes to every column subnet, so it publishes every column that recovery reconstructs. The
+// publish runs on a context bounded in time and detached from the worker, and does not hold up the worker.
+func TestBlobRecoveryPublishesReconstructedColumnsOnSubscribedSubnets(t *testing.T) {
+	d, root, stored, published, stopWorker := startRecoveryWithPublisher(t, &clparams.CaplinConfig{ArchiveBlobs: true}, false)
+
+	call := receiveRecoveredColumnsPublish(t, published)
+
+	var reconstructed []uint64
+	for index := range d.beaconConfig.NumberOfColumns {
+		if !stored[index] {
+			reconstructed = append(reconstructed, index)
+		}
+	}
+	require.ElementsMatch(t, reconstructed, publishedColumnIndices(call.sidecars))
+	for _, sidecar := range call.sidecars {
+		require.True(t, VerifyDataColumnSidecarKZGProofs(sidecar))
+	}
+	require.Eventually(t, func() bool {
+		d.recoveringMutex.Lock()
+		defer d.recoveringMutex.Unlock()
+		_, owned := d.isRecovering[root]
+		return !owned
+	}, 10*time.Second, 10*time.Millisecond, "the worker waits for the publish")
+	_, bounded := call.ctx.Deadline()
+	require.True(t, bounded)
+	stopWorker()
+	require.NoError(t, call.ctx.Err())
+}
+
+// A node that subscribes only to its custody subnets publishes only its custody columns.
+func TestBlobRecoveryPublishesOnlyColumnsOnSubscribedSubnets(t *testing.T) {
+	d, _, _, published, _ := startRecoveryWithPublisher(t, &clparams.CaplinConfig{}, false)
+
+	call := receiveRecoveredColumnsPublish(t, published)
+
+	custodyColumns, err := d.state.GetMyCustodyColumns()
+	require.NoError(t, err)
+	var custody []uint64
+	for index := range custodyColumns {
+		custody = append(custody, index)
+	}
+	require.ElementsMatch(t, custody, publishedColumnIndices(call.sidecars))
+}
+
+// A custody column that recovery fails to write is not published, so it is not marked seen and a gossip copy can
+// still store it.
+func TestBlobRecoveryDoesNotPublishCustodyColumnsItFailedToWrite(t *testing.T) {
+	d, _, stored, published, _ := startRecoveryWithPublisher(t, &clparams.CaplinConfig{ArchiveBlobs: true}, true)
+
+	call := receiveRecoveredColumnsPublish(t, published)
+
+	custodyColumns, err := d.state.GetMyCustodyColumns()
+	require.NoError(t, err)
+	var reconstructedOutsideCustody []uint64
+	for index := range d.beaconConfig.NumberOfColumns {
+		if !stored[index] && !custodyColumns[index] {
+			reconstructedOutsideCustody = append(reconstructedOutsideCustody, index)
+		}
+	}
+	require.ElementsMatch(t, reconstructedOutsideCustody, publishedColumnIndices(call.sidecars))
+}
