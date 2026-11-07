@@ -150,6 +150,14 @@ func TestPBTManifestRoundTripAndTamperChecks(t *testing.T) {
 	})
 }
 
+func TestPBTManifestIsReadableByOthers(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "pbt-manifest.toml")
+	require.NoError(t, state.WritePBTManifest(path, state.PBTManifest{}))
+	st, err := os.Stat(path)
+	require.NoError(t, err)
+	require.Equal(t, os.FileMode(0o044), st.Mode().Perm()&0o044)
+}
+
 func TestPBTManifestProgressCountsFinishedFiles(t *testing.T) {
 	root := t.TempDir()
 	sources := make([]state.PBTManifestFileSource, 8)

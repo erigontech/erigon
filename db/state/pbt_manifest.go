@@ -85,7 +85,7 @@ func WritePBTManifest(path string, manifest PBTManifest) error {
 	if err != nil {
 		return fmt.Errorf("pbt manifest: encode: %w", err)
 	}
-	return dir.WriteFileAtomic(path, data, 0o600)
+	return dir.WriteFileAtomic(path, data, 0o644)
 }
 
 func PBTManifestDigest(path string) (string, error) {
