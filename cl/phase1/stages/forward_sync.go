@@ -319,16 +319,14 @@ func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) er
 		if envelope == nil {
 			return true
 		}
-		err := processDownloadedGloasEnvelope(ctx, logger, cfg.forkChoice, cfg.blockCollector, tip.Block, root, envelope, shouldInsert, shouldValidateForwardSyncPayload(cfg, shouldInsert), true)
-		dataMissing := errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable)
-		if err != nil && !dataMissing {
+		// The apply checks data availability before the signature, and may not check the signature at all.
+		if err := cfg.forkChoice.ValidateExecutionPayloadEnvelopeForGossip(envelope); err != nil {
+			logger.Debug("[Caplin] forward sync: tip envelope failed validation", "slot", tip.Block.Slot, "root", root, "err", err)
 			return false
 		}
-		// A queued envelope has not passed its signature check yet.
-		if !dataMissing || cfg.forkChoice.ValidateExecutionPayloadEnvelopeForGossip(envelope) == nil {
-			cfg.forkChoice.RecordExecutionPayloadArrival(root, tip.Block.Slot, receivedAt)
-		}
-		if dataMissing {
+		cfg.forkChoice.RecordExecutionPayloadArrival(root, tip.Block.Slot, receivedAt)
+		err := processDownloadedGloasEnvelope(ctx, logger, cfg.forkChoice, cfg.blockCollector, tip.Block, root, envelope, shouldInsert, shouldValidateForwardSyncPayload(cfg, shouldInsert), true)
+		if errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
 			logger.Debug("[Caplin] forward sync: tip envelope waits for its column data", "slot", tip.Block.Slot, "root", root)
 			// Fork choice does not schedule the download while the head is unpublished.
 			if cfg.peerDas != nil {
@@ -336,8 +334,9 @@ func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) er
 					logger.Warn("[Caplin] forward sync: failed to schedule the tip's column download", "slot", tip.Block.Slot, "root", root, "err", err)
 				}
 			}
+			return true
 		}
-		return true
+		return err == nil
 	}
 
 	// Run the log loop until the highest processed slot reaches the chain tip slot

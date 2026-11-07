@@ -237,43 +237,48 @@ func TestForwardSyncRecordsTipEnvelopeArrivalWithInsertion(t *testing.T) {
 		require.False(t, f.cfg.forkChoice.ExecutionPayloadReceivedBefore(f.tipRoot, started))
 		require.True(t, f.cfg.forkChoice.ExecutionPayloadReceivedBefore(f.tipRoot, time.Now()))
 	})
-	for _, badSignature := range []bool{false, true} {
-		t.Run(fmt.Sprintf("data missing/bad signature=%t", badSignature), func(t *testing.T) {
-			f := newForwardSyncTipFixtureWithBlob(t, 0, false, true)
-			f.cfg.executionClient.(*testExecutionEngine).supportInsertion = true
-			f.cfg.blockCollector = &gloasCollectorTest{}
-			if badSignature {
-				badEnvelope := *f.envelope
-				badEnvelope.Signature[0] ^= 0xff
-				f.sentinel.envelopeResponse = f.encode(t, &badEnvelope)
-			}
-			peerDas := das_mock_services.NewMockPeerDas(gomock.NewController(t))
-			peerDas.EXPECT().IsDataAvailable(gomock.Any(), gomock.Any()).Return(false, nil).AnyTimes()
-			peerDas.EXPECT().SyncColumnDataLater(gomock.Any()).Return(nil).AnyTimes()
-			peerDas.EXPECT().BackfillCustodyColumns(gomock.Any(), gomock.Any()).AnyTimes()
-			f.cfg.forkChoice.InitPeerDas(peerDas)
-			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-			defer cancel()
-
-			require.NoError(t, forwardSync(ctx, log.Root(), f.cfg, Args{}))
-			require.True(t, f.cfg.forkChoice.HasPendingExecutionPayloadEnvelope(f.tipRoot))
-			require.Equal(t, !badSignature, f.cfg.forkChoice.ExecutionPayloadReceivedBefore(f.tipRoot, time.Now()))
-		})
-	}
-	t.Run("bad signature", func(t *testing.T) {
-		f := newForwardSyncTipFixture(t, 0, false)
+	t.Run("data missing", func(t *testing.T) {
+		f := newForwardSyncTipFixtureWithBlob(t, 0, false, true)
 		f.cfg.executionClient.(*testExecutionEngine).supportInsertion = true
 		f.cfg.blockCollector = &gloasCollectorTest{}
-		badEnvelope := *f.envelope
-		badEnvelope.Signature[0] ^= 0xff
-		f.sentinel.envelopeResponse = f.encode(t, &badEnvelope)
-		ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+		missingDataPeerDas(t, f.cfg)
+		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 		defer cancel()
 
-		require.ErrorIs(t, forwardSync(ctx, log.Root(), f.cfg, Args{}), context.DeadlineExceeded)
-		require.False(t, f.cfg.forkChoice.HasEnvelope(f.tipRoot))
-		require.False(t, f.cfg.forkChoice.ExecutionPayloadReceivedBefore(f.tipRoot, time.Now()))
+		require.NoError(t, forwardSync(ctx, log.Root(), f.cfg, Args{}))
+		require.True(t, f.cfg.forkChoice.HasPendingExecutionPayloadEnvelope(f.tipRoot))
+		require.True(t, f.cfg.forkChoice.ExecutionPayloadReceivedBefore(f.tipRoot, time.Now()))
 	})
+	for _, withBlob := range []bool{false, true} {
+		t.Run(fmt.Sprintf("bad signature/blob=%t", withBlob), func(t *testing.T) {
+			f := newForwardSyncTipFixtureWithBlob(t, 0, false, withBlob)
+			f.cfg.executionClient.(*testExecutionEngine).supportInsertion = true
+			f.cfg.blockCollector = &gloasCollectorTest{}
+			if withBlob {
+				missingDataPeerDas(t, f.cfg)
+			}
+			badEnvelope := *f.envelope
+			badEnvelope.Signature[0] ^= 0xff
+			f.sentinel.envelopeResponse = f.encode(t, &badEnvelope)
+			ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+			defer cancel()
+
+			require.ErrorIs(t, forwardSync(ctx, log.Root(), f.cfg, Args{}), context.DeadlineExceeded)
+			require.Zero(t, f.cfg.forwardSyncTipRoot)
+			require.False(t, f.cfg.forkChoice.HasEnvelope(f.tipRoot))
+			require.False(t, f.cfg.forkChoice.HasPendingExecutionPayloadEnvelope(f.tipRoot))
+			require.False(t, f.cfg.forkChoice.ExecutionPayloadReceivedBefore(f.tipRoot, time.Now()))
+		})
+	}
+}
+
+func missingDataPeerDas(t *testing.T, cfg *Cfg) {
+	t.Helper()
+	peerDas := das_mock_services.NewMockPeerDas(gomock.NewController(t))
+	peerDas.EXPECT().IsDataAvailable(gomock.Any(), gomock.Any()).Return(false, nil).AnyTimes()
+	peerDas.EXPECT().SyncColumnDataLater(gomock.Any()).Return(nil).AnyTimes()
+	peerDas.EXPECT().BackfillCustodyColumns(gomock.Any(), gomock.Any()).AnyTimes()
+	cfg.forkChoice.InitPeerDas(peerDas)
 }
 
 // The answer that brings the tip covers no slot after it, so ForwardSync asks again and finds the successor.
