@@ -649,6 +649,12 @@ func modexpU256(dst, base, exp, mod []byte) {
 		return // 0^exp with exp > 0; dst is already zero
 	}
 	mu := uint256.Reciprocal(&m)
+	if n := len(exp)*8 - bits.LeadingZeros8(exp[0]); n > 32 {
+		r := slidingWindowExpU256(&b, &m, &mu, exp, n)
+		b32 := r.Bytes32()
+		copy(dst, b32[32-len(dst):])
+		return
+	}
 
 	// started stays false until the first set exponent bit, so leading zero bits
 	// of the top byte cost no squarings. It is always set by the end: exp[0] != 0.
@@ -671,6 +677,51 @@ func modexpU256(dst, base, exp, mod []byte) {
 	}
 	b32 := result.Bytes32()
 	copy(dst, b32[32-len(dst):])
+}
+
+// slidingWindowExpU256 returns b^exp mod m for an exponent of n significant bits, exp[0] != 0. Each window of up to
+// 4 bits that ends in a set bit costs one multiply by a precomputed odd power of b, instead of one multiply per set bit.
+func slidingWindowExpU256(b, m *uint256.Int, mu *[5]uint64, exp []byte, n int) uint256.Int {
+	w := 3
+	if n > 80 {
+		w = 4
+	}
+	var odd [8]uint256.Int // odd[k] = b^(2k+1)
+	var b2 uint256.Int
+	odd[0] = *b
+	b2.MulModWithReciprocal(b, b, m, mu)
+	for k := 1; k < 1<<(w-1); k++ {
+		odd[k].MulModWithReciprocal(&odd[k-1], &b2, m, mu)
+	}
+	bitAt := func(i int) int { return int(exp[i>>3]>>(7-i&7)) & 1 }
+	nbits := len(exp) * 8
+	var result uint256.Int
+	started := false
+	for i := nbits - n; i < nbits; {
+		if bitAt(i) == 0 {
+			result.MulModWithReciprocal(&result, &result, m, mu) // started: the first visited bit is set
+			i++
+			continue
+		}
+		j := min(i+w, nbits)
+		for bitAt(j-1) == 0 {
+			j--
+		}
+		v := 0
+		for k := i; k < j; k++ {
+			v = v<<1 | bitAt(k)
+			if started {
+				result.MulModWithReciprocal(&result, &result, m, mu)
+			}
+		}
+		if started {
+			result.MulModWithReciprocal(&result, &odd[v>>1], m, mu)
+		} else {
+			result, started = odd[v>>1], true
+		}
+		i = j
+	}
+	return result
 }
 
 func (c *bigModExp) Name() string {
