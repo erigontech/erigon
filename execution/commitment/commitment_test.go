@@ -885,7 +885,7 @@ func TestUpdatesModeParallel_NewAllocates(t *testing.T) {
 	require.Nil(t, ut.tree)
 	require.Nil(t, ut.treeIdx)
 	require.Nil(t, ut.etl, "ModeParallel uses the prefix trie, not any ETL collector")
-	require.True(t, ut.IsConcurrentCommitment(), "IsConcurrentCommitment must report true for ModeParallel")
+	require.Equal(t, ModeParallel, ut.Mode(), "collection must stay in ModeParallel")
 	require.Equal(t, uint64(0), ut.Size())
 }
 
@@ -1041,7 +1041,6 @@ func TestInitializeTrieAndUpdates_Variants(t *testing.T) {
 			require.Equal(t, tc.wantMode, upd.Mode())
 			if tc.wantParallel {
 				require.NotNil(t, upd.parallel)
-				require.True(t, upd.IsConcurrentCommitment())
 			} else {
 				require.Nil(t, upd.parallel)
 			}

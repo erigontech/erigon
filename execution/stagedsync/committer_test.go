@@ -110,6 +110,12 @@ func TestShouldComputeOnRequest_BlockZeroAfterAdvance(t *testing.T) {
 		"stale block 0 result while we've already computed block 5 — skip")
 }
 
+func TestAsOfStateReaderDoesNotOwnBranchesByDefault(t *testing.T) {
+	reader := &asOfStateReader{}
+	_, ownsBranches := any(reader).(interface{ ReadsOwnedBranches() })
+	require.False(t, ownsBranches)
+}
+
 // TestHandleBlockRequest_EmptyBALFallsToIncremental pins the empty-BAL gate.
 // A genuine empty BAL (0xc0) decodes to a non-nil empty slice, so a nil check
 // alone selects BAL-driven mode and computes zero changes → parent root →

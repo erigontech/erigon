@@ -464,6 +464,7 @@ type GetLatestOptions struct {
 	maxStep     Step
 	hasMaxStep  bool
 	branchCache bool
+	owned       bool
 	buf         []byte
 }
 
@@ -491,6 +492,15 @@ func (opts GetLatestOptions) WithMaxStep(maxStep Step) GetLatestOptions {
 func (opts GetLatestOptions) WithBranchCache() GetLatestOptions {
 	opts.branchCache = true
 	return opts
+}
+
+func (opts GetLatestOptions) WithOwned() GetLatestOptions {
+	opts.owned = true
+	return opts
+}
+
+func (opts GetLatestOptions) Owned() bool {
+	return opts.owned
 }
 
 func (opts GetLatestOptions) Metrics() (GetLatestMetrics, time.Time) {
@@ -652,8 +662,8 @@ type FlushConfig struct {
 	// tuple during Flush so a downstream cache (e.g. the BranchCache) can stay in
 	// sync. txNum is the value's write txNum, for tx-precise unwind invalidation.
 	//
-	// k belongs to the callback; v is the batch's own storage, which is never
-	// rewritten in place, so a consumer may retain it.
+	// k and v are the batch's own storage, which is never rewritten in place,
+	// so a consumer may retain them but must not write to them.
 	DomainCallbacks map[Domain]func(k []byte, v []byte, step Step, txNum uint64)
 }
 

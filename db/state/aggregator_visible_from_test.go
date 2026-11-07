@@ -20,6 +20,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/db/state/statecfg"
 )
 
 // A tx opened from a pin (src.Pin() then pin.BeginFilesRo()) must observe the
@@ -28,6 +30,7 @@ import (
 // commitment tx was built against. A plain BeginFilesRo, by contrast, pins
 // whatever generation is current when it runs.
 func TestFilesPin_PinsSourceGeneration(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	stepSize := uint64(10)
 	db, agg := testDbAndAggregatorv3(t, stepSize)
 

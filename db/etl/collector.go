@@ -299,6 +299,27 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 	return nil
 }
 
+func MergeLoad(logPrefix string, collectors []*Collector, loadFunc func(k, v []byte) error, args TransformArgs) error {
+	errs := make([]error, len(collectors))
+	var wg sync.WaitGroup
+	for i, c := range collectors {
+		if c.allFlushed {
+			continue
+		}
+		wg.Go(func() { errs[i] = c.flushBuffer(true) })
+	}
+	wg.Wait()
+	if err := errors.Join(errs...); err != nil {
+		return err
+	}
+	var providers []dataProvider
+	for _, c := range collectors {
+		providers = append(providers, c.dataProviders...)
+		args.BufferType = c.bufType
+	}
+	return mergeSortFiles(logPrefix, providers, loadFunc, args)
+}
+
 func (c *Collector) Close() {
 	// Providers first: a KeepInRAM one reads straight from `buf`, whose chunks
 	// Reset hands to a pool that other collectors draw from.

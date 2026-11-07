@@ -443,7 +443,9 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 			if err != nil {
 				return nil, err
 			}
-			written.touchAll()
+			if err := written.touchAll(); err != nil {
+				return nil, err
+			}
 			stateRoot, err = sharedDomains.ComputeCommitment(ctx, tx, false, blockNum, latestTxNum, "getReceipt", nil)
 			if err != nil {
 				return nil, err
@@ -647,7 +649,9 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 				if err != nil {
 					return nil, err
 				}
-				written.touchAll()
+				if err := written.touchAll(); err != nil {
+					return nil, err
+				}
 				stateRoot, err = sharedDomains.ComputeCommitment(ctx, tx, false, blockNum, latestTxNum, "getReceipts", nil)
 				if err != nil {
 					return nil, err
@@ -876,12 +880,15 @@ func (w *blockWrites) record(domain kv.Domain, k []byte) {
 	w.keys[domain][string(k)] = struct{}{}
 }
 
-func (w *blockWrites) touchAll() {
-	for domain, keys := range w.keys {
+func (w *blockWrites) touchAll() error {
+	for _, keys := range w.keys {
 		for k := range keys {
-			w.sd.GetCommitmentContext().TouchKey(domain, k, nil)
+			if err := w.sd.GetCommitmentContext().TouchKeyFromState(w.tx, []byte(k)); err != nil {
+				return err
+			}
 		}
 	}
+	return nil
 }
 
 // applyCancellable runs apply with the EVM wired to ctx: a cancelled context aborts it

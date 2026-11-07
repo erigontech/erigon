@@ -58,9 +58,9 @@ func TestAggregator_RebuildCommitmentAcrossMergedShards(t *testing.T) {
 		defer tx.Rollback()
 		ac := state.AggTx(tx)
 
-		stateVal, ok, _, _, _ := ac.DebugGetLatestFromFiles(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, math.MaxUint64)
+		stateVal, ok, _, _, _ := ac.DebugGetLatestFromFiles(kv.CommitmentDomain, commitmentdb.StateKey(), math.MaxUint64)
 		require.True(t, ok)
-		rootInFiles, _, _, err = commitment.HexTrieExtractStateRoot(stateVal)
+		_, _, rootInFiles, err = commitmentdb.DecodeState(stateVal)
 		require.NoError(t, err)
 
 		var widest uint64
@@ -79,5 +79,5 @@ func TestAggregator_RebuildCommitmentAcrossMergedShards(t *testing.T) {
 		agg.Close()
 	}
 
-	rebuildCommitmentFromScratch(t, db, agg, rootInFiles, fPaths, false)
+	rebuildCommitmentFromScratch(t, db, agg, rootInFiles, fPaths, false, false)
 }

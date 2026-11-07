@@ -203,6 +203,7 @@ func TestStartupSyncLeavesStateCacheBoundForReadOnlyTxs(t *testing.T) {
 	require.NoError(t, err)
 	defer sd.Close()
 	sd.SetTxNum(5)
+	sd.SetDisableInlineTouchKey(true)
 	require.NoError(t, sd.DomainPut(kv.AccountsDomain, rwTx, key, []byte{1}, 5, nil))
 	require.NoError(t, rawdbv3.TxNums.Append(rwTx, 1, 20))
 	require.NoError(t, stages.SaveStageProgress(rwTx, stages.Execution, 1))

@@ -22,11 +22,22 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/erigontech/erigon/db/config3"
+	"github.com/erigontech/erigon/db/version"
 )
 
 func TestCommitmentReferencesDefault(t *testing.T) {
 	assert.False(t, config3.DefaultReferencesInCommitmentBranches)
 	assert.Equal(t, config3.DefaultReferencesInCommitmentBranches, Schema.CommitmentDomain.ReferencesInCommitmentBranches)
+}
+
+func TestCommitmentV3RejectsLegacyFiles(t *testing.T) {
+	cfg := Schema.CommitmentDomain
+	EnableCommitmentV3Records(&cfg)
+	for _, v := range []version.Versions{cfg.FileVersion.DataKV, cfg.Hist.FileVersion.DataV} {
+		assert.False(t, v.Supports(version.V2_0))
+		assert.False(t, v.Supports(version.Version{Major: 2, Minor: 2}))
+		assert.True(t, v.Supports(version.V3_0))
+	}
 }
 
 // TestSchemaEntityEnabled pins which schema entities participate in writes and

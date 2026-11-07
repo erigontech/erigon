@@ -33,6 +33,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/config3"
@@ -47,6 +48,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/execfinality"
@@ -59,8 +61,6 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
-
-	t.Parallel()
 
 	logger := log.New()
 	stepSize := uint64(100)
@@ -110,12 +110,17 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 		keys[txNum-1] = append(addr, loc...) //nolint:makezero
 
 		if (txNum+1)%stepSize == 0 {
-			trieState, err := hph.EncodeCurrentState(nil)
-			require.NoError(t, err)
-			cs := commitmentdb.NewCommitmentState(txNum, 0, trieState)
-			encodedState, err := cs.Encode()
-			require.NoError(t, err)
-			err = domains.DomainPut(kv.CommitmentDomain, tx, commitmentdb.KeyCommitmentState, encodedState, txNum, nil)
+			var encodedState []byte
+			if statecfg.ExperimentalCommitmentV3 {
+				encodedState, err = commitment.EncodeCommitmentV3State(empty.RootHash[:], 0, txNum, nil)
+				require.NoError(t, err)
+			} else {
+				trieState, err := hph.EncodeCurrentState(nil)
+				require.NoError(t, err)
+				encodedState, err = commitmentdb.NewCommitmentState(txNum, 0, trieState).Encode()
+				require.NoError(t, err)
+			}
+			err = domains.DomainPut(kv.CommitmentDomain, tx, commitmentdb.StateKey(), encodedState, txNum, nil)
 			require.NoError(t, err)
 		}
 	}
@@ -864,6 +869,9 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *execctx.SharedDoma
 		key, existed := getKey()
 
 		r := rnd.IntN(101)
+		if (r <= 33 || r > 80) && len(key) > length.Addr {
+			key = key[:length.Addr]
+		}
 		switch {
 		case r <= 33:
 			acc := accounts.Account{

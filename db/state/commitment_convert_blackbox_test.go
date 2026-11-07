@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
@@ -129,6 +130,7 @@ func TestConvertCommitmentFile_AlreadyTarget(t *testing.T) {
 //   - every non-state key in the output decodes canonically via DecodeKeyV2
 //   - the key count is preserved
 func TestConvertCommitmentFile_V1ToV2_KeysOnly(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	if testing.Short() {
 		t.Skip()
 	}
@@ -202,6 +204,7 @@ func TestConvertCommitmentFile_V1ToV2_KeysOnly(t *testing.T) {
 // short (sub-10-byte) plain-key references — the squeeze marker the read-side
 // detector keys off of.
 func TestConvertCommitmentFile_V1ToV1_Squeeze(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	if testing.Short() {
 		t.Skip()
 	}
@@ -262,6 +265,7 @@ func TestConvertCommitmentFile_V1ToV1_Squeeze(t *testing.T) {
 // in tmpDir2, and compare tmpDir2/<file>.kv bytes against a snapshot taken
 // before the first conversion.
 func TestConvertCommitmentFile_RoundTrip_V1V2(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	if testing.Short() {
 		t.Skip()
 	}
@@ -353,6 +357,7 @@ func snapshotCommitmentFiles(t *testing.T, snapDir string) map[string][]byte {
 //     the commitment root computed against the reloaded files matches the
 //     root the original files produced.
 func TestConvertCommitmentFiles_FullFlow(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	if testing.Short() {
 		t.Skip()
 	}
@@ -382,7 +387,7 @@ func TestConvertCommitmentFiles_FullFlow(t *testing.T) {
 	// Value-axis only: V1+unsqueezed → V1+squeezed. Keeps the test asserting
 	// pure orchestrator mechanics without composing two codecs at once.
 	opts := state.ConvertOpts{TargetSqueeze: true, TargetNibblesV2: false}
-	convErr := state.ConvertCommitmentFiles(t.Context(), at, opts, log.New())
+	_, convErr := state.ConvertCommitmentFiles(t.Context(), at, opts, log.New())
 	rwTx.Rollback() // safe: ReloadFiles already invalidated at internally
 	require.NoError(t, convErr)
 
@@ -510,6 +515,7 @@ func swapVersionExt(kviPath string) string {
 // pre-conversion snapshot. The composed round-trip also implicitly exercises
 // both axes in both directions.
 func TestConvertCommitmentFiles_RoundTripComposed(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	if testing.Short() {
 		t.Skip()
 	}
@@ -565,7 +571,7 @@ func runOrchestrator(t *testing.T, db kv.TemporalRwDB, opts state.ConvertOpts) {
 	require.NoError(t, err)
 	t.Cleanup(tx.Rollback) //nolint:gocritic // explicit Rollback below; this is the panic safety net
 	at := state.AggTx(tx)
-	convErr := state.ConvertCommitmentFiles(t.Context(), at, opts, log.New())
+	_, convErr := state.ConvertCommitmentFiles(t.Context(), at, opts, log.New())
 	tx.Rollback()
 	require.NoError(t, convErr)
 }
@@ -621,8 +627,10 @@ func TestConvertCommitmentFiles_EmptyDatadir(t *testing.T) {
 	require.Empty(t, at.Files(kv.CommitmentDomain),
 		"setup precondition: no commitment files in empty datadir")
 
-	require.NoError(t, state.ConvertCommitmentFiles(t.Context(), at,
-		state.ConvertOpts{TargetSqueeze: true, TargetNibblesV2: true}, log.New()))
+	converted, err := state.ConvertCommitmentFiles(t.Context(), at,
+		state.ConvertOpts{TargetSqueeze: true, TargetNibblesV2: true}, log.New())
+	require.NoError(t, err)
+	require.False(t, converted)
 
 	// Nothing was created.
 	_, err = os.Stat(filepath.Join(agg.Dirs().Snap, "backup"))
@@ -652,7 +660,7 @@ func TestConvertCommitmentFiles_BackupExists(t *testing.T) {
 	defer tx.Rollback()
 	at := state.AggTx(tx)
 
-	convErr := state.ConvertCommitmentFiles(t.Context(), at,
+	_, convErr := state.ConvertCommitmentFiles(t.Context(), at,
 		state.ConvertOpts{TargetSqueeze: true, TargetNibblesV2: true}, log.New())
 	require.Error(t, convErr, "must refuse to run when backup is non-empty")
 	require.Contains(t, convErr.Error(), backupDir,
@@ -663,6 +671,7 @@ func TestConvertCommitmentFiles_BackupExists(t *testing.T) {
 // if a prior crashed run left junk under snapshots/rebuild/domain/, the
 // orchestrator wipes it on pre-flight and proceeds normally.
 func TestConvertCommitmentFiles_LeftoverRebuild(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	if testing.Short() {
 		t.Skip()
 	}
@@ -717,6 +726,7 @@ func listVisibleCommitmentKVs(t *testing.T, db kv.TemporalRwDB) []kv.VisibleFile
 // than by counting log lines (which is fragile across line-number /
 // timestamp changes — see the plan's "Decision now" note in Task 5).
 func TestConvertCommitmentFiles_ContinueResumes(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	if testing.Short() {
 		t.Skip()
 	}
@@ -775,7 +785,7 @@ func TestConvertCommitmentFiles_ContinueResumes(t *testing.T) {
 	tx1, err := db.BeginTemporalRw(ctx1)
 	require.NoError(t, err)
 	t.Cleanup(tx1.Rollback) //nolint:gocritic // explicit Rollback below; this is the panic safety net
-	convErr := state.ConvertCommitmentFiles(ctx1, state.AggTx(tx1), opts, log.New())
+	_, convErr := state.ConvertCommitmentFiles(ctx1, state.AggTx(tx1), opts, log.New())
 	tx1.Rollback()
 	cancel1()
 	require.Error(t, convErr, "first run must abort once the hook cancels ctx")
@@ -826,7 +836,7 @@ func TestConvertCommitmentFiles_ContinueResumes(t *testing.T) {
 	t.Cleanup(tx2.Rollback) //nolint:gocritic // explicit Rollback below; this is the panic safety net
 	resumeOpts := opts
 	resumeOpts.Continue = true
-	convErr = state.ConvertCommitmentFiles(t.Context(), state.AggTx(tx2), resumeOpts, log.New())
+	_, convErr = state.ConvertCommitmentFiles(t.Context(), state.AggTx(tx2), resumeOpts, log.New())
 	tx2.Rollback() // safe: Phase 5 ReloadFiles already invalidated at internally
 	require.NoError(t, convErr, "resume run must complete successfully")
 	state.SetConvertPhase1AfterFileHookForTest(nil)

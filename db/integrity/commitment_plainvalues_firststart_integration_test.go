@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/statecfg"
 )
 
 // TestFirstStartPlainValuesRegime bootstraps a fresh datadir, resolves erigondb.toml through the
@@ -37,6 +38,7 @@ import (
 // matching version regime (plain => v2.2, referenced => v2.1) and passes the regime-aware integrity
 // checks — i.e. the flag's chosen regime flows resolver -> settings -> schema -> merge.
 func TestFirstStartPlainValuesRegime(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	t.Run("plain", func(t *testing.T) {
 		t.Parallel()
 		runFirstStartRegimeCheck(t, true)

@@ -14,6 +14,7 @@ import (
 	"github.com/erigontech/erigon/db/preverified"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/state/statecfg"
 )
 
 // Commitment values reference accounts and storage records by byte offset into the .kv of the same
@@ -407,6 +408,7 @@ var completeLocalMerge = []string{
 }
 
 func TestResetAllowsAMixedRangeHiddenByACompleteMerge(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	withOsRoot(t, func(root *os.Root) {
 		qt.Assert(t, qt.IsNil(runCoveredRangeReset(t, root, completeLocalMerge, nil)))
 	})
@@ -452,6 +454,7 @@ func TestResetChecksAMixedRangeWhenTheMergeDoesNotOpen(t *testing.T) {
 }
 
 func TestResetHidesAMixedRangeOnlyBehindAManifestMergeWithItsAccessor(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	manifestMerge := []string{
 		"domain/v2.1-commitment.0-4.kv",
 		"domain/v1.0-accounts.0-4.kv",
@@ -556,6 +559,7 @@ func TestResetIgnoresMalformedNamesWhenFindingTheVisibleEnd(t *testing.T) {
 }
 
 func TestResetSkipsLegacyCommitmentHistoryThatStartupRemoves(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	for _, legacy := range []string{
 		"snapshots/history/v1-commitment.0-2.v",
 		"snapshots/idx/v1-commitment.0-2.ef",

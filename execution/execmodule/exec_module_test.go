@@ -230,10 +230,10 @@ func TestValidateChainWithLastTxNumOfBlockAtStepBoundary(t *testing.T) {
 	require.Equal(t, uint64(1), extendingNum)
 	var inMemBlockNum, inMemTxNum uint64
 	err = m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
-		v, _, err := extendingSd.GetLatest(kv.CommitmentDomain, tx, commitmentdb.KeyCommitmentState)
+		v, _, err := extendingSd.GetLatest(kv.CommitmentDomain, tx, commitmentdb.StateKey())
 		require.NoError(t, err)
-		inMemTxNum = binary.BigEndian.Uint64(v[:8])
-		inMemBlockNum = binary.BigEndian.Uint64(v[8:16])
+		inMemTxNum, inMemBlockNum, _, err = commitmentdb.DecodeState(v)
+		require.NoError(t, err)
 		return nil
 	})
 	require.NoError(t, err)
@@ -863,10 +863,11 @@ func truncateTxNumsBelowCommitment(t *testing.T, m *execmoduletester.ExecModuleT
 	// "too deep" and the pre-fix code rejects the FCU as ReorgTooDeep.
 	var commitBlock uint64
 	require.NoError(t, m.DB.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
-		v, _, err := tx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, kv.GetLatestOptions{})
+		v, _, err := tx.GetLatest(kv.CommitmentDomain, commitmentdb.StateKey(), kv.GetLatestOptions{})
 		require.NoError(t, err)
 		require.GreaterOrEqual(t, len(v), 16)
-		commitBlock = binary.BigEndian.Uint64(v[8:16])
+		_, commitBlock, _, err = commitmentdb.DecodeState(v)
+		require.NoError(t, err)
 		require.NoError(t, rawdbv3.TxNums.Truncate(tx, truncateTo+1))
 		require.NoError(t, rawdb.TruncateCanonicalHash(tx, truncateTo+1, false))
 		if !keepChangesets {
@@ -928,10 +929,11 @@ func TestUpdateForkChoiceForwardExecutesAfterStateAheadRecovery(t *testing.T) {
 	const truncateTo uint64 = 5
 	var commitBlock uint64
 	require.NoError(t, m.DB.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
-		v, _, err := tx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, kv.GetLatestOptions{})
+		v, _, err := tx.GetLatest(kv.CommitmentDomain, commitmentdb.StateKey(), kv.GetLatestOptions{})
 		require.NoError(t, err)
 		require.GreaterOrEqual(t, len(v), 16)
-		commitBlock = binary.BigEndian.Uint64(v[8:16])
+		_, commitBlock, _, err = commitmentdb.DecodeState(v)
+		require.NoError(t, err)
 		require.NoError(t, rawdbv3.TxNums.Truncate(tx, truncateTo+1))
 		require.NoError(t, rawdb.TruncateCanonicalHash(tx, truncateTo+1, false))
 		require.NoError(t, tx.ClearTable(kv.ChangeSets3))

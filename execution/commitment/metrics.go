@@ -89,6 +89,8 @@ func (m *Metrics) Updates(plainKey []byte) {
 // AddBranchRead records one branch read of n bytes.
 func (m *Metrics) AddBranchRead(n int) { m.branchReadBytes.Add(uint64(n)) }
 
+func (m *Metrics) AddBranchLoad(n uint64) { m.loadBranch.Add(n) }
+
 // AddBranchWrite records one branch write of n bytes.
 func (m *Metrics) AddBranchWrite(n int) { m.branchWriteBytes.Add(uint64(n)) }
 
