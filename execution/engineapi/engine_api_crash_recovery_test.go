@@ -44,8 +44,9 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/abi/bind"
-	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/commitment"
 	enginetypes "github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/engineapi/engineapitester"
 	"github.com/erigontech/erigon/execution/execmodule"
@@ -61,6 +62,22 @@ const unwindCrashChild = "ERIGON_UNWIND_CRASH_CHILD"
 
 // Windows reports Process.Kill as exit code 1; child failures must stay distinct.
 const crashRecoveryFailureExitCode = 2
+
+func testCommitmentStateKey() []byte {
+	if statecfg.ExperimentalCommitmentV3 {
+		return commitment.KeyCommitmentV3State
+	}
+	return commitment.KeyCommitmentState
+}
+
+func testDecodeCommitmentState(v []byte) (txNum, blockNum uint64, root []byte, err error) {
+	if statecfg.ExperimentalCommitmentV3 {
+		blockNum, txNum, root, err = commitment.DecodeCommitmentV3State(v)
+		return txNum, blockNum, root, err
+	}
+	root, blockNum, txNum, err = commitment.HexTrieExtractStateRoot(v)
+	return txNum, blockNum, root, err
+}
 
 type crashRecoveryRequest struct {
 	Genesis        *types.Genesis
@@ -358,9 +375,9 @@ func readCrashRecoveryTx(t *testing.T, tx kv.TemporalTx) crashRecoveryState {
 		state.StageProgress[stage], err = stages.GetStageProgress(tx, stage)
 		require.NoError(t, err)
 	}
-	encoded, _, err := tx.GetLatest(kv.CommitmentDomain, commitmentdb.StateKey(), kv.GetLatestOptions{})
+	encoded, _, err := tx.GetLatest(kv.CommitmentDomain, testCommitmentStateKey(), kv.GetLatestOptions{})
 	require.NoError(t, err)
-	txNum, blockNum, root, err := commitmentdb.DecodeState(encoded)
+	txNum, blockNum, root, err := testDecodeCommitmentState(encoded)
 	require.NoError(t, err)
 	state.StateRoot, state.CommitmentBlock, state.CommitmentTx = common.BytesToHash(root), blockNum, txNum
 	require.LessOrEqual(t, blockNum, lastBlock, "commitment must have a canonical block")

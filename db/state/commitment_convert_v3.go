@@ -49,10 +49,9 @@ import (
 	v3 "github.com/erigontech/erigon/execution/commitment/v3"
 )
 
-const (
-	commitmentV3Batch      = 1024
-	commitmentV3BatchBytes = 1 << 20
-)
+const commitmentV3Batch = 1024
+
+var commitmentV3BatchBytes = 1 << 20
 
 type kvBatch struct {
 	seq   uint64

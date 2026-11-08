@@ -189,7 +189,8 @@ func foldBranchChild(parent *node, nib int, dst *[32]byte) error {
 	} else if !parent.hasChildHash(nib) {
 		return fmt.Errorf("%w: child %d hash", errFoldNode, nib)
 	} else {
-		ext, hash = parent.childExtAt(nib), parent.childHashAt(nib)
+		var extScratch [64]byte
+		ext, hash = parent.childExtAtInto(nib, extScratch[:0]), parent.childHashAt(nib)
 	}
 	if len(ext) != 0 {
 		*dst = extensionRef(ext, hash)

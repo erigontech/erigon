@@ -129,7 +129,11 @@ const (
 	CommitmentV3StateMarker    byte        = 0x04
 )
 
-var KeyCommitmentV3State = []byte{0x42}
+var (
+	KeyCommitmentState   = []byte("state")
+	KeyCommitmentV3State = []byte{0x42}
+	CommitmentStateKeys  = [][]byte{KeyCommitmentV3State, KeyCommitmentState}
+)
 
 const CommitmentV3StateSize = 1 + 8 + 8 + 32
 
@@ -159,7 +163,12 @@ func DecodeCommitmentV3State(value []byte) (blockNum, txNum uint64, root []byte,
 }
 
 func IsCommitmentStateKey(key []byte) bool {
-	return bytes.Equal(key, KeyCommitmentV3State) || bytes.Equal(key, KeyCommitmentState)
+	for _, stateKey := range CommitmentStateKeys {
+		if bytes.Equal(key, stateKey) {
+			return true
+		}
+	}
+	return false
 }
 
 var NewCommitmentV3Trie func(tmpdir string, cfg TrieConfig) (Trie, *Updates)

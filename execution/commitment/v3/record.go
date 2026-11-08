@@ -206,7 +206,7 @@ func Validate(data []byte, depth int) error {
 			return ErrRecordTruncated
 		}
 		extLen := int(data[off])
-		if extLen >= suffixCount {
+		if extLen == 0 || extLen >= suffixCount {
 			return fmt.Errorf("%w: extension length %d", ErrRecordTrailer, extLen)
 		}
 		end := off + 1 + packedLen(extLen)

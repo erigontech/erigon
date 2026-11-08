@@ -86,16 +86,12 @@ func appendStorageLeafRLP(dst, suffix, payload []byte) []byte {
 }
 
 func storageLeafRef(suffix []byte, payload []byte, dst []byte) []byte {
-	start := len(dst)
-	dst = hashLongRef(appendStorageLeafRLP(dst, suffix, payload), start)
-	if len(dst)-start < 32 {
-		return dst[start:]
-	}
-	return dst
+	return hashLongRef(appendStorageLeafRLP(dst, suffix, payload), 0)
 }
 
 func appendExtensionRLP(dst, ext, childHash []byte) []byte {
-	return appendLeafRLP(dst, nibbles.HexToCompact(ext), childHash)
+	var compact [34]byte
+	return appendLeafRLP(dst, nibbles.HexToCompactInto(compact[:0], ext), childHash)
 }
 
 func extensionRef(ext []byte, childHash []byte) [32]byte {

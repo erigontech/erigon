@@ -1497,7 +1497,7 @@ func detectCollapseSiblings(
 		if traced, tracedRoot, err = sdCtx.TraceCollapses(ctx, tx, blockNum, firstTxNumInBlock, trace); err != nil {
 			return nil, fmt.Errorf("[debug_executionWitness] collapse detection via TraceCollapses failed: %w", err)
 		}
-		if traced && len(tracedRoot) != 0 {
+		if traced {
 			if err := verifyTracedWitnessRoot(expectedBlockRoot, tracedRoot); err != nil {
 				return nil, err
 			}

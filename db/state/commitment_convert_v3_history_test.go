@@ -18,17 +18,22 @@ package state_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dir"
@@ -257,6 +262,44 @@ func TestConvertCommitmentFiles_V3HistoryRejectsAsOfOrphans(t *testing.T) {
 	_, err = state.ConvertCommitmentFiles(t.Context(), state.AggTx(tx), state.ConvertOpts{TargetV3: true}, log.New())
 	tx.Rollback()
 	require.ErrorContains(t, err, "orphan records")
+}
+
+func TestConvertCommitmentFiles_V3HistoryOversizedBatch(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	db, _, _ := testDbAggregatorWithCommitmentHistory(t, 7, 4)
+	previousBatchBytes := state.SetCommitmentV3BatchBytesForTest(256)
+	t.Cleanup(func() { state.SetCommitmentV3BatchBytesForTest(previousBatchBytes) })
+	previousProcs := runtime.GOMAXPROCS(1)
+	t.Cleanup(func() { runtime.GOMAXPROCS(previousProcs) })
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	tx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	t.Cleanup(tx.Rollback)
+	_, err = state.ConvertCommitmentFiles(ctx, state.AggTx(tx), state.ConvertOpts{TargetV3: true}, log.New())
+	tx.Rollback()
+	require.NoError(t, err)
+}
+
+func TestConvertCommitmentFiles_V3HistoryPreflightLeavesNoProducer(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	db, _, _ := testDbAggregatorWithCommitmentHistory(t, 7, 4)
+	previousBatchBytes := state.SetCommitmentV3BatchBytesForTest(256)
+	t.Cleanup(func() { state.SetCommitmentV3BatchBytesForTest(previousBatchBytes) })
+	previousProcs := runtime.GOMAXPROCS(1)
+	t.Cleanup(func() { runtime.GOMAXPROCS(previousProcs) })
+	state.SetLegacyCommitTxNumsForTest(func(*state.DomainRoTx, uint64, uint64) ([]uint64, error) {
+		return nil, errors.New("missing .ef range")
+	})
+	t.Cleanup(func() { state.SetLegacyCommitTxNumsForTest(nil) })
+
+	tx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	t.Cleanup(tx.Rollback)
+	_, err = state.ConvertCommitmentFiles(t.Context(), state.AggTx(tx), state.ConvertOpts{TargetV3: true}, log.New())
+	tx.Rollback()
+	require.ErrorContains(t, err, "missing .ef range")
+	goleak.VerifyNone(t, goleak.IgnoreCurrent())
 }
 
 type commitmentHistoryPair struct {

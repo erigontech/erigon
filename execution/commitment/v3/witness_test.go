@@ -572,7 +572,7 @@ func witnessAfterTraceReusesReads(t *testing.T, seed int64, traceOnly bool) {
 	require.NoError(t, err)
 	u := testUpdates(t, commitment.ModeCollect, batch)
 	if traceOnly {
-		err = tr.TraceCollapses(ctx, u, func([]byte, []byte) {})
+		_, err = tr.TraceCollapsesRoot(ctx, u, func([]byte, []byte) {})
 	} else {
 		tr.SetCollapseTracer(func([]byte, []byte) {})
 		_, err = tr.Process(ctx, u, "", nil, commitment.WarmupConfig{})

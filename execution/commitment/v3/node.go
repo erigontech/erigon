@@ -94,19 +94,22 @@ func (n *node) childHashAt(nib int) []byte {
 }
 
 func (n *node) childExtAt(nib int) []byte {
+	return n.childExtAtInto(nib, nil)
+}
+
+func (n *node) childExtAtInto(nib int, dst []byte) []byte {
 	if s := n.slot(nib); s != nil {
 		return s.ext
 	}
 	if !n.stored(nib) {
 		return nil
 	}
-	return decodeExtension(n.record.extAt(n.layout, nib))
+	return decodeExtensionInto(n.record.extAt(n.layout, nib), dst)
 }
 
 func (n *node) hasChildExt(nib int) bool {
 	if n.stored(nib) {
-		encoded := n.record.extAt(n.layout, nib)
-		return len(encoded) != 0 && encoded[0] != 0
+		return n.layout.ext&(uint16(1)<<nib) != 0
 	}
 	return len(n.childExtAt(nib)) != 0
 }

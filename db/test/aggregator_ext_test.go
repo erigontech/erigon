@@ -120,7 +120,11 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 				encodedState, err = commitmentdb.NewCommitmentState(txNum, 0, trieState).Encode()
 				require.NoError(t, err)
 			}
-			err = domains.DomainPut(kv.CommitmentDomain, tx, commitmentdb.StateKey(), encodedState, txNum, nil)
+			stateKey := commitment.KeyCommitmentState
+			if statecfg.ExperimentalCommitmentV3 {
+				stateKey = commitment.KeyCommitmentV3State
+			}
+			err = domains.DomainPut(kv.CommitmentDomain, tx, stateKey, encodedState, txNum, nil)
 			require.NoError(t, err)
 		}
 	}

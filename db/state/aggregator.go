@@ -2857,9 +2857,8 @@ func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx, opts k
 	if metrics != nil && dbg.KVReadLevelledMetrics {
 		metrics.UpdateFileReadsUnique(domain, k, start)
 	}
-	stored := v
 	v, err = at.replaceShortenedKeysInBranch(k, commitment.BranchData(v), fileStartTxNum, fileEndTxNum)
-	if opts.Owned() && len(v) != 0 && len(stored) != 0 && &v[0] == &stored[0] {
+	if opts.Owned() {
 		v = bytes.Clone(v)
 	}
 	step = kv.Step(fileEndTxNum / at.StepSize())

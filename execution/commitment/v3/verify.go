@@ -91,7 +91,8 @@ func (h *RecordHasher) Hash(key, value []byte, expect func(key, hash []byte) err
 			childPath := n.path
 			if !rootExtension {
 				h.child = append(append(h.child[:0], n.path...), byte(nib))
-				h.child = append(h.child, n.childExtAt(nib)...)
+				ext := n.childExtAtInto(nib, h.child[len(h.child):cap(h.child)])
+				h.child = append(h.child, ext...)
 				childPath = h.child
 			}
 			h.key = nodeKey(tag, addrHash, childPath, h.key[:0])

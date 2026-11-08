@@ -530,6 +530,7 @@ func TestRecordCodec(t *testing.T) {
 				{name: "truncated body", data: valid[:len(valid)-1], depth: 3, want: ErrRecordTruncated},
 				{name: "leaf outside child mask", data: commitmenttest.Record(&commitmenttest.RecordSpec{ChildMask: 1, LeafMask: 2}), depth: 3, want: ErrRecordMasks},
 				{name: "extension overlaps leaf", data: commitmenttest.Record(&commitmenttest.RecordSpec{Flags: hdrHasChildExt, ChildMask: 1, LeafMask: 1, ExtensionMask: 1, Extensions: [16][]byte{0: extFixture([]byte{1})}}), depth: 3, want: ErrRecordMasks},
+				{name: "empty child extension", data: commitmenttest.Record(&commitmenttest.RecordSpec{Flags: hdrHasChildExt, ChildMask: 1, ExtensionMask: 1, Extensions: [16][]byte{0: extFixture(nil)}}), depth: 3, want: ErrRecordTrailer},
 				{name: "leaf root and self extension", data: append([]byte{hdrIsLeafRoot | hdrHasSelfExt}, make([]byte, 33)...), depth: 0, want: ErrRecordRoot},
 				{name: "self extension has two children", data: commitmenttest.Record(&commitmenttest.RecordSpec{Flags: hdrHasSelfExt, ChildMask: 3, SelfExtension: extFixture([]byte{1})}), depth: 0, want: ErrRecordRoot},
 				{name: "short extension trailer", data: commitmenttest.Record(&commitmenttest.RecordSpec{Flags: hdrHasChildExt, ChildMask: 1, ExtensionMask: 1, Extensions: [16][]byte{0: {3, 0x12}}}), depth: 3, want: ErrRecordTruncated},
@@ -661,6 +662,26 @@ func TestRecordCodec(t *testing.T) {
 	} {
 		t.Run(tc.name, tc.run)
 	}
+}
+
+func TestExtensionHotPathsDoNotAllocate(t *testing.T) {
+	var child [32]byte
+	require.Zero(t, testing.AllocsPerRun(100, func() {
+		_ = extensionRef([]byte{1, 2, 3, 4}, child[:])
+	}))
+
+	n := newNode(planeAccount, 1)
+	n.setStoredChild(3, child[:], []byte{2, 3, 4})
+	data := encodeRecord(n, len(n.path), nil)
+	stored := fork(n.path)
+	stored.record = Record{data: data, depth: len(n.path)}
+	stored.layout = stored.record.layout()
+	stored.childMask = stored.layout.child
+	stored.hashMask = stored.layout.tree()
+	var dst [64]byte
+	require.Zero(t, testing.AllocsPerRun(100, func() {
+		_ = stored.childExtAtInto(3, dst[:0])
+	}))
 }
 
 func extFixture(path []byte) []byte {

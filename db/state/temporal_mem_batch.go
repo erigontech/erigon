@@ -240,6 +240,21 @@ func (sd *TemporalMemBatch) addPutMetrics(domain kv.Domain, puts int64, putKeySi
 	dm.CachePutValueSize += putValueSize
 }
 
+func replaceLatest(old []dataWithTxNum, next dataWithTxNum, keepHistory bool) (updated []dataWithTxNum, sameTxNum bool, valueSizeDelta int) {
+	if old[len(old)-1].txNum == next.txNum {
+		sameTxNum = true
+		valueSizeDelta = len(next.data) - len(old[len(old)-1].data)
+		old[len(old)-1] = next
+		return old, sameTxNum, valueSizeDelta
+	}
+	if keepHistory {
+		return append(old, next), false, len(next.data)
+	}
+	valueSizeDelta = len(next.data) - len(old[len(old)-1].data)
+	old[0] = next
+	return old[:1], false, valueSizeDelta
+}
+
 func (sd *TemporalMemBatch) PutOwnedCommitmentBranches(parts [][]commitment.BranchDelta, txNum uint64, diff *kv.DomainDiff) error {
 	count := 0
 	for _, part := range parts {
@@ -294,19 +309,10 @@ func (sd *TemporalMemBatch) insertOwnedCommitmentBranches(flat []*commitment.Bra
 		version := dataWithTxNum{data: d.Data, txNum: txNum}
 		latest := sd.shard(domain, key).m
 		if old, ok := latest[key]; ok {
-			switch {
-			case old[len(old)-1].txNum == txNum:
-				sameTxNum[i] = true
-				putValueSize += len(d.Data) - len(old[len(old)-1].data)
-				old[len(old)-1] = version
-			case sd.inMemHistoryReads:
-				latest[key] = append(old, version)
-				putValueSize += len(d.Data)
-			default:
-				putValueSize += len(d.Data) - len(old[len(old)-1].data)
-				old[0] = version
-				latest[key] = old[:1]
-			}
+			var delta int
+			old, sameTxNum[i], delta = replaceLatest(old, version, sd.inMemHistoryReads)
+			latest[key] = old
+			putValueSize += delta
 		} else {
 			versions[slot] = version
 			latest[key] = versions[slot : slot+1 : slot+1]
@@ -361,31 +367,20 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 	// that a background merge can munmap while a concurrent commitment worker reads sd.mem.
 	valWithStep := dataWithTxNum{data: bytes.Clone(val), txNum: txNum}
 	sameTxNumUpdate, putKeySize, putValueSize := sd.putLatestLocked(domain, key, valWithStep)
-	sd.updatePutMetrics(domain, putKeySize, putValueSize)
+	sd.addPutMetrics(domain, 1, putKeySize, putValueSize)
 	return sameTxNumUpdate
 }
 
 func (sd *TemporalMemBatch) putLatestLocked(domain kv.Domain, key string, valWithStep dataWithTxNum) (sameTxNumUpdate bool, putKeySize, putValueSize int) {
-	val, txNum := valWithStep.data, valWithStep.txNum
+	val := valWithStep.data
 	sh := sd.shard(domain, key)
 	sh.Lock()
 	defer sh.Unlock()
 	if domain == kv.StorageDomain {
 		if old, ok := sd.storage.Get(key); ok {
-			switch {
-			case old[len(old)-1].txNum == txNum:
-				sameTxNumUpdate = true
-				putValueSize += len(val) - len(old[len(old)-1].data)
-				old[len(old)-1] = valWithStep
-				sd.storage.Set(key, old)
-			case sd.inMemHistoryReads:
-				sd.storage.Set(key, append(old, valWithStep))
-				putValueSize += len(val)
-			default:
-				putValueSize += len(val) - len(old[len(old)-1].data)
-				old[0] = valWithStep
-				sd.storage.Set(key, old[:1])
-			}
+			updated, same, delta := replaceLatest(old, valWithStep, sd.inMemHistoryReads)
+			sameTxNumUpdate, putValueSize = same, delta
+			sd.storage.Set(key, updated)
 		} else {
 			sd.storage.Set(key, []dataWithTxNum{valWithStep})
 			putKeySize += len(key)
@@ -399,20 +394,9 @@ func (sd *TemporalMemBatch) putLatestLocked(domain kv.Domain, key string, valWit
 		sh.m = map[string][]dataWithTxNum{}
 	}
 	if old, ok := sh.m[key]; ok {
-		switch {
-		case old[len(old)-1].txNum == txNum:
-			sameTxNumUpdate = true
-			putValueSize += len(val) - len(old[len(old)-1].data)
-			old[len(old)-1] = valWithStep
-			sh.m[key] = old
-		case sd.inMemHistoryReads:
-			sh.m[key] = append(old, valWithStep)
-			putValueSize += len(val)
-		default:
-			putValueSize += len(val) - len(old[len(old)-1].data)
-			old[0] = valWithStep
-			sh.m[key] = old[:1]
-		}
+		updated, same, delta := replaceLatest(old, valWithStep, sd.inMemHistoryReads)
+		sameTxNumUpdate, putValueSize = same, delta
+		sh.m[key] = updated
 	} else {
 		sh.m[key] = []dataWithTxNum{valWithStep}
 		putKeySize += len(key)
@@ -420,10 +404,6 @@ func (sd *TemporalMemBatch) putLatestLocked(domain kv.Domain, key string, valWit
 	}
 
 	return sameTxNumUpdate, putKeySize, putValueSize
-}
-
-func (sd *TemporalMemBatch) updatePutMetrics(domain kv.Domain, putKeySize int, putValueSize int) {
-	sd.addPutMetrics(domain, 1, putKeySize, putValueSize)
 }
 
 func (sd *TemporalMemBatch) GetLatest(domain kv.Domain, key []byte) (v []byte, step kv.Step, ok bool) {
@@ -959,7 +939,7 @@ func (sd *TemporalMemBatch) Flush(ctx context.Context, tx kv.RwTx, opts ...kv.Fl
 						return true
 					}
 					latest := history[len(history)-1]
-					cb(common.ToBytesZeroCopy(keyStr), latest.data, kv.Step(latest.txNum/sd.stepSize), latest.txNum)
+					cb([]byte(keyStr), latest.data, kv.Step(latest.txNum/sd.stepSize), latest.txNum)
 					return true
 				})
 				continue
@@ -970,23 +950,13 @@ func (sd *TemporalMemBatch) Flush(ctx context.Context, tx kv.RwTx, opts ...kv.Fl
 						continue
 					}
 					latest := history[len(history)-1]
-					cb(common.ToBytesZeroCopy(keyStr), latest.data, kv.Step(latest.txNum/sd.stepSize), latest.txNum)
+					cb([]byte(keyStr), latest.data, kv.Step(latest.txNum/sd.stepSize), latest.txNum)
 				}
 			}
 		}
 	}
 
 	return nil
-}
-
-func (sd *TemporalMemBatch) DomainLen(domain kv.Domain) int {
-	sd.rlockDomain(domain)
-	defer sd.runlockDomain(domain)
-	n := 0
-	for i := range sd.latest[domain] {
-		n += len(sd.latest[domain][i].m)
-	}
-	return n
 }
 
 func (sd *TemporalMemBatch) flushDiffSet(_ context.Context, tx kv.RwTx) error {

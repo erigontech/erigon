@@ -350,6 +350,8 @@ func legacyCommitTxNums(dt *DomainRoTx, fromTxNum, toTxNum uint64) ([]uint64, er
 	return appendFileTxNums(commits, iit, fromTxNum, toTxNum, commitment.KeyCommitmentState)
 }
 
+var legacyCommitTxNumsFn = legacyCommitTxNums
+
 func convertStateOrEmpty(legacy []byte) ([]byte, error) {
 	if len(legacy) == 0 {
 		return nil, nil
@@ -491,6 +493,18 @@ func convertCommitmentHistoryFileV3(ctx context.Context, at *AggregatorRoTx, vFi
 	inFlightBudget := int64(commitmentV3BatchBytes * workers * 2)
 	inFlight := semaphore.NewWeighted(inFlightBudget)
 	var chains, versions atomic.Uint64
+	commits, commitsErr := legacyCommitTxNumsFn(dt, fromTxNum, toTxNum)
+	if commitsErr != nil {
+		return r, commitsErr
+	}
+	leavesAsOf := func(txNum uint64) uint64 {
+		i, _ := slices.BinarySearch(commits, txNum)
+		if i == 0 {
+			return 0
+		}
+		return commits[i-1] + 1
+	}
+	rootLegacyKey := encodeLegacyPrefix(nil, keysV2)
 
 	g, gctx := errgroup.WithContext(ctx)
 	g.Go(func() error {
@@ -567,19 +581,6 @@ func convertCommitmentHistoryFileV3(ctx context.Context, at *AggregatorRoTx, vFi
 		}
 		return send()
 	})
-
-	commits, commitsErr := legacyCommitTxNums(dt, fromTxNum, toTxNum)
-	if commitsErr != nil {
-		return r, commitsErr
-	}
-	leavesAsOf := func(txNum uint64) uint64 {
-		i, _ := slices.BinarySearch(commits, txNum)
-		if i == 0 {
-			return 0
-		}
-		return commits[i-1] + 1
-	}
-	rootLegacyKey := encodeLegacyPrefix(nil, keysV2)
 
 	var converting sync.WaitGroup
 	for range workers {

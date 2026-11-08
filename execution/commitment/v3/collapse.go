@@ -127,7 +127,8 @@ func liveBranch(load func(plane byte, addrHash, path []byte) (*node, error), pre
 		if bit := uint16(1) << nib; n.childMask&bit == 0 || n.leafMask&bit != 0 {
 			return nil, nil
 		}
-		childPath := slices.Concat(n.path, []byte{byte(nib)}, n.childExtAt(nib))
+		var extScratch [64]byte
+		childPath := slices.Concat(n.path, []byte{byte(nib)}, n.childExtAtInto(nib, extScratch[:0]))
 		if !bytes.HasPrefix(path, childPath) {
 			return nil, nil
 		}
@@ -172,7 +173,8 @@ func (s *collapseSim) loadRoot() error {
 func recordCell(n *node, nib int, prefix []byte) collapseCell {
 	bit := uint16(1) << nib
 	if n.leafMask&bit == 0 {
-		return collapseCell{hash: true, hext: slices.Clone(n.childExtAt(nib))}
+		var extScratch [64]byte
+		return collapseCell{hash: true, hext: slices.Clone(n.childExtAtInto(nib, extScratch[:0]))}
 	}
 	suffix, payload := n.leafAt(nib)
 	rest := unpackPath(suffix, 64-len(n.path)-1, nil)

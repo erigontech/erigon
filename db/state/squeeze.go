@@ -125,7 +125,7 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 	dirs := at.Dirs()
 
 	commitmentUseReferencedBranches := at.a.referencesInCommitmentBranches()
-	if !commitmentUseReferencedBranches || at.a.d[kv.CommitmentDomain].CommitmentV3Records {
+	if !commitmentUseReferencedBranches {
 		return nil
 	}
 

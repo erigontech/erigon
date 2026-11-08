@@ -758,10 +758,6 @@ func (sd *SharedDomains) DomainPutCommitmentDiff(roTx kv.TemporalTx, k, v []byte
 // shared, lockable target SetChangesetAccumulator installs. Non-commitment
 // domains fall back to the normal DomainPut/DomainDel — TrieContext.PutBranch
 // (the only real caller) only ever writes kv.CommitmentDomain.
-type domainCounter interface {
-	DomainLen(domain kv.Domain) int
-}
-
 type commitmentBranchBatchWriter interface {
 	PutOwnedCommitmentBranches(parts [][]commitment.BranchDelta, txNum uint64, diff *kv.DomainDiff) error
 }
@@ -1252,9 +1248,6 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 	// It borrows the batch's buffers rather than holding a second image of the
 	// whole flush; see FlushConfig.DomainCallbacks.
 	var pendingBranches []branchCacheUpdate
-	if counter, ok := sd.mem.(domainCounter); ok && sd.branchCache != nil {
-		pendingBranches = make([]branchCacheUpdate, 0, counter.DomainLen(kv.CommitmentDomain))
-	}
 	var pendingState []cache.StateUpdate
 	stash := func(domain kv.Domain) kv.FlushOption {
 		return kv.WithFlushCallback(domain, func(k []byte, v []byte, step kv.Step, txNum uint64) {

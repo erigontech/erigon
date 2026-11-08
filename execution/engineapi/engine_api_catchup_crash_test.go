@@ -43,7 +43,6 @@ import (
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
-	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/engineapi/engineapitester"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -277,7 +276,7 @@ func crashRecoveryLiveCommitment(t *testing.T, entries map[string]string) map[st
 	t.Helper()
 	entries = maps.Clone(entries)
 	for key, value := range entries {
-		if key == hex.EncodeToString(commitmentdb.StateKey()) {
+		if key == hex.EncodeToString(testCommitmentStateKey()) {
 			continue
 		}
 		data, err := hex.DecodeString(value)

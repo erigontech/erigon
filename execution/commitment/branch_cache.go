@@ -17,7 +17,6 @@
 package commitment
 
 import (
-	"bytes"
 	"encoding/binary"
 	"fmt"
 	"os"
@@ -33,11 +32,8 @@ import (
 // the low 32 bits suffice for shard routing.
 func u64ident(k uint64) uint32 { return uint32(k) }
 
-// KeyCommitmentState must never enter the BranchCache: it changes every block.
-var KeyCommitmentState = []byte("state")
-
 func isCommitmentStateKey(prefix []byte) bool {
-	return bytes.Equal(prefix, KeyCommitmentState)
+	return IsCommitmentStateKey(prefix)
 }
 
 // BranchCache: writer stripes only make stamped publications atomic with

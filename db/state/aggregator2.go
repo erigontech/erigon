@@ -241,13 +241,11 @@ func CheckSnapshotsCompatibility(d datadir.Dirs) error {
 			currentFileVersion := fileInfo.Version
 
 			dir := filepath.Dir(path)
-			if statecfg.Schema.CommitmentDomain.CommitmentV3Records && fileInfo.TypeString == "commitment" &&
-				(dir == d.SnapDomain || dir == d.SnapHistory) && (fileInfo.Ext == ".kv" || fileInfo.Ext == ".v") && currentFileVersion.Major < 3 {
+			if statecfg.Schema.CommitmentDomain.CommitmentV3Records && isCommitmentData(d, dir, fileInfo) && currentFileVersion.Major < 3 {
 				return fmt.Errorf("commitment file %s is legacy (v%d) but commitment v3 is enabled; "+
 					"convert the datadir with `integration commitment convert --v3`", fileInfo.Name(), currentFileVersion.Major)
 			}
-			if !statecfg.ExperimentalCommitmentV3 && fileInfo.TypeString == "commitment" &&
-				(dir == d.SnapDomain || dir == d.SnapHistory) && (fileInfo.Ext == ".kv" || fileInfo.Ext == ".v") && currentFileVersion.Major >= 3 {
+			if !statecfg.ExperimentalCommitmentV3 && isCommitmentData(d, dir, fileInfo) && currentFileVersion.Major >= 3 {
 				return fmt.Errorf("commitment file %s requires commitment v3; run with COMMITMENT_V3=true", fileInfo.Name())
 			}
 
@@ -274,6 +272,12 @@ func CheckSnapshotsCompatibility(d datadir.Dirs) error {
 	}
 
 	return nil
+}
+
+func isCommitmentData(d datadir.Dirs, dir string, fileInfo snaptype.FileInfo) bool {
+	return fileInfo.TypeString == "commitment" &&
+		(dir == d.SnapDomain || dir == d.SnapHistory) &&
+		(fileInfo.Ext == ".kv" || fileInfo.Ext == ".v")
 }
 
 func CheckCommitmentV3DownloaderCompatibility(d datadir.Dirs) error {

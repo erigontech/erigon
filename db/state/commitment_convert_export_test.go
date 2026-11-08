@@ -53,3 +53,17 @@ func SetConvertPhase1AfterFileHookForTest(fn func(idx int)) {
 func SetConvertPhase5HookForTest(fn func() error) {
 	convertPhase5Hook = fn
 }
+
+func SetCommitmentV3BatchBytesForTest(n int) int {
+	old := commitmentV3BatchBytes
+	commitmentV3BatchBytes = n
+	return old
+}
+
+func SetLegacyCommitTxNumsForTest(fn func(*DomainRoTx, uint64, uint64) ([]uint64, error)) {
+	if fn == nil {
+		legacyCommitTxNumsFn = legacyCommitTxNums
+		return
+	}
+	legacyCommitTxNumsFn = fn
+}

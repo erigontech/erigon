@@ -82,8 +82,12 @@ func unfold(ctx commitment.PatriciaContext, path []byte, plane byte, addrHash []
 }
 
 func decodeExtension(encoded []byte) []byte {
+	return decodeExtensionInto(encoded, nil)
+}
+
+func decodeExtensionInto(encoded, dst []byte) []byte {
 	if len(encoded) == 0 {
 		return nil
 	}
-	return unpackPath(encoded[1:], int(encoded[0]), nil)
+	return unpackPath(encoded[1:], int(encoded[0]), dst)
 }

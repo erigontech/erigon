@@ -133,23 +133,6 @@ func (t *Trie) Process(
 	})
 }
 
-func (t *Trie) TraceCollapses(ctx context.Context, updates *commitment.Updates, tracer commitment.CollapseTracer) error {
-	if t.ctx == nil {
-		return errTrieContext
-	}
-	if updates == nil || updates.Mode() != commitment.ModeCollect {
-		return errors.New("commitment v3: TraceCollapses requires ModeCollect updates")
-	}
-	items, err := drainFeed(ctx, updates, t.scheduleWorkers)
-	if err != nil {
-		return err
-	}
-	slices.SortFunc(items, compareFeed)
-	cache := &recordCache{PatriciaContext: t.ctx, recs: make(map[string][]byte)}
-	t.preRecs, t.preRoot = cache.recs, bytes.Clone(t.root)
-	return traceCollapses(cache, items, tracer)
-}
-
 func (t *Trie) TraceCollapsesRoot(ctx context.Context, updates *commitment.Updates, tracer commitment.CollapseTracer) ([]byte, error) {
 	if t.ctx == nil {
 		return nil, errTrieContext
@@ -167,18 +150,25 @@ func (t *Trie) TraceCollapsesRoot(ctx context.Context, updates *commitment.Updat
 	if err := traceCollapses(cache, items, tracer); err != nil {
 		return nil, err
 	}
-	post := commitment.NewUpdates(commitment.ModeCollect, "", commitment.KeyToHexNibbleHash)
-	defer post.Close()
-	for i := range items {
-		post.TouchPlainKeyDirect(items[i].plainKey, items[i].update)
-	}
 	rootBefore := bytes.Clone(t.root)
 	deferredBefore := t.deferred
 	deferUpdatesBefore := t.deferUpdates
 	preRecsBefore, preRootBefore := t.preRecs, t.preRoot
 	t.deferUpdates = true
 	t.deferred = nil
-	root, err := t.Process(ctx, post, "", nil, commitment.WarmupConfig{})
+	inner := t.ctx
+	t.ctx = cache
+	root, err := t.round(ctx, nil, func() ([]storageTask, []accountEntry, int, error) {
+		p := &partitioner{}
+		for i := range items {
+			if err := p.add(items[i].hashedKey, items[i].update); err != nil {
+				return nil, nil, 0, err
+			}
+		}
+		storage, accounts := p.done()
+		return storage, accounts, len(items), nil
+	})
+	t.ctx = inner
 	t.root = rootBefore
 	t.deferred = deferredBefore
 	t.deferUpdates = deferUpdatesBefore
