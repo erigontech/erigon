@@ -1971,26 +1971,114 @@ func TestDomain_GetAsOfEveryTxNum(t *testing.T) {
 				collateAndMerge(t, tx, d, filesUpTo)
 			}
 
-			domainRoTx = d.beginForTests()
-			defer domainRoTx.Close()
-			for key, updates := range data {
-				for txNum := uint64(0); txNum <= totalTx+d.stepSize; txNum++ {
-					var want []byte
-					for _, u := range updates {
-						if u.txNum < txNum {
-							want = u.value
-						}
-					}
-					v, ok, err := domainRoTx.GetAsOf([]byte(key), txNum, tx)
-					require.NoError(t, err)
-					require.Truef(t, bytes.Equal(want, v), "key %x txNum %d: want %x, got %x", []byte(key), txNum, want, v)
-					if len(want) > 0 {
-						require.Truef(t, ok, "key %x txNum %d", []byte(key), txNum)
-					}
-				}
-			}
+			requireGetAsOfEveryTxNum(t, d, tx, data, totalTx+d.stepSize)
 		})
 	}
+}
+
+// A collated step whose DB rows are pruned only in part leaves stale older rows next to the files; GetAsOf must still
+// return the last write before every txNum.
+func TestDomain_GetAsOfHalfPrunedSteps(t *testing.T) {
+	for _, cfg := range []statecfg.DomainCfg{statecfg.Schema.AccountsDomain, statecfg.Schema.CodeDomain} {
+		t.Run(cfg.Name.String(), func(t *testing.T) {
+			db, d := testDbAndDomainOfStep(t, cfg, 16, log.New())
+			tx, err := db.BeginRw(t.Context())
+			require.NoError(t, err)
+			defer tx.Rollback()
+
+			const collated = 10
+			totalTx := uint64(collated) * 16                                       // every write is in a collated step
+			data := generateTestData(t, length.Addr, length.Addr, totalTx, 60, 80) // accounts and code keys are addresses
+			domainRoTx := d.beginForTests()
+			writer := domainRoTx.NewWriter(db)
+			for key, updates := range data {
+				var prev []byte
+				for i := range updates {
+					if i > 0 {
+						prev = updates[i-1].value
+					}
+					require.NoError(t, writer.PutWithPrev([]byte(key), updates[i].value, updates[i].txNum, prev))
+				}
+			}
+			require.NoError(t, writer.Flush(t.Context(), tx))
+			writer.Close()
+			domainRoTx.Close()
+
+			logEvery := time.NewTicker(30 * time.Second)
+			defer logEvery.Stop()
+			for step := kv.Step(0); step < collated; step++ {
+				require.NoError(t, d.collateBuildIntegrate(t.Context(), step, tx, background.NewProgressSet()))
+			}
+			// Only odd steps are pruned: a key written in steps 8 and 9 keeps its step-8 row in the DB next to the
+			// step-9 value in files, as a prune that stopped part-way leaves it.
+			for step := kv.Step(1); step < collated; step += 2 {
+				pruneTx := d.beginForTests()
+				_, err := pruneTx.Prune(t.Context(), tx, step, uint64(step)*d.stepSize, uint64(step+1)*d.stepSize, math.MaxUint64, logEvery)
+				pruneTx.Close()
+				require.NoError(t, err)
+			}
+			require.Positive(t, staleDbRows(t, tx, d, data, collated), "some key must keep a DB row older than its value in files")
+			require.NoError(t, tx.Commit())
+
+			roTx, err := db.BeginRo(t.Context())
+			require.NoError(t, err)
+			defer roTx.Rollback()
+			requireGetAsOfEveryTxNum(t, d, roTx, data, totalTx+d.stepSize)
+		})
+	}
+}
+
+func requireGetAsOfEveryTxNum(t *testing.T, d *Domain, tx kv.Tx, data map[string][]upd, maxTxNum uint64) {
+	t.Helper()
+	domainRoTx := d.beginForTests()
+	defer domainRoTx.Close()
+	for key, updates := range data {
+		for txNum := uint64(0); txNum <= maxTxNum; txNum++ {
+			var want []byte
+			for _, u := range updates {
+				if u.txNum < txNum {
+					want = u.value
+				}
+			}
+			v, ok, err := domainRoTx.GetAsOf([]byte(key), txNum, tx)
+			require.NoError(t, err)
+			require.Truef(t, bytes.Equal(want, v), "key %x txNum %d: want %x, got %x", []byte(key), txNum, want, v)
+			if len(want) > 0 {
+				require.Truef(t, ok, "key %x txNum %d", []byte(key), txNum)
+			}
+		}
+	}
+}
+
+// staleDbRows counts keys whose newest DB row is from a collated step older than the key's last collated write.
+func staleDbRows(t *testing.T, tx kv.Tx, d *Domain, data map[string][]upd, collated kv.Step) (n int) {
+	t.Helper()
+	newest := map[string]kv.Step{}
+	c, err := tx.Cursor(d.ValuesTable)
+	require.NoError(t, err)
+	defer c.Close()
+	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+		require.NoError(t, err)
+		key, inv := k[:len(k)-8], k[len(k)-8:]
+		if !d.LargeValues {
+			key, inv = k, v[:8]
+		}
+		if step, ok := newest[string(key)]; !ok || kv.Step(^binary.BigEndian.Uint64(inv)) > step {
+			newest[string(key)] = kv.Step(^binary.BigEndian.Uint64(inv))
+		}
+	}
+	for key, updates := range data {
+		var lastCollated kv.Step
+		for _, u := range updates {
+			if s := kv.Step(u.txNum / d.stepSize); s < collated {
+				lastCollated = s
+			}
+		}
+		if step, ok := newest[key]; ok && step < lastCollated {
+			n++
+		}
+	}
+	return n
 }
 
 func TestDomain_GetAfterAggregation(t *testing.T) {
