@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -122,4 +123,45 @@ func TestTorrentPeerManagerDefaultCheckDialsWithTheClientSockets(t *testing.T) {
 	m := NewTorrentPeerManager(client, func() NodeSource { return nil }, log.New())
 	require.True(t, m.probe(t.Context(), fmt.Sprintf("127.0.0.1:%d", remote.LocalPort())))
 	require.False(t, m.probe(t.Context(), closedAddr))
+}
+
+// The wait before a check again starts when the failed check ends: listing the peers resolves them over
+// the network, and a check can take up to its timeout.
+func TestTorrentPeerManagerCountsTheWaitFromTheFailedCheck(t *testing.T) {
+	source := &mockNodeSource{nodes: []*enode.Node{btNode(t, 1001)}}
+	m, f := newFakeReachabilityManager(t, source)
+	const addr = "127.0.0.1:1001"
+	probe := m.probe
+	m.probe = func(ctx context.Context, a string) bool {
+		f.mu.Lock()
+		f.now = f.now.Add(btPeerProbeTimeout) // a check that runs into its timeout
+		f.mu.Unlock()
+		return probe(ctx, a)
+	}
+
+	m.sync(t.Context())
+	f.now = f.now.Add(btPeerRetryMin - time.Second)
+	m.sync(t.Context())
+	require.Equal(t, 1, f.probes[addr], "checked again before the wait after the failed check ended")
+}
+
+// A peer whose client accepts only uTP (--torrent.disable-tcp) must be found reachable over uTP.
+func TestTorrentPeerManagerDefaultCheckReachesAUTPOnlyPeer(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows reserves UDP port ranges, so binding the uTP socket can fail (see #23204)")
+	}
+	utpOnly := func() *torrent.Client {
+		cfg := newTestClientConfig(t, t.TempDir())
+		cfg.DisableUTP, cfg.DisableTCP = false, true
+		// The uTP socket drops a connection unless some torrent wants one; these clients have no torrents.
+		cfg.AlwaysWantConns = true
+		client, err := torrent.NewClient(cfg)
+		require.NoError(t, err)
+		t.Cleanup(func() { client.Close() })
+		return client
+	}
+	client, remote := utpOnly(), utpOnly()
+
+	m := NewTorrentPeerManager(client, func() NodeSource { return nil }, log.New())
+	require.True(t, m.probe(t.Context(), fmt.Sprintf("127.0.0.1:%d", remote.LocalPort())))
 }

@@ -94,12 +94,13 @@ func (m *TorrentPeerManager) sync(ctx context.Context) {
 		return
 	}
 
+	nodes := ns.AllNodes() // may resolve each peer over the network, so the clock is read after it
 	now := m.now()
 	currentPeers := make(map[enode.ID]struct{})
 	var due []enode.ID
 
 	m.mu.Lock()
-	for _, node := range ns.AllNodes() {
+	for _, node := range nodes {
 		var bt enr.BT
 		if err := node.Record().Load(&bt); err != nil || bt == 0 {
 			continue
@@ -138,6 +139,7 @@ func (m *TorrentPeerManager) sync(ctx context.Context) {
 		probes.Go(func() { reachable[i] = m.probe(ctx, addrs[i].Addr.String()) })
 	}
 	probes.Wait()
+	checked := m.now() // a failed check can take its whole timeout; the wait starts after it
 
 	var toInject []torrent.PeerInfo
 	m.mu.Lock()
@@ -152,7 +154,7 @@ func (m *TorrentPeerManager) sync(ctx context.Context) {
 			m.logger.Debug("[bt-peers] added torrent peer from ENR", "node", id.TerminalString(), "addr", p.addr.Addr)
 		} else {
 			p.retry = min(max(2*p.retry, btPeerRetryMin), btPeerRetryMax)
-			p.retryAt = now.Add(p.retry)
+			p.retryAt = checked.Add(p.retry)
 			m.logger.Debug("[bt-peers] BT endpoint from ENR does not answer", "node", id.TerminalString(), "addr", p.addr.Addr, "retryIn", p.retry)
 		}
 		m.knownPeers[id] = p
