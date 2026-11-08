@@ -127,9 +127,10 @@ func TestValidateBALResponseBoundsStorageReadAllocations(t *testing.T) {
 }
 
 func TestValidateBALResponseBoundsEmptySlotAllocations(t *testing.T) {
-	slots := make([]rlp.RawValue, 100_000)
+	// Duplicate slots would let the ordering check hide a missing empty slot check.
+	slots := make([][]any, 100_000)
 	for i := range slots {
-		slots[i] = rlp.RawValue{0xc2, 0x80, 0xc0}
+		slots[i] = []any{uint64(i), []any{}}
 	}
 	raw, err := rlp.EncodeToBytes([]any{[]any{
 		common.Address{}, slots, []any{}, []any{}, []any{}, []any{},
