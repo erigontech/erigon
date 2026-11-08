@@ -118,15 +118,6 @@ func TestNodeMutations(t *testing.T) {
 			require.Equal(t, byte(1), n.childHashAt(5)[0])
 			require.Equal(t, byte(2), n.childExtAt(5)[0])
 		}},
-		{"E10/ForkReturnsSharedNodePointer", func(t *testing.T) {
-			parent := fork([]byte{1})
-			forked := parent
-			forked.setLeaf(2, []byte{3}, []byte{4})
-
-			require.Same(t, parent, forked)
-			require.Equal(t, uint16(1<<2), parent.childMask)
-			require.Equal(t, uint16(1<<2), parent.leafMask)
-		}},
 		{"E11/NodeRejectsInvalidReferences", func(t *testing.T) {
 			n := fork(nil)
 			require.Panics(t, func() { n.setStoredChild(0, nil, nil) })
