@@ -140,7 +140,7 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 		}
 
 		batch.add(cfg, header, blockHash, body, cached)
-		if len(batch.txns) >= sendersBatchTxs {
+		if len(batch.txns) >= sendersBatchTxs || len(batch.blocks) >= sendersBatchBlocks {
 			if bad, err = batch.flush(ctx, cfg, collectorSenders); err != nil {
 				return err
 			}
@@ -184,7 +184,11 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 	return nil
 }
 
-const sendersBatchTxs = 1 << 16
+const (
+	sendersBatchTxs = 64 * 1024
+	// sendersBatchBlocks bounds the bodies a batch keeps: empty blocks add none to sendersBatchTxs.
+	sendersBatchBlocks = 1024
+)
 
 type sendersBlock struct {
 	number     uint64
