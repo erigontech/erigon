@@ -2043,42 +2043,47 @@ func TestSharedDomain_MergeUnwindKeepsDeeperTarget(t *testing.T) {
 		return &merged
 	}
 
-	rwTx, err = db.BeginTemporalRw(ctx)
-	require.NoError(err)
-	defer rwTx.Rollback()
-
-	sd1, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
-	require.NoError(err)
-	sd1.Unwind(deepTarget+1, mergeRange(deepTarget+1, lastBlock))
-	sd1.SetTxNum(deepTarget)
-
-	sd2, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
-	require.NoError(err)
-	sd2.Unwind(shallowTarget+1, mergeRange(shallowTarget+1, lastBlock))
-	sd2.SetTxNum(shallowTarget)
-
-	require.NoError(sd1.Merge(ctx, deepTarget, sd2, shallowTarget))
-	require.NoError(sd1.Flush(ctx, rwTx))
-	sd1.Close()
-
-	latest, _, err := rwTx.GetLatest(kv.AccountsDomain, addr, kv.GetLatestOptions{})
-	require.NoError(err)
-	var latestAcc accounts.Account
-	require.NoError(accounts.DeserialiseV3(&latestAcc, latest))
-	require.Equal(deepTarget, latestAcc.Nonce)
-
-	for ts := deepTarget + 1; ts <= lastBlock; ts++ {
-		v, ok, err := rwTx.GetAsOf(kv.AccountsDomain, addr, ts)
+	mergeAndCheck := func(target1, target2 uint64) {
+		rwTx, err := db.BeginTemporalRw(ctx)
 		require.NoError(err)
-		require.True(ok)
-		var acc accounts.Account
-		require.NoError(accounts.DeserialiseV3(&acc, v))
-		require.Equalf(deepTarget, acc.Nonce, "GetAsOf(ts=%d) must not see history of unwound blocks", ts)
+		defer rwTx.Rollback()
+
+		sd1, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+		require.NoError(err)
+		sd1.Unwind(target1+1, mergeRange(target1+1, lastBlock))
+		sd1.SetTxNum(target1)
+
+		sd2, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+		require.NoError(err)
+		sd2.Unwind(target2+1, mergeRange(target2+1, lastBlock))
+		sd2.SetTxNum(target2)
+
+		require.NoError(sd1.Merge(ctx, shallowTarget, sd2, shallowTarget))
+		require.NoError(sd1.Flush(ctx, rwTx))
+		sd1.Close()
+
+		latest, _, err := rwTx.GetLatest(kv.AccountsDomain, addr, kv.GetLatestOptions{})
+		require.NoError(err)
+		var latestAcc accounts.Account
+		require.NoError(accounts.DeserialiseV3(&latestAcc, latest))
+		require.Equal(deepTarget, latestAcc.Nonce)
+
+		for ts := deepTarget + 1; ts <= lastBlock; ts++ {
+			v, ok, err := rwTx.GetAsOf(kv.AccountsDomain, addr, ts)
+			require.NoError(err)
+			require.True(ok)
+			var acc accounts.Account
+			require.NoError(accounts.DeserialiseV3(&acc, v))
+			require.Equalf(deepTarget, acc.Nonce, "GetAsOf(ts=%d) must not see history of unwound blocks", ts)
+		}
+
+		it, err := rwTx.IndexRange(kv.AccountsHistoryIdx, addr, int(deepTarget+1), -1, order.Asc, kv.Unlim)
+		require.NoError(err)
+		txNums, err := stream.ToArrayU64(it)
+		require.NoError(err)
+		require.Empty(txNums)
 	}
 
-	it, err := rwTx.IndexRange(kv.AccountsHistoryIdx, addr, int(deepTarget+1), -1, order.Asc, kv.Unlim)
-	require.NoError(err)
-	txNums, err := stream.ToArrayU64(it)
-	require.NoError(err)
-	require.Empty(txNums)
+	mergeAndCheck(deepTarget, shallowTarget)
+	mergeAndCheck(shallowTarget, deepTarget)
 }
