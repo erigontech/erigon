@@ -35,21 +35,21 @@ func TestTorrentPeerManager_AddAndRemove(t *testing.T) {
 	m := NewTorrentPeerManager(client, func() NodeSource { return source }, logger)
 
 	// First sync: should add only the peer with BT port.
-	m.sync()
+	m.sync(t.Context())
 	assert.Equal(t, 1, m.PeerCount())
 
 	// Second sync with same peers: no change.
-	m.sync()
+	m.sync(t.Context())
 	assert.Equal(t, 1, m.PeerCount())
 
 	// Remove the BT peer from the source.
 	source.nodes = []*enode.Node{peerWithoutBT}
-	m.sync()
+	m.sync(t.Context())
 	assert.Equal(t, 0, m.PeerCount(), "peer should be removed when it leaves DevP2P")
 
 	// Add it back.
 	source.nodes = []*enode.Node{peerWithBT, peerWithoutBT}
-	m.sync()
+	m.sync(t.Context())
 	assert.Equal(t, 1, m.PeerCount(), "peer should be re-added when it rejoins DevP2P")
 }
 
@@ -64,6 +64,6 @@ func TestTorrentPeerManager_NilNodeSource(t *testing.T) {
 	m := NewTorrentPeerManager(client, func() NodeSource { return nil }, logger)
 
 	// Should not panic when node source returns nil.
-	m.sync()
+	m.sync(t.Context())
 	assert.Equal(t, 0, m.PeerCount())
 }
