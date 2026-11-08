@@ -63,15 +63,16 @@ func runCaplinNode(ctx context.Context, cliCtx *cli.Command) error {
 		return err
 	}
 	rcfg := beacon_router_configuration.RouterConfiguration{
-		Protocol:         cfg.BeaconProtocol,
-		Address:          cfg.BeaconAddr,
-		ReadTimeTimeout:  cfg.BeaconApiReadTimeout,
-		WriteTimeout:     cfg.BeaconApiWriteTimeout,
-		IdleTimeout:      cfg.BeaconApiWriteTimeout,
-		AllowedOrigins:   cfg.AllowedOrigins,
-		AllowedMethods:   cfg.AllowedMethods,
-		AllowCredentials: cfg.AllowCredentials,
-		PreserveGraffiti: cfg.PreserveGraffiti,
+		Protocol:                  cfg.BeaconProtocol,
+		Address:                   cfg.BeaconAddr,
+		ReadTimeTimeout:           cfg.BeaconApiReadTimeout,
+		WriteTimeout:              cfg.BeaconApiWriteTimeout,
+		IdleTimeout:               cfg.BeaconApiWriteTimeout,
+		AllowedOrigins:            cfg.AllowedOrigins,
+		AllowedMethods:            cfg.AllowedMethods,
+		AllowCredentials:          cfg.AllowCredentials,
+		PreserveGraffiti:          cfg.PreserveGraffiti,
+		DisablePayloadPreparation: cfg.DisablePayloadPreparation,
 	}
 	if err := rcfg.UnwrapEndpointsList(cfg.AllowedEndpoints); err != nil {
 		return err
@@ -113,6 +114,7 @@ func runCaplinNode(ctx context.Context, cliCtx *cli.Command) error {
 		CaplinDiscoveryPort:       uint64(cfg.Port),
 		CaplinDiscoveryTCPPort:    uint64(cfg.ServerTcpPort),
 		CaplinDiscoveryQUICPort:   uint64(cfg.ServerQUICPort),
+		CaplinDisableQUIC:         cfg.ServerQUICDisable,
 		BeaconAPIRouter:           rcfg,
 		NetworkId:                 networkId,
 		LocalDiscovery:            cfg.LocalDiscovery,
@@ -121,6 +123,8 @@ func runCaplinNode(ctx context.Context, cliCtx *cli.Command) error {
 		CustomConfigPath:          cfg.CustomConfig,
 		CustomGenesisStatePath:    cfg.CustomGenesisState,
 		MaxPeerCount:              cfg.MaxPeerCount,
+		DisableIPBlockLimits:      cfg.DisableIPBlockLimits,
+		TrustedCIDRs:              cfg.TrustedCIDRs,
 		SubscribeAllTopics:        cfg.SubscribeAllTopics,
 		MaxInboundTrafficPerPeer:  datasize.MB,
 		MaxOutboundTrafficPerPeer: datasize.MB,

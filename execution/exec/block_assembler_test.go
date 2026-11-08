@@ -26,6 +26,12 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
@@ -145,6 +151,112 @@ func TestBlockAssemblerMinTxGasEarlyExit(t *testing.T) {
 			require.Len(t, ba.Txns, tc.wantPacked)
 		})
 	}
+}
+
+// A versioned (Amsterdam) block assembler must remove a touched empty account
+// before the next tx: a later EIP-7702 authorization by that account must cost
+// the same as for an absent one.
+func TestBlockAssemblerRemovesTouchedEmptyAccountBeforeNextTx(t *testing.T) {
+	touchKey, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	require.NoError(t, err)
+	setCodeKey, err := crypto.HexToECDSA("9a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
+	require.NoError(t, err)
+	senders := []common.Address{crypto.PubkeyToAddress(touchKey.PublicKey), crypto.PubkeyToAddress(setCodeKey.PublicKey)}
+	authorityKey, err := crypto.HexToECDSA("8a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
+	require.NoError(t, err)
+	authority := crypto.PubkeyToAddress(authorityKey.PublicKey)
+
+	config := chain.TestChainOsakaConfig.Copy()
+	config.AmsterdamTime = common.NewUint64(0)
+	signer := types.LatestSignerForChainID(config.ChainID)
+	gasPrice := uint256.NewInt(10_000_000_000)
+	auth, err := types.SignAuthorization(authorityKey, *config.ChainID, common.HexToAddress("0xcafe"), 0)
+	require.NoError(t, err)
+	to := common.HexToAddress("0xbeef")
+
+	setCodeGasUsed := func(withEmptyAuthority bool) uint64 {
+		ctx := context.Background()
+		logger := log.New()
+		db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()), temporaltest.WithStepSize(16))
+		require.NoError(t, db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
+			domains, err := execctx.NewSharedDomains(ctx, tx, logger)
+			if err != nil {
+				return err
+			}
+			defer domains.Close()
+			domains.SetTxNum(1)
+			put := func(addr common.Address, acc accounts.Account) error {
+				return domains.DomainPut(kv.AccountsDomain, tx, addr[:], accounts.SerialiseV3(&acc), 1, nil)
+			}
+			for _, sender := range senders {
+				acc := accounts.NewAccount()
+				acc.Balance = *uint256.NewInt(1_000_000_000_000_000_000)
+				if err := put(sender, acc); err != nil {
+					return err
+				}
+			}
+			if withEmptyAuthority {
+				if err := put(authority, accounts.NewAccount()); err != nil {
+					return err
+				}
+			}
+			if err := rawdbv3.TxNums.Append(tx, 0, 1); err != nil {
+				return err
+			}
+			return domains.Flush(ctx, tx)
+		}))
+
+		tx, err := db.BeginTemporalRo(ctx)
+		require.NoError(t, err)
+		defer tx.Rollback()
+		domains, err := execctx.NewSharedDomains(ctx, tx, logger)
+		require.NoError(t, err)
+		defer domains.Close()
+		domains.SetTxNum(2)
+		ibs := state.New(state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
+		defer ibs.Close()
+		ibs.SetVersionMap(state.NewVersionMap(nil))
+		ibs.SetTxContext(1, -1)
+
+		header := types.NewEmptyHeaderForAssembling()
+		header.Coinbase = common.Address{1}
+		header.Number = *uint256.NewInt(1)
+		header.GasLimit = 30_000_000
+		header.Time = 12
+		header.BaseFee = uint256.NewInt(1_000_000_000)
+		excessBlobGas := uint64(0)
+		header.ExcessBlobGas = &excessBlobGas
+		header.BlobGasUsed = new(uint64)
+		header.ParentBeaconBlockRoot = &common.Hash{}
+		slot := uint64(1)
+		header.SlotNumber = &slot
+
+		engine := merge.New(ethash.NewFaker())
+		defer engine.Close()
+		ba := NewBlockAssembler(AssemblerCfg{ChainConfig: config, Engine: engine}, &AssembledBlock{
+			Header: header, Uncles: []*types.Header{}, Txns: types.Transactions{}, Receipts: types.Receipts{}, Withdrawals: []*types.Withdrawal{},
+		})
+		require.True(t, ba.HasBAL())
+		require.NoError(t, ba.Initialize(ibs, tx, logger))
+
+		touch, err := types.SignTx(types.NewTransaction(0, authority, uint256.NewInt(0), 100_000, gasPrice, nil), *signer, touchKey)
+		require.NoError(t, err)
+		setCode, err := types.SignTx(&types.SetCodeTransaction{
+			DynamicFeeTransaction: types.DynamicFeeTransaction{
+				CommonTx: types.CommonTx{Nonce: 0, GasLimit: 500_000, To: &to},
+				ChainID:  *config.ChainID,
+				TipCap:   *gasPrice,
+				FeeCap:   *gasPrice,
+			},
+			Authorizations: []types.Authorization{auth},
+		}, *signer, setCodeKey)
+		require.NoError(t, err)
+		_, _, err = ba.AddTransactions(ctx, nil, types.Transactions{touch, setCode}, accounts.InternAddress(header.Coinbase), &vm.Config{}, ibs, nil, "test", logger)
+		require.NoError(t, err)
+		require.Len(t, ba.Receipts, 2)
+		return ba.Receipts[1].GasUsed
+	}
+	require.Equal(t, setCodeGasUsed(false), setCodeGasUsed(true))
 }
 
 func TestAvailableRlpSpaceCoversFinalizedHeader(t *testing.T) {

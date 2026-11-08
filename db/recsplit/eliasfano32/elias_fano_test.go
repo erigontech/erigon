@@ -808,3 +808,17 @@ func naiveReverseIterator(ef *EliasFano) *stream.ArrStream[uint64] {
 	}
 	return stream.ReverseArray[uint64](values)
 }
+
+func TestGetProbeMatchesGet(t *testing.T) {
+	const count = 1000
+	ef := NewEliasFano(count, 3*count)
+	for i := range uint64(count) {
+		ef.AddOffset(3*i + i%3)
+	}
+	ef.Build()
+	for i := range uint64(count) {
+		v, w, s, c, l := ef.get(i)
+		pv, pw, ps, pc, pl := ef.getProbe(i, nil)
+		require.Equal(t, []uint64{v, w, uint64(s), c, l}, []uint64{pv, pw, uint64(ps), pc, pl}, "i=%d", i)
+	}
+}

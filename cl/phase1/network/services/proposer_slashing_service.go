@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
@@ -27,7 +28,6 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/gossip"
 	st "github.com/erigontech/erigon/cl/phase1/core/state"
-	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -39,7 +39,7 @@ type proposerSlashingService struct {
 	beaconCfg         *clparams.BeaconChainConfig
 	ethClock          eth_clock.EthereumClock
 	emitters          *beaconevents.EventEmitter
-	cache             *lru.Cache[uint64, struct{}]
+	seenProposers     sync.Map
 }
 
 func NewProposerSlashingService(
@@ -49,16 +49,11 @@ func NewProposerSlashingService(
 	ethClock eth_clock.EthereumClock,
 	emitters *beaconevents.EventEmitter,
 ) *proposerSlashingService {
-	cache, err := lru.New[uint64, struct{}]("proposer_slashing", proposerSlashingCacheSize)
-	if err != nil {
-		panic(err)
-	}
 	return &proposerSlashingService{
 		operationsPool:    operationsPool,
 		syncedDataManager: syncedDataManager,
 		beaconCfg:         beaconCfg,
 		ethClock:          ethClock,
-		cache:             cache,
 		emitters:          emitters,
 	}
 }
@@ -84,12 +79,8 @@ func (s *proposerSlashingService) ProcessMessage(ctx context.Context, subnet *ui
 
 	// [IGNORE] The proposer slashing is the first valid proposer slashing received for the proposer with index proposer_slashing.signed_header_1.message.proposer_index
 	pIndex := msg.Header1.Header.ProposerIndex
-	if _, ok := s.cache.Get(pIndex); ok {
-		return nil
-	}
-
-	if s.operationsPool.ProposerSlashingsPool.Has(pool.ComputeKeyForProposerSlashing(msg)) {
-		return nil
+	if _, ok := s.seenProposers.Load(pIndex); ok {
+		return ErrIgnore
 	}
 	h1 := msg.Header1.Header
 	h2 := msg.Header2.Header
@@ -125,7 +116,7 @@ func (s *proposerSlashingService) ProcessMessage(ctx context.Context, subnet *ui
 				return fmt.Errorf("unable to get domain: %w", err)
 			}
 			pk := proposer.PublicKey()
-			signingRoot, err := computeSigningRoot(signedHeader, domain)
+			signingRoot, err := computeSigningRoot(signedHeader.Header, domain)
 			if err != nil {
 				return fmt.Errorf("unable to compute signing root: %w", err)
 			}
@@ -138,8 +129,10 @@ func (s *proposerSlashingService) ProcessMessage(ctx context.Context, subnet *ui
 			}
 		}
 
+		if _, loaded := s.seenProposers.LoadOrStore(pIndex, struct{}{}); loaded {
+			return ErrIgnore
+		}
 		s.operationsPool.ProposerSlashingsPool.Insert(pool.ComputeKeyForProposerSlashing(msg), msg)
-		s.cache.Add(pIndex, struct{}{})
 		s.emitters.Operation().SendProposerSlashing(msg)
 		return nil
 	})

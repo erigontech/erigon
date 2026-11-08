@@ -55,6 +55,7 @@ type BlobStore struct {
 func NewBlobStore(db kv.RwDB, fs afero.Fs) BlobStorage {
 	bs := &BlobStore{db: db}
 	bs.bucketStore.init(fs)
+	bs.dropRows = deleteRootRows(db, kv.BlockRootToKzgCommitments)
 	bs.slotLocks.initLocks()
 	return bs
 }
@@ -241,7 +242,7 @@ func VerifyBlobSidecars(sidecars []*cltypes.BlobSidecar, version clparams.StateV
 		if sidecar.CommitmentInclusionProof == nil || sidecar.CommitmentInclusionProof.Length() != cltypes.CommitmentBranchSize {
 			return errors.New("blob sidecar commitment inclusion proof has the wrong length")
 		}
-		if version < clparams.GloasVersion && !cltypes.VerifyCommitmentInclusionProof(sidecar.KzgCommitment, sidecar.CommitmentInclusionProof, sidecar.Index, clparams.DenebVersion, sidecar.SignedBlockHeader.Header.BodyRoot) {
+		if version < clparams.GloasVersion && !cltypes.VerifyCommitmentInclusionProof(sidecar.KzgCommitment, sidecar.CommitmentInclusionProof, sidecar.Index, sidecar.SignedBlockHeader.Header.BodyRoot) {
 			return errors.New("could not verify blob's inclusion proof")
 		}
 		if verifySignatureFn != nil {
@@ -310,7 +311,7 @@ func VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx context.Context, stor
 		if sidecar.CommitmentInclusionProof == nil || sidecar.CommitmentInclusionProof.Length() != cltypes.CommitmentBranchSize {
 			return 0, 0, errors.New("blob sidecar commitment inclusion proof has the wrong length")
 		}
-		if version < clparams.GloasVersion && !cltypes.VerifyCommitmentInclusionProof(sidecar.KzgCommitment, sidecar.CommitmentInclusionProof, sidecar.Index, clparams.DenebVersion, sidecar.SignedBlockHeader.Header.BodyRoot) {
+		if version < clparams.GloasVersion && !cltypes.VerifyCommitmentInclusionProof(sidecar.KzgCommitment, sidecar.CommitmentInclusionProof, sidecar.Index, sidecar.SignedBlockHeader.Header.BodyRoot) {
 			return 0, 0, errors.New("could not verify blob's inclusion proof")
 		}
 		if verifySignatureFn != nil {

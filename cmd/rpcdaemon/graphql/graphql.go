@@ -20,8 +20,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
+	"sync/atomic"
 
 	gqlgen "github.com/99designs/gqlgen/graphql"
 	"github.com/99designs/gqlgen/graphql/handler"
@@ -30,6 +32,7 @@ import (
 	"github.com/vektah/gqlparser/v2/gqlerror"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/graphql/graph"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/jsonrpc"
 )
@@ -62,6 +65,14 @@ func CreateHandler(api []rpc.API) http.Handler {
 
 	srv := handler.NewDefaultServer(graph.NewExecutableSchema(graph.Config{Resolvers: &resolver}))
 	srv.Use(depthLimit(maxQueryDepth))
+	srv.SetErrorPresenter(func(ctx context.Context, err error) *gqlerror.Error {
+		if errors.Is(err, kv.ErrReadTxLimitExceeded) {
+			if overloaded, _ := ctx.Value(overloadedKey{}).(*atomic.Bool); overloaded != nil {
+				overloaded.Store(true)
+			}
+		}
+		return gqlgen.DefaultErrorPresenter(ctx, err)
+	})
 	return bodyLimitMiddleware(statusFixMiddleware(srv))
 }
 
@@ -116,20 +127,28 @@ func selectionDepth(set ast.SelectionSet, fragments map[string]int) int {
 	return depth
 }
 
+type overloadedKey struct{}
+
 // statusFixMiddleware adjusts HTTP status codes to match the GraphQL test expectations:
+// - a resolver hit kv.ErrReadTxLimitExceeded → 503 with Retry-After
 // - 422 (gqlgen validation errors) → 400
 // - 200 with top-level "errors" → 400
 func statusFixMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var overloaded atomic.Bool
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
-		next.ServeHTTP(rec, r)
+		next.ServeHTTP(rec, r.WithContext(context.WithValue(r.Context(), overloadedKey{}, &overloaded)))
 
 		status := rec.status
 		body := rec.buf.Bytes()
 
-		if status == http.StatusUnprocessableEntity {
+		switch {
+		case overloaded.Load():
+			status = http.StatusServiceUnavailable
+			w.Header().Set("Retry-After", "1")
+		case status == http.StatusUnprocessableEntity:
 			status = http.StatusBadRequest
-		} else if status == http.StatusOK && hasGraphQLErrors(body) {
+		case status == http.StatusOK && hasGraphQLErrors(body):
 			status = http.StatusBadRequest
 		}
 

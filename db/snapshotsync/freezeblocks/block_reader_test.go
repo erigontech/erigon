@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/recsplit"
@@ -608,6 +609,38 @@ func TestTxBlockView_StaleUntilReopen(t *testing.T) {
 	require.Positive(t, bodiesInTxView())
 }
 
+type minimumBlockBackendClient struct {
+	remoteproto.ETHBACKENDClient
+	block uint64
+	err   error
+}
+
+func (c minimumBlockBackendClient) MinimumBlockAvailable(context.Context, *emptypb.Empty, ...grpc.CallOption) (*remoteproto.MinimumBlockAvailableReply, error) {
+	return &remoteproto.MinimumBlockAvailableReply{BlockNum: c.block}, c.err
+}
+
+func TestRemoteBlockReaderMinimumBlockAvailable(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name  string
+		block uint64
+		want  uint64
+		err   error
+	}{
+		{name: "unpruned", block: 0, want: 0},
+		{name: "legacy_unpruned", block: 1, want: 0},
+		{name: "pruned", block: 1000, want: 1000},
+		{name: "backend_error", err: errors.New("backend unavailable")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reader := NewRemoteBlockReader(minimumBlockBackendClient{block: tc.block, err: tc.err})
+			floor, err := reader.MinimumBlockAvailable(t.Context(), nil)
+			require.ErrorIs(t, err, tc.err)
+			require.Equal(t, tc.want, floor)
+		})
+	}
+}
+
 // frozenBlocksBackendClient stubs the one call under test; every other method of the
 // embedded interface stays nil and panics if reached.
 type frozenBlocksBackendClient struct {
@@ -620,10 +653,8 @@ func (c frozenBlocksBackendClient) FrozenBlocks(ctx context.Context, in *emptypb
 	return c.reply, c.err
 }
 
-// TestRemoteBlockReaderFrozenBlocks pins that the remote reader answers FrozenBlocks
-// through the backend instead of panicking: the receipt gates and eth_capabilities
-// reach it on a remote rpcdaemon. The signature leaves no way to surface an error, so
-// a failed call reports zero, the conservative answer for every caller.
+// The scalar getter reports zero on failure. Callers that need to distinguish
+// unavailable metadata from an empty snapshot set must use FrozenBlocksObserved.
 func TestRemoteBlockReaderFrozenBlocks(t *testing.T) {
 	t.Parallel()
 
@@ -636,6 +667,61 @@ func TestRemoteBlockReaderFrozenBlocks(t *testing.T) {
 	require.NotPanics(t, func() {
 		require.Zero(t, failing.FrozenBlocks())
 	})
+}
+
+type txNumBackendClient struct {
+	frozenBlocksBackendClient
+	body      []byte
+	bodyCalls int
+}
+
+func (c *txNumBackendClient) CanonicalBodyForStorage(context.Context, *remoteproto.CanonicalBodyForStorageRequest, ...grpc.CallOption) (*remoteproto.CanonicalBodyForStorageReply, error) {
+	c.bodyCalls++
+	return &remoteproto.CanonicalBodyForStorageReply{Body: c.body}, nil
+}
+
+func TestRemoteTxNumsRequireObservedFrozenRange(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
+		return rawdbv3.TxNums.Append(tx, 50, 200)
+	}))
+	tx, err := db.BeginRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	body, err := rlp.EncodeToBytes(&types.BodyForStorage{BaseTxnID: 80, TxCount: 4})
+	require.NoError(t, err)
+	client := &txNumBackendClient{
+		frozenBlocksBackendClient: frozenBlocksBackendClient{
+			reply: &remoteproto.FrozenBlocksReply{FrozenBlocks: 42},
+			err:   errors.New("backend unavailable"),
+		},
+		body: body,
+	}
+	reader := NewRemoteBlockReader(client)
+	txNums := reader.TxnumReader()
+	_, err = txNums.Max(ctx, tx, 42)
+	require.ErrorContains(t, err, "remote frozen range is unknown")
+	_, err = txNums.Min(ctx, tx, 43)
+	require.ErrorContains(t, err, "remote frozen range is unknown")
+	require.Zero(t, client.bodyCalls)
+
+	client.err = nil
+	reader.frozenBlocks.SetTTL(0)
+	maxTxNum, err := txNums.Max(ctx, tx, 42)
+	require.NoError(t, err)
+	require.EqualValues(t, 83, maxTxNum)
+	minTxNum, err := txNums.Min(ctx, tx, 43)
+	require.NoError(t, err)
+	require.EqualValues(t, 84, minTxNum)
+	require.Equal(t, 2, client.bodyCalls)
+
+	_, found, err := txNums.MaxExact(ctx, tx, nil, 43)
+	require.NoError(t, err)
+	require.False(t, found, "a body above the frozen range has storage IDs, not canonical txNums")
+	require.Equal(t, 2, client.bodyCalls, "do not read MDBX bodies for missing mappings")
 }
 
 type countingFrozenBlocksClient struct {
@@ -953,8 +1039,9 @@ func TestMinimumBlockAvailableWithoutVisibleTransactionSegments(t *testing.T) {
 	snapshots := db.(HasBlockFiles).DebugBlockFiles()
 	require.NoError(t, snapshots.OpenFolder())
 	require.NotZero(t, snapshots.BlocksAvailable(), "headers and bodies are frozen")
-	_, ok := snapshots.SegmentsMin()
-	require.False(t, ok, "the transaction segment starts above the aligned height")
+	view := snapshots.View()
+	defer view.Close()
+	require.Empty(t, view.Segments(snaptype2.Transactions), "the transaction segment starts above the aligned height")
 
 	rwTx, err := db.BeginRw(t.Context())
 	require.NoError(t, err)
@@ -999,31 +1086,29 @@ func TestMinimumBlockAvailableKeepsSegmentsWhenTheDatabaseHoldsNoBody(t *testing
 	require.Equal(t, uint64(5000), minimum, "the empty database answers nothing, so the segments stand")
 }
 
-// TestMinimumBlockAvailableTakesTheHighestTypeMinimum pins the shape chain-history expiry
-// produces: headers and bodies reach genesis, transactions do not, and the block the node
-// can serve in full is the first one every type covers.
+// A complete block needs all three segment types, regardless of which starts latest.
 func TestMinimumBlockAvailableTakesTheHighestTypeMinimum(t *testing.T) {
-	dirs := datadir.New(t.TempDir())
-	db := temporaltest.NewTestDB(t, dirs)
-	logger := log.New()
-
-	ver := version.V1_0
-	for _, typ := range []snaptype.Enum{snaptype2.Enums.Headers, snaptype2.Enums.Bodies} {
-		createTestSegmentFile(t, 0, 1000, typ, dirs.Snap, ver, logger)
-		createTestSegmentFile(t, 1000, 2000, typ, dirs.Snap, ver, logger)
+	for _, latest := range snaptype2.BlockSnapshotTypes {
+		t.Run(latest.Name(), func(t *testing.T) {
+			dirs := datadir.New(t.TempDir())
+			db := temporaltest.NewTestDB(t, dirs)
+			logger := log.New()
+			for _, typ := range snaptype2.BlockSnapshotTypes {
+				if typ.Enum() != latest.Enum() {
+					createTestSegmentFile(t, 0, 1000, typ.Enum(), dirs.Snap, version.V1_0, logger)
+				}
+				createTestSegmentFile(t, 1000, 2000, typ.Enum(), dirs.Snap, version.V1_0, logger)
+			}
+			snapshots := db.(HasBlockFiles).DebugBlockFiles()
+			require.NoError(t, snapshots.OpenFolder())
+			tx, err := db.BeginRo(t.Context())
+			require.NoError(t, err)
+			defer tx.Rollback()
+			minimum, err := NewBlockReader(snapshots).MinimumBlockAvailable(t.Context(), tx)
+			require.NoError(t, err)
+			require.Equal(t, uint64(1000), minimum)
+		})
 	}
-	createTestSegmentFile(t, 1000, 2000, snaptype2.Enums.Transactions, dirs.Snap, ver, logger)
-
-	snapshots := db.(HasBlockFiles).DebugBlockFiles()
-	require.NoError(t, snapshots.OpenFolder())
-
-	tx, err := db.BeginRo(t.Context())
-	require.NoError(t, err)
-	defer tx.Rollback()
-
-	minimum, err := NewBlockReader(snapshots).MinimumBlockAvailable(t.Context(), tx)
-	require.NoError(t, err)
-	require.Equal(t, uint64(1000), minimum)
 }
 
 // A transaction of a block that is still in the DB carries the sender stored for it, so the

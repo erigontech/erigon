@@ -37,7 +37,7 @@ func BenchmarkMarshalReceipt(b *testing.B) {
 	txn.SetSender(accounts.InternAddress(common.HexToAddress("0xabcdef0123456789abcdef0123456789abcdef03")))
 	header := &types.Header{Number: *uint256.NewInt(7), Time: 1_750_000_000, BaseFee: uint256.NewInt(50)}
 
-	for _, logCount := range []int{0, 2} {
+	for _, logCount := range []int{0, 2, 100} {
 		logs := make(types.Logs, logCount)
 		for i := range logs {
 			logs[i] = &types.Log{Address: to, Topics: []common.Hash{{0x01}, {0x02}}, Data: make([]byte, 64)}

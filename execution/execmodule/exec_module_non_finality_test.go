@@ -188,6 +188,65 @@ func TestExecModule_GivenReorgAtFinalisedBlock_WhenFinality_ThenInvalidFCU(t *te
 	}))
 }
 
+func TestExecModule_GivenSameHeadFCULowersFinalised_WhenReorgAboveIt_ThenReorg(t *testing.T) {
+	// A finalized import can put the stored checkpoint ahead of the CL's.
+	// Reorg checks must use the CL's later update, even if it did not move the head.
+	ctx := t.Context()
+	const (
+		chainLen          = 20
+		finalisedBlockNum = 2
+		forkBlockNum      = 10
+	)
+	emt := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	canonical, err := emt.GenerateChain(chainLen, nil)
+	require.NoError(t, err)
+	status, err := emt.InsertBlocks(ctx, canonical.Blocks)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+	tipHash := canonical.TopBlock.Hash()
+	result, err := emt.UpdateForkChoice(ctx, canonical.TopBlock.Header(),
+		execmoduletester.WithSafeHash(tipHash),
+		execmoduletester.WithFinalisedHash(tipHash))
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status)
+	emt.ExecModule.Drain()
+	assertPersistedForkchoice(t, emt.DB, tipHash, tipHash, tipHash)
+
+	finalisedHash := canonical.Blocks[finalisedBlockNum-1].Hash()
+	result, err = emt.UpdateForkChoice(ctx, canonical.TopBlock.Header(),
+		execmoduletester.WithSafeHash(finalisedHash),
+		execmoduletester.WithFinalisedHash(finalisedHash))
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status)
+	emt.ExecModule.Drain()
+	assertPersistedForkchoice(t, emt.DB, tipHash, finalisedHash, finalisedHash)
+
+	fork, err := emt.GenerateChainFrom(canonical.Blocks[forkBlockNum-1], chainLen-forkBlockNum, func(_ int, gen *blockgen.BlockGen) {
+		gen.SetCoinbase(common.Address{1})
+	})
+	require.NoError(t, err)
+	require.NotEqual(t, tipHash, fork.TopBlock.Hash())
+	status, err = emt.InsertBlocks(ctx, fork.Blocks)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+	validation, err := emt.ValidateChain(ctx, fork.TopBlock.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
+	result, err = emt.UpdateForkChoice(ctx, fork.TopBlock.Header(),
+		execmoduletester.WithSafeHash(finalisedHash),
+		execmoduletester.WithFinalisedHash(finalisedHash))
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status, "reorg above the updated finalized block must succeed")
+	emt.ExecModule.Drain()
+	assertPersistedForkchoice(t, emt.DB, fork.TopBlock.Hash(), finalisedHash, finalisedHash)
+	require.NoError(t, emt.DB.View(ctx, func(tx kv.Tx) error {
+		canonicalHash, err := rawdb.ReadCanonicalHash(tx, fork.TopBlock.NumberU64())
+		require.NoError(t, err)
+		require.Equal(t, fork.TopBlock.Hash(), canonicalHash)
+		return nil
+	}))
+}
+
 func TestExecModule_GivenReorgPastMaxReorgDepth_WhenNonFinality_ThenReorg(t *testing.T) {
 	// in normal circumstances our MAX_REORG_DEPTH aligns with the depth of the finalised hash
 	// (i.e. on ethereum we have T-96 finalised block in 99.999999% of the time and our MAX_REORG_DEPTH=96)

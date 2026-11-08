@@ -6,9 +6,9 @@ sidebar_position: 2
 
 # erigon
 
-Erigon provides several RPC namespaces that extend beyond the standard Ethereum JSON-RPC API, exposing Erigon-specific functionality and data structures. The primary Erigon-specific namespace is **`erigon_`** which offer extended blockchain data access methods.
+Erigon provides several RPC namespaces that extend beyond the standard Ethereum JSON-RPC API, exposing Erigon-specific functionality and data structures. The primary Erigon-specific namespace is **`erigon_`**, which offers extended blockchain data access methods.
 
-These methods must be explicitly enabled using the `--http.api` flag when starting the RPC Daemon.
+The namespace is enabled by default; if you set `--http.api`, include `erigon` in the list.
 
 ### Namespace Availability
 
@@ -238,7 +238,7 @@ The number of logs returned is capped by [`--rpc.logs.maxresults`](../fundamenta
 
 ## **erigon\_getLatestLogs**
 
-Returns the latest logs matching a filter criteria in descending order with advanced pagination and topic matching options.
+Returns the latest logs matching the filter criteria in descending order with advanced pagination and topic matching options.
 
 **Parameters**
 

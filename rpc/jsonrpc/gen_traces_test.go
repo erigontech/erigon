@@ -137,7 +137,7 @@ func TestGeneratedTraceApi(t *testing.T) {
 	if err != nil {
 		t.Errorf("trace_block %d: %v", 0, err)
 	}
-	buf, err := json.Marshal(traces)
+	buf, err := jsonstream.Marshal(traces)
 	if err != nil {
 		t.Errorf("marshall result into JSON: %v", err)
 	}
@@ -273,6 +273,8 @@ func TestGeneratedTraceApi(t *testing.T) {
 		  "result": null,
 		  "subtraces": 0,
 		  "traceAddress": [],
+		  "transactionHash": null,
+		  "transactionPosition": null,
 		  "type": "reward"
 		}
 	  ]`

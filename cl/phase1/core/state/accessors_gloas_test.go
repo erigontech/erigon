@@ -1,6 +1,7 @@
 package state
 
 import (
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -9,6 +10,16 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 )
+
+func TestBuilderBalanceAfterWithdrawalsSaturatesWithoutOverflow(t *testing.T) {
+	validatorIndex := ConvertBuilderIndexToValidatorIndex(0)
+	withdrawals := []*cltypes.Withdrawal{
+		{Validator: validatorIndex, Amount: math.MaxUint64},
+		{Validator: validatorIndex, Amount: 1},
+	}
+
+	require.Zero(t, getBuilderBalanceAfterWithdrawals(10, 0, withdrawals))
+}
 
 func TestIsValidIndexedAttestationRejectsOversizedGloasIndicesBeforeLookup(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig

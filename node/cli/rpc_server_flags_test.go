@@ -17,9 +17,13 @@
 package cli
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/urfave/cli/v3"
+
+	"github.com/erigontech/erigon/common/log/v3"
 
 	"github.com/erigontech/erigon/node/nodecfg"
 )
@@ -60,4 +64,22 @@ func TestRpcServerFlags_Set(t *testing.T) {
 	require.Equal(t, "tcp://0.0.0.0:8443", cfg.Http.HttpsURL)
 	require.Equal(t, "/path/to/cert.pem", cfg.Http.HttpsCertfile)
 	require.Equal(t, "/path/to/key.pem", cfg.Http.HttpsKeyFile)
+}
+
+func TestWSFlag_ExplicitFalse(t *testing.T) {
+	require.False(t, buildHttpCfg(t, nil).Http.WebsocketEnabled)
+	require.False(t, buildHttpCfg(t, []string{"--ws=false"}).Http.WebsocketEnabled)
+	require.True(t, buildHttpCfg(t, []string{"--ws"}).Http.WebsocketEnabled)
+}
+
+func TestJWTSecretPath_EphemeralDatadir(t *testing.T) {
+	var got string
+	app := &cli.Command{Flags: DefaultFlags, Action: func(_ context.Context, ctx *cli.Command) error {
+		cfg := nodecfg.Config{}
+		ApplyFlagsForNodeConfig(ctx, &cfg, log.New())
+		got = cfg.Http.JWTSecretPath
+		return nil
+	}}
+	require.NoError(t, app.Run(context.Background(), []string{"erigon"}))
+	require.Equal(t, "jwt.hex", got)
 }

@@ -45,15 +45,6 @@ type weightStore struct {
 	checkpointState *checkpointState // cached per getHeadGloas invocation
 }
 
-// NewWeightStore creates a new WeightStore for the given ForkChoiceStore.
-// It pre-fetches the checkpoint state once so that repeated calls to
-// GetAttestationScore / GetProposerScore avoid redundant disk reads.
-func NewWeightStore(f *ForkChoiceStore) WeightStore {
-	justifiedCheckpoint := f.JustifiedCheckpoint()
-	cs, _ := f.getCheckpointState(justifiedCheckpoint)
-	return newWeightStoreFromCheckpointState(f, cs)
-}
-
 func newWeightStoreFromCheckpointState(f *ForkChoiceStore, cs *checkpointState) WeightStore {
 	return &weightStore{f: f, checkpointState: cs}
 }
@@ -102,7 +93,7 @@ func getProposerScore(f *ForkChoiceStore, cs *checkpointState) uint64 {
 	if cs == nil {
 		return 0
 	}
-	committeeWeight := cs.activeBalance / f.beaconCfg.SlotsPerEpoch
+	committeeWeight := cs.unslashedActiveBalance / f.beaconCfg.SlotsPerEpoch
 	return (committeeWeight * f.beaconCfg.ProposerScoreBoost) / 100
 }
 

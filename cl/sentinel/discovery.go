@@ -40,13 +40,14 @@ import (
 )
 
 const (
-	peerSubnetTarget                 = 4
 	goRoutinesOpeningPeerConnections = 4
 	attestationSubnetCount           = 64
-	minimumPeersPerSubnet            = 4 // Minimum peers needed per subnet before proactive search stops
-	subnetSearchTimeout              = 30 * time.Second
-	subnetSearchInterval             = 12 * time.Second // Check every slot
-	peerPruneInterval                = 60 * time.Second // How often to check for excess peers
+	// Subscribers wanted per attestation subnet before the proactive search stops: the mesh low watermark, so
+	// gossipsub can fill a subnet's mesh.
+	minimumPeersPerSubnet = gossip.GossipSubDlo
+	subnetSearchTimeout   = 30 * time.Second
+	subnetSearchInterval  = 12 * time.Second // Check every slot
+	peerPruneInterval     = 60 * time.Second // How often to check for excess peers
 )
 
 func filterNonPrivatePeerAddresses(info *peer.AddrInfo) bool {
@@ -102,6 +103,8 @@ func (s *Sentinel) findPeersForSubnets(subnets []subnetSearchState) {
 
 	ctx, cancel := context.WithTimeout(s.ctx, subnetSearchTimeout)
 	defer cancel()
+	// The filter skips non-matching nodes inside Next, so a walk would outlive the timeout unless it is closed.
+	defer context.AfterFunc(ctx, filteredIterator.Close)()
 
 	checked := 0
 	maxChecks := 2000 // Higher limit since we're searching for multiple subnets
@@ -144,8 +147,7 @@ func (s *Sentinel) findPeersForSubnets(subnets []subnetSearchState) {
 			continue
 		}
 
-		// Skip banned peers
-		if s.peers.BanStatus(peerInfo.ID) {
+		if !s.peers.Dialable(peerInfo.ID) {
 			continue
 		}
 
@@ -216,28 +218,11 @@ func (s *Sentinel) proactiveSubnetPeerSearch() {
 			s.pruneExcessPeers()
 		case <-searchTicker.C:
 			coverage := s.getSubnetCoverage()
-
-			// Collect underserved subnets with their peer counts
-			var underserved []subnetSearchState
-			for i, count := range &coverage {
-				if count < minimumPeersPerSubnet {
-					underserved = append(underserved, subnetSearchState{
-						idx:    i,
-						wanted: minimumPeersPerSubnet - count,
-						found:  0,
-					})
-				}
-			}
-
+			underserved := underservedSubnets(&coverage)
 			if len(underserved) == 0 {
 				log.Trace("[Sentinel] All subnets have sufficient peers")
 				continue
 			}
-
-			// Sort by wanted count descending (subnets needing most peers first, i.e., 0-peer subnets)
-			slices.SortFunc(underserved, func(a, b subnetSearchState) int {
-				return cmp.Compare(b.wanted, a.wanted)
-			})
 
 			// Extract just the subnet indices for logging
 			underservedIdxs := make([]int, len(underserved))
@@ -276,6 +261,31 @@ func (s *Sentinel) proactiveSubnetPeerSearch() {
 				"stillUnderserved", stillUnderserved)
 		}
 	}
+}
+
+// underservedSubnets returns the subnets with fewer than minimumPeersPerSubnet subscribers, the emptiest first.
+func underservedSubnets(coverage *[attestationSubnetCount]int) []subnetSearchState {
+	var underserved []subnetSearchState
+	for i, count := range coverage {
+		if count < minimumPeersPerSubnet {
+			underserved = append(underserved, subnetSearchState{idx: i, wanted: minimumPeersPerSubnet - count})
+		}
+	}
+	slices.SortFunc(underserved, func(a, b subnetSearchState) int {
+		return cmp.Compare(b.wanted, a.wanted)
+	})
+	return underserved
+}
+
+// coversUnderservedSubnet reports whether a peer advertising peerSubnets would add a subscriber to a subnet
+// below minimumPeersPerSubnet.
+func coversUnderservedSubnet(peerSubnets bitfield.Bitvector64, coverage *[attestationSubnetCount]int) bool {
+	for i := range attestationSubnetCount {
+		if peerSubnets[i/8]&(1<<(i%8)) != 0 && coverage[i] < minimumPeersPerSubnet {
+			return true
+		}
+	}
+	return false
 }
 
 // peerSubnetInfo holds information about a peer's subnet coverage for pruning decisions
@@ -423,7 +433,6 @@ func (s *Sentinel) pruneExcessPeers() {
 		// Disconnect the peer
 		s.closePeer(info.pid)
 		s.p2p.Host().Peerstore().RemovePeer(info.pid)
-		s.peers.RemovePeer(info.pid)
 		removed++
 
 		log.Trace("[Sentinel] Pruned excess peer", "peer", info.pid, "subnetsCount", info.subnetsCount)
@@ -442,8 +451,8 @@ func (s *Sentinel) ConnectWithPeer(ctx context.Context, info peer.AddrInfo, sem 
 	if info.ID == s.p2p.Host().ID() {
 		return nil
 	}
-	if s.peers.BanStatus(info.ID) {
-		return errors.New("refused to connect to bad peer")
+	if !s.peers.Dialable(info.ID) {
+		return errors.New("peer is not dialable")
 	}
 	ctxWithTimeout, cancel := context.WithTimeout(ctx, clparams.MaxDialTimeout)
 	defer cancel()
@@ -571,17 +580,16 @@ func (s *Sentinel) onConnection(_ network.Network, conn network.Conn) {
 		"direction", conn.Stat().Direction,
 		"addr", addr,
 		"transport", transport)
-	go s.handleNewConnection(peerId, func() (bool, error) {
+	go s.handleNewConnection(peerId, conn.Stat().Direction, addr, func() (bool, error) {
 		return s.handshaker.ValidatePeer(s.ctx, peerId)
 	})
 }
 
 // handleNewConnection admits or rejects a peer that has just connected, then runs its status
 // handshake. Reports whether the peer was kept.
-func (s *Sentinel) handleNewConnection(peerId peer.ID, validate func() (bool, error)) bool {
-	// ConnectWithPeer consults the ban list, but it only covers dials we initiate; a peer
-	// banned for repeated handshake failures reconnects and reaches here regardless.
-	if s.peers.BanStatus(peerId) {
+func (s *Sentinel) handleNewConnection(peerId peer.ID, direction network.Direction, addr multiaddr.Multiaddr, validate func() (bool, error)) bool {
+	if s.peers.RefuseConnections(peerId) {
+		s.logger.Debug("[Sentinel] Closing refused peer connection", "peer", peerId, "direction", direction, "addr", addr)
 		s.closePeer(peerId)
 		return false
 	}
@@ -594,12 +602,7 @@ func (s *Sentinel) handleNewConnection(peerId peer.ID, validate func() (bool, er
 				var peerSubnets bitfield.Bitvector64
 				if err := node.Load(enr.WithEntry(s.cfg.NetworkConfig.AttSubnetKey, &peerSubnets)); err == nil && len(peerSubnets) == 8 {
 					coverage := s.getSubnetCoverage()
-					for i := range attestationSubnetCount {
-						if peerSubnets[i/8]&(1<<(i%8)) != 0 && coverage[i] < minimumPeersPerSubnet {
-							peerHelpsSubnets = true
-							break
-						}
-					}
+					peerHelpsSubnets = coversUnderservedSubnet(peerSubnets, &coverage)
 				}
 			}
 		}
@@ -609,35 +612,35 @@ func (s *Sentinel) handleNewConnection(peerId peer.ID, validate func() (bool, er
 			log.Trace("[Sentinel] Rejecting peer, at peer limit")
 			s.p2p.Host().Peerstore().RemovePeer(peerId)
 			s.closePeer(peerId)
-			s.peers.RemovePeer(peerId)
 			return false
 		}
 	}
 
 	valid, err := validate()
-	if err != nil {
-		// Handshake transport error (stream reset, timeout, etc.) — keep the peer.
-		// The peer may still work for gossip even if status exchange failed.
-		log.Trace("[Sentinel] Handshake transport error (keeping connection)", "peer", peerId, "err", err)
+	if !valid && err != nil {
+		failureCount, becameUndialable := s.peers.RecordHandshakeFailure(peerId)
+		s.logger.Debug("[Sentinel] Handshake failed", "peer", peerId, "count", failureCount, "err", err)
+		if becameUndialable {
+			s.logger.Debug("[Sentinel] Peer became undialable", "peer", peerId)
+		}
+		if s.peers.RefuseConnections(peerId) {
+			s.logger.Debug("[Sentinel] Refusing peer connections", "peer", peerId, "count", failureCount)
+			s.closePeer(peerId)
+			return false
+		}
+		return true
 	}
 
-	if !valid && err == nil {
+	if !valid {
 		// Handshake succeeded but fork digest mismatched — peer is on a different fork.
 		// Must disconnect to avoid receiving incompatible blocks.
 		log.Debug("[Sentinel] Fork mismatch, disconnecting peer", "peer", peerId)
 		s.p2p.Host().Peerstore().RemovePeer(peerId)
 		s.closePeer(peerId)
-		s.peers.RemovePeer(peerId)
 		return false
 	}
 
-	if !valid {
-		// Handshake had a transport error AND returned invalid — keep anyway.
-		s.peers.RecordHandshakeFailure(peerId)
-		return true
-	}
-	// we were able to successfully connect, so add this peer to our pool
-	s.peers.AddPeer(peerId)
+	s.peers.RecordHandshakeSuccess(peerId)
 	log.Trace("[Sentinel] Peer validated and added", "peer", peerId)
 	return true
 }

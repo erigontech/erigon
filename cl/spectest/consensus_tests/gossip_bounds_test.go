@@ -25,15 +25,6 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 )
 
-func TestGossipMessageTimeOverflow(t *testing.T) {
-	_, ok := gossipMessageTime(^uint64(0), 1)
-	require.False(t, ok)
-
-	messageTime, ok := gossipMessageTime(12_000, 500)
-	require.True(t, ok)
-	require.Equal(t, uint64(12_500), messageTime)
-}
-
 func TestGossipCurrentSlotRejectsInvalidTimeConfig(t *testing.T) {
 	config := clparams.MainnetBeaconConfig
 	beaconState := state.New(&config)
@@ -50,11 +41,11 @@ func TestGossipCurrentSlotRejectsInvalidTimeConfig(t *testing.T) {
 func TestGossipSyncSubcommitteePublicKeysRejectsInvalidBounds(t *testing.T) {
 	config := clparams.MainnetBeaconConfig
 	config.SyncCommitteeSubnetCount = 0
-	_, ok := gossipSyncSubcommitteePublicKeys(state.New(&config), 0)
+	_, ok := gossipSyncSubcommitteePublicKeys(&config, state.New(&config).CurrentSyncCommittee(), 0)
 	require.False(t, ok)
 
 	config = clparams.MainnetBeaconConfig
-	_, ok = gossipSyncSubcommitteePublicKeys(state.New(&config), config.SyncCommitteeSubnetCount)
+	_, ok = gossipSyncSubcommitteePublicKeys(&config, state.New(&config).CurrentSyncCommittee(), config.SyncCommitteeSubnetCount)
 	require.False(t, ok)
 }
 

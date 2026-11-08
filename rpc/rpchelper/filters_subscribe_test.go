@@ -412,8 +412,10 @@ func TestSubscribeReceiptsConcurrentSubscribersDoNotSendStaleRequest(t *testing.
 // Every subscriber gets the same event object, so the RPC layer encodes it once for all of them.
 func TestNewHeadsSubscribersShareOneEvent(t *testing.T) {
 	f := newTestFilters(t)
-	a, idA := f.SubscribeNewHeads(8, ProtocolWS)
-	b, idB := f.SubscribeNewHeads(8, ProtocolWS)
+	a, idA, err := f.SubscribeNewHeads(8, ProtocolWS)
+	require.NoError(t, err)
+	b, idB, err := f.SubscribeNewHeads(8, ProtocolWS)
+	require.NoError(t, err)
 	defer f.UnsubscribeHeads(idA)
 	defer f.UnsubscribeHeads(idB)
 

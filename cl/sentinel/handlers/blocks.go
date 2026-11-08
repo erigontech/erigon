@@ -17,13 +17,17 @@
 package handlers
 
 import (
+	"errors"
+
 	"github.com/libp2p/go-libp2p/core/network"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
@@ -37,9 +41,13 @@ func (c *ConsensusHandlers) beaconBlocksByRangeHandler(s network.Stream) error {
 		return err
 	}
 
-	// Consume additional rate-limit tokens proportional to the requested block count.
+	if req.StartSlot+req.Count < req.StartSlot {
+		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, InvalidRequestPrefix)
+	}
+
+	// Consume additional rate-limit tokens proportional to the blocks we may serve.
 	// The wrapper already consumed 1 token for admission.
-	if cost := min(int(req.Count), MaxRequestsBlocks) - 1; !c.consumeRateLimit(s, cost) {
+	if cost := int(min(req.Count, MaxRequestsBlocks)) - 1; !c.consumeRateLimit(s, cost) {
 		return nil
 	}
 
@@ -49,10 +57,17 @@ func (c *ConsensusHandlers) beaconBlocksByRangeHandler(s network.Stream) error {
 	}
 	defer tx.Rollback()
 
-	written := uint64(0)
-	for slot := req.StartSlot; slot < req.StartSlot+MaxRequestsBlocks; slot++ {
+	// Serve only blocks in [start_slot, start_slot+count): empty slots are left out, not replaced by
+	// later blocks. Search up to MAX_REQUEST_BLOCKS_DENEB slots and answer with at most
+	// MaxRequestsBlocks blocks; the spec allows a response with fewer blocks than requested.
+	endSlot := req.StartSlot + min(req.Count, c.beaconConfig.MaxRequestBlocksDeneb)
+	written := 0
+	for slot := req.StartSlot; slot < endSlot && written < MaxRequestsBlocks; slot++ {
 		block, err := c.beaconDB.ReadBlockBySlot(c.ctx, tx, slot)
 		if err != nil {
+			if errors.Is(err, snapshot_format.ErrExecutionBodyNotFound) {
+				break
+			}
 			return err
 		}
 		if block == nil {
@@ -76,36 +91,33 @@ func (c *ConsensusHandlers) beaconBlocksByRangeHandler(s network.Stream) error {
 			return err
 		}
 		written++
-		if written >= req.Count {
-			break
-		}
 	}
 
 	return nil
 }
 
 func (c *ConsensusHandlers) beaconBlocksByRootHandler(s network.Stream) error {
-	var req solid.HashListSSZ = solid.NewHashList(100)
-	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, req, clparams.Phase0Version); err != nil {
+	// Altair keeps MAX_REQUEST_BLOCKS for BeaconBlocksByRoot v2, Deneb lowers it to MAX_REQUEST_BLOCKS_DENEB.
+	maxRoots := c.beaconConfig.MaxRequestBlocks
+	if c.ethClock.GetCurrentEpoch() >= c.beaconConfig.DenebForkEpoch {
+		maxRoots = c.beaconConfig.MaxRequestBlocksDeneb
+	}
+	var req solid.HashListSSZ = solid.NewHashList(int(maxRoots))
+	if err := ssz_snappy.DecodeAndReadNoForkDigestMax(s, req, clparams.Phase0Version, maxRoots*length.Hash); err != nil {
+		if errors.Is(err, ssz_snappy.ErrPayloadExceedsLimit) {
+			return ssz_snappy.EncodeAndWrite(s, &emptyString{}, InvalidRequestPrefix)
+		}
 		return err
 	}
 
-	blockRoots := []common.Hash{}
-	for i := 0; i < req.Length(); i++ {
-		blockRoot := req.Get(i)
-		blockRoots = append(blockRoots, blockRoot)
-		// Limit the number of blocks to the count specified in the request.
-		if len(blockRoots) >= MaxRequestsBlocks {
-			break
-		}
-	}
-
-	if len(blockRoots) == 0 {
+	if req.Length() == 0 {
 		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavailablePrefix)
 	}
 
-	// Consume additional rate-limit tokens proportional to the number of roots.
-	if cost := len(blockRoots) - 1; !c.consumeRateLimit(s, cost) {
+	// Consume additional rate-limit tokens proportional to the number of roots,
+	// capped at the number of blocks one response can carry so that the roots
+	// beyond the cap can be requested again without a punishment.
+	if cost := min(req.Length(), MaxRequestsBlocks) - 1; !c.consumeRateLimit(s, cost) {
 		return nil
 	}
 
@@ -116,8 +128,16 @@ func (c *ConsensusHandlers) beaconBlocksByRootHandler(s network.Stream) error {
 	defer tx.Rollback()
 
 	var block *cltypes.SignedBeaconBlock
+	written := 0
 	req.Range(func(index int, blockRoot common.Hash, length int) bool {
+		// Limit the number of blocks served, not the number of roots inspected.
+		if written >= MaxRequestsBlocks {
+			return false
+		}
 		block, err = c.beaconDB.ReadBlockByRoot(c.ctx, tx, blockRoot)
+		if errors.Is(err, snapshot_format.ErrExecutionBodyNotFound) {
+			block, err = nil, nil
+		}
 		if err != nil {
 			return false
 		}
@@ -148,6 +168,7 @@ func (c *ConsensusHandlers) beaconBlocksByRootHandler(s network.Stream) error {
 		if err = ssz_snappy.EncodeAndWrite(s, block); err != nil {
 			return false
 		}
+		written++
 		return true
 	})
 

@@ -1123,9 +1123,16 @@ func (m *MemoryMutation) HistorySeek(name kv.Domain, k []byte, ts uint64) (v []b
 
 func (m *MemoryMutation) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (timestamps stream.U64, err error) {
 	if m.db == nil {
-		return nil, fmt.Errorf("MemoryMutation: domain read requires backing tx (detached overlay)")
+		return nil, fmt.Errorf("MemoryMutation: index read requires backing tx (detached overlay)")
 	}
 	return m.db.IndexRange(name, k, fromTs, toTs, asc, limit)
+}
+
+func (m *MemoryMutation) IndexJoin(q kv.IndexQuery) (stream.U64, error) {
+	if m.db == nil {
+		return nil, fmt.Errorf("MemoryMutation: index read requires backing tx (detached overlay)")
+	}
+	return m.db.IndexJoin(q)
 }
 
 func (m *MemoryMutation) HistoryRange(name kv.Domain, fromTs, toTs int, asc order.By, limit int) (it stream.KV, err error) {
@@ -1135,9 +1142,9 @@ func (m *MemoryMutation) HistoryRange(name kv.Domain, fromTs, toTs int, asc orde
 	return m.db.HistoryRange(name, fromTs, toTs, asc, limit)
 }
 
-func (m *MemoryMutation) HistoryStartFrom(name kv.Domain) uint64 {
+func (m *MemoryMutation) HistoryStartFrom(name kv.Domain) (uint64, error) {
 	if m.db == nil {
-		return 0
+		return 0, nil
 	}
 	return m.db.Debug().HistoryStartFrom(name)
 }
@@ -1314,6 +1321,10 @@ func (v *OverlayTemporalReadView) RangeAsOf(name kv.Domain, fromKey, toKey []byt
 
 func (v *OverlayTemporalReadView) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (stream.U64, error) {
 	return v.temporalTx.IndexRange(name, k, fromTs, toTs, asc, limit)
+}
+
+func (v *OverlayTemporalReadView) IndexJoin(q kv.IndexQuery) (stream.U64, error) {
+	return v.temporalTx.IndexJoin(q)
 }
 
 func (v *OverlayTemporalReadView) HistorySeek(name kv.Domain, k []byte, ts uint64) ([]byte, bool, error) {

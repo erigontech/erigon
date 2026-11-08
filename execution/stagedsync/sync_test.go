@@ -598,7 +598,7 @@ func TestSyncInterruptLongUnwind(t *testing.T) {
 	state := New(ethconfig.Defaults.Sync, s, []stages.SyncStage{s[2].ID, s[1].ID, s[0].ID}, nil, log.New(), stages.ModeApplyingBlocks)
 	_, tx := temporaltest.NewTestTx(t)
 	_, err := state.Run(nil, tx, true /* initialCycle */, false)
-	assert.Error(t, errInterrupted, err)
+	assert.ErrorIs(t, err, errInterrupted)
 
 	//state = NewState(s)
 	//state.unwindOrder = []*Stage{s[0], s[1], s[2]}
