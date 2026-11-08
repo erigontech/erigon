@@ -143,8 +143,7 @@ func (etp *EncryptedTxnsPool) Txns(eon EonIndex, from, to TxnIndex, gasLimit uin
 				"from", from,
 				"to", to,
 			)
-			idxOffset += item.TxnIndex - nextTxnIndex + 1
-			return true // continue
+			idxOffset += item.TxnIndex - nextTxnIndex
 		}
 
 		idxOffset++
