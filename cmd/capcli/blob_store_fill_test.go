@@ -17,10 +17,12 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -122,15 +124,10 @@ func (f *fillFixture) addBlockWithTransactions(slot uint64, blobs int, txs bool)
 	}))
 	f.tip = root
 	if txs {
-		stored := block.Clone().(*cltypes.SignedBeaconBlock)
-		encoded, err := block.EncodeSSZ(nil)
-		require.NoError(t, err)
-		require.NoError(t, stored.DecodeSSZ(encoded, int(clparams.DenebVersion)))
-		stored.Block.Body.ExecutionPayload.Transactions = solid.NewTransactionsSSZFromTransactions(nil)
-		storedRoot, err := stored.Block.HashSSZ()
+		block.Block.Body.ExecutionPayload.Transactions = solid.NewTransactionsSSZFromTransactions(nil)
+		storedRoot, err := block.Block.HashSSZ()
 		require.NoError(t, err)
 		require.NotEqual(t, root, common.Hash(storedRoot))
-		block = stored
 	}
 	f.blocks.blocks[slot] = block
 	return root
@@ -204,10 +201,7 @@ func TestBlobArchiveStoreFillReplacesInvalidSidecars(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			f := newFillFixture(t)
 			root := f.addBlock(fillTestSlot, 2)
-			bad := f.sidecars[root][1].Clone().(*cltypes.BlobSidecar)
-			encoded, err := f.sidecars[root][1].EncodeSSZ(nil)
-			require.NoError(t, err)
-			require.NoError(t, bad.DecodeSSZ(encoded, int(clparams.DenebVersion)))
+			bad := cloneSidecar(t, f.sidecars[root][1])
 			corrupt(bad)
 			require.NoError(t, f.store.WriteBlobSidecars(t.Context(), root, []*cltypes.BlobSidecar{f.sidecars[root][0], bad}))
 			require.False(t, f.storedValid(fillTestSlot, root))
@@ -352,20 +346,47 @@ func TestBlobArchiveStoreFillReportsASlotTheResponseDidNotRepair(t *testing.T) {
 func TestBlobArchiveStoreFillMovesPastABadEndpoint(t *testing.T) {
 	defer func(old time.Duration) { fillRequestTimeout = old }(fillRequestTimeout)
 	fillRequestTimeout = 200 * time.Millisecond
-	for name, respond := range map[string]func(http.ResponseWriter, *http.Request){
-		"stalled":   func(_ http.ResponseWriter, r *http.Request) { <-r.Context().Done() },
-		"null blob": func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{"data":[{"blob":null}]}`)) },
-		"too many":  func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{"data":[{},{},{}]}`)) },
+	for name, respond := range map[string]func(good string) http.HandlerFunc{
+		"stalled": func(string) http.HandlerFunc {
+			return func(_ http.ResponseWriter, r *http.Request) { <-r.Context().Done() }
+		},
+		"null blob": func(string) http.HandlerFunc {
+			return func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{"data":[{"blob":null}]}`)) }
+		},
+		"too many": func(string) http.HandlerFunc {
+			return func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{"data":[{},{},{}]}`)) }
+		},
+		// A correct response behind more padding than the size cap allows: only the cap rejects it.
+		"oversized": func(good string) http.HandlerFunc {
+			return func(w http.ResponseWriter, r *http.Request) {
+				req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, good+r.URL.Path, nil)
+				if err != nil {
+					return
+				}
+				resp, err := http.DefaultClient.Do(req)
+				if err != nil {
+					return
+				}
+				defer resp.Body.Close()
+				_, _ = w.Write(bytes.Repeat([]byte(" "), 2*maxBlobSidecarJSONSize))
+				_, _ = io.Copy(w, resp.Body)
+			}
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			f := newFillFixture(t)
 			root := f.addBlock(fillTestSlot, 1)
-			bad := httptest.NewServer(http.HandlerFunc(respond))
+			good, requests := f.endpoint(false)
+			bad := httptest.NewServer(respond(good))
 			t.Cleanup(bad.Close)
-			good, _ := f.endpoint(false)
 
 			require.NoError(t, f.fill(&BlobArchiveStoreFill{Endpoints: []string{bad.URL, good}, FromSlot: fillTestSlot, ToSlot: fillTestSlot}, nil))
 			require.True(t, f.storedValid(fillTestSlot, root))
+			want := 1
+			if name == "oversized" {
+				want = 2 // the padded copy it proxied, then the fill after the cap rejected that copy
+			}
+			require.EqualValues(t, want, requestsFor(requests, root), "the slot was filled from the bad endpoint")
 		})
 	}
 }
@@ -429,6 +450,19 @@ func TestBlobArchiveStoreFillRefusesAnUnindexedStretch(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Adjacent blocks that do not link mean an inconsistent index, not a missing stretch.
+func TestBlobArchiveStoreFillRefusesAdjacentBlocksThatDoNotLink(t *testing.T) {
+	f := newFillFixture(t)
+	f.addBlock(fillTestSlot, 1)
+	f.tip = common.HexToHash("0x0a")
+	f.addBlock(fillTestSlot+1, 1)
+	url, _ := f.endpoint(false)
+
+	err := f.fill(&BlobArchiveStoreFill{Endpoints: []string{url}, FromSlot: fillTestSlot, ToSlot: fillTestSlot + 1}, nil)
+	require.ErrorContains(t, err, fmt.Sprintf("the block at slot %d does not follow the one at slot %d", fillTestSlot+1, fillTestSlot))
+	require.NotContains(t, err.Error(), "not in the local index")
 }
 
 // The index check reads every slot of the range, so it has to stop when the run is cancelled.

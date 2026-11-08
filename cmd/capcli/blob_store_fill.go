@@ -65,7 +65,7 @@ type BlobArchiveStoreFill struct {
 
 // fillReport counts slots by outcome; only the slots that could not be filled are listed.
 type fillReport struct {
-	withBlobs, valid, missing, filled atomic.Uint64
+	withBlobs, valid, filled atomic.Uint64
 
 	mu     sync.Mutex
 	failed []uint64
@@ -174,7 +174,7 @@ func (b *BlobArchiveStoreFill) fill(ctx context.Context, db kv.RoDB, blocks free
 	err := g.Wait()
 	slices.Sort(report.failed)
 	log.Info("Blob store fill finished", "fromSlot", b.FromSlot, "toSlot", b.ToSlot, "slotsWithBlobs", report.withBlobs.Load(),
-		"valid", report.valid.Load(), "missing", report.missing.Load(), "filled", report.filled.Load(), "failed", len(report.failed),
+		"valid", report.valid.Load(), "missing", report.withBlobs.Load()-report.valid.Load(), "filled", report.filled.Load(), "failed", len(report.failed),
 		"dryRun", b.DryRun)
 	if err != nil {
 		return err
@@ -209,10 +209,13 @@ func checkRangeIndexed(ctx context.Context, tx kv.Tx, from, to uint64) error {
 			return err
 		}
 		if prevRoot != (common.Hash{}) {
-			if parent != prevRoot {
-				return fmt.Errorf("slots %d to %d are not in the local index: block at slot %d does not follow the one at slot %d", prevSlot+1, slot-1, slot, prevSlot)
+			if parent == prevRoot {
+				return nil
 			}
-			return nil
+			if slot == prevSlot+1 {
+				return fmt.Errorf("the local index is inconsistent: the block at slot %d does not follow the one at slot %d", slot, prevSlot)
+			}
+			return fmt.Errorf("slots %d to %d are not in the local index: block at slot %d does not follow the one at slot %d", prevSlot+1, slot-1, slot, prevSlot)
 		}
 		parentSlot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, parent)
 		if err != nil {
@@ -223,7 +226,9 @@ func checkRangeIndexed(ctx context.Context, tx kv.Tx, from, to uint64) error {
 		}
 		return nil
 	}
-	for slot := from; ; slot++ {
+	// The scan ends at the first block at or after to: a range that ends on a block needs nothing after it, and
+	// empty slots at its end are empty only if the next block follows the last one in the range.
+	for slot := from; slot <= head; slot++ {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -231,35 +236,16 @@ func checkRangeIndexed(ctx context.Context, tx kv.Tx, from, to uint64) error {
 		if err != nil {
 			return err
 		}
-		if root != (common.Hash{}) {
-			if err := linked(slot, root); err != nil {
-				return err
-			}
-			prevSlot, prevRoot = slot, root
+		if root == (common.Hash{}) {
+			continue
 		}
-		if slot == to {
-			break
-		}
-	}
-	// Empty slots at the end of the range are empty only if the next block follows the last one. A
-	// range that ends on a block has none, and a gap after it is not this range's to prove.
-	if prevRoot != (common.Hash{}) && prevSlot == to {
-		return nil
-	}
-	for slot := to + 1; slot <= head; slot++ {
-		if err := ctx.Err(); err != nil {
+		if err := linked(slot, root); err != nil {
 			return err
 		}
-		root, err := beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
-		if err != nil {
-			return err
-		}
-		if root != (common.Hash{}) {
-			if err := linked(slot, root); err != nil {
-				return err
-			}
+		if slot >= to {
 			break
 		}
+		prevSlot, prevRoot = slot, root
 	}
 	return nil
 }
@@ -298,7 +284,6 @@ func (b *BlobArchiveStoreFill) fillSlot(ctx context.Context, db kv.RoDB, blocks 
 		report.valid.Add(1)
 		return nil
 	}
-	report.missing.Add(1)
 	if b.DryRun {
 		log.Info("Slot needs its sidecars", "slot", slot, "blockRoot", root, "blobs", commitments.Len())
 		return nil
