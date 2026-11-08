@@ -89,15 +89,20 @@ func EncodeAndWrite(w io.Writer, val ssz.Marshaler, prefix ...byte) error {
 }
 
 func DecodeAndReadNoForkDigest(r io.Reader, val ssz.EncodableSSZ, version clparams.StateVersion) error {
-	return decodeAndReadNoForkDigest(r, val, version, nil)
+	return decodeAndReadNoForkDigest(r, val, version, nil, clparams.MaxPayloadSize)
+}
+
+// DecodeAndReadFixedSizeNoForkDigest refuses a payload larger than val's fixed size before decoding it.
+func DecodeAndReadFixedSizeNoForkDigest(r io.Reader, val ssz.EncodableSSZ, version clparams.StateVersion) error {
+	return decodeAndReadNoForkDigest(r, val, version, nil, uint64(val.EncodingSizeSSZ()))
 }
 
 // DecodeAndReadNoForkDigestExact decodes a payload with an exact uncompressed size and no trailing data.
 func DecodeAndReadNoForkDigestExact(r io.Reader, val ssz.EncodableSSZ, version clparams.StateVersion, expectedSize uint64) error {
-	return decodeAndReadNoForkDigest(r, val, version, &expectedSize)
+	return decodeAndReadNoForkDigest(r, val, version, &expectedSize, clparams.MaxPayloadSize)
 }
 
-func decodeAndReadNoForkDigest(r io.Reader, val ssz.EncodableSSZ, version clparams.StateVersion, expectedSize *uint64) error {
+func decodeAndReadNoForkDigest(r io.Reader, val ssz.EncodableSSZ, version clparams.StateVersion, expectedSize *uint64, maxSize uint64) error {
 	// Read varint for length of message.
 	encodedLn, err := ReadUvarint(r)
 	if err != nil {
@@ -106,7 +111,7 @@ func decodeAndReadNoForkDigest(r io.Reader, val ssz.EncodableSSZ, version clpara
 	if expectedSize != nil && encodedLn != *expectedSize {
 		return fmt.Errorf("unexpected payload size: got %d, want %d", encodedLn, *expectedSize)
 	}
-	if encodedLn > clparams.MaxPayloadSize {
+	if encodedLn > maxSize {
 		return errors.New("payload too big")
 	}
 
