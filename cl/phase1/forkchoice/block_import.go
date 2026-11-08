@@ -49,7 +49,8 @@ type preparedPostState struct {
 
 // preparePostState reads no store state. It mutates the post-state's justification fields for the pull-up
 // and restores them on success, so the caller must own the post-state.
-func preparePostState(cfg *clparams.BeaconChainConfig, postState *state.CachingBeaconState, block *cltypes.BeaconBlock) *preparedPostState {
+func preparePostState(postState *state.CachingBeaconState, block *cltypes.BeaconBlock) *preparedPostState {
+	cfg := postState.BeaconConfig()
 	prepared := &preparedPostState{
 		participationEpoch: state.Epoch(postState),
 		participation:      postState.CurrentEpochParticipation().Copy(),
@@ -181,7 +182,7 @@ func (f *ForkChoiceStore) applyBlockImportLocked(
 	f.unrealizedFinalizations.Store(blockRoot, prepared.postPullupFinalized)
 	f.updateUnrealizedCheckpoints(prepared.postPullupJustified, prepared.postPullupFinalized)
 	// Spec compute_pulled_up_tip: if the block is from a prior epoch, apply the post-pull-up checkpoints to the store.
-	currentEpoch := f.computeEpochAtSlot(f.slotAtTimeMs(storeTimeMs))
+	currentEpoch := f.computeEpochAtSlot(currentSlot)
 	if blockEpoch < currentEpoch {
 		f.updateCheckpoints(prepared.postPullupJustified, prepared.postPullupFinalized)
 	}

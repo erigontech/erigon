@@ -275,7 +275,7 @@ func TestPreparePostStateLeavesPostStateRootUnchanged(t *testing.T) {
 	before, err := postState.HashSSZ()
 	require.NoError(t, err)
 
-	preparePostState(postState.BeaconConfig(), postState, beaconBlock)
+	preparePostState(postState, beaconBlock)
 
 	after, err := postState.HashSSZ()
 	require.NoError(t, err)
@@ -297,7 +297,7 @@ func TestPreparePostStateMatchesInlineComputation(t *testing.T) {
 	})
 	require.NotEmpty(t, wantIndices)
 
-	prepared := preparePostState(postState.BeaconConfig(), postState, beaconBlock)
+	prepared := preparePostState(postState, beaconBlock)
 
 	require.NoError(t, prepared.pullupErr)
 	require.Equal(t, expected.CurrentJustifiedCheckpoint(), prepared.postPullupJustified)

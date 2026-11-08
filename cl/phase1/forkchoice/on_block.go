@@ -465,7 +465,7 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 		return fmt.Errorf("replay block, status %+v", status)
 	}
 	storeTimeMs := f.timeMs.Load()
-	prepared := preparePostState(f.beaconCfg, lastProcessedState, block.Block)
+	prepared := preparePostState(lastProcessedState, block.Block)
 	pendingEnvelopeFound, err := f.applyBlockImportLocked(
 		block.Block,
 		blockRoot,

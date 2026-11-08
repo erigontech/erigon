@@ -50,7 +50,7 @@ func TestApplyBlockImportUsesCapturedStoreTime(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, fork_graph.Success, status)
 		storeTimeMs := store.timeMs.Load()
-		prepared := preparePostState(store.beaconCfg, postState, block.Block)
+		prepared := preparePostState(postState, block.Block)
 		require.True(t, store.timeMs.CompareAndSwap(storeTimeMs, storeTimeMs+store.beaconCfg.SecondsPerSlot*1000))
 
 		_, err = store.applyBlockImportLocked(block.Block, blockRoot, common.Hash{}, storeTimeMs, postState, prepared)
