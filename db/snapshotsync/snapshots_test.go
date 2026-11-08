@@ -843,8 +843,8 @@ func TestRetireFilesBelowLogsWhatItRetired(t *testing.T) {
 }
 
 // The SnapshotDownloadToBlock cleanup: after downloading past the target block, the extra
-// segments (ending at/beyond it) are retired across all block types and handed to the seeder,
-// while segments fully below it stay.
+// segments (ending beyond it) are retired across all block types and handed to the seeder,
+// while segments ending at or below it stay.
 func TestRetireFilesAbove(t *testing.T) {
 	logger := log.New()
 	dir := t.TempDir()
@@ -868,13 +868,13 @@ func TestRetireFilesAbove(t *testing.T) {
 		return nil
 	}))
 
-	require.Equal(1, s.dirty[txEnum].Len())
+	require.Equal(2, s.dirty[txEnum].Len())
 	require.True(visibleHas(s, txEnum, 0, 10_000), "segment fully below the target is kept")
-	require.False(visibleHas(s, txEnum, 10_000, 20_000))
+	require.True(visibleHas(s, txEnum, 10_000, 20_000), "segment ending at the target is kept")
 	require.False(visibleHas(s, txEnum, 20_000, 30_000))
 
-	require.Contains(deleted, snaptype.SegmentFileName(version.V1_0, 10_000, 20_000, txEnum), "seeder told about removed files")
-	require.Contains(deleted, snaptype.SegmentFileName(version.V1_0, 20_000, 30_000, txEnum))
+	require.Contains(deleted, snaptype.SegmentFileName(version.V1_0, 20_000, 30_000, txEnum), "seeder told about removed files")
+	require.NotContains(deleted, snaptype.SegmentFileName(version.V1_0, 10_000, 20_000, txEnum))
 	require.NotContains(deleted, snaptype.SegmentFileName(version.V1_0, 0, 10_000, txEnum))
 }
 
@@ -2034,4 +2034,35 @@ func TestMergeAbortKeepsTheIndexOfASameRangeInput(t *testing.T) {
 	exists, err := dir2.FileExist(headersIdx)
 	require.NoError(err)
 	require.True(exists, "%s: the input's index must stay on disk", filepath.Base(headersIdx))
+}
+
+// A segment ending exactly at the download cap is part of the capped download: retiring
+// it only makes the follow-up request, which keeps every file with To <= toBlock, fetch it again.
+func TestRetireFilesAboveKeepsFilesTheCappedDownloadRequests(t *testing.T) {
+	logger := log.New()
+	dir := t.TempDir()
+	require := require.New(t)
+
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
+	defer s.Close()
+	for _, snT := range snaptype2.BlockSnapshotTypes {
+		createTestSegmentFile(t, 0, 10_000, snT.Enum(), dir, version.V1_0, logger)
+		createTestSegmentFile(t, 10_000, 20_000, snT.Enum(), dir, version.V1_0, logger)
+		createTestSegmentFile(t, 20_000, 30_000, snT.Enum(), dir, version.V1_0, logger)
+	}
+	require.NoError(s.OpenFolder())
+
+	const toBlock = 20_000
+	var retired []string
+	require.NoError(s.RetireFilesAbove(toBlock, func(files []string) error {
+		retired = append(retired, files...)
+		return nil
+	}))
+	require.NotEmpty(retired)
+	for _, f := range retired {
+		if filepath.Ext(f) != ".seg" {
+			continue
+		}
+		require.True(filterToBlock(filepath.Base(f), toBlock, kv.Step(0), false), "%s is retired but the capped download requests it again", f)
+	}
 }
