@@ -52,6 +52,16 @@ func (a *Accumulator) Reset(plainStateID uint64) {
 	a.plainStateID = plainStateID
 }
 
+// Checkpoint returns a rollback to completed block changes. Later writes must
+// start with StartChange so the saved changes remain immutable.
+func (a *Accumulator) Checkpoint() (restore func()) {
+	saved := *a
+	a.latestChange = nil
+	a.accountChangeIndex = nil
+	a.storageChangeIndex = nil
+	return func() { *a = saved }
+}
+
 // SendAndReset converts accumulated changes to protobuf and dispatches them,
 // then resets the accumulator. In-process consumers use the same messages.
 func (a *Accumulator) SendAndReset(ctx context.Context, c StateChangeConsumer, pendingBaseFee uint64, pendingBlobFee uint64, blockGasLimit uint64, finalizedBlock uint64) {

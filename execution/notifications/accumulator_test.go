@@ -75,6 +75,45 @@ func TestAccumulatorAppendIncompleteChanges(t *testing.T) {
 	}
 }
 
+func TestAccumulatorCheckpoint(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		incomplete bool
+	}{
+		{name: "complete"},
+		{name: "incomplete", incomplete: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			acc := NewAccumulator()
+			address, slot := common.Address{1}, common.Hash{2}
+			acc.SetStateID(7)
+			acc.StartChange(&types.Header{Time: 1}, [][]byte{{1}}, true)
+			acc.ChangeAccount(address, 0, []byte{2})
+			acc.ChangeStorage(address, 0, slot, []byte{3})
+			if tc.incomplete {
+				acc.MarkIncomplete()
+			}
+			want := acc.Changes()[0].ToProto()
+			restore := acc.Checkpoint()
+
+			acc.SetStateID(8)
+			acc.MarkIncomplete()
+			acc.StartChange(&types.Header{Time: 2}, [][]byte{{4}}, false)
+			acc.ChangeStorage(address, 0, slot, []byte{5})
+			restore()
+
+			require.Equal(t, uint64(7), acc.plainStateID)
+			require.Equal(t, tc.incomplete, acc.stateChangesIncomplete)
+			require.Len(t, acc.Changes(), 1)
+			require.Equal(t, want, acc.Changes()[0].ToProto())
+			acc.ChangeStorage(address, 0, slot, []byte{6})
+			require.Len(t, acc.Changes()[0].Changes, 1)
+			require.Len(t, acc.Changes()[0].Changes[0].StorageChanges, 1)
+			require.Equal(t, []byte{6}, acc.Changes()[0].Changes[0].StorageChanges[0].Data)
+		})
+	}
+}
+
 func TestAccumulatorAppendPreservesChanges(t *testing.T) {
 	for _, name := range []string{"empty source", "nonempty source"} {
 		t.Run(name, func(t *testing.T) {

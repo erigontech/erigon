@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/notifications"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
@@ -112,17 +113,17 @@ var reorgCases = []reorgCase{
 	{name: "NineBlockForkViaForkchoiceOnly", forkLen: 9, newPayload: false},
 }
 
-func newReorgChains(t *testing.T, canonicalLen, sideLen int) (*ExecModuleTester, *blockgen.ChainPack, *blockgen.ChainPack) {
+func newReorgChains(t *testing.T, canonicalLen, sideLen int, opts ...Option) (*ExecModuleTester, *blockgen.ChainPack, *blockgen.ChainPack) {
 	key, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	sender := crypto.PubkeyToAddress(key.PublicKey)
-	m := New(t, WithGenesisSpec(&types.Genesis{
+	m := New(t, append([]Option{WithGenesisSpec(&types.Genesis{
 		Config: chain.AllProtocolChanges,
 		Alloc: types.GenesisAlloc{
 			sender:     {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
 			logEmitter: {Code: []byte{0x60, 0x00, 0x60, 0x00, 0xa0, 0x00}}, // PUSH1 0 PUSH1 0 LOG0 STOP
 		},
-	}), WithKey(key))
+	}), WithKey(key)}, opts...)...)
 	signer := *types.LatestSignerForChainID(m.ChainConfig.ChainID)
 	gasPrice := uint256.NewInt(m.Genesis.BaseFee().Uint64() * 2)
 	sign := func(txn types.Transaction) types.Transaction {
@@ -500,7 +501,7 @@ func TestMissingSegmentForkchoicePreservesCanonicalRemovedLogs(t *testing.T) {
 	require.Equal(t, 1, got.logCount(a3.Hash(), true))
 }
 
-func TestRejectedUnwindingForkchoicePreservesCanonicalRemovedLogs(t *testing.T) {
+func TestRejectedUnwindingForkchoicePreservesCanonicalNotifications(t *testing.T) {
 	m, canonical, side := newReorgChains(t, 2, 2)
 	b1, a2 := canonical.Blocks[0], canonical.Blocks[1]
 	b2 := side.Blocks[1]
@@ -525,14 +526,19 @@ func TestRejectedUnwindingForkchoicePreservesCanonicalRemovedLogs(t *testing.T) 
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, fcu.Status)
 	m.ExecModule.WaitIdle(t.Context())
-	waitForBatchWithHead(b2.Hash())
+	batch := waitForBatchWithHead(b2.Hash())
+	require.Equal(t, 2, len(batch.ChangeBatch), "only the accepted reorg's changes must be announced")
+	require.Equal(t, remoteproto.Direction_UNWIND, batch.ChangeBatch[0].Direction)
+	require.Equal(t, b1.Hash(), common.Hash(gointerfaces.ConvertH256ToHash(batch.ChangeBatch[0].BlockHash)))
+	require.Equal(t, remoteproto.Direction_FORWARD, batch.ChangeBatch[1].Direction)
+	require.Equal(t, b2.Hash(), common.Hash(gointerfaces.ConvertH256ToHash(batch.ChangeBatch[1].BlockHash)))
 
 	got := collectReorgSubscriptions(nil, logs, nil)
 	require.Equal(t, 1, got.logCount(b2.Hash(), false))
 	require.Equal(t, 1, got.logCount(a2.Hash(), true), "replaced canonical block's log was not reported as removed")
 }
 
-func TestRejectedUnwindingForkchoiceDoesNotReportCanonicalLogsRemoved(t *testing.T) {
+func TestRejectedUnwindingForkchoiceDoesNotAnnounceCanonicalUnwind(t *testing.T) {
 	m, canonical, _ := newReorgChains(t, 3, 3)
 	b1, a2, a3 := canonical.Blocks[0], canonical.Blocks[1], canonical.Blocks[2]
 	waitForBatchWithHead := subscribeStateChangeHeads(t, m)
@@ -551,9 +557,66 @@ func TestRejectedUnwindingForkchoiceDoesNotReportCanonicalLogsRemoved(t *testing
 	m.Notifications.Events.EmptyLogSubscription(false)
 	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), []*types.Block{a3}))
 	m.ExecModule.WaitIdle(t.Context())
-	waitForBatchWithHead(a3.Hash())
+	batch := waitForBatchWithHead(a3.Hash())
+	require.Equal(t, 1, len(batch.ChangeBatch), "the rejected forkchoice must not leave changes for the next extension")
+	require.Equal(t, remoteproto.Direction_FORWARD, batch.ChangeBatch[0].Direction)
 
 	got := collectReorgSubscriptions(nil, logs, nil)
 	require.Equal(t, 1, got.logCount(a3.Hash(), false))
 	require.Zero(t, got.logCount(a2.Hash(), true), "canonical block's log was reported as removed")
+}
+
+func TestRejectedCatchupForkchoiceKeepsCommittedNotifications(t *testing.T) {
+	m, canonical, side := newReorgChains(t, 2, 27, WithStepSize(16), WithLoopBlockLimit(8))
+	waitForBatchWithHead := subscribeStateChangeHeads(t, m)
+	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), canonical.Blocks))
+	m.ExecModule.WaitIdle(t.Context())
+	waitForBatchWithHead(canonical.TopBlock.Hash())
+
+	header := types.CopyHeader(side.TopBlock.HeaderNoCopy())
+	header.Root[0] ^= 1
+	badTip := types.NewBlockFromNetwork(header, side.TopBlock.Body(), side.TopBlock.BlockAccessListSidecar())
+	blocks := append([]*types.Block(nil), side.Blocks[1:]...)
+	blocks[len(blocks)-1] = badTip
+	status, err := m.InsertBlocks(t.Context(), blocks)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+	fcu, err := m.UpdateForkChoice(t.Context(), badTip.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusBadBlock, fcu.Status)
+	m.ExecModule.WaitIdle(t.Context())
+
+	var committed uint64
+	require.NoError(t, m.DB.View(t.Context(), func(tx kv.Tx) error {
+		var err error
+		committed, err = stages.GetStageProgress(tx, stages.Finish)
+		return err
+	}))
+	require.Greater(t, committed, canonical.TopBlock.NumberU64(), "catch-up must commit before the rejected cycle")
+	require.Less(t, committed, side.TopBlock.NumberU64()-1, "the failed cycle must also contain a valid, uncommitted block")
+	changes := m.Notifications.Accumulator.Changes()
+	require.Equal(t, int(committed), len(changes), "retain the canonical unwind and committed blocks, without the failed cycle")
+	require.Equal(t, notifications.DirectionUnwind, changes[0].Direction)
+	require.Equal(t, side.Blocks[0].Hash(), changes[0].BlockHash)
+	for i, change := range changes[1:] {
+		require.Equal(t, notifications.DirectionForward, change.Direction)
+		require.Equal(t, side.Blocks[i+1].Hash(), change.BlockHash)
+	}
+
+	status, err = m.InsertBlocks(t.Context(), []*types.Block{side.TopBlock})
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+	fcu, err = m.UpdateForkChoice(t.Context(), side.TopBlock.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, fcu.Status)
+	m.ExecModule.WaitIdle(t.Context())
+	batch := waitForBatchWithHead(side.TopBlock.Hash())
+	require.Equal(t, len(side.Blocks), len(batch.ChangeBatch), "committed and retried changes must be delivered once")
+	require.Equal(t, remoteproto.Direction_UNWIND, batch.ChangeBatch[0].Direction)
+	for i, change := range batch.ChangeBatch {
+		require.Equal(t, side.Blocks[i].Hash(), common.Hash(gointerfaces.ConvertH256ToHash(change.BlockHash)))
+		if i > 0 {
+			require.Equal(t, remoteproto.Direction_FORWARD, change.Direction)
+		}
+	}
 }
