@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
 )
 
@@ -212,6 +213,10 @@ func (dm *DomainMetrics) UpdateFileReadsUnique(domain kv.Domain, key []byte, sta
 	if dm == nil {
 		return
 	}
+	if dbg.SBNoUniq {
+		dm.UpdateFileReads(domain, start)
+		return
+	}
 	// Composite key so two domains can hold the same prefix shape without colliding.
 	domainKey := domain.String() + ":" + string(key)
 	alreadySeen := true
@@ -304,6 +309,9 @@ const ckMetrics ctxKey = iota
 // path extracts it via MetricsFromContext so a concurrent worker accumulates
 // into its own instance and never touches shared state.
 func ContextWithMetrics(ctx context.Context, m *DomainMetrics) context.Context {
+	if dbg.SBNoCommit {
+		return ctx
+	}
 	return context.WithValue(ctx, ckMetrics, m)
 }
 

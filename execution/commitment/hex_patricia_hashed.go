@@ -1875,7 +1875,7 @@ func (hph *HexPatriciaHashed) hashRow(row int, depth int16, hasher io.Writer) (*
 
 		// Save hash before compute for metrics
 		var hashBefore []byte
-		if dbg.KVReadLevelledMetrics && (cell.accountAddrLen > 0 || cell.storageAddrLen > 0) {
+		if !dbg.SBNoTrie && dbg.KVReadLevelledMetrics && (cell.accountAddrLen > 0 || cell.storageAddrLen > 0) {
 			hashBefore = make([]byte, cell.stateHashLen)
 			copy(hashBefore, cell.stateHash[:cell.stateHashLen])
 		}
@@ -1890,7 +1890,7 @@ func (hph *HexPatriciaHashed) hashRow(row int, depth int16, hasher io.Writer) (*
 		}
 
 		// Collect metrics on hash recomputation vs skip
-		if dbg.KVReadLevelledMetrics && hashBefore != nil {
+		if !dbg.SBNoTrie && dbg.KVReadLevelledMetrics && hashBefore != nil {
 			counters := hph.hadToLoadL[hph.depthsToTxNum[depth]]
 			if !bytes.Equal(hashBefore, cell.stateHash[:cell.stateHashLen]) {
 				if cell.accountAddrLen > 0 {
@@ -1941,7 +1941,7 @@ func (hph *HexPatriciaHashed) prepareBranchCells(row int, depth int16, nibblesLe
 		}
 		/* memoization of state hashes*/
 		var counters skipStat
-		if dbg.KVReadLevelledMetrics {
+		if !dbg.SBNoTrie && dbg.KVReadLevelledMetrics {
 			counters = hph.hadToLoadL[hph.depthsToTxNum[depth]]
 		}
 		if cell.stateHashLen > 0 && (hph.touchMap[row]&hph.afterMap[row]&uint16(1<<nibble) > 0 || cell.stateHashLen != length.Hash) {
@@ -1963,7 +1963,7 @@ func (hph *HexPatriciaHashed) prepareBranchCells(row int, depth int16, nibblesLe
 		if err != nil {
 			return 0, err
 		}
-		if dbg.KVReadLevelledMetrics {
+		if !dbg.SBNoTrie && dbg.KVReadLevelledMetrics {
 			hph.hadToLoadL[hph.depthsToTxNum[depth]] = counters
 		}
 		/* end of memoization */
@@ -1993,14 +1993,14 @@ func (hph *HexPatriciaHashed) foldPropagate(row int, nibble, upDepth, depth int1
 	upCell.extLen = 0
 	upCell.stateHashLen = 0
 	var counters skipStat
-	if dbg.KVReadLevelledMetrics {
+	if !dbg.SBNoTrie && dbg.KVReadLevelledMetrics {
 		counters = hph.hadToLoadL[hph.depthsToTxNum[depth]]
 	}
 	counters, err := hph.loadStateIfNeeded(cell, counters)
 	if err != nil {
 		return err
 	}
-	if dbg.KVReadLevelledMetrics {
+	if !dbg.SBNoTrie && dbg.KVReadLevelledMetrics {
 		hph.hadToLoadL[hph.depthsToTxNum[depth]] = counters
 	}
 	// propagate cell into parent row
@@ -2848,7 +2848,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 
 	flushTrieStateRates()
 
-	if dbg.KVReadLevelledMetrics {
+	if !dbg.SBNoTrie && dbg.KVReadLevelledMetrics {
 		log.Debug(
 			"commitment finished, counters updated (no reset)",
 			//"hadToLoad", common.PrettyCounter(hadToLoad.Load()), "skippedLoad", common.PrettyCounter(skippedLoad.Load()),
