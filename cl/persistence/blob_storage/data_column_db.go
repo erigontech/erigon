@@ -2,9 +2,11 @@ package blob_storage
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"os"
+	"sync"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -40,16 +42,29 @@ type dataColumnStorageImpl struct {
 	slotLocks
 	beaconChainConfig *clparams.BeaconChainConfig
 	emitters          *beaconevents.EventEmitter
+	bitmaps           *columnBitmaps
 }
 
 func NewDataColumnStore(fs afero.Fs, beaconChainConfig *clparams.BeaconChainConfig, emitters *beaconevents.EventEmitter) DataColumnStorage {
 	impl := &dataColumnStorageImpl{
 		beaconChainConfig: beaconChainConfig,
 		emitters:          emitters,
+		bitmaps:           newColumnBitmaps(maxColumnBitmaps),
 	}
 	impl.bucketStore.init(fs)
 	impl.slotLocks.initLocks()
 	return impl
+}
+
+// forRoot stripes by block root, not slot: a root's files are named by its bucket and root
+// alone, so callers passing different slots of one bucket must still serialize, or a scan
+// could seed a bitmap around a write or remove of the same root.
+func (s *dataColumnStorageImpl) forRoot(root common.Hash) *sync.RWMutex {
+	return &s.locks[binary.LittleEndian.Uint64(root[:8])%rwLocksCount]
+}
+
+func (s *dataColumnStorageImpl) columnKey(slot uint64, root common.Hash) columnKey {
+	return columnKey{root: root, bucket: slot / subdivisionSlot, width: s.beaconChainConfig.NumberOfColumns}
 }
 
 func (s *dataColumnStorageImpl) WriteColumnSidecars(ctx context.Context, blockRoot common.Hash, columnIndex int64, columnData *cltypes.DataColumnSidecar) error {
@@ -70,18 +85,26 @@ func (s *dataColumnStorageImpl) WriteColumnSidecars(ctx context.Context, blockRo
 	columnData.BlockRoot = blockRoot
 	columnData.Slot = slot
 
-	lock := s.forSlot(slot)
-	lock.Lock()
-	defer lock.Unlock()
-	if !s.startWrite(slot) {
-		return nil
-	}
-	created, err := s.writeAdmitted(slot, blockRoot, uint64(columnIndex), columnData)
-	s.finishWrite()
+	created, err := func() (bool, error) {
+		lock := s.forRoot(blockRoot)
+		lock.Lock()
+		defer lock.Unlock()
+		if !s.startWrite(slot) {
+			return false, nil
+		}
+		defer s.finishWrite()
+		created, err := s.writeAdmitted(slot, blockRoot, uint64(columnIndex), columnData)
+		if err != nil {
+			return false, err
+		}
+		s.bitmaps.set(s.columnKey(slot, blockRoot), uint64(columnIndex))
+		return created, nil
+	}()
 	if err != nil {
 		return err
 	}
 	if created {
+		s.emitters.NotifyDataColumnStored(blockRoot)
 		s.emitters.Operation().SendDataColumnSidecar(beaconevents.NewDataColumnSidecarData(columnData))
 		log.Trace("wrote data column sidecar", "slot", slot, "block_root", blockRoot.String(), "column_index", columnIndex)
 	}
@@ -105,21 +128,45 @@ func (s *dataColumnStorageImpl) ReadColumnSidecarByColumnIndex(ctx context.Conte
 }
 
 func (s *dataColumnStorageImpl) ColumnSidecarExists(ctx context.Context, slot uint64, blockRoot common.Hash, columnIndex int64) (bool, error) {
-	return s.exists(slot, blockRoot, uint64(columnIndex))
+	column := uint64(columnIndex)
+	// Called per column from gossip and peer-DAS, so it must not queue behind a prune waiting
+	// on pruneMutex. A prune that raises the floor after this load removes the bucket after
+	// the answer, as it would after a stat.
+	if slot >= s.pruneFloor.Load() {
+		if stored, known := s.bitmaps.has(s.columnKey(slot, blockRoot), column); known {
+			return stored, nil
+		}
+	}
+	return s.exists(slot, blockRoot, column)
 }
 
 func (s *dataColumnStorageImpl) RemoveColumnSidecars(ctx context.Context, slot uint64, blockRoot common.Hash, columnIndices ...int64) error {
-	lock := s.forSlot(slot)
+	if len(columnIndices) == 0 {
+		return nil
+	}
+	lock := s.forRoot(blockRoot)
 	lock.Lock()
 	defer lock.Unlock()
+	key := s.columnKey(slot, blockRoot)
 	var firstErr error
+	defer func() {
+		if firstErr != nil {
+			// A file that failed to go may still be there; let the files answer for this
+			// root again.
+			s.bitmaps.forget(blockRoot)
+		}
+	}()
 	for _, index := range columnIndices {
+		// The bit goes after the file, so ColumnSidecarExists, which takes no root lock,
+		// never reports missing a file that a failed remove leaves in place. Until then it
+		// answers as a stat taken just before the unlink would.
 		if err := s.remove(slot, blockRoot, uint64(index)); err != nil {
 			if firstErr == nil {
 				firstErr = fmt.Errorf("failed to remove column sidecar: %w", err)
 			}
 			continue
 		}
+		s.bitmaps.clear(key, uint64(index))
 		log.Trace("removed data column sidecar", "slot", slot, "block_root", blockRoot.String(), "column_index", index)
 	}
 	return firstErr
@@ -157,11 +204,29 @@ func (s *dataColumnStorageImpl) WriteStream(w io.Writer, slot uint64, blockRoot 
 
 // GetSavedColumnIndex returns the list of saved column indices for the given slot and block root.
 func (s *dataColumnStorageImpl) GetSavedColumnIndex(ctx context.Context, slot uint64, blockRoot common.Hash) ([]uint64, error) {
-	lock := s.forSlot(slot)
+	lock := s.forRoot(blockRoot)
 	lock.RLock()
 	defer lock.RUnlock()
+	key := s.columnKey(slot, blockRoot)
+	if !s.startWrite(slot) {
+		return s.scanSavedColumns(slot, key)
+	}
+	defer s.finishWrite()
+	if saved, ok := s.bitmaps.columns(key); ok {
+		return saved, nil
+	}
+	saved, err := s.scanSavedColumns(slot, key)
+	if err != nil {
+		return nil, err
+	}
+	s.bitmaps.seed(key, saved)
+	return saved, nil
+}
+
+func (s *dataColumnStorageImpl) scanSavedColumns(slot uint64, key columnKey) ([]uint64, error) {
+	blockRoot := key.root
 	var savedColumns []uint64
-	for i := uint64(0); i < s.beaconChainConfig.NumberOfColumns; i++ {
+	for i := uint64(0); i < key.width; i++ {
 		exists, err := s.exists(slot, blockRoot, i)
 		if err != nil {
 			return nil, err
@@ -176,5 +241,7 @@ func (s *dataColumnStorageImpl) GetSavedColumnIndex(ctx context.Context, slot ui
 
 func (s *dataColumnStorageImpl) PruneBelow(slot uint64) error {
 	log.Debug("pruning data column sidecars", "cutoff_slot", slot)
-	return s.pruneBelow(slot)
+	err := s.pruneBelow(slot)
+	s.bitmaps.dropBelow(s.pruneFloor.Load() / subdivisionSlot)
+	return err
 }

@@ -59,17 +59,7 @@ func RederiveBlockAccessList(
 	blockNum := header.Number.Uint64()
 	balIO := &state.VersionedIO{}
 	noopWriter := state.NewNoopWriter()
-	var headerErr error
-	hashFn := protocol.GetHashFn(header, func(hash common.Hash, number uint64) (*types.Header, error) {
-		h, err := getHeader(hash, number)
-		if err == nil && h == nil {
-			err = fmt.Errorf("header %d %x not found", number, hash)
-		}
-		if err != nil && headerErr == nil {
-			headerErr = err
-		}
-		return h, err
-	})
+	hashFn := protocol.GetHashFn(header, getHeader)
 	// phaseErr returns the error of the phase that just ran. The node's own
 	// failures come first: the EVM folds failed state reads and header lookups
 	// into failed calls, and the executor recovers panics into errors.
@@ -79,9 +69,6 @@ func RederiveBlockAccessList(
 		}
 		if readErr := ibs.StateReadError(); readErr != nil {
 			return readErr
-		}
-		if headerErr != nil {
-			return headerErr
 		}
 		if errors.Is(err, protocol.ErrExecPanic) {
 			return err
@@ -121,10 +108,6 @@ func RederiveBlockAccessList(
 	vmCfg := vm.Config{}
 	receipts := make(types.Receipts, 0, len(txns))
 	for i, txn := range txns {
-		// The live executor runs RIP-7560 transactions on their own path.
-		if txn.Type() == types.AccountAbstractionTxType {
-			return nil, fmt.Errorf("bal.RederiveBlockAccessList: replay tx %d of block %d: account abstraction transactions are not replayed", i, blockNum)
-		}
 		ibs.SetTxContext(blockNum, i)
 		evm := protocol.CreateEVM(cfg, hashFn, engine, accounts.NilAddress, ibs, header, vmCfg)
 		stopCancelWatch := context.AfterFunc(ctx, evm.Cancel)

@@ -37,12 +37,6 @@ import (
 const (
 	DefaultAccountCacheBytes = 150 * datasize.MB
 	DefaultStorageCacheBytes = 1 * datasize.GB
-
-	// Per-domain avg bytes held outside freelru's element, translating the byte
-	// budget into the entry-count cap. Entry bookkeeping is excluded: it sits
-	// inside the element, which the slot charge already covers.
-	avgAccountPayloadBytes = 70 // 20 addr + ~50 account record
-	avgStoragePayloadBytes = 64 // 52 addr+slot + ~12 value
 )
 
 // StateCache is a unified cache for domain data (Account, Storage, Code).
@@ -89,8 +83,8 @@ func NewStateCache(accountBytes, storageBytes, codeBytes, addrBytes datasize.Byt
 		sc.disableFills = true
 		log.Info("[cache] STATE_CACHE_FILLS=false — read fills disabled, only post-commit publication populates the cache")
 	}
-	sc.caches[kv.AccountsDomain] = newDomainCacheBytes(accountBytes, avgAccountPayloadBytes, mode)
-	sc.caches[kv.StorageDomain] = newDomainCacheBytes(storageBytes, avgStoragePayloadBytes, mode)
+	sc.caches[kv.AccountsDomain] = NewDomainCacheMode(accountBytes, mode)
+	sc.caches[kv.StorageDomain] = NewDomainCacheMode(storageBytes, mode)
 	sc.caches[kv.CodeDomain] = NewCodeCache(codeBytes, addrBytes)
 	// CommitmentDomain deliberately gets no cache: commitment data lives in the
 	// BranchCache, and the nil slot short-circuits every StateCache path for it
@@ -112,16 +106,6 @@ func stateCacheModeFromEnv() Mode {
 	default:
 		log.Warn("[cache] unrecognised STATE_CACHE_MODE; defaulting to evict", "value", v)
 		return ModeEvictLRU
-	}
-}
-
-// newDomainCacheBytes constructs a DomainCache whose growth ceiling is derived
-// from the byte budget using the supplied per-domain avg. It jump-grows from a
-// small start into the shared envelope on demand, so a domain with a small
-// working set (a test fixture) never pre-commits the full budget.
-func newDomainCacheBytes(capacityBytes datasize.ByteSize, avgBytes uint32, mode Mode) *DomainCache {
-	return &DomainCache{
-		GenericCache: NewGenericCacheWithAvg(capacityBytes, avgBytes, func(v []byte) int { return len(v) }, mode),
 	}
 }
 
@@ -163,7 +147,7 @@ func (c *StateCache) getWithTxNum(domain kv.Domain, key []byte) ([]byte, uint64,
 	return cache.GetWithTxNum(key)
 }
 
-// getCodeByHash retrieves code bytes by their Ethereum codeHash (keccak256),
+// GetCodeByHash retrieves code bytes by their Ethereum codeHash (keccak256),
 // bypassing the addr-keyed CodeDomain lookup. Returns (nil, false) on miss or
 // when the code domain cache is not a CodeCache (defensive fallback).
 //
@@ -171,7 +155,7 @@ func (c *StateCache) getWithTxNum(domain kv.Domain, key []byte) ([]byte, uint64,
 // for EXTCODESIZE / EXTCODEHASH / CALL targets. Lets many-addrs-one-code
 // patterns (proxies, factory clones, ERC-20 holders) share a single codeHashToCode
 // entry.
-func (c *StateCache) getCodeByHash(codeHash []byte) ([]byte, bool) {
+func (c *StateCache) GetCodeByHash(codeHash []byte) ([]byte, bool) {
 	cc, ok := c.caches[kv.CodeDomain].(*CodeCache)
 	if !ok {
 		return nil, false

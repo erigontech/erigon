@@ -60,7 +60,8 @@ type account struct {
 	// empty records whether the account existed before the tx, decided at first
 	// lookup (before Storage is populated by SLOAD/SSTORE) so that later reads of
 	// its own storage during the tx don't retroactively make it look non-empty.
-	empty bool
+	empty          bool
+	selfdestructed bool
 }
 
 // writeStorage writes the slots in key order, as encoding/json orders map keys.
@@ -114,13 +115,9 @@ type prestateTracer struct {
 	env       *tracing.VMContext
 	pre       state
 	post      state
-	create    bool
-	to        accounts.Address
 	config    prestateTracerConfig
 	interrupt atomic.Bool           // Atomic flag to signal execution interruption
 	reason    atomic.Pointer[error] // Reason for the interruption, populated by Stop
-	created   map[accounts.Address]bool
-	deleted   map[accounts.Address]bool
 }
 
 type prestateTracerConfig struct {
@@ -144,11 +141,9 @@ func newPrestateTracer(ctx *tracers.Context, cfg json.RawMessage) (*tracers.Trac
 	}
 
 	t := &prestateTracer{
-		pre:     state{},
-		post:    state{},
-		config:  config,
-		created: make(map[accounts.Address]bool),
-		deleted: make(map[accounts.Address]bool),
+		pre:    state{},
+		post:   state{},
+		config: config,
 	}
 
 	return &tracers.Tracer{
@@ -165,17 +160,19 @@ func newPrestateTracer(ctx *tracers.Context, cfg json.RawMessage) (*tracers.Trac
 	}, nil
 }
 
-// ExitHook is invoked when the processing of a message ends.
+// Capture the journaled status after all call and atomic batch rollbacks.
+// Finalization can clear these markers before OnTxEnd runs.
 func (t *prestateTracer) OnExitV2(depth int, output []byte, gasUsed mdgas.MdGasUsage, err error, reverted bool) {
-	if reverted {
-		// clear the created or deleted address beacuse the tx is reverted; and so avoid to notify wrong state change
-		for addr := range t.created {
-			delete(t.created, addr)
+	if depth != 0 || !t.config.DiffMode {
+		return
+	}
+	for addr, account := range t.pre {
+		selfdestructed, err := t.env.IntraBlockState.HasSelfdestructed(addr)
+		if err != nil {
+			t.Stop(err)
+			return
 		}
-
-		for addr := range t.deleted {
-			delete(t.deleted, addr)
-		}
+		account.selfdestructed = selfdestructed
 	}
 }
 
@@ -202,17 +199,6 @@ func (t *prestateTracer) OnOpcodeV2(pc uint64, opcode byte, gas mdgas.MdGas, cos
 	case stackLen >= 1 && (op == vm.EXTCODECOPY || op == vm.EXTCODEHASH || op == vm.EXTCODESIZE || op == vm.BALANCE || op == vm.SELFDESTRUCT):
 		addr := accounts.InternAddress(stackData[stackLen-1].Bytes20())
 		t.lookupAccount(addr)
-		if op == vm.SELFDESTRUCT {
-			if t.env.ChainConfig.IsCancun(t.env.Time) {
-				// EIP-6780: Post Dancum/Cancun only delete if created in same transaction
-				if t.created[caller] {
-					t.deleted[caller] = true
-				}
-			} else {
-				// EIP-6780: Pre Dancum/Cancun only delete if created in same transaction
-				t.deleted[caller] = true
-			}
-		}
 
 	case stackLen >= 5 && (op == vm.DELEGATECALL || op == vm.CALL || op == vm.STATICCALL || op == vm.CALLCODE):
 		addr := accounts.InternAddress(stackData[stackLen-2].Bytes20())
@@ -229,7 +215,6 @@ func (t *prestateTracer) OnOpcodeV2(pc uint64, opcode byte, gas mdgas.MdGas, cos
 		nonce, _ := t.env.IntraBlockState.GetNonce(caller)
 		addr := accounts.InternAddress(types.CreateAddress(caller.Value(), nonce))
 		t.lookupAccount(addr)
-		t.created[addr] = true
 	case stackLen >= 4 && op == vm.CREATE2:
 		offset := stackData[stackLen-2]
 		size := stackData[stackLen-3]
@@ -241,33 +226,45 @@ func (t *prestateTracer) OnOpcodeV2(pc uint64, opcode byte, gas mdgas.MdGas, cos
 		salt := stackData[stackLen-4]
 		addr := accounts.InternAddress(types.CreateAddress2(caller.Value(), salt.Bytes32(), inithash))
 		t.lookupAccount(addr)
-		t.created[addr] = true
 	}
 }
 
 func (t *prestateTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from accounts.Address) {
 	t.env = env
-
-	nounce, _ := env.IntraBlockState.GetNonce(from)
-
-	if tx.GetTo() == nil {
-		t.create = true
-		t.to = accounts.InternAddress(types.CreateAddress(from.Value(), nounce))
-	} else {
-		t.to = accounts.InternAddress(*tx.GetTo())
-		t.create = false
+	t.lookupAccount(from)
+	t.lookupAccount(env.Coinbase)
+	if frameTx, ok := tx.Unwrap().(*types.FrameTransaction); ok {
+		// Capture direct targets before any frame runs; earlier frames may change
+		// the account state or delegation that a later frame will observe.
+		for _, frame := range frameTx.Frames {
+			target := accounts.InternAddress(frame.ResolvedTarget(frameTx.SenderAddress))
+			t.lookupAccount(target)
+			code, _ := env.IntraBlockState.GetCode(target)
+			if delegated, ok := types.ParseDelegation(code); ok {
+				t.lookupAccount(delegated)
+			}
+		}
+		if !frameTx.UsesLegacyNonce() {
+			manager := accounts.InternAddress(types.FrameNonceManager)
+			t.lookupAccount(manager)
+			for _, key := range frameTx.NonceKeys {
+				t.lookupStorage(manager, types.FrameNonceSlot(frameTx.SenderAddress, key))
+			}
+		}
+	} else if tx.IsContractDeploy() {
+		nonce, _ := env.IntraBlockState.GetNonce(from)
+		t.lookupAccount(accounts.InternAddress(types.CreateAddress(from.Value(), nonce)))
+	} else if tx.GetTo() != nil {
+		to := accounts.InternAddress(*tx.GetTo())
+		t.lookupAccount(to)
 		// Lookup the delegation target
 		if t.env.ChainConfig.IsPrague(t.env.Time) {
-			code, _ := t.env.IntraBlockState.GetCode(t.to)
+			code, _ := t.env.IntraBlockState.GetCode(to)
 			if target, ok := types.ParseDelegation(code); ok {
 				t.lookupAccount(target)
 			}
 		}
 	}
-
-	t.lookupAccount(from)
-	t.lookupAccount(t.to)
-	t.lookupAccount(env.Coinbase)
 
 	// Add accounts with authorizations to the prestate before they get applied.
 	auths := tx.GetAuthorizations()
@@ -278,10 +275,6 @@ func (t *prestateTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction,
 			continue
 		}
 		t.lookupAccount(accounts.InternAddress(addr))
-	}
-
-	if t.create && t.config.DiffMode {
-		t.created[t.to] = true
 	}
 }
 
@@ -311,8 +304,9 @@ func (t *prestateTracer) OnTxEndV2(receipt *types.Receipt, txnGasUsage mdgas.Txn
 
 func (t *prestateTracer) processDiffState() {
 	for addr, state := range t.pre {
-		// The deleted account's state is pruned from `post` but kept in `pre`
-		if _, ok := t.deleted[addr]; ok {
+		newBalance, _ := t.env.IntraBlockState.GetBalance(addr)
+		// A deleted account belongs only in the prestate.
+		if state.selfdestructed && (!t.env.ChainConfig.IsAmsterdam(t.env.Time) || newBalance.IsZero()) {
 			continue
 		}
 		modified := false
@@ -320,12 +314,17 @@ func (t *prestateTracer) processDiffState() {
 			Storage: make(map[common.Hash]common.Hash),
 		}
 
-		newBalance, _ := t.env.IntraBlockState.GetBalance(addr)
-		newNonce, _ := t.env.IntraBlockState.GetNonce(addr)
-		// GetCode returns empty bytes for both deleted and codeless accounts;
-		// GetCodeHash distinguishes them (deleted → zero hash).
-		codeHash, _ := t.env.IntraBlockState.GetCodeHash(addr)
-		newCodeHash := codeHash.Value()
+		// EIP-8246 keeps the balance but clears nonce, code and storage.
+		// OnTxEnd can run before finalization, so do not read those fields back.
+		var newNonce uint64
+		newCodeHash := empty.CodeHash
+		if !state.selfdestructed {
+			newNonce, _ = t.env.IntraBlockState.GetNonce(addr)
+			// GetCode returns empty bytes for both deleted and codeless accounts;
+			// GetCodeHash distinguishes them (deleted → zero hash).
+			codeHash, _ := t.env.IntraBlockState.GetCodeHash(addr)
+			newCodeHash = codeHash.Value()
+		}
 
 		if newBalance != uint256.Int(*state.Balance) {
 			modified = true
@@ -347,7 +346,10 @@ func (t *prestateTracer) processDiffState() {
 		}
 
 		if !t.config.DisableCode {
-			newCode, _ := t.env.IntraBlockState.GetCode(addr)
+			var newCode []byte
+			if !state.selfdestructed {
+				newCode, _ = t.env.IntraBlockState.GetCode(addr)
+			}
 			prevCode := common.Deref(state.Code)
 			if !bytes.Equal(newCode, prevCode) {
 				modified = true
@@ -362,7 +364,10 @@ func (t *prestateTracer) processDiffState() {
 					delete(state.Storage, key)
 				}
 
-				newVal, _ := t.env.IntraBlockState.GetState(addr, accounts.InternKey(key))
+				var newVal uint256.Int
+				if !state.selfdestructed {
+					newVal, _ = t.env.IntraBlockState.GetState(addr, accounts.InternKey(key))
+				}
 				if new(uint256.Int).SetBytes(val[:]).Eq(&newVal) {
 					// Omit unchanged slots
 					delete(state.Storage, key)
