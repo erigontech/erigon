@@ -72,7 +72,6 @@ func applyTransaction(config *chain.Config, engine rules.EngineReader, gp *GasPo
 		receipt *types.Receipt
 		result  *evmtypes.ExecutionResult
 		err     error
-		txEnded bool
 	)
 
 	rules := evm.ChainRules()
@@ -83,23 +82,23 @@ func applyTransaction(config *chain.Config, engine rules.EngineReader, gp *GasPo
 	}
 	msg.SetCheckNonce(!cfg.StatelessExec)
 
-	if cfg.Tracer != nil {
-		if cfg.Tracer.OnTxStart != nil {
-			cfg.Tracer.OnTxStart(evm.GetVMContext(), txn, msg.From())
-		}
-		if cfg.Tracer.HasTxEndHook() {
-			defer func() {
-				if txEnded {
-					return
-				}
-				var txnGasUsage mdgas.TxnGasUsage
-				if result != nil {
-					txnGasUsage = result.TxnGasUsage
-				}
-				cfg.Tracer.EmitTxEnd(receipt, txnGasUsage, err)
-			}()
-		}
+	if cfg.Tracer != nil && cfg.Tracer.OnTxStart != nil {
+		cfg.Tracer.OnTxStart(evm.GetVMContext(), txn, msg.From())
 	}
+	// The journal reset hides a versioned state's own writes, so it waits for the tracer's tx end.
+	var finalized bool
+	defer func() {
+		if cfg.Tracer.HasTxEndHook() {
+			var txnGasUsage mdgas.TxnGasUsage
+			if result != nil {
+				txnGasUsage = result.TxnGasUsage
+			}
+			cfg.Tracer.EmitTxEnd(receipt, txnGasUsage, err)
+		}
+		if finalized {
+			ibs.ClearJournalAndRefund()
+		}
+	}()
 
 	txContext := NewEVMTxContext(msg)
 
@@ -109,14 +108,10 @@ func applyTransaction(config *chain.Config, engine rules.EngineReader, gp *GasPo
 	if err != nil {
 		return nil, err
 	}
-	// FinalizeTx clears the journal that lets reads see the tx's own versioned writes, so a versioned
-	// state ends the tx for tracers first.
-	finalizeFirst := !ibs.IsVersioned()
-	if finalizeFirst {
-		if err = ibs.FinalizeTx(rules, stateWriter); err != nil {
-			return nil, err
-		}
+	if err = ibs.FinalizeTxKeepJournal(rules, stateWriter); err != nil {
+		return nil, err
 	}
+	finalized = true
 	gasUsed.AddResult(result)
 	gasUsed.Blob += txn.GetBlobGas()
 
@@ -125,15 +120,6 @@ func applyTransaction(config *chain.Config, engine rules.EngineReader, gp *GasPo
 	if !cfg.NoReceipts {
 		// by the txn
 		receipt = MakeReceipt(&header.Number, header.Hash(), txn, gasUsed.Receipt, result, ibs, evm)
-	}
-	if !finalizeFirst {
-		if cfg.Tracer.HasTxEndHook() {
-			cfg.Tracer.EmitTxEnd(receipt, result.TxnGasUsage, nil)
-			txEnded = true
-		}
-		if err = ibs.FinalizeTx(rules, stateWriter); err != nil {
-			return nil, err
-		}
 	}
 
 	return receipt, err
