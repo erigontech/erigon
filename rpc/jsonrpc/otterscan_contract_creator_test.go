@@ -108,6 +108,7 @@ func TestGetContractCreatorGenesisAlloc(t *testing.T) {
 	require.Nil(t, creator)
 }
 
+// A recreated genesis contract is not reported as genesis. The right answer is the CREATE2 transaction, which is not found yet.
 func TestGetContractCreatorRecreatedGenesisContractIsNotGenesis(t *testing.T) {
 	initCode := []byte{0x60, 0x00, 0x60, 0x00, 0x53, 0x60, 0x01, 0x60, 0x00, 0xf3}
 	factoryCode := append(append([]byte{0x69}, initCode...), 0x60, 0x00, 0x52, 0x60, 0x00, 0x60, 0x0a, 0x60, 0x16, 0x60, 0x00, 0xf5, 0x00)
@@ -139,7 +140,7 @@ func TestGetContractCreatorRecreatedGenesisContractIsNotGenesis(t *testing.T) {
 
 	api := NewOtterscanAPI(newBaseApiForTest(m), m.DB, 25)
 	creator, err := api.GetContractCreator(m.Ctx, target)
-	require.Error(t, err)
+	require.ErrorContains(t, err, "binary search")
 	require.Nil(t, creator)
 }
 
