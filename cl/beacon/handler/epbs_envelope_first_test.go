@@ -61,6 +61,11 @@ func (f *envelopeContentsFixture) requireContentsRequiredRecord(wantRecord bool)
 	}
 }
 
+func (f *envelopeContentsFixture) requireNoArrival() {
+	f.t.Helper()
+	require.NotContains(f.t, f.forkchoice.ExecutionPayloadReceivedAt, f.root, "an envelope that was not broadcast must not count as received")
+}
+
 func (f *envelopeContentsFixture) requireClaimReleased() {
 	f.t.Helper()
 	token, err := f.forkchoice.EnvelopeGossipAdmissions.TryClaim(f.root, f.signedEnvelope.Message.BuilderIndex)
@@ -270,6 +275,7 @@ func TestPostEnvelopeContentsGossipModeEnvelopePublishFailureStopsBeforeColumns(
 	require.Equal(t, http.StatusInternalServerError, first.Code, first.Body.String())
 	require.Equal(t, []contentsEventKind{eventEnvelopePublish}, f.phases(), "nothing may follow a failed envelope publish")
 	require.False(t, f.forkchoice.OnExecutionPayloadCalled)
+	f.requireNoArrival()
 	f.requireContentsRequiredRecord(false)
 
 	f.failEnvelope = nil
@@ -567,6 +573,7 @@ func TestPostEnvelopeContentsGossipModeValidationDeadlineAnswersUnavailable(t *t
 		require.Equal(t, http.StatusServiceUnavailable, first.Code, first.Body.String())
 		f.requireNoEvents()
 		f.requireClaimReleased()
+		f.requireNoArrival()
 
 		f.forkchoice.ValidateExecutionPayloadEnvelopeFunc = nil
 		second := f.postContents(t.Context(), body, "")
@@ -603,6 +610,7 @@ func TestPostEnvelopeContentsGossipModeValidationDeadlineAnswersUnavailable(t *t
 
 		require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
 		f.requireNoEvents()
+		f.requireNoArrival()
 	})
 
 	// The rows below are not on the early path, so their contents validation runs under the request context.
