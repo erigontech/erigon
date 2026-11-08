@@ -843,12 +843,12 @@ const restoreManifestTmpName = ".restore_manifest.tmp"
 // accessor types that don't exist in the backup (e.g. converted .kvei when the
 // original had only .kvi, or a newer version-prefix on the .kv).
 //
-// Refuses before moving anything if a live dir holds a v3 commitment file whose
-// step range is not in its backup, and if snapshots/backup/domains/ is missing
-// or empty while no history backup exists (errors out so the
-// operator notices). On success the now-empty backup dir is removed, the
-// snapshots/backup/ parent is cleaned if also empty, and the caller is told to
-// restart erigon to pick up the restored files.
+// Refuses before moving anything if snapshots/domain/ or the history dir holds a
+// v3 commitment data file whose step range is not in its existing backup dir, or
+// if snapshots/backup/domains/ is missing or empty while no history backup exists
+// (errors out so the operator notices). On success the now-empty backup dir is
+// removed, the snapshots/backup/ parent is cleaned if also empty, and the caller
+// is told to restart erigon to pick up the restored files.
 //
 // Safe to re-run after a partial failure: the first attempt persists a manifest
 // listing every file that needs to be restored, and subsequent attempts use
@@ -1025,7 +1025,7 @@ func restoreCommitmentBackup(ctx context.Context, backupDir, liveDir string, req
 		manifestSet[name] = struct{}{}
 	}
 
-	// Orphan sweep: remove every *-commitment.<from>-<to>.* in snapshots/domain/
+	// Orphan sweep: remove every *-commitment.<from>-<to>.* in liveDir
 	// for each step-range covered by the backup, EXCEPT files whose basename is
 	// in the manifest. Preserving manifest-listed names is what makes retry safe
 	// after a partial rename: a file already restored on a prior attempt stays
@@ -1120,7 +1120,7 @@ func loadRestoreManifest(path string) ([]string, bool, error) {
 			continue
 		}
 		// Reject path components: manifest entries must be plain basenames so
-		// filepath.Join cannot escape backupDir/snapDomain on restore. The
+		// filepath.Join cannot escape backupDir/liveDir on restore. The
 		// commitment step-range regex is not anchored and would otherwise
 		// accept e.g. "../../etc/passwd-commitment.0-32.kv".
 		if line != filepath.Base(line) || strings.ContainsAny(line, `/\`) {
@@ -1579,9 +1579,9 @@ func convertPhase3(snapDir, backupDir string, ranges []commitmentHistoryRange) (
 	return moved, nil
 }
 
-// convertPhase4 moves every regular file in rebuildDir into snapDomain. The
+// convertPhase4 moves every regular file in rebuildDir into liveDir. The
 // caller deletes rebuildDir afterwards.
-func convertPhase4(rebuildDir, snapDomain string) (int, error) {
+func convertPhase4(rebuildDir, liveDir string) (int, error) {
 	entries, err := os.ReadDir(rebuildDir)
 	if err != nil {
 		return 0, fmt.Errorf("[commitment_convert] phase 4 read rebuild dir %s: %w", rebuildDir, err)
@@ -1592,7 +1592,7 @@ func convertPhase4(rebuildDir, snapDomain string) (int, error) {
 			continue
 		}
 		src := filepath.Join(rebuildDir, e.Name())
-		dst := filepath.Join(snapDomain, e.Name())
+		dst := filepath.Join(liveDir, e.Name())
 		if renameErr := os.Rename(src, dst); renameErr != nil {
 			return moved, fmt.Errorf("[commitment_convert] phase 4 mv %s -> %s: %w",
 				src, dst, renameErr)
