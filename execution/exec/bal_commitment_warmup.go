@@ -67,6 +67,8 @@ func balCommitmentWarmupKeys(bal types.BlockAccessList) [][]byte {
 	return keys
 }
 
+var l1Warm = os.Getenv("L1_WARM") == "1"
+
 type balCommitmentContext struct {
 	tx         kv.TemporalTx
 	cache      *commitment.BranchCache
@@ -85,6 +87,13 @@ func (c *balCommitmentContext) Branch(prefix []byte) ([]byte, kv.Step, error) {
 	}
 	c.cacheStats.misses.Add(1)
 	c.cacheStats.fillRequests.Add(1)
+	if l1Warm {
+		if p, ok := c.tx.AggTx().(interface {
+			PreReadLatest(context.Context, kv.Domain, []byte)
+		}); ok {
+			p.PreReadLatest(context.Background(), kv.CommitmentDomain, prefix)
+		}
+	}
 	return c.tx.GetLatest(kv.CommitmentDomain, prefix, kv.GetLatestOptions{}.WithBranchCache())
 }
 

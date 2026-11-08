@@ -1024,6 +1024,7 @@ func (r *asOfStateReader) CheckDataAvailable(d kv.Domain, step kv.Step) error {
 func (r *asOfStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) (enc []byte, step kv.Step, err error) {
 	if d == kv.CommitmentDomain {
 		// Branches: use GetLatest — written only by this calculator, sequential.
+		r.preRead(d, plainKey)
 		if r.workerCtx != nil {
 			return r.sd.GetLatestContext(r.workerCtx, d, r.roTx, plainKey)
 		}
@@ -1033,6 +1034,7 @@ func (r *asOfStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) (e
 		step = kv.Step(r.txNum / stepSize)
 	}
 	if r.cur != nil && (d == kv.AccountsDomain || d == kv.StorageDomain) {
+		r.preRead(d, plainKey)
 		enc, err = r.readFoldingBlock(d, plainKey)
 		return enc, step, err
 	}

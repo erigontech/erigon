@@ -67,3 +67,13 @@ func (at *AggregatorRoTx) PrefetchBranchRefs(ctx context.Context, prefixes [][]b
 	}
 	return branches, len(list), mmap.ReadPages(ctx, list)
 }
+
+// PreReadLatest reads, in page batches, the file pages a latest read of key touches and, for a commitment branch, the
+// pages its shortened keys point to. Probe: the caller's P is released while the pages are read.
+func (at *AggregatorRoTx) PreReadLatest(ctx context.Context, domain kv.Domain, key []byte) {
+	keys := [][]byte{key}
+	_, _ = at.PrefetchLatest(ctx, domain, keys)
+	if domain == kv.CommitmentDomain {
+		_, _, _ = at.PrefetchBranchRefs(ctx, keys)
+	}
+}
