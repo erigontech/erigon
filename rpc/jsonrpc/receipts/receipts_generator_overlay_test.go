@@ -137,7 +137,6 @@ func TestGetReceiptSkipsBloomOfPersistedReceipt(t *testing.T) {
 // TestGetReceiptReplayOfStorageWriteAndLog pins a replayed receipt of a contract call that writes
 // storage and emits a log. A fresh generator and no persistent receipt cache force the replay.
 func TestGetReceiptReplayOfStorageWriteAndLog(t *testing.T) {
-
 	signer := types.LatestSignerForChainID(nil)
 	runtime := []byte{0x60, 0x01, 0x60, 0x00, 0x55, 0x60, 0x00, 0x60, 0x00, 0xa0, 0x00} // SSTORE(0, 1) LOG0 STOP
 	initCode := append([]byte{0x60, byte(len(runtime)), 0x60, 0x0c, 0x60, 0x00, 0x39, 0x60, byte(len(runtime)), 0x60, 0x00, 0xf3}, runtime...)
