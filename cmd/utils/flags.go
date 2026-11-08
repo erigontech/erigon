@@ -1268,7 +1268,7 @@ var (
 	ExecNoPruneFlag = cli.BoolFlag{
 		Name:    "debug.exec.no-prune",
 		Aliases: []string{"exec.no-prune"},
-		Usage:   "Disable all DB pruning: state-aggregator (Domain/InvertedIndex) plus stage-level pruning (Execution: ChangeSets3/BlockAccessList; TxLookup; Snapshots: PruneAncientBlocks/canonical markers/old transaction files; block files are still built) (equivalent to NO_PRUNE=true). Diagnostic / perf-comparison use only: chaindata grows without bound and --prune.mode is not enforced. The --exec.no-prune alias is deprecated and will be removed in the next release.",
+		Usage:   "Disable all DB pruning: state-aggregator (Domain/InvertedIndex) plus stage-level pruning (Execution: BlockAccessList, and ChangeSets3 except changesets no unwind can need; TxLookup; Snapshots: PruneAncientBlocks/canonical markers/old transaction files; block files are still built) (equivalent to NO_PRUNE=true). Diagnostic / perf-comparison use only: chaindata grows without bound and --prune.mode is not enforced. The --exec.no-prune alias is deprecated and will be removed in the next release.",
 		Value:   false,
 	}
 	ExecNoBackgroundMaintenanceFlag = cli.BoolFlag{

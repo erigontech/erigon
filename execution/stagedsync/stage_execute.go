@@ -615,6 +615,9 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDom
 
 func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.TemporalRwTx, cfg ExecuteBlockCfg, timeout time.Duration, logger log.Logger) (err error) {
 	if dbg.NoPrune() {
+		if err := pruneChangeSetsNoUnwindNeeds(ctx, s, tx, cfg, logger); err != nil {
+			return err
+		}
 		return s.Done(tx)
 	}
 	// on chain-tip:
@@ -785,4 +788,24 @@ func blockAmountRetireCutoffTxNum(ctx context.Context, tx kv.Tx, blockReader dbs
 		return 0, nil
 	}
 	return blockReader.TxnumReader().Min(ctx, tx, cutoffBlock)
+}
+
+// pruneChangeSetsNoUnwindNeeds is the --exec.no-prune changeset prune. It deletes only changesets no unwind can need:
+// those of blocks fully in state files (an unwind never enters files) and more than MaxReorgDepth below the head. A
+// finalized mark does not count, because bench tools fork below their own finalized blocks.
+func pruneChangeSetsNoUnwindNeeds(ctx context.Context, s *PruneState, tx kv.TemporalRwTx, cfg ExecuteBlockCfg, logger log.Logger) error {
+	filesEnd := tx.Debug().TxNumsInFiles(kv.StateDomains...)
+	if filesEnd == 0 || s.ForwardProgress <= cfg.syncCfg.MaxReorgDepth {
+		return nil
+	}
+	firstBlockNotInFiles, ok, err := cfg.blockReader.TxnumReader().FindBlockNum(ctx, tx, filesEnd)
+	if err != nil || !ok {
+		return err
+	}
+	pruneTo := min(firstBlockNotInFiles, s.ForwardProgress-cfg.syncCfg.MaxReorgDepth)
+	limit, timeout := 200_000, time.Duration(cfg.chainConfig.SecondsPerSlot()*1000/3)*time.Millisecond
+	if s.CurrentSyncCycle.IsInitialCycle {
+		limit, timeout = math.MaxInt, 12*time.Hour
+	}
+	return rawdb.PruneTable(tx, kv.ChangeSets3, pruneTo, ctx, limit, timeout, logger, s.LogPrefix())
 }

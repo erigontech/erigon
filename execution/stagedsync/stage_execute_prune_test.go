@@ -18,6 +18,7 @@ package stagedsync
 
 import (
 	"context"
+	"slices"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -34,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
@@ -195,6 +197,85 @@ func TestPruneExecutionStageInitialCycleUsesMaxReorgDepth(t *testing.T) {
 		require.True(t, has, "%s pruned the reorg boundary", table)
 	}
 }
+
+// Under --exec.no-prune a changeset is deleted only when no unwind can need it: its block is fully in state files and
+// more than MaxReorgDepth below the head. A finalized mark does not count, since bench tools fork below their own marks.
+func TestPruneExecutionStageNoPruneKeepsUnwindableChangeSets(t *testing.T) {
+	const (
+		head          = uint64(1_000)
+		maxReorgDepth = uint64(96)
+		perBlock      = uint64(10)
+	)
+	blocks := []uint64{100, 499, 500, 903, 904, head}
+	for _, tc := range []struct {
+		name     string
+		filesEnd uint64 // first txNum not in state files
+		pruned   []uint64
+	}{
+		{"files end at block 500", 500 * perBlock, []uint64{100, 499}},
+		{"files end above the reorg window", 990 * perBlock, []uint64{100, 499, 500, 903}},
+		{"no files, head finalized", 0, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			orig := dbg.NoPrune()
+			t.Cleanup(func() { dbg.SetNoPrune(orig) })
+			dbg.SetNoPrune(true)
+			ctx := context.Background()
+			dirs := datadir.New(t.TempDir())
+			db := temporaltest.NewTestDB(t, dirs)
+			rwTx, err := db.BeginTemporalRw(ctx)
+			require.NoError(t, err)
+			defer rwTx.Rollback()
+			for b := uint64(0); b <= head; b++ {
+				require.NoError(t, rawdbv3.TxNums.Append(rwTx, b, b*perBlock+perBlock-1))
+			}
+			headHash := common.Hash{0x02}
+			require.NoError(t, rawdb.WriteHeaderNumber(rwTx, headHash, head))
+			rawdb.WriteForkchoiceFinalized(rwTx, headHash)
+			for _, b := range blocks {
+				require.NoError(t, rwTx.Put(kv.ChangeSets3, dbutils.BlockBodyKey(b, common.Hash{byte(b)}), []byte{0x01}))
+			}
+			state := &PruneState{
+				ID:              stages.Execution,
+				ForwardProgress: head,
+				FinalityCtx:     execfinality.NewContext(head, head, maxReorgDepth, false, rawdbv3.TxNums),
+			}
+			cfg := ExecuteBlockCfg{
+				db:          db,
+				chainConfig: &chain.Config{},
+				blockReader: freezeblocks.NewBlockReader(db.(freezeblocks.HasBlockFiles).DebugBlockFiles()),
+				syncCfg:     ethconfig.Sync{MaxReorgDepth: maxReorgDepth},
+			}
+			require.NoError(t, PruneExecutionStage(ctx, state, filesEndTx{rwTx, tc.filesEnd}, cfg, 0, log.New()))
+			for _, b := range blocks {
+				has, err := rwTx.Has(kv.ChangeSets3, dbutils.BlockBodyKey(b, common.Hash{byte(b)}))
+				require.NoError(t, err)
+				require.Equal(t, !slices.Contains(tc.pruned, b), has, "changeset of block %d", b)
+			}
+		})
+	}
+}
+
+// filesEndTx reports filesEnd as the state files' end, so a test needs no built files.
+type filesEndTx struct {
+	kv.TemporalRwTx
+	filesEnd uint64
+}
+
+func (t filesEndTx) Debug() kv.TemporalDebugTx {
+	return filesEndDebug{t.TemporalRwTx.Debug(), t.filesEnd}
+}
+
+func (t filesEndTx) BlockFilesRoTx() *blocksnapshots.View {
+	return t.TemporalRwTx.(freezeblocks.HasBlockFilesRoTx).BlockFilesRoTx()
+}
+
+type filesEndDebug struct {
+	kv.TemporalDebugTx
+	filesEnd uint64
+}
+
+func (d filesEndDebug) TxNumsInFiles(...kv.Domain) uint64 { return d.filesEnd }
 
 // Execution writes the senders of a BAL block that the Senders stage left to the exec workers.
 func TestWriteSendersRecoveredByExec(t *testing.T) {
