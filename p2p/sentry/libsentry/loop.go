@@ -139,26 +139,6 @@ func pumpStreamLoop[TMessage any](
 		defer disconnectedMarker.MarkDisconnected()
 	}
 
-	// need to read all messages from Sentry as fast as we can, then:
-	// - can group them or process in batch
-	// - can have slow processing
-	reqs := make(chan TMessage, 256)
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case req := <-reqs:
-				if err := handleInboundMessage(ctx, req, sentry); err != nil {
-					logger.Debug("Handling incoming message", "stream", streamName, "err", err)
-				}
-				if wg != nil {
-					wg.Done()
-				}
-			}
-		}
-	}()
-
 	stream, err := streamFactory(ctx, sentry)
 	if err != nil {
 		return err
@@ -171,9 +151,14 @@ func pumpStreamLoop[TMessage any](
 			return err
 		}
 
-		select {
-		case reqs <- req:
-		case <-ctx.Done():
+		// Handle before reading again so slow consumers leave the backlog upstream.
+		// Read-ahead would retain payload copies after the upstream queues release
+		// their byte budget, bypassing the queue limits.
+		if err := handleInboundMessage(ctx, req, sentry); err != nil {
+			logger.Debug("Handling incoming message", "stream", streamName, "err", err)
+		}
+		if wg != nil {
+			wg.Done()
 		}
 	}
 

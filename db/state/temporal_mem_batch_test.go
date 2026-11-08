@@ -17,9 +17,11 @@
 package state
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 
 	btree2 "github.com/tidwall/btree"
 
@@ -27,6 +29,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/kvmetrics"
 )
@@ -51,18 +54,12 @@ func TestGetDiffsetCoversAllDomains(t *testing.T) {
 	}
 }
 
-// Pins the locking contract of the per-domain latestStateLocks: readers and
-// writers of different domains run concurrently while Unwind takes every
-// lock. Meaningful under -race; also checks unwind correctness afterwards.
 func TestTemporalMemBatchConcurrentDomainAccess(t *testing.T) {
 	t.Parallel()
 	sd := &TemporalMemBatch{
 		stepSize: 16,
 		storage:  btree2.NewMap[string, []dataWithTxNum](128),
 		metrics:  &kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
-	}
-	for d := range sd.domains {
-		sd.domains[d] = map[string][]dataWithTxNum{}
 	}
 
 	const keysPerDomain = 200
@@ -103,6 +100,52 @@ func TestTemporalMemBatchConcurrentDomainAccess(t *testing.T) {
 	}
 }
 
+// A published batch keeps serving RPC reads while it is flushed, so Flush must
+// not exclude readers. The executor goroutine stays inside Flush until the RPC
+// reader goroutine has finished its reads.
+func TestFlushDoesNotBlockReaders(t *testing.T) {
+	t.Parallel()
+	_, tx := mdbxtest.NewTestTx(t)
+	sd := &TemporalMemBatch{
+		stepSize: 16,
+		storage:  btree2.NewMap[string, []dataWithTxNum](128),
+		metrics:  &kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
+	}
+	sd.putLatest(kv.AccountsDomain, "acc", []byte("v"), 1)
+
+	flushing := make(chan struct{})
+	readerDone := make(chan struct{})
+	flushErr := make(chan error, 1)
+	go func() { // executor
+		flushErr <- sd.Flush(context.Background(), tx, kv.WithFlushCallback(kv.AccountsDomain, func([]byte, []byte, kv.Step, uint64) {
+			close(flushing)
+			<-readerDone
+		}))
+	}()
+
+	const reads = 1000
+	readsDone := make(chan int, 1)
+	go func() { // RPC reader
+		<-flushing
+		n := 0
+		for range reads {
+			if v, _, ok := sd.GetLatest(kv.AccountsDomain, []byte("acc")); ok && string(v) == "v" {
+				n++
+			}
+		}
+		readsDone <- n
+	}()
+
+	select {
+	case n := <-readsDone:
+		require.Equal(t, reads, n)
+	case <-time.After(5 * time.Second):
+		t.Error("RPC reader blocked by an in-progress Flush")
+	}
+	close(readerDone)
+	require.NoError(t, <-flushErr)
+}
+
 // Commit borrows the batch's value buffers instead of copying, which is only
 // sound while a later write to the same key leaves the earlier bytes alone.
 func TestPutLatest_NeverRewritesValuesInPlace(t *testing.T) {
@@ -119,9 +162,6 @@ func TestPutLatest_NeverRewritesValuesInPlace(t *testing.T) {
 				storage:           btree2.NewMap[string, []dataWithTxNum](128),
 				metrics:           &kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
 				inMemHistoryReads: inMemHistoryReads,
-			}
-			for d := range sd.domains {
-				sd.domains[d] = map[string][]dataWithTxNum{}
 			}
 
 			// Each case is the FIRST write after the borrow, so the slot still holds
@@ -150,5 +190,29 @@ func TestPutLatest_NeverRewritesValuesInPlace(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestMergeRejectedBatchKeepsReceiverUnchanged(t *testing.T) {
+	t.Parallel()
+	newBatch := func() *TemporalMemBatch {
+		return &TemporalMemBatch{
+			stepSize: 16,
+			storage:  btree2.NewMap[string, []dataWithTxNum](128),
+			metrics:  &kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
+		}
+	}
+	for _, receiverHasAccumulator := range []bool{false, true} {
+		sd, other := newBatch(), newBatch()
+		other.putLatest(kv.AccountsDomain, "k", []byte("v"), 1)
+		if receiverHasAccumulator {
+			sd.currentChangesAccumulator = &changeset.StateChangeSet{}
+		} else {
+			other.currentChangesAccumulator = &changeset.StateChangeSet{}
+		}
+
+		require.Error(t, sd.Merge(other))
+		_, _, ok := sd.GetLatest(kv.AccountsDomain, []byte("k"))
+		require.False(t, ok, "receiverHasAccumulator=%v", receiverHasAccumulator)
 	}
 }

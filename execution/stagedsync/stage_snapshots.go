@@ -559,10 +559,7 @@ func pruneCanonicalMarkers(ctx context.Context, tx kv.RwTx, blockReader dbservic
 }
 
 // SnapshotsPrune moving block data from db into snapshots, removing old snapshots (if --prune.* enabled)
-func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.RwTx, logger log.Logger) (err error) {
-	if dbg.NoPrune() {
-		return nil
-	}
+func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.RwTx) (err error) {
 	freezingCfg := cfg.blockReader.FreezingCfg()
 	if freezingCfg.ProduceE2 && !dbg.NoBackgroundMaintenance() {
 		if s.CurrentSyncCycle.IsInitialCycle {
@@ -577,7 +574,7 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 			log.LvlDebug,
 			cfg.getSeederClient(),
 			func() error {
-				filesDeleted, err := retireBlockSnapshots(ctx, cfg, logger)
+				filesDeleted, err := retireBlockSnapshots(ctx, cfg)
 				if filesDeleted && cfg.notifier != nil {
 					cfg.notifier.Events.OnNewSnapshot()
 				}
@@ -594,10 +591,13 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 		}
 	}
 
+	if dbg.NoPrune() {
+		return nil
+	}
 	pruneLimit := 10
 	pruneTimeout := 125 * time.Millisecond
 	if s.CurrentSyncCycle.IsInitialCycle {
-		pruneLimit = 10_000
+		pruneLimit = 100_000
 		pruneTimeout = time.Hour
 	}
 	if _, err := cfg.blockRetire.PruneAncientBlocks(tx, pruneLimit, pruneTimeout); err != nil {
@@ -609,8 +609,8 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 	return nil
 }
 
-func retireBlockSnapshots(ctx context.Context, cfg SnapshotsCfg, logger log.Logger) (bool, error) {
-	if dbg.NoRetire() {
+func retireBlockSnapshots(ctx context.Context, cfg SnapshotsCfg) (bool, error) {
+	if dbg.NoRetire() || dbg.NoPrune() {
 		return false, nil
 	}
 	tx, err := cfg.db.BeginRo(ctx)

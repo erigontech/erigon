@@ -87,7 +87,7 @@ func runStateTests(t *testing.T, st *testutil.TestMatcher, testDir string) {
 					}
 					defer sd.Close()
 					sd.EnableParaTrieDB(db)
-					_, _, err = test.Run(t, sd, tx, subtest, vmconfig)
+					_, _, err = test.Run(sd, tx, subtest, vmconfig)
 					tx.Rollback()
 					if err != nil && len(test.Json.Post[subtest.Fork][subtest.Index].ExpectException) > 0 {
 						// Ignore expected errors

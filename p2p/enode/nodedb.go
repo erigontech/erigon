@@ -137,7 +137,7 @@ func newPersistentDB(ctx context.Context, logger log.Logger, path string) (*DB, 
 		GrowthStep(2 * datasize.MB).
 		Flags(func(f uint) uint { return f&^mdbx1.Durable | mdbx1.SafeNoSync | mdbx1.WriteMap }).
 		SyncBytes(dbSyncBytesThreshold).
-		SyncPeriod(dbSyncPeriod).
+		PollerSyncPeriod(dbSyncPeriod).
 		DirtySpace(uint64(32 * datasize.MB)).
 		// WithMetrics().
 		Open(ctx)
@@ -457,6 +457,12 @@ func (db *DB) expireNodes() {
 				return err
 			}
 			id, ip, field := splitNodeItemKey(k)
+			if id != prevId {
+				if youngestPong > 0 && youngestPong < threshold {
+					toDelete = append(toDelete, nodeKey(prevId))
+				}
+				youngestPong = 0
+			}
 			if field == dbNodePong {
 				time, _ := binary.Varint(v)
 				if time > youngestPong {
@@ -466,12 +472,6 @@ func (db *DB) expireNodes() {
 					// Last pong from this IP older than threshold, remove fields belonging to it.
 					toDelete = append(toDelete, nodeItemKey(id, ip, ""))
 				}
-			}
-			if id != prevId {
-				if youngestPong > 0 && youngestPong < threshold {
-					toDelete = append(toDelete, nodeKey(prevId))
-				}
-				youngestPong = 0
 			}
 			prevId = id
 			empty = false

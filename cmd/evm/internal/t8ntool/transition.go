@@ -163,7 +163,9 @@ func Main(_ context.Context, ctx *cli.Command) error {
 	// Figure out the prestate alloc
 	if allocStr == stdinSelector || envStr == stdinSelector || txStr == stdinSelector {
 		decoder := json.NewDecoder(os.Stdin)
-		decoder.Decode(inputData) //nolint:errcheck
+		if err := decoder.Decode(inputData); err != nil {
+			return NewError(ErrorJson, fmt.Errorf("failed unmarshaling stdin: %w", err))
+		}
 	}
 	if allocStr != stdinSelector {
 		inFile, err1 := os.Open(allocStr)
@@ -192,6 +194,9 @@ func Main(_ context.Context, ctx *cli.Command) error {
 			return NewError(ErrorJson, fmt.Errorf("failed unmarshaling env-file: %w", err))
 		}
 		inputData.Env = &env
+	}
+	if inputData.Env == nil {
+		return NewError(ErrorJson, errors.New("missing 'env' section in input"))
 	}
 	prestate.Env = *inputData.Env
 
@@ -323,15 +328,15 @@ func Main(_ context.Context, ctx *cli.Command) error {
 	}
 	defer sd.Close()
 
-	blockNum, txNum := uint64(0), uint64(0)
-	reader, writer := MakePreState((&evmtypes.BlockContext{}).Rules(chainConfig), tx, sd, prestate.Pre, blockNum, txNum)
-	blockNum, txNum = uint64(1), uint64(2)
+	txNum := uint64(0)
+	reader, writer := MakePreState((&evmtypes.BlockContext{}).Rules(chainConfig), tx, sd, prestate.Pre, txNum)
+	blockNum, txNum := uint64(1), uint64(2)
 
 	// Merge engine can be used for pre-merge blocks as well, as it
 	// redirects to the ethash engine based on the block number
 	engine := merge.New(&ethash.FakeEthash{})
 
-	t8logger := log.New("t8ntool")
+	t8logger := log.New("component", "t8ntool")
 	chainReader := consensuschain.NewReader(chainConfig, tx, nil, t8logger)
 	result, err := protocol.ExecuteBlockEphemerally(chainConfig, &vmConfig, getHash, engine, block, reader, writer, chainReader, getTracer, t8logger)
 
@@ -518,7 +523,7 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 			Authorizations: auths,
 		}, nil
 	default:
-		return nil, nil
+		return nil, fmt.Errorf("unsupported transaction type %d", txJson.Type)
 	}
 }
 

@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
@@ -122,12 +123,16 @@ func (c ChainReaderWriterEth1) GetBlockByNumber(ctx context.Context, number uint
 }
 
 func (c ChainReaderWriterEth1) GetHeaderByHash(ctx context.Context, hash common.Hash) *types.Header {
-	h, err := c.executionModule.GetHeader(ctx, &hash, nil)
+	h, err := c.HeaderByHash(ctx, hash)
 	if err != nil {
 		log.Warn("[engine] GetHeaderByHash", "err", err)
 		return nil
 	}
 	return h
+}
+
+func (c ChainReaderWriterEth1) HeaderByHash(ctx context.Context, hash common.Hash) (*types.Header, error) {
+	return c.executionModule.GetHeader(ctx, &hash, nil)
 }
 
 func (c ChainReaderWriterEth1) GetHeaderByNumber(ctx context.Context, number uint64) *types.Header {
@@ -208,9 +213,16 @@ func (c ChainReaderWriterEth1) IsCanonicalHash(ctx context.Context, hash common.
 	return c.executionModule.IsCanonicalHash(ctx, hash)
 }
 
+func (c ChainReaderWriterEth1) IsValidated(hash common.Hash) bool {
+	return c.executionModule.IsValidated(hash)
+}
+
 func (c ChainReaderWriterEth1) FrozenBlocks(ctx context.Context) (uint64, bool) {
 	frozen, hasGap, err := c.executionModule.FrozenBlocks(ctx)
 	if err != nil {
+		if ctx.Err() != nil {
+			return 0, false
+		}
 		panic(err)
 	}
 	return frozen, hasGap
@@ -225,6 +237,13 @@ func (c ChainReaderWriterEth1) InsertBlocks(ctx context.Context, blocks []*types
 		return fmt.Errorf("InsertBlocks: invalid code received from execution module: %s", status)
 	}
 	return nil
+}
+
+func (c ChainReaderWriterEth1) StartSendersRecovery(ctx context.Context, blockHash common.Hash, header *types.Header, txns types.Transactions) {
+	if len(txns) == 0 {
+		return
+	}
+	c.executionModule.AddSendersRecovery(blockHash, exec.StartSendersRecovery(ctx, types.MakeSigner(c.cfg, header.Number.Uint64(), header.Time), txns))
 }
 
 func (c ChainReaderWriterEth1) InsertBlock(ctx context.Context, block *types.Block) error {
@@ -244,6 +263,18 @@ func (c ChainReaderWriterEth1) ValidateChain(ctx context.Context, hash common.Ha
 }
 
 func (c ChainReaderWriterEth1) UpdateForkChoice(ctx context.Context, headHash, safeHash, finalizeHash common.Hash, timeoutOverride ...uint64) (execmodule.ExecutionStatus, *string, common.Hash, error) {
+	result, err := c.UpdateForkChoiceResult(ctx, headHash, safeHash, finalizeHash, timeoutOverride...)
+	if err != nil {
+		return 0, nil, common.Hash{}, err
+	}
+	var validationError *string
+	if len(result.ValidationError) > 0 {
+		validationError = &result.ValidationError
+	}
+	return result.Status, validationError, result.LatestValidHash, nil
+}
+
+func (c ChainReaderWriterEth1) UpdateForkChoiceResult(ctx context.Context, headHash, safeHash, finalizeHash common.Hash, timeoutOverride ...uint64) (execmodule.ForkChoiceResult, error) {
 	// Apply timeout via context so the native UpdateForkChoice returns Busy on deadline exceeded.
 	timeout := c.fcuTimeout
 	if len(timeoutOverride) > 0 {
@@ -255,15 +286,7 @@ func (c ChainReaderWriterEth1) UpdateForkChoice(ctx context.Context, headHash, s
 		callCtx, cancel = context.WithTimeout(ctx, timeout)
 		defer cancel()
 	}
-	result, err := c.executionModule.UpdateForkChoice(callCtx, headHash, safeHash, finalizeHash)
-	if err != nil {
-		return 0, nil, common.Hash{}, err
-	}
-	var validationError *string
-	if len(result.ValidationError) > 0 {
-		validationError = &result.ValidationError
-	}
-	return result.Status, validationError, result.LatestValidHash, nil
+	return c.executionModule.UpdateForkChoice(callCtx, headHash, safeHash, finalizeHash)
 }
 
 func (c ChainReaderWriterEth1) GetForkChoice(ctx context.Context) (headHash, finalizedHash, safeHash common.Hash, err error) {
@@ -325,58 +348,22 @@ func (c ChainReaderWriterEth1) GetAssembledBlock(ctx context.Context, id uint64)
 
 	br := result.Block
 	block := br.Block
-	header := block.Header()
-
-	// Encode transactions
-	encodedTxs, err := types.MarshalTransactionsBinary(block.Transactions())
+	payload, err := engine_types.ExecutionPayloadFromBlock(block)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
 
-	// Build CL Eth1Block
-	extraData := solid.NewExtraData()
-	extraData.SetBytes(header.Extra)
-	blockHash := block.Hash()
-
-	var baseFeeLE common.Hash
-	if header.BaseFee != nil {
-		_, _ = header.BaseFee.MarshalSSZAppend(baseFeeLE[:0])
+	// The beacon block producer supplies the consensus version.
+	eth1Block, err := payload.ToEth1Block(clparams.Phase0Version, &clparams.MainnetBeaconConfig)
+	if err != nil {
+		return nil, nil, nil, nil, err
 	}
-
-	eth1Block := &cltypes.Eth1Block{
-		ParentHash:    header.ParentHash,
-		FeeRecipient:  header.Coinbase,
-		StateRoot:     header.Root,
-		ReceiptsRoot:  header.ReceiptHash,
-		LogsBloom:     header.Bloom,
-		BlockNumber:   header.Number.Uint64(),
-		GasLimit:      header.GasLimit,
-		GasUsed:       header.GasUsed,
-		Time:          header.Time,
-		Extra:         extraData,
-		PrevRandao:    header.MixDigest,
-		Transactions:  solid.NewTransactionsSSZFromTransactions(encodedTxs),
-		BlockHash:     blockHash,
-		BaseFeePerGas: baseFeeLE,
+	if eth1Block.Extra == nil {
+		eth1Block.Extra = solid.NewExtraData()
 	}
-	if header.ExcessBlobGas != nil {
-		eth1Block.ExcessBlobGas = *header.ExcessBlobGas
+	if eth1Block.Withdrawals == nil {
+		eth1Block.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(clparams.MainnetBeaconConfig.MaxWithdrawalsPerPayload), 44)
 	}
-	if header.BlobGasUsed != nil {
-		eth1Block.BlobGasUsed = *header.BlobGasUsed
-	}
-
-	// Withdrawals
-	withdrawals := solid.NewStaticListSSZ[*cltypes.Withdrawal](int(clparams.MainnetBeaconConfig.MaxWithdrawalsPerPayload), 44)
-	for _, w := range block.Withdrawals() {
-		withdrawals.Append(&cltypes.Withdrawal{
-			Amount:    uint64(w.Amount),
-			Address:   w.Address,
-			Index:     uint64(w.Index),
-			Validator: uint64(w.Validator),
-		})
-	}
-	eth1Block.Withdrawals = withdrawals
 
 	// Blob bundle
 	blobsBundle, err := engine_types.BlobsBundleFromTransactions(block.Transactions())

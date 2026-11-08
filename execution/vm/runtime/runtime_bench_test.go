@@ -176,6 +176,12 @@ func BenchmarkSimpleLoop(b *testing.B) {
 		StaticCall(nil, 0x4, 0, 0, 0, 0).
 		Op(vm.POP).Jump(lbl).Bytes() // pop return value and jump to label
 
+	const identityInputSize = 172_673 // largest gas-efficient input for a 2^24 gas tx
+	p, lbl = program.New().Push(identityInputSize).Push0().Push0().Op(vm.CODECOPY).Jumpdest()
+	staticCallIdentityLarge := p.
+		StaticCall(nil, 0x4, 0, identityInputSize, 0, 0).
+		Op(vm.POP).Jump(lbl).Bytes()
+
 	p, lbl = program.New().Jumpdest()
 	callIdentity := p.
 		Call(nil, 0x4, 0, 0, 0, 0, 0).
@@ -230,6 +236,7 @@ func BenchmarkSimpleLoop(b *testing.B) {
 	//	}})
 	// 100M gas
 	benchmarkNonModifyingCode(mdgas.MdGas{Execution: 100_000_000}, staticCallIdentity, "staticcall-identity-100M", "", b)
+	benchmarkNonModifyingCode(mdgas.MdGas{Execution: 1 << 24}, staticCallIdentityLarge, "staticcall-identity-large-16M", "", b)
 	benchmarkNonModifyingCode(mdgas.MdGas{Execution: 100_000_000}, callIdentity, "call-identity-100M", "", b)
 	benchmarkNonModifyingCode(mdgas.MdGas{Execution: 100_000_000}, loopingCode, "loop-100M", "", b)
 	benchmarkNonModifyingCode(mdgas.MdGas{Execution: 100_000_000}, loopingCode2, "loop2-100M", "", b)
@@ -283,7 +290,7 @@ func BenchmarkEVM_SWAP1(b *testing.B) {
 func benchState(b *testing.B, reader state.StateReader) *state.IntraBlockState {
 	b.Helper()
 	statedb := state.NewWithVersionMap(reader, state.NewVersionMap(nil))
-	statedb.SetNoMaterialize(true)
+	statedb.SetNoConflictDetection()
 	return statedb
 }
 

@@ -789,3 +789,24 @@ func TestRecoverWitnessBuildContainsPanic(t *testing.T) {
 		panic("simulated build pipeline panic")
 	})
 }
+
+type panicGetTx struct {
+	kv.TemporalTx
+	rolledBack bool
+}
+
+func (tx *panicGetTx) GetOne(string, []byte) ([]byte, error) { panic("boom") }
+func (tx *panicGetTx) Rollback()                             { tx.rolledBack = true }
+
+type panicGetDB struct {
+	kv.TemporalRoDB
+	tx *panicGetTx
+}
+
+func (db panicGetDB) BeginTemporalRo(context.Context) (kv.TemporalTx, error) { return db.tx, nil }
+
+func TestWaitCommittedHeadPanicRollsBack(t *testing.T) {
+	tx := &panicGetTx{}
+	require.Panics(t, func() { _, _, _ = waitCommittedHead(context.Background(), panicGetDB{tx: tx}, 1, common.Hash{}) })
+	require.True(t, tx.rolledBack)
+}

@@ -17,9 +17,11 @@
 package forkchoice
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/erigontech/erigon/cl/abstract"
@@ -29,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/monitor"
+	"github.com/erigontech/erigon/cl/persistence/base_encoding"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
@@ -48,7 +51,9 @@ import (
 // and queues the execution block for later EL insertion.
 var errELBehind = errors.New("EL behind: payload not processable yet")
 
-var errPayloadValidationAdmission = errors.New("payload validation admission canceled")
+// ErrPayloadValidationInterrupted marks a NewPayload that ended with its context, waiting for
+// admission or inside the EL call, instead of with an EL verdict.
+var ErrPayloadValidationInterrupted = errors.New("payload validation interrupted")
 
 // ErrExecutionPayloadEnvelopeIndicesPending reports a persisted envelope whose database indices are queued for retry.
 var ErrExecutionPayloadEnvelopeIndicesPending = errors.New("execution payload envelope indices pending")
@@ -57,9 +62,13 @@ var ErrExecutionPayloadEnvelopeIndicesPending = errors.New("execution payload en
 var ErrExecutionPayloadEnvelopePersistenceFailed = errors.New("execution payload envelope persistence failed")
 
 var (
-	ErrInvalidExecutionPayloadEnvelope = errors.New("invalid execution payload envelope")
-	errPendingEnvelopeAgeBounded       = errors.New("pending execution payload envelope is age bounded")
+	ErrInvalidExecutionPayloadEnvelope           = errors.New("invalid execution payload envelope")
+	ErrExecutionPayloadEnvelopeStateUnavailable  = fmt.Errorf("%w: execution payload envelope state unavailable", ErrIgnore)
+	ErrExecutionPayloadEnvelopeStateReplayFailed = fmt.Errorf("%w: execution payload envelope state replay failed", ErrIgnore)
+	errPendingEnvelopeAgeBounded                 = errors.New("pending execution payload envelope is age bounded")
 )
+
+var blsVerify = bls.Verify
 
 func (f *ForkChoiceStore) claimEnvelopeIndexRepair(root common.Hash, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, applied bool) (envelopeIndexRepairToken, bool, error) {
 	return f.claimEnvelopeIndexRepairWith(root, signedEnvelope, applied, f.envelopeIndexRepairs.claim)
@@ -114,12 +123,12 @@ func (f *ForkChoiceStore) captureEnvelopeIndexRepairValues(token envelopeIndexRe
 	if signedEnvelope == nil || signedEnvelope.Message == nil || signedEnvelope.Message.Payload == nil {
 		return token
 	}
-	return f.envelopeIndexRepairs.setValues(token, signedEnvelope.Message.Payload.BlockNumber, signedEnvelope.Message.Payload.BlockHash)
+	return f.envelopeIndexRepairs.setValues(token, signedEnvelope.Message.Payload.SlotNumber, signedEnvelope.Message.Payload.BlockNumber, signedEnvelope.Message.Payload.BlockHash, signedEnvelope.Signature)
 }
 
 func envelopeForIndexRepair(token envelopeIndexRepairToken) *cltypes.SignedExecutionPayloadEnvelope {
-	return &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{
-		Payload: &cltypes.Eth1Block{BlockNumber: token.blockNumber, BlockHash: token.blockHash},
+	return &cltypes.SignedExecutionPayloadEnvelope{Signature: token.signature, Message: &cltypes.ExecutionPayloadEnvelope{
+		Payload: &cltypes.Eth1Block{SlotNumber: token.slot, BlockNumber: token.blockNumber, BlockHash: token.blockHash},
 	}}
 }
 
@@ -158,14 +167,6 @@ func (f *ForkChoiceStore) validateEnvelopeAgainstBlockAfterCommitments(
 	return f.validateEnvelopeAgainstBlockInternal(signedEnvelope, block, blockState, true, true)
 }
 
-func (f *ForkChoiceStore) validateEnvelopeAgainstBlockForGossip(
-	signedEnvelope *cltypes.SignedExecutionPayloadEnvelope,
-	block *cltypes.SignedBeaconBlock,
-	blockState abstract.BeaconState,
-) error {
-	return f.validateEnvelopeAgainstBlockInternal(signedEnvelope, block, blockState, true, false)
-}
-
 func (f *ForkChoiceStore) validateEnvelopeAgainstBlockInternal(
 	signedEnvelope *cltypes.SignedExecutionPayloadEnvelope,
 	block *cltypes.SignedBeaconBlock,
@@ -173,8 +174,18 @@ func (f *ForkChoiceStore) validateEnvelopeAgainstBlockInternal(
 	commitmentsValidated bool,
 	validateParentBeaconBlockRoot bool,
 ) error {
+	if err := validateEnvelopeAgainstBlockStateFree(signedEnvelope, block); err != nil {
+		return err
+	}
+	return f.validateEnvelopeStateDependent(signedEnvelope, block, blockState, commitmentsValidated, validateParentBeaconBlockRoot)
+}
+
+func validateEnvelopeAgainstBlockStateFree(
+	signedEnvelope *cltypes.SignedExecutionPayloadEnvelope,
+	block *cltypes.SignedBeaconBlock,
+) error {
 	if signedEnvelope.Message == nil {
-		log.Warn("[validateEnvelopeAgainstBlock] received signed envelope with nil message")
+		log.Warn("[validateEnvelopeAgainstBlockStateFree] received signed envelope with nil message")
 		return errors.New("signed envelope has nil message")
 	}
 	envelope := signedEnvelope.Message
@@ -218,6 +229,17 @@ func (f *ForkChoiceStore) validateEnvelopeAgainstBlockInternal(
 		return fmt.Errorf("execution_requests root %v != bid execution_requests_root %v",
 			requestsRoot, bid.Message.ExecutionRequestsRoot)
 	}
+	return nil
+}
+
+func (f *ForkChoiceStore) validateEnvelopeStateDependent(
+	signedEnvelope *cltypes.SignedExecutionPayloadEnvelope,
+	block *cltypes.SignedBeaconBlock,
+	blockState abstract.BeaconState,
+	commitmentsValidated bool,
+	validateParentBeaconBlockRoot bool,
+) error {
+	envelope := signedEnvelope.Message
 	if !commitmentsValidated {
 		if err := cltypes.ValidateExecutionPayloadEnvelopeCommitments(f.beaconCfg, block, signedEnvelope); err != nil {
 			return fmt.Errorf("invalid execution payload envelope commitments: %w", err)
@@ -290,7 +312,7 @@ func (f *ForkChoiceStore) verifyEnvelopeBuilderSignature(
 	}
 
 	// Verify BLS signature
-	valid, err := bls.Verify(signedEnvelope.Signature[:], signingRoot[:], pk[:])
+	valid, err := blsVerify(signedEnvelope.Signature[:], signingRoot[:], pk[:])
 	if err != nil {
 		return fmt.Errorf("signature verification error: %w", err)
 	}
@@ -305,7 +327,6 @@ func (f *ForkChoiceStore) verifyEnvelopeBuilderSignature(
 // For GLOAS, blob_kzg_commitments are in the committed bid, not directly in BeaconBlock.
 // Returns nil if data is available, ErrEIP7594ColumnDataNotAvailable if not available yet.
 func (f *ForkChoiceStore) checkDataAvailability(
-	ctx context.Context,
 	block *cltypes.SignedBeaconBlock,
 	beaconBlockRoot common.Hash,
 ) error {
@@ -322,6 +343,9 @@ func (f *ForkChoiceStore) checkDataAvailability(
 		return nil
 	}
 
+	if f.peerDas == nil {
+		return ErrEIP7594ColumnDataNotAvailable
+	}
 	// Check PeerDAS data availability
 	// Note: Unlike OnBlock, we don't skip this check even if EL has blobs,
 	// because we need to ensure blobs are stored in CL's blob storage for beacon API.
@@ -537,7 +561,7 @@ func (f *ForkChoiceStore) validatePayloadHashFallbackLocked(blockRoot, execution
 		return err
 	}
 	if f.payloadInvalidatedLocked(blockRoot, executionBlockHash) {
-		f.markPayloadStatusIfRetainedLocked(blockRoot, executionBlockHash, execution_client.PayloadStatusInvalidated)
+		f.markPayloadStatusIfRetainedLocked(blockRoot, executionBlockHash, execution_client.PayloadStatusInvalidated, nil)
 		return fmt.Errorf("%w: execution payload was invalidated during local payload hash validation", ErrInvalidExecutionPayloadEnvelope)
 	}
 	return nil
@@ -578,11 +602,15 @@ func (f *ForkChoiceStore) withPayloadValidationAdmission(ctx context.Context, va
 	case f.payloadValidationAdmission <- struct{}{}:
 		defer func() { <-f.payloadValidationAdmission }()
 	case <-ctx.Done():
-		return execution_client.PayloadStatusNone, fmt.Errorf("%w: %w", errPayloadValidationAdmission, ctx.Err())
+		return execution_client.PayloadStatusNone, fmt.Errorf("%w: %w", ErrPayloadValidationInterrupted, ctx.Err())
 	}
 	timeStartExec := time.Now()
 	defer monitor.ObserveNewPayloadTime(timeStartExec)
-	return validate()
+	status, err := validate()
+	if execution_client.ValidationInterrupted(ctx, status, err) {
+		return status, fmt.Errorf("%w: %w", ErrPayloadValidationInterrupted, err)
+	}
+	return status, err
 }
 
 // NewPayloadWithAdmission serializes EL payload validation across fork-choice and stage retries.
@@ -595,6 +623,10 @@ func (f *ForkChoiceStore) NewPayloadWithAdmission(
 ) (execution_client.PayloadStatus, error) {
 	if f.engine == nil {
 		return execution_client.PayloadStatusNone, errors.New("execution client is not configured")
+	}
+	if payload != nil {
+		finishImport := f.BeginPayloadImport(payload.SlotNumber)
+		defer finishImport()
 	}
 	return f.withPayloadValidationAdmission(ctx, func() (execution_client.PayloadStatus, error) {
 		return f.engine.NewPayload(ctx, payload, parentBlockRoot, versionedHashes, executionRequestsList)
@@ -617,12 +649,12 @@ func (f *ForkChoiceStore) applyPayloadValidationResultLocked(
 		return err
 	}
 	if payloadStatus != execution_client.PayloadStatusValidated && payloadStatus != execution_client.PayloadStatusInvalidated && f.payloadValidatedLocked(beaconBlockRoot, executionBlockHash) {
-		f.markPayloadStatusIfRetainedLocked(beaconBlockRoot, executionBlockHash, execution_client.PayloadStatusValidated)
+		f.markPayloadStatusIfRetainedLocked(beaconBlockRoot, executionBlockHash, execution_client.PayloadStatusValidated, nil)
 		return nil
 	}
 	if guard, ok := f.forkGraph.(retainedBlockGuard); ok {
-		retained := guard.WithRetainedBlock(beaconBlockRoot, func() {
-			payloadStatus = f.markPayloadStatusRetainedLocked(beaconBlockRoot, executionBlockHash, payloadStatus)
+		retained := guard.WithRetainedBlock(beaconBlockRoot, func(isRetained func(common.Hash) bool) {
+			payloadStatus = f.markPayloadStatus(beaconBlockRoot, executionBlockHash, payloadStatus, isRetained)
 		})
 		if !retained {
 			return fmt.Errorf("%w: block disappeared during payload validation for beacon_block_root %v", ErrIgnore, beaconBlockRoot)
@@ -674,7 +706,7 @@ func (f *ForkChoiceStore) rejectKnownInvalidPayloadStatusLocked(payloadStatus ex
 	if payloadStatus == execution_client.PayloadStatusInvalidated || !f.payloadInvalidatedLocked(blockRoot, executionBlockHash) {
 		return nil
 	}
-	f.markPayloadStatusIfRetainedLocked(blockRoot, executionBlockHash, execution_client.PayloadStatusInvalidated)
+	f.markPayloadStatusIfRetainedLocked(blockRoot, executionBlockHash, execution_client.PayloadStatusInvalidated, nil)
 	return fmt.Errorf("%w: execution payload was invalidated while validation was in progress", ErrInvalidExecutionPayloadEnvelope)
 }
 
@@ -713,14 +745,14 @@ func (f *ForkChoiceStore) applyTerminalPayloadValidationResultLocked(
 		return true, f.applyPayloadValidationResultLocked(payloadStatus, validationErr, envelope, block, beaconBlockRoot)
 	}
 	if f.payloadInvalidatedLocked(beaconBlockRoot, envelope.Payload.BlockHash) {
-		f.markPayloadStatusIfRetainedLocked(beaconBlockRoot, envelope.Payload.BlockHash, execution_client.PayloadStatusInvalidated)
+		f.markPayloadStatusIfRetainedLocked(beaconBlockRoot, envelope.Payload.BlockHash, execution_client.PayloadStatusInvalidated, nil)
 		return true, fmt.Errorf("%w: execution payload was invalidated while validation was in progress", ErrInvalidExecutionPayloadEnvelope)
 	}
 	if payloadStatus == execution_client.PayloadStatusValidated {
 		return true, f.applyPayloadValidationResultLocked(payloadStatus, validationErr, envelope, block, beaconBlockRoot)
 	}
 	if f.payloadValidatedLocked(beaconBlockRoot, envelope.Payload.BlockHash) {
-		f.markPayloadStatusIfRetainedLocked(beaconBlockRoot, envelope.Payload.BlockHash, execution_client.PayloadStatusValidated)
+		f.markPayloadStatusIfRetainedLocked(beaconBlockRoot, envelope.Payload.BlockHash, execution_client.PayloadStatusValidated, nil)
 		return true, nil
 	}
 	return false, nil
@@ -741,7 +773,7 @@ const (
 	queueMissingEnvelope missingEnvelopeMode = true
 )
 
-// applyEnvelope processes the envelope under f.mu except while waiting for EL validation.
+// applyEnvelope processes envelope mutations under f.mu except while waiting for EL validation.
 // Returns (true, nil) if the envelope was applied,
 // (false, nil) if it was skipped (already processed or block not yet known),
 // or (false, err) on failure.
@@ -759,58 +791,163 @@ func (f *ForkChoiceStore) applyEnvelope(
 		return false, fmt.Errorf("%w: signed envelope has nil message", ErrInvalidExecutionPayloadEnvelope)
 	}
 
+	if signedEnvelope.Message.Payload != nil && !f.forkGraph.HasEnvelope(signedEnvelope.Message.BeaconBlockRoot) {
+		// Warm the payload root caches outside f.mu.
+		_, _ = signedEnvelope.Message.Payload.HashSSZ()
+	}
+	var replayedState *state.CachingBeaconState
+	var verifiedOffLock bool
+	releaseValidation := func() {}
+	if validatePayload && commitmentsValidated {
+		var err error
+		replayedState, verifiedOffLock, releaseValidation, err = f.replayAndVerifyEnvelopeOffLock(signedEnvelope)
+		defer releaseValidation()
+		if err != nil {
+			if errors.Is(err, ErrExecutionPayloadEnvelopeStateUnavailable) {
+				func() {
+					f.mu.RLock()
+					defer f.mu.RUnlock()
+					f.queuePendingEnvelope(signedEnvelope, missingMode, receivedAt)
+				}()
+			}
+			return false, err
+		}
+	}
 	f.mu.Lock()
+	releaseValidation()
 	defer f.mu.Unlock()
 
-	return f.applyEnvelopeCoordinated(ctx, signedEnvelope, checkBlobData, validatePayload, commitmentsValidated, missingMode, receivedAt)
+	return f.applyEnvelopeCoordinated(ctx, signedEnvelope, checkBlobData, validatePayload, commitmentsValidated, missingMode, receivedAt, replayedState, verifiedOffLock)
+}
+
+func (f *ForkChoiceStore) replayAndVerifyEnvelopeOffLock(
+	signedEnvelope *cltypes.SignedExecutionPayloadEnvelope,
+) (*state.CachingBeaconState, bool, func(), error) {
+	noRelease := func() {}
+	validate := func(block *cltypes.SignedBeaconBlock, blockState *state.CachingBeaconState) error {
+		if err := f.validateEnvelopeAgainstBlockAfterCommitments(signedEnvelope, block, blockState); err != nil {
+			return fmt.Errorf("%w: OnExecutionPayload: envelope validation failed: %w", ErrInvalidExecutionPayloadEnvelope, err)
+		}
+		return nil
+	}
+	root := signedEnvelope.Message.BeaconBlockRoot
+	block, verified, err := func() (*cltypes.SignedBeaconBlock, bool, error) {
+		f.mu.RLock()
+		defer f.mu.RUnlock()
+		if f.forkGraph.HasEnvelope(root) {
+			return nil, false, nil
+		}
+		block, ok := f.forkGraph.GetBlock(root)
+		if !ok || block == nil {
+			return nil, false, nil
+		}
+		if current := f.forkGraph.CurrentStateLocked(root); current != nil {
+			err := validate(block, current)
+			return block, err == nil, err
+		}
+		return block, false, nil
+	}()
+	if err != nil {
+		return nil, false, noRelease, err
+	}
+	if block == nil {
+		return nil, false, noRelease, nil
+	}
+	if verified {
+		return nil, true, noRelease, nil
+	}
+
+	validation := f.envelopeValidationSemaphore()
+	validation <- struct{}{}
+	releaseValidation := sync.OnceFunc(func() { <-validation })
+	releaseOnReturn := true
+	defer func() {
+		if releaseOnReturn {
+			releaseValidation()
+		}
+	}()
+	if f.forkGraph.HasEnvelope(root) {
+		return nil, false, noRelease, nil
+	}
+
+	blockState, err := f.forkGraph.ReplayState(root)
+	if err != nil {
+		return nil, false, noRelease, fmt.Errorf("%w: OnExecutionPayload: failed to get block state: %w", errPendingEnvelopeAgeBounded, err)
+	}
+	if blockState == nil {
+		return nil, false, noRelease, fmt.Errorf("%w: OnExecutionPayload: state unavailable for beacon_block_root %v", ErrExecutionPayloadEnvelopeStateUnavailable, root)
+	}
+	if err := validate(block, blockState); err != nil {
+		return nil, false, noRelease, err
+	}
+	releaseOnReturn = false
+	return blockState, true, releaseValidation, nil
 }
 
 func (f *ForkChoiceStore) ValidateExecutionPayloadEnvelopeForGossip(signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error {
 	if err := f.validateExecutionPayloadEnvelopeInput(signedEnvelope); err != nil {
 		return err
 	}
-
-	releaseValidation, err := f.acquireExecutionPayloadValidationRead(context.Background())
+	root := signedEnvelope.Message.BeaconBlockRoot
+	block, err := func() (*cltypes.SignedBeaconBlock, error) {
+		f.mu.RLock()
+		defer f.mu.RUnlock()
+		block, ok := f.forkGraph.GetBlock(root)
+		if !ok || block == nil || block.Block == nil {
+			if f.forkGraph.IsBlockInvalid(root) {
+				return nil, fmt.Errorf("beacon block %v failed validation", root)
+			}
+			return nil, fmt.Errorf("%w: beacon block %v is unavailable", ErrIgnore, root)
+		}
+		finalizedSlot := f.computeStartSlotAtEpoch(f.FinalizedCheckpoint().Epoch)
+		if signedEnvelope.Message.Payload.SlotNumber < finalizedSlot {
+			return nil, fmt.Errorf("%w: envelope slot %d is before finalized slot %d", ErrIgnore, signedEnvelope.Message.Payload.SlotNumber, finalizedSlot)
+		}
+		return block, nil
+	}()
 	if err != nil {
 		return err
 	}
-	validationHeld := true
-	lockHeld := true
-	defer func() {
-		if lockHeld {
-			f.mu.RUnlock()
-		}
-		if validationHeld {
-			releaseValidation()
-		}
-	}()
-	root := signedEnvelope.Message.BeaconBlockRoot
-	blockState, err := f.forkGraph.GetState(root, true)
-	if err != nil || blockState == nil {
-		return fmt.Errorf("%w: beacon block state %v is unavailable", ErrIgnore, root)
-	}
-	block, ok := f.forkGraph.GetBlock(root)
-	finalizedSlot := f.computeStartSlotAtEpoch(f.FinalizedCheckpoint().Epoch)
-	f.mu.RUnlock()
-	lockHeld = false
-	if !ok || block == nil || block.Block == nil {
-		return fmt.Errorf("%w: beacon block %v is unavailable", ErrIgnore, root)
-	}
-	if signedEnvelope.Message.Payload.SlotNumber < finalizedSlot {
-		return fmt.Errorf("%w: envelope slot %d is before finalized slot %d", ErrIgnore, signedEnvelope.Message.Payload.SlotNumber, finalizedSlot)
-	}
-	if err := f.validateEnvelopeAgainstBlockForGossip(signedEnvelope, block, blockState); err != nil {
-		releaseValidation()
-		validationHeld = false
+	if err := validateEnvelopeAgainstBlockStateFree(signedEnvelope, block); err != nil {
 		return fmt.Errorf("execution payload envelope failed gossip validation: %w", err)
 	}
-	releaseValidation()
-	validationHeld = false
-	f.mu.RLock()
-	lockHeld = true
-	finalizedSlot = f.computeStartSlotAtEpoch(f.FinalizedCheckpoint().Epoch)
-	f.mu.RUnlock()
-	lockHeld = false
+	_, _ = signedEnvelope.Message.Payload.HashSSZ()
+
+	validated, err := func() (bool, error) {
+		f.mu.RLock()
+		defer f.mu.RUnlock()
+		if blockState := f.forkGraph.CurrentStateLocked(root); blockState != nil {
+			if err := f.validateEnvelopeStateDependent(signedEnvelope, block, blockState, true, false); err != nil {
+				return false, fmt.Errorf("execution payload envelope failed gossip validation: %w", err)
+			}
+			return true, nil
+		}
+		return false, nil
+	}()
+	if err != nil {
+		return err
+	}
+	if !validated {
+		if err := func() error {
+			validation := f.envelopeValidationSemaphore()
+			validation <- struct{}{}
+			defer func() { <-validation }()
+			blockState, err := f.forkGraph.ReplayState(root)
+			if err != nil {
+				return fmt.Errorf("%w: beacon block state %v: %w", ErrExecutionPayloadEnvelopeStateReplayFailed, root, err)
+			}
+			if blockState == nil {
+				return fmt.Errorf("%w: beacon block state %v is unavailable", ErrExecutionPayloadEnvelopeStateUnavailable, root)
+			}
+			if err := f.validateEnvelopeStateDependent(signedEnvelope, block, blockState, true, false); err != nil {
+				return fmt.Errorf("execution payload envelope failed gossip validation: %w", err)
+			}
+			return nil
+		}(); err != nil {
+			return err
+		}
+	}
+	finalizedSlot := f.computeStartSlotAtEpoch(f.FinalizedCheckpoint().Epoch)
 	if signedEnvelope.Message.Payload.SlotNumber < finalizedSlot {
 		return fmt.Errorf("%w: envelope slot %d is before finalized slot %d", ErrIgnore, signedEnvelope.Message.Payload.SlotNumber, finalizedSlot)
 	}
@@ -819,22 +956,41 @@ func (f *ForkChoiceStore) ValidateExecutionPayloadEnvelopeForGossip(signedEnvelo
 
 // acquireExecutionPayloadValidationRead returns with f.mu held and never waits for it while holding validation capacity.
 func (f *ForkChoiceStore) acquireExecutionPayloadValidationRead(ctx context.Context) (func(), error) {
-	f.executionPayloadValidationOnce.Do(func() {
-		f.executionPayloadValidation = make(chan struct{}, 1)
-	})
+	validation := f.envelopeValidationSemaphore()
 	for {
 		select {
-		case f.executionPayloadValidation <- struct{}{}:
+		case validation <- struct{}{}:
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		}
 		if f.mu.TryRLock() {
-			return func() { <-f.executionPayloadValidation }, nil
+			return func() { <-validation }, nil
 		}
-		<-f.executionPayloadValidation
+		<-validation
 		f.mu.RLock()
 		f.mu.RUnlock() //nolint:gocritic,staticcheck // This pair waits for a queued writer before retrying.
 	}
+}
+
+func (f *ForkChoiceStore) envelopeValidationSemaphore() chan struct{} {
+	f.executionPayloadValidationOnce.Do(func() {
+		f.executionPayloadValidation = make(chan struct{}, 1)
+	})
+	return f.executionPayloadValidation
+}
+
+func (f *ForkChoiceStore) queuePendingEnvelope(signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, missingMode missingEnvelopeMode, receivedAt time.Time) {
+	if missingMode != queueMissingEnvelope || f.forkGraph.HasEnvelope(signedEnvelope.Message.BeaconBlockRoot) {
+		return
+	}
+	f.rememberPendingEnvelopeArrival(signedEnvelope, receivedAt)
+	f.pendingEnvelopes.Add(signedEnvelope.Message.BeaconBlockRoot, signedEnvelope)
+}
+
+func (f *ForkChoiceStore) QueuePendingExecutionPayloadEnvelope(signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, receivedAt time.Time) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	f.queuePendingEnvelope(signedEnvelope, queueMissingEnvelope, receivedAt)
 }
 
 func (f *ForkChoiceStore) ClaimExecutionPayloadEnvelopeForGossip(
@@ -893,7 +1049,7 @@ func (f *ForkChoiceStore) ValidateExecutionPayloadEnvelopeForConsensus(ctx conte
 
 	f.mu.RLock()
 	root := signedEnvelope.Message.BeaconBlockRoot
-	blockState, err := f.forkGraph.GetState(root, true)
+	blockState, err := f.copyStateAtBlockRootLocked(root)
 	if err != nil || blockState == nil {
 		f.mu.RUnlock()
 		return fmt.Errorf("beacon block state %v is unavailable", root)
@@ -910,11 +1066,13 @@ func (f *ForkChoiceStore) ValidateExecutionPayloadEnvelopeForConsensus(ctx conte
 	if err := f.validateEnvelopeAgainstBlock(signedEnvelope, block, blockState); err != nil {
 		return fmt.Errorf("execution payload envelope failed gossip validation: %w", err)
 	}
-	if err := f.checkDataAvailability(ctx, block, root); err != nil {
+	finishImport := f.BeginPayloadImport(block.Block.Slot)
+	defer finishImport()
+	if err := f.checkDataAvailability(block, root); err != nil {
 		return err
 	}
 	blockState.SetPreviousStateRoot(block.Block.StateRoot)
-	if err := transition.ValidatingMachine.ProcessExecutionPayloadEnvelope(blockState, signedEnvelope); err != nil {
+	if err := transition.DefaultMachine.ProcessExecutionPayloadEnvelope(blockState, signedEnvelope); err != nil {
 		return fmt.Errorf("%w: execution payload envelope consensus validation failed: %w", ErrInvalidExecutionPayloadEnvelope, err)
 	}
 	f.mu.Lock()
@@ -974,8 +1132,8 @@ func (f *ForkChoiceStore) validateKnownEnvelopeCommitments(signedEnvelope *cltyp
 func (f *ForkChoiceStore) validatePendingEnvelopeCommitments(signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, validatePayload bool) (bool, error) {
 	root := signedEnvelope.Message.BeaconBlockRoot
 	f.mu.RLock()
-	blockState, stateErr := f.forkGraph.GetState(root, false)
-	if stateErr != nil || blockState == nil {
+	header, ok := f.forkGraph.GetHeader(root)
+	if !ok || header == nil {
 		f.mu.RUnlock()
 		return false, nil
 	}
@@ -1002,6 +1160,8 @@ func (f *ForkChoiceStore) applyEnvelopeCoordinated(
 	commitmentsValidated bool,
 	missingMode missingEnvelopeMode,
 	receivedAt time.Time,
+	replayedState *state.CachingBeaconState,
+	verifiedOffLock bool,
 ) (bool, error) {
 	if signedEnvelope.Message == nil {
 		log.Warn("[applyEnvelopeCoordinated] received signed envelope with nil message")
@@ -1015,29 +1175,31 @@ func (f *ForkChoiceStore) applyEnvelopeCoordinated(
 		return false, nil
 	}
 
-	// Envelope verification only reads the state (the consume-once
-	// PreviousStateRoot it takes is restored), so the shared reference is safe
-	// and avoids a full state copy per envelope under the write lock.
-	blockState, err := f.forkGraph.GetState(beaconBlockRoot, false)
-	if err != nil {
-		return false, fmt.Errorf("%w: OnExecutionPayload: failed to get block state: %w", errPendingEnvelopeAgeBounded, err)
+	var err error
+	blockState := replayedState
+	if blockState == nil {
+		if validatePayload && commitmentsValidated && !verifiedOffLock {
+			blockState = f.forkGraph.CurrentStateLocked(beaconBlockRoot)
+		} else {
+			// Envelope verification only reads the state (the consume-once
+			// PreviousStateRoot it takes is restored), so the shared reference is safe
+			// and avoids a full state copy per envelope under the write lock.
+			blockState, err = f.getStateLocked(beaconBlockRoot)
+			if err != nil {
+				return false, fmt.Errorf("%w: OnExecutionPayload: failed to get block state: %w", errPendingEnvelopeAgeBounded, err)
+			}
+		}
 	}
 	if blockState == nil {
-		if missingMode == queueMissingEnvelope {
-			f.rememberPendingEnvelopeArrival(signedEnvelope, receivedAt)
-			f.pendingEnvelopes.Add(beaconBlockRoot, signedEnvelope)
-		}
+		f.queuePendingEnvelope(signedEnvelope, missingMode, receivedAt)
 		log.Trace("OnExecutionPayload: block state not found", "beaconBlockRoot", common.Hash(beaconBlockRoot))
-		return false, fmt.Errorf("%w: block state not found for beacon_block_root %v", ErrIgnore, common.Hash(beaconBlockRoot))
+		return false, fmt.Errorf("%w: block state not found for beacon_block_root %v", ErrExecutionPayloadEnvelopeStateUnavailable, common.Hash(beaconBlockRoot))
 	}
 
 	// Get the block to verify it exists
 	block, ok := f.forkGraph.GetBlock(beaconBlockRoot)
 	if !ok || block == nil {
-		if missingMode == queueMissingEnvelope {
-			f.rememberPendingEnvelopeArrival(signedEnvelope, receivedAt)
-			f.pendingEnvelopes.Add(beaconBlockRoot, signedEnvelope)
-		}
+		f.queuePendingEnvelope(signedEnvelope, missingMode, receivedAt)
 		log.Trace("OnExecutionPayload: block not found in fork graph", "beaconBlockRoot", common.Hash(beaconBlockRoot))
 		return false, fmt.Errorf("%w: block not found in fork graph for beacon_block_root %v", ErrIgnore, common.Hash(beaconBlockRoot))
 	}
@@ -1052,7 +1214,7 @@ func (f *ForkChoiceStore) applyEnvelopeCoordinated(
 			}
 			return false, fmt.Errorf("OnExecutionPayload: failed to refresh block after commitment validation: %w", err)
 		}
-		blockState, err = f.forkGraph.GetState(beaconBlockRoot, false)
+		blockState, err = f.getStateLocked(beaconBlockRoot)
 		if err != nil {
 			return false, fmt.Errorf("%w: OnExecutionPayload: failed to refresh block state: %w", errPendingEnvelopeAgeBounded, err)
 		}
@@ -1066,15 +1228,21 @@ func (f *ForkChoiceStore) applyEnvelopeCoordinated(
 
 	// Validate envelope against block (bid matching + signature verification)
 	if validatePayload {
-		if err := f.validateEnvelopeAgainstBlockAfterCommitments(signedEnvelope, block, blockState); err != nil {
-			return false, fmt.Errorf("%w: OnExecutionPayload: envelope validation failed: %w", ErrInvalidExecutionPayloadEnvelope, err)
+		if !verifiedOffLock {
+			if err := f.validateEnvelopeAgainstBlockAfterCommitments(signedEnvelope, block, blockState); err != nil {
+				return false, fmt.Errorf("%w: OnExecutionPayload: envelope validation failed: %w", ErrInvalidExecutionPayloadEnvelope, err)
+			}
 		}
 		f.recordExecutionPayloadArrival(beaconBlockRoot, block.Block.Slot, receivedAt)
+		f.beginEnvelopeApply(beaconBlockRoot)
+		defer f.endEnvelopeApply(beaconBlockRoot)
 	}
+	finishImport := f.BeginPayloadImport(block.Block.Slot)
+	defer finishImport()
 
 	// Check blob data availability
 	if checkBlobData {
-		if err := f.checkDataAvailability(ctx, block, common.Hash(beaconBlockRoot)); err != nil {
+		if err := f.checkDataAvailability(block, common.Hash(beaconBlockRoot)); err != nil {
 			if missingMode == queueMissingEnvelope && errors.Is(err, ErrEIP7594ColumnDataNotAvailable) {
 				f.pendingEnvelopes.Add(beaconBlockRoot, signedEnvelope)
 			}
@@ -1082,7 +1250,12 @@ func (f *ForkChoiceStore) applyEnvelopeCoordinated(
 		}
 	}
 	blockState.SetPreviousStateRoot(block.Block.StateRoot)
-	if err := transition.ValidatingMachine.ProcessExecutionPayloadEnvelope(blockState, signedEnvelope); err != nil {
+	// The validatePayload branch above already verified the builder signature.
+	machine := transition.ValidatingMachine
+	if validatePayload {
+		machine = transition.DefaultMachine
+	}
+	if err := machine.ProcessExecutionPayloadEnvelope(blockState, signedEnvelope); err != nil {
 		return false, fmt.Errorf("%w: OnExecutionPayload: failed to verify execution payload: %w", ErrInvalidExecutionPayloadEnvelope, err)
 	}
 
@@ -1090,7 +1263,8 @@ func (f *ForkChoiceStore) applyEnvelopeCoordinated(
 	var elBehind bool
 	if validatePayload && f.engine != nil {
 		payloadStatus, validationErr := f.validatePayloadWithEL(ctx, envelope, block, common.Hash(beaconBlockRoot))
-		if errors.Is(validationErr, errPayloadValidationAdmission) {
+		if errors.Is(validationErr, ErrPayloadValidationInterrupted) {
+			// An expired context is not an EL verdict; keep the envelope pending.
 			if missingMode == queueMissingEnvelope && !f.forkGraph.HasEnvelope(beaconBlockRoot) {
 				f.pendingEnvelopes.Add(beaconBlockRoot, signedEnvelope)
 			}
@@ -1144,14 +1318,21 @@ func (f *ForkChoiceStore) applyEnvelopeCoordinated(
 
 	// Persist envelope to disk — this marks the root as "has payload" in store.payloads
 	if err := f.forkGraph.DumpEnvelopeOnDisk(beaconBlockRoot, signedEnvelope); err != nil {
+		if missingMode == queueMissingEnvelope {
+			f.pendingEnvelopes.Add(beaconBlockRoot, signedEnvelope)
+		}
 		return false, fmt.Errorf("%w: OnExecutionPayload: failed to dump envelope: %w", ErrExecutionPayloadEnvelopePersistenceFailed, err)
 	}
 	f.cacheParentBuilderExitRequests(beaconBlockRoot, signedEnvelope)
 	if envelope.Payload != nil {
 		f.eth2Roots.Add(beaconBlockRoot, envelope.Payload.BlockHash)
 	}
-	if f.engine == nil && envelope.Payload != nil {
-		if _, retained := f.markPayloadStatusIfRetainedLocked(beaconBlockRoot, envelope.Payload.BlockHash, execution_client.PayloadStatusNotValidated); !retained {
+	if (f.engine == nil || !validatePayload) && envelope.Payload != nil {
+		payloadStatus := execution_client.PayloadStatus(execution_client.PayloadStatusNotValidated)
+		if f.payloadValidatedLocked(beaconBlockRoot, envelope.Payload.BlockHash) {
+			payloadStatus = execution_client.PayloadStatusValidated
+		}
+		if _, retained := f.markPayloadStatusIfRetainedLocked(beaconBlockRoot, envelope.Payload.BlockHash, payloadStatus, &envelope.Payload.GasLimit); !retained {
 			return false, fmt.Errorf("%w: block disappeared while storing payload status for beacon_block_root %v", ErrIgnore, beaconBlockRoot)
 		}
 	}
@@ -1175,6 +1356,36 @@ func (f *ForkChoiceStore) ExecutionPayloadReceivedBefore(blockRoot common.Hash, 
 	return ok && arrival.receivedAt.Before(deadline)
 }
 
+// ExecutionPayloadApplyInFlight reports an envelope held for import or past its signature check
+// with the apply still running.
+func (f *ForkChoiceStore) ExecutionPayloadApplyInFlight(blockRoot common.Hash) bool {
+	if f.payloadPreparation.HasPendingEnvelope(blockRoot) {
+		return true
+	}
+	f.envelopeAppliesMu.Lock()
+	defer f.envelopeAppliesMu.Unlock()
+	return f.envelopeApplies[blockRoot] > 0
+}
+
+func (f *ForkChoiceStore) beginEnvelopeApply(blockRoot common.Hash) {
+	f.envelopeAppliesMu.Lock()
+	defer f.envelopeAppliesMu.Unlock()
+	if f.envelopeApplies == nil {
+		f.envelopeApplies = make(map[common.Hash]int)
+	}
+	f.envelopeApplies[blockRoot]++
+}
+
+func (f *ForkChoiceStore) endEnvelopeApply(blockRoot common.Hash) {
+	f.envelopeAppliesMu.Lock()
+	defer f.envelopeAppliesMu.Unlock()
+	if f.envelopeApplies[blockRoot] <= 1 {
+		delete(f.envelopeApplies, blockRoot)
+		return
+	}
+	f.envelopeApplies[blockRoot]--
+}
+
 func (f *ForkChoiceStore) recordExecutionPayloadArrival(blockRoot common.Hash, slot uint64, receivedAt time.Time) {
 	f.executionPayloadFirstSeenMu.Lock()
 	defer f.executionPayloadFirstSeenMu.Unlock()
@@ -1184,6 +1395,10 @@ func (f *ForkChoiceStore) recordExecutionPayloadArrival(blockRoot common.Hash, s
 	if _, ok := f.executionPayloadFirstSeen[blockRoot]; !ok {
 		f.executionPayloadFirstSeen[blockRoot] = executionPayloadArrival{receivedAt: receivedAt, slot: slot}
 	}
+}
+
+func (f *ForkChoiceStore) RecordExecutionPayloadArrival(blockRoot common.Hash, slot uint64, receivedAt time.Time) {
+	f.recordExecutionPayloadArrival(blockRoot, slot, receivedAt)
 }
 
 func (f *ForkChoiceStore) pruneExecutionPayloadFirstSeen(pruneSlot uint64) {
@@ -1294,11 +1509,10 @@ func (f *ForkChoiceStore) StoreAnchorEnvelope(blockRoot common.Hash, signedEnvel
 			return fmt.Errorf("%w: StoreAnchorEnvelope failed to dump envelope: %w", ErrExecutionPayloadEnvelopePersistenceFailed, err)
 		}
 	}
-	if f.engine == nil {
-		if _, retained := f.markPayloadStatusIfRetainedLocked(blockRoot, envelope.Payload.BlockHash, execution_client.PayloadStatusNotValidated); !retained {
-			f.mu.Unlock()
-			return fmt.Errorf("%w: block disappeared while storing anchor payload status for beacon_block_root %v", ErrIgnore, blockRoot)
-		}
+	// Until the EL answers, the anchor's payload counts as NotValidated; a later verdict replaces it.
+	if _, retained := f.markPayloadStatusIfRetainedLocked(blockRoot, envelope.Payload.BlockHash, execution_client.PayloadStatusNotValidated, &envelope.Payload.GasLimit); !retained {
+		f.mu.Unlock()
+		return fmt.Errorf("%w: block disappeared while storing anchor payload status for beacon_block_root %v", ErrIgnore, blockRoot)
 	}
 	f.eth2Roots.Add(blockRoot, envelope.Payload.BlockHash)
 	f.headHash = common.Hash{}
@@ -1368,9 +1582,6 @@ func (f *ForkChoiceStore) OnExecutionPayloadAt(ctx context.Context, signedEnvelo
 	// deadlock with postForkchoiceOperations (which holds MDBX tx then needs f.mu.RLock).
 	applied, err := f.applyEnvelope(ctx, signedEnvelope, checkBlobData, validatePayload, commitmentsValidated, queueMissingEnvelope, receivedAt)
 	if err != nil {
-		if errors.Is(err, ErrExecutionPayloadEnvelopePersistenceFailed) {
-			f.pendingEnvelopes.Add(common.Hash(beaconBlockRoot), signedEnvelope)
-		}
 		return err
 	}
 	token, tracked, err := f.claimEnvelopeIndexRepair(common.Hash(beaconBlockRoot), signedEnvelope, applied)
@@ -1420,7 +1631,7 @@ func (f *ForkChoiceStore) ValidateExecutionPayloadEnvelope(ctx context.Context, 
 	if !ok || block == nil {
 		return fmt.Errorf("block not found for beacon_block_root %v", blockRoot)
 	}
-	blockState, err := f.forkGraph.GetState(blockRoot, false)
+	blockState, err := f.getStateLocked(blockRoot)
 	if err != nil {
 		return fmt.Errorf("failed to get block state: %w", err)
 	}
@@ -1459,9 +1670,6 @@ func (f *ForkChoiceStore) ApplyLocalSelfBuildEnvelope(ctx context.Context, signe
 
 	applied, err := f.applyLocalSelfBuildEnvelope(ctx, signedEnvelope, queueMissingEnvelope)
 	if err != nil {
-		if errors.Is(err, ErrExecutionPayloadEnvelopePersistenceFailed) {
-			f.pendingLocalSelfBuildEnvelopes.Add(common.Hash(beaconBlockRoot), signedEnvelope)
-		}
 		return err
 	}
 	token, tracked, err := f.claimEnvelopeIndexRepair(common.Hash(beaconBlockRoot), signedEnvelope, applied)
@@ -1495,19 +1703,23 @@ func (f *ForkChoiceStore) emitExecutionPayloadIntegrationEvents(blockRoot common
 	if f.emitters == nil || signedEnvelope == nil || signedEnvelope.Message == nil || signedEnvelope.Message.Payload == nil {
 		return
 	}
+	block, ok := f.GetBlock(blockRoot)
+	if !ok || block == nil || block.Block == nil {
+		return
+	}
+	bid := block.Block.Body.GetSignedExecutionPayloadBid()
+	if bid == nil || bid.Message == nil {
+		return
+	}
 	envelope := signedEnvelope.Message
 	f.emitters.Operation().SendExecutionPayload(&beaconevents.ExecutionPayloadData{
-		Slot: envelope.Payload.SlotNumber, BuilderIndex: envelope.BuilderIndex, BlockHash: envelope.Payload.BlockHash, BlockRoot: blockRoot,
+		Slot: block.Block.Slot, BuilderIndex: bid.Message.BuilderIndex, BlockHash: envelope.Payload.BlockHash, BlockRoot: blockRoot,
 		ExecutionOptimistic: f.IsRootOptimistic(blockRoot),
 	})
 	f.emitters.Operation().SendExecutionPayloadAvailable(&beaconevents.ExecutionPayloadAvailableData{
-		Slot: envelope.Payload.SlotNumber, BlockRoot: blockRoot,
+		Slot: block.Block.Slot, BlockRoot: blockRoot,
 	})
 	if f.beaconCfg == nil {
-		return
-	}
-	block, ok := f.GetBlock(blockRoot)
-	if !ok || block == nil || block.Block == nil {
 		return
 	}
 	f.mu.RLock()
@@ -1556,7 +1768,7 @@ func (f *ForkChoiceStore) ensureKnownExecutionPayloadEnvelopeIndices(ctx context
 }
 
 func (f *ForkChoiceStore) ensureExecutionPayloadEnvelopeIndicesWithTrust(ctx context.Context, blockRoot common.Hash, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, applied, knownPersisted bool) (*cltypes.SignedExecutionPayloadEnvelope, bool, error) {
-	if f.db == nil || (!applied && !f.forkGraph.HasEnvelope(blockRoot)) {
+	if f.db == nil || (!applied && !knownPersisted && !f.forkGraph.HasEnvelope(blockRoot)) {
 		return signedEnvelope, applied, nil
 	}
 	retried := false
@@ -1582,6 +1794,43 @@ func (f *ForkChoiceStore) ensureExecutionPayloadEnvelopeIndicesWithTrust(ctx con
 
 var errExecutionPayloadIndexWritePanicked = errors.New("execution payload index write panicked")
 
+type executionPayloadEnvelopeIndexState struct {
+	blockNumber    []byte
+	blockHash      []byte
+	signature      common.Bytes96
+	signatureFound bool
+}
+
+func (s executionPayloadEnvelopeIndexState) structurallyUsable(wantSignature common.Bytes96) bool {
+	return len(s.blockNumber) == 4 && len(s.blockHash) == len(common.Hash{}) && common.BytesToHash(s.blockHash) != (common.Hash{}) &&
+		s.signatureFound && s.signature == wantSignature
+}
+
+func (s executionPayloadEnvelopeIndexState) exactValues(blockNumber uint64, blockHash common.Hash, signature common.Bytes96) bool {
+	return len(s.blockNumber) == 4 && base_encoding.Decode64FromBytes4(s.blockNumber) == blockNumber &&
+		bytes.Equal(s.blockHash, blockHash[:]) &&
+		s.signatureFound && s.signature == signature
+}
+
+func (f *ForkChoiceStore) readExecutionPayloadEnvelopeIndexState(ctx context.Context, blockRoot common.Hash, slot uint64) (executionPayloadEnvelopeIndexState, error) {
+	var indexState executionPayloadEnvelopeIndexState
+	err := f.db.View(ctx, func(tx kv.Tx) error {
+		blockNumber, err := tx.GetOne(kv.BlockRootToBlockNumber, blockRoot[:])
+		if err != nil {
+			return err
+		}
+		blockHash, err := tx.GetOne(kv.BlockRootToBlockHash, blockRoot[:])
+		if err != nil {
+			return err
+		}
+		indexState.blockNumber = bytes.Clone(blockNumber)
+		indexState.blockHash = bytes.Clone(blockHash)
+		indexState.signature, indexState.signatureFound, err = beacon_indicies.ReadExecutionPayloadEnvelopeSignature(tx, slot, blockRoot)
+		return err
+	})
+	return indexState, err
+}
+
 func (f *ForkChoiceStore) runExecutionPayloadEnvelopeIndexWrite(ctx context.Context, blockRoot common.Hash, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, applied, knownPersisted bool, write *envelopeIndexWrite) (envelope *cltypes.SignedExecutionPayloadEnvelope, indexed bool, err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
@@ -1601,13 +1850,16 @@ func (f *ForkChoiceStore) runExecutionPayloadEnvelopeIndexWrite(ctx context.Cont
 
 func (f *ForkChoiceStore) writeExecutionPayloadEnvelopeIndices(ctx context.Context, blockRoot common.Hash, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, applied, knownPersisted bool) (*cltypes.SignedExecutionPayloadEnvelope, bool, error) {
 	if !applied && !knownPersisted {
-		indexed, err := f.executionPayloadEnvelopeIndicesAreWellFormed(ctx, blockRoot)
-		if err != nil {
-			return nil, false, err
+		if signedEnvelope != nil && signedEnvelope.Message != nil && signedEnvelope.Message.Payload != nil {
+			indexState, err := f.readExecutionPayloadEnvelopeIndexState(ctx, blockRoot, signedEnvelope.Message.Payload.SlotNumber)
+			if err != nil {
+				return nil, false, err
+			}
+			if indexState.structurallyUsable(signedEnvelope.Signature) {
+				return signedEnvelope, false, nil
+			}
 		}
-		if indexed {
-			return signedEnvelope, false, nil
-		}
+		var err error
 		signedEnvelope, err = f.forkGraph.ReadEnvelopeFromDisk(blockRoot)
 		if err != nil {
 			return signedEnvelope, false, err
@@ -1616,54 +1868,18 @@ func (f *ForkChoiceStore) writeExecutionPayloadEnvelopeIndices(ctx context.Conte
 	if signedEnvelope == nil || signedEnvelope.Message == nil || signedEnvelope.Message.Payload == nil {
 		return signedEnvelope, false, errors.New("persisted execution payload envelope is incomplete")
 	}
-	indexed := false
-	err := f.db.View(ctx, func(tx kv.Tx) error {
-		blockNumberBytes, err := tx.GetOne(kv.BlockRootToBlockNumber, blockRoot[:])
-		if err != nil {
-			return err
-		}
-		blockHashBytes, err := tx.GetOne(kv.BlockRootToBlockHash, blockRoot[:])
-		if err != nil {
-			return err
-		}
-		if len(blockNumberBytes) != 4 || len(blockHashBytes) != len(common.Hash{}) {
-			return nil
-		}
-		blockNumber, err := beacon_indicies.ReadExecutionBlockNumber(tx, blockRoot)
-		if err != nil {
-			return err
-		}
-		blockHash, err := beacon_indicies.ReadExecutionBlockHash(tx, blockRoot)
-		if err != nil {
-			return err
-		}
-		indexed = blockNumber != nil && *blockNumber == signedEnvelope.Message.Payload.BlockNumber && blockHash == signedEnvelope.Message.Payload.BlockHash
-		return nil
-	})
-	if err != nil || indexed {
+	beaconSlot := signedEnvelope.Message.Payload.SlotNumber
+	indexState, err := f.readExecutionPayloadEnvelopeIndexState(ctx, blockRoot, beaconSlot)
+	if err != nil || indexState.exactValues(signedEnvelope.Message.Payload.BlockNumber, signedEnvelope.Message.Payload.BlockHash, signedEnvelope.Signature) {
 		return signedEnvelope, false, err
 	}
 	err = f.db.Update(ctx, func(tx kv.RwTx) error {
-		return beacon_indicies.WriteExecutionPayloadEnvelopeIndicies(tx, blockRoot, signedEnvelope.Message)
+		if err := beacon_indicies.WriteExecutionPayloadEnvelopeIndicies(tx, blockRoot, signedEnvelope.Message); err != nil {
+			return err
+		}
+		return beacon_indicies.WriteExecutionPayloadEnvelopeSignature(tx, beaconSlot, blockRoot, signedEnvelope.Signature)
 	})
 	return signedEnvelope, err == nil, err
-}
-
-func (f *ForkChoiceStore) executionPayloadEnvelopeIndicesAreWellFormed(ctx context.Context, blockRoot common.Hash) (bool, error) {
-	indexed := false
-	err := f.db.View(ctx, func(tx kv.Tx) error {
-		blockNumber, err := tx.GetOne(kv.BlockRootToBlockNumber, blockRoot[:])
-		if err != nil {
-			return err
-		}
-		blockHash, err := tx.GetOne(kv.BlockRootToBlockHash, blockRoot[:])
-		if err != nil {
-			return err
-		}
-		indexed = len(blockNumber) == 4 && len(blockHash) == len(common.Hash{}) && common.BytesToHash(blockHash) != (common.Hash{})
-		return nil
-	})
-	return indexed, err
 }
 
 // applyLocalSelfBuildEnvelope coordinates fork-choice ownership around local envelope processing.
@@ -1691,7 +1907,7 @@ func (f *ForkChoiceStore) applyLocalSelfBuildEnvelopeCoordinated(ctx context.Con
 		return false, nil
 	}
 
-	blockState, err := f.forkGraph.GetState(beaconBlockRoot, false)
+	blockState, err := f.getStateLocked(beaconBlockRoot)
 	if err != nil {
 		return false, fmt.Errorf("%w: applyLocalSelfBuildEnvelopeCoordinated: failed to get block state: %w", errPendingEnvelopeAgeBounded, err)
 	}
@@ -1711,6 +1927,8 @@ func (f *ForkChoiceStore) applyLocalSelfBuildEnvelopeCoordinated(ctx context.Con
 		log.Trace("applyLocalSelfBuildEnvelopeCoordinated: block not found in fork graph", "beaconBlockRoot", common.Hash(beaconBlockRoot))
 		return false, fmt.Errorf("%w: block not found in fork graph for beacon_block_root %v", ErrIgnore, common.Hash(beaconBlockRoot))
 	}
+	finishImport := f.BeginPayloadImport(block.Block.Slot)
+	defer finishImport()
 
 	// Skip validateEnvelopeAgainstBlock — we produced this envelope locally.
 	blockState.SetPreviousStateRoot(block.Block.StateRoot)
@@ -1722,7 +1940,7 @@ func (f *ForkChoiceStore) applyLocalSelfBuildEnvelopeCoordinated(ctx context.Con
 	var elBehind bool
 	if f.engine != nil {
 		payloadStatus, validationErr := f.validatePayloadWithEL(ctx, envelope, block, common.Hash(beaconBlockRoot))
-		if errors.Is(validationErr, errPayloadValidationAdmission) {
+		if errors.Is(validationErr, ErrPayloadValidationInterrupted) {
 			if missingMode == queueMissingEnvelope && !f.forkGraph.HasEnvelope(beaconBlockRoot) {
 				f.pendingLocalSelfBuildEnvelopes.Add(beaconBlockRoot, signedEnvelope)
 			}
@@ -1781,6 +1999,9 @@ func (f *ForkChoiceStore) applyLocalSelfBuildEnvelopeCoordinated(ctx context.Con
 	}
 
 	if err := f.forkGraph.DumpEnvelopeOnDisk(beaconBlockRoot, signedEnvelope); err != nil {
+		if missingMode == queueMissingEnvelope {
+			f.pendingLocalSelfBuildEnvelopes.Add(beaconBlockRoot, signedEnvelope)
+		}
 		return false, fmt.Errorf("%w: applyLocalSelfBuildEnvelopeCoordinated: failed to dump envelope: %w", ErrExecutionPayloadEnvelopePersistenceFailed, err)
 	}
 	f.cacheParentBuilderExitRequests(beaconBlockRoot, signedEnvelope)

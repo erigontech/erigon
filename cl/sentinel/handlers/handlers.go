@@ -27,14 +27,16 @@ import (
 	"github.com/libp2p/go-libp2p/core/protocol"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
 	peerdasstate "github.com/erigontech/erigon/cl/das/state"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
+	"github.com/erigontech/erigon/cl/phase1/envelope_history"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/sentinel/communication"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/cl/sentinel/handshake"
-	"github.com/erigontech/erigon/cl/sentinel/peers"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
@@ -61,6 +63,13 @@ type ConsensusHandlers struct {
 	dataColumnStorage  blob_storage.DataColumnStorage
 	peerdasStateReader peerdasstate.PeerDasStateReader
 	enableBlocks       bool
+	envelopeRebuilder  EnvelopeRebuilder
+}
+
+type EnvelopeRebuilder interface {
+	Prepare(context.Context, kv.Tx, uint64, common.Hash) (*envelope_history.PreparedRebuild, error)
+	PrepareFromBlocks(kv.Tx, uint64, common.Hash, *cltypes.SignedBeaconBlock, uint64, *cltypes.SignedBeaconBlock) (*envelope_history.PreparedRebuild, error)
+	TryRebuild(context.Context, *envelope_history.PreparedRebuild) (*cltypes.SignedExecutionPayloadEnvelope, error)
 }
 
 const (
@@ -68,6 +77,7 @@ const (
 	InvalidRequestPrefix      = 0x01
 	ServerErrorPrefix         = 0x02
 	ResourceUnavailablePrefix = 0x03
+	StreamDeadline            = 5 * time.Second
 )
 
 func NewConsensusHandlers(
@@ -75,7 +85,6 @@ func NewConsensusHandlers(
 	db freezeblocks.BeaconSnapshotReader,
 	indiciesDB kv.RoDB,
 	host host.Host,
-	peers *peers.Pool,
 	netCfg *clparams.NetworkConfig,
 	me *enode.LocalNode,
 	beaconConfig *clparams.BeaconChainConfig,
@@ -86,6 +95,7 @@ func NewConsensusHandlers(
 	dataColumnStorage blob_storage.DataColumnStorage,
 	peerDasStateReader peerdasstate.PeerDasStateReader,
 	enabledBlocks bool,
+	rebuilder EnvelopeRebuilder,
 ) *ConsensusHandlers {
 	c := &ConsensusHandlers{
 		host:               host,
@@ -103,6 +113,7 @@ func NewConsensusHandlers(
 		blobsStorage:       blobsStorage,
 		dataColumnStorage:  dataColumnStorage,
 		peerdasStateReader: peerDasStateReader,
+		envelopeRebuilder:  rebuilder,
 	}
 
 	hm := map[string]func(s network.Stream) error{
@@ -190,7 +201,7 @@ func (c *ConsensusHandlers) wrapStreamHandler(name string, fn func(s network.Str
 		}
 
 		// SetDeadline covers both directions.
-		if err := s.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		if err := s.SetDeadline(time.Now().Add(StreamDeadline)); err != nil {
 			log.Trace("failed to set stream deadline", "err", err)
 			_ = s.Reset()
 			_ = s.Close()
@@ -214,7 +225,7 @@ func (c *ConsensusHandlers) wrapStreamHandler(name string, fn func(s network.Str
 			if !(strings.Contains(name, "goodbye") &&
 				(strings.Contains(err.Error(), "session shut down") ||
 					strings.Contains(err.Error(), "stream reset"))) {
-				log.Trace("[pubsubhandler] close stream", l)
+				log.Trace("[pubsubhandler] close stream", l) //nolint:loggercheck // a single log.Ctx is expanded into pairs
 			}
 		}
 	}

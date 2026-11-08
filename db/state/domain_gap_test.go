@@ -52,7 +52,7 @@ func TestDomain_RmStateLatestHole(t *testing.T) {
 	v1, v2 := []byte("v1-old"), []byte("v2-latest")
 
 	drt := d.beginForTests()
-	w := drt.NewWriter()
+	w := drt.NewWriter(db)
 	require.NoError(t, w.PutWithPrev(k, v1, 1, nil))        // step 0
 	require.NoError(t, w.PutWithPrev(k, v2, aggStep+1, v1)) // step 1 (the true latest)
 	require.NoError(t, w.Flush(ctx, tx))
@@ -112,7 +112,7 @@ func TestInvertedIndex_RmStateLatestHole(t *testing.T) {
 	defer tx.Rollback()
 
 	ic := ii.beginForTests()
-	w := ic.NewWriter()
+	w := ic.NewWriter(db)
 	require.NoError(t, w.Add([]byte("k"), 1))         // step 0
 	require.NoError(t, w.Add([]byte("k"), aggStep+1)) // step 1
 	require.NoError(t, w.Flush(ctx, tx))

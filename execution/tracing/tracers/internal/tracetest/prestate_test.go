@@ -45,6 +45,7 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 // prestateTrace is the result of a prestateTrace run.
@@ -193,6 +194,11 @@ func testPrestateTracer(tracerName string, dirPath string, t *testing.T) {
 			}
 			if string(want) != string(res) {
 				t.Fatalf("trace mismatch\n have: %v\n want: %v\n", string(res), string(want))
+			}
+			if tracer.MarshalFastJSONTo != nil {
+				fast, err := jsonstream.Marshal(fastJSON(tracer.MarshalFastJSONTo))
+				require.NoError(t, err)
+				require.Equal(t, string(res), string(fast))
 			}
 		})
 	}

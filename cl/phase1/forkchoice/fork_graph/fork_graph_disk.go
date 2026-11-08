@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/cl/transition/impl/eth2"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 )
 
 const (
@@ -56,6 +57,8 @@ type validatedChildren struct {
 }
 
 var ErrStateNotFound = errors.New("state not found")
+
+var nextEpochStateOutcomes = metrics.GetOrCreateCounterVec("caplin_next_epoch_state_outcomes_total", []string{"outcome"})
 
 type ChainSegmentInsertionResult uint
 
@@ -119,13 +122,11 @@ type forkGraphDisk struct {
 	childrenMu          sync.RWMutex
 	children            map[common.Hash]*validatedChildren
 
-	// current state data — dual-protected. AddChainSegment is the sole writer
-	// and runs under the outer forkchoice f.mu, so reads taken under f.mu are
-	// already serialized against the writer and don't need currentStateMu.
-	// Reads outside f.mu (e.g. getCheckpointState) must take currentStateMu.
-	currentStateMu        sync.RWMutex
 	currentState          *state.CachingBeaconState
 	currentStateBlockRoot common.Hash // block root of the last processed block (avoids BlockRoot() zeroed-StateRoot issue)
+	nextEpochParentRoot   common.Hash
+	nextEpochState        *state.CachingBeaconState
+	highestTransitionSlot uint64
 
 	// for each block root we also keep track of te equivalent current justified and finalized checkpoints for faster head retrieval.
 	currentJustifiedCheckpoints sync.Map
@@ -156,13 +157,18 @@ type forkGraphDisk struct {
 	envelopeMissing  sync.Map // common.Hash -> struct{}
 	invalidEnvelopes sync.Map // common.Hash -> struct{}
 
-	// reusable buffers
-	sszBuffer []byte
+	// stateDumpLock guards the reusable state buffer and the key of the last state dump
+	stateDumpLock  sync.Mutex
+	sszBuffer      []byte
+	lastDumpedRoot common.Hash
+	lastDumpedSlot uint64
+
+	// envelopeMu guards the reusable envelope buffer
+	envelopeMu        sync.Mutex
+	envelopeSSZBuffer []byte
 
 	rcfg       beacon_router_configuration.RouterConfiguration
 	syncedData synced_data.SyncedData
-
-	stateDumpLock sync.Mutex
 }
 
 // Initialize fork graph with a new state.
@@ -197,6 +203,10 @@ func NewForkGraphDisk(anchorState *state.CachingBeaconState, syncedData synced_d
 	}
 
 	farthestExtendingPath[anchorRoot] = true
+	anchorState, err = anchorState.Copy()
+	if err != nil {
+		return nil, err
+	}
 
 	f := &forkGraphDisk{
 		fs: aferoFs,
@@ -228,6 +238,42 @@ func (f *forkGraphDisk) AnchorSlot() uint64 {
 
 func (f *forkGraphDisk) AnchorRoot() common.Hash {
 	return f.anchorRoot
+}
+
+func (f *forkGraphDisk) SetNextEpochState(parentRoot common.Hash, state *state.CachingBeaconState) {
+	f.addPruneMu.Lock()
+	defer f.addPruneMu.Unlock()
+	if f.highestTransitionSlot >= state.Slot() {
+		recordNextEpochStateOutcome("late", state.Slot())
+		return
+	}
+	f.nextEpochParentRoot = parentRoot
+	f.nextEpochState = state
+}
+
+func recordNextEpochStateOutcome(outcome string, slot uint64) {
+	nextEpochStateOutcomes.WithLabelValues(outcome).Inc()
+	log.Debug("Precomputed epoch state", "outcome", outcome, "slot", slot)
+}
+
+func (f *forkGraphDisk) takeNextEpochStateLocked(block *cltypes.BeaconBlock, parentSlot uint64, fullValidation bool) *state.CachingBeaconState {
+	if f.nextEpochState == nil || block.Slot < f.nextEpochState.Slot() {
+		if block.Slot/f.beaconCfg.SlotsPerEpoch > parentSlot/f.beaconCfg.SlotsPerEpoch {
+			recordNextEpochStateOutcome("no_entry", block.Slot)
+		}
+		return nil
+	}
+	precomputed := f.nextEpochState
+	f.nextEpochState = nil
+	if !fullValidation {
+		recordNextEpochStateOutcome("no_full_validation", block.Slot)
+		return nil
+	}
+	if f.nextEpochParentRoot != block.ParentRoot {
+		recordNextEpochStateOutcome("parent_mismatch", block.Slot)
+		return nil
+	}
+	return precomputed
 }
 
 func (f *forkGraphDisk) isBlockRootTheCurrentState(blockRoot common.Hash) bool {
@@ -266,8 +312,10 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 	var newState *state.CachingBeaconState
 	if isBlockRootTheCurrentState {
 		newState = f.currentState
+	} else if current := f.CurrentStateLocked(block.ParentRoot); current != nil {
+		newState = current
 	} else {
-		newState, err = f.getState(block.ParentRoot, false, true)
+		newState, err = f.replayState(block.ParentRoot, true)
 		if err != nil {
 			return nil, LogisticError, fmt.Errorf("AddChainSegment: %w, parentRoot: %x", err, block.ParentRoot)
 		}
@@ -328,28 +376,44 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 	// get an empty response and penalize us (Lighthouse: -20 per NullBlocksByRoot).
 	f.blocks.Store(common.Hash(blockRoot), signedBlock)
 
-	blockRewardsCollector := &eth2.BlockRewardsCollector{}
-
 	if !isBlockRootTheCurrentState {
-		// Execute the state
-		if invalidBlockErr := transition.TransitionState(newState, signedBlock, blockRewardsCollector, fullValidation); invalidBlockErr != nil {
-			// Add block to list of invalid blocks
-			log.Warn("Invalid beacon block", "slot", block.Slot, "blockRoot", common.Bytes2Hex(blockRoot[:]), "reason", invalidBlockErr)
-			f.blocks.Delete(common.Hash(blockRoot)) // remove early-stored block
-			f.badBlocks.Store(common.Hash(blockRoot), block.Slot)
-			f.currentStateMu.Lock()
-			f.currentState = nil
-			f.currentStateBlockRoot = common.Hash{}
-			f.currentStateMu.Unlock()
-			return nil, InvalidBlock, invalidBlockErr
+		f.highestTransitionSlot = max(f.highestTransitionSlot, block.Slot)
+		blockRewardsCollector := &eth2.BlockRewardsCollector{}
+		precomputedState := f.takeNextEpochStateLocked(block, newState.Slot(), fullValidation)
+		var precomputedErr error
+		if precomputedState != nil {
+			precomputedErr = transition.TransitionStateFromPrecomputedEpochState(precomputedState, signedBlock, blockRewardsCollector, fullValidation)
+			if precomputedErr == nil {
+				newState = precomputedState
+				recordNextEpochStateOutcome("hit", block.Slot)
+			} else {
+				blockRewardsCollector = &eth2.BlockRewardsCollector{}
+			}
+		}
+		if precomputedState == nil || precomputedErr != nil {
+			if invalidBlockErr := transition.TransitionState(newState, signedBlock, blockRewardsCollector, fullValidation); invalidBlockErr != nil {
+				if precomputedErr != nil {
+					recordNextEpochStateOutcome("invalid", block.Slot)
+				}
+				log.Warn("Invalid beacon block", "slot", block.Slot, "blockRoot", common.Bytes2Hex(blockRoot[:]), "reason", invalidBlockErr)
+				f.blocks.Delete(common.Hash(blockRoot)) // remove early-stored block
+				if !errors.Is(invalidBlockErr, eth2.ErrInvalidBlockSignature) {
+					f.badBlocks.Store(common.Hash(blockRoot), block.Slot)
+				}
+				f.currentState = nil
+				f.currentStateBlockRoot = common.Hash{}
+				return nil, InvalidBlock, invalidBlockErr
+			}
+			if precomputedErr != nil {
+				nextEpochStateOutcomes.WithLabelValues("diverged").Inc()
+				log.Warn("Precomputed epoch state diverged", "slot", block.Slot, "blockRoot", common.Bytes2Hex(blockRoot[:]), "reason", precomputedErr)
+			}
 		}
 		f.blockRewards.Store(common.Hash(blockRoot), blockRewardsCollector)
 	}
 
-	f.currentStateMu.Lock()
 	f.currentState = newState
 	f.currentStateBlockRoot = common.Hash(blockRoot)
-	f.currentStateMu.Unlock()
 
 	// Verify currentState.BlockRoot() matches the actual block root.
 	if computedRoot, cerr := newState.BlockRoot(); cerr == nil && computedRoot != common.Hash(blockRoot) {
@@ -526,8 +590,15 @@ func (f *forkGraphDisk) removeValidatedChildren(rootsByParent map[common.Hash][]
 	}
 }
 
-func (f *forkGraphDisk) GetState(blockRoot common.Hash, alwaysCopy bool) (*state.CachingBeaconState, error) {
-	return f.getState(blockRoot, alwaysCopy, false)
+func (f *forkGraphDisk) CurrentStateLocked(blockRoot common.Hash) *state.CachingBeaconState {
+	if f.currentState == nil || f.currentStateBlockRoot != blockRoot {
+		return nil
+	}
+	return f.currentState
+}
+
+func (f *forkGraphDisk) ReplayState(blockRoot common.Hash) (*state.CachingBeaconState, error) {
+	return f.replayState(blockRoot, false)
 }
 
 func (f *forkGraphDisk) useCachedStateIfPossible(blockRoot common.Hash, in *state.CachingBeaconState) (out *state.CachingBeaconState, ok bool, err error) {
@@ -535,7 +606,10 @@ func (f *forkGraphDisk) useCachedStateIfPossible(blockRoot common.Hash, in *stat
 		return
 	}
 	if f.syncedData.HeadRoot() == blockRoot {
-		err = f.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
+		err = f.syncedData.ViewHeadStateWithIdentity(func(headState *state.CachingBeaconState, headRoot common.Hash, _ uint64) error {
+			if headRoot != blockRoot {
+				return nil
+			}
 			// HeadRoot() already matched blockRoot, so we trust the stored root
 			// rather than recomputing BlockRoot() which can return incorrect results
 			// when the state's incremental hashing cache has been dirtied.
@@ -553,7 +627,9 @@ func (f *forkGraphDisk) useCachedStateIfPossible(blockRoot common.Hash, in *stat
 		if errors.Is(err, synced_data.ErrNotSynced) {
 			err = nil
 		}
-		return
+		if ok || err != nil {
+			return
+		}
 	}
 
 	// check if the state is in the cache
@@ -586,24 +662,14 @@ func (f *forkGraphDisk) useCachedStateIfPossible(blockRoot common.Hash, in *stat
 	return
 }
 
-func (f *forkGraphDisk) getState(blockRoot common.Hash, alwaysCopy bool, addChainSegment bool) (*state.CachingBeaconState, error) {
-	// Snapshot currentState/currentStateBlockRoot under RLock so that
-	// concurrent callers (getCheckpointState outside forkchoice mu)
-	// don't race with AddChainSegment writes.
-	f.currentStateMu.RLock()
-	cs := f.currentState
-	csRoot := f.currentStateBlockRoot
-	f.currentStateMu.RUnlock()
-
-	if cs != nil && csRoot == blockRoot {
-		if alwaysCopy {
-			return cs.Copy()
-		}
-		return cs, nil
-	}
-	if addChainSegment && !alwaysCopy {
-		if state, ok, err := f.useCachedStateIfPossible(blockRoot, cs); ok {
+func (f *forkGraphDisk) replayState(blockRoot common.Hash, addChainSegment bool) (*state.CachingBeaconState, error) {
+	if addChainSegment {
+		if state, ok, err := f.useCachedStateIfPossible(blockRoot, f.currentState); ok {
 			return state, err
+		}
+	} else {
+		if _, ok := f.GetHeader(blockRoot); !ok {
+			return nil, nil
 		}
 	}
 
@@ -619,11 +685,17 @@ func (f *forkGraphDisk) getState(blockRoot common.Hash, alwaysCopy bool, addChai
 		block, isSegmentPresent := f.GetBlock(currentIteratorRoot)
 		if !isSegmentPresent {
 			// check if it is in the header
+			// The anchor state is dumped at startup whatever its slot.
 			bHeader, ok := f.GetHeader(currentIteratorRoot)
-			if ok && bHeader.Slot%dumpSlotFrequency == 0 {
+			if ok && (bHeader.Slot%dumpSlotFrequency == 0 || currentIteratorRoot == f.anchorRoot) {
 				copyReferencedState, err = f.readBeaconStateFromDisk(currentIteratorRoot)
 				if err != nil {
-					log.Trace("Could not retrieve state", "missing", currentIteratorRoot, "err", err)
+					if currentIteratorRoot == f.anchorRoot {
+						// Once currentState has moved on, this file is the only copy of the anchor state.
+						log.Warn("Could not read the anchor state file", "root", currentIteratorRoot, "err", err)
+					} else {
+						log.Trace("Could not retrieve state", "missing", currentIteratorRoot, "err", err)
+					}
 					return nil, nil
 				}
 				continue
@@ -653,10 +725,8 @@ func (f *forkGraphDisk) getState(blockRoot common.Hash, alwaysCopy bool, addChai
 	for _, b := range slices.Backward(blocksInTheWay) {
 		if err := transition.TransitionState(copyReferencedState, b, nil, false); err != nil {
 			if addChainSegment {
-				f.currentStateMu.Lock()
 				f.currentState = nil
 				f.currentStateBlockRoot = common.Hash{}
-				f.currentStateMu.Unlock()
 			}
 			return nil, err
 		}
@@ -739,13 +809,13 @@ func (f *forkGraphDisk) IsBlockRetained(blockRoot common.Hash) bool {
 	return f.retainedBlock(blockRoot)
 }
 
-func (f *forkGraphDisk) WithRetainedBlock(blockRoot common.Hash, fn func()) bool {
+func (f *forkGraphDisk) WithRetainedBlock(blockRoot common.Hash, fn func(func(common.Hash) bool)) bool {
 	f.lifecycleMu.RLock()
 	defer f.lifecycleMu.RUnlock()
 	if !f.retainedBlock(blockRoot) {
 		return false
 	}
-	fn()
+	fn(f.retainedBlock)
 	return true
 }
 
@@ -902,28 +972,6 @@ func (f *forkGraphDisk) GetLightClientUpdate(period uint64) (*cltypes.LightClien
 	return obj.(*cltypes.LightClientUpdate), true
 }
 
-func (f *forkGraphDisk) GetBalances(blockRoot common.Hash) (solid.Uint64ListSSZ, error) {
-	st, err := f.GetState(blockRoot, true)
-	if err != nil {
-		return nil, err
-	}
-	if st == nil {
-		return nil, ErrStateNotFound
-	}
-	return st.Balances(), nil
-}
-
-func (f *forkGraphDisk) GetInactivitiesScores(blockRoot common.Hash) (solid.Uint64ListSSZ, error) {
-	st, err := f.GetState(blockRoot, true)
-	if err != nil {
-		return nil, err
-	}
-	if st == nil {
-		return nil, ErrStateNotFound
-	}
-	return st.InactivityScores(), nil
-}
-
 func (f *forkGraphDisk) GetPreviousParticipationIndicies(epoch uint64) (*solid.ParticipationBitList, error) {
 	b, ok := f.previousIndicies.get(epoch)
 	if !ok {
@@ -960,15 +1008,4 @@ func (f *forkGraphDisk) GetCurrentParticipationIndicies(epoch uint64) (*solid.Pa
 	out := solid.NewParticipationBitList(0, int(f.beaconCfg.ValidatorRegistryLimit))
 	err := out.DecodeSSZ(b, 0)
 	return out, err
-}
-
-func (f *forkGraphDisk) GetValidatorSet(blockRoot common.Hash) (*solid.ValidatorSet, error) {
-	st, err := f.GetState(blockRoot, true)
-	if err != nil {
-		return nil, err
-	}
-	if st == nil {
-		return nil, ErrStateNotFound
-	}
-	return st.ValidatorSet(), nil
 }

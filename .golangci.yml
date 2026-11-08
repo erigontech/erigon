@@ -1,4 +1,9 @@
 version: "2"
+issues:
+  # Cached issues load in map order; these caps would then keep a random subset per run.
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
 run:
   allow-parallel-runners: true
 linters:
@@ -22,13 +27,19 @@ linters:
     - noctx
     - errorlint
     - unused
-  disable:
     - testifylint
+    - nosprintfhostport
+    - gocheckcompilerdirectives
+    - gosec
+    - usetesting
+    - loggercheck
+    - wastedassign
+    - revive
+    - gomoddirectives
+  disable:
     - contextcheck
     - err113
     - exhaustive
-    - gocheckcompilerdirectives
-    - gosec
     - musttag
     - nilerr
     - protogetter
@@ -38,11 +49,84 @@ linters:
     - sqlclosecheck # we don't use SQL
     - rowserrcheck # we don't use SQL
     - zerologlint # not don't use Zerolog
-    - wastedassign # `ineffassign` linter is enabled by default
     - spancheck # we don't use OpenTelemetry
-    - loggercheck # we don't use Zap
     - unconvert # not enough profit from always enabling
   settings:
+    gomoddirectives:
+      replace-allow-list:
+        - github.com/holiman/bloomfilter/v2
+    revive:
+      rules:
+        - name: atomic
+        - name: inefficient-map-lookup
+        - name: string-of-int
+        - name: time-date
+        - name: time-equal
+        - name: unconditional-recursion
+        - name: useless-fallthrough
+        - name: waitgroup-by-value
+        - name: unreachable-code
+        - name: defer
+          arguments:
+            - ["immediate-recover", "return"]
+    loggercheck:
+      rules:
+        - (github.com/erigontech/erigon/common/log/v3.Logger).Trace
+        - github.com/erigontech/erigon/common/log/v3.Trace
+        - (github.com/erigontech/erigon/common/log/v3.Logger).Debug
+        - github.com/erigontech/erigon/common/log/v3.Debug
+        - (github.com/erigontech/erigon/common/log/v3.Logger).Info
+        - github.com/erigontech/erigon/common/log/v3.Info
+        - (github.com/erigontech/erigon/common/log/v3.Logger).Warn
+        - github.com/erigontech/erigon/common/log/v3.Warn
+        - (github.com/erigontech/erigon/common/log/v3.Logger).Error
+        - github.com/erigontech/erigon/common/log/v3.Error
+        - (github.com/erigontech/erigon/common/log/v3.Logger).Crit
+        - github.com/erigontech/erigon/common/log/v3.Crit
+        - (github.com/erigontech/erigon/common/log/v3.Logger).Log
+        - github.com/erigontech/erigon/common/log/v3.Log
+        - (github.com/erigontech/erigon/common/log/v3.Logger).New
+        - github.com/erigontech/erigon/common/log/v3.New
+    gosec:
+      includes:
+        - G102
+        - G106
+        - G107
+        - G108
+        - G109
+        - G110
+        - G111
+        - G112
+        - G113
+        - G114
+        - G117
+        - G119
+        - G120
+        - G121
+        - G123
+        - G124
+        - G203
+        - G303
+        - G305
+        - G307
+        - G402
+        - G403
+        - G405
+        - G408
+        - G502
+        - G503
+        - G504
+        - G506
+        - G701
+        - G702
+        - G704
+        - G706
+        - G707
+        - G708
+        - G709
+        - G710
+    usetesting:
+      os-mkdir-temp: false
     goconst:
       min-len: 2
       min-occurrences: 2
@@ -65,6 +149,17 @@ linters:
           rules: rules.go
         underef:
           skipRecvDeref: true
+    testifylint:
+      disable-all: true
+      enable:
+        - error-is-as
+        - go-require
+        - formatter
+        - useless-assert
+        - suite-broken-parallel
+        - suite-method-signature
+        - suite-subtest-run
+        - nil-compare
     modernize:
       # newexpr wants //go:fix inline on common.NewUint64 (391 call sites) — its own PR.
       disable:
@@ -96,30 +191,32 @@ linters:
         - -ST1029
         - -ST5011
     govet:
-      enable:
-        - nilness
-        - unusedwrite
-        - shadow
+      enable-all: true
       disable:
         - deepequalerrors
         - fieldalignment
-        - unsafeptr
+        - reflectvaluecompare
   exclusions:
     generated: lax
     presets:
       - comments
       - common-false-positives
-      - legacy
       - std-error-handling
     rules:
       - linters:
           - modernize
         path: _grpc\.pb\.go
-      # shadow runs under db/ only for now; the rest of the tree is not swept yet.
+      # errcheck v2.15+ flags bare channel receives of error types (e.g. <-errCh) as
+      # unchecked errors. These are intentional drains to wait for channel closure.
+      - linters:
+          - errcheck
+        text: "^Error return value is not checked"
+        source: "^\\s*(case\\s+)?<-"
+      # shadow is gated only under these dirs; the rest of the tree is not swept yet.
       - linters:
           - govet
         text: "^shadow:"
-        path-except: "^db/"
+        path-except: "^(db|common|diagnostics|internal|node|plugins|txnprovider)/"
       # Bootstrap exclusion: files with baseline shadow findings, migrated one
       # file per PR. Remove a file from the list once it is clean; a file that is
       # not listed is gated, so a fixed file cannot silently regress.
@@ -204,6 +301,8 @@ linters:
           |db/test/domain_shared_bench_test\\.go\
           |db/test/domains_restart_test\\.go\
           |db/test/lifecycle_bench_test\\.go\
+          |node/eth/backend\\.go\
+          |txnprovider/txpool/pool\\.go\
           )$"
       - linters:
           - gosec

@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"math/big"
 	"reflect"
 	"testing"
@@ -345,6 +346,58 @@ func TestTraceGasUsageAcrossRPCPaths(t *testing.T) {
 		})
 		require.Equal(t, txnTrace, callTrace, "call %d", i)
 		require.Equal(t, txnTrace, manyTraces[0][i], "call-many %d", i)
+	}
+}
+
+// revertingContractOverride replaces the code gasTracingTestChain's transactions call with a REVERT.
+func revertingContractOverride() *tracersConfig.TraceConfig {
+	tracer := "callTracer"
+	reverting := hexutil.Bytes{byte(vm.PUSH1), 0, byte(vm.PUSH1), 0, byte(vm.REVERT)}
+	return &tracersConfig.TraceConfig{Tracer: &tracer, StateOverrides: &ethapi.StateOverrides{
+		accounts.InternAddress(common.HexToAddress("0x2000")): {Code: &reverting},
+	}}
+}
+
+type callTraceError struct {
+	Error string `json:"error"`
+}
+
+func TestTraceBlockSeesStateOverrides(t *testing.T) {
+	m, _, calls := gasTracingTestChain(t)
+	api := newDebugApiForTest(m)
+	var traces []struct {
+		Result callTraceError `json:"result"`
+	}
+	readGasTrace(t, &traces, func(stream *jsonstream.Stream) error {
+		return api.TraceBlockByNumber(m.Ctx, 1, revertingContractOverride(), stream)
+	})
+	require.Len(t, traces, len(calls))
+	for i, trace := range traces {
+		require.Equal(t, "execution reverted", trace.Result.Error, "transaction %d", i)
+	}
+}
+
+func TestTraceTransactionSeesStateOverrides(t *testing.T) {
+	m, generated, _ := gasTracingTestChain(t)
+	api := newDebugApiForTest(m)
+	var trace callTraceError
+	readGasTrace(t, &trace, func(stream *jsonstream.Stream) error {
+		return api.TraceTransaction(m.Ctx, generated.Blocks[0].Transactions()[0].Hash(), revertingContractOverride(), stream)
+	})
+	require.Equal(t, "execution reverted", trace.Error)
+}
+
+func TestTraceCallManySeesStateOverrides(t *testing.T) {
+	m, _, calls := gasTracingTestChain(t)
+	api := newDebugApiForTest(m)
+	var traces [][]callTraceError
+	readGasTrace(t, &traces, func(stream *jsonstream.Stream) error {
+		return api.TraceCallMany(m.Ctx, []Bundle{{Transactions: calls}}, StateContext{BlockNumber: rpc.BlockNumberOrHashWithNumber(1), TransactionIndex: new(0)}, revertingContractOverride(), stream)
+	})
+	require.Len(t, traces, 1)
+	require.Len(t, traces[0], len(calls))
+	for i, trace := range traces[0] {
+		require.Equal(t, "execution reverted", trace.Error, "call %d", i)
 	}
 }
 
@@ -1026,6 +1079,15 @@ func TestStorageRangeAtGethCompat(t *testing.T) {
 		require.Empty(t, result.Storage)
 		require.NotNil(t, result.NextKey)
 		require.Equal(t, keys[0], *result.NextKey)
+
+		for _, maxResult := range []int{100_000_000_000, math.MaxInt} {
+			result, err = api.StorageRangeAt(m.Ctx, latestBlock.Hash(), 0, addr, nil, maxResult)
+			require.NoError(t, err)
+			expect = StorageRangeResult{storage, nil}
+			if !reflect.DeepEqual(result, expect) {
+				t.Fatalf("maxResult %d: wrong result:\ngot %s\nwant %s", maxResult, dumper.Sdump(result), dumper.Sdump(&expect))
+			}
+		}
 	})
 }
 
@@ -1345,7 +1407,7 @@ func TestMapTxNum2BlockNum(t *testing.T) {
 		for expectTxNums.HasNext() {
 			require.True(t, txNumsIter.HasNext())
 			expectTxNum, _ := expectTxNums.Next()
-			txNum, _, _, _, _, _ := txNumsIter.Next()
+			txNum, _, _, _, _, _, _ := txNumsIter.Next()
 			require.Equal(t, expectTxNum, txNum)
 		}
 	}
@@ -1447,8 +1509,9 @@ func TestAccountAt(t *testing.T) {
 	})
 	t.Run("large transaction index", func(t *testing.T) {
 		result, err := api.AccountAt(m.Ctx, blockHash10, 1024, contract)
-		require.NoError(t, err)
-		require.Equal(t, 42, int(result.Nonce))
+		var invalidParams *rpc.InvalidParamsError
+		require.ErrorAs(t, err, &invalidParams)
+		require.Nil(t, result)
 	})
 	t.Run("not existing addr", func(t *testing.T) {
 		require := require.New(t)
@@ -2076,4 +2139,91 @@ func TestSetHeadCanonicalCleanup(t *testing.T) {
 	restoredHead, err := rpchelper.GetLatestBlockNumber(roTx)
 	require.NoError(t, err)
 	require.Equal(t, head, restoredHead, "chain head should be restored after UpdateForkChoice")
+}
+
+func TestCallRejectsTxIndexOutOfBlock(t *testing.T) {
+	m, _, calls := gasTracingTestChain(t)
+	api, debugApi := newCallManyApisForTest(m)
+	block := rpc.BlockNumberOrHashWithNumber(1)
+	var invalidParams *rpc.InvalidParamsError
+	for _, txIndex := range []int{-5, len(calls) + 1, 500} {
+		stateCtx := StateContext{BlockNumber: block, TransactionIndex: &txIndex}
+		t.Run(fmt.Sprintf("debug_traceCallMany/%d", txIndex), func(t *testing.T) {
+			err := debugApi.TraceCallMany(m.Ctx, []Bundle{{Transactions: calls}}, stateCtx, nil, jsonstream.New(&bytes.Buffer{}))
+			require.ErrorAs(t, err, &invalidParams)
+		})
+		t.Run(fmt.Sprintf("eth_callMany/%d", txIndex), func(t *testing.T) {
+			_, err := api.CallMany(m.Ctx, []Bundle{{Transactions: calls}}, stateCtx, nil, nil)
+			require.ErrorAs(t, err, &invalidParams)
+		})
+		if txIndex < 0 {
+			continue
+		}
+		t.Run(fmt.Sprintf("debug_traceCall/%d", txIndex), func(t *testing.T) {
+			config := &tracersConfig.TraceConfig{TxIndex: new(hexutil.Uint(txIndex))}
+			err := debugApi.TraceCall(m.Ctx, calls[0], &block, config, jsonstream.New(&bytes.Buffer{}))
+			require.ErrorAs(t, err, &invalidParams)
+		})
+	}
+
+	txCount := len(calls)
+	stateCtx := StateContext{BlockNumber: block, TransactionIndex: &txCount}
+	_, err := api.CallMany(m.Ctx, []Bundle{{Transactions: calls}}, stateCtx, nil, nil)
+	require.NoError(t, err)
+	require.NoError(t, debugApi.TraceCallMany(m.Ctx, []Bundle{{Transactions: calls}}, stateCtx, nil, jsonstream.New(&bytes.Buffer{})))
+	config := &tracersConfig.TraceConfig{TxIndex: new(hexutil.Uint(txCount))}
+	require.NoError(t, debugApi.TraceCall(m.Ctx, calls[0], &block, config, jsonstream.New(&bytes.Buffer{})))
+
+	t.Run("debug_traceCallMany/negative_index_without_bounds", func(t *testing.T) {
+		require.NoError(t, m.DB.Update(m.Ctx, func(tx kv.RwTx) error {
+			return tx.Delete(kv.MaxTxNum, hexutil.EncodeTs(1))
+		}))
+		stateCtx := StateContext{BlockNumber: block, TransactionIndex: new(int(-2))}
+		err := debugApi.TraceCallMany(m.Ctx, []Bundle{{Transactions: calls}}, stateCtx, nil, jsonstream.New(&bytes.Buffer{}))
+		require.ErrorAs(t, err, &invalidParams)
+	})
+}
+
+func TestTraceCallRejectsTxIndexOutOfLatestBlock(t *testing.T) {
+	m, _, calls := gasTracingTestChain(t)
+	_, debugApi := newCallManyApisForTest(m)
+	latest := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
+	var invalidParams *rpc.InvalidParamsError
+	for _, txIndex := range []int{-5, 500} {
+		stateCtx := StateContext{BlockNumber: latest, TransactionIndex: &txIndex}
+		err := debugApi.TraceCallMany(m.Ctx, []Bundle{{Transactions: calls}}, stateCtx, nil, jsonstream.New(&bytes.Buffer{}))
+		require.ErrorAs(t, err, &invalidParams, "debug_traceCallMany %d", txIndex)
+	}
+	config := &tracersConfig.TraceConfig{TxIndex: new(hexutil.Uint(500))}
+	err := debugApi.TraceCall(m.Ctx, calls[0], &latest, config, jsonstream.New(&bytes.Buffer{}))
+	require.ErrorAs(t, err, &invalidParams)
+}
+
+type recordingCodeStore map[string]int
+
+func (s recordingCodeStore) GetCodeByHash(h []byte) ([]byte, bool) {
+	s[string(h)]++
+	return nil, false
+}
+
+type codeSharingCache struct {
+	kvcache.Cache
+	store recordingCodeStore
+}
+
+func (c codeSharingCache) CodeByHash() state.CodeByHash { return c.store }
+
+func TestTraceBlockLooksUpSharedCodeByHash(t *testing.T) {
+	m, chain, _ := rpcdaemontest.CreateTestExecModule(t)
+	cache := codeSharingCache{Cache: kvcache.New(kvcache.DefaultCoherentConfig), store: recordingCodeStore{}}
+	baseApi := NewBaseApi(nil, cache, m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
+	api := NewPrivateDebugAPI(baseApi, m.DB, nil, &rpccfg.DebugApiConfig{})
+
+	for n := rpc.BlockNumber(1); n <= rpc.BlockNumber(chain.Length()); n++ {
+		var buf bytes.Buffer
+		s := jsonstream.New(&buf)
+		require.NoError(t, api.TraceBlockByNumber(m.Ctx, n, &tracersConfig.TraceConfig{}, s))
+		require.NoError(t, s.Flush())
+	}
+	require.NotEmpty(t, cache.store, "a block replay must look committed code up in the shared store")
 }

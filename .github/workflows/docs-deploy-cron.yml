@@ -19,8 +19,8 @@ name: Docs - Refresh deployed version
 
 on:
   schedule:
-    # 06:20 UTC — clear of the 04:00 QA cron block.
-    - cron: '20 6 * * *'
+    # 06:21 UTC — clear of the 04:00 QA cron block.
+    - cron: '21 6 * * *'
   workflow_dispatch:
 
 permissions: {}

@@ -92,6 +92,11 @@ func (e *ErrInvalidOpCode) Error() string {
 	return fmt.Sprintf("invalid opcode: %s", e.opcode)
 }
 
+// Undefined reports whether the opcode itself is undefined, rather than its immediate operand invalid.
+func (e *ErrInvalidOpCode) Undefined() bool {
+	return e.operand == nil
+}
+
 func (e *ErrInvalidOpCode) Is(target error) bool {
 	_, is := target.(*ErrInvalidOpCode)
 	return is
