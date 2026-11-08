@@ -478,9 +478,6 @@ func (i *MapTxNum2BlockNumIter) moveTo(txNum uint64) error {
 		if err := i.loadStartBlock(); err != nil {
 			return err
 		}
-		if i.maxTxNumInBlock != 0 && txNum >= i.minTxNumInBlock && txNum <= i.maxTxNumInBlock {
-			return nil
-		}
 	}
 	if i.maxTxNumInBlock != 0 {
 		if moved, err := i.searchFrom(txNum); err != nil || moved {
