@@ -32,6 +32,8 @@ var (
 	ErrStaleParent = errors.New("parent is no longer the head")
 	// ErrBelowSafe reports a head move below the safe block.
 	ErrBelowSafe = errors.New("head would move below the safe block")
+	// ErrNotCanonical reports a block that is not on the canonical chain.
+	ErrNotCanonical = errors.New("not a canonical block")
 )
 
 // command is work on the local chain that Run performs between its own
@@ -130,13 +132,39 @@ func (f *Follower) HeadTo(ctx context.Context, ancestor common.Hash) error {
 			return err
 		}
 		if !ok {
-			return fmt.Errorf("head to %x: not a canonical block", ancestor)
+			return fmt.Errorf("head to %x: %w", ancestor, ErrNotCanonical)
 		}
 		if safe := f.deriver.Safe(); n < safe {
 			return fmt.Errorf("%w: block %d, safe %d", ErrBelowSafe, n, safe)
 		}
 		return f.deriver.ForkChoiceTo(ctx, ancestor)
 	})
+}
+
+// HeadBefore moves the head back to the parent of block and returns it.
+// ErrBelowSafe reports a block at or below the safe block, ErrNotCanonical
+// one another block has replaced.
+func (f *Follower) HeadBefore(ctx context.Context, block *types.Header) (*types.Header, error) {
+	var parent *types.Header
+	err := f.do(ctx, func(ctx context.Context) error {
+		n := block.Number.Uint64()
+		if safe := f.deriver.Safe(); n <= safe {
+			return fmt.Errorf("%w: block %d, safe %d", ErrBelowSafe, n-1, safe)
+		}
+		hash, ok, err := f.chain.CanonicalHash(ctx, n)
+		if err != nil {
+			return err
+		}
+		if !ok || hash != block.Hash() {
+			return fmt.Errorf("head before block %d (%x): %w", n, block.Hash(), ErrNotCanonical)
+		}
+		if err := f.deriver.ForkChoiceTo(ctx, block.ParentHash); err != nil {
+			return err
+		}
+		parent, err = f.chain.Head(ctx)
+		return err
+	})
+	return parent, err
 }
 
 // Head returns the header of the head block.

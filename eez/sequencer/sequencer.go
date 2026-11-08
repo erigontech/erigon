@@ -94,8 +94,9 @@ type SyncSlotComposer interface {
 	// batch aimed at L1 block target, zero for the next one available; nil
 	// has the sequencer fill the block from the pool.
 	ComposeSyncSlot(ctx context.Context, parent *types.Header, ts, target uint64, mode Mode) *types.Block
-	// RecoverFailed handles the bundles that failed on L1. It runs before
-	// every trigger reads the head, which it may move.
+	// RecoverFailed handles the bundles that failed on L1, replacing each
+	// failed Sync block through Sequencer.Substitute. It runs before every
+	// trigger reads the head, which it may move.
 	RecoverFailed(ctx context.Context)
 }
 
@@ -110,6 +111,10 @@ type Committer interface {
 	// Insert makes blocks, the first a child of the head, the head, running
 	// hook when set. follower.ErrStaleParent reports a head that has moved.
 	Insert(ctx context.Context, blocks []*types.Block, hook follower.CommitHook) error
+	// HeadBefore moves the head back to the parent of block and returns it;
+	// follower.ErrBelowSafe reports a block at or below the safe block,
+	// follower.ErrNotCanonical one another block has replaced.
+	HeadBefore(ctx context.Context, block *types.Header) (*types.Header, error)
 	// Settled returns the block the latest settlement ended at.
 	Settled() uint64
 }
@@ -307,6 +312,26 @@ func (s *Sequencer) syncSlot(ctx context.Context, slot SyncSlot) error {
 		return s.syncBlock(ctx, head, slot.Time, target, mode)
 	}
 	return nil
+}
+
+// Substitute replaces failed, a Sync block whose bundle failed on L1, with an
+// empty Sync block on its parent; a composer calls it from RecoverFailed. It
+// fails with follower.ErrBelowSafe once L1 settled that height,
+// follower.ErrNotCanonical once another block replaced failed, and
+// follower.ErrStaleParent when derivation moves the head between the
+// rollback and the sibling.
+func (s *Sequencer) Substitute(ctx context.Context, failed *types.Header) (*types.Header, error) {
+	parent, err := s.committer.HeadBefore(ctx, failed)
+	if err != nil {
+		return nil, err
+	}
+	h, err := s.build(ctx, Sync, parent, noTxns{})
+	if err != nil {
+		return nil, err
+	}
+	s.logger.Warn("[eez] failed Sync block substituted with its empty sibling", "event", "eez.composer.recovery.substituted",
+		"number", h.Number.Uint64(), "hash", h.Hash())
+	return h, nil
 }
 
 // late reports whether a proof started now reaches L1 after the submission

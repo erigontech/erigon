@@ -82,8 +82,9 @@ func inputs(parent *types.Header) deriver.HeaderInputs {
 
 // TestCommands: Run performs the commands of the chain's other writers. A
 // produced block survives its settlement, the head moves back no lower than
-// safe, and a command on a moved head fails (T-SEQ-5, head rollback). The
-// status reports the sequencer as the source of the heads they set.
+// safe and only below a canonical block, and a command on a moved head fails
+// (T-SEQ-5, head rollback). The status reports the sequencer as the source
+// of the heads they set.
 func TestCommands(t *testing.T) {
 	c := derivertest.NewComposer(t)
 	n := newNode(t, c.L1)
@@ -136,6 +137,7 @@ func TestCommands(t *testing.T) {
 	_, ok, err := n.chain.CanonicalHash(ctx, 3)
 	require.NoError(t, err)
 	require.False(t, ok, "block 3 left the canonical chain")
+	require.ErrorIs(t, n.follower.HeadTo(ctx, b3.Block.Hash()), follower.ErrNotCanonical)
 
 	require.ErrorIs(t, n.follower.HeadTo(ctx, genesis.Hash()), follower.ErrBelowSafe)
 	require.Equal(t, b2.Block.Hash(), head().Hash())
@@ -147,6 +149,19 @@ func TestCommands(t *testing.T) {
 	fc, err := n.m.ExecModule.GetForkChoice(ctx)
 	require.NoError(t, err)
 	require.Equal(t, b1.Block.Hash(), fc.SafeHash)
+
+	parent, err := n.follower.HeadBefore(ctx, b3.Block.Header())
+	require.NoError(t, err)
+	require.Equal(t, b2.Block.Hash(), parent.Hash())
+	require.Equal(t, b2.Block.Hash(), head().Hash())
+	// Block 3 replaced at its height is not moved below.
+	rival, err := n.follower.Produce(ctx, inputs(b2.Block.Header()), provide(t, c.Transfer(bob, 2)), nil)
+	require.NoError(t, err)
+	_, err = n.follower.HeadBefore(ctx, b3.Block.Header())
+	require.ErrorIs(t, err, follower.ErrNotCanonical)
+	_, err = n.follower.HeadBefore(ctx, b1.Block.Header())
+	require.ErrorIs(t, err, follower.ErrBelowSafe)
+	require.Equal(t, rival.Block.Hash(), head().Hash())
 }
 
 // TestProduceOutlivesItsCaller: a caller whose context ends after Run took

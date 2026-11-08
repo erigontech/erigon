@@ -298,6 +298,224 @@ func TestComposer(t *testing.T) {
 	require.Equal(t, composed{parent: hash(347), ts: g + 696, target: 67, mode: sequencer.ModeCatchup}, call(5))
 }
 
+// settle posts the batch that settles the local blocks from..to as they are,
+// and waits for the follower to make to safe. It returns the L1 block.
+func (h *harness) settle(t *testing.T, from, to uint64) uint64 {
+	t.Helper()
+	l1Block := h.c.Post(derivertest.Posting{Batch: h.compose(t, from, to)}).Header.Number
+	require.Eventually(t, func() bool { return h.follower.Status().Safe == to }, 10*time.Second, 5*time.Millisecond)
+	return l1Block
+}
+
+// compose returns the batch that settles the local blocks from..to as they
+// are.
+func (h *harness) compose(t *testing.T, from, to uint64) *derivertest.Batch {
+	t.Helper()
+	var blocks []derivertest.Block
+	for n := from; n <= to; n++ {
+		b := h.block(t, n)
+		txs := make([][]byte, len(b.Transactions()))
+		for i, tx := range b.Transactions() {
+			var buf bytes.Buffer
+			require.NoError(t, tx.MarshalBinary(&buf))
+			txs[i] = buf.Bytes()
+		}
+		blocks = append(blocks, derivertest.Block{Coinbase: b.Coinbase(), Extra: b.Extra(), Txs: txs})
+	}
+	batch := h.c.Compose(nil, blocks...)
+	require.Equal(t, h.block(t, to).Hash(), batch.Blocks[len(batch.Blocks)-1].Hash())
+	return batch
+}
+
+// TestSubstitute is T-SEQ-5 for a failed bundle: at the composer's request
+// the head moves back below the failed Sync block and an empty sibling, its
+// witness recorded, takes its place; once L1 settles that height nothing is
+// replaced.
+func TestSubstitute(t *testing.T) {
+	h := newHarness(t)
+	c := &slotComposer{}
+	w := &witnesses{follower: h.follower, pinned: map[common.Hash]common.Hash{}}
+	s := h.sequencerOf(t, sequencer.Config{Composer: c, Witnesses: w})
+	ctx := t.Context()
+	g := h.genesis.Time
+	collector := *derivertest.Config().FeeCollector
+
+	c.answer = func(parent *types.Header) *types.Block {
+		return h.prebuilt(t, parent, h.c.Transfer(common.HexToAddress("0xb0b"), 1))
+	}
+	s.SetClock(func() time.Time { return onTime(g + 12) })
+	require.NoError(t, s.Handle(ctx, sequencer.SyncSlot{Height: 6, Time: g + 12, L1Head: 1}))
+	require.Len(t, c.calls, 1)
+	require.Equal(t, sequencer.ModeSteady, c.calls[0].mode)
+	failed := h.block(t, 6)
+	require.Len(t, failed.Transactions(), 1)
+	c.answer = nil
+	for range 2 {
+		require.NoError(t, s.Handle(ctx, sequencer.LiveTick{SyncHeight: 12}))
+	}
+	require.Equal(t, uint64(8), h.head(t).Number.Uint64())
+
+	// The failed block's transaction is back in the pool, for a later block.
+	var buf bytes.Buffer
+	require.NoError(t, failed.Transactions()[0].MarshalBinary(&buf))
+	h.pool.add(t, buf.Bytes())
+	parent := h.block(t, 5).Header()
+	var sibling *types.Header
+	c.recover = func(ctx context.Context) {
+		var err error
+		sibling, err = s.Substitute(ctx, failed.Header())
+		require.NoError(t, err)
+		c.recover = nil
+	}
+	require.NoError(t, s.Handle(ctx, sequencer.LiveTick{SyncHeight: 12}))
+	require.NotNil(t, sibling)
+	six := h.block(t, 6)
+	require.Equal(t, sibling.Hash(), six.Hash())
+	require.Equal(t, parent.Hash(), six.ParentHash())
+	require.Empty(t, six.Transactions())
+	require.Equal(t, g+12, six.Time())
+	require.Equal(t, collector, six.Coinbase())
+	require.Equal(t, parent.Hash(), w.pinned[six.Hash()])
+	require.Equal(t, uint64(7), h.head(t).Number.Uint64(), "the tick builds on the sibling")
+	require.Equal(t, six.Hash(), h.head(t).ParentHash)
+	require.Len(t, h.block(t, 7).Transactions(), 1)
+	require.Equal(t, [3]uint64{6, 2, 2}, s.Status().Produced)
+
+	h.settle(t, 1, 6)
+	head := h.head(t)
+	for _, b := range []*types.Block{six, failed} {
+		_, err := s.Substitute(ctx, b.Header())
+		require.ErrorIs(t, err, follower.ErrBelowSafe, "block %x", b.Hash())
+	}
+	require.Equal(t, head.Hash(), h.head(t).Hash())
+}
+
+// raceCommitter runs between after a successful HeadBefore, where derivation
+// can run between two follower commands.
+type raceCommitter struct {
+	*follower.Follower
+	between func()
+}
+
+func (r *raceCommitter) HeadBefore(ctx context.Context, block *types.Header) (*types.Header, error) {
+	parent, err := r.Follower.HeadBefore(ctx, block)
+	if err == nil && r.between != nil {
+		r.between()
+	}
+	return parent, err
+}
+
+// TestSubstituteRace: L1 settling the failed block between the rollback and
+// the sibling fails the sibling as a stale parent, and the settled block
+// stays the head.
+func TestSubstituteRace(t *testing.T) {
+	h := newHarness(t)
+	c := &slotComposer{}
+	rc := &raceCommitter{Follower: h.follower}
+	s, err := sequencer.New(derivertest.Config(), sequencer.Config{Timing: devnet(), Composer: c}, rc, h.pool, log.New())
+	require.NoError(t, err)
+	ctx := t.Context()
+	g := h.genesis.Time
+
+	c.answer = func(parent *types.Header) *types.Block {
+		return h.prebuilt(t, parent, h.c.Transfer(common.HexToAddress("0xb0b"), 1))
+	}
+	s.SetClock(func() time.Time { return onTime(g + 12) })
+	require.NoError(t, s.Handle(ctx, sequencer.SyncSlot{Height: 6, Time: g + 12, L1Head: 1}))
+	c.answer = nil
+	failed := h.block(t, 6)
+	require.Len(t, failed.Transactions(), 1)
+	require.NoError(t, s.Handle(ctx, sequencer.LiveTick{SyncHeight: 12}))
+
+	batch := h.compose(t, 1, 6)
+	rc.between = func() {
+		rc.between = nil
+		h.c.Post(derivertest.Posting{Batch: batch})
+		require.Eventually(t, func() bool { return h.follower.Status().Safe == 6 }, 10*time.Second, 5*time.Millisecond)
+	}
+	_, err = s.Substitute(ctx, failed.Header())
+	require.ErrorIs(t, err, follower.ErrStaleParent)
+	require.Equal(t, failed.Hash(), h.head(t).Hash())
+}
+
+// TestSettledRival is T-SEQ-5 for a rival batch: the blocks L1 settles
+// replace the speculative ones, and production resumes on them.
+func TestSettledRival(t *testing.T) {
+	h := newHarness(t)
+	s := h.sequencer(t, 0)
+	ctx := t.Context()
+	g := h.genesis.Time
+
+	h.pool.add(t, h.c.Transfer(common.HexToAddress("0xb0b"), 1))
+	require.NoError(t, s.Handle(ctx, sequencer.SyncSlot{Height: 6, Time: g + 12, L1Head: 1}))
+	for range 3 {
+		require.NoError(t, s.Handle(ctx, sequencer.LiveTick{SyncHeight: 12}))
+	}
+	require.Equal(t, uint64(9), h.head(t).Number.Uint64())
+
+	var blocks []derivertest.Block
+	for range 6 {
+		blocks = append(blocks, derivertest.Block{Coinbase: common.HexToAddress("0xa11ce"), Extra: []byte{}, Txs: [][]byte{}})
+	}
+	rival := h.c.Compose(nil, blocks...)
+	h.c.Post(derivertest.Posting{Batch: rival})
+	require.Eventually(t, func() bool { return h.follower.Status().Safe == 6 }, 10*time.Second, 5*time.Millisecond)
+	derivertest.RequireChain(t, h.chain, rival.Blocks...)
+	require.Equal(t, rival.Blocks[5].Hash(), h.head(t).Hash(), "the speculative suffix is gone")
+
+	require.NoError(t, s.Handle(ctx, sequencer.SyncSlot{Height: 12, Time: g + 24, L1Head: 2}))
+	require.Equal(t, uint64(12), h.head(t).Number.Uint64())
+	require.Equal(t, rival.Blocks[5].Hash(), h.block(t, 7).ParentHash())
+}
+
+// TestL1Reorg is T-SEQ-5 for an L1 reorg below the head: the head moves
+// back to the block the remaining settlements end at, a Catchup rebuilds on
+// the grid from there, and a late failure of a Sync block the reorg dropped
+// replaces nothing.
+func TestL1Reorg(t *testing.T) {
+	h := newHarness(t)
+	c := &slotComposer{}
+	s := h.sequencerOf(t, sequencer.Config{Composer: c})
+	ctx := t.Context()
+	g := h.genesis.Time
+
+	require.NoError(t, s.Handle(ctx, sequencer.SyncSlot{Height: 6, Time: g + 12, L1Head: 1}))
+	first := h.settle(t, 1, 6)
+	c.answer = func(parent *types.Header) *types.Block {
+		return h.prebuilt(t, parent, h.c.Transfer(common.HexToAddress("0xb0b"), 1))
+	}
+	require.NoError(t, s.Handle(ctx, sequencer.SyncSlot{Height: 12, Time: g + 24, L1Head: 2}))
+	c.answer = nil
+	failed := h.block(t, 12)
+	require.Len(t, failed.Transactions(), 1)
+	h.settle(t, 7, 12)
+	for range 3 {
+		require.NoError(t, s.Handle(ctx, sequencer.LiveTick{SyncHeight: 18}))
+	}
+	six, seven := h.block(t, 6), h.block(t, 7)
+	require.Equal(t, uint64(15), h.head(t).Number.Uint64())
+
+	h.c.ReorgL1(first)
+	require.Eventually(t, func() bool {
+		head, err := h.follower.Head(ctx)
+		return err == nil && head.Hash() == six.Hash() && h.follower.Status().Safe == 6
+	}, 10*time.Second, 5*time.Millisecond)
+	_, ok, err := h.chain.CanonicalHash(ctx, 7)
+	require.NoError(t, err)
+	require.False(t, ok, "block 7 left the canonical chain")
+
+	require.NoError(t, s.Handle(ctx, sequencer.SyncSlot{Height: 18, Time: g + 36, L1Head: 3}))
+	require.Equal(t, uint64(18), h.head(t).Number.Uint64())
+	require.Equal(t, g+36, h.head(t).Time)
+	require.Equal(t, seven.Hash(), h.block(t, 7).Hash(), "an empty pool rebuilds the same block")
+
+	require.Equal(t, failed.ParentHash(), h.block(t, 11).Hash())
+	head := h.head(t)
+	_, err = s.Substitute(ctx, failed.Header())
+	require.ErrorIs(t, err, follower.ErrNotCanonical)
+	require.Equal(t, head.Hash(), h.head(t).Hash())
+}
+
 func (h *harness) head(t *testing.T) *types.Header {
 	t.Helper()
 	head, err := h.follower.Head(t.Context())
