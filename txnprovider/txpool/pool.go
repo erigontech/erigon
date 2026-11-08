@@ -2504,7 +2504,8 @@ func (p *TxPool) promoteSubPools(pendingBaseFee uint64, pendingBlobFee uint64, a
 	}
 
 	// Promote best transactions from base fee pool to pending pool while they qualify. The pool is ordered by fee cap,
-	// so a blob txn that waits only for the blob fee is set aside rather than holding back the txns after it.
+	// so a txn that waits only for the blob fee, its own or that of a blob txn before it in its sender's nonce chain,
+	// is set aside rather than holding back the txns after it.
 	var blobFeeBlocked []*metaTxn
 	for best := p.baseFee.Best(); p.baseFee.Len() > 0 && best.subPool >= BaseFeePoolBits && best.minFeeCap.CmpUint64(pendingBaseFee) >= 0; best = p.baseFee.Best() {
 		tx := p.baseFee.PopBest()

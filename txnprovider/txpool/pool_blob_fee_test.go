@@ -138,3 +138,16 @@ func TestBestHoldsBackTheSuccessorOfABlobTxnBelowTheBlobFee(t *testing.T) {
 	require.Zero(t, bestOf(t, pool))
 	require.Zero(t, pool.pending.Len())
 }
+
+func TestBlobFeeCapKeepsTheLowestCap(t *testing.T) {
+	blob := func(feeCap *uint256.Int) *TxnSlot {
+		slot := newTestBlobTxnSlot(0, 1, 1, 10, 21_000)
+		slot.Txn.(*types.BlobTx).MaxFeePerBlobGas = *feeCap
+		return slot
+	}
+	aboveUint64 := new(uint256.Int).Lsh(uint256.NewInt(1), 64)
+	require.Equal(t, uint64(7), blobFeeCap(newTestTxnSlot(0, 1, 1, 10, 21_000), 7), "a txn without blobs keeps the chain's cap")
+	require.Equal(t, uint64(5), blobFeeCap(blob(uint256.NewInt(5)), 7))
+	require.Equal(t, uint64(7), blobFeeCap(blob(uint256.NewInt(9)), 7))
+	require.Equal(t, uint64(math.MaxUint64), blobFeeCap(blob(aboveUint64), math.MaxUint64), "a cap above uint64 never lowers it")
+}

@@ -22,16 +22,15 @@ import (
 	"github.com/holiman/uint256"
 )
 
-// blobFeeCap returns min(capSoFar, the txn's blob fee cap), saturated to uint64, or capSoFar for a txn without blobs.
+// blobFeeCap returns min(capSoFar, the txn's blob fee cap), or capSoFar for a txn without blobs.
 func blobFeeCap(slot *TxnSlot, capSoFar uint64) uint64 {
 	if !slot.HasBlobs() {
 		return capSoFar
 	}
-	c := slot.GetBlobFeeCap()
-	if !c.IsUint64() {
-		return capSoFar
+	if c := slot.GetBlobFeeCap(); c.LtUint64(capSoFar) {
+		return c.Uint64()
 	}
-	return min(capSoFar, c.Uint64())
+	return capSoFar
 }
 
 func newMetaTxn(slot *TxnSlot, isLocal bool, timestamp uint64) *metaTxn {
