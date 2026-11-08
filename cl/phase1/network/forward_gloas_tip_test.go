@@ -1052,4 +1052,19 @@ func TestForwardBeaconDownloaderKeepsDownloadedParentRecordBounded(t *testing.T)
 		require.Equal(t, uint64(13), downloader.GetHighestProcessedSlot())
 		require.LessOrEqual(t, len(downloader.gloasDownloadedParents), 2)
 	})
+
+	t.Run("accepted but unprocessed responses", func(t *testing.T) {
+		downloader := newDownloader(t)
+		downloader.gloasDownloadedParents = map[common.Hash]uint64{}
+		for i := range maxGloasDownloadedParents {
+			downloader.gloasDownloadedParents[common.Hash{0xee, byte(i), byte(i >> 8)}] = 5000
+		}
+		parent := makeGloasBlock(9, hash(0xa0), common.Hash{})
+		held := makeGloasBlock(10, hash(0xb0), common.Hash{})
+		linkBeaconBlocks(t, parent, held)
+		downloadFromPeer(t, downloader, parent, held)
+		require.Same(t, held, downloader.gloasLookahead)
+		require.LessOrEqual(t, len(downloader.gloasDownloadedParents), 2)
+		require.Contains(t, downloader.gloasDownloadedParents, held.Block.ParentRoot)
+	})
 }

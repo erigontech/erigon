@@ -78,6 +78,8 @@ type ForwardBeaconDownloader struct {
 
 const forwardRequestRetryInterval = 300 * time.Millisecond
 
+const maxGloasDownloadedParents = 4096
+
 // SetCurrentSlotSampler limits range requests to slots that can already exist.
 func (f *ForwardBeaconDownloader) SetCurrentSlotSampler(currentSlot func() uint64) {
 	f.currentSlot = currentSlot
@@ -552,7 +554,8 @@ Process:
 		return
 	}
 	f.mu.Lock()
-	if f.gloasDownloadedParents == nil {
+	// The record is a bounded hint: dropping old entries can only let forward sync end at an older tip.
+	if f.gloasDownloadedParents == nil || len(f.gloasDownloadedParents) >= maxGloasDownloadedParents {
 		f.gloasDownloadedParents = map[common.Hash]uint64{}
 	}
 	for _, block := range children {
