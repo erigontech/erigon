@@ -7,6 +7,8 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -36,9 +38,9 @@ func TestJournalDirtySymmetry(t *testing.T) {
 		{"resetObjectChange", kindResetObject, func(j *journal) { j.resetObjectChange(addr, nil, nil) }},
 		{"selfdestructChange", kindSelfdestruct, func(j *journal) { j.selfdestructChange(addr, false, val, false) }},
 		{"selfdestructChangeVersioned", kindSelfdestruct, func(j *journal) {
-			j.selfdestructChangeVersioned(addr, false, val, false, false, 0, false, val)
+			j.selfdestructChangeVersioned(addr, false, val, false, false, 0, false, val, false)
 		}},
-		{"balanceChange", kindBalance, func(j *journal) { j.balanceChange(addr, val, false) }},
+		{"balanceChange", kindBalance, func(j *journal) { j.balanceChange(addr, val, false, false) }},
 		{"balanceIncrease", kindBalanceIncrease, func(j *journal) { j.balanceIncrease(addr, val) }},
 		{"balanceIncreaseTransfer", kindBalanceIncreaseTransfer, func(j *journal) {
 			j.balanceIncreaseTransfer(&BalanceIncrease{})
@@ -52,6 +54,22 @@ func TestJournalDirtySymmetry(t *testing.T) {
 		{"accessListAddAccountChange", kindAccessListAddAccount, func(j *journal) { j.accessListAddAccountChange(addr) }},
 		{"accessListAddSlotChange", kindAccessListAddSlot, func(j *journal) { j.accessListAddSlotChange(addr, key) }},
 		{"transientStorageChange", kindTransientStorage, func(j *journal) { j.transientStorageChange(addr, 0, val) }},
+		{"frameApproval", kindFrameApproval, func(j *journal) {
+			ctx := (&IntraBlockState{journal: j}).NewFrameContext(&types.FrameTransaction{}, uint256.Int{})
+			ctx.SetApproval(true, addr)
+		}},
+		{"frameStateGas", kindFrameStateGas, func(j *journal) {
+			ctx := (&IntraBlockState{journal: j}).NewFrameContext(&types.FrameTransaction{Frames: []types.Frame{{Limits: mdgas.MdGas{State: 1}}}}, uint256.Int{})
+			ctx.ChargeStateGas(1)
+		}},
+		{"frameStorageOwner", kindFrameStorageOwner, func(j *journal) {
+			ctx := (&IntraBlockState{journal: j}).NewFrameContext(&types.FrameTransaction{}, uint256.Int{})
+			ctx.RecordStorageCharge(addr, key)
+		}},
+		{"frameTransient", kindFrameTransient, func(j *journal) {
+			ibs := &IntraBlockState{journal: j, transientStorage: transientStorage{addr: &transientSlots{}}}
+			ibs.ResetFrameTransientStorage()
+		}},
 	}
 
 	covered := map[entryKind]bool{}
@@ -113,6 +131,54 @@ func BenchmarkJournalStorageChange(b *testing.B) {
 		j.storageChange(addr, key, *prev, false)
 		if len(j.entries) == 1<<16 {
 			j.Reset()
+		}
+	}
+}
+
+// TestJournalResetDropsEntriesItReslicesPast pins that Reset clears the journalExtra
+// pointers in the capacity tail it reslices past, so a large prevcode payload cannot be
+// pinned alive by a stale entry after the journal is reused.
+func TestJournalResetDropsEntriesItReslicesPast(t *testing.T) {
+	j := newJournal()
+	t.Cleanup(j.release)
+
+	addr := accounts.InternAddress(common.Address{1})
+	j.codeChange(addr, make([]byte, 4096), accounts.EmptyCodeHash, false)
+	j.codeChange(addr, make([]byte, 4096), accounts.EmptyCodeHash, false)
+	if len(j.entries) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(j.entries))
+	}
+
+	j.Reset()
+
+	tail := j.entries[:cap(j.entries)]
+	for i, e := range tail {
+		if e.extra != nil {
+			t.Fatalf("entry %d still pins a journalExtra after Reset (prevcode %d bytes)",
+				i, len(e.extra.prevcode))
+		}
+	}
+}
+
+// TestJournalRevertDropsTheEntriesItTruncates pins the same for revert: the entries a
+// revert truncates must not keep their journalExtra pinned after a following Reset.
+func TestJournalRevertDropsTheEntriesItTruncates(t *testing.T) {
+	ibs := New(NewVersionedStateReader(0, ReadSet{}, nil, nil))
+	addr := accounts.InternAddress(common.Address{1})
+	ibs.stateObjects[addr] = newObject(ibs, addr, &accounts.Account{}, &accounts.Account{})
+
+	j := ibs.journal
+	for range 4 {
+		j.codeChange(addr, make([]byte, 4096), accounts.EmptyCodeHash, false)
+	}
+
+	j.revert(ibs, 2)
+	j.Reset()
+
+	for i, e := range j.entries[:cap(j.entries)] {
+		if e.extra != nil {
+			t.Fatalf("entry %d still pins a journalExtra after Reset (prevcode %d bytes)",
+				i, len(e.extra.prevcode))
 		}
 	}
 }

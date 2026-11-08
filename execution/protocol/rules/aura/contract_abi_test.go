@@ -19,6 +19,7 @@ package aura
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 
@@ -60,4 +61,24 @@ func TestGetCertifierFailsClosed(t *testing.T) {
 			})
 		})
 	}
+}
+
+func TestIsServiceTransactionSyscallDoesNotHoldCertifierLock(t *testing.T) {
+	certifier := common.HexToAddress("0x5000000000000000000000000000000000000001")
+	c := &AuRa{}
+	c.certifier.Store(&certifier)
+	certified := common.LeftPadBytes([]byte{1}, 32)
+	inner := make(chan bool, 1)
+	outer := func(_ accounts.Address, _ []byte) ([]byte, error) {
+		go func() {
+			inner <- c.IsServiceTransaction(accounts.InternAddress(common.Address{2}), func(_ accounts.Address, _ []byte) ([]byte, error) { return certified, nil })
+		}()
+		select {
+		case <-inner:
+		case <-time.After(5 * time.Second):
+			return nil, errors.New("a certifier syscall waiting on another service tx check deadlocked")
+		}
+		return certified, nil
+	}
+	assert.True(t, c.IsServiceTransaction(accounts.InternAddress(common.Address{1}), outer))
 }

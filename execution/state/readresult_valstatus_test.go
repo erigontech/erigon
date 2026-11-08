@@ -24,7 +24,7 @@ func TestReadResultCarriesValStatus(t *testing.T) {
 			WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: key, Version: v, valStatus: ValueUnchanged},
 			Val:         *uint256.NewInt(100),
 		})
-		vm.FlushVersionedWrites(ws, true, "")
+		vm.FlushVersionedWrites(ws, true)
 
 		_, rr, ok := vm.ReadStorage(addr, key, 10)
 		require.True(t, ok)
@@ -38,7 +38,7 @@ func TestReadResultCarriesValStatus(t *testing.T) {
 			WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: key, Version: v, valStatus: ValueChanged},
 			Val:         *uint256.NewInt(200),
 		})
-		vm.FlushVersionedWrites(ws, true, "")
+		vm.FlushVersionedWrites(ws, true)
 
 		_, rr, ok := vm.ReadStorage(addr, key, 10)
 		require.True(t, ok)

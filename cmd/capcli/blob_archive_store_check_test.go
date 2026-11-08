@@ -19,6 +19,7 @@ package main
 import (
 	"context"
 	"errors"
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -167,7 +168,7 @@ func TestBlobArchiveStoreCheckExposesTheRemoveFlag(t *testing.T) {
 	require.True(t, b.RemoveMismatched, "parsing --remove-mismatched must set the field")
 }
 
-// PruneBelow removes sidecar files but leaves their BlockRootToKzgCommitments rows, so a count can
+// A BlockRootToKzgCommitments row does not prove its sidecar files are on disk, so a count can
 // match for a slot whose files are gone. Accepting metadata equality as completeness makes the audit
 // report a clean datadir right before it is published from. The old wrong-root lookup missed every
 // count and flagged these by accident; reading the canonical root removes that accident.
@@ -193,7 +194,7 @@ func TestBlobArchiveStoreCheckFlagsCountEqualSlotsWithNoFiles(t *testing.T) {
 	}
 	storage := blob_storage.NewBlobStore(db, fs)
 	require.NoError(t, storage.WriteBlobSidecars(t.Context(), canonical, []*cltypes.BlobSidecar{sidecar}))
-	require.NoError(t, storage.PruneBelow(10_000))
+	require.NoError(t, fs.RemoveAll("0"))
 
 	// The state: the count row survives, the file does not.
 	count, err := storage.KzgCommitmentsCount(t.Context(), canonical)
@@ -247,4 +248,48 @@ func TestBlobArchiveStoreCheckPropagatesDeleteFailure(t *testing.T) {
 
 	_, _, err = checkBlobStore(t.Context(), tx, reader, storage, slot, slot, true)
 	require.ErrorIs(t, err, wantErr, "a failed delete must not be swallowed")
+}
+
+// slotRecorder records which slots the check reads; every slot is empty.
+type slotRecorder struct {
+	freezeblocks.BeaconSnapshotReader
+	read []uint64
+}
+
+func (r *slotRecorder) ReadBeaconBlockBodyBySlot(_ context.Context, _ kv.Tx, slot uint64) (*cltypes.SignedBeaconBlock, error) {
+	r.read = append(r.read, slot)
+	return nil, nil
+}
+
+// The scan counts down on unsigned slots. It must stop after a floor of 0 (hoodi has Deneb at
+// genesis), check every slot when it starts at the largest slot, and check nothing for an empty range.
+func TestBlobArchiveStoreCheckScansEverySlotOfTheRange(t *testing.T) {
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	tx, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	for name, tc := range map[string]struct {
+		from, floor uint64
+		read        []uint64
+	}{
+		"floor of zero":   {3, 0, []uint64{3, 2, 1, 0}},
+		"largest slot":    {math.MaxUint64, math.MaxUint64 - 2, []uint64{math.MaxUint64, math.MaxUint64 - 1, math.MaxUint64 - 2}},
+		"one slot":        {7, 7, []uint64{7}},
+		"below the floor": {6, 7, nil},
+	} {
+		t.Run(name, func(t *testing.T) {
+			reader := &slotRecorder{}
+			_, _, err := checkBlobStore(t.Context(), tx, reader, nil, tc.from, tc.floor, false)
+			require.NoError(t, err)
+			require.Equal(t, tc.read, reader.read)
+		})
+	}
+}
+
+// Below the frozen blob frontier the store holds nothing by design, so the scan stops there.
+func TestStoreCheckFloorIsTheFrozenBlobFrontier(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	deneb := cfg.DenebForkEpoch * cfg.SlotsPerEpoch
+	require.Equal(t, deneb, storeCheckFloor(cfg, 0))
+	require.Equal(t, deneb+1000, storeCheckFloor(cfg, deneb+1000))
 }

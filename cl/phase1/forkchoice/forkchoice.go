@@ -908,6 +908,16 @@ func (f *ForkChoiceStore) ViewStateAtBlockRoot(blockRoot common.Hash, fn func(*s
 	return fn(blockState)
 }
 
+func (f *ForkChoiceStore) ViewCurrentStateAtBlockRoot(blockRoot common.Hash, fn func(*state.CachingBeaconState) error) error {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	current := f.forkGraph.CurrentStateLocked(blockRoot)
+	if current == nil {
+		return nil
+	}
+	return fn(current)
+}
+
 func (f *ForkChoiceStore) PreverifiedValidator(blockRoot common.Hash) uint64 {
 	if ret, ok := f.preverifiedSizes.Get(blockRoot); ok {
 		return ret.validatorLength
@@ -1075,6 +1085,10 @@ func (f *ForkChoiceStore) HasBlockEquivocation(slot, proposerIndex uint64, excep
 // [New in Gloas:EIP7732]
 func (f *ForkChoiceStore) HasEnvelope(blockRoot common.Hash) bool {
 	return f.forkGraph.HasEnvelope(blockRoot)
+}
+
+func (f *ForkChoiceStore) IsBlockInvalid(blockRoot common.Hash) bool {
+	return f.forkGraph.IsBlockInvalid(blockRoot)
 }
 
 // IsPayloadVerified returns whether the execution payload for the beacon block root

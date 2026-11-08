@@ -31,6 +31,7 @@ import (
 	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/mmap"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
@@ -319,8 +320,14 @@ func TestExecPerfFlags_OverrideDbg(t *testing.T) {
 	t.Run("no-merge and no-prune set to true", func(t *testing.T) {
 		dbg.SetNoMerge(false)
 		dbg.SetNoPrune(false)
-		run("--exec.no-merge=true", "--exec.no-prune=true")
+		run("--exec.no-merge=true", "--debug.exec.no-prune=true")
 		require.True(t, dbg.NoMerge())
+		require.True(t, dbg.NoPrune())
+	})
+
+	t.Run("deprecated exec.no-prune alias still sets NoPrune", func(t *testing.T) {
+		dbg.SetNoPrune(false)
+		run("--exec.no-prune=true")
 		require.True(t, dbg.NoPrune())
 	})
 
@@ -505,4 +512,16 @@ func TestDisableBoolFlags_ExplicitFalse(t *testing.T) {
 	require.True(t, ethCfg.TxPool.Disable)
 	require.False(t, builderCfg.EnabledPOS)
 	require.Equal(t, ethashcfg.ModeFake, ethCfg.Ethash.PowMode)
+}
+
+func TestBALBatchPrefetchOffWithoutIOUring(t *testing.T) {
+	prevDbg, prevMmap := dbg.BALBatchPrefetch, mmap.BatchPrefetch
+	t.Cleanup(func() { dbg.BALBatchPrefetch, mmap.BatchPrefetch = prevDbg, prevMmap })
+
+	dbg.BALBatchPrefetch, mmap.BatchPrefetch = true, true
+	disableBALBatchPrefetchWithoutIOUring(true)
+	require.True(t, dbg.BALBatchPrefetch && mmap.BatchPrefetch, "io_uring present: the prefetch stays on")
+
+	disableBALBatchPrefetchWithoutIOUring(false)
+	require.False(t, dbg.BALBatchPrefetch || mmap.BatchPrefetch, "no io_uring, on any platform: both flags go off")
 }

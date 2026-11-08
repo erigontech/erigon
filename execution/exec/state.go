@@ -119,10 +119,11 @@ type WorkerContext struct {
 	prevBlockReg *state.PrevBlockList
 	chainConfig  *chain.Config
 
-	ctx     context.Context
-	engine  rules.Engine
-	genesis *types.Genesis
-	chain   rules.ChainReader
+	ctx        context.Context
+	stopCancel func() bool
+	engine     rules.Engine
+	genesis    *types.Genesis
+	chain      rules.ChainReader
 
 	evm *vm.EVM
 	ibs *state.IntraBlockState
@@ -135,6 +136,7 @@ type WorkerContext struct {
 	// collectorAcc keeps this worker's reads for the process-level collector until
 	// a non-blocking TrySend hands them off; Close flushes the rest.
 	collectorAcc *kvmetrics.DomainMetrics
+	codeBuf      []byte
 }
 
 // installWorkerGetHash points the EVM's BLOCKHASH lookup at the worker's own
@@ -148,11 +150,7 @@ func (rw *WorkerContext) installWorkerGetHash(txTask Task) {
 	br := rw.blockReader
 	ctx := rw.ctx
 	rw.evm.Context.GetHash = protocol.GetHashFn(header, func(hash common.Hash, number uint64) (*types.Header, error) {
-		h, err := br.Header(ctx, rw.chainTx, hash, number)
-		if h == nil && err == nil {
-			h = &types.Header{}
-		}
-		return h, err
+		return br.Header(ctx, rw.chainTx, hash, number)
 	})
 }
 
@@ -179,6 +177,7 @@ func NewWorkerContext(ctx context.Context, background bool, metrics *WorkerMetri
 		collectorAcc: kvmetrics.NewDomainMetrics(),
 	}
 	w.ibs = state.New(w.stateReader)
+	w.stopCancel = context.AfterFunc(ctx, w.evm.Cancel)
 	return w
 }
 
@@ -210,6 +209,7 @@ func (rw *WorkerContext) ResetState(rs *state.StateV3Buffered, chainTx kv.Tempor
 func (rw *WorkerContext) Close() {
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
+	rw.stopCancel()
 	rw.ibs.Close()
 	_ = rw.bindTx(nil)
 	if dbg.KVReadLevelledMetrics && rw.rs != nil {
@@ -220,16 +220,13 @@ func (rw *WorkerContext) Close() {
 	}
 }
 
+func (rw *WorkerContext) getter(tx kv.TemporalTx) execctxapi.StateGetter {
+	return rw.rs.Domains().AsStateGetter(tx, execctxapi.StateGetterOptions{}.WithMetrics(rw.readMetrics).WithCodeBuf(&rw.codeBuf))
+}
+
 func (rw *WorkerContext) ResetTx(chainTx kv.TemporalTx) error {
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
-	return rw.bindTx(chainTx)
-}
-
-// BindTxHeld rebinds the worker to chainTx assuming the caller already holds
-// rw.lock — used for a mid-execution rebind from inside RunTxTask (which holds
-// the lock for the whole run), where ResetTx would re-lock and self-deadlock.
-func (rw *WorkerContext) BindTxHeld(chainTx kv.TemporalTx) error {
 	return rw.bindTx(chainTx)
 }
 
@@ -270,7 +267,7 @@ func (rw *WorkerContext) bindTx(chainTx kv.TemporalTx) error {
 	type historic interface{ SetTx(kv.TemporalTx) }
 	switch typedReader := rw.stateReader.(type) {
 	case latest:
-		typedReader.SetGetter(rw.rs.Domains().AsGetterMetered(chainTx, rw.readMetrics))
+		typedReader.SetGetter(rw.getter(chainTx))
 	case historic:
 		typedReader.SetTx(chainTx)
 	default:
@@ -357,7 +354,7 @@ func (rw *WorkerContext) SetReader(reader state.StateReader) {
 
 	switch typedReader := rw.stateReader.(type) {
 	case latest:
-		typedReader.SetGetter(rw.rs.Domains().AsGetterMetered(rw.chainTx, rw.readMetrics))
+		typedReader.SetGetter(rw.getter(rw.chainTx))
 	case historic:
 		typedReader.SetTx(rw.chainTx)
 	}
@@ -398,7 +395,7 @@ func (rw *WorkerContext) RunTxTaskNoLock(txTask Task) *TxResult {
 		// from the current batch.
 		rw.SetReader(state.NewHistoryReaderV3WithSharedDomains(rw.chainTx, rw.rs.Domains(), txTask.Version().TxNum))
 	} else if !txTask.IsHistoric() && (rw.stateReader == nil || rw.historyMode) {
-		rw.SetReader(state.NewReaderV3(rw.rs.Domains().AsGetterMetered(rw.chainTx, rw.readMetrics)))
+		rw.SetReader(state.NewReaderV3(rw.getter(rw.chainTx)))
 	}
 
 	if rw.background && rw.chainTx == nil {
@@ -425,12 +422,20 @@ func (rw *WorkerContext) RunTxTaskNoLock(txTask Task) *TxResult {
 			Err:  err,
 		}
 	}
+	// Task reset may clear EVM cancellation, so check the worker context afterward.
+	if err := rw.ctx.Err(); err != nil {
+		return &TxResult{Task: txTask, Err: err, Operational: true}
+	}
 
 	if rw.background && rw.chainTx != nil && rw.blockReader != nil {
 		rw.installWorkerGetHash(txTask)
 	}
 
 	result := txTask.Execute(rw.evm, rw.engine, rw.genesis, rw.ibs, rw.stateWriter, rw.chainConfig, rw.chain, rw.dirs, true)
+	// The EVM can return a nil error after cancellation; reject that result.
+	if err := rw.ctx.Err(); err != nil {
+		return &TxResult{Task: txTask, Err: err, Operational: true}
+	}
 
 	if result.Task == nil {
 		result.Task = txTask

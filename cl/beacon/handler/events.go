@@ -28,7 +28,9 @@ import (
 	mapset "github.com/deckarep/golang-set/v2"
 	event "github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
+	ethevent "github.com/erigontech/erigon/common/event"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 )
 
 const (
@@ -67,33 +69,42 @@ func (q *eventStreamQueue) release(size int) {
 	q.queued.Add(-int64(size))
 }
 
-var validTopics = map[event.EventTopic]struct{}{
-	// operation events
-	event.OpAttestation:               {},
-	event.OpSingleAttestation:         {},
-	event.OpAttesterSlashing:          {},
-	event.OpBlobSidecar:               {},
-	event.OpDataColumnSidecar:         {},
-	event.OpBlsToExecution:            {},
-	event.OpContributionProof:         {},
-	event.OpProposerSlashing:          {},
-	event.OpVoluntaryExit:             {},
-	event.OpPayloadAttestationMessage: {},
-	event.OpExecutionPayloadBid:       {},
-	event.OpExecutionPayloadAvailable: {},
-	event.OpExecutionPayload:          {},
-	event.OpExecutionPayloadGossip:    {},
-	event.OpProposerPreferences:       {},
-	// state events
-	event.StateBlock:                       {},
-	event.StateBlockGossip:                 {},
-	event.StateChainReorg:                  {},
-	event.StateLightClientFinalityUpdate:   {},
-	event.StateFinalizedCheckpoint:         {},
-	event.StateHead:                        {},
-	event.StateHeadV2:                      {},
-	event.StateLightClientOptimisticUpdate: {},
-	event.StatePayloadAttributes:           {},
+type eventFeed int
+
+const (
+	operationFeed eventFeed = iota
+	stateFeed
+)
+
+// eventStreamsClosed counts the streams the handler closes because the client does not keep up.
+var eventStreamsClosed = metrics.GetOrCreateCounterVec("caplin_event_streams_closed_total", []string{"reason"})
+
+// validTopics maps each topic to the emitter feed that carries it.
+var validTopics = map[event.EventTopic]eventFeed{
+	event.OpAttestation:                    operationFeed,
+	event.OpSingleAttestation:              operationFeed,
+	event.OpAttesterSlashing:               operationFeed,
+	event.OpBlobSidecar:                    operationFeed,
+	event.OpDataColumnSidecar:              operationFeed,
+	event.OpBlsToExecution:                 operationFeed,
+	event.OpContributionProof:              operationFeed,
+	event.OpProposerSlashing:               operationFeed,
+	event.OpVoluntaryExit:                  operationFeed,
+	event.OpPayloadAttestationMessage:      operationFeed,
+	event.OpExecutionPayloadBid:            operationFeed,
+	event.OpExecutionPayloadAvailable:      operationFeed,
+	event.OpExecutionPayload:               operationFeed,
+	event.OpExecutionPayloadGossip:         operationFeed,
+	event.OpProposerPreferences:            operationFeed,
+	event.StateBlock:                       stateFeed,
+	event.StateBlockGossip:                 stateFeed,
+	event.StateChainReorg:                  stateFeed,
+	event.StateLightClientFinalityUpdate:   stateFeed,
+	event.StateFinalizedCheckpoint:         stateFeed,
+	event.StateHead:                        stateFeed,
+	event.StateHeadV2:                      stateFeed,
+	event.StateLightClientOptimisticUpdate: stateFeed,
+	event.StatePayloadAttributes:           stateFeed,
 }
 
 func (a *ApiHandler) EventSourceGetV1Events(w http.ResponseWriter, r *http.Request) {
@@ -124,9 +135,7 @@ func (a *ApiHandler) EventSourceGetV1Events(w http.ResponseWriter, r *http.Reque
 		defer release()
 	}
 
-	eventCh := make(chan *event.EventStream, 128)
-	opSub := a.emitters.Operation().Subscribe(eventCh)
-	stateSub := a.emitters.State().Subscribe(eventCh)
+	sub := subscribeEventStream(a.emitters, subscribeTopics)
 	// Emitters block until every subscriber takes an event, so network writes must not happen on this goroutine.
 	queue := newEventStreamQueue()
 	stop := make(chan struct{})
@@ -138,8 +147,7 @@ func (a *ApiHandler) EventSourceGetV1Events(w http.ResponseWriter, r *http.Reque
 		}
 	}()
 	defer func() {
-		opSub.Unsubscribe()
-		stateSub.Unsubscribe()
+		sub.unsubscribe()
 		close(stop)
 		// Abort a write that is in flight; stop is closed first so the writer cannot re-arm the deadline and continue.
 		_ = setWriteDeadline(http.NewResponseController(w), time.Now())
@@ -152,31 +160,27 @@ func (a *ApiHandler) EventSourceGetV1Events(w http.ResponseWriter, r *http.Reque
 			return true
 		}
 		log.Warn("event stream client is not keeping up, closing stream", "remote", r.RemoteAddr, "topics", subscribeTopics)
+		eventStreamsClosed.WithLabelValues("write_queue_full").Inc()
 		return false
+	}
+
+	missedHead := func(err error) {
+		log.Warn("event stream missed a head event, closing stream", "err", err, "remote", r.RemoteAddr, "topics", subscribeTopics)
+		eventStreamsClosed.WithLabelValues("missed_head").Inc()
 	}
 
 	ticker := time.NewTicker(time.Duration(a.beaconChainCfg.SecondsPerSlot) * time.Second)
 	defer ticker.Stop()
 
 	for {
+		var e *event.EventStream
 		select {
-		case e := <-eventCh:
-			if !subscribeTopics.Contains(e.Event) {
-				continue
+		case e = <-sub.state:
+			if isHeadTopic(e.Event) {
+				continue // a stream gets head and head_v2 from their own feeds
 			}
-			if e.Data == nil {
-				log.Warn("event data is nil", "event", e)
-				continue
-			}
-			// marshal and send
-			buf, err := json.Marshal(e.Data)
-			if err != nil {
-				log.Warn("failed to encode data", "err", err, "topic", e.Event)
-				continue
-			}
-			if !enqueue(fmt.Appendf(nil, "event: %s\ndata: %s\n\n", e.Event, buf)) {
-				return
-			}
+		case e = <-sub.op:
+		case e = <-sub.head:
 		case <-ticker.C:
 			// keep connection alive
 			if !enqueue([]byte(":\n\n")) {
@@ -184,14 +188,36 @@ func (a *ApiHandler) EventSourceGetV1Events(w http.ResponseWriter, r *http.Reque
 			}
 		case <-writerDone:
 			return
-		case err := <-stateSub.Err():
-			log.Warn("event error", "err", err)
+		case err := <-subErr(sub.headSub):
+			missedHead(err)
 			return
-		case err := <-opSub.Err():
-			log.Warn("event error", "err", err)
+		case err := <-subErr(sub.headV2Sub):
+			missedHead(err)
+			return
+		case err := <-subErr(sub.stateSub):
+			log.Warn("event error", "err", err, "remote", r.RemoteAddr, "topics", subscribeTopics)
+			return
+		case err := <-subErr(sub.opSub):
+			log.Warn("event error", "err", err, "remote", r.RemoteAddr, "topics", subscribeTopics)
 			return
 		case <-r.Context().Done():
 			log.Info("Client disconnected from event stream")
+			return
+		}
+		if e == nil || !subscribeTopics.Contains(e.Event) {
+			continue
+		}
+		if e.Data == nil {
+			log.Warn("event data is nil", "event", e)
+			continue
+		}
+		// marshal and send
+		buf, err := json.Marshal(e.Data)
+		if err != nil {
+			log.Warn("failed to encode data", "err", err, "topic", e.Event)
+			continue
+		}
+		if !enqueue(fmt.Appendf(nil, "event: %s\ndata: %s\n\n", e.Event, buf)) {
 			return
 		}
 	}
@@ -239,4 +265,71 @@ func setWriteDeadline(rc *http.ResponseController, deadline time.Time) error {
 		return err
 	}
 	return nil
+}
+
+// eventStreamFeedBuffer is the buffer of each feed subscription of a stream.
+const eventStreamFeedBuffer = 128
+
+// eventStreamSubscription subscribes a stream only to the feeds that carry its topics, each into its own buffer. State
+// events must never share a buffer with operation events: the operation feed carries thousands of gossip events per
+// slot. head and head_v2 come from feeds of their own: they are sent without waiting for subscribers, and a stream that
+// misses one it asked for is closed, so the client reconnects. A missed head or head_v2 it did not ask for must not
+// close it. A channel and subscription of a feed the stream does not need stay nil, and a nil channel is never ready in
+// a select.
+type eventStreamSubscription struct {
+	state, op, head                     chan *event.EventStream
+	stateSub, opSub, headSub, headV2Sub ethevent.Subscription
+}
+
+func isHeadTopic(topic event.EventTopic) bool {
+	return topic == event.StateHead || topic == event.StateHeadV2
+}
+
+func subscribeEventStream(emitters *event.EventEmitter, topics mapset.Set[event.EventTopic]) *eventStreamSubscription {
+	s := &eventStreamSubscription{}
+	for topic := range topics.Iter() {
+		switch {
+		case isHeadTopic(topic):
+			if s.head == nil {
+				s.head = make(chan *event.EventStream, eventStreamFeedBuffer)
+			}
+			if topic == event.StateHead {
+				s.headSub = emitters.State().SubscribeHead(s.head)
+			} else {
+				s.headV2Sub = emitters.State().SubscribeHeadV2(s.head)
+			}
+		case validTopics[topic] == stateFeed:
+			if s.state == nil {
+				s.state = make(chan *event.EventStream, eventStreamFeedBuffer)
+				s.stateSub = emitters.State().Subscribe(s.state)
+			}
+		case validTopics[topic] == operationFeed:
+			if s.op == nil {
+				s.op = make(chan *event.EventStream, eventStreamFeedBuffer)
+				s.opSub = emitters.Operation().Subscribe(s.op)
+			}
+		}
+	}
+	return s
+}
+
+func subErr(sub ethevent.Subscription) <-chan error {
+	if sub == nil {
+		return nil
+	}
+	return sub.Err()
+}
+
+func (s *eventStreamSubscription) unsubscribe() {
+	for _, sub := range []ethevent.Subscription{s.headSub, s.headV2Sub} {
+		if sub != nil {
+			sub.Unsubscribe()
+		}
+	}
+	if s.stateSub != nil {
+		s.stateSub.Unsubscribe()
+	}
+	if s.opSub != nil {
+		s.opSub.Unsubscribe()
+	}
 }
