@@ -1400,28 +1400,40 @@ func TestGetterNextRejectsUnderflowedWordLen(t *testing.T) {
 }
 
 func TestDecompressorTruncatedDictVarint(t *testing.T) {
-	t.Run("patterns", func(t *testing.T) {
-		aux := make([]byte, 24+1+8)
-		binary.BigEndian.PutUint64(aux[16:24], 1) // pattern dict size in bytes
-		aux[24] = 0x80                            // varint without its last byte
+	// A 0x80 byte starts a varint that never terminates; 0x01 is a complete one-byte varint.
+	patternDict := func(dict ...byte) []byte {
+		aux := make([]byte, 24+len(dict)+8)                       // trailing bytes hold the position dict size
+		binary.BigEndian.PutUint64(aux[16:24], uint64(len(dict))) // pattern dict size in bytes
+		copy(aux[24:], dict)
+		return aux
+	}
+	positionDict := func(dict ...byte) []byte {
+		aux := make([]byte, 24+8+len(dict))
+		binary.BigEndian.PutUint64(aux[24:32], uint64(len(dict))) // position dict size in bytes
+		copy(aux[32:], dict)
+		return aux
+	}
 
-		fpath := filepath.Join(t.TempDir(), "truncatedPatternVarint")
-		require.NoError(t, os.WriteFile(fpath, aux, 0o644))
+	for name, tc := range map[string]struct {
+		file   []byte
+		reason string
+	}{
+		"patternDepth":  {patternDict(0x80), "invalid pattern depth varint"},
+		"patternLength": {patternDict(0x01, 0x80), "invalid pattern length varint"},
+		"positionDepth": {positionDict(0x80), "invalid position depth varint"},
+		"positionValue": {positionDict(0x01, 0x80), "invalid position varint"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			fpath := filepath.Join(t.TempDir(), name)
+			require.NoError(t, os.WriteFile(fpath, tc.file, 0o644))
 
-		d, err := NewDecompressor(fpath)
-		require.ErrorIs(t, err, &ErrCompressedFileCorrupted{})
-		require.Nil(t, d)
-	})
-	t.Run("positions", func(t *testing.T) {
-		aux := make([]byte, 24+8+1)
-		binary.BigEndian.PutUint64(aux[24:32], 1) // position dict size in bytes
-		aux[32] = 0x80                            // varint without its last byte
+			d, err := NewDecompressor(fpath)
+			require.ErrorIs(t, err, &ErrCompressedFileCorrupted{})
+			require.Nil(t, d)
 
-		fpath := filepath.Join(t.TempDir(), "truncatedPositionVarint")
-		require.NoError(t, os.WriteFile(fpath, aux, 0o644))
-
-		d, err := NewDecompressor(fpath)
-		require.ErrorIs(t, err, &ErrCompressedFileCorrupted{})
-		require.Nil(t, d)
-	})
+			var corrupted *ErrCompressedFileCorrupted
+			require.ErrorAs(t, err, &corrupted)
+			require.Contains(t, corrupted.Reason, tc.reason)
+		})
+	}
 }
