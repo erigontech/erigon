@@ -277,8 +277,9 @@ func (e *EngineServer) checkRequestsPresence(version clparams.StateVersion, exec
 	return nil
 }
 
-// newPayload validates and may execute a payload.
 var errTypedTxnAsRlpString = errors.New("typed txn marshalled as RLP string")
+
+const payloadDecodeChunk = 64
 
 func (e *EngineServer) decodePayloadTransactions(raw []hexutil.Bytes, gasLimit uint64, amsterdam, deriveBlobHashes bool, expectedBlobHashes []common.Hash) ([][]byte, []types.Transaction, []common.Hash, *engine_types.PayloadStatus) {
 	txs := make([][]byte, len(raw))
@@ -288,23 +289,28 @@ func (e *EngineServer) decodePayloadTransactions(raw []hexutil.Bytes, gasLimit u
 	transactions := make([]types.Transaction, len(raw))
 	decodeErrs := make([]error, len(raw))
 	gasErrs := make([]error, len(raw))
+	decode := func(i int) {
+		if types.TypedTransactionMarshalledAsRlpString(raw[i]) {
+			decodeErrs[i] = errTypedTxnAsRlpString
+			return
+		}
+		if transactions[i], decodeErrs[i] = types.UnmarshalTransactionFromBinary(raw[i], false /* blobTxnsAreWrappedWithBlobs */); decodeErrs[i] != nil {
+			return
+		}
+		limits, gasErr := protocol.TransactionGasLimits(transactions[i], amsterdam)
+		if gasErr == nil && (limits.Execution > gasLimit || limits.State > gasLimit) {
+			gasErr = protocol.ErrGasLimitReached
+		}
+		gasErrs[i] = gasErr
+	}
 	var next atomic.Int64
 	var wg sync.WaitGroup
-	for range min(runtime.GOMAXPROCS(0), len(raw)) {
+	for range min(runtime.GOMAXPROCS(0), (len(raw)+payloadDecodeChunk-1)/payloadDecodeChunk) {
 		wg.Go(func() {
-			for i := int(next.Add(1) - 1); i < len(raw); i = int(next.Add(1) - 1) {
-				if types.TypedTransactionMarshalledAsRlpString(raw[i]) {
-					decodeErrs[i] = errTypedTxnAsRlpString
-					continue
+			for start := int(next.Add(payloadDecodeChunk) - payloadDecodeChunk); start < len(raw); start = int(next.Add(payloadDecodeChunk) - payloadDecodeChunk) {
+				for i := start; i < min(start+payloadDecodeChunk, len(raw)); i++ {
+					decode(i)
 				}
-				if transactions[i], decodeErrs[i] = types.UnmarshalTransactionFromBinary(raw[i], false /* blobTxnsAreWrappedWithBlobs */); decodeErrs[i] != nil {
-					continue
-				}
-				limits, gasErr := protocol.TransactionGasLimits(transactions[i], amsterdam)
-				if gasErr == nil && (limits.Execution > gasLimit || limits.State > gasLimit) {
-					gasErr = protocol.ErrGasLimitReached
-				}
-				gasErrs[i] = gasErr
 			}
 		})
 	}
@@ -313,12 +319,12 @@ func (e *EngineServer) decodePayloadTransactions(raw []hexutil.Bytes, gasLimit u
 		return &engine_types.PayloadStatus{Status: engine_types.InvalidStatus, ValidationError: engine_types.NewStringifiedError(err)}
 	}
 	for i, transaction := range raw {
-		switch err := decodeErrs[i]; {
-		case errors.Is(err, errTypedTxnAsRlpString):
-			e.logger.Warn("[NewPayload] typed txn marshalled as RLP string", "txn", common.Bytes2Hex(transaction))
-			return txs, transactions, expectedBlobHashes, invalid(err)
-		case err != nil:
-			e.logger.Warn("[NewPayload] failed to decode transactions", "err", err)
+		if err := decodeErrs[i]; err != nil {
+			if errors.Is(err, errTypedTxnAsRlpString) {
+				e.logger.Warn("[NewPayload] typed txn marshalled as RLP string", "txn", common.Bytes2Hex(transaction))
+			} else {
+				e.logger.Warn("[NewPayload] failed to decode transactions", "err", err)
+			}
 			return txs, transactions, expectedBlobHashes, invalid(err)
 		}
 		if deriveBlobHashes {
@@ -335,6 +341,7 @@ func (e *EngineServer) decodePayloadTransactions(raw []hexutil.Bytes, gasLimit u
 	return txs, transactions, expectedBlobHashes, nil
 }
 
+// newPayload validates and may execute a payload.
 func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.ExecutionPayload,
 	expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash,
 	executionRequests []hexutil.Bytes, version clparams.StateVersion, deriveBlobHashes bool,
