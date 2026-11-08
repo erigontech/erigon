@@ -119,18 +119,8 @@ func (s *Sentinel) findPeersForSubnets(subnets []subnetSearchState) {
 		return true
 	}
 
-	for !allSatisfied() && checked < maxChecks {
-		select {
-		case <-ctx.Done():
-			log.Debug("[Sentinel] Subnet peer search timeout", "checked", checked)
-			return
-		default:
-		}
-
-		if !filteredIterator.Next() {
-			// Iterator exhausted
-			break
-		}
+	// The walk ends when the iterator is exhausted or, once the context ends, closed.
+	for !allSatisfied() && checked < maxChecks && filteredIterator.Next() {
 		checked++
 		node := filteredIterator.Node()
 
@@ -187,6 +177,11 @@ func (s *Sentinel) findPeersForSubnets(subnets []subnetSearchState) {
 		if len(coveredSubnets) > 0 {
 			log.Debug("[Sentinel] Subnet search: connected to peer", "peer", peerInfo.ID, "subnets", coveredSubnets)
 		}
+	}
+
+	if ctx.Err() != nil {
+		log.Debug("[Sentinel] Subnet peer search timeout", "checked", checked)
+		return
 	}
 
 	// Log final results

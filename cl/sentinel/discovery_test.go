@@ -18,7 +18,6 @@ package sentinel
 
 import (
 	"context"
-	"net"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -31,7 +30,6 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/p2p/discover"
-	"github.com/erigontech/erigon/p2p/enode"
 	libp2p "github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -360,12 +358,8 @@ func TestPeerCoveringSubnetBelowMeshLowWatermarkIsWanted(t *testing.T) {
 func TestFindPeersForSubnetsEndsWithItsContext(t *testing.T) {
 	key, err := crypto.GenerateKey()
 	require.NoError(t, err)
-	db, err := enode.OpenDBEx(t.Context(), "", t.TempDir(), log.Root())
-	require.NoError(t, err)
-	defer db.Close()
-	conn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
-	require.NoError(t, err)
-	listener, err := discover.ListenV5(t.Context(), conn, enode.NewLocalNode(db, key), discover.Config{PrivateKey: key, Log: log.Root()})
+	listener, err := p2p.NewUDPv5Listener(t.Context(), &p2p.P2PConfig{IpAddr: "127.0.0.1", TmpDir: t.TempDir()},
+		discover.Config{PrivateKey: key, Log: log.Root()}, log.Root())
 	require.NoError(t, err)
 	defer listener.Close()
 
