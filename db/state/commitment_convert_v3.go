@@ -705,11 +705,6 @@ func verifyCommitmentV3Check(c CommitmentV3Check) error {
 	return nil
 }
 
-func DebugCommitmentV3RootAsOf(ctx context.Context, a *Aggregator, txNum uint64) ([]byte, error) {
-	c, err := FoldCommitmentV3(ctx, a, txNum)
-	return c.Root, err
-}
-
 type CommitmentV3Check struct {
 	Root                              []byte
 	BlockNum, TxNum, Records, Orphans uint64

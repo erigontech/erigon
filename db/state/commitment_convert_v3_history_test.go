@@ -34,7 +34,10 @@ import (
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/recsplit/multiencseq"
+	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
@@ -194,9 +197,9 @@ func TestConvertCommitmentFiles_V3HistoryOrphanStorageRoot(t *testing.T) {
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, lastFrozenCommit, uint64(3))
 	for txNum := range lastFrozenCommit + 1 {
-		root, rootErr := state.DebugCommitmentV3RootAsOf(ctx, agg, txNum+1)
+		check, rootErr := state.FoldCommitmentV3(ctx, agg, txNum+1)
 		require.NoErrorf(t, rootErr, "records as of txNum %d", txNum+1)
-		require.Equalf(t, roots[txNum], root, "root as of txNum %d", txNum+1)
+		require.Equalf(t, roots[txNum], check.Root, "root as of txNum %d", txNum+1)
 	}
 }
 
@@ -232,11 +235,151 @@ func TestConvertCommitmentFiles_V3History(t *testing.T) {
 			break
 		}
 		checked++
-		root, rootErr := state.DebugCommitmentV3RootAsOf(t.Context(), agg, txNum+1)
+		check, rootErr := state.FoldCommitmentV3(t.Context(), agg, txNum+1)
 		require.NoErrorf(t, rootErr, "records as of txNum %d", txNum+1)
-		require.Equalf(t, roots[txNum], root, "root as of txNum %d", txNum+1)
+		require.Equalf(t, roots[txNum], check.Root, "root as of txNum %d", txNum+1)
 	}
 	require.Greater(t, checked, 90)
+}
+
+func TestConvertCommitmentFiles_V3HistoryRejectsAsOfOrphans(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	db, agg, _ := testDbAggregatorWithCommitmentHistory(t, 7, 2)
+	state.SetConvertPhase5HookForTest(func() error {
+		injectCommitmentHistoryOrphan(t, db, agg)
+		return nil
+	})
+	t.Cleanup(func() { state.SetConvertPhase5HookForTest(nil) })
+
+	tx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	t.Cleanup(tx.Rollback) //nolint:gocritic
+	_, err = state.ConvertCommitmentFiles(t.Context(), state.AggTx(tx), state.ConvertOpts{TargetV3: true}, log.New())
+	tx.Rollback()
+	require.ErrorContains(t, err, "orphan records")
+}
+
+type commitmentHistoryPair struct {
+	key, value []byte
+}
+
+func injectCommitmentHistoryOrphan(t *testing.T, db kv.TemporalRwDB, agg *state.Aggregator) {
+	t.Helper()
+	dirs := agg.Dirs()
+	historyPaths, err := filepath.Glob(filepath.Join(dirs.SnapHistory, "*-commitment.*.v"))
+	require.NoError(t, err)
+	require.NotEmpty(t, historyPaths)
+	historyPath := historyPaths[len(historyPaths)-1]
+	base := strings.TrimSuffix(filepath.Base(historyPath), ".v")
+	idxPath := filepath.Join(dirs.SnapIdx, base+".ef")
+	cfg := agg.Cfg(kv.CommitmentDomain).Hist
+
+	historyDecomp, err := seg.NewDecompressor(historyPath)
+	require.NoError(t, err)
+	pageValues := historyDecomp.CompressedPageValuesCount()
+	if historyDecomp.CompressionFormatVersion() == seg.FileCompressionFormatV0 {
+		pageValues = cfg.HistoryValuesOnCompressedPage
+	}
+	historyReader := seg.NewPagedReader(seg.NewReader(historyDecomp.MakeGetter(), cfg.Compression), pageValues, true)
+	var historyPairs []commitmentHistoryPair
+	for historyReader.HasNext() {
+		key, value, _, _ := historyReader.Next2(nil)
+		historyPairs = append(historyPairs, commitmentHistoryPair{key: slices.Clone(key), value: slices.Clone(value)})
+	}
+	historyDecomp.Close()
+
+	idxDecomp, err := seg.NewDecompressor(idxPath)
+	require.NoError(t, err)
+	idxReader := seg.NewReader(idxDecomp.MakeGetter(), cfg.IiCfg.Compression)
+	var idxPairs []commitmentHistoryPair
+	for idxReader.HasNext() {
+		key, _ := idxReader.Next(nil)
+		require.True(t, idxReader.HasNext())
+		value, _ := idxReader.Next(nil)
+		idxPairs = append(idxPairs, commitmentHistoryPair{key: slices.Clone(key), value: slices.Clone(value)})
+	}
+	idxDecomp.Close()
+
+	var sourceKey, sourceValue []byte
+	var orphanTx uint64
+	for _, idxPair := range idxPairs {
+		if len(idxPair.key) <= 33 || idxPair.key[0] != 0x41 {
+			continue
+		}
+		for _, historyPair := range historyPairs {
+			if len(historyPair.key) < 8 || !bytes.Equal(historyPair.key[8:], idxPair.key) || len(historyPair.value) == 0 {
+				continue
+			}
+			txNum := binary.BigEndian.Uint64(historyPair.key)
+			if sourceKey == nil || txNum > orphanTx {
+				sourceKey = slices.Clone(idxPair.key)
+				sourceValue = slices.Clone(historyPair.value)
+				orphanTx = txNum
+			}
+		}
+	}
+	require.NotEmpty(t, sourceKey)
+	orphanKey := slices.Clone(sourceKey)
+	for i := 1; i < 33; i++ {
+		orphanKey[i] = 0xff
+	}
+	require.NotEqual(t, sourceKey, orphanKey)
+	var sequence multiencseq.SequenceBuilder
+	sequence.Reset(0, 1, orphanTx)
+	sequence.AddOffset(orphanTx)
+	sequence.Build()
+	idxPairs = append(idxPairs, commitmentHistoryPair{key: orphanKey, value: sequence.AppendBytes(nil)})
+	historyKey := binary.BigEndian.AppendUint64(nil, orphanTx)
+	historyPairs = append(historyPairs, commitmentHistoryPair{key: append(historyKey, orphanKey...), value: sourceValue})
+	slices.SortFunc(idxPairs, func(a, b commitmentHistoryPair) int { return bytes.Compare(a.key, b.key) })
+	slices.SortFunc(historyPairs, func(a, b commitmentHistoryPair) int { return bytes.Compare(a.key, b.key) })
+
+	agg.CloseFilesNoReopen()
+	rangeBase := strings.TrimPrefix(base, "v3.0")
+	for _, dirPath := range []string{dirs.SnapIdx, dirs.SnapAccessors} {
+		for _, ext := range []string{".bt", ".efi", ".kvei", ".kvi", ".vi"} {
+			accessors, err := filepath.Glob(filepath.Join(dirPath, "*"+rangeBase+ext))
+			require.NoError(t, err)
+			for _, accessor := range accessors {
+				require.NoError(t, dir.RemoveFile(accessor))
+			}
+		}
+	}
+	rewriteCommitmentHistoryV3(t, dirs, historyPath, historyPairs, cfg)
+	rewriteCommitmentHistoryIndex(t, dirs, idxPath, idxPairs, cfg)
+	require.NoError(t, agg.ReloadFiles())
+	require.NoError(t, agg.BuildMissedAccessors(t.Context(), db, 1))
+}
+
+func rewriteCommitmentHistoryV3(t *testing.T, dirs datadir.Dirs, path string, pairs []commitmentHistoryPair, cfg statecfg.HistCfg) {
+	t.Helper()
+	tmp := path + ".tmp"
+	comp, err := seg.NewCompressor(t.Context(), "test commitment history", tmp, dirs.Tmp, cfg.CompressorCfg, log.LvlTrace, log.New())
+	require.NoError(t, err)
+	w := seg.NewPagedWriter(t.Context(), seg.NewWriter(comp, cfg.Compression), comp.GetValuesOnCompressedPage() > 0, cfg.CompressorCfg.Workers)
+	for _, pair := range pairs {
+		require.NoError(t, w.Add(pair.key, pair.value))
+	}
+	require.NoError(t, w.Compress())
+	comp.Close()
+	require.NoError(t, os.Rename(tmp, path))
+}
+
+func rewriteCommitmentHistoryIndex(t *testing.T, dirs datadir.Dirs, path string, pairs []commitmentHistoryPair, cfg statecfg.HistCfg) {
+	t.Helper()
+	tmp := path + ".tmp"
+	comp, err := seg.NewCompressor(t.Context(), "test commitment history index", tmp, dirs.Tmp, cfg.IiCfg.CompressorCfg, log.LvlTrace, log.New())
+	require.NoError(t, err)
+	w := seg.NewWriter(comp, cfg.IiCfg.Compression)
+	for _, pair := range pairs {
+		_, err = w.Write(pair.key)
+		require.NoError(t, err)
+		_, err = w.Write(pair.value)
+		require.NoError(t, err)
+	}
+	require.NoError(t, comp.Compress())
+	comp.Close()
+	require.NoError(t, os.Rename(tmp, path))
 }
 
 func TestRestoreCommitmentFiles_V3RestoresHistory(t *testing.T) {
@@ -297,7 +440,7 @@ func TestConvertCommitmentFiles_V3HistoryStaleStorageBranchOfRecreatedAccount(t 
 	runOrchestrator(t, db, state.ConvertOpts{TargetV3: true})
 
 	for txNum := uint64(1); txNum <= stepSize*steps; txNum++ {
-		_, err := state.DebugCommitmentV3RootAsOf(ctx, agg, txNum)
+		_, err := state.FoldCommitmentV3(ctx, agg, txNum)
 		require.NoErrorf(t, err, "records as of txNum %d", txNum)
 	}
 }
@@ -380,8 +523,8 @@ func TestConvertCommitmentFiles_V3HistoryExtensionRoot(t *testing.T) {
 		if txNum >= stepSize*(steps-1) {
 			break
 		}
-		root, err := state.DebugCommitmentV3RootAsOf(t.Context(), agg, txNum+1)
+		check, err := state.FoldCommitmentV3(t.Context(), agg, txNum+1)
 		require.NoErrorf(t, err, "records as of txNum %d", txNum+1)
-		require.Equalf(t, roots[txNum], root, "root as of txNum %d", txNum+1)
+		require.Equalf(t, roots[txNum], check.Root, "root as of txNum %d", txNum+1)
 	}
 }

@@ -183,6 +183,24 @@ func TestEmitTouchedFeedCarriesWhatEmitTouchedEmits(t *testing.T) {
 	require.Equal(t, wantDeleted, gotDeleted)
 }
 
+func TestEmitTouchedFeedSkipsDeletedWhenParentReadsNotWanted(t *testing.T) {
+	commitmentdb.WantParentReads(false)
+	t.Cleanup(func() { commitmentdb.WantParentReads(false) })
+	const txIdx = 3
+	ver := state.Version{TxIndex: txIdx}
+	a := accounts.InternAddress([20]byte{1})
+	k := accounts.InternKey([32]byte{2})
+	ws := newWS().emptyRemoval(a, ver).stor(a, k, ver, uint256.Int{}).build()
+	vm := state.NewVersionMap(nil)
+	vm.FlushVersionedWrites(ws, true)
+	view := vm.View(txIdx+1, nil)
+
+	cc := &commitmentCalculator{branchPrefetch: newPrefetchRecords()}
+	cc.accumulateTouched(state.NewVersionMapWriteView(ws, vm, txIdx), nil)
+	require.NoError(t, cc.emitTouchedFeed(view))
+	require.Nil(t, cc.deleted)
+}
+
 func TestComputeAheadFeedRootMatchesHexPatricia(t *testing.T) {
 	defer func(v bool) { statecfg.ExperimentalCommitmentV3 = v }(statecfg.ExperimentalCommitmentV3)
 	roots := make(map[bool][]byte)

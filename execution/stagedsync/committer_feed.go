@@ -87,7 +87,8 @@ func (cc *commitmentCalculator) emitTouchedFeed(view *state.VersionMapView) erro
 	for _, m := range cc.touchedStorage {
 		slots += len(m)
 	}
-	if commitmentdb.ParentReadsWanted() {
+	wantDeleted := commitmentdb.ParentReadsWanted()
+	if wantDeleted {
 		cc.deleted = [][]byte{}
 	} else {
 		cc.deleted = nil
@@ -101,7 +102,7 @@ func (cc *commitmentCalculator) emitTouchedFeed(view *state.VersionMapView) erro
 		address := addr.Value()
 		f.updates = append(f.updates, cc.accountUpdate(view, addr))
 		u := &f.updates[len(f.updates)-1]
-		if u.Deleted() {
+		if wantDeleted && u.Deleted() {
 			cc.deleted = append(cc.deleted, address[:])
 		}
 		start := len(f.slots)
@@ -111,7 +112,7 @@ func (cc *commitmentCalculator) emitTouchedFeed(view *state.VersionMapView) erro
 				n := val.ByteLen()
 				f.values = f.values[:at+n]
 				val.WriteToSlice(f.values[at:])
-			} else {
+			} else if wantDeleted {
 				s := slot.Value()
 				cc.deleted = append(cc.deleted, slices.Concat(address[:], s[:]))
 			}

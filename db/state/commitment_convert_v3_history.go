@@ -90,6 +90,10 @@ func (b *historyChainBatch) span(p []byte) [2]int {
 	return [2]int{start, len(b.buf)}
 }
 
+func historyBatchWeight(size, budget int64) int64 {
+	return min(size, budget)
+}
+
 var historyChainBatchPool = sync.Pool{New: func() any { return &historyChainBatch{} }}
 
 type historyVersion struct {
@@ -484,7 +488,8 @@ func convertCommitmentHistoryFileV3(ctx context.Context, at *AggregatorRoTx, vFi
 	defer closeCollectors()
 	in := make(chan *historyChainBatch, workers*2)
 	out := make(chan *convertedBatch, workers*2)
-	inFlight := semaphore.NewWeighted(int64(commitmentV3BatchBytes * workers * 2))
+	inFlightBudget := int64(commitmentV3BatchBytes * workers * 2)
+	inFlight := semaphore.NewWeighted(inFlightBudget)
 	var chains, versions atomic.Uint64
 
 	g, gctx := errgroup.WithContext(ctx)
@@ -508,7 +513,7 @@ func convertCommitmentHistoryFileV3(ctx context.Context, at *AggregatorRoTx, vFi
 		batch := historyChainBatchPool.Get().(*historyChainBatch)
 		batch.reset()
 		send := func() error {
-			weight := int64(len(batch.buf))
+			weight := historyBatchWeight(int64(len(batch.buf)), inFlightBudget)
 			if err := inFlight.Acquire(gctx, weight); err != nil {
 				return err
 			}
@@ -861,8 +866,9 @@ func convertCommitmentHistoryFileV3(ctx context.Context, at *AggregatorRoTx, vFi
 						}
 					}
 				}
+				weight := batch.weight
+				inFlight.Release(weight)
 				historyChainBatchPool.Put(batch)
-				inFlight.Release(batch.weight)
 				if err := send(); err != nil {
 					return err
 				}
