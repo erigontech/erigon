@@ -60,8 +60,13 @@ const maxFetchRequests = 64 * 1024
 const disconnectedPeerMemory = time.Minute
 
 // maxRetryRequestsPerPeer bounds a peer's unanswered retry requests well under sentry's 32-message outbound queue,
-// which drops the oldest when full: a slow writer gets no more retries until it answers.
+// which drops the oldest when full: retries alone cannot fill it, and a slow writer gets no more until it answers.
+// Other traffic shares the queue, so a retry can still be dropped; retryAnswerTimeout frees its slot.
 const maxRetryRequestsPerPeer = 8
+
+// retryAnswerTimeout frees the slot of a retry left unanswered this long, as sentry's queue dropped it; a slower
+// writer still gets at most maxRetryRequestsPerPeer retries per this window.
+const retryAnswerTimeout = 2 * time.Minute
 
 type fetchPeer struct {
 	sentry sentryproto.SentryClient
@@ -109,12 +114,12 @@ type Fetch struct {
 	announcements            *maphash.LRU[announceInfo] // announceKey(txHash, peerHash) -> announced (type, size) from that peer
 	requestedLock            sync.Mutex
 	requested                *maphash.LRU[*fetchRequest]
-	pending                  []pendingFetch          // in request order, so the oldest expires first
-	waiting                  []pendingFetch          // timed-out requests whose alternates have no retry room
-	waitingReady             bool                    // a waiting request's alternate may have room again
-	retriesOutstanding       map[fetchPeer]int       // retry requests a peer has not answered yet
-	alternatesOf             map[fetchPeer]int       // hashes each peer waits on as an alternate
-	disconnected             map[fetchPeer]time.Time // recently disconnected peers: an announcement buffered before the disconnect or a failed send must not keep them
+	pending                  []pendingFetch            // in request order, so the oldest expires first
+	waiting                  []pendingFetch            // timed-out requests whose alternates have no retry room
+	waitingReady             bool                      // a waiting request's alternate may have room again
+	retriesOutstanding       map[fetchPeer][]time.Time // send times of the retries a peer has not answered, oldest first
+	alternatesOf             map[fetchPeer]int         // hashes each peer waits on as an alternate
+	disconnected             map[fetchPeer]time.Time   // recently disconnected peers: an announcement buffered before the disconnect or a failed send must not keep them
 	now                      func() time.Time
 	logger                   log.Logger
 }
@@ -153,7 +158,7 @@ func NewFetch(
 		pooledTxnsParseCtx:   NewTxnParseContext(chainID).ChainIDRequired().WithPoolRules(),
 		announcements:        announcements,
 		requested:            requested,
-		retriesOutstanding:   map[fetchPeer]int{},
+		retriesOutstanding:   map[fetchPeer][]time.Time{},
 		alternatesOf:         map[fetchPeer]int{},
 		disconnected:         map[fetchPeer]time.Time{},
 		now:                  time.Now,
@@ -297,6 +302,7 @@ func (f *Fetch) announcedSize(hash []byte, peer fetchPeer) int {
 func (f *Fetch) requestFromAlternates(ctx context.Context, tx kv.Tx) {
 	f.requestedLock.Lock()
 	now := f.now()
+	f.expireRetries(now)
 	scanWaiting := f.waitingReady
 	var expired Hashes
 	if scanWaiting {
@@ -306,6 +312,10 @@ func (f *Fetch) requestFromAlternates(ctx context.Context, tx kv.Tx) {
 			r, ok := f.requested.Get(p.hash[:])
 			if !ok || !r.at.Equal(p.at) {
 				continue // stale
+			}
+			if len(r.alternates) == 0 {
+				f.requested.Delete(p.hash[:]) // exhausted: free the slot for live requests
+				continue
 			}
 			kept = append(kept, p)
 			if f.hasRetryRoom(r) {
@@ -326,6 +336,10 @@ func (f *Fetch) requestFromAlternates(ctx context.Context, tx kv.Tx) {
 		return
 	}
 	state := map[[32]byte]bool{} // true: held, false: queued for validation
+	checked := make(map[[32]byte]struct{}, len(expired)/32)
+	for i := 0; i < len(expired); i += 32 {
+		checked[[32]byte(expired[i:i+32])] = struct{}{}
+	}
 	held, queued, err := f.pool.HeldOrQueuedIdHashes(tx, expired)
 	if err != nil {
 		held, queued = nil, nil // ask anyway: a held txn costs only a duplicate reply
@@ -365,8 +379,12 @@ func (f *Fetch) requestFromAlternates(ctx context.Context, tx kv.Tx) {
 			deferred = append(deferred, p)
 			continue
 		}
-		if fromWaiting && !f.hasRetryRoom(r) {
-			waiting = append(waiting, p)
+		if len(r.alternates) == 0 {
+			f.requested.Delete(p.hash[:]) // exhausted: free the slot for live requests
+			continue
+		}
+		if _, lookedUp := checked[p.hash]; fromWaiting && (!lookedUp || !f.hasRetryRoom(r)) {
+			waiting = append(waiting, p) // room that opened during the unlocked lookup waits for the next sweep's lookup
 			continue
 		}
 		if isHeld, found := state[p.hash]; found {
@@ -378,14 +396,10 @@ func (f *Fetch) requestFromAlternates(ctx context.Context, tx kv.Tx) {
 			f.pending = append(f.pending, pendingFetch{p.hash, sent})
 			continue
 		}
-		if len(r.alternates) == 0 {
-			f.requested.Delete(p.hash[:]) // exhausted: free the slot for live requests
-			continue
-		}
 		picked := slices.IndexFunc(r.alternates, func(alt fetchPeer) bool {
 			plan := plans[alt]
 			if plan == nil {
-				plan = &retryPlan{limit: maxRetryRequestsPerPeer - f.retriesOutstanding[alt]}
+				plan = &retryPlan{limit: maxRetryRequestsPerPeer - len(f.retriesOutstanding[alt])}
 				plans[alt] = plan
 			}
 			return plan.limit > 0 && plan.add(p.hash[:], f.announcedSize(p.hash[:], alt))
@@ -402,7 +416,7 @@ func (f *Fetch) requestFromAlternates(ctx context.Context, tx kv.Tx) {
 	}
 	f.waiting = waiting
 	for peer, plan := range plans { // counted before the sends, so a reply that beats its send's return frees a slot
-		f.retriesOutstanding[peer] += len(plan.reqs)
+		f.retriesOutstanding[peer] = append(f.retriesOutstanding[peer], slices.Repeat([]time.Time{sent}, len(plan.reqs))...)
 	}
 	f.requestedLock.Unlock()
 
@@ -526,7 +540,9 @@ func (f *Fetch) appendAlternate(r *fetchRequest, peer fetchPeer) {
 	}
 	r.alternates = append(r.alternates, peer)
 	f.alternatesOf[peer]++
-	f.waitingReady = true // a waiting request may have gained an alternate with room
+	if len(f.waiting) > 0 && len(f.retriesOutstanding[peer]) < maxRetryRequestsPerPeer {
+		f.waitingReady = true // a waiting request may have gained an alternate with room
+	}
 }
 
 func (f *Fetch) removeAlternate(r *fetchRequest, i int) fetchPeer {
@@ -580,7 +596,23 @@ func (f *Fetch) requestPooledTxns(ctx context.Context, peer fetchPeer, hashes Ha
 
 // hasRetryRoom reports whether one of r's alternates can take another retry request; caller holds requestedLock.
 func (f *Fetch) hasRetryRoom(r *fetchRequest) bool {
-	return slices.ContainsFunc(r.alternates, func(alt fetchPeer) bool { return f.retriesOutstanding[alt] < maxRetryRequestsPerPeer })
+	return slices.ContainsFunc(r.alternates, func(alt fetchPeer) bool { return len(f.retriesOutstanding[alt]) < maxRetryRequestsPerPeer })
+}
+
+// expireRetries frees the slots of retries unanswered for retryAnswerTimeout. Caller holds requestedLock.
+func (f *Fetch) expireRetries(now time.Time) {
+	for peer, sent := range f.retriesOutstanding {
+		live := slices.IndexFunc(sent, func(at time.Time) bool { return now.Sub(at) < retryAnswerTimeout })
+		switch {
+		case live == 0:
+			continue
+		case live < 0:
+			delete(f.retriesOutstanding, peer)
+		default:
+			f.retriesOutstanding[peer] = sent[live:]
+		}
+		f.waitingReady = true
+	}
 }
 
 // releaseRetry frees one of peer's retry slots: on a PooledTransactions reply, which a peer sends for every request
@@ -588,11 +620,11 @@ func (f *Fetch) hasRetryRoom(r *fetchRequest) bool {
 func (f *Fetch) releaseRetry(peer fetchPeer) {
 	f.requestedLock.Lock()
 	defer f.requestedLock.Unlock()
-	if n := f.retriesOutstanding[peer]; n > 0 {
-		if n == 1 {
+	if sent := f.retriesOutstanding[peer]; len(sent) > 0 {
+		if len(sent) == 1 {
 			delete(f.retriesOutstanding, peer)
 		} else {
-			f.retriesOutstanding[peer] = n - 1
+			f.retriesOutstanding[peer] = sent[1:]
 		}
 		f.waitingReady = true
 	}

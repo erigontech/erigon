@@ -864,45 +864,17 @@ func toPeerIDs(h ...byte) (out []PeerID) {
 
 func TestAnnouncedHashRequestedFromOnePeerUntilTimeout(t *testing.T) {
 	t.Parallel()
-	ctx := t.Context()
-	ctrl := gomock.NewController(t)
-	sentryServer := sentryproto.NewMockSentryServer(ctrl)
-	pool := NewMockPool(ctrl)
-	pool.EXPECT().Started().Return(true).AnyTimes()
-	pool.EXPECT().FilterKnownIdHashes(gomock.Any(), gomock.Any()).
-		DoAndReturn(func(_ kv.Tx, hashes Hashes) (Hashes, error) { return hashes, nil }).AnyTimes()
-	pool.EXPECT().HeldOrQueuedIdHashes(gomock.Any(), gomock.Any()).Return(nil, nil, nil).AnyTimes()
-	var requestedFrom [][64]byte
-	sentryServer.EXPECT().SendMessageById(gomock.Any(), gomock.Any()).
-		DoAndReturn(func(_ context.Context, r *sentryproto.SendMessageByIdRequest) (*sentryproto.SentPeers, error) {
-			requestedFrom = append(requestedFrom, gointerfaces.ConvertH512ToHash(r.PeerId))
-			return &sentryproto.SentPeers{Peers: []*typesproto.H512{r.PeerId}}, nil
-		}).AnyTimes()
-	sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, NewMockSentry(ctx, sentryServer))
-	require.NoError(t, err)
-	fetch := NewFetch(ctx, []sentryproto.SentryClient{sentryClient}, pool, nil, nil, u256.N1, log.New())
-	now := time.Unix(1_000_000, 0)
-	fetch.now = func() time.Time { return now }
+	a := newAnnounceFetchTest(t)
+	hash, peerA, peerB := [32]byte{0xaa}, [64]byte{0xa}, [64]byte{0xb}
+	a.announce(t, peerA, hash)
+	a.announce(t, peerB, hash)
+	require.Equal(t, [][64]byte{peerA}, a.requestedFrom)
 
-	hash := [32]byte{0xaa}
-	buf := make([]byte, announcementsLen([]byte{types.DynamicFeeTxType}, []uint32{100}, hash[:]))
-	announcement := buf[:encodeAnnouncements([]byte{types.DynamicFeeTxType}, []uint32{100}, hash[:], buf)]
-	peerA, peerB := [64]byte{0xa}, [64]byte{0xb}
-	announce := func(peer [64]byte) {
-		require.NoError(t, fetch.handleInboundMessageWithTx(ctx, nil, &sentryproto.InboundMessage{
-			Id: sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_68, Data: announcement, PeerId: gointerfaces.ConvertHashToH512(peer),
-		}, sentryClient))
-	}
-
-	announce(peerA)
-	announce(peerB)
-	require.Equal(t, [][64]byte{peerA}, requestedFrom)
-
-	now = now.Add(txFetchTimeout)
-	announce(peerB)
-	require.Equal(t, [][64]byte{peerA}, requestedFrom, "the waiting alternate is asked by the sweep, in order")
-	fetch.requestFromAlternates(ctx, nil)
-	require.Equal(t, [][64]byte{peerA, peerB}, requestedFrom)
+	*a.now = a.now.Add(txFetchTimeout)
+	a.announce(t, peerB, hash)
+	require.Equal(t, [][64]byte{peerA}, a.requestedFrom, "the waiting alternate is asked by the sweep, in order")
+	a.fetch.requestFromAlternates(a.ctx, nil)
+	require.Equal(t, [][64]byte{peerA, peerB}, a.requestedFrom)
 }
 
 type announceFetchTest struct {
@@ -1157,6 +1129,31 @@ func TestFetchBoundsQueuedBatch(t *testing.T) {
 			})
 		})
 	}
+}
+
+// Every PooledTransactions reply frees one retry slot of its peer, even one whose body a dedup drops.
+func TestIdenticalRepliesEachFreeARetrySlot(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	pool := NewMockPool(ctrl)
+	pool.EXPECT().Started().Return(false).AnyTimes()
+	client := sentryproto.NewMockSentryClient(ctrl)
+	fetch := NewFetch(t.Context(), nil, pool, nil, nil, u256.N1, log.New())
+	peerB := [64]byte{0xb}
+	peer := fetchPeer{client, peerB}
+	fetch.retriesOutstanding[peer] = []time.Time{time.Unix(1, 0), time.Unix(1, 0)}
+	reply := &sentryproto.InboundMessage{Id: sentryproto.MessageId_POOLED_TRANSACTIONS_66, Data: []byte{0xc0}, PeerId: gointerfaces.ConvertHashToH512(peerB)}
+	replies := []*sentryproto.InboundMessage{reply, reply}
+	stream := &boundedBatchStream{recv: func() (*sentryproto.InboundMessage, error) {
+		if len(replies) == 0 {
+			return nil, nil
+		}
+		r := replies[0]
+		replies = replies[1:]
+		return r, nil
+	}}
+	client.EXPECT().Messages(gomock.Any(), gomock.Any(), gomock.Any()).Return(stream, nil)
+	require.NoError(t, fetch.receiveMessage(t.Context(), client))
+	require.Empty(t, fetch.retriesOutstanding[peer], "a duplicate reply still answers a retry")
 }
 
 func TestFetchSerializesBatchFlushes(t *testing.T) {
@@ -1496,6 +1493,26 @@ func TestSlowPeerGetsNoRetriesUntilItAnswers(t *testing.T) {
 	require.Len(t, a.requestedFrom, maxRetryRequestsPerPeer+1, "each answer frees one retry")
 }
 
+// Sentry's queue can drop a retry, which is then never answered; its slot must not hold the peer forever.
+func TestDroppedRetriesFreeTheirSlots(t *testing.T) {
+	t.Parallel()
+	a := newAnnounceFetchTest(t)
+	peerA, peerB := [64]byte{0xa}, [64]byte{0xb}
+	hashes := make([][32]byte, 4*maxRetryRequestsPerPeer)
+	for i := range hashes {
+		binary.BigEndian.PutUint64(hashes[i][:], uint64(i)+1)
+	}
+	const blobTxnSize = 131 * 1024
+	a.announceSized(t, peerA, blobTxnSize, hashes...)
+	a.announceSized(t, peerB, blobTxnSize, hashes...)
+	a.requestedFrom = nil
+	a.timeoutSweep()
+	require.Len(t, a.requestedFrom, maxRetryRequestsPerPeer)
+	*a.now = a.now.Add(retryAnswerTimeout)
+	a.fetch.requestFromAlternates(a.ctx, nil)
+	require.Greater(t, len(a.requestedFrom), maxRetryRequestsPerPeer, "dropped retries still hold the peer")
+}
+
 func TestStalledRetrySendKeepsLaterBatchesWithTheirPeer(t *testing.T) {
 	t.Parallel()
 	a := newAnnounceFetchTest(t)
@@ -1514,7 +1531,7 @@ func TestStalledRetrySendKeepsLaterBatchesWithTheirPeer(t *testing.T) {
 func TestBlockedFirstSendDoesNotStrandLaterChunks(t *testing.T) {
 	t.Parallel()
 	a := newAnnounceFetchTest(t)
-	peerA := [64]byte{0xa}
+	peerA, peerB := [64]byte{0xa}, [64]byte{0xb}
 	hashes := make([][32]byte, 257)
 	for i := range hashes {
 		binary.BigEndian.PutUint64(hashes[i][:], uint64(i)+1)
@@ -1533,8 +1550,10 @@ func TestBlockedFirstSendDoesNotStrandLaterChunks(t *testing.T) {
 	_ = a.fetch.handleInboundMessageWithTx(a.ctx, nil, &sentryproto.InboundMessage{
 		Id: sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_68, Data: announcement, PeerId: gointerfaces.ConvertHashToH512(peerA),
 	}, a.sentryClient)
-	r, ok := a.fetch.requested.Get(hashes[256][:])
-	require.False(t, ok && r.unsent, "the last chunk's hash must not stay unsent, or it never times out")
+	a.requestedFrom, a.sentHashes = nil, nil
+	a.announce(t, peerB, hashes[256])
+	require.Equal(t, [][64]byte{peerB}, a.requestedFrom, "a hash left reserved for A would only gain B as an alternate")
+	require.Equal(t, []Hashes{hashes[256][:]}, a.sentHashes)
 }
 
 func TestReplyDuringTheRetrySendFreesItsSlot(t *testing.T) {
@@ -1546,7 +1565,7 @@ func TestReplyDuringTheRetrySendFreesItsSlot(t *testing.T) {
 	a.onSend = func() { a.answer(peerB, 1) } // B answers before SendMessageById returns
 	a.timeoutSweep()
 	require.Equal(t, [][64]byte{peerA, peerB}, a.requestedFrom)
-	require.Zero(t, a.fetch.retriesOutstanding[fetchPeer{a.sentryClient, peerB}], "an answered retry must not stay outstanding")
+	require.Empty(t, a.fetch.retriesOutstanding[fetchPeer{a.sentryClient, peerB}], "an answered retry must not stay outstanding")
 }
 
 func TestNewAnnouncerOfAWaitingHashIsAskedAtOnce(t *testing.T) {
@@ -1586,6 +1605,51 @@ func TestStaleWaitingEntriesAreDropped(t *testing.T) {
 	a.answer(peerB, 1)
 	a.fetch.requestFromAlternates(a.ctx, nil)
 	require.Empty(t, a.fetch.waiting, "a sweep with nothing to retry still drops the stale entry")
+}
+
+func TestWaitingHashWithoutAlternatesIsDropped(t *testing.T) {
+	t.Parallel()
+	a := newAnnounceFetchTest(t)
+	peerA, peerB := [64]byte{0xa}, [64]byte{0xb}
+	hashes := make([][32]byte, maxRetryRequestsPerPeer+1)
+	for i := range hashes {
+		binary.BigEndian.PutUint64(hashes[i][:], uint64(i)+1)
+	}
+	const blobTxnSize = 131 * 1024
+	a.announceSized(t, peerA, blobTxnSize, hashes...)
+	a.announceSized(t, peerB, blobTxnSize, hashes...)
+	a.timeoutSweep()
+	require.Len(t, a.fetch.waiting, 1)
+	a.fetch.dropAlternate(fetchPeer{a.sentryClient, peerB}) // its only alternate disconnects
+	a.fetch.requestFromAlternates(a.ctx, nil)
+	_, ok := a.fetch.requested.Get(hashes[len(hashes)-1][:])
+	require.False(t, ok, "a waiting hash with no alternate left must free its slot")
+	require.Empty(t, a.fetch.waiting)
+}
+
+// A waiting hash is sent only after a pool lookup in the same sweep, even if room opens during that lookup.
+func TestRoomOpenedDuringTheLookupWaitsForTheNextLookup(t *testing.T) {
+	t.Parallel()
+	a := newAnnounceFetchTest(t)
+	peerA, peerB := [64]byte{0xa}, [64]byte{0xb}
+	hashes := make([][32]byte, maxRetryRequestsPerPeer+1)
+	for i := range hashes {
+		binary.BigEndian.PutUint64(hashes[i][:], uint64(i)+1)
+	}
+	const blobTxnSize = 131 * 1024
+	a.announceSized(t, peerA, blobTxnSize, hashes...)
+	a.announceSized(t, peerB, blobTxnSize, hashes...)
+	a.timeoutSweep()
+	require.Len(t, a.fetch.waiting, 1)
+	waitingHash := hashes[len(hashes)-1]
+	a.known = map[[32]byte]bool{waitingHash: true}                  // the pool got it meanwhile
+	a.fetch.dropAlternate(fetchPeer{a.sentryClient, [64]byte{0xc}}) // an unrelated disconnect re-scans the waiting list
+	a.onFilter = func() { a.onFilter = nil; a.answer(peerB, 1) }
+	a.sentHashes = nil
+	a.timeoutSweep() // looks up the expired retries; B answers during the lookup
+	for _, sent := range a.sentHashes {
+		require.NotContains(t, string(sent), string(waitingHash[:]), "a hash the pool holds was requested without a lookup")
+	}
 }
 
 func TestDisconnectDuringAStalledSendReachesTheUnsentRequest(t *testing.T) {

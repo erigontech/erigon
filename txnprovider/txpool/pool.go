@@ -699,29 +699,11 @@ func (p *TxPool) HeldOrQueuedIdHashes(tx kv.Tx, hashes Hashes) (held, queued Has
 			queued = append(queued, hash...)
 			continue
 		}
-		_, inPool := p.byHash[hashS]
-		_, mined := p.minedBlobTxnsByHash[hashS]
-		if inPool || mined {
-			held = append(held, hash...)
-			continue
-		}
-		if generation, rejected := p.frameRejections.Get(hashS); rejected {
-			if generation == p.stateGeneration { // a refetched body would be dropped as known
-				held = append(held, hash...)
-			}
-			continue
-		}
-		if reason, discarded := p.discardReasonsLRU.Get(hashS); discarded {
-			if !refetchableDiscard(reason) { // a refetched body would be dropped as known
-				held = append(held, hash...)
-			}
-			continue
-		}
-		has, err := tx.Has(kv.PoolTransaction, hash)
+		known, err := p.idHashKnown(tx, hash, hashS)
 		if err != nil {
 			return held, queued, err
 		}
-		if has {
+		if known {
 			held = append(held, hash...)
 		}
 	}
