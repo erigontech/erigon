@@ -640,26 +640,14 @@ func TestPostEnvelopeContentsLogsBlockOfFailedColumnPublish(t *testing.T) {
 }
 
 func TestPostEnvelopeContentsUsesCachedLocalBundle(t *testing.T) {
-	f := newEnvelopeContentsFixture(t, 0, 1)
-	f.handler.blobBundles.Add(common.Bytes48(f.blobs[0].commitment), bundleOf(f.blobs[0]))
-	other := newTestBlob(t, 99, clparams.FuluVersion)
-	request := testBlob{blob: other.blob, commitment: f.blobs[0].commitment, proofs: make([]cltypes.KZGProof, len(other.proofs))}
-
-	recorder := f.postContents(t.Context(), f.contents(request), "")
-
-	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
-	f.requirePublishedColumnsEqual(f.expectedColumns(f.blobs...))
-}
-
-func TestPostEnvelopeContentsConsensusModesUseCachedLocalBundle(t *testing.T) {
-	for _, mode := range []string{"consensus", "consensus_and_equivocation"} {
-		t.Run(mode, func(t *testing.T) {
+	for _, query := range []string{"", "?broadcast_validation=consensus", "?broadcast_validation=consensus_and_equivocation"} {
+		t.Run(query, func(t *testing.T) {
 			f := newEnvelopeContentsFixture(t, 0, 1)
 			f.handler.blobBundles.Add(common.Bytes48(f.blobs[0].commitment), bundleOf(f.blobs[0]))
 			other := newTestBlob(t, 99, clparams.FuluVersion)
 			request := testBlob{blob: other.blob, commitment: f.blobs[0].commitment, proofs: make([]cltypes.KZGProof, len(other.proofs))}
 
-			recorder := f.postContents(t.Context(), f.contents(request), "?broadcast_validation="+mode)
+			recorder := f.postContents(t.Context(), f.contents(request), query)
 
 			require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
 			require.False(t, f.consensusCheckBlobData)
