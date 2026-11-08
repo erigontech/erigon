@@ -203,12 +203,15 @@ func (f *balFetcher) fetchFromPeer(ctx context.Context, reqs []BALRequest, peerI
 	// does not prove that the peer lacks it. Only explicit unavailable entries
 	// update the tracker; a truncated response also gives no availability evidence.
 	for i := 0; i < len(response) && i < len(reqs); i++ {
-		entry := response[i]
-		if len(entry) == 0 || (len(entry) == 1 && entry[0] == 0x80) {
+		if isUnavailableBALEntry(response[i]) {
 			f.peerTracker.BALNumMissing(peerId, reqs[i].Number)
 		}
 	}
 	return out, err
+}
+
+func isUnavailableBALEntry(entry rlp.RawValue) bool {
+	return len(entry) == 0 || (len(entry) == 1 && entry[0] == 0x80)
 }
 
 // validateBALResponse maps a positional EIP-8159 BlockAccessLists response onto
@@ -229,7 +232,7 @@ func validateBALResponse(reqs []BALRequest, response []rlp.RawValue) (map[common
 		expected := reqs[i].ExpectedHash
 		// EIP-8159: 0x80 = "not available", 0xc0 = "genuinely empty BAL",
 		// anything else = BAL bytes that must keccak256 to the committed hash.
-		if len(entry) == 0 || (len(entry) == 1 && entry[0] == 0x80) {
+		if isUnavailableBALEntry(entry) {
 			continue
 		}
 		if len(entry) == 1 && entry[0] == 0xc0 {

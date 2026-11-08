@@ -42,15 +42,7 @@ import (
 
 func TestBALFetcherTracksAvailability(t *testing.T) {
 	malformed := rlp.RawValue{0xc2, 0x01, 0x02}
-	invalid, err := types.EncodeBlockAccessListBytes(types.BlockAccessList{{
-		Address: common.Address{1},
-		StorageChanges: []types.SlotChanges{{
-			Slot:    accounts.InternKey(common.Hash{1}),
-			Changes: []*types.StorageChange{{Index: 0, Value: *uint256.NewInt(1)}},
-		}},
-		StorageReads: []common.Hash{{1}},
-	}})
-	require.NoError(t, err)
+	invalid := encodeBALWithOverlappingStorageSlot(t)
 
 	for _, tc := range []struct {
 		name         string
@@ -216,15 +208,7 @@ func TestValidateBALResponse(t *testing.T) {
 	})
 
 	t.Run("hash-matching invalid BAL is discarded while valid entries are kept", func(t *testing.T) {
-		invalid, err := types.EncodeBlockAccessListBytes(types.BlockAccessList{{
-			Address: common.Address{1},
-			StorageChanges: []types.SlotChanges{{
-				Slot:    accounts.InternKey(common.Hash{1}),
-				Changes: []*types.StorageChange{{Index: 0, Value: *uint256.NewInt(1)}},
-			}},
-			StorageReads: []common.Hash{{1}},
-		}})
-		require.NoError(t, err)
+		invalid := encodeBALWithOverlappingStorageSlot(t)
 		gasLimit := uint64(3 * types.BalItemCost)
 		decoded, err := types.DecodeBlockAccessListSidecarForHeader(invalid, gasLimit)
 		require.NoError(t, err)
@@ -502,4 +486,18 @@ func TestFetchAcrossPeers(t *testing.T) {
 			[]PeerId{*PeerIdFromUint64(1), *PeerIdFromUint64(2), *PeerIdFromUint64(3), *PeerIdFromUint64(4)}, 2, fetch)
 		require.LessOrEqual(t, peak.Load(), int32(2)) // limit 2 enforced (would reach 4 unbounded)
 	})
+}
+
+func encodeBALWithOverlappingStorageSlot(t *testing.T) rlp.RawValue {
+	t.Helper()
+	raw, err := types.EncodeBlockAccessListBytes(types.BlockAccessList{{
+		Address: common.Address{1},
+		StorageChanges: []types.SlotChanges{{
+			Slot:    accounts.InternKey(common.Hash{1}),
+			Changes: []*types.StorageChange{{Index: 0, Value: *uint256.NewInt(1)}},
+		}},
+		StorageReads: []common.Hash{{1}},
+	}})
+	require.NoError(t, err)
+	return raw
 }
