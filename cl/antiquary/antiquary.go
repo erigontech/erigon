@@ -55,6 +55,7 @@ var (
 	mxAntiquaryPruneBatchSeconds = metrics.GetOrCreateSummary(`caplin_antiquary_batch_seconds{phase="prune"}`)
 	mxAntiquaryIndexBatchSlots   = metrics.GetOrCreateGauge(`caplin_antiquary_batch_items{phase="index"}`)
 	mxAntiquaryPruneBatchBlocks  = metrics.GetOrCreateGauge(`caplin_antiquary_batch_items{phase="prune"}`)
+	mxBlobRetirementGapSlot      = metrics.GetOrCreateGauge(`caplin_antiquary_blob_retirement_gap_slot`) // 0 while blob retirement is not blocked
 	mxAntiquaryPrunedBlocks      = metrics.GetOrCreateCounter("caplin_antiquary_pruned_blocks_total")
 )
 
@@ -65,6 +66,8 @@ type Antiquary struct {
 	dirs                           datadir.Dirs
 	downloader                     dbservices.DownloaderClient
 	logger                         log.Logger
+	lastBlobGapLog                 time.Time // the retirement loop's last log of a blob gap that blocks retirement
+	blobCheckedTo                  uint64    // every blob below it, from the next blob segment's start, is stored
 	sn                             *freezeblocks.CaplinSnapshots
 	stateSn                        *snapshotsync.CaplinStateSnapshots
 	snReader                       freezeblocks.BeaconSnapshotReader
@@ -243,9 +246,6 @@ func (s *Antiquary) retirementTick(blocks, merges, blobs *retirementStep) {
 	merges.attempt(s.shuttingDown)
 
 	if s.cfg.DenebForkEpoch == math.MaxUint64 {
-		return
-	}
-	if !s.blobBackfilled.Load() {
 		return
 	}
 	blobs.attempt(s.shuttingDown)
@@ -574,6 +574,39 @@ func nextBlobSegment(sn blobRetirementSnapshots, cfg *clparams.BeaconChainConfig
 	return from, from + snaptype.CaplinMergeLimit, frozenBlocks, true
 }
 
+const blobRetirementGapLogInterval = 10 * time.Minute
+
+// firstMissingBlobSlot returns the first slot in [from, to) that has fewer stored blob sidecars than its block's
+// commitments.
+func firstMissingBlobSlot(from, to uint64, blobCount freezeblocks.BlobCountBySlotFn, storedCount func(slot uint64) (uint64, error)) (uint64, bool, error) {
+	for slot := from; slot < to; slot++ {
+		want, err := blobCount(slot)
+		if err != nil || want == 0 {
+			if err != nil {
+				return 0, false, err
+			}
+			continue
+		}
+		have, err := storedCount(slot)
+		if err != nil {
+			return 0, false, err
+		}
+		if have < want {
+			return slot, true, nil
+		}
+	}
+	return 0, false, nil
+}
+
+func (s *Antiquary) reportBlobRetirementGap(from, gap uint64, now time.Time) {
+	mxBlobRetirementGapSlot.SetUint64(gap)
+	if now.Sub(s.lastBlobGapLog) < blobRetirementGapLogInterval {
+		return
+	}
+	s.lastBlobGapLog = now
+	s.logger.Info("[Antiquary] Blob retirement waits for a missing blob slot", "segmentFrom", from, "gapSlot", gap)
+}
+
 func (s *Antiquary) antiquateBlobs() error {
 	if !s.snapgen {
 		return nil
@@ -594,6 +627,26 @@ func (s *Antiquary) antiquateBlobs() error {
 	if !ok {
 		return nil
 	}
+	blobCount := freezeblocks.BlobCountFromBlocks(s.ctx, s.sn, s.snReader)
+	if !s.blobBackfilled.Load() { // an unfillable gap keeps backfill incomplete; the segments below it are still complete
+		gap, missing, err := firstMissingBlobSlot(max(currentBlobsProgress, s.blobCheckedTo), to, blobCount, func(slot uint64) (uint64, error) {
+			blockRoot, err := beacon_indicies.ReadCanonicalBlockRoot(roTx, slot)
+			if err != nil {
+				return 0, err
+			}
+			n, err := s.blobStorage.KzgCommitmentsCount(s.ctx, blockRoot)
+			return uint64(n), err
+		})
+		if err != nil {
+			return err
+		}
+		if missing {
+			s.blobCheckedTo = gap
+			s.reportBlobRetirementGap(currentBlobsProgress, gap, time.Now())
+			return nil
+		}
+	}
+	mxBlobRetirementGapSlot.SetUint64(0)
 	roTx.Rollback()
 	s.logger.Info("[Antiquary] Antiquating blobs", "from", currentBlobsProgress, "to", to, "backlogTo", backlogTo)
 	// now, we need to retire the blobs
@@ -602,7 +655,7 @@ func (s *Antiquary) antiquateBlobs() error {
 	if err := func() error {
 		compressWorkers, releaseBuildSlot := s.blobCompressWorkers(currentBlobsProgress, backlogTo)
 		defer releaseBuildSlot()
-		return freezeblocks.DumpBlobsSidecar(s.ctx, s.blobStorage, s.mainDB, currentBlobsProgress, to, s.sn.Salt, s.dirs, compressWorkers, freezeblocks.BlobCountFromBlocks(s.ctx, s.sn, s.snReader), log.LvlDebug, s.logger)
+		return freezeblocks.DumpBlobsSidecar(s.ctx, s.blobStorage, s.mainDB, currentBlobsProgress, to, s.sn.Salt, s.dirs, compressWorkers, blobCount, log.LvlDebug, s.logger)
 	}(); err != nil {
 		return err
 	}

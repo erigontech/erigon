@@ -22,6 +22,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -919,4 +920,40 @@ func TestRebuildBeaconSnapshotIndexIsIdempotentAtAStaticTip(t *testing.T) {
 		require.Equal(t, tip+1, progress)
 		return nil
 	}))
+}
+
+func TestFirstMissingBlobSlot(t *testing.T) {
+	blobs := map[uint64]uint64{3: 2, 5: 1, 7: 3} // slots with blobs; the rest have none
+	stored := map[uint64]uint64{3: 2, 5: 1, 7: 3}
+	blobCount := func(slot uint64) (uint64, error) { return blobs[slot], nil }
+	storedCount := func(slot uint64) (uint64, error) { return stored[slot], nil }
+
+	_, missing, err := firstMissingBlobSlot(0, 10, blobCount, storedCount)
+	require.NoError(t, err)
+	require.False(t, missing, "every blob of the segment is stored")
+
+	stored[5] = 0
+	gap, missing, err := firstMissingBlobSlot(0, 10, blobCount, storedCount)
+	require.NoError(t, err)
+	require.True(t, missing)
+	require.Equal(t, uint64(5), gap)
+
+	_, missing, err = firstMissingBlobSlot(0, 5, blobCount, storedCount)
+	require.NoError(t, err)
+	require.False(t, missing, "the segment below the gap is complete")
+}
+
+func TestBlobRetirementGapIsReported(t *testing.T) {
+	var buf bytes.Buffer
+	logger := log.New()
+	logger.SetHandler(log.StreamHandler(&buf, log.LogfmtFormat()))
+	a := &Antiquary{logger: logger}
+
+	a.reportBlobRetirementGap(10_000, 12_345, time.Unix(1_000, 0))
+	a.reportBlobRetirementGap(10_000, 12_345, time.Unix(1_060, 0))
+	require.Equal(t, uint64(12_345), mxBlobRetirementGapSlot.GetValueUint64())
+	require.Equal(t, 1, strings.Count(buf.String(), "gapSlot=12345"), "the log is rate limited")
+
+	a.reportBlobRetirementGap(10_000, 12_345, time.Unix(1_000, 0).Add(blobRetirementGapLogInterval))
+	require.Equal(t, 2, strings.Count(buf.String(), "gapSlot=12345"))
 }
