@@ -40,7 +40,6 @@ type ChainSegment struct {
 	signedBlock      *cltypes.SignedBeaconBlock
 	blockRoot        common.Hash
 	fullValidation   bool
-	beaconCfg        *clparams.BeaconChainConfig
 	parentState      *state.CachingBeaconState
 	parentSlot       uint64
 	precomputedState *state.CachingBeaconState
@@ -159,7 +158,6 @@ func (f *forkGraphDisk) beginChainSegmentLocked(signedBlock *cltypes.SignedBeaco
 		signedBlock:    signedBlock,
 		blockRoot:      common.Hash(blockRoot),
 		fullValidation: fullValidation,
-		beaconCfg:      f.beaconCfg,
 		parentState:    parentState,
 		parentSlot:     parentState.Slot(),
 		runTransition:  !isBlockRootTheCurrentState,
@@ -201,7 +199,7 @@ func (s *ChainSegment) transition() error {
 		if err != nil {
 			return err
 		}
-		lcUpdate, err := lightclient_utils.CreateLightClientUpdate(s.beaconCfg, s.signedBlock, s.finalizedBlock, s.parentBlock, newState.Slot(),
+		lcUpdate, err := lightclient_utils.CreateLightClientUpdate(newState.BeaconConfig(), s.signedBlock, s.finalizedBlock, s.parentBlock, newState.Slot(),
 			newState.NextSyncCommittee(), newState.FinalizedCheckpoint(), convertHashSliceToHashList(nextSyncCommitteeBranch), convertHashSliceToHashList(finalityBranch))
 		if err != nil {
 			log.Debug("Could not create light client update", "err", err)
