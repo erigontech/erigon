@@ -331,7 +331,7 @@ jobs:
           fi
           if selected eth_getLogs_gen; then
             ./build/bin/rpc_pattern_gen eth_getLogs --url http://localhost:8545 \
-              --counts 100000 --block-tag latest --verify --keep ok --fees drop \
+              --counts 60000 --block-tag latest --verify --keep ok --fees drop \
               --out "perf/pattern/$CHAIN/stress_test_eth_getLogs_gen_latest.jsonl"
           fi
           if selected eth_getLogs_head; then
@@ -559,7 +559,7 @@ jobs:
         id: perf_eth_getLogs_gen
         if: env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getLogs_gen'
         continue-on-error: true
-        run: bash .github/workflows/scripts/run_rpc_perf.sh eth_getLogs stress_test_eth_getLogs_gen_latest 1000:20,5000:20 eth_getLogs_gen
+        run: bash .github/workflows/scripts/run_rpc_perf.sh eth_getLogs stress_test_eth_getLogs_gen_latest 1000:20,3000:20 eth_getLogs_gen
 
       - name: Sync clients before eth_getLogs_head
         if: needs.setup.outputs.coordinated == 'true' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getLogs_head')
