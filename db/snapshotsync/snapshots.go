@@ -1319,23 +1319,6 @@ func (s *BaseRoSnapshots) detachNotInList(protect []string) retiredSegments {
 	return detached
 }
 
-func closeAndDropNotProtected(tree *btree.BTreeG[*DirtySegment], protectFiles map[string]struct{}, nameOf func(*DirtySegment) string) {
-	var toClose []*DirtySegment
-	tree.Walk(func(segs []*DirtySegment) bool {
-		for _, seg := range segs {
-			if _, ok := protectFiles[nameOf(seg)]; ok {
-				continue
-			}
-			toClose = append(toClose, seg)
-		}
-		return true
-	})
-	for _, delSeg := range toClose {
-		delSeg.close()
-		tree.Delete(delSeg)
-	}
-}
-
 // FindOpenSegment returns tree's already-open segment named fName, if any.
 func FindOpenSegment(tree *btree.BTreeG[*DirtySegment], fName string) (*DirtySegment, bool) {
 	return findOpenSegment(tree, func(sn *DirtySegment) bool { return sn.FileName() == fName })
