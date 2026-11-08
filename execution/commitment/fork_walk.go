@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"math/bits"
+	"runtime"
 	"sync"
 	"sync/atomic"
 
@@ -156,6 +157,9 @@ func (fw *forkWalk) splits(node *prefixNode) bool {
 }
 
 func (fw *forkWalk) walk(ctx context.Context, wk *walker, node *prefixNode, path []byte) error {
+	if foldYield {
+		runtime.Gosched()
+	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
