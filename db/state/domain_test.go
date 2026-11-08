@@ -1976,56 +1976,90 @@ func TestDomain_GetAsOfEveryTxNum(t *testing.T) {
 	}
 }
 
-// A collated step whose DB rows are pruned only in part leaves stale older rows next to the files; GetAsOf must still
-// return the last write before every txNum.
+// A collated range whose DB rows are pruned only in part leaves older rows next to the files; GetAsOf must still
+// return the last write before every txNum. "odd steps" keeps a key's step-8 row while its step-9 row is gone;
+// "interrupted" is what a time-limited prune of [0, files end) leaves: keys before the stop are pruned, later keys
+// keep rows at every collated step.
 func TestDomain_GetAsOfHalfPrunedSteps(t *testing.T) {
 	for _, cfg := range []statecfg.DomainCfg{statecfg.Schema.AccountsDomain, statecfg.Schema.CodeDomain} {
-		t.Run(cfg.Name.String(), func(t *testing.T) {
-			db, d := testDbAndDomainOfStep(t, cfg, 16, log.New())
-			tx, err := db.BeginRw(t.Context())
-			require.NoError(t, err)
-			defer tx.Rollback()
-
-			const collated = 10
-			totalTx := uint64(collated) * 16                                       // every write is in a collated step
-			data := generateTestData(t, length.Addr, length.Addr, totalTx, 60, 80) // accounts and code keys are addresses
-			domainRoTx := d.beginForTests()
-			writer := domainRoTx.NewWriter(db)
-			for key, updates := range data {
-				var prev []byte
-				for i := range updates {
-					if i > 0 {
-						prev = updates[i-1].value
-					}
-					require.NoError(t, writer.PutWithPrev([]byte(key), updates[i].value, updates[i].txNum, prev))
-				}
-			}
-			require.NoError(t, writer.Flush(t.Context(), tx))
-			writer.Close()
-			domainRoTx.Close()
-
-			logEvery := time.NewTicker(30 * time.Second)
-			defer logEvery.Stop()
-			for step := kv.Step(0); step < collated; step++ {
-				require.NoError(t, d.collateBuildIntegrate(t.Context(), step, tx, background.NewProgressSet()))
-			}
-			// Only odd steps are pruned: a key written in steps 8 and 9 keeps its step-8 row in the DB next to the
-			// step-9 value in files, as a prune that stopped part-way leaves it.
-			for step := kv.Step(1); step < collated; step += 2 {
-				pruneTx := d.beginForTests()
-				_, err := pruneTx.Prune(t.Context(), tx, step, uint64(step)*d.stepSize, uint64(step+1)*d.stepSize, math.MaxUint64, logEvery)
-				pruneTx.Close()
+		for _, mode := range []string{"odd_steps", "interrupted"} {
+			t.Run(cfg.Name.String()+"/"+mode, func(t *testing.T) {
+				db, d := testDbAndDomainOfStep(t, cfg, 16, log.New())
+				tx, err := db.BeginRw(t.Context())
 				require.NoError(t, err)
-			}
-			require.Positive(t, staleDbRows(t, tx, d, data, collated), "some key must keep a DB row older than its value in files")
-			require.NoError(t, tx.Commit())
+				defer tx.Rollback()
 
-			roTx, err := db.BeginRo(t.Context())
-			require.NoError(t, err)
-			defer roTx.Rollback()
-			requireGetAsOfEveryTxNum(t, d, roTx, data, totalTx+d.stepSize)
-		})
+				const collated = 10
+				totalTx := uint64(collated) * 16                                       // every write is in a collated step
+				data := generateTestData(t, length.Addr, length.Addr, totalTx, 60, 80) // accounts and code keys are addresses
+				domainRoTx := d.beginForTests()
+				writer := domainRoTx.NewWriter(db)
+				for key, updates := range data {
+					var prev []byte
+					for i := range updates {
+						if i > 0 {
+							prev = updates[i-1].value
+						}
+						require.NoError(t, writer.PutWithPrev([]byte(key), updates[i].value, updates[i].txNum, prev))
+					}
+				}
+				require.NoError(t, writer.Flush(t.Context(), tx))
+				writer.Close()
+				domainRoTx.Close()
+
+				logEvery := time.NewTicker(30 * time.Second)
+				defer logEvery.Stop()
+				for step := kv.Step(0); step < collated; step++ {
+					require.NoError(t, d.collateBuildIntegrate(t.Context(), step, tx, background.NewProgressSet()))
+				}
+				prune := func(ctx context.Context, step kv.Step, txFrom, txTo, historyLimit uint64) {
+					pruneTx := d.beginForTests()
+					defer pruneTx.Close()
+					_, err := pruneTx.Prune(ctx, tx, step, txFrom, txTo, historyLimit, logEvery)
+					require.NoError(t, err)
+				}
+				if mode == "odd_steps" {
+					for step := kv.Step(1); step < collated; step += 2 {
+						prune(t.Context(), step, uint64(step)*d.stepSize, uint64(step+1)*d.stepSize, math.MaxUint64)
+					}
+					require.Positive(t, staleDbRows(t, tx, d, data, collated), "some key must keep a DB row older than its value in files")
+				} else {
+					historyTx := d.beginForTests()
+					_, err := historyTx.ht.Prune(t.Context(), tx, 0, collated*d.stepSize, math.MaxUint64, false, logEvery)
+					historyTx.Close()
+					require.NoError(t, err)
+					// The values scan asks ctx.Err once per key, or once per row in a large-values table.
+					units := len(data)
+					if d.LargeValues {
+						units = dbRows(t, tx, d)
+					}
+					prune(&errAfterCtx{Context: t.Context(), left: units / 2}, collated-1, 0, collated*d.stepSize, math.MaxUint64)
+					pruned, kept := keysPrunedAndKept(t, tx, d, len(data))
+					require.Positive(t, pruned, "the prune must remove some keys' rows")
+					require.Positive(t, kept, "the interrupted prune must keep some keys' rows")
+				}
+				require.NoError(t, tx.Commit())
+
+				roTx, err := db.BeginRo(t.Context())
+				require.NoError(t, err)
+				defer roTx.Rollback()
+				requireGetAsOfEveryTxNum(t, d, roTx, data, totalTx+d.stepSize)
+			})
+		}
 	}
+}
+
+// errAfterCtx reports cancellation once Err was asked more than left times, so a prune stops at a fixed point.
+type errAfterCtx struct {
+	context.Context
+	left int
+}
+
+func (c *errAfterCtx) Err() error {
+	if c.left--; c.left < 0 {
+		return context.Canceled
+	}
+	return nil
 }
 
 func requireGetAsOfEveryTxNum(t *testing.T, d *Domain, tx kv.Tx, data map[string][]upd, maxTxNum uint64) {
@@ -4493,4 +4527,33 @@ func TestDomain_MayContainInFilesKeepsKeysOfMappedFilters(t *testing.T) {
 	for i := range 100 {
 		require.True(t, domainTx.mayContainInFiles(fmt.Appendf(nil, "absent-%d", i)))
 	}
+}
+
+// keysPrunedAndKept counts keys of the domain left without DB rows and keys that keep them.
+func keysPrunedAndKept(t *testing.T, tx kv.Tx, d *Domain, keys int) (pruned, kept int) {
+	t.Helper()
+	inDb := map[string]bool{}
+	c, err := tx.Cursor(d.ValuesTable)
+	require.NoError(t, err)
+	defer c.Close()
+	for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
+		require.NoError(t, err)
+		if d.LargeValues {
+			k = k[:len(k)-8]
+		}
+		inDb[string(k)] = true
+	}
+	return keys - len(inDb), len(inDb)
+}
+
+func dbRows(t *testing.T, tx kv.Tx, d *Domain) (n int) {
+	t.Helper()
+	c, err := tx.Cursor(d.ValuesTable)
+	require.NoError(t, err)
+	defer c.Close()
+	for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
+		require.NoError(t, err)
+		n++
+	}
+	return n
 }
