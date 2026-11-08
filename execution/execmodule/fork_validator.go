@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 
@@ -91,7 +92,7 @@ func newForkValidator(ctx context.Context, currentHeight uint64, executor *Pipel
 
 	var blockMetricsCache *lru.Cache[common.Hash, *blockmetrics.Record]
 	if slowBlockThreshold != nil {
-		dbg.KVReadLevelledMetrics = true
+		dbg.KVReadLevelledMetrics = os.Getenv("NO_LEVELLED") != "1"
 		blockMetricsCache, err = lru.New[common.Hash, *blockmetrics.Record]("blockMetricsCache", timingsCacheSize)
 		if err != nil {
 			panic(err)
