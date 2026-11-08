@@ -1820,6 +1820,16 @@ func (dt *DomainRoTx) HistoryCoverageStart() uint64 {
 	return max(dt.ht.files[0].startTxNum, dt.ht.iit.files[0].startTxNum)
 }
 
+// valuesFilesContiguous is false when a visible values file is missing between others: its writes then exist only in history.
+func (dt *DomainRoTx) valuesFilesContiguous() bool {
+	for i := 1; i < len(dt.files); i++ {
+		if dt.files[i-1].endTxNum != dt.files[i].startTxNum {
+			return false
+		}
+	}
+	return true
+}
+
 // GetAsOf does not always require usage of roTx. If it is possible to determine
 // historical value based only on static files, roTx will not be used.
 func (dt *DomainRoTx) GetAsOf(key []byte, txNum uint64, roTx kv.Tx) ([]byte, bool, error) {
@@ -1838,7 +1848,7 @@ func (dt *DomainRoTx) GetAsOf(key []byte, txNum uint64, roTx kv.Tx) ([]byte, boo
 		if err != nil {
 			return nil, false, err
 		}
-		if latestOk && len(latest) > 0 && step < kv.Step(txNum/dt.stepSize) {
+		if latestOk && len(latest) > 0 && step < kv.Step(txNum/dt.stepSize) && dt.valuesFilesContiguous() {
 			return latest, true, nil
 		}
 	}
