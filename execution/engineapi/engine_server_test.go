@@ -786,20 +786,12 @@ func storedBlockAboveTheCappedBound(t *testing.T, maxReorgDepth uint64) (*execmo
 	return m, srv, downloader, block1, block2
 }
 
-// sideChainAboveTheCappedBound builds a canonical chain of four blocks and a side chain of two blocks
-// on the genesis. The second side block has a doubled gas limit and more transactions than the
-// parent's cap allows.
+// sideChainAboveTheCappedBound is sideChainWithAnInvalidHeader with more transactions in the second
+// side block than the parent's cap allows.
 func sideChainAboveTheCappedBound(t *testing.T) (*execmoduletester.ExecModuleTester, *types.Block, *types.Block) {
 	t.Helper()
-	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{Config: preCancunChainConfig()}))
-	canonical, err := m.GenerateChain(4, func(int, *blockgen.BlockGen) {})
-	require.NoError(t, err)
-	require.NoError(t, m.InsertChain(canonical))
-	side, err := m.GenerateChain(2, func(_ int, b *blockgen.BlockGen) { b.SetCoinbase(common.Address{1}) })
-	require.NoError(t, err)
-	block1 := side.Blocks[0]
-	header2 := types.CopyHeader(side.Blocks[1].HeaderNoCopy())
-	header2.GasLimit *= 2
+	m, block1, invalidHeader := sideChainWithAnInvalidHeader(t)
+	header2 := types.CopyHeader(invalidHeader.HeaderNoCopy())
 	minTxBlockGas := mdgas.MinTxBlockGas(m.ChainConfig.IsLondon(header2.Number.Uint64()), m.ChainConfig.IsPrague(header2.Time), m.ChainConfig.IsAmsterdam(header2.Time))
 	txCount := misc.MaxGasLimit(m.ChainConfig, block1.HeaderNoCopy(), header2)/minTxBlockGas + 1
 	require.LessOrEqual(t, txCount, header2.GasLimit/minTxBlockGas, "the payload's own gas limit allows the transactions")
@@ -809,7 +801,7 @@ func sideChainAboveTheCappedBound(t *testing.T) (*execmoduletester.ExecModuleTes
 		txs[i] = &types.LegacyTx{CommonTx: types.CommonTx{Nonce: uint64(i), To: &to, GasLimit: 21_000}}
 	}
 	header2.TxHash = types.DeriveSha(txs)
-	return m, block1, types.NewBlockFromStorage(header2.Hash(), header2, txs, nil, side.Blocks[1].Withdrawals(), nil)
+	return m, block1, types.NewBlockFromStorage(header2.Hash(), header2, txs, nil, invalidHeader.Withdrawals(), nil)
 }
 
 // A stored block above the parent-capped bound, with its parent not validated, is sent again. The
@@ -859,8 +851,8 @@ func TestNewPayloadAboveTheCappedBoundLeavesABlockStoredDuringTheRequestToTheVal
 }
 
 // Beyond the reorg depth the block validation does not run, so a stored block above the
-// parent-capped bound gets the answer from main and stays stored: an INVALID answer would contradict
-// the body that is still served.
+// parent-capped bound is ACCEPTED and stays stored: an INVALID answer would contradict the body that
+// is still served.
 func TestNewPayloadAcceptsAStoredBlockAboveTheCappedBoundBeyondTheReorgDepth(t *testing.T) {
 	_, srv, _, _, block2 := storedBlockAboveTheCappedBound(t, 2)
 
@@ -873,8 +865,7 @@ func TestNewPayloadAcceptsAStoredBlockAboveTheCappedBoundBeyondTheReorgDepth(t *
 
 // A payload above the capped bound names the hash of a stored block. The stored header decides, as
 // the payload's block hash is not verified yet: a stored block with a gas limit that is invalid for
-// the parent takes the normal path, which validates and removes it, and any other payload gets the
-// bound's answer.
+// the parent takes the normal path, and any other payload gets the bound's answer.
 func TestNewPayloadAboveTheCappedBoundNamingAStoredBlock(t *testing.T) {
 	t.Parallel()
 

@@ -512,8 +512,8 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		}
 	}
 	// A payload above the capped bound has a gas limit above what the parent allows, so it is invalid.
-	// A stored block with such a gas limit was stored without the cap. It takes the normal path, which
-	// validates and removes it as any stored invalid block.
+	// A stored block with such a gas limit was stored without the cap. It takes the normal path, as any
+	// stored block, because an INVALID answer here would not remove it.
 	aboveCappedBound := uint64(len(req.Transactions)) > gasLimit/minTxBlockGas
 	if aboveCappedBound && !e.parentBeforeTTD(ctx, req) && !e.mayBeStoredWithInvalidGasLimit(ctx, req, parent) {
 		return gasLimitReached(len(req.Transactions), minTxBlockGas), nil
