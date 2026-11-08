@@ -203,7 +203,11 @@ func (a *Accumulator) ChangeStorage(address common.Address, incarnation uint64, 
 // Existing changes must stay before the appended changes, including any unwind.
 func (a *Accumulator) AppendAndReset(target *Accumulator) {
 	if len(a.changes) > 0 {
-		target.changes = append(target.changes, a.changes...)
+		if len(target.changes) == 0 {
+			target.changes = a.changes
+		} else {
+			target.changes = append(target.changes, a.changes...)
+		}
 		target.latestChange = &target.changes[len(target.changes)-1]
 		target.accountChangeIndex = a.accountChangeIndex
 		target.storageChangeIndex = a.storageChangeIndex
