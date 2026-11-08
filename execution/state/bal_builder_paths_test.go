@@ -59,3 +59,15 @@ func TestBlockAccessListBuilderRegistersValuelessWrites(t *testing.T) {
 		})
 	}
 }
+
+func TestBlockAccessListBuilderDropsEmptyCodeOfContractCreatedInBlock(t *testing.T) {
+	addr := accounts.InternAddress(common.Address{19: 0x43})
+	ws := &WriteSet{}
+	ws.SetCreateContract(addr, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: CreateContractPath}, Val: true})
+	ws.SetCode(addr, &VersionedWrite[accounts.Code]{WriteHeader: WriteHeader{Address: addr, Path: CodePath}, Val: accounts.NewCode(nil)})
+	b := NewBlockAccessListBuilder()
+	b.Add(-1, ReadSet{}, ws)
+	bal := b.Build()
+	require.Len(t, bal, 1)
+	require.Empty(t, bal[0].CodeChanges)
+}
