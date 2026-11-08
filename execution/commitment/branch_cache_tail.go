@@ -18,6 +18,7 @@ package commitment
 
 import (
 	"fmt"
+	"os"
 	"sync"
 	"sync/atomic"
 
@@ -40,10 +41,21 @@ type tailLRU struct {
 	resizeMu sync.Mutex
 	curCap   atomic.Uint32
 	reserved int64
+	adds     atomic.Uint32
 }
+
+// Probe knobs: TAIL_ADDS_GROW=1 grows on a count of adds instead of lru.Len (which locks every shard); TAIL_FULL=1 starts
+// at the full capacity, so no Add checks the size.
+var (
+	tailAddsGrow = os.Getenv("TAIL_ADDS_GROW") == "1"
+	tailFull     = os.Getenv("TAIL_FULL") == "1"
+)
 
 func newTailLRU(maxCapacity uint32) *tailLRU {
 	start := min(uint32(tailStartCapacity), maxCapacity)
+	if tailFull {
+		start = maxCapacity
+	}
 	t := &tailLRU{maxCap: maxCapacity}
 	t.reserved = int64(start) * tailEntryBytes
 	cachebudget.Global.Take(t.reserved)
@@ -69,7 +81,7 @@ func (t *tailLRU) Get(key uint64) (*branchCacheEntry, bool) {
 func (t *tailLRU) Add(key uint64, entry *branchCacheEntry) {
 	lru := t.cur.Load()
 	// Avoid lru.Len() locks once fully grown.
-	if curCap := t.curCap.Load(); curCap < t.maxCap && lru.Len() >= int(curCap) {
+	if curCap := t.curCap.Load(); curCap < t.maxCap && (tailAddsGrow && t.adds.Add(1) >= curCap || !tailAddsGrow && lru.Len() >= int(curCap)) {
 		t.maybeGrow()
 		lru = t.cur.Load()
 	}
@@ -98,6 +110,7 @@ func (t *tailLRU) maybeGrow() {
 	}
 	t.cur.Store(next)
 	t.curCap.Store(newCap)
+	t.adds.Store(0)
 	t.reserved += delta
 }
 
