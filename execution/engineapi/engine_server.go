@@ -281,6 +281,7 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash,
 	executionRequests []hexutil.Bytes, version clparams.StateVersion, deriveBlobHashes bool,
 ) (*engine_types.PayloadStatus, error) {
+	warmPages()
 	defer engineNewPayloadDuration.ObserveDuration(time.Now())
 	if req == nil {
 		return nil, &rpc.InvalidParamsError{Message: "missing payload"}
