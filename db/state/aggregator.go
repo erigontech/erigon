@@ -2754,6 +2754,20 @@ func (at *AggregatorRoTx) PrefetchLatest(ctx context.Context, domain kv.Domain, 
 	for waves := 0; len(pending) > 0 && waves < prefetchMaxWaves && ctx.Err() == nil; waves++ {
 		cold := make([]uintptr, 0, len(pending))
 		wave := make(map[uintptr]struct{}, len(pending)) // keys sharing a page count it once
+		// PF_PIPE: each chunk of cold pages is read while the next keys are probed.
+		var readers sync.WaitGroup
+		var pipeErr atomic.Pointer[error]
+		issued := 0
+		issue := func(chunk []uintptr) {
+			if len(chunk) == 0 {
+				return
+			}
+			readers.Go(func() {
+				if rerr := mmap.ReadPages(ctx, chunk); rerr != nil {
+					pipeErr.CompareAndSwap(nil, &rerr)
+				}
+			})
+		}
 		next := pending[:0:0]
 		for _, k := range pending {
 			if ctx.Err() != nil {
@@ -2769,14 +2783,29 @@ func (at *AggregatorRoTx) PrefetchLatest(ctx context.Context, domain kv.Domain, 
 			if _, dup := wave[page]; !dup {
 				wave[page] = struct{}{}
 				cold = append(cold, page)
+				if prefetchPipe && len(cold)-issued >= prefetchPipeChunk {
+					issue(cold[issued:])
+					issued = len(cold)
+				}
 			}
 			next = append(next, k)
 		}
+		if prefetchPipe {
+			issue(cold[issued:])
+			readers.Wait()
+			if rerr := pipeErr.Load(); rerr != nil {
+				err = cmp.Or(err, *rerr)
+			} else {
+				dt.probe.MarkResident(cold)
+			}
+		}
 		// A failed page goes into tried below, so the next wave goes on with the other keys.
-		if rerr := mmap.ReadPages(ctx, cold); rerr != nil {
-			err = cmp.Or(err, rerr)
-		} else {
-			dt.probe.MarkResident(cold)
+		if !prefetchPipe {
+			if rerr := mmap.ReadPages(ctx, cold); rerr != nil {
+				err = cmp.Or(err, rerr)
+			} else {
+				dt.probe.MarkResident(cold)
+			}
 		}
 		pages += len(cold)
 		for _, page := range cold {
@@ -2983,3 +3012,9 @@ func lastIdInDB(db kv.RoDB, domain *Domain) (lstInDb kv.Step) {
 	}
 	return lstInDb
 }
+
+// prefetchPipe is a probe knob: PF_PIPE=1 reads each prefetchPipeChunk of a wave's cold pages while the rest of the wave
+// is probed, instead of reading the whole wave after probing it.
+var prefetchPipe = os.Getenv("PF_PIPE") == "1"
+
+const prefetchPipeChunk = 1024
