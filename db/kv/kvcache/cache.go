@@ -215,11 +215,11 @@ func (c *Coherent) selectOrCreateRoot(versionID uint64) *CoherentRoot {
 }
 
 // advanceRoot - used for advancing root onNewBlock
-func (c *Coherent) advanceRoot(stateVersionID uint64) (r *CoherentRoot) {
+func (c *Coherent) advanceRoot(stateVersionID uint64, incomplete bool) (r *CoherentRoot) {
 	r, rootExists := c.roots[stateVersionID]
 
-	// if nothing has progressed just return the existing root
-	if c.latestStateVersionID == stateVersionID && rootExists {
+	// Missing changes invalidate cached values even when the state version is repeated.
+	if !incomplete && c.latestStateVersionID == stateVersionID && rootExists {
 		return r
 	}
 
@@ -228,14 +228,14 @@ func (c *Coherent) advanceRoot(stateVersionID uint64) (r *CoherentRoot) {
 		c.roots[stateVersionID] = r
 	}
 
-	if prevView, ok := c.roots[stateVersionID-1]; ok && prevView.isCanonical {
+	if prevView, ok := c.roots[stateVersionID-1]; !incomplete && ok && prevView.isCanonical {
 		//log.Info("advance: clone", "from", viewID-1, "to", viewID)
 		r.cache = prevView.cache.Copy()
 		r.codeCache = prevView.codeCache.Copy()
 	} else {
 		c.stateEvict.Init()
 		c.codeEvict.Init()
-		if r.cache == nil {
+		if r.cache == nil || incomplete {
 			//log.Info("advance: new", "to", viewID)
 			r.cache = btree2.NewBTreeG(Less)
 			r.codeCache = btree2.NewBTreeG(Less)
@@ -272,7 +272,7 @@ func (c *Coherent) OnNewBlock(stateChanges *remoteproto.StateChangeBatch) {
 	defer c.lock.Unlock()
 	c.waitExceededCount.Store(0) // reset the circuit breaker
 	id := stateChanges.StateVersionId
-	r := c.advanceRoot(id)
+	r := c.advanceRoot(id, stateChanges.StateChangesIncomplete)
 
 	for _, sc := range stateChanges.ChangeBatch {
 		for i := range sc.Changes {
