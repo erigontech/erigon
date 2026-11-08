@@ -29,11 +29,13 @@ import (
 
 	"github.com/klauspost/compress/zstd"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/persistence/base_encoding"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
+	"github.com/erigontech/erigon/cl/persistence/blob_storage/mock_services"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -924,23 +926,65 @@ func TestRebuildBeaconSnapshotIndexIsIdempotentAtAStaticTip(t *testing.T) {
 
 func TestFirstMissingBlobSlot(t *testing.T) {
 	blobs := map[uint64]uint64{3: 2, 5: 1, 7: 3} // slots with blobs; the rest have none
-	stored := map[uint64]uint64{3: 2, 5: 1, 7: 3}
+	lost := map[uint64]bool{}
 	blobCount := func(slot uint64) (uint64, error) { return blobs[slot], nil }
-	storedCount := func(slot uint64) (uint64, error) { return stored[slot], nil }
+	stored := func(slot, want uint64) (bool, error) {
+		require.Equal(t, blobs[slot], want)
+		return !lost[slot], nil
+	}
 
-	_, missing, err := firstMissingBlobSlot(0, 10, blobCount, storedCount)
+	_, missing, err := firstMissingBlobSlot(0, 10, blobCount, stored)
 	require.NoError(t, err)
 	require.False(t, missing, "every blob of the segment is stored")
 
-	stored[5] = 0
-	gap, missing, err := firstMissingBlobSlot(0, 10, blobCount, storedCount)
+	lost[5] = true
+	gap, missing, err := firstMissingBlobSlot(0, 10, blobCount, stored)
 	require.NoError(t, err)
 	require.True(t, missing)
 	require.Equal(t, uint64(5), gap)
 
-	_, missing, err = firstMissingBlobSlot(0, 5, blobCount, storedCount)
+	_, missing, err = firstMissingBlobSlot(0, 5, blobCount, stored)
 	require.NoError(t, err)
 	require.False(t, missing, "the segment below the gap is complete")
+}
+
+// A count row stays after its sidecar file is lost, so the scan must check the files. It rescans from the gap.
+func TestBlobSegmentCompleteScansFilesAndResumesAtTheGap(t *testing.T) {
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	wants := map[uint64]uint64{3: 2, 5: 1}
+	for slot := range wants {
+		require.NoError(t, beacon_indicies.MarkRootCanonical(tx, slot, common.Hash{byte(slot)}))
+	}
+	fileLost := true
+	storage := mock_services.NewMockBlobStorage(gomock.NewController(t))
+	storage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).DoAndReturn(func(_ context.Context, root common.Hash) (uint32, error) {
+		return uint32(wants[uint64(root[0])]), nil
+	}).AnyTimes()
+	storage.EXPECT().BlobSidecarExists(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(_ context.Context, slot uint64, _ common.Hash, _ uint64) (bool, error) {
+		return slot != 5 || !fileLost, nil
+	}).AnyTimes()
+	a := &Antiquary{ctx: t.Context(), logger: log.New(), blobStorage: storage, blobBackfilled: &atomic.Bool{}}
+	var asked []uint64
+	blobCount := func(slot uint64) (uint64, error) {
+		asked = append(asked, slot)
+		return wants[slot], nil
+	}
+
+	complete, err := a.blobSegmentComplete(tx, 0, 8, blobCount)
+	require.NoError(t, err)
+	require.False(t, complete, "the sidecar file of slot 5 is lost")
+	require.Equal(t, uint64(5), a.blobCheckedTo)
+	require.Equal(t, uint64(5), mxBlobRetirementGapSlot.GetValueUint64())
+
+	fileLost, asked = false, nil
+	complete, err = a.blobSegmentComplete(tx, 0, 8, blobCount)
+	require.NoError(t, err)
+	require.True(t, complete)
+	require.Equal(t, uint64(5), asked[0], "the scan resumes at the last known gap")
+	require.Zero(t, mxBlobRetirementGapSlot.GetValueUint64())
 }
 
 func TestBlobRetirementGapIsReported(t *testing.T) {
