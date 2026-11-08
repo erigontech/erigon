@@ -2616,16 +2616,6 @@ func printAccount(eip161Enabled bool, isAura bool, addr accounts.Address, stateO
 
 // FinalizeTx should be called after every transaction.
 func (ibs *IntraBlockState) FinalizeTx(chainRules *chain.Rules, stateWriter StateWriter) error {
-	if err := ibs.FinalizeTxKeepJournal(chainRules, stateWriter); err != nil {
-		return err
-	}
-	ibs.ClearJournalAndRefund()
-	return nil
-}
-
-// FinalizeTxKeepJournal is FinalizeTx without the journal reset: until ClearJournalAndRefund,
-// reads of a versioned state still see the tx's own writes.
-func (ibs *IntraBlockState) FinalizeTxKeepJournal(chainRules *chain.Rules, stateWriter StateWriter) error {
 	for addr, bi := range ibs.balanceInc {
 		if !bi.transferred {
 			if _, err := ibs.getStateObject(addr, true); err != nil {
@@ -2672,12 +2662,9 @@ func (ibs *IntraBlockState) FinalizeTxKeepJournal(chainRules *chain.Rules, state
 		so.newlyCreated = false
 		ibs.stateObjectsDirty[addr] = struct{}{}
 	}
-	return nil
-}
-
-// ClearJournalAndRefund ends the tx: reverting across transactions is not allowed.
-func (ibs *IntraBlockState) ClearJournalAndRefund() {
+	// Invalidate journal because reverting across transactions is not allowed.
 	ibs.clearJournalAndRefund()
+	return nil
 }
 
 func (ibs *IntraBlockState) SoftFinalise() {

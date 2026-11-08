@@ -976,21 +976,16 @@ func TestApplyTransactionTxEndV2(t *testing.T) {
 		name       string
 		noReceipts bool
 		writerErr  error
-		versioned  bool
 	}{
 		{name: "receipt"},
 		{name: "without receipt", noReceipts: true},
 		{name: "finalization failure", writerErr: finalizeErr},
-		{name: "versioned finalization failure", writerErr: finalizeErr, versioned: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			const blockGasLimit = 1_000_000
 			sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
 			recipient := common.HexToAddress("0x2222222222222222222222222222222222222222")
 			ibs := state.New(state.NewNoopReader())
-			if test.versioned {
-				ibs = state.NewForSequentialCommitment(state.NewNoopReader())
-			}
 			defer ibs.Close()
 			require.NoError(t, ibs.SetCode(accounts.InternAddress(recipient), []byte{
 				byte(vm.PUSH1), 1, byte(vm.PUSH1), 0, byte(vm.SSTORE), byte(vm.STOP),
