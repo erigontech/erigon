@@ -20,6 +20,7 @@
 package js
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -426,4 +427,33 @@ func TestSetup(t *testing.T) {
 	if string(have) != `"bar"` {
 		t.Errorf("tracer returned wrong result. have: %s, want: \"bar\"\n", string(have))
 	}
+}
+
+func TestGetCodeBufferDoesNotAliasState(t *testing.T) {
+	tracer, err := newJsTracer(`{done: false, step: function(log, db) {
+		if (this.done) { return; }
+		var code = db.getCode(log.contract.getAddress());
+		for (var i = 0; i < code.length; i++) { code[i] = 0xfe; }
+		this.done = true;
+	}, fault: function() {}, result: function() { return this.done; }}`, nil, nil)
+	require.NoError(t, err)
+	code := []byte{byte(vm.PUSH1), 0x1, byte(vm.POP), byte(vm.STOP)}
+	want := bytes.Clone(code)
+	ibs := state.New(state.NewNoopReader())
+	t.Cleanup(ibs.Close)
+	addr := accounts.InternAddress(common.HexToAddress("0x1000"))
+	require.NoError(t, ibs.SetCode(addr, code, tracing.CodeChangeUnspecified))
+
+	env := vm.NewEVM(evmtypes.BlockContext{Transfer: misc.Transfer}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, vm.Config{Tracer: tracer.Hooks})
+	tracer.OnTxStart(env.GetVMContext(), types.NewTransaction(0, addr.Value(), nil, 100_000, nil, nil), accounts.ZeroAddress)
+	_, _, _, err = env.Call(accounts.ZeroAddress, addr, nil, mdgas.MdGas{Execution: 100_000}, uint256.Int{}, false)
+	require.NoError(t, err)
+	tracer.EmitTxEnd(&types.Receipt{}, mdgas.TxnGasUsage{}, nil)
+	result, err := tracer.GetResult()
+	require.NoError(t, err)
+	require.JSONEq(t, `true`, string(result))
+
+	got, err := ibs.GetCode(addr)
+	require.NoError(t, err)
+	require.Equal(t, want, got)
 }

@@ -42,12 +42,34 @@ type IntrinsicGasCalcArgs struct {
 	IsEIP7976          bool
 	IsEIP7981          bool
 	IsEIP2780          bool
-	IsAATxn            bool
 }
 
 type IntrinsicGasCalcResult struct {
 	ExecutionGas uint64
 	FloorGasCost uint64
+}
+
+type FrameIntrinsicGasCalcArgs struct {
+	FramesLen         uint64
+	KeyedNoncesLen    uint64
+	ValueTransfersLen uint64
+	SignatureGas      uint64
+	DataLen           uint64
+	DataNonZeroLen    uint64
+}
+
+// CalcFrameIntrinsicGas charges transaction overhead before any frame executes.
+// Keyed-nonce reads and writes are prepaid here; first-use storage creation is
+// charged separately to the state-gas budget of the frame that approves payment.
+func CalcFrameIntrinsicGas(args FrameIntrinsicGasCalcArgs) IntrinsicGasCalcResult {
+	base := params.FrameIntrinsicGas + params.FrameOverheadGas*args.FramesLen
+	base += args.KeyedNoncesLen * (params.ColdStorageAccessCostEIP8038 + params.StorageWriteCostEIP8038)
+	base += args.ValueTransfersLen*params.TxValueCostEIP2780 + args.SignatureGas
+	dataGas := (args.DataLen-args.DataNonZeroLen)*params.TxDataZeroGas + args.DataNonZeroLen*params.TxDataNonZeroGasEIP2028
+	return IntrinsicGasCalcResult{
+		ExecutionGas: base + dataGas,
+		FloorGasCost: base + params.TxTotalCostFloorPerTokenEIP7976*params.TxStandardTokensPerByte*args.DataLen,
+	}
 }
 
 // CountNonZeroBytes returns the number of non-zero bytes in data.
@@ -71,8 +93,6 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 	dataLen := uint64(len(args.Data))
 	// Set the starting gas for the raw transaction
 	switch {
-	case args.IsAATxn:
-		result.ExecutionGas = params.TxAAGas
 	case args.IsEIP2780:
 		result.ExecutionGas = params.TxBaseEIP2780
 		if args.IsContractCreation {
@@ -263,11 +283,7 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 	// Add the cost of authorizations
 	var perAuthCost uint64
 	if args.IsEIP2780 {
-		if args.IsAATxn {
-			perAuthCost = params.PerAuthExecutionCostEIP8038
-		} else {
-			perAuthCost = params.ExecutionPerAuthBaseCostEIP8038
-		}
+		perAuthCost = params.ExecutionPerAuthBaseCostEIP8038
 	} else {
 		perAuthCost = params.PerEmptyAccountCost
 	}
@@ -283,7 +299,7 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 	return result, false
 }
 
-// MinTxGas is the least intrinsic gas of any non-AA transaction: the cost of a
+// MinTxGas is the least intrinsic gas of any transaction: the cost of a
 // zero-value self-transfer.
 func MinTxGas(isEIP2780 bool) uint64 {
 	if isEIP2780 {
@@ -292,7 +308,7 @@ func MinTxGas(isEIP2780 bool) uint64 {
 	return params.TxGas
 }
 
-// MinTxBlockGas is the least block gas a non-AA transaction uses: MinTxGas less
+// MinTxBlockGas is a lower bound on block gas per transaction: MinTxGas less
 // the largest refund. Since Prague the EIP-7623 floor is not refundable, and
 // since Amsterdam block gas does not count refunds (EIP-7778).
 func MinTxBlockGas(isLondon, isPrague, isAmsterdam bool) uint64 {

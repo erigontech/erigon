@@ -120,8 +120,8 @@ func BenchmarkAddrCodeHashHotKey(b *testing.B) {
 		})
 	})
 
-	b.Run("sharded/generic", func(b *testing.B) {
-		c := NewGenericCacheWithAvg(8*datasize.MB, 52, func([32]byte) int { return 32 }, ModeEvictLRU)
+	b.Run("lockfree/generic", func(b *testing.B) {
+		c := NewGenericCache(8*datasize.MB, func([32]byte) int { return 32 }, ModeEvictLRU)
 		c.Put(addr[:], hash, txNum)
 		b.ResetTimer()
 		b.RunParallel(func(pb *testing.PB) {

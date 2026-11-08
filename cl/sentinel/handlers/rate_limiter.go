@@ -38,6 +38,7 @@ type tokenBucket struct {
 	maxTokens  float64
 	refillRate float64 // tokens per second
 	lastRefill time.Time
+	inUse      bool
 }
 
 func newTokenBucket(maxTokens float64, refillRate float64) *tokenBucket {
@@ -54,7 +55,17 @@ func (tb *tokenBucket) tryConsume(n int) bool {
 	tb.mu.Lock()
 	defer tb.mu.Unlock()
 
-	now := time.Now()
+	tb.refill(time.Now())
+
+	cost := float64(n)
+	if tb.tokens >= cost {
+		tb.tokens -= cost
+		return true
+	}
+	return false
+}
+
+func (tb *tokenBucket) refill(now time.Time) {
 	elapsed := now.Sub(tb.lastRefill).Seconds()
 	if elapsed > 0 {
 		tb.tokens += elapsed * tb.refillRate
@@ -66,13 +77,30 @@ func (tb *tokenBucket) tryConsume(n int) bool {
 	// If elapsed <= 0, lastRefill is in the future (set by punishment). No
 	// tokens are refilled and lastRefill stays advanced until real time
 	// catches up, preventing burst regeneration during punishment.
+}
 
-	cost := float64(n)
-	if tb.tokens >= cost {
-		tb.tokens -= cost
-		return true
+func (tb *tokenBucket) tryStartRebuild(now time.Time) bool {
+	tb.mu.Lock()
+	defer tb.mu.Unlock()
+	if tb.inUse {
+		return false
 	}
-	return false
+	tb.refill(now)
+	if tb.tokens < 0 {
+		return false
+	}
+	tb.inUse = true
+	return true
+}
+
+func (tb *tokenBucket) finishRebuild(now time.Time, held float64, charge bool) {
+	tb.mu.Lock()
+	defer tb.mu.Unlock()
+	if charge {
+		tb.tokens -= held
+		tb.lastRefill = now
+	}
+	tb.inUse = false
 }
 
 // protocolRateConfig defines the rate limit for a protocol.
@@ -116,16 +144,24 @@ type peerRateLimiter struct {
 
 	// punished maps (peerID, protocol) -> punishment expiry time
 	punished sync.Map // map[peerProtocolKey]time.Time
+
+	now func() time.Time
 }
+
+const envelopeRebuildKey = "envelope_rebuild"
+
+// blockRateBurst is the token bucket capacity of the block protocols.
+const blockRateBurst = 128
 
 func newPeerRateLimiter() *peerRateLimiter {
 	rl := &peerRateLimiter{
 		protocolLimits: make(map[string]protocolRateConfig),
+		now:            time.Now,
 	}
 
 	// Rate limits aligned with other consensus clients.
 	// Format: maxTokens (burst), refillRate (tokens/second)
-	blockRate := protocolRateConfig{maxTokens: 128, refillRate: 12.8}                  // 128 per 10s
+	blockRate := protocolRateConfig{maxTokens: blockRateBurst, refillRate: 12.8}       // 128 per 10s
 	blobRate := protocolRateConfig{maxTokens: 72, refillRate: 7.2}                     // 72 per 10s
 	dataColRate := protocolRateConfig{maxTokens: 16384, refillRate: 1638.4}            // 16384 per 10s (proportional to blockRate × NumberOfColumns)
 	lcRate := protocolRateConfig{maxTokens: 128, refillRate: 12.8}                     // 128 per 10s
@@ -134,6 +170,9 @@ func newPeerRateLimiter() *peerRateLimiter {
 	statusRate := protocolRateConfig{maxTokens: 5, refillRate: 1, noPunishment: true}  // 5 burst, 1 per second
 	metadataRate := protocolRateConfig{maxTokens: 2, refillRate: 0.2}                  // 2 per 10s
 
+	// A rebuild limit can cut an admitted response short, so the retry must wait for refill instead of being punished.
+	envelopeRate := protocolRateConfig{maxTokens: 128, refillRate: 12.8, noPunishment: true} // 128 per 10s
+
 	rl.protocolLimits[communication.BeaconBlocksByRangeProtocolV2] = blockRate
 	rl.protocolLimits[communication.BeaconBlocksByRootProtocolV2] = blockRate
 	rl.protocolLimits[communication.BeaconBlocksByHeadProtocolV1] = blockRate
@@ -141,8 +180,8 @@ func newPeerRateLimiter() *peerRateLimiter {
 	rl.protocolLimits[communication.BlobSidecarByRootProtocolV1] = blobRate
 	rl.protocolLimits[communication.DataColumnSidecarsByRangeProtocolV1] = dataColRate
 	rl.protocolLimits[communication.DataColumnSidecarsByRootProtocolV1] = dataColRate
-	rl.protocolLimits[communication.ExecutionPayloadEnvelopesByRangeProtocolV1] = blockRate
-	rl.protocolLimits[communication.ExecutionPayloadEnvelopesByRootProtocolV1] = blockRate
+	rl.protocolLimits[communication.ExecutionPayloadEnvelopesByRangeProtocolV1] = envelopeRate
+	rl.protocolLimits[communication.ExecutionPayloadEnvelopesByRootProtocolV1] = envelopeRate
 	rl.protocolLimits[communication.PingProtocolV1] = pingRate
 	rl.protocolLimits[communication.GoodbyeProtocolV1] = goodbyeRate
 	rl.protocolLimits[communication.StatusProtocolV1] = statusRate
@@ -154,8 +193,30 @@ func newPeerRateLimiter() *peerRateLimiter {
 	rl.protocolLimits[communication.LightClientFinalityUpdateProtocolV1] = lcRate
 	rl.protocolLimits[communication.LightClientBootstrapProtocolV1] = lcRate
 	rl.protocolLimits[communication.LightClientUpdatesByRangeProtocolV1] = lcRate
-
 	return rl
+}
+
+func (rl *peerRateLimiter) envelopeRebuildBucket(peerID string) *tokenBucket {
+	key := peerProtocolKey{peerID: peerID, protocol: envelopeRebuildKey}
+	if bucket, ok := rl.buckets.Load(key); ok {
+		return bucket.(*tokenBucket)
+	}
+	newBucket := newTokenBucket(1, 1) // One second of credit per second bounds sustained slot use to half.
+	newBucket.lastRefill = rl.now()
+	bucket, _ := rl.buckets.LoadOrStore(key, newBucket)
+	return bucket.(*tokenBucket)
+}
+
+func (rl *peerRateLimiter) tryStartEnvelopeRebuild(peerID string) *tokenBucket {
+	bucket := rl.envelopeRebuildBucket(peerID)
+	if !bucket.tryStartRebuild(rl.now()) {
+		return nil
+	}
+	return bucket
+}
+
+func (rl *peerRateLimiter) finishEnvelopeRebuild(bucket *tokenBucket, elapsed time.Duration, charge bool) {
+	bucket.finishRebuild(rl.now(), elapsed.Seconds(), charge)
 }
 
 // allowRequest checks whether a request from peerID on the given protocol should be allowed.

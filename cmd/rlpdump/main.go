@@ -34,7 +34,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/rlp"
 )
 
@@ -191,12 +191,8 @@ func die(args ...any) {
 	os.Exit(1)
 }
 
-// textToRlp converts text into RLP (best effort).
+// textToRlp converts text into RLP.
 func textToRlp(r io.Reader) ([]byte, error) {
-	// We're expecting the input to be well-formed, meaning that
-	// - each element is on a separate line
-	// - each line is either an (element OR a list start/end) + comma
-	// - an element is either hex-encoded bytes OR a quoted string
 	var (
 		scanner = bufio.NewScanner(r)
 		obj     []any
@@ -212,23 +208,42 @@ func textToRlp(r io.Reader) ([]byte, error) {
 			stack.PushFront(obj)
 			obj = make([]any, 0)
 		case "]", "],": // list end
+			if stack.Len() == 0 {
+				return nil, errors.New("unexpected list end")
+			}
 			parent := stack.Remove(stack.Front()).([]any)
 			parent = append(parent, obj)
 			obj = parent
-		case "[],": // empty list
+		case "[]", "[],": // empty list
 			obj = append(obj, make([]any, 0))
 		default: // element
-			data := []byte(t)[:len(t)-1] // cut off comma
-			if data[0] == '"' {          // ascii string
-				data = []byte(t)[1 : len(data)-1]
+			t = strings.TrimSuffix(t, ",")
+			if len(t) == 0 {
+				return nil, fmt.Errorf("invalid token %q", t)
+			}
+			var data []byte
+			var err error
+			if t[0] == '"' { // ascii string
+				var str string
+				str, err = strconv.Unquote(t)
+				data = []byte(str)
 			} else { // hex data
-				data = common.FromHex(string(data))
+				data, err = hexutil.FromHexWithValidation(t)
+			}
+			if err != nil {
+				return nil, fmt.Errorf("invalid element %q: %w", t, err)
 			}
 			obj = append(obj, data)
 		}
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, err
+	}
+	if stack.Len() != 0 {
+		return nil, errors.New("unclosed list")
+	}
+	if len(obj) != 1 {
+		return nil, fmt.Errorf("expected one root element, got %d", len(obj))
 	}
 	data, err := rlp.EncodeToBytes(obj[0])
 	return data, err

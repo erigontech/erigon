@@ -47,7 +47,6 @@ import (
 	"github.com/erigontech/erigon/db/snaptype2"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/protocol"
@@ -80,19 +79,11 @@ func (e *GenesisMismatchError) Error() string {
 	return fmt.Sprintf("database contains genesis (have %x, new %x)", e.Stored, e.New) + advice
 }
 
-// CommitGenesisBlock writes or updates the genesis block in db.
-// The block that will be used is:
-//
-//	                     genesis == nil       genesis != nil
-//	                  +------------------------------------------
-//	db has no genesis |  main-net          |  genesis
-//	db has genesis    |  from DB           |  genesis (if compatible)
-//
-// The stored chain configuration will be updated if it is compatible (i.e. does not
-// specify a fork block below the local head block). In case of a conflict, the
-// error is a *params.ConfigCompatError and the new, unwritten config is returned.
-//
-// The returned chain configuration is never nil.
+// CommitGenesisBlock writes genesis or updates the stored chain configuration.
+// If the DB already has genesis, a supplied genesis must have the same block hash.
+// If genesis is nil, it uses the stored block, or mainnet genesis for an empty DB.
+// Above block 0, conflicting configuration changes return *chain.ConfigCompatError
+// and the rejected configuration. Other errors may return a nil configuration.
 func CommitGenesisBlock(db kv.RwDB, genesis *types.Genesis, chainName string, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
 	return CommitGenesisBlockWithOverride(db, genesis, chainName, nil, nil, false, dirs, logger)
 }
@@ -156,19 +147,21 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 		}
 	}
 
-	if (storedHash == common.Hash{}) {
-		custom := true
-		if genesis == nil {
-			logger.Info("Writing main-net genesis block")
-			genesis = chainspec.MainnetGenesisBlock()
-			custom = false
-		}
+	custom := genesis != nil
+	if genesis == nil && (storedHash == common.Hash{}) {
+		logger.Info("Writing main-net genesis block")
+		genesis = chainspec.MainnetGenesisBlock()
+	}
+	if genesis != nil {
 		// Copy the struct, not just the config it points at: a named chain hands over the
 		// registered Genesis, and assigning the copied config back writes into it.
 		g := *genesis
 		g.Config = g.Config.Copy()
 		genesis = &g
 		applyOverrides(genesis.Config)
+	}
+
+	if (storedHash == common.Hash{}) {
 		block, err1 := write(tx, genesis, dirs, logger)
 		if err1 != nil {
 			return genesis.Config, nil, err1
@@ -222,24 +215,25 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 	// Special case: don't change the existing config of a private chain if no new
 	// config is supplied. This is useful, for example, to preserve DB config created by erigon init.
 	// In that case, only apply the overrides.
-	if genesis == nil {
-		if !keepStoredChainConfig {
-			spec, err := chainspec.ChainSpecByName(chainName)
-			if err != nil {
-				// Unknown chain name — always keep stored config
-				keepStoredChainConfig = true
-			} else if spec.GenesisHash != (common.Hash{}) && spec.GenesisHash != storedHash {
-				// Known chain name but genesis hash doesn't match (e.g. custom
-				// genesis with chainId 1 in Hive tests) — keep stored config
-				keepStoredChainConfig = true
-			}
+	if genesis == nil && !keepStoredChainConfig {
+		spec, err := chainspec.ChainSpecByName(chainName)
+		if err != nil {
+			// Unknown chain name — always keep stored config
+			keepStoredChainConfig = true
+		} else if spec.GenesisHash != (common.Hash{}) && spec.GenesisHash != storedHash {
+			// Known chain name but genesis hash doesn't match (e.g. custom
+			// genesis with chainId 1 in Hive tests) — keep stored config
+			keepStoredChainConfig = true
 		}
-		if keepStoredChainConfig {
-			// storedCfg is the receiver of CheckCompatible below, so overriding it in
-			// place would compare it against itself and find no conflict.
-			newCfg = storedCfg.Copy()
-			applyOverrides(newCfg)
+	}
+	if keepStoredChainConfig {
+		if genesis != nil && !sameUint256(newCfg.ChainID, storedCfg.ChainID) {
+			return newCfg, storedBlock, fmt.Errorf("genesis chain ID mismatch: database has %v, supplied genesis has %v", storedCfg.ChainID, newCfg.ChainID)
 		}
+		// storedCfg is the receiver of CheckCompatible below, so overriding it in
+		// place would compare it against itself and find no conflict.
+		newCfg = storedCfg.Copy()
+		applyOverrides(newCfg)
 	}
 	// The ordering check runs here, not on configOrDefault's result: under
 	// keepStoredChainConfig that one is discarded, so validating it rejects a schedule
@@ -262,16 +256,59 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 				return newCfg, storedBlock, err
 			}
 		}
-		compatibilityErr := storedCfg.CheckCompatible(newCfg, *height, headTime)
-		if compatibilityErr != nil &&
-			(compatibilityErr.RewindTo != 0 || compatibilityErr.HasTimestampConflict()) {
+		toleratedForks, compatibilityErr := checkCompatibleTolerating(storedCfg, newCfg, *height, headTime)
+		if compatibilityErr != nil {
 			return newCfg, storedBlock, compatibilityErr
+		}
+		if len(toleratedForks) > 0 {
+			logger.Warn("Replacing the stored chain config, tolerating PoW-era fork differences that select nothing on this chain",
+				"genesisHash", storedHash, "toleratedForkChanges", strings.Join(toleratedForks, ", "), "storedConfig", storedCfg, "newConfig", newCfg)
 		}
 	}
 	if err := rawdb.WriteChainConfig(tx, storedHash, newCfg); err != nil {
 		return newCfg, nil, err
 	}
 	return newCfg, storedBlock, nil
+}
+
+func sameUint256(a, b *uint256.Int) bool {
+	return a == b || (a != nil && b != nil && a.Eq(b))
+}
+
+// checkCompatibleTolerating runs CheckCompatible after the PoW-era forks that are nil in one
+// config and 0 in the other take their stored value, and lists those forks. With TTD 0 every
+// block after genesis is PoS, so DAO, the glaciers and MergeNetsplit select nothing; with London
+// at block 0 the difficulty calculation never selects Muir Glacier. The chain ID and the engine
+// setup must match too, as CheckCompatible does not fully compare them.
+func checkCompatibleTolerating(stored, next *chain.Config, height, headTime uint64) (tolerated []string, err *chain.ConfigCompatError) {
+	normalized := next.Copy()
+	tolerate := func(name string, storedFork, newFork *uint64) *uint64 {
+		switch {
+		case storedFork == nil && newFork != nil && *newFork == 0:
+			tolerated = append(tolerated, name+" nil->0")
+		case newFork == nil && storedFork != nil && *storedFork == 0:
+			tolerated = append(tolerated, name+" 0->nil")
+		default:
+			return newFork
+		}
+		return storedFork
+	}
+	if sameUint256(stored.ChainID, next.ChainID) &&
+		sameUint256(stored.TerminalTotalDifficulty, next.TerminalTotalDifficulty) &&
+		stored.TerminalTotalDifficultyPassed == next.TerminalTotalDifficultyPassed &&
+		stored.Aura == nil && next.Aura == nil && !stored.IsL2() && !next.IsL2() {
+		posFromGenesis := stored.TerminalTotalDifficulty != nil && stored.TerminalTotalDifficulty.IsZero()
+		if posFromGenesis {
+			normalized.DAOForkBlock = tolerate("daoForkBlock", stored.DAOForkBlock, next.DAOForkBlock)
+			normalized.ArrowGlacierBlock = tolerate("arrowGlacierBlock", stored.ArrowGlacierBlock, next.ArrowGlacierBlock)
+			normalized.GrayGlacierBlock = tolerate("grayGlacierBlock", stored.GrayGlacierBlock, next.GrayGlacierBlock)
+			normalized.MergeNetsplitBlock = tolerate("mergeNetsplitBlock", stored.MergeNetsplitBlock, next.MergeNetsplitBlock)
+		}
+		if posFromGenesis || stored.IsLondon(0) {
+			normalized.MuirGlacierBlock = tolerate("muirGlacierBlock", stored.MuirGlacierBlock, next.MuirGlacierBlock)
+		}
+	}
+	return tolerated, stored.CheckCompatible(normalized, height, headTime)
 }
 
 // headTimestamp reads the head header's time, falling back to the block files: kv.Headers
@@ -464,7 +501,7 @@ func ComputeGenesisCommitment(ctx context.Context, g *types.Genesis, tx kv.Tempo
 	blockNum := uint64(0)
 	txNum := uint64(1) // 2 system txs in begin/end of block. Attribute state-writes to first, consensus state-changes to second
 
-	r, w := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
+	r, w := state.NewNoopReader(), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 
 	statedb := state.NewForSequentialCommitment(r)
 	statedb.SetTrace(false)
