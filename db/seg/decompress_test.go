@@ -588,6 +588,19 @@ func TestDecompressor_OpenCorrupted(t *testing.T) {
 			"file contains incorrect dictionary size in bytes, got error %v", err)
 		require.Nil(t, d)
 	})
+	t.Run("truncatedAfterPatternDictionary", func(t *testing.T) {
+		aux := make([]byte, 32)
+		binary.BigEndian.PutUint64(aux[16:24], 1) // pattern dict size in bytes
+		aux[24] = 1
+
+		fpath := filepath.Join(tmpDir, "truncatedAfterPatternDictionary")
+		err := os.WriteFile(fpath, aux, 0o644)
+		require.NoError(t, err)
+
+		d, err := NewDecompressor(fpath)
+		require.ErrorIsf(t, err, &ErrCompressedFileCorrupted{}, "got error %v", err)
+		require.Nil(t, d)
+	})
 }
 
 const lorem = `lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et
@@ -1384,4 +1397,43 @@ func TestGetterNextRejectsUnderflowedWordLen(t *testing.T) {
 	buf, offset := g.Next([]byte{1, 2, 3})
 	require.Nil(t, buf)
 	require.Zero(t, offset)
+}
+
+func TestDecompressorTruncatedDictVarint(t *testing.T) {
+	// A 0x80 byte starts a varint that never terminates; 0x01 is a complete one-byte varint.
+	patternDict := func(dict ...byte) []byte {
+		aux := make([]byte, 24+len(dict)+8)                       // trailing bytes hold the position dict size
+		binary.BigEndian.PutUint64(aux[16:24], uint64(len(dict))) // pattern dict size in bytes
+		copy(aux[24:], dict)
+		return aux
+	}
+	positionDict := func(dict ...byte) []byte {
+		aux := make([]byte, 24+8+len(dict))
+		binary.BigEndian.PutUint64(aux[24:32], uint64(len(dict))) // position dict size in bytes
+		copy(aux[32:], dict)
+		return aux
+	}
+
+	for name, tc := range map[string]struct {
+		file   []byte
+		reason string
+	}{
+		"patternDepth":  {patternDict(0x80), "invalid pattern depth varint"},
+		"patternLength": {patternDict(0x01, 0x80), "invalid pattern length varint"},
+		"positionDepth": {positionDict(0x80), "invalid position depth varint"},
+		"positionValue": {positionDict(0x01, 0x80), "invalid position varint"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			fpath := filepath.Join(t.TempDir(), name)
+			require.NoError(t, os.WriteFile(fpath, tc.file, 0o644))
+
+			d, err := NewDecompressor(fpath)
+			require.ErrorIs(t, err, &ErrCompressedFileCorrupted{})
+			require.Nil(t, d)
+
+			var corrupted *ErrCompressedFileCorrupted
+			require.ErrorAs(t, err, &corrupted)
+			require.Contains(t, corrupted.Reason, tc.reason)
+		})
+	}
 }

@@ -133,6 +133,7 @@ var (
 	// BAL_DRIVEN_COMMITMENT=false (or IGNORE_BAL=true) to fall back to the
 	// incremental path if it ever misbehaves.
 	BALDrivenCommitment = EnvBool("BAL_DRIVEN_COMMITMENT", true)
+	BALBatchPrefetch    = EnvBool("BAL_BATCH_PREFETCH", true)
 	// BALShadowCompute (requires BALDrivenCommitment) also computes each
 	// BAL-driven block incrementally and asserts both roots match before
 	// publishing; without it the BAL-driven root is published directly.

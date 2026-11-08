@@ -1,7 +1,7 @@
 package stagedsync
 
 import (
-	"sync/atomic"
+	"fmt"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -25,22 +25,22 @@ func mkDetTask(txIndex int) *execTask {
 func newDetExecutor(t *testing.T, n int) *blockExecutor {
 	t.Helper()
 	tasks := make([]*execTask, n)
-	reexec := make([]chan struct{}, n)
+	poolTasks := make([]*poolTask, n)
 	for i := range tasks {
 		tasks[i] = mkDetTask(i)
-		reexec[i] = make(chan struct{}, 1)
+		poolTasks[i] = &poolTask{}
 	}
 	return &blockExecutor{
 		tasks:               tasks,
 		blockIO:             &state.VersionedIO{},
 		versionMap:          state.NewVersionMap(nil),
-		readerByAddr:        map[accounts.Address][]int{},
+		readerByAddr:        map[accounts.Address][]addrReader{},
 		finalizedResults:    map[int]*execResult{},
 		coinbaseFlushedUpTo: -1,
 		execFailed:          make([]int, n),
-		slReexec:            reexec,
-		slReexecFlag:        make([]atomic.Bool, n),
+		poolTasks:           poolTasks,
 		writeChangedPrev:    map[int]*state.WriteSet{},
+		revalidate:          map[int]bool{},
 	}
 }
 
@@ -66,7 +66,7 @@ func TestValidated_ReaderReExecutedWhenWriterChangesAfterReaderCommits(t *testin
 	// W (tx0) writes key=v1, Validated at (0,0).
 	wWrites := newWS().stor(addr, key, state.Version{TxIndex: 0, Incarnation: 0}, v1).build()
 	be.blockIO.RecordWrites(state.Version{TxIndex: 0, Incarnation: 0}, wWrites)
-	be.versionMap.FlushVersionedWrites(wWrites, false, "")
+	be.versionMap.FlushVersionedWrites(wWrites, false)
 	be.versionMap.MarkWritesValidated(wWrites, nil)
 
 	// R (tx1) early-broke on W's Validated value, recorded the dep at (0,0), and
@@ -88,7 +88,7 @@ func TestValidated_ReaderReExecutedWhenWriterChangesAfterReaderCommits(t *testin
 
 	require.False(t, be.validateTasks.checkComplete(1),
 		"R was committed against W's in-flight value; W changed -> R must be un-committed")
-	require.True(t, be.slReexecFlag[1].Load(), "R must be signalled for re-execution")
+	require.True(t, be.poolTasks[1].pending, "R must be signalled for re-execution")
 }
 
 // TestValidated_CrossPathLifecycleWriteReExecutesReader pins item 2 at the executor
@@ -105,7 +105,7 @@ func TestValidated_CrossPathLifecycleWriteReExecutesReader(t *testing.T) {
 	// Base: addr live with a balance at (0,0), Validated.
 	baseW := newWS().bal(addr, state.Version{TxIndex: 0, Incarnation: 0}, baseBal).build()
 	be.blockIO.RecordWrites(state.Version{TxIndex: 0, Incarnation: 0}, baseW)
-	be.versionMap.FlushVersionedWrites(baseW, false, "")
+	be.versionMap.FlushVersionedWrites(baseW, false)
 	be.versionMap.MarkWritesValidated(baseW, nil)
 
 	// R (tx2) read addr.BALANCE at (0,0) while live, recorded the dep, committed early.
@@ -120,14 +120,14 @@ func TestValidated_CrossPathLifecycleWriteReExecutesReader(t *testing.T) {
 	// W1 (tx1) self-destructs addr — writes SelfDestructPath only, never BalancePath.
 	sdW := newWS().selfDestruct(addr, state.Version{TxIndex: 1, Incarnation: 0}, true).build()
 	be.blockIO.RecordWrites(state.Version{TxIndex: 1, Incarnation: 0}, sdW)
-	be.versionMap.FlushVersionedWrites(sdW, false, "")
+	be.versionMap.FlushVersionedWrites(sdW, false)
 	be.versionMap.MarkWritesValidated(sdW, nil)
 
 	be.revalidateCommittedDependents(1, nil)
 
 	require.False(t, be.validateTasks.checkComplete(2),
 		"R read a live balance; a later self-destruct of that account must un-commit R (cross-path lifecycle dep)")
-	require.True(t, be.slReexecFlag[2].Load(), "R must be signalled for re-execution")
+	require.True(t, be.poolTasks[2].pending, "R must be signalled for re-execution")
 }
 
 // TestValidated_ReaderCommittingAfterWriterChange pins the OTHER ordering: the
@@ -145,7 +145,7 @@ func TestValidated_ReaderCommittingAfterWriterChange(t *testing.T) {
 	// W (tx0) Validated at (0,0)=v1.
 	wWrites := newWS().stor(addr, key, state.Version{TxIndex: 0, Incarnation: 0}, v1).build()
 	be.blockIO.RecordWrites(state.Version{TxIndex: 0, Incarnation: 0}, wWrites)
-	be.versionMap.FlushVersionedWrites(wWrites, false, "")
+	be.versionMap.FlushVersionedWrites(wWrites, false)
 	be.versionMap.MarkWritesValidated(wWrites, nil)
 
 	// R executed against v1 and recorded the dep at (0,0) — but hasn't committed yet.
@@ -206,7 +206,6 @@ func TestMarkReadersDirty(t *testing.T) {
 	}
 	newBE := func() *blockExecutor {
 		be := newDetExecutor(t, 4)
-		be.revalidate = map[int]bool{}
 		read(be, 0, 0, slot1)
 		read(be, 2, 0, slot1)
 		read(be, 3, 0, slot2)
@@ -230,4 +229,37 @@ func TestMarkReadersDirty(t *testing.T) {
 		be.markReadersDirty(1, newWS().stor(addr, slot1, writer, *uint256.NewInt(1)).build())
 		require.Empty(t, be.revalidate)
 	})
+	writes := map[state.AccountPath]*state.WriteSet{
+		state.BalancePath:  newWS().bal(addr, writer, *uint256.NewInt(1)).build(),
+		state.NoncePath:    newWS().nonce(addr, writer, 1).build(),
+		state.CodePath:     newWS().code(addr, writer, accounts.Code{}).build(),
+		state.CodeHashPath: newWS().codeHash(addr, writer, accounts.CodeHash{}).build(),
+		state.CodeSizePath: newWS().codeSize(addr, writer, 1).build(),
+		state.StoragePath:  newWS().stor(addr, slot1, writer, *uint256.NewInt(1)).build(),
+	}
+	for written, ws := range writes {
+		for read := state.AddressPath; read <= state.CreateContractPath; read++ {
+			t.Run(fmt.Sprintf("write %d read %d", written, read), func(t *testing.T) {
+				be := newDetExecutor(t, 4)
+				rs := state.ReadSet{}
+				rs.SetHeader(addr, read, slot1, state.ReadHeader{Source: state.StorageRead})
+				be.blockIO.RecordReads(state.Version{TxIndex: 2}, rs)
+				be.indexReads(2, rs)
+				be.markReadersDirty(1, ws)
+				require.Equal(t, read == written, be.revalidate[2])
+			})
+		}
+	}
+	for _, written := range []state.AccountPath{state.BalancePath, state.NoncePath} {
+		t.Run(fmt.Sprintf("a reader of balance and nonce is flagged by a write %d", written), func(t *testing.T) {
+			be := newDetExecutor(t, 4)
+			rs := state.ReadSet{}
+			rs.SetHeader(addr, state.BalancePath, accounts.NilKey, state.ReadHeader{Source: state.StorageRead})
+			rs.SetHeader(addr, state.NoncePath, accounts.NilKey, state.ReadHeader{Source: state.StorageRead})
+			be.blockIO.RecordReads(state.Version{TxIndex: 2}, rs)
+			be.indexReads(2, rs)
+			be.markReadersDirty(1, writes[written])
+			require.True(t, be.revalidate[2])
+		})
+	}
 }

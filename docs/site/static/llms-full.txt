@@ -1864,7 +1864,7 @@ MDBX reuses free pages instead of returning them to the filesystem, so `mdbx.dat
 
 Erigon must be stopped. The command takes the datadir lock and opens each database exclusively, so it fails instead of touching a database still in use. The copy is written inside the database's own directory, so each database needs free space for a second copy of itself on the volume it already lives on, and a big `chaindata/` can take hours.
 
-Erigon also compacts at startup, before the node opens its databases: any database whose free pages are at least 10 GB **and** more than four times its live data is rewritten the same way (`[compact] auto-compact` in the log). It needs the same free space for a second copy, delays startup while it runs, and cannot be turned off. A database that fails to compact is left as it was, and startup continues. It skips the step if another process holds the datadir lock.
+Erigon also compacts at startup, before the node opens its databases: any database whose free pages are at least 5 GB **and** more than three times its live data is rewritten the same way (`[compact] auto-compact` in the log). It needs the same free space for a second copy, delays startup while it runs, and cannot be turned off. A database that fails to compact is left as it was, and startup continues. It skips the step if another process holds the datadir lock.
 
 `erigon db compact` is a manual defragmentation pass, not the background compaction of a log-structured merge-tree (LSM) engine — MDBX has none, as described in *Storage engine: MDBX* above.
 
@@ -2324,9 +2324,7 @@ These flags cover the general behavior and configuration of the Erigon client.
 - `--override.amsterdam value`: Manually specifies the Amsterdam fork time.
   - Default: `0`
 
-- `--vmdebug`: Records information for VM and contract debugging.
-  - Default: `false`
-
+- `--override.genesis value`: Loads the genesis block and chain configuration from this JSON file instead of the `--chain` network's. A fresh datadir is initialized from it on first start, as `erigon init` would; on an initialized datadir it must match the stored genesis, or Erigon refuses to start. Cannot be combined with `--chain`.
 - `--gdbme`: Restarts Erigon under gdb for debugging.
   - Default: `false`
 
@@ -2505,9 +2503,6 @@ Options for configuring the [transaction pool](https://docs.erigon.tech/fundamen
   - Default: `3h0m0s`
   - Set to `0` to disable dormancy-based eviction.
 
-- `--aa`: Accepts account-abstraction (AA) transactions. Gates them both in the pool and during execution; with it unset they are rejected.
-  - Default: `false`
-
 ### Network and Peers
 
 These flags manage network connectivity, peer discovery, and traffic control. See [Default Ports](https://docs.erigon.tech/fundamentals/default-ports) for the full port map.
@@ -2587,6 +2582,9 @@ Flags for configuring various RPC servers and their behavior. See [Interacting w
 - `--authrpc.jwtsecret value`: The path to the [JWT secret](https://docs.erigon.tech/fundamentals/jwt) file for the consensus layer.
 - `--http.compression`: Compresses HTTP-RPC responses of 1 KiB or more with the encoding the client's `Accept-Encoding` allows: Zstandard (preferred) or gzip. A client that accepts neither gets an uncompressed response.
   - Default: `true`
+
+- `--http.compression.loopback`: Also compresses HTTP-RPC responses to clients connecting from a loopback address (`127.0.0.1`, `::1`). By default these responses are sent uncompressed: on loopback compression only costs CPU and latency. Requests with an `X-Forwarded-For` or `Forwarded` header are treated as remote, so a reverse proxy on the same host that sets one of them keeps compression. Enable this flag only when such a proxy sets neither header and does not compress responses itself.
+  - Default: `false`
 
 - `--http.corsdomain value`: A comma-separated list of domains for cross-origin requests. The same list gates browser WebSocket handshakes and cross-site `GET` calls: a page whose `Origin` is not listed gets `403`. Without the flag, only pages on `http://localhost`, `http://127.0.0.1`, `http://[::1]` or the node's own hostname can open a WebSocket. Clients that send no `Origin` header, such as `curl` or server-side libraries, are not affected.
 - `--http.vhosts value`: A comma-separated list of virtual hostnames.
@@ -3010,7 +3008,7 @@ Flags for configuring the parallel block execution engine.
 - `--exec.serial`: Force serial execution by clamping the parallel executor to a single worker. Wins over `--exec.workers` and `EXEC3_WORKERS` — use to disable parallelism for diagnostics or like-for-like baseline comparisons.
   - Default: `false`
 
-- `--exec.no-prune`: Disable all DB pruning: state-aggregator (Domain/InvertedIndex) plus stage-level pruning (Execution: ChangeSets3/BlockAccessList; TxLookup; Snapshots: PruneAncientBlocks/canonical markers/old transaction files; block files are still built). Equivalent to `NO_PRUNE=true`. Diagnostic / perf-comparison use only.
+- `--debug.exec.no-prune` *(renamed from `--exec.no-prune` in v3.9; the old name still works as a deprecated alias and will be removed in the next release)*: Disable all DB pruning: state-aggregator (Domain/InvertedIndex) plus stage-level pruning (Execution: ChangeSets3/BlockAccessList; TxLookup; Snapshots: PruneAncientBlocks/canonical markers/old transaction files; block files are still built). Equivalent to `NO_PRUNE=true`. Diagnostic / perf-comparison use only: chaindata grows without bound and `--prune.mode` is not enforced. Erigon logs a warning at startup while it is set.
   - Default: `false`
 
 - `--exec.no-merge`: Disable state-aggregator file merges for Domain / History / Inverted-Index. Equivalent to `NO_MERGE=true`. Diagnostic / perf-comparison use only.
@@ -3204,7 +3202,7 @@ Erigon's own variables — everything below except the [Docker](https://docs.eri
 
 **Synchronization and Pruning:**
 
-- `NO_PRUNE` - Disables pruning when set to true (flag equivalent: `--exec.no-prune`)
+- `NO_PRUNE` - Disables pruning when set to true (flag equivalent: `--debug.exec.no-prune`)
 - `NO_MERGE` - Disables merging operations (flag equivalent: `--exec.no-merge`)
 - `PRUNE_TOTAL_DIFFICULTY` - Controls total difficulty pruning (default: `true`)
 - `MAX_REORG_DEPTH` - Sets how many blocks behind the head Erigon keeps reorg data while no finalized block is known, and during the initial sync cycle (default: `96`). After that, once the consensus layer reports a finalized block, Erigon keeps changesets and holds snapshot retirement back to that block instead: during non-finality it can reorg deeper than this value — down to, but not below, the finalized block — and with normal finality it may keep fewer than 96 blocks. The value still caps how far a new payload's missing ancestors are downloaded and how far from the head a side fork is validated.
@@ -4844,6 +4842,7 @@ Flags:
       --http.addr string                            HTTP server listening interface (default "localhost")
       --http.api strings                            API's offered over the RPC interface: eth,erigon,web3,net,debug,trace,txpool,db. Supported methods: https://github.com/erigontech/erigon/tree/main/cmd/rpcdaemon (default [eth,erigon])
       --http.compression                            Disable http compression (default true)
+      --http.compression.loopback                   Also compress HTTP-RPC responses to loopback clients (default false)
       --http.corsdomain strings                     Comma separated list of domains from which to accept cross origin requests (browser enforced)
       --http.dbg.single                             Allow pass HTTP header 'dbg: true' to printt more detailed logs - how this request was executed
       --http.enabled                                enable http server (default true)
@@ -8739,7 +8738,7 @@ These integrated practices focus on maximizing the reliability, efficiency, and 
 | Configure Firewall Rules | Configure your firewall to allow only the necessary ports for P2P and RPC communication. See [Default Ports](https://docs.erigon.tech/fundamentals/default-ports). | Standard security practice to limit attack surface. |
 | Never Expose RPC Ports | Never expose the RPC ports to the public internet without a reverse proxy. See [Security](https://docs.erigon.tech/fundamentals/security). | RPC (Remote Procedure Call) ports grant access to node functions; public exposure is a major security risk. |
 | Monitor Your Node's Health | Implement comprehensive monitoring using tools like Prometheus and Grafana to track key metrics like disk I/O, CPU load, and sync status in real time. See [Creating a Dashboard](https://docs.erigon.tech/fundamentals/creating-a-dashboard). | Essential for proactively identifying performance bottlenecks and stability issues. |
-| Enable JSON-RPC Compression | Use the `--http.compression` flag. See [Configuring Erigon](https://docs.erigon.tech/fundamentals/configuring-erigon). | Reduces network bandwidth usage for RPC requests. |
+| Enable JSON-RPC Compression | Use the `--http.compression` flag. See [Configuring Erigon](https://docs.erigon.tech/fundamentals/configuring-erigon). | Reduces network bandwidth usage for RPC requests. Responses to loopback clients stay uncompressed unless `--http.compression.loopback` is set. |
 | Tune RPC Batch Concurrency | Adjust the `--rpc.batch.concurrency` flag. See [RPC & API flags](https://docs.erigon.tech/fundamentals/configuring-erigon#rpc--api). | Limits the number of parallel database reads to prevent a single batch request from overloading the server. |
 | Harden Public RPC Endpoints | Place a reverse proxy (e.g. Nginx, Caddy) in front of Erigon. Enable rate-limiting, TLS termination, and authentication at the proxy layer. Never bind `--http.addr` to `0.0.0.0` directly on a public interface. See [TLS Authentication](https://docs.erigon.tech/fundamentals/tls-authentication). | A direct public binding exposes the node to denial-of-service (DoS) attacks and unrestricted calls that can exhaust resources. |
 

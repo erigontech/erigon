@@ -22,6 +22,7 @@ Use this map when reviewing `cl/transition/machine/`.
 | Go file/function | Spec section |
 | --- | --- |
 | `machine/transition.go`: `TransitionState` | Phase0 `state_transition`: `process_slots`, block signature verification, `process_block`, final state-root assertion |
+| `machine/transition.go`: `TransitionStateFromPrecomputedEpochState` | Phase0 `state_transition` on a state already advanced by `process_slots`: skips `process_slots` when the state is at the block slot |
 | `machine/block.go`: `ProcessBlock` | Phase0 `process_block`; Bellatrix/Capella execution payload and withdrawals; Gloas modified `process_block` ordering with `process_parent_execution_payload`, `process_withdrawals`, and `process_execution_payload_bid`; batched signature verification (`verify_execution_payload_bid_signature`; signature part of `is_valid_indexed_payload_attestation`) |
 | `machine/block.go`: `ProcessOperations` | Phase0 `process_operations`; Capella `process_bls_to_execution_change`; Electra execution requests; Gloas payload attestations and payload-attestation signature-set collection |
 | `machine/block.go`: `processRandao` | Phase0 `process_randao`; batched signature collection for block-level validation |
@@ -33,7 +34,7 @@ Use this map when reviewing `cl/transition/machine/`.
 | `machine/helpers.go`: `executionEnabled` | Bellatrix `is_execution_enabled` merge-transition gate |
 | `impl/eth2/validation.go`: `VerifyTransition`, `VerifyBlockSignature` | Phase0 state-root assertion after `process_block`; `verify_block_signature` |
 | `impl/eth2/utils.go`: `transitionSlot`, `computeSigningRootEpoch` | Phase0 `process_slot` (state/block root caching, Gloas payload availability reset); signing-root helper |
-| `compat.go`: `TransitionState` | Top-level entry point wiring `DefaultMachine` and `ValidatingMachine` |
+| `compat.go`: `TransitionState`, `TransitionStateFromPrecomputedEpochState` | Top-level entry points wiring `DefaultMachine` and `ValidatingMachine` |
 | `machine/machine.go`: `Interface`, `BlockProcessor`, `BlockValidator`, `SlotProcessor`, `BlockHeaderProcessor`, `BlockOperationProcessor` | Local interface hierarchy for the spec functions implemented in `impl/eth2/` |
 
 ## Block Operation Spec Map

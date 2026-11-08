@@ -224,9 +224,8 @@ func NewDecompressor(compressedFilePath string) (*Decompressor, error) {
 	return NewDecompressorWithMetadata(compressedFilePath, false)
 }
 
-func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (*Decompressor, error) {
+func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (_ *Decompressor, err error) {
 	_, fName := filepath.Split(compressedFilePath)
-	var err error
 	validationPassed := false
 	d := &Decompressor{
 		filePath:    compressedFilePath,
@@ -236,11 +235,10 @@ func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (*
 
 	defer func() {
 		if rec := recover(); rec != nil {
-			err = fmt.Errorf("incomplete file: %s, %+v, trace: %s", compressedFilePath, rec, dbg.Stack())
+			err = &ErrCompressedFileCorrupted{FileName: fName, Reason: fmt.Sprintf("incomplete file: %+v, trace: %s", rec, dbg.Stack())}
 		}
 		if err != nil || !validationPassed {
 			d.Close()
-			d = nil
 		}
 	}()
 
@@ -330,6 +328,9 @@ func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (*
 
 	for dictPos < dictSize {
 		depth, ns := binary.Uvarint(data[dictPos:])
+		if ns <= 0 {
+			return nil, &ErrCompressedFileCorrupted{FileName: fName, Reason: fmt.Sprintf("invalid pattern depth varint at %d", dictPos)}
+		}
 		if depth > maxAllowedDepth {
 			return nil, &ErrCompressedFileCorrupted{
 				FileName: fName,
@@ -342,6 +343,9 @@ func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (*
 		}
 		dictPos += uint64(ns)
 		l, n := binary.Uvarint(data[dictPos:])
+		if n <= 0 {
+			return nil, &ErrCompressedFileCorrupted{FileName: fName, Reason: fmt.Sprintf("invalid pattern length varint at %d", dictPos)}
+		}
 		dictPos += uint64(n)
 		patterns = append(patterns, data[dictPos:dictPos+l])
 		//fmt.Printf("depth = %d, pattern = [%x]\n", depth, data[dictPos:dictPos+l])
@@ -396,6 +400,9 @@ func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (*
 	dictPos = 0
 	for dictPos < dictSize {
 		depth, ns := binary.Uvarint(data[dictPos:])
+		if ns <= 0 {
+			return nil, &ErrCompressedFileCorrupted{FileName: fName, Reason: fmt.Sprintf("invalid position depth varint at %d", dictPos)}
+		}
 		if depth > maxAllowedDepth {
 			return nil, &ErrCompressedFileCorrupted{FileName: fName, Reason: fmt.Sprintf("posMaxDepth=%d", depth)}
 		}
@@ -405,6 +412,9 @@ func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (*
 		}
 		dictPos += uint64(ns)
 		dp, n := binary.Uvarint(data[dictPos:])
+		if n <= 0 {
+			return nil, &ErrCompressedFileCorrupted{FileName: fName, Reason: fmt.Sprintf("invalid position varint at %d", dictPos)}
+		}
 		dictPos += uint64(n)
 		poss = append(poss, dp)
 	}
@@ -788,6 +798,8 @@ type Getter struct {
 	multiPageReadThreshold     uint64
 	trace                      bool
 	residencyGate              bool
+	slowReset                  bool // residencyGate or a probe set
+	probe                      *mmap.Probe
 }
 
 func (g *Getter) MadvNormal() MadvDisabler {
@@ -951,9 +963,27 @@ func (g *Getter) DataLen() int {
 	return len(g.data)
 }
 
+// SetProbe makes the next reads touch their pages through pr; nil turns probing off.
+func (g *Getter) SetProbe(pr *mmap.Probe) {
+	g.probe = pr
+	g.slowReset = g.residencyGate || pr != nil
+}
+
+func (g *Getter) Probe() *mmap.Probe { return g.probe }
+
 func (g *Getter) Reset(offset uint64) {
 	g.dataP = offset
 	g.dataBit = 0
+	if g.slowReset {
+		g.resetSlow(offset)
+	}
+}
+
+// resetSlow keeps the probe and the residency gate out of Reset, so Reset still inlines.
+func (g *Getter) resetSlow(offset uint64) {
+	if g.probe != nil && offset < uint64(len(g.data)) {
+		g.probe.Touch(unsafe.Pointer(&g.data[offset]))
+	}
 	if g.residencyGate {
 		g.ensureResident(offset)
 	}

@@ -260,8 +260,8 @@ func (f *ForkChoiceStore) verifyAttestationWithState(
 
 func (f *ForkChoiceStore) setLatestMessage(index uint64, message LatestMessage) {
 	f.latestMessages.set(int(index), message)
-	f.gloasWeightTree.markDirty(index)
-	f.voteTally.markDirty(index)
+	f.gloasWeightTree.update(index)
+	f.voteTally.update(f, index)
 }
 
 func (f *ForkChoiceStore) trackGloasWeights() bool {
@@ -305,8 +305,8 @@ func (f *ForkChoiceStore) setUnequivocating(validatorIndex uint64) {
 	}
 	subIndex := int(validatorIndex) % 8
 	f.equivocatingIndicies[index] |= 1 << uint(subIndex)
-	f.gloasWeightTree.markDirty(validatorIndex)
-	f.voteTally.markDirty(validatorIndex)
+	f.gloasWeightTree.update(validatorIndex)
+	f.voteTally.update(f, validatorIndex)
 }
 
 func (f *ForkChoiceStore) updateLatestMessages(
@@ -401,9 +401,8 @@ func (f *ForkChoiceStore) ValidateOnAttestation(attestation *solid.Attestation) 
 		if blockHeader.Slot == attestation.Data.Slot && attestation.Data.CommitteeIndex != 0 {
 			return errors.New("attestation index must be 0 when block_slot equals attestation_slot")
 		}
-		// PTC attestation (index 1): payload must be verified
-		if attestation.Data.CommitteeIndex == 1 && !f.IsPayloadVerified(attestation.Data.BeaconBlockRoot) {
-			return errors.New("PTC attestation requires verified payload envelope")
+		if attestation.Data.CommitteeIndex == 1 && !f.isPayloadAvailable(attestation.Data.BeaconBlockRoot) {
+			return errors.New("attestation with index 1 requires an imported payload")
 		}
 	}
 

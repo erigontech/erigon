@@ -284,7 +284,7 @@ func (b *CachingBeaconState) reinitCaches() error {
 	if err := b._updateProposerIndex(); err != nil {
 		return err
 	}
-	if b.Version() >= clparams.Phase0Version {
+	if b.Version() == clparams.Phase0Version {
 		return b._initializeValidatorsPhase0()
 	}
 
