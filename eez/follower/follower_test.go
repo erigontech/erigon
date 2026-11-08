@@ -543,6 +543,49 @@ func TestReorgDropsResumePoint(t *testing.T) {
 	require.Contains(t, again.logs.String(), `msg="[eez] resuming from local settled block"`)
 }
 
+// TestOnHeadAfterBoot: the L1 head boot caught up to reaches OnHead once
+// derivation has caught up, without waiting for a newer one.
+func TestOnHeadAfterBoot(t *testing.T) {
+	c := derivertest.NewComposer(t)
+	first := c.Compose(nil, derivertest.Block{Coinbase: alice, Extra: []byte{}, Txs: transfers(c, 1)})
+	l1Head := c.Post(derivertest.Posting{Batch: first}).Header
+
+	type seen struct {
+		head   l1.Header
+		cursor uint64
+	}
+	heads := make(chan seen, 1)
+	var f *follower.Follower
+	cfg := testConfig
+	cfg.OnHead = func(h l1.Header) {
+		select {
+		case heads <- seen{head: h, cursor: f.Status().Cursor}:
+		default:
+		}
+	}
+	_, chain := derivertest.NewL2(t)
+	var err error
+	f, err = follower.New(c.L1, chain, derivertest.Config(), cfg, log.New())
+	require.NoError(t, err)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = f.Run(ctx)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+	select {
+	case s := <-heads:
+		require.Equal(t, l1Head, s.head)
+		require.Equal(t, uint64(1), s.cursor)
+	case <-time.After(10 * time.Second):
+		t.Fatal("no L1 head after boot")
+	}
+}
+
 // TestWrongL1 refuses an L1 source on another chain.
 func TestWrongL1(t *testing.T) {
 	other, err := recording.NewMemoryChain(1, &recording.Block{Header: l1.Header{Number: 12, Hash: common.Hash{1}}})

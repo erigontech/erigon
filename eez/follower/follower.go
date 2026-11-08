@@ -106,8 +106,8 @@ type Config struct {
 	PeerCount        func(ctx context.Context) (uint64, error)
 	PeerRefresh      time.Duration
 	OverlayPeerCount func() int
-	// OnHead, when set, receives every new L1 head from Run; it must not
-	// block.
+	// OnHead, when set, receives from Run the L1 head boot caught up to, then
+	// every new one; it must not block.
 	OnHead func(l1.Header)
 }
 
@@ -368,6 +368,9 @@ func (f *Follower) Run(ctx context.Context) error {
 	}
 	if err := f.Boot(ctx); err != nil {
 		return err
+	}
+	if f.cfg.OnHead != nil {
+		f.cfg.OnHead(f.watcher.Tip())
 	}
 	events := make(chan l1.Event, 64)
 	watched := make(chan error, 1)

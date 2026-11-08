@@ -159,7 +159,7 @@ Peers mode stops the node when the root's chain leaves the local finalized block
 
 ## Producing the chain
 
-With `--eez.sequencer` the node also produces the chain ahead of settlement, from its transaction pool. Every L1 head anchors a slot of K = L1 block time / L2 block time blocks, the last of which, the Sync block, has the timestamp of the next L1 block. Live blocks are produced on the L2 cadence; when the Live blocks end, the slot's trigger produces the Future blocks ahead of their timestamps, then the Sync block. A node that is behind catches up in bursts of up to 300 blocks, the last of them a Sync block on the slots' grid. Derivation keeps a produced block once L1 settles it, and replaces it when L1 settles another.
+With `--eez.sequencer` the node also produces the chain ahead of settlement, from its transaction pool. Every L1 head anchors a slot of K = L1 block time / L2 block time blocks, the last of which, the Sync block, has the timestamp of the next L1 block. Live blocks are produced on the L2 cadence; when the Live blocks end, the slot's trigger produces the Future blocks ahead of their timestamps, then the Sync block. A node that is behind catches up in bursts of up to 300 blocks, the last of them a Sync block on the slots' grid. Derivation keeps a produced block once L1 settles it, and replaces it when L1 settles another. A restarted node keeps the blocks L1 has not settled as its head, and resumes the slots from the L1 head derivation caught up to.
 
 ```bash
 ./build/bin/erigon --eez.enabled --chain=eez-devnet --datadir=/data/eez-sequencer \
