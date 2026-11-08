@@ -234,40 +234,62 @@ func runReorg(t *testing.T, tc reorgCase) (oldHead *types.Block, forkBlocks []*t
 	return oldHead, forkBlocks, got
 }
 
-func TestReorgPreservesUnwindStateChanges(t *testing.T) {
+func TestReorgNotifications(t *testing.T) {
 	for _, tc := range reorgCases {
 		t.Run(tc.name, func(t *testing.T) {
 			oldHead, forkBlocks, got := runReorg(t, tc)
-			changes := got.stateChanges.ChangeBatch
-			require.Len(t, changes, 1+len(forkBlocks))
-			require.Equal(t, remoteproto.Direction_UNWIND, changes[0].Direction)
-			require.Equal(t, oldHead.ParentHash(), common.Hash(gointerfaces.ConvertH256ToHash(changes[0].BlockHash)))
-			var unwound []common.Hash
-			for _, raw := range changes[0].Txs {
-				txn, err := types.DecodeTransaction(raw)
-				require.NoError(t, err)
-				unwound = append(unwound, txn.Hash())
-			}
-			for _, txn := range oldHead.Transactions() {
-				require.Contains(t, unwound, txn.Hash())
-			}
-			for i, block := range forkBlocks {
-				require.Equal(t, remoteproto.Direction_FORWARD, changes[i+1].Direction)
-				require.Equal(t, block.Hash(), common.Hash(gointerfaces.ConvertH256ToHash(changes[i+1].BlockHash)))
-			}
-		})
-	}
-}
 
-func TestReorgAnnouncesNewCanonicalHeaders(t *testing.T) {
-	for _, tc := range reorgCases {
-		t.Run(tc.name, func(t *testing.T) {
-			_, forkBlocks, got := runReorg(t, tc)
-			want := make([]common.Hash, 0, len(forkBlocks))
-			for _, b := range forkBlocks {
-				want = append(want, b.Hash())
-			}
-			require.ElementsMatch(t, want, got.headerHashes(t), "newHeads subscribers were not told about the new canonical blocks")
+			t.Run("state_changes", func(t *testing.T) {
+				changes := got.stateChanges.ChangeBatch
+				require.Len(t, changes, 1+len(forkBlocks))
+				require.Equal(t, remoteproto.Direction_UNWIND, changes[0].Direction)
+				require.Equal(t, oldHead.ParentHash(), common.Hash(gointerfaces.ConvertH256ToHash(changes[0].BlockHash)))
+				var unwound []common.Hash
+				for _, raw := range changes[0].Txs {
+					txn, err := types.DecodeTransaction(raw)
+					require.NoError(t, err)
+					unwound = append(unwound, txn.Hash())
+				}
+				for _, txn := range oldHead.Transactions() {
+					require.Contains(t, unwound, txn.Hash())
+				}
+				for i, block := range forkBlocks {
+					require.Equal(t, remoteproto.Direction_FORWARD, changes[i+1].Direction)
+					require.Equal(t, block.Hash(), common.Hash(gointerfaces.ConvertH256ToHash(changes[i+1].BlockHash)))
+				}
+			})
+			t.Run("headers", func(t *testing.T) {
+				want := make([]common.Hash, 0, len(forkBlocks))
+				for _, b := range forkBlocks {
+					want = append(want, b.Hash())
+				}
+				require.ElementsMatch(t, want, got.headerHashes(t), "newHeads subscribers were not told about the new canonical blocks")
+			})
+			t.Run("removed_logs", func(t *testing.T) {
+				require.Equal(t, 1, got.logCount(oldHead.Hash(), true), "old head's log was not reported as removed")
+				for _, b := range forkBlocks {
+					require.Zero(t, got.logCount(b.Hash(), true), "log of new canonical block %d reported as removed", b.NumberU64())
+				}
+			})
+			t.Run("added_logs", func(t *testing.T) {
+				for _, b := range forkBlocks {
+					require.Equal(t, 1, got.logCount(b.Hash(), false), "log of new canonical block %d was not reported", b.NumberU64())
+				}
+				require.Zero(t, got.logCount(oldHead.Hash(), false), "old head's log was reported again as added")
+			})
+			t.Run("receipts", func(t *testing.T) {
+				wantCount := 0
+				for _, tx := range oldHead.Transactions() {
+					require.Zero(t, got.receiptCount(oldHead.Hash(), tx.Hash()))
+				}
+				for _, block := range forkBlocks {
+					wantCount += len(block.Transactions())
+					for _, tx := range block.Transactions() {
+						require.Equal(t, 1, got.receiptCount(block.Hash(), tx.Hash()))
+					}
+				}
+				require.Len(t, got.receipts, wantCount)
+			})
 		})
 	}
 }
@@ -324,49 +346,6 @@ func TestSideForkValidationDoesNotAnnounceUnwindForExtension(t *testing.T) {
 	batch := waitForBatchWithHead(canonical.TopBlock.Hash())
 	for _, change := range batch.ChangeBatch {
 		require.Equal(t, remoteproto.Direction_FORWARD, change.Direction, "validation must not announce a canonical unwind")
-	}
-}
-
-func TestReorgMarksOldHeadLogsRemoved(t *testing.T) {
-	for _, tc := range reorgCases {
-		t.Run(tc.name, func(t *testing.T) {
-			oldHead, forkBlocks, got := runReorg(t, tc)
-			require.Equal(t, 1, got.logCount(oldHead.Hash(), true), "old head's log was not reported as removed")
-			for _, b := range forkBlocks {
-				require.Zero(t, got.logCount(b.Hash(), true), "log of new canonical block %d reported as removed", b.NumberU64())
-			}
-		})
-	}
-}
-
-func TestReorgAnnouncesNewCanonicalLogs(t *testing.T) {
-	for _, tc := range reorgCases {
-		t.Run(tc.name, func(t *testing.T) {
-			oldHead, forkBlocks, got := runReorg(t, tc)
-			for _, b := range forkBlocks {
-				require.Equal(t, 1, got.logCount(b.Hash(), false), "log of new canonical block %d was not reported", b.NumberU64())
-			}
-			require.Zero(t, got.logCount(oldHead.Hash(), false), "old head's log was reported again as added")
-		})
-	}
-}
-
-func TestReorgAnnouncesTransactionReceipts(t *testing.T) {
-	for _, tc := range reorgCases {
-		t.Run(tc.name, func(t *testing.T) {
-			oldHead, forkBlocks, got := runReorg(t, tc)
-			wantCount := 0
-			for _, tx := range oldHead.Transactions() {
-				require.Zero(t, got.receiptCount(oldHead.Hash(), tx.Hash()))
-			}
-			for _, block := range forkBlocks {
-				wantCount += len(block.Transactions())
-				for _, tx := range block.Transactions() {
-					require.Equal(t, 1, got.receiptCount(block.Hash(), tx.Hash()))
-				}
-			}
-			require.Len(t, got.receipts, wantCount)
-		})
 	}
 }
 

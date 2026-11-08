@@ -239,12 +239,7 @@ func TestUnwindExec3RequiresExecutedDiffsets(t *testing.T) {
 			logger := log.New()
 			db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()), temporaltest.WithStepSize(16))
 			br := freezeblocks.NewBlockReader(db.(freezeblocks.HasBlockFiles).DebugBlockFiles())
-			tx, err := db.BeginTemporalRw(ctx)
-			require.NoError(t, err)
-			defer tx.Rollback()
-			doms, err := execctx.NewSharedDomains(ctx, tx, logger)
-			require.NoError(t, err)
-			defer doms.Close()
+			tx, doms := temporaltest.NewTestTxSD(t, db)
 			for number := uint64(0); number <= 3; number++ {
 				header := makeHeader(number, common.Hash{1})
 				require.NoError(t, rawdb.WriteHeader(tx, header))
@@ -258,7 +253,7 @@ func TestUnwindExec3RequiresExecutedDiffsets(t *testing.T) {
 				require.NoError(t, changeset.WriteDiffSet(tx, number, makeHeader(number, common.Hash{1}).Hash(), cs))
 			}
 			doms.SetTxNum(8)
-			err = unwindExec3(
+			err := unwindExec3(
 				&UnwindState{ID: stages.Execution, UnwindPoint: 0, CurrentBlockNumber: 3},
 				&StageState{ID: stages.Execution, BlockNumber: 2}, doms, tx, ctx,
 				ExecuteBlockCfg{blockReader: br}, nil, logger,

@@ -6,7 +6,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
@@ -48,10 +47,7 @@ func (file unwindFile) EndRootNum() uint64 { return file.end }
 func TestMinimumUnwindKeepsImmutableTransactions(t *testing.T) {
 	for domain := range kv.DomainLen {
 		t.Run(domain.String(), func(t *testing.T) {
-			db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-			tx, err := db.BeginTemporalRw(t.Context())
-			require.NoError(t, err)
-			defer tx.Rollback()
+			_, tx := temporaltest.NewTestTx(t)
 			for block := range uint64(5) {
 				require.NoError(t, rawdbv3.TxNums.Append(tx, block, 3*block+2))
 				if block > 0 {
@@ -74,7 +70,7 @@ func TestMinimumUnwindKeepsImmutableTransactions(t *testing.T) {
 					require.False(t, allowed)
 				}
 			}
-			_, err = rawtemporaldb.CanUnwindToBlockNum(unwindFilesTx{TemporalTx: tx, domain: domain, end: 100})
+			_, err := rawtemporaldb.CanUnwindToBlockNum(unwindFilesTx{TemporalTx: tx, domain: domain, end: 100})
 			require.ErrorIs(t, err, commitmentdb.ErrBehindCommitment)
 		})
 	}
