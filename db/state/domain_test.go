@@ -2009,7 +2009,7 @@ func TestDomain_GetAsOfHalfPrunedSteps(t *testing.T) {
 
 				logEvery := time.NewTicker(30 * time.Second)
 				defer logEvery.Stop()
-				for step := kv.Step(0); step < collated; step++ {
+				for step := range kv.Step(collated) {
 					require.NoError(t, d.collateBuildIntegrate(t.Context(), step, tx, background.NewProgressSet()))
 				}
 				prune := func(ctx context.Context, step kv.Step, txFrom, txTo, historyLimit uint64) {
