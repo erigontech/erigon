@@ -330,6 +330,12 @@ func WithGenesisSpec(gspec *types.Genesis) Option {
 	}
 }
 
+func WithBlockReaderWrap(wrap func(dbservices.FullBlockReader) dbservices.FullBlockReader) Option {
+	return func(opts *options) {
+		opts.wrapBlockReader = wrap
+	}
+}
+
 func WithKey(key *ecdsa.PrivateKey) Option {
 	return func(opts *options) {
 		opts.key = key
@@ -456,6 +462,7 @@ type options struct {
 	sentryProtocol           uint
 	stateTransitionObserver  execmodule.StateTransitionObserver
 	skipSystemContracts      bool
+	wrapBlockReader          func(dbservices.FullBlockReader) dbservices.FullBlockReader
 }
 
 func applyOptions(opts []Option) options {
@@ -620,6 +627,10 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	erigonGrpcServer := remotedbserver.NewKvServer(ctx, db, nil, nil, logger)
 	allSnapshots := db.(freezeblocks.HasBlockFiles).DebugBlockFiles()
 	br := freezeblocks.NewBlockReader(allSnapshots)
+	var blockReader dbservices.FullBlockReader = br
+	if opt.wrapBlockReader != nil {
+		blockReader = opt.wrapBlockReader(br)
+	}
 
 	mock := &ExecModuleTester{
 		Ctx: ctx, Cancel: ctxCancel, DB: db,
@@ -633,7 +644,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		stateChangesClient: direct.NewStateDiffClientDirect(erigonGrpcServer),
 		PeerId:             gointerfaces.ConvertHashToH512([64]byte{0x12, 0x34, 0x50}), // "12345"
 		BlockSnapshots:     allSnapshots,
-		BlockReader:        br,
+		BlockReader:        blockReader,
 		ReceiptsReader:     receipts.NewGenerator(dirs, br, engine, nil, 5*time.Second),
 		HistoryV3:          true,
 		cfg:                cfg,
