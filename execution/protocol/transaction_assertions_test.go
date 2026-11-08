@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -119,6 +120,75 @@ func TestTxDiffValidationErrors(t *testing.T) {
 			require.NoError(t, err)
 			require.ErrorIs(t, result.Err, tc.want)
 			require.NotErrorIs(t, result.Err, vm.ErrOutOfGas)
+		})
+	}
+}
+
+func TestPostTxStateReadErrorAbortsTransaction(t *testing.T) {
+	target := common.HexToAddress("0x2000")
+	body := common.HexToAddress("0x3000")
+	for _, tc := range []struct {
+		name  string
+		op    vm.OpCode
+		args  *program.Program
+		trace bool
+	}{
+		{"TXTRACE", vm.TXTRACE, program.New().Push0().Push0(), true},
+		{"TXDIFF trace", vm.TXDIFF, program.New().Push0().Push0().Push(6), true},
+		{"EVENTDATACOPY", vm.EVENTDATACOPY, program.New().Push0().Push0().Push0().Push0(), true},
+		{"TXDIFF storage before", vm.TXDIFF, program.New().Push0().Push(target).Push0(), false},
+		{"TXDIFF storage after", vm.TXDIFF, program.New().Push0().Push(target).Push(1), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			evm, tx := frameTestEnv(t)
+			ibs := evm.IntraBlockState()
+			require.NoError(t, ibs.SetCode(accounts.InternAddress(tx.SenderAddress), []byte{0x60, 3, 0x5f, 0x5f, 0xaa}, tracing.CodeChangeUnspecified))
+			require.NoError(t, ibs.SetCode(accounts.InternAddress(target), tc.args.Op(tc.op, vm.STOP).Bytes(), tracing.CodeChangeUnspecified))
+			require.NoError(t, ibs.SetCode(accounts.InternAddress(body), program.New().Sstore(0, 1).Bytes(), tracing.CodeChangeUnspecified))
+			tx.Frames = []types.Frame{
+				{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
+				{Mode: types.FrameSender, Target: &body, Limits: mdgas.MdGas{Execution: 20_000, State: params.StateGasPerStorageSet}},
+				{Mode: types.FramePostTx, Target: &target, Limits: mdgas.MdGas{Execution: 10_000}},
+			}
+
+			var readErr, frameErr error
+			config := evm.Config()
+			config.Tracer = &tracing.Hooks{
+				OnOpcode: func(_ uint64, op byte, _, _ uint64, _ tracing.OpContext, _ []byte, _ int, _ error) {
+					if vm.OpCode(op) != tc.op {
+						return
+					}
+					address := accounts.InternAddress(target)
+					key := accounts.InternKey(common.Hash{})
+					if tc.trace {
+						address = accounts.InternAddress(body)
+					} else {
+						_, err := evm.FrameContext.TransactionTrace(ibs)
+						require.NoError(t, err)
+					}
+					// A materialized account in versioned mode triggers an internal read
+					// error without setting StateReadError. Inject it only for this opcode.
+					ibs.SetVersionMap(state.NewVersionMap(nil))
+					_, readErr = ibs.GetState(address, key)
+					require.ErrorContains(t, readErr, "noMaterialize read fell back to a materialized stateObject")
+					require.NoError(t, ibs.StateReadError())
+				},
+				OnExitV2: func(_ int, _ []byte, _ mdgas.MdGasUsage, err error, _ bool) {
+					if ibs.IsVersioned() {
+						frameErr = err
+					}
+					ibs.SetVersionMap(nil)
+				},
+			}
+			evm.ResetBetweenBlocks(evm.Context, evm.TxContext, ibs, config, evm.ChainRules())
+
+			result, err := applyFrameTest(t, evm, tx)
+			require.Error(t, readErr)
+			require.ErrorContains(t, frameErr, readErr.Error())
+			require.NoError(t, ibs.StateReadError())
+			require.ErrorIs(t, err, vm.ErrIntraBlockStateFailed)
+			require.ErrorContains(t, err, readErr.Error())
+			require.Nil(t, result)
 		})
 	}
 }

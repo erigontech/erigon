@@ -17,6 +17,8 @@
 package vm
 
 import (
+	"fmt"
+
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
@@ -50,7 +52,7 @@ func opTxTrace(pc uint64, evm *EVM, call *CallContext) (uint64, []byte, error) {
 	}
 	trace, err := ctx.TransactionTrace(evm.IntraBlockState())
 	if err != nil {
-		return pc, nil, err
+		return pc, nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 	}
 	switch {
 	case p == 0:
@@ -160,7 +162,7 @@ func opTxDiff(pc uint64, evm *EVM, call *CallContext) (uint64, []byte, error) {
 	ibs := evm.IntraBlockState()
 	trace, err := evm.FrameContext.TransactionTrace(ibs)
 	if err != nil {
-		return pc, nil, err
+		return pc, nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 	}
 	if p <= 5 {
 		address := ibs.InternAddress(key)
@@ -174,19 +176,28 @@ func opTxDiff(pc uint64, evm *EVM, call *CallContext) (uint64, []byte, error) {
 			if err == nil && p == 0 {
 				value, err = trace.Storage(ibs, address, slot, true)
 			}
+			if err != nil {
+				return pc, nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+			}
 			index.Set(&value)
-			return pc, nil, err
+			return pc, nil, nil
 		}
 		ibs.AddAddressToAccessList(address)
 		if p <= 3 {
 			value, err := trace.Balance(ibs, address, p == 2)
+			if err != nil {
+				return pc, nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+			}
 			index.Set(&value)
-			return pc, nil, err
+			return pc, nil, nil
 		}
 		hash, err := trace.CodeHash(ibs, address, p == 4)
+		if err != nil {
+			return pc, nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+		}
 		value := hash.Value()
 		index.SetBytes(value[:])
-		return pc, nil, err
+		return pc, nil, nil
 	}
 	var indices []int
 	switch p {
@@ -219,7 +230,7 @@ func opEventDataCopy(pc uint64, evm *EVM, call *CallContext) (uint64, []byte, er
 	dataOffset, length := call.Stack.pop2()
 	trace, err := evm.FrameContext.TransactionTrace(evm.IntraBlockState())
 	if err != nil {
-		return pc, nil, err
+		return pc, nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 	}
 	if !eventIndex.IsUint64() || eventIndex.Uint64() >= uint64(len(trace.Events)) || !dataOffset.IsUint64() || !length.IsUint64() {
 		return pc, nil, ErrFrameParameter
