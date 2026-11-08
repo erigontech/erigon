@@ -27,6 +27,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/eez/announce"
 	"github.com/erigontech/erigon/eez/deriver"
 	"github.com/erigontech/erigon/eez/follower"
 	"github.com/erigontech/erigon/eez/protocol"
@@ -76,9 +77,10 @@ func Register() {
 
 // API serves the eez namespace.
 type API struct {
-	follower  atomic.Pointer[follower.Follower]
-	sequencer atomic.Pointer[sequencer.Sequencer]
-	witnesses atomic.Pointer[witness.Store]
+	follower      atomic.Pointer[follower.Follower]
+	sequencer     atomic.Pointer[sequencer.Sequencer]
+	witnesses     atomic.Pointer[witness.Store]
+	announcements atomic.Pointer[announce.Store]
 }
 
 // NewAPI returns an API with no follower attached.
@@ -92,6 +94,9 @@ func (a *API) AttachSequencer(s *sequencer.Sequencer) { a.sequencer.Store(s) }
 
 // AttachWitnesses makes the API serve the witnesses of s.
 func (a *API) AttachWitnesses(s *witness.Store) { a.witnesses.Store(s) }
+
+// AttachAnnouncements makes the API serve the announcements of s.
+func (a *API) AttachAnnouncements(s *announce.Store) { a.announcements.Store(s) }
 
 // API returns the RPC registration of a.
 func (a *API) API() erigonrpc.API {
@@ -268,6 +273,25 @@ func (a *API) ExecutionWitnessByNumber(ctx context.Context, number hexutil.Uint6
 		return nil, err
 	}
 	return s.Get(ctx, uint64(number), hash)
+}
+
+// GetUnsafeBlockAnnouncement is eez_getUnsafeBlockAnnouncement: the App. D.6
+// announcement of the produced canonical block number; null when the node
+// keeps none for it.
+func (a *API) GetUnsafeBlockAnnouncement(ctx context.Context, number hexutil.Uint64) (*hexutil.Bytes, error) {
+	f, s := a.follower.Load(), a.announcements.Load()
+	if f == nil || s == nil {
+		return nil, nil
+	}
+	hash, ok, err := f.CanonicalHash(ctx, uint64(number))
+	if err != nil || !ok {
+		return nil, err
+	}
+	env, err := s.Get(ctx, uint64(number), hash)
+	if err != nil || env == nil {
+		return nil, err
+	}
+	return (*hexutil.Bytes)(&env), nil
 }
 
 // DecodeBatch is eez_decodeBatch: the batch a postAndVerifyBatch input

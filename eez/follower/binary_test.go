@@ -752,7 +752,8 @@ func enodeURL(key *ecdsa.PrivateKey, port string) string {
 // a couple of L2 blocks, while its safe block stays L1's. The sequencer, first
 // producer of the chain, derives from L1 alone, its overlay needs its key, it
 // reports itself as the source of its head and its overlay peers, and it
-// refuses debug_setHead.
+// refuses debug_setHead. On a rollup0 network its key signs no App. D.6
+// announcement.
 func TestSequencerBinary(t *testing.T) {
 	bin := os.Getenv("EEZ_ERIGON")
 	if bin == "" {
@@ -976,6 +977,9 @@ func TestSequencerBinary(t *testing.T) {
 	require.Positive(t, uint64(*followerStatus.OverlayPeers), "the follower of signed heads")
 	var ignored any
 	require.ErrorContains(t, call(t.Context(), s.url, "debug_setHead", &ignored, hexutil.Uint64(0)), "only driver")
+	var env *hexutil.Bytes
+	require.NoError(t, call(t.Context(), s.url, "eez_getUnsafeBlockAnnouncement", &env, receipt.BlockNumber))
+	require.Nil(t, env, "an App. D.6 announcement on a rollup0 network")
 
 	require.NoError(t, s.cmd.Process.Signal(os.Interrupt))
 	select {

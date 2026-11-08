@@ -233,7 +233,8 @@ type SequencerConfig struct {
 	// FeeRecipient is the produced blocks' beneficiary; zero selects the
 	// chain's fee collector.
 	FeeRecipient common.Address
-	// Key, when set, signs the sequencer's heads.
+	// Key, when set, signs the sequencer's heads or, where the rule set has
+	// them, its unsafe-block announcements instead.
 	Key *ecdsa.PrivateKey
 }
 
@@ -504,7 +505,14 @@ func (c *Config) L1Only(chainConfig *chain.Config) (bool, error) {
 // sequencer signs no heads has no overlay.
 func (c *Config) CheckChain(cc *chain.Config) error {
 	l2, ok := cc.L2.(*config.L2Config)
-	if !ok || !config.IsRollupX(l2.RuleSet()) || c.P2PListen == nil {
+	if !ok {
+		return nil
+	}
+	return c.checkRuleSet(l2.RuleSet())
+}
+
+func (c *Config) checkRuleSet(ruleSet uint64) error {
+	if c.P2PListen == nil || (!config.IsRollupX(ruleSet) && !config.Announces(ruleSet)) {
 		return nil
 	}
 	return fmt.Errorf("%w: --%s, --%s and --%s: the chain's sequencer signs no heads", ErrConfig, P2PListenFlag.Name, P2PPeersFlag.Name, SequencerAddressFlag.Name)

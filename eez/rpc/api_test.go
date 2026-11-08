@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/eez"
+	"github.com/erigontech/erigon/eez/announce"
 	"github.com/erigontech/erigon/eez/deriver/derivertest"
 	"github.com/erigontech/erigon/eez/follower"
 	"github.com/erigontech/erigon/eez/internal/testfixtures"
@@ -298,6 +299,47 @@ func TestFollowerStatus(t *testing.T) {
 		"hash":    unsettled.Hash().Hex(),
 	}}, fields["signedHeads"])
 	require.Equal(t, "signed_head", fields["headSource"])
+}
+
+// TestUnsafeBlockAnnouncement serves the announcement kept for the canonical
+// block at a number, and null for another block, a number without a block, or
+// a node that keeps none.
+func TestUnsafeBlockAnnouncement(t *testing.T) {
+	c := derivertest.NewComposer(t)
+	b := c.Compose(nil,
+		derivertest.Block{Coinbase: common.Address{1}, Extra: []byte{}, Txs: [][]byte{}},
+		derivertest.Block{Coinbase: common.Address{1}, Extra: []byte{}, Txs: [][]byte{}},
+	)
+	c.Post(derivertest.Posting{Batch: b})
+
+	api := eezrpc.NewAPI()
+	client := serve(t, api)
+	announcement := func(n uint64) string {
+		t.Helper()
+		var raw json.RawMessage
+		require.NoError(t, client.CallContext(t.Context(), &raw, "eez_getUnsafeBlockAnnouncement", hexutil.Uint64(n)))
+		return string(raw)
+	}
+	require.Equal(t, "null", announcement(1), "no follower")
+
+	_, chain := derivertest.NewL2(t)
+	cfg := follower.DefaultConfig
+	cfg.Dir = t.TempDir()
+	f, err := follower.New(c.L1, chain, derivertest.Config(), cfg, log.New())
+	require.NoError(t, err)
+	require.NoError(t, f.Boot(t.Context()))
+	api.Attach(f)
+	require.Equal(t, "null", announcement(1), "no store")
+
+	st, err := announce.Open(t.Context(), t.TempDir(), log.New())
+	require.NoError(t, err)
+	defer st.Close()
+	api.AttachAnnouncements(st)
+	require.NoError(t, st.Put(t.Context(), 1, b.Blocks[0].Hash(), []byte{1, 2}))
+	require.NoError(t, st.Put(t.Context(), 2, common.Hash{2}, []byte{3}))
+	require.Equal(t, `"0x0102"`, announcement(1))
+	require.Equal(t, "null", announcement(2), "another block's")
+	require.Equal(t, "null", announcement(3), "no block")
 }
 
 type noTxns struct{}
