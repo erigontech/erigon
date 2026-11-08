@@ -40,15 +40,10 @@ type chainWitnesses struct {
 }
 
 func collectChainWitnesses(t *testing.T, commitmentV3 bool) chainWitnesses {
-	previousAssert, previousSchema, previousV3 := dbg.AssertEnabled, statecfg.Schema, statecfg.ExperimentalCommitmentV3
-	t.Cleanup(func() {
-		dbg.AssertEnabled, statecfg.Schema, statecfg.ExperimentalCommitmentV3 = previousAssert, previousSchema, previousV3
-	})
+	previousAssert := dbg.AssertEnabled
+	t.Cleanup(func() { dbg.AssertEnabled = previousAssert })
 	dbg.AssertEnabled = true
-	statecfg.ExperimentalCommitmentV3 = commitmentV3
-	if commitmentV3 {
-		statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
-	}
+	t.Cleanup(statecfg.SetCommitmentV3(commitmentV3))
 	statecfg.EnableHistoricalCommitment()
 
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)

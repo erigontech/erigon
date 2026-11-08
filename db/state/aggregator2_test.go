@@ -110,9 +110,7 @@ func TestWorkersCfgKeepsOnlyTheNewestRequest(t *testing.T) {
 }
 
 func TestCheckSnapshotsCompatibilityV3RecordsRejectsLegacyCommitment(t *testing.T) {
-	prev := statecfg.Schema.CommitmentDomain.CommitmentV3Records
-	statecfg.Schema.CommitmentDomain.CommitmentV3Records = true
-	t.Cleanup(func() { statecfg.Schema.CommitmentDomain.CommitmentV3Records = prev })
+	t.Cleanup(statecfg.SetCommitmentV3(true))
 
 	dirs := datadir.New(t.TempDir())
 	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v2.0-commitment.0-1.kv"), nil, 0o644))
@@ -121,13 +119,7 @@ func TestCheckSnapshotsCompatibilityV3RecordsRejectsLegacyCommitment(t *testing.
 }
 
 func TestCheckSnapshotsCompatibilityV3RecordsIgnoresConvertBackups(t *testing.T) {
-	prev, previousV3 := statecfg.Schema.CommitmentDomain.CommitmentV3Records, statecfg.ExperimentalCommitmentV3
-	statecfg.Schema.CommitmentDomain.CommitmentV3Records = true
-	statecfg.ExperimentalCommitmentV3 = true
-	t.Cleanup(func() {
-		statecfg.Schema.CommitmentDomain.CommitmentV3Records = prev
-		statecfg.ExperimentalCommitmentV3 = previousV3
-	})
+	t.Cleanup(statecfg.SetCommitmentV3(true))
 
 	dirs := datadir.New(t.TempDir())
 	backup := filepath.Join(dirs.Snap, "backup", "domains")
@@ -139,13 +131,7 @@ func TestCheckSnapshotsCompatibilityV3RecordsIgnoresConvertBackups(t *testing.T)
 }
 
 func TestCheckSnapshotsCompatibilityV3RecordsRequiresFlag(t *testing.T) {
-	previousSchema, previousV3 := statecfg.Schema.CommitmentDomain.CommitmentV3Records, statecfg.ExperimentalCommitmentV3
-	statecfg.Schema.CommitmentDomain.CommitmentV3Records = false
-	statecfg.ExperimentalCommitmentV3 = false
-	t.Cleanup(func() {
-		statecfg.Schema.CommitmentDomain.CommitmentV3Records = previousSchema
-		statecfg.ExperimentalCommitmentV3 = previousV3
-	})
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 
 	dirs := datadir.New(t.TempDir())
 	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v3.0-commitment.0-1.kv"), nil, 0o644))

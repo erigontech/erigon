@@ -167,13 +167,6 @@ func randomWitnessAccount(rng *rand.Rand) *commitmenttest.AccountValue {
 	return &value
 }
 
-func randomWitnessValue(rng *rand.Rand) []byte {
-	value := make([]byte, 1+rng.Intn(32))
-	_, _ = rng.Read(value)
-	value[0] |= 1
-	return value
-}
-
 func craftKey(rng *rand.Rand, size int, prefix []byte, hashed func([]byte) []byte) []byte {
 	for {
 		key := make([]byte, size)
@@ -226,12 +219,12 @@ func witnessState(rng *rand.Rand, shape witnessShape) []commitmenttest.Op {
 				prefix = shape.slotPrefixes[j%len(shape.slotPrefixes)]
 			}
 			if shape.sharedSlots && j < len(shared) {
-				ops = append(ops, commitmenttest.Op{Key: append(bytes.Clone(addr), shared[j]...), Storage: randomWitnessValue(rng)})
+				ops = append(ops, commitmenttest.Op{Key: append(bytes.Clone(addr), shared[j]...), Storage: commitmenttest.RandomStorage(rng)})
 				continue
 			}
 			slot := craftKey(rng, length.Hash, prefix, slotNibbles(addr))
 			shared = append(shared, slot)
-			ops = append(ops, commitmenttest.Op{Key: append(bytes.Clone(addr), slot...), Storage: randomWitnessValue(rng)})
+			ops = append(ops, commitmenttest.Op{Key: append(bytes.Clone(addr), slot...), Storage: commitmenttest.RandomStorage(rng)})
 		}
 	}
 	return ops
@@ -338,7 +331,11 @@ func TestWitnessMatchesHPH(t *testing.T) {
 	})
 	for _, shape := range shapes {
 		t.Run(shape.name, func(t *testing.T) {
-			for seed := range int64(25) {
+			seeds := int64(25)
+			if testing.Short() {
+				seeds = 3
+			}
+			for seed := range seeds {
 				rng := rand.New(rand.NewSource(seed))
 				b := newWitnessBed(t, witnessState(rng, shape))
 				for round := range 4 {
@@ -380,7 +377,7 @@ func collapseBatch(rng *rand.Rand, b *witnessBed) []commitmenttest.Op {
 		case n < 4:
 			ops = append(ops, commitmenttest.DeleteAt(slot))
 		case n < 6 && !dead:
-			ops = append(ops, commitmenttest.Op{Key: slot, Storage: randomWitnessValue(rng)})
+			ops = append(ops, commitmenttest.Op{Key: slot, Storage: commitmenttest.RandomStorage(rng)})
 		}
 	}
 	for range rng.Intn(4) {
@@ -414,7 +411,7 @@ func collapseBatch(rng *rand.Rand, b *witnessBed) []commitmenttest.Op {
 				prefix = slotNibbles(addr)(slot[length.Addr:])[:1+rng.Intn(2)]
 			}
 		}
-		ops = append(ops, commitmenttest.Op{Key: append(bytes.Clone(addr), craftKey(rng, length.Hash, prefix, slotNibbles(addr))...), Storage: randomWitnessValue(rng)})
+		ops = append(ops, commitmenttest.Op{Key: append(bytes.Clone(addr), craftKey(rng, length.Hash, prefix, slotNibbles(addr))...), Storage: commitmenttest.RandomStorage(rng)})
 	}
 	return ops
 }
@@ -489,11 +486,11 @@ func TestCollapseTracerMatchesHPH(t *testing.T) {
 			for seed := range int64(40) {
 				rng := rand.New(rand.NewSource(seed))
 				pre := witnessState(rng, shape)
-				batch := collapseBatch(rng, newWitnessBed(t, pre))
-				if shape.batch != nil {
-					batch = shape.batch(rng, newWitnessBed(t, pre))
-				}
 				b := newWitnessBed(t, pre)
+				batch := collapseBatch(rng, b)
+				if shape.batch != nil {
+					batch = shape.batch(rng, b)
+				}
 				wantEvents, wantRoot := b.hphCollapses(t, batch)
 				gotEvents, gotRoot := b.v3Collapses(t, batch, false)
 				label := fmt.Sprintf("seed=%d batch=%d ops", seed, len(batch))

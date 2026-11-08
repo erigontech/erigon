@@ -365,18 +365,14 @@ func TestOpenRollingPin(t *testing.T) {
 func TestOpenRollingPinWarmTxsOnlyForV3(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	ctx := context.Background()
-	previousSchema, previousV3 := statecfg.Schema, statecfg.ExperimentalCommitmentV3
-	t.Cleanup(func() { statecfg.Schema, statecfg.ExperimentalCommitmentV3 = previousSchema, previousV3 })
-
-	statecfg.ExperimentalCommitmentV3 = false
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	pin, err := openRollingPin(ctx, m.DB)
 	require.NoError(t, err)
 	require.NotNil(t, pin)
 	t.Cleanup(pin.close)
 	require.Empty(t, pin.warm)
 
-	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
-	statecfg.ExperimentalCommitmentV3 = true
+	t.Cleanup(statecfg.SetCommitmentV3(true))
 	pin, err = openRollingPin(ctx, m.DB)
 	require.NoError(t, err)
 	require.NotNil(t, pin)
@@ -466,13 +462,10 @@ func TestBuildAndCacheHeadCaptureHappyPath(t *testing.T) {
 // straight into the shared cache's mode fields: head-capture construction yields a
 // cache-only, head-capture cache; durable construction yields a recompute-capable one.
 func TestBuildAndCacheHeadCaptureReadsParentRecords(t *testing.T) {
-	t.Run("legacy", func(t *testing.T) { headCaptureReadsParentRecords(t, false) })
-	t.Run("v3", func(t *testing.T) { headCaptureReadsParentRecords(t, true) })
+	headCaptureReadsParentRecords(t)
 }
 
 func TestRunWitnessCacheBuilderParentReadsByVariant(t *testing.T) {
-	previousSchema, previousV3 := statecfg.Schema, statecfg.ExperimentalCommitmentV3
-	t.Cleanup(func() { statecfg.Schema, statecfg.ExperimentalCommitmentV3 = previousSchema, previousV3 })
 	for _, tc := range []struct {
 		name string
 		v3   bool
@@ -481,11 +474,7 @@ func TestRunWitnessCacheBuilderParentReadsByVariant(t *testing.T) {
 		{name: "v3", v3: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			statecfg.Schema = previousSchema
-			statecfg.ExperimentalCommitmentV3 = tc.v3
-			if tc.v3 {
-				statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
-			}
+			t.Cleanup(statecfg.SetCommitmentV3(tc.v3))
 			commitmentdb.WantParentReads(false)
 			cache := newWitnessResultCache(1, 0, true, true)
 			header, hash := encodeSyntheticHeader(t, 1)
@@ -511,13 +500,8 @@ func TestRunWitnessCacheBuilderParentReadsByVariant(t *testing.T) {
 	}
 }
 
-func headCaptureReadsParentRecords(t *testing.T, commitmentV3 bool) {
-	previousSchema, previousV3 := statecfg.Schema, statecfg.ExperimentalCommitmentV3
-	t.Cleanup(func() { statecfg.Schema, statecfg.ExperimentalCommitmentV3 = previousSchema, previousV3 })
-	statecfg.ExperimentalCommitmentV3 = commitmentV3
-	if commitmentV3 {
-		statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
-	}
+func headCaptureReadsParentRecords(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(true))
 	statecfg.EnableHistoricalCommitment()
 	t.Cleanup(func() { commitmentdb.PublishParentRecords(nil) })
 
@@ -966,8 +950,7 @@ func TestWaitCommittedHeadPanicRollsBack(t *testing.T) {
 
 func newV3HistoryTestExecModule(t *testing.T) (*execmoduletester.ExecModuleTester, *blockgen.ChainPack) {
 	t.Helper()
-	statecfg.ExperimentalCommitmentV3 = true
-	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+	t.Cleanup(statecfg.SetCommitmentV3(true))
 	statecfg.EnableHistoricalCommitment()
 
 	m, testChain := rpcdaemontest.CreateTestExecModuleNoInsert(t)
@@ -978,10 +961,9 @@ func newV3HistoryTestExecModule(t *testing.T) (*execmoduletester.ExecModuleTeste
 }
 
 func TestHeadCaptureOverParentRecordsMatchesDurablePerBlock(t *testing.T) {
-	previousAssert, previousSchema, previousV3 := dbg.AssertEnabled, statecfg.Schema, statecfg.ExperimentalCommitmentV3
-	t.Cleanup(func() {
-		dbg.AssertEnabled, statecfg.Schema, statecfg.ExperimentalCommitmentV3 = previousAssert, previousSchema, previousV3
-	})
+	previousAssert := dbg.AssertEnabled
+	t.Cleanup(func() { dbg.AssertEnabled = previousAssert })
+	t.Cleanup(statecfg.SetCommitmentV3(true))
 	dbg.AssertEnabled = true
 	commitmentdb.WantParentReads(true)
 	t.Cleanup(func() { commitmentdb.WantParentReads(false) })
@@ -1038,8 +1020,7 @@ func TestHeadCaptureOverParentRecordsMatchesDurablePerBlock(t *testing.T) {
 }
 
 func TestHeadCaptureWarmPanicIsContained(t *testing.T) {
-	previousSchema, previousV3 := statecfg.Schema, statecfg.ExperimentalCommitmentV3
-	t.Cleanup(func() { statecfg.Schema, statecfg.ExperimentalCommitmentV3 = previousSchema, previousV3 })
+	t.Cleanup(statecfg.SetCommitmentV3(true))
 	t.Cleanup(func() { commitmentdb.PublishParentRecords(nil) })
 	m, testChain := newV3HistoryTestExecModule(t)
 	ctx := context.Background()

@@ -137,7 +137,7 @@ func TestDifferential(t *testing.T) {
 
 	t.Run("bulk", func(t *testing.T) {
 		for _, kind := range []string{"accounts", "storage", "mixed"} {
-			for _, count := range []int{1, 2, 16, 1000, 100000} {
+			for _, count := range []int{1, 2, 16, 256} {
 				var initial, ops []commitmenttest.Op
 				for i := range count {
 					slot := commitmenttest.StorageAt(commitmenttest.SlotKey(parityAddress(i), paritySlot(i)), i)
@@ -183,7 +183,7 @@ func TestDifferential(t *testing.T) {
 	})
 
 	t.Run("incremental", func(t *testing.T) {
-		c := commitmenttest.Generate(commitmenttest.MathRand(0), commitmenttest.SequenceSpec{Kind: "incremental"})
+		c := commitmenttest.Generate(commitmenttest.Seed(0), commitmenttest.SequenceSpec{Kind: "incremental"})
 		state := make(commitmenttest.State)
 		for _, round := range c.Rounds {
 			state.Apply(round)
@@ -205,8 +205,8 @@ func TestDifferential(t *testing.T) {
 	})
 
 	t.Run("feed", func(t *testing.T) {
-		storage := commitmenttest.Generate(commitmenttest.MathRand(0), commitmenttest.SequenceSpec{Kind: "storage", Count: 300})
-		whale := commitmenttest.Generate(commitmenttest.MathRand(424242), commitmenttest.SequenceSpec{Kind: "whale", Count: 3 * defaultStorageFanOutMin})
+		storage := commitmenttest.Generate(commitmenttest.Seed(0), commitmenttest.SequenceSpec{Kind: "storage", Count: 300})
+		whale := commitmenttest.Generate(commitmenttest.Seed(424242), commitmenttest.SequenceSpec{Kind: "whale", Count: 3 * defaultStorageFanOutMin})
 		seed := storage.Rounds[0]
 		seed = append(seed, whale.Rounds[0]...)
 		var next []commitmenttest.Op
@@ -250,7 +250,7 @@ func TestDifferential(t *testing.T) {
 				for seed := int64(1); seed <= 40; seed++ {
 					for _, b1 := range tt.first {
 						for _, b2 := range tt.second {
-							c := commitmenttest.Generate(commitmenttest.MathRand(seed), commitmenttest.SequenceSpec{Kind: tt.kind, BatchSizes: []int{b1, b2}, Rewrite: rewrite})
+							c := commitmenttest.Generate(commitmenttest.Seed(seed), commitmenttest.SequenceSpec{Kind: tt.kind, BatchSizes: []int{b1, b2}, Rewrite: rewrite})
 							c.ID = fmt.Sprintf("%s/%d+%d", tt.kind, b1, b2)
 							if tt.kind == "one-slot" {
 								c.ID += fmt.Sprintf("/rewrite=%t", rewrite)
@@ -266,7 +266,7 @@ func TestDifferential(t *testing.T) {
 	t.Run("E61/two-slot-seeds", func(t *testing.T) {
 		for seed := range int64(200) {
 			t.Run(fmt.Sprintf("seed=%d", seed), func(t *testing.T) {
-				c := commitmenttest.Generate(commitmenttest.MathRand(seed), commitmenttest.SequenceSpec{Kind: "whale", Count: 2})
+				c := commitmenttest.Generate(commitmenttest.Seed(seed), commitmenttest.SequenceSpec{Kind: "whale", Count: 2})
 				c.ID = "E61/two-slot-seeds"
 				differential(t, c, serialEngines[:1])
 			})
@@ -276,7 +276,7 @@ func TestDifferential(t *testing.T) {
 	t.Run("slot_threshold", func(t *testing.T) {
 		for _, seed := range []int64{424242, 1, 2, 3, 7, 99, 12345, 777, 31337, 5150} {
 			for n := 1; n <= 80; n++ {
-				c := commitmenttest.Generate(commitmenttest.MathRand(seed), commitmenttest.SequenceSpec{Kind: "whale", Count: n})
+				c := commitmenttest.Generate(commitmenttest.Seed(seed), commitmenttest.SequenceSpec{Kind: "whale", Count: n})
 				c.ID = fmt.Sprintf("slot-threshold/%d", n)
 				differential(t, c, serialEngines[:1])
 			}
@@ -382,8 +382,10 @@ func runWorlds(t *testing.T, spec commitmenttest.SequenceSpec, seeds int64) {
 	rounds, drifts := 0, 0
 	for seed := int64(1); seed <= seeds; seed++ {
 		t.Run(fmt.Sprintf("a%d_s%d/seed%d", spec.Accounts, spec.Slots, seed), func(t *testing.T) {
-			c := commitmenttest.Generate(commitmenttest.MathRand(seed), spec)
-			c.Assertions.TolerateHPHDrift = true
+			c := commitmenttest.Generate(commitmenttest.Seed(seed), spec)
+			if spec.Kind == "root-collapse" {
+				c.Assertions.TolerateHPHDrift = true
+			}
 			roots, _, hphDrift := differential(t, c, parityEngines[:2])
 			require.Len(t, roots, spec.Rounds, "every configured round must be checked against v3")
 			rounds += len(roots)

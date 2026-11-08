@@ -144,7 +144,7 @@ func TestDeltas(t *testing.T) {
 		t.Run(tc.name, tc.run)
 	}
 
-	generated := commitmenttest.Generate(commitmenttest.MathRand(0), commitmenttest.SequenceSpec{Kind: "storage", Count: 2200})
+	generated := commitmenttest.Generate(commitmenttest.Seed(0), commitmenttest.SequenceSpec{Kind: "storage", Count: 2200})
 	whale := commitmenttest.Key(commitmenttest.KeySpec{Kind: "bench-address", Size: 20}, 7)
 	account := commitmenttest.Account(commitmenttest.AccountSpec{Kind: "parity", Number: 7})
 	owner := commitmenttest.Op{Key: whale, Account: &account}
@@ -295,6 +295,30 @@ func TestRecordGraph(t *testing.T) {
 			require.NoError(t, live.Record(parent, [32]byte{8}))
 			_, _, _, err = live.Finish()
 			require.ErrorContains(t, err, "is referenced but missing")
+		}},
+		{"E66/RecordMatcherRejectsHashMismatch", func(t *testing.T) {
+			matcher := NewRecordMatcher()
+			key := AccountNodeKey([]byte{1}, nil)
+			h1, h2 := [32]byte{1}, [32]byte{2}
+			require.NoError(t, matcher.Expect(key, h1[:]))
+			require.ErrorContains(t, matcher.Record(key, h2), "folds to")
+		}},
+		{"E66/RecordMatcherRejectsDuplicateRecord", func(t *testing.T) {
+			matcher := NewRecordMatcher()
+			key := AccountNodeKey([]byte{1}, nil)
+			hash := [32]byte{1}
+			require.NoError(t, matcher.Record(key, hash))
+			require.ErrorContains(t, matcher.Record(key, hash), "recorded or expected twice")
+		}},
+		{"E66/RecordMatcherRejectsMissingStorageRoot", func(t *testing.T) {
+			matcher := NewRecordMatcher()
+			var addrHash [32]byte
+			addrHash[0] = 1
+			root := [32]byte{2}
+			require.NoError(t, matcher.Expect(StorageNodeKey(addrHash, nil, nil), root[:]))
+			require.NoError(t, matcher.Record(AccountNodeKey(nil, nil), [32]byte{3}))
+			_, _, _, err := matcher.Finish()
+			require.ErrorContains(t, err, "no storage trie")
 		}},
 		{"E66/EmptyChildRecordIsInvalid", func(t *testing.T) {
 			var addrHash [32]byte

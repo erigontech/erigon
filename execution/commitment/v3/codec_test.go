@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/race"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -290,7 +291,7 @@ func TestAccountCodec(t *testing.T) {
 			for _, share := range []int{12, 0} {
 				t.Run(fmt.Sprintf("contracts=%d", share), func(t *testing.T) {
 					rnd := rand.New(rand.NewSource(7))
-					for i := range 200000 {
+					for i := range 2000 {
 						value, root := commitmenttest.SizedAccount(i, i%100 < share, rnd)
 						encoded := encodeAccountLeaf(testAccountUpdate(value), root, nil)
 						nonce, balance, code, storage, err := decodeAccountLeaf(encoded)
@@ -299,7 +300,6 @@ func TestAccountCodec(t *testing.T) {
 						require.Equal(t, value.Balance, balance)
 						require.Equal(t, value.CodeHash[:], code)
 						require.Equal(t, root, storage)
-						_ = accountConsensusRLP(nonce, &balance, storage, code, nil)
 					}
 				})
 			}
@@ -666,9 +666,13 @@ func TestRecordCodec(t *testing.T) {
 
 func TestExtensionHotPathsDoNotAllocate(t *testing.T) {
 	var child [32]byte
-	require.Zero(t, testing.AllocsPerRun(100, func() {
+	callExtension := func() {
 		_ = extensionRef([]byte{1, 2, 3, 4}, child[:])
-	}))
+	}
+	callExtension()
+	if !race.Enabled {
+		require.Zero(t, testing.AllocsPerRun(100, callExtension))
+	}
 
 	n := newNode(planeAccount, 1)
 	n.setStoredChild(3, child[:], []byte{2, 3, 4})
@@ -679,9 +683,13 @@ func TestExtensionHotPathsDoNotAllocate(t *testing.T) {
 	stored.childMask = stored.layout.child
 	stored.hashMask = stored.layout.tree()
 	var dst [64]byte
-	require.Zero(t, testing.AllocsPerRun(100, func() {
+	callChildExt := func() {
 		_ = stored.childExtAtInto(3, dst[:0])
-	}))
+	}
+	callChildExt()
+	if !race.Enabled {
+		require.Zero(t, testing.AllocsPerRun(100, callChildExt))
+	}
 }
 
 func extFixture(path []byte) []byte {

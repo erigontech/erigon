@@ -258,7 +258,7 @@ func stressRounds(rng *rand.Rand, spec SequenceSpec) [][]Op {
 				entries = append(entries, wipe)
 				for range 1 + rng.Intn(3) {
 					key := append(bytes.Clone(addr), Key(KeySpec{Kind: "integer", Size: 32}, rng.Intn(spec.Slots))...)
-					entries = append(entries, Op{Key: key, Storage: randomStorage(rng)})
+					entries = append(entries, Op{Key: key, Storage: RandomStorage(rng)})
 				}
 			default:
 				touched[string(addr)] = struct{}{}
@@ -271,7 +271,7 @@ func stressRounds(rng *rand.Rand, spec SequenceSpec) [][]Op {
 						entries = append(entries, Op{Key: key, Delete: true})
 						continue
 					}
-					entries = append(entries, Op{Key: key, Storage: randomStorage(rng)})
+					entries = append(entries, Op{Key: key, Storage: RandomStorage(rng)})
 				}
 			}
 		}

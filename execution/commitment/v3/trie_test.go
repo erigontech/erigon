@@ -180,7 +180,7 @@ func TestTrieAPI(t *testing.T) {
 			slot := bytes.Repeat([]byte{0x22}, 32)
 			account := fullAccountUpdate(3, 5, common.HexToHash("0x1234"))
 			updates.TouchPlainKeyDirect(string(address), &account)
-			storage := phaseAStorageUpdate([]byte{0xaa})
+			storage := storageUpdate([]byte{0xaa})
 			updates.TouchPlainKeyDirect(string(append(append([]byte(nil), address...), slot...)), storage)
 
 			_, err := trie.Process(context.Background(), updates, "", nil, commitment.WarmupConfig{})
@@ -639,8 +639,8 @@ func TestUnfold(t *testing.T) {
 			m := newMockContext()
 			address := [32]byte{7}
 			_, err := runStorageTask(m, storageTask{addrHash: address, entries: []storageEntry{
-				entryOf(append([]byte{1}, bytes.Repeat([]byte{2}, 63)...), phaseAStorageUpdate([]byte{1})),
-				entryOf(append([]byte{3}, bytes.Repeat([]byte{4}, 63)...), phaseAStorageUpdate([]byte{2})),
+				entryOf(append([]byte{1}, bytes.Repeat([]byte{2}, 63)...), storageUpdate([]byte{1})),
+				entryOf(append([]byte{3}, bytes.Repeat([]byte{4}, 63)...), storageUpdate([]byte{2})),
 			}})
 			require.NoError(t, err)
 			stored := m.branches[string(StorageNodeKey(address, nil, nil))]
@@ -811,7 +811,7 @@ func foldUpdate(plane byte, number int) commitment.Update {
 }
 
 func distinctKeysAndPaths(count int, seed int64) ([][]byte, [][]byte) {
-	keys := commitmenttest.Keys(commitmenttest.MathRand(seed), commitmenttest.KeySpec{Kind: "random-distinct", Size: 20, Count: count})
+	keys := commitmenttest.Keys(commitmenttest.Seed(seed), commitmenttest.KeySpec{Kind: "random-distinct", Size: 20, Count: count})
 	paths := make([][]byte, 0, len(keys))
 	for _, key := range keys {
 		paths = append(paths, commitment.KeyToHexNibbleHash(key))

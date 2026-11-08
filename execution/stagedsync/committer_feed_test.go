@@ -40,11 +40,12 @@ import (
 )
 
 func TestCalculatorFeedRootMatchesHexPatricia(t *testing.T) {
-	defer func(v bool) { statecfg.ExperimentalCommitmentV3 = v }(statecfg.ExperimentalCommitmentV3)
 	roots := make(map[bool][][]byte)
 	for _, v3 := range []bool{false, true} {
-		statecfg.ExperimentalCommitmentV3 = v3
-		roots[v3] = calculatorRoots(t, v3)
+		t.Run(map[bool]string{false: "hph", true: "v3"}[v3], func(t *testing.T) {
+			t.Cleanup(statecfg.SetCommitmentV3(v3))
+			roots[v3] = calculatorRoots(t, v3)
+		})
 	}
 	require.Len(t, roots[false], 2)
 	require.Equal(t, roots[false], roots[true])
@@ -202,11 +203,12 @@ func TestEmitTouchedFeedSkipsDeletedWhenParentReadsNotWanted(t *testing.T) {
 }
 
 func TestComputeAheadFeedRootMatchesHexPatricia(t *testing.T) {
-	defer func(v bool) { statecfg.ExperimentalCommitmentV3 = v }(statecfg.ExperimentalCommitmentV3)
 	roots := make(map[bool][]byte)
 	for _, v3 := range []bool{false, true} {
-		statecfg.ExperimentalCommitmentV3 = v3
-		roots[v3] = computeAheadRoot(t, v3)
+		t.Run(map[bool]string{false: "hph", true: "v3"}[v3], func(t *testing.T) {
+			t.Cleanup(statecfg.SetCommitmentV3(v3))
+			roots[v3] = computeAheadRoot(t, v3)
+		})
 	}
 	require.NotEmpty(t, roots[false])
 	require.Equal(t, roots[false], roots[true])

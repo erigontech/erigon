@@ -22,26 +22,16 @@ import (
 	"maps"
 	"math/rand"
 	"slices"
-	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/length"
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/trie"
 	"github.com/erigontech/erigon/internal/commitmenttest"
 	"github.com/erigontech/erigon/internal/commitmenttest/runner"
 )
-
-func benchUpdatesIn(dir string, mode commitment.Mode, ops []commitmenttest.Op, updates []*commitment.Update) *commitment.Updates {
-	u := commitment.NewUpdates(mode, dir, commitment.KeyToHexNibbleHash)
-	for i, op := range ops {
-		u.TouchPlainKeyDirect(string(op.Key), updates[i])
-	}
-	return u
-}
 
 func benchAddr(i int) []byte {
 	return commitmenttest.Key(commitmenttest.KeySpec{Kind: "bench-address", Size: 20}, i)
@@ -49,19 +39,6 @@ func benchAddr(i int) []byte {
 
 func benchSlot(i int) []byte {
 	return commitmenttest.Key(commitmenttest.KeySpec{Kind: "bench-slot", Size: 32}, i)
-}
-
-func benchEntries(shape string, n int) []commitmenttest.Op {
-	seed := int64(0)
-	switch shape {
-	case "accounts", "storage":
-	case "whale":
-		seed = 424242
-	default:
-		shape = "storage"
-	}
-	c := commitmenttest.Generate(commitmenttest.MathRand(seed), commitmenttest.SequenceSpec{Kind: shape, Count: n})
-	return c.Rounds[0]
 }
 
 func BenchmarkFoldV3VsHPH(b *testing.B) {
@@ -114,55 +91,6 @@ func BenchmarkFoldV3VsHPH(b *testing.B) {
 		}
 	}
 }
-
-type shardedShard struct {
-	mu       sync.Mutex
-	branches map[string][]byte
-	_        [24]byte
-}
-
-type shardedContext struct {
-	shards [64]shardedShard
-	empty  commitment.Update
-}
-
-func newShardedContext() *shardedContext {
-	c := &shardedContext{empty: commitment.Update{Flags: commitment.DeleteUpdate}}
-	for i := range c.shards {
-		c.shards[i].branches = make(map[string][]byte)
-	}
-	return c
-}
-
-func (c *shardedContext) shard(key []byte) *shardedShard {
-	h := uint32(2166136261)
-	for _, b := range key {
-		h = (h ^ uint32(b)) * 16777619
-	}
-	return &c.shards[h&63]
-}
-
-func (c *shardedContext) Branch(key []byte) ([]byte, kv.Step, error) {
-	s := c.shard(key)
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return bytes.Clone(s.branches[string(key)]), 0, nil
-}
-
-func (c *shardedContext) PutBranch(key, data, _ []byte) error {
-	s := c.shard(key)
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.branches[string(key)] = bytes.Clone(data)
-	return nil
-}
-
-func (c *shardedContext) Account([]byte) (*commitment.Update, error) { return c.empty.Copy(), nil }
-func (c *shardedContext) Storage([]byte) (*commitment.Update, error) { return c.empty.Copy(), nil }
-
-func (c *shardedContext) factory(context.Context) (commitment.PatriciaContext, func()) { return c, nil }
-
-var _ commitment.PatriciaContext = (*shardedContext)(nil)
 
 func BenchmarkV3Workers(b *testing.B) {
 	ctxb := context.Background()
@@ -252,10 +180,6 @@ func BenchmarkV3Incremental(b *testing.B) {
 	})
 }
 
-type discardWrites struct{ commitment.PatriciaContext }
-
-func (discardWrites) PutBranch([]byte, []byte, []byte) error { return nil }
-
 func BenchmarkWitness(b *testing.B) {
 	rng := rand.New(rand.NewSource(1))
 	bed := newWitnessBed(b, witnessState(rng, witnessShape{accounts: 20000, slots: 8}))
@@ -275,7 +199,7 @@ func BenchmarkWitness(b *testing.B) {
 			batch = append(batch, commitmenttest.DeleteAt(bed.slots[rng.Intn(len(bed.slots))]))
 		default:
 			addr := bed.accounts[rng.Intn(len(bed.accounts))]
-			batch = append(batch, commitmenttest.Op{Key: append(bytes.Clone(addr), craftKey(rng, length.Hash, nil, slotNibbles(addr))...), Storage: randomWitnessValue(rng)})
+			batch = append(batch, commitmenttest.Op{Key: append(bytes.Clone(addr), craftKey(rng, length.Hash, nil, slotNibbles(addr))...), Storage: commitmenttest.RandomStorage(rng)})
 		}
 	}
 	ctx := context.Background()

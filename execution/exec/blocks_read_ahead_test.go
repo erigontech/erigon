@@ -335,9 +335,9 @@ func TestWarmBALPropagatesWorkerCancellation(t *testing.T) {
 }
 
 func TestWarmBALSkipsCommitmentWarmupOnV3(t *testing.T) {
-	defer func(v bool) { statecfg.ExperimentalCommitmentV3 = v }(statecfg.ExperimentalCommitmentV3)
+	t.Cleanup(statecfg.SetCommitmentV3(true))
 	defer func(v int) { dbg.TrieBALWarmupers = v }(dbg.TrieBALWarmupers)
-	statecfg.ExperimentalCommitmentV3, dbg.TrieBALWarmupers = true, 2
+	dbg.TrieBALWarmupers = 2
 
 	tx := new(commitmentRecordingTx)
 	db := &singleTxRoDB{tx: tx}

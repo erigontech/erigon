@@ -108,7 +108,7 @@ func Storage(spec StorageSpec) []byte {
 	return []byte{byte(spec.Number), byte(spec.Number >> 8)}
 }
 
-func randomStorage(rng *rand.Rand) []byte {
+func RandomStorage(rng *rand.Rand) []byte {
 	value := make([]byte, 1+rng.Intn(32))
 	_, _ = rng.Read(value)
 	value[0] |= 1

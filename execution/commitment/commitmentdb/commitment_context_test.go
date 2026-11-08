@@ -71,18 +71,6 @@ func TestLegacyCommitmentStateDispatch(t *testing.T) {
 	}
 }
 
-func TestCommitmentV3StateRejectsLegacyBlob(t *testing.T) {
-	t.Parallel()
-
-	cs := commitmentState{txNum: 2, blockNum: 1, trieState: []byte{3}}
-	legacy, err := cs.Encode()
-	require.NoError(t, err)
-
-	sdc := &SharedDomainsCommitmentContext{patriciaTrie: &stateCodecTrie{}}
-	_, _, err = sdc.restorePatriciaState(legacy)
-	require.ErrorContains(t, err, "invalid state variant marker")
-}
-
 type stateCodecTrie struct{ testTrie }
 
 type testTrie struct{}

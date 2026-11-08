@@ -20,8 +20,6 @@ import "math/rand"
 
 type Seed int64
 
-func MathRand(seed int64) Seed { return Seed(seed) }
-
 func (s Seed) rand() *rand.Rand { return rand.New(rand.NewSource(int64(s))) }
 
 type Op struct {

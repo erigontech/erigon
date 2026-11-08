@@ -176,10 +176,10 @@ func TestHandleBlockRequestQueuesBALWrites(t *testing.T) {
 }
 
 func TestComputeAheadReadsPrefetchedBranches(t *testing.T) {
-	defer func(v bool) { statecfg.ExperimentalCommitmentV3 = v }(statecfg.ExperimentalCommitmentV3)
+	t.Cleanup(statecfg.SetCommitmentV3(true))
 	defer func(v bool) { dbg.BALDrivenCommitment = v }(dbg.BALDrivenCommitment)
 	defer func(v bool) { dbg.IgnoreBAL = v }(dbg.IgnoreBAL)
-	statecfg.ExperimentalCommitmentV3, dbg.BALDrivenCommitment, dbg.IgnoreBAL = true, true, false
+	dbg.BALDrivenCommitment, dbg.IgnoreBAL = true, false
 
 	ctx := context.Background()
 	logger := log.New()

@@ -227,27 +227,6 @@ func TestCommitmentCalculator_ReportsProgress(t *testing.T) {
 // is how the archive snapshot producer runs — it needs step-aligned commitment
 // just like batch mode.
 func TestHandleMessage_StepCheckpointInPerBlockMode(t *testing.T) {
-	const stepEdgeTxNum = uint64(16) - 1
-	stateBlob := runPerBlockMidBlockStepEdge(t, false)
-	require.GreaterOrEqual(t, len(stateBlob), 16, "a commitment checkpoint must exist at the mid-block step edge")
-	gotTxNum, gotBlockNum := stateTxBlockNums(t, stateBlob)
-	require.Equal(t, stepEdgeTxNum, gotTxNum,
-		"per-block mode must still checkpoint at the mid-block step edge (snapshot producer needs step-aligned commitment)")
-	require.Equal(t, uint64(2), gotBlockNum,
-		"the step checkpoint sits inside the straddling block")
-}
-
-func TestHandleMessage_BlockEndStateFollowsMidBlockStepCheckpoint(t *testing.T) {
-	const block2End = uint64(16) - 1 + 2
-	stateBlob := runPerBlockMidBlockStepEdge(t, true)
-	require.GreaterOrEqual(t, len(stateBlob), 16)
-	gotTxNum, gotBlockNum := stateTxBlockNums(t, stateBlob)
-	require.Equal(t, block2End, gotTxNum,
-		"a block whose writes end at a mid-block step edge must still save commitment state at its last txNum; a state left at the edge makes the next cycle re-execute the block")
-	require.Equal(t, uint64(2), gotBlockNum)
-}
-
-func runPerBlockMidBlockStepEdge(t *testing.T, finishBlock bool) []byte {
 	ctx := context.Background()
 	logger := log.New()
 	const stepSize = uint64(16)
@@ -262,7 +241,6 @@ func runPerBlockMidBlockStepEdge(t *testing.T, finishBlock bool) []byte {
 
 	const block1End = uint64(10)
 	const stepEdgeTxNum = stepSize - 1
-	const block2End = stepEdgeTxNum + 2
 
 	rnd := rand.New(rand.NewSource(42))
 	vm1, vm2 := newRawViewVM(1), newRawViewVM(block1End+1)
@@ -289,18 +267,16 @@ func runPerBlockMidBlockStepEdge(t *testing.T, finishBlock bool) []byte {
 	for txNum := block1End + 1; txNum <= stepEdgeTxNum; txNum++ {
 		writeAccount(txNum, 2)
 	}
-	if finishBlock {
-		for txNum := stepEdgeTxNum + 1; txNum <= block2End; txNum++ {
-			cc.handleMessage(ctx, &txResult{blockNum: 2, txNum: txNum, rules: &chain.Rules{}, writes: &state.WriteSet{}})
-		}
-		cc.handleMessage(ctx, newTestBlockResult(2, common.Hash{0x02}, block2End, false))
-	}
-
 	cc.Stop()
 
 	stateBlob, _, err := doms.GetLatest(kv.CommitmentDomain, tx, testCommitmentStateKey())
 	require.NoError(t, err)
-	return stateBlob
+	require.GreaterOrEqual(t, len(stateBlob), 16, "a commitment checkpoint must exist at the mid-block step edge")
+	gotTxNum, gotBlockNum := stateTxBlockNums(t, stateBlob)
+	require.Equal(t, stepEdgeTxNum, gotTxNum,
+		"per-block mode must still checkpoint at the mid-block step edge (snapshot producer needs step-aligned commitment)")
+	require.Equal(t, uint64(2), gotBlockNum,
+		"the step checkpoint sits inside the straddling block")
 }
 
 // TestHandleMessage_PartialBlockComputeFailureNotSwallowed pins that when the

@@ -296,10 +296,11 @@ func TestConvertCommitmentFiles_V3HistoryPreflightLeavesNoProducer(t *testing.T)
 	tx, err := db.BeginTemporalRw(t.Context())
 	require.NoError(t, err)
 	t.Cleanup(tx.Rollback)
+	opt := goleak.IgnoreCurrent()
 	_, err = state.ConvertCommitmentFiles(t.Context(), state.AggTx(tx), state.ConvertOpts{TargetV3: true}, log.New())
 	tx.Rollback()
 	require.ErrorContains(t, err, "missing .ef range")
-	goleak.VerifyNone(t, goleak.IgnoreCurrent())
+	goleak.VerifyNone(t, opt)
 }
 
 type commitmentHistoryPair struct {

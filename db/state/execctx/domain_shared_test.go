@@ -2045,9 +2045,6 @@ func decodeStoredState(t *testing.T, state []byte) (txNum, blockNum uint64, payl
 }
 
 func TestSeekCommitmentRejectsOtherPlaneState(t *testing.T) {
-	previousV3 := statecfg.ExperimentalCommitmentV3
-	t.Cleanup(func() { statecfg.ExperimentalCommitmentV3 = previousV3 })
-
 	for _, tc := range []struct {
 		name    string
 		key     []byte
@@ -2058,7 +2055,7 @@ func TestSeekCommitmentRejectsOtherPlaneState(t *testing.T) {
 		{"legacy rejects v3 state", commitment.KeyCommitmentV3State, false, "commitment v3 records"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			statecfg.ExperimentalCommitmentV3 = false
+			t.Cleanup(statecfg.SetCommitmentV3(false))
 			ctx := t.Context()
 			db := newTestDb(t, 16)
 			rwTx, err := db.BeginTemporalRw(ctx)
@@ -2071,7 +2068,7 @@ func TestSeekCommitmentRejectsOtherPlaneState(t *testing.T) {
 			require.NoError(t, sd.Flush(ctx, rwTx))
 			sd.Close()
 
-			statecfg.ExperimentalCommitmentV3 = tc.openV3
+			t.Cleanup(statecfg.SetCommitmentV3(tc.openV3))
 			_, err = execctx.NewSharedDomains(ctx, rwTx, log.New())
 			require.ErrorContains(t, err, tc.wantErr)
 		})
@@ -2081,12 +2078,7 @@ func TestSeekCommitmentRejectsOtherPlaneState(t *testing.T) {
 func TestTouchChangedKeysFromHistoryRestoresTheStoredRoot(t *testing.T) {
 	for _, v3 := range []bool{false, true} {
 		t.Run(fmt.Sprintf("v3=%t", v3), func(t *testing.T) {
-			schema, enabled := statecfg.Schema, statecfg.ExperimentalCommitmentV3
-			t.Cleanup(func() { statecfg.Schema, statecfg.ExperimentalCommitmentV3 = schema, enabled })
-			if v3 {
-				statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
-				statecfg.ExperimentalCommitmentV3 = true
-			}
+			t.Cleanup(statecfg.SetCommitmentV3(v3))
 			ctx := t.Context()
 			db1 := newTestDb(t, 1)
 			rw, err := db1.BeginTemporalRw(ctx)

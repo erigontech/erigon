@@ -416,7 +416,7 @@ func convertFixture(t *testing.T, db kv.TemporalRwDB, agg *state.Aggregator, mod
 func buildRandomWriteFiles(t *testing.T, mode string) (kv.TemporalRwDB, *state.Aggregator) {
 	t.Helper()
 	const stepSize, steps = 4, 8
-	useCommitmentSchema(t, mode == "native")
+	t.Cleanup(statecfg.SetCommitmentV3(mode == "native"))
 	db, agg, rwTx, domains := convertTestDomains(t, stepSize)
 	_, _, putAccount := domainWriter(t, domains, rwTx)
 	addrs, _ := generateInputData(t, length.Addr, 1, 64)
@@ -522,7 +522,7 @@ func wipedStorage(c wipeCase) func(t *testing.T, mode string) (kv.TemporalRwDB, 
 func buildWipedStorageFiles(t *testing.T, mode string, c wipeCase) (kv.TemporalRwDB, *state.Aggregator) {
 	t.Helper()
 	const stepSize, steps, wipeTx = 4, 8, 17
-	useCommitmentSchema(t, mode == "native")
+	t.Cleanup(statecfg.SetCommitmentV3(mode == "native"))
 	db, agg, rwTx, domains := convertTestDomains(t, stepSize)
 	put, del, putAccount := domainWriter(t, domains, rwTx)
 	addrs, _ := generateInputData(t, length.Addr, 1, 16)
@@ -586,7 +586,7 @@ func buildWipedStorageFiles(t *testing.T, mode string, c wipeCase) (kv.TemporalR
 
 func TestConvertCommitmentFiles_V3ExtensionRoot(t *testing.T) {
 	const stepSize, steps = 4, 2
-	useCommitmentSchema(t, false)
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	db, agg, rwTx, domains := convertTestDomains(t, stepSize)
 	_, _, putAccount := domainWriter(t, domains, rwTx)
 	next := uint64(1)
@@ -618,7 +618,7 @@ func TestConvertCommitmentFiles_V3ExtensionRoot(t *testing.T) {
 
 func TestConvertCommitmentFiles_V3LeafRootFailsBeforeSwap(t *testing.T) {
 	const stepSize, steps = 4, 2
-	useCommitmentSchema(t, false)
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	db, agg, rwTx, domains := convertTestDomains(t, stepSize)
 	_, _, putAccount := domainWriter(t, domains, rwTx)
 	next := uint64(1)
@@ -650,7 +650,7 @@ func TestConvertCommitmentFiles_V3ExtensionRootReplacedLater(t *testing.T) {
 	for _, name := range []string{"branch", "empty"} {
 		t.Run(name, func(t *testing.T) {
 			const stepSize, steps = 1, 4
-			useCommitmentSchema(t, false)
+			t.Cleanup(statecfg.SetCommitmentV3(false))
 			db, agg, rwTx, domains := convertTestDomains(t, stepSize)
 			_, del, putAccount := domainWriter(t, domains, rwTx)
 			next := uint64(1)

@@ -17,7 +17,6 @@
 package execctx_test
 
 import (
-	"math/rand/v2"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -29,26 +28,6 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment"
 )
-
-func commitmentPutCorpus(n int) []commitment.BranchDelta {
-	rng := rand.New(rand.NewPCG(1, 2))
-	writes := make([]commitment.BranchDelta, n)
-	for i := range writes {
-		key := make([]byte, 37)
-		key[0] = 0x41
-		for j := 1; j < len(key); j++ {
-			key[j] = byte(rng.Uint32())
-		}
-		data := make([]byte, 300+rng.IntN(150))
-		prev := make([]byte, len(data))
-		for j := range data {
-			data[j] = byte(rng.Uint32())
-			prev[j] = byte(rng.Uint32())
-		}
-		writes[i] = commitment.BranchDelta{Key: key, Data: data, Prev: prev}
-	}
-	return writes
-}
 
 func BenchmarkCommitmentPut(b *testing.B) {
 	const records = 900_000

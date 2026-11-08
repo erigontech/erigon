@@ -391,7 +391,7 @@ func testRebuildCommitmentBasedOnFiles(t *testing.T, v3 bool) {
 		//db.Close()
 	}
 
-	useCommitmentSchema(t, v3)
+	t.Cleanup(statecfg.SetCommitmentV3(v3))
 	rebuildCommitmentFromScratch(t, db, agg, rootInFiles, fPaths, true, v3)
 }
 
@@ -483,12 +483,8 @@ func TestAggregator_RebuildCommitmentWithHistory(t *testing.T) {
 	}
 }
 
-func useCommitmentSchema(t *testing.T, v3 bool) {
-	t.Cleanup(statecfg.SetCommitmentV3(v3))
-}
-
 func testRebuildCommitmentWithHistory(t *testing.T, v3 bool, filedSteps uint64, resume bool) {
-	useCommitmentSchema(t, v3)
+	t.Cleanup(statecfg.SetCommitmentV3(v3))
 	statecfg.EnableHistoricalCommitment()
 	const stepSize = 16
 	db, agg := testDbAndAggregatorv3(t, stepSize)
@@ -1267,7 +1263,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 }
 
 func TestMergeCommitmentV3RecordsWithReferencesEnabled(t *testing.T) {
-	useCommitmentSchema(t, true)
+	t.Cleanup(statecfg.SetCommitmentV3(true))
 	_, agg := testDbAggregatorWithFiles(t, &testAggConfig{stepSize: 10})
 	require.NoError(t, agg.MergeLoop(t.Context()))
 }

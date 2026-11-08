@@ -18,8 +18,10 @@ package v3
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"maps"
 	"slices"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -73,7 +75,7 @@ func TestSharedRunnerCatalogue(t *testing.T) {
 		{"E58-E101/process-100k-storage", "storage", 100000},
 	} {
 		t.Run(tc.id, func(t *testing.T) {
-			c := commitmenttest.Generate(commitmenttest.MathRand(0), commitmenttest.SequenceSpec{Kind: tc.kind, Count: tc.count})
+			c := commitmenttest.Generate(commitmenttest.Seed(0), commitmenttest.SequenceSpec{Kind: tc.kind, Count: tc.count})
 			c.ID = tc.id
 			runner.Run(t, c, runner.RunSpec{Name: "v3", Mode: commitment.ModeCollect, Context: runner.ContextSpec{ForbidStateReads: true}}, openTestTrie)
 		})
@@ -81,7 +83,7 @@ func TestSharedRunnerCatalogue(t *testing.T) {
 }
 
 func TestProcessFeedReadsNoState(t *testing.T) {
-	c := commitmenttest.Generate(commitmenttest.MathRand(424242), commitmenttest.SequenceSpec{Kind: "whale", Count: 200})
+	c := commitmenttest.Generate(commitmenttest.Seed(424242), commitmenttest.SequenceSpec{Kind: "whale", Count: 200})
 	memory := runner.NewMemory(runner.ContextSpec{ForbidStateReads: true})
 	engine, err := openTestTrie(context.Background(), runner.RunSpec{Mode: commitment.ModeCollect, Memory: memory})
 	require.NoError(t, err)
@@ -141,11 +143,109 @@ func entryOf(path []byte, update *commitment.Update) storageEntry {
 }
 
 func slotPath(prefix ...byte) []byte {
-	paths := commitmenttest.Paths(commitmenttest.Shape{Prefixes: [][]byte{prefix}})
-	return paths[0]
+	return paths([][]byte{prefix})[0]
 }
 
-func phaseAStorageUpdate(value []byte) *commitment.Update { return storageUpdate(value) }
+func paths(prefixes [][]byte) [][]byte {
+	paths := make([][]byte, 0, len(prefixes))
+	for _, prefix := range prefixes {
+		if len(prefix) > 64 {
+			panic(fmt.Sprintf("prefix length %d", len(prefix)))
+		}
+		fill := byte(0xd)
+		if len(prefix) != 0 {
+			fill = (prefix[len(prefix)-1] + 7) & 15
+		}
+		path := make([]byte, 64)
+		copy(path, prefix)
+		for i := len(prefix); i < len(path); i++ {
+			path[i] = fill
+		}
+		paths = append(paths, path)
+	}
+	for _, path := range paths {
+		for _, nib := range path {
+			if nib > 15 {
+				panic(fmt.Sprintf("invalid nibble %d", nib))
+			}
+		}
+	}
+	return paths
+}
+
+func benchUpdatesIn(dir string, mode commitment.Mode, ops []commitmenttest.Op, updates []*commitment.Update) *commitment.Updates {
+	u := commitment.NewUpdates(mode, dir, commitment.KeyToHexNibbleHash)
+	for i, op := range ops {
+		u.TouchPlainKeyDirect(string(op.Key), updates[i])
+	}
+	return u
+}
+
+func benchEntries(shape string, n int) []commitmenttest.Op {
+	seed := int64(0)
+	switch shape {
+	case "accounts", "storage":
+	case "whale":
+		seed = 424242
+	default:
+		shape = "storage"
+	}
+	c := commitmenttest.Generate(commitmenttest.Seed(seed), commitmenttest.SequenceSpec{Kind: shape, Count: n})
+	return c.Rounds[0]
+}
+
+type shardedShard struct {
+	mu       sync.Mutex
+	branches map[string][]byte
+	_        [24]byte
+}
+
+type shardedContext struct {
+	shards [64]shardedShard
+	empty  commitment.Update
+}
+
+func newShardedContext() *shardedContext {
+	c := &shardedContext{empty: commitment.Update{Flags: commitment.DeleteUpdate}}
+	for i := range c.shards {
+		c.shards[i].branches = make(map[string][]byte)
+	}
+	return c
+}
+
+func (c *shardedContext) shard(key []byte) *shardedShard {
+	h := uint32(2166136261)
+	for _, b := range key {
+		h = (h ^ uint32(b)) * 16777619
+	}
+	return &c.shards[h&63]
+}
+
+func (c *shardedContext) Branch(key []byte) ([]byte, kv.Step, error) {
+	s := c.shard(key)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return bytes.Clone(s.branches[string(key)]), 0, nil
+}
+
+func (c *shardedContext) PutBranch(key, data, _ []byte) error {
+	s := c.shard(key)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.branches[string(key)] = bytes.Clone(data)
+	return nil
+}
+
+func (c *shardedContext) Account([]byte) (*commitment.Update, error) { return c.empty.Copy(), nil }
+func (c *shardedContext) Storage([]byte) (*commitment.Update, error) { return c.empty.Copy(), nil }
+
+func (c *shardedContext) factory(context.Context) (commitment.PatriciaContext, func()) { return c, nil }
+
+var _ commitment.PatriciaContext = (*shardedContext)(nil)
+
+type discardWrites struct{ commitment.PatriciaContext }
+
+func (discardWrites) PutBranch([]byte, []byte, []byte) error { return nil }
 
 func storageTaskFor(addr [32]byte, ops []commitmenttest.Op) storageTask {
 	task := storageTask{addrHash: addr, entries: make([]storageEntry, len(ops))}

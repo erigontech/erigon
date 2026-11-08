@@ -17,6 +17,7 @@
 package execctx
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -26,11 +27,6 @@ import (
 )
 
 func TestPickTrieVariant(t *testing.T) {
-	parallel, v3 := statecfg.ExperimentalParallelCommitment, statecfg.ExperimentalCommitmentV3
-	t.Cleanup(func() {
-		statecfg.ExperimentalParallelCommitment, statecfg.ExperimentalCommitmentV3 = parallel, v3
-	})
-
 	for _, tc := range []struct {
 		parallel, v3 bool
 		want         commitment.TrieVariant
@@ -40,8 +36,13 @@ func TestPickTrieVariant(t *testing.T) {
 		{false, true, commitment.VariantCommitmentV3},
 		{true, true, commitment.VariantCommitmentV3},
 	} {
-		statecfg.ExperimentalParallelCommitment, statecfg.ExperimentalCommitmentV3 = tc.parallel, tc.v3
-		require.Equal(t, tc.want, PickTrieVariant(), "parallel=%v v3=%v", tc.parallel, tc.v3)
+		t.Run(fmt.Sprintf("parallel=%t/v3=%t", tc.parallel, tc.v3), func(t *testing.T) {
+			t.Cleanup(statecfg.SetCommitmentV3(tc.v3))
+			parallel := statecfg.ExperimentalParallelCommitment
+			t.Cleanup(func() { statecfg.ExperimentalParallelCommitment = parallel })
+			statecfg.ExperimentalParallelCommitment = tc.parallel
+			require.Equal(t, tc.want, PickTrieVariant(), "parallel=%v v3=%v", tc.parallel, tc.v3)
+		})
 	}
 }
 

@@ -51,6 +51,22 @@ func noopCtxFactory(context.Context) (PatriciaContext, func()) {
 	return &noopPatriciaContext{}, nil
 }
 
+func TestCollectedHashedKeysIncludeHashedTouches(t *testing.T) {
+	u := NewUpdates(ModeCollect, t.TempDir(), KeyToHexNibbleHash)
+	account := []byte("0123456789abcdefghij")
+	other := []byte("jihgfedcba9876543210")
+	u.TouchPlainKey(string(account), nil, func(*KeyUpdate, []byte) {})
+	u.TouchPlainKeyDirect(string(account), &Update{Flags: NonceUpdate, Nonce: 1})
+	u.TouchPlainKeyDirect(string(other), &Update{Flags: NonceUpdate, Nonce: 2})
+	partial := []byte{0x3, 0x0, 0xa}
+	u.TouchHashedKey(partial)
+	u.TouchHashedKey(partial)
+
+	want := [][]byte{partial, KeyToHexNibbleHash(account), KeyToHexNibbleHash(other)}
+	slices.SortFunc(want, bytes.Compare)
+	require.Equal(t, want, u.CollectedHashedKeys())
+}
+
 type gatedPatriciaContext struct {
 	sleep       time.Duration
 	descend     bool
