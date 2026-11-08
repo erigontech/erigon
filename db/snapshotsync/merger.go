@@ -311,7 +311,7 @@ func (m *Merger) Merge(
 		m.integrateMergedDirtyFiles(snapshots, in, out)
 		in = nil
 	}
-	m.logger.Log(m.lvl, "[snapshots] Merge done", "from", mergeRanges[0].from, "to", mergeRanges[0].to)
+	m.logger.Log(m.lvl, "[snapshots] Merge done", "ranges", len(mergeRanges), "from", mergeRanges[0].from, "to", mergeRanges[len(mergeRanges)-1].to)
 	return nil
 }
 
