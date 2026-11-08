@@ -32,6 +32,9 @@ import (
 
 var errCompressedPayloadLimit = errors.New("compressed payload exceeds maximum size")
 
+// ErrPayloadExceedsLimit is returned when the length prefix of a payload is above the caller's limit.
+var ErrPayloadExceedsLimit = errors.New("payload size exceeds limit")
+
 type compressedPayloadReader struct {
 	r         io.Reader
 	remaining uint64
@@ -94,7 +97,13 @@ func DecodeAndReadNoForkDigest(r io.Reader, val ssz.EncodableSSZ, version clpara
 
 // DecodeAndReadFixedSizeNoForkDigest refuses a payload larger than val's fixed size before decoding it.
 func DecodeAndReadFixedSizeNoForkDigest(r io.Reader, val ssz.EncodableSSZ, version clparams.StateVersion) error {
-	return decodeAndReadNoForkDigest(r, val, version, nil, uint64(val.EncodingSizeSSZ()))
+	return DecodeAndReadNoForkDigestMax(r, val, version, uint64(val.EncodingSizeSSZ()))
+}
+
+// DecodeAndReadNoForkDigestMax decodes a payload whose uncompressed size is at most maxSize.
+// The length prefix is checked before any decompression, and ErrPayloadExceedsLimit is returned when it is too big.
+func DecodeAndReadNoForkDigestMax(r io.Reader, val ssz.EncodableSSZ, version clparams.StateVersion, maxSize uint64) error {
+	return decodeAndReadNoForkDigest(r, val, version, nil, min(maxSize, clparams.MaxPayloadSize))
 }
 
 // DecodeAndReadNoForkDigestExact decodes a payload with an exact uncompressed size and no trailing data.
@@ -111,8 +120,11 @@ func decodeAndReadNoForkDigest(r io.Reader, val ssz.EncodableSSZ, version clpara
 	if expectedSize != nil && encodedLn != *expectedSize {
 		return fmt.Errorf("unexpected payload size: got %d, want %d", encodedLn, *expectedSize)
 	}
+	if encodedLn > clparams.MaxPayloadSize {
+		return fmt.Errorf("%w: payload too big", ErrPayloadExceedsLimit)
+	}
 	if encodedLn > maxSize {
-		return errors.New("payload too big")
+		return fmt.Errorf("%w: got %d, max %d", ErrPayloadExceedsLimit, encodedLn, maxSize)
 	}
 
 	maxCompressedSize := uint64(snappy.MaxEncodedLen(int(encodedLn)))
