@@ -99,7 +99,7 @@ var responseBodyBudget = semaphore.NewWeighted(2 * int64(httpreqresp.MaxResponse
 func responseBodyWeight(topic string, maxBytes uint64) int64 {
 	var weight uint64
 	for alt := range strings.SplitSeq(topic, ",") {
-		weight = max(weight, httpreqresp.MaxResponseBodySize(alt, maxBytes))
+		weight = max(weight, httpreqresp.MaxResponseBodySize(strings.TrimSpace(alt), maxBytes))
 	}
 	return int64(weight)
 }
