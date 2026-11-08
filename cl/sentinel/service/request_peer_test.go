@@ -163,7 +163,7 @@ func TestPeerRequestsShareAResponseBudget(t *testing.T) {
 			<-release
 		}),
 	}}
-	blocksByRange := communication.BeaconBlocksByRangeProtocolV2
+	blocksByRange := communication.BeaconBlocksByRangeProtocolV2 + "," + communication.BeaconBlocksByRangeProtocolV1 // as block RPCs send it
 	request := func(pid string) <-chan error {
 		done := make(chan error, 1)
 		go func() {
