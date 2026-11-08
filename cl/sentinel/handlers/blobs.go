@@ -17,6 +17,7 @@
 package handlers
 
 import (
+	"errors"
 	"math"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -114,8 +115,13 @@ func (c *ConsensusHandlers) blobsSidecarsByIdsHandler(s network.Stream, version 
 	// Blob requests retain their Deneb wire format when later forks change the size limit.
 	// Before Deneb activates, use its limit because this handler is already registered.
 	currentVersion := max(clparams.DenebVersion, c.beaconConfig.GetCurrentStateVersion(c.ethClock.GetCurrentEpoch()))
-	req := solid.NewStaticListSSZ[*cltypes.BlobIdentifier](c.beaconConfig.MaxRequestBlobSidecarsByVersion(currentVersion), 40)
-	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, req, version); err != nil {
+	maxIDs := c.beaconConfig.MaxRequestBlobSidecarsByVersion(currentVersion)
+	identifierSize := new(cltypes.BlobIdentifier).EncodingSizeSSZ()
+	req := solid.NewStaticListSSZ[*cltypes.BlobIdentifier](maxIDs, identifierSize)
+	if err := ssz_snappy.DecodeAndReadNoForkDigestMax(s, req, version, uint64(maxIDs)*uint64(identifierSize)); err != nil {
+		if errors.Is(err, ssz_snappy.ErrPayloadExceedsLimit) {
+			return ssz_snappy.EncodeAndWrite(s, &emptyString{}, InvalidRequestPrefix)
+		}
 		return err
 	}
 

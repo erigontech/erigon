@@ -192,15 +192,41 @@ func TestBlobsByIdentifiersRequestLimit(t *testing.T) {
 						req.Append(&cltypes.BlobIdentifier{BlockRoot: common.Hash{0xff}})
 					}
 					stream := newHandlerTestStream(t, communication.BlobSidecarByRootProtocolV1, req)
-					err := c.blobsSidecarsByIdsHandlerDeneb(stream)
+					require.NoError(t, c.blobsSidecarsByIdsHandlerDeneb(stream))
 					if count > tc.limit {
-						require.Error(t, err)
-					} else {
+						code, err := stream.response.ReadByte()
 						require.NoError(t, err)
+						require.Equal(t, byte(InvalidRequestPrefix), code)
+						return
 					}
 					require.Zero(t, stream.response.Len())
 				})
 			}
+		})
+	}
+}
+
+func TestBlobsByIdentifiersRejectsOversizedPrefix(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	identifierSize := uint64(new(cltypes.BlobIdentifier).EncodingSizeSSZ())
+	for _, tc := range []struct {
+		name  string
+		epoch uint64
+		size  uint64
+	}{
+		{"Deneb", cfg.DenebForkEpoch, cfg.MaxRequestBlobSidecars*identifierSize + 1},
+		{"Electra", cfg.ElectraForkEpoch, cfg.MaxRequestBlobSidecarsElectra*identifierSize + 1},
+		{"above global limit", cfg.ElectraForkEpoch, clparams.MaxPayloadSize + 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
+			clock.EXPECT().GetCurrentEpoch().Return(tc.epoch)
+			c := &ConsensusHandlers{beaconConfig: &cfg, ethClock: clock}
+			stream := &envelopeHandlerStream{request: bytes.NewReader(binary.AppendUvarint(nil, tc.size))}
+			require.NoError(t, c.blobsSidecarsByIdsHandlerDeneb(stream))
+			code, err := stream.response.ReadByte()
+			require.NoError(t, err)
+			require.Equal(t, byte(InvalidRequestPrefix), code)
 		})
 	}
 }
