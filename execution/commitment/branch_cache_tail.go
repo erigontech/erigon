@@ -94,7 +94,8 @@ func (t *tailLRU) maybeGrow() {
 
 	old := t.cur.Load()
 	curCap := t.curCap.Load()
-	if curCap >= t.maxCap || old.Len() < int(curCap) {
+	if n := old.Len(); curCap >= t.maxCap || n < int(curCap) {
+		t.adds.Store(uint32(n))
 		return
 	}
 	newCap := min(curCap*tailGrowFactor, t.maxCap)
