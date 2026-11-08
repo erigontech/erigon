@@ -531,15 +531,9 @@ Process:
 	f.mu.Lock()
 	lookahead := f.gloasLookahead
 	lookaheadPeer := f.gloasLookaheadPeer
-	if f.gloasDownloadedParents == nil {
-		f.gloasDownloadedParents = map[common.Hash]uint64{}
-	}
-	// A response processes or holds at most its first count+1 blocks, so the next block is the last child that matters.
-	for _, block := range processBlocks[:min(len(processBlocks), int(count)+2)] {
-		f.gloasDownloadedParents[block.Block.ParentRoot] = max(f.gloasDownloadedParents[block.Block.ParentRoot], block.Block.Slot)
-	}
-	maps.DeleteFunc(f.gloasDownloadedParents, func(_ common.Hash, slot uint64) bool { return slot <= f.highestSlotProcessed })
 	f.mu.Unlock()
+	// A response processes or holds at most its first count+1 blocks, so the next block is the last child that matters.
+	children := processBlocks[:min(len(processBlocks), int(count)+2)]
 	if lookahead != nil {
 		processBlocks = mergeGloasLookahead(processBlocks, lookahead)
 	}
@@ -557,6 +551,15 @@ Process:
 		f.mu.Unlock()
 		return
 	}
+	f.mu.Lock()
+	if f.gloasDownloadedParents == nil {
+		f.gloasDownloadedParents = map[common.Hash]uint64{}
+	}
+	for _, block := range children {
+		f.gloasDownloadedParents[block.Block.ParentRoot] = max(f.gloasDownloadedParents[block.Block.ParentRoot], block.Block.Slot)
+	}
+	maps.DeleteFunc(f.gloasDownloadedParents, func(_ common.Hash, slot uint64) bool { return slot <= f.highestSlotProcessed })
+	f.mu.Unlock()
 
 	var envelopes map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope
 	var nextGloasLookahead *cltypes.SignedBeaconBlock
@@ -635,6 +638,11 @@ Process:
 	if highestSlotProcessed > f.highestSlotProcessed {
 		f.highestSlotProcessed = highestSlotProcessed
 		f.highestSlotUpdateTime = time.Now()
+	}
+	for _, block := range processBlocks {
+		if block.Block.Slot <= f.highestSlotProcessed {
+			delete(f.gloasDownloadedParents, block.Block.ParentRoot)
+		}
 	}
 	if nextGloasLookahead != nil {
 		for _, block := range processBlocks {
