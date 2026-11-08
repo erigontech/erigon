@@ -1044,7 +1044,7 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 						w.WriteHeader(http.StatusOK)
 						return
 					}
-					if a.executionPayloadEnvelopeBroadcastOnly(gossipKey, signedEnvelope) {
+					if a.executionPayloadEnvelopeBroadcasts.Contains(requestRoot) {
 						w.WriteHeader(http.StatusAccepted)
 						return
 					}
@@ -1138,10 +1138,6 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 	}
 	if envelopeFirst {
 		encodedSSZ, err := signedEnvelope.EncodeSSZ(nil)
-		var envelopeRoot [32]byte
-		if err == nil {
-			envelopeRoot, err = signedEnvelope.HashSSZ()
-		}
 		if err == nil {
 			err = a.gossipManager.PublishToForkDigest(workCtx, forkDigest, gossip.TopicNameExecutionPayload, encodedSSZ)
 		}
@@ -1150,7 +1146,9 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 			return
 		}
 		a.forkchoiceStore.RecordExecutionPayloadArrival(gossipKey.BeaconBlockRoot, signedEnvelope.Message.Payload.SlotNumber, receivedAt)
-		a.executionPayloadEnvelopeBroadcasts.Add(envelopeRoot, struct{}{})
+		if envelopeRoot, err := signedEnvelope.HashSSZ(); err == nil {
+			a.executionPayloadEnvelopeBroadcasts.Add(envelopeRoot, struct{}{})
+		}
 	}
 	contentsIntegrationFailed := false
 	var columnPublishErr error
