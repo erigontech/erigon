@@ -170,7 +170,7 @@ func putCell[T any](vm *VersionMap, cells *btree.Map[int, *WriteCell[T]], addr a
 		if ci.incarnation > incarnation {
 			panic(fmt.Errorf("existing transaction value does not have lower incarnation: %x %s, %v", addr, path, txIdx))
 		}
-		if dbg.AssertEnabled && ci.loadFlag() == FlagDone && flag == FlagEstimate {
+		if dbg.AssertEnabled && ci.loadFlag() == FlagDone && flag == FlagEstimate && ci.accSource != AccountFromBAL {
 			panic(fmt.Errorf("versionMap: Done->Estimate downgrade addr=%x path=%s txIdx=%d inc %d->%d", addr, path, txIdx, ci.incarnation, incarnation))
 		}
 		ci.flag.Store(uint32(flag))
@@ -1352,7 +1352,7 @@ func cellNoOp[T any](cells *btree.Map[int, *WriteCell[T]], txIdx int, flag statu
 // concurrent readers on a hot pre-seeded account). A net-zero storage write (ValueUnchanged)
 // is omitted from the BAL and folded away by StorageChanges, so it is never materialized and
 // counts as already-present, unless an earlier run of the tx left a cell the flush resets or removes.
-// Lifecycle transitions and the putCell-only paths (which never no-bump) force the slow path.
+// Only incarnation, createContract, and selfDestruct force the slow path.
 // Caller holds e's read lock; only used on the BAL fast path.
 func flushAllNoOp(e *AddressEntry, writes *WriteSet, addr accounts.Address, flag statusFlag) bool {
 	if _, ok := writes.selfDestruct[addr]; ok {
@@ -1361,11 +1361,15 @@ func flushAllNoOp(e *AddressEntry, writes *WriteSet, addr accounts.Address, flag
 	if _, ok := writes.incarnation[addr]; ok {
 		return false
 	}
-	if _, ok := writes.code[addr]; ok {
-		return false
+	if vw, ok := writes.code[addr]; ok {
+		if !cellNoOp(e.Code, vw.Version.TxIndex, flag, vw.Val, vw.valStatus, eqCode) {
+			return false
+		}
 	}
-	if _, ok := writes.codeSize[addr]; ok {
-		return false
+	if vw, ok := writes.codeSize[addr]; ok {
+		if !cellNoOp(e.CodeSize, vw.Version.TxIndex, flag, vw.Val, vw.valStatus, eqInt) {
+			return false
+		}
 	}
 	if _, ok := writes.createContract[addr]; ok {
 		return false
@@ -1480,13 +1484,13 @@ func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool) {
 			e.Incarnation = putCell(vm, e.Incarnation, addr, IncarnationPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, vw.valStatus, getCellIncarnation)
 		}
 		if vw, ok := writes.code[addr]; ok {
-			e.Code = putCell(vm, e.Code, addr, CodePath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, vw.valStatus, getCellCode)
+			e.Code = flushCell(vm, e.Code, addr, CodePath, vw.Version, flag, vw.Val, vw.valStatus, getCellCode, eqCode, destructed)
 		}
 		if vw, ok := writes.codeHash[addr]; ok {
 			e.CodeHash = flushCell(vm, e.CodeHash, addr, CodeHashPath, vw.Version, flag, vw.Val, vw.valStatus, getCellCodeHash, eqCodeHash, destructed)
 		}
 		if vw, ok := writes.codeSize[addr]; ok {
-			e.CodeSize = putCell(vm, e.CodeSize, addr, CodeSizePath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, vw.valStatus, getCellCodeSize)
+			e.CodeSize = flushCell(vm, e.CodeSize, addr, CodeSizePath, vw.Version, flag, vw.Val, vw.valStatus, getCellCodeSize, eqInt, destructed)
 		}
 		if vw, ok := writes.createContract[addr]; ok {
 			e.CreateContract = putCell(vm, e.CreateContract, addr, CreateContractPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, vw.valStatus, getCellCreateContract)
@@ -1936,6 +1940,8 @@ func eqUint64(a, b uint64) bool       { return a == b }
 func eqCodeHash(a, b accounts.CodeHash) bool {
 	return a == b
 }
+func eqCode(a, b accounts.Code) bool { return a.Hash == b.Hash && bytes.Equal(a.Bytes, b.Bytes) }
+func eqInt(a, b int) bool            { return a == b }
 
 func eqAccount(a, b *accounts.Account) bool {
 	return a != nil && b != nil && a.Equals(b)
