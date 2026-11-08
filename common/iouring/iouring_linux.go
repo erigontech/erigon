@@ -79,6 +79,8 @@ type Ring struct {
 	sqMask         uint32
 	sqArray        []uint32
 	cqHead, cqTail *uint32
+	cqMask         uint32
+	cqes           uint32 // offset of the CQE array in cqRing
 }
 
 func p32(b []byte, off uint32) *uint32 { return (*uint32)(unsafe.Pointer(&b[off])) }
@@ -122,6 +124,8 @@ func New(entries uint32) (*Ring, error) {
 
 	ring.cqHead = p32(ring.cqRing, pp.cqOff.head)
 	ring.cqTail = p32(ring.cqRing, pp.cqOff.tail)
+	ring.cqMask = *p32(ring.cqRing, pp.cqOff.ringMask)
+	ring.cqes = pp.cqOff.cqes
 
 	return ring, nil
 }
@@ -180,9 +184,13 @@ func (r *Ring) fillSQE(idx uint32, fd int, off uint64, buf []byte, userData uint
 	*(*uint64)(unsafe.Add(base, 32)) = userData                                 // user_data @32
 }
 
+// ErrReadFailed marks a read that completed with an error; the ring itself still works.
+var ErrReadFailed = errors.New("io_uring read failed")
+
 // BlockingBatchRead reads each (offset,len) request into scratch buffers using
-// io_uring, keeping up to the ring size in flight. It returns after all complete. After an
-// error other than ErrRingReset, reads may still be in flight into scratch: the caller must not reuse the ring or scratch.
+// io_uring, keeping up to the ring size in flight. It returns after all complete. After
+// ErrReadFailed or ErrRingReset no read is in flight, so the ring and scratch can be reused; after any
+// other error reads may still be in flight into scratch: the caller must not reuse them.
 func (r *Ring) BlockingBatchRead(fd int, offsets []int64, lens []int, scratch [][]byte) error {
 	n := len(offsets)
 	done := 0
@@ -207,12 +215,17 @@ func (r *Ring) BlockingBatchRead(fd int, offsets []int64, lens []int, scratch []
 		// The kernel may take only part of the wave and then returns without waiting, so each
 		// wait also submits what is still queued.
 		submitted, reaped := 0, 0
+		var failed error
 		for reaped < wave {
 			ch := atomic.LoadUint32(r.cqHead)
 			ct := atomic.LoadUint32(r.cqTail)
-			// A CQE result (res @8) is discarded: a failed read moves the work
-			// to the following mmap access. Only the count matters.
 			for ch != ct {
+				// A failed read leaves its page cold; report it once the wave is drained so the caller stops.
+				cqe := r.cqes + (ch&r.cqMask)*cqeSize
+				if res := int32(*p32(r.cqRing, cqe+8)); res < 0 && failed == nil {
+					i := *(*uint64)(unsafe.Pointer(&r.cqRing[cqe]))
+					failed = fmt.Errorf("%w: request %d: %w", ErrReadFailed, i, unix.Errno(-res))
+				}
 				ch++
 				reaped++
 			}
@@ -232,6 +245,9 @@ func (r *Ring) BlockingBatchRead(fd int, offsets []int64, lens []int, scratch []
 				return fmt.Errorf("io_uring_enter: %w", errno)
 			}
 			submitted += int(taken)
+		}
+		if failed != nil {
+			return failed
 		}
 		done += wave
 	}

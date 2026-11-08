@@ -2076,7 +2076,7 @@ func (vr *versionedStateReader) HasAccount(address common.Address) (bool, error)
 func versionedUpdateAddress(vm *VersionMap, addr accounts.Address, txIndex int) (*accounts.Account, bool) {
 	val, res, ok := vm.ReadAddress(addr, txIndex)
 	if ok && res.Status() != MVReadResultNone {
-		if res.accSource == AccountFromBAL {
+		if res.accSource() == AccountFromBAL {
 			return nil, false
 		}
 		return val, true

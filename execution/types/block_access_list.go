@@ -188,8 +188,6 @@ func (s *BlockAccessListSidecar) copy() *BlockAccessListSidecar {
 	return cpy
 }
 
-const maxBlockAccessListBytes = 10 * 1024 * 1024
-
 // EIP-7928: bal_items <= block_gas_limit / BalItemCost
 const BalItemCost = 2000
 
@@ -815,9 +813,6 @@ func DecodeBlockAccessListBytes(data []byte) (BlockAccessList, error) {
 }
 
 func decodeBlockAccessListBytes(data []byte, budget *blockAccessListDecodeBudget) (BlockAccessList, error) {
-	if len(data) > maxBlockAccessListBytes {
-		return nil, fmt.Errorf("block access list RLP exceeds maximum size (%d bytes)", len(data))
-	}
 	stream := rlp.NewStream(bytes.NewReader(data), 0)
 	var bal BlockAccessList
 	if err := decodeBlockAccessList(&bal, stream, budget); err != nil {
