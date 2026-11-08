@@ -1854,7 +1854,7 @@ func (dt *DomainRoTx) GetAsOf(key []byte, txNum uint64, roTx kv.Tx) ([]byte, boo
 		if err != nil {
 			return nil, false, err
 		}
-		if latestOk && len(latest) > 0 && step < kv.Step(txNum/dt.stepSize) && dt.visible.coversHistory {
+		if latestOk && len(latest) > 0 && step < kv.Step(txNum/dt.stepSize) && (dt.visible.coversHistory || forceCoversHistory) {
 			return latest, true, nil
 		}
 	}
