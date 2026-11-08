@@ -457,8 +457,12 @@ func prefetchCommitment(ctx context.Context, db kv.RoDB, hashedKeys [][]byte) er
 		if !ok || trieMostlyResident(ctx, p, hashedKeys) {
 			return
 		}
-		if err = prefetchKeys(ctx, db, ttx, kv.CommitmentDomain, flatPrefixes(hashedKeys)); err != nil {
+		flat := flatPrefixes(hashedKeys)
+		if err = prefetchKeys(ctx, db, ttx, kv.CommitmentDomain, flat); err != nil {
 			return
+		}
+		if pfRefs {
+			prefetchBranchRefs(ctx, ttx, flat)
 		}
 		var storageKeys [][]byte
 		for _, k := range hashedKeys {
@@ -471,7 +475,7 @@ func prefetchCommitment(ctx context.Context, db kv.RoDB, hashedKeys [][]byte) er
 			err = walkTriePrefixes(ctx, db, ttx, storageKeys, storageTrieDepth)
 		}
 		if err == nil && pfRefs {
-			prefetchBranchRefs(ctx, ttx, hashedKeys)
+			prefetchBranchRefs(ctx, ttx, refPrefixes.take())
 		}
 	})
 	return cmp.Or(txErr, err)
@@ -650,7 +654,7 @@ func trieMostlyResident(ctx context.Context, p latestPrefetcher, hashedKeys [][]
 // shortened keys point to.
 var pfRefs = os.Getenv("PF_REFS") == "1"
 
-func prefetchBranchRefs(ctx context.Context, ttx kv.TemporalTx, hashedKeys [][]byte) {
+func prefetchBranchRefs(ctx context.Context, ttx kv.TemporalTx, prefixes [][]byte) {
 	p, ok := ttx.AggTx().(interface {
 		PrefetchBranchRefs(context.Context, [][]byte) (int, int, error)
 	})
@@ -658,7 +662,6 @@ func prefetchBranchRefs(ctx context.Context, ttx kv.TemporalTx, hashedKeys [][]b
 		return
 	}
 	start := time.Now()
-	prefixes := refPrefixes.take()
 	branches, pages, err := p.PrefetchBranchRefs(ctx, prefixes)
 	log.Info("[warmBAL] branch refs prefetch", "prefixes", len(prefixes), "branches", branches, "pages", pages, "err", err, "elapsed", time.Since(start))
 }
