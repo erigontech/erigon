@@ -235,11 +235,13 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 				// overlay it on the current state. Self-destruct is the exception:
 				// its base stays empty so cleared fields cannot be resurrected.
 				acc := accounts.NewAccount()
+				var prev []byte
 				if !d.selfDestruct {
 					v, _, err := domains.GetLatest(kv.AccountsDomain, roTx, address[:])
 					if err != nil {
 						return err
 					}
+					prev = v
 					if len(v) > 0 {
 						if err := accounts.DeserialiseV3(&acc, v); err != nil {
 							return err
@@ -264,7 +266,7 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 					fmt.Printf("%d apply:put account: %x balance:%s,nonce:%d,codehash:%x\n", blockNum, addr, acc.Balance.String(), acc.Nonce, acc.CodeHash)
 				}
 				enc := accounts.SerialiseV3(&acc)
-				if err := domains.DomainPut(kv.AccountsDomain, roTx, address[:], enc, txNum, nil); err != nil {
+				if err := domains.DomainPut(kv.AccountsDomain, roTx, address[:], enc, txNum, prev); err != nil {
 					return err
 				}
 			}
