@@ -328,6 +328,9 @@ func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (_
 
 	for dictPos < dictSize {
 		depth, ns := binary.Uvarint(data[dictPos:])
+		if ns <= 0 {
+			return nil, &ErrCompressedFileCorrupted{FileName: fName, Reason: fmt.Sprintf("invalid pattern depth varint at %d", dictPos)}
+		}
 		if depth > maxAllowedDepth {
 			return nil, &ErrCompressedFileCorrupted{
 				FileName: fName,
@@ -340,6 +343,9 @@ func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (_
 		}
 		dictPos += uint64(ns)
 		l, n := binary.Uvarint(data[dictPos:])
+		if n <= 0 {
+			return nil, &ErrCompressedFileCorrupted{FileName: fName, Reason: fmt.Sprintf("invalid pattern length varint at %d", dictPos)}
+		}
 		dictPos += uint64(n)
 		patterns = append(patterns, data[dictPos:dictPos+l])
 		//fmt.Printf("depth = %d, pattern = [%x]\n", depth, data[dictPos:dictPos+l])
@@ -394,6 +400,9 @@ func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (_
 	dictPos = 0
 	for dictPos < dictSize {
 		depth, ns := binary.Uvarint(data[dictPos:])
+		if ns <= 0 {
+			return nil, &ErrCompressedFileCorrupted{FileName: fName, Reason: fmt.Sprintf("invalid position depth varint at %d", dictPos)}
+		}
 		if depth > maxAllowedDepth {
 			return nil, &ErrCompressedFileCorrupted{FileName: fName, Reason: fmt.Sprintf("posMaxDepth=%d", depth)}
 		}
@@ -403,6 +412,9 @@ func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (_
 		}
 		dictPos += uint64(ns)
 		dp, n := binary.Uvarint(data[dictPos:])
+		if n <= 0 {
+			return nil, &ErrCompressedFileCorrupted{FileName: fName, Reason: fmt.Sprintf("invalid position varint at %d", dictPos)}
+		}
 		dictPos += uint64(n)
 		poss = append(poss, dp)
 	}
