@@ -113,7 +113,7 @@ GOTEST = $(GO_BUILD_ENV) GODEBUG=$(GODEBUG) GOTRACEBACK=1 $(GO) test $(GO_FLAGS)
 
 GOINSTALL = go install -trimpath
 GOLANGCI = $(GO) tool -modfile=golangci-lint.mod golangci-lint
-GOVULNCHECK = $(GO) tool -modfile=govulncheck.mod govulncheck
+GOVULNCHECK = $(GO) tool -modfile=tools/govulncheck.mod govulncheck
 
 OS = $(shell uname -s)
 ARCH = $(shell uname -m)
