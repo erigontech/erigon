@@ -92,9 +92,10 @@ func (f *Follower) Produce(ctx context.Context, in deriver.HeaderInputs, txs txn
 }
 
 // Insert stores blocks, the first a child of the head, and makes the last
-// one the head. A head other than the first block's parent fails it with
-// ErrStaleParent.
-func (f *Follower) Insert(ctx context.Context, blocks []*types.Block) error {
+// one the head, running hook when set: on the first one's parent and with
+// the last one's header. A head other than the first block's parent fails
+// it with ErrStaleParent.
+func (f *Follower) Insert(ctx context.Context, blocks []*types.Block, hook CommitHook) error {
 	if len(blocks) == 0 {
 		return nil
 	}
@@ -102,10 +103,21 @@ func (f *Follower) Insert(ctx context.Context, blocks []*types.Block) error {
 		if err := f.requireHead(ctx, blocks[0].ParentHash()); err != nil {
 			return err
 		}
+		var committed func(*types.Header)
+		if hook != nil {
+			committed = hook()
+		}
 		if err := f.chain.Insert(ctx, blocks); err != nil {
 			return err
 		}
-		return f.deriver.ForkChoiceTo(ctx, blocks[len(blocks)-1].Hash())
+		last := blocks[len(blocks)-1]
+		if err := f.deriver.ForkChoiceTo(ctx, last.Hash()); err != nil {
+			return err
+		}
+		if committed != nil {
+			committed(last.Header())
+		}
+		return nil
 	})
 }
 

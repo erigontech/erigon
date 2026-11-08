@@ -140,8 +140,8 @@ func TestCommands(t *testing.T) {
 	require.ErrorIs(t, n.follower.HeadTo(ctx, genesis.Hash()), follower.ErrBelowSafe)
 	require.Equal(t, b2.Block.Hash(), head().Hash())
 
-	require.ErrorIs(t, n.follower.Insert(ctx, []*types.Block{b2.Block}), follower.ErrStaleParent)
-	require.NoError(t, n.follower.Insert(ctx, []*types.Block{b3.Block}))
+	require.ErrorIs(t, n.follower.Insert(ctx, []*types.Block{b2.Block}, nil), follower.ErrStaleParent)
+	require.NoError(t, n.follower.Insert(ctx, []*types.Block{b3.Block}, nil))
 	require.Equal(t, b3.Block.Hash(), head().Hash())
 	require.Equal(t, follower.HeadSequencer, n.follower.Status().HeadSource)
 	fc, err := n.m.ExecModule.GetForkChoice(ctx)

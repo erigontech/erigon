@@ -86,6 +86,8 @@ type harness struct {
 	follower *follower.Follower
 	pool     *queue
 	genesis  *types.Header
+	// mirror builds the blocks a composer hands over.
+	mirror *deriver.ExecChain
 }
 
 func newHarness(t *testing.T) *harness {
@@ -106,9 +108,194 @@ func newHarness(t *testing.T) *harness {
 
 func (h *harness) sequencer(t *testing.T, maxDepth uint64) *sequencer.Sequencer {
 	t.Helper()
-	s, err := sequencer.New(derivertest.Config(), sequencer.Config{Timing: devnet(), MaxDepth: maxDepth}, h.follower, h.pool, log.New())
+	return h.sequencerOf(t, sequencer.Config{MaxDepth: maxDepth})
+}
+
+// sequencerOf returns the sequencer of cfg on the devnet timing.
+func (h *harness) sequencerOf(t *testing.T, cfg sequencer.Config) *sequencer.Sequencer {
+	t.Helper()
+	cfg.Timing = devnet()
+	s, err := sequencer.New(derivertest.Config(), cfg, h.follower, h.pool, log.New())
 	require.NoError(t, err)
 	return s
+}
+
+// prebuilt returns the block of txs on parent with the sequencer's header
+// inputs, built on a copy of the chain as a composer builds a Sync block.
+func (h *harness) prebuilt(t *testing.T, parent *types.Header, txs ...[]byte) *types.Block {
+	t.Helper()
+	ctx := t.Context()
+	if h.mirror == nil {
+		_, h.mirror = derivertest.NewL2(t)
+	}
+	var blocks []*types.Block
+	for n := uint64(1); n <= parent.Number.Uint64(); n++ {
+		blocks = append(blocks, h.block(t, n))
+	}
+	if len(blocks) > 0 {
+		require.NoError(t, h.mirror.Insert(ctx, blocks))
+	}
+	decoded, err := deriver.DecodeTxs(txs)
+	require.NoError(t, err)
+	l2 := derivertest.Config().L2.(*config.L2Config)
+	in := deriver.HeaderInputs{
+		Number:     parent.Number.Uint64() + 1,
+		ParentHash: parent.Hash(),
+		Time:       parent.Time + l2.BlockInterval,
+		Coinbase:   *derivertest.Config().FeeCollector,
+		Extra:      []byte{},
+		GasLimit:   l2.BlockGasLimit,
+	}
+	built, err := h.mirror.Extend(ctx, parent, in, decoded, common.Hash{}, common.Hash{})
+	require.NoError(t, err)
+	return built.Block
+}
+
+// composed is a Sync slot a composer was asked for.
+type composed struct {
+	parent     common.Hash
+	ts, target uint64
+	mode       sequencer.Mode
+}
+
+// slotComposer records the Sync slots it is asked for and answers with
+// answer's block, nil without one.
+type slotComposer struct {
+	calls     []composed
+	answer    func(parent *types.Header) *types.Block
+	recover   func(ctx context.Context)
+	recovered int
+}
+
+func (c *slotComposer) ComposeSyncSlot(_ context.Context, parent *types.Header, ts, target uint64, mode sequencer.Mode) *types.Block {
+	c.calls = append(c.calls, composed{parent: parent.Hash(), ts: ts, target: target, mode: mode})
+	if c.answer == nil {
+		return nil
+	}
+	return c.answer(parent)
+}
+
+func (c *slotComposer) RecoverFailed(ctx context.Context) {
+	c.recovered++
+	if c.recover != nil {
+		c.recover(ctx)
+	}
+}
+
+// pin is the head a witness capture pinned.
+type pin common.Hash
+
+func (pin) Close() {}
+
+// witnesses records, for each block whose witness it built, the head pinned
+// for it.
+type witnesses struct {
+	follower *follower.Follower
+	pinned   map[common.Hash]common.Hash
+}
+
+func (w *witnesses) Pin(ctx context.Context) (interface{ Close() }, error) {
+	head, err := w.follower.Head(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return pin(head.Hash()), nil
+}
+
+func (w *witnesses) Record(_ context.Context, p interface{ Close() }, h *types.Header) error {
+	w.pinned[h.Hash()] = common.Hash(p.(pin))
+	return nil
+}
+
+// TestComposer is T-SEQ-1 for the Sync slot hook: an on-time slot is
+// Steady and aimed at the next L1 block, a late one Empty, a Catchup stays
+// Catchup however late; the composer's block is committed with its witness
+// and ends a run of off-grid skips, a stale one is not committed, and
+// recovery runs before a Sync slot or a Live tick reads the head.
+func TestComposer(t *testing.T) {
+	h := newHarness(t)
+	c := &slotComposer{}
+	w := &witnesses{follower: h.follower, pinned: map[common.Hash]common.Hash{}}
+	s := h.sequencerOf(t, sequencer.Config{Composer: c, Witnesses: w})
+	ctx := t.Context()
+	g := h.genesis.Time
+	hash := func(n uint64) common.Hash { return h.block(t, n).Hash() }
+	call := func(i int) composed {
+		t.Helper()
+		require.Len(t, c.calls, i+1)
+		return c.calls[i]
+	}
+	// moveBack has the next recovery move the head back to block n.
+	moveBack := func(n uint64) common.Hash {
+		to := hash(n)
+		c.recover = func(ctx context.Context) {
+			require.NoError(t, h.follower.HeadTo(ctx, to))
+			c.recover = nil
+		}
+		return to
+	}
+
+	s.SetClock(func() time.Time { return onTime(g + 12) })
+	require.NoError(t, s.Handle(ctx, sequencer.SyncSlot{Height: 6, Time: g + 12, L1Head: 1}))
+	require.Equal(t, uint64(6), h.head(t).Number.Uint64(), "the pool fills the Sync block the composer leaves")
+	require.Equal(t, composed{parent: hash(5), ts: g + 12, target: 2, mode: sequencer.ModeSteady}, call(0))
+
+	// Recovery that moves the head back is seen by the Sync slot it precedes.
+	for range 3 {
+		require.NoError(t, s.Handle(ctx, sequencer.LiveTick{SyncHeight: 12}))
+	}
+	five := moveBack(5)
+	require.NoError(t, s.Handle(ctx, sequencer.SyncSlot{Height: 12, Time: g + 24, L1Head: 2}))
+	require.Equal(t, uint64(12), h.head(t).Number.Uint64())
+	require.Equal(t, five, h.block(t, 6).ParentHash())
+	require.Equal(t, composed{parent: hash(11), ts: g + 24, target: 3, mode: sequencer.ModeCatchup}, call(1))
+
+	// A slot off the grid is skipped; the composer's Sync block ends the run.
+	require.NoError(t, s.Handle(ctx, sequencer.SyncSlot{Height: 18, Time: g + 37, L1Head: 3}))
+	require.Equal(t, 1, s.Status().OffGridSkips)
+	var built *types.Block
+	c.answer = func(parent *types.Header) *types.Block {
+		built = h.prebuilt(t, parent, h.c.Transfer(common.HexToAddress("0xb0b"), 1))
+		return built
+	}
+	s.SetClock(func() time.Time { return onTime(g + 36).Add(time.Millisecond) })
+	require.NoError(t, s.Handle(ctx, sequencer.SyncSlot{Height: 18, Time: g + 36, L1Head: 3}))
+	require.Equal(t, composed{parent: hash(17), ts: g + 36, target: 0, mode: sequencer.ModeEmpty}, call(2))
+	require.Equal(t, built.Hash(), h.head(t).Hash())
+	require.Len(t, h.block(t, 18).Transactions(), 1)
+	require.Zero(t, s.Status().OffGridSkips)
+	require.Equal(t, [3]uint64{15, 4, 3}, s.Status().Produced)
+	for n := uint64(1); n <= 18; n++ {
+		require.Equal(t, hash(n-1), w.pinned[hash(n)], "witness of block %d", n)
+	}
+
+	c.answer = nil
+	s.SetClock(func() time.Time { return onTime(g + 96) })
+	require.NoError(t, s.Handle(ctx, sequencer.SyncSlot{Height: 48, Time: g + 96, L1Head: 8}))
+	require.Equal(t, uint64(48), h.head(t).Number.Uint64())
+	require.Equal(t, composed{parent: hash(47), ts: g + 96, target: 9, mode: sequencer.ModeCatchup}, call(3))
+
+	// A block on a parent that is no longer the head is not committed.
+	c.answer = func(*types.Header) *types.Block { return built }
+	s.SetClock(func() time.Time { return onTime(g + 108) })
+	require.NoError(t, s.Handle(ctx, sequencer.SyncSlot{Height: 54, Time: g + 108, L1Head: 9}))
+	require.Equal(t, composed{parent: hash(53), ts: g + 108, target: 10, mode: sequencer.ModeSteady}, call(4))
+	require.Equal(t, uint64(53), h.head(t).Number.Uint64())
+	require.Equal(t, 9, c.recovered)
+
+	// Recovery that moves the head back is seen by the Live tick it precedes.
+	fifty := moveBack(50)
+	require.NoError(t, s.Handle(ctx, sequencer.LiveTick{SyncHeight: 60}))
+	require.Equal(t, uint64(51), h.head(t).Number.Uint64())
+	require.Equal(t, fifty, h.head(t).ParentHash)
+
+	// A Catchup capped below the target ends on the grid at its own time, and
+	// stays Catchup at its trigger's instant, long past that time.
+	c.answer = nil
+	s.SetClock(func() time.Time { return time.Unix(int64(g+786), 0) })
+	require.NoError(t, s.Handle(ctx, sequencer.SyncSlot{Height: 396, Time: g + 792, L1Head: 66}))
+	require.Equal(t, uint64(348), h.head(t).Number.Uint64())
+	require.Equal(t, composed{parent: hash(347), ts: g + 696, target: 67, mode: sequencer.ModeCatchup}, call(5))
 }
 
 func (h *harness) head(t *testing.T) *types.Header {
@@ -121,6 +308,13 @@ func (h *harness) head(t *testing.T) *types.Header {
 // devnet is the reference devnet's timing on the devnet chain: K 6, Future 2,
 // Live 3.
 func devnet() sequencer.Timing { return timing(12_000, 2_000, 4_000, 1_500) }
+
+// onTime is the latest instant a proof of the Sync block at ts reaches L1 the
+// slack before it, on the devnet timing.
+func onTime(ts uint64) time.Time {
+	tm := devnet()
+	return time.Unix(int64(ts), 0).Add(-tm.Slack - tm.Proof)
+}
 
 // TestSequencer is T-SEQ-1 and T-SEQ-2 on the devnet: a steady slot, Live
 // ticks up to the Live blocks' end, the remainder of a slot, a Catchup that
