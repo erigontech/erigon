@@ -108,7 +108,8 @@ func applyTransaction(config *chain.Config, engine rules.EngineReader, gp *GasPo
 	if err != nil {
 		return nil, err
 	}
-	if err = ibs.FinalizeTxKeepJournal(rules, stateWriter); err != nil {
+	err = ibs.FinalizeTxKeepJournal(rules, stateWriter)
+	if err != nil {
 		return nil, err
 	}
 	finalized = true
