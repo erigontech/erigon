@@ -411,3 +411,26 @@ func TestProcessChecksBALSidecarAndComputedBAL(t *testing.T) {
 	require.ErrorContains(t, process(other.Hash(), sidecar(otherBytes)), "block access list mismatch")
 	require.ErrorContains(t, process(other.Hash(), nil), "block access list mismatch")
 }
+
+func TestProcessReturnsTheSidecarListWhenItMatches(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0x01"))
+	slot := accounts.InternKey(common.BigToHash(big.NewInt(1)))
+	io := state.NewVersionedIO(2)
+	writeSets := map[int]*state.WriteSet{}
+	addBalanceWrite(writeSets, 0, addr, 7)
+	addStorageWrite(writeSets, 1, addr, slot, 9)
+	recordAll(io, map[int]state.ReadSet{}, writeSets)
+
+	computed := balpkg.Create(1, nil, io, "", log.New())
+	raw, err := types.EncodeBlockAccessListBytes(computed)
+	require.NoError(t, err)
+	sidecar, err := types.DecodeBlockAccessListSidecar(raw)
+	require.NoError(t, err)
+	headerHash := computed.Hash()
+	h := &types.Header{Number: *uint256.NewInt(1), GasLimit: 60_000_000, BlockAccessListHash: &headerHash}
+
+	got, err := balpkg.Process(sidecar, h, nil, io, true, false, "", log.New())
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	require.Same(t, &sidecar.BlockAccessList()[0], &got[0])
+}
