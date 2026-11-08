@@ -1038,7 +1038,7 @@ func TruncateCanonicalChain(db kv.RwTx, from uint64) error {
 // does decrement sequences of kv.EthTx
 // doesn't delete Receipts, Canonical markers, TotalDifficulty
 func TruncateBlocks(ctx context.Context, tx kv.RwTx, blockFrom uint64) error {
-	if blockFrom < 1 { //protect genesis
+	if blockFrom < 1 { // protect genesis
 		blockFrom = 1
 	}
 	return deleteBlocksRange(ctx, tx, blockFrom, nil, "TruncateBlocks")

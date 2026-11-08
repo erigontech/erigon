@@ -356,6 +356,7 @@ func (c *RwCursorPseudoDupSort) LastDup() ([]byte, error) {
 func (c *RwCursorPseudoDupSort) DeleteCurrentDuplicates() error {
 	return c.DeleteCurrent()
 }
+
 func (c *RwCursorPseudoDupSort) DeleteCurrentMultiValBefore(v []byte) (uint64, error) {
 	k, cur, err := c.Current()
 	if err != nil || cur == nil {

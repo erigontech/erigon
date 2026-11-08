@@ -345,7 +345,7 @@ func (m *memoryMutationCursor) DeleteCurrentMultiValBefore(v []byte) (uint64, er
 		if cur := m.currentPair.value; v != nil && bytes.Compare(cur, v) >= 0 {
 			return 0, nil
 		}
-		if err := m.mutation.Delete(m.table, key); err != nil {
+		if err = m.mutation.Delete(m.table, key); err != nil {
 			return 0, err
 		}
 		m.currentPair, m.currentDbEntry, m.currentMemEntry = cursorEntry{}, cursorEntry{}, cursorEntry{}
