@@ -210,7 +210,16 @@ func (e *EngineServer) GetPayloadBodiesByHashV2(ctx context.Context, hashes []co
 		return nil, &engine_helpers.TooLargeRequestErr
 	}
 	e.engineLogSpamer.RecordRequest()
-	return e.chainRW.GetPayloadBodiesByHash(ctx, hashes)
+	bodies, err := e.chainRW.GetPayloadBodiesByHash(ctx, hashes)
+	if err != nil {
+		return nil, err
+	}
+	for i, hash := range hashes {
+		if e.isKnownBadBlock(hash) {
+			bodies[i] = nil
+		}
+	}
+	return bodies, nil
 }
 
 // Returns an ordered (as per canonical chain) array of execution payload bodies, with corresponding execution block numbers from "start", up to "count"
