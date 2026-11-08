@@ -20,6 +20,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -138,4 +140,27 @@ func TestNewAppDefaults(t *testing.T) {
 
 	// Verify ExitErrHandler is set
 	require.NotNil(t, app.ExitErrHandler)
+}
+
+const tlsHelperArgsEnv = "ERIGON_TEST_TLS_HELPER_ARGS"
+
+func TestTLSHelperProcess(t *testing.T) {
+	args := os.Getenv(tlsHelperArgsEnv)
+	if args == "" {
+		return
+	}
+	buildHttpCfg(t, strings.Fields(args))
+}
+
+func TestTLSWithMissingCertOrKeyIsFatal(t *testing.T) {
+	for _, args := range []string{"--tls", "--tls --tls.cert=cert.pem", "--tls --tls.key=key.pem"} {
+		t.Run(args, func(t *testing.T) {
+			cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestTLSHelperProcess$")
+			cmd.Env = append(os.Environ(), tlsHelperArgsEnv+"="+args)
+			output, err := cmd.CombinedOutput()
+			var exitErr *exec.ExitError
+			require.ErrorAs(t, err, &exitErr, string(output))
+			require.Contains(t, string(output), "Fatal:")
+		})
+	}
 }

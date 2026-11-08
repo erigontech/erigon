@@ -326,6 +326,9 @@ type cell struct {
 	stateHashLen    int16     // stateHash length, if > 0 can reuse
 	loaded          loadFlags // folded Cell have only hash, unfolded have all fields
 	Update                    // state update
+
+	// pendingHashDepth is depth+1 of a deferred deriveHashedKeys; most decoded cells are never read by key.
+	pendingHashDepth int16
 }
 
 type loadFlags uint8
@@ -422,6 +425,7 @@ func (cell *cell) reset() {
 }
 
 func (cell *cell) resetStorage() {
+	cell.pendingHashDepth = 0
 	cell.storageAddrLen = 0
 	cell.hashedExtLen = 0
 	cell.extLen = 0
@@ -520,6 +524,7 @@ func (cell *cell) fillAccountGaps(read *Update) {
 }
 
 func (cell *cell) fillFromUpperCell(upCell *cell, depth, depthIncrement int16) {
+	cell.pendingHashDepth = 0
 	if upCell.hashedExtLen >= depthIncrement {
 		cell.hashedExtLen = upCell.hashedExtLen - depthIncrement
 	} else {
@@ -575,6 +580,7 @@ func (cell *cell) fillFromUpperCell(upCell *cell, depth, depthIncrement int16) {
 
 // fillFromLowerCell fills the cell with the data from the cell of the lower row during fold
 func (cell *cell) fillFromLowerCell(lowCell *cell, lowDepth int16, preExtension []byte, nibble int) {
+	cell.pendingHashDepth = 0
 	if lowCell.accountAddrLen > 0 || lowDepth < 64 {
 		cell.accountAddrLen = lowCell.accountAddrLen
 	}
@@ -603,10 +609,8 @@ func (cell *cell) fillFromLowerCell(lowCell *cell, lowDepth int16, preExtension 
 				copy(cell.extension[1+len(preExtension):], lowCell.extension[:lowCell.extLen])
 			}
 			cell.extLen = lowCell.extLen + 1 + int16(len(preExtension))
-			if cell.accountAddrLen == 0 && cell.storageAddrLen == 0 {
-				copy(cell.hashedExtension[:], cell.extension[:cell.extLen])
-				cell.hashedExtLen = cell.extLen
-			}
+			copy(cell.hashedExtension[:], cell.extension[:cell.extLen])
+			cell.hashedExtLen = cell.extLen
 		} else {
 			// Extension is related to a storage branch node, so we copy it upwards as is
 			cell.extLen = lowCell.extLen
@@ -665,6 +669,7 @@ func (cell *cell) deriveHashedKeys(depth int16, accountKeyLen int16, hashBuf []b
 }
 
 func (cell *cell) fillFromFields(data []byte, pos int, fieldBits cellFields) (int, error) {
+	cell.pendingHashDepth = 0
 	fields := []struct {
 		flag      cellFields
 		lenField  *int16
@@ -1375,7 +1380,7 @@ func (hph *HexPatriciaHashed) needUnfolding(hashedKey []byte) int16 {
 			return 0
 		}
 		nibble := int(hashedKey[hph.currentKeyLen])
-		cell = &hph.grid[hph.activeRows-1][nibble]
+		cell = hph.gridCell(hph.activeRows-1, nibble)
 		if hph.traceW != nil {
 			fmt.Fprintf(hph.traceW, "currentKey [%x] needUnfolding cell (%d, %x, depth=%d) cell.hash=[%x]\n", hph.currentKey[:hph.currentKeyLen], hph.activeRows-1, nibble, depth, cell.hash[:cell.hashLen])
 		}
@@ -1433,7 +1438,7 @@ func (hph *HexPatriciaHashed) PrintGrid() {
 	for row := 0; row < hph.activeRows; row++ {
 		fmt.Printf("row %d depth %d:\n", row, hph.depths[row])
 		for col := range 16 {
-			cell := &hph.grid[row][col]
+			cell := hph.gridCell(row, col)
 			if cell.hashedExtLen > 0 || cell.accountAddrLen > 0 {
 				var cellHash []byte
 				cellHash, _, _, err := hph.witnessComputeCellHashWithStorage(cell, hph.depths[row], nil)
@@ -1570,12 +1575,26 @@ func (hph *HexPatriciaHashed) decodeBranchIntoRow(row int, depth int16, branch [
 		if hph.traceW != nil {
 			fmt.Fprintf(hph.traceW, "cell (%d, %x, depth=%d) %s\n", row, nibble, depth, cell.FullString())
 		}
-		if err := cell.deriveHashedKeys(depth, hph.accountKeyLen, hph.cellHashBuf[:]); err != nil {
-			return err
+		if cell.accountAddrLen > 0 && depth > 64 {
+			return errors.New("deriveHashedKeys accountAddr present at depth > 64")
+		}
+		if cell.accountAddrLen > 0 || cell.storageAddrLen > 0 {
+			cell.pendingHashDepth = depth + 1
 		}
 		bitset ^= bit
 	}
 	return nil
+}
+
+// gridCell returns grid[row][nibble] with its deferred hashed keys derived.
+func (hph *HexPatriciaHashed) gridCell(row, nibble int) *cell {
+	c := &hph.grid[row][nibble]
+	if c.pendingHashDepth > 0 {
+		depth := c.pendingHashDepth - 1
+		c.pendingHashDepth = 0
+		_ = c.deriveHashedKeys(depth, hph.accountKeyLen, hph.cellHashBuf[:]) // depth checked at decode
+	}
+	return c
 }
 
 func (hph *HexPatriciaHashed) unfold(hashedKey []byte, unfolding int16) error {
@@ -1599,7 +1618,7 @@ func (hph *HexPatriciaHashed) unfold(hashedKey []byte, unfolding int16) error {
 		upRow := hph.activeRows - 1
 		upDepth = hph.depths[upRow]
 		upNibble := hashedKey[upDepth-1]
-		upCell = &hph.grid[upRow][upNibble]
+		upCell = hph.gridCell(upRow, int(upNibble))
 
 		touched = hph.touchMap[upRow]&(uint16(1)<<upNibble) != 0
 		present = hph.afterMap[upRow]&(uint16(1)<<upNibble) != 0
@@ -1970,7 +1989,7 @@ func (hph *HexPatriciaHashed) foldPropagate(row int, nibble, upDepth, depth int1
 		}
 	}
 	childNibble := bits.TrailingZeros16(hph.afterMap[row])
-	cell := &hph.grid[row][childNibble]
+	cell := hph.gridCell(row, childNibble)
 	upCell.extLen = 0
 	upCell.stateHashLen = 0
 	var counters skipStat
@@ -2115,7 +2134,7 @@ func (hph *HexPatriciaHashed) fold() error {
 		if hph.traceW != nil {
 			fmt.Fprintf(hph.traceW, "fold: parent (%d, %x, depth=%d)\n", upRow, nibble, upDepth)
 		}
-		upCell = &hph.grid[upRow][nibble]
+		upCell = hph.gridCell(upRow, int(nibble))
 	}
 
 	depth := hph.depths[row]
@@ -2194,7 +2213,7 @@ func (hph *HexPatriciaHashed) deleteCell(hashedKey []byte) {
 			return
 		}
 		nibble := int(hashedKey[hph.currentKeyLen])
-		cell = &hph.grid[row][nibble]
+		cell = hph.gridCell(row, nibble)
 		col := uint16(1) << nibble
 		if hph.afterMap[row]&col != 0 {
 			// Prevent "spurious deletions", i.e. deletion of absent items
@@ -2247,7 +2266,7 @@ func (hph *HexPatriciaHashed) detectCollapseBeforeDelete(hashedKey []byte) {
 		return
 	}
 
-	siblingCell := &hph.grid[parentRow][siblingNibble]
+	siblingCell := hph.gridCell(parentRow, int(siblingNibble))
 
 	// Build the sibling's full hashed key path
 	siblingPath := make([]byte, int(depth)+1+int(siblingCell.hashedExtLen))
@@ -2270,7 +2289,7 @@ func (hph *HexPatriciaHashed) detectCollapseBeforeDelete(hashedKey []byte) {
 func (hph *HexPatriciaHashed) detectCascadingCollapseAtRow(row int) {
 	depth := hph.depths[row] - 1
 	survivingNibble := bits.TrailingZeros16(hph.afterMap[row])
-	survivingCell := &hph.grid[row][survivingNibble]
+	survivingCell := hph.gridCell(row, survivingNibble)
 
 	// Build the surviving child's full hashed key path
 	siblingPath := make([]byte, int(depth)+1+int(survivingCell.hashedExtLen))
@@ -2349,7 +2368,7 @@ func (hph *HexPatriciaHashed) resetAccountStorageRoot(hashedKey []byte) {
 	}
 	row := hph.activeRows - 1
 	nibble := int(hashedKey[hph.currentKeyLen])
-	cell := &hph.grid[row][nibble]
+	cell := hph.gridCell(row, nibble)
 	cell.hashLen = 0
 	cell.extLen = 0
 	cell.stateHashLen = 0
@@ -2387,7 +2406,7 @@ func (hph *HexPatriciaHashed) updateCell(plainKey, hashedKey []byte, u *Update) 
 		row := hph.activeRows - 1
 		depth = hph.depths[row]
 		nibble := int(hashedKey[hph.currentKeyLen])
-		cell = &hph.grid[row][nibble]
+		cell = hph.gridCell(row, nibble)
 		col := uint16(1) << nibble
 
 		hph.touchMap[row] |= col
@@ -2427,6 +2446,9 @@ func (hph *HexPatriciaHashed) updateCell(plainKey, hashedKey []byte, u *Update) 
 
 func (hph *HexPatriciaHashed) RootHash() ([]byte, error) {
 	hph.root.stateHashLen = 0
+	if _, err := hph.loadStateIfNeeded(&hph.root, skipStat{}); err != nil {
+		return nil, err
+	}
 	rootHash, err := hph.computeCellHash(&hph.root, 0, nil)
 	if err != nil {
 		return nil, err
@@ -2525,7 +2547,7 @@ func (hph *HexPatriciaHashed) foldMounted(ctx context.Context, nib int) (cell, e
 				fmt.Fprintf(hph.traceW, "mount early as nibble %02x %s\n", hph.mountedNib, hph.grid[0][hph.mountedNib].String())
 			}
 			// fmt.Printf("===[%x] stop folding at %x\n", hph.mountedNib, hph.currentKey[:hph.currentKeyLen])
-			return hph.grid[0][hph.mountedNib], nil
+			return *hph.gridCell(0, int(hph.mountedNib)), nil
 		}
 		hph.metrics.folds.Add(1)
 		if err := hph.fold(); err != nil {
@@ -2558,7 +2580,7 @@ func (hph *HexPatriciaHashed) captureExtensionDivergence(hashedKey []byte, set *
 	if keyPos >= int16(len(hashedKey)) {
 		return nil
 	}
-	cell := &hph.grid[row][hashedKey[keyPos]]
+	cell := hph.gridCell(row, int(hashedKey[keyPos]))
 	if cell.hashedExtLen == 0 || cell.hashLen == 0 {
 		return nil
 	}

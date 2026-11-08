@@ -12,7 +12,6 @@ self-hosted-runner:
     - rpc-integration
     - rpc-integration-commitment
     - rpc-integration-geth
-    - rpc-integration-nethermind
     - rpc-latest-erigon
     - rpc-latest-geth
     - rpc-latest-nethermind
