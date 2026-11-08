@@ -87,6 +87,7 @@ func (cc *ExecutionClientDirect) NewPayload(
 		return PayloadStatusInvalidated, err
 	}
 
+	cc.chainRW.StartSendersRecovery(ctx, payload.BlockHash, header, txs)
 	startInsertBlock := time.Now()
 	if err := cc.chainRW.InsertBlock(ctx, types.NewBlockFromStorageWithBinaryTxs(payload.BlockHash, header, txs, body.Transactions, nil, body.Withdrawals, bal)); err != nil {
 		if errors.Is(err, types.ErrBlockExceedsMaxRlpSize) {
