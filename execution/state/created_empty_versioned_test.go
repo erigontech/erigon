@@ -505,3 +505,22 @@ func TestCreatedSelfDestructEmpty(t *testing.T) {
 	_, known = createdSelfDestructEmpty(writes(true, 0), nil, addr)
 	require.False(t, known, "without a real self-destruct the account view decides")
 }
+
+func TestFinalizedWritesCreatedSelfDestructKeepsCodeDeletedMarker(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0xd1})
+	ibs := NewWithVersionMap(&minimalStateReader{}, NewVersionMap(nil))
+	t.Cleanup(ibs.Close)
+	ibs.SetTxContext(1, 0)
+	require.NoError(t, ibs.CreateAccount(addr, true))
+	require.NoError(t, ibs.SetCode(addr, []byte{0x60, 0x00}, tracing.CodeChangeUnspecified))
+	_, err := ibs.Selfdestruct(addr, false)
+	require.NoError(t, err)
+
+	writes := finalizedWrites(t, ibs, &chain.Rules{IsSpuriousDragon: true, IsCancun: true})
+
+	sd, ok := writes.GetSelfDestruct(addr)
+	require.True(t, ok && sd.Val, "the created contract is removed")
+	ch, ok := writes.GetCodeHash(addr)
+	require.True(t, ok && ch.Deletes(), "a destroyed contract keeps the code-deleted marker, so the fee calc burns its delayed fee")
+}
