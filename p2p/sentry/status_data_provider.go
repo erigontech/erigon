@@ -111,11 +111,11 @@ func makeGenesisChainHead(genesis *types.Block) ChainHead {
 
 func (s *StatusDataProvider) makeStatusData(head ChainHead) *sentryproto.StatusData {
 	return &sentryproto.StatusData{
-		NetworkId:          s.networkId,
-		TotalDifficulty:    gointerfaces.ConvertUint256IntToH256(head.HeadTd),
-		BestHash:           gointerfaces.ConvertHashToH256(head.HeadHash),
-		MaxBlockHeight:     head.HeadHeight,
-		MaxBlockTime:       head.HeadTime,
+		NetworkId:       s.networkId,
+		TotalDifficulty: gointerfaces.ConvertUint256IntToH256(head.HeadTd),
+		BestHash:        gointerfaces.ConvertHashToH256(head.HeadHash),
+		MaxBlockHeight:  head.HeadHeight,
+		MaxBlockTime:    head.HeadTime,
 		// Peers reject a Status with earliest above latest, and retained block files can start above the head during first sync.
 		MinimumBlockHeight: min(head.MinimumHeight, head.HeadHeight),
 		ForkData: &sentryproto.Forks{
