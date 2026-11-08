@@ -154,9 +154,9 @@ type AddressEntry struct {
 	CreateContract *btree.Map[int, *WriteCell[bool]]
 	Storage        map[accounts.StorageKey]*btree.Map[int, *WriteCell[uint256.Int]]
 	// mu guards this account's cell maps. Held RLock for reads (readFloor and
-	// the per-path scans) and Lock for writes (putCell / Delete / markFlag).
-	// MarkWritesComplete flips flags to Done under RLock only while no SelfDestruct
-	// cell is true: readers combine several cells' flags only through a destruct.
+	// the per-path scans) and Lock for writes (putCell / Delete).
+	// MarkWritesComplete and MarkWritesValidated flip flags under RLock only while no
+	// SelfDestruct cell is true: readers combine several cells' flags only through a destruct.
 	mu sync.RWMutex
 }
 
@@ -1529,6 +1529,24 @@ func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool) {
 	})
 }
 
+func lockForMark(e *AddressEntry) (exclusive bool) {
+	e.mu.RLock()
+	if !hasDestruct(e.SelfDestruct) {
+		return false
+	}
+	e.mu.RUnlock()
+	e.mu.Lock()
+	return true
+}
+
+func unlockForMark(e *AddressEntry, exclusive bool) {
+	if exclusive {
+		e.mu.Unlock()
+	} else {
+		e.mu.RUnlock()
+	}
+}
+
 // hasDestruct reports a true SelfDestruct cell; a created account holds only false markers.
 func hasDestruct(cells *btree.Map[int, *WriteCell[bool]]) bool {
 	found := false
@@ -1558,19 +1576,8 @@ func (vm *VersionMap) MarkWritesComplete(writes *WriteSet) {
 		if e == nil {
 			panic(fmt.Sprintf("markComplete: no entry addr=%x", addr.Value()))
 		}
-		e.mu.RLock()
-		exclusive := hasDestruct(e.SelfDestruct)
-		if exclusive {
-			e.mu.RUnlock()
-			e.mu.Lock()
-		}
-		defer func() {
-			if exclusive {
-				e.mu.Unlock()
-			} else {
-				e.mu.RUnlock()
-			}
-		}()
+		exclusive := lockForMark(e)
+		defer unlockForMark(e, exclusive)
 		if vm.stamps != nil && hasLifecycleCells(e) {
 			wtx := writes.txIndex()
 			vm.mutBegin(wtx)
@@ -1635,8 +1642,8 @@ func (vm *VersionMap) MarkWritesValidated(writes *WriteSet, isFeeRecipient func(
 		if e == nil {
 			panic(fmt.Sprintf("markValidated: no entry addr=%x", addr.Value()))
 		}
-		e.mu.Lock()
-		defer e.mu.Unlock()
+		exclusive := lockForMark(e)
+		defer unlockForMark(e, exclusive)
 		if vm.stamps != nil && hasLifecycleCells(e) {
 			wtx := writes.txIndex()
 			vm.mutBegin(wtx)
@@ -1687,7 +1694,7 @@ func (vm *VersionMap) MarkWritesValidated(writes *WriteSet, isFeeRecipient func(
 }
 
 // markFlag updates the flag on an existing (addr, path, key, txIdx) cell.
-// Caller must hold e.mu.Lock(). Panics if no cell is present at txIdx. When
+// Caller must hold e.mu as lockForMark takes it. Panics if no cell is present at txIdx. When
 // incarnation >= 0 the cell must be at that incarnation.
 func markFlag(e *AddressEntry, addr accounts.Address, path AccountPath, key accounts.StorageKey, txIdx int, incarnation Incarnation, flag statusFlag) {
 	switch path {
