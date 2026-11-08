@@ -368,7 +368,7 @@ func TestNoMaterialize_RevivedAccountDropsDestroyedNonce(t *testing.T) {
 	require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(5), tracing.BalanceChangeTransfer))
 	vm.FlushVersionedWrites(ibs.VersionedWrites(), true)
 
-	acc, ok := vm.View(3, &emptyReader{}).GetAccount(addr)
+	acc, ok, _ := vm.View(3, &emptyReader{}).GetAccount(addr)
 	require.True(t, ok)
 	require.Zero(t, acc.Nonce)
 	require.Equal(t, *uint256.NewInt(5), acc.Balance)

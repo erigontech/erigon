@@ -215,6 +215,7 @@ type IntraBlockState struct {
 	// still commit via FinalizeTx→so.data.
 	noMaterialize       bool
 	noConflictDetection bool
+	codeByHash          CodeByHash
 
 	revisions revisions
 
@@ -361,6 +362,7 @@ func (ibs *IntraBlockState) Reset() {
 	// both right after Reset; the block assembler never calls Reset mid-block.
 	ibs.noMaterialize = false
 	ibs.noConflictDetection = false
+	ibs.codeByHash = nil
 	clear(ibs.committedBase)
 	// Read side rebinds to a fresh empty set: VersionedReads() at end of
 	// tx hands the per-path maps to result.TxIn, so rebinding leaves the
@@ -451,6 +453,8 @@ func (ibs *IntraBlockState) resetForPool() bool {
 // balance read serves both, so skipping it needs both to be absent. Reset
 // clears it.
 func (ibs *IntraBlockState) SetNoConflictDetection() { ibs.noConflictDetection = true }
+
+func (ibs *IntraBlockState) SetCodeByHash(c CodeByHash) { ibs.codeByHash = c }
 
 // Release Deprecated use Close
 func (ibs *IntraBlockState) Release(bool) { ibs.Close() }
@@ -846,7 +850,7 @@ func (ibs *IntraBlockState) GetCodeSize(addr accounts.Address) (int, error) {
 		// ReadAccountCode there returns nil (EXTCODESIZE 0) and diverges from
 		// consensus.
 		size, err := ibs.stateReader.ReadAccountCodeSize(addr)
-		ibs.recordStateReadError(err)
+		ibs.RecordStateReadError(err)
 		if err != nil {
 			return 0, err
 		}
@@ -1427,7 +1431,7 @@ func (ibs *IntraBlockState) committedAccount(addr accounts.Address) (*accounts.A
 		// Route a committed-base read failure (e.g. a corrupt account record) operationally
 		// like the origin* readers, so the executor surfaces it instead of letting the
 		// EVM swallow it as a gas failure and condemn the block as invalid.
-		ibs.recordStateReadError(err)
+		ibs.RecordStateReadError(err)
 		return nil, err
 	}
 	if ibs.committedBase == nil {
@@ -2082,7 +2086,7 @@ func (ibs *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 		// Record so the executor surfaces it operationally rather than continuing
 		// with a wrong value; the serial (non-versioned) account read reaches the DB
 		// here, bypassing refreshAccount and the typed readers that already record.
-		ibs.recordStateReadError(err)
+		ibs.RecordStateReadError(err)
 		return nil, err
 	}
 
@@ -2827,7 +2831,7 @@ func (ibs *IntraBlockState) encodeExistingEmptyRemovals(chainRules *chain.Rules,
 			// A failed base read zeroes the composed fields, which would read as
 			// an EIP-161 empty and delete a live account. Surface the error and
 			// leave the account's writes intact instead.
-			ibs.recordStateReadError(err)
+			ibs.RecordStateReadError(err)
 			continue
 		}
 		bal, nonce, codeHash := view.GetBalance(), view.GetNonce(), view.GetCodeHash()
@@ -3626,7 +3630,7 @@ func (ibs *IntraBlockState) StateReadError() error {
 	return ibs.stateReadErr
 }
 
-func (ibs *IntraBlockState) recordStateReadError(err error) {
+func (ibs *IntraBlockState) RecordStateReadError(err error) {
 	if err != nil && ibs.stateReadErr == nil {
 		ibs.stateReadErr = err
 	}

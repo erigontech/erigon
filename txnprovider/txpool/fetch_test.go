@@ -902,6 +902,40 @@ func TestFetchBoundsQueuedBatch(t *testing.T) {
 	}
 }
 
+func TestFetchRevalidatesDuplicateReplyAfterNewBlock(t *testing.T) {
+	t.Parallel()
+	txnRlp := decodeHex("f867088504a817c8088302e2489435353535353535353535353535353535353535358202008025a064b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c12a064b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c10")
+	reply := &sentryproto.InboundMessage{
+		Id:     sentryproto.MessageId_POOLED_TRANSACTIONS_66,
+		Data:   EncodePooledTransactions66([][]byte{txnRlp}, 1, nil),
+		PeerId: peerID,
+	}
+	ctrl := gomock.NewController(t)
+	pool := NewMockPool(ctrl)
+	pool.EXPECT().Started().Return(true).AnyTimes()
+	pool.EXPECT().IdHashKnown(gomock.Any(), gomock.Any()).Return(false, nil).AnyTimes()
+	pool.EXPECT().OnNewBlock(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil)
+	pool.EXPECT().AddRemoteTxns(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Times(2)
+	fetch := NewFetch(t.Context(), nil, pool, nil, mdbxtest.NewTestDB(t, dbcfg.TxPoolDB), u256.N1, log.New())
+	newBlock := &remoteproto.StateChangeBatch{ChangeBatch: []*remoteproto.StateChange{{BlockHeight: 1}}}
+
+	// reply, duplicate reply in the same block, then the same reply after a new block
+	received := 0
+	stream := &boundedBatchStream{recv: func() (*sentryproto.InboundMessage, error) {
+		received++
+		if received == 3 {
+			require.NoError(t, fetch.handleStateChangesRequest(t.Context(), newBlock))
+		}
+		if received > 3 {
+			return nil, nil
+		}
+		return reply, nil
+	}}
+	client := sentryproto.NewMockSentryClient(ctrl)
+	client.EXPECT().Messages(gomock.Any(), gomock.Any(), gomock.Any()).Return(stream, nil)
+	require.NoError(t, fetch.receiveMessage(t.Context(), client))
+}
+
 func TestFetchSerializesBatchFlushes(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		ctrl := gomock.NewController(t)
