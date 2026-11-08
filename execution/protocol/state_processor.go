@@ -82,20 +82,23 @@ func applyTransaction(config *chain.Config, engine rules.EngineReader, gp *GasPo
 	}
 	msg.SetCheckNonce(!cfg.StatelessExec)
 
-	if cfg.Tracer != nil {
-		if cfg.Tracer.OnTxStart != nil {
-			cfg.Tracer.OnTxStart(evm.GetVMContext(), txn, msg.From())
-		}
-		if cfg.Tracer.HasTxEndHook() {
-			defer func() {
-				var txnGasUsage mdgas.TxnGasUsage
-				if result != nil {
-					txnGasUsage = result.TxnGasUsage
-				}
-				cfg.Tracer.EmitTxEnd(receipt, txnGasUsage, err)
-			}()
-		}
+	if cfg.Tracer != nil && cfg.Tracer.OnTxStart != nil {
+		cfg.Tracer.OnTxStart(evm.GetVMContext(), txn, msg.From())
 	}
+	// The journal reset hides a versioned state's own writes, so it waits for the tracer's tx end.
+	var finalized bool
+	defer func() {
+		if cfg.Tracer.HasTxEndHook() {
+			var txnGasUsage mdgas.TxnGasUsage
+			if result != nil {
+				txnGasUsage = result.TxnGasUsage
+			}
+			cfg.Tracer.EmitTxEnd(receipt, txnGasUsage, err)
+		}
+		if finalized {
+			ibs.ClearJournalAndRefund()
+		}
+	}()
 
 	txContext := NewEVMTxContext(msg)
 
@@ -105,10 +108,11 @@ func applyTransaction(config *chain.Config, engine rules.EngineReader, gp *GasPo
 	if err != nil {
 		return nil, err
 	}
-	err = ibs.FinalizeTx(rules, stateWriter)
+	err = ibs.FinalizeTxKeepJournal(rules, stateWriter)
 	if err != nil {
 		return nil, err
 	}
+	finalized = true
 	gasUsed.AddResult(result)
 	gasUsed.Blob += txn.GetBlobGas()
 
