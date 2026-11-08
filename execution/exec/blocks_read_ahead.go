@@ -35,6 +35,8 @@ type BlockReadAheader struct {
 	bodies  *lru.Cache[common.Hash, *types.Body]
 	bals    *lru.Cache[common.Hash, *types.BlockAccessListSidecar]
 
+	inserted *lru.Cache[common.Hash, insertedBody]
+
 	recoveries *lru.Cache[common.Hash, *SendersRecovery]
 
 	// The single permit belongs either to one warmup or to the code suspending
@@ -71,11 +73,16 @@ func NewBlockReadAheader() *BlockReadAheader {
 	if err != nil {
 		panic(err)
 	}
+	inserted, err := lru.New[common.Hash, insertedBody](4)
+	if err != nil {
+		panic(err)
+	}
 	return &BlockReadAheader{
 		recoveries: recoveries,
 		headers:    headers,
 		bodies:     bodies,
 		bals:       bals,
+		inserted:   inserted,
 		warmupGate: semaphore.NewWeighted(1),
 	}
 }
@@ -650,6 +657,20 @@ func (bra *BlockReadAheader) warmTxns(ctx context.Context, db kv.RoDB, txns type
 		})
 	}
 	return wg.Wait()
+}
+
+type insertedBody struct {
+	body *types.Body
+	raw  *types.RawBody
+}
+
+func (bra *BlockReadAheader) AddInsertedBody(blockHash common.Hash, body *types.Body, raw *types.RawBody) {
+	bra.inserted.Add(blockHash, insertedBody{body: body, raw: raw})
+}
+
+func (bra *BlockReadAheader) InsertedBody(blockHash common.Hash) (*types.Body, *types.RawBody, bool) {
+	b, ok := bra.inserted.Get(blockHash)
+	return b.body, b.raw, ok
 }
 
 func (bra *BlockReadAheader) ReadBodyWithTransactions(blockHash common.Hash) (*types.Body, bool) {

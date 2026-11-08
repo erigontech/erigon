@@ -517,6 +517,16 @@ const nextForkBanner = `
 =============================================== GLAMSTERDAM ACTIVATED ===============================================
 `
 
+func (e *ExecModule) validationBody(ctx context.Context, tx kv.Getter, blockHash common.Hash, blockNumber uint64) (*types.Body, *types.RawBody, error) {
+	if e.readAheader != nil {
+		if body, raw, ok := e.readAheader.InsertedBody(blockHash); ok {
+			return body, raw, nil
+		}
+	}
+	body, err := e.blockReader.BodyWithTransactions(ctx, tx, blockHash, blockNumber)
+	return body, nil, err
+}
+
 func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, blockNumber uint64) (ValidationResult, error) {
 	defer validateChainDuration.ObserveDuration(time.Now())
 	if !e.semaphore.TryAcquire(1) {
@@ -536,6 +546,7 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 	var (
 		header             *types.Header
 		body               *types.Body
+		rawBody            *types.RawBody
 		currentBlockNumber *uint64
 		payloadExecuted    bool
 		canonical          bool
@@ -568,7 +579,7 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		if err != nil {
 			return ValidationResult{}, err
 		}
-		body, err = e.blockReader.BodyWithTransactions(ctx, overlay, blockHash, blockNumber)
+		body, rawBody, err = e.validationBody(ctx, overlay, blockHash, blockNumber)
 		if err != nil {
 			return ValidationResult{}, err
 		}
@@ -584,7 +595,7 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 			if err != nil {
 				return err
 			}
-			body, err = e.blockReader.BodyWithTransactions(ctx, tx, blockHash, blockNumber)
+			body, rawBody, err = e.validationBody(ctx, tx, blockHash, blockNumber)
 			if err != nil {
 				return err
 			}
@@ -693,7 +704,10 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		doms.Close()
 		return ValidationResult{}, err
 	}
-	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(ctx, doms, tx, header, body.RawBody(), ensureReadAheadSuspended, e.logger)
+	if rawBody == nil {
+		rawBody = body.RawBody()
+	}
+	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(ctx, doms, tx, header, rawBody, ensureReadAheadSuspended, e.logger)
 	if criticalError != nil {
 		return ValidationResult{}, criticalError
 	}
