@@ -3917,6 +3917,33 @@ func TestDomain_FileCacheKeepsMissNotFound(t *testing.T) {
 	}
 }
 
+func TestDomain_FileCacheKeepsDeletedKeyFound(t *testing.T) {
+	t.Parallel()
+	db, d := testDbAndDomain(t, log.New())
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	domainTx := d.beginForTests()
+	writer := domainTx.NewWriter(db)
+	key := []byte("key")
+	require.NoError(t, writer.PutWithPrev(key, []byte("v0"), 5, nil))
+	require.NoError(t, writer.DeleteWithPrev(key, 20, []byte("v0")))
+	require.NoError(t, writer.Flush(t.Context(), tx))
+	writer.Close()
+	domainTx.Close()
+	require.NoError(t, d.collateBuildIntegrate(t.Context(), 0, tx, background.NewProgressSet()))
+	require.NoError(t, d.collateBuildIntegrate(t.Context(), 1, tx, background.NewProgressSet()))
+	domainTx = d.beginForTests()
+	defer domainTx.Close()
+
+	for range 2 {
+		v, found, _, _, err := domainTx.debugGetLatestFromFiles(key, 0)
+		require.NoError(t, err)
+		require.True(t, found)
+		require.Empty(t, v)
+	}
+}
+
 // TestDomainDisabledDiscardsWrites pins that Enabled=false is a real master
 // switch: a writer taken from a disabled domain must drop everything instead of
 // quietly collecting and flushing into the DB tables.
