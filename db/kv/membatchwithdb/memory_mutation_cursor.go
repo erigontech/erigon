@@ -362,6 +362,11 @@ func (m *memoryMutationCursor) Last() ([]byte, []byte, error) {
 	if err != nil {
 		return nil, nil, err
 	}
+	for dbKey != nil && m.isEntryDeleted(dbKey, dbValue) {
+		if dbKey, dbValue, err = m.cursor.Prev(); err != nil {
+			return nil, nil, err
+		}
+	}
 
 	dbKey, dbValue, err = m.skipIntersection(memKey, memValue, dbKey, dbValue, Normal)
 	if err != nil {
