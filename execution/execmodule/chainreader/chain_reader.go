@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
@@ -236,6 +237,13 @@ func (c ChainReaderWriterEth1) InsertBlocks(ctx context.Context, blocks []*types
 		return fmt.Errorf("InsertBlocks: invalid code received from execution module: %s", status)
 	}
 	return nil
+}
+
+func (c ChainReaderWriterEth1) StartSendersRecovery(ctx context.Context, blockHash common.Hash, header *types.Header, txns types.Transactions) {
+	if len(txns) == 0 {
+		return
+	}
+	c.executionModule.AddSendersRecovery(blockHash, exec.StartSendersRecovery(ctx, types.MakeSigner(c.cfg, header.Number.Uint64(), header.Time), txns))
 }
 
 func (c ChainReaderWriterEth1) InsertBlock(ctx context.Context, block *types.Block) error {
