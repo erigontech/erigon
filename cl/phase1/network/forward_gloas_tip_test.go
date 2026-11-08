@@ -690,22 +690,7 @@ func TestForwardBeaconDownloaderDoesNotImportTipAfterSuccessorWasDropped(t *test
 			b := makeGloasBlock(heldSlot, hash(0xb0), common.Hash{})
 			c := makeGloasBlock(heldSlot+1, hash(0xc0), hash(0xb0))
 			linkBeaconBlocks(t, a, b, c)
-			encoded := map[string][]byte{}
-			for _, block := range []*cltypes.SignedBeaconBlock{a, b, c} {
-				bytes, err := block.EncodeSSZ(nil)
-				require.NoError(t, err)
-				encoded[fmt.Sprintf("/eth/v2/beacon/blocks/%d", block.Block.Slot)] = bytes
-			}
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				bytes, ok := encoded[r.URL.Path]
-				if !ok {
-					http.NotFound(w, r)
-					return
-				}
-				w.Header().Set("Eth-Consensus-Version", "gloas")
-				_, _ = w.Write(bytes)
-			}))
-			t.Cleanup(server.Close)
+			server := newBlocksServer(t, a, b, c)
 
 			var failNextProcess atomic.Bool
 			client, _ := newNoPeersRPC(t, cfg)
