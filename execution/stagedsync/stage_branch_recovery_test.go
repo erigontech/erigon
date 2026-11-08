@@ -343,7 +343,6 @@ func readRecoveryDomain(t *testing.T, tx kv.TemporalTx, domain kv.Domain) map[st
 			values[hex.EncodeToString(key)] = hex.EncodeToString(value)
 		}
 	}
-	entries.Close()
 	return values
 }
 
@@ -364,7 +363,6 @@ func readRecoveryHistory(t *testing.T, tx kv.TemporalTx, domain kv.Domain) []rec
 			Key: hex.EncodeToString(key), Before: hex.EncodeToString(before), TxNum: txNum,
 		})
 	}
-	entries.Close()
 	return history
 }
 
