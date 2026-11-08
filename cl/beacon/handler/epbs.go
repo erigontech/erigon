@@ -1213,7 +1213,7 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 			a.forkchoiceStore.ExecutionPayloadInvalidated(gossipKey.BeaconBlockRoot, signedEnvelope.Message.Payload.BlockHash):
 			// A payload marked invalid after the consensus validation is never accepted or published, whatever error
 			// the import returned: an ignored or interrupted import does not recheck it.
-			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+			beaconhttp.NewEndpointError(http.StatusBadRequest, errExecutionPayloadInvalidated).WriteTo(w)
 			return
 		case errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopePersistenceFailed):
 			persistenceErr = err
@@ -1541,6 +1541,7 @@ var (
 	errExecutionPayloadEnvelopeIntegration      = errors.New("execution payload envelope integration failed")
 	errExecutionPayloadColumnPublish            = errors.New("execution payload data columns were not published")
 	errExecutionPayloadEnvelopeContentsRequired = errors.New("blob data is required to repair the columns of this execution payload envelope")
+	errExecutionPayloadInvalidated              = errors.New("execution payload was marked invalid")
 )
 
 func (a *ApiHandler) publishAndStoreExecutionPayloadEnvelopeColumns(storeCtx, publishCtx context.Context, work *envelopeColumnWork, forkDigest common.Bytes4) error {

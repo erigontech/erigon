@@ -1244,6 +1244,7 @@ func TestPostEnvelopeConsensusModeRetryPublishesFailedEnvelope(t *testing.T) {
 			retry := f.postContents(t.Context(), body, query)
 
 			require.Equal(t, http.StatusBadRequest, retry.Code, retry.Body.String())
+			require.Contains(t, retry.Body.String(), errExecutionPayloadInvalidated.Error())
 			require.Len(t, f.eventsOf(eventEnvelopePublish), 1)
 		})
 	}
