@@ -170,7 +170,7 @@ func putCell[T any](vm *VersionMap, cells *btree.Map[int, *WriteCell[T]], addr a
 		if ci.incarnation > incarnation {
 			panic(fmt.Errorf("existing transaction value does not have lower incarnation: %x %s, %v", addr, path, txIdx))
 		}
-		if dbg.AssertEnabled && ci.loadFlag() == FlagDone && flag == FlagEstimate {
+		if dbg.AssertEnabled && ci.loadFlag() == FlagDone && flag == FlagEstimate && ci.accSource != AccountFromBAL {
 			panic(fmt.Errorf("versionMap: Done->Estimate downgrade addr=%x path=%s txIdx=%d inc %d->%d", addr, path, txIdx, ci.incarnation, incarnation))
 		}
 		ci.flag.Store(uint32(flag))
@@ -725,13 +725,15 @@ func readFloor[T any](vm *VersionMap, addr accounts.Address, txIdx int, sel func
 	}
 	res.depIdx = fk
 	res.valStatus = fv.valStatus
-	res.accSource = fv.accSource
+	if fv.accSource == AccountFromBAL {
+		res.flags |= readFromBAL
+	}
 	switch fv.loadFlag() {
 	case FlagDone:
 		res.incarnation = fv.incarnation
 	case FlagValidated:
 		res.incarnation = fv.incarnation
-		res.validated = true
+		res.flags |= readValidated
 	case FlagEstimate:
 	default:
 		panic("unknown flag value")
@@ -873,13 +875,15 @@ func readFloorLife[T any](vm *VersionMap, addr accounts.Address, txIdx int, sel 
 	}
 	res.depIdx = fk
 	res.valStatus = fv.valStatus
-	res.accSource = fv.accSource
+	if fv.accSource == AccountFromBAL {
+		res.flags |= readFromBAL
+	}
 	switch fv.loadFlag() {
 	case FlagDone:
 		res.incarnation = fv.incarnation
 	case FlagValidated:
 		res.incarnation = fv.incarnation
-		res.validated = true
+		res.flags |= readValidated
 	case FlagEstimate:
 	default:
 		panic("unknown flag value")
@@ -1348,7 +1352,7 @@ func cellNoOp[T any](cells *btree.Map[int, *WriteCell[T]], txIdx int, flag statu
 // concurrent readers on a hot pre-seeded account). A net-zero storage write (ValueUnchanged)
 // is omitted from the BAL and folded away by StorageChanges, so it is never materialized and
 // counts as already-present, unless an earlier run of the tx left a cell the flush resets or removes.
-// Lifecycle transitions and the putCell-only paths (which never no-bump) force the slow path.
+// Only incarnation, createContract, and selfDestruct force the slow path.
 // Caller holds e's read lock; only used on the BAL fast path.
 func flushAllNoOp(e *AddressEntry, writes *WriteSet, addr accounts.Address, flag statusFlag) bool {
 	if _, ok := writes.selfDestruct[addr]; ok {
@@ -1357,11 +1361,15 @@ func flushAllNoOp(e *AddressEntry, writes *WriteSet, addr accounts.Address, flag
 	if _, ok := writes.incarnation[addr]; ok {
 		return false
 	}
-	if _, ok := writes.code[addr]; ok {
-		return false
+	if vw, ok := writes.code[addr]; ok {
+		if !cellNoOp(e.Code, vw.Version.TxIndex, flag, vw.Val, vw.valStatus, eqCode) {
+			return false
+		}
 	}
-	if _, ok := writes.codeSize[addr]; ok {
-		return false
+	if vw, ok := writes.codeSize[addr]; ok {
+		if !cellNoOp(e.CodeSize, vw.Version.TxIndex, flag, vw.Val, vw.valStatus, eqInt) {
+			return false
+		}
 	}
 	if _, ok := writes.createContract[addr]; ok {
 		return false
@@ -1450,6 +1458,7 @@ func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool) {
 		}
 		e := vm.entryOrCreate(addr)
 		e.mu.Lock()
+		defer e.mu.Unlock()
 		// CreateAccount also writes SelfDestruct=false for a fresh address, which is no removal.
 		destructed := false
 		if sd, ok := writes.selfDestruct[addr]; ok {
@@ -1475,13 +1484,13 @@ func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool) {
 			e.Incarnation = putCell(vm, e.Incarnation, addr, IncarnationPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, vw.valStatus, getCellIncarnation)
 		}
 		if vw, ok := writes.code[addr]; ok {
-			e.Code = putCell(vm, e.Code, addr, CodePath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, vw.valStatus, getCellCode)
+			e.Code = flushCell(vm, e.Code, addr, CodePath, vw.Version, flag, vw.Val, vw.valStatus, getCellCode, eqCode, destructed)
 		}
 		if vw, ok := writes.codeHash[addr]; ok {
 			e.CodeHash = flushCell(vm, e.CodeHash, addr, CodeHashPath, vw.Version, flag, vw.Val, vw.valStatus, getCellCodeHash, eqCodeHash, destructed)
 		}
 		if vw, ok := writes.codeSize[addr]; ok {
-			e.CodeSize = putCell(vm, e.CodeSize, addr, CodeSizePath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, vw.valStatus, getCellCodeSize)
+			e.CodeSize = flushCell(vm, e.CodeSize, addr, CodeSizePath, vw.Version, flag, vw.Val, vw.valStatus, getCellCodeSize, eqInt, destructed)
 		}
 		if vw, ok := writes.createContract[addr]; ok {
 			e.CreateContract = putCell(vm, e.CreateContract, addr, CreateContractPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, vw.valStatus, getCellCreateContract)
@@ -1517,7 +1526,6 @@ func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool) {
 				e.Storage[key] = flushCell(vm, e.Storage[key], addr, StoragePath, vw.Version, flag, vw.Val, vw.valStatus, getCellStorage, eqUint256, destructed)
 			}
 		}
-		e.mu.Unlock()
 	})
 }
 
@@ -1932,6 +1940,8 @@ func eqUint64(a, b uint64) bool       { return a == b }
 func eqCodeHash(a, b accounts.CodeHash) bool {
 	return a == b
 }
+func eqCode(a, b accounts.Code) bool { return a.Hash == b.Hash && bytes.Equal(a.Bytes, b.Bytes) }
+func eqInt(a, b int) bool            { return a == b }
 
 func eqAccount(a, b *accounts.Account) bool {
 	return a != nil && b != nil && a.Equals(b)
@@ -2328,11 +2338,26 @@ const (
 type ReadResult struct {
 	depIdx      int
 	incarnation Incarnation
-	// validated: the floor cell was Validated (pre-seal, revertible); the reader
+	valStatus   valueStatus
+	flags       readFlags
+}
+
+// readFlags packs a read's boolean facts into one field: ReadResult stays at 4 fields, so the compiler keeps it in
+// registers.
+type readFlags uint8
+
+const (
+	// readValidated: the floor cell was Validated (pre-seal, revertible); the reader
 	// continues on it like Done but the dep is not yet final.
-	validated bool
-	valStatus valueStatus
-	accSource AccountSource
+	readValidated readFlags = 1 << iota
+	readFromBAL             // the cell's record is an AccountFromBAL existence marker
+)
+
+func (res ReadResult) accSource() AccountSource {
+	if res.flags&readFromBAL != 0 {
+		return AccountFromBAL
+	}
+	return AccountFromBase
 }
 
 func (res *ReadResult) DepString() string {
@@ -2364,7 +2389,7 @@ func (res *ReadResult) ValStatus() valueStatus {
 
 func (res ReadResult) Status() int {
 	if res.depIdx != UnknownDep {
-		if res.validated {
+		if res.flags&readValidated != 0 {
 			return MVReadResultValidated
 		}
 		if res.incarnation == -1 {

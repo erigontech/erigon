@@ -56,9 +56,9 @@ permissions: {}
 
 env:
   APP_REPO: "erigontech/erigon"
-  # Mirror release.yml: the glibc-portable bases that actually ship, so the scan
-  # sees the released image rather than the Dockerfile's newer trixie defaults.
-  BUILDER_IMAGE: "golang:1.27-bookworm"
+  # Mirror release.yml so the scan sees the released image: the trixie builder with
+  # the glibc-portable debian:12-slim base, not the Dockerfile's debian:13-slim default.
+  BUILDER_IMAGE: "golang:1.27-trixie"
   TARGET_BASE_IMAGE: "debian:12-slim"
   BINARIES: "erigon"
   TRIVY_SEVERITY: "HIGH,CRITICAL"

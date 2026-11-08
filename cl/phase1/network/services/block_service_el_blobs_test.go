@@ -41,7 +41,7 @@ type recordingColumnsPublisher struct {
 	contextErr []error
 }
 
-func (r *recordingColumnsPublisher) PublishColumnsFromEL(ctx context.Context, sidecars []*cltypes.DataColumnSidecar) {
+func (r *recordingColumnsPublisher) PublishColumns(ctx context.Context, sidecars []*cltypes.DataColumnSidecar) {
 	r.published = append(r.published, sidecars)
 	r.contextErr = append(r.contextErr, ctx.Err())
 }
