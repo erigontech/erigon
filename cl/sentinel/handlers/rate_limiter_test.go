@@ -154,11 +154,10 @@ func TestRateLimiter_PerItemCost(t *testing.T) {
 	require.False(t, rl.allowRequest(peer, proto, 1))
 }
 
-func TestRateLimiter_ConsumeTokensZeroCost(t *testing.T) {
+func TestRateLimiter_ConsumeTokensNonPositiveCost(t *testing.T) {
 	rl := newPeerRateLimiter()
-	// Zero and negative costs should always succeed.
 	require.True(t, rl.consumeTokens("peer1", communication.PingProtocolV1, 0))
-	require.True(t, rl.consumeTokens("peer1", communication.PingProtocolV1, -5))
+	require.False(t, rl.consumeTokens("peer1", communication.PingProtocolV1, -5))
 }
 
 func TestRateLimiter_PunishmentDrainsBucket(t *testing.T) {
