@@ -17,30 +17,238 @@
 package jsonrpc
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
+
+// readTxLimitDB opens the first n read txs and fails the next ones as a full read-tx
+// semaphore does under kv.WithNonBlockingAcquire.
+type readTxLimitDB struct {
+	kv.TemporalRoDB
+	left atomic.Int32
+}
+
+func newReadTxLimitDB(db kv.TemporalRoDB, n int32) *readTxLimitDB {
+	limited := &readTxLimitDB{TemporalRoDB: db}
+	limited.left.Store(n)
+	return limited
+}
+
+func (db *readTxLimitDB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
+	if db.left.Add(-1) < 0 {
+		return nil, kv.ErrReadTxLimitExceeded
+	}
+	return db.TemporalRoDB.BeginTemporalRo(ctx)
+}
+
+// TestTraceBlockUnderReadTxLimit pins that debug_traceBlock answers with the read txs it
+// gets: the request's own one only, or that one and one worker.
+func TestTraceBlockUnderReadTxLimit(t *testing.T) {
+	m, _ := createLogIndexTestModule(t)
+	trace := func(t *testing.T, api *DebugAPIImpl) string {
+		var buf bytes.Buffer
+		stream := jsonstream.New(&buf)
+		require.NoError(t, api.TraceBlockByNumber(m.Ctx, rpc.BlockNumber(1), withLogCallTracer(), stream))
+		require.NoError(t, stream.Flush())
+		return buf.String()
+	}
+	withReplayCPUs(t, 1)
+	want := trace(t, newDebugApiForTest(m))
+
+	withReplayCPUs(t, 16)
+	for name, readTxs := range map[string]int32{"no worker tx": 1, "one worker tx": 2} {
+		t.Run(name, func(t *testing.T) {
+			api := newDebugApiForTest(m)
+			api.db = newReadTxLimitDB(m.DB, readTxs)
+			require.Equal(t, want, trace(t, api))
+		})
+	}
+}
+
+// TestTraceBlockParityUnderReadTxLimit pins the same for trace_block.
+func TestTraceBlockParityUnderReadTxLimit(t *testing.T) {
+	m, _ := createLogIndexTestModule(t)
+	want, err := newTraceApiForTest(m).Block(m.Ctx, 1, nil, nil)
+	require.NoError(t, err)
+
+	withReplayCPUs(t, 16)
+	for name, readTxs := range map[string]int32{"no worker tx": 1, "one worker tx": 2} {
+		t.Run(name, func(t *testing.T) {
+			api := newTraceApiForTest(m)
+			api.kv = newReadTxLimitDB(m.DB, readTxs)
+			got, err := api.Block(m.Ctx, 1, nil, nil)
+			require.NoError(t, err)
+			require.Equal(t, want, got)
+		})
+	}
+}
 
 // TestReplayTxnsParallelRejectsReorgedBlock pins that the workers fail, instead of replaying
 // another block's txNums, when the block is no longer canonical in their own view.
 func TestReplayTxnsParallelRejectsReorgedBlock(t *testing.T) {
 	m, _ := createLogIndexTestModule(t)
-	withReplayCPUs(t, 16)
 
 	var replayed atomic.Bool
-	g, _ := replayTxnsParallel(m.Ctx, m.DB, m.BlockReader, 1, common.Hash{0xff}, 0, 4,
+	r, err := replayTxnsParallel(m.Ctx, m.DB, m.BlockReader, 1, common.Hash{0xff}, 0, 4, 4, 4,
 		func(context.Context, kv.TemporalTx) (func(int) error, error) {
 			return func(int) error {
 				replayed.Store(true)
 				return nil
 			}, nil
 		})
-	require.ErrorIs(t, g.Wait(), errBlockNotCanonical)
+	require.NoError(t, err)
+	require.ErrorIs(t, r.Wait(), errBlockNotCanonical)
 	require.False(t, replayed.Load())
+}
+
+// TestReplayTxnsParallelBoundsBufferedTxns pins that a slow txn holds back every txn a window
+// or more after it, so at most a window of results waits to be written.
+func TestReplayTxnsParallelBoundsBufferedTxns(t *testing.T) {
+	m, _ := createLogIndexTestModule(t)
+	tx, err := m.DB.BeginRo(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	hash, _, err := m.BlockReader.CanonicalHash(m.Ctx, tx, 1)
+	require.NoError(t, err)
+
+	const txnCount, workers, window = 16, 4, 4
+	var written atomic.Int64
+	var ahead atomic.Bool
+	done := make([]chan struct{}, txnCount)
+	for i := range done {
+		done[i] = make(chan struct{})
+	}
+	r, err := replayTxnsParallel(m.Ctx, m.DB, m.BlockReader, 1, hash, 0, txnCount, workers, window,
+		func(context.Context, kv.TemporalTx) (func(int) error, error) {
+			return func(txnIndex int) error {
+				if int64(txnIndex) >= written.Load()+window {
+					ahead.Store(true)
+				}
+				if txnIndex == 0 {
+					time.Sleep(50 * time.Millisecond)
+				}
+				close(done[txnIndex])
+				return nil
+			}, nil
+		})
+	require.NoError(t, err)
+	for i := range txnCount {
+		<-done[i]
+		written.Add(1)
+		r.written()
+	}
+	require.NoError(t, r.Wait())
+	require.False(t, ahead.Load())
+}
+
+// TestReplayTxnsParallelStopsWaitingWorkersOnError pins that workers held back by the window
+// stop when a txn before them fails, instead of waiting for a write that never comes.
+func TestReplayTxnsParallelStopsWaitingWorkersOnError(t *testing.T) {
+	m, _ := createLogIndexTestModule(t)
+	tx, err := m.DB.BeginRo(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	hash, _, err := m.BlockReader.CanonicalHash(m.Ctx, tx, 1)
+	require.NoError(t, err)
+
+	const txnCount, workers, window = 16, 4, 4
+	errSlowTxn := errors.New("slow txn failed")
+	r, err := replayTxnsParallel(m.Ctx, m.DB, m.BlockReader, 1, hash, 0, txnCount, workers, window,
+		func(context.Context, kv.TemporalTx) (func(int) error, error) {
+			return func(txnIndex int) error {
+				if txnIndex == 0 {
+					time.Sleep(50 * time.Millisecond)
+					return errSlowTxn
+				}
+				return nil
+			}, nil
+		})
+	require.NoError(t, err)
+	waited := make(chan error, 1)
+	go func() { waited <- r.Wait() }()
+	select {
+	case err := <-waited:
+		require.ErrorIs(t, err, errSlowTxn)
+	case <-time.After(10 * time.Second):
+		t.Fatal("workers held back by the window did not stop")
+	}
+}
+
+// openTxCountingDB counts the read txs it opened that are not rolled back yet, and fails
+// every open after the first n with failErr.
+type openTxCountingDB struct {
+	kv.TemporalRoDB
+	left    atomic.Int32
+	open    atomic.Int32
+	failErr error
+	mu      sync.Mutex
+	txs     []*countedTx
+}
+
+// rollbackLeaked rolls back the txs left open, so a failing test can still close the db.
+func (db *openTxCountingDB) rollbackLeaked() {
+	db.mu.Lock()
+	defer db.mu.Unlock()
+	for _, tx := range db.txs {
+		tx.Rollback()
+	}
+}
+
+type countedTx struct {
+	kv.TemporalTx
+	db   *openTxCountingDB
+	once sync.Once
+}
+
+func (tx *countedTx) Rollback() {
+	tx.once.Do(func() {
+		tx.db.open.Add(-1)
+		tx.TemporalTx.Rollback()
+	})
+}
+
+func (db *openTxCountingDB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
+	if db.left.Add(-1) < 0 {
+		return nil, db.failErr
+	}
+	tx, err := db.TemporalRoDB.BeginTemporalRo(ctx) //nolint:gocritic // the caller owns and rolls back the tx
+	if err != nil {
+		return nil, err
+	}
+	db.open.Add(1)
+	counted := &countedTx{TemporalTx: tx, db: db}
+	db.mu.Lock()
+	db.txs = append(db.txs, counted)
+	db.mu.Unlock()
+	return counted, nil
+}
+
+// TestReplayTxnsParallelRollsBackOnOpenError pins that an open error other than the read-tx
+// limit fails the replay and rolls back the read txs already opened.
+func TestReplayTxnsParallelRollsBackOnOpenError(t *testing.T) {
+	m, _ := createLogIndexTestModule(t)
+	errOpen := errors.New("open failed")
+	db := &openTxCountingDB{TemporalRoDB: m.DB, failErr: errOpen}
+	db.left.Store(2)
+	t.Cleanup(db.rollbackLeaked)
+
+	_, err := replayTxnsParallel(m.Ctx, db, m.BlockReader, 1, common.Hash{}, 0, 4, 4, 4,
+		func(context.Context, kv.TemporalTx) (func(int) error, error) {
+			t.Fatal("no worker may start")
+			return nil, nil
+		})
+	require.ErrorIs(t, err, errOpen)
+	require.Zero(t, db.open.Load())
 }

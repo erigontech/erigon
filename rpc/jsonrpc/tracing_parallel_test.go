@@ -18,9 +18,11 @@ package jsonrpc
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"math/big"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -55,7 +57,9 @@ func requireSameTraceOnAnyCores(t *testing.T, m *execmoduletester.ExecModuleTest
 		withReplayCPUs(t, cpus)
 		var buf bytes.Buffer
 		stream := jsonstream.New(&buf)
-		require.NoError(t, api.TraceBlockByNumber(m.Ctx, rpc.BlockNumber(1), config(), stream))
+		ctx, cancel := context.WithTimeout(m.Ctx, time.Minute)
+		defer cancel()
+		require.NoError(t, api.TraceBlockByNumber(ctx, rpc.BlockNumber(1), config(), stream))
 		require.NoError(t, stream.Flush())
 		return buf.String()
 	}
@@ -144,4 +148,36 @@ func TestTraceBlockParallelKeepsCarriedState(t *testing.T) {
 			requireSameTraceOnAnyCores(t, m, config)
 		})
 	}
+}
+
+// createManyTxnsTestModule builds a one-block chain of 12 transactions to the log emitting
+// contracts: more than the window of the 4 workers that 16 cores give, so they wait for
+// the writer.
+func createManyTxnsTestModule(t *testing.T) *execmoduletester.ExecModuleTester {
+	t.Helper()
+	key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	require.NoError(t, err)
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(logIndexTestGenesis(crypto.PubkeyToAddress(key.PublicKey))), execmoduletester.WithKey(key))
+	signer := *types.LatestSignerForChainID(nil)
+	contracts := []common.Address{emitTwoAddr, emitOneAddr, emitAroundAddr, emitAroundRevertAddr}
+	chainPack, err := m.GenerateChain(1, func(i int, b *blockgen.BlockGen) {
+		b.SetCoinbase(common.Address{1})
+		for nonce := range 12 {
+			txn, err := types.SignTx(types.NewTransaction(uint64(nonce), contracts[nonce%len(contracts)], &u256.Num0, 200000, &u256.Num1, nil), signer, key)
+			require.NoError(t, err)
+			b.AddTx(txn)
+		}
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(chainPack))
+	return m
+}
+
+// TestTraceBlockParallelMatchesSequentialBeyondWindow pins the output of a block whose
+// workers are held back by the window.
+func TestTraceBlockParallelMatchesSequentialBeyondWindow(t *testing.T) {
+	m := createManyTxnsTestModule(t)
+	withReplayCPUs(t, 16)
+	require.Less(t, 2*debugTraceBlockWorkers(12), 12, "the window must be smaller than the block")
+	requireSameTraceOnAnyCores(t, m, withLogCallTracer)
 }

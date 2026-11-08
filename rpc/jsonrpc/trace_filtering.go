@@ -820,9 +820,12 @@ func (api *TraceAPIImpl) callBlock(
 
 	var traces []*TraceCallResult
 	var cmErr error
-	if isHistoricalStateReader && !hasStateDiff && !hasVmTrace && replayWorkerCount(len(txs)) > 1 {
+	parallel := isHistoricalStateReader && !hasStateDiff && !hasVmTrace && len(txs) > 1
+	if parallel {
 		traces, cmErr = api.doCallBlockParallel(ctx, dbtx, baseTxNum, txs, msgs, callParams, header, gasBailOut, traceConfig)
-	} else {
+		parallel = !errors.Is(cmErr, errNoReplayReadTx)
+	}
+	if !parallel {
 		traces, _, cmErr = api.doCallBlock(ctx, dbtx, stateReader, stateCache, cachedWriter, ibs, txs, msgs, callParams,
 			header, true /* requireCanonical */, gasBailOut /* gasBailout */, true /* advanceTxNum */, false /* noBaseFee */, traceConfig, nil /* overrides */)
 	}
@@ -906,7 +909,7 @@ func (api *TraceAPIImpl) doCallBlockParallel(
 
 	results := make([]*TraceCallResult, len(txns))
 
-	g, _ := replayTxnsParallel(ctx, api.kv, api._blockReader, header.Number.Uint64(), header.Hash(), baseTxNum, len(txns), func(_ context.Context, workerTx kv.TemporalTx) (func(int) error, error) {
+	replay, err := replayTxnsParallel(ctx, api.kv, api._blockReader, header.Number.Uint64(), header.Hash(), baseTxNum, len(txns), replayWorkerCount(replayCPUs(), len(txns)), len(txns), func(_ context.Context, workerTx kv.TemporalTx) (func(int) error, error) {
 		// blockCtx captures workerTx in its GetHash closure, so it cannot
 		// be shared across workers (each needs its own copy).
 		blockCtx := transactions.NewEVMBlockContext(engine, header, true /* requireCanonical */, workerTx, api._blockReader, chainConfig)
@@ -967,7 +970,10 @@ func (api *TraceAPIImpl) doCallBlockParallel(
 			return nil
 		}, nil
 	})
-	if err := g.Wait(); err != nil {
+	if err != nil {
+		return nil, err
+	}
+	if err := replay.Wait(); err != nil {
 		return nil, err
 	}
 	return results, nil

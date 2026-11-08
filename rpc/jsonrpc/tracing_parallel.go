@@ -51,8 +51,9 @@ func (api *DebugAPIImpl) traceBlockParallel(ctx context.Context, block *types.Bl
 		done[i] = make(chan struct{})
 	}
 
+	workers := debugTraceBlockWorkers(len(txns))
 	ctx, cancel := context.WithCancel(ctx)
-	g, gctx := replayTxnsParallel(ctx, api.db, api._blockReader, header.Number.Uint64(), block.Hash(), baseTxNum, len(txns), func(ctx context.Context, workerTx kv.TemporalTx) (func(int) error, error) {
+	replay, err := replayTxnsParallel(ctx, api.db, api._blockReader, header.Number.Uint64(), block.Hash(), baseTxNum, len(txns), workers, 2*workers, func(ctx context.Context, workerTx kv.TemporalTx) (func(int) error, error) {
 		getHeader := func(hash common.Hash, n uint64) (*types.Header, error) {
 			return api._blockReader.HeaderByNumber(ctx, workerTx, n)
 		}
@@ -79,28 +80,33 @@ func (api *DebugAPIImpl) traceBlockParallel(ctx context.Context, block *types.Bl
 			return nil
 		}, nil
 	})
+	if err != nil {
+		cancel()
+		return err
+	}
 	defer func() {
 		cancel()
-		_ = g.Wait()
+		_ = replay.Wait()
 	}()
 
 	stream.WriteArrayStart()
 	for i := range txns {
 		select {
 		case <-done[i]:
-		case <-gctx.Done():
-			if err := g.Wait(); err != nil {
+		case <-replay.ctx.Done():
+			if err := replay.Wait(); err != nil {
 				return err
 			}
 			return ctx.Err()
 		}
 		stream.WriteRawBytes(outs[i].Bytes())
 		outs[i] = bytes.Buffer{}
+		replay.written()
 		if err := stream.Flush(); err != nil {
 			return err
 		}
 	}
-	if err := g.Wait(); err != nil {
+	if err := replay.Wait(); err != nil {
 		return err
 	}
 	var gasUsed protocol.GasUsed
@@ -111,4 +117,10 @@ func (api *DebugAPIImpl) traceBlockParallel(ctx context.Context, block *types.Bl
 	assertTracedBlockGas(block, config, &gasUsed)
 	stream.WriteArrayEnd()
 	return nil
+}
+
+// debugTraceBlockWorkers gives a quarter of the cores to one block: more workers per request
+// compete for the same cores and caches, so they cost CPU without lowering latency.
+func debugTraceBlockWorkers(txnCount int) int {
+	return replayWorkerCount(replayCPUs()/4, txnCount)
 }
