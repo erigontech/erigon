@@ -361,6 +361,7 @@ func TestFindPeersForSubnetsEndsWithItsContext(t *testing.T) {
 	listener, err := p2p.NewUDPv5Listener(t.Context(), &p2p.P2PConfig{IpAddr: "127.0.0.1", TmpDir: t.TempDir()},
 		discover.Config{PrivateKey: key, Log: log.Root()}, log.Root())
 	require.NoError(t, err)
+	defer listener.LocalNode().Database().Close() // Close does not close it, and Windows cannot remove an open file
 	defer listener.Close()
 
 	ctx, cancel := context.WithCancel(t.Context())
