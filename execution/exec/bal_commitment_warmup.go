@@ -22,7 +22,9 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"os"
 	"slices"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -220,7 +222,6 @@ type latestPrefetcher interface {
 
 const (
 	prefetchFlatDepth = 8 // trie levels read as one flat batch before the walk checks branches
-	prefetchPar       = 4 // read txs one prefetch step spreads its keys over
 )
 
 type rawBranchReader interface {
@@ -638,3 +639,11 @@ func trieMostlyResident(ctx context.Context, p latestPrefetcher, hashedKeys [][]
 	logSampleFailure(kv.CommitmentDomain, err)
 	return err != nil || !isCold
 }
+
+// prefetchPar is the number of read txs one prefetch step spreads its keys over; probe knob PF_PAR.
+var prefetchPar = func() int {
+	if n, err := strconv.Atoi(os.Getenv("PF_PAR")); err == nil && n > 0 {
+		return n
+	}
+	return 4
+}()
