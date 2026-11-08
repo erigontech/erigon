@@ -1737,7 +1737,8 @@ type balTx struct {
 // sweep, broadcast the advanced frontier.
 //
 // A read that observes an in-flight estimate aborts the run (result.Dep); the task
-// is re-queued once the commit frontier reaches its predecessor.
+// is re-queued once that writer validates, and after the named re-run limit once the
+// commit frontier reaches its predecessor.
 
 // selfLoopFlush publishes tv's writes to the versionMap, plus deletion of any key
 // the previous incarnation wrote that this one dropped.
@@ -2642,8 +2643,9 @@ type blockExecutor struct {
 	committedFrontier atomic.Int64
 	wakeMu            sync.Mutex
 	wakeAt            map[int][]*poolTask
-	// wakeValidated maps a task to the named re-runs waiting for it to validate;
-	// validatedTasks holds the tasks validated since their last re-exec signal.
+	// wakeValidated maps a task to the named re-runs waiting for it to validate; finalizing
+	// F also re-queues wakeValidated[F]. validatedTasks holds the tasks validated since
+	// their last re-exec signal.
 	wakeValidated  map[int][]*poolTask
 	validatedTasks map[int]bool
 	// poolTasks[i] is task i's pool state. After sending its result a task is parked

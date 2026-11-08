@@ -56,6 +56,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/execution/vm/program"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
@@ -2640,10 +2641,6 @@ func TestParallelSameBlockDeployCallFuzz(t *testing.T) {
 
 	counter := []byte{byte(vm.PUSH1), 0, byte(vm.SLOAD), byte(vm.PUSH1), 1, byte(vm.ADD), byte(vm.PUSH1), 0, byte(vm.SSTORE), byte(vm.STOP)}
 	destruct := []byte{byte(vm.CALLER), byte(vm.SELFDESTRUCT)}
-	deployCode := func(runtime []byte) []byte {
-		n := byte(len(runtime))
-		return append([]byte{byte(vm.PUSH1), n, byte(vm.PUSH1), 12, byte(vm.PUSH1), 0, byte(vm.CODECOPY), byte(vm.PUSH1), n, byte(vm.PUSH1), 0, byte(vm.RETURN)}, runtime...)
-	}
 	config := libchain.AllProtocolChanges
 	gasPrice := uint256.NewInt(10_000_000_000)
 	for seed := range 8 {
@@ -2679,7 +2676,7 @@ func TestParallelSameBlockDeployCallFuzz(t *testing.T) {
 							runtime = destruct
 						}
 						deployed = append(deployed, types.CreateAddress(from, nonces[s]))
-						txn = types.NewContractCreation(nonces[s], uint256.NewInt(0), 500_000, gasPrice, deployCode(runtime))
+						txn = types.NewContractCreation(nonces[s], uint256.NewInt(0), 500_000, gasPrice, program.New().ReturnViaCodeCopy(runtime).Bytes())
 					} else {
 						txn = types.NewTransaction(nonces[s], deployed[rng.IntN(len(deployed))], uint256.NewInt(uint64(rng.IntN(2))), 300_000, gasPrice, nil)
 					}
