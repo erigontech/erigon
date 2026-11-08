@@ -1627,6 +1627,29 @@ func TestWaitingHashWithoutAlternatesIsDropped(t *testing.T) {
 	require.Empty(t, a.fetch.waiting)
 }
 
+// A waiting hash whose body is queued for validation keeps its entry when its last alternate leaves: the body may
+// still fail, and a later announcer must then be kept as a fallback.
+func TestWaitingHashWithAQueuedBodyKeepsItsEntry(t *testing.T) {
+	t.Parallel()
+	a := newAnnounceFetchTest(t)
+	peerA, peerB := [64]byte{0xa}, [64]byte{0xb}
+	hashes := make([][32]byte, maxRetryRequestsPerPeer+1)
+	for i := range hashes {
+		binary.BigEndian.PutUint64(hashes[i][:], uint64(i)+1)
+	}
+	const blobTxnSize = 131 * 1024
+	a.announceSized(t, peerA, blobTxnSize, hashes...)
+	a.announceSized(t, peerB, blobTxnSize, hashes...)
+	a.timeoutSweep()
+	require.Len(t, a.fetch.waiting, 1)
+	waitingHash := hashes[len(hashes)-1]
+	a.queued = map[[32]byte]bool{waitingHash: true} // A's late body waits for validation
+	a.fetch.dropAlternate(fetchPeer{a.sentryClient, peerB})
+	a.fetch.requestFromAlternates(a.ctx, nil)
+	_, ok := a.fetch.requested.Get(waitingHash[:])
+	require.True(t, ok, "a queued body may still be rejected")
+}
+
 // A waiting hash is sent only after a pool lookup in the same sweep, even if room opens during that lookup.
 func TestRoomOpenedDuringTheLookupWaitsForTheNextLookup(t *testing.T) {
 	t.Parallel()

@@ -313,12 +313,8 @@ func (f *Fetch) requestFromAlternates(ctx context.Context, tx kv.Tx) {
 			if !ok || !r.at.Equal(p.at) {
 				continue // stale
 			}
-			if len(r.alternates) == 0 {
-				f.requested.Delete(p.hash[:]) // exhausted: free the slot for live requests
-				continue
-			}
 			kept = append(kept, p)
-			if f.hasRetryRoom(r) {
+			if len(r.alternates) == 0 || f.hasRetryRoom(r) { // an exhausted hash is looked up too: its body may be queued
 				expired = append(expired, p.hash[:]...)
 			}
 		}
@@ -379,11 +375,7 @@ func (f *Fetch) requestFromAlternates(ctx context.Context, tx kv.Tx) {
 			deferred = append(deferred, p)
 			continue
 		}
-		if len(r.alternates) == 0 {
-			f.requested.Delete(p.hash[:]) // exhausted: free the slot for live requests
-			continue
-		}
-		if _, lookedUp := checked[p.hash]; fromWaiting && (!lookedUp || !f.hasRetryRoom(r)) {
+		if _, lookedUp := checked[p.hash]; fromWaiting && (!lookedUp || len(r.alternates) > 0 && !f.hasRetryRoom(r)) {
 			waiting = append(waiting, p) // room that opened during the unlocked lookup waits for the next sweep's lookup
 			continue
 		}
@@ -394,6 +386,10 @@ func (f *Fetch) requestFromAlternates(ctx context.Context, tx kv.Tx) {
 			}
 			r.at = sent // a queued body may still fail validation; keep the alternates
 			f.pending = append(f.pending, pendingFetch{p.hash, sent})
+			continue
+		}
+		if len(r.alternates) == 0 {
+			f.requested.Delete(p.hash[:]) // exhausted: free the slot for live requests
 			continue
 		}
 		picked := slices.IndexFunc(r.alternates, func(alt fetchPeer) bool {
