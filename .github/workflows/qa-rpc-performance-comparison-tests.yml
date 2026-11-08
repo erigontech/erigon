@@ -319,6 +319,18 @@ jobs:
           # Each count covers the largest step of its test, e.g. 30000:20 for eth_call, 6000:20 for mixed.
           selected() { [ "$RPC_TEST" = "all" ] || [ "$RPC_TEST" = "$1" ]; }
           cd "$RUNNER_WS/rpc-tests"
+          # With --block-tag latest every request asks for "latest", the chain head of each client when the request
+          # runs: the requests do not depend on the blocks read here, so they need no verify and rpc_perf cycles them.
+          if selected eth_getBlockReceipts_latest; then
+            ./build/bin/rpc_pattern_gen eth_getBlockReceipts --url http://localhost:8545 \
+              --counts 1000 --block-tag latest \
+              --out "perf/pattern/$CHAIN/stress_test_eth_getBlockReceipts_latest_gen_latest.jsonl"
+          fi
+          if selected eth_getBlockByNumber_latest; then
+            ./build/bin/rpc_pattern_gen eth_getBlockByNumber --url http://localhost:8545 \
+              --option full=true --counts 1000 --block-tag latest \
+              --out "perf/pattern/$CHAIN/stress_test_eth_getBlockByNumber_latest_gen_latest.jsonl"
+          fi
           if selected eth_call_gen; then
             ./build/bin/rpc_pattern_gen eth_call --url http://localhost:8545 \
               --counts 600000 --block-tag latest --verify --keep ok --fees drop \
@@ -353,18 +365,6 @@ jobs:
             ./build/bin/rpc_pattern_gen --profile "perf/pattern/$CHAIN/config/eth_getLogs_latest.profile" --url http://localhost:8545 \
               --counts 200000 --block-tag latest --verify --keep ok --fees drop \
               --out "perf/pattern/$CHAIN/stress_test_eth_getLogs_latest_gen_latest.jsonl"
-          fi
-          # With --block-tag latest every block lookup asks for "latest", the chain head of each client when the
-          # request runs: the requests are all the same, so a few are enough and rpc_perf cycles them.
-          if selected eth_getBlockReceipts_latest; then
-            ./build/bin/rpc_pattern_gen eth_getBlockReceipts --url http://localhost:8545 \
-              --counts 1000 --block-tag latest --verify --keep ok \
-              --out "perf/pattern/$CHAIN/stress_test_eth_getBlockReceipts_latest_gen_latest.jsonl"
-          fi
-          if selected eth_getBlockByNumber_latest; then
-            ./build/bin/rpc_pattern_gen eth_getBlockByNumber --url http://localhost:8545 \
-              --option full=true --counts 1000 --block-tag latest --verify --keep ok \
-              --out "perf/pattern/$CHAIN/stress_test_eth_getBlockByNumber_latest_gen_latest.jsonl"
           fi
           # Without --block-tag each block lookup carries the number of one of the last 8000 blocks (about 27 hours,
           # within the history that full nodes keep). Above Erigon's block receipts LRU (R_LRU, 1024 blocks), so the
