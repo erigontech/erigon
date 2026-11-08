@@ -408,9 +408,11 @@ func TestReadFill_MemoizesWritableVisibleEndUntilFlush(t *testing.T) {
 	for i := byte(2); i <= 3; i++ {
 		missing := make([]byte, 20)
 		missing[0] = i
-		value, _, err := domains.GetLatest(kv.AccountsDomain, rwTx, missing)
-		require.NoError(t, err)
-		require.Empty(t, value)
+		for range 2 { // the second miss fills
+			value, _, err := domains.GetLatest(kv.AccountsDomain, rwTx, missing)
+			require.NoError(t, err)
+			require.Empty(t, value)
+		}
 	}
 	require.Equal(t, uint64(1), debug.calls)
 	initialEnd := debug.last
@@ -423,9 +425,11 @@ func TestReadFill_MemoizesWritableVisibleEndUntilFlush(t *testing.T) {
 
 	missing := make([]byte, 20)
 	missing[0] = 5
-	value, _, err := domains.GetLatest(kv.AccountsDomain, rwTx, missing)
-	require.NoError(t, err)
-	require.Empty(t, value)
+	for range 2 {
+		value, _, err := domains.GetLatest(kv.AccountsDomain, rwTx, missing)
+		require.NoError(t, err)
+		require.Empty(t, value)
+	}
 	require.Equal(t, uint64(2), debug.calls)
 	require.Greater(t, debug.last, initialEnd)
 }
@@ -834,9 +838,11 @@ func TestReadFill_NegativeUsesLastVisibleTxNum(t *testing.T) {
 
 	missing := make([]byte, 20)
 	missing[0] = 0x02
-	v, _, err := sd2.GetLatest(kv.AccountsDomain, roTx, missing)
-	require.NoError(t, err)
-	require.Empty(t, v)
+	for range 2 { // the second miss fills
+		v, _, err := sd2.GetLatest(kv.AccountsDomain, roTx, missing)
+		require.NoError(t, err)
+		require.Empty(t, v)
+	}
 	_, ok = sc.View(nil).Get(kv.AccountsDomain, missing)
 	require.True(t, ok, "the negative result must be cached")
 
@@ -1166,8 +1172,10 @@ func TestLocalCacheUnwindDoesNotFillSharedStateCache(t *testing.T) {
 	defer candidate.Close()
 	candidate.BindStateCache(sc)
 	candidate.Unwind(16, nil)
-	_, _, err = candidate.GetLatest(kv.AccountsDomain, tx, key)
-	require.NoError(t, err)
+	for range 2 { // two misses, so the doorkeeper alone would admit the fill
+		_, _, err = candidate.GetLatest(kv.AccountsDomain, tx, key)
+		require.NoError(t, err)
+	}
 	_, ok := sc.View(nil).Get(kv.AccountsDomain, key)
 	require.False(t, ok, "a speculative session must not seed the shared state cache from a database read")
 }
@@ -1188,8 +1196,10 @@ func TestCanonicalUnwindStillFillsSharedStateCache(t *testing.T) {
 	defer sd.Close()
 	sd.BindStateCache(sc)
 	sd.Unwind(16, nil)
-	_, _, err = sd.GetLatest(kv.AccountsDomain, tx, key)
-	require.NoError(t, err)
+	for range 2 { // the second miss fills
+		_, _, err = sd.GetLatest(kv.AccountsDomain, tx, key)
+		require.NoError(t, err)
+	}
 	_, ok := sc.View(nil).Get(kv.AccountsDomain, key)
 	require.True(t, ok, "a canonical session must keep filling the shared state cache after its own unwind")
 }

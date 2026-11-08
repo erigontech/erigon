@@ -19,6 +19,7 @@ package cache
 import (
 	"bytes"
 	"fmt"
+	"hash/maphash"
 	"math"
 	"strings"
 	"sync"
@@ -70,6 +71,35 @@ type StateCache struct {
 	// (including the content-addressed ones), leaving canonical publication as
 	// the only writer — an A/B lever and an operational kill switch.
 	disableFills bool
+	// fillDoor backs ReadView.FillOnSecondMiss.
+	fillDoor atomic.Pointer[fillDoorkeeper]
+}
+
+const fillDoorWords = 1 << 14 // 2^20 bits
+
+type fillDoorkeeper struct {
+	bits [fillDoorWords]atomic.Uint64
+	set  atomic.Uint32
+}
+
+var fillDoorSeed = maphash.MakeSeed()
+
+// fillSeenBefore marks key and reports whether it was marked since the last reset. The bitset is replaced once a
+// quarter of its bits are set, which keeps false positives (an admission on a first miss) under 25%.
+func (c *StateCache) fillSeenBefore(key []byte) bool {
+	d := c.fillDoor.Load()
+	if d == nil {
+		return true
+	}
+	h := maphash.Bytes(fillDoorSeed, key)
+	w, m := &d.bits[(h>>6)&(fillDoorWords-1)], uint64(1)<<(h&63)
+	if w.Load()&m != 0 || w.Or(m)&m != 0 {
+		return true
+	}
+	if d.set.Add(1) == fillDoorWords*64/4 {
+		c.fillDoor.CompareAndSwap(d, new(fillDoorkeeper))
+	}
+	return false
 }
 
 // NewStateCache creates a new StateCache with the specified byte capacities.
@@ -79,6 +109,7 @@ type StateCache struct {
 func NewStateCache(accountBytes, storageBytes, codeBytes, addrBytes datasize.ByteSize) *StateCache {
 	mode := stateCacheModeFromEnv()
 	sc := &StateCache{}
+	sc.fillDoor.Store(new(fillDoorkeeper))
 	if !dbg.EnvBool("STATE_CACHE_FILLS", true) {
 		sc.disableFills = true
 		log.Info("[cache] STATE_CACHE_FILLS=false — read fills disabled, only post-commit publication populates the cache")
