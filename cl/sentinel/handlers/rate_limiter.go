@@ -118,6 +118,9 @@ type peerRateLimiter struct {
 	punished sync.Map // map[peerProtocolKey]time.Time
 }
 
+// blockRateBurst is the token bucket capacity of the block protocols.
+const blockRateBurst = 128
+
 func newPeerRateLimiter() *peerRateLimiter {
 	rl := &peerRateLimiter{
 		protocolLimits: make(map[string]protocolRateConfig),
@@ -125,7 +128,7 @@ func newPeerRateLimiter() *peerRateLimiter {
 
 	// Rate limits aligned with other consensus clients.
 	// Format: maxTokens (burst), refillRate (tokens/second)
-	blockRate := protocolRateConfig{maxTokens: 128, refillRate: 12.8}                  // 128 per 10s
+	blockRate := protocolRateConfig{maxTokens: blockRateBurst, refillRate: 12.8}       // 128 per 10s
 	blobRate := protocolRateConfig{maxTokens: 72, refillRate: 7.2}                     // 72 per 10s
 	dataColRate := protocolRateConfig{maxTokens: 16384, refillRate: 1638.4}            // 16384 per 10s (proportional to blockRate × NumberOfColumns)
 	lcRate := protocolRateConfig{maxTokens: 128, refillRate: 12.8}                     // 128 per 10s
