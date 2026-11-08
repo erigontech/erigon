@@ -22,7 +22,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
-	"math"
 	"os"
 	"testing"
 
@@ -30,6 +29,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/protocol"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -39,23 +39,25 @@ import (
 	"github.com/erigontech/erigon/cl/sentinel/communication"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/snappypool"
 )
 
 func TestBeaconBlocksByRootRequestLimit(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
 	for _, tc := range []struct {
-		name           string
-		count          int
-		denebForkEpoch uint64
-		limit          int
+		name  string
+		count int
+		epoch uint64
+		limit int
 	}{
-		{"Deneb at limit", 128, 0, 128},
-		{"Deneb above limit", 129, 0, 128},
-		{"before Deneb above 128", 129, math.MaxUint64, 1024},
-		{"before Deneb at limit", 1024, math.MaxUint64, 1024},
-		{"before Deneb above limit", 1025, math.MaxUint64, 1024},
+		{"Deneb at limit", 128, cfg.DenebForkEpoch, 128},
+		{"Deneb above limit", 129, cfg.DenebForkEpoch, 128},
+		{"before Deneb above 128", 129, cfg.DenebForkEpoch - 1, 1024},
+		{"before Deneb at limit", 1024, cfg.DenebForkEpoch - 1, 1024},
+		{"before Deneb above limit", 1025, cfg.DenebForkEpoch - 1, 1024},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, db := setupStore(t)
@@ -65,11 +67,13 @@ func TestBeaconBlocksByRootRequestLimit(t *testing.T) {
 			defer tx.Rollback()
 			blocks := populateDatabaseWithBlocks(t, store.MockBlockReader, tx, 100, uint64(tc.count-1))
 			require.NoError(t, tx.Commit())
-			cfg := clparams.MainnetBeaconConfig
-			cfg.DenebForkEpoch = tc.denebForkEpoch
+			forkClock := getEthClock(t)
+			clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
+			clock.EXPECT().GetCurrentEpoch().Return(tc.epoch)
+			clock.EXPECT().ComputeForkDigest(gomock.Any()).DoAndReturn(forkClock.ComputeForkDigest).AnyTimes()
 			c := &ConsensusHandlers{
 				ctx: t.Context(), beaconDB: store, indiciesDB: db, beaconConfig: &cfg,
-				ethClock: getEthClock(t), rateLimiter: newPeerRateLimiter(),
+				ethClock: clock, rateLimiter: newPeerRateLimiter(),
 			}
 			req := solid.NewHashList(tc.count)
 			for _, block := range blocks {
@@ -88,7 +92,7 @@ func TestBeaconBlocksByRootRequestLimit(t *testing.T) {
 			}
 			require.Equal(t, MaxRequestsBlocks, store.readBlockByRootCalls)
 			stream.request = bytes.NewReader(stream.response.Bytes())
-			require.Len(t, readBlocksByRangeSlots(t, stream, c.ethClock), MaxRequestsBlocks)
+			require.Len(t, readBlocksByRangeSlots(t, stream, forkClock), MaxRequestsBlocks)
 		})
 	}
 }
