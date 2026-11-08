@@ -25,6 +25,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -171,6 +172,7 @@ type AccessListTracer struct {
 	excl               map[common.Address]struct{} // Set of account to exclude from the list
 	list               accessList                  // Set of accounts and storage slots touched
 	state              *state.IntraBlockState      // State for nonce calculation of created contracts
+	rules              *chain.Rules
 	createdContracts   map[common.Address]struct{} // Set of all addresses of contracts created during txn execution
 	usedBeforeCreation map[common.Address]struct{} // Set of all contract addresses first used before creation
 }
@@ -181,8 +183,8 @@ type AccessListTracer struct {
 // An optional set of addresses to be excluded from the resulting accesslist can
 // also be specified.
 // state is borrowed for CREATE nonce lookups; the caller keeps ownership of it.
-func NewAccessListTracer(acl types.AccessList, exclude map[common.Address]struct{}, state *state.IntraBlockState) *AccessListTracer {
-	t := newAccessListTracer(exclude, newAccessList(), state)
+func NewAccessListTracer(acl types.AccessList, exclude map[common.Address]struct{}, state *state.IntraBlockState, rules *chain.Rules) *AccessListTracer {
+	t := newAccessListTracer(exclude, newAccessList(), state, rules)
 	for _, al := range acl {
 		if _, ok := t.excl[al.Address]; ok {
 			continue
@@ -197,7 +199,7 @@ func NewAccessListTracer(acl types.AccessList, exclude map[common.Address]struct
 
 // newAccessListTracer holds the construction both entry points share, so they
 // cannot drift.
-func newAccessListTracer(excl map[common.Address]struct{}, list accessList, state *state.IntraBlockState) *AccessListTracer {
+func newAccessListTracer(excl map[common.Address]struct{}, list accessList, state *state.IntraBlockState, rules *chain.Rules) *AccessListTracer {
 	if excl == nil {
 		excl = make(map[common.Address]struct{})
 	}
@@ -205,6 +207,7 @@ func newAccessListTracer(excl map[common.Address]struct{}, list accessList, stat
 		excl:  excl,
 		list:  list,
 		state: state,
+		rules: rules,
 	}
 }
 
@@ -212,7 +215,7 @@ func newAccessListTracer(excl map[common.Address]struct{}, list accessList, stat
 // convergence iteration, copying the maps directly rather than round-tripping
 // through types.AccessList.
 func (a *AccessListTracer) SeedNew(state *state.IntraBlockState) *AccessListTracer {
-	return newAccessListTracer(a.excl, a.list.cloneExcluding(a.excl), state)
+	return newAccessListTracer(a.excl, a.list.cloneExcluding(a.excl), state, a.rules)
 }
 
 // markCreated and markUsedBeforeCreation each allocate their set lazily, on
@@ -254,8 +257,12 @@ func (a *AccessListTracer) OnOpcodeV2(pc uint64, opcode byte, gas mdgas.MdGas, c
 	// opcodes that don't read the stack.
 	switch op := vm.OpCode(opcode); op {
 	case vm.TXDIFF:
+		// Undefined opcodes reach this hook before their execution error is set.
+		if !a.rules.IsBogota || err != nil {
+			return
+		}
 		stack := scope.StackData()
-		if err != nil || len(stack) < 3 {
+		if len(stack) < 3 {
 			return
 		}
 		param := &stack[len(stack)-1]

@@ -1095,9 +1095,9 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 	}
 
 	// Create an initial tracer
-	prevTracer := logger.NewAccessListTracer(nil, excl, nil)
+	prevTracer := logger.NewAccessListTracer(nil, excl, nil, rules)
 	if args.AccessList != nil {
-		prevTracer = logger.NewAccessListTracer(*args.AccessList, excl, nil)
+		prevTracer = logger.NewAccessListTracer(*args.AccessList, excl, nil, rules)
 	}
 
 	// Convergence re-runs the whole message, so the state is reset per iteration
