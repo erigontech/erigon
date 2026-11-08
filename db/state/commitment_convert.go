@@ -823,9 +823,9 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 }
 
 // restoreManifestName is the filename of the persistent manifest written inside
-// snapshots/backup/domains/ on the first restore attempt. It records the full
+// each snapshots/backup/<dir>/ on the first restore attempt. It records the full
 // set of files the operation is responsible for so a retry after a partial
-// failure does not lose track of which files belong in snapshots/domain/.
+// failure does not lose track of which files belong in the live dir.
 const restoreManifestName = ".restore_manifest"
 
 // restoreManifestTmpName is the temp file used to write the manifest atomically
@@ -835,13 +835,17 @@ const restoreManifestName = ".restore_manifest"
 const restoreManifestTmpName = ".restore_manifest.tmp"
 
 // RestoreCommitmentFiles undoes ConvertCommitmentFiles by moving every file
-// from snapshots/backup/domains/ back into snapshots/domain/. Before each
+// from snapshots/backup/domains/ back into snapshots/domain/, and from
+// snapshots/backup/{history,idx,accessor}/ into the live history, idx and
+// accessor dirs when those backups exist. Before each
 // rename it sweeps the destination of any orphaned siblings that share the
 // backup file's step range — necessary because the converter may have produced
 // accessor types that don't exist in the backup (e.g. converted .kvei when the
 // original had only .kvi, or a newer version-prefix on the .kv).
 //
-// Refuses if snapshots/backup/domains/ is missing or empty (errors out so the
+// Refuses before moving anything if a live dir holds a v3 commitment file whose
+// step range is not in its backup, and if snapshots/backup/domains/ is missing
+// or empty while no history backup exists (errors out so the
 // operator notices). On success the now-empty backup dir is removed, the
 // snapshots/backup/ parent is cleaned if also empty, and the caller is told to
 // restart erigon to pick up the restored files.
