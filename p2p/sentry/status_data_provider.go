@@ -116,7 +116,8 @@ func (s *StatusDataProvider) makeStatusData(head ChainHead) *sentryproto.StatusD
 		BestHash:           gointerfaces.ConvertHashToH256(head.HeadHash),
 		MaxBlockHeight:     head.HeadHeight,
 		MaxBlockTime:       head.HeadTime,
-		MinimumBlockHeight: head.MinimumHeight,
+		// Peers reject a Status with earliest above latest, and retained block files can start above the head during first sync.
+		MinimumBlockHeight: min(head.MinimumHeight, head.HeadHeight),
 		ForkData: &sentryproto.Forks{
 			Genesis:     gointerfaces.ConvertHashToH256(s.genesisHash),
 			HeightForks: append([]uint64(nil), s.heightForks...),
