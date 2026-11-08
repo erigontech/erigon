@@ -30,7 +30,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
@@ -125,35 +124,28 @@ func TestFrameTraceBlockAfterTracerError(t *testing.T) {
 			return {gasUsed: ctx.gasUsed, stateGasUsed: ctx.stateGasUsed};
 		}
 	}`
-	for _, versioned := range []bool{false, true} {
-		t.Run(map[bool]string{false: "materialized", true: "versioned"}[versioned], func(t *testing.T) {
-			previous := dbg.CallNoMaterialize
-			dbg.CallNoMaterialize = versioned
-			t.Cleanup(func() { dbg.CallNoMaterialize = previous })
-			var out bytes.Buffer
-			stream := jsonstream.New(&out)
-			require.NotPanics(t, func() {
-				require.NoError(t, api.TraceBlockByNumber(m.Ctx, 1, &config.TraceConfig{Tracer: &tracer}, stream))
-			})
-			require.NoError(t, stream.Flush())
-			var traces []struct {
-				Error *struct {
-					Message string `json:"message"`
-				} `json:"error"`
-				Result struct {
-					GasUsed      uint64 `json:"gasUsed"`
-					StateGasUsed uint64 `json:"stateGasUsed"`
-				} `json:"result"`
-			}
-			require.NoError(t, json.Unmarshal(out.Bytes(), &traces))
-			require.Len(t, traces, 2)
-			require.NotNil(t, traces[0].Error)
-			require.Contains(t, traces[0].Error.Message, "trace result failed")
-			require.Nil(t, traces[1].Error)
-			require.Equal(t, pack.Receipts[0][1].GasUsed, traces[1].Result.GasUsed)
-			require.Zero(t, traces[1].Result.StateGasUsed)
-		})
+	var out bytes.Buffer
+	stream := jsonstream.New(&out)
+	require.NotPanics(t, func() {
+		require.NoError(t, api.TraceBlockByNumber(m.Ctx, 1, &config.TraceConfig{Tracer: &tracer}, stream))
+	})
+	require.NoError(t, stream.Flush())
+	var traces []struct {
+		Error *struct {
+			Message string `json:"message"`
+		} `json:"error"`
+		Result struct {
+			GasUsed      uint64 `json:"gasUsed"`
+			StateGasUsed uint64 `json:"stateGasUsed"`
+		} `json:"result"`
 	}
+	require.NoError(t, json.Unmarshal(out.Bytes(), &traces))
+	require.Len(t, traces, 2)
+	require.NotNil(t, traces[0].Error)
+	require.Contains(t, traces[0].Error.Message, "trace result failed")
+	require.Nil(t, traces[1].Error)
+	require.Equal(t, pack.Receipts[0][1].GasUsed, traces[1].Result.GasUsed)
+	require.Zero(t, traces[1].Result.StateGasUsed)
 }
 
 type frameCallTrace struct {
