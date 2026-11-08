@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -116,6 +117,7 @@ type Fetch struct {
 	alternatesOf             map[fetchPeer]int       // hashes each peer waits on as an alternate
 	disconnected             map[fetchPeer]time.Time // recently disconnected peers: an announcement buffered before the disconnect or a failed send must not keep them
 	now                      func() time.Time
+	newBlocks                atomic.Uint64
 	logger                   log.Logger
 }
 
@@ -820,6 +822,7 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentryproto.Sen
 	// LRU cache for deduplication - filters duplicates before they enter the batch
 	// Uses maphash to avoid string allocations
 	seenLRU, _ := maphash.NewLRU[struct{}](1024)
+	var seenNewBlocks uint64
 
 	flushBatch := func() {
 		flushLock.Lock()
@@ -903,13 +906,17 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentryproto.Sen
 		}
 
 		// Deduplicate transaction bodies to avoid repeated blob verification.
-		// Keep announcements for peer fallback. Replies with cached bodies are still
-		// dropped before the pool can revalidate their transactions.
+		// Keep announcements for peer fallback. A new block can make a rejected
+		// transaction valid, so it starts a new deduplication scope.
 		if req.Id == sentryproto.MessageId_POOLED_TRANSACTIONS_66 {
 			f.releaseRetry(fetchPeer{sentryClient, gointerfaces.ConvertH512ToHash(req.PeerId)}) // before dedup: replies to different requests can be identical
 		}
 		switch req.Id {
 		case sentryproto.MessageId_TRANSACTIONS_66, sentryproto.MessageId_POOLED_TRANSACTIONS_66:
+			if newBlocks := f.newBlocks.Load(); newBlocks != seenNewBlocks {
+				seenLRU.Purge()
+				seenNewBlocks = newBlocks
+			}
 			if _, seen := seenLRU.Get(req.Data); seen {
 				if f.wg != nil {
 					f.wg.Done()
@@ -1337,5 +1344,6 @@ func (f *Fetch) handleStateChangesRequest(ctx context.Context, req *remoteproto.
 	if err := f.pool.OnNewBlock(ctx, req, unwindTxns, unwindBlobTxns, minedTxns); err != nil && !errors.Is(err, context.Canceled) {
 		return err
 	}
+	f.newBlocks.Add(1)
 	return nil
 }
