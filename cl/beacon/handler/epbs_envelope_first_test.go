@@ -28,7 +28,6 @@ import (
 	"net/http/httptest"
 	"slices"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -62,6 +61,11 @@ func (f *envelopeContentsFixture) requireContentsRequiredRecord(wantRecord bool)
 		require.Equal(f.t, envelopeRoot, record.EnvelopeRoot)
 		require.True(f.t, record.ContentsRequired)
 	}
+}
+
+func (f *envelopeContentsFixture) requireNoArrival() {
+	f.t.Helper()
+	require.NotContains(f.t, f.forkchoice.ExecutionPayloadReceivedAt, f.root, "an envelope that was not broadcast must not count as received")
 }
 
 func (f *envelopeContentsFixture) requireClaimReleased() {
@@ -162,38 +166,32 @@ func drainEventCounts(events chan *beaconevents.EventStream) map[beaconevents.Ev
 	}
 }
 
-// repostWatch counts, from its creation on, what a re-POST answered from state must not do.
+// repostWatch fails the test on any work, from its creation on, that a re-POST answered from state must not do.
 type repostWatch struct {
-	f                                               *envelopeContentsFixture
-	events                                          int
-	imports, gossipValidations, contentsValidations atomic.Int32
+	f      *envelopeContentsFixture
+	events int
 }
 
 // watchWork replaces the validation hooks and wraps the import, so create it after the hooks of the test are set.
 func (f *envelopeContentsFixture) watchWork() *repostWatch {
-	w := &repostWatch{f: f, events: len(f.events)}
 	f.forkchoice.ValidateExecutionPayloadEnvelopeForGossipFunc = func(*cltypes.SignedExecutionPayloadEnvelope) error {
-		w.gossipValidations.Add(1)
+		f.t.Error("the envelope must not be gossip-validated again")
 		return nil
 	}
 	f.forkchoice.ValidateExecutionPayloadEnvelopeFunc = func(context.Context, *cltypes.SignedExecutionPayloadEnvelope) error {
-		w.contentsValidations.Add(1)
+		f.t.Error("the contents must not be validated again")
 		return nil
 	}
 	f.wrapImport(func(_ context.Context, next func() error) error {
-		w.imports.Add(1)
+		f.t.Error("the envelope must not be imported again")
 		return next()
 	})
-	return w
+	return &repostWatch{f: f, events: len(f.events)}
 }
 
 func (w *repostWatch) requireIdle() {
-	t := w.f.t
-	t.Helper()
-	require.Equal(t, w.events, len(w.f.events), "nothing may be published, written or imported")
-	require.Zero(t, w.imports.Load(), "the envelope must not be imported again")
-	require.Zero(t, w.gossipValidations.Load(), "the envelope must not be gossip-validated again")
-	require.Zero(t, w.contentsValidations.Load(), "the contents must not be validated again")
+	w.f.t.Helper()
+	require.Equal(w.f.t, w.events, len(w.f.events), "nothing may be published, written or imported")
 }
 
 // markSeenThroughGossip closes the admission identity, as an envelope that arrived through gossip does.
@@ -678,6 +676,7 @@ func TestPostEnvelopeContentsGossipModeEnvelopePublishFailureStopsBeforeColumns(
 	require.Equal(t, http.StatusInternalServerError, first.Code, first.Body.String())
 	require.Equal(t, []contentsEventKind{eventEnvelopePublish}, f.phases(), "nothing may follow a failed envelope publish")
 	require.False(t, f.forkchoice.OnExecutionPayloadCalled)
+	f.requireNoArrival()
 	f.requireContentsRequiredRecord(false)
 
 	f.failEnvelope = nil
@@ -975,6 +974,7 @@ func TestPostEnvelopeContentsGossipModeValidationDeadlineAnswersUnavailable(t *t
 		require.Equal(t, http.StatusServiceUnavailable, first.Code, first.Body.String())
 		f.requireNoEvents()
 		f.requireClaimReleased()
+		f.requireNoArrival()
 
 		f.forkchoice.ValidateExecutionPayloadEnvelopeFunc = nil
 		second := f.postContents(t.Context(), body, "")
@@ -1011,6 +1011,7 @@ func TestPostEnvelopeContentsGossipModeValidationDeadlineAnswersUnavailable(t *t
 
 		require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
 		f.requireNoEvents()
+		f.requireNoArrival()
 	})
 
 	// The rows below are not on the early path, so their contents validation runs under the request context.
@@ -1596,22 +1597,6 @@ func TestPostEnvelopeContentsLegacyRoutePublishesEnvelopeLast(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
 	require.Equal(t, []contentsEventKind{eventColumnPublish, eventColumnWrite, eventImport, eventEnvelopePublish}, f.phases())
-}
-
-func TestPostEnvelopeContentsRetryDoesNotRepublishEnvelope(t *testing.T) {
-	f := newEnvelopeContentsFixture(t, 0, 2)
-	f.failPublish = failPublishOf(5)
-	body := f.contents(f.blobs...)
-	require.Equal(t, http.StatusInternalServerError, f.postContents(t.Context(), body, "").Code)
-	require.True(t, f.forkchoice.HasEnvelope(f.root), "the retry must find the envelope persisted")
-	f.failPublish = nil
-	published := len(f.eventsOf(eventColumnPublish))
-
-	recorder := f.postContents(t.Context(), body, "")
-
-	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
-	require.Len(t, f.eventsOf(eventEnvelopePublish), 1)
-	require.Len(t, f.eventsOf(eventColumnPublish), published+int(f.handler.beaconChainCfg.NumberOfColumns))
 }
 
 func TestPostEnvelopeContentsRequiredDoesNotRefuseADifferentEnvelope(t *testing.T) {

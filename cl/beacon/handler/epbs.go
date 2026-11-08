@@ -1044,7 +1044,7 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 						w.WriteHeader(http.StatusOK)
 						return
 					}
-					if a.executionPayloadEnvelopeBroadcastOnly(gossipKey, signedEnvelope) {
+					if a.executionPayloadEnvelopeBroadcasts.Contains(requestRoot) {
 						w.WriteHeader(http.StatusAccepted)
 						return
 					}
@@ -1107,7 +1107,6 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 		var cancel context.CancelFunc
 		workCtx, cancel = context.WithTimeout(context.WithoutCancel(r.Context()), time.Duration(a.beaconChainCfg.SecondsPerSlot)*time.Second)
 		defer cancel()
-		a.forkchoiceStore.RecordExecutionPayloadArrival(gossipKey.BeaconBlockRoot, signedEnvelope.Message.Payload.SlotNumber, receivedAt)
 		releasePreparation := a.forkchoiceStore.BeginPendingPayloadEnvelope(gossipKey.BeaconBlockRoot)
 		defer releasePreparation()
 		context.AfterFunc(workCtx, releasePreparation)
@@ -1122,6 +1121,7 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 			status := http.StatusBadRequest
 			if envelopeFirst && errors.Is(err, context.DeadlineExceeded) && errors.Is(workCtx.Err(), context.DeadlineExceeded) {
 				status = http.StatusServiceUnavailable
+				err = fmt.Errorf("execution payload envelope contents validation did not finish within a slot, nothing was broadcast: %w", err)
 			}
 			beaconhttp.NewEndpointError(status, err).WriteTo(w)
 			return
@@ -1154,10 +1154,6 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 	}
 	if envelopeFirst {
 		encodedSSZ, err := signedEnvelope.EncodeSSZ(nil)
-		var envelopeRoot [32]byte
-		if err == nil {
-			envelopeRoot, err = signedEnvelope.HashSSZ()
-		}
 		if err == nil {
 			err = a.gossipManager.PublishToForkDigest(workCtx, forkDigest, gossip.TopicNameExecutionPayload, encodedSSZ)
 		}
@@ -1165,7 +1161,10 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 			beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
 			return
 		}
-		a.executionPayloadEnvelopeBroadcasts.Add(envelopeRoot, struct{}{})
+		a.forkchoiceStore.RecordExecutionPayloadArrival(gossipKey.BeaconBlockRoot, signedEnvelope.Message.Payload.SlotNumber, receivedAt)
+		if envelopeRoot, err := signedEnvelope.HashSSZ(); err == nil {
+			a.executionPayloadEnvelopeBroadcasts.Add(envelopeRoot, struct{}{})
+		}
 	}
 	contentsIntegrationFailed := false
 	columnWriteFailed := false
