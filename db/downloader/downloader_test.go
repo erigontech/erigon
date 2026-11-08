@@ -1441,3 +1441,19 @@ func TestGrpcServerDeleteKeepsFilesOutsideSnapDir(t *testing.T) {
 	require.Error(t, err)
 	require.FileExists(t, victim)
 }
+
+func TestVerifyDataFailFastDetectsTrailingBytes(t *testing.T) {
+	require := require.New(t)
+	test := newDownloaderTest(t)
+	path := filepath.Join(test.dirs.Snap, "a")
+	require.NoError(os.WriteFile(path, bytes.Repeat([]byte{1}, 4096), 0o644))
+	require.NoError(test.downloader.AddNewSeedableFile(t.Context(), "a"))
+
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
+	require.NoError(err)
+	_, err = f.Write([]byte{2})
+	require.NoError(err)
+	require.NoError(f.Close())
+
+	require.Error(test.downloader.VerifyData(test.downloader.ctx, nil, true))
+}
