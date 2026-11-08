@@ -45,8 +45,7 @@ func (c *ConsensusHandlers) beaconBlocksByRangeHandler(s network.Stream) error {
 		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, InvalidRequestPrefix)
 	}
 
-	estimatedResponses := min(req.Count, MaxRequestsBlocks)
-	if cost := max(int(estimatedResponses)-1, 0); !c.consumeRateLimit(s, cost) {
+	if cost := requestCost(req.Count, 1, MaxRequestsBlocks); !c.consumeRateLimit(s, cost) {
 		return nil
 	}
 
@@ -114,7 +113,7 @@ func (c *ConsensusHandlers) beaconBlocksByRootHandler(s network.Stream) error {
 	}
 
 	// Cap the charge at the response limit so peers retain credit for the remaining roots.
-	if cost := min(req.Length(), MaxRequestsBlocks) - 1; !c.consumeRateLimit(s, cost) {
+	if cost := requestCost(uint64(req.Length()), 1, MaxRequestsBlocks); !c.consumeRateLimit(s, cost) {
 		return nil
 	}
 

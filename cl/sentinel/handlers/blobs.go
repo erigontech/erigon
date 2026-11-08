@@ -49,7 +49,7 @@ func (c *ConsensusHandlers) blobsSidecarsByRangeHandler(s network.Stream, versio
 	// Cap the charge at the response limit, since larger ranges cannot return more blobs.
 	startEpoch := req.StartSlot / c.beaconConfig.SlotsPerEpoch
 	maxBlobs := c.beaconConfig.GetBlobParameters(startEpoch).MaxBlobsPerBlock
-	if cost := sidecarsRequestCost(req.Count, maxBlobs, maxBlobsThroughputPerRequest); !c.consumeRateLimit(s, cost) {
+	if cost := requestCost(req.Count, maxBlobs, maxBlobsThroughputPerRequest); !c.consumeRateLimit(s, cost) {
 		return nil
 	}
 
@@ -125,8 +125,7 @@ func (c *ConsensusHandlers) blobsSidecarsByIdsHandler(s network.Stream, version 
 		return err
 	}
 
-	estimatedResponses := min(req.Len(), maxBlobsThroughputPerRequest)
-	if cost := max(estimatedResponses-1, 0); !c.consumeRateLimit(s, cost) {
+	if cost := requestCost(uint64(req.Len()), 1, maxBlobsThroughputPerRequest); !c.consumeRateLimit(s, cost) {
 		return nil
 	}
 

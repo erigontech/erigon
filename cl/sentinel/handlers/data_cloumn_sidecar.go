@@ -56,7 +56,7 @@ func (c *ConsensusHandlers) dataColumnSidecarsByRangeHandler(s network.Stream) e
 	}
 
 	// Consume additional rate-limit tokens: slots × columns per slot, capped at config max.
-	if cost := sidecarsRequestCost(endSlot-startSlot, uint64(req.Columns.Length()), c.beaconConfig.MaxRequestDataColumnSidecars); !c.consumeRateLimit(s, cost) {
+	if cost := requestCost(endSlot-startSlot, uint64(req.Columns.Length()), c.beaconConfig.MaxRequestDataColumnSidecars); !c.consumeRateLimit(s, cost) {
 		return nil
 	}
 
@@ -183,7 +183,7 @@ func (c *ConsensusHandlers) dataColumnSidecarsByRootHandler(s network.Stream) er
 	if totalColumns == 0 {
 		return nil
 	}
-	if cost := sidecarsRequestCost(1, uint64(totalColumns), c.beaconConfig.MaxRequestDataColumnSidecars); !c.consumeRateLimit(s, cost) {
+	if cost := requestCost(1, uint64(totalColumns), c.beaconConfig.MaxRequestDataColumnSidecars); !c.consumeRateLimit(s, cost) {
 		return nil
 	}
 
@@ -274,14 +274,14 @@ func (c *ConsensusHandlers) dataColumnSidecarsByRootHandler(s network.Stream) er
 	return responseErr
 }
 
-// sidecarsRequestCost returns the estimated additional tokens to charge after admission.
+// requestCost returns the estimated additional tokens to charge after admission.
 // Check the cap by division so large counts cannot overflow the multiplication.
-func sidecarsRequestCost(slots, sidecarsPerSlot, maxSidecars uint64) int {
-	if slots == 0 || sidecarsPerSlot == 0 || maxSidecars == 0 {
+func requestCost(count, multiplier, limit uint64) int {
+	if count == 0 || multiplier == 0 || limit == 0 {
 		return 0
 	}
-	if slots > maxSidecars/sidecarsPerSlot {
-		return int(maxSidecars) - 1
+	if count > limit/multiplier {
+		return int(limit) - 1
 	}
-	return int(slots*sidecarsPerSlot) - 1
+	return int(count*multiplier) - 1
 }

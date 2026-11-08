@@ -100,9 +100,7 @@ func (c *ConsensusHandlers) lightClientUpdatesByRangeHandler(s network.Stream) e
 		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, InvalidRequestPrefix)
 	}
 
-	// Cap the unsigned count before converting to int so large requests cannot overflow the cost.
-	estimatedResponses := min(req.Count, maxLightClientsPerRequest)
-	if cost := max(int(estimatedResponses)-1, 0); !c.consumeRateLimit(s, cost) {
+	if cost := requestCost(req.Count, 1, maxLightClientsPerRequest); !c.consumeRateLimit(s, cost) {
 		return nil
 	}
 
