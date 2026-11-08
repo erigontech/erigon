@@ -1133,7 +1133,7 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 			a.forkchoiceStore.HasBlockEquivocation(block.Block.Slot, block.Block.ProposerIndex, signedEnvelope.Message.BeaconBlockRoot)
 	}
 	if validation != BlockPublishingValidationGossip {
-		if err := a.forkchoiceStore.ValidateExecutionPayloadEnvelopeForConsensus(r.Context(), signedEnvelope, columnWork != nil); err != nil {
+		if err := a.forkchoiceStore.ValidateExecutionPayloadEnvelopeForConsensus(r.Context(), signedEnvelope, columnWork == nil); err != nil {
 			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 			return
 		}

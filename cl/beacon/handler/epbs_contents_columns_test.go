@@ -72,22 +72,22 @@ type contentsEvent struct {
 // envelopeContentsFixture posts a Gloas envelope whose block has a bid with real KZG blobs to a
 // handler with a real column store and a real custody-8 PeerDas, and logs what the handler does.
 type envelopeContentsFixture struct {
-	t                          *testing.T
-	handler                    *ApiHandler
-	forkchoice                 *mock_services2.ForkChoiceStorageMock
-	blobs                      []testBlob
-	slot                       uint64
-	currentSlot                uint64
-	root                       common.Hash
-	signedEnvelope             *cltypes.SignedExecutionPayloadEnvelope
-	columnEvents               chan *beaconevents.EventStream
-	digestEpochs               []uint64
-	events                     []contentsEvent
-	duringConsensusValidation  func()
-	consensusBlobDataAvailable bool
-	payloadInvalidated         bool
-	invalidatedBlockRoot       common.Hash
-	invalidatedExecutionHash   common.Hash
+	t                         *testing.T
+	handler                   *ApiHandler
+	forkchoice                *mock_services2.ForkChoiceStorageMock
+	blobs                     []testBlob
+	slot                      uint64
+	currentSlot               uint64
+	root                      common.Hash
+	signedEnvelope            *cltypes.SignedExecutionPayloadEnvelope
+	columnEvents              chan *beaconevents.EventStream
+	digestEpochs              []uint64
+	events                    []contentsEvent
+	duringConsensusValidation func()
+	consensusCheckBlobData    bool
+	payloadInvalidated        bool
+	invalidatedBlockRoot      common.Hash
+	invalidatedExecutionHash  common.Hash
 
 	failWrite    func(index uint64) error
 	failPublish  func(index uint64) error
@@ -120,9 +120,9 @@ type dataAvailabilityForkchoice struct {
 	f *envelopeContentsFixture
 }
 
-func (d *dataAvailabilityForkchoice) ValidateExecutionPayloadEnvelopeForConsensus(ctx context.Context, envelope *cltypes.SignedExecutionPayloadEnvelope, blobDataAvailable bool) error {
+func (d *dataAvailabilityForkchoice) ValidateExecutionPayloadEnvelopeForConsensus(ctx context.Context, envelope *cltypes.SignedExecutionPayloadEnvelope, checkBlobData bool) error {
 	d.f.record(contentsEvent{kind: eventConsensusValidation})
-	d.f.consensusBlobDataAvailable = blobDataAvailable
+	d.f.consensusCheckBlobData = checkBlobData
 	if d.f.duringConsensusValidation != nil {
 		d.f.duringConsensusValidation()
 	}
@@ -133,10 +133,10 @@ func (d *dataAvailabilityForkchoice) ValidateExecutionPayloadEnvelopeForConsensu
 	if envelope.Message.Payload.SlotNumber < finalizedSlot {
 		return fmt.Errorf("envelope slot %d is before finalized slot %d", envelope.Message.Payload.SlotNumber, finalizedSlot)
 	}
-	if !blobDataAvailable && !d.f.dataAvailable() {
+	if checkBlobData && !d.f.dataAvailable() {
 		return forkchoice.ErrEIP7594ColumnDataNotAvailable
 	}
-	return d.ForkChoiceStorageMock.ValidateExecutionPayloadEnvelopeForConsensus(ctx, envelope, blobDataAvailable)
+	return d.ForkChoiceStorageMock.ValidateExecutionPayloadEnvelopeForConsensus(ctx, envelope, checkBlobData)
 }
 
 func (d *dataAvailabilityForkchoice) ExecutionPayloadInvalidated(blockRoot, executionBlockHash common.Hash) bool {
@@ -662,7 +662,7 @@ func TestPostEnvelopeContentsConsensusModesUseCachedLocalBundle(t *testing.T) {
 			recorder := f.postContents(t.Context(), f.contents(request), "?broadcast_validation="+mode)
 
 			require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
-			require.True(t, f.consensusBlobDataAvailable)
+			require.False(t, f.consensusCheckBlobData)
 			f.requirePublishedColumnsEqual(f.expectedColumns(f.blobs...))
 		})
 	}

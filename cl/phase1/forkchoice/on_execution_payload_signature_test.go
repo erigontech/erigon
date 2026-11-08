@@ -516,22 +516,22 @@ func TestValidateExecutionPayloadEnvelopeForConsensusVerifiesBuilderSignatureOnc
 
 	calls := stubBLSVerify(t)
 
-	err := store.ValidateExecutionPayloadEnvelopeForConsensus(t.Context(), envelope, false)
+	err := store.ValidateExecutionPayloadEnvelopeForConsensus(t.Context(), envelope, true)
 
 	require.Equal(t, 1, *calls)
 	require.NoError(t, err)
 }
 
 func TestValidateExecutionPayloadEnvelopeForConsensusRejectsInvalidBuilderSignature(t *testing.T) {
-	for _, blobDataAvailable := range []bool{false, true} {
-		t.Run("blobDataAvailable="+strconv.FormatBool(blobDataAvailable), func(t *testing.T) {
+	for _, checkBlobData := range []bool{false, true} {
+		t.Run("checkBlobData="+strconv.FormatBool(checkBlobData), func(t *testing.T) {
 			cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
 			signAdmissionEnvelopeWithKey(t, cfg, blockState, envelope, otherSigningKey)
 			engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
 			store, _ := newEnvelopeApplicationTestStore(t, cfg, blockState, block)
 			store.engine = engine
 
-			err := store.ValidateExecutionPayloadEnvelopeForConsensus(t.Context(), envelope, blobDataAvailable)
+			err := store.ValidateExecutionPayloadEnvelopeForConsensus(t.Context(), envelope, checkBlobData)
 
 			require.ErrorContains(t, err, "invalid builder signature: invalid signature")
 		})

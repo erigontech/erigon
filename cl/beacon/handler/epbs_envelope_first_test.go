@@ -1252,22 +1252,22 @@ func TestPostEnvelopeConsensusModeRetryPublishesFailedEnvelope(t *testing.T) {
 func TestPostEnvelopeContentsConsensusModesPublishEnvelopeLast(t *testing.T) {
 	for _, mode := range []string{"consensus", "consensus_and_equivocation"} {
 		for _, tc := range []struct {
-			name              string
-			blobCount         int
-			bare              bool
-			wantPhases        []contentsEventKind
-			blobDataAvailable bool
+			name          string
+			blobCount     int
+			bare          bool
+			wantPhases    []contentsEventKind
+			checkBlobData bool
 		}{
 			{
-				name: "contents with blobs", blobCount: 2, blobDataAvailable: true,
+				name: "contents with blobs", blobCount: 2,
 				wantPhases: []contentsEventKind{eventConsensusValidation, eventColumnPublish, eventColumnWrite, eventImport, eventEnvelopePublish},
 			},
 			{
-				name: "contents without blobs", blobDataAvailable: true,
+				name:       "contents without blobs",
 				wantPhases: []contentsEventKind{eventConsensusValidation, eventImport, eventEnvelopePublish},
 			},
 			{
-				name: "bare envelope without blobs", bare: true,
+				name: "bare envelope without blobs", bare: true, checkBlobData: true,
 				wantPhases: []contentsEventKind{eventConsensusValidation, eventImport, eventEnvelopePublish},
 			},
 		} {
@@ -1281,7 +1281,7 @@ func TestPostEnvelopeContentsConsensusModesPublishEnvelopeLast(t *testing.T) {
 
 				require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
 				require.Equal(t, tc.wantPhases, f.phases())
-				require.Equal(t, tc.blobDataAvailable, f.consensusBlobDataAvailable)
+				require.Equal(t, tc.checkBlobData, f.consensusCheckBlobData)
 			})
 		}
 	}
@@ -1438,7 +1438,7 @@ func TestPostEnvelopeContentsConsensusModesWriteFailureAnswersAccepted(t *testin
 			require.Len(t, f.eventsOf(eventImport), 1)
 			require.Equal(t, f.root, f.invalidatedBlockRoot)
 			require.Equal(t, f.signedEnvelope.Message.Payload.BlockHash, f.invalidatedExecutionHash)
-			require.True(t, f.consensusBlobDataAvailable)
+			require.False(t, f.consensusCheckBlobData)
 			f.requireClaimReleased()
 			f.requireContentsRequiredRecord(false)
 		})
@@ -1516,14 +1516,14 @@ func TestPostEnvelopeConsensusModeWithoutBlobDataReadsStoredColumns(t *testing.T
 	first := f.postAllBlobs(true, "?broadcast_validation=consensus")
 
 	require.Equal(t, http.StatusBadRequest, first.Code, first.Body.String())
-	require.False(t, f.consensusBlobDataAvailable)
+	require.True(t, f.consensusCheckBlobData)
 	require.Equal(t, []contentsEventKind{eventConsensusValidation}, f.phases())
 
 	f.storeCustodyColumns()
 	second := f.postAllBlobs(true, "?broadcast_validation=consensus")
 
 	require.Equal(t, http.StatusOK, second.Code, second.Body.String())
-	require.False(t, f.consensusBlobDataAvailable)
+	require.True(t, f.consensusCheckBlobData)
 }
 
 func TestPostEnvelopeContentsConsensusModesImportRejectionAfterColumnsKeepsBadRequest(t *testing.T) {

@@ -187,10 +187,8 @@ type ForkChoiceStorageWriter interface {
 	ValidateExecutionPayloadEnvelopeForGossip(signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error
 	QueuePendingExecutionPayloadEnvelope(signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, receivedAt time.Time)
 	RecordExecutionPayloadArrival(blockRoot common.Hash, slot uint64, receivedAt time.Time)
-	// ValidateExecutionPayloadEnvelopeForConsensus skips the spec's data availability check when blobDataAvailable is
-	// true, so pass true only when the caller holds every bid blob with KZG proofs that it verified or received from
-	// this node's EL.
-	ValidateExecutionPayloadEnvelopeForConsensus(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, blobDataAvailable bool) error
+	// checkBlobData: run the data availability check; pass false only while holding every bid blob with verified KZG proofs.
+	ValidateExecutionPayloadEnvelopeForConsensus(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, checkBlobData bool) error
 	// [New in Gloas:EIP7732] ApplyLocalSelfBuildEnvelope processes a locally-produced
 	// self-build envelope, skipping BLS signature verification. EL validation still runs.
 	// MUST only be called from the local block production path.

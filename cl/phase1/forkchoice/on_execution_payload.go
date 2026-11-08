@@ -1045,7 +1045,7 @@ func (f *ForkChoiceStore) ForgetExecutionPayloadEnvelopeForGossip(beaconBlockRoo
 	f.envelopeGossipAdmissions.ForgetSeen(beaconBlockRoot, builderIndex)
 }
 
-func (f *ForkChoiceStore) ValidateExecutionPayloadEnvelopeForConsensus(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, blobDataAvailable bool) error {
+func (f *ForkChoiceStore) ValidateExecutionPayloadEnvelopeForConsensus(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, checkBlobData bool) error {
 	if err := f.validateExecutionPayloadEnvelopeInput(signedEnvelope); err != nil {
 		return err
 	}
@@ -1071,7 +1071,7 @@ func (f *ForkChoiceStore) ValidateExecutionPayloadEnvelopeForConsensus(ctx conte
 	}
 	finishImport := f.BeginPayloadImport(block.Block.Slot)
 	defer finishImport()
-	if !blobDataAvailable {
+	if checkBlobData {
 		if err := f.checkDataAvailability(block, root); err != nil {
 			return err
 		}
