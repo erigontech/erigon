@@ -173,7 +173,7 @@ func newEnvelopeContentsFixture(t *testing.T, slot uint64, blobCount int) *envel
 	if slot == 0 {
 		slot = handler.ethClock.GetCurrentSlot()
 	}
-	f := &envelopeContentsFixture{t: t, handler: handler, forkchoice: fcu, slot: slot, currentSlot: slot}
+	f := &envelopeContentsFixture{t: t, handler: handler, forkchoice: fcu, slot: slot, currentSlot: slot, consensusCheckBlobData: true}
 
 	clock := eth_clock.NewMockEthereumClock(ctrl)
 	clock.EXPECT().GetCurrentSlot().DoAndReturn(func() uint64 { return f.currentSlot }).AnyTimes()
@@ -650,7 +650,7 @@ func TestPostEnvelopeContentsUsesCachedLocalBundle(t *testing.T) {
 			recorder := f.postContents(t.Context(), f.contents(request), query)
 
 			require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
-			require.False(t, f.consensusCheckBlobData)
+			require.Equal(t, query == "", f.consensusCheckBlobData)
 			f.requirePublishedColumnsEqual(f.expectedColumns(f.blobs...))
 		})
 	}
