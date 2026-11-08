@@ -135,6 +135,7 @@ func TestCaplinBlockProductionIntegration(t *testing.T) {
 			})
 			targetSlot := baseBlock.Slot + 1
 			require.NoError(t, transition.DefaultMachine.ProcessSlots(postState, targetSlot))
+			require.NoError(t, producer.WaitForTxPool(ctx, parent.Hash()))
 
 			block, err := handler.produceBlock(ctx, 3, baseBlock.Slot, baseRoot, postState, targetSlot, common.Bytes96{0xc0}, common.Hash{})
 			require.NoError(t, err)

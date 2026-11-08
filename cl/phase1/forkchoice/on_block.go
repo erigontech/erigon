@@ -152,7 +152,7 @@ func (f *ForkChoiceStore) ValidateBlockForPublishing(block *cltypes.SignedBeacon
 		f.mu.RUnlock()
 		return nil
 	}
-	parentState, err := f.forkGraph.GetState(block.Block.ParentRoot, true)
+	parentState, err := f.copyStateAtBlockRootLocked(block.Block.ParentRoot)
 	f.mu.RUnlock()
 	if err != nil {
 		return err
@@ -213,9 +213,17 @@ func (f *ForkChoiceStore) validateBlockAdmissionLocked(block *cltypes.SignedBeac
 }
 
 func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeaconBlock, newPayload, fullValidation, checkDataAvaiability, rejectEquivocation bool) error {
+	if block != nil && block.Block != nil {
+		finishImport := f.BeginPayloadImport(block.Block.Slot)
+		defer finishImport()
+	}
 	// Count before taking the store mutex so queued imports are visible as in progress.
 	f.blocksProcessing.Add(1)
 	defer f.blocksProcessing.Add(-1)
+	var columns custodyColumnRead
+	if checkDataAvaiability {
+		columns = f.readCustodyColumns(block)
+	}
 	f.mu.Lock()
 	unlocked := false
 	defer f.drainQueuedWork()
@@ -264,7 +272,10 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 	headBeforeBlock := common.Hash{}
 	if isGloas && f.Slot() == block.Block.Slot {
 		justifiedCheckpoint := f.justifiedCheckpoint.Load().(solid.Checkpoint)
-		cs, _ := f.getCheckpointState(justifiedCheckpoint)
+		cs, err := f.gloasHeadCheckpointState(justifiedCheckpoint, f.getCheckpointStateLocked)
+		if err != nil {
+			return err
+		}
 		head, _, err := f.computeHeadGloasWithAnchorFallback(justifiedCheckpoint, cs)
 		if err != nil {
 			return err
@@ -295,7 +306,7 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 		}
 
 		if checkDataAvaiability {
-			if err := f.checkPreGloasBlockDataAvailability(ctx, block, common.Hash(blockRoot), versionedHashes); err != nil {
+			if err := f.checkPreGloasBlockDataAvailability(ctx, block, common.Hash(blockRoot), versionedHashes, columns); err != nil {
 				return err
 			}
 		}
@@ -576,17 +587,29 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 		log.Debug("OnBlock", "elapsed", time.Since(start), "slot", block.Block.Slot)
 	}
 
+	var custodyRequirement uint64
+	updateValidatorsCustody := false
 	if f.peerDas != nil {
 		if connectedValidators := f.localValidators.GetValidators(); len(connectedValidators) > 0 {
 			// update the custody requirement whenever we see a new block
-			custodyRequirement := state.GetValidatorsCustodyRequirement(lastProcessedState, connectedValidators)
-			f.peerDas.UpdateValidatorsCustody(custodyRequirement)
+			custodyRequirement = state.GetValidatorsCustodyRequirement(lastProcessedState, connectedValidators)
+			updateValidatorsCustody = true
 		}
 	}
+
+	block.Block.Body.Attestations.Range(func(_ int, attestation *solid.Attestation, _ int) bool {
+		if err := f.onAttestationLocked(attestation, true, lastProcessedState, blockRoot); err != nil {
+			log.Debug("[OnBlock] block attestation not applied", "slot", block.Block.Slot, "err", err)
+		}
+		return true
+	})
 
 	// Release lock (via defer) before writing DB indices for the applied envelope.
 	unlocked = true
 	f.mu.Unlock()
+	if updateValidatorsCustody {
+		f.peerDas.UpdateValidatorsCustody(custodyRequirement)
+	}
 
 	var appliedEnvelope *cltypes.SignedExecutionPayloadEnvelope
 	var appliedEnvelopeLocal, envelopeApplied bool
@@ -612,9 +635,34 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 	return nil
 }
 
+// custodyColumnRead is a Fulu custody column availability read taken before f.mu, with the advertised custody group
+// count that defined the custody set at the time of the read.
+type custodyColumnRead struct {
+	available bool
+	cgc       uint64
+	err       error
+}
+
+// readCustodyColumns reads Fulu custody column availability. Callers must not hold f.mu: the read stats column files on
+// disk. Its skip conditions must match the Fulu branch of checkPreGloasBlockDataAvailability, which treats a skipped
+// read as unavailable.
+func (f *ForkChoiceStore) readCustodyColumns(block *cltypes.SignedBeaconBlock) custodyColumnRead {
+	if f.peerDas == nil || block == nil || block.Block == nil || block.Block.Body == nil || block.Version() < clparams.FuluVersion ||
+		block.Version() >= clparams.GloasVersion || block.Block.Body.BlobKzgCommitments == nil || block.Block.Body.BlobKzgCommitments.Len() == 0 {
+		return custodyColumnRead{}
+	}
+	blockRoot, err := block.Block.HashSSZ()
+	if err != nil {
+		return custodyColumnRead{err: invalidBlockError(err)}
+	}
+	cgc := f.peerDas.StateReader().GetAdvertisedCgc()
+	available, err := f.peerDas.IsDataAvailable(block.Block.Slot, blockRoot)
+	return custodyColumnRead{available: available, cgc: cgc, err: err}
+}
+
 // checkPreGloasBlockDataAvailability checks that a pre-Gloas block's blob data is available before the block enters
 // fork choice.
-func (f *ForkChoiceStore) checkPreGloasBlockDataAvailability(ctx context.Context, block *cltypes.SignedBeaconBlock, blockRoot common.Hash, versionedHashes []common.Hash) error {
+func (f *ForkChoiceStore) checkPreGloasBlockDataAvailability(ctx context.Context, block *cltypes.SignedBeaconBlock, blockRoot common.Hash, versionedHashes []common.Hash, columns custodyColumnRead) error {
 	// Before Fulu, blobs in the EL's pool are enough. From Fulu the node must hold its custody columns: peers that see
 	// it treat the block as known ask it for them, and score it down for a partial answer.
 	elHasBlobs := false
@@ -630,11 +678,11 @@ func (f *ForkChoiceStore) checkPreGloasBlockDataAvailability(ctx context.Context
 	// Check if blob data is available (skip if blobs are in txpool)
 	if block.Block.Body.BlobKzgCommitments.Len() > 0 && !elHasBlobs {
 		if block.Version() >= clparams.FuluVersion && f.peerDas != nil {
-			available, err := f.peerDas.IsDataAvailable(block.Block.Slot, blockRoot)
-			if err != nil {
-				return err
+			if columns.err != nil {
+				return columns.err
 			}
-			if !available {
+			// A custody raise while waiting for f.mu adds columns that the read did not check.
+			if !columns.available || f.peerDas.StateReader().GetAdvertisedCgc() != columns.cgc {
 				if !f.syncedDataManager.Syncing() {
 					if err := f.peerDas.SyncColumnDataLater(block); err != nil {
 						log.Warn("failed to schedule deferred column data sync", "slot", block.Block.Slot, "blockRoot", blockRoot, "err", err)
@@ -821,7 +869,9 @@ func (f *ForkChoiceStore) RetryPendingExecutionPayloadEnvelope(ctx context.Conte
 }
 
 func (f *ForkChoiceStore) RetryPendingExecutionPayloadEnvelopeIndices(ctx context.Context, limit int) {
-	for _, repair := range f.envelopeIndexRepairs.repairs() {
+	repairs := f.envelopeIndexRepairs.repairs()
+	for i := range repairs {
+		repair := repairs[i]
 		if limit <= 0 || ctx.Err() != nil {
 			return
 		}
@@ -844,7 +894,7 @@ func (f *ForkChoiceStore) RetryPendingExecutionPayloadEnvelopeIndices(ctx contex
 				limit--
 				continue
 			}
-			repair = f.envelopeIndexRepairs.setValues(repair, persisted.Message.Payload.BlockNumber, persisted.Message.Payload.BlockHash)
+			repair = f.captureEnvelopeIndexRepairValues(repair, persisted)
 			if repair.generation == 0 {
 				limit--
 				continue

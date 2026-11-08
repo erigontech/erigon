@@ -133,16 +133,11 @@ var (
 	// BAL_DRIVEN_COMMITMENT=false (or IGNORE_BAL=true) to fall back to the
 	// incremental path if it ever misbehaves.
 	BALDrivenCommitment = EnvBool("BAL_DRIVEN_COMMITMENT", true)
+	BALBatchPrefetch    = EnvBool("BAL_BATCH_PREFETCH", true)
 	// BALShadowCompute (requires BALDrivenCommitment) also computes each
 	// BAL-driven block incrementally and asserts both roots match before
 	// publishing; without it the BAL-driven root is published directly.
-	BALShadowCompute = EnvBool("BAL_SHADOW_COMPUTE", false)
-	// CommitmentAfterExec makes the exec loop wait for the commitment
-	// calculator to handle block N's result before starting N+1. Diagnostic:
-	// it trades the block-level exec/commitment overlap for most of the
-	// SharedDomains.changesetMu contention. Mid-block computes (step-edge
-	// checkpoints) still run alongside exec.
-	CommitmentAfterExec           = EnvBool("COMMITMENT_AFTER_EXEC", false)
+	BALShadowCompute              = EnvBool("BAL_SHADOW_COMPUTE", false)
 	CaplinEfficientReorg          = EnvBool("CAPLIN_EFFICIENT_REORG", true)
 	UseTxDependencies             = EnvBool("USE_TX_DEPENDENCIES", false)
 	UseStateCache                 = EnvBool("USE_STATE_CACHE", true)

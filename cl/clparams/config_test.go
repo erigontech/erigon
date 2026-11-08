@@ -84,6 +84,15 @@ func TestAttestationDueMs(t *testing.T) {
 	}
 }
 
+func TestCustomConfigReadsMaxPayloadSize(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	require.NoError(t, os.WriteFile(configPath, []byte("MAX_PAYLOAD_SIZE: 20971520\n"), 0o644))
+
+	_, networkCfg, err := CustomConfig(configPath)
+	require.NoError(t, err)
+	require.Equal(t, uint64(20_971_520), networkCfg.GossipMaxSize)
+}
+
 func TestBlockRequestWindowFallsBackToSpecFormula(t *testing.T) {
 	cfg := BeaconChainConfig{MinValidatorWithdrawabilityDelay: 256, ChurnLimitQuotient: 65_536}
 	require.Equal(t, uint64(33_024), cfg.MinEpochsForBlockRequests())

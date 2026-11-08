@@ -52,6 +52,12 @@ type StateReader interface {
 	TracePrefix() string
 }
 
+// CodeByHash is a code store shared across requests. Code is content-addressed, so a reader at
+// any txNum may serve from it.
+type CodeByHash interface {
+	GetCodeByHash(codeHash []byte) ([]byte, bool)
+}
+
 type HistoricalStateReader interface {
 	GetTxNum() uint64
 	SetTxNum(txNum uint64)

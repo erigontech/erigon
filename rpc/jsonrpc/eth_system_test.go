@@ -248,6 +248,27 @@ func TestCapabilities(t *testing.T) {
 		require.Equal(t, testPruneDistance, window(t, result.StateProofs))
 	})
 
+	for _, tc := range []struct {
+		name       string
+		history    prune.BlockAmount
+		commitment prune.Distance
+	}{
+		{"archive_commitment_window", prune.ArchiveMode.History, 5},
+		{"full_shorter_commitment_window", prune.Distance(testPruneDistance), 5},
+		{"unstarted_commitment_window", prune.Distance(chainSize * 3), prune.Distance(chainSize * 2)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			mode := prune.ArchiveMode
+			mode.History, mode.CommitmentHistory = tc.history, tc.commitment
+			api, head := setupAPI(t, mode, true, false)
+			result, err := api.Capabilities(t.Context())
+			require.NoError(t, err)
+			require.Equal(t, tc.history.PruneTo(head), oldest(t, result.StateProofs), "commitment files have not been retired")
+			require.Equal(t, uint64(tc.commitment), window(t, result.StateProofs))
+		})
+	}
+
 	t.Run("minimal_no_commitment", func(t *testing.T) {
 		t.Parallel()
 		api, head := setupAPI(t, testMinimalMode, false, false)
@@ -362,9 +383,9 @@ func TestCapabilities(t *testing.T) {
 		require.NoError(t, err)
 		// blocks constraint (mergeAt=18) is tighter than state (10): both receipts and logs must reflect it
 		require.Equal(t, mergeAt, oldest(t, result.Receipts))
-		require.Nil(t, result.Receipts.DeleteStrategy)
+		require.Equal(t, testPruneDistance, window(t, result.Receipts))
 		require.Equal(t, mergeAt, oldest(t, result.Logs))
-		require.Nil(t, result.Logs.DeleteStrategy)
+		require.Equal(t, testPruneDistance, window(t, result.Logs))
 	})
 
 	// full mode + --prune.include-receipts on a merge chain: pre-merge blocks were never downloaded,
@@ -486,6 +507,38 @@ func TestGasPriceAddsHeadBaseFee(t *testing.T) {
 	require.NotNil(t, head)
 	require.NotNil(t, head.BaseFee)
 	require.False(t, head.BaseFee.IsZero())
+
+	tip, err := eth.MaxPriorityFeePerGas(ctx)
+	require.NoError(t, err)
+	price, err := eth.GasPrice(ctx)
+	require.NoError(t, err)
+	want := new(uint256.Int).Add((*uint256.Int)(tip), head.BaseFee)
+	require.Equal(t, want, (*uint256.Int)(price))
+}
+
+// The base fee must come from the head the tip was sampled at, not from a head header
+// marker that lags the forkchoice head.
+func TestGasPriceBaseFeeFromTipHead(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	m := createGasPriceTestKV(t, chain.TestChainOsakaConfig, 30)
+	defer m.DB.Close()
+	eth := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	ctx := t.Context()
+
+	rwTx, err := m.DB.BeginRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	latest, err := rpchelper.GetLatestBlockNumber(rwTx)
+	require.NoError(t, err)
+	head, err := m.BlockReader.HeaderByNumber(ctx, rwTx, latest)
+	require.NoError(t, err)
+	stale, err := m.BlockReader.HeaderByNumber(ctx, rwTx, latest-10)
+	require.NoError(t, err)
+	require.NotEqual(t, head.BaseFee, stale.BaseFee)
+	require.NoError(t, rawdb.WriteHeadHeaderHash(rwTx, stale.Hash()))
+	require.NoError(t, rwTx.Commit())
 
 	tip, err := eth.MaxPriorityFeePerGas(ctx)
 	require.NoError(t, err)

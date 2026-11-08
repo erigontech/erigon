@@ -19,11 +19,13 @@ package consensus_tests
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io/fs"
 	"slices"
 	"testing"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/fork"
@@ -170,7 +172,10 @@ func validateGossipSyncCommitteeMessage(
 	if message.ValidatorIndex >= uint64(beaconState.ValidatorLength()) {
 		return "reject"
 	}
-	validSubnets, err := subnets.ComputeSubnetsForSyncCommittee(beaconState, message.ValidatorIndex)
+	validSubnets, err := subnets.ComputeSubnetsForSyncCommittee(beaconState, message.Slot, message.ValidatorIndex)
+	if errors.Is(err, state.ErrSyncCommitteeNotInState) {
+		return "ignore"
+	}
 	if err != nil || !slices.Contains(validSubnets, subnetID) {
 		return "reject"
 	}
@@ -264,7 +269,14 @@ func validateGossipSyncContribution(
 	if message.AggregatorIndex >= uint64(beaconState.ValidatorLength()) {
 		return "reject"
 	}
-	subcommitteePublicKeys, ok := gossipSyncSubcommitteePublicKeys(beaconState, contribution.SubcommitteeIndex)
+	committee, err := state.SyncCommitteeForMessageSlot(beaconState, contribution.Slot)
+	if errors.Is(err, state.ErrSyncCommitteeNotInState) {
+		return "ignore"
+	}
+	if err != nil {
+		return "reject"
+	}
+	subcommitteePublicKeys, ok := gossipSyncSubcommitteePublicKeys(config, committee, contribution.SubcommitteeIndex)
 	if !ok || len(contribution.AggregationBits)*8 != len(subcommitteePublicKeys) {
 		return "reject"
 	}
@@ -345,17 +357,9 @@ func gossipCurrentSlot(beaconState *state.CachingBeaconState, currentTimeMS uint
 	return (currentTimeMS - genesisTimeMS) / (beaconState.BeaconConfig().SecondsPerSlot * 1000), true
 }
 
-func gossipSyncSubcommitteePublicKeys(beaconState *state.CachingBeaconState, subcommitteeIndex uint64) ([]common.Bytes48, bool) {
-	config := beaconState.BeaconConfig()
+func gossipSyncSubcommitteePublicKeys(config *clparams.BeaconChainConfig, committee *solid.SyncCommittee, subcommitteeIndex uint64) ([]common.Bytes48, bool) {
 	if config.SyncCommitteeSubnetCount == 0 || config.SyncCommitteeSize%config.SyncCommitteeSubnetCount != 0 {
 		return nil, false
-	}
-	committee := beaconState.CurrentSyncCommittee()
-	if beaconState.Slot() == ^uint64(0) {
-		return nil, false
-	}
-	if config.SyncCommitteePeriod(beaconState.Slot()) != config.SyncCommitteePeriod(beaconState.Slot()+1) {
-		committee = beaconState.NextSyncCommittee()
 	}
 	if committee == nil {
 		return nil, false

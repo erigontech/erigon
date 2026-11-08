@@ -46,7 +46,8 @@ and Gloas helper extensions in `epbs.go`.
 | `util.go`: `IsAttestationSameSlot` | Gloas same-slot attestation helper for builder pending-payment weights |
 | `epbs.go`: `IsBuilderIndex`, `ConvertBuilderIndexToValidatorIndex`, `ConvertValidatorIndexToBuilderIndex` | Gloas builder-index encoding helpers |
 | `epbs.go`: `IsActiveBuilder`, `IsBuilderWithdrawalCredential` | Gloas builder registry and withdrawal-credential helpers |
-| `epbs.go`: `IsValidIndexedPayloadAttestation` | Gloas `is_valid_indexed_payload_attestation` |
+| `epbs.go`: `IndexedPayloadAttestationSignatureSet` | Gloas `is_valid_indexed_payload_attestation` signature verification inputs |
+| `epbs.go`: `ExecutionPayloadBidSignatureSet` | Gloas `verify_execution_payload_bid_signature` inputs |
 | `epbs.go`: `CanBuilderCoverBid`, `GetPendingBalanceToWithdrawForBuilder` | Gloas builder bid coverage and pending-withdrawal helpers |
 | `epbs.go`: `IsPendingValidator`, `IsBuilderPubkey` | Gloas deposit request routing helpers |
 | `util.go`: `GetMaxEffectiveBalanceByVersion` | Electra `get_max_effective_balance`; version-gated effective balance cap |

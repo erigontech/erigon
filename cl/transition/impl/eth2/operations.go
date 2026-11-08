@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/cl/monitor"
 
 	"github.com/erigontech/erigon/cl/transition/impl/eth2/statechange"
+	"github.com/erigontech/erigon/cl/transition/machine"
 
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
@@ -47,11 +48,8 @@ const (
 	FullExitRequestAmount = 0
 )
 
-// ErrInvalidExecutionPayloadBid marks a deterministic execution payload bid validation failure.
-var ErrInvalidExecutionPayloadBid = errors.New("invalid execution payload bid")
-
 func invalidExecutionPayloadBid(format string, args ...any) error {
-	return fmt.Errorf("%w: %s", ErrInvalidExecutionPayloadBid, fmt.Sprintf(format, args...))
+	return fmt.Errorf("%w: %s", machine.ErrInvalidExecutionPayloadBid, fmt.Sprintf(format, args...))
 }
 
 func (imp *impl) FullValidate() bool {
@@ -525,14 +523,6 @@ func (imp *impl) ProcessExecutionPayloadBid(s abstract.BeaconState, block cltype
 		if !state.CanBuilderCoverBid(s, builderIndex, amount) {
 			return invalidExecutionPayloadBid("processExecutionPayloadBid: builder cannot cover bid")
 		}
-		// Verify that the bid signature is valid
-		valid, err := verifyExecutionPayloadBidSignature(s, signedBid)
-		if err != nil {
-			return fmt.Errorf("processExecutionPayloadBid: failed to verify bid signature: %w", err)
-		}
-		if !valid {
-			return invalidExecutionPayloadBid("processExecutionPayloadBid: invalid bid signature")
-		}
 	}
 
 	// Verify commitments are under limit
@@ -780,29 +770,6 @@ func (imp *impl) ProcessParentExecutionPayload(s abstract.BeaconState, block clt
 	return imp.ApplyParentExecutionPayload(s, parentExecutionRequests)
 }
 
-// verifyExecutionPayloadBidSignature verifies the BLS signature of a signed execution payload bid.
-// [New in Gloas:EIP7732]
-func verifyExecutionPayloadBidSignature(s abstract.BeaconState, signedBid *cltypes.SignedExecutionPayloadBid) (bool, error) {
-	builders := s.GetBuilders()
-	if builders == nil || signedBid.Message.BuilderIndex >= uint64(builders.Len()) {
-		return false, fmt.Errorf("builder index %d out of range", signedBid.Message.BuilderIndex)
-	}
-	builder := builders.Get(int(signedBid.Message.BuilderIndex))
-
-	domain, err := s.GetDomain(s.BeaconConfig().DomainBeaconBuilder, state.Epoch(s))
-	if err != nil {
-		return false, err
-	}
-
-	signingRoot, err := fork.ComputeSigningRoot(signedBid.Message, domain)
-	if err != nil {
-		return false, err
-	}
-
-	pk := builder.Pubkey
-	return bls.Verify(signedBid.Signature[:], signingRoot[:], pk[:])
-}
-
 // ProcessExecutionPayloadEnvelope processes the execution payload envelope for the Gloas fork.
 // [New in Gloas:EIP7732]
 func (imp *impl) ProcessExecutionPayloadEnvelope(s abstract.BeaconState, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error {
@@ -813,6 +780,9 @@ func (imp *impl) ProcessExecutionPayloadEnvelope(s abstract.BeaconState, signedE
 	payload := envelope.Payload
 	if payload == nil {
 		return errors.New("ProcessExecutionPayloadEnvelope: envelope has nil payload")
+	}
+	if payload.Transactions == nil {
+		return errors.New("ProcessExecutionPayloadEnvelope: payload has nil transactions")
 	}
 
 	// Verify signature
@@ -873,17 +843,13 @@ func (imp *impl) ProcessExecutionPayloadEnvelope(s abstract.BeaconState, signedE
 	if envelope.BuilderIndex != committedBid.BuilderIndex {
 		return fmt.Errorf("ProcessExecutionPayloadEnvelope: builder_index %d != committed bid builder_index %d", envelope.BuilderIndex, committedBid.BuilderIndex)
 	}
-	payloadHeader, err := payload.PayloadHeader()
-	if err != nil {
-		return fmt.Errorf("ProcessExecutionPayloadEnvelope: failed to get payload header: %w", err)
-	}
-	if committedBid.PrevRandao != payloadHeader.PrevRandao {
+	if committedBid.PrevRandao != payload.PrevRandao {
 		return errors.New("ProcessExecutionPayloadEnvelope: prev_randao mismatch with committed bid")
 	}
-	if committedBid.GasLimit != payloadHeader.GasLimit {
-		return fmt.Errorf("ProcessExecutionPayloadEnvelope: gas_limit %d != committed bid gas_limit %d", payloadHeader.GasLimit, committedBid.GasLimit)
+	if committedBid.GasLimit != payload.GasLimit {
+		return fmt.Errorf("ProcessExecutionPayloadEnvelope: gas_limit %d != committed bid gas_limit %d", payload.GasLimit, committedBid.GasLimit)
 	}
-	if committedBid.BlockHash != payloadHeader.BlockHash {
+	if committedBid.BlockHash != payload.BlockHash {
 		return errors.New("ProcessExecutionPayloadEnvelope: block_hash mismatch with committed bid")
 	}
 
@@ -901,11 +867,11 @@ func (imp *impl) ProcessExecutionPayloadEnvelope(s abstract.BeaconState, signedE
 	}
 
 	// Verify consistency of the parent hash with respect to the previous execution payload
-	if payloadHeader.ParentHash != s.GetLatestBlockHash() {
+	if payload.ParentHash != s.GetLatestBlockHash() {
 		return errors.New("ProcessExecutionPayloadEnvelope: parent_hash mismatch with latest block hash")
 	}
 	// Verify timestamp
-	if payloadHeader.Time != state.ComputeTimestampAtSlot(s, s.Slot()) {
+	if payload.Time != state.ComputeTimestampAtSlot(s, s.Slot()) {
 		return errors.New("ProcessExecutionPayloadEnvelope: invalid timestamp")
 	}
 
@@ -2032,18 +1998,5 @@ func (imp *impl) ProcessPayloadAttestation(s abstract.BeaconState, payloadAttest
 	if data.Slot+1 != s.Slot() {
 		return fmt.Errorf("ProcessPayloadAttestation: attestation slot %d + 1 != state slot %d", data.Slot, s.Slot())
 	}
-	// Verify signature
-	indexedPayloadAttestation, err := s.GetIndexedPayloadAttestation(payloadAttestation)
-	if err != nil {
-		return fmt.Errorf("ProcessPayloadAttestation: failed to get indexed payload attestation: %w", err)
-	}
-	valid, err := state.IsValidIndexedPayloadAttestation(s, indexedPayloadAttestation)
-	if err != nil {
-		return fmt.Errorf("ProcessPayloadAttestation: %w", err)
-	}
-	if !valid {
-		return errors.New("ProcessPayloadAttestation: invalid indexed payload attestation")
-	}
-
 	return nil
 }

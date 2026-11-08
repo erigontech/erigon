@@ -238,6 +238,10 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 			drops.unparsableItem(p.Name)
 			continue
 		}
+		if dot < lastSep {
+			drops.unparsableItem(p.Name)
+			continue
+		}
 
 		//typeName, _ := strings.CutSuffix(parts[2], filepath.Ext(parts[2]))
 		typeName := name[lastSep+1 : dot]
@@ -392,13 +396,12 @@ func ExtractBlockFromName(name string, v ver.Version) (block uint64, err error) 
 	return block, nil
 }
 
-func fromToml(in []byte) PreverifiedItems {
+func fromToml(in []byte) (PreverifiedItems, error) {
 	var outMap map[string]string
 	if err := toml.Unmarshal(in, &outMap); err != nil {
-		panic(err)
+		return nil, err
 	}
-
-	return preverified.ItemsFromMap(outMap)
+	return preverified.ItemsFromMap(outMap), nil
 }
 
 func newCfg(networkName string, preverified Preverified) *Cfg {
@@ -447,6 +450,9 @@ func (c Cfg) MergeLimit(t snaptype.Enum, fromBlock uint64) uint64 {
 	// Caplin entries are skipped below and no core entry can match a caplin enum, so the
 	// scan is a no-op for these types — and IsFrozen calls this per segment opened.
 	if snaptype.IsCaplinType(t) {
+		if t == snaptype.CaplinEnums.BeaconBlocks {
+			return snaptype.Erigon2MergeLimit
+		}
 		return snaptype.CaplinMergeLimit
 	}
 
@@ -635,6 +641,9 @@ func LoadRemotePreverified(ctx context.Context, chainName string, forceChainToml
 
 		var err error
 		hashes, err = FetchChainToml(ctx, R2, snapshotGitBranch, chainName)
+		if err == nil {
+			_, err = fromToml(hashes) // a CDN error page can come back with HTTP 200
+		}
 		if err != nil {
 			log.Root().Warn("Failed to load snapshot hashes from R2; falling back to GitHub", "chain", chainName, "err", err)
 
@@ -645,14 +654,24 @@ func LoadRemotePreverified(ctx context.Context, chainName string, forceChainToml
 		}
 	}
 
-	registry.Set(chainName, Preverified{Items: fromToml(hashes)}, hashes)
+	items, err := fromToml(hashes)
+	if err != nil {
+		return fmt.Errorf("parse snapshot hashes of %s: %w", chainName, err)
+	}
+	registry.Set(chainName, Preverified{Items: items}, hashes)
 	return nil
 }
 
-func SetToml(networkName string, toml []byte, local bool) {
-	if _, ok := knownChains[networkName]; ok {
-		registry.Set(networkName, Preverified{Local: local, Items: fromToml(toml)}, toml)
+func SetToml(networkName string, toml []byte, local bool) error {
+	if _, ok := knownChains[networkName]; !ok {
+		return nil
 	}
+	items, err := fromToml(toml)
+	if err != nil {
+		return fmt.Errorf("parse snapshot hashes of %s: %w", networkName, err)
+	}
+	registry.Set(networkName, Preverified{Local: local, Items: items}, toml)
+	return nil
 }
 
 func GetToml(networkName string) []byte {

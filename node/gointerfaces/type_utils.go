@@ -33,34 +33,6 @@ func ConvertH2048ToBloom(h2048 *typesproto.H2048) [256]byte {
 	return bloom
 }
 
-// h2048Arena holds an H2048 and all nested messages in one allocation.
-type h2048Arena struct {
-	h  typesproto.H2048
-	hi typesproto.H1024
-	lo typesproto.H1024
-	s0 h512Arena
-	s1 h512Arena
-	s2 h512Arena
-	s3 h512Arena
-}
-
-func ConvertBytesToH2048(data []byte) *typesproto.H2048 {
-	if len(data) < 256 {
-		var d [256]byte
-		copy(d[:], data)
-		data = d[:]
-	}
-	a := &h2048Arena{}
-	fillH512Arena(&a.s0, data[0:])
-	fillH512Arena(&a.s1, data[64:])
-	fillH512Arena(&a.s2, data[128:])
-	fillH512Arena(&a.s3, data[192:])
-	a.hi = typesproto.H1024{Hi: &a.s0.h, Lo: &a.s1.h}
-	a.lo = typesproto.H1024{Hi: &a.s2.h, Lo: &a.s3.h}
-	a.h = typesproto.H2048{Hi: &a.hi, Lo: &a.lo}
-	return &a.h
-}
-
 func ConvertH256ToHash(h256 *typesproto.H256) [32]byte {
 	var hash [32]byte
 	binary.BigEndian.PutUint64(hash[0:], h256.Hi.Hi)

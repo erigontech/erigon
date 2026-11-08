@@ -165,52 +165,80 @@ func StampedLog(log *Log, timestamp uint64) *Log {
 	return &stamped
 }
 
-// BuildTopicMap converts a slice-of-alternatives representation of topics into a
-// pre-built lookup map suitable for repeated calls to FilterWithTopicMap.
-func BuildTopicMap(topics [][]common.Hash) []map[common.Hash]struct{} {
-	topicMap := make([]map[common.Hash]struct{}, len(topics))
-	for idx, v := range topics {
-		if len(v) == 0 {
-			continue // nil entry = wildcard; FilterWithTopicMap treats len(nil)==0 as match-all
-		}
-		topicMap[idx] = make(map[common.Hash]struct{}, len(v))
-		for _, h := range v {
-			topicMap[idx][h] = struct{}{}
-		}
+// matchSet holds the alternatives of one filter position; none matches any value. One value,
+// the common case, is compared directly instead of hashing the key for a map lookup.
+type matchSet[K comparable] struct {
+	n   int
+	one K
+	m   map[K]struct{}
+}
+
+func newMatchSet[K comparable](values []K) matchSet[K] {
+	if len(values) == 0 {
+		return matchSet[K]{}
 	}
-	return topicMap
+	m := make(map[K]struct{}, len(values))
+	for _, v := range values {
+		m[v] = struct{}{}
+	}
+	s := matchSet[K]{n: len(m)}
+	if s.n == 1 {
+		s.one = values[0]
+	} else {
+		s.m = m
+	}
+	return s
+}
+
+func (s *matchSet[K]) matches(v K) bool {
+	switch s.n {
+	case 0:
+		return true
+	case 1:
+		return v == s.one
+	}
+	_, ok := s.m[v]
+	return ok
+}
+
+// LogFilter is the address and topic criteria of a log filter, built once and reused for every log.
+type LogFilter struct {
+	addrs  matchSet[common.Address]
+	topics []matchSet[common.Hash]
+}
+
+func NewLogFilter(addrs []common.Address, topics [][]common.Hash) *LogFilter {
+	f := &LogFilter{addrs: newMatchSet(addrs), topics: make([]matchSet[common.Hash], len(topics))}
+	for i, alternatives := range topics {
+		f.topics[i] = newMatchSet(alternatives)
+	}
+	return f
 }
 
 // matchFilter reports whether the log is worth considering (right address, enough
 // topics) and, separately, whether its topics match. A maxLogs budget is spent on
 // every considered log, so the two cannot be collapsed into one bool.
-func (l *Log) matchFilter(addrMap map[common.Address]struct{}, topicMap []map[common.Hash]struct{}) (considered, matched bool) {
-	if len(addrMap) != 0 {
-		if _, ok := addrMap[l.Address]; !ok {
-			return false, false
-		}
-	}
-	if len(topicMap) > len(l.Topics) {
+func (l *Log) matchFilter(f *LogFilter) (considered, matched bool) {
+	if !f.addrs.matches(l.Address) {
 		return false, false
 	}
-	for idx, topicSet := range topicMap {
-		if len(topicSet) == 0 {
-			continue
-		}
-		if _, ok := topicSet[l.Topics[idx]]; !ok {
+	if len(f.topics) > len(l.Topics) {
+		return false, false
+	}
+	for idx := range f.topics {
+		if !f.topics[idx].matches(l.Topics[idx]) {
 			return true, false
 		}
 	}
 	return true, true
 }
 
-// FilterWithTopicMap filters logs using a pre-built topic map. Use this when filtering
-// in a loop with the same topics to avoid rebuilding the map on every call.
-func (logs Logs) FilterWithTopicMap(addrMap map[common.Address]struct{}, topicMap []map[common.Hash]struct{}, maxLogs uint64) Logs {
+// FilterWith filters logs with a filter built once, for callers that filter in a loop.
+func (logs Logs) FilterWith(f *LogFilter, maxLogs uint64) Logs {
 	o := make(Logs, 0, len(logs))
 	var logCount uint64
 	for _, v := range logs {
-		considered, matched := v.matchFilter(addrMap, topicMap)
+		considered, matched := v.matchFilter(f)
 		if !considered {
 			continue
 		}
@@ -225,23 +253,38 @@ func (logs Logs) FilterWithTopicMap(addrMap map[common.Address]struct{}, topicMa
 	return o
 }
 
-// AppendFilteredLogs appends the logs matching addrMap and topicMap to dst,
+// AppendFilteredLogs appends the logs matching f to dst,
 // adding a timestamp to each entry. It stops once dst holds limit entries, so a caller
 // enforcing a result cap never converts more logs than it can use; limit 0 is unlimited.
-func (logs Logs) AppendFilteredLogs(dst Logs, addrMap map[common.Address]struct{}, topicMap []map[common.Hash]struct{}, timestamp uint64, limit int) Logs {
+func (logs Logs) AppendFilteredLogs(dst Logs, f *LogFilter, timestamp uint64, limit int) Logs {
+	start := len(dst)
 	for _, l := range logs {
 		if limit != 0 && len(dst) >= limit {
 			break
 		}
-		if _, matched := l.matchFilter(addrMap, topicMap); matched {
-			dst = append(dst, StampedLog(l, timestamp))
+		if _, matched := l.matchFilter(f); matched {
+			dst = append(dst, l)
 		}
+	}
+	matched := dst[start:]
+	if len(matched) == 0 {
+		return dst
+	}
+	stamped := make([]struct {
+		log       Log
+		timestamp hexutil.Uint64
+	}, len(matched))
+	for i, l := range matched {
+		s := &stamped[i]
+		s.log, s.timestamp = *l, hexutil.Uint64(timestamp)
+		s.log.BlockTimestamp = &s.timestamp
+		matched[i] = &s.log
 	}
 	return dst
 }
 
-func (logs Logs) Filter(addrMap map[common.Address]struct{}, topics [][]common.Hash, maxLogs uint64) Logs {
-	return logs.FilterWithTopicMap(addrMap, BuildTopicMap(topics), maxLogs)
+func (logs Logs) Filter(addrs []common.Address, topics [][]common.Hash, maxLogs uint64) Logs {
+	return logs.FilterWith(NewLogFilter(addrs, topics), maxLogs)
 }
 
 func (logs Logs) ContainingTopics(addrMap map[common.Address]struct{}, topicsMap map[common.Hash]struct{}, maxLogs uint64) Logs {

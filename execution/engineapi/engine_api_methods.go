@@ -18,8 +18,6 @@ package engineapi
 
 import (
 	"context"
-	"encoding/binary"
-	"errors"
 	"fmt"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -29,15 +27,6 @@ import (
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/rpc"
 )
-
-var errInvalidPayloadID = errors.New("invalid payload id: expected 8 bytes")
-
-func decodePayloadID(payloadID hexutil.Bytes) (uint64, error) {
-	if len(payloadID) != 8 {
-		return 0, errInvalidPayloadID
-	}
-	return binary.BigEndian.Uint64(payloadID), nil
-}
 
 var ourCapabilities = []string{
 	"engine_forkchoiceUpdatedV1",
@@ -65,27 +54,6 @@ var ourCapabilities = []string{
 	"engine_getBlobsV3",
 	"engine_getBlobsV4",
 	"engine_getInclusionListV1",
-	"POST /engine/v1/payloads",
-	"POST /engine/v2/payloads",
-	"POST /engine/v3/payloads",
-	"POST /engine/v4/payloads",
-	"POST /engine/v5/payloads",
-	"GET /engine/v1/payloads/{payload_id}",
-	"GET /engine/v2/payloads/{payload_id}",
-	"GET /engine/v3/payloads/{payload_id}",
-	"GET /engine/v4/payloads/{payload_id}",
-	"GET /engine/v5/payloads/{payload_id}",
-	"GET /engine/v6/payloads/{payload_id}",
-	"POST /engine/v1/forkchoice",
-	"POST /engine/v2/forkchoice",
-	"POST /engine/v3/forkchoice",
-	"POST /engine/v4/forkchoice",
-	"POST /engine/v1/blobs",
-	"POST /engine/v2/blobs",
-	"POST /engine/v3/blobs",
-	"GET /engine/v1/inclusion-list",
-	"POST /engine/v1/client/version",
-	"POST /engine/v1/capabilities",
 }
 
 // Returns the most recent version of the payload(for the payloadID) at the time of receiving the call
@@ -97,7 +65,7 @@ func (e *EngineServer) GetPayloadV1(ctx context.Context, payloadId hexutil.Bytes
 	}
 	e.engineLogSpamer.RecordRequest()
 
-	decodedPayloadId, err := decodePayloadID(payloadId)
+	decodedPayloadId, err := engine_types.DecodePayloadID(payloadId)
 	if err != nil {
 		return nil, err
 	}
@@ -114,7 +82,7 @@ func (e *EngineServer) GetPayloadV1(ctx context.Context, payloadId hexutil.Bytes
 // Same as [GetPayloadV1] with addition of blockValue
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/shanghai.md#engine_getpayloadv2
 func (e *EngineServer) GetPayloadV2(ctx context.Context, payloadID hexutil.Bytes) (*engine_types.GetPayloadResponse, error) {
-	decodedPayloadId, err := decodePayloadID(payloadID)
+	decodedPayloadId, err := engine_types.DecodePayloadID(payloadID)
 	if err != nil {
 		return nil, err
 	}
@@ -125,7 +93,7 @@ func (e *EngineServer) GetPayloadV2(ctx context.Context, payloadID hexutil.Bytes
 // Same as [GetPayloadV2], with addition of blobsBundle containing valid blobs, commitments, proofs
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#engine_getpayloadv3
 func (e *EngineServer) GetPayloadV3(ctx context.Context, payloadID hexutil.Bytes) (*engine_types.GetPayloadResponse, error) {
-	decodedPayloadId, err := decodePayloadID(payloadID)
+	decodedPayloadId, err := engine_types.DecodePayloadID(payloadID)
 	if err != nil {
 		return nil, err
 	}
@@ -136,7 +104,7 @@ func (e *EngineServer) GetPayloadV3(ctx context.Context, payloadID hexutil.Bytes
 // Same as [GetPayloadV3], with executionRequests added to the response.
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/prague.md#engine_getpayloadv4
 func (e *EngineServer) GetPayloadV4(ctx context.Context, payloadID hexutil.Bytes) (*engine_types.GetPayloadResponse, error) {
-	decodedPayloadId, err := decodePayloadID(payloadID)
+	decodedPayloadId, err := engine_types.DecodePayloadID(payloadID)
 	if err != nil {
 		return nil, err
 	}
@@ -147,7 +115,7 @@ func (e *EngineServer) GetPayloadV4(ctx context.Context, payloadID hexutil.Bytes
 // Same as [GetPayloadV4], but returning BlobsBundleV2 instead of BlobsBundleV1
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/osaka.md#engine_getpayloadv5
 func (e *EngineServer) GetPayloadV5(ctx context.Context, payloadID hexutil.Bytes) (*engine_types.GetPayloadResponse, error) {
-	decodedPayloadId, err := decodePayloadID(payloadID)
+	decodedPayloadId, err := engine_types.DecodePayloadID(payloadID)
 	if err != nil {
 		return nil, err
 	}
@@ -158,7 +126,7 @@ func (e *EngineServer) GetPayloadV5(ctx context.Context, payloadID hexutil.Bytes
 // Same as [GetPayloadV5], but returning ExecutionPayloadV4.
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_getpayloadv6
 func (e *EngineServer) GetPayloadV6(ctx context.Context, payloadID hexutil.Bytes) (*engine_types.GetPayloadResponse, error) {
-	decodedPayloadId, err := decodePayloadID(payloadID)
+	decodedPayloadId, err := engine_types.DecodePayloadID(payloadID)
 	if err != nil {
 		return nil, err
 	}
@@ -195,13 +163,13 @@ func (e *EngineServer) ForkchoiceUpdatedV4(ctx context.Context, forkChoiceState 
 // NewPayloadV1 processes new payloads (blocks) from the beacon chain without withdrawals.
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/paris.md#engine_newpayloadv1
 func (e *EngineServer) NewPayloadV1(ctx context.Context, payload *engine_types.ExecutionPayload) (*engine_types.PayloadStatus, error) {
-	return e.newPayload(ctx, payload, nil, nil, nil, clparams.BellatrixVersion)
+	return e.newPayload(ctx, payload, nil, nil, nil, clparams.BellatrixVersion, false)
 }
 
 // NewPayloadV2 processes new payloads (blocks) from the beacon chain with withdrawals.
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/shanghai.md#engine_newpayloadv2
 func (e *EngineServer) NewPayloadV2(ctx context.Context, payload *engine_types.ExecutionPayload) (*engine_types.PayloadStatus, error) {
-	return e.newPayload(ctx, payload, nil, nil, nil, clparams.CapellaVersion)
+	return e.newPayload(ctx, payload, nil, nil, nil, clparams.CapellaVersion, false)
 }
 
 // NewPayloadV3 processes new payloads (blocks) from the beacon chain with withdrawals & blob gas.
@@ -209,7 +177,7 @@ func (e *EngineServer) NewPayloadV2(ctx context.Context, payload *engine_types.E
 func (e *EngineServer) NewPayloadV3(ctx context.Context, payload *engine_types.ExecutionPayload,
 	expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash,
 ) (*engine_types.PayloadStatus, error) {
-	return e.newPayload(ctx, payload, expectedBlobHashes, parentBeaconBlockRoot, nil, clparams.DenebVersion)
+	return e.newPayload(ctx, payload, expectedBlobHashes, parentBeaconBlockRoot, nil, clparams.DenebVersion, false)
 }
 
 // NewPayloadV4 processes new payloads (blocks) from the beacon chain with withdrawals, blob gas and requests.
@@ -217,7 +185,7 @@ func (e *EngineServer) NewPayloadV3(ctx context.Context, payload *engine_types.E
 func (e *EngineServer) NewPayloadV4(ctx context.Context, payload *engine_types.ExecutionPayload,
 	expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash, executionRequests []hexutil.Bytes,
 ) (*engine_types.PayloadStatus, error) {
-	return e.newPayload(ctx, payload, expectedBlobHashes, parentBeaconBlockRoot, executionRequests, clparams.ElectraVersion)
+	return e.newPayload(ctx, payload, expectedBlobHashes, parentBeaconBlockRoot, executionRequests, clparams.ElectraVersion, false)
 }
 
 // NewPayloadV5 processes new payloads (blocks) from the beacon chain with withdrawals, blob gas, requests and block access list.
@@ -225,7 +193,7 @@ func (e *EngineServer) NewPayloadV4(ctx context.Context, payload *engine_types.E
 func (e *EngineServer) NewPayloadV5(ctx context.Context, payload *engine_types.ExecutionPayload,
 	expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash, executionRequests []hexutil.Bytes,
 ) (*engine_types.PayloadStatus, error) {
-	return e.newPayload(ctx, payload, expectedBlobHashes, parentBeaconBlockRoot, executionRequests, clparams.GloasVersion)
+	return e.newPayload(ctx, payload, expectedBlobHashes, parentBeaconBlockRoot, executionRequests, clparams.GloasVersion, false)
 }
 
 // Returns an array of execution payload bodies referenced by their block hashes
@@ -317,9 +285,9 @@ func (e *EngineServer) GetBlobsV3(ctx context.Context, blobHashes []common.Hash)
 	return ret, nil
 }
 
-func (e *EngineServer) GetBlobsV4(ctx context.Context, blobHashes []common.Hash, cellIndices hexutil.Bytes) (engine_types.BlobsBundleV3, error) {
+func (e *EngineServer) GetBlobsV4(ctx context.Context, blobHashes []common.Hash, cellMask hexutil.Bytes) (engine_types.BlobsBundleV3, error) {
 	e.logger.Debug("[GetBlobsV4] Received Request", "hashes", len(blobHashes))
-	resp, err := e.getBlobs(ctx, blobHashes, clparams.GloasVersion, cellIndices)
+	resp, err := e.getBlobs(ctx, blobHashes, clparams.GloasVersion, cellMask)
 	if err != nil {
 		return nil, err
 	}

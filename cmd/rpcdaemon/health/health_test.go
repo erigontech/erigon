@@ -570,3 +570,25 @@ func TestProcessHealthcheckIfNeeded_RequestBody(t *testing.T) {
 		}
 	}
 }
+
+// TestProcessHealthcheckIfNeeded_BodyTooLarge pins that a body over maxBodySize is rejected
+// before any check runs, even when it holds a valid query.
+func TestProcessHealthcheckIfNeeded_BodyTooLarge(t *testing.T) {
+	body := `{"known_block": 1}` + strings.Repeat(" ", maxBodySize)
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/health", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	apis := []rpc.API{{Service: &ethApiStub{blockResult: &ethapi.RPCBlock{}}}}
+
+	ProcessHealthcheckIfNeeded(w, r, apis)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("expected status code %v, got %v", http.StatusInternalServerError, w.Code)
+	}
+	var got map[string]string
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got["healthcheck_query"], "too large") || got["check_block"] != "DISABLED" {
+		t.Fatalf("unexpected response %v", got)
+	}
+}

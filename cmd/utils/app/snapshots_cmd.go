@@ -55,6 +55,7 @@ import (
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/datastruct/btindex"
+	"github.com/erigontech/erigon/db/datastruct/posidx"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/downloader/webseeds"
 	"github.com/erigontech/erigon/db/etl"
@@ -144,7 +145,7 @@ var snapshotCommand = cli.Command{
 			Name: "ls",
 			Action: func(ctx context.Context, c *cli.Command) error {
 				dirs := datadir.New(c.String(utils.DataDirFlag.Name))
-				return doLS(ctx, c, dirs)
+				return doLS(ctx, dirs)
 			},
 			Usage: "List all files with their words count",
 			Flags: joinFlags([]cli.Flag{
@@ -159,7 +160,7 @@ var snapshotCommand = cli.Command{
 				if _, err := os.Stat(dirs.DataDir); os.IsNotExist(err) {
 					return fmt.Errorf("datadir does not exist: %s", dirs.DataDir)
 				}
-				return doDU(ctx, c, dirs)
+				return doDU(c, dirs)
 			},
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
@@ -229,7 +230,7 @@ var snapshotCommand = cli.Command{
 				}
 				defer unlockDatadir(log.Root(), l)
 
-				return doRemoveOverlap(ctx, c, dirs)
+				return doRemoveOverlap(ctx, dirs)
 			},
 			Usage: "remove overlaps from e3 files",
 			Flags: joinFlags([]cli.Flag{
@@ -320,6 +321,7 @@ var snapshotCommand = cli.Command{
 			Flags: []cli.Flag{
 				&utils.DataDirFlag,
 				&dryRunFlag,
+				&keepLocalSnapshotsFlag,
 				&removeLocalFlag,
 				&allowMixedStateFlag,
 				&PreverifiedFlag,
@@ -438,7 +440,7 @@ var snapshotCommand = cli.Command{
 				&cli.Uint64Flag{Name: "fromStep", Value: 0, Usage: "skip files before given step"},
 				&cli.StringFlag{Name: "file-integrity-cache", Usage: "path to integrity check cache file (speeds up repeated runs)"},
 				&cli.Int64Flag{Name: "seed", Usage: "random seed for sampling (auto-generated if not set)"},
-				&cli.Float64Flag{Name: "sample", Usage: "fraction of items to check via pseudo-random sampling (0.0-1.0)", Value: 0.01},
+				&cli.Float64Flag{Name: "sample", Usage: "fraction of items to check via pseudo-random sampling (0.0-1.0); slow checks use 1/10000 of it", Value: 1.0},
 				&cli.DurationFlag{Name: "integrity.budget", Value: 0, Usage: "total wall-clock budget for the run; each check gets (remaining / remaining_checks). 0 (default) means no limit"},
 			}),
 		},
@@ -565,7 +567,7 @@ var snapshotCommand = cli.Command{
 			Name: "publishable",
 			Action: func(ctx context.Context, cliCtx *cli.Command) error {
 				dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
-				if err := doPublishable(dirs, nil); err != nil {
+				if err := doPublishable(ctx, dirs, nil); err != nil {
 					log.Error("[publishable]", "err", err)
 					return err
 				}
@@ -1277,7 +1279,7 @@ func DeleteBlockSnapshots(args DeleteBlockSnapshotsArgs) error {
 		f := &toRemove[i]
 		// Catch both ".torrent" and partial ".torrent<suffix>" companions
 		// (see snaptype.IsTorrentPartial).
-		torrentArtifacts, err := filepath.Glob(f.Path + ".torrent*")
+		torrentArtifacts, err := dir2.Glob(f.Path + ".torrent*")
 		if err != nil {
 			return err
 		}
@@ -1663,12 +1665,14 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) (retErr error) {
 			return integrity.SnapBlocksRead(ctx, db, blockReader, 0, 0, failFast)
 		case integrity.InvertedIndex:
 			return integrity.E3EfFiles(ctx, db, failFast, fromStep)
+		case integrity.HistoryVi:
+			return integrity.HistoryValueAccessorFiles(ctx, db, failFast, fromStep, logger)
 		case integrity.HistoryNoSystemTxs:
 			return integrity.HistoryCheckNoSystemTxs(ctx, db, blockReader)
 		case integrity.StateProgress:
 			return integrity.CheckStateProgress(ctx, db, blockReader)
 		case integrity.Publishable:
-			return doPublishable(dirs, chainDB)
+			return doPublishable(ctx, dirs, chainDB)
 		case integrity.CaplinStateRoots:
 			return integrity.CheckCaplinStateRoots(ctx, dirs, failFast, logger)
 		case integrity.CaplinBlobSidecars:
@@ -1693,7 +1697,7 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) (retErr error) {
 				return nil
 			}
 			scCopy := sc
-			scCopy.SampleRatio /= 100 // it's very slow check
+			scCopy.SampleRatio /= 10_000 // it's very slow check
 			return integrity.CheckCommitmentHistVal(ctx, scCopy, db, blockReader, failFast, logger)
 		case integrity.StateRootVerifyByHistory:
 			if !commitmentHistoryEnabled {
@@ -1705,7 +1709,7 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) (retErr error) {
 				return err
 			}
 			scCopy := sc
-			scCopy.SampleRatio /= 100 // it's very slow check
+			scCopy.SampleRatio /= 10_000 // it's very slow check
 			return integrity.CheckCommitmentHistAtBlkRange(ctx, scCopy, db, blockReader, 1, to+1, logger)
 		case integrity.StateVerify:
 			return integrity.CheckStateVerify(ctx, db, failFast, fromStep, logger)
@@ -2064,8 +2068,8 @@ func doVerifyHistory(ctx context.Context, cliCtx *cli.Command, logger log.Logger
 	return integrityErr
 }
 
-func checkIfCaplinSnapshotsPublishable(dirs datadir.Dirs, emptyOk bool) error {
-	stateSnapTypes := snapshotsync.MakeCaplinStateSnapshotsTypes(nil)
+func checkIfCaplinSnapshotsPublishable(dirs datadir.Dirs, emptyOk bool, beaconConfig *clparams.BeaconChainConfig) error {
+	stateSnapTypes := snapshotsync.MakeCaplinStateSnapshotsTypes(nil, beaconConfig)
 	caplinSchema := caplinsnapschema.NewCaplinSchema(dirs, 1000, stateSnapTypes)
 
 	//to := int64(-1)
@@ -2087,6 +2091,9 @@ func checkIfCaplinSnapshotsPublishable(dirs datadir.Dirs, emptyOk bool) error {
 
 	to := int64(-1)
 	for table := range stateSnapTypes.KeyValueGetters {
+		if table == kv.PtcWindowEpochTable {
+			continue
+		}
 		uto, empty, err := CheckFilesForSchema(caplinSchema.GetState(table), CheckFilesParams{
 			checkLastFileTo: to,
 			emptyOk:         emptyOk,
@@ -2094,9 +2101,22 @@ func checkIfCaplinSnapshotsPublishable(dirs datadir.Dirs, emptyOk bool) error {
 		if err != nil {
 			return err
 		}
-		if !empty {
-			to = int64(uto)
+		if empty {
+			continue
 		}
+		to = int64(uto)
+	}
+
+	ptcWindowEpochRequired := to >= 0 && uint64(to) > stateSnapTypes.GloasForkSlot
+	ptcWindowEpochTo := int64(-1)
+	if ptcWindowEpochRequired {
+		ptcWindowEpochTo = to
+	}
+	if _, _, err := CheckFilesForSchema(caplinSchema.GetState(kv.PtcWindowEpochTable), CheckFilesParams{
+		checkLastFileTo: ptcWindowEpochTo,
+		emptyOk:         !ptcWindowEpochRequired,
+	}); err != nil {
+		return err
 	}
 
 	return nil
@@ -2229,12 +2249,6 @@ func checkIfBlockSnapshotsPublishable(snapDir string) error {
 }
 
 func checkIfStateSnapshotsPublishable(dirs datadir.Dirs, chainDB kv.RoDB) error {
-	// Read feature flags from DB
-	if chainDB == nil {
-		chainDB = dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
-		defer chainDB.Close()
-	}
-
 	var persistReceiptCache, commitmentHistory bool
 	if err := chainDB.View(context.Background(), func(tx kv.Tx) error {
 		var err error
@@ -2588,7 +2602,12 @@ func doBlockSnapshotsRangeCheck(snapDir string, suffix string, snapType string) 
 	return nil
 }
 
-func doPublishable(dat datadir.Dirs, chainDB kv.RoDB) error {
+func doPublishable(ctx context.Context, dat datadir.Dirs, chainDB kv.RoDB) error {
+	if chainDB == nil {
+		chainDB = dbCfg(dbcfg.ChainDB, dat.Chaindata).MustOpen()
+		defer chainDB.Close()
+	}
+
 	// Check block snapshots sanity
 	if err := checkIfBlockSnapshotsPublishable(dat.Snap); err != nil {
 		return err
@@ -2597,8 +2616,43 @@ func doPublishable(dat datadir.Dirs, chainDB kv.RoDB) error {
 	if err := checkIfStateSnapshotsPublishable(dat, chainDB); err != nil {
 		return err
 	}
-	if err := checkIfCaplinSnapshotsPublishable(dat, true); err != nil {
+	var chainName string
+	if err := chainDB.View(ctx, func(tx kv.Tx) error {
+		genesisHash, err := rawdb.ReadCanonicalHash(tx, 0)
+		if err != nil {
+			return err
+		}
+		chainConfig, err := rawdb.ReadChainConfig(tx, genesisHash)
+		if err != nil {
+			return err
+		}
+		if chainConfig != nil {
+			chainName = chainConfig.ChainName
+		}
+		return nil
+	}); err != nil {
+		return fmt.Errorf("failed to read chain config: %w", err)
+	}
+
+	var beaconConfig *clparams.BeaconChainConfig
+	if chainName == "" {
+		log.Warn("[publishable] PtcWindowEpoch content check skipped", "reason", "chain config is missing")
+	} else {
+		_, resolvedBeaconConfig, _, err := clparams.GetConfigsByNetworkName(chainName)
+		if err != nil {
+			log.Warn("[publishable] PtcWindowEpoch content check skipped", "chain", chainName, "err", err)
+		} else {
+			beaconConfig = resolvedBeaconConfig
+		}
+	}
+
+	if err := checkIfCaplinSnapshotsPublishable(dat, true, beaconConfig); err != nil {
 		return err
+	}
+	if beaconConfig != nil {
+		if err := integrity.CheckPtcWindowEpoch(ctx, dat, beaconConfig); err != nil {
+			return err
+		}
 	}
 	// check if salt-state.txt and salt-blocks.txt exist
 	exists, err := dir2.FileExist(filepath.Join(dat.Snap, "salt-state.txt"))
@@ -2833,6 +2887,13 @@ func doMeta(ctx context.Context, cliCtx *cli.Command) error {
 		}
 
 		log.Info("meta", "distances(*100K)", fmt.Sprintf("%v", distances))
+	} else if v, _ := version.ParseVersion(filepath.Base(fname)); strings.HasSuffix(fname, ".vi") && v.GreaterOrEqual(version.V2_0) {
+		idx, err := posidx.Open(fname)
+		if err != nil {
+			return err
+		}
+		defer idx.Close()
+		log.Info("meta", "format", "positional", "empty", idx.Empty())
 	} else if strings.HasSuffix(fname, ".kvi") || strings.HasSuffix(fname, ".idx") || strings.HasSuffix(fname, ".efi") || strings.HasSuffix(fname, ".vi") {
 		idx, err := recsplit.OpenIndex(fname)
 		if err != nil {
@@ -2990,7 +3051,7 @@ func doIndicesCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dir
 	return nil
 }
 
-func doLS(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs) error {
+func doLS(ctx context.Context, dirs datadir.Dirs) error {
 	return lsDatadir(ctx, dirs, log.Root())
 }
 
@@ -3095,7 +3156,7 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 		}
 		res.CaplinIndexDB = indexDB
 
-		snTypes := snapshotsync.MakeCaplinStateSnapshotsTypes(indexDB)
+		snTypes := snapshotsync.MakeCaplinStateSnapshotsTypes(indexDB, beaconConfig)
 		blkFreezeCfg := ethconfig.BlocksFreezing{ChainName: beaconConfig.ConfigName}
 		res.CaplinStateSnaps = snapshotsync.NewCaplinStateSnapshots(blkFreezeCfg, dirs, snTypes, logger)
 		if err := res.CaplinStateSnaps.OpenFolder(); err != nil {
@@ -3278,7 +3339,7 @@ func doCompress(ctx context.Context, cliCtx *cli.Command) error {
 	return nil
 }
 
-func doRemoveOverlap(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs) error {
+func doRemoveOverlap(ctx context.Context, dirs datadir.Dirs) error {
 	logger := log.Root()
 	defer logger.Info("Done")
 
@@ -4272,7 +4333,7 @@ func duFormatJSON(w io.Writer, result duResult) error {
 }
 
 // doDU implements the "erigon seg du" subcommand.
-func doDU(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs) error {
+func doDU(cliCtx *cli.Command, dirs datadir.Dirs) error {
 	// Resolve chain name and configured prune mode from chaindata (best-effort).
 	// Use recover because both MustOpen and fromdb.ChainConfig can panic
 	// (e.g., DB locked by running node, corrupted/empty chaindata).

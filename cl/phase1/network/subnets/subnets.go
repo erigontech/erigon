@@ -24,7 +24,6 @@ import (
 
 	"github.com/erigontech/erigon/cl/abstract"
 	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
 	commoncrypto "github.com/erigontech/erigon/common/crypto"
@@ -72,34 +71,16 @@ func subnetSubscriptionOffset(nodeID enode.ID) uint64 {
 	return binary.BigEndian.Uint64(nodeID[24:]) % epochsPerSubnetSubscription
 }
 
-// def compute_subnets_for_sync_committee(state: BeaconState, validator_index: ValidatorIndex) -> Set[uint64]:
-//     next_slot_epoch = compute_epoch_at_slot(Slot(state.slot + 1))
-//     if compute_sync_committee_period(get_current_epoch(state)) == compute_sync_committee_period(next_slot_epoch):
-//         sync_committee = state.current_sync_committee
-//     else:
-//         sync_committee = state.next_sync_committee
-
-// target_pubkey = state.validators[validator_index].pubkey
-// sync_committee_indices = [index for index, pubkey in enumerate(sync_committee.pubkeys) if pubkey == target_pubkey]
-// return set([
-//
-//	uint64(index // (SYNC_COMMITTEE_SIZE // SYNC_COMMITTEE_SUBNET_COUNT))
-//	for index in sync_committee_indices
-//
-// ])
-
-// ComputeSubnetsForSyncCommittee is used by the ValidatorClient to determine which subnets a validator should be subscribed to for sync committees.
-// the function takes an extra syncCommitteeIndicies parameter to adapt to the Beacon API specs.
-func ComputeSubnetsForSyncCommittee(s *state.CachingBeaconState, validatorIndex uint64) (subnets []uint64, err error) {
+// ComputeSubnetsForSyncCommittee returns the subnets of a validator in the sync committee that signs for slot
+// (compute_subnets_for_sync_committee, with the committee chosen by state.SyncCommitteeForMessageSlot).
+func ComputeSubnetsForSyncCommittee(s *state.CachingBeaconState, slot, validatorIndex uint64) (subnets []uint64, err error) {
 	cfg := s.BeaconConfig()
-	var syncCommittee *solid.SyncCommittee
-	if cfg.SyncCommitteePeriod(s.Slot()) == cfg.SyncCommitteePeriod(s.Slot()+1) {
-		syncCommittee = s.CurrentSyncCommittee()
-	} else {
-		syncCommittee = s.NextSyncCommittee()
-	}
-
+	// An unknown validator index is invalid whatever the slot, so check it before the committee.
 	targetPublicKey, err := s.ValidatorPublicKey(int(validatorIndex))
+	if err != nil {
+		return nil, err
+	}
+	syncCommittee, err := state.SyncCommitteeForMessageSlot(s, slot)
 	if err != nil {
 		return nil, err
 	}

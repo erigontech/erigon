@@ -81,12 +81,13 @@ func (cc *ExecutionClientDirect) NewPayload(
 	}
 
 	body := payload.Body()
-	txs, err := types.DecodeTransactions(body.Transactions)
+	txs, err := DecodePayloadTransactions(payload)
 	if err != nil {
 		// invalid block
 		return PayloadStatusInvalidated, err
 	}
 
+	cc.chainRW.StartSendersRecovery(ctx, payload.BlockHash, header, txs)
 	startInsertBlock := time.Now()
 	if err := cc.chainRW.InsertBlock(ctx, types.NewBlockFromStorageWithBinaryTxs(payload.BlockHash, header, txs, body.Transactions, nil, body.Withdrawals, bal)); err != nil {
 		if errors.Is(err, types.ErrBlockExceedsMaxRlpSize) {
@@ -129,17 +130,20 @@ func (cc *ExecutionClientDirect) NewPayload(
 }
 
 func (cc *ExecutionClientDirect) ForkChoiceUpdate(ctx context.Context, finalized, safe, head common.Hash, attr *engine_types.PayloadAttributes, _ clparams.StateVersion) ([]byte, error) {
-	status, _, _, err := cc.chainRW.UpdateForkChoice(ctx, head, safe, finalized)
+	result, err := cc.chainRW.UpdateForkChoiceResult(ctx, head, safe, finalized)
 	if err != nil {
 		return nil, fmt.Errorf("execution Client RPC failed to retrieve ForkChoiceUpdate response, err: %w", err)
 	}
-	if status == execmodule.ExecutionStatusInvalidForkchoice {
+	if result.Status == execmodule.ExecutionStatusInvalidForkchoice {
 		return nil, errors.New("forkchoice was invalid")
 	}
-	if status == execmodule.ExecutionStatusBadBlock {
+	if result.Status == execmodule.ExecutionStatusBadBlock {
 		return nil, errors.New("bad block as forkchoice")
 	}
 	if attr == nil {
+		if result.Status == execmodule.ExecutionStatusBusy && !result.UpdateInProgress {
+			return nil, ErrForkChoiceUpdateBusy
+		}
 		return nil, nil
 	}
 	// The forkchoice update answers before its commit releases the execution semaphore, so the
@@ -255,6 +259,10 @@ func (cc *ExecutionClientDirect) CurrentHeader(ctx context.Context) (*types.Head
 	return cc.chainRW.CurrentHeader(ctx), nil
 }
 
+func (cc *ExecutionClientDirect) GetHeaderByHash(ctx context.Context, hash common.Hash) (*types.Header, error) {
+	return cc.chainRW.HeaderByHash(ctx, hash)
+}
+
 func (cc *ExecutionClientDirect) IsCanonicalHash(ctx context.Context, hash common.Hash) (bool, error) {
 	return cc.chainRW.IsCanonicalHash(ctx, hash)
 }
@@ -271,6 +279,10 @@ func (cc *ExecutionClientDirect) GetBodiesByRange(ctx context.Context, start, co
 // GetBodiesByHashes gets block bodies with given hashes
 func (cc *ExecutionClientDirect) GetBodiesByHashes(ctx context.Context, hashes []common.Hash) ([]*types.RawBody, error) {
 	return cc.chainRW.GetBodiesByHashes(ctx, hashes)
+}
+
+func (cc *ExecutionClientDirect) GetPayloadBodiesByHash(ctx context.Context, hashes []common.Hash) ([]*engine_types.ExecutionPayloadBodyV2, error) {
+	return cc.chainRW.GetPayloadBodiesByHash(ctx, hashes)
 }
 
 func (cc *ExecutionClientDirect) FrozenBlocks(ctx context.Context) uint64 {
