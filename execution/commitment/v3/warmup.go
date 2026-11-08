@@ -41,20 +41,15 @@ func warmupStepV3(data, hashedKey []byte, depth int) (nextDepth int, stop bool) 
 		return 0, true
 	}
 
-	branchPoint := depth
 	if planeDepth == 0 && l.selfExtLen != 0 {
 		selfExt := record.SelfExt()
-		end := branchPoint + l.selfExtLen
-		if end > len(hashedKey) || !packedMatches(selfExt[1:], hashedKey[branchPoint:end]) {
+		end := depth + l.selfExtLen
+		if end > len(hashedKey) || !packedMatches(selfExt[1:], hashedKey[depth:end]) {
 			return 0, true
 		}
 		return end, false
 	}
-	if branchPoint >= len(hashedKey) {
-		return 0, true
-	}
-
-	bit := uint16(1) << hashedKey[branchPoint]
+	bit := uint16(1) << hashedKey[depth]
 	if l.tree()&bit == 0 {
 		if len(hashedKey) > 64 && depth < 64 && l.leaf&bit != 0 {
 			return 64, false
@@ -64,13 +59,13 @@ func warmupStepV3(data, hashedKey []byte, depth int) (nextDepth int, stop bool) 
 
 	extLen := 0
 	if l.ext&bit != 0 {
-		ext := record.extAt(l, int(hashedKey[branchPoint]))
+		ext := record.extAt(l, int(hashedKey[depth]))
 		if len(ext) == 0 {
 			return 0, true
 		}
 		extLen = int(ext[0])
 	}
-	nextDepth = branchPoint + 1 + extLen
+	nextDepth = depth + 1 + extLen
 	if nextDepth > len(hashedKey) {
 		return 0, true
 	}

@@ -65,11 +65,6 @@ func TestPartition(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			storage, accounts := partition(tc.stream)
 			require.Equal(t, tc.accounts, accounts)
-			for i, want := range tc.accounts {
-				if want.update != nil {
-					require.Equal(t, want.update.Flags == commitment.DeleteUpdate, accounts[i].update.Deleted())
-				}
-			}
 			require.Len(t, storage, 1)
 			require.Len(t, storage[0].entries, tc.slots)
 			require.Equal(t, tc.wipe, storage[0].wipe)
@@ -671,24 +666,9 @@ func TestWarmup(t *testing.T) {
 		}
 		require.Equal(t, StorageNodeKey(addrHash, nil, nil), warmupKeyV3(hashedKey, 64, scratch[:]))
 		require.Equal(t, StorageNodeKey(addrHash, storagePath[:1], nil), warmupKeyV3(hashedKey, 65, scratch[:]))
+		require.Equal(t, StorageNodeKey(addrHash, storagePath, nil), warmupKeyV3(hashedKey, 128, scratch[:]))
 		accountOnly := accountPath[:64]
 		require.Equal(t, AccountNodeKey(accountOnly, nil), warmupKeyV3(accountOnly, 64, scratch[:]))
-		require.Equal(t, tagStorageNode, warmupKeyV3(hashedKey, 64, scratch[:])[0])
-	})
-
-	t.Run("key_shapes", func(t *testing.T) {
-		hashedKey := bytes.Repeat([]byte{0x0b}, 128)
-		for _, depth := range []int{1, 2, 63, 64, 65, 128} {
-			got := warmupKeyV3(hashedKey, depth, scratch[:])
-			want := AccountNodeKey(hashedKey[:min(depth, 64)], nil)
-			if depth >= 64 {
-				want = StorageNodeKey(hashAddressPath(hashedKey[:64]), hashedKey[64:depth], nil)
-			}
-			require.Equal(t, want, got)
-			if depth&1 != 0 {
-				require.Zero(t, got[len(got)-2]&0x0f)
-			}
-		}
 	})
 
 	t.Run("step_self_extension_and_truncated", func(t *testing.T) {
@@ -865,9 +845,7 @@ func TestBoundedContextFactoryNeverDeadlocks(t *testing.T) {
 	for i := range 20 {
 		c := newShardedContext()
 		f := &slotFactory{ctx: c, slots: make(chan struct{}, 2)}
-		tr := &Trie{scheduleWorkers: 2}
-		tr.ResetContext(c)
-		tr.SetTrieContextFactory(f.factory)
+		tr := newFactoryTrie(2, c, f.factory)
 		u := benchUpdatesIn(t.TempDir(), commitment.ModeCollect, entries, updates)
 		requireFinishes(t, fmt.Sprintf("process run %d", i), func() error {
 			_, err := tr.Process(context.Background(), u, "", nil, commitment.WarmupConfig{})

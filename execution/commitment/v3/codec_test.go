@@ -697,6 +697,17 @@ func TestConsensusHash(t *testing.T) {
 			})
 		}
 	})
+	rlpStorageLeafRef := func(t *testing.T, suffix, payload []byte) []byte {
+		inner, err := rlp.EncodeToBytes(payload)
+		require.NoError(t, err)
+		want, err := rlp.EncodeToBytes([][]byte{suffix, inner})
+		require.NoError(t, err)
+		if len(want) >= 32 {
+			hash := keccak.Sum256(want)
+			want = hash[:]
+		}
+		return want
+	}
 	t.Run("E23/StorageLeafRefMatchesRLP", func(t *testing.T) {
 		payloads := [][]byte{{}, {0x00}, {0x7f}, {0x80}, {0xff}}
 		for n := 2; n <= 32; n++ {
@@ -705,15 +716,7 @@ func TestConsensusHash(t *testing.T) {
 		for _, keyLen := range []int{0, 1, 2, 30, 62, 63, 64} {
 			suffix := nibbles.HexToCompact(append(bytes.Repeat([]byte{0x0c}, keyLen), nibbles.Terminator))
 			for _, payload := range payloads {
-				inner, err := rlp.EncodeToBytes(payload)
-				require.NoError(t, err)
-				want, err := rlp.EncodeToBytes([][]byte{suffix, inner})
-				require.NoError(t, err)
-				if len(want) >= 32 {
-					hash := keccak.Sum256(want)
-					want = hash[:]
-				}
-				require.Equal(t, want, storageLeafRef(suffix, payload, nil), "key %d payload %x", keyLen, payload)
+				require.Equal(t, rlpStorageLeafRef(t, suffix, payload), storageLeafRef(suffix, payload, nil), "key %d payload %x", keyLen, payload)
 			}
 		}
 	})
@@ -732,32 +735,11 @@ func TestConsensusHash(t *testing.T) {
 						v[0] = 1
 					}
 					rnd.Read(suffix)
-					want := storageLeafRefBuffered(suffix, v, nil)
-					require.Equal(t, want, storageLeafRef(suffix, v, nil), "suffixLen=%d l=%d v=%x", suffixLen, l, v)
+					require.Equal(t, rlpStorageLeafRef(t, suffix, v), storageLeafRef(suffix, v, nil), "suffixLen=%d l=%d v=%x", suffixLen, l, v)
 				}
 			}
 		}
 	})
-}
-
-func storageLeafRefBuffered(suffix []byte, payload []byte, dst []byte) []byte {
-	var encoded bytes.Buffer
-	var prefix [8]byte
-	if err := rlp.RlpSerializableBytes(payload).ToDoubleRLP(&encoded, prefix[:]); err != nil {
-		panic(err)
-	}
-	contentLen := rlp.StringLen(suffix) + encoded.Len()
-	start := len(dst)
-	dst = append(dst, make([]byte, rlp.ListLen(contentLen))...)
-	pos := start + rlp.EncodeListPrefixToBuf(contentLen, dst[start:])
-	pos += rlp.EncodeStringToBuf(suffix, dst[pos:])
-	pos += copy(dst[pos:], encoded.Bytes())
-	encodedBytes := dst[start:pos]
-	if len(encodedBytes) < 32 {
-		return encodedBytes
-	}
-	hash := keccak.Sum256(encodedBytes)
-	return append(dst[:start], hash[:]...)
 }
 
 func TestUnfoldRejectsInvalidRecords(t *testing.T) {

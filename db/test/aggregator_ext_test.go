@@ -53,6 +53,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/execfinality"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/internal/commitmenttest"
 )
 
 var unboundedFinalityCtx = execfinality.NewContext(math.MaxUint64, math.MaxUint64, 0, false, rawdbv3.TxNums)
@@ -120,11 +121,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 				encodedState, err = commitmentdb.NewCommitmentState(txNum, 0, trieState).Encode()
 				require.NoError(t, err)
 			}
-			stateKey := commitment.KeyCommitmentState
-			if statecfg.ExperimentalCommitmentV3 {
-				stateKey = commitment.KeyCommitmentV3State
-			}
-			err = domains.DomainPut(kv.CommitmentDomain, tx, stateKey, encodedState, txNum, nil)
+			err = domains.DomainPut(kv.CommitmentDomain, tx, commitmenttest.StateKey(), encodedState, txNum, nil)
 			require.NoError(t, err)
 		}
 	}

@@ -27,7 +27,6 @@ import (
 	keccak "github.com/erigontech/fastkeccak"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -209,6 +208,13 @@ func (c *shardedContext) Storage([]byte) (*commitment.Update, error) { return c.
 func (c *shardedContext) factory(context.Context) (commitment.PatriciaContext, func()) { return c, nil }
 
 var _ commitment.PatriciaContext = (*shardedContext)(nil)
+
+func newFactoryTrie(workers int, ctx commitment.PatriciaContext, factory commitment.TrieContextFactory) *Trie {
+	tr := &Trie{scheduleWorkers: workers}
+	tr.ResetContext(ctx)
+	tr.SetTrieContextFactory(factory)
+	return tr
+}
 
 type discardWrites struct{ commitment.PatriciaContext }
 
@@ -443,10 +449,6 @@ func requireSameRuns(t *testing.T, base []commitmenttest.Op, a, b v3Config, roun
 		require.Equal(t, deltasA, deltasB)
 	}
 	return rootsA
-}
-
-func fullAccountUpdate(nonce, balance uint64, codeHash common.Hash) commitment.Update {
-	return *testAccountUpdate(commitmenttest.Account(commitmenttest.AccountSpec{Nonce: nonce, Balance: balance, CodeHash: codeHash}))
 }
 
 type mockContext struct {

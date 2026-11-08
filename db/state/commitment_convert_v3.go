@@ -735,35 +735,22 @@ func FoldCommitmentV3(ctx context.Context, a *Aggregator, asOfTxNum uint64) (Com
 		it = stream.UnionKV(hist, latest, -1)
 	}
 	defer it.Close()
-	f, err := foldCommitmentV3Records(ctx, it)
+	c, state, err := foldCommitmentV3Records(ctx, it)
 	if err != nil {
 		return CommitmentV3Check{}, err
 	}
-	blockNum, txNum, err := f.checkState()
+	var stateRoot []byte
+	c.BlockNum, c.TxNum, stateRoot, err = commitment.DecodeCommitmentV3State(state)
 	if err != nil {
-		return CommitmentV3Check{}, err
+		return CommitmentV3Check{}, fmt.Errorf("state %x: %w", state, err)
 	}
-	return CommitmentV3Check{Root: f.root[:], BlockNum: blockNum, TxNum: txNum, Records: f.records, Orphans: f.orphans}, nil
+	if !bytes.Equal(c.Root, stateRoot) {
+		return CommitmentV3Check{}, fmt.Errorf("records fold to root %x, state at block %d records %x", c.Root, c.BlockNum, stateRoot)
+	}
+	return c, nil
 }
 
-type commitmentV3Fold struct {
-	root             [32]byte
-	state            []byte
-	records, orphans uint64
-}
-
-func (f commitmentV3Fold) checkState() (blockNum, txNum uint64, err error) {
-	blockNum, txNum, stateRoot, err := commitment.DecodeCommitmentV3State(f.state)
-	if err != nil {
-		return 0, 0, fmt.Errorf("state %x: %w", f.state, err)
-	}
-	if !bytes.Equal(f.root[:], stateRoot) {
-		return 0, 0, fmt.Errorf("records fold to root %x, state at block %d records %x", f.root, blockNum, stateRoot)
-	}
-	return blockNum, txNum, nil
-}
-
-func foldCommitmentV3Records(ctx context.Context, it stream.KV) (commitmentV3Fold, error) {
+func foldCommitmentV3Records(ctx context.Context, it stream.KV) (CommitmentV3Check, []byte, error) {
 	workers := max(1, runtime.GOMAXPROCS(0))
 	in := make(chan *kvBatch, workers*2)
 	out := make(chan *hashedBatch, workers*2)
@@ -870,11 +857,11 @@ func foldCommitmentV3Records(ctx context.Context, it stream.KV) (commitmentV3Fol
 		return nil
 	})
 	if err := g.Wait(); err != nil {
-		return commitmentV3Fold{}, err
+		return CommitmentV3Check{}, nil, err
 	}
 	root, records, orphans, err := matcher.Finish()
 	if err != nil {
-		return commitmentV3Fold{}, err
+		return CommitmentV3Check{}, nil, err
 	}
-	return commitmentV3Fold{root: root, state: state, records: records, orphans: orphans}, nil
+	return CommitmentV3Check{Root: root[:], Records: records, Orphans: orphans}, state, nil
 }

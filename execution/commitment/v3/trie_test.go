@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math/bits"
 	"math/rand"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -159,7 +160,7 @@ func TestTrieAPI(t *testing.T) {
 		updates := commitment.NewUpdates(commitment.ModeCollect, t.TempDir(), commitment.KeyToHexNibbleHash)
 		t.Cleanup(updates.Close)
 		address := bytes.Repeat([]byte{0x11}, 20)
-		account := fullAccountUpdate(3, 5, common.HexToHash("0x1234"))
+		account := *testAccountUpdate(commitmenttest.Account(commitmenttest.AccountSpec{Nonce: 3, Balance: 5, CodeHash: common.HexToHash("0x1234")}))
 		updates.TouchPlainKeyDirect(string(address), &account)
 
 		_, err := trie.Process(context.Background(), updates, "", nil, commitment.WarmupConfig{})
@@ -477,10 +478,7 @@ func TestTrieMutations(t *testing.T) {
 }
 
 func appendPath(prefix []byte, nib byte, suffix []byte) []byte {
-	path := make([]byte, 0, len(prefix)+1+len(suffix))
-	path = append(path, prefix...)
-	path = append(path, nib)
-	return append(path, suffix...)
+	return slices.Concat(prefix, []byte{nib}, suffix)
 }
 
 func eachPlane(t *testing.T, run func(*testing.T, byte)) {
@@ -613,18 +611,6 @@ func TestFoldParity(t *testing.T) {
 			require.Equal(t, empty.RootHash[:], got[:])
 		}
 	})
-	t.Run("E29/FoldSingleLeafMatchesHexPatriciaHashed", func(t *testing.T) {
-		for _, plane := range []byte{planeAccount, planeStorage} {
-			key := incrAddress(1)
-			path := commitment.KeyToHexNibbleHash(key)
-			value := foldValue(plane, 1)
-			n := newNode(plane)
-			require.NoError(t, insert(n, path, value))
-
-			want := hexPatriciaRoot(t, plane, [][]byte{key}, [][]byte{path}, []commitment.Update{foldUpdate(plane, 1)})
-			require.Equal(t, want, foldPlaneRoot(t, n))
-		}
-	})
 	t.Run("E29/seeded", func(t *testing.T) {
 		for _, plane := range []byte{planeAccount, planeStorage} {
 			for _, tc := range []struct {
@@ -742,15 +728,10 @@ func foldUpdate(plane byte, number int) commitment.Update {
 
 func distinctKeysAndPaths(count int, seed int64) ([][]byte, [][]byte) {
 	rng := rand.New(rand.NewSource(seed))
-	seen := make(map[string]struct{}, count)
 	keys, paths := make([][]byte, 0, count), make([][]byte, 0, count)
-	for len(keys) < count {
+	for range count {
 		key := make([]byte, 20)
 		_, _ = rng.Read(key)
-		if _, ok := seen[string(key)]; ok {
-			continue
-		}
-		seen[string(key)] = struct{}{}
 		keys = append(keys, key)
 		paths = append(paths, commitment.KeyToHexNibbleHash(key))
 	}

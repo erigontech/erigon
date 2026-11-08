@@ -93,11 +93,8 @@ func newWitnessBed(t testing.TB, ops []commitmenttest.Op) *witnessBed {
 }
 
 func (b *witnessBed) openV3(ctx context.Context) *Trie {
-	tr := &Trie{scheduleWorkers: 1}
 	reader, _ := b.v3Mem.Open(ctx)
-	tr.ResetContext(reader)
-	tr.SetTrieContextFactory(b.v3Mem.Open)
-	return tr
+	return newFactoryTrie(1, reader, b.v3Mem.Open)
 }
 
 func (b *witnessBed) hphWitness(t testing.TB, keys witnessKeys, exclusion bool) [][]byte {
@@ -546,52 +543,48 @@ func TestTracedProcessReadsEachRecordOnce(t *testing.T) {
 }
 
 func TestWitnessAfterTracedProcessReusesReads(t *testing.T) {
+	ctx := context.Background()
 	for _, traceOnly := range []bool{false, true} {
 		for seed := range int64(8) {
-			witnessAfterTraceReusesReads(t, seed, traceOnly)
+			rng := rand.New(rand.NewSource(seed))
+			b := newWitnessBed(t, witnessState(rng, witnessShape{accounts: 24, slots: 4}))
+			keys := witnessKeySet(rng, b)
+			want := b.v3Witness(t, keys, false)
+			batch := collapseBatch(rng, b)
+
+			reader, _ := b.v3Mem.Open(ctx)
+			counting := &countingReads{PatriciaContext: discardWrites{reader}, reads: map[string]int{}}
+			tr := &Trie{scheduleWorkers: 1}
+			tr.ResetContext(counting)
+			_, _, err := tr.RestoreState(b.v3State)
+			require.NoError(t, err)
+			u := testUpdates(t, commitment.ModeCollect, batch)
+			if traceOnly {
+				_, err = tr.TraceCollapsesRoot(ctx, u, func([]byte, []byte) {})
+			} else {
+				tr.SetCollapseTracer(func([]byte, []byte) {})
+				_, err = tr.Process(ctx, u, "", nil, commitment.WarmupConfig{})
+				tr.SetCollapseTracer(nil)
+			}
+			require.NoError(t, err)
+			require.NotEmpty(t, counting.reads, "seed %d traceOnly=%v", seed, traceOnly)
+
+			processReads := counting.reads
+			counting.reads = map[string]int{}
+			_, _, err = tr.RestoreState(b.v3State)
+			require.NoError(t, err)
+			u = commitment.NewUpdates(commitment.ModeCollect, t.TempDir(), commitment.KeyToHexNibbleHash)
+			keys.touch(u)
+			byHash, proved, root, err := tr.WitnessesByHash(ctx, u, false)
+			u.Close()
+			require.NoError(t, err)
+			got, err := trie.WitnessNodesForKeysByHash(byHash, root, proved)
+			require.NoError(t, err)
+			requireSameNodes(t, want, got, fmt.Sprintf("seed %d", seed))
+			for k := range counting.reads {
+				require.Zerof(t, processReads[k], "seed %d: record %x read by both Process and the witness walk", seed, k)
+			}
 		}
-	}
-}
-
-func witnessAfterTraceReusesReads(t *testing.T, seed int64, traceOnly bool) {
-	ctx := context.Background()
-	rng := rand.New(rand.NewSource(seed))
-	b := newWitnessBed(t, witnessState(rng, witnessShape{accounts: 24, slots: 4}))
-	keys := witnessKeySet(rng, b)
-	want := b.v3Witness(t, keys, false)
-	batch := collapseBatch(rng, b)
-
-	reader, _ := b.v3Mem.Open(ctx)
-	counting := &countingReads{PatriciaContext: discardWrites{reader}, reads: map[string]int{}}
-	tr := &Trie{scheduleWorkers: 1}
-	tr.ResetContext(counting)
-	_, _, err := tr.RestoreState(b.v3State)
-	require.NoError(t, err)
-	u := testUpdates(t, commitment.ModeCollect, batch)
-	if traceOnly {
-		_, err = tr.TraceCollapsesRoot(ctx, u, func([]byte, []byte) {})
-	} else {
-		tr.SetCollapseTracer(func([]byte, []byte) {})
-		_, err = tr.Process(ctx, u, "", nil, commitment.WarmupConfig{})
-		tr.SetCollapseTracer(nil)
-	}
-	require.NoError(t, err)
-	require.NotEmpty(t, counting.reads, "seed %d traceOnly=%v", seed, traceOnly)
-
-	processReads := counting.reads
-	counting.reads = map[string]int{}
-	_, _, err = tr.RestoreState(b.v3State)
-	require.NoError(t, err)
-	u = commitment.NewUpdates(commitment.ModeCollect, t.TempDir(), commitment.KeyToHexNibbleHash)
-	keys.touch(u)
-	byHash, proved, root, err := tr.WitnessesByHash(ctx, u, false)
-	u.Close()
-	require.NoError(t, err)
-	got, err := trie.WitnessNodesForKeysByHash(byHash, root, proved)
-	require.NoError(t, err)
-	requireSameNodes(t, want, got, fmt.Sprintf("seed %d", seed))
-	for k := range counting.reads {
-		require.Zerof(t, processReads[k], "seed %d: record %x read by both Process and the witness walk", seed, k)
 	}
 }
 

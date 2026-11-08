@@ -30,6 +30,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -148,9 +149,7 @@ func TestDeltas(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := runner.NewMemory(runner.ContextSpec{CheckPrevious: true, ForbidStateReads: true})
 			for _, ops := range tc.rounds {
-				tr := &Trie{}
-				tr.ResetContext(ctx)
-				tr.SetTrieContextFactory(ctx.Open)
+				tr := newFactoryTrie(0, ctx, ctx.Open)
 				_, err := tr.Process(context.Background(), testUpdates(t, commitment.ModeCollect, ops), "", nil, commitment.WarmupConfig{})
 				tr.Release()
 				require.NoError(t, err)
@@ -424,11 +423,6 @@ type legacyAccount struct {
 	slots [][]byte
 }
 
-func keccakSlice(b []byte) []byte {
-	h := keccak.Sum256(b)
-	return h[:]
-}
-
 func randBytes(rng *rand.Rand, n int) []byte {
 	b := make([]byte, n)
 	rng.Read(b)
@@ -443,10 +437,10 @@ func seedLegacyWorld(t *testing.T, rng *rand.Rand) (*legacyWorld, []legacyAccoun
 	}
 	sharingPrefix := func(nibbles int) {
 		first := randBytes(rng, 32)
-		want := unpackPath(keccakSlice(first), 64, nil)[:nibbles]
+		want := unpackPath(crypto.Keccak256(first), 64, nil)[:nibbles]
 		for {
 			next := randBytes(rng, 32)
-			if bytes.Equal(unpackPath(keccakSlice(next), 64, nil)[:nibbles], want) {
+			if bytes.Equal(unpackPath(crypto.Keccak256(next), 64, nil)[:nibbles], want) {
 				add(first, next)
 				return
 			}
@@ -570,7 +564,7 @@ func TestConversion(t *testing.T) {
 		slots := [][]byte{randBytes(rng, 32)}
 		for {
 			next := randBytes(rng, 32)
-			if keccakSlice(next)[0]>>4 != keccakSlice(slots[0])[0]>>4 {
+			if crypto.Keccak256(next)[0]>>4 != crypto.Keccak256(slots[0])[0]>>4 {
 				slots = append(slots, next)
 				break
 			}
@@ -579,7 +573,7 @@ func TestConversion(t *testing.T) {
 			w.setSlot(owner, slot, uint64(j+1))
 		}
 		w.process(t)
-		storageRootKey := string(append([]byte{0}, keccakSlice(owner)...))
+		storageRootKey := string(append([]byte{0}, crypto.Keccak256(owner)...))
 		stale := w.Records()[storageRootKey]
 		require.NotEmpty(t, stale)
 

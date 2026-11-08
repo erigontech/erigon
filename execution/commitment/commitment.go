@@ -319,6 +319,27 @@ type BranchDelta struct {
 	Prev []byte
 }
 
+type FeedSlot struct {
+	Hash  [32]byte
+	Value []byte
+}
+
+type FeedAccount struct {
+	Hash   [32]byte
+	Update *Update
+	Slots  []FeedSlot
+}
+
+type Feed struct {
+	Accounts []FeedAccount
+	Keys     int
+}
+
+type LeafRefs struct {
+	Mask uint16
+	Refs [][32]byte
+}
+
 type PendingCommitmentUpdate struct {
 	BlockNum uint64
 	// BlockHash disambiguates changeset lookups sharing a block number.

@@ -42,11 +42,6 @@ import (
 	"github.com/erigontech/erigon/node/ethconfig"
 )
 
-func dbWithStateTail(t *testing.T) (kv.TemporalRwDB, datadir.Dirs, func() uint64) {
-	t.Helper()
-	return dbWithState(t, true)
-}
-
 func dbWithState(t *testing.T, buildFiles bool) (kv.TemporalRwDB, datadir.Dirs, func() uint64) {
 	t.Helper()
 	const stepSize, txs, filed = 16, 64, 48
@@ -109,7 +104,7 @@ func requireExecutionReset(t *testing.T, db kv.TemporalRwDB, countTail func() ui
 }
 
 func TestCommitmentRebuildWithoutHistoryDropsTheDBTail(t *testing.T) {
-	db, dirs, countTail := dbWithStateTail(t)
+	db, dirs, countTail := dbWithState(t, true)
 	snapCfg := ethconfig.Defaults.Snapshot
 	snapCfg.ChainName = networkname.Test
 	blockSnaps := blocksnapshots.NewRoSnapshots(snapCfg, dirs.Snap, log.Root())
@@ -127,13 +122,13 @@ func TestCommitmentRebuildWithoutHistoryDropsTheDBTail(t *testing.T) {
 
 func TestCommitmentConvertV3DropsTheDBTail(t *testing.T) {
 	t.Cleanup(statecfg.SetCommitmentV3(false))
-	db, _, countTail := dbWithStateTail(t)
+	db, _, countTail := dbWithState(t, true)
 	require.NoError(t, commitmentConvert(db, t.Context(), log.New(), state.ConvertOpts{TargetV3: true}))
 	requireExecutionReset(t, db, countTail)
 }
 
 func TestCommitmentConvertV3RefusedKeepsTheDBTail(t *testing.T) {
-	db, dirs, countTail := dbWithStateTail(t)
+	db, dirs, countTail := dbWithState(t, true)
 	before := countTail()
 	backup := filepath.Join(dirs.Snap, "backup", "domains")
 	require.NoError(t, os.MkdirAll(backup, 0o755))
@@ -150,7 +145,7 @@ func TestCommitmentConvertV3WithoutFilesKeepsTheDBTail(t *testing.T) {
 }
 
 func TestCommitmentClearKeepsTheDBTail(t *testing.T) {
-	db, dirs, countTail := dbWithStateTail(t)
+	db, dirs, countTail := dbWithState(t, true)
 	snapCfg := ethconfig.Defaults.Snapshot
 	snapCfg.ChainName = networkname.Test
 	blockSnaps := blocksnapshots.NewRoSnapshots(snapCfg, dirs.Snap, log.Root())

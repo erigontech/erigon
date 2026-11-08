@@ -183,16 +183,6 @@ func TestConvertCommitmentFiles_V3BranchNotRewrittenAfterLeafChange(t *testing.T
 	runOrchestrator(t, db, state.ConvertOpts{TargetV3: true})
 }
 
-func storageSlotWithHashPrefix(tb testing.TB, prefix []byte, next *uint64) []byte {
-	tb.Helper()
-	return keyWithHashPrefix(length.Hash, prefix, next)
-}
-
-func addressWithHashPrefix(tb testing.TB, prefix []byte, next *uint64) []byte {
-	tb.Helper()
-	return keyWithHashPrefix(length.Addr, prefix, next)
-}
-
 func keyWithHashPrefix(size int, prefix []byte, next *uint64) []byte {
 	for ; ; *next++ {
 		key := make([]byte, size)
@@ -265,19 +255,19 @@ func buildRecreatedOwnerFilesWithParallel(t *testing.T, stepSize, steps uint64, 
 	owner := addrs[0]
 	next := uint64(1)
 	live := [][]byte{
-		storageSlotWithHashPrefix(t, []byte{0xe, 0x1, 0x2}, &next),
-		storageSlotWithHashPrefix(t, []byte{0xe, 0x5}, &next),
-		storageSlotWithHashPrefix(t, []byte{0x3}, &next),
+		keyWithHashPrefix(length.Hash, []byte{0xe, 0x1, 0x2}, &next),
+		keyWithHashPrefix(length.Hash, []byte{0xe, 0x5}, &next),
+		keyWithHashPrefix(length.Hash, []byte{0x3}, &next),
 	}
 	old := [][]byte{
-		storageSlotWithHashPrefix(t, []byte{0xe, 0x1, 0x7, 0x0}, &next),
-		storageSlotWithHashPrefix(t, []byte{0xe, 0x1, 0x7, 0x9}, &next),
-		storageSlotWithHashPrefix(t, []byte{0xe, 0x1, 0xe, 0x5}, &next),
-		storageSlotWithHashPrefix(t, []byte{0xe, 0x1, 0xe, 0xa}, &next),
+		keyWithHashPrefix(length.Hash, []byte{0xe, 0x1, 0x7, 0x0}, &next),
+		keyWithHashPrefix(length.Hash, []byte{0xe, 0x1, 0x7, 0x9}, &next),
+		keyWithHashPrefix(length.Hash, []byte{0xe, 0x1, 0xe, 0x5}, &next),
+		keyWithHashPrefix(length.Hash, []byte{0xe, 0x1, 0xe, 0xa}, &next),
 	}
 	var later []byte
 	if laterSlot {
-		later = storageSlotWithHashPrefix(t, []byte{0xe, 0x1, 0x7, 0x3}, &next)
+		later = keyWithHashPrefix(length.Hash, []byte{0xe, 0x1, 0x7, 0x3}, &next)
 	}
 	slot := func(s []byte) []byte { return append(bytes.Clone(owner), s...) }
 	for txNum := range stepSize * steps {
@@ -344,14 +334,14 @@ func TestConvertCommitmentFiles_V3StorageRootSurvivesBranchCollapseAcrossSteps(t
 	ctx := t.Context()
 
 	nextA := uint64(1)
-	a := addressWithHashPrefix(t, []byte{0x1, 0x1}, &nextA)
-	b := addressWithHashPrefix(t, []byte{0x1, 0x2}, &nextA)
-	c := addressWithHashPrefix(t, []byte{0x5}, &nextA)
+	a := keyWithHashPrefix(length.Addr, []byte{0x1, 0x1}, &nextA)
+	b := keyWithHashPrefix(length.Addr, []byte{0x1, 0x2}, &nextA)
+	c := keyWithHashPrefix(length.Addr, []byte{0x5}, &nextA)
 	nextS := uint64(1)
 	slots := [][]byte{
-		storageSlotWithHashPrefix(t, []byte{0x1}, &nextS),
-		storageSlotWithHashPrefix(t, []byte{0x9}, &nextS),
-		storageSlotWithHashPrefix(t, []byte{0xc}, &nextS),
+		keyWithHashPrefix(length.Hash, []byte{0x1}, &nextS),
+		keyWithHashPrefix(length.Hash, []byte{0x9}, &nextS),
+		keyWithHashPrefix(length.Hash, []byte{0xc}, &nextS),
 	}
 	for txNum := range uint64(stepSize * steps) {
 		switch txNum {
@@ -523,11 +513,11 @@ func buildWipedStorageFiles(t *testing.T, mode string, c wipeCase) (kv.TemporalR
 	put, del, putAccount := domainWriter(t, domains, rwTx)
 	addrs, _ := generateInputData(t, length.Addr, 1, 16)
 	next := uint64(1)
-	owner := addressWithHashPrefix(t, []byte{0x7}, &next)
+	owner := keyWithHashPrefix(length.Addr, []byte{0x7}, &next)
 	slotsOf := func(prefixes ...[]byte) [][]byte {
 		var slots [][]byte
 		for _, p := range prefixes {
-			slots = append(slots, append(bytes.Clone(owner), storageSlotWithHashPrefix(t, p, &next)...))
+			slots = append(slots, append(bytes.Clone(owner), keyWithHashPrefix(length.Hash, p, &next)...))
 		}
 		return slots
 	}
@@ -586,7 +576,7 @@ func TestConvertCommitmentFiles_V3ExtensionRoot(t *testing.T) {
 	db, agg, rwTx, domains := convertTestDomains(t, stepSize)
 	_, _, putAccount := domainWriter(t, domains, rwTx)
 	next := uint64(1)
-	addrs := [][]byte{addressWithHashPrefix(t, []byte{4}, &next), addressWithHashPrefix(t, []byte{4}, &next)}
+	addrs := [][]byte{keyWithHashPrefix(length.Addr, []byte{4}, &next), keyWithHashPrefix(length.Addr, []byte{4}, &next)}
 	for txNum := range uint64(stepSize * steps) {
 		for _, a := range addrs {
 			putAccount(a, txNum)
@@ -618,7 +608,7 @@ func TestConvertCommitmentFiles_V3LeafRootFailsBeforeSwap(t *testing.T) {
 	db, agg, rwTx, domains := convertTestDomains(t, stepSize)
 	_, _, putAccount := domainWriter(t, domains, rwTx)
 	next := uint64(1)
-	addrs := [][]byte{addressWithHashPrefix(t, []byte{4}, &next)}
+	addrs := [][]byte{keyWithHashPrefix(length.Addr, []byte{4}, &next)}
 	for txNum := range uint64(stepSize * steps) {
 		for _, a := range addrs {
 			putAccount(a, txNum)
@@ -650,8 +640,8 @@ func TestConvertCommitmentFiles_V3ExtensionRootReplacedLater(t *testing.T) {
 			db, agg, rwTx, domains := convertTestDomains(t, stepSize)
 			_, del, putAccount := domainWriter(t, domains, rwTx)
 			next := uint64(1)
-			addrs := [][]byte{addressWithHashPrefix(t, []byte{4}, &next), addressWithHashPrefix(t, []byte{4}, &next)}
-			other := addressWithHashPrefix(t, []byte{9}, &next)
+			addrs := [][]byte{keyWithHashPrefix(length.Addr, []byte{4}, &next), keyWithHashPrefix(length.Addr, []byte{4}, &next)}
+			other := keyWithHashPrefix(length.Addr, []byte{9}, &next)
 			for txNum := range uint64(stepSize * steps) {
 				switch {
 				case txNum < stepSize*2:

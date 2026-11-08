@@ -35,7 +35,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 
-	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -115,24 +114,6 @@ func testDbAggregatorWithCommitmentHistory(t *testing.T, stepSize uint64, steps 
 	return db, agg, roots
 }
 
-func storageSlotPairs(tb testing.TB) [2][2][]byte {
-	tb.Helper()
-	byNibble := map[byte][][]byte{}
-	var pairs [2][2][]byte
-	found := 0
-	for i := uint64(1); found < 2; i++ {
-		slot := make([]byte, length.Hash)
-		binary.BigEndian.PutUint64(slot[length.Hash-8:], i)
-		nibble := crypto.Keccak256(slot)[0] >> 4
-		byNibble[nibble] = append(byNibble[nibble], slot)
-		if len(byNibble[nibble]) == 2 {
-			pairs[found] = [2][]byte{byNibble[nibble][0], byNibble[nibble][1]}
-			found++
-		}
-	}
-	return pairs
-}
-
 func TestConvertCommitmentFiles_V3HistoryOrphanStorageRoot(t *testing.T) {
 	t.Cleanup(statecfg.SetCommitmentV3(false))
 	previousSchema := statecfg.Schema
@@ -146,8 +127,8 @@ func TestConvertCommitmentFiles_V3HistoryOrphanStorageRoot(t *testing.T) {
 
 	addrs, _ := generateInputData(t, length.Addr, 1, 4)
 	owner := addrs[0]
-	pairs := storageSlotPairs(t)
-	slots := [][]byte{pairs[0][0], pairs[0][1], pairs[1][0], pairs[1][1]}
+	var next uint64
+	slots := [][]byte{keyWithHashPrefix(length.Hash, []byte{1}, &next), keyWithHashPrefix(length.Hash, []byte{1}, &next), keyWithHashPrefix(length.Hash, []byte{2}, &next), keyWithHashPrefix(length.Hash, []byte{2}, &next)}
 	slot := func(s []byte) []byte { return append(bytes.Clone(owner), s...) }
 
 	roots := map[uint64][]byte{}
@@ -167,9 +148,9 @@ func TestConvertCommitmentFiles_V3HistoryOrphanStorageRoot(t *testing.T) {
 			del(kv.AccountsDomain, owner, txNum)
 		case 2:
 			putAccount(owner, txNum)
-			put(kv.StorageDomain, slot(pairs[0][0]), []byte{2}, txNum)
+			put(kv.StorageDomain, slot(slots[0]), []byte{2}, txNum)
 		case 3:
-			put(kv.StorageDomain, slot(pairs[1][0]), []byte{3}, txNum)
+			put(kv.StorageDomain, slot(slots[2]), []byte{3}, txNum)
 		default:
 			putAccount(addrs[1+int(txNum)%3], txNum)
 		}
@@ -500,10 +481,10 @@ func TestConvertCommitmentFiles_V3HistorySerialRecreatedAccountRefusesBeforeSwap
 	})
 
 	db, agg, _ := buildRecreatedOwnerFilesWithParallel(t, 4, 3, 4, true, false)
-	beforeDomain := snapshotCommitmentFilesV3History(t, agg.Dirs().SnapDomain)
-	beforeHistory := snapshotCommitmentFilesV3History(t, agg.Dirs().SnapHistory)
-	beforeIdx := snapshotCommitmentFilesV3History(t, agg.Dirs().SnapIdx)
-	beforeAccessors := snapshotCommitmentFilesV3History(t, agg.Dirs().SnapAccessors)
+	beforeDomain := snapshotCommitmentFiles(t, agg.Dirs().SnapDomain)
+	beforeHistory := snapshotCommitmentFiles(t, agg.Dirs().SnapHistory)
+	beforeIdx := snapshotCommitmentFiles(t, agg.Dirs().SnapIdx)
+	beforeAccessors := snapshotCommitmentFiles(t, agg.Dirs().SnapAccessors)
 	require.NotEmpty(t, beforeIdx)
 	require.NotEmpty(t, beforeAccessors)
 	backupRoot := filepath.Join(agg.Dirs().Snap, "backup")
@@ -517,24 +498,12 @@ func TestConvertCommitmentFiles_V3HistorySerialRecreatedAccountRefusesBeforeSwap
 	tx.Rollback()
 	require.ErrorContains(t, err, "[commitment_convert] phase 1 history:")
 
-	require.Equal(t, beforeDomain, snapshotCommitmentFilesV3History(t, agg.Dirs().SnapDomain))
-	require.Equal(t, beforeHistory, snapshotCommitmentFilesV3History(t, agg.Dirs().SnapHistory))
-	require.Equal(t, beforeIdx, snapshotCommitmentFilesV3History(t, agg.Dirs().SnapIdx))
-	require.Equal(t, beforeAccessors, snapshotCommitmentFilesV3History(t, agg.Dirs().SnapAccessors))
+	require.Equal(t, beforeDomain, snapshotCommitmentFiles(t, agg.Dirs().SnapDomain))
+	require.Equal(t, beforeHistory, snapshotCommitmentFiles(t, agg.Dirs().SnapHistory))
+	require.Equal(t, beforeIdx, snapshotCommitmentFiles(t, agg.Dirs().SnapIdx))
+	require.Equal(t, beforeAccessors, snapshotCommitmentFiles(t, agg.Dirs().SnapAccessors))
 	_, err = os.Stat(backupRoot)
 	require.ErrorIs(t, err, os.ErrNotExist)
-}
-
-func snapshotCommitmentFilesV3History(t *testing.T, snapDir string) map[string][]byte {
-	t.Helper()
-	files, err := filepath.Glob(filepath.Join(snapDir, "*-commitment.*"))
-	require.NoError(t, err)
-	content := make(map[string][]byte, len(files))
-	for _, path := range files {
-		content[filepath.Base(path)], err = os.ReadFile(path)
-		require.NoError(t, err)
-	}
-	return content
 }
 
 func TestConvertCommitmentFiles_V3HistoryExtensionRoot(t *testing.T) {
@@ -546,7 +515,7 @@ func TestConvertCommitmentFiles_V3HistoryExtensionRoot(t *testing.T) {
 	db, agg, rwTx, domains := convertTestDomains(t, stepSize)
 	_, _, putAccount := domainWriter(t, domains, rwTx)
 	next := uint64(1)
-	addrs := [][]byte{addressWithHashPrefix(t, []byte{4}, &next), addressWithHashPrefix(t, []byte{4}, &next)}
+	addrs := [][]byte{keyWithHashPrefix(length.Addr, []byte{4}, &next), keyWithHashPrefix(length.Addr, []byte{4}, &next)}
 	roots := map[uint64][]byte{}
 	for txNum := range uint64(stepSize * steps) {
 		putAccount(addrs[txNum%2], txNum)

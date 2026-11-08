@@ -48,46 +48,31 @@ func BenchmarkFoldV3VsHPH(b *testing.B) {
 			entries := benchEntries(shape, n)
 			updates := updatesOf(entries)
 
-			b.Run(fmt.Sprintf("%s/%d/v3", shape, n), func(b *testing.B) {
-				dir := b.TempDir()
-				timedProcess(b, func() (func() error, func()) {
-					c := newShardedContext()
-					tr := &Trie{}
-					tr.ResetContext(c)
-					tr.SetTrieContextFactory(c.factory)
-					return func() error {
-						u := benchUpdatesIn(dir, commitment.ModeCollect, entries, updates)
-						_, err := tr.Process(ctxb, u, "", nil, commitment.WarmupConfig{})
-						return err
-					}, tr.Release
+			for _, arm := range []struct {
+				name string
+				mode commitment.Mode
+				open func(*shardedContext) commitment.Trie
+			}{
+				{"v3", commitment.ModeCollect, func(c *shardedContext) commitment.Trie { return newFactoryTrie(0, c, c.factory) }},
+				{"hph", commitment.ModeUpdate, func(c *shardedContext) commitment.Trie {
+					return commitment.NewHexPatriciaHashed(length.Addr, c, commitment.DefaultTrieConfig())
+				}},
+				{"parallel", commitment.ModeParallel, func(c *shardedContext) commitment.Trie {
+					return commitment.NewParallelPatriciaHashed(c.factory, length.Addr, commitment.DefaultTrieConfig())
+				}},
+			} {
+				b.Run(fmt.Sprintf("%s/%d/%s", shape, n, arm.name), func(b *testing.B) {
+					dir := b.TempDir()
+					timedProcess(b, func() (func() error, func()) {
+						tr := arm.open(newShardedContext())
+						return func() error {
+							u := benchUpdatesIn(dir, arm.mode, entries, updates)
+							_, err := tr.Process(ctxb, u, "", nil, commitment.WarmupConfig{})
+							return err
+						}, tr.Release
+					})
 				})
-			})
-
-			b.Run(fmt.Sprintf("%s/%d/hph", shape, n), func(b *testing.B) {
-				dir := b.TempDir()
-				timedProcess(b, func() (func() error, func()) {
-					c := newShardedContext()
-					tr := commitment.NewHexPatriciaHashed(length.Addr, c, commitment.DefaultTrieConfig())
-					return func() error {
-						u := benchUpdatesIn(dir, commitment.ModeUpdate, entries, updates)
-						_, err := tr.Process(ctxb, u, "", nil, commitment.WarmupConfig{})
-						return err
-					}, tr.Release
-				})
-			})
-
-			b.Run(fmt.Sprintf("%s/%d/parallel", shape, n), func(b *testing.B) {
-				dir := b.TempDir()
-				timedProcess(b, func() (func() error, func()) {
-					c := newShardedContext()
-					tr := commitment.NewParallelPatriciaHashed(c.factory, length.Addr, commitment.DefaultTrieConfig())
-					return func() error {
-						u := benchUpdatesIn(dir, commitment.ModeParallel, entries, updates)
-						_, err := tr.Process(ctxb, u, "", nil, commitment.WarmupConfig{})
-						return err
-					}, tr.Release
-				})
-			})
+			}
 		}
 	}
 }
@@ -102,9 +87,7 @@ func BenchmarkV3Workers(b *testing.B) {
 				dir := b.TempDir()
 				timedProcess(b, func() (func() error, func()) {
 					c := newShardedContext()
-					tr := &Trie{scheduleWorkers: w}
-					tr.ResetContext(c)
-					tr.SetTrieContextFactory(c.factory)
+					tr := newFactoryTrie(w, c, c.factory)
 					return func() error {
 						u := benchUpdatesIn(dir, commitment.ModeCollect, entries, updates)
 						_, err := tr.Process(ctxb, u, "", nil, commitment.WarmupConfig{})
@@ -152,9 +135,7 @@ func BenchmarkV3Incremental(b *testing.B) {
 	}
 
 	base := newShardedContext()
-	tr := &Trie{}
-	tr.ResetContext(base)
-	tr.SetTrieContextFactory(base.factory)
+	tr := newFactoryTrie(0, base, base.factory)
 	if _, err := tr.Process(context.Background(), benchUpdatesIn(b.TempDir(), commitment.ModeCollect, seed, updatesOf(seed)), "", nil, commitment.WarmupConfig{}); err != nil {
 		b.Fatal(err)
 	}
@@ -169,9 +150,7 @@ func BenchmarkV3Incremental(b *testing.B) {
 		for s := range base.shards {
 			c.shards[s].branches = maps.Clone(base.shards[s].branches)
 		}
-		tr := &Trie{}
-		tr.ResetContext(c)
-		tr.SetTrieContextFactory(c.factory)
+		tr := newFactoryTrie(0, c, c.factory)
 		u := benchUpdatesIn(dir, commitment.ModeCollect, next, nextUpdates)
 		return func() error {
 			_, err := tr.Process(context.Background(), u, "", nil, commitment.WarmupConfig{})

@@ -1052,22 +1052,16 @@ func (sdc *SharedDomainsCommitmentContext) SeekCommitment(ctx context.Context, t
 		}
 		return txNum, blockNum, nil
 	}
+	otherKey, otherErr := commitment.KeyCommitmentV3State, "the datadir holds commitment v3 records: start with COMMITMENT_V3=true"
 	if sdc.patriciaTrie.Variant() == commitment.VariantCommitmentV3 {
-		legacy, _, err := tx.GetLatest(kv.CommitmentDomain, KeyCommitmentState, kv.GetLatestOptions{})
-		if err != nil {
-			return 0, 0, err
-		}
-		if len(legacy) > 0 {
-			return 0, 0, errors.New("commitment v3 is enabled, but the datadir holds legacy commitment: convert it with `integration commitment convert --v3` first")
-		}
-	} else {
-		v3, _, err := tx.GetLatest(kv.CommitmentDomain, commitment.KeyCommitmentV3State, kv.GetLatestOptions{})
-		if err != nil {
-			return 0, 0, err
-		}
-		if len(v3) > 0 {
-			return 0, 0, errors.New("the datadir holds commitment v3 records: start with COMMITMENT_V3=true")
-		}
+		otherKey, otherErr = KeyCommitmentState, "commitment v3 is enabled, but the datadir holds legacy commitment: convert it with `integration commitment convert --v3` first"
+	}
+	other, _, err := tx.GetLatest(kv.CommitmentDomain, otherKey, kv.GetLatestOptions{})
+	if err != nil {
+		return 0, 0, err
+	}
+	if len(other) > 0 {
+		return 0, 0, errors.New(otherErr)
 	}
 	// handle case when we have no commitment, but have executed blocks
 	bnBytes, err := tx.GetOne(kv.SyncStageProgress, []byte("Execution"))
