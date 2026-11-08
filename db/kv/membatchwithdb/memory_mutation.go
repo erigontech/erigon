@@ -37,8 +37,10 @@ import (
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 )
 
-var _ kv.TemporalRwTx = &MemoryMutation{}
-var _ kv.HasDeleteRange = &MemoryMutation{}
+var (
+	_ kv.TemporalRwTx   = &MemoryMutation{}
+	_ kv.HasDeleteRange = &MemoryMutation{}
+)
 
 var errStopIteration = errors.New("stop")
 
