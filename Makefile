@@ -113,6 +113,7 @@ GOTEST = $(GO_BUILD_ENV) GODEBUG=$(GODEBUG) GOTRACEBACK=1 $(GO) test $(GO_FLAGS)
 
 GOINSTALL = go install -trimpath
 GOLANGCI = $(GO) tool -modfile=golangci-lint.mod golangci-lint
+GOVULNCHECK = $(GO) tool -modfile=govulncheck.mod govulncheck
 
 OS = $(shell uname -s)
 ARCH = $(shell uname -m)
@@ -510,12 +511,18 @@ kurtosis-cleanup:
 lintci:
 	@$(GOLANGCI) run --config ./.golangci.yml
 	@$(MAKE) check-generated
+	@$(MAKE) vulncheck
 
 ## lint:                              run all linters (fast-only first for quick feedback, then full)
 lint:
 	@$(GOLANGCI) run --config ./.golangci.yml --fast-only
 	@$(GOLANGCI) run --config ./.golangci.yml
 	@$(MAKE) check-generated
+	@$(MAKE) vulncheck
+
+## vulncheck:                         report known vulnerabilities that the code calls (govulncheck)
+vulncheck:
+	@$(GOVULNCHECK) ./...
 
 ## tidy:                              `go mod tidy`
 tidy:
