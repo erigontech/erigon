@@ -19,9 +19,11 @@ package rpc
 import (
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -74,7 +76,16 @@ func TestBatchLimitWebsocketBudgetHeldUntilAnswered(t *testing.T) {
 	srv := newTestServer(logger)
 	defer srv.Stop()
 	srv.SetBatchLimit(1)
-	httpsrv := httptest.NewServer(srv.WebsocketHandler([]string{"*"}, nil, false, logger))
+	writing, unblock := make(chan struct{}), make(chan struct{})
+	httpsrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hw := &hijackRecorder{ResponseWriter: w}
+		conn, err := websocket.Accept(hw, r, nil)
+		if err != nil {
+			return
+		}
+		hw.conn.Conn = &blockedWriteConn{Conn: hw.conn.Conn, writing: writing, unblock: unblock}
+		srv.ServeCodecWithContext(r.Context(), newWebsocketCodec(conn, hw.conn, &srv.ingress, r.Host, r.Header, r.RemoteAddr), 0)
+	}))
 	defer httpsrv.Close()
 
 	conn, resp, err := websocket.Dial(t.Context(), "ws:"+strings.TrimPrefix(httpsrv.URL, "http:"), nil)
@@ -86,20 +97,32 @@ func TestBatchLimitWebsocketBudgetHeldUntilAnswered(t *testing.T) {
 	}
 	defer func() { _ = conn.CloseNow() }()
 	conn.SetReadLimit(-1)
-	// The id is larger than the socket buffers, so the error is not written while the
-	// test does not read.
-	id := `"` + strings.Repeat("x", 24<<20) + `"`
+	id := `"` + strings.Repeat("x", int(smallBodyLimit)) + `"`
 	msg := `[{"jsonrpc":"2.0","id":` + id + `,"method":"test_echo"},{"jsonrpc":"2.0","id":2,"method":"test_echo"}]`
 	require.NoError(t, conn.Write(t.Context(), websocket.MessageText, []byte(msg)))
 
-	charged := int64(len(msg)) - smallBodyLimit
-	require.Eventually(t, func() bool { return srv.ingress.used.Load() == charged }, 5*time.Second, time.Millisecond)
-	require.Never(t, func() bool { return srv.ingress.used.Load() != charged }, 200*time.Millisecond, time.Millisecond)
+	<-writing
+	require.Equal(t, int64(len(msg))-smallBodyLimit, srv.ingress.used.Load())
 
+	close(unblock)
 	_, answer, err := conn.Read(t.Context())
 	require.NoError(t, err)
 	require.Contains(t, string(answer), id)
 	require.Eventually(t, func() bool { return srv.ingress.used.Load() == 0 }, 5*time.Second, time.Millisecond)
+}
+
+// blockedWriteConn holds every write until unblock is closed, and closes writing when the
+// first one starts.
+type blockedWriteConn struct {
+	net.Conn
+	writing, unblock chan struct{}
+	once             sync.Once
+}
+
+func (c *blockedWriteConn) Write(p []byte) (int, error) {
+	c.once.Do(func() { close(c.writing) })
+	<-c.unblock
+	return c.Conn.Write(p)
 }
 
 // TestParseMessageOverBatchLimitDoesNotAllocateElements pins that a batch over the limit is
