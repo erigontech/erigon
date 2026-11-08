@@ -202,11 +202,17 @@ func TestMergeRejectedBatchKeepsReceiverUnchanged(t *testing.T) {
 			metrics:  &kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
 		}
 	}
-	sd, other := newBatch(), newBatch()
-	other.putLatest(kv.AccountsDomain, "k", []byte("v"), 1)
-	other.currentChangesAccumulator = &changeset.StateChangeSet{}
+	for _, receiverHasAccumulator := range []bool{false, true} {
+		sd, other := newBatch(), newBatch()
+		other.putLatest(kv.AccountsDomain, "k", []byte("v"), 1)
+		if receiverHasAccumulator {
+			sd.currentChangesAccumulator = &changeset.StateChangeSet{}
+		} else {
+			other.currentChangesAccumulator = &changeset.StateChangeSet{}
+		}
 
-	require.Error(t, sd.Merge(other))
-	_, _, ok := sd.GetLatest(kv.AccountsDomain, []byte("k"))
-	require.False(t, ok)
+		require.Error(t, sd.Merge(other))
+		_, _, ok := sd.GetLatest(kv.AccountsDomain, []byte("k"))
+		require.False(t, ok, "receiverHasAccumulator=%v", receiverHasAccumulator)
+	}
 }
