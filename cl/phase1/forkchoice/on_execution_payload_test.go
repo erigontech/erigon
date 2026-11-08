@@ -2917,8 +2917,10 @@ func TestValidateExecutionPayloadEnvelopeForGossipIgnoresUnavailableBlockData(t 
 	}
 }
 
-func TestValidateExecutionPayloadEnvelopeForGossipRejectsBidMismatchBeforeStateReplay(t *testing.T) {
+func TestValidateExecutionPayloadEnvelopeForGossipRejectsBidMismatchBeforePayloadHashAndStateReplay(t *testing.T) {
 	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
+	envelope.Message.Payload.Transactions = solid.NewProgressiveTransactionsSSZFromTransactions([][]byte{{1, 2, 3}})
+	require.NoError(t, envelope.Message.Payload.BlockAccessList.SetBytes([]byte{4, 5, 6}))
 	envelope.Message.Payload.BlockHash[0]++
 	var replayCalls atomic.Int32
 	store := &ForkChoiceStore{
@@ -2937,6 +2939,8 @@ func TestValidateExecutionPayloadEnvelopeForGossipRejectsBidMismatchBeforeStateR
 	require.NotErrorIs(t, err, ErrIgnore)
 	require.ErrorContains(t, err, "failed gossip validation")
 	require.Zero(t, replayCalls.Load())
+	require.False(t, progressiveRootCached(t, envelope.Message.Payload.Transactions))
+	require.False(t, progressiveRootCached(t, envelope.Message.Payload.BlockAccessList))
 }
 
 func TestValidateExecutionPayloadEnvelopeForGossipBoundsStateCopiesAndAllowsWriter(t *testing.T) {

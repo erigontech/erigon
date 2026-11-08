@@ -422,6 +422,7 @@ func (p *TxPool) applyBlockUpdate(stateChanges *remoteproto.StateChangeBatch, un
 		})
 	}
 
+	unwindCells := make(blobCells)
 	for i, txn := range unwindBlobTxns.Txns {
 		if txn.HasBlobs() {
 			if poolTx == nil {
@@ -431,7 +432,7 @@ func (p *TxPool) applyBlockUpdate(stateChanges *remoteproto.StateChangeBatch, un
 			if err != nil {
 				return frames, err
 			}
-			if knownBlobTxn != nil {
+			if knownBlobTxn != nil && p.validateBlobSidecar(knownBlobTxn.TxnSlot, unwindCells) == txpoolcfg.Success {
 				unwindTxns.Append(knownBlobTxn.TxnSlot, unwindBlobTxns.Senders.At(i), false)
 			}
 		}
@@ -445,6 +446,7 @@ func (p *TxPool) applyBlockUpdate(stateChanges *remoteproto.StateChangeBatch, un
 	if err != nil {
 		return frames, err
 	}
+	maps.Copy(cells, unwindCells)
 
 	if dbg.AssertEnabled {
 		for _, txn := range unwindTxns.Txns {
@@ -1102,7 +1104,7 @@ func (p *TxPool) validateTxWithCells(txn *TxnSlot, isLocal bool, stateCache kvca
 			return txpoolcfg.InvalidFrame, nil
 		}
 		if txn.HasBlobs() {
-			return p.validateBlobTxn(txn, isLocal, cells), nil
+			return p.validateBlobTxnAndSidecar(txn, isLocal, cells), nil
 		}
 		return txpoolcfg.Success, nil
 	}
@@ -1238,12 +1240,20 @@ func (p *TxPool) validateTxWithCells(txn *TxnSlot, isLocal bool, stateCache kvca
 		}
 	}
 	if txn.HasBlobs() {
-		return p.validateBlobTxn(txn, isLocal, cells), nil
+		return p.validateBlobTxn(txn, isLocal), nil
 	}
 	return txpoolcfg.Success, nil
 }
 
-func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool, cellsByHash blobCells) txpoolcfg.DiscardReason {
+// validateBlobTxnAndSidecar runs both blob checks, for callers that already hold p.lock.
+func (p *TxPool) validateBlobTxnAndSidecar(txn *TxnSlot, isLocal bool, cells blobCells) txpoolcfg.DiscardReason {
+	if reason := p.validateBlobTxn(txn, isLocal); reason != txpoolcfg.Success {
+		return reason
+	}
+	return p.validateBlobSidecar(txn, cells)
+}
+
+func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardReason {
 	if !p.isCancun() {
 		return txpoolcfg.TypeNotActivated
 	}
@@ -1259,6 +1269,27 @@ func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool, cellsByHash blobCel
 		return txpoolcfg.TooManyBlobs
 	}
 
+	if !isLocal && (p.all.blobCount(txn.SenderID)+uint64(blobCount)) > p.cfg.BlobSlots {
+		if txn.Traced {
+			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx sender blob limit exceeded idHash=%x blobs=%d, limit=%d", txn.IDHash, p.all.blobCount(txn.SenderID)+uint64(blobCount), p.cfg.BlobSlots))
+		}
+		return txpoolcfg.BlobSlotsOverflow
+	}
+	if p.totalBlobsInPool.Load() >= p.cfg.TotalBlobPoolLimit {
+		if txn.Traced {
+			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx total blobs limit reached in pool limit=%d current blobs=%d", p.cfg.TotalBlobPoolLimit, p.totalBlobsInPool.Load()))
+		}
+		return txpoolcfg.BlobPoolOverflow
+	}
+
+	return txpoolcfg.Success
+}
+
+// validateBlobSidecar checks the blob sidecar against the txn and adds its cells to cellsByHash.
+// It reads no pool state, so it does not need p.lock.
+func (p *TxPool) validateBlobSidecar(txn *TxnSlot, cellsByHash blobCells) txpoolcfg.DiscardReason {
+	blobHashes := txn.GetBlobHashes()
+	blobCount := len(blobHashes)
 	if blobCount != len(txn.BlobBundles) {
 		p.logger.Debug(fmt.Sprintf("TX POOL: blobCount %d != len(blobs) %d", blobCount, len(txn.BlobBundles)))
 		return txpoolcfg.UnequalBlobTxExt
@@ -1286,19 +1317,6 @@ func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool, cellsByHash blobCel
 		if libkzg.KZGToVersionedHash(commitments[i]) != libkzg.VersionedHash(blobHashes[i]) {
 			return txpoolcfg.BlobHashCheckFail
 		}
-	}
-
-	if !isLocal && (p.all.blobCount(txn.SenderID)+uint64(blobCount)) > p.cfg.BlobSlots {
-		if txn.Traced {
-			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx sender blob limit exceeded idHash=%x blobs=%d, limit=%d", txn.IDHash, p.all.blobCount(txn.SenderID)+uint64(blobCount), p.cfg.BlobSlots))
-		}
-		return txpoolcfg.BlobSlotsOverflow
-	}
-	if p.totalBlobsInPool.Load() >= p.cfg.TotalBlobPoolLimit {
-		if txn.Traced {
-			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx total blobs limit reached in pool limit=%d current blobs=%d", p.cfg.TotalBlobPoolLimit, p.totalBlobsInPool.Load()))
-		}
-		return txpoolcfg.BlobPoolOverflow
 	}
 
 	if p.isOsaka() {
@@ -1522,34 +1540,34 @@ func (p *TxPool) withLockedState(ctx context.Context, txns *TxnSlots, f func(kv.
 	}
 }
 
-// Precheck SetCode transactions under the pool lock, then recover their
-// authorization signers without it. The caller must validate the surviving
-// transactions again with a fresh state view before inserting them.
-func (p *TxPool) prepareAuthorizations(ctx context.Context, txns TxnSlots) ([]txpoolcfg.DiscardReason, error) {
+// Precheck SetCode and blob transactions under the pool lock, then recover
+// authorization signers and verify blob sidecars without it. The caller must
+// validate the surviving transactions again with a fresh state view before inserting them.
+func (p *TxPool) prepareTxns(ctx context.Context, txns TxnSlots, sources []remoteSource) ([]txpoolcfg.DiscardReason, blobCells, error) {
 	if err := txns.Valid(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	var setCode TxnSlots
+	var prechecked TxnSlots
 	var indices []int
 	for i, txn := range txns.Txns {
-		if txn.TxType() == SetCodeTxnType {
-			setCode.Append(txn, txns.Senders.At(i), txns.IsLocal[i])
+		if txn.TxType() == SetCodeTxnType || txn.TxType() == BlobTxnType {
+			prechecked.Append(txn, txns.Senders.At(i), txns.IsLocal[i])
 			indices = append(indices, i)
 		}
 	}
 	if len(indices) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	var precheckReasons []txpoolcfg.DiscardReason
 	var goodTxns TxnSlots
-	err := p.withLockedState(ctx, &setCode, func(_ kv.TemporalTx, view kvcache.CacheView) error {
+	err := p.withLockedState(ctx, &prechecked, func(_ kv.TemporalTx, view kvcache.CacheView) error {
 		var err error
-		precheckReasons, goodTxns, _, err = p.validateTxns(&setCode, view, nil, nil)
+		precheckReasons, goodTxns, _, err = p.validateTxns(&prechecked, view, nil, nil)
 		return err
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	reasons := make([]txpoolcfg.DiscardReason, len(txns.Txns))
@@ -1557,9 +1575,50 @@ func (p *TxPool) prepareAuthorizations(ctx context.Context, txns TxnSlots) ([]tx
 		reasons[index] = precheckReasons[i]
 	}
 	for _, txn := range goodTxns.Txns {
-		p.recoverAuthorizations(txn)
+		if txn.TxType() == SetCodeTxnType {
+			p.recoverAuthorizations(txn)
+		}
 	}
-	return reasons, nil
+	cells := make(blobCells)
+	offenders := kzgOffenders{sources: sources}
+	for _, i := range indices {
+		if txns.Txns[i].TxType() != BlobTxnType || reasons[i] != txpoolcfg.NotSet {
+			continue
+		}
+		remote := !txns.IsLocal[i]
+		if remote && offenders.skip(i) {
+			continue
+		}
+		reasons[i] = p.validateBlobSidecar(txns.Txns[i], cells)
+		if reasons[i] == txpoolcfg.Success {
+			reasons[i] = txpoolcfg.NotSet
+		} else if reasons[i] == txpoolcfg.UnmatchedBlobTxExt && remote {
+			offenders.add(i)
+		}
+	}
+	return reasons, cells, nil
+}
+
+// kzgOffenders tracks the remote sources of txns that failed KZG verification, so their later txns are skipped.
+type kzgOffenders struct {
+	sources   []remoteSource
+	peers     [][64]byte
+	allRemote bool // a failure without a peer ID skips every later remote txn
+}
+
+func (o *kzgOffenders) skip(i int) bool {
+	if o.allRemote {
+		return true
+	}
+	return i < len(o.sources) && o.sources[i].peerID != nil && slices.Contains(o.peers, o.sources[i].peerKey())
+}
+
+func (o *kzgOffenders) add(i int) {
+	if i < len(o.sources) && o.sources[i].peerID != nil {
+		o.peers = append(o.peers, o.sources[i].peerKey())
+	} else {
+		o.allRemote = true
+	}
 }
 
 // validateTxns returns per-slot discard reasons and the txns that passed.
@@ -1577,20 +1636,12 @@ func (p *TxPool) validateTxns(txns *TxnSlots, stateCache kvcache.CacheView, reas
 	}
 	cells = make(blobCells)
 
-	skipAllRemote := false
-	var kzgOffenders [][64]byte
-	isKZGOffender := func(i int) bool {
-		if skipAllRemote {
-			return true
-		}
-		if i >= len(sources) || sources[i].peerID == nil {
-			return false
-		}
-		return slices.Contains(kzgOffenders, sources[i].peerKey())
-	}
-
+	offenders := kzgOffenders{sources: sources}
 	for i, txn := range txns.Txns {
-		if reasons[i] != txpoolcfg.NotSet || (!txns.IsLocal[i] && isKZGOffender(i)) {
+		if reasons[i] == txpoolcfg.UnmatchedBlobTxExt && !txns.IsLocal[i] {
+			offenders.add(i)
+		}
+		if reasons[i] != txpoolcfg.NotSet || (!txns.IsLocal[i] && offenders.skip(i)) {
 			continue
 		}
 		reason, err := p.validateTxWithCells(txn, txns.IsLocal[i], stateCache, cells)
@@ -1611,13 +1662,8 @@ func (p *TxPool) validateTxns(txns *TxnSlots, stateCache kvcache.CacheView, reas
 			p.punishSpammer(txn.SenderID)
 		}
 		reasons[i] = reason
-		// On a KZG-verify failure in a remote batch, drop the rest from the same peer without re-verifying.
-		if reason == txpoolcfg.UnmatchedBlobTxExt && !txns.IsLocal[i] {
-			if i < len(sources) && sources[i].peerID != nil {
-				kzgOffenders = append(kzgOffenders, sources[i].peerKey())
-			} else {
-				skipAllRemote = true
-			}
+		if reason == txpoolcfg.UnmatchedBlobTxExt && !txns.IsLocal[i] { // a frame txn's sidecar is verified here
+			offenders.add(i)
 		}
 	}
 	return reasons, goodTxns, cells, nil
@@ -1666,7 +1712,7 @@ func (p *TxPool) AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcf
 // State-update processing must disable waitForHead so it can continue delivering
 // the notifications needed to retry a backend head mismatch.
 func (p *TxPool) addNewTxns(ctx context.Context, newTxns TxnSlots, sources []remoteSource, waitForHead bool) ([]txpoolcfg.DiscardReason, error) {
-	reasons, err := p.prepareAuthorizations(ctx, newTxns)
+	reasons, preparedCells, err := p.prepareTxns(ctx, newTxns, sources)
 	if err != nil {
 		return nil, err
 	}
@@ -1689,6 +1735,7 @@ func (p *TxPool) addNewTxns(ctx context.Context, newTxns TxnSlots, sources []rem
 			if err != nil {
 				return err
 			}
+			maps.Copy(cells, preparedCells)
 			reasons = validatedReasons
 			p.kickKZGOffenders(ctx, reasons, sources)
 
@@ -3077,6 +3124,9 @@ func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.
 		reason, err := p.validateTxWithCells(txn, isLocalTx, cacheView, cells)
 		if err != nil {
 			return err
+		}
+		if reason == txpoolcfg.Success && txn.TxType() == BlobTxnType {
+			reason = p.validateBlobSidecar(txn, cells)
 		}
 		if reason != txpoolcfg.NotSet && reason != txpoolcfg.Success {
 			// The flush-time delete needs only the hash and the sender; dropping the body frees blobs now.

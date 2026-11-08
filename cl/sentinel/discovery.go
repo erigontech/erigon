@@ -103,6 +103,8 @@ func (s *Sentinel) findPeersForSubnets(subnets []subnetSearchState) {
 
 	ctx, cancel := context.WithTimeout(s.ctx, subnetSearchTimeout)
 	defer cancel()
+	// The filter skips non-matching nodes inside Next, so a walk would outlive the timeout unless it is closed.
+	defer context.AfterFunc(ctx, filteredIterator.Close)()
 
 	checked := 0
 	maxChecks := 2000 // Higher limit since we're searching for multiple subnets
