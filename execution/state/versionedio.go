@@ -8,9 +8,11 @@ import (
 	"fmt"
 	"iter"
 	"maps"
+	"runtime"
 	"slices"
 	"strconv"
 	"sync"
+	"sync/atomic"
 
 	g "github.com/anacrolix/generics"
 	"github.com/heimdalr/dag"
@@ -2936,21 +2938,46 @@ func (b *BlockAccessListBuilder) Build() types.BlockAccessList {
 	return bal
 }
 
+const matchesPerWorker = 4096
+
 func (b *BlockAccessListBuilder) Matches(bal types.BlockAccessList) bool {
 	if len(bal) != len(b.ac) {
 		return false
 	}
-	for i := range bal {
-		account, ok := b.ac[accounts.InternAddress(bal[i].Address)]
-		if !ok {
-			return false
-		}
-		account.finalize()
-		if !account.changes.Equal(&bal[i]) {
+	for i := 1; i < len(bal); i++ {
+		if bytes.Compare(bal[i-1].Address[:], bal[i].Address[:]) >= 0 {
 			return false
 		}
 	}
-	return true
+	match := func(from, to int) bool {
+		for i := from; i < to; i++ {
+			account, ok := b.ac[accounts.InternAddress(bal[i].Address)]
+			if !ok {
+				return false
+			}
+			account.finalize()
+			if !account.changes.Equal(&bal[i]) {
+				return false
+			}
+		}
+		return true
+	}
+	workers := min(runtime.GOMAXPROCS(0), len(bal)/matchesPerWorker)
+	if workers < 2 {
+		return match(0, len(bal))
+	}
+	var mismatch atomic.Bool
+	var wg sync.WaitGroup
+	step := (len(bal) + workers - 1) / workers
+	for from := 0; from < len(bal); from += step {
+		wg.Go(func() {
+			if !match(from, min(from+step, len(bal))) {
+				mismatch.Store(true)
+			}
+		})
+	}
+	wg.Wait()
+	return !mismatch.Load()
 }
 
 type accountState struct {

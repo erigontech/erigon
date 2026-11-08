@@ -129,3 +129,36 @@ func TestBlockAccessListBuilderMatchesAgreesWithHash(t *testing.T) {
 		require.True(t, withEmpty[0].Equal(&withNil[0]))
 	})
 }
+
+func TestBlockAccessListBuilderMatchesAcrossWorkers(t *testing.T) {
+	addrs := make([]accounts.Address, 3*matchesPerWorker+5)
+	for i := range addrs {
+		addrs[i] = accounts.InternAddress(common.Address{0: byte(i >> 16), 1: byte(i >> 8), 2: byte(i), 19: 1})
+	}
+	build := func() *BlockAccessListBuilder {
+		b := NewBlockAccessListBuilder()
+		for i, a := range addrs {
+			account := ensureAccountState(b.ac, a)
+			account.updateReadBalance(*uint256.NewInt(uint64(i)))
+			if i%7 == 0 {
+				account.applyWriteBalance(*uint256.NewInt(uint64(i) + 1), uint32(i%5+1))
+			}
+		}
+		return b
+	}
+	want := build().Build()
+	require.True(t, build().Matches(want))
+
+	changed := want.Copy()
+	changed[2*matchesPerWorker+3].BalanceChanges = []*types.BalanceChange{{Index: 1, Value: *uint256.NewInt(9)}}
+	require.False(t, build().Matches(changed))
+
+	swapped := want.Copy()
+	swapped[matchesPerWorker], swapped[matchesPerWorker+1] = swapped[matchesPerWorker+1], swapped[matchesPerWorker]
+	require.False(t, build().Matches(swapped))
+
+	duplicated := want.Copy()
+	step := (len(want) + 2) / 3
+	duplicated[0], duplicated[step+1] = want[len(want)-1], want[len(want)-1]
+	require.False(t, build().Matches(duplicated))
+}
