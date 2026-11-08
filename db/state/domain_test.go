@@ -2052,55 +2052,58 @@ func TestDomain_GetAsOfHalfPrunedSteps(t *testing.T) {
 // A commitment file that is not visible hides the values file of its range while that range's history stays visible, so
 // the latest value can be older than a write the history still holds.
 func TestDomain_GetAsOfValuesFileGap(t *testing.T) {
-	db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, 16, log.New())
-	tx, err := db.BeginRw(t.Context())
-	require.NoError(t, err)
-	defer tx.Rollback()
+	for name, collated := range map[string]uint64{"between_files": 6, "last_file": 4} {
+		t.Run(name, func(t *testing.T) {
+			db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, 16, log.New())
+			tx, err := db.BeginRw(t.Context())
+			require.NoError(t, err)
+			defer tx.Rollback()
 
-	key, other := bytes.Repeat([]byte{0xa1}, length.Addr), bytes.Repeat([]byte{0xb2}, length.Addr)
-	a, b, c := []byte("value-a"), []byte("value-b"), []byte("value-c")
-	domainRoTx := d.beginForTests()
-	writer := domainRoTx.NewWriter(db)
-	require.NoError(t, writer.PutWithPrev(key, a, 1, nil))
-	require.NoError(t, writer.PutWithPrev(key, b, 34, a))
-	require.NoError(t, writer.PutWithPrev(key, c, 54, b))
-	var prev []byte
-	const collated = 6
-	for step := range uint64(collated) {
-		v := binary.BigEndian.AppendUint64(nil, step+1)
-		require.NoError(t, writer.PutWithPrev(other, v, step*d.stepSize+3, prev))
-		prev = v
-	}
-	require.NoError(t, writer.Flush(t.Context(), tx))
-	writer.Close()
-	domainRoTx.Close()
+			key, other := bytes.Repeat([]byte{0xa1}, length.Addr), bytes.Repeat([]byte{0xb2}, length.Addr)
+			a, b, c := []byte("value-a"), []byte("value-b"), []byte("value-c")
+			domainRoTx := d.beginForTests()
+			writer := domainRoTx.NewWriter(db)
+			require.NoError(t, writer.PutWithPrev(key, a, 1, nil))
+			require.NoError(t, writer.PutWithPrev(key, b, 34, a))
+			require.NoError(t, writer.PutWithPrev(key, c, 54, b))
+			var prev []byte
+			for step := range uint64(collated) {
+				v := binary.BigEndian.AppendUint64(nil, step+1)
+				require.NoError(t, writer.PutWithPrev(other, v, step*d.stepSize+3, prev))
+				prev = v
+			}
+			require.NoError(t, writer.Flush(t.Context(), tx))
+			writer.Close()
+			domainRoTx.Close()
 
-	logEvery := time.NewTicker(30 * time.Second)
-	defer logEvery.Stop()
-	for step := range kv.Step(collated) {
-		require.NoError(t, d.collateBuildIntegrate(t.Context(), step, tx, background.NewProgressSet()))
-	}
-	pruneTx := d.beginForTests()
-	for step := range kv.Step(collated) {
-		_, err := pruneTx.Prune(t.Context(), tx, step, uint64(step)*d.stepSize, uint64(step+1)*d.stepSize, math.MaxUint64, logEvery)
-		require.NoError(t, err)
-	}
-	pruneTx.Close()
+			logEvery := time.NewTicker(30 * time.Second)
+			defer logEvery.Stop()
+			for step := range kv.Step(collated) {
+				require.NoError(t, d.collateBuildIntegrate(t.Context(), step, tx, background.NewProgressSet()))
+			}
+			pruneTx := d.beginForTests()
+			for step := range kv.Step(collated) {
+				_, err := pruneTx.Prune(t.Context(), tx, step, uint64(step)*d.stepSize, uint64(step+1)*d.stepSize, math.MaxUint64, logEvery)
+				require.NoError(t, err)
+			}
+			pruneTx.Close()
 
-	d.dirtyFiles.Scan(func(item *FilesItem) bool {
-		if item.startTxNum >= 32 && item.endTxNum <= 64 {
-			item.canDelete.Store(true)
-		}
-		return true
-	})
+			d.dirtyFiles.Scan(func(item *FilesItem) bool {
+				if item.startTxNum >= 32 && item.endTxNum <= 64 {
+					item.canDelete.Store(true)
+				}
+				return true
+			})
 
-	roTx := d.beginForTests()
-	defer roTx.Close()
-	for txNum, want := range map[uint64][]byte{2: a, 34: a, 35: b, 48: b, 54: b} {
-		got, ok, err := roTx.GetAsOf(key, txNum, tx)
-		require.NoError(t, err)
-		require.True(t, ok, "txNum %d", txNum)
-		require.Equal(t, want, got, "txNum %d", txNum)
+			roTx := d.beginForTests()
+			defer roTx.Close()
+			for txNum, want := range map[uint64][]byte{2: a, 34: a, 35: b, 48: b, 54: b} {
+				got, ok, err := roTx.GetAsOf(key, txNum, tx)
+				require.NoError(t, err)
+				require.True(t, ok, "txNum %d", txNum)
+				require.Equal(t, want, got, "txNum %d", txNum)
+			}
+		})
 	}
 }
 
