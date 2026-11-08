@@ -23,6 +23,7 @@ import (
 	"maps"
 	"math/rand"
 	"slices"
+	"strconv"
 	"testing"
 
 	keccak "github.com/erigontech/fastkeccak"
@@ -38,118 +39,96 @@ import (
 )
 
 func TestDeltas(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		run  func(*testing.T)
-	}{
-		{"E40/DeltaPartsDropUnchangedRecords", func(t *testing.T) {
-			var parts deltaParts
-			parts.add(recordDelta{Key: []byte{1}, Data: []byte{2}, Prev: []byte{2}})
-			parts.add(recordDelta{Key: []byte{3}, Data: []byte{4}, Prev: []byte{5}})
-			parts.add(recordDelta{Key: []byte{6}, Data: nil, Prev: nil})
-			require.Equal(t, deltaParts{{{Key: []byte{3}, Data: []byte{4}, Prev: []byte{5}}}}, parts)
-		}},
-		{"E40/ApplyDeltasReturnsPutError", func(t *testing.T) {
-			wantErr := errors.New("put failed")
-			err := applyDeltas(deltaParts{{{Key: []byte{1}, Data: []byte{2}, Prev: []byte{3}}}}, func(_, _, _ []byte) error {
-				return wantErr
-			}, nil)
-			require.ErrorIs(t, err, wantErr)
-		}},
-		{"E40/ApplyDeltasCountsOnlyAppliedWrites", func(t *testing.T) {
-			metered := &meteredContext{meterCounts: new(meterCounts)}
-			err := applyDeltas(deltaParts{{
-				{Key: []byte{1}, Data: []byte{2}},
-				{Key: []byte{3}, Data: []byte{4}},
-			}}, func(key, data, prev []byte) error {
-				if key[0] == 3 {
-					return errors.New("put failed")
-				}
-				return nil
-			}, metered.countDelta)
-			require.Error(t, err)
-			require.EqualValues(t, 1, metered.writes.Load())
-		}},
-		{"E40/MaterializeFoldsAndEncodesRecordInOneWalk", func(t *testing.T) {
-			ctx := newMockContext()
-			n := newNode(planeStorage)
-			n.addLeaf(3, 4, 9)
+	t.Run("E40/DeltaPartsDropUnchangedRecords", func(t *testing.T) {
+		var parts deltaParts
+		parts.add(recordDelta{Key: []byte{1}, Data: []byte{2}, Prev: []byte{2}})
+		parts.add(recordDelta{Key: []byte{3}, Data: []byte{4}, Prev: []byte{5}})
+		parts.add(recordDelta{Key: []byte{6}, Data: nil, Prev: nil})
+		require.Equal(t, deltaParts{{{Key: []byte{3}, Data: []byte{4}, Prev: []byte{5}}}}, parts)
+	})
+	t.Run("E40/ApplyDeltasReturnsPutError", func(t *testing.T) {
+		wantErr := errors.New("put failed")
+		err := applyDeltas(deltaParts{{{Key: []byte{1}, Data: []byte{2}, Prev: []byte{3}}}}, func(_, _, _ []byte) error {
+			return wantErr
+		}, nil)
+		require.ErrorIs(t, err, wantErr)
+	})
+	t.Run("E40/MaterializeFoldsAndEncodesRecordInOneWalk", func(t *testing.T) {
+		ctx := newMockContext()
+		n := newNode(planeStorage)
+		n.addLeaf(3, 4, 9)
 
-			var acc deltaParts
-			hash, err := graph{plane: planeStorage, addrHash: make([]byte, 32)}.materialize(ctx, n, n, &acc)
-			require.NoError(t, err)
-			require.Len(t, hash, 32)
-			require.Len(t, acc, 1)
-			require.Len(t, acc[0], 1)
-			delta := acc[0][0]
-			require.Equal(t, StorageNodeKey([32]byte{}, nil, nil), delta.Key)
-			require.NotEmpty(t, delta.Data)
-			require.NoError(t, Validate(delta.Data, 0))
-			require.Empty(t, ctx.putCalls)
-		}},
-		{"E43/PersistGraphRetainsOnlyFoldedDeltasAfterChildWalk", func(t *testing.T) {
-			for _, count := range []int{1000, 100000} {
-				t.Run(itoa(count), func(t *testing.T) {
-					ctx := newMockContext()
-					var addr [32]byte
-					root := newNode(planeStorage)
-					for i := range count {
-						path := make([]byte, 64)
-						path[0] = byte(i % 16)
-						value := i
-						for j := len(path) - 1; j >= 1 && value != 0; j-- {
-							path[j] = byte(value & 0x0f)
-							value >>= 4
-						}
-						require.NoError(t, insert(root, path, []byte{byte(i)}))
+		var acc deltaParts
+		hash, err := graph{plane: planeStorage, addrHash: make([]byte, 32)}.materialize(ctx, n, n, &acc)
+		require.NoError(t, err)
+		require.Len(t, hash, 32)
+		require.Len(t, acc, 1)
+		require.Len(t, acc[0], 1)
+		delta := acc[0][0]
+		require.Equal(t, StorageNodeKey([32]byte{}, nil, nil), delta.Key)
+		require.NotEmpty(t, delta.Data)
+		require.NoError(t, Validate(delta.Data, 0))
+		require.Empty(t, ctx.putCalls)
+	})
+	t.Run("E43/PersistGraphRetainsOnlyFoldedDeltasAfterChildWalk", func(t *testing.T) {
+		for _, count := range []int{1000, 100000} {
+			t.Run(strconv.Itoa(count), func(t *testing.T) {
+				ctx := newMockContext()
+				var addr [32]byte
+				root := newNode(planeStorage)
+				for i := range count {
+					path := make([]byte, 64)
+					path[0] = byte(i % 16)
+					value := i
+					for j := len(path) - 1; j >= 1 && value != 0; j-- {
+						path[j] = byte(value & 0x0f)
+						value >>= 4
 					}
-					g := graph{plane: planeStorage, addrHash: addr[:]}
-					parts, _, err := g.persistGraph(ctx, root, foldPlan{})
-					require.NoError(t, err)
-					require.NoError(t, applyDeltas(parts, ctx.PutBranch, nil))
-					require.NotEmpty(t, ctx.branches)
-					require.Equal(t, 1, linkedNodeCount(root))
-					require.Empty(t, ctx.accountCalls)
-					require.Empty(t, ctx.storageCalls)
-				})
-			}
-		}},
-		{"E43/PersistGraphKeepsRecordsThatOnlyMovedDeeper", func(t *testing.T) {
-			ctx := newMockContext()
-			var addr [32]byte
-			addr[0] = 0x7e
-			g := graph{plane: planeStorage, addrHash: addr[:]}
+					require.NoError(t, insert(root, path, []byte{byte(i)}))
+				}
+				g := graph{plane: planeStorage, addrHash: addr[:]}
+				parts, _, err := g.persistGraph(ctx, root, foldPlan{})
+				require.NoError(t, err)
+				require.NoError(t, applyDeltas(parts, ctx.PutBranch, nil))
+				require.NotEmpty(t, ctx.branches)
+				require.Equal(t, 1, linkedNodeCount(root))
+				require.Empty(t, ctx.accountCalls)
+				require.Empty(t, ctx.storageCalls)
+			})
+		}
+	})
+	t.Run("E43/PersistGraphKeepsRecordsThatOnlyMovedDeeper", func(t *testing.T) {
+		ctx := newMockContext()
+		var addr [32]byte
+		addr[0] = 0x7e
+		g := graph{plane: planeStorage, addrHash: addr[:]}
 
-			deepPath := []byte{0x0c, 0x06}
-			deepKey := StorageNodeKey(addr, deepPath, nil)
-			deepData := []byte{0xde, 0xad, 0xbe, 0xef}
-			ctx.branches[string(deepKey)] = deepData
-			siblingKey := StorageNodeKey(addr, []byte{0x02}, nil)
-			ctx.branches[string(siblingKey)] = []byte{0xca, 0xfe}
+		deepPath := []byte{0x0c, 0x06}
+		deepKey := StorageNodeKey(addr, deepPath, nil)
+		deepData := []byte{0xde, 0xad, 0xbe, 0xef}
+		ctx.branches[string(deepKey)] = deepData
+		siblingKey := StorageNodeKey(addr, []byte{0x02}, nil)
+		ctx.branches[string(siblingKey)] = []byte{0xca, 0xfe}
 
-			root := newNode(planeStorage)
-			root.setStoredChild(0x0c, bytes.Repeat([]byte{0x11}, 32), []byte{0x06})
-			root.setStoredChild(0x02, bytes.Repeat([]byte{0x22}, 32), nil)
+		root := newNode(planeStorage)
+		root.setStoredChild(0x0c, bytes.Repeat([]byte{0x11}, 32), []byte{0x06})
+		root.setStoredChild(0x02, bytes.Repeat([]byte{0x22}, 32), nil)
 
-			diverging := commitmenttest.Path([]byte{0x0c, 0x07}, 0x05)
-			require.NoError(t, insert(root, diverging, []byte{0x01}))
-			parts, _, err := g.persistGraph(ctx, root, foldPlan{})
-			require.NoError(t, err)
-			require.NoError(t, applyDeltas(parts, ctx.PutBranch, nil))
+		diverging := commitmenttest.Path([]byte{0x0c, 0x07}, 0x05)
+		require.NoError(t, insert(root, diverging, []byte{0x01}))
+		parts, _, err := g.persistGraph(ctx, root, foldPlan{})
+		require.NoError(t, err)
+		require.NoError(t, applyDeltas(parts, ctx.PutBranch, nil))
 
-			require.Equal(t, deepData, ctx.branches[string(deepKey)], "record that only moved from depth 1 to depth 2 must not be tombstoned")
-			require.Equal(t, []byte{0xca, 0xfe}, ctx.branches[string(siblingKey)])
-		}},
-	} {
-		t.Run(tc.name, tc.run)
-	}
+		require.Equal(t, deepData, ctx.branches[string(deepKey)], "record that only moved from depth 1 to depth 2 must not be tombstoned")
+		require.Equal(t, []byte{0xca, 0xfe}, ctx.branches[string(siblingKey)])
+	})
 
 	generated := commitmenttest.Generate(commitmenttest.Seed(0), commitmenttest.SequenceSpec{Kind: "storage", Count: 2200})
 	whale := commitmenttest.Key(commitmenttest.KeySpec{Kind: "bench-address", Size: 20}, 7)
-	account := commitmenttest.Account(commitmenttest.AccountSpec{Kind: "parity", Number: 7})
-	owner := commitmenttest.Op{Key: whale, Account: &account}
+	owner := parityAccount(whale, 7)
 	put := func(i int) commitmenttest.Op {
-		return commitmenttest.Op{Key: append(bytes.Clone(whale), commitmenttest.Key(commitmenttest.KeySpec{Kind: "bench-slot", Size: 32}, i)...), Storage: commitmenttest.Storage(commitmenttest.StorageSpec{Number: i})}
+		return commitmenttest.Op{Key: append(bytes.Clone(whale), commitmenttest.Key(commitmenttest.KeySpec{Kind: "bench-slot", Size: 32}, i)...), Storage: commitmenttest.Storage(i)}
 	}
 	deleted := put(1)
 	deleted.Delete = true
@@ -250,90 +229,83 @@ func linkedNodeCount(n *node) int {
 }
 
 func TestRecordGraph(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		run  func(*testing.T)
-	}{
-		{"E66/RecordHasherExpectsEveryExtensionChild", func(t *testing.T) {
-			n := newNode(planeAccount)
-			n.setStoredChild(1, bytes.Repeat([]byte{0x11}, 32), []byte{2, 3})
-			n.setStoredChild(4, bytes.Repeat([]byte{0x44}, 32), []byte{5, 6, 7})
-			record := encodeRecord(n, 0, nil)
-			want, err := fold(n, 0)
-			require.NoError(t, err)
+	t.Run("E66/RecordHasherExpectsEveryExtensionChild", func(t *testing.T) {
+		n := newNode(planeAccount)
+		n.setStoredChild(1, bytes.Repeat([]byte{0x11}, 32), []byte{2, 3})
+		n.setStoredChild(4, bytes.Repeat([]byte{0x44}, 32), []byte{5, 6, 7})
+		record := encodeRecord(n, 0, nil)
+		want, err := fold(n, 0)
+		require.NoError(t, err)
 
-			var keys [][]byte
-			got, err := NewRecordHasher().Hash(AccountNodeKey(nil, nil), record, func(key, _ []byte) error {
-				keys = append(keys, bytes.Clone(key))
-				return nil
-			})
-			require.NoError(t, err)
-			require.Equal(t, want, got)
-			require.Equal(t, [][]byte{AccountNodeKey([]byte{1, 2, 3}, nil), AccountNodeKey([]byte{4, 5, 6, 7}, nil)}, keys)
-		}},
-		{"E66/RecordMatcherChecksOnlyReferencedStorageTries", func(t *testing.T) {
-			var addrHash [32]byte
-			addrHash[0] = 0xe7
-			child := StorageNodeKey(addrHash, []byte{8, 2}, nil)
-			parent := StorageNodeKey(addrHash, []byte{8}, nil)
+		var keys [][]byte
+		got, err := NewRecordHasher().Hash(AccountNodeKey(nil, nil), record, func(key, _ []byte) error {
+			keys = append(keys, bytes.Clone(key))
+			return nil
+		})
+		require.NoError(t, err)
+		require.Equal(t, want, got)
+		require.Equal(t, [][]byte{AccountNodeKey([]byte{1, 2, 3}, nil), AccountNodeKey([]byte{4, 5, 6, 7}, nil)}, keys)
+	})
+	t.Run("E66/RecordMatcherChecksOnlyReferencedStorageTries", func(t *testing.T) {
+		var addrHash [32]byte
+		addrHash[0] = 0xe7
+		child := StorageNodeKey(addrHash, []byte{8, 2}, nil)
+		parent := StorageNodeKey(addrHash, []byte{8}, nil)
 
-			dead := NewRecordMatcher()
-			require.NoError(t, dead.Record(AccountNodeKey(nil, nil), [32]byte{1}))
-			require.NoError(t, dead.Expect(child, bytes.Repeat([]byte{0x22}, 32)))
-			require.NoError(t, dead.Record(parent, [32]byte{8}))
-			_, _, orphans, err := dead.Finish()
-			require.NoError(t, err)
-			require.Equal(t, uint64(1), orphans)
+		dead := NewRecordMatcher()
+		require.NoError(t, dead.Record(AccountNodeKey(nil, nil), [32]byte{1}))
+		require.NoError(t, dead.Expect(child, bytes.Repeat([]byte{0x22}, 32)))
+		require.NoError(t, dead.Record(parent, [32]byte{8}))
+		_, _, orphans, err := dead.Finish()
+		require.NoError(t, err)
+		require.Equal(t, uint64(1), orphans)
 
-			var root [32]byte
-			copy(root[:], bytes.Repeat([]byte{0x77}, 32))
-			live := NewRecordMatcher()
-			require.NoError(t, live.Expect(StorageNodeKey(addrHash, nil, nil), root[:]))
-			require.NoError(t, live.Record(AccountNodeKey(nil, nil), [32]byte{1}))
-			require.NoError(t, live.Record(StorageNodeKey(addrHash, nil, nil), root))
-			require.NoError(t, live.Expect(child, bytes.Repeat([]byte{0x22}, 32)))
-			require.NoError(t, live.Record(parent, [32]byte{8}))
-			_, _, _, err = live.Finish()
-			require.ErrorContains(t, err, "is referenced but missing")
-		}},
-		{"E66/RecordMatcherRejectsHashMismatch", func(t *testing.T) {
-			matcher := NewRecordMatcher()
-			key := AccountNodeKey([]byte{1}, nil)
-			h1, h2 := [32]byte{1}, [32]byte{2}
-			require.NoError(t, matcher.Expect(key, h1[:]))
-			require.ErrorContains(t, matcher.Record(key, h2), "folds to")
-		}},
-		{"E66/RecordMatcherRejectsDuplicateRecord", func(t *testing.T) {
-			matcher := NewRecordMatcher()
-			key := AccountNodeKey([]byte{1}, nil)
-			hash := [32]byte{1}
-			require.NoError(t, matcher.Record(key, hash))
-			require.ErrorContains(t, matcher.Record(key, hash), "recorded or expected twice")
-		}},
-		{"E66/RecordMatcherRejectsMissingStorageRoot", func(t *testing.T) {
-			matcher := NewRecordMatcher()
-			var addrHash [32]byte
-			addrHash[0] = 1
-			root := [32]byte{2}
-			require.NoError(t, matcher.Expect(StorageNodeKey(addrHash, nil, nil), root[:]))
-			require.NoError(t, matcher.Record(AccountNodeKey(nil, nil), [32]byte{3}))
-			_, _, _, err := matcher.Finish()
-			require.ErrorContains(t, err, "no storage trie")
-		}},
-		{"E66/EmptyChildRecordIsInvalid", func(t *testing.T) {
-			var addrHash [32]byte
-			parent := newNode(planeStorage)
-			parent.setStoredChild(4, bytes.Repeat([]byte{0x44}, 32), nil)
-			ctx := newMockContext()
-			ctx.branches[string(StorageNodeKey(addrHash, []byte{4}, nil))] = []byte{}
+		var root [32]byte
+		copy(root[:], bytes.Repeat([]byte{0x77}, 32))
+		live := NewRecordMatcher()
+		require.NoError(t, live.Expect(StorageNodeKey(addrHash, nil, nil), root[:]))
+		require.NoError(t, live.Record(AccountNodeKey(nil, nil), [32]byte{1}))
+		require.NoError(t, live.Record(StorageNodeKey(addrHash, nil, nil), root))
+		require.NoError(t, live.Expect(child, bytes.Repeat([]byte{0x22}, 32)))
+		require.NoError(t, live.Record(parent, [32]byte{8}))
+		_, _, _, err = live.Finish()
+		require.ErrorContains(t, err, "is referenced but missing")
+	})
+	t.Run("E66/RecordMatcherRejectsHashMismatch", func(t *testing.T) {
+		matcher := NewRecordMatcher()
+		key := AccountNodeKey([]byte{1}, nil)
+		h1, h2 := [32]byte{1}, [32]byte{2}
+		require.NoError(t, matcher.Expect(key, h1[:]))
+		require.ErrorContains(t, matcher.Record(key, h2), "folds to")
+	})
+	t.Run("E66/RecordMatcherRejectsDuplicateRecord", func(t *testing.T) {
+		matcher := NewRecordMatcher()
+		key := AccountNodeKey([]byte{1}, nil)
+		hash := [32]byte{1}
+		require.NoError(t, matcher.Record(key, hash))
+		require.ErrorContains(t, matcher.Record(key, hash), "recorded or expected twice")
+	})
+	t.Run("E66/RecordMatcherRejectsMissingStorageRoot", func(t *testing.T) {
+		matcher := NewRecordMatcher()
+		var addrHash [32]byte
+		addrHash[0] = 1
+		root := [32]byte{2}
+		require.NoError(t, matcher.Expect(StorageNodeKey(addrHash, nil, nil), root[:]))
+		require.NoError(t, matcher.Record(AccountNodeKey(nil, nil), [32]byte{3}))
+		_, _, _, err := matcher.Finish()
+		require.ErrorContains(t, err, "no storage trie")
+	})
+	t.Run("E66/EmptyChildRecordIsInvalid", func(t *testing.T) {
+		var addrHash [32]byte
+		parent := newNode(planeStorage)
+		parent.setStoredChild(4, bytes.Repeat([]byte{0x44}, 32), nil)
+		ctx := newMockContext()
+		ctx.branches[string(StorageNodeKey(addrHash, []byte{4}, nil))] = []byte{}
 
-			g := graph{plane: planeStorage, addrHash: addrHash[:]}
-			_, err := g.unfoldChild(ctx, parent.childPath(4, nil))
-			require.ErrorIs(t, err, errNodeRecord)
-		}},
-	} {
-		t.Run(tc.name, tc.run)
-	}
+		g := graph{plane: planeStorage, addrHash: addrHash[:]}
+		_, err := g.unfoldChild(ctx, parent.childPath(4, nil))
+		require.ErrorIs(t, err, errNodeRecord)
+	})
 }
 
 type legacyWorld struct {

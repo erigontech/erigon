@@ -259,7 +259,7 @@ func TestConvertCommitmentFiles_V3HistoryRejectsAsOfOrphans(t *testing.T) {
 	tx, err := db.BeginTemporalRw(t.Context())
 	require.NoError(t, err)
 	t.Cleanup(tx.Rollback) //nolint:gocritic
-	_, err = state.ConvertCommitmentFiles(t.Context(), state.AggTx(tx), state.ConvertOpts{TargetV3: true}, log.New())
+	err = state.ConvertCommitmentFiles(t.Context(), state.AggTx(tx), state.ConvertOpts{TargetV3: true}, log.New())
 	tx.Rollback()
 	require.ErrorContains(t, err, "orphan records")
 }
@@ -276,7 +276,7 @@ func TestConvertCommitmentFiles_V3HistoryOversizedBatch(t *testing.T) {
 	tx, err := db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	t.Cleanup(tx.Rollback)
-	_, err = state.ConvertCommitmentFiles(ctx, state.AggTx(tx), state.ConvertOpts{TargetV3: true}, log.New())
+	err = state.ConvertCommitmentFiles(ctx, state.AggTx(tx), state.ConvertOpts{TargetV3: true}, log.New())
 	tx.Rollback()
 	require.NoError(t, err)
 }
@@ -297,7 +297,7 @@ func TestConvertCommitmentFiles_V3HistoryPreflightLeavesNoProducer(t *testing.T)
 	require.NoError(t, err)
 	t.Cleanup(tx.Rollback)
 	opt := goleak.IgnoreCurrent()
-	_, err = state.ConvertCommitmentFiles(t.Context(), state.AggTx(tx), state.ConvertOpts{TargetV3: true}, log.New())
+	err = state.ConvertCommitmentFiles(t.Context(), state.AggTx(tx), state.ConvertOpts{TargetV3: true}, log.New())
 	tx.Rollback()
 	require.ErrorContains(t, err, "missing .ef range")
 	goleak.VerifyNone(t, opt)
@@ -513,7 +513,7 @@ func TestConvertCommitmentFiles_V3HistorySerialRecreatedAccountRefusesBeforeSwap
 	tx, err := db.BeginTemporalRw(t.Context())
 	require.NoError(t, err)
 	t.Cleanup(tx.Rollback)
-	_, err = state.ConvertCommitmentFiles(t.Context(), state.AggTx(tx), state.ConvertOpts{TargetV3: true}, log.New())
+	err = state.ConvertCommitmentFiles(t.Context(), state.AggTx(tx), state.ConvertOpts{TargetV3: true}, log.New())
 	tx.Rollback()
 	require.ErrorContains(t, err, "[commitment_convert] phase 1 history:")
 

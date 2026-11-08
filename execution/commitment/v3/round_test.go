@@ -53,13 +53,13 @@ func TestPartition(t *testing.T) {
 		wipe     bool
 	}{
 		{"E34/PartitionStoragePrefixAndAccounts", []phaseAInput{
-			{hashedKey: append(path(1), path(3)...), plainKey: bytes.Repeat([]byte{0xa}, 52), update: storageUpdate([]byte{1})},
-			{hashedKey: append(path(1), path(4)...), plainKey: bytes.Repeat([]byte{0xa}, 52), update: storageUpdate([]byte{2})},
-			{hashedKey: path(1), plainKey: bytes.Repeat([]byte{0xa}, 20), update: nonce},
-			{hashedKey: path(2), plainKey: bytes.Repeat([]byte{0xb}, 20)},
+			{hashedKey: append(path(1), path(3)...), update: storageUpdate([]byte{1})},
+			{hashedKey: append(path(1), path(4)...), update: storageUpdate([]byte{2})},
+			{hashedKey: path(1), update: nonce},
+			{hashedKey: path(2)},
 		}, []accountEntry{{hashedKey: path(1), update: &commitment.Update{Flags: commitment.NonceUpdate, Nonce: 7}, storageDirty: true}, {hashedKey: path(2)}}, 2, false},
 		{"E34/PhaseAStorageOnlyUpdateKeepsAccountEntrySeparate", []phaseAInput{{hashedKey: append(path(9), path(2)...), update: storageUpdate([]byte{0xaa})}}, []accountEntry{{hashedKey: path(9), storageDirty: true}}, 1, false},
-		{"E35/PartitionAccountDeleteCreatesWipeJob", []phaseAInput{{hashedKey: path(3), plainKey: bytes.Repeat([]byte{0x11}, 20), update: deleted}}, []accountEntry{{hashedKey: path(3), update: &commitment.Update{Flags: commitment.DeleteUpdate}}}, 0, true},
+		{"E35/PartitionAccountDeleteCreatesWipeJob", []phaseAInput{{hashedKey: path(3), update: deleted}}, []accountEntry{{hashedKey: path(3), update: &commitment.Update{Flags: commitment.DeleteUpdate}}}, 0, true},
 		{"E35/PartitionDeleteWithStorageWriteStillWipes", []phaseAInput{{hashedKey: path(4), update: deleted}, {hashedKey: append(path(4), path(5)...), update: storageUpdate([]byte{1})}}, []accountEntry{{hashedKey: path(4), update: &commitment.Update{Flags: commitment.DeleteUpdate}, storageDirty: true}}, 0, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -351,9 +351,9 @@ func TestDeletedAccountWipesStorageWrittenInTheSameBatch(t *testing.T) {
 	differential(t, commitmenttest.Case{
 		ID: "delete-with-slot-write",
 		Rounds: [][]commitmenttest.Op{
-			{commitmenttest.AccountAt(addr, commitmenttest.AccountSpec{Kind: "parity", Number: 7}), commitmenttest.StorageAt(slotA, 8), commitmenttest.StorageAt(slotB, 9)},
+			{parityAccount(addr, 7), commitmenttest.StorageAt(slotA, 8), commitmenttest.StorageAt(slotB, 9)},
 			{commitmenttest.StorageAt(slotA, 80), commitmenttest.DeleteAt(addr)},
-			{commitmenttest.AccountAt(addr, commitmenttest.AccountSpec{Kind: "parity", Number: 70})},
+			{parityAccount(addr, 70)},
 		},
 	}, []runner.RunSpec{{Name: "v3", Mode: commitment.ModeCollect, Workers: 1}})
 }

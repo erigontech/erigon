@@ -49,6 +49,7 @@ import (
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state/contracts"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/internal/commitmenttest"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
 
@@ -276,7 +277,7 @@ func crashRecoveryLiveCommitment(t *testing.T, entries map[string]string) map[st
 	t.Helper()
 	entries = maps.Clone(entries)
 	for key, value := range entries {
-		if key == hex.EncodeToString(testCommitmentStateKey()) {
+		if key == hex.EncodeToString(commitmenttest.StateKey()) {
 			continue
 		}
 		data, err := hex.DecodeString(value)

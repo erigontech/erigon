@@ -163,12 +163,7 @@ func DecodeCommitmentV3State(value []byte) (blockNum, txNum uint64, root []byte,
 }
 
 func IsCommitmentStateKey(key []byte) bool {
-	for _, stateKey := range CommitmentStateKeys {
-		if bytes.Equal(key, stateKey) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(CommitmentStateKeys, func(k []byte) bool { return bytes.Equal(key, k) })
 }
 
 var NewCommitmentV3Trie func(tmpdir string, cfg TrieConfig) (Trie, *Updates)

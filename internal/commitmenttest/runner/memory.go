@@ -62,19 +62,15 @@ func (m *Memory) Open(context.Context) (commitment.PatriciaContext, func()) {
 	return &Memory{spec: m.spec, store: m.store}, nil
 }
 
-func (m *Memory) read(key []byte) ([]byte, kv.Step, error) {
-	m.store.Lock()
-	defer m.store.Unlock()
-	return m.store.records[string(key)], 0, nil
-}
-
 func (m *Memory) Branch(key []byte) ([]byte, kv.Step, error) {
-	data, step, err := m.read(key)
-	if err != nil || data == nil {
-		return nil, step, err
+	m.store.Lock()
+	data := m.store.records[string(key)]
+	m.store.Unlock()
+	if data == nil {
+		return nil, 0, nil
 	}
 	if !m.spec.Borrowed {
-		return bytes.Clone(data), step, nil
+		return bytes.Clone(data), 0, nil
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -82,7 +78,7 @@ func (m *Memory) Branch(key []byte) ([]byte, kv.Step, error) {
 		m.scratch = make([]byte, 0, len(data))
 	}
 	m.scratch = append(m.scratch[:0], data...)
-	return m.scratch, step, nil
+	return m.scratch, 0, nil
 }
 
 func (m *Memory) PutBranch(key, data, prev []byte) error {

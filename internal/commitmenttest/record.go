@@ -16,7 +16,12 @@
 
 package commitmenttest
 
-import "bytes"
+import (
+	"bytes"
+
+	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/execution/commitment"
+)
 
 type Leaf struct {
 	Suffix []byte
@@ -24,7 +29,6 @@ type Leaf struct {
 }
 
 type RecordSpec struct {
-	Key           []byte
 	Flags         byte
 	ChildMask     uint16
 	LeafMask      uint16
@@ -76,4 +80,20 @@ func Record(spec *RecordSpec) []byte {
 		}
 	}
 	return data
+}
+
+func StateKey() []byte {
+	if statecfg.ExperimentalCommitmentV3 {
+		return commitment.KeyCommitmentV3State
+	}
+	return commitment.KeyCommitmentState
+}
+
+func DecodeState(v []byte) (txNum, blockNum uint64, root []byte, err error) {
+	if statecfg.ExperimentalCommitmentV3 {
+		blockNum, txNum, root, err = commitment.DecodeCommitmentV3State(v)
+		return txNum, blockNum, root, err
+	}
+	root, blockNum, txNum, err = commitment.HexTrieExtractStateRoot(v)
+	return txNum, blockNum, root, err
 }

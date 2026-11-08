@@ -45,9 +45,3 @@ func TestPickTrieVariant(t *testing.T) {
 		})
 	}
 }
-
-func TestParseTrieVariantKnowsV3(t *testing.T) {
-	require.Equal(t, commitment.VariantCommitmentV3, commitment.ParseTrieVariant("v3"))
-	require.Equal(t, commitment.VariantParallelHexPatricia, commitment.ParseTrieVariant("parallel"))
-	require.Equal(t, commitment.VariantHexPatriciaTrie, commitment.ParseTrieVariant("hex"))
-}

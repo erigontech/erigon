@@ -458,13 +458,6 @@ func TestBuildAndCacheHeadCaptureHappyPath(t *testing.T) {
 	require.Equal(t, wantBytes, gotBytes, "head-capture witness must match the durable on-demand build")
 }
 
-// TestNewWitnessCacheBuilderAPISelectsMode pins that the head-capture argument routes
-// straight into the shared cache's mode fields: head-capture construction yields a
-// cache-only, head-capture cache; durable construction yields a recompute-capable one.
-func TestBuildAndCacheHeadCaptureReadsParentRecords(t *testing.T) {
-	headCaptureReadsParentRecords(t)
-}
-
 func TestRunWitnessCacheBuilderParentReadsByVariant(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -500,7 +493,7 @@ func TestRunWitnessCacheBuilderParentReadsByVariant(t *testing.T) {
 	}
 }
 
-func headCaptureReadsParentRecords(t *testing.T) {
+func TestBuildAndCacheHeadCaptureReadsParentRecords(t *testing.T) {
 	t.Cleanup(statecfg.SetCommitmentV3(true))
 	statecfg.EnableHistoricalCommitment()
 	t.Cleanup(func() { commitmentdb.PublishParentRecords(nil) })
@@ -573,6 +566,9 @@ func headCaptureReadsParentRecords(t *testing.T) {
 	require.False(t, ok, "a verified deletion the collapse trace does not delete fails the build")
 }
 
+// TestNewWitnessCacheBuilderAPISelectsMode pins that the head-capture argument routes
+// straight into the shared cache's mode fields: head-capture construction yields a
+// cache-only, head-capture cache; durable construction yields a recompute-capable one.
 func TestNewWitnessCacheBuilderAPISelectsMode(t *testing.T) {
 	m, _ := rpcdaemontest.CreateTestExecModuleNoInsert(t)
 	cfg := &httpcfg.HttpCfg{WitnessCacheBlocks: 8, Dirs: m.Dirs}

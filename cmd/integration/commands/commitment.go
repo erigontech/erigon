@@ -639,8 +639,7 @@ func commitmentConvert(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 	// references. The deferred Close itself is safe (refcount decrement +
 	// nil-guarded closeFiles), but MadvNormal would dereference freed mmap.
 
-	_, err := dbstate.ConvertCommitmentFiles(ctx, acRo, opts, logger)
-	return err
+	return dbstate.ConvertCommitmentFiles(ctx, acRo, opts, logger)
 }
 
 // integration commitment visualize

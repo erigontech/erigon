@@ -17,12 +17,10 @@
 package commands
 
 import (
-	"encoding/binary"
 	"os"
 	"path/filepath"
 	"testing"
 
-	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -33,7 +31,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal"
-	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/state"
@@ -41,8 +38,6 @@ import (
 	chaincfg "github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	"github.com/erigontech/erigon/execution/execfinality"
-	"github.com/erigontech/erigon/execution/stagedsync/stages"
-	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
 
@@ -120,24 +115,7 @@ func dbWithV3State(t *testing.T) (kv.TemporalRwDB, datadir.Dirs) {
 	require.NoError(t, err)
 	require.NoError(t, db.OpenStateSnapshots(t.Context()))
 	t.Cleanup(db.Close)
-	agg := db.Agg().(*state.Aggregator)
-	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, false)
-	tx, domains := temporaltest.NewTestTxSD(t, db)
-	for txNum := range uint64(64) {
-		addr := make([]byte, 20)
-		binary.BigEndian.PutUint64(addr[12:], txNum%5+1)
-		acc := accounts.Account{Nonce: txNum + 1, Balance: *uint256.NewInt(txNum + 1), CodeHash: accounts.EmptyCodeHash}
-		prev, _, err := domains.GetLatest(kv.AccountsDomain, tx, addr)
-		require.NoError(t, err)
-		require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, addr, accounts.SerialiseV3(&acc), txNum, prev))
-		_, err = domains.ComputeCommitment(t.Context(), tx, true, txNum, txNum, "", nil)
-		require.NoError(t, err)
-		require.NoError(t, rawdbv3.TxNums.Append(tx, txNum, txNum))
-	}
-	require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, 63))
-	require.NoError(t, domains.Flush(t.Context(), tx))
-	domains.Close()
-	require.NoError(t, tx.Commit())
+	agg := fillAccountState(t, db, 64)
 	require.NoError(t, agg.BuildFiles(db, 48, execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums)))
 	return db, dirs
 }

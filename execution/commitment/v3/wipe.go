@@ -71,5 +71,5 @@ func childRecordPath(record Record, l layout, path []byte, nib int) []byte {
 		return unpackPath(selfExt[1:], int(selfExt[0]), nil)
 	}
 	childPath := append(append([]byte(nil), path...), byte(nib))
-	return append(childPath, decodeExtension(record.extAt(l, nib))...)
+	return append(childPath, decodeExtensionInto(record.extAt(l, nib), nil)...)
 }

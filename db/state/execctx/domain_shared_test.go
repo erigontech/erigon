@@ -51,6 +51,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/execfinality"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/internal/commitmenttest"
 )
 
 var unboundedFinalityCtx = execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums)
@@ -514,10 +515,10 @@ func TestSharedDomain_RepeatedUnwindAcrossStepBoundary(t *testing.T) {
 	require.NoError(doms.Flush(ctx, rwTx))
 
 	// Verify: commitment "state" key is at blockNum ≤ unwindTarget.
-	stateVal, _, err := rwTx.GetLatest(kv.CommitmentDomain, testCommitmentStateKey(), kv.GetLatestOptions{})
+	stateVal, _, err := rwTx.GetLatest(kv.CommitmentDomain, commitmenttest.StateKey(), kv.GetLatestOptions{})
 	require.NoError(err)
 	require.GreaterOrEqual(len(stateVal), 16, "commitment state record must exist post-unwind (was forward-populated by executeRange)")
-	_, postBlock, _, err := testDecodeCommitmentState(stateVal)
+	_, postBlock, _, err := commitmenttest.DecodeState(stateVal)
 	require.NoError(err)
 	require.LessOrEqualf(postBlock, unwindTarget,
 		"commitment state blockNum=%d must be ≤ unwindTarget=%d after repeated unwinds",
@@ -671,10 +672,10 @@ func TestSharedDomain_MergeUnwindAcrossStepBoundary(t *testing.T) {
 	// unwind step — but the value carried by the retained entry is the
 	// pre-step-1-write value (block 9's state), not the unwindTarget's
 	// state (block 4). A later GetLatest then sees blockNum=9 > target=4.
-	stateVal, _, err := rwTx.GetLatest(kv.CommitmentDomain, testCommitmentStateKey(), kv.GetLatestOptions{})
+	stateVal, _, err := rwTx.GetLatest(kv.CommitmentDomain, commitmenttest.StateKey(), kv.GetLatestOptions{})
 	require.NoError(err)
 	require.GreaterOrEqual(len(stateVal), 16, "commitment state record must exist after Merge+Flush")
-	_, postBlock, _, err := testDecodeCommitmentState(stateVal)
+	_, postBlock, _, err := commitmenttest.DecodeState(stateVal)
 	require.NoError(err)
 	require.LessOrEqualf(postBlock, unwindTarget,
 		"commitment state blockNum=%d must be ≤ unwindTarget=%d after Merge+Flush; "+
@@ -782,10 +783,10 @@ func TestSharedDomain_UnwindAcrossStepBoundary(t *testing.T) {
 	rwTx, err = db.BeginTemporalRw(ctx)
 	require.NoError(err)
 	defer rwTx.Rollback()
-	stateVal, _, err := rwTx.GetLatest(kv.CommitmentDomain, testCommitmentStateKey(), kv.GetLatestOptions{})
+	stateVal, _, err := rwTx.GetLatest(kv.CommitmentDomain, commitmenttest.StateKey(), kv.GetLatestOptions{})
 	require.NoError(err)
 	require.GreaterOrEqual(len(stateVal), 16)
-	commitTxNum, commitBlock, _, err := testDecodeCommitmentState(stateVal)
+	commitTxNum, commitBlock, _, err := commitmenttest.DecodeState(stateVal)
 	require.NoError(err)
 	require.Equal(lastBlock, commitBlock, "pre-unwind: commitment state should be at last block")
 	require.Equal(lastBlock, commitTxNum, "pre-unwind: commitment state txNum")
@@ -807,10 +808,10 @@ func TestSharedDomain_UnwindAcrossStepBoundary(t *testing.T) {
 	require.NoError(rwTx.Unwind(ctx, unwindTarget, &merged))
 
 	// Phase 5: the commitment "state" key should now decode to blockNum ≤ unwindTarget.
-	stateVal, _, err = rwTx.GetLatest(kv.CommitmentDomain, testCommitmentStateKey(), kv.GetLatestOptions{})
+	stateVal, _, err = rwTx.GetLatest(kv.CommitmentDomain, commitmenttest.StateKey(), kv.GetLatestOptions{})
 	require.NoError(err)
 	require.GreaterOrEqual(len(stateVal), 16, "post-unwind: commitment state record must exist (was populated in phase 2)")
-	postTxNum, postBlock, _, err := testDecodeCommitmentState(stateVal)
+	postTxNum, postBlock, _, err := commitmenttest.DecodeState(stateVal)
 	require.NoError(err)
 	require.LessOrEqualf(postBlock, unwindTarget,
 		"post-unwind: commitment state blockNum=%d must be ≤ unwindTarget=%d (txNum=%d)",
@@ -1978,7 +1979,7 @@ func TestSharedDomain_ZeroUpdateCommitmentAdvancesProgress(t *testing.T) {
 
 	state1, _, err := rwTx2.GetLatest(
 		kv.CommitmentDomain,
-		testCommitmentStateKey(),
+		commitmenttest.StateKey(),
 		kv.GetLatestOptions{},
 	)
 	require.NoError(t, err)
@@ -2021,7 +2022,7 @@ func TestSharedDomain_ZeroUpdateCommitmentAdvancesProgress(t *testing.T) {
 
 	state2, _, err := rwTx3.GetLatest(
 		kv.CommitmentDomain,
-		testCommitmentStateKey(),
+		commitmenttest.StateKey(),
 		kv.GetLatestOptions{},
 	)
 	require.NoError(t, err)
@@ -2036,7 +2037,7 @@ func TestSharedDomain_ZeroUpdateCommitmentAdvancesProgress(t *testing.T) {
 
 func decodeStoredState(t *testing.T, state []byte) (txNum, blockNum uint64, payload []byte) {
 	t.Helper()
-	txNum, blockNum, root, err := testDecodeCommitmentState(state)
+	txNum, blockNum, root, err := commitmenttest.DecodeState(state)
 	require.NoError(t, err)
 	if statecfg.ExperimentalCommitmentV3 {
 		return txNum, blockNum, root

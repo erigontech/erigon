@@ -21,7 +21,6 @@ import (
 	"context"
 	"errors"
 	"io"
-	"slices"
 	"time"
 
 	"github.com/erigontech/erigon/common/empty"
@@ -140,43 +139,15 @@ func (t *Trie) TraceCollapsesRoot(ctx context.Context, updates *commitment.Updat
 	if updates == nil || updates.Mode() != commitment.ModeCollect {
 		return nil, errors.New("commitment v3: TraceCollapses requires ModeCollect updates")
 	}
-	items, err := drainFeed(ctx, updates, t.scheduleWorkers)
-	if err != nil {
-		return nil, err
-	}
-	slices.SortFunc(items, compareFeed)
 	cache := &recordCache{PatriciaContext: t.ctx, recs: make(map[string][]byte)}
 	t.preRecs, t.preRoot = cache.recs, bytes.Clone(t.root)
-	if err := traceCollapses(cache, items, tracer); err != nil {
-		return nil, err
-	}
-	rootBefore := bytes.Clone(t.root)
-	deferredBefore := t.deferred
-	deferUpdatesBefore := t.deferUpdates
-	preRecsBefore, preRootBefore := t.preRecs, t.preRoot
-	t.deferUpdates = true
-	t.deferred = nil
-	inner := t.ctx
-	t.ctx = cache
+	inner, rootBefore, deferredBefore, deferUpdatesBefore := t.ctx, bytes.Clone(t.root), t.deferred, t.deferUpdates
+	t.ctx, t.deferred, t.deferUpdates = cache, nil, true
 	root, err := t.round(ctx, nil, func() ([]storageTask, []accountEntry, int, error) {
-		p := &partitioner{}
-		for i := range items {
-			if err := p.add(items[i].hashedKey, items[i].update); err != nil {
-				return nil, nil, 0, err
-			}
-		}
-		storage, accounts := p.done()
-		return storage, accounts, len(items), nil
+		return partitionUpdates(ctx, updates, t.scheduleWorkers, func(items []feedEntry) error { return traceCollapses(cache, items, tracer) })
 	})
-	t.ctx = inner
-	t.root = rootBefore
-	t.deferred = deferredBefore
-	t.deferUpdates = deferUpdatesBefore
-	t.preRecs, t.preRoot = preRecsBefore, preRootBefore
-	if err != nil {
-		return nil, err
-	}
-	return root, nil
+	t.ctx, t.root, t.deferred, t.deferUpdates = inner, rootBefore, deferredBefore, deferUpdatesBefore
+	return root, err
 }
 
 func (t *Trie) ProcessFeed(ctx context.Context, feed *commitment.Feed, onProgress func(*commitment.CommitProgress)) ([]byte, error) {

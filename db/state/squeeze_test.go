@@ -44,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/internal/commitmenttest"
 )
 
 type testAggConfig struct {
@@ -378,9 +379,9 @@ func testRebuildCommitmentBasedOnFiles(t *testing.T, v3 bool) {
 		ac := state.AggTx(tx)
 
 		// collect latest root from each available file
-		stateVal, ok, _, _, _ := ac.DebugGetLatestFromFiles(kv.CommitmentDomain, testCommitmentStateKey(), math.MaxUint64)
+		stateVal, ok, _, _, _ := ac.DebugGetLatestFromFiles(kv.CommitmentDomain, commitmenttest.StateKey(), math.MaxUint64)
 		require.True(t, ok)
-		_, _, rootInFiles, err = testDecodeCommitmentState(stateVal)
+		_, _, rootInFiles, err = commitmenttest.DecodeState(stateVal)
 		require.NoError(t, err)
 
 		for _, f := range ac.Files(kv.CommitmentDomain) {

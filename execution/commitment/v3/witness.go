@@ -26,7 +26,6 @@ import (
 	keccak "github.com/erigontech/fastkeccak"
 
 	"github.com/erigontech/erigon/common/empty"
-	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/commitment"
 )
 
@@ -281,9 +280,6 @@ func leafRLP(n *node, nib int, includeNib bool) (rlp, leafKey, payload []byte, e
 		return nil, nil, nil, err
 	}
 	if n.plane != planeAccount {
-		if len(payload) > length.Hash {
-			return nil, nil, nil, fmt.Errorf("%w: storage leaf %d payload length %d", errFoldNode, nib, len(payload))
-		}
 		return appendStorageLeafRLP(nil, compact, payload), leafKey, payload, nil
 	}
 	return appendLeafRLP(nil, compact, encodedPayload), leafKey, payload, nil

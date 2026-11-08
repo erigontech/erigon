@@ -18,7 +18,6 @@ package v3
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"maps"
 	"slices"
 	"sync"
@@ -143,34 +142,7 @@ func entryOf(path []byte, update *commitment.Update) storageEntry {
 }
 
 func slotPath(prefix ...byte) []byte {
-	return paths([][]byte{prefix})[0]
-}
-
-func paths(prefixes [][]byte) [][]byte {
-	paths := make([][]byte, 0, len(prefixes))
-	for _, prefix := range prefixes {
-		if len(prefix) > 64 {
-			panic(fmt.Sprintf("prefix length %d", len(prefix)))
-		}
-		fill := byte(0xd)
-		if len(prefix) != 0 {
-			fill = (prefix[len(prefix)-1] + 7) & 15
-		}
-		path := make([]byte, 64)
-		copy(path, prefix)
-		for i := len(prefix); i < len(path); i++ {
-			path[i] = fill
-		}
-		paths = append(paths, path)
-	}
-	for _, path := range paths {
-		for _, nib := range path {
-			if nib > 15 {
-				panic(fmt.Sprintf("invalid nibble %d", nib))
-			}
-		}
-	}
-	return paths
+	return commitmenttest.Path(prefix, (prefix[len(prefix)-1]+7)&15)
 }
 
 func benchUpdatesIn(dir string, mode commitment.Mode, ops []commitmenttest.Op, updates []*commitment.Update) *commitment.Updates {
@@ -182,16 +154,11 @@ func benchUpdatesIn(dir string, mode commitment.Mode, ops []commitmenttest.Op, u
 }
 
 func benchEntries(shape string, n int) []commitmenttest.Op {
-	seed := int64(0)
-	switch shape {
-	case "accounts", "storage":
-	case "whale":
+	seed := commitmenttest.Seed(0)
+	if shape == "whale" {
 		seed = 424242
-	default:
-		shape = "storage"
 	}
-	c := commitmenttest.Generate(commitmenttest.Seed(seed), commitmenttest.SequenceSpec{Kind: shape, Count: n})
-	return c.Rounds[0]
+	return commitmenttest.Generate(seed, commitmenttest.SequenceSpec{Kind: shape, Count: n}).Rounds[0]
 }
 
 type shardedShard struct {
@@ -265,7 +232,7 @@ func storageRound(t *testing.T, ctx commitment.PatriciaContext, addr [32]byte, o
 func storageOps(paths [][]byte) []commitmenttest.Op {
 	ops := make([]commitmenttest.Op, len(paths))
 	for i, path := range paths {
-		ops[i] = commitmenttest.Op{Key: path, Storage: commitmenttest.Storage(commitmenttest.StorageSpec{Path: path})}
+		ops[i] = commitmenttest.Op{Key: path, Storage: []byte{path[0] + 1, path[1] + 1, path[2] + 1, path[3] + 1}}
 	}
 	return ops
 }
@@ -305,7 +272,7 @@ func exactLeaves(t *testing.T, ctx commitment.PatriciaContext, plane byte, addr 
 			}
 			child := append(bytes.Clone(path), byte(nib))
 			if l.leaf&bit == 0 {
-				visit(append(child, decodeExtension(r.extAt(l, nib))...))
+				visit(append(child, decodeExtensionInto(r.extAt(l, nib), nil)...))
 				continue
 			}
 			suffix, value := r.leafAt(l, nib)
@@ -528,7 +495,6 @@ var _ commitment.PatriciaContext = (*mockContext)(nil)
 
 type phaseAInput struct {
 	hashedKey []byte
-	plainKey  []byte
 	update    *commitment.Update
 }
 

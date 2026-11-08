@@ -432,11 +432,7 @@ func (g graph) fanOutRoot(ctx commitment.PatriciaContext, root *node, n int, nib
 	}); err != nil || after == nil {
 		return true, err
 	}
-	nibAt := func(k int) int { return nibs[k] }
-	if next != nil {
-		nibAt = func(int) int { return next() }
-	}
-	return true, plan.runEach(ctx, len(nibs), nibAt, func(workerCtx commitment.PatriciaContext, _, nib int) error {
+	return true, plan.runEach(ctx, len(nibs), func(int) int { return next() }, func(workerCtx commitment.PatriciaContext, _, nib int) error {
 		return after(workerCtx, nib, groups[nib])
 	})
 }

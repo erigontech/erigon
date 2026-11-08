@@ -39,33 +39,16 @@ type SequenceSpec struct {
 
 func Generate(seed Seed, spec SequenceSpec) Case {
 	c := Case{ID: spec.Kind, Seed: seed}
-	if len(spec.BatchSizes) != 0 {
-		if spec.Count != 0 || (spec.Kind != "whale" && spec.Kind != "one-slot") {
-			panic("batch sizes require whale or one-slot without a count")
-		}
-		for _, size := range spec.BatchSizes {
-			if size < 0 {
-				panic(fmt.Sprintf("negative batch size %d", size))
-			}
-			spec.Count += size
-		}
-	}
-	if spec.Count < 0 {
-		panic(fmt.Sprintf("negative count %d", spec.Count))
+	for _, size := range spec.BatchSizes {
+		spec.Count += size
 	}
 	rng := seed.rand()
-	if spec.Kind == "stress" || spec.Kind == "root-collapse" {
-		if spec.Rounds < 0 || spec.Accounts < 1 {
-			panic("invalid stress dimensions")
-		}
-		if spec.Kind == "stress" {
-			if spec.Slots < 1 || spec.OpsPerRound < 1 {
-				panic("invalid stress operations")
-			}
-			c.Rounds = stressRounds(rng, spec)
-		} else {
-			c.Rounds = collapseRounds(rng, spec)
-		}
+	if spec.Kind == "stress" {
+		c.Rounds = stressRounds(rng, spec)
+		return c
+	}
+	if spec.Kind == "root-collapse" {
+		c.Rounds = collapseRounds(rng, spec)
 		return c
 	}
 	if spec.Kind == "incremental" {
@@ -73,9 +56,6 @@ func Generate(seed Seed, spec SequenceSpec) Case {
 		return c
 	}
 	if spec.Kind == "one-slot" {
-		if len(spec.BatchSizes) != 2 {
-			panic("one-slot requires two batch sizes")
-		}
 		addrs, slots := make([][]byte, spec.Count), make([][]byte, spec.Count)
 		for i := range addrs {
 			addrs[i], slots[i] = make([]byte, 20), make([]byte, 32)
@@ -93,7 +73,7 @@ func Generate(seed Seed, spec SequenceSpec) Case {
 			var ops []Op
 			for i := start; i < start+count; i++ {
 				value := Account(AccountSpec{Kind: "parity", Number: i})
-				ops = append(ops, Op{Key: addrs[i], Account: &value}, Op{Key: append(bytes.Clone(addrs[i]), slots[i]...), Storage: Storage(StorageSpec{Number: i + generation*1000})})
+				ops = append(ops, Op{Key: addrs[i], Account: &value}, Op{Key: append(bytes.Clone(addrs[i]), slots[i]...), Storage: Storage(i + generation*1000)})
 			}
 			c.Rounds = append(c.Rounds, ops)
 		}
@@ -110,7 +90,7 @@ func Generate(seed Seed, spec SequenceSpec) Case {
 		for i := range spec.Count {
 			addAccount(address(i), i)
 			if spec.Kind == "storage" {
-				ops = append(ops, Op{Key: append(address(i), Key(KeySpec{Kind: "bench-slot", Size: 32}, i)...), Storage: Storage(StorageSpec{Number: i})})
+				ops = append(ops, Op{Key: append(address(i), Key(KeySpec{Kind: "bench-slot", Size: 32}, i)...), Storage: Storage(i)})
 			}
 		}
 	case "whale":
@@ -120,7 +100,7 @@ func Generate(seed Seed, spec SequenceSpec) Case {
 		for i := range spec.Count {
 			slot := make([]byte, 32)
 			_, _ = rng.Read(slot)
-			ops = append(ops, Op{Key: append(bytes.Clone(addr), slot...), Storage: Storage(StorageSpec{Number: i})})
+			ops = append(ops, Op{Key: append(bytes.Clone(addr), slot...), Storage: Storage(i)})
 		}
 	default:
 		panic(fmt.Sprintf("unknown sequence kind: %s", spec.Kind))
@@ -319,7 +299,7 @@ func accountOp(key []byte, value AccountValue) Op { return Op{Key: key, Account:
 func AccountAt(key []byte, spec AccountSpec) Op { return accountOp(key, Account(spec)) }
 
 func StorageAt(key []byte, number int) Op {
-	return Op{Key: key, Storage: Storage(StorageSpec{Number: number})}
+	return Op{Key: key, Storage: Storage(number)}
 }
 
 func DeleteAt(key []byte) Op { return Op{Key: key, Delete: true} }

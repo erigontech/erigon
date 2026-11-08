@@ -76,13 +76,9 @@ func unfold(ctx commitment.PatriciaContext, path []byte, plane byte, addrHash []
 			continue
 		}
 		hash := record.slotAt(l, nib)
-		n.setStoredChild(nib, hash, decodeExtension(record.extAt(l, nib)))
+		n.setStoredChild(nib, hash, decodeExtensionInto(record.extAt(l, nib), nil))
 	}
 	return n, nil
-}
-
-func decodeExtension(encoded []byte) []byte {
-	return decodeExtensionInto(encoded, nil)
 }
 
 func decodeExtensionInto(encoded, dst []byte) []byte {

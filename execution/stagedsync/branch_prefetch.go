@@ -74,22 +74,19 @@ type branchPrefetcher struct {
 }
 
 func newBranchPrefetcher(ctx context.Context, db kv.TemporalRoDB) *branchPrefetcher {
-	return newPrefetchRecords().start(ctx, db)
+	p := newPrefetchRecords()
+	p.work = make(chan prefetchItem, branchPrefetchQueue)
+	ctx = kv.WithNonBlockingAcquire(ctx)
+	for range branchPrefetchWorkers {
+		p.wg.Go(func() { p.run(ctx, db) })
+	}
+	return p
 }
 
 func newPrefetchRecords() *branchPrefetcher {
 	p := &branchPrefetcher{seed: maphash.MakeSeed()}
 	for i := range p.shards {
 		p.shards[i].records = make(map[string]prefetchedRecord)
-	}
-	return p
-}
-
-func (p *branchPrefetcher) start(ctx context.Context, db kv.TemporalRoDB) *branchPrefetcher {
-	p.work = make(chan prefetchItem, branchPrefetchQueue)
-	ctx = kv.WithNonBlockingAcquire(ctx)
-	for range branchPrefetchWorkers {
-		p.wg.Go(func() { p.run(ctx, db) })
 	}
 	return p
 }

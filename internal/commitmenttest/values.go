@@ -61,11 +61,7 @@ func Account(spec AccountSpec) AccountValue {
 		value.Nonce = uint64(spec.Number + 1)
 		value.Balance.SetUint64(uint64(spec.Number + 1))
 		value.CodeHash = empty.CodeHash
-	case "fold":
-		value.Nonce = uint64(spec.Number)
-		value.Balance.SetUint64(uint64(spec.Number * 3))
-		value.CodeHash = empty.CodeHash
-	case "", "full":
+	case "":
 	default:
 		panic("unknown account kind: " + spec.Kind)
 	}
@@ -96,16 +92,8 @@ func SizedAccount(number int, contract bool, rng *rand.Rand) (AccountValue, []by
 	return value, root
 }
 
-type StorageSpec struct {
-	Number int
-	Path   []byte
-}
-
-func Storage(spec StorageSpec) []byte {
-	if spec.Path != nil {
-		return []byte{spec.Path[0] + 1, spec.Path[1] + 1, spec.Path[2] + 1, spec.Path[3] + 1}
-	}
-	return []byte{byte(spec.Number), byte(spec.Number >> 8)}
+func Storage(number int) []byte {
+	return []byte{byte(number), byte(number >> 8)}
 }
 
 func RandomStorage(rng *rand.Rand) []byte {

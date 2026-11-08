@@ -52,26 +52,8 @@ func dbWithState(t *testing.T, buildFiles bool) (kv.TemporalRwDB, datadir.Dirs, 
 	const stepSize, txs, filed = 16, 64, 48
 	dirs := datadir.New(t.TempDir())
 	db := temporaltest.NewTestDB(t, dirs, temporaltest.WithStepSize(stepSize))
-	agg := db.(state.HasAgg).Agg().(*state.Aggregator)
-	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, false)
+	agg := fillAccountState(t, db, txs)
 	ctx := t.Context()
-
-	tx, domains := temporaltest.NewTestTxSD(t, db)
-	for txNum := range uint64(txs) {
-		addr := make([]byte, 20)
-		binary.BigEndian.PutUint64(addr[12:], txNum%5+1)
-		acc := accounts.Account{Nonce: txNum + 1, Balance: *uint256.NewInt(txNum + 1), CodeHash: accounts.EmptyCodeHash}
-		prev, _, err := domains.GetLatest(kv.AccountsDomain, tx, addr)
-		require.NoError(t, err)
-		require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, addr, accounts.SerialiseV3(&acc), txNum, prev))
-		_, err = domains.ComputeCommitment(ctx, tx, true, txNum, txNum, "", nil)
-		require.NoError(t, err)
-		require.NoError(t, rawdbv3.TxNums.Append(tx, txNum, txNum))
-	}
-	require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, txs-1))
-	require.NoError(t, domains.Flush(ctx, tx))
-	domains.Close()
-	require.NoError(t, tx.Commit())
 	if buildFiles {
 		require.NoError(t, agg.BuildFiles(db, filed, execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums)))
 	}
@@ -90,6 +72,29 @@ func dbWithState(t *testing.T, buildFiles bool) (kv.TemporalRwDB, datadir.Dirs, 
 	}
 	require.NotZero(t, countTail(), "the accounts domain keeps txNums past the files in the DB")
 	return db, dirs, countTail
+}
+
+func fillAccountState(t *testing.T, db kv.TemporalRwDB, txs uint64) *state.Aggregator {
+	t.Helper()
+	agg := db.(state.HasAgg).Agg().(*state.Aggregator)
+	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, false)
+	tx, domains := temporaltest.NewTestTxSD(t, db)
+	for txNum := range txs {
+		addr := make([]byte, 20)
+		binary.BigEndian.PutUint64(addr[12:], txNum%5+1)
+		acc := accounts.Account{Nonce: txNum + 1, Balance: *uint256.NewInt(txNum + 1), CodeHash: accounts.EmptyCodeHash}
+		prev, _, err := domains.GetLatest(kv.AccountsDomain, tx, addr)
+		require.NoError(t, err)
+		require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, addr, accounts.SerialiseV3(&acc), txNum, prev))
+		_, err = domains.ComputeCommitment(t.Context(), tx, true, txNum, txNum, "", nil)
+		require.NoError(t, err)
+		require.NoError(t, rawdbv3.TxNums.Append(tx, txNum, txNum))
+	}
+	require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, txs-1))
+	require.NoError(t, domains.Flush(t.Context(), tx))
+	domains.Close()
+	require.NoError(t, tx.Commit())
+	return agg
 }
 
 func requireExecutionReset(t *testing.T, db kv.TemporalRwDB, countTail func() uint64) {

@@ -34,8 +34,6 @@ type Op struct {
 type Assertions struct {
 	TolerateHPHDrift bool
 	StateReadEngines []string
-	ZeroAccountReads bool
-	ZeroStorageReads bool
 }
 
 type Case struct {

@@ -45,14 +45,10 @@ type RunSpec struct {
 }
 
 type roundResult struct {
-	State    []byte
-	BlockNum uint64
-	TxNum    uint64
-	Root     []byte
-	Records  map[string][]byte
-	Counts   counts
-	Err      error
-	Rebuilt  bool
+	Root    []byte
+	Records map[string][]byte
+	Counts  counts
+	Err     error
 }
 
 type observation struct {
@@ -90,11 +86,11 @@ func execute(tb testing.TB, c commitmenttest.Case, spec RunSpec, open openFunc) 
 			engine.Release()
 			engine = nil
 		}
-		round := roundResult{Rebuilt: engine == nil && i != 0}
+		var round roundResult
 		if engine == nil {
 			spec.Memory = NewMemory(spec.Context)
 			engine, round.Err = open(context.Background(), spec)
-			if round.Rebuilt || spec.Fresh {
+			if i != 0 || spec.Fresh {
 				ops = state.Ops()
 			}
 		}
@@ -143,8 +139,9 @@ func reload(tb testing.TB, engine commitment.Trie, spec RunSpec, open openFunc, 
 		round.Err = fmt.Errorf("engine %s has no state codec", spec.Name)
 		return engine
 	}
-	round.State, round.Err = codec.EncodeState(number, number, nil)
-	if round.Err != nil {
+	state, err := codec.EncodeState(number, number, nil)
+	if err != nil {
+		round.Err = err
 		return engine
 	}
 	engine.Release()
@@ -153,13 +150,14 @@ func reload(tb testing.TB, engine commitment.Trie, spec RunSpec, open openFunc, 
 		return engine
 	}
 	codec = engine.(commitment.TrieStateCodec)
-	round.BlockNum, round.TxNum, round.Err = codec.RestoreState(round.State)
-	if round.Err != nil {
+	blockNum, txNum, err := codec.RestoreState(state)
+	if err != nil {
+		round.Err = err
 		return engine
 	}
 	root, err := process(engine, spec.Mode, tb.TempDir(), nil)
 	round.Err = err
-	if err == nil && (!bytes.Equal(root, round.Root) || round.BlockNum != number || round.TxNum != number) {
+	if err == nil && (!bytes.Equal(root, round.Root) || blockNum != number || txNum != number) {
 		round.Err = fmt.Errorf("restored root or metadata differs")
 	}
 	return engine
@@ -168,15 +166,13 @@ func reload(tb testing.TB, engine commitment.Trie, spec RunSpec, open openFunc, 
 func check(tb testing.TB, c commitmenttest.Case, got observation) {
 	tb.Helper()
 	require.Len(tb, got.Rounds, len(c.Rounds), "case=%s seed=%d engine=%s", c.ID, c.Seed, got.Name)
-	checkStateReads := len(c.Assertions.StateReadEngines) == 0 || slices.Contains(c.Assertions.StateReadEngines, got.Name)
+	checkStateReads := slices.Contains(c.Assertions.StateReadEngines, got.Name)
 	for i := range got.Rounds {
 		round := &got.Rounds[i]
 		label := fmt.Sprintf("case=%s seed=%d engine=%s round=%d", c.ID, c.Seed, got.Name, i)
 		require.NoError(tb, round.Err, label)
-		if checkStateReads && c.Assertions.ZeroAccountReads {
+		if checkStateReads {
 			require.Zero(tb, round.Counts.AccountReads, label)
-		}
-		if checkStateReads && c.Assertions.ZeroStorageReads {
 			require.Zero(tb, round.Counts.StorageReads, label)
 		}
 	}

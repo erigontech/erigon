@@ -255,10 +255,6 @@ func TestConvertCommitmentFiles_V3CollapsedStorageBranch(t *testing.T) {
 	}
 }
 
-func buildRecreatedOwnerFiles(t *testing.T, stepSize, steps uint64, accounts int, laterSlot bool) (kv.TemporalRwDB, *state.Aggregator, []byte) {
-	return buildRecreatedOwnerFilesWithParallel(t, stepSize, steps, accounts, laterSlot, statecfg.ExperimentalParallelCommitment)
-}
-
 func buildRecreatedOwnerFilesWithParallel(t *testing.T, stepSize, steps uint64, accounts int, laterSlot, parallel bool) (kv.TemporalRwDB, *state.Aggregator, []byte) {
 	t.Helper()
 	db, agg, rwTx, domains := convertTestDomainsWithParallel(t, stepSize, parallel)
@@ -318,7 +314,7 @@ func buildRecreatedOwnerFilesWithParallel(t *testing.T, stepSize, steps uint64, 
 }
 
 func testConvertCommitmentFilesV3CollapsedStorageBranch(t *testing.T, keysV2 bool) {
-	db, agg, owner := buildRecreatedOwnerFiles(t, 4, 2, 2, false)
+	db, agg, owner := buildRecreatedOwnerFilesWithParallel(t, 4, 2, 2, false, statecfg.ExperimentalParallelCommitment)
 	ctx := t.Context()
 
 	roTx, err := db.BeginTemporalRo(ctx)
@@ -640,7 +636,7 @@ func TestConvertCommitmentFiles_V3LeafRootFailsBeforeSwap(t *testing.T) {
 	tx, err := db.BeginTemporalRw(t.Context())
 	require.NoError(t, err)
 	t.Cleanup(tx.Rollback) //nolint:gocritic
-	_, err = state.ConvertCommitmentFiles(t.Context(), state.AggTx(tx), state.ConvertOpts{TargetV3: true}, log.New())
+	err = state.ConvertCommitmentFiles(t.Context(), state.AggTx(tx), state.ConvertOpts{TargetV3: true}, log.New())
 	tx.Rollback()
 	require.Error(t, err)
 	require.Equal(t, kvs, commitmentFilesByEnd(t, agg.Dirs().SnapDomain))

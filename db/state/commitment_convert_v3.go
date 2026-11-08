@@ -90,6 +90,41 @@ func (b *convertedBatch) emit(k, v []byte, kind v3.LegacyKind) error {
 
 var errConvertedBatchFull = errors.New("converted batch full")
 
+func getConvertedBatch() *convertedBatch {
+	res := convertedBatchPool.Get().(*convertedBatch)
+	res.buf, res.ents = res.buf[:0], res.ents[:0]
+	return res
+}
+
+type convertedSink struct {
+	ctx context.Context
+	out chan<- *convertedBatch
+	res *convertedBatch
+}
+
+func (s *convertedSink) send() error {
+	if len(s.res.ents) == 0 {
+		return nil
+	}
+	select {
+	case s.out <- s.res:
+		s.res = getConvertedBatch()
+		return nil
+	case <-s.ctx.Done():
+		return s.ctx.Err()
+	}
+}
+
+func (s *convertedSink) emit(k, v []byte, kind v3.LegacyKind) error {
+	if err := s.res.emit(k, v, kind); !errors.Is(err, errConvertedBatchFull) {
+		return err
+	}
+	if err := s.send(); err != nil {
+		return err
+	}
+	return s.res.emit(k, v, kind)
+}
+
 var (
 	kvBatchPool        = sync.Pool{New: func() any { return &kvBatch{pairs: make([][2][]byte, 0, commitmentV3Batch)} }}
 	convertedBatchPool = sync.Pool{New: func() any { return &convertedBatch{} }}
@@ -231,44 +266,19 @@ func convertCommitmentFileV3(
 			}}
 			delta := &legacyDelta{commitment: prevs, before: stepFrom - 1, after: stepTo - 1, keysV2: st.keysV2}
 			delta.reachBefore = &legacyReach{keysV2: st.keysV2, read: func(key []byte) ([]byte, error) { return delta.read(key, delta.before) }}
+			sink := &convertedSink{ctx: gctx, out: out}
 			for batch := range in {
-				res := convertedBatchPool.Get().(*convertedBatch)
-				res.buf, res.ents = res.buf[:0], res.ents[:0]
-				send := func() error {
-					if len(res.ents) == 0 {
-						return nil
-					}
-					select {
-					case out <- res:
-						res = convertedBatchPool.Get().(*convertedBatch)
-						res.buf, res.ents = res.buf[:0], res.ents[:0]
-						return nil
-					case <-gctx.Done():
-						return gctx.Err()
-					}
-				}
-				emit := func(k, v []byte, kind v3.LegacyKind) error {
-					emitErr := res.emit(k, v, kind)
-					if errors.Is(emitErr, errConvertedBatchFull) {
-						if sendErr := send(); sendErr != nil {
-							return sendErr
-						}
-						return res.emit(k, v, kind)
-					} else {
-						return emitErr
-					}
-				}
+				sink.res = getConvertedBatch()
 				for _, p := range batch.pairs {
-					if convErr := convertLegacyPairV3(p[0], p[1], incremental, stepFrom, conv, reach, delta, emit); convErr != nil {
+					if convErr := convertLegacyPairV3(p[0], p[1], incremental, stepFrom, conv, reach, delta, sink.emit); convErr != nil {
 						return convErr
 					}
 				}
 				kvBatchPool.Put(batch)
-				sendErr := send()
-				if sendErr != nil {
+				if sendErr := sink.send(); sendErr != nil {
 					return sendErr
 				}
-				convertedBatchPool.Put(res)
+				convertedBatchPool.Put(sink.res)
 			}
 			return nil
 		})
@@ -691,10 +701,7 @@ func verifyCommitmentV3Files(ctx context.Context, a *Aggregator, logger log.Logg
 	}
 	logger.Info("[commitment_convert] v3 records verified", "root", fmt.Sprintf("%x", c.Root), "block", c.BlockNum, "txNum", c.TxNum,
 		"records", common.PrettyCounter(c.Records), "orphans", common.PrettyCounter(c.Orphans), "took", time.Since(started).Round(time.Millisecond))
-	if err := verifyCommitmentV3Check(c); err != nil {
-		return err
-	}
-	return nil
+	return verifyCommitmentV3Check(c)
 }
 
 func verifyCommitmentV3Check(c CommitmentV3Check) error {

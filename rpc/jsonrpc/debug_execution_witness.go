@@ -980,6 +980,7 @@ func (hc *headCaptureSource) warmPaths(ctx context.Context, accessed *accessedSt
 	}
 	txs := append([]kv.TemporalTx{hc.pinnedParentTx}, hc.warmTxs...)
 	hc.warm = &sync.Map{}
+	get := hc.recordReader().Get
 	var wg sync.WaitGroup
 	var crash sync.Once
 	var crashed any
@@ -991,13 +992,8 @@ func (hc *headCaptureSource) warmPaths(ctx context.Context, accessed *accessedSt
 				}
 			}()
 			read := func(key []byte) []byte {
-				if hc.records != nil {
-					if v, _, ok := hc.records.Get(key); ok {
-						return v
-					}
-				}
-				if v, ok := hc.warm.Load(string(key)); ok {
-					return v.(warmRecord).data
+				if v, _, ok := get(key); ok {
+					return v
 				}
 				v, step, err := tx.GetLatest(kv.CommitmentDomain, key, kv.GetLatestOptions{})
 				if err != nil {
@@ -1211,50 +1207,32 @@ func (a *accessedState) isEmpty() bool {
 // skipping zero→zero no-ops that would corrupt the HPH trie's internal maps.
 func (a *accessedState) touchNonZeroKeys(sdCtx *commitmentdb.SharedDomainsCommitmentContext, post, pre commitmentdb.StateReader, stepSize uint64) (deleted map[string]struct{}) {
 	deleted = make(map[string]struct{})
-	touch := func(d kv.Domain, plainKey, postEnc []byte) {
+	touch := func(d kv.Domain, plainKey []byte) {
+		postEnc, _, _ := post.Read(d, plainKey, stepSize)
 		if len(postEnc) == 0 {
+			if preEnc, _, _ := pre.Read(d, plainKey, stepSize); len(preEnc) == 0 {
+				return
+			}
 			deleted[string(plainKey)] = struct{}{}
 		}
 		sdCtx.TouchKey(d, string(plainKey), postEnc)
 	}
 	for addr := range a.Addresses {
-		plainKey := addr[:]
-		postEnc, _, _ := post.Read(kv.AccountsDomain, plainKey, stepSize)
-		if len(postEnc) == 0 {
-			preEnc, _, _ := pre.Read(kv.AccountsDomain, plainKey, stepSize)
-			if len(preEnc) == 0 {
-				continue
-			}
-		}
-		touch(kv.AccountsDomain, plainKey, postEnc)
+		touch(kv.AccountsDomain, addr[:])
 	}
 	for addr := range a.CodeAddrs {
-		if !sdCtx.AcceptsFeed() {
+		if sdCtx.AcceptsFeed() {
+			touch(kv.AccountsDomain, addr[:])
+		} else {
 			sdCtx.TouchKey(kv.AccountsDomain, string(addr[:]), nil)
-			continue
 		}
-		postEnc, _, _ := post.Read(kv.AccountsDomain, addr[:], stepSize)
-		if len(postEnc) == 0 {
-			preEnc, _, _ := pre.Read(kv.AccountsDomain, addr[:], stepSize)
-			if len(preEnc) == 0 {
-				continue
-			}
-		}
-		touch(kv.AccountsDomain, addr[:], postEnc)
 	}
 	for addr, keys := range a.Storage {
 		for key := range keys {
 			plainKey := make([]byte, 0, len(addr)+len(key))
 			plainKey = append(plainKey, addr[:]...)
 			plainKey = append(plainKey, key[:]...)
-			postEnc, _, _ := post.Read(kv.StorageDomain, plainKey, stepSize)
-			if len(postEnc) == 0 {
-				preEnc, _, _ := pre.Read(kv.StorageDomain, plainKey, stepSize)
-				if len(preEnc) == 0 {
-					continue
-				}
-			}
-			touch(kv.StorageDomain, plainKey, postEnc)
+			touch(kv.StorageDomain, plainKey)
 		}
 	}
 	return deleted

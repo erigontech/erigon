@@ -16,15 +16,11 @@
 
 package commitmenttest
 
-import (
-	"encoding/binary"
-	"fmt"
-)
+import "encoding/binary"
 
 type KeySpec struct {
-	Kind  string
-	Size  int
-	Count int
+	Kind string
+	Size int
 }
 
 func Key(spec KeySpec, number int) []byte {
@@ -47,36 +43,10 @@ func Key(spec KeySpec, number int) []byte {
 		for j := range key {
 			key[j] = byte(number*29 + j*3)
 		}
-	case "fold":
-		for j := range key {
-			key[j] = byte(number + j*17)
-		}
 	default:
 		panic("unknown key kind: " + spec.Kind)
 	}
 	return key
-}
-
-func Keys(seed Seed, spec KeySpec) [][]byte {
-	if spec.Count < 0 || spec.Size < 1 {
-		panic(fmt.Sprintf("invalid key spec: %+v", spec))
-	}
-	keys := make([][]byte, 0, spec.Count)
-	if spec.Size < 8 && uint64(spec.Count) > uint64(1)<<(8*spec.Size) {
-		panic(fmt.Sprintf("too many distinct keys for size %d", spec.Size))
-	}
-	rng := seed.rand()
-	seen := make(map[string]struct{}, spec.Count)
-	for len(keys) < spec.Count {
-		key := make([]byte, spec.Size)
-		_, _ = rng.Read(key)
-		if _, ok := seen[string(key)]; ok {
-			continue
-		}
-		seen[string(key)] = struct{}{}
-		keys = append(keys, key)
-	}
-	return keys
 }
 
 func Path(head []byte, fill byte) []byte {

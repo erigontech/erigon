@@ -149,31 +149,7 @@ func (cc *commitmentCalculator) emitTouched(view *state.VersionMapView, updates 
 	}
 	for addr, hashed := range cc.touchedAccounts {
 		address := addr.Value()
-		var u commitment.Update
-		acc, ok, wasDeleted := view.GetAccount(addr)
-		if ok {
-			u = commitment.Update{
-				Flags:    commitment.BalanceUpdate | commitment.NonceUpdate | commitment.CodeUpdate,
-				Balance:  acc.Balance,
-				Nonce:    acc.Nonce,
-				CodeHash: acc.CodeHash.Value(),
-			}
-			if acc.CodeHash.IsEmpty() {
-				u.CodeHash = empty.CodeHash
-			}
-		} else {
-			u = commitment.Update{Flags: commitment.DeleteUpdate, CodeHash: empty.CodeHash, DeleteStorageSubtree: true}
-		}
-		if _, ok := cc.destructed[addr]; ok {
-			u.DeleteStorageSubtree = true
-		}
-		if wasDeleted {
-			at, _ := view.DestroyedAt(addr)
-			if wiped, ok := cc.wipedAt[addr]; !ok || wiped != at {
-				u.DeleteStorageSubtree = true
-			}
-			cc.wipedAt[addr] = at
-		}
+		u := cc.accountUpdate(view, addr)
 		updates.TouchPlainKeyDirectHashed(string(address[:]), hashed, &u)
 	}
 	for addr, slots := range cc.touchedStorage {

@@ -387,7 +387,7 @@ func TestConvertCommitmentFiles_FullFlow(t *testing.T) {
 	// Value-axis only: V1+unsqueezed → V1+squeezed. Keeps the test asserting
 	// pure orchestrator mechanics without composing two codecs at once.
 	opts := state.ConvertOpts{TargetSqueeze: true, TargetNibblesV2: false}
-	_, convErr := state.ConvertCommitmentFiles(t.Context(), at, opts, log.New())
+	convErr := state.ConvertCommitmentFiles(t.Context(), at, opts, log.New())
 	rwTx.Rollback() // safe: ReloadFiles already invalidated at internally
 	require.NoError(t, convErr)
 
@@ -456,7 +456,7 @@ func TestConvertCommitmentFiles_RejectsUnindexedLegacyFileBeforeBackup(t *testin
 	require.NoError(t, err)
 	t.Cleanup(rwTx.Rollback)
 	at := state.AggTx(rwTx)
-	_, err = state.ConvertCommitmentFiles(t.Context(), at, state.ConvertOpts{TargetV3: true}, log.New())
+	err = state.ConvertCommitmentFiles(t.Context(), at, state.ConvertOpts{TargetV3: true}, log.New())
 	rwTx.Rollback()
 	require.ErrorContains(t, err, "v2.0-commitment.999-1000.kv")
 	require.NoDirExists(t, filepath.Join(agg.Dirs().Snap, "backup"))
@@ -487,7 +487,7 @@ func TestConvertCommitmentFiles_BeforeSwapRunsBeforePhase5Failure(t *testing.T) 
 		return errors.New("injected phase5 failure")
 	})
 	t.Cleanup(func() { state.SetConvertPhase5HookForTest(nil) })
-	_, err = state.ConvertCommitmentFiles(t.Context(), at, opts, log.New())
+	err = state.ConvertCommitmentFiles(t.Context(), at, opts, log.New())
 	rwTx.Rollback()
 	require.ErrorContains(t, err, "injected phase5 failure")
 	require.Equal(t, []string{"before-swap", "phase5"}, events)
@@ -620,7 +620,7 @@ func runOrchestrator(t *testing.T, db kv.TemporalRwDB, opts state.ConvertOpts) {
 	require.NoError(t, err)
 	t.Cleanup(tx.Rollback) //nolint:gocritic // explicit Rollback below; this is the panic safety net
 	at := state.AggTx(tx)
-	_, convErr := state.ConvertCommitmentFiles(t.Context(), at, opts, log.New())
+	convErr := state.ConvertCommitmentFiles(t.Context(), at, opts, log.New())
 	tx.Rollback()
 	require.NoError(t, convErr)
 }
@@ -676,10 +676,8 @@ func TestConvertCommitmentFiles_EmptyDatadir(t *testing.T) {
 	require.Empty(t, at.Files(kv.CommitmentDomain),
 		"setup precondition: no commitment files in empty datadir")
 
-	converted, err := state.ConvertCommitmentFiles(t.Context(), at,
-		state.ConvertOpts{TargetSqueeze: true, TargetNibblesV2: true}, log.New())
-	require.NoError(t, err)
-	require.False(t, converted)
+	require.NoError(t, state.ConvertCommitmentFiles(t.Context(), at,
+		state.ConvertOpts{TargetSqueeze: true, TargetNibblesV2: true}, log.New()))
 
 	// Nothing was created.
 	_, err = os.Stat(filepath.Join(agg.Dirs().Snap, "backup"))
@@ -709,7 +707,7 @@ func TestConvertCommitmentFiles_BackupExists(t *testing.T) {
 	defer tx.Rollback()
 	at := state.AggTx(tx)
 
-	_, convErr := state.ConvertCommitmentFiles(t.Context(), at,
+	convErr := state.ConvertCommitmentFiles(t.Context(), at,
 		state.ConvertOpts{TargetSqueeze: true, TargetNibblesV2: true}, log.New())
 	require.Error(t, convErr, "must refuse to run when backup is non-empty")
 	require.Contains(t, convErr.Error(), backupDir,
@@ -834,7 +832,7 @@ func TestConvertCommitmentFiles_ContinueResumes(t *testing.T) {
 	tx1, err := db.BeginTemporalRw(ctx1)
 	require.NoError(t, err)
 	t.Cleanup(tx1.Rollback) //nolint:gocritic // explicit Rollback below; this is the panic safety net
-	_, convErr := state.ConvertCommitmentFiles(ctx1, state.AggTx(tx1), opts, log.New())
+	convErr := state.ConvertCommitmentFiles(ctx1, state.AggTx(tx1), opts, log.New())
 	tx1.Rollback()
 	cancel1()
 	require.Error(t, convErr, "first run must abort once the hook cancels ctx")
@@ -885,7 +883,7 @@ func TestConvertCommitmentFiles_ContinueResumes(t *testing.T) {
 	t.Cleanup(tx2.Rollback) //nolint:gocritic // explicit Rollback below; this is the panic safety net
 	resumeOpts := opts
 	resumeOpts.Continue = true
-	_, convErr = state.ConvertCommitmentFiles(t.Context(), state.AggTx(tx2), resumeOpts, log.New())
+	convErr = state.ConvertCommitmentFiles(t.Context(), state.AggTx(tx2), resumeOpts, log.New())
 	tx2.Rollback() // safe: Phase 5 ReloadFiles already invalidated at internally
 	require.NoError(t, convErr, "resume run must complete successfully")
 	state.SetConvertPhase1AfterFileHookForTest(nil)

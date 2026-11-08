@@ -90,10 +90,6 @@ func (b *historyChainBatch) span(p []byte) [2]int {
 	return [2]int{start, len(b.buf)}
 }
 
-func historyBatchWeight(size, budget int64) int64 {
-	return min(size, budget)
-}
-
 var historyChainBatchPool = sync.Pool{New: func() any { return &historyChainBatch{} }}
 
 type historyVersion struct {
@@ -527,7 +523,7 @@ func convertCommitmentHistoryFileV3(ctx context.Context, at *AggregatorRoTx, vFi
 		batch := historyChainBatchPool.Get().(*historyChainBatch)
 		batch.reset()
 		send := func() error {
-			weight := historyBatchWeight(int64(len(batch.buf)), inFlightBudget)
+			weight := min(int64(len(batch.buf)), inFlightBudget)
 			if err := inFlight.Acquire(gctx, weight); err != nil {
 				return err
 			}
@@ -595,30 +591,10 @@ func convertCommitmentHistoryFileV3(ctx context.Context, at *AggregatorRoTx, vFi
 			var cur, nextVersion, childCur, childNext, scratch historyVersion
 			var beforeChildren, afterChildren []legacyChild
 			var key, rootKey []byte
-			var res *convertedBatch
-			send := func() error {
-				if res == nil || len(res.ents) == 0 {
-					return nil
-				}
-				select {
-				case out <- res:
-					res = convertedBatchPool.Get().(*convertedBatch)
-					res.buf, res.ents = res.buf[:0], res.ents[:0]
-					return nil
-				case <-gctx.Done():
-					return gctx.Err()
-				}
-			}
+			sink := &convertedSink{ctx: gctx, out: out}
 			emit := func(k []byte, txNum uint64, v []byte, kind v3.LegacyKind) error {
 				key = binary.BigEndian.AppendUint64(appendEscapedKey(key[:0], k), txNum)
-				if err := res.emit(key, v, kind); errors.Is(err, errConvertedBatchFull) {
-					if sendErr := send(); sendErr != nil {
-						return sendErr
-					}
-					return res.emit(key, v, kind)
-				} else {
-					return err
-				}
+				return sink.emit(key, v, kind)
 			}
 			convert := func(legacyKey, value []byte, asOf uint64, dst *historyVersion) error {
 				dst.reset()
@@ -779,8 +755,7 @@ func convertCommitmentHistoryFileV3(ctx context.Context, at *AggregatorRoTx, vFi
 				return nil
 			}
 			for batch := range in {
-				res = convertedBatchPool.Get().(*convertedBatch)
-				res.buf, res.ents = res.buf[:0], res.ents[:0]
+				sink.res = getConvertedBatch()
 				for c, span := range batch.spans {
 					legacyKey := batch.buf[batch.keys[c][0]:batch.keys[c][1]]
 					txNums := batch.txNums[span[0]:span[1]]
@@ -870,10 +845,10 @@ func convertCommitmentHistoryFileV3(ctx context.Context, at *AggregatorRoTx, vFi
 				weight := batch.weight
 				inFlight.Release(weight)
 				historyChainBatchPool.Put(batch)
-				if err := send(); err != nil {
+				if err := sink.send(); err != nil {
 					return err
 				}
-				convertedBatchPool.Put(res)
+				convertedBatchPool.Put(sink.res)
 			}
 			return nil
 		})
@@ -1020,21 +995,10 @@ func convertCommitmentHistoryFileV3(ctx context.Context, at *AggregatorRoTx, vFi
 func convertHistoryPhase3(dirs datadir.Dirs, backupRoot string, ranges []commitmentHistoryRange) (int, error) {
 	moved := 0
 	for _, pair := range [][2]string{{dirs.SnapHistory, "history"}, {dirs.SnapIdx, "idx"}, {dirs.SnapAccessors, "accessor"}} {
-		dst := filepath.Join(backupRoot, pair[1])
-		if err := os.MkdirAll(dst, 0o755); err != nil {
+		n, err := convertPhase3(pair[0], filepath.Join(backupRoot, pair[1]), ranges)
+		moved += n
+		if err != nil {
 			return moved, err
-		}
-		for _, r := range ranges {
-			matches, err := filepath.Glob(filepath.Join(pair[0], fmt.Sprintf("*-commitment.%d-%d.*", r.fromStep, r.toStep)))
-			if err != nil {
-				return moved, err
-			}
-			for _, src := range matches {
-				if err := os.Rename(src, filepath.Join(dst, filepath.Base(src))); err != nil {
-					return moved, err
-				}
-				moved++
-			}
 		}
 	}
 	return moved, nil

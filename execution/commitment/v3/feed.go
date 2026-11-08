@@ -22,7 +22,6 @@ import (
 	"runtime"
 	"slices"
 	"strings"
-	"sync"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -39,26 +38,15 @@ type feedEntry struct {
 
 func hashFeed(items []feedEntry, workers int) {
 	if workers <= 1 || len(items) < hashParallelMin {
-		var cache commitment.AddrHashCache
-		for i := range items {
-			items[i].hashedKey = commitment.KeyToHexNibbleHashCached(common.ToBytesZeroCopy(items[i].plainKey), &cache)
-		}
-		return
+		workers = 1
 	}
 	chunk := (len(items) + workers - 1) / workers
-	var wg sync.WaitGroup
-	for start := 0; start < len(items); start += chunk {
-		end := min(start+chunk, len(items))
-		wg.Add(1)
-		go func(lo, hi int) {
-			defer wg.Done()
-			var cache commitment.AddrHashCache
-			for i := lo; i < hi; i++ {
-				items[i].hashedKey = commitment.KeyToHexNibbleHashCached(common.ToBytesZeroCopy(items[i].plainKey), &cache)
-			}
-		}(start, end)
-	}
-	wg.Wait()
+	parallelFor(workers, workers, 1, func(w int) {
+		var cache commitment.AddrHashCache
+		for i := w * chunk; i < min((w+1)*chunk, len(items)); i++ {
+			items[i].hashedKey = commitment.KeyToHexNibbleHashCached(common.ToBytesZeroCopy(items[i].plainKey), &cache)
+		}
+	})
 }
 
 func compareFeed(a, b feedEntry) int {
