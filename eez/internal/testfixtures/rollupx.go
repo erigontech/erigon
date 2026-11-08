@@ -28,7 +28,7 @@ import (
 )
 
 // EEZDevReplayFile is the eez.dev replay under rollupx/eezdev-699069.
-const EEZDevReplayFile = "replay-0-2250.json"
+const EEZDevReplayFile = "replay-0-2250.json.gz"
 
 // EEZDevReplay is the start of eez.dev, the eez-rollupX network on Chiado:
 // its first fourteen settled batches with their L1 data, and the hashes of
@@ -80,9 +80,9 @@ func (b *ReplayBatch) Blobs() [][]byte {
 	return out
 }
 
-// LoadEEZDevReplay reads rollupx/eezdev-699069/replay-0-2250.json.
+// LoadEEZDevReplay reads rollupx/eezdev-699069/replay-0-2250.json.gz.
 func LoadEEZDevReplay() (*EEZDevReplay, error) {
-	data, err := os.ReadFile(Path("rollupx", "eezdev-699069", EEZDevReplayFile))
+	data, err := readGzip("eezdev-699069", EEZDevReplayFile)
 	if err != nil {
 		return nil, err
 	}
@@ -203,18 +203,9 @@ func LoadRollupXL1Replay(chainID uint64) (*RollupXL1Replay, error) {
 		return nil, fmt.Errorf("no L1 replay of chain %d", chainID)
 	}
 	file := src[1]
-	f, err := os.Open(Path("rollupx", src[0], file))
+	data, err := readGzip(src[0], file)
 	if err != nil {
 		return nil, err
-	}
-	defer f.Close()
-	z, err := gzip.NewReader(f)
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w", file, err)
-	}
-	data, err := io.ReadAll(z)
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w", file, err)
 	}
 	var r RollupXL1Replay
 	if err := decodeStrict(data, &r); err != nil {
@@ -228,4 +219,22 @@ func LoadRollupXL1Replay(chainID uint64) (*RollupXL1Replay, error) {
 		}
 	}
 	return &r, nil
+}
+
+// readGzip returns the decompressed content of the gzip file under rollupx/dir.
+func readGzip(dir, file string) ([]byte, error) {
+	f, err := os.Open(Path("rollupx", dir, file))
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	z, err := gzip.NewReader(f)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", file, err)
+	}
+	data, err := io.ReadAll(z)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", file, err)
+	}
+	return data, nil
 }

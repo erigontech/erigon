@@ -57,7 +57,7 @@ The loader test rebuilds the transaction from its fields and requires the mined 
 
 ## rollupx/
 
-`eezdev-699069/replay-0-2250.json` is fixture `rollupx/eezdev-699069` of `NethermindEth/nethermind` at `6d2b31d907e86a6cf243e9f0351f45f5918eed23` (`feature/eez-l2-execution`), `src/Nethermind/Nethermind.Eez.Test/Fixtures/rollupx/eezdev-699069/`. Per that repository's fixture README it holds independently recorded public testnet data of eez.dev (L1 Gnosis Chiado; L2 chain id 699069): the first fourteen accepted batches with their L1 headers, logs, posting transactions and the blobs of their beacon slots (trailing zeros trimmed), and the hashes of L2 blocks 0 to 2250. Its `genesis.json` is `eez/networks/chiado-699069-genesis.json`.
+`eezdev-699069/replay-0-2250.json.gz` is fixture `rollupx/eezdev-699069` of `NethermindEth/nethermind` at `6d2b31d907e86a6cf243e9f0351f45f5918eed23` (`feature/eez-l2-execution`), `src/Nethermind/Nethermind.Eez.Test/Fixtures/rollupx/eezdev-699069/`, its `replay-0-2250.json` gzip-compressed with `gzip -9 -n`; decompressed, its SHA-256 is `6815ec581ed88eedada5a53e09bb485907139311f7d8a170b7af851314717096`. Per that repository's fixture README it holds independently recorded public testnet data of eez.dev (L1 Gnosis Chiado; L2 chain id 699069): the first fourteen accepted batches with their L1 headers, logs, posting transactions and the blobs of their beacon slots (trailing zeros trimmed), and the hashes of L2 blocks 0 to 2250. Its `genesis.json` is `eez/networks/chiado-699069-genesis.json`.
 
 License: `LGPL-3.0-only` (nethermind).
 
@@ -77,7 +77,7 @@ License: `LGPL-3.0-only` (nethermind).
 | `rollupx/chiado-699169/blocks-0-2600.hex.gz` | `10cbd741d8d5ed0ed77f392829e45c8e4b30a64f1258fe38262266fe3e5102f1` |
 | `rollupx/chiado-916969/blocks-0-770.hex.gz` | `7baf18765a4e74fe78214f416f9ee8ec31529542980a3d495ba1e2b81104bacd` |
 | `rollupx/chiado-916969/l1-23731445-23731589.json.gz` | `1d14be06abf94ea69220b3c55a8c399774be24d03887e769729304daa4f356d1` |
-| `rollupx/eezdev-699069/replay-0-2250.json` | `6815ec581ed88eedada5a53e09bb485907139311f7d8a170b7af851314717096` |
+| `rollupx/eezdev-699069/replay-0-2250.json.gz` | `3beb797895731d8584d44f77b16e30fd0623f82ac01f6a2f5732d74d65c798ff` |
 | `vectors/native-profile-v1.json` | `e34194f2a2cba5151f27fb3964be1c6a22961a3ad7a11ff46d66668e9d966276` |
 | `vectors/public_inputs_hash_vectors.json` | `8a787a8e307089a5be0ec4a56d8bd0e1ef4d8862eb58bb6b5086347ff2745472` |
 | `vectors/rolling_hash_vectors.json` | `bc37e3a369c91dde689c586899a4f2cc49da50770032f24dfa5c313f5368b88d` |
