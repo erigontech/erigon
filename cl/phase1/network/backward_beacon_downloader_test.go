@@ -75,6 +75,13 @@ func makeDenebBlock(slot uint64) *cltypes.SignedBeaconBlock {
 	return blk
 }
 
+func makeFuluBlock(slot uint64) *cltypes.SignedBeaconBlock {
+	blk := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.FuluVersion)
+	blk.Block.Slot = slot
+	blk.Block.Body.SyncAggregate = cltypes.NewSyncAggregate()
+	return blk
+}
+
 func hash(b byte) common.Hash {
 	var h common.Hash
 	h[0] = b

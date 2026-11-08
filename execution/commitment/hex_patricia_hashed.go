@@ -606,10 +606,8 @@ func (cell *cell) fillFromLowerCell(lowCell *cell, lowDepth int16, preExtension 
 				copy(cell.extension[1+len(preExtension):], lowCell.extension[:lowCell.extLen])
 			}
 			cell.extLen = lowCell.extLen + 1 + int16(len(preExtension))
-			if cell.accountAddrLen == 0 && cell.storageAddrLen == 0 {
-				copy(cell.hashedExtension[:], cell.extension[:cell.extLen])
-				cell.hashedExtLen = cell.extLen
-			}
+			copy(cell.hashedExtension[:], cell.extension[:cell.extLen])
+			cell.hashedExtLen = cell.extLen
 		} else {
 			// Extension is related to a storage branch node, so we copy it upwards as is
 			cell.extLen = lowCell.extLen
