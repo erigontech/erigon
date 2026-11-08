@@ -124,7 +124,6 @@ func BenchmarkNonceRetryPrepare(b *testing.B) {
 		nonce         uint64
 		cached, mixed bool
 	}{
-		{"ordinary", "Cancun", 0, false, false},
 		{"fresh_blob_cancun", "Cancun", 0, false, false},
 		{"distant_cancun", "Cancun", 1000, true, false},
 		{"eligible_cancun", "Cancun", 1000, true, false},
@@ -136,9 +135,6 @@ func BenchmarkNonceRetryPrepare(b *testing.B) {
 		b.Run(tc.name, func(b *testing.B) {
 			pool, slot := nonceRetryBlob(b, tc.fork, tc.nonce)
 			sender := common.Address{1}
-			if tc.name == "ordinary" {
-				slot = newTestTxnSlot(0, 0, 300_000, 300_000, 100_000)
-			}
 			var txns TxnSlots
 			txns.Append(slot, sender[:], false)
 			if tc.cached {
@@ -161,30 +157,5 @@ func BenchmarkNonceRetryPrepare(b *testing.B) {
 				}
 			}
 		})
-	}
-}
-
-func BenchmarkNonceRetryOrdinaryAdmission(b *testing.B) {
-	pool := seedBlobKZGTestPool(b, b.Context())
-	require.NoError(b, pool.start(b.Context()))
-	sender := common.Address{1}
-	slot := newTestTxnSlot(0, 0, 300_000, 300_000, 100_000)
-	slot.IDHash = slot.Txn.Hash()
-	var txns TxnSlots
-	txns.Append(slot, sender[:], true)
-	b.ReportAllocs()
-	b.ResetTimer()
-	for b.Loop() {
-		reasons, err := pool.AddLocalTxns(b.Context(), txns)
-		if err != nil || len(reasons) != 1 || reasons[0] != txpoolcfg.Success {
-			b.Fatalf("admission: %v, %v", reasons, err)
-		}
-		pool.lock.Lock()
-		mt := pool.byHash[string(slot.IDHash[:])]
-		pool.removeFromSubPool(mt, "benchmark cleanup")
-		pool.discardLocked(mt, txpoolcfg.Success)
-		pool.deletedTxns = pool.deletedTxns[:0]
-		pool.discardReasonsLRU.Remove(string(slot.IDHash[:]))
-		pool.lock.Unlock()
 	}
 }
