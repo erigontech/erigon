@@ -87,14 +87,7 @@ func (m *merkleHasher) getBuffer(size int) [][32]byte {
 
 func (m *merkleHasher) getBufferFromFlat(xs []byte) [][32]byte {
 	n := (len(xs) + 31) / 32
-	buf := m.getBuffer(n)
-	for i := range n {
-		copy(buf[i][:], xs[i*32:])
-	}
-	if rem := len(xs) % 32; rem != 0 {
-		clear(buf[n-1][rem:])
-	}
-	return buf
+	return packBitsInto(m.getBuffer(n+1), xs)
 }
 
 func (m *merkleHasher) transactionsListRoot(transactions [][]byte) ([32]byte, error) {
