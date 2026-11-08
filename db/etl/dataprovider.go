@@ -44,6 +44,7 @@ type fileDataProvider struct {
 	mmapReader *mmapBytesReader // zero-copy reader over mmap'd data
 	mmapData   mmap.Ro          // mmap'd file content
 	wg         *errgroup.Group
+	discarded  int
 }
 
 // mmapBytesReader tracks position for reading from mmap'd data
@@ -106,7 +107,7 @@ func sortAndFlush(b Buffer, tmpdir string) (*os.File, error) {
 		return nil, err
 	}
 
-	w := bufiopool.Writer(bufferFile)
+	w := bufiopool.Writer(dir.UncachedWriter(bufferFile))
 	defer bufiopool.PutWriter(w)
 
 	if err = b.Write(w); err != nil {
@@ -123,6 +124,14 @@ func (p *fileDataProvider) Next() ([]byte, []byte, error) {
 		if err := p.initMmap(); err != nil {
 			return nil, nil, err
 		}
+	}
+	if p.mmapReader.pos == len(p.mmapData) && p.discarded < len(p.mmapData) {
+		_ = discardSpillRange(p.file, p.mmapData, p.discarded, len(p.mmapData))
+		p.discarded = len(p.mmapData)
+	} else if p.mmapReader.pos-p.discarded >= 8<<20 {
+		end := (p.mmapReader.pos - (4 << 20)) / os.Getpagesize() * os.Getpagesize()
+		_ = discardSpillRange(p.file, p.mmapData, p.discarded, end)
+		p.discarded = end
 	}
 	key, err := readKeyField(p.mmapReader)
 	if err != nil {

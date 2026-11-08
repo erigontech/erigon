@@ -37,12 +37,14 @@ import (
 
 // openWriters creates buffered writers for record and error files.
 // Returns a cleanup function that flushes and closes all opened files.
-func openWriters(recordFileName, errorFileName string) (rec, errs *bufio.Writer, cleanup func(), err error) {
-	var closers []func()
-	cleanup = func() {
+func openWriters(recordFileName, errorFileName string) (rec, errs *bufio.Writer, cleanup func() error, err error) {
+	var closers []func() error
+	cleanup = func() error {
+		var err error
 		for _, closer := range slices.Backward(closers) {
-			closer()
+			err = errors.Join(err, closer())
 		}
+		return err
 	}
 	if errorFileName != "" {
 		f, err := os.Create(errorFileName)
@@ -50,18 +52,22 @@ func openWriters(recordFileName, errorFileName string) (rec, errs *bufio.Writer,
 			return nil, nil, cleanup, fmt.Errorf("cannot create file %s: %w", errorFileName, err)
 		}
 		errs = bufio.NewWriter(f)
-		closers = append(closers, func() { errs.Flush(); f.Close() })
+		closers = append(closers, flushAndClose(errs, f))
 	}
 	if recordFileName != "" {
 		f, err := os.Create(recordFileName)
 		if err != nil {
-			cleanup() // close any files already opened above
-			return nil, nil, nil, fmt.Errorf("cannot create file %s: %w", recordFileName, err)
+			// close any files already opened above
+			return nil, nil, nil, errors.Join(fmt.Errorf("cannot create file %s: %w", recordFileName, err), cleanup())
 		}
 		rec = bufio.NewWriter(f)
-		closers = append(closers, func() { rec.Flush(); f.Close() })
+		closers = append(closers, flushAndClose(rec, f))
 	}
 	return rec, errs, cleanup, nil
+}
+
+func flushAndClose(w *bufio.Writer, f io.Closer) func() error {
+	return func() error { return errors.Join(w.Flush(), f.Close()) }
 }
 
 // fetchBlock fetches a block by number from Erigon and optionally compares it with Geth.

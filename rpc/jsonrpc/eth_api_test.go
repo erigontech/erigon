@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
@@ -640,6 +641,9 @@ func TestGetStorageAtExcludesNextBlockSystemCall(t *testing.T) {
 	ch, err := m.GenerateChain(3, func(int, *blockgen.BlockGen) {})
 	require.NoError(t, err)
 	require.NoError(t, m.InsertChain(ch))
+	require.NoError(t, m.DB.Update(context.Background(), func(tx kv.RwTx) error {
+		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
+	}))
 	api := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, &rpccfg.EthApiConfig{GasCap: 5000000}, log.New())
 
 	const bn = 2

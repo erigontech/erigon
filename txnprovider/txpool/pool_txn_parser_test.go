@@ -79,6 +79,43 @@ func TestParseTransactionRLP(t *testing.T) {
 	}
 }
 
+func TestFrameSerializedSizeLimit(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		dataSize int
+		wrapped  bool
+		tooLarge bool
+	}{
+		{"plain", 0, false, false},
+		{"large plain", 128 * 1024, false, true},
+		{"blob sidecar", 0, true, false},
+		{"large wrapped body", 128 * 1024, true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			frame := framePoolSlot(t, common.Address{1}, 1, 2).Txn.(*types.FrameTransaction)
+			frame.Frames[0].Data = make([]byte, tc.dataSize)
+			var encoded bytes.Buffer
+			if tc.wrapped {
+				frame.BlobVersionedHashes = []common.Hash{{1}}
+				wrapped := &types.FrameTxWrapper{FrameTransaction: frame, WrapperVersion: 1, Blobs: types.Blobs{{}}, Commitments: types.BlobKzgs{{}}, Proofs: make(types.KZGProofs, 128)}
+				require.NoError(t, wrapped.MarshalBinaryWrapped(&encoded))
+			} else {
+				require.NoError(t, frame.MarshalBinary(&encoded))
+			}
+			enveloped, err := rlp.EncodeToBytes(encoded.Bytes())
+			require.NoError(t, err)
+			for _, payload := range [][]byte{encoded.Bytes(), enveloped} {
+				err := ValidateSerializedTxn(payload)
+				if tc.tooLarge {
+					require.ErrorIs(t, err, ErrRlpTooBig)
+				} else {
+					require.NoError(t, err)
+				}
+			}
+		})
+	}
+}
+
 func TestTransactionSignatureValidity1(t *testing.T) {
 	chainId := new(uint256.Int).SetUint64(1)
 	ctx := NewTxnParseContext(*chainId)
@@ -580,17 +617,9 @@ func TestParseTransactionsRejectsTrailingBlobWrapperBytes(t *testing.T) {
 	require.ErrorContains(t, err, "trailing bytes after blobs wrapper")
 }
 
-func TestSetCodeAuthSignatureRecover(t *testing.T) {
+func TestSetCodeAuthRecoveryDeferred(t *testing.T) {
 	txnRlpHex := testdata.ValidSetCodeTxn1
-	// For authorizationList[0] in the above :-
-	// expectedAddress := common.HexToAddress("0x0e2dadd8081919cd0534c4144a74204f2db229ec")
-	// expectedNonce := 0x17
-	// expectedYParity := 0x1
-	// expectedR := "0x837da79f8b17c1db2371cdc4b2b134cd5aef1b588f811a5e3b4f2329c2107116"
-	// expectedS := "0x66aab6e4baa71dd601f4211e1bbf27c297e47dc845e73b9147ab1823064df2b9"
-
 	expectedChainId := 11155111 // Sepolia
-	expectedSigner := common.HexToAddress("0x7934d5340b1fa4e3d8f5cd62705feee3ece50ea3")
 
 	var txn TxnSlot
 
@@ -603,8 +632,16 @@ func TestSetCodeAuthSignatureRecover(t *testing.T) {
 	setCodeTx := types.SetCodeTransaction{}
 	rlpStream := rlp.NewStream(bytes.NewBuffer(txnRlpBytes[1:]), uint64(len(txnRlpBytes)))
 	require.NoError(t, setCodeTx.DecodeRLP(rlpStream))
+	require.Equal(t, setCodeTx.Authorizations, txn.Txn.GetAuthorizations())
+	require.Empty(t, txn.AuthAndNonces)
+	pool := &TxPool{chainID: ctx.chainID}
+	pool.recoverAuthorizations(&txn)
 	require.Len(t, txn.AuthAndNonces, 1)
-	require.Equal(t, expectedSigner, txn.AuthAndNonces[0].authority)
+	require.Equal(t, common.HexToAddress("0x7934d5340b1fa4e3d8f5cd62705feee3ece50ea3"), txn.AuthAndNonces[0].authority)
+
+	_, err = ctx.ParseTransaction(hexutil.MustDecodeHex(testdata.ValidSetCodeTxn2), 0, &txn, nil, false, false, nil)
+	require.NoError(t, err)
+	require.Nil(t, txn.AuthAndNonces, "parsing a new transaction must clear the previous recovery")
 }
 
 func TestSetCodeTxnParsing(t *testing.T) {
@@ -622,7 +659,8 @@ func TestSetCodeTxnParsing(t *testing.T) {
 
 	_, err = ctx.ParseTransaction(bodyRlx, 0, &txn, nil, hasEnvelope, false, nil)
 	require.NoError(t, err)
-	assert.Len(t, txn.AuthAndNonces, 2)
+	assert.Len(t, txn.Txn.GetAuthorizations(), 2)
+	assert.Empty(t, txn.AuthAndNonces)
 	assert.Equal(t, SetCodeTxnType, txn.TxType())
 
 	// test empty authorizations
@@ -879,4 +917,42 @@ func buildBlobWrapperPayload() []byte {
 	wrapperRlp[4] = byte(innerLen)
 
 	return wrapperRlp
+}
+
+func TestWrappedBlobTxnDoesNotAliasPayload(t *testing.T) {
+	chainID := uint256.NewInt(5)
+	wrapper := types.MakeWrappedBlobTxn(chainID)
+	wrapperBuf := &bytes.Buffer{}
+	require.NoError(t, wrapper.MarshalBinaryWrapped(wrapperBuf))
+	wire := wrapperBuf.Bytes()
+	packet := EncodeTransactions([][]byte{wire}, nil)
+
+	ctx := NewTxnParseContext(*chainID)
+	ctx.WithSender(false)
+	var slots TxnSlots
+	_, err := ParseTransactions(packet, 0, ctx, &slots, nil)
+	require.NoError(t, err)
+	clear(packet)
+
+	slot := slots.Txns[0]
+	require.Len(t, slot.BlobBundles, len(wrapper.Blobs))
+	for i, bundle := range slot.BlobBundles {
+		require.True(t, bytes.Equal(wrapper.Blobs[i][:], bundle.Blob), "blob %d aliases the payload", i)
+	}
+	require.True(t, bytes.Equal(wire, slot.Rlp), "rlp aliases the payload")
+}
+
+// A known blob txn is rejected before its blobs are copied.
+func TestKnownWrappedBlobTxnRejectedBeforeBlobs(t *testing.T) {
+	chainID := uint256.NewInt(5)
+	wrapper := types.MakeWrappedBlobTxn(chainID)
+	wrapperBuf := &bytes.Buffer{}
+	require.NoError(t, wrapper.MarshalBinaryWrapped(wrapperBuf))
+
+	ctx := NewTxnParseContext(*chainID)
+	ctx.WithSender(false)
+	var slot TxnSlot
+	_, err := ctx.ParseTransaction(wrapperBuf.Bytes(), 0, &slot, nil, false, true, func([]byte) error { return ErrRejected })
+	require.ErrorIs(t, err, ErrRejected)
+	require.Empty(t, slot.BlobBundles)
 }

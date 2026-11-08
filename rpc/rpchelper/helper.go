@@ -190,7 +190,11 @@ func CreateHistoryStateReader(ctx context.Context, tx kv.TemporalTx, blockNumber
 		return nil, err
 	}
 	txNum := uint64(int(minTxNum) + txnIndex + /* 1 system txNum in beginning of block */ 1)
-	if minHistoryTxNum := state.StateHistoryStartTxNum(tx); txNum < minHistoryTxNum {
+	minHistoryTxNum, err := state.StateHistoryStartTxNum(tx)
+	if err != nil {
+		return nil, err
+	}
+	if txNum < minHistoryTxNum {
 		firstAvailBlock, _, _ := txNumsReader.FindBlockNum(ctx, tx, minHistoryTxNum)
 		return nil, fmt.Errorf("%w: requested block %d, history is available from block %d", state.ErrPruned, blockNumber, firstAvailBlock)
 	}
@@ -228,7 +232,11 @@ func CreateHistoryCachedStateReader(ctx context.Context, cache kvcache.CacheView
 		return nil, err
 	}
 	txNum := uint64(int(minTxNum) + txnIndex + /* 1 system txNum in beginning of block */ 1)
-	if minHistoryTxNum := state.StateHistoryStartTxNum(tx); txNum < minHistoryTxNum {
+	minHistoryTxNum, err := state.StateHistoryStartTxNum(tx)
+	if err != nil {
+		return nil, err
+	}
+	if txNum < minHistoryTxNum {
 		return nil, fmt.Errorf("%w: block tx: %d, min tx: %d", state.ErrPruned, txNum, minHistoryTxNum)
 	}
 	return &cachedHistoryReaderV3{
@@ -242,6 +250,7 @@ type cachedHistoryReaderV3 struct {
 	cache     asOfView
 	reader    *state.HistoryReaderV3
 	composite []byte
+	addr      common.Address
 }
 
 func (hr *cachedHistoryReaderV3) SetTrace(trace bool, tracePrefix string) {
@@ -265,8 +274,12 @@ func (hr *cachedHistoryReaderV3) SetTxNum(txNum uint64) {
 }
 
 func (hr *cachedHistoryReaderV3) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
-	addressValue := address.Value()
-	enc, ok, err := hr.cache.GetAsOf(addressValue[:], hr.reader.GetTxNum())
+	return hr.ReadAccountByPlainAddr(address.Value())
+}
+
+func (hr *cachedHistoryReaderV3) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {
+	hr.addr = address
+	enc, ok, err := hr.cache.GetAsOf(hr.addr[:], hr.reader.GetTxNum())
 	if err != nil {
 		return nil, err
 	}
@@ -282,14 +295,14 @@ func (hr *cachedHistoryReaderV3) ReadAccountData(address accounts.Address) (*acc
 		return &a, nil
 	}
 
-	return hr.reader.ReadAccountData(address)
+	return hr.reader.ReadAccountByPlainAddr(address)
 }
 
 // HasAccount answers from the cached encoding's length, so a historical existence check
 // costs no DeserialiseV3 either.
-func (hr *cachedHistoryReaderV3) HasAccount(address accounts.Address) (bool, error) {
-	addressValue := address.Value()
-	enc, ok, err := hr.cache.GetAsOf(addressValue[:], hr.reader.GetTxNum())
+func (hr *cachedHistoryReaderV3) HasAccount(address common.Address) (bool, error) {
+	hr.addr = address
+	enc, ok, err := hr.cache.GetAsOf(hr.addr[:], hr.reader.GetTxNum())
 	if err != nil {
 		return false, err
 	}

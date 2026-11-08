@@ -25,6 +25,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/spf13/afero"
@@ -64,8 +65,11 @@ type maliciousColumnSentinel struct {
 	columnRequested chan struct{}
 	releaseColumn   chan struct{}
 	columnCalls     atomic.Int32
+	callTimesMu     sync.Mutex
+	columnCallTimes []time.Time
 	banOnce         sync.Once
 	banned          chan struct{}
+	softBans        atomic.Int32
 }
 
 func (s *maliciousColumnSentinel) PeersInfo(context.Context, *sentinelproto.PeersInfoRequest, ...grpc.CallOption) (*sentinelproto.PeersInfoResponse, error) {
@@ -73,6 +77,11 @@ func (s *maliciousColumnSentinel) PeersInfo(context.Context, *sentinelproto.Peer
 }
 
 func (s *maliciousColumnSentinel) BanPeer(context.Context, *sentinelproto.Peer, ...grpc.CallOption) (*sentinelproto.EmptyMessage, error) {
+	s.softBans.Add(1)
+	return &sentinelproto.EmptyMessage{}, nil
+}
+
+func (s *maliciousColumnSentinel) BanPeerForInvalidData(context.Context, *sentinelproto.Peer, ...grpc.CallOption) (*sentinelproto.EmptyMessage, error) {
 	s.banOnce.Do(func() { close(s.banned) })
 	return &sentinelproto.EmptyMessage{}, nil
 }
@@ -83,6 +92,9 @@ func (s *maliciousColumnSentinel) SendPeerRequest(ctx context.Context, req *sent
 		s.metadataOnce.Do(func() { close(s.metadataReady) })
 		return &sentinelproto.ResponseData{Data: s.metadataResponse, Peer: peer}, nil
 	}
+	s.callTimesMu.Lock()
+	s.columnCallTimes = append(s.columnCallTimes, time.Now())
+	s.callTimesMu.Unlock()
 	if s.columnRequested != nil {
 		s.columnOnce.Do(func() { close(s.columnRequested) })
 	}
@@ -152,7 +164,11 @@ func newColumnResponseRPCWithPeerAndForkEpoch(t *testing.T, cfg *clparams.Beacon
 		}
 		encoded[i] = wire.Bytes()
 	}
+	return newColumnResponseRPCFromWire(t, cfg, clock, peerEnodeID, custodyGroupCount, encoded)
+}
 
+func newColumnResponseRPCFromWire(t *testing.T, cfg *clparams.BeaconChainConfig, clock eth_clock.EthereumClock, peerEnodeID string, custodyGroupCount uint64, encoded [][]byte) (*rpc.BeaconRpcP2P, *maliciousColumnSentinel) {
+	t.Helper()
 	syncnets := [1]byte{}
 	metadata := &cltypes.Metadata{Syncnets: &syncnets, CustodyGroupCount: &custodyGroupCount}
 	var metadataWire bytes.Buffer
@@ -164,7 +180,7 @@ func newColumnResponseRPCWithPeerAndForkEpoch(t *testing.T, cfg *clparams.Beacon
 		metadataReady:    make(chan struct{}),
 		banned:           make(chan struct{}),
 	}
-	rpcClient := rpc.NewBeaconRpcP2P(t.Context(), sentinel, cfg, clock, nil)
+	rpcClient := rpc.NewBeaconRpcP2P(t.Context(), sentinel, cfg, clock)
 	select {
 	case <-sentinel.metadataReady:
 	case <-time.After(30 * time.Second):
@@ -425,27 +441,23 @@ func TestRunDownloadRejectsFuluSignatureMismatchBeforeStorage(t *testing.T) {
 	done := make(chan struct{})
 	go func() { defer close(done); d.runDownload(ctx, req, true) }()
 
-	select {
-	case <-sentinel.banned:
-	case <-storage.lookups:
+	deadline := time.After(30 * time.Second)
+	for sentinel.softBans.Load() == 0 {
 		select {
-		case <-storage.writes:
-			cancel()
-			<-done
-			t.Fatal("signature-mismatched Fulu column was persisted")
 		case <-sentinel.banned:
 			cancel()
 			<-done
-			t.Fatal("signature mismatch reached storage lookup before rejection")
-		case <-time.After(30 * time.Second):
+			t.Fatal("a mismatch with the unverified stored signature hard-banned the peer")
+		case <-storage.lookups:
 			cancel()
 			<-done
-			t.Fatal("signature mismatch reached storage lookup without a terminal result")
+			t.Fatal("signature mismatch reached storage lookup before rejection")
+		case <-deadline:
+			cancel()
+			<-done
+			t.Fatal("signature mismatch was not rejected")
+		case <-time.After(10 * time.Millisecond):
 		}
-	case <-time.After(30 * time.Second):
-		cancel()
-		<-done
-		t.Fatal("signature mismatch was neither rejected nor processed")
 	}
 	cancel()
 	<-done
@@ -455,6 +467,155 @@ func TestRunDownloadRejectsFuluSignatureMismatchBeforeStorage(t *testing.T) {
 	saved, err := baseStorage.GetSavedColumnIndex(t.Context(), block.GetSlot(), root)
 	require.NoError(t, err)
 	require.Empty(t, saved)
+}
+
+func TestRunDownloadBansPeerForInvalidProofBehindSignatureMismatch(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = 0
+	cfg.InitializeForkSchedule()
+	initTestBeaconConfig(&cfg)
+	for name, duplicate := range map[string]bool{"invalid_kzg_proof": false, "duplicate_column": true} {
+		t.Run(name, func(t *testing.T) {
+			block, root, _, columns := recoverableFuluDataAtSlot(t, &cfg, 100)
+			metadata, err := newBlobRecoveryMetadata(block, root)
+			require.NoError(t, err)
+			mismatchedHeader := *columns[0].SignedBlockHeader
+			mismatchedHeader.Signature[0] ^= 1
+			columns[0].SignedBlockHeader = &mismatchedHeader
+			response := []*cltypes.DataColumnSidecar{columns[0]}
+			requested := map[uint64]bool{0: true}
+			if duplicate {
+				require.True(t, VerifyDataColumnSidecarKZGProofs(columns[0]))
+				response = append(response, columns[0])
+				requested[1] = true
+			} else {
+				columns[0].KzgProofs.Get(0)[0] ^= 1
+				require.False(t, VerifyDataColumnSidecarKZGProofs(columns[0]))
+			}
+			rpcClient, sentinel := newColumnResponseRPC(t, &cfg, block.GetSlot(), response)
+
+			d := &peerdas{
+				rpc:           rpcClient,
+				beaconConfig:  &cfg,
+				state:         peerdasstate.NewPeerDasState(&cfg, &clparams.NetworkConfig{}),
+				columnStorage: blob_storage.NewDataColumnStore(afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter()),
+			}
+			req := &downloadRequest{
+				beaconConfig: &cfg,
+				downloadTable: map[downloadTableEntry]map[uint64]bool{
+					{blockRoot: root, slot: block.GetSlot()}: requested,
+				},
+				recoveryDetails:    map[common.Hash]*blobRecoveryMetadata{root: metadata},
+				validatedBlobCount: map[common.Hash]uint32{root: 0},
+			}
+			ctx, cancel := context.WithCancel(t.Context())
+			done := make(chan struct{})
+			go func() { defer close(done); d.runDownload(ctx, req, true) }()
+
+			deadline := time.After(30 * time.Second)
+			for {
+				select {
+				case <-sentinel.banned:
+					cancel()
+					<-done
+					require.Zero(t, sentinel.softBans.Load())
+					require.Equal(t, 1, req.remainingEntriesCount())
+					return
+				case <-deadline:
+					cancel()
+					<-done
+					t.Fatal("an invalid response behind a signature mismatch was not rejected")
+				case <-time.After(10 * time.Millisecond):
+					if sentinel.softBans.Load() != 0 {
+						cancel()
+						<-done
+						t.Fatal("an invalid response behind a signature mismatch got only a soft ban")
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestRunDownloadBansPeerForInvalidGloasSidecarBesideFuluSignatureMismatch(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = 1
+	cfg.GloasForkEpoch = 2
+	cfg.InitializeForkSchedule()
+	initTestBeaconConfig(&cfg)
+	currentSlot := cfg.GloasForkEpoch * cfg.SlotsPerEpoch
+	fuluBlock, fuluRoot, _, fuluColumns := recoverableFuluDataAtSlot(t, &cfg, cfg.FuluForkEpoch*cfg.SlotsPerEpoch)
+	fuluMetadata, err := newBlobRecoveryMetadata(fuluBlock, fuluRoot)
+	require.NoError(t, err)
+	mismatchedHeader := *fuluColumns[0].SignedBlockHeader
+	mismatchedHeader.Signature[0] ^= 1
+	fuluColumns[0].SignedBlockHeader = &mismatchedHeader
+	require.False(t, invalidFuluSidecar(fuluColumns[0]))
+	gloasBlock, gloasRoot, gloasColumns := recoverableGloasColumns(t, &cfg, currentSlot)
+	gloasColumns[1].KzgProofs.Get(0)[0] ^= 1
+	require.False(t, VerifyDataColumnSidecarKZGProofsWithCommitments(gloasColumns[1], gloasBlock.GetBlobKzgCommitments()))
+
+	clock := eth_clock.NewEthereumClock(uint64(time.Now().Unix())-currentSlot*cfg.SecondsPerSlot, common.Hash{}, &cfg)
+	var wire bytes.Buffer
+	for i, chunk := range []struct {
+		sidecar *cltypes.DataColumnSidecar
+		epoch   uint64
+	}{{fuluColumns[0], cfg.FuluForkEpoch}, {gloasColumns[1], cfg.GloasForkEpoch}} {
+		sidecar := chunk.sidecar
+		if i > 0 {
+			require.NoError(t, wire.WriteByte(0))
+		}
+		digest, err := clock.ComputeForkDigest(chunk.epoch)
+		require.NoError(t, err)
+		require.NoError(t, ssz_snappy.EncodeAndWrite(&wire, sidecar, digest[:]...))
+	}
+	rpcClient, sentinel := newColumnResponseRPCFromWire(t, &cfg, clock, "", cfg.NumberOfColumns, [][]byte{wire.Bytes()})
+
+	gloasDataCache, err := lru.New[common.Hash, *gloasBlockData]("gloasMixedFork", 1)
+	require.NoError(t, err)
+	gloasDataCache.Add(gloasRoot, &gloasBlockData{
+		BlobKzgCommitments:      gloasBlock.GetBlobKzgCommitments(),
+		SignedBeaconBlockHeader: gloasBlock.SignedBeaconBlockHeader(),
+	})
+	d := &peerdas{
+		rpc:            rpcClient,
+		beaconConfig:   &cfg,
+		state:          peerdasstate.NewPeerDasState(&cfg, &clparams.NetworkConfig{}),
+		columnStorage:  blob_storage.NewDataColumnStore(afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter()),
+		gloasDataCache: gloasDataCache,
+	}
+	req := &downloadRequest{
+		beaconConfig: &cfg,
+		downloadTable: map[downloadTableEntry]map[uint64]bool{
+			{blockRoot: fuluRoot, slot: fuluBlock.GetSlot()}:   {0: true},
+			{blockRoot: gloasRoot, slot: gloasBlock.GetSlot()}: {1: true},
+		},
+		recoveryDetails:    map[common.Hash]*blobRecoveryMetadata{fuluRoot: fuluMetadata},
+		validatedBlobCount: map[common.Hash]uint32{fuluRoot: 0},
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() { defer close(done); d.runDownload(ctx, req, false) }()
+
+	select {
+	case <-sentinel.banned:
+	case <-time.After(30 * time.Second):
+		cancel()
+		<-done
+		t.Fatalf("an invalid Gloas sidecar beside a Fulu signature mismatch was not hard-banned, soft bans: %d", sentinel.softBans.Load())
+	}
+	cancel()
+	<-done
 }
 
 func TestRunDownloadAcceptsGloasSidecarWithRecoveryMetadata(t *testing.T) {
@@ -745,6 +906,47 @@ func TestRunDownloadRejectsDuplicateRequestedTupleBeforeStorage(t *testing.T) {
 	cancel()
 	<-done
 	require.Equal(t, 1, req.remainingEntriesCount())
+}
+
+func TestRunDownloadDoesNotRepeatRequestsToPeerThatAnsweredNothing(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		cfg := clparams.MainnetBeaconConfig
+		cfg.AltairForkEpoch = 0
+		cfg.BellatrixForkEpoch = 0
+		cfg.CapellaForkEpoch = 0
+		cfg.DenebForkEpoch = 0
+		cfg.ElectraForkEpoch = 0
+		cfg.FuluForkEpoch = 0
+		cfg.InitializeForkSchedule()
+		initTestBeaconConfig(&cfg)
+		rpcClient, sentinel := newColumnResponseRPC(t, &cfg, 100, nil)
+		d := &peerdas{
+			rpc:           rpcClient,
+			beaconConfig:  &cfg,
+			state:         peerdasstate.NewPeerDasState(&cfg, &clparams.NetworkConfig{}),
+			columnStorage: blob_storage.NewDataColumnStore(afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter()),
+		}
+		req := &downloadRequest{
+			beaconConfig: &cfg,
+			downloadTable: map[downloadTableEntry]map[uint64]bool{
+				{blockRoot: common.Hash{1}, slot: 100}: {0: true},
+			},
+		}
+		// Long enough to cross the 15 s peer refresh.
+		ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+		defer cancel()
+		d.runDownload(ctx, req, false)
+		synctest.Wait()
+
+		sentinel.callTimesMu.Lock()
+		defer sentinel.callTimesMu.Unlock()
+		times := sentinel.columnCallTimes
+		require.Greater(t, len(times), 1)
+		for i := 1; i < len(times); i++ {
+			require.GreaterOrEqual(t, times[i].Sub(times[i-1]), 2*time.Second, "gap before request %d", i)
+		}
+		require.Equal(t, 1, req.remainingEntriesCount())
+	})
 }
 
 func TestRunDownloadAcceptsPartialReorderedRequestedSubset(t *testing.T) {
@@ -1164,7 +1366,7 @@ func TestRunDownloadRejectsGloasSidecarWithPreGloasSlot(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	rpcClient := rpc.NewBeaconRpcP2P(ctx, sentinel, &cfg, clock, nil)
+	rpcClient := rpc.NewBeaconRpcP2P(ctx, sentinel, &cfg, clock)
 
 	select {
 	case <-sentinel.metadataReady:
@@ -1233,4 +1435,111 @@ func TestNewBlobRecoveryMetadataCarriesTheSignature(t *testing.T) {
 	wrapped, err := newBlobRecoveryMetadata(&blockHashCountingBlock{ColumnSyncableSignedBlock: block}, root)
 	require.NoError(t, err)
 	require.Equal(t, signature, wrapped.signature, "a wrapper must not drop the signature")
+}
+
+type failingLookupColumnStorage struct {
+	blob_storage.DataColumnStorage
+	lookups chan struct{}
+}
+
+func (s *failingLookupColumnStorage) ColumnSidecarExists(context.Context, uint64, common.Hash, int64) (bool, error) {
+	select {
+	case s.lookups <- struct{}{}:
+	default:
+	}
+	return false, errors.New("local storage failure")
+}
+
+func TestRunDownloadDoesNotBanPeerForLocalStorageError(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = 0
+	cfg.InitializeForkSchedule()
+	initTestBeaconConfig(&cfg)
+	block, root, _, columns := recoverableFuluDataAtSlot(t, &cfg, 100)
+	rpcClient, sentinel := newColumnResponseRPC(t, &cfg, block.GetSlot(), []*cltypes.DataColumnSidecar{columns[0]})
+
+	storage := &failingLookupColumnStorage{
+		DataColumnStorage: blob_storage.NewDataColumnStore(afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter()),
+		lookups:           make(chan struct{}, 1),
+	}
+	d := &peerdas{
+		rpc:           rpcClient,
+		beaconConfig:  &cfg,
+		state:         peerdasstate.NewPeerDasState(&cfg, &clparams.NetworkConfig{}),
+		columnStorage: storage,
+	}
+	req := &downloadRequest{
+		beaconConfig: &cfg,
+		downloadTable: map[downloadTableEntry]map[uint64]bool{
+			{blockRoot: root, slot: block.GetSlot()}: {0: true},
+		},
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() { defer close(done); d.runDownload(ctx, req, false) }()
+
+	select {
+	case <-storage.lookups:
+	case <-time.After(30 * time.Second):
+		cancel()
+		<-done
+		t.Fatal("valid response did not reach storage lookup")
+	}
+	cancel()
+	<-done
+	require.Zero(t, sentinel.softBans.Load())
+	select {
+	case <-sentinel.banned:
+		t.Fatal("peer was banned for a local storage error")
+	default:
+	}
+}
+
+func TestRunDownloadBansPeerForInvalidFuluKZGProof(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = 0
+	cfg.InitializeForkSchedule()
+	initTestBeaconConfig(&cfg)
+	block, root, _, columns := recoverableFuluDataAtSlot(t, &cfg, 100)
+	columns[0].KzgProofs.Get(0)[0] ^= 1
+	require.True(t, VerifyDataColumnSidecar(columns[0]))
+	require.True(t, VerifyDataColumnSidecarInclusionProof(columns[0]))
+	require.False(t, VerifyDataColumnSidecarKZGProofs(columns[0]))
+	rpcClient, sentinel := newColumnResponseRPC(t, &cfg, block.GetSlot(), []*cltypes.DataColumnSidecar{columns[0]})
+
+	d := &peerdas{
+		rpc:           rpcClient,
+		beaconConfig:  &cfg,
+		state:         peerdasstate.NewPeerDasState(&cfg, &clparams.NetworkConfig{}),
+		columnStorage: blob_storage.NewDataColumnStore(afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter()),
+	}
+	req := &downloadRequest{
+		beaconConfig: &cfg,
+		downloadTable: map[downloadTableEntry]map[uint64]bool{
+			{blockRoot: root, slot: block.GetSlot()}: {0: true},
+		},
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() { defer close(done); d.runDownload(ctx, req, false) }()
+
+	select {
+	case <-sentinel.banned:
+	case <-time.After(30 * time.Second):
+		cancel()
+		<-done
+		t.Fatal("peer serving an invalid KZG proof was not banned")
+	}
+	cancel()
+	<-done
 }

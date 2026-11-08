@@ -27,8 +27,8 @@ deviation that has not yet been documented may still exist.
 `execution-apis` is a living specification rather than a frozen standard — methods are
 still being added, and some long-standing `eth` behaviour was never specified at all — so
 parts of what follows are differences from a moving target rather than defects. Erigon
-runs the specification's own conformance vectors in CI (Hive's `rpc-compat` suite against
-a pinned `execution-apis` revision) and works with the other client teams on closing
+runs the specification's own conformance vectors in continuous integration (CI), using Hive's `rpc-compat` suite against
+a pinned `execution-apis` revision, and works with the other client teams on closing
 these gaps, so this page will change as the two converge.
 :::
 
@@ -56,7 +56,7 @@ A call object whose `chainId` is not the node's is rejected with `-32602` (`chai
 
 `eth_syncing` returns `false` when the current block is fewer than 8 blocks from the highest block seen, in either direction; otherwise an object with `startingBlock`, `currentBlock`, `highestBlock` and `stages` (per-stage progress). While snapshots download, `currentBlock` advances with the bytes downloaded, scaled to the block the snapshots reach, and `stages` is empty (as it is while the highest block is not yet known). A node 8 or more blocks ahead of a stale highest block therefore reports syncing, with `highestBlock` equal to `currentBlock`. Both report `startingBlock` as the block where the current sync session began.
 
-`eth_subscribe("syncing")` (WebSocket or IPC) sends the last known state when you subscribe, if the node has reported one, then a message on each change: the same object with `syncing: true` while syncing, or `false` once synced. A slow client can miss intermediate states: each subscription buffers 8 messages and drops the oldest first, so the latest state always arrives.
+`eth_subscribe("syncing")` (WebSocket or inter-process communication (IPC)) sends the last known state when you subscribe, if the node has reported one, then a message on each change: the same object with `syncing: true` while syncing, or `false` once synced. A slow client can miss intermediate states: each subscription buffers 8 messages and drops the oldest first, so the latest state always arrives.
 
 ### eth\_getProof
 
@@ -239,7 +239,7 @@ Besides the fee-field rules above, a fill fails outright when:
 
 An object with `raw`, the unsigned transaction in its canonical binary encoding, and
 `tx`, the same transaction in JSON form. `raw` comes from `MarshalBinary`, so it is bare
-RLP only for a legacy transaction; a typed one is the EIP-2718 type byte followed by the
+Recursive Length Prefix (RLP) only for a legacy transaction; a typed one is the EIP-2718 type byte followed by the
 encoded payload, and feeding that straight to an RLP decoder will fail. The standardized
 result carries only `tx`; the extra `raw` field is the geth-compatible shape.
 
@@ -272,7 +272,7 @@ A request may carry the sidecar fields `blobs`, `commitments` and `proofs`. When
 `blobs` is present, the fill builds the sidecar:
 
 * `commitments` and `proofs` are either both supplied or both absent; one without the
-  other is rejected. Absent ones are computed from the blobs, supplied ones are verified
+  other is rejected. Absent ones are computed from the blobs; supplied ones are verified
   with KZG (`failed to verify blob proof`).
 * Once Osaka is active on the head, the proofs are EIP-7594 cell proofs — 128 per blob —
   and the sidecar has wrapper version 1. One blob proof per blob, as pre-Osaka tooling

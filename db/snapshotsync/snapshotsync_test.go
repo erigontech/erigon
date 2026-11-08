@@ -469,6 +469,42 @@ func TestGetMinimumBlocksToDownload_MinBlock(t *testing.T) {
 	assert.Equal(t, kv.Step(99), receiptsStep)
 }
 
+// The state files end inside a block, so execution resumes there and replays the block's prefix
+// from history. The history cutoff must keep the step that the block starts in.
+func TestGetMinimumBlocksToDownload_KeepsHistoryOfTheResumedBlock(t *testing.T) {
+	const stepSize = 100
+	for _, tc := range []struct {
+		name            string
+		baseTxNum       uint64
+		txCount         uint64
+		historyPruneTo  uint64
+		wantHistoryStep kv.Step
+	}{
+		{"state ends inside a block that starts a step earlier", 14_850, 200, 300, 147},
+		{"state ends between blocks", 14_950, 50, 300, 299},
+		{"cutoff below the resumed block", 14_850, 200, 100, 99},
+		{"cutoff below the frozen bodies", 14_850, 200, 50, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			br := &fakeBlockReader{
+				frozenMax: 1000,
+				bodies: []frozenBody{
+					{blockNum: 100, baseTxNum: 10_000, txCount: 2},
+					{blockNum: 150, baseTxNum: tc.baseTxNum, txCount: tc.txCount},
+					{blockNum: 151, baseTxNum: tc.baseTxNum + tc.txCount, txCount: 2},
+					{blockNum: 300, baseTxNum: 30_000, txCount: 2},
+				},
+			}
+			// maxStateStep=150: the state files hold txNums below 15_000. The history cutoff is at
+			// step 299 for block 300 and at step 99 for block 100; block 50 is not frozen, so no
+			// history is skipped.
+			_, historyStep, _, _, err := getMinimumBlocksToDownload(context.Background(), br, beginTestRoTx(t), 150, stepSize, tc.historyPruneTo, 300, 300)
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantHistoryStep, historyStep)
+		})
+	}
+}
+
 // TestGetMinimumBlocksToDownload_CutoffBelowFrozenBodies pins sentinel
 // normalization: when a prune-to boundary block is not visited during the
 // frozen-body scan (it falls below the first frozen body), the corresponding

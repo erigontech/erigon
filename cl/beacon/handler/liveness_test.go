@@ -18,6 +18,7 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -30,8 +31,27 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 )
+
+type consensusBodyOnlyReader struct {
+	freezeblocks.BeaconSnapshotReader
+	block *cltypes.SignedBeaconBlock
+}
+
+func (r *consensusBodyOnlyReader) ReadBlockBySlot(context.Context, kv.Tx, uint64) (*cltypes.SignedBeaconBlock, error) {
+	return nil, snapshot_format.ErrExecutionBodyNotFound
+}
+
+func (r *consensusBodyOnlyReader) ReadBeaconBlockBodyBySlot(_ context.Context, _ kv.Tx, slot uint64) (*cltypes.SignedBeaconBlock, error) {
+	if slot == r.block.Block.Slot {
+		return r.block, nil
+	}
+	return nil, nil
+}
 
 func TestUpdateLivenessWithBlock_ProposerIsLive(t *testing.T) {
 	bcfg := clparams.MainnetBeaconConfig
@@ -180,6 +200,24 @@ func TestLivenessEndpoint_ValidatorLiveViaParticipation(t *testing.T) {
 	}
 	require.True(t, liveByIdx[0], "validator 0 with participation flags should be live")
 	require.False(t, liveByIdx[1], "validator 1 without participation flags should not be live")
+}
+
+func TestLivenessEndpointReadsConsensusBodyWithoutExecutionData(t *testing.T) {
+	_, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
+	block := blocks[len(blocks)-1]
+	block.Block.ProposerIndex = 0
+	epoch := block.Block.Slot / handler.beaconChainCfg.SlotsPerEpoch
+	fcu.ParticipationVal = map[uint64]*solid.ParticipationBitList{
+		epoch: solid.NewParticipationBitList(1, 1),
+	}
+	handler.blockReader = &consensusBodyOnlyReader{BeaconSnapshotReader: handler.blockReader, block: block}
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/validator/liveness/"+epochStr(epoch), bytes.NewReader([]byte(`["0"]`)))
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Contains(t, recorder.Body.String(), `"is_live":true`)
 }
 
 func TestLivenessEndpoint_NoParticipationNotLive(t *testing.T) {

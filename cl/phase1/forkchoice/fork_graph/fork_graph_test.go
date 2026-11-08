@@ -21,6 +21,7 @@ import (
 	_ "embed"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"os"
 	"runtime"
 	"strings"
@@ -30,6 +31,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
+	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/golang/snappy"
 	"github.com/spf13/afero"
@@ -284,6 +286,9 @@ func (f *envelopeBlockingRenameFs) Stat(name string) (os.FileInfo, error) {
 }
 
 func (f envelopeWriteFailureFile) Write(p []byte) (int, error) {
+	if f.stage == "panic" {
+		panic(errTestEnvelopeIO)
+	}
 	if f.stage == "write" {
 		return 0, errTestEnvelopeIO
 	}
@@ -372,6 +377,170 @@ func TestNewForkGraphDiskReturnsErrorOnDumpFailure(t *testing.T) {
 		require.Error(t, err)
 		require.Nil(t, graph)
 	})
+}
+
+func TestForkGraphDumpsDoNotRequireSync(t *testing.T) {
+	t.Run("beacon state", func(t *testing.T) {
+		anchorState := state.New(&clparams.MainnetBeaconConfig)
+		require.NoError(t, utils.DecodeSSZSnappy(anchorState, anchor, int(clparams.Phase0Version)))
+		anchorRoot, err := anchorState.BlockRoot()
+		require.NoError(t, err)
+		fs := envelopeWriteFailureFs{Fs: afero.NewMemMapFs(), stage: "sync"}
+
+		forkGraph, err := NewForkGraphDisk(anchorState, nil, fs, beacon_router_configuration.RouterConfiguration{})
+		require.NoError(t, err)
+		graph := forkGraph.(*forkGraphDisk)
+		persisted, err := graph.readBeaconStateFromDisk(anchorRoot)
+		require.NoError(t, err)
+		wantHash, err := anchorState.HashSSZ()
+		require.NoError(t, err)
+		gotHash, err := persisted.HashSSZ()
+		require.NoError(t, err)
+		require.Equal(t, wantHash, gotHash)
+	})
+
+	t.Run("envelope", func(t *testing.T) {
+		fs := envelopeWriteFailureFs{Fs: afero.NewMemMapFs(), stage: "sync"}
+		f := &forkGraphDisk{fs: fs, beaconCfg: &clparams.MainnetBeaconConfig}
+		root := common.HexToHash("0x1234")
+		addEnvelopeTestBlock(f, root, 1)
+		envelope := testEnvelopeWithTransaction(root, []byte{1, 2, 3})
+
+		require.NoError(t, f.DumpEnvelopeOnDisk(root, envelope))
+		persisted, err := f.ReadEnvelopeFromDisk(root)
+		require.NoError(t, err)
+		wantHash, err := envelope.HashSSZ()
+		require.NoError(t, err)
+		gotHash, err := persisted.HashSSZ()
+		require.NoError(t, err)
+		require.Equal(t, wantHash, gotHash)
+	})
+}
+
+func TestDumpBeaconStateReturnsCloseError(t *testing.T) {
+	anchorState := state.New(&clparams.MainnetBeaconConfig)
+	require.NoError(t, utils.DecodeSSZSnappy(anchorState, anchor, int(clparams.Phase0Version)))
+	wantHash, err := anchorState.HashSSZ()
+	require.NoError(t, err)
+	root, err := anchorState.BlockRoot()
+	require.NoError(t, err)
+	baseFs := afero.NewMemMapFs()
+	var closes atomic.Int32
+	f := &forkGraphDisk{
+		fs:        envelopeWriteFailureFs{Fs: baseFs, stage: "close", closes: &closes},
+		beaconCfg: &clparams.MainnetBeaconConfig,
+	}
+
+	require.ErrorIs(t, f.DumpBeaconStateOnDisk(root, anchorState, true), errTestEnvelopeIO)
+	require.Equal(t, int32(1), closes.Load())
+	f.fs = envelopeWriteFailureFs{Fs: baseFs, closes: &closes}
+	require.NoError(t, f.DumpBeaconStateOnDisk(root, anchorState, true))
+	require.Equal(t, int32(2), closes.Load())
+	persisted, err := f.readBeaconStateFromDisk(root)
+	require.NoError(t, err)
+	gotHash, err := persisted.HashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, wantHash, gotHash)
+}
+
+func TestDumpBeaconStateSkipsRepeatedRootAndSlot(t *testing.T) {
+	anchorState := state.New(&clparams.MainnetBeaconConfig)
+	require.NoError(t, utils.DecodeSSZSnappy(anchorState, anchor, int(clparams.Phase0Version)))
+	var closes atomic.Int32
+	fs := envelopeWriteFailureFs{Fs: afero.NewMemMapFs(), closes: &closes}
+	f := &forkGraphDisk{fs: fs, beaconCfg: &clparams.MainnetBeaconConfig}
+	root := common.HexToHash("0x1234")
+
+	require.NoError(t, f.DumpBeaconStateOnDisk(root, anchorState, true))
+	require.NoError(t, f.DumpBeaconStateOnDisk(root, anchorState, true))
+	require.Equal(t, int32(1), closes.Load())
+}
+
+func TestDumpBeaconStateWritesDifferentRoot(t *testing.T) {
+	anchorState := state.New(&clparams.MainnetBeaconConfig)
+	require.NoError(t, utils.DecodeSSZSnappy(anchorState, anchor, int(clparams.Phase0Version)))
+	var closes atomic.Int32
+	fs := envelopeWriteFailureFs{Fs: afero.NewMemMapFs(), closes: &closes}
+	f := &forkGraphDisk{fs: fs, beaconCfg: &clparams.MainnetBeaconConfig}
+
+	require.NoError(t, f.DumpBeaconStateOnDisk(common.HexToHash("0x1234"), anchorState, true))
+	require.NoError(t, f.DumpBeaconStateOnDisk(common.HexToHash("0x5678"), anchorState, true))
+	require.Equal(t, int32(2), closes.Load())
+}
+
+func TestDumpBeaconStateWritesSameRootAtDifferentSlot(t *testing.T) {
+	anchorState := state.New(&clparams.MainnetBeaconConfig)
+	require.NoError(t, utils.DecodeSSZSnappy(anchorState, anchor, int(clparams.Phase0Version)))
+	var closes atomic.Int32
+	fs := envelopeWriteFailureFs{Fs: afero.NewMemMapFs(), closes: &closes}
+	f := &forkGraphDisk{fs: fs, beaconCfg: &clparams.MainnetBeaconConfig}
+	root := common.HexToHash("0x1234")
+
+	require.NoError(t, f.DumpBeaconStateOnDisk(root, anchorState, true))
+	require.NoError(t, anchorState.SetSlot(anchorState.Slot()+1))
+	wantHash, err := anchorState.HashSSZ()
+	require.NoError(t, err)
+	require.NoError(t, f.DumpBeaconStateOnDisk(root, anchorState, true))
+	require.Equal(t, int32(2), closes.Load())
+	persisted, err := f.readBeaconStateFromDisk(root)
+	require.NoError(t, err)
+	require.Equal(t, anchorState.Slot(), persisted.Slot())
+	gotHash, err := persisted.HashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, wantHash, gotHash)
+}
+
+func TestDumpBeaconStateRetriesEarlierSlotAfterLaterSlotFailure(t *testing.T) {
+	earlierState := state.New(&clparams.MainnetBeaconConfig)
+	require.NoError(t, utils.DecodeSSZSnappy(earlierState, anchor, int(clparams.Phase0Version)))
+	laterState, err := earlierState.Copy()
+	require.NoError(t, err)
+	wantHash, err := earlierState.HashSSZ()
+	require.NoError(t, err)
+	require.NoError(t, laterState.SetSlot(laterState.Slot()+1))
+	baseFs := afero.NewMemMapFs()
+	var closes atomic.Int32
+	fs := envelopeWriteFailureFs{Fs: baseFs, closes: &closes}
+	f := &forkGraphDisk{fs: fs, beaconCfg: &clparams.MainnetBeaconConfig}
+	root := common.HexToHash("0x1234")
+
+	require.NoError(t, f.DumpBeaconStateOnDisk(root, earlierState, true))
+	f.fs = envelopeWriteFailureFs{Fs: baseFs, stage: "write", closes: &closes}
+	require.ErrorIs(t, f.DumpBeaconStateOnDisk(root, laterState, true), errTestEnvelopeIO)
+	f.fs = envelopeWriteFailureFs{Fs: baseFs, closes: &closes}
+	require.NoError(t, f.DumpBeaconStateOnDisk(root, earlierState, true))
+	require.Equal(t, int32(3), closes.Load())
+	persisted, err := f.readBeaconStateFromDisk(root)
+	require.NoError(t, err)
+	gotHash, err := persisted.HashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, wantHash, gotHash)
+}
+
+func TestDumpBeaconStateRetriesAfterPanic(t *testing.T) {
+	anchorState := state.New(&clparams.MainnetBeaconConfig)
+	require.NoError(t, utils.DecodeSSZSnappy(anchorState, anchor, int(clparams.Phase0Version)))
+	wantHash, err := anchorState.HashSSZ()
+	require.NoError(t, err)
+	baseFs := afero.NewMemMapFs()
+	f := &forkGraphDisk{
+		fs:        envelopeWriteFailureFs{Fs: baseFs, stage: "panic"},
+		beaconCfg: &clparams.MainnetBeaconConfig,
+	}
+	root := common.HexToHash("0x1234")
+
+	require.PanicsWithValue(t, errTestEnvelopeIO, func() {
+		_ = f.DumpBeaconStateOnDisk(root, anchorState, true)
+	})
+	var closes atomic.Int32
+	f.fs = envelopeWriteFailureFs{Fs: baseFs, closes: &closes}
+	require.NoError(t, f.DumpBeaconStateOnDisk(root, anchorState, true))
+	require.Equal(t, int32(1), closes.Load())
+	persisted, err := f.readBeaconStateFromDisk(root)
+	require.NoError(t, err)
+	gotHash, err := persisted.HashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, wantHash, gotHash)
 }
 
 func TestDumpEnvelopeErrorDoesNotPublishPartialFile(t *testing.T) {
@@ -486,13 +655,16 @@ func TestNewForkGraphDiskCachesAnchorStateRoot(t *testing.T) {
 			}
 			anchorRoot, err := anchorState.BlockRoot()
 			require.NoError(t, err)
+			callerHeaderRoot := anchorState.LatestBlockHeader().Root
 
 			forkGraph, err := NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
 			require.NoError(t, err)
 			graph := forkGraph.(*forkGraphDisk)
 
 			require.Equal(t, common.Hash(expectedStateRoot), anchorState.PeekPreviousStateRoot())
-			require.Equal(t, header.Root, anchorState.LatestBlockHeader().Root)
+			require.Equal(t, callerHeaderRoot, anchorState.LatestBlockHeader().Root)
+			require.Equal(t, common.Hash(expectedStateRoot), graph.currentState.PeekPreviousStateRoot())
+			require.Equal(t, header.Root, graph.currentState.LatestBlockHeader().Root)
 			persistedState, err := graph.readBeaconStateFromDisk(anchorRoot)
 			require.NoError(t, err)
 			require.Equal(t, common.Hash(expectedStateRoot), persistedState.PeekPreviousStateRoot())
@@ -1049,7 +1221,7 @@ func TestAddChainSegmentDoesNotExcludeLifecycleReaders(t *testing.T) {
 	anchorState := state.New(&clparams.MainnetBeaconConfig)
 	require.NoError(t, utils.DecodeSSZSnappy(block, block1, int(clparams.Phase0Version)))
 	require.NoError(t, utils.DecodeSSZSnappy(anchorState, anchor, int(clparams.Phase0Version)))
-	graph, err := NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
+	graph, err := NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{Beacon: true})
 	require.NoError(t, err)
 	f := graph.(*forkGraphDisk)
 	blockRoot, err := block.Block.HashSSZ()
@@ -1078,9 +1250,7 @@ func TestAddChainSegmentDoesNotExcludeLifecycleReaders(t *testing.T) {
 	statePublished := make(chan struct{})
 	go func() {
 		for {
-			f.currentStateMu.RLock()
-			published := f.currentStateBlockRoot == common.Hash(blockRoot)
-			f.currentStateMu.RUnlock()
+			_, _, published := f.GetSyncCommittees(f.beaconCfg.SyncCommitteePeriod(block.Block.Slot))
 			if published {
 				close(statePublished)
 				return
@@ -1134,15 +1304,18 @@ func TestHasEnvelopeDoesNotTrustUnvalidatedDiskFile(t *testing.T) {
 	restarted := &forkGraphDisk{fs: fs, beaconCfg: &clparams.MainnetBeaconConfig}
 	addEnvelopeTestBlock(restarted, root, 1)
 	restarted.stateDumpLock.Lock()
+	restarted.envelopeMu.Lock()
 	result := make(chan bool, 1)
 	go func() { result <- restarted.HasEnvelope(root) }()
 	select {
 	case hasEnvelope := <-result:
 		require.False(t, hasEnvelope)
 	case <-time.After(time.Second):
+		restarted.envelopeMu.Unlock()
 		restarted.stateDumpLock.Unlock()
-		t.Fatal("HasEnvelope waited for state disk I/O")
+		t.Fatal("HasEnvelope waited for disk I/O")
 	}
+	restarted.envelopeMu.Unlock()
 	restarted.stateDumpLock.Unlock()
 	require.Zero(t, fs.opens.Load())
 
@@ -1186,6 +1359,197 @@ func TestDumpEnvelopeAtomicallyPersistsReadableFile(t *testing.T) {
 	persisted, err := f.ReadEnvelopeFromDisk(root)
 	require.NoError(t, err)
 	require.Equal(t, root, persisted.Message.BeaconBlockRoot)
+}
+
+func TestDumpEnvelopeDoesNotWaitForStateDiskIO(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	f := &forkGraphDisk{fs: fs, beaconCfg: &clparams.MainnetBeaconConfig}
+	root := common.HexToHash("0x1234")
+	addEnvelopeTestBlock(f, root, 1)
+
+	f.stateDumpLock.Lock()
+	result := make(chan error, 1)
+	go func() {
+		result <- f.DumpEnvelopeOnDisk(root, testEnvelopeWithTransaction(root, []byte{1, 2, 3}))
+	}()
+	select {
+	case err := <-result:
+		f.stateDumpLock.Unlock()
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		f.stateDumpLock.Unlock()
+		t.Fatal("envelope dump waited for state disk I/O")
+	}
+}
+
+func TestReadEnvelopeDoesNotWaitForStateDiskIO(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	f := &forkGraphDisk{fs: fs, beaconCfg: &clparams.MainnetBeaconConfig}
+	root := common.HexToHash("0x1234")
+	want := testEnvelopeWithTransaction(root, []byte{1, 2, 3})
+	wantHash, err := want.HashSSZ()
+	require.NoError(t, err)
+	addEnvelopeTestBlock(f, root, 1)
+	require.NoError(t, f.DumpEnvelopeOnDisk(root, want))
+
+	type readResult struct {
+		envelope *cltypes.SignedExecutionPayloadEnvelope
+		err      error
+	}
+	f.stateDumpLock.Lock()
+	result := make(chan readResult, 1)
+	go func() {
+		envelope, err := f.ReadEnvelopeFromDisk(root)
+		result <- readResult{envelope: envelope, err: err}
+	}()
+	select {
+	case result := <-result:
+		f.stateDumpLock.Unlock()
+		require.NoError(t, result.err)
+		gotHash, err := result.envelope.HashSSZ()
+		require.NoError(t, err)
+		require.Equal(t, wantHash, gotHash)
+		require.Equal(t, [][]byte{{1, 2, 3}}, result.envelope.Message.Payload.Transactions.UnderlyngReference())
+	case <-time.After(time.Second):
+		f.stateDumpLock.Unlock()
+		t.Fatal("envelope read waited for state disk I/O")
+	}
+}
+
+func TestReadBeaconStateDoesNotWaitForEnvelopeDiskIO(t *testing.T) {
+	f := &forkGraphDisk{fs: afero.NewMemMapFs(), beaconCfg: &clparams.MainnetBeaconConfig}
+	root := common.HexToHash("0x1234")
+
+	f.envelopeMu.Lock()
+	result := make(chan error, 1)
+	go func() {
+		_, err := f.readBeaconStateFromDisk(root)
+		result <- err
+	}()
+	select {
+	case err := <-result:
+		f.envelopeMu.Unlock()
+		require.Error(t, err)
+	case <-time.After(time.Second):
+		f.envelopeMu.Unlock()
+		t.Fatal("beacon state read waited for envelope disk I/O")
+	}
+}
+
+func TestConcurrentSameRootEnvelopeDumps(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	f := &forkGraphDisk{fs: fs, beaconCfg: &clparams.MainnetBeaconConfig}
+	root := common.HexToHash("0x1234")
+	wantTransactions := [][]byte{{1, 2, 3}}
+	envelope := testEnvelopeWithTransaction(root, wantTransactions[0])
+	addEnvelopeTestBlock(f, root, 1)
+
+	const dumpCount = 8
+	start := make(chan struct{})
+	results := make(chan error, dumpCount)
+	var wg sync.WaitGroup
+	for range dumpCount {
+		wg.Go(func() {
+			<-start
+			results <- f.DumpEnvelopeOnDisk(root, envelope)
+		})
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+	for err := range results {
+		require.NoError(t, err)
+	}
+
+	persisted, err := f.ReadEnvelopeFromDisk(root)
+	require.NoError(t, err)
+	require.Equal(t, wantTransactions, persisted.Message.Payload.Transactions.UnderlyngReference())
+	tempExists, err := afero.Exists(fs, getEnvelopeTempFilename(root))
+	require.NoError(t, err)
+	require.False(t, tempExists)
+}
+
+func TestConcurrentEnvelopeAndStateDumps(t *testing.T) {
+	f := &forkGraphDisk{fs: afero.NewMemMapFs(), beaconCfg: &clparams.MainnetBeaconConfig}
+	envelopeRoot := common.HexToHash("0x1234")
+	stateRoot := common.HexToHash("0x5678")
+	envelope := testEnvelopeWithTransaction(envelopeRoot, []byte{1, 2, 3})
+	wantEnvelopeRoot, err := envelope.HashSSZ()
+	require.NoError(t, err)
+	addEnvelopeTestBlock(f, envelopeRoot, 1)
+	anchorState := state.New(&clparams.MainnetBeaconConfig)
+	require.NoError(t, utils.DecodeSSZSnappy(anchorState, anchor, int(clparams.Phase0Version)))
+	wantStateRoot, err := anchorState.HashSSZ()
+	require.NoError(t, err)
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	var envelopeErr, stateErr error
+	wg.Go(func() {
+		<-start
+		envelopeErr = f.DumpEnvelopeOnDisk(envelopeRoot, envelope)
+	})
+	wg.Go(func() {
+		<-start
+		stateErr = f.DumpBeaconStateOnDisk(stateRoot, anchorState, true)
+	})
+	close(start)
+	wg.Wait()
+	require.NoError(t, envelopeErr)
+	require.NoError(t, stateErr)
+
+	persistedEnvelope, err := f.ReadEnvelopeFromDisk(envelopeRoot)
+	require.NoError(t, err)
+	gotEnvelopeRoot, err := persistedEnvelope.HashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, wantEnvelopeRoot, gotEnvelopeRoot)
+	persistedState, err := f.readBeaconStateFromDisk(stateRoot)
+	require.NoError(t, err)
+	gotStateRoot, err := persistedState.HashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, wantStateRoot, gotStateRoot)
+}
+
+func TestConcurrentEnvelopeReadAndDump(t *testing.T) {
+	f := &forkGraphDisk{fs: afero.NewMemMapFs(), beaconCfg: &clparams.MainnetBeaconConfig}
+	readRoot := common.HexToHash("0x1234")
+	dumpRoot := common.HexToHash("0x5678")
+	addEnvelopeTestBlock(f, readRoot, 1)
+	addEnvelopeTestBlock(f, dumpRoot, 2)
+	require.NoError(t, f.DumpEnvelopeOnDisk(readRoot, testEnvelopeWithTransaction(readRoot, []byte{1, 2, 3})))
+	dumped := testEnvelopeWithTransaction(dumpRoot, []byte{4, 5, 6})
+
+	const rounds = 16
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	var readErr, dumpErr error
+	wg.Go(func() {
+		<-start
+		for range rounds {
+			persisted, err := f.ReadEnvelopeFromDisk(readRoot)
+			if err != nil {
+				readErr = err
+				return
+			}
+			if got := persisted.Message.Payload.Transactions.UnderlyngReference(); len(got) != 1 || !bytes.Equal(got[0], []byte{1, 2, 3}) {
+				readErr = fmt.Errorf("read envelope transactions %x, want [010203]", got)
+				return
+			}
+		}
+	})
+	wg.Go(func() {
+		<-start
+		for range rounds {
+			if err := f.DumpEnvelopeOnDisk(dumpRoot, dumped); err != nil {
+				dumpErr = err
+				return
+			}
+		}
+	})
+	close(start)
+	wg.Wait()
+	require.NoError(t, readErr)
+	require.NoError(t, dumpErr)
 }
 
 func TestDumpEnvelopeRejectsUnsupportedVersion(t *testing.T) {
@@ -1505,7 +1869,7 @@ func TestDumpEnvelopeAllowsAnchorRoot(t *testing.T) {
 }
 
 func TestDumpEnvelopeFailurePreservesExistingFinal(t *testing.T) {
-	for _, stage := range []string{"open", "write", "sync", "close", "rename"} {
+	for _, stage := range []string{"open", "write", "close", "rename"} {
 		t.Run(stage, func(t *testing.T) {
 			fs := afero.NewMemMapFs()
 			f := &forkGraphDisk{fs: fs, beaconCfg: &clparams.MainnetBeaconConfig}
@@ -1744,13 +2108,13 @@ func TestReadEnvelopeReusesSharedBufferWithoutAliasingTransactions(t *testing.T)
 	require.NoError(t, f.DumpEnvelopeOnDisk(rootB, testEnvelopeWithTransaction(rootB, []byte{9, 8, 7})))
 	encodedA, err := envelopeA.EncodeSSZ(nil)
 	require.NoError(t, err)
-	f.sszBuffer = bytes.Repeat([]byte{0xff}, len(encodedA))
-	sharedBuffer := &f.sszBuffer[0]
+	f.envelopeSSZBuffer = bytes.Repeat([]byte{0xff}, len(encodedA))
+	sharedBuffer := &f.envelopeSSZBuffer[0]
 
 	persistedA, err := f.ReadEnvelopeFromDisk(rootA)
 	require.NoError(t, err)
-	require.Same(t, sharedBuffer, &f.sszBuffer[0])
-	require.Equal(t, encodedA, f.sszBuffer)
+	require.Same(t, sharedBuffer, &f.envelopeSSZBuffer[0])
+	require.Equal(t, encodedA, f.envelopeSSZBuffer)
 	_, err = f.ReadEnvelopeFromDisk(rootB)
 	require.NoError(t, err)
 	require.Equal(t, [][]byte{{1, 2, 3}}, persistedA.Message.Payload.Transactions.UnderlyngReference())
@@ -1905,4 +2269,68 @@ func writeEnvelopeTestFile(t *testing.T, fs afero.Fs, root common.Hash, version 
 	require.NoError(t, err)
 	require.NoError(t, writer.Close())
 	require.NoError(t, afero.WriteFile(fs, getEnvelopeFilename(root), compressed.Bytes(), 0o644))
+}
+
+func TestPreviousHeadFastPathUsesAuthoritativePriorRoot(t *testing.T) {
+	manager := synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
+	graph := &forkGraphDisk{syncedData: manager}
+
+	first := state.New(&clparams.MainnetBeaconConfig)
+	recomputedRoot, err := first.BlockRoot()
+	require.NoError(t, err)
+	first.SetPreviousStateRoot(common.Hash{0xaa, 0xbb, 0xcc})
+	firstRoot, err := first.BlockRoot()
+	require.NoError(t, err)
+	require.NotEqual(t, recomputedRoot, firstRoot, "fixture must make previousStateRoot authoritative, not recomputable")
+
+	require.NoError(t, manager.OnHeadStateWithBlockRoot(first, firstRoot))
+	require.NoError(t, manager.OnHeadStateWithBlockRoot(state.New(&clparams.MainnetBeaconConfig), common.Hash{0x02}))
+
+	out, ok, err := graph.useCachedStateIfPossible(firstRoot, nil)
+	require.NoError(t, err)
+	require.True(t, ok, "previous-head fast path must resolve the authoritative prior root")
+	outRoot, err := out.BlockRoot()
+	require.NoError(t, err)
+	require.Equal(t, firstRoot, outRoot)
+
+	_, ok, err = graph.useCachedStateIfPossible(recomputedRoot, nil)
+	require.NoError(t, err)
+	require.False(t, ok)
+}
+
+type publishOnHeadRoot struct {
+	*synced_data.SyncedDataManager
+	publish func()
+}
+
+func (s *publishOnHeadRoot) HeadRoot() common.Hash {
+	root := s.SyncedDataManager.HeadRoot()
+	if s.publish != nil {
+		s.publish()
+		s.publish = nil
+	}
+	return root
+}
+
+func TestHeadFastPathRechecksRootAfterHeadMoves(t *testing.T) {
+	manager := synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
+	first := state.New(&clparams.MainnetBeaconConfig)
+	require.NoError(t, first.SetSlot(1))
+	firstRoot, err := first.BlockRoot()
+	require.NoError(t, err)
+	require.NoError(t, manager.OnHeadStateWithBlockRoot(first, firstRoot))
+
+	second := state.New(&clparams.MainnetBeaconConfig)
+	require.NoError(t, second.SetSlot(2))
+	graph := &forkGraphDisk{syncedData: &publishOnHeadRoot{
+		SyncedDataManager: manager,
+		publish: func() {
+			require.NoError(t, manager.OnHeadStateWithBlockRoot(second, common.Hash{0x02}))
+		},
+	}}
+
+	out, ok, err := graph.useCachedStateIfPossible(firstRoot, nil)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, uint64(1), out.Slot())
 }

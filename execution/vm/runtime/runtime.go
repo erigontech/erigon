@@ -162,7 +162,7 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 		sender,
 		contractAsAddress,
 		input,
-		mdgas.SplitTxnGasLimit(cfg.GasLimit, 0, rules),
+		mdgas.SplitTxnGasLimit(cfg.GasLimit, 0, rules, false),
 		cfg.Value,
 		false, /* bailout */
 	)
@@ -206,7 +206,7 @@ func Create(input []byte, cfg *Config) ([]byte, common.Address, mdgas.MdGas, err
 		vmenv  = NewEnv(cfg)
 		sender = cfg.Origin
 		rules  = vmenv.ChainRules()
-		gas    = mdgas.SplitTxnGasLimit(cfg.GasLimit, 0, rules)
+		gas    = mdgas.SplitTxnGasLimit(cfg.GasLimit, 0, rules, false)
 	)
 	cfg.State.Prepare(rules, cfg.Origin, cfg.Coinbase, accounts.NilAddress, vm.ActivePrecompiles(rules), nil)
 	if !rules.IsAmsterdam {
@@ -263,12 +263,20 @@ func Call(address accounts.Address, input []byte, cfg *Config) ([]byte, mdgas.Md
 	statedb := cfg.State
 	rules := vmenv.ChainRules()
 	statedb.Prepare(rules, cfg.Origin, cfg.Coinbase, address, vm.ActivePrecompiles(rules), nil)
+	// Without EIP-161 an empty account survives in the post-state, and a
+	// zero-value transfer does not create the sender, so the origin has to
+	// exist for the dump and for CALL gas to match.
+	if !rules.IsEIP161Enabled() {
+		if _, err := statedb.GetOrNewStateObject(cfg.Origin); err != nil {
+			return nil, mdgas.MdGas{}, err
+		}
+	}
 
 	if cfg.EVMConfig.Tracer != nil && cfg.EVMConfig.Tracer.OnTxStart != nil {
 		cfg.EVMConfig.Tracer.OnTxStart(vmenv.GetVMContext(), nil, accounts.ZeroAddress)
 	}
 
-	gas := mdgas.SplitTxnGasLimit(cfg.GasLimit, 0, rules)
+	gas := mdgas.SplitTxnGasLimit(cfg.GasLimit, 0, rules, false)
 	leftOverGas, topLevelCallGasUsed, err := protocol.HandleRuntimeCall(vmenv, address, cfg.Value, gas)
 	var ret []byte
 	if err == nil {
