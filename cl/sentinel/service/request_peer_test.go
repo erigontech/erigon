@@ -184,6 +184,6 @@ func TestPeerRequestsShareAResponseBudget(t *testing.T) {
 	close(release)
 	receivePeerRequestTestValue(t, reached)
 	for _, done := range []<-chan error{first, second, third} {
-		receivePeerRequestTestValue(t, done)
+		_ = receivePeerRequestTestValue(t, done) // the stub sends no response code, so each request ends in an error
 	}
 }
