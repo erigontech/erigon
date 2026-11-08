@@ -789,22 +789,6 @@ func TestPostEnvelopeContentsLegacyRoutePublishesEnvelopeLast(t *testing.T) {
 	require.Equal(t, []contentsEventKind{eventColumnPublish, eventColumnWrite, eventImport, eventEnvelopePublish}, f.phases())
 }
 
-func TestPostEnvelopeContentsRetryDoesNotRepublishEnvelope(t *testing.T) {
-	f := newEnvelopeContentsFixture(t, 0, 2)
-	f.failPublish = failPublishOf(5)
-	body := f.contents(f.blobs...)
-	require.Equal(t, http.StatusInternalServerError, f.postContents(t.Context(), body, "").Code)
-	require.True(t, f.forkchoice.HasEnvelope(f.root), "the retry must find the envelope persisted")
-	f.failPublish = nil
-	published := len(f.eventsOf(eventColumnPublish))
-
-	recorder := f.postContents(t.Context(), body, "")
-
-	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
-	require.Len(t, f.eventsOf(eventEnvelopePublish), 1)
-	require.Len(t, f.eventsOf(eventColumnPublish), published+int(f.handler.beaconChainCfg.NumberOfColumns))
-}
-
 func TestPostEnvelopeContentsRequiredDoesNotRefuseADifferentEnvelope(t *testing.T) {
 	f := newEnvelopeContentsFixture(t, 0, 2)
 	f.failPublish = failPublishOf(5)

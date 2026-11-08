@@ -525,11 +525,19 @@ func TestPostEnvelopeContentsColumnPublishFailureAllowsRepairingRePost(t *testin
 				require.True(t, ok, "the bundles are cached before the response")
 			}
 
+			if tc.envelopeFirst {
+				require.True(t, f.forkchoice.HasEnvelope(f.root), "the retry must find the envelope persisted")
+			}
+
 			f.failPublish = nil
+			published := len(f.eventsOf(eventColumnPublish))
 			second := f.postContents(t.Context(), body, tc.query)
 
 			require.Equal(t, http.StatusOK, second.Code, second.Body.String())
 			f.requireAllColumns("published after the re-POST", slices.Compact(f.succeededIndices(eventColumnPublish)))
+			if tc.envelopeFirst {
+				require.Len(t, f.eventsOf(eventColumnPublish), published+int(cfg.NumberOfColumns))
+			}
 			require.Len(t, f.eventsOf(eventEnvelopePublish), 1, "the re-POST must not publish the envelope again")
 
 			third := f.postContents(t.Context(), body, tc.query)
