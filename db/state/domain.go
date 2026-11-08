@@ -1826,6 +1826,22 @@ func (dt *DomainRoTx) GetAsOf(key []byte, txNum uint64, roTx kv.Tx) ([]byte, boo
 	if !dt.d.Enabled {
 		return nil, false, nil
 	}
+	var latest []byte
+	var latestOk bool
+	latestFirst := roTx != nil && dt.name != kv.CommitmentDomain
+	if latestFirst {
+		// A latest value written in a step before txNum's step was not changed at or after txNum, so it is the
+		// value as of txNum. A file reports its end step, never below the write's step.
+		var step kv.Step
+		var err error
+		latest, step, latestOk, err = dt.GetLatest(key, roTx)
+		if err != nil {
+			return nil, false, err
+		}
+		if latestOk && len(latest) > 0 && step < kv.Step(txNum/dt.stepSize) {
+			return latest, true, nil
+		}
+	}
 
 	v, hOk, err := dt.ht.HistorySeek(key, txNum, roTx)
 	if err != nil {
@@ -1848,9 +1864,10 @@ func (dt *DomainRoTx) GetAsOf(key []byte, txNum uint64, roTx kv.Tx) ([]byte, boo
 		// pointers to storage and account domains to do the reference. Aggregator tx must be called instead
 		return nil, false, nil
 	}
-	var ok bool
-	v, _, ok, err = dt.GetLatest(key, roTx)
-	if err != nil {
+	ok := latestOk
+	if latestFirst {
+		v = latest
+	} else if v, _, ok, err = dt.GetLatest(key, roTx); err != nil {
 		return nil, false, err
 	}
 	if traceGetAsOf == dt.d.FilenameBase {
