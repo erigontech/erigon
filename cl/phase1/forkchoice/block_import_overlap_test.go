@@ -421,8 +421,6 @@ func TestBlockImportOverlapMatchesSerial(t *testing.T) {
 			epochs := []uint64{state.Epoch(serialAnchor)}
 			epochStarts := 0
 			epochBoundaryBlocks := 0
-			bodyAttestations := 0
-			nonBlockStateAttestations := 0
 			parentSlot := overlapAnchor.Slot()
 			for index := range serialBlocks {
 				serialBlock := serialBlocks[index]
@@ -453,22 +451,14 @@ func TestBlockImportOverlapMatchesSerial(t *testing.T) {
 				require.NoError(t, err)
 				require.Equal(t, want, got, "slot %d", serialBlock.Block.Slot)
 				assertOverlapForkGraphArtifactsEqual(t, serial, overlap, serialRoot, overlapRoot, serialBlock.Block.Slot)
-				current := overlap.graph.CurrentStateLocked(overlapRoot)
-				require.NotNil(t, current)
-				overlapBlock.Block.Body.Attestations.Range(func(_ int, attestation *solid.Attestation, _ int) bool {
-					bodyAttestations++
-					if !overlap.store.HeadStateHasTargetShuffling(current, overlapRoot, attestation.Data.Target) {
-						nonBlockStateAttestations++
-					}
-					return true
-				})
+				require.NotNil(t, overlap.graph.CurrentStateLocked(overlapRoot))
 				parentSlot = overlapBlock.Block.Slot
 			}
 			require.Equal(t, int64(len(overlapBlocks)-epochBoundaryBlocks), hookCount.Load())
 			if fixture.name != "electra" {
 				require.Positive(t, epochStarts, "fixture must cover an epoch-first block")
 			}
-			t.Logf("%s covers %d blocks, %d epoch-first blocks, %d body attestations, and %d non-block-state attestation branches", fixture.name, len(overlapBlocks), epochStarts, bodyAttestations, nonBlockStateAttestations)
+			t.Logf("%s covers %d blocks and %d epoch-first blocks", fixture.name, len(overlapBlocks), epochStarts)
 		})
 	}
 }
@@ -777,7 +767,9 @@ func TestBlockImportOverlapDiscardPaths(t *testing.T) {
 	}
 }
 
-func TestBlockImportOverlapSameRootForgedDuplicateWaits(t *testing.T) {
+// importSameRootDuplicateDuringOverlap imports a mutated copy of the overlapped block while the overlap waits in prepare.
+func importSameRootDuplicateDuringOverlap(t *testing.T, name string, mutate func(*cltypes.SignedBeaconBlock)) (*overlapTestStore, *cltypes.SignedBeaconBlock, common.Hash) {
+	t.Helper()
 	blocks, anchor, _ := tests.GetBellatrixRandom()
 	engine, entered, releaseEL := blockingEngine(t, 1, execution_client.PayloadStatusValidated, nil)
 	test, block, _ := newNonBoundaryOverlapTestStore(t, blocks, anchor, engine, false)
@@ -792,54 +784,15 @@ func TestBlockImportOverlapSameRootForgedDuplicateWaits(t *testing.T) {
 	awaitSignal(t, entered, "NewPayload")
 	awaitSignal(t, prepareEntered, "prepare")
 
-	forged := cloneOverlapFixture(t, block)
-	forged.Signature[5] ^= 0xff
-	checks := signalAdmissionChecks(test)
-	forgedDone := make(chan error, 1)
-	go func() { forgedDone <- test.store.OnBlock(t.Context(), forged, true, true, false) }()
-	awaitSignal(t, checks, "forged duplicate admission")
-	close(releaseEL)
-	awaitSignal(t, checks, "forged duplicate admission after payload validation")
-	awaitSignal(t, checks, "forged duplicate post-payload admission")
-	assertOnBlockWaiting(t, test.store, forgedDone)
-	close(releasePrepare)
-	require.NoError(t, <-legitDone)
-	require.NoError(t, <-forgedDone)
-
-	root, err := block.Block.HashSSZ()
-	require.NoError(t, err)
-	require.False(t, test.graph.IsBlockInvalid(root))
-	_, hasHeader := test.graph.GetHeader(root)
-	require.True(t, hasHeader)
-	stored, hasBlock := test.graph.GetBlock(root)
-	require.True(t, hasBlock)
-	require.Equal(t, block.Signature, stored.Signature)
-	require.Len(t, drainBlockImportEvents(t, test.events), 1)
-}
-
-func TestBlockImportOverlapSameRootValidDuplicateWaits(t *testing.T) {
-	blocks, anchor, _ := tests.GetBellatrixRandom()
-	engine, entered, releaseEL := blockingEngine(t, 1, execution_client.PayloadStatusValidated, nil)
-	test, block, _ := newNonBoundaryOverlapTestStore(t, blocks, anchor, engine, false)
-	prepareEntered := make(chan struct{})
-	releasePrepare := make(chan struct{})
-	test.store.blockImportPrepareHook = func() {
-		close(prepareEntered)
-		<-releasePrepare
-	}
-	legitDone := make(chan error, 1)
-	go func() { legitDone <- test.store.OnBlock(t.Context(), block, true, true, false) }()
-	awaitSignal(t, entered, "NewPayload")
-	awaitSignal(t, prepareEntered, "prepare")
-
-	checks := signalAdmissionChecks(test)
 	duplicate := cloneOverlapFixture(t, block)
+	mutate(duplicate)
+	checks := signalAdmissionChecks(test)
 	duplicateDone := make(chan error, 1)
 	go func() { duplicateDone <- test.store.OnBlock(t.Context(), duplicate, true, true, false) }()
-	awaitSignal(t, checks, "valid duplicate admission")
+	awaitSignal(t, checks, name+" admission")
 	close(releaseEL)
-	awaitSignal(t, checks, "valid duplicate admission after payload validation")
-	awaitSignal(t, checks, "valid duplicate post-payload admission")
+	awaitSignal(t, checks, name+" admission after payload validation")
+	awaitSignal(t, checks, name+" post-payload admission")
 	assertOnBlockWaiting(t, test.store, duplicateDone)
 	close(releasePrepare)
 	require.NoError(t, <-legitDone)
@@ -852,6 +805,20 @@ func TestBlockImportOverlapSameRootValidDuplicateWaits(t *testing.T) {
 	_, hasBlock := test.graph.GetBlock(root)
 	require.True(t, hasBlock)
 	require.Len(t, drainBlockImportEvents(t, test.events), 1)
+	return test, block, root
+}
+
+func TestBlockImportOverlapSameRootForgedDuplicateWaits(t *testing.T) {
+	test, block, root := importSameRootDuplicateDuringOverlap(t, "forged duplicate", func(forged *cltypes.SignedBeaconBlock) {
+		forged.Signature[5] ^= 0xff
+	})
+	require.False(t, test.graph.IsBlockInvalid(root))
+	stored, _ := test.graph.GetBlock(root)
+	require.Equal(t, block.Signature, stored.Signature)
+}
+
+func TestBlockImportOverlapSameRootValidDuplicateWaits(t *testing.T) {
+	importSameRootDuplicateDuringOverlap(t, "valid duplicate", func(*cltypes.SignedBeaconBlock) {})
 }
 
 func TestBlockImportOverlapAbandonReleasesSameRootWaiter(t *testing.T) {
@@ -1094,40 +1061,29 @@ func TestBlockImportOverlapReadersUseSyncedHead(t *testing.T) {
 	awaitSignal(t, prepared, "prepare")
 	parentRoot := block.Block.ParentRoot
 	wantRoot := blocks[0].Block.StateRoot
-	got, err := test.store.GetStateAtBlockRoot(parentRoot)
-	require.NoError(t, err)
-	requireStateHash(t, got, wantRoot)
-	require.NoError(t, test.store.ViewStateAtBlockRoot(parentRoot, func(view *state.CachingBeaconState) error {
-		requireStateHash(t, view, wantRoot)
-		return nil
-	}))
-	owned, err := test.store.GetOwnedStateAtBlockRoot(parentRoot)
-	require.NoError(t, err)
-	requireStateHash(t, owned, wantRoot)
-	called := false
-	require.NoError(t, test.store.ViewCurrentStateAtBlockRoot(parentRoot, func(*state.CachingBeaconState) error {
-		called = true
-		return nil
-	}))
-	require.False(t, called)
+	requireParentReaders := func() {
+		t.Helper()
+		got, err := test.store.GetStateAtBlockRoot(parentRoot)
+		require.NoError(t, err)
+		requireStateHash(t, got, wantRoot)
+		require.NoError(t, test.store.ViewStateAtBlockRoot(parentRoot, func(view *state.CachingBeaconState) error {
+			requireStateHash(t, view, wantRoot)
+			return nil
+		}))
+		owned, err := test.store.GetOwnedStateAtBlockRoot(parentRoot)
+		require.NoError(t, err)
+		requireStateHash(t, owned, wantRoot)
+		called := false
+		require.NoError(t, test.store.ViewCurrentStateAtBlockRoot(parentRoot, func(*state.CachingBeaconState) error {
+			called = true
+			return nil
+		}))
+		require.False(t, called)
+	}
+	requireParentReaders()
 	close(release)
 	require.Error(t, <-done)
-	got, err = test.store.GetStateAtBlockRoot(parentRoot)
-	require.NoError(t, err)
-	requireStateHash(t, got, wantRoot)
-	require.NoError(t, test.store.ViewStateAtBlockRoot(parentRoot, func(view *state.CachingBeaconState) error {
-		requireStateHash(t, view, wantRoot)
-		return nil
-	}))
-	owned, err = test.store.GetOwnedStateAtBlockRoot(parentRoot)
-	require.NoError(t, err)
-	requireStateHash(t, owned, wantRoot)
-	called = false
-	require.NoError(t, test.store.ViewCurrentStateAtBlockRoot(parentRoot, func(*state.CachingBeaconState) error {
-		called = true
-		return nil
-	}))
-	require.False(t, called)
+	requireParentReaders()
 }
 
 func requireStateHash(t *testing.T, got *state.CachingBeaconState, want common.Hash) {

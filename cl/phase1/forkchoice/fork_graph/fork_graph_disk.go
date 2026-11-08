@@ -463,9 +463,6 @@ func (f *forkGraphDisk) useHeadStateIfPossible(blockRoot common.Hash, in *state.
 		if errors.Is(err, synced_data.ErrNotSynced) {
 			err = nil
 		}
-		if ok || err != nil {
-			return
-		}
 	}
 	return
 }
