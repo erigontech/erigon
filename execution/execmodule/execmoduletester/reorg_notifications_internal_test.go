@@ -247,9 +247,11 @@ func TestReorgPreservesUnwindStateChanges(t *testing.T) {
 				require.NoError(t, err)
 				unwound = append(unwound, txn.Hash())
 			}
+			var want []common.Hash
 			for _, txn := range oldHead.Transactions() {
-				require.Contains(t, unwound, txn.Hash())
+				want = append(want, txn.Hash())
 			}
+			require.ElementsMatch(t, want, unwound, "only transactions above the common ancestor may be restored")
 			for i, block := range forkBlocks {
 				require.Equal(t, remoteproto.Direction_FORWARD, changes[i+1].Direction)
 				require.Equal(t, block.Hash(), common.Hash(gointerfaces.ConvertH256ToHash(changes[i+1].BlockHash)))
