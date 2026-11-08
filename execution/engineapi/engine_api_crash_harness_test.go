@@ -52,6 +52,8 @@ func TestCrashRecoveryRequestMode(t *testing.T) {
 			execmodule.StateTransitionRPCViewBound,
 			execmodule.StateTransitionFCUCatchupCommitReady,
 			execmodule.StateTransitionFCUCatchupCommitComplete,
+			execmodule.StateTransitionStartupCommitReady,
+			execmodule.StateTransitionStartupCommitComplete,
 			255,
 		} {
 			request.Point = point
@@ -76,6 +78,26 @@ func TestCrashRecoveryRequestMode(t *testing.T) {
 	t.Run("negative_cycle", func(t *testing.T) {
 		request := crashRecoveryRequest{CatchupCycle: -1, Point: execmodule.StateTransitionCommitReady}
 		require.ErrorContains(t, request.validateMode(), "catch-up cycle must not be negative")
+	})
+	t.Run("startup", func(t *testing.T) {
+		request := crashRecoveryRequest{StartupCycle: 1}
+		for _, point := range []execmodule.StateTransitionPoint{
+			execmodule.StateTransitionStartupCommitReady,
+			execmodule.StateTransitionStartupCommitComplete,
+		} {
+			request.Point = point
+			require.NoError(t, request.validateMode())
+		}
+		request.CatchupCycle = 1
+		require.ErrorContains(t, request.validateMode(), "without importing blocks")
+		request.CatchupCycle = 0
+		request.Downloaded = []crashRecoveryBlock{{}}
+		require.ErrorContains(t, request.validateMode(), "without importing blocks")
+		request.Downloaded = nil
+		request.Point = execmodule.StateTransitionFCUCatchupCommitReady
+		require.ErrorContains(t, request.validateMode(), "requires a startup commit boundary")
+		request.StartupCycle = -1
+		require.ErrorContains(t, request.validateMode(), "startup cycle must not be negative")
 	})
 }
 

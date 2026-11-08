@@ -23,6 +23,8 @@ import (
 	"fmt"
 	"maps"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -62,6 +64,41 @@ type crashRecoveryBlock struct {
 func configureCatchupCrashRecovery(config *ethconfig.Config) {
 	configureCrashRecovery(config)
 	config.Sync.LoopBlockLimit = catchupCrashBlockLimit
+}
+
+func TestEngineApiStartupCommitObservations(t *testing.T) {
+	genesis, key, err := engineapitester.DefaultEngineApiTesterGenesis()
+	require.NoError(t, err)
+	var mu sync.Mutex
+	var observed []execmodule.StateTransitionPoint
+	eat, err := engineapitester.InitialiseEngineApiTester(t.Context(), engineapitester.EngineApiTesterInitArgs{
+		Logger: testlog.Logger(t, log.LvlError), DataDir: newSmallStepDataDir(t),
+		Genesis: genesis, CoinbaseKey: key, EthConfigTweaker: configureCatchupCrashRecovery,
+		StateTransitionObserver: func(ctx context.Context, point execmodule.StateTransitionPoint) {
+			if point != execmodule.StateTransitionStartupCommitReady && point != execmodule.StateTransitionStartupCommitComplete {
+				return
+			}
+			if err := ctx.Err(); err != nil {
+				t.Errorf("startup observer context: %v", err)
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			observed = append(observed, point)
+		},
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, eat.Close()) })
+	eat.ExecutionModule.Drain()
+	mu.Lock()
+	defer mu.Unlock()
+	require.NotEmpty(t, observed, "startup must expose its durable commit boundaries")
+	require.Zero(t, len(observed)%2)
+	for i := 0; i < len(observed); i += 2 {
+		require.Equal(t, []execmodule.StateTransitionPoint{
+			execmodule.StateTransitionStartupCommitReady,
+			execmodule.StateTransitionStartupCommitComplete,
+		}, observed[i:i+2])
+	}
 }
 
 func TestEngineApiCatchupCrashRecovery(t *testing.T) {
@@ -165,16 +202,44 @@ func TestEngineApiCatchupCrashRecovery(t *testing.T) {
 						require.Equal(t, downloaded, blocks, "bulk-imported blocks and BALs must survive every crash")
 					})
 
+					if committedCycles > 0 {
+						for _, recovery := range []struct {
+							point execmodule.StateTransitionPoint
+							cycle int
+						}{
+							{execmodule.StateTransitionStartupCommitReady, 2},
+							{execmodule.StateTransitionStartupCommitComplete, 1},
+						} {
+							killAtUnwindBoundary(t, crashRecoveryRequest{
+								Genesis: genesis, CoinbaseKey: crypto.FromECDSA(key), DataDir: request.DataDir,
+								Point: recovery.point, StartupCycle: recovery.cycle,
+							})
+							committedCycles += recovery.cycle
+							if recovery.point == execmodule.StateTransitionStartupCommitReady {
+								committedCycles--
+							}
+							want = catchupRecoveryCheckpoint(checkpoints[committedCycles-1], canonical.state, replacement.state)
+							inspectCrashRecoveryDataDir(t, request.DataDir, func(db kv.TemporalRoDB) {
+								assertEquivalentCrashRecoveryState(t, want, readCrashRecoveryCheckpoint(t, db))
+								require.Equal(t, downloaded, readCrashRecoveryBlocks(t, db, replacement.payloads))
+							})
+						}
+					}
+					var startupCommits atomic.Uint64
 					args := baseArgs
-					// Without the artificial batch cap, startup can finish catch-up
-					// before the CL repeats the interrupted forkchoice request.
-					args.EthConfigTweaker = configureCrashRecovery
+					args.StateTransitionObserver = func(_ context.Context, point execmodule.StateTransitionPoint) {
+						if point == execmodule.StateTransitionStartupCommitComplete {
+							startupCommits.Add(1)
+						}
+					}
 					args.Logger, args.DataDir = testlog.Logger(t, log.LvlError), request.DataDir
 					eat, initErr := engineapitester.InitialiseEngineApiTester(t.Context(), args)
 					require.NoError(t, initErr)
 					t.Cleanup(func() { require.NoError(t, eat.Close()) })
 					if committedCycles > 0 {
 						require.NoError(t, waitCrashRecoveryExecution(t.Context(), eat.ChainDB, replacement.state.CommitmentBlock))
+						eat.ExecutionModule.Drain()
+						require.GreaterOrEqual(t, startupCommits.Load(), uint64(len(checkpoints)-committedCycles), "restart must retain the execution batch limit")
 					}
 					// Bulk import is durable before the FCU; recovery must not re-import.
 					// Re-importing would hide missing headers, bodies, or BALs after the crash.
