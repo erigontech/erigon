@@ -20,86 +20,61 @@
 package cli
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/db/version"
 )
 
-// HelpData is a one shot struct to pass to the usage template
-type HelpData struct {
-	App        any
-	FlagGroups []FlagGroup
-}
-
-// FlagGroup is a collection of flags belonging to a single topic.
-type FlagGroup struct {
-	Name  string
-	Flags []cli.Flag
-}
-
-// ByCategory sorts an array of FlagGroup by Name in the order
-// defined in AppHelpFlagGroups.
-type ByCategory []FlagGroup
-
-func (a ByCategory) Len() int      { return len(a) }
-func (a ByCategory) Swap(i, j int) { a[i], a[j] = a[j], a[i] }
-func (a ByCategory) Less(i, j int) bool {
-	iCat, jCat := a[i].Name, a[j].Name
-	iIdx, jIdx := len(a), len(a) // ensure non categorized flags come last
-
-	for i, group := range a {
-		if iCat == group.Name {
-			iIdx = i
-		}
-		if jCat == group.Name {
-			jIdx = i
-		}
-	}
-
-	return iIdx < jIdx
-}
-
 // NewApp creates an app with sane defaults.
-func NewApp(desc string) *cli.App {
-	app := cli.NewApp()
+func NewApp(desc string) *cli.Command {
+	app := &cli.Command{}
 	app.Name = filepath.Base(os.Args[0])
 	app.Version = version.VersionWithCommit(version.GitCommit)
 	app.Usage = desc
-	app.EnableBashCompletion = true
+	app.EnableShellCompletion = true
 
 	app.Suggest = true
 
 	// Only show usage if explicitly requested via --help
-	app.OnUsageError = func(ctx *cli.Context, err error, isSubcommand bool) error {
+	app.OnUsageError = func(ctx context.Context, cmd *cli.Command, err error, isSubcommand bool) error {
 		// Print the error but not the usage
-		if ctx != nil && ctx.App != nil {
-			fmt.Fprintf(ctx.App.ErrWriter, "Error: %v\n", err)
-			fmt.Fprintf(ctx.App.ErrWriter, "Run '%s --help' for usage.\n", ctx.App.Name)
-		}
+		root := cmd.Root()
+		fmt.Fprintf(errWriter(root), "Error: %v\n", err)
+		fmt.Fprintf(errWriter(root), "Run '%s --help' for usage.\n", root.Name)
 		// Return cli.Exit to signal we've handled the error
 		return cli.Exit("", 1)
 	}
 
 	// Configure exit error handler to prevent additional output
-	app.ExitErrHandler = func(ctx *cli.Context, err error) {
+	app.ExitErrHandler = func(ctx context.Context, cmd *cli.Command, err error) {
 		if err == nil {
 			return
 		}
 		// For cli.Exit errors, just exit with the code
-		if exitErr, ok := err.(cli.ExitCoder); ok {
+		if exitErr, ok := errors.AsType[cli.ExitCoder](err); ok {
 			cli.OsExiter(exitErr.ExitCode())
 		} else {
 			// For other errors, print them and exit
 			if err.Error() != "" {
-				fmt.Fprintf(ctx.App.ErrWriter, "Error: %v\n", err)
+				fmt.Fprintf(errWriter(cmd.Root()), "Error: %v\n", err)
 			}
 			cli.OsExiter(1)
 		}
 	}
 
 	return app
+}
+
+func errWriter(cmd *cli.Command) io.Writer {
+	if cmd.ErrWriter != nil {
+		return cmd.ErrWriter
+	}
+	return os.Stderr
 }

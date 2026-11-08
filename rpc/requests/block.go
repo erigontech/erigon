@@ -19,7 +19,6 @@ package requests
 import (
 	"context"
 	"encoding/json"
-	"math/big"
 
 	"github.com/erigontech/erigon/common"
 	hexutil2 "github.com/erigontech/erigon/common/hexutil"
@@ -37,10 +36,6 @@ func (bn BlockNumber) Uint64() uint64 {
 	}
 
 	return 0
-}
-
-func AsBlockNumber(n *big.Int) BlockNumber {
-	return BlockNumber(hexutil2.EncodeBig(n))
 }
 
 var BlockNumbers = struct {
@@ -146,14 +141,4 @@ func (reqGen *requestGenerator) GetBlockByNumber(ctx context.Context, blockNum r
 	}
 
 	return &result, nil
-}
-
-func (req *requestGenerator) GetRootHash(ctx context.Context, startBlock uint64, endBlock uint64) (common.Hash, error) {
-	var result string
-
-	if err := req.rpcCall(ctx, &result, Methods.BorGetRootHash, startBlock, endBlock); err != nil {
-		return common.Hash{}, err
-	}
-
-	return common.HexToHash(result), nil
 }

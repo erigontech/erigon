@@ -1,0 +1,62 @@
+name: Reproducible build
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  reproducible-build:
+    strategy:
+      matrix:
+        os:
+          - ubuntu-24.04
+          - macos-15
+          - windows-2025
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-erigon
+        id: erigon
+        with:
+          cache-namespace: reproducible-build
+
+      - name: Build all
+        run: make all
+
+      - name: Reproducible build test
+        run: |
+          hash() { sha256sum "$1" 2>/dev/null || shasum -a 256 "$1"; }
+          hash ./build/bin/erigon > erigon1.sha256
+          # TODO: Check mtime doesn't interfere with rebuild
+          make -B erigon
+          hash ./build/bin/erigon > erigon2.sha256
+          if ! cmp -s erigon1.sha256 erigon2.sha256; then
+            echo >&2 "Reproducible build broken"; cat erigon1.sha256; cat erigon2.sha256; exit 1
+          fi
+
+      - uses: ./.github/actions/cleanup-erigon
+        if: always()
+
+      # In the merge queue, cancel the run on first failure so the gate
+      # doesn't stall waiting for still-running siblings. PR runs keep
+      # going so authors see the full failure picture.
+      - name: Cancel workflow run on failure
+        if: failure() && github.event_name == 'merge_group'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "::error title=Merge-queue root-cause failure::This job failed and is fast-cancelling the CI Gate run; THIS job is the real failure (the others show as cancelled). See its logs."
+          gh run cancel ${{ github.run_id }} || true

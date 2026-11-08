@@ -40,7 +40,7 @@ func TestBatchLimit_WebSocket_Exceeded(t *testing.T) {
 
 	// Create batch exceeding limit (20 > 10)
 	var batch []BatchElem
-	for i := 0; i < batchSize; i++ {
+	for range batchSize {
 		batch = append(batch, BatchElem{
 			Method: "test_echo",
 			Args:   []any{"hello"},
@@ -50,7 +50,6 @@ func TestBatchLimit_WebSocket_Exceeded(t *testing.T) {
 
 	// Send batch request
 	err = client.BatchCall(batch)
-
 	// With the current implementation, conn.close is called on batch limit exceeded
 	// This should result in a connection error (websocket close)
 	if err != nil {

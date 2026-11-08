@@ -19,6 +19,9 @@ package tests
 import (
 	"context"
 	"embed"
+	"errors"
+	"fmt"
+	"io/fs"
 	"strconv"
 	"testing"
 
@@ -28,9 +31,11 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/spectest/spectest"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 //go:embed test_data/electra/blocks_0.ssz_snappy
@@ -74,8 +79,61 @@ var phase0_post_state_ssz_snappy []byte
 //go:embed test_data/bellatrix
 var bellatrixFS embed.FS
 
+//go:embed test_data/gloas
+var gloasFS embed.FS
+
+type GloasFixture struct {
+	Config    *clparams.BeaconChainConfig
+	Blocks    []*cltypes.SignedBeaconBlock
+	PreState  *state.CachingBeaconState
+	PostState *state.CachingBeaconState
+}
+
+func GetGloasFixture(name string, transitionFixture bool, forkEpoch uint64) GloasFixture {
+	root, err := fs.Sub(gloasFS, "test_data/gloas/"+name)
+	if err != nil {
+		panic(err)
+	}
+	preVersion := clparams.GloasVersion
+	if transitionFixture {
+		preVersion = clparams.FuluVersion
+	}
+	preState, err := spectest.ReadBeaconState(root, preVersion, spectest.PreSsz)
+	if err != nil {
+		panic(err)
+	}
+	cfg := preState.BeaconConfig()
+	cfg.GloasForkEpoch = forkEpoch
+	postState, err := spectest.ReadBeaconState(root, clparams.GloasVersion, spectest.PostSsz)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		panic(err)
+	}
+	blocks := make([]*cltypes.SignedBeaconBlock, 0)
+	for index := 0; ; index++ {
+		slot, err := spectest.ReadBlockSlot(root, index)
+		if err != nil {
+			panic(err)
+		}
+		version := clparams.GloasVersion
+		if transitionFixture && slot < forkEpoch*cfg.SlotsPerEpoch {
+			version = clparams.FuluVersion
+		}
+		block, err := spectest.ReadBlock(root, version, index)
+		if err != nil {
+			panic(fmt.Errorf("read %s block %d: %w", name, index, err))
+		}
+		if block == nil {
+			break
+		}
+		blocks = append(blocks, block)
+	}
+	return GloasFixture{Config: cfg, Blocks: blocks, PreState: preState, PostState: postState}
+}
+
 type MockBlockReader struct {
-	U map[uint64]*cltypes.SignedBeaconBlock
+	U                map[uint64]*cltypes.SignedBeaconBlock
+	CachedBodies     []uint64
+	CachedBodyHashes []common.Hash
 }
 
 func NewMockBlockReader() *MockBlockReader {
@@ -86,11 +144,8 @@ func (m *MockBlockReader) ReadBlockBySlot(ctx context.Context, tx kv.Tx, slot ui
 	return m.U[slot], nil
 }
 
-func (m *MockBlockReader) ReadBlindedBlockBySlot(ctx context.Context, tx kv.Tx, slot uint64) (*cltypes.SignedBlindedBeaconBlock, error) {
-	if m.U[slot] == nil {
-		return nil, nil
-	}
-	return m.U[slot].Blinded()
+func (m *MockBlockReader) ReadBeaconBlockBodyBySlot(ctx context.Context, tx kv.Tx, slot uint64) (*cltypes.SignedBeaconBlock, error) {
+	return m.U[slot], nil
 }
 
 func (m *MockBlockReader) ReadBlockByRoot(ctx context.Context, tx kv.Tx, blockRoot common.Hash) (*cltypes.SignedBeaconBlock, error) {
@@ -107,6 +162,7 @@ func (m *MockBlockReader) ReadBlockByRoot(ctx context.Context, tx kv.Tx, blockRo
 	}
 	return nil, nil
 }
+
 func (m *MockBlockReader) ReadHeaderByRoot(ctx context.Context, tx kv.Tx, blockRoot common.Hash) (*cltypes.SignedBeaconBlockHeader, error) {
 	block, err := m.ReadBlockByRoot(ctx, tx, blockRoot)
 	if err != nil {
@@ -122,7 +178,12 @@ func (m *MockBlockReader) FrozenSlots() uint64 {
 	panic("implement me")
 }
 
-func LoadChain(blocks []*cltypes.SignedBeaconBlock, s *state.CachingBeaconState, db kv.RwDB, t *testing.T) *MockBlockReader {
+func (m *MockBlockReader) CacheBlockBody(blockNumber uint64, blockHash common.Hash, transactions [][]byte, withdrawals []*types.Withdrawal) {
+	m.CachedBodies = append(m.CachedBodies, blockNumber)
+	m.CachedBodyHashes = append(m.CachedBodyHashes, blockHash)
+}
+
+func LoadChain(blocks []*cltypes.SignedBeaconBlock, db kv.RwDB, t *testing.T) *MockBlockReader {
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -130,7 +191,7 @@ func LoadChain(blocks []*cltypes.SignedBeaconBlock, s *state.CachingBeaconState,
 	m := NewMockBlockReader()
 	for _, block := range blocks {
 		m.U[block.Block.Slot] = block
-		require.NoError(t, beacon_indicies.WriteBeaconBlockAndIndicies(context.Background(), tx, block, true))
+		require.NoError(t, beacon_indicies.WriteBeaconBlockAndIndicies(tx, block, true))
 		require.NoError(t, beacon_indicies.WriteHighestFinalized(tx, block.Block.Slot+64))
 	}
 
@@ -153,7 +214,6 @@ func GetElectraRandom() ([]*cltypes.SignedBeaconBlock, *state.CachingBeaconState
 	preState := state.New(&clparams.MainnetBeaconConfig)
 	if err := utils.DecodeSSZSnappy(preState, electra_pre_state_ssz_snappy, int(clparams.ElectraVersion)); err != nil {
 		panic(err)
-
 	}
 	postState := state.New(&clparams.MainnetBeaconConfig)
 	if err := utils.DecodeSSZSnappy(postState, electra_post_state_ssz_snappy, int(clparams.ElectraVersion)); err != nil {
@@ -177,7 +237,6 @@ func GetCapellaRandom() ([]*cltypes.SignedBeaconBlock, *state.CachingBeaconState
 	preState := state.New(&clparams.MainnetBeaconConfig)
 	if err := utils.DecodeSSZSnappy(preState, capella_pre_state_ssz_snappy, int(clparams.CapellaVersion)); err != nil {
 		panic(err)
-
 	}
 	postState := state.New(&clparams.MainnetBeaconConfig)
 	if err := utils.DecodeSSZSnappy(postState, capella_post_state_ssz_snappy, int(clparams.CapellaVersion)); err != nil {
@@ -212,7 +271,7 @@ func GetPhase0Random() ([]*cltypes.SignedBeaconBlock, *state.CachingBeaconState,
 func GetBellatrixRandom() ([]*cltypes.SignedBeaconBlock, *state.CachingBeaconState, *state.CachingBeaconState) {
 	ret := make([]*cltypes.SignedBeaconBlock, 0, 96)
 	// format for blocks is blocks_{i}.ssz_snappy where i is the index of the block, starting from 0 to 95 included.
-	for i := 0; i < 96; i++ {
+	for i := range 96 {
 		block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.BellatrixVersion)
 		// Lets do te
 		b, err := bellatrixFS.ReadFile("test_data/bellatrix/blocks_" + strconv.Itoa(i) + ".ssz_snappy")
@@ -241,5 +300,4 @@ func GetBellatrixRandom() ([]*cltypes.SignedBeaconBlock, *state.CachingBeaconSta
 		panic(err)
 	}
 	return ret, preState, postState
-
 }

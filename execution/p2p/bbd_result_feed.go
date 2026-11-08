@@ -26,15 +26,15 @@ type BbdResultFeed struct {
 	ch chan BlockBatchResult
 }
 
-func (rf BbdResultFeed) Next(ctx context.Context) ([]*types.Block, error) {
+func (rf BbdResultFeed) Next(ctx context.Context) (BlockBatchResult, error) {
 	select {
 	case <-ctx.Done():
-		return nil, ctx.Err()
+		return BlockBatchResult{}, ctx.Err()
 	case batch, ok := <-rf.ch:
 		if !ok {
-			return nil, nil
+			return BlockBatchResult{}, nil
 		}
-		return batch.Blocks, batch.Err
+		return batch, batch.Err
 	}
 }
 

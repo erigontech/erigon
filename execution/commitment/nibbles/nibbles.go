@@ -1,0 +1,162 @@
+// Copyright 2014 The go-ethereum Authors
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+// Package nibbles provides canonical spec-compliant hex/compact nibble encoding
+// helpers as defined in the Ethereum Yellow Paper. Both execution/commitment and
+// execution/commitment/trie import from this leaf package, avoiding the import
+// cycle that previously forced duplicated implementations.
+package nibbles
+
+import "encoding/binary"
+
+// Terminator is the hex nibble terminator byte (0x10 = 16).
+const Terminator byte = 0x10
+
+// HexToCompact converts a hex nibble sequence to compact (hex-prefix) encoding
+// as defined by the Ethereum Yellow Paper. The result is a fresh allocation the
+// caller owns and may retain.
+func HexToCompact(hex []byte) []byte {
+	return HexToCompactInto(nil, hex)
+}
+
+// HexToCompactInto is HexToCompact but writes into dst's backing array when it has
+// enough capacity, returning dst re-sliced to the result; otherwise it allocates and
+// the result is independent of dst. A result that aliases dst must not be retained
+// past dst's next reuse.
+func HexToCompactInto(dst, hex []byte) []byte {
+	terminator := byte(0)
+	if HasTerm(hex) {
+		terminator = 1
+		hex = hex[:len(hex)-1]
+	}
+	need := len(hex)/2 + 1
+	buf := dst
+	if cap(buf) < need {
+		buf = make([]byte, need)
+	} else {
+		buf = buf[:need]
+	}
+	buf[0] = terminator << 5 // the flag byte
+	if len(hex)&1 == 1 {
+		buf[0] |= 1 << 4 // odd flag
+		buf[0] |= hex[0] // first nibble is contained in the first byte
+		hex = hex[1:]
+	}
+	decodeNibbles(hex, buf[1:])
+	return buf
+}
+
+// CompactToHex converts a compact (hex-prefix) encoded byte slice back to
+// a hex nibble sequence.
+func CompactToHex(compact []byte) []byte {
+	if len(compact) == 0 {
+		return compact
+	}
+	base := KeybytesToHex(compact)
+	// delete terminator flag
+	if base[0] < 2 {
+		base = base[:len(base)-1]
+	}
+	// apply odd flag
+	chop := 2 - base[0]&1
+	return base[chop:]
+}
+
+// KeybytesToHex converts a key byte slice (packed, 2 nibbles per byte) to hex
+// nibble encoding with a trailing Terminator byte.
+func KeybytesToHex(str []byte) []byte {
+	l := len(str)*2 + 1
+	nibbles := make([]byte, l)
+	for i, b := range str {
+		nibbles[i*2] = b / Terminator
+		nibbles[i*2+1] = b % Terminator
+	}
+	nibbles[l-1] = Terminator
+	return nibbles
+}
+
+func Expand(src, dst []byte) {
+	for len(src) >= 4 {
+		v := uint64(binary.LittleEndian.Uint32(src))
+		v = (v | v<<16) & 0x0000ffff0000ffff
+		v = (v | v<<8) & 0x00ff00ff00ff00ff
+		v = (v<<8 | v>>4) & 0x0f0f0f0f0f0f0f0f
+		binary.LittleEndian.PutUint64(dst, v)
+		src, dst = src[4:], dst[8:]
+	}
+	for i, b := range src {
+		dst[2*i], dst[2*i+1] = b>>4, b&0x0f
+	}
+}
+
+// HexToKeybytes turns hex nibbles into key bytes.
+// This can only be used for keys of even length.
+func HexToKeybytes(hex []byte) []byte {
+	if HasTerm(hex) {
+		hex = hex[:len(hex)-1]
+	}
+	if len(hex)&1 != 0 {
+		panic("can't convert hex key of odd length")
+	}
+	key := make([]byte, len(hex)/2)
+	decodeNibbles(hex, key)
+	return key
+}
+
+// HasTerm returns whether a hex key has the terminator flag.
+func HasTerm(s []byte) bool {
+	return len(s) > 0 && s[len(s)-1] == Terminator
+}
+
+// CommonPrefixLen returns the length of the common prefix of a and b.
+func CommonPrefixLen(a, b []byte) int {
+	i, length := 0, len(a)
+	if len(b) < length {
+		length = len(b)
+	}
+	for ; i < length; i++ {
+		if a[i] != b[i] {
+			break
+		}
+	}
+	return i
+}
+
+func decodeNibbles(nibbles []byte, bytes []byte) {
+	if HasTerm(nibbles) {
+		nibbles = nibbles[:len(nibbles)-1]
+	}
+
+	for len(nibbles) >= 8 {
+		v := binary.LittleEndian.Uint64(nibbles)
+		v = (v<<4)&0x00f000f000f000f0 | (v>>8)&0x00ff00ff00ff00ff
+		v = (v | v>>8) & 0x0000ffff0000ffff
+		binary.LittleEndian.PutUint32(bytes, uint32(v|v>>16))
+		nibbles, bytes = nibbles[8:], bytes[4:]
+	}
+
+	nl := len(nibbles)
+	for bi, ni := 0, 0; ni < nl; bi, ni = bi+1, ni+2 {
+		if ni == nl-1 {
+			bytes[bi] = (bytes[bi] &^ 0xf0) | nibbles[ni]<<4
+		} else {
+			bytes[bi] = nibbles[ni]<<4 | nibbles[ni+1]
+		}
+	}
+}

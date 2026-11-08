@@ -35,7 +35,7 @@ type SnapshotCreationConfig struct {
 
 	// preverified can have larger files than that indicated by `MergeSteps.last`.
 	// This is because previously, different values might have been used.
-	//Preverified       snapcfg.Preverified
+	// Preverified       snapcfg.Preverified
 	PreverifiedParsed []*SnapInfo
 }
 
@@ -72,14 +72,6 @@ func (s *SnapshotConfig) validate() {
 	if s.MinimumSize%s.RootNumPerStep != 0 {
 		panic(fmt.Sprintf("MinimumSize(%d) must be divisible by RootNumPerStep(%d)", s.MinimumSize, s.RootNumPerStep))
 	}
-}
-
-func (s *SnapshotConfig) StepsInFrozenFile() uint64 {
-	if len(s.MergeStages) == 0 {
-		return s.MinimumSize / s.RootNumPerStep
-	}
-
-	return s.MergeStages[len(s.MergeStages)-1] / s.RootNumPerStep
 }
 
 func (s *SnapshotConfig) LoadPreverified(pre snapcfg.PreverifiedItems) {

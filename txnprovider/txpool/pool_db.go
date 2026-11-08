@@ -28,15 +28,17 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/polygon/bor/borcfg"
 )
 
-var PoolChainConfigKey = []byte("chain_config")
-var PoolLastSeenBlockKey = []byte("last_seen_block")
-var PoolPendingBaseFeeKey = []byte("pending_base_fee")
-var PoolPendingBlobFeeKey = []byte("pending_blob_fee")
-var PoolStateVersion = []byte("state_version")
+var (
+	PoolChainConfigKey    = []byte("chain_config")
+	PoolLastSeenBlockKey  = []byte("last_seen_block")
+	PoolPendingBaseFeeKey = []byte("pending_base_fee")
+	PoolPendingBlobFeeKey = []byte("pending_blob_fee")
+	PoolStateVersion      = []byte("state_version")
+)
 
 func getExecutionProgress(db kv.Getter) (uint64, error) {
 	data, err := db.GetOne(kv.SyncStageProgress, []byte("Execution"))
@@ -72,6 +74,45 @@ func PutLastSeenBlock(tx kv.Putter, n uint64, buf []byte) error {
 	return tx.Put(kv.PoolInfo, PoolLastSeenBlockKey, buf)
 }
 
+// LoadSenderLastActivity reads the persisted senderID→lastActivityBlock map from the pool DB.
+// Returns an empty map (not an error) when the table is absent or empty — e.g. on the first
+// run after this feature was introduced.
+func LoadSenderLastActivity(tx kv.Tx) (map[uint64]uint64, error) {
+	result := make(map[uint64]uint64)
+	it, err := tx.Range(kv.SenderLastActivity, nil, nil, order.Asc, kv.Unlim)
+	if err != nil {
+		return result, err
+	}
+	for it.HasNext() {
+		k, v, err := it.Next()
+		if err != nil {
+			return result, err
+		}
+		if len(k) == 8 && len(v) == 8 {
+			result[binary.BigEndian.Uint64(k)] = binary.BigEndian.Uint64(v)
+		}
+	}
+	return result, nil
+}
+
+// SaveSenderLastActivity persists the senderID→lastActivityBlock map to the pool DB,
+// replacing any previously stored entries.
+func SaveSenderLastActivity(tx kv.RwTx, m map[uint64]uint64) error {
+	if err := tx.ClearTable(kv.SenderLastActivity); err != nil {
+		return err
+	}
+	key := make([]byte, 8)
+	val := make([]byte, 8)
+	for senderID, blockNum := range m {
+		binary.BigEndian.PutUint64(key, senderID)
+		binary.BigEndian.PutUint64(val, blockNum)
+		if err := tx.Put(kv.SenderLastActivity, key, val); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func ChainConfig(tx kv.Getter) (*chain.Config, error) {
 	v, err := tx.GetOne(kv.PoolInfo, PoolChainConfigKey)
 	if err != nil {
@@ -95,25 +136,13 @@ func PutChainConfig(tx kv.Putter, cc *chain.Config, buf []byte) error {
 	return tx.Put(kv.PoolInfo, PoolChainConfigKey, wr.Bytes())
 }
 
-func initBor(cc *chain.Config) *chain.Config {
-	if cc.Bor == nil && cc.BorJSON != nil {
-		borConfig := &borcfg.BorConfig{}
-		err := json.Unmarshal(cc.BorJSON, borConfig)
-		if err != nil {
-			panic(fmt.Errorf("Could not parse 'bor' chainspec: %w", err))
-		}
-		cc.Bor = borConfig
-	}
-	return cc
-}
-
 func SaveChainConfigIfNeed(
 	ctx context.Context,
 	coreDB kv.RoDB,
 	poolDB kv.RwDB,
 	logger log.Logger,
 ) (cc *chain.Config, blockNum uint64, err error) {
-	if err = poolDB.View(ctx, func(tx kv.Tx) error {
+	err = poolDB.View(ctx, func(tx kv.Tx) error {
 		cc, err = ChainConfig(tx)
 		if err != nil {
 			return err
@@ -123,7 +152,8 @@ func SaveChainConfigIfNeed(
 			return err
 		}
 		return nil
-	}); err != nil {
+	})
+	if err != nil {
 		return nil, 0, err
 	}
 
@@ -133,7 +163,8 @@ func SaveChainConfigIfNeed(
 			if err != nil {
 				return err
 			}
-			n, err := chain.CurrentBlockNumber(tx)
+			var n *uint64
+			n, err = chain.CurrentBlockNumber(tx)
 			if err != nil {
 				return err
 			}
@@ -153,11 +184,11 @@ func SaveChainConfigIfNeed(
 		break
 	}
 
-	if err = poolDB.Update(ctx, func(tx kv.RwTx) error {
-		if err = PutChainConfig(tx, cc, nil); err != nil {
+	if err := poolDB.Update(ctx, func(tx kv.RwTx) error {
+		if err := PutChainConfig(tx, cc, nil); err != nil {
 			return err
 		}
-		if err = PutLastSeenBlock(tx, blockNum, nil); err != nil {
+		if err := PutLastSeenBlock(tx, blockNum, nil); err != nil {
 			return err
 		}
 		return nil
@@ -167,5 +198,5 @@ func SaveChainConfigIfNeed(
 	if cc.ChainID.Sign() == 0 {
 		return nil, 0, errors.New("wrong chain config")
 	}
-	return initBor(cc), blockNum, nil
+	return cc, blockNum, nil
 }

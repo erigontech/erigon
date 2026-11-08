@@ -18,21 +18,25 @@ package execmodule
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"reflect"
+	"time"
 
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
-	"github.com/erigontech/erigon/execution/execmodule/moduleutil"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/node/gointerfaces"
-	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
-	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/rpc"
 )
+
+func (e *ExecModule) InclusionList(ctx context.Context) (types.Transactions, error) {
+	if e.inclusionListFunc == nil {
+		return nil, errors.New("inclusion list building is not available")
+	}
+	return e.inclusionListFunc(ctx)
+}
 
 func (e *ExecModule) checkWithdrawalsPresence(time uint64, withdrawals []*types.Withdrawal) error {
 	if !e.config.IsShanghai(time) && withdrawals != nil {
@@ -44,214 +48,229 @@ func (e *ExecModule) checkWithdrawalsPresence(time uint64, withdrawals []*types.
 	return nil
 }
 
-func (e *ExecModule) evictOldBuilders() {
-	ids := common.SortedKeys(e.builders)
+// buildDuration returns how long a payload builder may run before it stops itself.
+//
+// A consensus layer may send payload attributes well ahead of the slot the payload is for and then
+// call getPayload against the cached payload id, without sending fresh attributes. A builder that
+// stops before that slot hands back a payload missing every transaction that arrived in between, so
+// build until shortly into the target slot, derived from the payload's own timestamp. The floor
+// leaves a late request no worse off than a fixed budget; the cap stops an implausible timestamp
+// from pinning a builder and its resources.
+func buildDuration(payloadTimestamp uint64, now time.Time, secondsPerSlot uint64) time.Duration {
+	slot := time.Duration(secondsPerSlot) * time.Second
+	// Reject beyond the cap horizon before converting: a large enough timestamp overflows
+	// time.Unix and lands in the past, which would take the floor instead of the cap.
+	horizon := now.Add(2 * slot)
+	if payloadTimestamp > uint64(max(horizon.Unix(), 0)) {
+		return 2 * slot
+	}
+	d := time.Unix(int64(payloadTimestamp), 0).Add(slot / 3).Sub(now)
+	return min(max(d, slot/4), 2*slot)
+}
 
-	// remove old builders so that at most MaxBuilders - 1 remain
-	for i := 0; i <= len(e.builders)-engine_helpers.MaxBuilders; i++ {
-		delete(e.builders, ids[i])
+// stopGraceDuration returns how long a builder that reached its budget may take to finish up - the
+// transaction in flight, the packing tail, payload finalization - before it is taken as stuck and
+// discarded.
+func stopGraceDuration(secondsPerSlot uint64) time.Duration {
+	return time.Duration(secondsPerSlot) * time.Second / 2
+}
+
+// sameBuildRequest reports whether a request is asking for the payload another one is already
+// building. A custom transaction provider is never treated as the same request: it is stateful and
+// hands its transactions over once, so a second request carrying one is not asking for what the
+// first is building, and comparing the provider itself would read fields the running build writes.
+func sameBuildRequest(previous, current *builder.Parameters) bool {
+	if previous == nil || current == nil {
+		return false
+	}
+	if previous.CustomTxnProvider != nil || current.CustomTxnProvider != nil {
+		return false
+	}
+	// The payload id is this module's to assign, so it is not part of the question, and comparing
+	// copies keeps the caller's parameters out of it.
+	withoutID := func(p *builder.Parameters) builder.Parameters {
+		stripped := *p
+		stripped.PayloadId = 0
+		return stripped
+	}
+	previousWithoutID, currentWithoutID := withoutID(previous), withoutID(current)
+	return reflect.DeepEqual(&previousWithoutID, &currentWithoutID)
+}
+
+// builderEntry keeps a builder with the immutable parameters it was created for, so the two cannot
+// drift apart and eviction can drop the timestamp index without scanning it.
+type builderEntry struct {
+	builder *builder.BlockBuilder
+	params  *builder.Parameters
+}
+
+// isIndexedFor reports whether the timestamp index still resolves to this entry, which is what has
+// to be cleaned up when the entry goes.
+func (e *ExecModule) isIndexedFor(id uint64, entry *builderEntry) bool {
+	return entry != nil && entry.params != nil && e.buildersByTimestamp[entry.params.Timestamp] == id
+}
+
+// isLiveProposalTarget reports whether an entry is what a proposal is still waiting on: the builder
+// its timestamp resolves to, for a slot that has not passed. Being indexed is not enough on its own,
+// because every slot has its own timestamp and successful entries stay indexed: protecting all of
+// them would mean never evicting anything.
+func (e *ExecModule) isLiveProposalTarget(id uint64, entry *builderEntry, now time.Time) bool {
+	if !e.isIndexedFor(id, entry) {
+		return false
+	}
+	// A builder that can no longer produce is not worth protecting, however live its slot.
+	if entry.builder == nil || entry.builder.Failed() || entry.builder.Discarded() {
+		return false
+	}
+	// Compared as seconds rather than times, so an implausible timestamp wraps into "not live"
+	// instead of overflowing into the past.
+	nowSeconds := uint64(max(now.Unix(), 0))
+	slotSeconds := e.config.SecondsPerSlot()
+	timestamp := entry.params.Timestamp
+	return timestamp+slotSeconds > nowSeconds && timestamp <= nowSeconds+2*slotSeconds
+}
+
+// dropBuilder removes and discards a builder.
+func (e *ExecModule) dropBuilder(id uint64, entry *builderEntry) {
+	if entry != nil {
+		if e.isIndexedFor(id, entry) {
+			delete(e.buildersByTimestamp, entry.params.Timestamp)
+		}
+		if entry.builder != nil {
+			entry.builder.Discard()
+		}
+	}
+	delete(e.builders, id)
+}
+
+// evictOldBuilders makes room for one builder by dropping the oldest entries, except those a live
+// proposal is still waiting on.
+func (e *ExecModule) evictOldBuilders() {
+	remaining := len(e.builders) - engine_helpers.MaxBuilders + 1
+	if remaining <= 0 {
+		return
+	}
+	now := time.Now()
+	for _, id := range common.SortedKeys(e.builders) {
+		if remaining <= 0 {
+			return
+		}
+		entry := e.builders[id]
+		if e.isLiveProposalTarget(id, entry, now) {
+			continue
+		}
+		e.dropBuilder(id, entry)
+		remaining--
 	}
 }
 
-// Missing: NewPayload, AssembleBlock
-func (e *ExecModule) AssembleBlock(ctx context.Context, req *executionproto.AssembleBlockRequest) (*executionproto.AssembleBlockResponse, error) {
+func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Parameters) (AssembleBlockResult, error) {
+	// Cancellation is checked first so an expired request reports why it stopped instead of
+	// looking like contention, which callers retry. The module context check avoids starting work
+	// after shutdown has already been observed.
+	if err := ctx.Err(); err != nil {
+		return AssembleBlockResult{}, err
+	}
+	if err := e.backgroundCtx.Err(); err != nil {
+		return AssembleBlockResult{}, err
+	}
 	if !e.semaphore.TryAcquire(1) {
-		return &executionproto.AssembleBlockResponse{
-			Id:   0,
-			Busy: true,
-		}, nil
+		return AssembleBlockResult{Busy: true}, nil
 	}
 	defer e.semaphore.Release(1)
-	param := builder.Parameters{
-		ParentHash:            gointerfaces.ConvertH256ToHash(req.ParentHash),
-		Timestamp:             req.Timestamp,
-		PrevRandao:            gointerfaces.ConvertH256ToHash(req.PrevRandao),
-		SuggestedFeeRecipient: gointerfaces.ConvertH160toAddress(req.SuggestedFeeRecipient),
-		Withdrawals:           moduleutil.ConvertWithdrawalsFromRpc(req.Withdrawals),
-		SlotNumber:            req.SlotNumber,
+
+	if err := e.checkWithdrawalsPresence(params.Timestamp, params.Withdrawals); err != nil {
+		return AssembleBlockResult{}, err
 	}
 
-	if err := e.checkWithdrawalsPresence(param.Timestamp, param.Withdrawals); err != nil {
-		return nil, err
-	}
-
-	if req.ParentBeaconBlockRoot != nil {
-		pbbr := common.Hash(gointerfaces.ConvertH256ToHash(req.ParentBeaconBlockRoot))
-		param.ParentBeaconBlockRoot = &pbbr
-	}
-
-	// First check if we're already building a block with the requested parameters
-	if e.lastParameters != nil {
-		param.PayloadId = e.lastParameters.PayloadId
-		if reflect.DeepEqual(e.lastParameters, &param) {
-			e.logger.Info("[ForkChoiceUpdated] duplicate build request")
-			return &executionproto.AssembleBlockResponse{
-				Id:   e.lastParameters.PayloadId,
-				Busy: false,
-			}, nil
+	// A stopped builder is still worth reusing: it holds the payload it was stopped for, which is
+	// exactly what a repeated request is asking for. Only one that cannot produce - failed, or
+	// discarded with its work still winding down - has to be passed over.
+	for previousID, previous := range e.builders {
+		if previous != nil && previous.params != nil && previous.params.Timestamp == params.Timestamp && previous.builder != nil &&
+			!previous.builder.Failed() && !previous.builder.Discarded() {
+			if sameBuildRequest(previous.params, params) {
+				e.buildersByTimestamp[params.Timestamp] = previousID
+				e.logger.Info("[ForkChoiceUpdated] duplicate build request")
+				return AssembleBlockResult{PayloadID: previousID}, nil
+			}
 		}
 	}
-
-	// Initiate payload building
 	e.evictOldBuilders()
 
 	e.nextPayloadId++
-	param.PayloadId = e.nextPayloadId
-	e.lastParameters = &param
+	ownedParams := params.Copy()
+	ownedParams.PayloadId = e.nextPayloadId
 
-	e.builders[e.nextPayloadId] = builder.NewBlockBuilder(e.builderFunc, &param, e.config.SecondsPerSlot()/4)
+	secondsPerSlot := e.config.SecondsPerSlot()
+	e.builders[e.nextPayloadId] = &builderEntry{
+		builder: builder.NewBlockBuilder(e.backgroundCtx, e.builderFunc, ownedParams,
+			buildDuration(params.Timestamp, time.Now(), secondsPerSlot), stopGraceDuration(secondsPerSlot)),
+		params: ownedParams,
+	}
+	e.buildersByTimestamp[params.Timestamp] = e.nextPayloadId
 	e.logger.Info("[ForkChoiceUpdated] BlockBuilder added", "payload", e.nextPayloadId)
 
-	return &executionproto.AssembleBlockResponse{
-		Id:   e.nextPayloadId,
-		Busy: false,
-	}, nil
+	return AssembleBlockResult{PayloadID: e.nextPayloadId}, nil
 }
 
-// The expected value to be received by the feeRecipient in wei
+// blockValue computes the expected value received by the fee recipient in wei.
 func blockValue(br *types.BlockWithReceipts, baseFee *uint256.Int) *uint256.Int {
 	blockValue := uint256.NewInt(0)
 	txs := br.Block.Transactions()
+	var gas, txValue uint256.Int
 	for i := range txs {
-		gas := new(uint256.Int).SetUint64(br.Receipts[i].GasUsed)
+		gas.SetUint64(br.Receipts[i].GasUsed)
+
 		effectiveTip := txs[i].GetEffectiveGasTip(baseFee)
-		txValue := new(uint256.Int).Mul(gas, effectiveTip)
-		blockValue.Add(blockValue, txValue)
+
+		txValue.Mul(&gas, &effectiveTip)
+		blockValue.Add(blockValue, &txValue)
 	}
 	return blockValue
 }
 
-func (e *ExecModule) GetAssembledBlockWithReceipts(payloadId uint64) (block *types.BlockWithReceipts, busy bool, err error) {
+func (e *ExecModule) GetAssembledBlock(ctx context.Context, payloadID uint64) (AssembledBlockResult, error) {
+	if err := ctx.Err(); err != nil {
+		return AssembledBlockResult{}, err
+	}
 	if !e.semaphore.TryAcquire(1) {
-		return nil, true, nil
+		return AssembledBlockResult{Busy: true}, nil
 	}
 	defer e.semaphore.Release(1)
-	builder, ok := e.builders[payloadId]
-	if !ok {
-		return nil, false, nil
-	}
-	blockWithReceipts, err := builder.Stop()
-	return blockWithReceipts, false, err
-}
 
-func (e *ExecModule) GetAssembledBlock(ctx context.Context, req *executionproto.GetAssembledBlockRequest) (*executionproto.GetAssembledBlockResponse, error) {
-	blockWithReceipts, busy, err := e.GetAssembledBlockWithReceipts(req.Id)
-	if err != nil {
-		e.logger.Error("Failed to build PoS block", "err", err)
-		return nil, err
+	entry, ok := e.builders[payloadID]
+	if !ok || entry == nil || entry.builder == nil {
+		return AssembledBlockResult{Unknown: true}, nil
 	}
-	if busy {
-		return &executionproto.GetAssembledBlockResponse{
-			Busy: true,
-		}, nil
+	blockWithReceipts, err := entry.builder.Stop(ctx)
+	if errors.Is(err, builder.ErrDiscarded) {
+		e.dropBuilder(payloadID, entry)
+		return AssembledBlockResult{Unknown: true}, nil
+	}
+	if err != nil {
+		// Stop reports the caller's wait expiring and the build's own failure through the same
+		// error, and a build can fail with a context error of its own - a transaction provider
+		// giving up, say. Only the builder knows which happened, so ask it rather than guess from
+		// the error: a caller that gave up leaves a builder still worth collecting.
+		if !entry.builder.Failed() {
+			return AssembledBlockResult{}, err
+		}
+		// Keeping a failed entry would hand its latched error to every retry.
+		e.dropBuilder(payloadID, entry)
+		e.logger.Error("Failed to build PoS block", "err", err)
+		return AssembledBlockResult{}, err
 	}
 	if blockWithReceipts == nil {
-		return &executionproto.GetAssembledBlockResponse{
-			Busy: false,
-		}, nil
+		return AssembledBlockResult{}, nil
 	}
 
-	block := blockWithReceipts.Block
-	header := block.Header()
-
+	header := blockWithReceipts.Block.Header()
 	baseFee := header.BaseFee
+	value := blockValue(blockWithReceipts, baseFee)
 
-	encodedTransactions, err := types.MarshalTransactionsBinary(block.Transactions())
-	if err != nil {
-		return nil, err
-	}
-
-	payload := &typesproto.ExecutionPayload{
-		Version:       1,
-		ParentHash:    gointerfaces.ConvertHashToH256(header.ParentHash),
-		Coinbase:      gointerfaces.ConvertAddressToH160(header.Coinbase),
-		Timestamp:     header.Time,
-		PrevRandao:    gointerfaces.ConvertHashToH256(header.MixDigest),
-		StateRoot:     gointerfaces.ConvertHashToH256(block.Root()),
-		ReceiptRoot:   gointerfaces.ConvertHashToH256(block.ReceiptHash()),
-		LogsBloom:     gointerfaces.ConvertBytesToH2048(block.Bloom().Bytes()),
-		GasLimit:      block.GasLimit(),
-		GasUsed:       block.GasUsed(),
-		BlockNumber:   block.NumberU64(),
-		ExtraData:     block.Extra(),
-		BaseFeePerGas: gointerfaces.ConvertUint256IntToH256(baseFee),
-		BlockHash:     gointerfaces.ConvertHashToH256(block.Hash()),
-		Transactions:  encodedTransactions,
-		SlotNumber:    header.SlotNumber,
-	}
-	if block.Withdrawals() != nil {
-		payload.Version = 2
-		payload.Withdrawals = moduleutil.ConvertWithdrawalsToRpc(block.Withdrawals())
-	}
-
-	if header.BlobGasUsed != nil && header.ExcessBlobGas != nil {
-		payload.Version = 3
-		payload.BlobGasUsed = header.BlobGasUsed
-		payload.ExcessBlobGas = header.ExcessBlobGas
-	}
-	blockAccessList := blockWithReceipts.BlockAccessList
-	if header.BlockAccessListHash != nil || blockAccessList != nil {
-		payload.Version = 4
-		if header.BlockAccessListHash != nil {
-			payload.BlockAccessListHash = gointerfaces.ConvertHashToH256(*header.BlockAccessListHash)
-		}
-		payload.BlockAccessList = types.ConvertBlockAccessListToTypesProto(blockAccessList)
-		if payload.BlockAccessList == nil {
-			payload.BlockAccessList = []*typesproto.BlockAccessListAccount{}
-		}
-	}
-
-	blockValue := blockValue(blockWithReceipts, baseFee)
-
-	blobsBundle := &typesproto.BlobsBundle{}
-	for i, txn := range block.Transactions() {
-		if txn.Type() != types.BlobTxType {
-			continue
-		}
-		blobTx, ok := txn.(*types.BlobTxWrapper)
-		if !ok {
-			return nil, fmt.Errorf("expected blob transaction to be type BlobTxWrapper, got: %T", blobTx)
-		}
-		versionedHashes, commitments, proofs, blobs := blobTx.GetBlobHashes(), blobTx.Commitments, blobTx.Proofs, blobTx.Blobs
-		lenCheck := len(versionedHashes)
-		if lenCheck != len(commitments) || (lenCheck != len(proofs) && blobTx.WrapperVersion == 0) || lenCheck != len(blobs) {
-			return nil, fmt.Errorf("tx %d in block %s has inconsistent commitments (%d) / proofs (%d) / blobs (%d) / "+
-				"versioned hashes (%d)", i, block.Hash(), len(commitments), len(proofs), len(blobs), lenCheck)
-		}
-		for _, commitment := range commitments {
-			c := types.KZGCommitment{}
-			copy(c[:], commitment[:])
-			blobsBundle.Commitments = append(blobsBundle.Commitments, c[:])
-		}
-		for _, proof := range proofs {
-			p := types.KZGProof{}
-			copy(p[:], proof[:])
-			blobsBundle.Proofs = append(blobsBundle.Proofs, p[:])
-		}
-		for _, blob := range blobs {
-			b := types.Blob{}
-			copy(b[:], blob[:])
-			blobsBundle.Blobs = append(blobsBundle.Blobs, b[:])
-		}
-	}
-
-	var requestsBundle *typesproto.RequestsBundle
-	if blockWithReceipts.Requests != nil {
-		requestsBundle = &typesproto.RequestsBundle{}
-		requests := make([][]byte, 0)
-		for _, r := range blockWithReceipts.Requests {
-			requests = append(requests, r.Encode())
-		}
-		requestsBundle.Requests = requests
-	}
-
-	return &executionproto.GetAssembledBlockResponse{
-		Data: &executionproto.AssembledBlockData{
-			ExecutionPayload: payload,
-			BlockValue:       gointerfaces.ConvertUint256IntToH256(blockValue),
-			BlobsBundle:      blobsBundle,
-			Requests:         requestsBundle,
-		},
-		Busy: false,
+	return AssembledBlockResult{
+		Block:      blockWithReceipts,
+		BlockValue: value,
 	}, nil
 }

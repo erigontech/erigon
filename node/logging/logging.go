@@ -18,20 +18,22 @@ package logging
 
 import (
 	"flag"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
 
 	"github.com/spf13/cobra"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 	"gopkg.in/natefinch/lumberjack.v2"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/metrics"
 )
 
 // Determine the log dir path based on the given urfave context
-func LogDirPath(ctx *cli.Context) string {
+func LogDirPath(ctx *cli.Command) string {
 	dirPath := ""
 	if !ctx.Bool(LogDirDisableFlag.Name) {
 		dirPath = ctx.String(LogDirPathFlag.Name)
@@ -55,30 +57,30 @@ func LogDirPath(ctx *cli.Context) string {
 // and it would make sense to choose one over another
 func SetupLoggerCtx(
 	filePrefix string,
-	ctx *cli.Context,
+	ctx *cli.Command,
 	consoleDefaultLevel log.Lvl,
 	dirDefaultLevel log.Lvl,
 	rootHandler bool,
 ) log.Logger {
-	var consoleJson = ctx.Bool(LogJsonFlag.Name) || ctx.Bool(LogConsoleJsonFlag.Name)
-	var dirJson = ctx.Bool(LogDirJsonFlag.Name)
+	consoleJson := ctx.Bool(LogJsonFlag.Name) || ctx.Bool(LogConsoleJsonFlag.Name)
+	dirJson := ctx.Bool(LogDirJsonFlag.Name)
 
-	metrics.DelayLoggingEnabled = ctx.Bool(LogBlockDelayFlag.Name)
+	metrics.DelayLoggingEnabled.Store(ctx.Bool(LogBlockDelayFlag.Name))
 
 	consoleLevel := consoleDefaultLevel
 
 	// Priority: LogConsoleVerbosityFlag (if explicitly set) > LogVerbosityFlag (if explicitly set) > default
 	if ctx.IsSet(LogConsoleVerbosityFlag.Name) {
-		if level, err := tryGetLogLevel(ctx.String(LogConsoleVerbosityFlag.Name)); err == nil {
+		if level, err := GetLogLevel(ctx.String(LogConsoleVerbosityFlag.Name)); err == nil {
 			consoleLevel = level
 		}
 	} else if ctx.IsSet(LogVerbosityFlag.Name) {
-		if level, err := tryGetLogLevel(ctx.String(LogVerbosityFlag.Name)); err == nil {
+		if level, err := GetLogLevel(ctx.String(LogVerbosityFlag.Name)); err == nil {
 			consoleLevel = level
 		}
 	}
 
-	dirLevel, dErr := tryGetLogLevel(ctx.String(LogDirVerbosityFlag.Name))
+	dirLevel, dErr := GetLogLevel(ctx.String(LogDirVerbosityFlag.Name))
 	if dErr != nil {
 		dirLevel = dirDefaultLevel
 	}
@@ -114,7 +116,6 @@ func SetupLoggerCtx(
 // Note: urfave and cobra are two CLI frameworks/libraries for the same functionalities
 // and it would make sense to choose one over another
 func SetupLoggerCmd(filePrefix string, cmd *cobra.Command) log.Logger {
-
 	logJsonVal, ljerr := cmd.Flags().GetBool(LogJsonFlag.Name)
 	if ljerr != nil {
 		logJsonVal = false
@@ -125,22 +126,22 @@ func SetupLoggerCmd(filePrefix string, cmd *cobra.Command) log.Logger {
 		logConsoleJsonVal = false
 	}
 
-	var consoleJson = logJsonVal || logConsoleJsonVal
+	consoleJson := logJsonVal || logConsoleJsonVal
 	dirJson, djerr := cmd.Flags().GetBool(LogDirJsonFlag.Name)
 	if djerr != nil {
 		dirJson = false
 	}
 
-	consoleLevel, lErr := tryGetLogLevel(cmd.Flags().Lookup(LogConsoleVerbosityFlag.Name).Value.String())
+	consoleLevel, lErr := GetLogLevel(cmd.Flags().Lookup(LogConsoleVerbosityFlag.Name).Value.String())
 	if lErr != nil {
 		// try verbosity flag
-		consoleLevel, lErr = tryGetLogLevel(cmd.Flags().Lookup(LogVerbosityFlag.Name).Value.String())
+		consoleLevel, lErr = GetLogLevel(cmd.Flags().Lookup(LogVerbosityFlag.Name).Value.String())
 		if lErr != nil {
 			consoleLevel = log.LvlInfo
 		}
 	}
 
-	dirLevel, dErr := tryGetLogLevel(cmd.Flags().Lookup(LogDirVerbosityFlag.Name).Value.String())
+	dirLevel, dErr := GetLogLevel(cmd.Flags().Lookup(LogDirVerbosityFlag.Name).Value.String())
 	if dErr != nil {
 		dirLevel = log.LvlInfo
 	}
@@ -173,35 +174,35 @@ func SetupLoggerCmd(filePrefix string, cmd *cobra.Command) log.Logger {
 // SetupLoggerCmd performs the logging using parameters specified by the `flag` package and sets it on the root logger
 // This is the function which is NOT used by Erigon itself, but instead by utility commands
 func SetupLogger(filePrefix string) log.Logger {
-	var logConsoleVerbosity = flag.String(LogConsoleVerbosityFlag.Name, "", LogConsoleVerbosityFlag.Usage)
-	var logDirVerbosity = flag.String(LogDirVerbosityFlag.Name, "", LogDirVerbosityFlag.Usage)
-	var logDirPath = flag.String(LogDirPathFlag.Name, "", LogDirPathFlag.Usage)
-	var logDirPrefix = flag.String(LogDirPrefixFlag.Name, "", LogDirPrefixFlag.Usage)
-	var logVerbosity = flag.String(LogVerbosityFlag.Name, "", LogVerbosityFlag.Usage)
-	var logConsoleJson = flag.Bool(LogConsoleJsonFlag.Name, false, LogConsoleJsonFlag.Usage)
-	var logJson = flag.Bool(LogJsonFlag.Name, false, LogJsonFlag.Usage)
-	var logDirJson = flag.Bool(LogDirJsonFlag.Name, false, LogDirJsonFlag.Usage)
+	logConsoleVerbosity := flag.String(LogConsoleVerbosityFlag.Name, "", LogConsoleVerbosityFlag.Usage)
+	logDirVerbosity := flag.String(LogDirVerbosityFlag.Name, "", LogDirVerbosityFlag.Usage)
+	logDirPath := flag.String(LogDirPathFlag.Name, "", LogDirPathFlag.Usage)
+	logDirPrefix := flag.String(LogDirPrefixFlag.Name, "", LogDirPrefixFlag.Usage)
+	logVerbosity := flag.String(LogVerbosityFlag.Name, "", LogVerbosityFlag.Usage)
+	logConsoleJson := flag.Bool(LogConsoleJsonFlag.Name, false, LogConsoleJsonFlag.Usage)
+	logJson := flag.Bool(LogJsonFlag.Name, false, LogJsonFlag.Usage)
+	logDirJson := flag.Bool(LogDirJsonFlag.Name, false, LogDirJsonFlag.Usage)
 	flag.Parse()
 
-	var consoleJson = *logJson || *logConsoleJson
-	var dirJson = logDirJson
+	consoleJson := *logJson || *logConsoleJson
+	dirJson := logDirJson
 
-	consoleLevel, lErr := tryGetLogLevel(*logConsoleVerbosity)
+	consoleLevel, lErr := GetLogLevel(*logConsoleVerbosity)
 	if lErr != nil {
 		// try verbosity flag
-		consoleLevel, lErr = tryGetLogLevel(*logVerbosity)
+		consoleLevel, lErr = GetLogLevel(*logVerbosity)
 		if lErr != nil {
 			consoleLevel = log.LvlInfo
 		}
 	}
 
-	dirLevel, dErr := tryGetLogLevel(*logDirVerbosity)
+	dirLevel, dErr := GetLogLevel(*logDirVerbosity)
 	if dErr != nil {
 		dirLevel = log.LvlInfo
 	}
 
-	if logDirPrefix != nil && len(*logDirPrefix) > 0 {
-		filePrefix = *logDirPrefix
+	if prefix := common.Deref(logDirPrefix); prefix != "" {
+		filePrefix = prefix
 	}
 
 	initSeparatedLogging(log.Root(), filePrefix, *logDirPath, consoleLevel, dirLevel, consoleJson, *dirJson)
@@ -218,8 +219,8 @@ func initSeparatedLogging(
 	consoleLevel log.Lvl,
 	dirLevel log.Lvl,
 	consoleJson bool,
-	dirJson bool) {
-
+	dirJson bool,
+) {
 	var consoleHandler log.Handler
 
 	if consoleJson {
@@ -234,10 +235,33 @@ func initSeparatedLogging(
 		return
 	}
 
-	err := os.MkdirAll(dirPath, 0755)
-	if err != nil {
-		logger.Warn("failed to create log dir, console logging only")
-		return
+	// Create the log directory with owner-only permissions (0700) so that
+	// by default only the erigon user can read logs. Group or world access
+	// must be explicitly granted by the operator (e.g. chmod 750 <logs-dir>).
+	// If the directory already exists we inspect its permissions: any group
+	// or world access bits are reported as a warning but we proceed running.
+	if info, err := os.Stat(dirPath); err != nil {
+		if !os.IsNotExist(err) {
+			logger.Warn("failed to stat log dir, console logging only", "err", err)
+			return
+		}
+		if err := os.MkdirAll(dirPath, 0o700); err != nil {
+			logger.Warn("failed to create log dir, console logging only", "err", err)
+			return
+		}
+	} else {
+		if mode := info.Mode().Perm(); mode&0o077 != 0 {
+			logger.Warn("log directory has non-default permissions; group or world access is enabled",
+				"dir", dirPath, "mode", fmt.Sprintf("%04o", mode))
+		}
+	}
+
+	// Pre-create the log file with group-readable permissions (0640).
+	// lumberjack.v2 copies the mode of the existing file when rotating, so
+	// all subsequent rotated files will also be created with 0640.
+	logFilePath := filepath.Join(dirPath, filePrefix+".log")
+	if f, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o640); err == nil {
+		_ = f.Close()
 	}
 
 	dirFormat := log.TerminalFormatNoColor()
@@ -246,20 +270,21 @@ func initSeparatedLogging(
 	}
 
 	lumberjack := &lumberjack.Logger{
-		Filename:   filepath.Join(dirPath, filePrefix+".log"),
+		Filename:   logFilePath,
 		MaxSize:    100, // megabytes
 		MaxBackups: 3,
-		MaxAge:     28, //days
+		MaxAge:     28, // days
 		Compress:   true,
 	}
 	userLog := log.StreamHandler(lumberjack, dirFormat)
 
 	mux := log.MultiHandler(consoleHandler, log.LvlFilterHandler(dirLevel, userLog))
 	logger.SetHandler(mux)
-	logger.Info("logging to file system", "log dir", dirPath, "file prefix", filePrefix, "log level", dirLevel, "json", dirJson)
+	logger.Info("logging to file system", "logDir", dirPath, "filePrefix", filePrefix, "logLevel", dirLevel, "json", dirJson)
 }
 
-func tryGetLogLevel(s string) (log.Lvl, error) {
+// GetLogLevel parses a log level given as a name ("info") or a numeric string ("3").
+func GetLogLevel(s string) (log.Lvl, error) {
 	lvl, err := log.LvlFromString(s)
 	if err != nil {
 		l, err := strconv.Atoi(s)

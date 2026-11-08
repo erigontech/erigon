@@ -18,7 +18,12 @@ package mock_services
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"go.uber.org/mock/gomock"
 
@@ -37,40 +42,134 @@ import (
 	"github.com/erigontech/erigon/common"
 )
 
-// Make mocks with maps and simple setters and getters, panic on methods from ForkChoiceStorageWriter
-
 type ForkChoiceStorageMock struct {
-	Ancestors              map[uint64]common.Hash
-	AnchorSlotVal          uint64
-	FinalizedCheckpointVal solid.Checkpoint
-	FinalizedSlotVal       uint64
-	HeadVal                common.Hash
-	HeadSlotVal            uint64
-	HighestSeenVal         uint64
-	JustifiedCheckpointVal solid.Checkpoint
-	JustifiedSlotVal       uint64
-	ProposerBoostRootVal   common.Hash
-	SlotVal                uint64
-	TimeVal                uint64
+	PreparationImports                    forkchoice.PayloadPreparationImports
+	ProposerLookaheadVal                  solid.Uint64VectorSSZ
+	AttestationDataFn                     func(common.Hash, uint64) (solid.AttestationData, bool)
+	Ancestors                             map[uint64]forkchoice.ForkChoiceNode
+	AncestorFn                            func(root common.Hash, slot uint64) forkchoice.ForkChoiceNode
+	AncestorCalls                         atomic.Int64
+	AnchorSlotVal                         uint64
+	AnchorRootVal                         common.Hash
+	AnchorExecutionPayloadBuilderIndexVal uint64
+	AnchorExecutionPayloadBuilderIndexOK  bool
+	FinalizedCheckpointVal                solid.Checkpoint
+	FinalizedSlotVal                      uint64
+	LowestAvailableSlotVal                *uint64
+	HeadVal                               common.Hash
+	HeadSlotVal                           uint64
+	HeadPayloadStatusVal                  cltypes.PayloadStatus
+	BlockProcessingVal                    bool
+	GetHeadNodeFn                         func() (forkchoice.ForkChoiceNode, uint64, error)
+	TryGetHeadNodeFn                      func() (forkchoice.ForkChoiceNode, bool)
+	GetStateAtBlockRootFn                 func(common.Hash) (*state.CachingBeaconState, error)
+	ViewStateAtBlockRootFn                func(common.Hash, func(*state.CachingBeaconState) error) error
+	ViewCurrentStateAtBlockRootFn         func(common.Hash, func(*state.CachingBeaconState) error) error
+	HighestSeenVal                        uint64
+	// HighestImportedDescendantVal is the slot of the highest imported descendant of any root,
+	// unless HasImportedDescendantAfterFn is set.
+	HighestImportedDescendantVal uint64
+	HasImportedDescendantAfterFn func(root common.Hash, slot uint64) bool
+	JustifiedCheckpointVal       solid.Checkpoint
+	JustifiedSlotVal             uint64
+	ProposerBoostRootVal         common.Hash
+	SlotVal                      uint64
+	TimeVal                      uint64
 
-	ParticipationVal *solid.ParticipationBitList
+	ParticipationVal map[uint64]*solid.ParticipationBitList
 
-	StateAtBlockRootVal       map[common.Hash]*state.CachingBeaconState
-	StateAtSlotVal            map[uint64]*state.CachingBeaconState
-	GetSyncCommitteesVal      map[uint64][2]*solid.SyncCommittee
-	GetFinalityCheckpointsVal map[common.Hash][3]solid.Checkpoint
-	WeightsMock               []forkchoice.ForkNode
-	LightClientBootstraps     map[common.Hash]*cltypes.LightClientBootstrap
-	NewestLCUpdate            *cltypes.LightClientUpdate
-	LCUpdates                 map[uint64]*cltypes.LightClientUpdate
-	SyncContributionPool      sync_contribution_pool.SyncContributionPool
-	Headers                   map[common.Hash]*cltypes.BeaconBlockHeader
-	GetBeaconCommitteeMock    func(slot, committeeIndex uint64) ([]uint64, error)
+	IsRootOptimisticVal bool
+
+	StateAtBlockRootVal                                map[common.Hash]*state.CachingBeaconState
+	StateAtSlotVal                                     map[uint64]*state.CachingBeaconState
+	GetSyncCommitteesVal                               map[uint64][2]*solid.SyncCommittee
+	GetFinalityCheckpointsVal                          map[common.Hash][3]solid.Checkpoint
+	PendingConsolidationsVal                           map[common.Hash]*solid.ListSSZ[*solid.PendingConsolidation]
+	PendingDepositsVal                                 map[common.Hash]*solid.ListSSZ[*solid.PendingDeposit]
+	PendingPartialWithdrawalsVal                       map[common.Hash]*solid.ListSSZ[*solid.PendingPartialWithdrawal]
+	WeightsMock                                        []forkchoice.ForkNode
+	LightClientBootstraps                              map[common.Hash]*cltypes.LightClientBootstrap
+	NewestLCUpdate                                     *cltypes.LightClientUpdate
+	LCUpdates                                          map[uint64]*cltypes.LightClientUpdate
+	SyncContributionPool                               sync_contribution_pool.SyncContributionPool
+	Headers                                            map[common.Hash]*cltypes.BeaconBlockHeader
+	Blocks                                             map[common.Hash]*cltypes.SignedBeaconBlock
+	Envelopes                                          map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope
+	envelopesMu                                        sync.RWMutex
+	executionPayloadMu                                 sync.RWMutex
+	HasEnvelopeFunc                                    func(common.Hash) bool
+	InvalidBlocks                                      map[common.Hash]struct{}
+	ExecutionPayloadReceivedAt                         map[common.Hash]time.Time
+	VerifiedPayloads                                   map[common.Hash]bool
+	OnBlockErr                                         error
+	OnExecutionPayloadErr                              error
+	OnExecutionPayloadCheckBlobData                    bool
+	OnExecutionPayloadCalled                           bool
+	ApplyLocalSelfBuildEnvelopeErr                     error
+	OnExecutionPayloadFn                               func(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool) error
+	OnExecutionPayloadAtFn                             func(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool, time.Time) error
+	ValidateBlockForPublishingFn                       func(*cltypes.SignedBeaconBlock, bool) error
+	OnTickFn                                           func(uint64)
+	ValidateExecutionPayloadEnvelopeErr                error
+	ValidateExecutionPayloadEnvelopeForGossipErr       error
+	ValidateExecutionPayloadEnvelopeForGossipCalled    bool
+	ValidateExecutionPayloadEnvelopeForGossipFunc      func(*cltypes.SignedExecutionPayloadEnvelope) error
+	ClaimExecutionPayloadEnvelopeForGossipFunc         func(context.Context, common.Hash, uint64) (forkchoice.ExecutionPayloadEnvelopeAdmissionToken, error)
+	TryClaimExecutionPayloadEnvelopeForGossipFunc      func(common.Hash, uint64) (forkchoice.ExecutionPayloadEnvelopeAdmissionToken, error)
+	ValidateExecutionPayloadEnvelopeForConsensusErr    error
+	ValidateExecutionPayloadEnvelopeForConsensusCalled bool
+	EnvelopeGossipAdmissions                           forkchoice.ExecutionPayloadEnvelopeAdmissions
+	ReadEnvelopeFromDiskFunc                           func(common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error)
+	GetBeaconCommitteeMock                             func(slot, committeeIndex uint64) ([]uint64, error)
+	HeadLacksTargetShuffling                           bool
+	TargetBeaconCommitteeFn                            func(target solid.Checkpoint, slot, committeeIndex uint64, claimBuild func() bool) ([]uint64, uint64, error)
 
 	Pool pool.OperationsPool
 
+	Eth1Hashes map[common.Hash]common.Hash
+
 	// Mock for PeerDas
 	MockPeerDas *mock_services.MockPeerDas
+
+	ShouldExtendPayloadVal bool
+	ShouldBuildOnFullVal   *bool
+
+	RetryPendingEnvelopeFunc func(ctx context.Context, blockRoot common.Hash) time.Time
+	PendingEnvelopeRoots     map[common.Hash]struct{}
+	ApplyInFlightRoots       map[common.Hash]struct{}
+	VotesRuleOutFullRoots    map[common.Hash]struct{}
+
+	// [New in Gloas:EIP7732] Execution payload status by execution block hash
+	ExecutionPayloadStatusMap map[common.Hash]execution_client.PayloadStatus
+	PayloadStatusByRootMap    map[common.Hash]execution_client.PayloadStatus
+	// [New in Gloas:EIP7732] Execution payload gas limit by execution block hash
+	ExecutionPayloadGasLimitMap map[common.Hash]uint64
+}
+
+func (f *ForkChoiceStorageMock) BeginPayloadImport(slot uint64) func() {
+	return f.PreparationImports.BeginImport(slot)
+}
+
+func (f *ForkChoiceStorageMock) PayloadImportInProgress(slot uint64) bool {
+	return f.PreparationImports.ImportInProgress(slot)
+}
+
+func (f *ForkChoiceStorageMock) BeginPendingPayloadEnvelope(blockRoot common.Hash) func() {
+	return f.PreparationImports.BeginPendingEnvelope(blockRoot)
+}
+
+func (f *ForkChoiceStorageMock) TryBeginPayloadPreparation(ctx context.Context, firstSlot, lastSlot uint64) (context.Context, func() bool, bool) {
+	return f.PreparationImports.TryBegin(ctx, firstSlot, lastSlot, nil, f.pendingEnvelopeSlot)
+}
+
+func (f *ForkChoiceStorageMock) pendingEnvelopeSlot(root common.Hash) (uint64, bool) {
+	if f.HasEnvelope(root) {
+		return 0, false
+	}
+	if block := f.Blocks[root]; block != nil && block.Block != nil {
+		return block.Block.Slot, true
+	}
+	return 0, false
 }
 
 func makeSyncContributionPoolMock(t *testing.T) sync_contribution_pool.SyncContributionPool {
@@ -117,10 +216,14 @@ func makeSyncContributionPoolMock(t *testing.T) sync_contribution_pool.SyncContr
 				Slot:              message.Slot,
 				SubcommitteeIndex: subCommitee,
 				BeaconBlockRoot:   message.BeaconBlockRoot,
-				AggregationBits:   make([]byte, cltypes.SyncCommitteeAggregationBitsSize),
+				AggregationBits:   make([]byte, cltypes.DefaultSyncCommitteeAggregationBitsSize),
 			}
 			return nil
 		}).AnyTimes()
+	pool.EXPECT().
+		GetSyncAggregate(gomock.Any(), gomock.Any()).
+		Return(cltypes.NewSyncAggregate(), nil).
+		AnyTimes()
 	return pool
 }
 
@@ -139,7 +242,7 @@ func NewForkChoiceStorageMock(t *testing.T) *ForkChoiceStorageMock {
 		Return(true, nil).
 		AnyTimes()
 	mockPeerDas.EXPECT().
-		Prune(gomock.Any()).
+		PruneBelow(gomock.Any()).
 		Return(nil).
 		AnyTimes()
 	mockPeerDas.EXPECT().
@@ -169,27 +272,37 @@ func NewForkChoiceStorageMock(t *testing.T) *ForkChoiceStorageMock {
 		AnyTimes()
 
 	return &ForkChoiceStorageMock{
-		Ancestors:                 make(map[uint64]common.Hash),
-		AnchorSlotVal:             0,
-		FinalizedCheckpointVal:    solid.Checkpoint{},
-		FinalizedSlotVal:          0,
-		HeadVal:                   common.Hash{},
-		HighestSeenVal:            0,
-		JustifiedCheckpointVal:    solid.Checkpoint{},
-		JustifiedSlotVal:          0,
-		ProposerBoostRootVal:      common.Hash{},
-		SlotVal:                   0,
-		TimeVal:                   0,
-		StateAtBlockRootVal:       make(map[common.Hash]*state.CachingBeaconState),
-		StateAtSlotVal:            make(map[uint64]*state.CachingBeaconState),
-		GetSyncCommitteesVal:      make(map[uint64][2]*solid.SyncCommittee),
-		GetFinalityCheckpointsVal: make(map[common.Hash][3]solid.Checkpoint),
-		LightClientBootstraps:     make(map[common.Hash]*cltypes.LightClientBootstrap),
-		LCUpdates:                 make(map[uint64]*cltypes.LightClientUpdate),
-		Headers:                   make(map[common.Hash]*cltypes.BeaconBlockHeader),
-		GetBeaconCommitteeMock:    nil,
-		SyncContributionPool:      makeSyncContributionPoolMock(t),
-		MockPeerDas:               mockPeerDas,
+		Ancestors:                   make(map[uint64]forkchoice.ForkChoiceNode),
+		AnchorSlotVal:               0,
+		FinalizedCheckpointVal:      solid.Checkpoint{},
+		FinalizedSlotVal:            0,
+		HeadVal:                     common.Hash{},
+		HeadPayloadStatusVal:        cltypes.PayloadStatusFull,
+		HighestSeenVal:              0,
+		JustifiedCheckpointVal:      solid.Checkpoint{},
+		JustifiedSlotVal:            0,
+		ProposerBoostRootVal:        common.Hash{},
+		SlotVal:                     0,
+		TimeVal:                     0,
+		StateAtBlockRootVal:         make(map[common.Hash]*state.CachingBeaconState),
+		StateAtSlotVal:              make(map[uint64]*state.CachingBeaconState),
+		GetSyncCommitteesVal:        make(map[uint64][2]*solid.SyncCommittee),
+		GetFinalityCheckpointsVal:   make(map[common.Hash][3]solid.Checkpoint),
+		LightClientBootstraps:       make(map[common.Hash]*cltypes.LightClientBootstrap),
+		LCUpdates:                   make(map[uint64]*cltypes.LightClientUpdate),
+		Headers:                     make(map[common.Hash]*cltypes.BeaconBlockHeader),
+		Blocks:                      make(map[common.Hash]*cltypes.SignedBeaconBlock),
+		Envelopes:                   make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope),
+		ExecutionPayloadReceivedAt:  make(map[common.Hash]time.Time),
+		PendingEnvelopeRoots:        make(map[common.Hash]struct{}),
+		GetBeaconCommitteeMock:      nil,
+		Eth1Hashes:                  make(map[common.Hash]common.Hash),
+		ShouldExtendPayloadVal:      true,
+		SyncContributionPool:        makeSyncContributionPoolMock(t),
+		MockPeerDas:                 mockPeerDas,
+		ExecutionPayloadStatusMap:   make(map[common.Hash]execution_client.PayloadStatus),
+		PayloadStatusByRootMap:      make(map[common.Hash]execution_client.PayloadStatus),
+		ExecutionPayloadGasLimitMap: make(map[common.Hash]uint64),
 	}
 }
 
@@ -197,12 +310,31 @@ func (f *ForkChoiceStorageMock) GetPeerDas() das.PeerDas {
 	return f.MockPeerDas
 }
 
-func (f *ForkChoiceStorageMock) Ancestor(root common.Hash, slot uint64) common.Hash {
+func (f *ForkChoiceStorageMock) Ancestor(root common.Hash, slot uint64) forkchoice.ForkChoiceNode {
+	f.AncestorCalls.Add(1)
+	if f.AncestorFn != nil {
+		return f.AncestorFn(root, slot)
+	}
 	return f.Ancestors[slot]
+}
+
+func (f *ForkChoiceStorageMock) AttestationData(headRoot common.Hash, slot uint64) (solid.AttestationData, bool) {
+	if f.AttestationDataFn == nil {
+		return solid.AttestationData{}, false
+	}
+	return f.AttestationDataFn(headRoot, slot)
 }
 
 func (f *ForkChoiceStorageMock) AnchorSlot() uint64 {
 	return f.AnchorSlotVal
+}
+
+func (f *ForkChoiceStorageMock) AnchorRoot() common.Hash {
+	return f.AnchorRootVal
+}
+
+func (f *ForkChoiceStorageMock) AnchorExecutionPayloadBuilderIndex() (uint64, bool) {
+	return f.AnchorExecutionPayloadBuilderIndexVal, f.AnchorExecutionPayloadBuilderIndexOK
 }
 
 func (f *ForkChoiceStorageMock) Engine() execution_client.ExecutionEngine {
@@ -218,15 +350,44 @@ func (f *ForkChoiceStorageMock) FinalizedSlot() uint64 {
 }
 
 func (f *ForkChoiceStorageMock) GetEth1Hash(eth2Root common.Hash) common.Hash {
-	panic("implement me")
+	if f.Eth1Hashes != nil {
+		return f.Eth1Hashes[eth2Root]
+	}
+	return common.Hash{}
+}
+
+func (f *ForkChoiceStorageMock) GetFinalizedExecutionHash(eth2Root common.Hash) common.Hash {
+	return f.GetEth1Hash(eth2Root)
 }
 
 func (f *ForkChoiceStorageMock) GetHead(_ *state.CachingBeaconState) (common.Hash, uint64, error) {
 	return f.HeadVal, f.HeadSlotVal, nil
 }
 
+func (f *ForkChoiceStorageMock) HeadStateHasTargetShuffling(*state.CachingBeaconState, common.Hash, solid.Checkpoint) bool {
+	return !f.HeadLacksTargetShuffling
+}
+
+func (f *ForkChoiceStorageMock) TargetBeaconCommittee(target solid.Checkpoint, slot, committeeIndex uint64, claimBuild func() bool) ([]uint64, uint64, error) {
+	if f.TargetBeaconCommitteeFn == nil {
+		return nil, 0, errors.New("target beacon committee not implemented")
+	}
+	return f.TargetBeaconCommitteeFn(target, slot, committeeIndex, claimBuild)
+}
+
 func (f *ForkChoiceStorageMock) HighestSeen() uint64 {
 	return f.HighestSeenVal
+}
+
+func (f *ForkChoiceStorageMock) HasImportedDescendantAfter(root common.Hash, slot uint64) bool {
+	if f.HasImportedDescendantAfterFn != nil {
+		return f.HasImportedDescendantAfterFn(root, slot)
+	}
+	return f.HighestImportedDescendantVal > slot
+}
+
+func (f *ForkChoiceStorageMock) BlockProcessing() bool {
+	return f.BlockProcessingVal
 }
 
 func (f *ForkChoiceStorageMock) JustifiedCheckpoint() solid.Checkpoint {
@@ -241,11 +402,44 @@ func (f *ForkChoiceStorageMock) ProposerBoostRoot() common.Hash {
 	return f.ProposerBoostRootVal
 }
 
-func (f *ForkChoiceStorageMock) GetStateAtBlockRoot(
-	blockRoot common.Hash,
-	alwaysCopy bool,
-) (*state.CachingBeaconState, error) {
-	return f.StateAtBlockRootVal[blockRoot], nil
+func (f *ForkChoiceStorageMock) GetStateAtBlockRoot(blockRoot common.Hash) (*state.CachingBeaconState, error) {
+	if f.GetStateAtBlockRootFn != nil {
+		return f.GetStateAtBlockRootFn(blockRoot)
+	}
+	st := f.StateAtBlockRootVal[blockRoot]
+	if st == nil {
+		return nil, nil
+	}
+	return st.Copy()
+}
+
+func (f *ForkChoiceStorageMock) GetOwnedStateAtBlockRoot(blockRoot common.Hash) (*state.CachingBeaconState, error) {
+	return f.GetStateAtBlockRoot(blockRoot)
+}
+
+func (f *ForkChoiceStorageMock) ViewStateAtBlockRoot(blockRoot common.Hash, fn func(*state.CachingBeaconState) error) error {
+	if f.ViewStateAtBlockRootFn != nil {
+		return f.ViewStateAtBlockRootFn(blockRoot, fn)
+	}
+	blockState, err := f.GetStateAtBlockRoot(blockRoot)
+	if err != nil {
+		return err
+	}
+	if blockState == nil {
+		return errors.New("block state not found")
+	}
+	return fn(blockState)
+}
+
+func (f *ForkChoiceStorageMock) ViewCurrentStateAtBlockRoot(blockRoot common.Hash, fn func(*state.CachingBeaconState) error) error {
+	if f.ViewCurrentStateAtBlockRootFn != nil {
+		return f.ViewCurrentStateAtBlockRootFn(blockRoot, fn)
+	}
+	blockState := f.StateAtBlockRootVal[blockRoot]
+	if blockState == nil {
+		return nil
+	}
+	return fn(blockState)
 }
 
 func (f *ForkChoiceStorageMock) GetFinalityCheckpoints(
@@ -299,10 +493,188 @@ func (f *ForkChoiceStorageMock) OnBlock(
 	fullValidation bool,
 	checkDataAvaiability bool,
 ) error {
+	return f.OnBlockErr
+}
+
+func (f *ForkChoiceStorageMock) OnBlockWithEquivocationCheck(
+	ctx context.Context,
+	block *cltypes.SignedBeaconBlock,
+	newPayload bool,
+	fullValidation bool,
+	checkDataAvaiability bool,
+) error {
+	if block != nil && block.Block != nil {
+		root, err := block.Block.HashSSZ()
+		if err != nil {
+			return err
+		}
+		if f.HasBlockEquivocation(block.Block.Slot, block.Block.ProposerIndex, root) {
+			return errors.New("block conflicts with a previously validated proposal")
+		}
+	}
+	return f.OnBlock(ctx, block, newPayload, fullValidation, checkDataAvaiability)
+}
+
+func (f *ForkChoiceStorageMock) ValidateBlockForPublishing(block *cltypes.SignedBeaconBlock, rejectEquivocation bool) error {
+	if f.ValidateBlockForPublishingFn != nil {
+		return f.ValidateBlockForPublishingFn(block, rejectEquivocation)
+	}
+	if block == nil || block.Block == nil {
+		return fmt.Errorf("%w: missing beacon block", forkchoice.ErrBlockInvalid)
+	}
+	root, err := block.Block.HashSSZ()
+	if err != nil {
+		return fmt.Errorf("%w: %w", forkchoice.ErrBlockInvalid, err)
+	}
+	if _, known := f.Headers[root]; known {
+		stored, ok := f.Blocks[root]
+		if !ok || stored == nil || stored.Block == nil || stored.Version() != block.Version() || stored.Signature != block.Signature {
+			return fmt.Errorf("%w: published block does not match the validated block for its root", forkchoice.ErrBlockInvalid)
+		}
+	} else if block.Block.Slot <= f.FinalizedSlotVal {
+		return fmt.Errorf("%w: block is at or below the finalized validation horizon", forkchoice.ErrBlockInvalid)
+	}
 	return nil
 }
 
-func (f *ForkChoiceStorageMock) OnTick(time uint64) {
+func (f *ForkChoiceStorageMock) OnExecutionPayload(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, checkBlobData, validatePayload bool) error {
+	f.envelopesMu.Lock()
+	f.OnExecutionPayloadCalled = true
+	f.OnExecutionPayloadCheckBlobData = checkBlobData
+	f.envelopesMu.Unlock()
+	if f.OnExecutionPayloadFn != nil {
+		return f.OnExecutionPayloadFn(ctx, signedEnvelope, checkBlobData, validatePayload)
+	}
+	f.envelopesMu.Lock()
+	defer f.envelopesMu.Unlock()
+	if f.OnExecutionPayloadErr == nil && signedEnvelope != nil && signedEnvelope.Message != nil {
+		if f.Envelopes == nil {
+			f.Envelopes = make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope)
+		}
+		f.Envelopes[signedEnvelope.Message.BeaconBlockRoot] = signedEnvelope
+	}
+	return f.OnExecutionPayloadErr
+}
+
+func (f *ForkChoiceStorageMock) OnExecutionPayloadAt(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, checkBlobData, validatePayload bool, receivedAt time.Time) error {
+	if f.OnExecutionPayloadAtFn != nil {
+		return f.OnExecutionPayloadAtFn(ctx, signedEnvelope, checkBlobData, validatePayload, receivedAt)
+	}
+	return f.OnExecutionPayload(ctx, signedEnvelope, checkBlobData, validatePayload)
+}
+
+func (f *ForkChoiceStorageMock) ValidateExecutionPayloadEnvelope(_ context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error {
+	return f.ValidateExecutionPayloadEnvelopeErr
+}
+
+func (f *ForkChoiceStorageMock) ValidateExecutionPayloadEnvelopeForGossip(envelope *cltypes.SignedExecutionPayloadEnvelope) error {
+	if f.ValidateExecutionPayloadEnvelopeForGossipFunc != nil {
+		return f.ValidateExecutionPayloadEnvelopeForGossipFunc(envelope)
+	}
+	f.ValidateExecutionPayloadEnvelopeForGossipCalled = true
+	return f.ValidateExecutionPayloadEnvelopeForGossipErr
+}
+
+func (f *ForkChoiceStorageMock) QueuePendingExecutionPayloadEnvelope(envelope *cltypes.SignedExecutionPayloadEnvelope, _ time.Time) {
+	f.executionPayloadMu.Lock()
+	defer f.executionPayloadMu.Unlock()
+	if f.PendingEnvelopeRoots == nil {
+		f.PendingEnvelopeRoots = make(map[common.Hash]struct{})
+	}
+	f.PendingEnvelopeRoots[envelope.Message.BeaconBlockRoot] = struct{}{}
+}
+
+func (f *ForkChoiceStorageMock) RecordExecutionPayloadArrival(blockRoot common.Hash, _ uint64, receivedAt time.Time) {
+	f.executionPayloadMu.Lock()
+	defer f.executionPayloadMu.Unlock()
+	if f.ExecutionPayloadReceivedAt == nil {
+		f.ExecutionPayloadReceivedAt = make(map[common.Hash]time.Time)
+	}
+	if _, ok := f.ExecutionPayloadReceivedAt[blockRoot]; !ok {
+		f.ExecutionPayloadReceivedAt[blockRoot] = receivedAt
+	}
+}
+
+func (f *ForkChoiceStorageMock) ClaimExecutionPayloadEnvelopeForGossip(
+	ctx context.Context,
+	beaconBlockRoot common.Hash,
+	builderIndex uint64,
+) (forkchoice.ExecutionPayloadEnvelopeAdmissionToken, error) {
+	if f.ClaimExecutionPayloadEnvelopeForGossipFunc != nil {
+		return f.ClaimExecutionPayloadEnvelopeForGossipFunc(ctx, beaconBlockRoot, builderIndex)
+	}
+	if err := ctx.Err(); err != nil {
+		return forkchoice.ExecutionPayloadEnvelopeAdmissionToken{}, err
+	}
+	token, err := f.EnvelopeGossipAdmissions.Claim(ctx, beaconBlockRoot, builderIndex)
+	if err != nil {
+		return forkchoice.ExecutionPayloadEnvelopeAdmissionToken{}, err
+	}
+	if f.HasEnvelope(beaconBlockRoot) {
+		f.EnvelopeGossipAdmissions.Finish(token, true)
+		return forkchoice.ExecutionPayloadEnvelopeAdmissionToken{}, forkchoice.ErrExecutionPayloadEnvelopeLookupRequired
+	}
+	if err := ctx.Err(); err != nil {
+		f.EnvelopeGossipAdmissions.Finish(token, false)
+		return forkchoice.ExecutionPayloadEnvelopeAdmissionToken{}, err
+	}
+	return token, nil
+}
+
+func (f *ForkChoiceStorageMock) TryClaimExecutionPayloadEnvelopeForGossip(
+	beaconBlockRoot common.Hash,
+	builderIndex uint64,
+) (forkchoice.ExecutionPayloadEnvelopeAdmissionToken, error) {
+	if f.TryClaimExecutionPayloadEnvelopeForGossipFunc != nil {
+		return f.TryClaimExecutionPayloadEnvelopeForGossipFunc(beaconBlockRoot, builderIndex)
+	}
+	if f.HasEnvelope(beaconBlockRoot) {
+		return forkchoice.ExecutionPayloadEnvelopeAdmissionToken{}, forkchoice.ErrExecutionPayloadEnvelopeLookupRequired
+	}
+	token, err := f.EnvelopeGossipAdmissions.TryClaim(beaconBlockRoot, builderIndex)
+	if err != nil {
+		return forkchoice.ExecutionPayloadEnvelopeAdmissionToken{}, err
+	}
+	if f.HasEnvelope(beaconBlockRoot) {
+		f.EnvelopeGossipAdmissions.Finish(token, true)
+		return forkchoice.ExecutionPayloadEnvelopeAdmissionToken{}, forkchoice.ErrExecutionPayloadEnvelopeLookupRequired
+	}
+	return token, nil
+}
+
+func (f *ForkChoiceStorageMock) FinishExecutionPayloadEnvelopeForGossip(
+	token forkchoice.ExecutionPayloadEnvelopeAdmissionToken,
+	seen bool,
+) {
+	f.EnvelopeGossipAdmissions.Finish(token, seen)
+}
+
+func (f *ForkChoiceStorageMock) ForgetExecutionPayloadEnvelopeForGossip(beaconBlockRoot common.Hash, builderIndex uint64) {
+	f.EnvelopeGossipAdmissions.ForgetSeen(beaconBlockRoot, builderIndex)
+}
+
+func (f *ForkChoiceStorageMock) ValidateExecutionPayloadEnvelopeForConsensus(_ context.Context, _ *cltypes.SignedExecutionPayloadEnvelope) error {
+	f.ValidateExecutionPayloadEnvelopeForConsensusCalled = true
+	return f.ValidateExecutionPayloadEnvelopeForConsensusErr
+}
+
+func (f *ForkChoiceStorageMock) ApplyLocalSelfBuildEnvelope(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error {
+	return f.ApplyLocalSelfBuildEnvelopeErr
+}
+
+func (f *ForkChoiceStorageMock) StoreAnchorEnvelope(blockRoot common.Hash, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error {
+	return nil
+}
+
+func (f *ForkChoiceStorageMock) OnGossipPayloadAttestationMessage(ctx context.Context, msg *cltypes.PayloadAttestationMessage, verifySignature forkchoice.PayloadAttestationSignatureVerifier) error {
+	return nil
+}
+
+func (f *ForkChoiceStorageMock) OnTick(timeMs uint64) {
+	if f.OnTickFn != nil {
+		f.OnTickFn(timeMs)
+		return
+	}
 	panic("implement me")
 }
 
@@ -319,15 +691,40 @@ func (f *ForkChoiceStorageMock) RandaoMixes(blockRoot common.Hash, out solid.Has
 }
 
 func (f *ForkChoiceStorageMock) LowestAvailableSlot() uint64 {
+	if f.LowestAvailableSlotVal != nil {
+		return *f.LowestAvailableSlotVal
+	}
 	return f.FinalizedSlotVal
 }
 
 func (f *ForkChoiceStorageMock) Participation(epoch uint64) (*solid.ParticipationBitList, bool) {
-	return f.ParticipationVal, f.ParticipationVal != nil
+	if f.ParticipationVal == nil {
+		return nil, false
+	}
+	p, ok := f.ParticipationVal[epoch]
+	return p, ok
 }
 
 func (f *ForkChoiceStorageMock) ForkNodes() []forkchoice.ForkNode {
 	return f.WeightsMock
+}
+
+func (f *ForkChoiceStorageMock) HasBlockChildAtOrAfter(blockRoot common.Hash, slot uint64) bool {
+	for _, header := range f.Headers {
+		if header != nil && header.ParentRoot == blockRoot && header.Slot >= slot {
+			return true
+		}
+	}
+	return false
+}
+
+func (f *ForkChoiceStorageMock) HasBlockEquivocation(slot, proposerIndex uint64, exceptRoot common.Hash) bool {
+	for root, header := range f.Headers {
+		if root != exceptRoot && header != nil && header.Slot == slot && header.ProposerIndex == proposerIndex {
+			return true
+		}
+	}
+	return false
 }
 
 func (f *ForkChoiceStorageMock) Synced() bool {
@@ -360,6 +757,119 @@ func (f *ForkChoiceStorageMock) GetHeader(
 	return f.Headers[blockRoot], f.Headers[blockRoot] != nil
 }
 
+func (f *ForkChoiceStorageMock) GetBlock(
+	blockRoot common.Hash,
+) (*cltypes.SignedBeaconBlock, bool) {
+	return f.Blocks[blockRoot], f.Blocks[blockRoot] != nil
+}
+
+func (f *ForkChoiceStorageMock) ExecutionPayloadApplyInFlight(blockRoot common.Hash) bool {
+	_, ok := f.ApplyInFlightRoots[blockRoot]
+	return ok
+}
+
+func (f *ForkChoiceStorageMock) PayloadVotesRuleOutFull(blockRoot common.Hash) bool {
+	_, ok := f.VotesRuleOutFullRoots[blockRoot]
+	return ok
+}
+
+func (f *ForkChoiceStorageMock) HasPendingExecutionPayloadEnvelope(blockRoot common.Hash) bool {
+	f.executionPayloadMu.RLock()
+	defer f.executionPayloadMu.RUnlock()
+	_, ok := f.PendingEnvelopeRoots[blockRoot]
+	return ok
+}
+
+func (f *ForkChoiceStorageMock) RetryPendingExecutionPayloadEnvelope(ctx context.Context, blockRoot common.Hash) time.Time {
+	if f.RetryPendingEnvelopeFunc != nil {
+		return f.RetryPendingEnvelopeFunc(ctx, blockRoot)
+	}
+	return time.Time{}
+}
+
+func (f *ForkChoiceStorageMock) IsBlockInvalid(blockRoot common.Hash) bool {
+	_, ok := f.InvalidBlocks[blockRoot]
+	return ok
+}
+
+func (f *ForkChoiceStorageMock) HasEnvelope(blockRoot common.Hash) bool {
+	if f.HasEnvelopeFunc != nil {
+		return f.HasEnvelopeFunc(blockRoot)
+	}
+	f.envelopesMu.RLock()
+	defer f.envelopesMu.RUnlock()
+	_, ok := f.Envelopes[blockRoot]
+	return ok
+}
+
+func (f *ForkChoiceStorageMock) ExecutionPayloadReceivedBefore(blockRoot common.Hash, deadline time.Time) bool {
+	f.executionPayloadMu.RLock()
+	defer f.executionPayloadMu.RUnlock()
+	receivedAt, ok := f.ExecutionPayloadReceivedAt[blockRoot]
+	return ok && receivedAt.Before(deadline)
+}
+
+func (f *ForkChoiceStorageMock) SetEnvelope(blockRoot common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope) {
+	f.envelopesMu.Lock()
+	defer f.envelopesMu.Unlock()
+	if f.Envelopes == nil {
+		f.Envelopes = make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope)
+	}
+	f.Envelopes[blockRoot] = envelope
+}
+
+func (f *ForkChoiceStorageMock) DeleteEnvelope(blockRoot common.Hash) {
+	f.envelopesMu.Lock()
+	defer f.envelopesMu.Unlock()
+	delete(f.Envelopes, blockRoot)
+}
+
+func (f *ForkChoiceStorageMock) IsPayloadVerified(blockRoot common.Hash) bool {
+	if f.VerifiedPayloads == nil {
+		return false
+	}
+	return f.VerifiedPayloads[blockRoot]
+}
+
+func (f *ForkChoiceStorageMock) ReadEnvelopeFromDisk(blockRoot common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+	if f.ReadEnvelopeFromDiskFunc != nil {
+		return f.ReadEnvelopeFromDiskFunc(blockRoot)
+	}
+	f.envelopesMu.RLock()
+	defer f.envelopesMu.RUnlock()
+	return f.Envelopes[blockRoot], nil
+}
+
+func (f *ForkChoiceStorageMock) IsBlobDataAvailable(slot uint64, blockRoot common.Hash) bool {
+	return true
+}
+
+func (f *ForkChoiceStorageMock) GetHeadNode() (forkchoice.ForkChoiceNode, uint64, error) {
+	if f.GetHeadNodeFn != nil {
+		return f.GetHeadNodeFn()
+	}
+	return forkchoice.ForkChoiceNode{Root: f.HeadVal, PayloadStatus: f.HeadPayloadStatusVal}, f.HeadSlotVal, nil
+}
+
+func (f *ForkChoiceStorageMock) TryGetHeadNode() (forkchoice.ForkChoiceNode, bool) {
+	if f.TryGetHeadNodeFn != nil {
+		return f.TryGetHeadNodeFn()
+	}
+	head, _, err := f.GetHeadNode()
+	return head, err == nil
+}
+
+func (f *ForkChoiceStorageMock) ShouldExtendPayload(root common.Hash) bool {
+	return f.ShouldExtendPayloadVal
+}
+
+func (f *ForkChoiceStorageMock) ShouldBuildOnFull(head forkchoice.ForkChoiceNode, proposalSlot uint64) bool {
+	if f.ShouldBuildOnFullVal != nil {
+		return *f.ShouldBuildOnFullVal
+	}
+	return true
+}
+
 func (f *ForkChoiceStorageMock) GetBalances(blockRoot common.Hash) (solid.Uint64ListSSZ, error) {
 	panic("implement me")
 }
@@ -388,13 +898,6 @@ func (f *ForkChoiceStorageMock) GetCurrentParticipationIndicies(
 	panic("implement me")
 }
 
-func (f *ForkChoiceStorageMock) GetPublicKeyForValidator(
-	blockRoot common.Hash,
-	idx uint64,
-) (common.Bytes48, error) {
-	panic("implement me")
-}
-
 // func (f *ForkChoiceStorageMock) OnSignedContributionAndProof(signedContribution *cltypes.SignedContributionAndProof, test bool) error {
 // 	f.SyncContributionPool.AddSyncContribution(nil, signedContribution.Message.Contribution)
 // 	return nil
@@ -403,6 +906,7 @@ func (f *ForkChoiceStorageMock) GetPublicKeyForValidator(
 func (f *ForkChoiceStorageMock) AddPreverifiedBlobSidecar(msg *cltypes.BlobSidecar) error {
 	return nil
 }
+
 func (f *ForkChoiceStorageMock) ValidateOnAttestation(attestation *solid.Attestation) error {
 	panic("implement me")
 }
@@ -414,7 +918,7 @@ func (f *ForkChoiceStorageMock) ProcessAttestingIndicies(
 }
 
 func (f *ForkChoiceStorageMock) IsRootOptimistic(root common.Hash) bool {
-	return false
+	return f.IsRootOptimisticVal
 }
 
 func (f *ForkChoiceStorageMock) IsHeadOptimistic() bool {
@@ -422,17 +926,39 @@ func (f *ForkChoiceStorageMock) IsHeadOptimistic() bool {
 }
 
 func (f *ForkChoiceStorageMock) GetPendingConsolidations(blockRoot common.Hash) (*solid.ListSSZ[*solid.PendingConsolidation], bool) {
-	return nil, false
+	v, ok := f.PendingConsolidationsVal[blockRoot]
+	return v, ok
 }
 
 func (f *ForkChoiceStorageMock) GetPendingDeposits(blockRoot common.Hash) (*solid.ListSSZ[*solid.PendingDeposit], bool) {
-	return nil, false
+	v, ok := f.PendingDepositsVal[blockRoot]
+	return v, ok
 }
 
 func (f *ForkChoiceStorageMock) GetPendingPartialWithdrawals(blockRoot common.Hash) (*solid.ListSSZ[*solid.PendingPartialWithdrawal], bool) {
-	return nil, false
+	v, ok := f.PendingPartialWithdrawalsVal[blockRoot]
+	return v, ok
 }
 
 func (f *ForkChoiceStorageMock) GetProposerLookahead(slot uint64) (solid.Uint64VectorSSZ, bool) {
-	return nil, false
+	return f.ProposerLookaheadVal, f.ProposerLookaheadVal != nil
+}
+
+// GetRecentExecutionPayloadStatus returns the validation status of a recently validated execution payload.
+// [New in Gloas:EIP7732]
+func (f *ForkChoiceStorageMock) GetRecentExecutionPayloadStatus(executionBlockHash common.Hash) (execution_client.PayloadStatus, bool) {
+	status, ok := f.ExecutionPayloadStatusMap[executionBlockHash]
+	return status, ok
+}
+
+func (f *ForkChoiceStorageMock) GetRecentExecutionPayloadStatusByRoot(blockRoot common.Hash) (execution_client.PayloadStatus, bool) {
+	status, ok := f.PayloadStatusByRootMap[blockRoot]
+	return status, ok
+}
+
+// GetExecutionPayloadGasLimit returns the gas_limit of a recently validated execution payload.
+// [New in Gloas:EIP7732]
+func (f *ForkChoiceStorageMock) GetExecutionPayloadGasLimit(executionBlockHash common.Hash) (uint64, bool) {
+	gasLimit, ok := f.ExecutionPayloadGasLimitMap[executionBlockHash]
+	return gasLimit, ok
 }

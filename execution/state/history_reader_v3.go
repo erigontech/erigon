@@ -22,65 +22,135 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/order"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-var PrunedError = errors.New("old data not available due to pruning")
+var ErrPruned = errors.New("old data not available due to pruning")
 
-// HistoryReaderV3 Implements StateReader and StateWriter
+// HistoryReaderV3 implements StateReader and StateWriter. Reads chain from
+// most-recent to persisted: sd's as-of read (in-batch memory, the shared state cache, ttx) → ttx.GetAsOf (DB
+// history + snapshots). When sd is nil the reader serves strictly persisted history.
 type HistoryReaderV3 struct {
-	txNum       uint64
-	trace       bool
-	tracePrefix string
 	ttx         kv.TemporalTx
-	composite   []byte
+	sd          execctx.DomainReader
+	asOf        kv.AsOfGetter // ttx, or sd's as-of read bound to ttx; built on the first read
+	tracePrefix string
+	txNum       uint64
+	composite   [length.Addr + length.Hash]byte // reused storage lookup key (addr||slot)
+	addr        common.Address                  // reused account/code lookup key
+	trace       bool
 }
 
 func NewHistoryReaderV3(ttx kv.TemporalTx, txNum uint64) *HistoryReaderV3 {
-	return &HistoryReaderV3{composite: make([]byte, 20+32), ttx: ttx, txNum: txNum}
+	return &HistoryReaderV3{ttx: ttx, txNum: txNum}
+}
+
+// NewHistoryReaderV3WithSharedDomains is the in-batch variant used by the
+// parallel executor. Reads chain sd.GetAsOf (in-memory batch state) then
+// fall back to ttx.GetAsOf so a tx can see prior-tx writes from the same
+// batch that have not yet been flushed to the history index.
+func NewHistoryReaderV3WithSharedDomains(ttx kv.TemporalTx, sd execctx.DomainReader, txNum uint64) *HistoryReaderV3 {
+	return &HistoryReaderV3{ttx: ttx, sd: sd, txNum: txNum}
+}
+
+// getAsOf reads through sd's as-of read (in-batch memory, the shared state cache, then ttx). When sd is nil, or
+// sd.mem has inMemHistoryReads disabled, it falls through to ttx so the same reader type
+// serves both the in-batch and persisted-history modes.
+func (hr *HistoryReaderV3) getAsOf(domain kv.Domain, key []byte) (enc []byte, ok bool, err error) {
+	if hr.asOf == nil {
+		hr.asOf = hr.ttx
+		if hr.sd != nil {
+			hr.asOf = hr.sd.AsOfGetter(hr.ttx)
+		}
+	}
+	if enc, ok, err = hr.asOf.GetAsOf(domain, key, hr.txNum); hr.sd != nil && errors.Is(err, kv.ErrInMemHistoryDisabled) {
+		return hr.ttx.GetAsOf(domain, key, hr.txNum)
+	}
+	return enc, ok, err
 }
 
 func (hr *HistoryReaderV3) String() string {
 	return fmt.Sprintf("txNum:%d", hr.txNum)
 }
-func (hr *HistoryReaderV3) SetTx(tx kv.TemporalTx) { hr.ttx = tx }
+func (hr *HistoryReaderV3) SetTx(tx kv.TemporalTx) { hr.ttx, hr.asOf = tx, nil }
 func (hr *HistoryReaderV3) SetTxNum(txNum uint64)  { hr.txNum = txNum }
 func (hr *HistoryReaderV3) GetTxNum() uint64       { return hr.txNum }
+func (hr *HistoryReaderV3) ReadsHistory()          {}
 func (hr *HistoryReaderV3) SetTrace(trace bool, tracePrefix string) {
 	hr.trace = trace
 	hr.tracePrefix = tracePrefix
 }
 
-func (r *HistoryReaderV3) Trace() bool {
-	return r.trace
+func (hr *HistoryReaderV3) Trace() bool {
+	return hr.trace
 }
 
-func (r *HistoryReaderV3) TracePrefix() string {
-	return r.tracePrefix
+func (hr *HistoryReaderV3) TracePrefix() string {
+	return hr.tracePrefix
 }
 
-// Gets the txNum where Account, Storage and Code history begins.
-// If the node is an archive node all history will be available therefore
-// the result will be 0.
-//
-// For non-archive node old history files get deleted, so this number will vary
-// but the goal is to know where the historical data begins.
-func StateHistoryStartTxNum(ttx kv.TemporalTx) uint64 {
+var stateHistoryDomains = []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain}
+
+// StateHistoryStartTxNum returns a conservative lower bound for account, storage
+// and code history. A domain may start later because it had no earlier changes,
+// so the maximum would reject valid reads. The minimum can still admit a request
+// whose history is missing in another domain.
+func StateHistoryStartTxNum(ttx kv.TemporalTx) (uint64, error) {
 	dbg := ttx.Debug()
-	return min(
-		dbg.HistoryStartFrom(kv.AccountsDomain),
-		dbg.HistoryStartFrom(kv.StorageDomain),
-		dbg.HistoryStartFrom(kv.CodeDomain),
-	)
+	if dbg == nil {
+		return 0, errors.New("state history requires a temporal debug view")
+	}
+	var start uint64
+	for i, domain := range stateHistoryDomains {
+		domainStart, err := dbg.HistoryStartFrom(domain)
+		if err != nil {
+			return 0, err
+		}
+		if i == 0 || domainStart < start {
+			start = domainStart
+		}
+	}
+	return start, nil
+}
+
+// RequireStateHistory returns an ErrPruned error unless account, storage and
+// code history cover the txNums [fromTxNum, toTxNum). History held only in the
+// DB must show a record in that range: an empty history table reports no start,
+// and a history read then answers from the latest state.
+func RequireStateHistory(dbg kv.TemporalDebugTx, fromTxNum, toTxNum uint64) error {
+	for _, domain := range stateHistoryDomains {
+		if start := dbg.HistoryCoverageStart(domain); fromTxNum < start {
+			return fmt.Errorf("%w: %s history starts at txNum %d, requested %d", ErrPruned, domain, start, fromTxNum)
+		}
+	}
+	if fromTxNum < dbg.TxNumsInFiles(stateHistoryDomains...) {
+		return nil
+	}
+	for _, domain := range stateHistoryDomains {
+		recorded, err := dbg.HistoryRecordedInDB(domain, fromTxNum, toTxNum)
+		if err != nil {
+			return err
+		}
+		if recorded {
+			return nil
+		}
+	}
+	return fmt.Errorf("%w: no state history recorded in txNums [%d, %d)", ErrPruned, fromTxNum, toTxNum)
 }
 
 func (hr *HistoryReaderV3) DiscardReadList() {}
 
 func (hr *HistoryReaderV3) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
-	addressValue := address.Value()
-	enc, ok, err := hr.ttx.GetAsOf(kv.AccountsDomain, addressValue[:], hr.txNum)
+	return hr.ReadAccountByPlainAddr(address.Value())
+}
+
+func (hr *HistoryReaderV3) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {
+	hr.addr = address
+	enc, ok, err := hr.getAsOf(kv.AccountsDomain, hr.addr[:])
 	if err != nil || !ok || len(enc) == 0 {
 		if hr.trace {
 			fmt.Printf("%sReadAccountData (hist)[%x] => []\n", hr.tracePrefix, address)
@@ -92,9 +162,15 @@ func (hr *HistoryReaderV3) ReadAccountData(address accounts.Address) (*accounts.
 		return nil, fmt.Errorf("%sread account data (hist)(%x): %w", hr.tracePrefix, address, err)
 	}
 	if hr.trace {
-		fmt.Printf("%sReadAccountData (hist)[%x] => [nonce: %d, balance: %d, codeHash: %x]\n", hr.tracePrefix, address, a.Nonce, &a.Balance, a.CodeHash)
+		fmt.Printf("%sReadAccountData (hist)[%x] => [nonce: %d, balance: %s, codeHash: %x]\n", hr.tracePrefix, address, a.Nonce, a.Balance.String(), a.CodeHash)
 	}
 	return &a, nil
+}
+
+func (hr *HistoryReaderV3) HasAccount(address common.Address) (bool, error) {
+	hr.addr = address
+	enc, ok, err := hr.getAsOf(kv.AccountsDomain, hr.addr[:])
+	return ok && len(enc) > 0, err
 }
 
 // ReadAccountDataForDebug - is like ReadAccountData, but without adding key to `readList`.
@@ -106,8 +182,9 @@ func (hr *HistoryReaderV3) ReadAccountDataForDebug(address accounts.Address) (*a
 func (hr *HistoryReaderV3) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
 	addressValue := address.Value()
 	keyValue := key.Value()
-	hr.composite = append(append(hr.composite[:0], addressValue[:]...), keyValue[:]...)
-	enc, ok, err := hr.ttx.GetAsOf(kv.StorageDomain, hr.composite, hr.txNum)
+	copy(hr.composite[:length.Addr], addressValue[:])
+	copy(hr.composite[length.Addr:], keyValue[:])
+	enc, ok, err := hr.getAsOf(kv.StorageDomain, hr.composite[:])
 	if hr.trace {
 		fmt.Printf("%sReadAccountStorage (hist)[%x] [%x] => [%x]\n", hr.tracePrefix, address, key, enc)
 	}
@@ -118,42 +195,11 @@ func (hr *HistoryReaderV3) ReadAccountStorage(address accounts.Address, key acco
 	return res, ok, err
 }
 
-func (hr *HistoryReaderV3) HasStorage(address accounts.Address) (bool, error) {
-	addressValue := address.Value()
-	to, ok := kv.NextSubtree(addressValue[:])
-	if !ok {
-		to = nil
-	}
-
-	it, err := hr.ttx.RangeAsOf(kv.StorageDomain, addressValue[:], to, hr.txNum, order.Asc, kv.Unlim)
-	if err != nil {
-		return false, err
-	}
-
-	defer it.Close()
-	// Note: if a storage for an address gets deleted, the historical RangeAsOf will return its slots as empty values.
-	// If the address doesn't have any storage slots, then we return "no storage" immediately
-	// If the address has storage slots, but they are all empty, then we return "no storage"
-	// If we see a non-empty slot for then address, then we return "has storage" immediately
-	for it.HasNext() {
-		_, v, err := it.Next()
-		if err != nil {
-			return false, err
-		}
-
-		if len(v) != 0 {
-			return true, nil
-		}
-	}
-
-	return false, nil
-}
-
 func (hr *HistoryReaderV3) ReadAccountCode(address accounts.Address) ([]byte, error) {
 	//  must pass key2=Nil here: because Erigon4 does concatinate key1+key2 under the hood
-	//code, _, err := hr.ttx.GetAsOf(kv.CodeDomain, address.Bytes(), codeHash.Bytes(), hr.txNum)
-	addressValue := address.Value()
-	code, _, err := hr.ttx.GetAsOf(kv.CodeDomain, addressValue[:], hr.txNum)
+	// code, _, err := hr.ttx.GetAsOf(kv.CodeDomain, address.Bytes(), codeHash.Bytes(), hr.txNum)
+	hr.addr = address.Value()
+	code, _, err := hr.getAsOf(kv.CodeDomain, hr.addr[:])
 	if hr.trace {
 		lenc, cs := printCode(code)
 		fmt.Printf("%sReadAccountCode (hist)[%x] => [%d:%s]\n", hr.tracePrefix, address, lenc, cs)
@@ -162,14 +208,14 @@ func (hr *HistoryReaderV3) ReadAccountCode(address accounts.Address) ([]byte, er
 }
 
 func (hr *HistoryReaderV3) ReadAccountCodeSize(address accounts.Address) (int, error) {
-	addressValue := address.Value()
-	enc, _, err := hr.ttx.GetAsOf(kv.CodeDomain, addressValue[:], hr.txNum)
+	hr.addr = address.Value()
+	enc, _, err := hr.getAsOf(kv.CodeDomain, hr.addr[:])
 	return len(enc), err
 }
 
 func (hr *HistoryReaderV3) ReadAccountIncarnation(address accounts.Address) (uint64, error) {
-	addressValue := address.Value()
-	enc, ok, err := hr.ttx.GetAsOf(kv.AccountsDomain, addressValue[:], hr.txNum)
+	hr.addr = address.Value()
+	enc, ok, err := hr.getAsOf(kv.AccountsDomain, hr.addr[:])
 	if err != nil || !ok || len(enc) == 0 {
 		if hr.trace {
 			fmt.Printf("%sReadAccountIncarnation (hist)[%x] => [0]\n", hr.tracePrefix, address)

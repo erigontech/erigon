@@ -24,7 +24,6 @@ import (
 	"io"
 	"testing"
 
-	"github.com/golang/snappy"
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/protocol"
@@ -36,14 +35,14 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/sentinel/communication"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
-	"github.com/erigontech/erigon/cl/sentinel/peers"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/snappypool"
+	"github.com/erigontech/erigon/common/ssz"
 )
 
-var (
-	altairSlot = clparams.MainnetBeaconConfig.AltairForkEpoch*clparams.MainnetBeaconConfig.SlotsPerEpoch + 1
-)
+var altairSlot = clparams.MainnetBeaconConfig.AltairForkEpoch*clparams.MainnetBeaconConfig.SlotsPerEpoch + 1
 
 func TestLightClientOptimistic(t *testing.T) {
 	ctx := context.Background()
@@ -62,16 +61,15 @@ func TestLightClientOptimistic(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	peersPool := peers.NewPool(host)
 	beaconDB, indiciesDB := setupStore(t)
 
 	f := mock_services.NewForkChoiceStorageMock(t)
 
 	f.NewestLCUpdate = &cltypes.LightClientUpdate{
 		AttestedHeader:    cltypes.NewLightClientHeader(clparams.AltairVersion),
-		NextSyncCommittee: &solid.SyncCommittee{},
+		NextSyncCommittee: solid.NewSyncCommittee(),
 		SignatureSlot:     1234,
-		SyncAggregate:     &cltypes.SyncAggregate{},
+		SyncAggregate:     cltypes.NewSyncAggregate(),
 		FinalizedHeader:   cltypes.NewLightClientHeader(clparams.AltairVersion),
 		// 8 is fine as this is a test
 		FinalityBranch:          solid.NewHashVector(8),
@@ -86,12 +84,11 @@ func TestLightClientOptimistic(t *testing.T) {
 		beaconDB,
 		indiciesDB,
 		host,
-		peersPool,
 		&clparams.NetworkConfig{},
 		nil,
 		beaconCfg,
 		ethClock,
-		nil, f, nil, nil, nil, true,
+		nil, f, nil, nil, nil, true, nil,
 	)
 	c.Start()
 
@@ -108,7 +105,7 @@ func TestLightClientOptimistic(t *testing.T) {
 
 	optimistic := &cltypes.LightClientOptimisticUpdate{}
 
-	err = ssz_snappy.DecodeAndRead(stream, optimistic, &clparams.MainnetBeaconConfig, ethClock)
+	err = decodeAndRead(stream, optimistic, ethClock)
 	require.NoError(t, err)
 
 	require.Equal(t, f.NewestLCUpdate.AttestedHeader, optimistic.AttestedHeader)
@@ -133,16 +130,15 @@ func TestLightClientFinality(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	peersPool := peers.NewPool(host)
 	beaconDB, indiciesDB := setupStore(t)
 
 	f := mock_services.NewForkChoiceStorageMock(t)
 
 	f.NewestLCUpdate = &cltypes.LightClientUpdate{
 		AttestedHeader:          cltypes.NewLightClientHeader(clparams.AltairVersion),
-		NextSyncCommittee:       &solid.SyncCommittee{},
+		NextSyncCommittee:       solid.NewSyncCommittee(),
 		SignatureSlot:           altairSlot,
-		SyncAggregate:           &cltypes.SyncAggregate{},
+		SyncAggregate:           cltypes.NewSyncAggregate(),
 		FinalizedHeader:         cltypes.NewLightClientHeader(clparams.AltairVersion),
 		FinalityBranch:          solid.NewHashVector(cltypes.FinalizedBranchSize),
 		NextSyncCommitteeBranch: solid.NewHashVector(cltypes.SyncCommitteeBranchSize),
@@ -156,12 +152,11 @@ func TestLightClientFinality(t *testing.T) {
 		beaconDB,
 		indiciesDB,
 		host,
-		peersPool,
 		&clparams.NetworkConfig{},
 		nil,
 		beaconCfg,
 		ethClock,
-		nil, f, nil, nil, nil, true,
+		nil, f, nil, nil, nil, true, nil,
 	)
 	c.Start()
 
@@ -178,7 +173,7 @@ func TestLightClientFinality(t *testing.T) {
 
 	got := &cltypes.LightClientFinalityUpdate{}
 
-	err = ssz_snappy.DecodeAndRead(stream, got, &clparams.MainnetBeaconConfig, ethClock)
+	err = decodeAndRead(stream, got, ethClock)
 	require.NoError(t, err)
 
 	require.Equal(t, got.AttestedHeader, f.NewestLCUpdate.AttestedHeader)
@@ -206,16 +201,15 @@ func TestLightClientBootstrap(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	peersPool := peers.NewPool(host)
 	beaconDB, indiciesDB := setupStore(t)
 
 	f := mock_services.NewForkChoiceStorageMock(t)
 
 	f.NewestLCUpdate = &cltypes.LightClientUpdate{
 		AttestedHeader:          cltypes.NewLightClientHeader(clparams.AltairVersion),
-		NextSyncCommittee:       &solid.SyncCommittee{},
+		NextSyncCommittee:       solid.NewSyncCommittee(),
 		SignatureSlot:           altairSlot,
-		SyncAggregate:           &cltypes.SyncAggregate{},
+		SyncAggregate:           cltypes.NewSyncAggregate(),
 		FinalizedHeader:         cltypes.NewLightClientHeader(clparams.AltairVersion),
 		FinalityBranch:          solid.NewHashVector(cltypes.FinalizedBranchSize),
 		NextSyncCommitteeBranch: solid.NewHashVector(cltypes.SyncCommitteeBranchSize),
@@ -224,7 +218,7 @@ func TestLightClientBootstrap(t *testing.T) {
 	reqRoot := common.Hash{1, 2, 3}
 	f.LightClientBootstraps[reqRoot] = &cltypes.LightClientBootstrap{
 		Header:                     cltypes.NewLightClientHeader(clparams.AltairVersion),
-		CurrentSyncCommittee:       &solid.SyncCommittee{1, 2, 3, 5, 6},
+		CurrentSyncCommittee:       solid.NewSyncCommittee(),
 		CurrentSyncCommitteeBranch: solid.NewHashVector(cltypes.SyncCommitteeBranchSize),
 	}
 	f.LightClientBootstraps[reqRoot].Header.Beacon.Slot = altairSlot
@@ -234,12 +228,11 @@ func TestLightClientBootstrap(t *testing.T) {
 		beaconDB,
 		indiciesDB,
 		host,
-		peersPool,
 		&clparams.NetworkConfig{},
 		nil,
 		beaconCfg,
 		ethClock,
-		nil, f, nil, nil, nil, true,
+		nil, f, nil, nil, nil, true, nil,
 	)
 	c.Start()
 
@@ -252,7 +245,7 @@ func TestLightClientBootstrap(t *testing.T) {
 	}
 	require.NoError(t, err)
 
-	reqData := common.Copy(reqBuf.Bytes())
+	reqData := bytes.Clone(reqBuf.Bytes())
 	_, err = stream.Write(reqData)
 	require.NoError(t, err)
 
@@ -263,7 +256,7 @@ func TestLightClientBootstrap(t *testing.T) {
 
 	got := &cltypes.LightClientBootstrap{}
 
-	err = ssz_snappy.DecodeAndRead(stream, got, &clparams.MainnetBeaconConfig, ethClock)
+	err = decodeAndRead(stream, got, ethClock)
 	require.NoError(t, err)
 
 	expected := f.LightClientBootstraps[reqRoot]
@@ -289,40 +282,30 @@ func TestLightClientUpdates(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	peersPool := peers.NewPool(host)
 	beaconDB, indiciesDB := setupStore(t)
 
 	f := mock_services.NewForkChoiceStorageMock(t)
 	ethClock := getEthClock(t)
 
-	up := &cltypes.LightClientUpdate{
-		AttestedHeader:          cltypes.NewLightClientHeader(clparams.AltairVersion),
-		NextSyncCommittee:       &solid.SyncCommittee{},
-		SignatureSlot:           altairSlot,
-		SyncAggregate:           &cltypes.SyncAggregate{},
-		FinalizedHeader:         cltypes.NewLightClientHeader(clparams.AltairVersion),
-		FinalityBranch:          solid.NewHashVector(cltypes.FinalizedBranchSize),
-		NextSyncCommitteeBranch: solid.NewHashVector(cltypes.SyncCommitteeBranchSize),
-	}
-	up.AttestedHeader.Beacon.Slot = altairSlot
+	_, beaconCfg := clparams.GetConfigsByNetwork(1)
+
 	// just some stupid randomization
 	for i := 1; i < 5; i++ {
-		upC := *up
+		upC := cltypes.NewLightClientUpdate(clparams.AltairVersion, beaconCfg)
+		upC.AttestedHeader.Beacon.Slot = altairSlot
 		upC.SignatureSlot = uint64(i)
-		f.LCUpdates[uint64(i)] = &upC
+		f.LCUpdates[uint64(i)] = upC
 	}
-	_, beaconCfg := clparams.GetConfigsByNetwork(1)
 	c := NewConsensusHandlers(
 		ctx,
 		beaconDB,
 		indiciesDB,
 		host,
-		peersPool,
 		&clparams.NetworkConfig{},
 		nil,
 		beaconCfg,
 		ethClock,
-		nil, f, nil, nil, nil, true,
+		nil, f, nil, nil, nil, true, nil,
 	)
 	c.Start()
 
@@ -335,7 +318,7 @@ func TestLightClientUpdates(t *testing.T) {
 	}
 	require.NoError(t, err)
 
-	reqData := common.Copy(reqBuf.Bytes())
+	reqData := bytes.Clone(reqBuf.Bytes())
 	_, err = stream.Write(reqData)
 	require.NoError(t, err)
 
@@ -348,23 +331,25 @@ func TestLightClientUpdates(t *testing.T) {
 	_ = got
 	expectedCount := 1
 	currentPeriod := 1
-	for i := 0; i < expectedCount; i++ {
+	sr := snappypool.Reader(stream)
+	defer snappypool.PutReader(sr)
+	for range expectedCount {
 		forkDigest := make([]byte, 4)
 
 		_, err := stream.Read(forkDigest)
 		if err != nil {
-			if err == io.EOF {
+			if err == io.EOF { //nolint:errorlint // intentional bare sentinel check
 				t.Fatal("Stream is empty")
 			} else {
 				require.NoError(t, err)
 			}
 		}
 
-		encodedLn, _, err := ssz_snappy.ReadUvarint(stream)
+		encodedLn, err := ssz_snappy.ReadUvarint(stream)
 		require.NoError(t, err)
 
 		raw := make([]byte, encodedLn)
-		sr := snappy.NewReader(stream)
+		sr.Reset(stream)
 		bytesRead := 0
 		for bytesRead < int(encodedLn) {
 			n, err := sr.Read(raw[bytesRead:])
@@ -383,7 +368,7 @@ func TestLightClientUpdates(t *testing.T) {
 			require.NoError(t, err)
 		}
 
-		update := cltypes.NewLightClientUpdate(version)
+		update := cltypes.NewLightClientUpdate(version, beaconCfg)
 		if err = update.DecodeSSZ(raw, int(version)); err != nil {
 			require.NoError(t, err)
 			return
@@ -391,37 +376,25 @@ func TestLightClientUpdates(t *testing.T) {
 		require.Equal(t, f.LCUpdates[uint64(currentPeriod)], update)
 		currentPeriod++
 
-		stream.Read(make([]byte, 1))
+		if _, err := stream.Read(make([]byte, 1)); err != nil && err != io.EOF { //nolint:errorlint // intentional bare sentinel check
+			require.NoError(t, err)
+		}
 	}
 
 	_, err = stream.Read(make([]byte, 1))
-	if err != io.EOF {
+	if err != io.EOF { //nolint:errorlint // intentional bare sentinel check
 		t.Fatal("Stream is not empty")
 	}
-
 }
 
-// BenchmarkLightClientPrefixConstruction benchmarks the prefix construction
-// for light client responses, comparing the optimized version (stack allocation)
-// against the old version (heap allocation with append).
-func BenchmarkLightClientPrefixConstruction(b *testing.B) {
-	forkDigest := common.Bytes4{0xAA, 0xBB, 0xCC, 0xDD}
-
-	b.Run("Optimized", func(b *testing.B) {
-		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
-			var prefix [5]byte
-			prefix[0] = SuccessfulResponsePrefix
-			copy(prefix[1:], forkDigest[:])
-			_ = prefix
-		}
-	})
-
-	b.Run("Old", func(b *testing.B) {
-		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
-			prefix := append([]byte{SuccessfulResponsePrefix}, forkDigest[:]...)
-			_ = prefix
-		}
-	})
+func decodeAndRead(r io.Reader, val ssz.EncodableSSZ, ethClock eth_clock.EthereumClock) error {
+	var forkDigest [4]byte
+	if _, err := io.ReadFull(r, forkDigest[:]); err != nil {
+		return err
+	}
+	version, err := ethClock.StateVersionByForkDigest(forkDigest)
+	if err != nil {
+		return err
+	}
+	return ssz_snappy.DecodeAndReadNoForkDigest(r, val, version)
 }

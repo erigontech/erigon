@@ -17,9 +17,8 @@
 package rpctest
 
 import (
-	"bufio"
+	"errors"
 	"fmt"
-	"os"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -29,62 +28,40 @@ import (
 // but also can be used for comparing RPCDaemon with Geth
 // parameters:
 // needCompare - if false - doesn't call Erigon and doesn't compare responses
-func BenchTraceCallMany(erigonURL, oeURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string, errorFile string) error {
+func BenchTraceCallMany(erigonURL, oeURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string, errorFile string) (err error) {
 	setRoutes(erigonURL, oeURL)
 
-	var rec *bufio.Writer
-	if recordFile != "" {
-		f, err := os.Create(recordFile)
-		if err != nil {
-			return fmt.Errorf("Cannot create file %s for recording: %v\n", recordFile, err)
-		}
-		defer f.Close()
-		rec = bufio.NewWriter(f)
-		defer rec.Flush()
+	rec, errs, cleanup, err := openWriters(recordFile, errorFile)
+	if err != nil {
+		return err
 	}
-	var errs *bufio.Writer
-	if errorFile != "" {
-		ferr, err := os.Create(errorFile)
-		if err != nil {
-			return fmt.Errorf("Cannot create file %s for error output: %v\n", errorFile, err)
-		}
-		defer ferr.Close()
-		errs = bufio.NewWriter(ferr)
-		defer errs.Flush()
-	}
+	defer func() { err = errors.Join(err, cleanup()) }()
 
-	var res CallResult
 	reqGen := &RequestGenerator{}
 
-	var blockNumber EthBlockNumber
-	res = reqGen.Erigon("eth_blockNumber", reqGen.blockNumber(), &blockNumber)
-	if res.Err != nil {
-		return fmt.Errorf("Could not get block number: %v\n", res.Err)
+	lastBlock, err := reqGen.latestBlockNumber()
+	if err != nil {
+		return err
 	}
-	if blockNumber.Error != nil {
-		return fmt.Errorf("Error getting block number: %d %s\n", blockNumber.Error.Code, blockNumber.Error.Message)
-	}
-	fmt.Printf("Last block: %d\n", blockNumber.Number)
+	fmt.Printf("Last block: %d\n", lastBlock)
 	for bn := blockFrom; bn <= blockTo; bn++ {
-
-		var b EthBlockByNumber
-		res = reqGen.Erigon("eth_getBlockByNumber", reqGen.getBlockByNumber(bn, true /* withTxs */), &b)
-		if res.Err != nil {
-			return fmt.Errorf("Could not retrieve block (Erigon) %d: %v\n", bn, res.Err)
+		b, skip, err := fetchBlock(reqGen, bn, false, nil)
+		if err != nil {
+			return err
 		}
-		if b.Error != nil {
-			return fmt.Errorf("Error retrieving block (Erigon): %d %s\n", b.Error.Code, b.Error.Message)
+		if skip {
+			continue
 		}
 
 		n := len(b.Result.Transactions)
 		from := make([]common.Address, n)
 		to := make([]*common.Address, n)
-		gas := make([]*hexutil.Big, n)
-		gasPrice := make([]*hexutil.Big, n)
-		value := make([]*hexutil.Big, n)
+		gas := make([]*hexutil.U256, n)
+		gasPrice := make([]*hexutil.U256, n)
+		value := make([]*hexutil.U256, n)
 		data := make([]hexutil.Bytes, n)
 
-		for i := 0; i < n; i++ {
+		for i := range n {
 			tx := b.Result.Transactions[i]
 			from[i] = tx.From
 			to[i] = tx.To

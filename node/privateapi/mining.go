@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"sync"
 
 	"google.golang.org/protobuf/types/known/emptypb"
 
@@ -28,8 +27,8 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
-	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/gointerfaces/grpcutil"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
@@ -52,6 +51,12 @@ type MiningServer struct {
 type IsMining interface {
 	IsMining() bool
 }
+
+// NoMining reports that this process never mines. The standalone txpool and
+// rpcdaemon run without a miner.
+type NoMining struct{}
+
+func (NoMining) IsMining() bool { return false }
 
 func NewMiningServer(ctx context.Context, isMining IsMining, ethashApi *ethash.API, logger log.Logger) *MiningServer {
 	return &MiningServer{ctx: ctx, isMining: isMining, ethash: ethashApi, logger: logger}
@@ -105,31 +110,11 @@ func (s *MiningServer) Mining(_ context.Context, req *txpoolproto.MiningRequest)
 }
 
 func (s *MiningServer) OnPendingLogs(req *txpoolproto.OnPendingLogsRequest, reply txpoolproto.Mining_OnPendingLogsServer) error {
-	remove := s.pendingLogsStreams.Add(reply)
-	defer remove()
-	<-reply.Context().Done()
-	return reply.Context().Err()
-}
-
-func (s *MiningServer) BroadcastPendingLogs(l types.Logs) error {
-	b, err := rlp.EncodeToBytes(l)
-	if err != nil {
-		return err
-	}
-	reply := &txpoolproto.OnPendingBlockReply{RplBlock: b}
-	s.pendingBlockStreams.Broadcast(reply, s.logger)
-	return nil
+	return s.pendingLogsStreams.Subscribe(s.ctx, reply)
 }
 
 func (s *MiningServer) OnPendingBlock(req *txpoolproto.OnPendingBlockRequest, reply txpoolproto.Mining_OnPendingBlockServer) error {
-	remove := s.pendingBlockStreams.Add(reply)
-	defer remove()
-	select {
-	case <-s.ctx.Done():
-		return nil
-	case <-reply.Context().Done():
-		return nil
-	}
+	return s.pendingBlockStreams.Subscribe(s.ctx, reply)
 }
 
 func (s *MiningServer) BroadcastPendingBlock(block *types.Block) error {
@@ -143,14 +128,11 @@ func (s *MiningServer) BroadcastPendingBlock(block *types.Block) error {
 }
 
 func (s *MiningServer) OnMinedBlock(req *txpoolproto.OnMinedBlockRequest, reply txpoolproto.Mining_OnMinedBlockServer) error {
-	remove := s.minedBlockStreams.Add(reply)
-	defer remove()
-	<-reply.Context().Done()
-	return reply.Context().Err()
+	return s.minedBlockStreams.Subscribe(s.ctx, reply)
 }
 
 func (s *MiningServer) BroadcastMinedBlock(block *types.Block) error {
-	s.logger.Debug("BroadcastMinedBlock", "block hash", block.Hash(), "block number", block.Number(), "root", block.Root(), "gas", block.GasUsed())
+	s.logger.Debug("BroadcastMinedBlock", "blockHash", block.Hash(), "blockNum", block.Number(), "root", block.Root(), "gas", block.GasUsed())
 	var buf bytes.Buffer
 	if err := block.EncodeRLP(&buf); err != nil {
 		return err
@@ -161,136 +143,10 @@ func (s *MiningServer) BroadcastMinedBlock(block *types.Block) error {
 }
 
 // MinedBlockStreams - it's safe to use this class as non-pointer
-type MinedBlockStreams struct {
-	chans map[uint]txpoolproto.Mining_OnMinedBlockServer
-	id    uint
-	mu    sync.Mutex
-}
-
-func (s *MinedBlockStreams) Add(stream txpoolproto.Mining_OnMinedBlockServer) (remove func()) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.chans == nil {
-		s.chans = make(map[uint]txpoolproto.Mining_OnMinedBlockServer)
-	}
-	s.id++
-	id := s.id
-	s.chans[id] = stream
-	return func() { s.remove(id) }
-}
-
-func (s *MinedBlockStreams) Broadcast(reply *txpoolproto.OnMinedBlockReply, logger log.Logger) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for id, stream := range s.chans {
-		err := stream.Send(reply)
-		if err != nil {
-			logger.Trace("failed send to mined block stream", "err", err)
-			select {
-			case <-stream.Context().Done():
-				delete(s.chans, id)
-			default:
-			}
-		}
-	}
-}
-
-func (s *MinedBlockStreams) remove(id uint) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	_, ok := s.chans[id]
-	if !ok { // double-unsubscribe support
-		return
-	}
-	delete(s.chans, id)
-}
+type MinedBlockStreams = grpcutil.StreamBroadcaster[txpoolproto.OnMinedBlockReply]
 
 // PendingBlockStreams - it's safe to use this class as non-pointer
-type PendingBlockStreams struct {
-	chans map[uint]txpoolproto.Mining_OnPendingBlockServer
-	mu    sync.Mutex
-	id    uint
-}
-
-func (s *PendingBlockStreams) Add(stream txpoolproto.Mining_OnPendingBlockServer) (remove func()) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.chans == nil {
-		s.chans = make(map[uint]txpoolproto.Mining_OnPendingBlockServer)
-	}
-	s.id++
-	id := s.id
-	s.chans[id] = stream
-	return func() { s.remove(id) }
-}
-
-func (s *PendingBlockStreams) Broadcast(reply *txpoolproto.OnPendingBlockReply, logger log.Logger) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for id, stream := range s.chans {
-		err := stream.Send(reply)
-		if err != nil {
-			logger.Trace("failed send to mined block stream", "err", err)
-			select {
-			case <-stream.Context().Done():
-				delete(s.chans, id)
-			default:
-			}
-		}
-	}
-}
-
-func (s *PendingBlockStreams) remove(id uint) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	_, ok := s.chans[id]
-	if !ok { // double-unsubscribe support
-		return
-	}
-	delete(s.chans, id)
-}
+type PendingBlockStreams = grpcutil.StreamBroadcaster[txpoolproto.OnPendingBlockReply]
 
 // PendingLogsStreams - it's safe to use this class as non-pointer
-type PendingLogsStreams struct {
-	chans map[uint]txpoolproto.Mining_OnPendingLogsServer
-	mu    sync.Mutex
-	id    uint
-}
-
-func (s *PendingLogsStreams) Add(stream txpoolproto.Mining_OnPendingLogsServer) (remove func()) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.chans == nil {
-		s.chans = make(map[uint]txpoolproto.Mining_OnPendingLogsServer)
-	}
-	s.id++
-	id := s.id
-	s.chans[id] = stream
-	return func() { s.remove(id) }
-}
-
-func (s *PendingLogsStreams) Broadcast(reply *txpoolproto.OnPendingLogsReply, logger log.Logger) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for id, stream := range s.chans {
-		err := stream.Send(reply)
-		if err != nil {
-			logger.Trace("failed send to mined block stream", "err", err)
-			select {
-			case <-stream.Context().Done():
-				delete(s.chans, id)
-			default:
-			}
-		}
-	}
-}
-
-func (s *PendingLogsStreams) remove(id uint) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	_, ok := s.chans[id]
-	if !ok { // double-unsubscribe support
-		return
-	}
-	delete(s.chans, id)
-}
+type PendingLogsStreams = grpcutil.StreamBroadcaster[txpoolproto.OnPendingLogsReply]

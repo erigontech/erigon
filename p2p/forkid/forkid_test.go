@@ -21,13 +21,13 @@ package forkid
 
 import (
 	"bytes"
+	"errors"
 	"math"
 	"testing"
 
 	"github.com/erigontech/erigon/common"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/rlp"
-	polychain "github.com/erigontech/erigon/polygon/chain"
 )
 
 const futureBn = math.MaxUint64
@@ -101,7 +101,10 @@ func TestCreation(t *testing.T) {
 				{7836331, 1741159776, ID{Hash: ChecksumToBytes(0xed88b5fd), Activation: 1741159776, Next: 1760427360}}, // First Prague block
 				{9412738, 1760427360, ID{Hash: ChecksumToBytes(0xe2ae4999), Activation: 1760427360, Next: 1761017184}}, // First Osaka block (approx)
 				{9461890, 1761017184, ID{Hash: ChecksumToBytes(0x56078a1e), Activation: 1761017184, Next: 1761607008}}, // First BPO1 block (approx)
-				{12000000, 1800000000, ID{Hash: ChecksumToBytes(0x268956b6), Activation: 1761607008, Next: 0}},         // Future BPO2 block (mock)
+				{futureBn, 1761607008, ID{Hash: ChecksumToBytes(0x268956b6), Activation: 1761607008, Next: 1791294816}},
+				{futureBn, 1791294815, ID{Hash: ChecksumToBytes(0x268956b6), Activation: 1761607008, Next: 1791294816}},
+				{futureBn, 1791294816, ID{Hash: ChecksumToBytes(0x6c1d9423), Activation: 1791294816, Next: 0}},
+				{12000000, 1800000000, ID{Hash: ChecksumToBytes(0x6c1d9423), Activation: 1791294816, Next: 0}},
 			},
 		},
 		{
@@ -136,9 +139,10 @@ func TestCreation(t *testing.T) {
 				{29242932, 1690889660, ID{Hash: ChecksumToBytes(0x2efe91ba), Activation: 1690889660, Next: 1710181820}}, // First Shanghai block
 				{32880679, 1710181810, ID{Hash: ChecksumToBytes(0x2efe91ba), Activation: 1690889660, Next: 1710181820}}, // Last Shanghai block
 				{32880680, 1710181820, ID{Hash: ChecksumToBytes(0x1384dfc1), Activation: 1710181820, Next: 1746021820}}, // First Cancun block
-				{39834364, 1746021815, ID{Hash: ChecksumToBytes(0x1384dfc1), Activation: 1710181820, Next: 1746021820}}, // Last Cancun block (approx)
-				{39834365, 1746021820, ID{Hash: ChecksumToBytes(0x2f095d4a), Activation: 1746021820, Next: 1766419900}}, // First Prague block (approx)
-				{43785599, 1766419900, ID{Hash: ChecksumToBytes(0xd00284ad), Activation: 1766419900, Next: 0}},          // Future Balancer block (approx)
+				{39827052, 1746021815, ID{Hash: ChecksumToBytes(0x1384dfc1), Activation: 1710181820, Next: 1746021820}}, // Last Cancun block
+				{39827053, 1746021825, ID{Hash: ChecksumToBytes(0x2f095d4a), Activation: 1746021820, Next: 1766419900}}, // First Prague block
+				{43785599, 1766419900, ID{Hash: ChecksumToBytes(0xd00284ad), Activation: 1766419900, Next: 1776168380}}, // First Balancer block (approx)
+				{45735295, 1776168380, ID{Hash: ChecksumToBytes(0xcfca387c), Activation: 1776168380, Next: 0}},          // First Osaka block (approx)
 			},
 		},
 		{
@@ -149,27 +153,9 @@ func TestCreation(t *testing.T) {
 				{4100419, 1684934220, ID{Hash: ChecksumToBytes(0xa15a4252), Activation: 1684934220, Next: 1706724940}},  // First Shanghai block
 				{8021277, 1706724930, ID{Hash: ChecksumToBytes(0xa15a4252), Activation: 1684934220, Next: 1706724940}},  // Last Shanghai block
 				{8021278, 1706724940, ID{Hash: ChecksumToBytes(0x5fbc16bc), Activation: 1706724940, Next: 1741254220}},  // First Cancun block
-				{14655798, 1741254215, ID{Hash: ChecksumToBytes(0x5fbc16bc), Activation: 1706724940, Next: 1741254220}}, // Last Cancun block (approx)
-				{14655799, 1741254220, ID{Hash: ChecksumToBytes(0x8ba51786), Activation: 1741254220, Next: 0}},          // First Prague block (approx)
-				{20000000, 1800000000, ID{Hash: ChecksumToBytes(0x8ba51786), Activation: 1741254220, Next: 0}},          // Future Prague block (mock)
-			},
-		},
-		{
-			polychain.Amoy,
-			[]testcase{
-				{0, 0, ID{Hash: ChecksumToBytes(0xbe06a477), Activation: 0, Next: 73100}},
-				{73100, 0, ID{Hash: ChecksumToBytes(0x135d2cd5), Activation: 73100, Next: 5423600}}, // First London, Jaipur, Delhi, Indore, Agra
-			},
-		},
-		{
-			polychain.BorMainnet,
-			[]testcase{
-				{0, 0, ID{Hash: ChecksumToBytes(0x0e07e722), Activation: 0, Next: 3395000}},
-				{3395000, 0, ID{Hash: ChecksumToBytes(0x27806576), Activation: 3395000, Next: 14750000}},   // First Istanbul block
-				{14750000, 0, ID{Hash: ChecksumToBytes(0x66e26adb), Activation: 14750000, Next: 23850000}}, // First Berlin block
-				{23850000, 0, ID{Hash: ChecksumToBytes(0x4f2f71cc), Activation: 23850000, Next: 50523000}}, // First London block
-				{50523000, 0, ID{Hash: ChecksumToBytes(0xdc08865c), Activation: 50523000, Next: 54876000}}, // First Agra block
-				{54876000, 0, ID{Hash: ChecksumToBytes(0xf097bc13), Activation: 54876000, Next: 73440256}}, // First Napoli block
+				{14642216, 1741254215, ID{Hash: ChecksumToBytes(0x5fbc16bc), Activation: 1706724940, Next: 1741254220}}, // Last Cancun block
+				{14642217, 1741254220, ID{Hash: ChecksumToBytes(0x8ba51786), Activation: 1741254220, Next: 1773653580}}, // First Prague block
+				{20286509, 1773653580, ID{Hash: ChecksumToBytes(0x71c457cd), Activation: 1773653580, Next: 0}},          // First Osaka block (approx)
 			},
 		},
 	}
@@ -257,7 +243,7 @@ func TestValidation(t *testing.T) {
 	heightForks, timeForks := GatherForks(chainspec.Mainnet.Config, 0 /* genesisTime */)
 	for i, tt := range tests {
 		filter := newFilter(heightForks, timeForks, chainspec.Mainnet.GenesisHash, tt.head, 0)
-		if err := filter(tt.id); err != tt.err {
+		if err := filter(tt.id); !errors.Is(err, tt.err) {
 			t.Errorf("test %d: validation error mismatch: have %v, want %v", i, err, tt.err)
 		}
 	}

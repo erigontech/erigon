@@ -1,9 +1,8 @@
 package fork_graph
 
 import (
+	"bytes"
 	"sync"
-
-	"github.com/erigontech/erigon/common"
 )
 
 type participationIndiciesStore struct {
@@ -21,7 +20,7 @@ func (p *participationIndiciesStore) get(epoch uint64) ([]byte, bool) {
 func (p *participationIndiciesStore) add(epoch uint64, participations []byte) {
 	prevBitlistInterface, ok := p.s.Load(epoch)
 	if !ok {
-		p.s.Store(epoch, common.Copy(participations))
+		p.s.Store(epoch, bytes.Clone(participations))
 		return
 	}
 	// Reuse the existing slice if possible
@@ -30,12 +29,19 @@ func (p *participationIndiciesStore) add(epoch uint64, participations []byte) {
 	p.s.Store(epoch, append(prevBitlist, participations...))
 }
 
-func (p *participationIndiciesStore) prune(epoch uint64) {
-	// iterate over the map and delete all keys less or equal than epoch
-	p.s.Range(func(key, value any) bool {
+func (p *participationIndiciesStore) keysThrough(epoch uint64) []uint64 {
+	keys := []uint64{}
+	p.s.Range(func(key, _ any) bool {
 		if key.(uint64) <= epoch {
-			p.s.Delete(key)
+			keys = append(keys, key.(uint64))
 		}
 		return true
 	})
+	return keys
+}
+
+func (p *participationIndiciesStore) deleteKeys(keys []uint64) {
+	for _, key := range keys {
+		p.s.Delete(key)
+	}
 }

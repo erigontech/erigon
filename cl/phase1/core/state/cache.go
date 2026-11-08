@@ -20,14 +20,12 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/phase1/core/caches"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
 	"github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
-	"github.com/erigontech/erigon/common/maphash"
-
-	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 )
@@ -45,7 +43,7 @@ type CachingBeaconState struct {
 	*raw.BeaconState
 
 	// Internals
-	publicKeyIndicies *maphash.NonConcurrentMap[uint64]
+	publicKeyIndices pubkeyIndex
 	// Caches
 	activeValidatorsCache *lru.Cache[uint64, []uint64]
 	shuffledSetsCache     *lru.Cache[common.Hash, []uint64]
@@ -60,16 +58,40 @@ func New(cfg *clparams.BeaconChainConfig) *CachingBeaconState {
 	state := &CachingBeaconState{
 		BeaconState: raw.New(cfg),
 	}
-	state.InitBeaconState()
+	// An empty, default-version state cannot fail to initialize: the caches have
+	// constant positive sizes and there are no validators to walk.
+	if err := state.InitBeaconState(); err != nil {
+		panic(err)
+	}
 	return state
 }
 
-func NewFromRaw(r *raw.BeaconState) *CachingBeaconState {
-	state := &CachingBeaconState{
-		BeaconState: r,
+// BlockRoot overrides raw.BeaconState.BlockRoot to use previousStateRoot
+// (set by TransitionState after VerifyTransition) when latestBlockHeader.Root
+// is still zero. In GLOAS, the execution payload envelope has not yet been
+// processed at the point AddChainSegment checks this, so the raw fallback to
+// HashSSZ() can return a diverged value. previousStateRoot is the
+// authoritative state root confirmed by TransitionState.
+func (b *CachingBeaconState) BlockRoot() ([32]byte, error) {
+	hdr := b.LatestBlockHeader()
+	root := hdr.Root
+	if root == (common.Hash{}) && b.previousStateRoot != (common.Hash{}) {
+		root = b.previousStateRoot
 	}
-	state.InitBeaconState()
-	return state
+	if root == (common.Hash{}) {
+		var err error
+		root, err = b.HashSSZ()
+		if err != nil {
+			return [32]byte{}, err
+		}
+	}
+	return (&cltypes.BeaconBlockHeader{
+		Slot:          hdr.Slot,
+		ProposerIndex: hdr.ProposerIndex,
+		BodyRoot:      hdr.BodyRoot,
+		ParentRoot:    hdr.ParentRoot,
+		Root:          root,
+	}).HashSSZ()
 }
 
 func (b *CachingBeaconState) SetPreviousStateRoot(root common.Hash) {
@@ -85,12 +107,14 @@ func (b *CachingBeaconState) _updateProposerIndex() (err error) {
 		beaconConfig.EpochsPerHistoricalVector
 	// Input for the seed hash.
 	mix := b.GetRandaoMix(int(mixPosition))
-	input := shuffling.GetSeed(b.BeaconConfig(), mix, epoch, b.BeaconConfig().DomainBeaconProposer)
+	input := shuffling.GetSeed(mix, epoch, b.BeaconConfig().DomainBeaconProposer)
 	slotByteArray := make([]byte, 8)
 	binary.LittleEndian.PutUint64(slotByteArray, b.Slot())
 
 	// Add slot to the end of the input.
-	inputWithSlot := append(input[:], slotByteArray...)
+	inputWithSlot := make([]byte, 0, len(input)+len(slotByteArray))
+	inputWithSlot = append(inputWithSlot, input[:]...)
+	inputWithSlot = append(inputWithSlot, slotByteArray...)
 
 	// Calculate the hash.
 	hash.Write(inputWithSlot)
@@ -218,16 +242,6 @@ func (b *CachingBeaconState) _refreshActiveBalancesIfNeeded() {
 	b.totalActiveBalanceCache = new(uint64)
 	*b.totalActiveBalanceCache = 0
 
-	// Check global cache using block root at beginning of previous epoch
-	blockRootAtBegginingPrevEpoch, err := b.GetBlockRootAtSlot(((epoch - 1) * b.BeaconConfig().SlotsPerEpoch) - 1)
-	if err == nil {
-		if _, cachedBalance, ok := caches.ActiveValidatorsCacheGlobal.Get(epoch, blockRootAtBegginingPrevEpoch); ok && cachedBalance != 0 {
-			*b.totalActiveBalanceCache = cachedBalance
-			b.totalActiveBalanceRootCache = utils.IntegerSquareRoot(*b.totalActiveBalanceCache)
-			return
-		}
-	}
-
 	for i := 0; i < b.ValidatorSet().Length(); i++ {
 		validator := b.ValidatorSet().Get(i)
 		if validator.Active(epoch) {
@@ -252,22 +266,25 @@ func (b *CachingBeaconState) initCaches() error {
 }
 
 func (b *CachingBeaconState) InitBeaconState() error {
+	b.rebuildPubkeyIndex()
+	return b.reinitCaches()
+}
 
-	b.publicKeyIndicies = maphash.NewNonConcurrentMap[uint64]()
-	b.ForEachValidator(func(validator solid.Validator, i, total int) bool {
-		pk := validator.PublicKey()
-		b.publicKeyIndicies.Set(pk[:], uint64(i))
-		return true
-	})
+func (b *CachingBeaconState) rebuildPubkeyIndex() {
+	b.publicKeyIndices = newPubkeyIndex(b.ValidatorSet())
+}
 
+func (b *CachingBeaconState) reinitCaches() error {
 	b.totalActiveBalanceCache = nil
 	b._refreshActiveBalancesIfNeeded()
 	b.previousStateRoot = common.Hash{}
-	b.initCaches()
+	if err := b.initCaches(); err != nil {
+		return err
+	}
 	if err := b._updateProposerIndex(); err != nil {
 		return err
 	}
-	if b.Version() >= clparams.Phase0Version {
+	if b.Version() == clparams.Phase0Version {
 		return b._initializeValidatorsPhase0()
 	}
 

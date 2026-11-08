@@ -23,104 +23,111 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
-	"path"
+	"os"
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"syscall"
 	"testing"
 
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/tracing/tracers/logger"
 	"github.com/erigontech/erigon/execution/vm"
 )
 
 func TestStateCornerCases(t *testing.T) {
-	t.Parallel()
+	stateTestSetup(t)
+	runStateTests(t, new(testutil.TestMatcher), filepath.Join(cornersDir, "state"))
+}
 
-	defer log.Root().SetHandler(log.Root().GetHandler())
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
+// stateTestSetup applies the parallel/log/Windows-skip boilerplate shared by
+// state-test runners.
+func stateTestSetup(t *testing.T) {
+	t.Helper()
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("fix me on win please") // it's too slow on win and stops on macos, need generally improve speed of this tests
 	}
+	prev := log.Root().GetHandler()
+	t.Cleanup(func() { log.Root().SetHandler(prev) })
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
+}
 
-	st := new(testMatcher)
-
-	dirs := datadir.New(t.TempDir())
-	db := temporaltest.NewTestDB(t, dirs)
-	testDir := path.Join(cornersDir, "state")
-	st.walk(t, testDir, func(t *testing.T, name string, test *testutil.StateTest) {
+// runStateTests walks testDir and runs each StateTest's subtests through the
+// shared per-subtest harness (temp datadir, fresh DB, withTrace). The matcher
+// is supplied by the caller pre-configured with any Slow/SkipLoad/Whitelist
+// patterns.
+func runStateTests(t *testing.T, st *testutil.TestMatcher, testDir string) {
+	t.Helper()
+	st.Walk(t, testDir, func(t *testing.T, name string, test *testutil.StateTest) {
+		tmpDir, err := os.MkdirTemp("", "erigon-test-*")
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = dir.RemoveAll(tmpDir) })
+		dirs := datadir.New(tmpDir)
+		db := temporaltest.NewTestDB(t, dirs)
 		for _, subtest := range test.Subtests() {
 			key := fmt.Sprintf("%s/%d", subtest.Fork, subtest.Index)
 			t.Run(key, func(t *testing.T) {
 				withTrace(t, func(vmconfig vm.Config) error {
-					tx, err := db.BeginTemporalRw(context.Background())
-					if err != nil {
-						t.Fatal(err)
-					}
+					tx := beginRwNoContention(t, db)
 					defer tx.Rollback()
-					_, _, err = test.Run(t, tx, subtest, vmconfig, dirs)
+					sd, sdErr := execctx.NewSharedDomains(context.Background(), tx, log.New())
+					if sdErr != nil {
+						return sdErr
+					}
+					defer sd.Close()
+					sd.EnableParaTrieDB(db)
+					_, _, err = test.Run(sd, tx, subtest, vmconfig)
 					tx.Rollback()
 					if err != nil && len(test.Json.Post[subtest.Fork][subtest.Index].ExpectException) > 0 {
 						// Ignore expected errors
 						return nil
 					}
-					return st.checkFailure(t, err)
+					return st.CheckFailure(t, err)
 				})
 			})
 		}
 	})
 }
 
-func TestState(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-	t.Parallel()
+// temporalRwTry is implemented by *temporal.DB when the underlying MDBX env
+// supports non-blocking write-tx opens.
+type temporalRwTry interface {
+	BeginTemporalRwTry(ctx context.Context) (kv.TemporalRwTx, error)
+}
 
-	if runtime.GOOS == "windows" {
-		t.Skip("fix me on win please") // it's too slow on win and stops on macos, need generally improve speed of this tests
-	}
-	defer log.Root().SetHandler(log.Root().GetHandler())
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
-
-	st := new(testMatcher)
-	// Corresponds to GeneralStateTests from ethereum/tests:
-	// see https://github.com/ethereum/execution-spec-tests/releases/tag/v5.0.0
-	dir := filepath.Join(eestDir, "state_tests", "static", "state_tests")
-
-	// Slow tests
-	st.slow(`^stPreCompiledContracts/precompsEIP2929Cancun`)
-
-	// Very slow tests
-	st.skipLoad(`^stTimeConsuming/`)
-
-	dirs := datadir.New(t.TempDir())
-	db := temporaltest.NewTestDB(t, dirs)
-	st.walk(t, dir, func(t *testing.T, name string, test *testutil.StateTest) {
-		for _, subtest := range test.Subtests() {
-			key := fmt.Sprintf("%s/%d", subtest.Fork, subtest.Index)
-			t.Run(key, func(t *testing.T) {
-				withTrace(t, func(vmconfig vm.Config) error {
-					tx, err := db.BeginTemporalRw(context.Background())
-					if err != nil {
-						t.Fatal(err)
-					}
-					defer tx.Rollback()
-					_, _, err = test.Run(t, tx, subtest, vmconfig, dirs)
-					tx.Rollback()
-					if err != nil && len(test.Json.Post[subtest.Fork][subtest.Index].ExpectException) > 0 {
-						// Ignore expected errors
-						return nil
-					}
-					return st.checkFailure(t, err)
-				})
-			})
+// beginRwNoContention opens a write tx and fatals immediately on EBUSY, which
+// indicates that two goroutines are racing on the same DB — a sign of
+// unintended db sharing between parallel subtests.
+func beginRwNoContention(t *testing.T, db kv.TemporalRwDB) kv.TemporalRwTx {
+	t.Helper()
+	if tryDB, ok := db.(temporalRwTry); ok {
+		tx, err := tryDB.BeginTemporalRwTry(context.Background())
+		if err != nil {
+			if errors.Is(err, syscall.EBUSY) {
+				t.Fatal("write lock contention: multiple goroutines sharing one db")
+			}
+			t.Fatal(err)
 		}
-	})
+		t.Cleanup(tx.Rollback)
+		return tx
+	}
+	tx, err := db.BeginTemporalRw(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(tx.Rollback)
+	return tx
 }
 
 func withTrace(t *testing.T, test func(vm.Config) error) {
@@ -135,7 +142,7 @@ func withTrace(t *testing.T, test func(vm.Config) error) {
 	t.Error(err)
 	buf := new(bytes.Buffer)
 	w := bufio.NewWriter(buf)
-	tracer := logger.NewJSONLogger(&logger.LogConfig{DisableMemory: true}, w)
+	tracer := logger.NewJSONLogger(&logger.LogConfig{EnableMemory: false}, w)
 	config.Tracer = tracer.Tracer().Hooks
 	err2 := test(config)
 	if !reflect.DeepEqual(err, err2) {

@@ -20,19 +20,21 @@
 package vm
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/binary"
 	"errors"
 	"maps"
 	"math/big"
 	"math/bits"
+	"slices"
 
 	"github.com/consensys/gnark-crypto/ecc"
 	bls12381 "github.com/consensys/gnark-crypto/ecc/bls12-381"
 	"github.com/consensys/gnark-crypto/ecc/bls12-381/fp"
 	"github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
 	"github.com/consensys/gnark-crypto/ecc/bn254"
-	patched_big "github.com/ethereum/go-bigmodexpfix/src/math/big"
+	evmone "github.com/erigontech/evmone_precompiles"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -44,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto/secp256r1"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -68,27 +71,51 @@ func ActivePrecompiledContracts(chainRules *chain.Rules) PrecompiledContracts {
 	return maps.Clone(Precompiles(chainRules))
 }
 
-func Precompiles(chainRules *chain.Rules) PrecompiledContracts {
+// forkTier indexes forkSets. It is derived from chainRules by the single
+// switch in forkTierFor, so the contracts map and the address list
+// for a fork can never drift apart the way two independent switches could.
+type forkTier int8
+
+const (
+	forkHomestead forkTier = iota
+	forkByzantium
+	forkIstanbul
+	forkBerlin
+	forkCancun
+	forkPrague
+	forkOsaka
+	forkTierCount
+)
+
+type mergedPrecompileSet struct {
+	contracts PrecompiledContracts
+	addresses []accounts.Address
+}
+
+var forkSets [forkTierCount]mergedPrecompileSet
+
+func forkTierFor(chainRules *chain.Rules) forkTier {
 	switch {
 	case chainRules.IsOsaka:
-		return PrecompiledContractsOsaka
-	case chainRules.IsBhilai:
-		return PrecompiledContractsBhilai
+		return forkOsaka
 	case chainRules.IsPrague:
-		return PrecompiledContractsPrague
-	case chainRules.IsNapoli:
-		return PrecompiledContractsNapoli
+		return forkPrague
 	case chainRules.IsCancun:
-		return PrecompiledContractsCancun
+		return forkCancun
 	case chainRules.IsBerlin:
-		return PrecompiledContractsBerlin
+		return forkBerlin
 	case chainRules.IsIstanbul:
-		return PrecompiledContractsIstanbul
+		return forkIstanbul
 	case chainRules.IsByzantium:
-		return PrecompiledContractsByzantium
+		return forkByzantium
 	default:
-		return PrecompiledContractsHomestead
+		return forkHomestead
 	}
+}
+
+// Precompiles returns the precompiles active under chainRules.
+func Precompiles(chainRules *chain.Rules) PrecompiledContracts {
+	return forkSets[forkTierFor(chainRules)].contracts
 }
 
 // PrecompiledContractsHomestead contains the default set of pre-compiled Ethereum
@@ -154,39 +181,6 @@ var PrecompiledContractsCancun = PrecompiledContracts{
 	accounts.InternAddress(common.BytesToAddress([]byte{0x0a})): &pointEvaluation{},
 }
 
-var PrecompiledContractsNapoli = PrecompiledContracts{
-	accounts.InternAddress(common.BytesToAddress([]byte{0x01})):       &ecrecover{},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x02})):       &sha256hash{},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x03})):       &ripemd160hash{},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x04})):       &dataCopy{},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x05})):       &bigModExp{eip2565: true},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x06})):       &bn254AddIstanbul{},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x07})):       &bn254ScalarMulIstanbul{},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x08})):       &bn254PairingIstanbul{},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x09})):       &blake2F{},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x01, 0x00})): &p256Verify{},
-}
-
-var PrecompiledContractsBhilai = PrecompiledContracts{
-	accounts.InternAddress(common.BytesToAddress([]byte{0x01})):       &ecrecover{},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x02})):       &sha256hash{},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x03})):       &ripemd160hash{},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x04})):       &dataCopy{},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x05})):       &bigModExp{eip2565: true},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x06})):       &bn254AddIstanbul{},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x07})):       &bn254ScalarMulIstanbul{},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x08})):       &bn254PairingIstanbul{},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x09})):       &blake2F{},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x0b})):       &bls12381G1Add{},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x0c})):       &bls12381G1MultiExp{},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x0d})):       &bls12381G2Add{},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x0e})):       &bls12381G2MultiExp{},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x0f})):       &bls12381Pairing{},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x10})):       &bls12381MapFpToG1{},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x11})):       &bls12381MapFp2ToG2{},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x01, 0x00})): &p256Verify{},
-}
-
 var PrecompiledContractsPrague = PrecompiledContracts{
 	accounts.InternAddress(common.BytesToAddress([]byte{0x01})): &ecrecover{},
 	accounts.InternAddress(common.BytesToAddress([]byte{0x02})): &sha256hash{},
@@ -229,69 +223,40 @@ var PrecompiledContractsOsaka = PrecompiledContracts{
 }
 
 var (
-	PrecompiledAddressesOsaka     []accounts.Address
-	PrecompiledAddressesPrague    []accounts.Address
-	PrecompiledAddressesNapoli    []accounts.Address
-	PrecompiledAddressesBhilai    []accounts.Address
-	PrecompiledAddressesCancun    []accounts.Address
-	PrecompiledAddressesBerlin    []accounts.Address
-	PrecompiledAddressesIstanbul  []accounts.Address
-	PrecompiledAddressesByzantium []accounts.Address
 	PrecompiledAddressesHomestead []accounts.Address
+	PrecompiledAddressesByzantium []accounts.Address
+	PrecompiledAddressesIstanbul  []accounts.Address
+	PrecompiledAddressesBerlin    []accounts.Address
+	PrecompiledAddressesCancun    []accounts.Address
+	PrecompiledAddressesPrague    []accounts.Address
+	PrecompiledAddressesOsaka     []accounts.Address
 )
 
 func init() {
-	for k := range PrecompiledContractsHomestead {
-		PrecompiledAddressesHomestead = append(PrecompiledAddressesHomestead, k)
-	}
-	for k := range PrecompiledContractsByzantium {
-		PrecompiledAddressesByzantium = append(PrecompiledAddressesByzantium, k)
-	}
-	for k := range PrecompiledContractsIstanbul {
-		PrecompiledAddressesIstanbul = append(PrecompiledAddressesIstanbul, k)
-	}
-	for k := range PrecompiledContractsBerlin {
-		PrecompiledAddressesBerlin = append(PrecompiledAddressesBerlin, k)
-	}
-	for k := range PrecompiledContractsCancun {
-		PrecompiledAddressesCancun = append(PrecompiledAddressesCancun, k)
-	}
-	for k := range PrecompiledContractsNapoli {
-		PrecompiledAddressesNapoli = append(PrecompiledAddressesNapoli, k)
-	}
-	for k := range PrecompiledContractsBhilai {
-		PrecompiledAddressesBhilai = append(PrecompiledAddressesBhilai, k)
-	}
-	for k := range PrecompiledContractsPrague {
-		PrecompiledAddressesPrague = append(PrecompiledAddressesPrague, k)
-	}
-	for k := range PrecompiledContractsOsaka {
-		PrecompiledAddressesOsaka = append(PrecompiledAddressesOsaka, k)
+	for tier, tierSet := range [forkTierCount]struct {
+		contracts PrecompiledContracts
+		addresses *[]accounts.Address
+	}{
+		forkHomestead: {PrecompiledContractsHomestead, &PrecompiledAddressesHomestead},
+		forkByzantium: {PrecompiledContractsByzantium, &PrecompiledAddressesByzantium},
+		forkIstanbul:  {PrecompiledContractsIstanbul, &PrecompiledAddressesIstanbul},
+		forkBerlin:    {PrecompiledContractsBerlin, &PrecompiledAddressesBerlin},
+		forkCancun:    {PrecompiledContractsCancun, &PrecompiledAddressesCancun},
+		forkPrague:    {PrecompiledContractsPrague, &PrecompiledAddressesPrague},
+		forkOsaka:     {PrecompiledContractsOsaka, &PrecompiledAddressesOsaka},
+	} {
+		for address, p := range tierSet.contracts {
+			tierSet.contracts[address] = cachePrecompile(p, forkTier(tier), address.Value())
+		}
+		forkSets[tier] = mergedPrecompileSet{tierSet.contracts, slices.Collect(maps.Keys(tierSet.contracts))}
+		*tierSet.addresses = forkSets[tier].addresses
 	}
 }
 
-// ActivePrecompiles returns the precompiles enabled with the current configuration.
+// ActivePrecompiles returns the addresses of the precompiles enabled with the
+// current configuration.
 func ActivePrecompiles(rules *chain.Rules) []accounts.Address {
-	switch {
-	case rules.IsOsaka:
-		return PrecompiledAddressesOsaka
-	case rules.IsBhilai:
-		return PrecompiledAddressesBhilai
-	case rules.IsPrague:
-		return PrecompiledAddressesPrague
-	case rules.IsNapoli:
-		return PrecompiledAddressesNapoli
-	case rules.IsCancun:
-		return PrecompiledAddressesCancun
-	case rules.IsBerlin:
-		return PrecompiledAddressesBerlin
-	case rules.IsIstanbul:
-		return PrecompiledAddressesIstanbul
-	case rules.IsByzantium:
-		return PrecompiledAddressesByzantium
-	default:
-		return PrecompiledAddressesHomestead
-	}
+	return forkSets[forkTierFor(rules)].addresses
 }
 
 // RunPrecompiledContract runs and evaluates the output of a precompiled contract.
@@ -299,20 +264,19 @@ func ActivePrecompiles(rules *chain.Rules) []accounts.Address {
 // - the returned bytes,
 // - the _remaining_ gas,
 // - any error that occurred
-func RunPrecompiledContract(p PrecompiledContract, input []byte, suppliedGas uint64, tracer *tracing.Hooks,
-) (ret []byte, remainingGas uint64, err error) {
+func RunPrecompiledContract(p PrecompiledContract, input []byte, suppliedGas mdgas.MdGas, tracer *tracing.Hooks) ([]byte, mdgas.MdGas, error) {
 	gasCost := p.RequiredGas(input)
-	if suppliedGas < gasCost {
-		return nil, 0, ErrOutOfGas
+	if suppliedGas.Execution < gasCost {
+		return nil, suppliedGas, ErrOutOfGas
 	}
 
-	if tracer != nil && tracer.OnGasChange != nil {
-		tracer.OnGasChange(suppliedGas, suppliedGas-gasCost, tracing.GasChangeCallPrecompiledContract)
+	remaining := suppliedGas
+	remaining.Execution -= gasCost
+	if tracer.HasGasChangeHook() {
+		tracer.EmitGasChange(suppliedGas, remaining, tracing.GasChangeCallPrecompiledContract)
 	}
-
-	suppliedGas -= gasCost
 	output, err := p.Run(input)
-	return output, suppliedGas, err
+	return output, remaining, err
 }
 
 // ECRECOVER implemented as a native contract.
@@ -365,8 +329,9 @@ type sha256hash struct{}
 // This method does not require any overflow checking as the input size gas costs
 // required for anything significant is so high it's impossible to pay for.
 func (c *sha256hash) RequiredGas(input []byte) uint64 {
-	return uint64(len(input)+31)/32*params.Sha256PerWordGas + params.Sha256BaseGas
+	return ToWordSize(uint64(len(input)))*params.Sha256PerWordGas + params.Sha256BaseGas
 }
+
 func (c *sha256hash) Run(input []byte) ([]byte, error) {
 	h := sha256.Sum256(input)
 	return h[:], nil
@@ -384,12 +349,15 @@ type ripemd160hash struct{}
 // This method does not require any overflow checking as the input size gas costs
 // required for anything significant is so high it's impossible to pay for.
 func (c *ripemd160hash) RequiredGas(input []byte) uint64 {
-	return uint64(len(input)+31)/32*params.Ripemd160PerWordGas + params.Ripemd160BaseGas
+	return ToWordSize(uint64(len(input)))*params.Ripemd160PerWordGas + params.Ripemd160BaseGas
 }
+
 func (c *ripemd160hash) Run(input []byte) ([]byte, error) {
 	ripemd := ripemd160.New()
 	ripemd.Write(input)
-	return common.LeftPadBytes(ripemd.Sum(nil), 32), nil
+	// Pre-allocate 32 bytes with 12-byte zero prefix for left-padding.
+	// Sum appends the 20-byte hash after the prefix.
+	return ripemd.Sum(make([]byte, 12, 32)), nil
 }
 
 func (c *ripemd160hash) Name() string {
@@ -404,10 +372,11 @@ type dataCopy struct{}
 // This method does not require any overflow checking as the input size gas costs
 // required for anything significant is so high it's impossible to pay for.
 func (c *dataCopy) RequiredGas(input []byte) uint64 {
-	return uint64(len(input)+31)/32*params.IdentityPerWordGas + params.IdentityBaseGas
+	return ToWordSize(uint64(len(input)))*params.IdentityPerWordGas + params.IdentityBaseGas
 }
+
 func (c *dataCopy) Run(in []byte) ([]byte, error) {
-	return common.Copy(in), nil
+	return bytes.Clone(in), nil
 }
 
 func (c *dataCopy) Name() string {
@@ -476,7 +445,6 @@ func modExpMultComplexityEip198(x uint32) uint64 {
 
 // RequiredGas returns the gas required to execute the pre-compiled contract.
 func (c *bigModExp) RequiredGas(input []byte) uint64 {
-
 	var minGas uint64
 	var adjExpFactor uint64
 	var finalDivisor uint64
@@ -566,7 +534,6 @@ var (
 	errModExpBaseLengthTooLarge     = errors.New("base length is too large")
 	errModExpExponentLengthTooLarge = errors.New("exponent length is too large")
 	errModExpModulusLengthTooLarge  = errors.New("modulus length is too large")
-	patchedBig1                     = patched_big.NewInt(1)
 )
 
 func (c *bigModExp) Run(input []byte) ([]byte, error) {
@@ -610,22 +577,101 @@ func (c *bigModExp) Run(input []byte) ([]byte, error) {
 		input = input[:0]
 	}
 	// Retrieve the operands and execute the exponentiation
-	var (
-		base = new(patched_big.Int).SetBytes(getData(input, 0, baseLen))
-		exp  = new(patched_big.Int).SetBytes(getData(input, baseLen, expLen))
-		mod  = new(patched_big.Int).SetBytes(getData(input, baseLen+expLen, modLen))
-		v    []byte
-	)
+	base := getData(input, 0, baseLen)
+	exp := getData(input, baseLen, expLen)
+	mod := getData(input, baseLen+expLen, modLen)
+
+	// Allocate the result buffer once, zero-filled.
+	result := make([]byte, modLen)
+	smallExp := len(exp) > 0 && !bitutil.TestBytes(exp[:len(exp)-1])
 	switch {
-	case mod.Cmp(patchedBig1) <= 0:
+	case !bitutil.TestBytes(mod[:len(mod)-1]) && mod[len(mod)-1] <= 1:
 		// Leave the result as zero for mod 0 (undefined) and 1
-	case base.Cmp(patchedBig1) == 0:
+	case len(base) > 0 && !bitutil.TestBytes(base[:len(base)-1]) && base[len(base)-1] == 1:
 		// If base == 1 (and mod > 1), then the result is 1
-		v = patchedBig1.Bytes()
+		result[modLen-1] = 1
+	case modLen > 32 && smallExp:
+		// For small exponents (≤255) with large moduli (>256 bits), use Go's math/big
+		// directly. evmone uses Montgomery multiplication whose O(n²) setup (converting
+		// to Montgomery form) doesn't pay off when the exponent only needs a few squarings.
+		baseBig := new(big.Int).SetBytes(base)
+		expBig := new(big.Int).SetBytes(exp)
+		modBig := new(big.Int).SetBytes(mod)
+		baseBig.Exp(baseBig, expBig, modBig).FillBytes(result)
+	case smallExp && modexpU256Applicable(base, mod):
+		// A fixed-width uint256 square-and-multiply avoids evmone's fixed cost (the cgo
+		// call and the Montgomery conversions) but costs more per exponent bit.
+		modexpU256(result, base, exp, mod)
 	default:
-		v = base.Exp(base, exp, mod).Bytes()
+		evmone.ModExp(result, base, exp, mod)
 	}
-	return common.LeftPadBytes(v, int(modLen)), nil
+	return result, nil
+}
+
+// modexpU256Applicable reports whether modexpU256 may be used for these operands,
+// and whether it is worth using. The base must fit in 256 bits — uint256.SetBytes
+// silently truncates above that — and the modulus must lie in [2^192, 2^256):
+// below 2^192 uint256.Reciprocal yields no reciprocal, every modular multiply
+// degrades into a full division, and evmone wins by around 3x.
+func modexpU256Applicable(base, mod []byte) bool {
+	if len(base) > 32 || len(mod) > 32 || len(mod) <= 24 {
+		return false
+	}
+	return bitutil.TestBytes(mod[:len(mod)-24])
+}
+
+// modexpU256 computes base^exp mod modulus and writes the big-endian result into
+// dst, which must be len(modulus) zero bytes. Operands must satisfy
+// modexpU256Applicable; the exponent may be any length.
+//
+// It is a fixed-width uint256 left-to-right square-and-multiply using a
+// precomputed reciprocal, so each modular multiply is a multiply+reduce with no
+// division and no heap allocation.
+func modexpU256(dst, base, exp, mod []byte) {
+	// Operands are padded to their declared field widths, which EIP-7823 caps at
+	// 1024 bytes. The loops below cost the field width, not the value, so the
+	// two degenerate results are taken before entering them.
+	for len(exp) >= 8 && binary.BigEndian.Uint64(exp) == 0 {
+		exp = exp[8:]
+	}
+	for len(exp) > 0 && exp[0] == 0 {
+		exp = exp[1:]
+	}
+	if len(exp) == 0 {
+		dst[len(dst)-1] = 1 // exponent 0 and m > 1, so the result is 1 — including 0^0
+		return
+	}
+
+	var m, b uint256.Int
+	m.SetBytes(mod)
+	b.SetBytes(base)
+	b.Mod(&b, &m)
+	if b.IsZero() {
+		return // 0^exp with exp > 0; dst is already zero
+	}
+	mu := uint256.Reciprocal(&m)
+
+	// started stays false until the first set exponent bit, so leading zero bits
+	// of the top byte cost no squarings. It is always set by the end: exp[0] != 0.
+	var result uint256.Int
+	started := false
+	for _, by := range exp {
+		for bit := 7; bit >= 0; bit-- {
+			if started {
+				result.MulModWithReciprocal(&result, &result, &m, &mu) // square
+			}
+			if (by>>uint(bit))&1 == 1 {
+				if !started {
+					started = true
+					result.Set(&b) // result was 1, so 1*b = b
+				} else {
+					result.MulModWithReciprocal(&result, &b, &m, &mu) // multiply
+				}
+			}
+		}
+	}
+	b32 := result.Bytes32()
+	copy(dst, b32[32-len(dst):])
 }
 
 func (c *bigModExp) Name() string {
@@ -690,6 +736,9 @@ func runBn254ScalarMul(input []byte) ([]byte, error) {
 	err := libbn254.UnmarshalCurvePointG1(getData(input, 0, 64), &x)
 	if err != nil {
 		return nil, err
+	}
+	if x.IsInfinity() {
+		return make([]byte, 64), nil
 	}
 	return libbn254.MarshalCurvePointG1(x.ScalarMultiplication(&x, new(big.Int).SetBytes(getData(input, 64, 32)))), nil
 }
@@ -853,11 +902,11 @@ func (c *blake2F) Run(input []byte) ([]byte, error) {
 		m [16]uint64
 		t [2]uint64
 	)
-	for i := 0; i < 8; i++ {
+	for i := range 8 {
 		offset := 4 + i*8
 		h[i] = binary.LittleEndian.Uint64(input[offset : offset+8])
 	}
-	for i := 0; i < 16; i++ {
+	for i := range 16 {
 		offset := 68 + i*8
 		m[i] = binary.LittleEndian.Uint64(input[offset : offset+8])
 	}
@@ -868,7 +917,7 @@ func (c *blake2F) Run(input []byte) ([]byte, error) {
 	blake2b.F(&h, m, t, final, rounds)
 
 	output := make([]byte, 64)
-	for i := 0; i < 8; i++ {
+	for i := range 8 {
 		offset := i * 8
 		binary.LittleEndian.PutUint64(output[offset:offset+8], h[i])
 	}
@@ -901,23 +950,22 @@ func (c *bls12381G1Add) Run(input []byte) ([]byte, error) {
 	if len(input) != 256 {
 		return nil, errBLS12381InvalidInputLength
 	}
-	var err error
-	var p0, p1 *bls12381.G1Affine
-
 	// Decode G1 point p_0
-	if p0, err = decodePointG1(input[:128]); err != nil {
+	p0, err := decodePointG1(input[:128])
+	if err != nil {
 		return nil, err
 	}
 	// Decode G1 point p_1
-	if p1, err = decodePointG1(input[128:]); err != nil {
+	p1, err := decodePointG1(input[128:])
+	if err != nil {
 		return nil, err
 	}
 
 	// Compute r = p_0 + p_1
-	p0.Add(p0, p1)
+	p0.Add(&p0, &p1)
 
 	// Encode the G1 point result into 128 bytes
-	return encodePointG1(p0), nil
+	return encodePointG1(&p0), nil
 }
 
 func (c *bls12381G1Add) Name() string {
@@ -958,32 +1006,39 @@ func (c *bls12381G1MultiExp) Run(input []byte) ([]byte, error) {
 	scalars := make([]fr.Element, k)
 
 	// Decode point scalar pairs
-	for i := 0; i < k; i++ {
+	for i := range k {
 		off := 160 * i
 		t0, t1, t2 := off, off+128, off+160
 		// Decode G1 point
-		p, err := decodePointG1(input[t0:t1])
-		if err != nil {
-			return nil, err
+		if i > 0 && bytes.Equal(input[t0:t1], input[t0-160:t1-160]) {
+			points[i] = points[i-1]
+		} else {
+			p, err := decodePointG1(input[t0:t1])
+			if err != nil {
+				return nil, err
+			}
+			if !p.IsInSubGroup() {
+				return nil, errBLS12381G1PointSubgroup
+			}
+			points[i] = p
 		}
-		// Fast subgroup check
-		if !p.IsInSubGroup() {
-			return nil, errBLS12381G1PointSubgroup
-		}
-		points[i] = *p
 		// Decode scalar value
-		scalars[i] = *new(fr.Element).SetBytes(input[t1:t2])
+		scalars[i].SetBytes(input[t1:t2])
 	}
 
 	// Compute r = e_0 * p_0 + e_1 * p_1 + ... + e_(k-1) * p_(k-1)
-	r := new(bls12381.G1Affine)
+	var r bls12381.G1Affine
+	if k == 1 {
+		scalarMulG1(&r, &points[0], &scalars[0])
+		return encodePointG1(&r), nil
+	}
 	_, err := r.MultiExp(points, scalars, ecc.MultiExpConfig{})
 	if err != nil {
 		return nil, err
 	}
 
 	// Encode the G1 point to 128 bytes
-	return encodePointG1(r), nil
+	return encodePointG1(&r), nil
 }
 
 func (c *bls12381G1MultiExp) Name() string {
@@ -1005,24 +1060,23 @@ func (c *bls12381G2Add) Run(input []byte) ([]byte, error) {
 	if len(input) != 512 {
 		return nil, errBLS12381InvalidInputLength
 	}
-	var err error
-	var p0, p1 *bls12381.G2Affine
-
 	// Decode G2 point p_0
-	if p0, err = decodePointG2(input[:256]); err != nil {
+	p0, err := decodePointG2(input[:256])
+	if err != nil {
 		return nil, err
 	}
 	// Decode G2 point p_1
-	if p1, err = decodePointG2(input[256:]); err != nil {
+	p1, err := decodePointG2(input[256:])
+	if err != nil {
 		return nil, err
 	}
 
 	// Compute r = p_0 + p_1
-	r := new(bls12381.G2Affine)
-	r.Add(p0, p1)
+	var r bls12381.G2Affine
+	r.Add(&p0, &p1)
 
 	// Encode the G2 point into 256 bytes
-	return encodePointG2(r), nil
+	return encodePointG2(&r), nil
 }
 
 func (c *bls12381G2Add) Name() string {
@@ -1063,32 +1117,39 @@ func (c *bls12381G2MultiExp) Run(input []byte) ([]byte, error) {
 	scalars := make([]fr.Element, k)
 
 	// Decode point scalar pairs
-	for i := 0; i < k; i++ {
+	for i := range k {
 		off := 288 * i
 		t0, t1, t2 := off, off+256, off+288
 		// Decode G2 point
-		p, err := decodePointG2(input[t0:t1])
-		if err != nil {
-			return nil, err
+		if i > 0 && bytes.Equal(input[t0:t1], input[t0-288:t1-288]) {
+			points[i] = points[i-1]
+		} else {
+			p, err := decodePointG2(input[t0:t1])
+			if err != nil {
+				return nil, err
+			}
+			if !p.IsInSubGroup() {
+				return nil, errBLS12381G2PointSubgroup
+			}
+			points[i] = p
 		}
-		// Fast subgroup check
-		if !p.IsInSubGroup() {
-			return nil, errBLS12381G2PointSubgroup
-		}
-		points[i] = *p
 		// Decode scalar value
-		scalars[i] = *new(fr.Element).SetBytes(input[t1:t2])
+		scalars[i].SetBytes(input[t1:t2])
 	}
 
 	// Compute r = e_0 * p_0 + e_1 * p_1 + ... + e_(k-1) * p_(k-1)
-	r := new(bls12381.G2Affine)
+	var r bls12381.G2Affine
+	if k == 1 {
+		scalarMulG2(&r, &points[0], &scalars[0])
+		return encodePointG2(&r), nil
+	}
 	_, err := r.MultiExp(points, scalars, ecc.MultiExpConfig{})
 	if err != nil {
 		return nil, err
 	}
 
 	// Encode the G2 point to 256 bytes.
-	return encodePointG2(r), nil
+	return encodePointG2(&r), nil
 }
 
 func (c *bls12381G2MultiExp) Name() string {
@@ -1115,13 +1176,11 @@ func (c *bls12381Pairing) Run(input []byte) ([]byte, error) {
 		return nil, errBLS12381InvalidInputLength
 	}
 
-	var (
-		p []bls12381.G1Affine
-		q []bls12381.G2Affine
-	)
+	p := make([]bls12381.G1Affine, k)
+	q := make([]bls12381.G2Affine, k)
 
 	// Decode pairs
-	for i := 0; i < k; i++ {
+	for i := range k {
 		off := 384 * i
 		t0, t1, t2 := off, off+128, off+384
 
@@ -1144,8 +1203,8 @@ func (c *bls12381Pairing) Run(input []byte) ([]byte, error) {
 		if !p2.IsInSubGroup() {
 			return nil, errBLS12381G2PointSubgroup
 		}
-		p = append(p, *p1)
-		q = append(q, *p2)
+		p[i] = p1
+		q[i] = p2
 	}
 	// Prepare 32 byte output
 	out := make([]byte, 32)
@@ -1162,55 +1221,69 @@ func (c *bls12381Pairing) Name() string {
 	return "BLS12_PAIRING_CHECK"
 }
 
-func decodePointG1(in []byte) (*bls12381.G1Affine, error) {
+// scalarMulG1 sets r to s*p. EIP-2537 has no dedicated MUL precompile, so a plain
+// scalar multiplication reaches G1MSM as k == 1, and the spec asks implementations
+// to recognise it: gnark's MultiExp pays full Pippenger setup even for one point.
+func scalarMulG1(r, p *bls12381.G1Affine, s *fr.Element) {
+	var b big.Int
+	r.ScalarMultiplication(p, s.BigInt(&b))
+}
+
+// scalarMulG2 sets r to s*p, see scalarMulG1.
+func scalarMulG2(r, p *bls12381.G2Affine, s *fr.Element) {
+	var b big.Int
+	r.ScalarMultiplication(p, s.BigInt(&b))
+}
+
+func decodePointG1(in []byte) (bls12381.G1Affine, error) {
 	if len(in) != 128 {
-		return nil, errors.New("invalid g1 point length")
+		return bls12381.G1Affine{}, errors.New("invalid g1 point length")
 	}
 	// decode x
 	x, err := decodeBLS12381FieldElement(in[:64])
 	if err != nil {
-		return nil, err
+		return bls12381.G1Affine{}, err
 	}
 	// decode y
 	y, err := decodeBLS12381FieldElement(in[64:])
 	if err != nil {
-		return nil, err
+		return bls12381.G1Affine{}, err
 	}
 	elem := bls12381.G1Affine{X: x, Y: y}
 	if !elem.IsOnCurve() {
-		return nil, errors.New("invalid point: not on curve")
+		return bls12381.G1Affine{}, errors.New("invalid point: not on curve")
 	}
 
-	return &elem, nil
+	return elem, nil
 }
 
 // decodePointG2 given encoded (x, y) coordinates in 256 bytes returns a valid G2 Point.
-func decodePointG2(in []byte) (*bls12381.G2Affine, error) {
+func decodePointG2(in []byte) (bls12381.G2Affine, error) {
 	if len(in) != 256 {
-		return nil, errors.New("invalid g2 point length")
+		return bls12381.G2Affine{}, errors.New("invalid g2 point length")
 	}
 	x0, err := decodeBLS12381FieldElement(in[:64])
 	if err != nil {
-		return nil, err
+		return bls12381.G2Affine{}, err
 	}
 	x1, err := decodeBLS12381FieldElement(in[64:128])
 	if err != nil {
-		return nil, err
+		return bls12381.G2Affine{}, err
 	}
 	y0, err := decodeBLS12381FieldElement(in[128:192])
 	if err != nil {
-		return nil, err
+		return bls12381.G2Affine{}, err
 	}
 	y1, err := decodeBLS12381FieldElement(in[192:])
 	if err != nil {
-		return nil, err
+		return bls12381.G2Affine{}, err
 	}
 
 	p := bls12381.G2Affine{X: bls12381.E2{A0: x0, A1: x1}, Y: bls12381.E2{A0: y0, A1: y1}}
 	if !p.IsOnCurve() {
-		return nil, errors.New("invalid point: not on curve")
+		return bls12381.G2Affine{}, errors.New("invalid point: not on curve")
 	}
-	return &p, err
+	return p, nil
 }
 
 // decodeBLS12381FieldElement decodes BLS12-381 elliptic curve field element.
@@ -1220,7 +1293,7 @@ func decodeBLS12381FieldElement(in []byte) (fp.Element, error) {
 		return fp.Element{}, errors.New("invalid field element length")
 	}
 	// check top bytes
-	for i := 0; i < 16; i++ {
+	for i := range 16 {
 		if in[i] != byte(0x00) {
 			return fp.Element{}, errBLS12381InvalidFieldElementTopBytes
 		}
@@ -1364,17 +1437,19 @@ func (c *p256Verify) Run(input []byte) ([]byte, error) {
 
 	// Extract the hash, r, s, x, y from the input
 	hash := input[0:32]
-	r, s := new(big.Int).SetBytes(input[32:64]), new(big.Int).SetBytes(input[64:96])
-	x, y := new(big.Int).SetBytes(input[96:128]), new(big.Int).SetBytes(input[128:160])
+	var r, s, x, y big.Int
+	r.SetBytes(input[32:64])
+	s.SetBytes(input[64:96])
+	x.SetBytes(input[96:128])
+	y.SetBytes(input[128:160])
 
 	// Verify the secp256r1 signature
-	if secp256r1.Verify(hash, r, s, x, y) {
+	if secp256r1.Verify(hash, &r, &s, &x, &y) {
 		// Signature is valid
-		return common.LeftPadBytes(common.Big1.Bytes(), 32), nil
-	} else {
-		// Signature is invalid
-		return nil, nil
+		return true32Byte, nil
 	}
+	// Signature is invalid
+	return nil, nil
 }
 
 func (c *p256Verify) Name() string {

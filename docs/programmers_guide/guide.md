@@ -22,12 +22,12 @@ Number of the type `uint64`.
 
 For non-contract accounts, nonce is important in two contexts. Firstly, all transactions signed by an account, have to
 appear in the ledger in the order of strictly increasing nonces (without gaps). This check is performed by member
-function `preCheck` of type `StateTransition` [core/state_transition.go](../../core/state_transition.go)
+function `preCheck` of type `TxnExecutor` [execution/protocol/txn_executor.go](../../execution/protocol/txn_executor.go)
 Secondly, if a transaction signed by an account is sent to no particular address (with intention of creating a contract)
 , and it ends up creating a new smart contract account, the address of such newly created smart contract account is
 calculated based on the current nonce of the "creator" account. For smart contract accounts, nonce is important
 when `CREATE` opcode is executed on behalf of such account. This computation is performed in the member
-function `Create` of the type `EVM` [core/vm/evm.go](../../core/vm/evm.go). Note the difference between the member
+function `Create` of the type `EVM` [execution/vm/evm.go](../../execution/vm/evm.go). Note the difference between the member
 function `Create2`, where the address of the newly created contract is independent of the nonce. For contract accounts,
 the nonce is important in the context of creating new contracts via `CREATE` opcode.
 
@@ -43,8 +43,8 @@ Binary 32-byte (256-bit) string.
 
 By root here one means the Merkle root of the smart contract storage, organised into a tree. Non-contract accounts
 cannot have storage, therefore root makes sense only for smart contract accounts. For non-contract accounts, the root
-field is assumed to be equal to the Merkle root of an empty tree, which is hard-coded in the variable `EmptyRoot` in
-[execution/commitment/trie/trie.go](../../execution/commitment/trie/trie.go). For contract accounts, the root is computed using member function `Hash`
+field is assumed to be equal to the Merkle root of an empty tree, which is hard-coded in the variable `RootHash` in
+[common/empty/empty_hashes.go](../../common/empty/empty_hashes.go). For contract accounts, the root is computed using member function `Hash`
 of type `Trie` [execution/commitment/trie/trie.go](../../execution/commitment/trie/trie.go), once the storage of the contract has been organised into
 the tree by calling member functions
 `Update` and `Delete` on the same type.
@@ -91,11 +91,11 @@ Organising Ethereum State into a Merkle Tree
 Ethereum network produces checkpoints of the Ethereum State after every block. These checkpoints come in a form of
 32-byte binary string, which is the root hash of the Merkle tree constructed out of the accounts in the state. This root
 hash is often referred to as "State root". It is part of block header, and is contained in the field `Root` of the type
-`Header` [core/types/block.go](../../core/types/block.go)
+`Header` [execution/types/block.go](../../execution/types/block.go)
 
 Prior to Byzantium release, the state root was also part of every transaction receipt, and was contained in the
 field `PostState`
-of the type `Receipt` [core/types/receipt.go](../../core/types/receipt.go).
+of the type `Receipt` [execution/types/receipt.go](../../execution/types/receipt.go).
 
 To keep the Merkle Patricia trie of Ethereum state balanced, all the keys (either addresses of Ethereum accounts and
 contracts, or storage positions within contract storage) are converted into their respective hashes using `Keccak256`
@@ -550,7 +550,7 @@ demand. It looks up the state at the point just before the transaction in questi
 re-executes transaction, and re-generates the receipt. This can only work if the history of the state is available for
 the period of time including the transaction.
 
-[See more about blocks and transactions processing here](/docs/readthedocs/source/stagedsync.rst)
+[See more about blocks and transactions processing here](/execution/stagedsync/README.md)
 
 
 Dev Net with Geth nodes

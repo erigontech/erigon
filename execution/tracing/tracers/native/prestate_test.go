@@ -1,0 +1,536 @@
+// Copyright 2026 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+package native
+
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"testing"
+
+	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
+	executionstate "github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/rpc/jsonstream"
+)
+
+var _ tracing.IntraBlockState = (*postTxIBS)(nil)
+
+// postTxIBS simulates the IntraBlockState *after* a transaction where deletedAddr
+// no longer exists (GetCodeHash returns NilCodeHash) and all other accounts are
+// codeless-but-existent (EmptyCodeHash).
+type postTxIBS struct {
+	deletedAddr accounts.Address
+}
+
+func (m *postTxIBS) GetBalance(accounts.Address) (uint256.Int, error) { return uint256.Int{}, nil }
+func (m *postTxIBS) GetNonce(accounts.Address) (uint64, error)        { return 0, nil }
+func (m *postTxIBS) GetCode(accounts.Address) ([]byte, error)         { return nil, nil }
+func (m *postTxIBS) GetCodeHash(addr accounts.Address) (accounts.CodeHash, error) {
+	if addr == m.deletedAddr {
+		return accounts.NilCodeHash, nil
+	}
+	return accounts.EmptyCodeHash, nil
+}
+
+func (m *postTxIBS) GetState(accounts.Address, accounts.StorageKey) (uint256.Int, error) {
+	return uint256.Int{}, nil
+}
+func (m *postTxIBS) Exist(accounts.Address) (bool, error)             { return false, nil }
+func (m *postTxIBS) HasSelfdestructed(accounts.Address) (bool, error) { return false, nil }
+func (m *postTxIBS) GetRefund() uint64                                { return 0 }
+
+func newTestPrestateTracer(cfg prestateTracerConfig) *prestateTracer {
+	return &prestateTracer{
+		pre:    state{},
+		post:   state{},
+		config: cfg,
+	}
+}
+
+// fakeOpContext is a minimal tracing.OpContext carrying only a stack and the
+// executing contract address, as seen by OnOpcode.
+type fakeOpContext struct {
+	stack []uint256.Int
+	addr  accounts.Address
+}
+
+func (c *fakeOpContext) MemoryData() []byte          { return nil }
+func (c *fakeOpContext) StackData() []uint256.Int    { return c.stack }
+func (c *fakeOpContext) Gas() mdgas.MdGas            { return mdgas.MdGas{} }
+func (c *fakeOpContext) Caller() accounts.Address    { return c.addr }
+func (c *fakeOpContext) Address() accounts.Address   { return c.addr }
+func (c *fakeOpContext) CallValue() uint256.Int      { return uint256.Int{} }
+func (c *fakeOpContext) CallInput() []byte           { return nil }
+func (c *fakeOpContext) Code() []byte                { return nil }
+func (c *fakeOpContext) CodeHash() accounts.CodeHash { return accounts.EmptyCodeHash }
+
+// TestPrestateTracerOnOpcodeFaultedSkipsLookup verifies that an opcode invoked
+// with a non-nil err (fault path, e.g. out-of-gas at the opcode itself) does not
+// record any touched account or storage slot: in consensus terms the access never
+// happened (no EIP-2929 warm-up), and go-ethereum skips it since PR #26848.
+func TestPrestateTracerOnOpcodeFaultedSkipsLookup(t *testing.T) {
+	caller := accounts.InternAddress(common.HexToAddress("0x0000000000000000000000000000000000001111"))
+	target := accounts.InternAddress(common.HexToAddress("0x0000000000000000000000000000000000002222"))
+
+	tr := newTestPrestateTracer(prestateTracerConfig{})
+	tr.env = &tracing.VMContext{
+		IntraBlockState: &postTxIBS{},
+	}
+	tr.lookupAccount(caller)
+
+	// EXTCODESIZE faulting with the target address as operand
+	// (real-world case: mainnet tx 0x84357b59..., block 25634962, OOG at EXTCODESIZE).
+	targetAddr := target.Value()
+	var operand uint256.Int
+	operand.SetBytes(targetAddr[:])
+	stack := []uint256.Int{operand}
+	tr.OnOpcodeV2(0, byte(vm.EXTCODESIZE), mdgas.MdGas{Execution: 1724}, mdgas.MdGasCost{Execution: 2600}, &fakeOpContext{stack: stack, addr: caller}, nil, 2, vm.ErrOutOfGas)
+
+	_, ok := tr.pre[target]
+	require.False(t, ok, "account referenced by a faulted EXTCODESIZE must not be recorded in the prestate")
+
+	// SLOAD faulting with the slot key as operand
+	// (real-world case: mainnet tx 0xa4b924b4..., block 25638021, OOG at SLOAD).
+	slot := common.HexToHash("0xbaaed5f3d2bc4b0bc4f1758fde25c1522c4254f5b2fbfa513449670cff246a98")
+	operand.SetBytes(slot[:])
+	stack = []uint256.Int{operand}
+	tr.OnOpcodeV2(0, byte(vm.SLOAD), mdgas.MdGas{Execution: 1577}, mdgas.MdGasCost{Execution: 2100}, &fakeOpContext{stack: stack, addr: caller}, nil, 1, vm.ErrOutOfGas)
+
+	require.NotContains(t, tr.pre[caller].Storage, slot,
+		"storage slot referenced by a faulted SLOAD must not be recorded in the prestate")
+}
+
+// codeIBS serves one contract whose code hash is stored apart from its code, as the
+// state stores it.
+type codeIBS struct {
+	postTxIBS
+	code     []byte
+	codeHash accounts.CodeHash
+}
+
+func (m *codeIBS) GetCode(accounts.Address) ([]byte, error) { return m.code, nil }
+func (m *codeIBS) GetCodeHash(accounts.Address) (accounts.CodeHash, error) {
+	return m.codeHash, nil
+}
+
+// The state already holds each account's code hash, so lookupAccount reports it
+// instead of hashing the whole bytecode again. The fake's hash is not keccak(code),
+// which shows where the reported hash comes from.
+func TestPrestateTracerTakesCodeHashFromState(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0x0000000000000000000000000000000000003333"))
+	stateHash := common.HexToHash("0x0101010101010101010101010101010101010101010101010101010101010101")
+
+	tr := newTestPrestateTracer(prestateTracerConfig{})
+	tr.env = &tracing.VMContext{
+		IntraBlockState: &codeIBS{code: []byte{0x60, 0x00, 0x60, 0x00, 0xf3}, codeHash: accounts.InternCodeHash(stateHash)},
+	}
+	tr.lookupAccount(addr)
+
+	acc, ok := tr.pre[addr]
+	require.True(t, ok)
+	require.NotNil(t, acc.CodeHash)
+	require.Equal(t, stateHash, *acc.CodeHash)
+}
+
+// TestPrestateTracerDiffModeDeletedAccount verifies that an account deleted during
+// a tx appears in the diff-mode post state with codeHash == 0x000...000.
+func TestPrestateTracerDiffModeDeletedAccount(t *testing.T) {
+	deletedAddr := accounts.InternAddress(common.HexToAddress("0x0000000000000000000000000000000000001234"))
+
+	tr := newTestPrestateTracer(prestateTracerConfig{DiffMode: true, DisableCode: true, DisableStorage: true})
+
+	tr.pre[deletedAddr] = &account{Balance: new(hexutil.U256)}
+
+	tr.env = &tracing.VMContext{
+		IntraBlockState: &postTxIBS{deletedAddr: deletedAddr},
+	}
+
+	tr.processDiffState()
+
+	post, ok := tr.post[deletedAddr]
+	require.True(t, ok, "deleted account must appear in post state")
+	require.NotNil(t, post.CodeHash, "deleted account must carry codeHash in post state")
+	require.Equal(t, common.Hash{}, *post.CodeHash, "deleted account must have zero codeHash")
+}
+
+func TestPrestateTracerDiffModeAfterFinalization(t *testing.T) {
+	ibs := executionstate.New(executionstate.NewNoopReader())
+	t.Cleanup(ibs.Close)
+	from := accounts.InternAddress(common.HexToAddress("0x1000"))
+	contract := accounts.InternAddress(common.HexToAddress("0x2000"))
+	require.NoError(t, ibs.SetCode(contract, []byte{byte(vm.STOP)}, tracing.CodeChangeUnspecified))
+	tracer, err := newPrestateTracer(nil, json.RawMessage(`{"diffMode":true}`))
+	require.NoError(t, err)
+	tx := types.NewTransaction(0, contract.Value(), new(uint256.Int), 100_000, new(uint256.Int), nil)
+	tracer.OnTxStart(&tracing.VMContext{ChainConfig: &chain.Config{}, Coinbase: accounts.ZeroAddress, IntraBlockState: ibs}, tx, from)
+	tracer.OnOpcodeV2(0, byte(vm.SELFDESTRUCT), mdgas.MdGas{}, mdgas.MdGasCost{}, &fakeOpContext{addr: contract, stack: []uint256.Int{{1}}}, nil, 1, nil)
+	_, err = ibs.Selfdestruct(contract, false)
+	require.NoError(t, err)
+	tracer.EmitExit(0, nil, mdgas.MdGasUsage{}, nil, false)
+	require.NoError(t, ibs.FinalizeTx(&chain.Rules{}, executionstate.NewNoopWriter()))
+	tracer.EmitTxEnd(&types.Receipt{}, mdgas.TxnGasUsage{}, nil)
+	result, err := tracer.GetResult()
+	require.NoError(t, err)
+	var diff struct {
+		Pre  map[common.Address]json.RawMessage `json:"pre"`
+		Post map[common.Address]json.RawMessage `json:"post"`
+	}
+	require.NoError(t, json.Unmarshal(result, &diff))
+	require.Contains(t, diff.Pre, contract.Value())
+	require.NotContains(t, diff.Post, contract.Value())
+}
+
+func TestPrestateTracerRetainedBalance(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		amsterdam bool
+		finalize  bool
+		prefund   uint64
+	}{
+		{name: "before finalization", amsterdam: true},
+		{name: "after finalization", amsterdam: true, finalize: true},
+		{name: "unchanged balance before finalization", amsterdam: true, prefund: 7},
+		{name: "unchanged balance after finalization", amsterdam: true, finalize: true, prefund: 7},
+		{name: "before Amsterdam"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ibs := executionstate.New(executionstate.NewNoopReader())
+			t.Cleanup(ibs.Close)
+			from := accounts.InternAddress(common.HexToAddress("0x1000"))
+			contract := accounts.InternAddress(common.HexToAddress("0x2000"))
+			require.NoError(t, ibs.SetBalance(contract, *uint256.NewInt(tc.prefund), tracing.BalanceChangeUnspecified))
+			cfg := &chain.Config{}
+			if tc.amsterdam {
+				cfg.AmsterdamTime = common.NewUint64(0)
+			}
+			tracer, err := newPrestateTracer(nil, json.RawMessage(`{"diffMode":true}`))
+			require.NoError(t, err)
+			tx := types.NewTransaction(0, contract.Value(), new(uint256.Int), 100_000, new(uint256.Int), nil)
+			tracer.OnTxStart(&tracing.VMContext{ChainConfig: cfg, Coinbase: accounts.ZeroAddress, IntraBlockState: ibs}, tx, from)
+			require.NoError(t, ibs.CreateAccount(contract, true))
+			require.NoError(t, ibs.SetNonce(contract, 1, tracing.NonceChangeUnspecified))
+			require.NoError(t, ibs.SetCode(contract, []byte{byte(vm.STOP)}, tracing.CodeChangeUnspecified))
+			tracer.OnOpcodeV2(0, byte(vm.SSTORE), mdgas.MdGas{}, mdgas.MdGasCost{}, &fakeOpContext{addr: contract, stack: []uint256.Int{{1}, {}}}, nil, 1, nil)
+			require.NoError(t, ibs.SetState(contract, accounts.InternKey(common.Hash{}), uint256.Int{1}))
+			_, err = ibs.Selfdestruct(contract, tc.amsterdam)
+			require.NoError(t, err)
+			tracer.EmitExit(0, nil, mdgas.MdGasUsage{}, nil, false)
+			// Settlement can credit an account after the root call has returned.
+			require.NoError(t, ibs.SetBalance(contract, uint256.Int{7}, tracing.BalanceChangeUnspecified))
+			if tc.finalize {
+				require.NoError(t, ibs.FinalizeTx(&chain.Rules{IsAmsterdam: tc.amsterdam}, executionstate.NewNoopWriter()))
+			}
+			tracer.EmitTxEnd(&types.Receipt{}, mdgas.TxnGasUsage{}, nil)
+			result, err := tracer.GetResult()
+			require.NoError(t, err)
+			var diff struct {
+				Pre  map[common.Address]json.RawMessage `json:"pre"`
+				Post map[common.Address]json.RawMessage `json:"post"`
+			}
+			require.NoError(t, json.Unmarshal(result, &diff))
+			require.NotContains(t, diff.Pre, contract.Value())
+			if tc.amsterdam && tc.prefund == 0 {
+				require.Contains(t, diff.Post, contract.Value())
+				require.JSONEq(t, `{"balance":"0x7"}`, string(diff.Post[contract.Value()]))
+			} else {
+				require.NotContains(t, diff.Post, contract.Value())
+			}
+		})
+	}
+}
+
+// TestPrestateTracerOnTxEndExcludesAccountEmptyBeforeStorageTouched pins the
+// account.empty invariant (see its field doc) against a virgin-SLOAD account.
+func TestPrestateTracerOnTxEndExcludesAccountEmptyBeforeStorageTouched(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0x0000000000000000000000000000000000004242"))
+	otherAddr := accounts.InternAddress(common.HexToAddress("0x0000000000000000000000000000000000009999"))
+
+	tr := newTestPrestateTracer(prestateTracerConfig{})
+	tr.env = &tracing.VMContext{
+		IntraBlockState: &postTxIBS{deletedAddr: otherAddr},
+	}
+
+	tr.lookupAccount(addr)
+	tr.lookupStorage(addr, common.HexToHash("0x01"))
+
+	tr.OnTxEndV2(nil, mdgas.TxnGasUsage{}, nil)
+
+	_, ok := tr.pre[addr]
+	require.False(t, ok, "account empty before the tx must be excluded even though its storage was read during the tx")
+}
+
+// TestPrestateTracerDiffModeCodelessUnchanged verifies that a codeless account
+// with no state changes does NOT appear in the post state (no false positive).
+func TestPrestateTracerDiffModeCodelessUnchanged(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0x0000000000000000000000000000000000005678"))
+	// Use a different deleted addr so that `addr` is treated as still-existent.
+	otherAddr := accounts.InternAddress(common.HexToAddress("0x0000000000000000000000000000000000009999"))
+
+	tr := newTestPrestateTracer(prestateTracerConfig{DiffMode: true, DisableCode: true, DisableStorage: true})
+
+	tr.pre[addr] = &account{Balance: new(hexutil.U256)}
+
+	tr.env = &tracing.VMContext{
+		IntraBlockState: &postTxIBS{deletedAddr: otherAddr},
+	}
+
+	tr.processDiffState()
+
+	_, ok := tr.post[addr]
+	require.False(t, ok, "unchanged codeless account must NOT appear in post state")
+}
+
+// TestPrestateTracerDiffModeZeroStorageUnmodified verifies that a storage slot
+// read as zero and unchanged (e.g. an SLOAD on a virgin slot) does not create
+// a spurious diff entry: the account must be excluded from both pre and post.
+func TestPrestateTracerDiffModeZeroStorageUnmodified(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0x0000000000000000000000000000000000004242"))
+	otherAddr := accounts.InternAddress(common.HexToAddress("0x0000000000000000000000000000000000009999"))
+
+	tr := newTestPrestateTracer(prestateTracerConfig{DiffMode: true})
+
+	tr.pre[addr] = &account{
+		Balance: new(hexutil.U256),
+		Storage: map[common.Hash]common.Hash{
+			common.HexToHash("0x01"): {},
+		},
+	}
+
+	tr.env = &tracing.VMContext{
+		IntraBlockState: &postTxIBS{deletedAddr: otherAddr},
+	}
+
+	tr.processDiffState()
+
+	_, inPre := tr.pre[addr]
+	require.False(t, inPre, "unmodified account with only a zero storage slot must not remain in pre state")
+	_, inPost := tr.post[addr]
+	require.False(t, inPost, "unmodified account with only a zero storage slot must not appear in post state")
+}
+
+// A MarshalJSON on callFrame makes encoding/json re-scan every nested frame's
+// bytes at each level, which is quadratic in call depth. Reflection over the
+// wire types encodes children inline instead.
+func TestCallFrameHasNoJSONMarshaler(t *testing.T) {
+	t.Parallel()
+	_, bad := any(&callFrame{}).(json.Marshaler)
+	require.False(t, bad, "callFrame must not implement json.Marshaler")
+}
+
+// The flat frames are encoded as a slice, so a MarshalJSON on any of them sends
+// the whole slice down marshalerEncoder and re-scans each frame's bytes. The
+// output tests below pass either way, so the absence is asserted here.
+func TestFlatCallTypesHaveNoJSONMarshaler(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		v    any
+	}{
+		{"flatCallFrame", &flatCallFrame{}},
+		{"flatCallAction", &flatCallAction{}},
+		{"flatCallResult", &flatCallResult{}},
+	} {
+		_, bad := tc.v.(json.Marshaler)
+		require.False(t, bad, "%s must not implement json.Marshaler", tc.name)
+	}
+}
+
+// A zero value and a call to the zero address are both real, so only a nil
+// pointer may be omitted. The flat tracer depends on this: it fills in a zero
+// value for child calls precisely so the key is present.
+func TestOnlyNilPointersAreOmitted(t *testing.T) {
+	t.Parallel()
+	zeroV := hexutil.U256(*uint256.NewInt(0))
+	var zeroAddr common.Address
+
+	var set callFrame
+	set.setType(vm.CALL)
+	set.Value, set.To = &zeroV, &zeroAddr
+	b, err := json.Marshal(set)
+	require.NoError(t, err)
+	require.Contains(t, string(b), `"value":"0x0"`)
+	require.Contains(t, string(b), `"to":"0x0000000000000000000000000000000000000000"`)
+
+	var unset callFrame
+	unset.setType(vm.CREATE)
+	b, err = json.Marshal(unset)
+	require.NoError(t, err)
+	require.NotContains(t, string(b), `"value"`)
+	require.NotContains(t, string(b), `"to"`)
+	require.Contains(t, string(b), `"input":"0x"`, "input carries no omitempty")
+}
+
+// The flat tracer's output is the public parity/OE trace shape. These cases pin
+// it exactly — field names, ordering, omissions and quantity encoding — because
+// the wire types on the frame are all that produce it now.
+func TestFlatCallFrameJSON(t *testing.T) {
+	t.Parallel()
+
+	from := common.HexToAddress("0x1111111111111111111111111111111111111111")
+	to := common.HexToAddress("0x2222222222222222222222222222222222222222")
+	zero := hexutil.U256(*uint256.NewInt(0))
+	maxU256 := hexutil.U256(*new(uint256.Int).SetAllOne())
+
+	for _, tc := range []struct {
+		name  string
+		build func() *flatCallFrame
+		want  string
+	}{
+		{
+			name: "call",
+			build: func() *flatCallFrame {
+				f := &callFrame{
+					From: from, To: &to, Gas: 0x1234, GasUsed: 0x100,
+					Input: hexutil.Bytes{0xaa, 0xbb}, Output: hexutil.Bytes{0xcc}, Value: &zero,
+				}
+				f.setType(vm.CALL)
+				return newFlatCall(f)
+			},
+			want: `{"action":{"callType":"call","from":"0x1111111111111111111111111111111111111111","gas":"0x1234","input":"0xaabb","to":"0x2222222222222222222222222222222222222222","value":"0x0"},"blockHash":null,"blockNumber":0,"result":{"gasUsed":"0x100","output":"0xcc"},"subtraces":0,"traceAddress":null,"transactionHash":null,"transactionPosition":0,"type":"call"}`,
+		},
+		{
+			name: "delegatecall keeps its callType and a max value",
+			build: func() *flatCallFrame {
+				f := &callFrame{From: from, To: &to, Gas: 1, GasUsed: 2, Value: &maxU256}
+				f.setType(vm.DELEGATECALL)
+				return newFlatCall(f)
+			},
+			want: `{"action":{"callType":"delegatecall","from":"0x1111111111111111111111111111111111111111","gas":"0x1","input":"0x","to":"0x2222222222222222222222222222222222222222","value":"0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"},"blockHash":null,"blockNumber":0,"result":{"gasUsed":"0x2","output":"0x"},"subtraces":0,"traceAddress":null,"transactionHash":null,"transactionPosition":0,"type":"call"}`,
+		},
+		{
+			name: "create2 reports the deployed code and address",
+			build: func() *flatCallFrame {
+				f := &callFrame{
+					From: from, To: &to, Gas: 0x10, GasUsed: 0x8,
+					Input: hexutil.Bytes{0x60, 0x80}, Output: hexutil.Bytes{0xfe}, Value: &zero,
+				}
+				f.setType(vm.CREATE2)
+				return newFlatCreate(f)
+			},
+			want: `{"action":{"creationMethod":"create2","from":"0x1111111111111111111111111111111111111111","gas":"0x10","init":"0x6080","value":"0x0"},"blockHash":null,"blockNumber":0,"result":{"address":"0x2222222222222222222222222222222222222222","code":"0xfe","gasUsed":"0x8"},"subtraces":0,"traceAddress":null,"transactionHash":null,"transactionPosition":0,"type":"create"}`,
+		},
+		{
+			name: "selfdestruct carries no result",
+			build: func() *flatCallFrame {
+				f := &callFrame{From: from, To: &to, Value: &zero}
+				f.setType(vm.SELFDESTRUCT)
+				return newFlatSelfdestruct(f)
+			},
+			want: `{"action":{"address":"0x1111111111111111111111111111111111111111","balance":"0x0","refundAddress":"0x2222222222222222222222222222222222222222"},"blockHash":null,"blockNumber":0,"subtraces":0,"traceAddress":null,"transactionHash":null,"transactionPosition":0,"type":"suicide"}`,
+		},
+		{
+			name: "nil and empty byte fields both encode as 0x",
+			build: func() *flatCallFrame {
+				f := &callFrame{From: from, To: &to, Input: nil, Output: hexutil.Bytes{}, Value: &zero}
+				f.setType(vm.CALL)
+				return newFlatCall(f)
+			},
+			want: `{"action":{"callType":"call","from":"0x1111111111111111111111111111111111111111","gas":"0x0","input":"0x","to":"0x2222222222222222222222222222222222222222","value":"0x0"},"blockHash":null,"blockNumber":0,"result":{"gasUsed":"0x0","output":"0x"},"subtraces":0,"traceAddress":null,"transactionHash":null,"transactionPosition":0,"type":"call"}`,
+		},
+		{
+			name: "a failed call reports error and drops the result",
+			build: func() *flatCallFrame {
+				f := &callFrame{From: from, To: &to, Value: &zero}
+				f.setType(vm.CALL)
+				fc := newFlatCall(f)
+				fc.Error, fc.Result = "Reverted", nil
+				return fc
+			},
+			want: `{"action":{"callType":"call","from":"0x1111111111111111111111111111111111111111","gas":"0x0","input":"0x","to":"0x2222222222222222222222222222222222222222","value":"0x0"},"blockHash":null,"blockNumber":0,"error":"Reverted","subtraces":0,"traceAddress":null,"transactionHash":null,"transactionPosition":0,"type":"call"}`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			b, err := json.Marshal(tc.build())
+			require.NoError(t, err)
+			require.Equal(t, tc.want, string(b))
+		})
+	}
+}
+
+// A MarshalJSON on account makes encoding/json re-parse every account's bytes
+// while encoding the map that holds them. Reflection over the wire types does
+// not.
+func TestAccountHasNoJSONMarshaler(t *testing.T) {
+	t.Parallel()
+	_, bad := any(&account{}).(json.Marshaler)
+	require.False(t, bad, "account must not implement json.Marshaler")
+}
+
+type fastJSON func(*jsonstream.Stream) error
+
+func (f fastJSON) MarshalFastJSONTo(s *jsonstream.Stream) error { return f(s) }
+
+// fastJSONTestState holds the shapes encoding/json treats differently: an empty account kept by
+// includeEmpty, code cleared to 0x, absent fields, and keys inserted out of their sorted order.
+func fastJSONTestState() state {
+	code, cleared := hexutil.Bytes{0x60, 0x00}, hexutil.Bytes{}
+	codeHash := common.HexToHash("0xc0de")
+	return state{
+		accounts.InternAddress(common.HexToAddress("0xff00")): {
+			Balance:  (*hexutil.U256)(uint256.NewInt(1 << 40)),
+			Code:     &code,
+			CodeHash: &codeHash,
+			Nonce:    7,
+			Storage: map[common.Hash]common.Hash{
+				common.HexToHash("0x02"): common.HexToHash("0xbb"),
+				common.HexToHash("0x01"): common.HexToHash("0xaa"),
+				common.HexToHash("0xf0"): {},
+			},
+		},
+		accounts.InternAddress(common.HexToAddress("0x00ff")): {Balance: new(hexutil.U256), Storage: map[common.Hash]common.Hash{}},
+		accounts.InternAddress(common.HexToAddress("0x0a00")): {Code: &cleared},
+		accounts.InternAddress(common.HexToAddress("0x00a0")): {Nonce: 1},
+	}
+}
+
+func TestPrestateTracerFastJSONMatchesGetResult(t *testing.T) {
+	t.Parallel()
+	for _, cfg := range []prestateTracerConfig{{}, {IncludeEmpty: true}, {DiffMode: true}} {
+		tr := newTestPrestateTracer(cfg)
+		tr.pre = fastJSONTestState()
+		if cfg.DiffMode {
+			tr.post = fastJSONTestState()
+		}
+		want, err := tr.GetResult()
+		require.NoError(t, err)
+		got, err := jsonstream.Marshal(fastJSON(tr.MarshalFastJSONTo))
+		require.NoError(t, err)
+		require.Equal(t, string(want), string(got), "config %+v", cfg)
+	}
+}
+
+func TestPrestateTracerFastJSONStoppedWritesNothing(t *testing.T) {
+	t.Parallel()
+	tr := newTestPrestateTracer(prestateTracerConfig{})
+	tr.pre = fastJSONTestState()
+	tr.Stop(errors.New("stopped"))
+	var buf bytes.Buffer
+	s := jsonstream.New(&buf)
+	require.EqualError(t, tr.MarshalFastJSONTo(s), "stopped")
+	require.Empty(t, s.Buffer(), "a stopped tracer writes nothing")
+}

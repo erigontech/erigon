@@ -53,9 +53,17 @@ func TestLiteralConverters(t *testing.T) {
 	require.Equal(t, []byte{0x58, 0x2, 0x0, 0x0, 0x0, 0x0, 0x00, 0x00}, utils.Uint64ToLE(600))
 }
 
-func TestReverseBytes(t *testing.T) {
-	input := common.HexToHash("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f")
-	reversed := common.HexToHash("1f1e1d1c1b1a191817161514131211100f0e0d0c0b0a09080706050403020100")
-	utils.ReverseBytes(&input)
-	require.Equal(t, reversed, input)
+func TestDecompressSnappyWithLimit(t *testing.T) {
+	payload := make([]byte, 1024)
+	compressed := utils.CompressSnappy(payload)
+
+	decoded, err := utils.DecompressSnappyWithLimit(compressed, 1024)
+	require.NoError(t, err)
+	require.Equal(t, payload, decoded)
+
+	_, err = utils.DecompressSnappyWithLimit(compressed, 1023)
+	require.Error(t, err)
+	require.Zero(t, testing.AllocsPerRun(10, func() {
+		_, _ = utils.DecompressSnappyWithLimit(compressed, 1023)
+	}), "an oversized declared length must be rejected before allocating")
 }

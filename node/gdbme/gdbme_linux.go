@@ -57,8 +57,9 @@ func RestartUnderGDB() {
 	}
 
 	// Формируем аргументы для GDB
-	var gdbArgs = make([]string, 0, len(gdbCommands)+10)
-	gdbArgs = append(gdbArgs,
+	gdbArgs := make([]string, 0, len(gdbCommands)+10)
+	gdbArgs = append(
+		gdbArgs,
 		"-q",
 		"-batch",
 		"-nx",
@@ -72,7 +73,7 @@ func RestartUnderGDB() {
 	gdbArgs = append(gdbArgs, filteredArgs...)
 
 	fmt.Fprintln(os.Stderr, "Restarting under GDB for crash diagnostics...")
-	cmd := exec.CommandContext(context.Background(), gdbPath, gdbArgs...)
+	cmd := exec.CommandContext(context.Background(), gdbPath, gdbArgs...) //nolint:gosec // re-runs this binary with its own args
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin

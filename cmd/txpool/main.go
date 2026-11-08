@@ -25,9 +25,11 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"google.golang.org/grpc"
+	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/cmd/utils/flags"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -73,7 +75,8 @@ var (
 
 	mdbxWriteMap bool
 
-	commitEvery time.Duration
+	commitEvery         time.Duration
+	queuedDormancyEvery time.Duration
 )
 
 func init() {
@@ -81,7 +84,7 @@ func init() {
 	rootCmd.Flags().StringSliceVar(&sentryAddr, "sentry.api.addr", []string{"localhost:9091"}, "comma separated sentry addresses '<host>:<port>,<host>:<port>'")
 	rootCmd.Flags().StringVar(&privateApiAddr, "private.api.addr", "localhost:9090", "execution service <host>:<port>")
 	rootCmd.Flags().StringVar(&txpoolApiAddr, "txpool.api.addr", "localhost:9094", "txpool service <host>:<port>")
-	rootCmd.Flags().StringVar(&datadirCli, utils.DataDirFlag.Name, paths.DefaultDataDir(), utils.DataDirFlag.Usage)
+	flags.DirVar(rootCmd.Flags(), &datadirCli, utils.DataDirFlag.Name, paths.DefaultDataDir(), utils.DataDirFlag.Usage)
 	if err := rootCmd.MarkFlagDirname(utils.DataDirFlag.Name); err != nil {
 		panic(err)
 	}
@@ -99,6 +102,7 @@ func init() {
 	rootCmd.PersistentFlags().Uint64Var(&priceBump, "txpool.pricebump", txpoolcfg.DefaultConfig.PriceBump, "Price bump percentage to replace an already existing transaction")
 	rootCmd.PersistentFlags().Uint64Var(&blobPriceBump, "txpool.blobpricebump", txpoolcfg.DefaultConfig.BlobPriceBump, "Price bump percentage to replace an existing blob (type-3) transaction")
 	rootCmd.PersistentFlags().DurationVar(&commitEvery, utils.TxPoolCommitEveryFlag.Name, utils.TxPoolCommitEveryFlag.Value, utils.TxPoolCommitEveryFlag.Usage)
+	rootCmd.PersistentFlags().DurationVar(&queuedDormancyEvery, utils.TxPoolQueuedDormancyFlag.Name, utils.TxPoolQueuedDormancyFlag.Value, utils.TxPoolQueuedDormancyFlag.Usage)
 	rootCmd.PersistentFlags().BoolVar(&noTxGossip, utils.TxPoolGossipDisableFlag.Name, utils.TxPoolGossipDisableFlag.Value, utils.TxPoolGossipDisableFlag.Usage)
 	rootCmd.PersistentFlags().BoolVar(&mdbxWriteMap, utils.DbWriteMapFlag.Name, utils.DbWriteMapFlag.Value, utils.DbWriteMapFlag.Usage)
 	rootCmd.Flags().StringSliceVar(&traceSenders, utils.TxPoolTraceSendersFlag.Name, []string{}, utils.TxPoolTraceSendersFlag.Usage)
@@ -111,7 +115,7 @@ var rootCmd = &cobra.Command{
 		debug.Exit()
 	},
 	Run: func(cmd *cobra.Command, args []string) {
-		logger := debug.SetupCobra(cmd, "integration")
+		logger := debug.SetupCobra(cmd, "txpool")
 		if err := doTxpool(cmd.Context(), logger); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				log.Error(err.Error())
@@ -130,8 +134,17 @@ func doTxpool(ctx context.Context, logger log.Logger) error {
 	if err != nil {
 		return fmt.Errorf("could not connect to remoteKv: %w", err)
 	}
+	defer coreConn.Close()
 
 	ethBackendClient := remoteproto.NewETHBACKENDClient(coreConn)
+	backendVersion, err := ethBackendClient.Version(ctx, &emptypb.Empty{}, grpc.WaitForReady(true))
+	if err != nil {
+		return fmt.Errorf("could not get ETHBACKEND version: %w", err)
+	}
+	expectedVersion := gointerfaces.VersionFromProto(privateapi.EthBackendAPIVersion)
+	if !gointerfaces.EnsureVersion(expectedVersion, backendVersion) {
+		return fmt.Errorf("incompatible ETHBACKEND versions: client %s, server %s", expectedVersion, gointerfaces.VersionFromProto(backendVersion))
+	}
 	kvClient := remoteproto.NewKVClient(coreConn)
 	coreDB, err := remotedb.NewRemote(gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion), log.New(), kvClient).Open()
 	if err != nil {
@@ -171,6 +184,7 @@ func doTxpool(ctx context.Context, logger log.Logger) error {
 	cfg.BlobPriceBump = blobPriceBump
 	cfg.NoGossip = noTxGossip
 	cfg.MdbxWriteMap = mdbxWriteMap
+	cfg.QueuedDormancyDuration = queuedDormancyEvery
 
 	cacheConfig := kvcache.DefaultCoherentConfig
 	cacheConfig.MetricsLabel = "txpool"
@@ -197,8 +211,8 @@ func doTxpool(ctx context.Context, logger log.Logger) error {
 		return err
 	}
 
-	miningGrpcServer := privateapi.NewMiningServer(ctx, &rpcdaemontest.IsMiningMock{}, nil, logger)
-	grpcServer, err := txpool.StartGrpc(txpoolGrpcServer, miningGrpcServer, txpoolApiAddr, nil, logger)
+	miningGrpcServer := privateapi.NewMiningServer(ctx, privateapi.NoMining{}, nil, logger)
+	grpcServer, err := txpool.StartGrpc(ctx, txpoolGrpcServer, miningGrpcServer, txpoolApiAddr, nil, logger)
 	if err != nil {
 		return err
 	}
@@ -213,11 +227,14 @@ func doTxpool(ctx context.Context, logger log.Logger) error {
 }
 
 func main() {
-	ctx, cancel := common.RootContext()
-	defer cancel()
-
-	if err := rootCmd.ExecuteContext(ctx); err != nil {
+	if err := run(); err != nil {
 		fmt.Println(err)
 		os.Exit(1)
 	}
+}
+
+func run() error {
+	ctx, cancel := common.RootContext()
+	defer cancel()
+	return rootCmd.ExecuteContext(ctx)
 }

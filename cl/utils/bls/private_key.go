@@ -31,6 +31,20 @@ func GenerateKey() (*PrivateKey, error) {
 	return privateKey, nil
 }
 
+// NewPrivateKeyFromIKM derives a BLS private key from input keying material
+// using blst.KeyGen (reduces modulo curve order). For deterministic key
+// derivation in dev/test contexts.
+func NewPrivateKeyFromIKM(ikm []byte) (*PrivateKey, error) {
+	if len(ikm) < 32 {
+		return nil, fmt.Errorf("bls(ikm): input must be at least 32 bytes, got %d", len(ikm))
+	}
+	privateKey := &PrivateKey{key: blst.KeyGen(ikm)}
+	if privateKey.isZero() {
+		return nil, ErrZeroPrivateKey
+	}
+	return privateKey, nil
+}
+
 // PrivateKeyFromBytes creates a BLS private key from bytes.
 func NewPrivateKeyFromBytes(privKey []byte) (*PrivateKey, error) {
 	if len(privKey) != privateKeyLength {

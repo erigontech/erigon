@@ -2,13 +2,9 @@ package stagedsync
 
 import (
 	"errors"
-	"fmt"
+	"slices"
 	"sort"
-	"strconv"
-	"strings"
 	"time"
-
-	"github.com/erigontech/erigon/execution/state"
 )
 
 type ExecutionStat struct {
@@ -17,89 +13,26 @@ type ExecutionStat struct {
 	Duration    time.Duration
 }
 
-// Find the longest execution path in the DAG
-func LongestPath(d *state.DAG, stats map[int]ExecutionStat) ([]int, uint64) {
-	prev := make(map[int]int, len(d.GetVertices()))
-
-	for i := 0; i < len(d.GetVertices()); i++ {
-		prev[i] = -1
-	}
-
-	pathWeights := make(map[int]uint64, len(d.GetVertices()))
-
-	maxPath := 0
-	maxPathWeight := uint64(0)
-
-	idxToId := make(map[int]string, len(d.GetVertices()))
-
-	for k, i := range d.GetVertices() {
-		idxToId[i.(int)] = k
-	}
-
-	for i := 0; i < len(idxToId); i++ {
-		parents, _ := d.GetParents(idxToId[i])
-
-		if len(parents) > 0 {
-			for _, p := range parents {
-				weight := pathWeights[p.(int)] + uint64(stats[i].Duration)
-				if weight > pathWeights[i] {
-					pathWeights[i] = weight
-					prev[i] = p.(int)
-				}
-			}
-		} else {
-			pathWeights[i] = uint64(stats[i].Duration)
-		}
-
-		if pathWeights[i] > maxPathWeight {
-			maxPath = i
-			maxPathWeight = pathWeights[i]
-		}
-	}
-
-	path := make([]int, 0)
-	for i := maxPath; i != -1; i = prev[i] {
-		path = append(path, i)
-	}
-
-	// Reverse the path so the transactions are in the ascending order
-	for i, j := 0, len(path)-1; i < j; i, j = i+1, j-1 {
-		path[i], path[j] = path[j], path[i]
-	}
-
-	return path, maxPathWeight
+// complete/inProgress use dense []bool (O(1)) rather than sorted []int: completions
+// arrive out of tx order, so slice insert/delete would be O(n²) per block.
+type execStatusList struct {
+	pending       []int
+	inProgress    []bool
+	complete      []bool
+	dependency    map[int]map[int]bool
+	blocker       map[int]map[int]bool
+	inProgressCnt int
+	completeCnt   int
+	completeUpTo  int // completeUpTo-1 == maxComplete (contiguous-from-zero complete prefix)
 }
 
-func ReportDAG(d *state.DAG, stats map[int]ExecutionStat, out func(string)) {
-	longestPath, weight := LongestPath(d, stats)
-
-	serialWeight := uint64(0)
-
-	for i := 0; i < len(d.GetVertices()); i++ {
-		serialWeight += uint64(stats[i].Duration)
-	}
-
-	makeStrs := func(ints []int) (ret []string) {
-		for _, v := range ints {
-			ret = append(ret, strconv.Itoa(v))
-		}
-
+func (m *execStatusList) ensureLen(tx int) {
+	n := tx + 1
+	if n <= len(m.complete) {
 		return
 	}
-
-	out("Longest execution path:")
-	out(fmt.Sprintf("(%v) %v", len(longestPath), strings.Join(makeStrs(longestPath), "->")))
-
-	out(fmt.Sprintf("Longest path ideal execution time: %v of %v (serial total), %v%%", time.Duration(weight),
-		time.Duration(serialWeight), fmt.Sprintf("%.1f", float64(weight)*100.0/float64(serialWeight))))
-}
-
-type execStatusList struct {
-	pending    []int
-	inProgress []int
-	complete   []int
-	dependency map[int]map[int]bool
-	blocker    map[int]map[int]bool
+	m.complete = slices.Grow(m.complete, n-len(m.complete))[:n]
+	m.inProgress = slices.Grow(m.inProgress, n-len(m.inProgress))[:n]
 }
 
 func insertInList(l []int, v int) []int {
@@ -111,9 +44,7 @@ func insertInList(l []int, v int) []int {
 			// already in list
 			return l
 		}
-		a := append(l[:x+1], l[x:]...)
-		a[x] = v
-		return a
+		return slices.Insert(l, x, v)
 	}
 }
 
@@ -124,38 +55,68 @@ func (m *execStatusList) takeNextPending() int {
 
 	x := m.pending[0]
 	m.pending = m.pending[1:]
-	m.inProgress = insertInList(m.inProgress, x)
+	m.setInProgress(x)
 
 	return x
 }
 
-func hasNoGap(l []int) bool {
-	return l[0]+len(l) == l[len(l)-1]+1
+// takePendingWhere removes and returns every pending tx satisfying pred, in
+// ascending order, marking each in-progress. Unlike takeNextPending (min-only,
+// contiguous), this lets validation select a non-contiguous ready subset for
+// dependency-ordered validation. Returns nil when nothing matches.
+func (m *execStatusList) takePendingWhere(pred func(tx int) bool) []int {
+	if len(m.pending) == 0 {
+		return nil
+	}
+	var taken []int
+	kept := m.pending[:0]
+	for _, tx := range m.pending {
+		if pred(tx) {
+			taken = append(taken, tx)
+			m.setInProgress(tx)
+		} else {
+			kept = append(kept, tx)
+		}
+	}
+	m.pending = kept
+	return taken
 }
 
 func (m execStatusList) maxComplete() int {
-	if len(m.complete) == 0 || m.complete[0] != 0 {
-		return -1
-	} else if m.complete[len(m.complete)-1] == len(m.complete)-1 {
-		return m.complete[len(m.complete)-1]
-	} else {
-		for i := len(m.complete) - 2; i >= 0; i-- {
-			if hasNoGap(m.complete[:i+1]) {
-				return m.complete[i]
-			}
-		}
-	}
-
-	return -1
+	return m.completeUpTo - 1
 }
 
 func (m *execStatusList) pushPending(tx int) {
+	m.ensureLen(tx)
 	m.pending = insertInList(m.pending, tx)
 }
 
+func (m *execStatusList) setInProgress(tx int) {
+	m.ensureLen(tx)
+	if !m.inProgress[tx] {
+		m.inProgress[tx] = true
+		m.inProgressCnt++
+	}
+}
+
+func (m *execStatusList) setComplete(tx int) {
+	m.ensureLen(tx)
+	if !m.complete[tx] {
+		m.complete[tx] = true
+		m.completeCnt++
+	}
+	if tx == m.completeUpTo {
+		for m.completeUpTo < len(m.complete) && m.complete[m.completeUpTo] {
+			m.completeUpTo++
+		}
+	}
+}
+
+func (m *execStatusList) inProgressCount() int { return m.inProgressCnt }
+
 func removeFromList(l []int, v int, expect bool) []int {
 	x := sort.SearchInts(l, v)
-	if x == -1 || l[x] != v {
+	if x >= len(l) || l[x] != v {
 		if expect {
 			panic(errors.New("should not happen - element expected in list"))
 		}
@@ -174,8 +135,21 @@ func removeFromList(l []int, v int, expect bool) []int {
 }
 
 func (m *execStatusList) markComplete(tx int) {
-	m.inProgress = removeFromList(m.inProgress, tx, true)
-	m.complete = insertInList(m.complete, tx)
+	m.ensureLen(tx)
+	if !m.inProgress[tx] {
+		panic(errors.New("should not happen - element expected in list"))
+	}
+	m.inProgress[tx] = false
+	m.inProgressCnt--
+	if !m.complete[tx] {
+		m.complete[tx] = true
+		m.completeCnt++
+	}
+	if tx == m.completeUpTo {
+		for m.completeUpTo < len(m.complete) && m.complete[m.completeUpTo] {
+			m.completeUpTo++
+		}
+	}
 }
 
 func (m *execStatusList) minPending() int {
@@ -187,7 +161,7 @@ func (m *execStatusList) minPending() int {
 }
 
 func (m *execStatusList) countComplete() int {
-	return len(m.complete)
+	return m.completeCnt
 }
 
 func (m *execStatusList) addDependency(blocker int, dependent int) bool {
@@ -252,16 +226,15 @@ func (m *execStatusList) removeDependency(tx int) {
 }
 
 func (m *execStatusList) clearInProgress(tx int) {
-	m.inProgress = removeFromList(m.inProgress, tx, true)
+	if tx >= len(m.inProgress) || !m.inProgress[tx] {
+		panic(errors.New("should not happen - element expected in list"))
+	}
+	m.inProgress[tx] = false
+	m.inProgressCnt--
 }
 
 func (m *execStatusList) checkInProgress(tx int) bool {
-	x := sort.SearchInts(m.inProgress, tx)
-	if x < len(m.inProgress) && m.inProgress[x] == tx {
-		return true
-	}
-
-	return false
+	return tx >= 0 && tx < len(m.inProgress) && m.inProgress[tx]
 }
 
 func (m *execStatusList) checkPending(tx int) bool {
@@ -274,12 +247,7 @@ func (m *execStatusList) checkPending(tx int) bool {
 }
 
 func (m *execStatusList) checkComplete(tx int) bool {
-	x := sort.SearchInts(m.complete, tx)
-	if x < len(m.complete) && m.complete[x] == tx {
-		return true
-	}
-
-	return false
+	return tx >= 0 && tx < len(m.complete) && m.complete[tx]
 }
 
 // getRevalidationRange: this range will be all tasks from tx (inclusive) that are not currently in progress up to the
@@ -307,9 +275,35 @@ func (m *execStatusList) pushPendingSet(set []int) {
 }
 
 func (m *execStatusList) clearComplete(tx int) {
-	m.complete = removeFromList(m.complete, tx, false)
+	if tx >= 0 && tx < len(m.complete) && m.complete[tx] {
+		m.complete[tx] = false
+		m.completeCnt--
+	}
+	if tx < m.completeUpTo {
+		m.completeUpTo = tx
+	}
 }
 
 func (m *execStatusList) clearPending(tx int) {
 	m.pending = removeFromList(m.pending, tx, false)
+}
+
+func (m *execStatusList) completeList() []int {
+	out := make([]int, 0, m.completeCnt)
+	for i, v := range m.complete {
+		if v {
+			out = append(out, i)
+		}
+	}
+	return out
+}
+
+func (m *execStatusList) inProgressList() []int {
+	out := make([]int, 0, m.inProgressCnt)
+	for i, v := range m.inProgress {
+		if v {
+			out = append(out, i)
+		}
+	}
+	return out
 }

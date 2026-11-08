@@ -26,6 +26,8 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 )
 
+const maxRequestLightClientUpdates = 128
+
 func (a *ApiHandler) GetEthV1BeaconLightClientBootstrap(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
 	ctx := r.Context()
 	tx, err := a.indiciesDB.BeginRo(ctx)
@@ -38,7 +40,7 @@ func (a *ApiHandler) GetEthV1BeaconLightClientBootstrap(w http.ResponseWriter, r
 	if err != nil {
 		return nil, err
 	}
-	root, err := a.rootFromBlockId(ctx, tx, blockId)
+	root, err := a.rootFromBlockId(tx, blockId)
 	if err != nil {
 		return nil, err
 	}
@@ -53,7 +55,7 @@ func (a *ApiHandler) GetEthV1BeaconLightClientBootstrap(w http.ResponseWriter, r
 func (a *ApiHandler) GetEthV1BeaconLightClientOptimisticUpdate(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
 	update := a.forkchoiceStore.NewestLightClientUpdate()
 	if update == nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("no optimistic update loaded yet, try again later. it may take a few minutes for it to load."))
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("no optimistic update loaded yet, try again later. it may take a few minutes for it to load"))
 	}
 	version := update.AttestedHeader.Version()
 	return newBeaconResponse(&cltypes.LightClientOptimisticUpdate{
@@ -66,7 +68,7 @@ func (a *ApiHandler) GetEthV1BeaconLightClientOptimisticUpdate(w http.ResponseWr
 func (a *ApiHandler) GetEthV1BeaconLightClientFinalityUpdate(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
 	update := a.forkchoiceStore.NewestLightClientUpdate()
 	if update == nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("no finility update loaded yet, try again later. it may take a few minutes for it to load."))
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("no finality update loaded yet, try again later. it may take a few minutes for it to load"))
 	}
 	version := update.AttestedHeader.Version()
 	return newBeaconResponse(&cltypes.LightClientFinalityUpdate{
@@ -79,7 +81,6 @@ func (a *ApiHandler) GetEthV1BeaconLightClientFinalityUpdate(w http.ResponseWrit
 }
 
 func (a *ApiHandler) GetEthV1BeaconLightClientUpdates(w http.ResponseWriter, r *http.Request) {
-
 	startPeriod, err := beaconhttp.Uint64FromQueryParams(r, "start_period")
 	if err != nil {
 		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
@@ -100,15 +101,10 @@ func (a *ApiHandler) GetEthV1BeaconLightClientUpdates(w http.ResponseWriter, r *
 	}
 
 	resp := []any{}
-	endPeriod := *startPeriod + *count
-	currentSlot := a.ethClock.GetCurrentSlot()
-	if endPeriod > a.beaconChainCfg.SyncCommitteePeriod(currentSlot) {
-		endPeriod = a.beaconChainCfg.SyncCommitteePeriod(currentSlot)
-	}
+	currentPeriod := a.beaconChainCfg.SyncCommitteePeriod(a.ethClock.GetCurrentSlot())
 
 	notFoundPrev := false
-	// Fetch from [start_period, start_period + count]
-	for i := *startPeriod; i <= endPeriod; i++ {
+	for i := *startPeriod; i <= currentPeriod && i-*startPeriod < *count && len(resp) < maxRequestLightClientUpdates; i++ {
 		respUpdate := map[string]any{}
 		update, has := a.forkchoiceStore.GetLightClientUpdate(i)
 		if !has {

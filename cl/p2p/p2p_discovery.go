@@ -4,25 +4,17 @@ import (
 	"context"
 	"time"
 
-	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/p2p/discover"
-	"github.com/erigontech/erigon/p2p/enr"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"golang.org/x/sync/semaphore"
+
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/p2p/discover"
 )
 
 func (p *p2pManager) connectToBootnodes(ctx context.Context, discoverConfig discover.Config) error {
-	for i := range discoverConfig.Bootnodes {
-		if err := discoverConfig.Bootnodes[i].Record().Load(enr.WithEntry("tcp", new(enr.TCP))); err != nil {
-			if !enr.IsNotFound(err) {
-				log.Error("[Sentinel] Could not retrieve tcp port")
-			}
-			continue
-		}
-	}
-	multiAddresses := convertToMultiAddr(discoverConfig.Bootnodes)
+	multiAddresses := ConvertToMultiAddr(discoverConfig.Bootnodes)
 	addrInfos, err := peer.AddrInfosFromP2pAddrs(multiAddresses...)
 	if err != nil {
 		return err
@@ -91,15 +83,19 @@ func (p *p2pManager) peerMonitor(ctx context.Context) {
 					connected++
 					peerInfo := p.Host().Network().Peerstore().PeerInfo(peer)
 					if len(peerInfo.Addrs) == 0 {
-						p.connectWithPeer(ctx, peerInfo, nil)
+						if err := p.connectWithPeer(ctx, peerInfo, nil); err != nil {
+							log.Trace("[caplin p2p] could not connect with peer", "err", err)
+						}
 						emptyAddrs++
 					}
 				} else {
-					p.Host().Network().ClosePeer(peer)
+					if err := p.Host().Network().ClosePeer(peer); err != nil {
+						log.Trace("[caplin p2p] could not close peer", "err", err)
+					}
 					closed++
 				}
 			}
-			log.Debug("[caplin p2p] reporting connected peers", "connected", connected, "closed", closed, "emptyAddrs", emptyAddrs)
+			log.Trace("[caplin p2p] reporting connected peers", "connected", connected, "closed", closed, "emptyAddrs", emptyAddrs)
 		case <-ctx.Done():
 			return
 		}

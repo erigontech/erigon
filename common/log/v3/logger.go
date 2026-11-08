@@ -9,10 +9,12 @@ import (
 	"github.com/go-stack/stack"
 )
 
-const timeKey = "t"
-const lvlKey = "lvl"
-const msgKey = "msg"
-const errorKey = "LOG15_ERROR"
+const (
+	timeKey  = "t"
+	lvlKey   = "lvl"
+	msgKey   = "msg"
+	errorKey = "LOG15_ERROR"
+)
 
 // Lvl is a type for predefined log levels.
 type Lvl int
@@ -42,6 +44,25 @@ func (l Lvl) String() string {
 		return "eror"
 	case LvlCrit:
 		return "crit"
+	default:
+		panic("bad level")
+	}
+}
+
+func (l Lvl) UpperString() string {
+	switch l {
+	case LvlTrace:
+		return "TRACE"
+	case LvlDebug:
+		return "DBUG"
+	case LvlInfo:
+		return "INFO"
+	case LvlWarn:
+		return "WARN"
+	case LvlError:
+		return "EROR"
+	case LvlCrit:
+		return "CRIT"
 	default:
 		panic("bad level")
 	}
@@ -123,7 +144,7 @@ type logger struct {
 }
 
 func (l *logger) write(msg string, lvl Lvl, ctx []any) {
-	l.h.Log(&Record{
+	_ = l.h.Log(&Record{
 		Time: time.Now(),
 		Lvl:  lvl,
 		Msg:  msg,

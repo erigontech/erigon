@@ -35,7 +35,7 @@ func MakeBlobTxnRlp() ([]byte, []goethkzg.KZGCommitment) {
 	blobsRlpPrefix := hexutil.MustDecodeHex("fa040008")
 	blobRlpPrefix := hexutil.MustDecodeHex("ba020000")
 
-	var blob0, blob1 = goethkzg.Blob{}, goethkzg.Blob{}
+	blob0, blob1 := goethkzg.Blob{}, goethkzg.Blob{}
 	copy(blob0[:], hexutil.MustDecodeHex(testdata.ValidBlob1Hex))
 	copy(blob1[:], hexutil.MustDecodeHex(testdata.ValidBlob2Hex))
 
@@ -78,7 +78,7 @@ func MakeV1WrappedBlobTxnRlp() ([]byte, []goethkzg.KZGCommitment) {
 	blobsRlpPrefix := hexutil.MustDecodeHex("fa040008")
 	blobRlpPrefix := hexutil.MustDecodeHex("ba020000")
 
-	var blob0, blob1 = goethkzg.Blob{}, goethkzg.Blob{}
+	blob0, blob1 := goethkzg.Blob{}, goethkzg.Blob{}
 	copy(blob0[:], hexutil.MustDecodeHex(testdata.ValidBlob1Hex))
 	copy(blob1[:], hexutil.MustDecodeHex(testdata.ValidBlob2Hex))
 
@@ -98,10 +98,10 @@ func MakeV1WrappedBlobTxnRlp() ([]byte, []goethkzg.KZGCommitment) {
 	}
 	proofs := make(KZGProofs, 0, 256)
 	for _, pp := range &p1 {
-		proofs = append(proofs, (KZGProof(pp)))
+		proofs = append(proofs, KZGProof(pp))
 	}
 	for _, pp := range &p2 {
-		proofs = append(proofs, (KZGProof(pp)))
+		proofs = append(proofs, KZGProof(pp))
 	}
 
 	wrapperRlp := hexutil.MustDecodeHex("03fa04329e")
@@ -136,12 +136,11 @@ func MakeWrappedBlobTxn(chainId *uint256.Int) *BlobTxWrapper {
 	wrappedTxn.Tx.To = &common.Address{129, 26, 117, 44, 140, 214, 151, 227, 203, 39, 39, 156, 51, 14, 209, 173, 167, 69, 168, 215}
 	wrappedTxn.Tx.Nonce = 0
 	wrappedTxn.Tx.GasLimit = 100000
-	wrappedTxn.Tx.Value = uint256.NewInt(0)
 	wrappedTxn.Tx.Data = []byte{4, 247}
-	wrappedTxn.Tx.ChainID = chainId
-	wrappedTxn.Tx.TipCap = uint256.NewInt(10000000000)
-	wrappedTxn.Tx.FeeCap = uint256.NewInt(10000000000)
-	wrappedTxn.Tx.MaxFeePerBlobGas = uint256.NewInt(123)
+	wrappedTxn.Tx.ChainID = *chainId
+	wrappedTxn.Tx.TipCap = *uint256.NewInt(10000000000)
+	wrappedTxn.Tx.FeeCap = *uint256.NewInt(10000000000)
+	wrappedTxn.Tx.MaxFeePerBlobGas = *uint256.NewInt(123)
 
 	wrappedTxn.Blobs = make(Blobs, 2)
 	wrappedTxn.Commitments = make(BlobKzgs, 2)
@@ -183,12 +182,11 @@ func MakeV1WrappedBlobTxn(chainId *uint256.Int) *BlobTxWrapper {
 	wrappedTxn.Tx.To = &common.Address{129, 26, 117, 44, 140, 214, 151, 227, 203, 39, 39, 156, 51, 14, 209, 173, 167, 69, 168, 215}
 	wrappedTxn.Tx.Nonce = 0
 	wrappedTxn.Tx.GasLimit = 100000
-	wrappedTxn.Tx.Value = uint256.NewInt(0)
 	wrappedTxn.Tx.Data = []byte{4, 247}
-	wrappedTxn.Tx.ChainID = chainId
-	wrappedTxn.Tx.TipCap = uint256.NewInt(10000000000)
-	wrappedTxn.Tx.FeeCap = uint256.NewInt(10000000000)
-	wrappedTxn.Tx.MaxFeePerBlobGas = uint256.NewInt(123)
+	wrappedTxn.Tx.ChainID = *chainId
+	wrappedTxn.Tx.TipCap = *uint256.NewInt(10000000000)
+	wrappedTxn.Tx.FeeCap = *uint256.NewInt(10000000000)
+	wrappedTxn.Tx.MaxFeePerBlobGas = *uint256.NewInt(123)
 
 	// Wrapper version = 0x1
 	wrappedTxn.WrapperVersion = 1
@@ -222,10 +220,10 @@ func MakeV1WrappedBlobTxn(chainId *uint256.Int) *BlobTxWrapper {
 	}
 
 	for _, pp := range &p1 {
-		wrappedTxn.Proofs = append(wrappedTxn.Proofs, (KZGProof(pp)))
+		wrappedTxn.Proofs = append(wrappedTxn.Proofs, KZGProof(pp))
 	}
 	for _, pp := range &p2 {
-		wrappedTxn.Proofs = append(wrappedTxn.Proofs, (KZGProof(pp)))
+		wrappedTxn.Proofs = append(wrappedTxn.Proofs, KZGProof(pp))
 	}
 
 	wrappedTxn.Tx.BlobVersionedHashes = make([]common.Hash, 2)

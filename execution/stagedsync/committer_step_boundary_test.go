@@ -1,0 +1,1333 @@
+// Copyright 2026 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+package stagedsync
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+	"math/rand"
+	"regexp"
+	"strings"
+	"testing"
+
+	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/order"
+	"github.com/erigontech/erigon/db/kv/temporal"
+	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/changeset"
+	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/kvmetrics"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
+)
+
+func nonceBalanceWrites(addr accounts.Address, nonce uint64, bal uint256.Int) *state.WriteSet {
+	ws := &state.WriteSet{}
+	ws.SetNonce(addr, &state.VersionedWrite[uint64]{WriteHeader: state.WriteHeader{Address: addr, Path: state.NoncePath}, Val: nonce})
+	ws.SetBalance(addr, &state.VersionedWrite[uint256.Int]{WriteHeader: state.WriteHeader{Address: addr, Path: state.BalancePath}, Val: bal})
+	return ws
+}
+
+func newTestBlockResult(blockNum uint64, blockHash common.Hash, lastTxNum uint64, partial bool) *blockResult {
+	return &blockResult{
+		BlockNum:  blockNum,
+		BlockHash: blockHash,
+		lastTxNum: lastTxNum,
+		isPartial: partial,
+	}
+}
+
+// newRawViewVM builds a raw-view (no-BAL) version map for one block whose base maps
+// the block's first txNum to TxIndex 0, as exec's per-block be.versionMap does.
+func newRawViewVM(firstTxNum uint64) *state.VersionMap {
+	vm := state.NewVersionMap(nil)
+	vm.SetBaseTxNum(firstTxNum - 1)
+	return vm
+}
+
+// recordTx flushes ws into vm — as exec's publish does — and returns the txResult
+// carrying that version map plus a map-view over the tx's writes, from which the
+// calculator folds commitment, exactly as a production txResult does.
+func recordTx(vm *state.VersionMap, blockNum uint64, blockHash common.Hash, txNum uint64, rules *chain.Rules, ws *state.WriteSet) *txResult {
+	var writes state.WriteSetView
+	if ws != nil {
+		vm.FlushVersionedWrites(ws, true)
+		txIdx := 0
+		for _, vw := range ws.Balances() {
+			txIdx = vw.Version.TxIndex
+		}
+		writes = state.NewVersionMapWriteView(ws, vm, txIdx)
+	}
+	return &txResult{blockNum: blockNum, blockHash: blockHash, txNum: txNum, rules: rules, writes: writes, versionMap: vm}
+}
+
+// TestHandleMessage_StepBoundaryCheckpointMidBlock pins the parallel-exec
+// step-boundary commitment bug: a block whose txNum range straddles a step
+// edge must leave a commitment checkpoint at that edge, otherwise the step's
+// commitment .kv lags its account/storage domain .kv. The calculator runs in
+// pure batch mode (no per-block compute), so without the step-boundary hook in
+// handleMessage's txResult case NO commitment state is written at the mid-block
+// step edge: the checkpoint never advances to stepEnd and no step-0 branches
+// are produced to verify against the account domain written through that step.
+func TestHandleMessage_StepBoundaryCheckpointMidBlock(t *testing.T) {
+	ctx := context.Background()
+	logger := log.New()
+	const stepSize = uint64(16)
+
+	db, tx, doms := setupStepTest(t)
+
+	in := make(chan applyResult, 64)
+	out := make(chan commitmentResult, 64)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, false, 1<<62, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
+	require.NoError(t, err)
+
+	// Block 1: txNums 1..10, fully before the step-0 edge (txNum 15).
+	// Block 2: txNums 11..20, straddling the edge at txNum 15.
+	const block1End = uint64(10)
+	const block2End = uint64(20)
+	const stepEdgeTxNum = stepSize - 1 // 15, where (txNum+1)%stepSize==0
+
+	rnd := rand.New(rand.NewSource(42))
+	accountValues := make(map[string][]byte)
+	vm1, vm2 := newRawViewVM(1), newRawViewVM(block1End+1)
+
+	writeAccount := func(txNum uint64) {
+		addrBytes := make([]byte, length.Addr)
+		rnd.Read(addrBytes)
+		addr := accounts.InternAddress([20]byte(addrBytes))
+		bal := *uint256.NewInt(txNum * 1000)
+		acc := accounts.Account{Nonce: txNum, Balance: bal, CodeHash: accounts.EmptyCodeHash}
+		buf := accounts.SerialiseV3(&acc)
+		require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addrBytes, buf, txNum, nil))
+		if txNum <= stepEdgeTxNum {
+			accountValues[string(addrBytes)] = buf
+		}
+		blockNum, vm := uint64(1), vm1
+		if txNum > block1End {
+			blockNum, vm = 2, vm2
+		}
+		cc.handleMessage(ctx, recordTx(vm, blockNum, common.Hash{byte(blockNum)}, txNum, &chain.Rules{}, nonceBalanceWrites(addr, txNum, bal)))
+	}
+
+	for txNum := uint64(1); txNum <= block1End; txNum++ {
+		writeAccount(txNum)
+	}
+	cc.handleMessage(ctx, &blockResult{BlockNum: 1, BlockHash: common.Hash{0x01}, lastTxNum: block1End})
+
+	for txNum := block1End + 1; txNum <= block2End; txNum++ {
+		writeAccount(txNum)
+	}
+	cc.handleMessage(ctx, &blockResult{BlockNum: 2, BlockHash: common.Hash{0x02}, lastTxNum: block2End})
+
+	cc.Stop()
+
+	// Batch mode computes commitment only on an explicit request, which this
+	// stream never sends; the sole writer of a checkpoint is the step-boundary
+	// hook at txNum 15, so the latest checkpoint must decode to that edge.
+	stateBlob, _, err := doms.GetLatest(kv.CommitmentDomain, tx, commitmentdb.KeyCommitmentState)
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, len(stateBlob), 16,
+		"no commitment checkpoint was saved at the mid-block step edge — the step-boundary hook in handleMessage's txResult case never ran")
+	gotTxNum, gotBlockNum := commitmentdb.DecodeTxBlockNums(stateBlob)
+	require.Equal(t, stepEdgeTxNum, gotTxNum,
+		"step-boundary checkpoint must reflect the straddling step's last txNum (stepEnd-1), not the last complete block before the edge")
+	require.Equal(t, uint64(2), gotBlockNum,
+		"the checkpoint sits inside block 2 (the straddling block)")
+
+	requireBranchesConsistentWithAccounts(t, doms, tx, accountValues)
+}
+
+// The commitment calculator must capture the trie's progress during a compute
+// (ComputeCommitmentWithDiff's onProgress callback, previously nil), so the commit
+// thread's periodic log can show it. A per-block compute over real updates reports
+// at least once (the fold reports when it reaches the last key).
+func TestCommitmentCalculator_ReportsProgress(t *testing.T) {
+	ctx := context.Background()
+	logger := log.New()
+	db, tx, doms := setupStepTest(t)
+
+	in := make(chan applyResult, 64)
+	out := make(chan commitmentResult, 64)
+
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, true, 1<<62, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
+	require.NoError(t, err)
+
+	rnd := rand.New(rand.NewSource(7))
+	vm := newRawViewVM(1)
+	for txNum := uint64(1); txNum <= 4; txNum++ {
+		addrBytes := make([]byte, length.Addr)
+		rnd.Read(addrBytes)
+		addr := accounts.InternAddress([20]byte(addrBytes))
+		bal := *uint256.NewInt(txNum * 1000)
+		acc := accounts.Account{Nonce: txNum, Balance: bal, CodeHash: accounts.EmptyCodeHash}
+		require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addrBytes, accounts.SerialiseV3(&acc), txNum, nil))
+		cc.handleMessage(ctx, recordTx(vm, 1, common.Hash{0x01}, txNum, &chain.Rules{}, nonceBalanceWrites(addr, txNum, bal)))
+	}
+	cc.handleMessage(ctx, &blockResult{BlockNum: 1, BlockHash: common.Hash{0x01}, lastTxNum: 4})
+	cc.Stop()
+
+	require.Positive(t, cc.lastCommitProgress.UpdateCount,
+		"the calculator must capture commit progress during compute, else the parallel commit gauges go unreported")
+}
+
+// TestHandleMessage_StepCheckpointInPerBlockMode pins that the step-boundary
+// checkpoint still fires in per-block compute mode (forcePerBlockCompute), which
+// is how the archive snapshot producer runs — it needs step-aligned commitment
+// just like batch mode.
+func TestHandleMessage_StepCheckpointInPerBlockMode(t *testing.T) {
+	ctx := context.Background()
+	logger := log.New()
+	const stepSize = uint64(16)
+
+	db, tx, doms := setupStepTest(t)
+
+	in := make(chan applyResult, 64)
+	out := make(chan commitmentResult, 64)
+	// forcePerBlockCompute=true => snapshot-producer mode (per-block at every block).
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, true, 1<<62, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
+	require.NoError(t, err)
+
+	const block1End = uint64(10)
+	const stepEdgeTxNum = stepSize - 1 // 15
+
+	rnd := rand.New(rand.NewSource(42))
+	vm1, vm2 := newRawViewVM(1), newRawViewVM(block1End+1)
+	writeAccount := func(txNum, blockNum uint64) {
+		addrBytes := make([]byte, length.Addr)
+		rnd.Read(addrBytes)
+		addr := accounts.InternAddress([20]byte(addrBytes))
+		bal := *uint256.NewInt(txNum * 1000)
+		acc := accounts.Account{Nonce: txNum, Balance: bal, CodeHash: accounts.EmptyCodeHash}
+		buf := accounts.SerialiseV3(&acc)
+		require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addrBytes, buf, txNum, nil))
+		vm := vm1
+		if blockNum == 2 {
+			vm = vm2
+		}
+		cc.handleMessage(ctx, recordTx(vm, blockNum, common.Hash{byte(blockNum)}, txNum, &chain.Rules{}, nonceBalanceWrites(addr, txNum, bal)))
+	}
+
+	for txNum := uint64(1); txNum <= block1End; txNum++ {
+		writeAccount(txNum, 1)
+	}
+	cc.handleMessage(ctx, &blockResult{BlockNum: 1, BlockHash: common.Hash{0x01}, lastTxNum: block1End})
+
+	// Block 2 runs only up to the step edge — no block-2 boundary is sent.
+	for txNum := block1End + 1; txNum <= stepEdgeTxNum; txNum++ {
+		writeAccount(txNum, 2)
+	}
+
+	cc.Stop()
+
+	stateBlob, _, err := doms.GetLatest(kv.CommitmentDomain, tx, commitmentdb.KeyCommitmentState)
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, len(stateBlob), 16, "a commitment checkpoint must exist at the mid-block step edge")
+	gotTxNum, gotBlockNum := commitmentdb.DecodeTxBlockNums(stateBlob)
+	require.Equal(t, stepEdgeTxNum, gotTxNum,
+		"per-block mode must still checkpoint at the mid-block step edge (snapshot producer needs step-aligned commitment)")
+	require.Equal(t, uint64(2), gotBlockNum,
+		"the step checkpoint sits inside the straddling block")
+}
+
+// TestHandleMessage_PartialBlockComputeFailureNotSwallowed pins that when the
+// first partial block's commitment computation fails, the calculator does not
+// mark the block computed. A swallowed compute error there would let exec
+// proceed past a block whose commitment never landed.
+func TestHandleMessage_PartialBlockComputeFailureNotSwallowed(t *testing.T) {
+	ctx := context.Background()
+	logger := log.New()
+
+	db, tx, doms := setupStepTest(t)
+
+	in := make(chan applyResult, 64)
+	out := make(chan commitmentResult, 64)
+	// forcePerBlockCompute=true routes the first partial block to computeWithoutCheck.
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, true, 1<<62, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
+	require.NoError(t, err)
+	defer cc.Stop()
+
+	rnd := rand.New(rand.NewSource(42))
+	vm := newRawViewVM(1)
+	for txNum := uint64(1); txNum <= 5; txNum++ {
+		addrBytes := make([]byte, length.Addr)
+		rnd.Read(addrBytes)
+		addr := accounts.InternAddress([20]byte(addrBytes))
+		bal := *uint256.NewInt(txNum * 1000)
+		acc := accounts.Account{Nonce: txNum, Balance: bal, CodeHash: accounts.EmptyCodeHash}
+		buf := accounts.SerialiseV3(&acc)
+		require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addrBytes, buf, txNum, nil))
+		cc.handleMessage(ctx, recordTx(vm, 1, common.Hash{0x01}, txNum, &chain.Rules{}, nonceBalanceWrites(addr, txNum, bal)))
+	}
+	require.False(t, cc.hasComputed)
+
+	// A cancelled context makes the partial-block ComputeCommitment fail
+	// deterministically (the per-key ctx check in the trie fold, with >=1 update).
+	failCtx, cancel := context.WithCancel(ctx)
+	cancel()
+	cc.handleMessage(failCtx, &blockResult{BlockNum: 1, BlockHash: common.Hash{0x01}, lastTxNum: 5, isPartial: true})
+
+	require.False(t, cc.hasComputed,
+		"a failed partial-block commitment must not be marked computed — the error must halt exec, not be swallowed")
+	require.Zero(t, cc.lastComputedBlock,
+		"lastComputedBlock must not advance past a block whose commitment failed")
+}
+
+// TestHandleMessage_BaseReadErrorFailsTheBlock pins that a failed base read in the
+// block compute publishes the error instead of folding the account as a delete.
+func TestHandleMessage_BaseReadErrorFailsTheBlock(t *testing.T) {
+	ctx := context.Background()
+	db, tx, doms := setupStepTest(t)
+
+	in := make(chan applyResult, 64)
+	out := make(chan commitmentResult, 64)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", log.New(), true, 1<<62, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
+	require.NoError(t, err)
+	defer cc.Stop()
+
+	addr := accounts.InternAddress([20]byte{0xe1})
+	av := addr.Value()
+	require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, av[:], []byte{0, 0, 0}, 0, nil))
+	ws := &state.WriteSet{}
+	ws.SetBalance(addr, &state.VersionedWrite[uint256.Int]{WriteHeader: state.WriteHeader{Address: addr, Path: state.BalancePath}, Val: *uint256.NewInt(7)})
+	cc.handleMessage(ctx, recordTx(newRawViewVM(2), 1, common.Hash{0x01}, 2, &chain.Rules{}, ws))
+	cc.handleMessage(ctx, &blockResult{BlockNum: 1, BlockHash: common.Hash{0x01}, lastTxNum: 2})
+
+	require.Len(t, out, 1)
+	require.ErrorContains(t, (<-out).err, "base read failed")
+}
+
+func TestComputeAhead_BaseReadErrorFailsTheBlock(t *testing.T) {
+	defer func(p bool) { dbg.BALDrivenCommitment = p }(dbg.BALDrivenCommitment)
+	defer func(p bool) { dbg.IgnoreBAL = p }(dbg.IgnoreBAL)
+	dbg.BALDrivenCommitment = true
+	dbg.IgnoreBAL = false
+
+	ctx := context.Background()
+	db, tx, doms := setupStepTest(t)
+
+	in := make(chan applyResult, 64)
+	out := make(chan commitmentResult, 64)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", log.New(), false, 1<<62, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
+	require.NoError(t, err)
+	defer cc.Stop()
+	cc.hasFirstBlock = true
+	cc.firstBlockNum = 2
+
+	addr := [20]byte{0xe2}
+	require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addr[:], []byte{0, 0, 0}, 0, nil))
+	cc.handleBlockRequest(ctx, &blockRequest{
+		blockNum:   2,
+		firstTxNum: 11,
+		lastTxNum:  12,
+		stateRoot:  common.Hash{0xde, 0xad},
+		bal:        types.BlockAccessList{{Address: addr, BalanceChanges: []*types.BalanceChange{{Index: 1, Value: *uint256.NewInt(7)}}}},
+	})
+
+	require.Len(t, out, 1)
+	require.ErrorContains(t, (<-out).err, "base read")
+}
+
+// requireBranchesConsistentWithAccounts verifies each flushed commitment branch
+// hashes consistently with the account values written through the step edge.
+func requireBranchesConsistentWithAccounts(t *testing.T, doms *execctx.SharedDomains, tx kv.TemporalRwTx, accountValues map[string][]byte) {
+	t.Helper()
+	require.NoError(t, doms.Flush(t.Context(), tx))
+
+	it, err := tx.RangeAsOf(kv.CommitmentDomain, nil, nil, 1000, order.Asc, -1)
+	require.NoError(t, err)
+	defer it.Close()
+
+	storageValues := map[string][]byte{}
+	checked := 0
+	for it.HasNext() {
+		k, v, err := it.Next()
+		require.NoError(t, err)
+		if bytes.Equal(k, commitmentdb.KeyCommitmentState) {
+			continue
+		}
+		require.NoError(t, commitment.VerifyBranchHashes(k, commitment.BranchData(v), accountValues, storageValues),
+			"branch %x at the step edge disagrees with the account domain written through that step", k)
+		checked++
+	}
+	require.Positive(t, checked, "expected at least one commitment branch to verify at the step edge")
+}
+
+type stepEdgeOutcome struct {
+	commitmentState  []byte
+	accountsThruEdge int
+}
+
+// runBlockEndingOnStepEdge drives one block, in pure batch mode, whose block-end
+// txNum is exactly the step-0 edge (txNum 15, stepSize 16). Regular txs 1..14
+// emit a txResult with writes; the block-end system task at txNum 15 is always
+// emitted as a regular txResult by the producer (exec3_parallel.go nextResult
+// sends every task unconditionally), carrying writes only when the block
+// finalizes some — edgeTxHasWrites models that. The step-boundary hook in
+// handleMessage's txResult case must checkpoint the edge in both cases.
+func runBlockEndingOnStepEdge(t *testing.T, edgeTxHasWrites bool) stepEdgeOutcome {
+	t.Helper()
+	ctx := context.Background()
+	logger := log.New()
+	const stepSize = uint64(16)
+	const edgeTxNum = stepSize - 1 // 15: (txNum+1)%stepSize == 0
+
+	db, tx, doms := setupStepTest(t)
+
+	in := make(chan applyResult, 64)
+	out := make(chan commitmentResult, 64)
+	// forcePerBlockCompute=false + huge perBlockFrom => pure batch mode: the
+	// blockResult never triggers a per-block compute, so the only thing that can
+	// checkpoint the step edge is the step-boundary hook.
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, false, 1<<62, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
+	require.NoError(t, err)
+
+	rnd := rand.New(rand.NewSource(42))
+	vm := newRawViewVM(1)
+	writeAccount := func(txNum uint64, hasWrites bool) {
+		var writes *state.WriteSet
+		if hasWrites {
+			addrBytes := make([]byte, length.Addr)
+			rnd.Read(addrBytes)
+			addr := accounts.InternAddress([20]byte(addrBytes))
+			bal := *uint256.NewInt(txNum * 1000)
+			acc := accounts.Account{Nonce: txNum, Balance: bal, CodeHash: accounts.EmptyCodeHash}
+			buf := accounts.SerialiseV3(&acc)
+			require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addrBytes, buf, txNum, nil))
+			writes = nonceBalanceWrites(addr, txNum, bal)
+		}
+		cc.handleMessage(ctx, recordTx(vm, 1, common.Hash{0x01}, txNum, &chain.Rules{}, writes))
+	}
+
+	for txNum := uint64(1); txNum < edgeTxNum; txNum++ {
+		writeAccount(txNum, true)
+	}
+	// The block-end system task is always published at the block-end txNum, with
+	// empty writes when the block has no finalize writes.
+	writeAccount(edgeTxNum, edgeTxHasWrites)
+	cc.handleMessage(ctx, &blockResult{BlockNum: 1, BlockHash: common.Hash{0x01}, lastTxNum: edgeTxNum})
+	cc.Stop()
+
+	stateBlob, _, err := doms.GetLatest(kv.CommitmentDomain, tx, commitmentdb.KeyCommitmentState)
+	require.NoError(t, err)
+
+	require.NoError(t, doms.Flush(ctx, tx))
+	it, err := tx.RangeAsOf(kv.AccountsDomain, nil, nil, edgeTxNum+1, order.Asc, -1)
+	require.NoError(t, err)
+	defer it.Close()
+	accCount := 0
+	for it.HasNext() {
+		_, v, err := it.Next()
+		require.NoError(t, err)
+		if len(v) > 0 {
+			accCount++
+		}
+	}
+	return stepEdgeOutcome{commitmentState: stateBlob, accountsThruEdge: accCount}
+}
+
+// TestHandleMessage_StepEdgeAtBlockEnd pins that a block whose block-end txNum is
+// a step edge leaves a step-aligned commitment checkpoint. The producer always
+// emits the block-end system task as a regular txResult, so the step-boundary
+// hook in handleMessage's *txResult case checkpoints the edge whether or not that
+// task carries finalize writes (it ignores len(writes)). Without it the step's
+// commitment .kv lags its account-domain .kv (the mid-block inconsistency).
+func TestHandleMessage_StepEdgeAtBlockEnd(t *testing.T) {
+	t.Run("with_finalize_writes", func(t *testing.T) {
+		res := runBlockEndingOnStepEdge(t, true)
+		require.GreaterOrEqual(t, len(res.commitmentState), 16,
+			"block-end txResult at the step edge → step-boundary checkpoint written")
+		gotTxNum, gotBlockNum := commitmentdb.DecodeTxBlockNums(res.commitmentState)
+		require.Equal(t, uint64(15), gotTxNum)
+		require.Equal(t, uint64(1), gotBlockNum)
+	})
+
+	t.Run("empty_finalize", func(t *testing.T) {
+		res := runBlockEndingOnStepEdge(t, false)
+		require.Positive(t, res.accountsThruEdge,
+			"sanity: the account domain holds the block's writes through the step edge")
+		require.GreaterOrEqual(t, len(res.commitmentState), 16,
+			"a block-end task with empty finalize writes must still leave a step-aligned "+
+				"checkpoint — the hook ignores len(writes); otherwise step-0 commitment .kv "+
+				"lags its account .kv")
+		gotTxNum, gotBlockNum := commitmentdb.DecodeTxBlockNums(res.commitmentState)
+		require.Equal(t, uint64(15), gotTxNum)
+		require.Equal(t, uint64(1), gotBlockNum)
+	})
+}
+
+// TestHandleMessage_StepBoundaryDoesNotPolluteLiveChangeset pins that a
+// pre-window mid-block step checkpoint records into NO changeset: the lagging
+// calculator's live accumulator can be a later block's, and leaking there
+// corrupts that block's unwind.
+func TestHandleMessage_StepBoundaryDoesNotPolluteLiveChangeset(t *testing.T) {
+	ctx := context.Background()
+	logger := log.New()
+	const stepSize = uint64(16)
+
+	db, tx, doms := setupStepTest(t)
+
+	// Stand in for the exec loop having advanced into the changeset window and
+	// installed a later block's accumulator as live, while the calculator is
+	// still on an earlier block whose own changeset was never saved.
+	liveCS := &changeset.StateChangeSet{}
+	doms.SetChangesetAccumulator(liveCS)
+
+	in := make(chan applyResult, 64)
+	out := make(chan commitmentResult, 64)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, false, 1<<62, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
+	require.NoError(t, err)
+	defer cc.Stop()
+
+	const stepEdgeTxNum = stepSize - 1 // 15: (txNum+1)%stepSize == 0
+	rnd := rand.New(rand.NewSource(42))
+	vm := newRawViewVM(1)
+	for txNum := uint64(1); txNum <= stepEdgeTxNum; txNum++ {
+		addrBytes := make([]byte, length.Addr)
+		rnd.Read(addrBytes)
+		addr := accounts.InternAddress([20]byte(addrBytes))
+		bal := *uint256.NewInt(txNum * 1000)
+		acc := accounts.Account{Nonce: txNum, Balance: bal, CodeHash: accounts.EmptyCodeHash}
+		buf := accounts.SerialiseV3(&acc)
+		require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addrBytes, buf, txNum, nil))
+		cc.handleMessage(ctx, recordTx(vm, 1, common.Hash{}, txNum, &chain.Rules{}, nonceBalanceWrites(addr, txNum, bal)))
+	}
+
+	require.Zero(t, liveCS.Diffs[kv.CommitmentDomain].Len(),
+		"mid-block step-boundary compute leaked CommitmentDomain diffs into the live "+
+			"changeset accumulator — on that block's unwind they corrupt commitment state")
+
+	// The checkpoint must still advance to the step edge: the fix isolates the
+	// changeset, it does not suppress the checkpoint.
+	stateBlob, _, err := doms.GetLatest(kv.CommitmentDomain, tx, commitmentdb.KeyCommitmentState)
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, len(stateBlob), 16,
+		"step-boundary checkpoint must still be written to sd, only kept out of the changeset")
+	gotTxNum, _ := commitmentdb.DecodeTxBlockNums(stateBlob)
+	require.Equal(t, stepEdgeTxNum, gotTxNum)
+}
+
+// TestHandleMessage_StepBoundaryRecordsIntoOwnChangesetInWindow pins the cs!=nil
+// hash-routing path: with block N's changeset saved and a DIFFERENT accumulator
+// live, the mid-block checkpoint must record its commitment writes into N's own
+// changeset, not the live one. (The stale-cs==nil TOCTOU itself needs concurrent
+// interleaving to trigger and isn't reproducible in this single-goroutine test.)
+func TestHandleMessage_StepBoundaryRecordsIntoOwnChangesetInWindow(t *testing.T) {
+	ctx := context.Background()
+	logger := log.New()
+	const stepSize = uint64(16)
+	blockHash := common.Hash{0xAB}
+
+	db, tx, doms := setupStepTest(t)
+
+	// Save block 1's own changeset (keyed by its hash) and install a DIFFERENT
+	// accumulator as the live one.
+	ownCS := &changeset.StateChangeSet{}
+	liveCS := &changeset.StateChangeSet{}
+	doms.SavePastChangesetAccumulator(blockHash, 1, ownCS)
+	doms.SetChangesetAccumulator(liveCS)
+
+	in := make(chan applyResult, 64)
+	out := make(chan commitmentResult, 64)
+	// perBlockFrom=1 => block 1 is in-window, so it routes through the hash-aware
+	// wrap (ownsChangeset(1)=true) rather than the isolated path.
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, false, 1, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
+	require.NoError(t, err)
+	defer cc.Stop()
+
+	const stepEdgeTxNum = stepSize - 1 // 15
+	rnd := rand.New(rand.NewSource(42))
+	vm := newRawViewVM(1)
+	for txNum := uint64(1); txNum <= stepEdgeTxNum; txNum++ {
+		addrBytes := make([]byte, length.Addr)
+		rnd.Read(addrBytes)
+		addr := accounts.InternAddress([20]byte(addrBytes))
+		bal := *uint256.NewInt(txNum * 1000)
+		acc := accounts.Account{Nonce: txNum, Balance: bal, CodeHash: accounts.EmptyCodeHash}
+		buf := accounts.SerialiseV3(&acc)
+		require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addrBytes, buf, txNum, nil))
+		cc.handleMessage(ctx, recordTx(vm, 1, blockHash, txNum, &chain.Rules{}, nonceBalanceWrites(addr, txNum, bal)))
+	}
+
+	require.Positive(t, ownCS.Diffs[kv.CommitmentDomain].Len(),
+		"the checkpoint must hash-route its commitment writes into block N's own saved changeset")
+	require.Zero(t, liveCS.Diffs[kv.CommitmentDomain].Len(),
+		"the checkpoint must NOT record commitment writes into the different live accumulator")
+}
+
+// TestHandleMessage_PreWindowPerBlockComputeDoesNotPolluteLiveChangeset guards
+// the block-boundary variant: forcePerBlockCompute makes even a pre-window block
+// compute per-block, so that compute must isolate or it leaks into a later
+// block's live changeset.
+func TestHandleMessage_PreWindowPerBlockComputeDoesNotPolluteLiveChangeset(t *testing.T) {
+	ctx := context.Background()
+	logger := log.New()
+
+	db, tx, doms := setupStepTest(t)
+
+	liveCS := &changeset.StateChangeSet{}
+	doms.SetChangesetAccumulator(liveCS)
+
+	in := make(chan applyResult, 64)
+	out := make(chan commitmentResult, 64)
+	// forcePerBlockCompute=true + perBlockFrom=5 => block 1 is pre-window yet
+	// still computes per-block.
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, true, 5, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
+	require.NoError(t, err)
+	defer cc.Stop()
+
+	rnd := rand.New(rand.NewSource(42))
+	vm := newRawViewVM(1)
+	for txNum := uint64(1); txNum <= 5; txNum++ {
+		addrBytes := make([]byte, length.Addr)
+		rnd.Read(addrBytes)
+		addr := accounts.InternAddress([20]byte(addrBytes))
+		bal := *uint256.NewInt(txNum * 1000)
+		acc := accounts.Account{Nonce: txNum, Balance: bal, CodeHash: accounts.EmptyCodeHash}
+		buf := accounts.SerialiseV3(&acc)
+		require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addrBytes, buf, txNum, nil))
+		cc.handleMessage(ctx, recordTx(vm, 1, common.Hash{0x01}, txNum, &chain.Rules{}, nonceBalanceWrites(addr, txNum, bal)))
+	}
+	// First partial block => computeWithoutCheck, a per-block compute with no
+	// root check; pre-window, so it must isolate its commitment writes.
+	cc.handleMessage(ctx, &blockResult{BlockNum: 1, BlockHash: common.Hash{0x01}, lastTxNum: 5, isPartial: true})
+
+	require.Zero(t, liveCS.Diffs[kv.CommitmentDomain].Len(),
+		"pre-window per-block compute leaked CommitmentDomain diffs into the live changeset accumulator")
+}
+
+// TestOwnsChangeset pins the isolation predicate at the window boundary — a wrong
+// answer either leaks a pre-window compute or over-isolates an in-window block.
+func TestOwnsChangeset(t *testing.T) {
+	cc := &commitmentCalculator{perBlockFrom: 100}
+	require.False(t, cc.ownsChangeset(0), "genesis owns no changeset")
+	require.False(t, cc.ownsChangeset(99), "pre-window block owns no changeset")
+	require.True(t, cc.ownsChangeset(100), "first in-window block owns its changeset")
+	require.True(t, cc.ownsChangeset(101), "in-window block owns its changeset")
+
+	// AlwaysGenerateChangesets from genesis => perBlockFrom == startBlockNum (0),
+	// but block 0 is still excluded by the exec loop.
+	genesisStart := &commitmentCalculator{perBlockFrom: 0}
+	require.False(t, genesisStart.ownsChangeset(0), "block 0 is always excluded")
+	require.True(t, genesisStart.ownsChangeset(1), "block 1 owns its changeset when the window starts at genesis")
+}
+
+// setupStepTest builds the shared in-memory temporal stack (stepSize 16) for the
+// step-boundary tests — like setup2CacheTest, but also returns the db the
+// commitment calculator needs for its own read tx.
+func setupStepTest(t *testing.T) (kv.TemporalRwDB, kv.TemporalRwTx, *execctx.SharedDomains) {
+	t.Helper()
+	ctx := context.Background()
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	rawDb := mdbx.New(dbcfg.ChainDB, logger).InMem(dirs.Chaindata).MustOpen()
+	t.Cleanup(rawDb.Close)
+
+	agg, err := dbstate.NewTest(dirs).StepSize(16).Logger(logger).Open(ctx)
+	require.NoError(t, err)
+	t.Cleanup(agg.Close)
+
+	db, err := temporal.New(rawDb, agg, nil)
+	require.NoError(t, err)
+
+	tx, err := db.BeginTemporalRw(ctx) //nolint:gocritic
+	require.NoError(t, err)
+	t.Cleanup(func() { tx.Rollback() })
+
+	doms, err := execctx.NewSharedDomains(ctx, tx, logger, execctx.WithParaTrieDB(db))
+	require.NoError(t, err)
+	t.Cleanup(doms.Close)
+	return db, tx, doms
+}
+
+// TestComputeAhead_StepBoundaryCheckpointMidBlock pins the batch-end-in-BAL
+// behaviour: computing ahead a block straddling an unfrozen step edge must
+// leave a commitment checkpoint at that edge (as of the edge txNum), so the
+// step's commitment .kv stays consistent with its account/storage .kv — the
+// same invariant the incremental path holds, now met by compute-ahead itself
+// rather than by dropping the block to the incremental path.
+func TestComputeAhead_StepBoundaryCheckpointMidBlock(t *testing.T) {
+	defer func(p bool) { dbg.BALDrivenCommitment = p }(dbg.BALDrivenCommitment)
+	defer func(p bool) { dbg.IgnoreBAL = p }(dbg.IgnoreBAL)
+	dbg.BALDrivenCommitment = true
+	dbg.IgnoreBAL = false
+
+	ctx := context.Background()
+	logger := log.New()
+	const firstTxNum = uint64(11) // block 2 starts at 11 (block 1 was txNums 1..10)
+	const lastTxNum = uint64(20)
+	const edgeTxNum = uint64(15) // (txNum+1)%16 == 0, interior to [11,20]
+
+	db, tx, doms := setupStepTest(t)
+
+	in := make(chan applyResult, 64)
+	out := make(chan commitmentResult, 64)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, false, 1<<62, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
+	require.NoError(t, err)
+	defer cc.Stop()
+	// Make block 2 the batch's first block so the compute-ahead gate opens with
+	// no prior blockResult, and compute-ahead runs synchronously from handleBlockRequest.
+	cc.hasFirstBlock = true
+	cc.firstBlockNum = 2
+
+	rnd := rand.New(rand.NewSource(42))
+	accountValues := map[string][]byte{}
+	var bList types.BlockAccessList
+	for txNum := firstTxNum; txNum <= lastTxNum; txNum++ {
+		addrBytes := make([]byte, length.Addr)
+		rnd.Read(addrBytes)
+		balV := *uint256.NewInt(txNum * 1000)
+		acc := accounts.Account{Nonce: txNum, Balance: balV, CodeHash: accounts.EmptyCodeHash}
+		buf := accounts.SerialiseV3(&acc)
+		require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addrBytes, buf, txNum, nil))
+		if txNum <= edgeTxNum {
+			accountValues[string(addrBytes)] = buf
+		}
+		idx := uint32(txNum - firstTxNum) // BAL index == txNum - firstTxNum
+		bList = append(bList, types.AccountChanges{
+			Address:        [20]byte(addrBytes),
+			BalanceChanges: []*types.BalanceChange{{Index: idx, Value: balV}},
+			NonceChanges:   []*types.NonceChange{{Index: idx, Value: txNum}},
+		})
+	}
+
+	// Drive compute-ahead. The block-end stateRoot is a dummy: the step checkpoints
+	// are written before the block-end root check, so a mismatch there still
+	// exercises the mid-block checkpoint under test (we assert on the checkpoint,
+	// not on compute-ahead verifying the block-end root).
+	cc.handleBlockRequest(ctx, &blockRequest{
+		blockNum:   2,
+		firstTxNum: firstTxNum,
+		lastTxNum:  lastTxNum,
+		stateRoot:  common.Hash{0xde, 0xad},
+		bal:        bList,
+	})
+
+	require.NoError(t, doms.Flush(ctx, tx))
+
+	// As of just past the edge, the latest commitment checkpoint must be the one
+	// compute-ahead wrote at the step edge — not the pre-block-2 checkpoint.
+	// Without checkpointStepsFromBAL, compute-ahead would write only the
+	// block-end (txNum 20) checkpoint and this as-of read would miss the edge.
+	blob, ok, err := doms.GetAsOf(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, edgeTxNum+1)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.GreaterOrEqual(t, len(blob), 16)
+	gotTx, gotBlock := commitmentdb.DecodeTxBlockNums(blob)
+	require.Equal(t, edgeTxNum, gotTx, "compute-ahead must checkpoint commitment at the mid-block step edge (txNum 15)")
+	require.Equal(t, uint64(2), gotBlock, "the checkpoint sits inside the straddling block 2")
+
+	requireBranchesConsistentWithAccounts(t, doms, tx, accountValues)
+}
+
+// TestLoop_BlockRequestBeatsSameNumberedResult pins that loop() handles a block's
+// request before its own result, which select alone does not guarantee. The two
+// delivery orders hit different windows: pre-buffered makes both cases ready at
+// once, after-start races the send against select's readiness poll.
+func TestLoop_BlockRequestBeatsSameNumberedResult(t *testing.T) {
+	defer func(p bool) { dbg.BALDrivenCommitment = p }(dbg.BALDrivenCommitment)
+	defer func(p bool) { dbg.IgnoreBAL = p }(dbg.IgnoreBAL)
+	defer func(p bool) { dbg.BatchCommitments = p }(dbg.BatchCommitments)
+	dbg.BALDrivenCommitment = true
+	dbg.IgnoreBAL = false
+	// Per-block mode would publish a second, incremental result per block and
+	// break the single-result assertion below.
+	dbg.BatchCommitments = true
+
+	// Each iteration logs its own expected wrong-root failure.
+	ctx := context.Background()
+	logger := log.New()
+	logger.SetHandler(log.DiscardHandler())
+
+	// Each iteration is an independent chance at select's two-ready pick, but the
+	// two orders are not equally likely to hit it: with the drain removed, the
+	// pre-buffered order catches within a handful of iterations while after-start
+	// averages ~40 and tails past 100, so it needs the larger count to keep a
+	// regression from slipping through.
+	for _, tc := range []struct {
+		name       string
+		afterStart bool
+		iterations uint64
+	}{
+		{name: "buffered before start", iterations: 200},
+		{name: "delivered after start", afterStart: true, iterations: 2_000},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Own domains per subtest: block and txNum restart at 1.
+			db, _, doms := setupStepTest(t)
+			rnd := rand.New(rand.NewSource(7))
+			for i := uint64(1); i <= tc.iterations; i++ {
+				in := make(chan applyResult, 4)
+				reqs := make(chan *blockRequest, 4)
+				out := make(chan commitmentResult, 4)
+				cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, false, 1<<62, in, reqs, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
+				require.NoError(t, err)
+				cc.hasFirstBlock = true
+				cc.firstBlockNum = i
+
+				addrBytes := make([]byte, length.Addr)
+				rnd.Read(addrBytes)
+				bal := types.BlockAccessList{{
+					Address:      [20]byte(addrBytes),
+					NonceChanges: []*types.NonceChange{{Index: 0, Value: 1}},
+				}}
+				// stateRoot is deliberately wrong, so a processed request publishes
+				// ErrWrongTrieRoot and a dropped one publishes nothing at all.
+				send := func() {
+					reqs <- &blockRequest{
+						blockNum:   i,
+						firstTxNum: i,
+						lastTxNum:  i,
+						stateRoot:  common.Hash{0xba, 0xd5, 0x00, 0x71},
+						bal:        bal,
+					}
+					in <- newTestBlockResult(i, common.Hash{0x01}, i, false)
+					close(reqs)
+					close(in)
+				}
+				if tc.afterStart {
+					cc.Start(ctx)
+					go send()
+				} else {
+					send()
+					cc.Start(ctx)
+				}
+
+				// Range rather than Stop() first: out closes only after loop() returns,
+				// and Stop()'s close(cc.done) would race an in-flight publish().
+				var results []commitmentResult
+				for res := range out {
+					results = append(results, res)
+				}
+				cc.Stop()
+
+				require.Len(t, results, 1,
+					"iteration %d: block %d's request was dropped by its own same-numbered result before compute-ahead could run", i, i)
+				require.ErrorIs(t, results[0].err, ErrWrongTrieRoot,
+					"iteration %d: block %d's request must be processed before its own result", i, i)
+			}
+		})
+	}
+}
+
+// feedBlock1Shadow builds a calculator, feeds block 1's n writes (seed 42) into the
+// version map, marks the block computed-ahead with balRoots[1]=balRoot, then delivers
+// blockResult(1) with BAL_SHADOW_COMPUTE on so shadowCrossCheck recomputes the
+// incremental root and cross-checks it against balRoot. Returns the published result.
+func feedBlock1Shadow(t *testing.T, n uint64, balRoot []byte) commitmentResult {
+	t.Helper()
+	defer func(p bool) { dbg.BALShadowCompute = p }(dbg.BALShadowCompute)
+	defer func(p bool) { dbg.BALDrivenCommitment = p }(dbg.BALDrivenCommitment)
+	dbg.BALShadowCompute = true
+	dbg.BALDrivenCommitment = true
+
+	ctx := context.Background()
+	db, _, doms := setupStepTest(t)
+	in := make(chan applyResult, 64)
+	out := make(chan commitmentResult, 64)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "shadow", log.New(), false, 1<<62, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
+	require.NoError(t, err)
+
+	rnd := rand.New(rand.NewSource(42))
+	vm := newRawViewVM(1)
+	for txNum := uint64(1); txNum <= n; txNum++ {
+		addrBytes := make([]byte, length.Addr)
+		rnd.Read(addrBytes)
+		addr := accounts.InternAddress([20]byte(addrBytes))
+		cc.handleMessage(ctx, recordTx(vm, 1, common.Hash{0x01}, txNum, &chain.Rules{}, nonceBalanceWrites(addr, txNum, *uint256.NewInt(txNum * 1000))))
+	}
+	cc.computedAhead[1] = true
+	cc.balRoots[1] = balRoot
+
+	cc.handleMessage(ctx, &blockResult{BlockNum: 1, BlockHash: common.Hash{0x01}, lastTxNum: n})
+	cc.Stop()
+	select {
+	case res := <-out:
+		return res
+	default:
+		t.Fatal("shadowCrossCheck published no result")
+		return commitmentResult{}
+	}
+}
+
+// TestShadowCrossCheck_Mismatch pins the safety path: a computed-ahead block
+// whose recorded balRoot disagrees with the incremental recompute must fail
+// the block with ErrWrongTrieRoot rather than publish silently.
+func TestShadowCrossCheck_Mismatch(t *testing.T) {
+	res := feedBlock1Shadow(t, 4, bytes.Repeat([]byte{0xEE}, 32))
+	require.Error(t, res.err, "a divergent computed-ahead root must fail the block")
+	require.ErrorIs(t, res.err, ErrWrongTrieRoot, "shadow mismatch must surface as ErrWrongTrieRoot")
+}
+
+// TestStepBoundaryRecordsIntoTheExecutorsChangeset pins the executor side of the
+// hash routing: block N's accumulator must be findable by hash while N is still
+// executing. The mid-block step checkpoint routes its commitment writes through
+// GetChangesetByHash, so an accumulator published only at block end leaves those
+// writes out of the unwind diff and commitment stays ahead of the state after a
+// reorg.
+func TestStepBoundaryRecordsIntoTheExecutorsChangeset(t *testing.T) {
+	ctx := context.Background()
+	logger := log.New()
+	const stepSize = uint64(16)
+	blockHash := common.Hash{0xCD}
+
+	db, tx, doms := setupStepTest(t)
+
+	pe := &parallelExecutor{txExecutor: txExecutor{doms: doms, logger: logger}}
+	pe.changesetWindowStart = 1
+	pe.maxBlockNum = 100
+	pe.ensureChangesetAccumulator(1, blockHash)
+	ownCS := pe.currentChangeSet
+	require.NotNil(t, ownCS)
+
+	in := make(chan applyResult, 64)
+	out := make(chan commitmentResult, 64)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, false, 1, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
+	require.NoError(t, err)
+	defer cc.Stop()
+
+	const stepEdgeTxNum = stepSize - 1
+	rnd := rand.New(rand.NewSource(42))
+	vm := newRawViewVM(1)
+	for txNum := uint64(1); txNum <= stepEdgeTxNum; txNum++ {
+		addrBytes := make([]byte, length.Addr)
+		rnd.Read(addrBytes)
+		addr := accounts.InternAddress([20]byte(addrBytes))
+		bal := *uint256.NewInt(txNum * 1000)
+		acc := accounts.Account{Nonce: txNum, Balance: bal, CodeHash: accounts.EmptyCodeHash}
+		require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addrBytes, accounts.SerialiseV3(&acc), txNum, nil))
+		cc.handleMessage(ctx, recordTx(vm, 1, blockHash, txNum, &chain.Rules{}, nonceBalanceWrites(addr, txNum, bal)))
+	}
+
+	// Branch writes alone would satisfy a bare Len() check. KeyCommitmentState is the
+	// marker an unwind needs, so assert that exact key (diff keys carry an 8-byte step
+	// suffix) rather than "something was recorded".
+	stateKey := string(commitmentdb.KeyCommitmentState)
+	sawStateKey := false
+	for _, d := range ownCS.Diffs[kv.CommitmentDomain].GetDiffSet() {
+		if len(d.Key) == len(stateKey)+8 && strings.HasPrefix(d.Key, stateKey) {
+			sawStateKey = true
+			break
+		}
+	}
+	require.True(t, sawStateKey,
+		"the mid-block checkpoint must record KeyCommitmentState into the changeset the executor opened for the block, or a reorg cannot unwind it")
+}
+
+type latestMetricsCaptureTx struct {
+	kv.TemporalTx
+	nonNilMetrics bool
+}
+
+func (tx *latestMetricsCaptureTx) GetLatest(domain kv.Domain, key []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
+	metrics, _ := opts.Metrics()
+	if dm, ok := metrics.(*kvmetrics.DomainMetrics); ok {
+		tx.nonNilMetrics = dm != nil
+	}
+	return tx.TemporalTx.GetLatest(domain, key, opts)
+}
+
+func TestAsOfStateReaderCloneForWorkerDoesNotBoxNilMetrics(t *testing.T) {
+	metricsEnabled := dbg.KVReadLevelledMetrics
+	dbg.KVReadLevelledMetrics = true
+	t.Cleanup(func() { dbg.KVReadLevelledMetrics = metricsEnabled })
+	_, tx, doms := setupStepTest(t)
+	require.NotNil(t, doms.Collector())
+	doms.StartRequestMetrics(kvmetrics.SourceCommitment)
+	captureTx := &latestMetricsCaptureTx{TemporalTx: tx}
+	reader := (&asOfStateReader{sd: doms, roTx: captureTx, dr: state.NewLayeredDomainReader(doms, nil, nil)}).CloneForWorker(context.Background(), captureTx)
+	_, _, err := reader.Read(kv.CommitmentDomain, []byte{0xaa, 0xbb}, doms.StepSize())
+	require.NoError(t, err)
+	require.True(t, captureTx.nonNilMetrics)
+}
+
+func isolatedCommitmentBranchCount(t *testing.T, checkRoot bool) (int, []commitmentResult, bool) {
+	t.Helper()
+	ctx := context.Background()
+	logger := log.New()
+	logger.SetHandler(log.DiscardHandler())
+
+	db, tx, doms := setupStepTest(t)
+	doms.SetDeferCommitmentUpdates(true)
+
+	in := make(chan applyResult, 64)
+	out := make(chan commitmentResult, 64)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, true, 5, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
+	require.NoError(t, err)
+	defer cc.Stop()
+
+	rnd := rand.New(rand.NewSource(43))
+	vm := newRawViewVM(1)
+	for txNum := uint64(1); txNum <= 5; txNum++ {
+		addrBytes := make([]byte, length.Addr)
+		rnd.Read(addrBytes)
+		addr := accounts.InternAddress([20]byte(addrBytes))
+		bal := *uint256.NewInt(txNum * 1000)
+		acc := accounts.Account{Nonce: txNum, Balance: bal, CodeHash: accounts.EmptyCodeHash}
+		require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addrBytes, accounts.SerialiseV3(&acc), txNum, nil))
+		cc.handleMessage(ctx, recordTx(vm, 1, common.Hash{0x01}, txNum, &chain.Rules{}, nonceBalanceWrites(addr, txNum, bal)))
+	}
+
+	// A partial first block computes without checking the root; the test header
+	// carries the zero root, so a checked root always mismatches.
+	cc.handleMessage(ctx, newTestBlockResult(1, common.Hash{0x01}, 5, !checkRoot))
+
+	var published []commitmentResult
+	for len(out) > 0 {
+		published = append(published, <-out)
+	}
+
+	pending := doms.GetCommitmentContext().HasPendingUpdate()
+	var branches int
+	require.NoError(t, doms.Flush(ctx, tx))
+	require.NoError(t, doms.GetMemBatch().IteratePrefix(kv.CommitmentDomain, nil, tx, func(k, v []byte) (bool, error) {
+		if len(v) > 0 && !bytes.Equal(k, commitment.KeyCommitmentState) {
+			branches++
+		}
+		return true, nil
+	}))
+	return branches, published, pending
+}
+
+func TestHandleMessage_WrongRootDiscardsIsolatedBranchWrites(t *testing.T) {
+	accepted, published, pending := isolatedCommitmentBranchCount(t, false)
+	require.Positive(t, accepted, "an unchecked isolated round must write its branch records, or the rejection arm proves nothing")
+	require.Empty(t, published, "an unchecked round publishes nothing")
+	require.False(t, pending, "an accepted round must leave nothing pending")
+
+	rejected, published, pending := isolatedCommitmentBranchCount(t, true)
+	require.Len(t, published, 1)
+	require.ErrorIs(t, published[0].err, ErrWrongTrieRoot)
+	require.Zero(t, rejected, "a rejected root must leave no branch record in the commitment domain")
+	require.False(t, pending, "the rejected round's output must be released")
+}
+
+func TestHandleMessage_ComputedAheadBlockSkipsTouchedUnion(t *testing.T) {
+	defer func(p bool) { dbg.BALShadowCompute = p }(dbg.BALShadowCompute)
+	for _, shadow := range []bool{false, true} {
+		dbg.BALShadowCompute = shadow
+		ctx := context.Background()
+		db, _, doms := setupStepTest(t)
+
+		in := make(chan applyResult, 64)
+		out := make(chan commitmentResult, 64)
+		cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", log.New(), true, 1<<62, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
+		require.NoError(t, err)
+
+		addr := accounts.InternAddress([20]byte{0xe3})
+		ws := &state.WriteSet{}
+		ws.SetBalance(addr, &state.VersionedWrite[uint256.Int]{WriteHeader: state.WriteHeader{Address: addr, Path: state.BalancePath}, Val: *uint256.NewInt(7)})
+		cc.computedAhead[1] = true
+		cc.handleMessage(ctx, recordTx(newRawViewVM(2), 1, common.Hash{0x01}, 2, &chain.Rules{}, ws))
+		cc.Stop()
+
+		if shadow {
+			require.Contains(t, cc.touchedAccounts, addr, "shadow mode cross-checks the compute-ahead root against the touched union")
+		} else {
+			require.Empty(t, cc.touchedAccounts, "a computed-ahead block's touched union is discarded at its blockResult")
+		}
+	}
+}
+
+// In batch mode a key touched in an earlier block is folded at batch end, after
+// its block's version map has left the first-touch cache, so its base read and
+// key hash wait for the fold. Per-block mode does both at first touch.
+func TestHandleMessage_FirstTouchWorkOnlyInPerBlockMode(t *testing.T) {
+	defer func(p bool) { dbg.BatchCommitments = p }(dbg.BatchCommitments)
+	dbg.BatchCommitments = true
+	for _, perBlock := range []bool{false, true} {
+		t.Run(fmt.Sprintf("perBlock=%v", perBlock), func(t *testing.T) {
+			ctx := context.Background()
+			db, _, doms := setupStepTest(t)
+			cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", log.New(), perBlock, 1<<62, make(chan applyResult, 4), nil, make(chan commitmentResult, 4), state.NewLayeredDomainReader(doms, nil, nil), nil)
+			require.NoError(t, err)
+			defer cc.Stop()
+
+			addr := accounts.InternAddress([20]byte{0xe5})
+			slot := accounts.InternKey([32]byte{0x7})
+			ws := nonceBalanceWrites(addr, 1, *uint256.NewInt(5))
+			ws.SetStorage(addr, slot, &state.VersionedWrite[uint256.Int]{WriteHeader: state.WriteHeader{Address: addr, Path: state.StoragePath, Key: slot}, Val: *uint256.NewInt(9)})
+			cc.handleMessage(ctx, recordTx(newRawViewVM(11), 1, common.Hash{0x01}, 12, &chain.Rules{}, ws))
+
+			require.Contains(t, cc.touchedAccounts, addr)
+			require.Contains(t, cc.touchedStorage[addr], slot)
+			_, cached := cc.baseAccounts[addr]
+			require.Equal(t, perBlock, cached, "first-touch base read")
+			require.Equal(t, perBlock, cc.touchedAccounts[addr] != nil, "account key hash")
+			require.Equal(t, perBlock, cc.touchedStorage[addr][slot] != nil, "storage key hash")
+		})
+	}
+}
+
+// A block resumed mid-block carries no cells for the txs a previous run already
+// committed; the fold must still see their domain writes in each touched account's base.
+func TestHandleMessage_PartialBlockFoldSeesCommittedEarlierTxs(t *testing.T) {
+	ctx := context.Background()
+	db, tx, doms := setupStepTest(t)
+
+	in := make(chan applyResult, 64)
+	out := make(chan commitmentResult, 64)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", log.New(), true, 1<<62, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
+	require.NoError(t, err)
+	defer cc.Stop()
+
+	addr := accounts.InternAddress([20]byte{0xe4})
+	av := addr.Value()
+	before := accounts.NewAccount()
+	before.Nonce, before.Balance = 5, *uint256.NewInt(100)
+	committedInBlock := accounts.NewAccount()
+	committedInBlock.Nonce, committedInBlock.Balance = 6, *uint256.NewInt(90)
+	require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, av[:], accounts.SerialiseV3(&before), 0, nil))
+	require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, av[:], accounts.SerialiseV3(&committedInBlock), 11, nil))
+
+	vm := newRawViewVM(11)
+	ws := &state.WriteSet{}
+	ws.SetBalance(addr, &state.VersionedWrite[uint256.Int]{WriteHeader: state.WriteHeader{Address: addr, Path: state.BalancePath, Version: state.Version{TxIndex: 1}}, Val: *uint256.NewInt(95)})
+	cc.handleMessage(ctx, recordTx(vm, 1, common.Hash{0x01}, 12, &chain.Rules{}, ws))
+
+	acc, ok, _ := cc.foldView(vm, 12, cc.asOfReader.dr.StateReaderAt(13)).GetAccount(addr)
+	require.True(t, ok)
+	require.Equal(t, *uint256.NewInt(95), acc.Balance)
+	require.Equal(t, uint64(6), acc.Nonce, "the nonce committed by the block's earlier tx comes from the base")
+}
+
+// computeBlockFromBAL must map the step edge to the right BAL index: the checkpoint folds a key rewritten after the edge at its pre-edge value.
+func TestComputeAhead_StepCheckpointExcludesPostEdgeWrite(t *testing.T) {
+	defer func(p bool) { dbg.BALDrivenCommitment = p }(dbg.BALDrivenCommitment)
+	defer func(p bool) { dbg.IgnoreBAL = p }(dbg.IgnoreBAL)
+	dbg.BALDrivenCommitment = true
+	dbg.IgnoreBAL = false
+
+	ctx := context.Background()
+	const firstTxNum, lastTxNum, edgeTxNum = uint64(11), uint64(20), uint64(15)
+
+	db, tx, doms := setupStepTest(t)
+	in := make(chan applyResult, 64)
+	out := make(chan commitmentResult, 64)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", log.New(), false, 1<<62, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
+	require.NoError(t, err)
+	defer cc.Stop()
+	cc.hasFirstBlock = true
+	cc.firstBlockNum = 2
+
+	rnd := rand.New(rand.NewSource(42))
+	key := make([]byte, length.Addr)
+	rnd.Read(key)
+	accountValues := map[string][]byte{}
+	var bList types.BlockAccessList
+	put := func(addrBytes []byte, txNum uint64, balV uint256.Int) []byte {
+		acc := accounts.Account{Nonce: txNum, Balance: balV, CodeHash: accounts.EmptyCodeHash}
+		buf := accounts.SerialiseV3(&acc)
+		require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addrBytes, buf, txNum, nil))
+		return buf
+	}
+	for txNum := firstTxNum; txNum <= lastTxNum; txNum++ {
+		addrBytes := key
+		if txNum != firstTxNum && txNum != lastTxNum-1 {
+			addrBytes = make([]byte, length.Addr)
+			rnd.Read(addrBytes)
+		}
+		balV := *uint256.NewInt(txNum * 1000)
+		buf := put(addrBytes, txNum, balV)
+		if txNum <= edgeTxNum {
+			accountValues[string(addrBytes)] = buf
+		}
+		idx := uint32(txNum - firstTxNum)
+		bList = append(bList, types.AccountChanges{
+			Address:        [20]byte(addrBytes),
+			BalanceChanges: []*types.BalanceChange{{Index: idx, Value: balV}},
+			NonceChanges:   []*types.NonceChange{{Index: idx, Value: txNum}},
+		})
+	}
+	cc.handleBlockRequest(ctx, &blockRequest{blockNum: 2, firstTxNum: firstTxNum, lastTxNum: lastTxNum, stateRoot: common.Hash{0xde, 0xad}, bal: bList})
+	require.NoError(t, doms.Flush(ctx, tx))
+
+	it, err := tx.RangeAsOf(kv.CommitmentDomain, nil, nil, 1000, order.Asc, -1)
+	require.NoError(t, err)
+	defer it.Close()
+	storageValues := map[string][]byte{}
+	checked := 0
+	for it.HasNext() {
+		k, _, err := it.Next()
+		require.NoError(t, err)
+		if bytes.Equal(k, commitmentdb.KeyCommitmentState) {
+			continue
+		}
+		v, ok, err := doms.GetAsOf(kv.CommitmentDomain, k, edgeTxNum+1)
+		require.NoError(t, err)
+		if !ok {
+			continue
+		}
+		require.NoError(t, commitment.VerifyBranchHashes(k, commitment.BranchData(v), accountValues, storageValues),
+			"checkpoint branch %x at the step edge must hash the pre-edge value of the rewritten key", k)
+		checked++
+	}
+	require.Positive(t, checked)
+}
+
+// Compute-ahead must fold an account the BAL drains to empty under EIP-161 as absent: its root equals that of a base that never had it.
+func TestComputeAhead_BALDrainedEmptyAccountFoldsAsAbsent(t *testing.T) {
+	defer func(p bool) { dbg.BALDrivenCommitment = p }(dbg.BALDrivenCommitment)
+	defer func(p bool) { dbg.IgnoreBAL = p }(dbg.IgnoreBAL)
+	dbg.BALDrivenCommitment = true
+	dbg.IgnoreBAL = false
+
+	const firstTxNum, lastTxNum = uint64(11), uint64(20)
+	cfg := *chain.AllProtocolChanges
+	require.True(t, cfg.IsEIP161Enabled(2))
+	addrA, addrB := bytes.Repeat([]byte{0xaa}, length.Addr), bytes.Repeat([]byte{0xbb}, length.Addr)
+
+	run := func(withA bool, stateRoot common.Hash) commitmentResult {
+		ctx := context.Background()
+		db, tx, doms := setupStepTest(t)
+		out := make(chan commitmentResult, 64)
+		cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &cfg, "test", log.New(), false, 1<<62, make(chan applyResult, 64), nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
+		require.NoError(t, err)
+		defer cc.Stop()
+		cc.hasFirstBlock = true
+		cc.firstBlockNum = 2
+
+		put := func(addr []byte, nonce uint64, bal uint64) {
+			acc := accounts.Account{Nonce: nonce, Balance: *uint256.NewInt(bal), CodeHash: accounts.EmptyCodeHash}
+			require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addr, accounts.SerialiseV3(&acc), 5, nil))
+		}
+		put(addrB, 1, 100)
+		bList := types.BlockAccessList{{
+			Address:        [20]byte(addrB),
+			BalanceChanges: []*types.BalanceChange{{Index: 1, Value: *uint256.NewInt(90)}},
+		}}
+		if withA {
+			put(addrA, 0, 7)
+			bList = append(bList, types.AccountChanges{
+				Address:        [20]byte(addrA),
+				BalanceChanges: []*types.BalanceChange{{Index: 1, Value: *uint256.NewInt(0)}},
+			})
+		}
+		cc.handleBlockRequest(ctx, &blockRequest{blockNum: 2, firstTxNum: firstTxNum, lastTxNum: lastTxNum, stateRoot: stateRoot, bal: bList})
+		return <-out
+	}
+
+	ref := run(false, common.Hash{0xde, 0xad})
+	m := regexp.MustCompile(`root ([0-9a-f]{64}) expected`).FindStringSubmatch(fmt.Sprint(ref.err))
+	require.Len(t, m, 2, "reference run must report its root through the mismatch error, got %v", ref.err)
+	want := common.HexToHash(m[1])
+
+	got := run(true, want)
+	require.NoError(t, got.err, "root with the drained empty account must equal the root of a base without it (%x)", want)
+	require.Equal(t, want[:], got.rootHash)
+}
+
+// A fold reads the folding block's accounts through its version map; it must read their code the same way,
+// or a code write that the apply loop has not landed yet disagrees with the account's code hash.
+func TestAsOfStateReaderReadsFoldingBlockCode(t *testing.T) {
+	_, tx, doms := setupStepTest(t)
+	addr := common.HexToAddress("0xc0de")
+	oldCode, newCode := []byte{0xef, 0x01, 0x00, 0x01}, []byte{0xef, 0x01, 0x00, 0x02}
+	require.NoError(t, doms.DomainPut(kv.CodeDomain, tx, addr[:], oldCode, 1, nil))
+
+	vm := state.NewVersionMap(nil)
+	vm.SetBaseTxNum(10)
+	vm.WriteCode(accounts.InternAddress(addr), state.Version{TxIndex: 0}, accounts.NewCode(newCode), true)
+
+	reader := &asOfStateReader{sd: doms, roTx: tx, txNum: 12, dr: state.NewLayeredDomainReader(doms, nil, nil), cur: vm, curTxNum: 11}
+	code, _, err := reader.Read(kv.CodeDomain, addr[:], doms.StepSize())
+	require.NoError(t, err)
+	require.Equal(t, newCode, code)
+
+	other := common.HexToAddress("0xc0df")
+	require.NoError(t, doms.DomainPut(kv.CodeDomain, tx, other[:], oldCode, 1, nil))
+	code, _, err = reader.Read(kv.CodeDomain, other[:], doms.StepSize())
+	require.NoError(t, err)
+	require.Equal(t, oldCode, code, "code without a cell in the block falls back to the domain")
+}
+
+func TestAsOfStateReaderReadsFoldingBlockAtCurTxNum(t *testing.T) {
+	_, tx, doms := setupStepTest(t)
+	addr := common.HexToAddress("0xacc0")
+	a := accounts.InternAddress(addr)
+	require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addr[:], accounts.SerialiseV3(&accounts.Account{Nonce: 5, Balance: *uint256.NewInt(1)}), 1, nil))
+	slot := func(b byte) ([]byte, accounts.StorageKey) {
+		var h common.Hash
+		h[31] = b
+		return append(bytes.Clone(addr[:]), h[:]...), accounts.InternKey(h)
+	}
+	changed, changedKey := slot(1)
+	untouched, _ := slot(2)
+	zeroed, zeroedKey := slot(3)
+	for k, v := range map[string]byte{string(changed): 1, string(untouched): 5, string(zeroed): 7} {
+		require.NoError(t, doms.DomainPut(kv.StorageDomain, tx, []byte(k), []byte{v}, 1, nil))
+	}
+
+	vm := state.NewVersionMap(nil)
+	vm.SetBaseTxNum(10)
+	vm.WriteBalance(a, state.Version{TxIndex: 0}, *uint256.NewInt(2), true)
+	vm.WriteBalance(a, state.Version{TxIndex: 3}, *uint256.NewInt(3), true)
+	vm.WriteStorage(a, changedKey, state.Version{TxIndex: 0}, *uint256.NewInt(2), true)
+	vm.WriteStorage(a, changedKey, state.Version{TxIndex: 3}, *uint256.NewInt(9), true)
+	vm.WriteStorage(a, zeroedKey, state.Version{TxIndex: 0}, uint256.Int{}, true)
+
+	reader := &asOfStateReader{sd: doms, roTx: tx, txNum: 12, dr: state.NewLayeredDomainReader(doms, nil, nil), cur: vm, curTxNum: 11}
+	enc, _, err := reader.Read(kv.AccountsDomain, addr[:], doms.StepSize())
+	require.NoError(t, err)
+	var acc accounts.Account
+	require.NoError(t, accounts.DeserialiseV3(&acc, enc))
+	require.Equal(t, uint64(5), acc.Nonce, "untouched field falls back to the domain")
+	require.Equal(t, *uint256.NewInt(2), acc.Balance, "a write after curTxNum is not visible")
+
+	for _, c := range []struct {
+		key  []byte
+		want []byte
+	}{{changed, []byte{2}}, {untouched, []byte{5}}, {zeroed, nil}} {
+		enc, _, err = reader.Read(kv.StorageDomain, c.key, doms.StepSize())
+		require.NoError(t, err)
+		require.Equal(t, c.want, enc)
+	}
+}
+
+func TestAsOfStateReaderReadsPrevBlockCode(t *testing.T) {
+	_, tx, doms := setupStepTest(t)
+	addr := common.HexToAddress("0xc0de")
+	oldCode, newCode := []byte{0xef, 0x01, 0x00, 0x01}, []byte{0xef, 0x01, 0x00, 0x02}
+	require.NoError(t, doms.DomainPut(kv.CodeDomain, tx, addr[:], oldCode, 1, nil))
+
+	prev := state.NewVersionMap(nil)
+	prev.SetBaseTxNum(5)
+	prev.WriteCode(accounts.InternAddress(addr), state.Version{TxIndex: 0}, accounts.NewCode(newCode), true)
+	prevBlocks := state.NewPrevBlockList()
+	prevBlocks.PushHead(1, 7, prev)
+
+	cur := state.NewVersionMap(nil)
+	cur.SetBaseTxNum(10)
+	reader := &asOfStateReader{sd: doms, roTx: tx, txNum: 12, dr: state.NewLayeredDomainReader(doms, nil, prevBlocks), cur: cur, curTxNum: 11}
+	code, _, err := reader.Read(kv.CodeDomain, addr[:], doms.StepSize())
+	require.NoError(t, err)
+	require.Equal(t, newCode, code, "code written by an earlier block not yet in the domain")
+}

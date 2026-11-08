@@ -1,0 +1,224 @@
+// Copyright 2021 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+package recsplit
+
+import (
+	"fmt"
+	"path/filepath"
+	"testing"
+
+	"github.com/spaolacci/murmur3"
+
+	"github.com/erigontech/erigon/common/log/v3"
+)
+
+func BenchmarkFindSplit(b *testing.B) {
+	// Simulate realistic aggregation-level buckets.
+	// With leafSize=8: primaryAggrBound=32, secondaryAggrBound=96.
+	// A bucket of size 2000 first splits with fanout=2, unit=1056 (secondaryAggr level),
+	// then recursively into primaryAggr and leaf levels.
+	// The most common aggregation call is primaryAggr level: m~32, fanout=4, unit=8.
+	const (
+		leafSize           = uint16(8)
+		primaryAggrBound   = uint16(32) // leafSize * max(2, ceil(0.35*8+0.5)) = 8*4
+		secondaryAggrBound = uint16(96) // primaryAggrBound * ceil(0.21*8+0.9) = 32*3
+	)
+	// Generate buckets at the primary aggregation level (most frequent)
+	const numBuckets = 1000
+	const m = primaryAggrBound // 32 keys
+	buckets := make([][m]uint64, numBuckets)
+	for i := range buckets {
+		for j := range buckets[i] {
+			key := fmt.Appendf(nil, "split_%d_%d", i, j)
+			hi, lo := murmur3.Sum128WithSeed(key, 1)
+			_ = hi
+			buckets[i][j] = lo
+		}
+	}
+	fanout, unit := splitParams(m, leafSize, primaryAggrBound, secondaryAggrBound)
+	salt := uint64(0x6453cec3f7376937) // startSeed[1]
+
+	for b.Loop() {
+		for i := range buckets {
+			findSplit(buckets[i][:], salt, fanout, unit)
+		}
+	}
+}
+
+func BenchmarkFindBijection(b *testing.B) {
+	// Simulate realistic leaf buckets: leafSize=8 keys with murmur3 hashes
+	const leafSize = 8
+	const numBuckets = 1000
+	buckets := make([][leafSize]uint64, numBuckets)
+	for i := range buckets {
+		for j := range buckets[i] {
+			key := fmt.Appendf(nil, "key_%d_%d", i, j)
+			hi, lo := murmur3.Sum128WithSeed(key, 1)
+			_ = hi
+			buckets[i][j] = lo
+		}
+	}
+	salt := uint64(0x106393c187cae2a) // startSeed[0]
+
+	for b.Loop() {
+		for i := range buckets {
+			findBijection(buckets[i][:], salt)
+		}
+	}
+}
+
+func BenchmarkBuild(b *testing.B) {
+	b.ReportAllocs()
+	logger := log.New()
+	tmpDir := b.TempDir()
+	salt := uint32(1)
+	const KeysN = 1_000_000
+
+	// Pre-allocate all keys outside the benchmark loop
+	keys := make([][]byte, KeysN)
+	for j := range KeysN {
+		keys[j] = fmt.Appendf(nil, "key %d", j)
+	}
+	b.ResetTimer()
+	for i := 0; b.Loop(); i++ {
+		b.StopTimer()
+		indexFile := filepath.Join(tmpDir, fmt.Sprintf("index_%d", i))
+		rs, err := NewRecSplit(RecSplitArgs{
+			KeyCount:   KeysN,
+			BucketSize: 2000,
+			Salt:       &salt,
+			TmpDir:     tmpDir,
+			IndexFile:  indexFile,
+			LeafSize:   8,
+			NoFsync:    true,
+		}, logger)
+		if err != nil {
+			b.Fatal(err)
+		}
+		for j := range KeysN {
+			if err = rs.AddKey(keys[j], uint64(j*17)); err != nil {
+				b.Fatal(err)
+			}
+		}
+		b.StartTimer()
+		if err := rs.Build(b.Context()); err != nil {
+			b.Fatal(err)
+		}
+		b.StopTimer()
+		rs.Close()
+		b.StartTimer()
+	}
+}
+
+func BenchmarkAddKeyAndBuild(b *testing.B) {
+	b.ReportAllocs()
+	logger := log.New()
+	tmpDir := b.TempDir()
+	salt := uint32(1)
+	const KeysN = 1_000_000
+
+	keys := make([][]byte, KeysN)
+	for j := range KeysN {
+		keys[j] = fmt.Appendf(nil, "key %d", j)
+	}
+
+	for _, enums := range []bool{false, true} {
+		name := "noEnums"
+		if enums {
+			name = "enums"
+		}
+		b.Run(name, func(b *testing.B) {
+			for i := 0; b.Loop(); i++ {
+				b.StopTimer()
+				indexFile := filepath.Join(tmpDir, fmt.Sprintf("index_full_%s_%d", name, i))
+				rs, err := NewRecSplit(RecSplitArgs{
+					KeyCount:   KeysN,
+					BucketSize: 2000,
+					Salt:       &salt,
+					TmpDir:     tmpDir,
+					IndexFile:  indexFile,
+					LeafSize:   8,
+					Enums:      enums,
+					NoFsync:    true,
+				}, logger)
+				if err != nil {
+					b.Fatal(err)
+				}
+				b.StartTimer()
+				for j := range KeysN {
+					if err = rs.AddKey(keys[j], uint64(j*17)); err != nil {
+						b.Fatal(err)
+					}
+				}
+				if err := rs.Build(b.Context()); err != nil {
+					b.Fatal(err)
+				}
+				b.StopTimer()
+				rs.Close()
+				b.StartTimer()
+			}
+		})
+	}
+}
+
+func BenchmarkBuildParallel(b *testing.B) {
+	b.ReportAllocs()
+	logger := log.New()
+	tmpDir := b.TempDir()
+	salt := uint32(1)
+	const KeysN = 1_000_000
+
+	keys := make([][]byte, KeysN)
+	for j := range KeysN {
+		keys[j] = fmt.Appendf(nil, "key %d", j)
+	}
+
+	for _, workers := range []int{1, 2, 4, 8} {
+		b.Run(fmt.Sprintf("workers=%d", workers), func(b *testing.B) {
+			b.ResetTimer()
+			for i := 0; b.Loop(); i++ {
+				b.StopTimer()
+				indexFile := filepath.Join(tmpDir, fmt.Sprintf("index_par_%d_w%d", i, workers))
+				rs, err := NewRecSplit(RecSplitArgs{
+					KeyCount:   KeysN,
+					BucketSize: 2000,
+					Salt:       &salt,
+					TmpDir:     tmpDir,
+					IndexFile:  indexFile,
+					LeafSize:   8,
+					NoFsync:    true,
+					Workers:    workers,
+				}, logger)
+				if err != nil {
+					b.Fatal(err)
+				}
+				for j := range KeysN {
+					if err = rs.AddKey(keys[j], uint64(j*17)); err != nil {
+						b.Fatal(err)
+					}
+				}
+				b.StartTimer()
+				if err := rs.Build(b.Context()); err != nil {
+					b.Fatal(err)
+				}
+				b.StopTimer()
+				rs.Close()
+				b.StartTimer()
+			}
+		})
+	}
+}

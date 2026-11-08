@@ -30,12 +30,13 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
-	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
+	"github.com/erigontech/erigon/txnprovider/txpool"
 )
 
 const reorgTooDeepDepth = 3
@@ -68,36 +69,43 @@ func (cc *ExecutionClientDirect) NewPayload(
 		requestsHash = cltypes.ComputeExecutionRequestHash(executionRequestsList)
 	}
 
-	header, err := payload.RlpHeader(beaconParentRoot, requestsHash)
+	bal, err := DecodeAndValidateBlockAccessList(payload)
+	if err != nil {
+		return PayloadStatusInvalidated, err
+	}
+
+	header, err := payload.RlpHeader(beaconParentRoot, requestsHash, bal)
 	if err != nil {
 		// invalid block
 		return PayloadStatusInvalidated, err
 	}
 
 	body := payload.Body()
-	txs, err := types.DecodeTransactions(body.Transactions)
+	txs, err := DecodePayloadTransactions(payload)
 	if err != nil {
 		// invalid block
 		return PayloadStatusInvalidated, err
 	}
 
-	startInsertBlockAndWait := time.Now()
-	if err := cc.chainRW.InsertBlockAndWait(ctx, types.NewBlockFromStorage(payload.BlockHash, header, txs, nil, body.Withdrawals)); err != nil {
+	startInsertBlock := time.Now()
+	if err := cc.chainRW.InsertBlock(ctx, types.NewBlockFromStorageWithBinaryTxs(payload.BlockHash, header, txs, body.Transactions, nil, body.Withdrawals, bal)); err != nil {
 		if errors.Is(err, types.ErrBlockExceedsMaxRlpSize) {
 			return PayloadStatusInvalidated, err
 		}
 		return PayloadStatusNone, err
 	}
-	monitor.ObserveExecutionClientInsertingBlocks(startInsertBlockAndWait)
+	monitor.ObserveExecutionClientInsertingBlocks(startInsertBlock)
 
 	headHeader := cc.chainRW.CurrentHeader(ctx)
+	if headHeader == nil && ctx.Err() != nil {
+		return PayloadStatusNone, ctx.Err()
+	}
 	if headHeader == nil || header.Number.Uint64() > headHeader.Number.Uint64()+1 {
 		// can't validate yet
 		return PayloadStatusNotValidated, nil
 	}
 
-	// check if the block is too deep in the reorg accounting for underflow
-	if headHeader.Number.Uint64() > reorgTooDeepDepth && header.Number.Uint64() < headHeader.Number.Uint64()-reorgTooDeepDepth {
+	if header.Number.Uint64() < notValidatedBelow(headHeader) {
 		// reorg too deep
 		return PayloadStatusNotValidated, nil
 	}
@@ -110,56 +118,148 @@ func (cc *ExecutionClientDirect) NewPayload(
 	monitor.ObserveExecutionClientValidateChain(startValidateChain)
 	// check status
 	switch status {
-	case executionproto.ExecutionStatus_BadBlock, executionproto.ExecutionStatus_InvalidForkchoice:
+	case execmodule.ExecutionStatusBadBlock, execmodule.ExecutionStatusInvalidForkchoice:
 		return PayloadStatusInvalidated, errors.New("bad block")
-	case executionproto.ExecutionStatus_Busy, executionproto.ExecutionStatus_MissingSegment, executionproto.ExecutionStatus_TooFarAway:
+	case execmodule.ExecutionStatusBusy, execmodule.ExecutionStatusMissingSegment, execmodule.ExecutionStatusTooFarAway:
 		return PayloadStatusNotValidated, nil
-	case executionproto.ExecutionStatus_Success:
+	case execmodule.ExecutionStatusSuccess:
 		return PayloadStatusValidated, nil
 	}
 	return PayloadStatusNone, errors.New("unexpected status")
 }
 
-func (cc *ExecutionClientDirect) ForkChoiceUpdate(ctx context.Context, finalized, safe, head common.Hash, attr *engine_types.PayloadAttributes) ([]byte, error) {
-	status, _, _, err := cc.chainRW.UpdateForkChoice(ctx, head, safe, finalized)
+func (cc *ExecutionClientDirect) ForkChoiceUpdate(ctx context.Context, finalized, safe, head common.Hash, attr *engine_types.PayloadAttributes, _ clparams.StateVersion) ([]byte, error) {
+	result, err := cc.chainRW.UpdateForkChoiceResult(ctx, head, safe, finalized)
 	if err != nil {
 		return nil, fmt.Errorf("execution Client RPC failed to retrieve ForkChoiceUpdate response, err: %w", err)
 	}
-	if status == executionproto.ExecutionStatus_InvalidForkchoice {
+	if result.Status == execmodule.ExecutionStatusInvalidForkchoice {
 		return nil, errors.New("forkchoice was invalid")
 	}
-	if status == executionproto.ExecutionStatus_BadBlock {
+	if result.Status == execmodule.ExecutionStatusBadBlock {
 		return nil, errors.New("bad block as forkchoice")
 	}
 	if attr == nil {
+		if result.Status == execmodule.ExecutionStatusBusy && !result.UpdateInProgress {
+			return nil, ErrForkChoiceUpdateBusy
+		}
 		return nil, nil
 	}
-	idBytes := make([]byte, 8)
-	id, err := cc.chainRW.AssembleBlock(head, attr)
+	// The forkchoice update answers before its commit releases the execution semaphore, so the
+	// build that follows it is usually busy for tens of milliseconds.
+	id, err := retryAssembleBlock(ctx, 30, 10*time.Millisecond, 200*time.Millisecond, func(ctx context.Context) (uint64, error) {
+		return cc.chainRW.AssembleBlock(ctx, head, attr)
+	})
 	if err != nil {
 		return nil, err
 	}
+	return encodeDirectPayloadID(id), nil
+}
+
+func (cc *ExecutionClientDirect) StartPayloadBuild(ctx context.Context, head common.Hash, attributes *engine_types.PayloadAttributes) ([]byte, error) {
+	id, err := startPayloadBuild(ctx, cc.chainRW, head, attributes)
+	if err != nil {
+		return nil, err
+	}
+	return encodeDirectPayloadID(id), nil
+}
+
+// Direct execution-module payload IDs use little-endian uint64 encoding. Engine API payload IDs
+// are a separate wire format.
+func encodeDirectPayloadID(id uint64) []byte {
+	idBytes := make([]byte, 8)
 	binary.LittleEndian.PutUint64(idBytes, id)
-	return idBytes, nil
+	return idBytes
+}
+
+func decodeDirectPayloadID(id []byte) uint64 {
+	return binary.LittleEndian.Uint64(id)
+}
+
+// assembleRetryDelay doubles the delay from first on each retry, up to maxDelay.
+func assembleRetryDelay(retry int, first, maxDelay time.Duration) time.Duration {
+	delay := first
+	for range retry {
+		if delay >= maxDelay/2 {
+			return maxDelay
+		}
+		delay *= 2
+	}
+	return min(delay, maxDelay)
+}
+
+func retryAssembleBlock(ctx context.Context, attempts int, firstDelay, maxDelay time.Duration, assemble func(context.Context) (uint64, error)) (uint64, error) {
+	if attempts <= 0 {
+		return 0, errors.New("assemble block requires at least one attempt")
+	}
+	var (
+		id  uint64
+		err error
+	)
+	for attempt := range attempts {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return 0, ctxErr
+		}
+		if id, err = assemble(ctx); err == nil {
+			return id, nil
+		}
+		if !errors.Is(err, chainreader.ErrExecutionBusy) {
+			return 0, err
+		}
+		if attempt+1 == attempts {
+			break
+		}
+		timer := time.NewTimer(assembleRetryDelay(attempt, firstDelay, maxDelay))
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			return 0, ctx.Err()
+		case <-timer.C:
+		}
+	}
+	return 0, err
+}
+
+// SkipsValidationBelow returns the block number below which NewPayload inserts a block but answers
+// NotValidated without validating it, or 0 when it validates every block. It follows the EL head;
+// known is false when the head cannot be read.
+func (cc *ExecutionClientDirect) SkipsValidationBelow(ctx context.Context) (below uint64, known bool) {
+	head := cc.chainRW.CurrentHeader(ctx)
+	return notValidatedBelow(head), head != nil
+}
+
+// notValidatedBelow returns the block number below which a block is more than reorgTooDeepDepth
+// below head, too deep to validate, or 0.
+func notValidatedBelow(head *types.Header) uint64 {
+	if head == nil || head.Number.Uint64() <= reorgTooDeepDepth {
+		return 0
+	}
+	return head.Number.Uint64() - reorgTooDeepDepth
 }
 
 func (cc *ExecutionClientDirect) SupportInsertion() bool {
 	return true
 }
 
-func (cc *ExecutionClientDirect) InsertBlocks(ctx context.Context, blocks []*types.Block, wait bool) error {
-	if wait {
-		return cc.chainRW.InsertBlocksAndWait(ctx, blocks)
-	}
+func (cc *ExecutionClientDirect) InsertBlocks(ctx context.Context, blocks []*types.Block) error {
 	return cc.chainRW.InsertBlocks(ctx, blocks)
 }
 
-func (cc *ExecutionClientDirect) InsertBlock(ctx context.Context, blk *types.Block) error {
-	return cc.chainRW.InsertBlockAndWait(ctx, blk)
+func (cc *ExecutionClientDirect) InsertBlock(ctx context.Context, block *types.Block) error {
+	return cc.chainRW.InsertBlock(ctx, block)
 }
 
 func (cc *ExecutionClientDirect) CurrentHeader(ctx context.Context) (*types.Header, error) {
 	return cc.chainRW.CurrentHeader(ctx), nil
+}
+
+func (cc *ExecutionClientDirect) GetHeaderByHash(ctx context.Context, hash common.Hash) (*types.Header, error) {
+	return cc.chainRW.HeaderByHash(ctx, hash)
 }
 
 func (cc *ExecutionClientDirect) IsCanonicalHash(ctx context.Context, hash common.Hash) (bool, error) {
@@ -180,6 +280,10 @@ func (cc *ExecutionClientDirect) GetBodiesByHashes(ctx context.Context, hashes [
 	return cc.chainRW.GetBodiesByHashes(ctx, hashes)
 }
 
+func (cc *ExecutionClientDirect) GetPayloadBodiesByHash(ctx context.Context, hashes []common.Hash) ([]*engine_types.ExecutionPayloadBodyV2, error) {
+	return cc.chainRW.GetPayloadBodiesByHash(ctx, hashes)
+}
+
 func (cc *ExecutionClientDirect) FrozenBlocks(ctx context.Context) uint64 {
 	frozenBlocks, _ := cc.chainRW.FrozenBlocks(ctx)
 	return frozenBlocks
@@ -189,8 +293,8 @@ func (cc *ExecutionClientDirect) HasBlock(ctx context.Context, hash common.Hash)
 	return cc.chainRW.HasBlock(ctx, hash)
 }
 
-func (cc *ExecutionClientDirect) GetAssembledBlock(_ context.Context, idBytes []byte) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
-	return cc.chainRW.GetAssembledBlock(binary.LittleEndian.Uint64(idBytes))
+func (cc *ExecutionClientDirect) GetAssembledBlock(ctx context.Context, idBytes []byte, _ clparams.StateVersion) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+	return cc.chainRW.GetAssembledBlock(ctx, decodeDirectPayloadID(idBytes))
 }
 
 func (cc *ExecutionClientDirect) HasGapInSnapshots(ctx context.Context) bool {
@@ -198,9 +302,9 @@ func (cc *ExecutionClientDirect) HasGapInSnapshots(ctx context.Context) bool {
 	return hasGap
 }
 
-func (cc *ExecutionClientDirect) GetBlobs(ctx context.Context, versionedHashes []common.Hash) (blobs [][]byte, proofs [][][]byte) {
+func (cc *ExecutionClientDirect) GetBlobs(ctx context.Context, versionedHashes []common.Hash, _ clparams.StateVersion) (blobs [][]byte, proofs [][][]byte, err error) {
 	if cc.txpool == nil {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	req := &txpoolproto.GetBlobsRequest{BlobHashes: make([]*typesproto.H256, len(versionedHashes))}
@@ -209,7 +313,10 @@ func (cc *ExecutionClientDirect) GetBlobs(ctx context.Context, versionedHashes [
 	}
 	resp, err := cc.txpool.GetBlobs(ctx, req)
 	if err != nil {
-		return nil, nil
+		if errors.Is(err, txpool.ErrPoolDisabled) {
+			return nil, nil, nil
+		}
+		return nil, nil, fmt.Errorf("txpool GetBlobs: %w", err)
 	}
 	blobsWithProof := resp.BlobsWithProofs
 	blobs = make([][]byte, len(blobsWithProof))
@@ -218,5 +325,10 @@ func (cc *ExecutionClientDirect) GetBlobs(ctx context.Context, versionedHashes [
 		blobs[i] = bwp.Blob
 		proofs[i] = bwp.Proofs
 	}
-	return blobs, proofs
+	return blobs, proofs, nil
+}
+
+// In direct mode the execution layer is the in-process Erigon node, so report it directly.
+func (cc *ExecutionClientDirect) GetClientVersionV1(_ context.Context, _ *engine_types.ClientVersionV1) ([]engine_types.ClientVersionV1, error) {
+	return []engine_types.ClientVersionV1{engine_types.LocalClientVersionV1()}, nil
 }

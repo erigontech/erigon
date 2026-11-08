@@ -17,8 +17,7 @@
 package diaglib
 
 import (
-	"context"
-	"sort"
+	"slices"
 	"sync"
 	"time"
 
@@ -123,7 +122,6 @@ func peerStatisticsFromMsgUpdate(msg PeerStatisticMsgUpdate, prevValue any) Peer
 			ps.CapBytesOut[msg.MsgCap] += uint64(msg.Bytes)
 			ps.TypeBytesOut[msg.MsgType] += uint64(msg.Bytes)
 		}
-
 	}
 
 	return ps
@@ -151,13 +149,13 @@ func (p *PeerStats) getPeers() map[string]PeerStatistics {
 	p.peersInfo.Range(func(key, value any) bool {
 		loadedKey, ok := key.(string)
 		if !ok {
-			log.Debug("Failed to cast key to string", key)
+			log.Debug("Failed to cast key to string", "key", key)
 			return true
 		}
 
 		loadedValue, ok := value.(PeerStatistics)
 		if !ok {
-			log.Debug("Failed to cast value to PeerStatistics struct", value)
+			log.Debug("Failed to cast value to PeerStatistics struct", "value", value)
 			return true
 		}
 
@@ -215,8 +213,14 @@ func (p *PeerStats) getOldestUpdatedPeersWithSize(size int) []PeerUpdTime {
 		timeArray = append(timeArray, PeerUpdTime{k, v})
 	}
 
-	sort.Slice(timeArray, func(i, j int) bool {
-		return timeArray[i].Time.Before(timeArray[j].Time)
+	slices.SortFunc(timeArray, func(a, b PeerUpdTime) int {
+		if a.Time.Before(b.Time) {
+			return -1
+		}
+		if b.Time.Before(a.Time) {
+			return 1
+		}
+		return 0
 	})
 
 	if len(timeArray) < size {
@@ -240,29 +244,4 @@ func (p *PeerStats) removePeersWhichExceedLimit(limit int) {
 			p.removePeer(peer.PeerID)
 		}
 	}
-}
-
-func (d *DiagnosticClient) setupNetworkDiagnostics(rootCtx context.Context) {
-	d.runCollectPeersStatistics(rootCtx)
-}
-
-func (d *DiagnosticClient) runCollectPeersStatistics(rootCtx context.Context) {
-	go func() {
-		ctx, ch, closeChannel := Context[PeerStatisticMsgUpdate](rootCtx, 1)
-		defer closeChannel()
-
-		StartProviders(ctx, TypeOf(PeerStatisticMsgUpdate{}), log.Root())
-		for {
-			select {
-			case <-rootCtx.Done():
-				return
-			case info := <-ch:
-				d.peersStats.AddOrUpdatePeer(info.PeerID, info)
-			}
-		}
-	}()
-}
-
-func (d *DiagnosticClient) Peers() map[string]PeerStatistics {
-	return d.peersStats.GetPeers()
 }

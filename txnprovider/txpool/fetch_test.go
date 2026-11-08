@@ -17,12 +17,18 @@
 package txpool
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"fmt"
 	"io"
+	"runtime"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"testing/synctest"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -33,7 +39,8 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
@@ -55,7 +62,7 @@ func TestFetch(t *testing.T) {
 	pool.EXPECT().Started().Return(true)
 
 	m := NewMockSentry(ctx, sentryServer)
-	sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m, nil)
+	sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m)
 	require.NoError(t, err)
 	var wg sync.WaitGroup
 	fetch := NewFetch(ctx, []sentryproto.SentryClient{sentryClient}, pool, remoteKvClient, nil, u256.N1, log.New(), WithP2PFetcherWg(&wg))
@@ -100,11 +107,13 @@ func TestSendTxnPropagate(t *testing.T) {
 						Peer: &typesproto.PeerInfo{
 							Id:   r.PeerId.String(),
 							Caps: []string{"eth/68"},
-						}}, nil
-				}).AnyTimes()
+						},
+					}, nil
+				},
+			).AnyTimes()
 
 		m := NewMockSentry(ctx, sentryServer)
-		sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m, nil)
+		sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m)
 		require.NoError(t, err)
 		send := NewSend(ctx, []sentryproto.SentryClient{sentryClient}, log.New())
 		send.BroadcastPooledTxns(testRlps(2), 100)
@@ -125,7 +134,7 @@ func TestSendTxnPropagate(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		sentryServer := sentryproto.NewMockSentryServer(ctrl)
 
-		times := 2
+		times := 3
 		requests := make([]*sentryproto.SendMessageToRandomPeersRequest, 0, times)
 		sentryServer.EXPECT().
 			SendMessageToRandomPeers(gomock.Any(), gomock.Any()).
@@ -136,7 +145,7 @@ func TestSendTxnPropagate(t *testing.T) {
 			Times(times)
 
 		m := NewMockSentry(ctx, sentryServer)
-		sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m, nil)
+		sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m)
 		require.NoError(t, err)
 		send := NewSend(ctx, []sentryproto.SentryClient{sentryClient}, log.New())
 		list := make(Hashes, p2pTxPacketLimit*3)
@@ -144,16 +153,19 @@ func TestSendTxnPropagate(t *testing.T) {
 			b := fmt.Appendf(nil, "%x", i)
 			copy(list[i:i+32], b)
 		}
-		send.BroadcastPooledTxns(testRlps(len(list)/32), 100)
+		rlps := testRlps(len(list) / 32)
+		send.BroadcastPooledTxns(rlps, 100)
 		send.AnnouncePooledTxns([]byte{0, 1, 2}, []uint32{10, 12, 14}, list, 100)
 
-		require.Len(t, requests, 2)
+		require.Len(t, requests, 3)
 
 		txnsMessage := requests[0].Data
 		require.Equal(t, sentryproto.MessageId_TRANSACTIONS_66, txnsMessage.Id)
-		require.Positive(t, len(txnsMessage.Data))
+		require.Equal(t, EncodeTransactions(rlps[:maxTransactionsPerPacket], nil), txnsMessage.Data)
+		require.Equal(t, sentryproto.MessageId_TRANSACTIONS_66, requests[1].Data.Id)
+		require.Equal(t, EncodeTransactions(rlps[maxTransactionsPerPacket:], nil), requests[1].Data.Data)
 
-		txnHashesMessage := requests[1].Data
+		txnHashesMessage := requests[2].Data
 		require.Equal(t, sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_68, txnHashesMessage.Id)
 		require.Positive(t, len(txnHashesMessage.Data))
 	})
@@ -173,7 +185,7 @@ func TestSendTxnPropagate(t *testing.T) {
 			Times(times)
 
 		m := NewMockSentry(ctx, sentryServer)
-		sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m, nil)
+		sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m)
 		require.NoError(t, err)
 		send := NewSend(ctx, []sentryproto.SentryClient{sentryClient}, log.New())
 		send.BroadcastPooledTxns(testRlps(2), 100)
@@ -211,11 +223,13 @@ func TestSendTxnPropagate(t *testing.T) {
 						Peer: &typesproto.PeerInfo{
 							Id:   r.PeerId.String(),
 							Caps: []string{"eth/68"},
-						}}, nil
-				}).AnyTimes()
+						},
+					}, nil
+				},
+			).AnyTimes()
 
 		m := NewMockSentry(ctx, sentryServer)
-		sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m, nil)
+		sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m)
 		require.NoError(t, err)
 		send := NewSend(ctx, []sentryproto.SentryClient{sentryClient}, log.New())
 		expectPeers := toPeerIDs(1, 2, 42)
@@ -241,7 +255,7 @@ func decodeHex(in string) []byte {
 func TestOnNewBlock(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
-	_, db := memdb.NewTestDB(t, dbcfg.ChainDB), memdb.NewTestDB(t, dbcfg.TxPoolDB)
+	_, db := mdbxtest.NewTestDB(t, dbcfg.ChainDB), mdbxtest.NewTestDB(t, dbcfg.TxPoolDB)
 	ctrl := gomock.NewController(t)
 
 	stream := remoteproto.NewMockKV_StateChangesClient[*remoteproto.StateChangeBatch](ctrl)
@@ -274,18 +288,12 @@ func TestOnNewBlock(t *testing.T) {
 	stateChanges.
 		EXPECT().
 		StateChanges(gomock.Any(), gomock.Any(), gomock.Any()).
-		DoAndReturn(func(_ context.Context, _ *remoteproto.StateChangeRequest, _ ...grpc.CallOption) (remoteproto.KV_StateChangesClient, error) {
+		DoAndReturn(func(_ context.Context, request *remoteproto.StateChangeRequest, _ ...grpc.CallOption) (remoteproto.KV_StateChangesClient, error) {
+			assert.True(t, request.WithStorage, "frame nonce revalidation needs changed storage slots")
 			return stream, nil
 		})
 
 	pool := NewMockPool(ctrl)
-
-	pool.EXPECT().
-		ValidateSerializedTxn(gomock.Any()).
-		DoAndReturn(func(_ []byte) error {
-			return nil
-		}).
-		Times(3)
 
 	var minedTxns TxnSlots
 	pool.EXPECT().
@@ -334,9 +342,11 @@ func (ms *MockSentry) Send(req *sentryproto.InboundMessage) (errs []error) {
 func (ms *MockSentry) SetStatus(context.Context, *sentryproto.StatusData) (*sentryproto.SetStatusReply, error) {
 	return &sentryproto.SetStatusReply{}, nil
 }
+
 func (ms *MockSentry) HandShake(context.Context, *emptypb.Empty) (*sentryproto.HandShakeReply, error) {
 	return &sentryproto.HandShakeReply{Protocol: sentryproto.Protocol_ETH69}, nil
 }
+
 func (ms *MockSentry) Messages(req *sentryproto.MessagesRequest, stream sentryproto.Sentry_MessagesServer) error {
 	ms.lock.Lock()
 	if ms.streams == nil {
@@ -368,9 +378,472 @@ func (ms *MockSentry) PeerEvents(_ *sentryproto.PeerEventsRequest, stream sentry
 	}
 }
 
+func TestFramePolicyRejectionKeepsOrdinaryTransactions(t *testing.T) {
+	frame := framePoolSlot(t, [20]byte{1}, 1, 2).Txn.(*types.FrameTransaction)
+	frame.Frames[0].Limits.Execution = 150_000
+	require.NoError(t, frame.Validate())
+	var encoded bytes.Buffer
+	require.NoError(t, frame.MarshalBinary(&encoded))
+	ordinary := tpEncodeTests[1].txns
+	txns := [][]byte{ordinary[0], encoded.Bytes(), ordinary[1]}
+
+	for _, id := range []sentryproto.MessageId{sentryproto.MessageId_TRANSACTIONS_66, sentryproto.MessageId_POOLED_TRANSACTIONS_66} {
+		t.Run(id.String(), func(t *testing.T) {
+			ctx := t.Context()
+			ctrl := gomock.NewController(t)
+			sentryServer := sentryproto.NewMockSentryServer(ctrl)
+			sentryServer.EXPECT().PenalizePeer(gomock.Any(), gomock.Any()).Times(0)
+			pool := NewMockPool(ctrl)
+			pool.EXPECT().Started().Return(true)
+			pool.EXPECT().IdHashKnown(gomock.Any(), gomock.Any()).Return(false, nil).AnyTimes()
+			pool.EXPECT().AddRemoteTxns(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+				Do(func(_ context.Context, slots TxnSlots, _ PeerID, _ sentryproto.SentryClient) {
+					require.Len(t, slots.Txns, len(ordinary))
+					for i, txn := range slots.Txns {
+						require.Equal(t, ordinary[i], txn.Rlp)
+					}
+				})
+
+			m := NewMockSentry(ctx, sentryServer)
+			sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m)
+			require.NoError(t, err)
+			fetch := NewFetch(ctx, []sentryproto.SentryClient{sentryClient}, pool, nil, nil, u256.N1, log.New())
+			payload := EncodeTransactions(txns, nil)
+			if id == sentryproto.MessageId_POOLED_TRANSACTIONS_66 {
+				payload = EncodePooledTransactions66(txns, 1, nil)
+			}
+			err = fetch.handleInboundMessageWithTx(ctx, nil, &sentryproto.InboundMessage{
+				Id: id, Data: payload, PeerId: peerID,
+			}, sentryClient)
+			require.NoError(t, err)
+		})
+	}
+}
+
+func TestPenalizePeerForMalformedMessages(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	txn := decodeHex("c98080808080801b0101")
+	oversizedTxns := make([][]byte, maxTransactionsPerPacket+1)
+	for i := range oversizedTxns {
+		oversizedTxns[i] = txn
+	}
+	frame := framePoolSlot(t, [20]byte{1}, 1, 2).Txn.(*types.FrameTransaction)
+	frame.Signatures = []types.FrameSignature{{Scheme: types.FrameSignatureSecp256k1, Signature: make([]byte, 65)}}
+	var invalidFrame bytes.Buffer
+	require.NoError(t, frame.MarshalBinary(&invalidFrame))
+
+	// Each sub-test sends a malformed message of a given type and asserts that PenalizePeer is called.
+	tests := []struct {
+		name string
+		id   sentryproto.MessageId
+		data []byte // deliberately malformed payload
+	}{
+		{
+			name: "malformed Transactions66",
+			id:   sentryproto.MessageId_TRANSACTIONS_66,
+			data: []byte{0xff, 0xfe}, // invalid RLP
+		},
+		{
+			name: "malformed PooledTransactions66",
+			id:   sentryproto.MessageId_POOLED_TRANSACTIONS_66,
+			data: []byte{0xff, 0xfe},
+		},
+		{
+			name: "invalid frame signature Transactions66",
+			id:   sentryproto.MessageId_TRANSACTIONS_66,
+			data: EncodeTransactions([][]byte{invalidFrame.Bytes()}, nil),
+		},
+		{
+			name: "invalid frame signature PooledTransactions66",
+			id:   sentryproto.MessageId_POOLED_TRANSACTIONS_66,
+			data: EncodePooledTransactions66([][]byte{invalidFrame.Bytes()}, 1, nil),
+		},
+		{
+			name: "oversized Transactions66",
+			id:   sentryproto.MessageId_TRANSACTIONS_66,
+			data: EncodeTransactions(oversizedTxns, nil),
+		},
+		{
+			name: "oversized PooledTransactions66",
+			id:   sentryproto.MessageId_POOLED_TRANSACTIONS_66,
+			data: EncodePooledTransactions66(oversizedTxns, 1, nil),
+		},
+		{
+			name: "malformed NewPooledTransactionHashes66",
+			id:   sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_66,
+			data: []byte{0xff, 0xfe},
+		},
+		{
+			name: "malformed NewPooledTransactionHashes68",
+			id:   sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_68,
+			data: []byte{0xff, 0xfe},
+		},
+		{
+			name: "malformed GetPooledTransactions66",
+			id:   sentryproto.MessageId_GET_POOLED_TRANSACTIONS_66,
+			data: []byte{0xff, 0xfe},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ctrl := gomock.NewController(t)
+
+			sentryServer := sentryproto.NewMockSentryServer(ctrl)
+			pool := NewMockPool(ctrl)
+			pool.EXPECT().Started().Return(true)
+			pool.EXPECT().IdHashKnown(gomock.Any(), gomock.Any()).Return(false, nil).AnyTimes()
+
+			// Expect PenalizePeer to be called exactly once with a Kick penalty.
+			sentryServer.EXPECT().
+				PenalizePeer(gomock.Any(), gomock.Any()).
+				DoAndReturn(func(_ context.Context, req *sentryproto.PenalizePeerRequest) (*emptypb.Empty, error) {
+					assert.Equal(t, sentryproto.PenaltyKind_Kick, req.Penalty)
+					assert.Equal(t, peerID, PeerID(req.PeerId))
+					return &emptypb.Empty{}, nil
+				}).
+				Times(1)
+
+			m := NewMockSentry(ctx, sentryServer)
+			sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m)
+			require.NoError(t, err)
+
+			fetch := NewFetch(ctx, []sentryproto.SentryClient{sentryClient}, pool, nil, nil, u256.N1, log.New())
+
+			err = fetch.handleInboundMessageWithTx(ctx, nil, &sentryproto.InboundMessage{
+				Id:     tt.id,
+				Data:   tt.data,
+				PeerId: peerID,
+			}, sentryClient)
+			require.NoError(t, err, "malformed message should be handled gracefully (penalize + return nil)")
+		})
+	}
+}
+
+// TestOversizedHashAnnouncement verifies that both eth/66 and eth/68 handlers
+// penalize peers that send more than 4096 hashes per NewPooledTransactionHashes
+// message (the devp2p soft limit) and do not issue a GetPooledTransactions request.
+func TestOversizedHashAnnouncement(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+
+	const oversizedCount = 4097
+
+	// Build oversized eth/66 payload: an RLP list of 4097 hashes.
+	hashes := make([]byte, 32*oversizedCount)
+	for i := range oversizedCount {
+		hashes[i*32] = byte(i)
+		hashes[i*32+1] = byte(i >> 8)
+	}
+	payload66 := EncodeHashes(hashes, nil)
+
+	// Build oversized eth/68 payload: announcement with 4097 entries.
+	types68 := make([]byte, oversizedCount)
+	sizes68 := make([]uint32, oversizedCount)
+	for i := range oversizedCount {
+		types68[i] = 2   // EIP-1559
+		sizes68[i] = 100 // arbitrary size
+	}
+	encodeBuf := make([]byte, announcementsLen(types68, sizes68, hashes))
+	n := encodeAnnouncements(types68, sizes68, hashes, encodeBuf)
+	payload68 := make([]byte, n)
+	copy(payload68, encodeBuf[:n])
+
+	tests := []struct {
+		name string
+		id   sentryproto.MessageId
+		data []byte
+	}{
+		{"eth/66", sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_66, payload66},
+		{"eth/68", sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_68, payload68},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ctrl := gomock.NewController(t)
+			sentryServer := sentryproto.NewMockSentryServer(ctrl)
+			pool := NewMockPool(ctrl)
+			pool.EXPECT().Started().Return(true)
+
+			// Expect peer to be penalized.
+			sentryServer.EXPECT().
+				PenalizePeer(gomock.Any(), gomock.Any()).
+				DoAndReturn(func(_ context.Context, req *sentryproto.PenalizePeerRequest) (*emptypb.Empty, error) {
+					assert.Equal(t, sentryproto.PenaltyKind_Kick, req.Penalty)
+					return &emptypb.Empty{}, nil
+				}).
+				Times(1)
+
+			m := NewMockSentry(ctx, sentryServer)
+			sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m)
+			require.NoError(t, err)
+
+			fetch := NewFetch(ctx, []sentryproto.SentryClient{sentryClient}, pool, nil, nil, u256.N1, log.New())
+
+			err = fetch.handleInboundMessageWithTx(ctx, nil, &sentryproto.InboundMessage{
+				Id:     tt.id,
+				Data:   tt.data,
+				PeerId: peerID,
+			}, sentryClient)
+			require.NoError(t, err, "oversized announcement should be handled gracefully")
+		})
+	}
+}
+
+// TestCheckPooledTxnAnnouncement verifies that a peer delivering a tx whose
+// type or size does not match what it previously announced is flagged, while
+// mismatches from an unrelated peer or without a prior announcement are not.
+func TestCheckPooledTxnAnnouncement(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+
+	ctrl := gomock.NewController(t)
+	sentryServer := sentryproto.NewMockSentryServer(ctrl)
+	pool := NewMockPool(ctrl)
+
+	m := NewMockSentry(ctx, sentryServer)
+	sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m)
+	require.NoError(t, err)
+
+	fetch := NewFetch(ctx, []sentryproto.SentryClient{sentryClient}, pool, nil, nil, u256.N1, log.New())
+
+	otherPeer := gointerfaces.ConvertHashToH512([64]byte{0xfe, 0xed})
+
+	hash := [32]byte{0xaa, 0xbb}
+	slot := &TxnSlot{IDHash: hash, Size: 200, Txn: &types.DynamicFeeTransaction{}}
+	// No announcement yet — must be a no-op.
+	require.NoError(t, fetch.checkPooledTxnAnnouncement(peerID, slot))
+
+	// Record an announcement: peer promised (type=DynamicFee, size=200).
+	// Tests pass nil filter to record every announced hash.
+	fetch.recordAnnouncement(peerID, []byte{types.DynamicFeeTxType}, []uint32{200}, hash[:], nil)
+
+	// Same peer, matching (type, size) — ok.
+	require.NoError(t, fetch.checkPooledTxnAnnouncement(peerID, slot))
+
+	// After a successful match the entry is consumed; re-announce for further checks.
+	fetch.recordAnnouncement(peerID, []byte{types.DynamicFeeTxType}, []uint32{200}, hash[:], nil)
+
+	// Same peer, mismatching type (announcement says DynamicFee but we deliver Legacy).
+	badTypeSlot := &TxnSlot{IDHash: hash, Size: 200, Txn: &types.LegacyTx{}}
+	require.Error(t, fetch.checkPooledTxnAnnouncement(peerID, badTypeSlot),
+		"peer delivering wrong type should be flagged")
+
+	// After the mismatch, re-announce and check the size path.
+	fetch.recordAnnouncement(peerID, []byte{types.DynamicFeeTxType}, []uint32{200}, hash[:], nil)
+	badSizeSlot := &TxnSlot{IDHash: hash, Size: 999, Txn: &types.DynamicFeeTransaction{}}
+	require.Error(t, fetch.checkPooledTxnAnnouncement(peerID, badSizeSlot),
+		"peer delivering wrong size should be flagged")
+
+	// Size within the 8-byte slack is not a violation — RLP vs consensus-format
+	// accounting can disagree by a handful of bytes for legacy/typed txs. The
+	// check is symmetric: both announced-larger-than-delivered and
+	// announced-smaller-than-delivered are bounded by the same slack.
+	fetch.recordAnnouncement(peerID, []byte{types.DynamicFeeTxType}, []uint32{208}, hash[:], nil)
+	require.NoError(t, fetch.checkPooledTxnAnnouncement(peerID, slot),
+		"size diff of +8 bytes should be within slack")
+	fetch.recordAnnouncement(peerID, []byte{types.DynamicFeeTxType}, []uint32{209}, hash[:], nil)
+	require.Error(t, fetch.checkPooledTxnAnnouncement(peerID, slot),
+		"size diff of +9 bytes should exceed slack")
+	fetch.recordAnnouncement(peerID, []byte{types.DynamicFeeTxType}, []uint32{192}, hash[:], nil)
+	require.NoError(t, fetch.checkPooledTxnAnnouncement(peerID, slot),
+		"size diff of -8 bytes should be within slack")
+	fetch.recordAnnouncement(peerID, []byte{types.DynamicFeeTxType}, []uint32{191}, hash[:], nil)
+	require.Error(t, fetch.checkPooledTxnAnnouncement(peerID, slot),
+		"size diff of -9 bytes should exceed slack")
+
+	// Different peer delivering the same hash must not be penalized based on
+	// another peer's announcement.
+	fetch.recordAnnouncement(peerID, []byte{types.DynamicFeeTxType}, []uint32{200}, hash[:], nil)
+	require.NoError(t, fetch.checkPooledTxnAnnouncement(otherPeer, badTypeSlot))
+
+	// Filter subset: an announcement for a hash not in the filter is skipped.
+	//
+	//  - hashA is in the filter — its (type, size) should be recorded.
+	//  - hashB is absent from the filter — its entry must NOT be recorded,
+	//    so a subsequent check for hashB from the same peer is a no-op.
+	hashA := [32]byte{0xcc, 0x01}
+	hashB := [32]byte{0xcc, 0x02}
+	both := append(append([]byte{}, hashA[:]...), hashB[:]...)
+	filter := hashA[:] // only hashA survives FilterKnownIdHashes
+	fetch.recordAnnouncement(peerID,
+		[]byte{types.DynamicFeeTxType, types.DynamicFeeTxType},
+		[]uint32{200, 200}, both, filter)
+	require.NoError(t, fetch.checkPooledTxnAnnouncement(peerID,
+		&TxnSlot{IDHash: hashB, Size: 999, Txn: &types.DynamicFeeTransaction{}}),
+		"hashB was filtered out at record time, so no mismatch should fire")
+	require.Error(t, fetch.checkPooledTxnAnnouncement(peerID,
+		&TxnSlot{IDHash: hashA, Size: 999, Txn: &types.DynamicFeeTransaction{}}),
+		"hashA was recorded, so the wrong-size delivery must fire")
+
+	// Multi-peer clobber regression: peer A lies in its announcement, peer B
+	// then announces the same hash with correct metadata. Without a composite
+	// (hash, peer) LRU key, B's entry would overwrite A's and A's lie would
+	// slip through the check. Both announcements must survive so A's delivery
+	// is still matched against A's own record.
+	//
+	// Concretely: A announces (DynamicFee, wrong size), B announces
+	// (DynamicFee, correct size), A then delivers the real 200-byte tx. The
+	// mismatch against A's own announcement must still fire.
+	hashC := [32]byte{0xdd, 0x01}
+	fetch.recordAnnouncement(peerID, []byte{types.DynamicFeeTxType}, []uint32{999}, hashC[:], nil)
+	fetch.recordAnnouncement(otherPeer, []byte{types.DynamicFeeTxType}, []uint32{200}, hashC[:], nil)
+	require.Error(t, fetch.checkPooledTxnAnnouncement(peerID,
+		&TxnSlot{IDHash: hashC, Size: 200, Txn: &types.DynamicFeeTransaction{}}),
+		"peer A's own lying announcement must still match A's delivery after B also announces")
+	// Peer B's delivery against its own (truthful) announcement is clean.
+	require.NoError(t, fetch.checkPooledTxnAnnouncement(otherPeer,
+		&TxnSlot{IDHash: hashC, Size: 200, Txn: &types.DynamicFeeTransaction{}}),
+		"peer B's matching delivery must not fire")
+}
+
+// TestCheckBlobSidecar verifies that a blob tx whose wrapper commitments do not
+// match its blob_versioned_hashes is flagged, while a correctly-formed wrapper
+// and a non-blob tx pass through cleanly.
+func TestCheckBlobSidecar(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+
+	ctrl := gomock.NewController(t)
+	sentryServer := sentryproto.NewMockSentryServer(ctrl)
+	pool := NewMockPool(ctrl)
+	m := NewMockSentry(ctx, sentryServer)
+	sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m)
+	require.NoError(t, err)
+	fetch := NewFetch(ctx, []sentryproto.SentryClient{sentryClient}, pool, nil, nil, u256.N1, log.New())
+
+	// Non-blob tx — unchecked.
+	require.NoError(t, fetch.checkBlobSidecar(&TxnSlot{Txn: &types.DynamicFeeTransaction{}}))
+
+	// Properly formed blob tx: a slot produced by makeBlobTxn() has both the
+	// inner BlobTx (with BlobVersionedHashes patched to match commitments) and
+	// the populated BlobBundles.
+	good := makeBlobTxn()
+	require.NoError(t, fetch.checkBlobSidecar(&good), "matching sidecar should pass")
+
+	// Corrupt a commitment so it no longer hashes to the versioned-hash.
+	bad := makeBlobTxn()
+	bad.BlobBundles[0].Commitment[0] ^= 0xff
+	require.Error(t, fetch.checkBlobSidecar(&bad), "mismatched commitment should be flagged")
+
+	// Blob tx arriving with no sidecar at all: the inner blob_versioned_hashes
+	// declares blobs but the wrapper delivers none. Treated as a protocol
+	// violation via the count-mismatch check (peer gets kicked).
+	missing := makeBlobTxn()
+	missing.BlobBundles = nil
+	require.Error(t, fetch.checkBlobSidecar(&missing), "blob tx with missing sidecar should be flagged")
+}
+
+// TestNoPenaltyOnInternalDBError verifies that when IdHashKnown returns a DB error
+// during transaction parsing, the peer is NOT penalized (since it's our internal failure,
+// not the peer's fault).
+func TestNoPenaltyOnInternalDBError(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+
+	// Build a valid Transactions66 RLP payload from a known good transaction.
+	txnRlp := decodeHex("f867088504a817c8088302e2489435353535353535353535353535353535353535358202008025a064b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c12a064b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c10")
+	validPayload := EncodeTransactions([][]byte{txnRlp}, nil)
+
+	ctrl := gomock.NewController(t)
+	sentryServer := sentryproto.NewMockSentryServer(ctrl)
+	pool := NewMockPool(ctrl)
+	pool.EXPECT().Started().Return(true)
+
+	dbErr := fmt.Errorf("mdbx read error")
+	pool.EXPECT().IdHashKnown(gomock.Any(), gomock.Any()).Return(false, dbErr).AnyTimes()
+
+	// PenalizePeer must NOT be called.
+	sentryServer.EXPECT().PenalizePeer(gomock.Any(), gomock.Any()).Times(0)
+
+	m := NewMockSentry(ctx, sentryServer)
+	sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m)
+	require.NoError(t, err)
+
+	fetch := NewFetch(ctx, []sentryproto.SentryClient{sentryClient}, pool, nil, nil, u256.N1, log.New())
+
+	err = fetch.handleInboundMessageWithTx(ctx, nil, &sentryproto.InboundMessage{
+		Id:     sentryproto.MessageId_TRANSACTIONS_66,
+		Data:   validPayload,
+		PeerId: peerID,
+	}, sentryClient)
+	require.Error(t, err, "internal DB error should be propagated, not swallowed")
+}
+
+// TestFetchConnectGoroutinesExitOnCancel is a regression test for a goroutine
+// leak where ConnectCore/ConnectSentries spawned fire-and-forget goroutines
+// that used bare time.Sleep in retry loops. After context cancellation, Run()
+// would return via the errgroup while the fetch goroutines continued sleeping
+// through a 3-second backoff, racing with downstream cleanup (DB.Close(), etc.).
+//
+// The fix replaced time.Sleep with select on ctx.Done() and added a WaitGroup
+// so callers can block until all goroutines exit. This test verifies that all
+// goroutines exit promptly (well under 3s) after cancellation.
+func TestFetchConnectGoroutinesExitOnCancel(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(t.Context())
+
+	// Mock sentry server: HandShake returns io.EOF, forcing receiveMessageLoop
+	// and receivePeerLoop into retry-with-backoff loops.
+	srv := &retrySentryServer{}
+	sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, srv)
+	require.NoError(t, err)
+
+	// Mock state changes client: StateChanges returns io.EOF, forcing the
+	// ConnectCore goroutine into its retry loop.
+	ctrl := gomock.NewController(t)
+	stateChanges := remoteproto.NewMockKVClient(ctrl)
+	stateChanges.EXPECT().
+		StateChanges(gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(nil, io.EOF).AnyTimes()
+
+	pool := NewMockPool(ctrl)
+
+	fetch := NewFetch(ctx, []sentryproto.SentryClient{sentryClient}, pool, stateChanges, nil, u256.N1, log.New())
+
+	// Start all goroutines: 1 from ConnectCore + 2 from ConnectSentries.
+	fetch.ConnectCore()
+	fetch.ConnectSentries()
+
+	// Let goroutines enter their retry-sleep selects.
+	time.Sleep(50 * time.Millisecond)
+
+	// Cancel the context — goroutines should notice via ctx.Done() and exit.
+	cancel()
+
+	// Wait must return well within 3 seconds. Before the fix, goroutines used
+	// bare time.Sleep(3 * time.Second) and would not notice cancellation until
+	// the sleep completed.
+	done := make(chan struct{})
+	go func() {
+		fetch.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// All goroutines exited promptly.
+	case <-time.After(1 * time.Second):
+		t.Fatal("goroutines did not exit within 1s of context cancellation — likely sleeping through backoff")
+	}
+}
+
+// retrySentryServer is a minimal SentryServer where HandShake always returns
+// io.EOF, forcing Fetch goroutines into their retry-with-backoff loops.
+type retrySentryServer struct {
+	sentryproto.UnimplementedSentryServer
+}
+
+func (s *retrySentryServer) HandShake(context.Context, *emptypb.Empty) (*sentryproto.HandShakeReply, error) {
+	return nil, io.EOF
+}
+
 func testRlps(num int) [][]byte {
 	rlps := make([][]byte, num)
-	for i := 0; i < num; i++ {
+	for i := range num {
 		rlps[i] = []byte{1}
 	}
 	return rlps
@@ -382,4 +855,158 @@ func toPeerIDs(h ...byte) (out []PeerID) {
 		out = append(out, gointerfaces.ConvertHashToH512(hash))
 	}
 	return out
+}
+
+type boundedBatchStream struct {
+	grpc.ClientStream
+	recv func() (*sentryproto.InboundMessage, error)
+}
+
+func (s *boundedBatchStream) Recv() (*sentryproto.InboundMessage, error) { return s.recv() }
+
+func TestFetchBoundsQueuedBatch(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		bytes, messages int
+		wantFlushes     int32
+	}{
+		{"bytes", 1024 * 1024, 5, 1},
+		{"messages", 1, 257, 1},
+		{"bytes_before_append", 3 * 1024 * 1024, 3, 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				ctrl := gomock.NewController(t)
+				pool := NewMockPool(ctrl)
+				var flushes atomic.Int32
+				pool.EXPECT().Started().DoAndReturn(func() bool { flushes.Add(1); return true }).AnyTimes()
+				client := sentryproto.NewMockSentryClient(ctrl)
+				var wg sync.WaitGroup
+				fetch := NewFetch(t.Context(), nil, pool, nil, nil, u256.N1, log.New(), WithP2PFetcherWg(&wg))
+				received := 0
+				stream := &boundedBatchStream{recv: func() (*sentryproto.InboundMessage, error) {
+					if received == tc.messages {
+						require.Equal(t, tc.wantFlushes, flushes.Load(), "unexpected flush count before stream closure")
+						return nil, nil
+					}
+					received++
+					wg.Add(1)
+					return &sentryproto.InboundMessage{Id: sentryproto.MessageId_GET_POOLED_TRANSACTIONS_66, Data: make([]byte, tc.bytes)}, nil
+				}}
+				client.EXPECT().Messages(gomock.Any(), gomock.Any(), gomock.Any()).Return(stream, nil)
+				require.NoError(t, fetch.receiveMessage(t.Context(), client))
+				wg.Wait()
+				require.Equal(t, tc.messages, received)
+			})
+		})
+	}
+}
+
+func TestFetchRevalidatesDuplicateReplyAfterNewBlock(t *testing.T) {
+	t.Parallel()
+	txnRlp := decodeHex("f867088504a817c8088302e2489435353535353535353535353535353535353535358202008025a064b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c12a064b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c10")
+	reply := &sentryproto.InboundMessage{
+		Id:     sentryproto.MessageId_POOLED_TRANSACTIONS_66,
+		Data:   EncodePooledTransactions66([][]byte{txnRlp}, 1, nil),
+		PeerId: peerID,
+	}
+	ctrl := gomock.NewController(t)
+	pool := NewMockPool(ctrl)
+	pool.EXPECT().Started().Return(true).AnyTimes()
+	pool.EXPECT().IdHashKnown(gomock.Any(), gomock.Any()).Return(false, nil).AnyTimes()
+	pool.EXPECT().OnNewBlock(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil)
+	pool.EXPECT().AddRemoteTxns(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Times(2)
+	fetch := NewFetch(t.Context(), nil, pool, nil, mdbxtest.NewTestDB(t, dbcfg.TxPoolDB), u256.N1, log.New())
+	newBlock := &remoteproto.StateChangeBatch{ChangeBatch: []*remoteproto.StateChange{{BlockHeight: 1}}}
+
+	// reply, duplicate reply in the same block, then the same reply after a new block
+	received := 0
+	stream := &boundedBatchStream{recv: func() (*sentryproto.InboundMessage, error) {
+		received++
+		if received == 3 {
+			require.NoError(t, fetch.handleStateChangesRequest(t.Context(), newBlock))
+		}
+		if received > 3 {
+			return nil, nil
+		}
+		return reply, nil
+	}}
+	client := sentryproto.NewMockSentryClient(ctrl)
+	client.EXPECT().Messages(gomock.Any(), gomock.Any(), gomock.Any()).Return(stream, nil)
+	require.NoError(t, fetch.receiveMessage(t.Context(), client))
+}
+
+func TestFetchSerializesBatchFlushes(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		pool := NewMockPool(ctrl)
+		started := make(chan struct{}, 3)
+		release := make(chan struct{})
+		releaseFirst := sync.OnceFunc(func() { close(release) })
+		defer releaseFirst()
+		pool.EXPECT().Started().DoAndReturn(func() bool {
+			started <- struct{}{}
+			<-release
+			return true
+		}).Times(3)
+		messages := make(chan *sentryproto.InboundMessage)
+		defer close(messages)
+		stream := &boundedBatchStream{recv: func() (*sentryproto.InboundMessage, error) {
+			return <-messages, nil
+		}}
+		client := sentryproto.NewMockSentryClient(ctrl)
+		client.EXPECT().Messages(gomock.Any(), gomock.Any(), gomock.Any()).Return(stream, nil)
+		fetch := NewFetch(t.Context(), nil, pool, nil, nil, u256.N1, log.New())
+		done := make(chan error, 1)
+		go func() { done <- fetch.receiveMessage(t.Context(), client) }()
+
+		message := &sentryproto.InboundMessage{Id: sentryproto.MessageId_GET_POOLED_TRANSACTIONS_66}
+		messages <- message
+		<-started
+		for range 257 {
+			messages <- message
+		}
+
+		// Mutex waits do not quiesce synctest, so observe the blocked receiver directly.
+		stacks := make([]runtime.StackRecord, 16)
+	waitForThreshold:
+		for {
+			select {
+			case <-started:
+				t.Fatal("threshold flush started before the timer flush was released")
+			default:
+			}
+			n, ok := runtime.GoroutineProfile(stacks)
+			if !ok {
+				stacks = make([]runtime.StackRecord, n)
+				continue
+			}
+			for _, stack := range stacks[:n] {
+				frames := runtime.CallersFrames(stack.Stack())
+				var previous string
+				var waiting, flushLocked, receiver bool
+				for {
+					frame, more := frames.Next()
+					waiting = waiting || strings.HasSuffix(frame.Function, ".runtime_SemacquireMutex")
+					if waiting && previous == "sync.(*Mutex).Lock" && strings.HasSuffix(frame.Function, ".(*Fetch).receiveMessage.func1") {
+						flushLocked = true
+					}
+					receiver = receiver || strings.Contains(frame.Function, ".TestFetchSerializesBatchFlushes.")
+					previous = frame.Function
+					if !more {
+						break
+					}
+				}
+				if flushLocked && receiver {
+					break waitForThreshold
+				}
+			}
+			runtime.Gosched()
+		}
+
+		releaseFirst()
+		<-started
+		messages <- nil
+		require.NoError(t, <-done)
+	})
 }

@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
@@ -48,6 +49,14 @@ func (s *StageGraph[CONFIG, ARGUMENTS]) StartWithStage(ctx context.Context, star
 		errch := make(chan error)
 		start := time.Now()
 		go func() {
+			// Recover so a panic in a stage (e.g. from a malformed peer response) degrades
+			// to a stage error instead of terminating the whole node.
+			defer func() {
+				if r := recover(); r != nil {
+					lg.Error("[Caplin] panic in clstage", "err", r, "stack", dbg.Stack())
+					errch <- fmt.Errorf("panic in clstage: %v", r)
+				}
+			}()
 			// we run this is a goroutine so that the process can exit in the middle of a stage
 			// since caplin is designed to always be able to recover regardless of db state, this should be safe
 			select {

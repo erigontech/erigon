@@ -109,6 +109,20 @@ func (pt *PeerTracker) BlockNumMissing(peerId *PeerId, blockNum uint64) {
 	})
 }
 
+func (pt *PeerTracker) BALNumMissing(peerId *PeerId, blockNum uint64) {
+	pt.updatePeerSyncProgress(peerId, func(psp *peerSyncProgress) {
+		psp.balNumMissing(blockNum)
+	})
+}
+
+func (pt *PeerTracker) PeerMayHaveBALNum(peerId *PeerId, blockNum uint64) bool {
+	pt.mu.Lock()
+	defer pt.mu.Unlock()
+
+	peerSyncProgress, ok := pt.peerSyncProgresses[*peerId]
+	return !ok || peerSyncProgress.peerMayHaveBALNum(blockNum)
+}
+
 func (pt *PeerTracker) ListPeersMayMissBlockHash(blockHash common.Hash) []*PeerId {
 	pt.mu.Lock()
 	defer pt.mu.Unlock()
@@ -138,10 +152,11 @@ func (pt *PeerTracker) BlockHashPresent(peerId *PeerId, blockHash common.Hash) {
 }
 
 func (pt *PeerTracker) PeerDisconnected(peerId *PeerId) {
+	pt.logger.Trace(peerTrackerLogPrefix("peer disconnected"), "peerId", peerId.String())
+
 	pt.mu.Lock()
 	defer pt.mu.Unlock()
 
-	pt.logger.Debug(peerTrackerLogPrefix("peer disconnected"), "peerId", peerId.String())
 	delete(pt.peerSyncProgresses, *peerId)
 	delete(pt.peerKnownBlockAnnounces, *peerId)
 }
@@ -154,7 +169,7 @@ func (pt *PeerTracker) PeerConnected(peerId *PeerId) {
 }
 
 func (pt *PeerTracker) peerConnected(peerId *PeerId) {
-	pt.logger.Debug(peerTrackerLogPrefix("peer connected"), "peerId", peerId.String())
+	pt.logger.Trace(peerTrackerLogPrefix("peer connected"), "peerId", peerId.String())
 
 	peerIdVal := *peerId
 	if _, ok := pt.peerSyncProgresses[peerIdVal]; !ok {

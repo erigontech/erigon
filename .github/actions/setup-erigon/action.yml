@@ -1,0 +1,331 @@
+name: Setup Erigon environment
+description: >
+  Install Go, restore/save module cache. Callers must do a shallow checkout
+  first (actions/checkout with fetch-depth: 1) so this composite action is
+  available. setup-erigon then re-fetches the full history of the current
+  commit only, avoiding the cost of fetching all branch and tag refs.
+
+inputs:
+  filter:
+    description: "Partial clone filter (e.g. blob:none)"
+    required: false
+    default: 'blob:none'
+  cleanup-space:
+    description: "Remove large pre-installed packages to free disk space (Linux only)"
+    required: false
+    default: 'true'
+  build-cache-extra-key:
+    description: "Extra segment appended to build cache key (e.g. matrix.test-group)"
+    required: false
+    default: ''
+  cache-namespace:
+    description: >
+      Workflow segment of the Go cache keys. Defaults to the top-level workflow
+      file basename, which differs between ci-gate and cache-warming runs;
+      reusable workflows should pass their own basename so keys match across both.
+    required: false
+    default: ''
+  ramdisk:
+    description: "Create a RAM disk and export its path as ERIGON_EXECUTION_TESTS_TMPDIR"
+    required: false
+    default: 'false'
+
+outputs:
+  goversion:
+    description: "Full Go version string (e.g. go1.25.7)"
+    value: ${{ steps.go-env.outputs.goversion }}
+  build:
+    description: "GOCACHE path"
+    value: ${{ steps.go-env.outputs.build }}
+  modcache:
+    description: "GOMODCACHE path"
+    value: ${{ steps.go-env.outputs.modcache }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set compact time format
+      shell: bash
+      run: echo "TIMEFORMAT=real %Rs user %Us sys %Ss" >> "$GITHUB_ENV"
+
+    - name: Display free disk space
+      shell: bash
+      run: time df -h
+
+    # Frees 20-30GB but takes ~30s. Only enable for workflows that hit the
+    # disk ceiling. If space is tight, first check whether caches have blown
+    # out in size before turning this on.
+    - name: Cleanup space
+      if: ${{ inputs.cleanup-space == 'true' && runner.os != 'Windows' }}
+      shell: bash
+      run: |
+        if [ "$(uname)" = "Linux" ]; then
+          time sudo rm -rf /usr/local/lib/android \
+                 /opt/az \
+                 /opt/microsoft \
+                 /usr/share/dotnet \
+                 /usr/share/miniconda \
+                 /usr/share/swift
+        elif [ "$(uname)" = "Darwin" ]; then
+          time rm -rf /Users/runner/Library/Android \
+                 /Users/runner/.dotnet
+        fi
+        df -h
+
+    - name: "Use D: drive for caches and temp files on Windows"
+      if: ${{ runner.os == 'Windows' }}
+      shell: bash
+      run: |
+        mkdir -p D:/tmp D:/go-build D:/go/pkg/mod
+        {
+          echo "TEMP=D:/tmp"
+          echo "TMP=D:/tmp"
+          echo "TMPDIR=D:/tmp"
+          echo "GOCACHE=D:/go-build"
+          echo "GOMODCACHE=D:/go/pkg/mod"
+        } >> "$GITHUB_ENV"
+
+    - name: Enable long paths on Windows
+      if: ${{ runner.os == 'Windows' }}
+      shell: bash
+      run: git config --global core.longpaths true
+
+    - name: Enable git debug tracing
+      if: ${{ runner.debug }}
+      shell: bash
+      run: |
+        echo "GIT_TRACE=1" >> "$GITHUB_ENV"
+        echo "GIT_CURL_VERBOSE=1" >> "$GITHUB_ENV"
+
+    - name: Checkout code
+      uses: actions/checkout@v6
+      with:
+        fetch-depth: 1
+        filter: ${{ inputs.filter }}
+        clean: false
+
+    - name: Unshallow current commit
+      shell: bash
+      run: |
+        # Fetch only the ancestry of the current commit so git-restore-mtime can
+        # determine per-file mtimes. Avoids the O(branches+tags) overhead that
+        # actions/checkout incurs when fetch-depth: 0 fetches refs/heads/* and
+        # refs/tags/* for the entire repo.
+        filter_arg=''
+        if [[ -n '${{ inputs.filter }}' ]]; then
+          filter_arg='--filter=${{ inputs.filter }}'
+        fi
+        time git fetch $filter_arg --unshallow --no-tags \
+          --prune --no-recurse-submodules origin "$(git rev-parse HEAD)"
+
+    - name: Install git-restore-mtime
+      shell: bash
+      run: |
+        if ! curl -sfL https://raw.githubusercontent.com/MestreLion/git-tools/main/git-restore-mtime -o "$RUNNER_TEMP/git-restore-mtime"; then
+          echo "::warning::Failed to download git-restore-mtime (rate-limited?), skipping mtime restore"
+          echo "SKIP_MTIME=true" >> "$GITHUB_ENV"
+        else
+          chmod +x "$RUNNER_TEMP/git-restore-mtime"
+        fi
+        echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+
+    - name: Restore fixture mtimes for Go test caching
+      if: ${{ env.SKIP_MTIME != 'true' }}
+      shell: bash
+      run: |
+        # Go's test cache keys include stat metadata (mtime+size) for every
+        # file and directory accessed during test execution. Source file
+        # changes are captured by the test binary hash, so we only need
+        # deterministic mtimes for fixture/data files that tests open at
+        # runtime.
+        #
+        # Main repo: git-restore-mtime sets each fixture's mtime to the
+        # commit that last touched it (deterministic and content-sensitive).
+        #
+        # Directories: normalize to a fixed epoch since git-restore-mtime
+        # only handles dirs for file adds/deletes, not modifications.
+
+        # Fixture paths and extensions in the main repo:
+        #   **/testdata/**          - Go-convention test data dirs
+        #   execution/tests/test-corners/** - custom edge-case fixtures
+        #   cl/spectest/**/data_*/** - consensus spec test data
+        #   cl/transition/**/test_data/** - consensus transition test data
+        #   cl/utils/eth2shuffle/spec/** - shuffle spec CSV (read at runtime)
+        #   execution/state/genesiswrite/*.json - genesis JSON (read at runtime)
+        #   execution/vm/vmgen/*.go - generator sources TestRunIsGenerated reads
+        #   Extensions: .json .js .txt .ssz .ssz_snappy .yaml .csv
+        time git restore-mtime --no-directories -- \
+          '**/testdata/**' \
+          'execution/tests/test-corners/**' \
+          'cl/spectest/**/data_*/**' \
+          'cl/transition/**/test_data/**' \
+          'cl/utils/eth2shuffle/spec/**' \
+          'execution/state/genesiswrite/*.json' \
+          'execution/vm/vmgen/*.go'
+
+        # Normalize directory mtimes to a fixed epoch.
+        find . -type d -not -path '*/.git/*' -print0 | TZ=UTC xargs -0 touch -t 200902132331.30
+
+    - name: Debug file mtimes
+      if: ${{ runner.debug }}
+      shell: bash
+      run: |
+        if [ "$RUNNER_OS" = "macOS" ]; then
+          find . -name .git -prune -o -print0 | xargs -0 stat -f '%m %HT %N' | sort -k3
+        else
+          find . -name .git -prune -o -printf '%T@ %y %p\n' | sort -k3
+        fi
+
+    - name: Create RAM disk
+      if: ${{ inputs.ramdisk == 'true' }}
+      shell: bash
+      run: |
+        path=$(bash tools/create-ramdisk)
+        if [ -n "$path" ]; then
+          echo "ERIGON_EXECUTION_TESTS_TMPDIR=$path" >> "$GITHUB_ENV"
+        fi
+
+    - name: Get Go minor version from go.mod
+      id: goversion
+      shell: bash
+      run: |
+        minor=$(sed -n 's/^go \([0-9]*\.[0-9]*\).*/\1/p' go.mod)
+        echo "version=${minor}.x" >> "$GITHUB_OUTPUT"
+
+    - uses: actions/setup-go@v6
+      with:
+        go-version: ${{ steps.goversion.outputs.version }}
+        # We have our own caching because we smrt.
+        cache: false
+        # Resolve 1.N.x to the same patch release on every runner regardless of
+        # what the image tool cache ships, so GOVERSION-keyed cache keys don't split.
+        check-latest: true
+
+    # TODO: Make this optional, it's possibly not needed for lints and a few other quick things.
+    - name: Install dependencies on Linux
+      if: ${{ runner.os == 'Linux' }}
+      shell: bash
+      # erigon needs make and a C and C++ compiler: cgo builds C++ sources from
+      # go-libutp and evmone_precompiles. The hosted runner image ships third-party
+      # apt repos (Google Chrome, Microsoft/azure-cli) whose
+      # CDNs intermittently break `apt-get update` — a Packages.gz size mismatch
+      # mid-mirror-sync, or a 403 "no longer signed" on the azure-cli repo —
+      # failing the whole job. Drop every source pointing at those CDNs (we never
+      # install from them); the Ubuntu archive retries on blips. That runs even
+      # when the install below is skipped, so anything else in the job that
+      # reaches for apt does not trip over them.
+      #
+      # apt waits indefinitely for an unreachable mirror or for a lock held by
+      # the image's own unattended-upgrades, and -qq hides that it is waiting,
+      # so the step can consume the entire job budget in silence. Skip the
+      # install when the toolchain already builds, and bound whatever is left.
+      run: |
+        sudo grep -rlZE 'dl\.google\.com|packages\.microsoft\.com' \
+          /etc/apt/sources.list.d/ 2>/dev/null | sudo xargs -0 -r rm -f || true
+        cc_bin=$(go env CC || true)
+        cxx_bin=$(go env CXX || true)
+        if command -v make >/dev/null 2>&1 &&
+           printf 'int main(void){return 0;}\n' | "$cc_bin" -x c -o /dev/null - 2>/dev/null &&
+           printf 'int main(){return 0;}\n' | "$cxx_bin" -x c++ -o /dev/null - 2>/dev/null; then
+          echo "C and C++ toolchains and make already usable; skipping apt"
+          exit 0
+        fi
+        apt_opts=(-o Acquire::Retries=3 -o Acquire::http::Timeout=15
+                  -o Acquire::https::Timeout=15 -o DPkg::Lock::Timeout=60)
+        if ! sudo timeout --kill-after=10s 300 apt-get update -q "${apt_opts[@]}"; then
+          echo "::error::apt-get update failed or did not finish within 300s"
+          exit 1
+        fi
+        if ! sudo timeout --kill-after=10s 600 apt-get install -qq -y "${apt_opts[@]}" build-essential; then
+          echo "::error::apt-get install build-essential failed or did not finish within 600s"
+          exit 1
+        fi
+
+    - name: Ensure make on Windows
+      if: ${{ runner.os == 'Windows' }}
+      shell: bash
+      # The hosted Windows image already ships GNU Make on PATH (C:\mingw64\bin),
+      # so the previous unconditional `choco install make` was redundant and added
+      # a flaky community.chocolatey.org/NuGet dependency. Use the present make and
+      # only fall back to a retried install if none is found.
+      run: |
+        set -euo pipefail
+        if ! command -v make >/dev/null 2>&1; then
+          echo "make not on PATH; installing via choco (fallback)"
+          for i in 1 2 3; do
+            choco install make -y --no-progress && break
+            echo "choco install make failed (attempt $i), retrying..."; sleep 30
+          done
+        fi
+        make_path="$(command -v make)" || { echo "::error::make unavailable on Windows"; exit 1; }
+        # Pin this make's directory at the front of PATH so later steps use
+        # exactly this binary, not another make/gmake also present on the image.
+        echo "$(cygpath -w "$(dirname "$make_path")")" >> "$GITHUB_PATH"
+        echo "using make: $make_path -> $(make --version | head -1)"
+
+    - name: Debug parallelism
+      shell: bash
+      run: |
+        nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo "nproc unavailable"
+
+    - name: Get Go environment paths
+      id: go-env
+      shell: bash
+      env:
+        CACHE_NAMESPACE: ${{ inputs.cache-namespace }}
+      run: |
+        echo "goversion=$(go env GOVERSION)" >> "$GITHUB_OUTPUT"
+        echo "build=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
+        echo "modcache=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
+        workflow="${CACHE_NAMESPACE:-$(basename "${GITHUB_WORKFLOW_REF%%@*}" .yml)}"
+        echo "workflow=$workflow" >> "$GITHUB_OUTPUT"
+        echo "ERIGON_CI_GOCACHE_PATH=$(go env GOCACHE)" >> "$GITHUB_ENV"
+        echo "ERIGON_CI_MODCACHE=$(go env GOMODCACHE)" >> "$GITHUB_ENV"
+
+    # The module cache is a pure function of go.sum (already in its key), so it
+    # never splits by matrix entry — sibling jobs share one entry per run and
+    # the cleanup-erigon probe dedups the save.
+    - id: restore-mod-cache
+      uses: ./.github/actions/restore-mod-cache
+      with:
+        modcache-path: ${{ steps.go-env.outputs.modcache }}
+        workflow-id: ${{ steps.go-env.outputs.workflow }}
+
+    - name: Export modcache key
+      shell: bash
+      run: echo "ERIGON_CI_MODCACHE_KEY=${{ steps.restore-mod-cache.outputs.primary-key }}" >> "$GITHUB_ENV"
+
+    - name: Fall back to direct module fetches after any proxy error
+      shell: bash
+      run: echo "GOPROXY=https://proxy.golang.org|direct" >> "$GITHUB_ENV"
+
+    - name: Download Go modules
+      shell: bash
+      run: |
+        for attempt in 1 2 3; do
+          if time go mod download; then
+            echo "ERIGON_CI_MODCACHE_COMPLETE=true" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          if [ "$attempt" -eq 3 ]; then
+            exit 1
+          fi
+          echo "go mod download failed (attempt $attempt), retrying..."
+          sleep $((attempt * 15))
+        done
+
+    - id: restore-build-cache
+      uses: ./.github/actions/restore-build-cache
+      with:
+        gocache-path: ${{ steps.go-env.outputs.build }}
+        goversion: ${{ steps.go-env.outputs.goversion }}
+        workflow-id: ${{ steps.go-env.outputs.workflow }}
+        matrix-key: ${{ inputs.build-cache-extra-key }}
+
+    - name: Export build cache key
+      shell: bash
+      run: echo "ERIGON_CI_GOCACHE_KEY=${{ steps.restore-build-cache.outputs.primary-key }}" >> "$GITHUB_ENV"
+
+    - name: Display free disk space after setup
+      shell: bash
+      run: df -h

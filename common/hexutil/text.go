@@ -17,7 +17,6 @@
 package hexutil
 
 import (
-	"encoding/hex"
 	"fmt"
 )
 
@@ -27,7 +26,11 @@ const badNibble = ^uint64(0)
 // determines the required input length. This function is commonly used to implement the
 // UnmarshalText method for fixed-size types.
 func UnmarshalFixedText(typeName string, input, out []byte) error {
-	raw, err := checkText(input, true)
+	return unmarshalFixedText(typeName, input, out, true)
+}
+
+func unmarshalFixedText(typeName string, input, out []byte, wantPrefix bool) error {
+	raw, err := checkText(input, wantPrefix)
 	if err != nil {
 		return err
 	}
@@ -40,7 +43,7 @@ func UnmarshalFixedText(typeName string, input, out []byte) error {
 			return ErrSyntax
 		}
 	}
-	_, err = hex.Decode(out, raw)
+	_, err = decodeHex(out, raw)
 	return err
 }
 

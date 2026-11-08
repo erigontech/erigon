@@ -58,27 +58,26 @@ func (bl *BlockListener) Run(ctx context.Context) error {
 		return err
 	}
 
-	// note the changes stream is ctx-aware so Recv should terminate with err if ctx gets done
-	var batch *remoteproto.StateChangeBatch
-	for batch, err = sub.Recv(); err == nil; batch, err = sub.Recv() {
+	for {
+		batch, recvErr := sub.Recv()
+		if recvErr != nil {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+				return fmt.Errorf("block listener sub.Recv: %w", recvErr)
+			}
+		}
+
 		if batch == nil || len(batch.ChangeBatch) == 0 {
 			continue
 		}
 
 		latestChange := batch.ChangeBatch[len(batch.ChangeBatch)-1]
-		blockEvent := BlockEvent{
+		bl.events.NotifySync(BlockEvent{
 			LatestBlockNum:  latestChange.BlockHeight,
 			LatestBlockTime: latestChange.BlockTime,
 			Unwind:          latestChange.Direction == remoteproto.Direction_UNWIND,
-		}
-
-		bl.events.NotifySync(blockEvent)
-	}
-
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	default:
-		return fmt.Errorf("block listener sub.Recv: %w", err)
+		})
 	}
 }

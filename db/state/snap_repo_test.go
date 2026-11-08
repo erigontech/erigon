@@ -1,14 +1,12 @@
 package state
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/dir"
@@ -16,6 +14,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/datastruct/btindex"
 	"github.com/erigontech/erigon/db/datastruct/existence"
+	"github.com/erigontech/erigon/db/datastruct/posidx"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
@@ -163,9 +162,9 @@ func TestIntegrateDirtyFile(t *testing.T) {
 	err := repo.OpenFolder()
 	require.NoError(t, err)
 
-	filesItem := newFilesItemWithSnapConfig(0, 1024, repo.cfg)
+	filesItem := newFilesItem(0, 1024)
 	filename, _ := repo.schema.DataFile(version.V1_0, 0, 1024)
-	comp, err := seg.NewCompressor(context.Background(), t.Name(), filename, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
+	comp, err := seg.NewCompressor(t.Context(), t.Name(), filename, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
 	require.NoError(t, err)
 	defer comp.Close()
 	comp.DisableFsync()
@@ -290,7 +289,7 @@ func TestMergeRangeSnapRepo(t *testing.T) {
 	execTestCase := func(ranges []testFileRange, vfCount int, needMerge bool, mergeFromStep, mergeToStep uint64) {
 		testFn(ranges, vfCount, needMerge, mergeFromStep, mergeToStep)
 		// Clean up temporary files created by compressors/decompressors in dirs.Tmp
-		filepath.WalkDir(dirs.Tmp, func(path string, d os.DirEntry, err error) error {
+		require.NoError(t, filepath.WalkDir(dirs.Tmp, func(path string, d os.DirEntry, err error) error {
 			if err != nil {
 				if os.IsNotExist(err) {
 					return nil
@@ -302,7 +301,7 @@ func TestMergeRangeSnapRepo(t *testing.T) {
 			}
 			_ = dir.RemoveFile(path)
 			return nil
-		})
+		}))
 	}
 
 	// 0-1, 1-2 => 0-2
@@ -332,7 +331,7 @@ func TestMergeRangeSnapRepo(t *testing.T) {
 	// 0-1, 1-2, ..... 14-15 => 0-1....12-13, 13-15
 	execTestCase([]testFileRange{{0, 1}, {1, 2}, {2, 3}, {3, 4}, {4, 5}, {5, 6}, {6, 7}, {7, 8}, {8, 9}, {9, 10}, {10, 11}, {11, 12}, {12, 13}, {13, 14}, {14, 15}}, 15, true, 13, 15)
 
-	//0-1....12-13, 13-15, 15-16 => 0-16
+	// 0-1....12-13, 13-15, 15-16 => 0-16
 	execTestCase([]testFileRange{{0, 1}, {1, 2}, {2, 3}, {3, 4}, {4, 5}, {5, 6}, {6, 7}, {7, 8}, {8, 9}, {9, 10}, {10, 11}, {11, 12}, {12, 13}, {13, 15}, {15, 16}}, 15, true, 0, 16)
 }
 
@@ -360,11 +359,10 @@ func TestReferencingIntegrityChecker(t *testing.T) {
 		return name, schema
 	})
 
-	accountsR.integrity = NewDependencyIntegrityChecker(dirs, log.New())
+	accountsR.integrity = NewDependencyIntegrityChecker(log.New())
 	accountsR.integrity.AddDependency(FromDomain(kv.AccountsDomain), &DependentInfo{
 		entity: FromDomain(kv.CommitmentDomain),
-		//filesGetter: ,
-		filesGetter: func() *btree.BTreeG[*FilesItem] {
+		filesGetter: func() *DirtyFiles {
 			return commitmentR.dirtyFiles
 		},
 		accessors: commitmentR.accessors,
@@ -498,7 +496,7 @@ func TestRecalcVisibleFilesAfterMerge(t *testing.T) {
 		items := repo.FilesInRange(mr, vf) // vf passed should ideally from rotx, but doesn't matter here
 		require.Len(t, items, nFilesInRange)
 
-		merged := newFilesItemWithSnapConfig(mr.from, mr.to, repo.cfg)
+		merged := newFilesItem(mr.from, mr.to)
 		repo.IntegrateDirtyFile(merged)
 		dirEntries, err := filesFromDir(repo.schema.DataDirectory())
 		require.NoError(t, err)
@@ -541,17 +539,8 @@ func TestRecalcVisibleFilesAfterMerge(t *testing.T) {
 	// 0-1, 1-2, ..... 14-15 => 0-1....12-13, 13-15
 	testFn([]testFileRange{{0, 1}, {1, 2}, {2, 3}, {3, 4}, {4, 5}, {5, 6}, {6, 7}, {7, 8}, {8, 9}, {9, 10}, {10, 11}, {11, 12}, {12, 13}, {13, 14}, {14, 15}}, true, 2, 14, 14)
 
-	//0-1....12-13, 13-15, 15-16 => 0-16
+	// 0-1....12-13, 13-15, 15-16 => 0-16
 	testFn([]testFileRange{{0, 1}, {1, 2}, {2, 3}, {3, 4}, {4, 5}, {5, 6}, {6, 7}, {7, 8}, {8, 9}, {9, 10}, {10, 11}, {11, 12}, {12, 13}, {13, 15}, {15, 16}}, true, 15, 1, 1)
-}
-
-func TestSegMetadata_Marshal_UM(t *testing.T) {
-	metadata := NumMetadata{First: Num(89), Last: Num(120), Count: 28}
-	data, err := metadata.Marshal()
-	require.NoError(t, err)
-	metadata2 := NumMetadata{}
-	require.NoError(t, metadata2.Unmarshal(data))
-	require.Equal(t, metadata, metadata2)
 }
 
 // /////////////////////////////////////// helpers and utils
@@ -561,9 +550,9 @@ func cleanupFiles(t *testing.T, repo *SnapshotRepo, dirs datadir.Dirs) {
 	repo.Close()
 	repo.RecalcVisibleFiles(0)
 
-	filepath.WalkDir(dirs.DataDir, func(path string, d os.DirEntry, err error) error {
+	require.NoError(t, filepath.WalkDir(dirs.DataDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
-			if os.IsNotExist(err) { //skip magically disappeared files
+			if os.IsNotExist(err) { // skip magically disappeared files
 				return nil
 			}
 			return err
@@ -576,7 +565,7 @@ func cleanupFiles(t *testing.T, repo *SnapshotRepo, dirs datadir.Dirs) {
 			panic(err)
 		}
 		return nil
-	})
+	}))
 }
 
 func stepToRootNum(t *testing.T, step uint64, repo *SnapshotRepo) RootNum {
@@ -660,7 +649,8 @@ func populateFiles2(t *testing.T, dirs datadir.Dirs, repo *SnapshotRepo, ranges 
 			allFiles = append(allFiles, file)
 		}
 		if acc.Has(statecfg.AccessorHashMap) {
-			file, _ := repo.schema.AccessorIdxFile(v, from, to, 0)
+			// zero version: let the schema name it with its own accessor version
+			file, _ := repo.schema.AccessorIdxFile(statecfg.Version{}, from, to, 0)
 			allFiles = append(allFiles, file)
 		}
 	}
@@ -681,7 +671,7 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, schema SnapNameSchema, allFi
 	// 1. account domain, history and ii
 	fileGen := func(filename string) {
 		if strings.HasSuffix(filename, ".ef") || strings.HasSuffix(filename, ".v") || strings.HasSuffix(filename, ".kv") {
-			seg, err := seg.NewCompressor(context.Background(), t.Name(), filename, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
+			seg, err := seg.NewCompressor(t.Context(), t.Name(), filename, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
 			require.NoError(t, err)
 			defer seg.Close()
 			seg.DisableFsync()
@@ -699,7 +689,7 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, schema SnapNameSchema, allFi
 
 		if strings.HasSuffix(filename, ".bt") {
 			sampleFile := filename + ".sample"
-			seg2, err := seg.NewCompressor(context.Background(), t.Name(), sampleFile, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
+			seg2, err := seg.NewCompressor(t.Context(), t.Name(), sampleFile, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
 			require.NoError(t, err)
 			defer seg2.Close()
 			seg2.DisableFsync()
@@ -713,15 +703,14 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, schema SnapNameSchema, allFi
 			seg3, err := seg.NewDecompressor(sampleFile)
 			require.NoError(t, err)
 			defer seg3.Close()
-			defer dir.RemoveFile(sampleFile)
+			defer dir.RemoveFile(sampleFile) //nolint:errcheck
 
 			r := seg.NewReader(seg3.MakeGetter(), seg.CompressNone)
-			bti, err := btindex.CreateBtreeIndexWithDecompressor(filename, 128, r, uint32(1), background.NewProgressSet(), dirs.Tmp, log.New(), true, statecfg.AccessorBTree|statecfg.AccessorExistence)
-			if err != nil {
+			kveiFile := strings.TrimSuffix(filename, ".bt") + ".kvei"
+			if err := btindex.BuildBtreeIndexWithDecompressor(filename, kveiFile, r, background.NewProgressSet(), dirs.Tmp, uint32(1), log.New(), true, statecfg.AccessorBTree|statecfg.AccessorExistence); err != nil {
 				t.Fatal(err)
 			}
 			seg3.Close()
-			bti.Close()
 
 			if strings.Contains(filename, name) && containsSubstring(t, filename, extensions) {
 				btCount++
@@ -731,7 +720,7 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, schema SnapNameSchema, allFi
 		}
 
 		if strings.HasSuffix(filename, ".kvei") {
-			filter, err := existence.NewFilter(0, filename, false)
+			filter, err := existence.NewFilter(0, filename)
 			require.NoError(t, err)
 			defer filter.Close()
 			filter.DisableFsync()
@@ -744,7 +733,22 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, schema SnapNameSchema, allFi
 			return
 		}
 
-		if strings.HasSuffix(filename, ".kvi") || strings.HasSuffix(filename, ".vi") || strings.HasSuffix(filename, ".efi") {
+		if strings.HasSuffix(filename, ".vi") {
+			w, err := posidx.NewWriter(filename, t.TempDir(), 1, 1, 1, 1)
+			require.NoError(t, err)
+			defer w.Close()
+			w.NoFsync()
+			w.AddRun(1)
+			w.AddPage(0)
+			require.NoError(t, w.Build())
+			if strings.Contains(filename, name) && containsSubstring(t, filename, extensions) {
+				accessorCount++
+			}
+
+			return
+		}
+
+		if strings.HasSuffix(filename, ".kvi") || strings.HasSuffix(filename, ".efi") {
 			salt := uint32(1)
 			rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
 				KeyCount:   1,
@@ -762,7 +766,7 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, schema SnapNameSchema, allFi
 			if err = rs.AddKey([]byte("first_key"), 0); err != nil {
 				t.Error(err)
 			}
-			if err = rs.Build(context.Background()); err != nil {
+			if err = rs.Build(t.Context()); err != nil {
 				t.Errorf("test is expected to fail, too few keys added")
 			}
 			rs.Close()
@@ -806,5 +810,4 @@ func fileExistsCheck(t *testing.T, repo *SnapshotRepo, startStep, endStep uint64
 		require.Error(t, err)
 		require.True(t, os.IsNotExist(err))
 	}
-
 }

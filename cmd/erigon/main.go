@@ -18,17 +18,19 @@ package main
 
 import (
 	"cmp"
+	"context"
 	"fmt"
 	"os"
 
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/common"
 
 	"github.com/erigontech/erigon/cmd/erigon/node"
 	erigonapp "github.com/erigontech/erigon/cmd/utils/app"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv/backup"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/diagnostics/syscheck"
@@ -40,10 +42,12 @@ func main() {
 	var err error
 	common.WithProfilersMain(func() {
 		app := erigonapp.MakeApp("erigon", runErigon, erigoncli.DefaultFlags)
-		err = app.Run(os.Args)
-		_, printErr := fmt.Fprintln(os.Stderr, err)
-		if printErr != nil {
-			log.Warn("Fprintln error", "err", printErr)
+		err = app.Run(context.Background(), os.Args)
+		if err != nil {
+			_, printErr := fmt.Fprintln(os.Stderr, err)
+			if printErr != nil {
+				log.Warn("Fprintln error", "err", printErr)
+			}
 		}
 	})
 	if err != nil {
@@ -51,13 +55,14 @@ func main() {
 	}
 }
 
-func runErigon(cliCtx *cli.Context) (err error) {
-	logger, tracer, metricsMux, pprofMux, err := debug.Setup(cliCtx, true /* rootLogger */)
+func runErigon(ctx context.Context, cliCtx *cli.Command) (err error) {
+	logger, tracer, metricsMux, pprofMux, err := debug.Setup(ctx, cliCtx, true /* rootLogger */)
 	if err != nil {
 		return
 	}
 
-	syscheck.CheckKernelAllocationHints(cliCtx.Context, logger)
+	syscheck.CheckKernelAllocationHints(ctx, logger)
+	go crypto.PrefaultKeccakCache()
 
 	debugMux := cmp.Or(metricsMux, pprofMux)
 
@@ -67,32 +72,20 @@ func runErigon(cliCtx *cli.Context) (err error) {
 	// initializing the node and providing the current git commit there
 
 	logger.Info("Build info", "git_branch", version.GitBranch, "git_tag", version.GitTag, "git_commit", version.GitCommit)
-	if version.Major == 3 {
-		logger.Info(`
-	########b          oo                               d####b. 
-	##                                                      '## 
-	##aaaa    ##d###b. dP .d####b. .d####b. ##d###b.     aaad#' 
-	##        ##'  '## ## ##'  '## ##'  '## ##'  '##        '## 
-	##        ##       ## ##.  .## ##.  .## ##    ##        .## 
-	########P dP       dP '####P## '#####P' dP    dP    d#####P 
-	                           .##                              
-	                       d####P                               
-		`)
-	}
-	erigonInfoGauge := metrics.GetOrCreateGauge(fmt.Sprintf(`erigon_info{version="%s",commit="%s"}`, version.VersionNoMeta, version.GitCommit))
+	erigonInfoGauge := metrics.GetOrCreateGauge(fmt.Sprintf(`erigon_info{version=%q,commit=%q}`, version.VersionNoMeta, version.GitCommit))
 	erigonInfoGauge.Set(1)
 
 	nodeCfg, err := node.NewNodConfigUrfave(cliCtx, debugMux, logger)
 	if err != nil {
 		return err
 	}
-	if err := datadir.ApplyMigrations(nodeCfg.Dirs); err != nil {
+	if err := backup.ApplyMigrations(ctx, nodeCfg.Dirs, logger); err != nil {
 		return err
 	}
 
-	ethCfg := node.NewEthConfigUrfave(cliCtx, nodeCfg, logger)
+	ethCfg := node.NewEthConfigUrfave(ctx, cliCtx, nodeCfg, logger)
 
-	ethNode, err := node.New(cliCtx.Context, nodeCfg, ethCfg, logger, tracer)
+	ethNode, err := node.New(ctx, nodeCfg, ethCfg, logger, tracer)
 	if err != nil {
 		log.Error("Erigon startup", "err", err)
 		return err

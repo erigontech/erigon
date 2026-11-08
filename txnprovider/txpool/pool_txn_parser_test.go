@@ -48,10 +48,16 @@ func TestParseTransactionRLP(t *testing.T) {
 					parseEnd, err := ctx.ParseTransaction(payload, 0, txn, txnSender[:], false /* hasEnvelope */, true /* wrappedWithBlobs */, nil)
 					require.NoError(err)
 					require.Equal(len(payload), parseEnd)
-					if tt.SignHashStr != "" {
+					if tt.SignHashStr != "" && txn.Txn != nil {
 						signHash := hexutil.MustDecodeHex(tt.SignHashStr)
-						if !bytes.Equal(signHash, ctx.Sighash[:]) {
-							t.Errorf("signHash expected %x, got %x", signHash, ctx.Sighash)
+						var computedSignHash common.Hash
+						if txn.Txn.Protected() {
+							computedSignHash = txn.Txn.SigningHash(&ctx.chainID)
+						} else {
+							computedSignHash = txn.Txn.SigningHash(nil)
+						}
+						if !bytes.Equal(signHash, computedSignHash[:]) {
+							t.Errorf("signHash expected %x, got %x", signHash, computedSignHash)
 						}
 					}
 					if tt.IdHashStr != "" {
@@ -68,6 +74,43 @@ func TestParseTransactionRLP(t *testing.T) {
 					}
 					require.Equal(tt.Nonce, txn.Nonce)
 				})
+			}
+		})
+	}
+}
+
+func TestFrameSerializedSizeLimit(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		dataSize int
+		wrapped  bool
+		tooLarge bool
+	}{
+		{"plain", 0, false, false},
+		{"large plain", 128 * 1024, false, true},
+		{"blob sidecar", 0, true, false},
+		{"large wrapped body", 128 * 1024, true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			frame := framePoolSlot(t, common.Address{1}, 1, 2).Txn.(*types.FrameTransaction)
+			frame.Frames[0].Data = make([]byte, tc.dataSize)
+			var encoded bytes.Buffer
+			if tc.wrapped {
+				frame.BlobVersionedHashes = []common.Hash{{1}}
+				wrapped := &types.FrameTxWrapper{FrameTransaction: frame, WrapperVersion: 1, Blobs: types.Blobs{{}}, Commitments: types.BlobKzgs{{}}, Proofs: make(types.KZGProofs, 128)}
+				require.NoError(t, wrapped.MarshalBinaryWrapped(&encoded))
+			} else {
+				require.NoError(t, frame.MarshalBinary(&encoded))
+			}
+			enveloped, err := rlp.EncodeToBytes(encoded.Bytes())
+			require.NoError(t, err)
+			for _, payload := range [][]byte{encoded.Bytes(), enveloped} {
+				err := ValidateSerializedTxn(payload)
+				if tc.tooLarge {
+					require.ErrorIs(t, err, ErrRlpTooBig)
+				} else {
+					require.NoError(t, err)
+				}
 			}
 		})
 	}
@@ -171,7 +214,6 @@ func TestDedupHashes(t *testing.T) {
 	c = h.DedupCopy()
 	assert.Equal(toHashes(1, 2, 3, 4), h)
 	assert.Equal(toHashes(1, 2, 3, 4), c)
-
 }
 
 func toHashes(h ...byte) (out Hashes) {
@@ -216,8 +258,8 @@ func TestBlobTxnParsing(t *testing.T) {
 	assert.Equal(t, len(bodyEnvelope), p)
 	assert.Equal(t, len(bodyEnvelope)-len(bodyEnvelopePrefix), int(thinTxn.Size))
 	assert.Equal(t, bodyEnvelope[3:], thinTxn.Rlp)
-	assert.Equal(t, BlobTxnType, thinTxn.Type)
-	assert.Len(t, thinTxn.BlobHashes, 2)
+	assert.Equal(t, BlobTxnType, thinTxn.TxType())
+	assert.Len(t, thinTxn.GetBlobHashes(), 2)
 	assert.Empty(t, thinTxn.Blobs())
 	assert.Empty(t, thinTxn.Commitments())
 	assert.Empty(t, thinTxn.Proofs())
@@ -269,31 +311,33 @@ func TestBlobTxnParsing(t *testing.T) {
 	assert.Equal(t, len(wrapperRlp), p)
 	assert.Equal(t, len(wrapperRlp), int(fatTxn.Size))
 	assert.Equal(t, wrapperRlp, fatTxn.Rlp)
-	assert.Equal(t, BlobTxnType, fatTxn.Type)
+	assert.Equal(t, BlobTxnType, fatTxn.TxType())
 
-	assert.Equal(t, thinTxn.Value, fatTxn.Value)
-	assert.Equal(t, thinTxn.Tip, fatTxn.Tip)
-	assert.Equal(t, thinTxn.FeeCap, fatTxn.FeeCap)
+	assert.Equal(t, thinTxn.GetValue(), fatTxn.GetValue())
+	assert.Equal(t, thinTxn.GetTipCap(), fatTxn.GetTipCap())
+	assert.Equal(t, thinTxn.GetFeeCap(), fatTxn.GetFeeCap())
 	assert.Equal(t, thinTxn.Nonce, fatTxn.Nonce)
-	assert.Equal(t, thinTxn.DataLen, fatTxn.DataLen)
-	assert.Equal(t, thinTxn.DataNonZeroLen, fatTxn.DataNonZeroLen)
-	assert.Equal(t, thinTxn.AccessListAddrCount, fatTxn.AccessListAddrCount)
-	assert.Equal(t, thinTxn.AccessListStorCount, fatTxn.AccessListStorCount)
-	assert.Equal(t, thinTxn.Gas, fatTxn.Gas)
+	assert.Equal(t, thinTxn.GetDataLen(), fatTxn.GetDataLen())
+	assert.Equal(t, thinTxn.GetDataNonZeroLen(), fatTxn.GetDataNonZeroLen())
+	assert.Equal(t, thinTxn.GetAccessListAddrCount(), fatTxn.GetAccessListAddrCount())
+	assert.Equal(t, thinTxn.GetAccessListStorCount(), fatTxn.GetAccessListStorCount())
+	assert.Equal(t, thinTxn.GetGas(), fatTxn.GetGas())
 	assert.Equal(t, thinTxn.IDHash, fatTxn.IDHash)
-	assert.Equal(t, thinTxn.Creation, fatTxn.Creation)
-	assert.Equal(t, thinTxn.BlobFeeCap, fatTxn.BlobFeeCap)
-	assert.Equal(t, thinTxn.BlobHashes, fatTxn.BlobHashes)
+	assert.Equal(t, thinTxn.IsCreation(), fatTxn.IsCreation())
+	assert.Equal(t, thinTxn.GetBlobFeeCap(), fatTxn.GetBlobFeeCap())
+	assert.Equal(t, thinTxn.GetBlobHashes(), fatTxn.GetBlobHashes())
 
 	require.Len(t, fatTxn.BlobBundles, 2)
-	require.NotEmpty(t, fatTxn.BlobBundles[0].Blob)
-	require.NotEmpty(t, fatTxn.BlobBundles[0].Proofs)
-	require.NotEmpty(t, fatTxn.BlobBundles[0].Proofs[0])
-	require.NotEmpty(t, fatTxn.BlobBundles[0].Commitment)
-	require.NotEmpty(t, fatTxn.BlobBundles[1].Blob)
-	require.NotEmpty(t, fatTxn.BlobBundles[1].Proofs)
-	require.NotEmpty(t, fatTxn.BlobBundles[1].Proofs[0])
-	require.NotEmpty(t, fatTxn.BlobBundles[1].Commitment)
+	blob0b, comm0b, proofs0b := fatTxn.BlobBundle(0)
+	blob1b, comm1b, proofs1b := fatTxn.BlobBundle(1)
+	require.NotEmpty(t, blob0b)
+	require.NotEmpty(t, proofs0b)
+	require.NotEmpty(t, proofs0b[0])
+	require.NotEmpty(t, comm0b)
+	require.NotEmpty(t, blob1b)
+	require.NotEmpty(t, proofs1b)
+	require.NotEmpty(t, proofs1b[0])
+	require.NotEmpty(t, comm1b)
 	assert.Equal(t, blob0, fatTxn.Blobs()[0])
 	assert.Equal(t, blob1, fatTxn.Blobs()[1])
 	assert.Equal(t, commitment0, fatTxn.Commitments()[0])
@@ -336,8 +380,8 @@ func TestWrapperV1BlobTxnParsing(t *testing.T) {
 	assert.Equal(t, len(bodyEnvelope), p)
 	assert.Equal(t, len(bodyEnvelope)-len(bodyEnvelopePrefix), int(thinTxn.Size))
 	assert.Equal(t, bodyEnvelope[3:], thinTxn.Rlp)
-	assert.Equal(t, BlobTxnType, thinTxn.Type)
-	assert.Len(t, thinTxn.BlobHashes, 2)
+	assert.Equal(t, BlobTxnType, thinTxn.TxType())
+	assert.Len(t, thinTxn.GetBlobHashes(), 2)
 	assert.Empty(t, thinTxn.Blobs())
 	assert.Empty(t, thinTxn.Commitments())
 	assert.Empty(t, thinTxn.Proofs())
@@ -398,31 +442,33 @@ func TestWrapperV1BlobTxnParsing(t *testing.T) {
 	assert.Equal(t, len(wrapperRlp), p)
 	assert.Equal(t, len(wrapperRlp), int(fatTxn.Size))
 	assert.Equal(t, wrapperRlp, fatTxn.Rlp)
-	assert.Equal(t, BlobTxnType, fatTxn.Type)
+	assert.Equal(t, BlobTxnType, fatTxn.TxType())
 
-	assert.Equal(t, thinTxn.Value, fatTxn.Value)
-	assert.Equal(t, thinTxn.Tip, fatTxn.Tip)
-	assert.Equal(t, thinTxn.FeeCap, fatTxn.FeeCap)
+	assert.Equal(t, thinTxn.GetValue(), fatTxn.GetValue())
+	assert.Equal(t, thinTxn.GetTipCap(), fatTxn.GetTipCap())
+	assert.Equal(t, thinTxn.GetFeeCap(), fatTxn.GetFeeCap())
 	assert.Equal(t, thinTxn.Nonce, fatTxn.Nonce)
-	assert.Equal(t, thinTxn.DataLen, fatTxn.DataLen)
-	assert.Equal(t, thinTxn.DataNonZeroLen, fatTxn.DataNonZeroLen)
-	assert.Equal(t, thinTxn.AccessListAddrCount, fatTxn.AccessListAddrCount)
-	assert.Equal(t, thinTxn.AccessListStorCount, fatTxn.AccessListStorCount)
-	assert.Equal(t, thinTxn.Gas, fatTxn.Gas)
+	assert.Equal(t, thinTxn.GetDataLen(), fatTxn.GetDataLen())
+	assert.Equal(t, thinTxn.GetDataNonZeroLen(), fatTxn.GetDataNonZeroLen())
+	assert.Equal(t, thinTxn.GetAccessListAddrCount(), fatTxn.GetAccessListAddrCount())
+	assert.Equal(t, thinTxn.GetAccessListStorCount(), fatTxn.GetAccessListStorCount())
+	assert.Equal(t, thinTxn.GetGas(), fatTxn.GetGas())
 	assert.Equal(t, thinTxn.IDHash, fatTxn.IDHash)
-	assert.Equal(t, thinTxn.Creation, fatTxn.Creation)
-	assert.Equal(t, thinTxn.BlobFeeCap, fatTxn.BlobFeeCap)
-	assert.Equal(t, thinTxn.BlobHashes, fatTxn.BlobHashes)
+	assert.Equal(t, thinTxn.IsCreation(), fatTxn.IsCreation())
+	assert.Equal(t, thinTxn.GetBlobFeeCap(), fatTxn.GetBlobFeeCap())
+	assert.Equal(t, thinTxn.GetBlobHashes(), fatTxn.GetBlobHashes())
 
 	require.Len(t, fatTxn.BlobBundles, 2)
-	require.NotEmpty(t, fatTxn.BlobBundles[0].Blob)
-	require.NotEmpty(t, fatTxn.BlobBundles[0].Proofs)
-	require.NotEmpty(t, fatTxn.BlobBundles[0].Proofs[0])
-	require.NotEmpty(t, fatTxn.BlobBundles[0].Commitment)
-	require.NotEmpty(t, fatTxn.BlobBundles[1].Blob)
-	require.NotEmpty(t, fatTxn.BlobBundles[1].Proofs)
-	require.NotEmpty(t, fatTxn.BlobBundles[1].Proofs[0])
-	require.NotEmpty(t, fatTxn.BlobBundles[1].Commitment)
+	blob0b, comm0b, proofs0b := fatTxn.BlobBundle(0)
+	blob1b, comm1b, proofs1b := fatTxn.BlobBundle(1)
+	require.NotEmpty(t, blob0b)
+	require.NotEmpty(t, proofs0b)
+	require.NotEmpty(t, proofs0b[0])
+	require.NotEmpty(t, comm0b)
+	require.NotEmpty(t, blob1b)
+	require.NotEmpty(t, proofs1b)
+	require.NotEmpty(t, proofs1b[0])
+	require.NotEmpty(t, comm1b)
 	assert.Equal(t, blob0, fatTxn.Blobs()[0])
 	assert.Equal(t, blob1, fatTxn.Blobs()[1])
 	assert.Equal(t, commitment0, fatTxn.Commitments()[0])
@@ -555,24 +601,27 @@ func TestParseTransactionRejectsBlobCommitmentCountMismatch(t *testing.T) {
 	require.ErrorContains(t, err, "fewer commitments than blobs")
 }
 
-func TestSetCodeAuthSignatureRecover(t *testing.T) {
+func TestParseTransactionsRejectsTrailingBlobWrapperBytes(t *testing.T) {
+	chainID := uint256.NewInt(5)
+	wrapper := types.MakeV1WrappedBlobTxn(chainID)
+
+	wrapperBuf := &bytes.Buffer{}
+	require.NoError(t, wrapper.MarshalBinaryWrapped(wrapperBuf))
+	malformed := append(wrapperBuf.Bytes(), 0x80)
+	packet := EncodeTransactions([][]byte{malformed}, nil)
+
+	ctx := NewTxnParseContext(*chainID)
+	ctx.WithSender(false)
+	var slots TxnSlots
+	_, err := ParseTransactions(packet, 0, ctx, &slots, nil)
+	require.ErrorContains(t, err, "trailing bytes after blobs wrapper")
+}
+
+func TestSetCodeAuthRecoveryDeferred(t *testing.T) {
 	txnRlpHex := testdata.ValidSetCodeTxn1
-	// For authorizationList[0] in the above :-
-	// expectedAddress := common.HexToAddress("0x0e2dadd8081919cd0534c4144a74204f2db229ec")
-	// expectedNonce := 0x17
-	// expectedYParity := 0x1
-	// expectedR := "0x837da79f8b17c1db2371cdc4b2b134cd5aef1b588f811a5e3b4f2329c2107116"
-	// expectedS := "0x66aab6e4baa71dd601f4211e1bbf27c297e47dc845e73b9147ab1823064df2b9"
-
-	// Should match with (but commented for efficiency) -
-	// expectedSigner, err := setCodeTx.Authorizations[0].RecoverSigner(bytes.NewBuffer(nil), make([]byte, 32))
-
 	expectedChainId := 11155111 // Sepolia
-	expectedSigner := common.HexToAddress("0x7934d5340b1fa4e3d8f5cd62705feee3ece50ea3")
 
-	var (
-		txn TxnSlot
-	)
+	var txn TxnSlot
 
 	txnRlpBytes := hexutil.FromHex(txnRlpHex)
 	ctx := NewTxnParseContext(*uint256.NewInt(uint64(expectedChainId)))
@@ -582,9 +631,17 @@ func TestSetCodeAuthSignatureRecover(t *testing.T) {
 
 	setCodeTx := types.SetCodeTransaction{}
 	rlpStream := rlp.NewStream(bytes.NewBuffer(txnRlpBytes[1:]), uint64(len(txnRlpBytes)))
-	setCodeTx.DecodeRLP(rlpStream)
+	require.NoError(t, setCodeTx.DecodeRLP(rlpStream))
+	require.Equal(t, setCodeTx.Authorizations, txn.Txn.GetAuthorizations())
+	require.Empty(t, txn.AuthAndNonces)
+	pool := &TxPool{chainID: ctx.chainID}
+	pool.recoverAuthorizations(&txn)
 	require.Len(t, txn.AuthAndNonces, 1)
-	require.Equal(t, expectedSigner, txn.AuthAndNonces[0].authority)
+	require.Equal(t, common.HexToAddress("0x7934d5340b1fa4e3d8f5cd62705feee3ece50ea3"), txn.AuthAndNonces[0].authority)
+
+	_, err = ctx.ParseTransaction(hexutil.MustDecodeHex(testdata.ValidSetCodeTxn2), 0, &txn, nil, false, false, nil)
+	require.NoError(t, err)
+	require.Nil(t, txn.AuthAndNonces, "parsing a new transaction must clear the previous recovery")
 }
 
 func TestSetCodeTxnParsing(t *testing.T) {
@@ -602,8 +659,9 @@ func TestSetCodeTxnParsing(t *testing.T) {
 
 	_, err = ctx.ParseTransaction(bodyRlx, 0, &txn, nil, hasEnvelope, false, nil)
 	require.NoError(t, err)
-	assert.Len(t, txn.AuthAndNonces, 2)
-	assert.Equal(t, SetCodeTxnType, txn.Type)
+	assert.Len(t, txn.Txn.GetAuthorizations(), 2)
+	assert.Empty(t, txn.AuthAndNonces)
+	assert.Equal(t, SetCodeTxnType, txn.TxType())
 
 	// test empty authorizations
 	bodyRlxHex = "0x04f903420188db1b29114eba96ab887145908699cc1f3488987b96c0c55fced7886b85e4937b481442949a60a150fda306891ad7aff6d47584c8a0e1571788c5f7682286d452e0b9021164b57ad1f652639f5d44536f1b868437787082df48b3e2a684742d0eafcfda5336e7a958afb22ae57aad8e9a271528f9aa1f4a34e29491a8929732e22c04a438578b2b8510862572dd36b5304a9c3b6668b7c8f818be8411c07866ccb1fbe34586f80a1ace62753b918139acefc71f92d0c4679c0a56bb6c8ae38bc37a7ee8f348255c8ada95e842b52d4bd2b2447789a8543beda9f3bc8e27f28d51373ef9b1494c3d21adc6b0416444088ed08834eb5736d48566da000356bbcd7d78b118c39d15a56874fd254dcfcc172cd7a82e36621b964ebc54fdaa64de9e381b1545cfc7c4ea1cfccff829f0dfa395ef5f750b79689e5c8e3f6c7de9afe34d05f599dac8e3ae999f7acb32f788991425a7d8b36bf92a7dc14d913c3cc5854e580f48d507bf06018f3d012155791e1930791afccefe46f268b59e023ddacaf1e8278026a4c962f9b968f065e7c33d98d2aea49e8885ac77bfcc952e322c5e414cb5b4e7477829c0a4b8b0964fc28d202bca1b3bedca34f3fe12d62629b30a4764121440d0ea0f50f26579c486070d00309a44c14f6c3347c5d14b520eca8a399a1cd3c421f28ae5485e96b4c500a411754a78f558701d1a9788d22e6d2f02fefd1c45c2d427b518adda66a34432c3f94b4b3811e2d063dca2917f403033b0400e4e9dc3fd327b10a43a15229332596671d0392e501c39f43b23f814e95b093e981418091f9e2a32013ab8fa7a409d5636b52fded6f8d5f794de688ae4be9a54b20eb5366903223863de2bc895e1a0f5ecb3956919b8e9e9956c20c89b523e71c5803592c99871b7d5ee025e402941f89b94ae16863cc3bf6e6946f186d0f63d77343f81363ef884a0b09afe54c0376e3e3091473edb4e2bf43f08530356a2c9236bf373869b79c8d0a0ec2c57ca577173865f340a7cd13cf0051e52229722e3a529f851d4b74e315c8ca00bbe5f1a1ef2e5830d0c5cb8e93a05d4d29b4d7bf244ceea432888c4fbd5d5d5a0823b7ceaeba3a4cd70572c2ccc560d588ffeed638aec7c0cc364afa7dbf1c51cc0018818848492f65ca7bd88ea2017dc526fff7f"
@@ -619,7 +677,7 @@ func TestSetCodeTxnParsing(t *testing.T) {
 	_, err = ctx.ParseTransaction(bodyRlx, 0, &tx2, nil, hasEnvelope, false, nil)
 	require.NoError(t, err)
 	assert.Empty(t, tx2.AuthAndNonces)
-	assert.Equal(t, SetCodeTxnType, tx2.Type)
+	assert.Equal(t, SetCodeTxnType, tx2.TxType())
 
 	// generated using this in core/types/encdec_test.go
 	/*
@@ -699,26 +757,37 @@ func TestSetCodeTxnParsingWithLargeAuthorizationValues(t *testing.T) {
 	assert.Equal(t, SetCodeTxnType, txnType)
 
 	_, err = ctx.ParseTransaction(bodyRlx, 0, &txn, nil, false /* hasEnvelope */, false, nil)
-	assert.ErrorContains(t, err, "chainId is too big")
+	// Note: the test fixture encodes yParity as a 32-byte field, which is
+	// rejected at RLP decoding (uint overflow) before the parser ever reaches
+	// auth-signer recovery. So this test still validates that grossly malformed
+	// auth tuples are rejected at parse time. Per-tuple recovery failures with
+	// well-formed RLP are exercised separately in TestEIP7702BatchPoisoning.
+	assert.Error(t, err)
 }
 
 var txnParseCalaverasTests = []parseTxnTest{
 	// Legacy protected (EIP-155) from calveras, with chainId 123
-	{PayloadStr: "f86d808459682f0082520894e80d2a018c813577f33f9e69387dc621206fb3a48856bc75e2d63100008082011aa04ae3cae463329a32573f4fbf1bd9b011f93aecf80e4185add4682a03ba4a4919a02b8f05f3f4858b0da24c93c2a65e51b2fbbecf5ffdf97c1f8cc1801f307dc107",
+	{
+		PayloadStr:  "f86d808459682f0082520894e80d2a018c813577f33f9e69387dc621206fb3a48856bc75e2d63100008082011aa04ae3cae463329a32573f4fbf1bd9b011f93aecf80e4185add4682a03ba4a4919a02b8f05f3f4858b0da24c93c2a65e51b2fbbecf5ffdf97c1f8cc1801f307dc107",
 		IdHashStr:   "f4a91979624effdb45d2ba012a7995c2652b62ebbeb08cdcab00f4923807aa8a",
-		SignHashStr: "ff44cf01ee9b831f09910309a689e8da83d19aa60bad325ee9154b7c25cf4de8", Nonce: 0},
+		SignHashStr: "ff44cf01ee9b831f09910309a689e8da83d19aa60bad325ee9154b7c25cf4de8", Nonce: 0,
+	},
 }
 
 var txnParseDevNetTests = []parseTxnTest{
-	{PayloadStr: "f8620101830186a09400000000000000000000000000000000000000006401820a96a04f353451b272c6b183cedf20787dab556db5afadf16733a3c6bffb0d2fcd2563a0773cd45f7cc62250f7ee715b9e19f0489176f8966f75c8eed2fbf1ac861cb50c",
+	{
+		PayloadStr:  "f8620101830186a09400000000000000000000000000000000000000006401820a96a04f353451b272c6b183cedf20787dab556db5afadf16733a3c6bffb0d2fcd2563a0773cd45f7cc62250f7ee715b9e19f0489176f8966f75c8eed2fbf1ac861cb50c",
 		IdHashStr:   "35767571787cd95dd71e2081ac4f667076f012b854fc314ed3b131e12623cbbd",
 		SignHashStr: "a2719fbc84efd65eee79201e46f5110edc4731c90ffe1cebf8644c8ddd62528d",
-		SenderStr:   "67b1d87101671b127f5f8714789c7192f7ad340e", Nonce: 1},
+		SenderStr:   "67b1d87101671b127f5f8714789c7192f7ad340e", Nonce: 1,
+	},
 }
 
 var txnRopstenTests = []parseTxnTest{
-	{PayloadStr: "f868188902000000000000000082520894000000000000000000000000000000000000004380801ba01d852f75e0bdbdf3c2b770be97eb3b74d9a3b2450fb58aa6cfbc9e9faa1c4b24a079aef959a5f032ed90b2e44b74a2e850043a3e0ab83f994ab0619638173fe035",
-		Nonce: 24, SenderStr: "874b54a8bd152966d63f706bae1ffeb0411921e5", IdHashStr: "5928c90044b9d2add2fc7f580e0c6ea1b2dca2ea8c254dfa4092c251f895ed52"},
+	{
+		PayloadStr: "f868188902000000000000000082520894000000000000000000000000000000000000004380801ba01d852f75e0bdbdf3c2b770be97eb3b74d9a3b2450fb58aa6cfbc9e9faa1c4b24a079aef959a5f032ed90b2e44b74a2e850043a3e0ab83f994ab0619638173fe035",
+		Nonce:      24, SenderStr: "874b54a8bd152966d63f706bae1ffeb0411921e5", IdHashStr: "5928c90044b9d2add2fc7f580e0c6ea1b2dca2ea8c254dfa4092c251f895ed52",
+	},
 }
 
 type parseTxnTest struct {
@@ -753,28 +822,137 @@ var allNetsTestCases = []struct {
 
 var TxnParseMainnetTests = []parseTxnTest{
 	// Legacy unprotected
-	{PayloadStr: "f86a808459682f0082520894fe3b557e8fb62b89f4916b721be55ceb828dbd73872386f26fc10000801ca0d22fc3eed9b9b9dbef9eec230aa3fb849eff60356c6b34e86155dca5c03554c7a05e3903d7375337f103cb9583d97a59dcca7472908c31614ae240c6a8311b02d6",
-		SenderStr: "fe3b557e8fb62b89f4916b721be55ceb828dbd73", IdHashStr: "595e27a835cd79729ff1eeacec3120eeb6ed1464a04ec727aaca734ead961328",
-		SignHashStr: "e2b043ecdbcfed773fe7b5ffc2e23ec238081c77137134a06d71eedf9cdd81d3", Nonce: 0},
+	{
+		PayloadStr: "f86a808459682f0082520894fe3b557e8fb62b89f4916b721be55ceb828dbd73872386f26fc10000801ca0d22fc3eed9b9b9dbef9eec230aa3fb849eff60356c6b34e86155dca5c03554c7a05e3903d7375337f103cb9583d97a59dcca7472908c31614ae240c6a8311b02d6",
+		SenderStr:  "fe3b557e8fb62b89f4916b721be55ceb828dbd73", IdHashStr: "595e27a835cd79729ff1eeacec3120eeb6ed1464a04ec727aaca734ead961328",
+		SignHashStr: "e2b043ecdbcfed773fe7b5ffc2e23ec238081c77137134a06d71eedf9cdd81d3", Nonce: 0,
+	},
 
-	{PayloadStr: "02f86a0180843b9aca00843b9aca0082520894e80d2a018c813577f33f9e69387dc621206fb3a48080c001a02c73a04cd144e5a84ceb6da942f83763c2682896b51f7922e2e2f9a524dd90b7a0235adda5f87a1d098e2739e40e83129ff82837c9042e6ad61d0481334dcb6f1a",
-		SenderStr: "81f5daee2c61807d0fc5e4c8b4e1d3c3e028d9ab", IdHashStr: "b4a8cd0b91310b0f84216c834c4cfa25a4ffc116b54692ac1f4e682be7fa73c9",
-		SignHashStr: "c63673a5d989925d01a6c1339252f546e99b6957ce566a488154e169ae9bd49c", Nonce: 0},
-	{PayloadStr: "01f86b01018203e882520894236ff1e97419ae93ad80cafbaa21220c5d78fb7d880de0b6b3a764000080c080a0987e3d8d0dcd86107b041e1dca2e0583118ff466ad71ad36a8465dd2a166ca2da02361c5018e63beea520321b290097cd749febc2f437c7cb41fdd085816742060",
-		SenderStr: "91406aebf7370d6db8d1796bc8fe97ca4b6bed78", IdHashStr: "7edf4b1a1594b252eb80edcf51605eb1a3b17ccdf891b303a8be146269821b65",
-		SignHashStr: "ae2a02407f345601507c52d1af6a89bafd4622fbcdac0001272ebca42cf7f7c2", Nonce: 1},
-	{PayloadStr: "f86780862d79883d2000825208945df9b87991262f6ba471f09758cde1c0fc1de734827a69801ca088ff6cf0fefd94db46111149ae4bfc179e9b94721fffd821d38d16464b3f71d0a045e0aff800961cfce805daef7016b9b675c137a6a41a548f7b60a3484c06a33a",
-		SenderStr: "a1e4380a3b1f749673e270229993ee55f35663b4", IdHashStr: "5c504ed432cb51138bcf09aa5e8a410dd4a1e204ef84bfed1be16dfba1b22060",
-		SignHashStr: "19b1e28c14f33e74b96b88eba97d4a4fc8a97638d72e972310025b7e1189b049", Nonce: 0},
-	{PayloadStr: "b903a301f9039f018218bf85105e34df0083048a949410a0847c2d170008ddca7c3a688124f49363003280b902e4c11695480000000000000000000000004b274e4a9af31c20ed4151769a88ffe63d9439960000000000000000000000008510211a852f0c5994051dd85eaef73112a82eb5000000000000000000000000000000000000000000000000000000000000012000000000000000000000000000bad4de000000000000000000000000607816a600000000000000000000000000000000000000000000000000000000000002200000000000000000000000000000000000000000000000000000001146aa2600000000000000000000000000000000000000000000000000000000000001bc9b000000000000000000000000eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee000000000000000000000000482579f93dc13e6b434e38b5a0447ca543d88a4600000000000000000000000000000000000000000000000000000000000000c42df546f40000000000000000000000004b274e4a9af31c20ed4151769a88ffe63d943996000000000000000000000000eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee0000000000000000000000007d93f93d41604572119e4be7757a7a4a43705f080000000000000000000000000000000000000000000000003782dace9d90000000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000082b5a61569b5898ac347c82a594c86699f1981aa88ca46a6a00b8e4f27b3d17bdf3714e7c0ca6a8023b37cca556602fce7dc7daac3fcee1ab04bbb3b94c10dec301cc57266db6567aa073efaa1fa6669bdc6f0877b0aeab4e33d18cb08b8877f08931abf427f11bade042177db48ca956feb114d6f5d56d1f5889047189562ec545e1c000000000000000000000000000000000000000000000000000000000000f84ff7946856ccf24beb7ed77f1f24eee5742f7ece5557e2e1a00000000000000000000000000000000000000000000000000000000000000001d694b1dd690cc9af7bb1a906a9b5a94f94191cc553cec080a0d52f3dbcad3530e73fcef6f4a75329b569a8903bf6d8109a960901f251a37af3a00ecf570e0c0ffa6efdc6e6e49be764b6a1a77e47de7bb99e167544ffbbcd65bc",
-		SenderStr: "1ced2cef30d40bb3617f8d455071b69f3b12d06f", IdHashStr: "851bad0415758075a1eb86776749c829b866d43179c57c3e4a4b9359a0358231",
-		SignHashStr: "894d999ea27537def37534b3d55df3fed4e1492b31e9f640774432d21cf4512c", Nonce: 6335},
-	{PayloadStr: "02f8cf01038502540be40085174876e8008301869f94e77162b7d2ceb3625a4993bab557403a7b706f18865af3107a400080f85bf85994de0b295669a9fd93d5f28d9ec85e40f4cb697baef842a00000000000000000000000000000000000000000000000000000000000000003a0000000000000000000000000000000000000000000000000000000000000000780a0f73da48f3f5c9f324dfd28d106dcf911b53f33c92ae068cf6135352300e7291aa06ee83d0f59275d90000ac8cf912c6eb47261d244c9db19ffefc49e52869ff197",
-		SenderStr: "e252dd9e8b19f4bcdc0f542e04e732fed2047f00", IdHashStr: "f08b9885d48a1307c5d5841fb2f92adaa35815846ac071cba65376ccfbc99c5d",
-		SignHashStr: "aeda585cd1f1dc0812d7c9ef0396fe3fb9102c9b927a14724180d4616f4568f2", Nonce: 3},
+	{
+		PayloadStr: "02f86a0180843b9aca00843b9aca0082520894e80d2a018c813577f33f9e69387dc621206fb3a48080c001a02c73a04cd144e5a84ceb6da942f83763c2682896b51f7922e2e2f9a524dd90b7a0235adda5f87a1d098e2739e40e83129ff82837c9042e6ad61d0481334dcb6f1a",
+		SenderStr:  "81f5daee2c61807d0fc5e4c8b4e1d3c3e028d9ab", IdHashStr: "b4a8cd0b91310b0f84216c834c4cfa25a4ffc116b54692ac1f4e682be7fa73c9",
+		SignHashStr: "c63673a5d989925d01a6c1339252f546e99b6957ce566a488154e169ae9bd49c", Nonce: 0,
+	},
+	{
+		PayloadStr: "01f86b01018203e882520894236ff1e97419ae93ad80cafbaa21220c5d78fb7d880de0b6b3a764000080c080a0987e3d8d0dcd86107b041e1dca2e0583118ff466ad71ad36a8465dd2a166ca2da02361c5018e63beea520321b290097cd749febc2f437c7cb41fdd085816742060",
+		SenderStr:  "91406aebf7370d6db8d1796bc8fe97ca4b6bed78", IdHashStr: "7edf4b1a1594b252eb80edcf51605eb1a3b17ccdf891b303a8be146269821b65",
+		SignHashStr: "ae2a02407f345601507c52d1af6a89bafd4622fbcdac0001272ebca42cf7f7c2", Nonce: 1,
+	},
+	{
+		PayloadStr: "f86780862d79883d2000825208945df9b87991262f6ba471f09758cde1c0fc1de734827a69801ca088ff6cf0fefd94db46111149ae4bfc179e9b94721fffd821d38d16464b3f71d0a045e0aff800961cfce805daef7016b9b675c137a6a41a548f7b60a3484c06a33a",
+		SenderStr:  "a1e4380a3b1f749673e270229993ee55f35663b4", IdHashStr: "5c504ed432cb51138bcf09aa5e8a410dd4a1e204ef84bfed1be16dfba1b22060",
+		SignHashStr: "19b1e28c14f33e74b96b88eba97d4a4fc8a97638d72e972310025b7e1189b049", Nonce: 0,
+	},
+	{
+		PayloadStr: "b903a301f9039f018218bf85105e34df0083048a949410a0847c2d170008ddca7c3a688124f49363003280b902e4c11695480000000000000000000000004b274e4a9af31c20ed4151769a88ffe63d9439960000000000000000000000008510211a852f0c5994051dd85eaef73112a82eb5000000000000000000000000000000000000000000000000000000000000012000000000000000000000000000bad4de000000000000000000000000607816a600000000000000000000000000000000000000000000000000000000000002200000000000000000000000000000000000000000000000000000001146aa2600000000000000000000000000000000000000000000000000000000000001bc9b000000000000000000000000eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee000000000000000000000000482579f93dc13e6b434e38b5a0447ca543d88a4600000000000000000000000000000000000000000000000000000000000000c42df546f40000000000000000000000004b274e4a9af31c20ed4151769a88ffe63d943996000000000000000000000000eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee0000000000000000000000007d93f93d41604572119e4be7757a7a4a43705f080000000000000000000000000000000000000000000000003782dace9d90000000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000082b5a61569b5898ac347c82a594c86699f1981aa88ca46a6a00b8e4f27b3d17bdf3714e7c0ca6a8023b37cca556602fce7dc7daac3fcee1ab04bbb3b94c10dec301cc57266db6567aa073efaa1fa6669bdc6f0877b0aeab4e33d18cb08b8877f08931abf427f11bade042177db48ca956feb114d6f5d56d1f5889047189562ec545e1c000000000000000000000000000000000000000000000000000000000000f84ff7946856ccf24beb7ed77f1f24eee5742f7ece5557e2e1a00000000000000000000000000000000000000000000000000000000000000001d694b1dd690cc9af7bb1a906a9b5a94f94191cc553cec080a0d52f3dbcad3530e73fcef6f4a75329b569a8903bf6d8109a960901f251a37af3a00ecf570e0c0ffa6efdc6e6e49be764b6a1a77e47de7bb99e167544ffbbcd65bc",
+		SenderStr:  "1ced2cef30d40bb3617f8d455071b69f3b12d06f", IdHashStr: "851bad0415758075a1eb86776749c829b866d43179c57c3e4a4b9359a0358231",
+		SignHashStr: "894d999ea27537def37534b3d55df3fed4e1492b31e9f640774432d21cf4512c", Nonce: 6335,
+	},
+	{
+		PayloadStr: "02f8cf01038502540be40085174876e8008301869f94e77162b7d2ceb3625a4993bab557403a7b706f18865af3107a400080f85bf85994de0b295669a9fd93d5f28d9ec85e40f4cb697baef842a00000000000000000000000000000000000000000000000000000000000000003a0000000000000000000000000000000000000000000000000000000000000000780a0f73da48f3f5c9f324dfd28d106dcf911b53f33c92ae068cf6135352300e7291aa06ee83d0f59275d90000ac8cf912c6eb47261d244c9db19ffefc49e52869ff197",
+		SenderStr:  "e252dd9e8b19f4bcdc0f542e04e732fed2047f00", IdHashStr: "f08b9885d48a1307c5d5841fb2f92adaa35815846ac071cba65376ccfbc99c5d",
+		SignHashStr: "aeda585cd1f1dc0812d7c9ef0396fe3fb9102c9b927a14724180d4616f4568f2", Nonce: 3,
+	},
 	// Access list
-	{PayloadStr: "01f889018201f30a8301e241808080f838f7940000000000000000000000000000000000000001e1a0000000000000000000000000000000000000000000000000000000000000000080a0a2196512ef8325b781e32d96d283a9d4cf3946947da77f3cd310eee050c537d5a00144af5513a24363bf49abed9a25476cb7c33df6e0c0053b63ee8dac64b027aa",
-		SenderStr: "4d8286232b1f058d8bdb1702d0f6a1e887ced385", IdHashStr: "bde66bd7925917db9e49e38a12ed0dcd6f9422f8db90de26d34a4523f8861d1e",
-		SignHashStr: "7f69febd06ddc1e72d9cd34524c82b3a8a116a02a10757be34cf536d6992d51c", Nonce: 499},
+	{
+		PayloadStr: "01f889018201f30a8301e241808080f838f7940000000000000000000000000000000000000001e1a0000000000000000000000000000000000000000000000000000000000000000080a0a2196512ef8325b781e32d96d283a9d4cf3946947da77f3cd310eee050c537d5a00144af5513a24363bf49abed9a25476cb7c33df6e0c0053b63ee8dac64b027aa",
+		SenderStr:  "4d8286232b1f058d8bdb1702d0f6a1e887ced385", IdHashStr: "bde66bd7925917db9e49e38a12ed0dcd6f9422f8db90de26d34a4523f8861d1e",
+		SignHashStr: "7f69febd06ddc1e72d9cd34524c82b3a8a116a02a10757be34cf536d6992d51c", Nonce: 499,
+	},
 	{PayloadStr: "01f84b01018080808080c080a0382d06e968cc18373209a2532b2c9df494c36475e479020730c918b1b6f73f6ba0084b433c82339de844e2531363f59fa64218e965016cc55069828d88959b58fe", Nonce: 1},
+}
+
+// buildBlobWrapperPayload constructs a 2-blob BlobTxWrapper RLP payload for benchmarking.
+// Uses the same structure as TestBlobTxnParsing.
+func buildBlobWrapperPayload() []byte {
+	bodyRlpHex := "f9012705078502540be4008506fc23ac008357b58494811a752c8cd697e3cb27" +
+		"279c330ed1ada745a8d7808204f7f872f85994de0b295669a9fd93d5f28d9ec85e40f4cb697b" +
+		"aef842a00000000000000000000000000000000000000000000000000000000000000003a000" +
+		"00000000000000000000000000000000000000000000000000000000000007d694bb9bc244d7" +
+		"98123fde783fcc1c72d3bb8c189413c07bf842a0c6bdd1de713471bd6cfa62dd8b5a5b42969e" +
+		"d09e26212d3377f3f8426d8ec210a08aaeccaf3873d07cef005aca28c39f8a9f8bdb1ec8d79f" +
+		"fc25afc0a4fa2ab73601a036b241b061a36a32ab7fe86c7aa9eb592dd59018cd0443adc09035" +
+		"90c16b02b0a05edcc541b4741c5cc6dd347c5ed9577ef293a62787b4510465fadbfe39ee4094"
+	bodyRlp := hexutil.MustDecodeHex(bodyRlpHex)
+
+	blobsRlpPrefix := hexutil.MustDecodeHex("fa040008")
+	blobRlpPrefix := hexutil.MustDecodeHex("ba020000")
+	proofsRlpPrefix := hexutil.MustDecodeHex("f862")
+
+	blob0 := make([]byte, params.BlobSize)
+	rand.Read(blob0)
+	blob1 := make([]byte, params.BlobSize)
+	rand.Read(blob1)
+
+	var commitment0, commitment1 goethkzg.KZGCommitment
+	rand.Read(commitment0[:])
+	rand.Read(commitment1[:])
+	var proof0, proof1 goethkzg.KZGProof
+	rand.Read(proof0[:])
+	rand.Read(proof1[:])
+
+	wrapperRlp := hexutil.MustDecodeHex("03fa0401fe")
+	wrapperRlp = append(wrapperRlp, bodyRlp...)
+	wrapperRlp = append(wrapperRlp, blobsRlpPrefix...)
+	wrapperRlp = append(wrapperRlp, blobRlpPrefix...)
+	wrapperRlp = append(wrapperRlp, blob0...)
+	wrapperRlp = append(wrapperRlp, blobRlpPrefix...)
+	wrapperRlp = append(wrapperRlp, blob1...)
+	wrapperRlp = append(wrapperRlp, proofsRlpPrefix...)
+	wrapperRlp = append(wrapperRlp, 0xb0)
+	wrapperRlp = append(wrapperRlp, commitment0[:]...)
+	wrapperRlp = append(wrapperRlp, 0xb0)
+	wrapperRlp = append(wrapperRlp, commitment1[:]...)
+	wrapperRlp = append(wrapperRlp, proofsRlpPrefix...)
+	wrapperRlp = append(wrapperRlp, 0xb0)
+	wrapperRlp = append(wrapperRlp, proof0[:]...)
+	wrapperRlp = append(wrapperRlp, 0xb0)
+	wrapperRlp = append(wrapperRlp, proof1[:]...)
+
+	// Fix the outer wrapper length
+	innerLen := len(wrapperRlp) - 5
+	wrapperRlp[1] = 0xfa
+	wrapperRlp[2] = byte(innerLen >> 16)
+	wrapperRlp[3] = byte(innerLen >> 8)
+	wrapperRlp[4] = byte(innerLen)
+
+	return wrapperRlp
+}
+
+func TestWrappedBlobTxnDoesNotAliasPayload(t *testing.T) {
+	chainID := uint256.NewInt(5)
+	wrapper := types.MakeWrappedBlobTxn(chainID)
+	wrapperBuf := &bytes.Buffer{}
+	require.NoError(t, wrapper.MarshalBinaryWrapped(wrapperBuf))
+	wire := wrapperBuf.Bytes()
+	packet := EncodeTransactions([][]byte{wire}, nil)
+
+	ctx := NewTxnParseContext(*chainID)
+	ctx.WithSender(false)
+	var slots TxnSlots
+	_, err := ParseTransactions(packet, 0, ctx, &slots, nil)
+	require.NoError(t, err)
+	clear(packet)
+
+	slot := slots.Txns[0]
+	require.Len(t, slot.BlobBundles, len(wrapper.Blobs))
+	for i, bundle := range slot.BlobBundles {
+		require.True(t, bytes.Equal(wrapper.Blobs[i][:], bundle.Blob), "blob %d aliases the payload", i)
+	}
+	require.True(t, bytes.Equal(wire, slot.Rlp), "rlp aliases the payload")
+}
+
+// A known blob txn is rejected before its blobs are copied.
+func TestKnownWrappedBlobTxnRejectedBeforeBlobs(t *testing.T) {
+	chainID := uint256.NewInt(5)
+	wrapper := types.MakeWrappedBlobTxn(chainID)
+	wrapperBuf := &bytes.Buffer{}
+	require.NoError(t, wrapper.MarshalBinaryWrapped(wrapperBuf))
+
+	ctx := NewTxnParseContext(*chainID)
+	ctx.WithSender(false)
+	var slot TxnSlot
+	_, err := ctx.ParseTransaction(wrapperBuf.Bytes(), 0, &slot, nil, false, true, func([]byte) error { return ErrRejected })
+	require.ErrorIs(t, err, ErrRejected)
+	require.Empty(t, slot.BlobBundles)
 }

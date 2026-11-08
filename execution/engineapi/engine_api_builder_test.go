@@ -1,0 +1,1338 @@
+// Copyright 2026 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+package engineapi_test
+
+import (
+	"context"
+	"crypto/ecdsa"
+	"encoding/binary"
+	"math/big"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/testlog"
+
+	"github.com/holiman/uint256"
+
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/execution/abi"
+	"github.com/erigontech/erigon/execution/abi/bind"
+	enginetypes "github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/engineapi/engineapitester"
+	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/state/contracts"
+	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/node/ethconfig"
+	"github.com/erigontech/erigon/rpc"
+)
+
+func TestEngineApiClearsFreshTouchedEmptyAccount(t *testing.T) {
+	tests := []struct {
+		name            string
+		experimentalBAL bool
+	}{
+		{name: "serial builder"},
+		{name: "experimental BAL builder", experimentalBAL: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			testEngineApiClearsFreshTouchedEmptyAccount(t, test.experimentalBAL)
+		})
+	}
+}
+
+func testEngineApiClearsFreshTouchedEmptyAccount(t *testing.T, experimentalBAL bool) {
+	parallel := dbg.Exec3Parallel
+	dbg.Exec3Parallel = true
+	t.Cleanup(func() { dbg.Exec3Parallel = parallel })
+
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlError)
+	genesis, coinbaseKey, err := engineapitester.DefaultEngineApiTesterGenesis()
+	require.NoError(t, err)
+	genesis.Config.AmsterdamTime = nil
+
+	senderKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	senderAddr := crypto.PubkeyToAddress(senderKey.PublicKey)
+	genesis.Alloc[senderAddr] = types.GenesisAccount{
+		Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(20), nil),
+	}
+
+	emptyKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	emptyAddr := crypto.PubkeyToAddress(emptyKey.PublicKey)
+
+	eat, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
+		Logger: logger, DataDir: t.TempDir(), Genesis: genesis, CoinbaseKey: coinbaseKey,
+		EthConfigTweaker: func(cfg *ethconfig.Config) {
+			cfg.ExperimentalBAL = experimentalBAL
+		},
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, eat.Close()) })
+
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		chainID := eat.ChainId()
+		signer := types.LatestSignerForChainID(chainID)
+		rpcClient := eat.Transactor.RpcClient()
+		feeCap := uint256.NewInt(1_000_000_000)
+
+		send := func(txn types.Transaction) {
+			signed, err := types.SignTx(txn, *signer, senderKey)
+			require.NoError(t, err)
+			_, err = rpcClient.SendTransaction(signed)
+			require.NoError(t, err)
+		}
+
+		// Deploy runtime code that pushes emptyAddr and executes SELFDESTRUCT.
+		initCode := append([]byte{0x75, 0x73}, emptyAddr[:]...)
+		initCode = append(initCode, 0xff, 0x60, 0x00, 0x52, 0x60, 0x16, 0x60, 0x0a, 0xf3)
+		send(&types.DynamicFeeTransaction{
+			CommonTx: types.CommonTx{Nonce: 0, GasLimit: 200_000, Data: initCode},
+			ChainID:  *chainID, TipCap: *feeCap, FeeCap: *feeCap,
+		})
+		_, err = eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+
+		selfDestructor := types.CreateAddress(senderAddr, 0)
+		send(&types.DynamicFeeTransaction{
+			CommonTx: types.CommonTx{Nonce: 1, GasLimit: 200_000, To: &selfDestructor},
+			ChainID:  *chainID, TipCap: *feeCap, FeeCap: *feeCap,
+		})
+		auth, err := types.SignAuthorization(emptyKey, *chainID, common.Address{0xaa}, 0)
+		require.NoError(t, err)
+		send(&types.SetCodeTransaction{
+			DynamicFeeTransaction: types.DynamicFeeTransaction{
+				CommonTx: types.CommonTx{Nonce: 2, GasLimit: 500_000, To: &senderAddr},
+				ChainID:  *chainID, TipCap: *feeCap, FeeCap: *feeCap,
+			},
+			Authorizations: []types.Authorization{auth},
+		})
+
+		payload, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+		const gasUsedWithoutAuthorityExistenceRefund = uint64(74_603)
+		require.Equal(t, gasUsedWithoutAuthorityExistenceRefund, uint64(payload.ExecutionPayload.GasUsed))
+	})
+}
+
+func TestEngineApiClearsFreshZeroAmountWithdrawal(t *testing.T) {
+	parallel := dbg.Exec3Parallel
+	dbg.Exec3Parallel = true
+	t.Cleanup(func() { dbg.Exec3Parallel = parallel })
+
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlError)
+	genesis, coinbaseKey, err := engineapitester.DefaultEngineApiTesterGenesis()
+	require.NoError(t, err)
+
+	eat, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
+		Logger: logger, DataDir: t.TempDir(), Genesis: genesis, CoinbaseKey: coinbaseKey,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, eat.Close()) })
+
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		fresh := common.Address{0xbe, 0xef}
+		withdrawals := []*types.Withdrawal{{Index: 1, Validator: 1, Address: fresh, Amount: 0}}
+		payload, err := eat.MockCl.BuildCanonicalBlock(ctx, engineapitester.WithWithdrawals(withdrawals))
+		require.NoError(t, err)
+
+		bal := decodeAndValidateBAL(t, payload)
+		changes := findAccountChanges(bal, accounts.InternAddress(fresh))
+		require.NotNilf(t, changes, "zero-amount withdrawal recipient must remain an access-only BAL entry\n%s", bal.DebugString())
+		require.Empty(t, changes.StorageChanges)
+		require.Empty(t, changes.StorageReads)
+		require.Empty(t, changes.BalanceChanges)
+		require.Empty(t, changes.NonceChanges)
+		require.Empty(t, changes.CodeChanges)
+	})
+}
+
+func TestEngineApiBuiltBlockStateMatchesValidation(t *testing.T) {
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
+	eat, err := engineapitester.DefaultEngineApiTester(ctx, logger, t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := eat.Close()
+		require.NoError(t, err)
+	})
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		receiver := common.HexToAddress("0x42")
+		sender := crypto.PubkeyToAddress(eat.CoinbaseKey.PublicKey)
+
+		// Submit transfer.
+		amount := big.NewInt(1_000_000)
+		txn, err := eat.Transactor.SubmitSimpleTransfer(eat.CoinbaseKey, receiver, amount)
+		require.NoError(t, err)
+
+		// Build canonical block (ForkchoiceUpdated + GetPayload + NewPayload + FCU).
+		payload, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+
+		// Verify tx inclusion.
+		err = eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, payload.ExecutionPayload, txn.Hash())
+		require.NoError(t, err)
+
+		// Verify receiver balance via RPC.
+		receiverBalance, err := eat.RpcApiClient.GetBalance(receiver, rpc.LatestBlock)
+		require.NoError(t, err)
+		require.Equal(t, uint256.MustFromBig(amount), receiverBalance)
+
+		// Verify sender nonce via RPC.
+		senderNonce, err := eat.RpcApiClient.GetTransactionCount(sender, rpc.LatestBlock)
+		require.NoError(t, err)
+		require.Equal(t, uint64(1), senderNonce.Uint64())
+	})
+}
+
+func TestEngineApiMultiBlockSequence(t *testing.T) {
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
+	eat, err := engineapitester.DefaultEngineApiTester(ctx, logger, t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := eat.Close()
+		require.NoError(t, err)
+	})
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		receiver := common.HexToAddress("0x42")
+
+		for range 5 {
+			txn, err := eat.Transactor.SubmitSimpleTransfer(eat.CoinbaseKey, receiver, big.NewInt(1000))
+			require.NoError(t, err)
+
+			payload, err := eat.MockCl.BuildCanonicalBlock(ctx)
+			require.NoError(t, err)
+
+			err = eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, payload.ExecutionPayload, txn.Hash())
+			require.NoError(t, err)
+		}
+
+		// Verify cumulative balance.
+		balance, err := eat.RpcApiClient.GetBalance(receiver, rpc.LatestBlock)
+		require.NoError(t, err)
+		require.Equal(t, uint256.NewInt(5000), balance)
+	})
+}
+
+func TestEngineApiEmptyBlockProduction(t *testing.T) {
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
+	eat, err := engineapitester.DefaultEngineApiTester(ctx, logger, t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := eat.Close()
+		require.NoError(t, err)
+	})
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		// Build block with no pending transactions.
+		payload, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+		require.Empty(t, payload.ExecutionPayload.Transactions)
+		// DefaultEngineApiTester already builds 1 empty block, so this is block 2.
+		require.Equal(t, hexutil.Uint64(2), payload.ExecutionPayload.BlockNumber)
+	})
+}
+
+// TestEngineApiBuiltBlockEmptyRequestsHash verifies that a built block with an
+// empty EIP-7685 request set carries empty.RequestsHash (SHA256 of empty input)
+// in its header, not a zero hash.
+func TestEngineApiBuiltBlockEmptyRequestsHash(t *testing.T) {
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
+	eat, err := engineapitester.DefaultEngineApiTester(ctx, logger, t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := eat.Close()
+		require.NoError(t, err)
+	})
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		// An empty block has no deposit/withdrawal/consolidation requests.
+		payload, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+		require.Empty(t, payload.ExecutionPayload.Transactions)
+		require.Empty(t, payload.ExecutionRequests)
+
+		block, err := eat.RpcApiClient.GetBlockByNumber(ctx, rpc.LatestBlockNumber, false)
+		require.NoError(t, err)
+		require.Equal(t, payload.ExecutionPayload.BlockHash, block.Hash)
+		require.NotNil(t, block.RequestsHash)
+		require.Equal(t, empty.RequestsHash, *block.RequestsHash)
+	})
+}
+
+func TestEngineApiBuiltBlockWithContractDeployAndCall(t *testing.T) {
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
+	eat, err := engineapitester.DefaultEngineApiTester(ctx, logger, t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := eat.Close()
+		require.NoError(t, err)
+	})
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		// Deploy Changer contract.
+		transactOpts, err := bind.NewKeyedTransactorWithChainID(eat.CoinbaseKey, eat.ChainId())
+		require.NoError(t, err)
+		transactOpts.GasLimit = params.MaxTxnGasLimit
+
+		_, deployTx, changer, err := contracts.DeployChanger(transactOpts, eat.ContractBackend)
+		require.NoError(t, err)
+
+		// Build block with deployment.
+		payload, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+		err = eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, payload.ExecutionPayload, deployTx.Hash())
+		require.NoError(t, err)
+
+		// Call the Change() method.
+		changeTx, err := changer.Change(transactOpts)
+		require.NoError(t, err)
+
+		// Build block with the call.
+		payload2, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+		err = eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, payload2.ExecutionPayload, changeTx.Hash())
+		require.NoError(t, err)
+	})
+}
+
+func TestEngineApiBuiltBlockReorgRecovery(t *testing.T) {
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
+	eat, err := engineapitester.DefaultEngineApiTester(ctx, logger, t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := eat.Close()
+		require.NoError(t, err)
+	})
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		receiver := common.HexToAddress("0x42")
+
+		// Build canonical block 2 with a transfer.
+		txn, err := eat.Transactor.SubmitSimpleTransfer(eat.CoinbaseKey, receiver, big.NewInt(1000))
+		require.NoError(t, err)
+		b2, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+		err = eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, b2.ExecutionPayload, txn.Hash())
+		require.NoError(t, err)
+
+		// Build canonical block 3 with another transfer.
+		txn2, err := eat.Transactor.SubmitSimpleTransfer(eat.CoinbaseKey, receiver, big.NewInt(2000))
+		require.NoError(t, err)
+		b3, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+		err = eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, b3.ExecutionPayload, txn2.Hash())
+		require.NoError(t, err)
+
+		// Create an invalid fork at block 3 — tamper state root.
+		b3Faulty := engineapitester.TamperMockClPayloadStateRoot(b3, common.HexToHash("0xbad"))
+		status, err := eat.MockCl.InsertNewPayload(ctx, b3Faulty)
+		require.NoError(t, err)
+		require.Equal(t, enginetypes.InvalidStatus, status.Status)
+
+		// Build block 4 on the canonical chain — proves recovery.
+		txn3, err := eat.Transactor.SubmitSimpleTransfer(eat.CoinbaseKey, receiver, big.NewInt(3000))
+		require.NoError(t, err)
+		b4, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+		err = eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, b4.ExecutionPayload, txn3.Hash())
+		require.NoError(t, err)
+
+		// Verify cumulative balance.
+		balance, err := eat.RpcApiClient.GetBalance(receiver, rpc.LatestBlock)
+		require.NoError(t, err)
+		require.Equal(t, uint256.NewInt(6000), balance)
+	})
+}
+
+func TestEngineApiBlockGasOverflowSpillsToNextBlock(t *testing.T) {
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
+	genesis, coinbaseKey, err := engineapitester.DefaultEngineApiTesterGenesis()
+	require.NoError(t, err)
+	genesis.GasLimit = 1_400_000 // ~7 account-creating transfers at ~200K state gas each
+	eat, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
+		Logger:      logger,
+		DataDir:     t.TempDir(),
+		Genesis:     genesis,
+		CoinbaseKey: coinbaseKey,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := eat.Close()
+		require.NoError(t, err)
+	})
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		// Distinct fresh recipients so every transfer is account-creating and costs the same.
+		receivers := make([]common.Address, 10)
+		for i := range receivers {
+			receivers[i] = common.BigToAddress(big.NewInt(int64(0x1000 + i)))
+		}
+		// Submit 10 simple transfers.
+		for _, receiver := range receivers {
+			_, err := eat.Transactor.SubmitSimpleTransfer(eat.CoinbaseKey, receiver, big.NewInt(100))
+			require.NoError(t, err)
+		}
+		// Block 2: gas-limited to 7 of the 10.
+		p1, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+		b2TxCount := len(p1.ExecutionPayload.Transactions)
+		require.Equal(t, 7, b2TxCount)
+		// Block 3: the remaining 3 spill over.
+		p2, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+		b3TxCount := len(p2.ExecutionPayload.Transactions)
+		require.Equal(t, 3, b3TxCount)
+		// All 10 transactions should be included across the 2 blocks.
+		require.Equal(t, 10, b2TxCount+b3TxCount)
+		// Verify cumulative balance across the distinct recipients.
+		total := uint256.NewInt(0)
+		for _, receiver := range receivers {
+			balance, err := eat.RpcApiClient.GetBalance(receiver, rpc.LatestBlock)
+			require.NoError(t, err)
+			total.Add(total, balance)
+		}
+		require.Equal(t, uint256.NewInt(1000), total) // 10 * 100
+	})
+}
+
+// TestEngineApiV4TargetGasLimitOverridesMinerGasLimit checks that a CL-supplied
+// targetGasLimit in PayloadAttributesV4 (engine_forkchoiceUpdatedV4) overrides
+// the EL's static --miner.gaslimit when building a block — and that the
+// resulting block respects the CL target as a cap.
+//
+// Setup picks numbers so the two values produce distinguishable block contents:
+//   - parent gas limit = 490_000 (room for two account-creating transfers)
+//   - static --miner.gaslimit = 225_000 (would cap the block at one transfer)
+//   - CL targetGasLimit = 490_000 (room for two transfers)
+//
+// Three transfers are submitted; only two must fit. If the static target won,
+// the block would gas-limit at ~489_520 and contain a single transfer.
+// See https://github.com/ethereum/execution-apis/pull/796.
+func TestEngineApiV4TargetGasLimitOverridesMinerGasLimit(t *testing.T) {
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
+	const targetGasLimit uint64 = 490_000
+	const minerGasLimit uint64 = 225_000
+	genesis, coinbaseKey, err := engineapitester.DefaultEngineApiTesterGenesis()
+	require.NoError(t, err)
+	genesis.GasLimit = targetGasLimit
+	eat, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
+		Logger:      logger,
+		DataDir:     t.TempDir(),
+		Genesis:     genesis,
+		CoinbaseKey: coinbaseKey,
+		EthConfigTweaker: func(config *ethconfig.Config) {
+			gl := minerGasLimit
+			config.Builder.GasLimit = &gl
+		},
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := eat.Close()
+		require.NoError(t, err)
+	})
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		receivers := []common.Address{
+			common.HexToAddress("0x42"),
+			common.HexToAddress("0x43"),
+			common.HexToAddress("0x44"),
+		}
+		for _, receiver := range receivers {
+			_, err := eat.Transactor.SubmitSimpleTransfer(eat.CoinbaseKey, receiver, big.NewInt(1))
+			require.NoError(t, err)
+		}
+		payload, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+		// Block gas limit follows the CL target — not the EL's --miner.gaslimit.
+		require.Equal(t, hexutil.Uint64(targetGasLimit), payload.ExecutionPayload.GasLimit)
+		require.Len(t, payload.ExecutionPayload.Transactions, 2)
+	})
+}
+
+func TestEngineApiSequentialNonceAdvancement(t *testing.T) {
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
+	eat, err := engineapitester.DefaultEngineApiTester(ctx, logger, t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := eat.Close()
+		require.NoError(t, err)
+	})
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		sender := crypto.PubkeyToAddress(eat.CoinbaseKey.PublicKey)
+		receiver := common.HexToAddress("0x42")
+
+		// Block 2: transfer with nonce 0.
+		txn0, err := eat.Transactor.SubmitSimpleTransfer(eat.CoinbaseKey, receiver, big.NewInt(100))
+		require.NoError(t, err)
+		p1, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+		err = eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, p1.ExecutionPayload, txn0.Hash())
+		require.NoError(t, err)
+
+		// Verify nonce is 1 after block 2.
+		nonce, err := eat.RpcApiClient.GetTransactionCount(sender, rpc.LatestBlock)
+		require.NoError(t, err)
+		require.Equal(t, uint64(1), nonce.Uint64())
+
+		// Block 3: transfer with nonce 1.
+		txn1, err := eat.Transactor.SubmitSimpleTransfer(eat.CoinbaseKey, receiver, big.NewInt(200))
+		require.NoError(t, err)
+		p2, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+		err = eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, p2.ExecutionPayload, txn1.Hash())
+		require.NoError(t, err)
+
+		// Verify nonce is 2 after block 3.
+		nonce, err = eat.RpcApiClient.GetTransactionCount(sender, rpc.LatestBlock)
+		require.NoError(t, err)
+		require.Equal(t, uint64(2), nonce.Uint64())
+
+		// Verify cumulative balance.
+		balance, err := eat.RpcApiClient.GetBalance(receiver, rpc.LatestBlock)
+		require.NoError(t, err)
+		require.Equal(t, uint256.NewInt(300), balance)
+	})
+}
+
+func TestEngineApiMultipleSendersInBlock(t *testing.T) {
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
+	genesis, coinbaseKey, err := engineapitester.DefaultEngineApiTesterGenesis()
+	require.NoError(t, err)
+	secondKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	secondAddr := crypto.PubkeyToAddress(secondKey.PublicKey)
+	genesis.Alloc[secondAddr] = types.GenesisAccount{
+		Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(21), nil), // 1000 ETH
+	}
+
+	eat, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
+		Logger:      logger,
+		DataDir:     t.TempDir(),
+		Genesis:     genesis,
+		CoinbaseKey: coinbaseKey,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := eat.Close()
+		require.NoError(t, err)
+	})
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		receiver := common.HexToAddress("0x42")
+
+		// Submit from coinbase (nonce 0).
+		txn1, err := eat.Transactor.SubmitSimpleTransfer(eat.CoinbaseKey, receiver, big.NewInt(100))
+		require.NoError(t, err)
+		// Submit from second account (nonce 0).
+		txn2, err := eat.Transactor.SubmitSimpleTransfer(secondKey, receiver, big.NewInt(200))
+		require.NoError(t, err)
+
+		// Build block — should include both.
+		payload, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+		err = eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, payload.ExecutionPayload,
+			txn1.Hash(), txn2.Hash())
+		require.NoError(t, err)
+
+		// Verify cumulative balance.
+		balance, err := eat.RpcApiClient.GetBalance(receiver, rpc.LatestBlock)
+		require.NoError(t, err)
+		require.Equal(t, uint256.NewInt(300), balance)
+
+		// Verify both sender nonces advanced.
+		coinbaseNonce, err := eat.RpcApiClient.GetTransactionCount(
+			crypto.PubkeyToAddress(eat.CoinbaseKey.PublicKey), rpc.LatestBlock,
+		)
+		require.NoError(t, err)
+		require.Equal(t, uint64(1), coinbaseNonce.Uint64())
+
+		secondNonce, err := eat.RpcApiClient.GetTransactionCount(secondAddr, rpc.LatestBlock)
+		require.NoError(t, err)
+		require.Equal(t, uint64(1), secondNonce.Uint64())
+	})
+}
+
+func TestEngineApiHighGasContractsFillBlock(t *testing.T) {
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
+	genesis, coinbaseKey, err := engineapitester.DefaultEngineApiTesterGenesis()
+	require.NoError(t, err)
+	genesis.Config.AmsterdamTime = nil // EIP-8037 state gas changes intrinsic costs; test pre-Amsterdam
+	genesis.GasLimit = 200_000         // tight budget for contracts + transfers
+	eat, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
+		Logger:      logger,
+		DataDir:     t.TempDir(),
+		Genesis:     genesis,
+		CoinbaseKey: coinbaseKey,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := eat.Close()
+		require.NoError(t, err)
+	})
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		transactOpts, err := bind.NewKeyedTransactorWithChainID(eat.CoinbaseKey, eat.ChainId())
+		require.NoError(t, err)
+		transactOpts.GasLimit = 100_000 // contract deploy ~53K+
+
+		// Deploy 2 contracts (~106K gas) + 1 transfer (21K) ≈ 127K.
+		// With system call overhead, this should leave little room.
+		_, deployTx1, _, err := contracts.DeployChanger(transactOpts, eat.ContractBackend)
+		require.NoError(t, err)
+		_, deployTx2, _, err := contracts.DeployChanger(transactOpts, eat.ContractBackend)
+		require.NoError(t, err)
+
+		receiver := common.HexToAddress("0x42")
+		transfer1, err := eat.Transactor.SubmitSimpleTransfer(eat.CoinbaseKey, receiver, big.NewInt(500))
+		require.NoError(t, err)
+		// This transfer may or may not fit in the same block.
+		transfer2, err := eat.Transactor.SubmitSimpleTransfer(eat.CoinbaseKey, receiver, big.NewInt(500))
+		require.NoError(t, err)
+
+		// Build block 2.
+		p1, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+		b2TxCount := len(p1.ExecutionPayload.Transactions)
+		t.Logf("block 2: %d transactions", b2TxCount)
+
+		// Build block 3 for any spillover.
+		p2, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+		b3TxCount := len(p2.ExecutionPayload.Transactions)
+		t.Logf("block 3: %d transactions", b3TxCount)
+
+		// All 4 txns should be included across the 2 blocks.
+		totalTxCount := b2TxCount + b3TxCount
+		require.Equal(t, 4, totalTxCount)
+
+		// Verify all txns included across both blocks.
+		allTxHashes := []common.Hash{deployTx1.Hash(), deployTx2.Hash(), transfer1.Hash(), transfer2.Hash()}
+		for _, h := range allTxHashes {
+			err1 := eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, p1.ExecutionPayload, h)
+			err2 := eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, p2.ExecutionPayload, h)
+			require.True(t, err1 == nil || err2 == nil, "tx %s not found in either block", h.Hex())
+		}
+
+		// Verify receiver balance.
+		balance, err := eat.RpcApiClient.GetBalance(receiver, rpc.LatestBlock)
+		require.NoError(t, err)
+		require.Equal(t, uint256.NewInt(1000), balance) // 500 + 500
+	})
+}
+
+// TestEngineApiBuiltBlockWithWithdrawalRequest sends a transaction to the EIP-7002
+// withdrawal request system contract and verifies the builder produces a block that
+// passes validation via NewPayload (ExecV3). This exercises the builder's state root
+// computation when system calls during finalization read state written by user txns.
+func TestEngineApiBuiltBlockWithWithdrawalRequest(t *testing.T) {
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
+	eat, err := engineapitester.DefaultEngineApiTester(ctx, logger, t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := eat.Close()
+		require.NoError(t, err)
+	})
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		sender := crypto.PubkeyToAddress(eat.CoinbaseKey.PublicKey)
+
+		// Build calldata: 48-byte validator pubkey + 8-byte amount (little-endian).
+		// Use a fake pubkey (all 0x01) and amount=0 (full exit).
+		var calldata []byte
+		pubkey := make([]byte, 48)
+		for i := range pubkey {
+			pubkey[i] = 0x01
+		}
+		amount := make([]byte, 8) // 0 = full exit
+		calldata = append(calldata, pubkey...)
+		calldata = append(calldata, amount...)
+
+		// Get current nonce and gas price.
+		nonce, err := eat.RpcApiClient.GetTransactionCount(sender, rpc.PendingBlock)
+		require.NoError(t, err)
+		gasPrice, err := eat.RpcApiClient.GasPrice()
+		require.NoError(t, err)
+
+		// Send tx to withdrawal request contract with 0.5 ETH.
+		withdrawalRequestAddr := params.WithdrawalRequestAddress.Value()
+		txn := &types.LegacyTx{
+			CommonTx: types.CommonTx{
+				Nonce:    nonce.Uint64(),
+				GasLimit: 1_000_000,
+				To:       &withdrawalRequestAddr,
+				Value:    *uint256.NewInt(500_000_000_000_000_000), // 0.5 ETH
+				Data:     calldata,
+			},
+			GasPrice: *gasPrice,
+		}
+		signer := types.LatestSignerForChainID(eat.ChainConfig.ChainID)
+		signedTxn, err := types.SignTx(txn, *signer, eat.CoinbaseKey)
+		require.NoError(t, err)
+
+		_, err = eat.RpcApiClient.SendTransaction(signedTxn)
+		require.NoError(t, err)
+
+		// Build canonical block — this builds via the builder AND validates via NewPayload.
+		// If the builder's ComputeCommitment produces a different state root than ExecV3,
+		// InsertNewPayload will return INVALID and BuildCanonicalBlock will fail.
+		payload, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+
+		// Verify the withdrawal request tx was included.
+		err = eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, payload.ExecutionPayload, signedTxn.Hash())
+		require.NoError(t, err)
+
+		// Verify execution requests are present in the payload (Prague includes withdrawal requests).
+		require.NotNil(t, payload.ExecutionRequests)
+
+		// Verify withdrawal request content — the system contract should have
+		// dequeued the request we submitted and included it in the block.
+		var foundWithdrawalRequest bool
+		for _, req := range payload.ExecutionRequests {
+			if len(req) == 0 || req[0] != types.WithdrawalRequestType {
+				continue
+			}
+			requestData := []byte(req[1:])
+			// A withdrawal request is: 20-byte source address + 48-byte pubkey + 8-byte LE amount.
+			require.Equal(t, types.WithdrawalRequestDataLen, len(requestData),
+				"withdrawal request should be exactly %d bytes", types.WithdrawalRequestDataLen)
+
+			sourceAddr := common.BytesToAddress(requestData[:20])
+			gotPubkey := requestData[20:68]
+			gotAmount := binary.LittleEndian.Uint64(requestData[68:76])
+
+			require.Equal(t, sender, sourceAddr,
+				"withdrawal request source address should be the sender")
+			require.Equal(t, pubkey, gotPubkey,
+				"withdrawal request pubkey should match the one we sent")
+			require.Equal(t, uint64(0), gotAmount,
+				"withdrawal request amount should be 0 (full exit)")
+			foundWithdrawalRequest = true
+		}
+		require.True(t, foundWithdrawalRequest,
+			"should find at least one withdrawal request in execution requests")
+	})
+}
+
+// TestEngineApiBALGlamsterdamCreate2OntoFundedAddress pins block-access-list
+// consistency for the glamsterdam-devnet-5 invalid-block pattern: a Disperse
+// contract credits many still-empty addresses, then a Gnosis-Safe-style Proxy is
+// CREATE2-deployed onto each in the same block. Creation preserves the balance, so
+// the credit is the only balance change; the builder's embedded BAL must match the
+// parallel validator's recomputed one, or BuildCanonicalBlock fails with a BAL
+// mismatch. Independent senders let the parallel executor race each credit against
+// its reincarnation.
+func TestEngineApiBALGlamsterdamCreate2OntoFundedAddress(t *testing.T) {
+	if !dbg.Exec3Parallel {
+		t.Skip("requires parallel exec")
+	}
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlInfo)
+	const numProxies = 12
+	genesis, coinbaseKey, err := engineapitester.DefaultEngineApiTesterGenesis()
+	require.NoError(t, err)
+	fund := new(big.Int).Exp(big.NewInt(10), big.NewInt(20), nil)
+	disperserKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	genesis.Alloc[crypto.PubkeyToAddress(disperserKey.PublicKey)] = types.GenesisAccount{Balance: fund}
+	deployerKeys := make([]*ecdsa.PrivateKey, numProxies)
+	for i := range deployerKeys {
+		deployerKeys[i], err = crypto.GenerateKey()
+		require.NoError(t, err)
+		genesis.Alloc[crypto.PubkeyToAddress(deployerKeys[i].PublicKey)] = types.GenesisAccount{Balance: fund}
+	}
+	eat, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
+		Logger: logger, DataDir: t.TempDir(), Genesis: genesis, CoinbaseKey: coinbaseKey,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, eat.Close()) })
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		chainID := eat.ChainId()
+		disperse, factory, factoryAddr := deployBALWorkloadContracts(ctx, t, eat)
+		// Proxy carries no constructor args, so its CREATE2 init code is exactly
+		// ProxyBin and each proxy address is deterministic from factory and salt.
+		proxyInit := common.FromHex(contracts.ProxyBin)
+		proxies := make([]common.Address, numProxies)
+		salts := make([][32]byte, numProxies)
+		recipients := make([]common.Address, numProxies)
+		values := make([]*big.Int, numProxies)
+		for i := range proxies {
+			salts[i][31] = byte(i + 1)
+			proxies[i] = create2Addr(factoryAddr, salts[i], proxyInit)
+			recipients[i] = proxies[i]
+			values[i] = creditWei.ToBig()
+		}
+		// The proxies must be funded while still empty, before CREATE2 in the same block.
+		// Nonces do not enforce order across independent senders, so funding has a higher fee.
+		disperseAuth, err := bind.NewKeyedTransactorWithChainID(disperserKey, chainID)
+		require.NoError(t, err)
+		disperseAuth.GasLimit = 3_000_000
+		disperseAuth.GasPrice = big.NewInt(4_000_000_000)
+		disperseAuth.Value = new(big.Int).Mul(creditWei.ToBig(), big.NewInt(numProxies))
+		for i := range proxies {
+			deployAuth, err := bind.NewKeyedTransactorWithChainID(deployerKeys[i], chainID)
+			require.NoError(t, err)
+			deployAuth.GasLimit = 500_000
+			deployAuth.GasPrice = big.NewInt(3_000_000_000)
+			_, err = factory.CreateProxy(deployAuth, salts[i])
+			require.NoError(t, err)
+		}
+		// Submit funding last to verify that fees enforce the required block order.
+		_, err = disperse.DisperseEther(disperseAuth, recipients, values)
+		require.NoError(t, err)
+		payload, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err, "proposer vs validator BAL mismatch: disperse credit + same-block CREATE2 of funded proxies")
+		bal := decodeAndValidateBAL(t, payload)
+		for _, proxy := range proxies {
+			requireProxyCreditPreserved(t, eat, bal, proxy)
+		}
+	})
+}
+
+// TestEngineApiEIP8246PreservedBalanceSurvivesCreate2Recreate builds one block
+// with two calls to SelfDestructFactory using the same salt: each CREATE2-
+// deploys SelfDestructInConstructor, whose constructor self-destructs to
+// itself, so under EIP-8246 the first call leaves a balance-only account and
+// the second re-creates over it with more value. The assembler runs both txs
+// on one shared IntraBlockState, so a stale selfdestructed marker from tx1
+// would drop the preserved balance in tx2's CREATE2 and produce an invalid
+// block: newPayload validation (fresh state per tx) computes the preserved sum
+// and rejects the assembled root.
+func TestEngineApiEIP8246PreservedBalanceSurvivesCreate2Recreate(t *testing.T) {
+	if !dbg.Exec3Parallel {
+		t.Skip("requires parallel exec")
+	}
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
+	senderKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	senderAddr := crypto.PubkeyToAddress(senderKey.PublicKey)
+	genesis, coinbaseKey, err := engineapitester.DefaultEngineApiTesterGenesis()
+	require.NoError(t, err)
+	genesis.Alloc[senderAddr] = types.GenesisAccount{
+		Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(20), nil), // 100 ETH
+	}
+	eat, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
+		Logger:      logger,
+		DataDir:     t.TempDir(),
+		Genesis:     genesis,
+		CoinbaseKey: coinbaseKey,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := eat.Close()
+		require.NoError(t, err)
+	})
+	valueTx1 := big.NewInt(1_000_000)
+	valueTx2 := big.NewInt(500_000)
+	salt := [32]byte{0x82, 0x46}
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		chainID := eat.ChainId()
+		factoryAuth, err := bind.NewKeyedTransactorWithChainID(eat.CoinbaseKey, chainID)
+		require.NoError(t, err)
+		factoryAuth.GasLimit = params.MaxTxnGasLimit
+		factoryAddr, _, factory, err := contracts.DeploySelfDestructFactory(factoryAuth, eat.ContractBackend)
+		require.NoError(t, err)
+		_, err = eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+		deployAuth, err := bind.NewKeyedTransactorWithChainID(senderKey, chainID)
+		require.NoError(t, err)
+		deployAuth.GasLimit = 1_000_000
+		deployAuth.Value = valueTx1
+		txn1, err := factory.Deploy(deployAuth, salt)
+		require.NoError(t, err)
+		deployAuth.Value = valueTx2
+		txn2, err := factory.Deploy(deployAuth, salt)
+		require.NoError(t, err)
+		payload, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err, "assembled block must validate: a dropped preserved balance surfaces as an INVALID payload")
+		err = eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, payload.ExecutionPayload, txn1.Hash(), txn2.Hash())
+		require.NoError(t, err)
+		createdAddr := create2Addr(factoryAddr, salt, common.FromHex(contracts.SelfDestructInConstructorBin))
+		balance, err := eat.RpcApiClient.GetBalance(createdAddr, rpc.LatestBlock)
+		require.NoError(t, err)
+		expected := uint256.MustFromBig(new(big.Int).Add(valueTx1, valueTx2))
+		require.Equal(t, expected, balance,
+			"EIP-8246: tx1's preserved balance must survive tx2's CREATE2 at the same address")
+		code, err := eat.RpcApiClient.GetCode(createdAddr, rpc.LatestBlock)
+		require.NoError(t, err)
+		require.Empty(t, code, "the self-destructed account is balance-only")
+	})
+}
+
+func TestEngineApiAccountLifecycleFinalizationConsistency(t *testing.T) {
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
+	genesis, coinbaseKey, err := engineapitester.DefaultEngineApiTesterGenesis()
+	require.NoError(t, err)
+	genesis.Config.AmsterdamTime = nil
+
+	salt := [32]byte{}
+	factoryAddr := types.CreateAddress(crypto.PubkeyToAddress(coinbaseKey.PublicKey), 0)
+	coinbase := create2Addr(factoryAddr, salt, common.FromHex(contracts.SelfDestructInConstructorBin))
+	genesis.Coinbase = coinbase
+
+	senderKeys := make([]*ecdsa.PrivateKey, 3)
+	funds := new(big.Int).Exp(big.NewInt(10), big.NewInt(20), nil)
+	for i := range senderKeys {
+		senderKeys[i], err = crypto.GenerateKey()
+		require.NoError(t, err)
+		genesis.Alloc[crypto.PubkeyToAddress(senderKeys[i].PublicKey)] = types.GenesisAccount{Balance: funds}
+	}
+
+	eat, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
+		Logger: logger, DataDir: t.TempDir(), Genesis: genesis, CoinbaseKey: coinbaseKey,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, eat.Close()) })
+
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		chainID := eat.ChainId()
+		deployAuth, err := bind.NewKeyedTransactorWithChainID(coinbaseKey, chainID)
+		require.NoError(t, err)
+		deployAuth.GasLimit = params.MaxTxnGasLimit
+		deployedFactoryAddr, _, factory, err := contracts.DeploySelfDestructFactory(deployAuth, eat.ContractBackend)
+		require.NoError(t, err)
+		require.Equal(t, factoryAddr, deployedFactoryAddr)
+		_, err = eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+
+		disperseAuth, err := bind.NewKeyedTransactorWithChainID(coinbaseKey, chainID)
+		require.NoError(t, err)
+		disperseAuth.GasLimit = params.MaxTxnGasLimit
+		_, _, disperse, err := contracts.DeployDisperse(disperseAuth, eat.ContractBackend)
+		require.NoError(t, err)
+		_, err = eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+
+		destroyAuth, err := bind.NewKeyedTransactorWithChainID(senderKeys[0], chainID)
+		require.NoError(t, err)
+		destroyAuth.GasLimit = 1_000_000
+		destroyAuth.GasPrice = big.NewInt(5_000_000_000)
+		destroyTx, err := factory.Deploy(destroyAuth, salt)
+		require.NoError(t, err)
+
+		fundAuth, err := bind.NewKeyedTransactorWithChainID(senderKeys[1], chainID)
+		require.NoError(t, err)
+		fundAuth.GasLimit = 1_000_000
+		fundAuth.GasPrice = big.NewInt(4_000_000_000)
+		fundAuth.Value = big.NewInt(7)
+		fundTx, err := disperse.DisperseEther(fundAuth, []common.Address{coinbase}, []*big.Int{big.NewInt(7)})
+		require.NoError(t, err)
+
+		recreateAuth, err := bind.NewKeyedTransactorWithChainID(senderKeys[2], chainID)
+		require.NoError(t, err)
+		recreateAuth.GasLimit = 1_000_000
+		recreateAuth.GasPrice = big.NewInt(3_000_000_000)
+		recreateTx, err := factory.Deploy(recreateAuth, salt)
+		require.NoError(t, err)
+
+		payload, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+		gotHashes := make([]common.Hash, len(payload.ExecutionPayload.Transactions))
+		for i, encoded := range payload.ExecutionPayload.Transactions {
+			txn, err := types.DecodeTransaction(encoded)
+			require.NoError(t, err)
+			gotHashes[i] = txn.Hash()
+		}
+		require.Equal(t, []common.Hash{destroyTx.Hash(), fundTx.Hash(), recreateTx.Hash()}, gotHashes)
+	})
+}
+
+// TestEngineApiAccountLifecycleFinalizationConsistencyEIP8246 is the Amsterdam
+// counterpart of TestEngineApiAccountLifecycleFinalizationConsistency. Under
+// EIP-8246 a self-destructed account that still holds a balance is preserved
+// (balance-only) rather than deleted, so the tip credited to a same-block
+// created+self-destructed coinbase must survive — the builder and the parallel
+// validator must still agree on the assembled block.
+func TestEngineApiAccountLifecycleFinalizationConsistencyEIP8246(t *testing.T) {
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
+	genesis, coinbaseKey, err := engineapitester.DefaultEngineApiTesterGenesis()
+	require.NoError(t, err)
+	require.NotNil(t, genesis.Config.AmsterdamTime, "genesis must keep Amsterdam enabled to exercise the EIP-8246 path")
+
+	salt := [32]byte{}
+	factoryAddr := types.CreateAddress(crypto.PubkeyToAddress(coinbaseKey.PublicKey), 0)
+	coinbase := create2Addr(factoryAddr, salt, common.FromHex(contracts.SelfDestructInConstructorBin))
+	genesis.Coinbase = coinbase
+
+	senderKeys := make([]*ecdsa.PrivateKey, 3)
+	funds := new(big.Int).Exp(big.NewInt(10), big.NewInt(20), nil)
+	for i := range senderKeys {
+		senderKeys[i], err = crypto.GenerateKey()
+		require.NoError(t, err)
+		genesis.Alloc[crypto.PubkeyToAddress(senderKeys[i].PublicKey)] = types.GenesisAccount{Balance: funds}
+	}
+
+	eat, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
+		Logger: logger, DataDir: t.TempDir(), Genesis: genesis, CoinbaseKey: coinbaseKey,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, eat.Close()) })
+
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		chainID := eat.ChainId()
+		deployAuth, err := bind.NewKeyedTransactorWithChainID(coinbaseKey, chainID)
+		require.NoError(t, err)
+		deployAuth.GasLimit = params.MaxTxnGasLimit
+		deployedFactoryAddr, _, factory, err := contracts.DeploySelfDestructFactory(deployAuth, eat.ContractBackend)
+		require.NoError(t, err)
+		require.Equal(t, factoryAddr, deployedFactoryAddr)
+		_, err = eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+
+		disperseAuth, err := bind.NewKeyedTransactorWithChainID(coinbaseKey, chainID)
+		require.NoError(t, err)
+		disperseAuth.GasLimit = params.MaxTxnGasLimit
+		_, _, disperse, err := contracts.DeployDisperse(disperseAuth, eat.ContractBackend)
+		require.NoError(t, err)
+		_, err = eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+
+		destroyAuth, err := bind.NewKeyedTransactorWithChainID(senderKeys[0], chainID)
+		require.NoError(t, err)
+		destroyAuth.GasLimit = 1_000_000
+		destroyAuth.GasPrice = big.NewInt(5_000_000_000)
+		destroyTx, err := factory.Deploy(destroyAuth, salt)
+		require.NoError(t, err)
+
+		fundAuth, err := bind.NewKeyedTransactorWithChainID(senderKeys[1], chainID)
+		require.NoError(t, err)
+		fundAuth.GasLimit = 1_000_000
+		fundAuth.GasPrice = big.NewInt(4_000_000_000)
+		fundAuth.Value = big.NewInt(7)
+		fundTx, err := disperse.DisperseEther(fundAuth, []common.Address{coinbase}, []*big.Int{big.NewInt(7)})
+		require.NoError(t, err)
+
+		recreateAuth, err := bind.NewKeyedTransactorWithChainID(senderKeys[2], chainID)
+		require.NoError(t, err)
+		recreateAuth.GasLimit = 1_000_000
+		recreateAuth.GasPrice = big.NewInt(3_000_000_000)
+		recreateTx, err := factory.Deploy(recreateAuth, salt)
+		require.NoError(t, err)
+
+		payload, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+		gotHashes := make([]common.Hash, len(payload.ExecutionPayload.Transactions))
+		for i, encoded := range payload.ExecutionPayload.Transactions {
+			txn, err := types.DecodeTransaction(encoded)
+			require.NoError(t, err)
+			gotHashes[i] = txn.Hash()
+		}
+		require.Equal(t, []common.Hash{destroyTx.Hash(), fundTx.Hash(), recreateTx.Hash()}, gotHashes)
+
+		// EIP-8246: the created+self-destructed+recreated coinbase is preserved as
+		// a balance-only account (empty code, non-zero accrued tips + funding), so
+		// the delayed tip is credited rather than burned.
+		code, err := eat.RpcApiClient.GetCode(coinbase, rpc.LatestBlock)
+		require.NoError(t, err)
+		require.Empty(t, code, "EIP-8246: self-destructed coinbase is balance-only")
+		balance, err := eat.RpcApiClient.GetBalance(coinbase, rpc.LatestBlock)
+		require.NoError(t, err)
+		require.Positive(t, balance.Sign(), "EIP-8246: coinbase tip must be preserved, not burned")
+	})
+}
+
+// TestParallelCreate2RecreateRace stresses the parallel executor's account
+// create/self-destruct/recreate lifecycle: each block, several senders CREATE2 a
+// self-destruct-in-constructor contract at a per-sender salt (net absent after
+// the tx), recreating the same address every block, while other senders send txs
+// that touch those addresses. A read that races ahead of the create/destruct
+// write commits a stale account state -> wrong trie root -> INVALID.
+func TestParallelCreate2RecreateRace(t *testing.T) {
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlError)
+	genesis, coinbaseKey, err := engineapitester.DefaultEngineApiTesterGenesis()
+	require.NoError(t, err)
+	genesis.Config.AmsterdamTime = nil
+
+	const nSenders = 6
+	senderKeys := make([]*ecdsa.PrivateKey, nSenders)
+	readerKeys := make([]*ecdsa.PrivateKey, nSenders)
+	funds := new(big.Int).Exp(big.NewInt(10), big.NewInt(22), nil)
+	for i := range senderKeys {
+		senderKeys[i], err = crypto.GenerateKey()
+		require.NoError(t, err)
+		genesis.Alloc[crypto.PubkeyToAddress(senderKeys[i].PublicKey)] = types.GenesisAccount{Balance: funds}
+		readerKeys[i], err = crypto.GenerateKey()
+		require.NoError(t, err)
+		genesis.Alloc[crypto.PubkeyToAddress(readerKeys[i].PublicKey)] = types.GenesisAccount{Balance: funds}
+	}
+
+	eat, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
+		Logger: logger, DataDir: t.TempDir(), Genesis: genesis, CoinbaseKey: coinbaseKey,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, eat.Close()) })
+
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		chainID := eat.ChainId()
+		deployAuth, err := bind.NewKeyedTransactorWithChainID(coinbaseKey, chainID)
+		require.NoError(t, err)
+		deployAuth.GasLimit = params.MaxTxnGasLimit
+		factoryAddr, _, factory, err := contracts.DeploySelfDestructFactory(deployAuth, eat.ContractBackend)
+		require.NoError(t, err)
+		_, err = eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+
+		// Precompute each sender's CREATE2 target address (factory + per-sender salt).
+		targets := make([]common.Address, nSenders)
+		salts := make([][32]byte, nSenders)
+		for i := range senderKeys {
+			salts[i][31] = byte(i + 1)
+			targets[i] = create2Addr(factoryAddr, salts[i], common.FromHex(contracts.SelfDestructInConstructorBin))
+		}
+
+		const nBlocks = 60
+		for range nBlocks {
+			for i, sk := range senderKeys {
+				// Recreate A_i (create + self-destruct in constructor => net absent).
+				depAuth, err := bind.NewKeyedTransactorWithChainID(sk, chainID)
+				require.NoError(t, err)
+				depAuth.GasLimit = 1_000_000
+				depAuth.GasPrice = big.NewInt(5_000_000_000)
+				_, err = factory.Deploy(depAuth, salts[i])
+				require.NoError(t, err)
+
+				// A different sender sends a value tx to this target, reading that
+				// address's account state the same block it is created+destructed
+				// by its deploy tx.
+				readAuth, err := bind.NewKeyedTransactorWithChainID(readerKeys[i], chainID)
+				require.NoError(t, err)
+				readAuth.GasLimit = 100_000
+				readAuth.GasPrice = big.NewInt(3_000_000_000)
+				bound := bind.NewBoundContract(targets[i], abi.ABI{}, eat.ContractBackend, eat.ContractBackend, eat.ContractBackend)
+				_, err = bound.RawTransact(readAuth, nil)
+				require.NoError(t, err)
+			}
+			_, err := eat.MockCl.BuildCanonicalBlock(ctx)
+			require.NoError(t, err)
+		}
+	})
+}
+
+// TestParallelSelfDestructReviveRace stresses the create+self-destruct+revive
+// lifecycle: each block a sender CREATE2s a self-destruct-in-constructor contract
+// at a per-sender salt (net absent), while another sender sends value to that same
+// address the same block — reviving it as a balance-only account above the
+// destruct. A read that races the create/destruct/revive writes must converge, not
+// invalidate forever.
+func TestParallelSelfDestructReviveRace(t *testing.T) {
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlError)
+	genesis, coinbaseKey, err := engineapitester.DefaultEngineApiTesterGenesis()
+	require.NoError(t, err)
+	genesis.Config.AmsterdamTime = nil
+
+	const nSenders = 6
+	senderKeys := make([]*ecdsa.PrivateKey, nSenders)
+	reviverKeys := make([]*ecdsa.PrivateKey, nSenders)
+	funds := new(big.Int).Exp(big.NewInt(10), big.NewInt(22), nil)
+	for i := range senderKeys {
+		senderKeys[i], err = crypto.GenerateKey()
+		require.NoError(t, err)
+		genesis.Alloc[crypto.PubkeyToAddress(senderKeys[i].PublicKey)] = types.GenesisAccount{Balance: funds}
+		reviverKeys[i], err = crypto.GenerateKey()
+		require.NoError(t, err)
+		genesis.Alloc[crypto.PubkeyToAddress(reviverKeys[i].PublicKey)] = types.GenesisAccount{Balance: funds}
+	}
+
+	eat, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
+		Logger: logger, DataDir: t.TempDir(), Genesis: genesis, CoinbaseKey: coinbaseKey,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, eat.Close()) })
+
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		chainID := eat.ChainId()
+		deployAuth, err := bind.NewKeyedTransactorWithChainID(coinbaseKey, chainID)
+		require.NoError(t, err)
+		deployAuth.GasLimit = params.MaxTxnGasLimit
+		factoryAddr, _, factory, err := contracts.DeploySelfDestructFactory(deployAuth, eat.ContractBackend)
+		require.NoError(t, err)
+		_, err = eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+
+		targets := make([]common.Address, nSenders)
+		salts := make([][32]byte, nSenders)
+		for i := range senderKeys {
+			salts[i][31] = byte(i + 1)
+			targets[i] = create2Addr(factoryAddr, salts[i], common.FromHex(contracts.SelfDestructInConstructorBin))
+		}
+
+		const nBlocks = 60
+		for range nBlocks {
+			for i, sk := range senderKeys {
+				depAuth, err := bind.NewKeyedTransactorWithChainID(sk, chainID)
+				require.NoError(t, err)
+				depAuth.GasLimit = 1_000_000
+				depAuth.GasPrice = big.NewInt(5_000_000_000)
+				_, err = factory.Deploy(depAuth, salts[i])
+				require.NoError(t, err)
+
+				// Revive the create+self-destructed target as a balance-only account.
+				revAuth, err := bind.NewKeyedTransactorWithChainID(reviverKeys[i], chainID)
+				require.NoError(t, err)
+				revAuth.GasLimit = 100_000
+				revAuth.GasPrice = big.NewInt(3_000_000_000)
+				revAuth.Value = big.NewInt(3)
+				bound := bind.NewBoundContract(targets[i], abi.ABI{}, eat.ContractBackend, eat.ContractBackend, eat.ContractBackend)
+				_, err = bound.RawTransact(revAuth, nil)
+				require.NoError(t, err)
+			}
+			_, err := eat.MockCl.BuildCanonicalBlock(ctx)
+			require.NoErrorf(t, err, "block build/validate failed")
+		}
+	})
+}
+
+// creditWei is the fixed amount dispersed to each proxy while it is still empty
+// (0.000256 ETH, the constant seen on glamsterdam-devnet-5).
+var creditWei = uint256.NewInt(256_000_000_000_000)
+
+func deployBALWorkloadContracts(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) (*contracts.Disperse, *contracts.ProxyFactory, common.Address) {
+	t.Helper()
+	chainID := eat.ChainId()
+	disperseAuth, err := bind.NewKeyedTransactorWithChainID(eat.CoinbaseKey, chainID)
+	require.NoError(t, err)
+	disperseAuth.GasLimit = params.MaxTxnGasLimit
+	disperseAddr, _, disperse, err := contracts.DeployDisperse(disperseAuth, eat.ContractBackend)
+	require.NoError(t, err)
+	_, err = eat.MockCl.BuildCanonicalBlock(ctx)
+	require.NoError(t, err)
+	factoryAuth, err := bind.NewKeyedTransactorWithChainID(eat.CoinbaseKey, chainID)
+	require.NoError(t, err)
+	factoryAuth.GasLimit = params.MaxTxnGasLimit
+	factoryAddr, _, factory, err := contracts.DeployProxyFactory(factoryAuth, eat.ContractBackend)
+	require.NoError(t, err)
+	_, err = eat.MockCl.BuildCanonicalBlock(ctx)
+	require.NoError(t, err)
+	disperseCode, err := eat.RpcApiClient.GetCode(disperseAddr, rpc.LatestBlock)
+	require.NoError(t, err)
+	require.NotEmpty(t, disperseCode, "disperse must be deployed")
+	factoryCode, err := eat.RpcApiClient.GetCode(factoryAddr, rpc.LatestBlock)
+	require.NoError(t, err)
+	require.NotEmpty(t, factoryCode, "factory must be deployed")
+	return disperse, factory, factoryAddr
+}
+
+func requireProxyCreditPreserved(t *testing.T, eat engineapitester.EngineApiTester, bal types.BlockAccessList, proxy common.Address) {
+	t.Helper()
+	onChain, err := eat.RpcApiClient.GetBalance(proxy, rpc.LatestBlock)
+	require.NoError(t, err)
+	require.Equalf(t, creditWei, onChain, "proxy %s must retain the dispersed credit", proxy)
+	code, err := eat.RpcApiClient.GetCode(proxy, rpc.LatestBlock)
+	require.NoError(t, err)
+	require.NotEmptyf(t, code, "proxy %s must be CREATE2-deployed", proxy)
+	cc := findAccountChanges(bal, accounts.InternAddress(proxy))
+	require.NotNilf(t, cc, "proxy %s missing from BAL\n%s", proxy, bal.DebugString())
+	credit := lastBalanceChange(cc)
+	require.NotNilf(t, credit, "proxy %s has no balance change in BAL (credit dropped)\n%s", proxy, bal.DebugString())
+	require.Truef(t, credit.Value.Eq(onChain), "proxy %s BAL balance %s != on-chain %s\n%s", proxy, credit.Value.Hex(), onChain.Hex(), bal.DebugString())
+	require.NotEmptyf(t, cc.CodeChanges, "proxy %s missing code change\n%s", proxy, bal.DebugString())
+	require.Lessf(t, credit.Index, cc.CodeChanges[0].Index, "proxy %s credit must precede its CREATE2 deploy\n%s", proxy, bal.DebugString())
+}
+
+func create2Addr(factory common.Address, salt [32]byte, initCode []byte) common.Address {
+	buf := make([]byte, 0, 85)
+	buf = append(buf, 0xff)
+	buf = append(buf, factory[:]...)
+	buf = append(buf, salt[:]...)
+	buf = append(buf, crypto.Keccak256(initCode)...)
+	return common.BytesToAddress(crypto.Keccak256(buf)[12:])
+}
+
+func lastBalanceChange(ac *types.AccountChanges) *types.BalanceChange {
+	var last *types.BalanceChange
+	for _, b := range ac.BalanceChanges {
+		if b != nil && (last == nil || b.Index >= last.Index) {
+			last = b
+		}
+	}
+	return last
+}
+
+// TestParallelBeaconRootReadRace reproduces a non-deterministic parallel-exec
+// consensus failure: the EIP-4788 block-init syscall (TxIndex -1) writes the
+// beacon-root ring-buffer slots for this block; a same-block user tx that reads
+// those slots must observe the block-init write, not the previous block's
+// committed value. When the read races ahead of the block-init write and the
+// stale base read is not caught, the tx consumes different gas and the block
+// gets a wrong trie root -> INSERT returns non-VALID. Each block's txs query the
+// current block's own timestamp so they read exactly the slots block-init wrote.
+func TestParallelBeaconRootReadRace(t *testing.T) {
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlError)
+	genesis, coinbaseKey, err := engineapitester.DefaultEngineApiTesterGenesis()
+	require.NoError(t, err)
+	// Run pre-Amsterdam (no BAL) to match the failing eest forks (Cancun/Prague/
+	// Osaka), where the versionMap is not BAL-pre-populated.
+	genesis.Config.AmsterdamTime = nil
+
+	const nSenders = 8
+	senderKeys := make([]*ecdsa.PrivateKey, nSenders)
+	funds := new(big.Int).Exp(big.NewInt(10), big.NewInt(22), nil)
+	for i := range senderKeys {
+		senderKeys[i], err = crypto.GenerateKey()
+		require.NoError(t, err)
+		genesis.Alloc[crypto.PubkeyToAddress(senderKeys[i].PublicKey)] = types.GenesisAccount{Balance: funds}
+	}
+
+	eat, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
+		Logger: logger, DataDir: t.TempDir(), Genesis: genesis, CoinbaseKey: coinbaseKey,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, eat.Close()) })
+
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		chainID := eat.ChainId()
+		beaconAddr := common.HexToAddress("0x000F3df6D732807Ef1319fB7B8bB8522d0Beac02")
+		bound := bind.NewBoundContract(beaconAddr, abi.ABI{}, eat.ContractBackend, eat.ContractBackend, eat.ContractBackend)
+
+		const nBlocks = 80
+		ts := uint64(1_700_000_000)
+		for b := range nBlocks {
+			ts += 12
+			calldata := make([]byte, 32)
+			binary.BigEndian.PutUint64(calldata[24:], ts)
+			for _, sk := range senderKeys {
+				auth, err := bind.NewKeyedTransactorWithChainID(sk, chainID)
+				require.NoError(t, err)
+				auth.GasLimit = 100_000
+				auth.GasPrice = big.NewInt(5_000_000_000)
+				_, err = bound.RawTransact(auth, calldata)
+				require.NoError(t, err)
+			}
+			_, err := eat.MockCl.BuildCanonicalBlock(ctx, engineapitester.WithTimestamp(ts))
+			require.NoErrorf(t, err, "block %d (ts %d) failed to build/validate", b, ts)
+		}
+	})
+}

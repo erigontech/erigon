@@ -7,13 +7,14 @@ import (
 
 // Precompiled regexes for redaction
 var (
-	reHTTP    = regexp.MustCompile(`(?i)http://\S+`)
-	reHTTPS   = regexp.MustCompile(`(?i)https://\S+`)
-	reWS      = regexp.MustCompile(`(?i)ws://\S+`)
-	reWSS     = regexp.MustCompile(`(?i)wss://\S+`)
-	reIPv4    = regexp.MustCompile(`(^|[^\w-])((?:\d{1,3}\.){3}\d{1,3}(?::\d{1,5})?)\b`)
-	reIPv6    = regexp.MustCompile(`(^|[^\w-])(\[[0-9a-fA-F:]+\](?::\d{1,5})?)\b`)
-	reDatadir = regexp.MustCompile(`(-{1,2}datadir[=\s]+)\S+`)
+	reHTTP     = regexp.MustCompile(`(?i)http://\S+`)
+	reHTTPS    = regexp.MustCompile(`(?i)https://\S+`)
+	reWS       = regexp.MustCompile(`(?i)ws://\S+`)
+	reWSS      = regexp.MustCompile(`(?i)wss://\S+`)
+	reIPv4     = regexp.MustCompile(`(^|[^\w-])((?:\d{1,3}\.){3}\d{1,3}(?::\d{1,5})?)\b`)
+	reIPv6     = regexp.MustCompile(`(^|[^\w-])(\[[0-9a-fA-F:]+\](?::\d{1,5})?)\b`)
+	reDatadir  = regexp.MustCompile(`(-{1,2}datadir[=\s]+)\S+`)
+	reEthstats = regexp.MustCompile(`(-{1,2}ethstats[=\s]+)\S+`)
 )
 
 // RedactArgs redacts sensitive information like HTTP(S), WS(S) urls and IP addresses from command line arguments
@@ -43,6 +44,9 @@ func RedactString(s string) string {
 
 	// Redact datadir paths
 	s = reDatadir.ReplaceAllString(s, "${1}<redacted-dir>")
+
+	// Redact ethstats credentials (nodename:secret@host:port)
+	s = reEthstats.ReplaceAllString(s, "${1}<redacted-ethstats>")
 
 	// redact IPs
 	s = reIPv6.ReplaceAllString(s, "$1<redacted-ipv6>")

@@ -165,14 +165,17 @@ func TestMessageListenerRegisterBlockBodiesObserver(t *testing.T) {
 	t.Parallel()
 
 	peerId := PeerIdFromUint64(1)
+	header := newMockBlockHeaders(1)[0]
 	test := newMessageListenerTest(t)
 	test.mockSentryStreams()
 	test.run(func(ctx context.Context, t *testing.T) {
 		var done atomic.Bool
-		observer := func(message *DecodedInboundMessage[*eth.BlockBodiesPacket66]) {
+		observer := func(message *DecodedInboundMessage[BlockBodiesEnvelope]) {
 			require.Equal(t, peerId, message.PeerId)
 			require.Equal(t, uint64(23), message.Decoded.RequestId)
-			require.Len(t, message.Decoded.BlockBodiesPacket, 1)
+			bodies, err := decodeBlockBodiesResponse(message.Decoded.EncodedBodies, []*types.Header{header})
+			require.NoError(t, err)
+			require.Len(t, bodies, 1)
 			done.Store(true)
 		}
 
@@ -411,15 +414,18 @@ func newMockBlockHeaders(numHeaders int) []*types.Header {
 			parentHash = parentHeader.Hash()
 		}
 
-		headers[i] = &types.Header{
-			Number:     *uint256.NewInt(uint64(i) + 1),
-			ParentHash: parentHash,
-		}
+		headers[i] = newMockHeaderForBody(uint64(i)+1, &types.Body{})
+		headers[i].ParentHash = parentHash
 
 		parentHeader = headers[i]
 	}
 
 	return headers
+}
+
+func newMockHeaderForBody(number uint64, body *types.Body) *types.Header {
+	header := &types.Header{Number: *uint256.NewInt(number)}
+	return types.NewBlock(header, body.Transactions, body.Uncles, nil, body.Withdrawals, nil).HeaderNoCopy()
 }
 
 func blockHeadersPacket66Bytes(t *testing.T, requestId uint64, headers []*types.Header) []byte {
@@ -434,7 +440,7 @@ func blockHeadersPacket66Bytes(t *testing.T, requestId uint64, headers []*types.
 
 func newMockNewBlockPacketBytes(t *testing.T) []byte {
 	newBlockPacket := eth.NewBlockPacket{
-		Block: types.NewBlock(newMockBlockHeaders(1)[0], nil, nil, nil, nil),
+		Block: types.NewBlock(newMockBlockHeaders(1)[0], nil, nil, nil, nil, nil),
 	}
 	newBlockPacketBytes, err := rlp.EncodeToBytes(&newBlockPacket)
 	require.NoError(t, err)
@@ -460,6 +466,16 @@ func newMockBlockBodiesPacketBytes(t *testing.T, requestId uint64, bodies ...*ty
 	newBlockHashesPacketBytes, err := rlp.EncodeToBytes(&newBlockHashesPacket)
 	require.NoError(t, err)
 	return newBlockHashesPacketBytes
+}
+
+func newMockRawBlockBodiesPacketBytes(t *testing.T, requestId uint64, bodies ...rlp.RawValue) []byte {
+	packet := eth.BlockBodiesRLPPacket66{
+		RequestId:            requestId,
+		BlockBodiesRLPPacket: bodies,
+	}
+	packetBytes, err := rlp.EncodeToBytes(&packet)
+	require.NoError(t, err)
+	return packetBytes
 }
 
 func mockExpectPenalizePeer(t *testing.T, sentryClient *direct.MockSentryClient, peerId *PeerId) {

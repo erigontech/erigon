@@ -24,23 +24,25 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 const (
-	//FirstContractIncarnation - first incarnation for contract accounts. After 1 it increases by 1.
+	// FirstContractIncarnation - first incarnation for contract accounts. After 1 it increases by 1.
 	FirstContractIncarnation = 1
-	//NonContractIncarnation incarnation for non contracts
+	// NonContractIncarnation incarnation for non contracts
 	NonContractIncarnation = 0
 )
 
 type StateReader interface {
 	ReadAccountData(address accounts.Address) (*accounts.Account, error)
+	ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error)
+	HasAccount(address common.Address) (bool, error)
 	ReadAccountDataForDebug(address accounts.Address) (*accounts.Account, error)
 	ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error)
-	HasStorage(address accounts.Address) (bool, error)
 	ReadAccountCode(address accounts.Address) ([]byte, error)
 	ReadAccountCodeSize(address accounts.Address) (int, error)
 	ReadAccountIncarnation(address accounts.Address) (uint64, error)
@@ -48,6 +50,12 @@ type StateReader interface {
 	SetTrace(trace bool, tracePrefix string)
 	Trace() bool
 	TracePrefix() string
+}
+
+// CodeByHash is a code store shared across requests. Code is content-addressed, so a reader at
+// any txNum may serve from it.
+type CodeByHash interface {
+	GetCodeByHash(codeHash []byte) ([]byte, bool)
 }
 
 type HistoricalStateReader interface {
@@ -76,10 +84,9 @@ func NewNoopWriter(trace ...bool) *NoopWriter {
 	return &NoopWriter{trace[0]}
 }
 
-func (*NoopWriter) SetTx(kv.TemporalTx) {}
 func (nw *NoopWriter) UpdateAccountData(address accounts.Address, original, account *accounts.Account) error {
 	if nw.trace {
-		fmt.Printf("acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}\n", address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash)
+		fmt.Printf("acc %x: {Balance: %s, Nonce: %d, Inc: %d, CodeHash: %x}\n", address, account.Balance.String(), account.Nonce, account.Incarnation, account.CodeHash)
 	}
 	return nil
 }
@@ -103,7 +110,7 @@ func (nw *NoopWriter) WriteAccountStorage(address accounts.Address, incarnation 
 		return nil
 	}
 	if nw.trace {
-		fmt.Printf("storage: %x,%x,%x\n", address, key, &value)
+		fmt.Printf("storage: %x,%x,%s\n", address, key, value.Hex()[2:])
 	}
 	return nil
 }
@@ -115,8 +122,7 @@ func (nw *NoopWriter) CreateContract(address accounts.Address) error {
 	return nil
 }
 
-type NoopReader struct {
-}
+type NoopReader struct{}
 
 var noopReader = &NoopReader{}
 
@@ -128,15 +134,27 @@ func (*NoopReader) SetTx(kv.TemporalTx) {}
 func (*NoopReader) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
 	return nil, nil
 }
+
+func (*NoopReader) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {
+	return nil, nil
+}
+
+func (*NoopReader) HasAccount(address common.Address) (bool, error) {
+	return false, nil
+}
+
 func (*NoopReader) ReadAccountDataForDebug(address accounts.Address) (*accounts.Account, error) {
 	return nil, nil
 }
+
 func (*NoopReader) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
 	return uint256.Int{}, false, nil
 }
-func (*NoopReader) HasStorage(address accounts.Address) (bool, error)               { return false, nil }
-func (*NoopReader) ReadAccountCode(address accounts.Address) ([]byte, error)        { return nil, nil }
-func (*NoopReader) ReadAccountCodeSize(address accounts.Address) (int, error)       { return 0, nil }
+
+func (*NoopReader) ReadAccountCode(address accounts.Address) ([]byte, error) { return nil, nil }
+
+func (*NoopReader) ReadAccountCodeSize(address accounts.Address) (int, error) { return 0, nil }
+
 func (*NoopReader) ReadAccountIncarnation(address accounts.Address) (uint64, error) { return 0, nil }
 
 func (*NoopReader) SetTrace(_ bool, _ string) {}

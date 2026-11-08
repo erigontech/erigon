@@ -1,0 +1,337 @@
+#!/usr/bin/env bash
+# Runs one shard of the EEST spec-test workflow:
+#
+#     tools/run-eest-spec-test.sh <shard>
+#
+# Where <shard> is one of:
+#
+#   statetests-stable-{sequential,parallel}    state tests vs. eest_stable
+#   statetests-devnet-{sequential,parallel}    state tests vs. eest_devnet
+#   statetests-legacy-{sequential,parallel}    complete legacy Cancun state tests
+#   transactiontests-stable-race               transaction tests vs. eest_stable
+#   transactiontests-devnet-race               transaction tests vs. eest_devnet
+#   rlptests-legacy-race                      complete legacy RLP tests
+#   transactiontests-legacy-race              complete legacy transaction tests
+#   difficultytests-legacy-race               complete legacy difficulty tests
+#   blocktests-stable-sequential               blockchain tests vs. eest_stable
+#   blocktests-devnet-{sequential,parallel}    blockchain tests vs. eest_devnet
+#   blocktests-legacy-consensus-{sequential,parallel}
+#                                              Hive consensus suite
+#   blocktests-legacy-consensus-race-{sequential,parallel}
+#                                              race-detector variants of the
+#                                              Hive consensus suite
+#   blocktests-legacy-constantinople-{sequential,parallel}
+#                                              Hive legacy suite
+#   blocktests-legacy-constantinople-race-*
+#                                              three fork partitions, each with
+#                                              sequential/parallel commitment
+#   blocktests-legacy-cancun-{sequential,parallel}
+#                                              Hive legacy-cancun suite
+#   blocktests-legacy-cancun-race-*
+#                                              six fork partitions, each with
+#                                              sequential/parallel commitment
+#   enginextests-stable-{sequential,parallel}  engine-x tests vs. eest_stable
+#   enginextests-devnet-{sequential,parallel}  engine-x tests vs. eest_devnet
+#   enginextests-benchmark-{1m,5m,10m,30m,60m,100m,150m}-sequential
+#                                              engine-x benchmark fixtures per
+#                                              gas-target subdir; each value
+#                                              maps to one for_osaka_at_<NNNN>M/
+#                                              directory under the engine_x
+#                                              benchmark fixtures
+#   blocktests-stable-race-{pre-cancun,cancun,prague,osaka,amsterdam}-sequential
+#                                              race-detector variant of
+#                                              blocktests-stable-sequential, split by
+#                                              fork via the manifest `run` regex so
+#                                              each sub-shard fits under ~30
+#                                              min. Caller (Makefile / CI) must
+#                                              export EVM_BIN to the race-built
+#                                              binary; otherwise -race
+#                                              detection doesn't fire.
+#   blocktests-devnet-race-amsterdam-{sequential,parallel}
+#                                              race-detector variants filtered
+#                                              to the Amsterdam fork only.
+#   zkevm-witness                              zkevm execution-witness conformance
+#                                              (eest_zkevm corpus) via the zkevmtest
+#                                              runner; compares debug_executionWitness
+#                                              (canonical) per block.
+#   zkevm-witness-race                         race-detector variant of the above over
+#                                              the whole corpus (run via evm.race).
+#   *-parallel                                  any of the above with "-parallel"
+#                                              appended runs with
+#                                              ERIGON_COMMITMENT_PARALLEL=true. Every
+#                                              other shard runs with
+#                                              ERIGON_COMMITMENT_PARALLEL=false so
+#                                              the runtime default in
+#                                              statecfg.ExperimentalParallelCommitment
+#                                              can flip without redefining the shards.
+#                                              Execution is parallel in every shard.
+#
+# Each shard maps to one cmd/evm subcommand running with --jsonout. Pass/fail
+# is decided here (not by the binary, which always exits 0): the shard fails
+# if no tests ran (unexpected — fixture path bug) or if observed failures
+# exceed EEST_SPEC_MAX_FAILURES.
+#
+# Env overrides:
+#   EEST_SPEC_MAX_FAILURES   - failure budget; CI sets via matrix include:
+#   EEST_SPEC_WORKERS        - parallel worker count
+#   EVM_BIN                  - path to evm binary (default build/bin/evm)
+#   ERIGON_EXECUTION_TESTS_TMPDIR - if set, used as TMPDIR; on Darwin we
+#                                   create a ramdisk if unset
+
+set -euo pipefail
+
+if (( $# != 1 )); then
+	echo "usage: $0 <shard>" >&2
+	exit 2
+fi
+shard="$1"
+
+for tool in yq jq; do
+	command -v "$tool" >/dev/null 2>&1 || { echo "run-eest-spec-test: required tool '$tool' not found in PATH" >&2; exit 1; }
+done
+
+# Resolve the fixture set from the shard name. Race shards inherit from their
+# non-race parent.
+fixture_sets=()
+case "$shard" in
+	*zkevm*)                       fixture_sets=(eest_zkevm) ;;
+	*-stable*)                     fixture_sets=(eest_stable) ;;
+	*-devnet*)                     fixture_sets=(eest_devnet) ;;
+	*-benchmark*)                  fixture_sets=(eest_benchmark) ;;
+	statetests-legacy-*)                     fixture_sets=(legacy_cancun) ;;
+	rlptests-legacy-* | \
+		transactiontests-legacy-* | \
+		difficultytests-legacy-*)           fixture_sets=(legacy_tests) ;;
+	blocktests-legacy-consensus-*)           fixture_sets=(legacy_tests) ;;
+	blocktests-legacy-constantinople-* | \
+		blocktests-legacy-cancun-*)          fixture_sets=(legacy_cancun) ;;
+	*) echo "cannot resolve fixtures for shard: $shard" >&2; exit 2 ;;
+esac
+fixture_base() {
+	local fixture_set="$1"
+	local fixture_root
+	fixture_root=$(jq -r --arg f "$fixture_set" '.[$f].root // "fixtures"' test-fixtures.json)
+	printf 'test-fixtures-cache/%s/%s\n' "$fixture_set" "$fixture_root"
+}
+base=$(fixture_base "${fixture_sets[0]}")
+
+# Resolve workers + failure budget + commitment-parallel + the optional race
+# --run regex from the single-source manifest. This script, the test-eest-spec.yml
+# load-matrix job, and the coverage guard all read tools/eest-spec-shards.yml, so
+# adding a shard / tweaking a budget / changing a fork filter is a one-file edit.
+# yq converts YAML→JSON so it can be queried with jq.
+manifest=tools/eest-spec-shards.yml
+shard_row=$(yq -o=json '.' "$manifest" | jq -r --arg s "$shard" '
+	.[] | select(.shard == $s)
+	| if (."commitment-parallel" | type) != "boolean"
+		then error("shard \($s) must define boolean commitment-parallel")
+		else "\(.workers)\t\(."max-allowed-failures")\t\(."commitment-parallel")\t\(."no-ramdisk" // false)\t\(."expected-tests" // 0)\t\(."evm-timeout-minutes" // 0)\t\(.run // "")"
+	end')
+if [[ -z "$shard_row" ]]; then
+	echo "shard $shard not found in $manifest" >&2
+	exit 2
+fi
+IFS=$'\t' read -r default_workers default_max commitment_parallel shard_no_ramdisk expected_tests evm_timeout_minutes run_regex <<<"$shard_row"
+# Always set ERIGON_COMMITMENT_PARALLEL explicitly (true or false) so the shard's
+# commitment mode is pinned to the manifest, independent of whatever
+# statecfg.ExperimentalParallelCommitment defaults to at runtime. Execution is
+# parallel in every shard (dbg.Exec3Parallel defaults true).
+export ERIGON_COMMITMENT_PARALLEL="$commitment_parallel"
+
+# Strip "-parallel" / "-sequential" suffix for case-arm routing — both variants
+# share the same fixture path / regex as the parent shard; only the
+# ERIGON_COMMITMENT_PARALLEL env var differs.
+shard_route="${shard%-parallel}"
+shard_route="${shard_route%-sequential}"
+
+# Per-shard structural config (cmd / fixture path / extra CLI flags). Match
+# against shard_route so "-parallel" variants reuse the same arm as their
+# non-parallel parent.
+extra=()
+paths=()
+case "$shard_route" in
+	statetests-stable | statetests-devnet)
+		cmd=statetest;   paths=("$base/state_tests") ;;
+	transactiontests-stable-race | transactiontests-devnet-race)
+		cmd=transactiontest;   paths=("$base/transaction_tests") ;;
+	statetests-legacy)
+		cmd=statetest;   paths=("$base/Cancun/GeneralStateTests") ;;
+	rlptests-legacy-*)
+		cmd=rlptest;   paths=("$base/RLPTests") ;;
+	transactiontests-legacy-*)
+		cmd=transactiontest;   paths=("$base/TransactionTests") ;;
+	difficultytests-legacy-*)
+		cmd=difficultytest;   paths=("$base/DifficultyTests") ;;
+	# race shards reuse this arm; each one's per-fork --run regex comes from the
+	# manifest `run` key (appended after this case), not from a per-shard arm.
+	blocktests-stable | blocktests-devnet | blocktests-stable-race-* | blocktests-devnet-race-*)
+		cmd=blocktest;   paths=("$base/blockchain_tests") ;;
+	blocktests-legacy-consensus | blocktests-legacy-consensus-*)
+		cmd=blocktest;   paths=("$base/BlockchainTests") ;;
+	blocktests-legacy-constantinople | blocktests-legacy-constantinople-*)
+		cmd=blocktest;   paths=("$base/Constantinople/BlockchainTests") ;;
+	blocktests-legacy-cancun | blocktests-legacy-cancun-*)
+		cmd=blocktest;   paths=("$base/Cancun/BlockchainTests") ;;
+	enginextests-stable | enginextests-devnet)
+		cmd=enginextest
+		paths=("$base/blockchain_tests_engine_x")
+		extra=(--pre-alloc-dir "${paths[0]}/pre_alloc") ;;
+	enginextests-benchmark-*)
+		# Per-gas-target shard: "...-1m" → for_osaka_at_0001M/, etc. Use
+		# shard_route (with any "-parallel" suffix stripped) so the parallel
+		# variants resolve to the same gas-target subdir.
+		gas="${shard_route##*-}"; gas_num="${gas%m}"
+		printf -v gas_dir 'for_osaka_at_%04dM' "$gas_num"
+		cmd=enginextest
+		paths=("$base/blockchain_tests_engine_x/$gas_dir")
+		extra=(--pre-alloc-dir "$base/blockchain_tests_engine_x/pre_alloc" --time) ;;
+	zkevm-witness*)
+		# Whole eest_zkevm blockchain_tests corpus; the "-race" variant differs
+		# only in the binary (evm.race, picked by the Makefile), not the fixtures.
+		cmd=zkevmtest;   paths=("$base/blockchain_tests") ;;
+	*) echo "unknown shard: $shard (route: $shard_route)" >&2; exit 2 ;;
+esac
+[[ -n "$run_regex" ]] && extra+=(--run "$run_regex")
+while IFS= read -r exclude; do
+	extra+=(--exclude "$exclude")
+done < <(yq -o=json '.' "$manifest" | jq -r --arg s "$shard" '.[] | select(.shard == $s) | .exclude[]?')
+
+workers="${EEST_SPEC_WORKERS:-$default_workers}"
+max="${EEST_SPEC_MAX_FAILURES:-$default_max}"
+evm_bin="${EVM_BIN:-build/bin/evm}"
+
+# Race-instrumented shards multiply RSS several-fold over the Go heap (TSAN
+# shadow + history). Bound the heap so allocation bursts trigger GC early
+# instead of growing the process into the CI runner's OOM range.
+if [[ "$shard" == *-race* ]]; then
+	export GOMEMLIMIT="${GOMEMLIMIT:-4GiB}"
+fi
+
+# 150M-gas blocks peak near 18GB RSS and get OOM-killed on a 16GB runner.
+if [[ "$shard" == *-benchmark-150m-* ]]; then
+	export GOMEMLIMIT="${GOMEMLIMIT:-12GiB}"
+fi
+
+if [[ ! -x "$evm_bin" ]]; then
+	echo "$evm_bin not found or not executable; run 'make evm' first" >&2
+	exit 2
+fi
+
+# Provision only this shard's fixture sets (no-op when already available).
+for fixture_set in "${fixture_sets[@]}"; do
+	bash tools/test-fixtures.sh test-fixtures.json test-fixtures-cache "$fixture_set"
+done
+
+for path in "${paths[@]}"; do
+	if [[ ! -e "$path" ]]; then
+		echo "fixture path $path does not exist" >&2
+		exit 2
+	fi
+done
+
+result_file=$(mktemp)
+raw_files=()
+part_files=()
+ramdisk=""
+evm_pid=""
+watchdog_pid=""
+cleanup() {
+	# A background evm ignores SIGINT, so an interrupted script must stop it before removing its files.
+	[[ -n "$watchdog_pid" ]] && kill "$watchdog_pid" 2>/dev/null || true
+	[[ -n "$evm_pid" ]] && kill "$evm_pid" 2>/dev/null && wait "$evm_pid" 2>/dev/null || true
+	# Auto-detach Darwin ramdisk we created in this run; leave existing
+	# user-provided ones (ERIGON_EXECUTION_TESTS_TMPDIR) untouched.
+	if [[ -n "$ramdisk" && "$(uname -s)" == "Darwin" ]]; then
+		hdiutil detach -force "$ramdisk" >/dev/null 2>&1 || true
+	fi
+	rm -f "$result_file" "${raw_files[@]}" "${part_files[@]}" 2>/dev/null || true
+}
+trap cleanup EXIT
+
+# Linux: do NOT auto-create a ramdisk. tools/create-ramdisk uses sudo mount
+# and never unmounts; CI gets the env var pre-set via the setup-erigon
+# action's ramdisk: true input. Local Linux users can opt in by exporting
+# ERIGON_EXECUTION_TESTS_TMPDIR or TMPDIR=/dev/shm.
+# Shards with no-ramdisk: true in the manifest skip the Darwin auto-ramdisk too:
+# their datadirs are few and long-lived, so tmpfs buys nothing — and the 150m
+# datadir (~7GB) doesn't even fit the default ramdisk size.
+if [[ "$shard_no_ramdisk" != "true" && -z "${ERIGON_EXECUTION_TESTS_TMPDIR:-}" && "$(uname -s)" == "Darwin" ]]; then
+	ramdisk=$(bash tools/create-ramdisk) || true
+	if [[ -n "$ramdisk" ]]; then
+		export ERIGON_EXECUTION_TESTS_TMPDIR="$ramdisk"
+		echo "ramdisk: $ramdisk"
+	fi
+fi
+export TMPDIR="${ERIGON_EXECUTION_TESTS_TMPDIR:-${TMPDIR:-/tmp}}"
+
+echo "tmpdir:  $TMPDIR"
+echo "max-allowed-failures: $max"
+if (( expected_tests > 0 )); then
+	echo "expected-tests: $expected_tests"
+fi
+
+# Don't fail on most non-zero exits — the runners report all results via JSON
+# regardless, and we want to inspect the JSON to drive the pass/fail decision
+# (crashes surface as missing/truncated JSON below). The one exception is exit
+# code 66: the Go race runtime's "data race detected" signal, emitted even when
+# the run completes and the JSON parses clean, so it must be checked explicitly.
+# The grep filter strips any init-time log lines (e.g. dbg.envLookup's
+# "[WARN] [env]" message when ERIGON_COMMITMENT_PARALLEL is set fires before cmd/evm
+# sets the log handler, and the default log handler writes to stdout) so jq
+# sees only JSON.
+for path in "${paths[@]}"; do
+	echo "running: $evm_bin $cmd ${extra[*]:-} --workers $workers --jsonout $path"
+	raw_file=$(mktemp)
+	raw_files+=("$raw_file")
+	part_file=$(mktemp)
+	part_files+=("$part_file")
+	rc=0
+	if (( evm_timeout_minutes > 0 )); then
+		# A hung run would otherwise sit silent until the job timeout and leave no trace.
+		timed_out=$(mktemp)
+		raw_files+=("$timed_out")
+		GOTRACEBACK=all "$evm_bin" "$cmd" --workers "$workers" --jsonout ${extra[@]+"${extra[@]}"} "$path" > "$raw_file" &
+		evm_pid=$!
+		# Its own stdio goes to /dev/null: after a kill, its sleep must not keep the step's output pipes open.
+		( sleep $((evm_timeout_minutes * 60)); echo yes > "$timed_out"; kill -QUIT "$evm_pid"; sleep 60; kill -KILL "$evm_pid" ) </dev/null >/dev/null 2>&1 &
+		watchdog_pid=$!
+		wait "$evm_pid" || rc=$?
+		evm_pid=""
+		kill "$watchdog_pid" 2>/dev/null || true
+		watchdog_pid=""
+		if [[ -s "$timed_out" ]]; then
+			echo "ERROR: evm still running after ${evm_timeout_minutes} min; its goroutine dump is above" >&2
+			exit 1
+		fi
+	else
+		"$evm_bin" "$cmd" --workers "$workers" --jsonout ${extra[@]+"${extra[@]}"} "$path" > "$raw_file" || rc=$?
+	fi
+	if (( rc == 66 )); then
+		echo "ERROR: data race detected (race runtime exit code 66); see WARNING: DATA RACE in the log above" >&2
+		exit 1
+	fi
+	grep -v '^\[[A-Z][A-Z]*\]' "$raw_file" > "$part_file"
+done
+jq -s 'add' "${part_files[@]}" > "$result_file"
+
+total=$(jq 'length' "$result_file")
+failed=$(jq '[.[] | select(.pass == false)] | length' "$result_file")
+echo "ran $total tests, $failed failed"
+
+if (( total == 0 )); then
+	echo "ERROR: no tests were run; expected non-empty fixtures at ${paths[*]}" >&2
+	exit 1
+fi
+if (( expected_tests > 0 && total != expected_tests )); then
+	echo "ERROR: ran $total tests, expected exactly $expected_tests" >&2
+	exit 1
+fi
+if (( failed > max )); then
+	echo "ERROR: $failed failures exceed max-allowed $max" >&2
+	# Emit the cmd/evm `error` field per failing test, not just the name,
+	# so transient CI flakes are diagnosable from the job log alone (the
+	# raw JSON output is dropped after this script exits).
+	jq -r '.[] | select(.pass == false) | "  FAIL " + .name + "\n        error: " + (.error // "<no error message>")' "$result_file" >&2
+	exit 1
+fi
+exit 0

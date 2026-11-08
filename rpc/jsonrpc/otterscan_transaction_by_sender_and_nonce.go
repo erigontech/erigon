@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -40,6 +41,7 @@ func (api *OtterscanAPIImpl) GetTransactionBySenderAndNonce(ctx context.Context,
 	if err != nil {
 		return nil, err
 	}
+	defer it.Close()
 
 	var prevTxnID, nextTxnID uint64
 	for i := 0; it.HasNext(); i++ {
@@ -92,7 +94,8 @@ func (api *OtterscanAPIImpl) GetTransactionBySenderAndNonce(ctx context.Context,
 		v, ok, err := tx.HistorySeek(kv.AccountsDomain, addr[:], txnID)
 		if err != nil {
 			log.Error("[rpc] Unexpected error, couldn't find changeset", "txNum", i, "addr", addr)
-			panic(err)
+			searchErr = err
+			return false
 		}
 		if !ok {
 			return false
@@ -139,16 +142,36 @@ func (api *OtterscanAPIImpl) GetTransactionBySenderAndNonce(ctx context.Context,
 	if txIndex == -1 {
 		txIndex = (idx + int(prevTxnID)) - int(minTxNum) - 1
 	}
-	txn, err := api._txnReader.TxnByIdxInBlock(ctx, tx, bn, txIndex)
+	if err := api.checkPruneBlocks(ctx, tx, bn); err != nil {
+		return nil, err
+	}
+	txn, ok, err := api._txnReader.TxnByIdxInBlock(ctx, tx, bn, txIndex)
 	if err != nil {
 		return nil, err
 	}
-	if txn == nil {
+	if !ok {
 		log.Warn("[rpc] txn is nil", "blockNum", bn, "txIndex", txIndex)
 		return nil, nil
 	}
-	found := txn.GetNonce() == nonce
-	if !found {
+	if txn.GetNonce() != nonce {
+		return nil, nil
+	}
+	header, err := api._blockReader.HeaderByNumber(ctx, tx, bn)
+	if err != nil {
+		return nil, err
+	}
+	if header == nil {
+		return nil, fmt.Errorf("header not found for block %d", bn)
+	}
+	chainConfig, err := api.chainConfig(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	sender, err := txn.Sender(*types.MakeSigner(chainConfig, bn, header.Time))
+	if err != nil {
+		return nil, err
+	}
+	if sender.Value() != addr {
 		return nil, nil
 	}
 	txHash := txn.Hash()

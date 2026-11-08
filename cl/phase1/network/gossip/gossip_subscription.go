@@ -6,15 +6,14 @@ import (
 	"sync"
 	"time"
 
+	pubsub "github.com/libp2p/go-libp2p-pubsub"
+
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/p2p"
 	"github.com/erigontech/erigon/common/log/v3"
-	pubsub "github.com/libp2p/go-libp2p-pubsub"
 )
 
-var (
-	ErrExpiryInThePast = errors.New("expiry is in the past")
-)
+var ErrExpiryInThePast = errors.New("expiry is in the past")
 
 type TopicSubscription struct {
 	topic     *pubsub.Topic
@@ -51,16 +50,65 @@ func (t *TopicSubscriptions) AllTopics() []string {
 	return topics
 }
 
+func (t *TopicSubscriptions) subscribedAttestationSubnetCount() uint64 {
+	t.mutex.RLock()
+	defer t.mutex.RUnlock()
+
+	subnets := make(map[int]struct{})
+	for topic, subscription := range t.subs {
+		if subscription.sub == nil {
+			continue
+		}
+		name := gossip.ExtractTopicName(topic)
+		if !gossip.IsTopicBeaconAttestation(name) {
+			continue
+		}
+		subnet := extractSubnetIndexByGossipTopic(name)
+		if subnet >= 0 {
+			subnets[subnet] = struct{}{}
+		}
+	}
+	return uint64(len(subnets))
+}
+
 func (t *TopicSubscriptions) Get(topic string) *TopicSubscription {
 	t.mutex.RLock()
 	defer t.mutex.RUnlock()
-	return t.subs[topic]
+	sub := t.subs[topic]
+	if sub == nil {
+		return nil
+	}
+	result := *sub
+	return &result
+}
+
+func (t *TopicSubscriptions) GetTopic(topic string) *pubsub.Topic {
+	t.mutex.RLock()
+	defer t.mutex.RUnlock()
+	sub := t.subs[topic]
+	if sub == nil {
+		return nil
+	}
+	return sub.topic
 }
 
 func (t *TopicSubscriptions) Add(topic string, topicHandle *pubsub.Topic, validator pubsub.ValidatorEx) error {
+	deferredExpiry, ok, err := t.addInternal(topic, topicHandle, validator)
+	if err != nil {
+		return err
+	}
+	if ok {
+		return t.SubscribeWithExpiry(topic, deferredExpiry)
+	}
+	return nil
+}
+
+func (t *TopicSubscriptions) addInternal(topic string, topicHandle *pubsub.Topic, validator pubsub.ValidatorEx) (deferredExpiry time.Time, hasDeferredExpiry bool, err error) {
 	t.mutex.Lock()
+	defer t.mutex.Unlock()
+
 	if _, ok := t.subs[topic]; ok {
-		return errors.New("topic already exists")
+		return time.Time{}, false, errors.New("topic already exists")
 	}
 	t.subs[topic] = &TopicSubscription{
 		topic:     topicHandle,
@@ -70,11 +118,9 @@ func (t *TopicSubscriptions) Add(topic string, topicHandle *pubsub.Topic, valida
 	}
 	if expiry, ok := t.toSubscribes[topic]; ok {
 		delete(t.toSubscribes, topic)
-		t.mutex.Unlock()
-		return t.SubscribeWithExpiry(topic, expiry)
+		return expiry, true, nil
 	}
-	t.mutex.Unlock()
-	return nil
+	return time.Time{}, false, nil
 }
 
 func (t *TopicSubscriptions) Remove(topic string) error {
@@ -87,6 +133,7 @@ func (t *TopicSubscriptions) Remove(topic string) error {
 	if sub.sub != nil {
 		sub.sub.Cancel()
 		sub.sub = nil
+		t.clearENRSyncNetsIfUnused(topic)
 	}
 	sub.topic.Close()
 	sub.topic = nil
@@ -104,6 +151,7 @@ func (t *TopicSubscriptions) Unsubscribe(topic string) error {
 	if sub.sub != nil {
 		sub.sub.Cancel()
 		sub.sub = nil
+		t.clearENRSyncNetsIfUnused(topic)
 	}
 	sub.expiry = time.Unix(0, 0) // reset
 	return nil
@@ -114,7 +162,9 @@ func (t *TopicSubscriptions) SubscribeWithExpiry(topic string, expiry time.Time)
 	defer t.mutex.Unlock()
 	sub, ok := t.subs[topic]
 	if !ok {
-		t.toSubscribes[topic] = expiry
+		if currentExpiry, exists := t.toSubscribes[topic]; !exists || expiry.After(currentExpiry) {
+			t.toSubscribes[topic] = expiry
+		}
 		return errors.New("topic not found")
 	}
 
@@ -128,17 +178,16 @@ func (t *TopicSubscriptions) SubscribeWithExpiry(topic string, expiry time.Time)
 		if err != nil {
 			return err
 		}
-		log.Info("[GossipManager] Subscribed to topic", "topic", topic, "expiration", expiry)
+		log.Debug("[GossipManager] Subscribed to topic", "topic", topic, "expiration", expiry)
 		sub.sub = s
-	}
-	sub.expiry = expiry
 
-	// update ENR on subscription
-	name := extractTopicName(topic)
-	if gossip.IsTopicBeaconAttestation(name) {
-		t.p2p.UpdateENRAttSubnets(extractSubnetIndexByGossipTopic(name), true)
-	} else if gossip.IsTopicSyncCommittee(name) {
-		t.p2p.UpdateENRSyncNets(extractSubnetIndexByGossipTopic(name), true)
+		name := gossip.ExtractTopicName(topic)
+		if gossip.IsTopicSyncCommittee(name) {
+			t.p2p.UpdateENRSyncNets(extractSubnetIndexByGossipTopic(name), true)
+		}
+	}
+	if expiry.After(sub.expiry) {
+		sub.expiry = expiry
 	}
 	return nil
 }
@@ -167,12 +216,20 @@ func (t *TopicSubscriptions) checkExpiredSubscriptions() {
 			sub.sub.Cancel()
 			sub.sub = nil
 			topic := sub.topic.String()
-			name := extractTopicName(topic)
-			if gossip.IsTopicBeaconAttestation(name) {
-				t.p2p.UpdateENRAttSubnets(extractSubnetIndexByGossipTopic(name), false)
-			} else if gossip.IsTopicSyncCommittee(name) {
-				t.p2p.UpdateENRSyncNets(extractSubnetIndexByGossipTopic(name), false)
-			}
+			t.clearENRSyncNetsIfUnused(topic)
 		}
 	}
+}
+
+func (t *TopicSubscriptions) clearENRSyncNetsIfUnused(topic string) {
+	name := gossip.ExtractTopicName(topic)
+	if !gossip.IsTopicSyncCommittee(name) {
+		return
+	}
+	for registeredTopic, subscription := range t.subs {
+		if subscription.sub != nil && gossip.ExtractTopicName(registeredTopic) == name {
+			return
+		}
+	}
+	t.p2p.UpdateENRSyncNets(extractSubnetIndexByGossipTopic(name), false)
 }

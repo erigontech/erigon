@@ -17,19 +17,7 @@
 package diaglib
 
 import (
-	"context"
-	"encoding/json"
 	"fmt"
-	"io"
-
-	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/kv"
-)
-
-var (
-	StagesListKey   = []byte("diagStagesList")
-	CurrentStageKey = []byte("diagCurrentStage")
 )
 
 type CurrentSyncStagesIdxs struct {
@@ -99,81 +87,6 @@ type CurrentSyncSubStage struct {
 
 func (ti CurrentSyncSubStage) Type() Type {
 	return TypeOf(ti)
-}
-
-func (d *DiagnosticClient) setupStagesDiagnostics(rootCtx context.Context) {
-	d.runSyncStagesListListener(rootCtx)
-	d.runCurrentSyncStageListener(rootCtx)
-	d.runCurrentSyncSubStageListener(rootCtx)
-	d.runSubStageListener(rootCtx)
-}
-
-func (d *DiagnosticClient) runSyncStagesListListener(rootCtx context.Context) {
-	go func() {
-		ctx, ch, closeChannel := Context[SyncStageList](rootCtx, 1)
-		defer closeChannel()
-
-		StartProviders(ctx, TypeOf(SyncStageList{}), log.Root())
-		for {
-			select {
-			case <-rootCtx.Done():
-				return
-			case info := <-ch:
-				d.SetStagesList(info.StagesList)
-			}
-		}
-	}()
-}
-
-func (d *DiagnosticClient) runCurrentSyncStageListener(rootCtx context.Context) {
-	go func() {
-		ctx, ch, closeChannel := Context[CurrentSyncStage](rootCtx, 1)
-		defer closeChannel()
-
-		StartProviders(ctx, TypeOf(CurrentSyncStage{}), log.Root())
-		for {
-			select {
-			case <-rootCtx.Done():
-				return
-			case info := <-ch:
-				d.SetCurrentSyncStage(info)
-			}
-		}
-	}()
-}
-
-func (d *DiagnosticClient) runCurrentSyncSubStageListener(rootCtx context.Context) {
-	go func() {
-		ctx, ch, closeChannel := Context[CurrentSyncSubStage](rootCtx, 1)
-		defer closeChannel()
-
-		StartProviders(ctx, TypeOf(CurrentSyncSubStage{}), log.Root())
-		for {
-			select {
-			case <-rootCtx.Done():
-				return
-			case info := <-ch:
-				d.SetCurrentSyncSubStage(info)
-			}
-		}
-	}()
-}
-
-func (d *DiagnosticClient) runSubStageListener(rootCtx context.Context) {
-	go func() {
-		ctx, ch, closeChannel := Context[SetSyncSubStageList](rootCtx, 1)
-		defer closeChannel()
-
-		StartProviders(ctx, TypeOf(SetSyncSubStageList{}), log.Root())
-		for {
-			select {
-			case <-rootCtx.Done():
-				return
-			case info := <-ch:
-				d.SetSubStagesList(info.Stage, info.List)
-			}
-		}
-	}()
 }
 
 func (d *DiagnosticClient) GetCurrentSyncIdxs() CurrentSyncStagesIdxs {
@@ -311,28 +224,7 @@ func (d *DiagnosticClient) getStageState(stageId string) (StageState, error) {
 	return 0, fmt.Errorf("stage %s not found in stages list %s", stageId, stagesIdsList)
 }
 
-func SyncStagesFromTX(tx kv.Tx) ([]byte, error) {
-	bytes, err := ReadDataFromTable(tx, kv.DiagSyncStages, StagesListKey)
-	if err != nil {
-		return nil, err
-	}
-
-	return common.Copy(bytes), nil
-}
-
-func StagesListUpdater(info []SyncStage) func(tx kv.RwTx) error {
-	return PutDataToTable(kv.DiagSyncStages, StagesListKey, info)
-}
-
 // Deprecated - not thread-safe method. Used only in tests. Need introduce more thread-safe method or something special for tests.
 func (d *DiagnosticClient) GetSyncStages() []SyncStage {
 	return d.syncStages
-}
-
-func (d *DiagnosticClient) SyncStagesJson(w io.Writer) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	if err := json.NewEncoder(w).Encode(d.syncStages); err != nil {
-		log.Debug("[diagnostics] HardwareInfoJson", "err", err)
-	}
 }

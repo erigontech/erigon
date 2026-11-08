@@ -41,6 +41,7 @@ func NewPendingSubPool(t SubPoolType, limit int) *PendingPool {
 func (p *PendingPool) EnforceWorstInvariants() {
 	heap.Init(p.worst)
 }
+
 func (p *PendingPool) EnforceBestInvariants() {
 	sort.Sort(p.best)
 }
@@ -56,7 +57,7 @@ func (p *PendingPool) Worst() *metaTxn { //nolint
 	if len(p.worst.ms) == 0 {
 		return nil
 	}
-	return (p.worst.ms)[0]
+	return p.worst.ms[0]
 }
 
 func (p *PendingPool) PopWorst() *metaTxn { //nolint

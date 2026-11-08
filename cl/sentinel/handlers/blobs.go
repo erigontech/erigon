@@ -29,17 +29,27 @@ import (
 	"github.com/libp2p/go-libp2p/core/network"
 )
 
-const maxBlobsThroughoutputPerRequest = 72
+const maxBlobsThroughputPerRequest = 72
 
 func (c *ConsensusHandlers) blobsSidecarsByRangeHandlerDeneb(s network.Stream) error {
 	return c.blobsSidecarsByRangeHandler(s, clparams.DenebVersion)
 }
 
 func (c *ConsensusHandlers) blobsSidecarsByRangeHandler(s network.Stream, version clparams.StateVersion) error {
-
 	req := &cltypes.BlobsByRangeRequest{}
 	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, req, version); err != nil {
 		return err
+	}
+
+	// Consume additional rate-limit tokens. Estimate blob count as slots × max blobs per block,
+	// capped at the per-request throughput limit (72). Use BlobSchedule-aware lookup so Deneb
+	// requests (max 6 blobs) are not overcharged at the Electra rate (max 9 blobs).
+	// Note: blob sidecars are deprecated at Fulu (replaced by data columns), so the effective
+	// max here is always ≤ Electra's MaxBlobsPerBlock.
+	startEpoch := req.StartSlot / c.beaconConfig.SlotsPerEpoch
+	maxBlobs := int(c.beaconConfig.GetBlobParameters(startEpoch).MaxBlobsPerBlock)
+	if cost := min(int(req.Count)*maxBlobs, maxBlobsThroughputPerRequest) - 1; !c.consumeRateLimit(s, cost) {
+		return nil
 	}
 
 	tx, err := c.indiciesDB.BeginRo(c.ctx)
@@ -75,7 +85,7 @@ func (c *ConsensusHandlers) blobsSidecarsByRangeHandler(s network.Stream, versio
 			return err
 		}
 
-		for i := 0; i < int(blobCount) && written < maxBlobsThroughoutputPerRequest; i++ {
+		for i := 0; i < int(blobCount) && written < maxBlobsThroughputPerRequest; i++ {
 			// Read the fork digest
 			forkDigest, err := c.ethClock.ComputeForkDigest(slot / c.beaconConfig.SlotsPerEpoch)
 			if err != nil {
@@ -101,10 +111,14 @@ func (c *ConsensusHandlers) blobsSidecarsByIdsHandlerDeneb(s network.Stream) err
 }
 
 func (c *ConsensusHandlers) blobsSidecarsByIdsHandler(s network.Stream, version clparams.StateVersion) error {
-
 	req := solid.NewStaticListSSZ[*cltypes.BlobIdentifier](40269, 40)
 	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, req, version); err != nil {
 		return err
+	}
+
+	// Consume additional rate-limit tokens: one per blob identifier.
+	if cost := min(req.Len(), maxBlobsThroughputPerRequest) - 1; !c.consumeRateLimit(s, cost) {
+		return nil
 	}
 
 	tx, err := c.indiciesDB.BeginRo(c.ctx)
@@ -114,7 +128,7 @@ func (c *ConsensusHandlers) blobsSidecarsByIdsHandler(s network.Stream, version 
 	defer tx.Rollback()
 
 	written := 0
-	for i := 0; i < req.Len() && written < maxBlobsThroughoutputPerRequest; i++ {
+	for i := 0; i < req.Len() && written < maxBlobsThroughputPerRequest; i++ {
 
 		id := req.Get(i)
 		slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, id.BlockRoot)

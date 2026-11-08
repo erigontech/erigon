@@ -49,9 +49,9 @@ func (me *slogHandler) Handle(ctx context.Context, record slog.Record) error {
 func attrToErilogCtxs(keyPrefix string, attr slog.Attr) iter.Seq[any] {
 	return func(yield func(any) bool) {
 		if attr.Value.Kind() == slog.KindGroup {
-			keyPrefix := keyPrefix + attr.Key + "."
+			groupPrefix := keyPrefix + attr.Key + "."
 			for _, a := range attr.Value.Group() {
-				attrToErilogCtxs(keyPrefix, a)(yield)
+				attrToErilogCtxs(groupPrefix, a)(yield)
 			}
 		} else {
 			yield(keyPrefix + attr.Key)
@@ -75,7 +75,8 @@ func (me *slogHandler) attrsToCtx(r slog.Record) (ret []any) {
 func (me *slogHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	ret := *me
 	high := len(me.attrs)
-	ret.attrs = append(me.attrs[:high:high], attrs...)
+	ret.attrs = me.attrs[:high:high]
+	ret.attrs = append(ret.attrs, attrs...)
 	return &ret
 }
 

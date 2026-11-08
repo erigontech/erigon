@@ -22,6 +22,8 @@ package node
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"runtime"
 	"testing"
@@ -29,17 +31,17 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/p2p"
 )
 
-var (
-	testNodeKey, _ = crypto.GenerateKey()
-)
+var testNodeKey, _ = crypto.GenerateKey()
 
 func testNodeConfig(t *testing.T) *nodecfg.Config {
 	return &nodecfg.Config{
@@ -55,14 +57,14 @@ func TestNodeCloseMultipleTimes(t *testing.T) {
 		t.Skip("fix me on win please")
 	}
 
-	stack, err := New(context.Background(), testNodeConfig(t), log.New())
+	stack, err := New(t.Context(), testNodeConfig(t), log.New())
 	if err != nil {
 		t.Fatalf("failed to create protocol stack: %v", err)
 	}
 	stack.Close()
 
 	// Ensure that a stopped node can be stopped again
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if err := stack.Close(); !errors.Is(err, ErrNodeStopped) {
 			t.Fatalf("iter %d: stop failure mismatch: have %v, want %v", i, err, ErrNodeStopped)
 		}
@@ -74,7 +76,7 @@ func TestNodeStartMultipleTimes(t *testing.T) {
 		t.Skip("fix me on win please")
 	}
 
-	stack, err := New(context.Background(), testNodeConfig(t), log.New())
+	stack, err := New(t.Context(), testNodeConfig(t), log.New())
 	if err != nil {
 		t.Fatalf("failed to create protocol stack: %v", err)
 	}
@@ -109,7 +111,7 @@ func TestNodeUsedDataDir(t *testing.T) {
 	dir := t.TempDir()
 
 	// Create a new node based on the data directory
-	original, originalErr := New(context.Background(), &nodecfg.Config{Dirs: datadir.New(dir)}, log.New())
+	original, originalErr := New(t.Context(), &nodecfg.Config{Dirs: datadir.New(dir)}, log.New())
 	if originalErr != nil {
 		t.Fatalf("failed to create original protocol stack: %v", originalErr)
 	}
@@ -119,14 +121,36 @@ func TestNodeUsedDataDir(t *testing.T) {
 	}
 
 	// Create a second node based on the same data directory and ensure failure
-	if _, err := New(context.Background(), &nodecfg.Config{Dirs: datadir.New(dir)}, log.New()); !errors.Is(err, datadir.ErrDataDirLocked) {
+	if _, err := New(t.Context(), &nodecfg.Config{Dirs: datadir.New(dir)}, log.New()); !errors.Is(err, datadir.ErrDataDirLocked) {
 		t.Fatalf("duplicate datadir failure mismatch: have %v, want %v", err, datadir.ErrDataDirLocked)
 	}
 }
 
+func TestNodeRenamesOldVersionsOnlyUnderLock(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	oldPath := filepath.Join(dirs.Snap, "v1-000000-000500-headers.seg")
+	require.NoError(t, os.WriteFile(oldPath, nil, 0o644))
+
+	l, locked, err := datadir.TryFlock(dirs)
+	require.NoError(t, err)
+	require.True(t, locked)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err = New(ctx, &nodecfg.Config{Dirs: dirs}, log.New())
+	require.ErrorIs(t, err, context.Canceled)
+	require.FileExists(t, oldPath)
+	require.NoError(t, l.Unlock())
+
+	stack, err := New(t.Context(), &nodecfg.Config{Dirs: dirs}, log.New())
+	require.NoError(t, err)
+	defer stack.Close()
+	require.NoFileExists(t, oldPath)
+	require.FileExists(t, filepath.Join(dirs.Snap, "v1.0-000000-000500-headers.seg"))
+}
+
 // Tests whether a Lifecycle can be registered.
 func TestLifecycleRegistry_Successful(t *testing.T) {
-	stack, err := New(context.Background(), testNodeConfig(t), log.New())
+	stack, err := New(t.Context(), testNodeConfig(t), log.New())
 	if err != nil {
 		t.Fatalf("failed to create protocol stack: %v", err)
 	}
@@ -153,21 +177,21 @@ func TestNodeCloseClosesDB(t *testing.T) {
 	}
 
 	logger := log.New()
-	stack, _ := New(context.Background(), testNodeConfig(t), logger)
+	stack, _ := New(t.Context(), testNodeConfig(t), logger)
 	defer stack.Close()
 
-	db, err := OpenDatabase(context.Background(), stack.Config(), dbcfg.SentryDB, "", false, logger)
+	db, err := OpenDatabase(t.Context(), stack.Config(), dbcfg.SentryDB, "", false, logger)
 	if err != nil {
 		t.Fatal("can't open DB:", err)
 	}
-	if err = db.Update(context.Background(), func(tx kv.RwTx) error {
+	if err = db.Update(t.Context(), func(tx kv.RwTx) error {
 		return tx.Put(kv.Inodes, []byte("testK"), []byte{})
 	}); err != nil {
 		t.Fatal("can't Put on open DB:", err)
 	}
 
 	stack.Close()
-	//if err = db.Update(context.Background(), func(tx kv.RwTx) error {
+	//if err = db.Update(t.Context(), func(tx kv.RwTx) error {
 	//	return tx.Put(kv.Inodes, []byte("testK"), []byte{})
 	//}); err == nil {
 	//	t.Fatal("Put succeeded after node is closed")
@@ -181,14 +205,14 @@ func TestNodeOpenDatabaseFromLifecycleStart(t *testing.T) {
 	}
 
 	logger := log.New()
-	stack, err := New(context.Background(), testNodeConfig(t), logger)
+	stack, err := New(t.Context(), testNodeConfig(t), logger)
 	require.NoError(t, err)
 	defer stack.Close()
 
 	var db kv.RwDB
 	stack.RegisterLifecycle(&InstrumentedService{
 		startHook: func() {
-			db, err = OpenDatabase(context.Background(), stack.Config(), dbcfg.SentryDB, "", false, logger)
+			db, err = OpenDatabase(t.Context(), stack.Config(), dbcfg.SentryDB, "", false, logger)
 			if err != nil {
 				t.Fatal("can't open DB:", err)
 			}
@@ -209,12 +233,12 @@ func TestNodeOpenDatabaseFromLifecycleStop(t *testing.T) {
 	}
 
 	logger := log.New()
-	stack, _ := New(context.Background(), testNodeConfig(t), logger)
+	stack, _ := New(t.Context(), testNodeConfig(t), logger)
 	defer stack.Close()
 
 	stack.RegisterLifecycle(&InstrumentedService{
 		stopHook: func() {
-			db, err := OpenDatabase(context.Background(), stack.Config(), dbcfg.ChainDB, "", false, logger)
+			db, err := OpenDatabase(t.Context(), stack.Config(), dbcfg.ChainDB, "", false, logger)
 			if err != nil {
 				t.Fatal("can't open DB:", err)
 			}
@@ -228,7 +252,7 @@ func TestNodeOpenDatabaseFromLifecycleStop(t *testing.T) {
 
 // Tests that registered Lifecycles get started and stopped correctly.
 func TestLifecycleLifeCycle(t *testing.T) {
-	stack, _ := New(context.Background(), testNodeConfig(t), log.New())
+	stack, _ := New(t.Context(), testNodeConfig(t), log.New())
 	defer stack.Close()
 
 	started := make(map[string]bool)
@@ -283,7 +307,7 @@ func TestLifecycleStartupError(t *testing.T) {
 		t.Skip("fix me on win please")
 	}
 
-	stack, err := New(context.Background(), testNodeConfig(t), log.New())
+	stack, err := New(t.Context(), testNodeConfig(t), log.New())
 	if err != nil {
 		t.Fatalf("failed to create protocol stack: %v", err)
 	}
@@ -333,7 +357,7 @@ func TestLifecycleStartupError(t *testing.T) {
 // Tests that even if a registered Lifecycle fails to shut down cleanly, it does
 // not influence the rest of the shutdown invocations.
 func TestLifecycleTerminationGuarantee(t *testing.T) {
-	stack, err := New(context.Background(), testNodeConfig(t), log.New())
+	stack, err := New(t.Context(), testNodeConfig(t), log.New())
 	if err != nil {
 		t.Fatalf("failed to create protocol stack: %v", err)
 	}
@@ -382,15 +406,15 @@ func TestLifecycleTerminationGuarantee(t *testing.T) {
 	}
 	// Stop the stack, verify failure and check all terminations
 	err = stack.Close()
-	if err, ok := err.(*StopError); !ok {
+	if stopErr, ok := errors.AsType[*StopError](err); !ok {
 		t.Fatalf("termination failure mismatch: have %v, want StopError", err)
 	} else {
 		failer := reflect.TypeFor[*InstrumentedService]()
-		if !errors.Is(err.Services[failer], failure) {
-			t.Fatalf("failer termination failure mismatch: have %v, want %v", err.Services[failer], failure)
+		if !errors.Is(stopErr.Services[failer], failure) {
+			t.Fatalf("failer termination failure mismatch: have %v, want %v", stopErr.Services[failer], failure)
 		}
-		if len(err.Services) != 1 {
-			t.Fatalf("failure count mismatch: have %d, want %d", len(err.Services), 1)
+		if len(stopErr.Services) != 1 {
+			t.Fatalf("failure count mismatch: have %d, want %d", len(stopErr.Services), 1)
 		}
 	}
 	for id := range lifecycles {
@@ -400,4 +424,25 @@ func TestLifecycleTerminationGuarantee(t *testing.T) {
 		delete(started, id)
 		delete(stopped, id)
 	}
+}
+
+func TestOpenDatabaseStampsSchemaVersionOnRecreatedChaindata(t *testing.T) {
+	logger := log.New()
+	cfg := testNodeConfig(t)
+	requireSchemaVersion := func() {
+		t.Helper()
+		db, err := OpenDatabase(t.Context(), cfg, dbcfg.ChainDB, "", false, logger)
+		require.NoError(t, err)
+		defer db.Close()
+		require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+			major, minor, _, ok, err := rawdb.ReadDBSchemaVersion(tx)
+			require.True(t, ok, "binaries at an older schema must refuse this chaindata")
+			require.Equal(t, kv.DBSchemaVersion.Major, major)
+			require.Equal(t, kv.DBSchemaVersion.Minor, minor)
+			return err
+		}))
+	}
+	requireSchemaVersion()
+	require.NoError(t, dir.RemoveAll(cfg.Dirs.Chaindata)) // a downgrade removes chaindata; the migrations DB stays
+	requireSchemaVersion()
 }

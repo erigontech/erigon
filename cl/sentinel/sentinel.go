@@ -23,12 +23,14 @@ import (
 	"os/signal"
 	"sync"
 	"syscall"
+	"time"
 
+	"github.com/OffchainLabs/go-bitfield"
 	"github.com/go-chi/chi/v5"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/prysmaticlabs/go-bitfield"
+	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/cl/cltypes"
 	peerdasstate "github.com/erigontech/erigon/cl/das/state"
@@ -54,6 +56,7 @@ type Sentinel struct {
 	started  bool
 	listener *discover.UDPv5 // this is us in the network.
 	ctx      context.Context
+	cancel   context.CancelFunc
 	cfg      *SentinelConfig
 	peers    *peers.Pool
 	p2p      p2p.P2PManager
@@ -69,7 +72,6 @@ type Sentinel struct {
 	indiciesDB kv.RoDB
 
 	discoverConfig     discover.Config
-	subManager         *GossipManager
 	metrics            bool
 	logger             log.Logger
 	forkChoiceReader   forkchoice.ForkChoiceStorageReader
@@ -78,7 +80,10 @@ type Sentinel struct {
 	ethClock           eth_clock.EthereumClock
 	peerDasStateReader peerdasstate.PeerDasStateReader
 
-	metadataLock sync.Mutex
+	// connectSem serializes concurrent Host.Connect() and Peerstore().RemovePeer()
+	// calls to work around a data race in libp2p v0.37.2's memoryAddrBook between
+	// addAddrsUnlocked() and the background gc() goroutine (see #19603).
+	connectSem *semaphore.Weighted
 }
 
 func (s *Sentinel) SetStatus(status *cltypes.Status) {
@@ -99,21 +104,6 @@ func New(
 	peerDasStateReader peerdasstate.PeerDasStateReader,
 	p2p p2p.P2PManager,
 ) (*Sentinel, error) {
-	s := &Sentinel{
-		ctx:                ctx,
-		cfg:                cfg,
-		blockReader:        blockReader,
-		indiciesDB:         indiciesDB,
-		metrics:            true,
-		logger:             logger,
-		forkChoiceReader:   forkChoiceReader,
-		blobStorage:        blobStorage,
-		ethClock:           ethClock,
-		dataColumnStorage:  dataColumnStorage,
-		peerDasStateReader: peerDasStateReader,
-		p2p:                p2p,
-	}
-
 	// Setup discovery
 	enodes := make([]*enode.Node, len(cfg.NetworkConfig.BootNodes))
 	for i, bootnode := range cfg.NetworkConfig.BootNodes {
@@ -127,6 +117,24 @@ func New(
 	if err != nil {
 		return nil, err
 	}
+
+	ctx, cancel := context.WithCancel(ctx)
+	s := &Sentinel{
+		ctx:                ctx,
+		cancel:             cancel,
+		cfg:                cfg,
+		blockReader:        blockReader,
+		indiciesDB:         indiciesDB,
+		metrics:            true,
+		logger:             logger,
+		forkChoiceReader:   forkChoiceReader,
+		blobStorage:        blobStorage,
+		ethClock:           ethClock,
+		dataColumnStorage:  dataColumnStorage,
+		peerDasStateReader: peerDasStateReader,
+		p2p:                p2p,
+		connectSem:         semaphore.NewWeighted(int64(goRoutinesOpeningPeerConnections)),
+	}
 	s.discoverConfig = discover.Config{
 		PrivateKey: privateKey,
 		Bootnodes:  enodes,
@@ -134,6 +142,7 @@ func New(
 
 	signal.Reset(syscall.SIGINT)
 	s.peers = peers.NewPool(s.p2p.Host())
+	s.p2p.SetDialPolicy(s.peers.Dialable)
 
 	mux := chi.NewRouter()
 	mux.Get("/", httpreqresp.NewRequestHandler(s.p2p.Host()))
@@ -164,10 +173,10 @@ func (s *Sentinel) Start() (*enode.LocalNode, error) {
 		s.blockReader,
 		s.indiciesDB,
 		s.p2p.Host(),
-		s.peers,
 		s.cfg.NetworkConfig,
 		s.p2p.UDPv5Listener().LocalNode(),
-		s.cfg.BeaconConfig, s.ethClock, s.handshaker, s.forkChoiceReader, s.blobStorage, s.dataColumnStorage, s.peerDasStateReader, s.cfg.EnableBlocks).Start()
+		s.cfg.BeaconConfig, s.ethClock, s.handshaker, s.forkChoiceReader, s.blobStorage, s.dataColumnStorage, s.peerDasStateReader, s.cfg.EnableBlocks, s.cfg.EnvelopeRebuilder,
+	).Start()
 
 	/*if err := s.connectToBootnodes(); err != nil {
 		return nil, fmt.Errorf("failed to connect to bootnodes err=%w", err)
@@ -177,23 +186,38 @@ func (s *Sentinel) Start() (*enode.LocalNode, error) {
 		ConnectedF: s.onConnection,
 		DisconnectedF: func(n network.Network, c network.Conn) {
 			peerId := c.RemotePeer()
-			s.peers.RemovePeer(peerId)
+			log.Trace("[Sentinel] Peer disconnected", "peer", peerId, "direction", c.Stat().Direction, "addr", c.RemoteMultiaddr())
 		},
 	})
-	s.subManager = NewGossipManager(s.ctx)
-	//s.subManager.Start(s.ctx)
-
 	go s.listenForPeers()
 	go s.proactiveSubnetPeerSearch() // Proactively search for peers when subnet coverage is low
+	_, connected, _ := s.GetPeersCount()
+	recordPeerMetrics(connected)
+	go s.updatePeerMetrics()
 	//go s.forkWatcher()
-	//go s.observeBandwidth(s.ctx)
 
 	return s.LocalNode(), nil
 }
 
+const peerMetricsUpdateInterval = 15 * time.Second
+
+func (s *Sentinel) updatePeerMetrics() {
+	ticker := time.NewTicker(peerMetricsUpdateInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		case <-ticker.C:
+			_, connected, _ := s.GetPeersCount()
+			recordPeerMetrics(connected)
+		}
+	}
+}
+
 func (s *Sentinel) Stop() {
 	//s.listener.Close()
-	//s.subManager.Close()
+	s.cancel()
 	s.p2p.Host().Close()
 }
 
@@ -270,25 +294,26 @@ func (s *Sentinel) Identity() (pid, enrStr string, p2pAddresses, discoveryAddres
 	enrStr = s.listener.LocalNode().Node().String()
 	p2pAddresses = make([]string, 0, len(s.p2p.Host().Addrs()))
 	for _, addr := range s.p2p.Host().Addrs() {
-		p2pAddresses = append(p2pAddresses, fmt.Sprintf("%s/%s", addr.String(), pid))
+		p2pAddresses = append(p2pAddresses, fmt.Sprintf("%s/p2p/%s", addr.String(), pid))
 	}
 	discoveryAddresses = []string{}
 
-	if s.listener.LocalNode().Node().TCP() != 0 {
+	nodeIP := s.listener.LocalNode().Node().IP()
+	if nodeIP == nil {
+		s.logger.Warn("[Sentinel] Discovery node has nil IP address, skipping discovery address advertisement. Check caplin.discovery.addr configuration and host IPv6 setup")
+	} else {
 		protocol := "ip4"
-		if s.listener.LocalNode().Node().IP().To4() == nil {
+		if nodeIP.To4() == nil {
 			protocol = "ip6"
 		}
-		port := s.listener.LocalNode().Node().TCP()
-		discoveryAddresses = append(discoveryAddresses, fmt.Sprintf("/%s/%s/tcp/%d/p2p/%s", protocol, s.listener.LocalNode().Node().IP(), port, pid))
-	}
-	if s.listener.LocalNode().Node().UDP() != 0 {
-		protocol := "ip4"
-		if s.listener.LocalNode().Node().IP().To4() == nil {
-			protocol = "ip6"
+		if s.listener.LocalNode().Node().TCP() != 0 {
+			port := s.listener.LocalNode().Node().TCP()
+			discoveryAddresses = append(discoveryAddresses, fmt.Sprintf("/%s/%s/tcp/%d/p2p/%s", protocol, nodeIP, port, pid))
 		}
-		port := s.listener.LocalNode().Node().UDP()
-		discoveryAddresses = append(discoveryAddresses, fmt.Sprintf("/%s/%s/udp/%d/p2p/%s", protocol, s.listener.LocalNode().Node().IP(), port, pid))
+		if s.listener.LocalNode().Node().UDP() != 0 {
+			port := s.listener.LocalNode().Node().UDP()
+			discoveryAddresses = append(discoveryAddresses, fmt.Sprintf("/%s/%s/udp/%d/p2p/%s", protocol, nodeIP, port, pid))
+		}
 	}
 	subnetField := bitfield.NewBitvector64()
 	syncnetField := bitfield.NewBitvector8()
@@ -320,10 +345,6 @@ func (s *Sentinel) Host() host.Host {
 
 func (s *Sentinel) Peers() *peers.Pool {
 	return s.peers
-}
-
-func (s *Sentinel) GossipManager() *GossipManager {
-	return s.subManager
 }
 
 func (s *Sentinel) Config() *SentinelConfig {

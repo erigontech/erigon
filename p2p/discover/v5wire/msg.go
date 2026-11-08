@@ -39,7 +39,7 @@ type Packet interface {
 
 	// AppendLogInfo returns its argument 'ctx' with additional fields
 	// appended for logging purposes.
-	AppendLogInfo(ctx []interface{}) []interface{}
+	AppendLogInfo(ctx []any) []any
 }
 
 // Message types.
@@ -66,19 +66,20 @@ type (
 
 	// WHOAREYOU contains the handshake challenge.
 	Whoareyou struct {
-		ChallengeData []byte   // Encoded challenge
-		Nonce         Nonce    // Nonce of request packet
-		IDNonce       [16]byte // Identity proof data
-		RecordSeq     uint64   // ENR sequence number of recipient
+		Nonce     Nonce    // Nonce of request packet
+		IDNonce   [16]byte // Identity proof data
+		RecordSeq uint64   // ENR sequence number of recipient
 
 		// Node is the locally known node record of recipient.
 		// This must be set by the caller of Encode.
-		Node *enode.Node
+		Node *enode.Node `rlp:"-"`
+
+		// ChallengeData contains the full packet encoding before masking.
+		// This data is later used during identity verification and is
+		// populated during both Encode and Decode steps.
+		ChallengeData []byte `rlp:"-"`
 
 		sent mclock.AbsTime // for handshake GC.
-
-		// Encoded is packet raw data for sending out, but should not be include in the RLP encoding.
-		Encoded []byte `rlp:"-"`
 	}
 
 	// PING is sent during liveness checks.
@@ -159,7 +160,7 @@ func (*Whoareyou) Kind() byte          { return WhoareyouPacket }
 func (*Whoareyou) RequestID() []byte   { return nil }
 func (*Whoareyou) SetRequestID([]byte) {}
 
-func (*Whoareyou) AppendLogInfo(ctx []interface{}) []interface{} {
+func (*Whoareyou) AppendLogInfo(ctx []any) []any {
 	return ctx
 }
 
@@ -168,7 +169,7 @@ func (*Unknown) Kind() byte          { return UnknownPacket }
 func (*Unknown) RequestID() []byte   { return nil }
 func (*Unknown) SetRequestID([]byte) {}
 
-func (*Unknown) AppendLogInfo(ctx []interface{}) []interface{} {
+func (*Unknown) AppendLogInfo(ctx []any) []any {
 	return ctx
 }
 
@@ -177,7 +178,7 @@ func (*Ping) Kind() byte               { return PingMsg }
 func (p *Ping) RequestID() []byte      { return p.ReqID }
 func (p *Ping) SetRequestID(id []byte) { p.ReqID = id }
 
-func (p *Ping) AppendLogInfo(ctx []interface{}) []interface{} {
+func (p *Ping) AppendLogInfo(ctx []any) []any {
 	return append(ctx, "req", hexutil.Bytes(p.ReqID), "enrseq", p.ENRSeq)
 }
 
@@ -186,7 +187,7 @@ func (*Pong) Kind() byte               { return PongMsg }
 func (p *Pong) RequestID() []byte      { return p.ReqID }
 func (p *Pong) SetRequestID(id []byte) { p.ReqID = id }
 
-func (p *Pong) AppendLogInfo(ctx []interface{}) []interface{} {
+func (p *Pong) AppendLogInfo(ctx []any) []any {
 	return append(ctx, "req", hexutil.Bytes(p.ReqID), "enrseq", p.ENRSeq)
 }
 
@@ -195,7 +196,7 @@ func (p *Findnode) Kind() byte             { return FindnodeMsg }
 func (p *Findnode) RequestID() []byte      { return p.ReqID }
 func (p *Findnode) SetRequestID(id []byte) { p.ReqID = id }
 
-func (p *Findnode) AppendLogInfo(ctx []interface{}) []interface{} {
+func (p *Findnode) AppendLogInfo(ctx []any) []any {
 	ctx = append(ctx, "req", hexutil.Bytes(p.ReqID))
 	if p.OpID != 0 {
 		ctx = append(ctx, "opid", p.OpID)
@@ -208,8 +209,9 @@ func (*Nodes) Kind() byte               { return NodesMsg }
 func (p *Nodes) RequestID() []byte      { return p.ReqID }
 func (p *Nodes) SetRequestID(id []byte) { p.ReqID = id }
 
-func (p *Nodes) AppendLogInfo(ctx []interface{}) []interface{} {
-	return append(ctx,
+func (p *Nodes) AppendLogInfo(ctx []any) []any {
+	return append(
+		ctx,
 		"req", hexutil.Bytes(p.ReqID),
 		"tot", p.RespCount,
 		"n", len(p.Nodes),
@@ -221,7 +223,7 @@ func (*TalkRequest) Kind() byte               { return TalkRequestMsg }
 func (p *TalkRequest) RequestID() []byte      { return p.ReqID }
 func (p *TalkRequest) SetRequestID(id []byte) { p.ReqID = id }
 
-func (p *TalkRequest) AppendLogInfo(ctx []interface{}) []interface{} {
+func (p *TalkRequest) AppendLogInfo(ctx []any) []any {
 	return append(ctx, "proto", p.Protocol, "req", hexutil.Bytes(p.ReqID), "len", len(p.Message))
 }
 
@@ -230,6 +232,6 @@ func (*TalkResponse) Kind() byte               { return TalkResponseMsg }
 func (p *TalkResponse) RequestID() []byte      { return p.ReqID }
 func (p *TalkResponse) SetRequestID(id []byte) { p.ReqID = id }
 
-func (p *TalkResponse) AppendLogInfo(ctx []interface{}) []interface{} {
+func (p *TalkResponse) AppendLogInfo(ctx []any) []any {
 	return append(ctx, "req", hexutil.Bytes(p.ReqID), "len", len(p.Message))
 }

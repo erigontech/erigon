@@ -1,16 +1,31 @@
 package sentry_multi_client
 
 import (
+	"bytes"
 	"context"
+	"fmt"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"testing/synctest"
+	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/semaphore"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/services"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/dbservices"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/execution/bal"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	proto_sentry "github.com/erigontech/erigon/node/gointerfaces/sentryproto"
@@ -19,6 +34,7 @@ import (
 )
 
 type receiptRLP69 struct {
+	Type              uint8
 	PostStateOrStatus []byte
 	CumulativeGasUsed uint64
 	Logs              []*types.Log
@@ -30,6 +46,7 @@ func TestMultiClient_GetReceipts69(t *testing.T) {
 	testHash := common.HexToHash("0x123")
 	testReceipts := types.Receipts{
 		{
+			Type:              types.LegacyTxType,
 			Status:            types.ReceiptStatusSuccessful,
 			CumulativeGasUsed: 21000,
 			Logs:              []*types.Log{},
@@ -37,6 +54,7 @@ func TestMultiClient_GetReceipts69(t *testing.T) {
 			GasUsed:           21000,
 		},
 		{
+			Type:              types.DynamicFeeTxType,
 			Status:            types.ReceiptStatusSuccessful,
 			CumulativeGasUsed: 42000,
 			Logs:              []*types.Log{},
@@ -116,14 +134,27 @@ func TestMultiClient_GetReceipts69(t *testing.T) {
 	}
 
 	if len(receiptsList) != 2 {
-		t.Fatalf("Expected 2 receipt in list, got %d", len(receiptsList))
+		t.Fatalf("Expected 2 receipts in list, got %d", len(receiptsList))
 	}
 
-	receipt := receiptsList[0]
+	// Verify legacy receipt (type 0)
+	receipt0 := receiptsList[0]
+	if receipt0.Type != types.LegacyTxType {
+		t.Errorf("Expected receipt[0] Type %d (legacy), got %d", types.LegacyTxType, receipt0.Type)
+	}
+	if receipt0.CumulativeGasUsed != 21000 {
+		t.Errorf("Expected receipt[0] CumulativeGasUsed 21000, got %d", receipt0.CumulativeGasUsed)
+	}
 
-	// Verify the receipt was decoded correctly
-	if receipt.CumulativeGasUsed != 21000 {
-		t.Errorf("Expected CumulativeGasUsed 21000, got %d", receipt.CumulativeGasUsed)
+	// Verify typed receipt (DynamicFee, type 2) — this is the critical case:
+	// ETH69 requires typed receipts to be list-encoded [type, status, gas, logs],
+	// NOT the old byte-string envelope (type_byte || rlp(data)) used in ETH68.
+	receipt1 := receiptsList[1]
+	if receipt1.Type != types.DynamicFeeTxType {
+		t.Errorf("Expected receipt[1] Type %d (DynamicFee), got %d", types.DynamicFeeTxType, receipt1.Type)
+	}
+	if receipt1.CumulativeGasUsed != 42000 {
+		t.Errorf("Expected receipt[1] CumulativeGasUsed 42000, got %d", receipt1.CumulativeGasUsed)
 	}
 }
 
@@ -132,6 +163,9 @@ type mockSentryClient struct {
 	sendMessageByIdFunc  func(ctx context.Context, req *proto_sentry.SendMessageByIdRequest, opts ...grpc.CallOption) (*proto_sentry.SentPeers, error)
 	sendMessageToAllFunc func(ctx context.Context, req *proto_sentry.OutboundMessageData, opts ...grpc.CallOption) (*proto_sentry.SentPeers, error)
 	handShakeFunc        func(ctx context.Context, req *emptypb.Empty, opts ...grpc.CallOption) (*proto_sentry.HandShakeReply, error)
+	penalizePeerFunc     func(ctx context.Context, req *proto_sentry.PenalizePeerRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
+	setStatusFunc        func(ctx context.Context, req *proto_sentry.StatusData, opts ...grpc.CallOption) (*proto_sentry.SetStatusReply, error)
+	messagesFunc         func(ctx context.Context, req *proto_sentry.MessagesRequest, opts ...grpc.CallOption) (proto_sentry.Sentry_MessagesClient, error)
 }
 
 func (m *mockSentryClient) SendMessageById(ctx context.Context, req *proto_sentry.SendMessageByIdRequest, opts ...grpc.CallOption) (*proto_sentry.SentPeers, error) {
@@ -146,8 +180,70 @@ func (m *mockSentryClient) HandShake(ctx context.Context, req *emptypb.Empty, op
 	return m.handShakeFunc(ctx, req, opts...)
 }
 
+func (m *mockSentryClient) SetStatus(ctx context.Context, req *proto_sentry.StatusData, opts ...grpc.CallOption) (*proto_sentry.SetStatusReply, error) {
+	return m.setStatusFunc(ctx, req, opts...)
+}
+
+func (m *mockSentryClient) Messages(ctx context.Context, req *proto_sentry.MessagesRequest, opts ...grpc.CallOption) (proto_sentry.Sentry_MessagesClient, error) {
+	return m.messagesFunc(ctx, req, opts...)
+}
+
+func (m *mockSentryClient) PenalizePeer(ctx context.Context, req *proto_sentry.PenalizePeerRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	if m.penalizePeerFunc == nil {
+		return &emptypb.Empty{}, nil
+	}
+	return m.penalizePeerFunc(ctx, req, opts...)
+}
+
 type mockBlockReader struct {
-	services.FullBlockReader
+	dbservices.FullBlockReader
+}
+
+// TestBlockRange69_InvalidPacketKicksPeer verifies that an invalid
+// BlockRangeUpdate (e.g. Earliest > Latest) causes the peer to be penalized.
+// This mirrors the Hive `TestBlockRangeUpdateInvalid` simulator check.
+func TestBlockRange69_InvalidPacketKicksPeer(t *testing.T) {
+	ctx := context.Background()
+
+	peerId := &proto_types.H512{
+		Hi: &proto_types.H256{Hi: &proto_types.H128{}, Lo: &proto_types.H128{}},
+		Lo: &proto_types.H256{Hi: &proto_types.H128{}, Lo: &proto_types.H128{}},
+	}
+
+	// Packet with Earliest > Latest is invalid per BlockRangeUpdatePacket.Validate.
+	invalid := eth.BlockRangeUpdatePacket{
+		Earliest:   10,
+		Latest:     8,
+		LatestHash: common.HexToHash("0xdeadbeef"),
+	}
+	payload, err := rlp.EncodeToBytes(&invalid)
+	if err != nil {
+		t.Fatalf("encode packet: %v", err)
+	}
+
+	var penalized *proto_sentry.PenalizePeerRequest
+	mockSentry := &mockSentryClient{
+		penalizePeerFunc: func(_ context.Context, req *proto_sentry.PenalizePeerRequest, _ ...grpc.CallOption) (*emptypb.Empty, error) {
+			penalized = req
+			return &emptypb.Empty{}, nil
+		},
+	}
+
+	cs := &MultiClient{logger: log.New()}
+
+	if err := cs.blockRange69(ctx, &proto_sentry.InboundMessage{
+		PeerId: peerId,
+		Data:   payload,
+	}, mockSentry); err == nil {
+		t.Fatal("expected validation error, got nil")
+	}
+
+	if penalized == nil {
+		t.Fatal("expected PenalizePeer to be called, got nil")
+	}
+	if penalized.Penalty != proto_sentry.PenaltyKind_Kick {
+		t.Fatalf("expected Kick penalty, got %v", penalized.Penalty)
+	}
 }
 
 type mockReceiptsGenerator struct {
@@ -167,11 +263,424 @@ func (m *mockStatusDataProvider) GetStatusData(ctx context.Context) (*proto_sent
 	return m.getStatusDataFunc(ctx)
 }
 
-type mockFullBlockReader struct {
-	services.FullBlockReader
-	readyFunc func(ctx context.Context) <-chan error
+// balHeaderNumberReader is a minimal dbservices.FullBlockReader stub that resolves
+// hash → block-number via an explicit map. AnswerGetBlockAccessListsQuery only
+// reads HeaderNumber; every other method falls through to the embedded nil
+// interface and would panic if called, which is the correct behaviour — it
+// flags accidental coupling.
+type balHeaderNumberReader struct {
+	dbservices.FullBlockReader
+	byHash map[common.Hash]uint64
 }
 
-func (m *mockFullBlockReader) Ready(ctx context.Context) <-chan error {
-	return m.readyFunc(ctx)
+func (m *balHeaderNumberReader) TxnumReader() rawdbv3.TxNumsReader {
+	return rawdbv3.TxNums
+}
+
+func (m *balHeaderNumberReader) HeaderNumber(_ context.Context, _ kv.Getter, hash common.Hash) (*uint64, error) {
+	n, ok := m.byHash[hash]
+	if !ok {
+		return nil, nil
+	}
+	return &n, nil
+}
+
+// TestGetBlockAccessLists71_AnswersAndSends covers the server-side eth/71 BAL
+// handler: decode an inbound GetBlockAccessLists request, look up stored BALs
+// from rawdb via AnswerGetBlockAccessListsQuery, encode a positionally-aligned
+// BlockAccessLists response, send it back to the requesting peer with the
+// matching RequestId. Pairs with the inbound-subscription fix on the *client*
+// side — without both, peers can't actually exchange BALs.
+func TestGetBlockAccessLists71_AnswersAndSends(t *testing.T) {
+	ctx := context.Background()
+
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	rwTx, err := db.BeginRw(ctx)
+	if err != nil {
+		t.Fatalf("begin rw: %v", err)
+	}
+	defer rwTx.Rollback() // safety net; we Commit below on the happy path
+
+	hashKnown := common.Hash{0x01}
+	hashUnknown := common.Hash{0x02}
+	const knownBlockNum uint64 = 100
+	bal := []byte{0xc3, 0x01, 0x02, 0x03} // short valid RLP non-empty payload
+	if err := rawdb.WriteBlockAccessListBytes(rwTx, hashKnown, knownBlockNum, bal); err != nil {
+		t.Fatalf("WriteBlockAccessListBytes: %v", err)
+	}
+	if err := rwTx.Commit(); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	reader := &balHeaderNumberReader{
+		byHash: map[common.Hash]uint64{hashKnown: knownBlockNum},
+	}
+
+	var sent *proto_sentry.SendMessageByIdRequest
+	mockSentry := &mockSentryClient{
+		sendMessageByIdFunc: func(_ context.Context, req *proto_sentry.SendMessageByIdRequest, _ ...grpc.CallOption) (*proto_sentry.SentPeers, error) {
+			sent = req
+			return &proto_sentry.SentPeers{}, nil
+		},
+	}
+
+	cs := &MultiClient{
+		db:          db,
+		blockReader: reader,
+		logger:      log.New(),
+	}
+
+	const reqID uint64 = 0xcafebabe
+	req := eth.GetBlockAccessListsPacket66{
+		RequestId:                 reqID,
+		GetBlockAccessListsPacket: eth.GetBlockAccessListsPacket{hashKnown, hashUnknown},
+	}
+	encoded, err := rlp.EncodeToBytes(&req)
+	if err != nil {
+		t.Fatalf("encode request: %v", err)
+	}
+
+	if err := cs.getBlockAccessLists71(ctx, &proto_sentry.InboundMessage{
+		Id:   proto_sentry.MessageId_GET_BLOCK_ACCESS_LISTS_71,
+		Data: encoded,
+		PeerId: &proto_types.H512{
+			Hi: &proto_types.H256{Hi: &proto_types.H128{}, Lo: &proto_types.H128{}},
+			Lo: &proto_types.H256{Hi: &proto_types.H128{}, Lo: &proto_types.H128{}},
+		},
+	}, mockSentry); err != nil {
+		t.Fatalf("getBlockAccessLists71: %v", err)
+	}
+	if sent == nil {
+		t.Fatal("no response sent")
+	}
+	if sent.Data.Id != proto_sentry.MessageId_BLOCK_ACCESS_LISTS_71 {
+		t.Fatalf("response message id: have %v, want BLOCK_ACCESS_LISTS_71", sent.Data.Id)
+	}
+
+	var resp eth.BlockAccessListsPacket66
+	if err := rlp.DecodeBytes(sent.Data.Data, &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.RequestId != reqID {
+		t.Fatalf("RequestId: have %d, want %d", resp.RequestId, reqID)
+	}
+	if got := len(resp.BlockAccessListsPacket); got != 2 {
+		t.Fatalf("response length: have %d, want 2 (positionally aligned to query)", got)
+	}
+	if !bytes.Equal(resp.BlockAccessListsPacket[0], bal) {
+		t.Errorf("response[0] (known+BAL): have %x, want %x", resp.BlockAccessListsPacket[0], bal)
+	}
+	// Unknown block — sentinel 0x80 ("not available"), not padded with anything else.
+	if !bytes.Equal(resp.BlockAccessListsPacket[1], []byte{0x80}) {
+		t.Errorf("response[1] (unknown block): have %x, want 0x80 sentinel", resp.BlockAccessListsPacket[1])
+	}
+}
+
+type balGetterFunc func(context.Context, *chain.Config, kv.TemporalTx, common.Hash, uint64) ([]byte, error)
+
+func (f balGetterFunc) GetBlockAccessListBytes(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, hash common.Hash, number uint64, beforeReplay func() error) ([]byte, error) {
+	if beforeReplay != nil {
+		if err := beforeReplay(); err != nil {
+			return nil, err
+		}
+	}
+	return f(ctx, cfg, tx, hash, number)
+}
+
+type cachedBALGetter struct {
+	balGetterFunc
+	cached map[common.Hash][]byte
+}
+
+func (g cachedBALGetter) GetBlockAccessListBytes(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, hash common.Hash, number uint64, beforeReplay func() error) ([]byte, error) {
+	if bal, ok := g.cached[hash]; ok {
+		return bal, nil
+	}
+	return g.balGetterFunc.GetBlockAccessListBytes(ctx, cfg, tx, hash, number, beforeReplay)
+}
+
+func newBALTestClient(t *testing.T) *MultiClient {
+	t.Helper()
+	dirs := datadir.New(t.TempDir())
+	db := temporaltest.NewTestDB(t, dirs)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return rawdb.WriteBlockAccessListBytes(tx, common.Hash{1}, 1, []byte{0xc0})
+	}))
+	reader := &balHeaderNumberReader{byHash: map[common.Hash]uint64{{1}: 1, {2}: 2, {3}: 3}}
+	cs, err := NewMultiClient(dirs, db, chain.AllProtocolChanges, nil, nil, reader, nil, false, log.New())
+	require.NoError(t, err)
+	return cs
+}
+
+func queryBALs(ctx context.Context, cs *MultiClient, query eth.GetBlockAccessListsPacket) ([]rlp.RawValue, error) {
+	request := eth.GetBlockAccessListsPacket66{RequestId: 42, GetBlockAccessListsPacket: query}
+	encoded, err := rlp.EncodeToBytes(request)
+	if err != nil {
+		return nil, err
+	}
+	var response eth.BlockAccessListsPacket66
+	sentry := &mockSentryClient{
+		sendMessageByIdFunc: func(ctx context.Context, req *proto_sentry.SendMessageByIdRequest, _ ...grpc.CallOption) (*proto_sentry.SentPeers, error) {
+			if err := ctx.Err(); err != nil {
+				return nil, fmt.Errorf("reply uses an expired context: %w", err)
+			}
+			return &proto_sentry.SentPeers{}, rlp.DecodeBytes(req.Data.Data, &response)
+		},
+	}
+	if err := cs.getBlockAccessLists71(ctx, &proto_sentry.InboundMessage{Data: encoded}, sentry); err != nil {
+		return nil, err
+	}
+	if request.RequestId != response.RequestId {
+		return nil, fmt.Errorf("response request ID %d, want %d", response.RequestId, request.RequestId)
+	}
+	return response.BlockAccessListsPacket, nil
+}
+
+func requireBALs(t *testing.T, cs *MultiClient, query eth.GetBlockAccessListsPacket) []rlp.RawValue {
+	t.Helper()
+	response, err := queryBALs(t.Context(), cs, query)
+	require.NoError(t, err)
+	return response
+}
+
+func TestGetBlockAccessLists71_ReplayDeadline(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		cs := newBALTestClient(t)
+		calls := 0
+		cs.balGenerator = balGetterFunc(func(ctx context.Context, _ *chain.Config, _ kv.TemporalTx, _ common.Hash, _ uint64) ([]byte, error) {
+			calls++
+			deadline, ok := ctx.Deadline()
+			if !ok {
+				t.Error("BAL regeneration has no request deadline")
+				return nil, context.DeadlineExceeded
+			}
+			require.LessOrEqual(t, time.Until(deadline), time.Second)
+			<-ctx.Done()
+			return nil, ctx.Err()
+		})
+		response := requireBALs(t, cs, eth.GetBlockAccessListsPacket{{1}, {2}, {3}})
+		require.Equal(t, []rlp.RawValue{{0xc0}}, response)
+		require.Equal(t, 1, calls, "a timed-out request must not start another replay")
+	})
+}
+
+func TestGetBlockAccessLists71_ReplayRateLimit(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		cs := newBALTestClient(t)
+		calls := 0
+		cs.balGenerator = balGetterFunc(func(context.Context, *chain.Config, kv.TemporalTx, common.Hash, uint64) ([]byte, error) {
+			calls++
+			return []byte{0xc0}, nil
+		})
+
+		require.Equal(t, []rlp.RawValue{{0xc0}, {0x80}}, requireBALs(t, cs, eth.GetBlockAccessListsPacket{{1}, {99}}))
+		require.Zero(t, calls, "stored and unknown blocks must not consume the replay budget")
+		require.Equal(t, []rlp.RawValue{{0xc0}, {0xc0}}, requireBALs(t, cs, eth.GetBlockAccessListsPacket{{2}, {3}}))
+		require.Equal(t, 2, calls, "one replay budget covers a batch")
+
+		require.Empty(t, requireBALs(t, cs, eth.GetBlockAccessListsPacket{{2}}))
+		require.Equal(t, []rlp.RawValue{{0xc0}}, requireBALs(t, cs, eth.GetBlockAccessListsPacket{{1}, {3}}))
+		require.Equal(t, 2, calls, "throttled requests must not replay blocks")
+
+		time.Sleep(time.Second)
+		require.Equal(t, []rlp.RawValue{{0xc0}}, requireBALs(t, cs, eth.GetBlockAccessListsPacket{{2}}))
+		require.Equal(t, 3, calls, "replay must resume after the budget refills")
+	})
+}
+
+type balPreflightReader struct {
+	dbservices.FullBlockReader
+	header *types.Header
+}
+
+func (r balPreflightReader) Header(context.Context, kv.Getter, common.Hash, uint64) (*types.Header, error) {
+	return r.header, nil
+}
+
+func (r balPreflightReader) CanonicalHash(context.Context, kv.Getter, uint64) (common.Hash, bool, error) {
+	return common.Hash{99}, true, nil
+}
+
+func TestGetBlockAccessLists71_PreflightBypassesReplayBudget(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		header *types.Header
+	}{
+		{name: "missing header"},
+		{name: "pre-Amsterdam", header: &types.Header{}},
+		{name: "non-canonical", header: &types.Header{BlockAccessListHash: &common.Hash{8}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				cs := newBALTestClient(t)
+				reader := balPreflightReader{FullBlockReader: cs.blockReader, header: tc.header}
+				cs.balGenerator = bal.NewRegenerator(reader, nil, log.New())
+				query := make(eth.GetBlockAccessListsPacket, eth.MaxBlockAccessListsRegenerate+1)
+				unavailable := make([]rlp.RawValue, len(query))
+				for i := range query {
+					query[i] = common.Hash{2}
+					unavailable[i] = rlp.RawValue{0x80}
+				}
+
+				require.Equal(t, unavailable, requireBALs(t, cs, query), "rejected preflight must not consume the per-request replay count")
+				require.True(t, cs.balReplayLimiter.Allow(), "rejected preflight must leave the replay budget available")
+				require.Equal(t, unavailable, requireBALs(t, cs, query), "preflight must still answer while replay is throttled")
+			})
+		})
+	}
+}
+
+func TestGetBlockAccessLists71_CompletedReplayAfterDeadline(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		cs := newBALTestClient(t)
+		calls := 0
+		cs.balGenerator = balGetterFunc(func(ctx context.Context, _ *chain.Config, _ kv.TemporalTx, _ common.Hash, _ uint64) ([]byte, error) {
+			calls++
+			<-ctx.Done()
+			return []byte{0xc0}, nil
+		})
+
+		response := requireBALs(t, cs, eth.GetBlockAccessListsPacket{{1}, {2}, {3}})
+		require.Equal(t, []rlp.RawValue{{0xc0}, {0xc0}}, response, "keep a completed BAL even if the deadline expires before it is returned")
+		require.Equal(t, 1, calls, "a timed-out request must not start another replay")
+	})
+}
+
+func TestGetBlockAccessLists71_CacheBypassesReplayBudget(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		cs := newBALTestClient(t)
+		calls := 0
+		cs.balGenerator = cachedBALGetter{
+			cached: map[common.Hash][]byte{{2}: {0xc0}},
+			balGetterFunc: func(context.Context, *chain.Config, kv.TemporalTx, common.Hash, uint64) ([]byte, error) {
+				calls++
+				return []byte{0xc0}, nil
+			},
+		}
+
+		require.Equal(t, []rlp.RawValue{{0xc0}}, requireBALs(t, cs, eth.GetBlockAccessListsPacket{{2}}))
+		require.Zero(t, calls, "a cache hit must not start replay")
+		require.Equal(t, []rlp.RawValue{{0xc0}}, requireBALs(t, cs, eth.GetBlockAccessListsPacket{{3}}))
+		require.Equal(t, 1, calls, "a cache hit must leave the replay budget available")
+
+		require.Equal(t, []rlp.RawValue{{0xc0}}, requireBALs(t, cs, eth.GetBlockAccessListsPacket{{2}, {3}}))
+		require.Equal(t, 1, calls, "cached BALs must remain available while replay is throttled")
+	})
+}
+
+type slowBALReader struct {
+	dbservices.FullBlockReader
+	loadBlock func(context.Context) error
+}
+
+func (r slowBALReader) Header(context.Context, kv.Getter, common.Hash, uint64) (*types.Header, error) {
+	return &types.Header{BlockAccessListHash: &common.Hash{8}}, nil
+}
+
+func (r slowBALReader) CanonicalHash(_ context.Context, _ kv.Getter, number uint64) (common.Hash, bool, error) {
+	return common.Hash{byte(number)}, true, nil
+}
+
+func (r slowBALReader) CanonicalBodyForStorage(context.Context, kv.Getter, uint64) (*types.BodyForStorage, error) {
+	return &types.BodyForStorage{}, nil
+}
+
+func (r slowBALReader) BlockWithSenders(ctx context.Context, _ kv.Getter, _ common.Hash, _ uint64) (*types.Block, []common.Address, error) {
+	return nil, nil, r.loadBlock(ctx)
+}
+
+func TestGetBlockAccessLists71_ReplayRemainsExclusiveAfterDeadline(t *testing.T) {
+	cs := newBALTestClient(t)
+	var calls atomic.Int32
+	deadlineReached := make(chan struct{})
+	release := make(chan struct{})
+	unblockReplay := sync.OnceFunc(func() { close(release) })
+	var requests sync.WaitGroup
+	defer func() {
+		unblockReplay()
+		requests.Wait()
+	}()
+	reader := slowBALReader{FullBlockReader: cs.blockReader, loadBlock: func(ctx context.Context) error {
+		if calls.Add(1) == 1 {
+			<-ctx.Done()
+			close(deadlineReached)
+			// Cancellation cannot interrupt every database operation immediately.
+			<-release
+			return ctx.Err()
+		}
+		return nil
+	}}
+	cs.balGenerator = bal.NewRegenerator(reader, nil, log.New())
+	var firstResponse []rlp.RawValue
+	firstDone := make(chan error, 1)
+	requests.Go(func() {
+		var err error
+		firstResponse, err = queryBALs(t.Context(), cs, eth.GetBlockAccessListsPacket{{1}, {2}})
+		firstDone <- err
+	})
+	select {
+	case <-deadlineReached:
+	case err := <-firstDone:
+		require.NoError(t, err)
+		t.Fatal("replay returned before reaching its deadline")
+	}
+	time.Sleep(time.Second)
+
+	var secondResponse []rlp.RawValue
+	secondDone := make(chan error, 1)
+	requests.Go(func() {
+		var err error
+		secondResponse, err = queryBALs(t.Context(), cs, eth.GetBlockAccessListsPacket{{1}, {2}})
+		secondDone <- err
+	})
+	select {
+	case err := <-secondDone:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("request waiting for the same block did not return after its deadline")
+	}
+	require.Equal(t, []rlp.RawValue{{0xc0}}, secondResponse)
+	require.Equal(t, []rlp.RawValue{{0xc0}}, requireBALs(t, cs, eth.GetBlockAccessListsPacket{{1}}))
+	assert.Equal(t, []rlp.RawValue{{0xc0}}, requireBALs(t, cs, eth.GetBlockAccessListsPacket{{1}, {3}}))
+	assert.Equal(t, int32(1), calls.Load(), "a refilled rate budget must not allow overlapping replay")
+	unblockReplay()
+	require.NoError(t, <-firstDone)
+	require.Equal(t, []rlp.RawValue{{0xc0}}, firstResponse)
+
+	require.Equal(t, []rlp.RawValue{{0x80}}, requireBALs(t, cs, eth.GetBlockAccessListsPacket{{3}}))
+	require.Equal(t, int32(2), calls.Load(), "the replay slot must be released when work actually finishes")
+}
+
+func TestUploadStreams_SeparateBALReplay(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	var subscribed []proto_sentry.MessageId
+	sentry := &mockSentryClient{
+		handShakeFunc: func(context.Context, *emptypb.Empty, ...grpc.CallOption) (*proto_sentry.HandShakeReply, error) {
+			return &proto_sentry.HandShakeReply{}, nil
+		},
+		setStatusFunc: func(context.Context, *proto_sentry.StatusData, ...grpc.CallOption) (*proto_sentry.SetStatusReply, error) {
+			return &proto_sentry.SetStatusReply{}, nil
+		},
+		messagesFunc: func(_ context.Context, req *proto_sentry.MessagesRequest, _ ...grpc.CallOption) (proto_sentry.Sentry_MessagesClient, error) {
+			subscribed = req.Ids
+			cancel()
+			return nil, context.Canceled
+		},
+	}
+	cs := &MultiClient{
+		logger: log.New(),
+		statusDataProvider: &mockStatusDataProvider{getStatusDataFunc: func(context.Context) (*proto_sentry.StatusData, error) {
+			return &proto_sentry.StatusData{}, nil
+		}},
+	}
+	cs.RecvUploadMessageLoop(ctx, sentry, nil)
+	require.Contains(t, subscribed, proto_sentry.MessageId_GET_BLOCK_BODIES_66)
+	require.Contains(t, subscribed, proto_sentry.MessageId_GET_RECEIPTS_66)
+	require.NotContains(t, subscribed, proto_sentry.MessageId_GET_BLOCK_ACCESS_LISTS_71, "BAL replay must not block bodies or receipts")
+
+	ctx, cancel = context.WithCancel(t.Context())
+	defer cancel()
+	cs.RecvUploadBlockAccessListsMessageLoop(ctx, sentry, nil)
+	require.Equal(t, []proto_sentry.MessageId{proto_sentry.MessageId_GET_BLOCK_ACCESS_LISTS_71}, subscribed)
 }

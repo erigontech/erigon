@@ -23,7 +23,6 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
@@ -56,13 +55,10 @@ func NewSyncContributionPool(beaconCfg *clparams.BeaconChainConfig) SyncContribu
 	}
 }
 
-func getSyncCommitteeFromState(s *state.CachingBeaconState) *solid.SyncCommittee {
-	cfg := s.BeaconConfig()
-	if cfg.SyncCommitteePeriod(s.Slot()) == cfg.SyncCommitteePeriod(s.Slot()+1) {
-		return s.CurrentSyncCommittee()
-	}
-	return s.NextSyncCommittee()
-
+// syncAggregationBitsSize returns the number of bytes needed for the AggregationBits
+// field of a SyncCommittee contribution (SyncCommitteeSize / SubnetCount / 8).
+func (s *syncContributionPoolImpl) syncAggregationBitsSize() int {
+	return int(s.beaconCfg.SyncCommitteeSize) / int(s.beaconCfg.SyncCommitteeSubnetCount) / 8
 }
 
 func (s *syncContributionPoolImpl) AddSyncContribution(headState *state.CachingBeaconState, contribution *cltypes.Contribution) error {
@@ -105,21 +101,25 @@ func (s *syncContributionPoolImpl) GetSyncContribution(slot, subcommitteeIndex u
 			Slot:              slot,
 			SubcommitteeIndex: subcommitteeIndex,
 			BeaconBlockRoot:   beaconBlockRoot,
-			AggregationBits:   make([]byte, cltypes.SyncCommitteeAggregationBitsSize),
+			AggregationBits:   make([]byte, s.syncAggregationBitsSize()),
 			Signature:         bls.InfiniteSignature,
 		}
 	}
 	return contribution.Copy()
 }
 
+// cleanupOldContributions keeps the contributions from the head's slot to one epoch after it: after
+// empty slots the next proposer and aggregators read slots past the head, and a stalled head must
+// not let later slots pile up.
 func (s *syncContributionPoolImpl) cleanupOldContributions(headState *state.CachingBeaconState) {
+	first, last := headState.Slot(), headState.Slot()+s.beaconCfg.SlotsPerEpoch
 	for key := range s.syncContributionPoolForAggregates {
-		if headState.Slot() != key.slot {
+		if key.slot < first || key.slot > last {
 			delete(s.syncContributionPoolForAggregates, key)
 		}
 	}
 	for key := range s.syncContributionPoolForBlocks {
-		if headState.Slot() != key.slot {
+		if key.slot < first || key.slot > last {
 			delete(s.syncContributionPoolForBlocks, key)
 		}
 	}
@@ -145,7 +145,7 @@ func (s *syncContributionPoolImpl) AddSyncCommitteeMessage(headState *state.Cach
 			Slot:              message.Slot,
 			SubcommitteeIndex: subCommittee,
 			BeaconBlockRoot:   message.BeaconBlockRoot,
-			AggregationBits:   make([]byte, cltypes.SyncCommitteeAggregationBitsSize),
+			AggregationBits:   make([]byte, s.syncAggregationBitsSize()),
 			Signature:         bls.InfiniteSignature,
 		}
 	}
@@ -157,8 +157,12 @@ func (s *syncContributionPoolImpl) AddSyncCommitteeMessage(headState *state.Cach
 		return err
 	}
 
+	syncCommittee, err := state.SyncCommitteeForMessageSlot(headState, message.Slot)
+	if err != nil {
+		return err
+	}
 	signatures := [][]byte{}
-	committee := getSyncCommitteeFromState(headState).GetCommittee()
+	committee := syncCommittee.GetCommittee()
 	subCommitteeSize := cfg.SyncCommitteeSize / cfg.SyncCommitteeSubnetCount
 	startSubCommittee := subCommittee * subCommitteeSize
 	for i := startSubCommittee; i < startSubCommittee+subCommitteeSize; i++ {
@@ -168,7 +172,7 @@ func (s *syncContributionPoolImpl) AddSyncCommitteeMessage(headState *state.Cach
 			}
 			utils.FlipBitOn(contribution.AggregationBits, int(i-startSubCommittee))
 			// Note: it's possible that one validator appears multiple times in the subcommittee.
-			signatures = append(signatures, common.Copy(message.Signature[:]))
+			signatures = append(signatures, bytes.Clone(message.Signature[:]))
 		}
 	}
 	if len(signatures) == 0 {
@@ -176,7 +180,7 @@ func (s *syncContributionPoolImpl) AddSyncCommitteeMessage(headState *state.Cach
 		return errors.New("validator not found in sync committee")
 	}
 	// Compute the aggregated signature.
-	signatures = append(signatures, common.Copy(contribution.Signature[:]))
+	signatures = append(signatures, bytes.Clone(contribution.Signature[:]))
 	aggregatedSignature, err := bls.AggregateSignatures(signatures)
 	if err != nil {
 		return err
@@ -216,42 +220,43 @@ func (s *syncContributionPoolImpl) GetSyncAggregate(slot uint64, beaconBlockRoot
 			contributions = append(contributions, contribution)
 		}
 	}
+	bitsSize := int(s.beaconCfg.SyncCommitteeSize) / 8
 	if len(contributions) == 0 {
-		return &cltypes.SyncAggregate{ // return an empty aggregate.
-			SyncCommiteeSignature: bls.InfiniteSignature,
-		}, nil
+		agg := cltypes.NewSyncAggregateWithSize(bitsSize)
+		agg.SyncCommiteeSignature = bls.InfiniteSignature
+		return agg, nil
 	}
-	aggregate := &cltypes.SyncAggregate{}
+	aggregate := cltypes.NewSyncAggregateWithSize(bitsSize)
 	signatures := [][]byte{}
 	syncSubCommitteeSize := s.beaconCfg.SyncCommitteeSize / s.beaconCfg.SyncCommitteeSubnetCount
 	// triple for-loop for the win.
 	for _, contribution := range contributions {
-		if bytes.Equal(contribution.AggregationBits, make([]byte, cltypes.SyncCommitteeAggregationBitsSize)) {
+		if bytes.Equal(contribution.AggregationBits, make([]byte, s.syncAggregationBitsSize())) {
 			continue
 		}
 		for i := range contribution.AggregationBits {
-			for j := 0; j < 8; j++ {
+			for j := range 8 {
 				bitIndex := i*8 + j
 				participated := utils.IsBitOn(contribution.AggregationBits, bitIndex)
 				if participated {
 					participantIndex := syncSubCommitteeSize*contribution.SubcommitteeIndex + uint64(bitIndex)
-					utils.FlipBitOn(aggregate.SyncCommiteeBits[:], int(participantIndex))
+					utils.FlipBitOn(aggregate.SyncCommiteeBits, int(participantIndex))
 				}
 			}
 		}
 		signatures = append(signatures, contribution.Signature[:])
 	}
 	if len(signatures) == 0 {
-		return &cltypes.SyncAggregate{ // return an empty aggregate.
-			SyncCommiteeSignature: bls.InfiniteSignature,
-		}, nil
+		agg := cltypes.NewSyncAggregateWithSize(bitsSize)
+		agg.SyncCommiteeSignature = bls.InfiniteSignature
+		return agg, nil
 	}
 	// Aggregate the signatures.
 	aggregateSignature, err := bls.AggregateSignatures(signatures)
 	if err != nil {
-		return &cltypes.SyncAggregate{ // return an empty aggregate.
-			SyncCommiteeSignature: bls.InfiniteSignature,
-		}, err
+		agg := cltypes.NewSyncAggregateWithSize(bitsSize)
+		agg.SyncCommiteeSignature = bls.InfiniteSignature
+		return agg, err
 	}
 	copy(aggregate.SyncCommiteeSignature[:], aggregateSignature)
 	return aggregate, nil

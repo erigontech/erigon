@@ -269,7 +269,7 @@ func (g *Gammas) Unmarshal(m []byte) error {
 	}
 	n := len(m) / blst.BLST_P2_COMPRESS_BYTES
 	*g = make(Gammas, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		p := new(blst.P2Affine)
 		p = p.Uncompress(m[i*blst.BLST_P2_COMPRESS_BYTES : (i+1)*blst.BLST_P2_COMPRESS_BYTES])
 		if p == nil {

@@ -44,12 +44,7 @@ func Verify(
 	if dataDir != "" {
 		dirs = datadir.Open(dataDir)
 	}
-	err = snapcfg.LoadPreverified(ctx, preverifiedFlagValue, &dirs)
-	if err != nil {
-		return
-	}
-	allPreverified := snapcfg.GetAllCurrentPreverified()
-	chains := selectChains(targetChain, snapcfg.KnownWebseeds)
+	chains := selectChains(targetChain, snapcfg.EmbeddedWebseeds)
 	if len(chains) == 0 {
 		err = errors.New("no matching chains")
 		return
@@ -68,17 +63,23 @@ func Verify(
 	}
 	g.MakeMapWithCap(&checker.state, len(chains))
 	defer func() {
-		items.Wait()
+		// The early-return err takes priority; the normal path already returns items.Wait().
+		_ = items.Wait()
 		// Strict evaluation for the win.
 		err = cmp.Or(err, json.NewEncoder(os.Stdout).Encode(checker.state))
 		logger.Info("finished check",
-			"total bytes read", checker.totalBytesRead.Load(),
-			"total request count", checker.totalRequestCount.Load())
+			"totalBytesRead", checker.totalBytesRead.Load(),
+			"totalRequestCount", checker.totalRequestCount.Load())
 	}()
 	for _, chain := range chains {
 		// Shift left?
 		//
-		webseeds := g.MapMustGet(snapcfg.KnownWebseeds, chain)
+		err = snapcfg.LoadPreverified(ctx, preverifiedFlagValue, &dirs, chain, "")
+		if err != nil {
+			return
+		}
+		cfg, _ := snapcfg.KnownCfg(chain)
+		webseeds, _ := snapcfg.GetEmbeddedWebseeds(chain)
 		var baseUrl string
 		err := errors.New("no valid webseeds")
 		for _, webseed := range webseeds {
@@ -88,7 +89,7 @@ func Verify(
 			}
 		}
 		panicif.Err(err)
-		preverified := g.MapMustGet(allPreverified, chain)
+		preverified := cfg.Preverified
 		panicif.True(preverified.Local)
 		//
 		// end shift left?
@@ -133,15 +134,15 @@ type itemState struct {
 	Etag               string
 }
 
-func (checker *webseedChecker) submitChain(
+func (me *webseedChecker) submitChain(
 	chain string,
 	baseUrl string,
 	items []preverified.Item,
 	group *errgroup.Group,
 ) error {
-	ctx := checker.ctx
+	ctx := me.ctx
 	chainState := make(map[string]*itemState, len(items))
-	g.MapMustAssignNew(checker.state, chain, chainState)
+	g.MapMustAssignNew(me.state, chain, chainState)
 	for _, item := range items {
 		if ctx.Err() != nil {
 			return context.Cause(ctx)
@@ -159,10 +160,10 @@ func (checker *webseedChecker) submitChain(
 			}()
 			for range 3 {
 				if err != nil {
-					checker.logger.Warn("retrying failed preverified item check", "baseUrl", baseUrl, "item", item, "err", err)
+					me.logger.Warn("retrying failed preverified item check", "baseUrl", baseUrl, "item", item, "err", err)
 				}
 				var done bool
-				done, err = checker.checkPreverifiedItem(baseUrl, item, &state)
+				done, err = me.checkPreverifiedItem(baseUrl, item, &state)
 				if done || ctx.Err() != nil {
 					break
 				}
@@ -196,7 +197,7 @@ func (me *webseedChecker) checkPreverifiedItem(
 	}
 	info, err := mi.UnmarshalInfo()
 	panicif.Err(err)
-	me.logger.Debug("got metainfo", "piece length", info.PieceLength, "length", info.Length)
+	me.logger.Debug("got metainfo", "pieceLength", info.PieceLength, "length", info.Length)
 	dataUrl := baseUrl + "/" + item.Name
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, dataUrl, nil)
 	panicif.Err(err)
@@ -212,14 +213,15 @@ func (me *webseedChecker) checkPreverifiedItem(
 	}
 	etag := resp.Header.Get("ETag")
 	stateItem.Etag = etag
-	me.logger.Debug("item response", "etag", etag, "content length", resp.ContentLength)
+	me.logger.Debug("item response", "etag", etag, "contentLength", resp.ContentLength)
 	done, err = me.matchHashes(&info, resp, stateItem)
 	if err == nil {
 		stateItem.DataMatchesTorrent = true
-		me.logger.Info("snapshot matches",
+		me.logger.Info(
+			"snapshot matches",
 			"url", dataUrl,
 			//"name", item.Name,
-			"content length", resp.ContentLength,
+			"contentLength", resp.ContentLength,
 			//"etag", resp.Header.Get("etag"),
 		)
 	}
@@ -280,7 +282,7 @@ func (me *webseedChecker) yieldHashes(r io.Reader, pieceLength int64, onReadN fu
 			n, err := io.CopyN(h, r, pieceLength)
 			onReadN(n)
 			if err != nil {
-				if err != io.EOF {
+				if !errors.Is(err, io.EOF) {
 					yield(result.Err[metainfo.Hash](err))
 					return
 				}

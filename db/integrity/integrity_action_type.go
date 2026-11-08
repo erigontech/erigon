@@ -16,6 +16,11 @@
 
 package integrity
 
+import (
+	"cmp"
+	"slices"
+)
+
 type Check string
 
 const (
@@ -41,7 +46,7 @@ const (
 
 	// HistoryNoSystemTxs verifies system transactions don't appear at block start.
 	// Samples history data to ensure the first transaction in each block's history
-	// is not a system transaction (except genesis). Used in Polygon chain validation.
+	// is not a system transaction (except genesis).
 	HistoryNoSystemTxs Check = "HistoryNoSystemTxs"
 
 	// ReceiptsNoDups validates receipt data monotonicity. Checks that cumulative gas used
@@ -54,18 +59,6 @@ const (
 	// and CumulativeGasUsed are monotonically increasing. Differs from ReceiptsNoDups in that
 	// it works on the cached representation rather than the raw receipt domain.
 	RCacheNoDups Check = "RCacheNoDups"
-
-	// BorEvents validates Polygon Bor event snapshots (Heimdall events). Only runs on Bor chains.
-	// Checks consistency of Bor bridge events. Skipped silently on non-Bor chains.
-	BorEvents Check = "BorEvents"
-
-	// BorSpans validates Polygon Bor span snapshots (validator spans). Only runs on Bor chains.
-	// Checks consistency of Bor validator span data. Skipped silently on non-Bor chains.
-	BorSpans Check = "BorSpans"
-
-	// BorCheckpoints validates Polygon Bor checkpoint snapshots. Only runs on Bor chains.
-	// Checks consistency of Bor checkpoint data. Skipped silently on non-Bor chains.
-	BorCheckpoints Check = "BorCheckpoints"
 
 	// CommitmentRoot verifies commitment state roots are present and correct. Checks that
 	// each commitment snapshot file contains the state root key, and optionally recomputes
@@ -90,6 +83,13 @@ const (
 	// consistent. This is a statistical check used to catch corruption without checking every value.
 	CommitmentHistVal Check = "CommitmentHistVal"
 
+	// StateRootVerifyByHistory verifies block state roots against commitment history over a
+	// specific block range. For each sampled block, it reads the commitment trie state from
+	// history snapshots and checks that the re-derived root matches the header's stored state
+	// root. Does NOT re-execute transactions — relies solely on history domain reads.
+	// More targeted than CommitmentHistVal when a particular block range is suspect.
+	StateRootVerifyByHistory Check = "StateRootVerifyByHistory"
+
 	// StateVerify verifies state correspondence between commitment and domains. Checks that
 	// every key in account/storage domains is properly referenced by commitment branches,
 	// and vice versa. Catches missing or extra keys. Uses forward check for base files
@@ -108,16 +108,72 @@ const (
 	// snapshots, and required metadata files (salt files). This is the final check before
 	// publishing snapshots for external distribution.
 	Publishable Check = "Publishable"
+
+	// ReceiptRootIntegrity verifies that receipts from RCache domain produce receipt roots
+	// matching block headers. Reads receipts from RCache, computes the receipt root via
+	// DeriveSha, and compares it with block.header.ReceiptHash. Similar to StateRootVerifyByHistory
+	// but for receipt roots instead of state roots.
+	ReceiptRootIntegrity Check = "ReceiptRootIntegrity"
+
+	// CaplinStateRoots verifies frozen caplin block_roots/state_roots snapshots hold a
+	// 32-byte root for every slot. process_slot writes these every slot, so an empty word is
+	// a range frozen before it was reconstructed; such a blank segment shadows the DB and
+	// breaks historical-state reads. Cheap: iterates the .seg words, no DB or re-derivation.
+	CaplinStateRoots Check = "CaplinStateRoots"
+
+	// HistoryVi validates history value accessor files (.vi). Re-derives every value's
+	// offset in the .v file by walking the paired .ef and .v the way the index was
+	// built, and compares it with what the .vi answers. Catches an .vi that does not
+	// belong to its .v as well as a corrupt one.
+	HistoryVi Check = "HistoryVi"
+
+	// CaplinBlobSidecars validates frozen blob sidecars against canonical beacon blocks and their cryptographic proofs.
+	CaplinBlobSidecars Check = "CaplinBlobSidecars"
+
+	// TorrentPieces re-hashes data files against their .torrent piece hashes. It runs as a
+	// pre-pass rather than from the check loop, because only --file-integrity-cache enables
+	// it, but it is named so --skip-check can turn it off like any other check.
+	TorrentPieces Check = "TorrentPieces"
 )
 
+// FastChecks is ordered cheapest → heaviest so time-budgeted runs give unused
+// budget to the heavier checks at the tail.
 var FastChecks = []Check{
-	Blocks, HeaderNoGaps, BlocksTxnID, InvertedIndex, StateProgress, Publishable, HistoryNoSystemTxs,
-	BorEvents, BorSpans, BorCheckpoints, ReceiptsNoDups, RCacheNoDups, CommitmentRoot,
-	CommitmentKvi,
+	Publishable, HeaderNoGaps, BlocksTxnID, Blocks, CaplinStateRoots,
+	ReceiptsNoDups, RCacheNoDups, ReceiptRootIntegrity, InvertedIndex, CommitmentRoot, CommitmentKvi,
+	HistoryNoSystemTxs, CommitmentHistVal, StateRootVerifyByHistory,
 }
 
-var SlowChecks = []Check{CommitmentHistVal, StateVerify}
-var DeprecatedChecks = []Check{
-	CommitmentKvDeref, //StateVerify - will overcome
+var (
+	SlowChecks       = []Check{CaplinBlobSidecars, StateVerify, HistoryVi}
+	DeprecatedChecks = []Check{
+		CommitmentKvDeref, // StateVerify - will overcome
+		StateProgress,
+	}
+)
+var AllChecks = append(append(append([]Check{TorrentPieces}, FastChecks...), SlowChecks...), DeprecatedChecks...)
+
+// SortChecksByCost returns a copy of checks ordered by their position in FastChecks
+// (cheapest → heaviest). Checks not in FastChecks keep their original relative order at the end.
+func SortChecksByCost(checks []Check) []Check {
+	rank := make(map[Check]int, len(FastChecks))
+	for i, c := range FastChecks {
+		rank[c] = i
+	}
+	out := append([]Check{}, checks...)
+	slices.SortStableFunc(out, func(a, b Check) int {
+		ri, oki := rank[a]
+		rj, okj := rank[b]
+		switch {
+		case oki && okj:
+			return cmp.Compare(ri, rj)
+		case oki:
+			return -1
+		case okj:
+			return 1
+		default:
+			return 0
+		}
+	})
+	return out
 }
-var AllChecks = append(append(append([]Check{}, FastChecks...), SlowChecks...), DeprecatedChecks...)

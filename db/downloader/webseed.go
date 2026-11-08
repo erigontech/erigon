@@ -29,6 +29,7 @@ import (
 	"github.com/hashicorp/go-retryablehttp"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snaptype"
 )
 
@@ -220,14 +221,14 @@ func (d *WebSeeds) VerifyManifestedBucket(ctx context.Context, webSeedProviderUR
 func (d *WebSeeds) retrieveManifest(ctx context.Context, webSeedProviderUrl *url.URL) (snaptype.WebSeedsFromProvider, error) {
 	// allow: host.com/v2/manifest.txt
 	u := webSeedProviderUrl.JoinPath("manifest.txt")
-	{ //do HEAD request with small timeout first
+	{ // do HEAD request with small timeout first
 		ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		defer cancel()
 		request, err := http.NewRequestWithContext(ctx, http.MethodHead, u.String(), nil)
 		if err != nil {
 			return nil, err
 		}
-		insertCloudflareHeaders(request)
+		snapcfg.InsertCloudflareHeaders(request)
 		resp, err := d.client.Do(request)
 		if err != nil {
 			return nil, fmt.Errorf("webseed.http: make request: %w, url=%s", err, u.String())
@@ -240,7 +241,7 @@ func (d *WebSeeds) retrieveManifest(ctx context.Context, webSeedProviderUrl *url
 		return nil, err
 	}
 
-	insertCloudflareHeaders(request)
+	snapcfg.InsertCloudflareHeaders(request)
 
 	resp, err := d.client.Do(request)
 	if err != nil {

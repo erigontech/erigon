@@ -38,12 +38,12 @@ type opNode struct {
 	children     []common.Hash
 }
 
-func (impl *optimisticStoreImpl) AddOptimisticCandidate(block *cltypes.BeaconBlock) error {
+func (impl *optimisticStoreImpl) AddOptimisticCandidate(blockRoot common.Hash, block *cltypes.BeaconBlock) error {
 	if block.Body.ExecutionPayload == nil || *block.Body.ExecutionPayload == (cltypes.Eth1Block{}) {
 		return nil
 	}
 
-	root := block.StateRoot
+	root := blockRoot
 	parentRoot := block.ParentRoot
 	impl.opMutex.Lock()
 	defer impl.opMutex.Unlock()
@@ -70,7 +70,7 @@ func (impl *optimisticStoreImpl) AddOptimisticCandidate(block *cltypes.BeaconBlo
 	return nil
 }
 
-func (impl *optimisticStoreImpl) ValidateBlock(block *cltypes.BeaconBlock) error {
+func (impl *optimisticStoreImpl) ValidateBlock(blockRoot common.Hash, block *cltypes.BeaconBlock) error {
 	// When a block transitions from NOT_VALIDATED -> VALID, all ancestors of the block MUST also transition
 	// from NOT_VALIDATED -> VALID. Such a block and any previously NOT_VALIDATED ancestors are no longer considered "optimistically imported".
 	if block.Body.ExecutionPayload == nil || *block.Body.ExecutionPayload == (cltypes.Eth1Block{}) {
@@ -79,7 +79,7 @@ func (impl *optimisticStoreImpl) ValidateBlock(block *cltypes.BeaconBlock) error
 	blockNum := block.Body.ExecutionPayload.BlockNumber
 	impl.opMutex.Lock()
 	defer impl.opMutex.Unlock()
-	curRoot := block.StateRoot
+	curRoot := blockRoot
 	for {
 		if node, ok := impl.optimisticRoots.Load(curRoot); ok {
 			// validate the block
@@ -112,7 +112,7 @@ func (impl *optimisticStoreImpl) ValidateBlock(block *cltypes.BeaconBlock) error
 	return nil
 }
 
-func (impl *optimisticStoreImpl) InvalidateBlock(block *cltypes.BeaconBlock) error {
+func (impl *optimisticStoreImpl) InvalidateBlock(blockRoot common.Hash, block *cltypes.BeaconBlock) error {
 	// When a block transitions from NOT_VALIDATED -> INVALIDATED, all descendants of the block MUST also transition
 	// from NOT_VALIDATED -> INVALIDATED.
 	if block.Body.ExecutionPayload == nil || *block.Body.ExecutionPayload == (cltypes.Eth1Block{}) {
@@ -121,7 +121,7 @@ func (impl *optimisticStoreImpl) InvalidateBlock(block *cltypes.BeaconBlock) err
 	impl.opMutex.Lock()
 	defer impl.opMutex.Unlock()
 	// start from the block to be invalidated, and remove all its descendants
-	toRemoves := []common.Hash{block.StateRoot}
+	toRemoves := []common.Hash{blockRoot}
 	for len(toRemoves) > 0 {
 		curRoot := toRemoves[0]
 		toRemoves = toRemoves[1:]

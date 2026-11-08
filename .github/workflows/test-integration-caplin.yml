@@ -1,20 +1,14 @@
 name: Consensus spec
 on:
-  push:
-    branches:
-      - main
-      - 'release/**'
-  pull_request:
-    branches:
-      - main
-      - 'release/**'
-      - performance
-      - performance-stable
-    types:
-      - opened
-      - reopened
-      - synchronize
-      - ready_for_review
+  workflow_dispatch:
+  workflow_call:
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: read
 
 jobs:
   tests:
@@ -23,49 +17,101 @@ jobs:
         #        disable macos-15 until https://github.com/erigontech/erigon/issues/8789
         os: [ ubuntu-24.04 ] # required check includes runner version. Do not change it only here.
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      actions: write
+    timeout-minutes: 60
 
     steps:
-      - uses: actions/checkout@v6
+      - name: Checkout custom actions
+        uses: actions/checkout@v7
         with:
           fetch-depth: 1
+          persist-credentials: false
 
-      - uses: actions/setup-go@v6
+      - uses: ./.github/actions/setup-erigon
+        id: erigon
         with:
-          go-version: '1.25'
-          cache: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/') }}
+          cache-namespace: test-integration-caplin
 
-      - name: Install dependencies on Linux
-        if: runner.os == 'Linux'
-        run: sudo apt update -y && sudo apt install -y build-essential
+      - name: Cache cl_mainnet tarball
+        uses: actions/cache@v6
+        with:
+          # Only cache the .tar.gz; the extracted dir is recreated by
+          # tools/test-fixtures.sh on each run from the cached tarball.
+          path: test-fixtures-cache/cl_mainnet.tar.gz
+          key: test-fixtures-cl-${{ runner.os }}-${{ hashFiles('test-fixtures.json') }}
+          restore-keys: |
+            test-fixtures-cl-${{ runner.os }}-
 
-      - name: Download consensus spec tests
-        id: download-spec-tests
-        continue-on-error: true
-        run: cd cl/spectest && make download-spec
+      - name: test-integration-caplin
+        run: |
+          cd cl/spectest
+          if make tests; then
+            make mainnet 2>&1 | ../../tools/filter-test-output | tee run.log
+          else
+            echo "::warning::consensus spec test setup failed; skipping mainnet tests"
+          fi
 
-      - name: Run consensus spec tests
-        if: steps.download-spec-tests.outcome == 'success'
-        run: cd cl/spectest && make tests && make mainnet
+      - uses: ./.github/actions/cleanup-erigon
+        if: always()
+
+      # In the merge queue, cancel the run on first failure so the gate
+      # doesn't stall waiting for still-running siblings. PR runs keep
+      # going so authors see the full failure picture.
+      - name: Cancel workflow run on failure
+        if: failure() && github.event_name == 'merge_group'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "::error title=Merge-queue root-cause failure::This job failed and is fast-cancelling the CI Gate run; THIS job is the real failure (the others show as cancelled). See its logs."
+          gh run cancel ${{ github.run_id }} || true
 
   tests-windows:
     strategy:
       matrix:
         os: [ windows-2025 ]
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      actions: write
+    timeout-minutes: 60
 
     steps:
-      - uses: actions/checkout@v6
+      - name: Checkout custom actions
+        uses: actions/checkout@v7
         with:
           fetch-depth: 1
+          persist-credentials: false
 
-      - uses: actions/setup-go@v6
+      - uses: ./.github/actions/setup-erigon
+        id: erigon
         with:
-          go-version: '1.25'
-          cache: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/') }}
+          cache-namespace: test-integration-caplin
 
-      - name: Install make
-        run: choco install make -y
+      - name: Cache cl_mainnet tarball
+        uses: actions/cache@v6
+        with:
+          path: test-fixtures-cache/cl_mainnet.tar.gz
+          key: test-fixtures-cl-${{ runner.os }}-${{ hashFiles('test-fixtures.json') }}
+          restore-keys: |
+            test-fixtures-cl-${{ runner.os }}-
 
       - name: test-integration-caplin
-        shell: bash
-        run: cd cl/spectest && make tests mainnet
+        run: |
+          cd cl/spectest && make tests
+          make mainnet 2>&1 | ../../tools/filter-test-output | tee run.log
+
+      - uses: ./.github/actions/cleanup-erigon
+        if: always()
+
+      # In the merge queue, cancel the run on first failure so the gate
+      # doesn't stall waiting for still-running siblings. PR runs keep
+      # going so authors see the full failure picture.
+      - name: Cancel workflow run on failure
+        if: failure() && github.event_name == 'merge_group'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "::error title=Merge-queue root-cause failure::This job failed and is fast-cancelling the CI Gate run; THIS job is the real failure (the others show as cancelled). See its logs."
+          gh run cancel ${{ github.run_id }} || true

@@ -22,9 +22,9 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"math"
 	"testing"
 
-	"github.com/golang/snappy"
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/protocol"
@@ -34,13 +34,13 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/sentinel/communication"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
-	"github.com/erigontech/erigon/cl/sentinel/peers"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/snappypool"
 )
 
 func TestBlocksByRangeHandler(t *testing.T) {
@@ -60,7 +60,6 @@ func TestBlocksByRangeHandler(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	peersPool := peers.NewPool(host)
 	_, indiciesDB := setupStore(t)
 	store := tests.NewMockBlockReader()
 
@@ -72,9 +71,7 @@ func TestBlocksByRangeHandler(t *testing.T) {
 	count := uint64(10)
 
 	expBlocks := populateDatabaseWithBlocks(t, store, tx, startSlot, count)
-	var blockRoots []common.Hash
-	blockRoots, _, _ = beacon_indicies.ReadBeaconBlockRootsInSlotRange(ctx, tx, startSlot, startSlot+count)
-	tx.Commit()
+	require.NoError(t, tx.Commit())
 
 	ethClock := getEthClock(t)
 	_, beaconCfg := clparams.GetConfigsByNetwork(1)
@@ -83,25 +80,26 @@ func TestBlocksByRangeHandler(t *testing.T) {
 		store,
 		indiciesDB,
 		host,
-		peersPool,
 		&clparams.NetworkConfig{},
 		nil,
 		beaconCfg,
 		ethClock,
-		nil, &mock_services.ForkChoiceStorageMock{}, nil, nil, nil, true,
+		nil, &mock_services.ForkChoiceStorageMock{}, nil, nil, nil, true, nil,
 	)
 	c.Start()
 	var req solid.HashListSSZ = solid.NewHashList(len(expBlocks))
 
-	for _, block := range blockRoots {
-		req.Append(block)
+	for _, block := range expBlocks {
+		root, err := block.Block.HashSSZ()
+		require.NoError(t, err)
+		req.Append(root)
 	}
 	var reqBuf bytes.Buffer
 	if err := ssz_snappy.EncodeAndWrite(&reqBuf, req); err != nil {
 		return
 	}
 
-	reqData := common.Copy(reqBuf.Bytes())
+	reqData := bytes.Clone(reqBuf.Bytes())
 	stream, err := host1.NewStream(ctx, host.ID(), protocol.ID(communication.BeaconBlocksByRootProtocolV2))
 	require.NoError(t, err)
 
@@ -113,18 +111,20 @@ func TestBlocksByRangeHandler(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, firstByte[0], byte(0))
 
-	for i := 0; i < len(blockRoots); i++ {
+	sr := snappypool.Reader(stream)
+	defer snappypool.PutReader(sr)
+	for i := range expBlocks {
 		forkDigest := make([]byte, 4)
 		_, err := stream.Read(forkDigest)
-		if err != nil && err != io.EOF {
+		if err != nil && err != io.EOF { //nolint:errorlint // intentional bare sentinel check
 			require.NoError(t, err)
 		}
 
-		encodedLn, _, err := ssz_snappy.ReadUvarint(stream)
+		encodedLn, err := ssz_snappy.ReadUvarint(stream)
 		require.NoError(t, err)
 
 		raw := make([]byte, encodedLn)
-		sr := snappy.NewReader(stream)
+		sr.Reset(stream)
 		bytesRead := 0
 		for bytesRead < int(encodedLn) {
 			n, err := sr.Read(raw[bytesRead:])
@@ -154,13 +154,166 @@ func TestBlocksByRangeHandler(t *testing.T) {
 		require.Equal(t, expBlocks[i].Block.ParentRoot, block.Block.ParentRoot)
 		require.Equal(t, expBlocks[i].Block.ProposerIndex, block.Block.ProposerIndex)
 		require.Equal(t, expBlocks[i].Block.Body.ExecutionPayload.BlockNumber, block.Block.Body.ExecutionPayload.BlockNumber)
-		stream.Read(make([]byte, 1))
+		if _, err := stream.Read(make([]byte, 1)); err != nil && err != io.EOF { //nolint:errorlint // intentional bare sentinel check
+			require.NoError(t, err)
+		}
 	}
 
 	_, err = stream.Read(make([]byte, 1))
-	if err != io.EOF {
+	if err != io.EOF { //nolint:errorlint // intentional bare sentinel check
 		t.Fatal("Stream is not empty")
 	}
 
-	defer indiciesDB.Close()
+	indiciesDB.Close()
+}
+
+type blocksByRootTester struct {
+	requestRaw func(payload []byte) []byte
+	// clearBuckets empties the rate limiter; requestRaw does not, so requests share a peer bucket.
+	clearBuckets func()
+	root         common.Hash
+	chunkSize    int
+}
+
+// request sends roots from a fresh rate-limit bucket.
+func (b *blocksByRootTester) request(t *testing.T, roots []common.Hash) []byte {
+	b.clearBuckets()
+	return b.requestSharedBucket(t, roots)
+}
+
+// requestSharedBucket sends roots without refilling the peer's rate-limit bucket.
+func (b *blocksByRootTester) requestSharedBucket(t *testing.T, roots []common.Hash) []byte {
+	req := solid.NewHashList(len(roots))
+	for _, r := range roots {
+		req.Append(r)
+	}
+	var reqBuf bytes.Buffer
+	require.NoError(t, ssz_snappy.EncodeAndWrite(&reqBuf, req))
+	return b.requestRaw(reqBuf.Bytes())
+}
+
+func setupBlocksByRootHandler(t *testing.T, denebForkEpoch uint64) *blocksByRootTester {
+	ctx := t.Context()
+
+	host, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
+	require.NoError(t, err)
+	t.Cleanup(func() { host.Close() })
+
+	host1, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
+	require.NoError(t, err)
+	t.Cleanup(func() { host1.Close() })
+
+	require.NoError(t, host.Connect(ctx, peer.AddrInfo{ID: host1.ID(), Addrs: host1.Addrs()}))
+
+	_, indiciesDB := setupStore(t)
+	t.Cleanup(indiciesDB.Close)
+	store := tests.NewMockBlockReader()
+
+	tx, err := indiciesDB.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	blocks := populateDatabaseWithBlocks(t, store, tx, 100, 1)
+	require.NoError(t, tx.Commit())
+	root, err := blocks[0].Block.HashSSZ()
+	require.NoError(t, err)
+
+	_, mainnetCfg := clparams.GetConfigsByNetwork(1)
+	beaconCfg := *mainnetCfg
+	beaconCfg.DenebForkEpoch = denebForkEpoch
+	c := NewConsensusHandlers(ctx, store, indiciesDB, host, &clparams.NetworkConfig{}, nil, &beaconCfg, getEthClock(t),
+		nil, &mock_services.ForkChoiceStorageMock{}, nil, nil, nil, true, nil)
+	c.Start()
+
+	requestRaw := func(payload []byte) []byte {
+		stream, err := host1.NewStream(ctx, host.ID(), protocol.ID(communication.BeaconBlocksByRootProtocolV2))
+		require.NoError(t, err)
+		_, err = stream.Write(payload)
+		require.NoError(t, err)
+		require.NoError(t, stream.CloseWrite())
+		resp, err := io.ReadAll(stream)
+		require.NoError(t, err)
+		return resp
+	}
+	b := &blocksByRootTester{requestRaw: requestRaw, clearBuckets: c.rateLimiter.buckets.Clear, root: root}
+	single := b.request(t, []common.Hash{root})
+	require.NotEmpty(t, single)
+	require.Equal(t, byte(SuccessfulResponsePrefix), single[0])
+	b.chunkSize = len(single)
+	return b
+}
+
+func (b *blocksByRootTester) repeatRoot(n int) []common.Hash {
+	roots := make([]common.Hash, n)
+	for i := range roots {
+		roots[i] = b.root
+	}
+	return roots
+}
+
+func (b *blocksByRootTester) requireBlocks(t *testing.T, resp []byte, want int) {
+	t.Helper()
+	require.Zero(t, len(resp)%b.chunkSize)
+	require.Equal(t, want, len(resp)/b.chunkSize)
+}
+
+func requireInvalidRequest(t *testing.T, resp []byte) {
+	t.Helper()
+	require.NotEmpty(t, resp)
+	require.Equal(t, byte(InvalidRequestPrefix), resp[0])
+}
+
+func TestBlocksByRootHandlerRequestLimit(t *testing.T) {
+	b := setupBlocksByRootHandler(t, 0)
+	limit := int(clparams.MainnetBeaconConfig.MaxRequestBlocksDeneb)
+
+	b.requireBlocks(t, b.request(t, b.repeatRoot(limit)), MaxRequestsBlocks)
+	requireInvalidRequest(t, b.request(t, b.repeatRoot(limit+1)))
+}
+
+func TestBlocksByRootHandlerRequestLimitPreDeneb(t *testing.T) {
+	b := setupBlocksByRootHandler(t, math.MaxUint64)
+	limit := int(clparams.MainnetBeaconConfig.MaxRequestBlocks)
+
+	b.requireBlocks(t, b.request(t, b.repeatRoot(int(clparams.MainnetBeaconConfig.MaxRequestBlocksDeneb)+1)), MaxRequestsBlocks)
+	b.requireBlocks(t, b.request(t, b.repeatRoot(limit)), MaxRequestsBlocks)
+	requireInvalidRequest(t, b.request(t, b.repeatRoot(limit+1)))
+}
+
+func TestBlocksByRootHandlerServesBlockAfterUnknownRoots(t *testing.T) {
+	b := setupBlocksByRootHandler(t, 0)
+
+	roots := make([]common.Hash, MaxRequestsBlocks, MaxRequestsBlocks+1)
+	for i := range roots {
+		roots[i][0] = 0xff
+		roots[i][1] = byte(i)
+	}
+	roots = append(roots, b.root)
+
+	b.requireBlocks(t, b.request(t, roots), 1)
+}
+
+// The handler must reject an oversized length prefix before it reads the compressed payload.
+func TestBlocksByRootHandlerRejectsOversizedLengthPrefix(t *testing.T) {
+	b := setupBlocksByRootHandler(t, 0)
+
+	prefix := binary.AppendUvarint(nil, (clparams.MainnetBeaconConfig.MaxRequestBlocksDeneb+1)*length.Hash)
+	requireInvalidRequest(t, b.requestRaw(prefix))
+}
+
+func TestBlocksByRootHandlerRejectsLengthPrefixAboveMaxPayloadSize(t *testing.T) {
+	b := setupBlocksByRootHandler(t, 0)
+
+	prefix := binary.AppendUvarint(nil, clparams.MaxPayloadSize+1)
+	requireInvalidRequest(t, b.requestRaw(prefix))
+}
+
+func TestBlocksByRootHandlerRetryAfterResponseCap(t *testing.T) {
+	b := setupBlocksByRootHandler(t, 0)
+	limit := int(clparams.MainnetBeaconConfig.MaxRequestBlocksDeneb)
+
+	// The first response is capped at MaxRequestsBlocks, so the remaining roots
+	// must still fit in the bucket when the peer asks for them straight away.
+	b.clearBuckets()
+	b.requireBlocks(t, b.requestSharedBucket(t, b.repeatRoot(limit)), MaxRequestsBlocks)
+	b.requireBlocks(t, b.requestSharedBucket(t, b.repeatRoot(limit-MaxRequestsBlocks)), limit-MaxRequestsBlocks)
 }

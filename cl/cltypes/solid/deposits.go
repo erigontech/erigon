@@ -25,9 +25,9 @@ const (
 type DepositRequest struct {
 	PubKey                common.Bytes48 `json:"pubkey"` // BLS public key
 	WithdrawalCredentials common.Hash    `json:"withdrawal_credentials"`
-	Amount                uint64         `json:"amount"`    // Gwei
-	Signature             common.Bytes96 `json:"signature"` // BLS signature
-	Index                 uint64         `json:"index"`     // validator index
+	Amount                uint64         `json:"amount,string"` // Gwei
+	Signature             common.Bytes96 `json:"signature"`     // BLS signature
+	Index                 uint64         `json:"index,string"`  // validator index
 }
 
 func (p *DepositRequest) EncodingSizeSSZ() int {
@@ -57,9 +57,9 @@ func (p *DepositRequest) Static() bool {
 type PendingDeposit struct {
 	PubKey                common.Bytes48 `json:"pubkey"` // BLS public key
 	WithdrawalCredentials common.Hash    `json:"withdrawal_credentials"`
-	Amount                uint64         `json:"amount"`    // Gwei
-	Signature             common.Bytes96 `json:"signature"` // BLS signature
-	Slot                  uint64         `json:"slot"`
+	Amount                uint64         `json:"amount,string"` // Gwei
+	Signature             common.Bytes96 `json:"signature"`     // BLS signature
+	Slot                  uint64         `json:"slot,string"`
 }
 
 func (p *PendingDeposit) EncodingSizeSSZ() int {

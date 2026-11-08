@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -31,7 +32,8 @@ func (at *AggregatorRoTx) IntegrityKey(domain kv.Domain, k []byte) error {
 	}
 	return nil
 }
-func (at *AggregatorRoTx) IntegirtyInvertedIndexKey(domain kv.Domain, k []byte) error {
+
+func (at *AggregatorRoTx) IntegrityInvertedIndexKey(domain kv.Domain, k []byte) error {
 	return at.d[domain].IntegrityKey(k)
 }
 
@@ -43,12 +45,12 @@ func (at *AggregatorRoTx) IntegrityInvertedIndexAllValuesAreInRange(ctx context.
 			return err
 		}
 	case kv.StorageHistoryIdx:
-		err := at.d[kv.CodeDomain].ht.iit.IntegrityInvertedIndexAllValuesAreInRange(ctx, failFast, fromStep)
+		err := at.d[kv.StorageDomain].ht.iit.IntegrityInvertedIndexAllValuesAreInRange(ctx, failFast, fromStep)
 		if err != nil {
 			return err
 		}
 	case kv.CodeHistoryIdx:
-		err := at.d[kv.StorageDomain].ht.iit.IntegrityInvertedIndexAllValuesAreInRange(ctx, failFast, fromStep)
+		err := at.d[kv.CodeDomain].ht.iit.IntegrityInvertedIndexAllValuesAreInRange(ctx, failFast, fromStep)
 		if err != nil {
 			return err
 		}
@@ -79,76 +81,87 @@ func (at *AggregatorRoTx) IntegrityInvertedIndexAllValuesAreInRange(ctx context.
 
 func (dt *DomainRoTx) IntegrityDomainFilesWithKey(k []byte) (res []string, err error) {
 	hi, lo := dt.ht.iit.hashKey(k)
-	for i := len(dt.files) - 1; i >= 0; i-- {
-		_, ok, _, err := dt.getLatestFromFile(i, k, hi, lo)
+	for i, f := range slices.Backward(dt.files) {
+		_, ok, _, err := dt.getLatestFromFile(i, k, nil, hi, lo)
 		if err != nil {
 			return res, err
 		}
 		if ok {
-			res = append(res, dt.files[i].src.decompressor.FileName())
+			res = append(res, f.src.decompressor.FileName())
 		}
 	}
 	return res, nil
 }
+
 func (dt *DomainRoTx) IntegrityKey(k []byte) error {
-	dt.ht.iit.ii.dirtyFiles.Walk(func(items []*FilesItem) bool {
-		for _, item := range items {
-			if item.decompressor == nil {
+	for _, f := range dt.ht.iit.files {
+		item := f.src
+		if item == nil || item.decompressor == nil {
+			continue
+		}
+		accessor := item.index
+		needClose := false
+		if accessor == nil {
+			fPath, _, _, err := version.FindFilesWithVersionsByPattern(dt.d.efAccessorFilePathMask(item.StepRange(dt.stepSize)))
+			if err != nil {
+				panic(err)
+			}
+
+			exists, err := dir.FileExist(fPath)
+			if err != nil {
+				_, fName := filepath.Split(fPath)
+				dt.d.logger.Warn("[agg] InvertedIndex.openDirtyFiles", "err", err, "f", fName)
 				continue
 			}
-			accessor := item.index
-			if accessor == nil {
-				fPath, _, _, err := version.FindFilesWithVersionsByPattern(dt.d.efAccessorFilePathMask(item.StepRange(dt.stepSize)))
-				if err != nil {
-					panic(err)
-				}
-
-				exists, err := dir.FileExist(fPath)
+			if exists {
+				var err error
+				accessor, err = dt.d.openHashMapAccessor(fPath)
 				if err != nil {
 					_, fName := filepath.Split(fPath)
 					dt.d.logger.Warn("[agg] InvertedIndex.openDirtyFiles", "err", err, "f", fName)
 					continue
 				}
-				if exists {
-					var err error
-					accessor, err = dt.d.openHashMapAccessor(fPath)
-					if err != nil {
-						_, fName := filepath.Split(fPath)
-						dt.d.logger.Warn("[agg] InvertedIndex.openDirtyFiles", "err", err, "f", fName)
-						continue
-					}
-					defer accessor.Close()
-				} else {
-					continue
-				}
-			}
-
-			offset, ok := accessor.GetReaderFromPool().Lookup(k)
-			if !ok {
+			} else {
 				continue
 			}
-			g := item.decompressor.MakeGetter()
-			g.Reset(offset)
-			key, _ := g.NextUncompressed()
-			if !bytes.Equal(k, key) {
-				continue
-			}
-			eliasVal, _ := g.NextUncompressed()
-			r := multiencseq.ReadMultiEncSeq(item.startTxNum, eliasVal)
-			last2 := uint64(0)
-			if r.Count() > 2 {
-				last2 = r.Get(r.Count() - 2)
-			}
-			log.Warn(fmt.Sprintf("[dbg] see1: %s, min=%d,max=%d, before_max=%d, all: %d", item.decompressor.FileName(), r.Min(), r.Max(), last2, stream.ToArrU64Must(r.Iterator(0))))
+			needClose = true
 		}
-		return true
-	})
+
+		reader := accessor.Reader()
+		offset, ok := reader.Lookup(k)
+		reader.Close()
+		if !ok {
+			if needClose {
+				accessor.Close()
+			}
+			continue
+		}
+		g := item.decompressor.MakeGetter()
+		g.Reset(offset)
+		key, _ := g.NextUncompressed()
+		if !bytes.Equal(k, key) {
+			if needClose {
+				accessor.Close()
+			}
+			continue
+		}
+		eliasVal, _ := g.NextUncompressed()
+		r := multiencseq.ReadMultiEncSeq(item.startTxNum, eliasVal)
+		last2 := uint64(0)
+		if r.Count() > 2 {
+			last2 = r.Get(r.Count() - 2)
+		}
+		log.Warn(fmt.Sprintf("[dbg] see1: %s, min=%d,max=%d, before_max=%d, all: %d", item.decompressor.FileName(), r.Min(), r.Max(), last2, stream.ToArrU64Must(r.Iterator(0))))
+		if needClose {
+			accessor.Close()
+		}
+	}
 	return nil
 }
 
 func (iit *InvertedIndexRoTx) IntegrityInvertedIndexAllValuesAreInRange(ctx context.Context, failFast bool, fromStep uint64) error {
 	fromTxNum := fromStep * iit.ii.stepSize
-	g := &errgroup.Group{}
+	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(estimate.AlmostAllCPUs())
 
 	logEvery := time.NewTicker(30 * time.Second)
@@ -181,6 +194,14 @@ func (iit *InvertedIndexRoTx) IntegrityInvertedIndexAllValuesAreInRange(ctx cont
 
 			if s.Count() == 0 {
 				continue
+			}
+			if s.Count() > 1 && s.Max() < s.Min() {
+				err := fmt.Errorf("[integrity] .ef file has unsorted sequence: Max=%d < Min=%d, count=%d, %s, %x", s.Max(), s.Min(), s.Count(), g.FileName(), common.Shorten(k, 8))
+				if failFast {
+					return err
+				} else {
+					log.Warn(err.Error())
+				}
 			}
 			if item.startTxNum > s.Min() {
 				err := fmt.Errorf("[integrity] .ef file has foreign txNum: %d > %d, %s, %x", item.startTxNum, s.Min(), g.FileName(), common.Shorten(k, 8))
@@ -229,5 +250,106 @@ func (iit *InvertedIndexRoTx) IntegrityInvertedIndexAllValuesAreInRange(ctx cont
 		return err
 	}
 
+	return nil
+}
+
+// IntegrityHistoryValueAccessor re-derives every .v offset the way buildVI does and
+// compares it with what the .vi answers. It also covers a v1 .vi, which is asked
+// the same question by txNum+key.
+func (at *AggregatorRoTx) IntegrityHistoryValueAccessor(ctx context.Context, domain kv.Domain, failFast bool, fromStep uint64) error {
+	return at.d[domain].ht.IntegrityHistoryValueAccessor(ctx, failFast, fromStep)
+}
+
+func (ht *HistoryRoTx) IntegrityHistoryValueAccessor(ctx context.Context, failFast bool, fromStep uint64) error {
+	fromTxNum := fromStep * ht.h.stepSize
+	g, ctx := errgroup.WithContext(ctx)
+	g.SetLimit(estimate.AlmostAllCPUs())
+
+	// a .vi that fails to open hides its .v and .ef from the visible lists walked below
+	for _, item := range ht.h.dirtyFiles.Items() {
+		if item.decompressor == nil || item.endTxNum <= fromTxNum || item.index != nil || item.vAccessor != nil {
+			continue
+		}
+		err := fmt.Errorf("[integrity] %s has no .vi accessor open", item.decompressor.FileName())
+		if failFast {
+			return err
+		}
+		log.Warn(err.Error())
+	}
+
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+
+	for _, efItem := range ht.iit.files {
+		if efItem.src.decompressor == nil || efItem.endTxNum <= fromTxNum {
+			continue
+		}
+		g.Go(func() error {
+			err := ht.checkValueAccessorOfFile(ctx, efItem, logEvery)
+			if err != nil && !failFast && ctx.Err() == nil {
+				log.Warn(err.Error())
+				return nil
+			}
+			return err
+		})
+	}
+	return g.Wait()
+}
+
+func (ht *HistoryRoTx) checkValueAccessorOfFile(ctx context.Context, efItem visibleFile, logEvery *time.Ticker) error {
+	vItem, ok := ht.pairedFile(efItem)
+	if !ok {
+		return fmt.Errorf("[integrity] no .v file paired with %s", efItem.src.decompressor.FileName())
+	}
+	hist := vItem.src.decompressor
+	pageSize := ht.h.valuesPerPage(hist)
+
+	efReader := ht.iit.dataReader(efItem.src.decompressor)
+	efReader.Reset(0)
+	histReader := ht.dataReader(hist)
+	histReader.Reset(0)
+
+	var key, encodedSeq []byte
+	var seq multiencseq.SequenceReader
+	var it multiencseq.SequenceIterator
+	var valOffset, value uint64
+	for keyOrdinal := uint64(0); efReader.HasNext(); keyOrdinal++ {
+		key, _ = efReader.Next(key[:0])
+		encodedSeq, _ = efReader.Next(encodedSeq[:0])
+		seq.Reset(efItem.startTxNum, encodedSeq)
+		it.Reset(&seq, 0)
+		for rank := uint64(0); it.HasNext(); rank++ {
+			txNum, err := it.Next()
+			if err != nil {
+				return err
+			}
+			if value%pageSize == 0 && !histReader.HasNext() {
+				return fmt.Errorf("[integrity] .vi of %s: key %x at txNum %d is on a page past the end of .v",
+					hist.FileName(), common.Shorten(key, 8), txNum)
+			}
+			got, ok := vItem.src.vOffset(keyOrdinal, rank, txNum, key)
+			if !ok {
+				return fmt.Errorf("[integrity] .vi of %s: no offset for key %x at txNum %d (run %d, item %d)",
+					hist.FileName(), common.Shorten(key, 8), txNum, keyOrdinal, rank)
+			}
+			if got != valOffset {
+				return fmt.Errorf("[integrity] .vi of %s: key %x at txNum %d resolves to offset %d, .v holds it at %d",
+					hist.FileName(), common.Shorten(key, 8), txNum, got, valOffset)
+			}
+			value++
+			if value%pageSize == 0 {
+				valOffset, _ = histReader.Skip()
+			}
+		}
+		if keyOrdinal%1024 == 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-logEvery.C:
+				log.Info(fmt.Sprintf("[integrity] HistoryVi: %s, prefix=%x", hist.FileName(), common.Shorten(key, 8)))
+			default:
+			}
+		}
+	}
 	return nil
 }

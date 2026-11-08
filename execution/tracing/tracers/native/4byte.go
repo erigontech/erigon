@@ -28,12 +28,12 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
-	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
 func init() {
@@ -55,10 +55,10 @@ func init() {
 //	  0xc281d19e-0: 1
 //	}
 type fourByteTracer struct {
-	ids               map[string]int     // ids aggregates the 4byte ids found
-	interrupt         atomic.Bool        // Atomic flag to signal execution interruption
-	reason            error              // Textual reason for the interruption
-	activePrecompiles []accounts.Address // Updated on tx start based on given rules
+	ids               map[string]int        // ids aggregates the 4byte ids found
+	interrupt         atomic.Bool           // Atomic flag to signal execution interruption
+	reason            atomic.Pointer[error] // Reason for the interruption, populated by Stop
+	activePrecompiles []accounts.Address    // Updated on tx start based on given rules
 }
 
 // newFourByteTracer returns a native go tracer which collects
@@ -70,7 +70,7 @@ func newFourByteTracer(ctx *tracers.Context, _ json.RawMessage) (*tracers.Tracer
 	return &tracers.Tracer{
 		Hooks: &tracing.Hooks{
 			OnTxStart: t.OnTxStart,
-			OnEnter:   t.OnEnter,
+			OnEnterV2: t.OnEnterV2,
 		},
 		GetResult: t.GetResult,
 		Stop:      t.Stop,
@@ -89,15 +89,10 @@ func (t *fourByteTracer) store(id []byte, size int) {
 }
 
 func (t *fourByteTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from accounts.Address) {
-	blockContext := evmtypes.BlockContext{
-		BlockNumber: env.BlockNumber,
-		Time:        env.Time,
-	}
-	rules := blockContext.Rules(env.ChainConfig)
-	t.activePrecompiles = vm.ActivePrecompiles(rules)
+	t.activePrecompiles = vm.ActivePrecompiles(env.Rules)
 }
 
-func (t *fourByteTracer) OnEnter(depth int, opcode byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) { // Skip if tracing was interrupted
+func (t *fourByteTracer) OnEnterV2(depth int, opcode byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas mdgas.MdGas, value uint256.Int, code []byte) { // Skip if tracing was interrupted
 	// Skip if tracing was interrupted
 	if t.interrupt.Load() {
 		return
@@ -125,12 +120,15 @@ func (t *fourByteTracer) GetResult() (json.RawMessage, error) {
 	if err != nil {
 		return nil, err
 	}
-	return res, t.reason
+	if p := t.reason.Load(); p != nil {
+		return res, *p
+	}
+	return res, nil
 }
 
 // Stop terminates execution of the tracer at the first opportune moment.
 func (t *fourByteTracer) Stop(err error) {
-	t.reason = err
+	t.reason.Store(&err)
 	t.interrupt.Store(true)
 }
 

@@ -89,11 +89,9 @@ func TestUDPv4_LookupIterator(t *testing.T) {
 		bootnodes[i] = lookupTestnet.node(256, i)
 	}
 	fillTable(test.table, bootnodes, true)
-	wg.Add(1)
-	go func() {
+	wg.Go(func() {
 		serveTestnet(test, lookupTestnet)
-		wg.Done()
-	}()
+	})
 
 	// Create the iterator and collect the nodes it yields.
 	iter := test.udp.RandomNodes()
@@ -133,11 +131,9 @@ func TestUDPv4_LookupIteratorClose(t *testing.T) {
 	}
 	fillTable(test.table, bootnodes, true)
 
-	wg.Add(1)
-	go func() {
+	wg.Go(func() {
 		serveTestnet(test, lookupTestnet)
-		wg.Done()
-	}()
+	})
 
 	it := test.udp.RandomNodes()
 	if ok := it.Next(); !ok || it.Node() == nil {
@@ -291,7 +287,9 @@ func (tn *preminedTestnet) node(dist, index int) *enode.Node {
 	rec := new(enr.Record)
 	rec.Set(enr.IP{127, byte(dist >> 8), byte(dist), byte(index)})
 	rec.Set(enr.UDP(5000))
-	enode.SignV4(rec, key)
+	if err := enode.SignV4(rec, key); err != nil {
+		panic(err)
+	}
 	n, _ := enode.New(enode.ValidSchemes, rec)
 	return n
 }

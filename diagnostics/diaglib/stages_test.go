@@ -24,6 +24,10 @@ import (
 	"github.com/erigontech/erigon/diagnostics/diaglib"
 )
 
+func NewTestDiagnosticClient() (*diaglib.DiagnosticClient, error) {
+	return &diaglib.DiagnosticClient{}, nil
+}
+
 func TestInitSyncStages(t *testing.T) {
 	d, err := NewTestDiagnosticClient()
 	require.NoError(t, err)
@@ -63,10 +67,9 @@ func TestSetCurrentSyncStage(t *testing.T) {
 	require.Equal(t, diaglib.Running, d.GetSyncStages()[1].State)
 	require.Equal(t, diaglib.Queued, d.GetSyncStages()[2].State)
 
-	//test not existed stage
+	// test not existed stage
 	err = d.SetCurrentSyncStage(diaglib.CurrentSyncStage{Stage: "NotExistedStage"})
 	require.Error(t, err)
-
 }
 
 func TestSetCurrentSyncSubStage(t *testing.T) {
@@ -101,24 +104,25 @@ func TestGetStageState(t *testing.T) {
 	d.SetStagesList(stages)
 
 	// Test get stage state
+	var state diaglib.StageState
 	for _, stageId := range nodeStages {
-		state, err := d.GetStageState(stageId)
+		state, err = d.GetStageState(stageId)
 		require.NoError(t, err)
 		require.Equal(t, diaglib.Queued, state)
 	}
 
-	//Test get not existed stage state
+	// Test get not existed stage state
 	_, err = d.GetStageState("NotExistedStage")
 	require.Error(t, err)
 
-	//Test Snapshots Running state
+	// Test Snapshots Running state
 	err = d.SetCurrentSyncStage(diaglib.CurrentSyncStage{Stage: "Snapshots"})
 	require.NoError(t, err)
-	state, err := d.GetStageState("Snapshots")
+	state, err = d.GetStageState("Snapshots")
 	require.NoError(t, err)
 	require.Equal(t, diaglib.Running, state)
 
-	//Test Snapshots Completed and BlockHashes running state
+	// Test Snapshots Completed and BlockHashes running state
 	err = d.SetCurrentSyncStage(diaglib.CurrentSyncStage{Stage: "BlockHashes"})
 	require.NoError(t, err)
 	state, err = d.GetStageState("Snapshots")
@@ -147,7 +151,7 @@ func TestGetStageIndexes(t *testing.T) {
 }
 
 func TestStagesState(t *testing.T) {
-	//Test StageState to string
+	// Test StageState to string
 	require.Equal(t, "Queued", diaglib.StageState(0).String())
 	require.Equal(t, "Running", diaglib.StageState(1).String())
 	require.Equal(t, "Completed", diaglib.StageState(2).String())

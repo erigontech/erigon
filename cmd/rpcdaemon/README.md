@@ -205,9 +205,10 @@ If the `--http.url` flag is set, then `--http.addr` and `--http.port` with both 
 
 note that this is NOT geth-style IPC. for that, read the next section, IPC endpoint(geth-compatible)
 
-### HTTPS, HTTP2, and H2C
+### HTTPS and HTTP2
 
-Erigon supports HTTPS, HTTP2, and H2C out of the box. H2C is served by the default HTTP handler.
+Erigon serves HTTP/1.1 on the plain HTTP port and negotiates HTTP/2 over TLS via ALPN. Cleartext HTTP/2 is not
+served: a client that offers it, such as `curl --http2`, is answered on HTTP/1.1.
 
 To enable the HTTPS+HTTP2 server, add flag `--https.enabled`, along with providing flags `--https.cert="/path/to.cert"`
 and `--https.key=/path/to.key`
@@ -241,6 +242,8 @@ The following table shows the current implementation status of Erigon's RPC daem
 | admin_peers                                | Yes     |                                                       |
 | admin_addPeer                              | Yes     |                                                       |
 | admin_removePeer                           | Yes     |                                                       |
+| admin_addTrustedPeer                       | Yes     |                                                       |
+| admin_removeTrustedPeer                    | Yes     |                                                       |
 |                                            |         |                                                       |
 | web3_clientVersion                         | Yes     |                                                       |
 | web3_sha3                                  | Yes     |                                                       |
@@ -256,22 +259,29 @@ The following table shows the current implementation status of Erigon's RPC daem
 | eth_gasPrice                               | Yes     |                                                       |
 | eth_maxPriorityFeePerGas                   | Yes     |                                                       |
 | eth_feeHistory                             | Yes     |                                                       |
+| eth_baseFee                                | Yes     |                                                       |
+| eth_blobBaseFee                            | Yes     |                                                       |
+| eth_config                                 | Yes     | EIP-7910                                              |
+| eth_capabilities                           | Yes     | execution-apis#755                                    |
 |                                            |         |                                                       |
 | eth_getBlockByHash                         | Yes     |                                                       |
 | eth_getBlockByNumber                       | Yes     |                                                       |
+| eth_getHeaderByHash                        | Yes     |                                                       |
+| eth_getHeaderByNumber                      | Yes     |                                                       |
 | eth_getBlockTransactionCountByHash         | Yes     |                                                       |
 | eth_getBlockTransactionCountByNumber       | Yes     |                                                       |
 | eth_getUncleByBlockHashAndIndex            | Yes     |                                                       |
 | eth_getUncleByBlockNumberAndIndex          | Yes     |                                                       |
 | eth_getUncleCountByBlockHash               | Yes     |                                                       |
 | eth_getUncleCountByBlockNumber             | Yes     |                                                       |
+| eth_getBlockAccessList                     | Yes     | Added in Amsterdam (EIP-7928)                         |
 |                                            |         |                                                       |
 | eth_getTransactionByHash                   | Yes     |                                                       |
 | eth_getRawTransactionByHash                | Yes     |                                                       |
 | eth_getTransactionByBlockHashAndIndex      | Yes     |                                                       |
-| eth_retRawTransactionByBlockHashAndIndex   | Yes     |                                                       |
+| eth_getRawTransactionByBlockHashAndIndex   | Yes     |                                                       |
 | eth_getTransactionByBlockNumberAndIndex    | Yes     |                                                       |
-| eth_retRawTransactionByBlockNumberAndIndex | Yes     |                                                       |
+| eth_getRawTransactionByBlockNumberAndIndex | Yes     |                                                       |
 | eth_getTransactionReceipt                  | Yes     |                                                       |
 | eth_getBlockReceipts                       | Yes     |                                                       |
 |                                            |         |                                                       |
@@ -280,15 +290,19 @@ The following table shows the current implementation status of Erigon's RPC daem
 | eth_getCode                                | Yes     |                                                       |
 | eth_getTransactionCount                    | Yes     |                                                       |
 | eth_getStorageAt                           | Yes     |                                                       |
+| eth_getStorageValues                       | Yes     |                                                       |
 | eth_call                                   | Yes     |                                                       |
-| eth_callMany                               | Yes     | Erigon Method PR#4567                                 |
+| eth_callMany                               | Yes     |                                                       |
 | eth_callBundle                             | Yes     |                                                       |
 | eth_createAccessList                       | Yes     |                                                       |
+| eth_simulateV1                             | Yes     |                                                       |
+| eth_getWitness                             | Yes     |                                                       |
+| eth_getTxWitness                           | Yes     |                                                       |
 |                                            |         |                                                       |
-| eth_newFilter                              | Yes     | Added by PR#4253                                      |
+| eth_newFilter                              | Yes     |                                                       |
 | eth_newBlockFilter                         | Yes     |                                                       |
 | eth_newPendingTransactionFilter            | Yes     |                                                       |
-| eth_getFilterLogs                          | Yes     | Added by PR#6514                                      |
+| eth_getFilterLogs                          | Yes     |                                                       |
 | eth_getFilterChanges                       | Yes     |                                                       |
 | eth_uninstallFilter                        | Yes     |                                                       |
 | eth_getLogs                                | Yes     |                                                       |
@@ -299,7 +313,7 @@ The following table shows the current implementation status of Erigon's RPC daem
 | eth_sendTransaction                        | -       | not yet implemented                                   |
 | eth_sign                                   | No      | deprecated                                            |
 | eth_signTransaction                        | -       | not yet implemented                                   |
-| eth_signTypedData                          | -       | ????                                                  |
+| eth_fillTransaction                        | Yes     |                                                       |
 |                                            |         |                                                       |
 | eth_getProof                               | Yes     | Limited to last 100000 blocks                         |
 |                                            |         |                                                       |
@@ -317,10 +331,12 @@ The following table shows the current implementation status of Erigon's RPC daem
 |                                            |         | logs                                                  |
 | eth_unsubscribe                            | Yes     | Websock Only                                          |
 |                                            |         |                                                       |
+| engine_exchangeCapabilities                | Yes     |                                                       |
 | engine_newPayloadV1                        | Yes     |                                                       |
 | engine_newPayloadV2                        | Yes     |                                                       |
 | engine_newPayloadV3                        | Yes     |                                                       |
 | engine_newPayloadV4                        | Yes     | Added in Pectra                                       |
+| engine_newPayloadV5                        | Yes     | Added in Amsterdam                                    |
 | engine_forkchoiceUpdatedV1                 | Yes     |                                                       |
 | engine_forkchoiceUpdatedV2                 | Yes     |                                                       |
 | engine_forkchoiceUpdatedV3                 | Yes     |                                                       |
@@ -329,35 +345,49 @@ The following table shows the current implementation status of Erigon's RPC daem
 | engine_getPayloadV2                        | Yes     |                                                       |
 | engine_getPayloadV3                        | Yes     |                                                       |
 | engine_getPayloadV4                        | Yes     | Added in Pectra                                       |
+| engine_getPayloadV5                        | Yes     | Added in Amsterdam                                    |
+| engine_getPayloadV6                        | Yes     | Added in Amsterdam                                    |
 | engine_getPayloadBodiesByHashV1            | Yes     |                                                       |
+| engine_getPayloadBodiesByHashV2            | Yes     |                                                       |
 | engine_getPayloadBodiesByRangeV1           | Yes     |                                                       |
+| engine_getPayloadBodiesByRangeV2           | Yes     |                                                       |
 | engine_getClientVersionV1                  | Yes     |                                                       |
 | engine_getBlobsV1                          | Yes     |                                                       |
 | engine_getBlobsV2                          | Yes     | Added in Fusaka                                       |
 | engine_getBlobsV3                          | Yes     | Added with BPO3                                       |
+| engine_getBlobsV4                          | Yes     | Added in Amsterdam                                   |
 |                                            |         |                                                       |
-| debug_getRawReceipts                       | Yes     | `debug_` expected to be private                       |
+| testing_buildBlockV1                       | Yes     | Testing environments only, disabled by default        |
+| testing_commitBlockV1                      | Yes     | Testing environments only, disabled by default        |
+|                                            |         |                                                       |
 | debug_accountRange                         | Yes     |                                                       |
 | debug_accountAt                            | Yes     |                                                       |
+| debug_getBadBlocks                         | Yes     |                                                       |
 | debug_getModifiedAccountsByNumber          | Yes     |                                                       |
 | debug_getModifiedAccountsByHash            | Yes     |                                                       |
+| debug_getRawBlock                          | Yes     |                                                       |
+| debug_getRawBlockAccessList                | Yes     | Added in Amsterdam (EIP-7928)                         |
+| debug_getRawHeader                         | Yes     |                                                       |
+| debug_getRawReceipts                       | Yes     |                                                       |
+| debug_getRawTransaction                    | Yes     |                                                       |
 | debug_storageRangeAt                       | Yes     | see https://github.com/erigontech/erigon/issues/14186 |
+| debug_setHead                              | Yes     |                                                       |
 | debug_traceBlockByHash                     | Yes     | Streaming (can handle huge results)                   |
 | debug_traceBlockByNumber                   | Yes     | Streaming (can handle huge results)                   |
 | debug_traceTransaction                     | Yes     | Streaming (can handle huge results)                   |
 | debug_traceCall                            | Yes     | Streaming (can handle huge results)                   |
-| debug_traceCallMany                        | Yes     | Erigon Method PR#4567.                                |
-| debug_setMemoryLimit                       | Yes     |                                                       |
-| debug_setGCPercent                         | Yes     |                                                       |
+| debug_traceCallMany                        | Yes     |                                                       |
 | debug_freeOSMemory                         | Yes     |                                                       |
+| debug_setGCPercent                         | Yes     |                                                       |
+| debug_setMemoryLimit                       | Yes     |                                                       |
 | debug_gcStats                              | Yes     |                                                       |
 | debug_memStats                             | Yes     |                                                       |
 |                                            |         |                                                       |
 | trace_call                                 | Yes     |                                                       |
 | trace_callMany                             | Yes     |                                                       |
-| trace_rawTransaction                       | -       | not yet implemented (come help!)                      |
-| trace_replayBlockTransactions              | yes     | stateDiff only (come help!)                           |
-| trace_replayTransaction                    | yes     | stateDiff only (come help!)                           |
+| trace_rawTransaction                       | Yes     |                                                       |
+| trace_replayBlockTransactions              | Yes     |                                                       |
+| trace_replayTransaction                    | Yes     |                                                       |
 | trace_block                                | Yes     |                                                       |
 | trace_filter                               | Yes     | no pagination, but streaming                          |
 | trace_get                                  | Yes     |                                                       |
@@ -366,6 +396,7 @@ The following table shows the current implementation status of Erigon's RPC daem
 | txpool_content                             | Yes     | `remote`                                              |
 | txpool_contentFrom                         | Yes     | `remote`                                              |
 | txpool_status                              | Yes     | `remote`                                              |
+| txpool_inspect                             | Yes     | `remote`                                              |
 |                                            |         |                                                       |
 | eth_getCompilers                           | No      | deprecated                                            |
 | eth_compileLLL                             | No      | deprecated                                            |
@@ -378,24 +409,39 @@ The following table shows the current implementation status of Erigon's RPC daem
 | db_getHex                                  | No      | deprecated                                            |
 |                                            |         |                                                       |
 | erigon_getHeaderByHash                     | Yes     | Erigon only                                           |
-| erigon_getBlockReceiptsByBlockHash         | Yes     | Erigon only                                           |
 | erigon_getHeaderByNumber                   | Yes     | Erigon only                                           |
-| erigon_getLogsByHash                       | Yes     | Erigon only                                           |
-| erigon_forks                               | Yes     | Erigon only                                           |
 | erigon_getBlockByTimestamp                 | Yes     | Erigon only                                           |
-| erigon_BlockNumber                         | Yes     | Erigon only                                           |
+| erigon_getBlockReceiptsByBlockHash         | Yes     | Erigon only                                           |
+| erigon_getLogsByHash                       | Yes     | Erigon only                                           |
+| erigon_getLogs                             | Yes     | Erigon only                                           |
 | erigon_getLatestLogs                       | Yes     | Erigon only                                           |
+| erigon_getBalanceChangesInBlock            | Yes     | Erigon only                                           |
+| erigon_blockNumber                         | Yes     | Erigon only                                           |
+| erigon_forks                               | Yes     | Erigon only                                           |
+| erigon_nodeInfo                            | Yes     | Erigon only                                           |
+| erigon_cacheCheck                          | Yes     | Erigon only                                           |
 |                                            |         |                                                       |
-| bor_getSnapshot                            | Yes     | Bor only                                              |
-| bor_getAuthor                              | Yes     | Bor only                                              |
-| bor_getSnapshotAtHash                      | Yes     | Bor only                                              |
-| bor_getSigners                             | Yes     | Bor only                                              |
-| bor_getSignersAtHash                       | Yes     | Bor only                                              |
-| bor_getCurrentProposer                     | Yes     | Bor only                                              |
-| bor_getCurrentValidators                   | Yes     | Bor only                                              |
-| bor_getSnapshotProposerSequence            | Yes     | Bor only                                              |
-| bor_getRootHash                            | Yes     | Bor only                                              |
-| bor_getVoteOnHash                          | Yes     | Bor only                                              |
+| ots_getApiLevel                            | Yes     | Otterscan                                             |
+| ots_getInternalOperations                  | Yes     | Otterscan                                             |
+| ots_searchTransactionsBefore               | Yes     | Otterscan                                             |
+| ots_searchTransactionsAfter                | Yes     | Otterscan                                             |
+| ots_getBlockDetails                        | Yes     | Otterscan                                             |
+| ots_getBlockDetailsByHash                  | Yes     | Otterscan                                             |
+| ots_getBlockTransactions                   | Yes     | Otterscan                                             |
+| ots_hasCode                                | Yes     | Otterscan                                             |
+| ots_traceTransaction                       | Yes     | Otterscan                                             |
+| ots_getTransactionError                    | Yes     | Otterscan                                             |
+| ots_getTransactionBySenderAndNonce         | Yes     | Otterscan                                             |
+| ots_getContractCreator                     | Yes     | Otterscan                                             |
+|                                            |         |                                                       |
+| parity_listStorageKeys                     | Yes     |                                                       |
+|                                            |         |                                                       |
+| overlay_getLogs                            | Yes     |                                                       |
+| overlay_callConstructor                    | Yes     |                                                       |
+|                                            |         |                                                       |
+| internal_getTxNumInfo                      | Yes     | Erigon only                                           |
+| internal_getStepsInDB                      | Yes     | Erigon only                                           |
+| internal_getPruningProgress                | Yes     | Erigon only                                           |
 
 ### GraphQL
 

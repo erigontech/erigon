@@ -92,8 +92,10 @@ type registry struct {
 	providers []Provider
 }
 
-var providers = map[Type]*registry{}
-var providerMutex sync.RWMutex
+var (
+	providers     = map[Type]*registry{}
+	providerMutex sync.RWMutex
+)
 
 func StartProviders(ctx context.Context, infoType Type, logger log.Logger) {
 	providerMutex.Lock()
@@ -134,7 +136,7 @@ func startProvider(ctx context.Context, infoType Type, provider Provider, logger
 func Send[I Info](info I) {
 	defer func() {
 		if r := recover(); r != nil {
-			log.Debug("diagnostic Send panic recovered: %v, stack: %s", r, dbg.Stack())
+			log.Debug("diagnostic Send panic recovered", "panic", r, "stack", dbg.Stack())
 		}
 	}()
 

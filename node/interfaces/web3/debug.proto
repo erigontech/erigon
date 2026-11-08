@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+import "types/types.proto";
+import "web3/common.proto";
+
+package web3;
+
+message AccountStreamRequest {
+  BlockId block_id = 1;
+  optional types.H160 offset = 2;
+}
+message Account {
+  types.H160 address = 1;
+  types.H256 balance = 2;
+  uint64 nonce = 3;
+  bytes code = 4;
+}
+
+message StorageStreamRequest {
+  BlockId block_id = 1;
+  types.H160 address = 2;
+  optional types.H256 offset = 3;
+}
+message StorageSlot {
+  types.H256 key = 1;
+  types.H256 value = 2;
+}
+
+service DebugApi {
+  rpc AccountStream(AccountStreamRequest) returns (stream Account);
+  rpc StorageStream(StorageStreamRequest) returns (stream StorageSlot);
+}

@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"sort"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
 )
 
@@ -59,12 +58,13 @@ func (a Announcements) Len() int {
 func (a Announcements) Less(i, j int) bool {
 	return bytes.Compare(a.hashes[i*length.Hash:(i+1)*length.Hash], a.hashes[j*length.Hash:(j+1)*length.Hash]) < 0
 }
+
 func (a Announcements) Swap(i, j int) {
 	a.ts[i], a.ts[j] = a.ts[j], a.ts[i]
 	a.sizes[i], a.sizes[j] = a.sizes[j], a.sizes[i]
 	ii := i * length.Hash
 	jj := j * length.Hash
-	for k := 0; k < length.Hash; k++ {
+	for range length.Hash {
 		a.hashes[ii], a.hashes[jj] = a.hashes[jj], a.hashes[ii]
 		ii++
 		jj++
@@ -108,28 +108,7 @@ func (a Announcements) DedupCopy() Announcements {
 }
 
 func (a Announcements) DedupHashes() Hashes {
-	if len(a.ts) == 0 {
-		return Hashes{}
-	}
-	sort.Sort(a)
-	unique := 1
-	for i := length.Hash; i < len(a.hashes); i += length.Hash {
-		if !bytes.Equal(a.hashes[i:i+length.Hash], a.hashes[i-length.Hash:i]) {
-			unique++
-		}
-	}
-	c := make(Hashes, unique*length.Hash)
-	copy(c[:], a.hashes[0:length.Hash])
-	dest := length.Hash
-	origin := length.Hash
-	for i := 1; i < len(a.ts); i++ {
-		if !bytes.Equal(a.hashes[origin:origin+length.Hash], a.hashes[origin-length.Hash:origin]) {
-			copy(c[dest:dest+length.Hash], a.hashes[origin:origin+length.Hash])
-			dest += length.Hash
-		}
-		origin += length.Hash
-	}
-	return c
+	return a.DedupCopy().Hashes()
 }
 
 func (a Announcements) Hashes() Hashes {
@@ -141,9 +120,9 @@ func (a Announcements) Copy() Announcements {
 		return a
 	}
 	c := Announcements{
-		ts:     common.Copy(a.ts),
+		ts:     bytes.Clone(a.ts),
 		sizes:  make([]uint32, len(a.sizes)),
-		hashes: common.Copy(a.hashes),
+		hashes: bytes.Clone(a.hashes),
 	}
 	copy(c.sizes, a.sizes)
 	return c
@@ -166,7 +145,7 @@ func (h Hashes) Less(i, j int) bool {
 func (h Hashes) Swap(i, j int) {
 	ii := i * length.Hash
 	jj := j * length.Hash
-	for k := 0; k < length.Hash; k++ {
+	for range length.Hash {
 		h[ii], h[jj] = h[jj], h[ii]
 		ii++
 		jj++

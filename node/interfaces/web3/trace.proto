@@ -1,0 +1,312 @@
+syntax = "proto3";
+
+import "google/protobuf/empty.proto";
+import "web3/common.proto";
+import "types/types.proto";
+
+package web3;
+
+// Call params
+
+message LegacyCall {
+  optional types.H160 from = 1;
+  optional types.H160 to = 2;
+  optional uint64 gas_limit = 3;
+  optional uint64 gas_price = 4;
+  optional types.H256 value = 5;
+  optional bytes input = 6;
+}
+
+message AccessList { repeated AccessListItem access_list = 1; }
+
+message EIP2930Call {
+  optional types.H160 from = 1;
+  optional types.H160 to = 2;
+  optional uint64 gas_limit = 3;
+  optional uint64 gas_price = 4;
+  optional types.H256 value = 5;
+  optional bytes input = 6;
+  optional AccessList access_list = 7;
+}
+
+message EIP1559Call {
+  optional types.H160 from = 1;
+  optional types.H160 to = 2;
+  optional uint64 gas_limit = 3;
+  optional uint64 max_priority_fee_per_gas = 4;
+  optional uint64 max_fee_per_gas = 5;
+  optional types.H256 value = 6;
+  optional bytes input = 7;
+  optional AccessList access_list = 8;
+}
+
+message Call {
+  oneof call {
+    LegacyCall legacy = 1;
+    EIP2930Call eip2930 = 2;
+    EIP1559Call eip1559 = 3;
+  }
+}
+
+message TraceKinds {
+  bool trace = 1;
+  bool vm_trace = 2;
+  bool state_diff = 3;
+}
+
+message CallRequest {
+  Call call = 1;
+  TraceKinds kinds = 2;
+}
+
+message CallRequests {
+  repeated CallRequest calls = 1;
+  BlockId block_id = 2;
+}
+
+message TraceBlockRequest {
+  BlockId id = 1;
+  TraceKinds kinds = 2;
+}
+
+message TraceTransactionRequest {
+  types.H256 hash = 1;
+  TraceKinds kinds = 2;
+}
+
+message AddressSet { repeated types.H160 addresses = 1; }
+
+enum FilterMode {
+  Union = 0;
+  Intersection = 1;
+}
+
+message FilterRequest {
+  optional BlockId from_block = 1;
+  optional BlockId to_block = 2;
+  optional AddressSet from_addresses = 3;
+  optional AddressSet to_addresses = 4;
+  optional FilterMode mode = 5;
+}
+
+// Trace
+
+enum CallType {
+  CallTypeCall = 0;
+  CallTypeCallCode = 1;
+  CallTypeDelegateCall = 2;
+  CallTypeStaticCall = 3;
+}
+
+message CallAction {
+  types.H160 from = 1;
+  types.H160 to = 2;
+  types.H256 value = 3;
+  uint64 gas = 4;
+  bytes input = 5;
+  optional CallType call_type = 6;
+}
+
+message CreateAction {
+  types.H160 from = 1;
+  types.H256 value = 2;
+  uint64 gas = 3;
+  bytes init = 4;
+}
+
+message SelfdestructAction {
+  types.H160 address = 1;
+  types.H160 refund_address = 2;
+  types.H256 balance = 3;
+}
+
+message RewardAction {
+  types.H160 author = 1;
+  types.H256 value = 2;
+  enum RewardType {
+    Block = 0;
+    Uncle = 1;
+  }
+  RewardType reward_type = 3;
+}
+
+message Action {
+  oneof action {
+    CallAction call = 1;
+    CreateAction create = 2;
+    SelfdestructAction selfdestruct = 3;
+    RewardAction reward = 4;
+  }
+}
+
+message Trace {
+  Action action = 1;
+  optional TraceResult result = 2;
+  uint64 subtraces = 3;
+  repeated uint64 trace_address = 4;
+}
+
+message CallOutput {
+  uint64 gas_used = 1;
+  bytes output = 2;
+}
+
+message CreateOutput {
+  uint64 gas_used = 1;
+  bytes code = 2;
+  types.H160 address = 3;
+}
+
+message TraceOutput {
+  oneof output {
+    CallOutput call = 1;
+    CreateOutput create = 2;
+  }
+}
+
+message TraceResult {
+  oneof result {
+    TraceOutput output = 1;
+    string error = 2;
+  }
+}
+
+message Traces { repeated Trace traces = 1; }
+
+message TraceWithLocation {
+  Trace trace = 1;
+
+  optional uint64 transaction_position = 2;
+  optional types.H256 transaction_hash = 3;
+  uint64 block_number = 4;
+  types.H256 block_hash = 5;
+}
+
+message TracesWithLocation { repeated TraceWithLocation traces = 1; }
+
+message OptionalTracesWithLocation { optional TracesWithLocation traces = 1; }
+
+// VM trace
+
+message MemoryDelta {
+  uint64 off = 1;
+  bytes data = 2;
+}
+
+message StorageDelta {
+  types.H256 key = 1;
+  types.H256 val = 2;
+}
+
+message VmExecutedOperation {
+  uint64 used = 1;
+  optional types.H256 push = 2;
+  optional MemoryDelta mem = 3;
+  optional StorageDelta store = 4;
+}
+
+message VmInstruction {
+  uint32 pc = 1;
+  uint64 cost = 2;
+  optional VmExecutedOperation ex = 3;
+  optional VmTrace sub = 4;
+}
+
+message VmTrace {
+  bytes code = 1;
+  repeated VmInstruction ops = 2;
+}
+
+// State diff
+
+message AlteredH256 {
+  types.H256 from = 1;
+  types.H256 to = 2;
+}
+
+message DeltaH256 {
+  oneof delta {
+    google.protobuf.Empty unchanged = 1;
+    types.H256 added = 2;
+    types.H256 removed = 3;
+    AlteredH256 altered = 4;
+  }
+}
+
+message AlteredU64 {
+  uint64 from = 1;
+  uint64 to = 2;
+}
+
+message DeltaU64 {
+  oneof delta {
+    google.protobuf.Empty unchanged = 1;
+    uint64 added = 2;
+    uint64 removed = 3;
+    AlteredU64 altered = 4;
+  }
+}
+
+message AlteredBytes {
+  bytes from = 1;
+  bytes to = 2;
+}
+
+message DeltaBytes {
+  oneof delta {
+    google.protobuf.Empty unchanged = 1;
+    bytes added = 2;
+    bytes removed = 3;
+    AlteredBytes altered = 4;
+  }
+}
+
+message StorageDiffEntry {
+  types.H256 location = 1;
+  DeltaH256 delta = 2;
+}
+
+message AccountDiff {
+  DeltaH256 balance = 1;
+  DeltaU64 nonce = 2;
+  DeltaBytes code = 3;
+  repeated StorageDiffEntry storage = 4;
+}
+
+message AccountDiffEntry {
+  types.H160 key = 1;
+  AccountDiff value = 2;
+}
+
+message StateDiff { repeated AccountDiffEntry diff = 1; }
+
+message FullTrace {
+  bytes output = 1;
+  optional Traces traces = 2;
+  optional VmTrace vm_trace = 3;
+  optional StateDiff state_diff = 4;
+}
+
+message FullTraceWithTransactionHash {
+  FullTrace full_trace = 1;
+  types.H256 transaction_hash = 2;
+}
+
+message FullTraces { repeated FullTrace traces = 1; }
+
+message FullTracesWithTransactionHashes {
+  repeated FullTraceWithTransactionHash traces = 1;
+}
+
+message OptionalFullTracesWithTransactionHashes {
+  optional FullTracesWithTransactionHashes traces = 1;
+}
+
+service TraceApi {
+  rpc Call(CallRequests) returns (FullTraces);
+  rpc Block(BlockId) returns (OptionalTracesWithLocation);
+  rpc BlockTransactions(TraceBlockRequest)
+      returns (OptionalFullTracesWithTransactionHashes);
+  rpc Transaction(TraceTransactionRequest) returns (FullTrace);
+  rpc Filter(FilterRequest) returns (stream TraceWithLocation);
+}

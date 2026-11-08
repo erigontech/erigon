@@ -349,7 +349,7 @@
             "output": "0x0000000000000000000000000000000000000000000000000000000000000001",
             "logs": [
               {
-                "index": 0,
+                "index": "0x0",
                 "address": "0x304a554a310c7e546dfe434669c62820b7d83490",
                 "topics": [
                   "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
@@ -366,7 +366,7 @@
         ],
         "logs": [
           {
-            "index": 1,
+            "index": "0x1",
             "address": "0xc0ee9db1a9e07ca63e4ff0d5fb6f86bf68d47b89",
             "topics": [
               "0x69ca02dd4edd7bf0a4abb9ed3b7af3f14778db5d61921c7dc7cd545266326de2"
@@ -487,7 +487,7 @@
             "output": "0x0000000000000000000000000000000000000000000000000000000000000001",
             "logs": [
               {
-                "index": 2,
+                "index": "0x2",
                 "address": "0x304a554a310c7e546dfe434669c62820b7d83490",
                 "topics": [
                   "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
@@ -504,7 +504,7 @@
         ],
         "logs": [
           {
-            "index": 3,
+            "index": "0x3",
             "address": "0xf835a0247b0063c04ef22006ebe57c5f11977cc4",
             "topics": [
               "0x69ca02dd4edd7bf0a4abb9ed3b7af3f14778db5d61921c7dc7cd545266326de2"
@@ -692,7 +692,7 @@
                 "output": "0x0000000000000000000000000000000000000000000000000000000000000001",
                 "logs": [
                   {
-                    "index": 5,
+                    "index": "0x5",
                     "address": "0x304a554a310c7e546dfe434669c62820b7d83490",
                     "topics": [
                       "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
@@ -876,7 +876,7 @@
                                     "output": "0x0000000000000000000000000000000000000000000000000000000000000001",
                                     "logs": [
                                       {
-                                        "index": 7,
+                                        "index": "0x7",
                                         "address": "0x304a554a310c7e546dfe434669c62820b7d83490",
                                         "topics": [
                                           "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
@@ -897,7 +897,7 @@
                             ],
                             "logs": [
                               {
-                                "index": 8,
+                                "index": "0x8",
                                 "address": "0xad3ecf23c0c8983b07163708be6d763b5f056193",
                                 "topics": [
                                   "0x9735b0cb909f3d21d5c16bbcccd272d85fa11446f6d679f6ecb170d2dabfecfc",
@@ -921,7 +921,7 @@
                 ],
                 "logs": [
                   {
-                    "index": 9,
+                    "index": "0x9",
                     "address": "0xad3ecf23c0c8983b07163708be6d763b5f056193",
                     "topics": [
                       "0x9735b0cb909f3d21d5c16bbcccd272d85fa11446f6d679f6ecb170d2dabfecfc",
@@ -947,7 +947,7 @@
             "output": "0x0000000000000000000000000000000000000000000000000000000000000001",
             "logs": [
               {
-                "index": 10,
+                "index": "0xa",
                 "address": "0x304a554a310c7e546dfe434669c62820b7d83490",
                 "topics": [
                   "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
@@ -964,7 +964,7 @@
         ],
         "logs": [
           {
-            "index": 4,
+            "index": "0x4",
             "address": "0x6e715ab4f598eacf0016b9b35ef33e4141844ccc",
             "topics": [
               "0x07cf7e805770612a8b2ee8e0bcbba8aa908df5f85fbc4f9e2ef384cf75315038"
@@ -973,7 +973,7 @@
             "position": "0x6"
           },
           {
-            "index": 6,
+            "index": "0x6",
             "address": "0x6e715ab4f598eacf0016b9b35ef33e4141844ccc",
             "topics": [
               "0x7027eecbd2a688fc1fa281702b311ed7168571514adfd17014a55d828cb43382"
@@ -1049,7 +1049,7 @@
                 "output": "0x0000000000000000000000000000000000000000000000000000000000000001",
                 "logs": [
                   {
-                    "index": 11,
+                    "index": "0xb",
                     "address": "0x304a554a310c7e546dfe434669c62820b7d83490",
                     "topics": [
                       "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
@@ -1178,7 +1178,7 @@
             "output": "0x0000000000000000000000000000000000000000000000000000000000000001",
             "logs": [
               {
-                "index": 14,
+                "index": "0xe",
                 "address": "0x304a554a310c7e546dfe434669c62820b7d83490",
                 "topics": [
                   "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
@@ -1195,7 +1195,7 @@
         ],
         "logs": [
           {
-            "index": 12,
+            "index": "0xc",
             "address": "0x6dbfc63479ffc031f23e94dc91befa38bec2c25f",
             "topics": [
               "0x4b0bc4f25f8d0b92d2e12b686ba96cd75e4e69325e6cf7b1f3119d14eaf2cbdf"
@@ -1204,7 +1204,7 @@
             "position": "0x6"
           },
           {
-            "index": 13,
+            "index": "0xd",
             "address": "0x6dbfc63479ffc031f23e94dc91befa38bec2c25f",
             "topics": [
               "0xf340c079d598119636d42046c6a2d2faf7a68c04aecee516f0e0b8a9e79b8666"
@@ -1253,7 +1253,7 @@
             "output": "0x0000000000000000000000000000000000000000000000000000000000000001",
             "logs": [
               {
-                "index": 15,
+                "index": "0xf",
                 "address": "0x304a554a310c7e546dfe434669c62820b7d83490",
                 "topics": [
                   "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
@@ -1349,7 +1349,7 @@
             ],
             "logs": [
               {
-                "index": 16,
+                "index": "0x10",
                 "address": "0x304a554a310c7e546dfe434669c62820b7d83490",
                 "topics": [
                   "0x5790de2c279e58269b93b12828f56fd5f2bc8ad15e61ce08572585c81a38756f",
@@ -1444,7 +1444,7 @@
             ],
             "logs": [
               {
-                "index": 17,
+                "index": "0x11",
                 "address": "0x304a554a310c7e546dfe434669c62820b7d83490",
                 "topics": [
                   "0x5790de2c279e58269b93b12828f56fd5f2bc8ad15e61ce08572585c81a38756f",
@@ -1539,7 +1539,7 @@
             ],
             "logs": [
               {
-                "index": 18,
+                "index": "0x12",
                 "address": "0x304a554a310c7e546dfe434669c62820b7d83490",
                 "topics": [
                   "0x5790de2c279e58269b93b12828f56fd5f2bc8ad15e61ce08572585c81a38756f",
@@ -1634,7 +1634,7 @@
             ],
             "logs": [
               {
-                "index": 19,
+                "index": "0x13",
                 "address": "0x304a554a310c7e546dfe434669c62820b7d83490",
                 "topics": [
                   "0x5790de2c279e58269b93b12828f56fd5f2bc8ad15e61ce08572585c81a38756f",
@@ -1729,7 +1729,7 @@
             ],
             "logs": [
               {
-                "index": 20,
+                "index": "0x14",
                 "address": "0x304a554a310c7e546dfe434669c62820b7d83490",
                 "topics": [
                   "0x5790de2c279e58269b93b12828f56fd5f2bc8ad15e61ce08572585c81a38756f",
@@ -1824,7 +1824,7 @@
             ],
             "logs": [
               {
-                "index": 21,
+                "index": "0x15",
                 "address": "0x304a554a310c7e546dfe434669c62820b7d83490",
                 "topics": [
                   "0x5790de2c279e58269b93b12828f56fd5f2bc8ad15e61ce08572585c81a38756f",
@@ -1919,7 +1919,7 @@
             ],
             "logs": [
               {
-                "index": 22,
+                "index": "0x16",
                 "address": "0x304a554a310c7e546dfe434669c62820b7d83490",
                 "topics": [
                   "0x5790de2c279e58269b93b12828f56fd5f2bc8ad15e61ce08572585c81a38756f",
@@ -2014,7 +2014,7 @@
             ],
             "logs": [
               {
-                "index": 23,
+                "index": "0x17",
                 "address": "0x304a554a310c7e546dfe434669c62820b7d83490",
                 "topics": [
                   "0x5790de2c279e58269b93b12828f56fd5f2bc8ad15e61ce08572585c81a38756f",
@@ -2109,7 +2109,7 @@
             ],
             "logs": [
               {
-                "index": 24,
+                "index": "0x18",
                 "address": "0x304a554a310c7e546dfe434669c62820b7d83490",
                 "topics": [
                   "0x5790de2c279e58269b93b12828f56fd5f2bc8ad15e61ce08572585c81a38756f",
@@ -2204,7 +2204,7 @@
             ],
             "logs": [
               {
-                "index": 25,
+                "index": "0x19",
                 "address": "0x304a554a310c7e546dfe434669c62820b7d83490",
                 "topics": [
                   "0x5790de2c279e58269b93b12828f56fd5f2bc8ad15e61ce08572585c81a38756f",
@@ -2257,7 +2257,7 @@
             "output": "0x0000000000000000000000000000000000000000000000000000000000000001",
             "logs": [
               {
-                "index": 26,
+                "index": "0x1a",
                 "address": "0x304a554a310c7e546dfe434669c62820b7d83490",
                 "topics": [
                   "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
@@ -2280,7 +2280,7 @@
             "output": "0x0000000000000000000000000000000000000000000000000000000000000001",
             "logs": [
               {
-                "index": 28,
+                "index": "0x1c",
                 "address": "0x304a554a310c7e546dfe434669c62820b7d83490",
                 "topics": [
                   "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
@@ -2303,7 +2303,7 @@
             "output": "0x0000000000000000000000000000000000000000000000000000000000000001",
             "logs": [
               {
-                "index": 30,
+                "index": "0x1e",
                 "address": "0x304a554a310c7e546dfe434669c62820b7d83490",
                 "topics": [
                   "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
@@ -2320,7 +2320,7 @@
         ],
         "logs": [
           {
-            "index": 27,
+            "index": "0x1b",
             "address": "0x4fd27b205895e698fa350f7ea57cec8a21927fcd",
             "topics": [
               "0xc6d8c0af6d21f291e7c359603aa97e0ed500f04db6e983b9fce75a91c6b8da6b"
@@ -2329,7 +2329,7 @@
             "position": "0x2"
           },
           {
-            "index": 29,
+            "index": "0x1d",
             "address": "0x4fd27b205895e698fa350f7ea57cec8a21927fcd",
             "topics": [
               "0xc6d8c0af6d21f291e7c359603aa97e0ed500f04db6e983b9fce75a91c6b8da6b"
@@ -2338,7 +2338,7 @@
             "position": "0x3"
           },
           {
-            "index": 31,
+            "index": "0x1f",
             "address": "0x4fd27b205895e698fa350f7ea57cec8a21927fcd",
             "topics": [
               "0xc6d8c0af6d21f291e7c359603aa97e0ed500f04db6e983b9fce75a91c6b8da6b"

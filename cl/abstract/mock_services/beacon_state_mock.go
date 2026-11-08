@@ -117,9 +117,11 @@ func (c *MockBeaconStateAddCurrentEpochParticipationFlagsCall) DoAndReturn(f fun
 }
 
 // AddEth1DataVote mocks base method.
-func (m *MockBeaconState) AddEth1DataVote(vote *cltypes.Eth1Data) {
+func (m *MockBeaconState) AddEth1DataVote(vote *cltypes.Eth1Data) error {
 	m.ctrl.T.Helper()
-	m.ctrl.Call(m, "AddEth1DataVote", vote)
+	ret := m.ctrl.Call(m, "AddEth1DataVote", vote)
+	ret0, _ := ret[0].(error)
+	return ret0
 }
 
 // AddEth1DataVote indicates an expected call of AddEth1DataVote.
@@ -135,19 +137,19 @@ type MockBeaconStateAddEth1DataVoteCall struct {
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockBeaconStateAddEth1DataVoteCall) Return() *MockBeaconStateAddEth1DataVoteCall {
-	c.Call = c.Call.Return()
+func (c *MockBeaconStateAddEth1DataVoteCall) Return(arg0 error) *MockBeaconStateAddEth1DataVoteCall {
+	c.Call = c.Call.Return(arg0)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockBeaconStateAddEth1DataVoteCall) Do(f func(*cltypes.Eth1Data)) *MockBeaconStateAddEth1DataVoteCall {
+func (c *MockBeaconStateAddEth1DataVoteCall) Do(f func(*cltypes.Eth1Data) error) *MockBeaconStateAddEth1DataVoteCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockBeaconStateAddEth1DataVoteCall) DoAndReturn(f func(*cltypes.Eth1Data)) *MockBeaconStateAddEth1DataVoteCall {
+func (c *MockBeaconStateAddEth1DataVoteCall) DoAndReturn(f func(*cltypes.Eth1Data) error) *MockBeaconStateAddEth1DataVoteCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
@@ -369,9 +371,11 @@ func (c *MockBeaconStateAddPreviousEpochParticipationFlagsCall) DoAndReturn(f fu
 }
 
 // AddValidator mocks base method.
-func (m *MockBeaconState) AddValidator(validator solid.Validator, balance uint64) {
+func (m *MockBeaconState) AddValidator(validator solid.Validator, balance uint64) error {
 	m.ctrl.T.Helper()
-	m.ctrl.Call(m, "AddValidator", validator, balance)
+	ret := m.ctrl.Call(m, "AddValidator", validator, balance)
+	ret0, _ := ret[0].(error)
+	return ret0
 }
 
 // AddValidator indicates an expected call of AddValidator.
@@ -387,19 +391,19 @@ type MockBeaconStateAddValidatorCall struct {
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockBeaconStateAddValidatorCall) Return() *MockBeaconStateAddValidatorCall {
-	c.Call = c.Call.Return()
+func (c *MockBeaconStateAddValidatorCall) Return(arg0 error) *MockBeaconStateAddValidatorCall {
+	c.Call = c.Call.Return(arg0)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockBeaconStateAddValidatorCall) Do(f func(solid.Validator, uint64)) *MockBeaconStateAddValidatorCall {
+func (c *MockBeaconStateAddValidatorCall) Do(f func(solid.Validator, uint64) error) *MockBeaconStateAddValidatorCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockBeaconStateAddValidatorCall) DoAndReturn(f func(solid.Validator, uint64)) *MockBeaconStateAddValidatorCall {
+func (c *MockBeaconStateAddValidatorCall) DoAndReturn(f func(solid.Validator, uint64) error) *MockBeaconStateAddValidatorCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
@@ -928,6 +932,45 @@ func (c *MockBeaconStateComputeNextSyncCommitteeCall) Do(f func() (*solid.SyncCo
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBeaconStateComputeNextSyncCommitteeCall) DoAndReturn(f func() (*solid.SyncCommittee, error)) *MockBeaconStateComputeNextSyncCommitteeCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// ComputePTC mocks base method.
+func (m *MockBeaconState) ComputePTC(slot uint64) ([]uint64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ComputePTC", slot)
+	ret0, _ := ret[0].([]uint64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ComputePTC indicates an expected call of ComputePTC.
+func (mr *MockBeaconStateMockRecorder) ComputePTC(slot any) *MockBeaconStateComputePTCCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ComputePTC", reflect.TypeOf((*MockBeaconState)(nil).ComputePTC), slot)
+	return &MockBeaconStateComputePTCCall{Call: call}
+}
+
+// MockBeaconStateComputePTCCall wrap *gomock.Call
+type MockBeaconStateComputePTCCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockBeaconStateComputePTCCall) Return(arg0 []uint64, arg1 error) *MockBeaconStateComputePTCCall {
+	c.Call = c.Call.Return(arg0, arg1)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockBeaconStateComputePTCCall) Do(f func(uint64) ([]uint64, error)) *MockBeaconStateComputePTCCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockBeaconStateComputePTCCall) DoAndReturn(f func(uint64) ([]uint64, error)) *MockBeaconStateComputePTCCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
@@ -1724,18 +1767,18 @@ func (c *MockBeaconStateGetActiveValidatorsIndicesCall) DoAndReturn(f func(uint6
 }
 
 // GetAttestationParticipationFlagIndicies mocks base method.
-func (m *MockBeaconState) GetAttestationParticipationFlagIndicies(data *solid.AttestationData, inclusionDelay uint64, skipAssert bool) ([]uint8, error) {
+func (m *MockBeaconState) GetAttestationParticipationFlagIndicies(data *solid.AttestationData, inclusionDelay, parentSlot uint64, skipAssert bool) ([]uint8, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetAttestationParticipationFlagIndicies", data, inclusionDelay, skipAssert)
+	ret := m.ctrl.Call(m, "GetAttestationParticipationFlagIndicies", data, inclusionDelay, parentSlot, skipAssert)
 	ret0, _ := ret[0].([]uint8)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // GetAttestationParticipationFlagIndicies indicates an expected call of GetAttestationParticipationFlagIndicies.
-func (mr *MockBeaconStateMockRecorder) GetAttestationParticipationFlagIndicies(data, inclusionDelay, skipAssert any) *MockBeaconStateGetAttestationParticipationFlagIndiciesCall {
+func (mr *MockBeaconStateMockRecorder) GetAttestationParticipationFlagIndicies(data, inclusionDelay, parentSlot, skipAssert any) *MockBeaconStateGetAttestationParticipationFlagIndiciesCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetAttestationParticipationFlagIndicies", reflect.TypeOf((*MockBeaconState)(nil).GetAttestationParticipationFlagIndicies), data, inclusionDelay, skipAssert)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetAttestationParticipationFlagIndicies", reflect.TypeOf((*MockBeaconState)(nil).GetAttestationParticipationFlagIndicies), data, inclusionDelay, parentSlot, skipAssert)
 	return &MockBeaconStateGetAttestationParticipationFlagIndiciesCall{Call: call}
 }
 
@@ -1751,13 +1794,13 @@ func (c *MockBeaconStateGetAttestationParticipationFlagIndiciesCall) Return(arg0
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockBeaconStateGetAttestationParticipationFlagIndiciesCall) Do(f func(*solid.AttestationData, uint64, bool) ([]uint8, error)) *MockBeaconStateGetAttestationParticipationFlagIndiciesCall {
+func (c *MockBeaconStateGetAttestationParticipationFlagIndiciesCall) Do(f func(*solid.AttestationData, uint64, uint64, bool) ([]uint8, error)) *MockBeaconStateGetAttestationParticipationFlagIndiciesCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockBeaconStateGetAttestationParticipationFlagIndiciesCall) DoAndReturn(f func(*solid.AttestationData, uint64, bool) ([]uint8, error)) *MockBeaconStateGetAttestationParticipationFlagIndiciesCall {
+func (c *MockBeaconStateGetAttestationParticipationFlagIndiciesCall) DoAndReturn(f func(*solid.AttestationData, uint64, uint64, bool) ([]uint8, error)) *MockBeaconStateGetAttestationParticipationFlagIndiciesCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
@@ -1957,6 +2000,158 @@ func (c *MockBeaconStateGetBlockRootAtSlotCall) DoAndReturn(f func(uint64) (comm
 	return c
 }
 
+// GetBuilderPaymentQuorumThreshold mocks base method.
+func (m *MockBeaconState) GetBuilderPaymentQuorumThreshold() uint64 {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetBuilderPaymentQuorumThreshold")
+	ret0, _ := ret[0].(uint64)
+	return ret0
+}
+
+// GetBuilderPaymentQuorumThreshold indicates an expected call of GetBuilderPaymentQuorumThreshold.
+func (mr *MockBeaconStateMockRecorder) GetBuilderPaymentQuorumThreshold() *MockBeaconStateGetBuilderPaymentQuorumThresholdCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetBuilderPaymentQuorumThreshold", reflect.TypeOf((*MockBeaconState)(nil).GetBuilderPaymentQuorumThreshold))
+	return &MockBeaconStateGetBuilderPaymentQuorumThresholdCall{Call: call}
+}
+
+// MockBeaconStateGetBuilderPaymentQuorumThresholdCall wrap *gomock.Call
+type MockBeaconStateGetBuilderPaymentQuorumThresholdCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockBeaconStateGetBuilderPaymentQuorumThresholdCall) Return(arg0 uint64) *MockBeaconStateGetBuilderPaymentQuorumThresholdCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockBeaconStateGetBuilderPaymentQuorumThresholdCall) Do(f func() uint64) *MockBeaconStateGetBuilderPaymentQuorumThresholdCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockBeaconStateGetBuilderPaymentQuorumThresholdCall) DoAndReturn(f func() uint64) *MockBeaconStateGetBuilderPaymentQuorumThresholdCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// GetBuilderPendingPayments mocks base method.
+func (m *MockBeaconState) GetBuilderPendingPayments() *solid.VectorSSZ[*cltypes.BuilderPendingPayment] {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetBuilderPendingPayments")
+	ret0, _ := ret[0].(*solid.VectorSSZ[*cltypes.BuilderPendingPayment])
+	return ret0
+}
+
+// GetBuilderPendingPayments indicates an expected call of GetBuilderPendingPayments.
+func (mr *MockBeaconStateMockRecorder) GetBuilderPendingPayments() *MockBeaconStateGetBuilderPendingPaymentsCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetBuilderPendingPayments", reflect.TypeOf((*MockBeaconState)(nil).GetBuilderPendingPayments))
+	return &MockBeaconStateGetBuilderPendingPaymentsCall{Call: call}
+}
+
+// MockBeaconStateGetBuilderPendingPaymentsCall wrap *gomock.Call
+type MockBeaconStateGetBuilderPendingPaymentsCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockBeaconStateGetBuilderPendingPaymentsCall) Return(arg0 *solid.VectorSSZ[*cltypes.BuilderPendingPayment]) *MockBeaconStateGetBuilderPendingPaymentsCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockBeaconStateGetBuilderPendingPaymentsCall) Do(f func() *solid.VectorSSZ[*cltypes.BuilderPendingPayment]) *MockBeaconStateGetBuilderPendingPaymentsCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockBeaconStateGetBuilderPendingPaymentsCall) DoAndReturn(f func() *solid.VectorSSZ[*cltypes.BuilderPendingPayment]) *MockBeaconStateGetBuilderPendingPaymentsCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// GetBuilderPendingWithdrawals mocks base method.
+func (m *MockBeaconState) GetBuilderPendingWithdrawals() *solid.ListSSZ[*cltypes.BuilderPendingWithdrawal] {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetBuilderPendingWithdrawals")
+	ret0, _ := ret[0].(*solid.ListSSZ[*cltypes.BuilderPendingWithdrawal])
+	return ret0
+}
+
+// GetBuilderPendingWithdrawals indicates an expected call of GetBuilderPendingWithdrawals.
+func (mr *MockBeaconStateMockRecorder) GetBuilderPendingWithdrawals() *MockBeaconStateGetBuilderPendingWithdrawalsCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetBuilderPendingWithdrawals", reflect.TypeOf((*MockBeaconState)(nil).GetBuilderPendingWithdrawals))
+	return &MockBeaconStateGetBuilderPendingWithdrawalsCall{Call: call}
+}
+
+// MockBeaconStateGetBuilderPendingWithdrawalsCall wrap *gomock.Call
+type MockBeaconStateGetBuilderPendingWithdrawalsCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockBeaconStateGetBuilderPendingWithdrawalsCall) Return(arg0 *solid.ListSSZ[*cltypes.BuilderPendingWithdrawal]) *MockBeaconStateGetBuilderPendingWithdrawalsCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockBeaconStateGetBuilderPendingWithdrawalsCall) Do(f func() *solid.ListSSZ[*cltypes.BuilderPendingWithdrawal]) *MockBeaconStateGetBuilderPendingWithdrawalsCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockBeaconStateGetBuilderPendingWithdrawalsCall) DoAndReturn(f func() *solid.ListSSZ[*cltypes.BuilderPendingWithdrawal]) *MockBeaconStateGetBuilderPendingWithdrawalsCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// GetBuilders mocks base method.
+func (m *MockBeaconState) GetBuilders() *solid.ListSSZ[*cltypes.Builder] {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetBuilders")
+	ret0, _ := ret[0].(*solid.ListSSZ[*cltypes.Builder])
+	return ret0
+}
+
+// GetBuilders indicates an expected call of GetBuilders.
+func (mr *MockBeaconStateMockRecorder) GetBuilders() *MockBeaconStateGetBuildersCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetBuilders", reflect.TypeOf((*MockBeaconState)(nil).GetBuilders))
+	return &MockBeaconStateGetBuildersCall{Call: call}
+}
+
+// MockBeaconStateGetBuildersCall wrap *gomock.Call
+type MockBeaconStateGetBuildersCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockBeaconStateGetBuildersCall) Return(arg0 *solid.ListSSZ[*cltypes.Builder]) *MockBeaconStateGetBuildersCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockBeaconStateGetBuildersCall) Do(f func() *solid.ListSSZ[*cltypes.Builder]) *MockBeaconStateGetBuildersCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockBeaconStateGetBuildersCall) DoAndReturn(f func() *solid.ListSSZ[*cltypes.Builder]) *MockBeaconStateGetBuildersCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // GetConsolidationBalanceToConsume mocks base method.
 func (m *MockBeaconState) GetConsolidationBalanceToConsume() uint64 {
 	m.ctrl.T.Helper()
@@ -2148,6 +2343,236 @@ func (c *MockBeaconStateGetEarlistConsolidationEpochCall) DoAndReturn(f func() u
 	return c
 }
 
+// GetIndexedPayloadAttestation mocks base method.
+func (m *MockBeaconState) GetIndexedPayloadAttestation(payloadAttestation *cltypes.PayloadAttestation) (*cltypes.IndexedPayloadAttestation, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetIndexedPayloadAttestation", payloadAttestation)
+	ret0, _ := ret[0].(*cltypes.IndexedPayloadAttestation)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetIndexedPayloadAttestation indicates an expected call of GetIndexedPayloadAttestation.
+func (mr *MockBeaconStateMockRecorder) GetIndexedPayloadAttestation(payloadAttestation any) *MockBeaconStateGetIndexedPayloadAttestationCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetIndexedPayloadAttestation", reflect.TypeOf((*MockBeaconState)(nil).GetIndexedPayloadAttestation), payloadAttestation)
+	return &MockBeaconStateGetIndexedPayloadAttestationCall{Call: call}
+}
+
+// MockBeaconStateGetIndexedPayloadAttestationCall wrap *gomock.Call
+type MockBeaconStateGetIndexedPayloadAttestationCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockBeaconStateGetIndexedPayloadAttestationCall) Return(arg0 *cltypes.IndexedPayloadAttestation, arg1 error) *MockBeaconStateGetIndexedPayloadAttestationCall {
+	c.Call = c.Call.Return(arg0, arg1)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockBeaconStateGetIndexedPayloadAttestationCall) Do(f func(*cltypes.PayloadAttestation) (*cltypes.IndexedPayloadAttestation, error)) *MockBeaconStateGetIndexedPayloadAttestationCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockBeaconStateGetIndexedPayloadAttestationCall) DoAndReturn(f func(*cltypes.PayloadAttestation) (*cltypes.IndexedPayloadAttestation, error)) *MockBeaconStateGetIndexedPayloadAttestationCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// GetLatestBlockHash mocks base method.
+func (m *MockBeaconState) GetLatestBlockHash() common.Hash {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetLatestBlockHash")
+	ret0, _ := ret[0].(common.Hash)
+	return ret0
+}
+
+// GetLatestBlockHash indicates an expected call of GetLatestBlockHash.
+func (mr *MockBeaconStateMockRecorder) GetLatestBlockHash() *MockBeaconStateGetLatestBlockHashCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetLatestBlockHash", reflect.TypeOf((*MockBeaconState)(nil).GetLatestBlockHash))
+	return &MockBeaconStateGetLatestBlockHashCall{Call: call}
+}
+
+// MockBeaconStateGetLatestBlockHashCall wrap *gomock.Call
+type MockBeaconStateGetLatestBlockHashCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockBeaconStateGetLatestBlockHashCall) Return(arg0 common.Hash) *MockBeaconStateGetLatestBlockHashCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockBeaconStateGetLatestBlockHashCall) Do(f func() common.Hash) *MockBeaconStateGetLatestBlockHashCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockBeaconStateGetLatestBlockHashCall) DoAndReturn(f func() common.Hash) *MockBeaconStateGetLatestBlockHashCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// GetLatestExecutionPayloadBid mocks base method.
+func (m *MockBeaconState) GetLatestExecutionPayloadBid() *cltypes.ExecutionPayloadBid {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetLatestExecutionPayloadBid")
+	ret0, _ := ret[0].(*cltypes.ExecutionPayloadBid)
+	return ret0
+}
+
+// GetLatestExecutionPayloadBid indicates an expected call of GetLatestExecutionPayloadBid.
+func (mr *MockBeaconStateMockRecorder) GetLatestExecutionPayloadBid() *MockBeaconStateGetLatestExecutionPayloadBidCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetLatestExecutionPayloadBid", reflect.TypeOf((*MockBeaconState)(nil).GetLatestExecutionPayloadBid))
+	return &MockBeaconStateGetLatestExecutionPayloadBidCall{Call: call}
+}
+
+// MockBeaconStateGetLatestExecutionPayloadBidCall wrap *gomock.Call
+type MockBeaconStateGetLatestExecutionPayloadBidCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockBeaconStateGetLatestExecutionPayloadBidCall) Return(arg0 *cltypes.ExecutionPayloadBid) *MockBeaconStateGetLatestExecutionPayloadBidCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockBeaconStateGetLatestExecutionPayloadBidCall) Do(f func() *cltypes.ExecutionPayloadBid) *MockBeaconStateGetLatestExecutionPayloadBidCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockBeaconStateGetLatestExecutionPayloadBidCall) DoAndReturn(f func() *cltypes.ExecutionPayloadBid) *MockBeaconStateGetLatestExecutionPayloadBidCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// GetNextWithdrawalBuilderIndex mocks base method.
+func (m *MockBeaconState) GetNextWithdrawalBuilderIndex() uint64 {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetNextWithdrawalBuilderIndex")
+	ret0, _ := ret[0].(uint64)
+	return ret0
+}
+
+// GetNextWithdrawalBuilderIndex indicates an expected call of GetNextWithdrawalBuilderIndex.
+func (mr *MockBeaconStateMockRecorder) GetNextWithdrawalBuilderIndex() *MockBeaconStateGetNextWithdrawalBuilderIndexCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetNextWithdrawalBuilderIndex", reflect.TypeOf((*MockBeaconState)(nil).GetNextWithdrawalBuilderIndex))
+	return &MockBeaconStateGetNextWithdrawalBuilderIndexCall{Call: call}
+}
+
+// MockBeaconStateGetNextWithdrawalBuilderIndexCall wrap *gomock.Call
+type MockBeaconStateGetNextWithdrawalBuilderIndexCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockBeaconStateGetNextWithdrawalBuilderIndexCall) Return(arg0 uint64) *MockBeaconStateGetNextWithdrawalBuilderIndexCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockBeaconStateGetNextWithdrawalBuilderIndexCall) Do(f func() uint64) *MockBeaconStateGetNextWithdrawalBuilderIndexCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockBeaconStateGetNextWithdrawalBuilderIndexCall) DoAndReturn(f func() uint64) *MockBeaconStateGetNextWithdrawalBuilderIndexCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// GetPTC mocks base method.
+func (m *MockBeaconState) GetPTC(slot uint64) ([]uint64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetPTC", slot)
+	ret0, _ := ret[0].([]uint64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetPTC indicates an expected call of GetPTC.
+func (mr *MockBeaconStateMockRecorder) GetPTC(slot any) *MockBeaconStateGetPTCCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetPTC", reflect.TypeOf((*MockBeaconState)(nil).GetPTC), slot)
+	return &MockBeaconStateGetPTCCall{Call: call}
+}
+
+// MockBeaconStateGetPTCCall wrap *gomock.Call
+type MockBeaconStateGetPTCCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockBeaconStateGetPTCCall) Return(arg0 []uint64, arg1 error) *MockBeaconStateGetPTCCall {
+	c.Call = c.Call.Return(arg0, arg1)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockBeaconStateGetPTCCall) Do(f func(uint64) ([]uint64, error)) *MockBeaconStateGetPTCCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockBeaconStateGetPTCCall) DoAndReturn(f func(uint64) ([]uint64, error)) *MockBeaconStateGetPTCCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// GetPayloadExpectedWithdrawals mocks base method.
+func (m *MockBeaconState) GetPayloadExpectedWithdrawals() *solid.ListSSZ[*cltypes.Withdrawal] {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetPayloadExpectedWithdrawals")
+	ret0, _ := ret[0].(*solid.ListSSZ[*cltypes.Withdrawal])
+	return ret0
+}
+
+// GetPayloadExpectedWithdrawals indicates an expected call of GetPayloadExpectedWithdrawals.
+func (mr *MockBeaconStateMockRecorder) GetPayloadExpectedWithdrawals() *MockBeaconStateGetPayloadExpectedWithdrawalsCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetPayloadExpectedWithdrawals", reflect.TypeOf((*MockBeaconState)(nil).GetPayloadExpectedWithdrawals))
+	return &MockBeaconStateGetPayloadExpectedWithdrawalsCall{Call: call}
+}
+
+// MockBeaconStateGetPayloadExpectedWithdrawalsCall wrap *gomock.Call
+type MockBeaconStateGetPayloadExpectedWithdrawalsCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockBeaconStateGetPayloadExpectedWithdrawalsCall) Return(arg0 *solid.ListSSZ[*cltypes.Withdrawal]) *MockBeaconStateGetPayloadExpectedWithdrawalsCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockBeaconStateGetPayloadExpectedWithdrawalsCall) Do(f func() *solid.ListSSZ[*cltypes.Withdrawal]) *MockBeaconStateGetPayloadExpectedWithdrawalsCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockBeaconStateGetPayloadExpectedWithdrawalsCall) DoAndReturn(f func() *solid.ListSSZ[*cltypes.Withdrawal]) *MockBeaconStateGetPayloadExpectedWithdrawalsCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // GetPendingConsolidations mocks base method.
 func (m *MockBeaconState) GetPendingConsolidations() *solid.ListSSZ[*solid.PendingConsolidation] {
 	m.ctrl.T.Helper()
@@ -2296,6 +2721,44 @@ func (c *MockBeaconStateGetProposerLookaheadCall) Do(f func() solid.Uint64Vector
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBeaconStateGetProposerLookaheadCall) DoAndReturn(f func() solid.Uint64VectorSSZ) *MockBeaconStateGetProposerLookaheadCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// GetPtcWindow mocks base method.
+func (m *MockBeaconState) GetPtcWindow() *solid.VectorSSZ[solid.Uint64VectorSSZ] {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetPtcWindow")
+	ret0, _ := ret[0].(*solid.VectorSSZ[solid.Uint64VectorSSZ])
+	return ret0
+}
+
+// GetPtcWindow indicates an expected call of GetPtcWindow.
+func (mr *MockBeaconStateMockRecorder) GetPtcWindow() *MockBeaconStateGetPtcWindowCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetPtcWindow", reflect.TypeOf((*MockBeaconState)(nil).GetPtcWindow))
+	return &MockBeaconStateGetPtcWindowCall{Call: call}
+}
+
+// MockBeaconStateGetPtcWindowCall wrap *gomock.Call
+type MockBeaconStateGetPtcWindowCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockBeaconStateGetPtcWindowCall) Return(arg0 *solid.VectorSSZ[solid.Uint64VectorSSZ]) *MockBeaconStateGetPtcWindowCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockBeaconStateGetPtcWindowCall) Do(f func() *solid.VectorSSZ[solid.Uint64VectorSSZ]) *MockBeaconStateGetPtcWindowCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockBeaconStateGetPtcWindowCall) DoAndReturn(f func() *solid.VectorSSZ[solid.Uint64VectorSSZ]) *MockBeaconStateGetPtcWindowCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
@@ -2525,6 +2988,42 @@ func (c *MockBeaconStateHashSSZCall) Do(f func() ([32]byte, error)) *MockBeaconS
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBeaconStateHashSSZCall) DoAndReturn(f func() ([32]byte, error)) *MockBeaconStateHashSSZCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// InitiateBuilderExit mocks base method.
+func (m *MockBeaconState) InitiateBuilderExit(builderIndex uint64) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "InitiateBuilderExit", builderIndex)
+}
+
+// InitiateBuilderExit indicates an expected call of InitiateBuilderExit.
+func (mr *MockBeaconStateMockRecorder) InitiateBuilderExit(builderIndex any) *MockBeaconStateInitiateBuilderExitCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "InitiateBuilderExit", reflect.TypeOf((*MockBeaconState)(nil).InitiateBuilderExit), builderIndex)
+	return &MockBeaconStateInitiateBuilderExitCall{Call: call}
+}
+
+// MockBeaconStateInitiateBuilderExitCall wrap *gomock.Call
+type MockBeaconStateInitiateBuilderExitCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockBeaconStateInitiateBuilderExitCall) Return() *MockBeaconStateInitiateBuilderExitCall {
+	c.Call = c.Call.Return()
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockBeaconStateInitiateBuilderExitCall) Do(f func(uint64)) *MockBeaconStateInitiateBuilderExitCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockBeaconStateInitiateBuilderExitCall) DoAndReturn(f func(uint64)) *MockBeaconStateInitiateBuilderExitCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
@@ -3023,6 +3522,42 @@ func (c *MockBeaconStatePreviousStateRootCall) DoAndReturn(f func() common.Hash)
 	return c
 }
 
+// PrintLeaves mocks base method.
+func (m *MockBeaconState) PrintLeaves() {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "PrintLeaves")
+}
+
+// PrintLeaves indicates an expected call of PrintLeaves.
+func (mr *MockBeaconStateMockRecorder) PrintLeaves() *MockBeaconStatePrintLeavesCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PrintLeaves", reflect.TypeOf((*MockBeaconState)(nil).PrintLeaves))
+	return &MockBeaconStatePrintLeavesCall{Call: call}
+}
+
+// MockBeaconStatePrintLeavesCall wrap *gomock.Call
+type MockBeaconStatePrintLeavesCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockBeaconStatePrintLeavesCall) Return() *MockBeaconStatePrintLeavesCall {
+	c.Call = c.Call.Return()
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockBeaconStatePrintLeavesCall) Do(f func()) *MockBeaconStatePrintLeavesCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockBeaconStatePrintLeavesCall) DoAndReturn(f func()) *MockBeaconStatePrintLeavesCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // RandaoMixes mocks base method.
 func (m *MockBeaconState) RandaoMixes() solid.HashVectorSSZ {
 	m.ctrl.T.Helper()
@@ -3098,9 +3633,11 @@ func (c *MockBeaconStateResetCurrentEpochAttestationsCall) DoAndReturn(f func())
 }
 
 // ResetEpochParticipation mocks base method.
-func (m *MockBeaconState) ResetEpochParticipation() {
+func (m *MockBeaconState) ResetEpochParticipation() error {
 	m.ctrl.T.Helper()
-	m.ctrl.Call(m, "ResetEpochParticipation")
+	ret := m.ctrl.Call(m, "ResetEpochParticipation")
+	ret0, _ := ret[0].(error)
+	return ret0
 }
 
 // ResetEpochParticipation indicates an expected call of ResetEpochParticipation.
@@ -3116,19 +3653,19 @@ type MockBeaconStateResetEpochParticipationCall struct {
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockBeaconStateResetEpochParticipationCall) Return() *MockBeaconStateResetEpochParticipationCall {
-	c.Call = c.Call.Return()
+func (c *MockBeaconStateResetEpochParticipationCall) Return(arg0 error) *MockBeaconStateResetEpochParticipationCall {
+	c.Call = c.Call.Return(arg0)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockBeaconStateResetEpochParticipationCall) Do(f func()) *MockBeaconStateResetEpochParticipationCall {
+func (c *MockBeaconStateResetEpochParticipationCall) Do(f func() error) *MockBeaconStateResetEpochParticipationCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockBeaconStateResetEpochParticipationCall) DoAndReturn(f func()) *MockBeaconStateResetEpochParticipationCall {
+func (c *MockBeaconStateResetEpochParticipationCall) DoAndReturn(f func() error) *MockBeaconStateResetEpochParticipationCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
@@ -3242,9 +3779,11 @@ func (c *MockBeaconStateResetPreviousEpochAttestationsCall) DoAndReturn(f func()
 }
 
 // SetActivationEligibilityEpochForValidatorAtIndex mocks base method.
-func (m *MockBeaconState) SetActivationEligibilityEpochForValidatorAtIndex(index int, epoch uint64) {
+func (m *MockBeaconState) SetActivationEligibilityEpochForValidatorAtIndex(index int, epoch uint64) error {
 	m.ctrl.T.Helper()
-	m.ctrl.Call(m, "SetActivationEligibilityEpochForValidatorAtIndex", index, epoch)
+	ret := m.ctrl.Call(m, "SetActivationEligibilityEpochForValidatorAtIndex", index, epoch)
+	ret0, _ := ret[0].(error)
+	return ret0
 }
 
 // SetActivationEligibilityEpochForValidatorAtIndex indicates an expected call of SetActivationEligibilityEpochForValidatorAtIndex.
@@ -3260,27 +3799,29 @@ type MockBeaconStateSetActivationEligibilityEpochForValidatorAtIndexCall struct 
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockBeaconStateSetActivationEligibilityEpochForValidatorAtIndexCall) Return() *MockBeaconStateSetActivationEligibilityEpochForValidatorAtIndexCall {
-	c.Call = c.Call.Return()
+func (c *MockBeaconStateSetActivationEligibilityEpochForValidatorAtIndexCall) Return(arg0 error) *MockBeaconStateSetActivationEligibilityEpochForValidatorAtIndexCall {
+	c.Call = c.Call.Return(arg0)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockBeaconStateSetActivationEligibilityEpochForValidatorAtIndexCall) Do(f func(int, uint64)) *MockBeaconStateSetActivationEligibilityEpochForValidatorAtIndexCall {
+func (c *MockBeaconStateSetActivationEligibilityEpochForValidatorAtIndexCall) Do(f func(int, uint64) error) *MockBeaconStateSetActivationEligibilityEpochForValidatorAtIndexCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockBeaconStateSetActivationEligibilityEpochForValidatorAtIndexCall) DoAndReturn(f func(int, uint64)) *MockBeaconStateSetActivationEligibilityEpochForValidatorAtIndexCall {
+func (c *MockBeaconStateSetActivationEligibilityEpochForValidatorAtIndexCall) DoAndReturn(f func(int, uint64) error) *MockBeaconStateSetActivationEligibilityEpochForValidatorAtIndexCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
 
 // SetActivationEpochForValidatorAtIndex mocks base method.
-func (m *MockBeaconState) SetActivationEpochForValidatorAtIndex(index int, epoch uint64) {
+func (m *MockBeaconState) SetActivationEpochForValidatorAtIndex(index int, epoch uint64) error {
 	m.ctrl.T.Helper()
-	m.ctrl.Call(m, "SetActivationEpochForValidatorAtIndex", index, epoch)
+	ret := m.ctrl.Call(m, "SetActivationEpochForValidatorAtIndex", index, epoch)
+	ret0, _ := ret[0].(error)
+	return ret0
 }
 
 // SetActivationEpochForValidatorAtIndex indicates an expected call of SetActivationEpochForValidatorAtIndex.
@@ -3296,27 +3837,29 @@ type MockBeaconStateSetActivationEpochForValidatorAtIndexCall struct {
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockBeaconStateSetActivationEpochForValidatorAtIndexCall) Return() *MockBeaconStateSetActivationEpochForValidatorAtIndexCall {
-	c.Call = c.Call.Return()
+func (c *MockBeaconStateSetActivationEpochForValidatorAtIndexCall) Return(arg0 error) *MockBeaconStateSetActivationEpochForValidatorAtIndexCall {
+	c.Call = c.Call.Return(arg0)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockBeaconStateSetActivationEpochForValidatorAtIndexCall) Do(f func(int, uint64)) *MockBeaconStateSetActivationEpochForValidatorAtIndexCall {
+func (c *MockBeaconStateSetActivationEpochForValidatorAtIndexCall) Do(f func(int, uint64) error) *MockBeaconStateSetActivationEpochForValidatorAtIndexCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockBeaconStateSetActivationEpochForValidatorAtIndexCall) DoAndReturn(f func(int, uint64)) *MockBeaconStateSetActivationEpochForValidatorAtIndexCall {
+func (c *MockBeaconStateSetActivationEpochForValidatorAtIndexCall) DoAndReturn(f func(int, uint64) error) *MockBeaconStateSetActivationEpochForValidatorAtIndexCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
 
 // SetBlockRootAt mocks base method.
-func (m *MockBeaconState) SetBlockRootAt(index int, root common.Hash) {
+func (m *MockBeaconState) SetBlockRootAt(index int, root common.Hash) error {
 	m.ctrl.T.Helper()
-	m.ctrl.Call(m, "SetBlockRootAt", index, root)
+	ret := m.ctrl.Call(m, "SetBlockRootAt", index, root)
+	ret0, _ := ret[0].(error)
+	return ret0
 }
 
 // SetBlockRootAt indicates an expected call of SetBlockRootAt.
@@ -3332,19 +3875,127 @@ type MockBeaconStateSetBlockRootAtCall struct {
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockBeaconStateSetBlockRootAtCall) Return() *MockBeaconStateSetBlockRootAtCall {
-	c.Call = c.Call.Return()
+func (c *MockBeaconStateSetBlockRootAtCall) Return(arg0 error) *MockBeaconStateSetBlockRootAtCall {
+	c.Call = c.Call.Return(arg0)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockBeaconStateSetBlockRootAtCall) Do(f func(int, common.Hash)) *MockBeaconStateSetBlockRootAtCall {
+func (c *MockBeaconStateSetBlockRootAtCall) Do(f func(int, common.Hash) error) *MockBeaconStateSetBlockRootAtCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockBeaconStateSetBlockRootAtCall) DoAndReturn(f func(int, common.Hash)) *MockBeaconStateSetBlockRootAtCall {
+func (c *MockBeaconStateSetBlockRootAtCall) DoAndReturn(f func(int, common.Hash) error) *MockBeaconStateSetBlockRootAtCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// SetBuilderPendingPayments mocks base method.
+func (m *MockBeaconState) SetBuilderPendingPayments(arg0 *solid.VectorSSZ[*cltypes.BuilderPendingPayment]) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "SetBuilderPendingPayments", arg0)
+}
+
+// SetBuilderPendingPayments indicates an expected call of SetBuilderPendingPayments.
+func (mr *MockBeaconStateMockRecorder) SetBuilderPendingPayments(arg0 any) *MockBeaconStateSetBuilderPendingPaymentsCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetBuilderPendingPayments", reflect.TypeOf((*MockBeaconState)(nil).SetBuilderPendingPayments), arg0)
+	return &MockBeaconStateSetBuilderPendingPaymentsCall{Call: call}
+}
+
+// MockBeaconStateSetBuilderPendingPaymentsCall wrap *gomock.Call
+type MockBeaconStateSetBuilderPendingPaymentsCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockBeaconStateSetBuilderPendingPaymentsCall) Return() *MockBeaconStateSetBuilderPendingPaymentsCall {
+	c.Call = c.Call.Return()
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockBeaconStateSetBuilderPendingPaymentsCall) Do(f func(*solid.VectorSSZ[*cltypes.BuilderPendingPayment])) *MockBeaconStateSetBuilderPendingPaymentsCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockBeaconStateSetBuilderPendingPaymentsCall) DoAndReturn(f func(*solid.VectorSSZ[*cltypes.BuilderPendingPayment])) *MockBeaconStateSetBuilderPendingPaymentsCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// SetBuilderPendingWithdrawals mocks base method.
+func (m *MockBeaconState) SetBuilderPendingWithdrawals(withdrawals *solid.ListSSZ[*cltypes.BuilderPendingWithdrawal]) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "SetBuilderPendingWithdrawals", withdrawals)
+}
+
+// SetBuilderPendingWithdrawals indicates an expected call of SetBuilderPendingWithdrawals.
+func (mr *MockBeaconStateMockRecorder) SetBuilderPendingWithdrawals(withdrawals any) *MockBeaconStateSetBuilderPendingWithdrawalsCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetBuilderPendingWithdrawals", reflect.TypeOf((*MockBeaconState)(nil).SetBuilderPendingWithdrawals), withdrawals)
+	return &MockBeaconStateSetBuilderPendingWithdrawalsCall{Call: call}
+}
+
+// MockBeaconStateSetBuilderPendingWithdrawalsCall wrap *gomock.Call
+type MockBeaconStateSetBuilderPendingWithdrawalsCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockBeaconStateSetBuilderPendingWithdrawalsCall) Return() *MockBeaconStateSetBuilderPendingWithdrawalsCall {
+	c.Call = c.Call.Return()
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockBeaconStateSetBuilderPendingWithdrawalsCall) Do(f func(*solid.ListSSZ[*cltypes.BuilderPendingWithdrawal])) *MockBeaconStateSetBuilderPendingWithdrawalsCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockBeaconStateSetBuilderPendingWithdrawalsCall) DoAndReturn(f func(*solid.ListSSZ[*cltypes.BuilderPendingWithdrawal])) *MockBeaconStateSetBuilderPendingWithdrawalsCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// SetBuilders mocks base method.
+func (m *MockBeaconState) SetBuilders(builders *solid.ListSSZ[*cltypes.Builder]) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "SetBuilders", builders)
+}
+
+// SetBuilders indicates an expected call of SetBuilders.
+func (mr *MockBeaconStateMockRecorder) SetBuilders(builders any) *MockBeaconStateSetBuildersCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetBuilders", reflect.TypeOf((*MockBeaconState)(nil).SetBuilders), builders)
+	return &MockBeaconStateSetBuildersCall{Call: call}
+}
+
+// MockBeaconStateSetBuildersCall wrap *gomock.Call
+type MockBeaconStateSetBuildersCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockBeaconStateSetBuildersCall) Return() *MockBeaconStateSetBuildersCall {
+	c.Call = c.Call.Return()
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockBeaconStateSetBuildersCall) Do(f func(*solid.ListSSZ[*cltypes.Builder])) *MockBeaconStateSetBuildersCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockBeaconStateSetBuildersCall) DoAndReturn(f func(*solid.ListSSZ[*cltypes.Builder])) *MockBeaconStateSetBuildersCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
@@ -3458,9 +4109,11 @@ func (c *MockBeaconStateSetCurrentJustifiedCheckpointCall) DoAndReturn(f func(so
 }
 
 // SetCurrentSyncCommittee mocks base method.
-func (m *MockBeaconState) SetCurrentSyncCommittee(currentSyncCommittee *solid.SyncCommittee) {
+func (m *MockBeaconState) SetCurrentSyncCommittee(currentSyncCommittee *solid.SyncCommittee) error {
 	m.ctrl.T.Helper()
-	m.ctrl.Call(m, "SetCurrentSyncCommittee", currentSyncCommittee)
+	ret := m.ctrl.Call(m, "SetCurrentSyncCommittee", currentSyncCommittee)
+	ret0, _ := ret[0].(error)
+	return ret0
 }
 
 // SetCurrentSyncCommittee indicates an expected call of SetCurrentSyncCommittee.
@@ -3476,19 +4129,19 @@ type MockBeaconStateSetCurrentSyncCommitteeCall struct {
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockBeaconStateSetCurrentSyncCommitteeCall) Return() *MockBeaconStateSetCurrentSyncCommitteeCall {
-	c.Call = c.Call.Return()
+func (c *MockBeaconStateSetCurrentSyncCommitteeCall) Return(arg0 error) *MockBeaconStateSetCurrentSyncCommitteeCall {
+	c.Call = c.Call.Return(arg0)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockBeaconStateSetCurrentSyncCommitteeCall) Do(f func(*solid.SyncCommittee)) *MockBeaconStateSetCurrentSyncCommitteeCall {
+func (c *MockBeaconStateSetCurrentSyncCommitteeCall) Do(f func(*solid.SyncCommittee) error) *MockBeaconStateSetCurrentSyncCommitteeCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockBeaconStateSetCurrentSyncCommitteeCall) DoAndReturn(f func(*solid.SyncCommittee)) *MockBeaconStateSetCurrentSyncCommitteeCall {
+func (c *MockBeaconStateSetCurrentSyncCommitteeCall) DoAndReturn(f func(*solid.SyncCommittee) error) *MockBeaconStateSetCurrentSyncCommitteeCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
@@ -3602,9 +4255,11 @@ func (c *MockBeaconStateSetEarlistConsolidationEpochCall) DoAndReturn(f func(uin
 }
 
 // SetEffectiveBalanceForValidatorAtIndex mocks base method.
-func (m *MockBeaconState) SetEffectiveBalanceForValidatorAtIndex(index int, balance uint64) {
+func (m *MockBeaconState) SetEffectiveBalanceForValidatorAtIndex(index int, balance uint64) error {
 	m.ctrl.T.Helper()
-	m.ctrl.Call(m, "SetEffectiveBalanceForValidatorAtIndex", index, balance)
+	ret := m.ctrl.Call(m, "SetEffectiveBalanceForValidatorAtIndex", index, balance)
+	ret0, _ := ret[0].(error)
+	return ret0
 }
 
 // SetEffectiveBalanceForValidatorAtIndex indicates an expected call of SetEffectiveBalanceForValidatorAtIndex.
@@ -3620,19 +4275,19 @@ type MockBeaconStateSetEffectiveBalanceForValidatorAtIndexCall struct {
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockBeaconStateSetEffectiveBalanceForValidatorAtIndexCall) Return() *MockBeaconStateSetEffectiveBalanceForValidatorAtIndexCall {
-	c.Call = c.Call.Return()
+func (c *MockBeaconStateSetEffectiveBalanceForValidatorAtIndexCall) Return(arg0 error) *MockBeaconStateSetEffectiveBalanceForValidatorAtIndexCall {
+	c.Call = c.Call.Return(arg0)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockBeaconStateSetEffectiveBalanceForValidatorAtIndexCall) Do(f func(int, uint64)) *MockBeaconStateSetEffectiveBalanceForValidatorAtIndexCall {
+func (c *MockBeaconStateSetEffectiveBalanceForValidatorAtIndexCall) Do(f func(int, uint64) error) *MockBeaconStateSetEffectiveBalanceForValidatorAtIndexCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockBeaconStateSetEffectiveBalanceForValidatorAtIndexCall) DoAndReturn(f func(int, uint64)) *MockBeaconStateSetEffectiveBalanceForValidatorAtIndexCall {
+func (c *MockBeaconStateSetEffectiveBalanceForValidatorAtIndexCall) DoAndReturn(f func(int, uint64) error) *MockBeaconStateSetEffectiveBalanceForValidatorAtIndexCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
@@ -3745,10 +4400,48 @@ func (c *MockBeaconStateSetEth1DepositIndexCall) DoAndReturn(f func(uint64)) *Mo
 	return c
 }
 
-// SetExitEpochForValidatorAtIndex mocks base method.
-func (m *MockBeaconState) SetExitEpochForValidatorAtIndex(index int, epoch uint64) {
+// SetExecutionPayloadAvailability mocks base method.
+func (m *MockBeaconState) SetExecutionPayloadAvailability(slot uint64, available bool) {
 	m.ctrl.T.Helper()
-	m.ctrl.Call(m, "SetExitEpochForValidatorAtIndex", index, epoch)
+	m.ctrl.Call(m, "SetExecutionPayloadAvailability", slot, available)
+}
+
+// SetExecutionPayloadAvailability indicates an expected call of SetExecutionPayloadAvailability.
+func (mr *MockBeaconStateMockRecorder) SetExecutionPayloadAvailability(slot, available any) *MockBeaconStateSetExecutionPayloadAvailabilityCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetExecutionPayloadAvailability", reflect.TypeOf((*MockBeaconState)(nil).SetExecutionPayloadAvailability), slot, available)
+	return &MockBeaconStateSetExecutionPayloadAvailabilityCall{Call: call}
+}
+
+// MockBeaconStateSetExecutionPayloadAvailabilityCall wrap *gomock.Call
+type MockBeaconStateSetExecutionPayloadAvailabilityCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockBeaconStateSetExecutionPayloadAvailabilityCall) Return() *MockBeaconStateSetExecutionPayloadAvailabilityCall {
+	c.Call = c.Call.Return()
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockBeaconStateSetExecutionPayloadAvailabilityCall) Do(f func(uint64, bool)) *MockBeaconStateSetExecutionPayloadAvailabilityCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockBeaconStateSetExecutionPayloadAvailabilityCall) DoAndReturn(f func(uint64, bool)) *MockBeaconStateSetExecutionPayloadAvailabilityCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// SetExitEpochForValidatorAtIndex mocks base method.
+func (m *MockBeaconState) SetExitEpochForValidatorAtIndex(index int, epoch uint64) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SetExitEpochForValidatorAtIndex", index, epoch)
+	ret0, _ := ret[0].(error)
+	return ret0
 }
 
 // SetExitEpochForValidatorAtIndex indicates an expected call of SetExitEpochForValidatorAtIndex.
@@ -3764,19 +4457,19 @@ type MockBeaconStateSetExitEpochForValidatorAtIndexCall struct {
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockBeaconStateSetExitEpochForValidatorAtIndexCall) Return() *MockBeaconStateSetExitEpochForValidatorAtIndexCall {
-	c.Call = c.Call.Return()
+func (c *MockBeaconStateSetExitEpochForValidatorAtIndexCall) Return(arg0 error) *MockBeaconStateSetExitEpochForValidatorAtIndexCall {
+	c.Call = c.Call.Return(arg0)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockBeaconStateSetExitEpochForValidatorAtIndexCall) Do(f func(int, uint64)) *MockBeaconStateSetExitEpochForValidatorAtIndexCall {
+func (c *MockBeaconStateSetExitEpochForValidatorAtIndexCall) Do(f func(int, uint64) error) *MockBeaconStateSetExitEpochForValidatorAtIndexCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockBeaconStateSetExitEpochForValidatorAtIndexCall) DoAndReturn(f func(int, uint64)) *MockBeaconStateSetExitEpochForValidatorAtIndexCall {
+func (c *MockBeaconStateSetExitEpochForValidatorAtIndexCall) DoAndReturn(f func(int, uint64) error) *MockBeaconStateSetExitEpochForValidatorAtIndexCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
@@ -3925,6 +4618,42 @@ func (c *MockBeaconStateSetJustificationBitsCall) DoAndReturn(f func(cltypes.Jus
 	return c
 }
 
+// SetLatestBlockHash mocks base method.
+func (m *MockBeaconState) SetLatestBlockHash(hash common.Hash) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "SetLatestBlockHash", hash)
+}
+
+// SetLatestBlockHash indicates an expected call of SetLatestBlockHash.
+func (mr *MockBeaconStateMockRecorder) SetLatestBlockHash(hash any) *MockBeaconStateSetLatestBlockHashCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetLatestBlockHash", reflect.TypeOf((*MockBeaconState)(nil).SetLatestBlockHash), hash)
+	return &MockBeaconStateSetLatestBlockHashCall{Call: call}
+}
+
+// MockBeaconStateSetLatestBlockHashCall wrap *gomock.Call
+type MockBeaconStateSetLatestBlockHashCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockBeaconStateSetLatestBlockHashCall) Return() *MockBeaconStateSetLatestBlockHashCall {
+	c.Call = c.Call.Return()
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockBeaconStateSetLatestBlockHashCall) Do(f func(common.Hash)) *MockBeaconStateSetLatestBlockHashCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockBeaconStateSetLatestBlockHashCall) DoAndReturn(f func(common.Hash)) *MockBeaconStateSetLatestBlockHashCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // SetLatestBlockHeader mocks base method.
 func (m *MockBeaconState) SetLatestBlockHeader(header *cltypes.BeaconBlockHeader) {
 	m.ctrl.T.Helper()
@@ -3957,6 +4686,42 @@ func (c *MockBeaconStateSetLatestBlockHeaderCall) Do(f func(*cltypes.BeaconBlock
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBeaconStateSetLatestBlockHeaderCall) DoAndReturn(f func(*cltypes.BeaconBlockHeader)) *MockBeaconStateSetLatestBlockHeaderCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// SetLatestExecutionPayloadBid mocks base method.
+func (m *MockBeaconState) SetLatestExecutionPayloadBid(bid *cltypes.ExecutionPayloadBid) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "SetLatestExecutionPayloadBid", bid)
+}
+
+// SetLatestExecutionPayloadBid indicates an expected call of SetLatestExecutionPayloadBid.
+func (mr *MockBeaconStateMockRecorder) SetLatestExecutionPayloadBid(bid any) *MockBeaconStateSetLatestExecutionPayloadBidCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetLatestExecutionPayloadBid", reflect.TypeOf((*MockBeaconState)(nil).SetLatestExecutionPayloadBid), bid)
+	return &MockBeaconStateSetLatestExecutionPayloadBidCall{Call: call}
+}
+
+// MockBeaconStateSetLatestExecutionPayloadBidCall wrap *gomock.Call
+type MockBeaconStateSetLatestExecutionPayloadBidCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockBeaconStateSetLatestExecutionPayloadBidCall) Return() *MockBeaconStateSetLatestExecutionPayloadBidCall {
+	c.Call = c.Call.Return()
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockBeaconStateSetLatestExecutionPayloadBidCall) Do(f func(*cltypes.ExecutionPayloadBid)) *MockBeaconStateSetLatestExecutionPayloadBidCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockBeaconStateSetLatestExecutionPayloadBidCall) DoAndReturn(f func(*cltypes.ExecutionPayloadBid)) *MockBeaconStateSetLatestExecutionPayloadBidCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
@@ -3998,9 +4763,11 @@ func (c *MockBeaconStateSetLatestExecutionPayloadHeaderCall) DoAndReturn(f func(
 }
 
 // SetNextSyncCommittee mocks base method.
-func (m *MockBeaconState) SetNextSyncCommittee(nextSyncCommittee *solid.SyncCommittee) {
+func (m *MockBeaconState) SetNextSyncCommittee(nextSyncCommittee *solid.SyncCommittee) error {
 	m.ctrl.T.Helper()
-	m.ctrl.Call(m, "SetNextSyncCommittee", nextSyncCommittee)
+	ret := m.ctrl.Call(m, "SetNextSyncCommittee", nextSyncCommittee)
+	ret0, _ := ret[0].(error)
+	return ret0
 }
 
 // SetNextSyncCommittee indicates an expected call of SetNextSyncCommittee.
@@ -4016,19 +4783,55 @@ type MockBeaconStateSetNextSyncCommitteeCall struct {
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockBeaconStateSetNextSyncCommitteeCall) Return() *MockBeaconStateSetNextSyncCommitteeCall {
-	c.Call = c.Call.Return()
+func (c *MockBeaconStateSetNextSyncCommitteeCall) Return(arg0 error) *MockBeaconStateSetNextSyncCommitteeCall {
+	c.Call = c.Call.Return(arg0)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockBeaconStateSetNextSyncCommitteeCall) Do(f func(*solid.SyncCommittee)) *MockBeaconStateSetNextSyncCommitteeCall {
+func (c *MockBeaconStateSetNextSyncCommitteeCall) Do(f func(*solid.SyncCommittee) error) *MockBeaconStateSetNextSyncCommitteeCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockBeaconStateSetNextSyncCommitteeCall) DoAndReturn(f func(*solid.SyncCommittee)) *MockBeaconStateSetNextSyncCommitteeCall {
+func (c *MockBeaconStateSetNextSyncCommitteeCall) DoAndReturn(f func(*solid.SyncCommittee) error) *MockBeaconStateSetNextSyncCommitteeCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// SetNextWithdrawalBuilderIndex mocks base method.
+func (m *MockBeaconState) SetNextWithdrawalBuilderIndex(index uint64) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "SetNextWithdrawalBuilderIndex", index)
+}
+
+// SetNextWithdrawalBuilderIndex indicates an expected call of SetNextWithdrawalBuilderIndex.
+func (mr *MockBeaconStateMockRecorder) SetNextWithdrawalBuilderIndex(index any) *MockBeaconStateSetNextWithdrawalBuilderIndexCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetNextWithdrawalBuilderIndex", reflect.TypeOf((*MockBeaconState)(nil).SetNextWithdrawalBuilderIndex), index)
+	return &MockBeaconStateSetNextWithdrawalBuilderIndexCall{Call: call}
+}
+
+// MockBeaconStateSetNextWithdrawalBuilderIndexCall wrap *gomock.Call
+type MockBeaconStateSetNextWithdrawalBuilderIndexCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockBeaconStateSetNextWithdrawalBuilderIndexCall) Return() *MockBeaconStateSetNextWithdrawalBuilderIndexCall {
+	c.Call = c.Call.Return()
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockBeaconStateSetNextWithdrawalBuilderIndexCall) Do(f func(uint64)) *MockBeaconStateSetNextWithdrawalBuilderIndexCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockBeaconStateSetNextWithdrawalBuilderIndexCall) DoAndReturn(f func(uint64)) *MockBeaconStateSetNextWithdrawalBuilderIndexCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
@@ -4101,6 +4904,42 @@ func (c *MockBeaconStateSetNextWithdrawalValidatorIndexCall) Do(f func(uint64)) 
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBeaconStateSetNextWithdrawalValidatorIndexCall) DoAndReturn(f func(uint64)) *MockBeaconStateSetNextWithdrawalValidatorIndexCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// SetPayloadExpectedWithdrawals mocks base method.
+func (m *MockBeaconState) SetPayloadExpectedWithdrawals(withdrawals *solid.ListSSZ[*cltypes.Withdrawal]) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "SetPayloadExpectedWithdrawals", withdrawals)
+}
+
+// SetPayloadExpectedWithdrawals indicates an expected call of SetPayloadExpectedWithdrawals.
+func (mr *MockBeaconStateMockRecorder) SetPayloadExpectedWithdrawals(withdrawals any) *MockBeaconStateSetPayloadExpectedWithdrawalsCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetPayloadExpectedWithdrawals", reflect.TypeOf((*MockBeaconState)(nil).SetPayloadExpectedWithdrawals), withdrawals)
+	return &MockBeaconStateSetPayloadExpectedWithdrawalsCall{Call: call}
+}
+
+// MockBeaconStateSetPayloadExpectedWithdrawalsCall wrap *gomock.Call
+type MockBeaconStateSetPayloadExpectedWithdrawalsCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockBeaconStateSetPayloadExpectedWithdrawalsCall) Return() *MockBeaconStateSetPayloadExpectedWithdrawalsCall {
+	c.Call = c.Call.Return()
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockBeaconStateSetPayloadExpectedWithdrawalsCall) Do(f func(*solid.ListSSZ[*cltypes.Withdrawal])) *MockBeaconStateSetPayloadExpectedWithdrawalsCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockBeaconStateSetPayloadExpectedWithdrawalsCall) DoAndReturn(f func(*solid.ListSSZ[*cltypes.Withdrawal])) *MockBeaconStateSetPayloadExpectedWithdrawalsCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
@@ -4393,10 +5232,48 @@ func (c *MockBeaconStateSetProposerLookaheadCall) DoAndReturn(f func(solid.Uint6
 	return c
 }
 
-// SetRandaoMixAt mocks base method.
-func (m *MockBeaconState) SetRandaoMixAt(index int, mix common.Hash) {
+// SetPtcWindow mocks base method.
+func (m *MockBeaconState) SetPtcWindow(ptcWindow *solid.VectorSSZ[solid.Uint64VectorSSZ]) {
 	m.ctrl.T.Helper()
-	m.ctrl.Call(m, "SetRandaoMixAt", index, mix)
+	m.ctrl.Call(m, "SetPtcWindow", ptcWindow)
+}
+
+// SetPtcWindow indicates an expected call of SetPtcWindow.
+func (mr *MockBeaconStateMockRecorder) SetPtcWindow(ptcWindow any) *MockBeaconStateSetPtcWindowCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetPtcWindow", reflect.TypeOf((*MockBeaconState)(nil).SetPtcWindow), ptcWindow)
+	return &MockBeaconStateSetPtcWindowCall{Call: call}
+}
+
+// MockBeaconStateSetPtcWindowCall wrap *gomock.Call
+type MockBeaconStateSetPtcWindowCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockBeaconStateSetPtcWindowCall) Return() *MockBeaconStateSetPtcWindowCall {
+	c.Call = c.Call.Return()
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockBeaconStateSetPtcWindowCall) Do(f func(*solid.VectorSSZ[solid.Uint64VectorSSZ])) *MockBeaconStateSetPtcWindowCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockBeaconStateSetPtcWindowCall) DoAndReturn(f func(*solid.VectorSSZ[solid.Uint64VectorSSZ])) *MockBeaconStateSetPtcWindowCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// SetRandaoMixAt mocks base method.
+func (m *MockBeaconState) SetRandaoMixAt(index int, mix common.Hash) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SetRandaoMixAt", index, mix)
+	ret0, _ := ret[0].(error)
+	return ret0
 }
 
 // SetRandaoMixAt indicates an expected call of SetRandaoMixAt.
@@ -4412,27 +5289,29 @@ type MockBeaconStateSetRandaoMixAtCall struct {
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockBeaconStateSetRandaoMixAtCall) Return() *MockBeaconStateSetRandaoMixAtCall {
-	c.Call = c.Call.Return()
+func (c *MockBeaconStateSetRandaoMixAtCall) Return(arg0 error) *MockBeaconStateSetRandaoMixAtCall {
+	c.Call = c.Call.Return(arg0)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockBeaconStateSetRandaoMixAtCall) Do(f func(int, common.Hash)) *MockBeaconStateSetRandaoMixAtCall {
+func (c *MockBeaconStateSetRandaoMixAtCall) Do(f func(int, common.Hash) error) *MockBeaconStateSetRandaoMixAtCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockBeaconStateSetRandaoMixAtCall) DoAndReturn(f func(int, common.Hash)) *MockBeaconStateSetRandaoMixAtCall {
+func (c *MockBeaconStateSetRandaoMixAtCall) DoAndReturn(f func(int, common.Hash) error) *MockBeaconStateSetRandaoMixAtCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
 
 // SetSlashingSegmentAt mocks base method.
-func (m *MockBeaconState) SetSlashingSegmentAt(index int, segment uint64) {
+func (m *MockBeaconState) SetSlashingSegmentAt(index int, segment uint64) error {
 	m.ctrl.T.Helper()
-	m.ctrl.Call(m, "SetSlashingSegmentAt", index, segment)
+	ret := m.ctrl.Call(m, "SetSlashingSegmentAt", index, segment)
+	ret0, _ := ret[0].(error)
+	return ret0
 }
 
 // SetSlashingSegmentAt indicates an expected call of SetSlashingSegmentAt.
@@ -4448,27 +5327,29 @@ type MockBeaconStateSetSlashingSegmentAtCall struct {
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockBeaconStateSetSlashingSegmentAtCall) Return() *MockBeaconStateSetSlashingSegmentAtCall {
-	c.Call = c.Call.Return()
+func (c *MockBeaconStateSetSlashingSegmentAtCall) Return(arg0 error) *MockBeaconStateSetSlashingSegmentAtCall {
+	c.Call = c.Call.Return(arg0)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockBeaconStateSetSlashingSegmentAtCall) Do(f func(int, uint64)) *MockBeaconStateSetSlashingSegmentAtCall {
+func (c *MockBeaconStateSetSlashingSegmentAtCall) Do(f func(int, uint64) error) *MockBeaconStateSetSlashingSegmentAtCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockBeaconStateSetSlashingSegmentAtCall) DoAndReturn(f func(int, uint64)) *MockBeaconStateSetSlashingSegmentAtCall {
+func (c *MockBeaconStateSetSlashingSegmentAtCall) DoAndReturn(f func(int, uint64) error) *MockBeaconStateSetSlashingSegmentAtCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
 
 // SetSlot mocks base method.
-func (m *MockBeaconState) SetSlot(slot uint64) {
+func (m *MockBeaconState) SetSlot(slot uint64) error {
 	m.ctrl.T.Helper()
-	m.ctrl.Call(m, "SetSlot", slot)
+	ret := m.ctrl.Call(m, "SetSlot", slot)
+	ret0, _ := ret[0].(error)
+	return ret0
 }
 
 // SetSlot indicates an expected call of SetSlot.
@@ -4484,27 +5365,29 @@ type MockBeaconStateSetSlotCall struct {
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockBeaconStateSetSlotCall) Return() *MockBeaconStateSetSlotCall {
-	c.Call = c.Call.Return()
+func (c *MockBeaconStateSetSlotCall) Return(arg0 error) *MockBeaconStateSetSlotCall {
+	c.Call = c.Call.Return(arg0)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockBeaconStateSetSlotCall) Do(f func(uint64)) *MockBeaconStateSetSlotCall {
+func (c *MockBeaconStateSetSlotCall) Do(f func(uint64) error) *MockBeaconStateSetSlotCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockBeaconStateSetSlotCall) DoAndReturn(f func(uint64)) *MockBeaconStateSetSlotCall {
+func (c *MockBeaconStateSetSlotCall) DoAndReturn(f func(uint64) error) *MockBeaconStateSetSlotCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
 
 // SetStateRootAt mocks base method.
-func (m *MockBeaconState) SetStateRootAt(index int, root common.Hash) {
+func (m *MockBeaconState) SetStateRootAt(index int, root common.Hash) error {
 	m.ctrl.T.Helper()
-	m.ctrl.Call(m, "SetStateRootAt", index, root)
+	ret := m.ctrl.Call(m, "SetStateRootAt", index, root)
+	ret0, _ := ret[0].(error)
+	return ret0
 }
 
 // SetStateRootAt indicates an expected call of SetStateRootAt.
@@ -4520,19 +5403,19 @@ type MockBeaconStateSetStateRootAtCall struct {
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockBeaconStateSetStateRootAtCall) Return() *MockBeaconStateSetStateRootAtCall {
-	c.Call = c.Call.Return()
+func (c *MockBeaconStateSetStateRootAtCall) Return(arg0 error) *MockBeaconStateSetStateRootAtCall {
+	c.Call = c.Call.Return(arg0)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockBeaconStateSetStateRootAtCall) Do(f func(int, common.Hash)) *MockBeaconStateSetStateRootAtCall {
+func (c *MockBeaconStateSetStateRootAtCall) Do(f func(int, common.Hash) error) *MockBeaconStateSetStateRootAtCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockBeaconStateSetStateRootAtCall) DoAndReturn(f func(int, common.Hash)) *MockBeaconStateSetStateRootAtCall {
+func (c *MockBeaconStateSetStateRootAtCall) DoAndReturn(f func(int, common.Hash) error) *MockBeaconStateSetStateRootAtCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
@@ -5066,9 +5949,11 @@ func (c *MockBeaconStateSetWithdrawableEpochForValidatorAtIndexCall) DoAndReturn
 }
 
 // SetWithdrawalCredentialForValidatorAtIndex mocks base method.
-func (m *MockBeaconState) SetWithdrawalCredentialForValidatorAtIndex(index int, creds common.Hash) {
+func (m *MockBeaconState) SetWithdrawalCredentialForValidatorAtIndex(index int, creds common.Hash) error {
 	m.ctrl.T.Helper()
-	m.ctrl.Call(m, "SetWithdrawalCredentialForValidatorAtIndex", index, creds)
+	ret := m.ctrl.Call(m, "SetWithdrawalCredentialForValidatorAtIndex", index, creds)
+	ret0, _ := ret[0].(error)
+	return ret0
 }
 
 // SetWithdrawalCredentialForValidatorAtIndex indicates an expected call of SetWithdrawalCredentialForValidatorAtIndex.
@@ -5084,19 +5969,19 @@ type MockBeaconStateSetWithdrawalCredentialForValidatorAtIndexCall struct {
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockBeaconStateSetWithdrawalCredentialForValidatorAtIndexCall) Return() *MockBeaconStateSetWithdrawalCredentialForValidatorAtIndexCall {
-	c.Call = c.Call.Return()
+func (c *MockBeaconStateSetWithdrawalCredentialForValidatorAtIndexCall) Return(arg0 error) *MockBeaconStateSetWithdrawalCredentialForValidatorAtIndexCall {
+	c.Call = c.Call.Return(arg0)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockBeaconStateSetWithdrawalCredentialForValidatorAtIndexCall) Do(f func(int, common.Hash)) *MockBeaconStateSetWithdrawalCredentialForValidatorAtIndexCall {
+func (c *MockBeaconStateSetWithdrawalCredentialForValidatorAtIndexCall) Do(f func(int, common.Hash) error) *MockBeaconStateSetWithdrawalCredentialForValidatorAtIndexCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockBeaconStateSetWithdrawalCredentialForValidatorAtIndexCall) DoAndReturn(f func(int, common.Hash)) *MockBeaconStateSetWithdrawalCredentialForValidatorAtIndexCall {
+func (c *MockBeaconStateSetWithdrawalCredentialForValidatorAtIndexCall) DoAndReturn(f func(int, common.Hash) error) *MockBeaconStateSetWithdrawalCredentialForValidatorAtIndexCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
@@ -5518,6 +6403,44 @@ func (c *MockBeaconStateUpgradeToFuluCall) Do(f func() error) *MockBeaconStateUp
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBeaconStateUpgradeToFuluCall) DoAndReturn(f func() error) *MockBeaconStateUpgradeToFuluCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// UpgradeToGloas mocks base method.
+func (m *MockBeaconState) UpgradeToGloas() error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpgradeToGloas")
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// UpgradeToGloas indicates an expected call of UpgradeToGloas.
+func (mr *MockBeaconStateMockRecorder) UpgradeToGloas() *MockBeaconStateUpgradeToGloasCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpgradeToGloas", reflect.TypeOf((*MockBeaconState)(nil).UpgradeToGloas))
+	return &MockBeaconStateUpgradeToGloasCall{Call: call}
+}
+
+// MockBeaconStateUpgradeToGloasCall wrap *gomock.Call
+type MockBeaconStateUpgradeToGloasCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockBeaconStateUpgradeToGloasCall) Return(arg0 error) *MockBeaconStateUpgradeToGloasCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockBeaconStateUpgradeToGloasCall) Do(f func() error) *MockBeaconStateUpgradeToGloasCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockBeaconStateUpgradeToGloasCall) DoAndReturn(f func() error) *MockBeaconStateUpgradeToGloasCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

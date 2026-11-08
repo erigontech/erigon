@@ -17,10 +17,9 @@
 package rpctest
 
 import (
-	"bufio"
 	"context"
+	"errors"
 	"fmt"
-	"os"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -34,46 +33,28 @@ import (
 // parameters:
 // needCompare - if false - doesn't call Erigon and doesn't compare responses
 //
-//	false value - to generate vegeta files, it's faster but we can generate vegeta files for Geth and Erigon
+//	false value - to generate the pattern files (vegeta_*.txt and <method>.jsonl), it's faster
 //
 // recordFile stores all eth_GetTransactioneHash returned with success
 //
 //	errorFile stores information when erigon and geth doesn't return same data
-func BenchEthGetTransactionByHash(ctx context.Context, erigonURL, gethURL string, needCompare bool, blockFrom, blockTo uint64, recordFileName string, errorFileName string) error {
+func BenchEthGetTransactionByHash(ctx context.Context, erigonURL, gethURL string, needCompare bool, blockFrom, blockTo uint64, recordFileName string, errorFileName string) (err error) {
 	setRoutes(erigonURL, gethURL)
 
-	var rec *bufio.Writer
-	var errs *bufio.Writer
-	var teeToVegeta chan CallResult
-	var nTransactions = 0
-
-	if errorFileName != "" {
-		f, err := os.Create(errorFileName)
-		if err != nil {
-			return fmt.Errorf("Cannot create file %s for errorFile: %v\n", errorFileName, err)
-		}
-		defer f.Close()
-		errs = bufio.NewWriter(f)
-		defer errs.Flush()
+	rec, errs, cleanup, err := openWriters(recordFileName, errorFileName)
+	if err != nil {
+		return err
 	}
+	defer func() { err = errors.Join(err, cleanup()) }()
 
-	if recordFileName != "" {
-		frec, errRec := os.Create(recordFileName)
-		if errRec != nil {
-			return fmt.Errorf("Cannot create file %s for errorFile: %v\n", recordFileName, errRec)
-		}
-		defer frec.Close()
-		rec = bufio.NewWriter(frec)
-		defer rec.Flush()
-	}
+	var teeToPattern chan CallResult
+	nTransactions := 0
 
 	if !needCompare {
-		teeToVegeta = make(chan CallResult, 1000)
-		defer close(teeToVegeta)
-		go vegetaWrite(true, []string{"eth_getTransactionByHash"}, teeToVegeta)
+		teeToPattern = make(chan CallResult, 1000)
+		defer close(teeToPattern)
+		go writePattern(true, []string{"eth_getTransactionByHash"}, teeToPattern)
 	}
-	var res CallResult
-
 	reqGen := &RequestGenerator{}
 
 	logEvery, lastLoggedNTxs, lastLoggedTime := time.NewTicker(10*time.Second), 0, time.Now()
@@ -92,7 +73,7 @@ func BenchEthGetTransactionByHash(ctx context.Context, erigonURL, gethURL string
 				var request string
 				request = reqGen.getTransactionByHash(txnHash)
 				errCtx := fmt.Sprintf(" hash=%s", txnHash) //nolint:perfsprint
-				if err := requestAndCompare(request, "eth_getTransactionByHash", errCtx, reqGen, needCompare, rec, errs, teeToVegeta,
+				if err := requestAndCompare(request, "eth_getTransactionByHash", errCtx, reqGen, needCompare, rec, errs, teeToPattern,
 					/* insertOnlyIfSuccess */ false); err != nil {
 					return err
 				}
@@ -103,40 +84,20 @@ func BenchEthGetTransactionByHash(ctx context.Context, erigonURL, gethURL string
 	})
 
 	for bn := blockFrom; bn <= blockTo; bn++ {
-		var b EthBlockByNumber
-		res = reqGen.Erigon("eth_getBlockByNumber", reqGen.getBlockByNumber(bn, true /* withTxs */), &b)
-		if res.Err != nil {
-			return fmt.Errorf("Could not retrieve block (Erigon) %d: %v\n", bn, res.Err)
+		b, skip, err := fetchBlock(reqGen, bn, needCompare, rec)
+		if err != nil {
+			return err
 		}
-		if b.Error != nil {
-			return fmt.Errorf("Error retrieving block (Erigon): %d %s\n", b.Error.Code, b.Error.Message)
+		if skip {
+			continue
 		}
 		if b.Result == nil {
-			return fmt.Errorf("Could not retrieve block (Erigon) %d: %v\n", bn, res.Err)
-		}
-
-		if needCompare {
-			var bg EthBlockByNumber
-			res = reqGen.Geth("eth_getBlockByNumber", reqGen.getBlockByNumber(bn, true /* withTxs */), &bg)
-			if res.Err != nil {
-				return fmt.Errorf("Could not retrieve block (geth) %d: %v\n", bn, res.Err)
-			}
-			if bg.Error != nil {
-				return fmt.Errorf("Error retrieving block (geth): %d %s\n", bg.Error.Code, bg.Error.Message)
-			}
-			if !compareBlocks(&b, &bg) {
-				if rec != nil {
-					fmt.Fprintf(rec, "Block difference for block=%d\n", bn)
-					rec.Flush()
-					continue
-				} else {
-					return fmt.Errorf("Block one or more fields areis different for block %d\n", bn)
-				}
-			}
+			return fmt.Errorf("could not retrieve block (Erigon) %d", bn)
 		}
 
 		nTransactions += len(b.Result.Transactions)
-		for _, txn := range b.Result.Transactions {
+		for i := range b.Result.Transactions {
+			txn := &b.Result.Transactions[i]
 			select {
 			case teeToGetTxs <- txn.Hash:
 			case <-ctx.Done():

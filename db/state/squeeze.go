@@ -3,6 +3,7 @@ package state
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
@@ -18,21 +20,28 @@ import (
 	"github.com/c2h5oh/datasize"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/seg"
 	downloadertype "github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/types"
 )
 
-//Sqeeze: ForeignKeys-aware compression of file
+// Sqeeze: ForeignKeys-aware compression of file
 
 // Sqeeze - re-compress file
 // Breaks squeezed commitment files totally
@@ -84,7 +93,7 @@ func (a *Aggregator) sqeezeDomainFile(ctx context.Context, domain kv.Domain, fro
 	compression := a.d[domain].Compression
 	compressCfg := a.d[domain].CompressCfg
 
-	a.logger.Info("[sqeeze] file", "f", to, "cfg", compressCfg, "c", compression)
+	a.logger.Info("[squeeze] file", "f", to, "cfg", compressCfg, "c", compression)
 	decompressor, err := seg.NewDecompressor(from)
 	if err != nil {
 		return err
@@ -92,7 +101,7 @@ func (a *Aggregator) sqeezeDomainFile(ctx context.Context, domain kv.Domain, fro
 	defer decompressor.Close()
 	defer decompressor.MadvSequential().DisableReadAhead()
 
-	c, err := seg.NewCompressor(ctx, "sqeeze", to, a.dirs.Tmp, compressCfg, log.LvlInfo, a.logger)
+	c, err := seg.NewCompressor(ctx, "squeeze", to, a.dirs.Tmp, compressCfg, log.LvlInfo, a.logger)
 	if err != nil {
 		return err
 	}
@@ -115,7 +124,7 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 	stepSize := at.StepSize()
 	dirs := at.Dirs()
 
-	commitmentUseReferencedBranches := at.a.Cfg(kv.CommitmentDomain).ReplaceKeysInValues
+	commitmentUseReferencedBranches := at.a.referencesInCommitmentBranches()
 	if !commitmentUseReferencedBranches {
 		return nil
 	}
@@ -142,7 +151,7 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 			},
 		},
 	}
-	sf, err := at.FilesInRange(rng)
+	sf, err := at.filesInRange(rng)
 	if err != nil {
 		return err
 	}
@@ -190,15 +199,15 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 	defer logEvery.Stop()
 
 	for ri, r := range ranges {
-		af, err := accounts.rawLookupFileByRange(r.from, r.to)
+		af, err := accounts.lookupVisibleFileByRange(r.from, r.to)
 		if err != nil {
 			return err
 		}
-		sf, err := storage.rawLookupFileByRange(r.from, r.to)
+		sf, err := storage.lookupVisibleFileByRange(r.from, r.to)
 		if err != nil {
 			return err
 		}
-		cf, err := commitment.rawLookupFileByRange(r.from, r.to)
+		cf, err := commitment.lookupVisibleFileByRange(r.from, r.to)
 		if err != nil {
 			return err
 		}
@@ -217,7 +226,11 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 				"progress", fmt.Sprintf("%d/%d", ri+1, len(ranges)), "compress_cfg", commitment.d.CompressCfg, "compress", compression)
 
 			originalPath := cf.decompressor.FilePath()
-			squeezedTmpPath := originalPath + sqExt + ".tmp"
+			// The squeeze re-references the file, so stamp the output with the flag-derived write
+			// version (v2.1) rather than reusing the input name, which may be a plain v2.2 file
+			// written during a flag-off rebuild window.
+			targetPath := commitment.d.kvNewFilePath(kv.Step(r.from/stepSize), kv.Step(r.to/stepSize))
+			squeezedTmpPath := targetPath + sqExt + ".tmp"
 
 			squeezedCompr, err := seg.NewCompressor(ctx, "squeeze", squeezedTmpPath, dirs.Tmp,
 				commitment.d.CompressCfg, log.LvlInfo, commitment.d.logger)
@@ -231,7 +244,7 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 			reader.Reset(0)
 
 			rng := MergeRange{needMerge: true, from: af.startTxNum, to: af.endTxNum}
-			vt, err := commitment.commitmentValTransformDomain(rng, accounts, storage, af, sf)
+			vt, err := commitment.commitmentValTransformDomain(rng, accounts, storage, af, sf, at.a.referencesInCommitmentBranches())
 			if err != nil {
 				return fmt.Errorf("failed to create commitment value transformer: %w", err)
 			}
@@ -269,7 +282,7 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 				}
 			}
 
-			if err = writer.Compress(); err != nil {
+			if err := writer.Compress(); err != nil {
 				return err
 			}
 			writer.Close()
@@ -279,16 +292,15 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 				return err
 			}
 			sizeDelta += delta
-			cf.frozen = false
 			cf.closeFilesAndRemove()
 
-			squeezedPath := originalPath + sqExt
-			if err = os.Rename(squeezedTmpPath, squeezedPath); err != nil {
+			squeezedPath := targetPath + sqExt
+			if err := os.Rename(squeezedTmpPath, squeezedPath); err != nil {
 				return err
 			}
 			temporalFiles = append(temporalFiles, squeezedPath)
 
-			logger.Info("[sqeeze_migration] file done", "original", filepath.Base(originalPath),
+			logger.Info("[squeeze_migration] file done", "original", filepath.Base(originalPath),
 				"sizeDelta", fmt.Sprintf("%s (%.1f%%)", delta.HR(), deltaP))
 
 			processedFiles++
@@ -310,6 +322,57 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 	logger.Info("[squeeze_migration] done", "sizeDelta", sizeDelta.HR(), "files", len(ranges))
 
 	return nil
+}
+
+// ExpandShortenedKeysInBranch expands shortened key references (file offsets) in branch data back
+// to full plain keys by looking them up in the supplied account and storage domain files.
+//
+// This is the read-side counterpart of commitmentValTransformDomain. It assumes the caller has
+// already checked the prerequisites (non-empty branch, not KeyCommitmentState, and the input file
+// is referenced per the per-file version gate): expansion is unconditional. The caller is also responsible
+// for emitting per-key debug metrics; this function intentionally does not so that offline tools
+// like the commitment converter can reuse it without coupling to read-path observability.
+//
+// Plain-keyed entries (address: 20 bytes; address+slot: 52 bytes) are returned as nil so
+// BranchData.ReplacePlainKeys keeps the original bytes. A lookup miss returns an error naming
+// the offending shortened key.
+func ExpandShortenedKeysInBranch(
+	branch commitment.BranchData,
+	accounts, storage *DomainRoTx,
+	accountFile, storageFile *FilesItem,
+	startTxNum, endTxNum uint64,
+) (commitment.BranchData, error) {
+	storageGetter := storage.dataReader(storageFile.decompressor)
+	accountGetter := accounts.dataReader(accountFile.decompressor)
+	logger := log.Root()
+	stepSize := accounts.d.stepSize
+
+	return branch.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
+		if isStorage {
+			if len(key) == length.Addr+length.Hash {
+				return nil, nil // not a referenced key, keep as is
+			}
+			storagePlainKey, found := storage.lookupByShortenedKey(key, storageGetter)
+			if !found {
+				s0, s1 := startTxNum/stepSize, endTxNum/stepSize
+				logger.Crit("replace back lost storage full key", "shortened", hex.EncodeToString(key),
+					"decoded", fmt.Sprintf("step %d-%d; offt %d", s0, s1, DecodeReferenceKey(key)))
+				return nil, fmt.Errorf("replace back lost storage full key: %x", key)
+			}
+			return storagePlainKey, nil
+		}
+		if len(key) == length.Addr {
+			return nil, nil // not a referenced key, keep as is
+		}
+		apkBuf, found := accounts.lookupByShortenedKey(key, accountGetter)
+		if !found {
+			s0, s1 := startTxNum/stepSize, endTxNum/stepSize
+			logger.Crit("replace back lost account full key", "shortened", hex.EncodeToString(key),
+				"decoded", fmt.Sprintf("step %d-%d; offt %d", s0, s1, DecodeReferenceKey(key)))
+			return nil, fmt.Errorf("replace back lost account full key: %x", key)
+		}
+		return apkBuf, nil
+	})
 }
 
 func CheckCommitmentForPrint(ctx context.Context, rwDb kv.TemporalRwDB) (string, error) {
@@ -335,19 +398,521 @@ func CheckCommitmentForPrint(ctx context.Context, rwDb kv.TemporalRwDB) (string,
 	}
 	var s strings.Builder
 	s.WriteString(fmt.Sprintf("[commitment] Latest: blockNum: %d txNum: %d latestRootHash: %x\n", latestBlock, latestTx, rootHash))
-	s.WriteString(fmt.Sprintf("[commitment] stepSize %d, ReplaceKeysInValues enabled %t\n", rwTx.Debug().StepSize(), a.Cfg(kv.CommitmentDomain).ReplaceKeysInValues))
+	s.WriteString(fmt.Sprintf("[commitment] stepSize %d, ReferencesInCommitmentBranches enabled %t\n", rwTx.Debug().StepSize(), a.referencesInCommitmentBranches()))
 	return s.String(), nil
+}
+
+type rebuildBlockReader interface {
+	TxnumReader() rawdbv3.TxNumsReader
+	HeaderByNumber(ctx context.Context, tx kv.Getter, blockNum uint64) (*types.Header, error)
+}
+
+// historyBatch collects account and storage history keys for a block range into an ETL
+// collector (key = blockNum 8B BE, value = rawKey), then delivers them sorted by blockNum
+// via Load. This encapsulates the ETL plumbing for the commitment rebuild loop.
+type historyBatch struct {
+	collector *etl.Collector
+	maxTxNums []uint64
+	blockFrom uint64
+	blockEnd  uint64
+}
+
+// collectHistoryBatch precomputes maxTxNums for [blockFrom, blockEnd] and collects
+// account+storage history keys into an ETL collector keyed by blockNum.
+// The caller is responsible for calling Close() on the returned batch.
+func collectHistoryBatch(ctx context.Context, roTx kv.TemporalTx, txNumsReader rawdbv3.TxNumsReader, blockFrom, blockEnd uint64, tmpDir string, logger log.Logger) (*historyBatch, error) {
+	numBlocks := int(blockEnd - blockFrom + 1)
+	maxTxNums := make([]uint64, numBlocks)
+	for i := range numBlocks {
+		var err error
+		maxTxNums[i], err = txNumsReader.Max(ctx, roTx, blockFrom+uint64(i))
+		if err != nil {
+			return nil, err
+		}
+	}
+	batchFromTxNum, err := txNumsReader.Min(ctx, roTx, blockFrom)
+	if err != nil {
+		return nil, err
+	}
+	batchToTxNum := maxTxNums[numBlocks-1] + 1 // exclusive
+
+	//nolint:gocritic // ownership transferred to historyBatch; caller closes via batch.Close()
+	collector := etl.NewCollector("[rebuild_commitment_history]", tmpDir,
+		etl.NewSortableBuffer(etl.BufferOptimalSize), logger)
+
+	var blockNumBuf [8]byte
+	collectDomain := func(domain kv.Domain) error {
+		it, err := roTx.Debug().HistoryKeyTxNumRange(domain, int(batchFromTxNum), int(batchToTxNum), order.Asc, -1)
+		if err != nil {
+			return err
+		}
+		defer it.Close()
+		for it.HasNext() {
+			k, txNum, err := it.Next()
+			if err != nil {
+				return err
+			}
+			// binary search: smallest i such that maxTxNums[i] >= txNum
+			blockIdx := sort.Search(numBlocks, func(i int) bool { return maxTxNums[i] >= txNum })
+			if blockIdx >= numBlocks {
+				return fmt.Errorf("[rebuild_commitment_history] txNum %d beyond batch range [%d, %d]",
+					txNum, blockFrom, blockEnd)
+			}
+			binary.BigEndian.PutUint64(blockNumBuf[:], blockFrom+uint64(blockIdx))
+			if err := collector.Collect(blockNumBuf[:], k); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	if err := collectDomain(kv.AccountsDomain); err != nil {
+		collector.Close()
+		return nil, err
+	}
+	if err := collectDomain(kv.StorageDomain); err != nil {
+		collector.Close()
+		return nil, err
+	}
+	return &historyBatch{collector: collector, maxTxNums: maxTxNums, blockFrom: blockFrom, blockEnd: blockEnd}, nil
+}
+
+// Load delivers (blockNum, rawKey) pairs in ascending blockNum order via fn.
+func (b *historyBatch) Load(ctx context.Context, fn func(blockNum uint64, rawKey []byte) error) error {
+	return b.collector.Load(nil, "", func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
+		return fn(binary.BigEndian.Uint64(k), v)
+	}, etl.TransformArgs{Quit: ctx.Done()})
+}
+
+// TxNum returns the max txNum for the given block within the batch.
+func (b *historyBatch) TxNum(blockNum uint64) uint64 { return b.maxTxNums[blockNum-b.blockFrom] }
+
+func (b *historyBatch) Close() { b.collector.Close() }
+
+func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB, blockReader rebuildBlockReader, finalityCtx kv.FinalityContext, logger log.Logger, squeeze bool) (latestRoot []byte, _ error) {
+	txNumsReader := blockReader.TxnumReader()
+	a := rwDb.(HasAgg).Agg().(*Aggregator)
+	defer rwDb.Debug().EnableReadAhead().DisableReadAhead()
+	a.DisableInterDomainDependencies()
+	defer a.Unalign(kv.CommitmentDomain)()
+
+	// Capture the resolved flag before we temporarily flip it off for the rebuild loop;
+	// the squeeze gate below uses the captured value, not process-global schema state.
+	wantsReferencesInBranches := a.referencesInCommitmentBranches()
+	// Restore the live flag on exit so the internal rebuild/squeeze toggles below don't leak out.
+	defer a.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, wantsReferencesInBranches)
+
+	// Disable ReferencesInCommitmentBranches before main loop; will be re-enabled for squeeze pass
+	a.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, false)
+
+	// Determine block range to process
+	var execProgress uint64
+	rwTx, err := rwDb.BeginTemporalRw(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { rwTx.Rollback() }()
+	{
+		execProgress, err = stages.GetStageProgress(rwTx, stages.Execution)
+		if err != nil {
+			return nil, err
+		}
+
+		if execProgress == 0 {
+			// else compare domain and block progress
+			domainTxNum := rwTx.Debug().DomainProgress(kv.AccountsDomain)
+			var ok bool
+			execProgress, ok, err = txNumsReader.FindBlockNum(ctx, rwTx, domainTxNum)
+			if err != nil {
+				return nil, err
+			}
+			if !ok {
+				return nil, fmt.Errorf("error in finding block number for %d", domainTxNum)
+			}
+		}
+	}
+
+	blockTo := execProgress
+	stepSize := a.StepSize()
+
+	start := time.Now()
+	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
+
+	var domains *execctx.SharedDomains
+	openDomains := func() (err error) {
+		cfg := commitment.DefaultTrieConfig()
+		cfg.Variant = execctx.PickTrieVariant()
+		if domains, err = execctx.NewSharedDomains(ctx, rwTx, logger, execctx.WithTrieConfig(cfg), execctx.WithoutSharedBranchCache()); err != nil {
+			return err
+		}
+		domains.DiscardWrites(kv.AccountsDomain)
+		domains.DiscardWrites(kv.StorageDomain)
+		domains.DiscardWrites(kv.CodeDomain)
+		domains.SetInMemHistoryReads(false)
+		domains.EnableParaTrieDB(rwDb)
+		return nil
+	}
+	if err := openDomains(); err != nil {
+		return nil, err
+	}
+	defer domains.Close()
+
+	_, seekBlockNum, err := domains.SeekCommitment(ctx, rwTx)
+	if err != nil {
+		return nil, fmt.Errorf("SeekCommitment: %w", err)
+	}
+	blockFrom := seekBlockNum
+
+	// If no commitment history files exist, start from block 0 regardless of what
+	// SeekCommitment returns (it falls back to execution progress which is wrong here).
+	if blockFrom > 0 && AggTx(rwTx).d[kv.CommitmentDomain].files.EndTxNum() == 0 {
+		logger.Info("[rebuild_commitment_history] no commitment files found, starting from block 0")
+		blockFrom = 0
+	}
+
+	if blockFrom > 0 {
+		blockFrom++ // SeekCommitment returns last committed block; start from next
+	}
+
+	{
+		startFromTxNum, err := txNumsReader.Min(ctx, rwTx, blockFrom)
+		if err != nil {
+			return nil, err
+		}
+		endToTxNum, err := txNumsReader.Max(ctx, rwTx, blockTo)
+		if err != nil {
+			return nil, err
+		}
+		logger.Info("[rebuild_commitment_history] starting", "blockFrom", blockFrom, "blockTo", blockTo,
+			"txNumFrom", startFromTxNum, "txNumTo", endToTxNum, "stepSize", stepSize)
+	}
+	var totalKeysProcessed uint64
+	var rh []byte
+	var lastToTxNum uint64
+	lastLogTime := time.Now()
+	lastLogBlock := uint64(0)
+
+	flushDomainsAndRebuild := func(step kv.Step, complete bool) error {
+		a.dirtyFilesLock.Lock()
+		visibleTo := a.dirtyFilesEndTxNumMinimax()
+		a.dirtyFilesLock.Unlock()
+		direct := complete && AggTx(rwTx).d[kv.CommitmentDomain].files.EndTxNum() == uint64(step)*stepSize && visibleTo >= uint64(step+1)*stepSize
+		for _, table := range a.d[kv.CommitmentDomain].Tables() {
+			n, err := rwTx.Count(table)
+			if err != nil {
+				return err
+			}
+			direct = direct && n == 0
+		}
+		logger.Info("[rebuild_commitment_history] flushing", "step", step, "direct", direct, "block", blockFrom-1, "toTxNum", lastToTxNum,
+			"memBatchSize", common.ByteCount(domains.Size()), "root", hex.EncodeToString(rh))
+		if direct {
+			err := dumpCommitmentStep(ctx, a, domains, step)
+			domains.Close()
+			rwTx.Rollback()
+			return err
+		}
+
+		if err := domains.Commit(ctx, rwTx); err != nil {
+			return err
+		}
+		domains.Close()
+
+		fromStep := kv.Step(a.EndTxNumMinimax() / a.StepSize())
+		toStep := step
+		if complete {
+			toStep++
+		}
+		logger.Info("[rebuild_commitment_history] build files", "fromStep", fromStep, "toStep", toStep, "lastToTxNum", lastToTxNum)
+		if err := rwDb.BuildFiles2(ctx, fromStep, toStep, finalityCtx, false); err != nil {
+			return err
+		}
+		a.WaitForFiles()
+		logger.Info("[rebuild_commitment_history] build files done", "fromStep", fromStep, "toStep", toStep)
+
+		pruneRwTx, err := rwDb.BeginTemporalRw(ctx)
+		if err != nil {
+			return err
+		}
+		defer pruneRwTx.Rollback()
+		aggTx := AggTx(pruneRwTx)
+		commitFilesEndTxNum := aggTx.d[kv.CommitmentDomain].files.EndTxNum()
+		logger.Info("[rebuild_commitment_history] prune check",
+			"commitFilesEndTxNum", commitFilesEndTxNum, "lastToTxNum", lastToTxNum)
+		if commitFilesEndTxNum > 0 {
+			pruneTo := min(commitFilesEndTxNum, lastToTxNum+1)
+			pruneLogEvery := time.NewTicker(30 * time.Second)
+			pruneStep := kv.Step((pruneTo - 1) / a.StepSize())
+			_, pruneErr := aggTx.d[kv.CommitmentDomain].Prune(ctx, pruneRwTx, pruneStep, 0, pruneTo, math.MaxUint64, pruneLogEvery)
+			pruneLogEvery.Stop()
+			if pruneErr != nil {
+				pruneRwTx.Rollback()
+				return fmt.Errorf("[rebuild_commitment_history] prune commitment: %w", pruneErr)
+			}
+		}
+		return pruneRwTx.Commit()
+	}
+
+	// finalizeBlock computes and verifies the commitment root for a single block.
+	finalizeBlock := func(blockNum, toTxNum uint64) error {
+		domains.SetTxNum(toTxNum)
+		domains.GetCommitmentCtx().SetStateReader(commitmentdb.NewRebuildStateReader(rwTx, domains, toTxNum+1))
+
+		var err error
+		rh, err = domains.ComputeCommitment(ctx, rwTx, true, blockNum, toTxNum, "[rebuild_commitment_history]", nil)
+		if err != nil {
+			return err
+		}
+		lastToTxNum = toTxNum
+
+		header, err := blockReader.HeaderByNumber(ctx, rwTx, blockNum)
+		if err != nil {
+			return fmt.Errorf("[rebuild_commitment_history] reading header for block %d: %w", blockNum, err)
+		}
+		if header == nil {
+			return fmt.Errorf("[rebuild_commitment_history] canonical header not found for block %d", blockNum)
+		}
+		if common.Hash(rh) != header.Root {
+			logger.Error("[rebuild_debug] ROOT MISMATCH",
+				"block", blockNum, "toTxNum", toTxNum,
+				"computed", hex.EncodeToString(rh), "expected", header.Root,
+				"prevBlock", blockNum-1, "memBatch", common.ByteCount(domains.Size()))
+			return fmt.Errorf("[rebuild_commitment_history] root mismatch at block %d (toTxNum=%d): computed %x, expected %x",
+				blockNum, toTxNum, rh, header.Root)
+		}
+
+		select {
+		case <-logEvery.C:
+			var m runtime.MemStats
+			dbg.ReadMemStats(&m)
+			now := time.Now()
+			blkPerSec := float64(blockNum-lastLogBlock) / now.Sub(lastLogTime).Seconds()
+			lastLogTime = now
+			lastLogBlock = blockNum
+			logger.Info("[rebuild_commitment_history] progress",
+				"block", fmt.Sprintf("%d/%d", blockNum, blockTo),
+				"blk/s", fmt.Sprintf("%.1f", blkPerSec),
+				"keys", common.PrettyCounter(totalKeysProcessed),
+				"root", hex.EncodeToString(rh),
+				"memBatch", common.ByteCount(domains.Size()),
+				"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+		default:
+		}
+		return nil
+	}
+
+	for blockFrom <= blockTo {
+		// Find the end of the current step: the last block whose max txNum < nextStepTxNum.
+		firstCommitTxNum, err := txNumsReader.Max(ctx, rwTx, blockFrom)
+		if err != nil {
+			return nil, err
+		}
+		currentStep := firstCommitTxNum / stepSize
+		nextStepTxNum := (currentStep + 1) * stepSize
+
+		batchEnd, ok, err := txNumsReader.FindBlockNum(ctx, rwTx, nextStepTxNum-1)
+		if err != nil {
+			return nil, fmt.Errorf("FindBlockNum for step %d boundary: %w", currentStep, err)
+		}
+		if !ok || batchEnd > blockTo {
+			batchEnd = blockTo
+		}
+		if batchEnd > blockFrom {
+			batchEndMax, err := txNumsReader.Max(ctx, rwTx, batchEnd)
+			if err != nil {
+				return nil, err
+			}
+			if batchEndMax >= nextStepTxNum {
+				batchEnd--
+			}
+		}
+
+		logger.Info("[rebuild_commitment_history] step start",
+			"step", currentStep, "blockFrom", blockFrom, "blockTo", batchEnd)
+
+		//nolint:gocritic
+		roTx, err := rwDb.BeginTemporalRo(ctx)
+		if err != nil {
+			return nil, err
+		}
+		batch, err := collectHistoryBatch(ctx, roTx, txNumsReader, blockFrom, batchEnd, a.dirs.Tmp, logger)
+		roTx.Rollback()
+		if err != nil {
+			return nil, err
+		}
+
+		curBlock := ^uint64(0) // sentinel: no block started yet
+		if err := batch.Load(ctx, func(blockNum uint64, rawKey []byte) error {
+			if blockNum != curBlock {
+				// Finalize the previous keyed block (or, on first key, start from blockFrom).
+				prevEnd := blockFrom
+				if curBlock != ^uint64(0) {
+					if err := finalizeBlock(curBlock, batch.TxNum(curBlock)); err != nil {
+						return err
+					}
+					prevEnd = curBlock + 1
+				}
+				for b := prevEnd; b < blockNum; b++ {
+					if err := finalizeBlock(b, batch.TxNum(b)); err != nil {
+						return err
+					}
+				}
+				// Set correct state reader before TouchKey calls begin.
+				toTxNum := batch.TxNum(blockNum)
+				domains.SetTxNum(toTxNum)
+				domains.GetCommitmentCtx().SetStateReader(commitmentdb.NewRebuildStateReader(rwTx, domains, toTxNum+1))
+				curBlock = blockNum
+			}
+			var domain kv.Domain
+			switch len(rawKey) {
+			case 20:
+				domain = kv.AccountsDomain
+			case 52:
+				domain = kv.StorageDomain
+			default:
+				return fmt.Errorf("[rebuild_commitment_history] block %d: unexpected rawKey length %d (hex %s)",
+					blockNum, len(rawKey), hex.EncodeToString(rawKey))
+			}
+			domains.GetCommitmentCtx().TouchKey(domain, string(rawKey), nil)
+			totalKeysProcessed++
+			return nil
+		}); err != nil {
+			batch.Close()
+			return nil, err
+		}
+
+		// Finalize the last block that received keys (if any), then remaining empty blocks.
+		firstUnfinalized := blockFrom
+		if curBlock != ^uint64(0) {
+			if err := finalizeBlock(curBlock, batch.TxNum(curBlock)); err != nil {
+				batch.Close()
+				return nil, err
+			}
+			firstUnfinalized = curBlock + 1
+		}
+		for b := firstUnfinalized; b <= batchEnd; b++ {
+			if err := finalizeBlock(b, batch.TxNum(b)); err != nil {
+				batch.Close()
+				return nil, err
+			}
+		}
+		batch.Close()
+
+		blockFrom = batchEnd + 1
+
+		if err := flushDomainsAndRebuild(kv.Step(currentStep), batchEnd < blockTo || lastToTxNum+1 == nextStepTxNum); err != nil {
+			return nil, err
+		}
+		if blockFrom > blockTo {
+			break
+		}
+		//nolint:gocritic
+		if rwTx, err = rwDb.BeginTemporalRw(ctx); err != nil {
+			return nil, err
+		}
+		if err := openDomains(); err != nil {
+			return nil, err
+		}
+		_, seekBlk, err := domains.SeekCommitment(ctx, rwTx)
+		if err != nil {
+			return nil, fmt.Errorf("SeekCommitment after flush: %w", err)
+		}
+		logger.Info("[rebuild_commitment_history] after flush: SeekCommitment restored",
+			"block", seekBlk, "txNum", domains.TxNum())
+	}
+
+	latestRoot = rh
+
+	var m runtime.MemStats
+	dbg.ReadMemStats(&m)
+	logger.Info("[rebuild_commitment_history] done", "duration", time.Since(start),
+		"blocks", blockTo+1, "totalKeys", common.PrettyCounter(totalKeysProcessed),
+		"root", hex.EncodeToString(latestRoot),
+		"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+
+	if totalKeysProcessed == 0 {
+		return latestRoot, nil
+	}
+
+	// Wait for all background file builds to complete before merging
+	logger.Info("[rebuild_commitment_history] waiting for background builds to finish")
+	<-a.WaitForBuildAndMerge(ctx)
+
+	logger.Info("[rebuild_commitment_history] merging built files")
+	for {
+		somethingMerged, err := a.mergeLoopStep(ctx, lastToTxNum)
+		if err != nil {
+			return nil, fmt.Errorf("[rebuild_commitment_history] merge: %w", err)
+		}
+		if !somethingMerged {
+			break
+		}
+	}
+
+	// Squeeze pass: re-compress commitment files with ReferencesInCommitmentBranches
+	if !squeeze && !wantsReferencesInBranches {
+		return latestRoot, nil
+	}
+	logger.Info("[rebuild_commitment_history] squeeze starting")
+
+	a.dirtyFilesLock.Lock()
+	a.recalcVisibleFiles(nil)
+	a.dirtyFilesLock.Unlock()
+
+	// Check if account files exist - squeeze requires them for ReferencesInCommitmentBranches
+	actx := a.BeginFilesRo()
+	hasAccountFiles := len(actx.d[kv.AccountsDomain].files) > 0
+	if !hasAccountFiles {
+		actx.Close()
+		logger.Info("[rebuild_commitment_history] no account files found, skipping squeeze (commitment-only rebuild)")
+		return latestRoot, nil
+	}
+	defer actx.Close()
+
+	a.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, true)
+
+	if err = SqueezeCommitmentFiles(ctx, actx, logger); err != nil {
+		logger.Warn("[rebuild_commitment_history] squeeze failed", "err", err)
+		logger.Info("[rebuild_commitment_history] rebuilt commitment files still available. Run 'erigon snapshots squeeze' to finish squeezing")
+		return nil, err
+	}
+	actx.Close()
+	if err = a.ReloadFiles(); err != nil {
+		logger.Warn("[rebuild_commitment_history] failed to reload folder after squeeze", "err", err)
+	}
+
+	if err = rwDb.BuildMissedAccessors(ctx, 4); err != nil {
+		logger.Warn("[rebuild_commitment_history] failed to build missed accessors", "err", err)
+		return nil, err
+	}
+
+	return latestRoot, nil
 }
 
 // RebuildCommitmentFiles recreates commitment files from existing accounts and storage kv files
 // If some commitment exists, they will be accepted as correct and next kv range will be processed.
 // DB expected to be empty, committed into db keys will be not processed.
-func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsReader *rawdbv3.TxNumsReader, logger log.Logger, squeeze bool) (latestRoot []byte, err error) {
+func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsReader *rawdbv3.TxNumsReader, logger log.Logger, squeeze bool) (latestRoot []byte, _ error) {
 	a := rwDb.(HasAgg).Agg().(*Aggregator)
 
 	// disable hard alignment; allowing commitment and storage/account to have
 	// different visibleFiles
 	a.DisableAllDependencies()
+	defer a.Unalign(kv.CommitmentDomain)()
+
+	// Capture the resolved flag before we temporarily flip it off for the rebuild loop;
+	// the squeeze gate below uses the captured value, not process-global schema state.
+	wantsReferencesInBranches := a.referencesInCommitmentBranches()
+	// Restore the live flag on exit so the internal rebuild/squeeze toggles below don't leak out.
+	defer a.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, wantsReferencesInBranches)
+
+	// Disable ReferencesInCommitmentBranches during rebuild. The merge loop after each range would
+	// otherwise shorten keys in commitment branch data, embedding file-range references
+	// (e.g. storage.0-16) that become stale once those files are merged into larger ranges
+	// (storage.0-32). The squeeze pass at the end re-enables this flag and applies the
+	// shortening in one shot when all files are finalized.
+	a.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, false)
 
 	acRo := a.BeginFilesRo() // this tx is used to read existing domain files and closed in the end
 	defer acRo.Close()
@@ -363,7 +928,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			},
 		},
 	}
-	sf, err := acRo.FilesInRange(rng)
+	sf, err := acRo.filesInRange(rng)
 	if err != nil {
 		return nil, err
 	}
@@ -383,7 +948,25 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 	}
 
 	logger.Info("[commitment_rebuild] collected shards to build", "count", len(sf.d[kv.AccountsDomain]))
+
+	if existing := acRo.TxNumsInFiles(kv.CommitmentDomain); existing > 0 {
+		skipped := 0
+		for _, r := range ranges {
+			if existing >= r.to {
+				skipped++
+			}
+		}
+		logger.Info("[commitment_rebuild] resume: existing commitment files cover up to txNum",
+			"txNum", existing, "rangesToSkip", skipped, "rangesTotal", len(ranges))
+	}
+
 	start := time.Now()
+
+	// Warmup stays off in this files-only rebuild path to match main; the WithHistory
+	// variant enables it explicitly. Variant is set per-iteration in the inner loop.
+	rebuildTrieCfg := commitment.DefaultTrieConfig()
+	rebuildTrieCfg.EnableTrieWarmup = false
+	maxShardSteps := uint64(commitment.DefaultRebuildShardMaxSteps)
 
 	var totalKeysCommitted uint64
 
@@ -395,11 +978,11 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			continue
 		}
 
-		roTx, err := a.db.BeginRo(ctx)
+		roTx, err := rwDb.BeginRo(ctx)
 		if err != nil {
 			return nil, err
 		}
-		defer roTx.Rollback()
+		defer roTx.Rollback() //nolint:gocritic
 
 		// count keys in accounts and storage domains
 		accKeys := acRo.KeyCountInFiles(kv.AccountsDomain, rangeFromTxNum, rangeToTxNum)
@@ -413,8 +996,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 		stepsInShard := uint64(shardTo - shardFrom)
 		keysPerStep := totalKeys / stepsInShard // how many keys in just one step?
 
-		//shardStepsSize := kv.Step(2)
-		shardStepsSize := kv.Step(min(uint64(math.Pow(2, math.Log2(float64(stepsInShard)))), 16))
+		shardStepsSize := kv.Step(min(uint64(math.Pow(2, math.Log2(float64(stepsInShard)))), maxShardSteps))
 		if uint64(shardStepsSize) != stepsInShard { // processing shard in several smaller steps
 			shardTo = shardFrom + shardStepsSize // if shard is quite big, we will process it in several steps
 		}
@@ -443,19 +1025,24 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			return nil, err
 		}
 		keyIter := stream.UnionKV(streamAcc, streamSto, -1)
-		//blockNum, ok, err := txNumsReader.FindBlockNum(ctx, roTx, rangeToTxNum-1)
+		// blockNum, ok, err := txNumsReader.FindBlockNum(ctx, roTx, rangeToTxNum-1)
 		blockNum, ok, err := txNumsReader.FindBlockNum(ctx, roTx, rangeToTxNum-1)
 		if err != nil {
 			return nil, fmt.Errorf("CommitmentRebuild: FindBlockNum(%d) %w", rangeToTxNum, err)
 		}
 		if !ok {
-			//var txnum uint64
+			// var txnum uint64
 			blockNum, _, err = txNumsReader.Last(roTx)
 			if err != nil {
 				return nil, fmt.Errorf("CommitmentRebuild: Last() %w", err)
 			}
 		}
 		roTx.Rollback()
+
+		trieVariant := commitment.VariantHexPatriciaTrie
+		if statecfg.ExperimentalParallelCommitment {
+			trieVariant = commitment.VariantParallelHexPatricia
+		}
 
 		for shardFrom < lastShard { // recreate this file range 1+ steps
 			nextKey := func() (ok bool, k []byte) {
@@ -478,16 +1065,21 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			if err != nil {
 				return nil, err
 			}
-			defer rwTx.Rollback()
+			defer rwTx.Rollback() //nolint:gocritic
 
-			domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+			iterTrieCfg := rebuildTrieCfg
+			iterTrieCfg.Variant = trieVariant
+			domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New(), execctx.WithTrieConfig(iterTrieCfg))
 			if err != nil {
 				return nil, err
 			}
 
 			domains.SetTxNum(lastTxnumInShard - 1)
 			currentTxNum := lastTxnumInShard - 1
-			domains.GetCommitmentCtx().SetLimitedHistoryStateReader(rwTx, lastTxnumInShard) // this helps to read state from correct file during commitment
+			domains.GetCommitmentCtx().SetStateReader(commitmentdb.NewFilesOnlyStateReader(rwTx, lastTxnumInShard-1))
+			if statecfg.ExperimentalParallelCommitment {
+				domains.EnableParaTrieDB(rwDb)
+			}
 
 			rebuiltCommit, err = rebuildCommitmentShard(ctx, domains, rwTx, nextKey, &rebuiltCommitment{
 				StepFrom: shardFrom,
@@ -507,9 +1099,19 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 
 			// make new file visible for all aggregator transactions
 			a.dirtyFilesLock.Lock()
-			a.recalcVisibleFiles(a.dirtyFilesEndTxNumMinimax())
+			a.recalcVisibleFiles(nil)
 			a.dirtyFilesLock.Unlock()
 			rwTx.Rollback()
+
+			for {
+				smthDone, err := a.mergeCommitmentStep(ctx, rangeToTxNum)
+				if err != nil {
+					return nil, err
+				}
+				if !smthDone {
+					break
+				}
+			}
 
 			if shardTo+shardStepsSize > lastShard && shardStepsSize > 1 {
 				shardStepsSize /= 2
@@ -553,29 +1155,31 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 
 	acRo.Close()
 
-	if !squeeze && !statecfg.Schema.CommitmentDomain.ReplaceKeysInValues {
+	if !squeeze && !wantsReferencesInBranches {
 		return latestRoot, nil
 	}
 	logger.Info("[squeeze] starting")
-	a.recalcVisibleFiles(a.dirtyFilesEndTxNumMinimax())
+	a.dirtyFilesLock.Lock()
+	a.recalcVisibleFiles(nil)
+	a.dirtyFilesLock.Unlock()
 
 	logger.Info(fmt.Sprintf("[squeeze] latest root %x", latestRoot))
-	a.ForTestReplaceKeysInValues(kv.CommitmentDomain, true)
+	a.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, true)
 
 	actx := a.BeginFilesRo()
 	defer actx.Close()
 
 	if err = SqueezeCommitmentFiles(ctx, actx, logger); err != nil {
 		logger.Warn("[squeeze] failed", "err", err)
-		logger.Info("[squeeze] rebuilt commitment files still available. Instead of re-run, you have to run 'erigon snapshots sqeeze' to finish squeezing")
+		logger.Info("[squeeze] rebuilt commitment files still available. Instead of re-run, you have to run 'erigon snapshots squeeze' to finish squeezing")
 		return nil, err
 	}
 	actx.Close()
 	if err = a.ReloadFiles(); err != nil {
-		logger.Warn("[squeeze] failed to reload folder after sqeeze", "err", err)
+		logger.Warn("[squeeze] failed to reload folder after squeeze", "err", err)
 	}
 
-	if err = a.BuildMissedAccessors(ctx, 4); err != nil {
+	if err = rwDb.BuildMissedAccessors(ctx, 4); err != nil {
 		logger.Warn("[squeeze] failed to build missed accessors", "err", err)
 		return nil, err
 	}
@@ -593,13 +1197,15 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 
 	visComFiles := tx.(kv.WithFreezeInfo).FreezeInfo().Files(kv.CommitmentDomain)
 	logger.Info(cfg.LogPrefix+" started", "totalKeys", common.PrettyCounter(cfg.Keys), "block", cfg.BlockNumber, "txn", cfg.TxnNumber,
-		"files", fmt.Sprintf("%d %v", len(visComFiles), visComFiles.Fullpaths()))
+		"files", fmt.Sprintf("%d %v", len(visComFiles), visComFiles.String()))
 
 	sf := time.Now()
 	var processed uint64
 	for ok, key := next(); ; ok, key = next() {
-		sd.GetCommitmentCtx().TouchKey(kv.AccountsDomain, string(key), nil)
-		processed++
+		if len(key) != 0 {
+			sd.GetCommitmentCtx().TouchKey(kv.AccountsDomain, string(key), nil)
+			processed++
+		}
 		if !ok {
 			break
 		}
@@ -610,6 +1216,7 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 	if err != nil {
 		return nil, err
 	}
+
 	logger.Info(cfg.LogPrefix+" now sealing (dumping on disk)", "root", hex.EncodeToString(rh),
 		"keysInShard", common.PrettyCounter(processed), "keysInRange", common.PrettyCounter(cfg.Keys))
 
@@ -643,6 +1250,30 @@ type rebuiltCommitment struct {
 	BlockNumber uint64 // block number for this commitment
 	TxnNumber   uint64 // tx number for this commitment
 	LogPrefix   string
+}
+
+func dumpCommitmentStep(ctx context.Context, a *Aggregator, sd *execctx.SharedDomains, step kv.Step) error {
+	d := a.d[kv.CommitmentDomain]
+	wal := sd.GetMemBatch().(*TemporalMemBatch).domainWriters[d.Name]
+	defer wal.Close()
+	coll, err := d.collateETL(ctx, step, step+1, wal.valsCollector(), nil, "")
+	if err != nil {
+		return err
+	}
+	if coll.HistoryCollation, err = d.History.collateETL(ctx, step, wal.h.valsCollector()); err != nil {
+		coll.Close()
+		return err
+	}
+	defer coll.Close()
+	sf, err := d.buildFiles(ctx, step, coll, background.NewProgressSet())
+	if err != nil {
+		return err
+	}
+	a.dirtyFilesLock.Lock()
+	defer a.dirtyFilesLock.Unlock()
+	d.integrateDirtyFiles(sf, uint64(step)*a.StepSize(), uint64(step+1)*a.StepSize())
+	a.recalcVisibleFiles(nil)
+	return nil
 }
 
 func domainFiles(dirs datadir.Dirs, domain kv.Domain) []string {

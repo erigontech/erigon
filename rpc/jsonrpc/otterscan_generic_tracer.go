@@ -18,8 +18,8 @@ package jsonrpc
 
 import (
 	"context"
+	"fmt"
 
-	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
@@ -34,6 +34,12 @@ type GenericTracer interface {
 }
 
 func (api *OtterscanAPIImpl) genericTracer(tx kv.TemporalTx, ctx context.Context, blockNum, txnID uint64, txIndex int, chainConfig *chain.Config, tracer GenericTracer) error {
+	if err := api.checkPruneBlocks(ctx, tx, blockNum); err != nil {
+		return err
+	}
+	if err := api.checkPruneTransactionHistoryAtIndex(ctx, tx, blockNum, uint64(txIndex)); err != nil {
+		return err
+	}
 	executor := exec.NewTraceWorker(tx, chainConfig, api.engine(), api._blockReader, tracer)
 	defer executor.Close()
 
@@ -43,20 +49,18 @@ func (api *OtterscanAPIImpl) genericTracer(tx kv.TemporalTx, ctx context.Context
 		return err
 	}
 	if header == nil {
-		log.Warn("[rpc] header is nil", "blockNum", blockNum)
-		return nil
+		return fmt.Errorf("header not found for block %d", blockNum)
 	}
 	executor.ChangeBlock(header)
 
-	txn, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txIndex)
+	txn, ok, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txIndex)
 	if err != nil {
 		return err
 	}
-	if txn == nil {
-		log.Warn("[rpc genericTracer] txn is nil", "blockNum", blockNum, "txIndex", txIndex)
-		return nil
+	if !ok {
+		return fmt.Errorf("txn not found at block %d, index %d", blockNum, txIndex)
 	}
-	err = executor.ExecTxn(txnID, txIndex, txn, false)
+	err = executor.ExecTxn(txnID, txIndex, txn)
 	if err != nil {
 		return err
 	}

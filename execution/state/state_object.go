@@ -34,29 +34,29 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/empty"
-	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 var stateObjectPool = sync.Pool{
-	New: func() any {
-		return &stateObject{
-			originStorage:      make(Storage),
-			blockOriginStorage: make(Storage),
-			dirtyStorage:       make(Storage),
-		}
-	},
+	New: func() any { return newHeapObject() },
 }
 
-type Code []byte
-
-func (c Code) String() string {
-	return string(c) //strings.Join(Disassemble(c), " ")
+func newHeapObject() *stateObject {
+	return &stateObject{}
 }
 
 type Storage map[accounts.StorageKey]uint256.Int
+
+// set allocates the map on first write, so an object that never writes keeps a
+// nil Storage.
+func (s *Storage) set(key accounts.StorageKey, value uint256.Int) {
+	if *s == nil {
+		*s = make(Storage)
+	}
+	(*s)[key] = value
+}
 
 func (s Storage) String() string {
 	var str strings.Builder
@@ -83,8 +83,7 @@ type stateObject struct {
 	db       *IntraBlockState
 
 	// Write caches.
-	//trie Trie // storage trie, which becomes non-nil on first access
-	code Code // contract bytecode, which gets set when code is loaded
+	code accounts.Code // contract bytecode, hash + canonical bytes
 
 	originStorage Storage // Storage cache of original entries to dedup rewrites
 	// blockOriginStorage keeps the values of storage items at the beginning of the block
@@ -102,36 +101,14 @@ type stateObject struct {
 	deleted         bool // true if account was deleted during the lifetime of this object
 	newlyCreated    bool // true if this object was created in the current transaction
 	createdContract bool // true if this object represents a newly created contract
+
+	// Set by stateObjectArena.alloc; keeps release from pooling a slot the arena owns.
+	arena bool
 }
 
-func (so *stateObject) deepCopy(db *IntraBlockState) *stateObject {
-	obj := stateObjectPool.Get().(*stateObject)
-	obj.db = db
-	obj.address = so.address
-	obj.data.Copy(&so.data)
-	obj.original.Copy(&so.original)
-	obj.code = so.code
-	// Clear and copy storage maps
-	clear(obj.dirtyStorage)
-	maps.Copy(obj.dirtyStorage, so.dirtyStorage)
-	clear(obj.originStorage)
-	maps.Copy(obj.originStorage, so.originStorage)
-	clear(obj.blockOriginStorage)
-	maps.Copy(obj.blockOriginStorage, so.blockOriginStorage)
-	if so.fakeStorage != nil {
-		obj.fakeStorage = so.fakeStorage.Copy()
-	}
-	obj.selfdestructed = so.selfdestructed
-	obj.dirtyCode = so.dirtyCode
-	obj.deleted = so.deleted
-	obj.newlyCreated = so.newlyCreated
-	obj.createdContract = so.createdContract
-	return obj
-}
-
-// newObject creates a state object from the pool.
+// newObject creates a state object from the arena or the pool.
 func newObject(db *IntraBlockState, address accounts.Address, data, original *accounts.Account) *stateObject {
-	so := stateObjectPool.Get().(*stateObject)
+	so := db.allocStateObject()
 	so.db = db
 	so.address = address
 	so.data.Copy(data)
@@ -146,13 +123,13 @@ func newObject(db *IntraBlockState, address accounts.Address, data, original *ac
 	return so
 }
 
-// release returns the stateObject to the pool after resetting it.
-func (so *stateObject) release() {
+// reset clears every per-use field, keeping any storage map already allocated.
+func (so *stateObject) reset() {
 	so.db = nil
 	so.address = accounts.NilAddress
 	so.data = accounts.Account{}
 	so.original = accounts.Account{}
-	so.code = nil
+	so.code = accounts.Code{}
 	clear(so.originStorage)
 	clear(so.blockOriginStorage)
 	clear(so.dirtyStorage)
@@ -162,12 +139,20 @@ func (so *stateObject) release() {
 	so.deleted = false
 	so.newlyCreated = false
 	so.createdContract = false
+}
+
+// release resets the object and pools it, unless the arena owns the slot.
+func (so *stateObject) release() {
+	so.reset()
+	if so.arena {
+		return
+	}
 	stateObjectPool.Put(so)
 }
 
 // EncodeRLP implements rlp.Encoder.
 func (so *stateObject) EncodeRLP(w io.Writer) error {
-	return rlp.Encode(w, so.data)
+	return rlp.Encode(w, &so.data)
 }
 
 func (so *stateObject) markSelfdestructed() {
@@ -175,18 +160,21 @@ func (so *stateObject) markSelfdestructed() {
 }
 
 // GetState returns a value from account storage.
-func (so *stateObject) GetState(key accounts.StorageKey) (uint256.Int, bool) {
+func (so *stateObject) GetState(key accounts.StorageKey) (uint256.Int, bool, error) {
 	// If the fake storage is set, only lookup the state here (in the debugging mode)
 	if so.fakeStorage != nil {
-		return so.fakeStorage[key], false
+		return so.fakeStorage[key], false, nil
 	}
 	value, dirty := so.dirtyStorage[key]
 	if dirty {
-		return value, false
+		return value, false, nil
 	}
 	// Otherwise return the entry's original value
-	value, _ = so.GetCommittedState(key)
-	return value, true
+	value, err := so.GetCommittedState(key)
+	if err != nil {
+		return uint256.Int{}, false, err
+	}
+	return value, true, nil
 }
 
 // GetCommittedState retrieves a value from the committed account storage trie.
@@ -209,6 +197,10 @@ func (so *stateObject) GetCommittedState(key accounts.StorageKey) (uint256.Int, 
 		}
 	}
 	if so.createdContract {
+		if dbg.TraceTransactionIO && (so.db.trace || dbg.TraceAccount(so.address.Handle())) {
+			fmt.Printf("%d (%d.%d) GetCommittedState SKIP (createdContract) %x key=%x\n",
+				so.db.blockNum, so.db.txIndex, so.db.version, so.address, key)
+		}
 		return uint256.Int{}, nil
 	}
 	// Load from DB in case it is missing.
@@ -225,6 +217,7 @@ func (so *stateObject) GetCommittedState(key accounts.StorageKey) (uint256.Int, 
 	}
 	so.db.storageReadCount++
 	so.db.stateReader.SetTrace(false, "")
+	so.db.RecordStateReadError(err)
 
 	if err != nil {
 		return uint256.Int{}, err
@@ -234,8 +227,8 @@ func (so *stateObject) GetCommittedState(key accounts.StorageKey) (uint256.Int, 
 		res.Clear()
 	}
 
-	so.originStorage[key] = res
-	so.blockOriginStorage[key] = res
+	so.originStorage.set(key, res)
+	so.blockOriginStorage.set(key, res)
 
 	return res, err
 }
@@ -244,11 +237,7 @@ func (so *stateObject) GetCommittedState(key accounts.StorageKey) (uint256.Int, 
 func (so *stateObject) SetState(key accounts.StorageKey, value uint256.Int, force bool) (_ bool, err error) {
 	// If the fake storage is set, put the temporary state update here.
 	if so.fakeStorage != nil {
-		so.db.journal.append(fakeStorageChange{
-			account:  so.address,
-			key:      key,
-			prevalue: so.fakeStorage[key],
-		})
+		so.db.journal.fakeStorageChange(so.address, key, so.fakeStorage[key])
 		so.fakeStorage[key] = value
 		return true, nil
 	}
@@ -258,20 +247,20 @@ func (so *stateObject) SetState(key accounts.StorageKey, value uint256.Int, forc
 	var source ReadSource
 
 	// we need to use versioned read here otherwise we will miss versionmap entries
-	prev, source, _, err = versionedRead(so.db, so.address, StoragePath, key, false, u256.N0,
-		func(v uint256.Int) uint256.Int {
-			return v
-		},
-		func(s *stateObject) (uint256.Int, error) {
-			var value uint256.Int
-			if s != nil && !s.deleted {
-				value, commited = s.GetState(key)
-			}
-			return value, nil
-		})
-
+	prev, source, _, commited, err = readStateForSet(so.db, so.address, key)
 	if err != nil {
 		return false, err
+	}
+
+	// When versionedReadCore resolves the previous value from a cached read
+	// (ReadSetRead) or from the version map (MapRead), the readStorage
+	// callback is never called and commited stays at its zero-value (false).
+	// In both cases there is no versioned write for this key in the current
+	// transaction, so this IS the first write — commited must be true so
+	// that the storage-change revert deletes the versioned write instead of
+	// updating it to the prevalue.
+	if source != WriteSetRead && source != UnknownSource && source != StorageRead {
+		commited = true
 	}
 
 	if !force && source != UnknownSource && prev == value {
@@ -279,12 +268,7 @@ func (so *stateObject) SetState(key accounts.StorageKey, value uint256.Int, forc
 	}
 
 	// New value is different, update and journal the change
-	so.db.journal.append(storageChange{
-		account:     so.address,
-		key:         key,
-		prevalue:    prev,
-		wasCommited: commited,
-	})
+	so.db.journal.storageChange(so.address, key, prev, commited)
 
 	if so.db.tracingHooks != nil && so.db.tracingHooks.OnStorageChange != nil {
 		so.db.tracingHooks.OnStorageChange(so.address, key, prev, value)
@@ -306,52 +290,85 @@ func (so *stateObject) SetStorage(storage Storage) {
 		so.fakeStorage = make(Storage)
 	}
 	// Set the fake storage through SetState to ensure journalling is done correctly.
+	// so.fakeStorage is non-nil at this point, so SetState always takes its
+	// fake-storage branch and returns a nil error.
 	for key, value := range storage {
-		so.SetState(key, value, false)
+		_, _ = so.SetState(key, value, false)
 	}
 }
 
 func (so *stateObject) setState(key accounts.StorageKey, value uint256.Int) {
-	so.dirtyStorage[key] = value
+	so.dirtyStorage.set(key, value)
 }
 
 // updateStorage writes cached storage modifications into the object's storage trie.
-func (so *stateObject) updateStorage(stateWriter StateWriter) error {
+// useBlockOrigin selects which baseline to compare against when deciding whether to skip
+// a write: false → use originStorage (last value written to MDBX within this block,
+// correct for per-tx FinalizeTx writes); true → use blockOriginStorage (value at block
+// start, correct for CommitBlock's system-txNum write which must not be skipped even
+// when a slot returned to its block-start value mid-block).
+func (so *stateObject) updateStorage(stateWriter StateWriter, useBlockOrigin bool) error {
 	// When using full state override, only the fake storage matters (see also SetStorage)
 	if so.fakeStorage != nil {
-		// First, delete the account to wipe out the original storage
-		err := stateWriter.DeleteAccount(so.address, &so.original)
+		// DeleteAccount also deletes the code, so read it first and write it back after.
+		code, err := so.CodeTyped()
 		if err != nil {
 			return err
 		}
+		// First, delete the account to wipe out the original storage
+		err = stateWriter.DeleteAccount(so.address, &so.original)
+		if err != nil {
+			return err
+		}
+		if len(code.Bytes) > 0 {
+			if err := stateWriter.UpdateAccountCode(so.address, so.data.Incarnation, code.Hash, code.Bytes); err != nil {
+				return err
+			}
+		}
 		// Then, we need to apply the fake storage changes to compute the state root correctly
-		err = so.applyStorageChanges(stateWriter, so.fakeStorage)
+		err = so.applyStorageChanges(stateWriter, so.fakeStorage, useBlockOrigin)
 		if err != nil {
 			return err
 		}
 		return nil
 	}
 	// Normal behaviour, apply the dirty storage changes
-	err := so.applyStorageChanges(stateWriter, so.dirtyStorage)
+	err := so.applyStorageChanges(stateWriter, so.dirtyStorage, useBlockOrigin)
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-func (so *stateObject) applyStorageChanges(stateWriter StateWriter, updatedStorage Storage) error {
+func (so *stateObject) applyStorageChanges(stateWriter StateWriter, updatedStorage Storage, useBlockOrigin bool) error {
 	for key, value := range updatedStorage {
-		blockOriginValue := so.blockOriginStorage[key]
+		// Choose the baseline for the skip-if-unchanged check:
+		//
+		//   useBlockOrigin=false (FinalizeTx): use originStorage[key], the last value
+		//   written to MDBX within this block. This avoids a stale-MDBX bug when a
+		//   slot returns to its block-start value mid-block (A→B→A): blockOriginStorage
+		//   would falsely report "no change" while MDBX still holds B from an earlier tx.
+		//
+		//   useBlockOrigin=true (CommitBlock): use blockOriginStorage[key]. After all
+		//   FinalizeTx calls, originStorage[key] already equals the final dirty value, so
+		//   using it would always skip the write. The CommitBlock write at system_txNum is
+		//   required by ComputeCommitment and must not be skipped.
+		var originValue uint256.Int
+		if useBlockOrigin {
+			originValue = so.blockOriginStorage[key]
+		} else {
+			originValue = so.originStorage[key]
+		}
 		if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (so.db.trace || dbg.TraceAccount(so.address.Handle()))) {
 			if _, ok := stateWriter.(*NoopWriter); !ok || dbg.TraceNoopIO {
 				fmt.Printf("%d (%d.%d) Update Storage (%T): %x,%x,%s->%s\n", so.db.blockNum, so.db.txIndex, so.db.version,
-					stateWriter, so.address, key, blockOriginValue.Hex(), value.Hex())
+					stateWriter, so.address, key, originValue.Hex(), value.Hex())
 			}
 		}
-		if err := stateWriter.WriteAccountStorage(so.address, so.data.GetIncarnation(), key, blockOriginValue, value); err != nil {
+		if err := stateWriter.WriteAccountStorage(so.address, so.data.GetIncarnation(), key, originValue, value); err != nil {
 			return err
 		}
-		so.originStorage[key] = value
+		so.originStorage.set(key, value)
 	}
 	return nil
 }
@@ -363,11 +380,7 @@ func (so *stateObject) printTrie() {
 }
 
 func (so *stateObject) SetBalance(amount uint256.Int, wasCommited bool, reason tracing.BalanceChangeReason) {
-	so.db.journal.append(balanceChange{
-		account:     so.address,
-		prev:        so.data.Balance,
-		wasCommited: wasCommited,
-	})
+	so.db.journal.balanceChange(so.address, so.data.Balance, wasCommited, so.db.versionedWrites.balanceDeleted(so.address))
 	if so.db.tracingHooks != nil && so.db.tracingHooks.OnBalanceChange != nil {
 		so.db.tracingHooks.OnBalanceChange(so.address, so.data.Balance, amount, reason)
 	}
@@ -377,9 +390,6 @@ func (so *stateObject) SetBalance(amount uint256.Int, wasCommited bool, reason t
 func (so *stateObject) setBalance(amount uint256.Int) {
 	so.data.Balance = amount
 }
-
-// Return the gas back to the origin. Used by the Virtual machine or Closures
-func (so *stateObject) ReturnGas(gas *big.Int) {}
 
 func (so *stateObject) setIncarnation(incarnation uint64) {
 	so.data.SetIncarnation(incarnation)
@@ -396,13 +406,41 @@ func (so *stateObject) Address() accounts.Address {
 
 // Code returns the contract code associated with this object, if any.
 func (so *stateObject) Code() ([]byte, error) {
-	if so.code != nil {
+	c, err := so.CodeTyped()
+	if err != nil {
+		return nil, err
+	}
+	return c.Bytes, nil
+}
+
+// CodeTyped returns the contract code as an accounts.Code carrying the
+// interned CodeHash alongside the bytes. Prefer this over Code() when the
+// caller needs the hash too — saves a Keccak.
+func (so *stateObject) CodeTyped() (accounts.Code, error) {
+	if so.code.Bytes != nil {
 		return so.code, nil
 	}
 	if so.data.CodeHash.IsEmpty() {
-		return nil, nil
+		return accounts.Code{Hash: so.data.CodeHash}, nil
 	}
 
+	// When a versionMap is present (parallel execution), check for CodePath
+	// entries from prior TXs (e.g. EIP-7702 SetCode). The versionMap has the
+	// synthetic code but the domain/stateReader does not.
+	if so.db.versionMap != nil {
+		if c, rr, ok := so.db.versionMap.ReadCode(so.address, so.db.txIndex); ok {
+			if !rr.resolved() {
+				// An in-flight cell: storage holds the pre-block code, so wait through the versioned
+				// path. Its result is this read's view, not the object's state, so it is not cached.
+				c, _, _, err := readCode(so.db, so.address)
+				return c, err
+			}
+			so.code = c
+			so.data.CodeHash = c.Hash
+			so.original.CodeHash = c.Hash
+			return c, nil
+		}
+	}
 	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (so.db.trace || dbg.TraceAccount(so.address.Handle()))) {
 		so.db.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", so.db.blockNum, so.db.txIndex, so.db.version))
 	}
@@ -416,50 +454,52 @@ func (so *stateObject) Code() ([]byte, error) {
 		so.db.codeReadCount++
 	}
 	so.db.stateReader.SetTrace(false, "")
+	so.db.RecordStateReadError(err)
 
 	if err != nil {
-		return nil, fmt.Errorf("can't read code for %x: %w", so.Address(), err)
+		return accounts.Code{}, fmt.Errorf("can't read code for %x: %w", so.Address(), err)
 	}
-	so.code = code
-	return code, nil
+	// Trust the committed (CodeHash, bytes) pair rather than re-hashing on every
+	// load; a codeHash-without-code state reports as empty so SetCode's compare
+	// still heals it.
+	var c accounts.Code
+	if len(code) == 0 {
+		c = accounts.EmptyCode
+	} else {
+		c = accounts.Code{Hash: so.data.CodeHash, Bytes: code}
+	}
+	so.code = c
+	return c, nil
 }
 
-func (so *stateObject) SetCode(codeHash accounts.CodeHash, code []byte, wasCommited bool) (bool, error) {
-	prevcode, err := so.Code()
+func (so *stateObject) SetCode(code accounts.Code, wasCommited bool, reason tracing.CodeChangeReason) (bool, error) {
+	prev, err := so.CodeTyped()
 	if err != nil {
 		return false, err
 	}
 
-	if bytes.Equal(prevcode, code) {
+	// bytes.Equal guards the codeHash-without-code case: a matching hash against
+	// empty prev bytes must still heal the CodeDomain, not skip.
+	if prev.Hash == code.Hash && bytes.Equal(prev.Bytes, code.Bytes) {
 		return false, nil
 	}
 
-	so.db.journal.append(codeChange{
-		account:     so.address,
-		prevhash:    so.data.CodeHash,
-		prevcode:    prevcode,
-		wasCommited: wasCommited,
-	})
-	if so.db.tracingHooks != nil && so.db.tracingHooks.OnCodeChange != nil {
-		so.db.tracingHooks.OnCodeChange(so.address, so.data.CodeHash, prevcode, codeHash, code)
-	}
-	so.setCode(codeHash, code)
+	so.db.journalCodeChange(so.address, so.data.CodeHash, prev.Bytes, code, wasCommited, reason)
+	so.setCode(code)
 	return true, nil
 }
 
-func (so *stateObject) setCode(codeHash accounts.CodeHash, code []byte) {
+func (so *stateObject) setCode(code accounts.Code) {
 	so.code = code
-	so.data.CodeHash = codeHash
+	so.data.CodeHash = code.Hash
 	so.dirtyCode = true
 }
 
-func (so *stateObject) SetNonce(nonce uint64, wasCommited bool) {
-	so.db.journal.append(nonceChange{
-		account:     so.address,
-		prev:        so.data.Nonce,
-		wasCommited: wasCommited,
-	})
-	if so.db.tracingHooks != nil && so.db.tracingHooks.OnNonceChange != nil {
+func (so *stateObject) SetNonce(nonce uint64, wasCommited bool, reason tracing.NonceChangeReason) {
+	so.db.journal.nonceChange(so.address, so.data.Nonce, wasCommited)
+	if so.db.tracingHooks != nil && so.db.tracingHooks.OnNonceChangeV2 != nil {
+		so.db.tracingHooks.OnNonceChangeV2(so.address, so.data.Nonce, nonce, reason)
+	} else if so.db.tracingHooks != nil && so.db.tracingHooks.OnNonceChange != nil {
 		so.db.tracingHooks.OnNonceChange(so.address, so.data.Nonce, nonce)
 	}
 	so.setNonce(nonce)

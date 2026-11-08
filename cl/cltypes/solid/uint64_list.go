@@ -32,15 +32,15 @@ func NewUint64ListSSZ(limit int) Uint64ListSSZ {
 	}
 }
 
-func (h uint64ListSSZ) MarshalJSON() ([]byte, error) {
-	return json.Marshal(h.u)
+func (arr uint64ListSSZ) MarshalJSON() ([]byte, error) {
+	return json.Marshal(arr.u)
 }
 
-func (h uint64ListSSZ) UnmarshalJSON(buf []byte) error {
-	return json.Unmarshal(buf, h.u)
+func (arr uint64ListSSZ) UnmarshalJSON(buf []byte) error {
+	return json.Unmarshal(buf, arr.u)
 }
 
-func (h *uint64ListSSZ) Static() bool {
+func (arr *uint64ListSSZ) Static() bool {
 	return false
 }
 
@@ -94,6 +94,14 @@ func (arr *uint64ListSSZ) HashSSZ() ([32]byte, error) {
 	return arr.u.HashListSSZ()
 }
 
+func (arr *uint64ListSSZ) HashSSZProgressive() ([32]byte, error) {
+	return arr.u.HashListSSZProgressive()
+}
+
+func (arr *uint64ListSSZ) SetProgressiveHashing(enabled bool) {
+	arr.u.SetProgressiveHashing(enabled)
+}
+
 func (arr *uint64ListSSZ) Clone() clonable.Clonable {
 	return NewUint64ListSSZ(arr.Cap())
 }
@@ -122,6 +130,16 @@ func (arr *uint64ListSSZ) Append(v uint64) {
 func IsUint64SortedSet(set IterableSSZ[uint64]) bool {
 	for i := 0; i < set.Length()-1; i++ {
 		if set.Get(i) >= set.Get(i+1) {
+			return false
+		}
+	}
+	return true
+}
+
+// IsUint64Sorted checks if the list is sorted in non-decreasing order (duplicates allowed). O(N) complexity.
+func IsUint64Sorted(list IterableSSZ[uint64]) bool {
+	for i := 0; i < list.Length()-1; i++ {
+		if list.Get(i) > list.Get(i+1) {
 			return false
 		}
 	}

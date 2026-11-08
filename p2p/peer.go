@@ -27,22 +27,21 @@ import (
 	"net"
 	"slices"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/event"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/mclock"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/enr"
-	"github.com/erigontech/erigon/p2p/event"
 )
 
-var (
-	ErrShuttingDown = errors.New("shutting down")
-)
+var ErrShuttingDown = errors.New("shutting down")
 
 const (
 	baseProtocolVersion    = 5
@@ -129,10 +128,17 @@ type Peer struct {
 
 // NewPeer returns a peer for testing purposes.
 func NewPeer(id enode.ID, pubkey [64]byte, name string, caps []Cap, metricsEnabled bool) *Peer {
+	return NewPeerWithProtocols(id, pubkey, name, caps, nil, metricsEnabled)
+}
+
+// NewPeerWithProtocols returns a peer for testing purposes with the given
+// protocols registered in its running map. Caps and protocols must match
+// for a protocol to appear as running.
+func NewPeerWithProtocols(id enode.ID, pubkey [64]byte, name string, caps []Cap, protocols []Protocol, metricsEnabled bool) *Peer {
 	pipe, _ := net.Pipe()
 	node := enode.SignNull(new(enr.Record), id)
 	conn := &conn{fd: pipe, transport: nil, node: node, caps: caps, name: name}
-	peer := newPeer(log.Root(), conn, nil, pubkey, metricsEnabled)
+	peer := newPeer(log.Root(), conn, protocols, pubkey, metricsEnabled)
 	close(peer.closed) // ensures Disconnect doesn't block
 	return peer
 }
@@ -250,9 +256,8 @@ func (p *Peer) run() (peerErr *PeerError) {
 		readErr    = make(chan error, 1)
 	)
 
-	p.wg.Add(2)
-	go p.readLoop(readErr)
-	go p.pingLoop()
+	p.wg.Go(func() { p.readLoop(readErr) })
+	p.wg.Go(p.pingLoop)
 
 	// Start all protocol handlers.
 	writeStart <- struct{}{}
@@ -274,7 +279,7 @@ func (p *Peer) run() (peerErr *PeerError) {
 			// Allow the next write to start if there was no error.
 			writeStart <- struct{}{}
 		case err := <-readErr:
-			if reason, ok := err.(DiscReason); ok {
+			if reason, ok := errors.AsType[DiscReason](err); ok {
 				return NewPeerError(PeerErrorDiscReasonRemote, reason, nil, "Peer.run got a remote DiscReason")
 			} else {
 				return NewPeerError(PeerErrorDiscReason, DiscNetworkError, err, "Peer.run readErr")
@@ -290,7 +295,6 @@ func (p *Peer) run() (peerErr *PeerError) {
 func (p *Peer) pingLoop() {
 	defer dbg.LogPanic()
 	ping := time.NewTimer(pingInterval)
-	defer p.wg.Done()
 	defer ping.Stop()
 	for {
 		select {
@@ -313,7 +317,6 @@ func (p *Peer) pingLoop() {
 
 func (p *Peer) readLoop(errc chan<- error) {
 	defer dbg.LogPanic()
-	defer p.wg.Done()
 	for {
 		msg, err := p.rw.ReadMsg()
 		if err != nil {
@@ -356,9 +359,7 @@ func (p *Peer) handle(msg Msg) error {
 		}
 
 		if p.metricsEnabled {
-			m := fmt.Sprintf("%s_%s_%d_%#02x", ingressMeterName, proto.Name, proto.Version, msg.Code-proto.offset)
-			metrics.GetOrCreateGauge(m).SetUint32(msg.meterSize)
-			metrics.GetOrCreateGauge(m + "_packets").Set(1)
+			proto.meterIngress(msg.Code-proto.offset, msg.meterSize)
 		}
 		select {
 		case proto.in <- msg:
@@ -397,7 +398,15 @@ outer:
 					offset -= old.Length
 				}
 				// Assign the new match
-				result[cap.Name] = &protoRW{Protocol: proto, offset: offset, in: make(chan Msg), w: rw, logger: logger}
+				prw := &protoRW{Protocol: proto, offset: offset, in: make(chan Msg), w: rw, logger: logger}
+				prw.meters = make([]metrics.Gauge, proto.Length)
+				prw.meterPackets = make([]metrics.Gauge, proto.Length)
+				for code := uint64(0); code < proto.Length; code++ {
+					m := fmt.Sprintf("%s_%s_%d_%#02x", ingressMeterName, proto.Name, proto.Version, code)
+					prw.meters[code] = metrics.GetOrCreateGauge(m)
+					prw.meterPackets[code] = metrics.GetOrCreateGauge(m + "_packets")
+				}
+				result[cap.Name] = prw
 				offset += proto.Length
 
 				continue outer
@@ -408,7 +417,6 @@ outer:
 }
 
 func (p *Peer) startProtocols(writeStart <-chan struct{}, writeErr chan<- error) {
-	p.wg.Add(len(p.running))
 	for _, proto := range p.running {
 		proto.closed = p.closed
 		proto.wstart = writeStart
@@ -417,17 +425,16 @@ func (p *Peer) startProtocols(writeStart <-chan struct{}, writeErr chan<- error)
 		if p.events != nil {
 			rw = newMsgEventer(rw, p.events, p.ID(), proto.Name, p.RemoteAddr().String(), p.LocalAddr().String())
 		}
-		p.log.Trace(fmt.Sprintf("[p2p] Starting protocol %s/%d", proto.Name, proto.Version))
-		go func() {
+		p.log.Trace("[p2p] Starting protocol", "proto", proto.Name, "version", proto.Version)
+		p.wg.Go(func() {
 			defer dbg.LogPanic()
-			defer p.wg.Done()
 			err := proto.Run(p, rw)
 			// only unit test protocols can return nil
 			if err == nil {
-				err = NewPeerError(PeerErrorTest, DiscQuitting, nil, fmt.Sprintf("Protocol %s/%d returned", proto.Name, proto.Version))
+				err = NewPeerError(PeerErrorTest, DiscQuitting, nil, "Protocol "+proto.cap().String()+" returned")
 			}
 			p.protoErr <- err
-		}()
+		})
 	}
 }
 
@@ -439,7 +446,7 @@ func (p *Peer) getProto(code uint64) (*protoRW, error) {
 			return proto, nil
 		}
 	}
-	return nil, NewPeerError(PeerErrorInvalidMessageCode, DiscProtocolError, nil, fmt.Sprintf("code=%d", code))
+	return nil, NewPeerError(PeerErrorInvalidMessageCode, DiscProtocolError, nil, "code="+strconv.FormatUint(code, 10))
 }
 
 type protoRW struct {
@@ -451,13 +458,32 @@ type protoRW struct {
 	offset uint64
 	w      MsgWriter
 	logger log.Logger
+
+	meters       []metrics.Gauge
+	meterPackets []metrics.Gauge
+}
+
+func (rw *protoRW) meterIngress(code uint64, size uint32) {
+	if rw.meters == nil {
+		rw.meters = make([]metrics.Gauge, rw.Length)
+		rw.meterPackets = make([]metrics.Gauge, rw.Length)
+	}
+	g := rw.meters[code]
+	if g == nil {
+		name := fmt.Sprintf("%s_%s_%d_%#02x", ingressMeterName, rw.Name, rw.Version, code)
+		g = metrics.GetOrCreateGauge(name)
+		rw.meters[code] = g
+		rw.meterPackets[code] = metrics.GetOrCreateGauge(name + "_packets")
+	}
+	g.SetUint32(size)
+	rw.meterPackets[code].Set(1)
 }
 
 var traceMsg = false
 
 func (rw *protoRW) WriteMsg(msg Msg) (err error) {
 	if msg.Code >= rw.Length {
-		return NewPeerError(PeerErrorInvalidMessageCode, DiscProtocolError, nil, fmt.Sprintf("not handled code=%d", msg.Code))
+		return NewPeerError(PeerErrorInvalidMessageCode, DiscProtocolError, nil, "not handled code="+strconv.FormatUint(msg.Code, 10))
 	}
 
 	msg.meterCap = rw.cap()
@@ -488,7 +514,6 @@ func (rw *protoRW) WriteMsg(msg Msg) (err error) {
 }
 
 func (rw *protoRW) ReadMsg() (Msg, error) {
-
 	select {
 	case msg := <-rw.in:
 		msg.Code -= rw.offset

@@ -22,6 +22,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
 )
 
@@ -35,6 +36,8 @@ func DirectGrpcServerClient(server downloaderproto.DownloaderServer) downloaderp
 	return directGrpcServerClient{server: server}
 }
 
+var _ dbservices.DownloadProgressProvider = directGrpcServerClient{}
+
 func (c directGrpcServerClient) Download(ctx context.Context, in *downloaderproto.DownloadRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
 	return c.server.Download(ctx, in)
 }
@@ -45,4 +48,13 @@ func (c directGrpcServerClient) Seed(ctx context.Context, in *downloaderproto.Se
 
 func (c directGrpcServerClient) Delete(ctx context.Context, in *downloaderproto.DeleteRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
 	return c.server.Delete(ctx, in)
+}
+
+func (c directGrpcServerClient) DownloadProgress() dbservices.DownloadProgressReport {
+	// The s.d != nil check avoids returning a typed nil, which would pass the
+	// caller's == nil test as a non-nil interface.
+	if s, ok := c.server.(*GrpcServer); ok && s.d != nil {
+		return s.d
+	}
+	return nil
 }

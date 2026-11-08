@@ -231,7 +231,7 @@ const (
 
 func subdomain(e entry) string {
 	h := keccak.NewFastKeccak()
-	io.WriteString(h, e.String())
+	io.WriteString(h, e.String()) //nolint:errcheck
 	return b32format.EncodeToString(h.Sum(nil)[:16])
 }
 
@@ -378,15 +378,4 @@ func truncateHash(hash string) string {
 		panic(fmt.Errorf("dnsdisc: hash %q is too short", hash))
 	}
 	return hash[:maxLen]
-}
-
-// URL encoding
-
-// ParseURL parses an enrtree:// URL and returns its components.
-func ParseURL(url string) (domain string, pubkey *ecdsa.PublicKey, err error) {
-	le, err := parseLink(url)
-	if err != nil {
-		return "", nil, err
-	}
-	return le.domain, le.pubkey, nil
 }

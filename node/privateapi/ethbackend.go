@@ -20,21 +20,26 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"math"
+	"time"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/services"
+	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
-	"github.com/erigontech/erigon/execution/protocol/aa"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/rlp"
-	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -45,7 +50,7 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/node/shards"
-	"github.com/erigontech/erigon/polygon/bridge"
+	"github.com/erigontech/erigon/rpc/transactions"
 )
 
 // EthBackendAPIVersion
@@ -56,7 +61,11 @@ import (
 // 3.1.0 - add Subscribe to logs
 // 3.2.0 - add EngineGetBlobsBundleV1k
 // 3.3.0 - merge EngineGetBlobsBundleV1 into EngineGetPayload
-var EthBackendAPIVersion = &typesproto.VersionReply{Major: 3, Minor: 3, Patch: 0}
+// 4.0.0 - remove BorTxnLookup and BorEvents
+// 4.1.0 - add FrozenBlocks function
+// 4.2.0 - add BlockBody function
+// 5.0.0 - replace AAValidation with FrameValidation
+var EthBackendAPIVersion = &typesproto.VersionReply{Major: 5, Minor: 0, Patch: 0}
 
 type EthBackendServer struct {
 	remoteproto.UnimplementedETHBACKENDServer // must be embedded to have forward compatible implementations.
@@ -65,8 +74,7 @@ type EthBackendServer struct {
 	eth                   EthBackend
 	notifications         *shards.Notifications
 	db                    kv.TemporalRoDB
-	blockReader           services.FullBlockReader
-	bridgeStore           bridge.Store
+	blockReader           dbservices.FullBlockReader
 	latestBlockBuiltStore *builder.LatestBlockBuiltStore
 
 	logsFilter     *LogsFilterAggregator
@@ -85,20 +93,23 @@ type EthBackend interface {
 	RemovePeer(ctx context.Context, url *remoteproto.RemovePeerRequest) (*remoteproto.RemovePeerReply, error)
 	AddTrustedPeer(ctx context.Context, url *remoteproto.AddPeerRequest) (*remoteproto.AddPeerReply, error)
 	RemoveTrustedPeer(ctx context.Context, url *remoteproto.RemovePeerRequest) (*remoteproto.RemovePeerReply, error)
+	SetHead(ctx context.Context, targetBlock uint64) error
 }
 
-func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.TemporalRwDB, notifications *shards.Notifications, blockReader services.FullBlockReader,
-	bridgeStore bridge.Store, logger log.Logger, latestBlockBuiltStore *builder.LatestBlockBuiltStore, chainConfig *chain.Config,
+func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.TemporalRwDB, notifications *shards.Notifications, blockReader dbservices.FullBlockReader,
+	logger log.Logger, latestBlockBuiltStore *builder.LatestBlockBuiltStore, chainConfig *chain.Config,
 ) *EthBackendServer {
+	if chainConfig == nil {
+		panic("privateapi: NewEthBackendServer: nil chainConfig")
+	}
 	s := &EthBackendServer{
 		ctx:                   ctx,
 		eth:                   eth,
 		notifications:         notifications,
 		db:                    db,
 		blockReader:           blockReader,
-		bridgeStore:           bridgeStore,
 		logsFilter:            NewLogsFilterAggregator(notifications.Events),
-		receiptsFilter:        NewReceiptsFilterAggregator(notifications.Events),
+		receiptsFilter:        NewReceiptsFilterAggregator(notifications.Events, chainConfig),
 		logger:                logger,
 		latestBlockBuiltStore: latestBlockBuiltStore,
 		chainConfig:           chainConfig,
@@ -156,55 +167,12 @@ func (s *EthBackendServer) Version(context.Context, *emptypb.Empty) (*typesproto
 }
 
 func (s *EthBackendServer) Syncing(ctx context.Context, _ *emptypb.Empty) (*remoteproto.SyncingReply, error) {
-	highestBlock := s.notifications.LastNewBlockSeen.Load()
-	frozenBlocks := s.blockReader.FrozenBlocks()
-
 	tx, err := s.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-
-	currentBlock, err := stages.GetStageProgress(tx, stages.Execution)
-	if err != nil {
-		return nil, err
-	}
-
-	if highestBlock < frozenBlocks {
-		highestBlock = frozenBlocks
-	}
-
-	reply := &remoteproto.SyncingReply{
-		CurrentBlock:     currentBlock,
-		FrozenBlocks:     frozenBlocks,
-		LastNewBlockSeen: highestBlock,
-		Syncing:          true,
-	}
-
-	// Maybe it is still downloading snapshots. Impossible to determine the highest block.
-	if highestBlock == 0 {
-		return reply, nil
-	}
-
-	// If the distance between the current block and the highest block is less than the reorg range, we are not syncing. abs(highestBlock - currentBlock) < reorgRange
-	reorgRange := 8
-	if math.Abs(float64(highestBlock)-float64(currentBlock)) < float64(reorgRange) {
-		reply.Syncing = false
-		return reply, nil
-	}
-
-	reply.Stages = make([]*remoteproto.SyncingReply_StageProgress, len(stages.AllStages))
-	for i, stage := range stages.AllStages {
-		progress, err := stages.GetStageProgress(tx, stage)
-		if err != nil {
-			return nil, err
-		}
-		reply.Stages[i] = &remoteproto.SyncingReply_StageProgress{}
-		reply.Stages[i].StageName = string(stage)
-		reply.Stages[i].BlockNumber = progress
-	}
-
-	return reply, nil
+	return s.notifications.BuildSyncingReply(tx, s.blockReader.FrozenBlocks())
 }
 
 func (s *EthBackendServer) PendingBlock(ctx context.Context, _ *emptypb.Empty) (*remoteproto.PendingBlockReply, error) {
@@ -264,6 +232,17 @@ func (s *EthBackendServer) Subscribe(r *remoteproto.SubscribeRequest, subscribeS
 	defer clean()
 	newSnCh, newSnClean := s.notifications.Events.AddNewSnapshotSubscription()
 	defer newSnClean()
+	seedTx, err := s.db.BeginRo(subscribeServer.Context())
+	if err != nil {
+		return err
+	}
+	defer seedTx.Rollback()
+	syncStateCh, syncSeed, syncStateClean, err := s.notifications.SubscribeSyncState(seedTx, s.blockReader.FrozenBlocks())
+	seedTx.Rollback()
+	if err != nil {
+		return err
+	}
+	defer syncStateClean()
 	defer func() {
 		if err != nil {
 			if !errors.Is(err, context.Canceled) {
@@ -272,6 +251,17 @@ func (s *EthBackendServer) Subscribe(r *remoteproto.SubscribeRequest, subscribeS
 		}
 	}()
 	_ = subscribeServer.Send(&remoteproto.SubscribeReply{Type: remoteproto.Event_NEW_SNAPSHOT})
+	// A fresh stream missed any SYNCING event published before it connected,
+	// and an unchanged state is never re-published — send the seed so a
+	// transition during a connection gap is not lost forever. The seed is
+	// ordered against syncStateCh by construction.
+	seedData, err := proto.Marshal(syncSeed)
+	if err != nil {
+		return err
+	}
+	if err := subscribeServer.Send(&remoteproto.SubscribeReply{Type: remoteproto.Event_SYNCING, Data: seedData}); err != nil {
+		return err
+	}
 	for {
 		select {
 		case <-s.ctx.Done():
@@ -280,7 +270,7 @@ func (s *EthBackendServer) Subscribe(r *remoteproto.SubscribeRequest, subscribeS
 			return subscribeServer.Context().Err()
 		case headersRlp := <-ch:
 			for _, headerRlp := range headersRlp {
-				if err = subscribeServer.Send(&remoteproto.SubscribeReply{
+				if err := subscribeServer.Send(&remoteproto.SubscribeReply{
 					Type: remoteproto.Event_HEADER,
 					Data: headerRlp,
 				}); err != nil {
@@ -288,7 +278,15 @@ func (s *EthBackendServer) Subscribe(r *remoteproto.SubscribeRequest, subscribeS
 				}
 			}
 		case <-newSnCh:
-			if err = subscribeServer.Send(&remoteproto.SubscribeReply{Type: remoteproto.Event_NEW_SNAPSHOT}); err != nil {
+			if err := subscribeServer.Send(&remoteproto.SubscribeReply{Type: remoteproto.Event_NEW_SNAPSHOT}); err != nil {
+				return err
+			}
+		case syncState := <-syncStateCh:
+			data, err := proto.Marshal(syncState)
+			if err != nil {
+				return err
+			}
+			if err := subscribeServer.Send(&remoteproto.SubscribeReply{Type: remoteproto.Event_SYNCING, Data: data}); err != nil {
 				return err
 			}
 		}
@@ -300,7 +298,7 @@ func (s *EthBackendServer) ProtocolVersion(_ context.Context, _ *remoteproto.Pro
 }
 
 func (s *EthBackendServer) ClientVersion(_ context.Context, _ *remoteproto.ClientVersionRequest) (*remoteproto.ClientVersionReply, error) {
-	return &remoteproto.ClientVersionReply{NodeName: common.MakeName("erigon", version.VersionNoMeta)}, nil
+	return &remoteproto.ClientVersionReply{NodeName: common.MakeName("erigon", version.VersionWithCommit(version.GitCommit))}, nil
 }
 
 func (s *EthBackendServer) TxnLookup(ctx context.Context, req *remoteproto.TxnLookupRequest) (*remoteproto.TxnLookupReply, error) {
@@ -329,7 +327,7 @@ func (s *EthBackendServer) Block(ctx context.Context, req *remoteproto.BlockRequ
 	defer tx.Rollback()
 
 	var blockHash common.Hash
-	var blockHeight = req.BlockHeight
+	blockHeight := req.BlockHeight
 	if req.BlockHash != nil {
 		blockHash = gointerfaces.ConvertH256ToHash(req.BlockHash)
 	} else if req.BlockHeight > 0 {
@@ -363,6 +361,35 @@ func (s *EthBackendServer) Block(ctx context.Context, req *remoteproto.BlockRequ
 		copy(sendersBytes[i*20:], sender[:])
 	}
 	return &remoteproto.BlockReply{BlockRlp: blockRlp, Senders: sendersBytes}, nil
+}
+
+func (s *EthBackendServer) BlockBody(ctx context.Context, req *remoteproto.BlockRequest) (*remoteproto.BlockBodyReply, error) {
+	hash := req.GetBlockHash()
+	if hash == nil || hash.Hi == nil || hash.Lo == nil {
+		return nil, status.Error(codes.InvalidArgument, "block hash is required")
+	}
+	blockHash := gointerfaces.ConvertH256ToHash(hash)
+	if blockHash == (common.Hash{}) {
+		return nil, status.Error(codes.InvalidArgument, "block hash must be non-zero")
+	}
+	tx, err := s.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	body, txCount, err := s.blockReader.Body(ctx, tx, blockHash, req.BlockHeight)
+	if err != nil {
+		return nil, err
+	}
+	if body == nil {
+		return &remoteproto.BlockBodyReply{}, nil
+	}
+	bodyRlp, err := rlp.EncodeToBytes(body)
+	if err != nil {
+		return nil, err
+	}
+	return &remoteproto.BlockBodyReply{BodyRlp: bodyRlp, TxCount: txCount}, nil
 }
 
 func (s *EthBackendServer) CanonicalBodyForStorage(ctx context.Context, req *remoteproto.CanonicalBodyForStorageRequest) (*remoteproto.CanonicalBodyForStorageReply, error) {
@@ -449,6 +476,13 @@ func (s *EthBackendServer) RemoveTrustedPeer(ctx context.Context, req *remotepro
 	return s.eth.RemoveTrustedPeer(ctx, req)
 }
 
+func (s *EthBackendServer) SetHead(ctx context.Context, req *remoteproto.SetHeadRequest) (*remoteproto.SetHeadReply, error) {
+	if err := s.eth.SetHead(ctx, req.BlockNumber); err != nil {
+		return nil, err
+	}
+	return &remoteproto.SetHeadReply{}, nil
+}
+
 func (s *EthBackendServer) SubscribeLogs(server remoteproto.ETHBACKEND_SubscribeLogsServer) (err error) {
 	if s.logsFilter != nil {
 		return s.logsFilter.subscribeLogs(server)
@@ -463,95 +497,131 @@ func (s *EthBackendServer) SubscribeReceipts(server remoteproto.ETHBACKEND_Subsc
 	return errors.New("no receipts filter available")
 }
 
-func (s *EthBackendServer) BorTxnLookup(ctx context.Context, req *remoteproto.BorTxnLookupRequest) (*remoteproto.BorTxnLookupReply, error) {
-	tx, err := s.db.BeginRo(ctx)
+// FrameValidation evaluates the pool validation prefix against the published head,
+// including state announced before database commit. It returns the payer and state
+// dependencies needed for admission and later revalidation.
+func (s *EthBackendServer) FrameValidation(ctx context.Context, req *remoteproto.FrameValidationRequest) (*remoteproto.FrameValidationReply, error) {
+	txn, err := types.DecodeTransaction(req.Transaction)
 	if err != nil {
-		return nil, err
+		return &remoteproto.FrameValidationReply{}, nil
 	}
-	defer tx.Rollback()
-
-	blockNum, ok, err := s.bridgeStore.EventTxnToBlockNum(ctx, gointerfaces.ConvertH256ToHash(req.BorTxHash))
-	if err != nil {
-		return nil, err
+	frame, ok := txn.(*types.FrameTransaction)
+	if !ok {
+		return &remoteproto.FrameValidationReply{}, nil
 	}
-	return &remoteproto.BorTxnLookupReply{
-		BlockNumber: blockNum,
-		Present:     ok,
-	}, nil
+	var expectedHash common.Hash
+	if req.ExpectedBlockHash != nil {
+		if req.ExpectedBlockHash.Hi == nil || req.ExpectedBlockHash.Lo == nil {
+			return nil, status.Error(codes.InvalidArgument, "invalid expected block hash")
+		}
+		expectedHash = gointerfaces.ConvertH256ToHash(req.ExpectedBlockHash)
+	}
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		sd, seq := s.notifications.Events.OverlaySnapshot()
+		result, err := s.validateFrameTransaction(ctx, frame, sd, expectedHash)
+		// Notifications precede commit. Retry if the published head changes while
+		// we open the database snapshot or validate against its overlay.
+		if _, current := s.notifications.Events.OverlaySnapshot(); current == seq {
+			return result, err
+		}
+	}
 }
 
-func (s *EthBackendServer) BorEvents(ctx context.Context, req *remoteproto.BorEventsRequest) (*remoteproto.BorEventsReply, error) {
-	tx, err := s.db.BeginRo(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
-	events, err := s.bridgeStore.EventsByBlock(ctx, gointerfaces.ConvertH256ToHash(req.BlockHash), req.BlockNum)
-	if err != nil {
-		return nil, err
-	}
-
-	eventsRaw := make([][]byte, len(events))
-	for i, event := range events {
-		eventsRaw[i] = event
-	}
-
-	return &remoteproto.BorEventsReply{
-		EventRlps: eventsRaw,
-	}, nil
-}
-
-func (s *EthBackendServer) AAValidation(ctx context.Context, req *remoteproto.AAValidationRequest) (*remoteproto.AAValidationReply, error) {
+func (s *EthBackendServer) validateFrameTransaction(ctx context.Context, frame *types.FrameTransaction, sd *execctx.SharedDomains, expectedHash common.Hash) (*remoteproto.FrameValidationReply, error) {
 	tx, err := s.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-
-	currentBlock, err := s.blockReader.CurrentBlock(tx)
+	if sd != nil {
+		if overlay := sd.BlockOverlay(); overlay != nil {
+			tx = overlay.NewReadView(tx)
+		} else {
+			sd = nil
+		}
+	}
+	headHash := rawdb.ReadHeadBlockHash(tx)
+	header, err := s.blockReader.HeaderByHash(ctx, tx, headHash)
 	if err != nil {
 		return nil, err
 	}
-	header := currentBlock.HeaderNoCopy()
-
-	aaTxn := types.FromProto(req.Tx)
-	txNumsReader := s.blockReader.TxnumReader()
-	maxTxNum, err := txNumsReader.Max(ctx, tx, header.Number.Uint64())
+	if header == nil {
+		return nil, errors.New("frame validation: no current block")
+	}
+	if expectedHash != (common.Hash{}) && expectedHash != headHash {
+		return nil, status.Error(codes.Aborted, "frame validation head changed")
+	}
+	maxTxNum, err := s.blockReader.TxnumReader().Max(ctx, tx, header.Number.Uint64())
 	if err != nil {
 		return nil, err
 	}
-
-	ibs := state.New(state.NewHistoryReaderV3(tx, maxTxNum))
-
-	blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, nil), nil, accounts.ZeroAddress, s.chainConfig)
-
-	senderCodeSize, err := ibs.GetCodeSize(aaTxn.SenderAddress)
-	if err != nil {
-		return nil, err
+	var reader state.StateReader
+	if sd != nil {
+		latest := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
+		latest.SetTxNum(maxTxNum + 1)
+		reader = latest
+	} else {
+		reader = state.NewHistoryReaderV3(tx, maxTxNum+1)
 	}
-
-	validationTracer := aa.NewValidationRulesTracer(aaTxn.SenderAddress, senderCodeSize != 0)
-	evm := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, s.chainConfig, vm.Config{Tracer: validationTracer.Hooks(), ReadOnly: true})
-	ibs.SetHooks(validationTracer.Hooks())
-
-	vmConfig := evm.Config()
-	rules := evm.ChainRules()
-	hasEIP3860 := vmConfig.HasEip3860(rules)
-
-	preTxCost, err := aaTxn.PreTransactionGasCost(rules, hasEIP3860)
-	if err != nil {
-		return nil, err
+	ibs := state.New(reader)
+	defer ibs.Close()
+	transactions.VersionedCallState(ibs)
+	// The validation hook rejects BLOCKHASH but does not stop the opcode from calling GetHash, where
+	// an error would be taken for the node's failure, not for an invalid transaction.
+	noBlockHash := func(uint64) (common.Hash, error) { return common.Hash{}, nil }
+	// State comes from the published head, but inclusion would happen in the next
+	// block. Its context must account for fee changes and fork activation.
+	blockContext := protocol.NewEVMBlockContext(header, noBlockHash, nil, accounts.ZeroAddress, s.chainConfig)
+	blockContext.BlockNumber++
+	blockContext.Time = max(header.Time+s.chainConfig.SecondsPerSlot(), uint64(time.Now().Unix()))
+	if header.BaseFee != nil {
+		blockContext.BaseFee = *misc.CalcBaseFee(s.chainConfig, header)
 	}
-
-	totalGasLimit := preTxCost + aaTxn.ValidationGasLimit + aaTxn.PaymasterValidationGasLimit + aaTxn.GasLimit + aaTxn.PostOpGasLimit
-	_, _, err = aa.ValidateAATransaction(aaTxn, ibs, new(protocol.GasPool).AddGas(totalGasLimit), header, evm, s.chainConfig)
-	if err != nil {
-		log.Info("RIP-7560 validation err", "err", err.Error())
-		return &remoteproto.AAValidationReply{Valid: false}, nil
+	if frame.GetBlobGas() != 0 {
+		excess := misc.CalcExcessBlobGas(s.chainConfig, header, blockContext.Time)
+		blockContext.BlobBaseFee, err = misc.GetBlobGasPrice(s.chainConfig, excess, blockContext.Time)
+		if err != nil {
+			return nil, err
+		}
 	}
-
-	return &remoteproto.AAValidationReply{Valid: validationTracer.Err() == nil}, nil
+	// Fee eligibility belongs to pool admission. Clamp fees here so low fee caps
+	// do not become cached failures of prefix validation.
+	if blockContext.BaseFee.Gt(frame.GetFeeCap()) {
+		blockContext.BaseFee.Set(frame.GetFeeCap())
+	}
+	if blockContext.BlobBaseFee.Gt(&frame.Fees.BlobFeeCap) {
+		blockContext.BlobBaseFee.Set(&frame.Fees.BlobFeeCap)
+	}
+	evm := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, s.chainConfig, vm.Config{})
+	defer context.AfterFunc(ctx, evm.Cancel)()
+	result, err := protocol.ValidateFrameTransaction(evm, frame)
+	if err != nil {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if err := ibs.StateReadError(); err != nil {
+			return nil, err
+		}
+		return &remoteproto.FrameValidationReply{}, nil
+	}
+	dependencies := make([]*typesproto.H160, len(result.Dependencies))
+	for i := range result.Dependencies {
+		dependencies[i] = gointerfaces.ConvertAddressToH160(result.Dependencies[i])
+	}
+	creationNonces := make([]*remoteproto.FrameCreationNonce, len(result.CreationNonces))
+	for i, dependency := range result.CreationNonces {
+		creationNonces[i] = &remoteproto.FrameCreationNonce{
+			Address: gointerfaces.ConvertAddressToH160(dependency.Address), MinNonce: dependency.MinNonce, MaxNonce: dependency.MaxNonce,
+		}
+	}
+	return &remoteproto.FrameValidationReply{
+		Valid: true, Payer: gointerfaces.ConvertAddressToH160(result.Payer),
+		MaxCost: gointerfaces.ConvertUint256IntToH256(&result.MaxCost), PayerBalance: gointerfaces.ConvertUint256IntToH256(&result.PayerBalance),
+		Paymaster: result.Paymaster, Deadline: result.Deadline, Dependencies: dependencies, CreationNonces: creationNonces,
+	}, nil
 }
 
 func (s *EthBackendServer) BlockForTxNum(ctx context.Context, req *remoteproto.BlockForTxNumRequest) (*remoteproto.BlockForTxNumResponse, error) {
@@ -577,4 +647,8 @@ func (s *EthBackendServer) MinimumBlockAvailable(ctx context.Context, req *empty
 
 	blockNum, err := s.blockReader.MinimumBlockAvailable(ctx, tx)
 	return &remoteproto.MinimumBlockAvailableReply{BlockNum: blockNum}, err
+}
+
+func (s *EthBackendServer) FrozenBlocks(ctx context.Context, req *emptypb.Empty) (*remoteproto.FrozenBlocksReply, error) {
+	return &remoteproto.FrozenBlocksReply{FrozenBlocks: s.blockReader.FrozenBlocks()}, nil
 }

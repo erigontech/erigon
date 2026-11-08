@@ -17,11 +17,20 @@
 package privateapi
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"sync"
 
+	"github.com/holiman/uint256"
+	"google.golang.org/protobuf/proto"
+
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/notifications"
+	"github.com/erigontech/erigon/execution/protocol/misc"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/shards"
@@ -33,6 +42,8 @@ type ReceiptsFilterAggregator struct {
 	receiptsFilterLock sync.Mutex
 	nextFilterId       uint64
 	events             *shards.Events
+	chainConfig        *chain.Config
+	signer             *types.Signer
 }
 
 type ReceiptsFilter struct {
@@ -41,7 +52,7 @@ type ReceiptsFilter struct {
 	sender      remoteproto.ETHBACKEND_SubscribeReceiptsServer
 }
 
-func NewReceiptsFilterAggregator(events *shards.Events) *ReceiptsFilterAggregator {
+func NewReceiptsFilterAggregator(events *shards.Events, chainConfig *chain.Config) *ReceiptsFilterAggregator {
 	return &ReceiptsFilterAggregator{
 		aggReceiptsFilter: ReceiptsFilter{
 			txHashes: make(map[common.Hash]int),
@@ -49,6 +60,8 @@ func NewReceiptsFilterAggregator(events *shards.Events) *ReceiptsFilterAggregato
 		receiptsFilters: make(map[uint64]*ReceiptsFilter),
 		nextFilterId:    0,
 		events:          events,
+		chainConfig:     chainConfig,
+		signer:          types.LatestSigner(chainConfig),
 	}
 }
 
@@ -86,11 +99,12 @@ func (a *ReceiptsFilterAggregator) updateReceiptsFilter(filter *ReceiptsFilter, 
 
 	// Empty TransactionHashes slice (not nil) means subscribe to all
 	txHashes := filterReq.GetTransactionHashes()
-	if txHashes != nil && len(txHashes) == 0 {
+	switch {
+	case txHashes != nil && len(txHashes) == 0:
 		filter.allTxHashes = 1
-	} else if filterReq.GetAllTransactions() {
+	case filterReq.GetAllTransactions():
 		filter.allTxHashes = 1
-	} else {
+	default:
 		filter.allTxHashes = 0
 	}
 
@@ -128,38 +142,162 @@ func (a *ReceiptsFilterAggregator) subscribeReceipts(server remoteproto.ETHBACKE
 	for filterReq, recvErr = server.Recv(); recvErr == nil; filterReq, recvErr = server.Recv() {
 		a.updateReceiptsFilter(filter, filterReq)
 	}
-	if recvErr != io.EOF {
+	if !errors.Is(recvErr, io.EOF) {
 		return fmt.Errorf("receiving receipts filter request: %w", recvErr)
 	}
 	return nil
 }
 
-func (a *ReceiptsFilterAggregator) distributeReceipts(receipts []*remoteproto.SubscribeReceiptsReply) error {
+// distributeReceipts receives native receipt notifications, filters them, and converts
+// to protobuf only when sending over gRPC.
+func (a *ReceiptsFilterAggregator) distributeReceipts(receipts []*notifications.ReceiptNotification) {
 	a.receiptsFilterLock.Lock()
 	defer a.receiptsFilterLock.Unlock()
 	filtersToDelete := make(map[uint64]*ReceiptsFilter)
-	for _, receipt := range receipts {
+	// Each stream's latest receipt is held back until the next one shows whether it ends its block.
+	held := make(map[uint64]*remoteproto.SubscribeReceiptsReply)
+	send := func(filterId uint64, reply *remoteproto.SubscribeReceiptsReply, lastInBlock bool) {
+		if lastInBlock {
+			reply = proto.CloneOf(reply) // the unflagged reply may also go to other streams
+			reply.LastInBlock = true
+		}
+		if err := a.receiptsFilters[filterId].sender.Send(reply); err != nil {
+			filtersToDelete[filterId] = a.receiptsFilters[filterId]
+		}
+	}
+	for _, rn := range receipts {
+		txHash := rn.Receipt.TxHash
 		if a.aggReceiptsFilter.allTxHashes == 0 {
-			txHash := gointerfaces.ConvertH256ToHash(receipt.TransactionHash)
 			if _, ok := a.aggReceiptsFilter.txHashes[txHash]; !ok {
 				continue
 			}
 		}
+		// Lazy convert: only build protobuf when we actually need to send
+		var reply *remoteproto.SubscribeReceiptsReply
 		for filterId, filter := range a.receiptsFilters {
 			if filter.allTxHashes == 0 {
-				txHash := gointerfaces.ConvertH256ToHash(receipt.TransactionHash)
 				if _, ok := filter.txHashes[txHash]; !ok {
 					continue
 				}
 			}
-			if err := filter.sender.Send(receipt); err != nil {
-				filtersToDelete[filterId] = filter
+			if reply == nil {
+				reply = a.receiptNotificationToProto(rn)
 			}
+			if prev := held[filterId]; prev != nil {
+				send(filterId, prev, prev.BlockNumber != reply.BlockNumber)
+			}
+			held[filterId] = reply
 		}
+	}
+	for filterId, reply := range held {
+		send(filterId, reply, true)
 	}
 	for filterId, filter := range filtersToDelete {
 		a.subtractReceiptsFilters(filter)
 		delete(a.receiptsFilters, filterId)
 	}
-	return nil
+}
+
+// receiptNotificationToProto converts a native ReceiptNotification to protobuf for gRPC.
+func (a *ReceiptsFilterAggregator) receiptNotificationToProto(rn *notifications.ReceiptNotification) *remoteproto.SubscribeReceiptsReply {
+	receipt := rn.Receipt
+	blockNum := receipt.BlockNumber.Uint64()
+	var blockTimestamp uint64
+	if rn.Header != nil {
+		blockTimestamp = rn.Header.Time
+	}
+
+	// Convert logs
+	protoLogs := make([]*remoteproto.SubscribeLogsReply, 0, len(receipt.Logs))
+	for _, l := range receipt.Logs {
+		protoLogs = append(protoLogs, logNotificationToProto(&notifications.LogNotification{
+			Log:            l,
+			BlockTimestamp: blockTimestamp,
+		}))
+	}
+
+	protoReceipt := &remoteproto.SubscribeReceiptsReply{
+		BlockHash:         gointerfaces.ConvertHashToH256(receipt.BlockHash),
+		BlockNumber:       blockNum,
+		TransactionHash:   gointerfaces.ConvertHashToH256(receipt.TxHash),
+		TransactionIndex:  uint64(receipt.TransactionIndex),
+		Type:              uint32(receipt.Type),
+		Status:            receipt.Status,
+		CumulativeGasUsed: receipt.CumulativeGasUsed,
+		GasUsed:           receipt.GasUsed,
+		LogsBloom:         receipt.Bloom[:],
+		Logs:              protoLogs,
+		BlobGasUsed:       receipt.BlobGasUsed,
+	}
+
+	if receipt.Payer != nil {
+		protoReceipt.Payer = gointerfaces.ConvertAddressToH160(*receipt.Payer)
+	}
+	for _, frame := range receipt.FrameReceipts {
+		logs := make([]*remoteproto.SubscribeLogsReply, 0, len(frame.Logs))
+		for _, l := range frame.Logs {
+			logs = append(logs, logNotificationToProto(&notifications.LogNotification{Log: l, BlockTimestamp: blockTimestamp}))
+		}
+		protoReceipt.FrameReceipts = append(protoReceipt.FrameReceipts, &remoteproto.FrameReceipt{Status: frame.Status, ExecutionGasUsed: frame.GasUsed.Execution, StateGasUsed: frame.GasUsed.State, Logs: logs})
+	}
+
+	// Add contract address if present
+	if receipt.ContractAddress != (common.Address{}) {
+		protoReceipt.ContractAddress = gointerfaces.ConvertAddressToH160(receipt.ContractAddress)
+	}
+
+	// Add transaction data (from/to)
+	if rn.Tx != nil {
+		if sender, err := rn.Tx.Sender(*a.signer); err == nil {
+			protoReceipt.From = gointerfaces.ConvertAddressToH160(sender.Value())
+		}
+		if to := rn.Tx.GetTo(); to != nil {
+			protoReceipt.To = gointerfaces.ConvertAddressToH160(*to)
+		}
+		protoReceipt.TxType = uint32(rn.Tx.Type())
+	}
+
+	// Add header data
+	if rn.Header != nil {
+		if rn.Header.BaseFee != nil {
+			protoReceipt.BaseFee = gointerfaces.ConvertUint256IntToH256(rn.Header.BaseFee)
+		}
+		protoReceipt.BlockTime = rn.Header.Time
+		if rn.Header.ExcessBlobGas != nil {
+			protoReceipt.ExcessBlobGas = *rn.Header.ExcessBlobGas
+		}
+	}
+
+	// The RPC side has neither the transaction nor the chain config the fees are derived from.
+	if rn.Tx != nil && rn.Header != nil {
+		protoReceipt.EffectiveGasPrice = gointerfaces.ConvertUint256IntToH256(effectiveGasPrice(rn.Tx, rn.Header.BaseFee))
+		if numBlobs := len(rn.Tx.GetBlobHashes()); numBlobs > 0 {
+			protoReceipt.BlobGasUsed = misc.GetBlobGasUsed(numBlobs)
+			if price := a.blobGasPrice(rn.Tx, rn.Header); price != nil {
+				protoReceipt.BlobGasPrice = gointerfaces.ConvertUint256IntToH256(price)
+			}
+		}
+	}
+
+	return protoReceipt
+}
+
+func effectiveGasPrice(txn types.Transaction, baseFee *uint256.Int) *uint256.Int {
+	if baseFee == nil {
+		return txn.GetTipCap()
+	}
+	tip := txn.GetEffectiveGasTip(baseFee)
+	return new(uint256.Int).Add(baseFee, &tip)
+}
+
+func (a *ReceiptsFilterAggregator) blobGasPrice(txn types.Transaction, header *types.Header) *uint256.Int {
+	if header.ExcessBlobGas == nil {
+		return nil
+	}
+	price, err := misc.GetBlobGasPrice(a.chainConfig, *header.ExcessBlobGas, header.Time)
+	if err != nil {
+		log.Warn("[rpc] cannot derive the blob gas price of a subscribed receipt", "err", err, "txHash", txn.Hash())
+		return nil
+	}
+	return &price
 }

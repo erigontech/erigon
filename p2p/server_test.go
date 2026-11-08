@@ -32,6 +32,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/p2p/enode"
@@ -111,7 +113,8 @@ func TestServerListen(t *testing.T) {
 	defer srv.Stop()
 
 	// dial the test server
-	conn, err := net.DialTimeout("tcp", srv.ListenAddr, 5*time.Second)
+	dialer := net.Dialer{Timeout: 5 * time.Second}
+	conn, err := dialer.DialContext(t.Context(), "tcp", srv.ListenAddr)
 	if err != nil {
 		t.Fatalf("could not dial: %v", err)
 	}
@@ -135,7 +138,7 @@ func TestServerListen(t *testing.T) {
 func TestServerDial(t *testing.T) {
 	logger := log.New()
 	// run a one-shot TCP server to handle the connection.
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	listener, err := net.Listen("tcp", "127.0.0.1:0") //nolint:noctx
 	if err != nil {
 		t.Fatalf("could not setup listener: %v", err)
 	}
@@ -290,7 +293,7 @@ func TestServerAtCap(t *testing.T) {
 	if err := srv.checkpoint(c, srv.checkpointPostHandshake); err != nil {
 		t.Error("unexpected error @ checkpointPostHandshake:", err)
 	}
-	if err := srv.checkpoint(c, srv.checkpointAddPeer); err != DiscTooManyPeers {
+	if err := srv.checkpoint(c, srv.checkpointAddPeer); !errors.Is(err, DiscTooManyPeers) {
 		t.Error("wrong error for insert:", err)
 	}
 
@@ -312,7 +315,7 @@ func TestServerAtCap(t *testing.T) {
 	if err := srv.checkpoint(c, srv.checkpointPostHandshake); err != nil {
 		t.Error("unexpected error @ checkpointPostHandshake:", err)
 	}
-	if err := srv.checkpoint(c, srv.checkpointAddPeer); err != DiscTooManyPeers {
+	if err := srv.checkpoint(c, srv.checkpointAddPeer); !errors.Is(err, DiscTooManyPeers) {
 		t.Error("wrong error for insert:", err)
 	}
 
@@ -336,7 +339,7 @@ func TestServerPeerLimits(t *testing.T) {
 	clientkey := newkey()
 	clientnode := enode.NewV4(&clientkey.PublicKey, nil, 0, 0)
 
-	var tp = &setupTransport{
+	tp := &setupTransport{
 		pubkey: &clientkey.PublicKey,
 		phs: protoHandshake{
 			Pubkey: crypto.MarshalPubkey(&clientkey.PublicKey),
@@ -469,7 +472,7 @@ func TestServerSetupConn(t *testing.T) {
 				defer srv.Stop()
 			}
 			p1, _ := net.Pipe()
-			srv.SetupConn(p1, test.flags, test.dialDest)
+			_ = srv.SetupConn(p1, test.flags, test.dialDest)
 			if !reflect.DeepEqual(test.tt.closeErr, test.wantCloseErr) {
 				t.Errorf("test %d: close error mismatch: got %q, want %q", i, test.tt.closeErr, test.wantCloseErr)
 			}
@@ -539,6 +542,66 @@ func randomID() (id enode.ID) {
 	return id
 }
 
+// TestServerInboundUsesStaticEnode covers the inbound-stub-enode bug:
+// a peer that's been registered as a static peer should keep its full
+// ENR record after an inbound connection completes, not be silently
+// downgraded to a stub enode containing only pubkey + remote addr.
+//
+// Without the fix at server.setupConn, the acceptor side of an inbound
+// handshake constructs a fresh enode via nodeFromConn, dropping every
+// custom ENR entry the dialer originally advertised. With the fix the
+// acceptor consults the static-peer table and reuses the registered
+// enode, preserving entries needed by downstream consumers (e.g.
+// chain.toml.v2 InfoHash, BT torrent port).
+func TestServerInboundUsesStaticEnode(t *testing.T) {
+	logger := log.New()
+
+	// The remote peer's key. The static-peer enode advertises a custom
+	// "ct" (chain-toml v2 stand-in) entry that should survive the
+	// inbound handshake.
+	remoteKey := newkey()
+	remoteCustom := enr.WithEntry("ct", uint64(0xabcdef))
+
+	var rec enr.Record
+	rec.Set(enode.Secp256k1(remoteKey.PublicKey))
+	rec.Set(enr.IP(net.IP{127, 0, 0, 1}))
+	rec.Set(enr.TCP(0))
+	rec.Set(remoteCustom)
+	rec.SetSeq(1)
+	require.NoError(t, enode.SignV4(&rec, remoteKey))
+	staticEnode, err := enode.New(enode.ValidSchemes, &rec)
+	require.NoError(t, err)
+
+	connected := make(chan *Peer, 1)
+	srv := startTestServer(t, &remoteKey.PublicKey, func(p *Peer) {
+		connected <- p
+	}, logger)
+	defer srv.Stop()
+
+	// Register the remote as a static peer with its full enode (custom
+	// ENR entry intact). The acceptor's setupConn is expected to look
+	// this up by pubkey when the inbound handshake produces no
+	// dialDest.
+	srv.AddPeer(staticEnode)
+
+	// Drive an inbound connection.
+	dialer := net.Dialer{Timeout: 5 * time.Second}
+	conn, err := dialer.DialContext(t.Context(), "tcp", srv.ListenAddr)
+	require.NoError(t, err)
+	defer conn.Close()
+
+	select {
+	case peer := <-connected:
+		var got uint64
+		err := peer.Node().Record().Load(enr.WithEntry("ct", &got))
+		if err != nil || got != 0xabcdef {
+			t.Fatalf("inbound peer enode lost custom ENR entry: err=%v got=%x", err, got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("server did not accept within two seconds")
+	}
+}
+
 // This test checks that inbound connections are throttled by IP.
 func TestServerInboundThrottle(t *testing.T) {
 	logger := log.New()
@@ -569,7 +632,8 @@ func TestServerInboundThrottle(t *testing.T) {
 	defer srv.Stop()
 
 	// Dial the test server.
-	conn, err := net.DialTimeout("tcp", srv.ListenAddr, timeout)
+	dialer := net.Dialer{Timeout: timeout}
+	conn, err := dialer.DialContext(t.Context(), "tcp", srv.ListenAddr)
 	if err != nil {
 		t.Fatalf("could not dial: %v", err)
 	}
@@ -583,15 +647,17 @@ func TestServerInboundThrottle(t *testing.T) {
 
 	// Dial again. This time the server should close the connection immediately.
 	connClosed := make(chan struct{}, 1)
-	conn, err = net.DialTimeout("tcp", srv.ListenAddr, timeout)
+	conn, err = dialer.DialContext(t.Context(), "tcp", srv.ListenAddr)
 	if err != nil {
 		t.Fatalf("could not dial: %v", err)
 	}
 	defer conn.Close()
 	go func() {
-		conn.SetDeadline(time.Now().Add(timeout))
+		if err := conn.SetDeadline(time.Now().Add(timeout)); err != nil {
+			t.Errorf("SetDeadline: %v", err)
+		}
 		buf := make([]byte, 10)
-		if n, err := conn.Read(buf); err != io.EOF || n != 0 {
+		if n, err := conn.Read(buf); !errors.Is(err, io.EOF) || n != 0 {
 			t.Errorf("expected io.EOF and n == 0, got error %q and n == %d", err, n)
 		}
 		connClosed <- struct{}{}
@@ -607,7 +673,7 @@ func TestServerInboundThrottle(t *testing.T) {
 }
 
 func listenFakeAddr(network, laddr string, remoteAddr net.Addr) (net.Listener, error) {
-	l, err := net.Listen(network, laddr)
+	l, err := net.Listen(network, laddr) //nolint:noctx
 	if err == nil {
 		l = &fakeAddrListener{l, remoteAddr}
 	}

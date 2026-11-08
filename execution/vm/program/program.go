@@ -28,6 +28,7 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/vm"
 )
 
@@ -128,11 +129,14 @@ func (p *Program) Push(val any) *Program {
 		p.doPush(new(uint256.Int).SetBytes(v))
 	case byte:
 		p.doPush(new(uint256.Int).SetUint64(uint64(v)))
-	case interface{ Bytes() []byte }:
-		// Here, we jump through some hoops in order to avoid depending on
-		// go-ethereum accounts.Address and common.Hash, and instead use the
-		// interface. This works on both values and pointers!
-		p.doPush(new(uint256.Int).SetBytes(v.Bytes()))
+	case common.Address:
+		p.doPush(new(uint256.Int).SetBytes(v[:]))
+	case *common.Address:
+		p.doPush(new(uint256.Int).SetBytes(v[:]))
+	case common.Hash:
+		p.doPush(new(uint256.Int).SetBytes(v[:]))
+	case *common.Hash:
+		p.doPush(new(uint256.Int).SetBytes(v[:]))
 	case nil:
 		p.doPush(nil)
 	default:
@@ -267,7 +271,7 @@ func (p *Program) InputAddressToStack(inputOffset uint32) *Program {
 
 // Mstore stores the provided data (into the memory area starting at memStart).
 func (p *Program) Mstore(data []byte, memStart uint32) *Program {
-	var idx = 0
+	idx := 0
 	// We need to store it in chunks of 32 bytes
 	for ; idx+32 <= len(data); idx += 32 {
 		chunk := data[idx : idx+32]

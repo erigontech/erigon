@@ -9,19 +9,17 @@ import (
 	"reflect"
 	"strings"
 
-	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/event"
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/p2p/event"
 )
 
 // Reference imports to suppress errors if they are not otherwise used.
 var (
 	_ = big.NewInt
 	_ = strings.NewReader
-	_ = ethereum.NotFound
 	_ = bind.Bind
 	_ = common.Big1
 	_ = types.BloomLookup
@@ -158,7 +156,7 @@ func bindSequencer(address common.Address, caller bind.ContractCaller, transacto
 // sets the output to result. The result type might be a single field for simple
 // returns, a slice of interfaces for anonymous returns and a struct for named
 // returns.
-func (_Sequencer *SequencerRaw) Call(opts *bind.CallOpts, result *[]interface{}, method string, params ...interface{}) error {
+func (_Sequencer *SequencerRaw) Call(opts *bind.CallOpts, result *[]any, method string, params ...any) error {
 	return _Sequencer.Contract.SequencerCaller.contract.Call(opts, result, method, params...)
 }
 
@@ -169,7 +167,7 @@ func (_Sequencer *SequencerRaw) Transfer(opts *bind.TransactOpts) (types.Transac
 }
 
 // Transact invokes the (paid) contract method with params as input values.
-func (_Sequencer *SequencerRaw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (types.Transaction, error) {
+func (_Sequencer *SequencerRaw) Transact(opts *bind.TransactOpts, method string, params ...any) (types.Transaction, error) {
 	return _Sequencer.Contract.SequencerTransactor.contract.Transact(opts, method, params...)
 }
 
@@ -177,7 +175,7 @@ func (_Sequencer *SequencerRaw) Transact(opts *bind.TransactOpts, method string,
 // sets the output to result. The result type might be a single field for simple
 // returns, a slice of interfaces for anonymous returns and a struct for named
 // returns.
-func (_Sequencer *SequencerCallerRaw) Call(opts *bind.CallOpts, result *[]interface{}, method string, params ...interface{}) error {
+func (_Sequencer *SequencerCallerRaw) Call(opts *bind.CallOpts, result *[]any, method string, params ...any) error {
 	return _Sequencer.Contract.contract.Call(opts, result, method, params...)
 }
 
@@ -188,7 +186,7 @@ func (_Sequencer *SequencerTransactorRaw) Transfer(opts *bind.TransactOpts) (typ
 }
 
 // Transact invokes the (paid) contract method with params as input values.
-func (_Sequencer *SequencerTransactorRaw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (types.Transaction, error) {
+func (_Sequencer *SequencerTransactorRaw) Transact(opts *bind.TransactOpts, method string, params ...any) (types.Transaction, error) {
 	return _Sequencer.Contract.contract.Transact(opts, method, params...)
 }
 
@@ -196,7 +194,7 @@ func (_Sequencer *SequencerTransactorRaw) Transact(opts *bind.TransactOpts, meth
 //
 // Solidity: function getTxCountForEon(uint64 eon) view returns(uint64)
 func (_Sequencer *SequencerCaller) GetTxCountForEon(opts *bind.CallOpts, eon uint64) (uint64, error) {
-	var out []interface{}
+	var out []any
 	err := _Sequencer.contract.Call(opts, &out, "getTxCountForEon", eon)
 
 	if err != nil {
@@ -352,10 +350,10 @@ type SequencerDecryptionProgressSubmittedIterator struct {
 	contract *bind.BoundContract // Generic contract to use for unpacking event data
 	event    string              // Event name to use for unpacking event data
 
-	logs chan types.Log        // Log channel receiving the found contract events
-	sub  ethereum.Subscription // Subscription for errors, completion and termination
-	done bool                  // Whether the subscription completed delivering logs
-	fail error                 // Occurred error to stop iteration
+	logs chan types.Log     // Log channel receiving the found contract events
+	sub  event.Subscription // Subscription for errors, completion and termination
+	done bool               // Whether the subscription completed delivering logs
+	fail error              // Occurred error to stop iteration
 }
 
 // Next advances the iterator to the subsequent event, returning whether there
@@ -490,10 +488,10 @@ type SequencerTransactionSubmittedIterator struct {
 	contract *bind.BoundContract // Generic contract to use for unpacking event data
 	event    string              // Event name to use for unpacking event data
 
-	logs chan types.Log        // Log channel receiving the found contract events
-	sub  ethereum.Subscription // Subscription for errors, completion and termination
-	done bool                  // Whether the subscription completed delivering logs
-	fail error                 // Occurred error to stop iteration
+	logs chan types.Log     // Log channel receiving the found contract events
+	sub  event.Subscription // Subscription for errors, completion and termination
+	done bool               // Whether the subscription completed delivering logs
+	fail error              // Occurred error to stop iteration
 }
 
 // Next advances the iterator to the subsequent event, returning whether there

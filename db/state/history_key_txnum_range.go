@@ -21,7 +21,6 @@ import (
 	"container/heap"
 	"encoding/binary"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
@@ -54,14 +53,13 @@ func (ht *HistoryRoTx) iterateKeyTxNumFrozen(fromTxNum, toTxNum int, asc order.B
 		}
 		g := ht.iit.dataReader(item.src.decompressor)
 		g.Reset(0)
-		wrapper := NewSegReaderWrapper(g)
-		if wrapper.HasNext() {
-			key, val, err := wrapper.Next()
-			if err != nil {
-				s.Close()
-				return nil, err
+		if g.HasNext() {
+			key, _ := g.Next(nil)
+			var val []byte
+			if g.HasNext() {
+				val, _ = g.Next(nil)
 			}
-			heap.Push(&s.h, &ReconItem{g: wrapper, key: key, val: val, startTxNum: item.startTxNum, endTxNum: item.endTxNum, txNum: item.endTxNum})
+			heap.Push(&s.h, &ReconItem{g: g, key: key, val: val, startTxNum: item.startTxNum, endTxNum: item.endTxNum, txNum: item.endTxNum})
 		}
 	}
 	if err := s.advance(); err != nil {
@@ -106,27 +104,22 @@ type HistoryKeyTxNumIterFiles struct {
 	startTxNum uint64
 	endTxNum   int
 
-	k, kBackup []byte
-	txNum      uint64
-	err        error
-	limit      int
+	err   error
+	limit int
 
 	curKey    []byte
-	curIdxVal []byte
 	curSeq    multiencseq.SequenceReader
-	curTxIter stream.U64
+	curTxIter multiencseq.SequenceIterator
+	hasIter   bool
 }
 
 func (hi *HistoryKeyTxNumIterFiles) Close() {
-	if hi.curTxIter != nil {
-		hi.curTxIter.Close()
-		hi.curTxIter = nil
-	}
+	hi.hasIter = false
 }
 
 func (hi *HistoryKeyTxNumIterFiles) advance() error {
 	for {
-		if hi.curTxIter != nil && hi.curTxIter.HasNext() {
+		if hi.hasIter && hi.curTxIter.HasNext() {
 			txNum, err := hi.curTxIter.Next()
 			if err != nil {
 				return err
@@ -137,7 +130,7 @@ func (hi *HistoryKeyTxNumIterFiles) advance() error {
 				return nil
 			}
 			// txNums are ascending — all remaining will also be >= endTxNum
-			hi.curTxIter = nil
+			hi.hasIter = false
 		}
 
 		if hi.h.Len() == 0 {
@@ -145,24 +138,25 @@ func (hi *HistoryKeyTxNumIterFiles) advance() error {
 			return nil
 		}
 
-		top := heap.Pop(&hi.h).(*ReconItem)
-		key, idxVal := top.key, top.val
+		top := hi.h[0]
+		hi.curKey = top.key
+		idxVal := top.val
 
 		if top.g.HasNext() {
-			var err error
-			top.key, top.val, err = top.g.Next()
-			if err != nil {
-				return err
+			top.key, _ = top.g.Next(nil)
+			if top.g.HasNext() {
+				top.val, _ = top.g.Next(nil)
+			} else {
+				top.val = nil
 			}
-			heap.Push(&hi.h, top)
+			heap.Fix(&hi.h, 0)
+		} else {
+			heap.Pop(&hi.h)
 		}
 
-		// Clone: segment reader reuses buffers
-		hi.curKey = append(hi.curKey[:0], key...)
-		hi.curIdxVal = append(hi.curIdxVal[:0], idxVal...)
-
-		hi.curSeq.Reset(top.startTxNum, hi.curIdxVal)
-		hi.curTxIter = hi.curSeq.Iterator(int(hi.startTxNum))
+		hi.curSeq.Reset(top.startTxNum, idxVal)
+		hi.curTxIter.Reset(&hi.curSeq, int(hi.startTxNum))
+		hi.hasIter = true
 	}
 }
 
@@ -175,15 +169,11 @@ func (hi *HistoryKeyTxNumIterFiles) Next() ([]byte, uint64, error) {
 		return nil, 0, hi.err
 	}
 	hi.limit--
-	hi.k = append(hi.k[:0], hi.nextKey...)
-	hi.txNum = hi.nextTxNum
-
-	// Satisfy iter.Duo Invariant 2 for key buffer
-	hi.k, hi.kBackup = hi.kBackup, hi.k
+	k, txNum := hi.nextKey, hi.nextTxNum
 	if err := hi.advance(); err != nil {
 		return nil, 0, err
 	}
-	return hi.kBackup, hi.txNum, nil
+	return k, txNum, nil
 }
 
 // HistoryKeyTxNumIterDB emits (key, txNum) for every txNum at which a key changed in the DB.
@@ -200,8 +190,6 @@ type HistoryKeyTxNumIterDB struct {
 
 	nextKey   []byte
 	nextTxNum uint64
-	k         []byte
-	txNum     uint64
 	err       error
 }
 
@@ -216,7 +204,7 @@ func (hi *HistoryKeyTxNumIterDB) Close() {
 
 // setNext copies k (cursor ops invalidate previous return values).
 func (hi *HistoryKeyTxNumIterDB) setNext(k []byte, txNum uint64) {
-	hi.nextKey = common.Copy(k)
+	hi.nextKey = bytes.Clone(k)
 	hi.nextTxNum = txNum
 }
 
@@ -256,8 +244,8 @@ func (hi *HistoryKeyTxNumIterDB) seekNextSmallKey(k []byte) error {
 }
 
 func (hi *HistoryKeyTxNumIterDB) advanceSmallVals() error {
-	var err error
 	if hi.valsCDup == nil {
+		var err error
 		if hi.valsCDup, err = hi.roTx.CursorDupSort(hi.valsTable); err != nil {
 			return err
 		}
@@ -287,8 +275,8 @@ func (hi *HistoryKeyTxNumIterDB) advanceSmallVals() error {
 }
 
 func (hi *HistoryKeyTxNumIterDB) advanceLargeVals() error {
-	var err error
 	if hi.valsC == nil {
+		var err error
 		if hi.valsC, err = hi.roTx.Cursor(hi.valsTable); err != nil {
 			return err
 		}
@@ -300,7 +288,7 @@ func (hi *HistoryKeyTxNumIterDB) advanceLargeVals() error {
 			hi.nextKey = nil
 			return nil
 		}
-		seek := append(common.Copy(k[:len(k)-8]), hi.startTxKey[:]...)
+		seek := append(bytes.Clone(k[:len(k)-8]), hi.startTxKey[:]...)
 		k, _, err = hi.valsC.Seek(seek)
 		if err != nil {
 			return err
@@ -317,7 +305,7 @@ func (hi *HistoryKeyTxNumIterDB) advanceLargeVals() error {
 		return nil
 	}
 	if hi.nextKey != nil && !bytes.Equal(k[:len(k)-8], hi.nextKey) {
-		seek := append(common.Copy(k[:len(k)-8]), hi.startTxKey[:]...)
+		seek := append(bytes.Clone(k[:len(k)-8]), hi.startTxKey[:]...)
 		k, _, err = hi.valsC.Seek(seek)
 		if err != nil {
 			return err
@@ -335,7 +323,8 @@ func (hi *HistoryKeyTxNumIterDB) scanLargeVals(k []byte) error {
 				hi.nextKey = nil
 				return nil
 			}
-			seek := append(next, hi.startTxKey[:]...)
+			seek := next
+			seek = append(seek, hi.startTxKey[:]...)
 			var err error
 			k, _, err = hi.valsC.Seek(seek)
 			if err != nil {
@@ -344,7 +333,7 @@ func (hi *HistoryKeyTxNumIterDB) scanLargeVals(k []byte) error {
 			continue
 		}
 		if txNum < binary.BigEndian.Uint64(hi.startTxKey[:]) {
-			seek := append(common.Copy(k[:len(k)-8]), hi.startTxKey[:]...)
+			seek := append(bytes.Clone(k[:len(k)-8]), hi.startTxKey[:]...)
 			var err error
 			k, _, err = hi.valsC.Seek(seek)
 			if err != nil {
@@ -368,9 +357,9 @@ func (hi *HistoryKeyTxNumIterDB) Next() ([]byte, uint64, error) {
 		return nil, 0, hi.err
 	}
 	hi.limit--
-	hi.k, hi.txNum = hi.nextKey, hi.nextTxNum
+	k, txNum := hi.nextKey, hi.nextTxNum
 	if err := hi.advance(); err != nil {
 		return nil, 0, err
 	}
-	return hi.k, hi.txNum, nil
+	return k, txNum, nil
 }

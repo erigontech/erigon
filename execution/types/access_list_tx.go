@@ -20,10 +20,10 @@
 package types
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
-	"math/big"
 
 	"github.com/holiman/uint256"
 
@@ -31,16 +31,30 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
+
+var ErrAccessListPreBerlin = errors.New("eip-2930 transactions require Berlin")
+
+//go:generate go run github.com/erigontech/erigon/cmd/tools/jsongen -type AccessTuple
 
 // AccessTuple is the element type of an access list.
 type AccessTuple struct {
-	Address     common.Address `json:"address"`
-	StorageKeys []common.Hash  `json:"storageKeys"`
+	Address     common.Address `json:"address" ethjson:"data"`
+	StorageKeys []common.Hash  `json:"storageKeys" ethjson:"datalist"`
 }
 
 // AccessList is an EIP-2930 access list.
 type AccessList []AccessTuple
+
+// MarshalFastJSONTo writes the list as a bare array. The receiver must stay a value, so the
+// type itself satisfies the fast-JSON interface.
+func (al AccessList) MarshalFastJSONTo(s *jsonstream.Stream) error {
+	jsonstream.ArrayValue(s, al, writeAccessTupleElem)
+	return nil
+}
+
+func writeAccessTupleElem(s *jsonstream.Stream, a *AccessTuple) { _ = a.MarshalFastJSONTo(s) }
 
 // StorageKeys returns the total number of storage keys in the access list.
 func (al AccessList) StorageKeys() int {
@@ -54,7 +68,7 @@ func (al AccessList) StorageKeys() int {
 // AccessListTx is the data of EIP-2930 access list transactions.
 type AccessListTx struct {
 	LegacyTx
-	ChainID    *uint256.Int
+	ChainID    uint256.Int
 	AccessList AccessList // EIP-2930 access list
 }
 
@@ -66,29 +80,19 @@ func (tx *AccessListTx) copy() *AccessListTx {
 				TransactionMisc: TransactionMisc{},
 				Nonce:           tx.Nonce,
 				To:              tx.To, // TODO: copy pointed-to address
-				Data:            common.Copy(tx.Data),
+				Data:            bytes.Clone(tx.Data),
 				GasLimit:        tx.GasLimit,
-				// These are copied below.
-				Value: new(uint256.Int),
+				Value:           tx.Value,
+				V:               tx.V,
+				R:               tx.R,
+				S:               tx.S,
 			},
-			GasPrice: new(uint256.Int),
+			GasPrice: tx.GasPrice,
 		},
-		ChainID:    new(uint256.Int),
+		ChainID:    tx.ChainID,
 		AccessList: make(AccessList, len(tx.AccessList)),
 	}
 	copy(cpy.AccessList, tx.AccessList)
-	if tx.Value != nil {
-		cpy.Value.Set(tx.Value)
-	}
-	if tx.ChainID != nil {
-		cpy.ChainID.Set(tx.ChainID)
-	}
-	if tx.GasPrice != nil {
-		cpy.GasPrice.Set(tx.GasPrice)
-	}
-	cpy.V.Set(&tx.V)
-	cpy.R.Set(&tx.R)
-	cpy.S.Set(&tx.S)
 	return cpy
 }
 
@@ -117,9 +121,9 @@ func (tx *AccessListTx) EncodingSize() int {
 
 // payloadSize calculates the RLP encoding size of transaction, without TxType and envelope
 func (tx *AccessListTx) payloadSize() (payloadSize int, accessListLen int) {
-	payloadSize += rlp.Uint256Len(*tx.ChainID)
+	payloadSize += rlp.Uint256Len(tx.ChainID)
 	payloadSize += rlp.U64Len(tx.Nonce)
-	payloadSize += rlp.Uint256Len(*tx.GasPrice)
+	payloadSize += rlp.Uint256Len(tx.GasPrice)
 	payloadSize += rlp.U64Len(tx.GasLimit)
 
 	// size of To
@@ -128,7 +132,7 @@ func (tx *AccessListTx) payloadSize() (payloadSize int, accessListLen int) {
 		payloadSize += 20
 	}
 
-	payloadSize += rlp.Uint256Len(*tx.Value)
+	payloadSize += rlp.Uint256Len(tx.Value)
 	payloadSize += rlp.StringLen(tx.Data)
 
 	// size of AccessList
@@ -155,18 +159,18 @@ func accessListSize(al AccessList) int {
 }
 
 func encodeAccessList(al AccessList, w io.Writer, b []byte) error {
-	for i := 0; i < len(al); i++ {
+	for i := range al {
 		tupleLen := 21
 		// Each storage key takes 33 bytes
 		storageLen := 33 * len(al[i].StorageKeys)
 		tupleLen += rlp.ListPrefixLen(storageLen) + storageLen
-		if err := rlp.EncodeStructSizePrefix(tupleLen, w, b); err != nil {
+		if err := rlp.EncodeListPrefix(tupleLen, w, b); err != nil {
 			return err
 		}
-		if err := rlp.EncodeOptionalAddress(&al[i].Address, w, b); err != nil { // TODO(racytech): change addr to []byte?
+		if err := EncodeOptionalAddress(&al[i].Address, w, b); err != nil { // TODO(racytech): change addr to []byte?
 			return err
 		}
-		if err := rlp.EncodeStructSizePrefix(storageLen, w, b); err != nil {
+		if err := rlp.EncodeListPrefix(storageLen, w, b); err != nil {
 			return err
 		}
 		b[0] = 128 + 32
@@ -187,8 +191,8 @@ func encodeAccessList(al AccessList, w io.Writer, b []byte) error {
 // transactions, it returns the type and payload.
 func (tx *AccessListTx) MarshalBinary(w io.Writer) error {
 	payloadSize, accessListLen := tx.payloadSize()
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := rlp.NewEncodingBuf()
+	defer b.Release()
 	// encode TxType
 	b[0] = AccessListTxType
 	if _, err := w.Write(b[:1]); err != nil {
@@ -202,31 +206,31 @@ func (tx *AccessListTx) MarshalBinary(w io.Writer) error {
 
 func (tx *AccessListTx) encodePayload(w io.Writer, b []byte, payloadSize, accessListLen int) error {
 	// prefix
-	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b); err != nil {
+	if err := rlp.EncodeListPrefix(payloadSize, w, b); err != nil {
 		return err
 	}
 	// encode ChainID
-	if err := rlp.EncodeUint256(*tx.ChainID, w, b); err != nil {
+	if err := rlp.EncodeUint256(tx.ChainID, w, b); err != nil {
 		return err
 	}
 	// encode Nonce
-	if err := rlp.EncodeInt(tx.Nonce, w, b); err != nil {
+	if err := rlp.EncodeU64(tx.Nonce, w, b); err != nil {
 		return err
 	}
 	// encode GasPrice
-	if err := rlp.EncodeUint256(*tx.GasPrice, w, b); err != nil {
+	if err := rlp.EncodeUint256(tx.GasPrice, w, b); err != nil {
 		return err
 	}
 	// encode GasLimit
-	if err := rlp.EncodeInt(tx.GasLimit, w, b); err != nil {
+	if err := rlp.EncodeU64(tx.GasLimit, w, b); err != nil {
 		return err
 	}
 	// encode To
-	if err := rlp.EncodeOptionalAddress(tx.To, w, b); err != nil {
+	if err := EncodeOptionalAddress(tx.To, w, b); err != nil {
 		return err
 	}
 	// encode Value
-	if err := rlp.EncodeUint256(*tx.Value, w, b); err != nil {
+	if err := rlp.EncodeUint256(tx.Value, w, b); err != nil {
 		return err
 	}
 	// encode Data
@@ -234,7 +238,7 @@ func (tx *AccessListTx) encodePayload(w io.Writer, b []byte, payloadSize, access
 		return err
 	}
 	// prefix
-	if err := rlp.EncodeStructSizePrefix(accessListLen, w, b); err != nil {
+	if err := rlp.EncodeListPrefix(accessListLen, w, b); err != nil {
 		return err
 	}
 	// encode AccessList
@@ -254,7 +258,6 @@ func (tx *AccessListTx) encodePayload(w io.Writer, b []byte, payloadSize, access
 		return err
 	}
 	return nil
-
 }
 
 // EncodeRLP implements rlp.Encoder
@@ -262,10 +265,10 @@ func (tx *AccessListTx) EncodeRLP(w io.Writer) error {
 	payloadSize, accessListLen := tx.payloadSize()
 	// size of struct prefix and TxType
 	envelopeSize := 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := rlp.NewEncodingBuf()
+	defer b.Release()
 	// envelope
-	if err := rlp.EncodeStringSizePrefix(envelopeSize, w, b[:]); err != nil {
+	if err := rlp.EncodeStringPrefix(envelopeSize, w, b[:]); err != nil {
 		return err
 	}
 	// encode TxType
@@ -279,36 +282,63 @@ func (tx *AccessListTx) EncodeRLP(w io.Writer) error {
 	return nil
 }
 
+// countAccessList walks the tuple headers for exact counts. A key list must end
+// inside its own tuple: rlp.Prefix only checks a length against the whole
+// payload, so overlapping tuples could otherwise count the same bytes twice.
+func countAccessList(raw []byte) (tuples, keys int) {
+	for pos := 0; pos < len(raw); {
+		tuplePos, tupleLen, isList, err := rlp.Prefix(raw, pos)
+		if err != nil || !isList {
+			return
+		}
+		// A valid tuple opens with a 20-byte address, encoded in 21 bytes.
+		keyPos, keyLen, isList, err := rlp.Prefix(raw, tuplePos+21)
+		if err != nil || !isList || keyPos+keyLen > tuplePos+tupleLen {
+			return
+		}
+		tuples++
+		keys += keyLen / 33
+		pos = tuplePos + tupleLen
+	}
+	return
+}
+
 func decodeAccessList(al *AccessList, s *rlp.Stream) error {
-	_, err := s.List()
+	l, err := s.List()
 	if err != nil {
 		return fmt.Errorf("open accessList: %w", err)
 	}
-	var b []byte
+	*al = (*al)[:0] // both paths below must agree
+	// One arena backs every tuple's StorageKeys, but only when the pre-walk
+	// sized it. Growing a shared arena instead would copy every key decoded so
+	// far and keep each retired array alive through the earlier tuples' views,
+	// so a reader that cannot be walked gets an exact slice per tuple. An empty
+	// list is left alone: allocating it would decode to [] where the caller
+	// marshals null.
+	var keys []common.Hash
+	arena := false
+	if raw := s.Peek(); l > 0 && uint64(len(raw)) >= l {
+		nTuples, nKeys := countAccessList(raw[:l])
+		*al = make(AccessList, 0, nTuples)
+		keys = make([]common.Hash, 0, nKeys)
+		arena = true
+	}
 	i := 0
 	for _, err = s.List(); err == nil; _, err = s.List() {
 		// decode tuple
-		*al = append(*al, AccessTuple{StorageKeys: []common.Hash{}})
+		*al = append(*al, AccessTuple{})
 		tuple := &(*al)[len(*al)-1]
-		if err = s.ReadBytes(tuple.Address[:]); err != nil {
+		if tuple.Address, err = s.Addr(); err != nil {
 			return fmt.Errorf("read Address: %w", err)
 		}
-		if _, err = s.List(); err != nil {
-			return fmt.Errorf("open StorageKeys: %w", err)
-		}
-		for b, err = s.Bytes(); err == nil; b, err = s.Bytes() {
-			tuple.StorageKeys = append(tuple.StorageKeys, common.Hash{})
-			if len(b) != 32 {
-				return fmt.Errorf("wrong size for StorageKey: %d", len(b))
+		if arena {
+			start := len(keys)
+			if keys, err = decodeHashListTo(s, keys); err != nil {
+				return fmt.Errorf("read StorageKeys: %w", err)
 			}
-			copy(tuple.StorageKeys[len(tuple.StorageKeys)-1][:], b)
-		}
-		if !errors.Is(err, rlp.EOL) {
-			return fmt.Errorf("read StorageKey: %w", err)
-		}
-		// end of StorageKeys list
-		if err = s.ListEnd(); err != nil {
-			return fmt.Errorf("close StorageKeys: %w", err)
+			tuple.StorageKeys = keys[start:len(keys):len(keys)]
+		} else if tuple.StorageKeys, err = decodeHashListTo(s, nil); err != nil {
+			return fmt.Errorf("read StorageKeys: %w", err)
 		}
 		// end of tuple
 		if err = s.ListEnd(); err != nil {
@@ -316,7 +346,7 @@ func decodeAccessList(al *AccessList, s *rlp.Stream) error {
 		}
 		i++
 	}
-	if !errors.Is(err, rlp.EOL) {
+	if err != rlp.EOL { //nolint:errorlint // intentional bare sentinel check
 		return fmt.Errorf("open accessTuple: %d %w", i, err)
 	}
 	if err = s.ListEnd(); err != nil {
@@ -330,35 +360,24 @@ func (tx *AccessListTx) DecodeRLP(s *rlp.Stream) error {
 	if err != nil {
 		return err
 	}
-	var b []byte
-	if b, err = s.Uint256Bytes(); err != nil {
+	if err = s.ReadUint256(&tx.ChainID); err != nil {
 		return fmt.Errorf("read ChainID: %w", err)
 	}
-	tx.ChainID = new(uint256.Int).SetBytes(b)
-	if tx.Nonce, err = s.Uint(); err != nil {
+	if tx.Nonce, err = s.Uint64(); err != nil {
 		return fmt.Errorf("read Nonce: %w", err)
 	}
-	if b, err = s.Uint256Bytes(); err != nil {
+	if err = s.ReadUint256(&tx.GasPrice); err != nil {
 		return fmt.Errorf("read GasPrice: %w", err)
 	}
-	tx.GasPrice = new(uint256.Int).SetBytes(b)
-	if tx.GasLimit, err = s.Uint(); err != nil {
+	if tx.GasLimit, err = s.Uint64(); err != nil {
 		return fmt.Errorf("read GasLimit: %w", err)
 	}
-	if b, err = s.Bytes(); err != nil {
+	if err = DecodeOptionalAddress(&tx.To, s); err != nil {
 		return fmt.Errorf("read To: %w", err)
 	}
-	if len(b) > 0 && len(b) != 20 {
-		return fmt.Errorf("wrong size for To: %d", len(b))
-	}
-	if len(b) > 0 {
-		tx.To = &common.Address{}
-		copy((*tx.To)[:], b)
-	}
-	if b, err = s.Uint256Bytes(); err != nil {
+	if err = s.ReadUint256(&tx.Value); err != nil {
 		return fmt.Errorf("read Value: %w", err)
 	}
-	tx.Value = new(uint256.Int).SetBytes(b)
 	if tx.Data, err = s.Bytes(); err != nil {
 		return fmt.Errorf("read Data: %w", err)
 	}
@@ -368,18 +387,15 @@ func (tx *AccessListTx) DecodeRLP(s *rlp.Stream) error {
 		return fmt.Errorf("read AccessList: %w", err)
 	}
 	// decode V
-	if b, err = s.Uint256Bytes(); err != nil {
+	if err = s.ReadUint256(&tx.V); err != nil {
 		return fmt.Errorf("read V: %w", err)
 	}
-	tx.V.SetBytes(b)
-	if b, err = s.Uint256Bytes(); err != nil {
+	if err = s.ReadUint256(&tx.R); err != nil {
 		return fmt.Errorf("read R: %w", err)
 	}
-	tx.R.SetBytes(b)
-	if b, err = s.Uint256Bytes(); err != nil {
+	if err = s.ReadUint256(&tx.S); err != nil {
 		return fmt.Errorf("read S: %w", err)
 	}
-	tx.S.SetBytes(b)
 	if err := s.ListEnd(); err != nil {
 		return fmt.Errorf("close AccessListTx: %w", err)
 	}
@@ -398,11 +414,11 @@ func (tx *AccessListTx) AsMessage(s Signer, _ *uint256.Int, rules *chain.Rules) 
 	msg := Message{
 		nonce:            tx.Nonce,
 		gasLimit:         tx.GasLimit,
-		gasPrice:         *tx.GasPrice,
-		tipCap:           *tx.GasPrice,
-		feeCap:           *tx.GasPrice,
+		gasPrice:         tx.GasPrice,
+		tipCap:           tx.GasPrice,
+		feeCap:           tx.GasPrice,
 		to:               txTo,
-		amount:           *tx.Value,
+		amount:           tx.Value,
 		data:             tx.Data,
 		accessList:       tx.AccessList,
 		checkNonce:       true,
@@ -411,7 +427,7 @@ func (tx *AccessListTx) AsMessage(s Signer, _ *uint256.Int, rules *chain.Rules) 
 	}
 
 	if !rules.IsBerlin {
-		return nil, errors.New("eip-2930 transactions require Berlin")
+		return nil, ErrAccessListPreBerlin
 	}
 
 	var err error
@@ -428,7 +444,7 @@ func (tx *AccessListTx) WithSignature(signer Signer, sig []byte) (Transaction, e
 	cpy.R.Set(r)
 	cpy.S.Set(s)
 	cpy.V.Set(v)
-	cpy.ChainID = signer.ChainID()
+	cpy.ChainID = *signer.ChainID()
 	return cpy, nil
 }
 
@@ -437,23 +453,16 @@ func (tx *AccessListTx) Hash() common.Hash {
 	if hash := tx.hash.Load(); hash != nil {
 		return *hash
 	}
-	hash := prefixedRlpHash(AccessListTxType, []any{
-		tx.ChainID,
-		tx.Nonce,
-		tx.GasPrice,
-		tx.GasLimit,
-		tx.To,
-		tx.Value,
-		tx.Data,
-		tx.AccessList,
-		tx.V, tx.R, tx.S,
+	payloadSize, accessListLen := tx.payloadSize()
+	hash := prefixedPayloadHash(AccessListTxType, func(w io.Writer, b []byte) error {
+		return tx.encodePayload(w, b, payloadSize, accessListLen)
 	})
 	tx.hash.Store(&hash)
 	return hash
 }
 
 type accessListTxSigHash struct {
-	ChainID    *big.Int
+	ChainID    *uint256.Int
 	Nonce      uint64
 	GasPrice   *uint256.Int
 	Gas        uint64
@@ -463,19 +472,20 @@ type accessListTxSigHash struct {
 	AccessList AccessList
 }
 
-func (tx *AccessListTx) SigningHash(chainID *big.Int) common.Hash {
+func (tx *AccessListTx) SigningHash(chainID *uint256.Int) common.Hash {
 	return prefixedRlpHash(
 		AccessListTxType,
 		&accessListTxSigHash{
 			ChainID:    chainID,
 			Nonce:      tx.Nonce,
-			GasPrice:   tx.GasPrice,
+			GasPrice:   &tx.GasPrice,
 			Gas:        tx.GasLimit,
 			To:         tx.To,
-			Value:      tx.Value,
+			Value:      &tx.Value,
 			Data:       tx.Data,
 			AccessList: tx.AccessList,
-		})
+		},
+	)
 }
 
 func (tx *AccessListTx) Type() byte { return AccessListTxType }
@@ -485,7 +495,7 @@ func (tx *AccessListTx) RawSignatureValues() (*uint256.Int, *uint256.Int, *uint2
 }
 
 func (tx *AccessListTx) GetChainID() *uint256.Int {
-	return tx.ChainID
+	return &tx.ChainID
 }
 
 func (tx *AccessListTx) cachedSender() (sender accounts.Address, ok bool) {

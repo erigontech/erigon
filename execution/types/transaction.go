@@ -24,11 +24,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/big"
 	"sync/atomic"
 
 	"github.com/holiman/uint256"
-	"github.com/protolambda/ztyp/codec"
 
 	"github.com/erigontech/erigon/common"
 	libcrypto "github.com/erigontech/erigon/common/crypto"
@@ -55,7 +53,7 @@ const (
 	DynamicFeeTxType
 	BlobTxType
 	SetCodeTxType
-	AccountAbstractionTxType
+	FrameTxType = 6
 )
 
 // Transaction is an Ethereum transaction.
@@ -63,9 +61,9 @@ type Transaction interface {
 	Type() byte
 	GetChainID() *uint256.Int
 	GetNonce() uint64
-	GetTipCap() *uint256.Int                              // max_priority_fee_per_gas in EIP-1559
-	GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int // effective_gas_price in EIP-1559
-	GetFeeCap() *uint256.Int                              // max_fee_per_gas in EIP-1559
+	GetTipCap() *uint256.Int                             // max_priority_fee_per_gas in EIP-1559
+	GetEffectiveGasTip(baseFee *uint256.Int) uint256.Int // priority_fee_per_gas in EIP-1559
+	GetFeeCap() *uint256.Int                             // max_fee_per_gas in EIP-1559
 	GetBlobHashes() []common.Hash
 	GetGasLimit() uint64
 	GetBlobGas() uint64
@@ -74,7 +72,7 @@ type Transaction interface {
 	AsMessage(s Signer, baseFee *uint256.Int, rules *chain.Rules) (*Message, error)
 	WithSignature(signer Signer, sig []byte) (Transaction, error)
 	Hash() common.Hash
-	SigningHash(chainID *big.Int) common.Hash
+	SigningHash(chainID *uint256.Int) common.Hash
 	GetData() []byte
 	GetAccessList() AccessList
 	GetAuthorizations() []Authorization // If this is a network wrapper, returns the unwrapped txn. Otherwise returns itself.
@@ -107,6 +105,44 @@ type TransactionMisc struct {
 	from accounts.Address
 }
 
+// The sender-cache trio is promoted from the embedding type when it doesn't
+// define its own; cachedSender being unexported, this is what lets a
+// transaction type outside this package satisfy the Transaction interface.
+func (t *TransactionMisc) cachedSender() (sender accounts.Address, ok bool) {
+	s := t.from
+	if s.IsNil() {
+		return sender, false
+	}
+	return s, true
+}
+
+func (t *TransactionMisc) GetSender() (accounts.Address, bool) {
+	return t.cachedSender()
+}
+
+func (t *TransactionMisc) SetSender(addr accounts.Address) {
+	t.from = addr
+}
+
+// CalcEffectiveGasTip computes the effective gas tip given a transaction's tip/fee caps and a base fee.
+// Shared logic used by all transaction types that implement GetEffectiveGasTip.
+func CalcEffectiveGasTip(baseFee *uint256.Int, getTipCap func() *uint256.Int, getFeeCap func() *uint256.Int) uint256.Int {
+	if baseFee == nil {
+		return *getTipCap()
+	}
+	gasFeeCap := getFeeCap()
+	if gasFeeCap.Lt(baseFee) {
+		var zero uint256.Int
+		return zero
+	}
+	var effectiveFee uint256.Int
+	effectiveFee.Sub(gasFeeCap, baseFee)
+	if getTipCap().Lt(&effectiveFee) {
+		return *getTipCap()
+	}
+	return effectiveFee
+}
+
 // RLP-marshalled legacy transactions and binary-marshalled (not wrapped into an RLP string) typed (EIP-2718) transactions
 type BinaryTransactions [][]byte
 
@@ -135,13 +171,14 @@ func DecodeRLPTransaction(s *rlp.Stream, blobTxnsAreWrappedWithBlobs bool) (Tran
 		}
 		txn = legacy
 	case rlp.String:
-		// Decode the EIP-2718 typed txn envelope.
+		// Decode the EIP-2718 typed txn envelope. Safe to view: every decoder
+		// copies out the fields it keeps.
 		var b []byte
-		if b, err = s.Bytes(); err != nil {
+		if b, err = s.ViewBytes(); err != nil {
 			return nil, err
 		}
-		if len(b) == 0 {
-			return nil, rlp.EOL
+		if len(b) > 0 && b[0] >= rlp.SingleByteThreshold {
+			return nil, ErrInvalidTxType
 		}
 		if txn, err = UnmarshalTransactionFromBinary(b, blobTxnsAreWrappedWithBlobs); err != nil {
 			return nil, err
@@ -161,8 +198,9 @@ func DecodeRLPTransaction(s *rlp.Stream, blobTxnsAreWrappedWithBlobs bool) (Tran
 	return txn, nil
 }
 
-// DecodeWrappedTransaction as similar to DecodeTransaction,
-// but type-3 (blob) transactions are expected to be wrapped with blobs/commitments/proofs.
+// DecodeWrappedTransaction decodes the network form of a transaction.
+// Type-3 transactions require a blob wrapper; frame transactions may be bare
+// or use their version-1 wrapper with blobs, commitments and cell proofs.
 // See https://eips.ethereum.org/EIPS/eip-4844#networking
 func DecodeWrappedTransaction(data []byte) (Transaction, error) {
 	blobTxnsAreWrappedWithBlobs := true
@@ -172,8 +210,8 @@ func DecodeWrappedTransaction(data []byte) (Transaction, error) {
 	if data[0] < 0x80 { // the encoding is canonical, not RLP
 		return UnmarshalTransactionFromBinary(data, blobTxnsAreWrappedWithBlobs)
 	}
-	s, done := rlp.NewStreamFromPool(bytes.NewReader(data), uint64(len(data)))
-	defer done()
+	s := rlp.NewBytesStream(data)
+	defer rlp.PutStream(s)
 	return DecodeRLPTransaction(s, blobTxnsAreWrappedWithBlobs)
 }
 
@@ -186,8 +224,8 @@ func DecodeTransaction(data []byte) (Transaction, error) {
 	if data[0] < 0x80 { // the encoding is canonical, not RLP
 		return UnmarshalTransactionFromBinary(data, blobTxnsAreWrappedWithBlobs)
 	}
-	s, done := rlp.NewStreamFromPool(bytes.NewReader(data), uint64(len(data)))
-	defer done()
+	s := rlp.NewBytesStream(data)
+	defer rlp.PutStream(s)
 	tx, err := DecodeRLPTransaction(s, blobTxnsAreWrappedWithBlobs)
 	if err != nil {
 		return nil, err
@@ -200,8 +238,8 @@ func UnmarshalTransactionFromBinary(data []byte, blobTxnsAreWrappedWithBlobs boo
 	if len(data) <= 1 {
 		return nil, fmt.Errorf("short input: %v", len(data))
 	}
-	s, done := rlp.NewStreamFromPool(bytes.NewReader(data[1:]), uint64(len(data)-1))
-	defer done()
+	s := rlp.NewBytesStream(data[1:])
+	defer rlp.PutStream(s)
 	var t Transaction
 	switch data[0] {
 	case AccessListTxType:
@@ -216,9 +254,22 @@ func UnmarshalTransactionFromBinary(data []byte, blobTxnsAreWrappedWithBlobs boo
 		}
 	case SetCodeTxType:
 		t = &SetCodeTransaction{}
-	case AccountAbstractionTxType:
-		t = &AccountAbstractionTransaction{}
+	case FrameTxType:
+		t = &FrameTransaction{}
+		if blobTxnsAreWrappedWithBlobs {
+			content, _, err := rlp.SplitList(data[1:])
+			if err != nil {
+				return nil, err
+			}
+			if len(content) > 0 && content[0] >= 0xc0 {
+				t = &FrameTxWrapper{}
+			}
+		}
 	default:
+		if spec, ok := registeredTxType(data[0]); ok {
+			t = spec.New()
+			break
+		}
 		if data[0] >= 0x80 {
 			// txn is type legacy which is RLP encoded
 			return DecodeTransaction(data)
@@ -234,12 +285,14 @@ func UnmarshalTransactionFromBinary(data []byte, blobTxnsAreWrappedWithBlobs boo
 	return t, nil
 }
 
-// Removes everything but the payload body from blob tx and prepends 0x3 at the beginning - no copy
-// Doesn't change non-blob tx
+// UnwrapTxPlayloadRlp removes a blob or frame transaction's sidecar without copying.
+// The result shares the input buffer, whose wrapper bytes may be overwritten to
+// preserve the transaction type. Unwrapped transactions and other types are unchanged.
 func UnwrapTxPlayloadRlp(blobTxRlp []byte) ([]byte, error) {
-	if blobTxRlp[0] != BlobTxType {
+	if len(blobTxRlp) == 0 || (blobTxRlp[0] != BlobTxType && blobTxRlp[0] != FrameTxType) {
 		return blobTxRlp, nil
 	}
+	txType := blobTxRlp[0]
 	dataposPrev, _, isList, err := rlp.Prefix(blobTxRlp[1:], 0)
 	if err != nil || dataposPrev < 1 {
 		return nil, err
@@ -248,6 +301,13 @@ func UnwrapTxPlayloadRlp(blobTxRlp []byte) ([]byte, error) {
 		return blobTxRlp, nil
 	}
 
+	_, _, isList, err = rlp.Prefix(blobTxRlp[1:], dataposPrev)
+	if err != nil {
+		return nil, err
+	}
+	if !isList {
+		return blobTxRlp, nil
+	}
 	blobTxRlp = blobTxRlp[1:]
 	// Get to the wrapper list
 	datapos, datalen, err := rlp.ParseList(blobTxRlp, dataposPrev)
@@ -255,7 +315,7 @@ func UnwrapTxPlayloadRlp(blobTxRlp []byte) ([]byte, error) {
 		return nil, err
 	}
 	blobTxRlp = blobTxRlp[dataposPrev-1 : datapos+datalen] // seekInFiles left an extra-bit
-	blobTxRlp[0] = 0x3
+	blobTxRlp[0] = txType
 	// Include the prefix part of the rlp
 	return blobTxRlp, nil
 }
@@ -274,7 +334,7 @@ func MarshalTransactionsBinary(txs Transactions) ([][]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		result[i] = common.Copy(buf.Bytes())
+		result[i] = bytes.Clone(buf.Bytes())
 	}
 	return result, nil
 }
@@ -302,15 +362,19 @@ func sanityCheckSignature(v *uint256.Int, r *uint256.Int, s *uint256.Int, maybeP
 	}
 
 	var plainV byte
-	if isProtectedV(v) {
-		chainID := DeriveChainId(v).Uint64()
-		plainV = byte(v.Uint64() - 35 - 2*chainID)
-	} else if maybeProtected {
+	switch {
+	case isProtectedV(v):
+		chainID, err := DeriveChainId(v)
+		if err != nil {
+			return err
+		}
+		plainV = byte(v.Uint64() - 35 - 2*chainID.Uint64())
+	case maybeProtected:
 		// Only EIP-155 signatures can be optionally protected. Since
 		// we determined this v value is not protected, it must be a
 		// raw 27 or 28.
 		plainV = byte(v.Uint64() - 27)
-	} else {
+	default:
 		// If the signature is not optionally protected, we assume it
 		// must already be equal to the recovery id.
 		plainV = byte(v.Uint64())
@@ -322,10 +386,10 @@ func sanityCheckSignature(v *uint256.Int, r *uint256.Int, s *uint256.Int, maybeP
 	return nil
 }
 
-func isProtectedV(V *uint256.Int) bool {
-	if V.BitLen() <= 8 {
-		v := V.Uint64()
-		return v != 27 && v != 28 && v != 1 && v != 0
+func isProtectedV(v *uint256.Int) bool {
+	if v.BitLen() <= 8 {
+		vVal := v.Uint64()
+		return vVal != 27 && vVal != 28 && vVal != 1 && vVal != 0
 	}
 	// anything not 27 or 28 is considered protected
 	return true
@@ -349,33 +413,6 @@ func (s Transactions) EncodeIndex(i int, w *bytes.Buffer) {
 // TransactionsGroupedBySender - lists of transactions grouped by sender
 type TransactionsGroupedBySender []Transactions
 
-// TxDifference returns a new set which is the difference between a and b.
-func TxDifference(a, b Transactions) Transactions {
-	keep := make(Transactions, 0, len(a))
-
-	remove := make(map[common.Hash]struct{})
-	for _, txn := range b {
-		remove[txn.Hash()] = struct{}{}
-	}
-
-	for _, txn := range a {
-		if _, ok := remove[txn.Hash()]; !ok {
-			keep = append(keep, txn)
-		}
-	}
-
-	return keep
-}
-
-// TxByNonce implements the sort interface to allow sorting a list of transactions
-// by their nonces. This is usually only useful for sorting transactions from a
-// single account, otherwise a nonce comparison doesn't make much sense.
-type TxByNonce Transactions
-
-func (s TxByNonce) Len() int           { return len(s) }
-func (s TxByNonce) Less(i, j int) bool { return s[i].GetNonce() < s[j].GetNonce() }
-func (s TxByNonce) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
-
 // Message is a fully derived transaction and implements core.Message
 type Message struct {
 	to               accounts.Address
@@ -395,6 +432,11 @@ type Message struct {
 	isFree           bool
 	blobHashes       []common.Hash
 	authorizations   []Authorization
+	authorities      *atomic.Pointer[RecoveredAuthorities]
+	dynamicFeeArgs   bool
+	frameTransaction *FrameTransaction
+
+	skipExecutionGasCap bool
 }
 
 func NewMessage(from accounts.Address, to accounts.Address, nonce uint64, amount *uint256.Int, gasLimit uint64,
@@ -440,9 +482,39 @@ func (m *Message) Nonce() uint64                   { return m.nonce }
 func (m *Message) Data() []byte                    { return m.data }
 func (m *Message) AccessList() AccessList          { return m.accessList }
 func (m *Message) Authorizations() []Authorization { return m.authorizations }
+
+// RecoveredAuthorities is the authorization list the block pre-pass recovers for the message's tx, waiting for a
+// list it started, or nil when it has not started.
+func (m *Message) RecoveredAuthorities() *RecoveredAuthorities {
+	if m.authorities == nil {
+		return nil
+	}
+	r := m.authorities.Load()
+	if r != nil {
+		<-r.done
+	}
+	return r
+}
+
+// Authorities is RecoveredAuthorities, recovering and publishing the list here when the pre-pass has not
+// started it, so re-executions and the pre-pass reuse it. Nil for a message without a tx's list.
+func (m *Message) Authorities(chainID *uint256.Int) *RecoveredAuthorities {
+	if r := m.RecoveredAuthorities(); r != nil || m.authorities == nil {
+		return r
+	}
+	r := &RecoveredAuthorities{done: make(chan struct{})}
+	if m.authorities.CompareAndSwap(nil, r) {
+		r.Signers, r.Errs = RecoverSigners(m.authorizations, chainID)
+		close(r.done)
+		return r
+	}
+	return m.RecoveredAuthorities()
+}
+
 func (m *Message) SetBlobVersionedHashes(blobHashes []common.Hash) {
 	m.blobHashes = blobHashes
 }
+
 func (m *Message) SetAuthorizations(authorizations []Authorization) {
 	m.authorizations = authorizations
 }
@@ -458,18 +530,31 @@ func (m *Message) CheckGas() bool { return m.checkGas }
 func (m *Message) SetCheckGas(checkGas bool) {
 	m.checkGas = checkGas
 }
+func (m *Message) SkipExecutionGasCap() bool { return m.skipExecutionGasCap }
+func (m *Message) SetSkipExecutionGasCap(skip bool) {
+	m.skipExecutionGasCap = skip
+}
+
+// DynamicFeeArgs reports whether the message was built from call arguments that name
+// maxFeePerGas or maxPriorityFeePerGas, even as zero. A transaction is checked against
+// its fork by AsMessage instead.
+func (m *Message) DynamicFeeArgs() bool { return m.dynamicFeeArgs }
+
+func (m *Message) SetDynamicFeeArgs(dynamicFeeArgs bool) {
+	m.dynamicFeeArgs = dynamicFeeArgs
+}
+
 func (m *Message) IsFree() bool { return m.isFree }
 func (m *Message) SetIsFree(isFree bool) {
 	m.isFree = isFree
 }
 
 func (m *Message) ChangeGas(globalGasCap, desiredGas uint64) {
-	gas := globalGasCap
-	if gas == 0 {
+	gas := desiredGas
+	// Only when no cap is configured does an unset limit mean "no limit": a
+	// desired gas of zero is a limit the caller asked for, not a missing value.
+	if globalGasCap == 0 && gas == 0 {
 		gas = uint64(math.MaxUint64 / 2)
-	}
-	if desiredGas > 0 {
-		gas = desiredGas
 	}
 	if globalGasCap != 0 && globalGasCap < gas {
 		log.Warn("Caller gas above allowance, capping", "requested", gas, "cap", globalGasCap)
@@ -487,11 +572,6 @@ func (m *Message) MaxFeePerBlobGas() *uint256.Int {
 
 func (m *Message) BlobHashes() []common.Hash { return m.blobHashes }
 
-func DecodeSSZ(data []byte, dest codec.Deserializable) error {
-	err := dest.Deserialize(codec.NewDecodingReader(bytes.NewReader(data), uint64(len(data))))
-	return err
-}
-
-func EncodeSSZ(w io.Writer, obj codec.Serializable) error {
-	return obj.Serialize(codec.NewEncodingWriter(w))
-}
+// FrameTransaction retains the full envelope because the single-call message
+// fields cannot represent approval frames, signatures and per-frame gas budgets.
+func (m *Message) FrameTransaction() *FrameTransaction { return m.frameTransaction }

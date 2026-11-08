@@ -24,6 +24,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
@@ -33,23 +34,29 @@ import (
 )
 
 type GasUsed struct {
-	Receipt uint64 // Gas used with refunds (what the user pays) - see EIP-7778
-	Block   uint64 // Gas used for block limit accounting - see EIP-7778
-	Blob    uint64 // Blob gas - see EIP-4844
+	Receipt        uint64 // Gas used with refunds (what the user pays) - see EIP-7778
+	BlockExecution uint64 // Execution gas accumulated across block (pre-Amsterdam: same as block gas)
+	BlockState     uint64 // State gas accumulated across block (EIP-8037)
+	Blob           uint64 // Blob gas - see EIP-4844
 }
 
-func NewGasUsed(h *types.Header, receiptGas uint64) *GasUsed {
-	gu := &GasUsed{Receipt: receiptGas, Block: h.GasUsed}
-	if h.BlobGasUsed != nil {
-		gu.Blob = *h.BlobGasUsed
-	}
-	return gu
+// BlockGasUsed returns the EIP-8037 "bottleneck" gas: max(execution, state).
+// Pre-Amsterdam blockStateGasUsed is 0, so this equals BlockExecution.
+func (gu *GasUsed) BlockGasUsed() uint64 { return max(gu.BlockExecution, gu.BlockState) }
+
+// AddResult accumulates one transaction: the post-refund receipt gas and the
+// pre-refund gas of each block dimension (EIP-7778, EIP-8037).
+func (gu *GasUsed) AddResult(result *evmtypes.ExecutionResult) {
+	gu.Receipt += result.ReceiptGasUsed
+	gu.BlockExecution += result.BlockExecutionGasUsed
+	gu.BlockState += result.BlockStateGasUsed
 }
 
 func SetGasUsed(h *types.Header, gu *GasUsed) {
-	h.GasUsed = gu.Block
+	h.GasUsed = gu.BlockGasUsed()
 	if h.BlobGasUsed != nil {
-		h.BlobGasUsed = &gu.Blob
+		blobGasUsed := gu.Blob
+		h.BlobGasUsed = &blobGasUsed
 	}
 }
 
@@ -59,9 +66,11 @@ func SetGasUsed(h *types.Header, gu *GasUsed) {
 // indicating the block was invalid.
 func applyTransaction(config *chain.Config, engine rules.EngineReader, gp *GasPool, ibs *state.IntraBlockState,
 	stateWriter state.StateWriter, header *types.Header, txn types.Transaction, gasUsed *GasUsed,
-	evm *vm.EVM, cfg vm.Config) (*types.Receipt, error) {
+	evm *vm.EVM, cfg vm.Config,
+) (*types.Receipt, error) {
 	var (
 		receipt *types.Receipt
+		result  *evmtypes.ExecutionResult
 		err     error
 	)
 
@@ -77,37 +86,37 @@ func applyTransaction(config *chain.Config, engine rules.EngineReader, gp *GasPo
 		if cfg.Tracer.OnTxStart != nil {
 			cfg.Tracer.OnTxStart(evm.GetVMContext(), txn, msg.From())
 		}
-		if cfg.Tracer.OnTxEnd != nil {
+		if cfg.Tracer.HasTxEndHook() {
 			defer func() {
-				cfg.Tracer.OnTxEnd(receipt, err)
+				var txnGasUsage mdgas.TxnGasUsage
+				if result != nil {
+					txnGasUsage = result.TxnGasUsage
+				}
+				cfg.Tracer.EmitTxEnd(receipt, txnGasUsage, err)
 			}()
 		}
 	}
 
 	txContext := NewEVMTxContext(msg)
-	if cfg.TraceJumpDest {
-		txContext.TxHash = txn.Hash()
-	}
 
 	// Update the evm with the new transaction context.
 	evm.Reset(txContext, ibs)
-	result, err := ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
+	result, err = ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
 	if err != nil {
 		return nil, err
 	}
-	// Update the state with pending changes
-	if err = ibs.FinalizeTx(rules, stateWriter); err != nil {
+	err = ibs.FinalizeTx(rules, stateWriter)
+	if err != nil {
 		return nil, err
 	}
-	gasUsed.Receipt += result.ReceiptGasUsed
-	gasUsed.Block += result.BlockGasUsed
+	gasUsed.AddResult(result)
 	gasUsed.Blob += txn.GetBlobGas()
 
 	// Set the receipt logs and create the bloom filter.
 	// based on the eip phase, we're passing whether the root touch-delete accounts.
 	if !cfg.NoReceipts {
 		// by the txn
-		receipt = MakeReceipt(&header.Number, header.Hash(), msg, txn, gasUsed.Receipt, result, ibs, evm)
+		receipt = MakeReceipt(&header.Number, header.Hash(), txn, gasUsed.Receipt, result, ibs, evm)
 	}
 
 	return receipt, err
@@ -145,14 +154,13 @@ func ApplyTransactionWithEVM(config *chain.Config, engine rules.EngineReader, gp
 func MakeReceipt(
 	blockNumber *uint256.Int,
 	blockHash common.Hash,
-	msg *types.Message,
 	txn types.Transaction,
 	cumulativeGasUsed uint64,
 	result *evmtypes.ExecutionResult,
 	ibs *state.IntraBlockState,
 	evm *vm.EVM,
 ) *types.Receipt {
-	receipt := &types.Receipt{Type: txn.Type(), CumulativeGasUsed: cumulativeGasUsed}
+	receipt := &types.Receipt{Type: txn.Type(), CumulativeGasUsed: cumulativeGasUsed, Payer: result.Payer, FrameReceipts: result.FrameReceipts}
 	if result.Failed() {
 		receipt.Status = types.ReceiptStatusFailed
 	} else {
@@ -160,19 +168,13 @@ func MakeReceipt(
 	}
 	receipt.TxHash = txn.Hash()
 	receipt.GasUsed = result.ReceiptGasUsed
-	// In the case of blob transaction, we need to possibly unwrap and store the gas used by blobs
-	if t, ok := txn.(*types.BlobTxWrapper); ok {
-		txn = &t.Tx
-	}
-	if txn.Type() == types.BlobTxType {
-		receipt.BlobGasUsed = txn.GetBlobGas()
-	}
+	receipt.BlobGasUsed = txn.GetBlobGas()
 	// If the transaction created a contract, store the creation address in the receipt.
-	if msg.To().IsNil() {
+	if txn.IsContractDeploy() {
 		receipt.ContractAddress = types.CreateAddress(evm.Origin.Value(), txn.GetNonce())
 	}
 	// Set the receipt logs and create a bloom for filtering
-	receipt.Logs = ibs.GetLogs(ibs.TxnIndex(), txn.Hash(), blockNumber.Uint64(), blockHash)
+	receipt.SetLogs(ibs.GetLogs(ibs.TxnIndex(), txn.Hash(), blockNumber.Uint64(), blockHash))
 	receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
 	receipt.BlockNumber = blockNumber
 	receipt.TransactionIndex = uint(ibs.TxnIndex())

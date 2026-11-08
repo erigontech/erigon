@@ -25,17 +25,24 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
+	"math/rand/v2"
 	"os"
 	"strings"
 	"testing"
+	"unsafe"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
@@ -54,19 +61,12 @@ type twoOperandParams struct {
 	y string
 }
 
-var commonParams []*twoOperandParams
-var twoOpMethods map[string]executionFunc
-
-type contractRef struct {
-	addr common.Address
-}
-
-func (c contractRef) Address() common.Address {
-	return c.addr
-}
+var (
+	commonParams []*twoOperandParams
+	twoOpMethods map[string]executionFunc
+)
 
 func init() {
-
 	// Params is a list of common edgecases that should be used for some common tests
 	params := []string{
 		"0000000000000000000000000000000000000000000000000000000000000000", // 0
@@ -86,7 +86,8 @@ func init() {
 			commonParams[i*len(params)+j] = &twoOperandParams{x, y}
 		}
 	}
-	twoOpMethods = map[string]executionFunc{"add": opAdd,
+	twoOpMethods = map[string]executionFunc{
+		"add":     opAdd,
 		"sub":     opSub,
 		"mul":     opMul,
 		"div":     opDiv,
@@ -112,7 +113,7 @@ func init() {
 
 func testTwoOperandOp(t *testing.T, tests []TwoOperandTestcase, opFn executionFunc, name string) {
 	var (
-		evm         = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.TestChainConfig, Config{})
+		evm         = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.AllProtocolChanges, Config{})
 		callContext = &CallContext{}
 		pc          = uint64(0)
 	)
@@ -124,13 +125,37 @@ func testTwoOperandOp(t *testing.T, tests []TwoOperandTestcase, opFn executionFu
 		callContext.Stack.push(x)
 		callContext.Stack.push(y)
 		opFn(pc, evm, callContext)
-		if len(callContext.Stack.data) != 1 {
-			t.Errorf("Expected one item on stack after %v, got %d: ", name, len(callContext.Stack.data))
+		if callContext.Stack.top != 1 {
+			t.Errorf("Expected one item on stack after %v, got %d: ", name, callContext.Stack.top)
 		}
-		actual := callContext.Stack.pop()
+		actual := callContext.Stack.popCopy()
 
 		if actual.Cmp(expected) != 0 {
 			t.Errorf("Testcase %v %d, %v(%x, %x): expected  %x, got %x", name, i, name, x, y, expected, &actual)
+		}
+	}
+}
+
+func TestOpDivPowerOfTwo(t *testing.T) {
+	t.Parallel()
+	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.AllProtocolChanges, Config{})
+	callContext := &CallContext{}
+	xs := []*uint256.Int{
+		uint256.NewInt(0), uint256.NewInt(7), new(uint256.Int).SetAllOne(),
+		uint256.MustFromHex("0x87ffb8b26394face67d77fae3608d0891"),
+		uint256.MustFromHex("0x40cf02000000000000000000000000000000000000000000000000000000000"),
+	}
+	one := uint256.NewInt(1)
+	for n := range uint(256) {
+		p := new(uint256.Int).Lsh(one, n)
+		for _, y := range []*uint256.Int{p, new(uint256.Int).AddUint64(p, 1), new(uint256.Int).Sub(p, one)} {
+			for _, x := range xs {
+				callContext.Stack.push(*y)
+				callContext.Stack.push(*x)
+				opDiv(0, evm, callContext)
+				got, want := callContext.Stack.popCopy(), new(uint256.Int).Div(x, y)
+				require.Equal(t, want, &got, "%x / %x", x, y)
+			}
 		}
 	}
 }
@@ -215,7 +240,7 @@ func TestSAR(t *testing.T) {
 func TestAddMod(t *testing.T) {
 	t.Parallel()
 	var (
-		evm         = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.TestChainConfig, Config{})
+		evm         = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.AllProtocolChanges, Config{})
 		callContext = &CallContext{}
 		pc          = uint64(0)
 	)
@@ -225,7 +250,8 @@ func TestAddMod(t *testing.T) {
 		z        string
 		expected string
 	}{
-		{"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+		{
+			"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
 			"fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe",
 			"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
 			"fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe",
@@ -243,17 +269,48 @@ func TestAddMod(t *testing.T) {
 		callContext.Stack.push(y)
 		callContext.Stack.push(x)
 		opAddmod(pc, evm, callContext)
-		actual := callContext.Stack.pop()
+		actual := callContext.Stack.popCopy()
 		if actual.Cmp(expected) != 0 {
 			t.Errorf("Testcase %d, expected  %x, got %x", i, expected, actual)
 		}
 	}
 }
 
+// MULMOD reuses a modulus's reciprocal across calls, so changing the modulus must not reuse a stale one.
+func TestMulModAcrossModuli(t *testing.T) {
+	t.Parallel()
+	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.AllProtocolChanges, Config{})
+	callContext := &CallContext{}
+	hex := func(s string) *big.Int { v, _ := new(big.Int).SetString(s, 16); return v }
+	m1 := hex("fffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f")
+	m2 := hex("30644e72e131a029b85045b68181585d97816a916871ca8d3c208c16d87cfd47")
+	m3 := hex("ffffffff")
+	x := hex("d4c3b2a1f0e9d8c7b6a5948372615049382716051f2e3d4c5b6a798897a6b5c4")
+	y := hex("1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef")
+	for i, m := range []*big.Int{m1, m1, m2, m1, m3, m2} {
+		want := new(big.Int).Mod(new(big.Int).Mul(x, y), m)
+		callContext.Stack.push(*uint256.MustFromBig(m))
+		callContext.Stack.push(*uint256.MustFromBig(y))
+		callContext.Stack.push(*uint256.MustFromBig(x))
+		opMulmod(0, evm, callContext)
+		got := callContext.Stack.popCopy()
+		require.Zero(t, want.Cmp(got.ToBig()), "call %d", i)
+	}
+
+	cached := callContext.mulmodModulus
+	callContext.Stack.push(*uint256.MustFromBig(m1))
+	callContext.Stack.push(*uint256.MustFromBig(y))
+	callContext.Stack.push(uint256.Int{})
+	opMulmod(0, evm, callContext)
+	got := callContext.Stack.popCopy()
+	require.True(t, got.IsZero())
+	require.Equal(t, cached, callContext.mulmodModulus, "a zero product must not replace the cached modulus")
+}
+
 // getResult is a convenience function to generate the expected values
 // func getResult(args []*twoOperandParams, opFn executionFunc) []TwoOperandTestcase {
 // 	var (
-// 		evm         = NewEVM(BlockContext{}, TxContext{}, nil, chain.TestChainConfig, Config{})
+// 		evm         = NewEVM(BlockContext{}, TxContext{}, nil, chain.AllProtocolChanges, Config{})
 // 		stack       = stack.New()
 // 		pc          = uint64(0)
 // 	)
@@ -299,241 +356,34 @@ func TestJsonTestcases(t *testing.T) {
 	}
 }
 
-func opBenchmark(b *testing.B, op executionFunc, args ...string) {
-	var (
-		evm         = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.TestChainConfig, Config{})
-		callContext = &CallContext{}
-	)
+func innerOutputsShareBuffer(cfg Config) bool {
+	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.AllProtocolChanges, cfg)
+	evm.depth = 2
+	var mem Memory
+	mem.Resize(32)
+	a, b := evm.output(&mem, 0, 32), evm.output(&mem, 0, 32)
+	return unsafe.SliceData(a) == unsafe.SliceData(b)
+}
 
-	// convert args
-	byteArgs := make([][]byte, len(args))
-	for i, arg := range args {
-		byteArgs[i] = common.Hex2Bytes(arg)
+// Tracers that see outputs (callTracer, opcode tracers) keep them, so those get copies.
+func TestInnerFrameOutputBufferPerTracer(t *testing.T) {
+	for name, tc := range map[string]struct {
+		hooks *tracing.Hooks
+		share bool
+	}{
+		"none":   {nil, true},
+		"enter":  {&tracing.Hooks{OnEnterV2: func(int, byte, accounts.Address, accounts.Address, bool, []byte, mdgas.MdGas, uint256.Int, []byte) {}}, true},
+		"exit":   {&tracing.Hooks{OnExit: func(int, []byte, uint64, error, bool) {}}, false},
+		"opcode": {&tracing.Hooks{OnOpcode: func(uint64, byte, uint64, uint64, tracing.OpContext, []byte, int, error) {}}, false},
+	} {
+		require.Equal(t, tc.share, innerOutputsShareBuffer(Config{Tracer: tc.hooks}), name)
 	}
-	pc := uint64(0)
-	b.ResetTimer()
-	for b.Loop() {
-		for _, arg := range byteArgs {
-			a := *new(uint256.Int).SetBytes(arg)
-			callContext.Stack.push(a)
-		}
-		op(pc, evm, callContext)
-		callContext.Stack.pop()
-	}
-}
-
-func BenchmarkOpAdd64(b *testing.B) {
-	x := "ffffffff"
-	y := "fd37f3e2bba2c4f"
-
-	opBenchmark(b, opAdd, x, y)
-}
-
-func BenchmarkOpAdd128(b *testing.B) {
-	x := "ffffffffffffffff"
-	y := "f5470b43c6549b016288e9a65629687"
-
-	opBenchmark(b, opAdd, x, y)
-}
-
-func BenchmarkOpAdd256(b *testing.B) {
-	x := "0802431afcbce1fc194c9eaa417b2fb67dc75a95db0bc7ec6b1c8af11df6a1da9"
-	y := "a1f5aac137876480252e5dcac62c354ec0d42b76b0642b6181ed099849ea1d57"
-
-	opBenchmark(b, opAdd, x, y)
-}
-
-func BenchmarkOpSub64(b *testing.B) {
-	x := "51022b6317003a9d"
-	y := "a20456c62e00753a"
-
-	opBenchmark(b, opSub, x, y)
-}
-
-func BenchmarkOpSub128(b *testing.B) {
-	x := "4dde30faaacdc14d00327aac314e915d"
-	y := "9bbc61f5559b829a0064f558629d22ba"
-
-	opBenchmark(b, opSub, x, y)
-}
-
-func BenchmarkOpSub256(b *testing.B) {
-	x := "4bfcd8bb2ac462735b48a17580690283980aa2d679f091c64364594df113ea37"
-	y := "97f9b1765588c4e6b69142eb00d20507301545acf3e1238c86c8b29be227d46e"
-
-	opBenchmark(b, opSub, x, y)
-}
-
-func BenchmarkOpMul(b *testing.B) {
-	x := opTestArg
-	y := opTestArg
-
-	opBenchmark(b, opMul, x, y)
-}
-
-func BenchmarkOpDiv256(b *testing.B) {
-	x := "ff3f9014f20db29ae04af2c2d265de17"
-	y := "fe7fb0d1f59dfe9492ffbf73683fd1e870eec79504c60144cc7f5fc2bad1e611"
-	opBenchmark(b, opDiv, x, y)
-}
-
-func BenchmarkOpDiv128(b *testing.B) {
-	x := "fdedc7f10142ff97"
-	y := "fbdfda0e2ce356173d1993d5f70a2b11"
-	opBenchmark(b, opDiv, x, y)
-}
-
-func BenchmarkOpDiv64(b *testing.B) {
-	x := "fcb34eb3"
-	y := "f97180878e839129"
-	opBenchmark(b, opDiv, x, y)
-}
-
-func BenchmarkOpSdiv(b *testing.B) {
-	x := "ff3f9014f20db29ae04af2c2d265de17"
-	y := "fe7fb0d1f59dfe9492ffbf73683fd1e870eec79504c60144cc7f5fc2bad1e611"
-
-	opBenchmark(b, opSdiv, x, y)
-}
-
-func BenchmarkOpMod(b *testing.B) {
-	x := opTestArg
-	y := opTestArg
-
-	opBenchmark(b, opMod, x, y)
-}
-
-func BenchmarkOpSmod(b *testing.B) {
-	x := opTestArg
-	y := opTestArg
-
-	opBenchmark(b, opSmod, x, y)
-}
-
-func BenchmarkOpExp(b *testing.B) {
-	x := opTestArg
-	y := opTestArg
-
-	opBenchmark(b, opExp, x, y)
-}
-
-func BenchmarkOpSignExtend(b *testing.B) {
-	x := opTestArg
-	y := opTestArg
-
-	opBenchmark(b, opSignExtend, x, y)
-}
-
-func BenchmarkOpLt(b *testing.B) {
-	x := opTestArg
-	y := opTestArg
-
-	opBenchmark(b, opLt, x, y)
-}
-
-func BenchmarkOpGt(b *testing.B) {
-	x := opTestArg
-	y := opTestArg
-
-	opBenchmark(b, opGt, x, y)
-}
-
-func BenchmarkOpSlt(b *testing.B) {
-	x := opTestArg
-	y := opTestArg
-
-	opBenchmark(b, opSlt, x, y)
-}
-
-func BenchmarkOpSgt(b *testing.B) {
-	x := opTestArg
-	y := opTestArg
-
-	opBenchmark(b, opSgt, x, y)
-}
-
-func BenchmarkOpEq(b *testing.B) {
-	x := opTestArg
-	y := opTestArg
-
-	opBenchmark(b, opEq, x, y)
-}
-func BenchmarkOpEq2(b *testing.B) {
-	x := "FBCDEF090807060504030201ffffffffFBCDEF090807060504030201ffffffff"
-	y := "FBCDEF090807060504030201ffffffffFBCDEF090807060504030201fffffffe"
-	opBenchmark(b, opEq, x, y)
-}
-func BenchmarkOpAnd(b *testing.B) {
-	x := opTestArg
-	y := opTestArg
-
-	opBenchmark(b, opAnd, x, y)
-}
-
-func BenchmarkOpOr(b *testing.B) {
-	x := opTestArg
-	y := opTestArg
-
-	opBenchmark(b, opOr, x, y)
-}
-
-func BenchmarkOpXor(b *testing.B) {
-	x := opTestArg
-	y := opTestArg
-
-	opBenchmark(b, opXor, x, y)
-}
-
-func BenchmarkOpByte(b *testing.B) {
-	x := opTestArg
-	y := opTestArg
-
-	opBenchmark(b, opByte, x, y)
-}
-
-func BenchmarkOpAddmod(b *testing.B) {
-	x := opTestArg
-	y := opTestArg
-	z := opTestArg
-
-	opBenchmark(b, opAddmod, x, y, z)
-}
-
-func BenchmarkOpMulmod(b *testing.B) {
-	x := opTestArg
-	y := opTestArg
-	z := opTestArg
-
-	opBenchmark(b, opMulmod, x, y, z)
-}
-
-func BenchmarkOpSHL(b *testing.B) {
-	x := "FBCDEF090807060504030201ffffffffFBCDEF090807060504030201ffffffff"
-	y := "ff"
-
-	opBenchmark(b, opSHL, x, y)
-}
-func BenchmarkOpSHR(b *testing.B) {
-	x := "FBCDEF090807060504030201ffffffffFBCDEF090807060504030201ffffffff"
-	y := "ff"
-
-	opBenchmark(b, opSHR, x, y)
-}
-func BenchmarkOpSAR(b *testing.B) {
-	x := "FBCDEF090807060504030201ffffffffFBCDEF090807060504030201ffffffff"
-	y := "ff"
-
-	opBenchmark(b, opSAR, x, y)
-}
-func BenchmarkOpIsZero(b *testing.B) {
-	x := "FBCDEF090807060504030201ffffffffFBCDEF090807060504030201ffffffff"
-	opBenchmark(b, opIszero, x)
 }
 
 func TestOpMstore(t *testing.T) {
 	t.Parallel()
 	var (
-		evm         = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.TestChainConfig, Config{})
+		evm         = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.AllProtocolChanges, Config{})
 		callContext = &CallContext{}
 	)
 
@@ -554,21 +404,147 @@ func TestOpMstore(t *testing.T) {
 	}
 }
 
-func BenchmarkOpMstore(bench *testing.B) {
-	var (
-		evm         = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.TestChainConfig, Config{})
-		callContext = &CallContext{}
-	)
+var retSink []byte
 
+// The CALL/CREATE trace formatters must read the operands the op is about to
+// pop (top-relative), not fixed slots near the array's capacity.
+func TestStaticCallTraceReadsStackTop(t *testing.T) {
+	callContext := &CallContext{}
 	callContext.Memory.Resize(64)
-	pc := uint64(0)
-	memStart := uint256.Int{}
-	value := *new(uint256.Int).SetUint64(0x1337)
+	callContext.Memory.Set(0, 4, []byte{0xde, 0xad, 0xbe, 0xef})
+	wantAddr := common.HexToAddress("0x1122334455667788990011223344556677889900")
 
-	for bench.Loop() {
-		callContext.Stack.push(value)
-		callContext.Stack.push(memStart)
-		opMstore(pc, evm, callContext)
+	// STATICCALL operands, top-down: gas, addr, inOffset, inSize, retOffset, retSize
+	callContext.Stack.push(uint256.Int{})                           // retSize
+	callContext.Stack.push(uint256.Int{})                           // retOffset
+	callContext.Stack.push(*uint256.NewInt(4))                      // inSize
+	callContext.Stack.push(uint256.Int{})                           // inOffset
+	callContext.Stack.push(*new(uint256.Int).SetBytes(wantAddr[:])) // addr
+	callContext.Stack.push(*uint256.NewInt(21000))                  // gas
+
+	got := stStaticCall(0, callContext)
+	wantHex := fmt.Sprintf("%x", wantAddr)
+	if !strings.Contains(got, wantHex) || !strings.Contains(got, "deadbeef") {
+		t.Fatalf("trace read wrong stack slots: got %q, want addr %s and args deadbeef", got, wantHex)
+	}
+}
+
+// CREATE2 must be wired to stCreate2 (not stCreate), which labels the op
+// "CREATE2" and includes the salt operand it reads from the fourth slot.
+func TestCreate2TraceWiring(t *testing.T) {
+	jt := newAmsterdamInstructionSet()
+	callContext := &CallContext{}
+	callContext.Memory.Resize(64)
+	callContext.Memory.Set(0, 4, []byte{0xde, 0xad, 0xbe, 0xef})
+
+	// CREATE2 operands, top-down: endowment, offset, size, salt
+	callContext.Stack.push(*uint256.NewInt(0xcafe)) // salt
+	callContext.Stack.push(*uint256.NewInt(4))      // size
+	callContext.Stack.push(uint256.Int{})           // offset
+	callContext.Stack.push(*uint256.NewInt(7))      // endowment
+
+	got := jt[CREATE2].string(0, callContext)
+	if !strings.HasPrefix(got, "CREATE2 ") {
+		t.Fatalf("CREATE2 traced with wrong formatter: got %q", got)
+	}
+	if !strings.Contains(got, "51966") || !strings.Contains(got, "deadbeef") {
+		t.Fatalf("CREATE2 trace missing salt/input: got %q, want salt 51966 and deadbeef", got)
+	}
+}
+
+func TestCreate2InitCodeAllocations(t *testing.T) {
+	ibs := state.New(state.NewNoopReader())
+	defer ibs.Close()
+	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
+	evm.depth = int(params.CallCreateDepth) + 1 // exclude child execution from the allocation count.
+	scope := evm.getCallContext(*NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{}), nil, mdgas.MdGas{Execution: 500_000})
+	defer evm.putCallContext(scope)
+	scope.Memory.Resize(64)
+	clear(scope.Memory.Data())
+	allocations := func(memorySize int) float64 {
+		return testing.AllocsPerRun(100, func() {
+			scope.Memory.store = scope.Memory.store[:memorySize]
+			scope.Memory.lastGasCost = 0
+			scope.Stack.Reset()
+			scope.Stack.push(uint256.Int{})
+			scope.Stack.push(*uint256.NewInt(64))
+			scope.Stack.push(uint256.Int{})
+			scope.Stack.push(uint256.Int{})
+			if _, err := gasCreate2Eip3860(evm, scope, scope.Gas(), 64); err != nil {
+				t.Fatal(err)
+			}
+			scope.Memory.Resize(64)
+			if _, _, err := opCreate2(0, evm, scope); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+	withoutPadding := allocations(64)
+	withPadding := allocations(32)
+	if withPadding != withoutPadding {
+		t.Fatalf("zero-padding adds initcode allocations: without padding %g, with padding %g", withoutPadding, withPadding)
+	}
+}
+
+func TestStackPopHelpers(t *testing.T) {
+	st := &Stack{}
+
+	// pop2Uint64 returns the low 64 bits of (top, next) and shrinks by two.
+	st.push(*uint256.NewInt(0xAAAA)) // next
+	st.push(*uint256.NewInt(0xBBBB)) // top
+	if x, y := st.pop2Uint64(); x != 0xBBBB || y != 0xAAAA {
+		t.Fatalf("pop2Uint64 = (%#x, %#x), want (0xbbbb, 0xaaaa)", x, y)
+	}
+	if st.len() != 0 {
+		t.Fatalf("pop2Uint64 len = %d, want 0", st.len())
+	}
+
+	// popRef returns a pointer to the just-popped slot, shrinks by one, and the
+	// pointed-to value stays valid until the next push reuses that slot.
+	st.push(*uint256.NewInt(1)) // stays below
+	st.push(*uint256.NewInt(2)) // popped by popRef
+	ref := st.pop()
+	if st.len() != 1 {
+		t.Fatalf("popRef len = %d, want 1", st.len())
+	}
+	if ref.Uint64() != 2 {
+		t.Fatalf("popRef value = %d, want 2", ref.Uint64())
+	}
+	if got := st.peek().Uint64(); got != 1 {
+		t.Fatalf("popRef disturbed slot below: peek = %d, want 1", got)
+	}
+	if ref.Uint64() != 2 {
+		t.Fatalf("popRef pointer invalidated before push: got %d, want 2", ref.Uint64())
+	}
+	st.push(*uint256.NewInt(9))
+	if ref.Uint64() != 9 {
+		t.Fatalf("push did not reuse popRef slot: ref = %d, want 9", ref.Uint64())
+	}
+
+	// popRef2Peek1 returns (top, next, third), shrinks by two, and leaves the
+	// third slot as the new top so the result can be built in place.
+	st.Reset()
+	st.push(*uint256.NewInt(3)) // third: stays as new top
+	st.push(*uint256.NewInt(2)) // next
+	st.push(*uint256.NewInt(1)) // top
+	x, y, z := st.pop2Peek1()
+	if x.Uint64() != 1 || y.Uint64() != 2 || z.Uint64() != 3 {
+		t.Fatalf("popRef2Peek1 = (%d, %d, %d), want (1, 2, 3)", x.Uint64(), y.Uint64(), z.Uint64())
+	}
+	if st.len() != 1 {
+		t.Fatalf("popRef2Peek1 len = %d, want 1", st.len())
+	}
+	if st.peek() != z {
+		t.Fatalf("popRef2Peek1 left wrong slot on top: peek = %p, want %p", st.peek(), z)
+	}
+
+	// dup takes a depth below the top: dup(0) duplicates the top item.
+	st.Reset()
+	st.push(*uint256.NewInt(7)) // depth 1
+	st.push(*uint256.NewInt(8)) // depth 0
+	st.dup(1)
+	if st.len() != 3 || st.peek().Uint64() != 7 {
+		t.Fatalf("dup(1) = (len %d, top %d), want (3, 7)", st.len(), st.peek().Uint64())
 	}
 }
 
@@ -576,12 +552,13 @@ func TestOpTstore(t *testing.T) {
 	t.Parallel()
 	var (
 		state       = state.New(nil)
-		evm         = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, state, chain.TestChainConfig, Config{})
+		evm         = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, state, chain.AllProtocolChanges, Config{})
 		caller      = accounts.ZeroAddress
 		to          = accounts.InternAddress(common.Address{1})
 		callContext = &CallContext{Contract: *NewContract(caller, caller, to, uint256.Int{})}
 		value       = common.Hex2Bytes("abcdef00000000000000abba000000000deaf000000c0de00100000000133700")
 	)
+	defer state.Close()
 
 	pc := uint64(0)
 	// push the value to the stack
@@ -603,22 +580,6 @@ func TestOpTstore(t *testing.T) {
 	val := callContext.Stack.peek()
 	if !bytes.Equal(val.Bytes(), value) {
 		t.Fatal("incorrect element read from transient storage")
-	}
-}
-
-func BenchmarkOpKeccak256(bench *testing.B) {
-	var (
-		evm         = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.TestChainConfig, Config{})
-		callContext = &CallContext{}
-	)
-	callContext.Memory.Resize(32)
-	pc := uint64(0)
-	start := uint256.Int{}
-
-	for bench.Loop() {
-		callContext.Stack.push(*uint256.NewInt(32))
-		callContext.Stack.push(start)
-		opKeccak256(pc, evm, callContext)
 	}
 }
 
@@ -679,7 +640,7 @@ func TestCreate2Addreses(t *testing.T) {
 		origin := common.BytesToAddress(common.FromHex(tt.origin))
 		salt := common.BytesToHash(common.FromHex(tt.salt))
 		code := common.FromHex(tt.code)
-		codeHash := accounts.InternCodeHash(common.Hash(crypto.Keccak256(code)))
+		codeHash := accounts.InternCodeHash(crypto.Keccak256Hash(code))
 		address := types.CreateAddress2(origin, salt, codeHash)
 		/*
 			stack          := newstack()
@@ -691,7 +652,7 @@ func TestCreate2Addreses(t *testing.T) {
 			fmt.Printf("Example %d\n* address `0x%x`\n* salt `0x%x`\n* init_code `0x%x`\n* gas (assuming no mem expansion): `%v`\n* result: `%s`\n\n", i,origin, salt, code, gas, address.String())
 		*/
 		expected := common.BytesToAddress(common.FromHex(tt.expected))
-		if !bytes.Equal(expected.Bytes(), address.Bytes()) {
+		if !bytes.Equal(expected[:], address[:]) {
 			t.Errorf("test %d: expected %s, got %s", i, expected.String(), address.String())
 		}
 	}
@@ -780,7 +741,7 @@ func TestOpMCopy(t *testing.T) {
 		},
 	} {
 		var (
-			evm         = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.TestChainConfig, Config{})
+			evm         = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.AllProtocolChanges, Config{})
 			callContext = &CallContext{}
 			pc          = uint64(0)
 		)
@@ -812,10 +773,10 @@ func TestOpMCopy(t *testing.T) {
 		}
 		// and the dynamic cost
 		var haveGas uint64
-		if dynamicCost, err := gasMcopy(evm, callContext, 0, memorySize); err != nil {
+		if dynamicCost, err := gasMcopy(evm, callContext, mdgas.MdGas{}, memorySize); err != nil {
 			t.Error(err)
 		} else {
-			haveGas = GasFastestStep + dynamicCost
+			haveGas = GasFastestStep + dynamicCost.Execution
 		}
 		// Expand mem
 		if memorySize > 0 {
@@ -849,7 +810,7 @@ func TestOpCLZ(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			var (
-				evm         = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.TestChainConfig, Config{})
+				evm         = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.AllProtocolChanges, Config{})
 				callContext = &CallContext{}
 			)
 
@@ -868,7 +829,7 @@ func TestOpCLZ(t *testing.T) {
 			if gotLen := callContext.Stack.len(); gotLen != 1 {
 				t.Fatalf("stack length = %d; want 1", gotLen)
 			}
-			result := callContext.Stack.pop()
+			result := callContext.Stack.popCopy()
 
 			if got := result.Uint64(); got != tc.want {
 				t.Fatalf("clz(%q) = %d; want %d", tc.inputHex, got, tc.want)
@@ -877,13 +838,72 @@ func TestOpCLZ(t *testing.T) {
 	}
 }
 
+func TestOpDifficulty(t *testing.T) {
+	t.Parallel()
+	randao := common.HexToHash("0x0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20")
+	difficulty := uint256.MustFromHex("0x7000000000000007600000000000000650000000000000054000000000000004")
+	tests := []struct {
+		name     string
+		blockCtx evmtypes.BlockContext
+		want     uint256.Int
+	}{
+		{"prevrandao", evmtypes.BlockContext{PrevRanDao: &randao, Difficulty: *difficulty}, *new(uint256.Int).SetBytes(randao[:])},
+		{"zero prevrandao", evmtypes.BlockContext{PrevRanDao: &common.Hash{}, Difficulty: *difficulty}, uint256.Int{}},
+		{"difficulty", evmtypes.BlockContext{Difficulty: *difficulty}, *difficulty},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			evm := NewEVM(tc.blockCtx, evmtypes.TxContext{}, nil, chain.AllProtocolChanges, Config{})
+			callContext := &CallContext{}
+			callContext.Stack.push(*uint256.NewInt(1))
+			callContext.Stack.push(*uint256.MustFromHex("0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"))
+			callContext.Stack.pop()
+			pc, res, err := opDifficulty(42, evm, callContext)
+			require.NoError(t, err)
+			require.Nil(t, res)
+			require.Equal(t, uint64(42), pc)
+			require.Equal(t, 2, callContext.Stack.len())
+			require.Equal(t, tc.want, *callContext.Stack.peek())
+			require.Equal(t, *uint256.NewInt(1), *callContext.Stack.back(1))
+		})
+	}
+}
+
+func TestPushMatchesSetBytes(t *testing.T) {
+	code := make([]byte, 70)
+	for i := range code {
+		code[i] = 0x5a ^ byte(i*37)
+	}
+	for size := uint64(1); size <= 32; size++ {
+		push := makePush(size, int(size))
+		for pc := range uint64(len(code)) {
+			scope := &CallContext{}
+			scope.Contract.Code = code
+			fillSlotAboveTopWithOnes(&scope.Stack)
+			next, _, err := push(pc, nil, scope)
+			require.NoError(t, err)
+			require.Equal(t, pc+size, next)
+			start, end := min(pc+1, uint64(len(code))), min(pc+1+size, uint64(len(code)))
+			want := new(uint256.Int).SetBytes(common.RightPadBytes(code[start:end], int(size)))
+			require.Equal(t, want, scope.Stack.peek(), "PUSH%d at pc %d", size, pc)
+			require.Equal(t, 2, scope.Stack.len())
+		}
+	}
+}
+
+func fillSlotAboveTopWithOnes(st *Stack) {
+	st.pushRef().SetAllOne()
+	st.pushRef().SetAllOne()
+	st.pop()
+}
+
 // TestPush sanity-checks how code with immediates are handled when the code size is
 // smaller than the size of the immediate.
 func TestPush(t *testing.T) {
 	code := common.FromHex("0011223344556677889900aabbccddeeff0102030405060708090a0b0c0d0e0ff1e1d1c1b1a19181716151413121")
 	push32 := makePush(32, 32)
 
-	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.TestChainConfig, Config{})
+	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.AllProtocolChanges, Config{})
 	callContext := &CallContext{}
 	callContext.Contract.Code = code
 
@@ -937,7 +957,7 @@ func TestPush(t *testing.T) {
 	} {
 		pc := uint64(i)
 		push32(pc, evm, callContext)
-		res := callContext.Stack.pop()
+		res := callContext.Stack.popCopy()
 		if have := res.Hex(); have != want {
 			t.Fatalf("case %d, have %v want %v", i, have, want)
 		}
@@ -945,18 +965,19 @@ func TestPush(t *testing.T) {
 }
 
 func TestEIP8024_Execution(t *testing.T) {
-	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.TestChainConfig, Config{})
+	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.AllProtocolChanges, Config{})
 
 	tests := []struct {
-		name       string
-		codeHex    string
-		wantErr    error
-		wantOpcode OpCode
-		wantVals   []uint64
+		name        string
+		codeHex     string
+		wantErr     error
+		wantOperand *byte
+		wantOpcode  OpCode
+		wantVals    []uint64
 	}{
 		{
 			name:    "DUPN",
-			codeHex: "60016000808080808080808080808080808080e600",
+			codeHex: "60016000808080808080808080808080808080e680", // encode_single(17) = 0x80
 			wantVals: []uint64{
 				1,
 				0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -964,17 +985,14 @@ func TestEIP8024_Execution(t *testing.T) {
 			},
 		},
 		{
-			name:    "DUPN_MISSING_IMMEDIATE",
-			codeHex: "60016000808080808080808080808080808080e6",
-			wantVals: []uint64{
-				1,
-				0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-				1,
-			},
+			name:       "DUPN_MISSING_IMMEDIATE",
+			codeHex:    "60016000808080808080808080808080808080e6", // missing immediate defaults to 0x00, decode_single(0x00) = 145
+			wantErr:    &ErrStackUnderflow{},
+			wantOpcode: DUPN,
 		},
 		{
 			name:    "SWAPN",
-			codeHex: "600160008080808080808080808080808080806002e700",
+			codeHex: "600160008080808080808080808080808080806002e780", // encode_single(17) = 0x80
 			wantVals: []uint64{
 				1,
 				0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -982,33 +1000,39 @@ func TestEIP8024_Execution(t *testing.T) {
 			},
 		},
 		{
-			name:    "SWAPN_MISSING_IMMEDIATE",
-			codeHex: "600160008080808080808080808080808080806002e7",
-			wantVals: []uint64{
-				1,
-				0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-				2,
-			},
+			name:       "SWAPN_MISSING_IMMEDIATE",
+			codeHex:    "600160008080808080808080808080808080806002e7", // missing immediate defaults to 0x00, decode_single(0x00) = 145
+			wantErr:    &ErrStackUnderflow{},
+			wantOpcode: SWAPN,
 		},
 		{
 			name:     "EXCHANGE",
-			codeHex:  "600060016002e801",
+			codeHex:  "600060016002e88e", // encode_pair(1, 2) = 0x8e
 			wantVals: []uint64{2, 0, 1},
 		},
 		{
 			name:    "EXCHANGE_MISSING_IMMEDIATE",
 			codeHex: "600060006000600060006000600060006000600060006000600060006000600060006000600060006000600060006000600060006000600060016002e8",
+			// missing immediate defaults to 0x00, decode_pair(0x00) = (9, 16),
+			// swapping two zero-valued stack positions → no visible change
 			wantVals: []uint64{
-				2,
+				2, 1,
 				0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-				1,
 			},
 		},
 		{
-			name:       "INVALID_SWAPN_LOW",
-			codeHex:    "e75b",
-			wantErr:    &ErrInvalidOpCode{},
-			wantOpcode: SWAPN,
+			name:        "INVALID_DUPN_LOW",
+			codeHex:     "e65b",
+			wantErr:     &ErrInvalidOpCode{},
+			wantOpcode:  DUPN,
+			wantOperand: ptrToByte(0x5b),
+		},
+		{
+			name:        "INVALID_SWAPN_LOW",
+			codeHex:     "e75b",
+			wantErr:     &ErrInvalidOpCode{},
+			wantOpcode:  SWAPN,
+			wantOperand: ptrToByte(0x5b),
 		},
 		{
 			name:    "JUMP over INVALID_DUPN",
@@ -1017,62 +1041,59 @@ func TestEIP8024_Execution(t *testing.T) {
 		},
 		{
 			name:       "UNDERFLOW_DUPN_1",
-			codeHex:    "6000808080808080808080808080808080e600",
+			codeHex:    "6000808080808080808080808080808080e680", // encode_single(17) = 0x80, need 17 items, have 16
 			wantErr:    &ErrStackUnderflow{},
 			wantOpcode: DUPN,
 		},
-		// Additional test cases
 		{
-			name:       "INVALID_DUPN_LOW",
-			codeHex:    "e65b",
-			wantErr:    &ErrInvalidOpCode{},
-			wantOpcode: DUPN,
+			name:        "INVALID_EXCHANGE_LOW",
+			codeHex:     "e852", // 0x52 = 82, first byte in invalid range (81 < x < 128)
+			wantErr:     &ErrInvalidOpCode{},
+			wantOpcode:  EXCHANGE,
+			wantOperand: ptrToByte(0x52),
 		},
 		{
-			name:       "INVALID_EXCHANGE_LOW",
-			codeHex:    "e850",
-			wantErr:    &ErrInvalidOpCode{},
-			wantOpcode: EXCHANGE,
+			name:        "INVALID_DUPN_HIGH",
+			codeHex:     "e67f",
+			wantErr:     &ErrInvalidOpCode{},
+			wantOpcode:  DUPN,
+			wantOperand: ptrToByte(0x7f),
 		},
 		{
-			name:       "INVALID_DUPN_HIGH",
-			codeHex:    "e67f",
-			wantErr:    &ErrInvalidOpCode{},
-			wantOpcode: DUPN,
+			name:        "INVALID_SWAPN_HIGH",
+			codeHex:     "e77f",
+			wantErr:     &ErrInvalidOpCode{},
+			wantOpcode:  SWAPN,
+			wantOperand: ptrToByte(0x7f),
 		},
 		{
-			name:       "INVALID_SWAPN_HIGH",
-			codeHex:    "e77f",
-			wantErr:    &ErrInvalidOpCode{},
-			wantOpcode: SWAPN,
-		},
-		{
-			name:       "INVALID_EXCHANGE_HIGH",
-			codeHex:    "e87f",
-			wantErr:    &ErrInvalidOpCode{},
-			wantOpcode: EXCHANGE,
+			name:        "INVALID_EXCHANGE_HIGH",
+			codeHex:     "e87f",
+			wantErr:     &ErrInvalidOpCode{},
+			wantOpcode:  EXCHANGE,
+			wantOperand: ptrToByte(0x7f),
 		},
 		{
 			name:       "UNDERFLOW_DUPN_2",
-			codeHex:    "5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5fe600", // (n=17, need 17 items, have 16)
+			codeHex:    "5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5fe680", // encode_single(17) = 0x80, need 17 items, have 16
 			wantErr:    &ErrStackUnderflow{},
 			wantOpcode: DUPN,
 		},
 		{
 			name:       "UNDERFLOW_SWAPN",
-			codeHex:    "5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5fe700", // (n=17, need 18 items, have 17)
+			codeHex:    "5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5fe780", // encode_single(17) = 0x80, need 18 items, have 17
 			wantErr:    &ErrStackUnderflow{},
 			wantOpcode: SWAPN,
 		},
 		{
 			name:       "UNDERFLOW_EXCHANGE",
-			codeHex:    "60016002e801", // (n,m)=(1,2), need 3 items, have 2
+			codeHex:    "60016002e88e", // encode_pair(1, 2) = 0x8e, need 3 items, have 2
 			wantErr:    &ErrStackUnderflow{},
 			wantOpcode: EXCHANGE,
 		},
 		{
 			name:     "PC_INCREMENT",
-			codeHex:  "600060006000e80115",
+			codeHex:  "600060006000e88e15", // encode_pair(1, 2) = 0x8e
 			wantVals: []uint64{1, 0, 0},
 		},
 	}
@@ -1126,16 +1147,27 @@ func TestEIP8024_Execution(t *testing.T) {
 				if errOp != tc.wantOpcode {
 					t.Fatalf("expected error from opcode %s, got %s", tc.wantOpcode, errOp)
 				}
-				// Fail if we don't get the error we expect.
-				switch tc.wantErr.(type) {
-				case *ErrInvalidOpCode:
-					var want *ErrInvalidOpCode
-					if !errors.As(err, &want) {
+				var invalidOp *ErrInvalidOpCode
+				var stackUnderflow *ErrStackUnderflow
+				switch {
+				case errors.As(tc.wantErr, &invalidOp):
+					var got *ErrInvalidOpCode
+					if !errors.As(err, &got) {
 						t.Fatalf("expected ErrInvalidOpCode, got %v", err)
 					}
-				case *ErrStackUnderflow:
-					var want *ErrStackUnderflow
-					if !errors.As(err, &want) {
+					if got.opcode != tc.wantOpcode {
+						t.Fatalf("ErrInvalidOpCode.opcode=%s; want %s", got.opcode, tc.wantOpcode)
+					}
+					if tc.wantOperand != nil {
+						if got.operand == nil {
+							t.Fatalf("ErrInvalidOpCode.operand=nil; want 0x%02x", *tc.wantOperand)
+						}
+						if *got.operand != *tc.wantOperand {
+							t.Fatalf("ErrInvalidOpCode.operand=0x%02x; want 0x%02x", *got.operand, *tc.wantOperand)
+						}
+					}
+				case errors.As(tc.wantErr, &stackUnderflow):
+					if _, ok := errors.AsType[*ErrStackUnderflow](err); !ok {
 						t.Fatalf("expected ErrStackUnderflow, got %v", err)
 					}
 				default:
@@ -1162,4 +1194,171 @@ func TestEIP8024_Execution(t *testing.T) {
 			}
 		})
 	}
+}
+
+func ptrToByte(v byte) *byte {
+	b := v
+	return &b
+}
+
+func TestLogDataSurvivesMemoryAndArenaReuse(t *testing.T) {
+	t.Parallel()
+	ibs := state.New(state.NewNoopReader())
+	defer ibs.Close()
+	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
+	scope := &CallContext{Contract: *NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})}
+	op := makeLog(3)
+	for i, size := range []int{1024 * 1024, 1024, 32, 0, 1024 * 1024} {
+		ibs.SetTxContext(1, 0)
+		scope.Memory.Resize(uint64(size + 6))
+		data := bytes.Repeat([]byte{byte(i + 1)}, size)
+		scope.Memory.Set(6, uint64(size), data)
+		for range 3 {
+			scope.Stack.push(uint256.Int{})
+		}
+		scope.Stack.push(*uint256.NewInt(uint64(size)))
+		scope.Stack.push(*uint256.NewInt(6))
+		_, _, err := op(0, evm, scope)
+		require.NoError(t, err)
+		clear(scope.Memory.Data())
+		logs := ibs.GetRawLogs(0)
+		require.Len(t, logs, 1)
+		require.Equal(t, []common.Hash{{}, {}, {}}, logs[0].Topics)
+		require.Len(t, logs[0].Data, size)
+		require.True(t, bytes.Equal(data, logs[0].Data), "log data changed for size %d", size)
+		ibs.Reset()
+	}
+}
+
+func TestExpSmallOperandBoundaries(t *testing.T) {
+	t.Parallel()
+	modulus := new(big.Int).Lsh(big.NewInt(1), 256)
+	for _, base := range []uint64{0, 1, 2, 3, 7, 13, 136279841, 1 << 31, 1 << 32, 1 << 63, ^uint64(0)} {
+		for power := range uint64(66) {
+			scope := &CallContext{}
+			scope.Stack.push(*uint256.NewInt(power))
+			scope.Stack.push(*uint256.NewInt(base))
+			_, _, err := opExp(0, nil, scope)
+			require.NoError(t, err)
+			want := new(big.Int).Exp(new(big.Int).SetUint64(base), new(big.Int).SetUint64(power), modulus)
+			got := scope.Stack.popCopy()
+			require.Zero(t, want.Cmp(got.ToBig()), "base=%d exponent=%d", base, power)
+		}
+	}
+}
+
+func TestExpMatchesBigInt(t *testing.T) {
+	t.Parallel()
+	modulus := new(big.Int).Lsh(big.NewInt(1), 256)
+	edges := []uint256.Int{{}, {1}, {2}, {3}, {1<<62 - 1}, {1 << 62}, {1<<62 + 1}, {1 << 63}, {0, 1}, {0, 0, 1}, {0, 0, 0, 1 << 63}, *new(uint256.Int).SetAllOne()}
+	rng := rand.New(rand.NewPCG(1, 2))
+	random := func() uint256.Int {
+		x := uint256.Int{rng.Uint64(), rng.Uint64(), rng.Uint64(), rng.Uint64()}
+		return *x.Rsh(&x, uint(rng.IntN(256)))
+	}
+	bases := append([]uint256.Int{{3}, {5}, {0x081f7721}, {1 << 32}, {^uint64(0) - 2, ^uint64(0), ^uint64(0), ^uint64(0)}}, edges...)
+	exponents := append([]uint256.Int(nil), edges...)
+	for range 200 {
+		bases = append(bases, random())
+		exponents = append(exponents, random())
+	}
+	for _, base := range bases {
+		for _, exponent := range exponents {
+			scope := &CallContext{}
+			scope.Stack.push(exponent)
+			scope.Stack.push(base)
+			_, _, err := opExp(0, nil, scope)
+			require.NoError(t, err)
+			want := new(big.Int).Exp(base.ToBig(), exponent.ToBig(), modulus)
+			got := scope.Stack.popCopy()
+			require.Zero(t, want.Cmp(got.ToBig()), "base=%x exponent=%x", &base, &exponent)
+		}
+	}
+}
+
+func TestExpNegativeOneParity(t *testing.T) {
+	modulus := new(big.Int).Lsh(big.NewInt(1), 256)
+	base := new(uint256.Int).SetAllOne()
+	for _, exponent := range []uint256.Int{{}, {1}, {2}, {3}, {0, 1}, {1, 1}, {0, 0, 0, 1}, {1, 0, 0, 1}, *new(uint256.Int).SetAllOne()} {
+		scope := &CallContext{}
+		scope.Stack.push(exponent)
+		scope.Stack.push(*base)
+		_, _, err := opExp(0, nil, scope)
+		want := new(big.Int).Exp(base.ToBig(), exponent.ToBig(), modulus)
+		if err != nil || scope.Stack.peek().ToBig().Cmp(want) != 0 {
+			t.Fatalf("exp %x: got %x, %v; want %x", exponent, scope.Stack.peek(), err, want)
+		}
+	}
+}
+
+func TestContextAddressWordsReusedFrame(t *testing.T) {
+	evm := &EVM{}
+	addresses := []accounts.Address{
+		accounts.NilAddress,
+		accounts.ZeroAddress,
+		accounts.InternAddress(common.HexToAddress("0x1234567890abcdef1234567890abcdef12345678")),
+		accounts.InternAddress(common.HexToAddress("0xabcdef0123456789abcdef0123456789abcdef01")),
+	}
+	for frame := range addresses {
+		address := addresses[frame]
+		origin := addresses[(frame+1)%len(addresses)]
+		caller := addresses[(frame+2)%len(addresses)]
+		coinbase := addresses[(frame+3)%len(addresses)]
+		evm.TxContext = evmtypes.TxContext{Origin: origin}
+		evm.Context = evmtypes.BlockContext{Coinbase: coinbase}
+		scope := evm.getCallContext(*NewContract(caller, caller, address, uint256.Int{}), nil, mdgas.MdGas{})
+		for _, tc := range []struct {
+			name    string
+			op      executionFunc
+			address accounts.Address
+		}{
+			{"ADDRESS", opAddress, address},
+			{"ORIGIN", opOrigin, origin},
+			{"CALLER", opCaller, caller},
+			{"COINBASE", opCoinbase, coinbase},
+		} {
+			value := tc.address.Value()
+			want := new(uint256.Int).SetBytes(value[:])
+			for range 2 {
+				scope.Stack.push(*uint256.MustFromHex("0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"))
+				scope.Stack.pop()
+				_, _, err := tc.op(0, evm, scope)
+				if err != nil || *scope.Stack.peek() != *want {
+					t.Fatalf("frame %d %s: got %x, %v; want %x", frame, tc.name, scope.Stack.peek(), err, want)
+				}
+				scope.Stack.Reset()
+			}
+		}
+		evm.putCallContext(scope)
+	}
+}
+
+// A context idle in the pool must not pin interned keys: a handle keeps its canonical
+// map entry alive.
+func TestPutReleasesFrameSlotKeys(t *testing.T) {
+	var evm EVM
+	ctx := evm.getCallContext(Contract{}, nil, mdgas.MdGas{})
+	ctx.slots.key[0] = accounts.InternKey(common.Hash{1})
+	ctx.slots.key[1] = accounts.InternKey(common.Hash{2})
+	evm.putCallContext(ctx)
+	require.Equal(t, [2]accounts.StorageKey{}, ctx.slots.key)
+}
+
+// A failed header read is the node's failure, not the transaction's. BLOCKHASH records it as a
+// state read error, so the executor does not judge the block by the call it aborted.
+func TestBlockhashRecordsAHeaderReadError(t *testing.T) {
+	t.Parallel()
+	ibs := state.New(state.NewNoopReader())
+	defer ibs.Close()
+	readErr := errors.New("header read failed")
+	blockCtx := gasTraceBlockContext()
+	blockCtx.BlockNumber = 10
+	blockCtx.GetHash = func(uint64) (common.Hash, error) { return common.Hash{}, readErr }
+	evm := NewEVM(blockCtx, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
+	c := NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
+	c.Code = []byte{byte(PUSH1), 9, byte(BLOCKHASH)}
+
+	_, _, _, err := evm.run(*c, mdgas.MdGas{Execution: 100_000}, nil, false, false, false)
+	require.ErrorIs(t, err, readErr)
+	require.ErrorIs(t, ibs.StateReadError(), readErr)
 }

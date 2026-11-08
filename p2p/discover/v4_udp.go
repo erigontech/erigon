@@ -153,9 +153,8 @@ func ListenV4(c UDPConn, ln *enode.LocalNode, cfg Config) (*UDPv4, error) {
 	t.tab = tab
 	go tab.loop()
 
-	t.wg.Add(2)
-	go t.loop()
-	go t.readLoop(cfg.Unhandled)
+	t.wg.Go(t.loop)
+	t.wg.Go(func() { t.readLoop(cfg.Unhandled) })
 	return t, nil
 }
 
@@ -263,7 +262,7 @@ func (t *UDPv4) sendPing(toid enode.ID, toaddr netip.AddrPort, callback func()) 
 	})
 	// Send the packet.
 	t.localNode.UDPContact(toaddr)
-	t.write(toaddr, toid, req.Name(), packet)
+	_ = t.write(toaddr, toid, req.Name(), packet)
 	return rm
 }
 
@@ -343,7 +342,7 @@ func (t *UDPv4) findnode(toid enode.ID, toAddrPort netip.AddrPort, target v4wire
 		}
 		return true, nreceived >= bucketSize
 	})
-	t.send(toAddrPort, toid, &v4wire.Findnode{
+	_, _ = t.send(toAddrPort, toid, &v4wire.Findnode{
 		Target:     target,
 		Expiration: uint64(time.Now().Add(expiration).Unix()),
 	})
@@ -361,7 +360,10 @@ func (t *UDPv4) findnode(toid enode.ID, toAddrPort netip.AddrPort, target v4wire
 
 // RequestENR sends ENRRequest to the given node and waits for a response.
 func (t *UDPv4) RequestENR(n *enode.Node) (*enode.Node, error) {
-	addr, _ := n.UDPEndpoint()
+	addr, ok := n.UDPEndpoint()
+	if !ok {
+		return nil, errNoUDPEndpoint
+	}
 	t.ensureBond(n.ID(), addr)
 
 	req := &v4wire.ENRRequest{
@@ -379,7 +381,7 @@ func (t *UDPv4) RequestENR(n *enode.Node) (*enode.Node, error) {
 		return matched, matched
 	})
 	// Send the packet and wait for the reply.
-	t.write(addr, n.ID(), req.Name(), packet)
+	_ = t.write(addr, n.ID(), req.Name(), packet)
 	if err := <-rm.errc; err != nil {
 		return nil, err
 	}
@@ -395,7 +397,7 @@ func (t *UDPv4) RequestENR(n *enode.Node) (*enode.Node, error) {
 		return n, nil // response record is older
 	}
 	if err := netutil.CheckRelayAddr(addr.Addr(), respN.IPAddr()); err != nil {
-		return nil, fmt.Errorf("invalid IP in response record: %v", err)
+		return nil, fmt.Errorf("invalid IP in response record: %w", err)
 	}
 	return respN, nil
 }
@@ -434,8 +436,6 @@ func (t *UDPv4) handleReply(from enode.ID, fromIP netip.Addr, req v4wire.Packet)
 // loop runs in its own goroutine. it keeps track of
 // the refresh timer and the pending reply queue.
 func (t *UDPv4) loop() {
-	defer t.wg.Done()
-
 	var (
 		plist        = list.New()
 		timeout      = time.NewTimer(0)
@@ -452,16 +452,16 @@ func (t *UDPv4) loop() {
 		}
 		// Start the timer so it fires when the next pending reply has expired.
 		now := time.Now()
-		for el := plist.Front(); el != nil; el = el.Next() {
-			nextTimeout = el.Value.(*replyMatcher)
-			if dist := nextTimeout.deadline.Sub(now); dist < 2*respTimeout {
+		for p, el := range iterList[*replyMatcher](plist) {
+			nextTimeout = p
+			if dist := p.deadline.Sub(now); dist < 2*respTimeout {
 				timeout.Reset(dist)
 				return
 			}
 			// Remove pending replies whose deadline is too far in the
 			// future. These can occur if the system clock jumped
 			// backwards after the deadline was assigned.
-			nextTimeout.errc <- errClockWarp
+			p.errc <- errClockWarp
 			plist.Remove(el)
 		}
 		nextTimeout = nil
@@ -484,8 +484,7 @@ func (t *UDPv4) loop() {
 
 		case r := <-t.gotreply:
 			var matched bool // whether any replyMatcher considered the reply acceptable.
-			for el := plist.Front(); el != nil; el = el.Next() {
-				p := el.Value.(*replyMatcher)
+			for p, el := range iterList[*replyMatcher](plist) {
 				if p.from == r.from && p.ptype == r.data.Kind() && p.ip == r.ip {
 					ok, requestDone := p.callback(r.data)
 					matched = matched || ok
@@ -505,8 +504,7 @@ func (t *UDPv4) loop() {
 			nextTimeout = nil
 
 			// Notify and remove callbacks whose deadline is in the past.
-			for el := plist.Front(); el != nil; el = el.Next() {
-				p := el.Value.(*replyMatcher)
+			for p, el := range iterList[*replyMatcher](plist) {
 				if now.After(p.deadline) || now.Equal(p.deadline) {
 					p.errc <- errTimeout
 					plist.Remove(el)
@@ -541,7 +539,6 @@ func (t *UDPv4) write(toaddr netip.AddrPort, toid enode.ID, what string, packet 
 
 // readLoop runs in its own goroutine. it handles incoming UDP packets.
 func (t *UDPv4) readLoop(unhandled chan<- ReadPacket) {
-	defer t.wg.Done()
 	if unhandled != nil {
 		defer close(unhandled)
 	}
@@ -551,20 +548,21 @@ func (t *UDPv4) readLoop(unhandled chan<- ReadPacket) {
 		nbytes, from, err := t.conn.ReadFromUDPAddrPort(buf)
 		if netutil.IsTemporaryError(err) {
 			// Ignore temporary read errors.
-			t.log.Debug("[p2p] Temporary UDP read error", "err", err)
+			t.log.Trace("[p2p] Temporary UDP read error", "err", err)
 			continue
 		} else if err != nil {
 			// Shut down the loop for permanent errors.
 			if !errors.Is(err, io.EOF) {
-				t.log.Debug("[p2p] UDP read error", "err", err)
+				t.log.Trace("[p2p] UDP read error", "err", err)
 			}
 			return
 		}
 		if err := t.handlePacket(from, buf[:nbytes]); err != nil && unhandled == nil {
-			t.log.Debug("[p2p] Bad discv4 packet", "addr", from, "err", err)
+			t.log.Trace("[p2p] Bad discv4 packet", "addr", from, "err", err)
 		} else if err != nil && unhandled != nil {
+			p := ReadPacket{bytes.Clone(buf[:nbytes]), from}
 			select {
-			case unhandled <- ReadPacket{buf[:nbytes], from}:
+			case unhandled <- p:
 			default:
 			}
 		}
@@ -693,7 +691,7 @@ func (t *UDPv4) handlePing(h *packetHandlerV4, from netip.AddrPort, fromID enode
 	req := h.Packet.(*v4wire.Ping)
 
 	// Reply.
-	t.send(from, fromID, &v4wire.Pong{
+	_, _ = t.send(from, fromID, &v4wire.Pong{
 		To:         v4wire.NewEndpoint(from, req.From.TCP),
 		ReplyTok:   mac,
 		Expiration: uint64(time.Now().Add(expiration).Unix()),
@@ -712,9 +710,13 @@ func (t *UDPv4) handlePing(h *packetHandlerV4, from netip.AddrPort, fromID enode
 	}
 
 	// Update node database and endpoint predictor.
-	t.db.UpdateLastPingReceived(n.ID(), from.Addr(), time.Now())
-	toaddr := netip.AddrPortFrom(netutil.IPToAddr(req.To.IP), req.To.UDP)
-	t.localNode.UDPEndpointStatement(from, toaddr)
+	if err := t.db.UpdateLastPingReceived(n.ID(), from.Addr(), time.Now()); err != nil {
+		t.log.Trace("[p2p] Failed to update last ping received", "id", n.ID(), "err", err)
+	}
+	if t.checkBond(fromID, from) {
+		toaddr := netip.AddrPortFrom(netutil.IPToAddr(req.To.IP), req.To.UDP)
+		t.localNode.UDPEndpointStatement(from, toaddr)
+	}
 }
 
 // PONG/v4
@@ -730,7 +732,9 @@ func (t *UDPv4) verifyPong(h *packetHandlerV4, from netip.AddrPort, fromID enode
 	}
 	toaddr := netip.AddrPortFrom(netutil.IPToAddr(req.To.IP), req.To.UDP)
 	t.localNode.UDPEndpointStatement(from, toaddr)
-	t.db.UpdateLastPongReceived(fromID, from.Addr(), time.Now())
+	if err := t.db.UpdateLastPongReceived(fromID, from.Addr(), time.Now()); err != nil {
+		t.log.Trace("[p2p] Failed to update last pong received", "id", fromID, "err", err)
+	}
 	return nil
 }
 
@@ -771,13 +775,13 @@ func (t *UDPv4) handleFindnode(h *packetHandlerV4, from netip.AddrPort, fromID e
 			p.Nodes = append(p.Nodes, nodeToRPC(n))
 		}
 		if len(p.Nodes) == v4wire.MaxNeighbors {
-			t.send(from, fromID, &p)
+			_, _ = t.send(from, fromID, &p)
 			p.Nodes = p.Nodes[:0]
 			sent = true
 		}
 	}
 	if len(p.Nodes) > 0 || !sent {
-		t.send(from, fromID, &p)
+		_, _ = t.send(from, fromID, &p)
 	}
 }
 
@@ -810,7 +814,7 @@ func (t *UDPv4) verifyENRRequest(h *packetHandlerV4, from netip.AddrPort, fromID
 }
 
 func (t *UDPv4) handleENRRequest(h *packetHandlerV4, from netip.AddrPort, fromID enode.ID, mac []byte) {
-	t.send(from, fromID, &v4wire.ENRResponse{
+	_, _ = t.send(from, fromID, &v4wire.ENRResponse{
 		ReplyTok: mac,
 		Record:   *t.localNode.Node().Record(),
 	})

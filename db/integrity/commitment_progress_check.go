@@ -4,11 +4,11 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/services"
 )
 
-func CheckStateProgress(ctx context.Context, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool) (err error) {
+func CheckStateProgress(ctx context.Context, db kv.TemporalRoDB, blockReader dbservices.FullBlockReader) (err error) {
 	// state files should not be ahead of blocks files
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -25,7 +25,7 @@ func CheckStateProgress(ctx context.Context, db kv.TemporalRoDB, blockReader ser
 	}
 
 	if stateFileProgress > blockFileProgress {
-		return fmt.Errorf("state files progress (%d) is ahead of blocks files progress (%d)", stateFileProgress, blockFileProgress)
+		return fmt.Errorf("state files progress (%d) is ahead of blocks files progress (%d). To recover: erigon seg rm-state --latest --datadir=<datadir>, then run integration stage_exec --reset --datadir=<datadir>", stateFileProgress, blockFileProgress)
 	}
 
 	return nil
