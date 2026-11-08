@@ -301,6 +301,9 @@ func keysWithChild(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, keys [][]
 				bits = 0
 				if err == nil && len(branch) >= 4 {
 					bits = binary.BigEndian.Uint16(branch[2:4])
+					if pfRefs {
+						refPrefixes.add(prefix)
+					}
 				}
 				lastPrefix = k[:depth]
 			}
@@ -655,10 +658,29 @@ func prefetchBranchRefs(ctx context.Context, ttx kv.TemporalTx, hashedKeys [][]b
 		return
 	}
 	start := time.Now()
-	prefixes := flatPrefixes(hashedKeys)
-	for depth := prefetchFlatDepth + 1; depth <= commitment.WarmupMaxDepth; depth++ {
-		prefixes = append(prefixes, compactPrefixes(hashedKeys, depth)...)
-	}
+	prefixes := refPrefixes.take()
 	branches, pages, err := p.PrefetchBranchRefs(ctx, prefixes)
 	log.Info("[warmBAL] branch refs prefetch", "prefixes", len(prefixes), "branches", branches, "pages", pages, "err", err, "elapsed", time.Since(start))
+}
+
+// refPrefixes collects the branch prefixes the trie walk found, for the PF_REFS probe.
+var refPrefixes prefixSet
+
+type prefixSet struct {
+	mu   sync.Mutex
+	list [][]byte
+}
+
+func (s *prefixSet) add(p []byte) {
+	s.mu.Lock()
+	s.list = append(s.list, bytes.Clone(p))
+	s.mu.Unlock()
+}
+
+func (s *prefixSet) take() [][]byte {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	l := s.list
+	s.list = nil
+	return l
 }

@@ -2,7 +2,6 @@ package state
 
 import (
 	"context"
-	"os"
 
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/mmap"
@@ -15,7 +14,6 @@ import (
 // commitment branches (as stored in files) point to. Probe for a second-stage trie prefetch.
 func (at *AggregatorRoTx) PrefetchBranchRefs(ctx context.Context, prefixes [][]byte) (branches, pages int, err error) {
 	cd, acc, sto := at.d[kv.CommitmentDomain], at.d[kv.AccountsDomain], at.d[kv.StorageDomain]
-	pg := uintptr(os.Getpagesize())
 	seen := map[uintptr]struct{}{}
 	var list []uintptr
 	add := func(r *seg.Reader, key []byte) {
@@ -24,11 +22,9 @@ func (at *AggregatorRoTx) PrefetchBranchRefs(ctx context.Context, prefixes [][]b
 		if !ok {
 			return
 		}
-		for _, p := range []uintptr{a, a + pg} { // a word can run into the next page
-			if _, dup := seen[p]; !dup {
-				seen[p] = struct{}{}
-				list = append(list, p)
-			}
+		if _, dup := seen[a]; !dup {
+			seen[a] = struct{}{}
+			list = append(list, a)
 		}
 	}
 	readers := map[*seg.Decompressor]*seg.Reader{}
