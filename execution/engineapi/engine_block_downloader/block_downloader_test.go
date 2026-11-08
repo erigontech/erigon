@@ -116,7 +116,7 @@ type domainAheadExecStub struct {
 	fcuCalls       int
 }
 
-func (*domainAheadExecStub) ValidateChain(context.Context, common.Hash, uint64) (execmodule.ValidationResult, error) {
+func (*domainAheadExecStub) ValidateChain(context.Context, *types.Block) (execmodule.ValidationResult, error) {
 	return execmodule.ValidationResult{ValidationStatus: execmodule.ExecutionStatusTooFarAway}, nil
 }
 

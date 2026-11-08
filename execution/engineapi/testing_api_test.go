@@ -119,9 +119,9 @@ func (s *stubExecutionModule) InsertBlocks(ctx context.Context, blocks []*types.
 	return execmodule.ExecutionStatusSuccess, nil
 }
 
-func (s *stubExecutionModule) ValidateChain(ctx context.Context, blockHash common.Hash, blockNumber uint64) (execmodule.ValidationResult, error) {
+func (s *stubExecutionModule) ValidateChain(ctx context.Context, block *types.Block) (execmodule.ValidationResult, error) {
 	if s.validateChainFunc != nil {
-		return s.validateChainFunc(ctx, blockHash, blockNumber)
+		return s.validateChainFunc(ctx, block.Hash(), block.NumberU64())
 	}
 	return execmodule.ValidationResult{}, nil
 }

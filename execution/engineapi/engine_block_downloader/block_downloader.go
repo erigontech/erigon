@@ -169,7 +169,7 @@ func (e *EngineBlockDownloader) processReq(ctx context.Context, req BackwardDown
 	if err != nil {
 		return fmt.Errorf("could not insert request chain tip for validation: %w", err)
 	}
-	status, validationErr, latestValidHash, err := e.chainRW.ValidateChain(ctx, tip.Hash(), tip.NumberU64())
+	status, validationErr, latestValidHash, err := e.chainRW.ValidateChain(ctx, tip)
 	if err != nil {
 		return fmt.Errorf("request chain tip validation failed: %w", err)
 	}
@@ -273,7 +273,7 @@ func (e *EngineBlockDownloader) downloadBlocks(ctx context.Context, req Backward
 }
 
 func (e *EngineBlockDownloader) execDownloadedBatch(ctx context.Context, block *types.Block, requested common.Hash) error {
-	status, validationErr, lastValidHash, err := e.chainRW.ValidateChain(ctx, block.Hash(), block.NumberU64())
+	status, validationErr, lastValidHash, err := e.chainRW.ValidateChain(ctx, block)
 	if err != nil {
 		return err
 	}

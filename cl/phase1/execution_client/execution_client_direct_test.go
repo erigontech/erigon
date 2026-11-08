@@ -61,7 +61,7 @@ func (s *newPayloadModuleStub) CurrentHeader(context.Context) (*types.Header, er
 	return &types.Header{}, nil
 }
 
-func (s *newPayloadModuleStub) ValidateChain(context.Context, common.Hash, uint64) (execmodule.ValidationResult, error) {
+func (s *newPayloadModuleStub) ValidateChain(context.Context, *types.Block) (execmodule.ValidationResult, error) {
 	s.validationCalls++
 	return execmodule.ValidationResult{ValidationStatus: execmodule.ExecutionStatusSuccess}, nil
 }

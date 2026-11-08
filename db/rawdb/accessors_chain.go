@@ -731,6 +731,17 @@ func WriteRawBodyIfNotExists(db kv.RwTx, hash common.Hash, number uint64, body *
 	return WriteRawBody(db, hash, number, body)
 }
 
+func WriteBodyIfNotExists(db kv.RwTx, hash common.Hash, number uint64, body *types.Body) (ok bool, err error) {
+	exists, err := db.Has(kv.BlockBody, dbutils.BlockBodyKey(number, hash))
+	if err != nil || exists {
+		return false, err
+	}
+	if err := WriteBody(db, hash, number, body); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 func WriteRawBody(db kv.RwTx, hash common.Hash, number uint64, body *types.RawBody) (ok bool, err error) {
 	baseTxnID, err := db.IncrementSequence(kv.EthTx, uint64(types.TxCountToTxAmount(len(body.Transactions))))
 	if err != nil {
@@ -752,9 +763,6 @@ func WriteRawBody(db kv.RwTx, hash common.Hash, number uint64, body *types.RawBo
 }
 
 func WriteBody(db kv.RwTx, hash common.Hash, number uint64, body *types.Body) (err error) {
-	// Pre-processing
-	body.SendersFromTxs()
-
 	baseTxnID, err := db.IncrementSequence(kv.EthTx, uint64(types.TxCountToTxAmount(len(body.Transactions))))
 	if err != nil {
 		return err

@@ -948,9 +948,9 @@ func (emt *ExecModuleTester) InsertBlocks(ctx context.Context, blocks []*types.B
 	})
 }
 
-func (emt *ExecModuleTester) ValidateChain(ctx context.Context, header *types.Header) (execmodule.ValidationResult, error) {
+func (emt *ExecModuleTester) ValidateChain(ctx context.Context, block *types.Block) (execmodule.ValidationResult, error) {
 	return retryBusy(ctx, func() (execmodule.ValidationResult, bool, error) {
-		result, err := emt.ExecModule.ValidateChain(ctx, header.Hash(), header.Number.Uint64())
+		result, err := emt.ExecModule.ValidateChain(ctx, block)
 		if err != nil {
 			return execmodule.ValidationResult{}, false, err
 		}
@@ -1019,7 +1019,7 @@ func (emt *ExecModuleTester) InsertValidateAndUfc1By1(ctx context.Context, block
 	}
 	for i, block := range blocks {
 		header := block.Header()
-		validationResult, err := emt.ValidateChain(ctx, header)
+		validationResult, err := emt.ValidateChain(ctx, block)
 		if err != nil {
 			return err
 		}
