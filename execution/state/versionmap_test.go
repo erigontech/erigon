@@ -2205,3 +2205,23 @@ func TestVersionMapLatchesWhenTheEntryAlreadyExists(t *testing.T) {
 	m.WriteNonce(addr, Version{TxIndex: 0}, 7, true)
 	require.NotNil(t, m.load(addr), "a completed write must be visible")
 }
+
+// A flush that panics must release the account lock, or the account's readers block forever
+// after the executor recovers the panic.
+func TestFlushVersionedWrites_PanicReleasesTheAccountLock(t *testing.T) {
+	t.Parallel()
+
+	addr := getAddress(45)
+	vm := NewVersionMap(nil)
+	balanceWrite := func(incarnation int, val uint64) *WriteSet {
+		return newWriteSet(
+			&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Key: accounts.NilKey, Version: Version{TxIndex: 5, Incarnation: incarnation}}, Val: *uint256.NewInt(val)},
+		)
+	}
+	vm.FlushVersionedWrites(balanceWrite(2, 100), false)
+
+	require.Panics(t, func() { vm.FlushVersionedWrites(balanceWrite(1, 42), false) })
+	e := vm.load(addr)
+	require.True(t, e.mu.TryLock(), "the account lock is still held after the panic")
+	e.mu.Unlock()
+}
