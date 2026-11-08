@@ -22,12 +22,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
 	"sync"
 
 	"github.com/libp2p/go-libp2p/core/peer"
+	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/sentinel"
@@ -89,6 +91,9 @@ func (s *SentinelServer) releaseStream(key peerStream) {
 		delete(s.openStreams, key)
 	}
 }
+
+// responseBodyBudget bounds the response bytes buffered across all requests in flight: two max-size by-range responses.
+var responseBodyBudget = semaphore.NewWeighted(2 * int64(httpreqresp.MaxResponseBodySize(communication.BeaconBlocksByRangeProtocolV2, math.MaxUint64)))
 
 type peerRequestBackend interface {
 	GetPeersCount() (active int, connected int, disconnected int)
@@ -165,6 +170,11 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 		return nil, ErrPeerBusy
 	}
 	defer s.releaseStream(stream)
+	budget := int64(httpreqresp.MaxResponseBodySize(req.Topic, req.MaxResponseBytes))
+	if err := responseBodyBudget.Acquire(ctx, budget); err != nil {
+		return nil, err
+	}
+	defer responseBodyBudget.Release(budget)
 
 	// prepare the http request
 	httpReq, err := http.NewRequestWithContext(ctx, "GET", "http://service.internal/", bytes.NewBuffer(req.Data))
