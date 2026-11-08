@@ -79,6 +79,10 @@ var (
 	// reader goroutine exists: flag parsing, or test setup before the first read.
 	KVReadLevelledMetrics = EnvBool("KV_READ_METRICS", false)
 
+	// KVFileReadSummaries times every file read into a summary shared by all workers, which serialises read-heavy
+	// blocks. The per-block read counters of the slow-block log must not turn it on.
+	KVFileReadSummaries = EnvBool("KV_READ_METRICS", false)
+
 	// allow simultaneous build of multiple snapshot types.
 	// Values from 1 to 4 makes sense since we have only 3 types of snapshots.
 	BuildSnapshotAllowance = EnvInt("SNAPSHOT_BUILD_SEMA_SIZE", 1) // allows 1 kind of snapshots to be built simultaneously

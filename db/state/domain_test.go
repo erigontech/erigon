@@ -40,6 +40,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/length"
@@ -60,6 +61,7 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	dto "github.com/prometheus/client_model/go"
 )
 
 type rndGen struct {
@@ -739,6 +741,47 @@ func (d *Domain) collateBuildIntegrate(ctx context.Context, step kv.Step, tx kv.
 	}
 	d.integrateDirtyFiles(sf, txFrom, txTo)
 	return nil
+}
+
+// The per-block read counters must not bring the per-file latency summaries with them: a summary is one shared
+// mutex for every file read of every worker.
+func TestDomain_FileReadObservesNoSummaryUnderBlockReadMetrics(t *testing.T) {
+	prev := dbg.KVReadLevelledMetrics
+	t.Cleanup(func() { dbg.KVReadLevelledMetrics = prev })
+	dbg.KVReadLevelledMetrics = true
+
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, 16, log.New())
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	key := bytes.Repeat([]byte{0xa1}, length.Addr)
+	domainRoTx := d.beginForTests()
+	writer := domainRoTx.NewWriter(db)
+	require.NoError(t, writer.PutWithPrev(key, []byte("value"), 1, nil))
+	require.NoError(t, writer.Flush(t.Context(), tx))
+	writer.Close()
+	domainRoTx.Close()
+
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+	require.NoError(t, d.collateBuildIntegrate(t.Context(), 0, tx, background.NewProgressSet()))
+	roTx := d.beginForTests()
+	defer roTx.Close()
+	_, err = roTx.Prune(t.Context(), tx, 0, 0, d.stepSize, math.MaxUint64, logEvery)
+	require.NoError(t, err)
+
+	sampleCount := func() uint64 {
+		var m dto.Metric
+		require.NoError(t, domainReadMetric(kv.AccountsDomain, 0).Write(&m))
+		return m.GetSummary().GetSampleCount()
+	}
+	before := sampleCount()
+	v, _, found, err := roTx.GetLatest(key, tx)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, []byte("value"), v)
+	require.Equal(t, before, sampleCount())
 }
 
 func collateAndMerge(t *testing.T, tx kv.RwTx, d *Domain, txs uint64) {
