@@ -194,6 +194,10 @@ func (t *prestateTracer) OnOpcodeV2(pc uint64, opcode byte, gas mdgas.MdGas, cos
 	caller := scope.Address()
 	switch {
 	case stackLen >= 3 && op == vm.TXDIFF:
+		// Undefined opcodes reach this hook before their execution error is set.
+		if !t.env.Rules.IsBogota {
+			return
+		}
 		param := &stackData[stackLen-1]
 		if !param.IsUint64() || param.Uint64() > 5 {
 			return
