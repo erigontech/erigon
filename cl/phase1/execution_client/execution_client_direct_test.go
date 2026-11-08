@@ -28,17 +28,28 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 type newPayloadModuleStub struct {
 	execmodule.ExecutionModule
 	inserted        []*types.Block
 	validationCalls int
+	recoveries      map[common.Hash]*exec.SendersRecovery
+}
+
+func (s *newPayloadModuleStub) AddSendersRecovery(blockHash common.Hash, r *exec.SendersRecovery) {
+	if s.recoveries == nil {
+		s.recoveries = map[common.Hash]*exec.SendersRecovery{}
+	}
+	s.recoveries[blockHash] = r
 }
 
 func (s *newPayloadModuleStub) InsertBlocks(_ context.Context, blocks []*types.Block) (execmodule.ExecutionStatus, error) {
@@ -109,6 +120,38 @@ func TestDirectNewPayloadTransactionEncoding(t *testing.T) {
 			require.Equal(t, 1, module.validationCalls)
 		})
 	}
+}
+
+func TestDirectNewPayloadRegistersSendersRecovery(t *testing.T) {
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	payload := cltypes.NewEth1Block(clparams.FuluVersion, &clparams.MainnetBeaconConfig)
+	payload.BlockNumber = 1
+	payload.Extra = solid.NewExtraData()
+	payload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(clparams.MainnetBeaconConfig.MaxWithdrawalsPerPayload), 44)
+	txn, err := types.SignTx(&types.DynamicFeeTransaction{
+		CommonTx: types.CommonTx{GasLimit: 21_000},
+		ChainID:  *chain.AllProtocolChanges.ChainID,
+	}, *types.MakeSigner(chain.AllProtocolChanges, payload.BlockNumber, payload.Time), key)
+	require.NoError(t, err)
+	raw, err := types.MarshalTransactionsBinary(types.Transactions{txn})
+	require.NoError(t, err)
+	payload.Transactions = solid.NewTransactionsSSZFromTransactions(raw)
+	parentRoot := common.Hash{}
+	payload.BlockHash, err = payload.ComputeBlockHash(&parentRoot, cltypes.ComputeExecutionRequestHash(nil), nil)
+	require.NoError(t, err)
+
+	module := &newPayloadModuleStub{}
+	client, err := NewExecutionClientDirect(chainreader.NewChainReaderEth1(chain.AllProtocolChanges, module, time.Second), nil)
+	require.NoError(t, err)
+	_, err = client.NewPayload(t.Context(), payload, &parentRoot, nil, nil)
+	require.NoError(t, err)
+
+	r, ok := module.recoveries[payload.BlockHash]
+	require.True(t, ok, "Caplin must start the recovery before validation, as Engine API newPayload does")
+	senders, err := r.Wait(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, []accounts.Address{accounts.InternAddress(crypto.PubkeyToAddress(key.PublicKey))}, senders)
 }
 
 func TestRetryAssembleBlockReturnsFirstSuccess(t *testing.T) {

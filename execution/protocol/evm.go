@@ -166,8 +166,8 @@ func GetHashFn(ref *types.Header, getHeader func(hash common.Hash, number uint64
 				}
 			}
 
+			hash, num := lastKnownHash, lastKnownNumber
 			header, err := func() (*types.Header, error) {
-				hash, num := lastKnownHash, lastKnownNumber
 				hashLookupCacheLock.Unlock()
 				defer hashLookupCacheLock.Lock()
 				return getHeader(hash, num)
@@ -176,7 +176,10 @@ func GetHashFn(ref *types.Header, getHeader func(hash common.Hash, number uint64
 				return common.Hash{}, err
 			}
 			if header == nil {
-				break
+				return common.Hash{}, fmt.Errorf("header %d %x not found", num, hash)
+			}
+			if header.Number.Uint64() != num {
+				return common.Hash{}, fmt.Errorf("header %x has number %d, want %d", hash, header.Number.Uint64(), num)
 			}
 			lastKnownHash = header.ParentHash
 			lastKnownNumber = header.Number.Uint64() - 1
@@ -187,8 +190,6 @@ func GetHashFn(ref *types.Header, getHeader func(hash common.Hash, number uint64
 				return lastKnownHash, nil
 			}
 		}
-
-		return common.Hash{}, nil
 	}
 }
 

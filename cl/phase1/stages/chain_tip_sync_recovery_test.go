@@ -217,6 +217,10 @@ func newChainTipBatchFixture(t *testing.T, replayStatus execution_client.Payload
 }
 
 func newChainTipBatchFixtureWithRecordedStatus(t *testing.T, replayStatus execution_client.PayloadStatus, recordStatus bool) (*Cfg, *chainTipBatchForkGraph, common.Hash, *cltypes.SignedBeaconBlock, *cltypes.SignedBeaconBlock, *testExecutionEngine) {
+	return newChainTipBatchFixtureWithBlob(t, replayStatus, recordStatus, false)
+}
+
+func newChainTipBatchFixtureWithBlob(t *testing.T, replayStatus execution_client.PayloadStatus, recordStatus, withBlob bool) (*Cfg, *chainTipBatchForkGraph, common.Hash, *cltypes.SignedBeaconBlock, *cltypes.SignedBeaconBlock, *testExecutionEngine) {
 	t.Helper()
 
 	beaconCfg, anchorState, parentBid, envelope, _ := validAnchorEnvelopeFixture(t, 0)
@@ -243,6 +247,10 @@ func newChainTipBatchFixtureWithRecordedStatus(t *testing.T, replayStatus execut
 		parentState.SetFinalizedCheckpoint(anchorCheckpoint)
 	}
 	parentBid.ParentBlockRoot = anchorRoot
+	if withBlob {
+		parentBid.BlobKzgCommitments.EnsureStaticProgressive(cltypes.MaxBlobsCommittmentsPerBlock, 48)
+		parentBid.BlobKzgCommitments.Append(&cltypes.KZGCommitment{})
+	}
 	envelope.Message.ParentBeaconBlockRoot = anchorRoot
 	envelope.Message.Payload.Time = state2.ComputeTimestampAtSlot(parentState, parentState.Slot())
 	requestsHash := cltypes.ComputeExecutionRequestHash(cltypes.GetExecutionRequestsList(beaconCfg, envelope.Message.ExecutionRequests))
@@ -368,6 +376,7 @@ func TestForwardSyncReplayMakesGloasPayloadAvailableForHeadSelection(t *testing.
 		envelope,
 		true,
 		shouldValidateForwardSyncPayload(cfg, true),
+		false,
 	))
 	require.NoError(t, cfg.forkChoice.OnBlock(t.Context(), fullChild, false, false, false))
 	fullChildRoot, err := fullChild.Block.HashSSZ()
