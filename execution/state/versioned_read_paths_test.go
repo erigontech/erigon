@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -381,7 +382,7 @@ func TestVersionedRead_RevivedFieldWipedReadCaughtAtCommit(t *testing.T) {
 			require.NoError(t, destructor.CreateAccount(addr, true))
 			_, err := destructor.Selfdestruct(addr, false)
 			require.NoError(t, err)
-			vm.FlushVersionedWrites(destructor.VersionedWrites(), true, "")
+			vm.FlushVersionedWrites(destructor.VersionedWrites(), true)
 			ibs := NewWithVersionMap(&emptyReader{}, vm)
 			defer ibs.Close()
 			ibs.SetTxContext(1, 3)
@@ -743,7 +744,7 @@ func TestVersionedRead_G9_FieldCellFlushedBeforeFallback(t *testing.T) {
 			tt.write(ws, addr, hdr)
 			vm.fieldMissHook = func() {
 				vm.fieldMissHook = nil
-				vm.FlushVersionedWrites(ws, true, "")
+				vm.FlushVersionedWrites(ws, true)
 			}
 
 			got, err := tt.read(ibs, addr)
@@ -781,7 +782,7 @@ func TestVersionedRead_RevivalFlushedAfterAbsentAccountRead(t *testing.T) {
 	vm, revival := creditedDestructAndRevival(addr, revived)
 	vm.absentAccountHook = func() {
 		vm.absentAccountHook = nil
-		vm.FlushVersionedWrites(revival, true, "")
+		vm.FlushVersionedWrites(revival, true)
 	}
 
 	ibs := NewWithVersionMap(&emptyReader{}, vm)
@@ -791,40 +792,6 @@ func TestVersionedRead_RevivalFlushedAfterAbsentAccountRead(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, vm.absentAccountHook, "the flush must land after the account read")
 	require.Equal(t, revived, account)
-	recorded, ok := ibs.versionedReads.GetAddress(addr)
-	require.True(t, ok)
-	require.Equal(t, VersionedRead[AccountView]{ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 1}}, Val: NewAccountView(revived)}, recorded)
-}
-
-// Tx 1 re-creates the account with CreateAccount, which also writes SelfDestruct=false, and its
-// writes are flushed as estimates after tx 2's account read found no account. The in-flight
-// self-destruct cell must not make the read treat the account as never destroyed: the read waits
-// for tx 1 and returns the re-created account.
-func TestVersionedRead_RecreateFlushedAfterAbsentAccountRead(t *testing.T) {
-	t.Parallel()
-	addr := accounts.InternAddress([20]byte{0x9c})
-	revived := &accounts.Account{Balance: *uint256.NewInt(12), CodeHash: accounts.EmptyCodeHash}
-	vm, revival := creditedDestructAndRevival(addr, revived)
-	revival.SetSelfDestruct(addr, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: Version{TxIndex: 1}}})
-	vm.absentAccountHook = func() {
-		vm.absentAccountHook = nil
-		vm.FlushVersionedWrites(revival, false, "")
-	}
-
-	ibs := NewWithVersionMap(&emptyReader{}, vm)
-	defer ibs.Close()
-	ibs.SetTxContext(1, 2)
-	waits := 0
-	ibs.SetWaitCommit(func(int) bool {
-		waits++
-		vm.MarkWritesComplete(revival)
-		return true
-	})
-	account, _, _, err := ibs.getVersionedAccount(addr, true)
-	require.NoError(t, err)
-	require.Nil(t, vm.absentAccountHook, "the flush must land after the account read")
-	require.Equal(t, revived, account)
-	require.Equal(t, 1, waits)
 	recorded, ok := ibs.versionedReads.GetAddress(addr)
 	require.True(t, ok)
 	require.Equal(t, VersionedRead[AccountView]{ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 1}}, Val: NewAccountView(revived)}, recorded)
@@ -848,7 +815,7 @@ func TestVersionedRead_DestructFlushedAfterMemoIsRecorded(t *testing.T) {
 	destruct.SetSelfDestruct(addr, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: Version{TxIndex: 1}}, Val: true})
 	destruct.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: Version{TxIndex: 1}, valStatus: ValueDeleted}})
 	destruct.SetIncarnation(addr, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: IncarnationPath, Version: Version{TxIndex: 1}}})
-	vm.FlushVersionedWrites(destruct, false, "")
+	vm.FlushVersionedWrites(destruct, false)
 	vm.MarkWritesValidated(destruct, nil)
 
 	_, err = ibs.Exist(addr)
@@ -859,34 +826,63 @@ func TestVersionedRead_DestructFlushedAfterMemoIsRecorded(t *testing.T) {
 	require.Equal(t, VersionInvalid, validateReads(vm, ibs, 3))
 }
 
-// Tx 1's re-creation is flushed as an estimate after tx 2's account read found no account, and
-// tx 1's re-execution withdraws it while the read waits on it: the read must return the account
-// that tx 0 left, as if tx 1 had not re-created it.
-func TestVersionedRead_RevivalWithdrawnDuringReRead(t *testing.T) {
+// Tx 0 created the account and self-destructed it to itself, which keeps its balance (EIP-8246) but
+// drops the account record. Tx 2's first load records an absence and returns the kept account.
+// Tx 1's re-creation of the account record is flushed before the second load and then withdrawn:
+// the second load must also return the kept account, which fails validation only while the
+// re-creation exists.
+func TestVersionedRead_KeptBalanceSurvivesWithdrawnRecreation(t *testing.T) {
 	t.Parallel()
-	addr := accounts.InternAddress([20]byte{0x9b})
-	vm, revival := creditedDestructAndRevival(addr, &accounts.Account{Balance: *uint256.NewInt(12), CodeHash: accounts.EmptyCodeHash})
+	addr := accounts.InternAddress([20]byte{0x9e})
+	vm := NewVersionMap(nil)
+	vm.WriteSelfDestruct(addr, Version{TxIndex: 0}, true, true)
+	vm.WriteBalance(addr, Version{TxIndex: 0}, *uint256.NewInt(5), true)
+	ibs := NewWithVersionMap(&emptyReader{}, vm)
+	defer ibs.Close()
+	ibs.SetTxContext(1, 2)
+	exists, err := ibs.Exist(addr)
+	require.NoError(t, err)
+	require.True(t, exists)
+
+	vm.WriteAddress(addr, Version{TxIndex: 1}, &accounts.Account{CodeHash: accounts.EmptyCodeHash}, false)
+	account, _, _, err := ibs.getVersionedAccount(addr, true)
+	require.NoError(t, err)
+	require.NotNil(t, account)
+	require.Equal(t, *uint256.NewInt(5), account.Balance)
+	require.Equal(t, VersionInvalid, validateReads(vm, ibs, 2))
+	vm.Delete(addr, AddressPath, accounts.NilKey, 1, false)
+	require.Equal(t, VersionValid, validateReads(vm, ibs, 2))
+}
+
+// Tx 0's destruct removed the account: its balance cell is stamped deleted, although it holds a
+// residual, as when the account is credited after the destruct in the same tx. Tx 2's recorded
+// absence is final, so tx 1's re-creation, flushed after the read, is not adopted mid-execution,
+// and the read fails validation.
+func TestVersionedRead_DeletedBalanceKeepsRecordedAbsence(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0x9f})
+	vm := NewVersionMap(nil)
+	vm.WriteSelfDestruct(addr, Version{TxIndex: 0}, true, true)
+	removal := &WriteSet{}
+	removal.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: Version{TxIndex: 0}, valStatus: ValueDeleted}, Val: *uint256.NewInt(5)})
+	vm.FlushVersionedWrites(removal, true)
+	recreated := &accounts.Account{Balance: *uint256.NewInt(12), CodeHash: accounts.EmptyCodeHash}
+	recreation := &WriteSet{}
+	recreation.SetAddress(addr, &VersionedWrite[*accounts.Account]{WriteHeader: WriteHeader{Address: addr, Path: AddressPath, Version: Version{TxIndex: 1}}, Val: recreated})
+	recreation.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: Version{TxIndex: 1}}, Val: recreated.Balance})
 	vm.absentAccountHook = func() {
 		vm.absentAccountHook = nil
-		vm.FlushVersionedWrites(revival, false, "")
+		vm.FlushVersionedWrites(recreation, true)
 	}
 
 	ibs := NewWithVersionMap(&emptyReader{}, vm)
 	defer ibs.Close()
 	ibs.SetTxContext(1, 2)
-	waits := 0
-	ibs.SetWaitCommit(func(int) bool {
-		waits++
-		vm.Delete(addr, AddressPath, accounts.NilKey, 1, false)
-		vm.Delete(addr, BalancePath, accounts.NilKey, 1, false)
-		return true
-	})
 	account, _, _, err := ibs.getVersionedAccount(addr, true)
 	require.NoError(t, err)
 	require.Nil(t, vm.absentAccountHook, "the flush must land after the account read")
-	require.NotNil(t, account)
-	require.Equal(t, *uint256.NewInt(5), account.Balance)
-	require.Equal(t, 1, waits)
+	require.Nil(t, account)
+	require.Equal(t, VersionInvalid, validateReads(vm, ibs, 2))
 }
 
 // storage fallback. Empty reader + no prior writes/reads → falls through
@@ -1130,7 +1126,6 @@ func TestVersionedRead_InFlightSelfDestructWithoutWaitRecordsDep(t *testing.T) {
 	ibs := NewWithVersionMap(NewReaderV3(domains.AsGetter(tx)), mvhm)
 	defer ibs.Close()
 	ibs.SetTxContext(1, 5)
-	ibs.SetWaitCommit(func(int) bool { return false })
 
 	addr := accounts.InternAddress([20]byte{0xf1})
 	writer := Version{TxIndex: 2}
@@ -1138,8 +1133,8 @@ func TestVersionedRead_InFlightSelfDestructWithoutWaitRecordsDep(t *testing.T) {
 	destruct.SetSelfDestruct(addr, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: writer}, Val: true})
 	burn := &WriteSet{}
 	burn.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: writer, valStatus: ValueDeleted}, Val: *uint256.NewInt(1)})
-	mvhm.FlushVersionedWrites(destruct, false, "")
-	mvhm.FlushVersionedWrites(burn, true, "")
+	mvhm.FlushVersionedWrites(destruct, false)
+	mvhm.FlushVersionedWrites(burn, true)
 
 	_, err := ibs.GetBalance(addr)
 	require.NoError(t, err)
@@ -1367,4 +1362,74 @@ func TestVersionedRead_CreateCarriesRevivedBalanceAfterEarlierDestroyedRead(t *t
 			require.EqualValues(t, 1000, bal.Uint64())
 		})
 	}
+}
+
+type codeStoreMap map[common.Hash][]byte
+
+func (m codeStoreMap) GetCodeByHash(codeHash []byte) ([]byte, bool) {
+	c, ok := m[common.BytesToHash(codeHash)]
+	return c, ok
+}
+
+type countingCodeReader struct {
+	codeReader
+	codeReads, codeSizeReads int
+}
+
+func (r *countingCodeReader) ReadAccountCode(addr accounts.Address) ([]byte, error) {
+	r.codeReads++
+	return r.codeReader.ReadAccountCode(addr)
+}
+
+func (r *countingCodeReader) ReadAccountCodeSize(addr accounts.Address) (int, error) {
+	r.codeSizeReads++
+	return r.codeReader.ReadAccountCodeSize(addr)
+}
+
+func newSharedCodeReplay(t *testing.T) (*IntraBlockState, *countingCodeReader, accounts.Address, []byte) {
+	t.Helper()
+	code := []byte{0x60, 0x01, 0x60, 0x02, 0x01, 0x00}
+	codeHash := crypto.Keccak256Hash(code)
+	addr := accounts.InternAddress([20]byte{0xC0, 0xDE})
+	acc := accounts.NewAccount()
+	acc.Nonce = 1
+	acc.CodeHash = accounts.InternCodeHash(codeHash)
+	reader := &countingCodeReader{codeReader: codeReader{addr: addr, account: &acc, code: code}}
+	ibs := NewWithVersionMap(reader, NewVersionMap(nil))
+	ibs.SetNoConflictDetection()
+	ibs.SetCodeByHash(codeStoreMap{codeHash: code})
+	ibs.SetTxContext(100, 0)
+	return ibs, reader, addr, code
+}
+
+func TestVersionedRead_CodeServedBySharedStore(t *testing.T) {
+	ibs, reader, addr, code := newSharedCodeReplay(t)
+
+	got, err := ibs.GetCode(addr)
+	require.NoError(t, err)
+	require.Equal(t, code, got)
+	require.Zero(t, reader.codeReads)
+}
+
+func TestVersionedRead_CodeSizeServedBySharedStore(t *testing.T) {
+	ibs, reader, addr, code := newSharedCodeReplay(t)
+
+	size, err := ibs.GetCodeSize(addr)
+	require.NoError(t, err)
+	require.Equal(t, len(code), size)
+	require.Zero(t, reader.codeReads+reader.codeSizeReads)
+}
+
+// A versioned read that finds a stateObject materialized before the IBS was bound to a
+// version map fails the read instead of panicking.
+func TestVersionedRead_MaterializedObjectFailsTheRead(t *testing.T) {
+	t.Parallel()
+	ibs := New(NewNoopReader())
+	addr := accounts.InternAddress(common.HexToAddress("0xab"))
+	require.NoError(t, ibs.CreateAccount(addr, true))
+	ibs.SetVersionMap(NewVersionMap(nil))
+	require.NotPanics(t, func() {
+		_, err := ibs.GetState(addr, accounts.InternKey(common.Hash{31: 1}))
+		require.Error(t, err)
+	})
 }

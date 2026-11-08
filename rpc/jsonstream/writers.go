@@ -19,7 +19,6 @@ package jsonstream
 import (
 	"encoding"
 	"slices"
-	"strconv"
 
 	"github.com/holiman/uint256"
 
@@ -62,7 +61,7 @@ func HexUint64Field(s *Stream, name string, v uint64) {
 	writeObjectFieldFast(s.stream, name)
 	buf := s.stream.Buffer()
 	start := len(buf)
-	buf = strconv.AppendUint(append(buf, '"', '0', 'x'), v, 16)
+	buf = hexutil.AppendUint64(append(buf, '"'), v)
 	s.commit(append(buf, '"'), start)
 	s.separatorPending = true
 	flushIfFull(s.stream)
@@ -96,4 +95,13 @@ func HexUint256Field(s *Stream, name string, v *uint256.Int) {
 	s.commit(buf, start)
 	s.separatorPending = true
 	flushIfFull(s.stream)
+}
+
+// HexKey writes the 0x-prefixed hex of b as a field name, for an object keyed by hashes or
+// addresses, without building the name as a string first.
+func HexKey(s *Stream, b []byte) {
+	s.beforeValue()
+	buf := hexutil.AppendQuoted(slices.Grow(s.stream.Buffer(), hexutil.QuotedLen(len(b))+1), b)
+	s.stream.SetBuffer(append(buf, ':'))
+	s.push(ItemField)
 }

@@ -45,6 +45,7 @@ import (
 type ForkChoiceStorageMock struct {
 	PreparationImports                    forkchoice.PayloadPreparationImports
 	ProposerLookaheadVal                  solid.Uint64VectorSSZ
+	AttestationDataFn                     func(common.Hash, uint64) (solid.AttestationData, bool)
 	Ancestors                             map[uint64]forkchoice.ForkChoiceNode
 	AncestorFn                            func(root common.Hash, slot uint64) forkchoice.ForkChoiceNode
 	AncestorCalls                         atomic.Int64
@@ -60,8 +61,10 @@ type ForkChoiceStorageMock struct {
 	HeadPayloadStatusVal                  cltypes.PayloadStatus
 	BlockProcessingVal                    bool
 	GetHeadNodeFn                         func() (forkchoice.ForkChoiceNode, uint64, error)
+	TryGetHeadNodeFn                      func() (forkchoice.ForkChoiceNode, bool)
 	GetStateAtBlockRootFn                 func(common.Hash) (*state.CachingBeaconState, error)
 	ViewStateAtBlockRootFn                func(common.Hash, func(*state.CachingBeaconState) error) error
+	ViewCurrentStateAtBlockRootFn         func(common.Hash, func(*state.CachingBeaconState) error) error
 	HighestSeenVal                        uint64
 	// HighestImportedDescendantVal is the slot of the highest imported descendant of any root,
 	// unless HasImportedDescendantAfterFn is set.
@@ -93,7 +96,9 @@ type ForkChoiceStorageMock struct {
 	Blocks                                             map[common.Hash]*cltypes.SignedBeaconBlock
 	Envelopes                                          map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope
 	envelopesMu                                        sync.RWMutex
+	executionPayloadMu                                 sync.RWMutex
 	HasEnvelopeFunc                                    func(common.Hash) bool
+	InvalidBlocks                                      map[common.Hash]struct{}
 	ExecutionPayloadReceivedAt                         map[common.Hash]time.Time
 	VerifiedPayloads                                   map[common.Hash]bool
 	OnBlockErr                                         error
@@ -143,6 +148,10 @@ type ForkChoiceStorageMock struct {
 
 func (f *ForkChoiceStorageMock) BeginPayloadImport(slot uint64) func() {
 	return f.PreparationImports.BeginImport(slot)
+}
+
+func (f *ForkChoiceStorageMock) PayloadImportInProgress(slot uint64) bool {
+	return f.PreparationImports.ImportInProgress(slot)
 }
 
 func (f *ForkChoiceStorageMock) BeginPendingPayloadEnvelope(blockRoot common.Hash) func() {
@@ -285,6 +294,7 @@ func NewForkChoiceStorageMock(t *testing.T) *ForkChoiceStorageMock {
 		Blocks:                      make(map[common.Hash]*cltypes.SignedBeaconBlock),
 		Envelopes:                   make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope),
 		ExecutionPayloadReceivedAt:  make(map[common.Hash]time.Time),
+		PendingEnvelopeRoots:        make(map[common.Hash]struct{}),
 		GetBeaconCommitteeMock:      nil,
 		Eth1Hashes:                  make(map[common.Hash]common.Hash),
 		ShouldExtendPayloadVal:      true,
@@ -306,6 +316,13 @@ func (f *ForkChoiceStorageMock) Ancestor(root common.Hash, slot uint64) forkchoi
 		return f.AncestorFn(root, slot)
 	}
 	return f.Ancestors[slot]
+}
+
+func (f *ForkChoiceStorageMock) AttestationData(headRoot common.Hash, slot uint64) (solid.AttestationData, bool) {
+	if f.AttestationDataFn == nil {
+		return solid.AttestationData{}, false
+	}
+	return f.AttestationDataFn(headRoot, slot)
 }
 
 func (f *ForkChoiceStorageMock) AnchorSlot() uint64 {
@@ -410,6 +427,17 @@ func (f *ForkChoiceStorageMock) ViewStateAtBlockRoot(blockRoot common.Hash, fn f
 	}
 	if blockState == nil {
 		return errors.New("block state not found")
+	}
+	return fn(blockState)
+}
+
+func (f *ForkChoiceStorageMock) ViewCurrentStateAtBlockRoot(blockRoot common.Hash, fn func(*state.CachingBeaconState) error) error {
+	if f.ViewCurrentStateAtBlockRootFn != nil {
+		return f.ViewCurrentStateAtBlockRootFn(blockRoot, fn)
+	}
+	blockState := f.StateAtBlockRootVal[blockRoot]
+	if blockState == nil {
+		return nil
 	}
 	return fn(blockState)
 }
@@ -545,6 +573,26 @@ func (f *ForkChoiceStorageMock) ValidateExecutionPayloadEnvelopeForGossip(envelo
 	}
 	f.ValidateExecutionPayloadEnvelopeForGossipCalled = true
 	return f.ValidateExecutionPayloadEnvelopeForGossipErr
+}
+
+func (f *ForkChoiceStorageMock) QueuePendingExecutionPayloadEnvelope(envelope *cltypes.SignedExecutionPayloadEnvelope, _ time.Time) {
+	f.executionPayloadMu.Lock()
+	defer f.executionPayloadMu.Unlock()
+	if f.PendingEnvelopeRoots == nil {
+		f.PendingEnvelopeRoots = make(map[common.Hash]struct{})
+	}
+	f.PendingEnvelopeRoots[envelope.Message.BeaconBlockRoot] = struct{}{}
+}
+
+func (f *ForkChoiceStorageMock) RecordExecutionPayloadArrival(blockRoot common.Hash, _ uint64, receivedAt time.Time) {
+	f.executionPayloadMu.Lock()
+	defer f.executionPayloadMu.Unlock()
+	if f.ExecutionPayloadReceivedAt == nil {
+		f.ExecutionPayloadReceivedAt = make(map[common.Hash]time.Time)
+	}
+	if _, ok := f.ExecutionPayloadReceivedAt[blockRoot]; !ok {
+		f.ExecutionPayloadReceivedAt[blockRoot] = receivedAt
+	}
 }
 
 func (f *ForkChoiceStorageMock) ClaimExecutionPayloadEnvelopeForGossip(
@@ -726,6 +774,8 @@ func (f *ForkChoiceStorageMock) PayloadVotesRuleOutFull(blockRoot common.Hash) b
 }
 
 func (f *ForkChoiceStorageMock) HasPendingExecutionPayloadEnvelope(blockRoot common.Hash) bool {
+	f.executionPayloadMu.RLock()
+	defer f.executionPayloadMu.RUnlock()
 	_, ok := f.PendingEnvelopeRoots[blockRoot]
 	return ok
 }
@@ -735,6 +785,11 @@ func (f *ForkChoiceStorageMock) RetryPendingExecutionPayloadEnvelope(ctx context
 		return f.RetryPendingEnvelopeFunc(ctx, blockRoot)
 	}
 	return time.Time{}
+}
+
+func (f *ForkChoiceStorageMock) IsBlockInvalid(blockRoot common.Hash) bool {
+	_, ok := f.InvalidBlocks[blockRoot]
+	return ok
 }
 
 func (f *ForkChoiceStorageMock) HasEnvelope(blockRoot common.Hash) bool {
@@ -748,6 +803,8 @@ func (f *ForkChoiceStorageMock) HasEnvelope(blockRoot common.Hash) bool {
 }
 
 func (f *ForkChoiceStorageMock) ExecutionPayloadReceivedBefore(blockRoot common.Hash, deadline time.Time) bool {
+	f.executionPayloadMu.RLock()
+	defer f.executionPayloadMu.RUnlock()
 	receivedAt, ok := f.ExecutionPayloadReceivedAt[blockRoot]
 	return ok && receivedAt.Before(deadline)
 }
@@ -792,6 +849,14 @@ func (f *ForkChoiceStorageMock) GetHeadNode() (forkchoice.ForkChoiceNode, uint64
 		return f.GetHeadNodeFn()
 	}
 	return forkchoice.ForkChoiceNode{Root: f.HeadVal, PayloadStatus: f.HeadPayloadStatusVal}, f.HeadSlotVal, nil
+}
+
+func (f *ForkChoiceStorageMock) TryGetHeadNode() (forkchoice.ForkChoiceNode, bool) {
+	if f.TryGetHeadNodeFn != nil {
+		return f.TryGetHeadNodeFn()
+	}
+	head, _, err := f.GetHeadNode()
+	return head, err == nil
 }
 
 func (f *ForkChoiceStorageMock) ShouldExtendPayload(root common.Hash) bool {

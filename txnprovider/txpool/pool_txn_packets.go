@@ -180,7 +180,8 @@ func ParseTransactions(payload []byte, pos int, ctx *TxnParseContext, txnSlots *
 		if count == maxTransactionsPerPacket {
 			return 0, fmt.Errorf("%w: too many transactions (limit %d)", ErrParseTxn, maxTransactionsPerPacket)
 		}
-		dataPos, dataLen, _, err := rlp.Prefix(payload, p)
+		var dataPos, dataLen int
+		dataPos, dataLen, _, err = rlp.Prefix(payload, p)
 		if err != nil {
 			return 0, err
 		}

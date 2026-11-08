@@ -95,6 +95,11 @@ func (a *Accumulator) StartChange(h *types.Header, txs [][]byte, unwind bool) {
 	}
 }
 
+func (a *Accumulator) HasAccountChange(address common.Address) bool {
+	i, ok := a.accountChangeIndex[address]
+	return ok && a.latestChange.Changes[i].Action != ActionStorage
+}
+
 // ChangeAccount adds modification of account balance or nonce (or both) to the latest change.
 func (a *Accumulator) ChangeAccount(address common.Address, incarnation uint64, data []byte) {
 	i, ok := a.accountChangeIndex[address]

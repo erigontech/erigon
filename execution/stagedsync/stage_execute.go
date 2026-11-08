@@ -412,7 +412,6 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 	if to < s.BlockNumber {
 		return nil
 	}
-
 	// Stage coordination hoisted out of the exec core: resolve the start point
 	// and exec window from committed domains + the txNum index before handing a
 	// resolved execRange to ExecV3.

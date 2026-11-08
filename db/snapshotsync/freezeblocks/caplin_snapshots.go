@@ -87,6 +87,7 @@ func NewCaplinSnapshots(cfg ethconfig.BlocksFreezing, beaconCfg *clparams.Beacon
 	})
 	c.SetIndexBuilder(snaptype.BeaconBlocks, beaconIdx)
 	c.SetIndexBuilder(snaptype.BlobSidecars, beaconIdx)
+	c.AnchorVisibleAtLowestDirty(snaptype.CaplinEnums.BeaconBlocks)
 	return c
 }
 
@@ -97,12 +98,7 @@ func (s *CaplinSnapshots) Close() {
 	s.BaseRoSnapshots.Close()
 }
 
-// SegmentsMax is dirty-backed and counts a segment as soon as its .seg opens, index or
-// not: the archive backfill stop condition asks how far data has been dumped, not how
-// far it is readable.
-func (s *CaplinSnapshots) SegmentsMax() uint64 {
-	return s.DirtySegmentsMax(snaptype.CaplinEnums.BeaconBlocks)
-}
+func (s *CaplinSnapshots) SegmentsMax() uint64 { return s.IndicesMax() }
 
 func (s *CaplinSnapshots) LogStat(str string) {
 	s.logger.Info(fmt.Sprintf("[snapshots:%s] Stat", str),
@@ -148,36 +144,14 @@ func (s *CaplinSnapshots) SegFileNames(from, to uint64) []string {
 	return res
 }
 
-// OpenFolder keeps caplin's own directory scan: SegmentsCaplin drops beacon-block
-// segments past a gap, so SegmentsMax never reports data the backfill can't walk back to.
-func (s *CaplinSnapshots) OpenFolder() error { return s.openFolder(false, nil) }
-
 func (s *CaplinSnapshots) OpenBeaconBlocks() error {
 	return s.openFolder(false, func(f snaptype.FileInfo) bool {
 		return f.Type != nil && f.Type.Enum() == snaptype.CaplinEnums.BeaconBlocks
 	})
 }
 
-// Shadowed so the promoted base versions cannot reach the unfiltered directory scan:
-// Go embedding has no virtual dispatch, so they would call the base OpenFolder.
-func (s *CaplinSnapshots) OptimisticalyOpenFolder() { _ = s.OpenFolder() }
-
-type snapshotNotifier interface {
-	OnNewSnapshot()
-}
-
-func (s *CaplinSnapshots) BuildMissedIndices(ctx context.Context, _ string, notifier snapshotNotifier, _ datadir.Dirs, _ *chain.Config, logger log.Logger) error {
-	if err := s.BuildMissingIndices(ctx, logger); err != nil {
-		return err
-	}
-	if notifier != nil {
-		notifier.OnNewSnapshot()
-	}
-	return nil
-}
-
 func (s *CaplinSnapshots) openFolder(optimistic bool, fileFilter func(snaptype.FileInfo) bool) error {
-	files, _, err := snapshotsync.SegmentsCaplin(s.Dir())
+	files, err := snapshotsync.AllTypedSegments(s.Dir(), s.Types())
 	if err != nil {
 		return err
 	}
@@ -404,14 +378,8 @@ func removeBlobIndexAndTorrents(snapDir string, from, to uint64) error {
 }
 
 func DumpBeaconBlocks(ctx context.Context, db kv.RoDB, fromSlot, toSlot uint64, salt uint32, dirs datadir.Dirs, workers int, lvl log.Lvl, logger log.Logger) error {
-	cfg := snapcfg.KnownCfgOrDevnet("")
-	for i := fromSlot; i < toSlot; i = chooseSegmentEnd(i, toSlot, snaptype.CaplinEnums.BeaconBlocks, cfg) {
-		blocksPerFile := snapcfg.MergeLimitFromCfg(cfg, snaptype.CaplinEnums.BeaconBlocks, i)
-
-		if toSlot-i < blocksPerFile {
-			break
-		}
-		to := chooseSegmentEnd(i, toSlot, snaptype.CaplinEnums.BeaconBlocks, cfg)
+	for i := fromSlot; i+snaptype.CaplinMergeLimit <= toSlot; i += snaptype.CaplinMergeLimit {
+		to := i + snaptype.CaplinMergeLimit
 		logger.Log(lvl, "Dumping beacon blocks", "from", i, "to", to)
 		if err := dumpBeaconBlocksRange(ctx, db, i, to, salt, dirs, workers, lvl, logger); err != nil {
 			return err
@@ -462,12 +430,6 @@ func DumpBlobsSidecar(ctx context.Context, blobStorage blob_storage.BlobStorage,
 	return nil
 }
 
-type indexClaim struct {
-	sType    snaptype.Type
-	from, to uint64
-	info     snaptype.FileInfo
-}
-
 // BuildMissingIndices indexes every caplin segment that is on disk but not indexed yet.
 // It opens the folder first because the dirty set it walks only exists after an open, and
 // the antiquary calls this before its own OpenFolder. That open is optimistic so that a
@@ -480,41 +442,7 @@ func (s *CaplinSnapshots) BuildMissingIndices(ctx context.Context, logger log.Lo
 	if err := s.openFolder(true, nil); err != nil {
 		return err
 	}
-
-	var claims []indexClaim
-	for _, t := range snaptype.CaplinSnapshotTypes {
-		enum := t.Enum()
-		s.WalkDirtySegments(enum, func(sn *snapshotsync.DirtySegment) bool {
-			if sn.IsIndexed() {
-				return true
-			}
-			from, to := sn.GetRange()
-			if !s.TryAcquireRange(enum, from, to) {
-				return true
-			}
-			claims = append(claims, indexClaim{sType: t, from: from, to: to, info: sn.FileInfo(s.Dir())})
-			return true
-		})
-	}
-	if len(claims) == 0 {
-		return nil
-	}
-
-	// Every claim is released even after a failure: openSegments skips a claimed range, so a
-	// still-held claim would keep the range out of the visible set for the process lifetime.
-	var buildErr error
-	for i := range claims {
-		c := &claims[i]
-		if buildErr == nil {
-			buildErr = s.IndexBuilder(c.sType).Build(ctx, c.info, s.Salt, nil, s.tmpdir, &background.Progress{}, log.LvlDebug, logger)
-		}
-		s.ReleaseRange(c.sType.Enum(), c.from, c.to)
-	}
-	if buildErr != nil {
-		return buildErr
-	}
-
-	return s.OpenFolder()
+	return s.IndexMissed(ctx, "caplin", s.tmpdir, nil, logger)
 }
 
 // ReadFrozenBeaconBlockBodyForIntegrity validates the stored body root before promoting blinded blocks.

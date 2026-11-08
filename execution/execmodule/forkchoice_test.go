@@ -218,6 +218,7 @@ func TestRepeatedForkchoicePersistsAfterCallerTimeout(t *testing.T) {
 	result, err := m.ExecModule.UpdateForkChoice(ctx, head, safe, finalized)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusBusy, result.Status, "changed markers cannot succeed before the durable write")
+	require.True(t, result.UpdateInProgress)
 	require.ErrorIs(t, ctx.Err(), context.DeadlineExceeded)
 	require.EventuallyWithT(t, func(collect *assert.CollectT) {
 		ready, err := m.ExecModule.Ready(t.Context())
@@ -225,6 +226,11 @@ func TestRepeatedForkchoicePersistsAfterCallerTimeout(t *testing.T) {
 		require.False(collect, ready, "the pending marker update must hold the execution semaphore")
 	}, time.Minute, 10*time.Millisecond)
 	assertPersistedForkchoice(t, m.DB, head, previousSafe, previousFinalized)
+
+	result, err = m.ExecModule.UpdateForkChoice(ctx, head, safe, finalized)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusBusy, result.Status)
+	require.False(t, result.UpdateInProgress)
 
 	writer.Rollback()
 	idleCtx, idleCancel := context.WithTimeout(t.Context(), time.Minute)

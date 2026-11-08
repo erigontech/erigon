@@ -95,31 +95,31 @@ func (c *ConsensusHandlers) lightClientUpdatesByRangeHandler(s network.Stream) e
 	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, req, clparams.Phase0Version); err != nil {
 		return err
 	}
+	endPeriod := req.StartPeriod + req.Count
+	if endPeriod < req.StartPeriod {
+		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, InvalidRequestPrefix)
+	}
 
-	// Consume additional rate-limit tokens: one per requested period.
-	if cost := min(int(req.Count), maxLightClientsPerRequest) - 1; !c.consumeRateLimit(s, cost) {
+	if cost := requestCost(req.Count, 1, maxLightClientsPerRequest); !c.consumeRateLimit(s, cost) {
 		return nil
 	}
 
 	lightClientUpdates := make([]*cltypes.LightClientUpdate, 0, maxLightClientsPerRequest)
 
-	endPeriod := req.StartPeriod + req.Count
 	currentSlot := c.ethClock.GetCurrentSlot()
 	if endPeriod > c.beaconConfig.SyncCommitteePeriod(currentSlot) {
 		endPeriod = c.beaconConfig.SyncCommitteePeriod(currentSlot) + 1
 	}
 
-	notFoundPrev := false
-	// Fetch from [start_period, start_period + count]
+	// The response must include the earliest available update and use consecutive periods.
+	// Skip leading gaps, but stop once a gap would split the response.
 	for i := req.StartPeriod; i < endPeriod; i++ {
 		update, has := c.forkChoiceReader.GetLightClientUpdate(i)
 		if !has {
-			notFoundPrev = true
+			if len(lightClientUpdates) > 0 {
+				break
+			}
 			continue
-		}
-		if notFoundPrev {
-			lightClientUpdates = lightClientUpdates[0:]
-			notFoundPrev = false
 		}
 
 		lightClientUpdates = append(lightClientUpdates, update)
