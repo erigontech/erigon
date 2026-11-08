@@ -6661,3 +6661,12 @@ func TestGetEthV3ValidatorBlockRejectsFarFutureSlot(t *testing.T) {
 	require.ErrorAs(t, err, &endpointErr)
 	require.Equal(t, http.StatusBadRequest, endpointErr.Code)
 }
+
+func TestCheckBlockProductionSlot(t *testing.T) {
+	const current = 100
+	require.NoError(t, checkBlockProductionSlot(current-1, current), "a past slot keeps today's behaviour")
+	require.NoError(t, checkBlockProductionSlot(current, current))
+	require.NoError(t, checkBlockProductionSlot(current+1, current), "a validator may ask for the next slot")
+	require.Error(t, checkBlockProductionSlot(current+2, current))
+	require.Error(t, checkBlockProductionSlot(math.MaxUint64, current))
+}
