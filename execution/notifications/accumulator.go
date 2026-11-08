@@ -50,8 +50,8 @@ func (a *Accumulator) Reset(plainStateID uint64) {
 	a.plainStateID = plainStateID
 }
 
-// Checkpoint returns a rollback to completed block changes. Later writes must
-// start with StartChange so the saved changes remain immutable.
+// Checkpoint returns a restore function without copying existing block changes.
+// Call StartChange before recording further changes so the saved blocks stay immutable.
 func (a *Accumulator) Checkpoint() (restore func()) {
 	saved := *a
 	a.latestChange = nil

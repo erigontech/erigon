@@ -516,7 +516,7 @@ func runUnwindCrashChild(t *testing.T) {
 		t.Cleanup(func() { os.Exit(crashRecoveryFailureExitCode) })
 	}
 	// Node lifetime belongs to the process. Test cancellation must not release
-	// a pre-commit barrier and let shutdown persist the parked FCU.
+	// a pre-commit barrier and let shutdown persist the parked transaction.
 	eat, err := engineapitester.InitialiseEngineApiTester(context.Background(), engineapitester.EngineApiTesterInitArgs{
 		Logger:                  testlog.Logger(t, log.LvlError),
 		DataDir:                 request.DataDir,
