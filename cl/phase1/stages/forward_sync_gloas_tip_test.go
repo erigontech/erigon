@@ -20,6 +20,8 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -37,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/cl/rpc"
 	"github.com/erigontech/erigon/cl/sentinel/communication"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
+	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -222,7 +225,7 @@ func TestForwardSyncSchedulesTipColumnsWhenDataIsMissing(t *testing.T) {
 }
 
 // With an execution client that inserts blocks, the tip's envelope skips EL validation. Its arrival still counts for
-// the payload attestation of the tip's slot, but only after the builder signature is checked.
+// the payload attestation of the tip's slot, but only after its builder signature and bid commitments are checked.
 func TestForwardSyncRecordsTipEnvelopeArrivalWithInsertion(t *testing.T) {
 	t.Run("valid", func(t *testing.T) {
 		f := newForwardSyncTipFixture(t, 0, false)
@@ -248,6 +251,40 @@ func TestForwardSyncRecordsTipEnvelopeArrivalWithInsertion(t *testing.T) {
 		require.NoError(t, forwardSync(ctx, log.Root(), f.cfg, Args{}))
 		require.True(t, f.cfg.forkChoice.HasPendingExecutionPayloadEnvelope(f.tipRoot))
 		require.True(t, f.cfg.forkChoice.ExecutionPayloadReceivedBefore(f.tipRoot, time.Now()))
+	})
+	t.Run("signed bid mismatch", func(t *testing.T) {
+		f := newForwardSyncTipFixture(t, 0, false)
+		f.cfg.executionClient.(*testExecutionEngine).supportInsertion = true
+		f.cfg.blockCollector = &gloasCollectorTest{}
+		message := *f.envelope.Message
+		payload := *message.Payload
+		payload.GasLimit++
+		message.Payload = &payload
+		badEnvelope := *f.envelope
+		badEnvelope.Message = &message
+		parentState, err := f.cfg.forkChoice.GetStateAtBlockRoot(f.tip.Block.ParentRoot)
+		require.NoError(t, err)
+		privKey, err := bls.NewPrivateKeyFromIKM([]byte("01234567890123456789012345678901"))
+		require.NoError(t, err)
+		signAnchorEnvelope(t, parentState, privKey, &badEnvelope, f.tip.Block.Slot)
+		f.sentinel.envelopeResponse = nil
+		envelopeBytes, err := badEnvelope.EncodeSSZ(nil)
+		require.NoError(t, err)
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Eth-Consensus-Version", "gloas")
+			_, _ = w.Write(envelopeBytes)
+		}))
+		t.Cleanup(server.Close)
+		previousURLs := clparams.ConfigurableCheckpointsURLs
+		clparams.ConfigurableCheckpointsURLs = []string{server.URL}
+		t.Cleanup(func() { clparams.ConfigurableCheckpointsURLs = previousURLs })
+		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+		defer cancel()
+
+		require.ErrorIs(t, forwardSync(ctx, log.Root(), f.cfg, Args{}), context.DeadlineExceeded)
+		require.Zero(t, f.cfg.forwardSyncTipRoot)
+		require.False(t, f.cfg.forkChoice.HasEnvelope(f.tipRoot))
+		require.False(t, f.cfg.forkChoice.ExecutionPayloadReceivedBefore(f.tipRoot, time.Now()))
 	})
 	for _, withBlob := range []bool{false, true} {
 		t.Run(fmt.Sprintf("bad signature/blob=%t", withBlob), func(t *testing.T) {

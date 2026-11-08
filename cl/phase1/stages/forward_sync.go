@@ -320,12 +320,16 @@ func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) er
 			return true
 		}
 		// The apply checks data availability before the signature, and may not check the signature at all.
-		if err := cfg.forkChoice.ValidateExecutionPayloadEnvelopeForGossip(envelope); err != nil {
+		err := cfg.forkChoice.ValidateExecutionPayloadEnvelopeForGossip(envelope)
+		if err == nil {
+			err = cltypes.ValidateExecutionPayloadEnvelopeBidCommitments(cfg.beaconCfg, tip, envelope)
+		}
+		if err != nil {
 			logger.Debug("[Caplin] forward sync: tip envelope failed validation", "slot", tip.Block.Slot, "root", root, "err", err)
 			return false
 		}
 		cfg.forkChoice.RecordExecutionPayloadArrival(root, tip.Block.Slot, receivedAt)
-		err := processDownloadedGloasEnvelope(ctx, logger, cfg.forkChoice, cfg.blockCollector, tip.Block, root, envelope, shouldInsert, shouldValidateForwardSyncPayload(cfg, shouldInsert), true)
+		err = processDownloadedGloasEnvelope(ctx, logger, cfg.forkChoice, cfg.blockCollector, tip.Block, root, envelope, shouldInsert, shouldValidateForwardSyncPayload(cfg, shouldInsert), true)
 		if errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
 			logger.Debug("[Caplin] forward sync: tip envelope waits for its column data", "slot", tip.Block.Slot, "root", root)
 			// Fork choice does not schedule the download while the head is unpublished.
