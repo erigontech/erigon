@@ -97,7 +97,7 @@ func (c *ConsensusHandlers) lightClientUpdatesByRangeHandler(s network.Stream) e
 	}
 
 	// Consume additional rate-limit tokens: one per requested period.
-	if cost := min(int(req.Count), maxLightClientsPerRequest) - 1; !c.consumeRateLimit(s, cost) {
+	if cost := int(min(req.Count, maxLightClientsPerRequest)) - 1; !c.consumeRateLimit(s, cost) {
 		return nil
 	}
 

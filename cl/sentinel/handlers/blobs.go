@@ -48,7 +48,7 @@ func (c *ConsensusHandlers) blobsSidecarsByRangeHandler(s network.Stream, versio
 	// max here is always ≤ Electra's MaxBlobsPerBlock.
 	startEpoch := req.StartSlot / c.beaconConfig.SlotsPerEpoch
 	maxBlobs := int(c.beaconConfig.GetBlobParameters(startEpoch).MaxBlobsPerBlock)
-	if cost := min(int(req.Count)*maxBlobs, maxBlobsThroughputPerRequest) - 1; !c.consumeRateLimit(s, cost) {
+	if cost := min(int(min(req.Count, maxBlobsThroughputPerRequest))*maxBlobs, maxBlobsThroughputPerRequest) - 1; !c.consumeRateLimit(s, cost) {
 		return nil
 	}
 

@@ -169,3 +169,43 @@ func TestBlocksByRangeRateLimit(t *testing.T) {
 	require.Equal(t, byte(InvalidRequestPrefix), resp,
 		"second blocks-by-range should be rate-limited (per-item cost)")
 }
+
+// A Count that turns negative as an int must still pay the full blob cost, so a second request is limited.
+func TestBlobsByRangeRateLimitHugeCount(t *testing.T) {
+	ctx := context.Background()
+	server, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
+	require.NoError(t, err)
+	t.Cleanup(func() { server.Close() })
+	client, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
+	require.NoError(t, err)
+	t.Cleanup(func() { client.Close() })
+	require.NoError(t, client.Connect(ctx, peer.AddrInfo{ID: server.ID(), Addrs: server.Addrs()}))
+
+	_, indiciesDB := setupStore(t)
+	_, beaconCfg := clparams.GetConfigsByNetwork(1)
+	c := NewConsensusHandlers(
+		ctx, tests.NewMockBlockReader(), indiciesDB, server,
+		&clparams.NetworkConfig{}, nil, beaconCfg, getEthClock(t),
+		nil, &mock_services.ForkChoiceStorageMock{}, nil, nil, nil, true, nil,
+	)
+	c.Start()
+
+	send := func() []byte {
+		var reqBuf bytes.Buffer
+		require.NoError(t, ssz_snappy.EncodeAndWrite(&reqBuf, &cltypes.BlobsByRangeRequest{StartSlot: 100, Count: 1<<63 + 1}))
+		stream, err := client.NewStream(ctx, server.ID(), protocol.ID(communication.BlobSidecarByRangeProtocolV1))
+		require.NoError(t, err)
+		defer stream.Close()
+		require.NoError(t, stream.SetDeadline(time.Now().Add(5*time.Second)))
+		_, err = stream.Write(reqBuf.Bytes())
+		require.NoError(t, err)
+		require.NoError(t, stream.CloseWrite())
+		resp, _ := io.ReadAll(stream)
+		return resp
+	}
+
+	require.Empty(t, send(), "no blocks stored, so the first request returns nothing")
+	resp := send()
+	require.NotEmpty(t, resp, "the second request must be rate-limited")
+	require.Equal(t, byte(InvalidRequestPrefix), resp[0])
+}
