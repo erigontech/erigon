@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	balpkg "github.com/erigontech/erigon/execution/bal"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -412,7 +413,7 @@ func TestProcessChecksBALSidecarAndComputedBAL(t *testing.T) {
 	require.ErrorContains(t, process(other.Hash(), nil), "block access list mismatch")
 }
 
-func TestProcessReturnsTheSidecarListWhenItMatches(t *testing.T) {
+func executedBALSidecar(t *testing.T) (*state.VersionedIO, types.BlockAccessList, *types.BlockAccessListSidecar) {
 	addr := accounts.InternAddress(common.HexToAddress("0x01"))
 	slot := accounts.InternKey(common.BigToHash(big.NewInt(1)))
 	io := state.NewVersionedIO(2)
@@ -426,6 +427,11 @@ func TestProcessReturnsTheSidecarListWhenItMatches(t *testing.T) {
 	require.NoError(t, err)
 	sidecar, err := types.DecodeBlockAccessListSidecar(raw)
 	require.NoError(t, err)
+	return io, computed, sidecar
+}
+
+func TestProcessReturnsTheSidecarListWhenItMatches(t *testing.T) {
+	io, computed, sidecar := executedBALSidecar(t)
 	headerHash := computed.Hash()
 	h := &types.Header{Number: *uint256.NewInt(1), GasLimit: 60_000_000, BlockAccessListHash: &headerHash}
 
@@ -433,4 +439,16 @@ func TestProcessReturnsTheSidecarListWhenItMatches(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, got, 1)
 	require.Same(t, &sidecar.BlockAccessList()[0], &got[0])
+}
+
+func TestProcessRejectsAMatchingSidecarTheHeaderDoesNotAllow(t *testing.T) {
+	process := func(headerHash common.Hash, gasLimit uint64) error {
+		io, _, sidecar := executedBALSidecar(t)
+		h := &types.Header{Number: *uint256.NewInt(1), GasLimit: gasLimit, BlockAccessListHash: &headerHash}
+		_, err := balpkg.Process(sidecar, h, nil, io, true, false, "", log.New())
+		return err
+	}
+	_, computed, _ := executedBALSidecar(t)
+	require.ErrorContains(t, process(common.Hash{1}, 60_000_000), "hash mismatch")
+	require.ErrorIs(t, process(computed.Hash(), types.BalItemCost), rules.ErrInvalidBlock)
 }
