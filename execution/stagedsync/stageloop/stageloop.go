@@ -217,23 +217,24 @@ func (h *Hook) NotifyStateRetirementDone() {
 	h.notifications.Events.OnStateRetirementDone()
 }
 
+// blockRangeAnnounceDue reports whether to announce BlockRangeUpdate:
+//   - after initialization
+//   - during sync: every 1 minute. A time limit is used to prevent excessive announcements in
+//     case of fast execution due to empty blocks or small SyncLoopBlockLimit
+//   - after sync: every 32 blocks or on unwind of any depth
+func (h *Hook) blockRangeAnnounceDue(finishStageBeforeSync, finishStageAfterSync uint64, isSynced bool) bool {
+	hadUnwind := h.sync != nil && h.sync.PrevUnwindPoint() != nil && *h.sync.PrevUnwindPoint() < finishStageBeforeSync
+	isInitialAnnouncement := h.lastAnnouncedBlockRangeLatestNumber == 0
+	progressed := isSynced && finishStageAfterSync >= h.lastAnnouncedBlockRangeLatestNumber+32
+	shouldPublishByTime := !isSynced && time.Since(h.lastAnnouncedBlockRangeTime) >= 1*time.Minute
+	return hadUnwind || isInitialAnnouncement || progressed || shouldPublishByTime
+}
+
 func (h *Hook) maybeAnnounceBlockRange(finishStageBeforeSync, finishStageAfterSync uint64, isSynced bool) {
 	if h.blockRangePublisher == nil || h.statusDataGetter == nil {
 		return
 	}
-
-	// we want to announce BlockRangeUpdate
-	// - after initialization
-	// - during sync: every 1 minute. A time limit is used to prevent excessive announcements in
-	//									case of fast execution due to empty blocks or small SyncLoopBlockLimit
-	// - after sync: every 32 blocks or on unwind of any depth
-	hadUnwind := h.sync != nil && h.sync.PrevUnwindPoint() != nil && *h.sync.PrevUnwindPoint() < finishStageBeforeSync
-	isInitialAnnouncement := h.lastAnnouncedBlockRangeLatestNumber == 0
-	progressed := finishStageAfterSync >= h.lastAnnouncedBlockRangeLatestNumber+32
-	timeElapsed := time.Since(h.lastAnnouncedBlockRangeTime)
-	shouldPublishByTime := !isSynced && timeElapsed >= 1*time.Minute
-
-	if !hadUnwind && !isInitialAnnouncement && !progressed && !shouldPublishByTime {
+	if !h.blockRangeAnnounceDue(finishStageBeforeSync, finishStageAfterSync, isSynced) {
 		return
 	}
 
@@ -254,7 +255,7 @@ func (h *Hook) maybeAnnounceBlockRange(finishStageBeforeSync, finishStageAfterSy
 		return
 	}
 
-	h.logger.Debug("[hook] publishing block range update", "earliest", packet.Earliest, "latest", packet.Latest, "hadUnwind", hadUnwind, "isSynced", isSynced, "timeElapsed", timeElapsed)
+	h.logger.Debug("[hook] publishing block range update", "earliest", packet.Earliest, "latest", packet.Latest, "isSynced", isSynced)
 	h.blockRangePublisher.PublishBlockRangeUpdate(packet)
 	h.lastAnnouncedBlockRangeLatestNumber = packet.Latest
 	h.lastAnnouncedBlockRangeTime = time.Now()

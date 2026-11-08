@@ -131,19 +131,34 @@ func (view *VersionMapView) GetStorage(addr accounts.Address, key accounts.Stora
 	return uint256.Int{}, false
 }
 
+// GetCode returns addr's code written in this map at or below the view's txNum; false ok means
+// no tx of the map wrote it, and the caller reads its base.
+func (view *VersionMapView) GetCode(addr accounts.Address) ([]byte, bool) {
+	code, _, ok := view.vm.ReadCode(addr, view.txIdx())
+	return code.Bytes, ok
+}
+
+// DestroyedAt reports whether addr was destroyed or removed (self-destruct or EIP-161
+// touched-empty removal) at or below the view's txNum, and the tx index of that destruct —
+// the lifecycle verdict the commitment uses to delete the account's whole storage subtree.
+func (view *VersionMapView) DestroyedAt(addr accounts.Address) (txIdx int, destroyed bool) {
+	state, _, destroyedAt, _ := view.vm.AccountLifecycleAt(addr, view.txIdx())
+	return destroyedAt, state != LifecycleLive
+}
+
 func (vm *VersionMap) SeedEmptyRemovals(eip161Enabled, isAura bool, base StateReader) error {
 	var stamps []*WriteSet
 	var candidates []uint32
 	for i := range vm.bal {
 		ac := &vm.bal[i]
-		addr := accounts.InternAddress(ac.Address)
-		if !EIP161EmptyRemoval(eip161Enabled, isAura, addr) {
-			continue
-		}
 		var maxIdx uint32
 		balChangeIndexes(ac, func(idx uint32) { maxIdx = max(maxIdx, idx) })
 		if maxIdx == 0 {
 			continue // only reads, no field change — not a removal candidate
+		}
+		addr := accounts.InternAddress(ac.Address)
+		if !EIP161EmptyRemoval(eip161Enabled, isAura, addr) {
+			continue
 		}
 		if len(ac.BalanceChanges) == 0 && len(ac.NonceChanges) == 0 && len(ac.CodeChanges) == 0 {
 			continue

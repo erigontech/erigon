@@ -353,7 +353,7 @@ LOOP:
 func (ba *BlockAssembler) AssembleBlock(ibs *state.IntraBlockState, tx kv.TemporalTx, logger log.Logger) (block *types.Block, err error) {
 	chainReader := NewChainReader(ba.cfg.ChainConfig, tx, ba.cfg.BlockReader, logger)
 
-	if err := ba.cfg.Engine.Prepare(chainReader, ba.Header, ibs); err != nil {
+	if err := ba.cfg.Engine.Prepare(chainReader, ba.Header); err != nil {
 		return nil, err
 	}
 

@@ -909,10 +909,6 @@ func createHandler(cfg *httpcfg.HttpCfg, apiList []rpc.API, httpHandler http.Han
 			return
 		}
 
-		// adding a healthcheck here
-		if health.ProcessHealthcheckIfNeeded(w, r, apiList) {
-			return
-		}
 		if cfg.WebsocketEnabled && wsHandler != nil && isWebsocket(r) {
 			wsHandler.ServeHTTP(w, r)
 			return
@@ -940,6 +936,9 @@ func createHandler(cfg *httpcfg.HttpCfg, apiList []rpc.API, httpHandler http.Han
 			return
 		}
 
+		if health.ProcessHealthcheckIfNeeded(w, r, apiList) {
+			return
+		}
 		httpHandler.ServeHTTP(w, r)
 	})
 
@@ -962,6 +961,7 @@ func createEngineListener(cfg *httpcfg.HttpCfg, engineApi []rpc.API, logger log.
 	engineHttpEndpoint := "tcp://" + listenHostPort(cfg.AuthRpcHTTPListenAddress, cfg.AuthRpcPort)
 
 	engineSrv := rpc.NewServer(cfg.RpcBatchConcurrency, cfg.TraceRequests, cfg.DebugSingleRequest, true, logger, cfg.RPCSlowLogThreshold)
+	engineSrv.SetBatchLimit(cfg.BatchLimit)
 	engineSrv.SetSubscriptionLimit(cfg.SubscriptionLimit)
 
 	if err := node.RegisterApisFromWhitelist(engineApi, nil, engineSrv, true, logger); err != nil {
@@ -1143,7 +1143,7 @@ func (e *remoteRulesEngine) VerifyUncles(_ rules.ChainReader, _ *types.Header, _
 	panic("remoteRulesEngine.VerifyUncles not supported")
 }
 
-func (e *remoteRulesEngine) Prepare(_ rules.ChainHeaderReader, _ *types.Header, _ *state.IntraBlockState) error {
+func (e *remoteRulesEngine) Prepare(_ rules.ChainHeaderReader, _ *types.Header) error {
 	panic("remoteRulesEngine.Prepare not supported")
 }
 
