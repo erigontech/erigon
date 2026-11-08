@@ -951,25 +951,18 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 	return indexIn, historyIn, nil
 }
 
-func (d *Domain) integrateMergedDirtyFiles(valuesIn, indexIn, historyIn *FilesItem) {
-	d.History.integrateMergedDirtyFiles(indexIn, historyIn)
-	if valuesIn != nil {
-		d.dirtyFiles.Set(valuesIn)
-	}
+func (d *Domain) integrateMergedDirtyFiles(valuesIn, indexIn, historyIn *FilesItem) retiredFiles {
+	retired := d.History.integrateMergedDirtyFiles(indexIn, historyIn)
+	return append(retired, d.dirtyFiles.replace(valuesIn)...)
 }
 
-func (ii *InvertedIndex) integrateMergedDirtyFiles(in *FilesItem) {
-	if in != nil {
-		ii.dirtyFiles.Set(in)
-	}
+func (ii *InvertedIndex) integrateMergedDirtyFiles(in *FilesItem) retiredFiles {
+	return ii.dirtyFiles.replace(in)
 }
 
-func (h *History) integrateMergedDirtyFiles(indexIn, historyIn *FilesItem) {
-	h.InvertedIndex.integrateMergedDirtyFiles(indexIn)
-	// TODO: handle collision
-	if historyIn != nil {
-		h.dirtyFiles.Set(historyIn)
-	}
+func (h *History) integrateMergedDirtyFiles(indexIn, historyIn *FilesItem) retiredFiles {
+	retired := h.InvertedIndex.integrateMergedDirtyFiles(indexIn)
+	return append(retired, h.dirtyFiles.replace(historyIn)...)
 }
 
 func (dt *DomainRoTx) cleanAfterMerge(mergedDomain, mergedHist, mergedIdx *FilesItem) (deleted []string, retired []*FilesItem) {

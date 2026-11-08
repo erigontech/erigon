@@ -2117,21 +2117,22 @@ func (a *Aggregator) integrateMergedDirtyFiles(in *MergeResult) {
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
 
+	var retired retiredFiles
 	for id, d := range a.d {
 		if !d.Enabled.Load() {
 			continue
 		}
-		d.integrateMergedDirtyFiles(in.d[id], in.dIdx[id], in.dHist[id])
+		retired = append(retired, d.integrateMergedDirtyFiles(in.d[id], in.dIdx[id], in.dHist[id])...)
 	}
 
 	for id, ii := range a.standaloneIIs() {
 		if !ii.Enabled.Load() {
 			continue
 		}
-		ii.integrateMergedDirtyFiles(in.iis[id])
+		retired = append(retired, ii.integrateMergedDirtyFiles(in.iis[id])...)
 	}
 
-	a.cleanAfterMergeLocked(at, in)
+	a.cleanAfterMergeLocked(at, in, retired)
 }
 
 func (a *Aggregator) cleanAfterMerge(in *MergeResult) {
@@ -2141,15 +2142,14 @@ func (a *Aggregator) cleanAfterMerge(in *MergeResult) {
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
 
-	a.cleanAfterMergeLocked(at, in)
+	a.cleanAfterMergeLocked(at, in, nil)
 }
 
-func (a *Aggregator) cleanAfterMergeLocked(at *AggregatorRoTx, in *MergeResult) {
+func (a *Aggregator) cleanAfterMergeLocked(at *AggregatorRoTx, in *MergeResult, retired retiredFiles) {
 	// Collect garbage names and remove it from dirtyFiles in one pass. onFilesDelete
 	// blocks downstream (e.g. Downloader) before recalc/reclaim physically unlinks
 	// anything (deferred to reclaimRetired), so it won't re-create a file we delete.
 	var deleted []string
-	var retired []*FilesItem
 	for id, d := range at.d {
 		if !d.d.Enabled.Load() {
 			continue
