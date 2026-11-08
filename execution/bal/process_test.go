@@ -386,22 +386,28 @@ func TestBALBlock943ViaVersionedIO(t *testing.T) {
 	_ = fmt.Sprintf // suppress unused import
 }
 
-func TestProcessChecksStoredBALBytesAndComputedBAL(t *testing.T) {
+func TestProcessChecksBALSidecarAndComputedBAL(t *testing.T) {
 	computed := balpkg.Create(1, nil, state.NewVersionedIO(0), "", log.New())
 	computedBytes, err := types.EncodeBlockAccessListBytes(computed)
 	require.NoError(t, err)
 	other := types.BlockAccessList{{Address: common.HexToAddress("0x01")}}
 	otherBytes, err := types.EncodeBlockAccessListBytes(other)
 	require.NoError(t, err)
+	sidecar := func(raw []byte) *types.BlockAccessListSidecar {
+		s, err := types.DecodeBlockAccessListSidecar(raw)
+		require.NoError(t, err)
+		return s
+	}
 
-	process := func(headerHash common.Hash, stored []byte) error {
+	process := func(headerHash common.Hash, stored *types.BlockAccessListSidecar) error {
 		h := &types.Header{Number: *uint256.NewInt(1), GasLimit: 60_000_000, BlockAccessListHash: &headerHash}
 		_, err := balpkg.Process(stored, h, nil, state.NewVersionedIO(0), true, false, "", log.New())
 		return err
 	}
-	require.NoError(t, process(computed.Hash(), computedBytes))
+	require.NoError(t, process(computed.Hash(), sidecar(computedBytes)))
 	require.NoError(t, process(computed.Hash(), nil))
-	require.ErrorContains(t, process(computed.Hash(), append(computedBytes, 0)), "hash mismatch")
-	require.ErrorContains(t, process(computed.Hash(), otherBytes), "hash mismatch")
-	require.ErrorContains(t, process(other.Hash(), otherBytes), "block access list mismatch")
+	require.ErrorContains(t, process(computed.Hash(), sidecar(otherBytes)), "hash mismatch")
+	require.ErrorContains(t, process(computed.Hash(), types.NewBlockAccessListSidecar(other)), "hash mismatch")
+	require.ErrorContains(t, process(other.Hash(), sidecar(otherBytes)), "block access list mismatch")
+	require.ErrorContains(t, process(other.Hash(), nil), "block access list mismatch")
 }

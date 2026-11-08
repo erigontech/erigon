@@ -2931,10 +2931,26 @@ func (b *BlockAccessListBuilder) Build() types.BlockAccessList {
 	bal := make(types.BlockAccessList, 0, len(keys))
 	for _, k := range keys {
 		k.account.finalize()
-		k.account.changes.Normalize()
 		bal = append(bal, k.account.changes)
 	}
 	return bal
+}
+
+func (b *BlockAccessListBuilder) Matches(bal types.BlockAccessList) bool {
+	if len(bal) != len(b.ac) {
+		return false
+	}
+	for i := range bal {
+		account, ok := b.ac[accounts.InternAddress(bal[i].Address)]
+		if !ok {
+			return false
+		}
+		account.finalize()
+		if !account.changes.Equal(&bal[i]) {
+			return false
+		}
+	}
+	return true
 }
 
 type accountState struct {
@@ -2962,6 +2978,7 @@ func (account *accountState) finalize() {
 	applyToBalance(&account.balance, &account.changes, account.initialBalanceValue)
 	applyToNonce(&account.nonce, &account.changes)
 	applyToCode(&account.code, &account.changes, account.initialCodeEmpty)
+	account.changes.Normalize()
 }
 
 type fieldTracker[T any] struct {
