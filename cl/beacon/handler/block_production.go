@@ -866,6 +866,11 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 			fmt.Errorf("invalid slot: %w", err),
 		)
 	}
+	// Production advances the head state slot by slot to targetSlot, without a context.
+	if currentSlot := a.ethClock.GetCurrentSlot(); targetSlot > currentSlot+1 {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest,
+			fmt.Errorf("block slot %d is after the next slot %d", targetSlot, currentSlot+1))
+	}
 
 	builderBoostFactor := uint64(100)
 	if options := gloasBlockOptionsFromContext(ctx); options != nil {
