@@ -16,10 +16,7 @@
 
 //go:build linux
 
-// Package iouring is a minimal hand-rolled io_uring facility for blocking file
-// reads that do not hold the goroutine's P. Waiting in io_uring_enter uses the
-// syscall path, so the Go runtime releases the P. It is not a general async
-// reactor: BlockingBatchRead submits a batch and waits for all of it.
+// Package iouring provides blocking file IO through io_uring without holding the goroutine's P.
 package iouring
 
 import (
