@@ -164,12 +164,14 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 		return nil, fmt.Errorf("block %d(%x) not found", blockNum, hash)
 	}
 
-	// -1, the default, runs the bundles after the whole block.
+	// -1, the default, runs the bundles after the whole block; an index, also
+	// the transaction count, before the block's closing operations.
 	transactionIndex := -1
 	if simulateContext.TransactionIndex != nil {
 		transactionIndex = *simulateContext.TransactionIndex
 	}
-	if transactionIndex == -1 {
+	afterBlock := transactionIndex == -1
+	if afterBlock {
 		transactionIndex = len(block.Transactions())
 	}
 	if transactionIndex < 0 || transactionIndex > len(block.Transactions()) {
@@ -180,7 +182,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 	// after the block with its closing system calls: replaying the block's
 	// transactions alone misses what the block and its engine do around them.
 	var stateReader state.StateReader
-	if transactionIndex == len(block.Transactions()) {
+	if afterBlock {
 		stateReader, err = rpchelper.CreateStateReaderFromBlockNumber(ctx, tx, blockNum, isLatest, -1, api.stateCache, api._txNumReader)
 	} else {
 		cacheView, viewErr := api.stateCache.View(ctx, tx)
