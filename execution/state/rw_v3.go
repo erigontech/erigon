@@ -165,10 +165,12 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 		for addr := range perAddr {
 			addrs = append(addrs, addr)
 		}
-		slices.SortFunc(addrs, func(a, b accounts.Address) int {
-			av, bv := a.Value(), b.Value()
-			return bytes.Compare(av[:], bv[:])
-		})
+		if dbg.TraceApply {
+			slices.SortFunc(addrs, func(a, b accounts.Address) int {
+				av, bv := a.Value(), b.Value()
+				return bytes.Compare(av[:], bv[:])
+			})
+		}
 
 		for _, addr := range addrs {
 			d := perAddr[addr]
