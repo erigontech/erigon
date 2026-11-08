@@ -28,7 +28,6 @@ import (
 	"net/http/httptest"
 	"slices"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -167,38 +166,32 @@ func drainEventCounts(events chan *beaconevents.EventStream) map[beaconevents.Ev
 	}
 }
 
-// repostWatch counts, from its creation on, what a re-POST answered from state must not do.
+// repostWatch fails the test on any work, from its creation on, that a re-POST answered from state must not do.
 type repostWatch struct {
-	f                                               *envelopeContentsFixture
-	events                                          int
-	imports, gossipValidations, contentsValidations atomic.Int32
+	f      *envelopeContentsFixture
+	events int
 }
 
 // watchWork replaces the validation hooks and wraps the import, so create it after the hooks of the test are set.
 func (f *envelopeContentsFixture) watchWork() *repostWatch {
-	w := &repostWatch{f: f, events: len(f.events)}
 	f.forkchoice.ValidateExecutionPayloadEnvelopeForGossipFunc = func(*cltypes.SignedExecutionPayloadEnvelope) error {
-		w.gossipValidations.Add(1)
+		f.t.Error("the envelope must not be gossip-validated again")
 		return nil
 	}
 	f.forkchoice.ValidateExecutionPayloadEnvelopeFunc = func(context.Context, *cltypes.SignedExecutionPayloadEnvelope) error {
-		w.contentsValidations.Add(1)
+		f.t.Error("the contents must not be validated again")
 		return nil
 	}
 	f.wrapImport(func(_ context.Context, next func() error) error {
-		w.imports.Add(1)
+		f.t.Error("the envelope must not be imported again")
 		return next()
 	})
-	return w
+	return &repostWatch{f: f, events: len(f.events)}
 }
 
 func (w *repostWatch) requireIdle() {
-	t := w.f.t
-	t.Helper()
-	require.Equal(t, w.events, len(w.f.events), "nothing may be published, written or imported")
-	require.Zero(t, w.imports.Load(), "the envelope must not be imported again")
-	require.Zero(t, w.gossipValidations.Load(), "the envelope must not be gossip-validated again")
-	require.Zero(t, w.contentsValidations.Load(), "the contents must not be validated again")
+	w.f.t.Helper()
+	require.Equal(w.f.t, w.events, len(w.f.events), "nothing may be published, written or imported")
 }
 
 // markSeenThroughGossip closes the admission identity, as an envelope that arrived through gossip does.
