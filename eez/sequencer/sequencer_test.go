@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/eez/deriver/derivertest"
 	"github.com/erigontech/erigon/eez/follower"
 	"github.com/erigontech/erigon/eez/l1"
+	"github.com/erigontech/erigon/eez/l1/recording"
 	"github.com/erigontech/erigon/eez/protocol/da"
 	"github.com/erigontech/erigon/eez/sequencer"
 	"github.com/erigontech/erigon/execution/types"
@@ -88,22 +89,49 @@ type harness struct {
 	genesis  *types.Header
 	// mirror builds the blocks a composer hands over.
 	mirror *deriver.ExecChain
+	// stop stops the follower and waits for it.
+	stop func()
 }
 
 func newHarness(t *testing.T) *harness {
 	t.Helper()
 	c := derivertest.NewComposer(t)
 	_, chain := derivertest.NewL2(t)
-	cfg := follower.DefaultConfig
-	cfg.Poll, cfg.Retry, cfg.MaxRetry, cfg.BootAttempts = 5*time.Millisecond, 5*time.Millisecond, 20*time.Millisecond, 3
-	f, err := follower.New(c.L1, chain, derivertest.Config(), cfg, log.New())
-	require.NoError(t, err)
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	go func() { _ = f.Run(ctx) }()
+	h := &harness{c: c, chain: chain, pool: &queue{}}
+	h.start(t, h.newFollower(t, nil))
 	genesis, err := chain.HeaderByNumber(t.Context(), 0)
 	require.NoError(t, err)
-	return &harness{c: c, chain: chain, follower: f, pool: &queue{}, genesis: genesis}
+	h.genesis = genesis
+	return h
+}
+
+// newFollower returns a follower of the chain that hands its L1 heads to
+// onHead.
+func (h *harness) newFollower(t *testing.T, onHead func(l1.Header)) *follower.Follower {
+	t.Helper()
+	cfg := follower.DefaultConfig
+	cfg.Poll, cfg.Retry, cfg.MaxRetry, cfg.BootAttempts = 5*time.Millisecond, 5*time.Millisecond, 20*time.Millisecond, 3
+	cfg.OnHead = onHead
+	f, err := follower.New(h.c.L1, h.chain, derivertest.Config(), cfg, log.New())
+	require.NoError(t, err)
+	return f
+}
+
+// start runs f as the follower until t ends or stop.
+func (h *harness) start(t *testing.T, f *follower.Follower) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = f.Run(ctx)
+	}()
+	h.follower = f
+	h.stop = func() {
+		cancel()
+		<-done
+	}
+	t.Cleanup(h.stop)
 }
 
 func (h *harness) sequencer(t *testing.T, maxDepth uint64) *sequencer.Sequencer {
@@ -302,9 +330,16 @@ func TestComposer(t *testing.T) {
 // and waits for the follower to make to safe. It returns the L1 block.
 func (h *harness) settle(t *testing.T, from, to uint64) uint64 {
 	t.Helper()
-	l1Block := h.c.Post(derivertest.Posting{Batch: h.compose(t, from, to)}).Header.Number
+	l1Block := h.post(t, from, to)
 	require.Eventually(t, func() bool { return h.follower.Status().Safe == to }, 10*time.Second, 5*time.Millisecond)
 	return l1Block
+}
+
+// post posts the batch that settles the local blocks from..to as they are,
+// and returns its L1 block.
+func (h *harness) post(t *testing.T, from, to uint64) uint64 {
+	t.Helper()
+	return h.c.Post(derivertest.Posting{Batch: h.compose(t, from, to)}).Header.Number
 }
 
 // compose returns the batch that settles the local blocks from..to as they
@@ -514,6 +549,47 @@ func TestL1Reorg(t *testing.T) {
 	_, err = s.Substitute(ctx, failed.Header())
 	require.ErrorIs(t, err, follower.ErrNotCanonical)
 	require.Equal(t, head.Hash(), h.head(t).Hash())
+}
+
+// TestRestart is T-SEQ-5 for a restart with an unsettled suffix: boot takes
+// L1's settlement of the first blocks without rebuilding them, the rest stay
+// the head, and the schedule resumes on them from the L1 head boot caught up
+// to.
+func TestRestart(t *testing.T) {
+	h := newHarness(t)
+	s := h.sequencer(t, 0)
+	ctx := t.Context()
+	g := h.genesis.Time
+
+	require.NoError(t, s.Handle(ctx, sequencer.SyncSlot{Height: 6, Time: g + 12, L1Head: 1}))
+	h.pool.add(t, h.c.Transfer(common.HexToAddress("0xb0b"), 1))
+	for range 3 {
+		require.NoError(t, s.Handle(ctx, sequencer.LiveTick{SyncHeight: 12}))
+	}
+	require.Len(t, h.block(t, 7).Transactions(), 1)
+	suffix := h.head(t)
+	require.Equal(t, uint64(9), suffix.Number.Uint64())
+
+	// While the node is down, L1 settles the first slot and reaches the block
+	// that anchors the next one.
+	h.stop()
+	h.post(t, 1, 6)
+	l1Head, err := h.c.L1.Head(ctx)
+	require.NoError(t, err)
+	require.NoError(t, h.c.L1.Append(&recording.Block{Header: l1.Header{Number: l1Head.Number + 1, Hash: common.Hash{0xa1}, ParentHash: l1Head.Hash, Time: g + 12}}))
+
+	var svc *sequencer.Service
+	f := h.newFollower(t, func(head l1.Header) { svc.Head(head) })
+	restarted, err := sequencer.New(derivertest.Config(), sequencer.Config{Timing: devnet()}, f, h.pool, log.New())
+	require.NoError(t, err)
+	svc = sequencer.NewService(restarted, sequencer.NewSchedule(devnet(), g), func(err error) { t.Errorf("sequencer halted: %v", err) }, log.New())
+	require.NoError(t, svc.Start())
+	t.Cleanup(func() { _ = svc.Stop() })
+	h.start(t, f)
+
+	require.Eventually(t, func() bool { return h.head(t).Number.Uint64() == 12 }, 10*time.Second, 5*time.Millisecond)
+	require.Equal(t, uint64(6), f.Status().Safe)
+	require.Equal(t, suffix.Hash(), h.block(t, 10).ParentHash(), "production resumes on the kept suffix")
 }
 
 func (h *harness) head(t *testing.T) *types.Header {
