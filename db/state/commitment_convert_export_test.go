@@ -49,3 +49,7 @@ func RebuildCommitmentShardKeysForTest(ctx context.Context, sd *execctx.SharedDo
 func SetConvertPhase1AfterFileHookForTest(fn func(idx int)) {
 	convertPhase1AfterFileHook = fn
 }
+
+func SetConvertPhase5HookForTest(fn func() error) {
+	convertPhase5Hook = fn
+}

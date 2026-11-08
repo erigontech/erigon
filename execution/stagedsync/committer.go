@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"runtime/debug"
 	"runtime/pprof"
 	"sync"
 	"sync/atomic"
@@ -322,8 +321,10 @@ func (cc *commitmentCalculator) Stop() {
 		p.close()
 		cc.logger.Debug("["+cc.logPrefix+"] commitment branch prefetch", "bytes", p.bytes.Load(),
 			"hits", p.hits.Load(), "misses", p.misses.Load(), "dropped", p.dropped.Load(), "drained", p.drained.Load())
-		if r := cc.parentRecords(); r != nil {
-			commitmentdb.PublishParentRecords(r)
+		if commitmentdb.ParentReadsWanted() {
+			if r := cc.parentRecords(); r != nil {
+				commitmentdb.PublishParentRecords(r)
+			}
 		}
 	}
 	if cc.prefetch != nil {
@@ -726,9 +727,6 @@ func (cc *commitmentCalculator) computeRootFromUpdates(ctx context.Context, t co
 	cc.finishPrefetch()
 	cc.branchPrefetch.pause()
 	defer cc.branchPrefetch.resume()
-	if cc.feeds() {
-		defer raiseGCPercent()()
-	}
 	cc.setInput(updates)
 	reader.txNum = t.lastTxNum + 1
 	cc.doms.GetCommitmentContext().SetStateReader(reader)
@@ -868,34 +866,6 @@ func (cc *commitmentCalculator) finishPrefetch() {
 	cc.prefetch = nil
 }
 
-const computeGCPercent = 400
-
-var gcRaise struct {
-	sync.Mutex
-	computes int
-	prev     int
-}
-
-func raiseGCPercent() (restore func()) {
-	gcRaise.Lock()
-	defer gcRaise.Unlock()
-	if gcRaise.computes == 0 {
-		gcRaise.prev = debug.SetGCPercent(computeGCPercent)
-		if gcRaise.prev < 0 || gcRaise.prev > computeGCPercent {
-			debug.SetGCPercent(gcRaise.prev)
-		}
-	}
-	gcRaise.computes++
-	return func() {
-		gcRaise.Lock()
-		defer gcRaise.Unlock()
-		gcRaise.computes--
-		if gcRaise.computes == 0 {
-			debug.SetGCPercent(gcRaise.prev)
-		}
-	}
-}
-
 // compute is the shared prologue/compute/footer for every calculator commitment
 // path; the per-call differences live in m.
 
@@ -948,7 +918,7 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 	if !m.midBlock {
 		cc.lastComputedBlock = t.blockNum
 		cc.hasComputed = true
-		if m.checkRoot && !mismatch {
+		if m.checkRoot && !mismatch && commitmentdb.ParentReadsWanted() {
 			cc.noteVerified(t)
 		}
 	}

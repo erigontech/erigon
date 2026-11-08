@@ -296,6 +296,17 @@ func TestRecordGraph(t *testing.T) {
 			_, _, _, err = live.Finish()
 			require.ErrorContains(t, err, "is referenced but missing")
 		}},
+		{"E66/EmptyChildRecordIsInvalid", func(t *testing.T) {
+			var addrHash [32]byte
+			parent := newNode(planeStorage)
+			parent.setStoredChild(4, bytes.Repeat([]byte{0x44}, 32), nil)
+			ctx := newMockContext()
+			ctx.branches[string(StorageNodeKey(addrHash, []byte{4}, nil))] = []byte{}
+
+			g := graph{plane: planeStorage, addrHash: addrHash[:]}
+			_, err := g.unfoldChild(ctx, parent.childPath(4, nil))
+			require.ErrorIs(t, err, errNodeRecord)
+		}},
 	} {
 		t.Run(tc.name, tc.run)
 	}

@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
@@ -75,10 +76,12 @@ type historyChainBatch struct {
 	spans  [][2]int
 	txNums []uint64
 	vals   [][2]int
+	weight int64
 }
 
 func (b *historyChainBatch) reset() {
 	b.buf, b.keys, b.spans, b.txNums, b.vals = b.buf[:0], b.keys[:0], b.spans[:0], b.txNums[:0], b.vals[:0]
+	b.weight = 0
 }
 
 func (b *historyChainBatch) span(p []byte) [2]int {
@@ -481,6 +484,7 @@ func convertCommitmentHistoryFileV3(ctx context.Context, at *AggregatorRoTx, vFi
 	defer closeCollectors()
 	in := make(chan *historyChainBatch, workers*2)
 	out := make(chan *convertedBatch, workers*2)
+	inFlight := semaphore.NewWeighted(int64(commitmentV3BatchBytes * workers * 2))
 	var chains, versions atomic.Uint64
 
 	g, gctx := errgroup.WithContext(ctx)
@@ -504,12 +508,18 @@ func convertCommitmentHistoryFileV3(ctx context.Context, at *AggregatorRoTx, vFi
 		batch := historyChainBatchPool.Get().(*historyChainBatch)
 		batch.reset()
 		send := func() error {
+			weight := int64(len(batch.buf))
+			if err := inFlight.Acquire(gctx, weight); err != nil {
+				return err
+			}
+			batch.weight = weight
 			select {
 			case in <- batch:
 				batch = historyChainBatchPool.Get().(*historyChainBatch)
 				batch.reset()
 				return nil
 			case <-gctx.Done():
+				inFlight.Release(weight)
 				return gctx.Err()
 			}
 		}
@@ -852,6 +862,7 @@ func convertCommitmentHistoryFileV3(ctx context.Context, at *AggregatorRoTx, vFi
 					}
 				}
 				historyChainBatchPool.Put(batch)
+				inFlight.Release(batch.weight)
 				if err := send(); err != nil {
 					return err
 				}
@@ -1057,7 +1068,11 @@ func verifyCommitmentV3History(ctx context.Context, a *Aggregator, ranges []comm
 	}
 	at.Close()
 	for _, txNum := range samples {
-		if _, err := DebugCommitmentV3RootAsOf(ctx, a, txNum); err != nil {
+		check, err := FoldCommitmentV3(ctx, a, txNum)
+		if err != nil {
+			return fmt.Errorf("as of txNum %d: %w", txNum, err)
+		}
+		if err := verifyCommitmentV3Check(check); err != nil {
 			return fmt.Errorf("as of txNum %d: %w", txNum, err)
 		}
 	}

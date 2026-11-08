@@ -18,7 +18,6 @@ package stagedsync
 
 import (
 	"context"
-	"runtime/debug"
 	"testing"
 
 	keccak "github.com/erigontech/fastkeccak"
@@ -31,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -115,6 +115,25 @@ func TestParentRecordsOnlyForOneVerifiedChildOfTheReadHead(t *testing.T) {
 	require.Nil(t, cc.parentRecords(), "a calculator that verified two blocks")
 }
 
+func TestStopDoesNotPublishParentRecordsWhenNotWanted(t *testing.T) {
+	previous := commitmentdb.ParentReadsWanted()
+	commitmentdb.WantParentReads(false)
+	t.Cleanup(func() { commitmentdb.WantParentReads(previous) })
+	p := newPrefetchRecords()
+	p.work = make(chan prefetchItem, 1)
+	cc := &commitmentCalculator{
+		branchPrefetch: p,
+		done:           make(chan struct{}),
+		readAtNum:      9,
+		readAtHash:     common.Hash{9},
+		logger:         log.New(),
+		handoff:        &commitTarget{blockNum: 10, blockHash: common.Hash{10}, parentHash: common.Hash{9}},
+	}
+
+	cc.Stop()
+	require.Nil(t, commitmentdb.ParentRecordsFor(10, common.Hash{10}, common.Hash{9}))
+}
+
 func TestHandleBlockRequestQueuesBALWrites(t *testing.T) {
 	defer func(prev bool) { dbg.IgnoreBAL = prev }(dbg.IgnoreBAL)
 	dbg.IgnoreBAL = false
@@ -191,27 +210,4 @@ func TestComputeAheadReadsPrefetchedBranches(t *testing.T) {
 	})
 
 	require.NotZero(t, p.hits.Load()+p.misses.Load(), "compute-ahead must read commitment records through the prefetch map")
-}
-
-func TestRaiseGCPercentRestores(t *testing.T) {
-	prev := debug.SetGCPercent(150)
-	defer debug.SetGCPercent(prev)
-	restore := raiseGCPercent()
-	require.Equal(t, computeGCPercent, debug.SetGCPercent(computeGCPercent))
-	restore()
-	require.Equal(t, 150, debug.SetGCPercent(150))
-
-	debug.SetGCPercent(-1)
-	raiseGCPercent()()
-	require.Equal(t, -1, debug.SetGCPercent(-1))
-}
-
-func TestRaiseGCPercentOverlappingComputesRestore(t *testing.T) {
-	prev := debug.SetGCPercent(150)
-	defer debug.SetGCPercent(prev)
-	first, second := raiseGCPercent(), raiseGCPercent()
-	first()
-	require.Equal(t, computeGCPercent, debug.SetGCPercent(computeGCPercent), "a compute still running keeps the raised percent")
-	second()
-	require.Equal(t, 150, debug.SetGCPercent(150), "the last compute to finish restores the percent the first one saw")
 }

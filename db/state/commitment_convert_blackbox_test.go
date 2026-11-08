@@ -444,6 +444,55 @@ func TestConvertCommitmentFiles_FullFlow(t *testing.T) {
 		"commitment root must be unchanged across squeeze conversion")
 }
 
+func TestConvertCommitmentFiles_RejectsUnindexedLegacyFileBeforeBackup(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	db, agg := testDbAggregatorWithFiles(t, &testAggConfig{stepSize: 10, disableCommitmentBranchTransform: true})
+	rogue := filepath.Join(agg.Dirs().SnapDomain, "v2.0-commitment.999-1000.kv")
+	require.NoError(t, os.WriteFile(rogue, nil, 0o644))
+
+	rwTx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	t.Cleanup(rwTx.Rollback)
+	at := state.AggTx(rwTx)
+	_, err = state.ConvertCommitmentFiles(t.Context(), at, state.ConvertOpts{TargetV3: true}, log.New())
+	rwTx.Rollback()
+	require.ErrorContains(t, err, "v2.0-commitment.999-1000.kv")
+	require.NoDirExists(t, filepath.Join(agg.Dirs().Snap, "backup"))
+}
+
+func TestConvertCommitmentFiles_BeforeSwapRunsBeforePhase5Failure(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	db, _ := testDbAggregatorWithFiles(t, &testAggConfig{stepSize: 10, disableCommitmentBranchTransform: true})
+	rwTx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	t.Cleanup(rwTx.Rollback)
+	at := state.AggTx(rwTx)
+	original := pickLargestCommitmentFile(t, at).Fullpath()
+	var events []string
+	opts := state.ConvertOpts{
+		TargetV3: true,
+		BeforeSwap: func() error {
+			events = append(events, "before-swap")
+			_, statErr := os.Stat(original)
+			require.NoError(t, statErr)
+			return nil
+		},
+	}
+	state.SetConvertPhase5HookForTest(func() error {
+		events = append(events, "phase5")
+		return errors.New("injected phase5 failure")
+	})
+	t.Cleanup(func() { state.SetConvertPhase5HookForTest(nil) })
+	_, err = state.ConvertCommitmentFiles(t.Context(), at, opts, log.New())
+	rwTx.Rollback()
+	require.ErrorContains(t, err, "injected phase5 failure")
+	require.Equal(t, []string{"before-swap", "phase5"}, events)
+}
+
 // anyFileHasSqueezedField returns true if any non-state branch value in any of
 // the supplied .kv files contains an embedded plain-key reference shorter than
 // binary.MaxVarintLen64 (10 bytes) — the on-disk marker the read side keys off
@@ -989,6 +1038,25 @@ func TestRestoreCommitmentFiles_OrphanSweep(t *testing.T) {
 	restoredBT := readFileBytes(t, filepath.Join(dirs.SnapDomain, "v2.0-commitment.0-32.bt"))
 	require.Equal(t, origKV, restoredKV)
 	require.Equal(t, origBT, restoredBT)
+}
+
+func TestRestoreCommitmentFiles_RejectsV3FileOutsideManifest(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	_, agg := testDbAndAggregatorv3(t, 10)
+	dirs := agg.Dirs()
+	backupDir := filepath.Join(dirs.Snap, "backup", "domains")
+	require.NoError(t, os.MkdirAll(backupDir, 0o755))
+	require.NoError(t, os.MkdirAll(dirs.SnapDomain, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(backupDir, "v2.0-commitment.0-32.kv"), []byte("ORIG"), 0o644))
+	orphan := filepath.Join(dirs.SnapDomain, "v3.0-commitment.16-32.kv")
+	require.NoError(t, os.WriteFile(orphan, []byte("ORPHAN"), 0o644))
+
+	err := state.RestoreCommitmentFiles(t.Context(), dirs, log.New())
+	require.ErrorContains(t, err, "v3.0-commitment.16-32.kv")
+	require.FileExists(t, orphan)
+	require.FileExists(t, filepath.Join(backupDir, "v2.0-commitment.0-32.kv"))
 }
 
 // TestRestoreCommitmentFiles_RerunnableAfterPartialFailure simulates a restore

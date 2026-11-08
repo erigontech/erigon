@@ -78,6 +78,23 @@ func TestCommitmentVerifyRejectsAsOfWithoutHistory(t *testing.T) {
 	require.ErrorContains(t, commitmentVerify(t.Context(), log.New()), "history is disabled")
 }
 
+func TestNewTemporalDBRejectsV3FilesWhenV3IsDisabled(t *testing.T) {
+	previous := statecfg.ExperimentalCommitmentV3
+	statecfg.ExperimentalCommitmentV3 = false
+	t.Cleanup(func() { statecfg.ExperimentalCommitmentV3 = previous })
+
+	db, dirs := dbWithV3State(t)
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v3.0-commitment.0-1.kv"), nil, 0o644))
+	previousDatadir := datadirCli
+	datadirCli = dirs.DataDir
+	t.Cleanup(func() { datadirCli = previousDatadir })
+
+	require.ErrorContains(t, func() error {
+		_, err := newTemporalDB(t.Context(), db, log.New())
+		return err
+	}(), "requires commitment v3")
+}
+
 func dbWithV3State(t *testing.T) (kv.TemporalRwDB, datadir.Dirs) {
 	t.Helper()
 	dirs := datadir.New(t.TempDir())

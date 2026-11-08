@@ -23,6 +23,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -35,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
@@ -57,7 +59,8 @@ type ConvertOpts struct {
 	// every required accessor sibling are skipped. Operator is responsible
 	// for passing the same TargetSqueeze / TargetNibblesV2 values used in
 	// the original run; a mismatch produces mixed-encoding output silently.
-	Continue bool
+	Continue   bool
+	BeforeSwap func() error
 }
 
 // fileState describes the detected current encoding of a commitment .kv file.
@@ -614,6 +617,24 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 		logger.Info("[commitment_convert] no commitment files to convert")
 		return false, nil
 	}
+	if opts.TargetV3 {
+		converted := make(map[string]struct{}, len(files))
+		for _, f := range files {
+			converted[filepath.Base(f.Fullpath())] = struct{}{}
+		}
+		for _, f := range at.d[kv.CommitmentDomain].ht.files {
+			if f.Version().Major < 3 {
+				converted[filepath.Base(f.Fullpath())] = struct{}{}
+			}
+		}
+		unindexed, err := legacyCommitmentFilesNotConverted(at.Dirs(), converted)
+		if err != nil {
+			return false, err
+		}
+		if len(unindexed) != 0 {
+			return false, fmt.Errorf("[commitment_convert] legacy commitment files are not visible to the aggregator: %s", strings.Join(unindexed, ", "))
+		}
+	}
 
 	// Output .kv version encodes the squeeze target for the version-gated reader (v2.1 squeezed,
 	// v2.2 plain); set once for the run so phase 1 writes and phase 2 discovery agree, then restore.
@@ -718,6 +739,11 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 			processedFiles, priorCompleteCount, expectedConverted, len(convertedFiles))
 	}
 	logger.Info(fmt.Sprintf("[commitment_convert] phase 2 pre-swap check: %d files ok", len(convertedFiles)))
+	if opts.BeforeSwap != nil {
+		if err := opts.BeforeSwap(); err != nil {
+			return false, fmt.Errorf("[commitment_convert] before swap: %w", err)
+		}
+	}
 
 	// Windows can't rename a mmapped file, so drop the aggregator's handles on
 	// the originals before Phase 3 moves them out of snapshots/domain/. This
@@ -761,6 +787,11 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 	}
 
 	// Phase 5: reload aggregator.
+	if convertPhase5Hook != nil {
+		if err := convertPhase5Hook(); err != nil {
+			return false, fmt.Errorf("[commitment_convert] phase 5 hook: %w", err)
+		}
+	}
 	if reloadErr := at.a.ReloadFiles(); reloadErr != nil {
 		return false, fmt.Errorf("[commitment_convert] phase 5 ReloadFiles; restore with `integration commitment convert --restore`: %w", reloadErr)
 	}
@@ -830,6 +861,11 @@ func RestoreCommitmentFiles(ctx context.Context, dirs datadir.Dirs, logger log.L
 			historyPending = true
 		}
 	}
+	if err := preflightRestoreV3Orphans(
+		[][2]string{{filepath.Join(backupRoot, "domains"), dirs.SnapDomain}, {filepath.Join(backupRoot, "history"), dirs.SnapHistory}},
+	); err != nil {
+		return err
+	}
 	if err := restoreCommitmentBackup(ctx, filepath.Join(backupRoot, "domains"), dirs.SnapDomain, !historyPending, logger); err != nil {
 		return err
 	}
@@ -837,6 +873,100 @@ func RestoreCommitmentFiles(ctx context.Context, dirs datadir.Dirs, logger log.L
 		if err := restoreCommitmentBackup(ctx, filepath.Join(backupRoot, pair[0]), pair[1], false, logger); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func commitmentFileVersion(name string) (uint64, bool) {
+	info, _, ok := snaptype.ParseFileName("", name)
+	if !ok || info.TypeString != "commitment" || (info.Ext != ".kv" && info.Ext != ".v") {
+		return 0, false
+	}
+	return info.Version.Major, true
+}
+
+func legacyCommitmentFilesNotConverted(dirs datadir.Dirs, converted map[string]struct{}) ([]string, error) {
+	var unindexed []string
+	for _, dirPath := range []string{dirs.SnapDomain, dirs.SnapHistory} {
+		entries, err := os.ReadDir(dirPath)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("[commitment_convert] read commitment directory %s: %w", dirPath, err)
+		}
+		for _, entry := range entries {
+			if entry.IsDir() {
+				continue
+			}
+			major, ok := commitmentFileVersion(entry.Name())
+			if !ok || major >= 3 {
+				continue
+			}
+			if _, ok := converted[entry.Name()]; !ok {
+				unindexed = append(unindexed, filepath.Join(dirPath, entry.Name()))
+			}
+		}
+	}
+	slices.Sort(unindexed)
+	return unindexed, nil
+}
+
+func preflightRestoreV3Orphans(pairs [][2]string) error {
+	var conflicts []string
+	for _, pair := range pairs {
+		entries, err := os.ReadDir(pair[0])
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("[commitment_convert] restore: read backup dir %s: %w", pair[0], err)
+		}
+		manifest, exists, err := loadRestoreManifest(filepath.Join(pair[0], restoreManifestName))
+		if err != nil {
+			return err
+		}
+		if !exists {
+			manifest, err = buildRestoreManifest(entries)
+			if err != nil {
+				return err
+			}
+		}
+		ranges := make(map[[2]string]struct{}, len(manifest))
+		for _, name := range manifest {
+			m := commitmentStepRangeRe.FindStringSubmatch(name)
+			if m == nil {
+				return fmt.Errorf("[commitment_convert] restore: manifest entry %q does not match commitment step-range pattern", name)
+			}
+			ranges[[2]string{m[1], m[2]}] = struct{}{}
+		}
+		liveEntries, err := os.ReadDir(pair[1])
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("[commitment_convert] restore: read live dir %s: %w", pair[1], err)
+		}
+		for _, entry := range liveEntries {
+			if entry.IsDir() {
+				continue
+			}
+			major, ok := commitmentFileVersion(entry.Name())
+			if !ok || major < 3 {
+				continue
+			}
+			m := commitmentStepRangeRe.FindStringSubmatch(entry.Name())
+			if m == nil {
+				continue
+			}
+			if _, ok := ranges[[2]string{m[1], m[2]}]; !ok {
+				conflicts = append(conflicts, filepath.Join(pair[1], entry.Name()))
+			}
+		}
+	}
+	if len(conflicts) != 0 {
+		slices.Sort(conflicts)
+		return fmt.Errorf("[commitment_convert] restore: v3 commitment files are not in the backup manifest: %s", strings.Join(conflicts, ", "))
 	}
 	return nil
 }
@@ -1311,6 +1441,8 @@ func preflightResume(
 // resume integration test can cancel mid-Phase-1 deterministically without
 // racing against log-line counting.
 var convertPhase1AfterFileHook func(idx int)
+
+var convertPhase5Hook func() error
 
 // convertPhase1 runs convertCommitmentFile against every visible commitment
 // file in sequence, writing outputs into rebuildDir. errSkip is caught

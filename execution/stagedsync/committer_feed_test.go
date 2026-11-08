@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	_ "github.com/erigontech/erigon/execution/commitment/v3"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
@@ -115,6 +116,8 @@ func calculatorRoots(t *testing.T, wantFeed bool) [][]byte {
 }
 
 func TestEmitTouchedFeedCarriesWhatEmitTouchedEmits(t *testing.T) {
+	commitmentdb.WantParentReads(true)
+	t.Cleanup(func() { commitmentdb.WantParentReads(false) })
 	const txIdx = 3
 	ver := state.Version{TxIndex: txIdx}
 	a := func(b byte) accounts.Address { return accounts.InternAddress([20]byte{b}) }

@@ -77,6 +77,9 @@ func (g graph) unfoldChild(ctx commitment.PatriciaContext, path []byte) (*node, 
 	if child == nil {
 		return nil, fmt.Errorf("%w: missing child at depth %d", errNodeRecord, len(path))
 	}
+	if len(child.raw) == 0 {
+		return nil, errNodeRecord
+	}
 	return child, nil
 }
 

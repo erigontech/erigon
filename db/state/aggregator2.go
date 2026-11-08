@@ -275,3 +275,28 @@ func CheckSnapshotsCompatibility(d datadir.Dirs) error {
 
 	return nil
 }
+
+func CheckCommitmentV3DownloaderCompatibility(d datadir.Dirs) error {
+	if !statecfg.ExperimentalCommitmentV3 {
+		return nil
+	}
+	for _, dirPath := range []string{d.SnapDomain, d.SnapHistory} {
+		entries, err := os.ReadDir(dirPath)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		for _, entry := range entries {
+			if entry.IsDir() {
+				continue
+			}
+			major, ok := commitmentFileVersion(entry.Name())
+			if ok && major >= 3 {
+				return nil
+			}
+		}
+	}
+	return errors.New("commitment v3 is enabled with the downloader but no v3 commitment files exist; convert the datadir or disable v3")
+}
