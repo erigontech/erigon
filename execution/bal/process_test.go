@@ -442,13 +442,15 @@ func TestProcessReturnsTheSidecarListWhenItMatches(t *testing.T) {
 }
 
 func TestProcessRejectsAMatchingSidecarTheHeaderDoesNotAllow(t *testing.T) {
-	process := func(headerHash common.Hash, gasLimit uint64) error {
+	process := func(headerHash *common.Hash, gasLimit uint64) error {
 		io, _, sidecar := executedBALSidecar(t)
-		h := &types.Header{Number: *uint256.NewInt(1), GasLimit: gasLimit, BlockAccessListHash: &headerHash}
+		h := &types.Header{Number: *uint256.NewInt(1), GasLimit: gasLimit, BlockAccessListHash: headerHash}
 		_, err := balpkg.Process(sidecar, h, nil, io, true, false, "", log.New())
 		return err
 	}
 	_, computed, _ := executedBALSidecar(t)
-	require.ErrorContains(t, process(common.Hash{1}, 60_000_000), "hash mismatch")
-	require.ErrorIs(t, process(computed.Hash(), types.BalItemCost), rules.ErrInvalidBlock)
+	computedHash := computed.Hash()
+	require.ErrorContains(t, process(&common.Hash{1}, 60_000_000), "hash mismatch")
+	require.ErrorIs(t, process(&computedHash, types.BalItemCost), rules.ErrInvalidBlock)
+	require.ErrorContains(t, process(nil, 60_000_000), "BlockAccessListHash is nil")
 }
