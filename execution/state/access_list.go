@@ -117,8 +117,10 @@ func (al *accessList) ContainsAddress(address accounts.Address) bool {
 // Contains checks if a slot within an account is present in the access list, returning
 // separate flags for the presence of the account and the slot respectively.
 func (al *accessList) Contains(address accounts.Address, slot accounts.StorageKey) (addressPresent bool, slotPresent bool) {
-	if _, present := al.slotsOnly[frameStorageSlot{address, slot}]; present {
-		return al.ContainsAddress(address), true
+	if len(al.slotsOnly) != 0 {
+		if _, present := al.slotsOnly[frameStorageSlot{address, slot}]; present {
+			return al.ContainsAddress(address), true
+		}
 	}
 	if al.lastSlots != nil && al.lastAddr == address {
 		if slot == al.lastWarmSlot {
@@ -168,8 +170,10 @@ func (al *accessList) AddAddress(address accounts.Address) bool {
 // - slot added
 // For any 'true' value returned, a corresponding journal entry must be made.
 func (al *accessList) AddSlot(address accounts.Address, slot accounts.StorageKey) (addrChange bool, slotChange bool) {
-	if _, present := al.slotsOnly[frameStorageSlot{address, slot}]; present {
-		return al.AddAddress(address), false
+	if len(al.slotsOnly) != 0 {
+		if _, present := al.slotsOnly[frameStorageSlot{address, slot}]; present {
+			return al.AddAddress(address), false
+		}
 	}
 	if al.lastSlots != nil && al.lastAddr == address {
 		if slot == al.lastWarmSlot {

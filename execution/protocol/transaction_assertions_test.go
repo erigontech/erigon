@@ -94,6 +94,35 @@ func TestPostTxBalanceTrace(t *testing.T) {
 	}
 }
 
+func TestTxDiffValidationErrors(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		mode  uint8
+		index uint64
+		want  error
+	}{
+		{"outside-post-tx", types.FrameSender, 0, vm.ErrFrameContext},
+		{"reserved-input", types.FramePostTx, 1, vm.ErrFrameParameter},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			evm, tx := frameTestEnv(t)
+			ibs := evm.IntraBlockState()
+			target := common.HexToAddress("0x2000")
+			require.NoError(t, ibs.SetCode(accounts.InternAddress(tx.SenderAddress), []byte{0x60, 3, 0x5f, 0x5f, 0xaa}, tracing.CodeChangeUnspecified))
+			code := program.New().Push(tc.index).Push0().Push(2).Op(vm.TXDIFF, vm.STOP).Bytes()
+			require.NoError(t, ibs.SetCode(accounts.InternAddress(target), code, tracing.CodeChangeUnspecified))
+			tx.Frames = []types.Frame{
+				{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
+				{Mode: tc.mode, Target: &target, Limits: mdgas.MdGas{Execution: 10_000}},
+			}
+			result, err := applyFrameTest(t, evm, tx)
+			require.NoError(t, err)
+			require.ErrorIs(t, result.Err, tc.want)
+			require.NotErrorIs(t, result.Err, vm.ErrOutOfGas)
+		})
+	}
+}
+
 func assertStackWord(code *program.Program, expected uint64) {
 	code.Push(expected).Op(vm.EQ)
 	destination := code.Size() + 7

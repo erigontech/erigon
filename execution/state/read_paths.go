@@ -55,10 +55,10 @@ func codeSizeFromStateObject(ibs *IntraBlockState, so *stateObject, addr account
 }
 
 // originStorageDirect reads a storage slot's pre-block origin value straight from the
-// state reader, no stateObject. Creation clears live storage, but a TXDIFF prestate
-// query must still read the value from before creation.
-func (ibs *IntraBlockState) originStorageDirect(addr accounts.Address, key accounts.StorageKey, beforeCreation bool) (uint256.Int, error) {
-	if cc, ok := ibs.versionedWriteCreateContract(addr); ok && cc && !beforeCreation {
+// state reader, no stateObject. A contract this tx created (own CreateContract cell)
+// has fresh storage, so a cold slot reads zero rather than a prior incarnation's value.
+func (ibs *IntraBlockState) originStorageDirect(addr accounts.Address, key accounts.StorageKey) (uint256.Int, error) {
+	if cc, ok := ibs.versionedWriteCreateContract(addr); ok && cc {
 		return uint256.Int{}, nil
 	}
 	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle()))) {
@@ -208,9 +208,7 @@ const (
 // Exactly one source field is populated for the tier-hit outcomes; the wrapper does
 // the typed extraction and records the read via ReadSet.SetX when r.recordVR is true.
 type readPathResult struct {
-	outcome               readPathOutcome
-	storageBeforeCreation bool
-	storageBase           *stateObject
+	outcome readPathOutcome
 
 	// Per-typed write pointers (only the read path's is set on outcomeWriteSetHit)
 	// avoid the any-boxing a single AnyVersionedWrite field would force on the hot path.
@@ -301,7 +299,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 		return
 	}
 
-	if so, ok := s.stateObjects[addr]; ok && so.deleted && !r.storageBeforeCreation {
+	if so, ok := s.stateObjects[addr]; ok && so.deleted {
 		// When the deletion reflects a prior tx's selfdestruct, surface the SD version
 		// rather than UnknownVersion so records match later SD-zero-path reads and
 		// don't force a version conflict.
@@ -333,7 +331,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 	// recorded: a read after the tx's own write is served from the write set and not recorded.
 	// A tx that created or destroyed the account, or holds its state object, answers otherwise.
 	if !commited && !s.versionedWrites.Has(WriteHeader{Address: addr, Path: path, Key: key}) ||
-		commited && path == StoragePath && (r.storageBeforeCreation || s.stateObjects[addr] == nil && !s.wroteAccountLifecycle(addr)) {
+		commited && path == StoragePath && s.stateObjects[addr] == nil && !s.wroteAccountLifecycle(addr) {
 		if prHeader, ok := s.versionedReads.getHeader(addr, path, key); ok &&
 			(prHeader.Source == MapRead || prHeader.Source == StorageRead) {
 			r.outcome = outcomeReadSetHit
@@ -380,7 +378,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 					Val:        true,
 				})
 			} else {
-				if commited && !r.storageBeforeCreation {
+				if commited {
 					r.outcome = wipedFieldOutcome(s, addr)
 					r.source = MapRead
 					r.version = sdVersion
@@ -529,7 +527,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 		// otherwise make validation disagree forever and livelock.
 		if path == StoragePath || path == NoncePath {
 			if r.life.state != LifecycleLive && hdr.Version.TxIndex <= r.life.destroyedAt {
-				if !commited || r.storageBeforeCreation {
+				if !commited {
 					recordWipedSelfDestruct(s, addr, r.life)
 					if path == StoragePath {
 						recordWipedStorageRead(s, addr, key, r.life)
@@ -719,23 +717,14 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 		// materializing a stateObject, reusing one only if a write this tx already made it.
 		if path == StoragePath {
 			hdr.Source = StorageRead
-			if r.storageBeforeCreation {
-				so = r.storageBase
-				if so == nil {
-					value, err := s.originStorageDirect(addr, key, true)
-					r.mapStorageVal, r.err = value, err
-					r.outcome, r.hdr, r.recordVR = outcomeStorageRead, hdr, true
-					r.source, r.version = hdr.Source, hdr.Version
-					return
-				}
-			} else if cached, ok := s.stateObjects[addr]; ok {
+			if cached, ok := s.stateObjects[addr]; ok {
 				so = cached
 			} else {
 				// A cold slot depends only on its own StoragePath cell — recording an
 				// AddressPath dependency would be a false dep. The origin is resolved by
 				// ReadStorage's origin fallback; this cold path is the first reader (not yet
 				// published), which reads the origin base from the state reader.
-				val, err := s.originStorageDirect(addr, key, false)
+				val, err := s.originStorageDirect(addr, key)
 				if err != nil {
 					r.err = err
 					r.outcome = outcomeReturnDefault
@@ -1545,12 +1534,6 @@ func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.Sto
 			return vw.Val, WriteSetRead, Version{TxIndex: s.txIndex, Incarnation: s.version}, false, nil
 		}
 	}
-	if created, _ := s.versionedWriteCreateContract(addr); created {
-		// Creation wipes the live storage, while the read set must retain the
-		// pre-transaction value for conflict detection and TXDIFF.
-		_, _, _, err := readStorageBeforeCreation(s, addr, key, nil)
-		return uint256.Int{}, WriteSetRead, Version{TxIndex: s.txIndex, Incarnation: s.version}, true, err
-	}
 	// A resident deleted object outranks the read set, as in versionedReadCore.
 	if so, ok := s.stateObjects[addr]; !ok || !so.deleted {
 		if tr, ok := s.versionedReads.GetStorage(addr, key); ok && warmSource(tr.Source) {
@@ -1605,28 +1588,7 @@ func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.Sto
 
 // readCommittedState reads a storage slot with committed-view semantics.
 func readCommittedState(s *IntraBlockState, addr accounts.Address, key accounts.StorageKey) (uint256.Int, ReadSource, Version, error) {
-	if created, _ := s.versionedWriteCreateContract(addr); s.versionMap != nil && created {
-		_, source, version, err := readStorageBeforeCreation(s, addr, key, nil)
-		return uint256.Int{}, source, version, err
-	}
-	return readCommittedStorage(s, addr, key, &readPathResult{})
-}
-
-// Creation resets SSTORE's original value to zero. TXDIFF instead needs the
-// transaction prestate, including writes from earlier transactions in the block.
-func readStorageBeforeCreation(s *IntraBlockState, addr accounts.Address, key accounts.StorageKey, previous *stateObject) (uint256.Int, ReadSource, Version, error) {
-	return readCommittedStorage(s, addr, key, &readPathResult{storageBeforeCreation: true, storageBase: previous})
-}
-
-func readCommittedStorage(s *IntraBlockState, addr accounts.Address, key accounts.StorageKey, r *readPathResult) (uint256.Int, ReadSource, Version, error) {
 	if s.versionMap == nil {
-		if r.storageBeforeCreation {
-			if r.storageBase == nil || r.storageBase.deleted {
-				return uint256.Int{}, StorageRead, UnknownVersion, nil
-			}
-			value, _, err := r.storageBase.GetState(key)
-			return value, StorageRead, UnknownVersion, err
-		}
 		so, err := s.getStateObject(addr, true)
 		if err != nil || so == nil || so.deleted {
 			return uint256.Int{}, StorageRead, UnknownVersion, err
@@ -1634,7 +1596,8 @@ func readCommittedStorage(s *IntraBlockState, addr accounts.Address, key account
 		v, err := so.GetCommittedState(key)
 		return v, StorageRead, UnknownVersion, err
 	}
-	versionedReadCore(s, addr, StoragePath, key, true, false, r)
+	var r readPathResult
+	versionedReadCore(s, addr, StoragePath, key, true, false, &r)
 	if r.err != nil {
 		return uint256.Int{}, r.source, r.version, r.err
 	}
@@ -1654,13 +1617,7 @@ func readCommittedStorage(s *IntraBlockState, addr accounts.Address, key account
 		var v uint256.Int
 		if r.so != nil {
 			if !r.so.deleted {
-				var cv uint256.Int
-				var err error
-				if r.storageBeforeCreation {
-					cv, _, err = r.so.GetState(key)
-				} else {
-					cv, err = r.so.GetCommittedState(key)
-				}
+				cv, err := r.so.GetCommittedState(key)
 				if err != nil {
 					return uint256.Int{}, StorageRead, UnknownVersion, err
 				}
@@ -1669,7 +1626,7 @@ func readCommittedStorage(s *IntraBlockState, addr accounts.Address, key account
 		} else {
 			v = r.mapStorageVal
 		}
-		seedStorageOrigin(s, addr, key, v, r)
+		seedStorageOrigin(s, addr, key, v, &r)
 		if r.recordVR {
 			s.versionedReads.SetStorage(addr, key, VersionedRead[uint256.Int]{r.hdr, v})
 		}

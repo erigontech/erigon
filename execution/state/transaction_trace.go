@@ -43,7 +43,6 @@ type TransactionTrace struct {
 	balanceBefore map[accounts.Address]uint256.Int
 	storageBefore map[frameStorageSlot]uint256.Int
 	codeBefore    map[accounts.Address]accounts.CodeHash
-	storageWipes  map[accounts.Address]*stateObject
 }
 
 type StorageChange struct {
@@ -57,9 +56,10 @@ type CodeChange struct {
 	After   accounts.CodeHash
 }
 
-// TransactionTrace uses the surviving journal entries, so reverted writes are
-// absent and each first value is from the transaction prestate. POST_TX is a
-// read-only suffix: its view stays fixed until settlement, outside the EVM.
+// TransactionTrace uses surviving journal entries, excluding reverted writes.
+// It relies on EIP-8253 preventing creation over non-empty storage, so the first
+// journaled slot value is its transaction prestate: https://eips.ethereum.org/EIPS/eip-8253
+// POST_TX is a read-only suffix: its view stays fixed until settlement, outside the EVM.
 func (ctx *FrameContext) TransactionTrace(ibs *IntraBlockState) (*TransactionTrace, error) {
 	if ctx.trace != nil {
 		return ctx.trace, nil
@@ -72,19 +72,10 @@ func (ctx *FrameContext) TransactionTrace(ibs *IntraBlockState) (*TransactionTra
 		balanceBefore: make(map[accounts.Address]uint256.Int),
 		storageBefore: make(map[frameStorageSlot]uint256.Int),
 		codeBefore:    make(map[accounts.Address]accounts.CodeHash),
-		storageWipes:  make(map[accounts.Address]*stateObject),
 	}
 	nonces := make(map[accounts.Address]uint64)
 	for _, entry := range ibs.journal.entries[ctx.journalStart:] {
 		switch entry.kind {
-		case kindCreateObject, kindResetObject:
-			if _, seen := trace.storageWipes[entry.account]; !seen {
-				var previous *stateObject
-				if entry.extra != nil {
-					previous = entry.extra.prevObj
-				}
-				trace.storageWipes[entry.account] = previous
-			}
 		case kindBalance, kindSelfdestruct:
 			if _, ok := trace.balanceBefore[entry.account]; !ok {
 				trace.balanceBefore[entry.account] = entry.value
@@ -96,15 +87,7 @@ func (ctx *FrameContext) TransactionTrace(ibs *IntraBlockState) (*TransactionTra
 		case kindStorage, kindFakeStorage:
 			slot := frameStorageSlot{entry.account, entry.key}
 			if _, ok := trace.storageBefore[slot]; !ok {
-				value := entry.value
-				if previous, wiped := trace.storageWipes[entry.account]; wiped {
-					var err error
-					value, _, _, err = readStorageBeforeCreation(ibs, entry.account, entry.key, previous)
-					if err != nil {
-						return nil, err
-					}
-				}
-				trace.storageBefore[slot] = value
+				trace.storageBefore[slot] = entry.value
 			}
 		case kindCode:
 			if _, ok := trace.codeBefore[entry.account]; !ok {
@@ -203,10 +186,6 @@ func (trace *TransactionTrace) Balance(ibs *IntraBlockState, address accounts.Ad
 func (trace *TransactionTrace) Storage(ibs *IntraBlockState, address accounts.Address, key accounts.StorageKey, before bool) (uint256.Int, error) {
 	if value, ok := trace.storageBefore[frameStorageSlot{address, key}]; before && ok {
 		return value, nil
-	}
-	if previous, wiped := trace.storageWipes[address]; before && wiped {
-		value, _, _, err := readStorageBeforeCreation(ibs, address, key, previous)
-		return value, err
 	}
 	return ibs.GetState(address, key)
 }

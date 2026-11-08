@@ -17,27 +17,13 @@
 package vm
 
 import (
-	"github.com/holiman/uint256"
-
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func inPostTx(evm *EVM) bool {
 	return evm.FrameContext != nil && evm.FrameContext.Transaction.Frames[evm.FrameContext.Index].Mode == types.FramePostTx
-}
-
-func (evm *EVM) prestateStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, error) {
-	if !inPostTx(evm) {
-		return uint256.Int{}, ErrFrameContext
-	}
-	trace, err := evm.FrameContext.TransactionTrace(evm.IntraBlockState())
-	if err != nil {
-		return uint256.Int{}, err
-	}
-	return trace.Storage(evm.IntraBlockState(), address, key, true)
 }
 
 func opTxTrace(pc uint64, evm *EVM, call *CallContext) (uint64, []byte, error) {
@@ -142,20 +128,13 @@ func opTxTrace(pc uint64, evm *EVM, call *CallContext) (uint64, []byte, error) {
 }
 
 func gasTxDiff(evm *EVM, call *CallContext, _ mdgas.MdGas, _ uint64) (mdgas.MdGasCost, error) {
-	if !inPostTx(evm) {
-		return mdgas.MdGasCost{}, ErrFrameContext
-	}
 	param, key, index := call.Stack.back3(0, 1, 2)
-	if !param.IsUint64() || param.Uint64() > 0x0c {
-		return mdgas.MdGasCost{}, ErrFrameParameter
-	}
-	p := param.Uint64()
-	if p >= 2 && p != 7 && p != 9 && p != 0x0c && !index.IsZero() {
-		return mdgas.MdGasCost{}, ErrFrameParameter
-	}
 	ibs := evm.IntraBlockState()
 	cost := uint64(params.WarmStorageReadCostEIP2929)
-	if p <= 1 {
+	if !param.IsUint64() {
+		return mdgas.MdGasCost{Execution: cost}, nil
+	}
+	if p := param.Uint64(); p <= 1 {
 		address, slot := ibs.InternAddress(key), ibs.InternStorageKey(index)
 		if _, warm := ibs.SlotInAccessList(address, slot); !warm {
 			cost = coldStorageAccessCost(evm.chainRules)
@@ -167,10 +146,17 @@ func gasTxDiff(evm *EVM, call *CallContext, _ mdgas.MdGas, _ uint64) (mdgas.MdGa
 }
 
 func opTxDiff(pc uint64, evm *EVM, call *CallContext) (uint64, []byte, error) {
-	// The gas calculator checks the mode and reserved inputs before any state
-	// access. Execution starts only after the full access cost was charged.
+	if !inPostTx(evm) {
+		return pc, nil, ErrFrameContext
+	}
 	param, key, index := call.Stack.pop2Peek1()
+	if !param.IsUint64() || param.Uint64() > 0x0c {
+		return pc, nil, ErrFrameParameter
+	}
 	p := param.Uint64()
+	if p >= 2 && p != 7 && p != 9 && p != 0x0c && !index.IsZero() {
+		return pc, nil, ErrFrameParameter
+	}
 	ibs := evm.IntraBlockState()
 	trace, err := evm.FrameContext.TransactionTrace(ibs)
 	if err != nil {
