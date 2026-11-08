@@ -109,10 +109,9 @@ type Domain struct {
 }
 
 type domainVisible struct {
-	files         visibleFiles
-	name          kv.Domain
-	caches        *sync.Pool
-	coversHistory bool
+	files  visibleFiles
+	name   kv.Domain
+	caches *sync.Pool
 }
 
 func NewDomain(cfg statecfg.DomainCfg, stepSize, stepsInFrozenFile uint64, dirs datadir.Dirs, logger log.Logger) (*Domain, error) {
@@ -552,7 +551,6 @@ func (d *Domain) calcVisibleFiles(toTxNum uint64) (*domainVisible, visibleFiles,
 	}
 	dv := newDomainVisible(d.Name, calcVisibleFiles(d.dirtyFiles, d.Accessors, checker, false, toTxNum))
 	hv, hiv := d.History.calcVisibleFiles(toTxNum)
-	dv.coversHistory = valuesFilesCoverHistory(dv.files, hv)
 	return dv, hv, hiv
 }
 
@@ -1824,12 +1822,12 @@ func (dt *DomainRoTx) HistoryCoverageStart() uint64 {
 
 // valuesFilesCoverHistory is false when a values file of a range that history covers is not visible: that range's writes
 // then exist only in history.
-func valuesFilesCoverHistory(values, history visibleFiles) bool {
-	if values.EndTxNum() < history.EndTxNum() {
+func (dt *DomainRoTx) valuesFilesCoverHistory() bool {
+	if dt.files.EndTxNum() < dt.ht.files.EndTxNum() {
 		return false
 	}
-	for i := 1; i < len(values); i++ {
-		if values[i-1].endTxNum != values[i].startTxNum {
+	for i := 1; i < len(dt.files); i++ {
+		if dt.files[i-1].endTxNum != dt.files[i].startTxNum {
 			return false
 		}
 	}
@@ -1854,7 +1852,7 @@ func (dt *DomainRoTx) GetAsOf(key []byte, txNum uint64, roTx kv.Tx) ([]byte, boo
 		if err != nil {
 			return nil, false, err
 		}
-		if latestOk && len(latest) > 0 && step < kv.Step(txNum/dt.stepSize) && dt.visible.coversHistory {
+		if latestOk && len(latest) > 0 && step < kv.Step(txNum/dt.stepSize) && dt.valuesFilesCoverHistory() {
 			return latest, true, nil
 		}
 	}
@@ -1880,12 +1878,12 @@ func (dt *DomainRoTx) GetAsOf(key []byte, txNum uint64, roTx kv.Tx) ([]byte, boo
 		// pointers to storage and account domains to do the reference. Aggregator tx must be called instead
 		return nil, false, nil
 	}
-	ok := latestOk
-	if latestFirst {
-		v = latest
-	} else if v, _, ok, err = dt.GetLatest(key, roTx); err != nil {
-		return nil, false, err
+	if !latestFirst {
+		if latest, _, latestOk, err = dt.GetLatest(key, roTx); err != nil {
+			return nil, false, err
+		}
 	}
+	v, ok := latest, latestOk
 	if traceGetAsOf == dt.d.FilenameBase {
 		if ok {
 			fmt.Printf("DomainGetAsOf(%s, %x, %d) -> found in latest state\n", dt.d.FilenameBase, key, txNum)
