@@ -22,6 +22,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"os"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -466,6 +467,9 @@ func prefetchCommitment(ctx context.Context, db kv.RoDB, hashedKeys [][]byte) er
 		if err = walkTriePrefixes(ctx, db, ttx, hashedKeys, 0); err == nil {
 			err = walkTriePrefixes(ctx, db, ttx, storageKeys, storageTrieDepth)
 		}
+		if err == nil && pfRefs {
+			prefetchBranchRefs(ctx, ttx, hashedKeys)
+		}
 	})
 	return cmp.Or(txErr, err)
 }
@@ -637,4 +641,24 @@ func trieMostlyResident(ctx context.Context, p latestPrefetcher, hashedKeys [][]
 	isCold, err := sampleCold(ctx, p, kv.CommitmentDomain, flatPrefixes(sampleEvenly(hashedKeys, residencySampleKeys)))
 	logSampleFailure(kv.CommitmentDomain, err)
 	return err != nil || !isCold
+}
+
+// pfRefs is a probe knob: PF_REFS=1 also batch-reads the account/storage file pages that the prefetched branches'
+// shortened keys point to.
+var pfRefs = os.Getenv("PF_REFS") == "1"
+
+func prefetchBranchRefs(ctx context.Context, ttx kv.TemporalTx, hashedKeys [][]byte) {
+	p, ok := ttx.AggTx().(interface {
+		PrefetchBranchRefs(context.Context, [][]byte) (int, int, error)
+	})
+	if !ok {
+		return
+	}
+	start := time.Now()
+	prefixes := flatPrefixes(hashedKeys)
+	for depth := prefetchFlatDepth + 1; depth <= commitment.WarmupMaxDepth; depth++ {
+		prefixes = append(prefixes, compactPrefixes(hashedKeys, depth)...)
+	}
+	branches, pages, err := p.PrefetchBranchRefs(ctx, prefixes)
+	log.Info("[warmBAL] branch refs prefetch", "prefixes", len(prefixes), "branches", branches, "pages", pages, "err", err, "elapsed", time.Since(start))
 }

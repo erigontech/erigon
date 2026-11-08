@@ -959,6 +959,14 @@ func (g *Getter) SetProbe(pr *mmap.Probe) {
 
 func (g *Getter) Probe() *mmap.Probe { return g.probe }
 
+// PageAddr returns the page address that holds data at offset, or false past the data.
+func (g *Getter) PageAddr(offset uint64) (uintptr, bool) {
+	if offset >= uint64(len(g.data)) {
+		return 0, false
+	}
+	return uintptr(unsafe.Pointer(&g.data[offset])) &^ uintptr(os.Getpagesize()-1), true
+}
+
 func (g *Getter) Reset(offset uint64) {
 	g.dataP = offset
 	g.dataBit = 0
