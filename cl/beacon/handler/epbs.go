@@ -1106,7 +1106,6 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 		var cancel context.CancelFunc
 		workCtx, cancel = context.WithTimeout(context.WithoutCancel(r.Context()), time.Duration(a.beaconChainCfg.SecondsPerSlot)*time.Second)
 		defer cancel()
-		a.forkchoiceStore.RecordExecutionPayloadArrival(gossipKey.BeaconBlockRoot, signedEnvelope.Message.Payload.SlotNumber, receivedAt)
 		releasePreparation := a.forkchoiceStore.BeginPendingPayloadEnvelope(gossipKey.BeaconBlockRoot)
 		defer releasePreparation()
 		context.AfterFunc(workCtx, releasePreparation)
@@ -1121,6 +1120,7 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 			status := http.StatusBadRequest
 			if envelopeFirst && errors.Is(err, context.DeadlineExceeded) && errors.Is(workCtx.Err(), context.DeadlineExceeded) {
 				status = http.StatusServiceUnavailable
+				err = fmt.Errorf("execution payload envelope contents validation did not finish within a slot, nothing was broadcast: %w", err)
 			}
 			beaconhttp.NewEndpointError(status, err).WriteTo(w)
 			return
@@ -1149,6 +1149,7 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 			beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
 			return
 		}
+		a.forkchoiceStore.RecordExecutionPayloadArrival(gossipKey.BeaconBlockRoot, signedEnvelope.Message.Payload.SlotNumber, receivedAt)
 		a.executionPayloadEnvelopeBroadcasts.Add(envelopeRoot, struct{}{})
 	}
 	contentsIntegrationFailed := false
