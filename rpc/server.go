@@ -167,7 +167,7 @@ func (s *Server) ServeCodecWithContext(connCtx context.Context, codec ServerCode
 // newConnHandler builds the handler of one connection, so every transport applies the
 // server's allow list and limits.
 func (s *Server) newConnHandler(ctx context.Context, conn jsonWriter) *handler {
-	return newHandler(ctx, conn, s.idgen, &s.services, s.batchLimit, s.subscriptionLimit, s.methodAllowList, s.batchConcurrency, s.traceRequests, s.logger, s.rpcSlowLogThreshold)
+	return newHandler(ctx, conn, s.idgen, &s.services, s.subscriptionLimit, s.methodAllowList, s.batchConcurrency, s.traceRequests, s.logger, s.rpcSlowLogThreshold)
 }
 
 // serveSingleRequest reads and processes a single RPC request from the given codec. This

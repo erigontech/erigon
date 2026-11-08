@@ -473,7 +473,7 @@ func parseMessage(raw json.RawMessage, batchLimit int) ([]*jsonrpcMessage, bool,
 			return true
 		})
 		if size > batchLimit {
-			return nil, true, &batchTooLargeError{size: size, id: firstCallID(raw)}
+			return nil, true, &batchTooLargeError{limit: batchLimit, size: size, id: firstCallID(raw)}
 		}
 	}
 	var msgs []*jsonrpcMessage
@@ -492,12 +492,13 @@ func parseMessage(raw json.RawMessage, batchLimit int) ([]*jsonrpcMessage, bool,
 
 // batchTooLargeError rejects a batch with more elements than the server's limit.
 type batchTooLargeError struct {
-	size int
-	id   json.RawMessage // of the first call, nil when the batch has none
+	limit int
+	size  int
+	id    json.RawMessage // of the first call, nil when the batch has none
 }
 
 func (e *batchTooLargeError) Error() string {
-	return fmt.Sprintf("batch of %d requests is too large", e.size)
+	return fmt.Sprintf("batch limit %d exceeded (can increase by --rpc.batch.limit). Requested batch of size: %d", e.limit, e.size)
 }
 
 // firstCallID returns the id of the first element of the batch raw that fillMessage would

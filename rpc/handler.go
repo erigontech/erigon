@@ -73,7 +73,6 @@ type handler struct {
 	logger         log.Logger
 	allowSubscribe bool
 	inlineCalls    bool // the caller waits for every answer, as a single HTTP request does
-	batchLimit     int
 
 	allowList     AllowList // a list of explicitly allowed methods, if empty -- everything is allowed
 	forbiddenList ForbiddenList
@@ -125,7 +124,6 @@ func newHandler(
 	conn jsonWriter,
 	idgen func() ID,
 	reg *serviceRegistry,
-	batchLimit int,
 	subscriptionLimit int,
 	allowList AllowList,
 	maxBatchConcurrency uint,
@@ -145,7 +143,6 @@ func newHandler(
 		rootCtx:        rootCtx,
 		cancelRoot:     cancelRoot,
 		allowSubscribe: true,
-		batchLimit:     batchLimit,
 		serverSubs:     make(map[ID]*Subscription),
 		logger:         logger,
 		allowList:      allowList,
@@ -329,8 +326,7 @@ func (h *handler) handleBatchTooLarge(tooLarge *batchTooLargeError, done func())
 		done = func() {}
 	}
 	h.startCallProc(func(cp *callProc) {
-		reason := fmt.Sprintf("batch limit %d exceeded (can increase by --rpc.batch.limit). Requested batch of size: %d", h.batchLimit, tooLarge.size)
-		resp := errorMessage(&invalidRequestError{reason})
+		resp := errorMessage(&invalidRequestError{tooLarge.Error()})
 		// The protocol has no error for a whole batch, so the error takes the first call's id.
 		if tooLarge.id != nil {
 			resp.ID = tooLarge.id

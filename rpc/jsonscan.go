@@ -22,6 +22,7 @@ package rpc
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/hex"
 )
 
 // Helpers for finding the bounds of JSON values without parsing them, so a
@@ -115,11 +116,12 @@ func jsonKeyIs(raw []byte, name string) bool {
 			// Only a \u escape below 0x80 can spell a letter.
 			c, n = 0, 2
 			if raw[1] == 'u' && len(raw) >= 6 {
-				v := 0
-				for _, h := range raw[2:6] {
-					v = v<<4 | hexDigit(h)
+				var v [2]byte
+				_, _ = hex.Decode(v[:], raw[2:6])
+				n = 6
+				if v[0] == 0 {
+					c = v[1]
 				}
-				c, n = byte(min(v, 0x80)), 6
 			}
 		}
 		if len(name) == 0 || c != name[0] {
@@ -128,18 +130,6 @@ func jsonKeyIs(raw []byte, name string) bool {
 		raw, name = raw[n:], name[1:]
 	}
 	return len(name) == 0
-}
-
-func hexDigit(c byte) int {
-	switch {
-	case '0' <= c && c <= '9':
-		return int(c - '0')
-	case 'a' <= c && c <= 'f':
-		return int(c-'a') + 10
-	case 'A' <= c && c <= 'F':
-		return int(c-'A') + 10
-	}
-	return 0
 }
 
 // forEachJSONField calls fn with the key and raw value of every member of the
