@@ -76,7 +76,7 @@ import (
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
-	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/execution/tracing/tracers"
 	debugtracer "github.com/erigontech/erigon/execution/tracing/tracers/debug"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
@@ -804,25 +804,17 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		stages.ModeApplyingBlocks,
 	)
 
-	var tracingHooks *tracing.Hooks
+	var tracer *tracers.Tracer
 	if dir, ok := os.LookupEnv("MOCK_SENTRY_DEBUG_TRACER_OUTPUT_DIR"); ok {
-		tracingHooks = debugtracer.New(dir, debugtracer.WithRecordOptions(debugtracer.RecordOptions{
+		tracer = debugtracer.New(dir, debugtracer.WithRecordOptions(debugtracer.RecordOptions{
 			DisableOnOpcodeStackRecording:  true,
 			DisableOnOpcodeMemoryRecording: true,
-		})).Hooks
+		}))
 	}
 
 	cfg.Genesis = gspec
-	executeCfg := stagedsync.StageExecuteBlocksCfg(db, cfg.Prune, cfg.BatchSize, mock.ChainConfig, mock.Engine, &vm.Config{Tracer: tracingHooks}, mock.Notifications, cfg.StateStream, dbg.BadBlockHalt, dirs, mock.BlockReader, gspec, cfg.Sync, cfg.ExperimentalBAL, readAheader)
-	executeCfg.SetBALSink(opt.balSink)
-	pipelineStages := stagedsync.PipelineStages(
-		mock.Ctx,
-		stagedsync.StageSnapshotsCfg(db, mock.ChainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, mock.BlockReader, mock.Notifications, cfg.InternalCL && cfg.CaplinConfig.ArchiveBlocks, cfg.CaplinConfig.ArchiveBlobs, cfg.CaplinConfig.ArchiveStates, cfg.Prune, nil, cfg.Snapshot.ManifestReady),
-		stagedsync.StageSendersCfg(mock.ChainConfig, dbg.BadBlockHalt, dirs.Tmp, mock.BlockReader, readAheader),
-		executeCfg,
-		stagedsync.StageTxLookupCfg(cfg.Prune, dirs.Tmp, mock.BlockReader),
-		stagedsync.StageFinishCfg(),
-	)
+	pipelineStages := stageloop.NewPipelineStages(mock.Ctx, db, &cfg, mock.sentriesClient, mock.Notifications, snapDownloader, mock.BlockReader, blockRetire, tracer, nil, readAheader,
+		func(executeCfg *stagedsync.ExecuteBlockCfg) { executeCfg.SetBALSink(opt.balSink) })
 	mock.posStagedSync = stagedsync.New(cfg.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger, stages.ModeApplyingBlocks)
 
 	// Create validation Sync and PipelineExecutor.
