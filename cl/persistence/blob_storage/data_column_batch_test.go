@@ -13,7 +13,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
-	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/common"
 )
@@ -33,18 +32,13 @@ func newBatchHarness(t testing.TB, fs afero.Fs) *batchHarness {
 	t.Helper()
 	cfg := *globalBeaconConfig
 	cfg.NumberOfColumns = 128
-	return newBatchHarnessWithConfig(t, fs, &cfg)
-}
-
-func newBatchHarnessWithConfig(t testing.TB, fs afero.Fs, cfg *clparams.BeaconChainConfig) *batchHarness {
-	t.Helper()
 	h := &batchHarness{
 		emitters: beaconevents.NewEventEmitter(),
 		events:   make(chan *beaconevents.EventStream, 1024),
 	}
 	subscription := h.emitters.Operation().Subscribe(h.events)
 	t.Cleanup(subscription.Unsubscribe)
-	h.storage = NewDataColumnStore(fs, cfg, h.emitters)
+	h.storage = NewDataColumnStore(fs, &cfg, h.emitters)
 	return h
 }
 
@@ -279,17 +273,13 @@ func TestWriteColumnSidecarsBatchFailureLeavesNothing(t *testing.T) {
 
 type renamePartiallyFailingFs struct {
 	afero.Fs
-	mu        sync.Mutex
 	renames   int
 	failAfter int
 }
 
 func (f *renamePartiallyFailingFs) Rename(oldname, newname string) error {
-	f.mu.Lock()
 	f.renames++
-	fail := f.renames > f.failAfter
-	f.mu.Unlock()
-	if fail {
+	if f.renames > f.failAfter {
 		return errInducedFailure
 	}
 	return f.Fs.Rename(oldname, newname)

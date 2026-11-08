@@ -117,23 +117,20 @@ func (s *dataColumnStorageImpl) WriteColumnSidecarsBatch(ctx context.Context, bl
 }
 
 func (s *dataColumnStorageImpl) writeColumns(blockRoot common.Hash, slot uint64, entries []batchEntry, sidecars []*cltypes.DataColumnSidecar) error {
-	var created []int
-	err := func() error {
+	created, err := func() ([]int, error) {
 		lock := s.forRoot(blockRoot)
 		lock.Lock()
 		defer lock.Unlock()
 		if !s.startWrite(slot) {
-			return nil
+			return nil, nil
 		}
 		defer s.finishWrite()
-		var existing []int
-		var err error
-		existing, created, err = s.writeMissingAdmitted(slot, blockRoot, entries)
+		existing, created, err := s.writeMissingAdmitted(slot, blockRoot, entries)
 		key := s.columnKey(slot, blockRoot)
 		for _, i := range slices.Concat(existing, created) {
 			s.bitmaps.set(key, entries[i].idx)
 		}
-		return err
+		return created, err
 	}()
 	if len(created) > 0 {
 		s.emitters.NotifyDataColumnStored(blockRoot)
