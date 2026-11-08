@@ -562,8 +562,7 @@ func TestNewPayloadLooksUpTheParentOnce(t *testing.T) {
 }
 
 // A side-chain payload beyond the reorg depth is stored after an ACCEPTED answer, and is sent again
-// once its parent is validated. The INVALID answer must also remove the stored block, so its body is
-// not served any more.
+// once its parent is validated. The INVALID answer must also remove the stored block.
 func TestNewPayloadRemovesAStoredBlockWithAnInvalidHeader(t *testing.T) {
 	m, block1, block2 := sideChainWithAnInvalidHeader(t)
 	srv, _ := newTesterEngineServer(t, m, m.ExecModule, 0, 2)
@@ -596,14 +595,11 @@ func TestNewPayloadRemovesAStoredBlockWithAnInvalidHeader(t *testing.T) {
 	require.Equal(t, engine_types.InvalidStatus, status.Status)
 	require.Equal(t, block1.Hash(), *status.LatestValidHash)
 	require.ErrorContains(t, status.ValidationError.Error(), "invalid block: invalid gas limit")
-	bodies, err := srv.GetPayloadBodiesByHashV1(ctx, []common.Hash{block2.Hash()})
-	require.NoError(t, err)
-	require.Len(t, bodies, 1)
-	require.Nil(t, bodies[0], "the body of an invalid block must not be served")
+	requireNotStored(t, m, block2)
 }
 
 // A block with an invalid header is stored, as a download stores it, right after the request looks it
-// up and misses it. The INVALID answer must also remove the block, so its body is not served.
+// up and misses it. The INVALID answer must also remove the block.
 func TestNewPayloadRemovesABlockWithAnInvalidHeaderStoredDuringTheRequest(t *testing.T) {
 	m, block1, block2 := sideChainWithAnInvalidHeader(t)
 	module := &storingAfterLookup{ExecutionModule: m.ExecModule, t: t, block: block2}
@@ -636,10 +632,7 @@ func TestNewPayloadRemovesABlockWithAnInvalidHeaderStoredDuringTheRequest(t *tes
 		require.Equal(t, engine_types.InvalidStatus, status.Status)
 		require.Equal(t, block1.Hash(), *status.LatestValidHash)
 		require.ErrorContains(t, status.ValidationError.Error(), "invalid gas limit")
-		bodies, err := srv.GetPayloadBodiesByHashV1(ctx, []common.Hash{block2.Hash()})
-		require.NoError(t, err)
-		require.Len(t, bodies, 1)
-		require.Nil(t, bodies[0], "the body of an invalid block must not be served")
+		requireNotStored(t, m, block2)
 	}
 	requireInvalidAndRemoved(newPayload(block2))
 	require.True(t, module.stored.Load())
@@ -716,10 +709,7 @@ func TestNewPayloadRemovesAStoredBlockWithAnInvalidHeaderSentDuringAForkchoiceUp
 	require.Equal(t, engine_types.InvalidStatus, status.Status)
 	require.Equal(t, block1.Hash(), *status.LatestValidHash)
 	require.ErrorContains(t, status.ValidationError.Error(), "invalid block: invalid gas limit")
-	bodies, err := srv.GetPayloadBodiesByHashV1(ctx, []common.Hash{block2.Hash()})
-	require.NoError(t, err)
-	require.Len(t, bodies, 1)
-	require.Nil(t, bodies[0], "the body of an invalid block must not be served")
+	requireNotStored(t, m, block2)
 }
 
 // sideChainWithAnInvalidHeader builds a canonical chain of four blocks and a side chain of two
@@ -737,6 +727,14 @@ func sideChainWithAnInvalidHeader(t *testing.T, options ...execmoduletester.Opti
 	header2.GasLimit *= 2
 	block2 := types.NewBlockFromStorage(header2.Hash(), header2, nil, nil, side.Blocks[1].Withdrawals(), nil)
 	return m, side.Blocks[0], block2
+}
+
+func requireNotStored(t *testing.T, m *execmoduletester.ExecModuleTester, block *types.Block) {
+	t.Helper()
+	hash, number := block.Hash(), block.NumberU64()
+	header, err := m.ExecModule.GetHeader(t.Context(), &hash, &number)
+	require.NoError(t, err)
+	require.Nil(t, header, "an invalid block must be removed")
 }
 
 func newTesterEngineServer(t *testing.T, m *execmoduletester.ExecModuleTester, executionModule execmodule.ExecutionModule, fcuTimeout time.Duration, maxReorgDepth uint64) (*EngineServer, *engine_block_downloader.EngineBlockDownloader) {
@@ -778,14 +776,14 @@ func (m *storingAfterLookup) storeAfterLookup(ctx context.Context, hash *common.
 
 // storedBlockAboveTheCappedBound stores the side blocks of sideChainAboveTheCappedBound without the
 // parent-capped transaction bound, as a download stores its blocks when their validation is skipped.
-func storedBlockAboveTheCappedBound(t *testing.T, maxReorgDepth uint64) (*EngineServer, *engine_block_downloader.EngineBlockDownloader, *types.Block, *types.Block) {
+func storedBlockAboveTheCappedBound(t *testing.T, maxReorgDepth uint64) (*execmoduletester.ExecModuleTester, *EngineServer, *engine_block_downloader.EngineBlockDownloader, *types.Block, *types.Block) {
 	t.Helper()
 	m, block1, block2 := sideChainAboveTheCappedBound(t)
 	srv, downloader := newTesterEngineServer(t, m, m.ExecModule, ethconfig.Defaults.FcuTimeout, maxReorgDepth)
 	_, err := m.InsertBlocks(t.Context(), []*types.Block{block1, block2})
 	require.NoError(t, err)
 	require.False(t, m.ExecModule.IsValidated(block1.Hash()))
-	return srv, downloader, block1, block2
+	return m, srv, downloader, block1, block2
 }
 
 // sideChainAboveTheCappedBound builds a canonical chain of four blocks and a side chain of two blocks
@@ -815,9 +813,9 @@ func sideChainAboveTheCappedBound(t *testing.T) (*execmoduletester.ExecModuleTes
 }
 
 // A stored block above the parent-capped bound, with its parent not validated, is sent again. The
-// INVALID answer must also remove the stored block, so its body is not served any more.
+// INVALID answer must also remove the stored block.
 func TestNewPayloadRemovesAStoredBlockAboveTheCappedBound(t *testing.T) {
-	srv, downloader, block1, block2 := storedBlockAboveTheCappedBound(t, ethconfig.Defaults.Sync.MaxReorgDepth)
+	m, srv, downloader, block1, block2 := storedBlockAboveTheCappedBound(t, ethconfig.Defaults.Sync.MaxReorgDepth)
 
 	payload, err := engine_types.ExecutionPayloadFromBlock(block2)
 	require.NoError(t, err)
@@ -829,10 +827,7 @@ func TestNewPayloadRemovesAStoredBlockAboveTheCappedBound(t *testing.T) {
 	require.ErrorContains(t, status.ValidationError.Error(), "invalid block: invalid gas limit")
 	bad, _, _ := downloader.IsBadHeader(block2.Hash())
 	require.True(t, bad)
-	bodies, err := srv.GetPayloadBodiesByHashV1(t.Context(), []common.Hash{block2.Hash()})
-	require.NoError(t, err)
-	require.Len(t, bodies, 1)
-	require.Nil(t, bodies[0], "the body of an invalid block must not be served")
+	requireNotStored(t, m, block2)
 }
 
 // A block above the parent-capped bound is stored, as a download stores it, right after the request
@@ -860,17 +855,14 @@ func TestNewPayloadAboveTheCappedBoundLeavesABlockStoredDuringTheRequestToTheVal
 	require.Equal(t, engine_types.InvalidStatus, status.Status)
 	require.Equal(t, block1.Hash(), *status.LatestValidHash)
 	require.ErrorContains(t, status.ValidationError.Error(), "invalid block: invalid gas limit")
-	bodies, err := srv.GetPayloadBodiesByHashV1(t.Context(), []common.Hash{block2.Hash()})
-	require.NoError(t, err)
-	require.Len(t, bodies, 1)
-	require.Nil(t, bodies[0], "the body of an invalid block must not be served")
+	requireNotStored(t, m, block2)
 }
 
 // Beyond the reorg depth the block validation does not run, so a stored block above the
 // parent-capped bound gets the answer from main and stays stored: an INVALID answer would contradict
 // the body that is still served.
 func TestNewPayloadAcceptsAStoredBlockAboveTheCappedBoundBeyondTheReorgDepth(t *testing.T) {
-	srv, _, _, block2 := storedBlockAboveTheCappedBound(t, 2)
+	_, srv, _, _, block2 := storedBlockAboveTheCappedBound(t, 2)
 
 	payload, err := engine_types.ExecutionPayloadFromBlock(block2)
 	require.NoError(t, err)
