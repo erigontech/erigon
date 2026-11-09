@@ -333,7 +333,7 @@ func (cq *CompressionQueue) Pop() any {
 	return x
 }
 
-func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, logPrefix, segmentFilePath string, cf *os.File, uncompressedFile *RawWordsFile, dictBuilder *DictionaryBuilder, lvl log.Lvl, logger log.Logger) error {
+func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, logPrefix, segmentFilePath string, cf *os.File, uncompressedFile *RawWordsFile, dictBuilder *DictionaryBuilder, lvl log.Lvl, logger log.Logger, progress func(uint64)) error {
 	logEvery := time.NewTicker(60 * time.Second)
 	defer logEvery.Stop()
 
@@ -764,6 +764,9 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 			}
 		}
 		wc++
+		if progress != nil {
+			progress(1)
+		}
 		if wc%1024 == 0 {
 			select {
 			case <-logEvery.C:
@@ -790,7 +793,7 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 // pattern-dictionary pipeline (superstringCount == 0). This happens for history .v files
 // that use CompressNone. Instead of building a dictionary and writing/reading an intermediate
 // file, it makes two sequential passes over the raw words file and writes directly to cf.
-func compressNoWordPatterns(logPrefix string, cf *os.File, uncompressedFile *RawWordsFile, lvl log.Lvl, logger log.Logger) error {
+func compressNoWordPatterns(logPrefix string, cf *os.File, uncompressedFile *RawWordsFile, lvl log.Lvl, logger log.Logger, progress func(uint64)) error {
 	var numBuf [binary.MaxVarintLen64]byte
 
 	// Pass 1: collect word counts and position-length frequencies for the Huffman tree.
@@ -844,7 +847,11 @@ func compressNoWordPatterns(logPrefix string, cf *os.File, uncompressedFile *Raw
 			}
 		}
 		if l == 0 {
-			return hc.flush()
+			err := hc.flush()
+			if err == nil && progress != nil {
+				progress(1)
+			}
+			return err
 		}
 		if c := pos2code[0]; c != nil {
 			if e := hc.encode(c.code, c.codeBits); e != nil {
@@ -855,6 +862,9 @@ func compressNoWordPatterns(logPrefix string, cf *os.File, uncompressedFile *Raw
 			return e
 		}
 		_, e := cw.Write(v)
+		if e == nil && progress != nil {
+			progress(1)
+		}
 		return e
 	}); err != nil {
 		return err

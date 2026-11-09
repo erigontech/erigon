@@ -676,6 +676,10 @@ func commitmentFilesIn(snapDomain string) ([]string, error) {
 // output. Destinations that already exist are kept, which is what makes a --resume
 // run reuse the commitment files it produced earlier.
 func linkSnapshotsExceptCommitment(srcRoot, dstRoot string) (int, error) {
+	return linkSnapshotsExceptCommitmentWithSalt(srcRoot, dstRoot, false)
+}
+
+func linkSnapshotsExceptCommitmentWithSalt(srcRoot, dstRoot string, preserveSalt bool) (int, error) {
 	linked := 0
 	err := filepath.WalkDir(srcRoot, func(p string, d os.DirEntry, err error) error {
 		if err != nil {
@@ -695,10 +699,24 @@ func linkSnapshotsExceptCommitment(srcRoot, dstRoot string) (int, error) {
 		if !d.Type().IsRegular() {
 			return fmt.Errorf("commitment rebuild: %s is not a regular file; the output can only be staged from a tree the hardlink walk can reproduce", p)
 		}
-		if isCommitmentFileName(d.Name()) || d.Name() == dbstate.ERIGONDB_SETTINGS_FILE || d.Name() == dbstate.COMMITMENT_STOP_FILE {
+		if isCommitmentFileName(d.Name()) || d.Name() == dbstate.ERIGONDB_SETTINGS_FILE || d.Name() == "pbt-manifest.toml" || d.Name() == dbstate.COMMITMENT_STOP_FILE {
 			return nil
 		}
 		if dstInfo, err := os.Lstat(dst); err == nil {
+			if preserveSalt && (d.Name() == "salt-state.txt" || d.Name() == "salt.txt") {
+				sourceSalt, readErr := os.ReadFile(p)
+				if readErr != nil {
+					return readErr
+				}
+				destinationSalt, readErr := os.ReadFile(dst)
+				if readErr != nil {
+					return readErr
+				}
+				if !bytes.Equal(sourceSalt, destinationSalt) {
+					return fmt.Errorf("commitment rebuild: existing output file %s differs from source", rel)
+				}
+				return nil
+			}
 			srcInfo, err := d.Info()
 			if err != nil {
 				return err

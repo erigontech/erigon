@@ -53,6 +53,7 @@ import (
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/eip8297"
 )
 
 var (
@@ -776,7 +777,7 @@ func (d *Domain) dumpStepRangeToPath(ctx context.Context, stepFrom, stepTo kv.St
 	}
 
 	ps := background.NewProgressSet()
-	static, err := d.buildFileRange(ctx, stepFrom, stepTo, coll, ps, dstDir)
+	static, err := d.buildFileRange(ctx, stepFrom, stepTo, coll, ps, dstDir, nil)
 	wal.Close() // munmap ETL temp files after buildFileRange consumed the zero-copy data
 	if err != nil {
 		return err
@@ -1122,7 +1123,11 @@ func (sf StaticFiles) CleanupOnError() {
 }
 
 // skips history files; dstDir overrides where index files land (empty = d.dirs.SnapDomain).
-func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo kv.Step, collation Collation, ps *background.ProgressSet, dstDir string) (StaticFiles, error) {
+func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo kv.Step, collation Collation, ps *background.ProgressSet, dstDir string, pbtRange *pbtRangeProgress) (StaticFiles, error) {
+	return d.buildFileRangeWithWorkers(ctx, stepFrom, stepTo, collation, ps, dstDir, pbtRange, d.BuildAccessorsWorkers)
+}
+
+func (d *Domain) buildFileRangeWithWorkers(ctx context.Context, stepFrom, stepTo kv.Step, collation Collation, ps *background.ProgressSet, dstDir string, pbtRange *pbtRangeProgress, accessorWorkers int) (StaticFiles, error) {
 	if !d.Enabled {
 		return StaticFiles{}, nil
 	}
@@ -1169,7 +1174,19 @@ func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo kv.Step, c
 	if d.noFsync {
 		valuesComp.DisableFsync()
 	}
-	if err = valuesComp.Compress(); err != nil {
+	var idtProgress *pbtProgressBatch
+	if pbtRange != nil {
+		idtProgress = pbtRange.batch(".idt", uint64(valuesComp.Count()))
+		valuesComp.SetProgress(idtProgress.Add)
+		if pbtRange.hook != nil {
+			if hookErr := pbtRange.hook("idt"); hookErr != nil {
+				return StaticFiles{}, hookErr
+			}
+		}
+	}
+	err = valuesComp.Compress()
+	idtProgress.Done()
+	if err != nil {
 		return StaticFiles{}, fmt.Errorf("compress %s values: %w", d.FilenameBase, err)
 	}
 	valuesComp.Close()
@@ -1180,10 +1197,21 @@ func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo kv.Step, c
 	}
 
 	if d.Accessors.Has(statecfg.AccessorHashMap) {
+		var kviProgress *pbtProgressBatch
+		if pbtRange != nil {
+			kviProgress = pbtRange.batch(".kvi", uint64(collation.valuesCount))
+			if pbtRange.hook != nil {
+				if hookErr := pbtRange.hook("kvi"); hookErr != nil {
+					return StaticFiles{}, hookErr
+				}
+			}
+		}
 		idxPath := d.kviAccessorNewFilePathIn(dstDir, stepFrom, stepTo)
-		if err = d.buildHashMapAccessorAt(ctx, idxPath, valuesDecomp, ps); err != nil {
+		if err = d.buildHashMapAccessorAtWithWorkers(ctx, idxPath, valuesDecomp, ps, kviProgress, accessorWorkers); err != nil {
+			kviProgress.Done()
 			return StaticFiles{}, fmt.Errorf("build %s values idx: %w", d.FilenameBase, err)
 		}
+		kviProgress.Done()
 		valuesIdx, err = d.openHashMapAccessor(idxPath)
 		if err != nil {
 			return StaticFiles{}, err
@@ -1325,10 +1353,10 @@ func (d *Domain) buildFiles(ctx context.Context, step kv.Step, collation Collati
 }
 
 func (d *Domain) buildHashMapAccessor(ctx context.Context, fromStep, toStep kv.Step, data *seg.Decompressor, ps *background.ProgressSet) error {
-	return d.buildHashMapAccessorAt(ctx, d.kviAccessorNewFilePath(fromStep, toStep), data, ps)
+	return d.buildHashMapAccessorAtWithWorkers(ctx, d.kviAccessorNewFilePath(fromStep, toStep), data, ps, nil, d.BuildAccessorsWorkers)
 }
 
-func (d *Domain) buildHashMapAccessorAt(ctx context.Context, idxPath string, data *seg.Decompressor, ps *background.ProgressSet) error {
+func (d *Domain) buildHashMapAccessorAtWithWorkers(ctx context.Context, idxPath string, data *seg.Decompressor, ps *background.ProgressSet, pbtProgress *pbtProgressBatch, workers int) error {
 	versionOfRs := version.DataStructureVersion(0)
 	if !d.FileVersion.AccessorKVI.Current.Eq(version.V1_0) { // v1.0 files predate FuseFilter; dataStructureVersion>=1 is incompatible with them
 		versionOfRs = recsplit.ExistenceFilterVersion
@@ -1344,9 +1372,9 @@ func (d *Domain) buildHashMapAccessorAt(ctx context.Context, idxPath string, dat
 		IndexFile:  idxPath,
 		Salt:       d.salt.Load(),
 		NoFsync:    d.noFsync,
-		Workers:    d.BuildAccessorsWorkers,
+		Workers:    workers,
 	}
-	return buildHashMapAccessor(ctx, data, d.Compression, idxPath, false, cfg, ps, d.logger, func(rs *recsplit.RecSplit) {
+	return buildHashMapAccessor(ctx, data, d.Compression, idxPath, false, cfg, ps, d.logger, pbtProgress, func(rs *recsplit.RecSplit) {
 		if d._testBuildAccessorHook != nil {
 			d._testBuildAccessorHook(rs, data)
 		}
@@ -1431,7 +1459,7 @@ func (d *Domain) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps
 	}
 }
 
-func buildHashMapAccessor(ctx context.Context, decomp *seg.Decompressor, compression seg.FileCompression, idxPath string, values bool, cfg recsplit.RecSplitArgs, ps *background.ProgressSet, logger log.Logger, testHook func(*recsplit.RecSplit)) (err error) {
+func buildHashMapAccessor(ctx context.Context, decomp *seg.Decompressor, compression seg.FileCompression, idxPath string, values bool, cfg recsplit.RecSplitArgs, ps *background.ProgressSet, logger log.Logger, pbtProgress *pbtProgressBatch, testHook func(*recsplit.RecSplit)) (err error) {
 	seqView, err := decomp.OpenSequentialView()
 	if err != nil {
 		return err
@@ -1486,6 +1514,7 @@ func buildHashMapAccessor(ctx context.Context, decomp *seg.Decompressor, compres
 					return fmt.Errorf("add idx key [%x]: %w", word, err)
 				}
 			}
+			pbtProgress.Add(1)
 
 			// Skip value
 			keyPos, _ = g.Skip()
@@ -1496,6 +1525,7 @@ func buildHashMapAccessor(ctx context.Context, decomp *seg.Decompressor, compres
 				if err := rs.ResetNextSalt(); err != nil {
 					return err
 				}
+				pbtProgress.Reset()
 			} else {
 				return fmt.Errorf("build idx: %w", err)
 			}
@@ -2063,12 +2093,41 @@ func (dt *DomainRoTx) RangeAsOf(ctx context.Context, tx kv.Tx, fromKey, toKey []
 }
 
 func (dt *DomainRoTx) DebugRangeLatest(roTx kv.Tx, fromKey, toKey []byte, limit int) (*DomainLatestIterFile, error) {
+	return dt.debugRangeLatest(roTx, fromKey, toKey, limit, nil)
+}
+
+func (dt *DomainRoTx) DebugRangeLatestCount(roTx kv.Tx) (uint64, uint64, error) {
+	it, err := dt.DebugRangeLatest(roTx, nil, nil, kv.Unlim)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer it.Close()
+	var count, stateKeys uint64
+	for it.HasNext() {
+		key, _, err := it.Next()
+		if err != nil {
+			return 0, 0, err
+		}
+		count++
+		if commitment.IsCommitmentStateKey(key) {
+			stateKeys++
+		}
+	}
+	return count, stateKeys, nil
+}
+
+func (dt *DomainRoTx) DebugRangeLatestWithOffsets(roTx kv.Tx, fromKey, toKey []byte, limit int, fileOffsets []uint64) (*DomainLatestIterFile, error) {
+	return dt.debugRangeLatest(roTx, fromKey, toKey, limit, fileOffsets)
+}
+
+func (dt *DomainRoTx) debugRangeLatest(roTx kv.Tx, fromKey, toKey []byte, limit int, fileOffsets []uint64) (*DomainLatestIterFile, error) {
 	s := &DomainLatestIterFile{
 		from: fromKey, to: toKey, limit: limit,
 		orderAscend: order.Asc,
 		aggStep:     dt.stepSize,
 		roTx:        roTx,
 		valsTable:   dt.d.ValuesTable,
+		fileOffsets: fileOffsets,
 		logger:      dt.d.logger,
 		h:           &CursorHeap{},
 	}
@@ -2082,13 +2141,176 @@ func (dt *DomainRoTx) DebugRangeLatest(roTx kv.Tx, fromKey, toKey []byte, limit 
 // DebugRangeLatestFromFiles iterates over keys in .kv snapshot files only,
 // ignoring keys in MDBX.
 func (dt *DomainRoTx) DebugRangeLatestFromFiles(fromKey, toKey []byte, limit int) (*DomainLatestIterFile, error) {
+	return dt.debugRangeLatestFromFiles(fromKey, toKey, limit, false, 0)
+}
+
+func (dt *DomainRoTx) DebugRangeLatestVerifyData(roTx kv.Tx, rootKey []byte, upperBits int16) (map[uint64][]uint64, []uint64, map[string][]byte, error) {
+	if !dt.d.Accessors.Has(statecfg.AccessorHashMap) {
+		return nil, nil, nil, nil
+	}
+	type fileData struct {
+		prefixOffsets map[uint64]uint64
+		upperRows     map[string][]byte
+		end           uint64
+	}
+	data := make([]fileData, len(dt.files))
+	scan := func(fileIndex int) {
+		reader := dt.dataReader(dt.files[fileIndex].src.decompressor)
+		reader.Reset(0)
+		result := fileData{prefixOffsets: make(map[uint64]uint64), upperRows: make(map[string][]byte)}
+		var keyBuf, valueBuf []byte
+		var offset uint64
+		for reader.HasNext() {
+			currentOffset := offset
+			key, _ := reader.Next(keyBuf[:0])
+			keyBuf = key
+			valueNeeded := false
+			path, err := eip8297.DecodeBitPath(key)
+			if err == nil && path.BitLen >= upperBits {
+				prefix := path.Words[0] >> uint(64-upperBits)
+				if _, ok := result.prefixOffsets[prefix]; !ok {
+					result.prefixOffsets[prefix] = currentOffset
+				}
+			}
+			if bytes.Equal(key, rootKey) || err == nil && path.BitLen < upperBits {
+				valueNeeded = true
+				result.upperRows[string(key)] = nil
+			}
+			if valueNeeded {
+				value, nextOffset := reader.Next(valueBuf[:0])
+				valueBuf = value
+				result.upperRows[string(key)] = bytes.Clone(value)
+				offset = nextOffset
+			} else {
+				offset, _ = reader.Skip()
+			}
+		}
+		result.end = offset
+		data[fileIndex] = result
+	}
+	var group sync.WaitGroup
+	for fileIndex := range data {
+		group.Go(func() { scan(fileIndex) })
+	}
+	group.Wait()
+	prefixOffsets := make(map[uint64][]uint64)
+	fileEnds := make([]uint64, len(data))
+	upperRows := make(map[string][]byte)
+	for fileIndex, result := range data {
+		fileEnds[fileIndex] = result.end
+		for prefix, offset := range result.prefixOffsets {
+			planned := prefixOffsets[prefix]
+			if planned == nil {
+				planned = make([]uint64, len(data))
+				for i := range planned {
+					planned[i] = ^uint64(0)
+				}
+			}
+			planned[fileIndex] = offset
+			prefixOffsets[prefix] = planned
+		}
+		for key, value := range result.upperRows {
+			if len(value) == 0 {
+				delete(upperRows, key)
+			} else {
+				upperRows[key] = value
+			}
+		}
+	}
+	if roTx != nil {
+		if err := dt.debugVerifyUpperRowsFromDB(roTx, rootKey, upperBits, upperRows); err != nil {
+			return nil, nil, nil, err
+		}
+	}
+	return prefixOffsets, fileEnds, upperRows, nil
+}
+
+func (dt *DomainRoTx) debugVerifyUpperRowsFromDB(roTx kv.Tx, rootKey []byte, upperBits int16, upperRows map[string][]byte) error {
+	isUpper := func(key []byte) bool {
+		if bytes.Equal(key, rootKey) {
+			return true
+		}
+		path, err := eip8297.DecodeBitPath(key)
+		return err == nil && path.BitLen < upperBits
+	}
+	filesEndTxNum := dt.files.EndTxNum()
+	if dt.d.LargeValues {
+		cursor, err := roTx.Cursor(dt.d.ValuesTable)
+		if err != nil {
+			return err
+		}
+		defer cursor.Close()
+		key, value, err := cursor.Seek(nil)
+		for err == nil && key != nil {
+			if len(key) <= 8 {
+				key, value, err = cursor.Next()
+				continue
+			}
+			baseKey := key[:len(key)-8]
+			step := ^binary.BigEndian.Uint64(key[len(key)-8:])
+			if step*dt.stepSize >= filesEndTxNum && isUpper(baseKey) {
+				if len(value) == 0 {
+					delete(upperRows, string(baseKey))
+				} else {
+					upperRows[string(baseKey)] = bytes.Clone(value)
+				}
+			}
+			for len(key) > 8 && bytes.Equal(key[:len(key)-8], baseKey) {
+				key, value, err = cursor.Next()
+			}
+		}
+		return err
+	}
+	cursor, err := roTx.CursorDupSort(dt.d.ValuesTable)
+	if err != nil {
+		return err
+	}
+	defer cursor.Close()
+	key, value, err := cursor.Seek(nil)
+	for err == nil && key != nil {
+		baseKey := bytes.Clone(key)
+		for {
+			if len(value) < 8 {
+				return fmt.Errorf("%s: malformed verification value for key %x", dt.name, key)
+			}
+			step := ^binary.BigEndian.Uint64(value[:8])
+			if step*dt.stepSize >= filesEndTxNum {
+				if isUpper(key) {
+					if len(value[8:]) == 0 {
+						delete(upperRows, string(key))
+					} else {
+						upperRows[string(key)] = bytes.Clone(value[8:])
+					}
+				}
+				break
+			}
+			key, value, err = cursor.NextDup()
+			if err != nil || key == nil || !bytes.Equal(key, baseKey) {
+				break
+			}
+		}
+		if err != nil {
+			return err
+		}
+		key, value, err = cursor.NextNoDup()
+	}
+	return err
+}
+
+func (dt *DomainRoTx) debugRangeLatestFromFilesAfter(fromKey, toKey []byte, limit int, minFileEndTxNum uint64) (*DomainLatestIterFile, error) {
+	return dt.debugRangeLatestFromFiles(fromKey, toKey, limit, true, minFileEndTxNum)
+}
+
+func (dt *DomainRoTx) debugRangeLatestFromFiles(fromKey, toKey []byte, limit int, includeEmpty bool, minFileEndTxNum uint64) (*DomainLatestIterFile, error) {
 	s := &DomainLatestIterFile{
 		from: fromKey, to: toKey, limit: limit,
-		orderAscend: order.Asc,
-		aggStep:     dt.stepSize,
-		filesOnly:   true,
-		logger:      dt.d.logger,
-		h:           &CursorHeap{},
+		orderAscend:     order.Asc,
+		aggStep:         dt.stepSize,
+		filesOnly:       true,
+		includeEmpty:    includeEmpty,
+		minFileEndTxNum: minFileEndTxNum,
+		logger:          dt.d.logger,
+		h:               &CursorHeap{},
 	}
 	if err := s.init(dt); err != nil {
 		s.Close() // it's responsibility of constructor (our) to close resource on error
