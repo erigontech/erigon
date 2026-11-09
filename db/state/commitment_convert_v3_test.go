@@ -738,3 +738,49 @@ func TestConvertCommitmentFiles_V3RebuiltStepRefusesBeforeSwap(t *testing.T) {
 	require.False(t, swapped)
 	require.NoDirExists(t, filepath.Join(agg.Dirs().Snap, "backup"))
 }
+
+func TestConvertCommitmentFiles_V3RejectsCorruptLatestRecord(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	db, agg := testDbAggregatorWithFiles(t, &testAggConfig{stepSize: 10, disableCommitmentBranchTransform: true})
+	state.SetConvertPhase5HookForTest(func() error {
+		paths := commitmentFilesByEnd(t, agg.Dirs().SnapDomain)
+		latest := paths[len(paths)-1]
+		keys, values := readKVFile(t, agg, latest)
+		i := slices.IndexFunc(keys, func(key []byte) bool { return bytes.Equal(key, []byte{0x40, 0}) })
+		require.NotEqual(t, -1, i)
+		require.NotEmpty(t, values[i])
+		values[i][len(values[i])-1] ^= 1
+		tmp := latest + ".tmp"
+		comp, err := seg.NewCompressor(t.Context(), "corrupt-latest-v3", tmp, agg.Dirs().Tmp, seg.DefaultCfg, log.LvlTrace, log.New())
+		require.NoError(t, err)
+		defer comp.Close()
+		writer := seg.NewWriter(comp, agg.Cfg(kv.CommitmentDomain).Compression)
+		for j, key := range keys {
+			_, err = writer.Write(key)
+			require.NoError(t, err)
+			_, err = writer.Write(values[j])
+			require.NoError(t, err)
+		}
+		require.NoError(t, comp.Compress())
+		comp.Close()
+		require.NoError(t, os.Rename(tmp, latest))
+		from, to := commitmentFileRange(t, latest)
+		siblings, err := filepath.Glob(filepath.Join(agg.Dirs().SnapDomain, fmt.Sprintf("*-commitment.%d-%d.*", from, to)))
+		require.NoError(t, err)
+		for _, path := range siblings {
+			switch filepath.Ext(path) {
+			case ".bt", ".kvi", ".kvei":
+				require.NoError(t, dir.RemoveFile(path))
+			}
+		}
+		require.NoError(t, agg.ReloadFiles())
+		require.NoError(t, agg.BuildMissedAccessors(t.Context(), db, 1))
+		agg.CloseFilesNoReopen()
+		return nil
+	})
+	t.Cleanup(func() { state.SetConvertPhase5HookForTest(nil) })
+	at := agg.BeginFilesRo()
+	defer at.Close()
+	err := state.ConvertCommitmentFiles(t.Context(), at, state.ConvertOpts{TargetV3: true}, log.New())
+	require.ErrorContains(t, err, "v3 verification")
+}
