@@ -228,6 +228,13 @@ func linkedNodeCount(n *node) int {
 }
 
 func TestRecordGraph(t *testing.T) {
+	t.Run("StorageRootExpectedAfterStoragePlane", func(t *testing.T) {
+		matcher := NewRecordMatcher()
+		addr := [32]byte{1}
+		hash := [32]byte{2}
+		require.NoError(t, matcher.Record(StorageNodeKey(addr, []byte{3}, nil), hash))
+		require.ErrorContains(t, matcher.Expect(StorageNodeKey(addr, nil, nil), hash[:]), "expected after the account plane")
+	})
 	t.Run("E66/RecordHasherExpectsEveryExtensionChild", func(t *testing.T) {
 		n := newNode(planeAccount)
 		n.setStoredChild(1, bytes.Repeat([]byte{0x11}, 32), []byte{2, 3})
