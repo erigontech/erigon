@@ -305,6 +305,18 @@ func TestRecordGraph(t *testing.T) {
 		_, err := g.unfoldChild(ctx, parent.childPath(4, nil))
 		require.ErrorIs(t, err, errNodeRecord)
 	})
+	t.Run("SingleHashChildBelowRootIsInvalid", func(t *testing.T) {
+		ctx := newMockContext()
+		data := commitmenttest.Record(&commitmenttest.RecordSpec{ChildMask: 1})
+		ctx.branches[string(AccountNodeKey([]byte{4}, nil))] = data
+		require.ErrorIs(t, Validate(data, 1), ErrRecordMasks)
+
+		root := newNode(planeAccount)
+		root.setStoredChild(4, bytes.Repeat([]byte{1}, 32), nil)
+		root.setStoredChild(8, bytes.Repeat([]byte{2}, 32), nil)
+		err := (graph{plane: planeAccount}).ensurePath(ctx, root, commitmenttest.Path([]byte{4, 0}, 1))
+		require.ErrorIs(t, err, ErrRecordMasks)
+	})
 	t.Run("E66/ZeroMaskChildRecordIsInvalid", func(t *testing.T) {
 		var addrHash [32]byte
 		parent := newNode(planeStorage)

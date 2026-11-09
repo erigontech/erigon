@@ -353,12 +353,12 @@ func TestRecordCodec(t *testing.T) {
 			},
 			{
 				name:  "child extension",
-				data:  commitmenttest.Record(&commitmenttest.RecordSpec{Flags: hdrHasChildExt, ChildMask: 0x0001, ExtensionMask: 0x0001, Extensions: [16][]byte{0: extFixture([]byte{1, 2})}}),
+				data:  commitmenttest.Record(&commitmenttest.RecordSpec{Flags: hdrHasChildExt, ChildMask: 0x0003, ExtensionMask: 0x0001, Extensions: [16][]byte{0: extFixture([]byte{1, 2})}}),
 				depth: 3,
 			},
 			{
 				name:  "leaf child",
-				data:  commitmenttest.Record(&commitmenttest.RecordSpec{ChildMask: 0x0001, LeafMask: 0x0001, Leaves: [16]commitmenttest.Leaf{0: {Suffix: suffix, Value: []byte{0x42}}}}),
+				data:  commitmenttest.Record(&commitmenttest.RecordSpec{ChildMask: 0x0003, LeafMask: 0x0001, Leaves: [16]commitmenttest.Leaf{0: {Suffix: suffix, Value: []byte{0x42}}}}),
 				depth: 3,
 			},
 			{
@@ -392,6 +392,9 @@ func TestRecordCodec(t *testing.T) {
 			}
 
 			child := uint16(1)
+			if depth != 0 {
+				child = 3
+			}
 			ext := uint16(0)
 			var extAt [16][]byte
 			if flags&hdrHasChildExt != 0 {
@@ -477,7 +480,7 @@ func TestRecordCodec(t *testing.T) {
 		}))
 	})
 	t.Run("E25/RecordDecodeRejectsMalformedRecords", func(t *testing.T) {
-		valid := commitmenttest.Record(&commitmenttest.RecordSpec{ChildMask: 1})
+		valid := commitmenttest.Record(&commitmenttest.RecordSpec{ChildMask: 3})
 		tests := []struct {
 			name  string
 			data  []byte
@@ -487,10 +490,10 @@ func TestRecordCodec(t *testing.T) {
 			{name: "truncated body", data: valid[:len(valid)-1], depth: 3, want: ErrRecordTruncated},
 			{name: "leaf outside child mask", data: commitmenttest.Record(&commitmenttest.RecordSpec{ChildMask: 1, LeafMask: 2}), depth: 3, want: ErrRecordMasks},
 			{name: "extension overlaps leaf", data: commitmenttest.Record(&commitmenttest.RecordSpec{Flags: hdrHasChildExt, ChildMask: 1, LeafMask: 1, ExtensionMask: 1, Extensions: [16][]byte{0: extFixture([]byte{1})}}), depth: 3, want: ErrRecordMasks},
-			{name: "empty child extension", data: commitmenttest.Record(&commitmenttest.RecordSpec{Flags: hdrHasChildExt, ChildMask: 1, ExtensionMask: 1, Extensions: [16][]byte{0: extFixture(nil)}}), depth: 3, want: ErrRecordTrailer},
+			{name: "empty child extension", data: commitmenttest.Record(&commitmenttest.RecordSpec{Flags: hdrHasChildExt, ChildMask: 3, ExtensionMask: 1, Extensions: [16][]byte{0: extFixture(nil)}}), depth: 3, want: ErrRecordTrailer},
 			{name: "leaf root and self extension", data: append([]byte{hdrIsLeafRoot | hdrHasSelfExt}, make([]byte, 33)...), depth: 0, want: ErrRecordRoot},
 			{name: "self extension has two children", data: commitmenttest.Record(&commitmenttest.RecordSpec{Flags: hdrHasSelfExt, ChildMask: 3, SelfExtension: extFixture([]byte{1})}), depth: 0, want: ErrRecordRoot},
-			{name: "short extension trailer", data: commitmenttest.Record(&commitmenttest.RecordSpec{Flags: hdrHasChildExt, ChildMask: 1, ExtensionMask: 1, Extensions: [16][]byte{0: {3, 0x12}}}), depth: 3, want: ErrRecordTruncated},
+			{name: "short extension trailer", data: commitmenttest.Record(&commitmenttest.RecordSpec{Flags: hdrHasChildExt, ChildMask: 3, ExtensionMask: 1, Extensions: [16][]byte{0: {3, 0x12}}}), depth: 3, want: ErrRecordTruncated},
 			{name: "embedded flag", data: commitmenttest.Record(&commitmenttest.RecordSpec{Flags: hdrHasEmb, ChildMask: 1}), depth: 3, want: ErrRecordFormat},
 		}
 		for _, tt := range tests {
@@ -525,7 +528,7 @@ func TestRecordCodec(t *testing.T) {
 			{
 				name:  "child extension",
 				depth: 3,
-				spec:  commitmenttest.RecordSpec{ChildMask: 1 << 4, Hashes: [16][]byte{4: hash}, Extensions: [16][]byte{4: {3, 0x23, 0x40}}},
+				spec:  commitmenttest.RecordSpec{ChildMask: 1<<4 | 1<<5, Hashes: [16][]byte{4: hash, 5: hash}, Extensions: [16][]byte{4: {3, 0x23, 0x40}}},
 				check: func(t *testing.T, r Record) {
 					l := r.layout()
 					require.Equal(t, uint16(1<<4), l.ext)
@@ -597,6 +600,7 @@ func TestRecordCodec(t *testing.T) {
 	t.Run("E27-E28/EncodeRecordReusesDestination", func(t *testing.T) {
 		n := fork(nil)
 		n.setStoredChild(2, bytes.Repeat([]byte{0x33}, 32), nil)
+		n.setStoredChild(3, bytes.Repeat([]byte{0x44}, 32), nil)
 		dst := make([]byte, 0, 256)
 		data := encodeRecord(n, 7, dst)
 		require.NoError(t, Validate(data, 7))
@@ -813,7 +817,7 @@ func TestEnumerateRecordChildrenRejectsUnsafeDepth(t *testing.T) {
 
 func TestComputeLeafRefsRejectsOversizedStorageValue(t *testing.T) {
 	data := commitmenttest.Record(&commitmenttest.RecordSpec{
-		ChildMask: 1,
+		ChildMask: 3,
 		LeafMask:  1,
 		Leaves: [16]commitmenttest.Leaf{
 			0: {Suffix: bytes.Repeat([]byte{1}, 31), Value: bytes.Repeat([]byte{2}, 33)},

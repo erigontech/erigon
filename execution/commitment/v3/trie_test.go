@@ -528,7 +528,7 @@ func TestUnfold(t *testing.T) {
 		var addrHash [32]byte
 		addrHash[0] = 0x9a
 		hash := bytes.Repeat([]byte{0xcd}, 32)
-		ctx.branches[string(StorageNodeKey(addrHash, path, nil))] = commitmenttest.Record(&commitmenttest.RecordSpec{ChildMask: 1 << 6, Hashes: [16][]byte{6: hash}})
+		ctx.branches[string(StorageNodeKey(addrHash, path, nil))] = commitmenttest.Record(&commitmenttest.RecordSpec{ChildMask: 1<<6 | 1<<7, Hashes: [16][]byte{6: hash, 7: hash}})
 
 		got, err := unfold(ctx, path, planeStorage, addrHash[:])
 		require.NoError(t, err)
