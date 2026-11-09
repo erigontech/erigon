@@ -73,7 +73,6 @@ type handler struct {
 	logger         log.Logger
 	allowSubscribe bool
 	inlineCalls    bool // the caller waits for every answer, as a single HTTP request does
-	batchLimit     int
 
 	allowList     AllowList // a list of explicitly allowed methods, if empty -- everything is allowed
 	forbiddenList ForbiddenList
@@ -125,7 +124,6 @@ func newHandler(
 	conn jsonWriter,
 	idgen func() ID,
 	reg *serviceRegistry,
-	batchLimit int,
 	subscriptionLimit int,
 	allowList AllowList,
 	maxBatchConcurrency uint,
@@ -145,7 +143,6 @@ func newHandler(
 		rootCtx:        rootCtx,
 		cancelRoot:     cancelRoot,
 		allowSubscribe: true,
-		batchLimit:     batchLimit,
 		serverSubs:     make(map[ID]*Subscription),
 		logger:         logger,
 		allowList:      allowList,
@@ -241,14 +238,6 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage, done func()) {
 		}, done)
 		return
 	}
-	// Apply limit on total number of requests.
-	if h.batchLimit != 0 && len(msgs) > h.batchLimit {
-		h.startCallProc(func(cp *callProc) {
-			h.respondWithBatchTooLarge(cp, msgs)
-		}, done)
-		return
-	}
-
 	// Handle non-call messages first:
 	calls := make([]*jsonrpcMessage, 0, len(msgs))
 	h.handleResponses(msgs, func(msg *jsonrpcMessage) {
@@ -330,21 +319,22 @@ func (h *handler) answerInto(cp *callProc, msg *jsonrpcMessage, stream *jsonstre
 	}
 }
 
-func (h *handler) respondWithBatchTooLarge(cp *callProc, batch []*jsonrpcMessage) {
-	reason := fmt.Sprintf("batch limit %d exceeded (can increase by --rpc.batch.limit). Requested batch of size: %d", h.batchLimit, len(batch))
-	resp := errorMessage(&invalidRequestError{reason})
-	// Find the first call and add its "id" field to the error.
-	// This is the best we can do, given that the protocol doesn't have a way
-	// of reporting an error for the entire batch.
-	for _, msg := range batch {
-		if msg.isCall() {
-			resp.ID = msg.ID
-			break
+// handleBatchTooLarge answers a batch the codec rejected for its size, and calls done, when
+// it is not nil, once the answer is written.
+func (h *handler) handleBatchTooLarge(tooLarge *batchTooLargeError, done func()) {
+	if done == nil {
+		done = func() {}
+	}
+	h.startCallProc(func(cp *callProc) {
+		resp := errorMessage(&invalidRequestError{tooLarge.Error()})
+		// The protocol has no error for a whole batch, so the error takes the first call's id.
+		if tooLarge.id != nil {
+			resp.ID = tooLarge.id
 		}
-	}
-	if err := h.conn.WriteJSON(cp.ctx, []*jsonrpcMessage{resp}); err != nil {
-		h.logger.Debug("Failed to write RPC batch-too-large response", "err", err)
-	}
+		if err := h.conn.WriteJSON(cp.ctx, []*jsonrpcMessage{resp}); err != nil {
+			h.logger.Debug("Failed to write RPC batch-too-large response", "err", err)
+		}
+	}, done)
 }
 
 // handleMsg handles a single message and calls done, when it is not nil, once the message

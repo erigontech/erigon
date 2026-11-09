@@ -5,19 +5,15 @@ import (
 )
 
 type stateFeed struct {
-	feed *ethevent.Feed
+	feed ethevent.Feed
 	// head and head_v2 are also sent on feeds of their own, where a subscriber that cannot take one gets
 	// ethevent.ErrSubscriberLagged. A lag report there is always about a topic the subscriber asked for; on feed,
 	// which carries every state topic, they are dropped silently.
-	head, headV2 *ethevent.Feed
+	head, headV2 ethevent.Feed
 }
 
 func newStateFeed() *stateFeed {
-	return &stateFeed{
-		feed:   &ethevent.Feed{},
-		head:   &ethevent.Feed{},
-		headV2: &ethevent.Feed{},
-	}
+	return &stateFeed{}
 }
 
 func (f *stateFeed) Subscribe(channel chan *EventStream) ethevent.Subscription {
