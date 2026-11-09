@@ -284,6 +284,31 @@ func TestConvertCommitmentFiles_V3HistoryPreflightLeavesNoProducer(t *testing.T)
 	goleak.VerifyNone(t, opt)
 }
 
+func TestConvertCommitmentFiles_V3HistoryRefusesPrunedStart(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	db, agg, _ := testDbAggregatorWithCommitmentHistory(t, 10, 4)
+	dirs := agg.Dirs()
+	var pruned []string
+	for _, d := range []string{dirs.SnapHistory, dirs.SnapIdx, dirs.SnapAccessors} {
+		files, err := filepath.Glob(filepath.Join(d, "*-commitment.0-*"))
+		require.NoError(t, err)
+		pruned = append(pruned, files...)
+	}
+	require.NotEmpty(t, pruned)
+	for _, f := range pruned {
+		require.NoError(t, os.Remove(f))
+	}
+	require.NoError(t, agg.OpenFolder(db))
+
+	tx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	t.Cleanup(tx.Rollback)
+	err = state.ConvertCommitmentFiles(t.Context(), state.AggTx(tx), state.ConvertOpts{TargetV3: true}, log.New())
+	tx.Rollback()
+	require.ErrorContains(t, err, "commitment history below step")
+	require.NoDirExists(t, filepath.Join(dirs.Snap, "backup"))
+}
+
 type commitmentHistoryPair struct {
 	key, value []byte
 }

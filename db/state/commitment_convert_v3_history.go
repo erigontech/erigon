@@ -432,6 +432,21 @@ func pendingCommitmentHistoryV3(dt *DomainRoTx) ([]visibleFile, []visibleFile, e
 	return vs, efs, nil
 }
 
+func checkCommitmentHistoryV3Start(dt *DomainRoTx, stepSize uint64) error {
+	if dt.ht.h.SnapshotsDisabled {
+		return nil
+	}
+	vs, _, err := pendingCommitmentHistoryV3(dt)
+	if err != nil || len(vs) == 0 || vs[0].startTxNum == 0 {
+		return err
+	}
+	_, found, err := lastWriteBefore(dt.ht.iit, commitment.KeyCommitmentState, vs[0].startTxNum)
+	if err != nil || found {
+		return err
+	}
+	return fmt.Errorf("[commitment_convert] commitment history below step %d is missing; %s needs the commit before it", vs[0].startTxNum/stepSize, filepath.Base(vs[0].Fullpath()))
+}
+
 func convertCommitmentHistoryV3(ctx context.Context, at *AggregatorRoTx, stage commitmentV3HistoryStage, logger log.Logger) ([]commitmentHistoryRange, error) {
 	dt := at.d[kv.CommitmentDomain]
 	if dt.ht.h.SnapshotsDisabled {
