@@ -356,6 +356,7 @@ func StateStep(chainReader rules.ChainReader, engine rules.Engine, sd *execctx.S
 		if err := addAndVerifyBlockStep(tx, engine, chainReader, currentHeader, currentBody); err != nil {
 			return err
 		}
+		dbg.NpMark("add_verify_block")
 		// Run state sync
 		hasMore, err := stateSync.RunNoInterrupt(sd, tx)
 		if err != nil {

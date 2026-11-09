@@ -459,6 +459,9 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 			// so the first window block's compute covers only its own deltas.
 			cc.compute(ctx, targetOf(r), computeMode{checkRoot: true})
 		}
+		if !r.execStartedAt.IsZero() {
+			dbg.NpStageEnd(r.execStartedAt)
+		}
 		if logNpPhases && !r.execStartedAt.IsZero() {
 			commitEnd := time.Now()
 			execActive := r.execEndedAt.Sub(r.execStartedAt)
