@@ -1004,11 +1004,7 @@ func (hc *headCaptureSource) warmPaths(ctx context.Context, accessed *accessedSt
 				return v
 			}
 			for i := w; i < len(paths) && ctx.Err() == nil; i += len(txs) {
-				if paths[i].slot == nil {
-					commitmentv3.PrefetchPath(read, paths[i].account, nil, 0)
-				} else {
-					commitmentv3.PrefetchPath(read, paths[i].account, paths[i].slot, 64)
-				}
+				commitmentv3.PrefetchPath(read, paths[i].account, paths[i].slot)
 			}
 		})
 	}

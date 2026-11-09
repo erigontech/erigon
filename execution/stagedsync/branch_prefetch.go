@@ -219,9 +219,9 @@ func (p *branchPrefetcher) walkChunk(it prefetchItem, read func(key []byte) []by
 }
 
 func (it *prefetchItem) touch(read func(key []byte) []byte) {
+	var slot []byte
 	if it.storage {
-		v3.PrefetchPath(read, it.account[:], it.slot[:], 64)
-		return
+		slot = it.slot[:]
 	}
-	v3.PrefetchPath(read, it.account[:], nil, 0)
+	v3.PrefetchPath(read, it.account[:], slot)
 }

@@ -580,8 +580,8 @@ func TestPrefetch(t *testing.T) {
 				prefetched[string(key)] = true
 				return ctx.branches[string(key)]
 			}
-			PrefetchPath(read, addrHash[:], nil, 0)
-			PrefetchPath(read, addrHash[:], slotHash[:], 64)
+			PrefetchPath(read, addrHash[:], nil)
+			PrefetchPath(read, addrHash[:], slotHash[:])
 
 			ctx.branchCalls = nil
 			runV3(t, ctx, v3Config{workers: 1, trie: tr}, []commitmenttest.Op{
@@ -729,7 +729,7 @@ func TestWarmup(t *testing.T) {
 		addrHash := make([]byte, 32)
 		addrHash[0] = 0x40
 		require.NotPanics(t, func() {
-			PrefetchPath(func([]byte) []byte { return record }, addrHash, nil, 0)
+			PrefetchPath(func([]byte) []byte { return record }, addrHash, nil)
 		})
 	})
 }
