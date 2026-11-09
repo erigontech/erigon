@@ -165,6 +165,7 @@ jobs:
       # is also what lets Gnosis run the same check as mainnet.
       - name: Test old state-history file retirement (minimal node)
         id: retirement_step
+        if: ${{ !cancelled() && steps.test_step.outcome == 'success' }}
         run: |
           set +e # Disable exit on error
 
