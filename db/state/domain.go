@@ -2166,7 +2166,7 @@ func (dt *DomainRoTx) checkFilesDBGap(tx kv.Tx) error {
 	if err != nil {
 		return err
 	}
-	if filesEnd := dt.files.EndTxNum(); prg.TxTo > filesEnd {
+	if filesEnd := dt.files.EndTxNum(); prg.TxTo > filesEnd && !dt.d.dirtyFiles.coversWithoutHole(filesEnd, prg.TxTo) {
 		return fmt.Errorf("gap between snapshot files and DB for domain %s: files end at txNum %d but the DB was pruned up to %d — [%d, %d) is in neither. Maybe you removed snapshot files (e.g. `snapshots rm-state --latest`) but forgot to run `integration stage_exec --reset` (or `integration stage_custom_trace --reset` for custom-trace domains)?",
 			dt.d.FilenameBase, filesEnd, prg.TxTo, filesEnd, prg.TxTo)
 	}

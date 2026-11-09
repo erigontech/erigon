@@ -25,6 +25,7 @@ import (
 
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/state/statecfg"
 )
@@ -91,6 +92,51 @@ func TestDomain_RmStateLatestHole(t *testing.T) {
 
 	// The gap check catches what GetLatest cannot.
 	require.ErrorContains(t, drt.checkFilesDBGap(tx), "gap between snapshot files and DB")
+}
+
+// A file that lost only its accessor still holds its data and BuildMissedAccessors can restore it, so it is no hole.
+func TestDomain_MissingAccessorIsNotAFilesDBGap(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	logEvery := time.NewTicker(time.Hour)
+	defer logEvery.Stop()
+
+	const aggStep = uint64(4)
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, aggStep, log.New())
+	tx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	drt := d.beginForTests()
+	w := drt.NewWriter(db)
+	var prev []byte
+	for step := range uint64(3) {
+		v := []byte{byte(step + 1)}
+		require.NoError(t, w.PutWithPrev([]byte("k"), v, step*aggStep+1, prev))
+		prev = v
+	}
+	require.NoError(t, w.Flush(ctx, tx))
+	w.Close()
+	drt.Close()
+	for step := range kv.Step(3) {
+		require.NoError(t, d.collateBuildIntegrate(ctx, step, tx, background.NewProgressSet()))
+	}
+	drt = d.beginForTests()
+	_, err = drt.Prune(ctx, tx, 0, 0, 3*aggStep, math.MaxUint64, logEvery)
+	require.NoError(t, err)
+	drt.Close()
+
+	d.dirtyFiles.Scan(func(item *FilesItem) bool {
+		if item.startTxNum == aggStep {
+			item.bindex, item.index = nil, nil
+		}
+		return true
+	})
+
+	drt = d.beginForTests()
+	defer drt.Close()
+	require.EqualValues(t, aggStep, drt.files.EndTxNum(), "the hidden file cuts the visible list")
+	require.NoError(t, drt.checkFilesDBGap(tx))
 }
 
 // TestInvertedIndex_RmStateLatestHole verifies the standalone-index gap check with

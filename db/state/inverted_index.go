@@ -817,7 +817,7 @@ func (iit *InvertedIndexRoTx) checkFilesDBGap(tx kv.Tx) error {
 	if err != nil {
 		return err
 	}
-	if filesEnd := iit.files.EndTxNum(); prg.TxTo > filesEnd {
+	if filesEnd := iit.files.EndTxNum(); prg.TxTo > filesEnd && !iit.ii.dirtyFiles.coversWithoutHole(filesEnd, prg.TxTo) {
 		return fmt.Errorf("gap between snapshot files and DB for index %s: files end at txNum %d but the DB was pruned up to %d — [%d, %d) is in neither. Maybe you removed snapshot files (e.g. `snapshots rm-state --latest`) but forgot to run `integration stage_exec --reset`?",
 			iit.ii.FilenameBase, filesEnd, prg.TxTo, filesEnd, prg.TxTo)
 	}

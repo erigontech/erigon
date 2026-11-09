@@ -136,6 +136,10 @@ func TestCalcVisibleFilesStopsAtTheFirstGap(t *testing.T) {
 		files := dirtyFilesOf([2]uint64{0, 4}, [2]uint64{4, 8}, [2]uint64{12, 16}, [2]uint64{16, 20})
 		require.Equal(t, []uint64{4, 8}, endsOf(calcVisibleFiles(files, 0, allFiles, false, 20)))
 	})
+	t.Run("partial overlap is not a gap", func(t *testing.T) {
+		files := dirtyFilesOf([2]uint64{0, 8}, [2]uint64{4, 12}, [2]uint64{8, 16})
+		require.Equal(t, []uint64{8, 12, 16}, endsOf(calcVisibleFiles(files, 0, allFiles, false, 16)))
+	})
 	t.Run("file hidden by the checker", func(t *testing.T) {
 		files := dirtyFilesOf([2]uint64{0, 4}, [2]uint64{4, 8}, [2]uint64{8, 12})
 		dependentMissing := func(start, _ uint64) bool { return start != 4 }

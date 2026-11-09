@@ -19,7 +19,6 @@ package state
 import (
 	"cmp"
 	"context"
-	"errors"
 	"fmt"
 	"math"
 	"slices"
@@ -170,33 +169,38 @@ func (at *AggregatorRoTx) stepAlignedEnd(stepSize uint64) (uint64, error) {
 func (at *AggregatorRoTx) refuseFilesHiddenByAGap() error {
 	at.a.dirtyFilesLock.Lock()
 	defer at.a.dirtyFilesLock.Unlock()
-	check := func(visible visibleFiles, dirty *DirtyFiles) (err error) {
-		if len(visible) == 0 {
-			return nil
-		}
-		end := visible.EndTxNum()
-		dirty.Scan(func(f *FilesItem) bool {
-			if f.startTxNum > end {
-				err = fmt.Errorf("%s: no visible file for txNum %d-%d", visible[len(visible)-1].Fullpath(), end, f.startTxNum)
-				return false
-			}
-			return true
-		})
-		return err
+	type entityFiles struct {
+		visible visibleFiles
+		dirty   *DirtyFiles
 	}
+	var entities []entityFiles
 	for _, d := range at.d {
 		if d == nil || !d.d.Enabled {
 			continue
 		}
-		if err := errors.Join(check(d.files, d.d.dirtyFiles), check(d.ht.files, d.ht.h.dirtyFiles), check(d.ht.iit.files, d.ht.iit.ii.dirtyFiles)); err != nil {
-			return err
-		}
+		entities = append(entities, entityFiles{d.files, d.d.dirtyFiles}, entityFiles{d.ht.files, d.ht.h.dirtyFiles}, entityFiles{d.ht.iit.files, d.ht.iit.ii.dirtyFiles})
 	}
 	for _, ii := range at.iis {
 		if ii == nil || !ii.ii.Enabled {
 			continue
 		}
-		if err := check(ii.files, ii.ii.dirtyFiles); err != nil {
+		entities = append(entities, entityFiles{ii.files, ii.ii.dirtyFiles})
+	}
+	ceiling := at.a.dirtyFilesEndTxNumMinimax()
+	for _, e := range entities {
+		if len(e.visible) == 0 {
+			continue
+		}
+		end := e.visible.EndTxNum()
+		var err error
+		e.dirty.Scan(func(f *FilesItem) bool {
+			if f.startTxNum > end && f.endTxNum <= ceiling {
+				err = fmt.Errorf("%s: no visible file for txNum %d-%d", e.visible[len(e.visible)-1].Fullpath(), end, f.startTxNum)
+				return false
+			}
+			return true
+		})
+		if err != nil {
 			return err
 		}
 	}
