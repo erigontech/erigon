@@ -25,6 +25,8 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/state"
@@ -35,6 +37,7 @@ const maxReplayWorkers = 32
 var (
 	errBlockNotCanonical = errors.New("block is no longer canonical")
 	errNoReplayReadTx    = errors.New("no read tx left for a replay worker")
+	errReplayWorkerPanic = errors.New("replay worker crashed")
 )
 
 var replayCPUs = func() int { return runtime.GOMAXPROCS(0) }
@@ -68,8 +71,14 @@ func replayTxnsParallel(ctx context.Context, db kv.TemporalRoDB, canonical dbser
 	}
 	g, gctx := errgroup.WithContext(ctx)
 	for _, tx := range txs {
-		g.Go(func() error {
+		g.Go(func() (err error) {
 			defer tx.Rollback()
+			defer func() {
+				if r := recover(); r != nil {
+					log.Error("replay worker crashed", "block", blockNum, "err", r, "stack", dbg.Stack())
+					err = fmt.Errorf("%w: %v", errReplayWorkerPanic, r)
+				}
+			}()
 			// A worker's view can start after the caller's, when pruning has moved on.
 			startTxNum, err := state.StateHistoryStartTxNum(tx)
 			if err != nil {

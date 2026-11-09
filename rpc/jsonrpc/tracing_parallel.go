@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/execution/chain"
@@ -29,7 +28,6 @@ import (
 	"github.com/erigontech/erigon/execution/state"
 	tracersConfig "github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/transactions"
 )
@@ -54,10 +52,7 @@ func (api *DebugAPIImpl) traceBlockParallel(ctx context.Context, block *types.Bl
 	workers := debugTraceBlockWorkers(len(txns))
 	ctx, cancel := context.WithCancel(ctx)
 	replay, err := replayTxnsParallel(ctx, api.db, api._blockReader, header.Number.Uint64(), block.Hash(), baseTxNum, len(txns), workers, 2*workers, func(ctx context.Context, workerTx kv.TemporalTx) (func(int) error, error) {
-		getHeader := func(hash common.Hash, n uint64) (*types.Header, error) {
-			return api._blockReader.HeaderByNumber(ctx, workerTx, n)
-		}
-		blockCtx := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, getHeader), engine, accounts.NilAddress, chainConfig)
+		blockCtx := transactions.NewEVMBlockContext(engine, header, true /* requireCanonical */, workerTx, api._blockReader, chainConfig)
 		return func(txnIndex int) error {
 			txNum := baseTxNum + uint64(txnIndex)
 			firstLogIndex, err := rawtemporaldb.FirstLogIndex(workerTx, txNum, txnIndex)

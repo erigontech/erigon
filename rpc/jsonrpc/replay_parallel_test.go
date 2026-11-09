@@ -186,6 +186,31 @@ func TestReplayTxnsParallelStopsWaitingWorkersOnError(t *testing.T) {
 	}
 }
 
+// TestReplayTxnsParallelReturnsWorkerPanic pins that a panic in a job fails the request
+// with an error instead of killing the process.
+func TestReplayTxnsParallelReturnsWorkerPanic(t *testing.T) {
+	m, _ := createLogIndexTestModule(t)
+	tx, err := m.DB.BeginRo(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	hash, _, err := m.BlockReader.CanonicalHash(m.Ctx, tx, 1)
+	require.NoError(t, err)
+
+	r, err := replayTxnsParallel(m.Ctx, m.DB, m.BlockReader, 1, hash, 0, 4, 2, 4,
+		func(context.Context, kv.TemporalTx) (func(int) error, error) {
+			return func(txnIndex int) error {
+				if txnIndex == 1 {
+					panic("tracer bug")
+				}
+				return nil
+			}, nil
+		})
+	require.NoError(t, err)
+	err = r.Wait()
+	require.ErrorIs(t, err, errReplayWorkerPanic)
+	require.ErrorContains(t, err, "tracer bug")
+}
+
 // openTxCountingDB counts the read txs it opened that are not rolled back yet, and fails
 // every open after the first n with failErr.
 type openTxCountingDB struct {
