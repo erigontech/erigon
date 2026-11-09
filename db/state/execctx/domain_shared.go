@@ -1430,7 +1430,7 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 		return v, step, nil
 	}
 	// stateCache holds committed values shared across domain readers.
-	if sd.stateCache != nil && domain != kv.CommitmentDomain {
+	if sd.stateCache != nil {
 		v, cTxNum, ok := view.GetWithTxNum(domain, k)
 		// The cache stamps txNums — divide to get the step the entry reflects.
 		// A negative uses the last txNum included by its read-view frontier, not
