@@ -54,6 +54,13 @@ func (g *stateGetter) GetCode(addr []byte, txNum uint64) ([]byte, bool, error) {
 	return code, ok, err
 }
 
+// LendCode returns bytes that alias the lent buffer until the next code read on this getter.
+func (g *stateGetter) LendCode(addr []byte, txNum uint64) ([]byte, bool, error) {
+	code, lent, err := g.sd.lendCode(g.tx, g.view, addr, txNum, *g.codeBuf)
+	*g.codeBuf = slices.Grow((*g.codeBuf)[:0], min(len(code), maxLentCodeBuf))
+	return code, lent, err
+}
+
 func (g *stateGetter) GetCodeSize(addr []byte, txNum uint64) (int, bool, error) {
 	return g.sd.getCodeSize(g.tx, g.view, addr, txNum)
 }

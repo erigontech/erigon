@@ -10,11 +10,13 @@ package state
 
 import (
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -681,11 +683,9 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 			r.outcome = outcomeReturnDefault
 			r.source = UnknownSource
 			r.version = UnknownVersion
-			if !commited && path != CodePath {
-				hdr.Source = StorageRead
-				r.hdr = hdr
-				r.recordVR = true
-			}
+			hdr.Source = StorageRead
+			r.hdr = hdr
+			r.recordVR = !commited && path != CodePath
 			return
 		}
 
@@ -1284,13 +1284,32 @@ func recordWipedCodeRead(s *IntraBlockState, addr accounts.Address, path Account
 
 // readCode returns the contract code with its hash.
 func readCode(s *IntraBlockState, addr accounts.Address) (accounts.Code, ReadSource, Version, error) {
+	return readCodeLending(s, addr, false)
+}
+
+// readCodeLending is readCode; with lend, a storage read that misses every cache may
+// return bytes lent by the worker and record the read without them.
+func readCodeLending(s *IntraBlockState, addr accounts.Address, lend bool) (accounts.Code, ReadSource, Version, error) {
 	if s.warmReadable(addr) {
 		if tr, ok := s.versionedReads.GetCode(addr); ok && warmSource(tr.Source) {
-			return tr.Val, tr.Source, tr.Version, nil
+			code, err := s.recordedCode(addr, tr, lend)
+			return code, tr.Source, tr.Version, err
 		}
 	}
 	var r readPathResult
-	versionedReadCore(s, addr, CodePath, accounts.NilKey, false, false, &r)
+	versionedReadCore(s, addr, CodePath, accounts.NilKey, false, lend, &r)
+	if lend && r.err == nil && r.outcome == outcomeReturnDefault && r.hdr.Source == StorageRead {
+		code, lent, err := s.lendOriginCode(addr)
+		if err != nil {
+			return accounts.Code{}, StorageRead, UnknownVersion, err
+		}
+		if lent {
+			s.versionedReads.SetCode(addr, VersionedRead[accounts.Code]{r.hdr, accounts.Code{Hash: code.Hash}})
+			return code, StorageRead, r.hdr.Version, nil
+		}
+		r = readPathResult{}
+		versionedReadCore(s, addr, CodePath, accounts.NilKey, false, false, &r)
+	}
 	if r.err != nil {
 		s.RecordStateReadError(r.err)
 		return accounts.Code{}, r.source, r.version, r.err
@@ -1300,7 +1319,8 @@ func readCode(s *IntraBlockState, addr accounts.Address) (accounts.Code, ReadSou
 		return r.vwCode.Val, r.source, r.version, nil
 	case outcomeReadSetHit:
 		tr, _ := s.versionedReads.GetCode(addr)
-		return tr.Val, r.source, r.version, nil
+		code, err := s.recordedCode(addr, tr, lend)
+		return code, r.source, r.version, err
 	case outcomeMapDone:
 		v := r.mapCodeVal
 		if r.recordVR {
@@ -1335,6 +1355,109 @@ func readCode(s *IntraBlockState, addr accounts.Address) (accounts.Code, ReadSou
 	default:
 		panic(fmt.Sprintf("readCode: unexpected outcome %d for %x", r.outcome, addr))
 	}
+}
+
+// codeBytesDropped reports a non-empty code read recorded without its bytes.
+func codeBytesDropped(c accounts.Code) bool {
+	return dbg.ExtCodeCopyBorrow && c.Bytes == nil && !c.Hash.IsEmpty()
+}
+
+type codeLender interface {
+	LendAccountCode(accounts.Address) ([]byte, bool, error)
+}
+
+// recordedCode returns a recorded read's code, re-reading bytes the record dropped.
+func (ibs *IntraBlockState) recordedCode(addr accounts.Address, tr VersionedRead[accounts.Code], lend bool) (accounts.Code, error) {
+	if !codeBytesDropped(tr.Val) {
+		return tr.Val, nil
+	}
+	if lend {
+		if code, lent, err := ibs.lendOriginCode(addr); lent || err != nil {
+			return code, err
+		}
+	}
+	code, err := ibs.originCodeDirect(addr)
+	if err != nil {
+		return accounts.Code{}, err
+	}
+	tr.Val = code
+	ibs.versionedReads.SetCode(addr, tr)
+	return code, nil
+}
+
+// lendOriginCode decodes addr's committed code into the worker's buffer. Not lent
+// when the code is already on a state object, absent, or held by a cache.
+func (ibs *IntraBlockState) lendOriginCode(addr accounts.Address) (accounts.Code, bool, error) {
+	lender, ok := ibs.stateReader.(codeLender)
+	if !ok || ibs.stateObjects[addr] != nil {
+		return accounts.Code{}, false, nil
+	}
+	if cc, ok := ibs.versionedWriteCreateContract(addr); ok && cc {
+		return accounts.Code{}, false, nil
+	}
+	codeHash, err := ibs.originCodeHash(addr)
+	if err != nil || codeHash.IsEmpty() {
+		return accounts.Code{}, false, err
+	}
+	if _, ok := ibs.sharedCode(codeHash); ok {
+		return accounts.Code{}, false, nil
+	}
+	code, lent, err := lender.LendAccountCode(addr)
+	ibs.RecordStateReadError(err)
+	if err != nil || !lent {
+		return accounts.Code{}, false, err
+	}
+	recordExtCodeCopyBorrow(addr, ibs.Version())
+	return accounts.Code{Hash: codeHash, Bytes: code}, true, nil
+}
+
+// shortcut: process-wide probe counters; a block that never reaches the log keeps its entry, remove with EXTCODECOPY_BORROW.
+type extCodeCopyBorrowRead struct {
+	addr    accounts.Address
+	version Version
+}
+
+type extCodeCopyBorrowStats struct {
+	misses, repeatsInTx, repeatsInBlock int
+	seenInTx                            map[extCodeCopyBorrowRead]struct{}
+	seenInBlock                         map[accounts.Address]struct{}
+}
+
+var extCodeCopyBorrows = struct {
+	sync.Mutex
+	blocks map[uint64]*extCodeCopyBorrowStats
+}{blocks: map[uint64]*extCodeCopyBorrowStats{}}
+
+func recordExtCodeCopyBorrow(addr accounts.Address, version Version) {
+	extCodeCopyBorrows.Lock()
+	defer extCodeCopyBorrows.Unlock()
+	stats := extCodeCopyBorrows.blocks[version.BlockNum]
+	if stats == nil {
+		stats = &extCodeCopyBorrowStats{seenInTx: map[extCodeCopyBorrowRead]struct{}{}, seenInBlock: map[accounts.Address]struct{}{}}
+		extCodeCopyBorrows.blocks[version.BlockNum] = stats
+	}
+	stats.misses++
+	read := extCodeCopyBorrowRead{addr, version}
+	if _, ok := stats.seenInTx[read]; ok {
+		stats.repeatsInTx++
+	}
+	stats.seenInTx[read] = struct{}{}
+	if _, ok := stats.seenInBlock[addr]; ok {
+		stats.repeatsInBlock++
+	}
+	stats.seenInBlock[addr] = struct{}{}
+}
+
+// LogExtCodeCopyBorrows logs and forgets the borrow-miss counters of blockNum.
+func LogExtCodeCopyBorrows(blockNum uint64) {
+	extCodeCopyBorrows.Lock()
+	defer extCodeCopyBorrows.Unlock()
+	stats := extCodeCopyBorrows.blocks[blockNum]
+	if stats == nil {
+		return
+	}
+	delete(extCodeCopyBorrows.blocks, blockNum)
+	log.Info(fmt.Sprintf("[extcodecopy] blk=%d misses=%d repeats_in_tx=%d repeats_in_block=%d", blockNum, stats.misses, stats.repeatsInTx, stats.repeatsInBlock))
 }
 
 // refreshCode is the in-memory-only variant for CodePath. CodePath is never recorded

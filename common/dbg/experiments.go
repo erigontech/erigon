@@ -160,6 +160,8 @@ var (
 	TrieBALWarmupers = EnvInt("TRIE_BAL_WARMUPERS", balCommitmentWarmupWorkersDefault(runtime.GOMAXPROCS(-1)))
 
 	PerfProfiles = EnvBool("PERF_PROFILES", false)
+
+	ExtCodeCopyBorrow = EnvBool("EXTCODECOPY_BORROW", false)
 )
 
 func balCommitmentWarmupWorkersDefault(gomaxprocs int) int {

@@ -1365,6 +1365,7 @@ type getLatestOptions struct {
 	codeHash    []byte
 	buf         []byte
 	hashFromMem bool
+	lent        *bool // non-nil: a fillable miss returns the decoded bytes unfilled and sets *lent
 }
 
 // getLatest is the read implementation. wm is the caller's lock-free
@@ -1497,6 +1498,8 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 			fillView = fillView.WithFrontier(sd.cacheFrontierFor(tx))
 		}
 		switch {
+		case fillsCode && opts.lent != nil:
+			*opts.lent = len(v) > 0
 		case fillsCode && opts.hashFromMem:
 			fillView.Fill(domain, k, v, readTxNum)
 			v = bytes.Clone(v)
@@ -1647,6 +1650,26 @@ func (sd *SharedDomains) getCode(tx kv.TemporalTx, view cache.ReadView, addr []b
 	}
 	if len(v) == 0 {
 		return nil, false, nil
+	}
+	return v, true, nil
+}
+
+// lendCode decodes a code-cache miss into buf without filling the cache. lent is
+// false when any cache or the in-memory batch holds the code, or the read cannot fill.
+func (sd *SharedDomains) lendCode(tx kv.TemporalTx, view cache.ReadView, addr []byte, txNum uint64, buf []byte) (code []byte, lent bool, err error) {
+	if tx == nil || sd.stateCache == nil {
+		return nil, false, nil
+	}
+	codeHash := sd.codeHashForAddr(tx, view, addr, txNum)
+	if len(codeHash) == 0 || sd.uncommittedCodeInMem(addr) {
+		return nil, false, nil
+	}
+	if _, ok := view.GetCodeByHash(codeHash); ok {
+		return nil, false, nil
+	}
+	v, _, err := sd.getLatest(kv.CodeDomain, tx, addr, nil, time.Time{}, kv.NoStepBound, view, getLatestOptions{codeHash: codeHash, buf: buf, lent: &lent})
+	if err != nil || !lent {
+		return nil, false, err
 	}
 	return v, true, nil
 }

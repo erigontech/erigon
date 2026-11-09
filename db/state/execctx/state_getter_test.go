@@ -721,3 +721,53 @@ func TestAsOfGetterServesCommittedValueFromStateCache(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, tx.reads, "a value committed at txNum 5 is not the value as of 5")
 }
+
+func TestStateGetterLendCodeLeavesTheCacheEmpty(t *testing.T) {
+	ctx := t.Context()
+	db := newTestDb(t, 16)
+	addr := make([]byte, 20)
+	addr[0] = 0x17
+	code := bytes.Repeat([]byte{0x17}, 1024)
+	codeHash := crypto.Keccak256Hash(code)
+	commitAccount(t, db, nil, addr, accounts.SerialiseV3(&accounts.Account{Nonce: 1, CodeHash: accounts.InternCodeHash(codeHash)}), 5)
+
+	roTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	var lentCaps []int
+	tx := codeBufTx{TemporalTx: roTx, code: map[string][]byte{string(addr): code}, lentCaps: &lentCaps}
+
+	sc := newSmallStateCache()
+	t.Cleanup(sc.Close)
+	sd, err := execctx.NewSharedDomains(ctx, tx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+	sd.BindStateCache(sc)
+
+	var buf []byte
+	getter := sd.AsStateGetter(tx, execctxapi.StateGetterOptions{}.WithCodeBuf(&buf))
+	lender := getter.(interface {
+		LendCode(addr []byte, txNum uint64) ([]byte, bool, error)
+	})
+
+	got, lent, err := lender.LendCode(addr, 5)
+	require.NoError(t, err)
+	require.True(t, lent)
+	require.Equal(t, code, got)
+	_, cached := sc.View(nil).GetCodeByHash(codeHash[:])
+	require.False(t, cached, "a lent read must not fill the code cache")
+
+	got, lent, err = lender.LendCode(addr, 5)
+	require.NoError(t, err)
+	require.True(t, lent)
+	require.Equal(t, code, got)
+	require.GreaterOrEqual(t, lentCaps[1], len(code), "the second lend must decode into the grown buffer")
+
+	got, ok, err := getter.GetCode(addr, 5)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, code, got)
+	_, lent, err = lender.LendCode(addr, 5)
+	require.NoError(t, err)
+	require.False(t, lent, "a cached code stays on the normal path")
+}

@@ -966,6 +966,17 @@ func (r *ReaderV3) traceReadAccountStorage(address accounts.Address, key common.
 	}
 }
 
+func (r *ReaderV3) LendAccountCode(address accounts.Address) ([]byte, bool, error) {
+	lender, ok := r.getter.(interface {
+		LendCode(addr []byte, txNum uint64) ([]byte, bool, error)
+	})
+	if !ok {
+		return nil, false, nil
+	}
+	r.addr = address.Value()
+	return lender.LendCode(r.addr[:], r.txNum)
+}
+
 func (r *ReaderV3) ReadAccountCode(address accounts.Address) ([]byte, error) {
 	r.addr = address.Value()
 	enc, _, err := r.getter.GetCode(r.addr[:], r.txNum)

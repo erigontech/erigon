@@ -1541,6 +1541,9 @@ func (pe *parallelExecutor) execLoopExitCheck(ctx context.Context, reason string
 }
 
 func (pe *parallelExecutor) recordBlockExecMetrics(be *blockExecutor) {
+	if dbg.ExtCodeCopyBorrow {
+		state.LogExtCodeCopyBorrows(be.blockNum)
+	}
 	if !be.execStarted.IsZero() {
 		pe.blockExecMetrics.Duration.Add(time.Since(be.execStarted))
 		pe.blockExecMetrics.BlockCount.Add(1)

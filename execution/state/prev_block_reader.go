@@ -86,6 +86,14 @@ func (o *PrevBlockReader) ReadAccountStorage(a accounts.Address, k accounts.Stor
 	return o.chain.ReadAccountStorage(a, k)
 }
 
+// LendAccountCode lends only when no prior block is layered over the base reader.
+func (o *PrevBlockReader) LendAccountCode(a accounts.Address) ([]byte, bool, error) {
+	if lender, ok := o.chain.(codeLender); ok {
+		return lender.LendAccountCode(a)
+	}
+	return nil, false, nil
+}
+
 func (o *PrevBlockReader) ReadAccountCode(a accounts.Address) ([]byte, error) {
 	return o.chain.ReadAccountCode(a)
 }
