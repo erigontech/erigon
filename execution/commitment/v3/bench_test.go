@@ -33,14 +33,6 @@ import (
 	"github.com/erigontech/erigon/internal/commitmenttest/runner"
 )
 
-func benchAddr(i int) []byte {
-	return commitmenttest.Key(commitmenttest.KeySpec{Kind: "bench-address", Size: 20}, i)
-}
-
-func benchSlot(i int) []byte {
-	return commitmenttest.Key(commitmenttest.KeySpec{Kind: "bench-slot", Size: 32}, i)
-}
-
 func BenchmarkFoldV3VsHPH(b *testing.B) {
 	ctxb := context.Background()
 	for _, shape := range []string{"accounts", "storage", "whale"} {

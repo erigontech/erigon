@@ -2118,3 +2118,23 @@ func TestTouchChangedKeysFromHistoryRestoresTheStoredRoot(t *testing.T) {
 		})
 	}
 }
+
+func TestPickTrieVariant(t *testing.T) {
+	for _, tc := range []struct {
+		parallel, v3 bool
+		want         commitment.TrieVariant
+	}{
+		{false, false, commitment.VariantHexPatriciaTrie},
+		{true, false, commitment.VariantParallelHexPatricia},
+		{false, true, commitment.VariantCommitmentV3},
+		{true, true, commitment.VariantCommitmentV3},
+	} {
+		t.Run(fmt.Sprintf("parallel=%t/v3=%t", tc.parallel, tc.v3), func(t *testing.T) {
+			t.Cleanup(statecfg.SetCommitmentV3(tc.v3))
+			parallel := statecfg.ExperimentalParallelCommitment
+			t.Cleanup(func() { statecfg.ExperimentalParallelCommitment = parallel })
+			statecfg.ExperimentalParallelCommitment = tc.parallel
+			require.Equal(t, tc.want, execctx.PickTrieVariant(), "parallel=%v v3=%v", tc.parallel, tc.v3)
+		})
+	}
+}

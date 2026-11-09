@@ -513,3 +513,11 @@ func partition(stream []phaseAInput) ([]storageTask, []accountEntry) {
 	}
 	return p.done()
 }
+
+func benchAddr(i int) []byte {
+	return commitmenttest.Key(commitmenttest.KeySpec{Kind: "bench-address", Size: 20}, i)
+}
+
+func benchSlot(i int) []byte {
+	return commitmenttest.Key(commitmenttest.KeySpec{Kind: "bench-slot", Size: 32}, i)
+}
