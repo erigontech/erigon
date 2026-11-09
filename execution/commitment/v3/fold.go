@@ -22,8 +22,6 @@ import (
 	"fmt"
 	"math/bits"
 
-	keccak "github.com/erigontech/fastkeccak"
-
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
@@ -54,9 +52,6 @@ func fold(n *node, depth int) ([32]byte, error) {
 		ref, err := foldLeaf(n, nib, true, rootRef[:0])
 		if err != nil {
 			return [32]byte{}, err
-		}
-		if len(ref) != 32 {
-			return keccak.Sum256(ref), nil
 		}
 		return [32]byte(ref), nil
 	}
