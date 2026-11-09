@@ -63,6 +63,14 @@ func TestListenAndServeServesBothTransports(t *testing.T) {
 	require.NoError(t, slashResp.Body.Close())
 	require.Equal(t, http.StatusOK, slashResp.StatusCode, "trailing-slash /mcp/ must reach the streamable handler")
 
+	foreignReq, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "http://"+addr+"/mcp", strings.NewReader(initBody))
+	require.NoError(t, err)
+	foreignReq.Header.Set("Origin", "https://evil.example")
+	foreignResp, err := client.Do(foreignReq)
+	require.NoError(t, err)
+	require.NoError(t, foreignResp.Body.Close())
+	require.Equal(t, http.StatusForbidden, foreignResp.StatusCode, "the served handler must refuse a foreign origin")
+
 	cancel()
 	require.NoError(t, <-done)
 }
