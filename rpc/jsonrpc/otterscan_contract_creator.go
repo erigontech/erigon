@@ -174,12 +174,8 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr common
 		if err != nil {
 			return nil, err
 		}
-		codeHistoryStart, err := tx.Debug().HistoryStartFrom(kv.CodeDomain)
-		if err != nil {
+		if err := api.checkPruneState(ctx, tx, 0); err != nil {
 			return nil, err
-		}
-		if codeHistoryStart > afterGenesis {
-			return nil, fmt.Errorf("binary search between %d-%d doesn't find anything", nextTxnID, prevTxnID)
 		}
 		codeChanges, err := tx.IndexRange(kv.CodeHistoryIdx, addr[:], int(afterGenesis), -1, order.Asc, 1)
 		if err != nil {
@@ -188,6 +184,9 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr common
 		defer codeChanges.Close()
 		if !codeChanges.HasNext() {
 			return nil, nil
+		}
+		if _, err := codeChanges.Next(); err != nil {
+			return nil, err
 		}
 		return nil, fmt.Errorf("binary search between %d-%d doesn't find anything", nextTxnID, prevTxnID)
 	}

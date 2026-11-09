@@ -106,6 +106,16 @@ func TestGetContractCreatorGenesisAlloc(t *testing.T) {
 	creator, err := api.GetContractCreator(m.Ctx, contract)
 	require.NoError(t, err)
 	require.Nil(t, creator)
+
+	t.Run("pruned history", func(t *testing.T) {
+		base := newBaseApiForTest(m)
+		base._pruneMode.Store(&prune.Mode{Initialised: true, History: prune.Distance(1), Blocks: prune.ArchiveMode.Blocks})
+		api := NewOtterscanAPI(base, m.DB, 25)
+
+		creator, err := api.GetContractCreator(m.Ctx, contract)
+		require.ErrorIs(t, err, state.ErrPruned)
+		require.Nil(t, creator)
+	})
 }
 
 // A recreated genesis contract is not reported as genesis. The right answer is the CREATE2 transaction, which is not found yet.
