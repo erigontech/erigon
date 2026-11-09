@@ -62,24 +62,14 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 			return
 		}
 
-		var envelope *cltypes.SignedExecutionPayloadEnvelope
-		if block.Version() >= clparams.GloasVersion {
-			envelope = envelopes[blockRoot]
-			if envelope != nil {
-				if err = network2.ValidateDownloadedGloasEnvelope(cfg.beaconCfg, block, envelope); err != nil {
-					return newHighestBlockProcessed, fmt.Errorf("%w: %w", network2.ErrUnattributableProcess, err)
-				}
-			}
-		}
 		collectExecution := shouldInsert && block.Version() >= clparams.BellatrixVersion && block.Version() < clparams.GloasVersion
 		previousWrite := cfg.pendingBlockWrite
 		if err = processBlock(ctx, cfg, block, false); err != nil {
 			if cfg.pendingBlockWrite != nil {
 				// Forward sync skips NewPayload, so a new pending write must retain its
 				// collector insertion. A failed retry must keep the earlier write unchanged.
-				if cfg.pendingBlockWrite != previousWrite {
-					cfg.pendingBlockWrite.collectExecution = collectExecution || (shouldInsert && envelope != nil)
-					cfg.pendingBlockWrite.envelope = envelope
+				if collectExecution && cfg.pendingBlockWrite != previousWrite {
+					cfg.pendingBlockWrite.collectExecution = true
 				}
 				return newHighestBlockProcessed, fmt.Errorf("%w: persist accepted block: %w", network2.ErrUnattributableProcess, err)
 			}
@@ -128,12 +118,6 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 			return
 		}
 
-		if env, ok := envelopes[blockRoot]; ok && block.Version() >= clparams.GloasVersion {
-			if err = processDownloadedGloasEnvelope(ctx, logger, cfg.forkChoice, cfg.blockCollector, block.Block, blockRoot, env, shouldInsert, shouldValidateForwardSyncPayload(cfg, shouldInsert), false); err != nil {
-				return newHighestBlockProcessed, fmt.Errorf("%w: %w", network2.ErrUnattributableProcess, err)
-			}
-		}
-
 		// Update the highest block processed if the current block's slot is higher
 		if newHighestBlockProcessed < block.Block.Slot {
 			newHighestBlockProcessed = block.Block.Slot
@@ -142,6 +126,11 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 		// [New in Gloas:EIP7732] GLOAS blocks carry no execution payload in the body;
 		// the payload is delivered separately via a SignedExecutionPayloadEnvelope.
 		if block.Version() >= clparams.GloasVersion {
+			if env, ok := envelopes[blockRoot]; ok {
+				if err = processDownloadedGloasEnvelope(ctx, logger, cfg.forkChoice, cfg.blockCollector, block.Block, blockRoot, env, shouldInsert, shouldValidateForwardSyncPayload(cfg, shouldInsert), false); err != nil {
+					return highestBlockProcessed, fmt.Errorf("%w: %w", network2.ErrUnattributableProcess, err)
+				}
+			}
 			// Dump state periodically for restart checkpoints.
 			if !hasSignedHeaderInDB && block.Block.Slot%(cfg.beaconCfg.SlotsPerEpoch*2) == 0 {
 				var st *state.CachingBeaconState

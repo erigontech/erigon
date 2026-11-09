@@ -103,7 +103,6 @@ type Cfg struct {
 
 type pendingBlockWrite struct {
 	block            *cltypes.SignedBeaconBlock
-	envelope         *cltypes.SignedExecutionPayloadEnvelope
 	collectExecution bool
 }
 
@@ -287,32 +286,15 @@ func retryPendingBlockWrite(ctx context.Context, cfg *Cfg) error {
 	block := pending.block
 	for {
 		err := persistAcceptedBlock(ctx, cfg, block)
-		if err == nil && pending.envelope != nil {
-			root := pending.envelope.Message.BeaconBlockRoot
-			if _, retained := cfg.forkChoice.GetBlock(root); !retained {
-				cfg.pendingBlockWrite = nil
-				return nil
-			}
-			if cfg.forkChoice.HasEnvelope(root) {
-				if accepted, readErr := cfg.forkChoice.ReadEnvelopeFromDisk(root); readErr == nil && accepted != nil {
-					pending.envelope = accepted
-				}
-			}
-			err = processDownloadedGloasEnvelope(ctx, log.Root(), cfg.forkChoice, cfg.blockCollector,
-				block.Block, root, pending.envelope,
-				pending.collectExecution, shouldValidateForwardSyncPayload(cfg, pending.collectExecution), false)
-		} else if err == nil && pending.collectExecution {
+		if err == nil && pending.collectExecution {
 			if err = cfg.blockCollector.AddBlock(block.Block); err != nil {
 				err = fmt.Errorf("failed to add block to collector: %w", err)
 			}
 		}
-		if err == nil || errors.Is(err, forkchoice.ErrInvalidExecutionPayloadEnvelope) {
+		if err == nil {
 			cfg.pendingBlockWrite = nil
 			if cfg.peerDas != nil {
 				cfg.peerDas.BackfillCustodyColumns(block.Block.Slot, block.Block.Slot)
-			}
-			if err != nil {
-				return fmt.Errorf("%w: %w", network2.ErrUnattributableProcess, err)
 			}
 			return nil
 		}
