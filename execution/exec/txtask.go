@@ -113,6 +113,9 @@ type TxResult struct {
 	Receipt *types.Receipt
 	Logs    []*types.Log
 
+	// RecipientHasCode is recorded for a rules.LaneEngine, see recipientHasCode.
+	RecipientHasCode bool
+
 	TraceFroms map[accounts.Address]struct{}
 	TraceTos   map[accounts.Address]struct{}
 
@@ -583,6 +586,12 @@ func (t *TxTask) Execute(evm *vm.EVM,
 		}
 
 		result.Coinbase = evm.Context.Coinbase
+
+		if isLaneEngine(engine) {
+			if result.RecipientHasCode, result.Err = recipientHasCode(t.Tx(), ibs); result.Err != nil {
+				break
+			}
+		}
 
 		// MA applytx
 		result.ExecutionResult, result.Err = func() (evmtypes.ExecutionResult, error) {

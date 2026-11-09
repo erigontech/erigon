@@ -99,6 +99,14 @@ type AuthorityBlocker interface {
 	BlocksAuthority(authority accounts.Address) bool
 }
 
+// LaneEngine is implemented by engines (Parlia) whose blocks reserve gas for a lane of
+// transactions. recipientHasCode[i] reports whether transaction i moved value to an account
+// that held code on the state the transaction started from. The executor calls VerifyLanes
+// with the post-execution checks of every fully executed block.
+type LaneEngine interface {
+	VerifyLanes(header *types.Header, txs types.Transactions, receipts types.Receipts, recipientHasCode []bool) error
+}
+
 // RewardKind - The kind of block reward.
 // Depending on the rules engine the allocated block reward might have
 // different semantics which could lead e.g. to different reward values.
