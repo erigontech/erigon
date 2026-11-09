@@ -396,7 +396,7 @@ func (cs *MultiClient) getBlockBodies66(ctx context.Context, inreq *sentryproto.
 	return nil
 }
 
-func (cs *MultiClient) getReceipts66(ctx context.Context, inreq *sentryproto.InboundMessage, sentryClient sentryproto.SentryClient) error {
+func (cs *MultiClient) getReceipts66(ctx context.Context, inreq *sentryproto.InboundMessage, sentryClient sentryproto.SentryClient, cacheOnly bool) error {
 	var query eth.GetReceiptsPacket66
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
 		return fmt.Errorf("decoding getReceipts66: %w, data: %x", err, inreq.Data)
@@ -405,10 +405,11 @@ func (cs *MultiClient) getReceipts66(ctx context.Context, inreq *sentryproto.Inb
 		id:         query.RequestId,
 		query:      query.GetReceiptsPacket,
 		ethVersion: direct.ETH68,
+		cacheOnly:  cacheOnly,
 	})
 }
 
-func (cs *MultiClient) getReceipts69(ctx context.Context, inreq *sentryproto.InboundMessage, sentryClient sentryproto.SentryClient) error {
+func (cs *MultiClient) getReceipts69(ctx context.Context, inreq *sentryproto.InboundMessage, sentryClient sentryproto.SentryClient, cacheOnly bool) error {
 	var query eth.GetReceiptsPacket66
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
 		return fmt.Errorf("decoding getReceipts69: %w, data: %x", err, inreq.Data)
@@ -417,10 +418,11 @@ func (cs *MultiClient) getReceipts69(ctx context.Context, inreq *sentryproto.Inb
 		id:         query.RequestId,
 		query:      query.GetReceiptsPacket,
 		ethVersion: direct.ETH69,
+		cacheOnly:  cacheOnly,
 	})
 }
 
-func (cs *MultiClient) getReceipts70(ctx context.Context, inreq *sentryproto.InboundMessage, sentryClient sentryproto.SentryClient) error {
+func (cs *MultiClient) getReceipts70(ctx context.Context, inreq *sentryproto.InboundMessage, sentryClient sentryproto.SentryClient, cacheOnly bool) error {
 	var query eth.GetReceiptsPacket70
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
 		return fmt.Errorf("decoding getReceipts70: %w, data: %x", err, inreq.Data)
@@ -430,6 +432,7 @@ func (cs *MultiClient) getReceipts70(ctx context.Context, inreq *sentryproto.Inb
 		query:                  query.GetReceiptsPacket,
 		ethVersion:             direct.ETH70,
 		firstBlockReceiptIndex: query.FirstBlockReceiptIndex,
+		cacheOnly:              cacheOnly,
 	})
 }
 
@@ -439,6 +442,7 @@ type requestParams struct {
 	query                  eth.GetReceiptsPacket
 	ethVersion             uint
 	firstBlockReceiptIndex uint64
+	cacheOnly              bool
 }
 
 // getReceiptsInner handles GetReceipts for all protocol versions.
@@ -466,6 +470,9 @@ func (cs *MultiClient) getReceiptsInner(ctx context.Context, peerId *typesproto.
 		lastBlockIncomplete = cached.LastBlockIncomplete
 	}
 	if needMore {
+		if p.cacheOnly {
+			return errReceiptCacheMiss
+		}
 		tx, err := cs.db.BeginTemporalRo(ctx)
 		if err != nil {
 			return err
@@ -555,13 +562,17 @@ func MakeInboundMessage() *sentryproto.InboundMessage {
 	return new(sentryproto.InboundMessage)
 }
 
-func (cs *MultiClient) HandleInboundMessage(ctx context.Context, message *sentryproto.InboundMessage, sentry sentryproto.SentryClient) (err error) {
+func (cs *MultiClient) HandleInboundMessage(ctx context.Context, message *sentryproto.InboundMessage, sentry sentryproto.SentryClient) error {
+	return cs.handleInboundMessage(ctx, message, sentry, false)
+}
+
+func (cs *MultiClient) handleInboundMessage(ctx context.Context, message *sentryproto.InboundMessage, sentry sentryproto.SentryClient, receiptCacheOnly bool) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("%+v, msgID=%s, trace: %s", rec, message.Id.String(), dbg.Stack())
 		}
 	}() // avoid crash because Erigon's core does many things
-	err = cs.handleInboundMessage(ctx, message, sentry)
+	err = cs.dispatchInboundMessage(ctx, message, sentry, receiptCacheOnly)
 
 	if (err != nil) && rlp.IsInvalidRLPError(err) {
 		cs.logger.Debug("Kick peer for invalid RLP", "err", err)
@@ -577,7 +588,7 @@ func (cs *MultiClient) HandleInboundMessage(ctx context.Context, message *sentry
 	return err
 }
 
-func (cs *MultiClient) handleInboundMessage(ctx context.Context, inreq *sentryproto.InboundMessage, sentry sentryproto.SentryClient) error {
+func (cs *MultiClient) dispatchInboundMessage(ctx context.Context, inreq *sentryproto.InboundMessage, sentry sentryproto.SentryClient, receiptCacheOnly bool) error {
 	switch inreq.Id {
 	case sentryproto.MessageId_NEW_BLOCK_HASHES_66,
 		sentryproto.MessageId_BLOCK_HEADERS_66,
@@ -592,11 +603,11 @@ func (cs *MultiClient) handleInboundMessage(ctx context.Context, inreq *sentrypr
 	case sentryproto.MessageId_RECEIPTS_66:
 		return cs.receipts66(ctx, inreq, sentry)
 	case sentryproto.MessageId_GET_RECEIPTS_66:
-		return cs.getReceipts66(ctx, inreq, sentry)
+		return cs.getReceipts66(ctx, inreq, sentry, receiptCacheOnly)
 	case sentryproto.MessageId_GET_RECEIPTS_69:
-		return cs.getReceipts69(ctx, inreq, sentry)
+		return cs.getReceipts69(ctx, inreq, sentry, receiptCacheOnly)
 	case sentryproto.MessageId_GET_RECEIPTS_70:
-		return cs.getReceipts70(ctx, inreq, sentry)
+		return cs.getReceipts70(ctx, inreq, sentry, receiptCacheOnly)
 	case sentryproto.MessageId_RECEIPTS_70:
 		return cs.receipts66(ctx, inreq, sentry) // client-side receipt handling is a no-op
 	case sentryproto.MessageId_GET_BLOCK_ACCESS_LISTS_71:

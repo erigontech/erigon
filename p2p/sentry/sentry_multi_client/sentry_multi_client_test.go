@@ -104,7 +104,7 @@ func TestMultiClient_GetReceipts69(t *testing.T) {
 			Lo: &proto_types.H256{},
 		},
 	}
-	err = cs.getReceipts69(ctx, inreq, mockSentry)
+	err = cs.getReceipts69(ctx, inreq, mockSentry, false)
 	if err != nil {
 		t.Fatalf("getReceipts69 failed: %v", err)
 	}
