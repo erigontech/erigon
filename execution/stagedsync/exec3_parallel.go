@@ -3254,7 +3254,11 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 	tx := task.index
 	if be.publishTasks.checkComplete(tx) {
-		pe.logger.Debug("[parallel] dropped a result for a published tx", "block", be.blockNum, "tx", res.Version().TxIndex, "incarnation", res.Version().Incarnation)
+		if res.Err != nil {
+			pe.logger.Warn("[parallel] dropped a failed result for a published tx", "block", be.blockNum, "tx", res.Version().TxIndex, "incarnation", res.Version().Incarnation, "err", res.Err)
+		} else {
+			pe.logger.Debug("[parallel] dropped a result for a published tx", "block", be.blockNum, "tx", res.Version().TxIndex, "incarnation", res.Version().Incarnation)
+		}
 		return nil, nil
 	}
 	be.results[tx] = &execResult{TxResult: res}
