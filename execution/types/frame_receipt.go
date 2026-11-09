@@ -18,7 +18,6 @@ package types
 
 import (
 	"encoding/json"
-	"slices"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -41,10 +40,16 @@ func (r *Receipt) deriveFrameFields() {
 	for _, frame := range r.FrameReceipts {
 		numLogs += len(frame.Logs)
 	}
-	r.Logs = slices.Grow(Logs(nil), numLogs)
+	r.Logs = nil
+	if numLogs > 0 {
+		r.Logs = make(Logs, numLogs)
+		off := 0
+		for _, frame := range r.FrameReceipts {
+			off += copy(r.Logs[off:], frame.Logs)
+		}
+	}
 	r.Status = ReceiptStatusSuccessful
 	for _, frame := range r.FrameReceipts {
-		r.Logs = append(r.Logs, frame.Logs...)
 		if frame.Status != ReceiptStatusSuccessful {
 			r.Status = ReceiptStatusFailed
 		}

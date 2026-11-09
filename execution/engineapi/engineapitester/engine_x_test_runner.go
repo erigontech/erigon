@@ -146,10 +146,12 @@ func (extr *EngineXTestRunner) Close() error {
 	for _, perAlloc := range extr.testers {
 		numEntries += len(perAlloc)
 	}
-	entries := make([]testerEntry, 0, numEntries)
+	entries := make([]testerEntry, numEntries)
+	i := 0
 	for _, perAlloc := range extr.testers {
-		for i := range perAlloc {
-			entries = append(entries, perAlloc[i])
+		for k := range perAlloc {
+			entries[i] = perAlloc[k]
+			i++
 		}
 	}
 	extr.testers = nil
