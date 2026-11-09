@@ -376,13 +376,6 @@ func (m *memoryMutationCursor) Last() ([]byte, []byte, error) {
 	m.currentDbEntry = cursorEntry{dbKey, dbValue}
 	m.currentMemEntry = cursorEntry{memKey, memValue}
 
-	// Basic checks
-	if dbKey != nil && m.isEntryDeleted(dbKey, dbValue) {
-		m.currentDbEntry = cursorEntry{}
-		m.isPrevFromDb = false
-		return memKey, memValue, nil
-	}
-
 	if dbValue == nil {
 		m.isPrevFromDb = false
 		return memKey, memValue, nil
