@@ -70,11 +70,13 @@ func NewDispatcher(
 
 // Dispatch sends all pending notifications. The tx parameter is the data source
 // for headers and forkchoice markers — it can be the SD's blockOverlay
-// (MemoryMutation) for pre-commit dispatch, or a committed DB tx.
+// (MemoryMutation) for pre-commit dispatch, or a committed DB tx. The state getter
+// must include all account writes at the announced head, including uncommitted ones.
 //
 // Parameters:
 //   - ctx: context for cancellation
 //   - tx: data source (overlay or committed tx)
+//   - state: final state at the announced head
 //   - stateVersion: durable version represented by the accumulated state changes
 //   - accumulator: state change accumulator (may be nil)
 //   - recentReceipts: receipt/log cache (may be nil)
@@ -84,6 +86,7 @@ func NewDispatcher(
 func (d *Dispatcher) Dispatch(
 	ctx context.Context,
 	tx kv.Tx,
+	state kv.TemporalGetter,
 	stateVersion uint64,
 	accumulator *notifications.Accumulator,
 	recentReceipts *notifications.RecentReceipts,
@@ -155,6 +158,9 @@ func (d *Dispatcher) Dispatch(
 
 		finalizedBlock := common.Deref(rawdb.ReadHeaderNumber(tx, rawdb.ReadForkchoiceFinalized(tx)))
 
+		if err := accumulator.RefreshAccounts(state); err != nil {
+			return err
+		}
 		accumulator.SendAndReset(ctx, d.stateChangeConsumer, pendingBaseFee.Uint64(), pendingBlobFee, currentHeader.GasLimit, finalizedBlock)
 	}
 	return nil

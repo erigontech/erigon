@@ -52,7 +52,7 @@ import (
 // an implementation defined in another package (e.g. execmodule.Dispatcher)
 // without creating a circular import.
 type NotificationSender interface {
-	Dispatch(ctx context.Context, tx kv.Tx, stateVersion uint64, accumulator *shards.Accumulator, recentReceipts *shards.RecentReceipts, finishProgressBefore, finishProgressAfter uint64, prevUnwindPoint *uint64) error
+	Dispatch(ctx context.Context, tx kv.Tx, state kv.TemporalGetter, stateVersion uint64, accumulator *shards.Accumulator, recentReceipts *shards.RecentReceipts, finishProgressBefore, finishProgressAfter uint64, prevUnwindPoint *uint64) error
 }
 
 type FrozenBlocksReader interface {
@@ -131,14 +131,13 @@ func (h *Hook) BeforeRun(tx kv.Tx, inSync bool) error {
 }
 
 // SendNotifications dispatches all pending notifications (state changes,
-// headers, logs, receipts) via the Dispatcher. The tx is the data source —
-// either the SD's blockOverlay (pre-commit) or a committed DB tx.
+// headers, logs, receipts) via the Dispatcher using committed state.
 //
 // All call sites follow the same pattern:
 //
 //	hook.SendNotifications(tx, finishProgressBefore)
 //	hook.UpdateHead(tx, finishProgressBefore, isSynced)
-func (h *Hook) SendNotifications(tx kv.Tx, finishProgressBefore uint64) error {
+func (h *Hook) SendNotifications(tx kv.TemporalTx, finishProgressBefore uint64) error {
 	if h == nil {
 		return nil
 	}
@@ -157,7 +156,7 @@ func (h *Hook) SendNotifications(tx kv.Tx, finishProgressBefore uint64) error {
 		}
 	}
 	return h.dispatcher.Dispatch(
-		h.ctx, tx, stateVersion,
+		h.ctx, tx, tx, stateVersion,
 		h.notifications.Accumulator,
 		h.notifications.RecentReceipts,
 		finishProgressBefore,
