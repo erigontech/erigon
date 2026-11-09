@@ -369,3 +369,25 @@ func BenchmarkTraceTxAccountReads(b *testing.B) {
 		})
 	}
 }
+
+func TestTraceTimeoutCannotExceedTheServerTimeout(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		client string
+		want   time.Duration
+	}{
+		{"1h", 5 * time.Second},
+		{"1s", time.Second},
+		{"5s", 5 * time.Second},
+	} {
+		got, err := traceTimeout(5*time.Second, &tc.client)
+		require.NoError(t, err)
+		require.Equal(t, tc.want, got, tc.client)
+	}
+	got, err := traceTimeout(5*time.Second, nil)
+	require.NoError(t, err)
+	require.Equal(t, 5*time.Second, got)
+	bad := "soon"
+	_, err = traceTimeout(5*time.Second, &bad)
+	require.Error(t, err)
+}
