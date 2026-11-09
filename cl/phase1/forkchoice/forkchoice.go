@@ -1399,7 +1399,7 @@ func (f *ForkChoiceStore) reachableFromSelectedHead(root, child common.Hash) boo
 }
 
 // cutOffByInvalidation reports whether root has no surviving fork-choice variant.
-// Rejecting a Gloas payload cuts off its FULL children while preserving its EMPTY branch.
+// A rejected Gloas payload excludes children that build on it; children that skip it can remain viable.
 func (f *ForkChoiceStore) cutOffByInvalidation(root common.Hash) bool {
 	block, ok := f.forkGraph.GetBlock(root)
 	if !ok || block == nil || block.Block == nil {

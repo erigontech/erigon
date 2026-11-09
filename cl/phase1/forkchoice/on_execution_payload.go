@@ -637,11 +637,13 @@ func (f *ForkChoiceStore) NewPayloadWithAdmission(
 	})
 }
 
-// A mismatch is terminal only after the payload's block hash has been authenticated.
+// ValidatePayloadBlobHashes compares the transaction blob hashes with versionedHashes in order.
+// It returns misc.ErrMismatchBlobHashes for a mismatch, or a transaction decoding error.
+// Callers must authenticate the payload's block hash before recording either error as a terminal failure.
 func ValidatePayloadBlobHashes(payload *cltypes.Eth1Block, versionedHashes []common.Hash) error {
 	actualHashes := make([]common.Hash, 0, len(versionedHashes))
 	for _, raw := range payload.Transactions.UnderlyngReference() {
-		// The EL validates non-blob transactions; only their type matters here.
+		// Skip decoding transaction types that cannot contain blob hashes; the EL validates them.
 		if len(raw) > 0 {
 			if raw[0] >= rlp.EmptyListCode {
 				continue
@@ -1201,10 +1203,9 @@ func (f *ForkChoiceStore) validatePendingEnvelopeCommitments(signedEnvelope *clt
 	return true, nil
 }
 
-// applyEnvelopeCoordinated temporarily yields the caller-held fork-choice lock during EL validation.
-// Returns (true, nil) if the envelope was applied,
-// (false, nil) if it was skipped (already processed or block not yet known),
-// or (false, err) on failure.
+// applyEnvelopeCoordinated temporarily yields the caller-held fork-choice lock during validation.
+// It returns true only when this call persists the envelope. An already stored envelope returns
+// (false, nil); missing blocks or states return errors.
 func (f *ForkChoiceStore) applyEnvelopeCoordinated(
 	ctx context.Context,
 	signedEnvelope *cltypes.SignedExecutionPayloadEnvelope,
@@ -1223,7 +1224,6 @@ func (f *ForkChoiceStore) applyEnvelopeCoordinated(
 	envelope := signedEnvelope.Message
 	beaconBlockRoot := envelope.BeaconBlockRoot
 
-	// Skip if envelope already processed and persisted
 	if f.IsEnvelopeRejected(beaconBlockRoot) {
 		return false, fmt.Errorf("%w: envelope previously rejected for root %x", ErrInvalidExecutionPayloadEnvelope, beaconBlockRoot)
 	}
@@ -1602,14 +1602,9 @@ func (f *ForkChoiceStore) StoreAnchorEnvelope(blockRoot common.Hash, signedEnvel
 	return nil
 }
 
-// OnExecutionPayload processes an incoming execution payload envelope.
-// Run upon receiving a new execution payload from the builder.
-// If the corresponding block hasn't arrived yet, the envelope is queued and processed
-// when the block is received via OnBlock.
-//
-// Parameters:
-//   - checkBlobData: if true, verify blob data availability via PeerDAS before processing
-//   - validatePayload: if true, call engine.NewPayload() to validate with EL before state transition
+// OnExecutionPayload processes an incoming envelope, queuing it if its beacon block is missing.
+// checkBlobData enables PeerDAS availability checks. validatePayload enables immediate EL
+// validation after consensus envelope verification, when an execution client is configured.
 func (f *ForkChoiceStore) OnExecutionPayload(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, checkBlobData, validatePayload bool) error {
 	return f.OnExecutionPayloadAt(ctx, signedEnvelope, checkBlobData, validatePayload, time.Now())
 }

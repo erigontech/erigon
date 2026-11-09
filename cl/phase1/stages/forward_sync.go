@@ -436,10 +436,9 @@ func anchorEnvelopeMatches(env *cltypes.SignedExecutionPayloadEnvelope, anchorRo
 	return env != nil && env.Message != nil && env.Message.BeaconBlockRoot == anchorRoot
 }
 
-// ensureAnchorEnvelopeOnce proactively fetches the anchor block's execution payload
-// envelope from P2P if it is not already on disk. Called once at the start of
-// forwardSync, before any blocks are processed.
-// [New in Gloas:EIP7732]
+// ensureAnchorEnvelopeOnce recovers and validates the checkpoint anchor's envelope.
+// It reuses a stored envelope or fetches one through HTTP with P2P fallback.
+// Calls may be repeated; verified, rejected, or invalidated payloads return early.
 func ensureAnchorEnvelopeOnce(ctx context.Context, cfg *Cfg) error {
 	anchorSlot := cfg.forkChoice.AnchorSlot()
 	epoch := anchorSlot / cfg.beaconCfg.SlotsPerEpoch
@@ -454,16 +453,13 @@ func ensureAnchorEnvelopeOnce(ctx context.Context, cfg *Cfg) error {
 	if cfg.forkChoice.IsBlockInvalid(anchorRoot) {
 		return fmt.Errorf("%w: anchor execution payload previously invalidated", forkchoice.ErrInvalidExecutionPayloadEnvelope)
 	}
-	// Find the anchor block root via the header stored in the fork graph
 	anchorHeader, ok := cfg.forkChoice.GetHeader(anchorRoot)
 	if !ok {
-		// Try to find by iterating — the anchor root should be the finalized root
 		log.Debug("[ensureAnchorEnvelopeOnce] anchor header not found, skipping")
 		return nil
 	}
 	_ = anchorHeader
 
-	// Get anchor block root from state
 	if cfg.forkChoice.IsPayloadVerified(anchorRoot) {
 		return nil
 	}
