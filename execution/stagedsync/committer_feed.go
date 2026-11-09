@@ -30,7 +30,6 @@ func (cc *commitmentCalculator) emit(view *state.VersionMapView, updates *commit
 	if cc.branchPrefetch != nil {
 		return cc.emitTouchedFeed(view)
 	}
-	cc.parentReads = false
 	return cc.emitTouched(view, updates)
 }
 
