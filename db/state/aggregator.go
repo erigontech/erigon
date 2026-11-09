@@ -1581,9 +1581,11 @@ func (as *AggregatorPruneStat) String() string {
 			sb.WriteString(fmt.Sprintf("%s| %s %s; ", d, v.String(), v.Progress.String()))
 		}
 	}
-	names = names[:0]
+	names = make([]string, len(as.Indices))
+	i = 0
 	for k := range as.Indices {
-		names = append(names, k)
+		names[i] = k
+		i++
 	}
 	slices.Sort(names)
 
