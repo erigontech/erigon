@@ -6282,7 +6282,7 @@ curl -s --data '{"jsonrpc":"2.0","method":"debug_getModifiedAccountsByNumber","p
 
 | Type | Description |
 | --- | --- |
-| Array of DATA, 20 Bytes | Array of modified account addresses |
+| Array of DATA, 20 Bytes | Array of modified account addresses, or `null` if no account changed in the range (same as Geth) |
 
 ### debug_getModifiedAccountsByHash
 
@@ -6305,7 +6305,7 @@ curl -s --data '{"jsonrpc":"2.0","method":"debug_getModifiedAccountsByHash","par
 
 | Type | Description |
 | --- | --- |
-| Array of DATA, 20 Bytes | Array of modified account addresses |
+| Array of DATA, 20 Bytes | Array of modified account addresses, or `null` if no account changed in the range (same as Geth) |
 
 ### debug_storageRangeAt
 
