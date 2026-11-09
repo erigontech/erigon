@@ -876,6 +876,70 @@ func TestFramePoolSenderPolicyRejectionCache(t *testing.T) {
 	}
 }
 
+func TestFramePoolSenderConflictClearedDuringAdmission(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		key         uint64
+		senderNonce uint64
+		cached      bool
+		expired     bool
+		want        txpoolcfg.DiscardReason
+	}{
+		{name: "fresh conflict", key: 2, want: txpoolcfg.Success},
+		{name: "cached conflict", key: 2, cached: true, want: txpoolcfg.Success},
+		{name: "expired deadline", key: 2, expired: true, want: txpoolcfg.FrameValidationUnavailable},
+		{name: "consumed legacy nonce", senderNonce: 1, expired: true, want: txpoolcfg.NonceTooLow},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, pool, sender := keyedFramePoolEnv(t)
+			backend := pool.ethBackend.(*frameValidationBackend)
+			require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{1}, tc.senderNonce, sender), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+			blocker := framePoolSlot(t, sender, 1, 2, uint256.Int{1})
+			var txns TxnSlots
+			txns.Append(blocker, sender[:], true)
+			reasons, err := pool.AddLocalTxns(ctx, txns)
+			require.NoError(t, err)
+			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+
+			candidate := framePoolSlot(t, sender, 1, 2, uint256.Int{tc.key})
+			txns.Txns[0] = candidate
+			if tc.cached {
+				reasons, err = pool.AddLocalTxns(ctx, txns)
+				require.NoError(t, err)
+				require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.InvalidFrame}, reasons)
+			}
+			otherSender := common.Address{2}
+			txns.Append(framePoolSlot(t, otherSender, 1, 2, uint256.Int{1}), otherSender[:], true)
+			generation := pool.stateGeneration
+			synctest.Test(t, func(t *testing.T) {
+				backend.onValidate = func() {
+					backend.onValidate = nil
+					pool.lock.Lock()
+					mt := pool.byHash[string(blocker.IDHash[:])]
+					pool.removeFromSubPool(mt, "test")
+					pool.discardLocked(mt, txpoolcfg.PendingPoolOverflow)
+					pool.lock.Unlock()
+					if tc.expired {
+						time.Sleep(frameValidationTimeout)
+						synctest.Wait()
+					}
+				}
+				reasons, err = pool.AddLocalTxns(t.Context(), txns)
+				require.NoError(t, err)
+				require.Equal(t, generation, pool.stateGeneration)
+				require.Equal(t, []txpoolcfg.DiscardReason{tc.want, txpoolcfg.Success}, reasons)
+				if tc.want == txpoolcfg.Success {
+					require.Contains(t, backend.calls, common.Hash(candidate.IDHash), "a cleared conflict must retry simulation before admission")
+					require.Contains(t, pool.byHash, string(candidate.IDHash[:]))
+				} else {
+					require.NotContains(t, backend.calls, common.Hash(candidate.IDHash))
+					require.NotContains(t, pool.byHash, string(candidate.IDHash[:]))
+				}
+			})
+		})
+	}
+}
+
 func TestFramePoolConsumedNonceBeforeSenderConflict(t *testing.T) {
 	for _, cached := range []bool{false, true} {
 		t.Run(fmt.Sprintf("cached=%t", cached), func(t *testing.T) {

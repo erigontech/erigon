@@ -253,10 +253,10 @@ func (p *TxPool) waitForFrameStateChange(ctx context.Context, generation uint64)
 	return generation != p.stateGeneration
 }
 
-// applyFrameValidation requires the pool lock. Stale batches are retried while time
-// remains. After the deadline, transaction checks and current sender policy are
-// rerun to preserve specific rejections. Frames needing simulation receive a retryable
-// rejection. Results for the current state generation remain usable after the deadline.
+// applyFrameValidation requires the pool lock. Stale batches and cleared sender
+// conflicts are retried while time remains. After the deadline, current prechecks
+// preserve specific rejections; frames needing simulation receive a retryable rejection.
+// Simulation results for the current state generation remain usable after the deadline.
 func (p *TxPool) applyFrameValidation(ctx context.Context, txns TxnSlots, batch frameValidationBatch, precheckReasons []txpoolcfg.DiscardReason, stateCache kvcache.CacheView) ([]txpoolcfg.DiscardReason, error) {
 	if len(batch.results) == 0 {
 		return precheckReasons, nil
@@ -291,6 +291,13 @@ func (p *TxPool) applyFrameValidation(ctx context.Context, txns TxnSlots, batch 
 				result.reason = txpoolcfg.NonceTooLow
 				p.frameRejections.Add(string(txn.IDHash[:]), frameRejection{generation: p.stateGeneration, reason: result.reason})
 			}
+		}
+		// Pool membership can change without advancing the state generation.
+		if result.senderConflict && result.reason == txpoolcfg.InvalidFrame && p.checkFrameSender(txn, txn.SenderID) == txpoolcfg.Success {
+			if ctx.Err() == nil {
+				return nil, errFrameStateChanged
+			}
+			result.reason = txpoolcfg.FrameValidationUnavailable
 		}
 		if result.reason == txpoolcfg.Success {
 			// A pooled slot's validation must match its active reservation.
