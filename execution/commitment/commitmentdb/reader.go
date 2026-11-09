@@ -110,33 +110,19 @@ func (r *LatestStateReader) BindsWorkerTx() bool { return false }
 // bytes it hands back alias a buffer its next read reuses, so the copy is made
 // under the same lock.
 type syncStateReader struct {
-	mu  *sync.Mutex
-	src StateReader
-	buf []byte
+	mu    *sync.Mutex
+	src   StateReader
+	buf   []byte
+	owned bool
 }
 
 var _ StateReader = (*syncStateReader)(nil)
 
 func newSyncStateReader(mu *sync.Mutex, src StateReader) StateReader {
-	r := &syncStateReader{mu: mu, src: src}
-	if _, ok := src.(ownedBranchReader); ok {
-		return ownedSyncStateReader{r}
-	}
-	return r
+	return &syncStateReader{mu: mu, src: src, owned: ownsBranches(src)}
 }
 
-type ownedSyncStateReader struct{ *syncStateReader }
-
-func (ownedSyncStateReader) ReadsOwnedBranches() {}
-
-func (r ownedSyncStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) ([]byte, kv.Step, error) {
-	if d != kv.CommitmentDomain {
-		return r.syncStateReader.Read(d, plainKey, stepSize)
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.src.Read(d, plainKey, stepSize)
-}
+func (r *syncStateReader) OwnsBranches() bool { return r.owned }
 
 func (r *syncStateReader) WithHistory() bool { return r.src.WithHistory() }
 
@@ -150,8 +136,8 @@ func (r *syncStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) ([
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	enc, step, err := r.src.Read(d, plainKey, stepSize)
-	if err != nil || enc == nil {
-		return nil, step, err
+	if err != nil || enc == nil || (r.owned && d == kv.CommitmentDomain) {
+		return enc, step, err
 	}
 	r.buf = append(r.buf[:0], enc...)
 	return r.buf, step, nil

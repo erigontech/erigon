@@ -344,7 +344,7 @@ func TestComputeCommitmentReportsItsDuration(t *testing.T) {
 
 type ownedTestStateReader struct{ *testStateReader }
 
-func (ownedTestStateReader) ReadsOwnedBranches() {}
+func (ownedTestStateReader) OwnsBranches() bool { return true }
 
 func TestTrieContextBranchOwnedCopiesOnlyBorrowedBytes(t *testing.T) {
 	t.Parallel()

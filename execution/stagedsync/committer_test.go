@@ -111,9 +111,7 @@ func TestShouldComputeOnRequest_BlockZeroAfterAdvance(t *testing.T) {
 }
 
 func TestAsOfStateReaderDoesNotOwnBranchesByDefault(t *testing.T) {
-	reader := &asOfStateReader{}
-	_, ownsBranches := any(reader).(interface{ ReadsOwnedBranches() })
-	require.False(t, ownsBranches)
+	require.False(t, (&asOfStateReader{}).OwnsBranches())
 }
 
 // TestHandleBlockRequest_EmptyBALFallsToIncremental pins the empty-BAL gate.

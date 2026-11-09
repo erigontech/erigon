@@ -1244,8 +1244,13 @@ func (sdc *TrieContext) Branch(pref []byte) ([]byte, kv.Step, error) {
 	return sdc.branchBuf, step, nil
 }
 
-type ownedBranchReader interface {
-	ReadsOwnedBranches()
+type branchOwner interface {
+	OwnsBranches() bool
+}
+
+func ownsBranches(r StateReader) bool {
+	o, ok := r.(branchOwner)
+	return ok && o.OwnsBranches()
 }
 
 type leafRefReader interface {
@@ -1270,7 +1275,7 @@ func (sdc *TrieContext) BranchOwned(pref []byte) ([]byte, kv.Step, error) {
 	if enc == nil {
 		return nil, step, nil
 	}
-	if _, ok := sdc.stateReader.(ownedBranchReader); !ok {
+	if !ownsBranches(sdc.stateReader) {
 		enc = bytes.Clone(enc)
 	}
 	return enc, step, nil

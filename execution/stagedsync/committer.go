@@ -1069,15 +1069,14 @@ type asOfStateReader struct {
 	prefetched *branchPrefetcher
 	// cur layers the folding block's own writes up to curTxNum (accounts, storage and code): the trie
 	// also reads untouched siblings, and dr sees them only after the apply loop lands them in sd.mem.
-	cur      *state.VersionMap
-	curTxNum uint64
+	cur          *state.VersionMap
+	curTxNum     uint64
+	ownsBranches bool
 }
 
 func (r *asOfStateReader) WithHistory() bool { return false }
 
-type ownedAsOfStateReader struct{ *asOfStateReader }
-
-func (ownedAsOfStateReader) ReadsOwnedBranches() {}
+func (r *asOfStateReader) OwnsBranches() bool { return r.ownsBranches }
 
 func (r *asOfStateReader) CheckDataAvailable(d kv.Domain, step kv.Step) error {
 	return nil
@@ -1168,11 +1167,8 @@ func (r *asOfStateReader) CloneForWorker(workerCtx context.Context, tx kv.Tempor
 }
 
 func (r *asOfStateReader) clone(tx kv.TemporalTx, workerCtx context.Context) commitmentdb.StateReader {
-	reader := &asOfStateReader{sd: r.sd, roTx: tx, txNum: r.txNum, workerCtx: workerCtx, dr: r.dr.CloneWithTx(tx), prefetched: r.prefetched, cur: r.cur, curTxNum: r.curTxNum}
-	if r.sd != nil && r.sd.GetCommitmentContext() != nil && r.sd.GetCommitmentContext().Trie().Variant() == commitment.VariantCommitmentV3 {
-		return ownedAsOfStateReader{reader}
-	}
-	return reader
+	ownsBranches := r.sd != nil && r.sd.GetCommitmentContext() != nil && r.sd.GetCommitmentContext().Trie().Variant() == commitment.VariantCommitmentV3
+	return &asOfStateReader{sd: r.sd, roTx: tx, txNum: r.txNum, workerCtx: workerCtx, dr: r.dr.CloneWithTx(tx), prefetched: r.prefetched, cur: r.cur, curTxNum: r.curTxNum, ownsBranches: ownsBranches}
 }
 
 // BindsWorkerTx: CloneForWorker rebinds roTx and the domain reader to the handed
