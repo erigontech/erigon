@@ -187,7 +187,7 @@ func Validate(data []byte, depth int) error {
 		return ErrRecordTruncated
 	}
 	child, leaf, ext := l.child, l.leaf, l.ext
-	if leaf&^child != 0 || ext&leaf != 0 || ext&^child != 0 {
+	if child == 0 || leaf&^child != 0 || ext&leaf != 0 || ext&^child != 0 {
 		return ErrRecordMasks
 	}
 	if data[0]&hdrHasSelfExt != 0 && (depth != 0 || bits.OnesCount16(child) != 1) {

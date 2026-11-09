@@ -305,6 +305,20 @@ func TestRecordGraph(t *testing.T) {
 		_, err := g.unfoldChild(ctx, parent.childPath(4, nil))
 		require.ErrorIs(t, err, errNodeRecord)
 	})
+	t.Run("E66/ZeroMaskChildRecordIsInvalid", func(t *testing.T) {
+		var addrHash [32]byte
+		parent := newNode(planeStorage)
+		parent.setStoredChild(4, bytes.Repeat([]byte{0x44}, 32), nil)
+		ctx := newMockContext()
+		ctx.branches[string(StorageNodeKey(addrHash, []byte{4}, nil))] = make([]byte, 5)
+
+		g := graph{plane: planeStorage, addrHash: addrHash[:]}
+		_, err := g.unfoldChild(ctx, parent.childPath(4, nil))
+		require.ErrorIs(t, err, ErrRecordMasks)
+		for _, depth := range []int{0, 1, 63} {
+			require.ErrorIs(t, Validate(make([]byte, 5), depth), ErrRecordMasks)
+		}
+	})
 }
 
 type legacyWorld struct {
