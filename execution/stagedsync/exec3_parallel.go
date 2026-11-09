@@ -3389,14 +3389,14 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			finalIndex := be.tasks[len(be.tasks)-1].Task.Version().TxIndex
 			buildsBAL := task.Rules().IsAmsterdam || pe.cfg.experimentalBAL
 			if buildsBAL && be.balTxs == nil {
-				be.balTxs = make([]balTx, 0, len(be.tasks))
+				be.balTxs = make([]balTx, finalIndex+1)
 			}
-			start := len(be.balTxs)
+			start := be.balAttached
 			for i := be.balAttached - 1; buildsBAL && i <= task.Version().TxIndex && i < finalIndex; i = be.balAttached - 1 {
-				be.balTxs = append(be.balTxs, balTx{i, be.blockIO.ReadSet(i), be.blockIO.WriteSet(i)})
+				be.balTxs[i+1] = balTx{i, be.blockIO.ReadSet(i), be.blockIO.WriteSet(i)}
 				be.balAttached++
 			}
-			applyResult.balTxs = be.balTxs[start:len(be.balTxs):len(be.balTxs)]
+			applyResult.balTxs = be.balTxs[start:be.balAttached:be.balAttached]
 
 			pe.lastExecutedTxNum.Store(int64(applyResult.txNum))
 			applyResult.versionMap = be.versionMap
