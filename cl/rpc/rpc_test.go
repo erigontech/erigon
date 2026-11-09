@@ -478,7 +478,8 @@ func (s *blockResponseSentinel) BanPeerForInvalidData(_ context.Context, peer *s
 	return &sentinelproto.EmptyMessage{}, nil
 }
 
-func TestBlocksByRangeRejectsMoreChunksThanRequested(t *testing.T) {
+func excessChunksClient(t *testing.T) (*BeaconRpcP2P, *blockResponseSentinel) {
+	t.Helper()
 	cfg := clparams.MainnetBeaconConfig
 	cfg.InitializeForkSchedule()
 	clock := eth_clock.NewEthereumClock(0, common.Hash{}, &cfg)
@@ -490,11 +491,23 @@ func TestBlocksByRangeRejectsMoreChunksThanRequested(t *testing.T) {
 	require.NoError(t, response.WriteByte(0))
 	require.NoError(t, ssz_snappy.EncodeAndWrite(&response, envelope, digest[:]...))
 	sentinel := &blockResponseSentinel{response: response.Bytes()}
-	client := &BeaconRpcP2P{ctx: t.Context(), sentinel: sentinel, beaconConfig: &cfg, ethClock: clock}
+	return &BeaconRpcP2P{ctx: t.Context(), sentinel: sentinel, beaconConfig: &cfg, ethClock: clock}, sentinel
+}
+
+func TestBlocksByRangeRejectsMoreChunksThanRequested(t *testing.T) {
+	client, sentinel := excessChunksClient(t)
 
 	_, pid, err := client.SendBeaconBlocksByRangeReq(t.Context(), 1, 1)
 	require.ErrorContains(t, err, "more chunks than requested")
 	require.Equal(t, pid, sentinel.bannedPeer, "block callers do not ban, so the request must")
+}
+
+func TestBlobsRejectMoreChunksThanRequested(t *testing.T) {
+	client, sentinel := excessChunksClient(t)
+
+	_, pid, err := client.sendBlobsSidecar(t.Context(), "topic", nil, 0, 1)
+	require.ErrorContains(t, err, "more chunks than requested")
+	require.Equal(t, pid, sentinel.bannedPeer, "blob callers do not ban, so the request must")
 }
 
 func TestExecutionPayloadEnvelopesByRootRejectsOverLimit(t *testing.T) {
@@ -1125,6 +1138,7 @@ func TestSendBeaconBlocksByRangeReqToPeerUsesThatPeer(t *testing.T) {
 		require.ErrorContains(t, err, "more chunks than requested")
 		require.Nil(t, blocks)
 		require.Equal(t, "directed-peer", sentinel.softBannedPeer)
+		require.Equal(t, "directed-peer", sentinel.bannedPeer)
 	})
 }
 
