@@ -55,7 +55,7 @@ var (
 	mxAntiquaryPruneBatchSeconds = metrics.GetOrCreateSummary(`caplin_antiquary_batch_seconds{phase="prune"}`)
 	mxAntiquaryIndexBatchSlots   = metrics.GetOrCreateGauge(`caplin_antiquary_batch_items{phase="index"}`)
 	mxAntiquaryPruneBatchBlocks  = metrics.GetOrCreateGauge(`caplin_antiquary_batch_items{phase="prune"}`)
-	mxBlobRetirementGapSlot      = metrics.GetOrCreateGauge(`caplin_antiquary_blob_retirement_gap_slot`) // 0 while blob retirement is not blocked
+	mxBlobRetirementGapSlot      = metrics.GetOrCreateGauge(`caplin_antiquary_blob_retirement_gap_slot`) // gap slot the last completeness check found; 0 once a check passes
 	mxAntiquaryPrunedBlocks      = metrics.GetOrCreateCounter("caplin_antiquary_pruned_blocks_total")
 )
 
@@ -583,10 +583,10 @@ const blobRetirementGapLogInterval = 10 * time.Minute
 func firstMissingBlobSlot(from, to uint64, blobCount freezeblocks.BlobCountBySlotFn, stored func(slot, want uint64) (bool, error)) (uint64, bool, error) {
 	for slot := from; slot < to; slot++ {
 		want, err := blobCount(slot)
-		if err != nil || want == 0 {
-			if err != nil {
-				return 0, false, err
-			}
+		if err != nil {
+			return 0, false, err
+		}
+		if want == 0 {
 			continue
 		}
 		ok, err := stored(slot, want)
@@ -607,7 +607,7 @@ func (s *Antiquary) blobSidecarsStored(tx kv.Tx, slot, want uint64) (bool, error
 		return false, err
 	}
 	count, err := s.blobStorage.KzgCommitmentsCount(s.ctx, blockRoot)
-	if err != nil || uint64(count) < want {
+	if err != nil || uint64(count) != want {
 		return false, err
 	}
 	for idx := range want {

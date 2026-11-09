@@ -949,6 +949,22 @@ func TestFirstMissingBlobSlot(t *testing.T) {
 }
 
 // A count row stays after its sidecar file is lost, so the scan must check the files. It rescans from the gap.
+func TestBlobSidecarsStoredRejectsACountAboveTheBlock(t *testing.T) {
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	require.NoError(t, beacon_indicies.MarkRootCanonical(tx, 3, common.Hash{3}))
+	storage := mock_services.NewMockBlobStorage(gomock.NewController(t))
+	storage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(3), nil)
+	storage.EXPECT().BlobSidecarExists(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).AnyTimes()
+	a := &Antiquary{ctx: t.Context(), logger: log.New(), blobStorage: storage, blobBackfilled: &atomic.Bool{}}
+
+	stored, err := a.blobSidecarsStored(tx, 3, 2)
+	require.NoError(t, err)
+	require.False(t, stored, "the dump requires the counts to be equal")
+}
+
 func TestBlobSegmentCompleteScansFilesAndResumesAtTheGap(t *testing.T) {
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(t.Context())
