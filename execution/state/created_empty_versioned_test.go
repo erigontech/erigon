@@ -17,6 +17,7 @@
 package state
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -68,6 +69,28 @@ func TestSetEmptyRemoval(t *testing.T) {
 		ch, ok := ws.GetCodeHash(addr)
 		require.True(t, ok && ch.Deletes(), "a destroyed contract stamps the code-deleted marker (was a contract, code removed)")
 	})
+}
+
+// A created-then-destructed account decides emptiness from its own writes: a failing base read proves no base read ran.
+func TestEncodeExistingEmptyRemovals_CreatedSelfDestructSkipsBaseRead(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0xc1})
+	vm := NewVersionMap(nil)
+	ibs := New(NewVersionedStateReader(0, ReadSet{}, vm, &failingBaseReader{err: errors.New("domain read failed")}))
+	ibs.SetTxContext(1, 0)
+	ibs.SetVersion(0)
+	ibs.SetVersionMap(vm)
+	ver := ibs.Version()
+	writes := newWriteSet(
+		&VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: CreateContractPath, Version: ver}, Val: true},
+		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: ver}},
+	)
+
+	ibs.encodeExistingEmptyRemovals(&chain.Rules{IsSpuriousDragon: true}, writes, map[accounts.Address]struct{}{addr: {}})
+
+	require.NoError(t, ibs.StateReadError())
+	ch, ok := writes.GetCodeHash(addr)
+	require.True(t, ok && ch.Deletes(), "the code-deleted marker is present")
 }
 
 func TestFinalizedWritesWithholdCreatedEmptyAccount(t *testing.T) {
