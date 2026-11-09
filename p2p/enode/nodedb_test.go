@@ -30,6 +30,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/p2p/enr"
 )
@@ -542,4 +544,22 @@ func TestDBExpirationNextNodePong(t *testing.T) {
 	if pong := db.LastPongReceived(fresh.ID(), freshIP); !pong.Equal(now.Truncate(time.Second)) {
 		t.Errorf("fresh pong time should be kept, got %v", pong)
 	}
+}
+
+// An unbonded node only ever has a ping row, so without a pong it must still expire.
+func TestDBExpiresNodeWithOnlyAPingRow(t *testing.T) {
+	db, err := OpenDB("")
+	require.NoError(t, err)
+	defer db.Close()
+
+	ip := netip.AddrFrom4([4]byte{127, 0, 0, 1})
+	now := time.Now()
+	stale, fresh := ID{1}, ID{2}
+	require.NoError(t, db.UpdateLastPingReceived(stale, ip, now.Add(-dbNodeExpiration-time.Minute)))
+	require.NoError(t, db.UpdateLastPingReceived(fresh, ip, now))
+
+	db.expireNodes()
+
+	require.True(t, db.LastPingReceived(stale, ip).IsZero() || db.LastPingReceived(stale, ip).Unix() == 0, "the stale ping row is deleted")
+	require.Equal(t, now.Unix(), db.LastPingReceived(fresh, ip).Unix())
 }

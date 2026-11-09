@@ -441,7 +441,16 @@ func (db *DB) expireNodes() {
 	var (
 		threshold    = time.Now().Add(-dbNodeExpiration).Unix()
 		youngestPong int64
+		youngestPing int64
 	)
+	// A node that never answered a ping has no pong row, so its last ping decides.
+	expired := func() bool {
+		youngest := youngestPong
+		if youngest == 0 {
+			youngest = youngestPing
+		}
+		return youngest > 0 && youngest < threshold
+	}
 	var toDelete [][]byte
 	if err := db.kv.View(db.ctx, func(tx kv.Tx) error {
 		c, err := tx.Cursor(kv.Inodes)
@@ -458,10 +467,14 @@ func (db *DB) expireNodes() {
 			}
 			id, ip, field := splitNodeItemKey(k)
 			if id != prevId {
-				if youngestPong > 0 && youngestPong < threshold {
+				if expired() {
 					toDelete = append(toDelete, nodeKey(prevId))
 				}
-				youngestPong = 0
+				youngestPong, youngestPing = 0, 0
+			}
+			if field == dbNodePing {
+				time, _ := binary.Varint(v)
+				youngestPing = max(youngestPing, time)
 			}
 			if field == dbNodePong {
 				time, _ := binary.Varint(v)
@@ -477,10 +490,10 @@ func (db *DB) expireNodes() {
 			empty = false
 		}
 		if !empty {
-			if youngestPong > 0 && youngestPong < threshold {
+			if expired() {
 				toDelete = append(toDelete, nodeKey(prevId))
 			}
-			youngestPong = 0
+			youngestPong, youngestPing = 0, 0
 		}
 		return nil
 	}); err != nil {
