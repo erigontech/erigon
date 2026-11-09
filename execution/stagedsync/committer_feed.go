@@ -34,14 +34,6 @@ func (cc *commitmentCalculator) emit(view *state.VersionMapView, updates *commit
 	return cc.emitTouched(view, updates)
 }
 
-func (cc *commitmentCalculator) setInput(updates *commitment.Updates) {
-	if cc.branchPrefetch != nil {
-		cc.doms.GetCommitmentContext().SetFeed(&cc.feed.Feed)
-		return
-	}
-	cc.doms.GetCommitmentContext().SetUpdates(updates)
-}
-
 func (cc *commitmentCalculator) prefetchWrites(writes state.WriteSetView) {
 	seen := map[accounts.Address][]byte{}
 	account := func(a accounts.Address) []byte {

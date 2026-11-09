@@ -79,7 +79,6 @@ type SharedDomainsCommitmentContext struct {
 	// deferCommitmentUpdates when true, deferred branch updates are stored as a pending update
 	// instead of being applied inline after Process(). Used during fork validation.
 	deferCommitmentUpdates bool
-	storageFanOutMin       int
 	// pendingUpdate stores a single deferred branch update to be flushed at the next ComputeCommitment call.
 	pendingUpdate *commitment.PendingCommitmentUpdate
 
@@ -171,7 +170,9 @@ func (sdc *SharedDomainsCommitmentContext) SetDeferCommitmentUpdates(defer_ bool
 }
 
 func (sdc *SharedDomainsCommitmentContext) SetStorageFanOutMin(n int) {
-	sdc.storageFanOutMin = n
+	if trie, ok := sdc.patriciaTrie.(v3Trie); ok {
+		trie.SetStorageFanOutMin(n)
+	}
 }
 
 // TakePendingUpdate returns the pending update and clears the field.
@@ -691,9 +692,6 @@ func (sdc *SharedDomainsCommitmentContext) computeCommitment(ctx context.Context
 	if trie, ok := sdc.patriciaTrie.(v3Trie); ok && sdc.deferCommitmentUpdates {
 		trie.SetDeferCommitmentUpdates(true)
 		defer trie.SetDeferCommitmentUpdates(false)
-	}
-	if trie, ok := sdc.patriciaTrie.(v3Trie); ok {
-		trie.SetStorageFanOutMin(sdc.storageFanOutMin)
 	}
 
 	if feed != nil {

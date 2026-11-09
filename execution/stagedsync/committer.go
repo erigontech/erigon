@@ -260,18 +260,6 @@ func newCommitmentCalculator(
 
 	// Single asOfStateReader shared by emitTouched's base reads and compute methods.
 	asOfReader := &asOfStateReader{sd: doms, roTx: roTx, txNum: 0, dr: drTemplate.CloneWithTx(roTx)}
-	var readAtNum uint64
-	var readAtHash common.Hash
-	var branchPrefetch *branchPrefetcher
-	if doms.GetCommitmentContext().AcceptsFeed() {
-		if n, err := stages.GetStageProgress(roTx, stages.Execution); err == nil {
-			if h, err := rawdb.ReadCanonicalHash(roTx, n); err == nil {
-				readAtNum, readAtHash = n, h
-			}
-		}
-		branchPrefetch = newBranchPrefetcher(workCtx, db)
-		asOfReader.prefetched = branchPrefetch
-	}
 
 	cc := &commitmentCalculator{
 		doms:                 doms,
@@ -294,9 +282,15 @@ func newCommitmentCalculator(
 		forcePerBlockCompute: forcePerBlockCompute,
 		perBlockFrom:         perBlockFrom,
 		done:                 make(chan struct{}),
-		branchPrefetch:       branchPrefetch,
-		readAtNum:            readAtNum,
-		readAtHash:           readAtHash,
+	}
+	if doms.GetCommitmentContext().AcceptsFeed() {
+		if n, err := stages.GetStageProgress(roTx, stages.Execution); err == nil {
+			if h, err := rawdb.ReadCanonicalHash(roTx, n); err == nil {
+				cc.readAtNum, cc.readAtHash = n, h
+			}
+		}
+		cc.branchPrefetch = newBranchPrefetcher(workCtx, db)
+		asOfReader.prefetched = cc.branchPrefetch
 	}
 	if dbg.BALCommitmentWarmupReaders() > 0 {
 		cc.prefetchFn = func(plainKey []byte) {
@@ -727,9 +721,14 @@ func (cc *commitmentCalculator) computeRootFromUpdates(ctx context.Context, t co
 	cc.finishPrefetch()
 	cc.branchPrefetch.pause()
 	defer cc.branchPrefetch.resume()
-	cc.setInput(updates)
+	sdCtx := cc.doms.GetCommitmentContext()
+	if cc.branchPrefetch != nil {
+		sdCtx.SetFeed(&cc.feed.Feed)
+	} else {
+		sdCtx.SetUpdates(updates)
+	}
 	reader.txNum = t.lastTxNum + 1
-	cc.doms.GetCommitmentContext().SetStateReader(reader)
+	sdCtx.SetStateReader(reader)
 	if !cc.ownsChangeset(t.blockNum) {
 		return cc.computeIsolated(ctx, t)
 	}
