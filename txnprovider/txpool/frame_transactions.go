@@ -511,8 +511,7 @@ func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*meta
 	blockTime := head.BlockTime
 	// Expiry uses the same block time as validation.
 	pendingTime := max(blockTime+p.chainConfig.SecondsPerSlot(), uint64(time.Now().Unix()))
-	pendingSlot, slotErr := protocol.FrameValidationSlot(head.SlotNumber)
-	hasPendingSlot := head.SlotNumber != nil && slotErr == nil
+	pendingSlot := protocol.FrameValidationSlot(head.SlotNumber)
 	touched := make(map[common.Address]struct{})
 	codeChanged := make(map[common.Address]struct{})
 	accountChanges := make(map[common.Address][]byte)
@@ -553,7 +552,7 @@ func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*meta
 		// of the validation's account dependencies changed.
 		affected := mt.currentSubPool == 0 || frame.GetBlobGas() != 0 || changes.StateChangesIncomplete
 		if len(previous.RecentRoots) > 0 {
-			invalidRoots := activationUnwound || !hasPendingSlot || slices.ContainsFunc(previous.RecentRoots, func(ref protocol.RecentRootReference) bool {
+			invalidRoots := activationUnwound || slices.ContainsFunc(previous.RecentRoots, func(ref protocol.RecentRootReference) bool {
 				return !ref.ValidAt(pendingSlot)
 			})
 			if invalidRoots {

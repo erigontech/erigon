@@ -578,10 +578,7 @@ func (s *EthBackendServer) validateFrameTransaction(ctx context.Context, frame *
 	// block. Its context must account for fee changes and fork activation.
 	blockContext := protocol.NewEVMBlockContext(header, rejectBlockHash, nil, accounts.ZeroAddress, s.chainConfig)
 	blockContext.BlockNumber++
-	blockContext.SlotNumber, err = protocol.FrameValidationSlot(header.SlotNumber)
-	if err != nil {
-		return nil, err
-	}
+	blockContext.SlotNumber = protocol.FrameValidationSlot(header.SlotNumber)
 	blockContext.Time = max(header.Time+s.chainConfig.SecondsPerSlot(), uint64(time.Now().Unix()))
 	if header.BaseFee != nil {
 		blockContext.BaseFee = *misc.CalcBaseFee(s.chainConfig, header)

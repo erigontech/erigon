@@ -92,16 +92,13 @@ var errFrameValidationPrefix = errors.New("unrecognized frame validation prefix"
 var frameExpiryCode = common.FromHex("60083614600a575f5ffd5b5f3560c01c4211601657005b5f5ffd")
 
 // FrameValidationSlot uses the canonical head slot plus one, even after empty slots.
-// A missing header slot remains zero, so no recent root can pass validation.
+// A missing header slot or overflow yields zero, so no recent root can be valid.
 // https://eips.ethereum.org/EIPS/eip-8272#current-slot
-func FrameValidationSlot(headSlot *uint64) (uint64, error) {
+func FrameValidationSlot(headSlot *uint64) uint64 {
 	if headSlot == nil {
-		return 0, nil
+		return 0
 	}
-	if *headSlot == math.MaxUint64 {
-		return 0, errors.New("frame validation: next slot overflows uint64")
-	}
-	return *headSlot + 1, nil
+	return *headSlot + 1
 }
 
 // ValidateFrameTransactionPrefix checks public-pool structure and gas budgets
