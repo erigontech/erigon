@@ -831,6 +831,16 @@ func (a *ApiHandler) gloasAttestationIndex(slot uint64, root common.Hash, head f
 	return 1, nil
 }
 
+// checkBlockProductionSlot rejects a slot after the next one: production advances the head state slot by slot to
+// it, without a context.
+func checkBlockProductionSlot(targetSlot, currentSlot uint64) error {
+	if targetSlot > currentSlot+1 {
+		return beaconhttp.NewEndpointError(http.StatusBadRequest,
+			fmt.Errorf("block slot %d is after the next slot %d", targetSlot, currentSlot+1))
+	}
+	return nil
+}
+
 func (a *ApiHandler) GetEthV3ValidatorBlock(
 	w http.ResponseWriter,
 	r *http.Request,
@@ -865,6 +875,9 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 			http.StatusBadRequest,
 			fmt.Errorf("invalid slot: %w", err),
 		)
+	}
+	if err := checkBlockProductionSlot(targetSlot, a.ethClock.GetCurrentSlot()); err != nil {
+		return nil, err
 	}
 
 	builderBoostFactor := uint64(100)
