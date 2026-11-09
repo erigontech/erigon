@@ -994,7 +994,7 @@ func (hc *headCaptureSource) warmPaths(ctx context.Context, accessed *accessedSt
 				witnessCacheWarmRecordsCounter.Inc()
 				return v
 			}
-			for i := w; i < len(paths) && ctx.Err() == nil; i += len(txs) {
+			for i := w; i < len(paths); i += len(txs) {
 				commitmentv3.PrefetchPath(read, paths[i].account, paths[i].slot)
 			}
 		})
@@ -1114,7 +1114,7 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 	if accessed.isEmpty() { // nothing touched, return empty witness
 		return result, nil
 	}
-	if hc != nil && len(hc.warmTxs) != 0 && sdCtx.Trie().Variant() == commitment.VariantCommitmentV3 {
+	if hc != nil && len(hc.warmTxs) != 0 {
 		hc.warmPaths(ctx, accessed)
 	}
 
