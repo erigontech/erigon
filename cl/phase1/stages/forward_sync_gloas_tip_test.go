@@ -281,8 +281,8 @@ func TestForwardSyncRecordsTipEnvelopeArrivalWithInsertion(t *testing.T) {
 		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 		defer cancel()
 
-		require.ErrorIs(t, forwardSync(ctx, log.Root(), f.cfg, Args{}), context.DeadlineExceeded)
-		require.Zero(t, f.cfg.forwardSyncTipRoot)
+		require.NoError(t, forwardSync(ctx, log.Root(), f.cfg, Args{}))
+		require.Equal(t, f.tipRoot, f.cfg.forwardSyncTipRoot)
 		require.False(t, f.cfg.forkChoice.HasEnvelope(f.tipRoot))
 		require.False(t, f.cfg.forkChoice.ExecutionPayloadReceivedBefore(f.tipRoot, time.Now()))
 	})

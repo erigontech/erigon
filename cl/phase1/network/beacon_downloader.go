@@ -748,6 +748,7 @@ func (f *ForwardBeaconDownloader) fetchGloasEnvelopes(
 	fullRoots [][32]byte,
 ) map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope {
 	var envelopes map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope
+	validate := NewEnvelopeBlockValidator(f.beaconCfg, blockLookup(blocks))
 	// P2P failed for blocks that came from the beacon API, so skip its long envelope timeout.
 	if pid != "http-fallback" || f.httpFallbackURL == "" {
 		var envErr error
@@ -755,7 +756,7 @@ func (f *ForwardBeaconDownloader) fetchGloasEnvelopes(
 			p2pCtx,
 			f.rpc,
 			fullRoots,
-			NewEnvelopeBlockValidator(f.beaconCfg, blockLookup(blocks)),
+			validate,
 			nil,
 			blocks...,
 		)
@@ -767,7 +768,15 @@ func (f *ForwardBeaconDownloader) fetchGloasEnvelopes(
 		if envelopes == nil {
 			envelopes = make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope)
 		}
-		httpResult := fetchEnvelopesFromBeaconAPI(ctx, f.httpFallbackURL, blocks, fullRoots, envelopes, f.beaconCfg)
+		httpEnvelopes := make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope)
+		httpResult := fetchEnvelopesFromBeaconAPI(ctx, f.httpFallbackURL, blocks, filterReceived(fullRoots, envelopes), httpEnvelopes, f.beaconCfg)
+		for root, envelope := range httpEnvelopes {
+			if err := validate(envelope); err != nil {
+				log.Debug("[ForwardBeaconDownloader] discarded invalid HTTP envelope", "root", root, "err", err)
+				continue
+			}
+			envelopes[root] = envelope
+		}
 		if httpResult.fetched > 0 {
 			log.Debug("[ForwardBeaconDownloader] fetched envelopes from beacon API", "count", httpResult.fetched)
 		}

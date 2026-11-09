@@ -217,6 +217,135 @@ func TestForwardSyncRetainsAcceptedCopyForExecutionInsertion(t *testing.T) {
 	}))
 }
 
+func TestForwardSyncRetriesGloasEnvelopeAfterBlockWriteFailure(t *testing.T) {
+	cfg, graph, root, child, _, engine := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
+	engine.supportInsertion = true
+	block, envelope := graph.parents[root], graph.envelopes[root]
+	delete(graph.parents, root)
+	delete(graph.envelopes, root)
+	graph.insertOnAdd = true
+	collector := &gloasCollectorTest{}
+	cfg.blockCollector = collector
+	db := &blockWriteErrorDB{RwDB: cfg.indiciesDB, err: errors.New("database write failed"), failures: 1}
+	cfg.indiciesDB = db
+
+	progress, err := processDownloadedBlockBatches(t.Context(), log.Root(), cfg, block.Block.Slot-1, true,
+		[]*cltypes.SignedBeaconBlock{block}, map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope{root: envelope})
+
+	require.ErrorIs(t, err, db.err)
+	require.ErrorIs(t, err, network2.ErrUnattributableProcess)
+	require.Equal(t, block.Block.Slot-1, progress)
+	require.NotNil(t, cfg.pendingBlockWrite)
+	require.False(t, cfg.forkChoice.HasEnvelope(root))
+	require.Zero(t, collector.calls)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	db.failures = 2
+	db.onWriteError = cancel
+	_, err = processDownloadedBlockBatches(ctx, log.Root(), cfg, progress, true, []*cltypes.SignedBeaconBlock{child}, nil)
+	require.ErrorIs(t, err, context.Canceled)
+	require.NotNil(t, cfg.pendingBlockWrite)
+
+	require.NoError(t, retryPendingBlockWrite(t.Context(), cfg))
+	require.Nil(t, cfg.pendingBlockWrite)
+	require.True(t, cfg.forkChoice.HasEnvelope(root))
+	require.Equal(t, 1, collector.calls)
+	require.Equal(t, 1, graph.added[root])
+	require.Zero(t, engine.newPayloadCalls)
+}
+
+func TestForwardSyncRejectsEnvelopeBeforeImport(t *testing.T) {
+	cfg, graph, root, _, _, _ := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
+	block, envelope := graph.parents[root], graph.envelopes[root]
+	delete(graph.parents, root)
+	delete(graph.envelopes, root)
+	graph.insertOnAdd = true
+	cfg.blockCollector = &gloasCollectorTest{}
+	db := &blockWriteErrorDB{RwDB: cfg.indiciesDB}
+	cfg.indiciesDB = db
+	envelope.Message.Payload.BlockHash[0] ^= 1
+
+	progress, err := processDownloadedBlockBatches(t.Context(), log.Root(), cfg, block.Block.Slot-1, true,
+		[]*cltypes.SignedBeaconBlock{block}, map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope{root: envelope})
+
+	require.Error(t, err)
+	require.Equal(t, block.Block.Slot-1, progress)
+	require.Empty(t, graph.added)
+	require.Zero(t, db.writes)
+}
+
+func TestForwardSyncKeepsCompletedPrefixOnEnvelopeFailure(t *testing.T) {
+	cfg, graph, root, child, _, engine := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
+	engine.supportInsertion = true
+	block, envelope := graph.parents[root], graph.envelopes[root]
+	delete(graph.parents, root)
+	delete(graph.envelopes, root)
+	graph.insertOnAdd = true
+	collector := &gloasCollectorTest{}
+	cfg.blockCollector = collector
+	require.NoError(t, persistAcceptedBlock(t.Context(), cfg, block))
+	childRoot, err := child.Block.HashSSZ()
+	require.NoError(t, err)
+
+	progress, err := processDownloadedBlockBatches(t.Context(), log.Root(), cfg, block.Block.Slot-1, true,
+		[]*cltypes.SignedBeaconBlock{block, child}, map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope{root: envelope, childRoot: nil})
+
+	require.ErrorContains(t, err, "nil execution payload envelope")
+	require.ErrorIs(t, err, network2.ErrUnattributableProcess)
+	require.Equal(t, block.Block.Slot, progress)
+	require.Equal(t, 1, collector.calls)
+}
+
+func TestPendingBlockWriteDropsRejectedGloasEnvelope(t *testing.T) {
+	cfg, graph, root, _, _, _ := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
+	block, envelope := graph.parents[root], graph.envelopes[root]
+	delete(graph.parents, root)
+	delete(graph.envelopes, root)
+	graph.insertOnAdd = true
+	cfg.blockCollector = &gloasCollectorTest{}
+	db := &blockWriteErrorDB{RwDB: cfg.indiciesDB, err: errors.New("database write failed"), failures: 1}
+	cfg.indiciesDB = db
+	envelope.Signature[0] ^= 1
+	require.NoError(t, network2.ValidateDownloadedGloasEnvelope(cfg.beaconCfg, block, envelope))
+	_, err := processDownloadedBlockBatches(t.Context(), log.Root(), cfg, block.Block.Slot-1, true,
+		[]*cltypes.SignedBeaconBlock{block}, map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope{root: envelope})
+	require.ErrorIs(t, err, db.err)
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+
+	err = retryPendingBlockWrite(ctx, cfg)
+
+	require.ErrorIs(t, err, forkchoice.ErrInvalidExecutionPayloadEnvelope)
+	require.ErrorIs(t, err, network2.ErrUnattributableProcess)
+	require.Nil(t, cfg.pendingBlockWrite)
+	require.False(t, cfg.forkChoice.HasEnvelope(root))
+}
+
+func TestPendingBlockWriteCollectsAcceptedGloasEnvelope(t *testing.T) {
+	cfg, graph, root, _, _, _ := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
+	block, envelope := graph.parents[root], graph.envelopes[root]
+	delete(graph.parents, root)
+	delete(graph.envelopes, root)
+	graph.insertOnAdd = true
+	collector := &gloasCollectorTest{}
+	cfg.blockCollector = collector
+	db := &blockWriteErrorDB{RwDB: cfg.indiciesDB, err: errors.New("database write failed"), failures: 1}
+	cfg.indiciesDB = db
+	received := *envelope
+	received.Signature[0] ^= 1
+	_, err := processDownloadedBlockBatches(t.Context(), log.Root(), cfg, block.Block.Slot-1, true,
+		[]*cltypes.SignedBeaconBlock{block}, map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope{root: &received})
+	require.ErrorIs(t, err, db.err)
+	require.NoError(t, cfg.forkChoice.OnExecutionPayload(t.Context(), envelope, false, false))
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+
+	require.NoError(t, retryPendingBlockWrite(ctx, cfg))
+	require.Nil(t, cfg.pendingBlockWrite)
+	require.Equal(t, 1, collector.calls)
+}
+
 type cancelingBlockCollector struct {
 	gloasCollectorTest
 	cancel context.CancelFunc
