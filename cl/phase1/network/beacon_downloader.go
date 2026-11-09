@@ -749,7 +749,7 @@ func (f *ForwardBeaconDownloader) fetchGloasEnvelopes(
 ) map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope {
 	var envelopes map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope
 	validate := NewEnvelopeBlockValidator(f.beaconCfg, blockLookup(blocks))
-	// P2P failed for blocks that came from the beacon API, so skip its long envelope timeout.
+	// Prefer HTTP for envelopes when blocks came from HTTP, avoiding the long P2P timeout.
 	if pid != "http-fallback" || f.httpFallbackURL == "" {
 		var envErr error
 		envelopes, envErr = RequestEnvelopesFrantically(
@@ -768,6 +768,7 @@ func (f *ForwardBeaconDownloader) fetchGloasEnvelopes(
 		if envelopes == nil {
 			envelopes = make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope)
 		}
+		// Keep HTTP results separate so P2P envelopes are not checked again here.
 		httpEnvelopes := make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope)
 		httpResult := fetchEnvelopesFromBeaconAPI(ctx, f.httpFallbackURL, blocks, filterReceived(fullRoots, envelopes), httpEnvelopes, f.beaconCfg)
 		for root, envelope := range httpEnvelopes {
@@ -1147,7 +1148,8 @@ type fetchEnvelopeHTTPResult struct {
 	fetched int
 }
 
-// fetchEnvelopesFromBeaconAPI fetches execution payload envelopes from the beacon API for FULL blocks missing from P2P.
+// fetchEnvelopesFromBeaconAPI fetches envelopes for requested roots not present in received.
+// Callers must check bid commitments and the payload hash before treating an envelope as available.
 func fetchEnvelopesFromBeaconAPI(
 	ctx context.Context,
 	baseURL string,

@@ -281,6 +281,7 @@ func TestForwardSyncRecordsTipEnvelopeArrivalWithInsertion(t *testing.T) {
 		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 		defer cancel()
 
+		// The tip can be imported without an envelope; discarded envelopes must not count as payload arrivals.
 		require.NoError(t, forwardSync(ctx, log.Root(), f.cfg, Args{}))
 		require.Equal(t, f.tipRoot, f.cfg.forwardSyncTipRoot)
 		require.False(t, f.cfg.forkChoice.HasEnvelope(f.tipRoot))
