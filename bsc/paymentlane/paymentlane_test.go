@@ -103,19 +103,18 @@ var (
 
 func newTx(t *testing.T, txType byte, to *common.Address, value uint64) types.Transaction {
 	t.Helper()
-	base := types.CommonTx{To: to, Value: *uint256.NewInt(value), GasLimit: 21000}
-	dynamic := types.DynamicFeeTransaction{CommonTx: base}
+	base := func() types.CommonTx { return types.CommonTx{To: to, Value: *uint256.NewInt(value), GasLimit: 21000} }
 	switch txType {
 	case types.LegacyTxType:
-		return &types.LegacyTx{CommonTx: base}
+		return &types.LegacyTx{CommonTx: base()}
 	case types.AccessListTxType:
-		return &types.AccessListTx{LegacyTx: types.LegacyTx{CommonTx: base}}
+		return &types.AccessListTx{LegacyTx: types.LegacyTx{CommonTx: base()}}
 	case types.DynamicFeeTxType:
-		return &dynamic
+		return &types.DynamicFeeTransaction{CommonTx: base()}
 	case types.BlobTxType:
-		return &types.BlobTx{DynamicFeeTransaction: dynamic, BlobVersionedHashes: []common.Hash{{0x01}}}
+		return &types.BlobTx{DynamicFeeTransaction: types.DynamicFeeTransaction{CommonTx: base()}, BlobVersionedHashes: []common.Hash{{0x01}}}
 	case types.SetCodeTxType:
-		return &types.SetCodeTransaction{DynamicFeeTransaction: dynamic}
+		return &types.SetCodeTransaction{DynamicFeeTransaction: types.DynamicFeeTransaction{CommonTx: base()}}
 	}
 	t.Fatalf("unsupported tx type %d", txType)
 	return nil
