@@ -2249,9 +2249,9 @@ func (ibs *IntraBlockState) createObject(addr accounts.Address, previous *stateO
 		if _, res, ok := ibs.versionMap.ReadNonce(addr, ibs.txIndex); ok && res.resolved() {
 			ibs.recordWriteNonce(addr, newobj.data.Nonce, tracing.NonceChangeNewContract)
 		}
-		if _, res, ok := ibs.versionMap.ReadBalance(addr, ibs.txIndex); ok && res.ValStatus() == ValueDeleted {
-			ibs.recordWriteBalance(addr, newobj.data.Balance)
-		}
+		// The balance is written unconditionally: a lower tx's removal of the account can be
+		// flushed after this tx ran, and its deleted balance would then decide the account.
+		ibs.recordWriteBalance(addr, newobj.data.Balance)
 	}
 	return newobj
 }
