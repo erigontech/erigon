@@ -138,6 +138,8 @@ type ForkChoiceStore struct {
 	// childrens
 	childrens sync.Map
 
+	hasEquivocator bool
+
 	// Use go map because this is actually an unordered set
 	equivocatingIndicies []byte
 	forkGraph            fork_graph.ForkGraph
