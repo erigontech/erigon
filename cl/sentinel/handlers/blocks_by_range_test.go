@@ -26,6 +26,8 @@ import (
 	"math"
 	"testing"
 
+	"github.com/golang/snappy"
+
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -293,4 +295,31 @@ func readBlocksByRangeSlots(t *testing.T, stream network.Stream, ethClock eth_cl
 		require.NoError(t, block.DecodeSSZ(raw, int(version)))
 		slots = append(slots, block.Block.Slot)
 	}
+}
+
+type countingStream struct {
+	network.Stream
+	r    io.Reader
+	read int
+}
+
+func (s *countingStream) Read(p []byte) (int, error) {
+	n, err := s.r.Read(p)
+	s.read += n
+	return n, err
+}
+
+// A fixed-size request whose prefix claims a large payload must be refused before that payload is read.
+func TestBlocksByRangeRefusesOversizedRequest(t *testing.T) {
+	payload := make([]byte, clparams.MaxPayloadSize)
+	var req bytes.Buffer
+	req.Write(binary.AppendUvarint(nil, uint64(len(payload))))
+	sw := snappy.NewBufferedWriter(&req)
+	_, err := sw.Write(payload)
+	require.NoError(t, err)
+	require.NoError(t, sw.Close())
+
+	s := &countingStream{r: &req}
+	require.Error(t, (&ConsensusHandlers{}).beaconBlocksByRangeHandler(s))
+	require.Less(t, s.read, 64, "the handler read the claimed payload")
 }
