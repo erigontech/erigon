@@ -37,12 +37,9 @@ var HistoryTableFormatChange = Migration{
 		}
 		defer tx.Rollback()
 
-		if err := BeforeCommit(tx, nil, true); err != nil {
+		if err := dir.RemoveAll(db.Path()); err != nil {
 			return err
 		}
-		if err := dir.RemoveAll(dirs.Chaindata); err != nil {
-			return err
-		}
-		return nil
+		return BeforeCommit(tx, nil, true)
 	},
 }

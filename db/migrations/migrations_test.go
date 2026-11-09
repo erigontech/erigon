@@ -17,6 +17,7 @@
 package migrations
 
 import (
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -297,4 +298,18 @@ func TestCommitCallRequired(t *testing.T) {
 		require.Empty(applied)
 		return nil
 	}))
+}
+
+func TestHistoryTableFormatChangeRemovesTheOpenedDB(t *testing.T) {
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	dirs := datadir.New(t.TempDir())
+	require.NoError(t, os.MkdirAll(dirs.Chaindata, 0o755))
+	committed := false
+	commit := func(kv.RwTx, []byte, bool) error { committed = true; return nil }
+
+	require.NoError(t, HistoryTableFormatChange.Up(db, dirs, nil, commit, log.New()))
+
+	require.True(t, committed)
+	require.NoDirExists(t, db.Path())
+	require.DirExists(t, dirs.Chaindata, "a chaindata the node did not open must stay")
 }
