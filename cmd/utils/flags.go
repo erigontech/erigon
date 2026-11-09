@@ -2085,7 +2085,7 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 	cfg.Ethstats = ctx.String(EthStatsURLFlag.Name)
 
 	setParallelCommitment(ctx)
-	if !cfg.Snapshot.NoDownloader && !cfg.Snapshot.DisableDownloadE3 {
+	if _, preverified := snapcfg.KnownCfg(chain); preverified && !cfg.Snapshot.NoDownloader && !cfg.Snapshot.DisableDownloadE3 {
 		if err := dbstate.CheckCommitmentV3DownloaderCompatibility(cfg.Dirs); err != nil {
 			Fatalf("%v", err)
 		}

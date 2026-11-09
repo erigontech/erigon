@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v3"
 
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/kvcfg"
@@ -47,8 +48,7 @@ func buildEthConfig(t *testing.T, args []string) *ethconfig.Config {
 	app.Flags = erigoncli.DefaultFlags
 	app.Action = func(nodeCtx context.Context, ctx *cli.Command) error {
 		logger := log.Root()
-		nodeCfg := &nodecfg.Config{}
-		nodeCfg.Dirs.DataDir = t.TempDir()
+		nodeCfg := &nodecfg.Config{Dirs: datadir.New(t.TempDir())}
 		ethCfg := ethconfig.Defaults
 		erigoncli.BuildEthConfig(nodeCtx, ctx, nodeCfg, &ethCfg, logger)
 		result = &ethCfg
@@ -134,6 +134,12 @@ func TestConfigCommitmentV3StartsFreshWithoutStateSnapshotDownload(t *testing.T)
 	cfg := buildEthConfig(t, []string{"--experimental.commitment-v3", "--snap.skip-state-snapshot-download"})
 	require.True(t, cfg.Snapshot.DisableDownloadE3)
 	require.False(t, cfg.Snapshot.NoDownloader)
+}
+
+func TestConfigCommitmentV3StartsFreshOnChainWithoutPreverifiedSnapshots(t *testing.T) {
+	cfg := buildEthConfig(t, []string{"--chain=dev", "--experimental.commitment-v3"})
+	require.False(t, cfg.Snapshot.NoDownloader)
+	require.False(t, cfg.Snapshot.DisableDownloadE3)
 }
 
 // TestConfigWithFlags verifies that specific flag combinations produce the
