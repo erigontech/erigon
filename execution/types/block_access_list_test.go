@@ -454,49 +454,23 @@ func TestBlockAccessListRLPEncoding(t *testing.T) {
 	}
 }
 
-func TestBlockAccessListRLPSizeLimit(t *testing.T) {
-	const limit = 10 << 20
-	code := make([]byte, limit)
+// EIP-7928 bounds the BAL by the block gas limit only, not by its encoded size.
+func TestBlockAccessListAbove10MiB(t *testing.T) {
+	code := make([]byte, 10<<20)
 	bal := BlockAccessList{{CodeChanges: []*CodeChange{{Index: 1, Bytecode: code}}}}
 	raw, err := EncodeBlockAccessListBytes(bal)
 	if err != nil {
 		t.Fatalf("encode BAL: %v", err)
 	}
-	overhead := len(raw) - len(code)
-	for _, tt := range []struct {
-		name string
-		size int
-	}{
-		{name: "below limit", size: limit - 1},
-		{name: "at limit", size: limit},
-		{name: "above limit", size: limit + 1},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			bal[0].CodeChanges[0].Bytecode = code[:tt.size-overhead]
-			raw, err := EncodeBlockAccessListBytes(bal)
-			if err != nil {
-				t.Fatalf("encode BAL: %v", err)
-			}
-			if len(raw) != tt.size {
-				t.Fatalf("RLP size = %d, want %d", len(raw), tt.size)
-			}
-			sidecar, err := DecodeBlockAccessListSidecarForBlock(raw, 10_000_000_000, len(bal))
-			if tt.size > limit {
-				if err == nil || !strings.Contains(err.Error(), "block access list RLP exceeds maximum size") {
-					t.Fatalf("decode BAL: got %v, want RLP size error", err)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("decode BAL: %v", err)
-			}
-			if err := sidecar.ValidateForBlock(10_000_000_000, len(bal)); err != nil {
-				t.Fatalf("validate BAL: %v", err)
-			}
-			if !reflect.DeepEqual(sidecar.BlockAccessList(), bal) {
-				t.Fatal("decoded BAL differs")
-			}
-		})
+	sidecar, err := DecodeBlockAccessListSidecarForBlock(raw, 60_000_000, len(bal))
+	if err != nil {
+		t.Fatalf("decode BAL: %v", err)
+	}
+	if err := sidecar.ValidateForBlock(60_000_000, len(bal)); err != nil {
+		t.Fatalf("validate BAL: %v", err)
+	}
+	if !reflect.DeepEqual(sidecar.BlockAccessList(), bal) {
+		t.Fatal("decoded BAL differs")
 	}
 }
 

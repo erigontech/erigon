@@ -884,11 +884,11 @@ func (imp *impl) ProcessExecutionPayloadEnvelope(s abstract.BeaconState, signedE
 	if expectedWithdrawals == nil {
 		return errors.New("ProcessExecutionPayloadEnvelope: state has nil expected withdrawals")
 	}
-	payloadWithdrawalsRoot, err := payloadWithdrawals.HashSSZ()
+	payloadWithdrawalsRoot, err := payloadWithdrawals.HashSSZProgressive(nil)
 	if err != nil {
 		return fmt.Errorf("ProcessExecutionPayloadEnvelope: failed to hash payload withdrawals: %w", err)
 	}
-	expectedWithdrawalsRoot, err := expectedWithdrawals.HashSSZ()
+	expectedWithdrawalsRoot, err := expectedWithdrawals.HashSSZProgressive(nil)
 	if err != nil {
 		return fmt.Errorf("ProcessExecutionPayloadEnvelope: failed to hash expected withdrawals: %w", err)
 	}
