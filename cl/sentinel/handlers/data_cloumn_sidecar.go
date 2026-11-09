@@ -79,7 +79,7 @@ func (c *ConsensusHandlers) dataColumnSidecarsByRangeHandler(s network.Stream) e
 
 // writeColumnsByRange counts every existence check, not only hits: a miss answers nothing and costs the peer no response budget.
 func (c *ConsensusHandlers) writeColumnsByRange(ctx context.Context, s network.Stream, tx kv.Tx, req *cltypes.ColumnSidecarsByRangeRequest, startSlot, endSlot, curSlot uint64) error {
-	count, checked := 0, uint64(0)
+	checked := uint64(0)
 	scanOver := func() bool { return ctx.Err() != nil || checked >= c.beaconConfig.MaxRequestDataColumnSidecars }
 	var responseErr error
 	for slot := startSlot; slot < endSlot; slot++ {
@@ -106,10 +106,6 @@ func (c *ConsensusHandlers) writeColumnsByRange(ctx context.Context, s network.S
 		}
 
 		req.Columns.Range(func(index int, columnIndex uint64, length int) bool {
-			if count >= int(c.beaconConfig.MaxRequestDataColumnSidecars) {
-				// max number of sidecars reached
-				return false
-			}
 			if scanOver() {
 				return false
 			}
@@ -149,14 +145,9 @@ func (c *ConsensusHandlers) writeColumnsByRange(ctx context.Context, s network.S
 				responseErr = err
 				return false
 			}
-			count++
 			return true
 		})
 		if responseErr != nil {
-			break
-		}
-		if count >= int(c.beaconConfig.MaxRequestDataColumnSidecars) {
-			// max number of sidecars reached
 			break
 		}
 	}
