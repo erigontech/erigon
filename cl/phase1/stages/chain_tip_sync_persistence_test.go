@@ -346,6 +346,36 @@ func TestPendingBlockWriteCollectsAcceptedGloasEnvelope(t *testing.T) {
 	require.Equal(t, 1, collector.calls)
 }
 
+func TestPendingBlockWriteReleasesPrunedGloasEnvelope(t *testing.T) {
+	cfg, graph, root, _, _, _ := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
+	block, envelope := graph.parents[root], graph.envelopes[root]
+	delete(graph.parents, root)
+	delete(graph.envelopes, root)
+	graph.insertOnAdd = true
+	collector := &gloasCollectorTest{}
+	cfg.blockCollector = collector
+	db := &blockWriteErrorDB{RwDB: cfg.indiciesDB, err: errors.New("database write failed"), failures: 1}
+	cfg.indiciesDB = db
+	_, err := processDownloadedBlockBatches(t.Context(), log.Root(), cfg, block.Block.Slot-1, true,
+		[]*cltypes.SignedBeaconBlock{block}, map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope{root: envelope})
+	require.ErrorIs(t, err, db.err)
+	delete(graph.parents, root)
+	_, retained := cfg.forkChoice.GetBlock(root)
+	require.False(t, retained)
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+
+	require.NoError(t, retryPendingBlockWrite(ctx, cfg))
+	require.Nil(t, cfg.pendingBlockWrite)
+	require.Zero(t, collector.calls)
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		header, _, err := beacon_indicies.ReadSignedHeaderByBlockRoot(tx, root)
+		require.NoError(t, err)
+		require.NotNil(t, header)
+		return nil
+	}))
+}
+
 type cancelingBlockCollector struct {
 	gloasCollectorTest
 	cancel context.CancelFunc

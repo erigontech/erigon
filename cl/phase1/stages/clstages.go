@@ -289,6 +289,10 @@ func retryPendingBlockWrite(ctx context.Context, cfg *Cfg) error {
 		err := persistAcceptedBlock(ctx, cfg, block)
 		if err == nil && pending.envelope != nil {
 			root := pending.envelope.Message.BeaconBlockRoot
+			if _, retained := cfg.forkChoice.GetBlock(root); !retained {
+				cfg.pendingBlockWrite = nil
+				return nil
+			}
 			if cfg.forkChoice.HasEnvelope(root) {
 				if accepted, readErr := cfg.forkChoice.ReadEnvelopeFromDisk(root); readErr == nil && accepted != nil {
 					pending.envelope = accepted
