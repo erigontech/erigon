@@ -30,22 +30,28 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
 
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
+	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
 func TestFetch(t *testing.T) {
@@ -308,6 +314,116 @@ func TestOnNewBlock(t *testing.T) {
 	err := fetch.handleStateChanges(ctx, stateChanges)
 	assert.ErrorIs(t, io.EOF, err)
 	assert.Len(t, minedTxns.Txns, 3)
+}
+
+func TestFetchRetainedForwardThenUnwindKeepsReplacement(t *testing.T) {
+	ctx, pool, poolDB, _ := newTestPool(t)
+	fetch := NewFetch(ctx, nil, pool, nil, poolDB, pool.chainID, log.New())
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	sender := crypto.PubkeyToAddress(key.PublicKey)
+	makeTxn := func(price uint64) *TxnSlot {
+		txn, signErr := types.SignTx(types.NewTransaction(0, common.Address{2}, uint256.NewInt(0), 21_000, uint256.NewInt(price), nil), *types.LatestSignerForChainID(&pool.chainID), key)
+		require.NoError(t, signErr)
+		var encoded bytes.Buffer
+		require.NoError(t, txn.MarshalBinary(&encoded))
+		slot := &TxnSlot{}
+		var recovered common.Address
+		_, parseErr := NewTxnParseContext(pool.chainID).ParseTransaction(encoded.Bytes(), 0, slot, recovered[:], false, false, nil)
+		require.NoError(t, parseErr)
+		require.Equal(t, sender, recovered)
+		return slot
+	}
+	accountChange := func(nonce uint64) []*remoteproto.AccountChange {
+		account := accounts.Account{Nonce: nonce, Balance: *uint256.NewInt(common.Ether), CodeHash: accounts.EmptyCodeHash}
+		return []*remoteproto.AccountChange{{
+			Action:  remoteproto.Action_UPSERT,
+			Address: gointerfaces.ConvertAddressToH160(sender),
+			Data:    accounts.SerialiseV3(&account),
+		}}
+	}
+	require.NoError(t, fetch.handleStateChangesRequest(ctx, &remoteproto.StateChangeBatch{
+		PendingBlockBaseFee: 1,
+		BlockGasLimit:       1_000_000,
+		ChangeBatch: []*remoteproto.StateChange{{
+			BlockHeight: 1,
+			BlockHash:   gointerfaces.ConvertHashToH256(common.Hash{1}),
+			Changes:     accountChange(0),
+		}},
+	}))
+	original, replacement := makeTxn(2), makeTxn(20)
+	var txns TxnSlots
+	txns.Append(replacement, sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+
+	require.NoError(t, fetch.handleStateChangesRequest(ctx, &remoteproto.StateChangeBatch{
+		PendingBlockBaseFee: 1,
+		BlockGasLimit:       1_000_000,
+		ChangeBatch: []*remoteproto.StateChange{
+			{Direction: remoteproto.Direction_FORWARD, BlockHeight: 2, BlockHash: gointerfaces.ConvertHashToH256(common.Hash{2}), Changes: accountChange(1), Txs: [][]byte{original.Rlp}},
+			{Direction: remoteproto.Direction_UNWIND, BlockHeight: 1, BlockHash: gointerfaces.ConvertHashToH256(common.Hash{1}), Changes: accountChange(0), Txs: [][]byte{original.Rlp}},
+			{Direction: remoteproto.Direction_FORWARD, BlockHeight: 2, BlockHash: gointerfaces.ConvertHashToH256(common.Hash{3})},
+		},
+	}))
+
+	require.Contains(t, pool.byHash, string(replacement.IDHash[:]), "an orphaned transaction must not evict its pooled replacement")
+	require.NotContains(t, pool.byHash, string(original.IDHash[:]))
+}
+
+func TestFetchStateChangesUseLastTransactionDirection(t *testing.T) {
+	for _, kind := range []string{"ordinary", "frame", "blob frame"} {
+		t.Run(kind, func(t *testing.T) {
+			rlps := [][]byte{decodeHex(TxnParseMainnetTests[1].PayloadStr), decodeHex(TxnParseMainnetTests[2].PayloadStr)}
+			if kind != "ordinary" {
+				for i := range rlps {
+					frame := framePoolSlotWithNonce(t, common.Address{1}, uint64(i), 1, 2).Txn.(*types.FrameTransaction)
+					if kind == "blob frame" {
+						frame.BlobVersionedHashes = []common.Hash{{1}}
+					}
+					rlps[i] = framePoolSlotFromTransaction(t, frame).Rlp
+				}
+			}
+			for _, tc := range []struct {
+				name        string
+				first, last remoteproto.Direction
+			}{
+				{"forward then unwind", remoteproto.Direction_FORWARD, remoteproto.Direction_UNWIND},
+				{"unwind then forward", remoteproto.Direction_UNWIND, remoteproto.Direction_FORWARD},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					batch := &remoteproto.StateChangeBatch{ChangeBatch: []*remoteproto.StateChange{
+						{Direction: tc.first, Txs: [][]byte{rlps[0]}},
+						{Direction: tc.last, Txs: [][]byte{rlps[1], rlps[0]}},
+					}}
+					original := proto.Clone(batch)
+					pool := NewMockPool(gomock.NewController(t))
+					pool.EXPECT().OnNewBlock(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+						func(_ context.Context, changes *remoteproto.StateChangeBatch, unwind, unwindBlobs, mined TxnSlots) error {
+							require.True(t, proto.Equal(original, changes), "state changes must remain in batch order")
+							require.Equal(t, 2, len(unwind.Txns)+len(unwindBlobs.Txns)+len(mined.Txns))
+							var got TxnSlots
+							switch {
+							case tc.last == remoteproto.Direction_FORWARD:
+								got = mined
+							case kind == "blob frame":
+								got = unwindBlobs
+							default:
+								got = unwind
+							}
+							require.NoError(t, got.Valid())
+							require.Len(t, got.Txns, 2)
+							require.Equal(t, rlps[1], got.Txns[0].Rlp)
+							require.Equal(t, rlps[0], got.Txns[1].Rlp)
+							return nil
+						})
+					fetch := NewFetch(t.Context(), nil, pool, nil, nil, u256.N1, log.New())
+					require.NoError(t, fetch.handleStateChangesRequest(t.Context(), batch))
+				})
+			}
+		})
+	}
 }
 
 type MockSentry struct {
