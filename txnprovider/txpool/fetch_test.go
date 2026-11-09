@@ -889,9 +889,10 @@ type announceFetchTest struct {
 	queued        map[[32]byte]bool // hashes whose body waits for validation
 	onFilter      func()
 	onSend        func()
-	lookedUp      int      // hashes passed to HeldOrQueuedIdHashes
-	sentHashes    []Hashes // hashes of each request, in send order
-	blockSend     bool     // the next send blocks until its context is done
+	lookedUp      int           // hashes passed to HeldOrQueuedIdHashes
+	sentHashes    []Hashes      // hashes of each request, in send order
+	blockSend     bool          // the next send blocks until its context is done
+	blockStarted  chan struct{} // closed when the blocked send starts
 	requestIDs    []uint64
 	noDeadline    bool // a send reached sentry without a deadline
 	sendErr       error
@@ -942,6 +943,9 @@ func newAnnounceFetchTest(t *testing.T) *announceFetchTest {
 		DoAndReturn(func(ctx context.Context, r *sentryproto.SendMessageByIdRequest) (*sentryproto.SentPeers, error) {
 			if a.blockSend {
 				a.blockSend = false
+				if a.blockStarted != nil {
+					close(a.blockStarted)
+				}
 				<-ctx.Done()
 				return nil, ctx.Err()
 			}
@@ -1140,7 +1144,6 @@ func TestFetchBoundsQueuedBatch(t *testing.T) {
 	}
 }
 
-// Every PooledTransactions reply frees one retry slot of its peer, even one whose body a dedup drops.
 func retrySlotsLeftAfterReplies(t *testing.T, slots []retrySlot, replyIDs ...uint64) int {
 	t.Helper()
 	ctrl := gomock.NewController(t)
@@ -1785,8 +1788,12 @@ func TestBlockedSentryDoesNotDelayOtherSentries(t *testing.T) {
 	asked := make(chan struct{}, 1)
 	otherServer := sentryproto.NewMockSentryServer(gomock.NewController(t))
 	otherServer.EXPECT().SendMessageById(gomock.Any(), gomock.Any()).
-		DoAndReturn(func(_ context.Context, r *sentryproto.SendMessageByIdRequest) (*sentryproto.SentPeers, error) {
-			asked <- struct{}{}
+		DoAndReturn(func(ctx context.Context, r *sentryproto.SendMessageByIdRequest) (*sentryproto.SentPeers, error) {
+			select { // waits for the blocked send, so serial sends fail in either order
+			case <-a.blockStarted:
+				asked <- struct{}{}
+			case <-ctx.Done():
+			}
 			return &sentryproto.SentPeers{Peers: []*typesproto.H512{r.PeerId}}, nil
 		}).AnyTimes()
 	other, err := direct.NewSentryClientDirect(direct.ETH68, NewMockSentry(a.ctx, otherServer))
@@ -1798,7 +1805,7 @@ func TestBlockedSentryDoesNotDelayOtherSentries(t *testing.T) {
 	a.sentryClient = other
 	a.announce(t, peerC, h2)
 	a.sentryClient = blockedSentry
-	a.blockSend = true
+	a.blockSend, a.blockStarted = true, make(chan struct{})
 	*a.now = a.now.Add(txFetchTimeout)
 	ctx, cancel := context.WithCancel(a.ctx)
 	defer cancel()
