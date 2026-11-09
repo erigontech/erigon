@@ -54,7 +54,6 @@ func TestAttestationProducerHeadChange(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			cfg := clparams.MainnetBeaconConfig
-			cfg.SecondsPerSlot = 0
 			producer := attestation_producer.New(&cfg)
 			headState := state.New(&cfg)
 			slot := cfg.SlotsPerEpoch
@@ -97,7 +96,6 @@ func TestAttestationProducerHeadChange(t *testing.T) {
 
 func TestAttestationProducerPreviousSlotAfterHeadAdvance(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
-	cfg.SecondsPerSlot = 0
 	producer := attestation_producer.New(&cfg)
 	headState := state.New(&cfg)
 	slot := cfg.SlotsPerEpoch
@@ -119,7 +117,6 @@ func TestAttestationProducerPreviousSlotAfterHeadAdvance(t *testing.T) {
 
 func TestAttestationProducerPreviousEpochAfterHeadAdvance(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
-	cfg.SecondsPerSlot = 0
 	producer := attestation_producer.New(&cfg)
 	headState := state.New(&cfg)
 	slot := 2*cfg.SlotsPerEpoch - 1
@@ -138,4 +135,17 @@ func TestAttestationProducerPreviousEpochAfterHeadAdvance(t *testing.T) {
 	got, err := producer.ProduceAndCacheAttestationData(headState, newRoot, slot)
 	require.NoError(t, err)
 	require.Equal(t, want, got)
+}
+
+func TestAttestationProducerRejectsSlotTwoEpochsBeforeHead(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	producer := attestation_producer.New(&cfg)
+	headState := state.New(&cfg)
+	require.NoError(t, headState.SetSlot(3*cfg.SlotsPerEpoch))
+	slot := 2*cfg.SlotsPerEpoch - 1
+	require.NoError(t, headState.SetBlockRootAt(int(cfg.SlotsPerEpoch), common.Hash{1}))
+	require.NoError(t, headState.SetBlockRootAt(int(slot), common.Hash{2}))
+
+	_, err := producer.ProduceAndCacheAttestationData(headState, common.Hash{3}, slot)
+	require.ErrorContains(t, err, "head state is more than one epoch ahead")
 }

@@ -20,7 +20,6 @@ import (
 	"errors"
 	"fmt"
 	"sync"
-	"time"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -52,13 +51,15 @@ type attestationProducer struct {
 	beaconCfg *clparams.BeaconChainConfig
 
 	attCacheMutex              sync.RWMutex
-	attestationsCache          *lru.CacheWithTTL[attestationCacheKey, solid.AttestationData]
+	attestationsCache          *lru.Cache[attestationCacheKey, solid.AttestationData]
 	blockRootsUsedForSlotCache *lru.Cache[blockRootCacheKey, common.Hash]
 }
 
 func New(beaconCfg *clparams.BeaconChainConfig) AttestationDataProducer {
-	ttl := time.Duration(beaconCfg.SecondsPerSlot) * time.Second / 2
-	attestationsCache := lru.NewWithTTL[attestationCacheKey, solid.AttestationData]("attestations", attestationsCacheSize, ttl)
+	attestationsCache, err := lru.New[attestationCacheKey, solid.AttestationData]("attestations", attestationsCacheSize)
+	if err != nil {
+		panic(err)
+	}
 	blockRootsUsedForSlotCache, err := lru.New[blockRootCacheKey, common.Hash]("blockRootsUsedForSlot", attestationsCacheSize)
 	if err != nil {
 		panic(err)

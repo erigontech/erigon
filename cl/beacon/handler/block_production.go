@@ -712,8 +712,13 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 	var ok, cached bool
 	if haveHead {
 		attestationData, ok = a.forkchoiceStore.AttestationData(head.Root, *slot)
+		if !ok {
+			ancestor := a.forkchoiceStore.Ancestor(head.Root, *slot)
+			if ancestor.Root != (common.Hash{}) && ancestor.Root != head.Root {
+				attestationData, ok = a.forkchoiceStore.AttestationData(ancestor.Root, *slot)
+			}
+		}
 	}
-	forkChoiceData := ok
 	if !ok {
 		cacheHeadRoot, haveCacheHead := head.Root, haveHead
 		if !haveCacheHead {
@@ -784,7 +789,7 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 	// The API returns the requested index before Electra, leaves it zero in Electra
 	// and Fulu, and uses it to signal payload presence from Gloas.
 	if clversion.AfterOrEqual(clparams.GloasVersion) {
-		attestationData.CommitteeIndex, err = a.gloasAttestationIndex(*slot, attestationData.BeaconBlockRoot, head, forkChoiceData)
+		attestationData.CommitteeIndex, err = a.gloasAttestationIndex(*slot, attestationData.BeaconBlockRoot, head, haveHead)
 		if err != nil {
 			return nil, err
 		}
