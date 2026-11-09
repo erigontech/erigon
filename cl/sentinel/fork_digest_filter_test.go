@@ -17,6 +17,7 @@
 package sentinel
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -37,7 +38,7 @@ func discoveredNode(t *testing.T, eth2 []byte) *enode.Node {
 	require.NoError(t, err)
 	var r enr.Record
 	if eth2 != nil {
-		r.Set(enr.WithEntry("eth2", eth2))
+		r.Set(enr.WithEntry(clparams.NetworkConfigs[chainspec.MainnetChainID].Eth2key, eth2))
 	}
 	require.NoError(t, enode.SignV4(&r, key))
 	node, err := enode.New(enode.ValidSchemes, &r)
@@ -66,6 +67,16 @@ func TestOnOurForkMatchesTheEnrForkDigest(t *testing.T) {
 	require.False(t, s.onOurFork(discoveredNode(t, other)), "another network or fork")
 	require.False(t, s.onOurFork(discoveredNode(t, nil)), "no eth2 entry, e.g. an execution layer node")
 	require.False(t, s.onOurFork(discoveredNode(t, forkID[:3])), "truncated eth2 entry")
+}
+
+// Without our digest the status handshake fails every peer, so nothing is worth dialling.
+func TestOnOurForkRejectsNodesWithoutOurDigest(t *testing.T) {
+	s := forkFilterSentinel(t)
+	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
+	clock.EXPECT().CurrentForkDigest().Return(common.Bytes4{}, errors.New("no digest")).AnyTimes()
+	s.ethClock = clock
+
+	require.False(t, s.onOurFork(discoveredNode(t, []byte{1, 2, 3, 4, 5, 6, 7, 8, 0, 0, 0, 0, 0, 0, 0, 1})))
 }
 
 // Both dial paths take discovered nodes through nodesOnOurFork; it passes on only the nodes of our fork, in order.

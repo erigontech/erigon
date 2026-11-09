@@ -208,10 +208,7 @@ func (s *Sentinel) onOurFork(node *enode.Node) bool {
 		return false
 	}
 	digest, err := s.ethClock.CurrentForkDigest()
-	if err != nil {
-		return true
-	}
-	return bytes.Equal(forkID[:4], digest[:])
+	return err == nil && bytes.Equal(forkID[:4], digest[:])
 }
 
 // proactiveSubnetPeerSearch is a goroutine that monitors subnet coverage
