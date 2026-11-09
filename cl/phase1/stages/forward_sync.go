@@ -21,7 +21,6 @@ import (
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/protocol/misc"
@@ -658,10 +657,7 @@ func verifyAnchorEnvelopeSignature(beaconCfg *clparams.BeaconChainConfig, anchor
 }
 
 func validateAnchorPayloadWithEL(ctx context.Context, cfg *Cfg, bid *cltypes.ExecutionPayloadBid, env *cltypes.SignedExecutionPayloadEnvelope) (execution_client.PayloadStatus, error) {
-	versionedHashes, executionRequestsList := buildAnchorNewPayloadArgs(cfg.beaconCfg, bid, env)
+	versionedHashes := bid.VersionedHashes()
+	executionRequestsList := cltypes.GetExecutionRequestsList(cfg.beaconCfg, env.Message.ExecutionRequests)
 	return cfg.gloasPayloadValidator.NewPayloadWithAdmission(ctx, env.Message.Payload, &bid.ParentBlockRoot, versionedHashes, executionRequestsList)
-}
-
-func buildAnchorNewPayloadArgs(beaconCfg *clparams.BeaconChainConfig, bid *cltypes.ExecutionPayloadBid, env *cltypes.SignedExecutionPayloadEnvelope) ([]common.Hash, []hexutil.Bytes) {
-	return bid.VersionedHashes(), gloasExecutionRequestsList(beaconCfg, env.Message.ExecutionRequests)
 }

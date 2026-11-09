@@ -1625,11 +1625,8 @@ func (f *ForkChoiceStore) OnExecutionPayloadAt(ctx context.Context, signedEnvelo
 	if f.IsEnvelopeRejected(signedEnvelope.Message.BeaconBlockRoot) {
 		return fmt.Errorf("%w: envelope previously rejected for root %x", ErrInvalidExecutionPayloadEnvelope, signedEnvelope.Message.BeaconBlockRoot)
 	}
-	if err := signedEnvelope.ValidateForConfig(f.beaconCfg); err != nil {
-		return fmt.Errorf("invalid execution payload envelope: %w", err)
-	}
-	if err := signedEnvelope.ValidateForPersistence(f.beaconCfg); err != nil {
-		return fmt.Errorf("unpersistable execution payload envelope: %w", err)
+	if err := f.validateExecutionPayloadEnvelopeInput(signedEnvelope); err != nil {
+		return err
 	}
 
 	envelope := signedEnvelope.Message
@@ -1719,11 +1716,8 @@ func (f *ForkChoiceStore) ApplyLocalSelfBuildEnvelope(ctx context.Context, signe
 	if signedEnvelope == nil || signedEnvelope.Message == nil || signedEnvelope.Message.Payload == nil {
 		return errors.New("execution payload envelope has nil payload")
 	}
-	if err := signedEnvelope.ValidateForConfig(f.beaconCfg); err != nil {
-		return fmt.Errorf("invalid execution payload envelope: %w", err)
-	}
-	if err := signedEnvelope.ValidateForPersistence(f.beaconCfg); err != nil {
-		return fmt.Errorf("unpersistable execution payload envelope: %w", err)
+	if err := f.validateExecutionPayloadEnvelopeInput(signedEnvelope); err != nil {
+		return err
 	}
 
 	envelope := signedEnvelope.Message

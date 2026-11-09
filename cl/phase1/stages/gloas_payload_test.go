@@ -13,6 +13,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
@@ -59,10 +60,14 @@ type anchorEnvelopeTestStore struct {
 	root     common.Hash
 	state    *state2.CachingBeaconState
 	envelope *cltypes.SignedExecutionPayloadEnvelope
+	rejected bool
 }
 
-func (*anchorEnvelopeTestStore) IsEnvelopeRejected(common.Hash) bool { return false }
-func (*anchorEnvelopeTestStore) IsBlockInvalid(common.Hash) bool     { return false }
+func (s *anchorEnvelopeTestStore) IsEnvelopeRejected(root common.Hash) bool {
+	return root == s.root && s.rejected
+}
+
+func (*anchorEnvelopeTestStore) IsBlockInvalid(common.Hash) bool { return false }
 
 func (s *anchorEnvelopeTestStore) AnchorRoot() common.Hash {
 	return s.root
@@ -447,6 +452,15 @@ func TestChainTipAnchorEnvelopeRetriesAfterUnavailableResponse(t *testing.T) {
 	require.True(t, ensureAnchorEnvelopeForChild(context.Background(), store, recoverAnchor, child))
 	require.True(t, store.HasEnvelope(anchorRoot))
 	require.Equal(t, 2, requests)
+}
+
+func TestChainTipAnchorEnvelopeDoesNotNeedStateForRejectedAnchor(t *testing.T) {
+	root := common.Hash{1}
+	store := &anchorEnvelopeTestStore{root: root, rejected: true}
+	child := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+	child.Block.ParentRoot = root
+
+	require.True(t, ensureAnchorEnvelopeForChild(t.Context(), store, nil, child))
 }
 
 func TestChainTipAnchorEnvelopeStopsRecoveryForInvalidPayload(t *testing.T) {
@@ -910,11 +924,15 @@ func TestBlockSupportsExecutionPayloadEnvelopeUsesBlockVersion(t *testing.T) {
 }
 
 func TestGloasNewPayloadArgsUseEmptyVersionedHashes(t *testing.T) {
-	cfg, _, bid, env, _ := validAnchorEnvelopeFixture(t, 1)
+	cfg, anchor, bid, env, _ := validAnchorEnvelopeFixture(t, 1)
+	engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
+	engine.EXPECT().NewPayload(gomock.Any(), env.Message.Payload, &bid.ParentBlockRoot, []common.Hash{}, []hexutil.Bytes{}).
+		Return(execution_client.PayloadStatusValidated, nil)
+	store := newAnchorForkChoiceStore(t, cfg, anchor, engine)
 
-	anchorHashes, _ := buildAnchorNewPayloadArgs(cfg, bid, env)
-	require.NotNil(t, anchorHashes)
-	require.Empty(t, anchorHashes)
+	status, err := validateAnchorPayloadWithEL(t.Context(), &Cfg{beaconCfg: cfg, gloasPayloadValidator: store}, bid, env)
+	require.NoError(t, err)
+	require.EqualValues(t, execution_client.PayloadStatusValidated, status)
 
 	block := &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Body: &cltypes.BeaconBody{Version: clparams.GloasVersion}}}
 	block.Block.Body.SignedExecutionPayloadBid = &cltypes.SignedExecutionPayloadBid{Message: bid}

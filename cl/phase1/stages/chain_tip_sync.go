@@ -34,13 +34,6 @@ const (
 	chainTipPollInterval         = time.Second
 )
 
-func gloasExecutionRequestsList(beaconCfg *clparams.BeaconChainConfig, requests *cltypes.ExecutionRequests) []hexutil.Bytes {
-	if requests == nil {
-		return nil
-	}
-	return cltypes.GetExecutionRequestsList(beaconCfg, requests)
-}
-
 func validPendingGloasPayload(p forkchoice.PendingELPayload) bool {
 	return p.Block != nil && p.Block.Block != nil && p.Envelope != nil && p.Envelope.Message != nil && p.Envelope.Message.Payload != nil
 }
@@ -899,7 +892,7 @@ func ensureAnchorEnvelopeForChild(
 	if anchorRoot == (common.Hash{}) || common.Hash(child.Block.ParentRoot) != anchorRoot {
 		return true
 	}
-	if store.HasEnvelope(anchorRoot) || store.IsBlockInvalid(anchorRoot) {
+	if store.HasEnvelope(anchorRoot) || store.IsEnvelopeRejected(anchorRoot) || store.IsBlockInvalid(anchorRoot) {
 		return true
 	}
 	anchorState, err := store.GetStateAtBlockRoot(anchorRoot)
@@ -912,9 +905,6 @@ func ensureAnchorEnvelopeForChild(
 		return false
 	}
 	if childBid.Message.ParentBlockHash != anchorBid.BlockHash {
-		return true
-	}
-	if store.IsEnvelopeRejected(anchorRoot) {
 		return true
 	}
 	if recoverAnchor == nil {
@@ -1307,7 +1297,7 @@ func buildGloasNewPayloadArgs(cfg *Cfg, block *cltypes.SignedBeaconBlock, envelo
 		return nil, nil, errors.New("missing execution payload bid")
 	}
 
-	return committedBid.Message.VersionedHashes(), gloasExecutionRequestsList(cfg.beaconCfg, envelope.Message.ExecutionRequests), nil
+	return committedBid.Message.VersionedHashes(), cltypes.GetExecutionRequestsList(cfg.beaconCfg, envelope.Message.ExecutionRequests), nil
 }
 
 func retryGloasPayloadWithEL(ctx context.Context, cfg *Cfg, block *cltypes.SignedBeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) (execution_client.PayloadStatus, error) {
