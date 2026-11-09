@@ -300,6 +300,13 @@ type RwCursorDupSort interface {
 	DeleteCurrentDuplicates() error       // DeleteCurrentDuplicates - deletes all values of the current key
 	DeleteExact(k1, k2 []byte) error      // DeleteExact - delete 1 value from given key
 	AppendDup(key, value []byte) error    // AppendDup - same as Append, but for sorted dup data
+
+	// DeleteCurrentMultiValBefore removes the current key's values below v and
+	// returns how many went. v==nil removes all of them. The cursor must be
+	// positioned on a key; it stays on that key, or is left unpositioned when no
+	// value survives, since a key with no values is itself gone. mdbx does this as
+	// a native bunch-delete, which beats per-dup deletes only on keys with many dups.
+	DeleteCurrentMultiValBefore(v []byte) (uint64, error)
 }
 
 type PseudoDupSortRwCursor interface { // For both DupSort and usual cursors (usual imitates functionality of ds)

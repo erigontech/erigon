@@ -8,6 +8,7 @@ import (
 	"math"
 	"time"
 
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
@@ -290,7 +291,16 @@ func TableScanningPrune(
 		}
 	}
 
-	lastVal, err := tableScanningPrune(ctx, stat, filenameBase, txFrom, txTo, txNumGetter, valDelCursor, keysCursor, throttling, logEvery, logger, prevStat.ValueProgress, prevStat.LastPrunedValue)
+	// dupBound is the dup value below which every value of a key has txNum < txTo.
+	// Only PrefixVal stores dups as txNum||val, i.e. sorted by txNum; the other
+	// modes can't express a txNum cut as a byte bound, so they leave it nil and
+	// keep walking dups one by one.
+	var dupBound []byte
+	if mode == PrefixValStorageMode {
+		dupBound = hexutil.EncodeTs(txTo)
+	}
+
+	lastVal, err := tableScanningPrune(ctx, stat, filenameBase, txFrom, txTo, txNumGetter, dupBound, valDelCursor, keysCursor, throttling, logEvery, logger, prevStat.ValueProgress, prevStat.LastPrunedValue)
 	if err != nil {
 		return nil, err
 	}
@@ -304,6 +314,8 @@ func TableScanningPrune(
 	return stat, nil
 }
 
+const minBunchDups = 8
+
 // tableScanningPrune scans values and deletes those in [txFrom, txTo).
 // Returns the last cursor position (non-nil) if interrupted by ctx, or nil if completed.
 func tableScanningPrune(
@@ -312,6 +324,7 @@ func tableScanningPrune(
 	filenameBase string,
 	txFrom, txTo uint64,
 	txNumGetter func(key, val []byte) uint64,
+	dupBound []byte,
 	valDelCursor kv.PseudoDupSortRwCursor,
 	keysCursor kv.RwCursorDupSort,
 	throttling *time.Duration,
@@ -320,6 +333,12 @@ func tableScanningPrune(
 	valueProgress Progress,
 	lastPrunedValue []byte,
 ) (interrupted []byte, err error) {
+	// The dupBound bunch-delete needs a real dupsort cursor to position on values.
+	dupCursor, ok := valDelCursor.(kv.RwCursorDupSort)
+	if !ok {
+		dupBound = nil
+	}
+
 	var val, txNumBytes []byte
 	switch valueProgress {
 	case InProgress:
@@ -388,6 +407,55 @@ func tableScanningPrune(
 			stat.MinTxNum = min(stat.MinTxNum, minTxNum)
 			stat.MaxTxNum = max(stat.MaxTxNum, maxTxNum)
 			goto nextKey
+		}
+
+		// Partial overlap with nothing below txFrom: the doomed dups are exactly
+		// those below txTo, a prefix mdbx cuts in one bunch-delete. Keys holding
+		// older dups to preserve, keys with fewer than minBunchDups dups, and modes
+		// whose dups aren't sorted by txNum fall through to the scan below.
+		if dupBound != nil && firstIsOldest && minTxNum >= txFrom {
+			dups, err := valDelCursor.CountDuplicates()
+			if err != nil {
+				return nil, fmt.Errorf("count dups %s: %w", filenameBase, err)
+			}
+			var firstSurvivor []byte
+			if dups >= minBunchDups {
+				firstSurvivor, err = dupCursor.SeekBothRange(val, dupBound)
+			}
+			if err != nil {
+				return nil, fmt.Errorf("seek prune bound %s: %w", filenameBase, err)
+			}
+			// maxTxNum >= txTo, so a survivor exists and the dup before it is the
+			// newest one actually deleted — read it now to keep the stats exact.
+			if firstSurvivor != nil {
+				_, lastDoomed, err := dupCursor.PrevDup()
+				if err != nil {
+					return nil, fmt.Errorf("PrevDup %s: %w", filenameBase, err)
+				}
+				if lastDoomed != nil {
+					maxDeleted := txNumGetter(val, lastDoomed)
+					deleted, err := dupCursor.DeleteCurrentMultiValBefore(dupBound)
+					if err != nil {
+						return nil, fmt.Errorf("cut dups below txTo %s: %w", filenameBase, err)
+					}
+					stat.MinTxNum = min(stat.MinTxNum, minTxNum)
+					stat.MaxTxNum = max(stat.MaxTxNum, maxDeleted)
+					stat.PruneCountValues += deleted
+					if throttling != nil {
+						time.Sleep(*throttling)
+					}
+					if ctx.Err() != nil {
+						cutKey, _, err := dupCursor.Current()
+						if err != nil {
+							return nil, fmt.Errorf("current after cut %s: %w", filenameBase, err)
+						}
+						stat.LastPrunedValue = bytes.Clone(cutKey)
+						stat.ValueProgress = InProgress
+						return bytes.Clone(cutKey), nil
+					}
+					goto nextKey
+				}
+			}
 		}
 
 		// Partial overlap: iterate dups and delete those in range.
