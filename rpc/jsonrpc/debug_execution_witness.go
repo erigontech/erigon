@@ -21,7 +21,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
@@ -729,11 +728,6 @@ func (api *BaseAPI) buildAccessedState(
 	return collectAccessedState(recordingState, mode), accessedBlockHashes, nil
 }
 
-var (
-	mxParentStateHit  = metrics.GetOrCreateCounter("witness_parent_state_hits_total")
-	mxParentStateMiss = metrics.GetOrCreateCounter("witness_parent_state_misses_total")
-)
-
 type parentStateReader struct {
 	state.StateReader
 	parent commitmentdb.ParentState
@@ -742,10 +736,10 @@ type parentStateReader struct {
 func (r *parentStateReader) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
 	acc, ok := r.parent.GetCommittedAccount(address)
 	if !ok {
-		mxParentStateMiss.Inc()
+		witnessCacheParentStateMissCounter.Inc()
 		return r.StateReader.ReadAccountData(address)
 	}
-	mxParentStateHit.Inc()
+	witnessCacheParentStateHitCounter.Inc()
 	var got *accounts.Account
 	if acc != nil {
 		c := *acc
@@ -770,10 +764,10 @@ func (r *parentStateReader) ReadAccountDataForDebug(address accounts.Address) (*
 func (r *parentStateReader) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
 	val, ok := r.parent.GetCommittedStorage(address, key)
 	if !ok {
-		mxParentStateMiss.Inc()
+		witnessCacheParentStateMissCounter.Inc()
 		return r.StateReader.ReadAccountStorage(address, key)
 	}
-	mxParentStateHit.Inc()
+	witnessCacheParentStateHitCounter.Inc()
 	var v uint256.Int
 	v.SetBytes(val)
 	if dbg.AssertEnabled {
@@ -935,8 +929,6 @@ type warmRecord struct {
 	step kv.Step
 }
 
-var mxWarmRecords = metrics.GetOrCreateCounter("witness_warm_records_total")
-
 func (hc *headCaptureSource) recordReader() *commitmentdb.ParentRecords {
 	if hc.warm == nil {
 		return hc.records
@@ -999,7 +991,7 @@ func (hc *headCaptureSource) warmPaths(ctx context.Context, accessed *accessedSt
 					return nil
 				}
 				hc.warm.Store(string(key), warmRecord{data: bytes.Clone(v), step: step})
-				mxWarmRecords.Inc()
+				witnessCacheWarmRecordsCounter.Inc()
 				return v
 			}
 			for i := w; i < len(paths) && ctx.Err() == nil; i += len(txs) {

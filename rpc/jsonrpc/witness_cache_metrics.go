@@ -19,6 +19,9 @@ package jsonrpc
 import "github.com/erigontech/erigon/diagnostics/metrics"
 
 var (
+	witnessCacheParentStateHitCounter  = metrics.GetOrCreateCounter("witness_cache_parent_state_hit_total")
+	witnessCacheParentStateMissCounter = metrics.GetOrCreateCounter("witness_cache_parent_state_miss_total")
+	witnessCacheWarmRecordsCounter     = metrics.GetOrCreateCounter("witness_cache_warm_records_total")
 	witnessCacheHitCounter             = metrics.GetOrCreateCounter("witness_cache_hit_total")
 	witnessCacheMissCounter            = metrics.GetOrCreateCounter("witness_cache_miss_total")
 	witnessCacheAwaitCounter           = metrics.GetOrCreateCounter("witness_cache_await_total")
