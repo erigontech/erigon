@@ -83,7 +83,7 @@ func (m *AggregateRegistrationMessage) ValidatorIndices() []int64 {
 	if m.Version == LegacyValidatorRegistrationMessageVersion {
 		return []int64{int64(m.ValidatorIndex)}
 	}
-	indices := make([]int64, 0)
+	indices := make([]int64, 0, m.Count)
 	for i := 0; i < int(m.Count); i++ {
 		indices = append(indices, int64(m.ValidatorIndex)+int64(i))
 	}
