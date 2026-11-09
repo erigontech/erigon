@@ -123,7 +123,7 @@ func TestCatchUpStateNotificationCompleteness(t *testing.T) {
 	accumulator := shards.NewAccumulator()
 	cfg := ExecuteBlockCfg{db: db, notifications: &shards.Notifications{Accumulator: accumulator}}
 	header := makeHeader(100, common.Hash{})
-	require.NoError(t, execV3Finalize(ctx, nil, cfg, doms, 200, 100, header, false, "test", logger))
+	require.NoError(t, execV3Finalize(ctx, nil, cfg, doms, 1, 200, 100, header, false, "test", logger))
 	capture := new(stateChangeCapture)
 	accumulator.SendAndReset(ctx, capture, 1, 1, 1_000_000, 0)
 	require.NotNil(t, capture.batch)

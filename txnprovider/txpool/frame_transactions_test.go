@@ -445,6 +445,67 @@ func TestFramePoolSharesOrdinaryBalance(t *testing.T) {
 	}
 }
 
+type stateCommitOnReadDB struct {
+	kv.TemporalRoDB
+	commit func()
+}
+
+func (db *stateCommitOnReadDB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
+	tx, err := db.TemporalRoDB.BeginTemporalRo(ctx) //nolint:gocritic // the returned transaction is owned by the caller
+	if err == nil && db.commit != nil {
+		commit := db.commit
+		db.commit = nil
+		commit()
+	}
+	return tx, err
+}
+
+func TestFramePoolIncompleteBatchRefreshesOrdinaryPayer(t *testing.T) {
+	for _, beforeCommit := range []bool{false, true} {
+		t.Run(fmt.Sprintf("before commit=%t", beforeCommit), func(t *testing.T) {
+			ctx, pool, payer := keyedFramePoolEnv(t)
+			backend := pool.ethBackend.(*frameValidationBackend)
+			backend.balance = common.Ether
+			ordinary := newTestTxnSlot(0, 0, 1, 2, 21_000)
+			ordinary.Txn.GetValue().SetUint64(common.Ether / 2)
+			ordinary.IDHash = ordinary.Txn.Hash()
+			frame := framePoolSlot(t, payer, 1, 2, uint256.Int{1})
+			var txns TxnSlots
+			txns.Append(ordinary, payer[:], true)
+			txns.Append(frame, payer[:], true)
+			reasons, err := pool.AddLocalTxns(ctx, txns)
+			require.NoError(t, err)
+			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Success}, reasons)
+			require.Equal(t, 2, pool.pending.Len())
+
+			backend.balance = 500_000
+			account := accounts.Account{Nonce: 1, Balance: *uint256.NewInt(backend.balance), CodeHash: accounts.EmptyCodeHash}
+			coreDB := pool._chainDB.(kv.TemporalRwDB)
+			change := newBlockChangeForAccounts(common.Hash{1}, 0)
+			change.StateChangesIncomplete = true
+			require.NoError(t, coreDB.View(ctx, func(tx kv.Tx) error {
+				var err error
+				change.StateVersionId, err = rawdb.GetStateVersion(tx)
+				return err
+			}))
+			change.StateVersionId++
+			commit := func() {
+				writeTestSenderState(t, ctx, coreDB, pool.logger, payer, accounts.SerialiseV3(&account), 1)
+			}
+			if beforeCommit {
+				pool._chainDB = &stateCommitOnReadDB{TemporalRoDB: coreDB, commit: commit}
+			} else {
+				commit()
+			}
+			require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+			require.Contains(t, pool.byHash, string(frame.IDHash[:]), "a mined ordinary transaction must not consume the frame payer's remaining balance")
+			require.NotContains(t, pool.byHash, string(ordinary.IDHash[:]))
+			require.Equal(t, PendingSubPool, pool.byHash[string(frame.IDHash[:])].currentSubPool)
+			require.Equal(t, frame.frameValidation.MaxCost, pool.frameReservations[payer].cost)
+		})
+	}
+}
+
 func TestFramePoolReservationReleasePromotesOrdinary(t *testing.T) {
 	for _, action := range []string{"replacement", "mined", "expired", "revalidation rejected", "revalidation payer change", "pool overflow"} {
 		t.Run(action, func(t *testing.T) {

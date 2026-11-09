@@ -571,7 +571,8 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 		}
 		dispatcher := e.pipelineExecutor.Dispatcher()
-		if result.Status == ExecutionStatusSuccess && dispatcher != nil && e.accum != nil && e.accum.Accumulator.HasPendingChanges() {
+		// Below-finality requests leave head markers untouched, so they cannot publish retained state.
+		if !belowFinality && result.Status == ExecutionStatusSuccess && dispatcher != nil && e.accum != nil && e.accum.Accumulator.HasPendingChanges() {
 			// The short circuit may close roTx while committing forkchoice markers.
 			if err := e.db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
 				stateVersion, err := rawdb.GetStateVersion(tx)

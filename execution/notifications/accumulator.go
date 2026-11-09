@@ -149,9 +149,10 @@ func (a *Accumulator) MarkIncomplete() {
 // StartChange begins accumulation of changes for a new block.
 func (a *Accumulator) StartChange(h *types.Header, txs [][]byte, unwind bool) {
 	a.changes = append(a.changes, StateChange{
-		BlockHeight: h.Number.Uint64(),
-		BlockHash:   h.Hash(),
-		BlockTime:   h.Time,
+		BlockHeight:      h.Number.Uint64(),
+		FirstBlockHeight: h.Number.Uint64(),
+		BlockHash:        h.Hash(),
+		BlockTime:        h.Time,
 	})
 	a.latestChange = &a.changes[len(a.changes)-1]
 	if h.SlotNumber != nil {
@@ -168,6 +169,12 @@ func (a *Accumulator) StartChange(h *types.Header, txs [][]byte, unwind bool) {
 			a.latestChange.Txs[i] = bytes.Clone(txs[i])
 		}
 	}
+}
+
+func (a *Accumulator) StartIncompleteRange(firstBlock uint64, lastHeader *types.Header) {
+	a.StartChange(lastHeader, nil, false)
+	a.latestChange.FirstBlockHeight = firstBlock
+	a.MarkIncomplete()
 }
 
 func (a *Accumulator) HasAccountChange(address common.Address) bool {

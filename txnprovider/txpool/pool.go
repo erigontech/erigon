@@ -317,6 +317,35 @@ func (p *TxPool) start(ctx context.Context) error {
 	})
 }
 
+// Incomplete notifications cannot supply every changed account before commit.
+// Wait for their state version without holding the pool lock or a database snapshot.
+func beginBlockState(ctx context.Context, db kv.TemporalRoDB, changes *remoteproto.StateChangeBatch) (kv.TemporalTx, error) {
+	if !changes.StateChangesIncomplete {
+		return db.BeginTemporalRo(ctx)
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	for {
+		tx, err := db.BeginTemporalRo(ctx) //nolint:gocritic // caller owns the returned transaction; stale snapshots are rolled back below
+		if err != nil {
+			return nil, err
+		}
+		version, err := rawdb.GetStateVersion(tx)
+		if err == nil && version >= changes.StateVersionId {
+			return tx, nil
+		}
+		tx.Rollback()
+		if err != nil {
+			return nil, err
+		}
+		select {
+		case <-waitCtx.Done():
+			return nil, fmt.Errorf("wait for announced state version %d: %w", changes.StateVersionId, waitCtx.Err())
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+}
+
 func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.StateChangeBatch, unwindTxns, unwindBlobTxns, minedTxns TxnSlots) error {
 	defer newBlockTimer.ObserveDuration(time.Now())
 	for _, txn := range unwindTxns.Txns {
@@ -325,7 +354,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 
 	coreDB, cache := p.chainDB()
 	cache.OnNewBlock(stateChanges)
-	coreTx, err := coreDB.BeginTemporalRo(ctx)
+	coreTx, err := beginBlockState(ctx, coreDB, stateChanges)
 	if err != nil {
 		return err
 	}
@@ -1868,13 +1897,21 @@ func (p *TxPool) addTxnsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView,
 	// queued forever, since the only re-evaluation trigger is the sender
 	// appearing in a block's stateChanges, which doesn't happen if the
 	// queued tx is the sender's only outstanding tx.
-	queuedSenders := map[uint64]struct{}{}
+	sendersToRefresh := map[uint64]struct{}{}
 	for _, mt := range p.queued.best.ms {
 		senderID := mt.TxnSlot.SenderID
 		if _, alreadyCovered := sendersWithChangedState[senderID]; alreadyCovered {
 			continue
 		}
-		queuedSenders[senderID] = struct{}{}
+		sendersToRefresh[senderID] = struct{}{}
+	}
+	if stateChanges.StateChangesIncomplete {
+		// Missing account changes can leave mined transactions spending a frame payer's balance.
+		for senderID := range p.all.senderIDTxnCount {
+			if _, changed := sendersWithChangedState[senderID]; !changed {
+				sendersToRefresh[senderID] = struct{}{}
+			}
+		}
 	}
 
 	for senderID := range sendersWithChangedState {
@@ -1887,9 +1924,8 @@ func (p *TxPool) addTxnsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView,
 		p.onSenderStateChange(senderID, nonce, balance, codeHash, blockGasLimit, logger)
 	}
 
-	// Don't touch senderLastActivity for queuedSenders — these senders did not
-	// change state on-chain, so the dormancy timer should not be reset.
-	for senderID := range queuedSenders {
+	// Refreshing eligibility without an announced account change must not extend the dormancy timer.
+	for senderID := range sendersToRefresh {
 		nonce, balance, codeHash, err := senders.info(cacheView, senderID)
 		if err != nil {
 			return announcements, err

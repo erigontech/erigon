@@ -748,6 +748,106 @@ func TestSuccessiveSetHeadAnnouncesDeepUnwindTarget(t *testing.T) {
 	require.Equal(t, target.SlotNumber, last.SlotNumber)
 }
 
+func TestBelowFinalityForkchoiceKeepsPendingNotifications(t *testing.T) {
+	m := New(t, WithStepSize(16), WithLoopBlockLimit(8))
+	chain, err := m.GenerateChain(27, nil)
+	require.NoError(t, err)
+	waitForBatchWithHead := subscribeStateChangeHeads(t, m)
+	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), chain.Blocks[:2]))
+	m.ExecModule.WaitIdle(t.Context())
+	waitForBatchWithHead(chain.Blocks[1].Hash())
+	fcu, err := m.UpdateForkChoice(t.Context(), chain.Blocks[1].Header(), WithFinalisedHash(chain.Blocks[1].Hash()))
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, fcu.Status)
+	m.ExecModule.WaitIdle(t.Context())
+
+	header := types.CopyHeader(chain.TopBlock.HeaderNoCopy())
+	header.Root[0] ^= 1
+	badTip := types.NewBlockFromNetwork(header, chain.TopBlock.Body(), chain.TopBlock.BlockAccessListSidecar())
+	blocks := append([]*types.Block(nil), chain.Blocks[2:]...)
+	blocks[len(blocks)-1] = badTip
+	status, err := m.InsertBlocks(t.Context(), blocks)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+	fcu, err = m.UpdateForkChoice(t.Context(), badTip.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusBadBlock, fcu.Status)
+	m.ExecModule.WaitIdle(t.Context())
+
+	retained := append([]notifications.StateChange(nil), m.Notifications.Accumulator.Changes()...)
+	require.NotEmpty(t, retained)
+	var committed uint64
+	require.NoError(t, m.DB.View(t.Context(), func(tx kv.Tx) error {
+		var err error
+		committed, err = stages.GetStageProgress(tx, stages.Finish)
+		require.Equal(t, badTip.Hash(), rawdb.ReadCurrentHeader(tx).Hash(), "the rejected catch-up left its requested head marker")
+		return err
+	}))
+	require.Greater(t, committed, uint64(2))
+	require.Less(t, committed, badTip.NumberU64())
+	fcu, err = m.UpdateForkChoice(t.Context(), chain.Blocks[0].Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, fcu.Status)
+	m.ExecModule.WaitIdle(t.Context())
+	require.Equal(t, retained, m.Notifications.Accumulator.Changes(), "an ignored head must not dispatch retained changes using the stale head marker")
+
+	accepted := chain.Blocks[committed-1]
+	fcu, err = m.UpdateForkChoice(t.Context(), accepted.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, fcu.Status)
+	m.ExecModule.WaitIdle(t.Context())
+	batch := waitForBatchWithHead(accepted.Hash())
+	for _, change := range batch.ChangeBatch {
+		require.LessOrEqual(t, change.BlockHeight, committed)
+	}
+	require.Empty(t, m.Notifications.Accumulator.Changes())
+}
+
+func TestRejectedHeadOnlyCatchupRetainsHeaderRange(t *testing.T) {
+	m := New(t, WithStepSize(16), WithLoopBlockLimit(8))
+	chain, err := m.GenerateChain(100, nil)
+	require.NoError(t, err)
+	waitForBatchWithHead := subscribeStateChangeHeads(t, m)
+	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), chain.Blocks[:2]))
+	m.ExecModule.WaitIdle(t.Context())
+	waitForBatchWithHead(chain.Blocks[1].Hash())
+
+	header := types.CopyHeader(chain.TopBlock.HeaderNoCopy())
+	header.Root[0] ^= 1
+	badTip := types.NewBlockFromNetwork(header, chain.TopBlock.Body(), chain.TopBlock.BlockAccessListSidecar())
+	blocks := append([]*types.Block(nil), chain.Blocks[2:]...)
+	blocks[len(blocks)-1] = badTip
+	status, err := m.InsertBlocks(t.Context(), blocks)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+	fcu, err := m.UpdateForkChoice(t.Context(), badTip.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusBadBlock, fcu.Status)
+	m.ExecModule.WaitIdle(t.Context())
+
+	var committed uint64
+	require.NoError(t, m.DB.View(t.Context(), func(tx kv.Tx) error {
+		var err error
+		committed, err = stages.GetStageProgress(tx, stages.Finish)
+		return err
+	}))
+	require.Greater(t, committed, uint64(10))
+	require.Greater(t, m.Notifications.Accumulator.Changes()[0].BlockHeight, uint64(3), "catch-up must omit individual block changes")
+	headers, unsubscribe := m.Notifications.Events.AddHeaderSubscription()
+	t.Cleanup(unsubscribe)
+	accepted := chain.Blocks[committed-1]
+	fcu, err = m.UpdateForkChoice(t.Context(), accepted.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, fcu.Status)
+	m.ExecModule.WaitIdle(t.Context())
+	waitForBatchWithHead(accepted.Hash())
+	var want []common.Hash
+	for _, block := range chain.Blocks[2:committed] {
+		want = append(want, block.Hash())
+	}
+	require.Equal(t, want, collectReorgSubscriptions(headers, nil, nil).headerHashes(t), "all committed catch-up headers must be announced")
+}
+
 func TestRejectedCatchupForkchoiceKeepsCommittedNotifications(t *testing.T) {
 	for _, name := range []string{"committed head", "new head"} {
 		t.Run(name, func(t *testing.T) {

@@ -107,8 +107,11 @@ func (d *Dispatcher) Dispatch(
 		if accumulator != nil {
 			for _, change := range accumulator.Changes() {
 				before := change.BlockHeight
-				if change.Direction == notifications.DirectionForward && before > 0 {
-					before--
+				if change.Direction == notifications.DirectionForward {
+					before = change.FirstBlockHeight
+					if before > 0 {
+						before--
+					}
 				}
 				base = min(base, before)
 			}
