@@ -668,15 +668,14 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					if !finalized && foldErr == nil {
 						foldErr = pe.foldTx(ctx, rwTx, applyResult)
 					}
-					for _, t := range applyResult.balTxs {
-						if t.index == -1 {
+					if applyResult.txIO != nil {
+						if balBuilder == nil {
 							balBuilder = state.NewBlockAccessListBuilder()
 						}
-						if balBuilder == nil || t.index != balBuilder.Next() {
-							balBuilder = nil
-							break
+						for balBuilder.Next()+1 < applyResult.balSealed {
+							i := balBuilder.Next()
+							balBuilder.Add(i, applyResult.txIO.ReadSet(i), applyResult.txIO.WriteSet(i))
 						}
-						balBuilder.Add(t.index, t.reads, t.writes)
 					}
 					if pe.accumulator != nil {
 						pendingAccumulatorWrites = append(pendingAccumulatorWrites, applyResult.writes)
@@ -1345,6 +1344,7 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 		}
 
 		if t.IsBlockEnd() {
+			executor.blockIO = state.NewVersionedIO(t.Version().TxIndex + 1)
 			pe.Lock()
 			if len(pe.blockExecutors) == 0 {
 				pe.blockExecutors = map[uint64]*blockExecutor{
@@ -1715,18 +1715,13 @@ type txResult struct {
 	writes                state.WriteSetView
 	versionMap            *state.VersionMap
 	rules                 *chain.Rules
-	// balTxs carries the sealed reads and writes of txs before the block's final one,
-	// so the apply loop builds the block access list while the block runs.
-	balTxs []balTx
+	// txIO and balSealed hand over the block's sealed reads and writes, tx indexes
+	// −1..balSealed−2, so the apply loop builds the block access list while the block runs.
+	txIO      *state.VersionedIO
+	balSealed int
 	// isFinalize marks block-end writes and logs, which have no receipt.
 	// The apply loop indexes these logs without changing the receipt cache.
 	isFinalize bool
-}
-
-type balTx struct {
-	index  int
-	reads  state.ReadSet
-	writes *state.WriteSet
 }
 
 // Block-STM model: workers own execution AND validation. Each worker flushes its
@@ -2561,9 +2556,6 @@ type blockExecutor struct {
 
 	// Publish tasks stores the state tasks ready for publication
 	publishTasks execStatusList
-	// balAttached counts the tx indexes, from -1, whose sets went out on a txResult.
-	balAttached int
-	balTxs      []balTx
 
 	// Multi-version map
 	versionMap *state.VersionMap
@@ -3261,6 +3253,10 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 	}
 
 	tx := task.index
+	if be.publishTasks.checkComplete(tx) {
+		pe.logger.Debug("[parallel] dropped a result for a published tx", "block", be.blockNum, "tx", res.Version().TxIndex, "incarnation", res.Version().Incarnation)
+		return nil, nil
+	}
 	be.results[tx] = &execResult{TxResult: res}
 	if res.Err != nil {
 		// The worker sends an error only after executing against the full committed
@@ -3387,16 +3383,10 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 			// The final task's sets are recorded again at block end, so it is left to the block result.
 			finalIndex := be.tasks[len(be.tasks)-1].Task.Version().TxIndex
-			buildsBAL := task.Rules().IsAmsterdam || pe.cfg.experimentalBAL
-			if buildsBAL && be.balTxs == nil {
-				be.balTxs = make([]balTx, finalIndex+1)
+			if (task.Rules().IsAmsterdam || pe.cfg.experimentalBAL) && be.tasks[0].Task.Version().TxIndex == -1 {
+				applyResult.txIO = be.blockIO
+				applyResult.balSealed = min(task.Version().TxIndex+2, finalIndex+1)
 			}
-			start := be.balAttached
-			for i := be.balAttached - 1; buildsBAL && i <= task.Version().TxIndex && i < finalIndex; i = be.balAttached - 1 {
-				be.balTxs[i+1] = balTx{i, be.blockIO.ReadSet(i), be.blockIO.WriteSet(i)}
-				be.balAttached++
-			}
-			applyResult.balTxs = be.balTxs[start:be.balAttached:be.balAttached]
 
 			pe.lastExecutedTxNum.Store(int64(applyResult.txNum))
 			applyResult.versionMap = be.versionMap
