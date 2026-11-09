@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"math/rand"
 	"slices"
 	"sync/atomic"
 	"testing"
@@ -169,6 +170,42 @@ func TestStorageTransitions(t *testing.T) {
 	path := func(first, fill byte) []byte { return commitmenttest.Path([]byte{first}, fill) }
 	put := func(p []byte, value byte) commitmenttest.Op { return commitmenttest.Op{Key: p, Storage: []byte{value}} }
 	del := commitmenttest.DeleteAt
+	for _, live := range []bool{false, true} {
+		t.Run(fmt.Sprintf("split-extension-live=%v", live), func(t *testing.T) {
+			ctx := runner.NewMemory(runner.ContextSpec{Borrowed: true, ForbidStateReads: true})
+			addr := [32]byte{0x35}
+			seed := storageOps([][]byte{slotPath(3, 5, 1), slotPath(3, 5, 8, 0), slotPath(3, 5, 8, 1)})
+			storageRound(t, ctx, addr, seed)
+			key := StorageNodeKey(addr, []byte{3, 5}, nil)
+			require.NotEmpty(t, ctx.Records()[string(key)])
+			ops := []commitmenttest.Op{del(slotPath(3, 5, 1)), put(slotPath(3, 9), 9)}
+			if live {
+				ops = append(ops[:1], put(slotPath(3, 5, 2), 2), ops[1])
+			}
+			root, parts, err := runStorageTaskWithPlan(ctx, storageTaskFor(addr, ops), foldPlan{})
+			require.NoError(t, err)
+			for _, part := range parts {
+				for _, delta := range part {
+					if live && bytes.Equal(delta.Key, key) {
+						require.NotEmpty(t, delta.Data, "live record must not be tombstoned")
+					}
+				}
+			}
+			require.NoError(t, applyDeltas(parts, ctx.PutBranch, nil))
+			if live {
+				require.NotEmpty(t, ctx.Records()[string(key)])
+			} else {
+				require.Empty(t, ctx.Records()[string(key)])
+			}
+			state := make(commitmenttest.State)
+			state.Apply(seed)
+			state.Apply(ops)
+			requireStorageState(t, ctx, addr, state)
+			fresh := runner.NewMemory(runner.ContextSpec{})
+			require.Equal(t, storageRound(t, fresh, addr, state.Ops()), root)
+			requireLiveRecords(t, fresh.Records(), ctx.Records(), "split extension")
+		})
+	}
 	for _, tc := range []struct {
 		name     string
 		addr     byte
@@ -441,6 +478,27 @@ func TestScheduling(t *testing.T) {
 		require.Greater(t, calls(wide(), 2, 16), int32(1))
 	})
 
+	t.Run("self_extended_whale_matches_serial", func(t *testing.T) {
+		addr := [32]byte{0x73}
+		seed := storageOps([][]byte{slotPath(3, 5, 1), slotPath(3, 5, 8)})
+		paths := make([][]byte, defaultStorageFanOutMin)
+		for i := range paths {
+			paths[i] = slotPath(byte(i%16), byte(i/16%16), byte(i/256%16), byte(i/4096%16), 9)
+		}
+		task := storageTaskFor(addr, storageOps(paths))
+		serial, parallel := newShardedContext(), newShardedContext()
+		storageRound(t, serial, addr, seed)
+		storageRound(t, parallel, addr, seed)
+		record, _, err := parallel.Branch(StorageNodeKey(addr, nil, nil))
+		require.NoError(t, err)
+		require.NotEmpty(t, (Record{data: record}).SelfExt())
+		want, _, err := runStorageTaskWithPlan(serial, task, foldPlan{})
+		require.NoError(t, err)
+		roots, parts := make([][32]byte, 1), make([]deltaParts, 1)
+		require.NoError(t, runStoragePhase(context.Background(), parallel, parallel.factory, []storageTask{task}, roots, parts, 2, defaultStorageFanOutMin, func(int) {}))
+		require.Equal(t, want, roots[0])
+	})
+
 	t.Run("field_update_preserves_storage_root", func(t *testing.T) {
 		address := parityAddress(3)
 		ctx := newShardedContext()
@@ -479,37 +537,52 @@ func TestScheduling(t *testing.T) {
 
 	var sparse, dense []int
 	for i := 0; len(dense) < 1500 || len(sparse) < 2; i++ {
-		h := commitment.KeyToHexNibbleHash(parityAddress(i))
+		h := commitment.KeyToHexNibbleHash(incrAddress(i))
 		switch {
-		case h[0] != 0:
+		case h[0] > 1:
 			if len(dense) < 1500 {
 				dense = append(dense, i)
 			}
-		case len(sparse) == 0:
+		case h[0] == 0 && len(sparse) == 0:
 			sparse = append(sparse, i)
-		case len(sparse) == 1 && h[1] != commitment.KeyToHexNibbleHash(parityAddress(sparse[0]))[1]:
+		case h[0] == 0 && len(sparse) == 1 && h[1] == commitment.KeyToHexNibbleHash(incrAddress(sparse[0]))[1] && h[2] != commitment.KeyToHexNibbleHash(incrAddress(sparse[0]))[2]:
 			sparse = append(sparse, i)
 		}
 	}
 	groupSeed := make([]commitmenttest.Op, 0, 2*len(dense))
 	for _, i := range append(append([]int(nil), dense...), sparse...) {
-		groupSeed = append(groupSeed, parityAccount(parityAddress(i), i))
+		groupSeed = append(groupSeed, parityAccount(incrAddress(i), i))
 		if i%3 == 0 {
-			groupSeed = append(groupSeed, commitmenttest.StorageAt(commitmenttest.SlotKey(parityAddress(i), paritySlot(i)), i))
+			groupSeed = append(groupSeed, commitmenttest.StorageAt(commitmenttest.SlotKey(incrAddress(i), paritySlot(i)), i))
 		}
 	}
-	groupNext := []commitmenttest.Op{commitmenttest.DeleteAt(parityAddress(sparse[0])), commitmenttest.DeleteAt(parityAddress(dense[3]))}
+	groupNext := []commitmenttest.Op{commitmenttest.DeleteAt(incrAddress(sparse[0])), commitmenttest.DeleteAt(incrAddress(dense[3]))}
 	for k, i := range dense[10:400] {
-		groupNext = append(groupNext, parityAccount(parityAddress(i), i+1))
+		groupNext = append(groupNext, parityAccount(incrAddress(i), i+1))
 		if k%4 == 0 {
-			groupNext = append(groupNext, commitmenttest.StorageAt(commitmenttest.SlotKey(parityAddress(i), paritySlot(i+7)), i+2))
+			groupNext = append(groupNext, commitmenttest.StorageAt(commitmenttest.SlotKey(incrAddress(i), paritySlot(i+7)), i+2))
 		}
 	}
 	for i := 100000; i < 100200; i++ {
-		if commitment.KeyToHexNibbleHash(parityAddress(i))[0] != 0 {
-			groupNext = append(groupNext, parityAccount(parityAddress(i), i))
+		if commitment.KeyToHexNibbleHash(incrAddress(i))[0] > 1 {
+			groupNext = append(groupNext, parityAccount(incrAddress(i), i))
 		}
 	}
+
+	rng := rand.New(rand.NewSource(35))
+	diverging := craftKey(rng, 20, []byte{0, (commitment.KeyToHexNibbleHash(incrAddress(sparse[0]))[1] + 1) % 16}, accountNibbles)
+	groupNext = append(groupNext, parityAccount(diverging, 1701))
+
+	for i := range 1200 {
+		prefix := []byte{byte(i % 2), 8}
+		if prefix[0] == 0 {
+			prefix[1] = commitment.KeyToHexNibbleHash(incrAddress(sparse[0]))[1]
+		}
+		key := craftKey(rng, 20, prefix, accountNibbles)
+		groupSeed = append(groupSeed, parityAccount(key, i+2000))
+		groupNext = append(groupNext, parityAccount(key, i+4000))
+	}
+	groupNext = append(groupNext, parityAccount(craftKey(rng, 20, []byte{1, 0}, accountNibbles), 6000))
 
 	for _, tc := range []struct {
 		name   string
@@ -808,15 +881,20 @@ func requireFinishes(t *testing.T, label string, run func() error) {
 func TestBoundedContextFactoryNeverDeadlocks(t *testing.T) {
 	entries := benchEntries("storage", 40)
 	updates := updatesOf(entries)
+	want, _, _ := runV3(t, newShardedContext(), v3Config{workers: 1}, entries)
 	for i := range 20 {
 		c := newShardedContext()
 		f := &slotFactory{ctx: c, slots: make(chan struct{}, 2)}
 		tr := newFactoryTrie(2, c, f.factory)
 		u := benchUpdatesIn(t.TempDir(), commitment.ModeCollect, entries, updates)
+		var root []byte
 		requireFinishes(t, fmt.Sprintf("process run %d", i), func() error {
-			_, err := tr.Process(context.Background(), u, "", nil, commitment.WarmupConfig{})
+			var err error
+			root, err = tr.Process(context.Background(), u, "", nil, commitment.WarmupConfig{})
 			return err
 		})
+		u.Close()
+		require.Equal(t, want[0], root)
 		tr.Release()
 	}
 
@@ -825,6 +903,18 @@ func TestBoundedContextFactoryNeverDeadlocks(t *testing.T) {
 		paths[i] = commitmenttest.Path([]byte{byte(i % 16), byte(i / 16)}, 5)
 	}
 	tasks := []storageTask{storageTaskFor([32]byte{1}, storageOps(paths)), storageTaskFor([32]byte{2}, storageOps(paths))}
+	wantRoots, wantParts := make([][32]byte, len(tasks)), make([]deltaParts, len(tasks))
+	unbounded := newShardedContext()
+	require.NoError(t, runStoragePhase(context.Background(), unbounded, unbounded.factory, tasks, wantRoots, wantParts, 2, 16, func(int) {}))
+	flatten := func(parts deltaParts) map[string]recordDelta {
+		out := make(map[string]recordDelta)
+		for _, part := range parts {
+			for _, delta := range part {
+				out[string(delta.Key)] = delta
+			}
+		}
+		return out
+	}
 	for i := range 20 {
 		c := newShardedContext()
 		f := &slotFactory{ctx: c, slots: make(chan struct{}, 2)}
@@ -832,6 +922,10 @@ func TestBoundedContextFactoryNeverDeadlocks(t *testing.T) {
 		requireFinishes(t, fmt.Sprintf("storage phase run %d", i), func() error {
 			return runStoragePhase(context.Background(), c, f.factory, tasks, roots, parts, 2, 16, func(int) {})
 		})
+		require.Equal(t, wantRoots, roots)
+		for j := range parts {
+			require.Equal(t, flatten(wantParts[j]), flatten(parts[j]))
+		}
 	}
 }
 
