@@ -3978,15 +3978,7 @@ func (t duBlockFilesTx) BlockFilesRoTx() *blocksnapshots.View { return t.view }
 
 type duSelectFunc func(mode prune.Mode, preverified snapcfg.Preverified) ([]snapcfg.PreverifiedItem, error)
 
-type duBlockReader interface {
-	Snapshots() dbservices.BlockSnapshots
-	IterateFrozenBodies(tx kv.Getter, f func(blockNum, baseTxNum, txCount uint64) error) error
-	FreezingCfg() ethconfig.BlocksFreezing
-	AllTypes() []snaptype.Type
-	TxnumReader() rawdbv3.TxNumsReader
-}
-
-func duPrunerSelect(ctx context.Context, tx kv.Tx, br duBlockReader, cc *chain.Config, stepSize uint64) duSelectFunc {
+func duPrunerSelect(ctx context.Context, tx kv.Tx, br snapshotsync.BlockReader, cc *chain.Config, stepSize uint64) duSelectFunc {
 	return func(mode prune.Mode, preverified snapcfg.Preverified) ([]snapcfg.PreverifiedItem, error) {
 		return snapshotsync.SnapshotsToDownload(ctx, "seg du", false, false, false, snapshotsync.BlobRetention{}, mode, snapshotsync.NoCaplin,
 			tx, br, cc, ethconfig.Defaults.Sync, stepSize, preverified, 0, kv.Step(math.MaxUint64))

@@ -250,7 +250,7 @@ func buildBlackListForPruning(
 	return blackList, nil
 }
 
-type blockReader interface {
+type BlockReader interface {
 	Snapshots() dbservices.BlockSnapshots
 	IterateFrozenBodies(tx kv.Getter, _ func(blockNum uint64, baseTxNum uint64, txCount uint64) error) error
 	FreezingCfg() ethconfig.BlocksFreezing
@@ -267,7 +267,7 @@ func stepAtTxNum(txNum, stepSize uint64) kv.Step {
 
 func getMinimumBlocksToDownload(
 	ctx context.Context,
-	blockReader blockReader,
+	blockReader BlockReader,
 	tx kv.Getter,
 	maxStateStep, stepSize uint64,
 	stateHistoryPruneTo, commitmentHistoryPruneTo, receiptsHistoryPruneTo uint64,
@@ -359,7 +359,7 @@ func getMaxStepRangeInSnapshots(preverified snapcfg.Preverified) (uint64, error)
 	return maxTo, nil
 }
 
-func computeBlocksToPrune(blockReader blockReader, p prune.Mode) (blocksToPrune uint64, historyToPrune uint64) {
+func computeBlocksToPrune(blockReader BlockReader, p prune.Mode) (blocksToPrune uint64, historyToPrune uint64) {
 	frozenBlocks := blockReader.Snapshots().SegmentsMax()
 	return p.Blocks.PruneTo(frozenBlocks), p.History.PruneTo(frozenBlocks)
 }
@@ -473,7 +473,7 @@ func SnapshotsToDownload(
 	prune prune.Mode,
 	caplin CaplinMode,
 	tx kv.Tx,
-	blockReader blockReader,
+	blockReader BlockReader,
 	cc *chain.Config,
 	syncCfg ethconfig.Sync,
 	stepSize uint64,
@@ -615,7 +615,7 @@ func SyncSnapshots(
 	prune prune.Mode,
 	caplin CaplinMode,
 	tx kv.RwTx,
-	blockReader blockReader,
+	blockReader BlockReader,
 	cc *chain.Config,
 	snapshotDownloader dbservices.DownloaderClient,
 	syncCfg ethconfig.Sync,
