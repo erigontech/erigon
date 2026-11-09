@@ -2,6 +2,7 @@ package stagedsync
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -30,6 +31,7 @@ func validateBlockPostExecution(engine rules.Engine, chainConfig *chain.Config, 
 	gasUsed, blobGasUsed uint64, checkReceipts, checkBloom bool,
 	receipts types.Receipts, txns types.Transactions, logger log.Logger,
 ) error {
+	defer func(start time.Time) { dbg.NpDetail("post_validate", time.Since(start)) }(time.Now())
 	err := engine.ValidateBlockPostExecution(chainConfig, header, gasUsed, blobGasUsed, checkReceipts, checkBloom, receipts, txns, logger)
 	switch {
 	case err != nil && dbg.LogHashMismatchReason():

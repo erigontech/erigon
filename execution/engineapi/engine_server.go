@@ -277,6 +277,9 @@ func (e *EngineServer) checkRequestsPresence(version clparams.StateVersion, exec
 	return nil
 }
 
+// shortcut: NP_BAL_STUB skips the BAL RLP decode, so execution runs without the BAL and no sidecar is stored; the header hash still comes from the raw bytes. Drop with the probe.
+var npBalStub = dbg.EnvBool("NP_BAL_STUB", false)
+
 // newPayload validates and may execute a payload.
 func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.ExecutionPayload,
 	expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash,
@@ -379,6 +382,7 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		header.ParentBeaconBlockRoot = parentBeaconBlockRoot
 	}
 
+	dbg.NpMark("np_header")
 	var blockAccessList *types.BlockAccessListSidecar
 	var blockAccessListErr error
 	if version < clparams.GloasVersion && req.SlotNumber != nil {
@@ -396,7 +400,9 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 			return nil, &rpc.InvalidParamsError{Message: "blockAccessList missing"}
 		}
 		balBytes := *req.BlockAccessList
-		blockAccessList, blockAccessListErr = types.DecodeBlockAccessListSidecarForBlock(balBytes, header.GasLimit, len(req.Transactions))
+		if !npBalStub {
+			blockAccessList, blockAccessListErr = types.DecodeBlockAccessListSidecarForBlock(balBytes, header.GasLimit, len(req.Transactions))
+		}
 		if blockAccessListErr != nil && !errors.Is(blockAccessListErr, types.ErrInvalidBlockAccessList) {
 			e.logger.Debug("[NewPayload] failed to decode blockAccessList", "err", blockAccessListErr, "raw", hex.EncodeToString(balBytes))
 			return &engine_types.PayloadStatus{
@@ -404,8 +410,9 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 				ValidationError: engine_types.NewStringifiedErrorFromString(fmt.Sprintf("%v: decode failed: %v", types.ErrInvalidBlockAccessList, blockAccessListErr)),
 			}, nil
 		}
+		dbg.NpMark("np_bal_rlp_decode")
 		var hash common.Hash
-		if blockAccessListErr != nil {
+		if blockAccessListErr != nil || npBalStub {
 			hash = crypto.Keccak256Hash(balBytes)
 		} else {
 			hash, err = blockAccessList.Hash()
@@ -413,6 +420,7 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 				return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("cannot hash blockAccessList: %v", err)}
 			}
 		}
+		dbg.NpMark("np_bal_hash")
 		header.BlockAccessListHash = &hash
 		if req.SlotNumber != nil {
 			slotNumber := uint64(*req.SlotNumber)
@@ -422,7 +430,6 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		}
 	}
 
-	dbg.NpMark("np_header_bal")
 	if (!e.config.IsCancun(header.Time) && version >= clparams.DenebVersion) ||
 		(e.config.IsCancun(header.Time) && version < clparams.DenebVersion) ||
 		(!e.config.IsPrague(header.Time) && version >= clparams.ElectraVersion) ||
@@ -531,6 +538,7 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 			}, nil
 		}
 	}
+	dbg.NpMark("np_bal_validate")
 
 	if version >= clparams.DenebVersion {
 		err := misc.ValidateBlobs(req.BlobGasUsed.Uint64(), e.config.GetMaxBlobGasPerBlock(header.Time), e.config.GetMaxBlobsPerBlock(header.Time), expectedBlobHashes, &transactions)
@@ -553,7 +561,7 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		}
 	}
 
-	dbg.NpMark("np_bal_blobs_check")
+	dbg.NpMark("np_blobs_check")
 	possibleStatus, err := e.getQuickPayloadStatusIfPossible(ctx, blockHash, uint64(req.BlockNumber), header.ParentHash, nil, true, defaultReadinessWait)
 	if err != nil {
 		return nil, err

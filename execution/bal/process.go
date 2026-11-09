@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -73,7 +74,10 @@ func Process(blockBalBytes []byte, h *types.Header, built *state.BlockAccessList
 	}
 	blockNum := h.Number.Uint64()
 	blockHash := h.Hash()
+	start := time.Now()
 	computedBlockBal := Create(blockNum, built, vio, dataDir, logger)
+	dbg.NpDetail("bal_create", time.Since(start))
+	start = time.Now()
 	err := computedBlockBal.Validate()
 	if err != nil {
 		return nil, fmt.Errorf("block %d: invalid computed block access list: %w", blockNum, err)
@@ -85,6 +89,8 @@ func Process(blockBalBytes []byte, h *types.Header, built *state.BlockAccessList
 	if err := computedBlockBal.ValidateMaxItems(h.GasLimit); err != nil {
 		return nil, fmt.Errorf("%w, block %d: %w", rules.ErrInvalidBlock, blockNum, err)
 	}
+	dbg.NpDetail("bal_validate", time.Since(start))
+	start = time.Now()
 	if h.BlockAccessListHash == nil {
 		return nil, fmt.Errorf("block %d: EIP-7928 active but BlockAccessListHash is nil in header", blockNum)
 	}
@@ -102,6 +108,7 @@ func Process(blockBalBytes []byte, h *types.Header, built *state.BlockAccessList
 	// in VersionMap.validateRead ensures deterministic parallel execution even
 	// without a stored BAL body, so the computed BAL is accurate.
 	computedBlockBalHash := computedBlockBal.Hash()
+	dbg.NpDetail("bal_hash", time.Since(start))
 	if blockBalHash != computedBlockBalHash {
 		var blockBal types.BlockAccessList
 		if blockBalBytes != nil {

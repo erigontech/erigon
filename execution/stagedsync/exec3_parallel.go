@@ -157,6 +157,9 @@ func drainToClose(applyResults <-chan applyResult, rootResults <-chan commitment
 	wg.Wait()
 }
 
+// shortcut: NP_EXIT_STUB skips the stored-BAL read and bal.Process, so a block whose executed access list disagrees with its header hash is accepted; the state root check stays. Drop with the probe.
+var npExitStub = dbg.EnvBool("NP_EXIT_STUB", false)
+
 // stopKind classifies why the executor was asked to stop. It maps directly
 // to the stage return: done→nil, more→ErrLoopExhausted, bad→fail.err+unwind.
 type stopKind uint8
@@ -443,6 +446,8 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 	var uncommittedTransactions uint64
 	var uncommittedGas int64
 	var hasLoggedExecution bool
+	// These points of the apply goroutine can precede NpStageEnd, so they are replayed after the loop exits.
+	var npExit struct{ blockRecv, balRead, notified, balDone, validated, closed, drained time.Time }
 
 	execErr := func() (err error) {
 		defer func() {
@@ -569,6 +574,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 			select {
 			case applyResult, ok := <-applyResults:
 				if !ok {
+					npExit.closed = time.Now()
 					// Exec loop closed the channel — batch complete. Drain calculator
 					// results, then exit. Skip the drain if rootResults already closed
 					// (ranging a nil channel hangs forever).
@@ -577,6 +583,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 							processCommit(cr)
 						}
 					}
+					npExit.drained = time.Now()
 					if lastBlockResult.BlockNum > 0 {
 						pe.txExecutor.lastCommittedBlockNum.Store(lastBlockResult.BlockNum)
 						pe.txExecutor.lastCommittedTxNum.Store(lastBlockResult.lastTxNum)
@@ -684,6 +691,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					blockApplyCount += writeCount
 					pe.rs.SetTrace(false)
 				case *blockResult:
+					npExit.blockRecv = time.Now()
 					built := balBuilder
 					balBuilder = nil
 					if finalized {
@@ -769,15 +777,17 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					var computedBAL types.BlockAccessList
 					var balErr error
 					var storedBAL []byte
-					if isAmsterdam && lastHeader != nil {
+					skipBAL := npExitStub && pe.cfg.balSink == nil
+					if isAmsterdam && lastHeader != nil && !skipBAL {
 						storedBAL, balErr = rawdb.ReadBlockAccessListBytes(rwTx, applyResult.BlockHash, applyResult.BlockNum)
 						storedBAL = bytes.Clone(storedBAL)
 					}
+					npExit.balRead = time.Now()
 					balDone := make(chan struct{})
 					h, txIO := lastHeader, applyResult.TxIO
 					go func() {
 						defer close(balDone)
-						if balErr == nil {
+						if balErr == nil && !skipBAL {
 							computedBAL, balErr = bal.Process(storedBAL, h, built, txIO, isAmsterdam, pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir, pe.logger)
 						}
 					}()
@@ -817,13 +827,16 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					blockUpdateCount = 0
 					blockApplyCount = 0
 
+					npExit.notified = time.Now()
 					<-balDone
+					npExit.balDone = time.Now()
 					// Join the per-block validator spawned above; its verdict wins over
 					// a bal.Process error.
 					if err := blockValidatorWaiter.Wait(); err != nil {
 						failInfra(fmt.Errorf("%w, block=%d, %w", rules.ErrInvalidBlock, applyResult.BlockNum, err))
 						continue
 					}
+					npExit.validated = time.Now()
 
 					if balErr != nil {
 						failInfra(balErr)
@@ -879,7 +892,14 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 	}()
 
 	executorCancel(nil)
-	dbg.NpMark("exec_loop_exit")
+	dbg.NpMarkAt("exit_fold_wait", npExit.blockRecv)
+	dbg.NpMarkAt("exit_bal_read", npExit.balRead)
+	dbg.NpMarkAt("exit_notify", npExit.notified)
+	dbg.NpMarkAt("exit_bal_wait", npExit.balDone)
+	dbg.NpMarkAt("exit_validate_wait", npExit.validated)
+	dbg.NpMarkAt("exit_close_wait", npExit.closed)
+	dbg.NpMarkAt("exit_root_drain", npExit.drained)
+	dbg.NpMark("exit_tail")
 
 	if !hasLoggedExecution {
 		pe.LogExecution()

@@ -19,6 +19,7 @@ package dbg
 import (
 	"runtime"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -79,4 +80,30 @@ func TestMemUsageMatchesMemStats(t *testing.T) {
 	require.InEpsilon(t, before.Alloc, alloc, 0.05)
 	require.GreaterOrEqual(t, sys, before.Sys)
 	require.LessOrEqual(t, sys, after.Sys)
+}
+
+func TestNpMarkAtClipsPointsBeforeThePreviousMark(t *testing.T) {
+	NpBegin(1)
+	defer func() { npPhase.active = false }()
+	NpStageEnd(time.Now())
+	stageEnd := npPhase.last
+
+	NpMarkAt("before", stageEnd.Add(-time.Second))
+	NpMarkAt("missing", time.Time{})
+	require.Equal(t, stageEnd, npPhase.last)
+	NpMarkAt("after", stageEnd.Add(time.Second))
+	NpMarkAt("next", stageEnd.Add(3*time.Second))
+
+	require.Equal(t, []any{"before", time.Duration(0), "missing", time.Duration(0), "after", time.Second, "next", 2 * time.Second}, npPhase.post)
+}
+
+func TestNpDetailKeepsTheLastValueOfAName(t *testing.T) {
+	NpBegin(1)
+	defer func() { npPhase.active = false }()
+
+	NpDetail("a", time.Second)
+	NpDetail("b", time.Minute)
+	NpDetail("a", time.Hour)
+
+	require.Equal(t, []any{"a", time.Hour, "b", time.Minute}, npPhase.detail)
 }

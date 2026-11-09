@@ -33,6 +33,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/rpc/jsonstream"
@@ -671,9 +672,13 @@ func (h *handler) handleCall(cp *callProc, msg *jsonrpcMessage, stream *jsonstre
 	if callb == nil {
 		return msg.errorResponse(&methodNotFoundError{method: msg.Method}), nil
 	}
+	decodeStart := time.Now()
 	args, err := parsePositionalArguments(msg.Params, callb.argTypes)
 	if err != nil {
 		return msg.errorResponse(&InvalidParamsError{err.Error()}), nil
+	}
+	if strings.HasPrefix(msg.Method, "engine_newPayload") {
+		dbg.NpParamsDecoded(time.Since(decodeStart))
 	}
 	start := time.Now()
 	answer, answered := h.runMethod(cp.ctx, msg, callb, args, stream)
