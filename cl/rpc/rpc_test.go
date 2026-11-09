@@ -492,8 +492,9 @@ func TestBlocksByRangeRejectsMoreChunksThanRequested(t *testing.T) {
 	sentinel := &blockResponseSentinel{response: response.Bytes()}
 	client := &BeaconRpcP2P{ctx: t.Context(), sentinel: sentinel, beaconConfig: &cfg, ethClock: clock}
 
-	_, _, err = client.SendBeaconBlocksByRangeReq(t.Context(), 1, 1)
+	_, pid, err := client.SendBeaconBlocksByRangeReq(t.Context(), 1, 1)
 	require.ErrorContains(t, err, "more chunks than requested")
+	require.Equal(t, pid, sentinel.bannedPeer, "block callers do not ban, so the request must")
 }
 
 func TestExecutionPayloadEnvelopesByRootRejectsOverLimit(t *testing.T) {
@@ -554,7 +555,7 @@ func TestExecutionPayloadEnvelopesByRangeCapsResponseBelowSlotSpan(t *testing.T)
 	require.ErrorContains(t, err, "more chunks than requested")
 	require.Len(t, envelopes, 1)
 	require.Equal(t, "malicious-peer", pid)
-	require.Equal(t, pid, sentinel.bannedPeer)
+	require.Equal(t, pid, sentinel.softBannedPeer)
 }
 
 func TestExecutionPayloadEnvelopesByRangeRejectsOnlyOverflowingRanges(t *testing.T) {
@@ -795,7 +796,7 @@ func TestExecutionPayloadEnvelopeRequestsRejectExcessResponseChunks(t *testing.T
 		require.Len(t, envelopes, 1)
 		require.NotNil(t, envelopes[0].Message)
 		require.Equal(t, "malicious-peer", pid)
-		require.Equal(t, pid, sentinel.bannedPeer)
+		require.Equal(t, pid, sentinel.softBannedPeer)
 	}
 }
 
@@ -823,7 +824,7 @@ func TestExecutionPayloadEnvelopeRequestsRejectResponseForEmptyRequest(t *testin
 		require.ErrorContains(t, err, "more chunks than requested")
 		require.ErrorIs(t, err, ErrInvalidResponse)
 		require.Empty(t, envelopes)
-		require.Equal(t, pid, sentinel.bannedPeer)
+		require.Equal(t, pid, sentinel.softBannedPeer)
 	}
 }
 
@@ -1123,7 +1124,7 @@ func TestSendBeaconBlocksByRangeReqToPeerUsesThatPeer(t *testing.T) {
 		require.ErrorIs(t, err, ErrInvalidResponse)
 		require.ErrorContains(t, err, "more chunks than requested")
 		require.Nil(t, blocks)
-		require.Equal(t, "directed-peer", sentinel.bannedPeer)
+		require.Equal(t, "directed-peer", sentinel.softBannedPeer)
 	})
 }
 
