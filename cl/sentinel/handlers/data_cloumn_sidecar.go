@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"errors"
+	"time"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -10,6 +11,7 @@ import (
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/libp2p/go-libp2p/core/network"
 )
 
@@ -70,10 +72,21 @@ func (c *ConsensusHandlers) dataColumnSidecarsByRangeHandler(s network.Stream) e
 		return err
 	}
 	defer tx.Rollback()
+	return c.writeColumnsByRange(s, tx, req, startSlot, endSlot, curSlot)
+}
 
-	count := 0
+// writeColumnsByRange counts every existence check, not only hits: a miss answers nothing and costs the peer no response budget.
+func (c *ConsensusHandlers) writeColumnsByRange(s network.Stream, tx kv.Tx, req *cltypes.ColumnSidecarsByRangeRequest, startSlot, endSlot, curSlot uint64) error {
+	deadline := time.Now().Add(StreamDeadline)
+	count, checked := 0, uint64(0)
 	var responseErr error
 	for slot := startSlot; slot < endSlot; slot++ {
+		if err := c.ctx.Err(); err != nil {
+			return err
+		}
+		if checked >= c.beaconConfig.MaxRequestDataColumnSidecars || time.Now().After(deadline) {
+			break
+		}
 		if slot > curSlot {
 			// slot is in the future
 			break
@@ -99,6 +112,7 @@ func (c *ConsensusHandlers) dataColumnSidecarsByRangeHandler(s network.Stream) e
 				return false
 			}
 
+			checked++
 			exists, err := c.dataColumnStorage.ColumnSidecarExists(c.ctx, slot, blockRoot, int64(columnIndex))
 			if err != nil {
 				log.Debug("failed to check if data column sidecar exists", "error", err)

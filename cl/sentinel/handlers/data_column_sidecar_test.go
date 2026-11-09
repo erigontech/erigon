@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/sentinel/communication"
@@ -304,6 +305,39 @@ func TestDataColumnSidecarsByRootTooManyColumnsReturnsInvalidRequest(t *testing.
 	t.Cleanup(func() { stream.Close() })
 
 	expectDataColumnSidecarResponsePrefix(t, stream, reqBuf.Bytes(), InvalidRequestPrefix)
+}
+
+type missingColumnsStore struct {
+	blob_storage.DataColumnStorage
+	checks int
+}
+
+func (m *missingColumnsStore) ColumnSidecarExists(context.Context, uint64, common.Hash, int64) (bool, error) {
+	m.checks++
+	return false, nil
+}
+
+func TestDataColumnSidecarsByRangeBoundsTheChecksOfMissingColumns(t *testing.T) {
+	_, mainnetCfg := clparams.GetConfigsByNetwork(1)
+	cfg := *mainnetCfg
+	cfg.MaxRequestDataColumnSidecars = 10
+	cfg.AltairForkEpoch, cfg.BellatrixForkEpoch, cfg.CapellaForkEpoch, cfg.DenebForkEpoch, cfg.ElectraForkEpoch, cfg.FuluForkEpoch = 0, 0, 0, 0, 0, 0
+	_, indiciesDB := setupStore(t)
+	tx, err := indiciesDB.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	const slots = uint64(32)
+	for slot := range slots {
+		require.NoError(t, beacon_indicies.MarkRootCanonical(tx, slot, common.Hash{byte(slot + 1)}))
+	}
+	store := &missingColumnsStore{}
+	c := &ConsensusHandlers{ctx: t.Context(), beaconConfig: &cfg, dataColumnStorage: store}
+	req := &cltypes.ColumnSidecarsByRangeRequest{Columns: solid.NewUint64ListSSZ(int(cfg.NumberOfColumns))}
+	req.Columns.Append(0)
+	req.Columns.Append(1)
+
+	require.NoError(t, c.writeColumnsByRange(nil, tx, req, 0, slots, slots))
+	require.LessOrEqual(t, store.checks, int(cfg.MaxRequestDataColumnSidecars)+1)
 }
 
 func TestDataColumnSidecarsByRangeZeroCountReturnsEmptySuccess(t *testing.T) {
