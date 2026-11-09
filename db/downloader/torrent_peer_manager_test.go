@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -203,12 +202,10 @@ func TestTorrentPeerManagerCountsTheWaitFromTheFailedCheck(t *testing.T) {
 
 // A peer whose client accepts only uTP (--torrent.disable-tcp) must be found reachable over uTP.
 func TestTorrentPeerManagerDefaultCheckReachesAUTPOnlyPeer(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("Windows reserves UDP port ranges, so binding the uTP socket can fail (see #23204)")
-	}
 	utpOnly := func() *torrent.Client {
 		cfg := newTestClientConfig(t, t.TempDir())
-		cfg.DisableUTP, cfg.DisableTCP = false, true
+		// One UDP socket on a port the OS picks: no second bind on a chosen port, which Windows can refuse (#23204).
+		cfg.DisableUTP, cfg.DisableTCP, cfg.DisableIPv6 = false, true, true
 		// The uTP socket drops a connection unless some torrent wants one; these clients have no torrents.
 		cfg.AlwaysWantConns = true
 		client, err := torrent.NewClient(cfg)

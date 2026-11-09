@@ -29,8 +29,9 @@ type TorrentPeerManager struct {
 	inject func(torrent.PeerInfo)
 	now    func() time.Time
 
-	mu         sync.Mutex
-	knownPeers map[enode.ID]btPeerInfo // DevP2P peers with a BT endpoint, reachable or not
+	// knownPeers holds the DevP2P peers with a BT endpoint, reachable or not. Only sync touches it, from Run's one
+	// goroutine, so it needs no lock.
+	knownPeers map[enode.ID]btPeerInfo
 }
 
 const (
@@ -99,7 +100,6 @@ func (m *TorrentPeerManager) sync(ctx context.Context) {
 	currentPeers := make(map[enode.ID]struct{})
 	var due []enode.ID
 
-	m.mu.Lock()
 	for _, node := range nodes {
 		var bt enr.BT
 		if err := node.Record().Load(&bt); err != nil || bt == 0 {
@@ -127,24 +127,16 @@ func (m *TorrentPeerManager) sync(ctx context.Context) {
 			m.logger.Debug("[bt-peers] peer left DevP2P, removed from tracking", "node", id.TerminalString())
 		}
 	}
-	addrs := make([]torrent.PeerInfo, len(due))
-	for i, id := range due {
-		addrs[i] = m.knownPeers[id].addr
-	}
-	m.mu.Unlock()
-
 	reachable := make([]bool, len(due))
 	var probes sync.WaitGroup
 	for i := range due {
-		probes.Go(func() { reachable[i] = m.probe(ctx, addrs[i].Addr.String()) })
+		probes.Go(func() { reachable[i] = m.probe(ctx, m.knownPeers[due[i]].addr.Addr.String()) }) // reads only
 	}
 	probes.Wait()
 	checked := m.now() // a failed check can take its whole timeout; the wait starts after it
 
 	var toInject []torrent.PeerInfo
-	m.mu.Lock()
 	for i, id := range due {
-		// Only sync writes knownPeers, and Run calls it from one goroutine, so the entry is as the checks found it.
 		p := m.knownPeers[id]
 		if reachable[i] {
 			p.reachable = true
@@ -157,8 +149,6 @@ func (m *TorrentPeerManager) sync(ctx context.Context) {
 		}
 		m.knownPeers[id] = p
 	}
-	m.mu.Unlock()
-	// Adding a peer touches every torrent, so it runs outside the lock.
 	for _, pi := range toInject {
 		m.inject(pi)
 	}
@@ -204,10 +194,8 @@ func (m *TorrentPeerManager) addPeerToAllTorrents(pi torrent.PeerInfo) {
 	}
 }
 
-// PeerCount returns the number of tracked torrent peers.
+// PeerCount returns the number of tracked torrent peers. Like sync, it must not run alongside Run.
 func (m *TorrentPeerManager) PeerCount() int {
-	m.mu.Lock()
-	defer m.mu.Unlock()
 	return len(m.knownPeers)
 }
 
