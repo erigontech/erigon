@@ -643,3 +643,12 @@ func TestConcurrentTrieContextFactoryReportsAFullReadTxLimitAsErrorContext(t *te
 	_, err := trieCtx.Account(nil)
 	require.ErrorIs(t, err, kv.ErrReadTxLimitExceeded)
 }
+
+func TestConcurrentV3FactoryYieldsAtReadTxLimit(t *testing.T) {
+	t.Parallel()
+	sdc := &SharedDomainsCommitmentContext{sharedDomains: stubSharedDomains{}, patriciaTrie: &testTrie{}}
+	factory, _ := sdc.concurrentTrieContextFactory(t.Context(), &beginRoRecordingDB{}, nil, nil, 0, nil)
+	trieCtx, cleanup := factory(kv.WithNonBlockingAcquire(t.Context()))
+	require.Nil(t, trieCtx)
+	require.Nil(t, cleanup)
+}
