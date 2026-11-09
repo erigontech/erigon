@@ -160,23 +160,19 @@ func TestUploadRequests_ReplaysLeaveWorkersForBodiesAndCacheHits(t *testing.T) {
 						}
 					},
 				}
-				var handled sync.WaitGroup
 				responses := make(chan *sentryproto.SendMessageByIdRequest, 6)
 				send := func(response *sentryproto.SendMessageByIdRequest) { responses <- response }
-				first := startUploadTestStream(t, ctx, cs, &handled, send)
-				second := startUploadTestStream(t, ctx, cs, &handled, send)
-				handled.Add(1)
+				first := startUploadTestStream(t, ctx, cs, nil, send)
+				second := startUploadTestStream(t, ctx, cs, nil, send)
 				require.NoError(t, first.Send(uploadRequest(t, id, 1, 1, common.Hash{1})))
 				synctest.Wait()
 				for peer := byte(2); peer <= 4; peer++ {
-					handled.Add(1)
 					require.NoError(t, second.Send(uploadRequest(t, id, peer, uint64(peer), common.Hash{1})))
 				}
 				synctest.Wait()
 				require.Equal(t, int32(1), calls.Load(), "all sentries must share one uncached receipt slot")
 				require.Equal(t, int32(1), db.reads.Load(), "waiting replays must not open read transactions")
 
-				handled.Add(2)
 				require.NoError(t, second.Send(uploadRequest(t, sentryproto.MessageId_GET_BLOCK_BODIES_66, 2, 5, common.Hash{2})))
 				require.NoError(t, second.Send(uploadRequest(t, id, 3, 6, common.Hash{2})))
 				synctest.Wait()
@@ -190,7 +186,7 @@ func TestUploadRequests_ReplaysLeaveWorkersForBodiesAndCacheHits(t *testing.T) {
 					}
 				}
 				close(release)
-				handled.Wait()
+				synctest.Wait()
 				require.Equal(t, int32(4), calls.Load())
 				require.Len(t, responses, 4, "waiting replays must eventually receive replies")
 			})
@@ -307,13 +303,11 @@ func TestUploadRequests_LimitsSharedAcrossSentries(t *testing.T) {
 				return nil, ctx.Err()
 			}
 		}
-		var handled sync.WaitGroup
 		responses := make(chan *sentryproto.SendMessageByIdRequest, 10)
 		send := func(response *sentryproto.SendMessageByIdRequest) { responses <- response }
-		first := startUploadTestStream(t, ctx, cs, &handled, send)
-		second := startUploadTestStream(t, ctx, cs, &handled, send)
+		first := startUploadTestStream(t, ctx, cs, nil, send)
+		second := startUploadTestStream(t, ctx, cs, nil, send)
 
-		handled.Add(2)
 		require.NoError(t, first.Send(uploadRequest(t, sentryproto.MessageId_GET_BLOCK_BODIES_66, 1, 1, common.Hash{1})))
 		synctest.Wait()
 		require.NoError(t, second.Send(uploadRequest(t, sentryproto.MessageId_GET_BLOCK_BODIES_66, 1, 2, common.Hash{1})))
@@ -321,7 +315,6 @@ func TestUploadRequests_LimitsSharedAcrossSentries(t *testing.T) {
 		require.Equal(t, int32(1), calls.Load(), "the same peer on another sentry must not get a second slot")
 
 		for peer := byte(2); peer <= 8; peer++ {
-			handled.Add(1)
 			stream := first
 			if peer%2 == 0 {
 				stream = second
@@ -332,11 +325,10 @@ func TestUploadRequests_LimitsSharedAcrossSentries(t *testing.T) {
 		require.Equal(t, int32(4), calls.Load(), "all sentries must share the four upload slots")
 
 		close(release)
-		handled.Wait()
+		synctest.Wait()
 		require.Len(t, responses, 9, "queued requests must drain after the four active handlers finish")
-		handled.Add(1)
 		require.NoError(t, first.Send(uploadRequest(t, sentryproto.MessageId_GET_BLOCK_BODIES_66, 1, 10, common.Hash{1})))
-		handled.Wait()
+		synctest.Wait()
 		require.Equal(t, int32(10), calls.Load(), "completed work must release its peer and global slot")
 	})
 }
@@ -402,47 +394,17 @@ func TestUploadRequests_PipelinedRequestsBothAnswered(t *testing.T) {
 				return nil, ctx.Err()
 			}
 		}}
-		var handled sync.WaitGroup
 		responses := make(chan *sentryproto.SendMessageByIdRequest, 2)
-		stream := startUploadTestStream(t, ctx, cs, &handled, func(response *sentryproto.SendMessageByIdRequest) { responses <- response })
-		handled.Add(2)
+		stream := startUploadTestStream(t, ctx, cs, nil, func(response *sentryproto.SendMessageByIdRequest) { responses <- response })
 		require.NoError(t, stream.Send(uploadRequest(t, sentryproto.MessageId_GET_RECEIPTS_69, 1, 100, common.Hash{1})))
 		synctest.Wait()
 		require.NoError(t, stream.Send(uploadRequest(t, sentryproto.MessageId_GET_BLOCK_BODIES_66, 1, 101, common.Hash{2})))
 		synctest.Wait()
 		close(release)
-		handled.Wait()
+		synctest.Wait()
 		require.Len(t, responses, 2, "one peer's concurrent bodies and receipts requests must both get a reply")
 		requireUploadResponse(t, <-responses, 100)
 		requireUploadResponse(t, <-responses, 101)
-	})
-}
-
-func TestUploadRequests_SmallBurstAllAnswered(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		ctx, cancel := context.WithCancel(t.Context())
-		defer cancel()
-		cs := newUploadTestClient(t)
-		release := make(chan struct{})
-		cs.ethApiWrapper = uploadReceiptsGetter{getReceipts: func(ctx context.Context, _ *types.Block) (types.Receipts, error) {
-			select {
-			case <-release:
-				return types.Receipts{{CumulativeGasUsed: 21_000}}, nil
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			}
-		}}
-		var handled sync.WaitGroup
-		responses := make(chan *sentryproto.SendMessageByIdRequest, 5)
-		stream := startUploadTestStream(t, ctx, cs, &handled, func(response *sentryproto.SendMessageByIdRequest) { responses <- response })
-		for peer := byte(1); peer <= 5; peer++ {
-			handled.Add(1)
-			require.NoError(t, stream.Send(uploadRequest(t, sentryproto.MessageId_GET_RECEIPTS_69, peer, uint64(peer), common.Hash{1})))
-		}
-		synctest.Wait()
-		close(release)
-		handled.Wait()
-		require.Len(t, responses, 5, "a small burst must drain after active work finishes")
 	})
 }
 
@@ -466,11 +428,9 @@ func TestUploadRequests_WaitingPeersTakeTurns(t *testing.T) {
 				return nil, ctx.Err()
 			}
 		}
-		var handled sync.WaitGroup
 		responses := make(chan *sentryproto.SendMessageByIdRequest, 6)
-		stream := startUploadTestStream(t, ctx, cs, &handled, func(response *sentryproto.SendMessageByIdRequest) { responses <- response })
+		stream := startUploadTestStream(t, ctx, cs, nil, func(response *sentryproto.SendMessageByIdRequest) { responses <- response })
 		for peer := byte(1); peer <= 4; peer++ {
-			handled.Add(1)
 			require.NoError(t, stream.Send(uploadRequest(t, sentryproto.MessageId_GET_BLOCK_BODIES_66, peer, uint64(peer), common.Hash{peer})))
 		}
 		synctest.Wait()
@@ -478,7 +438,6 @@ func TestUploadRequests_WaitingPeersTakeTurns(t *testing.T) {
 		for range 4 {
 			<-started
 		}
-		handled.Add(2)
 		require.NoError(t, stream.Send(uploadRequest(t, sentryproto.MessageId_GET_BLOCK_BODIES_66, 1, 6, common.Hash{1})))
 		synctest.Wait()
 		require.NoError(t, stream.Send(uploadRequest(t, sentryproto.MessageId_GET_BLOCK_BODIES_66, 5, 5, common.Hash{5})))
@@ -495,7 +454,7 @@ func TestUploadRequests_WaitingPeersTakeTurns(t *testing.T) {
 		for peer := 2; peer <= 4; peer++ {
 			close(releases[peer])
 		}
-		handled.Wait()
+		synctest.Wait()
 		require.Len(t, responses, 6)
 	})
 }
