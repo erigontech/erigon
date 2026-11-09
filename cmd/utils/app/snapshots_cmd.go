@@ -3926,6 +3926,19 @@ func duReadChain(tx kv.Tx) (*chain.Config, prune.Mode, error) {
 	return cc, pm, err
 }
 
+func duOpenBlockSnapshots(dirs datadir.Dirs, chainName string, logger log.Logger) (*blocksnapshots.RoSnapshots, error) {
+	snaps := blocksnapshots.NewRoSnapshots(ethconfig.NewSnapCfg(false, true, true, chainName), dirs.Snap, logger)
+	if err := snaps.OpenFolder(); err != nil {
+		snaps.Close()
+		return nil, err
+	}
+	if err := snaps.OpenSegments([]snaptype.Type{snaptype2.Headers, snaptype2.Bodies}, false); err != nil {
+		snaps.Close()
+		return nil, err
+	}
+	return snaps, nil
+}
+
 func duStepSize(dirs datadir.Dirs, logger log.Logger) (uint64, error) {
 	path := filepath.Join(dirs.Snap, state.ERIGONDB_SETTINGS_FILE)
 	if _, err := os.Stat(path); err != nil {
@@ -3934,6 +3947,9 @@ func duStepSize(dirs datadir.Dirs, logger log.Logger) (uint64, error) {
 	settings, err := state.ResolveErigonDBSettings(dirs, logger, false)
 	if err != nil {
 		return 0, err
+	}
+	if settings.StepSize == 0 {
+		return 0, fmt.Errorf("%s: step_size must be greater than 0", path)
 	}
 	return settings.StepSize, nil
 }
@@ -4324,8 +4340,8 @@ func doDU(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs, logger lo
 	if err != nil {
 		return err
 	}
-	blockSnaps := blocksnapshots.NewRoSnapshots(ethconfig.NewSnapCfg(false, true, true, chainName), dirs.Snap, logger)
-	if err := blockSnaps.OpenFolder(); err != nil {
+	blockSnaps, err := duOpenBlockSnapshots(dirs, chainName, logger)
+	if err != nil {
 		return err
 	}
 	defer blockSnaps.Close()

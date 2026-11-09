@@ -35,11 +35,14 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/db/snaptype2"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
+	"github.com/erigontech/erigon/execution/chain/networkname"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
 
@@ -944,6 +947,55 @@ func TestDUReadChain_UninitialisedChaindataIsAnError(t *testing.T) {
 	var err error
 	require.NotPanics(t, func() { _, _, err = duReadChain(tx) })
 	require.Error(t, err)
+}
+
+func TestDUStepSize_ZeroStepSizeIsAnError(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, state.ERIGONDB_SETTINGS_FILE), []byte("steps_in_frozen_file = 64\n"), 0o644))
+
+	_, err := duStepSize(dirs, log.New())
+	require.Error(t, err)
+}
+
+func duWriteSegment(t *testing.T, dir string, from, to uint64, typ snaptype.Enum) {
+	c, err := seg.NewCompressor(t.Context(), "test", filepath.Join(dir, snaptype.SegmentFileName(version.V1_0, from, to, typ)), dir, seg.DefaultCfg, log.LvlDebug, log.New())
+	require.NoError(t, err)
+	defer c.Close()
+	c.DisableFsync()
+	require.NoError(t, c.AddWord([]byte{1}))
+	require.NoError(t, c.Compress())
+	idxNames := []string{typ.String()}
+	if typ == snaptype2.Transactions.Enum() {
+		idxNames = append(idxNames, snaptype2.Indexes.TxnHash2BlockNum.Name)
+	}
+	for _, name := range idxNames {
+		idx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
+			KeyCount:   1,
+			BucketSize: 10,
+			TmpDir:     dir,
+			IndexFile:  filepath.Join(dir, snaptype.IdxFileName(version.V1_0, from, to, name)),
+			LeafSize:   8,
+		}, log.New())
+		require.NoError(t, err)
+		idx.DisableFsync()
+		require.NoError(t, idx.AddKey([]byte{1}, 0))
+		require.NoError(t, idx.Build(t.Context()))
+		idx.Close()
+	}
+}
+
+func TestDUOpenBlockSnapshots_UsesTheDownloaderRange(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	for _, r := range [][2]uint64{{0, 500_000}, {500_000, 1_000_000}} {
+		duWriteSegment(t, dirs.Snap, r[0], r[1], snaptype2.Enums.Headers)
+		duWriteSegment(t, dirs.Snap, r[0], r[1], snaptype2.Enums.Bodies)
+	}
+	duWriteSegment(t, dirs.Snap, 0, 500_000, snaptype2.Enums.Transactions)
+
+	snaps, err := duOpenBlockSnapshots(dirs, networkname.Mainnet, log.New())
+	require.NoError(t, err)
+	defer snaps.Close()
+	require.Equal(t, uint64(999_999), snaps.SegmentsMax())
 }
 
 func TestDUStepSize_LegacyDatadirIsNotWritten(t *testing.T) {
