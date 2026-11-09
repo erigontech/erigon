@@ -314,25 +314,23 @@ func checkCaplinBlobSnapshotCoverage(view *freezeblocks.CaplinView, beaconCfg *c
 		requiredTo = (beaconTo - 1) / snaptype.CaplinMergeLimit * snaptype.CaplinMergeLimit
 	}
 
-	next := max(expectedFrom, blobsFromSlot)
-	for i, segment := range blobSegments {
+	floor := max(expectedFrom, blobsFromSlot)
+	next := expectedFrom
+	for _, segment := range blobSegments {
 		from, to := segment.Src().GetRange()
-		if i == 0 && from >= expectedFrom {
-			next = min(next, from)
-		}
 		if from < next {
 			return fmt.Errorf("overlapping or pre-Deneb blob snapshot range %d-%d; expected next slot %d", from, to, next)
 		}
-		if from > next {
-			return fmt.Errorf("missing blob snapshot coverage %d-%d", next, from)
+		if from > max(next, floor) {
+			return fmt.Errorf("missing blob snapshot coverage %d-%d", max(next, floor), from)
 		}
 		if to <= from || to > beaconTo {
 			return fmt.Errorf("invalid blob snapshot range %d-%d; beacon snapshots end at %d", from, to, beaconTo)
 		}
 		next = to
 	}
-	if next < requiredTo {
-		return fmt.Errorf("missing blob snapshot coverage %d-%d", next, requiredTo)
+	if max(next, floor) < requiredTo {
+		return fmt.Errorf("missing blob snapshot coverage %d-%d", max(next, floor), requiredTo)
 	}
 	return nil
 }
