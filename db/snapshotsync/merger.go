@@ -54,6 +54,9 @@ func (m *Merger) FindMergeRanges(currentRanges []Range) (toMerge []Range) {
 				break
 			}
 			aggFrom := r.To() - span
+			if aggFrom < currentRanges[0].From() {
+				continue
+			}
 			toMerge = append(toMerge, NewRange(aggFrom, r.To()))
 			for i >= 0 && currentRanges[i].From() > aggFrom {
 				i--
