@@ -57,7 +57,10 @@ type Remote struct {
 	headRetry time.Duration
 }
 
-var _ HeadNotifier = (*Remote)(nil)
+var (
+	_ StateReader  = (*Remote)(nil)
+	_ HeadNotifier = (*Remote)(nil)
+)
 
 // DialRemote connects to the private API of the Erigon node at addr. Receipt
 // regeneration uses dirs for temporary files.
@@ -94,7 +97,7 @@ func DialRemote(ctx context.Context, addr string, dirs datadir.Dirs, logger log.
 	}
 	blocks := freezeblocks.NewRemoteBlockReader(r.backend)
 	engine := rulesconfig.CreateRulesEngineBareBones(ctx, cfg, logger)
-	r.Native = NewNative(db, blocks, receipts.NewGenerator(dirs, blocks, engine, nil, time.Minute), cfg)
+	r.Native = NewNative(db, blocks, receipts.NewGenerator(dirs, blocks, engine, nil, time.Minute), engine, cfg)
 	return r, nil
 }
 

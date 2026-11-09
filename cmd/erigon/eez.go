@@ -204,7 +204,7 @@ func localL1(ctx context.Context, backend *eth.Ethereum, dirs datadir.Dirs, logg
 	blockReader, _ := backend.BlockIO()
 	engine := rulesconfig.CreateRulesEngineBareBones(ctx, chainConfig, logger)
 	gen := receipts.NewGenerator(dirs, blockReader, engine, nil, time.Minute)
-	return l1.NewLocal(db, blockReader, gen, chainConfig, backend.Notifications().Events), nil
+	return l1.NewLocal(db, blockReader, gen, engine, chainConfig, backend.Notifications().Events), nil
 }
 
 // dialL1 connects to the L1 node of cfg.

@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/eez/l1"
 	"github.com/erigontech/erigon/eez/l1/l1test"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc/jsonrpc/receipts"
 )
@@ -36,7 +37,7 @@ import (
 // Erigon L1.
 func TestNativeConformance(t *testing.T) {
 	m, model := l1test.ErigonL1(t)
-	l1test.Conformance(t, l1.NewNative(m.DB, m.BlockReader, m.ReceiptsReader, m.ChainConfig), model, l1test.SampleFilters)
+	l1test.Conformance(t, l1.NewNative(m.DB, m.BlockReader, m.ReceiptsReader, m.Engine, m.ChainConfig), model, l1test.SampleFilters)
 }
 
 // hidingReader serves no transaction of one block, as a node missing its
@@ -73,7 +74,62 @@ func TestNativeMissingTransaction(t *testing.T) {
 	require.NotEmpty(t, logs)
 
 	hiding := hidingReader{m.BlockReader, uint64(logs[0].BlockNumber)}
-	native := l1.NewNative(m.DB, hiding, receipts.NewGenerator(m.Dirs, hiding, m.Engine, nil, time.Minute), m.ChainConfig)
+	native := l1.NewNative(m.DB, hiding, receipts.NewGenerator(m.Dirs, hiding, m.Engine, nil, time.Minute), m.Engine, m.ChainConfig)
 	_, err = native.Logs(ctx, 0, head.Number, f.Address, f.Topics)
 	require.ErrorContains(t, err, "not found")
+}
+
+// staleCanonical reports hash canonical at number, as a block reader that
+// answers from a newer view than the read transaction would.
+type staleCanonical struct {
+	dbservices.FullBlockReader
+	number uint64
+	hash   common.Hash
+}
+
+func (r staleCanonical) CanonicalHash(ctx context.Context, tx kv.Getter, number uint64) (common.Hash, bool, error) {
+	if number == r.number {
+		return r.hash, true, nil
+	}
+	return r.FullBlockReader.CanonicalHash(ctx, tx, number)
+}
+
+// TestNativeCanonicalInReadTx: a block off the canonical chain of the read
+// transaction is refused even when the block reader calls it canonical.
+func TestNativeCanonicalInReadTx(t *testing.T) {
+	m, model := l1test.ErigonL1(t)
+	orphans := model.Orphans()
+	require.NotEmpty(t, orphans)
+	orphan := orphans[0].Header
+	blocks := staleCanonical{m.BlockReader, orphan.Number, orphan.Hash}
+	native := l1.NewNative(m.DB, blocks, receipts.NewGenerator(m.Dirs, blocks, m.Engine, nil, time.Minute), m.Engine, m.ChainConfig)
+	_, err := native.CodeAt(t.Context(), l1test.Registry, orphan.Hash)
+	require.ErrorIs(t, err, l1.ErrNotCanonical)
+	_, err = native.CallAt(t.Context(), l1test.RollupsCall, orphan.Hash)
+	require.ErrorIs(t, err, l1.ErrNotCanonical)
+}
+
+// TestStateAboveExecutedHead: state reads at a canonical block above the
+// executed head are not served.
+func TestStateAboveExecutedHead(t *testing.T) {
+	m, model := l1test.ErigonL1(t)
+	ctx := t.Context()
+	head, err := model.Head(ctx)
+	require.NoError(t, err)
+	require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
+		return stages.SaveStageProgress(tx, stages.Execution, head.Number-1)
+	}))
+	for name, r := range map[string]l1.StateReader{
+		"native": l1.NewNative(m.DB, m.BlockReader, m.ReceiptsReader, m.Engine, m.ChainConfig),
+		"rpc":    erigonRPC(t, m),
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := r.CodeAt(ctx, l1test.Registry, head.Hash)
+			require.ErrorIs(t, err, l1.ErrNotFound)
+			require.NotErrorIs(t, err, l1.ErrNotCanonical)
+			_, err = r.CallAt(ctx, l1test.RollupsCall, head.Hash)
+			require.ErrorIs(t, err, l1.ErrNotFound)
+			require.NotErrorIs(t, err, l1.ErrNotCanonical)
+		})
+	}
 }

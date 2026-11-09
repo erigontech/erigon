@@ -18,8 +18,10 @@
 package recording
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"maps"
 	"slices"
 	"sync"
 
@@ -40,6 +42,17 @@ type Block struct {
 	// in which case they are kept as given.
 	Logs     []*types.Log
 	Recorded bool
+	// Code and Calls answer state reads on the state after the block; a
+	// read they do not answer is not served.
+	Code  map[common.Address][]byte
+	Calls []CallResult
+}
+
+// CallResult is a call and its output, or its revert data if it reverted.
+type CallResult struct {
+	Call     l1.Call
+	Return   []byte
+	Reverted bool
 }
 
 // MemoryChain is an l1.ChainReader over blocks held in memory. It backs recordings
@@ -56,7 +69,10 @@ type MemoryChain struct {
 	maxLogRange uint64
 }
 
-var _ l1.ChainReader = (*MemoryChain)(nil)
+var (
+	_ l1.ChainReader = (*MemoryChain)(nil)
+	_ l1.StateReader = (*MemoryChain)(nil)
+)
 
 // NewMemoryChain returns a chain whose first canonical block is first;
 // nothing below it is served.
@@ -84,7 +100,10 @@ func (c *MemoryChain) SetMaxLogRange(n uint64) {
 }
 
 func (c *MemoryChain) store(b *Block) common.Hash {
-	stored := &Block{Header: b.Header, Txs: b.Txs, Logs: make([]*types.Log, len(b.Logs)), Recorded: b.Recorded}
+	stored := &Block{
+		Header: b.Header, Txs: b.Txs, Logs: make([]*types.Log, len(b.Logs)), Recorded: b.Recorded,
+		Code: maps.Clone(b.Code), Calls: slices.Clone(b.Calls),
+	}
 	for i, l := range b.Logs {
 		cp := *l
 		if b.Recorded {
@@ -193,6 +212,15 @@ func (c *MemoryChain) HeaderByNumber(_ context.Context, number uint64) (*l1.Head
 func (c *MemoryChain) HeaderByHash(_ context.Context, hash common.Hash) (*l1.Header, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
+	b, err := c.block(hash)
+	if err != nil {
+		return nil, err
+	}
+	h := b.Header
+	return &h, nil
+}
+
+func (c *MemoryChain) block(hash common.Hash) (*Block, error) {
 	b, ok := c.blocks[hash]
 	if !ok {
 		for _, b := range c.blocks {
@@ -202,8 +230,51 @@ func (c *MemoryChain) HeaderByHash(_ context.Context, hash common.Hash) (*l1.Hea
 		}
 		return nil, fmt.Errorf("%w: block %x", l1.ErrNotFound, hash)
 	}
-	h := b.Header
-	return &h, nil
+	return b, nil
+}
+
+// canonicalBlock returns the block with hash if it is canonical.
+func (c *MemoryChain) canonicalBlock(hash common.Hash) (*Block, error) {
+	b, err := c.block(hash)
+	if err != nil {
+		return nil, err
+	}
+	if canonical, ok := c.canonicalAt(b.Header.Number); !ok || canonical != hash {
+		return nil, fmt.Errorf("%w: %w: block %x", l1.ErrNotFound, l1.ErrNotCanonical, hash)
+	}
+	return b, nil
+}
+
+func (c *MemoryChain) CodeAt(_ context.Context, addr common.Address, blockHash common.Hash) ([]byte, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	b, err := c.canonicalBlock(blockHash)
+	if err != nil {
+		return nil, err
+	}
+	code, ok := b.Code[addr]
+	if !ok {
+		return nil, fmt.Errorf("%w: code of %x at block %x", l1.ErrNotFound, addr, blockHash)
+	}
+	return slices.Clone(code), nil
+}
+
+func (c *MemoryChain) CallAt(_ context.Context, call l1.Call, blockHash common.Hash) ([]byte, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	b, err := c.canonicalBlock(blockHash)
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range b.Calls {
+		if r.Call.To == call.To && bytes.Equal(r.Call.Data, call.Data) {
+			if r.Reverted {
+				return nil, fmt.Errorf("%w: call to %x at block %x: %x", l1.ErrReverted, call.To, blockHash, r.Return)
+			}
+			return slices.Clone(r.Return), nil
+		}
+	}
+	return nil, fmt.Errorf("%w: call to %x at block %x", l1.ErrNotFound, call.To, blockHash)
 }
 
 func (c *MemoryChain) Head(ctx context.Context) (*l1.Header, error) {

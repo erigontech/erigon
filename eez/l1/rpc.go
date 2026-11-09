@@ -38,7 +38,10 @@ type RPC struct {
 	client *rpc.Client
 }
 
-var _ ChainReader = (*RPC)(nil)
+var (
+	_ ChainReader = (*RPC)(nil)
+	_ StateReader = (*RPC)(nil)
+)
 
 // DialRPC connects to the JSON-RPC endpoint at url.
 func DialRPC(ctx context.Context, url string, logger log.Logger) (*RPC, error) {
@@ -156,6 +159,36 @@ func (r *RPC) TransactionByBlockHashAndIndex(ctx context.Context, blockHash comm
 	return tx, nil
 }
 
+// canonicalAt is the EIP-1898 block parameter of a state read at hash.
+func canonicalAt(hash common.Hash) map[string]any {
+	return map[string]any{"blockHash": hash, "requireCanonical": true}
+}
+
+func (r *RPC) CodeAt(ctx context.Context, addr common.Address, blockHash common.Hash) ([]byte, error) {
+	var code hexutil.Bytes
+	if err := r.client.CallContext(ctx, &code, "eth_getCode", addr, canonicalAt(blockHash)); err != nil {
+		return nil, mapError(err, fmt.Sprintf("code of %x at block %x", addr, blockHash))
+	}
+	return code, nil
+}
+
+func (r *RPC) CallAt(ctx context.Context, call Call, blockHash common.Hash) ([]byte, error) {
+	args := map[string]any{"to": call.To, "input": hexutil.Bytes(call.Data)}
+	var out hexutil.Bytes
+	if err := r.client.CallContext(ctx, &out, "eth_call", args, canonicalAt(blockHash)); err != nil {
+		what := fmt.Sprintf("call to %x at block %x", call.To, blockHash)
+		// A revert reason is the contract's text and may read as any other error.
+		if rerr, ok := errors.AsType[rpc.Error](err); ok && rerr.ErrorCode() == revertCode {
+			return nil, fmt.Errorf("%w: %s: %w", ErrReverted, what, err)
+		}
+		return nil, mapError(err, what)
+	}
+	return out, nil
+}
+
+// revertCode is the JSON-RPC error code of an execution revert (EIP-1474).
+const revertCode = 3
+
 func isNull(raw json.RawMessage) bool {
 	return len(raw) == 0 || bytes.Equal(raw, []byte("null"))
 }
@@ -175,7 +208,11 @@ var rangeTooWide = []string{
 	"narrow your filter",
 }
 
-var notFound = []string{"not found", "unknown block", "finalized block"}
+var notFound = []string{"not found", "unknown block", "finalized block", "is not executed"}
+
+// notCanonical are messages of a state read refused at a non-canonical block
+// hash.
+var notCanonical = []string{"not currently canonical", "is not canonical"}
 
 func mapError(err error, what string) error {
 	err = RedactTransport(err)
@@ -183,6 +220,11 @@ func mapError(err error, what string) error {
 	for _, s := range rangeTooWide {
 		if strings.Contains(msg, s) {
 			return fmt.Errorf("%w: %s: %w", ErrRangeTooWide, what, err)
+		}
+	}
+	for _, s := range notCanonical {
+		if strings.Contains(msg, s) {
+			return fmt.Errorf("%w: %w: %s: %w", ErrNotFound, ErrNotCanonical, what, err)
 		}
 	}
 	for _, s := range notFound {
