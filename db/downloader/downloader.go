@@ -967,8 +967,8 @@ func (d *Downloader) incDownloadRequests() {
 
 func (d *Downloader) decDownloadRequests() {
 	d.activeDownloadRequestsLock.Lock()
+	defer d.activeDownloadRequestsLock.Unlock()
 	d.activeDownloadRequests--
-	d.activeDownloadRequestsLock.Unlock()
 	if d.activeDownloadRequests == 0 {
 		d.zeroActiveDownloadRequests.Broadcast()
 	}
