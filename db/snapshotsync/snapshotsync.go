@@ -423,7 +423,6 @@ func SnapshotsToDownload(
 	// - Erigon "download once": means restart/upgrade/downgrade must not download files (and will be fast)
 	// - After "download once" - Erigon will produce and seed new files
 
-	// send all hashes to the Downloader service
 	items := make([]snapcfg.PreverifiedItem, 0, len(preverifiedBlockSnapshots.Items))
 
 	blockPrune, historyPrune := computeBlocksToPrune(blockReader, prune)
@@ -472,7 +471,6 @@ func SnapshotsToDownload(
 		unblackListFilesBySubstring(blackListForPruning, kv.LogAddrIdx.String(), kv.LogTopicIdx.String())
 	}
 
-	// build all download requests
 	for _, p := range preverifiedBlockSnapshots.Items {
 		if caplin == NoCaplin && (strings.Contains(p.Name, "beaconblocks") || strings.Contains(p.Name, "blobsidecars") || strings.Contains(p.Name, "caplin")) {
 			continue
