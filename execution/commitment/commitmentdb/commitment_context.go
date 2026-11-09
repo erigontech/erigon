@@ -1272,9 +1272,6 @@ func (sdc *TrieContext) BranchOwned(pref []byte) ([]byte, kv.Step, error) {
 	if sdc.traceW != nil {
 		fmt.Fprintf(sdc.traceW, "[SDC] Branch read %x => %x\n", pref, enc)
 	}
-	if enc == nil {
-		return nil, step, nil
-	}
 	if !ownsBranches(sdc.stateReader) {
 		enc = bytes.Clone(enc)
 	}

@@ -148,16 +148,17 @@ const headCaptureWarmTxs = 4
 
 // close rolls back the pinned tx and clears it, so a second call is a no-op.
 func (p *rollingPin) close() {
-	if p != nil && p.tx != nil {
+	if p == nil {
+		return
+	}
+	if p.tx != nil {
 		p.tx.Rollback()
 		p.tx = nil
 	}
-	if p != nil {
-		for _, tx := range p.warm {
-			tx.Rollback()
-		}
-		p.warm = nil
+	for _, tx := range p.warm {
+		tx.Rollback()
 	}
+	p.warm = nil
 }
 
 func pinHead(tx kv.TemporalTx) (uint64, common.Hash, error) {

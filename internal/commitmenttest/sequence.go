@@ -19,8 +19,9 @@ package commitmenttest
 import (
 	"bytes"
 	"fmt"
+	"maps"
 	"math/rand"
-	"sort"
+	"slices"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
@@ -72,23 +73,18 @@ func Generate(seed Seed, spec SequenceSpec) Case {
 			}
 			var ops []Op
 			for i := start; i < start+count; i++ {
-				value := Account(AccountSpec{Kind: "parity", Number: i})
-				ops = append(ops, Op{Key: addrs[i], Account: &value}, Op{Key: append(bytes.Clone(addrs[i]), slots[i]...), Storage: Storage(i + generation*1000)})
+				ops = append(ops, AccountAt(addrs[i], AccountSpec{Kind: "parity", Number: i}), Op{Key: append(bytes.Clone(addrs[i]), slots[i]...), Storage: Storage(i + generation*1000)})
 			}
 			c.Rounds = append(c.Rounds, ops)
 		}
 		return c
 	}
 	ops := make([]Op, 0, spec.Count)
-	addAccount := func(key []byte, number int) {
-		value := Account(AccountSpec{Kind: "parity", Number: number})
-		ops = append(ops, Op{Key: key, Account: &value})
-	}
 	address := func(i int) []byte { return Key(KeySpec{Kind: "bench-address", Size: 20}, i) }
 	switch spec.Kind {
 	case "accounts", "storage":
 		for i := range spec.Count {
-			addAccount(address(i), i)
+			ops = append(ops, AccountAt(address(i), AccountSpec{Kind: "parity", Number: i}))
 			if spec.Kind == "storage" {
 				ops = append(ops, Op{Key: append(address(i), Key(KeySpec{Kind: "bench-slot", Size: 32}, i)...), Storage: Storage(i)})
 			}
@@ -96,7 +92,7 @@ func Generate(seed Seed, spec SequenceSpec) Case {
 	case "whale":
 		addr := make([]byte, 20)
 		_, _ = rng.Read(addr)
-		addAccount(addr, 1)
+		ops = append(ops, AccountAt(addr, AccountSpec{Kind: "parity", Number: 1}))
 		for i := range spec.Count {
 			slot := make([]byte, 32)
 			_, _ = rng.Read(slot)
@@ -188,11 +184,7 @@ func (s State) deleteStorage(addr []byte) {
 }
 
 func (s State) Ops() []Op {
-	keys := make([]string, 0, len(s))
-	for key := range s {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
+	keys := slices.Sorted(maps.Keys(s))
 	ops := make([]Op, 0, len(keys))
 	for _, key := range keys {
 		op := s[key]

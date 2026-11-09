@@ -92,9 +92,6 @@ func newPrefetchRecords() *branchPrefetcher {
 }
 
 func (p *branchPrefetcher) add(it prefetchItem) {
-	if p == nil {
-		return
-	}
 	select {
 	case p.work <- it:
 	default:
