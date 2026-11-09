@@ -20,6 +20,7 @@
 package protocol
 
 import (
+	"encoding/binary"
 	"fmt"
 	"sync"
 
@@ -83,6 +84,11 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (comm
 		slotNumber = *header.SlotNumber
 	}
 
+	var milliseconds uint16
+	if config.Parlia != nil {
+		milliseconds = binary.BigEndian.Uint16(header.MixDigest[30:])
+	}
+
 	blockContext := evmtypes.BlockContext{
 		CanTransfer:      CanTransfer,
 		Transfer:         transferFunc,
@@ -97,6 +103,7 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (comm
 		PrevRanDao:       prevRandDao,
 		BlobBaseFee:      blobBaseFee,
 		SlotNumber:       slotNumber,
+		Milliseconds:     milliseconds,
 	}
 	return blockContext
 }

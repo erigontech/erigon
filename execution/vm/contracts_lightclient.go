@@ -571,6 +571,18 @@ func (c *verifyDoubleSignEvidence) RequiredGas(input []byte) uint64 {
 
 func (c *verifyDoubleSignEvidence) Name() string { return "VerifyDoubleSignEvidence" }
 
+// verifyDoubleSignEvidenceJenner prices the input per byte, so oversized headers
+// cannot buy unbounded hashing work for a flat fee.
+type verifyDoubleSignEvidenceJenner struct {
+	verifyDoubleSignEvidence
+}
+
+func (c *verifyDoubleSignEvidenceJenner) Name() string { return "VerifyDoubleSignEvidenceJenner" }
+
+func (c *verifyDoubleSignEvidenceJenner) RequiredGas(input []byte) uint64 {
+	return params2.DoubleSignEvidenceVerifyGas + uint64(len(input))*params2.DoubleSignEvidenceVerifyPerByteGas
+}
+
 type doubleSignEvidence struct {
 	ChainID      uint256.Int
 	HeaderBytes1 []byte

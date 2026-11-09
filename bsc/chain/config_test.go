@@ -231,6 +231,37 @@ func TestChapelPasteurPrecompiles(t *testing.T) {
 	}
 }
 
+// TestChapelJennerPrecompiles pins the Jenner precompile set on the first Jenner
+// block: the Pasteur set with double-sign evidence priced per input byte and the
+// millisecond-timestamp precompile at 0x70.
+func TestChapelJennerPrecompiles(t *testing.T) {
+	t.Parallel()
+
+	spec, err := chainspec.ChainSpecByName(networkname.Chapel)
+	require.NoError(t, err)
+
+	addr := func(b ...byte) accounts.Address { return accounts.InternAddress(common.BytesToAddress(b)) }
+	doubleSign, milliTimestamp := addr(0x68), addr(0x70)
+	input := make([]byte, 1000)
+
+	pasteur := evmtypes.BlockContext{BlockNumber: 139533775, Time: 1793240999}
+	set := vm.Precompiles(pasteur.Rules(spec.Config))
+	assert.Equal(t, "VerifyDoubleSignEvidence", set[doubleSign].Name())
+	assert.Equal(t, params.DoubleSignEvidenceVerifyGas, set[doubleSign].RequiredGas(input))
+	assert.NotContains(t, set, milliTimestamp)
+
+	jenner := evmtypes.BlockContext{BlockNumber: 139533776, Time: 1793241000}
+	rules := jenner.Rules(spec.Config)
+	set = vm.Precompiles(rules)
+	assert.ElementsMatch(t, slices.Collect(maps.Keys(set)), vm.ActivePrecompiles(rules))
+	assert.ElementsMatch(t, append(slices.Collect(maps.Keys(vm.PrecompiledContractsPasteurForBSC)), milliTimestamp), vm.ActivePrecompiles(rules))
+
+	assert.Equal(t, "VerifyDoubleSignEvidenceJenner", set[doubleSign].Name())
+	assert.Equal(t, params.DoubleSignEvidenceVerifyGas+16*1000, set[doubleSign].RequiredGas(input))
+	assert.Equal(t, "MilliTimestamp", set[milliTimestamp].Name())
+	assert.Equal(t, uint64(20), set[milliTimestamp].RequiredGas(input))
+}
+
 func TestChapelSpec(t *testing.T) {
 	t.Parallel()
 

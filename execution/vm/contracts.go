@@ -97,6 +97,7 @@ const (
 	forkOsaka
 	forkOsakaBSC
 	forkPasteurBSC
+	forkJennerBSC
 	forkTierCount
 )
 
@@ -112,6 +113,8 @@ var forkSets [forkTierCount]mergedPrecompileSet
 // stays active forever.
 func forkTierFor(chainRules *chain.Rules) forkTier {
 	switch {
+	case chainRules.IsJenner:
+		return forkJennerBSC
 	case chainRules.IsPasteur:
 		return forkPasteurBSC
 	case chainRules.IsOsaka:
@@ -369,6 +372,13 @@ var PrecompiledContractsPasteurForBSC = func() PrecompiledContracts {
 	return m
 }()
 
+var PrecompiledContractsJennerForBSC = func() PrecompiledContracts {
+	m := maps.Clone(PrecompiledContractsPasteurForBSC)
+	m[accounts.InternAddress(common.BytesToAddress([]byte{0x68}))] = &verifyDoubleSignEvidenceJenner{}
+	m[accounts.InternAddress(common.BytesToAddress([]byte{0x70}))] = &milliTimestamp{}
+	return m
+}()
+
 var (
 	PrecompiledAddressesHomestead      []accounts.Address
 	PrecompiledAddressesByzantium      []accounts.Address
@@ -390,6 +400,7 @@ var (
 	PrecompiledAddressesPragueForBSC   []accounts.Address
 	PrecompiledAddressesOsakaForBSC    []accounts.Address
 	PrecompiledAddressesPasteurForBSC  []accounts.Address
+	PrecompiledAddressesJennerForBSC   []accounts.Address
 )
 
 func init() {
@@ -417,6 +428,7 @@ func init() {
 		forkPragueBSC:   {PrecompiledContractsPragueForBSC, &PrecompiledAddressesPragueForBSC},
 		forkOsakaBSC:    {PrecompiledContractsOsakaForBSC, &PrecompiledAddressesOsakaForBSC},
 		forkPasteurBSC:  {PrecompiledContractsPasteurForBSC, &PrecompiledAddressesPasteurForBSC},
+		forkJennerBSC:   {PrecompiledContractsJennerForBSC, &PrecompiledAddressesJennerForBSC},
 	} {
 		for address, p := range tierSet.contracts {
 			tierSet.contracts[address] = cachePrecompile(p, forkTier(tier), address.Value())
