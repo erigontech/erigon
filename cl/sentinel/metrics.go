@@ -23,15 +23,21 @@ import (
 )
 
 var (
-	peerCountGauge   metrics.Gauge
-	peerCountGaugeMu sync.Mutex
+	peerCountGauge    metrics.Gauge
+	inboundPeerGauge  metrics.Gauge
+	outboundPeerGauge metrics.Gauge
+	peerCountGaugeMu  sync.Mutex
 )
 
-func recordPeerMetrics(connected int) {
+func recordPeerMetrics(connected int, counts peerCounts) {
 	peerCountGaugeMu.Lock()
 	defer peerCountGaugeMu.Unlock()
 	if peerCountGauge == nil {
 		peerCountGauge = metrics.GetOrCreateGauge("caplin_peer_count")
+		inboundPeerGauge = metrics.GetOrCreateGauge(`caplin_peers{direction="inbound"}`)
+		outboundPeerGauge = metrics.GetOrCreateGauge(`caplin_peers{direction="outbound"}`)
 	}
 	peerCountGauge.SetInt(connected)
+	inboundPeerGauge.SetInt(counts.inbound)
+	outboundPeerGauge.SetInt(counts.outbound)
 }

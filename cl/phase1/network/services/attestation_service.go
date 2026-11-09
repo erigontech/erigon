@@ -255,7 +255,7 @@ func (s *attestationService) DecodeGossipMessage(pid peer.ID, data []byte, versi
 		ImmediateProcess: false,
 	}
 	obj.SingleAttestation = &solid.SingleAttestation{}
-	if err := obj.SingleAttestation.DecodeSSZ(data, int(version)); err != nil {
+	if err := decodeGossipSSZ(obj.SingleAttestation, data, version); err != nil {
 		return nil, err
 	}
 	return obj, nil
