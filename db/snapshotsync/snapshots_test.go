@@ -160,6 +160,15 @@ func TestFindMergeRange(t *testing.T) {
 
 		require.Equal(t, expect.String(), Ranges(found).String())
 	})
+
+	t.Run("lowest range above a span start", func(t *testing.T) {
+		var ranges Ranges
+		for from := uint64(610_000); from < 1_000_000; from += 10_000 {
+			ranges = append(ranges, NewRange(from, from+10_000))
+		}
+		expect := Ranges{NewRange(700_000, 800_000), NewRange(800_000, 900_000), NewRange(900_000, 1_000_000)}
+		require.Equal(t, expect.String(), Ranges(merger.FindMergeRanges(ranges)).String())
+	})
 }
 
 func TestMergeSnapshots(t *testing.T) {
