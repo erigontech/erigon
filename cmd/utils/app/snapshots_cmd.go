@@ -3988,7 +3988,7 @@ type duBlockReader interface {
 
 func duPrunerSelect(ctx context.Context, tx kv.Tx, br duBlockReader, cc *chain.Config, stepSize uint64) duSelectFunc {
 	return func(mode prune.Mode, preverified snapcfg.Preverified) ([]snapcfg.PreverifiedItem, error) {
-		return snapshotsync.SnapshotsToDownload(ctx, "seg du", false, false, false, mode, snapshotsync.NoCaplin,
+		return snapshotsync.SnapshotsToDownload(ctx, "seg du", false, false, false, snapshotsync.BlobRetention{}, mode, snapshotsync.NoCaplin,
 			tx, br, cc, ethconfig.Defaults.Sync, stepSize, preverified, 0, kv.Step(math.MaxUint64))
 	}
 }

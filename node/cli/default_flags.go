@@ -247,6 +247,7 @@ var DefaultFlags = []cli.Flag{
 
 	&utils.CaplinArchiveBlocksFlag,
 	&utils.CaplinArchiveBlobsFlag,
+	&utils.CaplinArchiveBlobsFromSlotFlag,
 	&utils.CaplinArchiveStatesFlag,
 	&utils.CaplinImmediateBlobBackfillFlag,
 
