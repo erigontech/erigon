@@ -191,9 +191,6 @@ func (p *TxPool) validateFrame(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardReas
 // captured head without holding the lock. applyFrameValidation checks the state
 // generation under the lock before these results can be used for admission.
 func (p *TxPool) prepareFrames(ctx context.Context, txns TxnSlots) frameValidationBatch {
-	if !slices.ContainsFunc(txns.Txns, func(txn *TxnSlot) bool { return txn.TxType() == FrameTxnType }) {
-		return frameValidationBatch{}
-	}
 	batch, stateBlockHash := p.precheckFrames(txns)
 	for _, txn := range txns.Txns {
 		if result, ok := batch.results[txn]; ok && result.reason == txpoolcfg.Success {
