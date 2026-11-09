@@ -229,3 +229,67 @@ func TestMemoryMutationCursorDeleteCurrentMultiValBeforeAll(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []byte("BBBB"), k)
 }
+
+func TestMemoryMutationCursorDeleteCurrentMultiValBeforeClearedTable(t *testing.T) {
+	t.Run("dupsort: an emptied key leaves the cursor unpositioned", func(t *testing.T) {
+		_, rwTx := newTestTx(t)
+		require.NoError(t, rwTx.Put(kv.TblAccountIdx, []byte("AAAA"), []byte("v1")))
+
+		batch, err := membatchwithdb.NewMemoryBatch(rwTx)
+		require.NoError(t, err)
+		t.Cleanup(batch.Close)
+		require.NoError(t, batch.ClearTable(kv.TblAccountIdx))
+		for _, v := range []string{"w1", "w2"} {
+			require.NoError(t, batch.Put(kv.TblAccountIdx, []byte("AAAA"), []byte(v)))
+		}
+		require.NoError(t, batch.Put(kv.TblAccountIdx, []byte("BBBB"), []byte("w1")))
+
+		c, err := batch.RwCursorDupSort(kv.TblAccountIdx)
+		require.NoError(t, err)
+		defer c.Close()
+
+		k, _, err := c.SeekExact([]byte("AAAA"))
+		require.NoError(t, err)
+		require.NotNil(t, k)
+
+		n, err := c.DeleteCurrentMultiValBefore(nil)
+		require.NoError(t, err)
+		require.EqualValues(t, 2, n)
+
+		k, _, err = c.Current()
+		require.NoError(t, err)
+		require.Nil(t, k)
+
+		var survived []string
+		require.NoError(t, batch.ForEach(kv.TblAccountIdx, nil, func(k, v []byte) error {
+			survived = append(survived, string(k)+"/"+string(v))
+			return nil
+		}))
+		require.Equal(t, []string{"BBBB/w1"}, survived)
+	})
+
+	t.Run("plain table: a value at the bound survives", func(t *testing.T) {
+		_, rwTx := newTestTx(t)
+		batch, err := membatchwithdb.NewMemoryBatch(rwTx)
+		require.NoError(t, err)
+		t.Cleanup(batch.Close)
+		require.NoError(t, batch.ClearTable(kv.Headers))
+		require.NoError(t, batch.Put(kv.Headers, []byte("AAAA"), []byte("v3")))
+
+		c, err := batch.RwCursorDupSort(kv.Headers)
+		require.NoError(t, err)
+		defer c.Close()
+
+		k, _, err := c.SeekExact([]byte("AAAA"))
+		require.NoError(t, err)
+		require.NotNil(t, k)
+
+		n, err := c.DeleteCurrentMultiValBefore([]byte("v3"))
+		require.NoError(t, err)
+		require.Zero(t, n)
+
+		got, err := batch.GetOne(kv.Headers, []byte("AAAA"))
+		require.NoError(t, err)
+		require.Equal(t, []byte("v3"), got)
+	})
+}

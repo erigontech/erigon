@@ -375,9 +375,10 @@ func TestKVDeleteRange(t *testing.T) {
 func TestMdbxDeleteCurrentMultiValBefore(t *testing.T) {
 	const keys, dups = 100, 8 // key i holds values 0..7
 
-	deleteBefore := func(t *testing.T, db kv.RwDB, key uint64, v []byte) uint64 {
+	deleteBefore := func(t *testing.T, db kv.RwDB, key uint64, v []byte) (uint64, []byte) {
 		t.Helper()
 		var n uint64
+		var cur []byte
 		require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
 			c, err := tx.RwCursorDupSort(deleteRangeTable)
 			if err != nil {
@@ -387,10 +388,14 @@ func TestMdbxDeleteCurrentMultiValBefore(t *testing.T) {
 			k, _, err := c.SeekExact(u64tob(key))
 			require.NoError(t, err)
 			require.NotNil(t, k)
-			n, err = c.DeleteCurrentMultiValBefore(v)
+			if n, err = c.DeleteCurrentMultiValBefore(v); err != nil {
+				return err
+			}
+			k, _, err = c.Current()
+			cur = bytes.Clone(k)
 			return err
 		}))
-		return n
+		return n, cur
 	}
 
 	countDupsOf := func(t *testing.T, db kv.RwDB, key uint64) uint64 {
@@ -413,7 +418,9 @@ func TestMdbxDeleteCurrentMultiValBefore(t *testing.T) {
 
 	t.Run("cuts values < v of the current key, leaves neighbours alone", func(t *testing.T) {
 		db := newFilledDupSortDB(t, keys, dups)
-		require.EqualValues(t, 3, deleteBefore(t, db, 5, u64tob(3))) // values 0,1,2
+		n, cur := deleteBefore(t, db, 5, u64tob(3))
+		require.EqualValues(t, 3, n) // values 0,1,2
+		require.Equal(t, u64tob(5), cur)
 		require.EqualValues(t, keys*dups-3, countTable(t, db))
 		require.EqualValues(t, dups-3, countDupsOf(t, db, 5))
 		require.EqualValues(t, dups, countDupsOf(t, db, 4)) // neighbouring keys untouched
@@ -432,86 +439,27 @@ func TestMdbxDeleteCurrentMultiValBefore(t *testing.T) {
 
 	t.Run("v==nil removes every value of the key", func(t *testing.T) {
 		db := newFilledDupSortDB(t, keys, dups)
-		require.EqualValues(t, dups, deleteBefore(t, db, 5, nil))
+		n, cur := deleteBefore(t, db, 5, nil)
+		require.EqualValues(t, dups, n)
+		require.Nil(t, cur)
 		require.Zero(t, countDupsOf(t, db, 5))
 		require.EqualValues(t, keys*dups-dups, countTable(t, db))
 	})
 
 	t.Run("v past the last value removes every value of the key", func(t *testing.T) {
 		db := newFilledDupSortDB(t, keys, dups)
-		require.EqualValues(t, dups, deleteBefore(t, db, 5, u64tob(999)))
+		n, cur := deleteBefore(t, db, 5, u64tob(999))
+		require.EqualValues(t, dups, n)
+		require.Nil(t, cur)
 		require.Zero(t, countDupsOf(t, db, 5))
 		require.EqualValues(t, dups, countDupsOf(t, db, 4))
 	})
 
 	t.Run("v==first value deletes nothing", func(t *testing.T) {
 		db := newFilledDupSortDB(t, keys, dups)
-		require.Zero(t, deleteBefore(t, db, 5, u64tob(0)))
+		n, cur := deleteBefore(t, db, 5, u64tob(0))
+		require.Zero(t, n)
+		require.Equal(t, u64tob(5), cur)
 		require.EqualValues(t, keys*dups, countTable(t, db))
-	})
-}
-
-// Pseudo-dupsort keys hold exactly one value, so deleting it removes the key and
-// the cursor must end up unpositioned. DeleteCurrent alone doesn't get there: it
-// leaves the cursor referring to the next record.
-func TestPseudoDupSortDeleteCurrentMultiValBefore(t *testing.T) {
-	// newFilledDB stores value []byte{1} under keys 0..n-1, so a bound of {2} is
-	// above the stored value and a bound of {1} is equal to it.
-	run := func(t *testing.T, wrap func(kv.RwCursor) kv.PseudoDupSortRwCursor) {
-		t.Helper()
-
-		t.Run("deletes the value and leaves the cursor unpositioned", func(t *testing.T) {
-			db := newFilledDB(t, 10)
-			require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
-				rc, err := tx.RwCursor(deleteRangeTable)
-				require.NoError(t, err)
-				defer rc.Close()
-				c := wrap(rc)
-
-				k, _, err := c.SeekExact(u64tob(5))
-				require.NoError(t, err)
-				require.NotNil(t, k)
-
-				n, err := c.DeleteCurrentMultiValBefore([]byte{2})
-				require.NoError(t, err)
-				require.EqualValues(t, 1, n)
-
-				k, _, err = c.Current()
-				require.NoError(t, err)
-				require.Nil(t, k) // must not have drifted onto key 6
-				return nil
-			}))
-			require.EqualValues(t, 9, countTable(t, db))
-		})
-
-		t.Run("keeps a value at or above the bound", func(t *testing.T) {
-			db := newFilledDB(t, 10)
-			require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
-				rc, err := tx.RwCursor(deleteRangeTable)
-				require.NoError(t, err)
-				defer rc.Close()
-				c := wrap(rc)
-
-				_, _, err = c.SeekExact(u64tob(5))
-				require.NoError(t, err)
-
-				n, err := c.DeleteCurrentMultiValBefore([]byte{1}) // equal to the value: kept
-				require.NoError(t, err)
-				require.Zero(t, n)
-				return nil
-			}))
-			require.EqualValues(t, 10, countTable(t, db))
-		})
-	}
-
-	t.Run("MdbxCursorPseudoDupSort", func(t *testing.T) {
-		run(t, func(rc kv.RwCursor) kv.PseudoDupSortRwCursor {
-			return &mdbx.MdbxCursorPseudoDupSort{MdbxCursor: rc.(*mdbx.MdbxCursor)}
-		})
-	})
-	t.Run("kv.RwCursorPseudoDupSort", func(t *testing.T) {
-		run(t, func(rc kv.RwCursor) kv.PseudoDupSortRwCursor {
-			return &kv.RwCursorPseudoDupSort{RwCursor: rc}
-		})
 	})
 }

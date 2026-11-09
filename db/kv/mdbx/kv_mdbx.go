@@ -1986,14 +1986,6 @@ func (c *MdbxCursorPseudoDupSort) DeleteCurrentDuplicates() error {
 	return nil
 }
 
-func (c *MdbxCursorPseudoDupSort) DeleteCurrentMultiValBefore(v []byte) (uint64, error) {
-	n, err := (&kv.RwCursorPseudoDupSort{RwCursor: c.MdbxCursor}).DeleteCurrentMultiValBefore(v)
-	if err != nil {
-		return 0, fmt.Errorf("label: %s,in DeleteCurrentMultiValBefore: %w", c.label, err)
-	}
-	return n, nil
-}
-
 // CountDuplicates returns the number of duplicates for the current key. See mdb_cursor_count
 func (c *MdbxCursorPseudoDupSort) CountDuplicates() (uint64, error) {
 	return 1, nil
@@ -2187,10 +2179,18 @@ func (c *MdbxDupSortCursor) DeleteCurrentMultiValBefore(v []byte) (uint64, error
 	if kk == nil {
 		return 0, nil
 	}
+	kk = bytes.Clone(kk)
 	if _, err := c.LastDup(); err != nil {
 		return 0, err
 	}
-	return c.c.RangeDel(mdbx.DeleteCurrentMultiValBeforeIncluding)
+	n, err := c.c.RangeDel(mdbx.DeleteCurrentMultiValBeforeIncluding)
+	if err != nil {
+		return 0, err
+	}
+	if _, _, err := c.SeekExact(kk); err != nil {
+		return 0, err
+	}
+	return n, nil
 }
 
 // CountDuplicates returns the number of duplicates for the current key. See mdb_cursor_count

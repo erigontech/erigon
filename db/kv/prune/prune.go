@@ -314,6 +314,8 @@ func TableScanningPrune(
 	return stat, nil
 }
 
+const minBunchDups = 8
+
 // tableScanningPrune scans values and deletes those in [txFrom, txTo).
 // Returns the last cursor position (non-nil) if interrupted by ctx, or nil if completed.
 func tableScanningPrune(
@@ -332,7 +334,7 @@ func tableScanningPrune(
 	lastPrunedValue []byte,
 ) (interrupted []byte, err error) {
 	// The dupBound bunch-delete needs a real dupsort cursor to position on values.
-	dupCursor, ok := valDelCursor.(kv.CursorDupSort)
+	dupCursor, ok := valDelCursor.(kv.RwCursorDupSort)
 	if !ok {
 		dupBound = nil
 	}
@@ -409,10 +411,17 @@ func tableScanningPrune(
 
 		// Partial overlap with nothing below txFrom: the doomed dups are exactly
 		// those below txTo, a prefix mdbx cuts in one bunch-delete. Keys holding
-		// older dups to preserve, and modes whose dups aren't sorted by txNum, fall
-		// through to the scan below.
+		// older dups to preserve, keys with fewer than minBunchDups dups, and modes
+		// whose dups aren't sorted by txNum fall through to the scan below.
 		if dupBound != nil && firstIsOldest && minTxNum >= txFrom {
-			firstSurvivor, err := dupCursor.SeekBothRange(val, dupBound)
+			dups, err := valDelCursor.CountDuplicates()
+			if err != nil {
+				return nil, fmt.Errorf("count dups %s: %w", filenameBase, err)
+			}
+			var firstSurvivor []byte
+			if dups >= minBunchDups {
+				firstSurvivor, err = dupCursor.SeekBothRange(val, dupBound)
+			}
 			if err != nil {
 				return nil, fmt.Errorf("seek prune bound %s: %w", filenameBase, err)
 			}
@@ -425,23 +434,24 @@ func tableScanningPrune(
 				}
 				if lastDoomed != nil {
 					maxDeleted := txNumGetter(val, lastDoomed)
-					deleted, err := valDelCursor.DeleteCurrentMultiValBefore(dupBound)
+					deleted, err := dupCursor.DeleteCurrentMultiValBefore(dupBound)
 					if err != nil {
 						return nil, fmt.Errorf("cut dups below txTo %s: %w", filenameBase, err)
 					}
 					stat.MinTxNum = min(stat.MinTxNum, minTxNum)
 					stat.MaxTxNum = max(stat.MaxTxNum, maxDeleted)
 					stat.PruneCountValues += deleted
-					if deleted > 1 {
-						stat.DupsDeleted += deleted
-					}
 					if throttling != nil {
 						time.Sleep(*throttling)
 					}
 					if ctx.Err() != nil {
-						stat.LastPrunedValue = bytes.Clone(val)
+						cutKey, _, err := dupCursor.Current()
+						if err != nil {
+							return nil, fmt.Errorf("current after cut %s: %w", filenameBase, err)
+						}
+						stat.LastPrunedValue = bytes.Clone(cutKey)
 						stat.ValueProgress = InProgress
-						return bytes.Clone(val), nil
+						return bytes.Clone(cutKey), nil
 					}
 					goto nextKey
 				}

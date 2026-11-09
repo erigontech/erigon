@@ -516,7 +516,7 @@ func TestDupSortPrune_PrefixValPartialOverlap(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	txNums := []uint64{10, 20, 30, 40, 50}
+	txNums := []uint64{10, 20, 30, 40, 50, 60, 70, 80}
 	for i, tn := range txNums {
 		require.NoError(t, tx.Put(testDupSortTable, userKey(0), encodePrefixVal(tn, byte(i))))
 	}
@@ -528,7 +528,7 @@ func TestDupSortPrune_PrefixValPartialOverlap(t *testing.T) {
 	cur := openDupSortPseudoCursor(t, tx)
 	defer cur.Close()
 
-	// [0, 35) → removes 10, 20, 30; keeps 40, 50
+	// [0, 35) → removes 10, 20, 30; keeps 40..80
 	stat, err := prune.TableScanningPrune(
 		t.Context(), "test", "dup",
 		0, 35, 16, logEvery, log.New(),
@@ -545,5 +545,98 @@ func TestDupSortPrune_PrefixValPartialOverlap(t *testing.T) {
 		survived = append(survived, binary.BigEndian.Uint64(v))
 		return nil
 	}))
-	require.Equal(t, []uint64{40, 50, 90}, survived)
+	require.Equal(t, []uint64{40, 50, 60, 70, 80, 90}, survived)
+}
+
+func TestDupSortPrune_PrefixValWalkAndBunchKeys(t *testing.T) {
+	db := openTestDupSortDB(t)
+	defer db.Close()
+
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	layout := map[uint64][]uint64{
+		0: {10, 50, 60},
+		1: {5, 11, 12, 13, 14, 15, 16, 34, 40, 41},
+		2: {10, 20, 50},
+		3: {10, 20, 30, 50},
+	}
+	for k, txNums := range layout {
+		for i, tn := range txNums {
+			require.NoError(t, tx.Put(testDupSortTable, userKey(k), encodePrefixVal(tn, byte(i))))
+		}
+	}
+
+	logEvery := time.NewTicker(time.Hour)
+	defer logEvery.Stop()
+	cur := openDupSortPseudoCursor(t, tx)
+	defer cur.Close()
+
+	stat, err := prune.TableScanningPrune(
+		t.Context(), "test", "dup",
+		0, 35, 16, logEvery, log.New(),
+		nil, cur, &prune.Stat{}, prune.PrefixValStorageMode,
+	)
+	require.NoError(t, err)
+	require.Equal(t, prune.Done, stat.ValueProgress)
+	require.EqualValues(t, 14, stat.PruneCountValues)
+	require.EqualValues(t, 5, stat.MinTxNum)
+	require.EqualValues(t, 34, stat.MaxTxNum)
+	require.Zero(t, stat.DupsDeleted)
+
+	survived := map[string][]uint64{}
+	require.NoError(t, tx.ForEach(testDupSortTable, nil, func(k, v []byte) error {
+		survived[string(k)] = append(survived[string(k)], binary.BigEndian.Uint64(v))
+		return nil
+	}))
+	require.Equal(t, map[string][]uint64{
+		string(userKey(0)): {50, 60},
+		string(userKey(1)): {40, 41},
+		string(userKey(2)): {50},
+		string(userKey(3)): {50},
+	}, survived)
+}
+
+type cancelAfterCut struct {
+	kv.RwCursorDupSort
+	cancel context.CancelFunc
+}
+
+func (c *cancelAfterCut) DeleteCurrentMultiValBefore(v []byte) (uint64, error) {
+	defer c.cancel()
+	return c.RwCursorDupSort.DeleteCurrentMultiValBefore(v)
+}
+
+func TestDupSortPrune_PrefixValBunchCancelResumesAtTheCutKey(t *testing.T) {
+	db := openTestDupSortDB(t)
+	defer db.Close()
+
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	for k := uint64(1); k <= 64; k++ {
+		for i := range uint64(10) {
+			require.NoError(t, tx.Put(testDupSortTable, userKey(k), encodePrefixVal(i*10, byte(i))))
+		}
+	}
+
+	logEvery := time.NewTicker(time.Hour)
+	defer logEvery.Stop()
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	raw, err := tx.RwCursorDupSort(testDupSortTable)
+	require.NoError(t, err)
+	defer raw.Close()
+
+	stat, err := prune.TableScanningPrune(
+		ctx, "test", "dup",
+		0, 35, 16, logEvery, log.New(),
+		nil, &cancelAfterCut{RwCursorDupSort: raw, cancel: cancel}, &prune.Stat{}, prune.PrefixValStorageMode,
+	)
+	require.NoError(t, err)
+	require.EqualValues(t, 4, stat.PruneCountValues)
+	require.Equal(t, prune.InProgress, stat.ValueProgress)
+	require.Equal(t, userKey(1), stat.LastPrunedValue)
 }

@@ -330,6 +330,9 @@ func (m *memoryMutationCursor) DeleteCurrentDuplicates() error {
 // tombstones those below v (see MemoryMutation.DeleteRange for why the overlay
 // deletes via tombstones).
 func (m *memoryMutationCursor) DeleteCurrentMultiValBefore(v []byte) (uint64, error) {
+	if m.isTableCleared() {
+		return m.memCursor.DeleteCurrentMultiValBefore(v)
+	}
 	k, _, err := m.Current()
 	if err != nil {
 		return 0, err
