@@ -18,6 +18,7 @@ package state
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -26,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -479,6 +481,50 @@ func TestDestructObservedBeforeItsInFlightFlushKeepsTheAccountAbsent(t *testing.
 		vm.Delete(x, path, accounts.NilKey, 0, false)
 	}
 	require.Equal(t, VersionInvalid, validateReads(vm, ibs, 1), "a withdrawn destruct invalidates the absence")
+}
+
+// As above, but tx 1 credits x in the window: the credit creates a fresh account instead of
+// reloading the pre-block one, so tx 1 stays valid once tx 0 is validated.
+func TestCreditAfterObservedDestructCreatesAFreshAccount(t *testing.T) {
+	t.Parallel()
+	for _, materialize := range []bool{true, false} {
+		t.Run(fmt.Sprintf("materialize=%v", materialize), func(t *testing.T) {
+			x := accounts.InternAddress(common.HexToAddress("0x5a1e"))
+			baseAcc := accounts.NewAccount()
+			baseAcc.Balance = *uint256.NewInt(5)
+			reader := &accountStateReader{accounts: map[accounts.Address]*accounts.Account{x: &baseAcc}}
+			bal := types.BlockAccessList{{
+				Address:        x.Value(),
+				BalanceChanges: []*types.BalanceChange{{Index: 1, Value: uint256.Int{}}},
+				NonceChanges:   []*types.NonceChange{{Index: 2, Value: 1}},
+				CodeChanges:    []*types.CodeChange{{Index: 2, Bytecode: []byte{0x00}}},
+			}}
+			vm := NewVersionMap(bal)
+			vm.SeedAddresses()
+			require.NoError(t, vm.SeedEmptyRemovals(true, false, reader))
+
+			ibs := NewWithVersionMap(reader, vm)
+			defer ibs.Close()
+			if !materialize {
+				ibs.SetVersionMap(vm)
+			}
+			ibs.SetTxContext(1, 1)
+			_, err := ibs.GetBalance(x)
+			require.NoError(t, err)
+
+			removal := &WriteSet{}
+			removal.SetContractRemoval(x, Version{TxIndex: 0})
+			vm.FlushVersionedWrites(removal, false)
+
+			require.NoError(t, ibs.AddBalance(x, *uint256.NewInt(1), tracing.BalanceChangeTransfer))
+			balance, err := ibs.GetBalance(x)
+			require.NoError(t, err)
+			require.Equal(t, *uint256.NewInt(1), balance)
+
+			vm.MarkWritesValidated(removal, nil)
+			require.Equal(t, VersionValid, validateReads(vm, ibs, 1))
+		})
+	}
 }
 
 // As above, but tx 1 funds x again between two destructs, so its account cell lies below the
