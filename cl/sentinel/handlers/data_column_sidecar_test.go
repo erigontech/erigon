@@ -335,9 +335,10 @@ func TestDataColumnSidecarsByRangeBoundsTheChecksOfMissingColumns(t *testing.T) 
 	req := &cltypes.ColumnSidecarsByRangeRequest{Columns: solid.NewUint64ListSSZ(int(cfg.NumberOfColumns))}
 	req.Columns.Append(0)
 	req.Columns.Append(1)
+	req.Columns.Append(2)
 
-	require.NoError(t, c.writeColumnsByRange(nil, tx, req, 0, slots, slots))
-	require.LessOrEqual(t, store.checks, int(cfg.MaxRequestDataColumnSidecars)+1)
+	require.NoError(t, c.writeColumnsByRange(t.Context(), nil, tx, req, 0, slots, slots))
+	require.Equal(t, int(cfg.MaxRequestDataColumnSidecars), store.checks)
 }
 
 func TestDataColumnSidecarsByRangeZeroCountReturnsEmptySuccess(t *testing.T) {
