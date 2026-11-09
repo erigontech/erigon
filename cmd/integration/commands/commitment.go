@@ -630,7 +630,10 @@ func commitmentRestore(ctx context.Context, logger log.Logger) error {
 		return fmt.Errorf("commitment files are restored, but the execution state still needs a reset: run `integration stage_exec --reset` before starting erigon: %w", err)
 	}
 	defer db.Close()
-	return rawdbreset.ResetExec(ctx, db)
+	if err := rawdbreset.ResetExec(ctx, db); err != nil {
+		return err
+	}
+	return dbstate.CompleteCommitmentRestore(datadir.New(datadirCli), logger)
 }
 
 func commitmentConvert(db kv.TemporalRwDB, ctx context.Context, logger log.Logger, opts dbstate.ConvertOpts) error {

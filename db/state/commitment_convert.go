@@ -837,6 +837,8 @@ const restoreManifestName = ".restore_manifest"
 // the next successful manifest write truncates it.
 const restoreManifestTmpName = ".restore_manifest.tmp"
 
+const restoreV3ResetPendingName = ".restore_v3_reset_pending"
+
 // RestoreCommitmentFiles undoes ConvertCommitmentFiles by moving every file
 // from snapshots/backup/domains/ back into snapshots/domain/, and from
 // snapshots/backup/{history,idx,accessor}/ into the live history, idx and
@@ -865,6 +867,12 @@ const restoreManifestTmpName = ".restore_manifest.tmp"
 // which is exactly when restore is most needed.
 func RestoreCommitmentFiles(ctx context.Context, dirs datadir.Dirs, logger log.Logger) (bool, error) {
 	backupRoot := filepath.Join(dirs.Snap, "backup")
+	pendingPath := filepath.Join(backupRoot, restoreV3ResetPendingName)
+	_, pendingErr := os.Stat(pendingPath)
+	if pendingErr != nil && !errors.Is(pendingErr, os.ErrNotExist) {
+		return false, fmt.Errorf("[commitment_convert] restore: check pending execution reset: %w", pendingErr)
+	}
+	resetPending := pendingErr == nil
 	historyDirs := [][2]string{{"history", dirs.SnapHistory}, {"idx", dirs.SnapIdx}, {"accessor", dirs.SnapAccessors}}
 	historyPending := false
 	for _, pair := range historyDirs {
@@ -878,7 +886,13 @@ func RestoreCommitmentFiles(ctx context.Context, dirs datadir.Dirs, logger log.L
 	if err != nil {
 		return false, err
 	}
-	if err := restoreCommitmentBackup(ctx, filepath.Join(backupRoot, "domains"), dirs.SnapDomain, !historyPending, logger); err != nil {
+	if restoredV3 {
+		if err := writeRestoreManifestAtomic(pendingPath, []string{"v3"}); err != nil {
+			return false, fmt.Errorf("[commitment_convert] restore: mark pending execution reset: %w", err)
+		}
+		resetPending = true
+	}
+	if err := restoreCommitmentBackup(ctx, filepath.Join(backupRoot, "domains"), dirs.SnapDomain, !historyPending && !resetPending, logger); err != nil {
 		return false, err
 	}
 	for _, pair := range historyDirs {
@@ -886,7 +900,19 @@ func RestoreCommitmentFiles(ctx context.Context, dirs datadir.Dirs, logger log.L
 			return false, err
 		}
 	}
-	return restoredV3, nil
+	return resetPending, nil
+}
+
+func CompleteCommitmentRestore(dirs datadir.Dirs, logger log.Logger) error {
+	backupRoot := filepath.Join(dirs.Snap, "backup")
+	if err := dir.RemoveFile(filepath.Join(backupRoot, restoreV3ResetPendingName)); err != nil {
+		return fmt.Errorf("[commitment_convert] restore: clear pending execution reset: %w", err)
+	}
+	if err := dir.FsyncDir(backupRoot); err != nil {
+		return fmt.Errorf("[commitment_convert] restore: sync execution reset completion: %w", err)
+	}
+	cleanupParentIfEmpty(backupRoot, logger)
+	return nil
 }
 
 func commitmentFileVersion(name string) (uint64, bool) {

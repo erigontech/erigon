@@ -1088,8 +1088,11 @@ func TestRestoreCommitmentFiles_RerunnableAfterPartialFailure(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v2.0-commitment.0-32.kv"), origKV, 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v2.0-commitment.0-32.bt"), origBT, 0o644))
 
-	_, restoreErr := state.RestoreCommitmentFiles(t.Context(), agg.Dirs(), log.New())
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, "backup", ".restore_v3_reset_pending"), nil, 0o644))
+
+	restoredV3, restoreErr := state.RestoreCommitmentFiles(t.Context(), agg.Dirs(), log.New())
 	require.NoError(t, restoreErr)
+	require.True(t, restoredV3)
 
 	// All three originals present with the expected content — the manifest-aware
 	// sweep must not have deleted the .kv/.bt files already in place.
