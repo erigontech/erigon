@@ -298,7 +298,7 @@ func newCommitmentCalculator(
 		readAtNum:            readAtNum,
 		readAtHash:           readAtHash,
 	}
-	if dbg.BALCommitmentWarmupReaders() > 0 && branchPrefetch == nil {
+	if dbg.BALCommitmentWarmupReaders() > 0 {
 		cc.prefetchFn = func(plainKey []byte) {
 			if !cc.balBlock {
 				cc.prefetchKey(workCtx, plainKey)
@@ -431,7 +431,7 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		}
 		if r.writes != nil && !r.writes.IsEmpty() {
 			cc.balBlock = r.rules != nil && r.rules.IsAmsterdam
-			cc.hashAtFold = !perBlock && cc.branchPrefetch == nil
+			cc.hashAtFold = !perBlock
 			if !cc.computedAhead[r.blockNum] || dbg.BALShadowCompute {
 				cc.accumulateTouched(r.writes, base)
 			}
