@@ -44,6 +44,20 @@ func TestStepAlignedEndRefusesListStartingOffBoundary(t *testing.T) {
 	require.ErrorContains(t, err, "starts at txNum 40")
 }
 
+func TestStepAlignedEndAcceptsFilesPastTheSharedCeiling(t *testing.T) {
+	t.Parallel()
+	db, agg := testDbAndAggregatorv3(t, 10)
+	dirs := agg.Dirs()
+	ranges := []testFileRange{{0, 1}, {1, 2}, {2, 3}}
+	generateAccountsFile(t, dirs, ranges)
+	generateStorageFile(t, dirs, ranges)
+	generatePlainCommitmentFile(t, dirs, []testFileRange{{0, 1}})
+	require.NoError(t, agg.OpenFolder(db))
+	end, err := agg.StepAlignedEnd(10)
+	require.NoError(t, err)
+	require.EqualValues(t, 10, end)
+}
+
 func TestStepAlignedEndRefusesHiddenFiles(t *testing.T) {
 	t.Parallel()
 	db, agg := testDbAndAggregatorv3(t, 10)
