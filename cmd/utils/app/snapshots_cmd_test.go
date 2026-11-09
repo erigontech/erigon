@@ -30,6 +30,7 @@ import (
 
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/datastruct/btindex"
 	"github.com/erigontech/erigon/db/dbservices"
@@ -1044,8 +1045,18 @@ func TestDUStepSize_LegacyDatadirIsNotWritten(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, datadir.PreverifiedFileName), nil, 0o644))
 
-	_, err := duStepSize(dirs, log.New())
-	require.Error(t, err)
+	stepSize, err := duStepSize(dirs, log.New())
+	require.NoError(t, err)
+	require.Equal(t, uint64(config3.LegacyStepSize), stepSize)
+	require.NoFileExists(t, filepath.Join(dirs.Snap, state.ERIGONDB_SETTINGS_FILE))
+}
+
+func TestDUStepSize_FreshDatadirUsesTheDefault(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+
+	stepSize, err := duStepSize(dirs, log.New())
+	require.NoError(t, err)
+	require.Equal(t, uint64(config3.DefaultStepSize), stepSize)
 	require.NoFileExists(t, filepath.Join(dirs.Snap, state.ERIGONDB_SETTINGS_FILE))
 }
 

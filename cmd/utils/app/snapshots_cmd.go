@@ -3956,8 +3956,16 @@ func duOpenBlockSnapshots(dirs datadir.Dirs, chainName string, logger log.Logger
 
 func duStepSize(dirs datadir.Dirs, logger log.Logger) (uint64, error) {
 	path := filepath.Join(dirs.Snap, state.ERIGONDB_SETTINGS_FILE)
-	if _, err := os.Stat(path); err != nil {
-		return 0, fmt.Errorf("step size needs %s: %w", path, err)
+	settingsExist, err := dir2.FileExist(path)
+	if err != nil {
+		return 0, err
+	}
+	legacy, err := dir2.FileExist(filepath.Join(dirs.Snap, datadir.PreverifiedFileName))
+	if err != nil {
+		return 0, err
+	}
+	if !settingsExist && legacy {
+		return config3.LegacyStepSize, nil
 	}
 	settings, err := state.ResolveErigonDBSettings(dirs, logger, false)
 	if err != nil {
