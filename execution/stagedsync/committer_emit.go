@@ -18,6 +18,7 @@ package stagedsync
 
 import (
 	"slices"
+	"time"
 
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -52,6 +53,8 @@ func (cc *commitmentCalculator) clearFoldedKeys() {
 // bare touch that changes nothing — a net-zero balance write to an absent account — folds
 // nothing, exactly as the lifecycle/domain read and the canonical trie treat it.
 func (cc *commitmentCalculator) accumulateTouched(writes state.WriteSetView, base state.StateReader) {
+	cc.probe.markFirstUpdate()
+	defer addSince(&cc.probe.accumulate, time.Now())
 	if cc.touchedAccounts == nil {
 		cc.touchedAccounts = map[accounts.Address][]byte{}
 		cc.touchedStorage = map[accounts.Address]map[accounts.StorageKey][]byte{}
@@ -118,6 +121,7 @@ func (cc *commitmentCalculator) addTouchedAccount(a accounts.Address, base state
 // (and subtree), a present one writes its full account; a storage slot cleared to zero
 // removes its leaf, a non-zero one writes it.
 func (cc *commitmentCalculator) emitTouched(view *state.VersionMapView, updates *commitment.Updates) error {
+	defer addSince(&cc.probe.emit, time.Now())
 	if cc.baseErr != nil {
 		return cc.baseErr
 	}

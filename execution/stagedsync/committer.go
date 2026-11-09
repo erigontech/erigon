@@ -197,6 +197,8 @@ type commitmentCalculator struct {
 	// compute so no pre-window deltas leak into a window block's changeset.
 	perBlockFrom uint64
 
+	probe foldProbe
+
 	wg   sync.WaitGroup
 	done chan struct{}
 }
@@ -310,8 +312,10 @@ func (cc *commitmentCalculator) loop(ctx context.Context) {
 	defer logEvery.Stop()
 	in, reqs := cc.in, cc.blockRequests
 	for in != nil {
+		waitStart := time.Now()
 		select {
 		case result, ok := <-in:
+			cc.probe.addIdle(waitStart)
 			if !ok {
 				in = nil
 				continue
@@ -325,8 +329,10 @@ func (cc *commitmentCalculator) loop(ctx context.Context) {
 			reqs = cc.drainBlockRequests(ctx, reqs)
 			cc.handleMessage(ctx, result)
 		case req, ok := <-reqs:
+			cc.probe.addIdle(waitStart)
 			reqs = cc.acceptBlockRequest(ctx, reqs, req, ok)
 		case <-logEvery.C:
+			cc.probe.addIdle(waitStart)
 			if cc.logCommit != nil {
 				cc.logCommit(cc.lastCommitProgress)
 			}
@@ -477,6 +483,7 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 				"stage", stageWall, "exec", execActive, "commit", commitActive,
 				"overlap", overlap, "gap", gap, "residual", residual)
 		}
+		cc.logFoldProbe()
 		delete(cc.pending, r.BlockNum)
 		delete(cc.computedAhead, r.BlockNum)
 		delete(cc.balRoots, r.BlockNum)
@@ -485,6 +492,7 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 	case *commitComputeRequest:
 		if cc.shouldComputeOnRequest() {
 			cc.compute(ctx, targetOf(cc.lastBlockResult), computeMode{checkRoot: true, publishRoot: true})
+			cc.logFoldProbe()
 		} else {
 			// Publish empty result so drainBeforeExit doesn't block forever.
 			cc.publish(ctx, commitmentResult{blockNum: cc.lastComputedBlock})
@@ -568,6 +576,7 @@ func (cc *commitmentCalculator) maybeComputeAhead(ctx context.Context, n uint64)
 // a mismatch fails the block. The touched-key set comes wholly from the BAL, never
 // from the cross-block incremental accumulator.
 func (cc *commitmentCalculator) computeBlockFromBAL(ctx context.Context, pb *pendingBlock) {
+	defer cc.probe.markFoldEnd()
 	req := pb.req
 	br := &blockResult{
 		BlockNum:  req.blockNum,
@@ -698,6 +707,7 @@ func (cc *commitmentCalculator) computeRootFromUpdates(ctx context.Context, t co
 // the BAL-driven root computed ahead; divergence fails the block. Publishes the
 // incremental root. BALShadowCompute only.
 func (cc *commitmentCalculator) shadowCrossCheck(ctx context.Context, r *blockResult) {
+	defer cc.probe.markFoldEnd()
 	balRoot := cc.balRoots[r.BlockNum]
 	cc.finishPrefetch()
 	// Recompute block r the raw-view way (emitTouched over the version map) to
@@ -795,6 +805,7 @@ func (cc *commitmentCalculator) finishPrefetch() {
 	if cc.prefetch == nil {
 		return
 	}
+	defer addSince(&cc.probe.prefetch, time.Now())
 	_ = cc.prefetch.WaitBufferFree(0)
 	cc.prefetch.CloseAndWait()
 	cc.prefetch = nil
@@ -804,6 +815,10 @@ func (cc *commitmentCalculator) finishPrefetch() {
 // path; the per-call differences live in m.
 
 func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m computeMode) {
+	cc.probe.markFirstUpdate()
+	if !m.midBlock {
+		defer cc.probe.markFoldEnd()
+	}
 	cc.finishPrefetch()
 	// The version map is the ledger: exec's writes already encode every EIP-161 /
 	// self-destruct removal, so emitTouched folds the block's touched keys straight
@@ -885,6 +900,7 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 func (cc *commitmentCalculator) recordProgress(p *commitment.CommitProgress) {
 	if p != nil {
 		cc.lastCommitProgress = *p
+		cc.probe.fold.Add(p.Fold)
 	}
 }
 
@@ -897,6 +913,7 @@ func (cc *commitmentCalculator) computeIsolated(ctx context.Context, t commitTar
 	// changeset the flush does not leak its branch deltas into the live
 	// accumulator (a later window block's changeset).
 	if err := func() error {
+		defer addSince(&cc.probe.flush, time.Now())
 		cc.doms.LockChangesetAccumulator()
 		defer cc.doms.UnlockChangesetAccumulator()
 		defer cc.doms.SwapCommitmentDiffLocked(nil)()
@@ -905,11 +922,14 @@ func (cc *commitmentCalculator) computeIsolated(ctx context.Context, t commitTar
 		return nil, nil, err
 	}
 
-	rh, err := cc.doms.GetCommitmentContext().ComputeCommitmentWithDiff(ctx, cc.roTx, true, t.blockNum, t.lastTxNum, cc.logPrefix, cc.recordProgress, nil)
+	rh, err := cc.computeTrie(ctx, t, nil)
 	if err != nil {
 		return nil, nil, err
 	}
-	return rh, func() error { return cc.doms.FlushPendingUpdatesWithoutChangeset(cc.roTx) }, nil
+	return rh, func() error {
+		defer addSince(&cc.probe.flush, time.Now())
+		return cc.doms.FlushPendingUpdatesWithoutChangeset(cc.roTx)
+	}, nil
 }
 
 // flushPendingUpdatesWithoutChangeset eagerly applies the pending deferred
@@ -973,6 +993,7 @@ func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context,
 	// independent of N's diff below) — the one remaining changesetMu window, brief
 	// rather than spanning the fold that follows.
 	if err := func() error {
+		defer addSince(&cc.probe.flush, time.Now())
 		cc.doms.LockChangesetAccumulator()
 		defer cc.doms.UnlockChangesetAccumulator()
 		return cc.doms.FlushPendingUpdatesLocked(cc.roTx)
@@ -987,8 +1008,7 @@ func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context,
 	if cs == nil {
 		return nil, fmt.Errorf("no changeset accumulator saved for block %d (%x)", t.blockNum, t.blockHash)
 	}
-	diff := &cs.Diffs[kv.CommitmentDomain]
-	return cc.doms.GetCommitmentContext().ComputeCommitmentWithDiff(ctx, cc.roTx, true, t.blockNum, t.lastTxNum, cc.logPrefix, cc.recordProgress, diff)
+	return cc.computeTrie(ctx, t, &cs.Diffs[kv.CommitmentDomain])
 }
 
 // asOfStateReader reads account/storage/code at a specific txNum via

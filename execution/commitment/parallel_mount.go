@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"runtime"
+	"time"
 )
 
 func parallelMountConcurrency(numWorkers int) int {
@@ -72,16 +73,21 @@ func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Up
 	root := pu.trie.root
 	path := make([]byte, 0, forkPathCap)
 	path = append(path, root.ext...)
+	walkStart := time.Now()
 	walkErr := fw.walk(ctx, bw, root, path)
+	p.foldTiming.Walk = time.Since(walkStart)
+	p.foldTiming.Parallel, p.foldTiming.Forks, p.foldTiming.Helpers = fw.parallel, fw.forks.Load(), fw.helpers.Load()
 	fw.detach(bw)
 	p.forks.Store(fw.forks.Load())
 	if walkErr != nil {
 		return nil, fmt.Errorf("processMounted: %w", walkErr)
 	}
 
+	rootFoldStart := time.Now()
 	if _, err := foldSplitRow(ctx, base); err != nil {
 		return nil, fmt.Errorf("processMounted: root fold: %w", err)
 	}
+	p.foldTiming.RootFold = time.Since(rootFoldStart)
 	p.metrics.Merge(base.metrics)
 	pu.appendDeferred(base.TakeDeferredUpdates())
 	return base.RootHash()

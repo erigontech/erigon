@@ -33,6 +33,25 @@ const deferredWritesPerWorker = 4096
 
 var defaultParallelCommitmentWorkers = max(1, runtime.GOMAXPROCS(0))
 
+// FoldTiming splits a parallel Process round. Durations are wall time on the goroutine that called Process.
+type FoldTiming struct {
+	Build    time.Duration
+	Walk     time.Duration
+	Parallel time.Duration // part of Walk spent in top-level forks, from spawning workers to joining them
+	RootFold time.Duration
+	Forks    uint64
+	Helpers  uint64
+}
+
+func (t *FoldTiming) Add(o FoldTiming) {
+	t.Build += o.Build
+	t.Walk += o.Walk
+	t.Parallel += o.Parallel
+	t.RootFold += o.RootFold
+	t.Forks += o.Forks
+	t.Helpers += o.Helpers
+}
+
 type ParallelPatriciaHashed struct {
 	template       *HexPatriciaHashed
 	trieCtxFactory TrieContextFactory
@@ -45,6 +64,8 @@ type ParallelPatriciaHashed struct {
 
 	forks     atomic.Uint64
 	forkGrain uint32
+
+	foldTiming FoldTiming
 
 	deferredForCaller []*DeferredBranchUpdate
 
@@ -247,8 +268,11 @@ func (p *ParallelPatriciaHashed) Process(
 	roundStart := time.Now()
 	defer func() { observeRound(p.metrics, roundStart) }()
 
+	p.foldTiming = FoldTiming{}
 	pu := updates.parallel
+	buildStart := time.Now()
 	pu.Build()
+	p.foldTiming.Build = time.Since(buildStart)
 	if pu.trie == nil || pu.trie.root == nil || pu.trie.root.subtreeCount == 0 {
 		// A consumed (or never-touched) collection must return the carried root; folding
 		// an empty base would publish the empty-trie root instead.
@@ -292,7 +316,7 @@ func (p *ParallelPatriciaHashed) Process(
 	p.rootHash.Store(&out)
 	flushTrieStateRates()
 	if onProgress != nil && p.metrics != nil {
-		onProgress(&CommitProgress{KeyIndex: n, UpdateCount: n, Metrics: p.metrics.AsValues()})
+		onProgress(&CommitProgress{KeyIndex: n, UpdateCount: n, Metrics: p.metrics.AsValues(), Fold: p.foldTiming})
 	}
 	return out, nil
 }

@@ -103,6 +103,7 @@ type CommitProgress struct {
 	KeyIndex    uint64
 	UpdateCount uint64
 	Metrics     MetricValues
+	Fold        FoldTiming
 }
 
 type PatriciaContext interface {

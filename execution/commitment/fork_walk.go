@@ -24,6 +24,7 @@ import (
 	"math/bits"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"golang.org/x/sync/errgroup"
 )
@@ -118,6 +119,7 @@ type forkWalk struct {
 	grain         uint32
 	forks         atomic.Uint64
 	helpers       atomic.Uint64
+	parallel      time.Duration // written only by the walker on the calling goroutine (!bindsCtx)
 }
 
 func (fw *forkWalk) attach(ctx context.Context, wk *walker) error {
@@ -247,6 +249,7 @@ func (fw *forkWalk) fork(ctx context.Context, wk *walker, node *prefixNode, path
 		return fw.runChild(cctx, w, cw, node, i, int(nibs[i]), path, cells, &touched, &present)
 	}
 
+	parallelStart := time.Now()
 	own := &walker{lease: wk.lease, bindsCtx: true}
 	if wk.bindsCtx {
 		w.ResetContext(nil)
@@ -292,6 +295,9 @@ func (fw *forkWalk) fork(ctx context.Context, wk *walker, node *prefixNode, path
 		own.lease = nil
 	}
 	_ = g.Wait()
+	if !wk.bindsCtx {
+		fw.parallel += time.Since(parallelStart)
+	}
 	if firstErr != nil {
 		wk.lease = own.lease
 		return firstErr
