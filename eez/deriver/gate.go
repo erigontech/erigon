@@ -30,13 +30,13 @@ import (
 var ErrOutboundUnauthorized = errors.New("outbound entry without a matching L2 call")
 
 // VerifyOutbound checks that each outbound entry has its own
-// CrossChainCallExecuted event among logs, emitted by EEZL2 with zero call
+// CrossChainCallExecuted event among logs, emitted by eezl2 with zero call
 // gas, so that a signed transaction of the Sync block made every L2-to-L1
 // call L1 settled.
-func VerifyOutbound(entries []protocol.ExecutionEntry, logs []*types.Log, rollupID uint64) error {
+func VerifyOutbound(entries []protocol.ExecutionEntry, logs []*types.Log, rollupID uint64, eezl2 common.Address) error {
 	available := map[common.Hash]int{}
 	for _, l := range logs {
-		if l.Address != protocol.EEZL2Address {
+		if l.Address != eezl2 {
 			continue
 		}
 		e, err := protocol.ParseL2CrossChainCallExecuted(l)

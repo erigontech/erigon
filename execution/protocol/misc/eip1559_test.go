@@ -114,3 +114,38 @@ func TestCalcBaseFee(t *testing.T) {
 		}
 	}
 }
+
+// TestCalcBaseFeeDenominator checks a configured denominator against the
+// eez-rollupX 2/50 vectors.
+func TestCalcBaseFeeDenominator(t *testing.T) {
+	cfg := config()
+	denominator := uint64(50)
+	cfg.BaseFeeChangeDenominator = &denominator
+	const gasLimit = 30_000_000
+	tests := []struct {
+		parentBaseFee   uint64
+		parentGasUsed   uint64
+		expectedBaseFee uint64
+	}{
+		{params.InitialBaseFee, 0, 980_000_000},
+		{params.InitialBaseFee, gasLimit / 2, params.InitialBaseFee},
+		{params.InitialBaseFee, gasLimit, 1_020_000_000},
+		{49, 0, 49},
+		{1, gasLimit, 2},
+	}
+	for i, test := range tests {
+		parent := &types.Header{
+			Number:   *common.Num32,
+			GasLimit: gasLimit,
+			GasUsed:  test.parentGasUsed,
+			BaseFee:  uint256.NewInt(test.parentBaseFee),
+		}
+		if have, want := CalcBaseFee(cfg, parent), uint256.NewInt(test.expectedBaseFee); have.Cmp(want) != 0 {
+			t.Errorf("test %d: have %d want %d", i, have, want)
+		}
+	}
+	parent := &types.Header{Number: *common.Num32, GasLimit: gasLimit, BaseFee: uint256.NewInt(params.InitialBaseFee)}
+	if have := CalcBaseFee(config(), parent); have.Uint64() != 875_000_000 {
+		t.Errorf("default denominator: have %d want 875000000", have)
+	}
+}

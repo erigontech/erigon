@@ -33,9 +33,14 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 )
 
-// ErrL1ChainID reports an L1 source on another chain than the configured
-// one.
-var ErrL1ChainID = errors.New("L1 source serves another chain")
+var (
+	// ErrL1ChainID reports an L1 source on another chain than the
+	// configured one.
+	ErrL1ChainID = errors.New("L1 source serves another chain")
+	// ErrL1Reference reports an L1 whose canonical block differs from the
+	// rollupX genesis's L1 reference.
+	ErrL1Reference = errors.New("L1 does not hold the genesis's L1 reference")
+)
 
 // Config tunes a Follower.
 type Config struct {
@@ -60,6 +65,12 @@ type Config struct {
 	// read every SequencerPoll, while it descends from the safe block.
 	Sequencer     Sequencer
 	SequencerPoll time.Duration
+	// Blobs serves the blobs of blob-backed batches; without it the
+	// follower cannot derive them.
+	Blobs l1.BlobSource
+	// Progress is the interval between info-level progress lines; zero logs
+	// none.
+	Progress time.Duration
 }
 
 // DefaultConfig is the reference client's tuning.
@@ -70,6 +81,7 @@ var DefaultConfig = Config{
 	Retry:         2 * time.Second,
 	MaxRetry:      30 * time.Second,
 	SequencerPoll: time.Second,
+	Progress:      30 * time.Second,
 }
 
 // overlayLimit bounds the sequencer blocks one overlay step inserts.
@@ -90,6 +102,8 @@ type Follower struct {
 	// the L1 head to scan to and l1Finalized the latest finalized L1 block.
 	scanned, target, l1Finalized uint64
 	resumed                      bool
+	// progress is the state at the last progress line.
+	progress progress
 
 	statusMu sync.Mutex
 	status   Status
@@ -130,6 +144,8 @@ func (f *Follower) publish() {
 	f.status = s
 	f.statusMu.Unlock()
 
+	f.logProgress(s)
+
 	m := loadMetrics()
 	m.l1Head.SetUint64(f.target)
 	m.l1Scanned.SetUint64(s.L1Scanned)
@@ -140,6 +156,24 @@ func (f *Follower) publish() {
 	m.l2Finalized.SetUint64(s.Finalized)
 }
 
+type progress struct {
+	at              time.Time
+	batches, blocks uint64
+}
+
+// logProgress logs s at most every cfg.Progress, with the batches derived
+// since the last line and the blocks they carry.
+func (f *Follower) logProgress(s Status) {
+	now := time.Now()
+	if f.cfg.Progress <= 0 || now.Sub(f.progress.at) < f.cfg.Progress {
+		return
+	}
+	batches, blocks := f.deriver.Derived()
+	f.logger.Info("[eez] following", "l1Scanned", s.L1Scanned, "l1Head", f.target, "l1Finalized", s.L1Finalized,
+		"safe", s.Safe, "finalized", s.Finalized, "batches", batches-f.progress.batches, "blocks", blocks-f.progress.blocks)
+	f.progress = progress{at: now, batches: batches, blocks: blocks}
+}
+
 // New returns a follower of the EEZ chain cfg, local in chain, settled on
 // the L1 that reader serves.
 func New(reader l1.ChainReader, chain deriver.Chain, cfg *chain.Config, c Config, logger log.Logger) (*Follower, error) {
@@ -147,11 +181,14 @@ func New(reader l1.ChainReader, chain deriver.Chain, cfg *chain.Config, c Config
 	if !ok {
 		return nil, fmt.Errorf("chain %s is not an EEZ chain", cfg.ChainName)
 	}
-	d, err := deriver.New(chain, cfg, c.Dir, logger)
+	d, err := deriver.New(chain, cfg, c.Dir, c.Blobs, reader, logger)
 	if err != nil {
 		return nil, err
 	}
 	scanner := l1.NewScanner(reader, l2.Registry, l2.RollupID)
+	if l2.RollupX != nil {
+		scanner.UseRollupX()
+	}
 	if c.LogChunk > 0 {
 		scanner.SetChunk(c.LogChunk)
 	}
@@ -160,7 +197,7 @@ func New(reader l1.ChainReader, chain deriver.Chain, cfg *chain.Config, c Config
 		l2:      l2,
 		reader:  reader,
 		scanner: scanner,
-		watcher: l1.NewWatcher(reader, c.ReorgDepth),
+		watcher: l1.NewWatcher(reader, c.ReorgDepth, logger),
 		chain:   chain,
 		deriver: d,
 		logger:  logger,
@@ -210,6 +247,7 @@ func (f *Follower) Run(ctx context.Context) error {
 		unsafeTick = t.C
 	}
 	var retry <-chan time.Time
+	var failing time.Time
 	pause := f.cfg.Retry
 	for {
 		var err error
@@ -232,7 +270,10 @@ func (f *Follower) Run(ctx context.Context) error {
 			if halts(err) {
 				return err
 			}
-			f.logger.Warn("[eez] follower step failed, retrying", "event", "eez.deriver.resync.failed", "in", pause, "err", err)
+			if retry == nil {
+				failing = time.Now()
+			}
+			f.logRetry("[eez] follower step failed, retrying", err, failing, "event", "eez.deriver.resync.failed", "in", pause)
 			retry, pause = time.After(pause), min(2*pause, f.cfg.MaxRetry)
 			continue
 		}
@@ -247,12 +288,16 @@ func (f *Follower) Run(ctx context.Context) error {
 // the L1 head, retrying failures that may pass.
 func (f *Follower) Boot(ctx context.Context) error {
 	pause := f.cfg.Retry
+	var failing time.Time
 	for attempt := 1; ; attempt++ {
 		err := f.recover(ctx, f.boot(ctx))
 		if err == nil || halts(err) || (f.cfg.BootAttempts > 0 && attempt >= f.cfg.BootAttempts) {
 			return err
 		}
-		f.logger.Warn("[eez] boot catch-up failed, retrying", "event", "eez.node.deriver.boot_catch_up.failed", "attempt", attempt, "in", pause, "err", err)
+		if attempt == 1 {
+			failing = time.Now()
+		}
+		f.logRetry("[eez] boot catch-up failed, retrying", err, failing, "event", "eez.node.deriver.boot_catch_up.failed", "attempt", attempt, "in", pause)
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -269,6 +314,14 @@ func (f *Follower) boot(ctx context.Context) error {
 	}
 	if id != f.l2.L1ChainID {
 		return fmt.Errorf("%w: chain %d, want %d", ErrL1ChainID, id, f.l2.L1ChainID)
+	}
+	if err := f.readFinalized(ctx); err != nil {
+		return err
+	}
+	if x := f.l2.RollupX; x != nil {
+		if err := f.checkL1Reference(ctx, &x.L1Reference); err != nil {
+			return err
+		}
 	}
 	head, err := f.reader.Head(ctx)
 	if err != nil {
@@ -298,8 +351,7 @@ func (f *Follower) resume(ctx context.Context, head uint64) (uint64, error) {
 	}
 	if r != nil {
 		f.logger.Info("[eez] resuming from checkpoint", "l1Block", r.L1Block, "l2Block", r.LastL2Block)
-		f.deriver.Seed(*r)
-		return r.L1Block, nil
+		return r.L1Block, f.seed(ctx, r)
 	}
 	deploy := f.l2.RegistryDeployBlock
 	if r, err = deriver.FindResumePoint(ctx, f.reader, f.l2.Registry, f.l2.RollupID, deploy, head, f.chain.CanonicalNumber); err != nil {
@@ -307,11 +359,37 @@ func (f *Follower) resume(ctx context.Context, head uint64) (uint64, error) {
 	}
 	if r != nil {
 		f.logger.Info("[eez] resuming from local settled block", "l1Block", r.L1Block, "l2Block", r.LastL2Block)
-		f.deriver.Seed(*r)
-		return r.L1Block, nil
+		return r.L1Block, f.seed(ctx, r)
 	}
 	f.logger.Info("[eez] deriving from the registry deploy block", "l1Block", deploy)
 	return max(deploy, 1), nil
+}
+
+// checkL1Reference checks that L1 finalized the rollupX genesis's L1
+// reference: its canonical block at the reference's number has the
+// reference's hash, timestamp and mixHash.
+func (f *Follower) checkL1Reference(ctx context.Context, ref *config.L1Reference) error {
+	if f.l1Finalized < ref.Number {
+		return fmt.Errorf("L1 finalized block %d is below the genesis's L1 reference %d", f.l1Finalized, ref.Number)
+	}
+	h, err := f.reader.HeaderByNumber(ctx, ref.Number)
+	if err != nil {
+		return err
+	}
+	if h.Hash != ref.Hash || h.Time != ref.Timestamp || h.MixDigest != ref.PrevRandao {
+		return fmt.Errorf("%w: block %d is %x at time %d with mixHash %x", ErrL1Reference, ref.Number, h.Hash, h.Time, h.MixDigest)
+	}
+	return nil
+}
+
+// seed starts the deriver after r, with its L1 block's timestamp and mixHash.
+func (f *Follower) seed(ctx context.Context, r *deriver.Record) error {
+	h, err := f.reader.HeaderByHash(ctx, r.L1BlockHash)
+	if err != nil {
+		return err
+	}
+	r.L1Time, r.L1MixDigest = h.Time, h.MixDigest
+	return f.deriver.Seed(ctx, *r)
 }
 
 // checkpointSeed returns the checkpoint's settlement when L1 and the local
@@ -368,6 +446,11 @@ func (f *Follower) Handle(ctx context.Context, e l1.Event) error {
 func (f *Follower) Sync(ctx context.Context) error {
 	defer f.publish()
 	defer loadMetrics().sync.ObserveDuration(time.Now())
+	if !f.resumed {
+		if err := f.resumeAgain(ctx); err != nil {
+			return err
+		}
+	}
 	if err := f.revalidate(ctx); err != nil {
 		return err
 	}
@@ -376,12 +459,45 @@ func (f *Follower) Sync(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		if err := f.deriver.Reconcile(ctx, batches); err != nil {
-			return err
+		// One L1 block at a time keeps the status, the metrics and the
+		// progress line current through a long range.
+		for len(batches) > 0 {
+			n := 1
+			for n < len(batches) && batches[n].L1Block == batches[0].L1Block {
+				n++
+			}
+			if err := f.deriver.Reconcile(ctx, batches[:n]); err != nil {
+				return err
+			}
+			batches = batches[n:]
+			f.publish()
 		}
 		f.scanned = reached
+		// Finality applied per range advances the finalized block and
+		// prunes the index through a long catch-up.
+		if err := f.readFinalized(ctx); err != nil {
+			return err
+		}
+		if err := f.deriver.OnFinalized(ctx, f.l1Finalized); err != nil {
+			return err
+		}
+		f.publish()
 	}
 	return f.deriver.OnFinalized(ctx, f.l1Finalized)
+}
+
+// readFinalized reads the latest finalized L1 block; there is none until L1
+// finalizes one.
+func (f *Follower) readFinalized(ctx context.Context) error {
+	h, err := f.reader.Finalized(ctx)
+	if errors.Is(err, l1.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	f.l1Finalized = max(f.l1Finalized, h.Number)
+	return nil
 }
 
 // revalidate rewinds to below the latest settlement whose L1 block is no
@@ -406,7 +522,31 @@ func (f *Follower) rewind(ctx context.Context, ancestor uint64) error {
 	defer f.publish()
 	loadMetrics().reorgs.Inc()
 	f.scanned = min(f.scanned, ancestor)
-	return f.deriver.OnReorg(ctx, ancestor)
+	err := f.deriver.OnReorg(ctx, ancestor)
+	if !errors.Is(err, deriver.ErrResumeReorged) {
+		return err
+	}
+	f.logger.Info("[eez] L1 reorg dropped the resume point, resuming again", "ancestor", ancestor)
+	f.resumed = false
+	return f.resumeAgain(ctx)
+}
+
+// resumeAgain seeds derivation again after a reorg dropped its resume point,
+// and moves the head back to the new one.
+func (f *Follower) resumeAgain(ctx context.Context) error {
+	head, err := f.reader.Head(ctx)
+	if err != nil {
+		return err
+	}
+	from, err := f.resume(ctx, head.Number)
+	if err != nil {
+		return err
+	}
+	if err := f.deriver.Retreat(ctx); err != nil {
+		return err
+	}
+	f.scanned, f.resumed = from-1, true
+	return nil
 }
 
 // recover turns a divergence found on an L1 block that is no longer
@@ -423,6 +563,7 @@ func (f *Follower) recover(ctx context.Context, err error) error {
 		return fmt.Errorf("%w (L1 block %d unreadable: %w)", retryable{err}, div.L1Block, herr)
 	}
 	if herr == nil && h.Hash == div.L1BlockHash {
+		f.logger.Crit("[eez] local chain diverged from L1", "event", div.Event, "err", err)
 		return err
 	}
 	f.logger.Warn("[eez] divergence on a reorged L1 block, rewinding", "l1Block", div.L1Block, "err", err)
@@ -430,6 +571,22 @@ func (f *Follower) recover(ctx context.Context, err error) error {
 		return err
 	}
 	return retryable{err}
+}
+
+// blobGrace is how long a blob may be missing before the retries log at
+// error level: a beacon node serves the blobs of a slot seconds after the L1
+// execution node has its block.
+const blobGrace = time.Minute
+
+// logRetry logs err, failing since failing, before a retry: at error level
+// once a blob is lost or missing for over blobGrace, since derivation cannot
+// pass it until an operator supplies it.
+func (f *Follower) logRetry(msg string, err error, failing time.Time, ctx ...any) {
+	logFn := f.logger.Warn
+	if errors.Is(err, l1.ErrBlobLost) || (errors.Is(err, l1.ErrBlobUnavailable) && time.Since(failing) > blobGrace) {
+		logFn = f.logger.Error
+	}
+	logFn(msg, append(ctx, "err", err)...)
 }
 
 // retryable marks an error whose cause may pass.
@@ -442,5 +599,5 @@ func halts(err error) bool {
 	}
 	return errors.Is(err, deriver.ErrDiverged) || errors.Is(err, deriver.ErrFinalizedReorged) ||
 		errors.Is(err, l1.ErrReorgTooDeep) || errors.Is(err, l1.ErrFinalityViolation) ||
-		errors.Is(err, l1.ErrUndecodable) || errors.Is(err, ErrL1ChainID)
+		errors.Is(err, l1.ErrUndecodable) || errors.Is(err, ErrL1ChainID) || errors.Is(err, ErrL1Reference)
 }

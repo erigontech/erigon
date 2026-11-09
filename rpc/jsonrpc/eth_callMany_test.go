@@ -136,6 +136,78 @@ func TestCallManyAtGenesisReadsGenesisState(t *testing.T) {
 	require.NotContains(t, res[0][0], "error")
 }
 
+// TestCallManyTransactionIndexBeforeBlockEnd checks that an explicit
+// transaction index runs the bundles before the block's closing operations,
+// also at the block's transaction count, and the default after them: the
+// coinbase's balance shows the block reward Finalize credits.
+func TestCallManyTransactionIndexBeforeBlockEnd(t *testing.T) {
+	coinbase := common.Address{0xcb}
+	m := execmoduletester.New(t,
+		execmoduletester.WithGenesisSpec(&types.Genesis{
+			Config:     chain.TestChainBerlinConfig,
+			Alloc:      types.GenesisAlloc{testAddr: {Balance: big.NewInt(1_000_000_000_000_000_000)}},
+			Difficulty: uint256.NewInt(1),
+		}),
+		execmoduletester.WithKey(testKey),
+	)
+	signer := types.LatestSignerForChainID(nil)
+	// Block 1 holds a transfer, block 2 nothing.
+	c, err := m.GenerateChain(2, func(i int, block *blockgen.BlockGen) {
+		block.SetCoinbase(coinbase)
+		if i > 0 {
+			return
+		}
+		txn, err := types.SignTx(types.NewTransaction(block.TxNonce(testAddr), common.Address{1},
+			uint256.NewInt(1), params.TxGas, uint256.NewInt(1), nil), *signer, testKey)
+		require.NoError(t, err)
+		block.AddTx(txn)
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(c))
+	api, _ := newCallManyApisForTest(m)
+	ctx := context.Background()
+
+	balanceAt := func(n int64) uint256.Int {
+		sel := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(n))
+		b, err := api.GetBalance(ctx, coinbase, &sel)
+		require.NoError(t, err)
+		return *uint256.MustFromBig(b.ToInt())
+	}
+	// Returns the coinbase's balance: PUSH20 coinbase BALANCE PUSH1 0 MSTORE PUSH1 32 PUSH1 0 RETURN.
+	reader := common.Address{0xbe}
+	code := hexutil.Bytes(append(append([]byte{byte(vm.PUSH20)}, coinbase[:]...),
+		byte(vm.BALANCE), byte(vm.PUSH1), 0, byte(vm.MSTORE), byte(vm.PUSH1), 32, byte(vm.PUSH1), 0, byte(vm.RETURN)))
+	callMany := func(block int64, txIndex *int) uint256.Int {
+		res, err := api.CallMany(ctx, []Bundle{{Transactions: []ethapi.CallArgs{{From: &testAddr, To: &reader}}}},
+			StateContext{BlockNumber: rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(block)), TransactionIndex: txIndex},
+			&ethapi.StateOverrides{accounts.InternAddress(reader): {Code: &code}}, nil)
+		require.NoError(t, err)
+		require.NotContains(t, res[0][0], "error")
+		raw, err := hex.DecodeString(res[0][0]["value"].(string))
+		require.NoError(t, err)
+		var v uint256.Int
+		v.SetBytes(raw)
+		return v
+	}
+	zero, one := 0, 1
+	after1, after2 := balanceAt(1), balanceAt(2)
+	var reward uint256.Int
+	reward.Sub(&after2, &after1)
+	require.False(t, reward.IsZero(), "block 2 credits its coinbase")
+	var before1End uint256.Int
+	before1End.Sub(&after1, &reward)
+
+	require.Equal(t, after1, callMany(2, &zero), "empty block 2, transaction index 0")
+	require.Equal(t, after2, callMany(2, nil), "empty block 2, default")
+	require.Equal(t, before1End, callMany(1, &one), "block 1, transaction index 1")
+	require.Equal(t, after1, callMany(1, nil), "block 1, default")
+
+	minusTwo := -2
+	_, err = api.CallMany(ctx, []Bundle{{Transactions: []ethapi.CallArgs{{From: &testAddr, To: &reader}}}},
+		StateContext{BlockNumber: rpc.BlockNumberOrHashWithNumber(1), TransactionIndex: &minusTwo}, nil, nil)
+	require.ErrorContains(t, err, "out of range")
+}
+
 // A hash selector must answer for the same state as the number it resolves to.
 func TestCallManyHashSelectorMatchesNumber(t *testing.T) {
 	m, chain, _ := rpcdaemontest.CreateTestExecModule(t)
@@ -159,6 +231,34 @@ func TestCallManyHashSelectorMatchesNumber(t *testing.T) {
 
 	require.Equal(t, byNumber, byHash)
 	require.NotContains(t, byNumber[0][0], "error")
+}
+
+// State is read from canonical history by number, which a side block at the same
+// height does not share.
+func TestCallManyRejectsNonCanonicalBlockHash(t *testing.T) {
+	m, chain, orphanedChains := rpcdaemontest.CreateTestExecModule(t)
+	api, _ := newCallManyApisForTest(m)
+	ctx := context.Background()
+
+	canonical := chain.Blocks[0]
+	side := orphanedChains[0].Blocks[0]
+	require.Equal(t, canonical.NumberU64(), side.NumberU64())
+	require.NotEqual(t, canonical.Hash(), side.Hash())
+
+	to := common.Address{3}
+	gas := hexutil.Uint64(21_000)
+	bundles := []Bundle{{Transactions: []ethapi.CallArgs{{
+		From: &m.Address, To: &to, Gas: &gas, Value: (*hexutil.U256)(uint256.NewInt(1)),
+	}}}}
+
+	res, err := api.CallMany(ctx, bundles,
+		StateContext{BlockNumber: rpc.BlockNumberOrHashWithHash(canonical.Hash(), false)}, nil, nil)
+	require.NoError(t, err)
+	require.NotContains(t, res[0][0], "error")
+
+	_, err = api.CallMany(ctx, bundles,
+		StateContext{BlockNumber: rpc.BlockNumberOrHashWithHash(side.Hash(), false)}, nil, nil)
+	require.ErrorContains(t, err, "is not currently canonical")
 }
 
 func TestCapEVMTimeout(t *testing.T) {

@@ -17,6 +17,7 @@ package l1_test
 
 import (
 	"context"
+	"errors"
 	"math/big"
 	"testing"
 
@@ -137,6 +138,20 @@ func scanAll(t *testing.T, s *l1.Scanner, from, to uint64) ([]l1.ScannedBatch, i
 	return all, calls
 }
 
+// refusing counts the log queries its source refused as too wide.
+type refusing struct {
+	l1.ChainReader
+	refused int
+}
+
+func (r *refusing) Logs(ctx context.Context, from, to uint64, address common.Address, topics [][]common.Hash) ([]*types.Log, error) {
+	logs, err := r.ChainReader.Logs(ctx, from, to, address, topics)
+	if errors.Is(err, l1.ErrRangeTooWide) {
+		r.refused++
+	}
+	return logs, err
+}
+
 func TestScanRange(t *testing.T) {
 	sc := newScanChain(t)
 	batches, calls := scanAll(t, l1.NewScanner(sc, testRegistry, 1), 0, 10)
@@ -149,11 +164,14 @@ func TestScanRange(t *testing.T) {
 		require.Equal(t, sc.postBatch[:4], protocol.PostAndVerifyBatchSelector[:])
 	}
 
-	// A source refusing wide ranges is read in narrower ones, to the same result.
+	// A source refusing wide ranges is read in narrower ones, to the same
+	// result; only the first scan probes for the width.
 	sc.SetMaxLogRange(3)
-	narrowed, calls := scanAll(t, l1.NewScanner(sc, testRegistry, 1), 0, 10)
+	src := &refusing{ChainReader: sc}
+	narrowed, calls := scanAll(t, l1.NewScanner(src, testRegistry, 1), 0, 10)
 	require.Greater(t, calls, 3)
 	require.Equal(t, batches, narrowed)
+	require.Equal(t, 2, src.refused)
 
 	// Another rollup's scanner finds nothing settled for it.
 	other, _ := scanAll(t, l1.NewScanner(sc, testRegistry, 2), 0, 10)

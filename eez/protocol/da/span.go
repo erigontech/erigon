@@ -88,16 +88,26 @@ func DecodeSpan(operations []byte) (*Span, error) {
 		}
 		txs += uint64(s.TxCounts[i])
 	}
-	if s.Beneficiaries, err = decodeRuns(&r, blocks, "beneficiary", func() (common.Address, error) {
+	if err := s.decodeColumns(&r, blocks, txs); err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+// decodeColumns decodes the columns after the transaction counts: the
+// beneficiary and extraData runs, then the txs transactions.
+func (s *Span) decodeColumns(r *spanReader, blocks uint32, txs uint64) error {
+	var err error
+	if s.Beneficiaries, err = decodeRuns(r, blocks, "beneficiary", func() (common.Address, error) {
 		b, err := r.take("beneficiary", 20)
 		if err != nil {
 			return common.Address{}, err
 		}
 		return common.Address(b), nil
 	}, func(a, b common.Address) bool { return a == b }); err != nil {
-		return nil, err
+		return err
 	}
-	if s.ExtraData, err = decodeRuns(&r, blocks, "extra_data", func() ([]byte, error) {
+	if s.ExtraData, err = decodeRuns(r, blocks, "extra_data", func() ([]byte, error) {
 		n, err := r.take("extra_data length", 1)
 		if err != nil {
 			return nil, err
@@ -107,34 +117,34 @@ func DecodeSpan(operations []byte) (*Span, error) {
 		}
 		return r.take("extra_data", int(n[0]))
 	}, bytes.Equal); err != nil {
-		return nil, err
+		return err
 	}
 	// Each transaction costs a length byte and at least one content byte.
 	if txs > uint64(r.remaining()/2) {
-		return nil, fmt.Errorf("%w: %d transactions in %d bytes", ErrSpanImplausible, txs, r.remaining())
+		return fmt.Errorf("%w: %d transactions in %d bytes", ErrSpanImplausible, txs, r.remaining())
 	}
 	lengths := make([]uint32, txs)
 	var total uint64
 	for i := range lengths {
 		if lengths[i], err = r.uvarint32("pure_transaction_lengths"); err != nil {
-			return nil, err
+			return err
 		}
 		if lengths[i] == 0 {
-			return nil, fmt.Errorf("%w: transaction %d", ErrSpanEmptyTx, i)
+			return fmt.Errorf("%w: transaction %d", ErrSpanEmptyTx, i)
 		}
 		total += uint64(lengths[i])
 	}
 	switch rest := uint64(r.remaining()); {
 	case total > rest:
-		return nil, fmt.Errorf("%w: %d transaction bytes declared, %d left", ErrSpanTruncated, total, rest)
+		return fmt.Errorf("%w: %d transaction bytes declared, %d left", ErrSpanTruncated, total, rest)
 	case total < rest:
-		return nil, fmt.Errorf("%w: %d", ErrSpanTrailingByte, rest-total)
+		return fmt.Errorf("%w: %d", ErrSpanTrailingByte, rest-total)
 	}
 	s.Transactions = make([][]byte, txs)
 	for i, n := range lengths {
 		s.Transactions[i], _ = r.take("pure_transaction_bytes", int(n))
 	}
-	return s, nil
+	return nil
 }
 
 // decodeRuns expands a column of (uvarint32 run length, value) runs into one

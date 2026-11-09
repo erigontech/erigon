@@ -1048,10 +1048,6 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Ha
 		return nil, err
 	}
 	defer tx.Rollback()
-	chainConfig, err := api.chainConfig(ctx, tx)
-	if err != nil {
-		return nil, err
-	}
 
 	blockNum, txNum, ok, err := api.txnLookup(ctx, tx, txHash)
 	if err != nil {
@@ -1080,7 +1076,7 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Ha
 	}
 
 	// Returns an array of trace arrays, one trace array for each transaction
-	trace, err := api.callTransaction(ctx, tx, header, traceTypes, txnIndex, *gasBailOut, chainConfig, traceConfig)
+	trace, err := api.callTransaction(ctx, tx, header, traceTypes, txnIndex, *gasBailOut, traceConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -1541,20 +1537,21 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 	defer ibs.Close()
 
 	trace, _, err := api.doCallBlock(ctx, tx, stateReader, stateCache, cachedWriter, ibs,
-		txns, msgs, callParams, overrideHeader(traceConfig, parentHeader), parentNrOrHash.RequireCanonical, false /* gasBailout */, false /* advanceTxNum */, true /* noBaseFee */, traceConfig, overrides)
+		txns, msgs, callParams, overrideHeader(traceConfig, parentHeader), parentNrOrHash.RequireCanonical, false /* gasBailout */, false /* blockReplay */, true /* noBaseFee */, traceConfig, overrides)
 	if err != nil {
 		return nil, callError(err)
 	}
 	return trace, nil
 }
 
-// advanceTxNum moves the history reader with the transaction index. Block
-// replay needs it; an ad-hoc bundle must not, or a call reads state left by a
-// real transaction it never executed.
+// blockReplay says txns are the transactions of header's block: the history
+// reader moves with the transaction index and the engine post-processes each
+// transaction. An ad-hoc bundle must not move the reader, or a call reads
+// state left by a real transaction it never executed.
 func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReader state.StateReader,
 	stateCache *shards.StateCache, cachedWriter state.StateWriter, ibs *state.IntraBlockState,
 	txns []types.Transaction, msgs []*types.Message, callParams []TraceCallParam,
-	header *types.Header, requireCanonical, gasBailout, advanceTxNum, noBaseFee bool,
+	header *types.Header, requireCanonical, gasBailout, blockReplay, noBaseFee bool,
 	traceConfig *config.TraceConfig, overrides *ethapi.StateOverrides,
 ) ([]*TraceCallResult, *tracing.Hooks, error) {
 	chainConfig, err := api.chainConfig(ctx, dbtx)
@@ -1602,9 +1599,10 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 	}
 	var tracer *tracers.Tracer
 	var tracingHooks *tracing.Hooks
+	var gasUsed protocol.GasUsed
 
 	for txIndex, msg := range msgs {
-		if isHistoricalStateReader && advanceTxNum {
+		if isHistoricalStateReader && blockReplay {
 			historicalStateReader.SetTxNum(baseTxNum + uint64(txIndex))
 		}
 		if err := common.Stopped(ctx.Done()); err != nil {
@@ -1665,7 +1663,11 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 		if precompiles != nil {
 			evm.SetPrecompiles(precompiles)
 		}
-		gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
+		gas := msg.Gas()
+		if blockReplay && protocol.TakesGasFromBlock(msg) {
+			gas = header.GasLimit - min(header.GasLimit, gasUsed.BlockGasUsed())
+		}
+		gp := new(protocol.GasPool).AddGas(gas).AddBlobGas(msg.BlobGas())
 
 		if tracer != nil && tracer.Hooks.OnTxStart != nil {
 			tracer.Hooks.OnTxStart(evm.GetVMContext(), txns[txIndex], msg.From())
@@ -1677,6 +1679,7 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 			}
 			return nil, nil, fmt.Errorf("first run for txIndex %d error: %w", txIndex, err)
 		}
+		gasUsed.AddResult(execResult)
 
 		if tracer != nil && tracer.Hooks.HasTxEndHook() {
 			tracer.Hooks.EmitTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, execResult.TxnGasUsage, nil)
@@ -1684,6 +1687,11 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 
 		chainRules := blockCtx.Rules(chainConfig)
 		traceResult.Output = bytes.Clone(execResult.ReturnData)
+		if blockReplay {
+			if err := protocol.PostProcessTx(engine, chainConfig, ibs, txns, txIndex); err != nil {
+				return nil, nil, err
+			}
+		}
 		if traceTypeStateDiff {
 			// Closure so the per-tx state is closed on every exit path.
 			if err := func() error {
@@ -1722,9 +1730,11 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 	return results, tracingHooks, nil
 }
 
-func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader state.StateReader,
+// doCall traces txn, transaction txIndex of its block; blockTxs, the block's
+// transactions, is set when the engine post-processes each transaction.
+func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.TemporalTx, stateReader state.StateReader,
 	stateCache *shards.StateCache, cachedWriter state.StateWriter, ibs *state.IntraBlockState,
-	txn types.Transaction, callParam TraceCallParam,
+	txn types.Transaction, blockTxs types.Transactions, callParam TraceCallParam,
 	header *types.Header, requireCanonical, gasBailout bool, txIndex int,
 	traceConfig *config.TraceConfig,
 ) (*TraceCallResult, error) {
@@ -1819,7 +1829,10 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 	ibs.SetTxContext(blockCtx.BlockNumber, txIndex)
 	txCtx := protocol.NewEVMTxContext(msg)
 	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
-	gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
+	gp, err := replayGasPool(dbtx, header, chainRules, msg, txIndex, baseTxNum+uint64(txIndex))
+	if err != nil {
+		return nil, err
+	}
 
 	if vmConfig.Tracer != nil && vmConfig.Tracer.OnTxStart != nil {
 		vmConfig.Tracer.OnTxStart(evm.GetVMContext(), txn, msg.From())
@@ -1827,6 +1840,11 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 	execResult, err := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailout /*gasBailout*/, engine)
 	if err != nil {
 		return nil, fmt.Errorf("first run for txIndex %d error: %w", txIndex, err)
+	}
+	if blockTxs != nil {
+		if err := protocol.PostProcessTx(engine, chainConfig, ibs, blockTxs, txIndex); err != nil {
+			return nil, err
+		}
 	}
 
 	traceResult.Output = bytes.Clone(execResult.ReturnData)

@@ -1,0 +1,90 @@
+name: EEZ devnet images
+
+# Builds eez-node, eez-proof-signer and eez-deploy at one eez-rollup0 commit
+# and pushes them to ghcr.io/erigontech, tagged with that commit, for
+# eez-devnet.yml to pull. eez-rollup0 publishes no images; building them
+# inside Docker keeps the Rust toolchain off Erigon's runners.
+#
+# A push runs it when this file changes, which is how a new ROLLUP0_REF gets
+# its images; workflow_dispatch is listed from the default branch only.
+
+on:
+  push:
+    branches:
+      - '*/eez'
+    paths:
+      - .github/workflows/eez-devnet-images.yml
+  workflow_dispatch:
+    inputs:
+      rollup0-ref:
+        description: "eez-rollup0 commit"
+        required: true
+        type: string
+
+env:
+  ROLLUP0_REF: 24c71aaf47a9ef1a40182b583255e081102c01f2
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Select the eez-rollup0 commit
+        id: ref
+        env:
+          INPUT_REF: ${{ inputs.rollup0-ref }}
+        run: |
+          ref="${INPUT_REF:-$ROLLUP0_REF}"
+          [[ "$ref" =~ ^[0-9a-f]{40}$ ]] || { echo "rollup0-ref must be a full commit hash" >&2; exit 1; }
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+
+      - name: Check out eez-rollup0
+        uses: actions/checkout@v7
+        with:
+          repository: eez-association/eez-rollup0
+          ref: ${{ steps.ref.outputs.ref }}
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Reclaim runner disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup
+          docker system prune --all --force
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        env:
+          REF: ${{ steps.ref.outputs.ref }}
+        run: |
+          set -euo pipefail
+          node="ghcr.io/erigontech/eez-node:$REF"
+          signer="ghcr.io/erigontech/eez-proof-signer:$REF"
+          deploy="ghcr.io/erigontech/eez-deploy:$REF"
+          docker build -t "$node" .
+          docker build -f Dockerfile --target proof-signer -t "$signer" .
+          docker build --build-arg "EEZ_NODE_IMAGE=$node" -f testing/kurtosis/Dockerfile.deploy -t "$deploy" .
+          {
+            echo "eez-rollup0 \`$REF\`"
+            echo
+            echo "| Image | Digest |"
+            echo "|---|---|"
+          } >> "$GITHUB_STEP_SUMMARY"
+          for image in "$node" "$signer" "$deploy"; do
+            docker push "$image"
+            echo "| \`${image%:*}\` | \`$(docker inspect --format '{{index .RepoDigests 0}}' "$image" | cut -d@ -f2)\` |" >> "$GITHUB_STEP_SUMMARY"
+          done

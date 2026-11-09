@@ -21,6 +21,8 @@ import (
 	"math"
 
 	"github.com/holiman/uint256"
+
+	"github.com/erigontech/erigon/common"
 )
 
 // SyncPair is a Sync-block system transaction and the user transaction that
@@ -45,6 +47,9 @@ type SyncTxContext struct {
 	ChainID uint64
 	// RollupID is the rollup the Sync block belongs to.
 	RollupID uint64
+	// EEZL2 is the rule set's EEZL2, the target of every system
+	// transaction.
+	EEZL2 common.Address
 }
 
 var errNonceOverflow = errors.New("system nonce overflow")
@@ -73,7 +78,7 @@ func BuildSyncPairs(outbound []OutboundSettlement, inbound []ExecutionEntry, ctx
 		if nonce == math.MaxUint64 {
 			return errNonceOverflow
 		}
-		tx := SystemTx{ChainID: ctx.ChainID, Nonce: nonce, To: EEZL2Address, Value: value, Input: input}
+		tx := SystemTx{ChainID: ctx.ChainID, Nonce: nonce, To: ctx.EEZL2, Value: value, Input: input}
 		enc, err := tx.MarshalBinary()
 		if err != nil {
 			return err

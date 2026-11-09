@@ -123,6 +123,34 @@ func TestCheckCompatible(t *testing.T) {
 	}
 }
 
+// TestCheckCompatibleBaseFeeDenominator: the EIP-1559 denominator, 8 when
+// unset, cannot change once London is active.
+func TestCheckCompatibleBaseFeeDenominator(t *testing.T) {
+	london := func(denominator *uint64) *chain.Config {
+		return &chain.Config{LondonBlock: common.NewUint64(10), BaseFeeChangeDenominator: denominator}
+	}
+	require.Nil(t, london(nil).CheckCompatible(london(common.NewUint64(50)), 9, 0), "before London")
+	require.Nil(t, london(nil).CheckCompatible(london(common.NewUint64(8)), 20, 0), "8 is the default")
+	err := london(nil).CheckCompatible(london(common.NewUint64(50)), 20, 0)
+	require.NotNil(t, err)
+	require.Equal(t, "EIP-1559 base fee change denominator", err.What)
+	require.Equal(t, uint64(9), err.RewindTo)
+}
+
+// TestCheckConfigZeroBaseFeeDenominator: an explicit zero denominator is
+// rejected where genesis setup validates the config, before CalcBaseFee
+// divides by it.
+func TestCheckConfigZeroBaseFeeDenominator(t *testing.T) {
+	withDenominator := func(denominator *uint64) *chain.Config {
+		cfg := chain.AllProtocolChanges.Copy()
+		cfg.BaseFeeChangeDenominator = denominator
+		return cfg
+	}
+	require.NoError(t, withDenominator(nil).CheckConfigForkOrder())
+	require.NoError(t, withDenominator(common.NewUint64(1)).CheckConfigForkOrder())
+	require.ErrorContains(t, withDenominator(common.NewUint64(0)).CheckConfigForkOrder(), "baseFeeChangeDenominator")
+}
+
 // Post-merge forks are scheduled by timestamp, so they compare against the head's
 // time rather than its number.
 func TestCheckCompatibleTimestampForks(t *testing.T) {

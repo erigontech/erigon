@@ -313,6 +313,13 @@ func WithExperimentalBAL() Option {
 	}
 }
 
+// WithBALSink passes every BAL the execution pipeline derives to sink.
+func WithBALSink(sink func(blockNum uint64, bal types.BlockAccessList)) Option {
+	return func(opts *options) {
+		opts.balSink = sink
+	}
+}
+
 // WithoutExperimentalBAL disables experimental BAL (and the parallel executor
 // it forces) for tests that exercise patterns the parallel executor doesn't
 // yet handle correctly (e.g. intra-block SELFDESTRUCT + CREATE2 reincarnation).
@@ -424,6 +431,7 @@ type options struct {
 	stepSize                 *uint64
 	e2RetireStep             *uint64
 	experimentalBAL          bool
+	balSink                  func(blockNum uint64, bal types.BlockAccessList)
 	genesis                  *types.Genesis
 	chainConfig              *chain.Config
 	key                      *ecdsa.PrivateKey
@@ -747,7 +755,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 			mock.BlockReader,
 			gspec,
 			cfg.Sync,
-			false, /*experimentalBAL*/
+			cfg.ExperimentalBAL,
 			readAheader,
 		),
 		nil, /*notifier*/
@@ -805,7 +813,8 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	}
 
 	cfg.Genesis = gspec
-	pipelineStages := stageloop.NewPipelineStages(mock.Ctx, db, &cfg, mock.sentriesClient, mock.Notifications, snapDownloader, mock.BlockReader, blockRetire, tracer, nil, readAheader)
+	pipelineStages := stageloop.NewPipelineStages(mock.Ctx, db, &cfg, mock.sentriesClient, mock.Notifications, snapDownloader, mock.BlockReader, blockRetire, tracer, nil, readAheader,
+		func(executeCfg *stagedsync.ExecuteBlockCfg) { executeCfg.SetBALSink(opt.balSink) })
 	mock.posStagedSync = stagedsync.New(cfg.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger, stages.ModeApplyingBlocks)
 
 	// Create validation Sync and PipelineExecutor.

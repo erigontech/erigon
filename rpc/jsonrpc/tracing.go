@@ -174,7 +174,9 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 				GasPrice:   *msg.GasPrice(),
 				BlobHashes: msg.BlobHashes(),
 			}
-			txnGasUsage, traceErr := transactions.TraceTx(ctx, engine, txn, msg, blockCtx, txCtx, &block.HeaderNoCopy().Number, block.Hash(), txnIndex, ibs, config, chainConfig, s, api.evmCallTimeout, precompiles)
+			gasLeft := block.GasLimit() - min(block.GasLimit(), gasUsed.BlockGasUsed())
+			txnGasUsage, traceErr := transactions.TraceTx(ctx, engine, txn, msg, blockCtx, txCtx, &block.HeaderNoCopy().Number, block.Hash(), txnIndex, ibs, &gasLeft,
+				protocol.TxPostProcess(engine, chainConfig, ibs, txns, txnIndex), config, chainConfig, s, api.evmCallTimeout, precompiles)
 			gasUsed.BlockExecution += txnGasUsage.BlockExecutionGasUsed
 			gasUsed.BlockState += txnGasUsage.BlockStateGasUsed
 			if traceErr != nil {
@@ -296,8 +298,23 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 		}
 	}
 
+	// The earlier transactions of the block never ran here either: for a message
+	// taking its gas from the block, the gas they used comes from the receipt
+	// domain. From Amsterdam it does not hold what a block counts, and the
+	// messages taking gas from the block there encode all they get.
+	var gasBefore uint64
+	if txnIndex > 0 && !rules.IsAmsterdam && protocol.TakesGasFromBlock(msg) {
+		var ok bool
+		if gasBefore, _, ok, err = rawtemporaldb.ReceiptGasAsOf(tx, txNum, txnIndex); err != nil {
+			return err
+		}
+		if !ok {
+			return fmt.Errorf("block %d: no receipt for the gas used before tx %d", blockNum, txnIndex)
+		}
+	}
 	// Trace the transaction and return
-	_, err = transactions.TraceTx(ctx, engine, block.Transactions()[txnIndex], msg, blockCtx, txCtx, &block.HeaderNoCopy().Number, block.Hash(), txnIndex, ibs, config, chainConfig, stream, api.evmCallTimeout, precompiles)
+	_, err = transactions.TraceTx(ctx, engine, block.Transactions()[txnIndex], msg, blockCtx, txCtx, &block.HeaderNoCopy().Number, block.Hash(), txnIndex, ibs, common.NewUint64(block.GasLimit()-min(block.GasLimit(), gasBefore)),
+		protocol.TxPostProcess(engine, chainConfig, ibs, block.Transactions(), txnIndex), config, chainConfig, stream, api.evmCallTimeout, precompiles)
 	return err
 }
 
@@ -398,7 +415,7 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, re
 	args.ZeroUnpricedBlobBaseFee(&blockCtx)
 	txCtx := protocol.NewEVMTxContext(msg)
 	// Trace the transaction and return
-	_, err = transactions.TraceTx(ctx, engine, transaction, msg, blockCtx, txCtx, nil, common.Hash{}, 0, ibs, config, chainConfig, stream, api.evmCallTimeout, precompiles)
+	_, err = transactions.TraceTx(ctx, engine, transaction, msg, blockCtx, txCtx, nil, common.Hash{}, 0, ibs, nil, nil, config, chainConfig, stream, api.evmCallTimeout, precompiles)
 	return err
 }
 
@@ -534,7 +551,7 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 			ibs := evm.IntraBlockState()
 			ibs.SetTxContext(blockCtx.BlockNumber, txIndex)
 			txIndex++
-			_, err = transactions.TraceTx(ctx, api.engine(), transaction, msg, blockCtx, txCtx, nil, common.Hash{}, txnIndex, evm.IntraBlockState(), config, chainConfig, stream, api.evmCallTimeout, precompiles)
+			_, err = transactions.TraceTx(ctx, api.engine(), transaction, msg, blockCtx, txCtx, nil, common.Hash{}, txnIndex, evm.IntraBlockState(), nil, nil, config, chainConfig, stream, api.evmCallTimeout, precompiles)
 			if err != nil {
 				return err
 			}

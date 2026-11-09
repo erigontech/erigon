@@ -96,6 +96,8 @@ type TxnExecutor struct {
 	state                 *state.IntraBlockState
 	evm                   *vm.EVM
 	mintsValue            bool
+	nonceless             bool
+	gas                   uint64
 
 	// If true, fee burning and tipping won't happen during transition. Instead, their values will be included in the
 	// ExecutionResult, which caller can use the values to update the balance of burner and coinbase account.
@@ -146,7 +148,25 @@ func NewTxnExecutor(evm *vm.EVM, msg Message, gp *GasPool) *TxnExecutor {
 		data:       msg.Data(),
 		state:      evm.IntraBlockState(),
 		mintsValue: mintsValue(msg),
+		nonceless:  nonceless(msg),
+		gas:        executionGas(msg, gp, evm.ChainRules().IsAmsterdam),
 	}
+}
+
+// executionGas returns the gas msg executes with: its gas limit or, when it
+// takes its gas from the block, at most the largest limit the block admits.
+func executionGas(msg Message, gp *GasPool, isAmsterdam bool) uint64 {
+	if !TakesGasFromBlock(msg) || gp == nil {
+		return msg.Gas()
+	}
+	return min(msg.Gas(), MaxInclusionGas(gp, isAmsterdam, msg.SkipExecutionGasCap()))
+}
+
+// TakesGasFromBlock reports whether msg executes with the gas its block has
+// left, at most its gas limit: a replay of it alone needs a pool of that gas.
+func TakesGasFromBlock(msg Message) bool {
+	fromBlock, ok := msg.(interface{ GasFromBlock() bool })
+	return ok && fromBlock.GasFromBlock()
 }
 
 // mintsValue reports whether msg has a registered type whose value the outer
@@ -154,6 +174,13 @@ func NewTxnExecutor(evm *vm.EVM, msg Message, gp *GasPool) *TxnExecutor {
 func mintsValue(msg Message) bool {
 	typed, ok := msg.(interface{ TxType() byte })
 	return ok && typed.TxType() != 0 && types.TxTypeMintsValue(typed.TxType())
+}
+
+// nonceless reports whether msg has a registered type that leaves its
+// sender's nonce alone.
+func nonceless(msg Message) bool {
+	typed, ok := msg.(interface{ TxType() byte })
+	return ok && typed.TxType() != 0 && types.TxTypeNonceless(typed.TxType())
 }
 
 // ApplyMessage computes the new state by applying the given message
@@ -236,7 +263,7 @@ func (st *TxnExecutor) buyGas(fees upfrontTxnFees, gasBailout bool) error {
 	}
 
 	if tracer := st.evm.Config().Tracer; tracer.HasGasChangeHook() {
-		tracer.EmitGasChange(mdgas.MdGas{}, mdgas.MdGas{Execution: st.msg.Gas()}, tracing.GasChangeTxInitialBalance)
+		tracer.EmitGasChange(mdgas.MdGas{}, mdgas.MdGas{Execution: st.gas}, tracing.GasChangeTxInitialBalance)
 	}
 
 	return nil
@@ -264,7 +291,7 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 	}
 
 	// Make sure this transaction's nonce is correct.
-	if st.msg.CheckNonce() && !st.chargeSenderAtValidation {
+	if st.msg.CheckNonce() && !st.chargeSenderAtValidation && !st.nonceless {
 		stNonce, err := st.state.GetNonce(from)
 		if err != nil {
 			return upfrontTxnFees{}, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
@@ -302,7 +329,7 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 		}
 	}
 
-	gas := st.msg.Gas()
+	gas := st.gas
 	blobGas := st.msg.BlobGas()
 	executionContribution, stateContribution := InclusionContributions(gas, rules.IsAmsterdam, st.msg.SkipExecutionGasCap())
 	if err := CheckBlockGasInclusion(st.gp, executionContribution, stateContribution, blobGas); err != nil {
@@ -465,8 +492,8 @@ func (st *TxnExecutor) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 		return nil, ErrGasUintOverflow
 	}
 	intrinsicGas := intrinsicGasResult.ExecutionGas
-	if st.msg.Gas() < intrinsicGas {
-		return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.msg.Gas(), intrinsicGas)
+	if st.gas < intrinsicGas {
+		return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.gas, intrinsicGas)
 	}
 
 	if contractCreation {
@@ -481,7 +508,7 @@ func (st *TxnExecutor) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 	if err := validateSetCodePrerequisites(auths, contractCreation, rules.IsPrague); err != nil {
 		return nil, err
 	}
-	st.gasRemaining = mdgas.SplitTxnGasLimit(st.msg.Gas(), intrinsicGas, rules, st.msg.SkipExecutionGasCap())
+	st.gasRemaining = mdgas.SplitTxnGasLimit(st.gas, intrinsicGas, rules, st.msg.SkipExecutionGasCap())
 	st.state.Prepare(rules, msg.From(), coinbase, msg.To(), vm.ActivePrecompiles(rules), accessTuples)
 	if st.evm.Config().NoBAL {
 		st.state.StopAccessRecording()
@@ -605,7 +632,7 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	rules := st.evm.ChainRules()
 	vmConfig := st.evm.Config()
 
-	if !contractCreation && !st.chargeSenderAtValidation {
+	if !contractCreation && !st.chargeSenderAtValidation && !st.nonceless {
 		// Increment the nonce for the next transaction
 		nonce, err := st.state.GetNonce(sender)
 		if err != nil {
@@ -617,10 +644,10 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	}
 
 	intrinsicGas := intrinsicGasResult.ExecutionGas
-	st.gasRemaining = mdgas.SplitTxnGasLimit(st.msg.Gas(), intrinsicGas, rules, st.msg.SkipExecutionGasCap())
+	st.gasRemaining = mdgas.SplitTxnGasLimit(st.gas, intrinsicGas, rules, st.msg.SkipExecutionGasCap())
 
 	if tracer := st.evm.Config().Tracer; tracer.HasGasChangeHook() {
-		tracer.EmitGasChange(mdgas.MdGas{Execution: st.msg.Gas()}, st.gasRemaining, tracing.GasChangeTxIntrinsicGas)
+		tracer.EmitGasChange(mdgas.MdGas{Execution: st.gas}, st.gasRemaining, tracing.GasChangeTxIntrinsicGas)
 	}
 
 	// The value debit is part of the sender charge applied at validation.
@@ -718,12 +745,12 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	gasLeft := st.gasRemaining
 	gasTracing := vmConfig.Tracer.HasGasChangeHook()
 	applyRefunds := refunds && !gasBailout
+	refundQuotient := params.RefundQuotient
+	if rules.IsLondon {
+		refundQuotient = params.RefundQuotientEIP3529
+	}
 	var refund uint64
 	if applyRefunds {
-		refundQuotient := params.RefundQuotient
-		if rules.IsLondon {
-			refundQuotient = params.RefundQuotientEIP3529
-		}
 		var old mdgas.MdGas
 		if gasTracing {
 			old = gasLeft
@@ -734,7 +761,7 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 			vmConfig.Tracer.EmitGasChange(old, gasLeft, tracing.GasChangeTxRefunds)
 		}
 	}
-	st.txnGasUsed = st.msg.Gas() - gasLeft.Total()
+	st.txnGasUsed = st.gas - gasLeft.Total()
 	if st.txnGasUsed < intrinsicGasResult.FloorGasCost && (rules.IsAmsterdam || (rules.IsPrague && applyRefunds)) {
 		var old mdgas.MdGas
 		if gasTracing {
@@ -760,7 +787,14 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 			}
 		}
 	} else if !rules.IsAmsterdam {
-		st.blockExecutionGasUsed = st.msg.Gas()
+		st.blockExecutionGasUsed = st.gas
+		if !gasBailout {
+			// A trace without refunds hides them from its transaction, not from the block.
+			st.blockExecutionGasUsed = st.txnGasUsed - min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund())
+			if rules.IsPrague {
+				st.blockExecutionGasUsed = max(st.blockExecutionGasUsed, intrinsicGasResult.FloorGasCost)
+			}
+		}
 	}
 	// EIP-8037: deduct the actual per-dimension usage from the block pool.
 	// Pre-Amsterdam only the execution dimension exists.

@@ -43,9 +43,18 @@ const LogChunk = 100_000
 type ScannedBatch struct {
 	L1Block     uint64
 	L1BlockHash common.Hash
+	// L1Time and L1MixDigest are the timestamp and mixHash of the L1 block.
+	L1Time      uint64
+	L1MixDigest common.Hash
 	TxHash      common.Hash
 	TxIndex     uint64
-	// Batch is the posted batch; its CallData carries the DA payload.
+	// Input is the posting transaction's input.
+	Input []byte
+	// BlobHashes are the versioned hashes of the posting transaction's
+	// blobs.
+	BlobHashes []common.Hash
+	// Batch is the posted batch; its CallData, or the blobs BlobIndices
+	// selects, carry the DA payload.
 	Batch      *protocol.ProofSystemBatch
 	Settlement protocol.Settlement
 }
@@ -56,6 +65,7 @@ type Scanner struct {
 	registry common.Address
 	rollupID uint64
 	chunk    uint64
+	rollupX  bool
 }
 
 // NewScanner returns a scanner of the registry's settlements of rollupID.
@@ -65,6 +75,11 @@ func NewScanner(reader ChainReader, registry common.Address, rollupID uint64) *S
 
 // SetChunk sets the widest range the scanner asks for at once.
 func (s *Scanner) SetChunk(n uint64) { s.chunk = max(n, 1) }
+
+// UseRollupX makes the scanner attribute settlements as rollupX does: a
+// batch is the rollup's when its BatchPosted lists it, and it settled the
+// steps of its claimed root chain that L1 emitted.
+func (s *Scanner) UseRollupX() { s.rollupX = true }
 
 // RegistryTopics selects the registry logs a follower reads.
 var RegistryTopics = [][]common.Hash{{
@@ -77,13 +92,14 @@ var RegistryTopics = [][]common.Hash{{
 // Scan returns the batches of [from, to] that settled something for the
 // rollup, in L1 order, and the last block it read. That block is below to
 // when the source refused the range and the scanner narrowed it; the caller
-// continues from the block after it.
+// continues from the block after it. Later calls keep the narrowed width.
 func (s *Scanner) Scan(ctx context.Context, from, to uint64) ([]ScannedBatch, uint64, error) {
 	hi := min(to, from+s.chunk-1)
 	for {
 		batches, err := s.scanRange(ctx, from, hi)
 		if errors.Is(err, ErrRangeTooWide) && hi > from {
 			hi = from + (hi-from)/2
+			s.chunk = hi - from + 1
 			continue
 		}
 		return batches, hi, err
@@ -147,9 +163,22 @@ func (s *Scanner) scanBlock(ctx context.Context, k blockKey, logs []*types.Log) 
 
 	var posted []protocol.PostedBatch
 	var txHashes []common.Hash
+	var inputs [][]byte
+	var blobHashes [][]common.Hash
 	for _, l := range logs {
 		if l.Topics[0] != protocol.BatchPostedTopic {
 			continue
+		}
+		var listed []uint64
+		if s.rollupX {
+			e, err := protocol.ParseBatchPosted(l)
+			if err != nil {
+				return nil, fmt.Errorf("%w: BatchPosted of transaction %x in block %d: %w", ErrUndecodable, l.TxHash, k.number, err)
+			}
+			if !slices.Contains(e.RollupIDs, s.rollupID) {
+				continue
+			}
+			listed = e.RollupIDs
 		}
 		tx, err := s.reader.TransactionByBlockHashAndIndex(ctx, k.hash, uint64(l.TxIndex))
 		if err != nil {
@@ -162,29 +191,51 @@ func (s *Scanner) scanBlock(ctx context.Context, k blockKey, logs []*types.Log) 
 		// when it settled our rollup.
 		batch, err := protocol.DecodePostAndVerifyBatch(tx.GetData())
 		if err != nil {
-			if settledBy[l.TxHash] {
+			if settledBy[l.TxHash] || s.rollupX {
 				return nil, fmt.Errorf("%w: transaction %x of block %d: %w", ErrUndecodable, l.TxHash, k.number, err)
 			}
 			continue
 		}
-		posted = append(posted, protocol.PostedBatch{Batch: batch, TxIndex: uint64(l.TxIndex), LogIndex: uint64(l.Index)})
+		if s.rollupX && !slices.EqualFunc(batch.RollupIDsWithProofSystems, listed, func(r protocol.RollupIDWithProofSystems, id uint64) bool { return r.RollupID == id }) {
+			return nil, fmt.Errorf("%w: transaction %x of block %d verifies other rollups than its BatchPosted lists", ErrUndecodable, l.TxHash, k.number)
+		}
+		posted = append(posted, protocol.PostedBatch{Batch: batch, TxIndex: uint64(l.TxIndex), LogIndex: uint64(l.Index), ListsRollup: listed != nil})
 		txHashes = append(txHashes, l.TxHash)
+		inputs = append(inputs, tx.GetData())
+		blobHashes = append(blobHashes, tx.GetBlobHashes())
 	}
 
-	settlements, err := protocol.AttributeBlock(posted, logs, s.rollupID)
+	attribute := protocol.AttributeBlock
+	if s.rollupX {
+		attribute = protocol.AttributeRollupXBlock
+	}
+	settlements, err := attribute(posted, logs, s.rollupID)
 	if err != nil {
 		return nil, fmt.Errorf("block %d (%x): %w", k.number, k.hash, err)
 	}
 	var out []ScannedBatch
+	var h *Header
 	for i, p := range posted {
 		if len(settlements[i].Applied) == 0 {
 			continue
 		}
+		if h == nil {
+			if h, err = s.reader.HeaderByHash(ctx, k.hash); err != nil {
+				return nil, err
+			}
+			if h.Number != k.number {
+				return nil, fmt.Errorf("%w: block %x is number %d, its logs say %d", ErrInconsistent, k.hash, h.Number, k.number)
+			}
+		}
 		out = append(out, ScannedBatch{
 			L1Block:     k.number,
 			L1BlockHash: k.hash,
+			L1Time:      h.Time,
+			L1MixDigest: h.MixDigest,
 			TxHash:      txHashes[i],
 			TxIndex:     p.TxIndex,
+			Input:       inputs[i],
+			BlobHashes:  blobHashes[i],
 			Batch:       p.Batch,
 			Settlement:  settlements[i],
 		})

@@ -247,7 +247,7 @@ func TestHandleMessage_PartialBlockComputeFailureNotSwallowed(t *testing.T) {
 
 	in := make(chan applyResult, 64)
 	out := make(chan commitmentResult, 64)
-	// forcePerBlockCompute=true routes the first partial block to computeWithoutCheck.
+	// forcePerBlockCompute=true makes the first partial block compute per-block.
 	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, true, 1<<62, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
 	require.NoError(t, err)
 	defer cc.Stop()
@@ -524,8 +524,36 @@ func TestHandleMessage_StepBoundaryRecordsIntoOwnChangesetInWindow(t *testing.T)
 func TestHandleMessage_PreWindowPerBlockComputeDoesNotPolluteLiveChangeset(t *testing.T) {
 	ctx := context.Background()
 	logger := log.New()
+	const lastTxNum = uint64(5)
+
+	rnd := rand.New(rand.NewSource(42))
+	addrs := make([][length.Addr]byte, lastTxNum)
+	for i := range addrs {
+		rnd.Read(addrs[i][:])
+	}
+	accountValues := make(map[string][]byte)
+	putAccount := func(doms *execctx.SharedDomains, tx kv.TemporalRwTx, txNum uint64) (accounts.Address, uint256.Int) {
+		addr := addrs[txNum-1]
+		bal := *uint256.NewInt(txNum * 1000)
+		acc := accounts.Account{Nonce: txNum, Balance: bal, CodeHash: accounts.EmptyCodeHash}
+		buf := accounts.SerialiseV3(&acc)
+		require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addr[:], buf, txNum, nil))
+		accountValues[string(addr[:])] = buf
+		return accounts.InternAddress(addr), bal
+	}
+
+	// Block 1 carries its true root, else the root check drops its commitment
+	// before the flush under test.
+	_, refTx, refDoms := setupStepTest(t)
+	for txNum := uint64(1); txNum <= lastTxNum; txNum++ {
+		putAccount(refDoms, refTx, txNum)
+	}
+	root, err := refDoms.ComputeCommitment(ctx, refTx, false, 1, lastTxNum, "test", nil)
+	require.NoError(t, err)
 
 	db, tx, doms := setupStepTest(t)
+	// As in exec, the compute leaves its branch writes pending for the flush.
+	doms.SetDeferCommitmentUpdates(true)
 
 	liveCS := &changeset.StateChangeSet{}
 	doms.SetChangesetAccumulator(liveCS)
@@ -538,15 +566,8 @@ func TestHandleMessage_PreWindowPerBlockComputeDoesNotPolluteLiveChangeset(t *te
 	require.NoError(t, err)
 	defer cc.Stop()
 
-	rnd := rand.New(rand.NewSource(42))
-	for txNum := uint64(1); txNum <= 5; txNum++ {
-		addrBytes := make([]byte, length.Addr)
-		rnd.Read(addrBytes)
-		addr := accounts.InternAddress([20]byte(addrBytes))
-		bal := *uint256.NewInt(txNum * 1000)
-		acc := accounts.Account{Nonce: txNum, Balance: bal, CodeHash: accounts.EmptyCodeHash}
-		buf := accounts.SerialiseV3(&acc)
-		require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addrBytes, buf, txNum, nil))
+	for txNum := uint64(1); txNum <= lastTxNum; txNum++ {
+		addr, bal := putAccount(doms, tx, txNum)
 		cc.handleMessage(ctx, &txResult{
 			rules:    &chain.Rules{},
 			blockNum: 1,
@@ -554,12 +575,18 @@ func TestHandleMessage_PreWindowPerBlockComputeDoesNotPolluteLiveChangeset(t *te
 			writes:   nonceBalanceWrites(addr, txNum, bal),
 		})
 	}
-	// First partial block => computeWithoutCheck, a per-block compute with no
-	// root check; pre-window, so it must isolate its commitment writes.
-	cc.handleMessage(ctx, &blockResult{BlockNum: 1, BlockHash: common.Hash{0x01}, lastTxNum: 5, isPartial: true})
+	// Pre-window yet computed per-block, so it must isolate its commitment writes.
+	cc.handleMessage(ctx, &blockResult{BlockNum: 1, BlockHash: common.Hash{0x01}, StateRoot: common.BytesToHash(root), lastTxNum: lastTxNum, isPartial: true})
 
+	select {
+	case r := <-out:
+		t.Fatalf("per-block compute of block 1 failed: %v", r.err)
+	default:
+	}
+	require.Nil(t, doms.GetCommitmentContext().PeekPendingUpdate(), "block 1's pending branch writes were not flushed")
 	require.Zero(t, liveCS.Diffs[kv.CommitmentDomain].Len(),
 		"pre-window per-block compute leaked CommitmentDomain diffs into the live changeset accumulator")
+	requireBranchesConsistentWithAccounts(t, doms, tx, accountValues)
 }
 
 // TestOwnsChangeset pins the isolation predicate at the window boundary — a wrong

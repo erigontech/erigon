@@ -31,6 +31,10 @@ import (
 // crates/eez-primitives/src/tests.rs (native_wire_sender_hash_and_storage_round_trip).
 const minimalSystemTx = "0x76dd0180944200000000000000000000000000000000000007808401020304"
 
+// minimalRollupXSystemTx is the same transaction to the rollupX EEZL2, as
+// eez-rollupX a50c326 pins it in crates/eez-primitives/src/tests.rs.
+const minimalRollupXSystemTx = "0x76dd0180944b2760f84b83d6b3829e30a7573b0172b6d6402c808401020304"
+
 // TestSystemTxVectors is T-RLP-1 on the reference client's byte vectors.
 func TestSystemTxVectors(t *testing.T) {
 	tx := SystemTx{ChainID: 1, To: EEZL2Address, Input: []byte{1, 2, 3, 4}}
@@ -43,6 +47,17 @@ func TestSystemTxVectors(t *testing.T) {
 	dec, err := DecodeSystemTx(enc)
 	require.NoError(t, err)
 	require.Equal(t, tx, *dec)
+
+	require.Equal(t, SystemTxGasLimit, tx.GasLimit())
+
+	tx.To = RollupXEEZL2Address
+	enc, err = tx.MarshalBinary()
+	require.NoError(t, err)
+	require.Equal(t, common.FromHex(minimalRollupXSystemTx), enc)
+	dec, err = DecodeSystemTx(enc)
+	require.NoError(t, err)
+	require.Equal(t, tx, *dec)
+	require.Equal(t, uint64(16_777_216), tx.GasLimit())
 
 	golden := common.FromHex(goldenInboundSystemTx)
 	dec, err = DecodeSystemTx(golden)

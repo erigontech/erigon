@@ -128,7 +128,8 @@ func RederiveBlockAccessList(
 		ibs.SetTxContext(blockNum, i)
 		evm := protocol.CreateEVM(cfg, hashFn, engine, accounts.NilAddress, ibs, header, vmCfg)
 		stopCancelWatch := context.AfterFunc(ctx, evm.Cancel)
-		receipt, err := protocol.ApplyTransactionWithEVM(cfg, engine, gp, ibs, noopWriter, header, txn, gasUsed, vmCfg, evm)
+		receipt, err := protocol.ApplyTransactionWithEVMPostProcessed(cfg, engine, gp, ibs, noopWriter, header, txn, gasUsed, vmCfg, evm,
+			protocol.TxPostProcess(engine, cfg, ibs, txns, i))
 		stopCancelWatch()
 		if err = phaseErr(err); err != nil {
 			return nil, fmt.Errorf("bal.RederiveBlockAccessList: replay tx %d of block %d: %w", i, blockNum, err)

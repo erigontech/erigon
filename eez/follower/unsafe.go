@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/eez/deriver"
+	"github.com/erigontech/erigon/eez/l1"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
@@ -51,7 +52,7 @@ type RPCSequencer struct{ client *rpc.Client }
 func DialSequencer(ctx context.Context, url string, logger log.Logger) (*RPCSequencer, error) {
 	c, err := rpc.DialContext(ctx, url, logger)
 	if err != nil {
-		return nil, err
+		return nil, l1.RedactTransport(err)
 	}
 	return &RPCSequencer{client: c}, nil
 }
@@ -65,7 +66,7 @@ func (s *RPCSequencer) Head(ctx context.Context) (uint64, common.Hash, error) {
 		Hash   common.Hash    `json:"hash"`
 	}
 	if err := s.client.CallContext(ctx, &h, "eth_getBlockByNumber", "latest", false); err != nil {
-		return 0, common.Hash{}, err
+		return 0, common.Hash{}, l1.RedactTransport(err)
 	}
 	if h == nil {
 		return 0, common.Hash{}, errors.New("sequencer serves no latest block")
@@ -76,7 +77,7 @@ func (s *RPCSequencer) Head(ctx context.Context) (uint64, common.Hash, error) {
 func (s *RPCSequencer) BlockByNumber(ctx context.Context, number uint64) (*types.Block, error) {
 	var raw hexutil.Bytes
 	if err := s.client.CallContext(ctx, &raw, "debug_getRawBlock", hexutil.Uint64(number)); err != nil {
-		return nil, err
+		return nil, l1.RedactTransport(err)
 	}
 	b := new(types.Block)
 	if err := rlp.DecodeBytes(raw, b); err != nil {

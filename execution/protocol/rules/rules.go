@@ -107,6 +107,23 @@ type Reward struct {
 	Amount      uint256.Int
 }
 
+// TxPostProcessor is implemented by engines whose rules change the state
+// after a transaction depending on the transactions before it in its block.
+type TxPostProcessor interface {
+	// PostProcessTx runs after txs[i] executed without error, on the state
+	// it left.
+	PostProcessTx(config *chain.Config, ibs *state.IntraBlockState, txs types.Transactions, i int) error
+}
+
+// TxGasBinder is implemented by engines with transaction types whose gas
+// limit is the gas their block leaves them.
+type TxGasBinder interface {
+	// BindTxGas returns txn with the gas limit it has when its block admits
+	// gasLeft more gas, or txn itself when it already has it or its type
+	// chooses its own.
+	BindTxGas(txn types.Transaction, gasLeft uint64) (types.Transaction, error)
+}
+
 // Engine is an algorithm agnostic rules engine.
 type Engine interface {
 	EngineReader

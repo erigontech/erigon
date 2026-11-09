@@ -394,7 +394,8 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 				currTxn := postState.Txns[txnIndex]
 
 				genEnv.ibs.SetTxContext(blockNum, txnIndex)
-				_, err := protocol.ApplyTransactionWithEVM(cfg, g.engine, genEnv.gp, genEnv.ibs, stateWriter, genEnv.header, currTxn, genEnv.gasUsed, vm.Config{}, evm)
+				_, err := protocol.ApplyTransactionWithEVMPostProcessed(cfg, g.engine, genEnv.gp, genEnv.ibs, stateWriter, genEnv.header, currTxn, genEnv.gasUsed, vm.Config{}, evm,
+					protocol.TxPostProcess(g.engine, cfg, genEnv.ibs, postState.Txns, txnIndex))
 				if err != nil {
 					return nil, fmt.Errorf("ReceiptGen.GetReceipts: bn=%d, txnIdx=%d, %w", blockNum, txnIndex, err)
 				}
@@ -417,6 +418,26 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		}
 
 		evm = protocol.CreateEVM(cfg, protocol.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, accounts.NilAddress, genEnv.ibs, genEnv.header, vm.Config{})
+		if !calculatePostState && index > 0 && !evm.ChainRules().IsAmsterdam {
+			// The earlier transactions did not run: a message that takes its gas
+			// from the block runs with what the receipt domain says they left. From
+			// Amsterdam it does not hold what a block counts, and the messages taking
+			// gas from the block there encode all they get.
+			msg, err := txn.AsMessage(*types.MakeSigner(cfg, blockNum, header.Time), header.BaseFee, evm.ChainRules())
+			if err != nil {
+				return nil, err
+			}
+			if protocol.TakesGasFromBlock(msg) {
+				gasBefore, _, ok, err := rawtemporaldb.ReceiptGasAsOf(tx, txNum, index)
+				if err != nil {
+					return nil, err
+				}
+				if !ok {
+					return nil, fmt.Errorf("block %d: no receipt for the gas used before tx %d", blockNum, index)
+				}
+				genEnv.gp = protocol.NewGasPool(header.GasLimit-min(header.GasLimit, gasBefore), cfg.GetMaxBlobGasPerBlock(header.Time))
+			}
+		}
 		ctx, cancel := context.WithTimeout(ctx, g.evmTimeout)
 		defer cancel()
 		defer context.AfterFunc(ctx, evm.Cancel)()
@@ -617,7 +638,8 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 			evm := protocol.CreateEVM(cfg, hashFn, g.engine, accounts.NilAddress, genEnv.ibs, genEnv.header, vmCfg)
 			genEnv.ibs.SetTxContext(blockNum, i)
 			receipt, err := applyCancellable(ctx, evm, func() (*types.Receipt, error) {
-				return protocol.ApplyTransactionWithEVM(cfg, g.engine, genEnv.gp, genEnv.ibs, stateWriter, genEnv.header, txn, genEnv.gasUsed, vmCfg, evm)
+				return protocol.ApplyTransactionWithEVMPostProcessed(cfg, g.engine, genEnv.gp, genEnv.ibs, stateWriter, genEnv.header, txn, genEnv.gasUsed, vmCfg, evm,
+					protocol.TxPostProcess(g.engine, cfg, genEnv.ibs, block.Transactions(), i))
 			})
 			if err != nil {
 				return nil, fmt.Errorf("ReceiptGen.GetReceipts: bn=%d, txnIdx=%d, %w", block.NumberU64(), i, err)

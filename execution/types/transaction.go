@@ -435,6 +435,8 @@ type Message struct {
 
 	// txType is set only for registered transaction types.
 	txType byte
+	// gasFromBlock is set only for registered transaction types.
+	gasFromBlock bool
 }
 
 func NewMessage(from accounts.Address, to accounts.Address, nonce uint64, amount *uint256.Int, gasLimit uint64,
@@ -519,6 +521,14 @@ func (m *Message) TxType() byte { return m.txType }
 
 func (m *Message) SetTxType(txType byte) {
 	m.txType = txType
+}
+
+// GasFromBlock reports whether the message executes with the gas its block
+// has left, at most Gas(), instead of reserving Gas() against the block.
+func (m *Message) GasFromBlock() bool { return m.gasFromBlock }
+
+func (m *Message) SetGasFromBlock(gasFromBlock bool) {
+	m.gasFromBlock = gasFromBlock
 }
 
 func (m *Message) IsFree() bool { return m.isFree }

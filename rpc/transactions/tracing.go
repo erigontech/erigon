@@ -108,6 +108,10 @@ func ComputeTxContext(statedb *state.IntraBlockState, engine rules.EngineReader,
 }
 
 // TraceTx writes the transaction trace to stream and returns its gas usage.
+// blockGasLeft is the gas its block has left before it, nil outside a
+// block; a message that takes its gas from the block runs with it.
+// postProcess, nil outside a block, runs on the state a successful message
+// left, before the tracer ends the transaction, so the trace holds its changes.
 func TraceTx(
 	ctx context.Context,
 	engine rules.EngineReader,
@@ -119,6 +123,8 @@ func TraceTx(
 	blockHash common.Hash,
 	txnIndex int,
 	ibs *state.IntraBlockState,
+	blockGasLeft *uint64,
+	postProcess func() error,
 	config *tracersConfig.TraceConfig,
 	chainConfig *chain.Config,
 	stream *jsonstream.Stream,
@@ -131,11 +137,21 @@ func TraceTx(
 	}
 	defer cancel()
 	execCb := func(evm *vm.EVM, refunds bool) (*evmtypes.ExecutionResult, error) {
-		gp := new(protocol.GasPool).AddGas(message.Gas()).AddBlobGas(message.BlobGas())
+		gas := message.Gas()
+		if blockGasLeft != nil && protocol.TakesGasFromBlock(message) {
+			gas = *blockGasLeft
+		}
+		gp := new(protocol.GasPool).AddGas(gas).AddBlobGas(message.BlobGas())
 		if tracer != nil && tracer.OnTxStart != nil {
 			tracer.OnTxStart(evm.GetVMContext(), tx, message.From())
 		}
 		result, err := protocol.ApplyMessage(evm, message, gp, refunds, false /* gasBailout */, engine)
+		if err == nil {
+			txnGasUsage = result.TxnGasUsage
+			if postProcess != nil {
+				err = postProcess()
+			}
+		}
 		if err != nil {
 			if tracer != nil {
 				tracer.EmitTxEnd(nil, mdgas.TxnGasUsage{}, err)
@@ -145,7 +161,6 @@ func TraceTx(
 		if tracer != nil && tracer.HasTxEndHook() {
 			tracer.EmitTxEnd(&types.Receipt{GasUsed: result.ReceiptGasUsed}, result.TxnGasUsage, nil)
 		}
-		txnGasUsage = result.TxnGasUsage
 		return result, err
 	}
 	err = ExecuteTraceTx(blockCtx, txCtx, ibs, config, chainConfig, stream, tracer, streaming, precompiles, execCb)

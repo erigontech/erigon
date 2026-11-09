@@ -19,7 +19,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net"
+	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/erigontech/erigon/common"
@@ -40,7 +44,7 @@ var _ ChainReader = (*RPC)(nil)
 func DialRPC(ctx context.Context, url string, logger log.Logger) (*RPC, error) {
 	client, err := rpc.DialContext(ctx, url, logger)
 	if err != nil {
-		return nil, err
+		return nil, RedactTransport(err)
 	}
 	return &RPC{client: client}, nil
 }
@@ -51,7 +55,7 @@ func (r *RPC) Close() { r.client.Close() }
 func (r *RPC) ChainID(ctx context.Context) (uint64, error) {
 	var id hexutil.Uint64
 	if err := r.client.CallContext(ctx, &id, "eth_chainId"); err != nil {
-		return 0, err
+		return 0, mapError(err, "eth_chainId")
 	}
 	return uint64(id), nil
 }
@@ -61,6 +65,7 @@ type rpcHeader struct {
 	Hash       *common.Hash    `json:"hash"`
 	ParentHash *common.Hash    `json:"parentHash"`
 	Timestamp  *hexutil.Uint64 `json:"timestamp"`
+	MixHash    common.Hash     `json:"mixHash"`
 }
 
 func (r *RPC) header(ctx context.Context, method string, block any) (*Header, error) {
@@ -78,7 +83,7 @@ func (r *RPC) header(ctx context.Context, method string, block any) (*Header, er
 	if h.Number == nil || h.Hash == nil || h.ParentHash == nil || h.Timestamp == nil {
 		return nil, fmt.Errorf("%w: %s(%v) lacks number, hash, parentHash or timestamp", ErrInconsistent, method, block)
 	}
-	return &Header{Number: uint64(*h.Number), Hash: *h.Hash, ParentHash: *h.ParentHash, Time: uint64(*h.Timestamp)}, nil
+	return &Header{Number: uint64(*h.Number), Hash: *h.Hash, ParentHash: *h.ParentHash, Time: uint64(*h.Timestamp), MixDigest: h.MixHash}, nil
 }
 
 func (r *RPC) HeaderByNumber(ctx context.Context, number uint64) (*Header, error) {
@@ -167,11 +172,13 @@ var rangeTooWide = []string{
 	"block range too large",
 	"too many results",
 	"exceed maximum block range",
+	"narrow your filter",
 }
 
 var notFound = []string{"not found", "unknown block", "finalized block"}
 
 func mapError(err error, what string) error {
+	err = RedactTransport(err)
 	msg := strings.ToLower(err.Error())
 	for _, s := range rangeTooWide {
 		if strings.Contains(msg, s) {
@@ -184,4 +191,48 @@ func mapError(err error, what string) error {
 		}
 	}
 	return fmt.Errorf("%s: %w", what, err)
+}
+
+// transportError prints a failed connection without the request URL, which
+// is the configured endpoint, and the local address, which changes per
+// connection.
+type transportError struct {
+	op  net.OpError
+	err error
+}
+
+func (e *transportError) Error() string { return e.op.Error() }
+
+func (e *transportError) Unwrap() error { return e.err }
+
+// urlError prints a failed request with the URL's scheme and host only: its
+// path, query and user info may carry the endpoint's API key.
+type urlError struct {
+	text string
+	err  error
+}
+
+func (e *urlError) Error() string { return e.text }
+
+func (e *urlError) Unwrap() error { return e.err }
+
+// RedactTransport returns err printed without what a failed request's error
+// text carries of its endpoint beyond scheme and host, and without a failed
+// connection's local address; err stays reachable through Unwrap.
+func RedactTransport(err error) error {
+	if op, ok := errors.AsType[*net.OpError](err); ok {
+		short := *op
+		short.Source = nil
+		return &transportError{op: short, err: err}
+	}
+	if ue, ok := errors.AsType[*url.Error](err); ok {
+		host := "endpoint"
+		if u, perr := url.Parse(ue.URL); perr == nil && u.Host != "" {
+			host = u.Scheme + "://" + u.Host
+		}
+		// url.Error prints its URL quoted.
+		text := strings.ReplaceAll(err.Error(), strconv.Quote(ue.URL), host)
+		return &urlError{text: strings.ReplaceAll(text, ue.URL, host), err: err}
+	}
+	return err
 }

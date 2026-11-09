@@ -101,7 +101,7 @@ func deriveWindow(t *testing.T, name string) {
 		if i == len(w.Blocks)-1 && len(p.Actions) > 0 {
 			// The system address nonce at the parent; execution checks it.
 			nonce := block.Transactions()[0].GetNonce()
-			sb, err := BuildSyncBlock(p, appliedAll(b), protocol.SyncTxContext{ChainID: cfg.ChainID.Uint64(), RollupID: l2.RollupID}, nonce)
+			sb, err := BuildSyncBlock(p, appliedAll(b), protocol.SyncTxContext{ChainID: cfg.ChainID.Uint64(), RollupID: l2.RollupID, EEZL2: l2.EEZL2()}, nonce)
 			require.NoError(t, err)
 			encoded, outbound = sb.Txs, sb.Outbound
 		}
@@ -127,14 +127,14 @@ func deriveWindow(t *testing.T, name string) {
 
 	// Each outbound entry is a call the Sync block made; a redirected one is
 	// not.
-	require.NoError(t, VerifyOutbound(outbound, logs, l2.RollupID))
+	require.NoError(t, VerifyOutbound(outbound, logs, l2.RollupID, l2.EEZL2()))
 	if len(outbound) > 0 {
 		redirected := slices.Clone(outbound)
 		redirected[0].L2ToL1Calls = slices.Clone(redirected[0].L2ToL1Calls)
 		redirected[0].L2ToL1Calls[0].TargetAddress = common.Address{1}
-		require.ErrorIs(t, VerifyOutbound(redirected, logs, l2.RollupID), ErrOutboundUnauthorized)
-		require.ErrorIs(t, VerifyOutbound(append(outbound, outbound[0]), logs, l2.RollupID), ErrOutboundUnauthorized, "one call settles one entry")
-		require.ErrorIs(t, VerifyOutbound(outbound, logs, l2.RollupID+1), ErrOutboundUnauthorized)
+		require.ErrorIs(t, VerifyOutbound(redirected, logs, l2.RollupID, l2.EEZL2()), ErrOutboundUnauthorized)
+		require.ErrorIs(t, VerifyOutbound(append(outbound, outbound[0]), logs, l2.RollupID, l2.EEZL2()), ErrOutboundUnauthorized, "one call settles one entry")
+		require.ErrorIs(t, VerifyOutbound(outbound, logs, l2.RollupID+1, l2.EEZL2()), ErrOutboundUnauthorized)
 	}
 }
 

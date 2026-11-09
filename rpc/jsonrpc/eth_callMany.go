@@ -32,7 +32,6 @@ import (
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/state"
-	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
@@ -120,11 +119,10 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 		return nil, err
 	}
 	var (
-		replayTransactions types.Transactions
-		evm                *vm.EVM
-		blockCtx           evmtypes.BlockContext
-		txCtx              evmtypes.TxContext
-		overrideBlockHash  map[uint64]common.Hash
+		evm               *vm.EVM
+		blockCtx          evmtypes.BlockContext
+		txCtx             evmtypes.TxContext
+		overrideBlockHash map[uint64]common.Hash
 	)
 
 	overrideBlockHash = make(map[uint64]common.Hash)
@@ -143,7 +141,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 
 	defer func(start time.Time) { log.Trace("Executing EVM callMany finished", "runtime", time.Since(start)) }(time.Now())
 
-	blockNum, hash, _, err := rpchelper.GetBlockNumber(ctx, simulateContext.BlockNumber, tx, api._blockReader)
+	blockNum, hash, isLatest, err := rpchelper.GetCanonicalBlockNumber(ctx, simulateContext.BlockNumber, tx, api._blockReader)
 	if err != nil {
 		return nil, err
 	}
@@ -166,28 +164,33 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 		return nil, fmt.Errorf("block %d(%x) not found", blockNum, hash)
 	}
 
-	// -1 is a default value for transaction index.
-	// If it's -1, we will try to replay every single transaction in that block
+	// -1, the default, runs the bundles after the whole block; an index, also
+	// the transaction count, before the block's closing operations.
 	transactionIndex := -1
-
 	if simulateContext.TransactionIndex != nil {
 		transactionIndex = *simulateContext.TransactionIndex
 	}
-
-	if transactionIndex == -1 {
+	afterBlock := transactionIndex == -1
+	if afterBlock {
 		transactionIndex = len(block.Transactions())
 	}
-
-	replayTransactions = block.Transactions()[:transactionIndex]
-
-	// The state a block starts from is its parent state plus the opening system
-	// transaction. Addressing it by the block itself keeps block 0 representable,
-	// where the parent block number would underflow.
-	cacheView, err := api.stateCache.View(ctx, tx)
-	if err != nil {
-		return nil, err
+	if transactionIndex < 0 || transactionIndex > len(block.Transactions()) {
+		return nil, fmt.Errorf("transaction index %d out of range: block %d has %d transactions", transactionIndex, blockNum, len(block.Transactions()))
 	}
-	stateReader, err := rpchelper.CreateHistoryCachedStateReader(ctx, cacheView, tx, blockNum, 0, api._txNumReader)
+
+	// History holds the state block execution left before the transaction, or
+	// after the block with its closing system calls: replaying the block's
+	// transactions alone misses what the block and its engine do around them.
+	var stateReader state.StateReader
+	if afterBlock {
+		stateReader, err = rpchelper.CreateStateReaderFromBlockNumber(ctx, tx, blockNum, isLatest, -1, api.stateCache, api._txNumReader)
+	} else {
+		cacheView, viewErr := api.stateCache.View(ctx, tx)
+		if viewErr != nil {
+			return nil, viewErr
+		}
+		stateReader, err = rpchelper.CreateHistoryCachedStateReader(ctx, cacheView, tx, blockNum, transactionIndex, api._txNumReader)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -214,39 +217,12 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 	// Get a new instance of the EVM
 	evm = vm.NewEVM(blockCtx, txCtx, st, chainConfig, vm.Config{})
 	storeEVM(evm)
-	signer := types.MakeSigner(chainConfig, blockNum, blockCtx.Time)
 	rules := evm.ChainRules()
 
 	// Setup the gas pool (also for unmetered requests)
-	// and apply the message.
 	gp := new(protocol.GasPool).AddGas(math.MaxUint64).AddBlobGas(math.MaxUint64)
-	for idx, txn := range replayTransactions {
-		st.SetTxContext(blockNum, idx)
-		msg, err := txn.AsMessage(*signer, block.BaseFee(), rules)
-		if err != nil {
-			return nil, err
-		}
-		txCtx = protocol.NewEVMTxContext(msg)
-		evm = vm.NewEVM(blockCtx, txCtx, evm.IntraBlockState(), chainConfig, vm.Config{})
-		storeEVM(evm)
-		// Execute the transaction message
-		_, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, api.engine())
-		if err != nil {
-			return nil, err
-		}
 
-		if err := ethapi.FinalizeCallTx(st, rules); err != nil {
-			return nil, err
-		}
-
-		if evm.Cancelled() {
-			return nil, fmt.Errorf("execution aborted (timeout = %v)", timeout)
-		}
-	}
-
-	// after replaying the txns, we want to overload the state
-	// overload state
-	st.SetTxContext(blockNum, len(replayTransactions))
+	st.SetTxContext(blockNum, transactionIndex)
 	var activePrecompiles vm.PrecompiledContracts
 	if stateOverride != nil {
 		activePrecompiles = vm.ActivePrecompiledContracts(rules)

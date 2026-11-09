@@ -61,6 +61,55 @@ func ReceiptAsOf(tx kv.TemporalTx, txNum uint64) (cumGasUsed uint64, cumBlobGasu
 	return
 }
 
+// ReceiptGasAsOf returns the cumulative gas and blob gas of the receipt of the
+// txn before the one at txNum and txIndex in its block, and whether the receipt
+// domain holds it, rather than an earlier block's record. A block's first txn
+// that left the cumulative gas unchanged has no record: it counts as held only
+// where the second's record is persisted, or in a block overlay batch holding
+// the block before.
+func ReceiptGasAsOf(tx kv.TemporalTx, txNum uint64, txIndex int) (cumGasUsed, cumBlobGasUsed uint64, ok bool, err error) {
+	if txIndex < 1 || txNum == 0 {
+		return 0, 0, false, nil
+	}
+	v, ok, err := tx.GetAsOf(kv.ReceiptDomain, CumulativeGasUsedInBlockKey, txNum)
+	if err != nil || !ok || len(v) == 0 {
+		return 0, 0, false, err
+	}
+	// Equal values are not written, and every txn after a block's first adds
+	// gas, so the record of txNum-1 shows as a change of value unless it is the
+	// block's first, left unchanged.
+	var prev []byte
+	if prev, _, err = tx.GetAsOf(kv.ReceiptDomain, CumulativeGasUsedInBlockKey, txNum-1); err != nil {
+		return 0, 0, false, err
+	}
+	if bytes.Equal(prev, v) {
+		if txIndex > 1 {
+			return 0, 0, false, nil
+		}
+		// Then the second txn's record must be there, persisted or in a batch that
+		// holds one before the first, so ran it: HistorySeek(txNum-1) finds a
+		// persisted record from txNum-1 on, and from the in-memory batch a block
+		// overlay reads first, any before txNum-1. A persisted domain resumed at
+		// the second txn past the first's lost receipt passes too.
+		var next []byte
+		if next, _, err = tx.GetAsOf(kv.ReceiptDomain, CumulativeGasUsedInBlockKey, txNum+1); err != nil || bytes.Equal(v, next) {
+			return 0, 0, false, err
+		}
+		if _, ok, err = tx.HistorySeek(kv.ReceiptDomain, CumulativeGasUsedInBlockKey, txNum-1); err != nil || !ok {
+			return 0, 0, false, err
+		}
+	}
+	// It is never zero after a block's first txn; a zero is the record of a
+	// block's start or end, which the custom trace stage writes.
+	if cumGasUsed = uvarint(v); cumGasUsed == 0 {
+		return 0, 0, false, nil
+	}
+	if v, ok, err = tx.GetAsOf(kv.ReceiptDomain, CumulativeBlobGasUsedInBlockKey, txNum); err != nil || !ok || len(v) == 0 {
+		return 0, 0, false, err
+	}
+	return cumGasUsed, uvarint(v), true, nil
+}
+
 // FirstLogIndex returns the block-wide index the first log of the txn at txNum
 // takes. Which record holds it depends on the receipt domain version, so this is
 // the one place that knows: before V1_1 the txn's own record holds it, from V1_1

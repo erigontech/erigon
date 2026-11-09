@@ -75,9 +75,10 @@ func TestConfigFromCLI(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, cfg, "EEZ off")
 
-	cfg, err = parse(t, "--eez.enabled", "--eez.l1.kv=127.0.0.1:9090")
+	cfg, err = parse(t, "--eez.enabled", "--eez.l1.kv=127.0.0.1:9090", "--eez.l1.blobs=/blobs")
 	require.NoError(t, err)
 	require.Equal(t, "127.0.0.1:9090", cfg.L1KV)
+	require.Equal(t, "/blobs", cfg.L1Blobs)
 	require.NoError(t, cfg.CheckNode())
 
 	cfg, err = parse(t, "--eez.enabled", "--eez.l1.rpc=http://l1:8545", "--eez.l1.poll=1s",
