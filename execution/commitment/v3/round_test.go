@@ -626,51 +626,6 @@ func TestPrefetch(t *testing.T) {
 }
 
 func TestWarmup(t *testing.T) {
-	var scratch [66]byte
-	accountRecords := func() map[string][]byte {
-		return map[string][]byte{
-			string(AccountNodeKey(nil, nil)):       commitmenttest.Record(&commitmenttest.RecordSpec{ChildMask: 1 << 2}),
-			string(AccountNodeKey([]byte{2}, nil)): commitmenttest.Record(&commitmenttest.RecordSpec{ChildMask: 1 << 3, LeafMask: 1 << 3}),
-		}
-	}
-
-	t.Run("key_and_step_account_descent", func(t *testing.T) {
-		hashedKey := make([]byte, 128)
-		hashedKey[0], hashedKey[1] = 2, 3
-		addrHash := hashAddressPath(hashedKey[:64])
-		records := accountRecords()
-		records[string(StorageNodeKey(addrHash, nil, nil))] = nil
-		var gotKeys [][]byte
-		for depth := 0; ; {
-			key := warmupKeyV3(hashedKey, depth, scratch[:])
-			gotKeys = append(gotKeys, bytes.Clone(key))
-			nextDepth, stop := warmupStepV3(records[string(key)], hashedKey, depth)
-			if stop {
-				break
-			}
-			depth = nextDepth
-		}
-		require.Equal(t, [][]byte{AccountNodeKey(nil, nil), AccountNodeKey([]byte{2}, nil), StorageNodeKey(addrHash, nil, nil)}, gotKeys)
-	})
-
-	t.Run("key_plane_crossing", func(t *testing.T) {
-		accountPath, storagePath := make([]byte, 64), make([]byte, 64)
-		for i := range accountPath {
-			accountPath[i] = byte(i & 0x0f)
-			storagePath[i] = byte((i + 7) & 0x0f)
-		}
-		hashedKey := append(bytes.Clone(accountPath), storagePath...)
-		addrHash := hashAddressPath(accountPath)
-		for depth := range 64 {
-			require.Equal(t, AccountNodeKey(accountPath[:depth], nil), warmupKeyV3(hashedKey, depth, scratch[:]))
-		}
-		require.Equal(t, StorageNodeKey(addrHash, nil, nil), warmupKeyV3(hashedKey, 64, scratch[:]))
-		require.Equal(t, StorageNodeKey(addrHash, storagePath[:1], nil), warmupKeyV3(hashedKey, 65, scratch[:]))
-		require.Equal(t, StorageNodeKey(addrHash, storagePath, nil), warmupKeyV3(hashedKey, 128, scratch[:]))
-		accountOnly := accountPath[:64]
-		require.Equal(t, AccountNodeKey(accountOnly, nil), warmupKeyV3(accountOnly, 64, scratch[:]))
-	})
-
 	t.Run("step_self_extension_and_truncated", func(t *testing.T) {
 		record := commitmenttest.Record(&commitmenttest.RecordSpec{Flags: hdrHasSelfExt, ChildMask: 1 << 4, SelfExtension: extFixture([]byte{1, 2})})
 		hashedKey := make([]byte, 64)
@@ -691,24 +646,17 @@ func TestWarmup(t *testing.T) {
 		require.Zero(t, nextDepth)
 	})
 
-	t.Run("step_plane_depth_and_extension_length", func(t *testing.T) {
+	t.Run("step_extension_length", func(t *testing.T) {
 		record := commitmenttest.Record(&commitmenttest.RecordSpec{Flags: hdrHasChildExt, ChildMask: 1 << 4, ExtensionMask: 1 << 4, Extensions: [16][]byte{4: extFixture([]byte{1, 2})}})
-		hashedKey := make([]byte, 128)
-		hashedKey[64] = 4
-		nextDepth, stop := warmupStepV3(record, hashedKey, 64)
+		hashedKey := make([]byte, 64)
+		hashedKey[0] = 4
+		nextDepth, stop := warmupStepV3(record, hashedKey, 0)
 		require.False(t, stop)
-		require.Equal(t, 67, nextDepth)
+		require.Equal(t, 3, nextDepth)
 
 		leafRecord := commitmenttest.Record(&commitmenttest.RecordSpec{ChildMask: 1 << 4, LeafMask: 1 << 4, Leaves: [16]commitmenttest.Leaf{4: {Suffix: bytes.Repeat([]byte{0x0c}, 31), Value: []byte{9}}}})
-		nextDepth, stop = warmupStepV3(leafRecord, hashedKey, 64)
+		_, stop = warmupStepV3(leafRecord, hashedKey, 0)
 		require.True(t, stop, "a storage-plane leaf must end the descent, not restart it")
-		require.NotEqual(t, 64, nextDepth, "restarting at 64 from the storage plane rewinds and re-reads the same record")
-
-		storageKey := make([]byte, 128)
-		storageKey[0] = 4
-		nextDepth, stop = warmupStepV3(leafRecord, storageKey, 0)
-		require.False(t, stop, "an account-plane leaf on a 128-nibble key must cross to the storage plane")
-		require.Equal(t, 64, nextDepth)
 	})
 
 	t.Run("step_stops_on_empty_or_missing_record", func(t *testing.T) {

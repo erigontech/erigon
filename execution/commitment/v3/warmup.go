@@ -18,30 +18,18 @@ package v3
 
 import "github.com/erigontech/erigon/execution/commitment/nibbles"
 
-func warmupKeyV3(hashedKey []byte, depth int, dst []byte) []byte {
-	if len(hashedKey) > 64 && depth >= 64 {
-		addrHash := hashAddressPath(hashedKey[:64])
-		return nodeKey(tagStorageNode, addrHash[:], hashedKey[64:depth], dst[:0])
-	}
-	return nodeKey(tagAccountNode, nil, hashedKey[:depth], dst[:0])
-}
-
 func warmupStepV3(data, hashedKey []byte, depth int) (nextDepth int, stop bool) {
 	if depth < 0 || depth >= len(hashedKey) {
 		return 0, true
 	}
 
-	planeDepth := depth
-	if len(hashedKey) > 64 && depth >= 64 {
-		planeDepth -= 64
-	}
-	record := Record{data: data, depth: planeDepth}
+	record := Record{data: data, depth: depth}
 	l := record.layout()
 	if !l.ok {
 		return 0, true
 	}
 
-	if planeDepth == 0 && l.selfExtLen != 0 {
+	if depth == 0 && l.selfExtLen != 0 {
 		selfExt := record.SelfExt()
 		end := depth + l.selfExtLen
 		if end > len(hashedKey) || !packedMatches(selfExt[1:], hashedKey[depth:end]) {
@@ -51,9 +39,6 @@ func warmupStepV3(data, hashedKey []byte, depth int) (nextDepth int, stop bool) 
 	}
 	bit := uint16(1) << hashedKey[depth]
 	if l.tree()&bit == 0 {
-		if len(hashedKey) > 64 && depth < 64 && l.leaf&bit != 0 {
-			return 64, false
-		}
 		return 0, true
 	}
 
@@ -73,22 +58,22 @@ func warmupStepV3(data, hashedKey []byte, depth int) (nextDepth int, stop bool) 
 }
 
 func PrefetchPath(read func(key []byte) []byte, addrHash, slotHash []byte) {
-	var nibbles [128]byte
-	hashedKey := unpackPath(addrHash, 64, nibbles[:64:64])
-	depth := 0
+	plane, hash := byte(tagAccountNode), addrHash
+	var owner []byte
 	if len(slotHash) != 0 {
-		unpackPath(slotHash, 64, nibbles[64:128:128])
-		hashedKey = nibbles[:128]
-		depth = 64
+		plane, owner, hash = tagStorageNode, addrHash, slotHash
 	}
+	var path [64]byte
+	hashedKey := unpackPath(hash, 64, path[:])
+	depth := 0
 	var buf [2 + 32 + 32 + 1]byte
 	for depth < len(hashedKey) {
-		data := read(warmupKeyV3(hashedKey, depth, buf[:0]))
+		data := read(nodeKey(plane, owner, hashedKey[:depth], buf[:0]))
 		if len(data) == 0 {
 			return
 		}
 		if split := splitDepthV3(data, hashedKey, depth); split != 0 {
-			read(warmupKeyV3(hashedKey, split, buf[:0]))
+			read(nodeKey(plane, owner, hashedKey[:split], buf[:0]))
 			return
 		}
 		next, stop := warmupStepV3(data, hashedKey, depth)
@@ -100,22 +85,18 @@ func PrefetchPath(read func(key []byte) []byte, addrHash, slotHash []byte) {
 }
 
 func splitDepthV3(data, hashedKey []byte, depth int) int {
-	planeDepth, planeEnd := depth, 64
-	if len(hashedKey) > 64 && depth >= 64 {
-		planeDepth, planeEnd = depth-64, 128
-	}
-	record := Record{data: data, depth: planeDepth}
+	record := Record{data: data, depth: depth}
 	l := record.layout()
-	if !l.ok || planeDepth == 0 && l.selfExtLen != 0 {
+	if !l.ok || depth == 0 && l.selfExtLen != 0 {
 		return 0
 	}
 	nib := int(hashedKey[depth])
 	bit := uint16(1) << nib
-	rest := hashedKey[depth+1 : planeEnd]
+	rest := hashedKey[depth+1:]
 	var packed []byte
 	count := len(rest)
 	switch {
-	case l.leaf&bit != 0 && planeEnd == len(hashedKey):
+	case l.leaf&bit != 0:
 		packed, _ = record.leafAt(l, nib)
 	case l.tree()&bit != 0 && l.ext&bit != 0:
 		ext := record.extAt(l, nib)
