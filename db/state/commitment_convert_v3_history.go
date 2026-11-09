@@ -596,7 +596,7 @@ func convertCommitmentHistoryFileV3(ctx context.Context, at *AggregatorRoTx, vFi
 		var cur, nextVersion, childCur, childNext, scratch historyVersion
 		var beforeChildren, afterChildren []legacyChild
 		var key, rootKey []byte
-		sink := &convertedSink{ctx: gctx, out: out}
+		sink := &convertedSink{ctx: gctx, out: out, res: getConvertedBatch()}
 		emit := func(k []byte, txNum uint64, v []byte, kind v3.LegacyKind) error {
 			key = binary.BigEndian.AppendUint64(appendEscapedKey(key[:0], k), txNum)
 			return sink.emit(key, v, kind)
@@ -760,7 +760,6 @@ func convertCommitmentHistoryFileV3(ctx context.Context, at *AggregatorRoTx, vFi
 			return nil
 		}
 		for batch := range in {
-			sink.res = getConvertedBatch()
 			for c, span := range batch.spans {
 				legacyKey := batch.buf[batch.keys[c][0]:batch.keys[c][1]]
 				txNums := batch.txNums[span[0]:span[1]]
@@ -852,7 +851,6 @@ func convertCommitmentHistoryFileV3(ctx context.Context, at *AggregatorRoTx, vFi
 			if err := sink.send(); err != nil {
 				return err
 			}
-			convertedBatchPool.Put(sink.res)
 		}
 		return nil
 	}, func() { close(out) })

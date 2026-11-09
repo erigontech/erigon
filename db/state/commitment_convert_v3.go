@@ -227,9 +227,11 @@ func convertCommitmentFileV3(
 	if !ok || vf.src == nil || vf.src.decompressor == nil {
 		return 0, 0, fmt.Errorf("convertCommitmentFileV3 %q: source has no decompressor", file.Fullpath())
 	}
-	dt := at.d[kv.CommitmentDomain]
-	d := dt.d
-	srcCompression := commitmentFileCompression(d, vf, stepSize)
+	d := at.d[kv.CommitmentDomain].d
+	srcCompression := d.Compression
+	if vf.src.StepCount(stepSize) < DomainMinStepsToCompress {
+		srcCompression = seg.CompressNone
+	}
 
 	baseName := filepath.Base(file.Fullpath())
 	fileStart := time.Now()
@@ -300,9 +302,8 @@ func convertCommitmentFileV3(
 		delta := &legacyDelta{commitment: wat.d[kv.CommitmentDomain], before: stepFrom - 1, after: stepTo - 1, keysV2: st.keysV2}
 		reach := &legacyReach{keysV2: st.keysV2, read: func(key []byte) ([]byte, error) { return delta.read(key, delta.after) }}
 		delta.reachBefore = &legacyReach{keysV2: st.keysV2, read: func(key []byte) ([]byte, error) { return delta.read(key, delta.before) }}
-		sink := &convertedSink{ctx: gctx, out: out}
+		sink := &convertedSink{ctx: gctx, out: out, res: getConvertedBatch()}
 		for batch := range in {
-			sink.res = getConvertedBatch()
 			for _, p := range batch.pairs {
 				if convErr := convertLegacyPairV3(p[0], p[1], incremental, conv, reach, delta, sink.emit); convErr != nil {
 					return convErr
@@ -312,7 +313,6 @@ func convertCommitmentFileV3(
 			if sendErr := sink.send(); sendErr != nil {
 				return sendErr
 			}
-			convertedBatchPool.Put(sink.res)
 		}
 		return nil
 	}, func() { close(out) })
@@ -377,13 +377,6 @@ func convertCommitmentFileV3(
 		collected.Sub(fileStart).Round(time.Millisecond), resolved.Sub(collected).Round(time.Millisecond), time.Since(resolved).Round(time.Millisecond),
 		buildPhase1Prefix(fileIdx, fileTotal, processedKeys+ki, grandTotalKeys)))
 	return delta, ki, nil
-}
-
-func commitmentFileCompression(d *Domain, f visibleFile, stepSize uint64) seg.FileCompression {
-	if f.src.StepCount(stepSize) < DomainMinStepsToCompress {
-		return seg.CompressNone
-	}
-	return d.Compression
 }
 
 func readOwned(reader *seg.Reader, batch *kvBatch, compressed bool) []byte {

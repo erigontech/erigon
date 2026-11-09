@@ -753,15 +753,15 @@ func (sd *SharedDomains) DomainPutCommitmentDiff(roTx kv.TemporalTx, k, v []byte
 	return sd.mem.(commitmentBranchDiffWriter).PutCommitmentBranchDiff(ks, v, txNum, prevVal, diff)
 }
 
+type commitmentBranchBatchWriter interface {
+	PutOwnedCommitmentBranches(parts [][]commitment.BranchDelta, txNum uint64, diff *kv.DomainDiff) error
+}
+
 // commitmentDiffPutDel implements kv.TemporalPutDel, routing commitment-domain
 // writes through an explicit diff (DomainPutCommitmentDiff) instead of the
 // shared, lockable target SetChangesetAccumulator installs. Non-commitment
 // domains fall back to the normal DomainPut/DomainDel — TrieContext.PutBranch
 // (the only real caller) only ever writes kv.CommitmentDomain.
-type commitmentBranchBatchWriter interface {
-	PutOwnedCommitmentBranches(parts [][]commitment.BranchDelta, txNum uint64, diff *kv.DomainDiff) error
-}
-
 type commitmentDiffPutDel struct {
 	temporalPutDel
 	diff *kv.DomainDiff
