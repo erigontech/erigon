@@ -8,6 +8,7 @@ import (
 
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -193,4 +194,132 @@ func TestRefreshCodeAssertsHashPresent(t *testing.T) {
 	ibs.SetVersion(0)
 
 	assert.Panics(t, func() { _, _ = refreshCode(ibs, addr) })
+}
+
+type lendingReader struct {
+	codeReader
+	lends int
+}
+
+func (r *lendingReader) LendAccountCode(addr accounts.Address) ([]byte, bool, error) {
+	if addr != r.addr {
+		return nil, false, nil
+	}
+	r.lends++
+	return r.code, true, nil
+}
+
+func newLendingRead(t *testing.T, vm *VersionMap) (*IntraBlockState, *lendingReader, accounts.Address, []byte) {
+	t.Helper()
+	addr := accounts.InternAddress([20]byte{0xC0, 0xDE})
+	code := []byte{0x60, 0x01, 0x60, 0x02, 0x01}
+	acc := accounts.NewAccount()
+	acc.Nonce = 1
+	acc.Incarnation = 1
+	acc.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(code))
+	reader := &lendingReader{codeReader: codeReader{addr: addr, account: &acc, code: code}}
+	ibs := NewWithVersionMap(reader, vm)
+	ibs.SetTxContext(100, 5)
+	ibs.SetVersion(0)
+	return ibs, reader, addr, code
+}
+
+func TestCodeLent_RecordsTheSameHeaderWithoutBytes(t *testing.T) {
+	normal, _, addr, code := newLendingRead(t, NewVersionMap(nil))
+	got, err := normal.GetCode(addr)
+	require.NoError(t, err)
+	require.Equal(t, code, got)
+	wantRead, ok := normal.versionedReads.GetCode(addr)
+	require.True(t, ok)
+
+	lending, reader, addr, code := newLendingRead(t, NewVersionMap(nil))
+	got, err = lending.GetCodeLent(addr)
+	require.NoError(t, err)
+	require.Equal(t, code, got)
+	require.Equal(t, 1, reader.lends)
+	require.Empty(t, lending.stateObjects)
+
+	haveRead, ok := lending.versionedReads.GetCode(addr)
+	require.True(t, ok)
+	require.Equal(t, wantRead.ReadHeader, haveRead.ReadHeader)
+	require.Nil(t, haveRead.Val.Bytes, "the lent bytes must not be retained")
+	require.Equal(t, wantRead.Val.Hash, haveRead.Val.Hash)
+}
+
+func TestCodeLent_LaterReadSeesFullCode(t *testing.T) {
+	for name, read := range map[string]func(*IntraBlockState, accounts.Address) ([]byte, error){
+		"GetCode": (*IntraBlockState).GetCode,
+		"ResolveCode": func(ibs *IntraBlockState, addr accounts.Address) ([]byte, error) {
+			code, err := ibs.ResolveCode(addr)
+			return code.Bytes, err
+		},
+		"GetCodeLent": (*IntraBlockState).GetCodeLent,
+	} {
+		t.Run(name, func(t *testing.T) {
+			ibs, _, addr, code := newLendingRead(t, NewVersionMap(nil))
+			_, err := ibs.GetCodeLent(addr)
+			require.NoError(t, err)
+
+			got, err := read(ibs, addr)
+			require.NoError(t, err)
+			require.Equal(t, code, got)
+		})
+	}
+}
+
+func TestCodeLent_LowerTxCodeWriteInvalidatesTheRead(t *testing.T) {
+	vm := NewVersionMap(nil)
+	ibs, _, addr, _ := newLendingRead(t, vm)
+	_, err := ibs.GetCodeLent(addr)
+	require.NoError(t, err)
+
+	ws := &WriteSet{}
+	lowerCode := accounts.NewCode([]byte{0x60, 0x00})
+	ws.SetCode(addr, &VersionedWrite[accounts.Code]{WriteHeader: WriteHeader{Address: addr, Path: CodePath, Version: Version{TxIndex: 1}, valStatus: ValueChanged}, Val: lowerCode})
+	vm.FlushVersionedWrites(ws, true)
+
+	io := NewVersionedIO(6)
+	io.RecordReads(Version{TxIndex: 5}, ibs.VersionedReads())
+	require.Equal(t, VersionInvalid, vm.ValidateVersion(5, io, validateEqualVersion, false, ""))
+}
+
+func TestCodeLent_LowerTxSelfDestructInvalidatesTheRead(t *testing.T) {
+	vm := NewVersionMap(nil)
+	ibs, _, addr, _ := newLendingRead(t, vm)
+	_, err := ibs.GetCodeLent(addr)
+	require.NoError(t, err)
+
+	ws := &WriteSet{}
+	ws.SetSelfDestruct(addr, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: Version{TxIndex: 1}}, Val: true})
+	vm.FlushVersionedWrites(ws, true)
+
+	io := NewVersionedIO(6)
+	io.RecordReads(Version{TxIndex: 5}, ibs.VersionedReads())
+	require.Equal(t, VersionInvalid, vm.ValidateVersion(5, io, validateEqualVersion, false, ""))
+}
+
+func TestCodeLent_UncommittedCodeStaysOnTheNormalPath(t *testing.T) {
+	t.Run("version map", func(t *testing.T) {
+		vm := NewVersionMap(nil)
+		ibs, reader, addr, _ := newLendingRead(t, vm)
+		mapped := accounts.NewCode([]byte{0x60, 0x00})
+		ws := &WriteSet{}
+		ws.SetCode(addr, &VersionedWrite[accounts.Code]{WriteHeader: WriteHeader{Address: addr, Path: CodePath, Version: Version{TxIndex: 1}, valStatus: ValueChanged}, Val: mapped})
+		vm.FlushVersionedWrites(ws, true)
+
+		got, err := ibs.GetCodeLent(addr)
+		require.NoError(t, err)
+		require.Equal(t, mapped.Bytes, got)
+		require.Zero(t, reader.lends)
+	})
+	t.Run("own write", func(t *testing.T) {
+		ibs, reader, addr, _ := newLendingRead(t, NewVersionMap(nil))
+		own := []byte{0x60, 0x00}
+		require.NoError(t, ibs.SetCode(addr, own, tracing.CodeChangeUnspecified))
+
+		got, err := ibs.GetCodeLent(addr)
+		require.NoError(t, err)
+		require.Equal(t, own, got)
+		require.Zero(t, reader.lends)
+	})
 }

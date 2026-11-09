@@ -659,7 +659,7 @@ func opExtCodeCopy(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, err
 	evm.IntraBlockState().MarkAddressAccess(addr, false)
 	len64 := length.Uint64()
 
-	code, err := evm.IntraBlockState().GetCode(addr)
+	code, err := evm.IntraBlockState().GetCodeLent(addr)
 	if err != nil {
 		return pc, nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 	}

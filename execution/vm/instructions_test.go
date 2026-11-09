@@ -1362,3 +1362,87 @@ func TestBlockhashRecordsAHeaderReadError(t *testing.T) {
 	require.ErrorIs(t, err, readErr)
 	require.ErrorIs(t, ibs.StateReadError(), readErr)
 }
+
+type lendingCodeReader struct {
+	state.NoopReader
+	addr   accounts.Address
+	code   []byte
+	lends  int
+	refuse bool
+}
+
+func (r *lendingCodeReader) ReadAccountData(addr accounts.Address) (*accounts.Account, error) {
+	if addr != r.addr {
+		return nil, nil
+	}
+	acc := accounts.NewAccount()
+	acc.Nonce = 1
+	acc.Incarnation = 1
+	acc.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(r.code))
+	return &acc, nil
+}
+
+func (r *lendingCodeReader) ReadAccountCode(addr accounts.Address) ([]byte, error) {
+	if addr != r.addr {
+		return nil, nil
+	}
+	return r.code, nil
+}
+
+func (r *lendingCodeReader) LendAccountCode(addr accounts.Address) ([]byte, bool, error) {
+	if r.refuse {
+		return nil, false, nil
+	}
+	r.lends++
+	return r.code, addr == r.addr, nil
+}
+
+func runExtCodeCopy(t *testing.T, lend bool, memOffset, codeOffset, length uint256.Int, memSize uint64) ([]byte, int) {
+	t.Helper()
+
+	addrBytes := common.Address{0xC0, 0xDE}
+	addr := accounts.InternAddress(addrBytes)
+	code := make([]byte, 64)
+	for i := range code {
+		code[i] = byte(i + 1)
+	}
+	reader := &lendingCodeReader{addr: addr, code: code, refuse: !lend}
+	ibs := state.NewWithVersionMap(reader, state.NewVersionMap(nil))
+	ibs.SetTxContext(100, 1)
+	ibs.SetVersion(0)
+
+	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
+	callContext := &CallContext{cacheGen: 1}
+	callContext.Memory.Resize(memSize)
+	callContext.Memory.Set(0, memSize, bytes.Repeat([]byte{0xff}, int(memSize)))
+	callContext.Stack.push(length)
+	callContext.Stack.push(codeOffset)
+	callContext.Stack.push(memOffset)
+	var addrWord uint256.Int
+	addrWord.SetBytes(addrBytes[:])
+	callContext.Stack.push(addrWord)
+
+	_, _, err := opExtCodeCopy(0, evm, callContext)
+	require.NoError(t, err)
+	return bytes.Clone(callContext.Memory.store), reader.lends
+}
+
+func TestOpExtCodeCopyBorrowMatchesNormalPath(t *testing.T) {
+	for _, tc := range []struct {
+		name                          string
+		memOffset, codeOffset, length uint256.Int
+		memSize                       uint64
+	}{
+		{name: "range inside code", memOffset: *uint256.NewInt(8), codeOffset: *uint256.NewInt(4), length: *uint256.NewInt(16), memSize: 32},
+		{name: "range past code end", memOffset: *uint256.NewInt(0), codeOffset: *uint256.NewInt(60), length: *uint256.NewInt(16), memSize: 32},
+		{name: "offset overflow", memOffset: *uint256.NewInt(0), codeOffset: *new(uint256.Int).Lsh(uint256.NewInt(1), 70), length: *uint256.NewInt(16), memSize: 32},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			want, offLends := runExtCodeCopy(t, false, tc.memOffset, tc.codeOffset, tc.length, tc.memSize)
+			have, onLends := runExtCodeCopy(t, true, tc.memOffset, tc.codeOffset, tc.length, tc.memSize)
+			require.Equal(t, want, have)
+			require.Zero(t, offLends, "a refused lend must take the normal path")
+			require.Equal(t, 1, onLends, "the miss must be lent")
+		})
+	}
+}
