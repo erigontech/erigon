@@ -158,17 +158,10 @@ func (b *SimulatedBackend) Commit() {
 	}); err != nil {
 		panic(err)
 	}
-	numLogs := 0
-	for _, r := range b.pendingReceipts {
-		numLogs += len(r.Logs)
-	}
+	//nolint:prealloc
 	var allLogs []*types.Log
-	if numLogs > 0 {
-		allLogs = make([]*types.Log, numLogs)
-		off := 0
-		for _, r := range b.pendingReceipts {
-			off += copy(allLogs[off:], r.Logs)
-		}
+	for _, r := range b.pendingReceipts {
+		allLogs = append(allLogs, r.Logs...)
 	}
 	b.logsFeed.Send(allLogs)
 	b.prependBlock = b.pendingBlock
