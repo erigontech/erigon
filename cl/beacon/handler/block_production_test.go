@@ -6196,6 +6196,34 @@ func TestGetEthV1ValidatorAttestationDataCacheHeadChange(t *testing.T) {
 	}
 }
 
+func TestGetEthV1ValidatorAttestationDataRejectsMismatchedHeadState(t *testing.T) {
+	_, _, _, _, headState, handler, _, syncedData, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	handler.aggregatePool = nil
+	slot := headState.Slot()
+	oldRoot, newRoot := common.Hash{1}, common.Hash{2}
+	producer := attestation_producer.New(handler.beaconChainCfg)
+	handler.attestationProducer = producer
+	_, err := producer.ProduceAndCacheAttestationData(headState, oldRoot, slot)
+	require.NoError(t, err)
+	require.NoError(t, syncedData.OnHeadStateWithBlockRoot(headState, oldRoot))
+	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
+	clock.EXPECT().GetCurrentSlot().Return(slot).AnyTimes()
+	handler.ethClock = clock
+	fcu.TryGetHeadNodeFn = func() (forkchoice.ForkChoiceNode, bool) {
+		return forkchoice.ForkChoiceNode{Root: newRoot}, true
+	}
+	fcu.AttestationDataFn = func(common.Hash, uint64) (solid.AttestationData, bool) {
+		return solid.AttestationData{}, false
+	}
+
+	status, _ := requestAttestationData(t, handler, t.Context(), slot)
+	require.Equal(t, http.StatusServiceUnavailable, status)
+	require.NoError(t, syncedData.OnHeadStateWithBlockRoot(headState, newRoot))
+	status, data := requestAttestationData(t, handler, t.Context(), slot)
+	require.Equal(t, http.StatusOK, status)
+	require.Equal(t, newRoot, data.BeaconBlockRoot)
+}
+
 func TestGetEthV1ValidatorAttestationDataWaitsForSlotImport(t *testing.T) {
 	oldRoot := common.HexToHash("0x1234")
 	newRoot := common.HexToHash("0x5678")
@@ -6433,7 +6461,7 @@ func TestGetEthV1ValidatorAttestationDataGloasPayloadIndex(t *testing.T) {
 		{name: "optimistic FULL head from fork choice", blockSlot: attestationSlot - 2, status: cltypes.PayloadStatusFull, forkChoice: true, wantStatus: http.StatusServiceUnavailable},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+			_, _, _, _, headState, handler, _, syncedData, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 			handler.attestationDataImportWait = 20 * time.Millisecond
 			cfg := handler.beaconChainCfg
 			cfg.AltairForkEpoch, cfg.BellatrixForkEpoch, cfg.CapellaForkEpoch, cfg.DenebForkEpoch, cfg.ElectraForkEpoch, cfg.FuluForkEpoch, cfg.GloasForkEpoch = 0, 0, 0, 0, 0, 0, 0
@@ -6462,6 +6490,7 @@ func TestGetEthV1ValidatorAttestationDataGloasPayloadIndex(t *testing.T) {
 				fcu.HeadPayloadStatusVal = cltypes.PayloadStatusEmpty
 				fcu.Ancestors = map[uint64]forkchoice.ForkChoiceNode{tt.blockSlot: {Root: root, PayloadStatus: tt.status}}
 			}
+			require.NoError(t, syncedData.OnHeadStateWithBlockRoot(headState, fcu.HeadVal))
 			wantErr := "payload of the beacon block root is not verified"
 			if tt.headErr {
 				wantErr = "fork-choice head unavailable"

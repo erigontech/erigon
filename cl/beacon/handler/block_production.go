@@ -757,6 +757,9 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 
 	if !ok {
 		if err := a.viewHeadStateWithIdentity(func(headState *state.CachingBeaconState, headRoot common.Hash, _ uint64) error {
+			if haveHead && headRoot != head.Root {
+				return synced_data.ErrNotSynced
+			}
 			attestationData, err = a.attestationProducer.ProduceAndCacheAttestationData(
 				headState,
 				headRoot,
