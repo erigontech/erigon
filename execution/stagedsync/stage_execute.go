@@ -396,6 +396,7 @@ func resolveExecResumePoint(ctx context.Context, txNumReader rawdbv3.TxNumsReade
 }
 
 func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDomains, rwTx kv.TemporalRwTx, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, logger log.Logger) (err error) {
+	dbg.NpStageStartNanos.Store(time.Now().UnixNano())
 	if dbg.StagesOnlyBlocks {
 		return nil
 	}

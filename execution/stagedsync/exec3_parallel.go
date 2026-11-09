@@ -1368,6 +1368,11 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 }
 
 func (pe *parallelExecutor) startBlock(ctx context.Context, be *blockExecutor) error {
+	startBlockAt := time.Now()
+	defer func() {
+		pe.logger.Info("[np-phase] pre-exec", "blk", be.blockNum, "fromNp", time.Duration(startBlockAt.UnixNano()-dbg.NpStartNanos.Load()),
+			"fromStage", time.Duration(startBlockAt.UnixNano()-dbg.NpStageStartNanos.Load()), "seed", time.Since(startBlockAt))
+	}()
 	if be.execStarted.IsZero() && be.versionMap.HasBAL {
 		var reader state.StateReader = state.NewReaderV3(pe.domainsRead().AsGetter(pe.applyTx))
 		if first := be.tasks[0]; first.IsHistoric() {
