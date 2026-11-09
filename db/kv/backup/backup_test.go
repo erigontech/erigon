@@ -374,3 +374,16 @@ func TestApplyMigrationsRenamesLegacySnapshotsAndDropsTheTwinTorrent(t *testing.
 	require.FileExists(t, renamed)
 	require.NoFileExists(t, renamed+".torrent")
 }
+
+func TestRestoreOwnerDoesNotFollowSymlinks(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	file := filepath.Join(dir, "file")
+	require.NoError(t, os.WriteFile(file, nil, 0o600))
+	src, err := os.Stat(file)
+	require.NoError(t, err)
+	link := filepath.Join(dir, "dangling")
+	require.NoError(t, os.Symlink(filepath.Join(dir, "missing"), link))
+
+	require.NoError(t, restoreOwner(src, link))
+}
