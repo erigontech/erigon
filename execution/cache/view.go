@@ -18,7 +18,9 @@ package cache
 
 import (
 	"bytes"
+	"sync"
 
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 )
 
@@ -322,9 +324,42 @@ func (v ReadView) Fill(domain kv.Domain, key []byte, value []byte, readTxNum uin
 
 // FillCode offers code to the cache and returns a copy the caller may keep.
 func (v ReadView) FillCode(addr, code, codeHash []byte, readTxNum uint64) []byte {
+	_, already := v.GetCodeByHash(codeHash)
 	stored := bytes.Clone(code)
 	v.fillCodeWithHash(addr, stored, codeHash, readTxNum)
+	_, admitted := v.GetCodeByHash(codeHash)
+	noteFillCode(codeHash, len(code), already, admitted, v.frontier != nil)
 	return stored
+}
+
+var fillCodeStats struct {
+	sync.Mutex
+	calls, already, admitted, frontier, bytes int
+	hashes                                    map[[32]byte]struct{}
+}
+
+func noteFillCode(codeHash []byte, size int, already, admitted, frontier bool) {
+	s := &fillCodeStats
+	s.Lock()
+	defer s.Unlock()
+	if s.hashes == nil {
+		s.hashes = map[[32]byte]struct{}{}
+	}
+	s.hashes[[32]byte(codeHash)] = struct{}{}
+	s.calls++
+	s.bytes += size
+	if already {
+		s.already++
+	}
+	if admitted {
+		s.admitted++
+	}
+	if frontier {
+		s.frontier++
+	}
+	if s.calls%200 == 0 {
+		log.Info("[fillcode]", "calls", s.calls, "distinct", len(s.hashes), "already", s.already, "admitted", s.admitted, "frontier", s.frontier, "MB", s.bytes/1_000_000)
+	}
 }
 
 // SeedAddrCodeHash offers an addr → codeHash mapping derived from an account
