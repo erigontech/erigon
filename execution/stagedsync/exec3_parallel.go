@@ -2563,6 +2563,7 @@ type blockExecutor struct {
 	publishTasks execStatusList
 	// balAttached counts the tx indexes, from -1, whose sets went out on a txResult.
 	balAttached int
+	balTxs      []balTx
 
 	// Multi-version map
 	versionMap *state.VersionMap
@@ -3353,8 +3354,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			applyResult := txResult{
 				blockNum:              be.blockNum,
 				blockHash:             be.blockHash,
-				traceFroms:            maps.Clone(result.TraceFroms),
-				traceTos:              maps.Clone(result.TraceTos),
+				traceFroms:            result.TraceFroms,
+				traceTos:              result.TraceTos,
 				txNum:                 task.Version().TxNum,
 				rules:                 task.Rules(),
 				cumulativeBlobGasUsed: result.cumulativeBlobGasUsed,
@@ -3387,10 +3388,15 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			// The final task's sets are recorded again at block end, so it is left to the block result.
 			finalIndex := be.tasks[len(be.tasks)-1].Task.Version().TxIndex
 			buildsBAL := task.Rules().IsAmsterdam || pe.cfg.experimentalBAL
+			if buildsBAL && be.balTxs == nil {
+				be.balTxs = make([]balTx, 0, len(be.tasks))
+			}
+			start := len(be.balTxs)
 			for i := be.balAttached - 1; buildsBAL && i <= task.Version().TxIndex && i < finalIndex; i = be.balAttached - 1 {
-				applyResult.balTxs = append(applyResult.balTxs, balTx{i, be.blockIO.ReadSet(i), be.blockIO.WriteSet(i)})
+				be.balTxs = append(be.balTxs, balTx{i, be.blockIO.ReadSet(i), be.blockIO.WriteSet(i)})
 				be.balAttached++
 			}
+			applyResult.balTxs = be.balTxs[start:len(be.balTxs):len(be.balTxs)]
 
 			pe.lastExecutedTxNum.Store(int64(applyResult.txNum))
 			applyResult.versionMap = be.versionMap
