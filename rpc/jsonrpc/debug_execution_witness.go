@@ -953,7 +953,7 @@ func (hc *headCaptureSource) recordReader() *commitmentdb.ParentRecords {
 	return r
 }
 
-func (hc *headCaptureSource) warmPaths(ctx context.Context, accessed *accessedState) {
+func (hc *headCaptureSource) warmPaths(accessed *accessedState) {
 	type path struct{ account, slot []byte }
 	var paths []path
 	for addr := range accessed.Addresses {
@@ -1115,7 +1115,7 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 		return result, nil
 	}
 	if hc != nil && len(hc.warmTxs) != 0 {
-		hc.warmPaths(ctx, accessed)
+		hc.warmPaths(accessed)
 	}
 
 	siblingPaths, err := detectCollapseSiblings(ctx, tx, hc, domains, sdCtx,

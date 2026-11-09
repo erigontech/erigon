@@ -1054,7 +1054,7 @@ func TestHeadCaptureWarmedRecordsMatchPinnedState(t *testing.T) {
 		it.Close()
 	}
 	hc := &headCaptureSource{pinnedParentTx: pin.tx, warmTxs: pin.warm}
-	hc.warmPaths(t.Context(), accessed)
+	hc.warmPaths(accessed)
 	reader := hc.recordReader()
 	count, live := 0, 0
 	hc.warm.Range(func(key, _ any) bool {
