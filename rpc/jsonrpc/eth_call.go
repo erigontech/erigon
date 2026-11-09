@@ -1000,9 +1000,6 @@ func checkIntrinsicGas(msg *types.Message, chainRules *chain.Rules) error {
 	return nil
 }
 
-// maxAccessListRuns bounds the convergence loop: a contract can read a slot derived from its remaining gas, so the list never settles.
-const maxAccessListRuns = 256
-
 // CreateAccessList implements eth_createAccessList. It creates an access list for the given transaction.
 // If the accesslist creation fails an error is returned.
 // If the transaction itself fails, an vmErr is returned.
@@ -1183,7 +1180,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		return result, nil, nil
 	}
 
-	for range maxAccessListRuns {
+	for {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
@@ -1196,7 +1193,6 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		}
 		prevTracer = tracer
 	}
-	return nil, fmt.Errorf("access list did not converge after %d runs", maxAccessListRuns)
 }
 
 // some addresses (like sender, recipient, block producer, and created contracts)

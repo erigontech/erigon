@@ -913,19 +913,6 @@ func TestCreateAccessListStateOverridePrecompile(t *testing.T) {
 	})
 }
 
-func TestCreateAccessListStopsARunThatNeverConverges(t *testing.T) {
-	m, _, bankAddr := fundedBankGenesis(t, chain.AllProtocolChanges)
-	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
-	reader := common.HexToAddress("0x00000000000000000000000000000000000000cc")
-	sloadGas := hexutil.Bytes(hexutil.MustDecode("0x5a5450")) // SLOAD(GAS): every run reads a new slot
-	gas := hexutil.Uint64(2_000_000)
-
-	_, err := api.CreateAccessList(context.Background(), ethapi.CallArgs{From: &bankAddr, To: &reader, Gas: &gas}, nil, &ethapi.StateOverrides{
-		accounts.InternAddress(reader): {Code: &sloadGas},
-	}, nil)
-	require.ErrorContains(t, err, "did not converge")
-}
-
 func TestCreateAccessListHonoursTheEVMTimeout(t *testing.T) {
 	cfg := chain.AllProtocolChanges.Copy()
 	cfg.AmsterdamTime = nil // Amsterdam caps execution gas, and the loop must outlast the timeout
