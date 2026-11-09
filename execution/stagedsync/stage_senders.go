@@ -222,6 +222,9 @@ func (b *sendersBatch) add(cfg SendersCfg, header *types.Header, hash common.Has
 		first:  len(b.txns),
 	}
 	if r, ok := cfg.readAheader.TakeSendersRecovery(hash); ok {
+		if cached && exec.DetachSendersRecovery(r, body.Transactions) {
+			return
+		}
 		blk.registered = r
 	} else {
 		b.txns = append(b.txns, body.Transactions...)
