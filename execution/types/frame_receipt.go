@@ -18,6 +18,7 @@ package types
 
 import (
 	"encoding/json"
+	"slices"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -36,7 +37,11 @@ type frameReceiptRLP struct {
 }
 
 func (r *Receipt) deriveFrameFields() {
-	r.Logs = nil
+	numLogs := 0
+	for _, frame := range r.FrameReceipts {
+		numLogs += len(frame.Logs)
+	}
+	r.Logs = slices.Grow(Logs(nil), numLogs)
 	r.Status = ReceiptStatusSuccessful
 	for _, frame := range r.FrameReceipts {
 		r.Logs = append(r.Logs, frame.Logs...)
