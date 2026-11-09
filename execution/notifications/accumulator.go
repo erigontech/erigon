@@ -43,6 +43,11 @@ func (a *Accumulator) Changes() []StateChange {
 	return a.changes
 }
 
+// An incomplete batch still needs delivery when no individual changes were recorded.
+func (a *Accumulator) HasPendingChanges() bool {
+	return a != nil && (len(a.changes) > 0 || a.stateChangesIncomplete)
+}
+
 func (a *Accumulator) Reset(plainStateID uint64) {
 	a.changes = nil
 	a.stateChangesIncomplete = false
@@ -55,10 +60,10 @@ func (a *Accumulator) Reset(plainStateID uint64) {
 // Checkpoint returns a rollback to completed block changes. Later writes must
 // start with StartChange so the saved changes remain immutable.
 func (a *Accumulator) Checkpoint() (restore func()) {
-	saved := *a
 	a.latestChange = nil
 	a.accountChangeIndex = nil
 	a.storageChangeIndex = nil
+	saved := *a
 	return func() { *a = saved }
 }
 

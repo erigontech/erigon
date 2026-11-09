@@ -100,6 +100,16 @@ func (d *Dispatcher) Dispatch(
 		if prevUnwindPoint != nil && *prevUnwindPoint < finishProgressBefore {
 			base = *prevUnwindPoint
 		}
+		// Undelivered commits may predate the current sync run.
+		if accumulator != nil {
+			for _, change := range accumulator.Changes() {
+				before := change.BlockHeight
+				if change.Direction == notifications.DirectionForward && before > 0 {
+					before--
+				}
+				base = min(base, before)
+			}
+		}
 		var notifyFrom uint64
 		switch {
 		case finishProgressAfter == 0:

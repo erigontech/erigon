@@ -106,10 +106,10 @@ func TestAccumulatorCheckpoint(t *testing.T) {
 			require.Equal(t, tc.incomplete, acc.stateChangesIncomplete)
 			require.Len(t, acc.Changes(), 1)
 			require.Equal(t, want, acc.Changes()[0].ToProto())
-			acc.ChangeStorage(address, 0, slot, []byte{6})
-			require.Len(t, acc.Changes()[0].Changes, 1)
-			require.Len(t, acc.Changes()[0].Changes[0].StorageChanges, 1)
-			require.Equal(t, []byte{6}, acc.Changes()[0].Changes[0].StorageChanges[0].Data)
+			require.Panics(t, func() { acc.ChangeStorage(address, 0, slot, []byte{6}) }, "restoring a checkpoint must not reopen completed changes")
+			acc.StartChange(&types.Header{Time: 3}, nil, false)
+			acc.ChangeStorage(address, 0, slot, []byte{7})
+			require.Equal(t, want, acc.Changes()[0].ToProto())
 		})
 	}
 }

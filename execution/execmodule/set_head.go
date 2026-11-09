@@ -116,6 +116,17 @@ func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
 	// (BadBlock). Mirrors ValidateChain/forkchoice.
 	sd.SetStateCache(e.stateCache)
 
+	// Pending notifications must follow the unwind's database commit outcome.
+	var restoreStateChanges func()
+	if e.accum != nil && e.accum.Accumulator != nil {
+		restoreStateChanges = e.accum.Accumulator.Checkpoint()
+	}
+	defer func() {
+		if restoreStateChanges != nil {
+			restoreStateChanges()
+		}
+	}()
+
 	// Set the unwind point and run the unwind
 	if err := e.pipelineExecutor.UnwindTo(targetBlock, stagedsync.StagedUnwind, tx); err != nil {
 		return fmt.Errorf("failed to set unwind point: %w", err)
@@ -162,6 +173,7 @@ func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
 	if err := sd.Commit(ctx, tx); err != nil {
 		return fmt.Errorf("failed to commit shared domains: %w", err)
 	}
+	restoreStateChanges = nil
 	if e.accum != nil && e.accum.RecentReceipts != nil {
 		e.accum.RecentReceipts.Clear()
 	}
