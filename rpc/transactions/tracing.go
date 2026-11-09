@@ -183,6 +183,9 @@ func AssembleTracer(
 		deadlineCtx, cancel := context.WithTimeout(ctx, timeout)
 		tracer, err := tracers.New(*config.Tracer, &tracers.Context{TxHash: txHash, TxIndex: txnIndex, BlockHash: blockHash, Ctx: deadlineCtx, BlockNumber: blockNumber}, cfg)
 		if err != nil {
+			if deadlineCtx.Err() != nil {
+				err = errors.New("execution timeout")
+			}
 			cancel()
 			return nil, false, func() {}, err
 		}

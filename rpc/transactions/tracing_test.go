@@ -382,7 +382,7 @@ func TestAssembleTracerStopsAJSConstructorAtTheTimeout(t *testing.T) {
 	}()
 	select {
 	case err := <-done:
-		require.Error(t, err)
+		require.ErrorContains(t, err, "execution timeout")
 	case <-time.After(10 * time.Second):
 		t.Fatal("the JS tracer constructor outlived its timeout")
 	}
