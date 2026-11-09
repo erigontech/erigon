@@ -616,5 +616,5 @@ func halts(err error) bool {
 	}
 	return errors.Is(err, deriver.ErrDiverged) || errors.Is(err, deriver.ErrFinalizedReorged) ||
 		errors.Is(err, l1.ErrReorgTooDeep) || errors.Is(err, l1.ErrFinalityViolation) ||
-		errors.Is(err, l1.ErrUndecodable) || errors.Is(err, ErrL1ChainID) || errors.Is(err, ErrL1Reference)
+		errors.Is(err, l1.ErrUndecodable) || errors.Is(err, l1.ErrUnsupported) || errors.Is(err, ErrL1ChainID) || errors.Is(err, ErrL1Reference)
 }

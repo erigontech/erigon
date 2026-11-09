@@ -17,7 +17,6 @@ package protocol
 
 import (
 	"bytes"
-	"encoding/binary"
 	"encoding/json"
 	"math/big"
 	"testing"
@@ -119,10 +118,9 @@ func TestChiadoPublicInputs(t *testing.T) {
 
 	b, err := DecodePostAndVerifyBatch(s.Transaction.Input)
 	require.NoError(t, err)
-	require.Equal(t, uint64(1<<64-1), b.BlockNumber)
-	customData := make([]byte, 64)
-	binary.BigEndian.PutUint64(customData[24:32], header.Time)
-	copy(customData[32:], header.ParentHash[:])
+	require.Equal(t, uint64(LiveBlockNumber), b.BlockNumber)
+	customData, err := SettlementCustomData(b.BlockNumber, header.Time, header.ParentHash)
+	require.NoError(t, err)
 
 	p, err := NewPublicInputs(b, s.Transaction.BlobVersionedHashes, [][]byte{customData},
 		[][]common.Hash{{s.StateAtBlock.ManagerVerificationKey}}, s.Transaction.From)
@@ -141,6 +139,36 @@ func TestChiadoPublicInputs(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, hashes, 1)
 	require.Equal(t, s.StateAtBlock.ProofSystemSigner, recoverSigner(t, hashes[0], b.Proofs[0]))
+}
+
+// TestSettlementCustomData pins the custom data each blockNumber binds:
+// none for a timeless batch, abi.encode(uint256(time), bytes32(parent)) of
+// the including L1 block for a live one, cross-checked with cast abi-encode.
+func TestSettlementCustomData(t *testing.T) {
+	parent := common.HexToHash("0x1111111111111111111111111111111111111111111111111111111111111111")
+	data, err := SettlementCustomData(0, 1_700_000_000, parent)
+	require.NoError(t, err)
+	require.Empty(t, data)
+
+	data, err = SettlementCustomData(LiveBlockNumber, 1_700_000_000, parent)
+	require.NoError(t, err)
+	require.Equal(t, common.FromHex("0x000000000000000000000000000000000000000000000000000000006553f1001111111111111111111111111111111111111111111111111111111111111111"), data)
+	data, err = SettlementCustomData(LiveBlockNumber, 1<<64-1, common.HexToHash("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff01"))
+	require.NoError(t, err)
+	require.Equal(t, common.FromHex("0x000000000000000000000000000000000000000000000000ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff01"), data)
+
+	for name, c := range map[string]struct {
+		blockNumber, time uint64
+		parent            common.Hash
+	}{
+		"live without time":   {LiveBlockNumber, 0, parent},
+		"live without parent": {LiveBlockNumber, 1_700_000_000, common.Hash{}},
+		"recent block":        {1, 1_700_000_000, parent},
+		"below live":          {LiveBlockNumber - 1, 1_700_000_000, parent},
+	} {
+		_, err := SettlementCustomData(c.blockNumber, c.time, c.parent)
+		require.Error(t, err, name)
+	}
 }
 
 func TestPublicInputsRejects(t *testing.T) {

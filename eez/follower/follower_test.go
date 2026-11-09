@@ -345,6 +345,24 @@ func TestHaltOnDivergence(t *testing.T) {
 	require.ErrorIs(t, again.follower.Boot(t.Context()), deriver.ErrDiverged)
 }
 
+// TestHaltOnUnsupportedPost: a settlement the follower cannot verify, here
+// one binding an L1 block other than its own, halts it rather than retrying.
+func TestHaltOnUnsupportedPost(t *testing.T) {
+	c := derivertest.NewComposer(t)
+	n := newNode(t, c.L1)
+	_, done := n.run(t)
+	b := c.Compose(nil, derivertest.Block{Coinbase: alice, Extra: []byte{}, Txs: transfers(c, 1)})
+	b.Batch.BlockNumber = 5
+	c.Post(derivertest.Posting{Batch: b})
+
+	select {
+	case err := <-done:
+		require.ErrorIs(t, err, l1.ErrUnsupported)
+	case <-time.After(10 * time.Second):
+		t.Fatal("follower did not halt")
+	}
+}
+
 // staleLogs serves logs and transactions from a stale copy of the chain
 // once, as a lagging L1 node behind a load balancer would, and headers from
 // the live chain.
