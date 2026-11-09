@@ -65,9 +65,9 @@ const disconnectedPeerMemory = time.Minute
 // Other traffic shares the queue, so a retry can still be dropped; retryAnswerTimeout frees its slot.
 const maxRetryRequestsPerPeer = 8
 
-// retryAnswerTimeout frees the slot of a retry left unanswered this long, as sentry's queue dropped it; a slower
-// writer still gets at most maxRetryRequestsPerPeer retries per this window.
-const retryAnswerTimeout = 2 * time.Minute
+// retryAnswerTimeout frees the slot of a retry left unanswered this long. A full 32-message sentry queue drains
+// within this time at the 20-second write timeout, so an older retry was written or dropped and is not queued.
+const retryAnswerTimeout = 32 * 20 * time.Second
 
 type fetchPeer struct {
 	sentry sentryproto.SentryClient

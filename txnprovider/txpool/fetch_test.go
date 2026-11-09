@@ -1517,7 +1517,7 @@ func TestSlowPeerGetsNoRetriesUntilItAnswers(t *testing.T) {
 	a.announceSized(t, peerB, blobTxnSize, hashes...)
 	a.requestedFrom = nil
 	a.timeoutSweep()
-	for range 5 { // a writer slower than one message per 19 s stays connected
+	for range 32 { // a writer taking 19 s per message stays connected and drains sentry's full queue
 		*a.now = a.now.Add(19 * time.Second)
 		a.fetch.requestFromAlternates(a.ctx, nil)
 	}
