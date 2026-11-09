@@ -715,10 +715,16 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 	}
 	forkChoiceData := ok
 	if !ok {
-		attestationData, ok, err = a.attestationProducer.CachedAttestationData(*slot)
-		cached = ok
-		if err != nil {
-			log.Warn("Failed to get attestation data", "err", err)
+		cacheHeadRoot, haveCacheHead := head.Root, haveHead
+		if !haveCacheHead {
+			cacheHeadRoot, _, haveCacheHead = a.syncedData.StateHead()
+		}
+		if haveCacheHead {
+			attestationData, ok, err = a.attestationProducer.CachedAttestationData(*slot, cacheHeadRoot)
+			cached = ok
+			if err != nil {
+				log.Warn("Failed to get attestation data", "err", err)
+			}
 		}
 	}
 

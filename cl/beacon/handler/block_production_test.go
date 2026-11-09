@@ -5981,7 +5981,7 @@ func (p cachedAttestationDataProducer) ProduceAndCacheAttestationData(kv.Tx, *st
 	return p.data, nil
 }
 
-func (p cachedAttestationDataProducer) CachedAttestationData(uint64) (solid.AttestationData, bool, error) {
+func (p cachedAttestationDataProducer) CachedAttestationData(uint64, common.Hash) (solid.AttestationData, bool, error) {
 	if p.calls != nil {
 		(*p.calls)++
 	}
@@ -6151,6 +6151,36 @@ func TestGetEthV1ValidatorAttestationDataUsesForkChoiceHead(t *testing.T) {
 			require.Equal(t, tt.forkChoiceHeadRoot, data.BeaconBlockRoot)
 			require.Equal(t, attestationSlot/handler.beaconChainCfg.SlotsPerEpoch, data.Target.Epoch)
 			require.Equal(t, tt.forkChoiceHeadRoot, data.Target.Root)
+		})
+	}
+}
+
+func TestGetEthV1ValidatorAttestationDataCacheHeadChange(t *testing.T) {
+	for _, haveHead := range []bool{true, false} {
+		t.Run(fmt.Sprintf("fork choice head available %t", haveHead), func(t *testing.T) {
+			_, _, _, _, headState, handler, _, syncedData, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+			handler.aggregatePool = nil
+			handler.attestationDataImportWait = 0
+			slot := headState.Slot()
+			oldRoot, newRoot := common.Hash{1}, common.Hash{2}
+			producer := attestation_producer.New(handler.beaconChainCfg)
+			handler.attestationProducer = producer
+			_, err := producer.ProduceAndCacheAttestationData(nil, headState, oldRoot, slot)
+			require.NoError(t, err)
+			require.NoError(t, syncedData.OnHeadStateWithBlockRoot(headState, newRoot))
+			clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
+			clock.EXPECT().GetCurrentSlot().Return(slot).AnyTimes()
+			handler.ethClock = clock
+			fcu.TryGetHeadNodeFn = func() (forkchoice.ForkChoiceNode, bool) {
+				return forkchoice.ForkChoiceNode{Root: newRoot}, haveHead
+			}
+			fcu.AttestationDataFn = func(common.Hash, uint64) (solid.AttestationData, bool) {
+				return solid.AttestationData{}, false
+			}
+
+			status, data := requestAttestationData(t, handler, t.Context(), slot)
+			require.Equal(t, http.StatusOK, status)
+			require.Equal(t, newRoot, data.BeaconBlockRoot)
 		})
 	}
 }

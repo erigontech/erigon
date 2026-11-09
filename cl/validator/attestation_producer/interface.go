@@ -25,5 +25,5 @@ import (
 
 type AttestationDataProducer interface {
 	ProduceAndCacheAttestationData(tx kv.Tx, baseState *state.CachingBeaconState, baseStateBlockRoot common.Hash, slot uint64) (solid.AttestationData, error)
-	CachedAttestationData(slot uint64) (solid.AttestationData, bool, error)
+	CachedAttestationData(slot uint64, headRoot common.Hash) (solid.AttestationData, bool, error)
 }

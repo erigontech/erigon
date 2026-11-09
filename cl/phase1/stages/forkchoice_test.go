@@ -107,7 +107,7 @@ func (noOpAttestationDataProducer) ProduceAndCacheAttestationData(kv.Tx, *state.
 	return solid.AttestationData{}, nil
 }
 
-func (noOpAttestationDataProducer) CachedAttestationData(uint64) (solid.AttestationData, bool, error) {
+func (noOpAttestationDataProducer) CachedAttestationData(uint64, common.Hash) (solid.AttestationData, bool, error) {
 	return solid.AttestationData{}, false, nil
 }
 
@@ -1872,7 +1872,7 @@ func TestPostForkchoiceSameRootAfterOtherWriterCachesAttestationData(t *testing.
 	require.NoError(t, f.runPass())
 
 	f.requireCopiesAndPublishes(t, 0)
-	data, ok, err := producer.CachedAttestationData(f.headSlot)
+	data, ok, err := producer.CachedAttestationData(f.headSlot, f.headRoot)
 	require.NoError(t, err)
 	require.True(t, ok, "attestation data for the head slot is not cached")
 	require.Equal(t, f.headRoot, data.BeaconBlockRoot)
