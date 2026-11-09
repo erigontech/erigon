@@ -131,3 +131,34 @@ func TestMarshalReceiptWithStampedLogs(t *testing.T) {
 		})
 	}
 }
+
+// MarshalReceiptWithoutLogs renders the receipt as a signed MarshalReceipt without timestamp, minus
+// the logs and the bloom, and leaves the cached logs untouched.
+func TestMarshalReceiptWithoutLogs(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		txn  types.Transaction
+	}{
+		{"legacy", &types.LegacyTx{}},
+		{"frame", &types.FrameTransaction{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			logs := types.Logs{{Index: 1, Topics: []common.Hash{}}, {Index: 2, Topics: []common.Hash{}}}
+			logs.SetBlockTimestamp(42)
+			receipt := &types.Receipt{Type: tc.txn.Type(), BlockNumber: uint256.NewInt(1), Logs: logs}
+			if tc.txn.Type() == types.FrameTxType {
+				receipt.FrameReceipts = []types.FrameReceipt{{Status: 1, Logs: logs[:1:1]}, {Status: 1, Logs: logs[1:]}}
+			}
+			header := &types.Header{Number: *uint256.NewInt(1), Time: 42, BaseFee: uint256.NewInt(0)}
+
+			want := MarshalReceipt(receipt, tc.txn, chain.AllProtocolChanges, header, true, false)
+			want.Logs, want.LogsBloom = nil, nil
+			got := MarshalReceiptWithoutLogs(receipt, tc.txn, chain.AllProtocolChanges, header)
+			require.Equal(t, want, got)
+			for _, l := range logs {
+				require.Equal(t, stampedAt(42), l.BlockTimestamp, "the cached log keeps its timestamp")
+			}
+		})
+	}
+}

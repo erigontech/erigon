@@ -105,6 +105,27 @@ func MarshalReceipt(
 	signed bool,
 	withBlockTimestamp bool,
 ) *RPCReceipt {
+	var timestamp *hexutil.Uint64
+	if withBlockTimestamp {
+		at := hexutil.Uint64(header.Time)
+		timestamp = &at
+	}
+	logs, frames := logsWithTimestamp(receipt, timestamp)
+	result := marshalReceipt(receipt, txn, chainConfig, header, signed, frames)
+	result.Logs, result.LogsBloom = logs, receipt.LogsBloom()
+	return result
+}
+
+// MarshalReceiptWithoutLogs renders a signed receipt without its logs and bloom.
+func MarshalReceiptWithoutLogs(receipt *types.Receipt, txn types.Transaction, chainConfig *chain.Config, header *types.Header) *RPCReceipt {
+	frames := receipt.FrameReceipts
+	if len(frames) > 0 {
+		_, frames = logsWithTimestamp(receipt, nil)
+	}
+	return marshalReceipt(receipt, txn, chainConfig, header, true, frames)
+}
+
+func marshalReceipt(receipt *types.Receipt, txn types.Transaction, chainConfig *chain.Config, header *types.Header, signed bool, frames []types.FrameReceipt) *RPCReceipt {
 	var from *common.Address
 	if signed {
 		sender, ok := txn.GetSender()
@@ -124,16 +145,9 @@ func MarshalReceipt(
 		from = &address
 	}
 
-	var timestamp *hexutil.Uint64
-	if withBlockTimestamp {
-		at := hexutil.Uint64(header.Time)
-		timestamp = &at
-	}
-	logsToMarshal, frameReceiptsToMarshal := logsWithTimestamp(receipt, timestamp)
-
 	result := &RPCReceipt{
 		Payer:             receipt.Payer,
-		FrameReceipts:     frameReceiptsToMarshal,
+		FrameReceipts:     frames,
 		BlockHash:         receipt.BlockHash,
 		BlockNumber:       hexutil.Uint64(receipt.BlockNumber.Uint64()),
 		TransactionHash:   receipt.TxHash,
@@ -143,8 +157,6 @@ func MarshalReceipt(
 		Type:              hexutil.Uint(txn.Type()),
 		GasUsed:           hexutil.Uint64(receipt.GasUsed),
 		CumulativeGasUsed: hexutil.Uint64(receipt.CumulativeGasUsed),
-		Logs:              logsToMarshal,
-		LogsBloom:         receipt.LogsBloom(),
 	}
 
 	if !chainConfig.IsLondon(header.Number.Uint64()) {

@@ -475,11 +475,11 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		receipt.Logs[i].Index = hexutil.Uint(firstLogIndex + uint32(i))
 	}
 
-	g.addToCacheReceipt(ctx, tx, header, txNum, receipt)
-
 	if dbg.AssertEnabled && receiptFromDB != nil {
 		g.assertEqualReceipts(receipt, receiptFromDB, txn)
 	}
+
+	g.addToCacheReceipt(ctx, tx, header, txNum, receipt)
 	return receipt, nil
 }
 
