@@ -57,12 +57,12 @@ func (t *Trie) RootHash() ([]byte, error) {
 	return bytes.Clone(t.root), nil
 }
 
-func (t *Trie) EncodeState(blockNum, txNum uint64, dst []byte) ([]byte, error) {
+func (t *Trie) EncodeState(blockNum, txNum uint64) ([]byte, error) {
 	root, err := t.RootHash()
 	if err != nil {
 		return nil, err
 	}
-	return commitment.EncodeCommitmentV3State(root, blockNum, txNum, dst)
+	return commitment.EncodeCommitmentV3State(root, blockNum, txNum)
 }
 
 func (t *Trie) RestoreState(value []byte) (uint64, uint64, error) {

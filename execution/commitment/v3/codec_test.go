@@ -290,12 +290,12 @@ func TestAccountCodec(t *testing.T) {
 func TestStateCodec(t *testing.T) {
 	t.Run("E44/StateRoundTrip", func(t *testing.T) {
 		trie := &Trie{root: bytes.Repeat([]byte{0x37}, 32)}
-		encoded, err := trie.EncodeState(91, 73, []byte{0xaa})
+		encoded, err := trie.EncodeState(91, 73)
 		require.NoError(t, err)
-		require.Equal(t, commitment.CommitmentV3StateMarker, encoded[1])
+		require.Equal(t, commitment.CommitmentV3StateMarker, encoded[0])
 
 		restored := &Trie{}
-		blockNum, txNum, err := restored.RestoreState(encoded[1:])
+		blockNum, txNum, err := restored.RestoreState(encoded)
 		require.NoError(t, err)
 		require.Equal(t, uint64(91), blockNum)
 		require.Equal(t, uint64(73), txNum)
@@ -305,7 +305,7 @@ func TestStateCodec(t *testing.T) {
 	})
 	t.Run("E44/StateRoundTripEmptyRoot", func(t *testing.T) {
 		trie := &Trie{}
-		encoded, err := trie.EncodeState(1, 2, nil)
+		encoded, err := trie.EncodeState(1, 2)
 		require.NoError(t, err)
 
 		restored := &Trie{root: bytes.Repeat([]byte{0x55}, 32)}
@@ -333,7 +333,7 @@ func TestStateCodec(t *testing.T) {
 		require.ErrorIs(t, err, commitment.ErrCommitmentV3StateMarker)
 	})
 	t.Run("E44/StateEncodeRejectsInvalidRoot", func(t *testing.T) {
-		_, err := (&Trie{root: []byte{1}}).EncodeState(0, 0, nil)
+		_, err := (&Trie{root: []byte{1}}).EncodeState(0, 0)
 		require.ErrorIs(t, err, commitment.ErrCommitmentV3StateSize)
 	})
 }

@@ -101,7 +101,7 @@ type Trie interface {
 }
 
 type TrieStateCodec interface {
-	EncodeState(blockNum, txNum uint64, dst []byte) ([]byte, error)
+	EncodeState(blockNum, txNum uint64) ([]byte, error)
 	RestoreState(value []byte) (blockNum, txNum uint64, err error)
 }
 
@@ -142,11 +142,12 @@ var (
 	ErrCommitmentV3StateSize   = errors.New("commitment v3: invalid state size")
 )
 
-func EncodeCommitmentV3State(root []byte, blockNum, txNum uint64, dst []byte) ([]byte, error) {
+func EncodeCommitmentV3State(root []byte, blockNum, txNum uint64) ([]byte, error) {
 	if len(root) != length.Hash {
 		return nil, ErrCommitmentV3StateSize
 	}
-	dst = append(slices.Grow(dst, CommitmentV3StateSize), CommitmentV3StateMarker)
+	dst := make([]byte, 1, CommitmentV3StateSize)
+	dst[0] = CommitmentV3StateMarker
 	dst = binary.BigEndian.AppendUint64(dst, txNum)
 	dst = binary.BigEndian.AppendUint64(dst, blockNum)
 	return append(dst, root...), nil

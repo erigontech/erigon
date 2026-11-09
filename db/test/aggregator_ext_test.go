@@ -113,7 +113,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 		if (txNum+1)%stepSize == 0 {
 			var encodedState []byte
 			if statecfg.ExperimentalCommitmentV3 {
-				encodedState, err = commitment.EncodeCommitmentV3State(empty.RootHash[:], 0, txNum, nil)
+				encodedState, err = commitment.EncodeCommitmentV3State(empty.RootHash[:], 0, txNum)
 				require.NoError(t, err)
 			} else {
 				trieState, err := hph.EncodeCurrentState(nil)

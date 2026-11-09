@@ -91,8 +91,8 @@ func (*testTrie) Process(context.Context, *commitment.Updates, string, func(*com
 
 func (*testTrie) Release() {}
 
-func (*stateCodecTrie) EncodeState(blockNum, txNum uint64, dst []byte) ([]byte, error) {
-	return append(dst, commitment.CommitmentV3StateMarker, byte(blockNum), byte(txNum)), nil
+func (*stateCodecTrie) EncodeState(blockNum, txNum uint64) ([]byte, error) {
+	return []byte{commitment.CommitmentV3StateMarker, byte(blockNum), byte(txNum)}, nil
 }
 
 func (*stateCodecTrie) RestoreState(value []byte) (uint64, uint64, error) {

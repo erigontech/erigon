@@ -497,7 +497,7 @@ func ConvertLegacyState(value []byte) ([]byte, error) {
 			return nil, fmt.Errorf("%w: %w", errLegacyState, err)
 		}
 	}
-	return commitment.EncodeCommitmentV3State(root, blockNum, txNum, nil)
+	return commitment.EncodeCommitmentV3State(root, blockNum, txNum)
 }
 
 type leafRootContext struct{}

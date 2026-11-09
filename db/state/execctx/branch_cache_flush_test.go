@@ -93,7 +93,7 @@ func mergedCommitmentFileFixture(t *testing.T, stepSize uint64) (kv.TemporalRwDB
 	if statecfg.ExperimentalCommitmentV3 {
 		stateKey = commitment.KeyCommitmentV3State
 		var err error
-		commitmentState, err = commitment.EncodeCommitmentV3State(empty.RootHash[:], 0, 20, nil)
+		commitmentState, err = commitment.EncodeCommitmentV3State(empty.RootHash[:], 0, 20)
 		require.NoError(t, err)
 	} else {
 		trieState, err := commitment.NewHexPatriciaHashed(1, nil, commitment.DefaultTrieConfig()).EncodeCurrentState(nil)

@@ -87,7 +87,7 @@ func newWitnessBed(t testing.TB, ops []commitmenttest.Op) *witnessBed {
 	v3Root, err := tr.Process(ctx, vu, "", nil, commitment.WarmupConfig{})
 	require.NoError(t, err)
 	require.Equal(t, hphRoot, v3Root)
-	b.v3State, err = tr.EncodeState(1, 1, nil)
+	b.v3State, err = tr.EncodeState(1, 1)
 	require.NoError(t, err)
 	return b
 }

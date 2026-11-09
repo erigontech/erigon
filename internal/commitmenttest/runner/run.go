@@ -139,7 +139,7 @@ func reload(tb testing.TB, engine commitment.Trie, spec RunSpec, open openFunc, 
 		round.Err = fmt.Errorf("engine %s has no state codec", spec.Name)
 		return engine
 	}
-	state, err := codec.EncodeState(number, number, nil)
+	state, err := codec.EncodeState(number, number)
 	if err != nil {
 		round.Err = err
 		return engine

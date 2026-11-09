@@ -1122,7 +1122,7 @@ func (sdc *SharedDomainsCommitmentContext) encodeCommitmentState(blockNum, txNum
 
 	switch trie := sdc.patriciaTrie.(type) {
 	case commitment.TrieStateCodec:
-		return trie.EncodeState(blockNum, txNum, nil)
+		return trie.EncodeState(blockNum, txNum)
 	case *commitment.HexPatriciaHashed:
 		state, err = trie.EncodeCurrentState(nil)
 		if err != nil {
