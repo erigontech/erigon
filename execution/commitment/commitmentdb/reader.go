@@ -329,12 +329,12 @@ func NewCommitmentReplayStateReader(ttx, tx kv.TemporalTx, tsd sd, plainStateAsO
 }
 
 type ParentRecords struct {
-	BlockNum   uint64
-	BlockHash  common.Hash
-	ParentHash common.Hash
-	Deleted    [][]byte
-	Get        func(key []byte) ([]byte, kv.Step, bool)
-	State      ParentState
+	BlockNum       uint64
+	BlockHash      common.Hash
+	ParentHash     common.Hash
+	TraceCollapses bool
+	Get            func(key []byte) ([]byte, kv.Step, bool)
+	State          ParentState
 }
 
 type ParentState interface {

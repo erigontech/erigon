@@ -32,7 +32,6 @@ import (
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
-	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/statecfg"
@@ -506,7 +505,7 @@ func TestBuildAndCacheHeadCaptureReadsParentRecords(t *testing.T) {
 		t.Cleanup(tx.Rollback)
 		return tx
 	}
-	pinA, recsA, pinB, pinC := parentTx(), parentTx(), parentTx(), parentTx()
+	pinA, recsA, pinB := parentTx(), parentTx(), parentTx()
 	require.NoError(t, m.InsertChain(testChain.Slice(int(buildNum)-1, int(buildNum))))
 	hash, _ := buildTestChainHeader(t, m, buildNum)
 
@@ -517,8 +516,8 @@ func TestBuildAndCacheHeadCaptureReadsParentRecords(t *testing.T) {
 	wantBytes, err := jsonstream.Marshal(want)
 	require.NoError(t, err)
 
-	build := func(pinTx kv.TemporalTx, get func(k []byte) ([]byte, kv.Step, bool), deleted [][]byte) (*ExecutionWitnessResult, bool) {
-		commitmentdb.PublishParentRecords(&commitmentdb.ParentRecords{BlockNum: buildNum, BlockHash: hash, ParentHash: parentHash, Deleted: deleted, Get: get})
+	build := func(pinTx kv.TemporalTx, get func(k []byte) ([]byte, kv.Step, bool), trace bool) (*ExecutionWitnessResult, bool) {
+		commitmentdb.PublishParentRecords(&commitmentdb.ParentRecords{BlockNum: buildNum, BlockHash: hash, ParentHash: parentHash, TraceCollapses: trace, Get: get})
 		committedTx, err := m.DB.BeginTemporalRo(ctx)
 		require.NoError(t, err)
 		defer committedTx.Rollback()
@@ -535,29 +534,15 @@ func TestBuildAndCacheHeadCaptureReadsParentRecords(t *testing.T) {
 		served++
 		return v, step, true
 	}
-	got, ok := build(pinA, parentGet, [][]byte{})
+	got, ok := build(pinA, parentGet, true)
 	require.True(t, ok, "a build over correct parent records is cached")
 	require.NotZero(t, served, "the build reads commitment through the parent records")
 	gotBytes, err := jsonstream.Marshal(got)
 	require.NoError(t, err)
 	require.Equal(t, wantBytes, gotBytes, "the witness over parent records matches the durable build")
 
-	_, ok = build(pinB, func(k []byte) ([]byte, kv.Step, bool) { return []byte{0x01, 0x02}, 0, true }, nil)
+	_, ok = build(pinB, func(k []byte) ([]byte, kv.Step, bool) { return []byte{0x01, 0x02}, 0, true }, false)
 	require.False(t, ok, "wrong parent records fail a gate and cache nothing")
-
-	var kept []byte
-	for _, key := range want.Keys {
-		if len(key) != length.Addr {
-			continue
-		}
-		if v, _, err := pinC.GetLatest(kv.AccountsDomain, key, kv.GetLatestOptions{}); err == nil && len(v) != 0 {
-			kept = key
-			break
-		}
-	}
-	require.NotNil(t, kept, "an account the block reads and keeps")
-	_, ok = build(pinC, parentGet, [][]byte{kept})
-	require.False(t, ok, "a verified deletion the collapse trace does not delete fails the build")
 }
 
 // TestNewWitnessCacheBuilderAPISelectsMode pins that the head-capture argument routes
@@ -965,7 +950,7 @@ func TestHeadCaptureOverParentRecordsMatchesDurablePerBlock(t *testing.T) {
 	stateHits := mxParentStateHit.GetValueUint64()
 	warmed := mxWarmRecords.GetValueUint64()
 	onDemand := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
-	deletions := 0
+	traces := 0
 	for n := uint64(2); n <= uint64(testChain.Length()); n++ {
 		pin, err := openRollingPin(ctx, m.DB)
 		require.NoError(t, err)
@@ -974,8 +959,8 @@ func TestHeadCaptureOverParentRecordsMatchesDurablePerBlock(t *testing.T) {
 		require.NoError(t, m.InsertChain(testChain.Slice(int(n)-1, int(n))), "block %d", n)
 		hash, _ := buildTestChainHeader(t, m, n)
 		parentHash, _ := buildTestChainHeader(t, m, n-1)
-		if r := commitmentdb.ParentRecordsFor(n, hash, parentHash); r != nil && len(r.Deleted) != 0 {
-			deletions++
+		if r := commitmentdb.ParentRecordsFor(n, hash, parentHash); r != nil && r.TraceCollapses {
+			traces++
 		}
 		if n%2 == 1 {
 			commitmentdb.PublishParentRecords(nil)
@@ -1003,7 +988,7 @@ func TestHeadCaptureOverParentRecordsMatchesDurablePerBlock(t *testing.T) {
 		require.Equal(t, wantBytes, gotBytes, "block %d", n)
 	}
 	require.Positive(t, witnessCacheParentRecordsCounter.GetValueUint64()-used, "head-capture builds read the published records")
-	require.Positive(t, deletions, "some blocks hand their verified deletions to head-capture")
+	require.Positive(t, traces, "some blocks enable the head-capture trace")
 	require.Positive(t, mxParentStateHit.GetValueUint64()-stateHits, "head-capture re-execution reads the validation's parent state")
 	require.Positive(t, mxWarmRecords.GetValueUint64()-warmed, "head-capture warms accessed paths the validation's records miss")
 }

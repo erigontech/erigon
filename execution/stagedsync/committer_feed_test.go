@@ -140,11 +140,7 @@ func TestEmitTouchedFeedCarriesWhatEmitTouchedEmits(t *testing.T) {
 	updates := newTestUpdates()
 	require.NoError(t, plain.emitTouched(view(), updates))
 	want := map[string]commitment.Update{}
-	wantDeleted := map[string]struct{}{}
 	for key, u := range collectUpdates(t, updates) {
-		if u.Deleted() {
-			wantDeleted[key] = struct{}{}
-		}
 		hash := crypto.Keccak256([]byte(key[:20]))
 		if len(key) > 20 {
 			hash = append(hash, crypto.Keccak256([]byte(key[20:]))...)
@@ -174,32 +170,6 @@ func TestEmitTouchedFeedCarriesWhatEmitTouchedEmits(t *testing.T) {
 	require.Len(t, distinct, len(feed.Accounts))
 	require.Equal(t, len(want), feed.Keys)
 	require.Equal(t, want, got)
-
-	gotDeleted := map[string]struct{}{}
-	for _, key := range cc.deleted {
-		gotDeleted[string(key)] = struct{}{}
-	}
-	require.NotEmpty(t, wantDeleted)
-	require.Len(t, cc.deleted, len(wantDeleted))
-	require.Equal(t, wantDeleted, gotDeleted)
-}
-
-func TestEmitTouchedFeedSkipsDeletedWhenParentReadsNotWanted(t *testing.T) {
-	commitmentdb.WantParentReads(false)
-	t.Cleanup(func() { commitmentdb.WantParentReads(false) })
-	const txIdx = 3
-	ver := state.Version{TxIndex: txIdx}
-	a := accounts.InternAddress([20]byte{1})
-	k := accounts.InternKey([32]byte{2})
-	ws := newWS().emptyRemoval(a, ver).stor(a, k, ver, uint256.Int{}).build()
-	vm := state.NewVersionMap(nil)
-	vm.FlushVersionedWrites(ws, true)
-	view := vm.View(txIdx+1, nil)
-
-	cc := &commitmentCalculator{branchPrefetch: newPrefetchRecords()}
-	cc.accumulateTouched(state.NewVersionMapWriteView(ws, vm, txIdx), nil)
-	require.NoError(t, cc.emitTouchedFeed(view))
-	require.Nil(t, cc.deleted)
 }
 
 func TestComputeAheadFeedRootMatchesHexPatricia(t *testing.T) {
