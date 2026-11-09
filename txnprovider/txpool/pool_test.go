@@ -575,6 +575,26 @@ func TestFromDBSkipsUnderpricedBlobTxns(t *testing.T) {
 	require.NotContains(t, pool.byHash, string(underpricedHash[:]))
 }
 
+func TestFromDBSkipsBlobTxnWithBadSidecar(t *testing.T) {
+	ctx, pool, poolDB, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+	wrapped := types.MakeV1WrappedBlobTxn(chain.AllProtocolChanges.ChainID)
+	wrapped.Tx.FeeCap = *uint256.NewInt(1_000_000_000)
+	wrapped.Tx.TipCap = *uint256.NewInt(1_000_000_000)
+	wrapped.Blobs[0][31] ^= 0x01
+	var encoded bytes.Buffer
+	require.NoError(t, wrapped.MarshalBinaryWrapped(&encoded))
+	hash := wrapped.Tx.Hash()
+	require.NoError(t, poolDB.Update(ctx, func(tx kv.RwTx) error {
+		return tx.Put(kv.PoolTransaction, hash[:], append(sender[:], encoded.Bytes()...))
+	}))
+
+	require.NoError(t, poolDB.View(ctx, func(poolTx kv.Tx) error {
+		return pool.fromDB(ctx, poolTx)
+	}))
+
+	require.NotContains(t, pool.byHash, string(hash[:]))
+}
+
 func TestGetCachedBlobTxnLockedSkipsUnparseableCachedRow(t *testing.T) {
 	ctx, pool, poolDB, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
 
@@ -700,6 +720,34 @@ func TestProvideTxnsAmsterdamGasAdmission(t *testing.T) {
 	}
 }
 
+func TestPoolBlockGasLimitEquality(t *testing.T) {
+	for _, updateSender := range []bool{false, true} {
+		name := "block limit update"
+		if updateSender {
+			name = "sender state update"
+		}
+		t.Run(name, func(t *testing.T) {
+			ctx := t.Context()
+			pool := newAmsterdamPoolWithPendingSelfTransfer(t, ctx, 100_000)
+			change := &remoteproto.StateChangeBatch{
+				PendingBlockBaseFee: 200_000, BlockGasLimit: 100_000,
+				ChangeBatch: []*remoteproto.StateChange{{BlockHeight: 1, BlockHash: gointerfaces.ConvertHashToH256(common.Hash{1})}},
+			}
+			if updateSender {
+				account := accounts.Account{Balance: *uint256.NewInt(common.Ether), CodeHash: accounts.EmptyCodeHash}
+				change.ChangeBatch[0].Changes = []*remoteproto.AccountChange{{
+					Action: remoteproto.Action_UPSERT, Address: gointerfaces.ConvertAddressToH160(common.Address{1}), Data: accounts.SerialiseV3(&account),
+				}}
+			}
+			require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+			require.Equal(t, 1, pool.pending.Len(), "a transaction may use the full block gas limit")
+			txns, err := pool.ProvideTxns(ctx, txnprovider.WithGasTarget(mdgas.NewFullMdGas(100_000, 100_000, 0)))
+			require.NoError(t, err)
+			require.Len(t, txns, 1, "a pending transaction at the gas limit must be selectable")
+		})
+	}
+}
+
 func TestOnNewBlockKeepsTxnAtBlockGasLimitPending(t *testing.T) {
 	ctx := t.Context()
 	pool := newAmsterdamPoolWithPendingSelfTransfer(t, ctx, 40_000_000)
@@ -738,13 +786,13 @@ func TestProvideTxnsUsesRemainingGasForAdmission(t *testing.T) {
 	}
 }
 
-func TestProvideTxnsRejectsAAAboveExecutionGasTarget(t *testing.T) {
+func TestProvideTxnsRejectsFrameAboveExecutionGasTarget(t *testing.T) {
 	pool := newAmsterdamPoolWithPendingSelfTransfer(t, t.Context(), 100_000)
-	aaTxn := &types.AccountAbstractionTransaction{
-		SenderAddress: accounts.InternAddress(common.Address{1}),
-		GasLimit:      100_000 - params.TxAAGas,
+	frameTxn := &types.FrameTransaction{
+		NonceKeys:     []uint256.Int{{}},
+		SenderAddress: common.Address{1}, Frames: []types.Frame{{Limits: mdgas.MdGas{Execution: 87_525}}},
 	}
-	pool.pending.best.ms[0].TxnSlot.Txn = aaTxn
+	pool.pending.best.ms[0].TxnSlot.Txn = frameTxn
 	txns, err := pool.ProvideTxns(t.Context(),
 		txnprovider.WithGasTarget(mdgas.NewFullMdGas(50_000, 100_000, 0)))
 	require.NoError(t, err)
@@ -978,7 +1026,7 @@ func TestSetCodeAuthorizationAdmission(t *testing.T) {
 					reasons, err = pool.AddLocalTxns(ctx, txns)
 				} else {
 					pool.AddRemoteTxns(ctx, txns, nil, nil)
-					reasons, err = pool.addNewTxns(ctx, *pool.unprocessedRemoteTxns, true)
+					reasons, err = pool.processRemoteBatch(ctx)
 				}
 				require.NoError(t, err)
 				require.Equal(t, []txpoolcfg.DiscardReason{tc.reason}, reasons)

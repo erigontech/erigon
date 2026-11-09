@@ -306,7 +306,8 @@ type simulator struct {
 	validation        bool
 	fullTransactions  bool
 	// Without commitment history, each block's root is replayed from the base block, so it needs the keys of all earlier simulated blocks.
-	touchedKeys keysByAccount
+	touchedKeys  keysByAccount
+	sweptStorage map[accounts.Address]struct{}
 }
 
 func newSimulator(
@@ -343,6 +344,7 @@ func newSimulator(
 		validation:        req.Validation,
 		fullTransactions:  req.ReturnFullTransactions,
 		touchedKeys:       make(keysByAccount),
+		sweptStorage:      make(map[accounts.Address]struct{}),
 	}
 }
 
@@ -617,14 +619,33 @@ type simOverrideReader struct {
 var _ state.StateReader = (*simOverrideReader)(nil)
 
 func commitSimOverrides(stateOverrides *ethapi.StateOverrides, base state.StateReader, precompiles vm.PrecompiledContracts, rules *chain.Rules, stateWriter state.StateWriter) (*simOverrideReader, error) {
-	overrides := state.New(base)
-	if err := stateOverrides.Override(overrides, precompiles, rules); err != nil {
-		overrides.Close()
-		return nil, err
-	}
 	overridden := make(map[accounts.Address]struct{}, len(*stateOverrides))
 	for addr := range *stateOverrides {
 		overridden[addr] = struct{}{}
+	}
+	overrides := state.New(base)
+	transactions.VersionedBlockState(overrides)
+	if err := applySimOverrides(overrides, stateOverrides, precompiles, rules, stateWriter); err != nil {
+		overrides.Close()
+		return nil, err
+	}
+	return &simOverrideReader{StateReader: base, overrides: overrides, overridden: overridden}, nil
+}
+
+func applySimOverrides(overrides *state.IntraBlockState, stateOverrides *ethapi.StateOverrides, precompiles vm.PrecompiledContracts, rules *chain.Rules, stateWriter state.StateWriter) error {
+	if overrides.IsVersioned() {
+		// The version map hides the replaced storage from this block only; the writer must drop the stored slots.
+		for addr, account := range *stateOverrides {
+			if account.State != nil {
+				if err := stateWriter.CreateContract(addr); err != nil {
+					return err
+				}
+			}
+		}
+		return stateOverrides.OverrideTo(overrides, precompiles, rules, stateWriter)
+	}
+	if err := stateOverrides.Override(overrides, precompiles, rules); err != nil {
+		return err
 	}
 	dirty := overrides.ExtractAndClearDirty()
 	for addr, account := range *stateOverrides {
@@ -634,10 +655,9 @@ func commitSimOverrides(stateOverrides *ethapi.StateOverrides, base state.StateR
 		}
 	}
 	if err := overrides.CommitOverrideDirtyAccounts(rules, stateWriter, dirty); err != nil {
-		overrides.Close()
-		return nil, fmt.Errorf("committing override accounts: %w", err)
+		return fmt.Errorf("committing override accounts: %w", err)
 	}
-	return &simOverrideReader{StateReader: base, overrides: overrides, overridden: overridden}, nil
+	return nil
 }
 
 func (r *simOverrideReader) Close() { r.overrides.Close() }
@@ -749,7 +769,7 @@ func (s *simulator) simulateBlock(
 
 	putDel := sharedDomains.AsPutDel(tx)
 	if !latest {
-		putDel = &historicalPutDel{TemporalPutDel: putDel, view: newSimulationIntraBlockStateReader(tx, sharedDomains, firstMinTxNum), touched: s.touchedKeys}
+		putDel = &historicalPutDel{TemporalPutDel: putDel, view: newSimulationIntraBlockStateReader(tx, sharedDomains, firstMinTxNum), touched: s.touchedKeys, sweptStorage: s.sweptStorage}
 	}
 	stateWriter := newDiffTrackingWriter(putDel, minTxNum, s.touchedKeys)
 	balMode := s.chainConfig.IsEIPEnabled(7928, header.Time)
@@ -1082,7 +1102,7 @@ func (s *simulator) simulateCall(
 	}
 	gasUsed.AddResult(result)
 	s.gasBudget -= result.ReceiptGasUsed
-	receipt := protocol.MakeReceipt(&header.Number, common.Hash{}, msg, txn, gasUsed.Receipt, result, intraBlockState, evm)
+	receipt := protocol.MakeReceipt(&header.Number, common.Hash{}, txn, gasUsed.Receipt, result, intraBlockState, evm)
 	gasUsed.Blob += receipt.BlobGasUsed
 
 	var logs []*types.Log
@@ -1309,8 +1329,9 @@ func newSimulationIntraBlockStateReader(roTx kv.TemporalTx, sd *execctx.SharedDo
 // It resolves the previous value from the simulation's own view instead.
 type historicalPutDel struct {
 	kv.TemporalPutDel
-	view    *simulationIntraBlockStateReader
-	touched keysByAccount
+	view         *simulationIntraBlockStateReader
+	touched      keysByAccount
+	sweptStorage map[accounts.Address]struct{}
 }
 
 func (p *historicalPutDel) prev(domain kv.Domain, k, prevVal []byte) ([]byte, error) {
@@ -1357,6 +1378,8 @@ func (p *historicalPutDel) DomainDelPrefix(domain kv.Domain, prefix []byte, txNu
 		return nil
 	}
 	address := accounts.InternAddress(common.BytesToAddress(prefix))
+	_, swept := p.sweptStorage[address]
+	p.sweptStorage[address] = struct{}{}
 	to, _ := kv.NextSubtree(prefix)
 	it, err := p.view.roTx.RangeAsOf(kv.StorageDomain, prefix, to, p.view.firstMinTxNum, order.Asc, kv.Unlim)
 	if err != nil {
@@ -1368,7 +1391,9 @@ func (p *historicalPutDel) DomainDelPrefix(domain kv.Domain, prefix []byte, txNu
 		if err != nil {
 			return err
 		}
-		p.touched[address] = append(p.touched[address], accounts.InternKey(common.BytesToHash(k[length.Addr:])))
+		if !swept && len(enc) > 0 { // enc is still the base value: a slot created after the base is absent there
+			p.touched[address] = append(p.touched[address], accounts.InternKey(common.BytesToHash(k[length.Addr:])))
+		}
 		if memEnc, _, ok := p.view.sd.GetMemBatch().GetLatest(kv.StorageDomain, k); ok {
 			enc = memEnc
 		}

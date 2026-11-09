@@ -789,7 +789,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		cfg.Sync,
 		stagedsync.DefaultStages(
 			mock.Ctx,
-			stagedsync.StageSnapshotsCfg(mock.DB, mock.ChainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, mock.BlockReader, mock.Notifications, false, false, false, pruneMode, nil, nil),
+			stagedsync.StageSnapshotsCfg(mock.DB, mock.ChainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, mock.BlockReader, mock.Notifications, false, false, 0, false, pruneMode, nil, nil),
 			stagedsync.StageHeadersCfg(mock.BlockReader),
 			stagedsync.StageBodiesCfg(mock.BlockReader, blockWriter),
 			stagedsync.StageSendersCfg(mock.ChainConfig, false /* badBlockHalt */, dirs.Tmp, mock.BlockReader, readAheader),
@@ -1306,16 +1306,23 @@ func NewWithExecLag(tb testing.TB, lag, ahead int, opts ...Option) (*ExecModuleT
 	require.NoError(tb, err)
 	require.NoError(tb, m.InsertValidateAndUfc1By1(ctx, chainPack.Blocks[:1]))
 
-	lagging := chainPack.Blocks[1 : 1+lag]
-	_, err = m.InsertBlocks(ctx, lagging)
+	InsertUnexecutedCanonical(tb, m, chainPack.Blocks[1:1+lag])
+	return m, chainPack
+}
+
+// InsertUnexecutedCanonical inserts blocks and marks them canonical without executing them.
+func InsertUnexecutedCanonical(tb testing.TB, m *ExecModuleTester, blocks []*types.Block) {
+	tb.Helper()
+	ctx := tb.Context()
+	_, err := m.InsertBlocks(ctx, blocks)
 	require.NoError(tb, err)
-	head := lagging[len(lagging)-1].NumberU64()
+	head := blocks[len(blocks)-1].NumberU64()
 	require.NoError(tb, m.DB.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
-		maxTxNum, err := rawdbv3.TxNums.Max(ctx, tx, 1)
+		maxTxNum, err := rawdbv3.TxNums.Max(ctx, tx, blocks[0].NumberU64()-1)
 		if err != nil {
 			return err
 		}
-		for _, b := range lagging {
+		for _, b := range blocks {
 			maxTxNum += uint64(len(b.Transactions())) + 2
 			if err := rawdbv3.TxNums.Append(tx, b.NumberU64(), maxTxNum); err != nil {
 				return err
@@ -1331,5 +1338,4 @@ func NewWithExecLag(tb testing.TB, lag, ahead int, opts ...Option) (*ExecModuleT
 		}
 		return nil
 	}))
-	return m, chainPack
 }

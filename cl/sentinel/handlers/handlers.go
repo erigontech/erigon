@@ -27,13 +27,16 @@ import (
 	"github.com/libp2p/go-libp2p/core/protocol"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
 	peerdasstate "github.com/erigontech/erigon/cl/das/state"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
+	"github.com/erigontech/erigon/cl/phase1/envelope_history"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/sentinel/communication"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/cl/sentinel/handshake"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
@@ -60,6 +63,13 @@ type ConsensusHandlers struct {
 	dataColumnStorage  blob_storage.DataColumnStorage
 	peerdasStateReader peerdasstate.PeerDasStateReader
 	enableBlocks       bool
+	envelopeRebuilder  EnvelopeRebuilder
+}
+
+type EnvelopeRebuilder interface {
+	Prepare(context.Context, kv.Tx, uint64, common.Hash) (*envelope_history.PreparedRebuild, error)
+	PrepareFromBlocks(kv.Tx, uint64, common.Hash, *cltypes.SignedBeaconBlock, uint64, *cltypes.SignedBeaconBlock) (*envelope_history.PreparedRebuild, error)
+	TryRebuild(context.Context, *envelope_history.PreparedRebuild) (*cltypes.SignedExecutionPayloadEnvelope, error)
 }
 
 const (
@@ -67,6 +77,7 @@ const (
 	InvalidRequestPrefix      = 0x01
 	ServerErrorPrefix         = 0x02
 	ResourceUnavailablePrefix = 0x03
+	StreamDeadline            = 5 * time.Second
 )
 
 func NewConsensusHandlers(
@@ -84,6 +95,7 @@ func NewConsensusHandlers(
 	dataColumnStorage blob_storage.DataColumnStorage,
 	peerDasStateReader peerdasstate.PeerDasStateReader,
 	enabledBlocks bool,
+	rebuilder EnvelopeRebuilder,
 ) *ConsensusHandlers {
 	c := &ConsensusHandlers{
 		host:               host,
@@ -101,6 +113,7 @@ func NewConsensusHandlers(
 		blobsStorage:       blobsStorage,
 		dataColumnStorage:  dataColumnStorage,
 		peerdasStateReader: peerDasStateReader,
+		envelopeRebuilder:  rebuilder,
 	}
 
 	hm := map[string]func(s network.Stream) error{
@@ -168,8 +181,7 @@ func (c *ConsensusHandlers) wrapStreamHandler(name string, fn func(s network.Str
 		}
 		defer c.rateLimiter.releaseConcurrency(peerID)
 
-		// Enforce per-peer, per-protocol rate limit (1 token for admission;
-		// batch handlers consume additional tokens after decoding the request).
+		// Charge admission before decoding the request; see consumeRateLimit for batch charges.
 		if !c.rateLimiter.allowRequest(peerID, name, 1) {
 			log.Debug("[pubsubhandler] rate limit exceeded", "protocol", name, "peer", peerID)
 			_ = ssz_snappy.EncodeAndWrite(s, &emptyString{}, InvalidRequestPrefix)
@@ -188,7 +200,7 @@ func (c *ConsensusHandlers) wrapStreamHandler(name string, fn func(s network.Str
 		}
 
 		// SetDeadline covers both directions.
-		if err := s.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		if err := s.SetDeadline(time.Now().Add(StreamDeadline)); err != nil {
 			log.Trace("failed to set stream deadline", "err", err)
 			_ = s.Reset()
 			_ = s.Close()
@@ -219,11 +231,11 @@ func (c *ConsensusHandlers) wrapStreamHandler(name string, fn func(s network.Str
 }
 
 // consumeRateLimit consumes additional rate-limit tokens for a batch request.
-// Batch handlers call this after decoding the request to charge for the actual
-// number of response items (beyond the 1 token already consumed by the wrapper).
-// Returns true if allowed. On rejection, writes an SSZ error response to s.
+// Handlers estimate cost from the request before reading or building responses,
+// excluding the admission token already consumed by the stream wrapper.
+// It returns false and writes an SSZ error response if cost is negative or credit is insufficient.
 func (c *ConsensusHandlers) consumeRateLimit(s network.Stream, cost int) bool {
-	if cost <= 0 {
+	if cost == 0 {
 		return true
 	}
 	peerID := s.Conn().RemotePeer().String()

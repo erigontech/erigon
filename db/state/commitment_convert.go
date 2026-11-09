@@ -831,7 +831,7 @@ func RestoreCommitmentFiles(ctx context.Context, dirs datadir.Dirs, logger log.L
 			return ctxErr
 		}
 		pattern := filepath.Join(snapDomain, fmt.Sprintf("*-commitment.%s-%s.*", r.from, r.to))
-		matches, globErr := filepath.Glob(pattern)
+		matches, globErr := dir.Glob(pattern)
 		if globErr != nil {
 			return fmt.Errorf("[commitment_convert] restore: glob %s: %w", pattern, globErr)
 		}
@@ -1351,7 +1351,7 @@ func convertPhase3(snapDomain, backupDir string, convertedFiles []VisibleFile, s
 		stepFrom := kv.Step(f.StartRootNum() / stepSize)
 		stepTo := kv.Step(f.EndRootNum() / stepSize)
 		pattern := filepath.Join(snapDomain, fmt.Sprintf("*-commitment.%d-%d.*", stepFrom, stepTo))
-		matches, err := filepath.Glob(pattern)
+		matches, err := dir.Glob(pattern)
 		if err != nil {
 			return moved, fmt.Errorf("[commitment_convert] phase 3 glob %s: %w", pattern, err)
 		}

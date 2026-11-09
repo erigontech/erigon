@@ -127,7 +127,7 @@ func (s *syncCommitteeMessagesService) DecodeGossipMessage(pid peer.ID, data []b
 		Receiver:             &sentinelproto.Peer{Pid: pid.String()},
 		SyncCommitteeMessage: &cltypes.SyncCommitteeMessage{},
 	}
-	if err := obj.SyncCommitteeMessage.DecodeSSZ(data, int(version)); err != nil {
+	if err := decodeGossipSSZ(obj.SyncCommitteeMessage, data, version); err != nil {
 		return nil, err
 	}
 	return obj, nil
@@ -193,6 +193,11 @@ func (s *syncCommitteeMessagesService) storeVerifiedMessage(subnet uint64, msg *
 		log.Debug("failed to add sync committee message to pool", "err", err)
 	}
 	if stale {
+		return ErrIgnore
+	}
+	// An identical submission is answered from the seen map while this one waits for the pool, and may have been
+	// published meanwhile; then there is nothing left for this one to publish.
+	if verified, ok := s.seenSyncCommitteeMessages.Load(key); ok && verified.(verifiedSyncCommitteeMessage).published {
 		return ErrIgnore
 	}
 	return nil

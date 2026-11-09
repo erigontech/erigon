@@ -109,6 +109,7 @@ func TestOverrideGenesisRestart(t *testing.T) {
 
 func TestOverrideGenesisKeepsStoredChainConfig(t *testing.T) {
 	genesis := testGenesis(1337, 30_000_000)
+	genesis.Config = chain.TestChainOsakaConfig.Copy()
 	genesis.Config.OsakaTime = common.NewUint64(100)
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	storedCfg, first, err := startGenesis(t, db, &ethconfig.Config{Genesis: genesis, GenesisFromFile: true})
@@ -187,7 +188,6 @@ func TestOverrideGenesisRestartWithForkOverride(t *testing.T) {
 		Genesis:               genesis,
 		GenesisFromFile:       true,
 		OverrideAmsterdamTime: common.NewUint64(0),
-		AllowAA:               true,
 	}
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	var tracedConfig *chain.Config
@@ -200,7 +200,6 @@ func TestOverrideGenesisRestartWithForkOverride(t *testing.T) {
 	require.NotNil(t, first.Header().SlotNumber)
 	require.Nil(t, genesis.Config.AmsterdamTime)
 	require.Equal(t, cfg, tracedConfig, "tracer must receive the overridden configuration")
-	require.True(t, tracedConfig.AllowAA)
 
 	tracedConfig = nil
 	cfg, block, err := setupGenesis(db, config, datadir.New(t.TempDir()), log.New(), tracer)
@@ -208,5 +207,4 @@ func TestOverrideGenesisRestartWithForkOverride(t *testing.T) {
 	require.Equal(t, first.Hash(), block.Hash())
 	require.Nil(t, genesis.Config.AmsterdamTime)
 	require.Equal(t, cfg, tracedConfig, "tracer must receive the overridden configuration on restart")
-	require.True(t, tracedConfig.AllowAA)
 }

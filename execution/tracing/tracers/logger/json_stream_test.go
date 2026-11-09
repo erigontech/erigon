@@ -66,8 +66,9 @@ func (m *mockIBS) GetCodeHash(accounts.Address) (accounts.CodeHash, error) {
 func (m *mockIBS) GetState(accounts.Address, accounts.StorageKey) (uint256.Int, error) {
 	return uint256.Int{}, nil
 }
-func (m *mockIBS) Exist(accounts.Address) (bool, error) { return false, nil }
-func (m *mockIBS) GetRefund() uint64                    { return 0 }
+func (m *mockIBS) Exist(accounts.Address) (bool, error)             { return false, nil }
+func (m *mockIBS) HasSelfdestructed(accounts.Address) (bool, error) { return false, nil }
+func (m *mockIBS) GetRefund() uint64                                { return 0 }
 
 // captureOnOpcode runs a single OnOpcodeV2 call and returns the parsed structLog entry.
 // It closes the stream the same way ExecuteTraceTx does after execution.
@@ -611,12 +612,12 @@ func TestJsonStreamLogger_LargeTraceStaysBounded(t *testing.T) {
 	}
 }
 
-// TestHexQuotedMatchesUint256Hex pins the stack encoding against uint256.Hex,
+// TestStackJSONMatchesUint256Hex pins the stack encoding against uint256.Hex,
 // which the RPC output has to stay byte-identical to. The interesting cases are
 // the nibble boundaries: Hex counts nibbles, not bytes, so 0xf is one digit and
 // 0x10 is two.
-func TestHexQuotedMatchesUint256Hex(t *testing.T) {
-	l := &JsonStreamLogger{}
+func TestStackJSONMatchesUint256Hex(t *testing.T) {
+	var s stackJSON
 	for _, str := range []string{
 		"0", "1", "f", "10", "ff", "100",
 		"1234567890abcdef",
@@ -625,7 +626,7 @@ func TestHexQuotedMatchesUint256Hex(t *testing.T) {
 		"8000000000000000000000000000000000000000000000000000000000000000",
 	} {
 		v := new(uint256.Int).SetBytes(common.FromHex("0x" + str))
-		require.Equal(t, `"`+v.Hex()+`"`, l.hexQuoted(v), "value 0x%s", str)
+		require.Equal(t, `["`+v.Hex()+`"]`, string(s.encode([]uint256.Int{*v})), "value 0x%s", str)
 	}
 }
 
@@ -637,7 +638,7 @@ func TestJsonStreamLogger_StackFollowsValueChanges(t *testing.T) {
 	l := NewJsonStreamLogger(&LogConfig{DisableStorage: true}, context.Background(), stream)
 	l.env = &tracing.VMContext{IntraBlockState: &mockIBS{}}
 
-	steps := [][]uint64{{0, 1}, {0, 1}, {0, 2}, {5, 0}, {5, 0, 7}, {5}}
+	steps := [][]uint64{{0, 1}, {0, 1}, {0, 2}, {5, 0}, {5, 0, 7}, {5}, {}, {3}}
 	for i, step := range steps {
 		stack := make([]uint256.Int, len(step))
 		for j, v := range step {

@@ -681,13 +681,13 @@ func TestProcessDownloadedGloasEnvelopeCollectorReconciliation(t *testing.T) {
 	t.Run("exact persisted duplicate", func(t *testing.T) {
 		store := &envelopeReadTestStore{onErr: forkchoice.ErrIgnore, persisted: envelope}
 		collector := &gloasCollectorTest{}
-		require.NoError(t, processDownloadedGloasEnvelope(t.Context(), log.Root(), store, collector, block, root, envelope, true, false))
+		require.NoError(t, processDownloadedGloasEnvelope(t.Context(), log.Root(), store, collector, block, root, envelope, true, false, false))
 		require.Equal(t, 1, collector.calls)
 	})
 	t.Run("indices pending after persistence", func(t *testing.T) {
 		store := &envelopeReadTestStore{onErr: forkchoice.ErrExecutionPayloadEnvelopeIndicesPending, persisted: envelope}
 		collector := &gloasCollectorTest{}
-		require.NoError(t, processDownloadedGloasEnvelope(t.Context(), log.Root(), store, collector, block, root, envelope, true, false))
+		require.NoError(t, processDownloadedGloasEnvelope(t.Context(), log.Root(), store, collector, block, root, envelope, true, false, false))
 		require.Equal(t, 1, collector.calls)
 	})
 	t.Run("mismatch", func(t *testing.T) {
@@ -696,26 +696,26 @@ func TestProcessDownloadedGloasEnvelopeCollectorReconciliation(t *testing.T) {
 		different.Signature[0] = 1
 		store := &envelopeReadTestStore{onErr: forkchoice.ErrIgnore, persisted: different}
 		collector := &gloasCollectorTest{}
-		require.ErrorIs(t, processDownloadedGloasEnvelope(t.Context(), log.Root(), store, collector, block, root, envelope, true, false), forkchoice.ErrIgnore)
+		require.ErrorIs(t, processDownloadedGloasEnvelope(t.Context(), log.Root(), store, collector, block, root, envelope, true, false, false), forkchoice.ErrIgnore)
 		require.Zero(t, collector.calls)
 	})
 	t.Run("read error", func(t *testing.T) {
 		store := &envelopeReadTestStore{onErr: forkchoice.ErrIgnore, readErr: errors.New("disk unavailable")}
 		collector := &gloasCollectorTest{}
-		require.ErrorIs(t, processDownloadedGloasEnvelope(t.Context(), log.Root(), store, collector, block, root, envelope, true, false), forkchoice.ErrIgnore)
+		require.ErrorIs(t, processDownloadedGloasEnvelope(t.Context(), log.Root(), store, collector, block, root, envelope, true, false, false), forkchoice.ErrIgnore)
 		require.Zero(t, collector.calls)
 	})
 	t.Run("validation failure", func(t *testing.T) {
 		validationErr := errors.New("invalid execution payload")
 		store := &envelopeReadTestStore{onErr: validationErr}
 		collector := &gloasCollectorTest{}
-		require.ErrorIs(t, processDownloadedGloasEnvelope(t.Context(), log.Root(), store, collector, block, root, envelope, true, false), validationErr)
+		require.ErrorIs(t, processDownloadedGloasEnvelope(t.Context(), log.Root(), store, collector, block, root, envelope, true, false, false), validationErr)
 		require.Zero(t, collector.calls)
 	})
 	t.Run("collector error", func(t *testing.T) {
 		store := &envelopeReadTestStore{}
 		collector := &gloasCollectorTest{err: errors.New("collector failed")}
-		err := processDownloadedGloasEnvelope(t.Context(), log.Root(), store, collector, block, root, envelope, true, false)
+		err := processDownloadedGloasEnvelope(t.Context(), log.Root(), store, collector, block, root, envelope, true, false, false)
 		require.ErrorContains(t, err, "collector failed")
 	})
 }
@@ -1652,6 +1652,10 @@ func (t *testExecutionEngine) InsertBlock(context.Context, *types.Block) error {
 
 func (t *testExecutionEngine) CurrentHeader(context.Context) (*types.Header, error) { return nil, nil }
 
+func (t *testExecutionEngine) GetHeaderByHash(context.Context, common.Hash) (*types.Header, error) {
+	return nil, nil
+}
+
 func (t *testExecutionEngine) IsCanonicalHash(context.Context, common.Hash) (bool, error) {
 	return false, nil
 }
@@ -1663,6 +1667,10 @@ func (t *testExecutionEngine) GetBodiesByRange(context.Context, uint64, uint64) 
 }
 
 func (t *testExecutionEngine) GetBodiesByHashes(context.Context, []common.Hash) ([]*types.RawBody, error) {
+	return nil, nil
+}
+
+func (t *testExecutionEngine) GetPayloadBodiesByHash(context.Context, []common.Hash) ([]*engine_types.ExecutionPayloadBodyV2, error) {
 	return nil, nil
 }
 

@@ -502,12 +502,24 @@ func opCallValue(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error
 
 func opCallDataLoad(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	x := scope.Stack.peek()
-	if offset, overflow := x.Uint64WithOverflow(); !overflow {
-		data := getData(scope.input, offset, 32)
-		x.SetBytes(data)
-	} else {
+	offset, overflow := x.Uint64WithOverflow()
+	if overflow {
 		x.Clear()
+		return pc, nil, nil
 	}
+	// Common case: 32 bytes are in range, so skip getData's bounds checks and
+	// RightPadBytes' allocation.
+	if end := offset + 32; end >= offset && end <= uint64(len(scope.input)) {
+		x.SetBytes32(scope.input[offset:end])
+		return pc, nil, nil
+	}
+	// Past the end of calldata the word is all zeros; Clear avoids the 32-byte
+	// allocation RightPadBytes would make on every op.
+	if offset >= uint64(len(scope.input)) {
+		x.Clear()
+		return pc, nil, nil
+	}
+	x.SetBytes(getData(scope.input, offset, 32))
 	return pc, nil, nil
 }
 
@@ -747,6 +759,7 @@ func opBlockhash(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error
 	if arg64 >= lower && arg64 < upper {
 		hash, err := evm.Context.GetHash(arg64)
 		if err != nil {
+			evm.IntraBlockState().RecordStateReadError(err)
 			arg.Clear()
 			return pc, nil, err
 		}
@@ -1365,6 +1378,10 @@ func opStaticCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, erro
 	if evm.chainRules.IsAmsterdam && err == nil {
 		scope.mergeChildStateGas(childGasUsage.StateSpill, evm.config.Tracer)
 	}
+	if evm.FrameContext != nil {
+		// APPROVE can debit the payer even inside a static call.
+		scope.Contract.selfBalanceCached = false
+	}
 	evm.returnData = ret
 	return pc, ret, nil
 }
@@ -1446,8 +1463,9 @@ func opSelfdestruct(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 		return pc, nil, err
 	}
 	tracer := evm.Config().Tracer
-	tracer.EmitEnter(evm.depth, byte(SELFDESTRUCT), scope.Contract.Address(), beneficiaryAddr, false, []byte{}, mdgas.MdGas{}, balance, nil)
-	tracer.EmitExit(evm.depth, []byte{}, mdgas.MdGasUsage{}, nil, false)
+	depth := evm.callTraceDepth(evm.depth)
+	tracer.EmitEnter(depth, byte(SELFDESTRUCT), scope.Contract.Address(), beneficiaryAddr, false, []byte{}, mdgas.MdGas{}, balance, nil)
+	tracer.EmitExit(depth, []byte{}, mdgas.MdGasUsage{}, nil, false)
 	return pc, nil, errStopToken
 }
 
@@ -1513,8 +1531,9 @@ func opSelfdestruct6780(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte
 		ibs.AddLog(misc.EthTransferLog(self.Value(), beneficiaryAddr.Value(), balance))
 	}
 	tracer := evm.Config().Tracer
-	tracer.EmitEnter(evm.depth, byte(SELFDESTRUCT), scope.Contract.Address(), beneficiaryAddr, false, []byte{}, mdgas.MdGas{}, balance, nil)
-	tracer.EmitExit(evm.depth, []byte{}, mdgas.MdGasUsage{}, nil, false)
+	depth := evm.callTraceDepth(evm.depth)
+	tracer.EmitEnter(depth, byte(SELFDESTRUCT), scope.Contract.Address(), beneficiaryAddr, false, []byte{}, mdgas.MdGas{}, balance, nil)
+	tracer.EmitExit(depth, []byte{}, mdgas.MdGasUsage{}, nil, false)
 	return pc, nil, errStopToken
 }
 

@@ -1319,23 +1319,6 @@ func (s *BaseRoSnapshots) detachNotInList(protect []string) retiredSegments {
 	return detached
 }
 
-func closeAndDropNotProtected(tree *btree.BTreeG[*DirtySegment], protectFiles map[string]struct{}, nameOf func(*DirtySegment) string) {
-	var toClose []*DirtySegment
-	tree.Walk(func(segs []*DirtySegment) bool {
-		for _, seg := range segs {
-			if _, ok := protectFiles[nameOf(seg)]; ok {
-				continue
-			}
-			toClose = append(toClose, seg)
-		}
-		return true
-	})
-	for _, delSeg := range toClose {
-		delSeg.close()
-		tree.Delete(delSeg)
-	}
-}
-
 // FindOpenSegment returns tree's already-open segment named fName, if any.
 func FindOpenSegment(tree *btree.BTreeG[*DirtySegment], fName string) (*DirtySegment, bool) {
 	return findOpenSegment(tree, func(sn *DirtySegment) bool { return sn.FileName() == fName })
@@ -1635,17 +1618,11 @@ func (s *BaseRoSnapshots) BuildMissedIndices(ctx context.Context, logPrefix stri
 	}
 
 	// wait for Downloader service to download all expected snapshots
-	indexWorkers := estimate.IndexSnapshot.Workers()
-	newIdxBuilt, err := s.buildMissedIndices(logPrefix, ctx, dirs, cc, indexWorkers, logger)
-	if err != nil {
+	if _, err := snaptype.GetIndexSalt(dirs.Snap, logger); err != nil {
 		return fmt.Errorf("can't build missed indices: %w", err)
 	}
-
-	if newIdxBuilt {
-		if err := s.OpenFolder(); err != nil {
-			return err
-		}
-		s.LogStat("missed-idx:open")
+	if err := s.IndexMissed(ctx, logPrefix, dirs.Tmp, cc, logger); err != nil {
+		return err
 	}
 	if notifier != nil {
 		notifier.OnNewSnapshot()
@@ -1787,16 +1764,43 @@ func (s *BaseRoSnapshots) RetireFilesAbove(blockNum uint64, onDelete func(l []st
 	return s.retireFiles(mvcc.RetireReasonAged, names...)
 }
 
-func (s *BaseRoSnapshots) buildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs, chainConfig *chain.Config, workers int, logger log.Logger) (newIdxBuilt bool, err error) {
-	if s == nil {
-		return
-	}
+type indexJob struct {
+	t            snaptype.Enum
+	from, to     uint64
+	info         snaptype.FileInfo
+	indexBuilder snaptype.IndexBuilder
+}
 
-	if _, err = snaptype.GetIndexSalt(dirs.Snap, logger); err != nil {
-		return
-	}
+func (s *BaseRoSnapshots) claimIndexJobs() []indexJob {
+	s.dirtyLock.Lock()
+	defer s.dirtyLock.Unlock()
 
-	dir, tmpDir := dirs.Snap, dirs.Tmp
+	var jobs []indexJob
+	for _, t := range s.enums {
+		s.dirty[t].Reverse(func(segment *DirtySegment) bool {
+			if segment.IsIndexed() {
+				return true
+			}
+			// Skip if a merge/dump/another recovery is already building this
+			// (type, range); otherwise claim it so we don't double-build.
+			from, to := segment.From(), segment.To()
+			if !s.TryAcquireRange(t, from, to) {
+				return true
+			}
+			info, _, ok := snaptype.ParseFileName(s.dir, segment.FileName())
+			if !ok {
+				s.ReleaseRange(t, from, to)
+				return true
+			}
+			segment.closeIdx()
+			jobs = append(jobs, indexJob{t: t, from: from, to: to, info: info, indexBuilder: s.IndexBuilder(t.Type())})
+			return true
+		})
+	}
+	return jobs
+}
+
+func (s *BaseRoSnapshots) IndexMissed(ctx context.Context, logPrefix, tmpDir string, chainConfig *chain.Config, logger log.Logger) error {
 	//log.Log(lvl, "[snapshots] Build indices", "from", min)
 
 	ps := background.NewProgressSet()
@@ -1806,7 +1810,7 @@ func (s *BaseRoSnapshots) buildMissedIndices(logPrefix string, ctx context.Conte
 	defer logEvery.Stop()
 
 	g, gCtx := errgroup.WithContext(ctx)
-	g.SetLimit(workers)
+	g.SetLimit(estimate.IndexSnapshot.Workers())
 	finish := make(chan struct{})
 
 	go func() {
@@ -1827,43 +1831,24 @@ func (s *BaseRoSnapshots) buildMissedIndices(logPrefix string, ctx context.Conte
 
 	var fmu sync.Mutex
 	failedIndexes := make(map[string]error, 0)
+	jobs := s.claimIndexJobs()
+	newIdxBuilt := len(jobs) > 0
 
-	for _, t := range s.enums {
-		s.dirty[t].Walk(func(segs []*DirtySegment) bool {
-			for _, segment := range segs {
-				if segment.IsIndexed() {
-					continue
-				}
-				// Skip if a merge/dump/another recovery is already building this
-				// (type, range); otherwise claim it so we don't double-build.
-				from, to := segment.From(), segment.To()
-				if !s.TryAcquireRange(t, from, to) {
-					continue
-				}
-				info := segment.FileInfo(dir)
-
-				newIdxBuilt = true
-
-				segment.closeIdx()
-
-				indexBuilder := s.IndexBuilder(t.Type())
-
-				g.Go(func() error {
-					defer s.ReleaseRange(t, from, to)
-					p := &background.Progress{}
-					ps.Add(p)
-					defer notifySegmentIndexingFinished(info.Name())
-					defer ps.Delete(p)
-					if err := t.BuildIndexes(gCtx, info, indexBuilder, chainConfig, tmpDir, p, log.LvlInfo, logger); err != nil {
-						// unsuccessful indexing should allow other indexing to finish
-						fmu.Lock()
-						failedIndexes[info.Name()] = err
-						fmu.Unlock()
-					}
-					return nil
-				})
+	for i := range jobs {
+		job := jobs[i]
+		g.Go(func() error {
+			defer s.ReleaseRange(job.t, job.from, job.to)
+			p := &background.Progress{}
+			ps.Add(p)
+			defer notifySegmentIndexingFinished(job.info.Name())
+			defer ps.Delete(p)
+			if err := job.t.BuildIndexes(gCtx, job.info, job.indexBuilder, chainConfig, tmpDir, p, log.LvlInfo, logger); err != nil {
+				// unsuccessful indexing should allow other indexing to finish
+				fmu.Lock()
+				failedIndexes[job.info.Name()] = err
+				fmu.Unlock()
 			}
-			return true
+			return nil
 		})
 	}
 
@@ -1885,13 +1870,19 @@ func (s *BaseRoSnapshots) buildMissedIndices(logPrefix string, ctx context.Conte
 	// Block main thread
 	select {
 	case <-finish:
-		if err = g.Wait(); err != nil {
-			return
-		}
-		return newIdxBuilt, ie
 	case <-ctx.Done():
-		return newIdxBuilt, ctx.Err()
+		return fmt.Errorf("can't build missed indices: %w", ctx.Err())
 	}
+	if ie != nil {
+		return fmt.Errorf("can't build missed indices: %w", ie)
+	}
+	if newIdxBuilt {
+		if err := s.OpenFolder(); err != nil {
+			return err
+		}
+		s.LogStat("missed-idx:open")
+	}
+	return nil
 }
 
 // View pins one whole generation of files for its entire life: a tx passes through
