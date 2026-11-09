@@ -194,6 +194,20 @@ func TestCallManyAppliesTheReturnDataLimit(t *testing.T) {
 	require.ErrorContains(t, err, "--rpc.returndata.limit")
 }
 
+func TestCallManySharesTheGasCapAcrossTheRequest(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api, _ := newCallManyApisForTest(m)
+	api.GasCap = 100_000
+	txIndex := -1
+	stateCtx := StateContext{BlockNumber: rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber), TransactionIndex: &txIndex}
+	burner := common.HexToAddress("0x00000000000000000000000000000000000000ac")
+	code := hexutil.Bytes(hexutil.MustDecode("0x5b600056"))
+	overrides := ethapi.StateOverrides{accounts.InternAddress(burner): {Code: &code}}
+
+	_, err := api.CallMany(context.Background(), []Bundle{{Transactions: []ethapi.CallArgs{{To: &burner}, {To: &burner}}}}, stateCtx, &overrides, nil)
+	require.ErrorContains(t, err, "--rpc.gascap")
+}
+
 func TestCallManyEmptyBundles(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api, debugApi := newCallManyApisForTest(m)
