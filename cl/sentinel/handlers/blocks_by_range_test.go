@@ -25,6 +25,7 @@ import (
 	"io"
 	"math"
 	"testing"
+	"time"
 
 	"github.com/golang/snappy"
 
@@ -320,6 +321,25 @@ func TestBlocksByRangeRefusesOversizedRequest(t *testing.T) {
 	require.NoError(t, sw.Close())
 
 	s := &countingStream{r: &req}
-	require.Error(t, (&ConsensusHandlers{}).beaconBlocksByRangeHandler(s))
+	require.ErrorIs(t, (&ConsensusHandlers{}).beaconBlocksByRangeHandler(s), ssz_snappy.ErrPayloadExceedsLimit)
 	require.Less(t, s.read, 64, "the handler read the claimed payload")
+}
+
+func TestOversizedFixedSizeRequestGetsInvalidRequest(t *testing.T) {
+	for _, p := range []string{
+		communication.BeaconBlocksByRangeProtocolV2,
+		communication.BeaconBlocksByHeadProtocolV1,
+		communication.BlobSidecarByRangeProtocolV1,
+		communication.LightClientBootstrapProtocolV1,
+		communication.LightClientUpdatesByRangeProtocolV1,
+	} {
+		t.Run(p, func(t *testing.T) {
+			stream, _ := newHeartbeatTestStream(t, protocol.ID(p))
+			require.NoError(t, stream.SetDeadline(time.Now().Add(5*time.Second)))
+			_, err := stream.Write(binary.AppendUvarint(nil, uint64(clparams.MaxPayloadSize)))
+			require.NoError(t, err)
+			require.NoError(t, stream.CloseWrite())
+			requireResponseCode(t, stream, InvalidRequestPrefix)
+		})
+	}
 }
