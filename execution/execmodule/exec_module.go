@@ -536,9 +536,15 @@ func (e *ExecModule) ValidateChain(ctx context.Context, block *types.Block) (Val
 	e.forkValidator.ClearWithUnwind()
 	e.logger.Debug("[execmodule] validating chain", "number", blockNumber, "hash", blockHash)
 	header, body := block.HeaderNoCopy(), block.Body()
-	body.Transactions = slices.Clone(body.Transactions)
 	for i, txn := range body.Transactions {
-		body.Transactions[i] = txn.Unwrap()
+		if txn == txn.Unwrap() {
+			continue
+		}
+		body.Transactions = slices.Clone(body.Transactions)
+		for j := i; j < len(body.Transactions); j++ {
+			body.Transactions[j] = body.Transactions[j].Unwrap()
+		}
+		break
 	}
 	var (
 		currentBlockNumber *uint64
