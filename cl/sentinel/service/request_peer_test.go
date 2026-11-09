@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"math"
 	"net/http"
 	"testing"
 	"time"
@@ -34,9 +35,10 @@ import (
 )
 
 func TestPeerRequestUsesCallerContext(t *testing.T) {
-	requestCancelled := make(chan struct{})
+	requestStarted, requestCancelled := make(chan struct{}), make(chan struct{})
 	server := &SentinelServer{peerRequestBackend: peerRequestBackendStub{
 		handler: http.HandlerFunc(func(_ http.ResponseWriter, request *http.Request) {
+			close(requestStarted)
 			<-request.Context().Done()
 			close(requestCancelled)
 		}),
@@ -48,6 +50,7 @@ func TestPeerRequestUsesCallerContext(t *testing.T) {
 		done <- err
 	}()
 
+	receivePeerRequestTestValue(t, requestStarted)
 	cancel()
 	require.ErrorIs(t, receivePeerRequestTestValue(t, done), context.Canceled)
 	receivePeerRequestTestValue(t, requestCancelled)
@@ -148,4 +151,39 @@ func TestPeerRequestLimitsConcurrentStreamsPerPeerAndRequestType(t *testing.T) {
 		require.NotErrorIs(t, receivePeerRequestTestValue(t, done), ErrPeerBusy)
 	}
 	require.NotErrorIs(t, receivePeerRequestTestValue(t, request("a", communication.BeaconBlocksByRangeProtocolV2)), ErrPeerBusy, "finished streams free their slots")
+}
+
+// Responses are buffered whole, so max-size requests in flight share one byte budget: a third must wait.
+func TestPeerRequestsShareAResponseBudget(t *testing.T) {
+	release := make(chan struct{})
+	reached := make(chan struct{}, 4)
+	server := &SentinelServer{peerRequestBackend: peerRequestBackendStub{
+		handler: http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+			reached <- struct{}{}
+			<-release
+		}),
+	}}
+	blocksByRange := " " + communication.BeaconBlocksByRangeProtocolV2 + " , " + communication.BeaconBlocksByRangeProtocolV1 // the handler trims each alternative
+	request := func(pid string) <-chan error {
+		done := make(chan error, 1)
+		go func() {
+			_, err := server.requestPeer(t.Context(), peer.ID(pid), &sentinelproto.RequestData{Topic: blocksByRange, Data: []byte("request"), MaxResponseBytes: math.MaxUint64})
+			done <- err
+		}()
+		return done
+	}
+
+	first, second, third := request("a"), request("b"), request("c")
+	receivePeerRequestTestValue(t, reached)
+	receivePeerRequestTestValue(t, reached)
+	select {
+	case <-reached:
+		t.Fatal("a third max-size request ran while two held the budget")
+	case <-time.After(200 * time.Millisecond):
+	}
+	close(release)
+	receivePeerRequestTestValue(t, reached)
+	for _, done := range []<-chan error{first, second, third} {
+		_ = receivePeerRequestTestValue(t, done) // the stub sends no response code, so each request ends in an error
+	}
 }
