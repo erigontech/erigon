@@ -1012,7 +1012,7 @@ func testPenalizePeerForBroadcastBlobTxn(t *testing.T, known bool) {
 	blobTxnRlp := makeWrappedBlobTxnRlpWithCellProofs(t, uint256.NewInt(1), 1)
 	err = fetch.handleInboundMessageWithTx(ctx, nil, &sentryproto.InboundMessage{
 		Id:     sentryproto.MessageId_TRANSACTIONS_66,
-		Data:   EncodeTransactions([][]byte{blobTxnRlp}, nil),
+		Data:   EncodeTransactions([][]byte{tpEncodeTests[1].txns[0], blobTxnRlp}, nil),
 		PeerId: peerID,
 	}, sentryClient)
 	require.NoError(t, err)
