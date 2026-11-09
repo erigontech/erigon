@@ -2107,6 +2107,61 @@ func TestDomain_GetAsOfValuesFileGap(t *testing.T) {
 	}
 }
 
+// Partially overlapping values files leave no hole, so the latest value stays usable for every txNum.
+func TestDomain_GetAsOfPartialOverlap(t *testing.T) {
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, 16, log.New())
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	const totalTx = 96
+	data := generateTestData(t, length.Addr, length.Addr+length.Hash, totalTx, 12, 40)
+	domainRoTx := d.beginForTests()
+	writer := domainRoTx.NewWriter(db)
+	for key, updates := range data {
+		var prev []byte
+		for i := range updates {
+			if i > 0 {
+				prev = updates[i-1].value
+			}
+			require.NoError(t, writer.PutWithPrev([]byte(key), updates[i].value, updates[i].txNum, prev))
+		}
+	}
+	require.NoError(t, writer.Flush(t.Context(), tx))
+	writer.Close()
+	domainRoTx.Close()
+
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+	for step := range kv.Step(3) {
+		require.NoError(t, d.collateBuildIntegrate(t.Context(), step, tx, background.NewProgressSet()))
+	}
+	pruneTx := d.beginForTests()
+	for step := range kv.Step(3) {
+		_, err := pruneTx.Prune(t.Context(), tx, step, uint64(step)*d.stepSize, uint64(step+1)*d.stepSize, math.MaxUint64, logEvery)
+		require.NoError(t, err)
+	}
+	pruneTx.Close()
+
+	mergeTx := d.beginForTests()
+	defer mergeTx.Close()
+	for _, span := range [][2]uint64{{0, 2 * d.stepSize}, {d.stepSize, 3 * d.stepSize}} {
+		r := DomainRanges{name: d.Name, values: MergeRange{needMerge: true, from: span[0], to: span[1]}, aggStep: d.stepSize}
+		valuesOuts, indexOuts, historyOuts := mergeTx.staticFilesInRange(r)
+		valuesIn, indexIn, historyIn, err := mergeTx.mergeFiles(t.Context(), valuesOuts, indexOuts, historyOuts, r, nil, true, background.NewProgressSet())
+		require.NoError(t, err)
+		d.integrateMergedDirtyFiles(valuesIn, indexIn, historyIn)
+	}
+
+	roTx := d.beginForTests()
+	require.Equal(t, 2, len(roTx.files))
+	require.Equal(t, d.stepSize, roTx.files[1].startTxNum)
+	require.Less(t, roTx.files[1].startTxNum, roTx.files[0].endTxNum)
+	roTx.Close()
+
+	requireGetAsOfEveryTxNum(t, d, tx, data, totalTx+d.stepSize)
+}
+
 // Commitment values in plain files can be returned as they are; referenced files hold shortened keys that only the
 // aggregator can expand, so GetAsOf of the domain must not return them.
 func TestDomain_GetAsOfCommitmentFiles(t *testing.T) {
