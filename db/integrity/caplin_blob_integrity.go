@@ -87,6 +87,11 @@ func CheckCaplinBlobSidecars(ctx context.Context, db kv.RoDB, snapshots *freezeb
 		}
 		return nil
 	}
+	if visibleErr := checkCaplinBlobSnapshotsVisible(snapshots, view); visibleErr != nil {
+		if reportErr := report(visibleErr); reportErr != nil {
+			return reportErr
+		}
+	}
 	if coverageErr := checkCaplinBlobSnapshotCoverage(view, beaconCfg, blobsFromSlot); coverageErr != nil {
 		if reportErr := report(coverageErr); reportErr != nil {
 			return reportErr
@@ -285,6 +290,25 @@ func checkCaplinBlobSnapshotSlot(ctx context.Context, tx kv.Tx, snapshots *freez
 		return fmt.Errorf("blob snapshot slot %d: KZG/proof verification failed: %w", slot, err)
 	}
 	return nil
+}
+
+func checkCaplinBlobSnapshotsVisible(snapshots *freezeblocks.CaplinSnapshots, view *freezeblocks.CaplinView) error {
+	visible := view.BlobSidecars()
+	var visibleFrom, visibleTo uint64
+	if len(visible) > 0 {
+		visibleFrom, _ = visible[0].Src().GetRange()
+		_, visibleTo = visible[len(visible)-1].Src().GetRange()
+	}
+	var err error
+	snapshots.WalkDirtySegments(snaptype.BlobSidecars.Enum(), func(segment *snapshotsync.DirtySegment) bool {
+		from, to := segment.GetRange()
+		if from >= visibleFrom && to <= visibleTo {
+			return true
+		}
+		err = fmt.Errorf("blob snapshot segment %d-%d is not visible; visible blob snapshots cover %d-%d", from, to, visibleFrom, visibleTo)
+		return false
+	})
+	return err
 }
 
 func checkCaplinBlobSnapshotCoverage(view *freezeblocks.CaplinView, beaconCfg *clparams.BeaconChainConfig, blobsFromSlot uint64) error {
