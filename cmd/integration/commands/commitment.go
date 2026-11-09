@@ -627,7 +627,7 @@ func commitmentRestore(ctx context.Context, logger log.Logger) error {
 	}
 	db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), true, logger)
 	if err != nil {
-		return fmt.Errorf("commitment files are restored, but the execution state still needs a reset: re-run `integration commitment convert --restore --datadir /path/to/datadir --chain mainnet` before starting erigon: %w", err)
+		return fmt.Errorf("commitment files are restored, but the execution state still needs a reset: re-run the same `integration commitment convert --restore` command before starting erigon: %w", err)
 	}
 	defer db.Close()
 	if err := rawdbreset.ResetExec(ctx, db); err != nil {
