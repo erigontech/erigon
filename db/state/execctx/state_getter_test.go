@@ -177,6 +177,55 @@ func (tx codeBufTx) GetLatest(domain kv.Domain, key []byte, opts kv.GetLatestOpt
 
 // A caller-owned buffer outlives each getter, so a later getter decodes into it
 // instead of growing its own.
+// Identical code at many addresses is decoded once; any other read into the buffer ends the reuse.
+func TestStateGetterLendCodeReusesTheLastDecode(t *testing.T) {
+	ctx := t.Context()
+	db := newTestDb(t, 16)
+	code := bytes.Repeat([]byte{0x21}, 1024)
+	other := bytes.Repeat([]byte{0x22}, 1024)
+	addr := func(b byte) []byte { return append(make([]byte, 19), b) }
+	byAddr := map[string][]byte{string(addr(1)): code, string(addr(2)): code, string(addr(3)): other}
+	for a, c := range byAddr {
+		commitAccount(t, db, nil, []byte(a), accounts.SerialiseV3(&accounts.Account{Nonce: 1, CodeHash: accounts.InternCodeHash(crypto.Keccak256Hash(c))}), 1)
+	}
+
+	roTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	var lentCaps []int
+	tx := codeBufTx{TemporalTx: roTx, code: byAddr, lentCaps: &lentCaps}
+	sc := newSmallStateCache()
+	t.Cleanup(sc.Close)
+	sd, err := execctx.NewSharedDomains(ctx, tx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+	sd.BindStateCache(sc)
+	var buf []byte
+	getter := sd.AsStateGetter(tx, execctxapi.StateGetterOptions{}.WithCodeBuf(&buf))
+	lender := getter.(interface {
+		LendCode(addr []byte, txNum uint64) ([]byte, bool, error)
+	})
+	lend := func(b byte, want []byte, decodes int) {
+		t.Helper()
+		got, lent, err := lender.LendCode(addr(b), 5)
+		require.NoError(t, err)
+		require.True(t, lent)
+		require.Equal(t, want, got)
+		require.Len(t, lentCaps, decodes)
+	}
+
+	lend(1, code, 1)
+	lend(2, code, 1)
+	lend(3, other, 2)
+	lend(1, code, 3)
+
+	_, ok, err := getter.GetCode(addr(3), 5)
+	require.NoError(t, err)
+	require.True(t, ok)
+	decodes := len(lentCaps)
+	lend(1, code, decodes+1)
+}
+
 func TestStateGetterCallerCodeBufOutlivesGetter(t *testing.T) {
 	ctx := t.Context()
 	db := newTestDb(t, 16)
@@ -730,12 +779,16 @@ func TestStateGetterLendCodeLeavesTheCacheEmpty(t *testing.T) {
 	code := bytes.Repeat([]byte{0x17}, 1024)
 	codeHash := crypto.Keccak256Hash(code)
 	commitAccount(t, db, nil, addr, accounts.SerialiseV3(&accounts.Account{Nonce: 1, CodeHash: accounts.InternCodeHash(codeHash)}), 5)
+	addr2 := bytes.Clone(addr)
+	addr2[0] = 0x18
+	code2 := bytes.Repeat([]byte{0x18}, 1024)
+	commitAccount(t, db, nil, addr2, accounts.SerialiseV3(&accounts.Account{Nonce: 1, CodeHash: accounts.InternCodeHash(crypto.Keccak256Hash(code2))}), 5)
 
 	roTx, err := db.BeginTemporalRo(ctx)
 	require.NoError(t, err)
 	defer roTx.Rollback()
 	var lentCaps []int
-	tx := codeBufTx{TemporalTx: roTx, code: map[string][]byte{string(addr): code}, lentCaps: &lentCaps}
+	tx := codeBufTx{TemporalTx: roTx, code: map[string][]byte{string(addr): code, string(addr2): code2}, lentCaps: &lentCaps}
 
 	sc := newSmallStateCache()
 	t.Cleanup(sc.Close)
@@ -757,11 +810,11 @@ func TestStateGetterLendCodeLeavesTheCacheEmpty(t *testing.T) {
 	_, cached := sc.View(nil).GetCodeByHash(codeHash[:])
 	require.False(t, cached, "a lent read must not fill the code cache")
 
-	got, lent, err = lender.LendCode(addr, 5)
+	got, lent, err = lender.LendCode(addr2, 5)
 	require.NoError(t, err)
 	require.True(t, lent)
-	require.Equal(t, code, got)
-	require.GreaterOrEqual(t, lentCaps[1], len(code), "the second lend must decode into the grown buffer")
+	require.Equal(t, code2, got)
+	require.GreaterOrEqual(t, lentCaps[1], len(code2), "the second lend must decode into the grown buffer")
 
 	got, ok, err := getter.GetCode(addr, 5)
 	require.NoError(t, err)
