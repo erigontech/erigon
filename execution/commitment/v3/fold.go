@@ -74,11 +74,10 @@ func fold(n *node, depth int) ([32]byte, error) {
 	}
 
 	var refStore [16][32]byte
-	refLens, err := branchRefs(n, &refStore)
+	refs, err := branchRefs(n, &refStore)
 	if err != nil {
 		return [32]byte{}, err
 	}
-	refs := refSlices(n, &refStore, &refLens)
 	branchHash := branchRef(&refs)
 	if depth == 0 && len(n.path) != 0 {
 		return extensionRef(n.path, branchHash[:]), nil
@@ -104,7 +103,7 @@ func foldLeaf(n *node, nib int, includeNib bool, out []byte) ([]byte, error) {
 	return append(out, storageLeafRef(compact, payload, encScratch[:0])...), nil
 }
 
-func branchRefs(n *node, refStore *[16][32]byte) (refLens [16]uint8, err error) {
+func branchRefs(n *node, refStore *[16][32]byte) (refs [16][]byte, err error) {
 	for nib := range 16 {
 		bit := uint16(1) << nib
 		if n.childMask&bit == 0 {
@@ -112,30 +111,21 @@ func branchRefs(n *node, refStore *[16][32]byte) (refLens [16]uint8, err error) 
 		}
 		if n.leafMask&bit == 0 {
 			if err := foldBranchChild(n, nib, &refStore[nib]); err != nil {
-				return refLens, err
+				return refs, err
 			}
-			refLens[nib] = 32
+			refs[nib] = refStore[nib][:]
 			continue
 		}
 		ref, err := foldLeaf(n, nib, false, refStore[nib][:0])
 		if err != nil {
-			return refLens, err
+			return refs, err
 		}
 		if len(ref) > 32 {
-			return refLens, fmt.Errorf("%w: leaf %d ref length %d", errFoldNode, nib, len(ref))
+			return refs, fmt.Errorf("%w: leaf %d ref length %d", errFoldNode, nib, len(ref))
 		}
-		refLens[nib] = uint8(copy(refStore[nib][:], ref))
+		refs[nib] = refStore[nib][:copy(refStore[nib][:], ref)]
 	}
-	return refLens, nil
-}
-
-func refSlices(n *node, refStore *[16][32]byte, refLens *[16]uint8) (refs [16][]byte) {
-	for nib := range 16 {
-		if n.childMask&(uint16(1)<<nib) != 0 {
-			refs[nib] = refStore[nib][:refLens[nib]]
-		}
-	}
-	return refs
+	return refs, nil
 }
 
 func leafParts(n *node, nib int, includeNib bool, keyDst, compactDst, payloadDst []byte) (compact, leafKey, rawPayload, encodedPayload []byte, err error) {

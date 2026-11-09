@@ -30,13 +30,10 @@ const (
 	planeAccount = tagAccountNode
 	planeStorage = tagStorageNode
 
-	// widest RLP a branch can produce: list prefix + 16 hash refs + the empty value slot
 	refScratch = 3 + 16*33 + 1
 
-	// widest account body: list prefix + nonce + balance + storage root + code hash
 	accountRLPScratch = 3 + 9 + 33 + 33 + 33
 
-	// widest leaf RLP before hashing: list prefix + compact suffix + account body
 	leafRefScratch = 3 + 34 + accountRLPScratch
 )
 

@@ -255,11 +255,10 @@ func (w *witnessWalk) leaf(plane byte, fullKey, k, leafKey, payload []byte) erro
 
 func branchRLP(n *node) ([]byte, error) {
 	var refStore [16][32]byte
-	refLens, err := branchRefs(n, &refStore)
+	refs, err := branchRefs(n, &refStore)
 	if err != nil {
 		return nil, err
 	}
-	refs := refSlices(n, &refStore, &refLens)
 	return appendBranchRLP(nil, &refs), nil
 }
 

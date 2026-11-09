@@ -65,23 +65,8 @@ func (h *RecordHasher) Hash(key, value []byte, expect func(key, hash []byte) err
 			h.scratch = appendUnpacked(h.scratch, selfExt[1:], int(selfExt[0]))
 			n.path = h.scratch[start:]
 		}
-		for nib := range 16 {
-			bit := uint16(1) << nib
-			switch {
-			case l.child&bit == 0:
-			case l.leaf&bit != 0:
-				suffix, leafValue := record.leafAt(l, nib)
-				appendLeaf(n, nib, suffix, leafValue)
-			default:
-				var ext []byte
-				if encoded := record.extAt(l, nib); len(encoded) != 0 {
-					start := len(h.scratch)
-					h.scratch = appendUnpacked(h.scratch, encoded[1:], int(encoded[0]))
-					ext = h.scratch[start:]
-				}
-				appendStoredChild(n, nib, record.slotAt(l, nib), ext)
-			}
-		}
+		n.record, n.layout = record, l
+		n.childMask, n.leafMask, n.hashMask = l.child, l.leaf, l.tree()
 	}
 
 	rootExtension := depth == 0 && len(n.path) != 0

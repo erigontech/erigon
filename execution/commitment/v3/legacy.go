@@ -70,7 +70,6 @@ type LegacyConverter struct {
 
 	branch  node
 	root    node
-	prefix  []byte
 	scratch []byte
 	key     []byte
 	rootKey []byte
@@ -207,14 +206,7 @@ func (c *LegacyConverter) decodePrefix(key []byte) ([]byte, error) {
 	if len(key) == 0 || key[0]>>4 > 1 || key[0]>>4 == 0 && key[0]&0x0f != 0 {
 		return nil, fmt.Errorf("%w: %x is not a compact branch prefix", errLegacyBranch, key)
 	}
-	c.prefix = c.prefix[:0]
-	if key[0]>>4 == 1 {
-		c.prefix = append(c.prefix, key[0]&0x0f)
-	}
-	for _, b := range key[1:] {
-		c.prefix = append(c.prefix, b>>4, b&0x0f)
-	}
-	return c.prefix, nil
+	return nibbles.CompactToHex(key), nil
 }
 
 func (c *LegacyConverter) accountLeaf(cell commitment.BranchCell, addrHash *[32]byte, emit LegacyEmitFunc) ([]byte, error) {

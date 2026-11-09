@@ -43,7 +43,6 @@ var (
 	errAccountLeafTruncated = errors.New("commitment v3: truncated account leaf")
 )
 
-// widest account leaf body: flags + uvarint nonce + code hash + storage root + balance
 const accountLeafScratch = 1 + binary.MaxVarintLen64 + 3*length.Hash
 
 func encodeAccountLeaf(u *commitment.Update, storageRoot []byte, dst []byte) []byte {
