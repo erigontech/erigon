@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"reflect"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode"
@@ -176,6 +177,9 @@ func NewType(t string, internalType string, components []ArgumentMarshaling) (ty
 			names      []string
 			expression strings.Builder // canonical parameter expression
 		)
+		fields = slices.Grow(fields, len(components))
+		elems = slices.Grow(elems, len(components))
+		names = slices.Grow(names, len(components))
 		expression.WriteString("(")
 		overloadedNames := make(map[string]string)
 		for idx, c := range components {
