@@ -49,7 +49,7 @@ func unfold(ctx commitment.PatriciaContext, path []byte, plane byte, addrHash []
 	n.loaded = true
 	n.plane = plane
 	if data[0]&hdrHasSelfExt != 0 {
-		n.path = unpackPath(record.SelfExt()[1:], int(data[1]), nil)
+		n.path = decodeExtensionInto(record.SelfExt(), nil)
 	}
 	l := record.layout()
 	if record.isLeafRoot() {
@@ -65,11 +65,9 @@ func unfold(ctx commitment.PatriciaContext, path []byte, plane byte, addrHash []
 		return n, nil
 	}
 	n.slots = make([]childSlot, 0, bits.OnesCount16(l.child))
-	for nib := range 16 {
+	for m := l.child; m != 0; m &= m - 1 {
+		nib := bits.TrailingZeros16(m)
 		bit := uint16(1) << nib
-		if l.child&bit == 0 {
-			continue
-		}
 		if l.leaf&bit != 0 {
 			suffix, value := record.leafAt(l, nib)
 			n.setLeafShared(nib, suffix, value)

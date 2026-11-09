@@ -177,11 +177,8 @@ func applyDeltas(parts deltaParts, putBranch func(key, data, prev []byte) error,
 func (g graph) materialize(ctx commitment.PatriciaContext, n, root *node, acc *deltaParts) ([32]byte, error) {
 	g.dropDead(n, n.dead, acc)
 	n.dead = nil
-	for nib := range 16 {
-		bit := uint16(1) << nib
-		if n.childMask&bit == 0 || n.leafMask&bit != 0 {
-			continue
-		}
+	for m := n.childMask &^ n.leafMask; m != 0; m &= m - 1 {
+		nib := bits.TrailingZeros16(m)
 		child := n.child(nib)
 		if child == nil {
 			if !n.hasChildHash(nib) {

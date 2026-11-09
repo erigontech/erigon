@@ -19,6 +19,7 @@ package v3
 import (
 	"errors"
 	"fmt"
+	"math/bits"
 
 	"github.com/erigontech/erigon/execution/commitment"
 )
@@ -44,11 +45,8 @@ func enumerateRecordChildren(ctx commitment.PatriciaContext, addrHash [32]byte, 
 	}
 	record := Record{data: data, depth: depth}
 	l := record.layout()
-	for nib := range 16 {
-		bit := uint16(1) << nib
-		if l.child&bit == 0 || l.leaf&bit != 0 {
-			continue
-		}
+	for m := l.child &^ l.leaf; m != 0; m &= m - 1 {
+		nib := bits.TrailingZeros16(m)
 		childPath := childRecordPath(record, l, path, nib)
 		key := StorageNodeKey(addrHash, childPath, nil)
 		childData, _, err := branchOwned(ctx, key)
@@ -68,7 +66,7 @@ func enumerateRecordChildren(ctx commitment.PatriciaContext, addrHash [32]byte, 
 
 func childRecordPath(record Record, l layout, path []byte, nib int) []byte {
 	if selfExt := record.SelfExt(); len(path) == 0 && len(selfExt) != 0 {
-		return unpackPath(selfExt[1:], int(selfExt[0]), nil)
+		return decodeExtensionInto(selfExt, nil)
 	}
 	childPath := append(append([]byte(nil), path...), byte(nib))
 	return append(childPath, decodeExtensionInto(record.extAt(l, nib), nil)...)

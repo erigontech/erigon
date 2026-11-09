@@ -469,7 +469,7 @@ func TestScheduling(t *testing.T) {
 			for i := range 64 {
 				path := make([]byte, 64)
 				path[0], path[1] = byte(i%16), byte(i/16)
-				task.entries = append(task.entries, storageEntry{path: path, value: []byte{byte(i + 1)}, op: storagePut})
+				task.entries = append(task.entries, storageEntry{path: path, value: []byte{byte(i + 1)}})
 			}
 			return []storageTask{task}
 		}

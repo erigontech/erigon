@@ -54,10 +54,8 @@ func ComputeLeafRefs(key, data []byte) (*commitment.LeafRefs, error) {
 	n := node{path: path[:depth], record: record, layout: l, plane: plane, childMask: l.child, leafMask: l.leaf, hashMask: l.child &^ l.leaf}
 	refs := &commitment.LeafRefs{Refs: make([][32]byte, 0, bits.OnesCount16(l.leaf))}
 	var out [32]byte
-	for nib := range 16 {
-		if l.leaf&(uint16(1)<<nib) == 0 {
-			continue
-		}
+	for m := l.leaf; m != 0; m &= m - 1 {
+		nib := bits.TrailingZeros16(m)
 		ref, err := foldLeaf(&n, nib, false, out[:0])
 		if err != nil {
 			return nil, err

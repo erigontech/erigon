@@ -88,10 +88,8 @@ func (r Record) leafAt(l layout, nib int) (suffix, value []byte) {
 		return nil, nil
 	}
 	suffixLen := packedLen(64 - r.depth - 1)
-	for i := range 16 {
-		if l.leaf&(uint16(1)<<i) == 0 {
-			continue
-		}
+	for m := l.leaf; m != 0; m &= m - 1 {
+		i := bits.TrailingZeros16(m)
 		suffixEnd := off + suffixLen
 		if suffixEnd >= len(r.data) {
 			return nil, nil
@@ -128,10 +126,7 @@ func (r Record) skipExt(l layout, upto int) (int, bool) {
 	if off > len(r.data) {
 		return 0, false
 	}
-	for i := range upto {
-		if l.ext&(uint16(1)<<i) == 0 {
-			continue
-		}
+	for range bits.OnesCount16(l.ext & (uint16(1)<<upto - 1)) {
 		if len(r.data) <= off {
 			return 0, false
 		}
@@ -198,10 +193,7 @@ func Validate(data []byte, depth int) error {
 		return ErrRecordTruncated
 	}
 	suffixCount := 64 - depth - 1
-	for i := range 16 {
-		if ext&(uint16(1)<<i) == 0 {
-			continue
-		}
+	for range bits.OnesCount16(ext) {
 		if off >= len(data) {
 			return ErrRecordTruncated
 		}
@@ -219,10 +211,7 @@ func Validate(data []byte, depth int) error {
 		off = end
 	}
 	suffixLen := packedLen(suffixCount)
-	for i := range 16 {
-		if leaf&(uint16(1)<<i) == 0 {
-			continue
-		}
+	for range bits.OnesCount16(leaf) {
 		if off+suffixLen >= len(data) {
 			return ErrRecordTruncated
 		}
@@ -322,11 +311,8 @@ func encodeRecord(n *node, depth int, dst []byte) []byte {
 	slotStart := len(out)
 	slotCount := bits.OnesCount16(treeMask)
 	out = append(out, make([]byte, slotCount*32)...)
-	for nib := range 16 {
-		bit := uint16(1) << nib
-		if treeMask&bit == 0 {
-			continue
-		}
+	for m := treeMask; m != 0; m &= m - 1 {
+		nib := bits.TrailingZeros16(m)
 		hash := n.childHashAt(nib)
 		if len(hash) != 32 {
 			panic(fmt.Sprintf("commitment v3: child %d has no stored hash", nib))
@@ -335,21 +321,15 @@ func encodeRecord(n *node, depth int, dst []byte) []byte {
 		slotStart += 32
 	}
 
-	for nib := range 16 {
-		bit := uint16(1) << nib
-		if extMask&bit == 0 {
-			continue
-		}
+	for m := extMask; m != 0; m &= m - 1 {
+		nib := bits.TrailingZeros16(m)
 		out = n.appendChildExt(out, nib)
 	}
 
 	suffixCount := 64 - depth - 1
 	suffixLen := packedLen(suffixCount)
-	for nib := range 16 {
-		bit := uint16(1) << nib
-		if n.leafMask&bit == 0 {
-			continue
-		}
+	for m := n.leafMask; m != 0; m &= m - 1 {
+		nib := bits.TrailingZeros16(m)
 		suffix, value := n.leafAt(nib)
 		if len(suffix) != suffixLen {
 			panic(fmt.Sprintf("commitment v3: leaf %d has suffix length %d, want %d", nib, len(suffix), suffixLen))

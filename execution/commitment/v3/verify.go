@@ -60,8 +60,7 @@ func (h *RecordHasher) Hash(key, value []byte, expect func(key, hash []byte) err
 	} else {
 		l := record.layout()
 		if value[0]&hdrHasSelfExt != 0 {
-			selfExt := record.SelfExt()
-			h.scratch = unpackPath(selfExt[1:], int(selfExt[0]), h.scratch[:0])
+			h.scratch = decodeExtensionInto(record.SelfExt(), h.scratch[:0])
 			n.path = h.scratch
 		}
 		n.record, n.layout = record, l

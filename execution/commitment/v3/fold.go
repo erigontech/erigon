@@ -104,11 +104,9 @@ func foldLeaf(n *node, nib int, includeNib bool, out []byte) ([]byte, error) {
 }
 
 func branchRefs(n *node, refStore *[16][32]byte) (refs [16][]byte, err error) {
-	for nib := range 16 {
+	for m := n.childMask; m != 0; m &= m - 1 {
+		nib := bits.TrailingZeros16(m)
 		bit := uint16(1) << nib
-		if n.childMask&bit == 0 {
-			continue
-		}
 		if n.leafMask&bit == 0 {
 			if err := foldBranchChild(n, nib, &refStore[nib]); err != nil {
 				return refs, err

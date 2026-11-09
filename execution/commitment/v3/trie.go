@@ -58,10 +58,7 @@ func (t *Trie) RootHash() ([]byte, error) {
 }
 
 func (t *Trie) EncodeState(blockNum, txNum uint64) ([]byte, error) {
-	root, err := t.RootHash()
-	if err != nil {
-		return nil, err
-	}
+	root, _ := t.RootHash()
 	return commitment.EncodeCommitmentV3State(root, blockNum, txNum)
 }
 

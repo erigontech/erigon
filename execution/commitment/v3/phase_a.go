@@ -27,27 +27,20 @@ import (
 
 var errPhaseAUpdate = errors.New("commitment v3: invalid phase A update")
 
-type storageOp uint8
-
-const (
-	storagePut storageOp = iota
-	storageDelete
-)
-
 type storageEntry struct {
-	path  []byte
-	value []byte
-	op    storageOp
+	path    []byte
+	value   []byte
+	deleted bool
 }
 
 func storageEntryOf(path []byte, update *commitment.Update) (storageEntry, error) {
 	switch {
 	case update.Deleted():
-		return storageEntry{path: path, op: storageDelete}, nil
+		return storageEntry{path: path, deleted: true}, nil
 	case update.Flags&commitment.StorageUpdate == 0 || update.StorageLen < 0:
 		return storageEntry{}, errPhaseAUpdate
 	}
-	return storageEntry{path: path, value: update.Storage[:update.StorageLen], op: storagePut}, nil
+	return storageEntry{path: path, value: update.Storage[:update.StorageLen]}, nil
 }
 
 type storageTask struct {
@@ -177,7 +170,7 @@ func runStorageTaskWithPlan(ctx commitment.PatriciaContext, task storageTask, pl
 				return [32]byte{}, nil, err
 			}
 		}
-		if entry.op == storageDelete {
+		if entry.deleted {
 			if err := removeRoot(root, entry.path); err != nil {
 				if errors.Is(err, ErrRemoveNotFound) {
 					continue
@@ -199,7 +192,7 @@ func (g graph) rebuildStorage(ctx commitment.PatriciaContext, entries []storageE
 	root := fork(nil)
 	root.loaded, root.plane = true, g.plane
 	for _, entry := range entries {
-		if entry.op != storagePut {
+		if entry.deleted {
 			continue
 		}
 		if err := insertRoot(root, entry.path, entry.value); err != nil {

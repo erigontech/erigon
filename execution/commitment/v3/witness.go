@@ -60,10 +60,7 @@ func (t *Trie) WitnessesByHash(ctx context.Context, updates *commitment.Updates,
 		return nil, nil, nil, errTrieContext
 	}
 	keys := updates.CollectedHashedKeys()
-	want, err := t.RootHash()
-	if err != nil {
-		return nil, nil, nil, err
-	}
+	want, _ := t.RootHash()
 	reads := t.ctx
 	if t.preRecs != nil && bytes.Equal(t.preRoot, t.root) {
 		reads = &recordCache{PatriciaContext: t.ctx, recs: t.preRecs}

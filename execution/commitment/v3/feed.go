@@ -183,10 +183,8 @@ func partitionAccounts(feed []commitment.FeedAccount, workers int) ([]storageTas
 			task := storageTask{addrHash: fa.Hash, entries: entries[:len(fa.Slots):len(fa.Slots)]}
 			entries = entries[len(fa.Slots):]
 			for j := range fa.Slots {
-				task.entries[j] = storageEntry{path: expand(&fa.Slots[j].Hash), value: fa.Slots[j].Value, op: storagePut}
-				if len(fa.Slots[j].Value) == 0 {
-					task.entries[j].op = storageDelete
-				}
+				v := fa.Slots[j].Value
+				task.entries[j] = storageEntry{path: expand(&fa.Slots[j].Hash), value: v, deleted: len(v) == 0}
 			}
 			p.storage = append(p.storage, task)
 		}
