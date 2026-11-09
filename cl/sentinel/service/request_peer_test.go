@@ -153,7 +153,6 @@ func TestPeerRequestLimitsConcurrentStreamsPerPeerAndRequestType(t *testing.T) {
 	require.NotErrorIs(t, receivePeerRequestTestValue(t, request("a", communication.BeaconBlocksByRangeProtocolV2)), ErrPeerBusy, "finished streams free their slots")
 }
 
-// Responses are buffered whole, so max-size requests in flight share one byte budget: a third must wait.
 func TestSmallRequestDoesNotWaitBehindBulkRequests(t *testing.T) {
 	release := make(chan struct{})
 	defer close(release)
@@ -184,6 +183,7 @@ func TestSmallRequestDoesNotWaitBehindBulkRequests(t *testing.T) {
 	receivePeerRequestTestValue(t, reached)
 }
 
+// Responses are buffered whole, so max-size requests in flight share one byte budget: a third must wait, without a stream.
 func TestPeerRequestsShareAResponseBudget(t *testing.T) {
 	release := make(chan struct{})
 	reached := make(chan struct{}, 4)
@@ -203,7 +203,7 @@ func TestPeerRequestsShareAResponseBudget(t *testing.T) {
 		return done
 	}
 
-	first, second, third := request("a"), request("b"), request("c")
+	first, second, third := request("a"), request("a"), request("a")
 	receivePeerRequestTestValue(t, reached)
 	receivePeerRequestTestValue(t, reached)
 	select {
@@ -214,6 +214,6 @@ func TestPeerRequestsShareAResponseBudget(t *testing.T) {
 	close(release)
 	receivePeerRequestTestValue(t, reached)
 	for _, done := range []<-chan error{first, second, third} {
-		_ = receivePeerRequestTestValue(t, done) // the stub sends no response code, so each request ends in an error
+		require.NotErrorIs(t, receivePeerRequestTestValue(t, done), ErrPeerBusy, "a request waiting for budget holds no stream")
 	}
 }

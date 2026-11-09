@@ -15,6 +15,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	network "github.com/erigontech/erigon/cl/phase1/network"
+	"github.com/erigontech/erigon/cl/sentinel/httpreqresp"
 	"github.com/erigontech/erigon/cl/sentinel/peers"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
@@ -122,8 +123,8 @@ func waitForExecutionEngineToBeFinished(ctx context.Context, cfg *Cfg) (ready bo
 }
 
 const (
-	// maxChainTipRequestCount keeps a by-range response within the sentinel's 64-chunk ceiling.
-	maxChainTipRequestCount   = 64
+	// maxChainTipRequestCount keeps a by-range request under the sentinel's bulk weight, so backfill cannot park it.
+	maxChainTipRequestCount   = httpreqresp.MaxResponseChunks/2 - 1
 	ancestorLookupWindow      = 64
 	maxAncestorLookupRequests = 4
 )
@@ -173,8 +174,6 @@ func startFetchingBlocksMissedByGossipAfterSomeTime(ctx context.Context, cfg *Cf
 		return
 	}
 
-	// next is the slot after a capped window, so a run of skipped slots longer than one request is crossed.
-	var next uint64
 	// Continuously fetch and process blocks
 	for {
 		// Calculate the range of blocks to fetch
@@ -183,7 +182,7 @@ func startFetchingBlocksMissedByGossipAfterSomeTime(ctx context.Context, cfg *Cf
 		if highestSeen >= 2 {
 			from = highestSeen - 2
 		}
-		from = max(from, next)
+		from = max(from, cfg.chainTipResumeSlot.Load())
 		currentSlot := cfg.ethClock.GetCurrentSlot()
 		var count uint64
 		if currentSlot >= from {
@@ -191,10 +190,11 @@ func startFetchingBlocksMissedByGossipAfterSomeTime(ctx context.Context, cfg *Cf
 		} else {
 			count = 4
 		}
-		next = 0
+		var next uint64
 		if currentSlot >= from && currentSlot-from >= maxChainTipRequestCount {
 			next = from + count
 		}
+		cfg.chainTipResumeSlot.Store(next)
 
 		// Stop fetching if the highest seen block is greater than or equal to the target slot
 		if cfg.forkChoice.HighestSeen() >= args.targetSlot {
@@ -305,7 +305,7 @@ func fetchLinkedAncestors(ctx context.Context, cfg *Cfg, peer string, orphan *cl
 	var fetched []*cltypes.SignedBeaconBlock
 	next, end := start, orphan.Block.Slot
 	for requests := 0; next < end && requests < maxAncestorLookupRequests; requests++ {
-		blocks, err := cfg.rpc.SendBeaconBlocksByRangeReqToPeer(ctx, peer, next, end-next)
+		blocks, err := cfg.rpc.SendBeaconBlocksByRangeReqToPeer(ctx, peer, next, min(end-next, maxChainTipRequestCount))
 		switch {
 		case err != nil:
 			return nil, err

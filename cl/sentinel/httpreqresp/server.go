@@ -48,8 +48,8 @@ const (
 )
 
 const (
-	// MaxResponseChunks is the most items our multi-chunk requests ask for; with MAX_PAYLOAD_SIZE it
-	// sets the multi-chunk ceiling (maxMultiChunkResponse) on what one buffered response may hold.
+	// MaxResponseChunks is the most blocks or envelopes a request asks for. With MAX_PAYLOAD_SIZE it sets the
+	// byte ceiling (maxMultiChunkResponse) of every multi-chunk response; blobs and columns are small enough to fit.
 	MaxResponseChunks = 64
 	// maxSingleObjectResponse bounds single-chunk protocols (status, ping, metadata,
 	// goodbye, light-client singles), whose responses are at most tens of KiB.

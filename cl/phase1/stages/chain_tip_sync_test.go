@@ -130,6 +130,33 @@ func TestStartFetchingBlocksMissedByGossipCrossesSkippedSlots(t *testing.T) {
 	require.Equal(t, sentinel.starts[0]+maxChainTipRequestCount, sentinel.starts[1], "the next poll must start after the empty window")
 }
 
+func TestStartFetchingBlocksMissedByGossipResumesAcrossAttempts(t *testing.T) {
+	beaconCfg := clparams.MainnetBeaconConfig
+	beaconCfg.SecondsPerSlot = 1
+	sentinel := &rangeStartSentinel{}
+	clock := eth_clock.NewEthereumClock(uint64(time.Now().Unix())-200, common.Hash{}, &beaconCfg)
+	cfg := &Cfg{
+		beaconCfg:  &beaconCfg,
+		ethClock:   clock,
+		forkChoice: &forkchoice.ForkChoiceStore{},
+		rpc:        rpc.NewBeaconRpcP2P(t.Context(), sentinel, &beaconCfg, clock),
+	}
+	respCh := make(chan *peers.PeeredObject[[]*cltypes.SignedBeaconBlock], 1024)
+	attempt := func() {
+		ctx, cancel := context.WithTimeout(t.Context(), 1200*time.Millisecond)
+		defer cancel()
+		startFetchingBlocksMissedByGossipAfterSomeTime(ctx, cfg, Args{targetSlot: math.MaxUint64}, respCh, make(chan error, 1))
+	}
+
+	attempt()
+	last := len(sentinel.starts) - 1
+	require.GreaterOrEqual(t, last, 0)
+	attempt()
+
+	require.Greater(t, len(sentinel.starts), last+1)
+	require.Equal(t, sentinel.starts[last]+maxChainTipRequestCount, sentinel.starts[last+1], "a new attempt must continue past the empty windows")
+}
+
 func TestStartFetchingBlocksMissedByGossipReturnsAfterCancelWithoutErrorReader(t *testing.T) {
 	beaconCfg := clparams.MainnetBeaconConfig
 	beaconCfg.SecondsPerSlot = 1

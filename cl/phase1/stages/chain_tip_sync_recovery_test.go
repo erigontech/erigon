@@ -1740,7 +1740,7 @@ func TestChainTipAncestorLookupDropsAResponseOutsideTheRange(t *testing.T) {
 
 			f.process(tip.Block.Slot, rejected, tip)
 
-			require.Equal(t, []ancestorRequest{{pid: ancestorPeer, start: 136, count: 64}}, f.sentinel.requests)
+			require.Equal(t, []ancestorRequest{{pid: ancestorPeer, start: 136, count: maxChainTipRequestCount}}, f.sentinel.requests)
 			require.NotContains(t, f.graph.added, servedRoot)
 			require.NotContains(t, f.graph.added, tipRoot)
 			require.Contains(t, rejected, tipRoot)
@@ -1867,10 +1867,10 @@ func TestChainTipAncestorLookupStopsAfterFourRequests(t *testing.T) {
 	f.process(tip.Block.Slot, rejected, tip)
 
 	require.Equal(t, []ancestorRequest{
-		{pid: ancestorPeer, start: 136, count: 64},
-		{pid: ancestorPeer, start: 137, count: 63},
-		{pid: ancestorPeer, start: 138, count: 62},
-		{pid: ancestorPeer, start: 139, count: 61},
+		{pid: ancestorPeer, start: 136, count: maxChainTipRequestCount},
+		{pid: ancestorPeer, start: 137, count: maxChainTipRequestCount},
+		{pid: ancestorPeer, start: 138, count: maxChainTipRequestCount},
+		{pid: ancestorPeer, start: 139, count: maxChainTipRequestCount},
 	}, f.sentinel.requests)
 	require.Contains(t, rejected, tipRoot)
 	require.NotContains(t, f.graph.added, tipRoot)
