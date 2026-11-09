@@ -31,11 +31,14 @@ import (
 	btree2 "github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/kvmetrics"
 )
+
+var ablNoHistory = dbg.EnvBool("ABL_NO_HISTORY", false)
 
 type dataWithTxNum struct {
 	data  []byte
@@ -225,7 +228,8 @@ func (sd *TemporalMemBatch) putHistory(domain kv.Domain, k, v []byte, txNum uint
 	// A same-txNum update only rewrites the value: history and the unwind diff
 	// record the value as of BEFORE txNum, which the first write already did —
 	// this write's preval is the intra-txNum intermediate, not a real prev.
-	if sameTxNumUpdate {
+	// shortcut: ablation probe, skips domain history and unwind-diff writes (reorg and historical reads break), remove after the bound is measured.
+	if sameTxNumUpdate || ablNoHistory {
 		return sd.domainWriters[domain].addValue(k, v, kv.Step(txNum/sd.stepSize))
 	}
 	if len(v) == 0 {

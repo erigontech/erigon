@@ -89,6 +89,12 @@ rwloop does:
 When rwLoop has nothing to do - it does Prune, or flush of WAL to RwTx (agg.rotate+agg.Flush)
 */
 
+var (
+	ablNoTxIndexes   = dbg.EnvBool("ABL_NO_TX_INDEXES", false)
+	ablNoReceiptRoot = dbg.EnvBool("ABL_NO_RECEIPT_ROOT", false)
+	ablNoAccumulator = dbg.EnvBool("ABL_NO_ACCUMULATOR", false)
+)
+
 type parallelExecutor struct {
 	txExecutor
 	// verdict and exhausted carry the apply loop's typed outcome as data, out of a
@@ -279,6 +285,10 @@ func (pe *parallelExecutor) foldTx(ctx context.Context, rwTx kv.TemporalTx, r *t
 	if err := pe.rs.ApplyStateWrites(ctx, rwTx, r.blockNum, r.txNum, r.writes, nil, r.rules); err != nil {
 		return fmt.Errorf("fold state block=%d txNum=%d: %w", r.blockNum, r.txNum, err)
 	}
+	// shortcut: ablation probe, skips receipt and log/trace index domain writes, remove after the bound is measured.
+	if ablNoTxIndexes {
+		return nil
+	}
 	if err := pe.rs.ApplyTxIndexes(rwTx, r.txNum, r.receipt, r.cumulativeBlobGasUsed, r.logs, r.traceFroms, r.traceTos, r.isFinalize); err != nil {
 		return fmt.Errorf("fold index block=%d txNum=%d: %w", r.blockNum, r.txNum, err)
 	}
@@ -362,7 +372,10 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 	}
 
 	// Set accumulator before pe.run() so execLoop sees it without a race.
-	pe.accumulator = accumulator
+	// shortcut: ablation probe, a nil accumulator skips the state-change notify and its tx marshal, remove after the bound is measured.
+	if !ablNoAccumulator {
+		pe.accumulator = accumulator
+	}
 
 	// prevBlocks must exist before pe.run(): workers read it from their own goroutines.
 	pe.prevBlocks = state.NewPrevBlockList()
@@ -730,7 +743,8 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					pe.prevBlocks.RemoveTail()
 					var blockValidatorWaiter *blockValidator
 					if applyResult.BlockNum > 0 && !applyResult.isPartial { // Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
-						checkBloom := !pe.cfg.vmConfig.StatelessExec && !pe.cfg.vmConfig.NoReceipts
+						// shortcut: ablation probe, skips the receipts root and bloom computation and their checks, remove after the bound is measured.
+						checkBloom := !ablNoReceiptRoot && !pe.cfg.vmConfig.StatelessExec && !pe.cfg.vmConfig.NoReceipts
 						checkReceipts := checkBloom && pe.cfg.chainConfig.IsByzantium(applyResult.BlockNum)
 
 						header, txs := applyResult.Header, applyResult.Txs
