@@ -4250,7 +4250,6 @@ func duFormatJSON(w io.Writer, result duResult) error {
 	return enc.Encode(result)
 }
 
-// doDU implements the "erigon seg du" subcommand.
 func duCollect(ctx context.Context, dirs datadir.Dirs, logger log.Logger) (duResult, error) {
 	cc, configuredMode := duChainInfo(ctx, dirs, logger)
 	chainName := "unknown"
@@ -4331,6 +4330,7 @@ func duCollect(ctx context.Context, dirs datadir.Dirs, logger log.Logger) (duRes
 	}, nil
 }
 
+// doDU implements the "erigon seg du" subcommand.
 func doDU(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs, logger log.Logger) error {
 	result, err := duCollect(ctx, dirs, logger)
 	if err != nil {
