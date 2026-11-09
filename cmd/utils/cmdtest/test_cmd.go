@@ -183,10 +183,10 @@ func (tt *TestCmd) ExpectRegexp(regex string) (*regexp.Regexp, []string) {
 		return re, nil
 	}
 	tt.Logf("Matched stdout text:\n%s", output)
-	submatches := make([]string, len(matches)/2)
+	var submatches []string
 	for i := 0; i < len(matches); i += 2 {
 		submatch := string(output[matches[i]:matches[i+1]])
-		submatches[i/2] = submatch
+		submatches = append(submatches, submatch)
 	}
 	return re, submatches
 }
