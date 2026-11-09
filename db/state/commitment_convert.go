@@ -923,6 +923,27 @@ func legacyCommitmentFilesNotConverted(dirs datadir.Dirs, converted map[string]s
 	return unindexed, nil
 }
 
+func manifestRanges(backupDir string, entries []os.DirEntry) (manifest []string, built bool, ranges map[[2]string]struct{}, err error) {
+	manifest, exists, err := loadRestoreManifest(filepath.Join(backupDir, restoreManifestName))
+	if err != nil {
+		return nil, false, nil, err
+	}
+	if !exists {
+		if manifest, err = buildRestoreManifest(entries); err != nil {
+			return nil, false, nil, err
+		}
+	}
+	ranges = make(map[[2]string]struct{}, len(manifest))
+	for _, name := range manifest {
+		m := commitmentStepRangeRe.FindStringSubmatch(name)
+		if m == nil {
+			return nil, false, nil, fmt.Errorf("[commitment_convert] restore: manifest entry %q does not match commitment step-range pattern", name)
+		}
+		ranges[[2]string{m[1], m[2]}] = struct{}{}
+	}
+	return manifest, !exists, ranges, nil
+}
+
 func preflightRestoreV3Orphans(pairs [][2]string) error {
 	var conflicts []string
 	for _, pair := range pairs {
@@ -933,23 +954,9 @@ func preflightRestoreV3Orphans(pairs [][2]string) error {
 		if err != nil {
 			return fmt.Errorf("[commitment_convert] restore: read backup dir %s: %w", pair[0], err)
 		}
-		manifest, exists, err := loadRestoreManifest(filepath.Join(pair[0], restoreManifestName))
+		_, _, ranges, err := manifestRanges(pair[0], entries)
 		if err != nil {
 			return err
-		}
-		if !exists {
-			manifest, err = buildRestoreManifest(entries)
-			if err != nil {
-				return err
-			}
-		}
-		ranges := make(map[[2]string]struct{}, len(manifest))
-		for _, name := range manifest {
-			m := commitmentStepRangeRe.FindStringSubmatch(name)
-			if m == nil {
-				return fmt.Errorf("[commitment_convert] restore: manifest entry %q does not match commitment step-range pattern", name)
-			}
-			ranges[[2]string{m[1], m[2]}] = struct{}{}
 		}
 		liveEntries, err := os.ReadDir(pair[1])
 		if errors.Is(err, os.ErrNotExist) {
@@ -996,15 +1003,11 @@ func restoreCommitmentBackup(ctx context.Context, backupDir, liveDir string, req
 		return fmt.Errorf("[commitment_convert] restore: read backup dir %s: %w", backupDir, err)
 	}
 
-	manifest, manifestExists, err := loadRestoreManifest(manifestPath)
+	manifest, built, ranges, err := manifestRanges(backupDir, entries)
 	if err != nil {
 		return err
 	}
-	if !manifestExists {
-		manifest, err = buildRestoreManifest(entries)
-		if err != nil {
-			return err
-		}
+	if built {
 		if len(manifest) == 0 {
 			if !required {
 				return dir.RemoveFile(backupDir)
@@ -1016,15 +1019,8 @@ func restoreCommitmentBackup(ctx context.Context, backupDir, liveDir string, req
 		}
 	}
 
-	type stepRange struct{ from, to string }
-	ranges := make(map[stepRange]struct{})
 	manifestSet := make(map[string]struct{}, len(manifest))
 	for _, name := range manifest {
-		m := commitmentStepRangeRe.FindStringSubmatch(name)
-		if m == nil {
-			return fmt.Errorf("[commitment_convert] restore: manifest entry %q does not match commitment step-range pattern", name)
-		}
-		ranges[stepRange{m[1], m[2]}] = struct{}{}
 		manifestSet[name] = struct{}{}
 	}
 
@@ -1039,7 +1035,7 @@ func restoreCommitmentBackup(ctx context.Context, backupDir, liveDir string, req
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return ctxErr
 		}
-		pattern := filepath.Join(liveDir, fmt.Sprintf("*-commitment.%s-%s.*", r.from, r.to))
+		pattern := filepath.Join(liveDir, fmt.Sprintf("*-commitment.%s-%s.*", r[0], r[1]))
 		matches, globErr := dir.Glob(pattern)
 		if globErr != nil {
 			return fmt.Errorf("[commitment_convert] restore: glob %s: %w", pattern, globErr)
