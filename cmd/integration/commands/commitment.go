@@ -585,12 +585,7 @@ Examples:
 			return errors.New("--continue is mutually exclusive with --restore")
 		}
 		if convertRestore {
-			// Restore is a filesystem-only operation. Dispatch before openDB so
-			// recovery still works when the on-disk state is broken enough that
-			// MDBX/aggregator/snapshots can't open — which is exactly when
-			// --restore is most needed.
-			dirs := datadir.New(datadirCli)
-			return dbstate.RestoreCommitmentFiles(cmd.Context(), dirs, logger)
+			return commitmentRestore(ctx, logger)
 		}
 
 		if convertV3 {
@@ -620,6 +615,21 @@ Examples:
 		}
 		return commitmentConvert(db, cmd.Context(), logger, opts)
 	},
+}
+
+// commitmentRestore moves the files back before openDB so recovery still works
+// when MDBX/aggregator/snapshots can't open — which is exactly when --restore
+// is most needed.
+func commitmentRestore(ctx context.Context, logger log.Logger) error {
+	if err := dbstate.RestoreCommitmentFiles(ctx, datadir.New(datadirCli), logger); err != nil {
+		return err
+	}
+	db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), true, logger)
+	if err != nil {
+		return fmt.Errorf("commitment files are restored, but the execution state still needs a reset: run `integration stage_exec --reset` before starting erigon: %w", err)
+	}
+	defer db.Close()
+	return rawdbreset.ResetExec(ctx, db)
 }
 
 func commitmentConvert(db kv.TemporalRwDB, ctx context.Context, logger log.Logger, opts dbstate.ConvertOpts) error {

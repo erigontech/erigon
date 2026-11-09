@@ -38,6 +38,7 @@ import (
 	chaincfg "github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	"github.com/erigontech/erigon/execution/execfinality"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
 
@@ -88,6 +89,42 @@ func TestNewTemporalDBRejectsV3FilesWhenV3IsDisabled(t *testing.T) {
 		_, err := newTemporalDB(t.Context(), db, log.New())
 		return err
 	}(), "requires commitment v3")
+}
+
+func TestCommitmentConvertRestoreResetsExecution(t *testing.T) {
+	previous := statecfg.ExperimentalCommitmentV3
+	previousDatadir, previousChaindata := datadirCli, chaindata
+	t.Cleanup(func() {
+		statecfg.ExperimentalCommitmentV3 = previous
+		datadirCli, chaindata = previousDatadir, previousChaindata
+	})
+	statecfg.ExperimentalCommitmentV3 = false
+
+	db, dirs := dbWithV3State(t)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return stages.SaveStageProgress(tx, stages.Execution, 100)
+	}))
+	db.Close()
+	backupDir := filepath.Join(dirs.Snap, "backup", "domains")
+	require.NoError(t, os.MkdirAll(backupDir, 0o755))
+	files, err := filepath.Glob(filepath.Join(dirs.SnapDomain, "*-commitment.*"))
+	require.NoError(t, err)
+	require.NotEmpty(t, files)
+	for _, f := range files {
+		require.NoError(t, os.Rename(f, filepath.Join(backupDir, filepath.Base(f))))
+	}
+
+	datadirCli, chaindata = dirs.DataDir, dirs.Chaindata
+	require.NoError(t, commitmentRestore(t.Context(), log.New()))
+
+	rawDB := mdbx.New(dbcfg.ChainDB, log.New()).Path(dirs.Chaindata).MustOpen()
+	defer rawDB.Close()
+	var progress uint64
+	require.NoError(t, rawDB.View(t.Context(), func(tx kv.Tx) error {
+		progress, err = stages.GetStageProgress(tx, stages.Execution)
+		return err
+	}))
+	require.Zero(t, progress)
 }
 
 func dbWithV3State(t *testing.T) (kv.TemporalRwDB, datadir.Dirs) {
