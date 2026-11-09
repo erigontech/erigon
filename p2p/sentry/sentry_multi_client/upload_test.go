@@ -137,6 +137,45 @@ func (db *uploadCountingDB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx,
 	return db.TemporalRoDB.BeginTemporalRo(ctx)
 }
 
+func TestUploadRequests_ReceiptsUseFreeReplaySlot(t *testing.T) {
+	for _, id := range []sentryproto.MessageId{sentryproto.MessageId_GET_RECEIPTS_66, sentryproto.MessageId_GET_RECEIPTS_69, sentryproto.MessageId_GET_RECEIPTS_70} {
+		t.Run(id.String(), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				ctx, cancel := context.WithCancel(t.Context())
+				defer cancel()
+				cs := newUploadTestClient(t)
+				cs.blockReader.(*uploadBlockReader).body = func(context.Context, uint64) (rlp.RawValue, error) {
+					<-ctx.Done()
+					return nil, ctx.Err()
+				}
+				var cacheLookups, uncachedCalls atomic.Int32
+				cs.ethApiWrapper = &mockReceiptsGenerator{
+					ReceiptsGetter: uploadReceiptsGetter{getReceipts: func(context.Context, *types.Block) (types.Receipts, error) {
+						uncachedCalls.Add(1)
+						return types.Receipts{{CumulativeGasUsed: 21_000}}, nil
+					}},
+					getCachedReceiptsFunc: func(_ context.Context, hash common.Hash) (types.Receipts, bool) {
+						cacheLookups.Add(1)
+						if hash == (common.Hash{1}) {
+							return types.Receipts{{CumulativeGasUsed: 21_000}}, true
+						}
+						return nil, false
+					},
+				}
+				responses := make(chan *sentryproto.SendMessageByIdRequest, 2)
+				stream := startUploadTestStream(t, ctx, cs, nil, func(response *sentryproto.SendMessageByIdRequest) { responses <- response })
+				require.NoError(t, stream.Send(uploadRequest(t, sentryproto.MessageId_GET_BLOCK_BODIES_66, 1, 1, common.Hash{1})))
+				synctest.Wait()
+				require.NoError(t, stream.Send(uploadRequest(t, id, 2, 2, common.Hash{1}, common.Hash{2})))
+				synctest.Wait()
+				require.Len(t, responses, 1, "bodies must leave the replay slot available for receipts")
+				require.Equal(t, int32(1), uncachedCalls.Load())
+				require.Equal(t, int32(2), cacheLookups.Load(), "a free replay slot must avoid repeating the cache pass")
+			})
+		})
+	}
+}
+
 func TestUploadRequests_ReplaysLeaveWorkersForBodiesAndCacheHits(t *testing.T) {
 	for _, id := range []sentryproto.MessageId{sentryproto.MessageId_GET_RECEIPTS_66, sentryproto.MessageId_GET_RECEIPTS_69, sentryproto.MessageId_GET_RECEIPTS_70} {
 		t.Run(id.String(), func(t *testing.T) {

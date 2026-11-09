@@ -121,6 +121,10 @@ func (cs *MultiClient) startUploadsLocked() {
 		q.bytes -= task.size
 		peer.active = true
 		q.active++
+		switch task.message.Id {
+		case sentryproto.MessageId_GET_RECEIPTS_66, sentryproto.MessageId_GET_RECEIPTS_69, sentryproto.MessageId_GET_RECEIPTS_70:
+			task.uncached = !q.uncachedActive
+		}
 		if task.uncached {
 			q.uncachedActive = true
 		}
