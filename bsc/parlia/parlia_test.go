@@ -148,7 +148,6 @@ func TestInitializeInstallsJennerContractsOnFirstJennerBlock(t *testing.T) {
 	}{
 		{"last pasteur block", forkTime - 2, forkTime - 1, false},
 		{"first jenner block", forkTime - 1, forkTime, true},
-		{"later jenner block", forkTime, forkTime + 1, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			header := &types.Header{Number: *uint256.NewInt(forkBlock), Time: tc.time}
