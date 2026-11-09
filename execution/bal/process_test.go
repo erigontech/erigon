@@ -17,6 +17,7 @@
 package bal_test
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"math/big"
@@ -479,7 +480,7 @@ func TestProcessAgainstSidecarDecidesLikeProcess(t *testing.T) {
 		{name: "no sidecar, wrong header hash", headerHash: phantom.Hash(), gasLimit: gasLimit, wantErr: "block access list mismatch"},
 		{name: "sidecar not bound to the header", sidecar: phantom, headerHash: real.Hash(), gasLimit: gasLimit},
 		{name: "sidecar equals execution but header commits to another list", sidecar: real, headerHash: phantom.Hash(), gasLimit: gasLimit, wantErr: "block access list mismatch"},
-		{name: "stored bytes differ from the sidecar", sidecar: real, headerHash: real.Hash(), stored: append(common.Copy(realRaw), 0), gasLimit: gasLimit, wantErr: "hash mismatch"},
+		{name: "stored bytes differ from the sidecar", sidecar: real, headerHash: real.Hash(), stored: append(bytes.Clone(realRaw), 0), gasLimit: gasLimit, wantErr: "hash mismatch"},
 		{name: "phantom account", sidecar: phantom, headerHash: phantom.Hash(), gasLimit: gasLimit, wantErr: "block access list mismatch"},
 		{name: "missing account", sidecar: missing, headerHash: missing.Hash(), gasLimit: gasLimit, wantErr: "block access list mismatch"},
 		{name: "balance value", sidecar: balanceValue, headerHash: balanceValue.Hash(), gasLimit: gasLimit, wantErr: "block access list mismatch"},
