@@ -1738,6 +1738,44 @@ func TestRetrySendHasADeadline(t *testing.T) {
 	require.False(t, a.noDeadline, "a stalled sentry must not hold the one retry loop")
 }
 
+func TestBlockedSentryDoesNotDelayOtherSentries(t *testing.T) {
+	t.Parallel()
+	a := newAnnounceFetchTest(t)
+	asked := make(chan struct{}, 1)
+	otherServer := sentryproto.NewMockSentryServer(gomock.NewController(t))
+	otherServer.EXPECT().SendMessageById(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, r *sentryproto.SendMessageByIdRequest) (*sentryproto.SentPeers, error) {
+			asked <- struct{}{}
+			return &sentryproto.SentPeers{Peers: []*typesproto.H512{r.PeerId}}, nil
+		}).AnyTimes()
+	other, err := direct.NewSentryClientDirect(direct.ETH68, NewMockSentry(a.ctx, otherServer))
+	require.NoError(t, err)
+	h1, h2, peerA, peerB, peerC := [32]byte{0xe1}, [32]byte{0xe2}, [64]byte{0xa}, [64]byte{0xb}, [64]byte{0xc}
+	a.announce(t, peerA, h1, h2)
+	a.announce(t, peerB, h1)
+	blockedSentry := a.sentryClient
+	a.sentryClient = other
+	a.announce(t, peerC, h2)
+	a.sentryClient = blockedSentry
+	a.blockSend = true
+	*a.now = a.now.Add(txFetchTimeout)
+	ctx, cancel := context.WithCancel(a.ctx)
+	defer cancel()
+
+	swept := make(chan struct{})
+	go func() {
+		defer close(swept)
+		a.fetch.requestFromAlternates(ctx, nil)
+	}()
+	select {
+	case <-asked:
+	case <-time.After(3 * time.Second):
+		t.Fatal("a blocked sentry delayed the request on another sentry")
+	}
+	cancel()
+	<-swept
+}
+
 func TestStalledSendKeepsTheFinalFallback(t *testing.T) {
 	t.Parallel()
 	a := newAnnounceFetchTest(t)
