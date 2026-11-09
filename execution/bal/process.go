@@ -17,6 +17,7 @@
 package bal
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -112,6 +113,40 @@ func Process(blockBalBytes []byte, h *types.Header, built *state.BlockAccessList
 			rules.ErrInvalidBlock, blockNum, blockHash, computedBlockBalHash, blockBalHash)
 	}
 	return computedBlockBal, nil
+}
+
+// ProcessAgainstSidecar is Process for an EIP-7928 block with a decoded sidecar: an
+// executed list equal to a sidecar bound to the header needs no sort, RLP or Keccak.
+// Every other outcome is decided by Process.
+func ProcessAgainstSidecar(sidecar *types.BlockAccessListSidecar, blockBalBytes []byte, h *types.Header, built *state.BlockAccessListBuilder, vio *state.VersionedIO, dataDir string, logger log.Logger) (types.BlockAccessList, error) {
+	if dbg.TraceBlockAccessLists || !sidecarBoundToHeader(sidecar, blockBalBytes, h) {
+		return Process(blockBalBytes, h, built, vio, true, false, dataDir, logger)
+	}
+	if built == nil {
+		built = state.NewBlockAccessListBuilder()
+	}
+	built.AddRemaining(vio)
+	if built.MatchesSorted(sidecar.BlockAccessList()) {
+		return sidecar.BlockAccessList(), nil
+	}
+	return Process(blockBalBytes, h, built, vio, true, false, dataDir, logger)
+}
+
+// sidecarBoundToHeader reports whether the sidecar is a valid list carrying the header's
+// hash and is the same bytes as the stored copy, the conditions Process applies to it.
+func sidecarBoundToHeader(sidecar *types.BlockAccessListSidecar, blockBalBytes []byte, h *types.Header) bool {
+	if sidecar == nil || h == nil || h.BlockAccessListHash == nil || sidecar.ValidateForHeader(h.GasLimit) != nil {
+		return false
+	}
+	hash, err := sidecar.Hash()
+	if err != nil || hash != *h.BlockAccessListHash {
+		return false
+	}
+	if blockBalBytes == nil {
+		return true
+	}
+	raw, err := sidecar.Bytes()
+	return err == nil && bytes.Equal(raw, blockBalBytes)
 }
 
 // reportBALMismatch logs a BAL hash mismatch and dumps the block's BAL and the
