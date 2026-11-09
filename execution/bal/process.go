@@ -22,7 +22,6 @@ import (
 	"path/filepath"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -62,14 +61,20 @@ func writeBALToFile(bal types.BlockAccessList, dataDir string, name string, logg
 // Process derives the block's access list from the executed VersionedIO and,
 // once Amsterdam is active, cross-checks it against the header commitment. It
 // returns the computed BAL so callers (e.g. the pre-Amsterdam experimental
-// path, where the header carries no BAL hash) can capture it. blockBalBytes is
-// the stored BAL sidecar, nil when absent.
-func Process(blockBalBytes []byte, h *types.Header, built *state.BlockAccessListBuilder, vio *state.VersionedIO, isEIP7928 bool, experimental bool, dataDir string, logger log.Logger) (types.BlockAccessList, error) {
+// path, where the header carries no BAL hash) can capture it. blockBal is the
+// block's BAL sidecar, nil when absent.
+func Process(blockBal *types.BlockAccessListSidecar, h *types.Header, built *state.BlockAccessListBuilder, vio *state.VersionedIO, isEIP7928 bool, experimental bool, dataDir string, logger log.Logger) (types.BlockAccessList, error) {
 	if !isEIP7928 && !experimental {
 		return nil, nil
 	}
 	if h == nil {
 		return nil, nil
+	}
+	if built == nil {
+		built = state.NewBlockAccessListBuilder()
+	}
+	if isEIP7928 && matchesSidecar(blockBal, h, built, vio) {
+		return blockBal.BlockAccessList(), nil
 	}
 	blockNum := h.Number.Uint64()
 	blockHash := h.Hash()
@@ -90,11 +95,13 @@ func Process(blockBalBytes []byte, h *types.Header, built *state.BlockAccessList
 	}
 	blockBalHash := *h.BlockAccessListHash
 	// A stored BAL sidecar may be absent, so cross-check it only when present.
-	// The stored bytes are canonical RLP, so their Keccak is the BAL hash.
-	if blockBalBytes != nil {
-		if storedHash := crypto.Keccak256Hash(blockBalBytes); storedHash != blockBalHash {
-			blockBal, _ := types.DecodeBlockAccessListBytes(blockBalBytes)
-			reportBALMismatch(blockNum, blockHash, blockBal, blockBalHash, computedBlockBal, dataDir, logger)
+	if blockBal != nil {
+		storedHash, err := blockBal.Hash()
+		if err != nil {
+			return nil, fmt.Errorf("block %d: hash block access list sidecar: %w", blockNum, err)
+		}
+		if storedHash != blockBalHash {
+			reportBALMismatch(blockNum, blockHash, blockBal.BlockAccessList(), blockBalHash, computedBlockBal, dataDir, logger)
 			return nil, fmt.Errorf("block %d: invalid block access list, hash mismatch: got %s expected %s", blockNum, storedHash, blockBalHash)
 		}
 	}
@@ -103,15 +110,25 @@ func Process(blockBalBytes []byte, h *types.Header, built *state.BlockAccessList
 	// without a stored BAL body, so the computed BAL is accurate.
 	computedBlockBalHash := computedBlockBal.Hash()
 	if blockBalHash != computedBlockBalHash {
-		var blockBal types.BlockAccessList
-		if blockBalBytes != nil {
-			blockBal, _ = types.DecodeBlockAccessListBytes(blockBalBytes)
-		}
-		reportBALMismatch(blockNum, blockHash, blockBal, blockBalHash, computedBlockBal, dataDir, logger)
+		reportBALMismatch(blockNum, blockHash, blockBal.BlockAccessList(), blockBalHash, computedBlockBal, dataDir, logger)
 		return nil, fmt.Errorf("%w, block=%d (hash=%s): block access list mismatch: got %s expected %s",
 			rules.ErrInvalidBlock, blockNum, blockHash, computedBlockBalHash, blockBalHash)
 	}
 	return computedBlockBal, nil
+}
+
+func matchesSidecar(blockBal *types.BlockAccessListSidecar, h *types.Header, built *state.BlockAccessListBuilder, vio *state.VersionedIO) bool {
+	if blockBal == nil || h.BlockAccessListHash == nil || dbg.TraceBlockAccessLists {
+		return false
+	}
+	if hash, err := blockBal.Hash(); err != nil || hash != *h.BlockAccessListHash {
+		return false
+	}
+	if blockBal.ValidateForHeader(h.GasLimit) != nil {
+		return false
+	}
+	built.AddRemaining(vio)
+	return built.Matches(blockBal.BlockAccessList())
 }
 
 // reportBALMismatch logs a BAL hash mismatch and dumps the block's BAL and the

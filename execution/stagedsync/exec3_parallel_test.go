@@ -593,7 +593,7 @@ func executeParallelWithCheck(pe *parallelExecutor, tasks []exec.Task, profile b
 	consumers := newResultStream()
 	consumers.register("applyResults", applyResults)
 
-	pe.execRequests <- &execRequest{0, common.Hash{}, nil, nil, tasks, consumers, profile, nil}
+	pe.execRequests <- &execRequest{0, common.Hash{}, nil, nil, tasks, consumers, profile, nil, nil}
 
 	// TODO get results back
 
