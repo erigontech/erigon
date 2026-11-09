@@ -158,20 +158,10 @@ type AddressEntry struct {
 	Storage        map[accounts.StorageKey]*btree.Map[int, *WriteCell[uint256.Int]]
 	// mu guards this account's cell maps. Held RLock for reads (readFloor and
 	// the per-path scans) and Lock for writes (putCell / Delete).
-	// Marks take Lock only once a SelfDestruct cell was true: readers combine
-	// several cells' flags only through a destruct.
+	// Marks take Lock once a SelfDestruct cell was true or the map carries write
+	// stamps: readers combine several cells' flags only through a destruct.
 	mu         sync.RWMutex
 	destructed atomic.Bool
-	lifecycle  atomic.Bool
-}
-
-func (e *AddressEntry) noteLifecycle(path AccountPath, destruct bool) {
-	if !e.lifecycle.Load() {
-		e.lifecycle.Store(true)
-	}
-	if path == SelfDestructPath && destruct && !e.destructed.Load() {
-		e.destructed.Store(true)
-	}
 }
 
 // putCell sets/updates a typed cell at txIdx; caller holds e.mu.Lock(). Returns the (possibly new) map to assign back and the cell.
@@ -598,10 +588,9 @@ func (vm *VersionMap) WriteAddressExists(addr accounts.Address, v Version, value
 	e := vm.entryOrCreate(addr)
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	e.Address, _ = putCell(vm, e.Address, addr, AddressPath, v.TxIndex, v.Incarnation, flagFor(true), value, ValueChanged)
-	if cell, ok := e.Address.Get(v.TxIndex); ok {
-		cell.accSource = AccountFromBAL
-	}
+	var cell *WriteCell[*accounts.Account]
+	e.Address, cell = putCell(vm, e.Address, addr, AddressPath, v.TxIndex, v.Incarnation, flagFor(true), value, ValueChanged)
+	cell.accSource = AccountFromBAL
 }
 
 func (vm *VersionMap) WriteSelfDestruct(addr accounts.Address, v Version, value bool, complete bool) {
@@ -611,7 +600,9 @@ func (vm *VersionMap) WriteSelfDestruct(addr accounts.Address, v Version, value 
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.SelfDestruct, _ = putCell(vm, e.SelfDestruct, addr, SelfDestructPath, v.TxIndex, v.Incarnation, flagFor(complete), value, ValueChanged)
-	e.noteLifecycle(SelfDestructPath, value)
+	if value {
+		e.destructed.Store(true)
+	}
 }
 
 func (vm *VersionMap) WriteBalance(addr accounts.Address, v Version, value uint256.Int, complete bool) {
@@ -639,7 +630,6 @@ func (vm *VersionMap) WriteIncarnation(addr accounts.Address, v Version, value u
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.Incarnation, _ = putCell(vm, e.Incarnation, addr, IncarnationPath, v.TxIndex, v.Incarnation, flagFor(complete), value, ValueChanged)
-	e.noteLifecycle(IncarnationPath, false)
 }
 
 func (vm *VersionMap) WriteCode(addr accounts.Address, v Version, value accounts.Code, complete bool) {
@@ -676,7 +666,6 @@ func (vm *VersionMap) WriteCreateContract(addr accounts.Address, v Version, valu
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.CreateContract, _ = putCell(vm, e.CreateContract, addr, CreateContractPath, v.TxIndex, v.Incarnation, flagFor(complete), value, ValueChanged)
-	e.noteLifecycle(CreateContractPath, false)
 }
 
 func (vm *VersionMap) WriteStorage(addr accounts.Address, key accounts.StorageKey, v Version, value uint256.Int, complete bool) {
@@ -1491,7 +1480,9 @@ func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool) {
 		if vw, ok := writes.selfDestruct[addr]; ok {
 			e.SelfDestruct, vw.cell = putCell(vm, e.SelfDestruct, addr, SelfDestructPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, vw.valStatus)
 			vw.entry = e
-			e.noteLifecycle(SelfDestructPath, vw.Val)
+			if vw.Val {
+				e.destructed.Store(true)
+			}
 		}
 		if vw, ok := writes.balance[addr]; ok {
 			e.Balance, vw.cell = flushCell(vm, e.Balance, addr, BalancePath, vw.Version, flag, vw.Val, vw.valStatus, eqUint256, destructed)
@@ -1504,7 +1495,6 @@ func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool) {
 		if vw, ok := writes.incarnation[addr]; ok {
 			e.Incarnation, vw.cell = putCell(vm, e.Incarnation, addr, IncarnationPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, vw.valStatus)
 			vw.entry = e
-			e.noteLifecycle(IncarnationPath, false)
 		}
 		if vw, ok := writes.code[addr]; ok {
 			e.Code, vw.cell = flushCell(vm, e.Code, addr, CodePath, vw.Version, flag, vw.Val, vw.valStatus, eqCode, destructed)
@@ -1521,7 +1511,6 @@ func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool) {
 		if vw, ok := writes.createContract[addr]; ok {
 			e.CreateContract, vw.cell = putCell(vm, e.CreateContract, addr, CreateContractPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, vw.valStatus)
 			vw.entry = e
-			e.noteLifecycle(CreateContractPath, false)
 		}
 		if inner, ok := writes.storage[addr]; ok {
 			if e.Storage == nil {
