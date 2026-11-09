@@ -35,16 +35,11 @@ import (
 	"github.com/erigontech/erigon/db/version"
 )
 
-// 1. create folder with content; OpenFolder contains all dirtyFiles (check the dirty files)
-// 1.1 dirty file integration
-// 2. CloseFilesAFterRootNum
-// 3. check freezing range logics (different file)
-// 4. merge files
 type testFileRange struct {
 	fromStep, toStep uint64
 }
 
-func populateFiles2(t *testing.T, dirs datadir.Dirs, schema SnapNameSchema, stepSize uint64, ranges []testFileRange) (dataFileCount, btCount, existenceCount, accessorCount int) {
+func populateFiles2(t *testing.T, dirs datadir.Dirs, schema SnapNameSchema, stepSize uint64, ranges []testFileRange) {
 	t.Helper()
 	var allFiles []string //nolint:prealloc
 	v := version.V1_0
@@ -69,20 +64,12 @@ func populateFiles2(t *testing.T, dirs datadir.Dirs, schema SnapNameSchema, step
 		}
 	}
 
-	return populateFiles(t, dirs, schema, allFiles)
+	populateFiles(t, dirs, allFiles)
 }
 
-// this function creates mock files (.kvi, .v, .ef, .efi etc.) for the files specified in `allFiles`
-func populateFiles(t *testing.T, dirs datadir.Dirs, schema SnapNameSchema, allFiles []string) (dataFileCount, btCount, existenceCount, accessorCount int) {
+func populateFiles(t *testing.T, dirs datadir.Dirs, allFiles []string) {
 	t.Helper()
 
-	name := schema.DataTag()
-	extensions := schema.(*E3SnapSchema).FileExtensions()
-	dataFolder := schema.DataDirectory()
-
-	// populate data files
-
-	// 1. account domain, history and ii
 	fileGen := func(filename string) {
 		if strings.HasSuffix(filename, ".ef") || strings.HasSuffix(filename, ".v") || strings.HasSuffix(filename, ".kv") {
 			seg, err := seg.NewCompressor(t.Context(), t.Name(), filename, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
@@ -93,10 +80,6 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, schema SnapNameSchema, allFi
 				t.Fatal(err)
 			}
 			require.NoError(t, seg.Compress())
-
-			if strings.Contains(filename, name) && containsSubstring(t, filename, extensions) && strings.Contains(filename, dataFolder) {
-				dataFileCount++
-			}
 
 			return
 		}
@@ -126,10 +109,6 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, schema SnapNameSchema, allFi
 			}
 			seg3.Close()
 
-			if strings.Contains(filename, name) && containsSubstring(t, filename, extensions) {
-				btCount++
-			}
-
 			return
 		}
 
@@ -139,10 +118,6 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, schema SnapNameSchema, allFi
 			defer filter.Close()
 			filter.DisableFsync()
 			require.NoError(t, filter.Build())
-
-			if strings.Contains(filename, name) && containsSubstring(t, filename, extensions) {
-				existenceCount++
-			}
 
 			return
 		}
@@ -155,9 +130,6 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, schema SnapNameSchema, allFi
 			w.AddRun(1)
 			w.AddPage(0)
 			require.NoError(t, w.Build())
-			if strings.Contains(filename, name) && containsSubstring(t, filename, extensions) {
-				accessorCount++
-			}
 
 			return
 		}
@@ -184,9 +156,6 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, schema SnapNameSchema, allFi
 				t.Errorf("test is expected to fail, too few keys added")
 			}
 			rs.Close()
-			if strings.Contains(filename, name) && containsSubstring(t, filename, extensions) {
-				accessorCount++
-			}
 
 			return
 		}
@@ -195,16 +164,4 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, schema SnapNameSchema, allFi
 	for _, f := range allFiles {
 		fileGen(f)
 	}
-
-	return dataFileCount, btCount, existenceCount, accessorCount
-}
-
-func containsSubstring(t *testing.T, str string, list []string) bool {
-	t.Helper()
-	for _, s := range list {
-		if strings.Contains(str, s) {
-			return true
-		}
-	}
-	return false
 }

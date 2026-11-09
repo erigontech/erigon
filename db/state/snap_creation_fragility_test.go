@@ -547,7 +547,7 @@ func TestFindAccessorFilesBySearchVersion(t *testing.T) {
 	btFile, _ := domainSchema.BtIdxFile(version.V1_0, from, to)
 	exFile, _ := domainSchema.ExistenceFile(version.V1_0, from, to)
 	kvFile, _ := domainSchema.DataFile(version.V1_0, from, to)
-	populateFiles(t, dirs, domainSchema, []string{kvFile, btFile, exFile})
+	populateFiles(t, dirs, []string{kvFile, btFile, exFile})
 
 	btPath, err := domainSchema.BtIdxFile(version.SearchVersion, from, to)
 	require.NoError(t, err, "SearchVersion must find .bt accessor file on disk")
@@ -564,7 +564,7 @@ func TestFindAccessorFilesBySearchVersion(t *testing.T) {
 
 	efFile, _ := iiSchema.DataFile(version.V1_0, from, to)
 	efiFile, _ := iiSchema.AccessorIdxFile(version.V1_0, from, to, 0)
-	populateFiles(t, dirs, iiSchema, []string{efFile, efiFile})
+	populateFiles(t, dirs, []string{efFile, efiFile})
 
 	efiPath, err := iiSchema.AccessorIdxFile(version.SearchVersion, from, to, 0)
 	require.NoError(t, err, "SearchVersion must find .efi accessor file on disk")

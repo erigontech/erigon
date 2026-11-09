@@ -525,24 +525,6 @@ func (s *E3SnapSchema) DataFileCompression() seg.FileCompression {
 	return s.dataFileCompression
 }
 
-// debug method for getting all file extensions for this schema
-func (s *E3SnapSchema) FileExtensions() (extensions []string) {
-	extensions = append(extensions, s.dataExtension.String())
-	if s.indexFileMetadata.supported {
-		extensions = append(extensions, s.accessorIdxExtension.String())
-	}
-
-	if s.btIdxFileMetadata.supported {
-		extensions = append(extensions, ".bt")
-	}
-
-	if s.existenceFileMetadata.supported {
-		extensions = append(extensions, ".kvei")
-	}
-
-	return
-}
-
 func NewDomainSnapSchema(cfg statecfg.DomainCfg, stepSize uint64, dirs datadir.Dirs) *E3SnapSchema {
 	b := NewE3SnapSchemaBuilder(cfg.Accessors, stepSize).
 		Data(dirs.SnapDomain, cfg.Name.String(), DataExtensionKv, cfg.Compression, cfg.FileVersion.DataKV)
