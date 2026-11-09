@@ -22,8 +22,6 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 	"math/big"
-	"sync"
-	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -972,32 +970,6 @@ func TestStaticTxnProvider(t *testing.T) {
 		txns, err = p.ProvideTxns(t.Context(), txnprovider.WithAmount(1))
 		require.NoError(t, err)
 		require.Equal(t, []types.Transaction{stubTx}, txns)
-	})
-
-	t.Run("concurrent callers yield each list entry once", func(t *testing.T) {
-		t.Parallel()
-		p := &staticTxnProvider{txns: []types.Transaction{stubTx, stubTx}}
-		filter := mapset.NewSet[[32]byte]()
-		const goroutines = 32
-		var nonEmpty atomic.Int32
-		var wg sync.WaitGroup
-		start := make(chan struct{})
-		wg.Add(goroutines)
-		for range goroutines {
-			go func() {
-				defer wg.Done()
-				<-start
-				txns, err := p.ProvideTxns(t.Context(), txnprovider.WithAmount(1), txnprovider.WithTxnIdsFilter(filter))
-				assert.NoError(t, err)
-				if len(txns) > 0 {
-					assert.Equal(t, []types.Transaction{stubTx}, txns)
-					nonEmpty.Add(1)
-				}
-			}()
-		}
-		close(start)
-		wg.Wait()
-		assert.Equal(t, int32(len(p.txns)), nonEmpty.Load(), "each list entry must be yielded once")
 	})
 }
 

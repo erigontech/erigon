@@ -181,7 +181,7 @@ func (s *GrpcServer) Add(ctx context.Context, in *txpoolproto.AddRequest) (*txpo
 	var slots TxnSlots
 	parseCtx := NewTxnParseContext(s.chainID).ChainIDRequired().WithPoolRules()
 	parseCtx.ValidateRLP(ValidateSerializedTxn)
-	parseCtx.rejectPrefix = s.txPool.RejectFramePrefix
+	parseCtx.RejectPrefix(s.txPool.RejectFramePrefix)
 
 	reply := &txpoolproto.AddReply{Imported: make([]txpoolproto.ImportResult, len(in.RlpTxs)), Errors: make([]string, len(in.RlpTxs))}
 

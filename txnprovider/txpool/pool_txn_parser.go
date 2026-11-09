@@ -88,6 +88,8 @@ func NewTxnParseContext(chainID uint256.Int) *TxnParseContext {
 // Set the RLP validate function
 func (ctx *TxnParseContext) ValidateRLP(f func(txnRlp []byte) error) { ctx.validateRlp = f }
 
+func (ctx *TxnParseContext) RejectPrefix(f func(common.Hash)) { ctx.rejectPrefix = f }
+
 // Set the with sender flag
 func (ctx *TxnParseContext) WithSender(v bool) { ctx.withSender = v }
 

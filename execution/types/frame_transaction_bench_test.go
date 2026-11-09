@@ -94,6 +94,27 @@ func BenchmarkFrameTransactionValidate(b *testing.B) {
 	}
 }
 
+func BenchmarkFrameTransactionValidateArbitrary(b *testing.B) {
+	for _, mixed := range []bool{false, true} {
+		b.Run(fmt.Sprintf("mixed=%t", mixed), func(b *testing.B) {
+			tx := &FrameTransaction{NonceKeys: []uint256.Int{{}}, Frames: []Frame{{}}}
+			if mixed {
+				tx, _ = signedFrameTransaction(b, FrameSignatureSecp256k1, nil)
+				hash := tx.SigningHash(nil)
+				tx.Signatures[0].Message = hash[:]
+			}
+			tx.Signatures = append(tx.Signatures, FrameSignature{Scheme: FrameSignatureArbitrary, Signature: make([]byte, 128<<10)})
+			require.NoError(b, tx.Validate())
+			b.ReportAllocs()
+			for b.Loop() {
+				if err := tx.Validate(); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
 func BenchmarkFrameTransactionExecutionSetup(b *testing.B) {
 	for _, size := range []int{0, 128 << 10} {
 		for name, scheme := range map[string]uint8{"secp256k1": FrameSignatureSecp256k1, "p256": FrameSignatureP256} {

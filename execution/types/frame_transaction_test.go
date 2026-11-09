@@ -327,6 +327,17 @@ func TestFrameTransactionExplicitSignatureMutation(t *testing.T) {
 	}
 }
 
+func TestFrameTransactionCachedArbitrarySignatureMutation(t *testing.T) {
+	t.Parallel()
+	tx, _ := signedFrameTransaction(t, FrameSignatureSecp256k1, nil)
+	hash := tx.SigningHash(nil)
+	tx.Signatures[0].Message = hash[:]
+	tx.Signatures = append(tx.Signatures, FrameSignature{Scheme: FrameSignatureArbitrary})
+	require.NoError(t, tx.Validate())
+	tx.Signatures[1].Signer = make([]byte, 20)
+	require.EqualError(t, tx.Validate(), "invalid frame signature 1: arbitrary signature has signer")
+}
+
 func TestFrameTransactionMalformedSignature(t *testing.T) {
 	t.Parallel()
 	for name, test := range map[string]struct {

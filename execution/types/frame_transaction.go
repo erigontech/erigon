@@ -278,35 +278,36 @@ func (tx *FrameTransaction) validateSignatures() error {
 	// Successful cryptographic checks are cached; Validate still checks structure and gas.
 	// Copied signer, message and signature bytes, plus a fresh digest for signatures over
 	// the transaction, prevent changed inputs from reusing an earlier result.
-	var cachedSignatures, updatedSignatures []FrameSignature
-	if cached := tx.verifiedSignatures.Load(); cached != nil && cached.sender == tx.SenderAddress && cached.signingHash == signingHash {
-		cachedSignatures = cached.signatures
+	// Arbitrary payload bytes are not validated, so they are not compared or copied.
+	if cached := tx.verifiedSignatures.Load(); cached != nil && cached.sender == tx.SenderAddress && cached.signingHash == signingHash &&
+		slices.EqualFunc(tx.Signatures, cached.signatures, func(a, b FrameSignature) bool {
+			return a.Scheme == b.Scheme && bytes.Equal(a.Signer, b.Signer) && bytes.Equal(a.Message, b.Message) &&
+				(a.Scheme == FrameSignatureArbitrary || bytes.Equal(a.Signature, b.Signature))
+		}) {
+		return nil
 	}
+	hasCrypto := false
 	for i := range tx.Signatures {
 		sig := &tx.Signatures[i]
-		if sig.Scheme != FrameSignatureArbitrary && i < len(cachedSignatures) &&
-			sig.Scheme == cachedSignatures[i].Scheme && bytes.Equal(sig.Signer, cachedSignatures[i].Signer) &&
-			bytes.Equal(sig.Message, cachedSignatures[i].Message) && bytes.Equal(sig.Signature, cachedSignatures[i].Signature) {
-			continue
-		}
 		if err := sig.validate(tx.SenderAddress, signingHash); err != nil {
 			return fmt.Errorf("invalid frame signature %d: %w", i, err)
 		}
-		if sig.Scheme == FrameSignatureArbitrary {
-			continue
-		}
-		if updatedSignatures == nil {
-			updatedSignatures = make([]FrameSignature, len(tx.Signatures))
-			copy(updatedSignatures, cachedSignatures)
-		}
-		updatedSignatures[i] = FrameSignature{
-			Scheme: sig.Scheme, Signer: bytes.Clone(sig.Signer),
-			Message: bytes.Clone(sig.Message), Signature: bytes.Clone(sig.Signature),
-		}
+		hasCrypto = hasCrypto || sig.Scheme != FrameSignatureArbitrary
 	}
-	if updatedSignatures != nil {
+	if hasCrypto {
+		signatures := slices.Clone(tx.Signatures)
+		for i := range signatures {
+			sig := &signatures[i]
+			sig.Signer = bytes.Clone(sig.Signer)
+			sig.Message = bytes.Clone(sig.Message)
+			if sig.Scheme == FrameSignatureArbitrary {
+				sig.Signature = nil
+			} else {
+				sig.Signature = bytes.Clone(sig.Signature)
+			}
+		}
 		tx.verifiedSignatures.Store(&frameSignatureValidation{
-			sender: tx.SenderAddress, signingHash: signingHash, signatures: updatedSignatures,
+			sender: tx.SenderAddress, signingHash: signingHash, signatures: signatures,
 		})
 	}
 	return nil
