@@ -85,7 +85,7 @@ func (b *blobSidecarService) IsMyGossipMessage(name string) bool {
 
 func (b *blobSidecarService) DecodeGossipMessage(_ peer.ID, data []byte, version clparams.StateVersion) (*cltypes.BlobSidecar, error) {
 	obj := &cltypes.BlobSidecar{}
-	if err := obj.DecodeSSZ(data, int(version)); err != nil {
+	if err := decodeGossipSSZ(obj, data, version); err != nil {
 		return nil, err
 	}
 	return obj, nil

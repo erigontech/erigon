@@ -115,11 +115,8 @@ func decodeAndReadNoForkDigest(r io.Reader, val ssz.EncodableSSZ, version clpara
 	if expectedSize != nil && encodedLn != *expectedSize {
 		return fmt.Errorf("unexpected payload size: got %d, want %d", encodedLn, *expectedSize)
 	}
-	if encodedLn > clparams.MaxPayloadSize {
-		return fmt.Errorf("%w: payload too big", ErrPayloadExceedsLimit)
-	}
 	if encodedLn > maxSize {
-		return fmt.Errorf("%w: got %d, max %d", ErrPayloadExceedsLimit, encodedLn, maxSize)
+		return fmt.Errorf("%w: payload too big: got %d, max %d", ErrPayloadExceedsLimit, encodedLn, maxSize)
 	}
 
 	maxCompressedSize := uint64(snappy.MaxEncodedLen(int(encodedLn)))
