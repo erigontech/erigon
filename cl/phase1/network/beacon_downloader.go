@@ -769,8 +769,9 @@ func (f *ForwardBeaconDownloader) fetchGloasEnvelopes(
 			envelopes = make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope)
 		}
 		// Keep HTTP results separate so P2P envelopes are not checked again here.
+		missingRoots := filterReceived(fullRoots, envelopes)
 		httpEnvelopes := make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope)
-		httpResult := fetchEnvelopesFromBeaconAPI(ctx, f.httpFallbackURL, blocks, filterReceived(fullRoots, envelopes), httpEnvelopes, f.beaconCfg)
+		httpResult := fetchEnvelopesFromBeaconAPI(ctx, f.httpFallbackURL, blocks, missingRoots, httpEnvelopes, f.beaconCfg)
 		for root, envelope := range httpEnvelopes {
 			if err := validate(envelope); err != nil {
 				log.Debug("[ForwardBeaconDownloader] discarded invalid HTTP envelope", "root", root, "err", err)
