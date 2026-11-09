@@ -9,8 +9,8 @@
 projections of a 3-column relation, and there are only a handful of useful ones. The candidates people usually propose
 all fall out:
 
-- "ts → keys changed in [t1,t2)" (changesets) — that's HistoryRange, already served by the History facet because .v
-  files are ts-ordered. Composition, not a new column.
+- "ts → keys changed in [t1,t2)" (changesets) — that's HistoryRange, already served by the History facet through its
+  inverted index: .v files are ordered by key, then timestamp. Composition, not a new column.
 - "exists (key)?" — existence filters: accessor on Latest.
 - "hash → blockNum" — accessor on Headers' Latest.
 - append-only values by number (Headers, Caplin's beacon blocks) — degenerate Latest where key = ts, not a new facet.

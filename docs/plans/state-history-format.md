@@ -86,7 +86,7 @@ latest:   ◄──────── account.0-16.kv ────────�
 
 ### 3.2 What this already gets right
 
-- **Prune = `rm old_chunks`.** `GetAsOf(k, ts)` reads the *first change after ts* (a pre-value) or fallback to Latest
+- **Prune = `rm old_chunks`.** `GetAsOf(k, ts)` reads the *first change at or after ts* (a pre-value) or fallback to Latest
   Value (`.kv`) — so `{Latest State .kv} + {history after X}` is self-sufficient ("suffix-closure")
 - **It's small**: History doesn't store copy of Latest State. Block Execution on Chain Tip doesn't read History.
 - **Seed-what-you-use**: Same files used by serving RPC requests and initial Syncing/Seeding. No re-packing, no
@@ -130,7 +130,7 @@ Clients derive their own format of Latest State from "The History".
 | P1: no compaction    | Latest State doesn't need to be content-addressable anymore. All files will get "forever immutability" property (`.v` and `.ef` already have it)                                                   |
 | P2: no repair points | Every shard boundary is a "save point" can start re-execution from there at any time                                                                                                               |
 | P3: politics         | Spec = covers only history. Clients can derive any format of Latest State (or None - exec will work)                                                                                               |
-| P4: verification     | Free redundancy: span N's `latestValue(K)` == span N+1's first pre-value of K                                                                                                                      |
+| P4: verification     | Free redundancy: span N's `latestValue(K)` == span N+1's first pre-value of K. Checks span boundaries only: an altered pre-value inside a span still passes, so it does not verify history against consensus |
 | P5: hash what        | `(key, ts, value)` data-stream: is very fundamental thing. Means can `hash` it instead of files (maybe without MerkleTree). `Shard N+1`'s `hash` (of state history) can hook to `Shard N`'s `hash` |
 
 ### Limitations
