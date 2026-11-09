@@ -370,7 +370,7 @@ func receiptsSegmentRetentionCutoff(pruneMode prune.Mode, cc *chain.Config, head
 
 // isReceiptsSegmentPruned reports whether a receipt-related segment predates
 // pruneHeight (0 = keep everything) and should be skipped at download time.
-func isReceiptsSegmentPruned(ctx context.Context, tx kv.RwTx, txNumsReader rawdbv3.TxNumsReader, p snapcfg.PreverifiedItem, stepSize, pruneHeight uint64) bool {
+func isReceiptsSegmentPruned(ctx context.Context, tx kv.Tx, txNumsReader rawdbv3.TxNumsReader, p snapcfg.PreverifiedItem, stepSize, pruneHeight uint64) bool {
 	if strings.Contains(p.Name, "domain") {
 		return false // domain snapshots are never pruned
 	}
@@ -399,6 +399,134 @@ func unblackListFilesBySubstring(blackList map[string]struct{}, strs ...string) 
 			}
 		}
 	}
+}
+
+func SnapshotsToDownload(
+	ctx context.Context,
+	logPrefix string,
+	headerchain, blobs, caplinState bool,
+	prune prune.Mode,
+	caplin CaplinMode,
+	tx kv.Tx,
+	blockReader blockReader,
+	cc *chain.Config,
+	syncCfg ethconfig.Sync,
+	stepSize uint64,
+	preverifiedBlockSnapshots snapcfg.Preverified,
+	toBlock uint64,
+	toStep kv.Step,
+) ([]snapcfg.PreverifiedItem, error) {
+	txNumsReader := blockReader.TxnumReader()
+	frozenBlocks := blockReader.Snapshots().SegmentsMax()
+	// Corner cases:
+	// - Erigon generated file X with hash H1. User upgraded Erigon. New version has preverified file X with hash H2. Must ignore H2 (don't send to Downloader)
+	// - Erigon "download once": means restart/upgrade/downgrade must not download files (and will be fast)
+	// - After "download once" - Erigon will produce and seed new files
+
+	// send all hashes to the Downloader service
+	items := make([]snapcfg.PreverifiedItem, 0, len(preverifiedBlockSnapshots.Items))
+
+	blockPrune, historyPrune := computeBlocksToPrune(blockReader, prune)
+	blackListForPruning := make(map[string]struct{})
+	wantToPrune := downloadFilteringApplies(prune, cc)
+	if !headerchain && wantToPrune {
+		maxStateStep, err := getMaxStepRangeInSnapshots(preverifiedBlockSnapshots)
+		if err != nil {
+			return nil, err
+		}
+		commitmentHistoryPrune := prune.CommitmentHistoryAmount().PruneTo(frozenBlocks)
+		receiptsPrune := prune.ReceiptsAmount().PruneTo(frozenBlocks)
+		minBlockToDownload, minHistoryStep, minCommitmentHistoryStep, minReceiptsStep, err := getMinimumBlocksToDownload(
+			ctx, blockReader, tx, maxStateStep, stepSize, historyPrune, commitmentHistoryPrune, receiptsPrune,
+		)
+		if err != nil {
+			return nil, err
+		}
+		// Commitment-history filtering is opt-in; a zero step disables it in
+		// buildBlackListForPruning, so clear it when the window is unbounded.
+		if !prune.CommitmentHistoryAmount().Enabled() {
+			minCommitmentHistoryStep = 0
+		} else if minCommitmentHistoryStep > 0 {
+			log.Info(fmt.Sprintf("[%s] Filtering old commitment-history segments", logPrefix),
+				"pruneToBlock", commitmentHistoryPrune,
+				"minStep", minCommitmentHistoryStep)
+		}
+		// Receipts filtering is opt-in (requires --prune.include-receipts); a zero
+		// step disables it in buildBlackListForPruning.
+		if !prune.ReceiptsAmount().Enabled() {
+			minReceiptsStep = 0
+		} else if minReceiptsStep > 0 {
+			log.Info(fmt.Sprintf("[%s] Filtering old receipt-cache segments", logPrefix),
+				"pruneToBlock", receiptsPrune,
+				"minStep", minReceiptsStep)
+		}
+
+		blackListForPruning, err = buildBlackListForPruning(prune, cc, minHistoryStep, minCommitmentHistoryStep, minReceiptsStep, minBlockToDownload, blockPrune, preverifiedBlockSnapshots)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// If we want to get all receipts, we also need to unblack list log indexes (otherwise eth_getLogs won't work).
+	if syncCfg.PersistReceiptsCacheV2 {
+		unblackListFilesBySubstring(blackListForPruning, kv.LogAddrIdx.String(), kv.LogTopicIdx.String())
+	}
+
+	// build all download requests
+	for _, p := range preverifiedBlockSnapshots.Items {
+		if caplin == NoCaplin && (strings.Contains(p.Name, "beaconblocks") || strings.Contains(p.Name, "blobsidecars") || strings.Contains(p.Name, "caplin")) {
+			continue
+		}
+		if caplin == OnlyCaplin && !strings.Contains(p.Name, "beaconblocks") && !strings.Contains(p.Name, "blobsidecars") && !strings.Contains(p.Name, "caplin") {
+			continue
+		}
+
+		if isStateSnapshot(p.Name) && blockReader.FreezingCfg().DisableDownloadE3 {
+			continue
+		}
+		if !blobs && strings.Contains(p.Name, snaptype.BlobSidecars.Name()) {
+			continue
+		}
+		if !caplinState && strings.Contains(p.Name, "caplin/") {
+			continue
+		}
+		if headerchain &&
+			!(strings.Contains(p.Name, "headers") || strings.Contains(p.Name, "bodies") || p.Name == "salt-blocks.txt" || p.Name == "erigondb.toml") {
+			continue
+		}
+		if !syncCfg.KeepExecutionProofs && isStateHistory(p.Name) && strings.Contains(p.Name, kv.CommitmentDomain.String()) {
+			continue
+		}
+
+		if !syncCfg.PersistReceiptsCacheV2 && isStateSnapshot(p.Name) && strings.Contains(p.Name, kv.RCacheDomain.String()) {
+			continue
+		}
+
+		// rcache reaches this filter only in the follow-history default;
+		// explicit receipts windows are handled by the blacklist above.
+		isLogIndexSegment := strings.Contains(p.Name, kv.LogAddrIdx.String()) ||
+			strings.Contains(p.Name, kv.LogTopicIdx.String())
+		isRcacheHistorySegment := prune.ReceiptsFollowHistory() && strings.Contains(p.Name, kv.RCacheDomain.String())
+		if isLogIndexSegment || isRcacheHistorySegment {
+			cutoff := receiptsSegmentRetentionCutoff(prune, cc, frozenBlocks, p.Name)
+			if isReceiptsSegmentPruned(ctx, tx, txNumsReader, p, stepSize, cutoff) {
+				log.Debug(fmt.Sprintf("[%s] skipping expired receipt-related segment", logPrefix),
+					"name", p.Name, "cutoffBlock", cutoff, "rcacheHistory", isRcacheHistorySegment)
+				continue
+			}
+		}
+
+		if _, ok := blackListForPruning[p.Name]; ok {
+			continue
+		}
+
+		if filterToBlock(p.Name, toBlock, toStep, headerchain) {
+			continue
+		}
+
+		items = append(items, p)
+	}
+	return items, nil
 }
 
 // SyncSnapshots - Check snapshot states, determine what needs to be requested from the downloader
@@ -454,120 +582,13 @@ func SyncSnapshots(
 			tx.(kv.CanReopenUnderlyingFilesTx).ForceReopenUnderlyingFilesTx()
 		}
 
-		txNumsReader := blockReader.TxnumReader()
-
-		// This clause belongs in another function. We can take a long time here to determine what
-		// requests to send to the Downloader. Need to communicate that.
 		log.Info(fmt.Sprintf("[%s] Preparing snapshots request for %s", logPrefix, task))
-
-		frozenBlocks := blockReader.Snapshots().SegmentsMax()
-		// Corner cases:
-		// - Erigon generated file X with hash H1. User upgraded Erigon. New version has preverified file X with hash H2. Must ignore H2 (don't send to Downloader)
-		// - Erigon "download once": means restart/upgrade/downgrade must not download files (and will be fast)
-		// - After "download once" - Erigon will produce and seed new files
-
-		// send all hashes to the Downloader service
-		preverifiedBlockSnapshots := snapCfg.Preverified
-		downloadRequest := make([]dbservices.DownloadRequest, 0, len(preverifiedBlockSnapshots.Items))
-
-		blockPrune, historyPrune := computeBlocksToPrune(blockReader, prune)
-		blackListForPruning := make(map[string]struct{})
-		wantToPrune := downloadFilteringApplies(prune, cc)
-		if !headerchain && wantToPrune {
-			maxStateStep, err := getMaxStepRangeInSnapshots(preverifiedBlockSnapshots)
-			if err != nil {
-				return err
-			}
-			commitmentHistoryPrune := prune.CommitmentHistoryAmount().PruneTo(frozenBlocks)
-			receiptsPrune := prune.ReceiptsAmount().PruneTo(frozenBlocks)
-			minBlockToDownload, minHistoryStep, minCommitmentHistoryStep, minReceiptsStep, err := getMinimumBlocksToDownload(
-				ctx, blockReader, tx, maxStateStep, stepSize, historyPrune, commitmentHistoryPrune, receiptsPrune,
-			)
-			if err != nil {
-				return err
-			}
-			// Commitment-history filtering is opt-in; a zero step disables it in
-			// buildBlackListForPruning, so clear it when the window is unbounded.
-			if !prune.CommitmentHistoryAmount().Enabled() {
-				minCommitmentHistoryStep = 0
-			} else if minCommitmentHistoryStep > 0 {
-				log.Info(fmt.Sprintf("[%s] Filtering old commitment-history segments", logPrefix),
-					"pruneToBlock", commitmentHistoryPrune,
-					"minStep", minCommitmentHistoryStep)
-			}
-			// Receipts filtering is opt-in (requires --prune.include-receipts); a zero
-			// step disables it in buildBlackListForPruning.
-			if !prune.ReceiptsAmount().Enabled() {
-				minReceiptsStep = 0
-			} else if minReceiptsStep > 0 {
-				log.Info(fmt.Sprintf("[%s] Filtering old receipt-cache segments", logPrefix),
-					"pruneToBlock", receiptsPrune,
-					"minStep", minReceiptsStep)
-			}
-
-			blackListForPruning, err = buildBlackListForPruning(prune, cc, minHistoryStep, minCommitmentHistoryStep, minReceiptsStep, minBlockToDownload, blockPrune, preverifiedBlockSnapshots)
-			if err != nil {
-				return err
-			}
+		items, err := SnapshotsToDownload(ctx, logPrefix, headerchain, blobs, caplinState, prune, caplin, tx, blockReader, cc, syncCfg, stepSize, snapCfg.Preverified, toBlock, toStep)
+		if err != nil {
+			return err
 		}
-
-		// If we want to get all receipts, we also need to unblack list log indexes (otherwise eth_getLogs won't work).
-		if syncCfg.PersistReceiptsCacheV2 {
-			unblackListFilesBySubstring(blackListForPruning, kv.LogAddrIdx.String(), kv.LogTopicIdx.String())
-		}
-
-		// build all download requests
-		for _, p := range preverifiedBlockSnapshots.Items {
-			if caplin == NoCaplin && (strings.Contains(p.Name, "beaconblocks") || strings.Contains(p.Name, "blobsidecars") || strings.Contains(p.Name, "caplin")) {
-				continue
-			}
-			if caplin == OnlyCaplin && !strings.Contains(p.Name, "beaconblocks") && !strings.Contains(p.Name, "blobsidecars") && !strings.Contains(p.Name, "caplin") {
-				continue
-			}
-
-			if isStateSnapshot(p.Name) && blockReader.FreezingCfg().DisableDownloadE3 {
-				continue
-			}
-			if !blobs && strings.Contains(p.Name, snaptype.BlobSidecars.Name()) {
-				continue
-			}
-			if !caplinState && strings.Contains(p.Name, "caplin/") {
-				continue
-			}
-			if headerchain &&
-				!(strings.Contains(p.Name, "headers") || strings.Contains(p.Name, "bodies") || p.Name == "salt-blocks.txt" || p.Name == "erigondb.toml") {
-				continue
-			}
-			if !syncCfg.KeepExecutionProofs && isStateHistory(p.Name) && strings.Contains(p.Name, kv.CommitmentDomain.String()) {
-				continue
-			}
-
-			if !syncCfg.PersistReceiptsCacheV2 && isStateSnapshot(p.Name) && strings.Contains(p.Name, kv.RCacheDomain.String()) {
-				continue
-			}
-
-			// rcache reaches this filter only in the follow-history default;
-			// explicit receipts windows are handled by the blacklist above.
-			isLogIndexSegment := strings.Contains(p.Name, kv.LogAddrIdx.String()) ||
-				strings.Contains(p.Name, kv.LogTopicIdx.String())
-			isRcacheHistorySegment := prune.ReceiptsFollowHistory() && strings.Contains(p.Name, kv.RCacheDomain.String())
-			if isLogIndexSegment || isRcacheHistorySegment {
-				cutoff := receiptsSegmentRetentionCutoff(prune, cc, frozenBlocks, p.Name)
-				if isReceiptsSegmentPruned(ctx, tx, txNumsReader, p, stepSize, cutoff) {
-					log.Debug(fmt.Sprintf("[%s] skipping expired receipt-related segment", logPrefix),
-						"name", p.Name, "cutoffBlock", cutoff, "rcacheHistory", isRcacheHistorySegment)
-					continue
-				}
-			}
-
-			if _, ok := blackListForPruning[p.Name]; ok {
-				continue
-			}
-
-			if filterToBlock(p.Name, toBlock, toStep, headerchain) {
-				continue
-			}
-
+		downloadRequest := make([]dbservices.DownloadRequest, 0, len(items))
+		for _, p := range items {
 			downloadRequest = append(downloadRequest, dbservices.DownloadRequest{
 				Path:        p.Name,
 				TorrentHash: p.Hash,
