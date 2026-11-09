@@ -1035,112 +1035,6 @@ func TestDUComputeEstimates_ArchiveSkipsCommitmentHistory(t *testing.T) {
 	require.Equal(t, int64(100), estimates[0].TotalBytes)
 }
 
-func TestDUDetectNodeType(t *testing.T) {
-	t.Run("archive - has old state history from step 0", func(t *testing.T) {
-		// Archive mode keeps all history — old history files from step 0 are present.
-		files := []duFileInfo{
-			{Category: duCatDomains, Size: 100, IsState: true, To: 2000},
-			{Category: duCatHistory, Size: 500, IsState: true, From: 0, To: 500},
-			{Category: duCatHistory, Size: 500, IsState: true, From: 500, To: 2000},
-			{Category: duCatBlocks, IsState: false, From: 0, To: 500000, Size: 200},
-		}
-		require.Equal(t, "archive", duDetectNodeType(files))
-	})
-
-	t.Run("archive - with commitment hist and rcache (still archive by history)", func(t *testing.T) {
-		files := []duFileInfo{
-			{Category: duCatDomains, Size: 100, IsState: true, To: 2000},
-			{Category: duCatHistory, Size: 500, IsState: true, From: 0, To: 500},
-			{Category: duCatCommitHist, Size: 50, IsState: true, From: 0, To: 500},
-			{Category: duCatRcache, Size: 50, IsState: true, From: 0, To: 500},
-			{Category: duCatBlocks, IsState: false, To: 500000, Size: 200},
-		}
-		require.Equal(t, "archive", duDetectNodeType(files))
-	})
-
-	t.Run("blocks - has tx blocks from 0, no old state history", func(t *testing.T) {
-		// Blocks mode keeps all tx segments (including from genesis) but
-		// prunes state history. Detector recognises this via a tx segment
-		// starting at From=0 on a chain mature enough for distance pruning
-		// to have kicked in. maxBlock=2_000_000 > MinimalPruneDistance=100_000.
-		files := []duFileInfo{
-			{Category: duCatDomains, Size: 100, IsState: true, To: 50},
-			{Category: duCatHistory, Size: 500, IsState: true, From: 40, To: 50},
-			{Category: duCatRcache, Size: 50, IsState: true, From: 0, To: 50},
-			{Name: "000000-000300-transactions.seg", Category: duCatBlocks, IsState: false, From: 0, To: 300000, Size: 200},
-			{Name: "000300-002000-headers.seg", Category: duCatBlocks, IsState: false, From: 300000, To: 2000000, Size: 200},
-		}
-		require.Equal(t, "blocks", duDetectNodeType(files))
-	})
-
-	t.Run("full - has old transaction blocks not from 0, no old state history", func(t *testing.T) {
-		// Transactions start at 800000 (not 0). To=1_500_000 below minimal's
-		// cutoff (1_900_000) → "full". maxBlock=2_000_000,
-		// MinimalPruneDistance=100_000.
-		files := []duFileInfo{
-			{Category: duCatDomains, Size: 100, IsState: true, To: 50},
-			{Category: duCatHistory, Size: 500, IsState: true, From: 40, To: 50},
-			{Name: "800-1500-transactions.seg", Category: duCatBlocks, IsState: false, From: 800000, To: 1500000, Size: 200},
-			{Name: "1500-2000-transactions.seg", Category: duCatBlocks, IsState: false, From: 1500000, To: 2000000, Size: 200},
-		}
-		require.Equal(t, "full", duDetectNodeType(files))
-	})
-
-	t.Run("minimal - only recent blocks", func(t *testing.T) {
-		files := []duFileInfo{
-			{Category: duCatDomains, Size: 100, IsState: true, To: 50},
-			{Category: duCatBlocks, IsState: false, From: 450000, To: 500000, Size: 200},
-		}
-		require.Equal(t, "minimal", duDetectNodeType(files))
-	})
-
-	t.Run("minimal - empty files", func(t *testing.T) {
-		require.Equal(t, "minimal", duDetectNodeType(nil))
-	})
-
-	t.Run("minimal - blocks below prune distance threshold", func(t *testing.T) {
-		// maxBlock=50000 < MinimalPruneDistance=100_000 → can't determine old blocks
-		files := []duFileInfo{
-			{Category: duCatBlocks, IsState: false, From: 0, To: 50000, Size: 200},
-		}
-		require.Equal(t, "minimal", duDetectNodeType(files))
-	})
-
-	t.Run("young chain with history from 0 not detected as archive", func(t *testing.T) {
-		// Chain too young for pruning to matter — archive detection uses full's
-		// step distance (the larger one) so any state at step 0 only proves
-		// archive when full would already have pruned.
-		// fullStepPruneDistance = 262144 * 5 / 50000 = 26, maxStep=5 < 26
-		files := []duFileInfo{
-			{Category: duCatDomains, Size: 100, IsState: true, To: 5},
-			{Category: duCatHistory, Size: 500, IsState: true, From: 0, To: 5},
-			{Category: duCatBlocks, IsState: false, From: 0, To: 50000, Size: 200},
-		}
-		// maxStep=5 <= fullStepPruneDistance=26 → too young for archive classification,
-		// falls through to block-based detection. maxBlock=50000 <
-		// MinimalPruneDistance=100_000 → no full classification → minimal.
-		require.Equal(t, "minimal", duDetectNodeType(files))
-	})
-
-	t.Run("genesis tx in [MinimalPruneDistance, DefaultPruneDistance] band not classified as blocks", func(t *testing.T) {
-		// maxBlock=200_000 sits between MinimalPruneDistance (100_000) and
-		// DefaultPruneDistance (262_144). At this height a full-mode node
-		// still has the genesis tx segment because distance pruning hasn't
-		// kicked in yet — gating "blocks" on MinimalPruneDistance would
-		// misclassify it. With the fullPruneDistance gate the genesis tx is
-		// not evidence of blocks here, and the next branch correctly
-		// classifies it as full via the segment whose To equals the minimal
-		// cutoff (100_000 == 200_000 - 100_000).
-		files := []duFileInfo{
-			{Category: duCatDomains, Size: 100, IsState: true, To: 50},
-			{Category: duCatHistory, Size: 500, IsState: true, From: 40, To: 50},
-			{Name: "0-100-transactions.seg", Category: duCatBlocks, IsState: false, From: 0, To: 100_000, Size: 200},
-			{Name: "100-200-transactions.seg", Category: duCatBlocks, IsState: false, From: 100_000, To: 200_000, Size: 200},
-		}
-		require.Equal(t, "full", duDetectNodeType(files))
-	})
-}
-
 func TestDUAggregateCategories(t *testing.T) {
 	files := []duFileInfo{
 		{Category: duCatDomains, Size: 100},
@@ -1163,12 +1057,12 @@ func TestDUAggregateCategories_Empty(t *testing.T) {
 
 func TestDUFormatHuman(t *testing.T) {
 	result := duResult{
-		Chain:        "mainnet",
-		DetectedMode: "archive",
-		BlockRange:   [2]uint64{0, 21500000},
-		StepRange:    [2]uint64{0, 2048},
-		TotalBytes:   1024 * 1024 * 1024 * 100, // 100 GB
-		TotalFiles:   500,
+		Chain:          "mainnet",
+		ConfiguredMode: "archive",
+		BlockRange:     [2]uint64{0, 21500000},
+		StepRange:      [2]uint64{0, 2048},
+		TotalBytes:     1024 * 1024 * 1024 * 100, // 100 GB
+		TotalFiles:     500,
 		Categories: map[string]duCategoryStat{
 			duCatDomains: {Bytes: 50 * 1024 * 1024 * 1024, Files: 200},
 			duCatHistory: {Bytes: 30 * 1024 * 1024 * 1024, Files: 150},
@@ -1184,9 +1078,8 @@ func TestDUFormatHuman(t *testing.T) {
 	duFormatHuman(&buf, result, false)
 	out := buf.String()
 
-	// Check header line — no ConfiguredMode set, so shows "archive (detected)".
 	require.True(t, strings.Contains(out, "mainnet"), "should contain chain name")
-	require.True(t, strings.Contains(out, "archive (detected)"), "should show detected mode with qualifier when DB unavailable")
+	require.True(t, strings.Contains(out, "mainnet | archive |"), "should show the configured mode")
 	require.True(t, strings.Contains(out, "21.500.000"), "should contain formatted block range")
 	require.True(t, strings.Contains(out, "2.048"), "should contain formatted step range")
 
@@ -1204,53 +1097,23 @@ func TestDUFormatHuman(t *testing.T) {
 }
 
 func TestDUFormatHuman_ConfiguredMode(t *testing.T) {
-	t.Run("configured matches detected", func(t *testing.T) {
-		result := duResult{
-			Chain:          "mainnet",
-			ConfiguredMode: "full",
-			DetectedMode:   "full",
-			Categories:     map[string]duCategoryStat{},
-		}
+	t.Run("from chaindata", func(t *testing.T) {
 		var buf bytes.Buffer
-		duFormatHuman(&buf, result, false)
-		out := buf.String()
-		require.Contains(t, out, "full")
-		require.NotContains(t, out, "(detected)")
-		require.NotContains(t, out, "files look like")
+		duFormatHuman(&buf, duResult{Chain: "mainnet", ConfiguredMode: "full", Categories: map[string]duCategoryStat{}}, false)
+		require.Contains(t, buf.String(), "mainnet | full |")
 	})
 
-	t.Run("configured differs from detected", func(t *testing.T) {
-		result := duResult{
-			Chain:          "mainnet",
-			ConfiguredMode: "full",
-			DetectedMode:   "archive",
-			Categories:     map[string]duCategoryStat{},
-		}
+	t.Run("no chaindata", func(t *testing.T) {
 		var buf bytes.Buffer
-		duFormatHuman(&buf, result, false)
-		out := buf.String()
-		require.Contains(t, out, "full")
-		require.Contains(t, out, "files look like archive")
-	})
-
-	t.Run("no DB - shows detected with qualifier", func(t *testing.T) {
-		result := duResult{
-			Chain:        "unknown",
-			DetectedMode: "minimal",
-			Categories:   map[string]duCategoryStat{},
-		}
-		var buf bytes.Buffer
-		duFormatHuman(&buf, result, false)
-		out := buf.String()
-		require.Contains(t, out, "minimal (detected)")
+		duFormatHuman(&buf, duResult{Chain: "unknown", Categories: map[string]duCategoryStat{}}, false)
+		require.Contains(t, buf.String(), "unknown | mode unknown |")
 	})
 }
 
 func TestDUFormatHuman_EmptyResult(t *testing.T) {
 	result := duResult{
-		Chain:        "unknown",
-		DetectedMode: "minimal",
-		Categories:   map[string]duCategoryStat{},
+		Chain:      "unknown",
+		Categories: map[string]duCategoryStat{},
 	}
 
 	var buf bytes.Buffer
@@ -1263,12 +1126,11 @@ func TestDUFormatHuman_EmptyResult(t *testing.T) {
 
 func TestDUFormatJSON(t *testing.T) {
 	result := duResult{
-		Chain:        "mainnet",
-		DetectedMode: "archive",
-		BlockRange:   [2]uint64{0, 21500000},
-		StepRange:    [2]uint64{0, 2048},
-		TotalBytes:   107374182400,
-		TotalFiles:   500,
+		Chain:      "mainnet",
+		BlockRange: [2]uint64{0, 21500000},
+		StepRange:  [2]uint64{0, 2048},
+		TotalBytes: 107374182400,
+		TotalFiles: 500,
 		Categories: map[string]duCategoryStat{
 			duCatDomains: {Bytes: 53687091200, Files: 200},
 			duCatHistory: {Bytes: 32212254720, Files: 150},
@@ -1288,7 +1150,6 @@ func TestDUFormatJSON(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t, "mainnet", decoded.Chain)
-	require.Equal(t, "archive", decoded.DetectedMode)
 	require.Equal(t, [2]uint64{0, 21500000}, decoded.BlockRange)
 	require.Equal(t, [2]uint64{0, 2048}, decoded.StepRange)
 	require.Equal(t, int64(107374182400), decoded.TotalBytes)
@@ -1419,14 +1280,13 @@ func TestDUAcceptanceCriteria(t *testing.T) {
 
 	// Build result struct.
 	result := duResult{
-		Chain:        "mainnet",
-		DetectedMode: "archive",
-		BlockRange:   [2]uint64{0, maxBlock},
-		StepRange:    [2]uint64{0, maxStep},
-		TotalBytes:   expectedTotal,
-		TotalFiles:   len(files),
-		Categories:   cats,
-		Estimates:    estimates,
+		Chain:      "mainnet",
+		BlockRange: [2]uint64{0, maxBlock},
+		StepRange:  [2]uint64{0, maxStep},
+		TotalBytes: expectedTotal,
+		TotalFiles: len(files),
+		Categories: cats,
+		Estimates:  estimates,
 	}
 
 	// Acceptance criterion 1: human output has all three sections.
@@ -1465,7 +1325,6 @@ func TestDUAcceptanceCriteria(t *testing.T) {
 
 	// Verify round-trip fidelity.
 	require.Equal(t, result.Chain, decoded.Chain)
-	require.Equal(t, result.DetectedMode, decoded.DetectedMode)
 	require.Equal(t, result.BlockRange, decoded.BlockRange)
 	require.Equal(t, result.StepRange, decoded.StepRange)
 	require.Equal(t, result.TotalBytes, decoded.TotalBytes)

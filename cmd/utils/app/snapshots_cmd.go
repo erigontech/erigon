@@ -4027,83 +4027,6 @@ func duComputeEstimates(files []duFileInfo, snapDir string, sel duSelectFunc) ([
 	return estimates, nil
 }
 
-// duDetectNodeType infers the current node mode from which files are present.
-// Archive nodes retain all state history from step 0; non-archive modes have
-// pruned it, so old state history files are absent. Among non-archive modes:
-//   - Blocks mode keeps all transaction segments (from genesis) but prunes
-//     state history. Detected by the presence of a tx segment with From=0
-//     on a chain past DefaultPruneDistance, where full would have pruned it.
-//   - Full prunes both state history and transaction segments older than
-//     DefaultPruneDistance.
-//   - Minimal does the same but at the smaller MinimalPruneDistance, so it
-//     keeps a narrower recent window than full.
-//
-// On chains between MinimalPruneDistance and DefaultPruneDistance, full and
-// blocks look identical on disk (full has not yet pruned tx); the detector
-// defaults the ambiguous case to full, the more common mode.
-func duDetectNodeType(files []duFileInfo) string {
-	hasOldStateHistory := false
-	hasGenesisTxSegment := false
-	var maxBlock, maxStep uint64
-
-	fullPruneDistance := uint64(config3.DefaultPruneDistance)
-	minimalPruneDistance := uint64(config3.MinimalPruneDistance)
-
-	for _, f := range files {
-		// Track max ranges for pruning cutoff calculations.
-		if f.IsState && f.To > maxStep {
-			maxStep = f.To
-		}
-		if f.Category == duCatBlocks && !f.IsState {
-			if f.To > maxBlock {
-				maxBlock = f.To
-			}
-			if f.From == 0 && strings.Contains(strings.ToLower(f.Name), "transactions") {
-				hasGenesisTxSegment = true
-			}
-		}
-		// Regular state history files (not commitment hist, not rcache) starting
-		// at step 0 indicate archive mode — only archive keeps all history.
-		if f.Category == duCatHistory && f.From == 0 && f.To > 0 {
-			hasOldStateHistory = true
-		}
-	}
-
-	// Archive: keeps all state history from step 0. Use the LARGER (full's)
-	// step prune distance as the maturity threshold — a chain too young for
-	// full to have pruned isn't evidence of archive mode.
-	var fullStepPruneDistance uint64
-	if maxStep > 0 && maxBlock > 0 {
-		fullStepPruneDistance = fullPruneDistance * maxStep / maxBlock
-	}
-	if hasOldStateHistory && (fullStepPruneDistance == 0 || maxStep > fullStepPruneDistance) {
-		return "archive"
-	}
-
-	// Blocks mode: tx segments from genesis are present and the chain is past
-	// the point where full would have pruned them. Gate on fullPruneDistance —
-	// below that, full hasn't started pruning tx yet and a genesis tx segment
-	// is not evidence of blocks mode.
-	if hasGenesisTxSegment && maxBlock > fullPruneDistance {
-		return "blocks"
-	}
-
-	// Distinguish full from minimal by looking for transaction segments that
-	// minimal would have pruned but full would have kept — i.e., segments
-	// below (maxBlock - minimalPruneDistance). Presence of such segments
-	// indicates full mode.
-	if maxBlock > minimalPruneDistance {
-		for _, f := range files {
-			if f.Category == duCatBlocks && !f.IsState && strings.Contains(strings.ToLower(f.Name), "transactions") &&
-				f.To > 0 && f.To <= maxBlock-minimalPruneDistance {
-				return "full"
-			}
-		}
-	}
-
-	return "minimal"
-}
-
 // duCategoryStat holds aggregated size and file count for one category.
 type duCategoryStat struct {
 	Bytes int64 `json:"bytes"`
@@ -4114,7 +4037,6 @@ type duCategoryStat struct {
 type duResult struct {
 	Chain           string                               `json:"chain"`
 	ConfiguredMode  string                               `json:"configured_mode,omitempty"` // from DB; empty when DB unavailable
-	DetectedMode    string                               `json:"detected_mode"`
 	BlockRange      [2]uint64                            `json:"block_range"`
 	StepRange       [2]uint64                            `json:"step_range"`
 	TotalBytes      int64                                `json:"total_bytes"`
@@ -4210,13 +4132,9 @@ func duFormatNumber(n uint64) string {
 
 // duFormatHuman writes the human-readable du output to w.
 func duFormatHuman(w io.Writer, result duResult, verbose bool) {
-	// Header line: show configured mode from DB when available, always show detected.
-	modeStr := result.DetectedMode + " (detected)"
-	if result.ConfiguredMode != "" {
-		modeStr = result.ConfiguredMode
-		if result.ConfiguredMode != result.DetectedMode {
-			modeStr += fmt.Sprintf(" (files look like %s)", result.DetectedMode)
-		}
+	modeStr := result.ConfiguredMode
+	if modeStr == "" {
+		modeStr = "mode unknown"
 	}
 	fmt.Fprintf(w, "\n%s | %s | blocks 0–%s | steps 0–%s\n",
 		result.Chain, modeStr,
@@ -4383,7 +4301,6 @@ func doDU(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs, logger lo
 	result := duResult{
 		Chain:           chainName,
 		ConfiguredMode:  configuredMode,
-		DetectedMode:    duDetectNodeType(files),
 		BlockRange:      [2]uint64{0, maxBlock},
 		StepRange:       [2]uint64{0, maxStep},
 		TotalBytes:      totalBytes,
