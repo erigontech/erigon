@@ -146,8 +146,7 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(baseState *state.C
 	}
 	ap.attCacheMutex.RUnlock()
 
-	// in case the target epoch is not found, let's generate it with lock to avoid everyone trying to generate it
-	// at the same time, which would be a waste of memory resources
+	// Serialize cache misses to limit peak memory use during state copying and epoch processing.
 	ap.attCacheMutex.Lock()
 	defer ap.attCacheMutex.Unlock()
 
@@ -161,6 +160,7 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(baseState *state.C
 			log.Warn("Failed to copy base state", "slot", slot, "err", err)
 			return solid.AttestationData{}, err
 		}
+		// Reaching the first slot of the target epoch also completes the epoch transition.
 		if err := transition.DefaultMachine.ProcessSlots(baseState, ap.beaconCfg.RoundSlotToEpoch(slot)); err != nil {
 			log.Warn("Failed to process slots", "slot", slot, "err", err)
 			return solid.AttestationData{}, err

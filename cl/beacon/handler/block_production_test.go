@@ -6439,7 +6439,7 @@ func TestGetEthV1ValidatorAttestationDataGloasPayloadIndex(t *testing.T) {
 		blockSlot  uint64
 		status     cltypes.PayloadStatus
 		verified   bool
-		childHead  bool // the head is a child of the served root, as when attestation data was cached earlier in the slot
+		childHead  bool // the selected head is a child of the attested block
 		cached     bool
 		headErr    bool
 		forkChoice bool

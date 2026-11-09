@@ -780,8 +780,9 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 		}
 	}
 
-	// The cached attestation data has CommitteeIndex=0 (shared across all committees for the same slot), but the VC
-	// expects it to match the requested committee_index. In Gloas the field signals payload presence instead.
+	// Cached data is shared across committees and keeps CommitteeIndex at zero.
+	// The API returns the requested index before Electra, leaves it zero in Electra
+	// and Fulu, and uses it to signal payload presence from Gloas.
 	if clversion.AfterOrEqual(clparams.GloasVersion) {
 		attestationData.CommitteeIndex, err = a.gloasAttestationIndex(*slot, attestationData.BeaconBlockRoot, head, forkChoiceData)
 		if err != nil {
@@ -817,8 +818,8 @@ func (a *ApiHandler) gloasAttestationIndex(slot uint64, root common.Hash, head f
 			)
 		}
 	}
-	// Attestation data is cached per slot, so the served root can be an ancestor of the head; take the payload status
-	// the head's chain gives it.
+	// The attested block can be an ancestor of the selected head. Its payload status
+	// must come from that head's chain.
 	if head.Root != root {
 		head = a.forkchoiceStore.Ancestor(head.Root, header.Slot)
 	}
