@@ -186,7 +186,7 @@ func (r *Ring) complete(count int) ([2]int32, error) {
 	for reaped < count {
 		head := atomic.LoadUint32(r.cqHead)
 		tail := atomic.LoadUint32(r.cqTail)
-		for head != tail {
+		for head != tail && reaped < count {
 			cqe := r.cqes + (head&r.cqMask)*cqeSize
 			id := *(*uint64)(unsafe.Pointer(&r.cqRing[cqe]))
 			if id >= uint64(count) {

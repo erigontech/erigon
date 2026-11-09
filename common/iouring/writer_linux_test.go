@@ -18,12 +18,12 @@ package iouring
 
 import (
 	"bytes"
-	"encoding/binary"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sync/atomic"
 	"testing"
+	"unsafe"
 
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sys/unix"
@@ -131,6 +131,61 @@ func TestWriterAbortSkipsBufferedData(t *testing.T) {
 	require.NoError(t, w.Close())
 }
 
+func TestWriterResubmitsShortWrite(t *testing.T) {
+	data := make([]byte, 1<<20+100)
+	for i := range data {
+		data[i] = byte(i%251 + 1)
+	}
+	open := func(t *testing.T) (*Writer, string) {
+		path := filepath.Join(t.TempDir(), "output")
+		f, err := os.Create(path)
+		require.NoError(t, err)
+		_, err = f.WriteString("prefix")
+		require.NoError(t, err)
+		w := NewWriter(f)
+		require.NotNil(t, w.ring)
+		return w, path
+	}
+	requireOutput := func(t *testing.T, path string, hole int, tail []byte) {
+		actual, err := os.ReadFile(path)
+		require.NoError(t, err)
+		expected := append(append([]byte("prefix"), make([]byte, hole)...), tail...)
+		require.True(t, bytes.Equal(expected, actual), "got %d bytes, want %d", len(actual), len(expected))
+	}
+	t.Run("final", func(t *testing.T) {
+		w, path := open(t)
+		_, err := w.Write(data[:100])
+		require.NoError(t, err)
+		injectCompletion(w.ring, 0, 60)
+		injectCompletion(w.ring, 1, -int32(unix.ECANCELED))
+		injectCompletion(w.ring, 0, -int32(unix.EOPNOTSUPP))
+		injectCompletion(w.ring, 1, -int32(unix.ECANCELED))
+		require.NoError(t, w.Close())
+		requireOutput(t, path, 60, data[60:100])
+	})
+	t.Run("non-final", func(t *testing.T) {
+		w, path := open(t)
+		_, err := w.Write(data[:1<<20])
+		require.NoError(t, err)
+		injectCompletion(w.ring, 0, 1<<20-10)
+		injectCompletion(w.ring, 0, -int32(unix.EOPNOTSUPP))
+		_, err = w.Write(data[1<<20:])
+		require.NoError(t, err)
+		require.NoError(t, w.Close())
+		requireOutput(t, path, 1<<20-10, data[1<<20-10:])
+	})
+	t.Run("fsync fails on retry", func(t *testing.T) {
+		w, _ := open(t)
+		_, err := w.Write(data[:100])
+		require.NoError(t, err)
+		injectCompletion(w.ring, 0, 60)
+		injectCompletion(w.ring, 1, -int32(unix.ECANCELED))
+		injectCompletion(w.ring, 0, 40)
+		injectCompletion(w.ring, 1, -int32(unix.EIO))
+		require.ErrorIs(t, w.Close(), unix.EIO)
+	})
+}
+
 func TestWriterFallsBackWhenRingFsyncUnsupported(t *testing.T) {
 	f, err := os.Create(filepath.Join(t.TempDir(), "output"))
 	require.NoError(t, err)
@@ -169,7 +224,7 @@ func TestWriterSyncsAfterFallback(t *testing.T) {
 func injectCompletion(r *Ring, id uint64, res int32) {
 	tail := atomic.LoadUint32(r.cqTail)
 	cqe := r.cqes + (tail&r.cqMask)*cqeSize
-	binary.LittleEndian.PutUint64(r.cqRing[cqe:], id)
-	binary.LittleEndian.PutUint32(r.cqRing[cqe+8:], uint32(res))
+	*(*uint64)(unsafe.Pointer(&r.cqRing[cqe])) = id
+	*p32(r.cqRing, cqe+8) = uint32(res)
 	atomic.StoreUint32(r.cqTail, tail+1)
 }
