@@ -52,6 +52,7 @@ var blocksByRangeTopic = communication.BeaconBlocksByRangeProtocolV2 + "," + com
 
 var (
 	ErrInvalidResponse             = errors.New("invalid peer response")
+	errTooManyChunks               = errors.New("response contains more chunks than requested")
 	errBlockForkSchemaSlotMismatch = errors.New("block schema fork disagrees with the fork implied by its slot")
 )
 
@@ -174,16 +175,15 @@ func (b *BeaconRpcP2P) SendColumnSidecarsByRootIdentifierReqWithSnapshot(
 
 	data := buffer.Bytes()
 	maxResponseBytes := communication.MaxWireResponseBytes(b.columnSidecarRawBytes(), requestedColumnCount)
-	responsePacket, pid, err := b.sendRequestWithPeer(ctx, communication.DataColumnSidecarsByRootProtocolV1, data, pid, maxResponseBytes, requestedColumnCount+1)
+	responsePacket, pid, err := b.sendRequestWithPeer(ctx, communication.DataColumnSidecarsByRootProtocolV1, data, pid, maxResponseBytes, requestedColumnCount)
+	if errors.Is(err, errTooManyChunks) {
+		b.BanPeerForInvalidData(ctx, pid)
+	}
 	if err != nil {
 		return nil, pid, filteredReq, err
 	}
 	if len(responsePacket) == 0 {
 		b.columnDataPeers.coolDown(pid)
-	}
-	if uint64(len(responsePacket)) > requestedColumnCount {
-		b.BanPeerForInvalidData(ctx, pid)
-		return nil, pid, filteredReq, fmt.Errorf("response count %d exceeds requested column count %d", len(responsePacket), requestedColumnCount)
 	}
 
 	ColumnSidecars := []*cltypes.DataColumnSidecar{}
@@ -419,7 +419,7 @@ type responseData struct {
 }
 
 // parseResponseData parses the response data from a sentinel message and returns the parsed response data.
-func (b *BeaconRpcP2P) parseResponseData(ctx context.Context, message *sentinelproto.ResponseData, maxChunks *uint64) ([]responseData, string, error) {
+func (b *BeaconRpcP2P) parseResponseData(ctx context.Context, message *sentinelproto.ResponseData, maxChunks uint64) ([]responseData, string, error) {
 	if message.Error {
 		rd := snappypool.Reader(bytes.NewReader(message.Data))
 		errBytes, _ := io.ReadAll(rd)
@@ -442,9 +442,9 @@ func (b *BeaconRpcP2P) parseResponseData(ctx context.Context, message *sentinelp
 			}
 			return responsePacket, message.Peer.Pid, fmt.Errorf("%w: incomplete response fork digest: %w", ErrInvalidResponse, err)
 		}
-		if maxChunks != nil && uint64(len(responsePacket)) >= *maxChunks {
+		if uint64(len(responsePacket)) >= maxChunks {
 			b.banPeer(ctx, message.Peer.Pid)
-			return responsePacket, message.Peer.Pid, fmt.Errorf("%w: response contains more chunks than requested: limit %d", ErrInvalidResponse, *maxChunks)
+			return responsePacket, message.Peer.Pid, fmt.Errorf("%w: %w: limit %d", ErrInvalidResponse, errTooManyChunks, maxChunks)
 		}
 		// Read varint for length of message.
 		encodedLn, err := ssz_snappy.ReadUvarint(r)
@@ -506,7 +506,7 @@ func (b *BeaconRpcP2P) sendRequest(
 	topic string,
 	reqPayload []byte,
 	maxResponseBytes uint64,
-	maxChunks ...uint64,
+	maxChunks uint64,
 ) ([]responseData, string, error) {
 	requestCtx, cancel := boundReqRespContext(ctx)
 	defer cancel()
@@ -519,7 +519,7 @@ func (b *BeaconRpcP2P) sendRequest(
 	if err != nil {
 		return nil, "", err
 	}
-	return b.parseResponseData(requestCtx, message, chunkLimit(maxChunks))
+	return b.parseResponseData(requestCtx, message, maxChunks)
 }
 
 func (b *BeaconRpcP2P) sendRequestWithPeer(
@@ -528,7 +528,7 @@ func (b *BeaconRpcP2P) sendRequestWithPeer(
 	reqPayload []byte,
 	peerId string,
 	maxResponseBytes uint64,
-	maxChunks ...uint64,
+	maxChunks uint64,
 ) ([]responseData, string, error) {
 	requestCtx, cancel := boundReqRespContext(ctx)
 	defer cancel()
@@ -542,14 +542,7 @@ func (b *BeaconRpcP2P) sendRequestWithPeer(
 	if err != nil {
 		return nil, "", err
 	}
-	return b.parseResponseData(requestCtx, message, chunkLimit(maxChunks))
-}
-
-func chunkLimit(maxChunks []uint64) *uint64 {
-	if len(maxChunks) == 0 {
-		return nil
-	}
-	return &maxChunks[0]
+	return b.parseResponseData(requestCtx, message, maxChunks)
 }
 
 func boundReqRespContext(ctx context.Context) (context.Context, context.CancelFunc) {

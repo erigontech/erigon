@@ -105,9 +105,9 @@ func TestReqRespRequestsPreserveCallerDeadline(t *testing.T) {
 		sentinel := &contextRecordingSentinel{}
 		client := &BeaconRpcP2P{sentinel: sentinel}
 		if withPeer {
-			_, _, _ = client.sendRequestWithPeer(ctx, "topic", nil, "peer", 0)
+			_, _, _ = client.sendRequestWithPeer(ctx, "topic", nil, "peer", 0, math.MaxUint64)
 		} else {
-			_, _, _ = client.sendRequest(ctx, "topic", nil, 0)
+			_, _, _ = client.sendRequest(ctx, "topic", nil, 0, math.MaxUint64)
 		}
 		require.True(t, sentinel.hasDeadline)
 		require.Equal(t, deadline, sentinel.deadline)
@@ -120,9 +120,9 @@ func TestReqRespRequestsBoundContextsWithoutDeadline(t *testing.T) {
 		client := &BeaconRpcP2P{sentinel: sentinel}
 		before := time.Now().Add(30 * time.Second)
 		if withPeer {
-			_, _, _ = client.sendRequestWithPeer(t.Context(), "topic", nil, "peer", 0)
+			_, _, _ = client.sendRequestWithPeer(t.Context(), "topic", nil, "peer", 0, math.MaxUint64)
 		} else {
-			_, _, _ = client.sendRequest(t.Context(), "topic", nil, 0)
+			_, _, _ = client.sendRequest(t.Context(), "topic", nil, 0, math.MaxUint64)
 		}
 		after := time.Now().Add(30 * time.Second)
 		require.True(t, sentinel.hasDeadline)
@@ -283,7 +283,7 @@ func TestColumnSidecarsRequestRejectsOverCardinalityBeforeSidecarDecode(t *testi
 	request.Append(identifier)
 
 	sidecars, pid, snapshot, err := client.SendColumnSidecarsByRootIdentifierReqWithSnapshot(t.Context(), request)
-	require.ErrorContains(t, err, "response count 2 exceeds requested column count 1")
+	require.ErrorContains(t, err, "more chunks than requested")
 	require.Nil(t, sidecars)
 	require.Equal(t, "cap-ignoring-peer", pid)
 	require.Equal(t, 1, snapshot.Len())
@@ -725,7 +725,7 @@ func TestParseResponseDataRejectsOversizedCompressedChunk(t *testing.T) {
 			chunks, pid, err := client.parseResponseData(t.Context(), &sentinelproto.ResponseData{
 				Data: response,
 				Peer: &sentinelproto.Peer{Pid: "malicious-peer"},
-			}, nil)
+			}, math.MaxUint64)
 			if tc.wantError {
 				require.ErrorContains(t, err, "read error")
 				require.ErrorIs(t, err, ErrInvalidResponse)
@@ -758,7 +758,7 @@ func TestParseResponseDataAcceptsMaxPayloadSize(t *testing.T) {
 	chunks, pid, err := client.parseResponseData(t.Context(), &sentinelproto.ResponseData{
 		Data: response.Bytes(),
 		Peer: &sentinelproto.Peer{Pid: "peer"},
-	}, nil)
+	}, math.MaxUint64)
 	require.NoError(t, err)
 	require.Len(t, chunks, 1)
 	require.Len(t, chunks[0].raw, int(clparams.MaxPayloadSize))
