@@ -913,6 +913,33 @@ func TestCreateAccessListStateOverridePrecompile(t *testing.T) {
 	})
 }
 
+func TestCreateAccessListStopsARunThatNeverConverges(t *testing.T) {
+	m, _, bankAddr := fundedBankGenesis(t, chain.AllProtocolChanges)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	reader := common.HexToAddress("0x00000000000000000000000000000000000000cc")
+	sloadGas := hexutil.Bytes(hexutil.MustDecode("0x5a5450")) // SLOAD(GAS): every run reads a new slot
+	gas := hexutil.Uint64(2_000_000)
+
+	_, err := api.CreateAccessList(context.Background(), ethapi.CallArgs{From: &bankAddr, To: &reader, Gas: &gas}, nil, &ethapi.StateOverrides{
+		accounts.InternAddress(reader): {Code: &sloadGas},
+	}, nil)
+	require.ErrorContains(t, err, "did not converge")
+}
+
+func TestCreateAccessListHonoursTheEVMTimeout(t *testing.T) {
+	m, _, bankAddr := fundedBankGenesis(t, chain.AllProtocolChanges)
+	base := newBaseApiForTest(m)
+	base.evmCallTimeout = time.Nanosecond
+	api := newEthApiForTest(base, m.DB, nil, nil)
+	loop := common.HexToAddress("0x00000000000000000000000000000000000000cd")
+	jumpToStart := hexutil.Bytes(hexutil.MustDecode("0x5b600056"))
+
+	_, err := api.CreateAccessList(context.Background(), ethapi.CallArgs{From: &bankAddr, To: &loop}, nil, &ethapi.StateOverrides{
+		accounts.InternAddress(loop): {Code: &jumpToStart},
+	}, nil)
+	require.Error(t, err, "the expired timeout must stop the request")
+}
+
 // Init code that reads slot 0 of the contract being created and returns that contract's
 // address, so the access list and eth_call both reveal the nonce the creation used.
 const createdAddressProbe = "0x600054503060005260206000f3"
