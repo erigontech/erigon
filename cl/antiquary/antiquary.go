@@ -55,6 +55,7 @@ var (
 	mxAntiquaryPruneBatchSeconds = metrics.GetOrCreateSummary(`caplin_antiquary_batch_seconds{phase="prune"}`)
 	mxAntiquaryIndexBatchSlots   = metrics.GetOrCreateGauge(`caplin_antiquary_batch_items{phase="index"}`)
 	mxAntiquaryPruneBatchBlocks  = metrics.GetOrCreateGauge(`caplin_antiquary_batch_items{phase="prune"}`)
+	mxBlobRetirementGapSlot      = metrics.GetOrCreateGauge(`caplin_antiquary_blob_retirement_gap_slot`) // 0 while blob retirement is not blocked
 	mxAntiquaryPrunedBlocks      = metrics.GetOrCreateCounter("caplin_antiquary_pruned_blocks_total")
 )
 
@@ -65,6 +66,8 @@ type Antiquary struct {
 	dirs                           datadir.Dirs
 	downloader                     dbservices.DownloaderClient
 	logger                         log.Logger
+	lastBlobGapLog                 time.Time // the retirement loop's last log of a blob gap that blocks retirement
+	blobCheckedTo                  uint64    // every blob below it, from the next blob segment's start, is stored
 	sn                             *freezeblocks.CaplinSnapshots
 	stateSn                        *snapshotsync.CaplinStateSnapshots
 	snReader                       freezeblocks.BeaconSnapshotReader
@@ -245,7 +248,7 @@ func (s *Antiquary) retirementTick(blocks, merges, blobs *retirementStep) {
 	if s.cfg.DenebForkEpoch == math.MaxUint64 {
 		return
 	}
-	if !s.blobBackfilled.Load() {
+	if !s.blobs && !s.blobBackfilled.Load() { // a node without a blob archive has pruned the blobs
 		return
 	}
 	blobs.attempt(s.shuttingDown)
@@ -588,6 +591,77 @@ func nextBlobSegment(sn blobRetirementSnapshots, cfg *clparams.BeaconChainConfig
 	return from, from + snaptype.CaplinMergeLimit, frozenBlocks, true
 }
 
+const blobRetirementGapLogInterval = 10 * time.Minute
+
+// firstMissingBlobSlot returns the first slot in [from, to) whose blob sidecars are not all stored.
+func firstMissingBlobSlot(from, to uint64, blobCount freezeblocks.BlobCountBySlotFn, stored func(slot, want uint64) (bool, error)) (uint64, bool, error) {
+	for slot := from; slot < to; slot++ {
+		want, err := blobCount(slot)
+		if err != nil || want == 0 {
+			if err != nil {
+				return 0, false, err
+			}
+			continue
+		}
+		ok, err := stored(slot, want)
+		if err != nil {
+			return 0, false, err
+		}
+		if !ok {
+			return slot, true, nil
+		}
+	}
+	return 0, false, nil
+}
+
+// blobSidecarsStored checks the files too: a count row stays after its sidecar file is lost.
+func (s *Antiquary) blobSidecarsStored(tx kv.Tx, slot, want uint64) (bool, error) {
+	blockRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
+	if err != nil {
+		return false, err
+	}
+	count, err := s.blobStorage.KzgCommitmentsCount(s.ctx, blockRoot)
+	if err != nil || uint64(count) < want {
+		return false, err
+	}
+	for idx := range want {
+		exists, err := s.blobStorage.BlobSidecarExists(s.ctx, slot, blockRoot, idx)
+		if err != nil || !exists {
+			return false, err
+		}
+	}
+	return true, nil
+}
+
+// blobSegmentComplete reports whether [from, to) can retire. An unfillable gap keeps backfill incomplete, but the
+// segments below it are still complete.
+func (s *Antiquary) blobSegmentComplete(tx kv.Tx, from, to uint64, blobCount freezeblocks.BlobCountBySlotFn) (bool, error) {
+	if !s.blobBackfilled.Load() {
+		gap, missing, err := firstMissingBlobSlot(max(from, s.blobCheckedTo), to, blobCount, func(slot, want uint64) (bool, error) {
+			return s.blobSidecarsStored(tx, slot, want)
+		})
+		if err != nil {
+			return false, err
+		}
+		if missing {
+			s.blobCheckedTo = gap
+			s.reportBlobRetirementGap(from, gap, time.Now())
+			return false, nil
+		}
+	}
+	mxBlobRetirementGapSlot.SetUint64(0)
+	return true, nil
+}
+
+func (s *Antiquary) reportBlobRetirementGap(from, gap uint64, now time.Time) {
+	mxBlobRetirementGapSlot.SetUint64(gap)
+	if now.Sub(s.lastBlobGapLog) < blobRetirementGapLogInterval {
+		return
+	}
+	s.lastBlobGapLog = now
+	s.logger.Info("[Antiquary] Blob retirement waits for a missing blob slot", "segmentFrom", from, "gapSlot", gap)
+}
+
 func (s *Antiquary) antiquateBlobs() error {
 	if !s.snapgen {
 		return nil
@@ -608,6 +682,11 @@ func (s *Antiquary) antiquateBlobs() error {
 	if !ok {
 		return nil
 	}
+	blobCount := freezeblocks.BlobCountFromBlocks(s.ctx, s.sn, s.snReader)
+	complete, err := s.blobSegmentComplete(roTx, currentBlobsProgress, to, blobCount)
+	if err != nil || !complete {
+		return err
+	}
 	roTx.Rollback()
 	s.logger.Info("[Antiquary] Antiquating blobs", "from", currentBlobsProgress, "to", to, "backlogTo", backlogTo)
 	// now, we need to retire the blobs
@@ -616,7 +695,7 @@ func (s *Antiquary) antiquateBlobs() error {
 	if err := func() error {
 		compressWorkers, releaseBuildSlot := s.blobCompressWorkers(currentBlobsProgress, backlogTo)
 		defer releaseBuildSlot()
-		return freezeblocks.DumpBlobsSidecar(s.ctx, s.blobStorage, s.mainDB, currentBlobsProgress, to, s.sn.Salt, s.dirs, compressWorkers, freezeblocks.BlobCountFromBlocks(s.ctx, s.sn, s.snReader), log.LvlDebug, s.logger)
+		return freezeblocks.DumpBlobsSidecar(s.ctx, s.blobStorage, s.mainDB, currentBlobsProgress, to, s.sn.Salt, s.dirs, compressWorkers, blobCount, log.LvlDebug, s.logger)
 	}(); err != nil {
 		return err
 	}
