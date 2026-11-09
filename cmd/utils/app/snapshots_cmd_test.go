@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -74,7 +75,23 @@ func (f duFakeBlockReader) IterateFrozenBodies(_ kv.Getter, fn func(blockNum, ba
 
 func (duFakeBlockReader) FreezingCfg() ethconfig.BlocksFreezing { return ethconfig.BlocksFreezing{} }
 func (duFakeBlockReader) AllTypes() []snaptype.Type             { return nil }
-func (duFakeBlockReader) TxnumReader() rawdbv3.TxNumsReader     { return rawdbv3.TxNums }
+func (f duFakeBlockReader) TxnumReader() rawdbv3.TxNumsReader {
+	return rawdbv3.TxNums.WithCustomReadTxNumFunc(duFakeTxIndex(f))
+}
+
+type duFakeTxIndex duFakeBlockReader
+
+func (f duFakeTxIndex) MaxTxNum(_ context.Context, _ kv.Tx, _ kv.Cursor, blockNum uint64) (uint64, bool, error) {
+	if blockNum >= f.frozenMax {
+		return 0, false, nil
+	}
+	base, n := f.body(blockNum)
+	return base + n - 1, true, nil
+}
+
+func (duFakeTxIndex) BlockNumber(context.Context, kv.Tx, uint64) (uint64, bool, error) {
+	return 0, false, nil
+}
 
 type bundle struct {
 	domain, history, ii state.SnapNameSchema
@@ -1030,6 +1047,31 @@ func TestDUStepSize_LegacyDatadirIsNotWritten(t *testing.T) {
 	_, err := duStepSize(dirs, log.New())
 	require.Error(t, err)
 	require.NoFileExists(t, filepath.Join(dirs.Snap, state.ERIGONDB_SETTINGS_FILE))
+}
+
+func TestDUComputeEstimates_LogIndexFollowsHistoryWindow(t *testing.T) {
+	snapDir := t.TempDir()
+	_, tx := mdbxtest.NewTestTx(t)
+	br := duFakeBlockReader{frozenMax: 600_000, body: func(b uint64) (uint64, uint64) { return b, 1 }}
+	logIdx := func(from, to uint64, size int64) duFileInfo {
+		name := fmt.Sprintf("v1.1-logaddrs.%d-%d.ef", from, to)
+		return duFileInfo{Path: filepath.Join(snapDir, "idx", name), Name: name, Size: size, Category: duCatInvIdx, IsState: true, From: from, To: to}
+	}
+	files := []duFileInfo{
+		{Path: filepath.Join(snapDir, "domain", "v1.1-accounts.0-600.kv"), Name: "v1.1-accounts.0-600.kv", Category: duCatDomains, IsState: true, From: 0, To: 600},
+		logIdx(0, 256, 1000),
+		logIdx(256, 337, 100),
+		logIdx(337, 338, 50),
+		logIdx(338, 448, 10),
+		logIdx(448, 600, 1),
+	}
+
+	estimates, err := duComputeEstimates(files, snapDir, duPrunerSelect(context.Background(), tx, br, nil, 1000))
+	require.NoError(t, err)
+	want := map[string]int64{"archive": 1161, "full": 61, "blocks": 61, "minimal": 1}
+	for _, e := range estimates {
+		require.Equal(t, want[e.Mode], e.TotalBytes, "mode %q", e.Mode)
+	}
 }
 
 func TestDUComputeEstimates_ArchiveSkipsCommitmentHistory(t *testing.T) {
