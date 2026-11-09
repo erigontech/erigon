@@ -9,6 +9,7 @@ import (
 	"iter"
 	"maps"
 	"slices"
+	"sort"
 	"strconv"
 	"sync"
 
@@ -2739,8 +2740,9 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 // BlockAccessListBuilder assembles the block access list one tx index at a time,
 // so a block's list can be built while its txs are published.
 type BlockAccessListBuilder struct {
-	ac   map[accounts.Address]*accountState
-	next int
+	ac        map[accounts.Address]*accountState
+	next      int
+	finalized bool
 }
 
 func NewBlockAccessListBuilder() *BlockAccessListBuilder {
@@ -2930,12 +2932,45 @@ func (b *BlockAccessListBuilder) Build() types.BlockAccessList {
 
 	bal := make(types.BlockAccessList, 0, len(keys))
 	for _, k := range keys {
-		k.account.finalize()
-		k.account.changes.Normalize()
+		if !b.finalized {
+			k.account.finalize()
+			k.account.changes.Normalize()
+		}
 		bal = append(bal, k.account.changes)
 	}
 	return bal
 }
+
+// MatchesSorted reports whether the list Build would return equals want, whose
+// addresses must be strictly increasing. Only Build may follow it.
+func (b *BlockAccessListBuilder) MatchesSorted(want types.BlockAccessList) bool {
+	const prefixes = 256 * 256
+	bucketEnd := make([]int32, prefixes+1)
+	for i := range want {
+		bucketEnd[addressPrefix(want[i].Address)+1]++
+	}
+	for i := 1; i <= prefixes; i++ {
+		bucketEnd[i] += bucketEnd[i-1]
+	}
+	match := len(b.ac) == len(want)
+	for _, account := range b.ac {
+		account.finalize()
+		account.changes.Normalize()
+		if !match {
+			continue
+		}
+		addr := account.changes.Address
+		prefix := addressPrefix(addr)
+		lo, hi := int(bucketEnd[prefix]), int(bucketEnd[prefix+1])
+		// sort.Search: BinarySearchFunc would copy each 144-byte AccountChanges.
+		at := lo + sort.Search(hi-lo, func(i int) bool { return bytes.Compare(want[lo+i].Address[:], addr[:]) >= 0 })
+		match = at < hi && account.changes.Equal(&want[at])
+	}
+	b.finalized = true
+	return match
+}
+
+func addressPrefix(a common.Address) uint32 { return uint32(a[0])<<8 | uint32(a[1]) }
 
 type accountState struct {
 	changes             types.AccountChanges

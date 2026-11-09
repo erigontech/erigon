@@ -19,6 +19,7 @@ package stagedsync
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -502,19 +503,48 @@ func (fx *resumeBALFixture) exec(t *testing.T, block *types.Block, point resumeP
 	return out.verdict, nil
 }
 
+func setBALVerifyEarly(t *testing.T, on bool) {
+	t.Helper()
+	prev := balVerifyEarly
+	balVerifyEarly = on
+	t.Cleanup(func() { balVerifyEarly = prev })
+}
+
+// headerCommitsToOtherBlock keeps the real sidecar while the header commits to bal.
+func (fx *resumeBALFixture) headerCommitsToOtherBlock(t *testing.T, bal types.BlockAccessList) *types.Block {
+	t.Helper()
+	header := types.CopyHeader(fx.block.HeaderNoCopy())
+	balHash := bal.Hash()
+	header.BlockAccessListHash = &balHash
+	return fx.block.WithSeal(header).WithBlockAccessListSidecar(types.NewBlockAccessListSidecar(fx.block.BlockAccessList()))
+}
+
 // TestResumedBlockValidatesBlockAccessList pins that a block resumed after a
 // mid-block commit still has its EIP-7928 block access list checked against
 // the header, exactly like a block executed from its start.
 func TestResumedBlockValidatesBlockAccessList(t *testing.T) {
+	for _, early := range []bool{false, true} {
+		t.Run(fmt.Sprintf("BAL_VERIFY_EARLY=%v", early), func(t *testing.T) {
+			setBALVerifyEarly(t, early)
+			testResumedBlockValidatesBlockAccessList(t)
+		})
+	}
+}
+
+func testResumedBlockValidatesBlockAccessList(t *testing.T) {
 	fx := newResumeBALFixture(t)
 	phantom := fx.phantomAccountBlock(t)
 	droppedInit := fx.droppedInitWritesBlock(t)
+	headerCommitsElsewhere := fx.headerCommitsToOtherBlock(t, phantom.BlockAccessList())
 	for _, tc := range []struct {
 		name         string
 		block        *types.Block
 		point        resumePoint
 		wantMismatch bool
 	}{
+		{"full/header commits to another list", headerCommitsElsewhere, fromBlockStart, true},
+		{"full/no sidecar, valid", fx.block.WithBlockAccessListSidecar(nil), fromBlockStart, false},
+		{"full/no sidecar, phantom account", phantom.WithBlockAccessListSidecar(nil), fromBlockStart, true},
 		{"full/valid", fx.block, fromBlockStart, false},
 		{"full/phantom account", phantom, fromBlockStart, true},
 		{"full/dropped block-start writes", droppedInit, fromBlockStart, true},

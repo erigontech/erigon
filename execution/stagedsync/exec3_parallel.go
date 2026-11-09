@@ -157,6 +157,8 @@ func drainToClose(applyResults <-chan applyResult, rootResults <-chan commitment
 	wg.Wait()
 }
 
+var balVerifyEarly = dbg.EnvBool("BAL_VERIFY_EARLY", false)
+
 // stopKind classifies why the executor was asked to stop. It maps directly
 // to the stage return: done→nil, more→ErrLoopExhausted, bad→fail.err+unwind.
 type stopKind uint8
@@ -775,11 +777,23 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					}
 					balDone := make(chan struct{})
 					h, txIO := lastHeader, applyResult.TxIO
+					verifyAgainstSidecar := balVerifyEarly && isAmsterdam && applyResult.BlockNum > 0 && !applyResult.isPartial && applyResult.balSidecar != nil && pe.cfg.balSink == nil
+					sidecar := applyResult.balSidecar
+					var balVerify time.Duration
 					go func() {
 						defer close(balDone)
-						if balErr == nil {
-							computedBAL, balErr = bal.Process(storedBAL, h, built, txIO, isAmsterdam, pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir, pe.logger)
+						if logNpPhases {
+							start := time.Now()
+							defer func() { balVerify = time.Since(start) }()
 						}
+						if balErr != nil {
+							return
+						}
+						if verifyAgainstSidecar {
+							computedBAL, balErr = bal.ProcessAgainstSidecar(sidecar, storedBAL, h, built, txIO, pe.cfg.dirs.DataDir, pe.logger)
+							return
+						}
+						computedBAL, balErr = bal.Process(storedBAL, h, built, txIO, isAmsterdam, pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir, pe.logger)
 					}()
 
 					// StartChange + NotifyAccumulator both run in the apply goroutine to
@@ -817,7 +831,11 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					blockUpdateCount = 0
 					blockApplyCount = 0
 
+					joinStart := time.Now()
 					<-balDone
+					if logNpPhases {
+						pe.logger.Info("[np-phase] bal-verify", "blk", applyResult.BlockNum, "verify", balVerify, "join_wait", time.Since(joinStart))
+					}
 					// Join the per-block validator spawned above; its verdict wins over
 					// a bal.Process error.
 					if err := blockValidatorWaiter.Wait(); err != nil {
@@ -1271,6 +1289,7 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 
 			if !ok {
 				executor = newBlockExec(blockNum, execRequest.blockHash, execRequest.gasPool, execRequest.accessList, execRequest.consumers, execRequest.profile, execRequest.exhausted)
+				executor.balSidecar = execRequest.balSidecar
 				// Set the coinbase once, before any worker runs, so self-loop workers
 				// can read it during validation without racing the exec loop.
 				if h := txTask.BlockHeader(); h != nil {
@@ -1695,6 +1714,7 @@ type blockResult struct {
 	Exhausted        *ErrLoopExhausted
 	Header           *types.Header      // for accumulator.StartChange in apply loop
 	Txs              types.Transactions // for accumulator.StartChange in apply loop
+	balSidecar       *types.BlockAccessListSidecar
 
 	// Exec window for newPayload wall attribution; the calculator pairs these with
 	// its own commit-window timestamps to measure exec/commit overlap.
@@ -2549,6 +2569,7 @@ type execRequest struct {
 	consumers  *resultStream
 	profile    bool
 	exhausted  *ErrLoopExhausted
+	balSidecar *types.BlockAccessListSidecar
 }
 
 type blockExecutor struct {
@@ -2569,6 +2590,7 @@ type blockExecutor struct {
 	publishTasks execStatusList
 	// balAttached counts the tx indexes, from -1, whose sets went out on a txResult.
 	balAttached int
+	balSidecar  *types.BlockAccessListSidecar
 
 	// Multi-version map
 	versionMap *state.VersionMap
@@ -3668,6 +3690,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			Exhausted:        be.exhausted,
 			Header:           header,
 			Txs:              txs,
+			balSidecar:       be.balSidecar,
 			execStartedAt:    be.execStarted,
 			execEndedAt:      time.Now(),
 		}
