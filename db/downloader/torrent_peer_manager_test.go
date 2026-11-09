@@ -18,7 +18,7 @@ import (
 	"github.com/erigontech/erigon/p2p/enr"
 )
 
-func TestTorrentPeerManager_AddAndRemove(t *testing.T) {
+func TestTorrentPeerManager_TracksPeersWithBT(t *testing.T) {
 	client, err := torrent.NewClient(newTestClientConfig(t, t.TempDir()))
 	if err != nil {
 		t.Fatal(err)
@@ -39,7 +39,7 @@ func TestTorrentPeerManager_AddAndRemove(t *testing.T) {
 
 	m := NewTorrentPeerManager(client, func() NodeSource { return source }, logger)
 
-	// First sync: should add only the peer with BT port.
+	// First sync: tracks only the peer with a BT port. Nothing listens on it, so it is not added to the torrents.
 	m.sync(t.Context())
 	assert.Equal(t, 1, m.PeerCount())
 
@@ -50,12 +50,12 @@ func TestTorrentPeerManager_AddAndRemove(t *testing.T) {
 	// Remove the BT peer from the source.
 	source.nodes = []*enode.Node{peerWithoutBT}
 	m.sync(t.Context())
-	assert.Equal(t, 0, m.PeerCount(), "peer should be removed when it leaves DevP2P")
+	assert.Equal(t, 0, m.PeerCount(), "peer should be forgotten when it leaves DevP2P")
 
 	// Add it back.
 	source.nodes = []*enode.Node{peerWithBT, peerWithoutBT}
 	m.sync(t.Context())
-	assert.Equal(t, 1, m.PeerCount(), "peer should be re-added when it rejoins DevP2P")
+	assert.Equal(t, 1, m.PeerCount(), "peer should be tracked again when it rejoins DevP2P")
 }
 
 func TestTorrentPeerManager_NilNodeSource(t *testing.T) {
@@ -204,7 +204,7 @@ func TestTorrentPeerManagerCountsTheWaitFromTheFailedCheck(t *testing.T) {
 func TestTorrentPeerManagerDefaultCheckReachesAUTPOnlyPeer(t *testing.T) {
 	utpOnly := func() *torrent.Client {
 		cfg := newTestClientConfig(t, t.TempDir())
-		// One UDP socket on a port the OS picks: no second bind on a chosen port, which Windows can refuse (#23204).
+		// One UDP socket on a port the OS picks: no second bind on a chosen port, which Windows can refuse.
 		cfg.DisableUTP, cfg.DisableTCP, cfg.DisableIPv6 = false, true, true
 		// The uTP socket drops a connection unless some torrent wants one; these clients have no torrents.
 		cfg.AlwaysWantConns = true

@@ -15,9 +15,10 @@ import (
 
 // TorrentPeerManager synchronizes the torrent client's peer set with the
 // DevP2P peer set. It periodically scans known DevP2P peers for "bt" ENR
-// entries and adds them as torrent peers. When a DevP2P peer disconnects
-// (disappears from the NodeSource), the torrent client handles the connection
-// drop naturally — there is no explicit "remove peer" in the torrent API.
+// entries and adds a peer to every torrent once its BT endpoint answers; an
+// endpoint that does not answer is checked again later. When a DevP2P peer
+// disconnects (disappears from the NodeSource), the torrent client handles the
+// connection drop naturally — there is no explicit "remove peer" in the torrent API.
 type TorrentPeerManager struct {
 	client       *torrent.Client
 	nodeSourceFn func() NodeSource
