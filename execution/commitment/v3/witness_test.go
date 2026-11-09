@@ -544,6 +544,37 @@ func TestTracedProcessReadsEachRecordOnce(t *testing.T) {
 
 func TestWitnessAfterTracedProcessReusesReads(t *testing.T) {
 	ctx := context.Background()
+	t.Run("changed_root_discards_parent_reads", func(t *testing.T) {
+		addr := parityAddress(7)
+		b := newWitnessBed(t, []commitmenttest.Op{parityAccount(addr, 7), parityAccount(parityAddress(9), 9)})
+		reader, _ := b.v3Mem.Open(ctx)
+		counting := &countingReads{PatriciaContext: reader, reads: map[string]int{}}
+		tr := &Trie{scheduleWorkers: 1}
+		tr.ResetContext(counting)
+		_, _, err := tr.RestoreState(b.v3State)
+		require.NoError(t, err)
+		tr.SetCollapseTracer(func([]byte, []byte) {})
+		root, err := tr.Process(ctx, testUpdates(t, commitment.ModeCollect, []commitmenttest.Op{parityAccount(addr, 70)}), "", nil, commitment.WarmupConfig{})
+		require.NoError(t, err)
+		tr.SetCollapseTracer(nil)
+		require.NotEmpty(t, tr.preRecs)
+		require.NotEqual(t, tr.preRoot, root)
+		b.v3State, err = tr.EncodeState(2, 2)
+		require.NoError(t, err)
+		keys := witnessKeys{plain: [][]byte{addr, parityAddress(9)}}
+		want := b.v3Witness(t, keys, false)
+		counting.reads = map[string]int{}
+		u := commitment.NewUpdates(commitment.ModeCollect, t.TempDir(), commitment.KeyToHexNibbleHash)
+		defer u.Close()
+		keys.touch(u)
+		byHash, proved, gotRoot, err := tr.WitnessesByHash(ctx, u, false)
+		require.NoError(t, err)
+		require.Equal(t, root, gotRoot)
+		nodes, err := trie.WitnessNodesForKeysByHash(byHash, gotRoot, proved)
+		require.NoError(t, err)
+		requireSameNodes(t, want, nodes, "changed root")
+		require.NotEmpty(t, counting.reads)
+	})
 	for _, traceOnly := range []bool{false, true} {
 		for seed := range int64(8) {
 			rng := rand.New(rand.NewSource(seed))
