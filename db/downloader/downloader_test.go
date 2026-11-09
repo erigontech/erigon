@@ -1455,5 +1455,5 @@ func TestVerifyDataFailFastDetectsTrailingBytes(t *testing.T) {
 	require.NoError(err)
 	require.NoError(f.Close())
 
-	require.Error(test.downloader.VerifyData(test.downloader.ctx, nil, true))
+	require.ErrorContains(test.downloader.VerifyData(test.downloader.ctx, nil, true), "size mismatch")
 }
