@@ -18,6 +18,7 @@ package stagedsync
 
 import (
 	"context"
+	"encoding/binary"
 	"testing"
 
 	keccak "github.com/erigontech/fastkeccak"
@@ -28,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
@@ -61,6 +63,31 @@ func TestPrefetchedBranchesYieldToMemBatch(t *testing.T) {
 
 	require.Equal(t, uint64(1), p.hits.Load(), "only the untouched key is served from the map")
 	require.Equal(t, uint64(1), p.misses.Load(), "only the absent key falls through the map")
+
+	outside := []byte{0x40, 0x78, 0x02}
+	var unwound [kv.DomainLen][]kv.DomainEntryDiff
+	unwound[kv.CommitmentDomain] = []kv.DomainEntryDiff{{Key: string(outside) + string(binary.BigEndian.AppendUint64(nil, ^uint64(2)))}}
+	doms.Unwind(32, &unwound)
+	p.put(outside, []byte("prefetched-past-unwind"), 3)
+	_, maxStep, inMem := doms.GetLatestFromMemory(kv.CommitmentDomain, outside)
+	require.False(t, inMem)
+	require.NotEqual(t, kv.NoStepBound, maxStep)
+	got, _, err = r.Read(kv.CommitmentDomain, outside, 16)
+	require.NoError(t, err)
+	require.Empty(t, got)
+	require.Equal(t, uint64(1), p.hits.Load())
+}
+
+func TestBranchPrefetcherStopsAtByteCap(t *testing.T) {
+	p := newPrefetchRecords()
+	p.put([]byte("kept"), []byte("value"), 0)
+	p.bytes.Store(branchPrefetchMaxBytes)
+	p.put([]byte("overflow"), []byte("dropped"), 0)
+	_, _, ok := p.get([]byte("overflow"))
+	require.False(t, ok)
+	value, _, ok := p.get([]byte("kept"))
+	require.True(t, ok)
+	require.Equal(t, []byte("value"), value)
 }
 
 func TestBranchPrefetcherCountsDroppedAndDrained(t *testing.T) {
@@ -86,6 +113,7 @@ func TestBranchPrefetcherChunkStopsOnPause(t *testing.T) {
 }
 
 func TestParentRecordsOnlyForOneVerifiedChildOfTheReadHead(t *testing.T) {
+	t.Cleanup(func() { commitmentdb.PublishParentRecords(nil) })
 	p := newPrefetchRecords()
 	p.put([]byte{0x12}, []byte("parent-record"), 4)
 	head := common.Hash{9}
@@ -113,6 +141,23 @@ func TestParentRecordsOnlyForOneVerifiedChildOfTheReadHead(t *testing.T) {
 	cc.noteVerified(child)
 	cc.noteVerified(commitTarget{blockNum: 11, blockHash: common.Hash{11}, parentHash: child.blockHash})
 	require.Nil(t, cc.parentRecords(), "a calculator that verified two blocks")
+
+	t.Cleanup(statecfg.SetCommitmentV3(true))
+	previous := commitmentdb.ParentReadsWanted()
+	commitmentdb.WantParentReads(true)
+	t.Cleanup(func() { commitmentdb.WantParentReads(previous) })
+	ctx := t.Context()
+	db, _, doms := setupStepTest(t)
+	out := make(chan commitmentResult, 1)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", log.New(), false, 0, make(chan applyResult), nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
+	require.NoError(t, err)
+	defer cc.Stop()
+	cc.readAtNum, cc.readAtHash = 9, head
+	child.stateRoot = common.Hash{0xde, 0xad}
+	doms.SavePastChangesetAccumulator(child.blockHash, child.blockNum, &changeset.StateChangeSet{})
+	cc.compute(ctx, child, computeMode{checkRoot: true})
+	require.ErrorIs(t, (<-out).err, ErrWrongTrieRoot)
+	require.Nil(t, cc.parentRecords(), "a wrong root is never verified")
 }
 
 func TestStopDoesNotPublishParentRecordsWhenNotWanted(t *testing.T) {
