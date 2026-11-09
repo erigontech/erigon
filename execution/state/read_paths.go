@@ -17,6 +17,7 @@ import (
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -1457,7 +1458,8 @@ func LogExtCodeCopyBorrows(blockNum uint64) {
 		return
 	}
 	delete(extCodeCopyBorrows.blocks, blockNum)
-	log.Info(fmt.Sprintf("[extcodecopy] blk=%d misses=%d repeats_in_tx=%d repeats_in_block=%d", blockNum, stats.misses, stats.repeatsInTx, stats.repeatsInBlock))
+	hits, decodes := execctx.LendCodeStats()
+	log.Info(fmt.Sprintf("[extcodecopy] blk=%d misses=%d repeats_in_tx=%d repeats_in_block=%d memo_hits_total=%d decodes_total=%d", blockNum, stats.misses, stats.repeatsInTx, stats.repeatsInBlock, hits, decodes))
 }
 
 // refreshCode is the in-memory-only variant for CodePath. CodePath is never recorded

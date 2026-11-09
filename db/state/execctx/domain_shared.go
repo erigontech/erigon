@@ -1656,7 +1656,7 @@ func (sd *SharedDomains) getCode(tx kv.TemporalTx, view cache.ReadView, addr []b
 
 // lendCode decodes a code-cache miss into buf without filling the cache. lent is
 // false when any cache or the in-memory batch holds the code, or the read cannot fill.
-func (sd *SharedDomains) lendCode(tx kv.TemporalTx, view cache.ReadView, addr []byte, txNum uint64, buf []byte) (code []byte, lent bool, err error) {
+func (sd *SharedDomains) lendCode(tx kv.TemporalTx, view cache.ReadView, addr []byte, txNum uint64, buf []byte, memo *lentCodeMemo) (code []byte, lent bool, err error) {
 	if tx == nil || sd.stateCache == nil {
 		return nil, false, nil
 	}
@@ -1667,10 +1667,17 @@ func (sd *SharedDomains) lendCode(tx kv.TemporalTx, view cache.ReadView, addr []
 	if _, ok := view.GetCodeByHash(codeHash); ok {
 		return nil, false, nil
 	}
+	if memo.code != nil && bytes.Equal(memo.hash[:], codeHash) {
+		lendCodeMemoHits.Add(1)
+		return memo.code, true, nil
+	}
+	lendCodeDecodes.Add(1)
 	v, _, err := sd.getLatest(kv.CodeDomain, tx, addr, nil, time.Time{}, kv.NoStepBound, view, getLatestOptions{codeHash: codeHash, buf: buf, lent: &lent})
 	if err != nil || !lent {
 		return nil, false, err
 	}
+	memo.code = v
+	copy(memo.hash[:], codeHash)
 	return v, true, nil
 }
 
