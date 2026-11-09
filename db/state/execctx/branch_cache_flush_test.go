@@ -88,8 +88,10 @@ func mergedCommitmentFileFixture(t *testing.T, stepSize uint64) (kv.TemporalRwDB
 	stepOneValue := []byte{0, 0, 0, 0, 2}
 	writeCommitmentRows(t, db, key, nil, commitmentWrite{txNum: 5, value: stepZeroValue})
 	writeCommitmentRows(t, db, key, stepZeroValue, commitmentWrite{txNum: 20, value: stepOneValue})
+	stateKey := commitment.KeyCommitmentState
 	var commitmentState []byte
 	if statecfg.ExperimentalCommitmentV3 {
+		stateKey = commitment.KeyCommitmentV3State
 		var err error
 		commitmentState, err = commitment.EncodeCommitmentV3State(empty.RootHash[:], 0, 20, nil)
 		require.NoError(t, err)
@@ -99,7 +101,7 @@ func mergedCommitmentFileFixture(t *testing.T, stepSize uint64) (kv.TemporalRwDB
 		commitmentState, err = commitmentdb.NewCommitmentState(20, 0, trieState).Encode()
 		require.NoError(t, err)
 	}
-	writeCommitmentRows(t, db, commitment.KeyCommitmentState, nil, commitmentWrite{txNum: 20, value: commitmentState})
+	writeCommitmentRows(t, db, stateKey, nil, commitmentWrite{txNum: 20, value: commitmentState})
 	writeAggregationGuard(t, db, 40)
 	agg := db.(state.HasAgg).Agg().(*state.Aggregator)
 	require.NoError(t, agg.BuildFiles(db, 2*stepSize, unboundedFinalityCtx))

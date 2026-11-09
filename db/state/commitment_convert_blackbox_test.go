@@ -466,6 +466,7 @@ func TestConvertCommitmentFiles_BeforeSwapRunsBeforePhase5Failure(t *testing.T) 
 	if testing.Short() {
 		t.Skip()
 	}
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	db, _ := testDbAggregatorWithFiles(t, &testAggConfig{stepSize: 10, disableCommitmentBranchTransform: true})
 	rwTx, err := db.BeginTemporalRw(t.Context())
 	require.NoError(t, err)

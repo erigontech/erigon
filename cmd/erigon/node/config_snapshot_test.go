@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/kvcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	erigoncli "github.com/erigontech/erigon/node/cli"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/nodecfg"
@@ -39,6 +40,7 @@ import (
 // pipeline (BuildEthConfig) with the given CLI args.
 func buildEthConfig(t *testing.T, args []string) *ethconfig.Config {
 	t.Helper()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 
 	var result *ethconfig.Config
 	app := &cli.Command{}
@@ -126,6 +128,12 @@ func TestConfigDefaults(t *testing.T) {
 	require.True(t, snap.SnapProduceE3, "snap produce e3 should be on by default")
 	require.False(t, snap.NoDownloader, "downloader should be enabled by default")
 	require.False(t, snap.SnapKeepBlocks, "snap keep blocks should be off by default")
+}
+
+func TestConfigCommitmentV3StartsFreshWithoutStateSnapshotDownload(t *testing.T) {
+	cfg := buildEthConfig(t, []string{"--experimental.commitment-v3", "--snap.skip-state-snapshot-download"})
+	require.True(t, cfg.Snapshot.DisableDownloadE3)
+	require.False(t, cfg.Snapshot.NoDownloader)
 }
 
 // TestConfigWithFlags verifies that specific flag combinations produce the
