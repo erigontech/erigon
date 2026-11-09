@@ -151,14 +151,14 @@ func (vm *VersionMap) SeedEmptyRemovals(eip161Enabled, isAura bool, base StateRe
 	var candidates []uint32
 	for i := range vm.bal {
 		ac := &vm.bal[i]
-		addr := accounts.InternAddress(ac.Address)
-		if !EIP161EmptyRemoval(eip161Enabled, isAura, addr) {
-			continue
-		}
 		var maxIdx uint32
 		balChangeIndexes(ac, func(idx uint32) { maxIdx = max(maxIdx, idx) })
 		if maxIdx == 0 {
 			continue // only reads, no field change — not a removal candidate
+		}
+		addr := accounts.InternAddress(ac.Address)
+		if !EIP161EmptyRemoval(eip161Enabled, isAura, addr) {
+			continue
 		}
 		if len(ac.BalanceChanges) == 0 && len(ac.NonceChanges) == 0 && len(ac.CodeChanges) == 0 {
 			continue
