@@ -3899,22 +3899,6 @@ type duEstimate struct {
 	HistoryDesc string `json:"history_desc"`
 }
 
-// duIsReceiptRelated returns true for files whose pruning follows receipt
-// rules rather than general history rules: rcache, logaddrs, logtopics.
-func duIsReceiptRelated(f duFileInfo) bool {
-	lname := strings.ToLower(f.Name)
-	return f.Category == duCatRcache ||
-		strings.Contains(lname, "logaddrs") || strings.Contains(lname, "logtopics")
-}
-
-// duIsRcacheDomainFile returns true for rcache files in the domain/ directory.
-// Domain files are never pruned by the snapshot pruning logic.
-func duIsRcacheDomainFile(f duFileInfo) bool {
-	// Normalize path separators to handle both Unix and Windows paths in tests and production.
-	normalized := filepath.ToSlash(f.Path)
-	return f.Category == duCatRcache && strings.Contains(normalized, "/domain/")
-}
-
 // duCaplinBytes sums consensus-layer files, which the per-mode estimates leave out.
 func duCaplinBytes(files []duFileInfo) int64 {
 	var total int64
