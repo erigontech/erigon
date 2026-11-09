@@ -1094,7 +1094,7 @@ func (f *ForkChoiceStore) RejectEnvelope(blockRoot common.Hash) {
 }
 
 func (f *ForkChoiceStore) rejectEnvelopeLocked(blockRoot common.Hash) {
-	if !f.forkGraph.RejectEnvelope(blockRoot) {
+	if f.IsEnvelopeRejected(blockRoot) || !f.forkGraph.RejectEnvelope(blockRoot) {
 		return
 	}
 	if bid := f.anchorExecutionPayloadBid; bid != nil && blockRoot == f.forkGraph.AnchorRoot() {

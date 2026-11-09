@@ -1622,6 +1622,9 @@ func (f *ForkChoiceStore) OnExecutionPayloadAt(ctx context.Context, signedEnvelo
 	if signedEnvelope == nil || signedEnvelope.Message == nil {
 		return errors.New("nil execution payload envelope")
 	}
+	if f.IsEnvelopeRejected(signedEnvelope.Message.BeaconBlockRoot) {
+		return fmt.Errorf("%w: envelope previously rejected for root %x", ErrInvalidExecutionPayloadEnvelope, signedEnvelope.Message.BeaconBlockRoot)
+	}
 	if err := signedEnvelope.ValidateForConfig(f.beaconCfg); err != nil {
 		return fmt.Errorf("invalid execution payload envelope: %w", err)
 	}
