@@ -26,12 +26,8 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-func (cc *commitmentCalculator) feeds() bool {
-	return cc.doms.GetCommitmentContext().AcceptsFeed()
-}
-
 func (cc *commitmentCalculator) emit(view *state.VersionMapView, updates *commitment.Updates) error {
-	if cc.feeds() {
+	if cc.branchPrefetch != nil {
 		return cc.emitTouchedFeed(view)
 	}
 	cc.parentReads = false
@@ -39,7 +35,7 @@ func (cc *commitmentCalculator) emit(view *state.VersionMapView, updates *commit
 }
 
 func (cc *commitmentCalculator) setInput(updates *commitment.Updates) {
-	if cc.feeds() {
+	if cc.branchPrefetch != nil {
 		cc.doms.GetCommitmentContext().SetFeed(&cc.feed.Feed)
 		return
 	}
