@@ -504,6 +504,7 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 	e.hook.LastNewBlockSeen(blockNumber) // used by eth_syncing
 	e.currentContext.ResetPendingUpdates()
 	e.forkValidator.ClearWithUnwind()
+	dbg.NpMark("vc_clear")
 	e.logger.Debug("[execmodule] validating chain", "number", blockNumber, "hash", blockHash)
 	var (
 		header             *types.Header
@@ -598,7 +599,9 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		return ValidationResult{}, err
 	}
 	defer roTx.Rollback()
+	dbg.NpMark("vc_read_block")
 	doms, err := execctx.NewSharedDomains(ctx, roTx, e.logger, execctx.WithLocalCacheUnwind())
+	dbg.NpMark("vc_new_sd")
 	if err != nil {
 		return ValidationResult{}, err
 	}
@@ -657,6 +660,7 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		doms.Close()
 		return ValidationResult{}, err
 	}
+	dbg.NpMark("vc_unwind_common")
 	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(ctx, doms, tx, header, body.RawBody(), ensureReadAheadSuspended, e.logger)
 	if criticalError != nil {
 		return ValidationResult{}, criticalError

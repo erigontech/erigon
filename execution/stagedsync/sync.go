@@ -529,6 +529,7 @@ func (s *Sync) runStage(stage *Stage, doms *execctx.SharedDomains, rwTx kv.Tempo
 }
 
 func (s *Sync) logRunStageDone(stageState *StageState, start time.Time) {
+	dbg.NpMark("stage_" + string(stageState.ID))
 	took := time.Since(start)
 	logPrefix := s.LogPrefix()
 	if took > 60*time.Second {

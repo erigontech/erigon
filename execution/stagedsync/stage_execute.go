@@ -455,7 +455,10 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 		return execV3Serial(ctx, s, u, cfg, doms, rwTx, rng, logger)
 	}
 
+	dbg.NpMark("exec_seek")
 	out, execErr := execV3(ctx, cfg, doms, rwTx, s.SyncMode(), s.CurrentSyncCycle.IsInitialCycle, s.LogPrefix(), rng, nil, logger)
+	dbg.NpMark("exec_v3_ret")
+	dbg.NpStageEnd(time.Now())
 
 	// Write stage progress to the SharedDomains overlay when present; otherwise
 	// use the caller-owned stage transaction, which parallel execution preserves.

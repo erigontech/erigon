@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/crypto/kzg"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -282,6 +283,8 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash, executionRequests []hexutil.Bytes, version clparams.StateVersion,
 ) (*engine_types.PayloadStatus, error) {
 	defer engineNewPayloadDuration.ObserveDuration(time.Now())
+	dbg.NpBegin(req.BlockNumber.Uint64())
+	defer dbg.NpEnd(e.logger)
 	if !e.consuming.Load() {
 		return nil, errors.New("engine payload consumption is not enabled")
 	}
@@ -337,6 +340,7 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	if req.BaseFeePerGas != nil {
 		baseFee = new(uint256.Int).Set((*uint256.Int)(req.BaseFeePerGas))
 	}
+	dbg.NpMark("np_txs_decode")
 	header := types.Header{
 		ParentHash:  req.ParentHash,
 		Coinbase:    req.FeeRecipient,
@@ -456,6 +460,7 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
 
+	dbg.NpMark("np_tx_root")
 	blockHash := req.BlockHash
 	if header.Hash() != blockHash {
 		e.logger.Error(
@@ -521,8 +526,10 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		return possibleStatus, nil
 	}
 
+	dbg.NpMark("np_quick_status")
 	e.lock.Lock()
 	defer e.lock.Unlock()
+	dbg.NpMark("np_lock_wait")
 
 	e.logger.Debug("[NewPayload] sending block", "height", header.Number, "hash", blockHash)
 	// Pass `txs` (the binary tx encodings from the CL) through as the Block's
@@ -532,6 +539,7 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	// byte buffers from req.Transactions.
 	block := types.NewBlockFromStorageWithBinaryTxs(blockHash, &header, transactions, txs, nil /* uncles */, withdrawals, blockAccessList)
 	payloadStatus, err := e.HandleNewPayload(ctx, "NewPayload", block)
+	dbg.NpMark("np_response")
 	if err != nil {
 		if errors.Is(err, rules.ErrInvalidBlock) {
 			return &engine_types.PayloadStatus{
@@ -1088,6 +1096,7 @@ func (e *EngineServer) HandleNewPayload(
 		}
 	}
 
+	dbg.NpMark("hnp_parent")
 	if err := e.chainRW.InsertBlocks(ctx, []*types.Block{block}); err != nil {
 		if errors.Is(err, types.ErrBlockExceedsMaxRlpSize) || errors.Is(err, types.ErrInvalidBlockAccessList) {
 			return &engine_types.PayloadStatus{
@@ -1103,6 +1112,7 @@ func (e *EngineServer) HandleNewPayload(
 	}
 
 	e.logger.Debug(fmt.Sprintf("[%s] New payload begin verification", logPrefix))
+	dbg.NpMark("hnp_insert")
 	status, validationErr, latestValidHash, err := e.chainRW.ValidateChain(ctx, headerHash, headerNumber)
 	e.logger.Debug(fmt.Sprintf("[%s] New payload verification ended", logPrefix), "status", status.String(), "err", err)
 	if err != nil {
