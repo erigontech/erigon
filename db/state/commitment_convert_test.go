@@ -471,11 +471,15 @@ func TestPreflightResume_validationErrorPreservesDisk(t *testing.T) {
 	}
 }
 
-func TestConvertedBatchEmitCapsBuffer(t *testing.T) {
-	var batch convertedBatch
-	require.NoError(t, batch.emit([]byte{1}, []byte{2}, v3.LegacyDirect))
-	require.ErrorIs(t, batch.emit(bytes.Repeat([]byte{3}, commitmentV3BatchBytes), nil, v3.LegacyDirect), errConvertedBatchFull)
-	require.LessOrEqual(t, len(batch.buf), commitmentV3BatchBytes)
+func TestConvertedSinkEmitSendsFullBatch(t *testing.T) {
+	out := make(chan *convertedBatch, 1)
+	sink := convertedSink{ctx: t.Context(), out: out, res: getConvertedBatch()}
+	require.NoError(t, sink.emit([]byte{1}, []byte{2}, v3.LegacyDirect))
+	require.NoError(t, sink.emit(bytes.Repeat([]byte{3}, commitmentV3BatchBytes), nil, v3.LegacyDirect))
+	full := <-out
+	require.Len(t, full.ents, 1)
+	require.LessOrEqual(t, len(full.buf), commitmentV3BatchBytes)
+	require.Len(t, sink.res.ents, 1)
 }
 
 func TestVerifyCommitmentV3CheckRejectsOrphans(t *testing.T) {

@@ -76,19 +76,13 @@ type convertedBatch struct {
 	ents [][3]int
 }
 
-func (b *convertedBatch) emit(k, v []byte, kind v3.LegacyKind) error {
-	if len(b.ents) != 0 && len(b.buf)+len(k)+1+len(v) > commitmentV3BatchBytes {
-		return errConvertedBatchFull
-	}
+func (b *convertedBatch) emit(k, v []byte, kind v3.LegacyKind) {
 	k0 := len(b.buf)
 	b.buf = append(b.buf, k...)
 	v0 := len(b.buf)
 	b.buf = append(append(b.buf, byte(kind)), v...)
 	b.ents = append(b.ents, [3]int{k0, v0, len(b.buf)})
-	return nil
 }
-
-var errConvertedBatchFull = errors.New("converted batch full")
 
 func getConvertedBatch() *convertedBatch {
 	res := convertedBatchPool.Get().(*convertedBatch)
@@ -116,13 +110,13 @@ func (s *convertedSink) send() error {
 }
 
 func (s *convertedSink) emit(k, v []byte, kind v3.LegacyKind) error {
-	if err := s.res.emit(k, v, kind); !errors.Is(err, errConvertedBatchFull) {
-		return err
+	if len(s.res.ents) != 0 && len(s.res.buf)+len(k)+1+len(v) > commitmentV3BatchBytes {
+		if err := s.send(); err != nil {
+			return err
+		}
 	}
-	if err := s.send(); err != nil {
-		return err
-	}
-	return s.res.emit(k, v, kind)
+	s.res.emit(k, v, kind)
+	return nil
 }
 
 var (
