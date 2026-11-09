@@ -295,10 +295,11 @@ func TestConvertCommitmentFiles_V3HistoryRefusesPrunedStart(t *testing.T) {
 		pruned = append(pruned, files...)
 	}
 	require.NotEmpty(t, pruned)
+	agg.CloseFilesNoReopen()
 	for _, f := range pruned {
 		require.NoError(t, dir.RemoveFile(f))
 	}
-	require.NoError(t, agg.OpenFolder(db))
+	require.NoError(t, agg.ReloadFiles())
 
 	tx, err := db.BeginTemporalRw(t.Context())
 	require.NoError(t, err)
