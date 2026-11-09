@@ -144,10 +144,8 @@ func (m *TorrentPeerManager) sync(ctx context.Context) {
 	var toInject []torrent.PeerInfo
 	m.mu.Lock()
 	for i, id := range due {
-		p, ok := m.knownPeers[id]
-		if !ok || p.addr.Addr.String() != addrs[i].Addr.String() {
-			continue
-		}
+		// Only sync writes knownPeers, and Run calls it from one goroutine, so the entry is as the checks found it.
+		p := m.knownPeers[id]
 		if reachable[i] {
 			p.reachable = true
 			toInject = append(toInject, p.addr)
