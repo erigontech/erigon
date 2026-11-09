@@ -278,11 +278,9 @@ func configCopy(c *chain.Config) *chain.Config {
 
 // Returns the set of defined fork names
 func AvailableForks() []string {
-	availableForks := make([]string, len(Forks))
-	i := 0
+	var availableForks []string //nolint:prealloc
 	for k := range Forks {
-		availableForks[i] = k
-		i++
+		availableForks = append(availableForks, k)
 	}
 	slices.Sort(availableForks)
 	return availableForks

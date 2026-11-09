@@ -142,16 +142,10 @@ type testerEntry struct {
 // than serialised behind extr.mu.
 func (extr *EngineXTestRunner) Close() error {
 	extr.mu.Lock()
-	numEntries := 0
+	var entries []testerEntry
 	for _, perAlloc := range extr.testers {
-		numEntries += len(perAlloc)
-	}
-	entries := make([]testerEntry, numEntries)
-	i := 0
-	for _, perAlloc := range extr.testers {
-		for k := range perAlloc {
-			entries[i] = perAlloc[k]
-			i++
+		for i := range perAlloc {
+			entries = append(entries, perAlloc[i])
 		}
 	}
 	extr.testers = nil
