@@ -485,11 +485,15 @@ func (w *legacyDelta) walk(path []byte, visit func(key, value, old []byte) (desc
 		path := w.stack[len(w.stack)-1].path
 		w.stack = w.stack[:len(w.stack)-1]
 		key := encodeLegacyPrefix(path, w.keysV2)
-		value, old, unchanged, err := w.unchanged(key)
+		value, err := w.read(key, w.after)
 		if err != nil {
 			return err
 		}
-		if !unchanged {
+		old, err := w.read(key, w.before)
+		if err != nil {
+			return err
+		}
+		if len(value) == 0 || !bytes.Equal(value, old) {
 			continue
 		}
 		descend, err := visit(key, value, old)
@@ -526,16 +530,6 @@ func (w *legacyDelta) drop(path []byte, conv *v3.LegacyConverter, reach *legacyR
 		}
 		return true, nil
 	})
-}
-
-func (w *legacyDelta) unchanged(key []byte) (value, old []byte, unchanged bool, err error) {
-	if value, err = w.read(key, w.after); err != nil {
-		return nil, nil, false, err
-	}
-	if old, err = w.read(key, w.before); err != nil {
-		return nil, nil, false, err
-	}
-	return value, old, len(value) != 0 && bytes.Equal(value, old), nil
 }
 
 type legacyReach struct {
@@ -697,7 +691,7 @@ func verifyCommitmentV3Files(ctx context.Context, a *Aggregator, logger log.Logg
 		return err
 	}
 	logger.Info("[commitment_convert] v3 records verified", "root", fmt.Sprintf("%x", c.Root), "block", c.BlockNum, "txNum", c.TxNum,
-		"records", common.PrettyCounter(c.Records), "orphans", common.PrettyCounter(c.Orphans), "took", time.Since(started).Round(time.Millisecond))
+		"records", common.PrettyCounter(c.Records), "took", time.Since(started).Round(time.Millisecond))
 	return nil
 }
 

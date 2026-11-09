@@ -25,7 +25,6 @@ import (
 	"io"
 	"math/bits"
 	"reflect"
-	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -352,11 +351,6 @@ type PendingCommitmentUpdate struct {
 	// that trie's log counters. The Prometheus counters do not depend on it —
 	// publishBranchWrites bills those where the write lands.
 	Metrics *Metrics
-}
-
-func (p *PendingCommitmentUpdate) Apply(putBranch func(prefix, data, prevData []byte) error) error {
-	_, err := ApplyDeferredBranchUpdates(p.Deferred, runtime.NumCPU(), putBranch, p.Metrics)
-	return err
 }
 
 func (p *PendingCommitmentUpdate) Clear() {
