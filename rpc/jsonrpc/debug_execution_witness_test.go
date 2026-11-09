@@ -979,3 +979,25 @@ func TestWitnessesMatchHPHUnderCommitmentV3(t *testing.T) {
 		require.Equal(t, hph.GetWitness[n], v3.GetWitness[n], "eth_getWitness, block %d", n+1)
 	}
 }
+
+func TestHeadCaptureRejectsWrongTracedRoot(t *testing.T) {
+	m, testChain := newV3HistoryTestExecModule(t)
+	require.NoError(t, m.InsertChain(testChain.Slice(0, 1)))
+	pin, err := openRollingPin(t.Context(), m.DB)
+	require.NoError(t, err)
+	t.Cleanup(pin.close)
+	require.NoError(t, m.InsertChain(testChain.Slice(1, 2)))
+	committed, err := m.DB.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer committed.Rollback()
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
+	bn := rpc.BlockNumber(2)
+	info, err := api.resolveWitnessBlock(t.Context(), committed, rpc.BlockNumberOrHash{BlockNumber: &bn})
+	require.NoError(t, err)
+	header := info.Block.Header()
+	header.Root = common.Hash{0xde, 0xad}
+	info.Block = info.Block.WithSeal(header)
+	result, err := api.buildWitnessResultHeadCapture(t.Context(), committed, pin, &commitmentdb.ParentRecords{TraceCollapses: true}, info, witnessModeLegacy)
+	require.ErrorContains(t, err, "traced commitment root mismatch")
+	require.Nil(t, result)
+}
