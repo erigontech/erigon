@@ -25,7 +25,7 @@ import (
 func BenchmarkStructFields(b *testing.B) {
 	fields := make([]reflect.StructField, 48)
 	for i := range fields {
-		fields[i] = reflect.StructField{Name: fmt.Sprintf("Field%d", i), Type: reflect.TypeOf(uint64(0))}
+		fields[i] = reflect.StructField{Name: fmt.Sprintf("Field%d", i), Type: reflect.TypeFor[uint64]()}
 	}
 	typ := reflect.StructOf(fields)
 	theTC.mu.Lock()
