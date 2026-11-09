@@ -129,7 +129,7 @@ type field struct {
 // structFields resolves the typeinfo of all public fields in a struct type.
 func structFields(typ reflect.Type) (fields []field, err error) {
 	// Convert fields to rlpstruct.Field.
-	var allStructFields []rlpstruct.Field
+	allStructFields := make([]rlpstruct.Field, 0, typ.NumField())
 	for i := 0; i < typ.NumField(); i++ {
 		rf := typ.Field(i)
 		allStructFields = append(allStructFields, rlpstruct.Field{
