@@ -361,12 +361,12 @@ func Downloader(cmd *cobra.Command, logger log.Logger) error {
 	d.InitBackgroundLogger()
 	if seedbox {
 		snapCfg := snapcfg.KnownCfgOrDevnet(chain)
-		downloadItems := make([]*downloaderproto.DownloadItem, 0, len(snapCfg.Preverified.Items))
-		for _, it := range snapCfg.Preverified.Items {
-			downloadItems = append(downloadItems, &downloaderproto.DownloadItem{
+		downloadItems := make([]*downloaderproto.DownloadItem, len(snapCfg.Preverified.Items))
+		for i, it := range snapCfg.Preverified.Items {
+			downloadItems[i] = &downloaderproto.DownloadItem{
 				Path:        it.Name,
 				TorrentHash: downloadergrpc.String2Proto(it.Hash),
-			})
+			}
 		}
 		if _, err := bittorrentServer.Download(ctx, &downloaderproto.DownloadRequest{Items: downloadItems}); err != nil {
 			return err

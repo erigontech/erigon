@@ -856,7 +856,7 @@ func DeleteStateSnapshots(args DeleteStateSnapshotsArgs) error {
 	}
 
 	// Step 2: Process each candidate file (already parsed)
-	files := make([]snaptype.FileInfo, 0, len(candidateFiles))
+	files := make([]snaptype.FileInfo, len(candidateFiles))
 	doesRmCommitment := len(domainNames) == 0 || slices.Contains(domainNames, kv.CommitmentDomain.String())
 	var snapDir string
 	for i := range candidateFiles {
@@ -881,7 +881,7 @@ func DeleteStateSnapshots(args DeleteStateSnapshotsArgs) error {
 			}
 		}
 
-		files = append(files, res)
+		files[i] = res
 		if removeLatest {
 			_maxFrom = max(_maxFrom, res.From)
 			_maxTo = max(_maxTo, res.To)

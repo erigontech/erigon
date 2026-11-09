@@ -223,7 +223,7 @@ func generateChain(
 			var j uint64
 			var toAddr common.Address
 			nonce := block.TxNonce(address)
-			txs = make([]types.Transaction, 0, 32)
+			txs = make([]types.Transaction, 32)
 			for j = 1; j <= 32; j++ {
 				binary.BigEndian.PutUint64(toAddr[:], j)
 				txn, err = types.SignTx(types.NewTransaction(nonce, toAddr, uint256.NewInt(1_000_000_000_000_000), 21000, new(uint256.Int), nil), *signer, key)
@@ -234,7 +234,7 @@ func generateChain(
 				if err != nil {
 					panic(err)
 				}
-				txs = append(txs, txn)
+				txs[j-1] = txn
 				nonce++
 			}
 		case 6:
