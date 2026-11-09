@@ -554,7 +554,7 @@ func TestExecutionPayloadEnvelopesByRangeCapsResponseBelowSlotSpan(t *testing.T)
 	require.ErrorContains(t, err, "more chunks than requested")
 	require.Len(t, envelopes, 1)
 	require.Equal(t, "malicious-peer", pid)
-	require.Equal(t, pid, sentinel.softBannedPeer)
+	require.Equal(t, pid, sentinel.bannedPeer)
 }
 
 func TestExecutionPayloadEnvelopesByRangeRejectsOnlyOverflowingRanges(t *testing.T) {
@@ -795,7 +795,7 @@ func TestExecutionPayloadEnvelopeRequestsRejectExcessResponseChunks(t *testing.T
 		require.Len(t, envelopes, 1)
 		require.NotNil(t, envelopes[0].Message)
 		require.Equal(t, "malicious-peer", pid)
-		require.Equal(t, pid, sentinel.softBannedPeer)
+		require.Equal(t, pid, sentinel.bannedPeer)
 	}
 }
 
@@ -823,7 +823,7 @@ func TestExecutionPayloadEnvelopeRequestsRejectResponseForEmptyRequest(t *testin
 		require.ErrorContains(t, err, "more chunks than requested")
 		require.ErrorIs(t, err, ErrInvalidResponse)
 		require.Empty(t, envelopes)
-		require.Equal(t, pid, sentinel.softBannedPeer)
+		require.Equal(t, pid, sentinel.bannedPeer)
 	}
 }
 
@@ -1123,7 +1123,7 @@ func TestSendBeaconBlocksByRangeReqToPeerUsesThatPeer(t *testing.T) {
 		require.ErrorIs(t, err, ErrInvalidResponse)
 		require.ErrorContains(t, err, "more chunks than requested")
 		require.Nil(t, blocks)
-		require.Equal(t, "directed-peer", sentinel.softBannedPeer)
+		require.Equal(t, "directed-peer", sentinel.bannedPeer)
 	})
 }
 
