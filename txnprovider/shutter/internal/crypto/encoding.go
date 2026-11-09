@@ -79,10 +79,12 @@ func (m *EncryptedMessage) Unmarshal(d []byte) error {
 	copy(m.C2[:], d[1+blst.BLST_P2_COMPRESS_BYTES:1+blst.BLST_P2_COMPRESS_BYTES+BlockSize])
 
 	m.C3 = nil
-	for i := 1 + blst.BLST_P2_COMPRESS_BYTES + BlockSize; i < len(d); i += BlockSize {
-		b := Block{}
-		copy(b[:], d[i:i+BlockSize])
-		m.C3 = append(m.C3, b)
+	if n := len(d) - 1 - blst.BLST_P2_COMPRESS_BYTES - BlockSize; n > 0 {
+		m.C3 = make([]Block, n/BlockSize)
+	}
+	for j := range m.C3 {
+		i := 1 + blst.BLST_P2_COMPRESS_BYTES + BlockSize + j*BlockSize
+		copy(m.C3[j][:], d[i:i+BlockSize])
 	}
 
 	return nil
