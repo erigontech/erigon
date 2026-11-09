@@ -8,11 +8,21 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/node"
+	"github.com/erigontech/erigon/node/direct"
+	"github.com/erigontech/erigon/node/ethconfig"
+	"github.com/erigontech/erigon/node/nodecfg"
+	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/jsonrpc"
 )
@@ -88,4 +98,46 @@ func TestMCPNamespacesFollowHTTPAPI(t *testing.T) {
 			require.Equal(t, tc.want, got)
 		})
 	}
+}
+
+// TestBackwardBlockDownloader: the node exposes its downloader of blocks by
+// hash, which draws on the node's peers: with none it asks no one.
+func TestBackwardBlockDownloader(t *testing.T) {
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	stack, err := node.New(t.Context(), &nodecfg.Config{
+		Dirs: dirs,
+		P2P: p2p.Config{
+			ListenAddr:      "127.0.0.1:0",
+			MaxPeers:        1,
+			MaxPendingPeers: 1,
+			NoDiscovery:     true,
+			NoDial:          true,
+			ProtocolVersion: []uint{direct.ETH69},
+			PrivateKey:      key,
+		},
+		MdbxDBSizeLimit: datasize.GB,
+	}, logger)
+	require.NoError(t, err)
+	cfg := ethconfig.Defaults
+	cfg.Dirs = dirs
+	cfg.Genesis = chainspec.DeveloperGenesisBlock()
+	cfg.Snapshot.NoDownloader = true
+	cfg.TxPool.Disable = true
+	cfg.InternalCL = false
+	cfg.StateCacheBudget = datasize.MB
+	backend, err := New(t.Context(), stack, &cfg, logger, nil)
+	require.NoError(t, err)
+	require.NoError(t, backend.Init(stack, &cfg, backend.ChainConfig()))
+	require.NoError(t, stack.Start())
+	t.Cleanup(func() { require.NoError(t, stack.Close()) })
+
+	bbd := backend.BackwardBlockDownloader()
+	require.NotNil(t, bbd)
+	feed, err := bbd.DownloadBlocksBackwards(t.Context(), common.Hash{1}, nil)
+	require.NoError(t, err)
+	_, err = feed.Next(t.Context())
+	require.ErrorContains(t, err, "no peers available")
 }

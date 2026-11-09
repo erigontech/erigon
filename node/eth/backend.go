@@ -147,6 +147,7 @@ type Ethereum struct {
 	genesisHash  common.Hash
 
 	execModule *execmodule.ExecModule
+	bbd        *execp2p.BackwardBlockDownloader
 
 	ethBackendRPC       *privateapi2.EthBackendServer
 	ethRpcClient        rpchelper.ApiBackend
@@ -643,7 +644,7 @@ func New(
 		backend.sentryProvider.ExecutionP2PPeerPenalizer,
 		backend.sentryProvider.ExecutionP2PPeerTracker,
 	)
-	bbd := execp2p.NewBackwardBlockDownloader(logger, executionFetcher, backend.sentryProvider.ExecutionP2PPeerPenalizer, backend.sentryProvider.ExecutionP2PPeerTracker, tmpdir, execp2p.WithBALFetcher(balFetcher))
+	backend.bbd = execp2p.NewBackwardBlockDownloader(logger, executionFetcher, backend.sentryProvider.ExecutionP2PPeerPenalizer, backend.sentryProvider.ExecutionP2PPeerTracker, tmpdir, execp2p.WithBALFetcher(balFetcher))
 
 	// MultiClient is the late-binding half of the Sentry Provider — it needs
 	// construction above.
@@ -950,7 +951,7 @@ func New(
 			backend.chainDB,
 			chainConfig,
 			config.Sync,
-			bbd,
+			backend.bbd,
 		),
 		config.InternalCL && !config.CaplinConfig.EnableEngineAPI, // If the chain supports the engine API, then we should not make the server fail.
 		config.InternalCL, // Suppress "no CL" warning when any embedded CL is active.
@@ -1557,6 +1558,12 @@ func (s *Ethereum) TxPool() *txpool.TxPool {
 
 func (s *Ethereum) ExecutionModule() *execmodule.ExecModule {
 	return s.execModule
+}
+
+// BackwardBlockDownloader returns the downloader of blocks by hash from the
+// node's peers, the one the engine API server uses.
+func (s *Ethereum) BackwardBlockDownloader() *execp2p.BackwardBlockDownloader {
+	return s.bbd
 }
 
 // RemoveContents is like dir.RemoveAll, but preserve dir itself
