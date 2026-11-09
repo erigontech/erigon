@@ -438,7 +438,14 @@ func NewForkChoiceStore(
 	publicKeysRegistry.ResetAnchor(anchorState)
 	participation.Add(state.Epoch(anchorState.BeaconState), anchorState.CurrentEpochParticipation().Copy())
 
-	totalActiveBalances.Add(anchorRoot, anchorState.GetTotalActiveBalance())
+	// The caller's anchor state can carry a stale cached total, so take it from the fork graph's rescanned copy.
+	anchorTotalActiveBalance := anchorState.GetTotalActiveBalance()
+	if forkGraph != nil {
+		if current := forkGraph.CurrentStateLocked(anchorRoot); current != nil {
+			anchorTotalActiveBalance = current.GetTotalActiveBalance()
+		}
+	}
+	totalActiveBalances.Add(anchorRoot, anchorTotalActiveBalance)
 	r := solid.NewHashVector(int(anchorState.BeaconConfig().EpochsPerHistoricalVector))
 	anchorState.RandaoMixes().CopyTo(r)
 	randaoMixesLists.Add(anchorRoot, r)
@@ -844,6 +851,12 @@ func (f *ForkChoiceStore) copyCurrentStateLocked(blockRoot common.Hash) (*state.
 	}
 	start := time.Now()
 	defer currentStateCopy.ObserveDuration(start)
+	if f.totalActiveBalances != nil {
+		if total, ok := f.totalActiveBalances.Get(blockRoot); ok {
+			copied, err := current.CopyWithTotalActiveBalance(total)
+			return copied, true, err
+		}
+	}
 	copied, err := current.Copy()
 	return copied, true, err
 }
