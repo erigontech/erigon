@@ -157,6 +157,24 @@ func TestStartFetchingBlocksMissedByGossipResumesAcrossAttempts(t *testing.T) {
 	require.Equal(t, sentinel.starts[last]+maxChainTipRequestCount, sentinel.starts[last+1], "a new attempt must continue past the empty windows")
 }
 
+func TestStartFetchingBlocksMissedByGossipKeepsAnUnfetchedWindow(t *testing.T) {
+	beaconCfg := clparams.MainnetBeaconConfig
+	beaconCfg.SecondsPerSlot = 1
+	clock := eth_clock.NewEthereumClock(uint64(time.Now().Unix())-100, common.Hash{}, &beaconCfg)
+	cfg := &Cfg{
+		beaconCfg:  &beaconCfg,
+		ethClock:   clock,
+		forkChoice: &forkchoice.ForkChoiceStore{},
+		rpc:        rpc.NewBeaconRpcP2P(t.Context(), &failingRequestSentinel{}, &beaconCfg, clock),
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 800*time.Millisecond)
+	defer cancel()
+
+	startFetchingBlocksMissedByGossipAfterSomeTime(ctx, cfg, Args{targetSlot: math.MaxUint64}, make(chan *peers.PeeredObject[[]*cltypes.SignedBeaconBlock], 1), make(chan error, 1))
+
+	require.Zero(t, cfg.chainTipResumeSlot.Load(), "a window that was never fetched must be asked for again")
+}
+
 func TestStartFetchingBlocksMissedByGossipReturnsAfterCancelWithoutErrorReader(t *testing.T) {
 	beaconCfg := clparams.MainnetBeaconConfig
 	beaconCfg.SecondsPerSlot = 1

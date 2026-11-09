@@ -194,7 +194,6 @@ func startFetchingBlocksMissedByGossipAfterSomeTime(ctx context.Context, cfg *Cf
 		if currentSlot >= from && currentSlot-from >= maxChainTipRequestCount {
 			next = from + count
 		}
-		cfg.chainTipResumeSlot.Store(next)
 
 		// Stop fetching if the highest seen block is greater than or equal to the target slot
 		if cfg.forkChoice.HighestSeen() >= args.targetSlot {
@@ -210,6 +209,7 @@ func startFetchingBlocksMissedByGossipAfterSomeTime(ctx context.Context, cfg *Cf
 			}
 			return
 		}
+		cfg.chainTipResumeSlot.Store(next)
 
 		// Send fetched blocks to the response channel or handle context cancellation
 		select {
@@ -305,13 +305,17 @@ func fetchLinkedAncestors(ctx context.Context, cfg *Cfg, peer string, orphan *cl
 	var fetched []*cltypes.SignedBeaconBlock
 	next, end := start, orphan.Block.Slot
 	for requests := 0; next < end && requests < maxAncestorLookupRequests; requests++ {
-		blocks, err := cfg.rpc.SendBeaconBlocksByRangeReqToPeer(ctx, peer, next, min(end-next, maxChainTipRequestCount))
+		count := min(end-next, maxChainTipRequestCount)
+		blocks, err := cfg.rpc.SendBeaconBlocksByRangeReqToPeer(ctx, peer, next, count)
 		switch {
 		case err != nil:
 			return nil, err
+		case len(blocks) == 0 && next+count < end:
+			next += count
+			continue
 		case len(blocks) == 0:
 			return nil, fmt.Errorf("empty response, blocks fetched before: %d", len(fetched))
-		case !slotsIncreasingWithin(blocks, next, end):
+		case !slotsIncreasingWithin(blocks, next, next+count):
 			return nil, errors.New("response slots out of range or not increasing")
 		}
 		fetched = append(fetched, blocks...)
