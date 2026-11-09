@@ -52,9 +52,15 @@ type StateContext struct {
 	TransactionIndex *int
 }
 
+const maxCallManyTransactions = 1_000
+
 func validateBundles(bundles []Bundle, chainID *uint256.Int) error {
 	empty := true
+	total := 0
 	for b, bundle := range bundles {
+		if total += len(bundle.Transactions); total > maxCallManyTransactions {
+			return fmt.Errorf("too many transactions: more than %d", maxCallManyTransactions)
+		}
 		for i := range bundle.Transactions {
 			if err := ethapi.CheckChainID(bundle.Transactions[i].ChainID, chainID); err != nil {
 				return fmt.Errorf("bundle %d, transaction %d: %w", b, i, err)
@@ -297,6 +303,9 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 			// If the timer caused an abort, return an appropriate error message
 			if evm.Cancelled() {
 				return nil, fmt.Errorf("execution aborted (timeout = %v)", timeout)
+			}
+			if len(result.ReturnData) > api.ReturnDataLimit {
+				return nil, fmt.Errorf("call returned result on length %d exceeding --rpc.returndata.limit %d", len(result.ReturnData), api.ReturnDataLimit)
 			}
 			jsonResult := make(map[string]any)
 			if result.Err != nil {

@@ -180,6 +180,25 @@ func TestCapEVMTimeout(t *testing.T) {
 	}
 }
 
+func TestCallManyRejectsTooManyTransactions(t *testing.T) {
+	bundles := []Bundle{{Transactions: make([]ethapi.CallArgs, maxCallManyTransactions)}, {Transactions: make([]ethapi.CallArgs, 1)}}
+	require.ErrorContains(t, validateBundles(bundles, nil), "too many transactions")
+}
+
+func TestCallManyAppliesTheReturnDataLimit(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api, _ := newCallManyApisForTest(m)
+	api.ReturnDataLimit = 16
+	txIndex := -1
+	stateCtx := StateContext{BlockNumber: rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber), TransactionIndex: &txIndex}
+	returns32 := common.HexToAddress("0x00000000000000000000000000000000000000ab")
+	code := hexutil.Bytes(hexutil.MustDecode("0x60206000f3"))
+	overrides := ethapi.StateOverrides{accounts.InternAddress(returns32): {Code: &code}}
+
+	_, err := api.CallMany(context.Background(), []Bundle{{Transactions: []ethapi.CallArgs{{To: &returns32}}}}, stateCtx, &overrides, nil)
+	require.ErrorContains(t, err, "--rpc.returndata.limit")
+}
+
 func TestCallManyEmptyBundles(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api, debugApi := newCallManyApisForTest(m)
