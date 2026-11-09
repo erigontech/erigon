@@ -21,6 +21,7 @@ package enode
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/rand"
 	"encoding/binary"
@@ -445,10 +446,7 @@ func (db *DB) expireNodes() {
 	)
 	// A node that never answered a ping has no pong row, so its last ping decides.
 	expired := func() bool {
-		youngest := youngestPong
-		if youngest == 0 {
-			youngest = youngestPing
-		}
+		youngest := cmp.Or(youngestPong, youngestPing)
 		return youngest > 0 && youngest < threshold
 	}
 	var toDelete [][]byte
