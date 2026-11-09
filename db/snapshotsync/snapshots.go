@@ -25,6 +25,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -1810,6 +1811,53 @@ type snapshotNotifier interface {
 // caller that retries makes progress where one that treats it as final does not.
 var ErrSegmentsNotReady = errors.New("not all snapshot segments are available")
 
+// versionlessName drops a snapshot name's leading version so names can be
+// compared across it. A set's members version independently, so the same index
+// is "v2.0-...-headers.idx" here and "v2.1-...-headers.idx" in the manifest.
+func versionlessName(name string) string {
+	if len(name) == 0 || name[0] != 'v' {
+		return name
+	}
+	dash := strings.IndexByte(name, '-')
+	if dash < 0 || strings.IndexByte(name[:dash], '.') < 0 {
+		return name
+	}
+	return name[dash+1:]
+}
+
+// manifestNamedIndexes returns the segment's index files that the manifest
+// advertises a remote source for.
+//
+// A locally built index is not a copy of the advertised one: it embeds this
+// node's salt and is written at this binary's current index version, so its
+// bytes differ from those the manifest's hash was taken over. Building one
+// anyway leaves a publisher serving a file that fails its own infohash check,
+// which is why a named index must be downloaded rather than built.
+//
+// The manifest is read from the registry rather than the Cfg captured at
+// construction: a discovered chain.toml arrives later, via snapcfg.SetToml.
+func (s *BaseRoSnapshots) manifestNamedIndexes(segment *DirtySegment) []string {
+	wanted := segment.Type().IdxFileNames(segment.From(), segment.To())
+	if len(wanted) == 0 {
+		return nil
+	}
+	cfg, ok := snapcfg.KnownCfg(s.cfg.ChainName)
+	if !ok || cfg == nil {
+		return nil
+	}
+	advertised := make(map[string]struct{}, len(cfg.Preverified.Items))
+	for _, item := range cfg.Preverified.Items {
+		advertised[versionlessName(item.Name)] = struct{}{}
+	}
+	var named []string
+	for _, idx := range wanted {
+		if _, remote := advertised[versionlessName(idx)]; remote {
+			named = append(named, idx)
+		}
+	}
+	return named
+}
+
 func (s *BaseRoSnapshots) BuildMissedIndices(ctx context.Context, logPrefix string, notifier snapshotNotifier, dirs datadir.Dirs, cc *chain.Config, logger log.Logger) error {
 	if !s.Cfg().ProduceE2 && s.IndicesMax() == 0 {
 		if s.SegmentsMax() == 0 {
@@ -2037,6 +2085,11 @@ func (s *BaseRoSnapshots) buildMissedIndices(logPrefix string, ctx context.Conte
 				if segment.IsIndexed() {
 					continue
 				}
+				if named := s.manifestNamedIndexes(segment); len(named) > 0 {
+					logger.Debug(fmt.Sprintf("[%s] not indexing locally, the manifest names it", logPrefix),
+						"seg", segment.FileName(), "indexes", strings.Join(named, ","))
+					continue
+				}
 				// Skip if a merge/dump/another recovery is already building this
 				// (type, range); otherwise claim it so we don't double-build.
 				from, to := segment.From(), segment.To()
@@ -2044,6 +2097,8 @@ func (s *BaseRoSnapshots) buildMissedIndices(logPrefix string, ctx context.Conte
 					continue
 				}
 				info := segment.FileInfo(dir)
+				logger.Info(fmt.Sprintf("[%s] building index locally", logPrefix),
+					"seg", info.Name(), "indexes", strings.Join(t.Type().IdxFileNames(from, to), ","))
 
 				newIdxBuilt = true
 
