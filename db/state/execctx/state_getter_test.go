@@ -207,8 +207,8 @@ func TestStateGetterLendCodeReusesTheLastDecode(t *testing.T) {
 	})
 	lend := func(b byte, want []byte, decodes int) {
 		t.Helper()
-		got, lent, err := lender.LendCode(addr(b), 5)
-		require.NoError(t, err)
+		got, lent, lendErr := lender.LendCode(addr(b), 5)
+		require.NoError(t, lendErr)
 		require.True(t, lent)
 		require.Equal(t, want, got)
 		require.Len(t, lentCaps, decodes)
