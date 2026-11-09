@@ -500,10 +500,11 @@ func (m *sentryMultiplexer) Peers(ctx context.Context, in *emptypb.Empty, opts .
 
 	var allPeers []*typesproto.PeerInfo
 	if total > 0 {
-		allPeers = make([]*typesproto.PeerInfo, 0, total)
-	}
-	for _, sentPeers := range allReplies {
-		allPeers = append(allPeers, sentPeers.GetPeers()...)
+		allPeers = make([]*typesproto.PeerInfo, total)
+		off := 0
+		for _, sentPeers := range allReplies {
+			off += copy(allPeers[off:], sentPeers.GetPeers())
+		}
 	}
 
 	return &sentryproto.PeersReply{Peers: allPeers}, nil
