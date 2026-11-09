@@ -118,6 +118,7 @@ func (api *APIImpl) GetFilterChanges(_ context.Context, index string) ([]any, er
 	switch ft {
 	case rpchelper.FilterTypeHeads:
 		if blocks, ok := api.filters.ReadPendingBlocks(rpchelper.HeadsSubID(cutIndex)); ok {
+			stub = make([]any, 0, len(blocks))
 			for _, v := range blocks {
 				stub = append(stub, v.Hash())
 			}
@@ -132,6 +133,7 @@ func (api *APIImpl) GetFilterChanges(_ context.Context, index string) ([]any, er
 		}
 	case rpchelper.FilterTypeLogs:
 		if logs, ok := api.filters.ReadLogs(rpchelper.LogsSubID(cutIndex)); ok {
+			stub = make([]any, 0, len(logs))
 			for _, v := range logs {
 				stub = append(stub, v)
 			}

@@ -1345,8 +1345,6 @@ func buildWitnessTrie(
 	accessed *accessedState,
 	produceExclusionProofs bool,
 ) (encodedNodes []hexutil.Bytes, err error) {
-	encodedNodes = []hexutil.Bytes{}
-
 	sdCtx.SetStateReader(trieReaderFor(hc, tx, firstTxNumInBlock))
 	if _, _, err := domains.SeekCommitment(ctx, tx); err != nil {
 		return nil, fmt.Errorf("failed to reset commitment for regular witness: %w", err)
@@ -1371,6 +1369,7 @@ func buildWitnessTrie(
 		return nil, fmt.Errorf("collapse witness root mismatch: calculated=%x, expected=%x", common.BytesToHash(witnessRoot), expectedParentRoot)
 	}
 
+	encodedNodes = make([]hexutil.Bytes, 0, len(witnessNodes))
 	for _, node := range witnessNodes {
 		encodedNodes = append(encodedNodes, node)
 	}

@@ -257,7 +257,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 		}
 	}
 
-	ret := make([][]map[string]any, 0)
+	ret := make([][]map[string]any, 0, len(bundles))
 
 	// Every transaction of the request gets the next index, so each sees the ones before it.
 	txIndex := st.TxnIndex()
@@ -268,7 +268,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 		if err != nil {
 			return nil, err
 		}
-		results := []map[string]any{}
+		results := make([]map[string]any, 0, len(bundle.Transactions))
 		for i := range bundle.Transactions {
 			txn := &bundle.Transactions[i]
 			st.SetTxContext(blockNum, txIndex)
