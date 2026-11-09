@@ -1565,9 +1565,11 @@ func (as *AggregatorPruneStat) String() string {
 	if as == nil {
 		return ""
 	}
-	names := make([]string, 0, len(as.Domains))
+	names := make([]string, len(as.Domains))
+	i := 0
 	for k := range as.Domains {
-		names = append(names, k)
+		names[i] = k
+		i++
 	}
 
 	slices.Sort(names)
