@@ -479,7 +479,7 @@ func NewNotifications(stateChangesConsumer StateChangeConsumer) *Notifications {
 	return &Notifications{
 		Events:               NewEvents(),
 		Accumulator:          NewAccumulator(),
-		RecentReceipts:       NewRecentReceipts(512),
+		RecentReceipts:       NewRecentReceipts(notifications.MaxNotifiedBlocks),
 		StateChangesConsumer: stateChangesConsumer,
 	}
 }
