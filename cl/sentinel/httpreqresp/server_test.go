@@ -51,7 +51,7 @@ func TestMaxResponseBodySize(t *testing.T) {
 				"single-object protocol %s must ignore the byte budget", p.ID)
 			continue
 		}
-		// No budget falls back to the tight single-object cap, not the multi-GiB ceiling, so a
+		// No budget falls back to the tight single-object cap, not the multi-chunk ceiling, so a
 		// caller that forgets to size a budget can't turn a flood into an OOM.
 		require.EqualValuesf(t, maxSingleObjectResponse, MaxResponseBodySize(p.ID, 0),
 			"multi-chunk protocol %s with no budget must get the tight cap, not the ceiling", p.ID)
@@ -61,7 +61,7 @@ func TestMaxResponseBodySize(t *testing.T) {
 		require.Lessf(t, MaxResponseBodySize(p.ID, budget), ceiling,
 			"multi-chunk protocol %s with a small budget must be tighter than the ceiling", p.ID)
 		// A budget above the ceiling is clamped to it, so a miscomputed or overflowed budget
-		// can't make the handler stream more than a spec-maximal response.
+		// can't make the handler stream more than the ceiling.
 		require.EqualValuesf(t, ceiling, MaxResponseBodySize(p.ID, ceiling+1),
 			"multi-chunk protocol %s must clamp a budget above the ceiling", p.ID)
 	}
@@ -468,7 +468,7 @@ func TestSingleChunkEmptyCloseReturnsBadRequest(t *testing.T) {
 }
 
 // A multi-chunk request that reaches the handler without a caller budget (a caller that failed to
-// size one, or an empty request) must fall back to the tight single-object cap, not the multi-GiB
+// size one, or an empty request) must fall back to the tight single-object cap, not the multi-chunk
 // ceiling — so a missing budget can never let a flooding peer drive an OOM. A budgeted multi-chunk
 // response above the single-object cap still passes; see TestMultiChunkResponseRejectedOverByteBudget.
 func TestMultiChunkResponseCappedWithoutBudget(t *testing.T) {

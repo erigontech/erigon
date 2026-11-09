@@ -1154,3 +1154,10 @@ func TestNewBeaconRpcP2PStopsPeerGoroutinesWhenContextEnds(t *testing.T) {
 	}
 	cancel()
 }
+
+func TestMaxRequestPayloadsFitsABufferedResponse(t *testing.T) {
+	r := &BeaconRpcP2P{beaconConfig: &clparams.BeaconChainConfig{MaxRequestPayloads: 128}}
+	require.EqualValues(t, httpreqresp.MaxResponseChunks, r.MaxRequestPayloads())
+	r = &BeaconRpcP2P{beaconConfig: &clparams.BeaconChainConfig{MaxRequestPayloads: 8}}
+	require.EqualValues(t, 8, r.MaxRequestPayloads())
+}

@@ -192,7 +192,7 @@ func startFetchingBlocksMissedByGossipAfterSomeTime(ctx context.Context, cfg *Cf
 			count = 4
 		}
 		next = 0
-		if count == maxChainTipRequestCount {
+		if currentSlot >= from && currentSlot-from >= maxChainTipRequestCount {
 			next = from + count
 		}
 

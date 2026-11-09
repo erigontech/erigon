@@ -97,8 +97,9 @@ func NewBeaconRpcP2P(ctx context.Context, sentinel sentinelproto.SentinelClient,
 	return rpc
 }
 
+// MaxRequestPayloads is at most what one buffered response holds, so a spec-valid response always fits.
 func (b *BeaconRpcP2P) MaxRequestPayloads() uint64 {
-	return b.beaconConfig.MaxRequestPayloadsLimit()
+	return min(b.beaconConfig.MaxRequestPayloadsLimit(), httpreqresp.MaxResponseChunks)
 }
 
 func (b *BeaconRpcP2P) sendBlocksRequest(ctx context.Context, topic string, reqData []byte, maxResponseBytes uint64) ([]*cltypes.SignedBeaconBlock, string, error) {

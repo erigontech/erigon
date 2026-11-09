@@ -154,6 +154,36 @@ func TestPeerRequestLimitsConcurrentStreamsPerPeerAndRequestType(t *testing.T) {
 }
 
 // Responses are buffered whole, so max-size requests in flight share one byte budget: a third must wait.
+func TestSmallRequestDoesNotWaitBehindBulkRequests(t *testing.T) {
+	release := make(chan struct{})
+	defer close(release)
+	reached := make(chan struct{}, 4)
+	server := &SentinelServer{peerRequestBackend: peerRequestBackendStub{
+		handler: http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+			reached <- struct{}{}
+			<-release
+		}),
+	}}
+	bulk := func(pid string) {
+		go func() {
+			_, _ = server.requestPeer(t.Context(), peer.ID(pid), &sentinelproto.RequestData{Topic: communication.BeaconBlocksByRangeProtocolV2, Data: []byte{1}, MaxResponseBytes: math.MaxUint64})
+		}()
+	}
+	bulk("a")
+	bulk("b")
+	receivePeerRequestTestValue(t, reached)
+	receivePeerRequestTestValue(t, reached)
+	bulk("c")
+	time.Sleep(100 * time.Millisecond) // the third bulk request is now queued
+
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	go func() {
+		_, _ = server.requestPeer(ctx, peer.ID("d"), &sentinelproto.RequestData{Topic: communication.MetadataProtocolV2, Data: []byte{1}})
+	}()
+	receivePeerRequestTestValue(t, reached)
+}
+
 func TestPeerRequestsShareAResponseBudget(t *testing.T) {
 	release := make(chan struct{})
 	reached := make(chan struct{}, 4)
