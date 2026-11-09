@@ -153,7 +153,7 @@ func (d *Dispatcher) Dispatch(
 			if underflow {
 				span = 0
 			}
-			notifyFrom = finishProgressAfter - min(span, 1024) + 1
+			notifyFrom = finishProgressAfter - min(span, notifications.MaxNotifiedBlocks) + 1
 		}
 		notifyTo := finishProgressAfter + 1 //[from, to)
 
@@ -161,9 +161,9 @@ func (d *Dispatcher) Dispatch(
 			return err
 		}
 		if recentReceipts != nil {
-			loaded := d.loadMissingReceipts(ctx, committedTx, recentReceipts, notifyFrom, notifyTo)
-			recentReceipts.NotifyReceipts(d.events, notifyFrom, notifyTo, loaded)
-			recentReceipts.NotifyLogs(d.events, notifyFrom, notifyTo, loaded)
+			d.cacheMissingReceipts(ctx, committedTx, recentReceipts, notifyFrom, notifyTo)
+			recentReceipts.NotifyReceipts(d.events, notifyFrom, notifyTo)
+			recentReceipts.NotifyLogs(d.events, notifyFrom, notifyTo)
 		}
 	}
 
@@ -192,32 +192,27 @@ func (d *Dispatcher) Dispatch(
 	return nil
 }
 
-// loadMissingReceipts regenerates from committedTx the receipts of the blocks in [from,to) the cache lacks.
-func (d *Dispatcher) loadMissingReceipts(ctx context.Context, committedTx kv.TemporalTx, recentReceipts *notifications.RecentReceipts, from, to uint64) map[uint64]notifications.BlockReceipts {
+// cacheMissingReceipts regenerates from committedTx the receipts of the blocks in [from,to) the cache lacks.
+func (d *Dispatcher) cacheMissingReceipts(ctx context.Context, committedTx kv.TemporalTx, recentReceipts *notifications.RecentReceipts, from, to uint64) {
 	if committedTx == nil || d.loadReceipts == nil || !(d.events.HasLogSubscriptions() || d.events.HasReceiptSubscriptions()) {
-		return nil
+		return
 	}
-	var loaded map[uint64]notifications.BlockReceipts
 	var failed []uint64
 	var firstErr error
 	for _, blockNum := range recentReceipts.Missing(from, to) {
 		b, err := d.loadReceipts(ctx, committedTx, blockNum)
 		if err != nil {
 			if ctx.Err() != nil {
-				return loaded
+				return
 			}
 			failed, firstErr = append(failed, blockNum), cmp.Or(firstErr, err)
 			continue
 		}
-		if loaded == nil {
-			loaded = map[uint64]notifications.BlockReceipts{}
-		}
-		loaded[blockNum] = b
+		recentReceipts.Add(b.Receipts, b.Txs, b.Header)
 	}
 	if len(failed) > 0 {
 		d.logger.Warn("[dispatcher] blocks notified without receipts", "count", len(failed), "first", failed[0], "err", firstErr)
 	}
-	return loaded
 }
 
 // PublishOverlay sends the SharedDomains to in-process subscribers via Events.

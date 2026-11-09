@@ -24,6 +24,9 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
+// MaxNotifiedBlocks is the longest block span one notification dispatch covers.
+const MaxNotifiedBlocks = 1024
+
 // RecentReceipts caches recent block receipts for notification dispatch.
 //
 // Requirements:
@@ -101,18 +104,8 @@ func (r *RecentReceipts) evictBefore(from uint64) {
 	}
 }
 
-// block returns block bn's receipts from the cache, else from loaded; caller holds r.mu.
-func (r *RecentReceipts) block(bn uint64, loaded map[uint64]BlockReceipts) (BlockReceipts, bool) {
-	if receipts, ok := r.receipts[bn]; ok {
-		return BlockReceipts{Receipts: receipts, Txs: r.txs[bn], Header: r.headers[bn]}, true
-	}
-	b, ok := loaded[bn]
-	return b, ok
-}
-
-// NotifyLogs sends moved-aside logs as removed, then added logs in ascending block order for [from,to),
-// taking a block missing from the cache from loaded.
-func (r *RecentReceipts) NotifyLogs(n ChainEventNotifier, from, to uint64, loaded map[uint64]BlockReceipts) {
+// NotifyLogs sends moved-aside logs as removed, then added logs in ascending block order for [from,to).
+func (r *RecentReceipts) NotifyLogs(n ChainEventNotifier, from, to uint64) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	defer func() { r.removedLogs = nil }()
@@ -122,8 +115,8 @@ func (r *RecentReceipts) NotifyLogs(n ChainEventNotifier, from, to uint64, loade
 	r.evictBefore(from)
 	reply := r.removedLogs
 	for bn := from; bn < to; bn++ {
-		if b, ok := r.block(bn, loaded); ok {
-			reply = append(reply, logNotifications(b.Receipts, b.Header, false)...)
+		if receipts, ok := r.receipts[bn]; ok {
+			reply = append(reply, logNotifications(receipts, r.headers[bn], false)...)
 		}
 	}
 	if len(reply) > 0 {
@@ -194,18 +187,11 @@ func (r *RecentReceipts) Add(receipts types.Receipts, txs []types.Transaction, h
 	if len(r.receipts) <= int(r.limit) {
 		return
 	}
-	for bn := range r.receipts {
-		if bn+r.limit < blockNum {
-			delete(r.receipts, bn)
-			delete(r.txs, bn)
-			delete(r.headers, bn)
-		}
-	}
+	r.evictBefore(blockNum)
 }
 
-// NotifyReceipts sends added receipts in one batch, in ascending block order for [from,to), taking a block
-// missing from the cache from loaded.
-func (r *RecentReceipts) NotifyReceipts(n ChainEventNotifier, from, to uint64, loaded map[uint64]BlockReceipts) {
+// NotifyReceipts sends added receipts in one batch, in ascending block order for [from,to).
+func (r *RecentReceipts) NotifyReceipts(n ChainEventNotifier, from, to uint64) {
 	if !n.HasReceiptSubscriptions() {
 		return
 	}
@@ -215,9 +201,8 @@ func (r *RecentReceipts) NotifyReceipts(n ChainEventNotifier, from, to uint64, l
 	r.evictBefore(from)
 	var reply []*ReceiptNotification
 	for blockNum := from; blockNum < to; blockNum++ {
-		b, ok := r.block(blockNum, loaded)
-		receipts, txs, header := b.Receipts, b.Txs, b.Header
-		if !ok || len(receipts) == 0 || len(txs) == 0 || header == nil {
+		receipts, txs, header := r.receipts[blockNum], r.txs[blockNum], r.headers[blockNum]
+		if len(receipts) == 0 || len(txs) == 0 || header == nil {
 			continue
 		}
 

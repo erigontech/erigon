@@ -125,51 +125,128 @@ func TestDispatcherCapsHeadersAfterDeepUnwind(t *testing.T) {
 	}
 }
 
-func TestDispatcherDeliversLogsOfBlocksMissingFromTheCache(t *testing.T) {
-	const blocks = 600 // more than the cache holds
-	blockReceipts := func(blockNum uint64) notifications.BlockReceipts {
-		header := &types.Header{Number: *uint256.NewInt(blockNum)}
-		l := &types.Log{BlockNumber: hexutil.Uint64(blockNum)}
-		receipt := &types.Receipt{BlockNumber: uint256.NewInt(blockNum), Logs: types.Logs{l}}
-		return notifications.BlockReceipts{Receipts: types.Receipts{receipt}, Txs: []types.Transaction{types.NewTransaction(0, common.Address{}, uint256.NewInt(0), 0, uint256.NewInt(0), nil)}, Header: header}
+func oneLogBlockReceipts(blockNum uint64) notifications.BlockReceipts {
+	header := &types.Header{Number: *uint256.NewInt(blockNum)}
+	l := &types.Log{BlockNumber: hexutil.Uint64(blockNum)}
+	receipt := &types.Receipt{BlockNumber: uint256.NewInt(blockNum), Logs: types.Logs{l}}
+	return notifications.BlockReceipts{Receipts: types.Receipts{receipt}, Txs: []types.Transaction{types.NewTransaction(blockNum, common.Address{}, uint256.NewInt(0), 0, uint256.NewInt(0), nil)}, Header: header}
+}
+
+func loadOneLogBlockReceipts(_ context.Context, _ kv.TemporalTx, blockNum uint64) (notifications.BlockReceipts, error) {
+	return oneLogBlockReceipts(blockNum), nil
+}
+
+func writeHeadersAndFillCache(t *testing.T, tx kv.RwTx, recent *notifications.RecentReceipts, blocks uint64) {
+	t.Helper()
+	for blockNum := uint64(1); blockNum <= blocks; blockNum++ {
+		b := oneLogBlockReceipts(blockNum)
+		require.NoError(t, rawdb.WriteHeader(tx, b.Header))
+		require.NoError(t, rawdb.WriteCanonicalHash(tx, b.Header.Hash(), blockNum))
+		recent.Add(b.Receipts, b.Txs, b.Header)
 	}
-	for _, tc := range []struct {
-		name    string
-		prepare func(*notifications.RecentReceipts)
-	}{
-		{"span over the cache", func(*notifications.RecentReceipts) {}},
-		{"cleared cache", (*notifications.RecentReceipts).Clear},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			_, tx := temporaltest.NewTestTx(t)
-			recent := notifications.NewRecentReceipts(512)
-			for blockNum := uint64(1); blockNum <= blocks; blockNum++ {
-				b := blockReceipts(blockNum)
-				require.NoError(t, rawdb.WriteHeader(tx, b.Header))
-				require.NoError(t, rawdb.WriteCanonicalHash(tx, b.Header.Hash(), blockNum))
-				recent.Add(b.Receipts, b.Txs, b.Header)
-			}
-			tc.prepare(recent)
-			events := shards.NewEvents()
-			logs, unsubscribe := events.AddLogsSubscription()
-			t.Cleanup(unsubscribe)
-			events.EmptyLogSubscription(false)
-			load := func(_ context.Context, _ kv.TemporalTx, blockNum uint64) (notifications.BlockReceipts, error) {
-				return blockReceipts(blockNum), nil
-			}
-			dispatcher := NewDispatcher(chain.AllProtocolChanges, events, nil, load, log.New())
+}
 
-			require.NoError(t, dispatcher.Dispatch(t.Context(), tx, 0, nil, recent, 0, blocks, nil, tx))
+func TestDispatcherDeliversLogsOfBlocksMissingFromTheCache(t *testing.T) {
+	const blocks = notifications.MaxNotifiedBlocks
+	_, tx := temporaltest.NewTestTx(t)
+	recent := notifications.NewRecentReceipts(notifications.MaxNotifiedBlocks)
+	writeHeadersAndFillCache(t, tx, recent, blocks)
+	recent.Clear()
+	events := shards.NewEvents()
+	logs, unsubscribe := events.AddLogsSubscription()
+	t.Cleanup(unsubscribe)
+	events.EmptyLogSubscription(false)
+	dispatcher := NewDispatcher(chain.AllProtocolChanges, events, nil, loadOneLogBlockReceipts, log.New())
 
-			select {
-			case got := <-logs:
-				require.Len(t, got, blocks, "every block's log is delivered")
-				for i, l := range got {
-					require.Equal(t, uint64(i+1), uint64(l.BlockNumber), "in block order")
-				}
-			default:
-				t.Fatal("no logs delivered")
-			}
-		})
+	require.NoError(t, dispatcher.Dispatch(t.Context(), tx, 0, nil, recent, 0, blocks, nil, tx))
+
+	select {
+	case got := <-logs:
+		require.Len(t, got, blocks, "every block's log is delivered")
+		for i, l := range got {
+			require.Equal(t, uint64(i+1), uint64(l.BlockNumber), "in block order")
+		}
+	default:
+		t.Fatal("no logs delivered")
+	}
+}
+
+func TestDispatcherDeliversReceiptsOfBlocksMissingFromTheCache(t *testing.T) {
+	const blocks = notifications.MaxNotifiedBlocks
+	_, tx := temporaltest.NewTestTx(t)
+	recent := notifications.NewRecentReceipts(notifications.MaxNotifiedBlocks)
+	writeHeadersAndFillCache(t, tx, recent, blocks)
+	recent.Clear()
+	events := shards.NewEvents()
+	receipts, unsubscribe := events.AddReceiptsSubscription()
+	t.Cleanup(unsubscribe)
+	events.EmptyReceiptSubscription(false)
+	dispatcher := NewDispatcher(chain.AllProtocolChanges, events, nil, loadOneLogBlockReceipts, log.New())
+
+	require.NoError(t, dispatcher.Dispatch(t.Context(), tx, 0, nil, recent, 0, blocks, nil, tx))
+
+	select {
+	case got := <-receipts:
+		require.Len(t, got, blocks, "every block's receipt is delivered")
+		for i, r := range got {
+			blockNum := uint64(i + 1)
+			require.Equal(t, blockNum, r.Receipt.BlockNumber.Uint64(), "in block order")
+			require.Equal(t, blockNum, r.Header.Number.Uint64(), "with the block's header")
+			require.Equal(t, blockNum, r.Tx.GetNonce(), "with the block's transaction")
+		}
+	default:
+		t.Fatal("no receipts delivered")
+	}
+}
+
+func TestDispatcherSendsRemovedLogsOfBlocksLoadedAfterACacheMiss(t *testing.T) {
+	const blocks = 10
+	_, tx := temporaltest.NewTestTx(t)
+	recent := notifications.NewRecentReceipts(notifications.MaxNotifiedBlocks)
+	writeHeadersAndFillCache(t, tx, recent, blocks)
+	recent.Clear()
+	events := shards.NewEvents()
+	logs, unsubscribe := events.AddLogsSubscription()
+	t.Cleanup(unsubscribe)
+	events.EmptyLogSubscription(false)
+	dispatcher := NewDispatcher(chain.AllProtocolChanges, events, nil, loadOneLogBlockReceipts, log.New())
+	require.NoError(t, dispatcher.Dispatch(t.Context(), tx, 0, nil, recent, 0, blocks, nil, tx))
+	require.Len(t, <-logs, blocks)
+
+	recent.Unwind(0)
+	require.NoError(t, dispatcher.Dispatch(t.Context(), tx, 0, nil, recent, blocks, blocks, nil, nil))
+
+	select {
+	case got := <-logs:
+		require.Len(t, got, blocks, "every loaded block's log is removed")
+		for _, l := range got {
+			require.True(t, l.Removed)
+		}
+	default:
+		t.Fatal("no removed logs delivered")
+	}
+}
+
+// The Engine API path has no committed tx, so the cache alone must cover the longest notify span.
+func TestDispatcherForkchoicePathDeliversLogsOfTheWholeNotifySpan(t *testing.T) {
+	const blocks = 1_500
+	_, tx := temporaltest.NewTestTx(t)
+	accumulation := NewAccumulation()
+	writeHeadersAndFillCache(t, tx, accumulation.RecentReceipts, blocks)
+	events := shards.NewEvents()
+	logs, unsubscribe := events.AddLogsSubscription()
+	t.Cleanup(unsubscribe)
+	events.EmptyLogSubscription(false)
+	dispatcher := NewDispatcher(chain.AllProtocolChanges, events, nil, nil, log.New())
+
+	require.NoError(t, dispatcher.Dispatch(t.Context(), tx, 0, nil, accumulation.RecentReceipts, 0, blocks, nil, nil))
+
+	select {
+	case got := <-logs:
+		require.Len(t, got, 1_024, "the whole notify span is delivered")
+		require.Equal(t, uint64(blocks-1_024+1), uint64(got[0].BlockNumber))
+		require.Equal(t, uint64(blocks), uint64(got[len(got)-1].BlockNumber))
+	default:
+		t.Fatal("no logs delivered")
 	}
 }
