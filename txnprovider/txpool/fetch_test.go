@@ -999,8 +999,15 @@ func (a *announceFetchTest) announceSized(t *testing.T, peer [64]byte, size uint
 
 // answer delivers n PooledTransactions replies from peer.
 func (a *announceFetchTest) answer(peer [64]byte, n int) {
+	p := fetchPeer{a.sentryClient, peer}
 	for range n {
-		a.fetch.releaseRetry(fetchPeer{a.sentryClient, peer})
+		a.fetch.requestedLock.Lock()
+		var oldest uint64
+		if slots := a.fetch.retriesOutstanding[p]; len(slots) > 0 {
+			oldest = slots[0].id
+		}
+		a.fetch.requestedLock.Unlock()
+		a.fetch.releaseRetry(p, oldest)
 	}
 }
 
@@ -1134,7 +1141,7 @@ func TestFetchBoundsQueuedBatch(t *testing.T) {
 }
 
 // Every PooledTransactions reply frees one retry slot of its peer, even one whose body a dedup drops.
-func retrySlotsLeftAfterTwoReplies(t *testing.T, requestID uint64) int {
+func retrySlotsLeftAfterReplies(t *testing.T, slots []retrySlot, replyIDs ...uint64) int {
 	t.Helper()
 	ctrl := gomock.NewController(t)
 	pool := NewMockPool(ctrl)
@@ -1143,9 +1150,11 @@ func retrySlotsLeftAfterTwoReplies(t *testing.T, requestID uint64) int {
 	fetch := NewFetch(t.Context(), nil, pool, nil, nil, u256.N1, log.New())
 	peerB := [64]byte{0xb}
 	peer := fetchPeer{client, peerB}
-	fetch.retriesOutstanding[peer] = []time.Time{time.Unix(1, 0), time.Unix(1, 0)}
-	reply := &sentryproto.InboundMessage{Id: sentryproto.MessageId_POOLED_TRANSACTIONS_66, Data: EncodePooledTransactions66(nil, requestID, nil), PeerId: gointerfaces.ConvertHashToH512(peerB)}
-	replies := []*sentryproto.InboundMessage{reply, reply}
+	fetch.retriesOutstanding[peer] = slots
+	replies := make([]*sentryproto.InboundMessage, 0, len(replyIDs))
+	for _, id := range replyIDs {
+		replies = append(replies, &sentryproto.InboundMessage{Id: sentryproto.MessageId_POOLED_TRANSACTIONS_66, Data: EncodePooledTransactions66(nil, id, nil), PeerId: gointerfaces.ConvertHashToH512(peerB)})
+	}
 	stream := &boundedBatchStream{recv: func() (*sentryproto.InboundMessage, error) {
 		if len(replies) == 0 {
 			return nil, nil
@@ -1159,22 +1168,33 @@ func retrySlotsLeftAfterTwoReplies(t *testing.T, requestID uint64) int {
 	return len(fetch.retriesOutstanding[peer])
 }
 
-func TestIdenticalRepliesEachFreeARetrySlot(t *testing.T) {
-	require.Zero(t, retrySlotsLeftAfterTwoReplies(t, retryRequestID), "a duplicate reply still answers a retry")
+func TestRepliesFreeTheirOwnRetrySlots(t *testing.T) {
+	require.Zero(t, retrySlotsLeftAfterReplies(t, []retrySlot{{id: 5}, {id: 6}}, 6, 5))
+}
+
+func TestDuplicateReplyFreesOneRetrySlot(t *testing.T) {
+	require.Equal(t, 1, retrySlotsLeftAfterReplies(t, []retrySlot{{id: 5}, {id: 6}}, 5, 5))
 }
 
 func TestRepliesToInitialRequestsKeepTheRetrySlots(t *testing.T) {
-	require.Equal(t, 2, retrySlotsLeftAfterTwoReplies(t, initialRequestID))
+	require.Equal(t, 2, retrySlotsLeftAfterReplies(t, []retrySlot{{id: 5}, {id: 6}}, initialRequestID))
 }
 
-func TestRetriesCarryTheRetryRequestID(t *testing.T) {
+func TestLateReplyToAnExpiredRetryKeepsANewerSlot(t *testing.T) {
+	require.Equal(t, 1, retrySlotsLeftAfterReplies(t, []retrySlot{{id: 7}}, 5))
+}
+
+func TestRetriesCarryTheirSlotRequestID(t *testing.T) {
 	t.Parallel()
 	a := newAnnounceFetchTest(t)
 	hash, peerA, peerB := [32]byte{0xe3}, [64]byte{0xa}, [64]byte{0xb}
 	a.announce(t, peerA, hash)
 	a.announce(t, peerB, hash)
 	a.timeoutSweep()
-	require.Equal(t, []uint64{initialRequestID, retryRequestID}, a.requestIDs)
+	slots := a.fetch.retriesOutstanding[fetchPeer{a.sentryClient, peerB}]
+	require.Len(t, slots, 1)
+	require.Equal(t, []uint64{initialRequestID, slots[0].id}, a.requestIDs)
+	require.NotEqual(t, initialRequestID, slots[0].id)
 }
 
 func TestFetchRevalidatesDuplicateReplyAfterNewBlock(t *testing.T) {

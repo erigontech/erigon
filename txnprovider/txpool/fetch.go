@@ -65,11 +65,14 @@ const disconnectedPeerMemory = time.Minute
 // Other traffic shares the queue, so a retry can still be dropped; retryAnswerTimeout frees its slot.
 const maxRetryRequestsPerPeer = 8
 
-// A reply echoes its request's id, so only a reply to a retry frees a retry slot.
-const (
-	initialRequestID uint64 = 1
-	retryRequestID   uint64 = 2
-)
+// initialRequestID marks requests that hold no retry slot. Each retry gets its own larger id, and a reply frees a slot
+// only by echoing the id of a retry still outstanding.
+const initialRequestID uint64 = 1
+
+type retrySlot struct {
+	id   uint64
+	sent time.Time
+}
 
 // retryAnswerTimeout frees the slot of a retry left unanswered this long. A full 32-message sentry queue drains
 // within this time at the 20-second write timeout, so an older retry was written or dropped and is not queued.
@@ -124,9 +127,10 @@ type Fetch struct {
 	pending                  []pendingFetch            // in request order, so the oldest expires first
 	waiting                  []pendingFetch            // timed-out requests whose alternates have no retry room
 	waitingReady             bool                      // a waiting request's alternate may have room again
-	retriesOutstanding       map[fetchPeer][]time.Time // send times of the retries a peer has not answered, oldest first
-	alternatesOf             map[fetchPeer]int         // hashes each peer waits on as an alternate
-	disconnected             map[fetchPeer]time.Time   // recently disconnected peers: an announcement buffered before the disconnect or a failed send must not keep them
+	retriesOutstanding       map[fetchPeer][]retrySlot // the retries a peer has not answered, oldest first
+	lastRetryID              uint64
+	alternatesOf             map[fetchPeer]int       // hashes each peer waits on as an alternate
+	disconnected             map[fetchPeer]time.Time // recently disconnected peers: an announcement buffered before the disconnect or a failed send must not keep them
 	now                      func() time.Time
 	newBlocks                atomic.Uint64
 	logger                   log.Logger
@@ -166,7 +170,8 @@ func NewFetch(
 		pooledTxnsParseCtx:   NewTxnParseContext(chainID).ChainIDRequired().WithPoolRules(),
 		announcements:        announcements,
 		requested:            requested,
-		retriesOutstanding:   map[fetchPeer][]time.Time{},
+		retriesOutstanding:   map[fetchPeer][]retrySlot{},
+		lastRetryID:          initialRequestID,
 		alternatesOf:         map[fetchPeer]int{},
 		disconnected:         map[fetchPeer]time.Time{},
 		now:                  time.Now,
@@ -273,9 +278,10 @@ func (f *Fetch) retryTimedOutRequests(ctx context.Context) {
 
 // retryPlan groups a sweep's retries for one peer into requests a responder answers in full.
 type retryPlan struct {
-	reqs  []Hashes
-	size  int // announced bytes in the last request
-	limit int // requests the peer's budget still allows
+	firstID uint64
+	reqs    []Hashes
+	size    int // announced bytes in the last request
+	limit   int // requests the peer's budget still allows
 }
 
 // add reports false when the hash needs a request beyond the peer's remaining budget (limit).
@@ -420,7 +426,11 @@ func (f *Fetch) requestFromAlternates(ctx context.Context, tx kv.Tx) {
 	}
 	f.waiting = waiting
 	for peer, plan := range plans { // counted before the sends, so a reply that beats its send's return frees a slot
-		f.retriesOutstanding[peer] = append(f.retriesOutstanding[peer], slices.Repeat([]time.Time{sent}, len(plan.reqs))...)
+		plan.firstID = f.lastRetryID + 1
+		for range plan.reqs {
+			f.lastRetryID++
+			f.retriesOutstanding[peer] = append(f.retriesOutstanding[peer], retrySlot{f.lastRetryID, sent})
+		}
 	}
 	f.requestedLock.Unlock()
 
@@ -436,10 +446,11 @@ func (f *Fetch) requestFromAlternates(ctx context.Context, tx kv.Tx) {
 			sendCtx, cancel := context.WithTimeout(ctx, txFetchTimeout)
 			defer cancel()
 			for _, peer := range peers {
-				for _, hashes := range plans[peer].reqs {
-					unsent, at, n, err := f.requestPooledTxns(sendCtx, peer, retryRequestID, hashes, sent)
+				for i, hashes := range plans[peer].reqs {
+					id := plans[peer].firstID + uint64(i)
+					unsent, at, n, err := f.requestPooledTxns(sendCtx, peer, id, hashes, sent)
 					if n == 0 {
-						f.releaseRetry(peer)
+						f.releaseRetry(peer, id)
 					}
 					if err != nil {
 						f.logger.Debug("[txpool.fetch] request from alternate", "err", err)
@@ -606,7 +617,7 @@ func (f *Fetch) hasRetryRoom(r *fetchRequest) bool {
 // expireRetries frees the slots of retries unanswered for retryAnswerTimeout. Caller holds requestedLock.
 func (f *Fetch) expireRetries(now time.Time) {
 	for peer, sent := range f.retriesOutstanding {
-		live := slices.IndexFunc(sent, func(at time.Time) bool { return now.Sub(at) < retryAnswerTimeout })
+		live := slices.IndexFunc(sent, func(s retrySlot) bool { return now.Sub(s.sent) < retryAnswerTimeout })
 		switch {
 		case live == 0:
 			continue
@@ -621,17 +632,20 @@ func (f *Fetch) expireRetries(now time.Time) {
 
 // releaseRetry frees one of peer's retry slots: on a reply to a retry, which a peer sends for every request it reads,
 // or for a retry that was not sent. Waiting requests may go to the peer again.
-func (f *Fetch) releaseRetry(peer fetchPeer) {
+func (f *Fetch) releaseRetry(peer fetchPeer, id uint64) {
 	f.requestedLock.Lock()
 	defer f.requestedLock.Unlock()
-	if sent := f.retriesOutstanding[peer]; len(sent) > 0 {
-		if len(sent) == 1 {
-			delete(f.retriesOutstanding, peer)
-		} else {
-			f.retriesOutstanding[peer] = sent[1:]
-		}
-		f.waitingReady = true
+	slots := f.retriesOutstanding[peer]
+	i := slices.IndexFunc(slots, func(s retrySlot) bool { return s.id == id })
+	if i < 0 {
+		return
 	}
+	if len(slots) == 1 {
+		delete(f.retriesOutstanding, peer)
+	} else {
+		f.retriesOutstanding[peer] = slices.Delete(slots, i, i+1)
+	}
+	f.waitingReady = true
 }
 
 // recordAnnouncement remembers the (type, size) a peer promised for each
@@ -943,8 +957,8 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentryproto.Sen
 		// Keep announcements for peer fallback. A new block can make a rejected
 		// transaction valid, so it starts a new deduplication scope.
 		if req.Id == sentryproto.MessageId_POOLED_TRANSACTIONS_66 {
-			if id, err := pooledTransactions66RequestID(req.Data); err == nil && id == retryRequestID {
-				f.releaseRetry(fetchPeer{sentryClient, gointerfaces.ConvertH512ToHash(req.PeerId)}) // before dedup: replies to different requests can be identical
+			if id, err := pooledTransactions66RequestID(req.Data); err == nil {
+				f.releaseRetry(fetchPeer{sentryClient, gointerfaces.ConvertH512ToHash(req.PeerId)}, id)
 			}
 		}
 		switch req.Id {
