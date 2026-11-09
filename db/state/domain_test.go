@@ -2107,6 +2107,55 @@ func TestDomain_GetAsOfValuesFileGap(t *testing.T) {
 	}
 }
 
+// Commitment values in plain files can be returned as they are; referenced files hold shortened keys that only the
+// aggregator can expand, so GetAsOf of the domain must not return them.
+func TestDomain_GetAsOfCommitmentFiles(t *testing.T) {
+	for name, tc := range map[string]struct {
+		fileVersion version.Version
+		wantOk      bool
+	}{
+		"plain":      {fileVersion: version.V2_2, wantOk: true},
+		"referenced": {fileVersion: version.V1_1, wantOk: false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			db, d := testDbAndDomainOfStep(t, statecfg.Schema.CommitmentDomain, 16, log.New())
+			tx, err := db.BeginRw(t.Context())
+			require.NoError(t, err)
+			defer tx.Rollback()
+
+			key, other, value := []byte{0xa1, 0x01}, []byte{0xb2, 0x02}, []byte("branch-value")
+			domainRoTx := d.beginForTests()
+			writer := domainRoTx.NewWriter(db)
+			require.NoError(t, writer.PutWithPrev(key, value, 1, nil))
+			var prev []byte
+			for step := range uint64(6) {
+				v := binary.BigEndian.AppendUint64(nil, step+1)
+				require.NoError(t, writer.PutWithPrev(other, v, step*d.stepSize+3, prev))
+				prev = v
+			}
+			require.NoError(t, writer.Flush(t.Context(), tx))
+			writer.Close()
+			domainRoTx.Close()
+
+			collateAndMerge(t, tx, d, 5*d.stepSize)
+			d.dirtyFiles.Scan(func(item *FilesItem) bool {
+				item.version = tc.fileVersion
+				return true
+			})
+
+			roTx := d.beginForTests()
+			defer roTx.Close()
+			require.Equal(t, 4*d.stepSize, roTx.files.EndTxNum())
+			got, ok, err := roTx.GetAsOf(key, 5*d.stepSize+1, tx)
+			require.NoError(t, err)
+			require.Equal(t, tc.wantOk, ok)
+			if tc.wantOk {
+				require.Equal(t, value, got)
+			}
+		})
+	}
+}
+
 // errAfterCtx reports cancellation once Err was asked more than left times, so a prune stops at a fixed point.
 type errAfterCtx struct {
 	context.Context

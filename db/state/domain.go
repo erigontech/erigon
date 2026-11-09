@@ -1826,14 +1826,15 @@ func (dt *DomainRoTx) GetAsOf(key []byte, txNum uint64, roTx kv.Tx) ([]byte, boo
 	if !dt.d.Enabled {
 		return nil, false, nil
 	}
-	if roTx != nil && dt.name != kv.CommitmentDomain {
+	if roTx != nil {
 		// If the newest value of the key was written in a step before txNum's step, nothing changed it at or after txNum,
-		// so it is also the value as of txNum. Values files that end before history can miss a newer write.
+		// so it is also the value as of txNum. Values files that end before history can miss a newer write, and referenced
+		// commitment files hold shortened keys that only the aggregator can expand.
 		latest, step, ok, err := dt.GetLatest(key, roTx)
 		if err != nil {
 			return nil, false, err
 		}
-		if ok && len(latest) > 0 && step < kv.Step(txNum/dt.stepSize) && dt.files.EndTxNum() >= dt.ht.files.EndTxNum() {
+		if ok && len(latest) > 0 && step < kv.Step(txNum/dt.stepSize) && dt.files.EndTxNum() >= dt.ht.files.EndTxNum() && !dt.commitmentVisibleFilesReferenced() {
 			return latest, true, nil
 		}
 	}
