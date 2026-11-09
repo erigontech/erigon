@@ -34,6 +34,8 @@ const (
 // but it stays revertible until the in-order seal promotes it to Done.
 const FlagValidated statusFlag = 2
 
+const flagDeleted statusFlag = 3
+
 // valueStatus is the cell's value transition relative to what the writing tx read:
 // the leaf effect a write has. Stamped at write time from (prev-presence, prev, value),
 // never re-derived. Only the domain/commitment projection skips Unchanged; the BAL and
@@ -211,8 +213,11 @@ func markCellFlag[T any](cells *btree.Map[int, *WriteCell[T]], addr accounts.Add
 	}
 	// A cell at an EARLIER incarnation than the run is legitimate under the equal-value
 	// write-side no-bump; only a NEWER one means the flip targets a stale version.
-	if have, ok := ci.mark(incarnation, flag); !ok {
+	switch have, outcome := ci.mark(incarnation, flag); outcome {
+	case markStale:
 		panic(staleMarkMsg(have, incarnation, addr, path, key, txIdx))
+	case markDeleted:
+		panic(missingCellMsg("markFlag", addr, path, key, txIdx))
 	}
 }
 
@@ -1541,6 +1546,7 @@ func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool) {
 								c.setState(inc, FlagDone)
 							} else {
 								cells.Delete(vw.Version.TxIndex)
+								c.setFlag(flagDeleted)
 							}
 						}
 					}
@@ -1577,19 +1583,17 @@ func (vm *VersionMap) MarkWritesValidated(writes *WriteSet, isFeeRecipient func(
 }
 
 type cellMarks struct {
-	vm      *VersionMap
-	writes  *WriteSet
-	flag    statusFlag
-	fee     func(accounts.Address) bool
-	locked  []accounts.Address
-	stamped bool
+	vm     *VersionMap
+	flag   statusFlag
+	fee    func(accounts.Address) bool
+	locked []accounts.Address
 }
 
 func (vm *VersionMap) markWrites(writes *WriteSet, flag statusFlag, isFeeRecipient func(accounts.Address) bool) {
 	if writes == nil {
 		return
 	}
-	m := cellMarks{vm: vm, writes: writes, flag: flag, fee: isFeeRecipient}
+	m := cellMarks{vm: vm, flag: flag, fee: isFeeRecipient}
 	for addr, vw := range writes.address {
 		markCell(&m, addr, vw, true)
 	}
@@ -1627,9 +1631,6 @@ func (vm *VersionMap) markWrites(writes *WriteSet, flag statusFlag, isFeeRecipie
 			markCell(&m, addr, vw, false)
 		}
 	}
-	if m.stamped {
-		vm.mutEnd(writes.txIndex())
-	}
 	for _, addr := range m.locked {
 		vm.markAccountLocked(addr, writes, flag, isFeeRecipient)
 	}
@@ -1640,20 +1641,20 @@ func markCell[T any](m *cellMarks, addr accounts.Address, vw *VersionedWrite[T],
 		return
 	}
 	c, e := vw.cell, vw.entry
-	if c == nil || e.destructed.Load() {
+	if c == nil || e.destructed.Load() || m.vm.stamps != nil {
 		m.lock(addr)
 		return
-	}
-	if !m.stamped && m.vm.stamps != nil && e.lifecycle.Load() {
-		m.stamped = true
-		m.vm.mutBegin(m.writes.txIndex())
 	}
 	want := vw.Version.Incarnation
 	if m.flag == FlagDone && !dbg.AssertEnabled {
 		want = -1
 	}
-	if have, ok := c.mark(want, m.flag); !ok {
+	switch have, outcome := c.mark(want, m.flag); outcome {
+	case markStale:
 		panic(staleMarkMsg(have, want, addr, vw.Path, vw.Key, vw.Version.TxIndex))
+	case markDeleted:
+		m.lock(addr)
+		return
 	}
 	if m.flag == FlagDone && dbg.AssertEnabled {
 		m.lock(addr)
@@ -1725,7 +1726,8 @@ func markLocked[T any](cells *btree.Map[int, *WriteCell[T]], addr accounts.Addre
 }
 
 func deleteCell[T any](vm *VersionMap, m *btree.Map[int, *WriteCell[T]], txIdx int, stamped *bool) {
-	if _, ok := m.Get(txIdx); !ok {
+	c, ok := m.Get(txIdx)
+	if !ok {
 		return
 	}
 	if !*stamped {
@@ -1733,6 +1735,7 @@ func deleteCell[T any](vm *VersionMap, m *btree.Map[int, *WriteCell[T]], txIdx i
 		*stamped = true
 	}
 	m.Delete(txIdx)
+	c.setFlag(flagDeleted)
 }
 
 func (vm *VersionMap) endDeleteStamp(txIdx int, stamped *bool) {
@@ -2238,15 +2241,26 @@ func (c *WriteCell[T]) setFlag(flag statusFlag) {
 	}
 }
 
-func (c *WriteCell[T]) mark(want Incarnation, flag statusFlag) (have Incarnation, ok bool) {
+type markOutcome uint8
+
+const (
+	marked markOutcome = iota
+	markStale
+	markDeleted
+)
+
+func (c *WriteCell[T]) mark(want Incarnation, flag statusFlag) (Incarnation, markOutcome) {
 	for {
 		old := c.state.Load()
-		inc, _ := unpackCellState(old)
+		inc, f := unpackCellState(old)
+		if f == flagDeleted {
+			return inc, markDeleted
+		}
 		if want >= 0 && inc > want {
-			return inc, false
+			return inc, markStale
 		}
 		if c.state.CompareAndSwap(old, packCellState(inc, flag)) {
-			return inc, true
+			return inc, marked
 		}
 	}
 }

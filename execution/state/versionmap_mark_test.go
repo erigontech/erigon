@@ -123,3 +123,27 @@ func TestMarkWritesMarksAWriteSetMergedBeforeItsFlush(t *testing.T) {
 		})
 	}
 }
+
+func TestMarkWritesValidatedPanicsOnACellRecreatedAtANewerIncarnation(t *testing.T) {
+	t.Parallel()
+	vm := NewVersionMap(nil)
+	addr := accounts.InternAddress(common.HexToAddress("0x15"))
+	stale := balanceWrite(addr, Version{TxIndex: 3}, 1)
+	vm.FlushVersionedWrites(stale, false)
+	vm.Delete(addr, BalancePath, accounts.NilKey, 3, true)
+	vm.FlushVersionedWrites(balanceWrite(addr, Version{TxIndex: 3, Incarnation: 1}, 2), false)
+	require.Panics(t, func() { vm.MarkWritesValidated(stale, nil) })
+	require.Equal(t, FlagEstimate, balanceFlag(t, vm, addr, 3))
+}
+
+func TestMarkWritesValidatedMarksACellRecreatedAtTheSameIncarnation(t *testing.T) {
+	t.Parallel()
+	vm := NewVersionMap(nil)
+	addr := accounts.InternAddress(common.HexToAddress("0x16"))
+	first := balanceWrite(addr, Version{TxIndex: 3}, 1)
+	vm.FlushVersionedWrites(first, false)
+	vm.DeleteAll(addr, 3)
+	vm.FlushVersionedWrites(balanceWrite(addr, Version{TxIndex: 3}, 1), false)
+	vm.MarkWritesValidated(first, nil)
+	require.Equal(t, FlagValidated, balanceFlag(t, vm, addr, 3))
+}
