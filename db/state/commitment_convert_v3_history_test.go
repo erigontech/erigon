@@ -568,3 +568,25 @@ func TestConvertCommitmentFiles_V3HistoryExtensionRoot(t *testing.T) {
 		require.Equalf(t, roots[txNum], check.Root, "root as of txNum %d", txNum+1)
 	}
 }
+
+func TestConvertCommitmentFiles_HistoryBackupFailureNamesRestore(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	_, agg, _ := testDbAggregatorWithCommitmentHistory(t, 10, 32)
+	at := agg.BeginFilesRo()
+	defer at.Close()
+	err := state.ConvertCommitmentFiles(t.Context(), at, state.ConvertOpts{
+		TargetV3: true,
+		BeforeSwap: func() error {
+			backupRoot := filepath.Join(agg.Dirs().Snap, "backup")
+			if err := os.MkdirAll(backupRoot, 0o755); err != nil {
+				return err
+			}
+			return os.WriteFile(filepath.Join(backupRoot, "history"), nil, 0o644)
+		},
+	}, log.New())
+	require.ErrorContains(t, err, "phase 3 history backup")
+	require.ErrorContains(t, err, "restore with `integration commitment convert --restore`")
+	files, err := filepath.Glob(filepath.Join(agg.Dirs().SnapDomain, "v3.0-commitment.*.kv"))
+	require.NoError(t, err)
+	require.NotEmpty(t, files)
+}

@@ -762,7 +762,7 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 	}
 	movedToBackup, err := convertPhase3(dirs.SnapDomain, backupDir, ranges)
 	if err != nil {
-		return err
+		return commitmentRestoreError("phase 3 backup", err)
 	}
 	logger.Info(fmt.Sprintf("[commitment_convert] phase 3 backup: %d files moved to %s",
 		movedToBackup, backupDir))
@@ -770,7 +770,7 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 	// Phase 4: promote rebuilt files into snapshots/domain/.
 	promoted, err := convertPhase4(rebuildDir, dirs.SnapDomain)
 	if err != nil {
-		return err
+		return commitmentRestoreError("phase 4 promote", err)
 	}
 	if rmErr := dir.RemoveAll(rebuildDir); rmErr != nil {
 		logger.Warn("[commitment_convert] failed to remove empty rebuild dir", "path", rebuildDir, "err", rmErr)
@@ -782,11 +782,11 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 		historyBackup := filepath.Join(dirs.Snap, "backup")
 		movedHistory, err := convertHistoryPhase3(dirs, historyBackup, historyRanges)
 		if err != nil {
-			return fmt.Errorf("[commitment_convert] phase 3 history backup: %w", err)
+			return commitmentRestoreError("phase 3 history backup", err)
 		}
 		promotedHistory, err := convertHistoryPhase4(dirs, historyStage)
 		if err != nil {
-			return fmt.Errorf("[commitment_convert] phase 4 history promote: %w", err)
+			return commitmentRestoreError("phase 4 history promote", err)
 		}
 		cleanupParentIfEmpty(filepath.Dir(historyStage.history), logger)
 		logger.Info(fmt.Sprintf("[commitment_convert] history: %d originals moved to %s, %d converted files promoted",
@@ -796,19 +796,19 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 	// Phase 5: reload aggregator.
 	if convertPhase5Hook != nil {
 		if err := convertPhase5Hook(); err != nil {
-			return fmt.Errorf("[commitment_convert] phase 5 hook: %w", err)
+			return commitmentRestoreError("phase 5 hook", err)
 		}
 	}
 	if reloadErr := at.a.ReloadFiles(); reloadErr != nil {
-		return fmt.Errorf("[commitment_convert] phase 5 ReloadFiles; restore with `integration commitment convert --restore`: %w", reloadErr)
+		return commitmentRestoreError("phase 5 ReloadFiles", reloadErr)
 	}
 	if opts.TargetV3 {
 		if err := verifyCommitmentV3Files(ctx, at.a, logger); err != nil {
-			return fmt.Errorf("[commitment_convert] v3 verification; restore with `integration commitment convert --restore`: %w", err)
+			return commitmentRestoreError("v3 verification", err)
 		}
 		if len(historyRanges) > 0 {
 			if err := verifyCommitmentV3History(ctx, at.a, historyRanges, logger); err != nil {
-				return fmt.Errorf("[commitment_convert] v3 history verification; restore with `integration commitment convert --restore`: %w", err)
+				return commitmentRestoreError("v3 history verification", err)
 			}
 		}
 	}
@@ -823,6 +823,10 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 		doneSummary, backupDir,
 	))
 	return nil
+}
+
+func commitmentRestoreError(phase string, err error) error {
+	return fmt.Errorf("[commitment_convert] %s; restore with `integration commitment convert --restore`: %w", phase, err)
 }
 
 // restoreManifestName is the filename of the persistent manifest written inside
