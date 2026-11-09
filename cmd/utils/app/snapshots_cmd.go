@@ -65,12 +65,14 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/kvcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/snapshotsync/caplinsnapschema"
@@ -82,6 +84,7 @@ import (
 	"github.com/erigontech/erigon/db/state/stats"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/diagnostics/mem"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execfinality"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/verify"
@@ -160,7 +163,7 @@ var snapshotCommand = cli.Command{
 				if _, err := os.Stat(dirs.DataDir); os.IsNotExist(err) {
 					return fmt.Errorf("datadir does not exist: %s", dirs.DataDir)
 				}
-				return doDU(c, dirs)
+				return doDU(ctx, c, dirs, log.Root())
 			},
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
@@ -3923,127 +3926,76 @@ func duCaplinBytes(files []duFileInfo) int64 {
 	return total
 }
 
-// duComputeEstimates computes estimated sizes for archive/full/blocks/minimal
-// modes by summing files that survive each mode's pruning rules.
-// maxBlock is the highest block number across all block segment files.
-// maxStep is the highest step number across all state files.
-func duComputeEstimates(files []duFileInfo, maxBlock, maxStep uint64) []duEstimate {
-	fullPruneDistance := uint64(config3.DefaultPruneDistance)
-	minimalPruneDistance := uint64(config3.MinimalPruneDistance)
+type duBlockFilesTx struct {
+	kv.Tx
+	view *blocksnapshots.View
+}
 
-	// State files use step ranges, not block ranges. Convert each block-based
-	// prune distance to step units using the observed blocks-per-step ratio.
-	// Single division avoids compounding integer truncation.
-	stepDistance := func(blockDistance uint64) uint64 {
-		if maxStep == 0 || maxBlock == 0 {
-			return 0
-		}
-		return blockDistance * maxStep / maxBlock
-	}
-	fullStepPruneDistance := stepDistance(fullPruneDistance)
-	minimalStepPruneDistance := stepDistance(minimalPruneDistance)
+func (t duBlockFilesTx) BlockFilesRoTx() *blocksnapshots.View { return t.view }
 
-	// isStateHistoryPruned returns true when a state-history file's range is
-	// entirely below the step cutoff implied by `windowSteps`.
-	isStateHistoryPruned := func(f duFileInfo, windowSteps uint64) bool {
-		return windowSteps > 0 && f.To > 0 && maxStep > windowSteps && f.To <= maxStep-windowSteps
-	}
-	// isTxSegmentPruned returns true when a transactions block segment lies
-	// entirely below the block cutoff implied by `windowBlocks`.
-	isTxSegmentPruned := func(f duFileInfo, windowBlocks uint64) bool {
-		if f.Category != duCatBlocks || f.IsState {
-			return false
-		}
-		if !strings.Contains(strings.ToLower(f.Name), "transactions") {
-			return false
-		}
-		return f.To > 0 && maxBlock > windowBlocks && f.To <= maxBlock-windowBlocks
-	}
-	// isStateHistoryCategory matches the snapshot categories the pruner
-	// applies the state-history step cutoff to.
-	isStateHistoryCategory := func(f duFileInfo) bool {
-		return f.Category == duCatHistory || f.Category == duCatInvIdx || f.Category == duCatAccessors
-	}
+type duSelectFunc func(mode prune.Mode, preverified snapcfg.Preverified) ([]snapcfg.PreverifiedItem, error)
 
-	var archiveTotal, fullTotal, blocksTotal, minimalTotal int64
+type duBlockReader interface {
+	Snapshots() dbservices.BlockSnapshots
+	IterateFrozenBodies(tx kv.Getter, f func(blockNum, baseTxNum, txCount uint64) error) error
+	FreezingCfg() ethconfig.BlocksFreezing
+	AllTypes() []snaptype.Type
+	TxnumReader() rawdbv3.TxNumsReader
+}
 
+func duPrunerSelect(ctx context.Context, tx kv.Tx, br duBlockReader, cc *chain.Config, stepSize uint64) duSelectFunc {
+	return func(mode prune.Mode, preverified snapcfg.Preverified) ([]snapcfg.PreverifiedItem, error) {
+		return snapshotsync.SnapshotsToDownload(ctx, "seg du", false, false, false, mode, snapshotsync.NoCaplin,
+			tx, br, cc, ethconfig.Defaults.Sync, stepSize, preverified, 0, kv.Step(math.MaxUint64))
+	}
+}
+
+// duComputeEstimates sums, per prune mode, the files the downloader keeps for that mode.
+func duComputeEstimates(files []duFileInfo, snapDir string, sel duSelectFunc) ([]duEstimate, error) {
+	sizes := make(map[string]int64, len(files))
+	items := make([]snapcfg.PreverifiedItem, 0, len(files))
 	for _, f := range files {
-		// Consensus-layer data is retained by the caplin flags, not --prune.mode. It
-		// would add the same amount to every mode, so it is reported on its own line.
-		if f.Category == duCatCaplin {
+		if f.Category == duCatCaplin || strings.HasSuffix(f.Name, ".torrent") {
 			continue
 		}
-
-		archiveTotal += f.Size
-
-		// commitHist is archive-only across non-archive modes — pre-shared
-		// gate so we don't repeat it in each mode block below.
-		nonArchiveBase := f.Category != duCatCommitHist
-
-		// Full mode: prunes state history, inverted indices, accessors,
-		// receipt-related state, and transaction block segments older than
-		// fullPruneDistance.
-		includeInFull := nonArchiveBase
-		if includeInFull && isStateHistoryCategory(f) && f.IsState &&
-			!duIsReceiptRelated(f) && isStateHistoryPruned(f, fullStepPruneDistance) {
-			includeInFull = false
+		rel, err := filepath.Rel(snapDir, f.Path)
+		if err != nil {
+			return nil, err
 		}
-		if includeInFull && isTxSegmentPruned(f, fullPruneDistance) {
-			includeInFull = false
-		}
-		// Receipt-related state files (rcache hist/idx, logaddrs, logtopics)
-		// follow the block-distance prune cutoff (same formula as state
-		// history). Domain rcache files are never pruned.
-		if includeInFull && duIsReceiptRelated(f) && !duIsRcacheDomainFile(f) && f.IsState {
-			if isStateHistoryPruned(f, fullStepPruneDistance) {
-				includeInFull = false
-			}
-		}
-		if includeInFull {
-			fullTotal += f.Size
-		}
-
-		// Blocks mode: keeps all transaction segments (and all receipts —
-		// blocksRetentionCutoff returns 0 for KeepAllBlocksPruneMode, so the
-		// receipts filter is a no-op) but prunes state history at the same
-		// finite History distance as full (DefaultPruneDistance).
-		includeInBlocks := nonArchiveBase
-		if includeInBlocks && isStateHistoryCategory(f) && f.IsState &&
-			!duIsReceiptRelated(f) && isStateHistoryPruned(f, fullStepPruneDistance) {
-			includeInBlocks = false
-		}
-		if includeInBlocks {
-			blocksTotal += f.Size
-		}
-
-		// Minimal mode: same shape as full but with the smaller
-		// MinimalPruneDistance, so it prunes strictly more.
-		includeInMinimal := includeInFull
-		if includeInMinimal && isStateHistoryCategory(f) && f.IsState &&
-			!duIsReceiptRelated(f) && isStateHistoryPruned(f, minimalStepPruneDistance) {
-			includeInMinimal = false
-		}
-		if includeInMinimal && isTxSegmentPruned(f, minimalPruneDistance) {
-			includeInMinimal = false
-		}
-		if includeInMinimal && duIsReceiptRelated(f) && !duIsRcacheDomainFile(f) && f.IsState {
-			if isStateHistoryPruned(f, minimalStepPruneDistance) {
-				includeInMinimal = false
-			}
-		}
-		if includeInMinimal {
-			minimalTotal += f.Size
-		}
+		rel = filepath.ToSlash(rel)
+		sizes[rel] = f.Size
+		items = append(items, snapcfg.PreverifiedItem{Name: rel})
 	}
 
-	fullDesc := fmt.Sprintf("last %s", duFormatNumber(fullPruneDistance))
-	minimalDesc := fmt.Sprintf("last %s", duFormatNumber(minimalPruneDistance))
-	return []duEstimate{
-		{Mode: "archive", TotalBytes: archiveTotal, Delta: 0, BlocksDesc: "all blocks", HistoryDesc: "all history"},
-		{Mode: "full", TotalBytes: fullTotal, Delta: fullTotal - archiveTotal, BlocksDesc: fullDesc, HistoryDesc: fullDesc},
-		{Mode: "blocks", TotalBytes: blocksTotal, Delta: blocksTotal - archiveTotal, BlocksDesc: "all blocks", HistoryDesc: fullDesc},
-		{Mode: "minimal", TotalBytes: minimalTotal, Delta: minimalTotal - archiveTotal, BlocksDesc: minimalDesc, HistoryDesc: minimalDesc},
+	fullDesc := fmt.Sprintf("last %s", duFormatNumber(config3.DefaultPruneDistance))
+	minimalDesc := fmt.Sprintf("last %s", duFormatNumber(config3.MinimalPruneDistance))
+	modes := []struct {
+		name         string
+		mode         prune.Mode
+		blocks, hist string
+	}{
+		{"archive", prune.ArchiveMode, "all blocks", "all history"},
+		{"full", prune.FullMode, fullDesc, fullDesc},
+		{"blocks", prune.BlocksMode, "all blocks", fullDesc},
+		{"minimal", prune.MinimalMode, minimalDesc, minimalDesc},
 	}
+	estimates := make([]duEstimate, 0, len(modes))
+	for _, m := range modes {
+		kept, err := sel(m.mode, snapcfg.Preverified{Items: items})
+		if err != nil {
+			return nil, fmt.Errorf("%s estimate: %w", m.name, err)
+		}
+		var total int64
+		for _, p := range kept {
+			total += sizes[p.Name]
+		}
+		est := duEstimate{Mode: m.name, TotalBytes: total, BlocksDesc: m.blocks, HistoryDesc: m.hist}
+		if len(estimates) > 0 {
+			est.Delta = total - estimates[0].TotalBytes
+		}
+		estimates = append(estimates, est)
+	}
+	return estimates, nil
 }
 
 // duDetectNodeType infers the current node mode from which files are present.
@@ -4333,29 +4285,37 @@ func duFormatJSON(w io.Writer, result duResult) error {
 }
 
 // doDU implements the "erigon seg du" subcommand.
-func doDU(cliCtx *cli.Command, dirs datadir.Dirs) error {
-	// Resolve chain name and configured prune mode from chaindata (best-effort).
-	// Use recover because both MustOpen and fromdb.ChainConfig can panic
-	// (e.g., DB locked by running node, corrupted/empty chaindata).
-	chainName := "unknown"
-	var configuredMode string // empty when DB is unavailable
-	if _, err := os.Stat(dirs.Chaindata); err == nil {
-		func() {
-			defer func() {
-				if r := recover(); r != nil {
-					log.Warn("could not read chaindata", "err", r)
-				}
-			}()
-			chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
-			defer chainDB.Close()
-			cc := fromdb.ChainConfig(chainDB)
-			if cc != nil && cc.ChainName != "" {
-				chainName = cc.ChainName
-			}
-			pm := fromdb.PruneMode(chainDB)
-			configuredMode = pm.String()
-		}()
+func doDU(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs, logger log.Logger) error {
+	chainDB, err := dbCfg(dbcfg.ChainDB, dirs.Chaindata).Open(ctx)
+	if err != nil {
+		return fmt.Errorf("opening chaindata: %w", err)
 	}
+	defer chainDB.Close()
+	tx, err := chainDB.BeginRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	cc := fromdb.ChainConfig(chainDB)
+	if cc == nil {
+		return errors.New("no chain config in chaindata")
+	}
+	chainName := cc.ChainName
+	configuredMode := fromdb.PruneMode(chainDB).String()
+
+	settings, err := state.ResolveErigonDBSettings(dirs, logger, false)
+	if err != nil {
+		return err
+	}
+	blockSnaps := blocksnapshots.NewRoSnapshots(ethconfig.NewSnapCfg(false, true, true, chainName), dirs.Snap, logger)
+	if err := blockSnaps.OpenFolder(); err != nil {
+		return err
+	}
+	defer blockSnaps.Close()
+	blockReader := freezeblocks.NewBlockReader(blockSnaps)
+	view := blockSnaps.View()
+	defer view.Close()
+	pinnedTx := duBlockFilesTx{Tx: tx, view: view}
 
 	// Walk snapshot files.
 	files, err := duWalkSnapshots(dirs)
@@ -4379,7 +4339,10 @@ func doDU(cliCtx *cli.Command, dirs datadir.Dirs) error {
 
 	// Build result.
 	cats := duAggregateCategories(files)
-	estimates := duComputeEstimates(files, maxBlock, maxStep)
+	estimates, err := duComputeEstimates(files, dirs.Snap, duPrunerSelect(ctx, pinnedTx, blockReader, cc, settings.StepSize))
+	if err != nil {
+		return err
+	}
 
 	var totalBytes int64
 	var totalFiles int
