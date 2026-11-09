@@ -519,6 +519,8 @@ func (s *Sentinel) listenForPeers() {
 
 	iterator := s.nodesOnOurFork(s.listener.RandomNodes())
 	defer iterator.Close()
+	// The filter skips rejected nodes inside Next, so the loop below only sees the context end once the iterator closes.
+	defer context.AfterFunc(s.ctx, iterator.Close)()
 	for {
 		if err := s.ctx.Err(); err != nil {
 			log.Debug("Stopping Ethereum 2.0 peer discovery", "err", err)

@@ -379,3 +379,29 @@ func TestFindPeersForSubnetsEndsWithItsContext(t *testing.T) {
 		t.Fatal("the search outlived its context")
 	}
 }
+
+// The fork digest filter skips rejected nodes inside Next; peer discovery must still end with the sentinel's context.
+func TestListenForPeersEndsWithItsContext(t *testing.T) {
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	listener, err := p2p.NewUDPv5Listener(t.Context(), &p2p.P2PConfig{IpAddr: "127.0.0.1", TmpDir: t.TempDir()},
+		discover.Config{PrivateKey: key, Log: log.Root()}, log.Root())
+	require.NoError(t, err)
+	defer listener.LocalNode().Database().Close() // Close does not close it, and Windows cannot remove an open file
+	defer listener.Close()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	s := &Sentinel{ctx: ctx, listener: listener, cfg: &SentinelConfig{P2PConfig: p2p.P2PConfig{NetworkConfig: &clparams.NetworkConfig{}}}}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		s.listenForPeers()
+	}()
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("peer discovery outlived its context")
+	}
+}
