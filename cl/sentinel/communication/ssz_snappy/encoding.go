@@ -35,6 +35,9 @@ var errCompressedPayloadLimit = errors.New("compressed payload exceeds maximum s
 // ErrPayloadExceedsLimit is returned when the length prefix of a payload is above the caller's limit.
 var ErrPayloadExceedsLimit = errors.New("payload size exceeds limit")
 
+// ErrTrailingData is returned when a payload continues past the SSZ length declared in its prefix.
+var ErrTrailingData = errors.New("payload contains trailing bytes")
+
 type compressedPayloadReader struct {
 	r         io.Reader
 	remaining uint64
@@ -92,21 +95,22 @@ func EncodeAndWrite(w io.Writer, val ssz.Marshaler, prefix ...byte) error {
 }
 
 func DecodeAndReadNoForkDigest(r io.Reader, val ssz.EncodableSSZ, version clparams.StateVersion) error {
-	return decodeAndReadNoForkDigest(r, val, version, nil, clparams.MaxPayloadSize)
+	return decodeAndReadNoForkDigest(r, val, version, nil, clparams.MaxPayloadSize, false)
 }
 
 // DecodeAndReadNoForkDigestMax decodes a payload whose uncompressed size is at most maxSize.
 // The length prefix is checked before any decompression, and ErrPayloadExceedsLimit is returned when it is too big.
+// The payload must end at the declared length, otherwise ErrTrailingData is returned.
 func DecodeAndReadNoForkDigestMax(r io.Reader, val ssz.EncodableSSZ, version clparams.StateVersion, maxSize uint64) error {
-	return decodeAndReadNoForkDigest(r, val, version, nil, min(maxSize, clparams.MaxPayloadSize))
+	return decodeAndReadNoForkDigest(r, val, version, nil, min(maxSize, clparams.MaxPayloadSize), true)
 }
 
 // DecodeAndReadNoForkDigestExact decodes a payload with an exact uncompressed size and no trailing data.
 func DecodeAndReadNoForkDigestExact(r io.Reader, val ssz.EncodableSSZ, version clparams.StateVersion, expectedSize uint64) error {
-	return decodeAndReadNoForkDigest(r, val, version, &expectedSize, clparams.MaxPayloadSize)
+	return decodeAndReadNoForkDigest(r, val, version, &expectedSize, clparams.MaxPayloadSize, true)
 }
 
-func decodeAndReadNoForkDigest(r io.Reader, val ssz.EncodableSSZ, version clparams.StateVersion, expectedSize *uint64, maxSize uint64) error {
+func decodeAndReadNoForkDigest(r io.Reader, val ssz.EncodableSSZ, version clparams.StateVersion, expectedSize *uint64, maxSize uint64, rejectTrailing bool) error {
 	// Read varint for length of message.
 	encodedLn, err := ReadUvarint(r)
 	if err != nil {
@@ -130,7 +134,7 @@ func decodeAndReadNoForkDigest(r io.Reader, val ssz.EncodableSSZ, version clpara
 	if err != nil {
 		return fmt.Errorf("unable to readPacket: %w", err)
 	}
-	if expectedSize != nil {
+	if rejectTrailing {
 		if compressedReader.read >= maxCompressedSize {
 			return errCompressedPayloadLimit
 		}
@@ -144,7 +148,7 @@ func decodeAndReadNoForkDigest(r io.Reader, val ssz.EncodableSSZ, version clpara
 			return fmt.Errorf("unable to verify payload end: %w", err)
 		}
 		if err == nil || compressedReader.read != compressedBytes {
-			return errors.New("payload contains trailing bytes")
+			return ErrTrailingData
 		}
 	}
 

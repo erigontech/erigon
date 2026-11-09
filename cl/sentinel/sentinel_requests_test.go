@@ -271,6 +271,7 @@ func testSentinelBlocksByRoots(t *testing.T) {
 	req.Append(rt)
 
 	noErr(ssz_snappy.EncodeAndWrite(stream, req))
+	noErr(stream.CloseWrite())
 
 	code := make([]byte, 1)
 	_, err = stream.Read(code)

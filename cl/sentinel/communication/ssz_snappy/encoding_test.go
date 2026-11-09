@@ -33,6 +33,8 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/length"
 )
 
 var snappyStreamIdentifier = []byte{0xff, 0x06, 0x00, 0x00, 's', 'N', 'a', 'P', 'p', 'Y'}
@@ -222,4 +224,60 @@ func TestDecodeAndReadNoForkDigestDoesNotPreallocateDeclaredLength(t *testing.T)
 	runtime.ReadMemStats(&after)
 	require.ErrorIs(t, err, io.ErrUnexpectedEOF)
 	require.Less(t, after.TotalAlloc-before.TotalAlloc, uint64(datasize.MB))
+}
+
+func encodeHashList(t *testing.T, count int) []byte {
+	t.Helper()
+	request := solid.NewHashList(count)
+	for i := range count {
+		request.Append(common.Hash{byte(i + 1)})
+	}
+	var encoded bytes.Buffer
+	require.NoError(t, EncodeAndWrite(&encoded, request))
+	return encoded.Bytes()
+}
+
+func TestDecodeAndReadNoForkDigestMaxRejectsTrailingData(t *testing.T) {
+	// Two roots (64 SSZ bytes) with the length prefix rewritten to declare one root.
+	wire := encodeHashList(t, 2)
+	require.Equal(t, byte(2*length.Hash), wire[0])
+	wire[0] = length.Hash
+
+	decoded := solid.NewHashList(16)
+	err := DecodeAndReadNoForkDigestMax(bytes.NewReader(wire), decoded, clparams.Phase0Version, 16*length.Hash)
+	require.ErrorIs(t, err, ErrTrailingData)
+
+	// The exact decoder already rejects the same input.
+	err = DecodeAndReadNoForkDigestExact(bytes.NewReader(wire), solid.NewHashList(16), clparams.Phase0Version, length.Hash)
+	require.ErrorIs(t, err, ErrTrailingData)
+}
+
+func TestDecodeAndReadNoForkDigestMaxRejectsTrailingFrames(t *testing.T) {
+	wire := append(encodeHashList(t, 1), snappyStreamIdentifier...)
+
+	err := DecodeAndReadNoForkDigestMax(bytes.NewReader(wire), solid.NewHashList(16), clparams.Phase0Version, 16*length.Hash)
+	require.Error(t, err)
+}
+
+func TestDecodeAndReadNoForkDigestMaxAcceptsCompletePayload(t *testing.T) {
+	for _, count := range []int{1, 2, 16} {
+		wire := encodeHashList(t, count)
+
+		decoded := solid.NewHashList(16)
+		require.NoError(t, DecodeAndReadNoForkDigestMax(bytes.NewReader(wire), decoded, clparams.Phase0Version, 16*length.Hash))
+		require.Equal(t, count, decoded.Length())
+		for i := range count {
+			require.Equal(t, common.Hash{byte(i + 1)}, decoded.Get(i))
+		}
+	}
+}
+
+func TestDecodeAndReadNoForkDigestIgnoresTrailingData(t *testing.T) {
+	// The unbounded decoder is also used for stored files and responses, so it keeps its behaviour.
+	wire := encodeHashList(t, 2)
+	wire[0] = length.Hash
+
+	decoded := solid.NewHashList(16)
+	require.NoError(t, DecodeAndReadNoForkDigest(bytes.NewReader(wire), decoded, clparams.Phase0Version))
+	require.Equal(t, 1, decoded.Length())
 }

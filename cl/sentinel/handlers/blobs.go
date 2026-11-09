@@ -119,7 +119,7 @@ func (c *ConsensusHandlers) blobsSidecarsByIdsHandler(s network.Stream, version 
 	identifierSize := new(cltypes.BlobIdentifier).EncodingSizeSSZ()
 	req := solid.NewStaticListSSZ[*cltypes.BlobIdentifier](maxIDs, identifierSize)
 	if err := ssz_snappy.DecodeAndReadNoForkDigestMax(s, req, version, uint64(maxIDs)*uint64(identifierSize)); err != nil {
-		if errors.Is(err, ssz_snappy.ErrPayloadExceedsLimit) {
+		if errors.Is(err, ssz_snappy.ErrPayloadExceedsLimit) || errors.Is(err, ssz_snappy.ErrTrailingData) {
 			return ssz_snappy.EncodeAndWrite(s, &emptyString{}, InvalidRequestPrefix)
 		}
 		return err

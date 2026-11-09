@@ -102,7 +102,7 @@ func (c *ConsensusHandlers) beaconBlocksByRootHandler(s network.Stream) error {
 	}
 	var req solid.HashListSSZ = solid.NewHashList(int(maxRoots))
 	if err := ssz_snappy.DecodeAndReadNoForkDigestMax(s, req, clparams.Phase0Version, maxRoots*length.Hash); err != nil {
-		if errors.Is(err, ssz_snappy.ErrPayloadExceedsLimit) {
+		if errors.Is(err, ssz_snappy.ErrPayloadExceedsLimit) || errors.Is(err, ssz_snappy.ErrTrailingData) {
 			return ssz_snappy.EncodeAndWrite(s, &emptyString{}, InvalidRequestPrefix)
 		}
 		return err

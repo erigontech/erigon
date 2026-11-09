@@ -440,6 +440,7 @@ func TestBlobsByIdentifiersHandler(t *testing.T) {
 
 	_, err = stream.Write(reqData)
 	require.NoError(t, err)
+	require.NoError(t, stream.CloseWrite())
 
 	firstByte := make([]byte, 1)
 	_, err = stream.Read(firstByte)
