@@ -11,6 +11,12 @@ participants:
     cl_type: teku
     cl_image: consensys/teku:26.10.3
     count: 2
+  - el_type: erigon
+    el_image: test/erigon:current
+    el_extra_params: ["--prune.mode=archive", "--prune.include-commitment-history"]
+    cl_type: lighthouse
+    cl_image: sigp/lighthouse:v8.3.2
+    count: 2
 network_params:
   seconds_per_slot: 6
   genesis_delay: 30

@@ -12,7 +12,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 )
 
-func CanUnwindToBlockNum(tx kv.TemporalTx) (uint64, error) {
+func CanUnwindToBlockNum(tx kv.TemporalTx, txNumsReader rawdbv3.TxNumsReader) (uint64, error) {
 	minUnwindable, err := changeset.ReadLowestUnwindableBlock(tx)
 	if err != nil {
 		return 0, err
@@ -28,12 +28,12 @@ func CanUnwindToBlockNum(tx kv.TemporalTx) (uint64, error) {
 	}
 	var filesEnd uint64
 	for domain := range kv.DomainLen {
-		filesEnd = max(filesEnd, tx.Debug().DomainFiles(domain).EndRootNum())
+		filesEnd = max(filesEnd, tx.Debug().TxNumsInFiles(domain))
 	}
 	if filesEnd > 0 {
 		// Files cover [0, filesEnd). Keep the block containing their last tx,
 		// even when changesets for older blocks are still retained.
-		block, ok, err := rawdbv3.TxNums.FindBlockNum(context.Background(), tx, filesEnd-1)
+		block, ok, err := txNumsReader.FindBlockNum(context.Background(), tx, filesEnd-1)
 		if err != nil {
 			return 0, err
 		}
@@ -45,8 +45,8 @@ func CanUnwindToBlockNum(tx kv.TemporalTx) (uint64, error) {
 	return minUnwindable, nil
 }
 
-func CanUnwindBeforeBlockNum(blockNum uint64, tx kv.TemporalTx) (unwindableBlockNum uint64, ok bool, err error) {
-	_minUnwindableBlockNum, err := CanUnwindToBlockNum(tx)
+func CanUnwindBeforeBlockNum(blockNum uint64, tx kv.TemporalTx, txNumsReader rawdbv3.TxNumsReader) (unwindableBlockNum uint64, ok bool, err error) {
+	_minUnwindableBlockNum, err := CanUnwindToBlockNum(tx, txNumsReader)
 	if err != nil {
 		return 0, false, err
 	}

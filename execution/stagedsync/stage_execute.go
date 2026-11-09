@@ -213,10 +213,6 @@ func unwindExec3(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwT
 			return err
 		}
 		if !found {
-			// Only an unexecuted tail above recorded progress may lack diffsets.
-			if changeSet == nil && currentBlock > s.BlockNumber {
-				continue
-			}
 			return fmt.Errorf("missing diffset for executed block %d (%s)", currentBlock, executedHash)
 		}
 		if changeSet == nil {
@@ -559,7 +555,7 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDom
 	// would flush stale branch data that doesn't match the unwound state.
 	doms.ResetPendingUpdates()
 
-	unwindToLimit, ok, err := rawtemporaldb.CanUnwindBeforeBlockNum(u.UnwindPoint, rwTx)
+	unwindToLimit, ok, err := rawtemporaldb.CanUnwindBeforeBlockNum(u.UnwindPoint, rwTx, cfg.blockReader.TxnumReader())
 	if err != nil {
 		return err
 	}

@@ -187,3 +187,44 @@ func TestDomain_RepeatedUnwindKeepsVersionOrder(t *testing.T) {
 		}
 	}
 }
+
+func TestDomain_RepeatedUnwindRemovesRestoredVersions(t *testing.T) {
+	for _, cfg := range []statecfg.DomainCfg{statecfg.Schema.StorageDomain, statecfg.Schema.CodeDomain} {
+		for _, restored := range [][]byte{nil, {7}} {
+			t.Run(fmt.Sprintf("%s/restore_%x", cfg.Name, restored), func(t *testing.T) {
+				db, d := testDbAndDomainOfStep(t, cfg, 16, log.New())
+				tx, err := db.BeginRw(t.Context())
+				require.NoError(t, err)
+				defer tx.Rollback()
+				view := d.beginForTests()
+				defer view.Close()
+				key, ancestor := []byte("key"), []byte{1}
+				write := func(txNum uint64, value, previous []byte) []kv.DomainEntryDiff {
+					writer := view.NewWriter(db)
+					defer writer.Close()
+					writer.SetDiff(&kv.DomainDiff{})
+					require.NoError(t, writer.PutWithPrev(key, value, txNum, previous))
+					diffs := writer.Diff().GetDiffSet()
+					require.NoError(t, writer.Flush(t.Context(), tx))
+					return diffs
+				}
+				write(2, ancestor, nil)
+				first := write(34, []byte{2}, restored)
+				require.NoError(t, view.unwind(t.Context(), tx, 2, 34, first))
+				value, _, _, err := view.GetLatest(key, tx)
+				require.NoError(t, err)
+				require.Equal(t, len(restored), len(value))
+				if len(restored) > 0 {
+					require.Equal(t, restored, value)
+				}
+
+				// A restored version has no original write in the next branch's diffsets.
+				second := write(18, []byte{3}, ancestor)
+				require.NoError(t, view.unwind(t.Context(), tx, 0, 10, second))
+				value, _, _, err = view.GetLatest(key, tx)
+				require.NoError(t, err)
+				require.Equal(t, ancestor, value)
+			})
+		}
+	}
+}

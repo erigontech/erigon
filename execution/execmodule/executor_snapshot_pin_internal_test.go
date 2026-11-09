@@ -62,7 +62,7 @@ func newPinTestExecutor(t *testing.T, forward stagedsync.ExecFunc) (*PipelineExe
 	noopUnwind := func(*stagedsync.UnwindState, *stagedsync.StageState, *execctx.SharedDomains, kv.TemporalRwTx, log.Logger) error {
 		return nil
 	}
-	sync := stagedsync.New(
+	sync := stagedsync.New(pinTestBlockReader{}.TxnumReader(),
 		ethconfig.Sync{},
 		[]*stagedsync.Stage{{ID: stages.Snapshots, Forward: forward, Unwind: noopUnwind}},
 		nil, nil, logger, stages.ModeApplyingBlocks,

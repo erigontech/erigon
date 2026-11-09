@@ -2214,15 +2214,27 @@ func (at *AggregatorRoTx) firstStepToBuild(tx kv.Tx) (kv.Step, error) {
 	// An interrupted build can leave a domain without files while the state
 	// domains advance. Resume at its pending DB data, not at the state frontier.
 	for _, d := range at.d {
-		if !d.d.Enabled.Load() || d.FirstStepNotInFiles() >= step {
+		if d == nil || !d.d.Enabled.Load() || d.FirstStepNotInFiles() >= step {
 			continue
 		}
-		first, err := kv.FirstKey(tx, d.ht.h.KeysTable)
+		first, found, err := d.d.firstStepInDB(tx)
 		if err != nil {
 			return 0, err
 		}
-		if len(first) > 0 {
-			step = min(step, max(d.FirstStepNotInFiles(), kv.Step(binary.BigEndian.Uint64(first)/at.StepSize())))
+		if found {
+			step = min(step, max(d.FirstStepNotInFiles(), first))
+		}
+	}
+	for _, ii := range at.standaloneIIs() {
+		if ii == nil || !ii.ii.Enabled.Load() || ii.FirstStepNotInFiles() >= step {
+			continue
+		}
+		first, found, err := ii.ii.firstStepInDB(tx)
+		if err != nil {
+			return 0, err
+		}
+		if found {
+			step = min(step, max(ii.FirstStepNotInFiles(), first))
 		}
 	}
 	return step, nil

@@ -85,7 +85,7 @@ func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
 	}
 
 	// Check if we can unwind that far back
-	minUnwindableBlock, err := rawtemporaldb.CanUnwindToBlockNum(tx)
+	minUnwindableBlock, err := rawtemporaldb.CanUnwindToBlockNum(tx, e.blockReader.TxnumReader())
 	if err != nil {
 		return fmt.Errorf("failed to check minimum unwindable block: %w", err)
 	}
@@ -115,8 +115,18 @@ func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
 	// and the next FCU re-execution reads them and computes a stale state root
 	// (BadBlock). Mirrors ValidateChain/forkchoice.
 	sd.SetStateCache(e.stateCache)
+	var restoreStateChanges func()
+	if e.accum != nil && e.accum.Accumulator != nil {
+		restoreStateChanges = e.accum.Accumulator.Checkpoint()
+	}
+	defer func() {
+		if restoreStateChanges != nil {
+			restoreStateChanges()
+		}
+	}()
 
 	// Set the unwind point and run the unwind
+	defer e.pipelineExecutor.Sync().CancelUnwind()
 	if err := e.pipelineExecutor.UnwindTo(targetBlock, stagedsync.StagedUnwind, tx); err != nil {
 		return fmt.Errorf("failed to set unwind point: %w", err)
 	}
@@ -162,6 +172,7 @@ func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
 	if err := sd.Commit(ctx, tx); err != nil {
 		return fmt.Errorf("failed to commit shared domains: %w", err)
 	}
+	restoreStateChanges = nil
 	if e.accum != nil && e.accum.RecentReceipts != nil {
 		e.accum.RecentReceipts.Clear()
 	}

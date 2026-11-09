@@ -191,7 +191,11 @@ jobs:
   reorg:
     if: github.repository == 'erigontech/erigon' || github.event_name != 'schedule'
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
     steps:
       - uses: actions/checkout@v7
         with:
@@ -201,24 +205,38 @@ jobs:
           build-cache-extra-key: reorg-schedules
       - name: Run seeded reorg schedules
         env:
-          ERIGON_REORG_SEED: ${{ github.run_id }}
-          ERIGON_REORG_CASES: '100'
-        run: go test ./execution/engineapi -run '^TestEngineApiReorgSchedules$' -count=1 -timeout=45m -v 2>&1 | tee reorg-schedules.log
+          SEED_BASE: ${{ github.run_id }}
+          SHARD: ${{ matrix.shard }}
+          ERIGON_REORG_CASES: '25'
+        run: |
+          export ERIGON_REORG_SEED=$((SEED_BASE + SHARD * ERIGON_REORG_CASES))
+          make test-reorg-schedules 2>&1 | tee reorg-schedules.log
       - name: Record failure
         if: failure()
+        env:
+          SHARD: ${{ matrix.shard }}
         run: |
-          mkdir -p fuzz-failure
-          printf 'engine-reorg\texecution/engineapi\tTestEngineApiReorgSchedules\tno-reproducer\n' > fuzz-failure/engine-reorg.tsv
+          python3 - <<'PYTHON'
+          import os, pathlib, re
+          log = pathlib.Path("reorg-schedules.log")
+          failures = sorted(set(re.findall(r"--- FAIL: TestEngineApiReorgSchedules/(seed_\d+)", log.read_text()))) if log.exists() else []
+          directory = pathlib.Path("fuzz-failure")
+          directory.mkdir(exist_ok=True)
+          rows = [f"engine-reorg-{os.environ['SHARD']}\texecution/engineapi\tTestEngineApiReorgSchedules/{seed}\tseed\n" for seed in failures]
+          if not rows:
+              rows = [f"engine-reorg-{os.environ['SHARD']}\texecution/engineapi\tTestEngineApiReorgSchedules\tno-reproducer\n"]
+          (directory / f"engine-reorg-{os.environ['SHARD']}.tsv").write_text("".join(rows))
+          PYTHON
       - uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: reorg-schedules-log
+          name: reorg-schedules-log-${{ matrix.shard }}
           path: reorg-schedules.log
       - uses: actions/upload-artifact@v7
         if: failure()
         with:
-          name: fuzz-failure-engine-reorg
-          path: fuzz-failure/engine-reorg.tsv
+          name: fuzz-failure-engine-reorg-${{ matrix.shard }}
+          path: fuzz-failure/engine-reorg-${{ matrix.shard }}.tsv
       - uses: ./.github/actions/cleanup-erigon
         if: always()
 
@@ -252,6 +270,10 @@ jobs:
             while IFS=$'\t' read -r name pkg fn kind; do
               if [ "$kind" = crash ]; then
                 list="${list}- \`${name}\` — ${fn} (${pkg}): **crash, reproducer attached** (artifact \`fuzz-crash-${name}\`)"$'\n'
+                crashes=$((crashes + 1))
+              elif [ "$kind" = seed ]; then
+                seed=${fn##*/seed_}
+                list="${list}- \`${name}\` — ${fn} (${pkg}): replay with \`ERIGON_REORG_SEED=${seed} make test-reorg-schedules\`"$'\n'
                 crashes=$((crashes + 1))
               else
                 list="${list}- \`${name}\` — ${fn} (${pkg}): **failed without a reproducer** — read the step log"$'\n'

@@ -47,6 +47,15 @@ type reorgReference struct {
 	states   map[common.Hash]crashRecoveryState
 }
 
+func generatedReorgSchedule(seed uint64) []byte {
+	random := rand.New(rand.NewPCG(seed, 0))
+	schedule := make([]byte, 128)
+	for i := range schedule {
+		schedule[i] = byte(random.Uint32N(256))
+	}
+	return schedule
+}
+
 // Each pair selects an operation and its target. Reference branches never
 // execute a reorg or prune. A random case can be replayed with ERIGON_REORG_SEED.
 func TestEngineApiReorgSchedules(t *testing.T) {
@@ -61,6 +70,7 @@ func TestEngineApiReorgSchedules(t *testing.T) {
 		{"bounce_restart", []byte{0, 23, 1, 47, 2, 7, 3, 0, 4, 0, 5, 0, 1, 0, 3, 0, 0, 19}},
 		{"prune_invalid", []byte{4, 0, 1, 71, 5, 0, 3, 0, 2, 0, 0, 23, 4, 0, 1, 24}},
 		{"repeated_unwind", []byte{1, 98, 0, 89, 1, 179, 2, 16}},
+		{"restored_versions", generatedReorgSchedule(3)},
 	}
 	if value, ok := os.LookupEnv("ERIGON_REORG_SEED"); ok {
 		seed, err := strconv.ParseUint(value, 10, 64)
@@ -73,12 +83,7 @@ func TestEngineApiReorgSchedules(t *testing.T) {
 		}
 		for i := range count {
 			caseSeed := seed + uint64(i)
-			random := rand.New(rand.NewPCG(caseSeed, 0))
-			schedule := make([]byte, 128)
-			for j := range schedule {
-				schedule[j] = byte(random.Uint32N(256))
-			}
-			cases = append(cases, scheduleCase{fmt.Sprintf("seed_%d", caseSeed), schedule})
+			cases = append(cases, scheduleCase{fmt.Sprintf("seed_%d", caseSeed), generatedReorgSchedule(caseSeed)})
 		}
 	}
 	var branches []reorgReference
@@ -132,7 +137,7 @@ func TestEngineApiReorgSchedules(t *testing.T) {
 		branches = append(branches, ref)
 	}
 	for _, test := range cases {
-		if !t.Run(test.name, func(t *testing.T) {
+		t.Run(test.name, func(t *testing.T) {
 			schedule := test.schedule
 
 			ctx := t.Context()
@@ -230,8 +235,6 @@ func TestEngineApiReorgSchedules(t *testing.T) {
 			churn, err := contracts.NewStateChurn(address, eat.ContractBackend)
 			require.NoError(t, err)
 			churnAndAssert(ctx, t, eat, churn, 3, func(k int) int64 { return int64(9_000 + k) })
-		}) {
-			return
-		}
+		})
 	}
 }

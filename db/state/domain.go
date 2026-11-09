@@ -466,6 +466,36 @@ func (d *Domain) minStepInDB(tx kv.Tx) (lstInDb uint64) {
 	return binary.BigEndian.Uint64(lstIdx) / d.stepSize
 }
 
+func (d *Domain) firstStepInDB(tx kv.Tx) (kv.Step, bool, error) {
+	if !d.HistoryDisabled && !d.SnapshotsDisabled {
+		return d.InvertedIndex.firstStepInDB(tx)
+	}
+	// History can be absent or pruned independently of the pending values.
+	cursor, err := tx.Cursor(d.ValuesTable)
+	if err != nil {
+		return 0, false, err
+	}
+	defer cursor.Close()
+	first := kv.Step(math.MaxUint64)
+	for key, value, err := cursor.First(); ; key, value, err = cursor.Next() {
+		if err != nil {
+			return 0, false, err
+		}
+		if key == nil {
+			break
+		}
+		if d.LargeValues {
+			first = min(first, kv.Step(^binary.BigEndian.Uint64(key[len(key)-8:])))
+		} else {
+			first = min(first, kv.Step(^binary.BigEndian.Uint64(value[:8])))
+		}
+		if first == 0 {
+			break
+		}
+	}
+	return first, first != kv.Step(math.MaxUint64), nil
+}
+
 func (dt *DomainRoTx) NewWriter(db kv.RoDB) *DomainBufferedWriter {
 	return dt.newWriter(db, dt.d.dirs.Tmp, !dt.d.Enabled.Load())
 }
@@ -1568,39 +1598,52 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 		return err
 	}
 	defer valsCursor.Close()
-	// Fully discarded steps need only deletion: their preceding versions remain
-	// in MDBX or files. Restoring at a different step would create a version that
-	// surviving changesets cannot remove during a later unwind.
-	// Only the partially retained step needs its overwritten value restored.
 	unwindStepBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(unwindStepBytes, ^uint64(step))
 
 	for _, diff := range domainDiffs {
 		key := common.ToBytesZeroCopy(diff.Key)
 		stepBytes, fullKey := key[len(key)-8:], key[:len(key)-8]
-		if d.LargeValues {
-			if err := rwTx.Delete(d.ValuesTable, key); err != nil {
-				return err
-			}
-		} else {
-			valInDB, err := valsCursor.SeekBothRange(fullKey, stepBytes)
-			if err != nil {
-				return err
-			}
-			if len(valInDB) >= 8 && bytes.Equal(valInDB[:8], stepBytes) {
-				if err := valsCursor.DeleteCurrent(); err != nil {
-					return err
+		var previous []byte
+		var found bool
+		k, v, err := valsCursor.Seek(fullKey)
+		for err == nil && k != nil {
+			var version, value []byte
+			if d.LargeValues {
+				if len(k) != len(fullKey)+8 || !bytes.Equal(k[:len(fullKey)], fullKey) {
+					break
 				}
+				version, value = k[len(fullKey):], v
+			} else {
+				if !bytes.Equal(k, fullKey) {
+					break
+				}
+				version, value = v[:8], v[8:]
 			}
+			// Earlier restores can leave newer versions absent from this branch's diffs.
+			if bytes.Compare(version, unwindStepBytes) >= 0 && !bytes.Equal(version, stepBytes) {
+				previous, found = value, true
+				break
+			}
+			if err := valsCursor.DeleteCurrent(); err != nil {
+				return err
+			}
+			k, v, err = valsCursor.Next()
 		}
+		if err != nil {
+			return err
+		}
+		// Only the partially retained step needs its overwritten value restored.
 		if diff.Value == nil || txNumUnwindTo%dt.stepSize == 0 || !bytes.Equal(stepBytes, unwindStepBytes) {
 			continue
 		}
 		// A value already supplied by an older version needs no new entry.
 		// Otherwise that entry could outlive the changesets of this step.
-		previous, _, _, err := dt.GetLatest(fullKey, rwTx)
-		if err != nil {
-			return err
+		if !found {
+			previous, _, _, _, err = dt.getLatestFromFiles(fullKey, nil, kv.NoStepBound)
+			if err != nil {
+				return err
+			}
 		}
 		if bytes.Equal(previous, diff.Value) {
 			continue

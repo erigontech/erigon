@@ -1362,6 +1362,14 @@ func (ii *InvertedIndex) minTxNumInDB(tx kv.Tx) (uint64, error) {
 	return 0, nil
 }
 
+func (ii *InvertedIndex) firstStepInDB(tx kv.Tx) (kv.Step, bool, error) {
+	first, err := kv.FirstKey(tx, ii.KeysTable)
+	if err != nil || len(first) == 0 {
+		return 0, false, err
+	}
+	return kv.Step(binary.BigEndian.Uint64(first) / ii.stepSize), true, nil
+}
+
 func (ii *InvertedIndex) lastTxNumInDB(tx kv.Tx) (uint64, bool) {
 	// Read-only MDBX txs of one snapshot share its ID, so they share this answer.
 	if ro, ok := tx.(*mdbx.MdbxTx); ok && ro.IsRo() {

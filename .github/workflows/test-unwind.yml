@@ -2,21 +2,26 @@ name: Unwind modes
 
 on:
   workflow_call:
+    inputs:
+      cache-warming-only:
+        type: boolean
+        default: false
   workflow_dispatch:
 
 permissions:
   contents: read
+  actions: write
 
 jobs:
   unwind:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     strategy:
-      fail-fast: false
+      fail-fast: ${{ github.event_name == 'merge_group' }}
       matrix:
-        execution: [serial, parallel]
-        commitment: [serial, parallel]
-        batch: [false, true]
+        execution: ${{ fromJSON(inputs.cache-warming-only && '["serial"]' || '["serial", "parallel"]') }}
+        commitment: ${{ fromJSON(inputs.cache-warming-only && '["serial"]' || '["serial", "parallel"]') }}
+        batch: ${{ fromJSON(inputs.cache-warming-only && '[false]' || '[false, true]') }}
     env:
       ERIGON_EXEC3_PARALLEL: ${{ matrix.execution == 'parallel' && 'true' || 'false' }}
       ERIGON_COMMITMENT_PARALLEL: ${{ matrix.commitment == 'parallel' && 'true' || 'false' }}
@@ -29,6 +34,18 @@ jobs:
         with:
           cache-namespace: test-unwind
       # These switches are read at package init; test-unwind disables result caching.
-      - run: make test-unwind
+      - name: Compile unwind tests
+        if: inputs.cache-warming-only
+        run: make test-unwind UNWIND_TEST_PATTERN='^$$'
+      - name: Run unwind tests
+        if: '!inputs.cache-warming-only'
+        run: make test-unwind
       - uses: ./.github/actions/cleanup-erigon
         if: always()
+      - name: Cancel workflow run on failure
+        if: failure() && github.event_name == 'merge_group'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "::error title=Merge-queue root-cause failure::This job failed and is fast-cancelling the CI Gate run; THIS job is the real failure (the others show as cancelled). See its logs."
+          gh run cancel ${{ github.run_id }} || true

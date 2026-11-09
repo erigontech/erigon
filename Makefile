@@ -255,13 +255,19 @@ test-all: test-filtered
 
 ## test-unwind:                       reorg, snapshot and crash recovery integration tests
 .PHONY: test-unwind
+UNWIND_TEST_PATTERN ?= (Churn|Reorg|Unwind|Fork[Cc]hoice|F[Cc][Uu]|CrashRecovery|BranchRecovery|SetHead|MinimumUnwind|StartupCommitObservations|DeletedKeyNotResurrectedByFiles|AggregatorBuildResumesIncompleteStep|AggregatorEnableDomainDuringFilePlanning|MaintenanceObserver|MergeReplacementClosesAfterReaders|AccumulatorAppendPreservesChanges|HookBeforeRunPreservesPendingNotifications)
+test-unwind: override GOTEST_PACKAGES = ./execution/engineapi ./execution/execmodule ./execution/execmodule/execmoduletester ./execution/stagedsync ./execution/stagedsync/stageloop ./execution/notifications ./db/state ./db/rawdb/rawtemporaldb
 test-unwind:
-	$(GO) test ./execution/engineapi ./execution/execmodule ./execution/execmodule/execmoduletester ./execution/stagedsync -run '(Churn|Reorg|Unwind|Fork[Cc]hoice|F[Cc][Uu]|CrashRecovery|BranchRecovery)' -count=1 -timeout=20m $(GO_FLAGS)
-	$(GO) test ./db/state ./db/rawdb/rawtemporaldb -run '(TestDomain_.*(DeletedKeyNotResurrectedByFiles|Unwind)|TestAggregatorBuildResumesIncompleteStep|TestMinimumUnwindKeepsImmutableTransactions)' -count=1 -timeout=10m $(GO_FLAGS)
+	$(GOTEST) -run '$(UNWIND_TEST_PATTERN)' -count=1 -timeout=20m
+
+.PHONY: test-reorg-schedules
+test-reorg-schedules: override GOTEST_PACKAGES = ./execution/engineapi
+test-reorg-schedules:
+	$(GOTEST) -run '^TestEngineApiReorgSchedules$$' -count=1 -timeout=25m -v
 
 KURTOSIS ?= kurtosis
 REORG_ENCLAVE ?= unwind-reorg
-## test-reorg-devnet:                  partition/heal real CLs using test/erigon:current
+## test-reorg-devnet:                  bounce, heal and restart real CLs using test/erigon:current
 .PHONY: test-reorg-devnet
 test-reorg-devnet:
 	$(KURTOSIS) run --privileged --enclave $(REORG_ENCLAVE) tools/kurtosis/reorg --args-file .github/workflows/kurtosis/reorg-bounce.io

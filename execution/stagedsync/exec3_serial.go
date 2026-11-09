@@ -528,8 +528,8 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 			}
 			se.logger.Warn(fmt.Sprintf("[%s] Execution failed", se.logPrefix),
 				"block", txTask.BlockNumber(), "txNum", txTask.TxNum, "header-hash", txTask.Header.Hash().String(), "err", err, "isForkValidation", se.isForkValidation)
-			// The caller discards failed execution. A pending unwind would carry
-			// this block's error into the next forkchoice; see renderExecOutcome.
+			// Failed execution is discarded. A pending unwind would carry
+			// this block's error into the next forkchoice request.
 			return false, err
 		}
 
