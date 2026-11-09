@@ -927,27 +927,41 @@ func commitmentFileVersion(name string) (uint64, bool) {
 	return info.Version.Major, true
 }
 
+func isCommitmentData(name string) bool {
+	_, ok := commitmentFileVersion(name)
+	return ok
+}
+
+func forEachCommitmentDataFile(dirPath string, fn func(string) error) error {
+	entries, err := os.ReadDir(dirPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() && isCommitmentData(entry.Name()) {
+			if err := fn(entry.Name()); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 func legacyCommitmentFilesNotConverted(dirs datadir.Dirs, converted map[string]struct{}) ([]string, error) {
 	var unindexed []string
 	for _, dirPath := range []string{dirs.SnapDomain, dirs.SnapHistory} {
-		entries, err := os.ReadDir(dirPath)
-		if errors.Is(err, os.ErrNotExist) {
-			continue
-		}
+		err := forEachCommitmentDataFile(dirPath, func(name string) error {
+			major, _ := commitmentFileVersion(name)
+			if _, ok := converted[name]; major < 3 && !ok {
+				unindexed = append(unindexed, filepath.Join(dirPath, name))
+			}
+			return nil
+		})
 		if err != nil {
 			return nil, fmt.Errorf("[commitment_convert] read commitment directory %s: %w", dirPath, err)
-		}
-		for _, entry := range entries {
-			if entry.IsDir() {
-				continue
-			}
-			major, ok := commitmentFileVersion(entry.Name())
-			if !ok || major >= 3 {
-				continue
-			}
-			if _, ok := converted[entry.Name()]; !ok {
-				unindexed = append(unindexed, filepath.Join(dirPath, entry.Name()))
-			}
 		}
 	}
 	slices.Sort(unindexed)
@@ -990,29 +1004,22 @@ func preflightRestoreV3Orphans(pairs [][2]string) (bool, error) {
 		if err != nil {
 			return false, err
 		}
-		liveEntries, err := os.ReadDir(pair[1])
-		if errors.Is(err, os.ErrNotExist) {
-			continue
-		}
-		if err != nil {
-			return false, fmt.Errorf("[commitment_convert] restore: read live dir %s: %w", pair[1], err)
-		}
-		for _, entry := range liveEntries {
-			if entry.IsDir() {
-				continue
-			}
-			major, ok := commitmentFileVersion(entry.Name())
-			if !ok || major < 3 {
-				continue
+		err = forEachCommitmentDataFile(pair[1], func(name string) error {
+			major, _ := commitmentFileVersion(name)
+			if major < 3 {
+				return nil
 			}
 			restoredV3 = true
-			m := commitmentStepRangeRe.FindStringSubmatch(entry.Name())
-			if m == nil {
-				continue
+			m := commitmentStepRangeRe.FindStringSubmatch(name)
+			if m != nil {
+				if _, ok := ranges[[2]string{m[1], m[2]}]; !ok {
+					conflicts = append(conflicts, filepath.Join(pair[1], name))
+				}
 			}
-			if _, ok := ranges[[2]string{m[1], m[2]}]; !ok {
-				conflicts = append(conflicts, filepath.Join(pair[1], entry.Name()))
-			}
+			return nil
+		})
+		if err != nil {
+			return false, fmt.Errorf("[commitment_convert] restore: read live dir %s: %w", pair[1], err)
 		}
 	}
 	if len(conflicts) != 0 {

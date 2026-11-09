@@ -218,6 +218,22 @@ func (w *workersCfg) unlockEditing() {
 
 func CheckSnapshotsCompatibility(d datadir.Dirs) error {
 	for _, dirPath := range d.VersionedDirs() {
+		if dirPath == d.SnapDomain || dirPath == d.SnapHistory {
+			err := forEachCommitmentDataFile(dirPath, func(name string) error {
+				major, _ := commitmentFileVersion(name)
+				if statecfg.Schema.CommitmentDomain.CommitmentV3Records && major < 3 {
+					return fmt.Errorf("commitment file %s is legacy (v%d) but commitment v3 is enabled; "+
+						"convert the datadir with `integration commitment convert --v3`", name, major)
+				}
+				if !statecfg.ExperimentalCommitmentV3 && major >= 3 {
+					return fmt.Errorf("commitment file %s requires commitment v3; run with COMMITMENT_V3=true", name)
+				}
+				return nil
+			})
+			if err != nil {
+				return err
+			}
+		}
 		err := filepath.WalkDir(dirPath, func(path string, entry fs.DirEntry, err error) error {
 			if err != nil {
 				if os.IsNotExist(err) { // skip magically disappeared files
@@ -239,15 +255,6 @@ func CheckSnapshotsCompatibility(d datadir.Dirs) error {
 			fileInfo, _, _ := snaptype.ParseFileName("", name)
 
 			currentFileVersion := fileInfo.Version
-
-			dir := filepath.Dir(path)
-			if statecfg.Schema.CommitmentDomain.CommitmentV3Records && isCommitmentData(d, dir, fileInfo) && currentFileVersion.Major < 3 {
-				return fmt.Errorf("commitment file %s is legacy (v%d) but commitment v3 is enabled; "+
-					"convert the datadir with `integration commitment convert --v3`", fileInfo.Name(), currentFileVersion.Major)
-			}
-			if !statecfg.ExperimentalCommitmentV3 && isCommitmentData(d, dir, fileInfo) && currentFileVersion.Major >= 3 {
-				return fmt.Errorf("commitment file %s requires commitment v3; run with COMMITMENT_V3=true", fileInfo.Name())
-			}
 
 			msVs, ok := statecfg.SchemeMinSupportedVersions[fileInfo.TypeString]
 			if !ok {
@@ -272,10 +279,4 @@ func CheckSnapshotsCompatibility(d datadir.Dirs) error {
 	}
 
 	return nil
-}
-
-func isCommitmentData(d datadir.Dirs, dir string, fileInfo snaptype.FileInfo) bool {
-	return fileInfo.TypeString == "commitment" &&
-		(dir == d.SnapDomain || dir == d.SnapHistory) &&
-		(fileInfo.Ext == ".kv" || fileInfo.Ext == ".v")
 }
