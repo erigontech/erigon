@@ -913,6 +913,28 @@ func TestCreateAccessListStateOverridePrecompile(t *testing.T) {
 	})
 }
 
+func TestCreateAccessListTimeoutCoversEveryRun(t *testing.T) {
+	cfg := chain.AllProtocolChanges.Copy()
+	cfg.AmsterdamTime = nil // Amsterdam caps execution gas, and each new slot must stay affordable
+	m, _, bankAddr := fundedBankGenesis(t, cfg)
+	base := newBaseApiForTest(m)
+	base.evmCallTimeout = 200 * time.Millisecond
+	api := newEthApiForTest(base, m.DB, nil, nil)
+	api.GasCap = 10_000_000_000
+	gas := hexutil.Uint64(api.GasCap)
+	reader := common.HexToAddress("0x00000000000000000000000000000000000000cc")
+	sloadGas := hexutil.Bytes(hexutil.MustDecode("0x5a5450")) // SLOAD(GAS): every run reads a new slot
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	defer cancel()
+
+	start := time.Now()
+	_, err := api.CreateAccessList(ctx, ethapi.CallArgs{From: &bankAddr, To: &reader, Gas: &gas}, nil, &ethapi.StateOverrides{
+		accounts.InternAddress(reader): {Code: &sloadGas},
+	}, nil)
+	require.Error(t, err)
+	require.Less(t, time.Since(start), 10*time.Second, "the timeout must cover all runs of the request")
+}
+
 func TestCreateAccessListHonoursTheEVMTimeout(t *testing.T) {
 	cfg := chain.AllProtocolChanges.Copy()
 	cfg.AmsterdamTime = nil // Amsterdam caps execution gas, and the loop must outlast the timeout
