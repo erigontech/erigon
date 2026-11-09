@@ -2226,6 +2226,7 @@ Caplin also has an archive mode for historical states, blocks, and blobs. These 
 - `--caplin.states-archive`: Enables the storage and retrieval of historical state data, allowing access to past states of the blockchain for debugging, analytics, or other use cases.
 - `--caplin.blocks-archive`: Enables the storage of historical block data, making it possible to query or analyze full block history.
 - `--caplin.blobs-archive`: Enables the storage of historical blobs, ensuring access to additional off-chain data that might be required for specific applications.
+- `--caplin.blobs-archive-from-slot <slot>`: Bounds the blob archive to this beacon slot and later, for rollup nodes (Arbitrum Nitro, OP) that started from a snapshot and need blobs only from that point. It also enables block archival: every beacon block since genesis is downloaded and kept; only blob sidecars are bounded. The spec serving window (about 18 days) is always kept, even when the slot is newer. On first sync only blob snapshots that reach the slot or that window are downloaded; with `--caplin.custom-config` or `--caplin.custom-genesis` every blob snapshot is downloaded and the older ones are pruned afterwards. The newest blob snapshot is always kept. A rollup derives the slot from an L1 block timestamp as `(timestamp - genesis_time) / 12`. Raising it later drops the older blob snapshots; lowering it does not fetch them again. Changing an existing datadir from this bounded mode to plain `--caplin.blobs-archive`, or removing the bound, does not fetch dropped history: backfill stops at `FrozenBlobs` and `SyncSnapshots` is skipped once snapshots are local, so the range from Deneb to the first local blob segment remains unavailable.
 
 In addition, Caplin can backfill recent blobs for an op-node or other uses with the new flag:
 
@@ -3081,6 +3082,9 @@ Flags for configuring the [Caplin](https://docs.erigon.tech/fundamentals/caplin)
 
 - `--caplin.blobs-archive`: Enables backfilling for blobs.
   - Default: `false`
+
+- `--caplin.blobs-archive-from-slot value`: Keeps blob sidecars from this beacon slot onward and implies `--caplin.blobs-archive`. It also enables block archival: every beacon block since genesis is downloaded and kept; only blob sidecars are bounded. The first sync downloads only the blob snapshots that reach this slot or the spec retention window; with `--caplin.custom-config` or `--caplin.custom-genesis` all blob snapshots are downloaded, then pruned. Older sidecars and blob snapshots are dropped once they leave that window, but the newest blob snapshot is always kept. Changing an existing datadir from this bounded mode to plain `--caplin.blobs-archive`, or removing the bound, does not fetch dropped history: backfill stops at `FrozenBlobs` and `SyncSnapshots` is skipped once snapshots are local, so the range from Deneb to the first local blob segment remains unavailable. Cannot be combined with `--caplin.snapgen`.
+  - Default: `0` — keeps all history since Deneb
 
 - `--caplin.states-archive`: Enables the archival node for historical states.
   - Default: `false`
@@ -6676,7 +6680,8 @@ All `trace_*` methods return objects built from the same set of fields. Each met
 
 | Method | Top-level shape |
 | --- | --- |
-| `trace_call`, `trace_rawTransaction`, `trace_replayTransaction` | `Object` with `output`, `stateDiff`, `trace[]`, `vmTrace` |
+| `trace_call`, `trace_rawTransaction` | `Object` with `output`, `stateDiff`, `trace[]`, `vmTrace` |
+| `trace_replayTransaction` | `Object` with `output`, `stateDiff`, `trace[]`, `vmTrace`, `transactionHash` |
 | `trace_callMany` | `Array<Object>` — one per input call |
 | `trace_replayBlockTransactions` | `Array<Object>` — one per transaction; each entry adds `transactionHash` |
 | `trace_block`, `trace_filter`, `trace_transaction` | `Array<TraceEntry>` (flat list across all call frames) |
@@ -6690,7 +6695,7 @@ All `trace_*` methods return objects built from the same set of fields. Each met
 | `stateDiff` | Object \| null | Set when `"stateDiff"` is requested in the trace types array. Maps each touched account address to an object describing changes to `balance`, `nonce`, `code`, and per-key `storage` entries. `null` if not requested. |
 | `trace` | Array of TraceEntry | Set when `"trace"` is requested. Flat list of call frames executed during the transaction. Empty array (never `null`) if not requested. See **TraceEntry fields** below. |
 | `vmTrace` | Object \| null | Set when `"vmTrace"` is requested. Step-by-step EVM trace including `code`, per-step `ops` (with `pc`, `cost`, `op` name, `ex` execution result, and `sub` for nested calls). `ops` holds only operations that executed, so every `pc` lies inside `code`: an undefined opcode or a stack underflow or overflow is omitted, and an operation that halted exceptionally has `ex: null`. `null` if not requested. |
-| `transactionHash` | DATA, 32 BYTES | (Only in `trace_replayBlockTransactions` entries) Hash of the transaction this trace belongs to. |
+| `transactionHash` | DATA, 32 BYTES | (Only in `trace_replayTransaction` results and `trace_replayBlockTransactions` entries) Hash of the transaction this trace belongs to. |
 
 ### TraceEntry fields
 
@@ -7049,7 +7054,7 @@ params: [
 
 #### Returns
 
-`Object` shaped like the `trace_call` response (`output`, `stateDiff`, `trace[]`, `vmTrace`). See [Response Fields Reference](https://docs.erigon.tech/interacting-with-erigon/trace#response-fields-reference).
+`Object` shaped like the `trace_call` response (`output`, `stateDiff`, `trace[]`, `vmTrace`) plus a `transactionHash` field identifying the replayed transaction. See [Response Fields Reference](https://docs.erigon.tech/interacting-with-erigon/trace#response-fields-reference).
 
 #### Example
 
@@ -7078,6 +7083,7 @@ Response
       "traceAddress": [],
       "type": "call"
     }],
+    "transactionHash": "0x02d4a872e096445e80d05276ee756cefef7f3b376bcec14246469c0cd97dad8f",
     "vmTrace": null
   }
 }
