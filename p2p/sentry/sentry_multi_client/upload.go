@@ -24,6 +24,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
+	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/p2p/sentry/libsentry"
@@ -32,9 +33,18 @@ import (
 const (
 	maxConcurrentUploadRequests = 4
 	maxUploadRequestsPerPeer    = 5
+	// Leave room for other peers while allowing a maximum-size protocol request to wait.
+	maxUploadQueuedBytesPerPeer = 16 * 1024 * 1024
 )
 
-var errReceiptCacheMiss = errors.New("receipt cache miss")
+var (
+	errReceiptCacheMiss = errors.New("receipt cache miss")
+
+	uploadDroppedByPeerCount  = metrics.GetOrCreateCounter(`p2p_sentry_upload_dropped_requests_total{reason="peer_count"}`)
+	uploadDroppedByPeerBytes  = metrics.GetOrCreateCounter(`p2p_sentry_upload_dropped_requests_total{reason="peer_bytes"}`)
+	uploadDroppedByQueueCount = metrics.GetOrCreateCounter(`p2p_sentry_upload_dropped_requests_total{reason="queue_count"}`)
+	uploadDroppedByQueueBytes = metrics.GetOrCreateCounter(`p2p_sentry_upload_dropped_requests_total{reason="queue_bytes"}`)
+)
 
 type uploadTask struct {
 	ctx     context.Context
@@ -64,6 +74,27 @@ type uploadQueue struct {
 	bytes          int
 }
 
+func (q *uploadQueue) canQueue(peer *uploadPeer, size int) bool {
+	if q.queued >= libsentry.MessagesQueueSize {
+		uploadDroppedByQueueCount.Inc()
+		return false
+	}
+	if q.bytes+size > libsentry.MessagesQueueByteLimit {
+		uploadDroppedByQueueBytes.Inc()
+		return false
+	}
+	if peer != nil {
+		for _, task := range peer.pending {
+			size += task.size
+		}
+	}
+	if size > maxUploadQueuedBytesPerPeer {
+		uploadDroppedByPeerBytes.Inc()
+		return false
+	}
+	return true
+}
+
 func (cs *MultiClient) enqueueUpload(task uploadTask) {
 	peerID := gointerfaces.ConvertH512ToHash(task.message.PeerId)
 	task.size = proto.Size(task.message)
@@ -81,12 +112,13 @@ func (cs *MultiClient) enqueueUpload(task uploadTask) {
 			requests++
 		}
 		if requests >= maxUploadRequestsPerPeer {
+			uploadDroppedByPeerCount.Inc()
 			task.done()
 			return
 		}
 	}
-	mustWait := q.active == maxConcurrentUploadRequests || (peer != nil && (peer.active || len(peer.pending) > 0))
-	if mustWait && (q.queued >= libsentry.MessagesQueueSize || q.bytes+task.size > libsentry.MessagesQueueByteLimit) {
+	mustWait := q.active == maxConcurrentUploadRequests || (peer != nil && peer.active)
+	if mustWait && !q.canQueue(peer, task.size) {
 		task.done()
 		return
 	}
@@ -150,7 +182,7 @@ func (cs *MultiClient) runUpload(peerID [64]byte, task uploadTask) {
 		if task.uncached {
 			q.uncachedActive = false
 		}
-		requeue := cacheMiss && task.ctx.Err() == nil && q.queued < libsentry.MessagesQueueSize && q.bytes+task.size <= libsentry.MessagesQueueByteLimit
+		requeue := cacheMiss && task.ctx.Err() == nil && q.canQueue(peer, task.size)
 		if requeue {
 			task.uncached = true
 			uncachedEnd := 0
@@ -201,5 +233,4 @@ func (cs *MultiClient) cancelUploads(ctx context.Context) {
 		}
 	}
 	q.ready = slices.DeleteFunc(q.ready, func(peerID [64]byte) bool { return q.peers[peerID] == nil })
-	cs.startUploadsLocked()
 }
