@@ -517,3 +517,49 @@ func TestRecreateAfterEmptyRemovalShadowsBalanceDelete(t *testing.T) {
 		})
 	}
 }
+
+func TestCreatedSelfDestructEmpty(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0xd0})
+	realSD := map[accounts.Address]struct{}{addr: {}}
+	writes := func(created bool, bal uint64) *WriteSet {
+		ws := &WriteSet{}
+		if created {
+			ws.SetCreateContract(addr, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: CreateContractPath}, Val: true})
+		}
+		ws.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath}, Val: *uint256.NewInt(bal)})
+		return ws
+	}
+
+	empty, known := createdSelfDestructEmpty(writes(true, 0), realSD, addr)
+	require.True(t, known)
+	require.True(t, empty, "created, self-destructed, no balance left: removed")
+
+	empty, known = createdSelfDestructEmpty(writes(true, 7), realSD, addr)
+	require.True(t, known)
+	require.False(t, empty, "a balance left after the self-destruct keeps the account")
+
+	_, known = createdSelfDestructEmpty(writes(false, 0), realSD, addr)
+	require.False(t, known, "an account that existed before the tx needs the account view")
+
+	_, known = createdSelfDestructEmpty(writes(true, 0), nil, addr)
+	require.False(t, known, "without a real self-destruct the account view decides")
+}
+
+func TestFinalizedWritesCreatedSelfDestructKeepsCodeDeletedMarker(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0xd1})
+	ibs := NewWithVersionMap(&minimalStateReader{}, NewVersionMap(nil))
+	t.Cleanup(ibs.Close)
+	ibs.SetTxContext(1, 0)
+	require.NoError(t, ibs.CreateAccount(addr, true))
+	require.NoError(t, ibs.SetCode(addr, []byte{0x60, 0x00}, tracing.CodeChangeUnspecified))
+	_, err := ibs.Selfdestruct(addr, false)
+	require.NoError(t, err)
+
+	writes := finalizedWrites(t, ibs, &chain.Rules{IsSpuriousDragon: true, IsCancun: true})
+
+	sd, ok := writes.GetSelfDestruct(addr)
+	require.True(t, ok && sd.Val, "the created contract is removed")
+	ch, ok := writes.GetCodeHash(addr)
+	require.True(t, ok && ch.Deletes(), "a destroyed contract keeps the code-deleted marker, so the fee calc burns its delayed fee")
+}

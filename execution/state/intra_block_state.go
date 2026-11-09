@@ -2818,12 +2818,35 @@ func (ibs *IntraBlockState) FinalizedWrites(chainRules *chain.Rules) (*WriteSet,
 	return writes, ibs.StateReadError()
 }
 
+// createdSelfDestructEmpty decides emptiness without an account view for an account this tx created as a contract
+// and really self-destructed: the create collision rule means it had nonce 0 and no code before the tx, so its
+// balance write is the only field left to check.
+func createdSelfDestructEmpty(writes *WriteSet, realSelfDestruct map[accounts.Address]struct{}, addr accounts.Address) (empty, known bool) {
+	if _, sd := realSelfDestruct[addr]; !sd {
+		return false, false
+	}
+	if cc, ok := writes.GetCreateContract(addr); !ok || !cc.Val {
+		return false, false
+	}
+	bal, ok := writes.GetBalance(addr)
+	if !ok {
+		return false, false
+	}
+	return bal.Val.IsZero(), true
+}
+
 func (ibs *IntraBlockState) encodeExistingEmptyRemovals(chainRules *chain.Rules, writes *WriteSet, realSelfDestruct map[accounts.Address]struct{}) {
 	if chainRules == nil || ibs.versionMap == nil {
 		return
 	}
 	for addr := range writes.addrs() {
 		if !EIP161EmptyRemoval(chainRules.IsEIP161Enabled(), chainRules.IsAura, addr) {
+			continue
+		}
+		if empty, known := createdSelfDestructEmpty(writes, realSelfDestruct, addr); known {
+			if empty {
+				writes.SetContractRemoval(addr, ibs.Version())
+			}
 			continue
 		}
 		view := NewVersionedAccountView(addr, ibs.txIndex, ibs.versionMap, ibs.stateReader)
