@@ -459,32 +459,36 @@ func TestBuildAndCacheHeadCaptureHappyPath(t *testing.T) {
 
 func TestRunWitnessCacheBuilderParentReadsByVariant(t *testing.T) {
 	for _, tc := range []struct {
-		name string
-		v3   bool
+		name        string
+		v3          bool
+		headCapture bool
 	}{
-		{name: "legacy"},
-		{name: "v3", v3: true},
+		{name: "legacy", headCapture: true},
+		{name: "v3", v3: true, headCapture: true},
+		{name: "v3 durable", v3: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Cleanup(statecfg.SetCommitmentV3(tc.v3))
 			commitmentdb.WantParentReads(false)
-			cache := newWitnessResultCache(1, 0, true, true)
+			cache := newWitnessResultCache(1, 0, tc.headCapture, tc.headCapture)
 			header, hash := encodeSyntheticHeader(t, 1)
 			cache.Add(hash, &ExecutionWitnessResult{})
 			dbg := &DebugAPIImpl{witnessCache: cache}
 			headerCh := make(chan [][]byte, 1)
 			headerCh <- [][]byte{header}
 			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
 			done := make(chan struct{})
 			go func() {
 				RunWitnessCacheBuilder(ctx, dbg, headerCh)
 				close(done)
 			}()
 			require.Eventually(t, func() bool { return len(headerCh) == 0 }, time.Second, time.Millisecond)
-			require.Equal(t, tc.v3, commitmentdb.ParentReadsWanted())
+			require.Equal(t, tc.v3 && tc.headCapture, commitmentdb.ParentReadsWanted())
 			cancel()
 			select {
 			case <-done:
+				require.False(t, commitmentdb.ParentReadsWanted())
 			case <-time.After(time.Second):
 				t.Fatal("builder did not stop")
 			}
@@ -1023,4 +1027,50 @@ func TestHeadCaptureWarmPanicIsContained(t *testing.T) {
 	_, ok := api.witnessCache.Get(hash)
 	require.False(t, ok)
 	require.Equal(t, failed+1, witnessCacheBuildFailOtherCounter.GetValueUint64(), "the failed build is counted once")
+}
+
+func TestHeadCaptureWarmedRecordsMatchPinnedState(t *testing.T) {
+	m, testChain := newV3HistoryTestExecModule(t)
+	require.NoError(t, m.InsertChain(testChain.Slice(0, 2)))
+	pin, err := openRollingPin(t.Context(), m.DB)
+	require.NoError(t, err)
+	t.Cleanup(pin.close)
+	accessed := &accessedState{Addresses: map[common.Address]struct{}{}, Storage: map[common.Address]map[common.Hash]struct{}{}}
+	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain} {
+		it, err := pin.tx.Debug().RangeLatest(domain, nil, nil, kv.Unlim)
+		require.NoError(t, err)
+		for it.HasNext() {
+			key, _, err := it.Next()
+			require.NoError(t, err)
+			addr := common.BytesToAddress(key[:20])
+			accessed.Addresses[addr] = struct{}{}
+			if domain == kv.StorageDomain {
+				if accessed.Storage[addr] == nil {
+					accessed.Storage[addr] = map[common.Hash]struct{}{}
+				}
+				accessed.Storage[addr][common.BytesToHash(key[20:])] = struct{}{}
+			}
+		}
+		it.Close()
+	}
+	hc := &headCaptureSource{pinnedParentTx: pin.tx, warmTxs: pin.warm}
+	hc.warmPaths(t.Context(), accessed)
+	reader := hc.recordReader()
+	count, live := 0, 0
+	hc.warm.Range(func(key, _ any) bool {
+		k := []byte(key.(string))
+		want, step, err := pin.tx.GetLatest(kv.CommitmentDomain, k, kv.GetLatestOptions{})
+		require.NoError(t, err)
+		got, gotStep, ok := reader.Get(k)
+		require.True(t, ok, "warmed key %x", k)
+		require.Equal(t, want, got, "warmed key %x", k)
+		require.Equal(t, step, gotStep)
+		count++
+		if len(want) != 0 {
+			live++
+		}
+		return true
+	})
+	require.Positive(t, count)
+	require.Positive(t, live)
 }
