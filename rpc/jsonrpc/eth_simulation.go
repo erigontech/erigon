@@ -619,14 +619,33 @@ type simOverrideReader struct {
 var _ state.StateReader = (*simOverrideReader)(nil)
 
 func commitSimOverrides(stateOverrides *ethapi.StateOverrides, base state.StateReader, precompiles vm.PrecompiledContracts, rules *chain.Rules, stateWriter state.StateWriter) (*simOverrideReader, error) {
-	overrides := state.New(base)
-	if err := stateOverrides.Override(overrides, precompiles, rules); err != nil {
-		overrides.Close()
-		return nil, err
-	}
 	overridden := make(map[accounts.Address]struct{}, len(*stateOverrides))
 	for addr := range *stateOverrides {
 		overridden[addr] = struct{}{}
+	}
+	overrides := state.New(base)
+	transactions.VersionedBlockState(overrides)
+	if err := applySimOverrides(overrides, stateOverrides, precompiles, rules, stateWriter); err != nil {
+		overrides.Close()
+		return nil, err
+	}
+	return &simOverrideReader{StateReader: base, overrides: overrides, overridden: overridden}, nil
+}
+
+func applySimOverrides(overrides *state.IntraBlockState, stateOverrides *ethapi.StateOverrides, precompiles vm.PrecompiledContracts, rules *chain.Rules, stateWriter state.StateWriter) error {
+	if overrides.IsVersioned() {
+		// The version map hides the replaced storage from this block only; the writer must drop the stored slots.
+		for addr, account := range *stateOverrides {
+			if account.State != nil {
+				if err := stateWriter.CreateContract(addr); err != nil {
+					return err
+				}
+			}
+		}
+		return stateOverrides.OverrideTo(overrides, precompiles, rules, stateWriter)
+	}
+	if err := stateOverrides.Override(overrides, precompiles, rules); err != nil {
+		return err
 	}
 	dirty := overrides.ExtractAndClearDirty()
 	for addr, account := range *stateOverrides {
@@ -636,10 +655,9 @@ func commitSimOverrides(stateOverrides *ethapi.StateOverrides, base state.StateR
 		}
 	}
 	if err := overrides.CommitOverrideDirtyAccounts(rules, stateWriter, dirty); err != nil {
-		overrides.Close()
-		return nil, fmt.Errorf("committing override accounts: %w", err)
+		return fmt.Errorf("committing override accounts: %w", err)
 	}
-	return &simOverrideReader{StateReader: base, overrides: overrides, overridden: overridden}, nil
+	return nil
 }
 
 func (r *simOverrideReader) Close() { r.overrides.Close() }

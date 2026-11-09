@@ -170,7 +170,7 @@ func (b *Builder) Build(ctx context.Context, param *Parameters, interrupt *atomi
 	execCfg.requireAllTransactions = param.RequireAllTransactions
 	finishCfg := StageBuilderFinishCfg(b.chainConfig, b.engine, state, b.sealCancel, b.blockReader, b.latestBlockBuiltStore)
 
-	if err := createBlock(sd, compositeTx, executionAt, createCfg, b.logger); err != nil {
+	if err := createBlock(compositeTx, executionAt, createCfg, b.logger); err != nil {
 		return nil, err
 	}
 	if err := execBlock(ctx, sd, compositeTx, executionAt, execCfg, b.executeBlockCfg, b.logger); err != nil {

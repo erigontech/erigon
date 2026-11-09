@@ -287,7 +287,7 @@ jobs:
           if [ "$CLIENT" == "erigon" ]; then
             commit=$(git -C "$RUNNER_WS/erigon" rev-parse --short HEAD)
           else
-            commit=$(git -C $GETH_INSTALL_DIR rev-parse --short HEAD)
+            commit=$(git -c safe.directory="$GETH_INSTALL_DIR" -C "$GETH_INSTALL_DIR" rev-parse --short HEAD || echo no-version)
           fi
           
           # Prepare historical test results directory
