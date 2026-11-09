@@ -157,3 +157,19 @@ func TestGossipSubscriptionFilter(t *testing.T) {
 	_, err := filter.FilterIncomingSubscriptions(peer.ID("p"), subs)
 	require.ErrorIs(t, err, pubsub.ErrTooManySubscriptions)
 }
+
+func TestPubsubOptionsRefuseNonGossipTopics(t *testing.T) {
+	t.Parallel()
+	mn := mocknet.New()
+	t.Cleanup(func() { require.NoError(t, mn.Close()) })
+	host, err := mn.GenPeer()
+	require.NoError(t, err)
+	networkConfig, beaconConfig, _, err := clparams.GetConfigsByNetworkName("mainnet")
+	require.NoError(t, err)
+	manager := &p2pManager{cfg: &P2PConfig{NetworkConfig: networkConfig, BeaconConfig: beaconConfig}}
+	ps, err := pubsub.NewGossipSub(t.Context(), host, manager.pubsubOptions(beaconConfig)...)
+	require.NoError(t, err)
+
+	_, err = ps.Join("/junk/topic")
+	require.ErrorContains(t, err, "subscription filter")
+}
