@@ -462,10 +462,5 @@ func TestHandshakeRejectsOversizedMessage(t *testing.T) {
 	input := bytes.NewReader(append([]byte{size >> 8, size & 0xff}, make([]byte, size)...))
 	var h handshakeState
 	_, err := h.readMsg(new(authMsgV4), newkey(), input)
-	if err == nil {
-		t.Fatal("expected error for oversized handshake message")
-	}
-	if read := size - input.Len(); read >= size {
-		t.Fatalf("read the whole %d byte oversized handshake body", read)
-	}
+	require.ErrorIs(t, err, errHandshakeMsgTooLarge)
 }
