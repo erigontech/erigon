@@ -14,6 +14,7 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/rpc"
 )
 
 // Version is the MCP server version reported to clients.
@@ -86,8 +87,6 @@ func (e *ErigonMCPServer) ServeContext(ctx context.Context) error {
 	return server.NewStdioServer(e.mcpServer).Listen(ctx, os.Stdin, os.Stdout)
 }
 
-const maxMCPRequestBody = 5 * 1024 * 1024
-
 // guardHTTP refuses browser pages from other origins, so a web page cannot call the tools or read the SSE stream.
 // Origin is checked instead of Host because a DNS-rebinding page has a matching Host, and non-browser clients send no Origin.
 func guardHTTP(next http.Handler) http.Handler {
@@ -97,7 +96,7 @@ func guardHTTP(next http.Handler) http.Handler {
 			return
 		}
 		next.ServeHTTP(w, r)
-	}), maxMCPRequestBody)
+	}), rpc.MaxRequestContentLength)
 }
 
 func isLoopbackOrigin(origin string) bool {

@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/rpc"
 )
 
 // ListenAndServe must expose both MCP HTTP transports on one port: streamable
@@ -153,7 +155,7 @@ func TestGuardHTTPLimitsTheBody(t *testing.T) {
 	h := guardHTTP(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		_, readErr = io.Copy(io.Discard, r.Body)
 	}))
-	r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/message", strings.NewReader(strings.Repeat("x", maxMCPRequestBody+1)))
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/message", strings.NewReader(strings.Repeat("x", rpc.MaxRequestContentLength+1)))
 	h.ServeHTTP(httptest.NewRecorder(), r)
 	var tooLarge *http.MaxBytesError
 	require.ErrorAs(t, readErr, &tooLarge)
