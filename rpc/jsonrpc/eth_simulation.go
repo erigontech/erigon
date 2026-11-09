@@ -306,8 +306,9 @@ type simulator struct {
 	validation        bool
 	fullTransactions  bool
 	// Without commitment history, each block's root is replayed from the base block, so it needs the keys of all earlier simulated blocks.
-	touchedKeys  keysByAccount
-	sweptStorage map[accounts.Address]struct{}
+	touchedKeys   keysByAccount
+	sweptStorage  map[accounts.Address]struct{}
+	replacedSlots int
 }
 
 func newSimulator(
@@ -618,26 +619,59 @@ type simOverrideReader struct {
 
 var _ state.StateReader = (*simOverrideReader)(nil)
 
-// maxSimReplacedSlots bounds a "state" override: replacing an account's storage loads all its stored slots into memory.
+// maxSimReplacedSlots bounds the "state" overrides of one request: replacing an account's storage loads all its stored slots into memory.
 const maxSimReplacedSlots = 100_000
 
-func checkSimStorageReplacements(ctx context.Context, stateOverrides *ethapi.StateOverrides, sd *execctx.SharedDomains, tx kv.TemporalTx, limit int) error {
+func (s *simulator) checkStorageReplacements(ctx context.Context, stateOverrides *ethapi.StateOverrides, sd *execctx.SharedDomains, tx kv.TemporalTx, latest bool, firstMinTxNum uint64, limit int) error {
 	for addr, account := range *stateOverrides {
 		if account.State == nil {
 			continue
 		}
 		addrValue := addr.Value()
-		slots := 0
+		budget := limit - s.replacedSlots
+		headSlots := 0
 		if err := sd.IteratePrefix(kv.StorageDomain, addrValue[:], tx, func(_, _ []byte) (bool, error) {
-			if slots++; slots > limit {
-				return false, fmt.Errorf("state override replaces more than %d storage slots of %x", limit, addrValue)
-			}
-			return true, ctx.Err()
+			headSlots++
+			return headSlots <= budget, ctx.Err()
 		}); err != nil {
 			return err
 		}
+		baseSlots := 0
+		if !latest {
+			var err error
+			if baseSlots, err = countStorageSlotsAsOf(ctx, tx, addrValue[:], firstMinTxNum, budget+1); err != nil {
+				return err
+			}
+		}
+		if max(headSlots, baseSlots) > budget {
+			return fmt.Errorf("state overrides replace more than %d storage slots", limit)
+		}
+		s.replacedSlots += max(headSlots, baseSlots)
 	}
 	return nil
+}
+
+func countStorageSlotsAsOf(ctx context.Context, tx kv.TemporalTx, prefix []byte, txNum uint64, stopAt int) (int, error) {
+	to, _ := kv.NextSubtree(prefix)
+	it, err := tx.RangeAsOf(kv.StorageDomain, prefix, to, txNum, order.Asc, kv.Unlim)
+	if err != nil {
+		return 0, err
+	}
+	defer it.Close()
+	slots := 0
+	for slots < stopAt && it.HasNext() {
+		_, enc, err := it.Next()
+		if err != nil {
+			return slots, err
+		}
+		if len(enc) > 0 {
+			slots++
+		}
+		if err := ctx.Err(); err != nil {
+			return slots, err
+		}
+	}
+	return slots, nil
 }
 
 func commitSimOverrides(stateOverrides *ethapi.StateOverrides, base state.StateReader, precompiles vm.PrecompiledContracts, rules *chain.Rules, stateWriter state.StateWriter) (*simOverrideReader, error) {
@@ -798,7 +832,7 @@ func (s *simulator) simulateBlock(
 
 	// Override the state before block execution.
 	if bsc.StateOverrides != nil {
-		if err := checkSimStorageReplacements(ctx, bsc.StateOverrides, sharedDomains, tx, maxSimReplacedSlots); err != nil {
+		if err := s.checkStorageReplacements(ctx, bsc.StateOverrides, sharedDomains, tx, latest, firstMinTxNum, maxSimReplacedSlots); err != nil {
 			return nil, nil, err
 		}
 		overrideReader, err := commitSimOverrides(bsc.StateOverrides, stateReader, activePrecompiles, rules, stateWriter)

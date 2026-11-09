@@ -39,25 +39,53 @@ import (
 	"github.com/erigontech/erigon/rpc/ethapi"
 )
 
-func TestCheckSimStorageReplacementsBoundsTheStoredSlots(t *testing.T) {
+func simStorageKey(addr common.Address, slot byte) []byte {
+	key := make([]byte, 52)
+	copy(key, addr[:])
+	key[51] = slot
+	return key
+}
+
+func TestCheckStorageReplacementsBoundsTheRequest(t *testing.T) {
 	t.Parallel()
 	_, rwTx := temporaltest.NewTestTx(t)
 	sd, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New())
 	require.NoError(t, err)
 	t.Cleanup(sd.Close)
-	addr := common.HexToAddress("0x00000000000000000000000000000000000000aa")
+	addrA, addrB := common.HexToAddress("0xaa"), common.HexToAddress("0xbb")
+	putDel := sd.AsPutDel(rwTx)
+	for slot := byte(1); slot <= 2; slot++ {
+		require.NoError(t, putDel.DomainPut(kv.StorageDomain, simStorageKey(addrA, slot), []byte{slot}, 1, nil))
+		require.NoError(t, putDel.DomainPut(kv.StorageDomain, simStorageKey(addrB, slot), []byte{slot}, 1, nil))
+	}
+	empty := map[common.Hash]common.Hash{}
+	overrides := ethapi.StateOverrides{accounts.InternAddress(addrA): {State: &empty}, accounts.InternAddress(addrB): {State: &empty}}
+	check := func(limit int) error {
+		return (&simulator{}).checkStorageReplacements(t.Context(), &overrides, sd, rwTx, true, 0, limit)
+	}
+
+	require.NoError(t, check(4))
+	require.ErrorContains(t, check(3), "more than 3 storage slots")
+}
+
+func TestCheckStorageReplacementsCountsSlotsAtTheBaseBlock(t *testing.T) {
+	t.Parallel()
+	_, rwTx := temporaltest.NewTestTx(t)
+	sd, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New())
+	require.NoError(t, err)
+	t.Cleanup(sd.Close)
+	addr := common.HexToAddress("0xaa")
 	putDel := sd.AsPutDel(rwTx)
 	for slot := byte(1); slot <= 3; slot++ {
-		key := make([]byte, 52)
-		copy(key, addr[:])
-		key[51] = slot
-		require.NoError(t, putDel.DomainPut(kv.StorageDomain, key, []byte{slot}, 1, nil))
+		require.NoError(t, putDel.DomainPut(kv.StorageDomain, simStorageKey(addr, slot), []byte{slot}, 1, nil))
+		require.NoError(t, putDel.DomainDel(kv.StorageDomain, simStorageKey(addr, slot), 2, []byte{slot}))
 	}
+	require.NoError(t, sd.Flush(t.Context(), rwTx))
 	empty := map[common.Hash]common.Hash{}
 	overrides := ethapi.StateOverrides{accounts.InternAddress(addr): {State: &empty}}
 
-	require.NoError(t, checkSimStorageReplacements(t.Context(), &overrides, sd, rwTx, 3))
-	require.ErrorContains(t, checkSimStorageReplacements(t.Context(), &overrides, sd, rwTx, 2), "more than 2 storage slots")
+	require.NoError(t, (&simulator{}).checkStorageReplacements(t.Context(), &overrides, sd, rwTx, true, 2, 2), "the head has no slots")
+	require.ErrorContains(t, (&simulator{}).checkStorageReplacements(t.Context(), &overrides, sd, rwTx, false, 2, 2), "more than 2 storage slots")
 }
 
 func TestSimulationSkipsDisabledCommitmentHistory(t *testing.T) {
