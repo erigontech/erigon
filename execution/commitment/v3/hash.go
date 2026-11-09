@@ -51,16 +51,15 @@ func appendLeafRLP(dst, suffix, payload []byte) []byte {
 }
 
 func leafRef(suffix []byte, payload []byte, dst []byte) []byte {
-	start := len(dst)
-	return hashLongRef(appendLeafRLP(dst, suffix, payload), start)
+	return hashLongRef(appendLeafRLP(dst, suffix, payload))
 }
 
-func hashLongRef(dst []byte, start int) []byte {
-	if len(dst)-start < 32 {
+func hashLongRef(dst []byte) []byte {
+	if len(dst) < 32 {
 		return dst
 	}
-	hash := keccak.Sum256(dst[start:])
-	return append(dst[:start], hash[:]...)
+	hash := keccak.Sum256(dst)
+	return append(dst[:0], hash[:]...)
 }
 
 func appendStorageLeafRLP(dst, suffix, payload []byte) []byte {
@@ -86,7 +85,7 @@ func appendStorageLeafRLP(dst, suffix, payload []byte) []byte {
 }
 
 func storageLeafRef(suffix []byte, payload []byte, dst []byte) []byte {
-	return hashLongRef(appendStorageLeafRLP(dst, suffix, payload), 0)
+	return hashLongRef(appendStorageLeafRLP(dst, suffix, payload))
 }
 
 func appendExtensionRLP(dst, ext, childHash []byte) []byte {

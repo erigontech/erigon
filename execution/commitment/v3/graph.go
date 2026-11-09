@@ -55,12 +55,6 @@ func (g graph) loadRoot(ctx commitment.PatriciaContext) (*node, error) {
 		return root, nil
 	}
 	nib := bits.TrailingZeros16(root.childMask)
-	if root.child(nib) != nil {
-		return root, nil
-	}
-	if !root.hasChildHash(nib) {
-		return root, errNodeRecord
-	}
 	child, err := g.unfoldChild(ctx, root.path)
 	if err != nil {
 		return root, err
