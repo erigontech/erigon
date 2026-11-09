@@ -3308,10 +3308,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		}
 	}
 
-	tracePrefix := fmt.Sprintf("%d (%d.%d)", be.blockNum, txVersion.TxIndex, txVersion.Incarnation)
-
-	var trace bool
-	if trace = dbg.TraceTransactionIO && dbg.TraceTx(be.blockNum, txVersion.TxIndex); trace {
+	if dbg.TraceTransactionIO && dbg.TraceTx(be.blockNum, txVersion.TxIndex) {
+		tracePrefix := fmt.Sprintf("%d (%d.%d)", be.blockNum, txVersion.TxIndex, txVersion.Incarnation)
 		fmt.Println(tracePrefix, "RD", be.blockIO.ReadSet(txVersion.TxIndex).Len(), "WRT", be.blockIO.WriteSet(txVersion.TxIndex).Count())
 		be.blockIO.ReadSet(txVersion.TxIndex).TraceReads(tracePrefix)
 		for h := range be.blockIO.WriteSet(txVersion.TxIndex).AllHeaders() {
@@ -3355,8 +3353,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			applyResult := txResult{
 				blockNum:              be.blockNum,
 				blockHash:             be.blockHash,
-				traceFroms:            map[accounts.Address]struct{}{},
-				traceTos:              map[accounts.Address]struct{}{},
+				traceFroms:            maps.Clone(result.TraceFroms),
+				traceTos:              maps.Clone(result.TraceTos),
 				txNum:                 task.Version().TxNum,
 				rules:                 task.Rules(),
 				cumulativeBlobGasUsed: result.cumulativeBlobGasUsed,
@@ -3378,8 +3376,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				pe.executedGas.Add(int64(applyResult.blockGasUsed))
 			}
 
-			maps.Copy(applyResult.traceFroms, result.TraceFroms)
-			maps.Copy(applyResult.traceTos, result.TraceTos)
 			be.publishTasks.markComplete(tx)
 			// Published: the re-check no longer considers tx, so its parked worker can
 			// never be re-signalled — release it. Closing earlier (at finalize) would
