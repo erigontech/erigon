@@ -38,6 +38,8 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
+	"github.com/erigontech/erigon/node/ethconfig"
+	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
 )
 
 func beginTestRoTx(t *testing.T) kv.Tx {
@@ -705,4 +707,74 @@ func TestReceiptsSegmentRetentionCutoff_FollowsHistoryWindow(t *testing.T) {
 	require.Equal(t, uint64(head-config3.MinimalPruneDistance),
 		receiptsSegmentRetentionCutoff(prune.MinimalMode, nil, head, "idx/v1.0-logaddrs.100-200.ef"))
 	require.Zero(t, receiptsSegmentRetentionCutoff(prune.ArchiveMode, nil, head, "idx/v1.0-logaddrs.100-200.ef"))
+}
+
+type requestListBlockReader struct{ fakeBlockReader }
+
+func (*requestListBlockReader) FreezingCfg() ethconfig.BlocksFreezing {
+	return ethconfig.BlocksFreezing{}
+}
+
+func (*requestListBlockReader) TxnumReader() rawdbv3.TxNumsReader { return rawdbv3.TxNumsReader{} }
+
+type requestListDownloader struct {
+	dbservices.DownloaderClient
+	names []string
+}
+
+func (d *requestListDownloader) Download(_ context.Context, req *downloaderproto.DownloadRequest) error {
+	for _, item := range req.Items {
+		d.names = append(d.names, item.Path)
+	}
+	return nil
+}
+
+func TestSyncSnapshotsCommitmentRequestList(t *testing.T) {
+	files := []struct {
+		name       string
+		v3, legacy bool
+	}{
+		{"domain/v2.2-commitment.0-16.kv", false, true},
+		{"domain/v2.0-commitment.0-16.bt", false, true},
+		{"domain/v2.0-accounts.0-16.kv", false, true},
+		{"domain/v2.0-accounts.0-16.bt", false, true},
+		{"domain/v2.0-storage.0-16.kv", false, true},
+		{"domain/v2.0-code.0-16.kv", true, true},
+		{"domain/v2.2-commitment.16-32.kv", false, true},
+		{"domain/v3.0-commitment.16-32.kv", true, false},
+		{"domain/v2.0-commitment.16-32.bt", true, true},
+		{"domain/v2.0-accounts.16-32.kv", true, true},
+		{"domain/v3.0-commitment.32-48.kv", true, false},
+		{"domain/v2.0-commitment.32-48.bt", true, false},
+		{"history/v2.0-commitment.0-16.v", false, true},
+		{"idx/v2.0-commitment.0-16.ef", false, true},
+		{"history/v3.0-commitment.32-48.v", true, false},
+		{"idx/v2.0-commitment.32-48.ef", true, false},
+		{"history/v2.0-accounts.0-16.v", true, true},
+		{"accessor/v2.0-accounts.0-16.vi", true, true},
+	}
+	cfg, ok := snapcfg.KnownCfg(networkname.Mainnet)
+	require.True(t, ok)
+	previous := *cfg
+	t.Cleanup(func() { *cfg = previous })
+	cfg.Local = false
+	cfg.Preverified.Items = nil
+	for _, file := range files {
+		cfg.Preverified.Items = append(cfg.Preverified.Items, snapcfg.PreverifiedItem{Name: file.name, Hash: strings.Repeat("0", 40)})
+	}
+	for _, v3 := range []bool{false, true} {
+		t.Run(fmt.Sprintf("v3=%v", v3), func(t *testing.T) {
+			t.Cleanup(statecfg.SetCommitmentV3(v3))
+			downloader := &requestListDownloader{}
+			err := SyncSnapshots(t.Context(), "test", "test", false, false, false, prune.ArchiveMode, NoCaplin, nil, &requestListBlockReader{}, &chain.Config{ChainName: networkname.Mainnet}, downloader, ethconfig.Sync{KeepExecutionProofs: true}, 16)
+			require.NoError(t, err)
+			var want []string
+			for _, file := range files {
+				if v3 && file.v3 || !v3 && file.legacy {
+					want = append(want, file.name)
+				}
+			}
+			require.ElementsMatch(t, want, downloader.names)
+		})
+	}
 }
