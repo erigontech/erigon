@@ -417,3 +417,30 @@ func TestPoolSettleWaitsForReadTargetUnlessBAL(t *testing.T) {
 		}
 	}
 }
+
+// A run that recorded a read dependency is void whatever it returned: a cancelled frame tx returns an error, and its
+// re-run must still wait for the named writer, not for the whole lower prefix.
+func TestPoolDependencyVerdictWinsOverTheRunError(t *testing.T) {
+	pe, be := newPoolUnit(t, 4)
+	pt := newPoolUnitTask(be, 3)
+	pt.tv.version.Incarnation = 1
+	res := &exec.TxResult{Err: errors.New("frame execution cancelled"), Dep: 1}
+
+	require.False(t, pt.afterRun(pe.pool, res, false), "the task must wait for its writer")
+	require.Equal(t, []*poolTask{pt}, be.wakeValidated[be.taskIndexOf(1)])
+	require.Empty(t, be.wakeAt, "a dependency verdict is not a predecessor wait")
+}
+
+// A failed task reset reads nothing: its zero Dep is not a dependency, so tx 0 sends its error instead of waiting
+// for its own validation.
+func TestPoolResetFailureIsNoDependency(t *testing.T) {
+	pe, be := newPoolUnit(t, 4)
+	pt := newPoolUnitTask(be, 0)
+	pt.tv.version.Incarnation = 1
+	res := &exec.TxResult{Err: errors.New("reset failed")}
+
+	require.False(t, pt.afterRun(pe.pool, res, true))
+	require.Len(t, pe.results, 1, "the final run's error is the tx's verdict")
+	require.Empty(t, be.wakeValidated)
+	require.Empty(t, be.wakeAt)
+}
