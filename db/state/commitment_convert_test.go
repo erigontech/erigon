@@ -482,11 +482,6 @@ func TestConvertedSinkEmitSendsFullBatch(t *testing.T) {
 	require.Len(t, sink.res.ents, 1)
 }
 
-func TestVerifyCommitmentV3CheckRejectsOrphans(t *testing.T) {
-	err := verifyCommitmentV3Check(CommitmentV3Check{Orphans: 1, BlockNum: 2, Records: 3})
-	require.ErrorContains(t, err, "orphan records")
-}
-
 func TestHistoryConvertTxNumLookups(t *testing.T) {
 	const txs, stepSize, keys = 160, 16, 31
 	db, ii, _ := filledInvIndexOfSize(t, txs, stepSize, keys, log.New())

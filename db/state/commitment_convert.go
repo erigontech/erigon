@@ -927,12 +927,7 @@ func commitmentFileVersion(name string) (uint64, bool) {
 	return info.Version.Major, true
 }
 
-func isCommitmentData(name string) bool {
-	_, ok := commitmentFileVersion(name)
-	return ok
-}
-
-func forEachCommitmentDataFile(dirPath string, fn func(string) error) error {
+func forEachCommitmentDataFile(dirPath string, fn func(name string, major uint64) error) error {
 	entries, err := os.ReadDir(dirPath)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
@@ -941,8 +936,9 @@ func forEachCommitmentDataFile(dirPath string, fn func(string) error) error {
 		return err
 	}
 	for _, entry := range entries {
-		if !entry.IsDir() && isCommitmentData(entry.Name()) {
-			if err := fn(entry.Name()); err != nil {
+		major, ok := commitmentFileVersion(entry.Name())
+		if !entry.IsDir() && ok {
+			if err := fn(entry.Name(), major); err != nil {
 				return err
 			}
 		}
@@ -953,8 +949,7 @@ func forEachCommitmentDataFile(dirPath string, fn func(string) error) error {
 func legacyCommitmentFilesNotConverted(dirs datadir.Dirs, converted map[string]struct{}) ([]string, error) {
 	var unindexed []string
 	for _, dirPath := range []string{dirs.SnapDomain, dirs.SnapHistory} {
-		err := forEachCommitmentDataFile(dirPath, func(name string) error {
-			major, _ := commitmentFileVersion(name)
+		err := forEachCommitmentDataFile(dirPath, func(name string, major uint64) error {
 			if _, ok := converted[name]; major < 3 && !ok {
 				unindexed = append(unindexed, filepath.Join(dirPath, name))
 			}
@@ -1004,8 +999,7 @@ func preflightRestoreV3Orphans(pairs [][2]string) (bool, error) {
 		if err != nil {
 			return false, err
 		}
-		err = forEachCommitmentDataFile(pair[1], func(name string) error {
-			major, _ := commitmentFileVersion(name)
+		err = forEachCommitmentDataFile(pair[1], func(name string, major uint64) error {
 			if major < 3 {
 				return nil
 			}

@@ -219,8 +219,7 @@ func (w *workersCfg) unlockEditing() {
 func CheckSnapshotsCompatibility(d datadir.Dirs) error {
 	for _, dirPath := range d.VersionedDirs() {
 		if dirPath == d.SnapDomain || dirPath == d.SnapHistory {
-			err := forEachCommitmentDataFile(dirPath, func(name string) error {
-				major, _ := commitmentFileVersion(name)
+			err := forEachCommitmentDataFile(dirPath, func(name string, major uint64) error {
 				if statecfg.Schema.CommitmentDomain.CommitmentV3Records && major < 3 {
 					return fmt.Errorf("commitment file %s is legacy (v%d) but commitment v3 is enabled; "+
 						"convert the datadir with `integration commitment convert --v3`", name, major)

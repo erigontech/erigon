@@ -136,6 +136,49 @@ func newV3Collectors(name, tmpDir string, workers int, logger log.Logger) ([]*et
 	}
 }
 
+func mergeLoadGroups(ctx context.Context, name string, collectors []*etl.Collector, flush func(key []byte, group []v3.LegacyEntry) error) error {
+	var groupKey, groupVals []byte
+	var group []v3.LegacyEntry
+	flushGroup := func() error {
+		if len(group) == 0 {
+			return nil
+		}
+		return flush(groupKey, group)
+	}
+	err := etl.MergeLoad(name, collectors, func(k, v []byte) error {
+		if len(group) == 0 || !bytes.Equal(k, groupKey) {
+			if err := flushGroup(); err != nil {
+				return err
+			}
+			groupKey, groupVals, group = append(groupKey[:0], k...), groupVals[:0], group[:0]
+		}
+		start := len(groupVals)
+		groupVals = append(groupVals, v[1:]...)
+		group = append(group, v3.LegacyEntry{Kind: v3.LegacyKind(v[0]), Value: groupVals[start:]})
+		return nil
+	}, etl.TransformArgs{Quit: ctx.Done()})
+	if err != nil {
+		return err
+	}
+	return flushGroup()
+}
+
+func goWorkers(g *errgroup.Group, n int, work func() error, done func()) {
+	var wg sync.WaitGroup
+	for range n {
+		wg.Add(1)
+		g.Go(func() error {
+			defer wg.Done()
+			return work()
+		})
+	}
+	g.Go(func() error {
+		wg.Wait()
+		done()
+		return nil
+	})
+}
+
 func collectConverted(g *errgroup.Group, out <-chan *convertedBatch, collectors []*etl.Collector) {
 	for _, coll := range collectors {
 		g.Go(func() error {
@@ -249,44 +292,34 @@ func convertCommitmentFileV3(
 		return send()
 	})
 
-	var converting sync.WaitGroup
-	for range workers {
-		converting.Add(1)
-		g.Go(func() error {
-			defer converting.Done()
-			wat := at.a.BeginFilesRo()
-			defer wat.Close()
-			vals := &legacyFileValues{accounts: wat.d[kv.AccountsDomain], storage: wat.d[kv.StorageDomain], maxStep: stepTo - 1}
-			conv := v3.NewLegacyConverter(vals, st.keysV2, incremental)
-			prevs := wat.d[kv.CommitmentDomain]
-			reach := &legacyReach{keysV2: st.keysV2, read: func(key []byte) ([]byte, error) {
-				v, _, _, _, readErr := prevs.getLatestFromFiles(key, nil, stepTo-1)
-				return v, readErr
-			}}
-			delta := &legacyDelta{commitment: prevs, before: stepFrom - 1, after: stepTo - 1, keysV2: st.keysV2}
-			delta.reachBefore = &legacyReach{keysV2: st.keysV2, read: func(key []byte) ([]byte, error) { return delta.read(key, delta.before) }}
-			sink := &convertedSink{ctx: gctx, out: out}
-			for batch := range in {
-				sink.res = getConvertedBatch()
-				for _, p := range batch.pairs {
-					if convErr := convertLegacyPairV3(p[0], p[1], incremental, stepFrom, conv, reach, delta, sink.emit); convErr != nil {
-						return convErr
-					}
+	goWorkers(g, workers, func() error {
+		wat := at.a.BeginFilesRo()
+		defer wat.Close()
+		vals := &legacyFileValues{accounts: wat.d[kv.AccountsDomain], storage: wat.d[kv.StorageDomain], maxStep: stepTo - 1}
+		conv := v3.NewLegacyConverter(vals, st.keysV2, incremental)
+		prevs := wat.d[kv.CommitmentDomain]
+		reach := &legacyReach{keysV2: st.keysV2, read: func(key []byte) ([]byte, error) {
+			v, _, _, _, readErr := prevs.getLatestFromFiles(key, nil, stepTo-1)
+			return v, readErr
+		}}
+		delta := &legacyDelta{commitment: prevs, before: stepFrom - 1, after: stepTo - 1, keysV2: st.keysV2}
+		delta.reachBefore = &legacyReach{keysV2: st.keysV2, read: func(key []byte) ([]byte, error) { return delta.read(key, delta.before) }}
+		sink := &convertedSink{ctx: gctx, out: out}
+		for batch := range in {
+			sink.res = getConvertedBatch()
+			for _, p := range batch.pairs {
+				if convErr := convertLegacyPairV3(p[0], p[1], incremental, conv, reach, delta, sink.emit); convErr != nil {
+					return convErr
 				}
-				kvBatchPool.Put(batch)
-				if sendErr := sink.send(); sendErr != nil {
-					return sendErr
-				}
-				convertedBatchPool.Put(sink.res)
 			}
-			return nil
-		})
-	}
-	g.Go(func() error {
-		converting.Wait()
-		close(out)
+			kvBatchPool.Put(batch)
+			if sendErr := sink.send(); sendErr != nil {
+				return sendErr
+			}
+			convertedBatchPool.Put(sink.res)
+		}
 		return nil
-	})
+	}, func() { close(out) })
 	collectConverted(g, out, collectors)
 	if err = g.Wait(); err != nil {
 		return 0, read.Load(), fmt.Errorf("convertCommitmentFileV3 %q: %w", file.Fullpath(), err)
@@ -307,13 +340,8 @@ func convertCommitmentFileV3(
 		}
 	}()
 	writer := seg.NewWriter(valuesComp, srcCompression)
-	var groupKey, groupVals []byte
-	var group []v3.LegacyEntry
 	var written uint64
-	flush := func() error {
-		if len(group) == 0 {
-			return nil
-		}
+	err = mergeLoadGroups(ctx, "commitment_convert_v3", collectors, func(groupKey []byte, group []v3.LegacyEntry) error {
 		value, write, resolveErr := v3.ResolveLegacy(groupKey, group)
 		if resolveErr != nil || !write {
 			return resolveErr
@@ -324,22 +352,7 @@ func convertCommitmentFileV3(
 		}
 		_, writeErr := writer.Write(value)
 		return writeErr
-	}
-	err = etl.MergeLoad("commitment_convert_v3", collectors, func(k, v []byte) error {
-		if len(group) == 0 || !bytes.Equal(k, groupKey) {
-			if flushErr := flush(); flushErr != nil {
-				return flushErr
-			}
-			groupKey, groupVals, group = append(groupKey[:0], k...), groupVals[:0], group[:0]
-		}
-		start := len(groupVals)
-		groupVals = append(groupVals, v[1:]...)
-		group = append(group, v3.LegacyEntry{Kind: v3.LegacyKind(v[0]), Value: groupVals[start:]})
-		return nil
-	}, etl.TransformArgs{Quit: ctx.Done()})
-	if err == nil {
-		err = flush()
-	}
+	})
 	if err != nil {
 		return 0, ki, fmt.Errorf("convertCommitmentFileV3 %q: resolve: %w", file.Fullpath(), err)
 	}
@@ -387,7 +400,7 @@ func readOwned(reader *seg.Reader, batch *kvBatch, compressed bool) []byte {
 	return batch.buf[start:]
 }
 
-func convertLegacyPairV3(k, v []byte, incremental bool, stepFrom kv.Step, conv *v3.LegacyConverter, reach *legacyReach, delta *legacyDelta, emit v3.LegacyEmitFunc) error {
+func convertLegacyPairV3(k, v []byte, incremental bool, conv *v3.LegacyConverter, reach *legacyReach, delta *legacyDelta, emit v3.LegacyEmitFunc) error {
 	if commitment.IsCommitmentStateKey(k) {
 		if !bytes.Equal(k, commitment.KeyCommitmentState) {
 			return fmt.Errorf("unexpected state key %x in a legacy file", k)
@@ -411,7 +424,7 @@ func convertLegacyPairV3(k, v []byte, incremental bool, stepFrom kv.Step, conv *
 		}
 		return conv.Convert(k, v, nil, emit)
 	}
-	prev, err := delta.read(k, stepFrom-1)
+	prev, err := delta.read(k, delta.before)
 	if err != nil {
 		return err
 	}
@@ -552,7 +565,7 @@ type legacyReachNode struct {
 }
 
 func (r *legacyReach) reachable(legacyKey, value []byte) (bool, error) {
-	if len(value) < 4 || binary.BigEndian.Uint16(value[2:4]) == 0 {
+	if commitment.BranchData(value).ChildCount() == 0 {
 		return true, nil
 	}
 	path, err := decodeLegacyPrefix(legacyKey, r.keysV2)
@@ -576,7 +589,7 @@ func (r *legacyReach) reachable(legacyKey, value []byte) (bool, error) {
 		}
 		r.chain = append(r.chain, legacyReachNode{0, bytes.Clone(root)})
 		r.rootExt = nil
-		if len(root) < 4 || binary.BigEndian.Uint16(root[2:4]) == 0 {
+		if commitment.BranchData(root).ChildCount() == 0 {
 			state, err := r.read(commitment.KeyCommitmentState)
 			if err != nil || len(state) == 0 {
 				return false, err
@@ -607,7 +620,7 @@ func (r *legacyReach) reachable(legacyKey, value []byte) (bool, error) {
 			return true, nil
 		}
 		child, err := r.read(encodeLegacyPrefix(path[:next], r.keysV2))
-		if err != nil || len(child) < 4 || binary.BigEndian.Uint16(child[2:4]) == 0 {
+		if err != nil || commitment.BranchData(child).ChildCount() == 0 {
 			return false, err
 		}
 		r.chain = append(r.chain, legacyReachNode{next, bytes.Clone(child)})
@@ -696,13 +709,6 @@ func verifyCommitmentV3Files(ctx context.Context, a *Aggregator, logger log.Logg
 	}
 	logger.Info("[commitment_convert] v3 records verified", "root", fmt.Sprintf("%x", c.Root), "block", c.BlockNum, "txNum", c.TxNum,
 		"records", common.PrettyCounter(c.Records), "orphans", common.PrettyCounter(c.Orphans), "took", time.Since(started).Round(time.Millisecond))
-	return verifyCommitmentV3Check(c)
-}
-
-func verifyCommitmentV3Check(c CommitmentV3Check) error {
-	if c.Orphans != 0 {
-		return fmt.Errorf("%d orphan records (block %d, %d records)", c.Orphans, c.BlockNum, c.Records)
-	}
 	return nil
 }
 
@@ -741,6 +747,9 @@ func FoldCommitmentV3(ctx context.Context, a *Aggregator, asOfTxNum uint64) (Com
 	}
 	if !bytes.Equal(c.Root, stateRoot) {
 		return CommitmentV3Check{}, fmt.Errorf("records fold to root %x, state at block %d records %x", c.Root, c.BlockNum, stateRoot)
+	}
+	if c.Orphans != 0 {
+		return CommitmentV3Check{}, fmt.Errorf("%d orphan records (block %d, %d records)", c.Orphans, c.BlockNum, c.Records)
 	}
 	return c, nil
 }
@@ -792,41 +801,31 @@ func foldCommitmentV3Records(ctx context.Context, it stream.KV) (CommitmentV3Che
 		}
 		return send()
 	})
-	var hashing sync.WaitGroup
-	for range workers {
-		hashing.Add(1)
-		g.Go(func() error {
-			defer hashing.Done()
-			hasher := v3.NewRecordHasher()
-			for batch := range in {
-				res := hashedBatchPool.Get().(*hashedBatch)
-				res.seq, res.buf, res.records, res.expects = batch.seq, res.buf[:0], res.records[:0], res.expects[:0]
-				for _, p := range batch.pairs {
-					k0 := len(res.buf)
-					res.buf = append(res.buf, p[0]...)
-					r := hashedRecord{k0: k0, k1: len(res.buf), e0: len(res.expects)}
-					hash, hashErr := hasher.Hash(p[0], p[1], res.expect)
-					if hashErr != nil {
-						return hashErr
-					}
-					r.hash, r.e1 = hash, len(res.expects)
-					res.records = append(res.records, r)
+	goWorkers(g, workers, func() error {
+		hasher := v3.NewRecordHasher()
+		for batch := range in {
+			res := hashedBatchPool.Get().(*hashedBatch)
+			res.seq, res.buf, res.records, res.expects = batch.seq, res.buf[:0], res.records[:0], res.expects[:0]
+			for _, p := range batch.pairs {
+				k0 := len(res.buf)
+				res.buf = append(res.buf, p[0]...)
+				r := hashedRecord{k0: k0, k1: len(res.buf), e0: len(res.expects)}
+				hash, hashErr := hasher.Hash(p[0], p[1], res.expect)
+				if hashErr != nil {
+					return hashErr
 				}
-				kvBatchPool.Put(batch)
-				select {
-				case out <- res:
-				case <-gctx.Done():
-					return gctx.Err()
-				}
+				r.hash, r.e1 = hash, len(res.expects)
+				res.records = append(res.records, r)
 			}
-			return nil
-		})
-	}
-	g.Go(func() error {
-		hashing.Wait()
-		close(out)
+			kvBatchPool.Put(batch)
+			select {
+			case out <- res:
+			case <-gctx.Done():
+				return gctx.Err()
+			}
+		}
 		return nil
-	})
+	}, func() { close(out) })
 	matcher := v3.NewRecordMatcher()
 	g.Go(func() error {
 		waiting := map[uint64]*hashedBatch{}

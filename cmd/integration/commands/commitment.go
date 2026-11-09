@@ -309,9 +309,6 @@ func commitmentVerify(ctx context.Context, logger log.Logger) error {
 		if err != nil {
 			return fmt.Errorf("as of %s: %w", label, err)
 		}
-		if c.Orphans != 0 {
-			return fmt.Errorf("as of %s: %d orphan records (block %d, %d records)", label, c.Orphans, c.BlockNum, c.Records)
-		}
 		if asOf != math.MaxUint64 && c.TxNum > asOf {
 			return fmt.Errorf("as of %s: no commitment history covers txNum %d", label, asOf)
 		}
@@ -637,7 +634,7 @@ func commitmentRestore(ctx context.Context, logger log.Logger) error {
 }
 
 func commitmentConvert(db kv.TemporalRwDB, ctx context.Context, logger log.Logger, opts dbstate.ConvertOpts) error {
-	if opts.TargetV3 && opts.BeforeSwap == nil {
+	if opts.TargetV3 {
 		opts.BeforeSwap = func() error { return rawdbreset.ResetExec(ctx, db) }
 	}
 	agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)

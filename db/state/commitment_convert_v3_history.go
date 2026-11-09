@@ -40,7 +40,6 @@ import (
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/recsplit/multiencseq"
@@ -118,7 +117,7 @@ type accountStorage struct {
 func (h *historyVersion) reset() { h.buf, h.ents, h.accounts = h.buf[:0], h.ents[:0], h.accounts[:0] }
 
 func (h *historyVersion) parseAccounts(legacyValue []byte) error {
-	if len(legacyValue) < 4 || binary.BigEndian.Uint16(legacyValue[2:4]) == 0 {
+	if commitment.BranchData(legacyValue).ChildCount() == 0 {
 		return nil
 	}
 	return commitment.BranchData(legacyValue).ForEachCell(func(_ int, c commitment.BranchCell) error {
@@ -313,7 +312,7 @@ type legacyChild struct {
 }
 
 func appendLegacyChildren(dst []legacyChild, prefix, value []byte) ([]legacyChild, error) {
-	if len(value) < 4 || binary.BigEndian.Uint16(value[2:4]) == 0 {
+	if commitment.BranchData(value).ChildCount() == 0 {
 		return dst, nil
 	}
 	err := commitment.BranchData(value).ForEachCell(func(nib int, c commitment.BranchCell) error {
@@ -392,12 +391,12 @@ func resolveLegacyHistory(key []byte, entries []v3.LegacyEntry) ([]byte, error) 
 	return value, nil
 }
 
-func detectHistoryKeysV2(ii *InvertedIndex, ef *seg.Decompressor, samples int) (bool, error) {
+func detectHistoryKeysV2(ii *InvertedIndex, ef *seg.Decompressor) (bool, error) {
 	keys := ef.Count() / 2
 	if keys == 0 {
 		return false, nil
 	}
-	stride := max(1, keys/samples)
+	stride := max(1, keys/48)
 	r := seg.NewReader(ef.MakeGetter(), ii.Compression)
 	var pairs []sampledPair
 	for i := 0; r.HasNext(); i++ {
@@ -487,7 +486,7 @@ func convertCommitmentHistoryFileV3(ctx context.Context, at *AggregatorRoTx, vFi
 	baseName := filepath.Base(vFile.Fullpath())
 	fileStart := time.Now()
 
-	keysV2, keysErr := detectHistoryKeysV2(ii, efFile.src.decompressor, 48)
+	keysV2, keysErr := detectHistoryKeysV2(ii, efFile.src.decompressor)
 	if keysErr != nil {
 		return r, keysErr
 	}
@@ -593,286 +592,276 @@ func convertCommitmentHistoryFileV3(ctx context.Context, at *AggregatorRoTx, vFi
 		return send()
 	})
 
-	var converting sync.WaitGroup
-	for range workers {
-		converting.Add(1)
-		g.Go(func() error {
-			defer converting.Done()
-			wat := at.a.BeginFilesRo()
-			defer wat.Close()
-			wdt := wat.d[kv.CommitmentDomain]
-			vals := &legacyHistoryValues{accounts: wat.d[kv.AccountsDomain], storage: wat.d[kv.StorageDomain], cache: map[string]historyValue{}, cacheCap: max(1<<14, historyValueCacheTotal/workers)}
-			conv := v3.NewLegacyConverter(vals, keysV2, false)
-			var cur, nextVersion, childCur, childNext, scratch historyVersion
-			var beforeChildren, afterChildren []legacyChild
-			var key, rootKey []byte
-			sink := &convertedSink{ctx: gctx, out: out}
-			emit := func(k []byte, txNum uint64, v []byte, kind v3.LegacyKind) error {
-				key = binary.BigEndian.AppendUint64(appendEscapedKey(key[:0], k), txNum)
-				return sink.emit(key, v, kind)
+	goWorkers(g, workers, func() error {
+		wat := at.a.BeginFilesRo()
+		defer wat.Close()
+		wdt := wat.d[kv.CommitmentDomain]
+		vals := &legacyHistoryValues{accounts: wat.d[kv.AccountsDomain], storage: wat.d[kv.StorageDomain], cache: map[string]historyValue{}, cacheCap: max(1<<14, historyValueCacheTotal/workers)}
+		conv := v3.NewLegacyConverter(vals, keysV2, false)
+		var cur, nextVersion, childCur, childNext, scratch historyVersion
+		var beforeChildren, afterChildren []legacyChild
+		var key, rootKey []byte
+		sink := &convertedSink{ctx: gctx, out: out}
+		emit := func(k []byte, txNum uint64, v []byte, kind v3.LegacyKind) error {
+			key = binary.BigEndian.AppendUint64(appendEscapedKey(key[:0], k), txNum)
+			return sink.emit(key, v, kind)
+		}
+		convert := func(legacyKey, value []byte, asOf uint64, dst *historyVersion) error {
+			dst.reset()
+			vals.asOf = asOf
+			if convErr := conv.Convert(legacyKey, value, nil, dst.add); convErr != nil {
+				return fmt.Errorf("legacy %x as of txNum %d: %w", legacyKey, asOf, convErr)
 			}
-			convert := func(legacyKey, value []byte, asOf uint64, dst *historyVersion) error {
-				dst.reset()
-				vals.asOf = asOf
-				if convErr := conv.Convert(legacyKey, value, nil, dst.add); convErr != nil {
-					return fmt.Errorf("legacy %x as of txNum %d: %w", legacyKey, asOf, convErr)
-				}
-				if parseErr := dst.parseAccounts(value); parseErr != nil {
-					return fmt.Errorf("legacy %x as of txNum %d: accounts: %w", legacyKey, asOf, parseErr)
-				}
-				return nil
+			if parseErr := dst.parseAccounts(value); parseErr != nil {
+				return fmt.Errorf("legacy %x as of txNum %d: accounts: %w", legacyKey, asOf, parseErr)
 			}
-			branchRootAsOf := func(addrHash [32]byte, txNum uint64) ([]byte, error) {
-				path := make([]byte, 64)
-				nibbles.Expand(addrHash[:], path)
-				legacyKey := encodeLegacyPrefix(path, keysV2)
-				value, err := legacyCommitmentAsOf(wdt, legacyKey, txNum)
-				if err != nil {
-					return nil, err
-				}
-				if err := convert(legacyKey, value, leavesAsOf(txNum), &scratch); err != nil {
-					return nil, err
-				}
-				root := scratch.valueOf(rootKey)
-				if len(root) == 0 {
-					return nil, fmt.Errorf("account %x has a storage branch before txNum %d but legacy %x holds none", addrHash, txNum, legacyKey)
-				}
-				return root, nil
+			return nil
+		}
+		branchRootAsOf := func(addrHash [32]byte, txNum uint64) ([]byte, error) {
+			path := make([]byte, 64)
+			nibbles.Expand(addrHash[:], path)
+			legacyKey := encodeLegacyPrefix(path, keysV2)
+			value, err := legacyCommitmentAsOf(wdt, legacyKey, txNum)
+			if err != nil {
+				return nil, err
 			}
-			var reachTxNum uint64
-			reach := &legacyReach{keysV2: keysV2, read: func(key []byte) ([]byte, error) {
-				return legacyCommitmentAsOf(wdt, key, reachTxNum)
-			}}
-			reachableAsOf := func(legacyKey, value []byte, txNum uint64) (bool, error) {
-				reachTxNum, reach.chain = txNum, reach.chain[:0]
-				return reach.reachable(legacyKey, value)
+			if err := convert(legacyKey, value, leavesAsOf(txNum), &scratch); err != nil {
+				return nil, err
 			}
-			emitBoundary := func(txNum uint64, cur, next *historyVersion) error {
-				for _, e := range cur.ents {
-					if e.kind == v3.LegacySynthesized {
-						continue
-					}
-					k, v := cur.key(e), cur.value(e)
-					if e.kind == v3.LegacyDirect && next.hasValue(k, v) {
-						continue
-					}
-					if err := emit(k, txNum, v, e.kind); err != nil {
-						return err
-					}
-				}
-				for _, a := range cur.accounts {
-					rootKey = v3.StorageNodeKey(a.addrHash, nil, rootKey[:0])
-					after, inNext := next.account(a.addrHash)
-					var before []byte
-					switch a.class {
-					case storageSingleton, storageExtension:
-						before = cur.valueOf(rootKey)
-						if inNext && after.class != storageNone && after.class != storageBranch && bytes.Equal(before, next.valueOf(rootKey)) {
-							continue
-						}
-					case storageBranch:
-						if inNext && after.class == storageBranch {
-							continue
-						}
-						var err error
-						if before, err = branchRootAsOf(a.addrHash, txNum); err != nil {
-							return err
-						}
-					default:
-						continue
-					}
-					if err := emit(rootKey, txNum, before, v3.LegacySynthesized); err != nil {
-						return err
-					}
-				}
-				for _, a := range next.accounts {
-					if a.class == storageNone {
-						continue
-					}
-					if b, inCur := cur.account(a.addrHash); inCur && b.class != storageNone {
-						continue
-					}
-					rootKey = v3.StorageNodeKey(a.addrHash, nil, rootKey[:0])
-					if err := emit(rootKey, txNum, nil, v3.LegacySynthesized); err != nil {
-						return err
-					}
-				}
-				return nil
+			root := scratch.valueOf(rootKey)
+			if len(root) == 0 {
+				return nil, fmt.Errorf("account %x has a storage branch before txNum %d but legacy %x holds none", addrHash, txNum, legacyKey)
 			}
-			var childChanged func(childKey []byte, txNum uint64, persists bool) error
-			childChanged = func(childKey []byte, txNum uint64, persists bool) error {
-				found, written, err := wdt.ht.iit.seekInFiles(childKey, txNum)
-				if err != nil {
+			return root, nil
+		}
+		var reachTxNum uint64
+		reach := &legacyReach{keysV2: keysV2, read: func(key []byte) ([]byte, error) {
+			return legacyCommitmentAsOf(wdt, key, reachTxNum)
+		}}
+		reachableAsOf := func(legacyKey, value []byte, txNum uint64) (bool, error) {
+			reachTxNum, reach.chain = txNum, reach.chain[:0]
+			return reach.reachable(legacyKey, value)
+		}
+		emitBoundary := func(txNum uint64, cur, next *historyVersion) error {
+			for _, e := range cur.ents {
+				if e.kind == v3.LegacySynthesized {
+					continue
+				}
+				k, v := cur.key(e), cur.value(e)
+				if e.kind == v3.LegacyDirect && next.hasValue(k, v) {
+					continue
+				}
+				if err := emit(k, txNum, v, e.kind); err != nil {
 					return err
 				}
-				if found && written.txNum == txNum {
-					return nil
+			}
+			for _, a := range cur.accounts {
+				rootKey = v3.StorageNodeKey(a.addrHash, nil, rootKey[:0])
+				after, inNext := next.account(a.addrHash)
+				var before []byte
+				switch a.class {
+				case storageSingleton, storageExtension:
+					before = cur.valueOf(rootKey)
+					if inNext && after.class != storageNone && after.class != storageBranch && bytes.Equal(before, next.valueOf(rootKey)) {
+						continue
+					}
+				case storageBranch:
+					if inNext && after.class == storageBranch {
+						continue
+					}
+					var err error
+					if before, err = branchRootAsOf(a.addrHash, txNum); err != nil {
+						return err
+					}
+				default:
+					continue
 				}
-				value, err := legacyCommitmentAsOf(wdt, childKey, txNum)
-				if err != nil {
+				if err := emit(rootKey, txNum, before, v3.LegacySynthesized); err != nil {
 					return err
 				}
-				if len(value) < 4 || binary.BigEndian.Uint16(value[2:4]) == 0 {
-					return fmt.Errorf("legacy %x is referenced at txNum %d but holds no record", childKey, txNum)
+			}
+			for _, a := range next.accounts {
+				if a.class == storageNone {
+					continue
 				}
-				if convErr := convert(childKey, value, leavesAsOf(txNum), &childCur); convErr != nil {
+				if b, inCur := cur.account(a.addrHash); inCur && b.class != storageNone {
+					continue
+				}
+				rootKey = v3.StorageNodeKey(a.addrHash, nil, rootKey[:0])
+				if err := emit(rootKey, txNum, nil, v3.LegacySynthesized); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+		var childChanged func(childKey []byte, txNum uint64, persists bool) error
+		childChanged = func(childKey []byte, txNum uint64, persists bool) error {
+			found, written, err := wdt.ht.iit.seekInFiles(childKey, txNum)
+			if err != nil {
+				return err
+			}
+			if found && written.txNum == txNum {
+				return nil
+			}
+			value, err := legacyCommitmentAsOf(wdt, childKey, txNum)
+			if err != nil {
+				return err
+			}
+			if commitment.BranchData(value).ChildCount() == 0 {
+				return fmt.Errorf("legacy %x is referenced at txNum %d but holds no record", childKey, txNum)
+			}
+			if convErr := convert(childKey, value, leavesAsOf(txNum), &childCur); convErr != nil {
+				return convErr
+			}
+			childNext.reset()
+			if persists {
+				if convErr := convert(childKey, value, txNum+1, &childNext); convErr != nil {
 					return convErr
 				}
-				childNext.reset()
-				if persists {
-					if convErr := convert(childKey, value, txNum+1, &childNext); convErr != nil {
-						return convErr
-					}
-				}
-				if err = emitBoundary(txNum, &childCur, &childNext); err != nil || persists {
+			}
+			if err = emitBoundary(txNum, &childCur, &childNext); err != nil || persists {
+				return err
+			}
+			prefix, err := decodeLegacyPrefix(childKey, keysV2)
+			if err != nil {
+				return err
+			}
+			removed, err := appendLegacyChildren(nil, prefix, value)
+			if err != nil {
+				return fmt.Errorf("children of removed %x at txNum %d: %w", childKey, txNum, err)
+			}
+			for _, c := range removed {
+				if err := childChanged(encodeLegacyPrefix(c.path, keysV2), txNum, false); err != nil {
 					return err
 				}
-				prefix, err := decodeLegacyPrefix(childKey, keysV2)
-				if err != nil {
+			}
+			return nil
+		}
+		childrenChanged := func(prefix, before, after []byte, txNum uint64) error {
+			var err error
+			if beforeChildren, err = appendLegacyChildren(beforeChildren[:0], prefix, before); err != nil {
+				return fmt.Errorf("children of %x before txNum %d: %w", prefix, txNum, err)
+			}
+			if afterChildren, err = appendLegacyChildren(afterChildren[:0], prefix, after); err != nil {
+				return fmt.Errorf("children of %x after txNum %d: %w", prefix, txNum, err)
+			}
+			for _, b := range beforeChildren {
+				j := slices.IndexFunc(afterChildren, func(a legacyChild) bool { return bytes.Equal(a.path, b.path) })
+				if j >= 0 && afterChildren[j].hash == b.hash {
+					continue
+				}
+				if err := childChanged(encodeLegacyPrefix(b.path, keysV2), txNum, j >= 0); err != nil {
 					return err
 				}
-				removed, err := appendLegacyChildren(nil, prefix, value)
-				if err != nil {
-					return fmt.Errorf("children of removed %x at txNum %d: %w", childKey, txNum, err)
-				}
-				for _, c := range removed {
-					if err := childChanged(encodeLegacyPrefix(c.path, keysV2), txNum, false); err != nil {
-						return err
-					}
-				}
-				return nil
 			}
-			childrenChanged := func(prefix, before, after []byte, txNum uint64) error {
-				var err error
-				if beforeChildren, err = appendLegacyChildren(beforeChildren[:0], prefix, before); err != nil {
-					return fmt.Errorf("children of %x before txNum %d: %w", prefix, txNum, err)
+			for _, a := range afterChildren {
+				if slices.ContainsFunc(beforeChildren, func(b legacyChild) bool { return bytes.Equal(a.path, b.path) }) {
+					continue
 				}
-				if afterChildren, err = appendLegacyChildren(afterChildren[:0], prefix, after); err != nil {
-					return fmt.Errorf("children of %x after txNum %d: %w", prefix, txNum, err)
+				if err := childChanged(encodeLegacyPrefix(a.path, keysV2), txNum, true); err != nil {
+					return err
 				}
-				for _, b := range beforeChildren {
-					j := slices.IndexFunc(afterChildren, func(a legacyChild) bool { return bytes.Equal(a.path, b.path) })
-					if j >= 0 && afterChildren[j].hash == b.hash {
-						continue
-					}
-					if err := childChanged(encodeLegacyPrefix(b.path, keysV2), txNum, j >= 0); err != nil {
-						return err
-					}
-				}
-				for _, a := range afterChildren {
-					if slices.ContainsFunc(beforeChildren, func(b legacyChild) bool { return bytes.Equal(a.path, b.path) }) {
-						continue
-					}
-					if err := childChanged(encodeLegacyPrefix(a.path, keysV2), txNum, true); err != nil {
-						return err
-					}
-				}
-				return nil
 			}
-			for batch := range in {
-				sink.res = getConvertedBatch()
-				for c, span := range batch.spans {
-					legacyKey := batch.buf[batch.keys[c][0]:batch.keys[c][1]]
-					txNums := batch.txNums[span[0]:span[1]]
-					value := func(i int) []byte { return batch.buf[batch.vals[span[0]+i][0]:batch.vals[span[0]+i][1]] }
-					after := func(i int) ([]byte, error) {
-						if i+1 < len(txNums) {
-							return value(i + 1), nil
-						}
-						return legacyCommitmentAsOf(wdt, legacyKey, toTxNum)
+			return nil
+		}
+		for batch := range in {
+			sink.res = getConvertedBatch()
+			for c, span := range batch.spans {
+				legacyKey := batch.buf[batch.keys[c][0]:batch.keys[c][1]]
+				txNums := batch.txNums[span[0]:span[1]]
+				value := func(i int) []byte { return batch.buf[batch.vals[span[0]+i][0]:batch.vals[span[0]+i][1]] }
+				after := func(i int) ([]byte, error) {
+					if i+1 < len(txNums) {
+						return value(i + 1), nil
 					}
-					chains.Add(1)
-					versions.Add(uint64(len(txNums)))
-					if commitment.IsCommitmentStateKey(legacyKey) {
-						for i, txNum := range txNums {
-							before, err := convertStateOrEmpty(value(i))
-							if err != nil {
-								return fmt.Errorf("state before txNum %d: %w", txNum, err)
-							}
-							if emitErr := emit(commitment.KeyCommitmentV3State, txNum, before, v3.LegacyDirect); emitErr != nil {
-								return emitErr
-							}
-							next, err := after(i)
-							if err != nil {
-								return err
-							}
-							afterState, err := convertStateOrEmpty(next)
-							if err != nil {
-								return fmt.Errorf("state after txNum %d: %w", txNum, err)
-							}
-							rootKey, beforeExt, err := conv.RootExtensionRecord(value(i))
-							if err != nil {
-								return err
-							}
-							beforeExt = bytes.Clone(beforeExt)
-							_, afterExt, err := conv.RootExtensionRecord(next)
-							if err != nil {
-								return err
-							}
-							if !bytes.Equal(beforeExt, afterExt) {
-								kind := v3.LegacySynthesized
-								if len(beforeExt) == 0 {
-									kind = v3.LegacyTombstone
-								}
-								if emitErr := emit(rootKey, txNum, beforeExt, kind); emitErr != nil {
-									return emitErr
-								}
-							}
-							if len(beforeExt) == 0 && len(afterExt) == 0 && stateRootsDiffer(before, afterState) {
-								if err := childChanged(rootLegacyKey, txNum, true); err != nil {
-									return err
-								}
-							}
-						}
-						continue
-					}
-					prefix, err := decodeLegacyPrefix(legacyKey, keysV2)
-					if err != nil {
-						return err
-					}
+					return legacyCommitmentAsOf(wdt, legacyKey, toTxNum)
+				}
+				chains.Add(1)
+				versions.Add(uint64(len(txNums)))
+				if commitment.IsCommitmentStateKey(legacyKey) {
 					for i, txNum := range txNums {
+						before, err := convertStateOrEmpty(value(i))
+						if err != nil {
+							return fmt.Errorf("state before txNum %d: %w", txNum, err)
+						}
+						if emitErr := emit(commitment.KeyCommitmentV3State, txNum, before, v3.LegacyDirect); emitErr != nil {
+							return emitErr
+						}
 						next, err := after(i)
 						if err != nil {
 							return err
 						}
-						before := value(i)
-						live, err := reachableAsOf(legacyKey, before, txNum)
+						afterState, err := convertStateOrEmpty(next)
+						if err != nil {
+							return fmt.Errorf("state after txNum %d: %w", txNum, err)
+						}
+						rootKey, beforeExt, err := conv.RootExtensionRecord(value(i))
 						if err != nil {
 							return err
 						}
-						if !live {
-							before = nil
-						}
-						if err := convert(legacyKey, before, leavesAsOf(txNum), &cur); err != nil {
+						beforeExt = bytes.Clone(beforeExt)
+						_, afterExt, err := conv.RootExtensionRecord(next)
+						if err != nil {
 							return err
 						}
-						if err := convert(legacyKey, next, txNum+1, &nextVersion); err != nil {
-							return err
+						if !bytes.Equal(beforeExt, afterExt) {
+							kind := v3.LegacySynthesized
+							if len(beforeExt) == 0 {
+								kind = v3.LegacyTombstone
+							}
+							if emitErr := emit(rootKey, txNum, beforeExt, kind); emitErr != nil {
+								return emitErr
+							}
 						}
-						if err := emitBoundary(txNum, &cur, &nextVersion); err != nil {
-							return err
-						}
-						if err := childrenChanged(prefix, before, next, txNum); err != nil {
-							return err
+						if len(beforeExt) == 0 && len(afterExt) == 0 && stateRootsDiffer(before, afterState) {
+							if err := childChanged(rootLegacyKey, txNum, true); err != nil {
+								return err
+							}
 						}
 					}
+					continue
 				}
-				weight := batch.weight
-				inFlight.Release(weight)
-				historyChainBatchPool.Put(batch)
-				if err := sink.send(); err != nil {
+				prefix, err := decodeLegacyPrefix(legacyKey, keysV2)
+				if err != nil {
 					return err
 				}
-				convertedBatchPool.Put(sink.res)
+				for i, txNum := range txNums {
+					next, err := after(i)
+					if err != nil {
+						return err
+					}
+					before := value(i)
+					live, err := reachableAsOf(legacyKey, before, txNum)
+					if err != nil {
+						return err
+					}
+					if !live {
+						before = nil
+					}
+					if err := convert(legacyKey, before, leavesAsOf(txNum), &cur); err != nil {
+						return err
+					}
+					if err := convert(legacyKey, next, txNum+1, &nextVersion); err != nil {
+						return err
+					}
+					if err := emitBoundary(txNum, &cur, &nextVersion); err != nil {
+						return err
+					}
+					if err := childrenChanged(prefix, before, next, txNum); err != nil {
+						return err
+					}
+				}
 			}
-			return nil
-		})
-	}
-	g.Go(func() error {
-		converting.Wait()
-		close(out)
+			weight := batch.weight
+			inFlight.Release(weight)
+			historyChainBatchPool.Put(batch)
+			if err := sink.send(); err != nil {
+				return err
+			}
+			convertedBatchPool.Put(sink.res)
+		}
 		return nil
-	})
+	}, func() { close(out) })
 	collectConverted(g, out, collectors)
 	if err := g.Wait(); err != nil {
 		return r, err
@@ -897,13 +886,11 @@ func convertCommitmentHistoryFileV3(ctx context.Context, at *AggregatorRoTx, vFi
 	efWriter := ii.dataWriter(efComp, false)
 
 	var (
-		groupKey, histKey, efBytes []byte
-		curKey, nextKey            []byte
-		group                      []v3.LegacyEntry
-		groupVals                  []byte
-		keyTxNums                  []uint64
-		builder                    multiencseq.SequenceBuilder
-		records, keys              uint64
+		histKey, efBytes []byte
+		curKey, nextKey  []byte
+		keyTxNums        []uint64
+		builder          multiencseq.SequenceBuilder
+		records, keys    uint64
 	)
 	finishKey := func() error {
 		if len(keyTxNums) == 0 {
@@ -922,10 +909,7 @@ func convertCommitmentHistoryFileV3(ctx context.Context, at *AggregatorRoTx, vFi
 		_, err := efWriter.Write(efBytes)
 		return err
 	}
-	flush := func() error {
-		if len(group) == 0 {
-			return nil
-		}
+	loadErr := mergeLoadGroups(ctx, "commitment_convert_v3_history", collectors, func(groupKey []byte, group []v3.LegacyEntry) error {
 		value, err := resolveLegacyHistory(groupKey, group)
 		if err != nil {
 			return err
@@ -944,22 +928,7 @@ func convertCommitmentHistoryFileV3(ctx context.Context, at *AggregatorRoTx, vFi
 		records++
 		histKey = historyKey(txNum, curKey, histKey)
 		return vWriter.Add(histKey, value)
-	}
-	loadErr := etl.MergeLoad("commitment_convert_v3_history", collectors, func(k, v []byte) error {
-		if len(group) == 0 || !bytes.Equal(k, groupKey) {
-			if err := flush(); err != nil {
-				return err
-			}
-			groupKey, groupVals, group = append(groupKey[:0], k...), groupVals[:0], group[:0]
-		}
-		start := len(groupVals)
-		groupVals = append(groupVals, v[1:]...)
-		group = append(group, v3.LegacyEntry{Kind: v3.LegacyKind(v[0]), Value: groupVals[start:]})
-		return nil
-	}, etl.TransformArgs{Quit: ctx.Done()})
-	if loadErr == nil {
-		loadErr = flush()
-	}
+	})
 	if loadErr == nil {
 		loadErr = finishKey()
 	}
@@ -1054,11 +1023,8 @@ func verifyCommitmentV3History(ctx context.Context, a *Aggregator, ranges []comm
 	}
 	at.Close()
 	for _, txNum := range samples {
-		check, err := FoldCommitmentV3(ctx, a, txNum)
+		_, err := FoldCommitmentV3(ctx, a, txNum)
 		if err != nil {
-			return fmt.Errorf("as of txNum %d: %w", txNum, err)
-		}
-		if err := verifyCommitmentV3Check(check); err != nil {
 			return fmt.Errorf("as of txNum %d: %w", txNum, err)
 		}
 	}
