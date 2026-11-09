@@ -142,3 +142,29 @@ func BenchmarkHashSSZAfterBlock(b *testing.B) {
 		})
 	}
 }
+
+func BenchmarkSyncCommitteeAndFinalityBranches(b *testing.B) {
+	for _, version := range []clparams.StateVersion{clparams.DenebVersion, clparams.ElectraVersion, clparams.FuluVersion} {
+		s := newTestState(version)
+		if _, err := s.FinalityRootBranch(); err != nil {
+			b.Fatal(err)
+		}
+		for _, bc := range []struct {
+			name   string
+			branch func() ([][32]byte, error)
+		}{
+			{"current", s.CurrentSyncCommitteeBranch},
+			{"next", s.NextSyncCommitteeBranch},
+			{"finality", s.FinalityRootBranch},
+		} {
+			b.Run(version.String()+"/"+bc.name, func(b *testing.B) {
+				b.ReportAllocs()
+				for b.Loop() {
+					if _, err := bc.branch(); err != nil {
+						b.Fatal(err)
+					}
+				}
+			})
+		}
+	}
+}
