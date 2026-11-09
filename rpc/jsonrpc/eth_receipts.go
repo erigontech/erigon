@@ -186,9 +186,12 @@ func (api *BaseAPI) resolveLogsRange(ctx context.Context, tx kv.Tx, crit filters
 	end = latest
 	if crit.ToBlock != nil {
 		toBlock := crit.ToBlock.Int64()
-		if toBlock > 0 {
+		switch {
+		case toBlock > 0:
 			end = uint64(toBlock)
-		} else {
+		case crit.FromBlock != nil && crit.FromBlock.Int64() == toBlock:
+			end = begin
+		default:
 			blockNum := rpc.BlockNumber(toBlock)
 			end, _, _, err = rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNum), tx, api._blockReader)
 			if err != nil {
@@ -327,7 +330,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		return nil, err
 	}
 
-	it := rawdbv3.TxNums2BlockNums(ctx, tx, api._txNumReader, txNumbers, order.Asc)
+	it := rawdbv3.TxNums2BlockNumsFrom(ctx, tx, api._txNumReader, txNumbers, order.Asc, begin)
 	defer it.Close()
 
 	for it.HasNext() {

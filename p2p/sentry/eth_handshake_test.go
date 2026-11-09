@@ -95,3 +95,40 @@ func TestCheckPeerStatusCompatibility(t *testing.T) {
 		assert.ErrorIs(t, err, forkid.ErrLocalIncompatibleOrStale)
 	})
 }
+
+func TestCheckPeerStatus69BlockRange(t *testing.T) {
+	var version uint = direct.ETH69
+	networkID := chainspec.Mainnet.Config.ChainID.Uint64()
+	heightForks, timeForks := forkid.GatherForks(chainspec.Mainnet.Config, 0 /* genesisTime */)
+	goodReply := eth.StatusPacket69{
+		ProtocolVersion: uint32(version),
+		NetworkID:       networkID,
+		Genesis:         chainspec.Mainnet.GenesisHash,
+		ForkID:          forkid.NewIDFromForks(heightForks, timeForks, chainspec.Mainnet.GenesisHash, 0, 0),
+		MinimumBlock:    0,
+		LatestBlock:     10,
+		LatestBlockHash: common.HexToHash("0x01"),
+	}
+	status := sentryproto.StatusData{
+		NetworkId: networkID,
+		ForkData: &sentryproto.Forks{
+			Genesis:     gointerfaces.ConvertHashToH256(chainspec.Mainnet.GenesisHash),
+			HeightForks: heightForks,
+			TimeForks:   timeForks,
+		},
+	}
+
+	t.Run("ok", func(t *testing.T) {
+		assert.NoError(t, compatStatusPacket69(goodReply, &status, version, version))
+	})
+	t.Run("earliest above latest", func(t *testing.T) {
+		reply := goodReply
+		reply.MinimumBlock = reply.LatestBlock + 1
+		assert.Error(t, compatStatusPacket69(reply, &status, version, version))
+	})
+	t.Run("zero latest hash", func(t *testing.T) {
+		reply := goodReply
+		reply.LatestBlockHash = common.Hash{}
+		assert.Error(t, compatStatusPacket69(reply, &status, version, version))
+	})
+}
