@@ -123,12 +123,16 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, requestedBl
 		args.Gas = (*hexutil.Uint64)(&api.GasCap)
 	}
 
-	header, isLatest, err := api.canonicalHeaderByNumberOrHash(ctx, tx, blockNrOrHash)
-	if err != nil {
-		return nil, err
-	}
-	if header == nil {
-		return nil, fmt.Errorf("header not found")
+	header, isLatest, headerCached := rpchelper.CachedCallHeader(blockNrOrHash)
+	if !headerCached {
+		header, isLatest, err = api.canonicalHeaderByNumberOrHash(ctx, tx, blockNrOrHash)
+		if err != nil {
+			return nil, err
+		}
+		if header == nil {
+			return nil, fmt.Errorf("header not found")
+		}
+		rpchelper.StoreCallHeader(blockNrOrHash, header, isLatest)
 	}
 
 	err = api.BaseAPI.checkPruneStateAfterSystemTx(ctx, tx, header.Number.Uint64())
@@ -141,10 +145,11 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, requestedBl
 		return nil, err
 	}
 
-	stateReader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, tx, header.Number.Uint64(), isLatest, 0, api.stateCache, api._txNumReader)
+	stateReader, err := rpchelper.CallStateReader(ctx, tx, header.Number.Uint64(), isLatest, api.stateCache, api._txNumReader)
 	if err != nil {
 		return nil, err
 	}
+	defer rpchelper.ReleaseCallStateReader(header.Number.Uint64(), stateReader)
 
 	result, err := transactions.DoCall(ctx, engine, args, tx, blockNrOrHash, header, stateOverrides, blockOverrides, api.GasCap, chainConfig, stateReader, api._blockReader, api.evmCallTimeout)
 	if err != nil {

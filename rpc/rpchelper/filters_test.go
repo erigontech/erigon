@@ -24,6 +24,9 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/kvcache"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
@@ -868,4 +871,40 @@ func TestFilters_SubscribeReceiptsGeneratesCorrectReceiptsFilterRequest(t *testi
 	if lastFilterRequest.TransactionHashes != nil {
 		t.Error("6: expected transaction hashes to be nil with no subscriptions")
 	}
+}
+
+type asOfRecordingTx struct {
+	kv.TemporalTx
+	timestamps []uint64
+}
+
+func (tx *asOfRecordingTx) GetAsOf(_ kv.Domain, _ []byte, ts uint64) ([]byte, bool, error) {
+	tx.timestamps = append(tx.timestamps, ts)
+	return nil, false, nil
+}
+
+func TestCallStateReaderRebindsPooledReaderToCurrentTx(t *testing.T) {
+	const block, blockTxNum = uint64(5), uint64(7)
+	callReaderReuseOn = true
+	callReaders.Store(block, &callReaderEntry{cache: &kvcache.CoherentView{}, txNum: blockTxNum})
+	t.Cleanup(func() {
+		callReaderReuseOn = false
+		callReaders.Delete(block)
+	})
+
+	first, second := &asOfRecordingTx{}, &asOfRecordingTx{}
+	reader, err := CallStateReader(t.Context(), first, block, false, nil, rawdbv3.TxNumsReader{})
+	require.NoError(t, err)
+	_, err = reader.(*cachedHistoryReaderV3).ReadAccountByPlainAddr(common.Address{1})
+	require.NoError(t, err)
+	reader.(*cachedHistoryReaderV3).SetTxNum(99)
+	ReleaseCallStateReader(block, reader)
+
+	reader, err = CallStateReader(t.Context(), second, block, false, nil, rawdbv3.TxNumsReader{})
+	require.NoError(t, err)
+	_, err = reader.(*cachedHistoryReaderV3).ReadAccountByPlainAddr(common.Address{1})
+	require.NoError(t, err)
+
+	require.Equal(t, []uint64{blockTxNum}, first.timestamps)
+	require.Equal(t, []uint64{blockTxNum}, second.timestamps)
 }
