@@ -122,6 +122,8 @@ func waitForExecutionEngineToBeFinished(ctx context.Context, cfg *Cfg) (ready bo
 }
 
 const (
+	// maxChainTipRequestCount keeps a by-range response within the sentinel's 64-chunk ceiling.
+	maxChainTipRequestCount   = 64
 	ancestorLookupWindow      = 64
 	maxAncestorLookupRequests = 4
 )
@@ -171,6 +173,8 @@ func startFetchingBlocksMissedByGossipAfterSomeTime(ctx context.Context, cfg *Cf
 		return
 	}
 
+	// next is the slot after a capped window, so a run of skipped slots longer than one request is crossed.
+	var next uint64
 	// Continuously fetch and process blocks
 	for {
 		// Calculate the range of blocks to fetch
@@ -179,12 +183,17 @@ func startFetchingBlocksMissedByGossipAfterSomeTime(ctx context.Context, cfg *Cf
 		if highestSeen >= 2 {
 			from = highestSeen - 2
 		}
+		from = max(from, next)
 		currentSlot := cfg.ethClock.GetCurrentSlot()
 		var count uint64
 		if currentSlot >= from {
-			count = (currentSlot - from) + 4
+			count = min((currentSlot-from)+4, maxChainTipRequestCount)
 		} else {
 			count = 4
+		}
+		next = 0
+		if count == maxChainTipRequestCount {
+			next = from + count
 		}
 
 		// Stop fetching if the highest seen block is greater than or equal to the target slot
