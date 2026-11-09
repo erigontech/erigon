@@ -137,17 +137,26 @@ enum Direction {
   UNWIND = 1;
 }
 
-// StateChangeBatch - list of StateDiff done in one DB transaction
+message ExecutionView {
+  types.H256 block_hash = 1;
+  uint64 block_height = 2;
+  uint64 block_time = 3;
+  optional uint64 slot_number = 4;
+  uint64 state_version_id = 5;
+}
+
 message StateChangeBatch {
-  uint64 state_version_id = 1; // mdbx's tx.ID() - id of write transaction in db - where this changes happened
+  uint64 state_version_id = 1;
   repeated StateChange change_batch = 2;
   uint64 pending_block_base_fee = 3; // BaseFee of the next block to be produced
   uint64 block_gas_limit = 4; // GasLimit of the latest block - proxy for the gas limit of the next block to be produced
   uint64 finalized_block = 5;
   uint64 pending_blob_fee_per_gas = 6;  // Base Blob Fee for the next block to be produced
-  // State changes may be missing from this batch or earlier deliveries.
-  // Absent entries do not imply unchanged state.
+  // Reset to target_view using a matching snapshot. Historical values are not authoritative.
+  // Otherwise, changes completely cover the advance from previous_view to target_view.
   bool state_changes_incomplete = 7;
+  ExecutionView previous_view = 8;
+  ExecutionView target_view = 9;
 }
 
 // StateChange - changes done by 1 block or by 1 unwind
@@ -218,11 +227,13 @@ message GetLatestReq {
   bool latest = 6; // if true, then `ts` ignored and return latest state (without history lookup)
   optional uint64 max_step = 7; // absent means unbounded; zero bounds the read at step 0
   bool branch_cache = 8;
+  repeated bytes keys = 9;
 }
 
 message GetLatestReply{
   bytes v = 1;
   bool ok = 2;
+  repeated bytes values = 3;
 }
 
 message HistorySeekReq {

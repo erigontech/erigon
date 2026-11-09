@@ -93,7 +93,7 @@ func TestGetBlobsRemovedAfterMined(t *testing.T) {
 	minedBlob.Txn.(*types.BlobTx).Nonce = 0
 	var minedSlots TxnSlots
 	minedSlots.Append(&minedBlob, addr[:], true)
-	require.NoError(pool.OnNewBlock(ctx, blockChange, TxnSlots{}, TxnSlots{}, minedSlots))
+	require.NoError(applyTestBlock(ctx, pool, blockChange, TxnSlots{}, TxnSlots{}, minedSlots))
 
 	after := pool.GetBlobs(blobHashes)
 	require.Len(after, len(blobHashes))
@@ -136,7 +136,7 @@ func TestIdHashKnownRecognizesMinedBlobAfterNonceGap(t *testing.T) {
 			}},
 		}},
 	}
-	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, slots))
+	require.NoError(t, applyTestBlock(ctx, pool, change, TxnSlots{}, TxnSlots{}, slots))
 	reason, ok := pool.discardReasonsLRU.Get(string(blobTxn.IDHash[:]))
 	require.True(t, ok)
 	require.Equal(t, txpoolcfg.NonceTooDistant, reason)
@@ -197,7 +197,7 @@ func newGetBlobsTestPool(tb testing.TB, numAccounts int) (*TxPool, context.Conte
 			Data:    v,
 		})
 	}
-	require.NoError(tb, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	require.NoError(tb, applyTestBlock(ctx, pool, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 	return pool, ctx
 }
 

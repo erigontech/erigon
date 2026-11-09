@@ -79,7 +79,7 @@ func seedBlobKZGTestPool(t *testing.T, ctx context.Context) *TxPool {
 				Data:    v,
 			})
 	}
-	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	require.NoError(t, applyTestBlock(ctx, pool, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 	return pool
 }
 

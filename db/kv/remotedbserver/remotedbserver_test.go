@@ -75,6 +75,21 @@ func TestGetLatestForwardsMaxStep(t *testing.T) {
 	require.Equal(t, kv.Step(0), tx.opts.MaxStep())
 }
 
+type batchAccountsTx struct{ kv.TemporalTx }
+
+func (batchAccountsTx) GetLatest(_ kv.Domain, key []byte, _ kv.GetLatestOptions) ([]byte, kv.Step, error) {
+	return key, 0, nil
+}
+
+func TestGetLatestBatchesAccountReads(t *testing.T) {
+	s := NewKvServer(t.Context(), nil, nil, nil, log.New())
+	s.txs[1] = &threadSafeTx{TemporalTx: batchAccountsTx{}}
+	keys := [][]byte{{1}, nil, {2}}
+	reply, err := s.GetLatest(t.Context(), &remoteproto.GetLatestReq{TxId: 1, Table: kv.AccountsDomain.String(), Latest: true, Keys: keys})
+	require.NoError(t, err)
+	require.Equal(t, keys, reply.Values)
+}
+
 type readSequenceTx struct {
 	kv.TemporalTx
 	err error

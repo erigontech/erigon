@@ -65,7 +65,8 @@ import (
 // 4.1.0 - add FrozenBlocks function
 // 4.2.0 - add BlockBody function
 // 5.0.0 - replace AAValidation with FrameValidation
-var EthBackendAPIVersion = &typesproto.VersionReply{Major: 5, Minor: 0, Patch: 0}
+// 5.1.0 - bind frame validation to a state version
+var EthBackendAPIVersion = &typesproto.VersionReply{Major: 5, Minor: 1, Patch: 0}
 
 type EthBackendServer struct {
 	remoteproto.UnimplementedETHBACKENDServer // must be embedded to have forward compatible implementations.
@@ -521,7 +522,7 @@ func (s *EthBackendServer) FrameValidation(ctx context.Context, req *remoteproto
 			return nil, err
 		}
 		sd, seq := s.notifications.Events.OverlaySnapshot()
-		result, err := s.validateFrameTransaction(ctx, frame, sd, expectedHash)
+		result, err := s.validateFrameTransaction(ctx, frame, sd, expectedHash, req.ExpectedStateVersion)
 		// Notifications precede commit. Retry if the published head changes while
 		// we open the database snapshot or validate against its overlay.
 		if _, current := s.notifications.Events.OverlaySnapshot(); current == seq {
@@ -530,7 +531,7 @@ func (s *EthBackendServer) FrameValidation(ctx context.Context, req *remoteproto
 	}
 }
 
-func (s *EthBackendServer) validateFrameTransaction(ctx context.Context, frame *types.FrameTransaction, sd *execctx.SharedDomains, expectedHash common.Hash) (*remoteproto.FrameValidationReply, error) {
+func (s *EthBackendServer) validateFrameTransaction(ctx context.Context, frame *types.FrameTransaction, sd *execctx.SharedDomains, expectedHash common.Hash, expectedVersion *uint64) (*remoteproto.FrameValidationReply, error) {
 	tx, err := s.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -553,6 +554,20 @@ func (s *EthBackendServer) validateFrameTransaction(ctx context.Context, frame *
 	}
 	if expectedHash != (common.Hash{}) && expectedHash != headHash {
 		return nil, status.Error(codes.Aborted, "frame validation head changed")
+	}
+	if expectedVersion != nil {
+		var version uint64
+		if sd != nil {
+			version, err = sd.ProjectedStateVersion()
+		} else {
+			version, err = rawdb.GetStateVersion(tx)
+		}
+		if err != nil {
+			return nil, err
+		}
+		if version != *expectedVersion {
+			return nil, status.Error(codes.Aborted, "frame validation state version changed")
+		}
 	}
 	maxTxNum, err := s.blockReader.TxnumReader().Max(ctx, tx, header.Number.Uint64())
 	if err != nil {

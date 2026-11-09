@@ -55,6 +55,33 @@ import (
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
+func TestStateChangeParseFailureRemainsRetryable(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	pool := NewMockPool(ctrl)
+	fetch := NewFetch(t.Context(), nil, pool, nil, nil, u256.N1, log.New())
+	invalidated := false
+	fetch.onStateChangesUnavailable = func() { invalidated = true }
+	batch := &remoteproto.StateChangeBatch{ChangeBatch: []*remoteproto.StateChange{{Txs: [][]byte{{0xff}}}}}
+	pool.EXPECT().OnNewBlock(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil).MaxTimes(1)
+	require.Error(t, fetch.handleStateChangesRequest(t.Context(), batch, true))
+	require.True(t, invalidated)
+	require.Zero(t, fetch.newBlocks.Load())
+}
+
+func TestStateChangeRetriesDoNotParseAppliedTransactions(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	pool := NewMockPool(ctrl)
+	pool.EXPECT().OnNewBlock(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil).Times(2)
+	fetch := NewFetch(t.Context(), nil, pool, nil, nil, u256.N1, log.New())
+	parses := 0
+	fetch.stateChangesParseCtx.ValidateRLP(func([]byte) error { parses++; return nil })
+	batch := &remoteproto.StateChangeBatch{ChangeBatch: []*remoteproto.StateChange{{Txs: [][]byte{decodeHex(TxnParseMainnetTests[1].PayloadStr)}}}}
+	require.NoError(t, fetch.handleStateChangesRequest(t.Context(), batch, true))
+	require.NoError(t, fetch.handleStateChangesRequest(t.Context(), batch, false))
+	require.Equal(t, 1, parses)
+	require.Equal(t, uint64(1), fetch.newBlocks.Load())
+}
+
 func TestFetch(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow test")
@@ -72,7 +99,7 @@ func TestFetch(t *testing.T) {
 	sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m)
 	require.NoError(t, err)
 	var wg sync.WaitGroup
-	fetch := NewFetch(ctx, []sentryproto.SentryClient{sentryClient}, pool, remoteKvClient, nil, u256.N1, log.New(), WithP2PFetcherWg(&wg))
+	fetch := newTestFetch(ctx, []sentryproto.SentryClient{sentryClient}, pool, remoteKvClient, nil, u256.N1, log.New(), WithP2PFetcherWg(&wg))
 	m.StreamWg.Add(2)
 	fetch.ConnectSentries()
 	m.StreamWg.Wait()
@@ -311,7 +338,7 @@ func TestOnNewBlock(t *testing.T) {
 		}).
 		Times(1)
 
-	fetch := NewFetch(ctx, nil, pool, stateChanges, db, u256.N1, log.New())
+	fetch := newTestFetch(ctx, nil, pool, stateChanges, db, u256.N1, log.New())
 	err := fetch.handleStateChanges(ctx, stateChanges)
 	assert.ErrorIs(t, io.EOF, err)
 	assert.Len(t, minedTxns.Txns, 3)
@@ -322,7 +349,7 @@ func TestFetchRevalidatesFramesAfterFailedStateChange(t *testing.T) {
 	initial := newBlockChangeForAccounts(common.Hash{1}, 0)
 	initial.ChangeBatch[0].BlockHeight = 12
 	initial.ChangeBatch[0].SlotNumber = common.NewUint64(12)
-	require.NoError(t, pool.OnNewBlock(ctx, initial, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	require.NoError(t, applyTestBlock(ctx, pool, initial, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 	frame := recentRootPoolSlot(t, sender, 10, 1)
 	var txns TxnSlots
 	txns.Append(frame, sender[:], true)
@@ -357,9 +384,9 @@ func TestFetchRevalidatesFramesAfterFailedStateChange(t *testing.T) {
 	wrapped := NewMockPool(ctrl)
 	gomock.InOrder(
 		wrapped.EXPECT().OnNewBlock(gomock.Any(), unwind, gomock.Any(), gomock.Any(), gomock.Any()).Return(errors.New("state read failed")),
-		wrapped.EXPECT().OnNewBlock(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(pool.OnNewBlock),
+		wrapped.EXPECT().OnNewBlock(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn((fixtureStateChangePool{pool}).OnNewBlock),
 	)
-	fetch := NewFetch(ctx, nil, wrapped, client, pool.poolDB, pool.chainID, log.New())
+	fetch := newTestFetch(ctx, nil, wrapped, client, pool.poolDB, pool.chainID, log.New())
 	require.ErrorIs(t, fetch.handleStateChanges(ctx, client), io.EOF)
 	require.Equal(t, []common.Hash{frame.IDHash}, backend.calls, "the next batch must recover the missed root change")
 	require.NotContains(t, pool.byHash, string(frame.IDHash[:]))
@@ -408,9 +435,41 @@ func TestFetchStateChangeRecoveryUntilSuccess(t *testing.T) {
 	}
 }
 
+func TestStateChangeApplicationRetriesWithoutAnotherBlock(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	ctrl := gomock.NewController(t)
+	stream := remoteproto.NewMockKV_StateChangesClient[*remoteproto.StateChangeBatch](ctrl)
+	first := true
+	stream.EXPECT().Recv().DoAndReturn(func() (*remoteproto.StateChangeBatch, error) {
+		if first {
+			first = false
+			return &remoteproto.StateChangeBatch{}, nil
+		}
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}).AnyTimes()
+	client := remoteproto.NewMockKVClient(ctrl)
+	client.EXPECT().StateChanges(gomock.Any(), gomock.Any(), gomock.Any()).Return(stream, nil)
+	pool := NewMockPool(ctrl)
+	attempts := 0
+	pool.EXPECT().OnNewBlock(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+		func(context.Context, *remoteproto.StateChangeBatch, TxnSlots, TxnSlots, TxnSlots) error {
+			attempts++
+			if attempts == 1 {
+				return errors.New("snapshot unavailable")
+			}
+			cancel()
+			return nil
+		}).AnyTimes()
+	fetch := newTestFetch(ctx, nil, pool, client, nil, u256.N1, log.New())
+	_ = fetch.handleStateChanges(ctx, client)
+	require.Equal(t, 2, attempts)
+}
+
 func TestFetchRetainedForwardThenUnwindKeepsReplacement(t *testing.T) {
 	ctx, pool, poolDB, _ := newTestPool(t)
-	fetch := NewFetch(ctx, nil, pool, nil, poolDB, pool.chainID, log.New())
+	fetch := newTestFetch(ctx, nil, pool, nil, poolDB, pool.chainID, log.New())
 	key, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	sender := crypto.PubkeyToAddress(key.PublicKey)
@@ -442,7 +501,7 @@ func TestFetchRetainedForwardThenUnwindKeepsReplacement(t *testing.T) {
 			BlockHash:   gointerfaces.ConvertHashToH256(common.Hash{1}),
 			Changes:     accountChange(0),
 		}},
-	}))
+	}, true))
 	original, replacement := makeTxn(2), makeTxn(20)
 	var txns TxnSlots
 	txns.Append(replacement, sender[:], true)
@@ -458,7 +517,7 @@ func TestFetchRetainedForwardThenUnwindKeepsReplacement(t *testing.T) {
 			{Direction: remoteproto.Direction_UNWIND, BlockHeight: 1, BlockHash: gointerfaces.ConvertHashToH256(common.Hash{1}), Changes: accountChange(0), Txs: [][]byte{original.Rlp}},
 			{Direction: remoteproto.Direction_FORWARD, BlockHeight: 2, BlockHash: gointerfaces.ConvertHashToH256(common.Hash{3})},
 		},
-	}))
+	}, true))
 
 	require.Contains(t, pool.byHash, string(replacement.IDHash[:]), "an orphaned transaction must not evict its pooled replacement")
 	require.NotContains(t, pool.byHash, string(original.IDHash[:]))
@@ -510,8 +569,8 @@ func TestFetchStateChangesUseLastTransactionDirection(t *testing.T) {
 							require.Equal(t, rlps[0], got.Txns[1].Rlp)
 							return nil
 						})
-					fetch := NewFetch(t.Context(), nil, pool, nil, nil, u256.N1, log.New())
-					require.NoError(t, fetch.handleStateChangesRequest(t.Context(), batch))
+					fetch := newTestFetch(t.Context(), nil, pool, nil, nil, u256.N1, log.New())
+					require.NoError(t, fetch.handleStateChangesRequest(t.Context(), batch, true))
 				})
 			}
 		})
@@ -615,7 +674,7 @@ func TestFramePolicyRejectionKeepsOrdinaryTransactions(t *testing.T) {
 			m := NewMockSentry(ctx, sentryServer)
 			sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m)
 			require.NoError(t, err)
-			fetch := NewFetch(ctx, []sentryproto.SentryClient{sentryClient}, pool, nil, nil, u256.N1, log.New())
+			fetch := newTestFetch(ctx, []sentryproto.SentryClient{sentryClient}, pool, nil, nil, u256.N1, log.New())
 			payload := EncodeTransactions(txns, nil)
 			if id == sentryproto.MessageId_POOLED_TRANSACTIONS_66 {
 				payload = EncodePooledTransactions66(txns, 1, nil)
@@ -718,7 +777,7 @@ func TestPenalizePeerForMalformedMessages(t *testing.T) {
 			sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m)
 			require.NoError(t, err)
 
-			fetch := NewFetch(ctx, []sentryproto.SentryClient{sentryClient}, pool, nil, nil, u256.N1, log.New())
+			fetch := newTestFetch(ctx, []sentryproto.SentryClient{sentryClient}, pool, nil, nil, u256.N1, log.New())
 
 			err = fetch.handleInboundMessageWithTx(ctx, nil, &sentryproto.InboundMessage{
 				Id:     tt.id,
@@ -789,7 +848,7 @@ func TestOversizedHashAnnouncement(t *testing.T) {
 			sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m)
 			require.NoError(t, err)
 
-			fetch := NewFetch(ctx, []sentryproto.SentryClient{sentryClient}, pool, nil, nil, u256.N1, log.New())
+			fetch := newTestFetch(ctx, []sentryproto.SentryClient{sentryClient}, pool, nil, nil, u256.N1, log.New())
 
 			err = fetch.handleInboundMessageWithTx(ctx, nil, &sentryproto.InboundMessage{
 				Id:     tt.id,
@@ -816,7 +875,7 @@ func TestCheckPooledTxnAnnouncement(t *testing.T) {
 	sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m)
 	require.NoError(t, err)
 
-	fetch := NewFetch(ctx, []sentryproto.SentryClient{sentryClient}, pool, nil, nil, u256.N1, log.New())
+	fetch := newTestFetch(ctx, []sentryproto.SentryClient{sentryClient}, pool, nil, nil, u256.N1, log.New())
 
 	otherPeer := gointerfaces.ConvertHashToH512([64]byte{0xfe, 0xed})
 
@@ -921,7 +980,7 @@ func TestCheckBlobSidecar(t *testing.T) {
 	m := NewMockSentry(ctx, sentryServer)
 	sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m)
 	require.NoError(t, err)
-	fetch := NewFetch(ctx, []sentryproto.SentryClient{sentryClient}, pool, nil, nil, u256.N1, log.New())
+	fetch := newTestFetch(ctx, []sentryproto.SentryClient{sentryClient}, pool, nil, nil, u256.N1, log.New())
 
 	// Non-blob tx — unchecked.
 	require.NoError(t, fetch.checkBlobSidecar(&TxnSlot{Txn: &types.DynamicFeeTransaction{}}))
@@ -971,7 +1030,7 @@ func TestNoPenaltyOnInternalDBError(t *testing.T) {
 	sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m)
 	require.NoError(t, err)
 
-	fetch := NewFetch(ctx, []sentryproto.SentryClient{sentryClient}, pool, nil, nil, u256.N1, log.New())
+	fetch := newTestFetch(ctx, []sentryproto.SentryClient{sentryClient}, pool, nil, nil, u256.N1, log.New())
 
 	err = fetch.handleInboundMessageWithTx(ctx, nil, &sentryproto.InboundMessage{
 		Id:     sentryproto.MessageId_TRANSACTIONS_66,
@@ -1010,7 +1069,7 @@ func TestFetchConnectGoroutinesExitOnCancel(t *testing.T) {
 
 	pool := NewMockPool(ctrl)
 
-	fetch := NewFetch(ctx, []sentryproto.SentryClient{sentryClient}, pool, stateChanges, nil, u256.N1, log.New())
+	fetch := newTestFetch(ctx, []sentryproto.SentryClient{sentryClient}, pool, stateChanges, nil, u256.N1, log.New())
 
 	// Start all goroutines: 1 from ConnectCore + 2 from ConnectSentries.
 	fetch.ConnectCore()
@@ -1090,7 +1149,7 @@ func TestFetchBoundsQueuedBatch(t *testing.T) {
 				pool.EXPECT().Started().DoAndReturn(func() bool { flushes.Add(1); return true }).AnyTimes()
 				client := sentryproto.NewMockSentryClient(ctrl)
 				var wg sync.WaitGroup
-				fetch := NewFetch(t.Context(), nil, pool, nil, nil, u256.N1, log.New(), WithP2PFetcherWg(&wg))
+				fetch := newTestFetch(t.Context(), nil, pool, nil, nil, u256.N1, log.New(), WithP2PFetcherWg(&wg))
 				received := 0
 				stream := &boundedBatchStream{recv: func() (*sentryproto.InboundMessage, error) {
 					if received == tc.messages {
@@ -1124,7 +1183,7 @@ func TestFetchRevalidatesDuplicateReplyAfterNewBlock(t *testing.T) {
 	pool.EXPECT().IdHashKnown(gomock.Any(), gomock.Any()).Return(false, nil).AnyTimes()
 	pool.EXPECT().OnNewBlock(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil)
 	pool.EXPECT().AddRemoteTxns(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Times(2)
-	fetch := NewFetch(t.Context(), nil, pool, nil, mdbxtest.NewTestDB(t, dbcfg.TxPoolDB), u256.N1, log.New())
+	fetch := newTestFetch(t.Context(), nil, pool, nil, mdbxtest.NewTestDB(t, dbcfg.TxPoolDB), u256.N1, log.New())
 	newBlock := &remoteproto.StateChangeBatch{ChangeBatch: []*remoteproto.StateChange{{BlockHeight: 1}}}
 
 	// reply, duplicate reply in the same block, then the same reply after a new block
@@ -1132,7 +1191,7 @@ func TestFetchRevalidatesDuplicateReplyAfterNewBlock(t *testing.T) {
 	stream := &boundedBatchStream{recv: func() (*sentryproto.InboundMessage, error) {
 		received++
 		if received == 3 {
-			require.NoError(t, fetch.handleStateChangesRequest(t.Context(), newBlock))
+			require.NoError(t, fetch.handleStateChangesRequest(t.Context(), newBlock, true))
 		}
 		if received > 3 {
 			return nil, nil
@@ -1164,7 +1223,7 @@ func TestFetchSerializesBatchFlushes(t *testing.T) {
 		}}
 		client := sentryproto.NewMockSentryClient(ctrl)
 		client.EXPECT().Messages(gomock.Any(), gomock.Any(), gomock.Any()).Return(stream, nil)
-		fetch := NewFetch(t.Context(), nil, pool, nil, nil, u256.N1, log.New())
+		fetch := newTestFetch(t.Context(), nil, pool, nil, nil, u256.N1, log.New())
 		done := make(chan error, 1)
 		go func() { done <- fetch.receiveMessage(t.Context(), client) }()
 

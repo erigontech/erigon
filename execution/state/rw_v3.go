@@ -43,6 +43,7 @@ import (
 )
 
 type StateV3 struct {
+	notificationWrites     [kv.CodeDomain + 1]map[string][]byte
 	domains                *execctx.SharedDomains
 	logger                 log.Logger
 	persistReceiptsCacheV2 bool
@@ -622,71 +623,71 @@ func (c *versionedWriteCollector) WriteAccountStorage(address accounts.Address, 
 
 func (c *versionedWriteCollector) CreateContract(_ accounts.Address) error { return nil }
 
-// NotifyAccumulator sends a block's state changes to the accumulator. It reads every
-// account's latest state, so the block's writes must already be applied. StartChange
-// must be called on the accumulator first.
-func (rs *StateV3) NotifyAccumulator(accumulator *shards.Accumulator, roTx kv.TemporalTx, blockWrites []WriteSetView) error {
+func (rs *StateV3) TrackNotifications() func() {
+	rs.notificationWrites = [kv.CodeDomain + 1]map[string][]byte{}
+	rs.domains.SetStateWriteObserver(func(domain kv.Domain, key, value []byte) {
+		if rs.notificationWrites[domain] == nil {
+			rs.notificationWrites[domain] = make(map[string][]byte)
+		}
+		rs.notificationWrites[domain][string(key)] = bytes.Clone(value)
+	})
+	return func() {
+		rs.domains.SetStateWriteObserver(nil)
+		rs.notificationWrites = [kv.CodeDomain + 1]map[string][]byte{}
+	}
+}
+
+func (rs *StateV3) NotifyAccumulator(accumulator *shards.Accumulator, roTx kv.TemporalTx) error {
 	if accumulator == nil {
 		return nil
 	}
-
-	latest := make(map[accounts.Address]accounts.Account)
-	account := func(addr accounts.Address) (accounts.Account, error) {
-		if acc, ok := latest[addr]; ok {
-			return acc, nil
+	latest := make(map[common.Address]accounts.Account)
+	incarnation := func(address common.Address) (uint64, error) {
+		if acc, ok := latest[address]; ok {
+			return acc.Incarnation, nil
 		}
-		acc := accounts.NewAccount()
-		address := addr.Value()
 		v, _, err := rs.domains.GetLatest(kv.AccountsDomain, roTx, address[:])
 		if err != nil {
-			return accounts.Account{}, err
+			return 0, err
 		}
+		acc := accounts.NewAccount()
 		if len(v) > 0 {
 			if err := accounts.DeserialiseV3(&acc, v); err != nil {
-				return accounts.Account{}, err
+				return 0, err
 			}
 		}
-		latest[addr] = acc
-		return acc, nil
+		latest[address] = acc
+		return acc.Incarnation, nil
 	}
-
-	for _, writes := range blockWrites {
-		// Balance and nonce writes only name the account: range the keys, not the resolved values.
-		keys := writes
-		if v, ok := writes.(*versionMapWriteView); ok {
-			keys = v.keys
+	for key, value := range rs.notificationWrites[kv.StorageDomain] {
+		address := common.BytesToAddress([]byte(key[:length.Addr]))
+		inc, err := incarnation(address)
+		if err != nil {
+			return err
 		}
-		for addr, write := range writes.Codes() {
-			acc, err := account(addr)
-			if err != nil {
-				return err
-			}
-			accumulator.ChangeCode(addr.Value(), acc.Incarnation, write.Val.Bytes)
-		}
-		for addr, byKey := range writes.Storages() {
-			acc, err := account(addr)
-			if err != nil {
-				return err
-			}
-			for key, write := range byKey {
-				accumulator.ChangeStorage(addr.Value(), acc.Incarnation, key.Value(), write.Val.Bytes())
-			}
-		}
-		for addr := range keys.Balances() {
-			acc, err := account(addr)
-			if err != nil {
-				return err
-			}
-			accumulator.ChangeAccount(addr.Value(), acc.Incarnation, accounts.SerialiseV3(&acc))
-		}
-		for addr := range keys.Nonces() {
-			acc, err := account(addr)
-			if err != nil {
-				return err
-			}
-			accumulator.ChangeAccount(addr.Value(), acc.Incarnation, accounts.SerialiseV3(&acc))
-		}
+		accumulator.ChangeStorage(address, inc, common.BytesToHash([]byte(key[length.Addr:])), value)
 	}
+	for key, value := range rs.notificationWrites[kv.CodeDomain] {
+		address := common.BytesToAddress([]byte(key))
+		inc, err := incarnation(address)
+		if err != nil {
+			return err
+		}
+		accumulator.ChangeCode(address, inc, value)
+	}
+	for key, value := range rs.notificationWrites[kv.AccountsDomain] {
+		address := common.BytesToAddress([]byte(key))
+		if len(value) == 0 {
+			accumulator.DeleteAccount(address)
+			continue
+		}
+		inc, err := incarnation(address)
+		if err != nil {
+			return err
+		}
+		accumulator.ChangeAccount(address, inc, value)
+	}
+	rs.notificationWrites = [kv.CodeDomain + 1]map[string][]byte{}
 	return nil
 }
 

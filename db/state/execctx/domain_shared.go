@@ -218,7 +218,8 @@ func IsDomainAheadOfBlocks(ctx context.Context, tx kv.TemporalRwTx, logger log.L
 }
 
 type SharedDomains struct {
-	sdCtx *commitmentdb.SharedDomainsCommitmentContext
+	stateWriteObserver func(kv.Domain, []byte, []byte)
+	sdCtx              *commitmentdb.SharedDomainsCommitmentContext
 
 	stepSize uint64
 
@@ -1839,6 +1840,17 @@ func (sd *SharedDomains) HistorySeek(domain kv.Domain, key []byte, ts uint64) (v
 	return sd.mem.HistorySeek(domain, key, ts)
 }
 
+func (sd *SharedDomains) SetStateWriteObserver(observer func(kv.Domain, []byte, []byte)) {
+	sd.stateWriteObserver = observer
+}
+
+func (sd *SharedDomains) observeStateWrite(domain kv.Domain, key, value []byte) {
+	// Account, code and storage writes share one apply goroutine; commitment writes can run concurrently.
+	if domain <= kv.CodeDomain && sd.stateWriteObserver != nil {
+		sd.stateWriteObserver(domain, key, value)
+	}
+}
+
 // DomainPut
 // Optimizations:
 //   - user can provide `prevVal != nil` - then it will not read prev value from storage
@@ -1865,7 +1877,11 @@ func (sd *SharedDomains) domainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 	// sd.mem and is published to the cache only after a successful Commit;
 	// publishing it earlier could expose uncommitted, fork-specific state.
 
-	return sd.mem.DomainPut(domain, ks, v, txNum, prevVal)
+	if err := sd.mem.DomainPut(domain, ks, v, txNum, prevVal); err != nil {
+		return err
+	}
+	sd.observeStateWrite(domain, k, v)
+	return nil
 }
 
 // resolvePrevVal runs DomainPut's shared prologue: touches ks for the
@@ -1927,7 +1943,11 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, tx kv.TemporalTx, k []byte,
 
 	// As in DomainPut, a deletion reaches the shared state cache only after a
 	// successful Commit.
-	return sd.mem.DomainDel(domain, ks, txNum, prevVal)
+	if err := sd.mem.DomainDel(domain, ks, txNum, prevVal); err != nil {
+		return err
+	}
+	sd.observeStateWrite(domain, k, nil)
+	return nil
 }
 
 func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, roTx kv.TemporalTx, prefix []byte, txNum uint64) error {

@@ -116,20 +116,20 @@ func TestUnwoundBlobTxnWithoutSidecarIsNotAdded(t *testing.T) {
 			}},
 		}
 	}
-	require.NoError(t, pool.OnNewBlock(ctx, block(0, 2, remoteproto.Direction_FORWARD), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	require.NoError(t, applyTestBlock(ctx, pool, block(0, 2, remoteproto.Direction_FORWARD), TxnSlots{}, TxnSlots{}, TxnSlots{}))
 
 	blobTxn := makeBlobTxn()
 	blobTxn.Nonce = 2
 	blobTxn.BlobBundles = nil
 	var mined TxnSlots
 	mined.Append(&blobTxn, sender[:], false)
-	require.NoError(t, pool.OnNewBlock(ctx, block(1, 3, remoteproto.Direction_FORWARD), TxnSlots{}, TxnSlots{}, mined))
+	require.NoError(t, applyTestBlock(ctx, pool, block(1, 3, remoteproto.Direction_FORWARD), TxnSlots{}, TxnSlots{}, mined))
 
 	unwoundTxn := blobTxn
 	var unwound TxnSlots
 	unwound.Append(&unwoundTxn, sender[:], false)
 	reorg := block(0, 2, remoteproto.Direction_UNWIND)
 	reorg.ChangeBatch = append(reorg.ChangeBatch, &remoteproto.StateChange{BlockHeight: 1, BlockHash: gointerfaces.ConvertHashToH256(common.Hash{0x11})})
-	require.NoError(t, pool.OnNewBlock(ctx, reorg, TxnSlots{}, unwound, TxnSlots{}))
+	require.NoError(t, applyTestBlock(ctx, pool, reorg, TxnSlots{}, unwound, TxnSlots{}))
 	require.NotContains(t, pool.byHash, string(blobTxn.IDHash[:]))
 }

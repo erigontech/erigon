@@ -63,20 +63,22 @@ type announceInfo struct {
 // genesis hash and list of forks, but with zero max block and total difficulty
 // Sentry should have a logic not to overwrite statusData with messages from txn pool
 type Fetch struct {
-	ctx                      context.Context // Context used for cancellation and closing of the fetcher
-	pool                     Pool            // Transaction pool implementation
-	db                       kv.RwDB
-	stateChangesClient       StateChangesClient
-	wg                       *sync.WaitGroup // used for synchronisation in the tests (nil when not in tests)
-	connectWg                sync.WaitGroup  // tracks goroutines spawned by ConnectCore/ConnectSentries
-	stateChangesParseCtx     *TxnParseContext
-	pooledTxnsParseCtx       *TxnParseContext
-	sentryClients            []sentryproto.SentryClient // sentry clients that will be used for accessing the network
-	stateChangesParseCtxLock sync.Mutex
-	pooledTxnsParseCtxLock   sync.Mutex
-	announcements            *maphash.LRU[announceInfo] // announceKey(txHash, peerHash) -> announced (type, size) from that peer
-	newBlocks                atomic.Uint64
-	logger                   log.Logger
+	ctx                       context.Context // Context used for cancellation and closing of the fetcher
+	latestStateChanges        *remoteproto.StateChangeBatch
+	onStateChangesUnavailable func()
+	pool                      Pool // Transaction pool implementation
+	db                        kv.RwDB
+	stateChangesClient        StateChangesClient
+	wg                        *sync.WaitGroup // used for synchronisation in the tests (nil when not in tests)
+	connectWg                 sync.WaitGroup  // tracks goroutines spawned by ConnectCore/ConnectSentries
+	stateChangesParseCtx      *TxnParseContext
+	pooledTxnsParseCtx        *TxnParseContext
+	sentryClients             []sentryproto.SentryClient // sentry clients that will be used for accessing the network
+	stateChangesParseCtxLock  sync.Mutex
+	pooledTxnsParseCtxLock    sync.Mutex
+	announcements             *maphash.LRU[announceInfo] // announceKey(txHash, peerHash) -> announced (type, size) from that peer
+	newBlocks                 atomic.Uint64
+	logger                    log.Logger
 }
 
 type StateChangesClient interface {
@@ -788,37 +790,100 @@ func (f *Fetch) handleNewPeer(req *sentryproto.PeerEvent) error {
 func (f *Fetch) handleStateChanges(ctx context.Context, client StateChangesClient) error {
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	if f.onStateChangesUnavailable != nil {
+		defer f.onStateChangesUnavailable()
+	}
 	stream, err := client.StateChanges(streamCtx, &remoteproto.StateChangeRequest{WithStorage: true, WithTransactions: true}, grpc.WaitForReady(true))
 	if err != nil {
 		return err
 	}
-	var needsRefresh bool
-	for req, err := stream.Recv(); ; req, err = stream.Recv() {
-		if err != nil {
-			return err
+	type delivery struct {
+		batch *remoteproto.StateChangeBatch
+		err   error
+	}
+	deliveries := make(chan delivery)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			req, err := stream.Recv()
+			select {
+			case deliveries <- delivery{req, err}:
+			case <-streamCtx.Done():
+				return
+			}
+			if err != nil || req == nil {
+				return
+			}
 		}
-		if req == nil {
-			return nil
+	}()
+	defer func() { cancel(); <-done }()
+	retry := time.NewTicker(250 * time.Millisecond)
+	defer retry.Stop()
+	applied := false
+	needsRefresh := false
+	for {
+		received := false
+		select {
+		case event := <-deliveries:
+			if event.err != nil {
+				return event.err
+			}
+			if event.batch == nil {
+				return nil
+			}
+			f.latestStateChanges = event.batch
+			applied = false
+			received = true
+		case <-retry.C:
+			if f.latestStateChanges == nil {
+				continue
+			}
+		case <-ctx.Done():
+			return ctx.Err()
 		}
-		// Delivery can succeed even when applying the changes fails. Preserve the
-		// gap until an update succeeds, without changing other subscribers' batches.
+		req := f.latestStateChanges
 		if needsRefresh && !req.StateChangesIncomplete {
 			req = proto.Clone(req).(*remoteproto.StateChangeBatch)
 			req.StateChangesIncomplete = true
 		}
-		applyErr := f.handleStateChangesRequest(ctx, req)
-		needsRefresh = applyErr != nil
-		if applyErr != nil && !errors.Is(applyErr, context.Canceled) {
-			f.logger.Warn("[fetch] onNewBlock", "err", applyErr)
+		err := f.handleStateChangesRequest(ctx, req, !applied)
+		needsRefresh = err != nil
+		if err != nil {
+			if ctx.Err() == nil {
+				f.logger.Debug("[fetch] state refresh pending", "err", err)
+			}
+		} else {
+			applied = true
 		}
-
-		if f.wg != nil { // to help tests
+		if received && f.wg != nil {
 			f.wg.Done()
 		}
 	}
 }
 
-func (f *Fetch) handleStateChangesRequest(ctx context.Context, req *remoteproto.StateChangeBatch) error {
+func (f *Fetch) handleStateChangesRequest(ctx context.Context, req *remoteproto.StateChangeBatch, newBlock bool) error {
+	var unwindTxns, unwindBlobTxns, minedTxns TxnSlots
+	if newBlock {
+		var err error
+		unwindTxns, unwindBlobTxns, minedTxns, err = f.parseStateChanges(req)
+		if err != nil {
+			if f.onStateChangesUnavailable != nil {
+				f.onStateChangesUnavailable()
+			}
+			return err
+		}
+	}
+	if err := f.pool.OnNewBlock(ctx, req, unwindTxns, unwindBlobTxns, minedTxns); err != nil {
+		return err
+	}
+	if newBlock {
+		f.newBlocks.Add(1)
+	}
+	return nil
+}
+
+func (f *Fetch) parseStateChanges(req *remoteproto.StateChangeBatch) (unwindTxns, unwindBlobTxns, minedTxns TxnSlots, err error) {
 	type txnChange struct {
 		txn       *TxnSlot
 		sender    [20]byte
@@ -838,18 +903,13 @@ func (f *Fetch) handleStateChangesRequest(ctx context.Context, req *remoteproto.
 				_, err := parseContext.ParseTransaction(rlp, 0, parsed.txn, parsed.sender[:], false /* hasEnvelope */, false /* wrappedWithBlobs */, nil)
 				return err
 			}); err != nil {
-				if !errors.Is(err, context.Canceled) {
-					txnType, _ := PeekTransactionType(rlp)
-					f.logger.Debug("[txpool.fetch] stream.Recv", "dir", change.Direction, "txnType", txnType, "index", i, "err", err)
-				}
-				continue // 1 txn handling error must not stop batch processing
+				return TxnSlots{}, TxnSlots{}, TxnSlots{}, fmt.Errorf("state change transaction %d in block %d: %w", i, change.BlockHeight, err)
 			}
 			lastChange[parsed.txn.IDHash] = len(txns)
 			txns = append(txns, parsed)
 		}
 	}
 
-	var unwindTxns, unwindBlobTxns, minedTxns TxnSlots
 	for i, change := range txns {
 		if lastChange[change.txn.IDHash] != i {
 			continue
@@ -864,9 +924,5 @@ func (f *Fetch) handleStateChangesRequest(ctx context.Context, req *remoteproto.
 		}
 	}
 
-	if err := f.pool.OnNewBlock(ctx, req, unwindTxns, unwindBlobTxns, minedTxns); err != nil {
-		return err
-	}
-	f.newBlocks.Add(1)
-	return nil
+	return unwindTxns, unwindBlobTxns, minedTxns, nil
 }

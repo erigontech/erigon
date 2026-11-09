@@ -194,9 +194,6 @@ func doTxpool(ctx context.Context, logger log.Logger) error {
 	cfg.MdbxWriteMap = mdbxWriteMap
 	cfg.QueuedDormancyDuration = queuedDormancyEvery
 
-	cacheConfig := kvcache.DefaultCoherentConfig
-	cacheConfig.MetricsLabel = "txpool"
-
 	cfg.TracedSenders = make([]string, len(traceSenders))
 	for i, senderHex := range traceSenders {
 		sender := common.HexToAddress(senderHex)
@@ -208,7 +205,7 @@ func doTxpool(ctx context.Context, logger log.Logger) error {
 		ctx,
 		cfg,
 		coreDB,
-		kvcache.New(cacheConfig),
+		kvcache.NewLatestBatchCache(),
 		sentryClients,
 		kvClient,
 		notifyMiner,

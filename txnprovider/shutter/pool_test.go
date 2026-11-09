@@ -45,9 +45,12 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/testlog"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/chain"
@@ -442,8 +445,9 @@ func TestPoolProvideTxnsAmsterdamGasAdmission(t *testing.T) {
 }
 
 func TestPoolProvideTxnsUsesRemainingGasForAdmission(t *testing.T) {
+	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	publicPool, err := txpool.New(t.Context(), make(chan txpool.Announcements, 1),
-		mdbxtest.NewTestPoolDB(t), temporaltest.NewTestDB(t, datadir.New(t.TempDir())),
+		mdbxtest.NewTestPoolDB(t), coreDB,
 		txpoolcfg.DefaultConfig, kvcache.New(kvcache.DefaultCoherentConfig), chain.AllProtocolChanges,
 		nil, nil, func() {}, nil, nil, log.New(), txpool.WithFeeCalculator(nil))
 	require.NoError(t, err)
@@ -454,8 +458,27 @@ func TestPoolProvideTxnsUsesRemainingGasForAdmission(t *testing.T) {
 
 		sender := common.Address{1}
 		account := accounts.Account{Balance: *uint256.NewInt(common.Ether), CodeHash: accounts.EmptyCodeHash}
+		var version uint64
+		require.NoError(t, coreDB.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
+			domains, err := execctx.NewSharedDomains(ctx, tx, log.New())
+			if err != nil {
+				return err
+			}
+			defer domains.Close()
+			if putErr := domains.DomainPut(kv.AccountsDomain, tx, sender[:], accounts.SerialiseV3(&account), 1, nil); putErr != nil {
+				return putErr
+			}
+			if flushErr := domains.Flush(ctx, tx); flushErr != nil {
+				return flushErr
+			}
+			version, err = rawdb.GetStateVersion(tx)
+			return err
+		}))
 		require.NoError(t, publicPool.OnNewBlock(ctx, &remoteproto.StateChangeBatch{
-			BlockGasLimit: 1_000_000,
+			StateVersionId:         version,
+			StateChangesIncomplete: true,
+			TargetView:             &remoteproto.ExecutionView{BlockHash: gointerfaces.ConvertHashToH256(common.Hash{}), BlockHeight: handle.nextBlockNum - 1, StateVersionId: version},
+			BlockGasLimit:          1_000_000,
 			ChangeBatch: []*remoteproto.StateChange{{
 				BlockHeight: handle.nextBlockNum - 1,
 				BlockHash:   gointerfaces.ConvertHashToH256(common.Hash{}),

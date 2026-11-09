@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/notifications"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
@@ -208,9 +209,10 @@ func TestNotifyAccumulatorFromVersionedWrites(t *testing.T) {
 	err = collector.WriteAccountStorage(addr, 1, storageKey, storageVal, storageVal)
 	require.NoError(t, err)
 
+	defer rs.TrackNotifications()()
 	writes := collector.Writes()
 	require.NoError(t, rs.ApplyStateWrites(context.Background(), tx, 1, 1, writes, nil, &chain.Rules{}))
-	require.NoError(t, rs.NotifyAccumulator(accumulator, tx, []state.WriteSetView{writes}))
+	require.NoError(t, rs.NotifyAccumulator(accumulator, tx))
 
 	changes := accumulator.Changes()
 	require.Len(t, changes, 1, "one StateChange batch expected")
@@ -237,6 +239,7 @@ func notifyAccumulatorFromAppliedWrites(t *testing.T, addr accounts.Address, see
 	addrVal := addr.Value()
 	require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, addrVal[:], accounts.SerialiseV3(&seed), 0, nil))
 
+	defer rs.TrackNotifications()()
 	for i, writeSet := range writes {
 		require.NoError(t, rs.ApplyStateWrites(context.Background(), tx, 1, uint64(i+1), writeSet, nil, &chain.Rules{}))
 	}
@@ -245,7 +248,7 @@ func notifyAccumulatorFromAppliedWrites(t *testing.T, addr accounts.Address, see
 	var hdr types.Header
 	hdr.Number.SetUint64(1)
 	accumulator.StartChange(&hdr, nil, false)
-	require.NoError(t, rs.NotifyAccumulator(accumulator, tx, writes))
+	require.NoError(t, rs.NotifyAccumulator(accumulator, tx))
 	return accumulator
 }
 
@@ -350,4 +353,40 @@ func TestNotifyAccumulatorMergesBalanceAndCodeAtFinalIncarnation(t *testing.T) {
 	var got accounts.Account
 	require.NoError(t, accounts.DeserialiseV3(&got, change.Data))
 	require.Equal(t, uint64(1), got.Incarnation)
+}
+
+func TestNotifyAccumulatorIncludesSelfDestruct(t *testing.T) {
+	addr := accounts.InternAddress(common.Address{42})
+	accumulator := notifyAccumulatorFromAppliedWrites(t, addr,
+		accounts.Account{Balance: *uint256.NewInt(100), CodeHash: accounts.EmptyCodeHash},
+		newWS().selfDestruct(addr, state.Version{}, true).build())
+	require.Len(t, accumulator.Changes()[0].Changes, 1)
+	require.Equal(t, notifications.ActionRemove, accumulator.Changes()[0].Changes[0].Action)
+}
+
+func TestNotifyAccumulatorIncludesCodeAndStorageDeletion(t *testing.T) {
+	tx, domains := setup2CacheTest(t)
+	address := common.Address{42}
+	require.NoError(t, domains.DomainPut(kv.CodeDomain, tx, address[:], []byte{1}, 1, nil))
+	for _, slot := range []byte{1, 2} {
+		location := common.Hash{slot}
+		key := append([]byte(nil), address[:]...)
+		key = append(key, location[:]...)
+		require.NoError(t, domains.DomainPut(kv.StorageDomain, tx, key, []byte{1}, 1, nil))
+	}
+	rs := state.NewStateV3(domains, false, log.New())
+	defer rs.TrackNotifications()()
+	require.NoError(t, domains.DomainDel(kv.CodeDomain, tx, address[:], 2, nil))
+	require.NoError(t, domains.DomainDelPrefix(kv.StorageDomain, tx, address[:], 2))
+	accumulator := shards.NewAccumulator()
+	accumulator.StartChange(&types.Header{}, nil, false)
+	require.NoError(t, rs.NotifyAccumulator(accumulator, tx))
+	require.Len(t, accumulator.Changes()[0].Changes, 1)
+	change := accumulator.Changes()[0].Changes[0]
+	require.Equal(t, notifications.ActionCode, change.Action)
+	require.Empty(t, change.Code)
+	require.Len(t, change.StorageChanges, 2)
+	for _, storage := range change.StorageChanges {
+		require.Empty(t, storage.Data)
+	}
 }

@@ -505,7 +505,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 		}
 		// go to first fork
 		txns1, txns2, p2pReceived, txns3 := splitDataset(txns)
-		err = pool.OnNewBlock(ctx, change, txns1, TxnSlots{}, TxnSlots{})
+		err = applyTestBlock(ctx, pool, change, txns1, TxnSlots{}, TxnSlots{})
 		require.NoError(err)
 		check(txns1, TxnSlots{}, "fork1")
 		checkNotify(txns1, TxnSlots{}, "fork1")
@@ -518,7 +518,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 				{BlockHeight: 1, BlockHash: h0},
 			},
 		}
-		err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, txns2)
+		err = applyTestBlock(ctx, pool, change, TxnSlots{}, TxnSlots{}, txns2)
 		require.NoError(err)
 		check(TxnSlots{}, txns2, "fork1 mined")
 		checkNotify(TxnSlots{}, txns2, "fork1 mined")
@@ -531,7 +531,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 				{BlockHeight: 0, BlockHash: h0, Direction: remoteproto.Direction_UNWIND},
 			},
 		}
-		err = pool.OnNewBlock(ctx, change, txns2, TxnSlots{}, TxnSlots{})
+		err = applyTestBlock(ctx, pool, change, txns2, TxnSlots{}, TxnSlots{})
 		require.NoError(err)
 		check(txns2, TxnSlots{}, "fork2")
 		checkNotify(txns2, TxnSlots{}, "fork2")
@@ -543,7 +543,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 				{BlockHeight: 1, BlockHash: h22},
 			},
 		}
-		err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, txns3)
+		err = applyTestBlock(ctx, pool, change, TxnSlots{}, TxnSlots{}, txns3)
 		require.NoError(err)
 		check(TxnSlots{}, txns3, "fork2 mined")
 		checkNotify(TxnSlots{}, txns3, "fork2 mined")

@@ -295,6 +295,15 @@ func (p *TxPool) simulateFrame(ctx context.Context, txn *TxnSlot, generation uin
 		return nil, err
 	}
 	req := &remoteproto.FrameValidationRequest{Transaction: data.Bytes()}
+	p.lock.Lock()
+	if generation != p.stateGeneration || p.stateUpdatePending {
+		p.lock.Unlock()
+		return nil, kvcache.ErrExecutionViewUnavailable
+	}
+	if p.appliedView != nil {
+		req.ExpectedStateVersion = common.NewUint64(p.appliedView.StateVersionId)
+	}
+	p.lock.Unlock()
 	if stateBlockHash != (common.Hash{}) {
 		req.ExpectedBlockHash = gointerfaces.ConvertHashToH256(stateBlockHash)
 	}
@@ -498,7 +507,7 @@ func (p *TxPool) refreshFrameAccounts(cacheView kvcache.CacheView) error {
 // invalidateFrames drops expired transactions and parks those whose validation may be stale.
 // The caller holds the pool lock; revalidateFrames performs the EVM work later.
 func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*metaTxn {
-	head := changes.ChangeBatch[len(changes.ChangeBatch)-1]
+	head := changes.TargetView
 	headIsBogota := p.chainConfig.IsBogota(head.BlockTime)
 	activationUnwound := p.headIsBogota && !headIsBogota
 	p.headIsBogota = headIsBogota

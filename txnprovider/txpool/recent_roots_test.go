@@ -95,7 +95,7 @@ func TestFramePoolRecentRootExpiry(t *testing.T) {
 			ctx, pool, sender := keyedFramePoolEnv(t)
 			initial := newBlockChangeForAccounts(common.Hash{1}, 0)
 			initial.ChangeBatch[0].SlotNumber = common.NewUint64(10)
-			require.NoError(t, pool.OnNewBlock(ctx, initial, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+			require.NoError(t, applyTestBlock(ctx, pool, initial, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 			slot := recentRootPoolSlot(t, sender, 10, 1)
 			var txns TxnSlots
 			txns.Append(slot, sender[:], true)
@@ -107,7 +107,7 @@ func TestFramePoolRecentRootExpiry(t *testing.T) {
 
 			change := newBlockChangeForAccounts(common.Hash{2}, 0)
 			change.ChangeBatch[0].SlotNumber = tc.slot
-			require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+			require.NoError(t, applyTestBlock(ctx, pool, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 			if tc.keep {
 				require.Contains(t, pool.byHash, string(slot.IDHash[:]))
 			} else {
@@ -140,7 +140,7 @@ func TestFramePoolRecentRootForkBoundary(t *testing.T) {
 				initial := newBlockChangeForAccounts(common.Hash{1}, 0)
 				initial.ChangeBatch[0].BlockTime = now + tc.initialTime
 				initial.ChangeBatch[0].SlotNumber = common.NewUint64(tc.initialSlot)
-				require.NoError(t, pool.OnNewBlock(ctx, initial, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+				require.NoError(t, applyTestBlock(ctx, pool, initial, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 				time.Sleep(100 * time.Second)
 				slot := recentRootPoolSlot(t, sender, 10, 1)
 				var txns TxnSlots
@@ -154,7 +154,7 @@ func TestFramePoolRecentRootForkBoundary(t *testing.T) {
 				change.ChangeBatch[0].BlockTime = now + 88
 				change.ChangeBatch[0].SlotNumber = common.NewUint64(20)
 				change.ChangeBatch[0].Direction = tc.direction
-				require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+				require.NoError(t, applyTestBlock(ctx, pool, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 				require.Empty(t, backend.calls, "activation and age checks do not require simulation")
 				if tc.evict {
 					require.NotContains(t, pool.byHash, string(slot.IDHash[:]))
@@ -225,7 +225,7 @@ func TestFramePoolRestoredRecentRootEviction(t *testing.T) {
 					head.BlockTime = now - 12
 					head.Direction = remoteproto.Direction_UNWIND
 				}
-				require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+				require.NoError(t, applyTestBlock(ctx, pool, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 				if tc.keep {
 					require.Contains(t, pool.byHash, string(slot.IDHash[:]))
 					require.Equal(t, PendingSubPool, mt.currentSubPool)
@@ -297,7 +297,7 @@ func TestFramePoolRecentRootDependencies(t *testing.T) {
 				head.Direction = remoteproto.Direction_UNWIND
 			}
 			backend.valid, backend.calls = false, nil
-			require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+			require.NoError(t, applyTestBlock(ctx, pool, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 			if tc.revalidate {
 				require.Equal(t, []common.Hash{slot.IDHash}, backend.calls)
 				require.NotContains(t, pool.byHash, string(slot.IDHash[:]))
@@ -336,7 +336,7 @@ func TestFramePoolRecentRootDeploymentUnwindWithBalance(t *testing.T) {
 		}},
 	}}
 	backend.valid, backend.calls = false, nil
-	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	require.NoError(t, applyTestBlock(ctx, pool, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 	require.Equal(t, []common.Hash{slot.IDHash}, backend.calls)
 	require.NotContains(t, pool.byHash, string(slot.IDHash[:]))
 	require.Empty(t, pool.frameReservations)
@@ -367,7 +367,7 @@ func TestFramePoolRecentRootReplacement(t *testing.T) {
 			Address: gointerfaces.ConvertAddressToH160(types.FrameRecentRootVerifier), Action: remoteproto.Action_STORAGE,
 			StorageChanges: []*remoteproto.StorageChange{{Location: gointerfaces.ConvertHashToH256(slot.frameValidation.RecentRoots[0].StorageKey)}},
 		}}
-		require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+		require.NoError(t, applyTestBlock(ctx, pool, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 		if slot == first {
 			require.Empty(t, backend.calls)
 			require.Contains(t, pool.byHash, string(replacement.IDHash[:]))
@@ -395,7 +395,7 @@ func TestFramePoolRecentRootIncompleteNotifications(t *testing.T) {
 			initial := newBlockChangeForAccounts(common.Hash{1}, 0)
 			initial.ChangeBatch[0].BlockHeight = 1_011
 			initial.ChangeBatch[0].SlotNumber = common.NewUint64(1_011)
-			require.NoError(t, pool.OnNewBlock(ctx, initial, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+			require.NoError(t, applyTestBlock(ctx, pool, initial, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 			slot := recentRootPoolSlot(t, sender, 10, 1)
 			var txns TxnSlots
 			txns.Append(slot, sender[:], true)
@@ -412,7 +412,7 @@ func TestFramePoolRecentRootIncompleteNotifications(t *testing.T) {
 			change.ChangeBatch[0].BlockHeight = tc.height
 			change.ChangeBatch[0].SlotNumber = common.NewUint64(tc.height)
 			require.True(t, slot.frameValidation.RecentRoots[0].ValidAt(tc.height+1), "age checks alone cannot detect the missing root")
-			require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+			require.NoError(t, applyTestBlock(ctx, pool, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 			if tc.incomplete {
 				require.Equal(t, []common.Hash{slot.IDHash}, backend.calls)
 				require.NotContains(t, pool.byHash, string(slot.IDHash[:]))

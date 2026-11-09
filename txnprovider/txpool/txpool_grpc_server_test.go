@@ -29,9 +29,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/status"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -174,7 +172,7 @@ func TestGrpcServerAddRetriesNonceGapAfterStateUpdate(t *testing.T) {
 					}},
 				}},
 			}
-			require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+			require.NoError(t, applyTestBlock(ctx, pool, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 
 			first, err := server.Add(ctx, request)
 			require.NoError(t, err)
@@ -191,7 +189,7 @@ func TestGrpcServerAddRetriesNonceGapAfterStateUpdate(t *testing.T) {
 			account.Nonce = 141
 			change.ChangeBatch[0].BlockHeight = 142
 			change.ChangeBatch[0].Changes[0].Data = accounts3.SerialiseV3(&account)
-			require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+			require.NoError(t, applyTestBlock(ctx, pool, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 
 			retry, err := server.Add(ctx, request)
 			require.NoError(t, err)
@@ -259,13 +257,13 @@ func TestGrpcServerParkedFrame(t *testing.T) {
 	backend.err = context.DeadlineExceeded
 	change := newBlockChangeForAccounts(common.Hash{1}, 0, sender)
 	change.ChangeBatch[0].BlockHeight = 1
-	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	require.NoError(t, applyTestBlock(ctx, pool, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 	checkParked()
 
 	backend.err = nil
 	change = newBlockChangeForAccounts(common.Hash{2}, 0)
 	change.ChangeBatch[0].BlockHeight = 2
-	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	require.NoError(t, applyTestBlock(ctx, pool, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 	checkContent(txpoolproto.AllReply_PENDING, 1, 0)
 }
 
@@ -317,7 +315,7 @@ func TestQueryAllWithoutPanicUnknown(t *testing.T) {
 	})
 
 	// Apply state change
-	if err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}); err != nil {
+	if err = applyTestBlock(ctx, pool, change, TxnSlots{}, TxnSlots{}, TxnSlots{}); err != nil {
 		t.Fatalf("OnNewBlock: %v", err)
 	}
 
@@ -398,7 +396,7 @@ func TestQueryAllWithoutPanicUnknown(t *testing.T) {
 			// Now mined-removal path for whichever is present (use B here)
 			var mined TxnSlots
 			mined.Append(slotB, addr[:], true)
-			_ = pool.OnNewBlock(ctx, &remoteproto.StateChangeBatch{ // keep the same base fee
+			_ = applyTestBlock(ctx, pool, &remoteproto.StateChangeBatch{ // keep the same base fee
 				StateVersionId:      stateVersionID,
 				PendingBlockBaseFee: pendingBaseFee,
 				BlockGasLimit:       1_000_000,
@@ -432,7 +430,7 @@ func TestQueryAllWithoutPanicUnknown(t *testing.T) {
 				bf = pendingBaseFee / 20 // very low to allow promotions
 			}
 			flip = !flip
-			_ = pool.OnNewBlock(ctx, &remoteproto.StateChangeBatch{
+			_ = applyTestBlock(ctx, pool, &remoteproto.StateChangeBatch{
 				StateVersionId:      stateVersionID,
 				PendingBlockBaseFee: bf,
 				BlockGasLimit:       1_000_000,
@@ -530,9 +528,12 @@ func TestP2PPropagationContinuesWhileOnAddSubscriberStalls(t *testing.T) {
 		Return(&sentryproto.PeersReply{}, nil).AnyTimes()
 
 	stateChanges := remoteproto.NewMockKVClient(ctrl)
-	stateChanges.EXPECT().
-		StateChanges(gomock.Any(), gomock.Any(), gomock.Any()).
-		Return(nil, status.Error(codes.Unavailable, "no core node in this test")).AnyTimes()
+	stream := remoteproto.NewMockKV_StateChangesClient[*remoteproto.StateChangeBatch](ctrl)
+	stream.EXPECT().Recv().DoAndReturn(func() (*remoteproto.StateChangeBatch, error) {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}).AnyTimes()
+	stateChanges.EXPECT().StateChanges(gomock.Any(), gomock.Any(), gomock.Any()).Return(stream, nil).AnyTimes()
 
 	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	poolDB := mdbxtest.NewTestPoolDB(t)
@@ -570,7 +571,7 @@ func TestP2PPropagationContinuesWhileOnAddSubscriberStalls(t *testing.T) {
 			}},
 		}},
 	}
-	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	require.NoError(t, applyTestBlock(ctx, pool, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 
 	runDone := make(chan struct{})
 	go func() {

@@ -319,7 +319,7 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 	}
 
 	if hook != nil {
-		if err := pe.db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		if err := pe.db.View(ctx, func(tx kv.Tx) error {
 			headersProgress, err := stages.GetStageProgress(tx, stages.Headers)
 			if err != nil {
 				return err

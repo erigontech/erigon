@@ -171,8 +171,7 @@ func subscribeStateChangeHeads(t *testing.T, m *ExecModuleTester) func(common.Ha
 		for {
 			select {
 			case batch := <-batches:
-				last := batch.ChangeBatch[len(batch.ChangeBatch)-1]
-				if gointerfaces.ConvertH256ToHash(last.BlockHash) == head {
+				if gointerfaces.ConvertH256ToHash(batch.TargetView.BlockHash) == head {
 					return batch
 				}
 			case <-deadline:
@@ -237,7 +236,7 @@ func TestReorgPreservesUnwindStateChanges(t *testing.T) {
 	for _, tc := range reorgCases {
 		t.Run(tc.name, func(t *testing.T) {
 			oldHead, forkBlocks, got := runReorg(t, tc)
-			require.False(t, got.stateChanges.StateChangesIncomplete)
+			require.True(t, got.stateChanges.StateChangesIncomplete)
 			changes := got.stateChanges.ChangeBatch
 			require.Len(t, changes, 1+len(forkBlocks))
 			require.Equal(t, remoteproto.Direction_UNWIND, changes[0].Direction)
@@ -312,7 +311,7 @@ func TestReorgAccountNotificationAcrossSteps(t *testing.T) {
 	require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status)
 	m.ExecModule.WaitIdle(t.Context())
 	batch := waitForBatchWithHead(side.TopBlock.Hash())
-	require.False(t, batch.StateChangesIncomplete)
+	require.True(t, batch.StateChangesIncomplete)
 	cache := kvcache.NewLatestBatchCache()
 	cache.OnNewBlock(batch)
 	require.NoError(t, m.DB.ViewTemporal(t.Context(), func(tx kv.TemporalTx) error {
@@ -322,7 +321,7 @@ func TestReorgAccountNotificationAcrossSteps(t *testing.T) {
 		require.NoError(t, err)
 		got, err := view.Get(recipient[:])
 		require.NoError(t, err)
-		require.Equal(t, want, got, "the replacement branch leaves the recipient untouched, so its unwind notification must contain the restored account")
+		require.Equal(t, want, got, "reset must read the restored account even when the replacement branch leaves it untouched")
 		return nil
 	}))
 }
@@ -708,7 +707,8 @@ func TestRepeatedForkchoiceDeliversIncompleteChanges(t *testing.T) {
 	m.ExecModule.WaitIdle(t.Context())
 	batch := waitForBatchWithHead(canonical.TopBlock.Hash())
 	require.True(t, batch.StateChangesIncomplete)
-	require.Len(t, batch.ChangeBatch, 1)
+	require.Empty(t, batch.ChangeBatch)
+	require.Equal(t, canonical.TopBlock.NumberU64(), batch.TargetView.BlockHeight)
 }
 
 func TestSuccessiveSetHeadAnnouncesDeepUnwindTarget(t *testing.T) {
@@ -742,7 +742,7 @@ func TestSuccessiveSetHeadAnnouncesDeepUnwindTarget(t *testing.T) {
 	m.ExecModule.WaitIdle(t.Context())
 	batch := waitForBatchWithHead(target.Hash())
 	require.True(t, batch.StateChangesIncomplete)
-	last := batch.ChangeBatch[len(batch.ChangeBatch)-1]
+	last := batch.TargetView
 	require.Equal(t, target.Number.Uint64(), last.BlockHeight)
 	require.Equal(t, target.Time, last.BlockTime)
 	require.Equal(t, target.SlotNumber, last.SlotNumber)
