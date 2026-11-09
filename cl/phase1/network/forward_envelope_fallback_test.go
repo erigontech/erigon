@@ -58,8 +58,6 @@ func TestForwardHTTPEnvelopeRejectsBidMismatch(t *testing.T) {
 		t.Run(pid, func(t *testing.T) {
 			cfg := gloasFromGenesisConfig()
 			block, envelope, root := makeFullGloasTipAndEnvelope(t, cfg, 10)
-			envelope.Message.Payload.BlockHash = hash(0xff)
-			require.ErrorContains(t, ValidateDownloadedGloasEnvelope(cfg, block, envelope), "block hash mismatch")
 			encoded, err := envelope.EncodeSSZ(nil)
 			require.NoError(t, err)
 			server := newEnvelopeServer(t, root, encoded)
@@ -71,6 +69,16 @@ func TestForwardHTTPEnvelopeRejectsBidMismatch(t *testing.T) {
 			blocks := []*cltypes.SignedBeaconBlock{block}
 			roots := [][32]byte{root}
 			envelopes := downloader.fetchGloasEnvelopes(t.Context(), p2pCtx, pid, blocks, roots)
+			require.Contains(t, envelopes, root)
+
+			envelope.Message.Payload.BlockHash = hash(0xff)
+			require.ErrorContains(t, ValidateDownloadedGloasEnvelope(cfg, block, envelope), "block hash mismatch")
+			encoded, err = envelope.EncodeSSZ(nil)
+			require.NoError(t, err)
+			server = newEnvelopeServer(t, root, encoded)
+			downloader.SetHTTPFallbackURL(server.URL)
+
+			envelopes = downloader.fetchGloasEnvelopes(t.Context(), p2pCtx, pid, blocks, roots)
 
 			require.Empty(t, envelopes)
 			require.Empty(t, retainBlocksBeforeMissingGloasEnvelope(blocks, roots, envelopes))
