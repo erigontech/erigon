@@ -809,35 +809,50 @@ func TestFlushEstimate_ValidTxNotMarkedEstimate(t *testing.T) {
 	require.Equal(t, 7, res2.DepIdx())
 }
 
-func TestMarkWritesCompleteRunsUnderReadersOfTheEntry(t *testing.T) {
+var flagMarks = []struct {
+	name   string
+	mark   func(*VersionMap, *WriteSet)
+	status int
+}{
+	{"Complete", func(vm *VersionMap, ws *WriteSet) { vm.MarkWritesComplete(ws) }, MVReadResultDone},
+	{"Validated", func(vm *VersionMap, ws *WriteSet) { vm.MarkWritesValidated(ws, nil) }, MVReadResultValidated},
+}
+
+func TestMarkWritesRunUnderReadersOfTheEntry(t *testing.T) {
 	t.Parallel()
+	for _, m := range flagMarks {
+		t.Run(m.name, func(t *testing.T) {
+			t.Parallel()
 
-	addr := getAddress(45)
-	vm := NewVersionMap(nil)
-	writes := newWriteSet(
-		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Key: accounts.NilKey, Version: Version{TxIndex: 5, Incarnation: 1}}, Val: *uint256.NewInt(100)},
-	)
-	vm.FlushVersionedWrites(writes, false)
+			addr := getAddress(45)
+			vm := NewVersionMap(nil)
+			writes := newWriteSet(
+				&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Key: accounts.NilKey, Version: Version{TxIndex: 5, Incarnation: 1}}, Val: *uint256.NewInt(100)},
+			)
+			vm.FlushVersionedWrites(writes, false)
 
-	e := vm.load(addr)
-	e.mu.RLock()
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		vm.MarkWritesComplete(writes)
-	}()
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		e.mu.RUnlock()
-		t.Fatal("MarkWritesComplete waited for a reader of the entry")
+			e := vm.load(addr)
+			e.mu.RLock()
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				m.mark(vm, writes)
+			}()
+			select {
+			case <-done:
+			case <-time.After(5 * time.Second):
+				e.mu.RUnlock()
+				<-done
+				t.Fatalf("MarkWrites%s waited for a reader of the entry", m.name)
+			}
+			e.mu.RUnlock()
+
+			v, res, _ := readFor(vm, addr, BalancePath, accounts.NilKey, 10)
+			require.Equal(t, m.status, res.Status())
+			require.Equal(t, 1, int(res.Incarnation()))
+			require.Equal(t, *uint256.NewInt(100), v)
+		})
 	}
-	e.mu.RUnlock()
-
-	v, res, _ := readFor(vm, addr, BalancePath, accounts.NilKey, 10)
-	require.Equal(t, MVReadResultDone, res.Status())
-	require.Equal(t, 1, int(res.Incarnation()))
-	require.Equal(t, *uint256.NewInt(100), v)
 }
 
 // TestMarkWritesComplete_FlagFlipPreservesValue verifies the commit-boundary
@@ -2162,42 +2177,47 @@ func TestFlushNetZeroRerunInvalidatesReaderOfEarlierRun(t *testing.T) {
 
 // Readers combine a true destruct's flag with other cells' flags, so marking an entry with one
 // must wait for its readers.
-func TestMarkWritesCompleteWaitsForReadersOfADestructEntry(t *testing.T) {
+func TestMarkWritesWaitForReadersOfADestructEntry(t *testing.T) {
 	t.Parallel()
+	for _, m := range flagMarks {
+		t.Run(m.name, func(t *testing.T) {
+			t.Parallel()
 
-	addr := getAddress(52)
-	vm := NewVersionMap(nil)
-	writes := newWriteSet(
-		&VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Key: accounts.NilKey, Version: Version{TxIndex: 3, Incarnation: 1}}, Val: true},
-		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Key: accounts.NilKey, Version: Version{TxIndex: 3, Incarnation: 1}}, Val: uint256.Int{}},
-	)
-	vm.FlushVersionedWrites(writes, false)
+			addr := getAddress(52)
+			vm := NewVersionMap(nil)
+			writes := newWriteSet(
+				&VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Key: accounts.NilKey, Version: Version{TxIndex: 3, Incarnation: 1}}, Val: true},
+				&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Key: accounts.NilKey, Version: Version{TxIndex: 3, Incarnation: 1}}, Val: uint256.Int{}},
+			)
+			vm.FlushVersionedWrites(writes, false)
 
-	e := vm.load(addr)
-	e.mu.RLock()
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		vm.MarkWritesComplete(writes)
-	}()
-	// A writer waiting for Lock makes TryRLock fail; a mark under RLock finishes instead.
-	for {
-		select {
-		case <-done:
+			e := vm.load(addr)
+			e.mu.RLock()
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				m.mark(vm, writes)
+			}()
+			// A writer waiting for Lock makes TryRLock fail; a mark under RLock finishes instead.
+			for {
+				select {
+				case <-done:
+					e.mu.RUnlock()
+					t.Fatalf("MarkWrites%s marked a destruct entry under a reader", m.name)
+				default:
+				}
+				if !e.mu.TryRLock() {
+					break
+				}
+				e.mu.RUnlock()
+				runtime.Gosched()
+			}
 			e.mu.RUnlock()
-			t.Fatal("MarkWritesComplete marked a destruct entry under a reader")
-		default:
-		}
-		if !e.mu.TryRLock() {
-			break
-		}
-		e.mu.RUnlock()
-		runtime.Gosched()
+			<-done
+			_, res, _ := readFor(vm, addr, BalancePath, accounts.NilKey, 10)
+			require.Equal(t, m.status, res.Status())
+		})
 	}
-	e.mu.RUnlock()
-	<-done
-	_, res, _ := readFor(vm, addr, BalancePath, accounts.NilKey, 10)
-	require.Equal(t, MVReadResultDone, res.Status())
 }
 
 // A created account carries only SelfDestruct=false markers, which no reader combines with other
