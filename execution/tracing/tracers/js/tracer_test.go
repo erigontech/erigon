@@ -457,3 +457,28 @@ func TestGetCodeBufferDoesNotAliasState(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, want, got)
 }
+
+func TestConstructorStopsWhenCancelled(t *testing.T) {
+	t.Parallel()
+	for name, code := range map[string]string{
+		"tracer body": "(function(){ while (true) {} })()",
+		"setup":       "{result: function() {}, fault: function() {}, setup: function() { while (true) {} }}",
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			cancel := make(chan struct{})
+			done := make(chan error, 1)
+			go func() {
+				_, err := newJsTracer(code, &tracers.Context{Cancel: cancel}, nil)
+				done <- err
+			}()
+			close(cancel)
+			select {
+			case err := <-done:
+				require.Error(t, err)
+			case <-time.After(10 * time.Second):
+				t.Fatal("the tracer constructor did not stop")
+			}
+		})
+	}
+}

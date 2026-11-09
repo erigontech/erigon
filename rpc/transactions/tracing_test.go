@@ -369,3 +369,21 @@ func BenchmarkTraceTxAccountReads(b *testing.B) {
 		})
 	}
 }
+
+func TestAssembleTracerStopsAJSConstructorAtTheTimeout(t *testing.T) {
+	t.Parallel()
+	code, timeout := "(function(){ while (true) {} })()", "50ms"
+	done := make(chan error, 1)
+	go func() {
+		_, _, cancel, err := AssembleTracer(t.Context(), &tracersConfig.TraceConfig{Tracer: &code, Timeout: &timeout},
+			common.Hash{}, nil, common.Hash{}, 0, jsonstream.New(io.Discard), time.Minute)
+		cancel()
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		require.Error(t, err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("the JS tracer constructor outlived its timeout")
+	}
+}
