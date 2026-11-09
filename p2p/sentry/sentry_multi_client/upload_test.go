@@ -177,10 +177,10 @@ func TestUploadRequests_ReplaysLeaveWorkersForBodiesAndCacheHits(t *testing.T) {
 				require.Equal(t, int32(1), db.reads.Load(), "waiting replays must not open read transactions")
 
 				handled.Add(2)
-				require.NoError(t, second.Send(uploadRequest(t, sentryproto.MessageId_GET_BLOCK_BODIES_66, 5, 5, common.Hash{2})))
-				require.NoError(t, second.Send(uploadRequest(t, id, 6, 6, common.Hash{2})))
+				require.NoError(t, second.Send(uploadRequest(t, sentryproto.MessageId_GET_BLOCK_BODIES_66, 2, 5, common.Hash{2})))
+				require.NoError(t, second.Send(uploadRequest(t, id, 3, 6, common.Hash{2})))
 				synctest.Wait()
-				require.Len(t, responses, 2, "waiting replays must leave workers available for bodies and cache hits")
+				require.Len(t, responses, 2, "waiting replays must let the same peers receive bodies and cache hits")
 				for range 2 {
 					response := <-responses
 					if response.Data.Id == sentryproto.MessageId_BLOCK_BODIES_66 {
@@ -196,6 +196,44 @@ func TestUploadRequests_ReplaysLeaveWorkersForBodiesAndCacheHits(t *testing.T) {
 			})
 		})
 	}
+}
+
+func TestUploadRequests_WaitingReplaysKeepOrder(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		cs := newUploadTestClient(t)
+		release := make(chan struct{})
+		cs.ethApiWrapper = uploadReceiptsGetter{
+			cached: map[common.Hash]types.Receipts{{2}: {{CumulativeGasUsed: 21_000}}},
+			getReceipts: func(ctx context.Context, _ *types.Block) (types.Receipts, error) {
+				select {
+				case <-release:
+					return types.Receipts{{CumulativeGasUsed: 21_000}}, nil
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				}
+			},
+		}
+		responses := make(chan *sentryproto.SendMessageByIdRequest, 4)
+		stream := startUploadTestStream(t, ctx, cs, nil, func(response *sentryproto.SendMessageByIdRequest) { responses <- response })
+		require.NoError(t, stream.Send(uploadRequest(t, sentryproto.MessageId_GET_RECEIPTS_69, 1, 1, common.Hash{1})))
+		synctest.Wait()
+		for requestID := uint64(2); requestID <= 3; requestID++ {
+			require.NoError(t, stream.Send(uploadRequest(t, sentryproto.MessageId_GET_RECEIPTS_69, 2, requestID, common.Hash{1})))
+			synctest.Wait()
+		}
+		require.NoError(t, stream.Send(uploadRequest(t, sentryproto.MessageId_GET_RECEIPTS_69, 2, 4, common.Hash{2})))
+		synctest.Wait()
+		require.Len(t, responses, 1, "cache hits must run past all waiting replays from the same peer")
+		requireUploadResponse(t, <-responses, 4)
+		close(release)
+		synctest.Wait()
+		require.Len(t, responses, 3)
+		for requestID := uint64(1); requestID <= 3; requestID++ {
+			requireUploadResponse(t, <-responses, requestID)
+		}
+	})
 }
 
 func TestUploadRequests_SlowPeerDoesNotBlockOtherPeers(t *testing.T) {
@@ -506,7 +544,8 @@ func TestUploadRequests_CancellationRemovesWaitingWork(t *testing.T) {
 		active.Add(1)
 		require.NoError(t, first.Send(uploadRequest(t, sentryproto.MessageId_GET_BLOCK_BODIES_66, 5, 13, common.Hash{2})))
 		synctest.Wait()
-		require.Empty(t, responses)
+		require.Len(t, responses, 1, "a waiting replay must let the peer's next body request run")
+		requireUploadResponse(t, <-responses, 13)
 		cancelWaiting()
 		synctest.Wait()
 		select {
@@ -514,8 +553,7 @@ func TestUploadRequests_CancellationRemovesWaitingWork(t *testing.T) {
 		default:
 			t.Fatal("cancelled requests must finish without waiting for unrelated active work")
 		}
-		require.Len(t, responses, 1, "removing a waiting replay must let the peer's next request run")
-		requireUploadResponse(t, <-responses, 13)
+		require.Empty(t, responses)
 		close(release)
 		active.Wait()
 		require.Len(t, responses, 4, "cancelled requests must not be served")
