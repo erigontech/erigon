@@ -18,6 +18,7 @@ package exec
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"testing/synctest"
@@ -223,4 +224,22 @@ func TestWorkerGetHashFailsOnAMissingHeader(t *testing.T) {
 	_, err := w.evm.Context.GetHash(5)
 	require.ErrorContains(t, err, "not found")
 	require.Equal(t, 1, reader.calls)
+}
+
+type resetFailingTask struct{ TxTask }
+
+func (task *resetFailingTask) Reset(*vm.EVM, *state.IntraBlockState, *calltracer.CallTracer) error {
+	return errors.New("reset failed")
+}
+
+// A failed task reset reads nothing, so its result names no dependency: a scheduler must not wait on tx 0 for it.
+func TestWorkerResetFailureRecordsNoDependency(t *testing.T) {
+	w := NewWorkerContext(t.Context(), false, nil, nil, nil, chain.AllProtocolChanges, nil, nil, datadir.Dirs{}, log.New())
+	defer w.Close()
+	w.SetReader(state.NewNoopReader())
+	result := w.RunTxTask(&resetFailingTask{TxTask{TxIndex: 3, Header: &types.Header{Number: *uint256.NewInt(1)}}})
+
+	require.ErrorContains(t, result.Err, "reset failed")
+	require.False(t, result.Operational, "a reset failure is the tx's verdict")
+	require.Equal(t, state.UnknownDep, result.Dep)
 }
