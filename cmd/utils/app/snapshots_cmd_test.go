@@ -26,8 +26,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/config3"
@@ -35,8 +37,11 @@ import (
 	"github.com/erigontech/erigon/db/datastruct/btindex"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/snaptype"
@@ -44,6 +49,7 @@ import (
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
@@ -1058,6 +1064,25 @@ func TestDUStepSize_FreshDatadirUsesTheDefault(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, uint64(config3.DefaultStepSize), stepSize)
 	require.NoFileExists(t, filepath.Join(dirs.Snap, state.ERIGONDB_SETTINGS_FILE))
+}
+
+func TestDUCollect_UnnamedChainIsUnknown(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, state.ERIGONDB_SETTINGS_FILE), []byte("step_size = 1000\nsteps_in_frozen_file = 64\n"), 0o644))
+	db := mdbx.New(dbcfg.ChainDB, log.New()).Path(dirs.Chaindata).MustOpen()
+	genesis := common.HexToHash("0x01")
+	require.NoError(t, db.Update(context.Background(), func(tx kv.RwTx) error {
+		if err := rawdb.WriteCanonicalHash(tx, genesis, 0); err != nil {
+			return err
+		}
+		return rawdb.WriteChainConfig(tx, genesis, &chain.Config{ChainID: uint256.NewInt(1337)})
+	}))
+	db.Close()
+
+	result, err := duCollect(context.Background(), dirs, log.New())
+	require.NoError(t, err)
+	require.NotEmpty(t, result.ConfiguredMode)
+	require.Equal(t, "unknown", result.Chain)
 }
 
 func TestDUComputeEstimates_LogIndexFollowsHistoryWindow(t *testing.T) {

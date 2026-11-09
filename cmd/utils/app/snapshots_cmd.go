@@ -4254,7 +4254,7 @@ func duFormatJSON(w io.Writer, result duResult) error {
 func duCollect(ctx context.Context, dirs datadir.Dirs, logger log.Logger) (duResult, error) {
 	cc, configuredMode := duChainInfo(ctx, dirs, logger)
 	chainName := "unknown"
-	if cc != nil {
+	if cc != nil && cc.ChainName != "" {
 		chainName = cc.ChainName
 	}
 	emptyDB, err := mdbx.New(dbcfg.ChainDB, logger).InMem("").Open(ctx)
