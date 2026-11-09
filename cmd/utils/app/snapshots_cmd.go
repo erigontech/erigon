@@ -3785,8 +3785,8 @@ func duClassifyFile(dir, name string) string {
 		return duCatRcache
 	}
 
-	// commitment history/idx files
-	if (ldir == "history" || ldir == "idx") && strings.Contains(lname, "commitment") {
+	// commitment history/idx files and their accessors
+	if (ldir == "history" || ldir == "idx" || ldir == "accessor") && strings.Contains(lname, "commitment") {
 		return duCatCommitHist
 	}
 

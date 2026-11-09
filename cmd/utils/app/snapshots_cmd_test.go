@@ -682,6 +682,8 @@ func TestDUClassifyFile(t *testing.T) {
 		// commitment hist overrides history/idx
 		{"history", "v1.0-commitment.0-16.v", duCatCommitHist},
 		{"idx", "v1.0-commitment.0-16.ef", duCatCommitHist},
+		{"accessor", "v1.1-commitment.0-16.vi", duCatCommitHist},
+		{"accessor", "v2.0-commitment.0-16.efi", duCatCommitHist},
 
 		// commitment in domain is still domains (not commitment hist)
 		{"domain", "v1.0-commitment.0-16.kv", duCatDomains},
