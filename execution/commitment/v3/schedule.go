@@ -36,11 +36,8 @@ type accountPlan struct {
 	found    bool
 	delete   bool
 	skip     bool
-}
-
-type accountResult struct {
-	value []byte
-	err   error
+	value    []byte
+	err      error
 }
 
 const (
@@ -161,7 +158,6 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 		return [32]byte{}, nil, err
 	}
 	plans := make([]accountPlan, len(accounts))
-	accountResults := make([]accountResult, len(plans))
 	accountValues := make([]byte, accountLeafScratch*len(plans))
 	encode := func(i int) {
 		plan := &plans[i]
@@ -172,7 +168,7 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 		if plan.entry.storageDirty {
 			task, ok := taskOf[hashAddressPath(plan.entry.hashedKey)]
 			if !ok {
-				accountResults[i].err = errNodeRecord
+				plans[i].err = errNodeRecord
 				return
 			}
 			storageRoot = storageRoots[task]
@@ -183,14 +179,14 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 		}
 		update, existingRoot, updateErr := accountUpdate(plan.oldValue, plan.found, plan.entry.update)
 		if updateErr != nil {
-			accountResults[i].err = updateErr
+			plans[i].err = updateErr
 			return
 		}
 		if !plan.entry.storageDirty && plan.found {
 			copy(storageRoot[:], existingRoot)
 		}
 		at := i * accountLeafScratch
-		accountResults[i].value = encodeAccountLeaf(update, storageRoot[:], accountValues[at:at:at+accountLeafScratch])
+		plans[i].value = encodeAccountLeaf(update, storageRoot[:], accountValues[at:at:at+accountLeafScratch])
 	}
 
 	var pipelined [16]bool
@@ -204,7 +200,7 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 		}
 		for k, i := range group {
 			encode(i)
-			if err := accountResults[i].err; err != nil {
+			if err := plans[i].err; err != nil {
 				return err
 			}
 			plan := &plans[i]
@@ -220,7 +216,7 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 					return nil
 				}
 			default:
-				if err := insert(child, plan.entry.hashedKey, accountResults[i].value); err != nil {
+				if err := insert(child, plan.entry.hashedKey, plans[i].value); err != nil {
 					return err
 				}
 			}
@@ -262,7 +258,7 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 	var groups [16][]int
 	var rest []int
 	for _, i := range remaining {
-		if err := accountResults[i].err; err != nil {
+		if err := plans[i].err; err != nil {
 			return [32]byte{}, nil, err
 		}
 		plan := &plans[i]
@@ -279,7 +275,7 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 	var groupErrs [16]error
 	parallelFor(16, min(workers, (len(remaining)+1023)/1024), 1, func(nib int) {
 		for _, i := range groups[nib] {
-			if err := insert(root, plans[i].entry.hashedKey, accountResults[i].value); err != nil {
+			if err := insert(root, plans[i].entry.hashedKey, plans[i].value); err != nil {
 				groupErrs[nib] = err
 				return
 			}
@@ -298,11 +294,7 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 			}
 			continue
 		}
-		if len(root.path) == 0 {
-			if err := insert(root, hashedKey, accountResults[i].value); err != nil {
-				return [32]byte{}, nil, err
-			}
-		} else if err := insertRoot(root, hashedKey, accountResults[i].value); err != nil {
+		if err := insertRoot(root, hashedKey, plans[i].value); err != nil {
 			return [32]byte{}, nil, err
 		}
 	}

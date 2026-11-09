@@ -16,6 +16,8 @@
 
 package v3
 
+import "slices"
+
 func packedLen(nibbleCount int) int {
 	if nibbleCount < 0 {
 		panic("negative nibble count")
@@ -25,11 +27,7 @@ func packedLen(nibbleCount int) int {
 
 func packPath(nibbles []byte, dst []byte) []byte {
 	packed := packedLen(len(nibbles))
-	if cap(dst) < packed {
-		dst = make([]byte, packed)
-	} else {
-		dst = dst[:packed]
-	}
+	dst = slices.Grow(dst[:0], packed)[:packed]
 	for i, nibble := range nibbles {
 		if nibble > 0x0f {
 			panic("nibble out of range")
@@ -62,11 +60,7 @@ func packedMatches(packed []byte, nibbles []byte) bool {
 }
 
 func unpackPath(packed []byte, count int, dst []byte) []byte {
-	if cap(dst) < count {
-		dst = make([]byte, count)
-	} else {
-		dst = dst[:count]
-	}
+	dst = slices.Grow(dst[:0], count)[:count]
 	for i := range dst {
 		if i&1 == 0 {
 			dst[i] = packed[i/2] >> 4

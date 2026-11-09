@@ -56,14 +56,13 @@ func (h *RecordHasher) Hash(key, value []byte, expect func(key, hash []byte) err
 	if record.isLeafRoot() {
 		hashedKey, leafValue := value[1:33], value[34:]
 		full := (*[32]byte)(hashedKey)
-		appendLeaf(n, int(full[0]>>4), appendHashSuffix(&h.scratch, full, 1), leafValue)
+		n.setLeafShared(int(full[0]>>4), appendHashSuffix(&h.scratch, full, 1), leafValue)
 	} else {
 		l := record.layout()
 		if value[0]&hdrHasSelfExt != 0 {
 			selfExt := record.SelfExt()
-			start := len(h.scratch)
-			h.scratch = appendUnpacked(h.scratch, selfExt[1:], int(selfExt[0]))
-			n.path = h.scratch[start:]
+			h.scratch = unpackPath(selfExt[1:], int(selfExt[0]), h.scratch[:0])
+			n.path = h.scratch
 		}
 		n.record, n.layout = record, l
 		n.childMask, n.leafMask, n.hashMask = l.child, l.leaf, l.tree()
@@ -100,9 +99,7 @@ func (h *RecordHasher) Hash(key, value []byte, expect func(key, hash []byte) err
 		copy(full[:], n.path)
 		full[len(n.path)] = byte(nib)
 		unpackPath(suffix, 63-len(n.path), full[len(n.path)+1:len(n.path)+1:64])
-		var accountHash [32]byte
-		packPath(full[:], accountHash[:0])
-		h.key = StorageNodeKey(accountHash, nil, h.key[:0])
+		h.key = StorageNodeKey(hashAddressPath(full[:]), nil, h.key[:0])
 		if err := expect(h.key, storageRoot); err != nil {
 			return [32]byte{}, err
 		}
@@ -262,10 +259,4 @@ func (m *RecordMatcher) Finish() (root [32]byte, records, orphans uint64, err er
 		orphans++
 	}
 	return m.accountRoot, m.records, orphans, nil
-}
-
-func appendUnpacked(dst, packed []byte, count int) []byte {
-	dst = slices.Grow(dst, count)
-	unpackPath(packed, count, dst[len(dst):])
-	return dst[:len(dst)+count]
 }

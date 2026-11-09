@@ -133,7 +133,7 @@ func (c *LegacyConverter) Convert(legacyKey, value, prev []byte, emit LegacyEmit
 			if err != nil {
 				return err
 			}
-			appendLeaf(n, nib, suffix, leaf)
+			n.setLeafShared(nib, suffix, leaf)
 		case len(cell.StorageAddr) != 0:
 			if plane != planeStorage || len(cell.StorageAddr) != length.Addr+length.Hash {
 				return fmt.Errorf("%w: storage cell %d of %d bytes on plane %02x", errLegacyBranch, nib, len(cell.StorageAddr), plane)
@@ -153,7 +153,7 @@ func (c *LegacyConverter) Convert(legacyKey, value, prev []byte, emit LegacyEmit
 			if err != nil {
 				return err
 			}
-			appendLeaf(n, nib, suffix, slot)
+			n.setLeafShared(nib, suffix, slot)
 		case len(cell.Hash) == length.Hash:
 			if err := checkNibbles(cell.Extension); err != nil {
 				return err
@@ -161,7 +161,7 @@ func (c *LegacyConverter) Convert(legacyKey, value, prev []byte, emit LegacyEmit
 			if len(path)+1+len(cell.Extension) > 63 {
 				return fmt.Errorf("%w: child %d ends at depth %d", errLegacyBranch, nib, len(path)+1+len(cell.Extension))
 			}
-			appendStoredChild(n, nib, cell.Hash, cell.Extension)
+			n.setStoredChild(nib, cell.Hash, cell.Extension)
 		default:
 			return fmt.Errorf("%w: cell %d has no plain key and a %d-byte hash", errLegacyBranch, nib, len(cell.Hash))
 		}
@@ -223,7 +223,7 @@ func (c *LegacyConverter) accountLeaf(cell commitment.BranchCell, addrHash *[32]
 		}
 		slotHash := keccak.Sum256(cell.StorageAddr[length.Addr:])
 		resetNode(&c.root, nil, planeStorage)
-		appendLeaf(&c.root, int(slotHash[0]>>4), appendHashSuffix(&c.scratch, &slotHash, 1), slot)
+		c.root.setLeafShared(int(slotHash[0]>>4), appendHashSuffix(&c.scratch, &slotHash, 1), slot)
 		if rootHash, err = c.emitRoot(addrHash, emit); err != nil {
 			return nil, err
 		}
@@ -236,7 +236,7 @@ func (c *LegacyConverter) accountLeaf(cell commitment.BranchCell, addrHash *[32]
 			return nil, err
 		}
 		resetNode(&c.root, cell.Extension, planeStorage)
-		appendStoredChild(&c.root, int(cell.Extension[0]), cell.Hash, nil)
+		c.root.setStoredChild(int(cell.Extension[0]), cell.Hash, nil)
 		var err error
 		if rootHash, err = c.emitRoot(addrHash, emit); err != nil {
 			return nil, err
@@ -332,30 +332,7 @@ func hashNibble(hashed *[32]byte, i int) byte {
 }
 
 func resetNode(n *node, path []byte, plane byte) {
-	n.path = path
-	n.slots = n.slots[:0]
-	n.raw = nil
-	n.record, n.layout, n.refs = Record{}, layout{}, nil
-	n.plane = plane
-	n.loaded = false
-	n.childMask, n.leafMask, n.hashMask, n.slotMask = 0, 0, 0, 0
-}
-
-func appendLeaf(n *node, nib int, suffix, value []byte) {
-	n.slots = append(n.slots, childSlot{suffix: suffix, value: value})
-	bit := uint16(1) << nib
-	n.childMask |= bit
-	n.leafMask |= bit
-	n.slotMask |= bit
-}
-
-func appendStoredChild(n *node, nib int, hash, ext []byte) {
-	n.slots = append(n.slots, childSlot{ext: ext})
-	copy(n.slots[len(n.slots)-1].hash[:], hash)
-	bit := uint16(1) << nib
-	n.childMask |= bit
-	n.hashMask |= bit
-	n.slotMask |= bit
+	*n = node{path: path, slots: n.slots[:0], plane: plane}
 }
 
 func appendAccountLeafSerialised(dst, enc, storageRoot []byte) ([]byte, error) {
@@ -454,7 +431,7 @@ func (c *LegacyConverter) RootExtensionRecord(stateValue []byte) (key, record []
 		return nil, nil, fmt.Errorf("%w: root extension of %d nibbles", errLegacyState, len(ext))
 	}
 	resetNode(&c.root, ext, planeAccount)
-	appendStoredChild(&c.root, int(ext[0]), hash, nil)
+	c.root.setStoredChild(int(ext[0]), hash, nil)
 	c.rootOut = encodeRecord(&c.root, 0, c.rootOut[:0])
 	return c.rootKey, c.rootOut, nil
 }
