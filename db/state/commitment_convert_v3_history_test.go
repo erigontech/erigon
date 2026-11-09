@@ -296,7 +296,7 @@ func TestConvertCommitmentFiles_V3HistoryRefusesPrunedStart(t *testing.T) {
 	}
 	require.NotEmpty(t, pruned)
 	for _, f := range pruned {
-		require.NoError(t, os.Remove(f))
+		require.NoError(t, dir.RemoveFile(f))
 	}
 	require.NoError(t, agg.OpenFolder(db))
 
