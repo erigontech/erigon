@@ -60,6 +60,15 @@ func (p *PayloadPreparationImports) ImportInProgress(slot uint64) bool {
 	return active
 }
 
+func (p *PayloadPreparationImports) HasPendingEnvelope(blockRoot common.Hash) bool {
+	held := false
+	p.pendingEnvelopes.Range(func(_, value any) bool {
+		held = value.(common.Hash) == blockRoot
+		return !held
+	})
+	return held
+}
+
 func (p *PayloadPreparationImports) BeginPendingEnvelope(blockRoot common.Hash) func() {
 	key := &blockRoot
 	p.pendingEnvelopes.Store(key, blockRoot)

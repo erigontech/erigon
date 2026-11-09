@@ -1922,10 +1922,8 @@ func TestFramePoolParkedCapacityWithOrdinaryOrphan(t *testing.T) {
 			reasons, err := pool.AddLocalTxns(ctx, initial)
 			require.NoError(t, err)
 			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
-			var selected TxnsRlp
-			_, err = pool.PeekBest(ctx, 1, &selected, 0)
-			require.NoError(t, err)
-			require.Empty(t, selected.Txns)
+			// An ordinary txn left in the pool's indexes but outside every sub-pool.
+			pool.pending.Remove(pool.byHash[string(orphan.IDHash[:])], "test", pool.logger)
 			require.Zero(t, pool.pending.Len())
 			require.Contains(t, pool.byHash, string(orphan.IDHash[:]))
 

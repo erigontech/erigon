@@ -94,8 +94,8 @@ type ForkChoiceStorageReader interface {
 	// [New in Gloas:EIP7732] HasPendingExecutionPayloadEnvelope reports an envelope that is
 	// waiting for its block or its data columns.
 	HasPendingExecutionPayloadEnvelope(blockRoot common.Hash) bool
-	// [New in Gloas:EIP7732] ExecutionPayloadApplyInFlight reports an envelope that is being
-	// applied after passing its signature check.
+	// [New in Gloas:EIP7732] ExecutionPayloadApplyInFlight reports an envelope held for import or past its signature
+	// check with the apply still running.
 	ExecutionPayloadApplyInFlight(blockRoot common.Hash) bool
 	// [New in Gloas:EIP7732] PayloadVotesRuleOutFull reports PTC votes recorded for blockRoot that
 	// already rule out building on its FULL variant.

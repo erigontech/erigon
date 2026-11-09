@@ -1113,7 +1113,7 @@ func TestHandleMessage_PartialBlockFoldSeesCommittedEarlierTxs(t *testing.T) {
 	ws.SetBalance(addr, &state.VersionedWrite[uint256.Int]{WriteHeader: state.WriteHeader{Address: addr, Path: state.BalancePath, Version: state.Version{TxIndex: 1}}, Val: *uint256.NewInt(95)})
 	cc.handleMessage(ctx, recordTx(vm, 1, common.Hash{0x01}, 12, &chain.Rules{}, ws))
 
-	acc, ok := cc.foldView(vm, 12, cc.asOfReader.dr.StateReaderAt(13)).GetAccount(addr)
+	acc, ok, _ := cc.foldView(vm, 12, cc.asOfReader.dr.StateReaderAt(13)).GetAccount(addr)
 	require.True(t, ok)
 	require.Equal(t, *uint256.NewInt(95), acc.Balance)
 	require.Equal(t, uint64(6), acc.Nonce, "the nonce committed by the block's earlier tx comes from the base")
@@ -1243,4 +1243,91 @@ func TestComputeAhead_BALDrainedEmptyAccountFoldsAsAbsent(t *testing.T) {
 	got := run(true, want)
 	require.NoError(t, got.err, "root with the drained empty account must equal the root of a base without it (%x)", want)
 	require.Equal(t, want[:], got.rootHash)
+}
+
+// A fold reads the folding block's accounts through its version map; it must read their code the same way,
+// or a code write that the apply loop has not landed yet disagrees with the account's code hash.
+func TestAsOfStateReaderReadsFoldingBlockCode(t *testing.T) {
+	_, tx, doms := setupStepTest(t)
+	addr := common.HexToAddress("0xc0de")
+	oldCode, newCode := []byte{0xef, 0x01, 0x00, 0x01}, []byte{0xef, 0x01, 0x00, 0x02}
+	require.NoError(t, doms.DomainPut(kv.CodeDomain, tx, addr[:], oldCode, 1, nil))
+
+	vm := state.NewVersionMap(nil)
+	vm.SetBaseTxNum(10)
+	vm.WriteCode(accounts.InternAddress(addr), state.Version{TxIndex: 0}, accounts.NewCode(newCode), true)
+
+	reader := &asOfStateReader{sd: doms, roTx: tx, txNum: 12, dr: state.NewLayeredDomainReader(doms, nil, nil), cur: vm, curTxNum: 11}
+	code, _, err := reader.Read(kv.CodeDomain, addr[:], doms.StepSize())
+	require.NoError(t, err)
+	require.Equal(t, newCode, code)
+
+	other := common.HexToAddress("0xc0df")
+	require.NoError(t, doms.DomainPut(kv.CodeDomain, tx, other[:], oldCode, 1, nil))
+	code, _, err = reader.Read(kv.CodeDomain, other[:], doms.StepSize())
+	require.NoError(t, err)
+	require.Equal(t, oldCode, code, "code without a cell in the block falls back to the domain")
+}
+
+func TestAsOfStateReaderReadsFoldingBlockAtCurTxNum(t *testing.T) {
+	_, tx, doms := setupStepTest(t)
+	addr := common.HexToAddress("0xacc0")
+	a := accounts.InternAddress(addr)
+	require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addr[:], accounts.SerialiseV3(&accounts.Account{Nonce: 5, Balance: *uint256.NewInt(1)}), 1, nil))
+	slot := func(b byte) ([]byte, accounts.StorageKey) {
+		var h common.Hash
+		h[31] = b
+		return append(bytes.Clone(addr[:]), h[:]...), accounts.InternKey(h)
+	}
+	changed, changedKey := slot(1)
+	untouched, _ := slot(2)
+	zeroed, zeroedKey := slot(3)
+	for k, v := range map[string]byte{string(changed): 1, string(untouched): 5, string(zeroed): 7} {
+		require.NoError(t, doms.DomainPut(kv.StorageDomain, tx, []byte(k), []byte{v}, 1, nil))
+	}
+
+	vm := state.NewVersionMap(nil)
+	vm.SetBaseTxNum(10)
+	vm.WriteBalance(a, state.Version{TxIndex: 0}, *uint256.NewInt(2), true)
+	vm.WriteBalance(a, state.Version{TxIndex: 3}, *uint256.NewInt(3), true)
+	vm.WriteStorage(a, changedKey, state.Version{TxIndex: 0}, *uint256.NewInt(2), true)
+	vm.WriteStorage(a, changedKey, state.Version{TxIndex: 3}, *uint256.NewInt(9), true)
+	vm.WriteStorage(a, zeroedKey, state.Version{TxIndex: 0}, uint256.Int{}, true)
+
+	reader := &asOfStateReader{sd: doms, roTx: tx, txNum: 12, dr: state.NewLayeredDomainReader(doms, nil, nil), cur: vm, curTxNum: 11}
+	enc, _, err := reader.Read(kv.AccountsDomain, addr[:], doms.StepSize())
+	require.NoError(t, err)
+	var acc accounts.Account
+	require.NoError(t, accounts.DeserialiseV3(&acc, enc))
+	require.Equal(t, uint64(5), acc.Nonce, "untouched field falls back to the domain")
+	require.Equal(t, *uint256.NewInt(2), acc.Balance, "a write after curTxNum is not visible")
+
+	for _, c := range []struct {
+		key  []byte
+		want []byte
+	}{{changed, []byte{2}}, {untouched, []byte{5}}, {zeroed, nil}} {
+		enc, _, err = reader.Read(kv.StorageDomain, c.key, doms.StepSize())
+		require.NoError(t, err)
+		require.Equal(t, c.want, enc)
+	}
+}
+
+func TestAsOfStateReaderReadsPrevBlockCode(t *testing.T) {
+	_, tx, doms := setupStepTest(t)
+	addr := common.HexToAddress("0xc0de")
+	oldCode, newCode := []byte{0xef, 0x01, 0x00, 0x01}, []byte{0xef, 0x01, 0x00, 0x02}
+	require.NoError(t, doms.DomainPut(kv.CodeDomain, tx, addr[:], oldCode, 1, nil))
+
+	prev := state.NewVersionMap(nil)
+	prev.SetBaseTxNum(5)
+	prev.WriteCode(accounts.InternAddress(addr), state.Version{TxIndex: 0}, accounts.NewCode(newCode), true)
+	prevBlocks := state.NewPrevBlockList()
+	prevBlocks.PushHead(1, 7, prev)
+
+	cur := state.NewVersionMap(nil)
+	cur.SetBaseTxNum(10)
+	reader := &asOfStateReader{sd: doms, roTx: tx, txNum: 12, dr: state.NewLayeredDomainReader(doms, nil, prevBlocks), cur: cur, curTxNum: 11}
+	code, _, err := reader.Read(kv.CodeDomain, addr[:], doms.StepSize())
+	require.NoError(t, err)
+	require.Equal(t, newCode, code, "code written by an earlier block not yet in the domain")
 }

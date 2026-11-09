@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/state"
@@ -253,6 +254,42 @@ func TestParallelStateReadErrorUsesOperationalBlockResult(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, blockResult)
 	require.Equal(t, be.blockNum, blockResult.BlockNum)
+	require.True(t, blockResult.Operational)
+	require.ErrorIs(t, blockResult.Err, cause)
+	require.NotErrorIs(t, blockResult.Err, rules.ErrInvalidBlock)
+}
+
+// A BLOCKHASH whose header lookup fails is the node's failure: the task result is Operational
+// and the block gets no verdict, as for a failed state read.
+func TestParallelBlockhashHeaderReadErrorUsesOperationalBlockResult(t *testing.T) {
+	db := newResumeTestDB(t)
+	config := chain.TestChainBerlinConfig
+	pe, roTx := newResumeTestExec(t, db, config)
+	pe.cfg.vmConfig = &vm.Config{}
+	cause := errors.New("header read failed")
+
+	initCode := []byte{byte(vm.PUSH1), 0, byte(vm.BLOCKHASH), byte(vm.STOP)}
+	createTx, err := types.SignTx(&types.LegacyTx{CommonTx: types.CommonTx{GasLimit: 100_000, Data: initCode}}, *types.MakeSigner(config, 1, 0), senderIsCoinbaseKey.key)
+	require.NoError(t, err)
+	be, task := newParallelResultTestBlock(t, pe, config, createTx)
+	task.Task.(*exec.TxTask).EvmBlockContext = evmtypes.BlockContext{
+		BlockNumber: 1,
+		CanTransfer: protocol.CanTransfer,
+		Transfer:    misc.Transfer,
+		GetHash:     func(uint64) (common.Hash, error) { return common.Hash{}, cause },
+	}
+
+	ibs := state.New(state.NewNoopReader())
+	t.Cleanup(ibs.Close)
+	evm := &vm.EVM{}
+	require.NoError(t, task.Reset(evm, ibs, nil))
+	result := task.Execute(evm, pe.cfg.engine, nil, ibs, state.NewNoopWriter(), config, nil, datadir.Dirs{}, false)
+	result.Task = task
+	require.True(t, result.Operational)
+	require.ErrorIs(t, result.Err, cause)
+
+	blockResult, err := be.nextResult(context.Background(), pe, result, roTx)
+	require.NoError(t, err)
 	require.True(t, blockResult.Operational)
 	require.ErrorIs(t, blockResult.Err, cause)
 	require.NotErrorIs(t, blockResult.Err, rules.ErrInvalidBlock)

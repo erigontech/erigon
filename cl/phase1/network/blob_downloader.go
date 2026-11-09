@@ -141,6 +141,8 @@ type BlobHistoryDownloader struct {
 	retryRangeCursor       uint64
 	// archiveBlobs indicates whether to archive all blobs or just recent ones
 	archiveBlobs bool
+	// archiveFromSlot bounds the archive backfill from below; zero archives from Deneb
+	archiveFromSlot uint64
 	// immediateBlobsBackfilling indicates whether to backfill blobs immediately
 	immediateBlobsBackfilling bool
 	// columnBackfillTimeout bounds each fulu block's PeerDAS column recovery
@@ -185,6 +187,7 @@ func NewBlobHistoryDownloader(
 	syncedChecker SyncedChecker,
 	peerDasGetter PeerDasGetter,
 	archiveBlobs bool,
+	archiveFromSlot uint64,
 	immediateBlobsBackfilling bool,
 	logger log.Logger,
 ) *BlobHistoryDownloader {
@@ -206,6 +209,7 @@ func NewBlobHistoryDownloader(
 		nextBackfillTargetSlot:    targetSlot,
 		denebStartSlot:            targetSlot,
 		archiveBlobs:              archiveBlobs,
+		archiveFromSlot:           archiveFromSlot,
 		immediateBlobsBackfilling: immediateBlobsBackfilling,
 		columnBackfillTimeout:     blobColumnBackfillTimeout,
 		verifyBlobSidecars:        blob_storage.VerifyBlobSidecars,
@@ -383,11 +387,16 @@ func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 	retryFloor := uint64(0)
 	blobRetentionFloor := uint64(0)
 	fuluRetentionFloor := uint64(0)
-	// in case of non-archive mode, we only backfill the last relevant epochs
-	if !b.archiveBlobs {
+	// in case of non-archive mode, we only backfill the last relevant epochs;
+	// a bounded archive stops at its start slot or the serving window, whichever is lower
+	if !b.archiveBlobs || b.archiveFromSlot > 0 {
 		retentionSlot := b.ethClock.GetCurrentSlot()
 		blobRetentionFloor = b.beaconCfg.BlobSidecarServeRangeStartSlot(retentionSlot)
-		fuluRetentionFloor = b.beaconCfg.DataColumnSidecarServeRangeStartSlot(retentionSlot)
+		if b.archiveBlobs {
+			blobRetentionFloor = clparams.MinBlobRetentionFloor(b.archiveFromSlot, blobRetentionFloor)
+		} else {
+			fuluRetentionFloor = b.beaconCfg.DataColumnSidecarServeRangeStartSlot(retentionSlot)
+		}
 		targetSlot = min(currentSlot, max(targetSlot, blobRetentionFloor))
 		retryFloor = blobRetentionFloor
 	}

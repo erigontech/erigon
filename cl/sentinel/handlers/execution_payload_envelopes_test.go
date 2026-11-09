@@ -676,6 +676,38 @@ func TestExecutionPayloadEnvelopesByRootHandler(t *testing.T) {
 	require.ErrorIs(t, err, io.EOF, "stream should be empty after all envelopes")
 }
 
+func TestExecutionPayloadEnvelopesByRootDeduplicates(t *testing.T) {
+	for _, source := range []string{"stored", "rebuilt"} {
+		t.Run(source, func(t *testing.T) {
+			c, cfg, roots, envelopes, rebuilder, _ := newRangeHistoryHandler(t, 2, 2)
+			reads := 0
+			if source == "stored" {
+				fc := c.forkChoiceReader.(*mock_services.ForkChoiceStorageMock)
+				for root, envelope := range envelopes {
+					fc.SetEnvelope(root, envelope)
+				}
+				fc.ReadEnvelopeFromDiskFunc = func(root common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+					reads++
+					return envelopes[root], nil
+				}
+			}
+			req := solid.NewHashList(4)
+			for _, root := range roots {
+				req.Append(root)
+				req.Append(root)
+			}
+			stream := newRootHandlerTestStream(req, peer.ID("history-peer"))
+			response := stream.run(t, c)
+			if source == "stored" {
+				require.Equal(t, 2, reads)
+			} else {
+				require.Equal(t, roots, rebuilder.called)
+			}
+			require.Equal(t, []uint64{0, 1}, readEnvelopeBuilderIndices(t, response, cfg))
+		})
+	}
+}
+
 func TestExecutionPayloadEnvelopesByRootRebuildsMissingCanonicalEnvelope(t *testing.T) {
 	ctx := t.Context()
 	_, indiciesDB := setupStore(t)

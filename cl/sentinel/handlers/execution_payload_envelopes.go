@@ -353,11 +353,16 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRootHandler(s network.Str
 	}
 
 	rebuildCandidates := make([]rebuildCandidate, 0, req.Length())
+	seen := make(map[common.Hash]struct{}, req.Length())
 	stopped := false
 	req.Range(func(_ int, blockRoot common.Hash, _ int) bool {
 		if count >= int(maxPayloads) {
 			return false
 		}
+		if _, ok := seen[blockRoot]; ok {
+			return true
+		}
+		seen[blockRoot] = struct{}{}
 		if c.forkChoiceReader.IsEnvelopeRejected(blockRoot) {
 			return true
 		}

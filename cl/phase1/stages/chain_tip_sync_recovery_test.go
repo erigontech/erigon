@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/cl/rpc"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/cl/sentinel/peers"
+	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/cl/validator/validator_params"
@@ -40,6 +41,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/execution/protocol/misc"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 )
 
@@ -245,6 +247,10 @@ func newChainTipBatchFixture(t *testing.T, replayStatus execution_client.Payload
 }
 
 func newChainTipBatchFixtureWithRecordedStatus(t *testing.T, replayStatus execution_client.PayloadStatus, recordStatus bool) (*Cfg, *chainTipBatchForkGraph, common.Hash, *cltypes.SignedBeaconBlock, *cltypes.SignedBeaconBlock, *testExecutionEngine) {
+	return newChainTipBatchFixtureWithBlob(t, replayStatus, recordStatus, false)
+}
+
+func newChainTipBatchFixtureWithBlob(t *testing.T, replayStatus execution_client.PayloadStatus, recordStatus, withBlob bool) (*Cfg, *chainTipBatchForkGraph, common.Hash, *cltypes.SignedBeaconBlock, *cltypes.SignedBeaconBlock, *testExecutionEngine) {
 	t.Helper()
 
 	beaconCfg, anchorState, parentBid, envelope, _ := validAnchorEnvelopeFixture(t, 0)
@@ -275,10 +281,26 @@ func newChainTipBatchFixtureWithRecordedStatus(t *testing.T, replayStatus execut
 		parentState.SetFinalizedCheckpoint(anchorCheckpoint)
 	}
 	parentBid.ParentBlockRoot = anchorRoot
+	if withBlob {
+		commitment := new(cltypes.KZGCommitment)
+		versionedHash, err := utils.KzgCommitmentToVersionedHash(common.Bytes48(*commitment))
+		require.NoError(t, err)
+		txn := &types.BlobTx{
+			DynamicFeeTransaction: types.DynamicFeeTransaction{CommonTx: types.CommonTx{GasLimit: 21_000, To: &common.Address{1}}},
+			BlobVersionedHashes:   []common.Hash{versionedHash},
+		}
+		raw, err := types.MarshalTransactionsBinary(types.Transactions{txn})
+		require.NoError(t, err)
+		envelope.Message.Payload.Transactions = solid.NewProgressiveTransactionsSSZFromTransactions(raw)
+		envelope.Message.Payload.BlobGasUsed = misc.GetBlobGasUsed(1)
+		parentBid.BlobKzgCommitments.EnsureStaticProgressive(cltypes.MaxBlobsCommittmentsPerBlock, 48)
+		parentBid.BlobKzgCommitments.Append(commitment)
+	}
 	envelope.Message.ParentBeaconBlockRoot = anchorRoot
 	envelope.Message.Payload.Time = state2.ComputeTimestampAtSlot(parentState, parentState.Slot())
 	requestsHash := cltypes.ComputeExecutionRequestHash(cltypes.GetExecutionRequestsList(beaconCfg, envelope.Message.ExecutionRequests))
-	envelope.Message.Payload.BlockHash = anchorPayloadHeaderHash(t, envelope.Message.Payload, anchorRoot, requestsHash)
+	envelope.Message.Payload.BlockHash, err = envelope.Message.Payload.ComputeBlockHash(&envelope.Message.ParentBeaconBlockRoot, requestsHash, nil)
+	require.NoError(t, err)
 	parentBid.BlockHash = envelope.Message.Payload.BlockHash
 	parentState.SetLatestExecutionPayloadBid(parentBid)
 	parentState.SetLatestBlockHash(envelope.Message.Payload.ParentHash)
@@ -400,6 +422,7 @@ func TestForwardSyncReplayMakesGloasPayloadAvailableForHeadSelection(t *testing.
 		envelope,
 		true,
 		shouldValidateForwardSyncPayload(cfg, true),
+		false,
 	))
 	require.NoError(t, cfg.forkChoice.OnBlock(t.Context(), fullChild, false, false, false))
 	fullChildRoot, err := fullChild.Block.HashSSZ()

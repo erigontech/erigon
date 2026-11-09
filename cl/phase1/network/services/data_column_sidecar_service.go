@@ -139,7 +139,7 @@ func (s *dataColumnSidecarService) IsMyGossipMessage(name string) bool {
 
 func (s *dataColumnSidecarService) DecodeGossipMessage(_ peer.ID, data []byte, version clparams.StateVersion) (*cltypes.DataColumnSidecar, error) {
 	obj := cltypes.NewDataColumnSidecarWithVersion(version)
-	if err := obj.DecodeSSZ(data, int(version)); err != nil {
+	if err := decodeGossipSSZ(obj, data, version); err != nil {
 		return nil, err
 	}
 	return obj, nil
@@ -188,19 +188,9 @@ func (s *dataColumnSidecarService) processFuluMessage(ctx context.Context, subne
 		return fmt.Errorf("failed to get block root: %w", err)
 	}
 
-	// A column outside custody is still validated and relayed on a subscribed subnet; it is just not stored.
-	inCustody := true
-	if s.forkChoice.GetPeerDas().IsArchivedMode() {
-		if s.forkChoice.GetPeerDas().IsColumnOverHalf(blockHeader.Slot, blockRoot) ||
-			s.forkChoice.GetPeerDas().IsBlobAlreadyRecovered(blockRoot) {
-			return ErrIgnore
-		}
-	} else {
-		myCustodyColumns, err := s.forkChoice.GetPeerDas().StateReader().GetMyCustodyColumns()
-		if err != nil {
-			return fmt.Errorf("%w: failed to get my custody columns: %w", ErrIgnore, err)
-		}
-		_, inCustody = myCustodyColumns[msg.Index]
+	store, err := s.shouldStore(blockHeader.Slot, blockRoot, msg.Index)
+	if err != nil {
+		return err
 	}
 
 	blobParameters := s.cfg.GetBlobParameters(blockHeader.Slot / s.cfg.SlotsPerEpoch)
@@ -288,7 +278,7 @@ func (s *dataColumnSidecarService) processFuluMessage(ctx context.Context, subne
 	if seen, _ := s.seenSidecar.ContainsOrAdd(seenKey, struct{}{}); seen {
 		return ErrIgnore
 	}
-	if !inCustody {
+	if !store {
 		// Storage sends the data_column_sidecar event for a stored column, so a column that is not stored gets it here.
 		msg.BlockRoot = blockRoot
 		msg.Slot = blockHeader.Slot
@@ -307,27 +297,42 @@ func (s *dataColumnSidecarService) processFuluMessage(ctx context.Context, subne
 	return nil
 }
 
-// PublishColumnsFromEL marks each sidecar as seen and publishes it on its subnet, unless a sidecar
-// for its (slot, proposer, index) was seen already. The sidecars must be on subnets this node subscribes to.
-func (s *dataColumnSidecarService) PublishColumnsFromEL(ctx context.Context, sidecars []*cltypes.DataColumnSidecar) {
+// shouldStore reports whether the node stores a column it has validated. A column it does not store is still relayed
+// on a subscribed subnet. An archive node also stores columns outside custody until it can recover, or has recovered,
+// the blobs.
+func (s *dataColumnSidecarService) shouldStore(slot uint64, blockRoot common.Hash, index uint64) (bool, error) {
+	peerDas := s.forkChoice.GetPeerDas()
+	myCustodyColumns, err := peerDas.StateReader().GetMyCustodyColumns()
+	if err != nil {
+		return false, fmt.Errorf("%w: failed to get my custody columns: %w", ErrIgnore, err)
+	}
+	if _, inCustody := myCustodyColumns[index]; inCustody {
+		return true, nil
+	}
+	return peerDas.IsArchivedMode() && !peerDas.IsColumnOverHalf(slot, blockRoot) && !peerDas.IsBlobAlreadyRecovered(blockRoot), nil
+}
+
+// PublishColumns marks each sidecar of one block as seen and publishes it on its subnet, unless the sidecar was seen
+// already. The sidecars must be on subnets this node subscribes to.
+func (s *dataColumnSidecarService) PublishColumns(ctx context.Context, sidecars []*cltypes.DataColumnSidecar) {
 	if len(sidecars) == 0 {
 		return
 	}
-	header := sidecars[0].SignedBlockHeader.Header
-	// The block may have waited for its parent or the EL while finality moved on; peers would ignore
+	// The block may have waited for its parent, the EL or recovery while finality moved on; peers would ignore
 	// or reject its columns then.
-	if !s.afterFinalizedCheckpoint(header) {
-		log.Debug("[dataColumnSidecarService] not publishing columns built from EL blobs below finality", "slot", header.Slot)
+	slot, ok := s.afterFinality(sidecars[0])
+	if !ok {
+		log.Debug("[dataColumnSidecarService] not publishing local columns below finality", "slot", slot)
 		return
 	}
-	forkDigest, err := s.ethClock.ComputeForkDigest(header.Slot / s.cfg.SlotsPerEpoch)
+	forkDigest, err := s.ethClock.ComputeForkDigest(slot / s.cfg.SlotsPerEpoch)
 	if err != nil {
-		log.Warn("[dataColumnSidecarService] failed to compute the fork digest of columns built from EL blobs", "slot", header.Slot, "err", err)
+		log.Warn("[dataColumnSidecarService] failed to compute the fork digest of local columns", "slot", slot, "err", err)
 		return
 	}
 	for _, sidecar := range sidecars {
-		key := seenSidecarKey{slot: header.Slot, proposerIndex: header.ProposerIndex, index: sidecar.Index}
-		if seen, _ := s.seenSidecar.ContainsOrAdd(key, struct{}{}); seen {
+		release, claimed := s.claimSeen(sidecar)
+		if !claimed {
 			continue
 		}
 		encoded, err := sidecar.EncodeSSZ(nil)
@@ -336,21 +341,39 @@ func (s *dataColumnSidecarService) PublishColumnsFromEL(ctx context.Context, sid
 		}
 		if err != nil {
 			// Unclaimed, a copy from gossip is still processed and relayed.
-			s.seenSidecar.Remove(key)
-			log.Debug("[dataColumnSidecarService] failed to publish a column built from EL blobs", "slot", header.Slot, "index", sidecar.Index, "err", err)
+			release()
+			log.Debug("[dataColumnSidecarService] failed to publish a local column", "slot", slot, "index", sidecar.Index, "err", err)
 		}
 	}
 }
 
-// afterFinalizedCheckpoint applies the gossip finality rules for a Fulu sidecar: its slot is after the
-// finalized epoch start and the finalized checkpoint is an ancestor of its block.
-func (s *dataColumnSidecarService) afterFinalizedCheckpoint(header *cltypes.BeaconBlockHeader) bool {
+// afterFinality returns the sidecar's slot and whether the gossip finality rules allow the sidecar. For Fulu, its
+// slot is after the finalized epoch start and the finalized checkpoint is an ancestor of its block.
+func (s *dataColumnSidecarService) afterFinality(sidecar *cltypes.DataColumnSidecar) (uint64, bool) {
+	if sidecar.Version() >= clparams.GloasVersion {
+		return sidecar.Slot, sidecar.Slot > s.forkChoice.FinalizedSlot()
+	}
+	header := sidecar.SignedBlockHeader.Header
 	finalizedCheckpoint := s.forkChoice.FinalizedCheckpoint()
 	finalizedStartSlot, ok := safeMultiplyUint64(finalizedCheckpoint.Epoch, s.cfg.SlotsPerEpoch)
 	if !ok || header.Slot <= finalizedStartSlot {
-		return false
+		return header.Slot, false
 	}
-	return s.forkChoice.Ancestor(header.ParentRoot, max(finalizedStartSlot, s.forkChoice.AnchorSlot())).Root == finalizedCheckpoint.Root
+	return header.Slot, s.forkChoice.Ancestor(header.ParentRoot, max(finalizedStartSlot, s.forkChoice.AnchorSlot())).Root == finalizedCheckpoint.Root
+}
+
+// claimSeen marks the sidecar as seen. It reports whether the sidecar was not seen before, and returns a function that
+// removes the mark.
+func (s *dataColumnSidecarService) claimSeen(sidecar *cltypes.DataColumnSidecar) (release func(), claimed bool) {
+	if sidecar.Version() >= clparams.GloasVersion {
+		key := seenGloasSidecarKey{beaconBlockRoot: sidecar.BeaconBlockRoot, index: sidecar.Index}
+		seen, _ := s.seenGloasSidecar.ContainsOrAdd(key, struct{}{})
+		return func() { s.seenGloasSidecar.Remove(key) }, !seen
+	}
+	header := sidecar.SignedBlockHeader.Header
+	key := seenSidecarKey{slot: header.Slot, proposerIndex: header.ProposerIndex, index: sidecar.Index}
+	seen, _ := s.seenSidecar.ContainsOrAdd(key, struct{}{})
+	return func() { s.seenSidecar.Remove(key) }, !seen
 }
 
 // processGloasMessage handles GLOAS data column sidecar validation
@@ -388,26 +411,18 @@ func (s *dataColumnSidecarService) processGloasMessage(ctx context.Context, subn
 		return ErrIgnore
 	}
 
-	// Check custody columns
-	if s.forkChoice.GetPeerDas().IsArchivedMode() {
-		if s.forkChoice.GetPeerDas().IsColumnOverHalf(slot, blockRoot) ||
-			s.forkChoice.GetPeerDas().IsBlobAlreadyRecovered(blockRoot) {
-			return ErrIgnore
-		}
-	} else {
-		myCustodyColumns, err := s.forkChoice.GetPeerDas().StateReader().GetMyCustodyColumns()
-		if err != nil {
-			return fmt.Errorf("%w: failed to get my custody columns: %w", ErrIgnore, err)
-		}
-		if _, ok := myCustodyColumns[msg.Index]; !ok {
-			return ErrIgnore
-		}
+	store, err := s.shouldStore(slot, blockRoot, msg.Index)
+	if err != nil {
+		return err
 	}
 
 	// [IGNORE] A valid block for the sidecar's slot has been seen.
 	// Only checks recent blocks in forkChoice memory - older blocks don't need sidecar validation.
 	block, ok := s.forkChoice.GetBlock(blockRoot)
 	if !ok {
+		if !store {
+			return ErrIgnore
+		}
 		return errGloasSidecarBlockUnavailable
 	}
 
@@ -439,6 +454,14 @@ func (s *dataColumnSidecarService) processGloasMessage(ctx context.Context, subn
 		return errors.New("invalid kzg proofs for data column sidecar")
 	}
 
+	if !store {
+		if seen, _ := s.seenGloasSidecar.ContainsOrAdd(seenKey, struct{}{}); seen {
+			return ErrIgnore
+		}
+		msg.BlockRoot = blockRoot
+		s.emitters.Operation().SendDataColumnSidecar(beaconevents.NewDataColumnSidecarData(msg))
+		return nil
+	}
 	if err := s.columnSidecarStorage.WriteColumnSidecars(ctx, blockRoot, int64(msg.Index), msg); err != nil {
 		return fmt.Errorf("%w: failed to write data column sidecar: %w", ErrIgnore, err)
 	}
