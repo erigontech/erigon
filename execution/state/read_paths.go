@@ -1363,6 +1363,8 @@ func codeBytesDropped(c accounts.Code) bool {
 	return dbg.ExtCodeCopyBorrow && c.Bytes == nil && !c.Hash.IsEmpty()
 }
 
+var extCodeCopyCount = dbg.EnvBool("EXTCODECOPY_COUNT", false)
+
 type codeLender interface {
 	LendAccountCode(accounts.Address) ([]byte, bool, error)
 }
@@ -1408,7 +1410,9 @@ func (ibs *IntraBlockState) lendOriginCode(addr accounts.Address) (accounts.Code
 	if err != nil || !lent {
 		return accounts.Code{}, false, err
 	}
-	recordExtCodeCopyBorrow(addr, ibs.Version())
+	if extCodeCopyCount {
+		recordExtCodeCopyBorrow(addr, ibs.Version())
+	}
 	return accounts.Code{Hash: codeHash, Bytes: code}, true, nil
 }
 
