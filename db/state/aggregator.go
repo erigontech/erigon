@@ -1565,12 +1565,9 @@ func (as *AggregatorPruneStat) String() string {
 	if as == nil {
 		return ""
 	}
-	buf := make([]string, max(len(as.Domains), len(as.Indices)))
-	names := buf[:len(as.Domains)]
-	i := 0
+	names := make([]string, 0, len(as.Domains))
 	for k := range as.Domains {
-		names[i] = k
-		i++
+		names = append(names, k)
 	}
 
 	slices.Sort(names)
@@ -1582,11 +1579,9 @@ func (as *AggregatorPruneStat) String() string {
 			sb.WriteString(fmt.Sprintf("%s| %s %s; ", d, v.String(), v.Progress.String()))
 		}
 	}
-	names = buf[:len(as.Indices)]
-	i = 0
+	names = names[:0]
 	for k := range as.Indices {
-		names[i] = k
-		i++
+		names = append(names, k)
 	}
 	slices.Sort(names)
 
