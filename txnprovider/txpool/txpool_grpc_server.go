@@ -203,7 +203,7 @@ func (s *GrpcServer) Add(ctx context.Context, in *txpoolproto.AddRequest) (*txpo
 			case knownReason != txpoolcfg.NotSet:
 				reply.Errors[i] = knownReason.String()
 				reply.Imported[i] = mapDiscardReasonToProto(knownReason)
-			case errors.Is(err, ErrRlpTooBig): // Noop, but need to handle to not count these
+			case errors.Is(err, ErrRlpTooBig):
 				reply.Errors[i] = txpoolcfg.RLPTooLong.String()
 				reply.Imported[i] = txpoolproto.ImportResult_INVALID
 			case errors.Is(err, ErrParseTxn):

@@ -104,6 +104,8 @@ func checkTransactionGasCap(txn types.Transaction, gasCap uint64) error {
 }
 
 func (api *OverlayAPIImpl) applyGasBudget(msg *types.Message) {
+	// Frame execution reads its signed budgets from the transaction envelope,
+	// so changing the message allowance leaves those budgets unchanged.
 	msg.ChangeGas(api.GasCap, api.GasCap)
 	// The RPC budget may exceed the transaction gas-limit ceilings.
 	msg.SetCheckGas(false)

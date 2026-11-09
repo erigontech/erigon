@@ -88,6 +88,8 @@ func NewTxnParseContext(chainID uint256.Int) *TxnParseContext {
 // Set the RLP validate function
 func (ctx *TxnParseContext) ValidateRLP(f func(txnRlp []byte) error) { ctx.validateRlp = f }
 
+// RejectPrefix registers a callback for frame prefix policy rejections.
+// It receives the transaction hash and runs only when pool rules are enabled.
 func (ctx *TxnParseContext) RejectPrefix(f func(common.Hash)) { ctx.rejectPrefix = f }
 
 // Set the with sender flag
