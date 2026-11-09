@@ -117,6 +117,34 @@ func TestOnBlockHashMismatchPreservesVerifiedPayload(t *testing.T) {
 	}
 }
 
+func TestOnBlockSeedsEpochBoundaryCopyWithRescannedTotal(t *testing.T) {
+	blocks, anchor, post := tests.GetCapellaRandom()
+	anchorTotal := anchor.GetTotalActiveBalance()
+	store := newBellatrixForkChoiceStore(t, anchor, nil)
+
+	for i, block := range blocks {
+		store.OnTick((anchor.GenesisTime() + block.Block.Slot*anchor.BeaconConfig().SecondsPerSlot) * 1000)
+		require.NoError(t, store.OnBlock(t.Context(), block, false, false, false))
+		root, err := block.Block.HashSSZ()
+		require.NoError(t, err)
+		copied, err := store.GetStateAtBlockRoot(root)
+		require.NoError(t, err)
+		rescanned, err := copied.Copy()
+		require.NoError(t, err)
+		recorded, ok := store.TotalActiveBalance(root)
+		require.True(t, ok)
+
+		require.Equal(t, rescanned.GetTotalActiveBalance(), recorded)
+		require.Equal(t, rescanned.GetTotalActiveBalance(), copied.GetTotalActiveBalance())
+		require.Equal(t, rescanned.BaseRewardPerIncrement(), copied.BaseRewardPerIncrement())
+
+		if i == len(blocks)-1 {
+			require.Equal(t, post.GetTotalActiveBalance(), rescanned.GetTotalActiveBalance())
+			require.NotEqual(t, anchorTotal, rescanned.GetTotalActiveBalance())
+		}
+	}
+}
+
 func TestOnBlockDoesNotCacheValidatedPayloadWhenEngineReturnsError(t *testing.T) {
 	blocks, anchorState, _ := tests.GetBellatrixRandom()
 	block := blocks[0]
