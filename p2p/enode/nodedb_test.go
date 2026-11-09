@@ -560,7 +560,7 @@ func TestDBExpiresNodeWithOnlyAPingRow(t *testing.T) {
 
 	db.expireNodes()
 
-	require.True(t, db.LastPingReceived(stale, ip).IsZero() || db.LastPingReceived(stale, ip).Unix() == 0, "the stale ping row is deleted")
+	require.Zero(t, db.LastPingReceived(stale, ip).Unix(), "the stale ping row is deleted")
 	require.Equal(t, now.Unix(), db.LastPingReceived(fresh, ip).Unix())
 }
 
@@ -578,4 +578,20 @@ func TestDBExpiredPongDecidesOverFreshPing(t *testing.T) {
 
 	require.Zero(t, db.LastPongReceived(id, ponged).Unix())
 	require.Zero(t, db.LastPingReceived(id, pinged).Unix(), "a pong row decides the expiry, not a newer ping")
+}
+
+func TestDBExpiresStalePingRowOfALiveNode(t *testing.T) {
+	db, err := OpenDB("")
+	require.NoError(t, err)
+	defer db.Close()
+
+	id, oldIP, newIP := ID{1}, netip.AddrFrom4([4]byte{127, 0, 0, 1}), netip.AddrFrom4([4]byte{127, 0, 0, 2})
+	now := time.Now()
+	require.NoError(t, db.UpdateLastPingReceived(id, oldIP, now.Add(-dbNodeExpiration-time.Minute)))
+	require.NoError(t, db.UpdateLastPingReceived(id, newIP, now))
+
+	db.expireNodes()
+
+	require.Zero(t, db.LastPingReceived(id, oldIP).Unix(), "a source IP that stopped pinging must not stay")
+	require.Equal(t, now.Unix(), db.LastPingReceived(id, newIP).Unix())
 }

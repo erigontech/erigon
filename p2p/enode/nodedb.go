@@ -436,15 +436,14 @@ func (db *DB) expirer() {
 	}
 }
 
-// expireNodes iterates over the database and deletes all nodes that have not
-// been seen (i.e. received a pong from) for some time.
+// expireNodes iterates over the database and deletes all nodes that have not been seen for some time:
+// by their youngest pong, or by their youngest ping if they have no pong row. A stale ping row goes on its own.
 func (db *DB) expireNodes() {
 	var (
 		threshold    = time.Now().Add(-dbNodeExpiration).Unix()
 		youngestPong int64
 		youngestPing int64
 	)
-	// A node that never answered a ping has no pong row, so its last ping decides.
 	expired := func() bool {
 		youngest := cmp.Or(youngestPong, youngestPing)
 		return youngest > 0 && youngest < threshold
@@ -473,6 +472,9 @@ func (db *DB) expireNodes() {
 			if field == dbNodePing {
 				time, _ := binary.Varint(v)
 				youngestPing = max(youngestPing, time)
+				if time < threshold {
+					toDelete = append(toDelete, nodeItemKey(id, ip, dbNodePing))
+				}
 			}
 			if field == dbNodePong {
 				time, _ := binary.Varint(v)
