@@ -104,7 +104,7 @@ func (b *BeaconState) CurrentSyncCommitteeBranch() ([][32]byte, error) {
 		return merkle_tree.ProgressiveContainerProofAll(22, schema...)
 	}
 
-	schema := []any{}
+	schema := make([]any, 0, leafSize)
 	for i := 0; i < leafSize*32; i += 32 {
 		schema = append(schema, b.leaves[i:i+32])
 	}
@@ -136,7 +136,7 @@ func (b *BeaconState) NextSyncCommitteeBranch() ([][32]byte, error) {
 		return merkle_tree.ProgressiveContainerProofAll(23, schema...)
 	}
 
-	schema := []any{}
+	schema := make([]any, 0, leafSize)
 	for i := 0; i < leafSize*32; i += 32 {
 		schema = append(schema, b.leaves[i:i+32])
 	}
@@ -171,7 +171,7 @@ func (b *BeaconState) FinalityRootBranch() ([][32]byte, error) {
 		return append([][32]byte{merkle_tree.Uint64Root(b.finalizedCheckpoint.Epoch)}, proof...), nil
 	}
 
-	schema := []any{}
+	schema := make([]any, 0, leafSize)
 	for i := 0; i < leafSize*32; i += 32 {
 		schema = append(schema, b.leaves[i:i+32])
 	}

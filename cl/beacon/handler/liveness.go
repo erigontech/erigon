@@ -111,7 +111,7 @@ func (a *ApiHandler) liveness(w http.ResponseWriter, r *http.Request) (*beaconht
 		live.IsLive = currentEpochParticipation.Get(int(idx)) != 0
 	}
 
-	resp := []*live{}
+	resp := make([]*live, 0, len(liveSet))
 	for _, v := range liveSet {
 		resp = append(resp, v)
 	}

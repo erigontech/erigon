@@ -130,7 +130,7 @@ func BuildGenesisState(
 	beaconState.SetEth1DepositIndex(uint64(validatorCount))
 
 	// Collect pubkeys for sync committee initialization.
-	var allPubkeys []common.Bytes48
+	allPubkeys := make([]common.Bytes48, 0, validatorCount)
 
 	// Add validators.
 	maxEffectiveBalance := cfg.MaxEffectiveBalance

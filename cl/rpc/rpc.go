@@ -111,7 +111,7 @@ func (b *BeaconRpcP2P) sendBlocksRequest(ctx context.Context, topic string, reqD
 }
 
 func (b *BeaconRpcP2P) decodeBlocks(ctx context.Context, responses []responseData, pid string) ([]*cltypes.SignedBeaconBlock, error) {
-	responsePacket := []*cltypes.SignedBeaconBlock{}
+	responsePacket := make([]*cltypes.SignedBeaconBlock, 0, len(responses))
 	for _, data := range responses {
 		responseChunk := cltypes.NewSignedBeaconBlock(b.beaconConfig, data.version)
 		if err := responseChunk.DecodeSSZ(data.raw, int(data.version)); err != nil {
@@ -133,7 +133,7 @@ func (b *BeaconRpcP2P) sendBlobsSidecar(ctx context.Context, topic string, reqDa
 		return nil, pid, err
 	}
 
-	responsePacket := []*cltypes.BlobSidecar{}
+	responsePacket := make([]*cltypes.BlobSidecar, 0, len(responses))
 	for _, data := range responses {
 		responseChunk := &cltypes.BlobSidecar{}
 		if err := responseChunk.DecodeSSZ(data.raw, int(data.version)); err != nil {
@@ -186,7 +186,7 @@ func (b *BeaconRpcP2P) SendColumnSidecarsByRootIdentifierReqWithSnapshot(
 		return nil, pid, filteredReq, fmt.Errorf("response count %d exceeds requested column count %d", len(responsePacket), requestedColumnCount)
 	}
 
-	ColumnSidecars := []*cltypes.DataColumnSidecar{}
+	ColumnSidecars := make([]*cltypes.DataColumnSidecar, 0, len(responsePacket))
 	for _, data := range responsePacket {
 		columnSidecar := &cltypes.DataColumnSidecar{}
 		if err := columnSidecar.DecodeSSZ(data.raw, int(data.version)); err != nil {
