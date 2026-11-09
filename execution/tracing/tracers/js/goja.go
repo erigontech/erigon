@@ -21,6 +21,7 @@ package js
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -140,16 +141,8 @@ func newJsTracer(code string, ctx *tracers.Context, cfg json.RawMessage) (*trace
 		code = c
 	}
 	vm := goja.New()
-	if ctx != nil && ctx.Cancel != nil {
-		constructed := make(chan struct{})
-		defer close(constructed)
-		go func() {
-			select {
-			case <-ctx.Cancel:
-				vm.Interrupt("execution timeout")
-			case <-constructed:
-			}
-		}()
+	if ctx != nil && ctx.Ctx != nil {
+		defer context.AfterFunc(ctx.Ctx, func() { vm.Interrupt("execution timeout") })()
 	}
 	// By default field names are exported to JS as is, i.e. capitalized.
 	vm.SetFieldNameMapper(goja.UncapFieldNameMapper())

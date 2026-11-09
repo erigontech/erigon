@@ -181,7 +181,7 @@ func AssembleTracer(
 			cfg = *config.TracerConfig
 		}
 		deadlineCtx, cancel := context.WithTimeout(ctx, timeout)
-		tracer, err := tracers.New(*config.Tracer, &tracers.Context{TxHash: txHash, TxIndex: txnIndex, BlockHash: blockHash, Cancel: deadlineCtx.Done(), BlockNumber: blockNumber}, cfg)
+		tracer, err := tracers.New(*config.Tracer, &tracers.Context{TxHash: txHash, TxIndex: txnIndex, BlockHash: blockHash, Ctx: deadlineCtx, BlockNumber: blockNumber}, cfg)
 		if err != nil {
 			cancel()
 			return nil, false, func() {}, err

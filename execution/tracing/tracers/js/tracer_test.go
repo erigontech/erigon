@@ -21,6 +21,7 @@ package js
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -466,13 +467,13 @@ func TestConstructorStopsWhenCancelled(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			cancel := make(chan struct{})
+			ctx, cancel := context.WithCancel(t.Context())
 			done := make(chan error, 1)
 			go func() {
-				_, err := newJsTracer(code, &tracers.Context{Cancel: cancel}, nil)
+				_, err := newJsTracer(code, &tracers.Context{Ctx: ctx}, nil)
 				done <- err
 			}()
-			close(cancel)
+			cancel()
 			select {
 			case err := <-done:
 				require.Error(t, err)
