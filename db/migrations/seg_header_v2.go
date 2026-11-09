@@ -94,6 +94,11 @@ func upgradeSegFileToV2(path string, logger log.Logger) error {
 		d.Close() // already upgraded; re-detecting would validate the header but write a fresh guess
 		return nil
 	}
+	if !detectionSawData(d) {
+		d.Close() // stays V1, which readers still open with the caller's compression
+		logger.Warn("[seg_header_v2] keeping V1 header: compression sample has only empty words", "file", filepath.Base(path))
+		return nil
+	}
 	pageCnt := d.CompressedPageValuesCount()
 	fc := seg.DetectCompressType(d.MakeGetter())
 	if err := checkReadable(d, fc); err != nil {
@@ -108,6 +113,24 @@ func upgradeSegFileToV2(path string, logger log.Logger) error {
 	removeStaleTorrents(path)
 	logger.Debug("[seg_header_v2] upgraded", "file", filepath.Base(path), "compression", fc)
 	return nil
+}
+
+// detectionSawData reports whether DetectCompressType's sample has a non-empty word.
+// Empty words decode the same under any compression, so such a sample proves nothing.
+func detectionSawData(d *seg.Decompressor) (saw bool) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			saw = true // a compressed word that does not decode as uncompressed
+		}
+	}()
+	g := d.MakeGetter()
+	g.Reset(0)
+	for i := 0; i < 2*seg.DetectCompressSamplePairs && g.HasNext(); i++ {
+		if word, _ := g.NextUncompressed(); len(word) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // checkReadableMaxWords bounds the validation read so the migration stays fast on

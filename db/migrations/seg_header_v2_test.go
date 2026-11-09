@@ -136,3 +136,16 @@ func TestUpgradeSegHeadersV2_MissingDir(t *testing.T) {
 		return nil
 	}))
 }
+
+func TestUpgradeSegHeadersV2_EmptySampleKeepsV1(t *testing.T) {
+	pairs := append(make([][2]string, seg.DetectCompressSamplePairs), manyPairs()...)
+	path := filepath.Join(t.TempDir(), "v1.0-code.0-1024.v")
+	writeV1SegFile(t, path, seg.CompressKeys|seg.CompressVals, pairs)
+
+	require.NoError(t, upgradeSegFileToV2(path, log.New()))
+
+	d, err := seg.NewDecompressor(path)
+	require.NoError(t, err)
+	defer d.Close()
+	require.Equal(t, seg.FileCompressionFormatV1, d.CompressionFormatVersion())
+}

@@ -206,6 +206,9 @@ func (c *Writer) Close() {
 	}
 }
 
+// DetectCompressSamplePairs is how many key/value pairs DetectCompressType reads.
+const DetectCompressSamplePairs = 100
+
 func DetectCompressType(getter *Getter) (compressed FileCompression) {
 	keyCompressed := func() (compressed bool) {
 		defer func() {
@@ -214,7 +217,7 @@ func DetectCompressType(getter *Getter) (compressed FileCompression) {
 			}
 		}()
 		getter.Reset(0)
-		for range 100 {
+		for range DetectCompressSamplePairs {
 			if getter.HasNext() {
 				_, _ = getter.SkipUncompressed()
 			}
@@ -232,7 +235,7 @@ func DetectCompressType(getter *Getter) (compressed FileCompression) {
 			}
 		}()
 		getter.Reset(0)
-		for range 100 {
+		for range DetectCompressSamplePairs {
 			if getter.HasNext() {
 				_, _ = getter.Skip()
 			}
