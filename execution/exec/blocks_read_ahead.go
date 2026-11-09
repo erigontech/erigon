@@ -265,6 +265,10 @@ type SendersRecovery struct {
 	senders  []accounts.Address
 	err      error
 	failedTx int
+
+	ready      []atomic.Bool // ready[i] publishes senders[i] to exec while the recovery still runs
+	cachedTxns types.Transactions
+	lazy       atomic.Int64
 }
 
 type senderError struct {
@@ -285,6 +289,9 @@ func StartBatchSendersRecovery(ctx context.Context, signers []*types.Signer, txn
 
 func startSendersRecovery(ctx context.Context, signerOf func(int) *types.Signer, txns types.Transactions) *SendersRecovery {
 	r := &SendersRecovery{done: make(chan struct{}), senders: make([]accounts.Address, len(txns)), failedTx: -1}
+	if sendersNoWait {
+		r.ready = make([]atomic.Bool, len(txns))
+	}
 	go func() {
 		defer close(r.done)
 		var next atomic.Int64
@@ -301,6 +308,9 @@ func startSendersRecovery(ctx context.Context, signerOf func(int) *types.Signer,
 						return &senderError{txIndex: i, err: fmt.Errorf("%w: error recovering sender for tx=%x, %w", rules.ErrInvalidBlock, txns[i].Hash(), err)}
 					}
 					r.senders[i] = from
+					if r.ready != nil {
+						r.ready[i].Store(true)
+					}
 				}
 				return nil
 			})
@@ -665,8 +675,9 @@ func (bra *BlockReadAheader) ReadBlockWithSenders(blockHash common.Hash) (*types
 	if body == nil || !ok {
 		return nil, false
 	}
+	detached := sendersDetached(body.Transactions)
 	for _, txn := range body.Transactions {
-		if _, ok := txn.GetSender(); !ok {
+		if _, ok := txn.GetSender(); !ok && !detached {
 			return nil, false
 		}
 	}

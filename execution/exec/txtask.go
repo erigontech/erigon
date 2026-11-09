@@ -274,6 +274,9 @@ func (t *TxTask) TxSender() (accounts.Address, error) {
 	if sender, ok := t.Tx().GetSender(); ok {
 		return sender, nil
 	}
+	if sender, ok := detachedSender(t.Tx(), t.TxIndex); ok {
+		return sender, nil
+	}
 	if t.signer == nil {
 		t.signer = types.MakeSigner(t.Config, t.BlockNumber(), t.Header.Time)
 	}
@@ -281,7 +284,9 @@ func (t *TxTask) TxSender() (accounts.Address, error) {
 	if err != nil {
 		return accounts.NilAddress, fmt.Errorf("%w: error recovering sender for tx=%x, %w", rules.ErrInvalidBlock, t.TxHash(), err)
 	}
-	log.Warn("[Execution] expensive lazy sender recovery", "blockNum", t.BlockNumber(), "txIdx", t.TxIndex)
+	if !sendersNoWait {
+		log.Warn("[Execution] expensive lazy sender recovery", "blockNum", t.BlockNumber(), "txIdx", t.TxIndex)
+	}
 	return sender, nil
 }
 

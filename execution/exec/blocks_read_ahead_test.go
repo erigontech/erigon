@@ -19,6 +19,7 @@ package exec
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1105,4 +1106,84 @@ func TestBALAccountsKeepsAccountChangesWithoutStorage(t *testing.T) {
 	got := balAccounts(bal)
 	require.Equal(t, types.BlockAccessList{{Address: a1, BalanceChanges: bal[0].BalanceChanges}, {Address: a2}}, got)
 	require.Len(t, bal[0].StorageChanges, 1, "the BAL itself is unchanged")
+}
+
+// senderNoWaitBlock returns the same signed txns twice: once as newPayload decodes them and once as the cached body does.
+func senderNoWaitBlock(t *testing.T, signer *types.Signer) (payload, cached types.Transactions, want []accounts.Address) {
+	t.Helper()
+	for i := range 8 {
+		key, err := crypto.GenerateKey()
+		require.NoError(t, err)
+		for _, txns := range []*types.Transactions{&payload, &cached} {
+			signed, err := types.SignTx(&types.LegacyTx{
+				CommonTx: types.CommonTx{Nonce: uint64(i), GasLimit: 21_000},
+				GasPrice: *uint256.NewInt(1),
+			}, *signer, key)
+			require.NoError(t, err)
+			*txns = append(*txns, signed)
+		}
+		want = append(want, accounts.InternAddress(crypto.PubkeyToAddress(key.PublicKey)))
+	}
+	return payload, cached, want
+}
+
+func enableSendersNoWait(t *testing.T) {
+	t.Helper()
+	sendersNoWait = true
+	t.Cleanup(func() {
+		sendersNoWait = false
+		detachedSendersRecovery.Store(nil)
+	})
+}
+
+func TestSendersNoWaitExecReadsRecoveredSlots(t *testing.T) {
+	enableSendersNoWait(t)
+	signer := types.MakeSigner(chain.TestChainBerlinConfig, 1, 0)
+	payload, cached, want := senderNoWaitBlock(t, signer)
+	r := StartSendersRecovery(context.Background(), signer, payload)
+	_, err := r.Wait(context.Background())
+	require.NoError(t, err)
+	require.True(t, DetachSendersRecovery(r, cached))
+
+	bra := NewBlockReadAheader()
+	header := &types.Header{Number: *uint256.NewInt(1)}
+	bra.AddHeaderAndBody(context.Background(), nil, nil, header, &types.Body{Transactions: cached})
+	block, ok := bra.ReadBlockWithSenders(header.Hash())
+	require.True(t, ok, "a detached block stays on the cached path without senders")
+
+	for i := range want {
+		task := &TxTask{TxIndex: i, Txs: block.Transactions(), Header: header, Config: chain.TestChainBerlinConfig}
+		sender, err := task.TxSender()
+		require.NoError(t, err)
+		require.Equal(t, want[i], sender)
+		cachedSender, ok := cached[i].GetSender()
+		require.True(t, ok, "AsMessage must find the sender on the tx")
+		require.Equal(t, want[i], cachedSender)
+	}
+	require.Zero(t, r.lazy.Load())
+}
+
+func TestSendersNoWaitExecRecoversUnreadySlot(t *testing.T) {
+	enableSendersNoWait(t)
+	signer := types.MakeSigner(chain.TestChainBerlinConfig, 1, 0)
+	_, cached, want := senderNoWaitBlock(t, signer)
+	unfinished := &SendersRecovery{senders: make([]accounts.Address, len(cached)), ready: make([]atomic.Bool, len(cached))}
+	require.True(t, DetachSendersRecovery(unfinished, cached))
+
+	header := &types.Header{Number: *uint256.NewInt(1)}
+	task := &TxTask{TxIndex: 3, Txs: cached, Header: header, Config: chain.TestChainBerlinConfig}
+	sender, err := task.TxSender()
+	require.NoError(t, err)
+	require.Equal(t, want[3], sender)
+	require.EqualValues(t, 1, unfinished.lazy.Load())
+}
+
+func TestSendersNoWaitOffKeepsTheStageWait(t *testing.T) {
+	signer := types.MakeSigner(chain.TestChainBerlinConfig, 1, 0)
+	payload, cached, _ := senderNoWaitBlock(t, signer)
+	r := StartSendersRecovery(context.Background(), signer, payload)
+	_, err := r.Wait(context.Background())
+	require.NoError(t, err)
+	require.False(t, DetachSendersRecovery(r, cached))
+	require.False(t, sendersDetached(cached))
 }
