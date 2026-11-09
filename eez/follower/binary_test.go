@@ -31,6 +31,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -92,6 +93,22 @@ func blockHash(ctx context.Context, url, tag string) (common.Hash, error) {
 		return common.Hash{}, fmt.Errorf("no block %s", tag)
 	}
 	return b.Hash, nil
+}
+
+// waitStatus waits until the follower at url reports cursor and safe in
+// eez_followerStatus. It publishes them after the fork choice that moves the
+// safe block, so the status can lag that block for the rest of a step.
+func waitStatus(t *testing.T, url string, cursor, safe uint64) {
+	t.Helper()
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
+		var status struct {
+			Cursor hexutil.Uint64 `json:"cursor"`
+			Safe   hexutil.Uint64 `json:"safe"`
+		}
+		require.NoError(c, call(t.Context(), url, "eez_followerStatus", &status))
+		assert.Equal(c, cursor, uint64(status.Cursor), "cursor")
+		assert.Equal(c, safe, uint64(status.Safe), "safe")
+	}, 10*time.Second, 100*time.Millisecond, "eez_followerStatus")
 }
 
 // TestFollowerBinary runs the erigon binary named by EEZ_ERIGON as an EEZ
@@ -158,13 +175,7 @@ func TestFollowerBinary(t *testing.T) {
 	require.FileExists(t, filepath.Join(dir, "eez", "chaindata", "mdbx.dat"))
 	require.DirExists(t, filepath.Join(dir, "snapshots", "eez", "domain"))
 	require.FileExists(t, filepath.Join(dir, "eez", "eez-reconcile-checkpoint"))
-	var status struct {
-		Cursor hexutil.Uint64 `json:"cursor"`
-		Safe   hexutil.Uint64 `json:"safe"`
-	}
-	require.NoError(t, call(t.Context(), url, "eez_followerStatus", &status))
-	require.Equal(t, hexutil.Uint64(3), status.Cursor)
-	require.Equal(t, hexutil.Uint64(3), status.Safe)
+	waitStatus(t, url, 3, 3)
 	_, err = (&net.Dialer{Timeout: time.Second}).DialContext(t.Context(), "tcp", "127.0.0.1:"+authPort)
 	require.Error(t, err, "the engine API is down")
 
