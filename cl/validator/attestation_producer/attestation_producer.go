@@ -29,7 +29,6 @@ import (
 	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/kv"
 )
 
 var (
@@ -133,7 +132,7 @@ func (ap *attestationProducer) CachedAttestationData(slot uint64, headRoot commo
 	return solid.AttestationData{}, false, nil
 }
 
-func (ap *attestationProducer) ProduceAndCacheAttestationData(_ kv.Tx, baseState *state.CachingBeaconState, baseStateBlockRoot common.Hash, slot uint64) (solid.AttestationData, error) {
+func (ap *attestationProducer) ProduceAndCacheAttestationData(baseState *state.CachingBeaconState, baseStateBlockRoot common.Hash, slot uint64) (solid.AttestationData, error) {
 	epoch := slot / ap.beaconCfg.SlotsPerEpoch
 	key := attestationCacheKey{epoch: epoch, headRoot: baseStateBlockRoot}
 	var err error
@@ -159,8 +158,8 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(_ kv.Tx, baseState
 	defer ap.attCacheMutex.Unlock()
 
 	stateEpoch := state.Epoch(baseState)
-	if baseState.Slot() > slot {
-		return solid.AttestationData{}, errors.New("head state slot is bigger than requested slot, the attestation should have been cached, try again later")
+	if epoch < state.PreviousEpoch(baseState) {
+		return solid.AttestationData{}, errors.New("head state is more than one epoch ahead")
 	}
 	if stateEpoch < epoch {
 		baseState, err = baseState.Copy()
@@ -178,19 +177,26 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(_ kv.Tx, baseState
 	if err != nil {
 		return solid.AttestationData{}, err
 	}
+	beaconBlockRoot, err := ap.beaconBlockRootForSlot(baseState, baseStateBlockRoot, slot)
+	if err != nil {
+		return solid.AttestationData{}, err
+	}
+	sourceCheckpoint := baseState.CurrentJustifiedCheckpoint()
+	if epoch < stateEpoch {
+		sourceCheckpoint = baseState.PreviousJustifiedCheckpoint()
+	}
 	baseAttestationData := solid.AttestationData{
 		Slot:            0,             // slot will be filled in later
 		CommitteeIndex:  0,             // committee index is deprecated after Electra
 		BeaconBlockRoot: common.Hash{}, // beacon block root will be filled in later
-		Source:          baseState.CurrentJustifiedCheckpoint(),
+		Source:          sourceCheckpoint,
 		Target:          targetCheckpoint,
 	}
 	ap.attestationsCache.Add(key, baseAttestationData)
-	ap.blockRootsUsedForSlotCache.Add(blockRootCacheKey{slot: slot, headRoot: baseStateBlockRoot}, baseStateBlockRoot)
 
 	return solid.AttestationData{
 		Slot:            slot,
-		BeaconBlockRoot: baseStateBlockRoot,
+		BeaconBlockRoot: beaconBlockRoot,
 		Source:          baseAttestationData.Source,
 		Target:          targetCheckpoint,
 	}, nil

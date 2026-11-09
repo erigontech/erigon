@@ -23,12 +23,9 @@ import (
 	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/validator/attestation_producer"
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/stretchr/testify/require"
 )
 
@@ -39,7 +36,7 @@ func TestAttestationProducer(t *testing.T) {
 	root, err := headState.BlockRoot()
 	require.NoError(t, err)
 
-	att, err := attProducer.ProduceAndCacheAttestationData(nil, headState, root, headState.Slot())
+	att, err := attProducer.ProduceAndCacheAttestationData(headState, root, headState.Slot())
 	require.NoError(t, err)
 
 	attJson, err := json.Marshal(att)
@@ -47,24 +44,6 @@ func TestAttestationProducer(t *testing.T) {
 
 	// check if the json match with the expected value
 	require.JSONEq(t, string(attJson), `{"slot":"8322","index":"0","beacon_block_root":"0xeffdd8ef40c3c901f0724d48e04ce257967cf1da31929f3b6db614f89ef8d660","source":{"epoch":"258","root":"0x31885d5a2405876b7203f9cc1a7e115b9977412107c51c81ab4fd49bde93905e"},"target":{"epoch":"260","root":"0x86979f6f6dc7626064ef0d38d4dffb89e91d1d4c18492e3fb7d7ee93cedca3ed"}}`)
-}
-
-func TestAttestationProducerTargetFollowsHead(t *testing.T) {
-	cfg := clparams.MainnetBeaconConfig
-	headState := state.New(&cfg)
-	slot := cfg.SlotsPerEpoch
-	require.NoError(t, headState.SetSlot(slot))
-	oldRoot, newRoot := common.Hash{1}, common.Hash{2}
-	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
-	tx, err := db.BeginRw(t.Context())
-	require.NoError(t, err)
-	defer tx.Rollback()
-	require.NoError(t, beacon_indicies.MarkRootCanonical(tx, slot, oldRoot))
-
-	data, err := attestation_producer.New(&cfg).ProduceAndCacheAttestationData(tx, headState, newRoot, slot)
-	require.NoError(t, err)
-	require.Equal(t, newRoot, data.BeaconBlockRoot)
-	require.Equal(t, solid.Checkpoint{Epoch: 1, Root: newRoot}, data.Target)
 }
 
 func TestAttestationProducerHeadChange(t *testing.T) {
@@ -85,7 +64,7 @@ func TestAttestationProducerHeadChange(t *testing.T) {
 			}
 			oldRoot := common.Hash{1}
 			newRoot := common.Hash{2}
-			oldData, err := producer.ProduceAndCacheAttestationData(nil, headState, oldRoot, slot)
+			oldData, err := producer.ProduceAndCacheAttestationData(headState, oldRoot, slot)
 			require.NoError(t, err)
 			_, ok, err := producer.CachedAttestationData(slot, newRoot)
 			require.NoError(t, err)
@@ -95,7 +74,7 @@ func TestAttestationProducerHeadChange(t *testing.T) {
 			source := solid.Checkpoint{Root: common.Hash{3}}
 			headState.SetCurrentJustifiedCheckpoint(source)
 
-			data, err := producer.ProduceAndCacheAttestationData(nil, headState, newRoot, slot)
+			data, err := producer.ProduceAndCacheAttestationData(headState, newRoot, slot)
 			require.NoError(t, err)
 			require.Equal(t, newRoot, data.BeaconBlockRoot)
 			require.Equal(t, source, data.Source)
@@ -114,4 +93,49 @@ func TestAttestationProducerHeadChange(t *testing.T) {
 			require.Equal(t, oldData, cached)
 		})
 	}
+}
+
+func TestAttestationProducerPreviousSlotAfterHeadAdvance(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.SecondsPerSlot = 0
+	producer := attestation_producer.New(&cfg)
+	headState := state.New(&cfg)
+	slot := cfg.SlotsPerEpoch
+	require.NoError(t, headState.SetSlot(slot))
+	oldRoot, newRoot := common.Hash{1}, common.Hash{2}
+	want, err := producer.ProduceAndCacheAttestationData(headState, oldRoot, slot)
+	require.NoError(t, err)
+	require.NoError(t, headState.SetBlockRootAt(int(slot), oldRoot))
+	require.NoError(t, headState.SetSlot(slot+1))
+
+	got, err := producer.ProduceAndCacheAttestationData(headState, newRoot, slot)
+	require.NoError(t, err)
+	require.Equal(t, want, got)
+	cached, ok, err := producer.CachedAttestationData(slot, newRoot)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, got, cached)
+}
+
+func TestAttestationProducerPreviousEpochAfterHeadAdvance(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.SecondsPerSlot = 0
+	producer := attestation_producer.New(&cfg)
+	headState := state.New(&cfg)
+	slot := 2*cfg.SlotsPerEpoch - 1
+	oldRoot, newRoot := common.Hash{1}, common.Hash{2}
+	oldSource := solid.Checkpoint{Root: common.Hash{3}}
+	headState.SetCurrentJustifiedCheckpoint(oldSource)
+	require.NoError(t, headState.SetSlot(slot))
+	require.NoError(t, headState.SetBlockRootAt(int(cfg.SlotsPerEpoch), common.Hash{4}))
+	want, err := producer.ProduceAndCacheAttestationData(headState, oldRoot, slot)
+	require.NoError(t, err)
+	require.NoError(t, headState.SetBlockRootAt(int(slot), oldRoot))
+	require.NoError(t, headState.SetSlot(slot+1))
+	headState.SetPreviousJustifiedCheckpoint(oldSource)
+	headState.SetCurrentJustifiedCheckpoint(solid.Checkpoint{Epoch: 1, Root: common.Hash{5}})
+
+	got, err := producer.ProduceAndCacheAttestationData(headState, newRoot, slot)
+	require.NoError(t, err)
+	require.Equal(t, want, got)
 }

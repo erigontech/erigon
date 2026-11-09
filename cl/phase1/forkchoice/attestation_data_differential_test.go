@@ -64,7 +64,7 @@ func TestAttestationDataMatchesProducer(t *testing.T) {
 			}
 
 			require.True(t, ok, "head slot %d, requested slot %d", block.Block.Slot, slot)
-			want, err := attestation_producer.New(cfg).ProduceAndCacheAttestationData(nil, headState, headRoot, slot)
+			want, err := attestation_producer.New(cfg).ProduceAndCacheAttestationData(headState, headRoot, slot)
 			require.NoError(t, err)
 			require.Equal(t, want, got)
 

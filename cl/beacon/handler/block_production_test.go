@@ -5971,7 +5971,7 @@ func (c *doneObservedContext) Done() <-chan struct{} {
 	return c.Context.Done()
 }
 
-func (p cachedAttestationDataProducer) ProduceAndCacheAttestationData(kv.Tx, *state.CachingBeaconState, common.Hash, uint64) (solid.AttestationData, error) {
+func (p cachedAttestationDataProducer) ProduceAndCacheAttestationData(*state.CachingBeaconState, common.Hash, uint64) (solid.AttestationData, error) {
 	if p.calls != nil {
 		(*p.calls)++
 	}
@@ -6163,9 +6163,19 @@ func TestGetEthV1ValidatorAttestationDataCacheHeadChange(t *testing.T) {
 			handler.attestationDataImportWait = 0
 			slot := headState.Slot()
 			oldRoot, newRoot := common.Hash{1}, common.Hash{2}
+			targetSlot := handler.beaconChainCfg.RoundSlotToEpoch(slot)
+			targetRoot := newRoot
+			if targetSlot < slot {
+				var err error
+				targetRoot, err = headState.GetBlockRootAtSlot(targetSlot)
+				require.NoError(t, err)
+			}
+			require.NoError(t, handler.indiciesDB.Update(t.Context(), func(tx kv.RwTx) error {
+				return beacon_indicies.MarkRootCanonical(tx, targetSlot, common.Hash{3})
+			}))
 			producer := attestation_producer.New(handler.beaconChainCfg)
 			handler.attestationProducer = producer
-			_, err := producer.ProduceAndCacheAttestationData(nil, headState, oldRoot, slot)
+			_, err := producer.ProduceAndCacheAttestationData(headState, oldRoot, slot)
 			require.NoError(t, err)
 			require.NoError(t, syncedData.OnHeadStateWithBlockRoot(headState, newRoot))
 			clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
@@ -6181,6 +6191,7 @@ func TestGetEthV1ValidatorAttestationDataCacheHeadChange(t *testing.T) {
 			status, data := requestAttestationData(t, handler, t.Context(), slot)
 			require.Equal(t, http.StatusOK, status)
 			require.Equal(t, newRoot, data.BeaconBlockRoot)
+			require.Equal(t, targetRoot, data.Target.Root)
 		})
 	}
 }

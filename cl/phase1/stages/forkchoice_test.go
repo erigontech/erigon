@@ -103,7 +103,7 @@ type noOpAttestationDataProducer struct {
 	attestation_producer.AttestationDataProducer
 }
 
-func (noOpAttestationDataProducer) ProduceAndCacheAttestationData(kv.Tx, *state.CachingBeaconState, common.Hash, uint64) (solid.AttestationData, error) {
+func (noOpAttestationDataProducer) ProduceAndCacheAttestationData(*state.CachingBeaconState, common.Hash, uint64) (solid.AttestationData, error) {
 	return solid.AttestationData{}, nil
 }
 
@@ -116,9 +116,9 @@ type countingAttestationDataProducer struct {
 	produceCalls atomic.Int32
 }
 
-func (p *countingAttestationDataProducer) ProduceAndCacheAttestationData(tx kv.Tx, baseState *state.CachingBeaconState, baseStateBlockRoot common.Hash, slot uint64) (solid.AttestationData, error) {
+func (p *countingAttestationDataProducer) ProduceAndCacheAttestationData(baseState *state.CachingBeaconState, baseStateBlockRoot common.Hash, slot uint64) (solid.AttestationData, error) {
 	p.produceCalls.Add(1)
-	return p.AttestationDataProducer.ProduceAndCacheAttestationData(tx, baseState, baseStateBlockRoot, slot)
+	return p.AttestationDataProducer.ProduceAndCacheAttestationData(baseState, baseStateBlockRoot, slot)
 }
 
 type lockOrderFixture struct {

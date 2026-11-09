@@ -756,14 +756,8 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 	}
 
 	if !ok {
-		tx, err := a.indiciesDB.BeginRo(r.Context())
-		if err != nil {
-			return nil, err
-		}
-		defer tx.Rollback()
 		if err := a.viewHeadStateWithIdentity(func(headState *state.CachingBeaconState, headRoot common.Hash, _ uint64) error {
 			attestationData, err = a.attestationProducer.ProduceAndCacheAttestationData(
-				tx,
 				headState,
 				headRoot,
 				*slot,
@@ -3269,10 +3263,7 @@ func (a *ApiHandler) storeBlockAndBlobs(
 		log.Debug("BlockProduction: forkchoice update deferred while storing block", "root", headRoot, "err", err)
 	}
 
-	if err := a.indiciesDB.View(ctx, func(tx kv.Tx) error {
-		_, err := a.attestationProducer.ProduceAndCacheAttestationData(tx, headState, headRoot, block.Block.Slot)
-		return err
-	}); err != nil {
+	if _, err := a.attestationProducer.ProduceAndCacheAttestationData(headState, headRoot, block.Block.Slot); err != nil {
 		return err
 	}
 	if err := a.syncedData.OnHeadStateWithBlockRoot(headState, headRoot); err != nil {
