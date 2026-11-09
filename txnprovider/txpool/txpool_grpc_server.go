@@ -47,6 +47,7 @@ type txPool interface {
 	deprecatedForEach(f func(rlp []byte, sender common.Address, t SubPoolType), tx kv.Tx)
 	CountContent() (int, int, int)
 	HasTxn(hash []byte) bool
+	KnownTxnReason(hash []byte) txpoolcfg.DiscardReason
 	RejectFramePrefix(hash common.Hash)
 	NonceFromAddress(addr [20]byte) (nonce uint64, inPool bool)
 	GetBlobs(blobhashes []common.Hash) (blobBundles []PoolBlobBundle)
@@ -189,17 +190,19 @@ func (s *GrpcServer) Add(ctx context.Context, in *txpoolproto.AddRequest) (*txpo
 		slots.Resize(uint(j + 1))
 		slots.Txns[j] = &TxnSlot{}
 		slots.IsLocal[j] = true
+		var knownReason txpoolcfg.DiscardReason
 		if _, err := parseCtx.ParseTransaction(in.RlpTxs[i], 0, slots.Txns[j], slots.Senders.At(j), false /* hasEnvelope */, true /* wrappedWithBlobs */, func(hash []byte) error {
-			if s.txPool.HasTxn(hash) {
-				return ErrAlreadyKnown
+			knownReason = s.txPool.KnownTxnReason(hash)
+			if knownReason != txpoolcfg.NotSet {
+				return ErrRejected
 			}
 			return nil
 		}); err != nil {
 			slots.Resize(uint(j)) // remove erroneous transaction
 			switch {
-			case errors.Is(err, ErrAlreadyKnown): // Noop, but need to handle to not count these
-				reply.Errors[i] = txpoolcfg.AlreadyKnown.String()
-				reply.Imported[i] = txpoolproto.ImportResult_ALREADY_EXISTS
+			case knownReason != txpoolcfg.NotSet:
+				reply.Errors[i] = knownReason.String()
+				reply.Imported[i] = mapDiscardReasonToProto(knownReason)
 			case errors.Is(err, ErrRlpTooBig): // Noop, but need to handle to not count these
 				reply.Errors[i] = txpoolcfg.RLPTooLong.String()
 				reply.Imported[i] = txpoolproto.ImportResult_INVALID

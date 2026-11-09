@@ -81,6 +81,13 @@ func (m *addMockTxPool) HasTxn(hash []byte) bool {
 	return false
 }
 
+func (m *addMockTxPool) KnownTxnReason(hash []byte) txpoolcfg.DiscardReason {
+	if m.HasTxn(hash) {
+		return txpoolcfg.AlreadyKnown
+	}
+	return txpoolcfg.NotSet
+}
+
 func (m *addMockTxPool) NonceFromAddress(addr [20]byte) (nonce uint64, inPool bool) { return 0, false }
 
 func (m *addMockTxPool) GetBlobs(blobhashes []common.Hash) (blobBundles []PoolBlobBundle) { return nil }
@@ -478,6 +485,35 @@ func TestGrpcServerParkedFrame(t *testing.T) {
 	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 	checkContent(txpoolproto.AllReply_PENDING, 1, 0)
 	checkMetrics(1, 0)
+}
+
+func TestGrpcServerCachedFrameRejectionBeforeSignatures(t *testing.T) {
+	for _, tc := range []struct {
+		reason txpoolcfg.DiscardReason
+		want   txpoolproto.ImportResult
+	}{
+		{txpoolcfg.InvalidFrame, txpoolproto.ImportResult_INVALID},
+		{txpoolcfg.NonceTooLow, txpoolproto.ImportResult_STALE},
+	} {
+		t.Run(tc.reason.String(), func(t *testing.T) {
+			ctx, pool, sender := keyedFramePoolEnv(t)
+			pool.chainID.SetUint64(1)
+			frame := framePoolSlot(t, sender, 1, 2).Txn.(*types.FrameTransaction)
+			// Invalid signatures make a repeated signature check observable without instrumenting the verifier.
+			frame.Signatures = []types.FrameSignature{{Scheme: types.FrameSignatureSecp256k1, Signer: sender[:], Signature: make([]byte, 65)}}
+			var encoded bytes.Buffer
+			require.NoError(t, frame.MarshalBinary(&encoded))
+			hash := crypto.Keccak256Hash(encoded.Bytes())
+			pool.frameRejections.Add(string(hash[:]), frameRejection{generation: pool.stateGeneration, reason: tc.reason})
+			server := NewGrpcServer(ctx, pool, pool.poolDB, nil, pool.chainID, pool.logger)
+			reply, err := server.Add(ctx, &txpoolproto.AddRequest{RlpTxs: [][]byte{encoded.Bytes()}})
+			require.NoError(t, err)
+			require.Equal(t, []string{tc.reason.String()}, reply.Errors)
+			require.Equal(t, []txpoolproto.ImportResult{tc.want}, reply.Imported)
+			require.Empty(t, pool.ethBackend.(*frameValidationBackend).calls)
+			require.False(t, pool.HasTxn(hash[:]))
+		})
+	}
 }
 
 func TestGrpcServerRejectedFrameResubmission(t *testing.T) {
