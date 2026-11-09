@@ -18,6 +18,7 @@ package main
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -316,4 +317,29 @@ func TestRetrieveBlobsRefusesMoreSidecarsThanCommitments(t *testing.T) {
 
 	_, err := retrieveBlobsFromRemoteEndpoint(t.Context(), srv.URL, common.Hash{1}, 2)
 	require.ErrorContains(t, err, "3 sidecars")
+}
+
+// Beacon API providers put the key in the path, the query or the user info, so errors and logs carry only the
+// scheme and host of an endpoint.
+func TestRetrieveBlobsKeepsTheEndpointSecretOutOfErrors(t *testing.T) {
+	closed, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	host := closed.Addr().String()
+	require.NoError(t, closed.Close())
+
+	_, err = retrieveBlobsFromRemoteEndpoint(t.Context(), "http://user:pw-secret@"+host+"/path-secret/?apikey=query-secret", common.Hash{1}, 1)
+	require.Error(t, err)
+	for _, secret := range []string{"pw-secret", "path-secret", "query-secret", "user"} {
+		require.NotContains(t, err.Error(), secret)
+	}
+	require.Contains(t, err.Error(), host)
+
+	_, err = retrieveBlobsFromRemoteEndpoint(t.Context(), "http://h/%zz?apikey=query-secret", common.Hash{1}, 1)
+	require.Error(t, err)
+	require.NotContains(t, err.Error(), "query-secret")
+}
+
+func TestRedactEndpointKeepsSchemeAndHost(t *testing.T) {
+	require.Equal(t, "https://beacon.example:5052", redactEndpoint("https://u:p@beacon.example:5052/key/eth?apikey=k"))
+	require.Equal(t, "<invalid endpoint>", redactEndpoint("http://h/%zz"))
 }

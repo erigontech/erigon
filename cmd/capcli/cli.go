@@ -239,12 +239,15 @@ const maxBlobSidecarJSONSize = 512 << 10
 func retrieveBlobsFromRemoteEndpoint(ctx context.Context, endpoint string, root common.Hash, maxSidecars int) ([]*cltypes.BlobSidecar, error) {
 	base, err := url.Parse(endpoint)
 	if err != nil {
-		return nil, err
+		if ue, ok := errors.AsType[*url.Error](err); ok {
+			err = ue.Err // ue.URL is the whole endpoint
+		}
+		return nil, fmt.Errorf("invalid endpoint: %w", err)
 	}
-	blobUri := base.JoinPath("eth/v1/beacon/blob_sidecars", fmt.Sprintf("0x%x", root)).String()
-	log.Debug("[Blob Retrieval] Requesting blob sidecars", "uri", blobUri)
+	blobUri := base.JoinPath("eth/v1/beacon/blob_sidecars", fmt.Sprintf("0x%x", root))
+	log.Debug("[Blob Retrieval] Requesting blob sidecars", "endpoint", redactURL(base), "blockRoot", root)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, blobUri, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, blobUri.String(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -252,6 +255,10 @@ func retrieveBlobsFromRemoteEndpoint(ctx context.Context, endpoint string, root 
 
 	r, err := http.DefaultClient.Do(req)
 	if err != nil {
+		// The *url.Error holds the whole request URL; only its password is masked.
+		if ue, ok := errors.AsType[*url.Error](err); ok {
+			ue.URL = redactURL(blobUri)
+		}
 		return nil, err
 	}
 	defer r.Body.Close()
@@ -1669,4 +1676,19 @@ func (m *MakeDepositArgs) Run(ctx context.Context) error {
 	}
 	fmt.Println(string(depositJSON))
 	return nil
+}
+
+// redactURL keeps only the scheme and host of u for logs and errors: beacon API providers put the API key in
+// the user info, the path or the query.
+func redactURL(u *url.URL) string {
+	return (&url.URL{Scheme: u.Scheme, Host: u.Host}).String()
+}
+
+// redactEndpoint is redactURL for an --endpoint value.
+func redactEndpoint(endpoint string) string {
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return "<invalid endpoint>"
+	}
+	return redactURL(u)
 }

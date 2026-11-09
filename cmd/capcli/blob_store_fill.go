@@ -304,7 +304,7 @@ func (b *BlobArchiveStoreFill) fillSlot(ctx context.Context, db kv.RoDB, blocks 
 		if ctx.Err() != nil {
 			return nil
 		}
-		log.Debug("Endpoint could not fill slot", "slot", slot, "endpoint", endpoint, "err", lastErr)
+		log.Debug("Endpoint could not fill slot", "slot", slot, "endpoint", redactEndpoint(endpoint), "err", lastErr)
 	}
 	log.Warn("Could not fill slot", "slot", slot, "blockRoot", root, "err", lastErr)
 	report.fail(slot)
