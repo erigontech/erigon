@@ -1182,6 +1182,9 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 
 	for {
 		if err := ctx.Err(); err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				return nil, fmt.Errorf("execution aborted (timeout = %v)", api.evmCallTimeout)
+			}
 			return nil, err
 		}
 		result, tracer, err := step(prevTracer)

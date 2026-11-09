@@ -931,7 +931,7 @@ func TestCreateAccessListTimeoutCoversEveryRun(t *testing.T) {
 	_, err := api.CreateAccessList(ctx, ethapi.CallArgs{From: &bankAddr, To: &reader, Gas: &gas}, nil, &ethapi.StateOverrides{
 		accounts.InternAddress(reader): {Code: &sloadGas},
 	}, nil)
-	require.Error(t, err)
+	require.ErrorContains(t, err, "execution aborted")
 	require.Less(t, time.Since(start), 10*time.Second, "the timeout must cover all runs of the request")
 }
 
