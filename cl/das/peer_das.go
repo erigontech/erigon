@@ -41,11 +41,12 @@ const (
 	deferredColumnSyncMaxTick = time.Second
 )
 
-// BlockGetter is an interface for getting blocks by root and the fork-choice slot.
+// BlockGetter is an interface for getting blocks and headers by root and the fork-choice slot.
 // Used to avoid import cycle with forkchoice package.
 // [New in Gloas:EIP7732]
 type BlockGetter interface {
 	GetBlock(blockRoot common.Hash) (*cltypes.SignedBeaconBlock, bool)
+	GetHeader(blockRoot common.Hash) (*cltypes.BeaconBlockHeader, bool)
 	Slot() uint64
 }
 
