@@ -50,6 +50,9 @@ type Chain interface {
 	// HeaderByNumber returns the canonical header at number, nil when there
 	// is none.
 	HeaderByNumber(ctx context.Context, number uint64) (*types.Header, error)
+	// HeaderByHash returns the stored header with hash, canonical or not, nil
+	// when there is none.
+	HeaderByHash(ctx context.Context, hash common.Hash) (*types.Header, error)
 	// BlockByNumber returns the canonical block at number, nil when there is
 	// none.
 	BlockByNumber(ctx context.Context, number uint64) (*types.Block, error)
@@ -141,6 +144,10 @@ func (c *ExecChain) HeaderByNumber(ctx context.Context, number uint64) (h *types
 		return err
 	})
 	return h, err
+}
+
+func (c *ExecChain) HeaderByHash(ctx context.Context, hash common.Hash) (*types.Header, error) {
+	return c.exec.GetHeader(ctx, &hash, nil)
 }
 
 func (c *ExecChain) BlockByNumber(ctx context.Context, number uint64) (b *types.Block, err error) {
