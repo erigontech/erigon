@@ -23,15 +23,13 @@ import (
 	"fmt"
 	"strings"
 
-	goethkzg "github.com/crate-crypto/go-eth-kzg"
-
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
+	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/clonable"
-	"github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/ssz"
@@ -308,8 +306,7 @@ type ExecutionPayloadBid struct {
 func (e *ExecutionPayloadBid) VersionedHashes() []common.Hash {
 	hashes := make([]common.Hash, e.BlobKzgCommitments.Len())
 	for i := range hashes {
-		commitment := goethkzg.KZGCommitment(*e.BlobKzgCommitments.Get(i))
-		hashes[i] = common.Hash(kzg.KZGToVersionedHash(commitment))
+		hashes[i], _ = utils.KzgCommitmentToVersionedHash(common.Bytes48(*e.BlobKzgCommitments.Get(i)))
 	}
 	return hashes
 }

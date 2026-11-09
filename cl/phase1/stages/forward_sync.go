@@ -555,10 +555,6 @@ func validateAnchorPayloadWithExecutionClient(ctx context.Context, cfg *Cfg, anc
 	if errors.Is(err, forkchoice.ErrPayloadValidationInterrupted) {
 		return nil // not an EL verdict
 	}
-	if errors.Is(err, misc.ErrMismatchBlobHashes) {
-		cfg.forkChoice.RejectEnvelope(anchorRoot)
-		return fmt.Errorf("invalid anchor envelope: %w", err)
-	}
 	if err != nil {
 		log.Warn("[Caplin] Anchor envelope EL validation failed", "anchorRoot", anchorRoot, "status", status, "err", err)
 	}

@@ -1601,11 +1601,6 @@ func retryUnverifiedAnchorPayload(ctx context.Context, cfg *Cfg) {
 	if errors.Is(err, forkchoice.ErrPayloadValidationInterrupted) {
 		return
 	}
-	if errors.Is(err, misc.ErrMismatchBlobHashes) {
-		cfg.forkChoice.RejectEnvelope(anchorRoot)
-		log.Warn("[chainTipSync] invalid anchor envelope", "anchorRoot", anchorRoot, "err", err)
-		return
-	}
 	if err != nil {
 		log.Warn("[chainTipSync] anchor payload NewPayload retry failed", "anchorRoot", anchorRoot, "status", answer, "err", err)
 	}
