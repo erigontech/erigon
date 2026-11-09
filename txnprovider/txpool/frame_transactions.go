@@ -339,10 +339,7 @@ func (p *TxPool) simulateFrame(ctx context.Context, txn *TxnSlot, generation uin
 	}
 	// Root storage references are derived locally from frame calldata. The RPC
 	// reply records the verifier address so code changes also trigger revalidation.
-	v.RecentRoots, err = protocol.FrameTransactionRecentRoots(txn.Txn.(*types.FrameTransaction))
-	if err != nil {
-		return nil, err
-	}
+	v.RecentRoots = protocol.FrameTransactionRecentRoots(txn.Txn.(*types.FrameTransaction))
 	return v, nil
 }
 
@@ -545,14 +542,13 @@ func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*meta
 		frame := mt.TxnSlot.Txn.(*types.FrameTransaction)
 		previous := mt.TxnSlot.frameValidation
 		var roots []protocol.RecentRootReference
-		var rootsErr error
 		if previous != nil {
 			roots = previous.RecentRoots
 		} else {
 			// Root age and activation are independent of simulation results.
-			roots, rootsErr = protocol.FrameTransactionRecentRoots(frame)
+			roots = protocol.FrameTransactionRecentRoots(frame)
 		}
-		invalidRoots := rootsErr != nil || slices.ContainsFunc(roots, func(ref protocol.RecentRootReference) bool {
+		invalidRoots := slices.ContainsFunc(roots, func(ref protocol.RecentRootReference) bool {
 			return activationUnwound || !ref.ValidAt(pendingSlot)
 		})
 		if invalidRoots {

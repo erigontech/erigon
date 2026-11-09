@@ -310,6 +310,38 @@ func TestFramePoolRecentRootDependencies(t *testing.T) {
 	}
 }
 
+func TestFramePoolRecentRootDeploymentUnwindWithBalance(t *testing.T) {
+	ctx, pool, sender := keyedFramePoolEnv(t)
+	backend := pool.ethBackend.(*frameValidationBackend)
+	slot := recentRootPoolSlot(t, sender, 10, 1)
+	var txns TxnSlots
+	txns.Append(slot, sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+	require.Len(t, slot.frameValidation.RecentRoots, 1)
+
+	account := accounts.Account{Balance: *uint256.NewInt(1), CodeHash: accounts.EmptyCodeHash}
+	change := newBlockChangeForAccounts(common.Hash{2}, 0)
+	head := change.ChangeBatch[0]
+	head.Direction = remoteproto.Direction_UNWIND
+	head.SlotNumber = common.NewUint64(11)
+	// The funded account survives deployment rollback; its code and roots do not.
+	head.Changes = []*remoteproto.AccountChange{{
+		Address: gointerfaces.ConvertAddressToH160(types.FrameRecentRootVerifier),
+		Action:  remoteproto.Action_UPSERT,
+		Data:    accounts.SerialiseV3(&account),
+		StorageChanges: []*remoteproto.StorageChange{{
+			Location: gointerfaces.ConvertHashToH256(slot.frameValidation.RecentRoots[0].StorageKey),
+		}},
+	}}
+	backend.valid, backend.calls = false, nil
+	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	require.Equal(t, []common.Hash{slot.IDHash}, backend.calls)
+	require.NotContains(t, pool.byHash, string(slot.IDHash[:]))
+	require.Empty(t, pool.frameReservations)
+}
+
 func TestFramePoolRecentRootReplacement(t *testing.T) {
 	ctx, pool, sender := keyedFramePoolEnv(t)
 	first := recentRootPoolSlot(t, sender, 10, 1)

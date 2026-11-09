@@ -95,11 +95,7 @@ func (b *frameValidationBackend) FrameValidation(ctx context.Context, req *remot
 			expiry = binary.BigEndian.Uint64(first.Data)
 			dependencies = append(dependencies, gointerfaces.ConvertAddressToH160(types.FrameExpiryVerifier))
 		}
-		roots, err := protocol.FrameTransactionRecentRoots(frame)
-		if err != nil {
-			return &remoteproto.FrameValidationReply{}, nil
-		}
-		if len(roots) > 0 {
+		if len(protocol.FrameTransactionRecentRoots(frame)) > 0 {
 			dependencies = append(dependencies, gointerfaces.ConvertAddressToH160(types.FrameRecentRootVerifier))
 		}
 	}

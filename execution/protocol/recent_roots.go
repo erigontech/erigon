@@ -54,15 +54,13 @@ func (r RecentRootReference) ValidAt(slot uint64) bool {
 
 // FrameTransactionRecentRoots uses the validation prefix, so approval frames
 // targeting the verifier address do not become recent-root dependencies.
-func FrameTransactionRecentRoots(tx *types.FrameTransaction) ([]RecentRootReference, error) {
+// Invalid prefixes yield no references; callers validate them separately.
+func FrameTransactionRecentRoots(tx *types.FrameTransaction) []RecentRootReference {
 	prefix, err := parseFrameValidationPrefix(tx)
-	if err != nil {
-		return nil, err
+	if err != nil || prefix.recentRootFrame < 0 {
+		return nil
 	}
-	if prefix.recentRootFrame < 0 {
-		return nil, nil
-	}
-	return recentRootReferences(tx.Frames[prefix.recentRootFrame].Data), nil
+	return recentRootReferences(tx.Frames[prefix.recentRootFrame].Data)
 }
 
 // recentRootReferences expects data whose length has been checked by parseFrameValidationPrefix.

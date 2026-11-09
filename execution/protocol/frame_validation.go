@@ -180,19 +180,16 @@ func parseFrameValidationPrefix(tx *types.FrameTransaction) (framePrefix, error)
 		prefix.deadline = binary.BigEndian.Uint64(f.Data)
 		i++
 	}
-	if i < len(tx.Frames) {
-		f := &tx.Frames[i]
-		if f.IsRecentRootVerifier() {
-			if !f.Value.IsZero() || f.Limits.State != 0 {
-				return framePrefix{}, errFrameValidationPrefix
-			}
-			const maxReferences = 16
-			if size := len(f.Data); size < recentRootTupleSize || size%recentRootTupleSize != 0 || size > maxReferences*recentRootTupleSize {
-				return framePrefix{}, errors.New("invalid recent root data length")
-			}
-			prefix.recentRootFrame = i
-			i++
+	if i < len(tx.Frames) && tx.Frames[i].IsRecentRootVerifier() {
+		if !tx.Frames[i].Value.IsZero() || tx.Frames[i].Limits.State != 0 {
+			return framePrefix{}, errFrameValidationPrefix
 		}
+		const maxReferences = 16
+		if size := len(tx.Frames[i].Data); size < recentRootTupleSize || size%recentRootTupleSize != 0 || size > maxReferences*recentRootTupleSize {
+			return framePrefix{}, errors.New("invalid recent root data length")
+		}
+		prefix.recentRootFrame = i
+		i++
 	}
 	if i < len(tx.Frames) && tx.Frames[i].Mode == types.FrameDefault && tx.Frames[i].Flags == 0 {
 		prefix.deploymentFrame = i
