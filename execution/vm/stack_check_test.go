@@ -254,7 +254,7 @@ func TestRunEmptyCodeReturnsBeforeTraceChoice(t *testing.T) {
 // not in the measured cost, so the full budget is always run as well.
 func TestRunMatchesRunTraced(t *testing.T) {
 	t.Parallel()
-	runOnce := func(code []byte, gas uint64, traced bool) (string, uint64) {
+	runOnce := func(code, input []byte, gas uint64, traced bool) (string, []byte, uint64) {
 		// A fresh state per run: a shared one leaves the first run's cold accesses warm.
 		ibs := state.New(state.NewNoopReader())
 		defer ibs.Close()
@@ -275,9 +275,49 @@ func TestRunMatchesRunTraced(t *testing.T) {
 		if traced {
 			f = evm.runTraced
 		}
-		ret, left, used, err := f(*c, mdgas.MdGas{Execution: gas}, nil, false, false, false)
-		return fmt.Sprintf("ret=%x left=%d used=%+v err=%v", ret, left.Execution, used, err), gas - left.Execution
+		ret, left, used, err := f(*c, mdgas.MdGas{Execution: gas}, input, false, false, false)
+		return fmt.Sprintf("ret=%x left=%d used=%+v err=%v", ret, left.Execution, used, err), ret, gas - left.Execution
 	}
+	t.Run("calldataload", func(t *testing.T) {
+		calldata := make([]byte, 40)
+		for i := range calldata {
+			calldata[i] = byte(i + 1)
+		}
+		callDataLoad := func(offset *uint256.Int) []byte {
+			offsetBytes := offset.Bytes()
+			if len(offsetBytes) == 0 {
+				offsetBytes = []byte{0}
+			}
+			code := append([]byte{byte(PUSH1) + byte(len(offsetBytes)-1)}, offsetBytes...)
+			return append(code, byte(CALLDATALOAD), byte(PUSH1), 0, byte(MSTORE), byte(PUSH1), 32, byte(PUSH1), 0, byte(RETURN))
+		}
+		wantCallDataLoad := func(offset *uint256.Int) []byte {
+			want := make([]byte, 32)
+			if offset.IsUint64() && offset.Uint64() < uint64(len(calldata)) {
+				copy(want, calldata[offset.Uint64():])
+			}
+			return want
+		}
+		callDataLoadOffsets := []struct {
+			name   string
+			offset *uint256.Int
+		}{
+			{name: "0", offset: new(uint256.Int)},
+			{name: "L-32", offset: uint256.NewInt(uint64(len(calldata) - 32))},
+			{name: "L-31", offset: uint256.NewInt(uint64(len(calldata) - 31))},
+			{name: "L-1", offset: uint256.NewInt(uint64(len(calldata) - 1))},
+			{name: "L", offset: uint256.NewInt(uint64(len(calldata)))},
+			{name: "L+1", offset: uint256.NewInt(uint64(len(calldata) + 1))},
+			{name: "2^64-1", offset: new(uint256.Int).SetUint64(^uint64(0))},
+			{name: "2^64", offset: new(uint256.Int).Lsh(uint256.NewInt(1), 64)},
+		}
+		for _, tc := range callDataLoadOffsets {
+			for _, traced := range []bool{false, true} {
+				_, got, _ := runOnce(callDataLoad(tc.offset), calldata, 100, traced)
+				require.Equal(t, wantCallDataLoad(tc.offset), got, "%s traced=%v", tc.name, traced)
+			}
+		}
+	})
 	prog := func(parts ...any) []byte {
 		var b []byte
 		for _, p := range parts {
@@ -407,21 +447,23 @@ func TestRunMatchesRunTraced(t *testing.T) {
 		}
 		programs[fmt.Sprintf("random%d", i)] = prog(b)
 	}
-	for name, code := range programs {
-		const plenty = 1_000_000
-		_, cost := runOnce(code, plenty, true)
-		budgets := []uint64{plenty, cost / 2, cost - 1, cost, cost + 1}
-		if cost < 2000 {
-			for gas := range cost + 2 {
-				budgets = append(budgets, gas)
+	t.Run("existing", func(t *testing.T) {
+		for name, code := range programs {
+			const plenty = 1_000_000
+			_, _, cost := runOnce(code, nil, plenty, true)
+			budgets := []uint64{plenty, cost / 2, cost - 1, cost, cost + 1}
+			if cost < 2000 {
+				for gas := range cost + 2 {
+					budgets = append(budgets, gas)
+				}
+			}
+			for _, gas := range budgets {
+				want, _, _ := runOnce(code, nil, gas, true)
+				got, _, _ := runOnce(code, nil, gas, false)
+				require.Equal(t, want, got, "%s at gas %d", name, gas)
 			}
 		}
-		for _, gas := range budgets {
-			want, _ := runOnce(code, gas, true)
-			got, _ := runOnce(code, gas, false)
-			require.Equal(t, want, got, "%s at gas %d", name, gas)
-		}
-	}
+	})
 }
 
 // TestRunTakesCopyFastPath fails when an allocated copy falls back to the

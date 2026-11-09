@@ -21,14 +21,9 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"math"
-	"sync"
 	"time"
 
-	"github.com/erigontech/secp256k1"
-
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -36,7 +31,6 @@ import (
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
-	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -46,25 +40,20 @@ import (
 )
 
 type SendersCfg struct {
-	batchSize       int
-	numOfGoroutines int
-	badBlockHalt    bool
-	tmpdir          string
-	chainConfig     *chain.Config
-	blockReader     dbservices.FullBlockReader
-	readAheader     *exec.BlockReadAheader
+	badBlockHalt bool
+	tmpdir       string
+	chainConfig  *chain.Config
+	blockReader  dbservices.FullBlockReader
+	readAheader  *exec.BlockReadAheader
 }
 
 func StageSendersCfg(chainCfg *chain.Config, badBlockHalt bool, tmpdir string, blockReader dbservices.FullBlockReader, readAheader *exec.BlockReadAheader) SendersCfg {
-	const sendersBatchSize = 1000
 	return SendersCfg{
-		batchSize:       sendersBatchSize,
-		numOfGoroutines: secp256k1.NumOfContexts(), // we can only be as parallels as our crypto library supports,
-		badBlockHalt:    badBlockHalt,
-		tmpdir:          tmpdir,
-		chainConfig:     chainCfg,
-		blockReader:     blockReader,
-		readAheader:     readAheader,
+		badBlockHalt: badBlockHalt,
+		tmpdir:       tmpdir,
+		chainConfig:  chainCfg,
+		blockReader:  blockReader,
+		readAheader:  readAheader,
 	}
 }
 
@@ -73,11 +62,9 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 		s.BlockNumber = cfg.blockReader.FrozenBlocks()
 	}
 
-	quitCh := ctx.Done()
-
-	prevStageProgress, errStart := stages.GetStageProgress(tx, stages.Bodies)
-	if errStart != nil {
-		return errStart
+	prevStageProgress, err := stages.GetStageProgress(tx, stages.Bodies)
+	if err != nil {
+		return err
 	}
 
 	to := prevStageProgress
@@ -92,122 +79,13 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 		logger.Info(fmt.Sprintf("[%s] Started", logPrefix), "from", s.BlockNumber, "to", to)
 	}
 
-	logEvery := time.NewTicker(30 * time.Second)
-	defer logEvery.Stop()
-
 	startFrom := s.BlockNumber + 1
 	recoveryStart := time.Now()
-
-	jobs := make(chan *senderRecoveryJob, cfg.batchSize)
-	out := make(chan *senderRecoveryJob, cfg.batchSize)
-	var wg sync.WaitGroup
-	ctx, cancelWorkers := context.WithCancel(context.Background())
-	defer cancelWorkers()
-	for i := 0; i < cfg.numOfGoroutines; i++ {
-		wg.Go(func() {
-			defer dbg.LogPanic()
-			// each goroutine gets it's own crypto context to make sure they are really parallel
-			recoverSenders(ctx, secp256k1.ContextForThread(i), cfg.chainConfig, jobs, out, quitCh)
-		})
-	}
 
 	collectorSenders := etl.NewCollectorWithAllocator(logPrefix, cfg.tmpdir, etl.SmallSortableBuffers, logger)
 	defer collectorSenders.Close()
 	collectorSenders.SortAndFlushInBackground(false)
 	collectorSenders.LogLvl(log.LvlDebug)
-
-	// pendingBlocks tracks blocks that are being processed
-	// key: blockIndex, value: {senders slice, txCount, received count}
-	type pendingBlock struct {
-		senders  []byte
-		txCount  int
-		received int
-		hash     common.Hash
-	}
-	pendingBlocks := make(map[int]*pendingBlock)
-	var pendingMu sync.Mutex
-	var lastBlockIndex int
-
-	errCh := make(chan senderRecoveryError, 1)
-	go func() {
-		defer dbg.LogPanic()
-		defer close(errCh)
-		defer cancelWorkers()
-		var ok bool
-		var j *senderRecoveryJob
-		for {
-			select {
-			case <-quitCh:
-				return
-			case j, ok = <-out:
-				if !ok {
-					return
-				}
-				if j.err != nil {
-					errCh <- senderRecoveryError{err: j.err, blockNumber: j.blockNumber, blockHash: j.blockHash}
-					return
-				}
-
-				pendingMu.Lock()
-				pb := pendingBlocks[j.blockIndex]
-				if pb == nil {
-					pendingMu.Unlock()
-					errCh <- senderRecoveryError{err: fmt.Errorf("unexpected block index %d", j.blockIndex)}
-					return
-				}
-				// Copy sender address to the correct position
-				fromValue := j.from.Value()
-				copy(pb.senders[j.txIndex*length.Addr:], fromValue[:])
-				pb.received++
-
-				// Check if block is complete
-				if pb.received == pb.txCount {
-					cfg.readAheader.AddSenders(pb.senders, pb.hash)
-					if err := collectorSenders.Collect(dbutils.BlockBodyKey(s.BlockNumber+uint64(j.blockIndex)+1, pb.hash), pb.senders); err != nil {
-						pendingMu.Unlock()
-						errCh <- senderRecoveryError{err: err}
-						return
-					}
-					delete(pendingBlocks, j.blockIndex)
-					if j.blockIndex > lastBlockIndex {
-						lastBlockIndex = j.blockIndex
-					}
-				}
-				pendingMu.Unlock()
-			}
-		}
-	}()
-	var stopOnce sync.Once
-	stopWorkers := func() {
-		stopOnce.Do(func() {
-			close(jobs)
-			wg.Wait()
-			close(out)
-		})
-	}
-	// Runs before collectorSenders.Close: the result goroutine must exit before the collector is closed.
-	defer func() {
-		cancelWorkers()
-		stopWorkers()
-		for range errCh {
-		}
-	}()
-
-	var minBlockNum uint64 = math.MaxUint64
-	var minBlockHash common.Hash
-	var minBlockErr error
-	handleRecoverErr := func(recErr senderRecoveryError) error {
-		if recErr.blockHash == (common.Hash{}) {
-			return recErr.err
-		}
-
-		if recErr.blockNumber < minBlockNum {
-			minBlockNum = recErr.blockNumber
-			minBlockHash = recErr.blockHash
-			minBlockErr = recErr.err
-		}
-		return nil
-	}
 
 	bodiesC, err := tx.Cursor(kv.HeaderCanonical)
 	if err != nil {
@@ -215,12 +93,13 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 	}
 	defer bodiesC.Close()
 
-Loop:
-	for k, v, err := bodiesC.Seek(hexutil.EncodeTs(startFrom)); k != nil; k, v, err = bodiesC.Next() {
+	var batch sendersBatch
+	var bad *badSendersBlock
+	for k, v, err := bodiesC.Seek(hexutil.EncodeTs(startFrom)); k != nil && bad == nil; k, v, err = bodiesC.Next() {
 		if err != nil {
 			return err
 		}
-		if err := common.Stopped(quitCh); err != nil {
+		if err := common.Stopped(ctx.Done()); err != nil {
 			return err
 		}
 
@@ -239,8 +118,8 @@ Loop:
 			continue
 		}
 
-		var header *types.Header
-		if header, err = cfg.blockReader.Header(ctx, tx, blockHash, blockNumber); err != nil {
+		header, err := cfg.blockReader.Header(ctx, tx, blockHash, blockNumber)
+		if err != nil {
 			return err
 		}
 		if header == nil {
@@ -248,11 +127,9 @@ Loop:
 			continue
 		}
 
-		body, ok := cfg.readAheader.ReadBodyWithTransactions(blockHash)
-		if ok && body != nil && cfg.readAheader.ExecRecoversSenders(header) {
-			continue
-		}
-		if body == nil || !ok {
+		body, cached := cfg.readAheader.ReadBodyWithTransactions(blockHash)
+		if body == nil || !cached {
+			cached = false
 			if body, err = cfg.blockReader.BodyWithTransactions(ctx, tx, blockHash, blockNumber); err != nil {
 				return err
 			}
@@ -262,228 +139,160 @@ Loop:
 			}
 		}
 
-		blockIndex := int(blockNumber) - int(s.BlockNumber) - 1
-		if blockIndex < 0 {
-			panic(blockIndex) //uint-underflow
-		}
-
-		if senders, ok := cfg.readAheader.RecoveredSenders(ctx, blockHash); ok {
-			pendingMu.Lock()
-			cfg.readAheader.AddSenders(senders, blockHash)
-			err := collectorSenders.Collect(dbutils.BlockBodyKey(blockNumber, blockHash), senders)
-			pendingMu.Unlock()
-			if err != nil {
-				return err
-			}
-			continue
-		}
-
-		// Register pending block
-		pendingMu.Lock()
-		// Skip blocks with no transactions
-		if len(body.Transactions) == 0 {
-			// Write empty senders for blocks with no transactions
-			err := collectorSenders.Collect(dbutils.BlockBodyKey(s.BlockNumber+uint64(blockIndex)+1, blockHash), nil)
-			pendingMu.Unlock()
-			if err != nil {
-				return err
-			}
-			continue
-		}
-		pendingBlocks[blockIndex] = &pendingBlock{
-			senders: make([]byte, len(body.Transactions)*length.Addr),
-			txCount: len(body.Transactions),
-			hash:    blockHash,
-		}
-		pendingMu.Unlock()
-
-		// Send individual transaction jobs
-		for txIdx, txn := range body.Transactions {
-			j := &senderRecoveryJob{
-				txn:         txn,
-				blockNumber: blockNumber,
-				blockTime:   header.Time,
-				blockHash:   blockHash,
-				blockIndex:  blockIndex,
-				txIndex:     txIdx,
-			}
-			select {
-			case recoveryErr := <-errCh:
-				if recoveryErr.err != nil {
-					cancelWorkers()
-					if err := handleRecoverErr(recoveryErr); err != nil {
-						return err
-					}
-					break Loop
-				}
-			case jobs <- j:
-			}
-		}
-	}
-
-	stopWorkers()
-	for recoveryErr := range errCh {
-		if recoveryErr.err != nil {
-			cancelWorkers()
-			if err := handleRecoverErr(recoveryErr); err != nil {
+		batch.add(cfg, header, blockHash, body, cached)
+		if len(batch.txns) >= sendersBatchTxs || len(batch.blocks) >= sendersBatchBlocks {
+			if bad, err = batch.flush(ctx, cfg, collectorSenders); err != nil {
 				return err
 			}
 		}
 	}
-	if minBlockErr != nil {
-		logger.Error(fmt.Sprintf("[%s] Error recovering senders for block %d %x): %v", logPrefix, minBlockNum, minBlockHash, minBlockErr))
+	if bad == nil {
+		if bad, err = batch.flush(ctx, cfg, collectorSenders); err != nil {
+			return err
+		}
+	}
+
+	if bad != nil {
+		logger.Error(fmt.Sprintf("[%s] Error recovering senders for block %d %x): %v", logPrefix, bad.number, bad.hash, bad.err))
 		if cfg.badBlockHalt {
-			return minBlockErr
+			return bad.err
 		}
-
 		if to > s.BlockNumber {
-			var unwindReason UnwindReason
-			if errors.Is(minBlockErr, rules.ErrInvalidBlock) {
-				unwindReason = BadBlock(minBlockHash, minBlockErr)
-			} else {
-				unwindReason = OperationalErr(minBlockErr)
+			unwindReason := OperationalErr(bad.err)
+			if errors.Is(bad.err, rules.ErrInvalidBlock) {
+				unwindReason = BadBlock(bad.hash, bad.err)
 			}
-			if err := u.UnwindTo(minBlockNum-1, unwindReason, tx); err != nil {
+			if err := u.UnwindTo(bad.number-1, unwindReason, tx); err != nil {
 				return err
 			}
 		}
-	} else {
-		if err := collectorSenders.Load(tx, kv.Senders, etl.IdentityLoadFunc, etl.TransformArgs{
-			Quit: quitCh,
-			LogDetailsLoad: func(k, v []byte) (additionalLogArguments []any) {
-				return []any{"block", binary.BigEndian.Uint64(k)}
-			},
-		}); err != nil {
-			return err
-		}
-		if err := s.Update(tx, to); err != nil {
-			return err
-		}
-		log.Debug(fmt.Sprintf("[%s] Recovery done", logPrefix), "from", startFrom, "to", to, "blocks", to-startFrom+1, "took", time.Since(recoveryStart))
+		return nil
 	}
+
+	if err := collectorSenders.Load(tx, kv.Senders, etl.IdentityLoadFunc, etl.TransformArgs{
+		Quit: ctx.Done(),
+		LogDetailsLoad: func(k, v []byte) (additionalLogArguments []any) {
+			return []any{"block", binary.BigEndian.Uint64(k)}
+		},
+	}); err != nil {
+		return err
+	}
+	if err := s.Update(tx, to); err != nil {
+		return err
+	}
+	log.Debug(fmt.Sprintf("[%s] Recovery done", logPrefix), "from", startFrom, "to", to, "blocks", to-startFrom+1, "took", time.Since(recoveryStart))
 	return nil
 }
 
-type senderRecoveryError struct {
-	err         error
-	blockNumber uint64
-	blockHash   common.Hash
+const (
+	sendersBatchTxs = 64 * 1024
+	// sendersBatchBlocks bounds the bodies a batch keeps: empty blocks add none to sendersBatchTxs.
+	sendersBatchBlocks = 1024
+)
+
+type sendersBlock struct {
+	number     uint64
+	hash       common.Hash
+	signer     *types.Signer
+	body       *types.Body
+	cached     bool
+	registered *exec.SendersRecovery
+	first      int
 }
 
-type senderRecoveryJob struct {
-	txn         types.Transaction
-	from        accounts.Address
-	blockHash   common.Hash
-	blockNumber uint64
-	blockTime   uint64
-	blockIndex  int // index of the block relative to s.BlockNumber
-	txIndex     int // index of the tx within the block
-	err         error
+type badSendersBlock struct {
+	number uint64
+	hash   common.Hash
+	err    error
 }
 
-func recoverSenders(ctx context.Context, cryptoContext *secp256k1.Context, config *chain.Config, in, out chan *senderRecoveryJob, quit <-chan struct{}) {
-	var job *senderRecoveryJob
-	var ok bool
-	for {
-		select {
-		case job, ok = <-in:
-			if !ok {
-				return
-			}
-			if job == nil {
-				return
-			}
-		case <-ctx.Done():
-			return
-		case <-quit:
-			return
-		}
+type sendersBatch struct {
+	blocks  []sendersBlock
+	txns    types.Transactions
+	signers []*types.Signer
+}
 
-		signer := types.MakeSigner(config, job.blockNumber, job.blockTime)
-		from, err := signer.SenderWithContext(cryptoContext, job.txn)
-		if err != nil {
-			job.err = fmt.Errorf("%w: error recovering sender for tx=%x, %w",
-				rules.ErrInvalidBlock, job.txn.Hash(), err)
-		} else {
-			job.from = from
-		}
-		job.txn = nil // reduce ram usage and help GC
-
-		// prevent sending to close channel
-		if err := common.Stopped(quit); err != nil {
-			job.err = err
-		} else if err = common.Stopped(ctx.Done()); err != nil {
-			job.err = err
-		}
-		select {
-		case out <- job:
-		case <-ctx.Done():
-			return
-		}
-
-		if errors.Is(job.err, common.ErrStopped) {
-			return
+func (b *sendersBatch) add(cfg SendersCfg, header *types.Header, hash common.Hash, body *types.Body, cached bool) {
+	blk := sendersBlock{
+		number: header.Number.Uint64(),
+		hash:   hash,
+		signer: types.MakeSigner(cfg.chainConfig, header.Number.Uint64(), header.Time),
+		body:   body,
+		cached: cached,
+		first:  len(b.txns),
+	}
+	if r, ok := cfg.readAheader.TakeSendersRecovery(hash); ok {
+		blk.registered = r
+	} else {
+		b.txns = append(b.txns, body.Transactions...)
+		for range body.Transactions {
+			b.signers = append(b.signers, blk.signer)
 		}
 	}
+	b.blocks = append(b.blocks, blk)
+}
+
+func (b *sendersBatch) flush(ctx context.Context, cfg SendersCfg, collector *etl.Collector) (*badSendersBlock, error) {
+	defer func() { b.blocks, b.txns, b.signers = b.blocks[:0], b.txns[:0], b.signers[:0] }()
+	recovery := exec.StartBatchSendersRecovery(ctx, b.signers, b.txns)
+	recovered, batchErr := recovery.Wait(ctx)
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	for _, blk := range b.blocks {
+		n := len(blk.body.Transactions)
+		var senders []accounts.Address
+		var err error
+		switch {
+		case blk.registered != nil:
+			if senders, err = blk.registered.Wait(ctx); err != nil || len(senders) != n {
+				senders, err = exec.StartSendersRecovery(ctx, blk.signer, blk.body.Transactions).Wait(ctx)
+			}
+		case batchErr != nil:
+			if failed := recovery.FailedTx(); failed >= blk.first && failed < blk.first+n {
+				return &badSendersBlock{number: blk.number, hash: blk.hash, err: batchErr}, nil
+			}
+			continue
+		default:
+			senders = recovered[blk.first : blk.first+n]
+		}
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			return &badSendersBlock{number: blk.number, hash: blk.hash, err: err}, nil
+		}
+		if blk.cached {
+			for i, txn := range blk.body.Transactions {
+				txn.SetSender(senders[i])
+			}
+		}
+		if err := collector.Collect(dbutils.BlockBodyKey(blk.number, blk.hash), sendersBytes(senders)); err != nil {
+			return nil, err
+		}
+	}
+	if batchErr != nil {
+		return nil, batchErr
+	}
+	return nil, nil
+}
+
+func sendersBytes(senders []accounts.Address) []byte {
+	if len(senders) == 0 {
+		return nil
+	}
+	out := make([]byte, 0, len(senders)*length.Addr)
+	for _, sender := range senders {
+		addr := sender.Value()
+		out = append(out, addr[:]...)
+	}
+	return out
 }
 
 func UnwindSendersStage(u *UnwindState, tx kv.RwTx, cfg SendersCfg, ctx context.Context) (err error) {
 	u.UnwindPoint = max(u.UnwindPoint, cfg.blockReader.FrozenBlocks()) // protect from unwind behind files
 	if err := u.Done(tx); err != nil {
 		return err
-	}
-	return nil
-}
-
-func writeSendersRecoveredByExec(ctx context.Context, tx kv.RwTx, cfg ExecuteBlockCfg, from, to uint64) error {
-	if dbg.IgnoreBAL || cfg.chainConfig.AmsterdamTime == nil {
-		return nil
-	}
-	// Newest first: the walk stops at the first block before Amsterdam, which no older block can follow.
-	for n := to + 1; n > from; n-- {
-		blockNum := n - 1
-		hash, err := rawdb.ReadCanonicalHash(tx, blockNum)
-		if err != nil {
-			return err
-		}
-		header, err := cfg.blockReader.Header(ctx, tx, hash, blockNum)
-		if err != nil {
-			return err
-		}
-		if header != nil && header.Time < *cfg.chainConfig.AmsterdamTime {
-			break
-		}
-		if header == nil || !exec.RecoversSenders(header) {
-			continue
-		}
-		has, err := cfg.blockReader.HasSenders(ctx, tx, hash, blockNum)
-		if err != nil {
-			return err
-		}
-		if has {
-			continue
-		}
-		body, ok := cfg.readAheader.ReadBodyWithTransactions(hash)
-		if body == nil || !ok {
-			if body, err = cfg.blockReader.BodyWithTransactions(ctx, tx, hash, blockNum); err != nil {
-				return err
-			}
-			if body == nil {
-				return fmt.Errorf("no body for block %d %x", blockNum, hash)
-			}
-		}
-		signer := types.MakeSigner(cfg.chainConfig, blockNum, header.Time)
-		senders := make([]common.Address, len(body.Transactions))
-		for i, txn := range body.Transactions {
-			from, err := txn.Sender(*signer)
-			if err != nil {
-				return fmt.Errorf("%w: error recovering sender for tx=%x, %w", rules.ErrInvalidBlock, txn.Hash(), err)
-			}
-			senders[i] = from.Value()
-		}
-		if err := rawdb.WriteSenders(tx, hash, blockNum, senders); err != nil {
-			return err
-		}
 	}
 	return nil
 }

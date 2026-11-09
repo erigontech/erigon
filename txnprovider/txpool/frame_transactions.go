@@ -110,7 +110,7 @@ func (p *TxPool) restoreFramesLocked(blockNum uint64, txns TxnSlots) (parked []*
 		txn.SenderID, txn.Traced = p.senders.getOrCreateID(sender, p.logger)
 		reason := p.validateFrame(txn, isLocal)
 		if reason == txpoolcfg.Success && txn.HasBlobs() {
-			reason = p.validateBlobTxn(txn, isLocal, cells)
+			reason = p.validateBlobTxnAndSidecar(txn, isLocal, cells)
 		}
 		if reason == txpoolcfg.Success {
 			txn.frameValidation = nil

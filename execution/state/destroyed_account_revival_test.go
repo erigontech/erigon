@@ -203,7 +203,7 @@ func TestEIP8246PreserveSelfDestructRevert(t *testing.T) {
 	require.NoError(t, ibs.FinalizeTx(amsterdamRules, NewNoopWriter()))
 	vm.FlushVersionedWrites(finalizedWrites(t, ibs, amsterdamRules), true)
 
-	acc, ok := vm.View(1, reader).GetAccount(addr)
+	acc, ok, _ := vm.View(1, reader).GetAccount(addr)
 	require.True(t, ok)
 	require.Equal(t, uint64(5), acc.Nonce, "revert leaves the original contract nonce")
 	require.Equal(t, codeHash, acc.CodeHash, "revert leaves the original contract code")

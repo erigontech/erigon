@@ -243,7 +243,7 @@ func TestFinalizedWritesRemoveTouchedEmptyAccount(t *testing.T) {
 
 	// The emptied pre-existing account is removed: a later tx reads it absent, and
 	// an earlier tx's existence read predating the removal is stale (invalidated).
-	_, ok := vm.View(2, reader).GetAccount(addr)
+	_, ok, _ := vm.View(2, reader).GetAccount(addr)
 	require.False(t, ok, "an EIP-161-emptied account is removed from the trie")
 	exists, err = newTx(2).Exist(addr)
 	require.NoError(t, err)
@@ -511,7 +511,7 @@ func TestRecreateAfterEmptyRemovalShadowsBalanceDelete(t *testing.T) {
 			require.NoError(t, tc.recreate(recreate, addr))
 			vm.FlushVersionedWrites(finalizedWrites(t, recreate, rules), true)
 
-			acc, ok := vm.View(2, &minimalStateReader{}).GetAccount(addr)
+			acc, ok, _ := vm.View(2, &minimalStateReader{}).GetAccount(addr)
 			require.True(t, ok, "the re-created account must read present to commitment")
 			require.Equal(t, uint64(1), acc.Nonce)
 		})

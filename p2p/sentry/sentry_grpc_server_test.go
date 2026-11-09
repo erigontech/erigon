@@ -889,6 +889,27 @@ func TestRunPeer_NewBlockFloodKicksPeer(t *testing.T) {
 	}
 }
 
+// An Erigon peer in fast catch-up announces every 32 blocks, which can exceed the rate.
+func TestRunPeer_BlockRangeUpdateBurstIsDroppedWithoutDisconnect(t *testing.T) {
+	peerInfo, peerID := newTestPeerInfoWithEth(t)
+	rw := NewMockMsgReadWriter()
+	for range 40 {
+		require.NoError(t, rw.WriteMsg(p2p.Msg{
+			Code: eth.BlockRangeUpdateMsg, Size: 1, Payload: bytes.NewReader([]byte{0xc0}),
+		}))
+	}
+	rw.WriteToReadBuffer(rw.ReadAllWritten())
+	forwarded := 0
+	peerErr := runPeer(t.Context(), peerID, p2p.Cap{Name: eth.ProtocolName, Version: direct.ETH69},
+		rw, peerInfo, func(sentryproto.MessageId, [64]byte, []byte) { forwarded++ },
+		func(sentryproto.MessageId) bool { return true }, log.Root())
+	require.NotNil(t, peerErr)
+	require.Equal(t, p2p.PeerErrorMessageReceive, peerErr.Code, "the peer stays until its stream ends")
+	require.ErrorIs(t, peerErr.Err, io.EOF)
+	require.GreaterOrEqual(t, forwarded, blockAnnouncementsBurst)
+	require.Less(t, forwarded, 40)
+}
+
 func newGetBlockHeadersReadWriter(t *testing.T, requests int) *MockMsgReadWriter {
 	t.Helper()
 	rw := NewMockMsgReadWriter()
@@ -1246,6 +1267,25 @@ func TestGrpcServer_CloseStopsOwnedServer(t *testing.T) {
 
 	require.False(t, listenerReachable(t, srv),
 		"GrpcServer.Close (owned server) must close the listener")
+}
+
+func TestGrpcServer_PenalizePeerConcurrentWithStatusUpdate(t *testing.T) {
+	ss := &GrpcServer{statusReady: make(chan struct{})}
+	ss.peers.Store(NewPeerStore())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for range 100 {
+			ss.statusDataLock.Lock()
+			ss.statusData = &sentryproto.StatusData{NetworkId: 1}
+			ss.statusDataLock.Unlock()
+		}
+	}()
+	for range 100 {
+		_, err := ss.PenalizePeer(context.Background(), &sentryproto.PenalizePeerRequest{PeerId: gointerfaces.ConvertHashToH512([64]byte{1})})
+		require.NoError(t, err)
+	}
+	<-done
 }
 
 // TestGrpcServer_AwaitStatus_ReturnsExistingImmediately covers the fast path
