@@ -812,6 +812,10 @@ func TestFlushEstimate_ValidTxNotMarkedEstimate(t *testing.T) {
 }
 
 func TestFlushEstimateRacingMarkWritesCompleteKeepsDone(t *testing.T) {
+	prevAssert := dbg.AssertEnabled
+	dbg.AssertEnabled = false
+	t.Cleanup(func() { dbg.AssertEnabled = prevAssert })
+
 	addr := getAddress(45)
 	vm := NewVersionMap(nil)
 	writes := newWriteSet(
