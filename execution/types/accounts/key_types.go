@@ -57,7 +57,7 @@ func InternAddress(a common.Address) Address {
 	if h, ok := slot.Load().(Address); ok && h.Value() == a {
 		return h
 	}
-	h := Address(unique.Make(a))
+	h := makeAddress(a)
 	slot.Store(h)
 	return h
 }
@@ -157,7 +157,7 @@ func InternKey(k common.Hash) StorageKey {
 	if h, ok := slot.Load().(StorageKey); ok && h.Value() == k {
 		return h
 	}
-	h := StorageKey(unique.Make(k))
+	h := StorageKey(makeHash(k))
 	slot.Store(h)
 	return h
 }
@@ -213,7 +213,7 @@ var (
 )
 
 func InternCodeHash(k common.Hash) CodeHash {
-	return CodeHash(unique.Make(k))
+	return CodeHash(makeHash(k))
 }
 
 func (h CodeHash) IsNil() bool {

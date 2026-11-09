@@ -429,3 +429,17 @@ func TestInternSlotsSpreadLowValues(t *testing.T) {
 	require.NotSame(t, addressSlot(common.BytesToAddress([]byte{1})), addressSlot(common.BytesToAddress([]byte{2})))
 	require.NotSame(t, keySlot(common.BytesToHash([]byte{1})), keySlot(common.BytesToHash([]byte{2})))
 }
+
+func TestNoWeakHandlesAreCanonical(t *testing.T) {
+	a1, a2 := common.Address{1}, common.Address{2}
+	var addresses noWeakShard[common.Address]
+	require.True(t, addresses.handle(a1) == addresses.handle(a1))
+	require.False(t, addresses.handle(a1) == addresses.handle(a2))
+	require.Equal(t, a1, addresses.handle(a1).Value())
+
+	k1, k2 := common.Hash{1}, common.Hash{2}
+	var hashes noWeakShard[common.Hash]
+	require.True(t, hashes.handle(k1) == hashes.handle(k1))
+	require.False(t, hashes.handle(k1) == hashes.handle(k2))
+	require.Equal(t, k1, hashes.handle(k1).Value())
+}
