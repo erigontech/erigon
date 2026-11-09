@@ -927,17 +927,21 @@ func TestCreateAccessListStopsARunThatNeverConverges(t *testing.T) {
 }
 
 func TestCreateAccessListHonoursTheEVMTimeout(t *testing.T) {
-	m, _, bankAddr := fundedBankGenesis(t, chain.AllProtocolChanges)
+	cfg := chain.AllProtocolChanges.Copy()
+	cfg.AmsterdamTime = nil // Amsterdam caps execution gas, and the loop must outlast the timeout
+	m, _, bankAddr := fundedBankGenesis(t, cfg)
 	base := newBaseApiForTest(m)
-	base.evmCallTimeout = time.Nanosecond
+	base.evmCallTimeout = time.Second
 	api := newEthApiForTest(base, m.DB, nil, nil)
+	api.GasCap = 10_000_000_000
+	gas := hexutil.Uint64(api.GasCap)
 	loop := common.HexToAddress("0x00000000000000000000000000000000000000cd")
 	jumpToStart := hexutil.Bytes(hexutil.MustDecode("0x5b600056"))
 
-	_, err := api.CreateAccessList(context.Background(), ethapi.CallArgs{From: &bankAddr, To: &loop}, nil, &ethapi.StateOverrides{
+	_, err := api.CreateAccessList(context.Background(), ethapi.CallArgs{From: &bankAddr, To: &loop, Gas: &gas}, nil, &ethapi.StateOverrides{
 		accounts.InternAddress(loop): {Code: &jumpToStart},
 	}, nil)
-	require.Error(t, err, "the expired timeout must stop the request")
+	require.ErrorContains(t, err, "execution aborted")
 }
 
 // Init code that reads slot 0 of the contract being created and returns that contract's
