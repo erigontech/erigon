@@ -177,6 +177,7 @@ func TestProvideTxnsReturnsNothingOnceTheParentBlockWaitIsStopped(t *testing.T) 
 
 func TestProvideTxnsReportsCancellationWhenTheParentBlockWaitIsAlsoStopped(t *testing.T) {
 	p, _ := newLoggingPool()
+	p.started.Store(true)
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	stop := make(chan struct{})
