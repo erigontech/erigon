@@ -492,6 +492,7 @@ func TestRecordCodec(t *testing.T) {
 			{name: "extension overlaps leaf", data: commitmenttest.Record(&commitmenttest.RecordSpec{Flags: hdrHasChildExt, ChildMask: 1, LeafMask: 1, ExtensionMask: 1, Extensions: [16][]byte{0: extFixture([]byte{1})}}), depth: 3, want: ErrRecordMasks},
 			{name: "empty child extension", data: commitmenttest.Record(&commitmenttest.RecordSpec{Flags: hdrHasChildExt, ChildMask: 3, ExtensionMask: 1, Extensions: [16][]byte{0: extFixture(nil)}}), depth: 3, want: ErrRecordTrailer},
 			{name: "leaf root and self extension", data: append([]byte{hdrIsLeafRoot | hdrHasSelfExt}, make([]byte, 33)...), depth: 0, want: ErrRecordRoot},
+			{name: "self extension odd padding", data: commitmenttest.Record(&commitmenttest.RecordSpec{Flags: hdrHasSelfExt, ChildMask: 1, SelfExtension: []byte{3, 0x12, 0x31}}), depth: 0, want: ErrRecordTrailer},
 			{name: "self extension has two children", data: commitmenttest.Record(&commitmenttest.RecordSpec{Flags: hdrHasSelfExt, ChildMask: 3, SelfExtension: extFixture([]byte{1})}), depth: 0, want: ErrRecordRoot},
 			{name: "short extension trailer", data: commitmenttest.Record(&commitmenttest.RecordSpec{Flags: hdrHasChildExt, ChildMask: 3, ExtensionMask: 1, Extensions: [16][]byte{0: {3, 0x12}}}), depth: 3, want: ErrRecordTruncated},
 			{name: "embedded flag", data: commitmenttest.Record(&commitmenttest.RecordSpec{Flags: hdrHasEmb, ChildMask: 1}), depth: 3, want: ErrRecordFormat},
