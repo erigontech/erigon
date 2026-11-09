@@ -17,9 +17,9 @@
 package state
 
 import (
-	"errors"
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"slices"
