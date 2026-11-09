@@ -3928,10 +3928,6 @@ func duReadChain(tx kv.Tx) (*chain.Config, prune.Mode, error) {
 
 func duOpenBlockSnapshots(dirs datadir.Dirs, chainName string, logger log.Logger) (*blocksnapshots.RoSnapshots, error) {
 	snaps := blocksnapshots.NewRoSnapshots(ethconfig.NewSnapCfg(false, true, true, chainName), dirs.Snap, logger)
-	if err := snaps.OpenFolder(); err != nil {
-		snaps.Close()
-		return nil, err
-	}
 	if err := snaps.OpenSegments([]snaptype.Type{snaptype2.Headers, snaptype2.Bodies}, false); err != nil {
 		snaps.Close()
 		return nil, err

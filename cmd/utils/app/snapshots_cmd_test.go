@@ -998,6 +998,20 @@ func TestDUOpenBlockSnapshots_UsesTheDownloaderRange(t *testing.T) {
 	require.Equal(t, uint64(999_999), snaps.SegmentsMax())
 }
 
+func TestDUOpenBlockSnapshots_IgnoresBrokenTransactions(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	duWriteSegment(t, dirs.Snap, 0, 500_000, snaptype2.Enums.Headers)
+	duWriteSegment(t, dirs.Snap, 0, 500_000, snaptype2.Enums.Bodies)
+	duWriteSegment(t, dirs.Snap, 0, 500_000, snaptype2.Enums.Transactions)
+	txs := filepath.Join(dirs.Snap, snaptype.SegmentFileName(version.V1_0, 0, 500_000, snaptype2.Enums.Transactions))
+	require.NoError(t, os.Truncate(txs, 3))
+
+	snaps, err := duOpenBlockSnapshots(dirs, networkname.Mainnet, log.New())
+	require.NoError(t, err)
+	defer snaps.Close()
+	require.Equal(t, uint64(499_999), snaps.SegmentsMax())
+}
+
 func TestDUStepSize_LegacyDatadirIsNotWritten(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, datadir.PreverifiedFileName), nil, 0o644))
