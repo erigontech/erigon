@@ -18,6 +18,7 @@ package txpool
 
 import (
 	"encoding/binary"
+	"errors"
 	"math"
 	"testing"
 	"testing/synctest"
@@ -168,41 +169,76 @@ func TestFramePoolRecentRootForkBoundary(t *testing.T) {
 	}
 }
 
-func TestFramePoolRecentRootActivationUnwindAfterStartup(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		ctx, pool, poolDB, coreDB, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
-		now := uint64(time.Now().Unix())
-		pool.chainConfig = pool.chainConfig.Copy()
-		pool.chainConfig.BogotaTime = common.NewUint64(now)
-		pool.chainID.SetUint64(1)
-		backend := &frameValidationBackend{payer: sender, balance: 1_000_000, valid: true}
-		pool.ethBackend = backend
-		header := &types.Header{Number: uint256.Int{21}, Time: now}
-		require.NoError(t, coreDB.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
-			if err := rawdb.WriteHeader(tx, header); err != nil {
-				return err
-			}
-			rawdb.WriteHeadBlockHash(tx, header.Hash())
-			return nil
-		}))
-		slot := recentRootPoolSlot(t, sender, 10, 1)
-		require.NoError(t, poolDB.Update(ctx, func(tx kv.RwTx) error {
-			return tx.Put(kv.PoolTransaction, slot.IDHash[:], append(sender[:], slot.Rlp...))
-		}))
-		require.NoError(t, pool.start(ctx))
-		require.Contains(t, pool.byHash, string(slot.IDHash[:]))
-		require.Equal(t, PendingSubPool, pool.byHash[string(slot.IDHash[:])].currentSubPool)
+func TestFramePoolRestoredRecentRootEviction(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		validated        bool
+		activationUnwind bool
+		headSlot         uint64
+		keep             bool
+	}{
+		{"validated activation unwind", true, true, 20, false},
+		{"parked activation unwind", false, true, 20, false},
+		{"parked expired root", false, false, 10 + protocol.RecentRootHistorySlots - 1, false},
+		{"parked usable root", false, false, 22, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				ctx, pool, poolDB, coreDB, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+				now := uint64(time.Now().Unix())
+				pool.chainConfig = pool.chainConfig.Copy()
+				pool.chainConfig.BogotaTime = common.NewUint64(now)
+				pool.chainID.SetUint64(1)
+				backend := &frameValidationBackend{payer: sender, balance: 1_000_000, valid: true}
+				if !tc.validated {
+					backend.err = errors.New("validation backend unavailable")
+				}
+				pool.ethBackend = backend
+				header := &types.Header{Number: uint256.Int{21}, Time: now, SlotNumber: common.NewUint64(21)}
+				require.NoError(t, coreDB.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
+					if err := rawdb.WriteHeader(tx, header); err != nil {
+						return err
+					}
+					rawdb.WriteHeadBlockHash(tx, header.Hash())
+					return nil
+				}))
+				slot := recentRootPoolSlot(t, sender, 10, 1)
+				require.NoError(t, poolDB.Update(ctx, func(tx kv.RwTx) error {
+					return tx.Put(kv.PoolTransaction, slot.IDHash[:], append(sender[:], slot.Rlp...))
+				}))
+				require.NoError(t, pool.start(ctx))
+				mt := pool.byHash[string(slot.IDHash[:])]
+				require.NotNil(t, mt)
+				if tc.validated {
+					require.Equal(t, PendingSubPool, mt.currentSubPool)
+				} else {
+					require.Zero(t, mt.currentSubPool)
+					require.Nil(t, mt.TxnSlot.frameValidation)
+				}
 
-		backend.calls = nil
-		change := newBlockChangeForAccounts(common.Hash{2}, 0)
-		change.ChangeBatch[0].BlockTime = now - 12
-		change.ChangeBatch[0].SlotNumber = common.NewUint64(20)
-		change.ChangeBatch[0].Direction = remoteproto.Direction_UNWIND
-		require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
-		require.Empty(t, backend.calls)
-		require.NotContains(t, pool.byHash, string(slot.IDHash[:]))
-		require.Empty(t, pool.frameReservations)
-	})
+				backend.calls, backend.err = nil, nil
+				change := newBlockChangeForAccounts(common.Hash{2}, 0)
+				head := change.ChangeBatch[0]
+				head.BlockTime = now + 12
+				head.SlotNumber = common.NewUint64(tc.headSlot)
+				if tc.activationUnwind {
+					head.BlockTime = now - 12
+					head.Direction = remoteproto.Direction_UNWIND
+				}
+				require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+				if tc.keep {
+					require.Contains(t, pool.byHash, string(slot.IDHash[:]))
+					require.Equal(t, PendingSubPool, mt.currentSubPool)
+					require.Len(t, backend.calls, 1)
+				} else {
+					require.NotContains(t, pool.byHash, string(slot.IDHash[:]))
+					require.Empty(t, pool.frameReservations)
+					require.Empty(t, pool.all.senderIDFrameTxn)
+					require.Empty(t, backend.calls, "activation and age checks do not require simulation")
+				}
+			})
+		})
+	}
 }
 
 func TestFramePoolRecentRootDependencies(t *testing.T) {

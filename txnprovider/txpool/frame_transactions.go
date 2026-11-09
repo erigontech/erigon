@@ -542,25 +542,31 @@ func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*meta
 	}
 	var parked []*metaTxn
 	for _, mt := range p.all.senderIDFrameTxn {
+		frame := mt.TxnSlot.Txn.(*types.FrameTransaction)
 		previous := mt.TxnSlot.frameValidation
+		var roots []protocol.RecentRootReference
+		var rootsErr error
+		if previous != nil {
+			roots = previous.RecentRoots
+		} else {
+			// Root age and activation are independent of simulation results.
+			roots, rootsErr = protocol.FrameTransactionRecentRoots(frame)
+		}
+		invalidRoots := rootsErr != nil || slices.ContainsFunc(roots, func(ref protocol.RecentRootReference) bool {
+			return activationUnwound || !ref.ValidAt(pendingSlot)
+		})
+		if invalidRoots {
+			p.removeFromSubPool(mt, "recent root no longer usable")
+			p.discardLocked(mt, txpoolcfg.FrameStateChanged)
+			continue
+		}
 		if previous == nil {
 			parked = append(parked, mt)
 			continue
 		}
-		frame := mt.TxnSlot.Txn.(*types.FrameTransaction)
 		// Blob costs can change with the block context even when none
 		// of the validation's account dependencies changed.
 		affected := mt.currentSubPool == 0 || frame.GetBlobGas() != 0 || changes.StateChangesIncomplete
-		if len(previous.RecentRoots) > 0 {
-			invalidRoots := activationUnwound || slices.ContainsFunc(previous.RecentRoots, func(ref protocol.RecentRootReference) bool {
-				return !ref.ValidAt(pendingSlot)
-			})
-			if invalidRoots {
-				p.removeFromSubPool(mt, "recent root no longer usable")
-				p.discardLocked(mt, txpoolcfg.FrameStateChanged)
-				continue
-			}
-		}
 		// The signed deadline needs only a timestamp check. Changes to the verifier's
 		// code still trigger validation through its recorded dependency below.
 		if frame.Frames[0].IsExpiryVerifier() && previous.Deadline < pendingTime {
@@ -602,7 +608,7 @@ func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*meta
 			})
 		}
 		if !affected && len(rootSlots) > 0 {
-			affected = slices.ContainsFunc(previous.RecentRoots, func(ref protocol.RecentRootReference) bool {
+			affected = slices.ContainsFunc(roots, func(ref protocol.RecentRootReference) bool {
 				_, changed := rootSlots[ref.StorageKey]
 				return changed
 			})
