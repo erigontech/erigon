@@ -580,7 +580,7 @@ func nextBlobSegment(sn blobRetirementSnapshots, cfg *clparams.BeaconChainConfig
 const blobRetirementGapLogInterval = 10 * time.Minute
 
 // firstMissingBlobSlot returns the first slot in [from, to) whose blob sidecars are not all stored.
-func firstMissingBlobSlot(from, to uint64, blobCount freezeblocks.BlobCountBySlotFn, stored func(slot, want uint64) (bool, error)) (uint64, bool, error) {
+func (s *Antiquary) firstMissingBlobSlot(tx kv.Tx, from, to uint64, blobCount freezeblocks.BlobCountBySlotFn) (uint64, bool, error) {
 	for slot := from; slot < to; slot++ {
 		want, err := blobCount(slot)
 		if err != nil {
@@ -589,7 +589,7 @@ func firstMissingBlobSlot(from, to uint64, blobCount freezeblocks.BlobCountBySlo
 		if want == 0 {
 			continue
 		}
-		ok, err := stored(slot, want)
+		ok, err := s.blobSidecarsStored(tx, slot, want)
 		if err != nil {
 			return 0, false, err
 		}
@@ -623,9 +623,7 @@ func (s *Antiquary) blobSidecarsStored(tx kv.Tx, slot, want uint64) (bool, error
 // segments below it are still complete.
 func (s *Antiquary) blobSegmentComplete(tx kv.Tx, from, to uint64, blobCount freezeblocks.BlobCountBySlotFn) (bool, error) {
 	if !s.blobBackfilled.Load() {
-		gap, missing, err := firstMissingBlobSlot(max(from, s.blobCheckedTo), to, blobCount, func(slot, want uint64) (bool, error) {
-			return s.blobSidecarsStored(tx, slot, want)
-		})
+		gap, missing, err := s.firstMissingBlobSlot(tx, max(from, s.blobCheckedTo), to, blobCount)
 		if err != nil {
 			return false, err
 		}

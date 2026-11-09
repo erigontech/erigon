@@ -924,31 +924,6 @@ func TestRebuildBeaconSnapshotIndexIsIdempotentAtAStaticTip(t *testing.T) {
 	}))
 }
 
-func TestFirstMissingBlobSlot(t *testing.T) {
-	blobs := map[uint64]uint64{3: 2, 5: 1, 7: 3} // slots with blobs; the rest have none
-	lost := map[uint64]bool{}
-	blobCount := func(slot uint64) (uint64, error) { return blobs[slot], nil }
-	stored := func(slot, want uint64) (bool, error) {
-		require.Equal(t, blobs[slot], want)
-		return !lost[slot], nil
-	}
-
-	_, missing, err := firstMissingBlobSlot(0, 10, blobCount, stored)
-	require.NoError(t, err)
-	require.False(t, missing, "every blob of the segment is stored")
-
-	lost[5] = true
-	gap, missing, err := firstMissingBlobSlot(0, 10, blobCount, stored)
-	require.NoError(t, err)
-	require.True(t, missing)
-	require.Equal(t, uint64(5), gap)
-
-	_, missing, err = firstMissingBlobSlot(0, 5, blobCount, stored)
-	require.NoError(t, err)
-	require.False(t, missing, "the segment below the gap is complete")
-}
-
-// A count row stays after its sidecar file is lost, so the scan must check the files. It rescans from the gap.
 func TestBlobSidecarsStoredRejectsACountAboveTheBlock(t *testing.T) {
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(t.Context())
@@ -965,6 +940,7 @@ func TestBlobSidecarsStoredRejectsACountAboveTheBlock(t *testing.T) {
 	require.False(t, stored, "the dump requires the counts to be equal")
 }
 
+// A count row stays after its sidecar file is lost, so the scan must check the files. It rescans from the gap.
 func TestBlobSegmentCompleteScansFilesAndResumesAtTheGap(t *testing.T) {
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(t.Context())
@@ -989,7 +965,11 @@ func TestBlobSegmentCompleteScansFilesAndResumesAtTheGap(t *testing.T) {
 		return wants[slot], nil
 	}
 
-	complete, err := a.blobSegmentComplete(tx, 0, 8, blobCount)
+	complete, err := a.blobSegmentComplete(tx, 0, 5, blobCount)
+	require.NoError(t, err)
+	require.True(t, complete, "the segment below the gap is complete")
+
+	complete, err = a.blobSegmentComplete(tx, 0, 8, blobCount)
 	require.NoError(t, err)
 	require.False(t, complete, "the sidecar file of slot 5 is lost")
 	require.Equal(t, uint64(5), a.blobCheckedTo)
