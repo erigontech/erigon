@@ -740,6 +740,34 @@ func TestOpenListDirtyLockRace(t *testing.T) {
 	require.NoError(t, eg.Wait())
 }
 
+func TestIndexMissedConcurrentWithOpenFolder(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, snaptype.CaplinMergeLimit, false)
+
+	sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
+	t.Cleanup(sn.Close)
+	files, err := snapshotsync.AllTypedSegments(dirs.Snap, sn.Types())
+	require.NoError(t, err)
+	list := make([]string, 0, len(files))
+	for i := range files {
+		_, fName := filepath.Split(files[i].Path)
+		list = append(list, fName)
+	}
+	require.NoError(t, sn.OpenList(list, true))
+
+	var eg errgroup.Group
+	eg.Go(func() error {
+		return sn.IndexMissed(t.Context(), "caplin", dirs.Tmp, nil, log.New())
+	})
+	eg.Go(func() error {
+		for range 200 {
+			_ = sn.OpenFolder()
+		}
+		return nil
+	})
+	require.NoError(t, eg.Wait())
+}
+
 func TestCaplinBuildMissingIndicesIndexesPastGap(t *testing.T) {
 	const limit = snaptype.CaplinMergeLimit
 
@@ -835,4 +863,72 @@ func TestRemoveBlobIndexAndTorrents(t *testing.T) {
 		}
 	}
 	require.ElementsMatch(t, kept, left)
+}
+
+func TestRetireBlobsBelowDropsSegmentsUnderTheFloor(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+	for _, tc := range []struct {
+		name        string
+		floor       uint64
+		wantRetired int
+		wantFirst   uint64
+	}{
+		{name: "zero floor keeps everything", floor: 0, wantRetired: 0, wantFirst: 0},
+		{name: "floor inside the first segment keeps it", floor: limit - 1, wantRetired: 0, wantFirst: 0},
+		{name: "floor at a segment end retires it", floor: limit, wantRetired: 1, wantFirst: limit},
+		{name: "floor inside the second segment", floor: limit + 1, wantRetired: 1, wantFirst: limit},
+		{name: "floor past the tip keeps the newest segment", floor: 10 * limit, wantRetired: 2, wantFirst: 2 * limit},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dirs := datadir.New(t.TempDir())
+			for i := range uint64(3) {
+				writeEmptyBlobSidecarsSegment(t, dirs, i*limit, (i+1)*limit)
+			}
+			sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
+			t.Cleanup(sn.Close)
+			require.NoError(t, sn.OpenFolder())
+
+			var deleted []string
+			_, err := sn.RetireBlobsBelow(tc.floor, func(paths []string) error {
+				deleted = append(deleted, paths...)
+				return nil
+			})
+			require.NoError(t, err)
+
+			view := sn.View()
+			defer view.Close()
+			segs := view.BlobSidecars()
+			require.Len(t, segs, 3-tc.wantRetired)
+			require.Equal(t, tc.wantFirst, segs[0].From())
+			require.Equal(t, uint64(3*limit), sn.FrozenBlobs())
+			if tc.wantRetired == 0 {
+				require.Empty(t, deleted)
+			} else {
+				require.NotEmpty(t, deleted)
+				for _, path := range deleted {
+					require.False(t, strings.Contains(filepath.Base(path), "beaconblocks"))
+				}
+			}
+		})
+	}
+}
+
+func TestRetireBlobsBelowWaitsForOverlapCleanup(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+	dirs := datadir.New(t.TempDir())
+	writeEmptyBlobSidecarsSegment(t, dirs, 0, limit)
+	writeEmptyBlobSidecarsSegment(t, dirs, limit, 2*limit)
+	writeEmptyBlobSidecarsSegment(t, dirs, 0, 2*limit)
+	writeEmptyBlobSidecarsSegment(t, dirs, 2*limit, 3*limit)
+	sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
+	t.Cleanup(sn.Close)
+	require.NoError(t, sn.OpenFolder())
+
+	retired, err := sn.RetireBlobsBelow(10*limit, func([]string) error {
+		t.Fatal("no file may be handed to the seeder while superseded segments remain")
+		return nil
+	})
+	require.NoError(t, err)
+	require.False(t, retired)
+	require.Equal(t, uint64(3*limit), sn.FrozenBlobs())
 }

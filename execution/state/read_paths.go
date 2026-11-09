@@ -50,7 +50,7 @@ func codeSizeFromStateObject(ibs *IntraBlockState, so *stateObject, addr account
 		ibs.codeReadCount++
 	}
 	ibs.stateReader.SetTrace(false, "")
-	ibs.recordStateReadError(err)
+	ibs.RecordStateReadError(err)
 	return size, err
 }
 
@@ -74,7 +74,7 @@ func (ibs *IntraBlockState) originStorageDirect(addr accounts.Address, key accou
 	}
 	ibs.storageReadCount++
 	ibs.stateReader.SetTrace(false, "")
-	ibs.recordStateReadError(err)
+	ibs.RecordStateReadError(err)
 	if err != nil {
 		return uint256.Int{}, err
 	}
@@ -98,6 +98,9 @@ func (ibs *IntraBlockState) originCodeDirect(addr accounts.Address) (accounts.Co
 	if codeHash.IsEmpty() {
 		return accounts.EmptyCode, nil
 	}
+	if code, ok := ibs.sharedCode(codeHash); ok {
+		return accounts.Code{Hash: codeHash, Bytes: code}, nil
+	}
 	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle()))) {
 		ibs.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", ibs.blockNum, ibs.txIndex, ibs.version))
 	}
@@ -111,7 +114,7 @@ func (ibs *IntraBlockState) originCodeDirect(addr accounts.Address) (accounts.Co
 		ibs.codeReadCount++
 	}
 	ibs.stateReader.SetTrace(false, "")
-	ibs.recordStateReadError(err)
+	ibs.RecordStateReadError(err)
 	if len(code) == 0 {
 		return accounts.EmptyCode, err
 	}
@@ -165,6 +168,9 @@ func (ibs *IntraBlockState) originCodeSizeDirect(addr accounts.Address) (int, er
 	if codeHash.IsEmpty() {
 		return 0, nil
 	}
+	if code, ok := ibs.sharedCode(codeHash); ok {
+		return len(code), nil
+	}
 	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle()))) {
 		ibs.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", ibs.blockNum, ibs.txIndex, ibs.version))
 	}
@@ -178,7 +184,7 @@ func (ibs *IntraBlockState) originCodeSizeDirect(addr accounts.Address) (int, er
 		ibs.codeReadCount++
 	}
 	ibs.stateReader.SetTrace(false, "")
-	ibs.recordStateReadError(err)
+	ibs.RecordStateReadError(err)
 	return size, err
 }
 
@@ -447,7 +453,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 		panic(fmt.Errorf("readPaths: unknown path %v", path))
 	}
 
-	hdr := ReadHeader{Version: Version{TxIndex: res.DepIdx(), Incarnation: res.Incarnation()}, accSource: res.accSource}
+	hdr := ReadHeader{Version: Version{TxIndex: res.DepIdx(), Incarnation: res.Incarnation()}, accSource: res.accSource()}
 
 	if !commited {
 		if hasWrite := s.versionedWriteHit(addr, path, key, r); hasWrite {
@@ -1013,7 +1019,7 @@ func readBalance(s *IntraBlockState, addr accounts.Address) (uint256.Int, ReadSo
 	var r readPathResult
 	versionedReadCore(s, addr, BalancePath, accounts.NilKey, false, false, &r)
 	if r.err != nil {
-		s.recordStateReadError(r.err)
+		s.RecordStateReadError(r.err)
 		return uint256.Int{}, r.source, r.version, r.err
 	}
 	switch r.outcome {
@@ -1101,7 +1107,7 @@ func readNonce(s *IntraBlockState, addr accounts.Address) (uint64, ReadSource, V
 	var r readPathResult
 	versionedReadCore(s, addr, NoncePath, accounts.NilKey, false, false, &r)
 	if r.err != nil {
-		s.recordStateReadError(r.err)
+		s.RecordStateReadError(r.err)
 		return 0, r.source, r.version, r.err
 	}
 	switch r.outcome {
@@ -1286,7 +1292,7 @@ func readCode(s *IntraBlockState, addr accounts.Address) (accounts.Code, ReadSou
 	var r readPathResult
 	versionedReadCore(s, addr, CodePath, accounts.NilKey, false, false, &r)
 	if r.err != nil {
-		s.recordStateReadError(r.err)
+		s.RecordStateReadError(r.err)
 		return accounts.Code{}, r.source, r.version, r.err
 	}
 	switch r.outcome {
@@ -1366,7 +1372,7 @@ func readCodeSize(s *IntraBlockState, addr accounts.Address) (int, ReadSource, V
 	var r readPathResult
 	versionedReadCore(s, addr, CodeSizePath, accounts.NilKey, false, false, &r)
 	if r.err != nil {
-		s.recordStateReadError(r.err)
+		s.RecordStateReadError(r.err)
 		return 0, r.source, r.version, r.err
 	}
 	switch r.outcome {
@@ -1419,7 +1425,7 @@ func readCodeHash(s *IntraBlockState, addr accounts.Address, commited bool) (acc
 	var r readPathResult
 	versionedReadCore(s, addr, CodeHashPath, accounts.NilKey, commited, false, &r)
 	if r.err != nil {
-		s.recordStateReadError(r.err)
+		s.RecordStateReadError(r.err)
 		return accounts.NilCodeHash, r.source, r.version, r.err
 	}
 	switch r.outcome {
@@ -1769,4 +1775,12 @@ func (ibs *IntraBlockState) ReadStamp() (ReadStamp, bool) {
 		return ReadStamp{}, false
 	}
 	return ReadStamp{len(ibs.journal.entries), ibs.journal.epoch}, true
+}
+
+func (ibs *IntraBlockState) sharedCode(codeHash accounts.CodeHash) ([]byte, bool) {
+	if ibs.codeByHash == nil {
+		return nil, false
+	}
+	h := codeHash.Value()
+	return ibs.codeByHash.GetCodeByHash(h[:])
 }

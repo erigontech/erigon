@@ -68,6 +68,13 @@ func newExecutionPayloadTransactions(version clparams.StateVersion, cfg *clparam
 	return solid.NewTransactionsSSZWithLimits(cfg.MaxTransactionsPerPayload, cfg.MaxBytesPerTransaction)
 }
 
+func newExecutionPayloadWithdrawals(version clparams.StateVersion, cfg *clparams.BeaconChainConfig) *solid.ListSSZ[*Withdrawal] {
+	if version >= clparams.GloasVersion {
+		return solid.NewStaticProgressiveListSSZWithDecodeLimit[*Withdrawal](progressiveRequestDecodeLimit(44), 44)
+	}
+	return solid.NewStaticListSSZ[*Withdrawal](int(cfg.MaxWithdrawalsPerPayload), 44)
+}
+
 // NewEth1Block creates a new Eth1Block.
 func NewEth1Block(version clparams.StateVersion, beaconCfg *clparams.BeaconChainConfig) *Eth1Block {
 	b := &Eth1Block{
@@ -276,7 +283,7 @@ func (b *Eth1Block) UnmarshalJSON(data []byte) error {
 		SlotNumber      uint64                      `json:"slot_number,string"`
 	}
 	aux.Transactions = newExecutionPayloadTransactions(b.version, b.beaconCfg)
-	aux.Withdrawals = solid.NewStaticListSSZ[*Withdrawal](int(b.beaconCfg.MaxWithdrawalsPerPayload), 44)
+	aux.Withdrawals = newExecutionPayloadWithdrawals(b.version, b.beaconCfg)
 	if b.version >= clparams.GloasVersion {
 		aux.BlockAccessList = solid.NewByteListSSZ(b.beaconCfg.MaxBytesPerTransaction)
 	}
@@ -405,17 +412,27 @@ func (b *Eth1Block) EncodingSizeSSZ() (size int) {
 
 // DecodeSSZ decodes the block in SSZ format.
 func (b *Eth1Block) DecodeSSZ(buf []byte, version int) error {
-	return b.decodeSSZ(buf, version, false)
+	return b.decodeSSZ(buf, version, newExecutionPayloadTransactions(clparams.StateVersion(version), b.beaconCfg), false)
 }
 
 func (b *Eth1Block) DecodeSSZStrict(buf []byte, version int) error {
-	return b.decodeSSZ(buf, version, true)
+	return b.decodeSSZ(buf, version, newExecutionPayloadTransactions(clparams.StateVersion(version), b.beaconCfg), true)
 }
 
-func (b *Eth1Block) decodeSSZ(buf []byte, version int, strict bool) error {
+// DecodeSSZWithTransactionLimits uses the given count and per-transaction byte
+// limits without the consensus transport limit on the total transaction list size.
+func (b *Eth1Block) DecodeSSZWithTransactionLimits(buf []byte, version int, maxTransactionsPerPayload, maxBytesPerTransaction uint64) error {
+	return b.decodeSSZ(buf, version, solid.NewTransactionsSSZWithLimits(maxTransactionsPerPayload, maxBytesPerTransaction), false)
+}
+
+func (b *Eth1Block) DecodeSSZStrictWithTransactionLimits(buf []byte, version int, maxTransactionsPerPayload, maxBytesPerTransaction uint64) error {
+	return b.decodeSSZ(buf, version, solid.NewTransactionsSSZWithLimits(maxTransactionsPerPayload, maxBytesPerTransaction), true)
+}
+
+func (b *Eth1Block) decodeSSZ(buf []byte, version int, transactions *solid.TransactionsSSZ, strict bool) error {
 	b.Extra = solid.NewExtraData()
-	b.Transactions = newExecutionPayloadTransactions(clparams.StateVersion(version), b.beaconCfg)
-	b.Withdrawals = solid.NewStaticListSSZ[*Withdrawal](int(b.beaconCfg.MaxWithdrawalsPerPayload), 44)
+	b.Transactions = transactions
+	b.Withdrawals = newExecutionPayloadWithdrawals(clparams.StateVersion(version), b.beaconCfg)
 	b.version = clparams.StateVersion(version)
 	if b.version >= clparams.GloasVersion {
 		b.BlockAccessList = solid.NewByteListSSZ(b.beaconCfg.MaxBytesPerTransaction)

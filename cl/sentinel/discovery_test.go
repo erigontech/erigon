@@ -22,10 +22,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/OffchainLabs/go-bitfield"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/p2p"
 	"github.com/erigontech/erigon/cl/p2p/mock_services"
 	"github.com/erigontech/erigon/cl/sentinel/peers"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/p2p/discover"
 	libp2p "github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -320,4 +324,58 @@ func TestGoRoutinesOpeningPeerConnectionsConst(t *testing.T) {
 	t.Parallel()
 	assert.Equal(t, 4, goRoutinesOpeningPeerConnections,
 		"goRoutinesOpeningPeerConnections must be 4; changing this affects concurrency bounds")
+}
+
+func TestUnderservedSubnetsBelowMeshLowWatermark(t *testing.T) {
+	var coverage [attestationSubnetCount]int
+	for i := range coverage {
+		coverage[i] = 6
+	}
+	coverage[3] = 5
+	coverage[7] = 0
+
+	require.Equal(t, []subnetSearchState{{idx: 7, wanted: 6}, {idx: 3, wanted: 1}}, underservedSubnets(&coverage))
+}
+
+func TestPeerCoveringSubnetBelowMeshLowWatermarkIsWanted(t *testing.T) {
+	var coverage [attestationSubnetCount]int
+	for i := range coverage {
+		coverage[i] = 6
+	}
+	peerSubnets := bitfield.NewBitvector64()
+	peerSubnets.SetBitAt(3, true)
+
+	require.False(t, coversUnderservedSubnet(peerSubnets, &coverage))
+	coverage[3] = 5
+	require.True(t, coversUnderservedSubnet(peerSubnets, &coverage))
+	coverage[3] = 0
+	coverage[4] = 0
+	peerSubnets.SetBitAt(3, false)
+	require.False(t, coversUnderservedSubnet(peerSubnets, &coverage))
+}
+
+// A discv5 walk that finds no node blocks in Next; the search must still end when its context does.
+func TestFindPeersForSubnetsEndsWithItsContext(t *testing.T) {
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	listener, err := p2p.NewUDPv5Listener(t.Context(), &p2p.P2PConfig{IpAddr: "127.0.0.1", TmpDir: t.TempDir()},
+		discover.Config{PrivateKey: key, Log: log.Root()}, log.Root())
+	require.NoError(t, err)
+	defer listener.LocalNode().Database().Close() // Close does not close it, and Windows cannot remove an open file
+	defer listener.Close()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	s := &Sentinel{ctx: ctx, listener: listener, cfg: &SentinelConfig{}}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		s.findPeersForSubnets([]subnetSearchState{{idx: 0, wanted: 1}})
+	}()
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the search outlived its context")
+	}
 }

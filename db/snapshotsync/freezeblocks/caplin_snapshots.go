@@ -150,20 +150,6 @@ func (s *CaplinSnapshots) OpenBeaconBlocks() error {
 	})
 }
 
-type snapshotNotifier interface {
-	OnNewSnapshot()
-}
-
-func (s *CaplinSnapshots) BuildMissedIndices(ctx context.Context, _ string, notifier snapshotNotifier, _ datadir.Dirs, _ *chain.Config, logger log.Logger) error {
-	if err := s.BuildMissingIndices(ctx, logger); err != nil {
-		return err
-	}
-	if notifier != nil {
-		notifier.OnNewSnapshot()
-	}
-	return nil
-}
-
 func (s *CaplinSnapshots) openFolder(optimistic bool, fileFilter func(snaptype.FileInfo) bool) error {
 	files, err := snapshotsync.AllTypedSegments(s.Dir(), s.Types())
 	if err != nil {
@@ -444,12 +430,6 @@ func DumpBlobsSidecar(ctx context.Context, blobStorage blob_storage.BlobStorage,
 	return nil
 }
 
-type indexClaim struct {
-	sType    snaptype.Type
-	from, to uint64
-	info     snaptype.FileInfo
-}
-
 // BuildMissingIndices indexes every caplin segment that is on disk but not indexed yet.
 // It opens the folder first because the dirty set it walks only exists after an open, and
 // the antiquary calls this before its own OpenFolder. That open is optimistic so that a
@@ -462,41 +442,7 @@ func (s *CaplinSnapshots) BuildMissingIndices(ctx context.Context, logger log.Lo
 	if err := s.openFolder(true, nil); err != nil {
 		return err
 	}
-
-	var claims []indexClaim
-	for _, t := range snaptype.CaplinSnapshotTypes {
-		enum := t.Enum()
-		s.WalkDirtySegments(enum, func(sn *snapshotsync.DirtySegment) bool {
-			if sn.IsIndexed() {
-				return true
-			}
-			from, to := sn.GetRange()
-			if !s.TryAcquireRange(enum, from, to) {
-				return true
-			}
-			claims = append(claims, indexClaim{sType: t, from: from, to: to, info: sn.FileInfo(s.Dir())})
-			return true
-		})
-	}
-	if len(claims) == 0 {
-		return nil
-	}
-
-	// Every claim is released even after a failure: openSegments skips a claimed range, so a
-	// still-held claim would keep the range out of the visible set for the process lifetime.
-	var buildErr error
-	for i := range claims {
-		c := &claims[i]
-		if buildErr == nil {
-			buildErr = s.IndexBuilder(c.sType).Build(ctx, c.info, s.Salt, nil, s.tmpdir, &background.Progress{}, log.LvlDebug, logger)
-		}
-		s.ReleaseRange(c.sType.Enum(), c.from, c.to)
-	}
-	if buildErr != nil {
-		return buildErr
-	}
-
-	return s.OpenFolder()
+	return s.IndexMissed(ctx, "caplin", s.tmpdir, nil, logger)
 }
 
 // ReadFrozenBeaconBlockBodyForIntegrity validates the stored body root before promoting blinded blocks.
@@ -617,4 +563,28 @@ func (s *CaplinSnapshots) FrozenBlobs() uint64 {
 		return 0
 	}
 	return s.VisibleSegmentsMaxTo(snaptype.BlobSidecars.Enum())
+}
+
+// RetireBlobsBelow retires blob sidecar segments holding no slot at or above floor and hands
+// their files to onDelete so the seeder drops them. The newest segment always stays, so
+// FrozenBlobs and the backfill boundary it sets do not move. It waits while superseded segments
+// are still on disk: retiring the visible copy of a range would surface the hidden one and cut
+// visibility at the next gap.
+func (s *CaplinSnapshots) RetireBlobsBelow(floor uint64, onDelete func([]string) error) (bool, error) {
+	if floor == 0 {
+		return false, nil
+	}
+	var dirty int
+	s.WalkDirtySegments(snaptype.BlobSidecars.Enum(), func(*snapshotsync.DirtySegment) bool {
+		dirty++
+		return true
+	})
+	view := s.View()
+	visible := len(view.BlobSidecars())
+	view.Close()
+	if dirty != visible {
+		s.logger.Debug("Skipping blob retirement while dirty and visible segment counts differ", "dirty", dirty, "visible", visible)
+		return false, nil
+	}
+	return s.RetireFilesBelow(snaptype.BlobSidecars, min(floor+1, s.FrozenBlobs()), onDelete)
 }
