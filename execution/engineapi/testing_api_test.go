@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/builder"
@@ -45,7 +46,9 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/program"
 	"github.com/erigontech/erigon/node/ethconfig"
@@ -1729,11 +1732,60 @@ func TestNewPayloadRegistersSendersRecovery(t *testing.T) {
 	require.ErrorContains(t, err, "not a proof-of-stake chain")
 
 	require.Equal(t, payload.BlockHash, registeredHash)
-	readAheader := exec.NewBlockReadAheader()
-	readAheader.AddSendersRecovery(registeredHash, recovery)
-	senders, ok := readAheader.RecoveredSenders(t.Context(), registeredHash)
-	require.True(t, ok)
-	require.Equal(t, sender[:], senders)
+	senders, err := recovery.Wait(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, []accounts.Address{accounts.InternAddress(sender)}, senders)
+}
+
+func TestNewPayloadRegistersSendersRecoveryForBALPayload(t *testing.T) {
+	parallel := dbg.Exec3Parallel
+	dbg.Exec3Parallel = true
+	t.Cleanup(func() { dbg.Exec3Parallel = parallel })
+
+	config := allForksChainConfig()
+	config.TerminalTotalDifficulty = nil
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	txn, err := types.SignTx(&types.LegacyTx{
+		CommonTx: types.CommonTx{GasLimit: 21_000},
+		GasPrice: *uint256.NewInt(1),
+	}, *types.MakeSigner(config, 1, 0), key)
+	require.NoError(t, err)
+	balRLP, err := rlp.EncodeToBytes([]any{[]any{common.Address{0x2}, []any{}, []any{}, []any{}, []any{}, []any{}}})
+	require.NoError(t, err)
+	balHash := crypto.Keccak256Hash(balRLP)
+	zero := uint64(0)
+	header := &types.Header{
+		Number:                *uint256.NewInt(1),
+		GasLimit:              30_000_000,
+		BaseFee:               uint256.NewInt(1),
+		BlobGasUsed:           &zero,
+		ExcessBlobGas:         &zero,
+		ParentBeaconBlockRoot: &common.Hash{},
+		RequestsHash:          types.FlatRequests{}.Hash(),
+		BlockAccessListHash:   &balHash,
+		SlotNumber:            &zero,
+	}
+	block := types.NewBlock(header, []types.Transaction{txn}, nil, nil, []*types.Withdrawal{}, nil)
+	payload, err := engine_types.ExecutionPayloadFromBlock(block)
+	require.NoError(t, err)
+	payload.Withdrawals = []*types.Withdrawal{}
+	balBytes := hexutil.Bytes(balRLP)
+	payload.BlockAccessList = &balBytes
+
+	var registeredHash common.Hash
+	var recovery *exec.SendersRecovery
+	stub := &stubExecutionModule{addSendersRecoveryFunc: func(blockHash common.Hash, r *exec.SendersRecovery) {
+		registeredHash, recovery = blockHash, r
+	}}
+	srv := NewEngineServer(log.New(), config, stub, nil, false, false, false, true, nil, nil, 0, 0)
+	_, err = srv.NewPayloadV5(t.Context(), payload, []common.Hash{}, &common.Hash{}, []hexutil.Bytes{})
+	require.ErrorContains(t, err, "not a proof-of-stake chain")
+
+	require.Equal(t, payload.BlockHash, registeredHash)
+	senders, err := recovery.Wait(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, []accounts.Address{accounts.InternAddress(crypto.PubkeyToAddress(key.PublicKey))}, senders)
 }
 
 func TestNewPayloadSkipsSendersRecoveryOnBlockHashMismatch(t *testing.T) {

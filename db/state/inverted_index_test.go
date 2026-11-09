@@ -1038,14 +1038,15 @@ func TestCtxFiles(t *testing.T) {
 		"v1.0-accounts.0-4.ef",
 		"v1.0-accounts.2-3.ef",
 		"v1.0-accounts.3-4.ef",
-		"v1.0-accounts.4-5.ef",     // no overlap
+		"v1.0-accounts.4-5.ef", // no overlap
+		"v1.0-accounts.5-480.ef",
 		"v1.0-accounts.480-484.ef", // overlap with same `startTxNum=480`
 		"v1.0-accounts.480-488.ef",
 		"v1.0-accounts.480-496.ef",
 		"v1.0-accounts.480-512.ef",
 	}
 	ii.scanDirtyFiles(files)
-	require.Equal(t, 10, ii.dirtyFiles.Len())
+	require.Equal(t, 11, ii.dirtyFiles.Len())
 	ii.dirtyFiles.Scan(func(item *FilesItem) bool {
 		item.decompressor = &seg.Decompressor{}
 		return true
@@ -1063,7 +1064,7 @@ func TestCtxFiles(t *testing.T) {
 			require.Failf(t, "overlaping files", "%d-%d, %d-%d", item.startTxNum, item.endTxNum, visibleFiles[i-1].startTxNum, visibleFiles[i-1].endTxNum)
 		}
 	}
-	require.Len(t, visibleFiles, 3)
+	require.Len(t, visibleFiles, 4)
 
 	require.Equal(t, 0, int(visibleFiles[0].startTxNum))
 	require.Equal(t, 4, int(visibleFiles[0].endTxNum))
@@ -1071,8 +1072,8 @@ func TestCtxFiles(t *testing.T) {
 	require.Equal(t, 4, int(visibleFiles[1].startTxNum))
 	require.Equal(t, 5, int(visibleFiles[1].endTxNum))
 
-	require.Equal(t, 480, int(visibleFiles[2].startTxNum))
-	require.Equal(t, 512, int(visibleFiles[2].endTxNum))
+	require.Equal(t, 480, int(visibleFiles[3].startTxNum))
+	require.Equal(t, 512, int(visibleFiles[3].endTxNum))
 }
 
 func TestIsSubset(t *testing.T) {

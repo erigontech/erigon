@@ -640,18 +640,21 @@ func calcVisibleFiles(files *DirtyFiles, l statecfg.Accessors, checker func(star
 		newVisibleFiles = visibleFiles{}
 	}
 
-	// Check for gaps in visible files and warn if found
-	for i := 1; i < len(newVisibleFiles); i++ {
-		prev := newVisibleFiles[i-1]
-		curr := newVisibleFiles[i]
+	return truncateAtFirstGap(newVisibleFiles)
+}
+
+// truncateAtFirstGap drops the files after a hole: a read cannot tell that a key's latest value was in the hole.
+func truncateAtFirstGap(files visibleFiles) visibleFiles {
+	for i := 1; i < len(files); i++ {
+		prev, curr := files[i-1], files[i]
 		if prev.endTxNum != curr.startTxNum {
 			log.Warn("[agg] gap in visible files", "prev", prev.src.decompressor.FileName(),
 				"prevEnd", prev.endTxNum, "curr", curr.src.decompressor.FileName(), "currStart", curr.startTxNum,
 				"gap", curr.startTxNum-prev.endTxNum)
+			return files[:i]
 		}
 	}
-
-	return newVisibleFiles
+	return files
 }
 
 func checkForVisibility(item *FilesItem, l statecfg.Accessors, trace bool) (canBeVisible bool) {
