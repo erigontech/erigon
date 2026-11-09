@@ -36,6 +36,7 @@ import (
 	"github.com/google/btree"
 	"github.com/hashicorp/golang-lru/v2/simplelru"
 	"github.com/holiman/uint256"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/erigontech/erigon/common"
 	libkzg "github.com/erigontech/erigon/common/crypto/kzg"
@@ -146,6 +147,9 @@ type TxPool struct {
 	chainID                 uint256.Int
 	chainConfig             *chain.Config
 	stateGeneration         uint64
+	stateUpdateLock         sync.Mutex
+	stateUpdatePending      bool
+	appliedView             *remoteproto.ExecutionView
 	stateBlockHash          common.Hash // Head of the pool's state view; pins frame validation to the same block
 	headIsBogota            bool        // Canonical activation, independent of pending-block time
 	lastSeenBlock           atomic.Uint64
@@ -294,6 +298,7 @@ func New(
 	res.amsterdamTime = chainConfig.AmsterdamTime
 
 	res.p2pFetcher = NewFetch(ctx, sentryClients, res, stateChangesClient, poolDB, res.chainID, logger, opts...)
+	res.p2pFetcher.onStateChangesUnavailable = res.invalidateState
 	res.p2pSender = NewSend(ctx, sentryClients, logger, opts...)
 
 	return res, nil
@@ -317,25 +322,105 @@ func (p *TxPool) start(ctx context.Context) error {
 	})
 }
 
+func (p *TxPool) invalidateState() {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+	p.stateUpdatePending = true
+	p.stateGeneration++
+	p.lastSeenCond.Broadcast()
+}
+
 func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.StateChangeBatch, unwindTxns, unwindBlobTxns, minedTxns TxnSlots) error {
+	if stateChanges.TargetView == nil || stateChanges.TargetView.BlockHash == nil {
+		p.invalidateState()
+		return fmt.Errorf("state notification has no execution view")
+	}
+	frames, err := p.updateState(ctx, stateChanges, unwindTxns, unwindBlobTxns, minedTxns)
+	if err != nil {
+		return err
+	}
+	if err := p.revalidateFrames(ctx, frames.parked, frames.generation, frames.blockHash); err != nil {
+		p.lock.Lock()
+		if p.stateGeneration == frames.generation {
+			p.stateUpdatePending = true
+			p.stateGeneration++
+			p.lastSeenCond.Broadcast()
+		}
+		p.lock.Unlock()
+		return err
+	}
+	return nil
+}
+
+func (p *TxPool) updateState(ctx context.Context, stateChanges *remoteproto.StateChangeBatch, unwindTxns, unwindBlobTxns, minedTxns TxnSlots) (frameRevalidationBatch, error) {
 	defer newBlockTimer.ObserveDuration(time.Now())
 	for _, txn := range unwindTxns.Txns {
 		p.recoverAuthorizations(txn)
 	}
 
+	p.stateUpdateLock.Lock()
+	defer p.stateUpdateLock.Unlock()
+	p.lock.Lock()
+	previousApplied := p.appliedView
+	if !p.stateUpdatePending && proto.Equal(previousApplied, stateChanges.TargetView) {
+		frames := frameRevalidationBatch{generation: p.stateGeneration, blockHash: p.stateBlockHash}
+		for _, mt := range p.all.senderIDFrameTxn {
+			if mt.currentSubPool == 0 {
+				frames.parked = append(frames.parked, mt)
+			}
+		}
+		p.lock.Unlock()
+		return frames, nil
+	}
+	reset := stateChanges.StateChangesIncomplete || p.stateUpdatePending || previousApplied == nil || !proto.Equal(previousApplied, stateChanges.PreviousView)
+	p.stateUpdatePending = true
+	p.stateGeneration++
+	p.lock.Unlock()
+	if reset && !stateChanges.StateChangesIncomplete {
+		stateChanges = proto.Clone(stateChanges).(*remoteproto.StateChangeBatch)
+		stateChanges.StateChangesIncomplete = true
+	}
 	coreDB, cache := p.chainDB()
-	cache.OnNewBlock(stateChanges)
 	coreTx, err := coreDB.BeginTemporalRo(ctx)
 	if err != nil {
-		return err
+		return frameRevalidationBatch{}, err
 	}
 	defer coreTx.Rollback()
+	matches, err := kvcache.MatchesExecutionView(coreTx, stateChanges.TargetView)
+	if err != nil {
+		return frameRevalidationBatch{}, err
+	}
+	if !matches && !stateChanges.StateChangesIncomplete {
+		matches, err = kvcache.MatchesExecutionView(coreTx, stateChanges.PreviousView)
+		if err != nil {
+			return frameRevalidationBatch{}, err
+		}
+	}
+	if !matches {
+		return frameRevalidationBatch{}, kvcache.ErrExecutionViewUnavailable
+	}
+	if stateChanges.StateChangesIncomplete && previousApplied != nil {
+		changes, err := p.chainTransition(ctx, coreTx, previousApplied, stateChanges.TargetView)
+		if err != nil {
+			return frameRevalidationBatch{}, err
+		}
+		stateChanges = proto.Clone(stateChanges).(*remoteproto.StateChangeBatch)
+		stateChanges.ChangeBatch = changes
+		unwindTxns, unwindBlobTxns, minedTxns, err = p.p2pFetcher.parseStateChanges(stateChanges)
+		if err != nil {
+			return frameRevalidationBatch{}, err
+		}
+		for _, txn := range unwindTxns.Txns {
+			p.recoverAuthorizations(txn)
+		}
+	}
+	cache.OnNewBlock(stateChanges)
 
 	var poolTx kv.Tx
 	if p.poolDB != nil {
 		poolTx, err = p.poolDB.BeginRo(ctx)
 		if err != nil {
-			return err
+			return frameRevalidationBatch{}, err
 		}
 		defer poolTx.Rollback()
 	}
@@ -356,19 +441,15 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 	p.lastBlockTimestampMs.Store(nowMs)
 
 	if err := minedTxns.Valid(); err != nil {
-		return err
+		return frameRevalidationBatch{}, err
 	}
 
 	cacheView, err := cache.View(ctx, coreTx)
 	if err != nil {
-		return err
+		return frameRevalidationBatch{}, err
 	}
 
-	frames, err := p.applyBlockUpdate(stateChanges, unwindTxns, unwindBlobTxns, minedTxns, cacheView, poolTx)
-	if err != nil {
-		return err
-	}
-	return p.revalidateFrames(ctx, frames.parked, frames.generation, frames.blockHash)
+	return p.applyBlockUpdate(stateChanges, unwindTxns, unwindBlobTxns, minedTxns, cacheView, poolTx)
 }
 
 // applyBlockUpdate applies the announced state under the pool lock and returns
@@ -379,17 +460,24 @@ func (p *TxPool) applyBlockUpdate(stateChanges *remoteproto.StateChangeBatch, un
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
-	block := stateChanges.ChangeBatch[len(stateChanges.ChangeBatch)-1].BlockHeight
+	cacheView, err = p.readBlockAccounts(cacheView, stateChanges, unwindTxns, unwindBlobTxns, minedTxns)
+	if err != nil {
+		return frames, err
+	}
+	head := stateChanges.TargetView
+	block := head.BlockHeight
 	baseFee := stateChanges.PendingBlockBaseFee
 	p.stateGeneration++
 	frames.generation = p.stateGeneration
 	p.stateBlockHash = common.Hash{}
-	if hash := stateChanges.ChangeBatch[len(stateChanges.ChangeBatch)-1].BlockHash; hash != nil {
+	if hash := head.BlockHash; hash != nil {
 		p.stateBlockHash = gointerfaces.ConvertH256ToHash(hash)
 	}
 	frames.blockHash = p.stateBlockHash
 	defer func() {
 		if err == nil {
+			p.appliedView = head
+			p.stateUpdatePending = false
 			p.lastSeenBlock.Store(block)
 			p.lastSeenCond.Broadcast()
 		}
@@ -804,6 +892,10 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
+	if p.stateUpdatePending || len(p.frameAccountsToRefresh) > 0 {
+		txns.Resize(0)
+		return true, 0, nil
+	}
 	best := p.pending.best
 
 	isEIP3860 := p.isShanghai()
@@ -1499,6 +1591,9 @@ func (p *TxPool) withLockedState(ctx context.Context, txns *TxnSlots, f func(kv.
 			}
 			p.lock.Lock()
 			defer p.lock.Unlock()
+			if p.stateUpdatePending {
+				return kvcache.ErrExecutionViewUnavailable
+			}
 			if generation != p.stateGeneration {
 				retry = true
 				return nil
@@ -1511,6 +1606,24 @@ func (p *TxPool) withLockedState(ctx context.Context, txns *TxnSlots, f func(kv.
 			}
 			return f(coreTx, view)
 		})
+		// Admission can wait; notification processing must remain able to advance recovery.
+		if txns != nil && errors.Is(err, kvcache.ErrExecutionViewUnavailable) {
+			p.lock.Lock()
+			stop := context.AfterFunc(ctx, func() {
+				p.lock.Lock()
+				p.lastSeenCond.Broadcast()
+				p.lock.Unlock()
+			})
+			for generation == p.stateGeneration && ctx.Err() == nil {
+				p.lastSeenCond.Wait()
+			}
+			stop()
+			p.lock.Unlock()
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			continue
+		}
 		if err != nil || !retry {
 			return err
 		}
@@ -1843,10 +1956,7 @@ func (p *TxPool) addTxnsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView,
 	for _, changesList := range stateChanges.ChangeBatch {
 		for _, change := range changesList.Changes {
 			switch change.Action {
-			case remoteproto.Action_UPSERT, remoteproto.Action_UPSERT_CODE:
-				if change.Incarnation > 0 {
-					continue
-				}
+			case remoteproto.Action_UPSERT, remoteproto.Action_UPSERT_CODE, remoteproto.Action_REMOVE, remoteproto.Action_CODE:
 				addr := gointerfaces.ConvertH160toAddress(change.Address)
 				id, ok := senders.getID(addr)
 				if !ok {
@@ -1865,6 +1975,13 @@ func (p *TxPool) addTxnsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView,
 	// appearing in a block's stateChanges, which doesn't happen if the
 	// queued tx is the sender's only outstanding tx.
 	queuedSenders := map[uint64]struct{}{}
+	if stateChanges.StateChangesIncomplete {
+		for id := range p.all.senderIDTxnCount {
+			if _, changed := sendersWithChangedState[id]; !changed {
+				queuedSenders[id] = struct{}{}
+			}
+		}
+	}
 	for _, mt := range p.queued.best.ms {
 		senderID := mt.TxnSlot.SenderID
 		if _, alreadyCovered := sendersWithChangedState[senderID]; alreadyCovered {
@@ -2639,9 +2756,6 @@ func (p *TxPool) Run(ctx context.Context) error {
 		p.lastSeenCond.Broadcast() // to unblock .best() wait on cond
 		p.lock.Unlock()
 	}()
-	p.p2pFetcher.ConnectCore()
-	p.p2pFetcher.ConnectSentries()
-	defer p.p2pFetcher.Wait()
 
 	syncToNewPeersEvery := time.NewTicker(p.cfg.SyncToNewPeersEvery)
 	defer syncToNewPeersEvery.Stop()
@@ -2664,6 +2778,9 @@ func (p *TxPool) Run(ctx context.Context) error {
 		p.logger.Error("[txpool] Failed to start", "err", err)
 		return err
 	}
+	p.p2pFetcher.ConnectCore()
+	p.p2pFetcher.ConnectSentries()
+	defer p.p2pFetcher.Wait()
 	frameCtx, cancelFrames := context.WithCancel(ctx)
 	var frames sync.WaitGroup
 	frames.Go(func() { p.runRemoteFrames(frameCtx) })
@@ -3007,6 +3124,11 @@ func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.
 		}
 		if header != nil {
 			p.headIsBogota = p.chainConfig.IsBogota(header.Time)
+			version, err := rawdb.GetStateVersion(coreTx)
+			if err != nil {
+				return err
+			}
+			p.appliedView = &remoteproto.ExecutionView{BlockHash: gointerfaces.ConvertHashToH256(header.Hash()), BlockHeight: header.Number.Uint64(), BlockTime: header.Time, SlotNumber: header.SlotNumber, StateVersionId: version}
 		}
 	}
 	if p.lastSeenBlock.Load() == 0 {

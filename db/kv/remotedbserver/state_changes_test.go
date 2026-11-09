@@ -20,6 +20,7 @@ import (
 	"context"
 	"io"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -62,6 +63,19 @@ func TestStateChangesSubscriptionStartsIncomplete(t *testing.T) {
 		require.ErrorIs(t, err, io.EOF)
 		server.SendStateChanges(t.Context(), &remoteproto.StateChangeBatch{})
 	}
+}
+
+func TestStateChangesSubscriptionReplaysLatestView(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	server := NewKvServer(ctx, nil, nil, nil, log.New())
+	server.SendStateChanges(ctx, &remoteproto.StateChangeBatch{TargetView: &remoteproto.ExecutionView{BlockHeight: 7}})
+	stream, err := direct.NewStateDiffClientDirect(server).StateChanges(ctx, &remoteproto.StateChangeRequest{})
+	require.NoError(t, err)
+	reply, err := stream.Recv()
+	require.NoError(t, err)
+	require.Equal(t, uint64(7), reply.TargetView.BlockHeight)
+	require.True(t, reply.StateChangesIncomplete)
 }
 
 func TestStateChangesSubscriberOverflow(t *testing.T) {

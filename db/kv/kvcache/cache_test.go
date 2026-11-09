@@ -511,7 +511,35 @@ func TestOnNewBlockIncompleteChanges(t *testing.T) {
 				require.Equal(t, currentValue, value, "omitted accounts must be read from the database")
 				value, err = view.Get(announced[:])
 				require.NoError(t, err)
-				require.Equal(t, currentValue, value, "announced accounts must still be applied")
+				require.Empty(t, value, "partial historical values must not populate a reset cache")
+				return nil
+			}))
+		})
+	}
+}
+
+func TestResetIgnoresRecordedAccountValues(t *testing.T) {
+	for _, name := range []string{"coherent", "latest batch"} {
+		t.Run(name, func(t *testing.T) {
+			var cache Cache = New(DefaultCoherentConfig)
+			if name == "latest batch" {
+				cache = NewLatestBatchCache()
+			}
+			db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+			address := common.Address{1}
+			cache.OnNewBlock(&remoteproto.StateChangeBatch{
+				StateChangesIncomplete: true,
+				ChangeBatch: []*remoteproto.StateChange{{Changes: []*remoteproto.AccountChange{{
+					Address: gointerfaces.ConvertAddressToH160(address), Action: remoteproto.Action_UPSERT,
+					Data: accounts.SerialiseV3(&accounts.Account{Nonce: 1, CodeHash: accounts.EmptyCodeHash}),
+				}}}},
+			})
+			require.NoError(t, db.ViewTemporal(t.Context(), func(tx kv.TemporalTx) error {
+				view, err := cache.View(t.Context(), tx)
+				require.NoError(t, err)
+				value, err := view.Get(address[:])
+				require.NoError(t, err)
+				require.Empty(t, value, "the omitted deletion supersedes the recorded update")
 				return nil
 			}))
 		})

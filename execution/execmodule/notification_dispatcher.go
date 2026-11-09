@@ -29,6 +29,8 @@ import (
 	"github.com/erigontech/erigon/execution/notifications"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/stagedsync"
+	"github.com/erigontech/erigon/node/gointerfaces"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/shards"
 )
 
@@ -52,6 +54,7 @@ type Dispatcher struct {
 	events              *shards.Events
 	stateChangeConsumer notifications.StateChangeConsumer
 	logger              log.Logger
+	lastView            *remoteproto.ExecutionView
 }
 
 func NewDispatcher(
@@ -70,13 +73,11 @@ func NewDispatcher(
 
 // Dispatch sends all pending notifications. The tx parameter is the data source
 // for headers and forkchoice markers — it can be the SD's blockOverlay
-// (MemoryMutation) for pre-commit dispatch, or a committed DB tx. The state getter
-// must include all account writes at the announced head, including uncommitted ones.
+// (MemoryMutation) for pre-commit dispatch, or a committed DB tx.
 //
 // Parameters:
 //   - ctx: context for cancellation
 //   - tx: data source (overlay or committed tx)
-//   - state: final state at the announced head
 //   - stateVersion: durable version represented by the accumulated state changes
 //   - accumulator: state change accumulator (may be nil)
 //   - recentReceipts: receipt/log cache (may be nil)
@@ -86,7 +87,6 @@ func NewDispatcher(
 func (d *Dispatcher) Dispatch(
 	ctx context.Context,
 	tx kv.Tx,
-	state kv.TemporalGetter,
 	stateVersion uint64,
 	accumulator *notifications.Accumulator,
 	recentReceipts *notifications.RecentReceipts,
@@ -105,7 +105,9 @@ func (d *Dispatcher) Dispatch(
 		}
 		// Undelivered commits may predate the current sync run.
 		if accumulator != nil {
-			for _, change := range accumulator.Changes() {
+			changes := accumulator.Changes()
+			for i := range changes {
+				change := &changes[i]
 				before := change.BlockHeight
 				if change.Direction == notifications.DirectionForward && before > 0 {
 					before--
@@ -138,10 +140,24 @@ func (d *Dispatcher) Dispatch(
 		}
 	}
 
-	currentHeader := rawdb.ReadCurrentHeader(tx)
+	currentHeader, err := rawdb.ReadHeaderByHash(tx, rawdb.ReadHeadBlockHash(tx))
+	if err != nil {
+		return err
+	}
 	if accumulator != nil && currentHeader != nil {
-		if changes := accumulator.Changes(); len(changes) == 0 || changes[len(changes)-1].BlockHeight < currentHeader.Number.Uint64() {
-			accumulator.StartChange(currentHeader, nil, false)
+		target := &remoteproto.ExecutionView{
+			BlockHash: gointerfaces.ConvertHashToH256(currentHeader.Hash()), BlockHeight: currentHeader.Number.Uint64(),
+			BlockTime: currentHeader.Time, SlotNumber: currentHeader.SlotNumber, StateVersionId: stateVersion,
+		}
+		accumulator.SetViews(d.lastView, target)
+		if d.lastView == nil || len(accumulator.Changes()) != 1 {
+			accumulator.MarkIncomplete()
+		} else {
+			change := accumulator.Changes()[0]
+			if change.Direction != notifications.DirectionForward || change.BlockHeight != d.lastView.BlockHeight+1 ||
+				change.ParentHash != gointerfaces.ConvertH256ToHash(d.lastView.BlockHash) || change.BlockHash != currentHeader.Hash() {
+				accumulator.MarkIncomplete()
+			}
 		}
 
 		pendingBaseFee := misc.CalcBaseFee(d.chainConfig, currentHeader)
@@ -158,10 +174,8 @@ func (d *Dispatcher) Dispatch(
 
 		finalizedBlock := common.Deref(rawdb.ReadHeaderNumber(tx, rawdb.ReadForkchoiceFinalized(tx)))
 
-		if err := accumulator.RefreshAccounts(state); err != nil {
-			return err
-		}
 		accumulator.SendAndReset(ctx, d.stateChangeConsumer, pendingBaseFee.Uint64(), pendingBlobFee, currentHeader.GasLimit, finalizedBlock)
+		d.lastView = target
 	}
 	return nil
 }

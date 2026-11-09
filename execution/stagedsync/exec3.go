@@ -380,6 +380,9 @@ func execV3Serial(ctx context.Context,
 	}
 	se.lastCommittedTxNum.Store(inputTxNum)
 	se.lastCommittedBlockNum.Store(blockNum)
+	if accumulator != nil {
+		defer rs.TrackNotifications()()
+	}
 
 	defer func() {
 		if isApplyingBlocks {

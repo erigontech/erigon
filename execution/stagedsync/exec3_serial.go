@@ -47,11 +47,6 @@ type serialExecutor struct {
 	// commitProgress holds the most recent CommitProgress the trie reported,
 	// so the caller can log real commitment counters instead of a zero value.
 	commitProgress atomic.Pointer[commitment.CommitProgress]
-
-	// accumulator for the current block; set at StartChange and used by the
-	// block-end stateWriter so that AuRa system-call nonce changes are
-	// included in the txpool state-diff batch.
-	accumulator *shards.Accumulator
 }
 
 // minAuthIntrinsicGas is the smallest intrinsic charge per authorization on any fork, so no valid tx or block applies
@@ -151,7 +146,6 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			return se.getHeader(ctx, hash, number)
 		}), se.cfg.engine, se.cfg.author, se.cfg.chainConfig)
 
-		se.accumulator = accumulator // keep in sync for executeBlock's stateWriter
 		if accumulator != nil {
 			txs, err := se.cfg.blockReader.RawTransactions(context.Background(), se.applyTx, b.NumberU64(), b.NumberU64())
 			if err != nil {
@@ -199,6 +193,9 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			return nil, rwTx, err
 		}
 
+		if err := se.rs.NotifyAccumulator(accumulator, se.applyTx); err != nil {
+			return nil, rwTx, err
+		}
 		if !continueLoop {
 			return b.HeaderNoCopy(), rwTx, nil
 		}
@@ -473,10 +470,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 					}
 				}
 
-				// Pass se.accumulator so that AuRa / system-call nonce changes
-				// are included in the txpool state-diff batch (fixes empty block
-				// production on Gnosis Chain caused by stale pending txns).
-				stateWriter := state.NewWriter(se.doms.AsPutDel(se.applyTx), se.accumulator, txTask.TxNum)
+				stateWriter := state.NewWriter(se.doms.AsPutDel(se.applyTx), nil, txTask.TxNum)
 
 				if err = ibs.MakeWriteSet(txTask.Rules(), stateWriter); err != nil {
 					panic(err)

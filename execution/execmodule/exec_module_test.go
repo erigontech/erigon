@@ -64,6 +64,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/txnprovider"
@@ -177,8 +178,27 @@ func waitForProvidedTxnCount(t *testing.T, txnCounts <-chan int, want int) {
 	}
 }
 
-func txPoolHead(block *types.Block) *remoteproto.StateChangeBatch {
+func txPoolHead(t *testing.T, m *execmoduletester.ExecModuleTester, block *types.Block) *remoteproto.StateChangeBatch {
+	t.Helper()
+	var previous *remoteproto.ExecutionView
+	require.NoError(t, m.DB.ViewTemporal(t.Context(), func(tx kv.TemporalTx) error {
+		version, err := rawdb.GetStateVersion(tx)
+		if err != nil {
+			return err
+		}
+		header, err := rawdb.ReadHeaderByHash(tx, rawdb.ReadHeadBlockHash(tx))
+		if err != nil {
+			return err
+		}
+		previous = &remoteproto.ExecutionView{BlockHash: gointerfaces.ConvertHashToH256(header.Hash()), BlockHeight: header.Number.Uint64(), BlockTime: header.Time, SlotNumber: header.SlotNumber, StateVersionId: version}
+		return nil
+	}))
 	return &remoteproto.StateChangeBatch{
+		PreviousView: previous,
+		TargetView: &remoteproto.ExecutionView{
+			BlockHash: gointerfaces.ConvertHashToH256(block.Hash()), BlockHeight: block.NumberU64(),
+			BlockTime: block.Time(), SlotNumber: block.Header().SlotNumber, StateVersionId: previous.StateVersionId,
+		},
 		PendingBlockBaseFee: block.BaseFee().Uint64(),
 		BlockGasLimit:       block.GasLimit(),
 		ChangeBatch: []*remoteproto.StateChange{
@@ -1426,7 +1446,7 @@ func txPoolBehindParentFixture(t *testing.T) (
 	addTwoTxnsToPool(t.Context(), 0, t, m, m.TxPoolGrpcServer, parent.BaseFee().Uint64())
 	provider = &rewindingTxnProvider{
 		pool:  m.TxPool,
-		head:  txPoolHead(chainPack.Blocks[len(chainPack.Blocks)-2]),
+		head:  txPoolHead(t, m, chainPack.Blocks[len(chainPack.Blocks)-2]),
 		ready: make(chan struct{}),
 	}
 	parentBeaconBlockRoot := randomHash()
@@ -1480,7 +1500,7 @@ func TestGetAssembledBlockHonorsCanceledContextWhenTxPoolIsBehindParent(t *testi
 		blocked = true
 	}
 
-	require.NoError(t, m.TxPool.OnNewBlock(ctx, txPoolHead(parent), txnpool.TxnSlots{}, txnpool.TxnSlots{}, txnpool.TxnSlots{}))
+	require.NoError(t, m.TxPool.OnNewBlock(ctx, txPoolHead(t, m, parent), txnpool.TxnSlots{}, txnpool.TxnSlots{}, txnpool.TxnSlots{}))
 	if blocked {
 		select {
 		case <-resultCh:
@@ -1523,7 +1543,7 @@ func TestGetAssembledBlockIncludesTxnsOnceTxPoolCatchesUpSoonAfterStop(t *testin
 			returned <- assembled{result, err}
 		}()
 		synctest.Wait()
-		require.NoError(t, m.TxPool.OnNewBlock(t.Context(), txPoolHead(parent), txnpool.TxnSlots{}, txnpool.TxnSlots{}, txnpool.TxnSlots{}))
+		require.NoError(t, m.TxPool.OnNewBlock(t.Context(), txPoolHead(t, m, parent), txnpool.TxnSlots{}, txnpool.TxnSlots{}, txnpool.TxnSlots{}))
 
 		got := <-returned
 		require.NoError(t, got.err)

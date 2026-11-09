@@ -274,7 +274,11 @@ func (c *Coherent) OnNewBlock(stateChanges *remoteproto.StateChangeBatch) {
 	id := stateChanges.StateVersionId
 	r := c.advanceRoot(id, stateChanges.StateChangesIncomplete)
 
-	for _, sc := range stateChanges.ChangeBatch {
+	changes := stateChanges.ChangeBatch
+	if stateChanges.StateChangesIncomplete {
+		changes = nil
+	}
+	for _, sc := range changes {
 		for i := range sc.Changes {
 			switch sc.Changes[i].Action {
 			case remoteproto.Action_UPSERT:

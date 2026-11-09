@@ -138,7 +138,7 @@ func TestOnNewBlockDoesNotLeakSenderIDsOfAccountsOutsidePool(t *testing.T) {
 		minedTxns.Append(mined, minedSender[:], false)
 		touched = append(touched, minedSender)
 	}
-	require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{1}, 1, touched...), TxnSlots{}, TxnSlots{}, minedTxns))
+	require.NoError(t, applyTestBlock(ctx, pool, newBlockChangeForAccounts(common.Hash{1}, 1, touched...), TxnSlots{}, TxnSlots{}, minedTxns))
 
 	pool.lock.Lock()
 	defer pool.lock.Unlock()
@@ -160,7 +160,7 @@ func TestOnNewBlockKeepsSenderIDOfMinedSenderWithUnwoundTxn(t *testing.T) {
 	unwound.IDHash[0] = 0x31
 	var unwindTxns TxnSlots
 	unwindTxns.Append(unwound, sender[:], false)
-	require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{1}, 1, sender), unwindTxns, TxnSlots{}, minedTxns))
+	require.NoError(t, applyTestBlock(ctx, pool, newBlockChangeForAccounts(common.Hash{1}, 1, sender), unwindTxns, TxnSlots{}, minedTxns))
 
 	pool.lock.Lock()
 	defer pool.lock.Unlock()

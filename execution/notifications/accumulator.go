@@ -19,16 +19,13 @@ package notifications
 import (
 	"bytes"
 	"context"
-	"fmt"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 )
 
-// Accumulator collects state changes per block in native Go types.
-// Protobuf conversion happens only at the gRPC boundary via ToProto methods.
+// Accumulator collects state changes per block.
 type Accumulator struct {
 	plainStateID           uint64
 	changes                []StateChange
@@ -36,6 +33,8 @@ type Accumulator struct {
 	latestChange           *StateChange
 	accountChangeIndex     map[common.Address]int // For the latest change, allows finding account change by address
 	storageChangeIndex     map[common.Address]map[common.Hash]int
+	previousView           *remoteproto.ExecutionView
+	targetView             *remoteproto.ExecutionView
 }
 
 func NewAccumulator() *Accumulator {
@@ -58,6 +57,7 @@ func (a *Accumulator) Reset(plainStateID uint64) {
 	a.accountChangeIndex = nil
 	a.storageChangeIndex = nil
 	a.plainStateID = plainStateID
+	a.previousView, a.targetView = nil, nil
 }
 
 // Checkpoint returns a rollback to completed block changes. Later writes must
@@ -73,7 +73,7 @@ func (a *Accumulator) Checkpoint() (restore func()) {
 // SendAndReset converts accumulated changes to protobuf and dispatches them,
 // then resets the accumulator. In-process consumers use the same messages.
 func (a *Accumulator) SendAndReset(ctx context.Context, c StateChangeConsumer, pendingBaseFee uint64, pendingBlobFee uint64, blockGasLimit uint64, finalizedBlock uint64) {
-	if a == nil || len(a.changes) == 0 {
+	if a == nil || len(a.changes) == 0 && a.targetView == nil {
 		return
 	}
 	batch := &BlockBatchNotification{
@@ -84,6 +84,8 @@ func (a *Accumulator) SendAndReset(ctx context.Context, c StateChangeConsumer, p
 		PendingBlobFee:         pendingBlobFee,
 		BlockGasLimit:          blockGasLimit,
 		FinalizedBlock:         finalizedBlock,
+		PreviousView:           a.previousView,
+		TargetView:             a.targetView,
 	}
 	if c != nil {
 		c.SendStateChanges(ctx, batch.ToProtoBatch())
@@ -95,49 +97,8 @@ func (a *Accumulator) SetStateID(stateID uint64) {
 	a.plainStateID = stateID
 }
 
-// RefreshAccounts appends final account values after an incomplete batch's
-// recorded changes, which may precede omitted updates. The getter must include
-// uncommitted state because consumers can receive the batch before commit.
-func (a *Accumulator) RefreshAccounts(getter kv.TemporalGetter) error {
-	if !a.stateChangesIncomplete || len(a.changes) == 0 {
-		return nil
-	}
-	final := a.changes[len(a.changes)-1]
-	final.Txs, final.Changes = nil, nil
-	seen := make(map[common.Address]struct{})
-	for _, block := range a.changes {
-		for _, change := range block.Changes {
-			if change.Action != ActionUpsert && change.Action != ActionUpsertCode && change.Action != ActionRemove {
-				continue
-			}
-			if _, ok := seen[change.Address]; ok {
-				continue
-			}
-			seen[change.Address] = struct{}{}
-			data, _, err := getter.GetLatest(kv.AccountsDomain, change.Address[:], kv.GetLatestOptions{})
-			if err != nil {
-				return fmt.Errorf("refresh notification account %s: %w", change.Address, err)
-			}
-			updated := AccountChange{Address: change.Address, Action: ActionRemove}
-			if len(data) > 0 {
-				var account accounts.Account
-				if err := accounts.DeserialiseV3(&account, data); err != nil {
-					return fmt.Errorf("decode notification account %s: %w", change.Address, err)
-				}
-				updated.Action = ActionUpsert
-				updated.Incarnation = account.Incarnation
-				updated.Data = bytes.Clone(data)
-			}
-			final.Changes = append(final.Changes, updated)
-		}
-	}
-	if len(final.Changes) > 0 {
-		a.changes = append(a.changes, final)
-		a.latestChange = nil
-		a.accountChangeIndex = nil
-		a.storageChangeIndex = nil
-	}
-	return nil
+func (a *Accumulator) SetViews(previous, target *remoteproto.ExecutionView) {
+	a.previousView, a.targetView = previous, target
 }
 
 // MarkIncomplete records omitted state changes for the whole batch. Later
@@ -151,6 +112,7 @@ func (a *Accumulator) StartChange(h *types.Header, txs [][]byte, unwind bool) {
 	a.changes = append(a.changes, StateChange{
 		BlockHeight: h.Number.Uint64(),
 		BlockHash:   h.Hash(),
+		ParentHash:  h.ParentHash,
 		BlockTime:   h.Time,
 	})
 	a.latestChange = &a.changes[len(a.changes)-1]
@@ -206,12 +168,8 @@ func (a *Accumulator) DeleteAccount(address common.Address) {
 		a.accountChangeIndex[address] = i
 	}
 	accountChange := &a.latestChange.Changes[i]
-	if accountChange.Action != ActionStorage {
-		panic("")
-	}
 	accountChange.Data = nil
 	accountChange.Code = nil
-	accountChange.StorageChanges = nil
 	accountChange.Action = ActionRemove
 	delete(a.storageChangeIndex, address)
 }

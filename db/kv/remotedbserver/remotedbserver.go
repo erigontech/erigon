@@ -70,7 +70,8 @@ const MaxTxTTL = 60 * time.Second
 // 7.3.1 - Include pinned history-file generations in transaction replies
 // 7.3.2 - Add IndexJoin
 // 7.4.0 - Include block slots and completeness in state-change notifications
-var KvServiceAPIVersion = &typesproto.VersionReply{Major: 7, Minor: 4, Patch: 0}
+// 7.5.0 - Bind notifications to execution views and batch latest-state reads
+var KvServiceAPIVersion = &typesproto.VersionReply{Major: 7, Minor: 5, Patch: 0}
 
 type KvServer struct {
 	remoteproto.UnimplementedKVServer // must be embedded to have forward compatible implementations.
@@ -532,6 +533,7 @@ type StateChangePubSub struct {
 	chans    map[uint]chan stateChangeEvent
 	id       uint
 	sequence uint64
+	latest   *remoteproto.StateChangeBatch
 	mu       sync.RWMutex
 }
 
@@ -549,6 +551,9 @@ func (s *StateChangePubSub) Sub() (ch chan stateChangeEvent, remove func()) {
 	id := s.id
 	ch = make(chan stateChangeEvent, 8)
 	s.chans[id] = ch
+	if s.latest != nil && s.latest.TargetView != nil {
+		ch <- stateChangeEvent{sequence: s.sequence, batch: s.latest}
+	}
 	return ch, func() { s.remove(id) }
 }
 
@@ -556,6 +561,7 @@ func (s *StateChangePubSub) Pub(reply *remoteproto.StateChangeBatch) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.sequence++
+	s.latest = reply
 	event := stateChangeEvent{sequence: s.sequence, batch: reply}
 	for _, ch := range s.chans {
 		common.PrioritizedSend(ch, event)
@@ -598,6 +604,20 @@ func (s *KvServer) GetLatest(_ context.Context, req *remoteproto.GetLatestReq) (
 			}
 			if req.BranchCache {
 				opts = opts.WithBranchCache()
+			}
+			if len(req.Keys) > 0 {
+				if len(req.Keys) > 4096 {
+					return fmt.Errorf("too many latest-state keys: %d", len(req.Keys))
+				}
+				reply.Values = make([][]byte, len(req.Keys))
+				for i, key := range req.Keys {
+					value, _, getErr := tx.GetLatest(domainName, key, opts)
+					if getErr != nil {
+						return getErr
+					}
+					reply.Values[i] = bytes.Clone(value)
+				}
+				return nil
 			}
 			reply.V, _, err = tx.GetLatest(domainName, req.K, opts)
 			if err != nil {

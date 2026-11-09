@@ -156,7 +156,7 @@ func TestFramePoolPrecheckBeforeSignatures(t *testing.T) {
 			var encoded bytes.Buffer
 			require.NoError(t, frame.MarshalBinary(&encoded))
 			t.Run("gossip", func(t *testing.T) {
-				fetch := NewFetch(t.Context(), nil, nil, nil, nil, frame.ChainID, log.New())
+				fetch := newTestFetch(t.Context(), nil, nil, nil, nil, frame.ChainID, log.New())
 				var slot TxnSlot
 				var sender common.Address
 				_, err := fetch.pooledTxnsParseCtx.ParseTransaction(encoded.Bytes(), 0, &slot, sender[:], false, true, nil)
@@ -232,7 +232,7 @@ func TestFramePoolBudgetDoesNotRestrictMinedTransactions(t *testing.T) {
 	require.NoError(t, frame.Validate())
 	var encoded bytes.Buffer
 	require.NoError(t, frame.MarshalBinary(&encoded))
-	fetch := NewFetch(ctx, nil, pool, nil, nil, frame.ChainID, log.New())
+	fetch := newTestFetch(ctx, nil, pool, nil, nil, frame.ChainID, log.New())
 	var slot TxnSlot
 	var parsedSender common.Address
 	_, err = fetch.stateChangesParseCtx.ParseTransaction(encoded.Bytes(), 0, &slot, parsedSender[:], false, false, nil)
@@ -365,7 +365,7 @@ func TestFramePoolNewlyDelegatedSender(t *testing.T) {
 			change := newBlockChangeForAccounts(common.Hash{1}, nonce, sender)
 			account := accounts.Account{Nonce: nonce, Balance: *uint256.NewInt(common.Ether), CodeHash: testDelegationCodeHash()}
 			change.ChangeBatch[0].Changes[0].Data = accounts.SerialiseV3(&account)
-			require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+			require.NoError(t, applyTestBlock(ctx, pool, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 
 			require.Len(t, pool.byHash, 1)
 			require.Equal(t, 1, pool.pending.Len())
@@ -500,7 +500,7 @@ func TestFramePoolReservationReleasePromotesOrdinary(t *testing.T) {
 				change.PendingBlockBaseFee = 3
 			}
 			if action != "replacement" {
-				require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, mined))
+				require.NoError(t, applyTestBlock(ctx, pool, change, TxnSlots{}, TxnSlots{}, mined))
 			}
 			require.NotContains(t, pool.frameReservations, payer)
 			require.Equal(t, PendingSubPool, pool.byHash[string(ordinary.IDHash[:])].currentSubPool)
@@ -553,7 +553,7 @@ func TestFramePoolRevalidationRefreshesSenderNonceChain(t *testing.T) {
 				pool.pending.limit, pool.baseFee.limit, pool.queued.limit = 1, 0, 1
 				backend.err = context.DeadlineExceeded
 			}
-			require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+			require.NoError(t, applyTestBlock(ctx, pool, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 			wantSelected := 0
 			if action == "parked pool overflow" {
 				require.Zero(t, pool.byHash[string(frame.IDHash[:])].currentSubPool)
@@ -770,7 +770,7 @@ func TestFramePoolRejectionCache(t *testing.T) {
 			require.NotContains(t, pool.byHash, string(frame.IDHash[:]))
 			known(true)
 
-			require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{1}, 0, sender), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+			require.NoError(t, applyTestBlock(ctx, pool, newBlockChangeForAccounts(common.Hash{1}, 0, sender), TxnSlots{}, TxnSlots{}, TxnSlots{}))
 			known(false)
 			backend.valid = true
 			add(txpoolcfg.Success)
@@ -834,7 +834,7 @@ func TestFramePoolValidationUsesFreshState(t *testing.T) {
 	backend := pool.ethBackend.(*frameValidationBackend)
 	backend.onValidate = func() {
 		if len(backend.calls) == 0 {
-			require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{1}, 1, sender), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+			require.NoError(t, applyTestBlock(ctx, pool, newBlockChangeForAccounts(common.Hash{1}, 1, sender), TxnSlots{}, TxnSlots{}, TxnSlots{}))
 			backend.valid = false
 		} else {
 			backend.valid = true
@@ -853,7 +853,7 @@ func TestFramePoolValidationUsesFreshState(t *testing.T) {
 func TestFramePoolValidationPinsHead(t *testing.T) {
 	ctx, pool, sender := keyedFramePoolEnv(t)
 	hash := common.Hash{1}
-	require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(hash, 1, sender), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	require.NoError(t, applyTestBlock(ctx, pool, newBlockChangeForAccounts(hash, 1, sender), TxnSlots{}, TxnSlots{}, TxnSlots{}))
 	backend := pool.ethBackend.(*frameValidationBackend)
 	pool.ethBackend = &frameValidationFuncBackend{validate: func(ctx context.Context, req *remoteproto.FrameValidationRequest) (*remoteproto.FrameValidationReply, error) {
 		require.Equal(t, gointerfaces.ConvertHashToH256(hash), req.ExpectedBlockHash)
@@ -878,7 +878,7 @@ func TestFramePoolAdmissionWaitsForHeadNotification(t *testing.T) {
 				ctx, cancel := context.WithCancel(t.Context())
 				defer cancel()
 				oldHead, newHead := common.Hash{1}, common.Hash{2}
-				require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(oldHead, 0, sender), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+				require.NoError(t, applyTestBlock(ctx, pool, newBlockChangeForAccounts(oldHead, 0, sender), TxnSlots{}, TxnSlots{}, TxnSlots{}))
 				backend := pool.ethBackend.(*frameValidationBackend)
 				var heads []common.Hash
 				var deadlines []time.Time
@@ -923,7 +923,7 @@ func TestFramePoolAdmissionWaitsForHeadNotification(t *testing.T) {
 				require.True(t, pool.lock.TryLock(), "waiting for state must release the pool lock")
 				pool.lock.Unlock()
 				time.Sleep(time.Second)
-				require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(newHead, 0, sender), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+				require.NoError(t, applyTestBlock(ctx, pool, newBlockChangeForAccounts(newHead, 0, sender), TxnSlots{}, TxnSlots{}, TxnSlots{}))
 				<-done
 				require.NoError(t, err)
 				if local {
@@ -989,7 +989,7 @@ func TestFramePoolUnwindDoesNotWaitForHeadNotification(t *testing.T) {
 	unwound.Append(framePoolSlot(t, sender, 1, 2), sender[:], true)
 	synctest.Test(t, func(t *testing.T) {
 		started := time.Now()
-		require.NoError(t, pool.OnNewBlock(t.Context(), newBlockChangeForAccounts(common.Hash{1}, 0, sender), unwound, TxnSlots{}, TxnSlots{}))
+		require.NoError(t, applyTestBlock(t.Context(), pool, newBlockChangeForAccounts(common.Hash{1}, 0, sender), unwound, TxnSlots{}, TxnSlots{}))
 		require.Zero(t, time.Since(started), "state updates must return so the next notification can be processed")
 		require.Len(t, backend.calls, 1)
 	})
@@ -1061,7 +1061,7 @@ func TestFramePoolRevalidationReleasesLock(t *testing.T) {
 		pending, _, _ := pool.CountContent()
 		require.Zero(t, pending, "a frame awaiting revalidation must not be selected")
 	}
-	require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{1}, 1, sender), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	require.NoError(t, applyTestBlock(ctx, pool, newBlockChangeForAccounts(common.Hash{1}, 1, sender), TxnSlots{}, TxnSlots{}, TxnSlots{}))
 	require.Len(t, backend.calls, 2)
 	require.Contains(t, pool.byHash, string(frame.IDHash[:]))
 	require.Equal(t, 1, pool.pending.Len())
@@ -1125,13 +1125,13 @@ func TestFramePoolUnwindPooledBlobPreservesReservation(t *testing.T) {
 	change.PendingBlobFeePerGas = 2
 	change.ChangeBatch[0].Direction = remoteproto.Direction_UNWIND
 	failRevalidation = true
-	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, unwind, TxnSlots{}))
+	require.NoError(t, applyTestBlock(ctx, pool, change, TxnSlots{}, unwind, TxnSlots{}))
 	require.Zero(t, pool.byHash[string(frame.IDHash[:])].currentSubPool)
 	require.Equal(t, reservation, pool.frameReservations[sender])
 
 	var mined TxnSlots
 	mined.Append(frame, sender[:], false)
-	require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{2}, 0, sender), TxnSlots{}, TxnSlots{}, mined))
+	require.NoError(t, applyTestBlock(ctx, pool, newBlockChangeForAccounts(common.Hash{2}, 0, sender), TxnSlots{}, TxnSlots{}, mined))
 	require.Empty(t, pool.frameReservations, "mining the only frame must release its reservation exactly")
 	require.Equal(t, PendingSubPool, pool.byHash[string(ordinary.IDHash[:])].currentSubPool)
 }
@@ -1154,12 +1154,12 @@ func TestFramePoolUnwindPreservesLocalFlag(t *testing.T) {
 			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
 
 			txns.IsLocal[0] = false
-			require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{1}, 0, sender), TxnSlots{}, TxnSlots{}, txns))
+			require.NoError(t, applyTestBlock(ctx, pool, newBlockChangeForAccounts(common.Hash{1}, 0, sender), TxnSlots{}, TxnSlots{}, txns))
 			require.NotContains(t, pool.byHash, string(frame.IDHash[:]))
 
 			var unwind TxnSlots
 			unwind.Append(framePoolSlot(t, sender, 1, 2, uint256.Int{1}), sender[:], false)
-			require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{2}, 0, sender), unwind, TxnSlots{}, TxnSlots{}))
+			require.NoError(t, applyTestBlock(ctx, pool, newBlockChangeForAccounts(common.Hash{2}, 0, sender), unwind, TxnSlots{}, TxnSlots{}))
 			restored := pool.byHash[string(frame.IDHash[:])]
 			require.NotNil(t, restored)
 			require.Equal(t, tc.local, restored.subPool&IsLocal != 0)
@@ -1190,7 +1190,7 @@ func TestFramePoolUnwindRestoresNonceChain(t *testing.T) {
 
 	mined := newBlockChangeForAccounts(common.Hash{1}, 2, sender)
 	mined.ChangeBatch[0].BlockHeight = 1
-	require.NoError(t, pool.OnNewBlock(ctx, mined, TxnSlots{}, TxnSlots{}, txns))
+	require.NoError(t, applyTestBlock(ctx, pool, mined, TxnSlots{}, TxnSlots{}, txns))
 	require.Empty(t, pool.byHash)
 
 	var unwind, unwindBlobs TxnSlots
@@ -1198,7 +1198,7 @@ func TestFramePoolUnwindRestoresNonceChain(t *testing.T) {
 	unwindBlobs.Append(&TxnSlot{Txn: blob.Txn, Nonce: blob.Nonce, IDHash: blob.IDHash}, sender[:], false)
 	change := newBlockChangeForAccounts(common.Hash{2}, 0, sender)
 	change.ChangeBatch[0].Direction = remoteproto.Direction_UNWIND
-	require.NoError(t, pool.OnNewBlock(ctx, change, unwind, unwindBlobs, TxnSlots{}))
+	require.NoError(t, applyTestBlock(ctx, pool, change, unwind, unwindBlobs, TxnSlots{}))
 
 	for _, txn := range txns.Txns {
 		restored := pool.byHash[string(txn.IDHash[:])]
@@ -1225,7 +1225,7 @@ func TestFramePoolUnwindDoesNotReplaceBeforeValidation(t *testing.T) {
 	unwind.Append(frame, sender[:], false)
 	change := newBlockChangeForAccounts(common.Hash{1}, 0, sender)
 	change.ChangeBatch[0].Direction = remoteproto.Direction_UNWIND
-	require.NoError(t, pool.OnNewBlock(ctx, change, unwind, TxnSlots{}, TxnSlots{}))
+	require.NoError(t, applyTestBlock(ctx, pool, change, unwind, TxnSlots{}, TxnSlots{}))
 	require.Contains(t, pool.byHash, string(ordinary.IDHash[:]))
 	require.Equal(t, PendingSubPool, pool.byHash[string(ordinary.IDHash[:])].currentSubPool)
 	require.NotContains(t, pool.byHash, string(frame.IDHash[:]))
@@ -1259,7 +1259,7 @@ func TestFramePoolUnwindPreservesPooledNonceChain(t *testing.T) {
 
 			mined := blockChange(common.Hash{1}, 1)
 			mined.ChangeBatch[0].BlockHeight = 1
-			require.NoError(t, pool.OnNewBlock(ctx, mined, TxnSlots{}, TxnSlots{}, frameTxns))
+			require.NoError(t, applyTestBlock(ctx, pool, mined, TxnSlots{}, TxnSlots{}, frameTxns))
 			require.Empty(t, pool.byHash)
 
 			var successors TxnSlots
@@ -1319,7 +1319,7 @@ func TestFramePoolUnwindPreservesPooledNonceChain(t *testing.T) {
 			}
 			change := blockChange(common.Hash{2}, 0)
 			change.ChangeBatch[0].Direction = remoteproto.Direction_UNWIND
-			require.NoError(t, pool.OnNewBlock(ctx, change, frameTxns, TxnSlots{}, TxnSlots{}))
+			require.NoError(t, applyTestBlock(ctx, pool, change, frameTxns, TxnSlots{}, TxnSlots{}))
 			if outcome == "invalid" {
 				require.Empty(t, pool.byHash, "failed restoration must recheck the remaining nonce gap")
 				return
@@ -1336,7 +1336,7 @@ func TestFramePoolUnwindPreservesPooledNonceChain(t *testing.T) {
 					require.Equal(t, QueuedSubPool, mt.currentSubPool)
 				}
 				backend.err = nil
-				require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{3}, 0), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+				require.NoError(t, applyTestBlock(ctx, pool, newBlockChangeForAccounts(common.Hash{3}, 0), TxnSlots{}, TxnSlots{}, TxnSlots{}))
 			}
 			restored := pool.byHash[string(frame.IDHash[:])]
 			require.NotNil(t, restored)
@@ -1363,7 +1363,7 @@ func TestFramePoolUnwindKeepsUnrelatedQueueLimit(t *testing.T) {
 	ctx, pool, sender := keyedFramePoolEnv(t)
 	backend := pool.ethBackend.(*frameValidationBackend)
 	otherSender := common.Address{2}
-	require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{1}, 1, sender, otherSender), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	require.NoError(t, applyTestBlock(ctx, pool, newBlockChangeForAccounts(common.Hash{1}, 1, sender, otherSender), TxnSlots{}, TxnSlots{}, TxnSlots{}))
 	pool.pending.limit, pool.baseFee.limit, pool.queued.limit = 2, 0, 1
 
 	successor := newTestTxnSlot(1, 0, 1, 2, 21_000)
@@ -1392,7 +1392,7 @@ func TestFramePoolUnwindKeepsUnrelatedQueueLimit(t *testing.T) {
 	unwound.Append(frame, sender[:], false)
 	change := newBlockChangeForAccounts(common.Hash{2}, 0, sender)
 	change.ChangeBatch[0].Direction = remoteproto.Direction_UNWIND
-	require.NoError(t, pool.OnNewBlock(ctx, change, unwound, TxnSlots{}, TxnSlots{}))
+	require.NoError(t, applyTestBlock(ctx, pool, change, unwound, TxnSlots{}, TxnSlots{}))
 	require.Equal(t, 2, pool.pending.Len())
 	require.Equal(t, 1, pool.queued.Len())
 }
@@ -1407,7 +1407,7 @@ func TestFramePoolUnwindKeepsTotalCapacity(t *testing.T) {
 	reasons, err := pool.AddLocalTxns(ctx, frameTxns)
 	require.NoError(t, err)
 	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
-	require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{1}, 1, sender), TxnSlots{}, TxnSlots{}, frameTxns))
+	require.NoError(t, applyTestBlock(ctx, pool, newBlockChangeForAccounts(common.Hash{1}, 1, sender), TxnSlots{}, TxnSlots{}, frameTxns))
 
 	successor := newTestTxnSlot(1, 0, 1, 2, 21_000)
 	successor.IDHash[0] = 1
@@ -1431,7 +1431,7 @@ func TestFramePoolUnwindKeepsTotalCapacity(t *testing.T) {
 	}
 	change := newBlockChangeForAccounts(common.Hash{2}, 0, sender)
 	change.ChangeBatch[0].Direction = remoteproto.Direction_UNWIND
-	require.NoError(t, pool.OnNewBlock(ctx, change, frameTxns, TxnSlots{}, TxnSlots{}))
+	require.NoError(t, applyTestBlock(ctx, pool, change, frameTxns, TxnSlots{}, TxnSlots{}))
 	require.Equal(t, 2, pool.pending.Len())
 	require.Zero(t, pool.queued.Len())
 	for _, txn := range []*TxnSlot{frame, successor} {
@@ -1532,7 +1532,7 @@ func TestFramePoolRestoredTransactionsReleaseLock(t *testing.T) {
 			var txns TxnSlots
 			txns.Append(frame, sender[:], true)
 			if mode == "unwind" {
-				require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{1}, 1, sender), txns, TxnSlots{}, TxnSlots{}))
+				require.NoError(t, applyTestBlock(ctx, pool, newBlockChangeForAccounts(common.Hash{1}, 1, sender), txns, TxnSlots{}, TxnSlots{}))
 			} else {
 				require.NoError(t, pool.poolDB.Update(ctx, func(tx kv.RwTx) error {
 					return tx.Put(kv.PoolTransaction, frame.IDHash[:], append(sender[:], frame.Rlp...))
@@ -1651,7 +1651,7 @@ func TestFramePoolReloadDeletesRejectedRows(t *testing.T) {
 			}))
 			if tc.backendErr != nil {
 				backend.err, backend.valid = nil, true
-				require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{1}, 0), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+				require.NoError(t, applyTestBlock(ctx, pool, newBlockChangeForAccounts(common.Hash{1}, 0), TxnSlots{}, TxnSlots{}, TxnSlots{}))
 				mt := pool.byHash[string(frame.IDHash[:])]
 				require.NotNil(t, mt)
 				require.Equal(t, PendingSubPool, mt.currentSubPool)
@@ -1715,7 +1715,7 @@ func TestFramePoolReloadErrorRetainsTransaction(t *testing.T) {
 		return nil
 	}))
 	backend.err = nil
-	require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{1}, 0), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	require.NoError(t, applyTestBlock(ctx, pool, newBlockChangeForAccounts(common.Hash{1}, 0), TxnSlots{}, TxnSlots{}, TxnSlots{}))
 	require.Equal(t, PendingSubPool, pool.byHash[string(frame.IDHash[:])].currentSubPool)
 	_, err := pool.flushNoFsync(ctx)
 	require.NoError(t, err)
@@ -1768,13 +1768,13 @@ func TestFramePoolRevalidationQueuesNonceSuccessor(t *testing.T) {
 			backend.err = context.DeadlineExceeded
 			change := newBlockChangeForAccounts(common.Hash{1}, 0, backend.payer)
 			change.ChangeBatch[0].BlockHeight = 1
-			require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+			require.NoError(t, applyTestBlock(ctx, pool, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 			checkParked()
 
 			backend.err = nil
 			change = newBlockChangeForAccounts(common.Hash{2}, 0)
 			change.ChangeBatch[0].BlockHeight = 2
-			require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+			require.NoError(t, applyTestBlock(ctx, pool, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 			require.Len(t, backend.calls, 3)
 			for _, txn := range txns.Txns {
 				require.Equal(t, PendingSubPool, pool.byHash[string(txn.IDHash[:])].currentSubPool)
@@ -1801,7 +1801,7 @@ func TestFramePoolRevalidationUnavailableRetriesOnNextBlock(t *testing.T) {
 	backend.err = context.DeadlineExceeded
 	change := newBlockChangeForAccounts(common.Hash{1}, 1, sender)
 	change.ChangeBatch[0].BlockHeight = 1
-	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	require.NoError(t, applyTestBlock(ctx, pool, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 	require.Equal(t, uint64(1), pool.lastSeenBlock.Load())
 	require.Contains(t, pool.byHash, string(frame.IDHash[:]))
 	require.Zero(t, pool.byHash[string(frame.IDHash[:])].currentSubPool)
@@ -1812,7 +1812,7 @@ func TestFramePoolRevalidationUnavailableRetriesOnNextBlock(t *testing.T) {
 	backend.err = nil
 	change = newBlockChangeForAccounts(common.Hash{2}, 1)
 	change.ChangeBatch[0].BlockHeight = 2
-	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	require.NoError(t, applyTestBlock(ctx, pool, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 	require.Len(t, backend.calls, 3, "parked transactions must be retried without another dependency change")
 	require.Equal(t, PendingSubPool, pool.byHash[string(frame.IDHash[:])].currentSubPool)
 	require.Equal(t, reservation, pool.frameReservations[sender])
@@ -1827,7 +1827,7 @@ func TestFramePoolParkedEvictionPriority(t *testing.T) {
 				backend := pool.ethBackend.(*frameValidationBackend)
 				ordinarySender := common.Address{2}
 				change := newBlockChangeForAccounts(common.Hash{1}, 0, ordinarySender)
-				require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+				require.NoError(t, applyTestBlock(ctx, pool, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 				pool.pending.limit, pool.baseFee.limit, pool.queued.limit = 1, 0, 0
 
 				key := uint256.Int{}
@@ -1843,7 +1843,7 @@ func TestFramePoolParkedEvictionPriority(t *testing.T) {
 
 				backend.err = context.DeadlineExceeded
 				change = newBlockChangeForAccounts(common.Hash{2}, 0, sender)
-				require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+				require.NoError(t, applyTestBlock(ctx, pool, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 				require.Zero(t, pool.byHash[string(frame.IDHash[:])].currentSubPool)
 
 				ordinary := newTestTxnSlot(0, 0, 1, 5, 21_000)
@@ -1893,7 +1893,7 @@ func TestFramePoolParkedCapacity(t *testing.T) {
 		backend.err = context.DeadlineExceeded
 		change := newBlockChangeForAccounts(common.Hash{i}, 0, payer)
 		change.ChangeBatch[0].BlockHeight = uint64(i)
-		require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+		require.NoError(t, applyTestBlock(ctx, pool, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 		require.Zero(t, pool.pending.Len()+pool.baseFee.Len()+pool.queued.Len())
 		require.LessOrEqual(t, len(pool.byHash), capacity)
 	}
@@ -1921,7 +1921,7 @@ func TestFramePoolParkedCapacityWithOrdinaryOrphan(t *testing.T) {
 			ctx, pool, payer := keyedFramePoolEnv(t)
 			senders := []common.Address{{2}, {3}, {4}, {5}}
 			change := newBlockChangeForAccounts(common.Hash{1}, 0, senders...)
-			require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+			require.NoError(t, applyTestBlock(ctx, pool, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 			pool.pending.limit, pool.baseFee.limit, pool.queued.limit = 1, 1, 1
 
 			orphan := newTestTxnSlot(0, 0, 1, 2, 21_000)
@@ -1945,7 +1945,7 @@ func TestFramePoolParkedCapacityWithOrdinaryOrphan(t *testing.T) {
 				require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
 				pool.ethBackend.(*frameValidationBackend).err = context.DeadlineExceeded
 				change = newBlockChangeForAccounts(common.Hash{2}, 0, payer)
-				require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+				require.NoError(t, applyTestBlock(ctx, pool, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 				require.Zero(t, pool.byHash[string(frame.IDHash[:])].currentSubPool)
 			}
 
@@ -2001,7 +2001,7 @@ func TestFramePoolRevalidationAllowsResubmission(t *testing.T) {
 				backend.balance = 1
 			}
 			pool.lock.Lock()
-			pending := pool.invalidateFrames(&remoteproto.StateChangeBatch{ChangeBatch: []*remoteproto.StateChange{{Changes: []*remoteproto.AccountChange{{
+			pending := pool.invalidateFrames(&remoteproto.StateChangeBatch{TargetView: &remoteproto.ExecutionView{}, ChangeBatch: []*remoteproto.StateChange{{Changes: []*remoteproto.AccountChange{{
 				Address: gointerfaces.ConvertAddressToH160(sender), Action: remoteproto.Action_STORAGE,
 			}}}}})
 			generation := pool.stateGeneration
@@ -2010,7 +2010,7 @@ func TestFramePoolRevalidationAllowsResubmission(t *testing.T) {
 			require.NotContains(t, pool.byHash, string(frame.IDHash[:]))
 			require.Empty(t, pool.frameReservations)
 			if failure == "invalid prefix" {
-				require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{1}, 0, sender), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+				require.NoError(t, applyTestBlock(ctx, pool, newBlockChangeForAccounts(common.Hash{1}, 0, sender), TxnSlots{}, TxnSlots{}, TxnSlots{}))
 			}
 			require.NoError(t, pool.poolDB.View(ctx, func(tx kv.Tx) error {
 				persisted, readErr := tx.Has(kv.PoolTransaction, frame.IDHash[:])
@@ -2049,13 +2049,13 @@ func TestFramePoolIncompleteNotifications(t *testing.T) {
 		require.Zero(t, pool.byHash[string(frame.IDHash[:])].currentSubPool, "park before simulation")
 	}
 	change := newBlockChangeForAccounts(common.Hash{1}, 0)
-	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	require.NoError(t, applyTestBlock(ctx, pool, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 	require.Empty(t, backend.calls)
 	require.Contains(t, pool.byHash, string(frame.IDHash[:]))
 
 	change = newBlockChangeForAccounts(common.Hash{2}, 0)
 	change.StateChangesIncomplete = true
-	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	require.NoError(t, applyTestBlock(ctx, pool, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 	require.Equal(t, []common.Hash{frame.IDHash}, backend.calls)
 	require.NotContains(t, pool.byHash, string(frame.IDHash[:]))
 	require.Empty(t, pool.frameReservations)
@@ -2119,7 +2119,7 @@ func TestFramePoolRevalidationNonceManager(t *testing.T) {
 				change.StorageChanges = []*remoteproto.StorageChange{{Location: gointerfaces.ConvertHashToH256(location)}}
 			}
 			pool.lock.Lock()
-			pending := pool.invalidateFrames(&remoteproto.StateChangeBatch{ChangeBatch: []*remoteproto.StateChange{{Direction: tc.direction, Changes: []*remoteproto.AccountChange{change}}}})
+			pending := pool.invalidateFrames(&remoteproto.StateChangeBatch{TargetView: &remoteproto.ExecutionView{}, ChangeBatch: []*remoteproto.StateChange{{Direction: tc.direction, Changes: []*remoteproto.AccountChange{change}}}})
 			generation := pool.stateGeneration
 			pool.lock.Unlock()
 			require.NoError(t, pool.revalidateFrames(ctx, pending, generation, pool.stateBlockHash))
@@ -2175,7 +2175,7 @@ func TestFramePoolExpiry(t *testing.T) {
 				initial := newBlockChangeForAccounts(common.Hash{1}, 0)
 				initial.ChangeBatch[0].BlockTime = now
 				initial.PendingBlockBaseFee = tc.baseFee
-				require.NoError(t, pool.OnNewBlock(ctx, initial, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+				require.NoError(t, applyTestBlock(ctx, pool, initial, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 				tx := &types.FrameTransaction{
 					NonceKeys: []uint256.Int{{1}}, ChainID: *uint256.NewInt(1), SenderAddress: sender,
 					Frames: []types.Frame{
@@ -2219,7 +2219,7 @@ func TestFramePoolExpiry(t *testing.T) {
 					}}
 				}
 				time.Sleep(tc.elapsed)
-				require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+				require.NoError(t, applyTestBlock(ctx, pool, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 				if tc.verifierChanged {
 					require.Equal(t, []common.Hash{slot.IDHash}, backend.calls)
 				} else {
@@ -2284,7 +2284,7 @@ func TestFramePoolCreationNonceChanges(t *testing.T) {
 			change.ChangeBatch[0].Changes = []*remoteproto.AccountChange{{
 				Address: gointerfaces.ConvertAddressToH160(factory), Action: remoteproto.Action_UPSERT, Data: accounts.SerialiseV3(&acc),
 			}}
-			require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+			require.NoError(t, applyTestBlock(ctx, pool, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 			if tc.revalidate {
 				require.Equal(t, []common.Hash{slot.IDHash}, backend.calls)
 				require.NotContains(t, pool.byHash, string(slot.IDHash[:]))

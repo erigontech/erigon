@@ -943,6 +943,17 @@ func (tx *tx) GetLatest(name kv.Domain, k []byte, opts kv.GetLatestOptions) (v [
 	return reply.V, 0, nil
 }
 
+func (tx *tx) GetLatestBatch(domain kv.Domain, keys [][]byte) ([][]byte, error) {
+	reply, err := tx.db.remoteKV.GetLatest(tx.ctx, &remoteproto.GetLatestReq{TxId: tx.id, Table: domain.String(), Keys: keys, Latest: true})
+	if err != nil {
+		return nil, err
+	}
+	if len(reply.Values) != len(keys) {
+		return nil, fmt.Errorf("latest-state batch returned %d values for %d keys", len(reply.Values), len(keys))
+	}
+	return reply.Values, nil
+}
+
 func (tx *tx) GetLatestValSize(name kv.Domain, k []byte) (size int, found bool, err error) {
 	v, _, err := tx.GetLatest(name, k, kv.GetLatestOptions{})
 	return len(v), len(v) > 0, err

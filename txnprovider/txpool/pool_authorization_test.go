@@ -31,6 +31,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/remotedb"
@@ -61,11 +62,12 @@ func (p *authorizationReadProbe) GetAuthorizations() []types.Authorization {
 	return p.Transaction.GetAuthorizations()
 }
 
-func TestAuthorizationRecoveryRemoteDB(t *testing.T) {
-	ctx, pool, _, coreDB, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+func remoteTestDB(t testing.TB, coreDB kv.TemporalRoDB, logger log.Logger) kv.TemporalRoDB {
+	t.Helper()
+	ctx := t.Context()
 	listener := bufconn.Listen(1024 * 1024)
 	server := grpc.NewServer()
-	remoteproto.RegisterKVServer(server, remotedbserver.NewKvServer(ctx, coreDB, nil, nil, pool.logger))
+	remoteproto.RegisterKVServer(server, remotedbserver.NewKvServer(ctx, coreDB, nil, nil, logger))
 	t.Cleanup(server.Stop)
 	go func() {
 		if err := server.Serve(listener); err != nil {
@@ -78,9 +80,14 @@ func TestAuthorizationRecoveryRemoteDB(t *testing.T) {
 		}))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, conn.Close()) })
-	remoteDB, err := remotedb.NewRemote(gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion), pool.logger, remoteproto.NewKVClient(conn)).Open()
+	remoteDB, err := remotedb.NewRemote(gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion), logger, remoteproto.NewKVClient(conn)).Open()
 	require.NoError(t, err)
-	pool._chainDB = remoteDB
+	return remoteDB
+}
+
+func TestAuthorizationRecoveryRemoteDB(t *testing.T) {
+	ctx, pool, _, coreDB, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+	pool._chainDB = remoteTestDB(t, coreDB, pool.logger)
 
 	for nonce := range uint64(2) {
 		txn := newTestSetCodeTxnSlot(nonce, 0, 1, 2, 100_000)
@@ -151,7 +158,7 @@ func TestAuthorizationRecoveryRevalidatesBalance(t *testing.T) {
 				}},
 			}},
 		}
-		require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+		require.NoError(t, applyTestBlock(ctx, pool, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 	}}
 	var slots TxnSlots
 	slots.Append(txn, sender[:], true)
@@ -219,7 +226,7 @@ func TestAuthorizationRecoveryReopensStaleView(t *testing.T) {
 							}},
 						}},
 					}
-					require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+					require.NoError(t, applyTestBlock(ctx, pool, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 					changed = true
 				}
 			}}
@@ -291,7 +298,7 @@ func TestRejectedUnwindKeepsAuthorityReservation(t *testing.T) {
 			BlockHash:   gointerfaces.ConvertHashToH256(common.Hash{1}),
 		}},
 	}
-	require.NoError(t, pool.OnNewBlock(ctx, change, unwind, TxnSlots{}, TxnSlots{}))
+	require.NoError(t, applyTestBlock(ctx, pool, change, unwind, TxnSlots{}, TxnSlots{}))
 	require.Same(t, owner, pool.auths[reservation])
 	require.Equal(t, pooled.AuthAndNonces, rejected.AuthAndNonces)
 	dbTx, err := db.BeginRo(ctx)

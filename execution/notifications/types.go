@@ -49,6 +49,7 @@ const (
 type StateChange struct {
 	BlockHeight uint64
 	BlockHash   common.Hash
+	ParentHash  common.Hash
 	BlockTime   uint64
 	SlotNumber  *uint64
 	Direction   Direction
@@ -72,7 +73,7 @@ type StorageChange struct {
 	Data     []byte
 }
 
-// BlockBatchNotification holds a batch in native Go types before protobuf conversion.
+// BlockBatchNotification holds a batch before protobuf conversion.
 type BlockBatchNotification struct {
 	StateVersionID         uint64
 	Changes                []StateChange
@@ -81,6 +82,8 @@ type BlockBatchNotification struct {
 	PendingBlobFee         uint64
 	BlockGasLimit          uint64
 	FinalizedBlock         uint64
+	PreviousView           *remoteproto.ExecutionView
+	TargetView             *remoteproto.ExecutionView
 }
 
 // LogNotification carries a log event in native types.
@@ -174,6 +177,8 @@ func (b *BlockBatchNotification) ToProtoBatch() *remoteproto.StateChangeBatch {
 		PendingBlobFeePerGas:   b.PendingBlobFee,
 		BlockGasLimit:          b.BlockGasLimit,
 		FinalizedBlock:         b.FinalizedBlock,
+		PreviousView:           b.PreviousView,
+		TargetView:             b.TargetView,
 	}
 	for i := range b.Changes {
 		batch.ChangeBatch = append(batch.ChangeBatch, b.Changes[i].ToProto())

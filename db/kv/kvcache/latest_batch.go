@@ -19,26 +19,22 @@ package kvcache
 import (
 	"bytes"
 	"context"
+	"errors"
 	"sync"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 )
 
-// LatestBatchCache serves the most recent announced state-change batch on top
-// of the caller's tx — freshness over snapshot-consistency, with staleness
-// bounded to one batch by FCU serialization (contrast Coherent, which keys
-// entries by state version so readers stay consistent with their own
-// snapshot). It does not track versions: the map remembers account data from
-// the latest OnNewBlock batch so that callers (e.g. the txpool) see the
-// announced nonce/balance even when their read-only DB transaction was opened
-// before that data was committed. The map is replaced on every batch, so
-// memory stays proportional to one batch (~400 addresses per 60 M-gas block).
+// LatestBatchCache overlays account changes on their source snapshot.
 type LatestBatchCache struct {
-	mu       sync.RWMutex
-	accounts map[common.Address][]byte // address → latest serialised account
+	mu               sync.RWMutex
+	accounts         map[common.Address][]byte
+	previous, target *remoteproto.ExecutionView
+	reset            bool
 }
 
 var (
@@ -47,8 +43,40 @@ var (
 )
 
 func NewLatestBatchCache() *LatestBatchCache { return &LatestBatchCache{} }
+
+var ErrExecutionViewUnavailable = errors.New("execution view is not available")
+
+func MatchesExecutionView(tx kv.Tx, view *remoteproto.ExecutionView) (bool, error) {
+	if view == nil || view.BlockHash == nil {
+		return false, nil
+	}
+	version, err := rawdb.GetStateVersion(tx)
+	if err != nil {
+		return false, err
+	}
+	return version == view.StateVersionId && rawdb.ReadHeadBlockHash(tx) == common.Hash(gointerfaces.ConvertH256ToHash(view.BlockHash)), nil
+}
+
 func (c *LatestBatchCache) View(_ context.Context, tx kv.TemporalTx) (CacheView, error) {
-	return &LatestBatchView{cache: c, tx: tx}, nil
+	c.mu.RLock()
+	accounts, previous, target, reset := c.accounts, c.previous, c.target, c.reset
+	c.mu.RUnlock()
+	if target != nil {
+		matches, err := MatchesExecutionView(tx, target)
+		if err != nil {
+			return nil, err
+		}
+		if !matches && !reset {
+			matches, err = MatchesExecutionView(tx, previous)
+			if err != nil {
+				return nil, err
+			}
+		}
+		if !matches {
+			return nil, ErrExecutionViewUnavailable
+		}
+	}
+	return &LatestBatchView{accounts: accounts, tx: tx}, nil
 }
 
 func (c *LatestBatchCache) OnNewBlock(sc *remoteproto.StateChangeBatch) {
@@ -57,24 +85,26 @@ func (c *LatestBatchCache) OnNewBlock(sc *remoteproto.StateChangeBatch) {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	// Replace the map — only the latest batch's data is needed.
-	// By the time the next batch arrives, the DB commit for the
-	// previous batch should be visible to new RO transactions.
+	c.previous, c.target, c.reset = sc.PreviousView, sc.TargetView, sc.StateChangesIncomplete
 	c.accounts = nil
+	if sc.StateChangesIncomplete {
+		return
+	}
 	for _, change := range sc.ChangeBatch {
 		for i := range change.Changes {
 			switch change.Changes[i].Action {
-			case remoteproto.Action_UPSERT, remoteproto.Action_UPSERT_CODE, remoteproto.Action_REMOVE:
+			case remoteproto.Action_UPSERT, remoteproto.Action_UPSERT_CODE:
 				addr := gointerfaces.ConvertH160toAddress(change.Changes[i].Address)
 				if c.accounts == nil {
 					c.accounts = make(map[common.Address][]byte)
 				}
-				if change.Changes[i].Action == remoteproto.Action_REMOVE {
-					// The reader's database snapshot may still contain the deleted account.
-					c.accounts[addr] = nil
-				} else {
-					c.accounts[addr] = bytes.Clone(change.Changes[i].Data)
+				c.accounts[addr] = bytes.Clone(change.Changes[i].Data)
+			case remoteproto.Action_REMOVE:
+				addr := gointerfaces.ConvertH160toAddress(change.Changes[i].Address)
+				if c.accounts == nil {
+					c.accounts = make(map[common.Address][]byte)
 				}
+				c.accounts[addr] = nil
 			}
 		}
 	}
@@ -86,40 +116,65 @@ func (c *LatestBatchCache) Len() int {
 	return len(c.accounts)
 }
 
-func (c *LatestBatchCache) Get(k []byte, tx kv.TemporalTx) ([]byte, error) {
-	// Check the in-memory account cache first (populated by OnNewBlock).
-	if len(k) == 20 {
-		c.mu.RLock()
-		if v, ok := c.accounts[common.BytesToAddress(k)]; ok {
-			c.mu.RUnlock()
-			return bytes.Clone(v), nil
-		}
-		c.mu.RUnlock()
-		v, _, err := tx.GetLatest(kv.AccountsDomain, k, kv.GetLatestOptions{})
-		return v, err
-	}
-	v, _, err := tx.GetLatest(kv.StorageDomain, k, kv.GetLatestOptions{})
-	return v, err
-}
-
-func (c *LatestBatchCache) GetCode(k []byte, tx kv.TemporalTx) ([]byte, error) {
-	v, _, err := tx.GetLatest(kv.CodeDomain, k, kv.GetLatestOptions{})
-	return v, err
-}
-
 func (c *LatestBatchCache) ValidateCurrentRoot(_ context.Context, _ kv.TemporalTx) (*CacheValidationResult, error) {
 	return &CacheValidationResult{Enabled: false}, nil
 }
 
 type LatestBatchView struct {
-	cache *LatestBatchCache
-	tx    kv.TemporalTx
+	accounts map[common.Address][]byte
+	tx       kv.TemporalTx
 }
 
-func (c *LatestBatchView) Get(k []byte) ([]byte, error) { return c.cache.Get(k, c.tx) }
-
-// The cache holds latest-state only, so historical reads always fall through.
-func (c *LatestBatchView) GetAsOf(key []byte, ts uint64) (v []byte, ok bool, err error) {
-	return nil, false, nil
+func (c *LatestBatchView) Get(k []byte) ([]byte, error) {
+	domain := kv.StorageDomain
+	if len(k) == 20 {
+		if v, ok := c.accounts[common.BytesToAddress(k)]; ok {
+			return bytes.Clone(v), nil
+		}
+		domain = kv.AccountsDomain
+	}
+	v, _, err := c.tx.GetLatest(domain, k, kv.GetLatestOptions{})
+	return v, err
 }
-func (c *LatestBatchView) GetCode(k []byte) ([]byte, error) { return c.cache.GetCode(k, c.tx) }
+
+func (c *LatestBatchView) GetCode(k []byte) ([]byte, error) {
+	v, _, err := c.tx.GetLatest(kv.CodeDomain, k, kv.GetLatestOptions{})
+	return v, err
+}
+
+func (c *LatestBatchView) GetMany(keys [][]byte) ([][]byte, error) {
+	values := make([][]byte, len(keys))
+	var missing [][]byte
+	var indices []int
+	for i, key := range keys {
+		if value, ok := c.accounts[common.BytesToAddress(key)]; ok {
+			values[i] = bytes.Clone(value)
+		} else {
+			missing = append(missing, key)
+			indices = append(indices, i)
+		}
+	}
+	for start := 0; start < len(missing); start += 4096 {
+		end := min(start+4096, len(missing))
+		if batch, ok := c.tx.(interface {
+			GetLatestBatch(kv.Domain, [][]byte) ([][]byte, error)
+		}); ok {
+			found, err := batch.GetLatestBatch(kv.AccountsDomain, missing[start:end])
+			if err != nil {
+				return nil, err
+			}
+			for i, value := range found {
+				values[indices[start+i]] = value
+			}
+		} else {
+			for i := start; i < end; i++ {
+				value, err := c.Get(missing[i])
+				if err != nil {
+					return nil, err
+				}
+				values[indices[i]] = value
+			}
+		}
+	}
+	return values, nil
+}

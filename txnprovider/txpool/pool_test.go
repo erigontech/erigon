@@ -120,7 +120,7 @@ func testDelegationCodeHash() accounts.CodeHash {
 	return accounts.InternCodeHash(crypto.Keccak256Hash(delegation))
 }
 
-func newTestPool(t *testing.T) (context.Context, *TxPool, kv.RwDB, kv.TemporalRwDB) {
+func newTestPool(t testing.TB) (context.Context, *TxPool, kv.RwDB, kv.TemporalRwDB) {
 	t.Helper()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -171,7 +171,7 @@ func newTestPoolWithFundedSender(t *testing.T, codeHash accounts.CodeHash) (cont
 			}},
 		}},
 	}
-	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	require.NoError(t, applyTestBlock(ctx, pool, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 
 	return ctx, pool, poolDB, coreDB, sender
 }
@@ -427,7 +427,7 @@ func TestOnNewBlockLimitsNewlyDelegatedSender(t *testing.T) {
 			}},
 		}},
 	}
-	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	require.NoError(t, applyTestBlock(ctx, pool, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 
 	pending, baseFee, queued := pool.CountContent()
 	require.Equal(t, 1, pending+baseFee+queued)
@@ -686,7 +686,7 @@ func newAmsterdamPoolWithPendingSelfTransfer(t *testing.T, ctx context.Context, 
 		slot.Size = uint32(len(slot.Rlp))
 		slots.Append(slot, sender[:], true)
 	}
-	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	require.NoError(t, applyTestBlock(ctx, pool, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 	reasons, err := pool.AddLocalTxns(ctx, slots)
 	require.NoError(t, err)
 	for _, reason := range reasons {
@@ -739,7 +739,7 @@ func TestPoolBlockGasLimitEquality(t *testing.T) {
 					Action: remoteproto.Action_UPSERT, Address: gointerfaces.ConvertAddressToH160(common.Address{1}), Data: accounts.SerialiseV3(&account),
 				}}
 			}
-			require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+			require.NoError(t, applyTestBlock(ctx, pool, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 			require.Equal(t, 1, pool.pending.Len(), "a transaction may use the full block gas limit")
 			txns, err := pool.ProvideTxns(ctx, txnprovider.WithGasTarget(mdgas.NewFullMdGas(100_000, 100_000, 0)))
 			require.NoError(t, err)
@@ -759,11 +759,11 @@ func TestOnNewBlockKeepsTxnAtBlockGasLimitPending(t *testing.T) {
 			BlockHash:   gointerfaces.ConvertHashToH256(common.Hash{}),
 		}},
 	}
-	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	require.NoError(t, applyTestBlock(ctx, pool, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 	require.Equal(t, 1, pool.pending.Len())
 
 	change.BlockGasLimit = 40_000_000
-	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	require.NoError(t, applyTestBlock(ctx, pool, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 	require.Equal(t, 1, pool.pending.Len())
 	require.Equal(t, 0, pool.queued.Len())
 }
@@ -926,7 +926,7 @@ func TestNonceFromAddress(t *testing.T) {
 	tx, err := db.BeginRw(ctx)
 	require.NoError(err)
 	defer tx.Rollback()
-	err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
+	err = applyTestBlock(ctx, pool, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
 	require.NoError(err)
 
 	{
@@ -1220,7 +1220,7 @@ func TestMultipleAuthorizations(t *testing.T) {
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
-	err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
+	err = applyTestBlock(ctx, pool, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
 	require.NoError(t, err)
 
 	idHash := 0
@@ -1294,7 +1294,7 @@ func TestReplaceWithHigherFee(t *testing.T) {
 	tx, err := db.BeginRw(ctx)
 	require.NoError(err)
 	defer tx.Rollback()
-	err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
+	err = applyTestBlock(ctx, pool, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
 	require.NoError(err)
 
 	{
@@ -1397,7 +1397,7 @@ func TestReverseNonces(t *testing.T) {
 	tx, err := db.BeginRw(ctx)
 	require.NoError(err)
 	defer tx.Rollback()
-	err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
+	err = applyTestBlock(ctx, pool, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
 	require.NoError(err)
 	announced := func() (ids []byte) {
 		select {
@@ -1500,7 +1500,7 @@ func TestTxnPoke(t *testing.T) {
 	tx, err := db.BeginRw(ctx)
 	require.NoError(err)
 	defer tx.Rollback()
-	err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
+	err = applyTestBlock(ctx, pool, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
 	require.NoError(err)
 
 	var idHash Hashes
@@ -1773,7 +1773,7 @@ func TestTooHighGasLimitTxnValidation(t *testing.T) {
 	require.NoError(err)
 	defer tx.Rollback()
 
-	err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
+	err = applyTestBlock(ctx, pool, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
 	require.NoError(err)
 
 	{
@@ -1966,7 +1966,7 @@ func TestBlobTxnReplacement(t *testing.T) {
 	tx, err := db.BeginRw(ctx)
 	require.NoError(err)
 	defer tx.Rollback()
-	err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
+	err = applyTestBlock(ctx, pool, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
 	require.NoError(err)
 
 	tip, feeCap, blobFeeCap := uint256.NewInt(100_000), uint256.NewInt(200_000), uint256.NewInt(200_000)
@@ -2225,7 +2225,7 @@ func TestDropRemoteAtNoGossip(t *testing.T) {
 	tx, err := db.BeginRw(ctx)
 	require.NoError(err)
 	defer tx.Rollback()
-	err = txnPool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
+	err = applyTestBlock(ctx, txnPool, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
 	require.NoError(err)
 	// 1. Try Local TxnSlot
 	{
@@ -2331,7 +2331,7 @@ func TestBlobSlots(t *testing.T) {
 	tx, err := db.BeginRw(ctx)
 	require.NoError(err)
 	defer tx.Rollback()
-	err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
+	err = applyTestBlock(ctx, pool, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
 	require.NoError(err)
 
 	// Adding 20 blobs from 10 different accounts
@@ -2415,7 +2415,7 @@ func TestOsakaProofShapeMismatchDiscardsCompletely(t *testing.T) {
 	tx, err := db.BeginRw(ctx)
 	require.NoError(err)
 	defer tx.Rollback()
-	err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
+	err = applyTestBlock(ctx, pool, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
 	require.NoError(err)
 
 	// Step 1: Add a pre-Osaka-shape blob txn (2 blobs, 2 proofs — one per blob).
@@ -2537,7 +2537,7 @@ func TestGetBlobs(t *testing.T) {
 	tx, err := db.BeginRw(ctx)
 	require.NoError(err)
 	defer tx.Rollback()
-	err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
+	err = applyTestBlock(ctx, pool, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
 	require.NoError(err)
 	blobHashes := make([]common.Hash, 0, 20)
 
@@ -2615,7 +2615,7 @@ func TestGasLimitChanged(t *testing.T) {
 		Address: gointerfaces.ConvertAddressToH160(addr),
 		Data:    v,
 	})
-	err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
+	err = applyTestBlock(ctx, pool, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
 	require.NoError(err)
 
 	var txnSlots TxnSlots
@@ -2631,7 +2631,7 @@ func TestGasLimitChanged(t *testing.T) {
 
 	change.ChangeBatch[0].Changes = nil
 	change.BlockGasLimit = 150_000
-	err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
+	err = applyTestBlock(ctx, pool, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
 	require.NoError(err)
 
 	reasons, err = pool.AddLocalTxns(ctx, txnSlots)
@@ -2702,7 +2702,7 @@ func TestZombieQueuedEviction(t *testing.T) {
 			},
 		},
 	}
-	require.NoError(pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	require.NoError(applyTestBlock(ctx, pool, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 
 	t.Run("zombie tx with impossible nonce gap is evicted", func(t *testing.T) {
 		// nonce = 5 + 64 + 1 = 70, gap=65 > MaxNonceGap(64)
@@ -2777,7 +2777,7 @@ func TestZombieQueuedEviction(t *testing.T) {
 				},
 			},
 		}
-		require.NoError(pool2.OnNewBlock(ctx, change2, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+		require.NoError(applyTestBlock(ctx, pool2, change2, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 
 		// Add consecutive txns: nonces 5, 6, 7, ..., 5+MaxNonceGap+5 = 20
 		count := int(cfg2.MaxNonceGap + 5 + 1)
@@ -2871,7 +2871,7 @@ func TestStalePendingEvictionViaMineNonce(t *testing.T) {
 		Address: gointerfaces.ConvertAddressToH160(addr1),
 		Data:    serialiseAcc(0),
 	})
-	req.NoError(pool.OnNewBlock(ctx, initChange, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	req.NoError(applyTestBlock(ctx, pool, initChange, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 
 	// ── Step 2: add T1 (nonce=0) and T2 (nonce=1) to pending ────────────────
 	T1 := newTestTxnSlot(0, 0, 300_000, 300_000, 100_000)
@@ -2911,7 +2911,7 @@ func TestStalePendingEvictionViaMineNonce(t *testing.T) {
 	var minedSlots TxnSlots
 	minedSlots.Append(minedT1, addr1[:], true)
 
-	req.NoError(pool.OnNewBlock(ctx, blockChange, TxnSlots{}, TxnSlots{}, minedSlots))
+	req.NoError(applyTestBlock(ctx, pool, blockChange, TxnSlots{}, TxnSlots{}, minedSlots))
 
 	// ── Step 5: T1 removed by removeMined; T2 evicted by onSenderStateChange ─
 	// senderNonce=2 (from DB) > T2.Nonce=1 → NonceTooLow.
@@ -2993,7 +2993,7 @@ func TestQueuedTxnPromotedAfterStaleAddLocal(t *testing.T) {
 		Address: gointerfaces.ConvertAddressToH160(addr1),
 		Data:    serialiseAcc(0),
 	})
-	req.NoError(pool.OnNewBlock(ctx, initChange, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	req.NoError(applyTestBlock(ctx, pool, initChange, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 
 	// 2) Chain advances addr1 to nonce=1 (a tx from addr1 mined) but the pool
 	// has not yet processed the StateChangeBatch for that block. The DB now
@@ -3023,7 +3023,7 @@ func TestQueuedTxnPromotedAfterStaleAddLocal(t *testing.T) {
 		StateVersionId: 2, PendingBlockBaseFee: 200_000, BlockGasLimit: 1_000_000,
 		ChangeBatch: []*remoteproto.StateChange{{BlockHeight: 2, BlockHash: h2}},
 	}
-	req.NoError(pool.OnNewBlock(ctx, block2Change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	req.NoError(applyTestBlock(ctx, pool, block2Change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 
 	// 5) The queued tx must have been re-evaluated against current state
 	// (DB returns nonce=1) and promoted to pending.
@@ -3073,7 +3073,7 @@ func TestOnNewBlockRefreshesDepthMetrics(t *testing.T) {
 		Address: gointerfaces.ConvertAddressToH160(addr1),
 		Data:    serialiseAcc(0),
 	})
-	req.NoError(pool.OnNewBlock(ctx, initChange, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	req.NoError(applyTestBlock(ctx, pool, initChange, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 
 	// Executable txn (nonce 0 == on-chain nonce) → pending; nonce-gapped txn (nonce 3) → queued.
 	execTxn := newTestTxnSlot(0, 0, 300_000, 300_000, 100_000)
@@ -3101,7 +3101,7 @@ func TestOnNewBlockRefreshesDepthMetrics(t *testing.T) {
 		StateVersionId: 1, PendingBlockBaseFee: 200_000, BlockGasLimit: 1_000_000,
 		ChangeBatch: []*remoteproto.StateChange{{BlockHeight: 1, BlockHash: h1}},
 	}
-	req.NoError(pool.OnNewBlock(ctx, block1, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	req.NoError(applyTestBlock(ctx, pool, block1, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 
 	pending, baseFee, queued := pool.CountContent()
 	asrt.EqualValues(pending, pendingSubCounter.GetValue(), "pending gauge stale after OnNewBlock")
@@ -3168,7 +3168,7 @@ func TestFromDBLoadsUnderPoolLock(t *testing.T) {
 
 		go func() {
 			defer close(onNewBlockDone)
-			onNewBlockErr = pool.OnNewBlock(ctx, block, TxnSlots{}, TxnSlots{}, TxnSlots{})
+			onNewBlockErr = applyTestBlock(ctx, pool, block, TxnSlots{}, TxnSlots{}, TxnSlots{})
 		}()
 
 		// Write the senders maps from the loading goroutine, spread out so the writes
@@ -3250,7 +3250,7 @@ func TestOnNewBlockFailureKeepsChainProgress(t *testing.T) {
 			BlockHash:   gointerfaces.ConvertHashToH256(common.Hash{1}),
 		}},
 	}
-	require.ErrorIs(t, pool.OnNewBlock(ctx, change, TxnSlots{}, unwindBlobTxns, TxnSlots{}), readErr)
+	require.ErrorIs(t, applyTestBlock(ctx, pool, change, TxnSlots{}, unwindBlobTxns, TxnSlots{}), readErr)
 	require.Equal(t, before, pool.lastSeenBlock.Load())
 }
 
@@ -3279,7 +3279,7 @@ func TestBaseFeeRoundTripAnnouncesOnce(t *testing.T) {
 		Address: gointerfaces.ConvertAddressToH160(addr),
 		Data:    accounts.SerialiseV3(&acc),
 	})
-	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	require.NoError(t, applyTestBlock(ctx, pool, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 
 	var txnSlots TxnSlots
 	txnSlot := newTestTxnSlot(0, 0, 100_000, 2_000_000, 100_000)
@@ -3306,7 +3306,7 @@ func TestBaseFeeRoundTripAnnouncesOnce(t *testing.T) {
 	change.ChangeBatch[0].Changes = nil
 	for _, baseFee := range []uint64{3_000_000, 1_000_000, 3_000_000, 1_000_000} {
 		change.PendingBlockBaseFee = baseFee
-		require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+		require.NoError(t, applyTestBlock(ctx, pool, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 	}
 	drain()
 	require.Equal(t, 1, announced, "a return to pending is not a new pending txn")
@@ -3326,7 +3326,7 @@ func TestFromDBBlobsOutliveReadTx(t *testing.T) {
 
 	sender := common.Address{1}
 	acc := accounts.Account{Balance: *uint256.NewInt(common.Ether), CodeHash: accounts.EmptyCodeHash, Incarnation: 1}
-	require.NoError(pool.OnNewBlock(ctx, &remoteproto.StateChangeBatch{
+	require.NoError(applyTestBlock(ctx, pool, &remoteproto.StateChangeBatch{
 		PendingBlockBaseFee:  1,
 		BlockGasLimit:        30_000_000,
 		PendingBlobFeePerGas: 1,
@@ -3481,7 +3481,7 @@ func TestOnNewBlockKeepsOriginalWhenUnwoundReplacementRejected(t *testing.T) {
 			}},
 		}},
 	}
-	require.NoError(t, pool.OnNewBlock(ctx, change, unwind, TxnSlots{}, TxnSlots{}))
+	require.NoError(t, applyTestBlock(ctx, pool, change, unwind, TxnSlots{}, TxnSlots{}))
 
 	require.Contains(t, pool.byHash, string(original.IDHash[:]))
 	require.NotContains(t, pool.byHash, string(replacement.IDHash[:]))
@@ -3534,14 +3534,14 @@ func TestOnNewBlockKeepsUnwoundLocalTxnLocal(t *testing.T) {
 			mined.IDHash[0] = 1
 			var minedTxns TxnSlots
 			minedTxns.Append(mined, sender[:], false)
-			require.NoError(t, pool.OnNewBlock(ctx, changeWithNonce(1, common.Hash{1}), TxnSlots{}, TxnSlots{}, minedTxns))
+			require.NoError(t, applyTestBlock(ctx, pool, changeWithNonce(1, common.Hash{1}), TxnSlots{}, TxnSlots{}, minedTxns))
 			require.NotContains(t, pool.byHash, string(mined.IDHash[:]))
 
 			unwound := newTestTxnSlot(0, 0, 1, 2, 100_000)
 			unwound.IDHash[0] = 1
 			var unwindTxns TxnSlots
 			unwindTxns.Append(unwound, sender[:], false)
-			require.NoError(t, pool.OnNewBlock(ctx, changeWithNonce(0, common.Hash{2}), unwindTxns, TxnSlots{}, TxnSlots{}))
+			require.NoError(t, applyTestBlock(ctx, pool, changeWithNonce(0, common.Hash{2}), unwindTxns, TxnSlots{}, TxnSlots{}))
 
 			pending, baseFee, queued := pool.CountContent()
 			require.Equal(t, slotsCount, pending+baseFee+queued)
@@ -3603,11 +3603,11 @@ func TestProvideTxnsKeepsSenderNonceOrderAfterUnwind(t *testing.T) {
 
 	var mined TxnSlots
 	mined.Append(newTestSenderTxnSlot(sender, 0), sender[:], false)
-	require.NoError(t, pool.OnNewBlock(ctx, block(1, 1, remoteproto.Direction_FORWARD), TxnSlots{}, TxnSlots{}, mined))
+	require.NoError(t, applyTestBlock(ctx, pool, block(1, 1, remoteproto.Direction_FORWARD), TxnSlots{}, TxnSlots{}, mined))
 
 	var unwound TxnSlots
 	unwound.Append(newTestSenderTxnSlot(sender, 0), sender[:], false)
-	require.NoError(t, pool.OnNewBlock(ctx, block(0, 0, remoteproto.Direction_UNWIND), unwound, TxnSlots{}, TxnSlots{}))
+	require.NoError(t, applyTestBlock(ctx, pool, block(0, 0, remoteproto.Direction_UNWIND), unwound, TxnSlots{}, TxnSlots{}))
 	pending, _, _ := pool.CountContent()
 	require.Equal(t, 2, pending)
 

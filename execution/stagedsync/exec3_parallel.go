@@ -363,6 +363,9 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 
 	// Set accumulator before pe.run() so execLoop sees it without a race.
 	pe.accumulator = accumulator
+	if accumulator != nil {
+		defer pe.rs.TrackNotifications()()
+	}
 
 	// prevBlocks must exist before pe.run(): workers read it from their own goroutines.
 	pe.prevBlocks = state.NewPrevBlockList()
@@ -502,9 +505,6 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 		// and trace output.
 		blockUpdateCount := 0
 		blockApplyCount := 0
-		// Collect per-tx writes to notify the accumulator AFTER StartChange (which
-		// arrives with the blockResult, after all txResults).
-		var pendingAccumulatorWrites []state.WriteSetView
 		// balBuilder holds the current block's access list up to its last published tx.
 		var balBuilder *state.BlockAccessListBuilder
 		// foldErr is the first per-tx fold error of the current block, surfaced at
@@ -678,9 +678,6 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 						}
 						balBuilder.Add(t.index, t.reads, t.writes)
 					}
-					if pe.accumulator != nil {
-						pendingAccumulatorWrites = append(pendingAccumulatorWrites, applyResult.writes)
-					}
 					blockApplyCount += writeCount
 					pe.rs.SetTrace(false)
 				case *blockResult:
@@ -694,7 +691,6 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					// take precedence.
 					if applyResult.Err != nil {
 						appliedBlocks[applyResult.BlockNum] = struct{}{}
-						pendingAccumulatorWrites = pendingAccumulatorWrites[:0]
 						finalized = true
 						// An infrastructure failure aborts the batch retryably without a
 						// block verdict; a validity verdict goes through fail so it wins its
@@ -794,8 +790,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 							continue
 						}
 						pe.accumulator.StartChange(applyResult.Header, rawTxs, false)
-						notifyErr := pe.rs.NotifyAccumulator(pe.accumulator, rwTx, pendingAccumulatorWrites)
-						pendingAccumulatorWrites = pendingAccumulatorWrites[:0]
+						notifyErr := pe.rs.NotifyAccumulator(pe.accumulator, rwTx)
 						if notifyErr != nil {
 							<-balDone
 							failInfra(fmt.Errorf("notify accumulator, block %d: %w", applyResult.BlockNum, notifyErr))

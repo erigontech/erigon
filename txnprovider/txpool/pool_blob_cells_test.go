@@ -51,7 +51,7 @@ func newPoolWithBlobTxn(t *testing.T, fork string) (context.Context, *TxPool, *T
 
 	sender := common.Address{1}
 	acc := accounts.Account{Balance: *uint256.NewInt(common.Ether), CodeHash: accounts.EmptyCodeHash, Incarnation: 1}
-	require.NoError(t, pool.OnNewBlock(ctx, &remoteproto.StateChangeBatch{
+	require.NoError(t, applyTestBlock(ctx, pool, &remoteproto.StateChangeBatch{
 		PendingBlockBaseFee:  1,
 		BlockGasLimit:        30_000_000,
 		PendingBlobFeePerGas: 1,
@@ -136,7 +136,7 @@ func TestUnwoundBlobTxnDoesNotKeepValidationCells(t *testing.T) {
 			BlockHash:   gointerfaces.ConvertHashToH256(common.Hash{1}),
 		}},
 	}
-	require.NoError(t, pool.OnNewBlock(ctx, minedChange, TxnSlots{}, TxnSlots{}, txns))
+	require.NoError(t, applyTestBlock(ctx, pool, minedChange, TxnSlots{}, TxnSlots{}, txns))
 	require.NotContains(t, pool.byHash, string(slot.IDHash[:]))
 	for _, hash := range slot.GetBlobHashes() {
 		require.NotContains(t, pool.blobs.bundles, hash)
@@ -154,7 +154,7 @@ func TestUnwoundBlobTxnDoesNotKeepValidationCells(t *testing.T) {
 			BlockHash:   gointerfaces.ConvertHashToH256(common.Hash{2}),
 		}},
 	}
-	require.NoError(t, pool.OnNewBlock(ctx, unwoundChange, TxnSlots{}, unwindBlobTxns, TxnSlots{}))
+	require.NoError(t, applyTestBlock(ctx, pool, unwoundChange, TxnSlots{}, unwindBlobTxns, TxnSlots{}))
 
 	pooled := pool.byHash[string(slot.IDHash[:])]
 	require.NotNil(t, pooled)
