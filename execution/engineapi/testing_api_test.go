@@ -21,6 +21,7 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"math/big"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -44,6 +45,7 @@ import (
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -118,9 +120,9 @@ func (s *stubExecutionModule) InsertBlocks(ctx context.Context, blocks []*types.
 	return execmodule.ExecutionStatusSuccess, nil
 }
 
-func (s *stubExecutionModule) ValidateChain(ctx context.Context, blockHash common.Hash, blockNumber uint64) (execmodule.ValidationResult, error) {
+func (s *stubExecutionModule) ValidateChain(ctx context.Context, block *types.Block) (execmodule.ValidationResult, error) {
 	if s.validateChainFunc != nil {
-		return s.validateChainFunc(ctx, blockHash, blockNumber)
+		return s.validateChainFunc(ctx, block.Hash(), block.NumberU64())
 	}
 	return execmodule.ValidationResult{}, nil
 }
@@ -1786,6 +1788,102 @@ func TestNewPayloadRegistersSendersRecoveryForBALPayload(t *testing.T) {
 	senders, err := recovery.Wait(t.Context())
 	require.NoError(t, err)
 	require.Equal(t, []accounts.Address{accounts.InternAddress(crypto.PubkeyToAddress(key.PublicKey))}, senders)
+}
+
+func TestDecodePayloadTransactionsReportsTheFirstInvalidTx(t *testing.T) {
+	config := preAmsterdamChainConfig()
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	signed := func(gas uint64) hexutil.Bytes {
+		txn, err := types.SignTx(&types.LegacyTx{CommonTx: types.CommonTx{GasLimit: gas}, GasPrice: *uint256.NewInt(1)}, *types.MakeSigner(config, 1, 0), key)
+		require.NoError(t, err)
+		raw, err := types.MarshalTransactionsBinary(types.Transactions{txn})
+		require.NoError(t, err)
+		return raw[0]
+	}
+	undecodable := hexutil.Bytes{0x02, 0xff}
+	rlpString := hexutil.Bytes{0x82, 0x02, 0x01}
+	srv := NewEngineServer(log.New(), config, &stubExecutionModule{}, nil, false, false, false, true, nil, nil, 0, 0)
+	for _, test := range []struct {
+		name string
+		raw  []hexutil.Bytes
+		want string
+	}{
+		{"decode error before RLP string", []hexutil.Bytes{signed(21_000), undecodable, rlpString}, "rlp"},
+		{"RLP string before decode error", []hexutil.Bytes{signed(21_000), rlpString, undecodable}, "typed txn marshalled as RLP string"},
+		{"gas limit before decode error", []hexutil.Bytes{signed(31_000_000), undecodable}, protocol.ErrGasLimitReached.Error()},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, _, _, status := srv.decodePayloadTransactions(test.raw, 30_000_000, false, false, nil)
+			require.NotNil(t, status)
+			require.Equal(t, engine_types.InvalidStatus, status.Status)
+			require.ErrorContains(t, status.ValidationError.Error(), test.want)
+		})
+	}
+}
+
+func TestDecodePayloadTransactionsAcrossChunks(t *testing.T) {
+	defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(4))
+	config := preAmsterdamChainConfig()
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	const n = 3*payloadDecodeChunk + 8
+	payload := func() []hexutil.Bytes {
+		raw := make([]hexutil.Bytes, n)
+		for i := range raw {
+			txn, err := types.SignTx(&types.LegacyTx{CommonTx: types.CommonTx{Nonce: uint64(i), GasLimit: 21_000}, GasPrice: *uint256.NewInt(1)}, *types.MakeSigner(config, 1, 0), key)
+			require.NoError(t, err)
+			bins, err := types.MarshalTransactionsBinary(types.Transactions{txn})
+			require.NoError(t, err)
+			raw[i] = bins[0]
+		}
+		return raw
+	}
+	overGas := func(raw []hexutil.Bytes, i int) {
+		txn, err := types.SignTx(&types.LegacyTx{CommonTx: types.CommonTx{Nonce: uint64(i), GasLimit: 31_000_000}, GasPrice: *uint256.NewInt(1)}, *types.MakeSigner(config, 1, 0), key)
+		require.NoError(t, err)
+		bins, err := types.MarshalTransactionsBinary(types.Transactions{txn})
+		require.NoError(t, err)
+		raw[i] = bins[0]
+	}
+	srv := NewEngineServer(log.New(), config, &stubExecutionModule{}, nil, false, false, false, true, nil, nil, 0, 0)
+
+	t.Run("every tx decoded in order", func(t *testing.T) {
+		_, transactions, _, status := srv.decodePayloadTransactions(payload(), 30_000_000, false, false, nil)
+		require.Nil(t, status)
+		require.Len(t, transactions, n)
+		for i, txn := range transactions {
+			require.NotNil(t, txn, "tx %d was not decoded", i)
+			require.Equal(t, uint64(i), txn.GetNonce())
+		}
+	})
+	low, high := payloadDecodeChunk+5, 2*payloadDecodeChunk+5
+	for _, test := range []struct {
+		name string
+		mark func(raw []hexutil.Bytes)
+		want string
+	}{
+		{"gas limit in an earlier chunk than a decode error", func(raw []hexutil.Bytes) {
+			overGas(raw, low)
+			raw[high] = hexutil.Bytes{0x02, 0xff}
+		}, protocol.ErrGasLimitReached.Error()},
+		{"decode error in an earlier chunk than a gas limit", func(raw []hexutil.Bytes) {
+			raw[low] = hexutil.Bytes{0x02, 0xff}
+			overGas(raw, high)
+		}, "rlp"},
+		{"error in the partial last chunk", func(raw []hexutil.Bytes) {
+			raw[n-1] = hexutil.Bytes{0x82, 0x02, 0x01}
+		}, "typed txn marshalled as RLP string"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			raw := payload()
+			test.mark(raw)
+			_, _, _, status := srv.decodePayloadTransactions(raw, 30_000_000, false, false, nil)
+			require.NotNil(t, status)
+			require.Equal(t, engine_types.InvalidStatus, status.Status)
+			require.ErrorContains(t, status.ValidationError.Error(), test.want)
+		})
+	}
 }
 
 func TestNewPayloadSkipsSendersRecoveryOnBlockHashMismatch(t *testing.T) {

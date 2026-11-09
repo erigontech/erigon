@@ -168,7 +168,7 @@ func TestExecModule_GivenReorgAtFinalisedBlock_WhenFinality_ThenInvalidFCU(t *te
 	status, err := emt.InsertBlocks(ctx, fork.Blocks)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
-	validation, err := emt.ValidateChain(ctx, fork.TopBlock.Header())
+	validation, err := emt.ValidateChain(ctx, fork.TopBlock)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
 	forkHash := fork.TopBlock.Hash()
@@ -229,7 +229,7 @@ func TestExecModule_GivenSameHeadFCULowersFinalised_WhenReorgAboveIt_ThenReorg(t
 	status, err = emt.InsertBlocks(ctx, fork.Blocks)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
-	validation, err := emt.ValidateChain(ctx, fork.TopBlock.Header())
+	validation, err := emt.ValidateChain(ctx, fork.TopBlock)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
 	result, err = emt.UpdateForkChoice(ctx, fork.TopBlock.Header(),

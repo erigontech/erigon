@@ -234,7 +234,6 @@ func (t *testingImpl) CommitBlockV1(
 
 	block := assembled.Block.Block
 	blockHash := block.Hash()
-	blockNumber := block.NumberU64()
 
 	err = func() error {
 		t.server.lock.Lock()
@@ -246,7 +245,7 @@ func (t *testingImpl) CommitBlockV1(
 	}
 
 	status, validationErr, busy, err := t.lockedStatusPoll(ctx, deadline, func() (execmodule.ExecutionStatus, *string, error) {
-		s, v, _, err := t.server.chainRW.ValidateChain(ctx, blockHash, blockNumber)
+		s, v, _, err := t.server.chainRW.ValidateChain(ctx, block)
 		return s, v, err
 	})
 	if err != nil {

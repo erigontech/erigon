@@ -212,7 +212,7 @@ func runReorg(t *testing.T, tc reorgCase) (oldHead *types.Block, forkBlocks []*t
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
 	if tc.newPayload {
-		validation, err := m.ValidateChain(t.Context(), newHead.Header())
+		validation, err := m.ValidateChain(t.Context(), newHead)
 		require.NoError(t, err)
 		require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
 		require.Equal(t, newHead.Hash(), m.ExecModule.ForkValidator().ExtendingForkHeadHash())
@@ -327,7 +327,7 @@ func TestSideForkValidationPreservesCanonicalRemovedLogs(t *testing.T) {
 		status, err := m.InsertBlocks(t.Context(), []*types.Block{block})
 		require.NoError(t, err)
 		require.Equal(t, execmodule.ExecutionStatusSuccess, status)
-		validation, err := m.ValidateChain(t.Context(), block.Header())
+		validation, err := m.ValidateChain(t.Context(), block)
 		require.NoError(t, err)
 		require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
 	}
