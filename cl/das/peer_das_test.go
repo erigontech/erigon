@@ -2393,50 +2393,65 @@ func TestBlobRecoveryDoesNotPublishCustodyColumnsItFailedToWrite(t *testing.T) {
 	require.ElementsMatch(t, reconstructedOutsideCustody, publishedColumnIndices(call.sidecars))
 }
 
-// lateColumnsStorage adds the sidecars in late to the store on the first column read, as gossip does while the worker
-// recovers the matrix, and counts the column writes made through it.
-type lateColumnsStorage struct {
+// countingColumnStorage counts the column writes made through it.
+type countingColumnStorage struct {
 	blob_storage.DataColumnStorage
-	late    []*cltypes.DataColumnSidecar
-	once    sync.Once
-	lateErr error
-	writes  atomic.Int32
+	writes atomic.Int32
 }
 
-func (s *lateColumnsStorage) ReadColumnSidecarByColumnIndex(ctx context.Context, slot uint64, blockRoot common.Hash, columnIndex int64) (*cltypes.DataColumnSidecar, error) {
-	s.once.Do(func() {
-		for _, sidecar := range s.late {
-			if err := s.DataColumnStorage.WriteColumnSidecars(ctx, blockRoot, int64(sidecar.Index), sidecar); err != nil {
-				s.lateErr = err
-			}
-		}
-	})
-	return s.DataColumnStorage.ReadColumnSidecarByColumnIndex(ctx, slot, blockRoot, columnIndex)
-}
-
-func (s *lateColumnsStorage) WriteColumnSidecars(ctx context.Context, blockRoot common.Hash, columnIndex int64, sidecar *cltypes.DataColumnSidecar) error {
+func (s *countingColumnStorage) WriteColumnSidecars(ctx context.Context, blockRoot common.Hash, columnIndex int64, sidecar *cltypes.DataColumnSidecar) error {
 	s.writes.Add(1)
 	return s.DataColumnStorage.WriteColumnSidecars(ctx, blockRoot, columnIndex, sidecar)
 }
 
-func (r *recoveryRun) storeLateColumns(late []*cltypes.DataColumnSidecar) *lateColumnsStorage {
-	columns := &lateColumnsStorage{DataColumnStorage: r.d.columnStorage, late: late}
+func (r *recoveryRun) countColumnWrites() *countingColumnStorage {
+	columns := &countingColumnStorage{DataColumnStorage: r.d.columnStorage}
 	r.d.columnStorage = columns
 	return columns
 }
 
-// The columns that gossip stores while the worker recovers the matrix are neither written nor published by the worker.
+// lateColumnsBlobStorage stores the sidecars in late when the worker writes the blob sidecars: the latest point before the
+// worker reads the stored columns again, so a read moved before the matrix step misses them.
+type lateColumnsBlobStorage struct {
+	blob_storage.BlobStorage
+	columns blob_storage.DataColumnStorage
+	late    []*cltypes.DataColumnSidecar
+	lateErr error
+}
+
+func (s *lateColumnsBlobStorage) WriteBlobSidecars(ctx context.Context, blockRoot common.Hash, sidecars []*cltypes.BlobSidecar) error {
+	for _, sidecar := range s.late {
+		if err := s.columns.WriteColumnSidecars(ctx, blockRoot, int64(sidecar.Index), sidecar); err != nil {
+			s.lateErr = err
+		}
+	}
+	return s.BlobStorage.WriteBlobSidecars(ctx, blockRoot, sidecars)
+}
+
+// storeLateColumns must run before countColumnWrites, so the late writes are not counted as writes by the worker.
+func (r *recoveryRun) storeLateColumns(late []*cltypes.DataColumnSidecar) *lateColumnsBlobStorage {
+	blobs := &lateColumnsBlobStorage{BlobStorage: r.d.blobStorage, columns: r.d.columnStorage, late: late}
+	r.d.blobStorage = blobs
+	return blobs
+}
+
+// Columns that gossip stores during the matrix step are neither written nor published by the worker. The test stores
+// them when the worker writes the blob sidecars.
 func TestBlobRecoverySkipsColumnsStoredDuringMatrixRecovery(t *testing.T) {
-	var columns *lateColumnsStorage
+	var late *lateColumnsBlobStorage
+	var columns *countingColumnStorage
 	r := startRecoveryWithPublisher(t, recoveryOptions{
 		caplinConfig: &clparams.CaplinConfig{},
 		supernode:    true,
-		instrument:   func(r *recoveryRun) { columns = r.storeLateColumns(r.unstoredColumns()) },
+		instrument: func(r *recoveryRun) {
+			late = r.storeLateColumns(r.unstoredColumns())
+			columns = r.countColumnWrites()
+		},
 	})
 
 	requireBlobRecoveryReleased(t, r.d, r.root)
 
-	require.NoError(t, columns.lateErr)
+	require.NoError(t, late.lateErr)
 	r.requireBlobsRecovered(t)
 	require.Zero(t, columns.writes.Load(), "column writes by the worker")
 	require.Never(t, func() bool { return len(r.published) > 0 }, 100*time.Millisecond, 10*time.Millisecond, "published columns")
@@ -2444,11 +2459,11 @@ func TestBlobRecoverySkipsColumnsStoredDuringMatrixRecovery(t *testing.T) {
 
 // With nothing stored during the matrix recovery, the worker writes and publishes every missing column.
 func TestBlobRecoveryWritesAndPublishesMissingColumns(t *testing.T) {
-	var columns *lateColumnsStorage
+	var columns *countingColumnStorage
 	r := startRecoveryWithPublisher(t, recoveryOptions{
 		caplinConfig: &clparams.CaplinConfig{},
 		supernode:    true,
-		instrument:   func(r *recoveryRun) { columns = r.storeLateColumns(nil) },
+		instrument:   func(r *recoveryRun) { columns = r.countColumnWrites() },
 	})
 
 	call := receiveRecoveredColumnsPublish(t, r.published)
@@ -2484,26 +2499,26 @@ func TestBlobRecoveryKeepsStoredColumnsWhenRereadFails(t *testing.T) {
 	require.ElementsMatch(t, publishedColumnIndices(r.unstoredColumns()), publishedColumnIndices(call.sidecars))
 }
 
-// An archive node that is not a supernode removes the columns outside its custody that gossip stores while the worker
-// recovers the matrix, and does not publish them.
+// An archive node that is not a supernode removes the columns outside its custody that gossip stores during the matrix
+// step, and does not publish them. The test stores them when the worker writes the blob sidecars.
 func TestBlobRecoveryRemovesNonCustodyColumnsStoredDuringMatrixRecovery(t *testing.T) {
-	var columns *lateColumnsStorage
+	var late *lateColumnsBlobStorage
 	r := startRecoveryWithPublisher(t, recoveryOptions{
 		caplinConfig: &clparams.CaplinConfig{ArchiveBlobs: true},
 		instrument: func(r *recoveryRun) {
 			custody, err := r.d.state.GetMyCustodyColumns()
 			require.NoError(t, err)
-			columns = r.storeLateColumns(slices.DeleteFunc(r.unstoredColumns(), func(sidecar *cltypes.DataColumnSidecar) bool { return custody[sidecar.Index] }))
+			late = r.storeLateColumns(slices.DeleteFunc(r.unstoredColumns(), func(sidecar *cltypes.DataColumnSidecar) bool { return custody[sidecar.Index] }))
 		},
 	})
 	custody, err := r.d.state.GetMyCustodyColumns()
 	require.NoError(t, err)
-	require.NotEmpty(t, columns.late)
+	require.NotEmpty(t, late.late)
 
 	call := receiveRecoveredColumnsPublish(t, r.published)
 
 	requireBlobRecoveryReleased(t, r.d, r.root)
-	require.NoError(t, columns.lateErr)
+	require.NoError(t, late.lateErr)
 	var custodyIndices []uint64
 	for index := range custody {
 		custodyIndices = append(custodyIndices, index)
@@ -2514,16 +2529,16 @@ func TestBlobRecoveryRemovesNonCustodyColumnsStoredDuringMatrixRecovery(t *testi
 	require.ElementsMatch(t, custodyIndices, saved)
 }
 
-// When a prune drops the block's columns while the worker recovers the matrix, the worker still skips the columns it
-// read before the matrix step and rebuilds only the others.
+// When a prune drops the block's columns while the worker writes the blob sidecars, the worker still skips the columns
+// it read before the matrix step and rebuilds only the others.
 func TestBlobRecoveryPrunedDuringMatrixRecoveryRebuildsOnlyUnstoredColumns(t *testing.T) {
-	var columns *lateColumnsStorage
+	var columns *countingColumnStorage
 	var blobs *blockingBlobWriteStorage
 	r := startRecoveryWithPublisher(t, recoveryOptions{
 		caplinConfig: &clparams.CaplinConfig{},
 		supernode:    true,
 		instrument: func(r *recoveryRun) {
-			columns = r.storeLateColumns(nil)
+			columns = r.countColumnWrites()
 			blobs = &blockingBlobWriteStorage{BlobStorage: r.d.blobStorage, entered: make(chan struct{}), release: make(chan struct{})}
 			r.d.blobStorage = blobs
 		},
