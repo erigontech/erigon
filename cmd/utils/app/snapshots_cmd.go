@@ -1655,7 +1655,7 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) (retErr error) {
 		blobsFromSlot, err = rawdb.ReadCaplinBlobsArchiveFromSlot(tx)
 		return err
 	}); err != nil {
-		return err
+		return fmt.Errorf("read integrity config: %w", err)
 	}
 
 	runCheck := func(ctx context.Context, chk integrity.Check) error {
