@@ -2399,7 +2399,7 @@ func touchHistoricalKeys(sd *execctx.SharedDomains, tx kv.TemporalTx, d kv.Domai
 			if visitor != nil {
 				visitor([]byte(k))
 			}
-			if err := sd.GetCommitmentCtx().TouchChangedKey(tx, d, []byte(k)); err != nil {
+			if err := sd.GetCommitmentCtx().TouchKeyFromState(tx, []byte(k)); err != nil {
 				return 0, err
 			}
 		}
@@ -2419,7 +2419,7 @@ func touchHistoricalKeys(sd *execctx.SharedDomains, tx kv.TemporalTx, d kv.Domai
 		if visitor != nil {
 			visitor(k)
 		}
-		if err := sd.GetCommitmentCtx().TouchChangedKey(tx, d, k); err != nil {
+		if err := sd.GetCommitmentCtx().TouchKeyFromState(tx, k); err != nil {
 			return 0, err
 		}
 		touches++
