@@ -848,12 +848,12 @@ const restoreV3ResetPendingName = ".restore_v3_reset_pending"
 // accessor types that don't exist in the backup (e.g. converted .kvei when the
 // original had only .kvi, or a newer version-prefix on the .kv).
 //
-// Refuses before moving anything if snapshots/domain/ or the history dir holds a
-// v3 commitment data file whose step range is not in its existing backup dir, or
-// if snapshots/backup/domains/ is missing or empty while no history backup exists
-// (errors out so the operator notices). On success the now-empty backup dir is
-// removed, the snapshots/backup/ parent is cleaned if also empty, and the caller
-// is told to restart erigon to pick up the restored files.
+// Refuses before moving anything if a live v3 commitment data file has no
+// matching backup range, or if snapshots/backup/domains/ is missing or empty
+// without a history backup or snapshots/backup/.restore_v3_reset_pending.
+// On success, empty backup dirs are removed. The returned bool means an
+// Execution reset is pending; call CompleteCommitmentRestore after it succeeds.
+// Restart erigon to pick up the restored files.
 //
 // Safe to re-run after a partial failure: the first attempt persists a manifest
 // listing every file that needs to be restored, and subsequent attempts use
