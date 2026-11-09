@@ -881,6 +881,7 @@ type anchorEnvelopeStore interface {
 
 type anchorEnvelopeRecoverer func(context.Context) error
 
+// Rejected anchors complete recovery so block validation can reject their FULL children.
 func ensureAnchorEnvelopeForChild(
 	ctx context.Context,
 	store anchorEnvelopeStore,
@@ -913,7 +914,7 @@ func ensureAnchorEnvelopeForChild(
 		return true
 	}
 	if store.IsEnvelopeRejected(anchorRoot) {
-		return false
+		return true
 	}
 	if recoverAnchor == nil {
 		return false
@@ -921,7 +922,7 @@ func ensureAnchorEnvelopeForChild(
 	if err := recoverAnchor(ctx); err != nil {
 		log.Debug("[chainTipSync] failed to recover anchor envelope", "anchorRoot", anchorRoot, "err", err)
 	}
-	return store.HasEnvelope(anchorRoot)
+	return store.HasEnvelope(anchorRoot) || store.IsEnvelopeRejected(anchorRoot)
 }
 
 type envelopeRequestFunc func(context.Context, [][32]byte) (map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, error)

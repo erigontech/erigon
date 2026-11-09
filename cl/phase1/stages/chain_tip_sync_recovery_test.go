@@ -881,6 +881,63 @@ func TestChainTipBatchReplayBudgetStopsAtTarget(t *testing.T) {
 	require.Zero(t, graph.added[common.Hash(childBRoot)])
 }
 
+func TestChainTipBatchRejectsFullChildOfRejectedAnchor(t *testing.T) {
+	for _, test := range []struct {
+		name            string
+		alreadyRejected bool
+		wantRequests    int
+	}{
+		{name: "already rejected", alreadyRejected: true},
+		{name: "rejected during recovery", wantRequests: 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cfg, graph, parentRoot, child, _, engine := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
+			anchor := graph.parentState
+			bid := anchor.GetLatestExecutionPayloadBid().Copy()
+			bid.BlobKzgCommitments.Append(&cltypes.KZGCommitment{1})
+			anchor.SetLatestExecutionPayloadBid(bid)
+			store := newAnchorForkChoiceStore(t, cfg.beaconCfg, anchor, engine)
+			anchorRoot := store.AnchorRoot()
+			child.Block.ParentRoot = anchorRoot
+			store.OnTick((child.Block.Slot + 1) * cfg.beaconCfg.SecondsPerSlot * 1000)
+			if test.alreadyRejected {
+				store.RejectEnvelope(anchorRoot)
+			}
+			envelope := graph.envelopes[parentRoot]
+			envelope.Message.BeaconBlockRoot = anchorRoot
+			key, err := bls.NewPrivateKeyFromIKM([]byte("01234567890123456789012345678901"))
+			require.NoError(t, err)
+			signAnchorEnvelope(t, anchor, key, envelope, bid.Slot)
+			peerRPC, sentinel := newChainTipBatchEnvelopeRPC(t, cfg.beaconCfg, envelope)
+			cfg.rpc = peerRPC
+			cfg.caplinConfig.DisabledCheckpointSync = true
+			cfg.forkChoice = store
+			cfg.chainTipRejections = newChainTipRejections(time.Hour, nil)
+			cfg.chainTipRejections.lastLog = time.Now()
+			root, err := child.Block.HashSSZ()
+			require.NoError(t, err)
+			seen := make(map[common.Hash]struct{})
+			rejected := make(map[common.Hash]error)
+			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+			defer cancel()
+			for range 2 {
+				reachedTarget := processChainTipBatch(ctx, cfg, Args{targetSlot: child.Block.Slot}, []*cltypes.SignedBeaconBlock{child}, seen, rejected)
+
+				require.False(t, reachedTarget)
+				require.True(t, store.IsEnvelopeRejected(anchorRoot))
+				require.ErrorIs(t, rejected[root], forkchoice.ErrBlockInvalid)
+				require.ErrorContains(t, rejected[root], "parent execution payload envelope is rejected")
+				require.Contains(t, seen, common.Hash(root))
+				_, imported := store.GetHeader(root)
+				require.False(t, imported)
+				require.Zero(t, engine.newPayloadCalls)
+				require.Equal(t, test.wantRequests, sentinel.calls)
+			}
+			require.Equal(t, 1, cfg.chainTipRejections.reasons["process block failed"].attempts)
+		})
+	}
+}
+
 func TestChainTipBatchReplaysStoredParentPayload(t *testing.T) {
 	t.Run("peer-fetched unavailable parent leaves full child unpersisted", func(t *testing.T) {
 		cfg, graph, parentRoot, fullChild, _, engine := newChainTipBatchFixture(t, execution_client.PayloadStatusNone)

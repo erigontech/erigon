@@ -59,10 +59,9 @@ type anchorEnvelopeTestStore struct {
 	root     common.Hash
 	state    *state2.CachingBeaconState
 	envelope *cltypes.SignedExecutionPayloadEnvelope
-	rejected bool
 }
 
-func (s *anchorEnvelopeTestStore) IsEnvelopeRejected(common.Hash) bool { return s.rejected }
+func (*anchorEnvelopeTestStore) IsEnvelopeRejected(common.Hash) bool { return false }
 
 func (s *anchorEnvelopeTestStore) AnchorRoot() common.Hash {
 	return s.root
@@ -446,10 +445,6 @@ func TestChainTipAnchorEnvelopeRetriesAfterUnavailableResponse(t *testing.T) {
 	require.False(t, store.HasEnvelope(anchorRoot))
 	require.True(t, ensureAnchorEnvelopeForChild(context.Background(), store, recoverAnchor, child))
 	require.True(t, store.HasEnvelope(anchorRoot))
-	require.Equal(t, 2, requests)
-	store.envelope = nil
-	store.rejected = true
-	require.False(t, ensureAnchorEnvelopeForChild(t.Context(), store, recoverAnchor, child))
 	require.Equal(t, 2, requests)
 }
 
