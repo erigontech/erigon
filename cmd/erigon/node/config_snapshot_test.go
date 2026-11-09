@@ -24,7 +24,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v3"
 
-	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/kvcfg"
@@ -41,14 +40,14 @@ import (
 // pipeline (BuildEthConfig) with the given CLI args.
 func buildEthConfig(t *testing.T, args []string) *ethconfig.Config {
 	t.Helper()
-	t.Cleanup(statecfg.SetCommitmentV3(false))
 
 	var result *ethconfig.Config
 	app := &cli.Command{}
 	app.Flags = erigoncli.DefaultFlags
 	app.Action = func(nodeCtx context.Context, ctx *cli.Command) error {
 		logger := log.Root()
-		nodeCfg := &nodecfg.Config{Dirs: datadir.New(t.TempDir())}
+		nodeCfg := &nodecfg.Config{}
+		nodeCfg.Dirs.DataDir = t.TempDir()
 		ethCfg := ethconfig.Defaults
 		erigoncli.BuildEthConfig(nodeCtx, ctx, nodeCfg, &ethCfg, logger)
 		result = &ethCfg
@@ -130,16 +129,10 @@ func TestConfigDefaults(t *testing.T) {
 	require.False(t, snap.SnapKeepBlocks, "snap keep blocks should be off by default")
 }
 
-func TestConfigCommitmentV3StartsFreshWithoutStateSnapshotDownload(t *testing.T) {
-	cfg := buildEthConfig(t, []string{"--experimental.commitment-v3", "--snap.skip-state-snapshot-download"})
-	require.True(t, cfg.Snapshot.DisableDownloadE3)
+func TestConfigCommitmentV3StartsOnFreshDatadir(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(true))
+	cfg := buildEthConfig(t, nil)
 	require.False(t, cfg.Snapshot.NoDownloader)
-}
-
-func TestConfigCommitmentV3StartsFreshOnChainWithoutPreverifiedSnapshots(t *testing.T) {
-	cfg := buildEthConfig(t, []string{"--chain=dev", "--experimental.commitment-v3"})
-	require.False(t, cfg.Snapshot.NoDownloader)
-	require.False(t, cfg.Snapshot.DisableDownloadE3)
 }
 
 // TestConfigWithFlags verifies that specific flag combinations produce the

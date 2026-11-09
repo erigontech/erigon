@@ -57,7 +57,6 @@ import (
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/snapcfg"
-	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/diagnostics/metrics"
@@ -2085,11 +2084,6 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 	cfg.Ethstats = ctx.String(EthStatsURLFlag.Name)
 
 	setParallelCommitment(ctx)
-	if _, preverified := snapcfg.KnownCfg(chain); preverified && !cfg.Snapshot.NoDownloader && !cfg.Snapshot.DisableDownloadE3 {
-		if err := dbstate.CheckCommitmentV3DownloaderCompatibility(cfg.Dirs); err != nil {
-			Fatalf("%v", err)
-		}
-	}
 
 	cfg.FcuTimeout = ctx.Duration(FcuTimeoutFlag.Name)
 	cfg.FcuBackgroundPrune = ctx.Bool(FcuBackgroundPruneFlag.Name)

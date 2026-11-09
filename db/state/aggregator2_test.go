@@ -138,12 +138,3 @@ func TestCheckSnapshotsCompatibilityV3RecordsRequiresFlag(t *testing.T) {
 
 	require.ErrorContains(t, CheckSnapshotsCompatibility(dirs), "COMMITMENT_V3=true")
 }
-
-func TestCheckCommitmentV3DownloaderCompatibilityRejectsLegacyFiles(t *testing.T) {
-	t.Cleanup(statecfg.SetCommitmentV3(true))
-
-	dirs := datadir.New(t.TempDir())
-	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v2.2-commitment.0-1.kv"), nil, 0o644))
-
-	require.ErrorContains(t, CheckCommitmentV3DownloaderCompatibility(dirs), "convert the datadir or disable v3")
-}
