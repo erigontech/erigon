@@ -171,12 +171,19 @@ func TestDifferential(t *testing.T) {
 			{"account_with_slot", nil, []commitmenttest.Op{parity(7), commitmenttest.StorageAt(slotA, 8)}},
 			{"account_with_other_slot", nil, []commitmenttest.Op{parityAccount(address, 12), commitmenttest.StorageAt(slotB, 13)}},
 			{"delete_absent_account", nil, []commitmenttest.Op{commitmenttest.DeleteAt(address)}},
+			{"delete_slot_on_absent_account", nil, []commitmenttest.Op{commitmenttest.DeleteAt(slotA)}},
 			{"zeroed_account", nil, []commitmenttest.Op{fields(commitmenttest.AccountSpec{})}},
 			{"zeroed_account_with_neighbour", nil, []commitmenttest.Op{fields(commitmenttest.AccountSpec{}), parity(9)}},
 			{"nonce_only", nil, []commitmenttest.Op{fields(commitmenttest.AccountSpec{Nonce: 1})}},
 			{"balance_only", nil, []commitmenttest.Op{fields(commitmenttest.AccountSpec{Balance: 5})}},
 		} {
-			differential(t, commitmenttest.Case{ID: tc.name, Rounds: withInitial(tc.initial, tc.ops)}, parityEngines)
+			t.Run(tc.name, func(t *testing.T) {
+				roots, records, _ := differential(t, commitmenttest.Case{ID: tc.name, Rounds: withInitial(tc.initial, tc.ops)}, parityEngines)
+				if tc.name == "delete_slot_on_absent_account" {
+					require.Equal(t, empty.RootHash[:], roots[0])
+					require.Empty(t, records[string(AccountNodeKey(nil, nil))])
+				}
+			})
 		}
 	})
 
