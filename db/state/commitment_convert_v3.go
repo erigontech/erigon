@@ -307,11 +307,7 @@ func convertCommitmentFileV3(
 			collation.Close()
 		}
 	}()
-	compress := seg.CompressNone
-	if stepTo-stepFrom > DomainMinStepsToCompress {
-		compress = d.Compression
-	}
-	writer := seg.NewWriter(valuesComp, compress)
+	writer := seg.NewWriter(valuesComp, srcCompression)
 	var groupKey, groupVals []byte
 	var group []v3.LegacyEntry
 	var written uint64
