@@ -2835,6 +2835,18 @@ func createdSelfDestructEmpty(writes *WriteSet, realSelfDestruct map[accounts.Ad
 	return bal.Val.IsZero(), true
 }
 
+// ownWritesProveNonEmpty reports whether the tx's final writes alone show addr is not EIP-161 empty.
+func ownWritesProveNonEmpty(writes *WriteSet, addr accounts.Address) bool {
+	if w, ok := writes.GetBalance(addr); ok && !w.Val.IsZero() {
+		return true
+	}
+	if w, ok := writes.GetNonce(addr); ok && w.Val != 0 {
+		return true
+	}
+	w, ok := writes.GetCodeHash(addr)
+	return ok && !w.Val.IsEmpty()
+}
+
 func (ibs *IntraBlockState) encodeExistingEmptyRemovals(chainRules *chain.Rules, writes *WriteSet, realSelfDestruct map[accounts.Address]struct{}) {
 	if chainRules == nil || ibs.versionMap == nil {
 		return
@@ -2847,6 +2859,9 @@ func (ibs *IntraBlockState) encodeExistingEmptyRemovals(chainRules *chain.Rules,
 			if empty {
 				writes.SetContractRemoval(addr, ibs.Version())
 			}
+			continue
+		}
+		if ownWritesProveNonEmpty(writes, addr) {
 			continue
 		}
 		view := NewVersionedAccountView(addr, ibs.txIndex, ibs.versionMap, ibs.stateReader)

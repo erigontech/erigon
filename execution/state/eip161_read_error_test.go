@@ -72,6 +72,62 @@ func TestEncodeExistingEmptyRemovals_BailsOnBaseReadError(t *testing.T) {
 	require.ErrorIs(t, ibs.StateReadError(), readErr, "the base read error must surface, not be swallowed as an empty account")
 }
 
+// The tx's own non-zero nonce, balance or code hash proves the account is not empty,
+// so the removal check needs no base read for it. A zero value proves nothing.
+func TestEncodeExistingEmptyRemovals_OwnWritesDecideWithoutBaseRead(t *testing.T) {
+	t.Parallel()
+
+	addr := getAddress(1)
+	balance := func(v uint64) func(*WriteSet) {
+		return func(ws *WriteSet) {
+			ws.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath}, Val: *uint256.NewInt(v)})
+		}
+	}
+	nonce := func(v uint64) func(*WriteSet) {
+		return func(ws *WriteSet) {
+			ws.SetNonce(addr, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: NoncePath}, Val: v})
+		}
+	}
+	codeHash := func(h accounts.CodeHash) func(*WriteSet) {
+		return func(ws *WriteSet) {
+			ws.SetCodeHash(addr, &VersionedWrite[accounts.CodeHash]{WriteHeader: WriteHeader{Address: addr, Path: CodeHashPath}, Val: h})
+		}
+	}
+	for name, tc := range map[string]struct {
+		write       func(*WriteSet)
+		needsReader bool
+	}{
+		"non-zero balance":   {write: balance(1)},
+		"non-zero nonce":     {write: nonce(1)},
+		"non-empty codehash": {write: codeHash(accounts.InternCodeHash(common.HexToHash("0x01")))},
+		"zero balance":       {write: balance(0), needsReader: true},
+		"zero nonce":         {write: nonce(0), needsReader: true},
+		"empty codehash":     {write: codeHash(accounts.EmptyCodeHash), needsReader: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			readErr := errors.New("domain read failed")
+			vm := NewVersionMap(nil)
+			ibs := New(NewVersionedStateReader(0, ReadSet{}, vm, &failingBaseReader{err: readErr}))
+			ibs.SetTxContext(1, 0)
+			ibs.SetVersion(0)
+			ibs.SetVersionMap(vm)
+			writes := &WriteSet{}
+			tc.write(writes)
+
+			ibs.encodeExistingEmptyRemovals(&chain.Rules{IsSpuriousDragon: true}, writes, nil)
+
+			sd, ok := writes.GetSelfDestruct(addr)
+			require.False(t, ok && sd.Val)
+			if tc.needsReader {
+				require.ErrorIs(t, ibs.StateReadError(), readErr)
+			} else {
+				require.NoError(t, ibs.StateReadError())
+			}
+		})
+	}
+}
+
 type failingCodeSizeReader struct {
 	minimalStateReader
 	err error
