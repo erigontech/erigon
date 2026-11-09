@@ -396,28 +396,15 @@ func (cs *MultiClient) getBlockBodies66(ctx context.Context, inreq *sentryproto.
 	return nil
 }
 
-func (cs *MultiClient) getReceipts66(ctx context.Context, inreq *sentryproto.InboundMessage, sentryClient sentryproto.SentryClient, cacheOnly bool) error {
+func (cs *MultiClient) getReceipts66(ctx context.Context, inreq *sentryproto.InboundMessage, sentryClient sentryproto.SentryClient, ethVersion uint, cacheOnly bool) error {
 	var query eth.GetReceiptsPacket66
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
-		return fmt.Errorf("decoding getReceipts66: %w, data: %x", err, inreq.Data)
+		return fmt.Errorf("decoding %s: %w, data: %x", inreq.Id, err, inreq.Data)
 	}
 	return cs.getReceiptsInner(ctx, inreq.PeerId, sentryClient, requestParams{
 		id:         query.RequestId,
 		query:      query.GetReceiptsPacket,
-		ethVersion: direct.ETH68,
-		cacheOnly:  cacheOnly,
-	})
-}
-
-func (cs *MultiClient) getReceipts69(ctx context.Context, inreq *sentryproto.InboundMessage, sentryClient sentryproto.SentryClient, cacheOnly bool) error {
-	var query eth.GetReceiptsPacket66
-	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
-		return fmt.Errorf("decoding getReceipts69: %w, data: %x", err, inreq.Data)
-	}
-	return cs.getReceiptsInner(ctx, inreq.PeerId, sentryClient, requestParams{
-		id:         query.RequestId,
-		query:      query.GetReceiptsPacket,
-		ethVersion: direct.ETH69,
+		ethVersion: ethVersion,
 		cacheOnly:  cacheOnly,
 	})
 }
@@ -603,9 +590,9 @@ func (cs *MultiClient) dispatchInboundMessage(ctx context.Context, inreq *sentry
 	case sentryproto.MessageId_RECEIPTS_66:
 		return cs.receipts66(ctx, inreq, sentry)
 	case sentryproto.MessageId_GET_RECEIPTS_66:
-		return cs.getReceipts66(ctx, inreq, sentry, receiptCacheOnly)
+		return cs.getReceipts66(ctx, inreq, sentry, direct.ETH68, receiptCacheOnly)
 	case sentryproto.MessageId_GET_RECEIPTS_69:
-		return cs.getReceipts69(ctx, inreq, sentry, receiptCacheOnly)
+		return cs.getReceipts66(ctx, inreq, sentry, direct.ETH69, receiptCacheOnly)
 	case sentryproto.MessageId_GET_RECEIPTS_70:
 		return cs.getReceipts70(ctx, inreq, sentry, receiptCacheOnly)
 	case sentryproto.MessageId_RECEIPTS_70:

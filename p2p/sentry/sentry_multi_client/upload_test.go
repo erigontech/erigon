@@ -59,6 +59,17 @@ func (g uploadReceiptsGetter) GetReceipts(ctx context.Context, _ *chain.Config, 
 	return g.getReceipts(ctx, block)
 }
 
+func waitForUploadReceipts(release <-chan struct{}) func(context.Context, *types.Block) (types.Receipts, error) {
+	return func(ctx context.Context, _ *types.Block) (types.Receipts, error) {
+		select {
+		case <-release:
+			return types.Receipts{{CumulativeGasUsed: 21_000}}, nil
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+}
+
 func newUploadTestClient(t *testing.T) *MultiClient {
 	t.Helper()
 	dirs := datadir.New(t.TempDir())
@@ -240,15 +251,8 @@ func TestUploadRequests_WaitingReplaysKeepOrder(t *testing.T) {
 		cs := newUploadTestClient(t)
 		release := make(chan struct{})
 		cs.ethApiWrapper = uploadReceiptsGetter{
-			cached: map[common.Hash]types.Receipts{{2}: {{CumulativeGasUsed: 21_000}}},
-			getReceipts: func(ctx context.Context, _ *types.Block) (types.Receipts, error) {
-				select {
-				case <-release:
-					return types.Receipts{{CumulativeGasUsed: 21_000}}, nil
-				case <-ctx.Done():
-					return nil, ctx.Err()
-				}
-			},
+			cached:      map[common.Hash]types.Receipts{{2}: {{CumulativeGasUsed: 21_000}}},
+			getReceipts: waitForUploadReceipts(release),
 		}
 		responses := make(chan *sentryproto.SendMessageByIdRequest, 4)
 		stream := startUploadTestStream(t, ctx, cs, nil, func(response *sentryproto.SendMessageByIdRequest) { responses <- response })
@@ -425,14 +429,7 @@ func TestUploadRequests_PipelinedRequestsBothAnswered(t *testing.T) {
 		defer cancel()
 		cs := newUploadTestClient(t)
 		release := make(chan struct{})
-		cs.ethApiWrapper = uploadReceiptsGetter{getReceipts: func(ctx context.Context, _ *types.Block) (types.Receipts, error) {
-			select {
-			case <-release:
-				return types.Receipts{{CumulativeGasUsed: 21_000}}, nil
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			}
-		}}
+		cs.ethApiWrapper = uploadReceiptsGetter{getReceipts: waitForUploadReceipts(release)}
 		responses := make(chan *sentryproto.SendMessageByIdRequest, 2)
 		stream := startUploadTestStream(t, ctx, cs, nil, func(response *sentryproto.SendMessageByIdRequest) { responses <- response })
 		require.NoError(t, stream.Send(uploadRequest(t, sentryproto.MessageId_GET_RECEIPTS_69, 1, 100, common.Hash{1})))
@@ -506,14 +503,7 @@ func TestUploadRequests_CancellationRemovesWaitingWork(t *testing.T) {
 		defer cancelWaiting()
 		cs := newUploadTestClient(t)
 		release := make(chan struct{})
-		cs.ethApiWrapper = uploadReceiptsGetter{getReceipts: func(ctx context.Context, _ *types.Block) (types.Receipts, error) {
-			select {
-			case <-release:
-				return types.Receipts{{CumulativeGasUsed: 21_000}}, nil
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			}
-		}}
+		cs.ethApiWrapper = uploadReceiptsGetter{getReceipts: waitForUploadReceipts(release)}
 		var active, waiting sync.WaitGroup
 		responses := make(chan *sentryproto.SendMessageByIdRequest, 13)
 		send := func(response *sentryproto.SendMessageByIdRequest) { responses <- response }
