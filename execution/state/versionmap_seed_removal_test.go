@@ -505,9 +505,7 @@ func TestCreditAfterObservedDestructCreatesAFreshAccount(t *testing.T) {
 
 			ibs := NewWithVersionMap(reader, vm)
 			defer ibs.Close()
-			if !materialize {
-				ibs.SetVersionMap(vm)
-			}
+			ibs.noMaterialize = !materialize
 			ibs.SetTxContext(1, 1)
 			_, err := ibs.GetBalance(x)
 			require.NoError(t, err)
