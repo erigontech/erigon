@@ -746,9 +746,9 @@ func (d *Domain) collateBuildIntegrate(ctx context.Context, step kv.Step, tx kv.
 // The per-block read counters must not bring the per-file latency summaries with them: a summary is one shared
 // mutex for every file read of every worker.
 func TestDomain_FileReadObservesNoSummaryUnderBlockReadMetrics(t *testing.T) {
-	prev := dbg.KVReadLevelledMetrics
-	t.Cleanup(func() { dbg.KVReadLevelledMetrics = prev })
-	dbg.KVReadLevelledMetrics = true
+	prevLevelled, prevSummaries := dbg.KVReadLevelledMetrics, dbg.KVFileReadSummaries
+	t.Cleanup(func() { dbg.KVReadLevelledMetrics, dbg.KVFileReadSummaries = prevLevelled, prevSummaries })
+	dbg.KVReadLevelledMetrics, dbg.KVFileReadSummaries = true, false
 
 	db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, 16, log.New())
 	tx, err := db.BeginRw(t.Context())
