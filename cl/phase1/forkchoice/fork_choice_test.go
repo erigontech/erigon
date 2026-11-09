@@ -171,7 +171,53 @@ func TestOnBlockKnownInvalidRetryClearsOptimisticCandidate(t *testing.T) {
 	require.False(t, store.IsRootOptimistic(blockRoot))
 }
 
+func TestOnBlockInvalidPayloadWithLatestValidHashRevertsHeadToValidBranch(t *testing.T) {
+	blocks, anchorState, _ := tests.GetBellatrixRandom()
+	roots := make([]common.Hash, 4)
+	for i := range roots {
+		root, err := blocks[i].Block.HashSSZ()
+		require.NoError(t, err)
+		roots[i] = root
+	}
+	invalidResponse := &execution_client.InvalidPayloadError{
+		LatestValidHash: blocks[0].Block.Body.ExecutionPayload.BlockHash,
+		Err:             errors.New("injected invalid payload"),
+	}
+	engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
+	gomock.InOrder(
+		engine.EXPECT().NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(execution_client.PayloadStatusValidated, nil),
+		engine.EXPECT().NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(execution_client.PayloadStatusNotValidated, nil),
+		engine.EXPECT().NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(execution_client.PayloadStatusNotValidated, nil),
+		engine.EXPECT().NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(execution_client.PayloadStatusInvalidated, invalidResponse),
+	)
+	store := newUntickedBellatrixForkChoiceStore(t, anchorState, engine)
+
+	for i, block := range blocks[:3] {
+		store.OnTick((anchorState.GenesisTime() + block.Block.Slot*anchorState.BeaconConfig().SecondsPerSlot) * 1000)
+		require.NoError(t, store.OnBlock(t.Context(), block, true, true, false), i)
+	}
+	head, _, err := store.GetHead(nil)
+	require.NoError(t, err)
+	require.Equal(t, roots[2], head)
+
+	store.OnTick((anchorState.GenesisTime() + blocks[3].Block.Slot*anchorState.BeaconConfig().SecondsPerSlot) * 1000)
+	require.ErrorIs(t, store.OnBlock(t.Context(), blocks[3], true, true, false), forkchoice.ErrBlockInvalid)
+
+	head, _, err = store.GetHead(nil)
+	require.NoError(t, err)
+	require.Equal(t, roots[0], head)
+	require.False(t, store.IsRootOptimistic(roots[1]))
+	require.False(t, store.IsRootOptimistic(roots[2]))
+}
+
 func newBellatrixForkChoiceStore(t *testing.T, anchorState *state.CachingBeaconState, engine execution_client.ExecutionEngine) *forkchoice.ForkChoiceStore {
+	t.Helper()
+	store := newUntickedBellatrixForkChoiceStore(t, anchorState, engine)
+	store.OnTick(2000 * 1000)
+	return store
+}
+
+func newUntickedBellatrixForkChoiceStore(t *testing.T, anchorState *state.CachingBeaconState, engine execution_client.ExecutionEngine) *forkchoice.ForkChoiceStore {
 	t.Helper()
 	genesisState, err := initial_state.GetGenesisState(t.Context(), 1)
 	require.NoError(t, err)
@@ -193,7 +239,6 @@ func newBellatrixForkChoiceStore(t *testing.T, anchorState *state.CachingBeaconS
 		nil,
 	)
 	require.NoError(t, err)
-	store.OnTick(2000 * 1000)
 	return store
 }
 

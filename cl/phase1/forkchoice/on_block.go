@@ -393,6 +393,9 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 				}
 			case execution_client.PayloadStatusInvalidated:
 				log.Warn("OnBlock: block is invalid", "block", common.Hash(blockRoot), "err", err)
+				if ancestorsErr := f.invalidateOptimisticAncestorsLocked(err, block.Block); ancestorsErr != nil {
+					return ancestorsErr
+				}
 				// remove from optimistic candidate
 				if err := f.optimisticStore.InvalidateBlock(blockRoot, block.Block); err != nil {
 					return fmt.Errorf("failed to remove block from optimistic store: %w", err)
