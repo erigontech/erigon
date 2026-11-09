@@ -782,6 +782,54 @@ func TestSyncSnapshotsCommitmentRequestList(t *testing.T) {
 	}
 }
 
+func TestSyncSnapshotsCommitmentV3StateTip(t *testing.T) {
+	legacyFiles := []string{
+		"domain/v2.2-commitment.0-16.kv",
+		"domain/v2.0-commitment.0-16.bt",
+		"domain/v2.0-accounts.0-16.kv",
+		"domain/v2.0-storage.0-16.kv",
+		"domain/v2.0-code.0-16.kv",
+		"domain/v2.2-commitment.16-32.kv",
+		"domain/v2.0-commitment.16-32.bt",
+		"domain/v2.0-accounts.16-32.kv",
+		"domain/v2.0-storage.16-32.kv",
+		"domain/v2.0-code.16-32.kv",
+	}
+	cfg, ok := snapcfg.KnownCfg(networkname.Mainnet)
+	require.True(t, ok)
+	previous := *cfg
+	t.Cleanup(func() { *cfg = previous })
+	cfg.Local = false
+	for _, tc := range []struct {
+		name        string
+		v3, olderV3 bool
+	}{
+		{name: "v3 on legacy only", v3: true},
+		{name: "v3 below state tip", v3: true, olderV3: true},
+		{name: "v3 off legacy only"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Cleanup(statecfg.SetCommitmentV3(tc.v3))
+			cfg.Preverified.Items = nil
+			for _, name := range legacyFiles {
+				cfg.Preverified.Items = append(cfg.Preverified.Items, snapcfg.PreverifiedItem{Name: name, Hash: strings.Repeat("0", 40)})
+			}
+			if tc.olderV3 {
+				cfg.Preverified.Items = append(cfg.Preverified.Items, snapcfg.PreverifiedItem{Name: "domain/v3.0-commitment.0-16.kv", Hash: strings.Repeat("0", 40)})
+			}
+			downloader := &requestListDownloader{}
+			err := SyncSnapshots(t.Context(), "test", "test", false, false, false, BlobRetention{}, prune.ArchiveMode, NoCaplin, nil, &requestListBlockReader{}, &chain.Config{ChainName: networkname.Mainnet}, downloader, ethconfig.Sync{KeepExecutionProofs: true}, 16)
+			if tc.v3 {
+				require.ErrorContains(t, err, "commitment convert --v3")
+				require.Empty(t, downloader.names)
+			} else {
+				require.NoError(t, err)
+				require.ElementsMatch(t, legacyFiles, downloader.names)
+			}
+		})
+	}
+}
+
 func TestBlobSidecarDownloadFilter(t *testing.T) {
 	seg := "v1.1-008620-008630-blobsidecars.seg"
 	idx := "v1.1-008620-008630-blocksidecars.idx"
