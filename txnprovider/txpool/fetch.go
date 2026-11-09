@@ -449,6 +449,11 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentryproto.Sen
 		switch req.Id {
 		case sentryproto.MessageId_TRANSACTIONS_66, sentryproto.MessageId_POOLED_TRANSACTIONS_66:
 			if _, seen := seenLRU.Get(req.Data); seen {
+				// A repeated blob broadcast from another peer is still a protocol violation.
+				if req.Id == sentryproto.MessageId_TRANSACTIONS_66 && hasBlobTxn(req.Data) {
+					f.logger.Debug("[txpool] penalizing peer for broadcast blob tx", "peer", req.PeerId)
+					f.penalizePeer(streamCtx, sentryClient, req.PeerId)
+				}
 				if f.wg != nil {
 					f.wg.Done()
 				}
@@ -699,22 +704,40 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 	return nil
 }
 
-// hasBlobTxn reports whether a Transactions payload contains a blob transaction.
-// Malformed payloads report false and are left to the regular parser.
+// hasBlobTxn reports whether a Transactions payload contains a blob transaction
+// or a frame transaction wrapped with blobs. Malformed payloads, and payloads
+// over maxTransactionsPerPacket, report false and are left to the regular parser.
 func hasBlobTxn(payload []byte) bool {
 	pos, _, err := rlp.ParseList(payload, 0)
 	if err != nil {
 		return false
 	}
-	for pos < len(payload) {
+	for count := 0; pos < len(payload); count++ {
+		if count == maxTransactionsPerPacket {
+			return false
+		}
 		dataPos, dataLen, isList, err := rlp.Prefix(payload, pos)
 		if err != nil {
 			return false
 		}
-		if !isList && dataPos > pos && dataLen > 0 && payload[dataPos] == BlobTxnType {
+		if !isList && dataPos > pos && dataLen > 0 && isBlobEnvelope(payload[dataPos:dataPos+dataLen]) {
 			return true
 		}
 		pos = dataPos + dataLen
+	}
+	return false
+}
+
+// isBlobEnvelope reports whether a typed transaction envelope carries blobs:
+// any type-3 transaction, or a frame transaction whose first list element is
+// the inner body, as in ParseTransaction's frame wrapper check.
+func isBlobEnvelope(txBytes []byte) bool {
+	switch txBytes[0] {
+	case BlobTxnType:
+		return true
+	case FrameTxnType:
+		bodyPos, bodyLen, err := rlp.ParseList(txBytes, 1)
+		return err == nil && bodyLen > 0 && txBytes[bodyPos] >= 0xc0
 	}
 	return false
 }

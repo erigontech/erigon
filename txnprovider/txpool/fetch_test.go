@@ -37,6 +37,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -978,17 +979,78 @@ func TestFetchSerializesBatchFlushes(t *testing.T) {
 	})
 }
 
+func makeWrappedFrameBlobTxnRlp(t *testing.T) []byte {
+	frame := framePoolSlot(t, common.Address{1}, 1, 2).Txn.(*types.FrameTransaction)
+	frame.BlobVersionedHashes = []common.Hash{{1}}
+	wrapped := &types.FrameTxWrapper{FrameTransaction: frame, WrapperVersion: 1, Blobs: types.Blobs{{}}, Commitments: types.BlobKzgs{{}}, Proofs: make(types.KZGProofs, 128)}
+	var encoded bytes.Buffer
+	require.NoError(t, wrapped.MarshalBinaryWrapped(&encoded))
+	return encoded.Bytes()
+}
+
 func TestPenalizePeerForBroadcastBlobTxn(t *testing.T) {
 	t.Parallel()
-	for _, known := range []bool{false, true} {
-		t.Run(fmt.Sprintf("known=%t", known), func(t *testing.T) {
-			t.Parallel()
-			testPenalizePeerForBroadcastBlobTxn(t, known)
-		})
+	for _, kind := range []string{"blob", "frame-blob"} {
+		for _, known := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/known=%t", kind, known), func(t *testing.T) {
+				t.Parallel()
+				blobTxnRlp := makeWrappedBlobTxnRlpWithCellProofs(t, uint256.NewInt(1), 1)
+				if kind == "frame-blob" {
+					blobTxnRlp = makeWrappedFrameBlobTxnRlp(t)
+				}
+				testPenalizePeerForBroadcastBlobTxn(t, known, blobTxnRlp)
+			})
+		}
 	}
 }
 
-func testPenalizePeerForBroadcastBlobTxn(t *testing.T, known bool) {
+func TestHasBlobTxnStopsAtTransactionLimit(t *testing.T) {
+	blobTxnRlp := []byte{BlobTxnType, 0xc0} // only the type byte is inspected
+	ordinary := tpEncodeTests[1].txns[0]
+	txns := make([][]byte, maxTransactionsPerPacket, maxTransactionsPerPacket+1)
+	for i := range txns {
+		txns[i] = ordinary
+	}
+	require.True(t, hasBlobTxn(EncodeTransactions(append(txns[:maxTransactionsPerPacket-1:maxTransactionsPerPacket-1], blobTxnRlp), nil)))
+	require.False(t, hasBlobTxn(EncodeTransactions(append(txns, blobTxnRlp), nil)))
+}
+
+func TestPenalizeEveryPeerForDuplicateBroadcastBlobTxn(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		pool := NewMockPool(ctrl)
+		pool.EXPECT().Started().Return(true).AnyTimes()
+		client := sentryproto.NewMockSentryClient(ctrl)
+		secondPeer := gointerfaces.ConvertHashToH512([64]byte{2})
+		client.EXPECT().
+			PenalizePeer(gomock.Any(), gomock.Any()).
+			DoAndReturn(func(_ context.Context, req *sentryproto.PenalizePeerRequest, _ ...grpc.CallOption) (*emptypb.Empty, error) {
+				assert.Equal(t, secondPeer, req.PeerId)
+				assert.Equal(t, sentryproto.PenaltyKind_Kick, req.Penalty)
+				return &emptypb.Empty{}, nil
+			}).
+			Times(1)
+		// No db: the batched first message is dropped unhandled, so only the duplicate path can kick.
+		fetch := NewFetch(t.Context(), nil, pool, nil, nil, u256.N1, log.New())
+		payload := EncodeTransactions([][]byte{makeWrappedBlobTxnRlpWithCellProofs(t, uint256.NewInt(1), 1)}, nil)
+		messages := []*sentryproto.InboundMessage{
+			{Id: sentryproto.MessageId_TRANSACTIONS_66, Data: payload, PeerId: peerID},
+			{Id: sentryproto.MessageId_TRANSACTIONS_66, Data: payload, PeerId: secondPeer},
+		}
+		stream := &boundedBatchStream{recv: func() (*sentryproto.InboundMessage, error) {
+			if len(messages) == 0 {
+				return nil, nil
+			}
+			req := messages[0]
+			messages = messages[1:]
+			return req, nil
+		}}
+		client.EXPECT().Messages(gomock.Any(), gomock.Any(), gomock.Any()).Return(stream, nil)
+		require.NoError(t, fetch.receiveMessage(t.Context(), client))
+	})
+}
+
+func testPenalizePeerForBroadcastBlobTxn(t *testing.T, known bool, blobTxnRlp []byte) {
 	ctx := t.Context()
 
 	ctrl := gomock.NewController(t)
@@ -1009,7 +1071,6 @@ func testPenalizePeerForBroadcastBlobTxn(t *testing.T, known bool) {
 	require.NoError(t, err)
 	fetch := NewFetch(ctx, []sentryproto.SentryClient{sentryClient}, pool, nil, nil, u256.N1, log.New())
 
-	blobTxnRlp := makeWrappedBlobTxnRlpWithCellProofs(t, uint256.NewInt(1), 1)
 	err = fetch.handleInboundMessageWithTx(ctx, nil, &sentryproto.InboundMessage{
 		Id:     sentryproto.MessageId_TRANSACTIONS_66,
 		Data:   EncodeTransactions([][]byte{tpEncodeTests[1].txns[0], blobTxnRlp}, nil),
