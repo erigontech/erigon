@@ -80,6 +80,7 @@ var fastPathOps = map[OpCode]fastPathWant{
 	ORIGIN:         {opOrigin, GasQuickStep, 0, 1, nil, nil},
 	CALLER:         {opCaller, GasQuickStep, 0, 1, nil, nil},
 	CALLDATASIZE:   {opCallDataSize, GasQuickStep, 0, 1, nil, nil},
+	CALLDATALOAD:   {opCallDataLoad, GasFastestStep, 1, 1, nil, nil},
 	CODESIZE:       {opCodeSize, GasQuickStep, 0, 1, nil, nil},
 	GASPRICE:       {opGasprice, GasQuickStep, 0, 1, nil, nil},
 	RETURNDATASIZE: {opReturnDataSize, GasQuickStep, 0, 1, nil, nil},
