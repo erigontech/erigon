@@ -375,9 +375,7 @@ func (g graph) accountPlanFor(ctx commitment.PatriciaContext, root *node, entry 
 	case entry.update != nil && entry.update.Deleted():
 		plan.delete = found
 		plan.skip = !found
-	case !entry.storageDirty && (entry.update == nil || entry.update.Flags == 0):
-		plan.skip = true
-	case !found && entry.update != nil && entry.update.Flags == 0:
+	case !entry.storageDirty && entry.update == nil:
 		plan.skip = true
 	}
 	return plan, nil

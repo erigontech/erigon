@@ -214,6 +214,9 @@ func process(engine commitment.Trie, mode commitment.Mode, dir string, ops []com
 	defer updates.Close()
 	for _, op := range ops {
 		if op.Read {
+			if engine.Variant() == commitment.VariantCommitmentV3 {
+				continue
+			}
 			updates.TouchPlainKey(string(op.Key), nil, func(*commitment.KeyUpdate, []byte) {})
 		} else {
 			updates.TouchPlainKeyDirect(string(op.Key), Update(op))

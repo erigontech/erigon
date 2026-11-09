@@ -30,8 +30,7 @@ var errPhaseAUpdate = errors.New("commitment v3: invalid phase A update")
 type storageOp uint8
 
 const (
-	storageSkip storageOp = iota
-	storagePut
+	storagePut storageOp = iota
 	storageDelete
 )
 
@@ -43,8 +42,6 @@ type storageEntry struct {
 
 func storageEntryOf(path []byte, update *commitment.Update) (storageEntry, error) {
 	switch {
-	case update == nil || update.Flags == 0:
-		return storageEntry{path: path}, nil
 	case update.Deleted():
 		return storageEntry{path: path, op: storageDelete}, nil
 	case update.Flags&commitment.StorageUpdate == 0 || update.StorageLen < 0:
@@ -164,9 +161,6 @@ func runStorageTaskWithPlan(ctx commitment.PatriciaContext, task storageTask, pl
 	fanned := false
 	if len(task.entries) >= plan.fanOutMin {
 		fanned, err = g.fanOutRoot(ctx, root, len(task.entries), func(i int) byte { return task.entries[i].path[0] }, plan, func(ctx commitment.PatriciaContext, i int) error {
-			if task.entries[i].op == storageSkip {
-				return nil
-			}
 			return g.ensurePath(ctx, root, task.entries[i].path)
 		}, nil, nil)
 		if err != nil {
@@ -178,9 +172,6 @@ func runStorageTaskWithPlan(ctx commitment.PatriciaContext, task storageTask, pl
 	}
 
 	for _, entry := range task.entries {
-		if entry.op == storageSkip {
-			continue
-		}
 		if !fanned && bytes.HasPrefix(entry.path, root.path) {
 			if err := g.ensurePath(ctx, root, entry.path); err != nil {
 				return [32]byte{}, nil, err

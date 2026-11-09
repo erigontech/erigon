@@ -111,6 +111,11 @@ func TestPartition(t *testing.T) {
 			require.Empty(t, ctx.branches[string(StorageNodeKey(storage[0].addrHash, nil, nil))])
 		})
 	}
+	t.Run("EmptyStorageUpdateIsInvalid", func(t *testing.T) {
+		p := &partitioner{}
+		err := p.add(append(path(1), path(2)...), &commitment.Update{})
+		require.ErrorIs(t, err, errPhaseAUpdate)
+	})
 	t.Run("E34/E63/PartitionFeedMatchesSerialPartition", func(t *testing.T) {
 		items := make([]feedEntry, 0, hashParallelMin*3)
 		for i := range hashParallelMin {
