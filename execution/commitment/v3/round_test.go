@@ -759,6 +759,19 @@ func TestMetrics(t *testing.T) {
 		}
 	})
 
+	t.Run("trace_does_not_bill_writes", func(t *testing.T) {
+		tr := &Trie{ctx: newMockContext(), scheduleWorkers: 1}
+		seed := testUpdates(t, commitment.ModeCollect, []commitmenttest.Op{parityAccount(parityAddress(1), 1), parityAccount(parityAddress(2), 2)})
+		_, err := tr.Process(t.Context(), seed, "", nil, commitment.WarmupConfig{})
+		require.NoError(t, err)
+		updates := testUpdates(t, commitment.ModeCollect, []commitmenttest.Op{parityAccount(parityAddress(1), 3)})
+		before := read()
+		_, err = tr.TraceCollapsesRoot(t.Context(), updates, func([]byte, []byte) {})
+		require.NoError(t, err)
+		after := read()
+		require.Equal(t, before[2:], after[2:])
+	})
+
 	t.Run("deferred_bills_branch_writes", func(t *testing.T) {
 		before := read()
 		runV3(t, newShardedContext(), v3Config{deferred: true}, benchEntries("storage", 64))

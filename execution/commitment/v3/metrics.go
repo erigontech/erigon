@@ -54,14 +54,6 @@ func branchOwned(ctx commitment.PatriciaContext, prefix []byte) ([]byte, kv.Step
 	return bytes.Clone(data), step, err
 }
 
-func (c *meteredContext) countDeltas(parts deltaParts) {
-	for _, part := range parts {
-		for i := range part {
-			c.countDelta(part[i])
-		}
-	}
-}
-
 func (c *meteredContext) countDelta(delta recordDelta) {
 	c.writes.Add(1)
 	c.writeBytes.Add(uint64(len(delta.Data)))

@@ -98,6 +98,14 @@ func (t *Trie) SetCollapseTracer(tracer commitment.CollapseTracer) { t.collapseT
 
 func (t *Trie) TakeDeferredDeltas() [][]commitment.BranchDelta {
 	parts := t.deferred
+	writes, writeBytes := 0, 0
+	for _, part := range parts {
+		writes += len(part)
+		for _, delta := range part {
+			writeBytes += len(delta.Data)
+		}
+	}
+	commitment.PublishBranchWrites(writes, writeBytes, nil)
 	t.deferred = nil
 	return parts
 }
@@ -182,7 +190,6 @@ func (t *Trie) round(ctx context.Context, onProgress func(*commitment.CommitProg
 	}
 	if t.deferUpdates {
 		t.deferred = parts
-		metered.countDeltas(parts)
 	} else if err := applyDeltas(parts, t.ctx.PutBranch, metered.countDelta); err != nil {
 		return nil, err
 	}
