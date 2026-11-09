@@ -178,13 +178,6 @@ func check(tb testing.TB, c commitmenttest.Case, got observation) {
 	}
 }
 
-func Run(tb testing.TB, c commitmenttest.Case, spec RunSpec, open openFunc) observation {
-	tb.Helper()
-	got := execute(tb, c, spec, open)
-	check(tb, c, got)
-	return got
-}
-
 func Compare(tb testing.TB, c commitmenttest.Case, runs []RunSpec, open openFunc) []observation {
 	tb.Helper()
 	observations := make([]observation, 0, len(runs))

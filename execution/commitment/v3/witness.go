@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"math/bits"
+	"slices"
 
 	keccak "github.com/erigontech/fastkeccak"
 
@@ -175,7 +176,7 @@ func (w *witnessWalk) walkPlane(plane byte, addrHash, fullKey, k []byte, want []
 		return w.leaf(plane, fullKey, k, r.leafKey, r.payload)
 	}
 	if len(r.n.path) == 0 {
-		return w.descend(plane, addrHash, fullKey, r.branch.n, nil, k)
+		return w.descend(plane, addrHash, fullKey, r.branch.n, k)
 	}
 	if !bytes.HasPrefix(k, r.n.path) {
 		if w.exclusion && plane == planeStorage {
@@ -184,10 +185,10 @@ func (w *witnessWalk) walkPlane(plane byte, addrHash, fullKey, k []byte, want []
 		return nil
 	}
 	w.emit(r.branch.rlp, r.branch.hash)
-	return w.descend(plane, addrHash, fullKey, r.branch.n, r.n.path, k[len(r.n.path):])
+	return w.descend(plane, addrHash, fullKey, r.branch.n, k[len(r.n.path):])
 }
 
-func (w *witnessWalk) descend(plane byte, addrHash, fullKey []byte, b *node, path, k []byte) error {
+func (w *witnessWalk) descend(plane byte, addrHash, fullKey []byte, b *node, k []byte) error {
 	for len(k) > 0 {
 		nib := int(k[0])
 		k = k[1:]
@@ -204,7 +205,7 @@ func (w *witnessWalk) descend(plane byte, addrHash, fullKey []byte, b *node, pat
 			return w.leaf(plane, fullKey, k, leafKey, payload)
 		}
 		ext := b.childExtAt(nib)
-		childPath := append(append(append(make([]byte, 0, len(path)+1+len(ext)), path...), byte(nib)), ext...)
+		childPath := slices.Concat(b.path, []byte{byte(nib)}, ext)
 		if len(ext) != 0 {
 			rlp := appendExtensionRLP(nil, ext, b.childHashAt(nib))
 			w.emit(rlp, keccak.Sum256(rlp))
@@ -226,7 +227,7 @@ func (w *witnessWalk) descend(plane byte, addrHash, fullKey []byte, b *node, pat
 			return err
 		}
 		w.emit(child.rlp, child.hash)
-		b, path = child.n, childPath
+		b = child.n
 	}
 	return nil
 }

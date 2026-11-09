@@ -63,22 +63,8 @@ func appendStorageLeafRLP(dst, suffix, payload []byte) []byte {
 	if len(payload) > length.Hash {
 		panic(fmt.Sprintf("commitment v3: storage leaf payload has length %d", len(payload)))
 	}
-	innerLen := rlp.StringLen(payload)
-	outerLen := innerLen
-	if innerLen > 1 || len(payload) == 0 {
-		outerLen++
-	}
-	contentLen := rlp.StringLen(suffix) + outerLen
-	start := len(dst)
-	dst = append(dst, make([]byte, rlp.ListLen(contentLen))...)
-	pos := start + rlp.EncodeListPrefixToBuf(contentLen, dst[start:])
-	pos += rlp.EncodeStringToBuf(suffix, dst[pos:])
-	if outerLen > innerLen {
-		dst[pos] = byte(0x80 + innerLen)
-		pos++
-	}
-	pos += rlp.EncodeStringToBuf(payload, dst[pos:])
-	return dst[:pos]
+	var inner [1 + length.Hash]byte
+	return appendLeafRLP(dst, suffix, inner[:rlp.EncodeStringToBuf(payload, inner[:])])
 }
 
 func storageLeafRef(suffix []byte, payload []byte, dst []byte) []byte {

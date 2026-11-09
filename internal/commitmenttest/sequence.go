@@ -43,7 +43,7 @@ func Generate(seed Seed, spec SequenceSpec) Case {
 	for _, size := range spec.BatchSizes {
 		spec.Count += size
 	}
-	rng := seed.rand()
+	rng := rand.New(rand.NewSource(int64(seed)))
 	if spec.Kind == "stress" {
 		c.Rounds = stressRounds(rng, spec)
 		return c
@@ -290,9 +290,7 @@ func accountOp(key []byte, value AccountValue) Op { return Op{Key: key, Account:
 
 func AccountAt(key []byte, spec AccountSpec) Op { return accountOp(key, Account(spec)) }
 
-func StorageAt(key []byte, number int) Op {
-	return Op{Key: key, Storage: Storage(number)}
-}
+func StorageAt(key []byte, number int) Op { return Op{Key: key, Storage: Storage(number)} }
 
 func DeleteAt(key []byte) Op { return Op{Key: key, Delete: true} }
 

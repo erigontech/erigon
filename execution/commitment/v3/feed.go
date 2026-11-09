@@ -108,10 +108,17 @@ func partitionUpdates(ctx context.Context, updates *commitment.Updates, workers 
 	if workers <= 0 {
 		workers = runtime.GOMAXPROCS(0)
 	}
-	items, err := drainFeed(ctx, updates, workers)
-	if err != nil {
+	items := make([]feedEntry, 0, updates.Size())
+	if err := updates.Drain(func(plainKey string, update *commitment.Update) error {
+		items = append(items, feedEntry{plainKey: plainKey, update: update})
+		return nil
+	}); err != nil {
 		return nil, nil, 0, err
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, nil, 0, err
+	}
+	hashFeed(items, workers)
 	if workers > 1 && len(items) >= hashParallelMin && sorted == nil {
 		return partitionFeed(items, workers)
 	}
@@ -130,21 +137,6 @@ func partitionUpdates(ctx context.Context, updates *commitment.Updates, workers 
 	}
 	storage, accounts := p.done()
 	return storage, accounts, len(items), nil
-}
-
-func drainFeed(ctx context.Context, updates *commitment.Updates, workers int) ([]feedEntry, error) {
-	items := make([]feedEntry, 0, updates.Size())
-	if err := updates.Drain(func(plainKey string, update *commitment.Update) error {
-		items = append(items, feedEntry{plainKey: plainKey, update: update})
-		return nil
-	}); err != nil {
-		return nil, err
-	}
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	hashFeed(items, workers)
-	return items, nil
 }
 
 func partitionAccounts(feed []commitment.FeedAccount, workers int) ([]storageTask, []accountEntry) {

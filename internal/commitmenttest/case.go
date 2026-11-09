@@ -16,11 +16,7 @@
 
 package commitmenttest
 
-import "math/rand"
-
 type Seed int64
-
-func (s Seed) rand() *rand.Rand { return rand.New(rand.NewSource(int64(s))) }
 
 type Op struct {
 	Key                  []byte

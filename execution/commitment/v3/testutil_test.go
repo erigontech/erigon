@@ -75,7 +75,7 @@ func TestSharedRunnerCatalogue(t *testing.T) {
 		t.Run(tc.id, func(t *testing.T) {
 			c := commitmenttest.Generate(commitmenttest.Seed(0), commitmenttest.SequenceSpec{Kind: tc.kind, Count: tc.count})
 			c.ID = tc.id
-			runner.Run(t, c, runner.RunSpec{Name: "v3", Mode: commitment.ModeCollect, Context: runner.ContextSpec{ForbidStateReads: true}}, openTestTrie)
+			runner.Compare(t, c, []runner.RunSpec{{Name: "v3", Mode: commitment.ModeCollect, Context: runner.ContextSpec{ForbidStateReads: true}}}, openTestTrie)
 		})
 	}
 }
