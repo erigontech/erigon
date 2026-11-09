@@ -97,6 +97,29 @@ func (d *Dispatcher) Dispatch(
 	if accumulator != nil {
 		accumulator.SetStateID(stateVersion)
 	}
+	currentHeader := rawdb.ReadCurrentHeader(tx)
+	var pendingBaseFee, pendingBlobFee uint64
+	if accumulator != nil && currentHeader != nil {
+		if changes := accumulator.Changes(); len(changes) == 0 || changes[len(changes)-1].BlockHeight < currentHeader.Number.Uint64() {
+			accumulator.StartChange(currentHeader, nil, false)
+		}
+
+		pendingBaseFee = misc.CalcBaseFee(d.chainConfig, currentHeader).Uint64()
+		pendingBlobFee = d.chainConfig.GetMinBlobGasPrice()
+		if currentHeader.ExcessBlobGas != nil {
+			nextBlockTime := currentHeader.Time + d.chainConfig.SecondsPerSlot()
+			excessBlobGas := misc.CalcExcessBlobGas(d.chainConfig, currentHeader, nextBlockTime)
+			f, err := misc.GetBlobGasPrice(d.chainConfig, excessBlobGas, nextBlockTime)
+			if err != nil {
+				return err
+			}
+			pendingBlobFee = f.Uint64()
+		}
+		// Account reads can fail. Finish preparing the batch before publishing events.
+		if err := accumulator.RefreshAccounts(state); err != nil {
+			return err
+		}
+	}
 
 	if d.events != nil {
 		base := finishProgressBefore
@@ -141,30 +164,9 @@ func (d *Dispatcher) Dispatch(
 		}
 	}
 
-	currentHeader := rawdb.ReadCurrentHeader(tx)
 	if accumulator != nil && currentHeader != nil {
-		if changes := accumulator.Changes(); len(changes) == 0 || changes[len(changes)-1].BlockHeight < currentHeader.Number.Uint64() {
-			accumulator.StartChange(currentHeader, nil, false)
-		}
-
-		pendingBaseFee := misc.CalcBaseFee(d.chainConfig, currentHeader)
-		pendingBlobFee := d.chainConfig.GetMinBlobGasPrice()
-		if currentHeader.ExcessBlobGas != nil {
-			nextBlockTime := currentHeader.Time + d.chainConfig.SecondsPerSlot()
-			excessBlobGas := misc.CalcExcessBlobGas(d.chainConfig, currentHeader, nextBlockTime)
-			f, err := misc.GetBlobGasPrice(d.chainConfig, excessBlobGas, nextBlockTime)
-			if err != nil {
-				return err
-			}
-			pendingBlobFee = f.Uint64()
-		}
-
 		finalizedBlock := common.Deref(rawdb.ReadHeaderNumber(tx, rawdb.ReadForkchoiceFinalized(tx)))
-
-		if err := accumulator.RefreshAccounts(state); err != nil {
-			return err
-		}
-		accumulator.SendAndReset(ctx, d.stateChangeConsumer, pendingBaseFee.Uint64(), pendingBlobFee, currentHeader.GasLimit, finalizedBlock)
+		accumulator.SendAndReset(ctx, d.stateChangeConsumer, pendingBaseFee, pendingBlobFee, currentHeader.GasLimit, finalizedBlock)
 	}
 	return nil
 }

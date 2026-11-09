@@ -428,6 +428,71 @@ func TestFetchStateChangeRecoveryStopsOnCancellation(t *testing.T) {
 	require.ErrorIs(t, fetch.handleStateChanges(ctx, client), context.Canceled)
 }
 
+func TestFetchCoalescesSupersededStateChanges(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+		defer cancel()
+		rlps := [][]byte{decodeHex(TxnParseMainnetTests[1].PayloadStr), decodeHex(TxnParseMainnetTests[2].PayloadStr)}
+		batches := make([]*remoteproto.StateChangeBatch, 3)
+		originals := make([]*remoteproto.StateChangeBatch, len(batches))
+		ctrl := gomock.NewController(t)
+		stream := remoteproto.NewMockKV_StateChangesClient[*remoteproto.StateChangeBatch](ctrl)
+		for i := range batches {
+			batch := newBlockChangeForAccounts(common.Hash{byte(i + 1)}, 0)
+			batch.StateVersionId = uint64(i + 1)
+			batch.StateChangesIncomplete = i == 0
+			batch.PendingBlockBaseFee = uint64(i + 1)
+			batch.ChangeBatch[0].Changes = []*remoteproto.AccountChange{{
+				Address: gointerfaces.ConvertAddressToH160(common.Address{byte(i + 1)}),
+				Action:  remoteproto.Action_UPSERT,
+				Data:    []byte{byte(i + 1)},
+			}}
+			batch.ChangeBatch[0].Direction = remoteproto.Direction_FORWARD
+			batch.ChangeBatch[0].Txs = [][]byte{rlps[0]}
+			if i == 1 {
+				batch.ChangeBatch[0].Direction = remoteproto.Direction_UNWIND
+			}
+			if i == 2 {
+				batch.ChangeBatch[0].Txs = [][]byte{rlps[1]}
+			}
+			batches[i] = batch
+			originals[i] = proto.Clone(batch).(*remoteproto.StateChangeBatch)
+			stream.EXPECT().Recv().Return(batch, nil)
+		}
+		stream.EXPECT().Recv().Return(nil, io.EOF)
+		client := remoteproto.NewMockKVClient(ctrl)
+		client.EXPECT().StateChanges(gomock.Any(), gomock.Any(), gomock.Any()).Return(stream, nil)
+		pool := NewMockPool(ctrl)
+		calls := uint64(0)
+		pool.EXPECT().OnNewBlock(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+			func(_ context.Context, batch *remoteproto.StateChangeBatch, unwind, unwindBlobs, mined TxnSlots) error {
+				calls++
+				require.Equal(t, calls, batch.StateVersionId, "a superseded view must advance to the next batch")
+				if calls < 3 {
+					return errStateViewSuperseded
+				}
+				require.True(t, batch.StateChangesIncomplete)
+				require.Equal(t, uint64(3), batch.PendingBlockBaseFee)
+				require.Len(t, batch.ChangeBatch, 3)
+				require.Empty(t, batch.ChangeBatch[0].Changes, "obsolete account values must not overlay the new snapshot")
+				require.Empty(t, batch.ChangeBatch[1].Changes)
+				require.True(t, proto.Equal(batches[2].ChangeBatch[0], batch.ChangeBatch[2]))
+				require.Len(t, unwind.Txns, 1)
+				require.Equal(t, rlps[0], unwind.Txns[0].Rlp)
+				require.Empty(t, unwindBlobs.Txns)
+				require.Len(t, mined.Txns, 1)
+				require.Equal(t, rlps[1], mined.Txns[0].Rlp)
+				return nil
+			}).Times(3)
+		fetch := NewFetch(ctx, nil, pool, client, nil, u256.N1, log.New())
+		require.ErrorIs(t, fetch.handleStateChanges(ctx, client), io.EOF)
+		require.Equal(t, uint64(1), fetch.newBlocks.Load())
+		for i, original := range originals {
+			require.True(t, proto.Equal(original, batches[i]), "shared notifications must remain unchanged")
+		}
+	})
+}
+
 func TestFetchRetainedForwardThenUnwindKeepsReplacement(t *testing.T) {
 	ctx, pool, poolDB, _ := newTestPool(t)
 	fetch := NewFetch(ctx, nil, pool, nil, poolDB, pool.chainID, log.New())

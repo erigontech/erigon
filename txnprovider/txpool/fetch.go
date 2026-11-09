@@ -792,12 +792,19 @@ func (f *Fetch) handleStateChanges(ctx context.Context, client StateChangesClien
 	if err != nil {
 		return err
 	}
+	var pending []*remoteproto.StateChange
 	for req, err := stream.Recv(); ; req, err = stream.Recv() {
 		if err != nil {
 			return err
 		}
 		if req == nil {
 			return nil
+		}
+		if len(pending) != 0 {
+			req = proto.Clone(req).(*remoteproto.StateChangeBatch)
+			req.ChangeBatch = append(pending, req.ChangeBatch...)
+			req.StateChangesIncomplete = true
+			pending = nil
 		}
 		for {
 			applyErr := f.handleStateChangesRequest(ctx, req)
@@ -806,6 +813,15 @@ func (f *Fetch) handleStateChanges(ctx context.Context, client StateChangesClien
 			}
 			if err := ctx.Err(); err != nil {
 				return err
+			}
+			if errors.Is(applyErr, errStateViewSuperseded) {
+				// Keep transaction directions for the next usable view, but do not
+				// overlay old account values onto its snapshot. Incompleteness forces a full refresh.
+				pending = proto.Clone(req).(*remoteproto.StateChangeBatch).ChangeBatch
+				for _, change := range pending {
+					change.Changes = nil
+				}
+				break
 			}
 			if !errors.Is(applyErr, context.Canceled) {
 				f.logger.Warn("[fetch] onNewBlock", "err", applyErr)

@@ -30,7 +30,12 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/kvcache"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/node/gointerfaces"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
@@ -148,4 +153,40 @@ func TestFramePoolAdmissionWaitsForStateRecovery(t *testing.T) {
 		require.NoError(t, <-admitted)
 		require.Equal(t, PendingSubPool, pool.byHash[string(frame.IDHash[:])].currentSubPool)
 	})
+}
+
+func TestPoolRejectsSupersededIncompleteState(t *testing.T) {
+	ctx, pool, _, db, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+	pool._stateCache = kvcache.NewLatestBatchCache()
+	account := accounts.Account{Balance: *uint256.NewInt(common.Ether), CodeHash: accounts.EmptyCodeHash}
+	writeTestSenderState(t, ctx, db, pool.logger, sender, accounts.SerialiseV3(&account), 1)
+	initial := newBlockChangeForAccounts(common.Hash{1}, 0)
+	require.NoError(t, pool.OnNewBlock(ctx, initial, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	txn := newTestTxnSlot(0, 0, 1, 2, 21_000)
+	txn.IDHash = txn.Txn.Hash()
+	var txns TxnSlots
+	txns.Append(txn, sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+
+	stale := newBlockChangeForAccounts(common.Hash{2}, 0)
+	stale.StateChangesIncomplete = true
+	require.NoError(t, db.View(ctx, func(tx kv.Tx) error {
+		var err error
+		stale.StateVersionId, err = rawdb.GetStateVersion(tx)
+		return err
+	}))
+	account.Nonce = 1
+	stale.ChangeBatch[0].Changes = []*remoteproto.AccountChange{{
+		Address: gointerfaces.ConvertAddressToH160(sender), Action: remoteproto.Action_UPSERT,
+		Data: accounts.SerialiseV3(&account),
+	}}
+	account.Nonce = 0
+	writeTestSenderState(t, ctx, db, pool.logger, sender, accounts.SerialiseV3(&account), 2)
+
+	require.Error(t, pool.OnNewBlock(ctx, stale, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	require.Contains(t, pool.byHash, string(txn.IDHash[:]), "an obsolete account update must not discard the valid transaction")
+	require.Equal(t, common.Hash{1}, pool.stateBlockHash)
+	require.True(t, pool.stateViewStale)
 }

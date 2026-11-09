@@ -18,6 +18,7 @@ package execmodule
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -160,6 +161,43 @@ func TestDispatcherRefreshesIncompleteAccountChanges(t *testing.T) {
 			require.Equal(t, want, value, "the coherent cache must agree with the committed state")
 		})
 	}
+}
+
+type failingNotificationState struct {
+	kv.TemporalGetter
+	err error
+}
+
+func (s failingNotificationState) GetLatest(kv.Domain, []byte, kv.GetLatestOptions) ([]byte, kv.Step, error) {
+	return nil, 0, s.err
+}
+
+func TestDispatcherDoesNotPublishBeforeAccountRefresh(t *testing.T) {
+	_, tx := temporaltest.NewTestTx(t)
+	header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 30_000_000, BaseFee: uint256.NewInt(1_000_000_000)}
+	require.NoError(t, rawdb.WriteHeader(tx, header))
+	require.NoError(t, rawdb.WriteCanonicalHash(tx, header.Hash(), 1))
+	require.NoError(t, rawdb.WriteHeadHeaderHash(tx, header.Hash()))
+	accumulator := notifications.NewAccumulator()
+	accumulator.StartChange(header, nil, false)
+	accumulator.ChangeAccount(common.Address{1}, 0, nil)
+	accumulator.MarkIncomplete()
+	events := shards.NewEvents()
+	headers, unsubscribe := events.AddHeaderSubscription()
+	t.Cleanup(unsubscribe)
+	capture := new(stateChangesCapture)
+	dispatcher := NewDispatcher(chain.AllProtocolChanges, events, capture, log.New())
+	readErr := errors.New("account read failed")
+	state := failingNotificationState{TemporalGetter: tx, err: readErr}
+
+	require.ErrorIs(t, dispatcher.Dispatch(t.Context(), tx, state, 1, accumulator, nil, 0, 1, nil), readErr)
+	select {
+	case <-headers:
+		t.Fatal("a failed account refresh must not publish headers")
+	default:
+	}
+	require.Nil(t, capture.batch)
+	require.NotEmpty(t, accumulator.Changes(), "failed preparation must retain pending changes")
 }
 
 func TestDispatcherNotifiesAfterUnwindToGenesis(t *testing.T) {

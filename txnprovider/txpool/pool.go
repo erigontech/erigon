@@ -339,8 +339,11 @@ func (p *TxPool) markStateStale() {
 	p.publishDepthMetrics()
 }
 
-// Incomplete notifications cannot supply every changed account before commit.
-// Wait for their state version without holding the pool lock or a database snapshot.
+var errStateViewSuperseded = errors.New("announced state version has been superseded")
+
+// Incomplete notifications require their exact committed state: combining their
+// account changes with a newer snapshot can restore values from an orphaned block.
+// Wait without holding the pool lock or a database snapshot.
 func beginBlockState(ctx context.Context, db kv.TemporalRoDB, changes *remoteproto.StateChangeBatch) (kv.TemporalTx, error) {
 	if !changes.StateChangesIncomplete {
 		return db.BeginTemporalRo(ctx)
@@ -353,12 +356,15 @@ func beginBlockState(ctx context.Context, db kv.TemporalRoDB, changes *remotepro
 			return nil, err
 		}
 		version, err := rawdb.GetStateVersion(tx)
-		if err == nil && version >= changes.StateVersionId {
+		if err == nil && version == changes.StateVersionId {
 			return tx, nil
 		}
 		tx.Rollback()
 		if err != nil {
 			return nil, err
+		}
+		if version > changes.StateVersionId {
+			return nil, fmt.Errorf("%w: announced=%d committed=%d", errStateViewSuperseded, changes.StateVersionId, version)
 		}
 		select {
 		case <-waitCtx.Done():
@@ -383,12 +389,12 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 	}
 
 	coreDB, cache := p.chainDB()
-	cache.OnNewBlock(stateChanges)
 	coreTx, err := beginBlockState(ctx, coreDB, stateChanges)
 	if err != nil {
 		return err
 	}
 	defer coreTx.Rollback()
+	cache.OnNewBlock(stateChanges)
 
 	var poolTx kv.Tx
 	if p.poolDB != nil {
