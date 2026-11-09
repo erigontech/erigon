@@ -106,13 +106,16 @@ func (cs *MultiClient) enqueueUpload(task uploadTask) {
 func (cs *MultiClient) startUploadsLocked() {
 	q := &cs.uploads
 	for q.active < maxConcurrentUploadRequests && len(q.ready) > 0 {
-		taskIndex := -1
-		peerIndex := slices.IndexFunc(q.ready, func(peerID [64]byte) bool {
+		peerIndex, taskIndex := -1, -1
+		for i, peerID := range q.ready {
 			taskIndex = slices.IndexFunc(q.peers[peerID].pending, func(task uploadTask) bool {
 				return !task.uncached || !q.uncachedActive
 			})
-			return taskIndex >= 0
-		})
+			if taskIndex >= 0 {
+				peerIndex = i
+				break
+			}
+		}
 		if peerIndex < 0 {
 			return
 		}
@@ -137,7 +140,7 @@ func (cs *MultiClient) startUploadsLocked() {
 }
 
 func (cs *MultiClient) runUpload(peerID [64]byte, task uploadTask) {
-	var retry bool
+	var cacheMiss bool
 	defer func() {
 		q := &cs.uploads
 		q.mu.Lock()
@@ -147,7 +150,7 @@ func (cs *MultiClient) runUpload(peerID [64]byte, task uploadTask) {
 		if task.uncached {
 			q.uncachedActive = false
 		}
-		requeue := retry && task.ctx.Err() == nil && q.queued < libsentry.MessagesQueueSize && q.bytes+task.size <= libsentry.MessagesQueueByteLimit
+		requeue := cacheMiss && task.ctx.Err() == nil && q.queued < libsentry.MessagesQueueSize && q.bytes+task.size <= libsentry.MessagesQueueByteLimit
 		if requeue {
 			task.uncached = true
 			uncachedEnd := 0
@@ -172,7 +175,7 @@ func (cs *MultiClient) runUpload(peerID [64]byte, task uploadTask) {
 	if task.ctx.Err() == nil {
 		err := cs.handleInboundMessage(task.ctx, task.message, task.sentry, !task.uncached)
 		if errors.Is(err, errReceiptCacheMiss) {
-			retry = true
+			cacheMiss = true
 		} else if err != nil {
 			cs.logger.Debug("Handling incoming upload message", "err", err)
 		}
