@@ -134,7 +134,6 @@ func driveToFinalize(be *blockExecutor, task *taskVersion) {
 	be.finalizedResults[0] = res
 	be.execTasks.setComplete(0)
 	be.validateTasks.setComplete(0)
-	be.publishTasks.setComplete(0)
 }
 
 // A block-init (TxIndex == -1) rules-engine error is a block-validity verdict, not an
@@ -323,4 +322,26 @@ func TestParallelTransitionPanicUsesOperationalBlockResult(t *testing.T) {
 	require.True(t, blockResult.Operational)
 	require.ErrorContains(t, blockResult.Err, "account reader panic")
 	require.NotErrorIs(t, blockResult.Err, rules.ErrInvalidBlock)
+}
+
+func TestNextResultDropsAResultForAPublishedTx(t *testing.T) {
+	db := newResumeTestDB(t)
+	config := chain.TestChainBerlinConfig
+	pe, roTx := newResumeTestExec(t, db, config)
+	pe.cfg.vmConfig = &vm.Config{}
+	be, task := newParallelResultTestBlock(t, pe, config)
+	driveToFinalize(be, task)
+	be.publishTasks.setComplete(0)
+	sealed := &state.WriteSet{}
+	be.blockIO.RecordWrites(task.Version(), sealed)
+
+	result, err := be.nextResult(context.Background(), pe, &exec.TxResult{
+		Task:  task,
+		TxIn:  state.ReadSet{},
+		TxOut: &state.WriteSet{},
+	}, roTx)
+
+	require.NoError(t, err)
+	require.Nil(t, result)
+	require.Same(t, sealed, be.blockIO.WriteSet(0))
 }

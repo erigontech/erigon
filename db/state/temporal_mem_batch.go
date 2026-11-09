@@ -785,6 +785,12 @@ func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch) error {
 	if !ok {
 		return fmt.Errorf("can't merge %T into *TemporalMemBatch", o)
 	}
+	if sd.currentChangesAccumulator != nil {
+		return fmt.Errorf("can't merge to batch with non-nil currentChangesAccumulator")
+	}
+	if other.currentChangesAccumulator != nil {
+		return fmt.Errorf("can't merge from batch with non-nil currentChangesAccumulator")
+	}
 
 	for d := range other.latest {
 		for i := range other.latest[d] {
@@ -819,14 +825,6 @@ func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch) error {
 	other.iiWriters = nil
 	sd.pastIIWriters = append(sd.pastIIWriters, other.pastIIWriters...)
 	other.pastIIWriters = nil
-
-	if sd.currentChangesAccumulator != nil {
-		return fmt.Errorf("can't merge to batch with non-nil currentChangesAccumulator")
-	}
-
-	if other.currentChangesAccumulator != nil {
-		return fmt.Errorf("can't merge from batch with non-nil currentChangesAccumulator")
-	}
 
 	// Fixed lock order (receiver write-lock, then `other` read-lock).
 	// Callers must not interleave reciprocal Merge calls — i.e. never run
@@ -886,7 +884,7 @@ func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch) error {
 					}
 				}
 			}
-			if sd.unwindToTxNum < other.unwindToTxNum {
+			if other.unwindToTxNum < sd.unwindToTxNum {
 				sd.unwindToTxNum = other.unwindToTxNum
 			}
 		}
