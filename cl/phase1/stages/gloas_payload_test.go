@@ -565,6 +565,53 @@ func TestGloasRecoveryPendingQueueIsBoundedAndRotatesFailures(t *testing.T) {
 	require.True(t, trackGloasEnvelopeRecoveryRoot(cfg, common.HexToHash("0xfffe")))
 }
 
+func TestGloasRecoveryReleasesInvalidPayload(t *testing.T) {
+	for _, alreadyInvalid := range []bool{true, false} {
+		t.Run(fmt.Sprintf("alreadyInvalid=%t", alreadyInvalid), func(t *testing.T) {
+			cfg, graph, parentRoot, _, _, engine := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusInvalidated, false)
+			parent := graph.parents[parentRoot]
+			envelope := graph.envelopes[parentRoot]
+			delete(graph.envelopes, parentRoot)
+
+			head := cltypes.NewSignedBeaconBlock(cfg.beaconCfg, clparams.GloasVersion)
+			head.Block.Slot = parent.Block.Slot
+			head.Block.ParentRoot = parent.Block.ParentRoot
+			head.Block.StateRoot = parent.Block.StateRoot
+			head.Block.Body.SignedExecutionPayloadBid.Message = parent.Block.Body.SignedExecutionPayloadBid.Message.Copy()
+			head.Block.Body.SignedExecutionPayloadBid.Message.BlockHash[0] ^= 1
+			graph.insertOnAdd = true
+			require.NoError(t, cfg.forkChoice.OnBlock(t.Context(), head, false, false, false))
+			headRoot, err := head.Block.HashSSZ()
+			require.NoError(t, err)
+			selectedRoot, _, err := cfg.forkChoice.GetHead(nil)
+			require.NoError(t, err)
+			require.Equal(t, common.Hash(headRoot), selectedRoot)
+
+			if alreadyInvalid {
+				cfg.forkChoice.MarkPayloadStatus(parentRoot, envelope.Message.Payload.BlockHash, execution_client.PayloadStatusInvalidated)
+			}
+			peerRPC, sentinel := newChainTipBatchEnvelopeRPC(t, cfg.beaconCfg, envelope)
+			cfg.rpc = peerRPC
+			cfg.gloasEnvelopeRecoveryPending = []common.Hash{parentRoot}
+			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+			defer cancel()
+
+			for range 2 {
+				recoverMissingEnvelopes(ctx, cfg)
+				require.True(t, cfg.forkChoice.IsBlockInvalid(parentRoot))
+				require.Empty(t, cfg.gloasEnvelopeRecoveryPending)
+			}
+			if alreadyInvalid {
+				require.Zero(t, sentinel.calls)
+				require.Zero(t, engine.newPayloadCalls)
+			} else {
+				require.Equal(t, 1, sentinel.calls)
+				require.Equal(t, 1, engine.newPayloadCalls)
+			}
+		})
+	}
+}
+
 func TestGloasRecoveryPendingReleasesOnlyRootsOutsideForkChoiceOwnership(t *testing.T) {
 	finalizedRoot := common.HexToHash("0x01")
 	missingRoot := common.HexToHash("0x02")

@@ -692,7 +692,7 @@ func recoverMissingEnvelopes(ctx context.Context, cfg *Cfg) {
 	}
 
 	envelopeResolved := func(root common.Hash) bool {
-		return cfg.forkChoice.HasEnvelope(root) || cfg.forkChoice.IsEnvelopeRejected(root)
+		return cfg.forkChoice.HasEnvelope(root) || cfg.forkChoice.IsEnvelopeRejected(root) || cfg.forkChoice.IsBlockInvalid(root)
 	}
 	pendingBeforePrune := len(cfg.gloasEnvelopeRecoveryPending)
 	cfg.gloasEnvelopeRecoveryPending = retainActionableGloasEnvelopeRecoveryRoots(

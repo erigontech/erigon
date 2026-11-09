@@ -4055,36 +4055,31 @@ func TestLocalSelfBuildPersistenceFailureIsRetryable(t *testing.T) {
 
 func TestExecutionPayloadIngressRejectsPayloadThatDoesNotDeriveClaimedBlockHash(t *testing.T) {
 	for _, test := range []struct {
-		name string
-		call func(*ForkChoiceStore, *cltypes.SignedExecutionPayloadEnvelope) error
+		name            string
+		withEngine      bool
+		validatePayload bool
 	}{
-		{
-			name: "engine-less sync persistence",
-			call: func(f *ForkChoiceStore, envelope *cltypes.SignedExecutionPayloadEnvelope) error {
-				return f.OnExecutionPayload(context.Background(), envelope, false, false)
-			},
-		},
-		{
-			name: "engine-less network persistence",
-			call: func(f *ForkChoiceStore, envelope *cltypes.SignedExecutionPayloadEnvelope) error {
-				return f.OnExecutionPayload(context.Background(), envelope, false, true)
-			},
-		},
+		{name: "deferred validation", withEngine: true},
+		{name: "engine-less sync persistence"},
+		{name: "engine-less network persistence", validatePayload: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
-			envelope.Message.Payload.GasUsed++
+			envelope.Message.Payload.Transactions = solid.NewProgressiveTransactionsSSZFromTransactions([][]byte{{types.BlobTxType, 0xc0}})
 			resignAdmissionEnvelope(t, cfg, blockState, envelope)
-			graph := &persistingEnvelopeForkGraph{dataAvailabilityForkGraph: dataAvailabilityForkGraph{state: blockState, block: block}}
-			eth2Roots, err := lru.New[common.Hash, common.Hash](1)
-			require.NoError(t, err)
-			f := &ForkChoiceStore{beaconCfg: cfg, forkGraph: graph, eth2Roots: eth2Roots}
-			f.finalizedCheckpoint.Store(solid.Checkpoint{})
+			f, graph := newEnvelopeApplicationTestStore(t, cfg, blockState, block)
+			if test.withEngine {
+				f.engine = execution_client.NewMockExecutionEngine(gomock.NewController(t))
+			}
 
-			err = test.call(f, envelope)
+			err := f.OnExecutionPayload(t.Context(), envelope, false, test.validatePayload)
 
 			require.ErrorContains(t, err, "mismatching hash")
 			require.False(t, graph.HasEnvelope(envelope.Message.BeaconBlockRoot))
+			require.False(t, graph.IsBlockInvalid(envelope.Message.BeaconBlockRoot))
+			require.False(t, f.IsEnvelopeRejected(envelope.Message.BeaconBlockRoot))
+			_, recorded := f.GetRecentExecutionPayloadStatus(envelope.Message.Payload.BlockHash)
+			require.False(t, recorded)
 		})
 	}
 }
@@ -4290,6 +4285,61 @@ func TestValidatePayloadBlobHashesRejectsUndecodableCandidates(t *testing.T) {
 			require.Error(t, err)
 			require.NotErrorIs(t, err, misc.ErrMismatchBlobHashes)
 		})
+	}
+}
+
+func TestExecutionPayloadDecodeFailureIsTerminal(t *testing.T) {
+	for _, tx := range []struct {
+		name   string
+		txType byte
+	}{
+		{name: "blob", txType: types.BlobTxType},
+		{name: "frame", txType: types.FrameTxType},
+	} {
+		for _, mode := range []struct {
+			name            string
+			withEngine      bool
+			validatePayload bool
+		}{
+			{name: "validated", withEngine: true, validatePayload: true},
+			{name: "deferred", withEngine: true},
+			{name: "without engine", validatePayload: true},
+		} {
+			t.Run(tx.name+"/"+mode.name, func(t *testing.T) {
+				cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
+				payload := envelope.Message.Payload
+				payload.Transactions = solid.NewProgressiveTransactionsSSZFromTransactions([][]byte{{tx.txType, 0xc0}})
+				requestsHash := cltypes.ComputeExecutionRequestHash(cltypes.GetExecutionRequestsList(cfg, envelope.Message.ExecutionRequests))
+				var err error
+				payload.BlockHash, err = payload.ComputeBlockHash(&envelope.Message.ParentBeaconBlockRoot, requestsHash, nil)
+				require.NoError(t, err)
+				block.Block.Body.SignedExecutionPayloadBid.Message.BlockHash = payload.BlockHash
+				rebindAdmissionBlockRoot(t, blockState, block, envelope)
+				resignAdmissionEnvelope(t, cfg, blockState, envelope)
+				f, graph := newEnvelopeApplicationTestStore(t, cfg, blockState, block)
+				if mode.withEngine {
+					f.engine = execution_client.NewMockExecutionEngine(gomock.NewController(t))
+				}
+
+				err = f.OnExecutionPayload(t.Context(), envelope, false, mode.validatePayload)
+
+				require.ErrorIs(t, err, ErrInvalidExecutionPayloadEnvelope)
+				require.NotErrorIs(t, err, misc.ErrMismatchBlobHashes)
+				status, recorded := f.GetRecentExecutionPayloadStatus(payload.BlockHash)
+				require.True(t, recorded, "authenticated decode failures must record an execution verdict")
+				require.EqualValues(t, execution_client.PayloadStatusInvalidated, status)
+				require.True(t, graph.invalid.Load())
+				require.False(t, f.IsEnvelopeRejected(envelope.Message.BeaconBlockRoot))
+				require.False(t, f.HasEnvelope(envelope.Message.BeaconBlockRoot))
+
+				child := cltypes.NewBeaconBlock(cfg, clparams.GloasVersion)
+				child.ParentRoot = envelope.Message.BeaconBlockRoot
+				child.Body.SignedExecutionPayloadBid.Message.ParentBlockHash = payload.BlockHash
+				err = f.validateParentPayloadPath(child, mode.withEngine)
+				require.ErrorContains(t, err, "parent execution payload is invalid")
+				require.NotErrorIs(t, err, ErrParentEnvelopePending)
+			})
+		}
 	}
 }
 

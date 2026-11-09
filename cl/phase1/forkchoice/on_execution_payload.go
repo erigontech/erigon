@@ -1158,9 +1158,12 @@ func (f *ForkChoiceStore) validateEnvelopePersistenceCommitments(block *cltypes.
 	if err != nil {
 		return err
 	}
-	err = ValidatePayloadBlobHashes(signedEnvelope.Message.Payload, versionedHashes)
+	envelope := signedEnvelope.Message
+	err = ValidatePayloadBlobHashes(envelope.Payload, versionedHashes)
 	if errors.Is(err, misc.ErrMismatchBlobHashes) {
-		f.RejectEnvelope(signedEnvelope.Message.BeaconBlockRoot)
+		f.RejectEnvelope(envelope.BeaconBlockRoot)
+	} else if err != nil {
+		f.MarkPayloadStatusAndGasLimitIfRetained(envelope.BeaconBlockRoot, envelope.Payload.BlockHash, execution_client.PayloadStatusInvalidated, envelope.Payload.GasLimit)
 	}
 	return err
 }
