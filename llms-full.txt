@@ -1938,7 +1938,7 @@ Erigon stores the majority of its chain data in **snapshot files** (`.seg` segme
 
 ## `seg du` — Disk Usage Report
 
-The `seg du` subcommand scans the snapshot directory for a given `--datadir` and reports a breakdown of disk usage by category, the configured node type, and estimated sizes for each pruning mode. Each estimate sums the files the downloader would select for that mode.
+The `seg du` subcommand scans the snapshot directory for a given `--datadir` and reports a breakdown of disk usage by category, the configured node type, and estimated sizes for each pruning mode. Each estimate sums the files the downloader would select for that mode, plus any file in the state directories whose name Erigon does not recognise, which every row counts.
 
 ### Syntax
 
