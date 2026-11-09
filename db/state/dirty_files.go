@@ -65,17 +65,6 @@ func newDirtyFiles() *DirtyFiles {
 	return &DirtyFiles{*btree2.NewBTreeGOptions(filesItemLess, btree2.Options{Degree: 128, NoLocks: false})}
 }
 
-// coversWithoutHole reports whether opened data files cover [from,to), with or without their accessors.
-func (df *DirtyFiles) coversWithoutHole(from, to uint64) bool {
-	df.Scan(func(f *FilesItem) bool {
-		if f.decompressor != nil && f.startTxNum <= from && from < f.endTxNum {
-			from = f.endTxNum
-		}
-		return true
-	})
-	return from >= to
-}
-
 func (df *DirtyFiles) copy() *DirtyFiles {
 	return &DirtyFiles{*df.BTreeG.Copy()}
 }
@@ -651,22 +640,18 @@ func calcVisibleFiles(files *DirtyFiles, l statecfg.Accessors, checker func(star
 		newVisibleFiles = visibleFiles{}
 	}
 
-	return keepFilesBeforeFirstGap(newVisibleFiles)
-}
-
-// keepFilesBeforeFirstGap drops the first file after a hole and all newer ones: a read cannot tell that a key's
-// latest value was in the hole.
-func keepFilesBeforeFirstGap(files visibleFiles) visibleFiles {
-	for i := 1; i < len(files); i++ {
-		prev, curr := files[i-1], files[i]
-		if prev.endTxNum < curr.startTxNum {
+	// Check for gaps in visible files and warn if found
+	for i := 1; i < len(newVisibleFiles); i++ {
+		prev := newVisibleFiles[i-1]
+		curr := newVisibleFiles[i]
+		if prev.endTxNum != curr.startTxNum {
 			log.Warn("[agg] gap in visible files", "prev", prev.src.decompressor.FileName(),
 				"prevEnd", prev.endTxNum, "curr", curr.src.decompressor.FileName(), "currStart", curr.startTxNum,
 				"gap", curr.startTxNum-prev.endTxNum)
-			return files[:i]
 		}
 	}
-	return files
+
+	return newVisibleFiles
 }
 
 func checkForVisibility(item *FilesItem, l statecfg.Accessors, trace bool) (canBeVisible bool) {

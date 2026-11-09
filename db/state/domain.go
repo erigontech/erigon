@@ -1820,6 +1820,20 @@ func (dt *DomainRoTx) HistoryCoverageStart() uint64 {
 	return max(dt.ht.files[0].startTxNum, dt.ht.iit.files[0].startTxNum)
 }
 
+// valuesFilesCoverHistory is false when a values file of a range that history covers is not visible: the writes of
+// that range then exist only in history.
+func (dt *DomainRoTx) valuesFilesCoverHistory() bool {
+	if dt.files.EndTxNum() < dt.ht.files.EndTxNum() {
+		return false
+	}
+	for i := 1; i < len(dt.files); i++ {
+		if dt.files[i-1].endTxNum < dt.files[i].startTxNum {
+			return false
+		}
+	}
+	return true
+}
+
 // GetAsOf does not always require usage of roTx. If it is possible to determine
 // historical value based only on static files, roTx will not be used.
 func (dt *DomainRoTx) GetAsOf(key []byte, txNum uint64, roTx kv.Tx) ([]byte, bool, error) {
@@ -1828,13 +1842,13 @@ func (dt *DomainRoTx) GetAsOf(key []byte, txNum uint64, roTx kv.Tx) ([]byte, boo
 	}
 	if roTx != nil {
 		// If the newest value of the key was written in a step before txNum's step, nothing changed it at or after txNum,
-		// so it is also the value as of txNum. Values files that end before history can miss a newer write, and referenced
-		// commitment files hold shortened keys that only the aggregator can expand.
+		// so it is also the value as of txNum. Referenced commitment files hold shortened keys that only the aggregator can
+		// expand, and values files that do not cover history can miss a newer write.
 		latest, step, ok, err := dt.GetLatest(key, roTx)
 		if err != nil {
 			return nil, false, err
 		}
-		if ok && len(latest) > 0 && step < kv.Step(txNum/dt.stepSize) && dt.files.EndTxNum() >= dt.ht.files.EndTxNum() && !dt.commitmentVisibleFilesReferenced() {
+		if ok && len(latest) > 0 && step < kv.Step(txNum/dt.stepSize) && !dt.commitmentVisibleFilesReferenced() && dt.valuesFilesCoverHistory() {
 			return latest, true, nil
 		}
 	}
@@ -2178,7 +2192,7 @@ func (dt *DomainRoTx) checkFilesDBGap(tx kv.Tx) error {
 	if err != nil {
 		return err
 	}
-	if filesEnd := dt.files.EndTxNum(); prg.TxTo > filesEnd && !dt.d.dirtyFiles.coversWithoutHole(filesEnd, prg.TxTo) {
+	if filesEnd := dt.files.EndTxNum(); prg.TxTo > filesEnd {
 		return fmt.Errorf("gap between snapshot files and DB for domain %s: files end at txNum %d but the DB was pruned up to %d — [%d, %d) is in neither. Maybe you removed snapshot files (e.g. `snapshots rm-state --latest`) but forgot to run `integration stage_exec --reset` (or `integration stage_custom_trace --reset` for custom-trace domains)?",
 			dt.d.FilenameBase, filesEnd, prg.TxTo, filesEnd, prg.TxTo)
 	}

@@ -152,8 +152,12 @@ func (at *AggregatorRoTx) stepAlignedEnd(stepSize uint64) (uint64, error) {
 			break
 		}
 	}
-	if err := at.refuseFilesHiddenByAGap(); err != nil {
-		return 0, err
+	for _, files := range lists {
+		for i := 1; i < len(files) && files[i].startTxNum < end; i++ {
+			if prev := files[i-1].endTxNum; files[i].startTxNum != prev {
+				return 0, fmt.Errorf("%s: no visible file for txNum %d-%d", files[i].Fullpath(), prev, files[i].startTxNum)
+			}
+		}
 	}
 	if com := at.d[kv.CommitmentDomain]; com != nil && com.d.Enabled {
 		for _, d := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain} {
@@ -163,48 +167,6 @@ func (at *AggregatorRoTx) stepAlignedEnd(stepSize uint64) (uint64, error) {
 		}
 	}
 	return end, nil
-}
-
-// refuseFilesHiddenByAGap stops a rebase that would otherwise end at a gap and ignore the files after it.
-func (at *AggregatorRoTx) refuseFilesHiddenByAGap() error {
-	at.a.dirtyFilesLock.Lock()
-	defer at.a.dirtyFilesLock.Unlock()
-	type entityFiles struct {
-		visible visibleFiles
-		dirty   *DirtyFiles
-	}
-	var entities []entityFiles
-	for _, d := range at.d {
-		if d == nil || !d.d.Enabled {
-			continue
-		}
-		entities = append(entities, entityFiles{d.files, d.d.dirtyFiles}, entityFiles{d.ht.files, d.ht.h.dirtyFiles}, entityFiles{d.ht.iit.files, d.ht.iit.ii.dirtyFiles})
-	}
-	for _, ii := range at.iis {
-		if ii == nil || !ii.ii.Enabled {
-			continue
-		}
-		entities = append(entities, entityFiles{ii.files, ii.ii.dirtyFiles})
-	}
-	ceiling := at.a.dirtyFilesEndTxNumMinimax()
-	for _, e := range entities {
-		if len(e.visible) == 0 {
-			continue
-		}
-		end := e.visible.EndTxNum()
-		var err error
-		e.dirty.Scan(func(f *FilesItem) bool {
-			if f.startTxNum > end && f.endTxNum <= ceiling {
-				err = fmt.Errorf("%s: no visible file for txNum %d-%d", e.visible[len(e.visible)-1].Fullpath(), end, f.startTxNum)
-				return false
-			}
-			return true
-		})
-		if err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func fileRangesUpTo(files visibleFiles, end uint64) (ranges [][2]uint64) {

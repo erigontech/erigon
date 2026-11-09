@@ -68,19 +68,6 @@ func TestVisibleFilesAligned_LaggingCommitmentClampsEveryone(t *testing.T) {
 	requireVisibleEnd(t, agg, alignStepSize)
 }
 
-func TestVisibleFilesAligned_GapHidesEveryFileAfterIt(t *testing.T) {
-	t.Parallel()
-	db, agg := testDbAndAggregatorv3(t, alignStepSize)
-
-	ranges := []testFileRange{{0, 1}, {2, 3}}
-	generateStateFiles(t, agg.Dirs(), ranges)
-	generateStandaloneIIFiles(t, agg.Dirs(), ranges)
-	generateCommitmentFile(t, agg.Dirs(), ranges)
-	require.NoError(t, agg.OpenFolder(db))
-
-	requireVisibleEnd(t, agg, alignStepSize)
-}
-
 // domains visible past the log/trace indexes answer eth_getLogs from blocks no index saw
 func TestVisibleFilesAligned_LaggingStandaloneIdxClampsEveryone(t *testing.T) {
 	t.Parallel()
