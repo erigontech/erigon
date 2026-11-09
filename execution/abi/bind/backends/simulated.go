@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -158,8 +159,11 @@ func (b *SimulatedBackend) Commit() {
 	}); err != nil {
 		panic(err)
 	}
-	//nolint:prealloc
-	var allLogs []*types.Log
+	numLogs := 0
+	for _, r := range b.pendingReceipts {
+		numLogs += len(r.Logs)
+	}
+	allLogs := slices.Grow([]*types.Log(nil), numLogs)
 	for _, r := range b.pendingReceipts {
 		allLogs = append(allLogs, r.Logs...)
 	}
