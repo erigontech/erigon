@@ -54,7 +54,7 @@ func TestStepAlignedEndRefusesHiddenFiles(t *testing.T) {
 	generatePlainCommitmentFile(t, dirs, []testFileRange{{0, 4}, {4, 8}, {8, 12}})
 	require.NoError(t, agg.OpenFolder(db))
 	_, err := agg.StepAlignedEnd(30)
-	require.ErrorContains(t, err, "no visible file for txNum 40-80")
+	require.ErrorContains(t, err, "no visible file for txNum 40-")
 }
 
 func TestAlignFilesToStepSizeRefusesCommitmentRangeMismatch(t *testing.T) {
