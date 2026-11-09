@@ -200,11 +200,11 @@ func TestCallManySharesTheGasCapAcrossTheRequest(t *testing.T) {
 	api.GasCap = 100_000
 	txIndex := -1
 	stateCtx := StateContext{BlockNumber: rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber), TransactionIndex: &txIndex}
-	burner := common.HexToAddress("0x00000000000000000000000000000000000000ac")
+	burner, cheap := common.HexToAddress("0x00000000000000000000000000000000000000ac"), common.HexToAddress("0x00000000000000000000000000000000000000ad")
 	code := hexutil.Bytes(hexutil.MustDecode("0x5b600056"))
 	overrides := ethapi.StateOverrides{accounts.InternAddress(burner): {Code: &code}}
 
-	_, err := api.CallMany(context.Background(), []Bundle{{Transactions: []ethapi.CallArgs{{To: &burner}, {To: &burner}}}}, stateCtx, &overrides, nil)
+	_, err := api.CallMany(context.Background(), []Bundle{{Transactions: []ethapi.CallArgs{{To: &cheap}, {To: &burner}, {To: &burner}}}}, stateCtx, &overrides, nil)
 	require.ErrorContains(t, err, "--rpc.gascap")
 }
 
