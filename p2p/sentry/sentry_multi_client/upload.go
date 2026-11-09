@@ -37,16 +37,20 @@ const (
 var errReceiptCacheMiss = errors.New("receipt cache miss")
 
 type uploadTask struct {
-	ctx      context.Context
-	message  *sentryproto.InboundMessage
-	sentry   sentryproto.SentryClient
-	done     func()
-	size     int
+	ctx     context.Context
+	message *sentryproto.InboundMessage
+	sentry  sentryproto.SentryClient
+	done    func()
+	size    int
+	// While queued, uncached marks a known cache miss waiting for the replay slot.
+	// While running, it means this task owns that slot, even if all receipts are cached.
 	uncached bool
 }
 
 type uploadPeer struct {
-	active  bool
+	active bool
+	// Known cache misses form a prefix in request order; new misses join its end.
+	// Later bodies and cache probes may bypass that prefix while the replay slot is busy.
 	pending []uploadTask
 }
 

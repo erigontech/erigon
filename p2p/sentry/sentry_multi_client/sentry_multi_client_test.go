@@ -124,8 +124,7 @@ func TestMultiClient_GetReceipts69(t *testing.T) {
 		t.Errorf("Expected request ID %d, got %d", request.RequestId, response.RequestId)
 	}
 
-	// Decode the receipt to verify Bloom field is not populated
-	// The ReceiptsRLPPacket contains an RLP-encoded list of receipts
+	// ETH69 omits the bloom field from the wire encoding.
 	var receiptsList []*receiptRLP69
 	if err := rlp.DecodeBytes(response.ReceiptsRLPPacket[0], &receiptsList); err != nil {
 		t.Fatalf("Failed to decode receipts list: %v", err)
