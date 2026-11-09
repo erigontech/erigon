@@ -465,6 +465,7 @@ type GetLatestOptions struct {
 	hasMaxStep  bool
 	branchCache bool
 	buf         []byte
+	owned       bool
 }
 
 // WithBuf to decode a value into
@@ -475,6 +476,14 @@ func (opts GetLatestOptions) WithBuf(buf []byte) GetLatestOptions {
 }
 
 func (opts GetLatestOptions) Buf() []byte { return opts.buf }
+
+// WithOwnedValue makes `GetLatest` return a slice nothing else references.
+func (opts GetLatestOptions) WithOwnedValue() GetLatestOptions {
+	opts.owned = true
+	return opts
+}
+
+func (opts GetLatestOptions) OwnedValue() bool { return opts.owned }
 
 func (opts GetLatestOptions) WithMetrics(metrics GetLatestMetrics, start time.Time) GetLatestOptions {
 	opts.metrics, opts.start = metrics, start

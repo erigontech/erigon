@@ -129,6 +129,7 @@ var (
 	StopAfterBlock        = EnvUint("STOP_AFTER_BLOCK", 0)
 	BadBlockHalt          = EnvBool("BAD_BLOCK_HALT", false)
 	IgnoreBAL             = EnvBool("IGNORE_BAL", false)
+	CodeOwnedDecode       = EnvBool("CODE_OWNED_DECODE", false)
 	BatchCommitments      = EnvBool("BATCH_COMMITMENTS", true)
 	// BALDrivenCommitment folds a block's commitment from its BAL ahead of the
 	// per-tx result stream, overlapping execution. On by default; set

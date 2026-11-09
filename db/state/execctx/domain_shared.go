@@ -1475,7 +1475,10 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 	}
 	willFill := !sd.hasLocalCacheUnwind() && maxStep == kv.NoStepBound && sd.stateCache != nil && sd.stateCache.Caches(domain)
 	fillsCode := willFill && len(opts.codeHash) == len(common.Hash{})
-	if fillsCode {
+	ownedCode := fillsCode && !opts.hashFromMem && dbg.CodeOwnedDecode
+	if ownedCode {
+		getOpts = getOpts.WithOwnedValue()
+	} else if fillsCode {
 		getOpts = getOpts.WithBuf(opts.buf)
 	}
 
@@ -1500,6 +1503,8 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 		case fillsCode && opts.hashFromMem:
 			fillView.Fill(domain, k, v, readTxNum)
 			v = bytes.Clone(v)
+		case ownedCode:
+			fillView.FillOwnedCode(k, v, opts.codeHash, readTxNum)
 		case fillsCode:
 			v = fillView.FillCode(k, v, opts.codeHash, readTxNum)
 		default:

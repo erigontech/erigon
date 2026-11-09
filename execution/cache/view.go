@@ -327,6 +327,11 @@ func (v ReadView) FillCode(addr, code, codeHash []byte, readTxNum uint64) []byte
 	return stored
 }
 
+// FillOwnedCode offers code that nothing else references, so the cache keeps it without a copy.
+func (v ReadView) FillOwnedCode(addr, code, codeHash []byte, readTxNum uint64) {
+	v.fillCodeWithHash(addr, code, codeHash, readTxNum)
+}
+
 // SeedAddrCodeHash offers an addr → codeHash mapping derived from an account
 // record read from this view, so admission checks the accounts frontier even
 // though the mapping lives in the code cache.
