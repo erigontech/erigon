@@ -1020,8 +1020,8 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 		return
 	}
 
-	if signedEnvelope == nil || signedEnvelope.Message == nil {
-		beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("missing message in signed envelope")).WriteTo(w)
+	if err := signedEnvelope.ValidateForConfig(a.beaconChainCfg); err != nil {
+		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
 	if !blobDataIncluded && contents == nil {
