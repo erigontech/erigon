@@ -138,17 +138,13 @@ func TestProvideTxnsReturnsWhileTheStartupReloadHoldsTheLock(t *testing.T) {
 	}
 }
 
-func TestProvideTxnsReturnsBeforeTheStartupReloadBegins(t *testing.T) {
-	p, logs := newLoggingPool()
-	require.False(t, p.Started())
+func TestProvideTxnsReportsACancelledCallerBeforeStartup(t *testing.T) {
+	p, _ := newLoggingPool()
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
 
-	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
-	defer cancel()
-
-	txns, err := p.ProvideTxns(ctx, txnprovider.WithParentBlockNum(1))
-	require.NoError(t, err)
-	require.Empty(t, txns)
-	require.False(t, logs.contains("Waiting for block"), "ProvideTxns entered the block wait")
+	_, err := p.ProvideTxns(ctx, txnprovider.WithParentBlockNum(1))
+	require.ErrorIs(t, err, context.Canceled)
 }
 
 func TestProvideTxnsReturnsNothingOnceTheParentBlockWaitIsStopped(t *testing.T) {
