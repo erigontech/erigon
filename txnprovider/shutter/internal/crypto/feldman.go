@@ -106,7 +106,7 @@ func (g Gammas) Equal(otherG Gammas) bool {
 
 // ZeroGammas returns the zero value for gammas.
 func ZeroGammas(degree uint64) *Gammas {
-	points := []*blst.P2Affine{}
+	points := make([]*blst.P2Affine, 0, degree+1)
 	for i := uint64(0); i < degree+1; i++ {
 		points = append(points, new(blst.P2Affine))
 	}
@@ -211,7 +211,7 @@ func VerifyPolyEval(keyperIndex int, polyEval *big.Int, gammas *Gammas, threshol
 
 // RandomPolynomial generates a random polynomial of given degree.
 func RandomPolynomial(r io.Reader, degree uint64) (*Polynomial, error) {
-	coefficients := []*big.Int{}
+	coefficients := make([]*big.Int, 0, degree+1)
 	for i := uint64(0); i < degree+1; i++ {
 		c, err := rand.Int(r, order)
 		if err != nil {
