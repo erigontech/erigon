@@ -146,7 +146,7 @@ func TestDownloadChainTomlKeepsSeededTorrent(t *testing.T) {
 	_, err = client.AddTorrent(&mi)
 	require.NoError(t, err)
 
-	_, err = DownloadChainTomlByInfoHash(t.Context(), client, mi.HashInfoBytes(), dir, nil)
+	_, err = DownloadChainTomlByInfoHash(t.Context(), client, mi.HashInfoBytes(), dir, t.TempDir(), nil)
 	require.NoError(t, err)
 	_, ok := client.Torrent(mi.HashInfoBytes())
 	require.True(t, ok)
