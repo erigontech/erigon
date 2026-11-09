@@ -34,7 +34,7 @@ import (
 )
 
 // CheckCaplinBlobSidecars verifies frozen blob snapshot coverage, canonical identity, and cryptographic proofs.
-func CheckCaplinBlobSidecars(ctx context.Context, db kv.RoDB, snapshots *freezeblocks.CaplinSnapshots, beaconCfg *clparams.BeaconChainConfig, failFast bool, logger log.Logger) error {
+func CheckCaplinBlobSidecars(ctx context.Context, db kv.RoDB, snapshots *freezeblocks.CaplinSnapshots, beaconCfg *clparams.BeaconChainConfig, blobsFromSlot uint64, failFast bool, logger log.Logger) error {
 	if snapshots == nil {
 		return fmt.Errorf("blob snapshot integrity: caplin snapshots are unavailable")
 	}
@@ -87,7 +87,7 @@ func CheckCaplinBlobSidecars(ctx context.Context, db kv.RoDB, snapshots *freezeb
 		}
 		return nil
 	}
-	if coverageErr := checkCaplinBlobSnapshotCoverage(view, beaconCfg); coverageErr != nil {
+	if coverageErr := checkCaplinBlobSnapshotCoverage(view, beaconCfg, blobsFromSlot); coverageErr != nil {
 		if reportErr := report(coverageErr); reportErr != nil {
 			return reportErr
 		}
@@ -287,7 +287,7 @@ func checkCaplinBlobSnapshotSlot(ctx context.Context, tx kv.Tx, snapshots *freez
 	return nil
 }
 
-func checkCaplinBlobSnapshotCoverage(view *freezeblocks.CaplinView, beaconCfg *clparams.BeaconChainConfig) error {
+func checkCaplinBlobSnapshotCoverage(view *freezeblocks.CaplinView, beaconCfg *clparams.BeaconChainConfig, blobsFromSlot uint64) error {
 	blobSegments := view.BlobSidecars()
 	if beaconCfg.DenebForkEpoch == math.MaxUint64 {
 		if len(blobSegments) != 0 {
@@ -314,9 +314,12 @@ func checkCaplinBlobSnapshotCoverage(view *freezeblocks.CaplinView, beaconCfg *c
 		requiredTo = (beaconTo - 1) / snaptype.CaplinMergeLimit * snaptype.CaplinMergeLimit
 	}
 
-	next := expectedFrom
-	for _, segment := range blobSegments {
+	next := max(expectedFrom, blobsFromSlot)
+	for i, segment := range blobSegments {
 		from, to := segment.Src().GetRange()
+		if i == 0 && from >= expectedFrom {
+			next = min(next, from)
+		}
 		if from < next {
 			return fmt.Errorf("overlapping or pre-Deneb blob snapshot range %d-%d; expected next slot %d", from, to, next)
 		}
