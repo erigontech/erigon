@@ -679,7 +679,7 @@ func TestDUClassifyFile(t *testing.T) {
 		{"history", "v1.0-rcache.0-16.v", duCatRcache},
 		{"idx", "v1.0-rcache.0-16.ef", duCatRcache},
 
-		// commitment hist overrides history/idx
+		// commitment hist overrides history/idx/accessor
 		{"history", "v1.0-commitment.0-16.v", duCatCommitHist},
 		{"idx", "v1.0-commitment.0-16.ef", duCatCommitHist},
 		{"accessor", "v1.1-commitment.0-16.vi", duCatCommitHist},
