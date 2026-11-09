@@ -6676,7 +6676,8 @@ All `trace_*` methods return objects built from the same set of fields. Each met
 
 | Method | Top-level shape |
 | --- | --- |
-| `trace_call`, `trace_rawTransaction`, `trace_replayTransaction` | `Object` with `output`, `stateDiff`, `trace[]`, `vmTrace` |
+| `trace_call`, `trace_rawTransaction` | `Object` with `output`, `stateDiff`, `trace[]`, `vmTrace` |
+| `trace_replayTransaction` | `Object` with `output`, `stateDiff`, `trace[]`, `vmTrace`, `transactionHash` |
 | `trace_callMany` | `Array<Object>` — one per input call |
 | `trace_replayBlockTransactions` | `Array<Object>` — one per transaction; each entry adds `transactionHash` |
 | `trace_block`, `trace_filter`, `trace_transaction` | `Array<TraceEntry>` (flat list across all call frames) |
@@ -6690,7 +6691,7 @@ All `trace_*` methods return objects built from the same set of fields. Each met
 | `stateDiff` | Object \| null | Set when `"stateDiff"` is requested in the trace types array. Maps each touched account address to an object describing changes to `balance`, `nonce`, `code`, and per-key `storage` entries. `null` if not requested. |
 | `trace` | Array of TraceEntry | Set when `"trace"` is requested. Flat list of call frames executed during the transaction. Empty array (never `null`) if not requested. See **TraceEntry fields** below. |
 | `vmTrace` | Object \| null | Set when `"vmTrace"` is requested. Step-by-step EVM trace including `code`, per-step `ops` (with `pc`, `cost`, `op` name, `ex` execution result, and `sub` for nested calls). `ops` holds only operations that executed, so every `pc` lies inside `code`: an undefined opcode or a stack underflow or overflow is omitted, and an operation that halted exceptionally has `ex: null`. `null` if not requested. |
-| `transactionHash` | DATA, 32 BYTES | (Only in `trace_replayBlockTransactions` entries) Hash of the transaction this trace belongs to. |
+| `transactionHash` | DATA, 32 BYTES | (Only in `trace_replayTransaction` results and `trace_replayBlockTransactions` entries) Hash of the transaction this trace belongs to. |
 
 ### TraceEntry fields
 
@@ -7049,7 +7050,7 @@ params: [
 
 #### Returns
 
-`Object` shaped like the `trace_call` response (`output`, `stateDiff`, `trace[]`, `vmTrace`). See [Response Fields Reference](https://docs.erigon.tech/interacting-with-erigon/trace#response-fields-reference).
+`Object` shaped like the `trace_call` response (`output`, `stateDiff`, `trace[]`, `vmTrace`) plus a `transactionHash` field identifying the replayed transaction. See [Response Fields Reference](https://docs.erigon.tech/interacting-with-erigon/trace#response-fields-reference).
 
 #### Example
 
@@ -7078,6 +7079,7 @@ Response
       "traceAddress": [],
       "type": "call"
     }],
+    "transactionHash": "0x02d4a872e096445e80d05276ee756cefef7f3b376bcec14246469c0cd97dad8f",
     "vmTrace": null
   }
 }
