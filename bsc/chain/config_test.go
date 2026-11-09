@@ -522,3 +522,34 @@ func TestParliaUpgradeSchedule(t *testing.T) {
 		})
 	}
 }
+
+func TestBSCSpecsForkOrder(t *testing.T) {
+	t.Parallel()
+
+	for _, network := range []string{networkname.BSC, networkname.Chapel} {
+		spec, err := chainspec.ChainSpecByName(network)
+		require.NoError(t, err)
+		require.NoError(t, spec.Config.CheckConfigForkOrder(), network)
+	}
+}
+
+func TestChapelTimestampForkChangeIsIncompatible(t *testing.T) {
+	t.Parallel()
+
+	spec, err := chainspec.ChainSpecByName(networkname.Chapel)
+	require.NoError(t, err)
+	stored := spec.Config
+	head, headTime := uint64(139533775), uint64(1793240999)
+
+	require.Nil(t, stored.CheckCompatible(stored, head, headTime))
+
+	movedPasteur := *stored
+	movedPasteur.PasteurTime = common.NewUint64(*stored.PasteurTime + 1)
+	compatErr := stored.CheckCompatible(&movedPasteur, head, headTime)
+	require.NotNil(t, compatErr)
+	assert.Equal(t, *stored.PasteurTime-1, compatErr.RewindToTime)
+
+	laterJenner := *stored
+	laterJenner.JennerTime = common.NewUint64(*stored.JennerTime + 1)
+	require.Nil(t, stored.CheckCompatible(&laterJenner, head, headTime))
+}
