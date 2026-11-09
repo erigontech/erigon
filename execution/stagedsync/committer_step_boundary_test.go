@@ -1017,6 +1017,60 @@ func isolatedCommitmentBranchCount(t *testing.T, checkRoot bool) (int, []commitm
 	return branches, published, pending
 }
 
+func TestAsyncBranchFlush_JoinerSeesFlushedBranches(t *testing.T) {
+	defer func(prev bool) { asyncBranchFlush = prev }(asyncBranchFlush)
+
+	asyncBranchFlush = false
+	want := branchCountAfterJoin(t)
+	require.Positive(t, want)
+
+	asyncBranchFlush = true
+	require.Equal(t, want, branchCountAfterJoin(t))
+}
+
+func branchCountAfterJoin(t *testing.T) int {
+	t.Helper()
+	ctx := context.Background()
+	logger := log.New()
+	logger.SetHandler(log.DiscardHandler())
+
+	db, tx, doms := setupStepTest(t)
+	doms.SetDeferCommitmentUpdates(true)
+
+	in := make(chan applyResult, 64)
+	out := make(chan commitmentResult, 64)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, true, 5, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
+	require.NoError(t, err)
+	defer cc.Stop()
+
+	rnd := rand.New(rand.NewSource(44))
+	vm := newRawViewVM(1)
+	ws := &state.WriteSet{}
+	for i := uint64(1); i <= 5000; i++ {
+		addrBytes := make([]byte, length.Addr)
+		rnd.Read(addrBytes)
+		addr := accounts.InternAddress([20]byte(addrBytes))
+		bal := *uint256.NewInt(i * 1000)
+		acc := accounts.Account{Nonce: i, Balance: bal, CodeHash: accounts.EmptyCodeHash}
+		require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addrBytes, accounts.SerialiseV3(&acc), 1, nil))
+		ws.SetNonce(addr, &state.VersionedWrite[uint64]{WriteHeader: state.WriteHeader{Address: addr, Path: state.NoncePath}, Val: i})
+		ws.SetBalance(addr, &state.VersionedWrite[uint256.Int]{WriteHeader: state.WriteHeader{Address: addr, Path: state.BalancePath}, Val: bal})
+	}
+	cc.handleMessage(ctx, recordTx(vm, 1, common.Hash{0x01}, 1, &chain.Rules{}, ws))
+	cc.handleMessage(ctx, newTestBlockResult(1, common.Hash{0x01}, 1, true))
+	require.Empty(t, out)
+
+	require.NoError(t, doms.Flush(ctx, tx))
+	var branches int
+	require.NoError(t, doms.GetMemBatch().IteratePrefix(kv.CommitmentDomain, nil, tx, func(k, v []byte) (bool, error) {
+		if len(v) > 0 && !bytes.Equal(k, commitment.KeyCommitmentState) {
+			branches++
+		}
+		return true, nil
+	}))
+	return branches
+}
+
 func TestHandleMessage_WrongRootDiscardsIsolatedBranchWrites(t *testing.T) {
 	accepted, published, pending := isolatedCommitmentBranchCount(t, false)
 	require.Positive(t, accepted, "an unchecked isolated round must write its branch records, or the rejection arm proves nothing")

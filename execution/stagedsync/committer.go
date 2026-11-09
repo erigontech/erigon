@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"os"
 	"runtime/pprof"
 	"sync"
 	"sync/atomic"
@@ -55,6 +56,8 @@ var computedAheadCount atomic.Int64
 // logNpPhases emits the per-block additive newPayload phase breakdown
 // (stage/exec/commit/overlap/gap/residual) for perf attribution.
 var logNpPhases = dbg.EnvBool("NEWPAYLOAD_PHASES", false)
+
+var asyncBranchFlush = os.Getenv("ASYNC_BRANCH_FLUSH") == "1"
 
 // ComputedAheadCountForTest reports the number of BAL compute-ahead computations
 // performed so far; ResetComputedAheadForTest zeroes it. Test-only observability.
@@ -682,6 +685,9 @@ func (cc *commitmentCalculator) computeRootFromBAL(ctx context.Context, req *blo
 // compute(). Used by BAL compute-ahead, which supplies its own BAL-folded updates
 // buffer rather than compute()'s shared one.
 func (cc *commitmentCalculator) computeRootFromUpdates(ctx context.Context, t commitTarget, updates *commitment.Updates, reader *asOfStateReader) ([]byte, func() error, error) {
+	if err := cc.doms.JoinBranchFlush(); err != nil {
+		return nil, nil, err
+	}
 	cc.finishPrefetch()
 	sdCtx := cc.doms.GetCommitmentContext()
 	sdCtx.SetUpdates(updates)
@@ -804,6 +810,10 @@ func (cc *commitmentCalculator) finishPrefetch() {
 // path; the per-call differences live in m.
 
 func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m computeMode) {
+	if err := cc.doms.JoinBranchFlush(); err != nil {
+		cc.publish(ctx, commitmentResult{blockNum: t.blockNum, txNum: t.lastTxNum, err: fmt.Errorf("commitmentCalculator: %sbranch flush failed: %w", m.label, err)})
+		return
+	}
 	cc.finishPrefetch()
 	// The version map is the ledger: exec's writes already encode every EIP-161 /
 	// self-destruct removal, so emitTouched folds the block's touched keys straight
@@ -909,7 +919,12 @@ func (cc *commitmentCalculator) computeIsolated(ctx context.Context, t commitTar
 	if err != nil {
 		return nil, nil, err
 	}
-	return rh, func() error { return cc.doms.FlushPendingUpdatesWithoutChangeset(cc.roTx) }, nil
+	return rh, func() error {
+		if asyncBranchFlush {
+			return cc.doms.StartFlushPendingUpdatesWithoutChangeset()
+		}
+		return cc.doms.FlushPendingUpdatesWithoutChangeset(cc.roTx)
+	}, nil
 }
 
 // flushPendingUpdatesWithoutChangeset eagerly applies the pending deferred

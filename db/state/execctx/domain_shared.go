@@ -224,6 +224,9 @@ type SharedDomains struct {
 
 	logger log.Logger
 
+	branchFlushMu sync.Mutex
+	branchFlush   *branchFlushJob
+
 	baseViewID       uint64
 	baseTxWritable   bool
 	baseStateVersion uint64
@@ -482,6 +485,7 @@ func (sd *SharedDomains) Merge(ctx context.Context, sdTxNum uint64, other *Share
 // ResetPendingUpdates clears all pending commitment updates.
 func (sd *SharedDomains) ResetPendingUpdates() {
 	if sd != nil && sd.sdCtx != nil {
+		sd.joinBranchFlushDiscarding()
 		sd.sdCtx.ResetPendingUpdates()
 	}
 }
@@ -519,16 +523,83 @@ func (sd *SharedDomains) FlushPendingUpdatesWithoutChangeset(tx kv.TemporalTx) e
 	putBranch := func(prefix, data, prevData []byte) error {
 		return sd.DomainPutCommitmentDiff(tx, prefix, data, upd.TxNum, prevData, nil)
 	}
+	start := time.Now()
 	_, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch, upd.Metrics)
+	sd.logBranchFlush(upd.BlockNum, time.Since(start), 0)
 	return err
 }
 
+type branchFlushJob struct {
+	blockNum uint64
+	took     time.Duration
+	err      error
+	done     chan struct{}
+}
+
+func (sd *SharedDomains) StartFlushPendingUpdatesWithoutChangeset() error {
+	if err := sd.JoinBranchFlush(); err != nil {
+		return err
+	}
+	upd := sd.sdCtx.TakePendingUpdate()
+	if upd == nil {
+		return nil
+	}
+	job := &branchFlushJob{blockNum: upd.BlockNum, done: make(chan struct{})}
+	sd.branchFlushMu.Lock()
+	sd.branchFlush = job
+	sd.branchFlushMu.Unlock()
+	go func() {
+		defer close(job.done)
+		defer upd.Clear()
+		putBranch := func(prefix, data, prevData []byte) error {
+			if bytes.Equal(prevData, data) {
+				return nil
+			}
+			// shortcut: writes without a tx, so a deferred update must carry a non-nil prev, resolve prev on an own RO tx if this leaves dbg
+			return sd.mem.(commitmentBranchDiffWriter).PutCommitmentBranchDiff(string(prefix), data, upd.TxNum, prevData, nil)
+		}
+		start := time.Now()
+		_, job.err = commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch, upd.Metrics)
+		job.took = time.Since(start)
+	}()
+	return nil
+}
+
+func (sd *SharedDomains) JoinBranchFlush() error {
+	sd.branchFlushMu.Lock()
+	defer sd.branchFlushMu.Unlock()
+	job := sd.branchFlush
+	if job == nil {
+		return nil
+	}
+	start := time.Now()
+	<-job.done
+	sd.branchFlush = nil
+	sd.logBranchFlush(job.blockNum, job.took, time.Since(start))
+	return job.err
+}
+
+func (sd *SharedDomains) joinBranchFlushDiscarding() {
+	if err := sd.JoinBranchFlush(); err != nil {
+		sd.logger.Warn("[np-phase] branch-flush failed on state being discarded", "err", err)
+	}
+}
+
+func (sd *SharedDomains) logBranchFlush(blockNum uint64, flush, joinWait time.Duration) {
+	sd.logger.Info("[np-phase] branch-flush", "blk", blockNum, "flush", flush, "join_wait", joinWait)
+}
+
 func (sd *SharedDomains) flushPendingUpdates(tx kv.TemporalTx, lockHeld bool) error {
+	if err := sd.JoinBranchFlush(); err != nil {
+		return err
+	}
 	upd := sd.sdCtx.TakePendingUpdate()
 	if upd == nil {
 		return nil
 	}
 	defer upd.Clear()
+	start := time.Now()
+	defer func() { sd.logBranchFlush(upd.BlockNum, time.Since(start), 0) }()
 
 	putBranch := func(prefix, data, prevData []byte) error {
 		return sd.DomainPut(kv.CommitmentDomain, tx, prefix, data, upd.TxNum, prevData)
@@ -832,6 +903,7 @@ func (sd *SharedDomains) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockNumb
 
 // Unwind drops [txNumUnwindTo, ∞)
 func (sd *SharedDomains) Unwind(txNumUnwindTo uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) {
+	sd.joinBranchFlushDiscarding()
 	sd.mem.Unwind(txNumUnwindTo, changeset)
 	if !sd.localCacheUnwind {
 		sd.invalidateCaches(txNumUnwindTo)
@@ -1105,6 +1177,9 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 
 func (sd *SharedDomains) flushMem(ctx context.Context, tx kv.RwTx, opts ...kv.FlushOption) error {
 	defer sd.visibleEnds.reset()
+	if err := sd.JoinBranchFlush(); err != nil {
+		return err
+	}
 	if sd.sdCtx.HasPendingUpdate() {
 		if ttx, ok := tx.(kv.TemporalTx); ok {
 			if err := sd.FlushPendingUpdates(ttx); err != nil {
