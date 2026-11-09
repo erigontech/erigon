@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
@@ -97,6 +98,33 @@ func isStateSnapshot(name string) bool {
 
 func isStateHistory(name string) bool {
 	return strings.HasPrefix(name, "idx") || strings.HasPrefix(name, "history") || strings.HasPrefix(name, "accessor")
+}
+
+func legacyCommitmentFiles(items snapcfg.PreverifiedItems) map[string]struct{} {
+	type stepRange struct {
+		history  bool
+		from, to uint64
+	}
+	ranges := make(map[string]stepRange)
+	v3 := make(map[stepRange]bool)
+	for _, p := range items {
+		info, _, ok := snaptype.ParseFileName("", p.Name)
+		if !ok || info.TypeString != kv.CommitmentDomain.String() {
+			continue
+		}
+		r := stepRange{history: isStateHistory(p.Name), from: info.From, to: info.To}
+		ranges[p.Name] = r
+		if info.Ext == ".kv" || info.Ext == ".v" {
+			v3[r] = info.Version.Major >= 3
+		}
+	}
+	legacy := make(map[string]struct{})
+	for name, r := range ranges {
+		if !v3[r] {
+			legacy[name] = struct{}{}
+		}
+	}
+	return legacy
 }
 
 func canSnapshotBePruned(name string) bool {
@@ -469,6 +497,10 @@ func SyncSnapshots(
 		// send all hashes to the Downloader service
 		preverifiedBlockSnapshots := snapCfg.Preverified
 		downloadRequest := make([]dbservices.DownloadRequest, 0, len(preverifiedBlockSnapshots.Items))
+		var legacyCommitment map[string]struct{}
+		if statecfg.ExperimentalCommitmentV3 {
+			legacyCommitment = legacyCommitmentFiles(preverifiedBlockSnapshots.Items)
+		}
 
 		blockPrune, historyPrune := computeBlocksToPrune(blockReader, prune)
 		blackListForPruning := make(map[string]struct{})
@@ -539,6 +571,9 @@ func SyncSnapshots(
 				continue
 			}
 			if !syncCfg.KeepExecutionProofs && isStateHistory(p.Name) && strings.Contains(p.Name, kv.CommitmentDomain.String()) {
+				continue
+			}
+			if _, ok := legacyCommitment[p.Name]; ok {
 				continue
 			}
 

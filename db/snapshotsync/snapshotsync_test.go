@@ -292,6 +292,31 @@ func TestBlackListForPruning_ChainHistoryExpiry(t *testing.T) {
 	}
 }
 
+func TestLegacyCommitmentFiles(t *testing.T) {
+	items := snapcfg.PreverifiedItems{
+		{Name: "domain/v2.2-commitment.0-16.kv"},
+		{Name: "domain/v2.0-commitment.0-16.kvi"},
+		{Name: "domain/v1.1-commitment.0-16.bt"},
+		{Name: "domain/v3.0-commitment.16-32.kv"},
+		{Name: "domain/v2.0-commitment.16-32.bt"},
+		{Name: "history/v2.0-commitment.0-16.v"},
+		{Name: "idx/v2.0-commitment.0-16.ef"},
+		{Name: "accessor/v2.0-commitment.0-16.vi"},
+		{Name: "history/v3.0-commitment.16-32.v"},
+		{Name: "idx/v2.0-commitment.16-32.ef"},
+		{Name: "domain/v2.0-accounts.0-16.kv"},
+		{Name: "v1.0-000000-000100-transactions.seg"},
+	}
+	require.Equal(t, map[string]struct{}{
+		"domain/v2.2-commitment.0-16.kv":   {},
+		"domain/v2.0-commitment.0-16.kvi":  {},
+		"domain/v1.1-commitment.0-16.bt":   {},
+		"history/v2.0-commitment.0-16.v":   {},
+		"idx/v2.0-commitment.0-16.ef":      {},
+		"accessor/v2.0-commitment.0-16.vi": {},
+	}, legacyCommitmentFiles(items))
+}
+
 // TestBuildBlackListForPruning_CommitmentHistory locks down the commitment
 // history filter folded into buildBlackListForPruning: commitment-domain
 // state-history files (idx/history/accessor) with To <= minCommitmentHistoryStep
