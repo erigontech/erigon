@@ -24,6 +24,8 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol"
@@ -36,6 +38,27 @@ import (
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 )
+
+func TestCheckSimStorageReplacementsBoundsTheStoredSlots(t *testing.T) {
+	t.Parallel()
+	_, rwTx := temporaltest.NewTestTx(t)
+	sd, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New())
+	require.NoError(t, err)
+	t.Cleanup(sd.Close)
+	addr := common.HexToAddress("0x00000000000000000000000000000000000000aa")
+	putDel := sd.AsPutDel(rwTx)
+	for slot := byte(1); slot <= 3; slot++ {
+		key := make([]byte, 52)
+		copy(key, addr[:])
+		key[51] = slot
+		require.NoError(t, putDel.DomainPut(kv.StorageDomain, key, []byte{slot}, 1, nil))
+	}
+	empty := map[common.Hash]common.Hash{}
+	overrides := ethapi.StateOverrides{accounts.InternAddress(addr): {State: &empty}}
+
+	require.NoError(t, checkSimStorageReplacements(t.Context(), &overrides, sd, rwTx, 3))
+	require.ErrorContains(t, checkSimStorageReplacements(t.Context(), &overrides, sd, rwTx, 2), "more than 2 storage slots")
+}
 
 func TestSimulationSkipsDisabledCommitmentHistory(t *testing.T) {
 	t.Parallel()
