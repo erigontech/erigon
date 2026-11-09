@@ -862,6 +862,7 @@ func advanceGloasEnvelopeRecoveryCursor(cfg *Cfg, scanRoot common.Hash, complete
 type selectedHeadEnvelopeStore interface {
 	HasEnvelope(common.Hash) bool
 	IsEnvelopeRejected(common.Hash) bool
+	IsBlockInvalid(common.Hash) bool
 	OnExecutionPayload(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool) error
 }
 
@@ -934,7 +935,7 @@ func waitForSelectedHeadEnvelope(
 ) {
 	pollCtx, pollCancel := context.WithTimeout(ctx, timeout)
 	defer pollCancel()
-	if store.HasEnvelope(headRoot) || store.IsEnvelopeRejected(headRoot) {
+	if store.HasEnvelope(headRoot) || store.IsEnvelopeRejected(headRoot) || store.IsBlockInvalid(headRoot) {
 		if hooks.done != nil {
 			hooks.done()
 		}
@@ -971,7 +972,7 @@ func waitForSelectedHeadEnvelope(
 		case <-pollCtx.Done():
 			return
 		case <-ticker.C:
-			if store.HasEnvelope(headRoot) || store.IsEnvelopeRejected(headRoot) {
+			if store.HasEnvelope(headRoot) || store.IsEnvelopeRejected(headRoot) || store.IsBlockInvalid(headRoot) {
 				return
 			}
 		}

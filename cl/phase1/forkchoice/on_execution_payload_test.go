@@ -4348,6 +4348,11 @@ func TestExecutionPayloadDecodeFailureIsTerminal(t *testing.T) {
 				err = f.validateParentPayloadPath(child, mode.withEngine)
 				require.ErrorContains(t, err, "parent execution payload is invalid")
 				require.NotErrorIs(t, err, ErrParentEnvelopePending)
+
+				f.executionPayloadStatus.Remove(payload.BlockHash)
+				err = f.validateParentPayloadPath(child, mode.withEngine)
+				require.ErrorContains(t, err, "parent execution payload is invalid")
+				require.NotErrorIs(t, err, ErrParentEnvelopePending)
 			})
 		}
 	}

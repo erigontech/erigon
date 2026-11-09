@@ -8,6 +8,7 @@ import (
 	"math/big"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -54,6 +55,7 @@ type selectedHeadEnvelopeTestStore struct {
 	onExecutionPayloadErr error
 	onExecutionPayload    func(*cltypes.SignedExecutionPayloadEnvelope) error
 	rejected              bool
+	invalid               bool
 }
 
 type anchorEnvelopeTestStore struct {
@@ -90,18 +92,55 @@ func (s *selectedHeadEnvelopeTestStore) HasEnvelope(root common.Hash) bool {
 	return s.envelopes[root] != nil
 }
 
-func (s *selectedHeadEnvelopeTestStore) IsEnvelopeRejected(common.Hash) bool { return s.rejected }
+func (s *selectedHeadEnvelopeTestStore) IsEnvelopeRejected(common.Hash) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.rejected
+}
 
-func TestWaitForSelectedHeadEnvelopeSkipsRejectedRoot(t *testing.T) {
-	store := &selectedHeadEnvelopeTestStore{rejected: true}
-	requests := 0
-	done := make(chan struct{})
-	waitForSelectedHeadEnvelope(t.Context(), store, func(context.Context, [][32]byte) (map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, error) {
-		requests++
-		return nil, nil
-	}, common.Hash{1}, time.Second, true, true, selectedHeadEnvelopeRequestHooks{done: func() { close(done) }})
-	<-done
-	require.Zero(t, requests)
+func (s *selectedHeadEnvelopeTestStore) IsBlockInvalid(common.Hash) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.invalid
+}
+
+func TestWaitForSelectedHeadEnvelopeSkipsTerminalRoot(t *testing.T) {
+	for _, verdict := range []string{"rejected", "invalidated"} {
+		t.Run(verdict, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				store := &selectedHeadEnvelopeTestStore{rejected: verdict == "rejected", invalid: verdict == "invalidated"}
+				requests := 0
+				done := make(chan struct{})
+				waitForSelectedHeadEnvelope(t.Context(), store, func(context.Context, [][32]byte) (map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, error) {
+					requests++
+					return nil, nil
+				}, common.Hash{1}, time.Second, true, true, selectedHeadEnvelopeRequestHooks{done: func() { close(done) }})
+				<-done
+				require.Zero(t, requests)
+			})
+		})
+	}
+}
+
+func TestWaitForSelectedHeadEnvelopeStopsOnTerminalVerdict(t *testing.T) {
+	for _, verdict := range []string{"rejected", "invalidated"} {
+		t.Run(verdict, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				store := &selectedHeadEnvelopeTestStore{}
+				done := make(chan struct{})
+				start := time.Now()
+				waitForSelectedHeadEnvelope(t.Context(), store, func(context.Context, [][32]byte) (map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, error) {
+					store.mu.Lock()
+					store.rejected = verdict == "rejected"
+					store.invalid = verdict == "invalidated"
+					store.mu.Unlock()
+					return nil, nil
+				}, common.Hash{1}, time.Second, true, true, selectedHeadEnvelopeRequestHooks{done: func() { close(done) }})
+				<-done
+				require.Less(t, time.Since(start), time.Second)
+			})
+		})
+	}
 }
 
 func (s *selectedHeadEnvelopeTestStore) OnExecutionPayload(_ context.Context, envelope *cltypes.SignedExecutionPayloadEnvelope, _, _ bool) error {
@@ -579,9 +618,9 @@ func TestGloasRecoveryPendingQueueIsBoundedAndRotatesFailures(t *testing.T) {
 	require.True(t, trackGloasEnvelopeRecoveryRoot(cfg, common.HexToHash("0xfffe")))
 }
 
-func TestGloasRecoveryReleasesInvalidPayload(t *testing.T) {
-	for _, alreadyInvalid := range []bool{true, false} {
-		t.Run(fmt.Sprintf("alreadyInvalid=%t", alreadyInvalid), func(t *testing.T) {
+func TestGloasRecoveryReleasesTerminalPayload(t *testing.T) {
+	for _, verdict := range []string{"invalidated", "invalidated during recovery", "rejected"} {
+		t.Run(verdict, func(t *testing.T) {
 			cfg, graph, parentRoot, _, _, engine := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusInvalidated, false)
 			parent := graph.parents[parentRoot]
 			envelope := graph.envelopes[parentRoot]
@@ -601,8 +640,11 @@ func TestGloasRecoveryReleasesInvalidPayload(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, common.Hash(headRoot), selectedRoot)
 
-			if alreadyInvalid {
+			switch verdict {
+			case "invalidated":
 				cfg.forkChoice.MarkPayloadStatus(parentRoot, envelope.Message.Payload.BlockHash, execution_client.PayloadStatusInvalidated)
+			case "rejected":
+				cfg.forkChoice.RejectEnvelope(parentRoot)
 			}
 			peerRPC, sentinel := newChainTipBatchEnvelopeRPC(t, cfg.beaconCfg, envelope)
 			cfg.rpc = peerRPC
@@ -612,15 +654,16 @@ func TestGloasRecoveryReleasesInvalidPayload(t *testing.T) {
 
 			for range 2 {
 				recoverMissingEnvelopes(ctx, cfg)
-				require.True(t, cfg.forkChoice.IsBlockInvalid(parentRoot))
+				require.Equal(t, verdict == "rejected", cfg.forkChoice.IsEnvelopeRejected(parentRoot))
+				require.Equal(t, verdict != "rejected", cfg.forkChoice.IsBlockInvalid(parentRoot))
 				require.Empty(t, cfg.gloasEnvelopeRecoveryPending)
 			}
-			if alreadyInvalid {
-				require.Zero(t, sentinel.calls)
-				require.Zero(t, engine.newPayloadCalls)
-			} else {
+			if verdict == "invalidated during recovery" {
 				require.Equal(t, 1, sentinel.calls)
 				require.Equal(t, 1, engine.newPayloadCalls)
+			} else {
+				require.Zero(t, sentinel.calls)
+				require.Zero(t, engine.newPayloadCalls)
 			}
 		})
 	}
@@ -998,6 +1041,104 @@ func TestWaitForSelectedHeadEnvelopeDoesNotJoinLateRequester(t *testing.T) {
 	require.False(t, store.HasEnvelope(headRoot))
 }
 
+func TestForwardSyncRecoversAnchorForPendingFullChild(t *testing.T) {
+	cfg, graph, anchorRoot, child, _, engine := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
+	anchor := graph.parentState
+	envelope := graph.envelopes[anchorRoot]
+	delete(graph.parents, anchorRoot)
+	delete(graph.envelopes, anchorRoot)
+	var err error
+	graph.ForkGraph, err = fork_graph.NewForkGraphDisk(anchor, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
+	require.NoError(t, err)
+	clock := eth_clock.NewEthereumClock(0, common.Hash{}, cfg.beaconCfg)
+	store, err := forkchoice.NewForkChoiceStore(clock, anchor, engine, pool.NewOperationsPool(cfg.beaconCfg), graph, beaconevents.NewEventEmitter(), nil, nil,
+		public_keys_registry.NewInMemoryPublicKeysRegistry(), validator_params.NewValidatorParams(), false, nil)
+	require.NoError(t, err)
+	require.Equal(t, anchorRoot, store.AnchorRoot())
+	store.OnTick((child.Block.Slot + 1) * cfg.beaconCfg.SecondsPerSlot * 1000)
+	cfg.forkChoice = store
+	cfg.gloasPayloadValidator = store
+	cfg.caplinConfig.DisabledCheckpointSync = true
+	peerRPC, sentinel := newChainTipBatchEnvelopeRPC(t, cfg.beaconCfg, envelope)
+	cfg.rpc = peerRPC
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+
+	frontier, err := processDownloadedBlockBatches(ctx, log.Root(), cfg, anchor.Slot(), false, []*cltypes.SignedBeaconBlock{child}, nil)
+
+	require.NoError(t, err)
+	require.Equal(t, anchor.Slot(), frontier)
+	require.True(t, store.HasEnvelope(anchorRoot))
+	require.Equal(t, 1, sentinel.calls)
+	require.Equal(t, 1, engine.newPayloadCalls)
+
+	frontier, err = processDownloadedBlockBatches(ctx, log.Root(), cfg, frontier, false, []*cltypes.SignedBeaconBlock{child}, nil)
+
+	require.NoError(t, err)
+	require.Equal(t, child.Block.Slot, frontier)
+	require.Equal(t, 1, sentinel.calls)
+	require.Equal(t, 1, engine.newPayloadCalls)
+}
+
+func TestEnsureAnchorEnvelopeReadsDiskAfterRestart(t *testing.T) {
+	for _, corrupt := range []bool{false, true} {
+		t.Run(fmt.Sprintf("corrupt=%t", corrupt), func(t *testing.T) {
+			cfg, anchor, bid, envelope, _ := validAnchorEnvelopeFixture(t, 1)
+			cfg.AltairForkEpoch, cfg.BellatrixForkEpoch, cfg.CapellaForkEpoch = 0, 0, 0
+			cfg.DenebForkEpoch, cfg.ElectraForkEpoch, cfg.FuluForkEpoch = 0, 0, 0
+			cfg.InitializeForkSchedule()
+			anchor.SetLatestExecutionPayloadBid(bid)
+			anchor.SetLatestBlockHash(bid.ParentBlockHash)
+			root, err := anchor.BlockRoot()
+			require.NoError(t, err)
+			envelope.Message.BeaconBlockRoot = root
+			key, err := bls.NewPrivateKeyFromIKM([]byte("01234567890123456789012345678901"))
+			require.NoError(t, err)
+			signAnchorEnvelope(t, anchor, key, envelope, bid.Slot)
+
+			fs := afero.NewMemMapFs()
+			graph, err := fork_graph.NewForkGraphDisk(anchor, nil, fs, beacon_router_configuration.RouterConfiguration{})
+			require.NoError(t, err)
+			require.NoError(t, graph.DumpEnvelopeOnDisk(root, envelope))
+			require.True(t, graph.HasEnvelope(root))
+			if corrupt {
+				require.NoError(t, afero.WriteFile(fs, fmt.Sprintf("%x.envelope.snappy_ssz", root), []byte("corrupt"), 0o600))
+			}
+
+			restartedGraph, err := fork_graph.NewForkGraphDisk(anchor, nil, fs, beacon_router_configuration.RouterConfiguration{})
+			require.NoError(t, err)
+			store, err := forkchoice.NewForkChoiceStore(nil, anchor, nil, pool.NewOperationsPool(cfg), restartedGraph, beaconevents.NewEventEmitter(), nil, nil,
+				public_keys_registry.NewInMemoryPublicKeysRegistry(), validator_params.NewValidatorParams(), false, nil)
+			require.NoError(t, err)
+			require.False(t, store.HasEnvelope(root))
+			clock := eth_clock.NewEthereumClock(0, common.Hash{}, cfg)
+			sentinel := &chainTipBatchEnvelopeSentinel{}
+			if corrupt {
+				sentinel.response = encodeEnvelopeResponse(t, cfg, envelope)
+			}
+			stageCfg := &Cfg{
+				beaconCfg: cfg, forkChoice: store,
+				caplinConfig: clparams.CaplinConfig{DisabledCheckpointSync: true},
+				rpc:          rpc.NewBeaconRpcP2P(t.Context(), sentinel, cfg, clock),
+			}
+			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+			defer cancel()
+
+			require.NoError(t, ensureAnchorEnvelopeOnce(ctx, stageCfg))
+
+			require.True(t, store.HasEnvelope(root))
+			if corrupt {
+				require.Equal(t, 1, sentinel.calls)
+			} else {
+				require.Zero(t, sentinel.calls)
+			}
+			stored, err := store.ReadEnvelopeFromDisk(root)
+			require.NoError(t, err)
+			require.Equal(t, envelope.Signature, stored.Signature)
+		})
+	}
+}
+
 func TestEnsureAnchorEnvelopeRejectsBlobMismatchBeforeStorage(t *testing.T) {
 	for _, withEngine := range []bool{false, true} {
 		t.Run(fmt.Sprintf("engine=%t", withEngine), func(t *testing.T) {
@@ -1136,6 +1277,9 @@ func TestAnchorPayloadDecodeFailureIsTerminal(t *testing.T) {
 				require.False(t, store.IsEnvelopeRejected(root))
 				require.Equal(t, bid.ParentBlockHash, store.GetFinalizedExecutionHash(store.FinalizedCheckpoint().Root))
 				require.Equal(t, bid.ParentBlockHash, store.GetFinalizedExecutionHash(store.JustifiedCheckpoint().Root))
+				executionHead, ready := store.GetExecutionHead(forkchoice.ForkChoiceNode{Root: root, PayloadStatus: cltypes.PayloadStatusEmpty})
+				require.True(t, ready)
+				require.Equal(t, bid.ParentBlockHash, executionHead)
 				require.Zero(t, engine.newPayloadCalls)
 
 				retryUnverifiedAnchorPayload(t.Context(), stageCfg)

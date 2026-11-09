@@ -473,10 +473,8 @@ func (f *ForkChoiceStore) validateParentPayloadPath(block *cltypes.BeaconBlock, 
 	}
 
 	parentBlockHash := currentBid.Message.ParentBlockHash
-	if status, ok := f.executionPayloadStatus.Get(parentBlockHash); ok {
-		if status == execution_client.PayloadStatusInvalidated {
-			return errors.New("parent execution payload is invalid")
-		}
+	if f.executionHashMarkedInvalid(parentBlockHash) {
+		return errors.New("parent execution payload is invalid")
 	}
 
 	parentBid := f.executionPayloadBid(block.ParentRoot)

@@ -90,10 +90,12 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 				return highestBlockProcessed, nil
 			}
 			if errors.Is(err, forkchoice.ErrParentEnvelopePending) {
-				// Parent is FULL but its envelope is not yet on disk.  This is
-				// normal during forward sync: the envelope either arrives in this
-				// batch (for a later block) or in a subsequent batch.  Return
-				// whatever progress was made so far (do NOT ban the peer).
+				// The anchor's envelope is outside the downloaded block batches.
+				if block.Block.ParentRoot == cfg.forkChoice.AnchorRoot() {
+					if recoveryErr := ensureAnchorEnvelopeOnce(ctx, cfg); recoveryErr != nil {
+						logger.Debug("[Caplin] forward sync: anchor envelope recovery failed", "err", recoveryErr)
+					}
+				}
 				logger.Debug("[Caplin] forward sync: parent envelope pending, will retry", "blockSlot", block.Block.Slot)
 				if newHighestBlockProcessed > 0 {
 					return newHighestBlockProcessed, nil
@@ -491,13 +493,12 @@ func ensureAnchorEnvelopeOnce(ctx context.Context, cfg *Cfg) error {
 		"anchorSlot", anchorSlot, "anchorRoot", common.Hash(anchorRoot),
 		"bidBlockHash", bid.BlockHash)
 
-	var env *cltypes.SignedExecutionPayloadEnvelope
-	if cfg.forkChoice.HasEnvelope(anchorRoot) {
-		env, err = cfg.forkChoice.ReadEnvelopeFromDisk(anchorRoot)
-		if err != nil {
-			return fmt.Errorf("failed to read anchor envelope: %w", err)
-		}
-	} else {
+	env, err := cfg.forkChoice.ReadEnvelopeFromDisk(anchorRoot)
+	if err != nil {
+		log.Debug("[Caplin] Stored anchor envelope unavailable, fetching from network", "anchorRoot", anchorRoot, "err", err)
+		env = nil
+	}
+	if env == nil {
 		// Try HTTP API first (checkpoint sync endpoint), then fall back to P2P.
 		// HTTP is more reliable on devnets with few peers. The checkpoint endpoint
 		// serves the server's current finalized envelope, which can be a newer block
