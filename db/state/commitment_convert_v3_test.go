@@ -32,11 +32,13 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/state"
@@ -45,6 +47,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	v3 "github.com/erigontech/erigon/execution/commitment/v3"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -676,4 +679,62 @@ func TestConvertCommitmentFiles_V3ExtensionRootReplacedLater(t *testing.T) {
 			require.Greater(t, len(kvs), 1)
 		})
 	}
+}
+
+func TestConvertCommitmentFiles_V3RebuiltStepRefusesBeforeSwap(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	statecfg.EnableHistoricalCommitment()
+	const stepSize = 16
+	db, agg, rwTx, domains := convertTestDomains(t, stepSize)
+	_, _, putAccount := domainWriter(t, domains, rwTx)
+	addrs, _ := generateInputData(t, length.Addr, 1, 5)
+	roots := rebuildHeaders{}
+	for block := range uint64(29) {
+		for txNum := block * 3; txNum < (block+1)*3; txNum++ {
+			putAccount(addrs[txNum%uint64(len(addrs))], txNum)
+		}
+		last := (block+1)*3 - 1
+		root, err := domains.ComputeCommitment(t.Context(), rwTx, true, block, last, "", nil)
+		require.NoError(t, err)
+		roots[block] = common.Hash(root)
+		require.NoError(t, rawdbv3.TxNums.Append(rwTx, block, last))
+	}
+	require.NoError(t, stages.SaveStageProgress(rwTx, stages.Execution, 28))
+	require.NoError(t, domains.Flush(t.Context(), rwTx))
+	domains.Close()
+	require.NoError(t, rwTx.Commit())
+	require.NoError(t, agg.BuildFiles(db, 87, unboundedFinalityCtx))
+
+	agg.CloseFilesNoReopen()
+	clearTx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	t.Cleanup(clearTx.Rollback)
+	for _, table := range statecfg.Schema.CommitmentDomain.Tables() {
+		require.NoError(t, clearTx.ClearTable(table))
+	}
+	require.NoError(t, clearTx.Commit())
+	for _, d := range []string{agg.Dirs().SnapDomain, agg.Dirs().SnapHistory, agg.Dirs().SnapIdx, agg.Dirs().SnapAccessors} {
+		files, globErr := filepath.Glob(filepath.Join(d, "*commitment*"))
+		require.NoError(t, globErr)
+		for _, f := range files {
+			require.NoError(t, dir.RemoveFile(f))
+		}
+	}
+	require.NoError(t, agg.OpenFolder(db))
+	_, err = state.RebuildCommitmentFilesWithHistory(t.Context(), db, roots, unboundedFinalityCtx, log.New(), false)
+	require.NoError(t, err)
+
+	at := agg.BeginFilesRo()
+	defer at.Close()
+	swapped := false
+	err = state.ConvertCommitmentFiles(t.Context(), at, state.ConvertOpts{
+		TargetV3: true,
+		BeforeSwap: func() error {
+			swapped = true
+			return nil
+		},
+	}, log.New())
+	require.ErrorContains(t, err, "commitment state txNum 62 differs from file end txNum 63")
+	require.False(t, swapped)
+	require.NoDirExists(t, filepath.Join(agg.Dirs().Snap, "backup"))
 }

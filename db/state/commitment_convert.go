@@ -863,7 +863,7 @@ const restoreManifestTmpName = ".restore_manifest.tmp"
 // Takes datadir.Dirs directly (not an AggregatorRoTx) so restore can run even
 // when the on-disk state is broken enough that the aggregator can't open it —
 // which is exactly when restore is most needed.
-func RestoreCommitmentFiles(ctx context.Context, dirs datadir.Dirs, logger log.Logger) error {
+func RestoreCommitmentFiles(ctx context.Context, dirs datadir.Dirs, logger log.Logger) (bool, error) {
 	backupRoot := filepath.Join(dirs.Snap, "backup")
 	historyDirs := [][2]string{{"history", dirs.SnapHistory}, {"idx", dirs.SnapIdx}, {"accessor", dirs.SnapAccessors}}
 	historyPending := false
@@ -872,20 +872,21 @@ func RestoreCommitmentFiles(ctx context.Context, dirs datadir.Dirs, logger log.L
 			historyPending = true
 		}
 	}
-	if err := preflightRestoreV3Orphans(
+	restoredV3, err := preflightRestoreV3Orphans(
 		[][2]string{{filepath.Join(backupRoot, "domains"), dirs.SnapDomain}, {filepath.Join(backupRoot, "history"), dirs.SnapHistory}},
-	); err != nil {
-		return err
+	)
+	if err != nil {
+		return false, err
 	}
 	if err := restoreCommitmentBackup(ctx, filepath.Join(backupRoot, "domains"), dirs.SnapDomain, !historyPending, logger); err != nil {
-		return err
+		return false, err
 	}
 	for _, pair := range historyDirs {
 		if err := restoreCommitmentBackup(ctx, filepath.Join(backupRoot, pair[0]), pair[1], false, logger); err != nil {
-			return err
+			return false, err
 		}
 	}
-	return nil
+	return restoredV3, nil
 }
 
 func commitmentFileVersion(name string) (uint64, bool) {
@@ -944,7 +945,8 @@ func manifestRanges(backupDir string, entries []os.DirEntry) (manifest []string,
 	return manifest, !exists, ranges, nil
 }
 
-func preflightRestoreV3Orphans(pairs [][2]string) error {
+func preflightRestoreV3Orphans(pairs [][2]string) (bool, error) {
+	restoredV3 := false
 	var conflicts []string
 	for _, pair := range pairs {
 		entries, err := os.ReadDir(pair[0])
@@ -952,18 +954,18 @@ func preflightRestoreV3Orphans(pairs [][2]string) error {
 			continue
 		}
 		if err != nil {
-			return fmt.Errorf("[commitment_convert] restore: read backup dir %s: %w", pair[0], err)
+			return false, fmt.Errorf("[commitment_convert] restore: read backup dir %s: %w", pair[0], err)
 		}
 		_, _, ranges, err := manifestRanges(pair[0], entries)
 		if err != nil {
-			return err
+			return false, err
 		}
 		liveEntries, err := os.ReadDir(pair[1])
 		if errors.Is(err, os.ErrNotExist) {
 			continue
 		}
 		if err != nil {
-			return fmt.Errorf("[commitment_convert] restore: read live dir %s: %w", pair[1], err)
+			return false, fmt.Errorf("[commitment_convert] restore: read live dir %s: %w", pair[1], err)
 		}
 		for _, entry := range liveEntries {
 			if entry.IsDir() {
@@ -973,6 +975,7 @@ func preflightRestoreV3Orphans(pairs [][2]string) error {
 			if !ok || major < 3 {
 				continue
 			}
+			restoredV3 = true
 			m := commitmentStepRangeRe.FindStringSubmatch(entry.Name())
 			if m == nil {
 				continue
@@ -984,9 +987,9 @@ func preflightRestoreV3Orphans(pairs [][2]string) error {
 	}
 	if len(conflicts) != 0 {
 		slices.Sort(conflicts)
-		return fmt.Errorf("[commitment_convert] restore: v3 commitment files are not in the backup manifest: %s", strings.Join(conflicts, ", "))
+		return false, fmt.Errorf("[commitment_convert] restore: v3 commitment files are not in the backup manifest: %s", strings.Join(conflicts, ", "))
 	}
-	return nil
+	return restoredV3, nil
 }
 
 func restoreCommitmentBackup(ctx context.Context, backupDir, liveDir string, required bool, logger log.Logger) error {

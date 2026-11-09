@@ -621,7 +621,8 @@ Examples:
 // when MDBX/aggregator/snapshots can't open — which is exactly when --restore
 // is most needed.
 func commitmentRestore(ctx context.Context, logger log.Logger) error {
-	if err := dbstate.RestoreCommitmentFiles(ctx, datadir.New(datadirCli), logger); err != nil {
+	restoredV3, err := dbstate.RestoreCommitmentFiles(ctx, datadir.New(datadirCli), logger)
+	if err != nil || !restoredV3 {
 		return err
 	}
 	db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), true, logger)

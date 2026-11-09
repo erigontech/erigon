@@ -223,6 +223,11 @@ func convertCommitmentFileV3(
 			}
 			n := read.Add(1)
 			v := readOwned(reader, batch, valsCompressed)
+			if bytes.Equal(k, commitment.KeyCommitmentState) && len(v) >= 8 {
+				if txNum := binary.BigEndian.Uint64(v); txNum != endTxNum-1 {
+					return fmt.Errorf("commitment state txNum %d differs from file end txNum %d", txNum, endTxNum-1)
+				}
+			}
 			batch.pairs = append(batch.pairs, [2][]byte{k, v})
 			if len(batch.pairs) == commitmentV3Batch {
 				if sendErr := send(); sendErr != nil {

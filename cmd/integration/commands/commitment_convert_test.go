@@ -91,6 +91,31 @@ func TestNewTemporalDBRejectsV3FilesWhenV3IsDisabled(t *testing.T) {
 	}(), "requires commitment v3")
 }
 
+func TestCommitmentConvertLegacyRestoreKeepsExecution(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	previousDatadir, previousChaindata := datadirCli, chaindata
+	t.Cleanup(func() { datadirCli, chaindata = previousDatadir, previousChaindata })
+
+	db, dirs := dbWithV3State(t)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return stages.SaveStageProgress(tx, stages.Execution, 100)
+	}))
+	require.NoError(t, commitmentConvert(db, t.Context(), log.New(), state.ConvertOpts{TargetSqueeze: true}))
+	db.Close()
+
+	datadirCli, chaindata = dirs.DataDir, dirs.Chaindata
+	require.NoError(t, commitmentRestore(t.Context(), log.New()))
+
+	rawDB := mdbx.New(dbcfg.ChainDB, log.New()).Path(dirs.Chaindata).MustOpen()
+	defer rawDB.Close()
+	require.NoError(t, rawDB.View(t.Context(), func(tx kv.Tx) error {
+		progress, err := stages.GetStageProgress(tx, stages.Execution)
+		require.NoError(t, err)
+		require.Equal(t, uint64(100), progress)
+		return nil
+	}))
+}
+
 func TestCommitmentConvertRestoreResetsExecution(t *testing.T) {
 	t.Cleanup(statecfg.SetCommitmentV3(false))
 	previousDatadir, previousChaindata := datadirCli, chaindata
@@ -109,6 +134,7 @@ func TestCommitmentConvertRestoreResetsExecution(t *testing.T) {
 	for _, f := range files {
 		require.NoError(t, os.Rename(f, filepath.Join(backupDir, filepath.Base(f))))
 	}
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v3.0-commitment.0-2.kv"), nil, 0o644))
 
 	datadirCli, chaindata = dirs.DataDir, dirs.Chaindata
 	require.NoError(t, commitmentRestore(t.Context(), log.New()))
