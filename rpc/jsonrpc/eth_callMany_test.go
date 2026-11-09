@@ -180,11 +180,6 @@ func TestCapEVMTimeout(t *testing.T) {
 	}
 }
 
-func TestCallManyRejectsTooManyTransactions(t *testing.T) {
-	bundles := []Bundle{{Transactions: make([]ethapi.CallArgs, maxCallManyTransactions)}, {Transactions: make([]ethapi.CallArgs, 1)}}
-	require.ErrorContains(t, validateBundles(bundles, nil), "too many transactions")
-}
-
 func TestCallManyAppliesTheReturnDataLimit(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api, _ := newCallManyApisForTest(m)

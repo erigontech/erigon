@@ -52,15 +52,9 @@ type StateContext struct {
 	TransactionIndex *int
 }
 
-const maxCallManyTransactions = 1_000
-
 func validateBundles(bundles []Bundle, chainID *uint256.Int) error {
 	empty := true
-	total := 0
 	for b, bundle := range bundles {
-		if total += len(bundle.Transactions); total > maxCallManyTransactions {
-			return fmt.Errorf("too many transactions: more than %d", maxCallManyTransactions)
-		}
 		for i := range bundle.Transactions {
 			if err := ethapi.CheckChainID(bundle.Transactions[i].ChainID, chainID); err != nil {
 				return fmt.Errorf("bundle %d, transaction %d: %w", b, i, err)
