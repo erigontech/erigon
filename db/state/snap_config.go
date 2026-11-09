@@ -3,7 +3,6 @@ package state
 import (
 	"fmt"
 
-	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/version"
 )
 
@@ -32,11 +31,6 @@ type SnapshotCreationConfig struct {
 	MinimumSize uint64
 
 	// SeedableSize uint64 // TODO: minimum size of file for it to be seedable.
-
-	// preverified can have larger files than that indicated by `MergeSteps.last`.
-	// This is because previously, different values might have been used.
-	// Preverified       snapcfg.Preverified
-	PreverifiedParsed []*SnapInfo
 }
 
 type SnapshotConfig struct {
@@ -49,8 +43,6 @@ type SnapshotConfig struct {
 	//Integrity *DependencyIntegrityChecker
 
 	Schema SnapNameSchema
-
-	HasMetadata bool // data file (.v etc) has metadata
 }
 
 func NewSnapshotConfig(cfg *SnapshotCreationConfig, schema SnapNameSchema) *SnapshotConfig {
@@ -74,20 +66,6 @@ func (s *SnapshotConfig) validate() {
 	}
 }
 
-func (s *SnapshotConfig) LoadPreverified(pre snapcfg.PreverifiedItems) {
-	if s.PreverifiedParsed != nil {
-		return
-	}
-	s.PreverifiedParsed = make([]*SnapInfo, 0, len(pre))
-	for _, item := range []snapcfg.PreverifiedItem(pre) {
-		res, ok := s.Schema.Parse(item.Name)
-		if !ok {
-			continue
-		}
-		s.PreverifiedParsed = append(s.PreverifiedParsed, res)
-	}
-}
-
 // common representation for any snapshot files
 // seg, .v or indexes and existence filters, accessors.
 type SnapInfo struct {
@@ -103,8 +81,6 @@ type SnapInfo struct {
 // func (f *SnapInfo) IsV() bool        { return strings.Compare(f.Ext, ".v") == 0 }
 // func (f *SnapInfo) IsKV() bool       { return strings.Compare(f.Ext, ".kv") == 0 }
 func (f *SnapInfo) IsDataFile() bool { return DataExtension(f.Ext).IsSet() }
-
-func (f *SnapInfo) Len() uint64 { return f.To - f.From }
 
 // some specific snap_configs
 

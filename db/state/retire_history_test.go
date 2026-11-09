@@ -68,18 +68,7 @@ func generateStandaloneIIFile(t *testing.T, name kv.InvertedIdx, dirs datadir.Di
 		Data(dirs.SnapIdx, name.String(), DataExtensionEf, seg.CompressNone, ver).
 		Accessor(dirs.SnapAccessors, ver).
 		Build()
-	createConfig := SnapshotCreationConfig{
-		RootNumPerStep: stepSize,
-		MergeStages:    []uint64{20, 40},
-		MinimumSize:    10,
-		SafetyMargin:   5,
-	}
-	repo := NewSnapshotRepo(name.String(), FromII(name), &SnapshotConfig{
-		SnapshotCreationConfig: &createConfig,
-		Schema:                 schema,
-	}, log.New())
-	t.Cleanup(repo.Close)
-	populateFiles2(t, dirs, repo, ranges)
+	populateFiles2(t, dirs, schema, stepSize, ranges)
 }
 
 // TestRetire_RetiresFrozenFileEntirelyBelowCutoff pins that a
