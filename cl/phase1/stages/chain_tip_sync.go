@@ -876,12 +876,13 @@ type anchorEnvelopeStore interface {
 	AnchorRoot() common.Hash
 	HasEnvelope(common.Hash) bool
 	IsEnvelopeRejected(common.Hash) bool
+	IsBlockInvalid(common.Hash) bool
 	GetStateAtBlockRoot(common.Hash) (*state.CachingBeaconState, error)
 }
 
 type anchorEnvelopeRecoverer func(context.Context) error
 
-// Rejected anchors complete recovery so block validation can reject their FULL children.
+// Terminal payload failures complete recovery so block validation can reject affected children.
 func ensureAnchorEnvelopeForChild(
 	ctx context.Context,
 	store anchorEnvelopeStore,
@@ -898,7 +899,7 @@ func ensureAnchorEnvelopeForChild(
 	if anchorRoot == (common.Hash{}) || common.Hash(child.Block.ParentRoot) != anchorRoot {
 		return true
 	}
-	if store.HasEnvelope(anchorRoot) {
+	if store.HasEnvelope(anchorRoot) || store.IsBlockInvalid(anchorRoot) {
 		return true
 	}
 	anchorState, err := store.GetStateAtBlockRoot(anchorRoot)
@@ -922,7 +923,7 @@ func ensureAnchorEnvelopeForChild(
 	if err := recoverAnchor(ctx); err != nil {
 		log.Debug("[chainTipSync] failed to recover anchor envelope", "anchorRoot", anchorRoot, "err", err)
 	}
-	return store.HasEnvelope(anchorRoot) || store.IsEnvelopeRejected(anchorRoot)
+	return store.HasEnvelope(anchorRoot) || store.IsEnvelopeRejected(anchorRoot) || store.IsBlockInvalid(anchorRoot)
 }
 
 type envelopeRequestFunc func(context.Context, [][32]byte) (map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, error)
@@ -1590,10 +1591,7 @@ func retryUnverifiedAnchorPayload(ctx context.Context, cfg *Cfg) {
 		log.Debug("[chainTipSync] failed to read anchor envelope for payload retry", "anchorRoot", anchorRoot, "err", err)
 		return
 	}
-	if err := validateAnchorEnvelope(cfg.beaconCfg, anchorState, anchorRoot, bid, envelope); err != nil {
-		if errors.Is(err, misc.ErrMismatchBlobHashes) {
-			cfg.forkChoice.RejectEnvelope(anchorRoot)
-		}
+	if _, err := validateAndRecordAnchorEnvelope(cfg, anchorState, anchorRoot, bid, envelope); err != nil {
 		log.Warn("[chainTipSync] invalid anchor envelope during payload retry", "anchorRoot", anchorRoot, "err", err)
 		return
 	}

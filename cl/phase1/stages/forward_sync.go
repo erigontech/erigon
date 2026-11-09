@@ -452,6 +452,9 @@ func ensureAnchorEnvelopeOnce(ctx context.Context, cfg *Cfg) error {
 	if cfg.forkChoice.IsEnvelopeRejected(anchorRoot) {
 		return fmt.Errorf("%w: anchor envelope previously rejected", forkchoice.ErrInvalidExecutionPayloadEnvelope)
 	}
+	if cfg.forkChoice.IsBlockInvalid(anchorRoot) {
+		return fmt.Errorf("%w: anchor execution payload previously invalidated", forkchoice.ErrInvalidExecutionPayloadEnvelope)
+	}
 	// Find the anchor block root via the header stored in the fork graph
 	anchorHeader, ok := cfg.forkChoice.GetHeader(anchorRoot)
 	if !ok {
@@ -482,9 +485,8 @@ func ensureAnchorEnvelopeOnce(ctx context.Context, cfg *Cfg) error {
 	ctx, cancelValidation := context.WithCancelCause(ctx)
 	defer cancelValidation(nil)
 	validate := func(env *cltypes.SignedExecutionPayloadEnvelope) error {
-		err := validateAnchorEnvelope(cfg.beaconCfg, anchorState, anchorRoot, bid, env)
-		if errors.Is(err, misc.ErrMismatchBlobHashes) {
-			cfg.forkChoice.RejectEnvelope(anchorRoot)
+		terminal, err := validateAndRecordAnchorEnvelope(cfg, anchorState, anchorRoot, bid, env)
+		if terminal {
 			cancelValidation(err)
 		}
 		return err
@@ -573,14 +575,44 @@ func validateAnchorPayloadWithExecutionClient(ctx context.Context, cfg *Cfg, anc
 	return nil
 }
 
-func validateAnchorEnvelope(beaconCfg *clparams.BeaconChainConfig, anchorState *state.CachingBeaconState, anchorRoot common.Hash, bid *cltypes.ExecutionPayloadBid, env *cltypes.SignedExecutionPayloadEnvelope) error {
+type anchorEnvelopeValidation uint8
+
+const (
+	anchorEnvelopeUnauthenticated anchorEnvelopeValidation = iota
+	anchorEnvelopePendingExecution
+	anchorEnvelopeBlobMismatch
+	anchorEnvelopeInvalidPayload
+)
+
+func validateAndRecordAnchorEnvelope(cfg *Cfg, anchorState *state.CachingBeaconState, anchorRoot common.Hash, bid *cltypes.ExecutionPayloadBid, env *cltypes.SignedExecutionPayloadEnvelope) (bool, error) {
+	result, err := validateAnchorEnvelope(cfg.beaconCfg, anchorState, anchorRoot, bid, env)
+	switch result {
+	case anchorEnvelopeBlobMismatch:
+		cfg.forkChoice.RejectEnvelope(anchorRoot)
+	case anchorEnvelopeInvalidPayload:
+		cfg.forkChoice.MarkPayloadStatusAndGasLimitIfRetained(anchorRoot, env.Message.Payload.BlockHash, execution_client.PayloadStatusInvalidated, env.Message.Payload.GasLimit)
+	case anchorEnvelopeUnauthenticated, anchorEnvelopePendingExecution:
+		return false, err
+	default:
+		panic("unexpected anchor envelope validation result")
+	}
+	return true, fmt.Errorf("%w: anchor payload validation failed: %w", forkchoice.ErrInvalidExecutionPayloadEnvelope, err)
+}
+
+func validateAnchorEnvelope(beaconCfg *clparams.BeaconChainConfig, anchorState *state.CachingBeaconState, anchorRoot common.Hash, bid *cltypes.ExecutionPayloadBid, env *cltypes.SignedExecutionPayloadEnvelope) (anchorEnvelopeValidation, error) {
 	if err := cltypes.ValidateGloasEnvelopeAgainstBid(beaconCfg, anchorRoot, bid, env); err != nil {
-		return err
+		return anchorEnvelopeUnauthenticated, err
 	}
 	if err := verifyAnchorEnvelopeSignature(beaconCfg, anchorState, env, bid.Slot); err != nil {
-		return err
+		return anchorEnvelopeUnauthenticated, err
 	}
-	return forkchoice.ValidatePayloadBlobHashes(env.Message.Payload, bid.VersionedHashes())
+	if err := forkchoice.ValidatePayloadBlobHashes(env.Message.Payload, bid.VersionedHashes()); err != nil {
+		if errors.Is(err, misc.ErrMismatchBlobHashes) {
+			return anchorEnvelopeBlobMismatch, err
+		}
+		return anchorEnvelopeInvalidPayload, err
+	}
+	return anchorEnvelopePendingExecution, nil
 }
 
 func verifyAnchorEnvelopeSignature(beaconCfg *clparams.BeaconChainConfig, anchorState *state.CachingBeaconState, env *cltypes.SignedExecutionPayloadEnvelope, slot uint64) error {

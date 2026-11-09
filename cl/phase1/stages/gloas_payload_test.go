@@ -62,6 +62,7 @@ type anchorEnvelopeTestStore struct {
 }
 
 func (*anchorEnvelopeTestStore) IsEnvelopeRejected(common.Hash) bool { return false }
+func (*anchorEnvelopeTestStore) IsBlockInvalid(common.Hash) bool     { return false }
 
 func (s *anchorEnvelopeTestStore) AnchorRoot() common.Hash {
 	return s.root
@@ -446,6 +447,39 @@ func TestChainTipAnchorEnvelopeRetriesAfterUnavailableResponse(t *testing.T) {
 	require.True(t, ensureAnchorEnvelopeForChild(context.Background(), store, recoverAnchor, child))
 	require.True(t, store.HasEnvelope(anchorRoot))
 	require.Equal(t, 2, requests)
+}
+
+func TestChainTipAnchorEnvelopeStopsRecoveryForInvalidPayload(t *testing.T) {
+	for _, alreadyInvalid := range []bool{false, true} {
+		t.Run(fmt.Sprintf("already invalid=%t", alreadyInvalid), func(t *testing.T) {
+			cfg, anchor, bid, _, _ := validAnchorEnvelopeFixture(t, 1)
+			anchor.SetLatestExecutionPayloadBid(bid)
+			root, err := anchor.BlockRoot()
+			require.NoError(t, err)
+			store := newAnchorForkChoiceStore(t, cfg, anchor, nil)
+			if alreadyInvalid {
+				store.MarkPayloadInvalid(root, bid.BlockHash)
+			}
+			child := cltypes.NewSignedBeaconBlock(cfg, clparams.GloasVersion)
+			child.Block.ParentRoot = root
+			child.Block.Body.GetSignedExecutionPayloadBid().Message.ParentBlockHash = bid.BlockHash
+			requests := 0
+			recoverAnchor := func(context.Context) error {
+				requests++
+				store.MarkPayloadInvalid(root, bid.BlockHash)
+				return forkchoice.ErrInvalidExecutionPayloadEnvelope
+			}
+
+			require.True(t, ensureAnchorEnvelopeForChild(t.Context(), store, recoverAnchor, child))
+			require.True(t, ensureAnchorEnvelopeForChild(t.Context(), store, recoverAnchor, child))
+			require.False(t, store.HasEnvelope(root))
+			if alreadyInvalid {
+				require.Zero(t, requests)
+			} else {
+				require.Equal(t, 1, requests)
+			}
+		})
+	}
 }
 
 func TestSelectedHeadEnvelopeRequestCoalescesOnlyWhileRequestIsActive(t *testing.T) {
@@ -953,17 +987,114 @@ func TestEnsureAnchorEnvelopeRejectsBlobMismatchBeforeStorage(t *testing.T) {
 	}
 }
 
+func TestAnchorPayloadDecodeFailureIsTerminal(t *testing.T) {
+	for _, tx := range []struct {
+		name   string
+		txType byte
+	}{
+		{name: "blob", txType: types.BlobTxType},
+		{name: "frame", txType: types.FrameTxType},
+	} {
+		for _, mode := range []struct {
+			name       string
+			stored     bool
+			withEngine bool
+		}{
+			{name: "recovery", withEngine: true},
+			{name: "stored retry", stored: true, withEngine: true},
+			{name: "recovery without engine"},
+		} {
+			t.Run(tx.name+"/"+mode.name, func(t *testing.T) {
+				cfg, anchor, bid, envelope, _ := validAnchorEnvelopeFixture(t, 1)
+				cfg.AltairForkEpoch, cfg.BellatrixForkEpoch, cfg.CapellaForkEpoch = 0, 0, 0
+				cfg.DenebForkEpoch, cfg.ElectraForkEpoch, cfg.FuluForkEpoch = 0, 0, 0
+				cfg.InitializeForkSchedule()
+				payload := envelope.Message.Payload
+				payload.Transactions = solid.NewProgressiveTransactionsSSZFromTransactions([][]byte{{tx.txType, 0xc0}})
+				requestsHash := cltypes.ComputeExecutionRequestHash(cltypes.GetExecutionRequestsList(cfg, envelope.Message.ExecutionRequests))
+				var err error
+				payload.BlockHash, err = payload.ComputeBlockHash(&bid.ParentBlockRoot, requestsHash, nil)
+				require.NoError(t, err)
+				bid.BlockHash = payload.BlockHash
+				anchor.SetLatestExecutionPayloadBid(bid)
+				anchor.SetLatestBlockHash(bid.ParentBlockHash)
+				root, err := anchor.BlockRoot()
+				require.NoError(t, err)
+				envelope.Message.BeaconBlockRoot = root
+				key, err := bls.NewPrivateKeyFromIKM([]byte("01234567890123456789012345678901"))
+				require.NoError(t, err)
+				signAnchorEnvelope(t, anchor, key, envelope, bid.Slot)
+				require.NoError(t, cltypes.ValidateGloasEnvelopeAgainstBid(cfg, root, bid, envelope))
+				require.NoError(t, verifyAnchorEnvelopeSignature(cfg, anchor, envelope, bid.Slot))
+				err = forkchoice.ValidatePayloadBlobHashes(payload, bid.VersionedHashes())
+				require.Error(t, err)
+				require.NotErrorIs(t, err, misc.ErrMismatchBlobHashes)
+
+				engine := &testExecutionEngine{payloadStatus: execution_client.PayloadStatusValidated}
+				var executionClient execution_client.ExecutionEngine
+				if mode.withEngine {
+					executionClient = engine
+				}
+				store := newAnchorForkChoiceStore(t, cfg, anchor, executionClient)
+				stageCfg := &Cfg{beaconCfg: cfg, forkChoice: store, executionClient: executionClient, gloasPayloadValidator: engine}
+				if mode.stored {
+					require.NoError(t, store.StoreAnchorEnvelope(root, envelope))
+					retryUnverifiedAnchorPayload(t.Context(), stageCfg)
+				} else {
+					clock := eth_clock.NewEthereumClock(0, common.Hash{}, cfg)
+					digest, err := clock.ComputeForkDigest(0)
+					require.NoError(t, err)
+					var response bytes.Buffer
+					require.NoError(t, ssz_snappy.EncodeAndWrite(&response, envelope, digest[:]...))
+					sentinel := &chainTipBatchEnvelopeSentinel{response: response.Bytes()}
+					stageCfg.caplinConfig.DisabledCheckpointSync = true
+					stageCfg.rpc = rpc.NewBeaconRpcP2P(t.Context(), sentinel, cfg, clock)
+					ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+					defer cancel()
+
+					err = ensureAnchorEnvelopeOnce(ctx, stageCfg)
+
+					require.ErrorIs(t, err, forkchoice.ErrInvalidExecutionPayloadEnvelope)
+					require.Equal(t, 1, sentinel.calls)
+					require.False(t, store.HasEnvelope(root))
+					require.ErrorIs(t, ensureAnchorEnvelopeOnce(t.Context(), stageCfg), forkchoice.ErrInvalidExecutionPayloadEnvelope)
+					require.Equal(t, 1, sentinel.calls)
+				}
+
+				status, ok := store.GetRecentExecutionPayloadStatusByRoot(root)
+				require.True(t, ok)
+				require.EqualValues(t, execution_client.PayloadStatusInvalidated, status)
+				status, ok = store.GetRecentExecutionPayloadStatus(payload.BlockHash)
+				require.True(t, ok)
+				require.EqualValues(t, execution_client.PayloadStatusInvalidated, status)
+				require.True(t, store.IsBlockInvalid(root))
+				require.False(t, store.IsEnvelopeRejected(root))
+				require.Zero(t, engine.newPayloadCalls)
+
+				retryUnverifiedAnchorPayload(t.Context(), stageCfg)
+				require.Zero(t, engine.newPayloadCalls, "an invalid payload must not be validated again")
+			})
+		}
+	}
+}
+
 func TestValidateAnchorEnvelopeRejectsBlobMismatch(t *testing.T) {
 	cfg, anchor, bid, envelope, root := validAnchorEnvelopeFixture(t, 1)
-	require.NoError(t, validateAnchorEnvelope(cfg, anchor, root, bid, envelope))
+	result, err := validateAnchorEnvelope(cfg, anchor, root, bid, envelope)
+	require.NoError(t, err)
+	require.Equal(t, anchorEnvelopePendingExecution, result)
 	bid.BlobKzgCommitments.Append(&cltypes.KZGCommitment{1})
-	require.ErrorIs(t, validateAnchorEnvelope(cfg, anchor, root, bid, envelope), misc.ErrMismatchBlobHashes)
+	result, err = validateAnchorEnvelope(cfg, anchor, root, bid, envelope)
+	require.ErrorIs(t, err, misc.ErrMismatchBlobHashes)
+	require.Equal(t, anchorEnvelopeBlobMismatch, result)
 }
 
 func TestValidateAnchorEnvelope(t *testing.T) {
 	cfg, st, bid, env, anchorRoot := validAnchorEnvelopeFixture(t, 1)
 
-	require.NoError(t, validateAnchorEnvelope(cfg, st, anchorRoot, bid, env))
+	result, err := validateAnchorEnvelope(cfg, st, anchorRoot, bid, env)
+	require.NoError(t, err)
+	require.Equal(t, anchorEnvelopePendingExecution, result)
 
 	t.Run("different fee recipients", func(t *testing.T) {
 		cfg, st, bid, env, anchorRoot := validAnchorEnvelopeFixture(t, 1)
@@ -975,7 +1106,9 @@ func TestValidateAnchorEnvelope(t *testing.T) {
 		require.NoError(t, err)
 		signAnchorEnvelope(t, st, privKey, env, bid.Slot)
 
-		require.NoError(t, validateAnchorEnvelope(cfg, st, anchorRoot, bid, env))
+		result, err := validateAnchorEnvelope(cfg, st, anchorRoot, bid, env)
+		require.NoError(t, err)
+		require.Equal(t, anchorEnvelopePendingExecution, result)
 	})
 
 	tests := []struct {
@@ -1066,7 +1199,9 @@ func TestValidateAnchorEnvelope(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			_, st, bid, env, anchorRoot := validAnchorEnvelopeFixture(t, 1)
 			tt.mutate(bid, env)
-			require.ErrorContains(t, validateAnchorEnvelope(cfg, st, anchorRoot, bid, env), tt.wantErr)
+			result, err := validateAnchorEnvelope(cfg, st, anchorRoot, bid, env)
+			require.ErrorContains(t, err, tt.wantErr)
+			require.Equal(t, anchorEnvelopeUnauthenticated, result)
 		})
 	}
 }
