@@ -230,6 +230,24 @@ func TestCheckCaplinBlobSidecarsRejectsPreDenebBlobSnapshotBelowArchiveSlot(t *t
 	require.ErrorContains(t, err, "pre-Deneb blob snapshot range 0-10000")
 }
 
+func TestCheckCaplinBlobSidecarsAcceptsBlobSnapshotsFromDenebBelowArchiveSlot(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+
+	dirs := datadir.New(t.TempDir())
+	writeCaplinIntegritySegment(t, dirs, snaptype.BeaconBlocks, 0, limit, func(uint64) []byte { return nil })
+	writeCaplinIntegritySegment(t, dirs, snaptype.BeaconBlocks, limit, 2*limit, func(uint64) []byte { return nil })
+	writeCaplinIntegritySegment(t, dirs, snaptype.BlobSidecars, limit, 2*limit, func(uint64) []byte { return nil })
+
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	cfg := clparams.MainnetBeaconConfig
+	cfg.DenebForkEpoch = limit/cfg.SlotsPerEpoch + 1
+	snapshots := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &cfg, dirs, log.New())
+	t.Cleanup(snapshots.Close)
+	require.NoError(t, snapshots.OpenFolder())
+
+	require.NoError(t, CheckCaplinBlobSidecars(t.Context(), db, snapshots, &cfg, limit+limit/2, true, log.New()))
+}
+
 func TestCheckCaplinBlobSidecarsRejectsMissingBlobSnapshotIndex(t *testing.T) {
 	const limit = snaptype.CaplinMergeLimit
 
