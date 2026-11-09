@@ -591,7 +591,7 @@ func TestNoBump_ValuePathKeepsVersionUnlessSelfDestructed(t *testing.T) {
 		require.NotNil(t, e)
 		c, ok := e.Balance.Get(5)
 		require.True(t, ok, "a balance cell exists at txIndex 5")
-		return c.incarnation
+		return c.loadInc()
 	}
 
 	t.Run("fresh create equal-value re-exec keeps the balance cell version", func(t *testing.T) {
@@ -635,7 +635,7 @@ func TestNoBump_CreateAccountMarker(t *testing.T) {
 	balCellInc := func(vm *VersionMap, addr accounts.Address) Incarnation {
 		c, ok := vm.load(addr).Balance.Get(5)
 		require.True(t, ok)
-		return c.incarnation
+		return c.loadInc()
 	}
 
 	t.Run("fresh address keeps the balance version", func(t *testing.T) {
@@ -678,14 +678,14 @@ func TestNoBump_CompleteFlushKeepsEqualValueVersion(t *testing.T) {
 	flush(vm, 0, 100, false)
 	flush(vm, 1, 100, false)
 	flush(vm, 1, 100, true)
-	require.Equal(t, Incarnation(0), cell(vm).incarnation, "an equal value at commit keeps the version")
+	require.Equal(t, Incarnation(0), cell(vm).loadInc(), "an equal value at commit keeps the version")
 	require.Equal(t, FlagDone, cell(vm).loadFlag())
 
 	vm = NewVersionMap(nil)
 	flush(vm, 0, 100, false)
 	flush(vm, 1, 100, false)
 	flush(vm, 1, 101, true)
-	require.Equal(t, Incarnation(1), cell(vm).incarnation, "a changed value at commit re-versions")
+	require.Equal(t, Incarnation(1), cell(vm).loadInc(), "a changed value at commit re-versions")
 }
 
 // TestOriginStorageIsWriteOnce pins the other half of the structural guarantee: the
