@@ -91,7 +91,7 @@ func (ap *attestationProducer) beaconBlockRootForSlot(baseState *state.CachingBe
 func (ap *attestationProducer) computeTargetCheckpoint(baseState *state.CachingBeaconState, baseStateBlockRoot common.Hash, slot uint64) (solid.Checkpoint, error) {
 	var err error
 	targetEpoch := slot / ap.beaconCfg.SlotsPerEpoch
-	epochStartTargetSlot := targetEpoch * ap.beaconCfg.SlotsPerEpoch
+	epochStartTargetSlot := ap.beaconCfg.RoundSlotToEpoch(slot)
 	var targetRoot common.Hash
 	if epochStartTargetSlot >= baseState.Slot() {
 		targetRoot = baseStateBlockRoot
@@ -122,12 +122,9 @@ func (ap *attestationProducer) CachedAttestationData(slot uint64, headRoot commo
 		if !ok {
 			return solid.AttestationData{}, false, nil
 		}
-		return solid.AttestationData{
-			Slot:            slot,
-			BeaconBlockRoot: beaconBlockRoot,
-			Source:          baseAttestationData.Source,
-			Target:          baseAttestationData.Target,
-		}, true, nil
+		baseAttestationData.Slot = slot
+		baseAttestationData.BeaconBlockRoot = beaconBlockRoot
+		return baseAttestationData, true, nil
 	}
 	return solid.AttestationData{}, false, nil
 }
@@ -143,12 +140,9 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(baseState *state.C
 		if err != nil {
 			return solid.AttestationData{}, err
 		}
-		return solid.AttestationData{
-			Slot:            slot,
-			BeaconBlockRoot: beaconBlockRoot,
-			Source:          baseAttestationData.Source,
-			Target:          baseAttestationData.Target,
-		}, nil
+		baseAttestationData.Slot = slot
+		baseAttestationData.BeaconBlockRoot = beaconBlockRoot
+		return baseAttestationData, nil
 	}
 	ap.attCacheMutex.RUnlock()
 
@@ -167,7 +161,7 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(baseState *state.C
 			log.Warn("Failed to copy base state", "slot", slot, "err", err)
 			return solid.AttestationData{}, err
 		}
-		if err := transition.DefaultMachine.ProcessSlots(baseState, epoch*ap.beaconCfg.SlotsPerEpoch); err != nil {
+		if err := transition.DefaultMachine.ProcessSlots(baseState, ap.beaconCfg.RoundSlotToEpoch(slot)); err != nil {
 			log.Warn("Failed to process slots", "slot", slot, "err", err)
 			return solid.AttestationData{}, err
 		}
@@ -186,18 +180,12 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(baseState *state.C
 		sourceCheckpoint = baseState.PreviousJustifiedCheckpoint()
 	}
 	baseAttestationData := solid.AttestationData{
-		Slot:            0,             // slot will be filled in later
-		CommitteeIndex:  0,             // committee index is deprecated after Electra
-		BeaconBlockRoot: common.Hash{}, // beacon block root will be filled in later
-		Source:          sourceCheckpoint,
-		Target:          targetCheckpoint,
+		Source: sourceCheckpoint,
+		Target: targetCheckpoint,
 	}
 	ap.attestationsCache.Add(key, baseAttestationData)
 
-	return solid.AttestationData{
-		Slot:            slot,
-		BeaconBlockRoot: beaconBlockRoot,
-		Source:          baseAttestationData.Source,
-		Target:          targetCheckpoint,
-	}, nil
+	baseAttestationData.Slot = slot
+	baseAttestationData.BeaconBlockRoot = beaconBlockRoot
+	return baseAttestationData, nil
 }
