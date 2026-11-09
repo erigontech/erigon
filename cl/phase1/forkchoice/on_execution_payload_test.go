@@ -4277,10 +4277,20 @@ func TestValidatePayloadBlobHashes(t *testing.T) {
 }
 
 func TestValidatePayloadBlobHashesRejectsUndecodableCandidates(t *testing.T) {
-	for _, raw := range [][]byte{nil, {types.BlobTxType}, {types.BlobTxType, 0xc0}, {types.FrameTxType, 0xc0}, {0x7f, 0xc0}, {0x81, types.BlobTxType}} {
-		t.Run(fmt.Sprintf("%x", raw), func(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		raw  []byte
+	}{
+		{name: "empty transaction"},
+		{name: "blob type without payload", raw: []byte{types.BlobTxType}},
+		{name: "blob transaction with empty payload list", raw: []byte{types.BlobTxType, 0xc0}},
+		{name: "frame transaction with empty payload list", raw: []byte{types.FrameTxType, 0xc0}},
+		{name: "unknown transaction type", raw: []byte{0x7f, 0xc0}},
+		{name: "RLP string instead of transaction", raw: []byte{0x81, types.BlobTxType}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			payload := cltypes.NewEth1Block(clparams.GloasVersion, &clparams.MainnetBeaconConfig)
-			payload.Transactions = solid.NewProgressiveTransactionsSSZFromTransactions([][]byte{raw})
+			payload.Transactions = solid.NewProgressiveTransactionsSSZFromTransactions([][]byte{tc.raw})
 			err := ValidatePayloadBlobHashes(payload, []common.Hash{})
 			require.Error(t, err)
 			require.NotErrorIs(t, err, misc.ErrMismatchBlobHashes)

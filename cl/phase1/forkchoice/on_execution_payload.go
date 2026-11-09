@@ -1021,11 +1021,15 @@ func (f *ForkChoiceStore) envelopeValidationSemaphore() chan struct{} {
 }
 
 func (f *ForkChoiceStore) queuePendingEnvelope(signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, missingMode missingEnvelopeMode, receivedAt time.Time) {
-	if missingMode != queueMissingEnvelope || f.IsEnvelopeRejected(signedEnvelope.Message.BeaconBlockRoot) || f.forkGraph.HasEnvelope(signedEnvelope.Message.BeaconBlockRoot) {
+	if missingMode != queueMissingEnvelope {
+		return
+	}
+	root := signedEnvelope.Message.BeaconBlockRoot
+	if f.IsEnvelopeRejected(root) || f.forkGraph.HasEnvelope(root) {
 		return
 	}
 	f.rememberPendingEnvelopeArrival(signedEnvelope, receivedAt)
-	f.pendingEnvelopes.Add(signedEnvelope.Message.BeaconBlockRoot, signedEnvelope)
+	f.pendingEnvelopes.Add(root, signedEnvelope)
 }
 
 func (f *ForkChoiceStore) QueuePendingExecutionPayloadEnvelope(signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, receivedAt time.Time) {
@@ -1165,7 +1169,12 @@ func (f *ForkChoiceStore) validateEnvelopePersistenceCommitments(block *cltypes.
 	if errors.Is(err, misc.ErrMismatchBlobHashes) {
 		f.RejectEnvelope(envelope.BeaconBlockRoot)
 	} else if err != nil {
-		f.MarkPayloadStatusAndGasLimitIfRetained(envelope.BeaconBlockRoot, envelope.Payload.BlockHash, execution_client.PayloadStatusInvalidated, envelope.Payload.GasLimit)
+		f.MarkPayloadStatusAndGasLimitIfRetained(
+			envelope.BeaconBlockRoot,
+			envelope.Payload.BlockHash,
+			execution_client.PayloadStatusInvalidated,
+			envelope.Payload.GasLimit,
+		)
 	}
 	return err
 }

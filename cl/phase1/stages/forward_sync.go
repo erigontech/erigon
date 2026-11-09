@@ -585,7 +585,12 @@ func validateAndRecordAnchorEnvelope(cfg *Cfg, anchorState *state.CachingBeaconS
 	case anchorEnvelopeBlobMismatch:
 		cfg.forkChoice.RejectEnvelope(anchorRoot)
 	case anchorEnvelopeInvalidPayload:
-		cfg.forkChoice.MarkPayloadStatusAndGasLimitIfRetained(anchorRoot, env.Message.Payload.BlockHash, execution_client.PayloadStatusInvalidated, env.Message.Payload.GasLimit)
+		cfg.forkChoice.MarkPayloadStatusAndGasLimitIfRetained(
+			anchorRoot,
+			env.Message.Payload.BlockHash,
+			execution_client.PayloadStatusInvalidated,
+			env.Message.Payload.GasLimit,
+		)
 	case anchorEnvelopeUnauthenticated, anchorEnvelopePendingExecution:
 		return false, err
 	default:
