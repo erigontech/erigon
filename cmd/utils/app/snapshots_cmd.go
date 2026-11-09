@@ -3910,6 +3910,34 @@ func duCaplinBytes(files []duFileInfo) int64 {
 	return total
 }
 
+func duReadChain(tx kv.Tx) (*chain.Config, prune.Mode, error) {
+	genesis, err := rawdb.ReadCanonicalHash(tx, 0)
+	if err != nil {
+		return nil, prune.Mode{}, err
+	}
+	cc, err := rawdb.ReadChainConfig(tx, genesis)
+	if err != nil {
+		return nil, prune.Mode{}, err
+	}
+	if cc == nil {
+		return nil, prune.Mode{}, errors.New("chaindata has no chain config")
+	}
+	pm, err := prune.Get(tx)
+	return cc, pm, err
+}
+
+func duStepSize(dirs datadir.Dirs, logger log.Logger) (uint64, error) {
+	path := filepath.Join(dirs.Snap, state.ERIGONDB_SETTINGS_FILE)
+	if _, err := os.Stat(path); err != nil {
+		return 0, fmt.Errorf("step size needs %s: %w", path, err)
+	}
+	settings, err := state.ResolveErigonDBSettings(dirs, logger, false)
+	if err != nil {
+		return 0, err
+	}
+	return settings.StepSize, nil
+}
+
 type duBlockFilesTx struct {
 	kv.Tx
 	view *blocksnapshots.View
@@ -3938,6 +3966,7 @@ func duPrunerSelect(ctx context.Context, tx kv.Tx, br duBlockReader, cc *chain.C
 func duComputeEstimates(files []duFileInfo, snapDir string, sel duSelectFunc) ([]duEstimate, error) {
 	sizes := make(map[string]int64, len(files))
 	items := make([]snapcfg.PreverifiedItem, 0, len(files))
+	var unparsed int64
 	for _, f := range files {
 		if f.Category == duCatCaplin || strings.HasSuffix(f.Name, ".torrent") {
 			continue
@@ -3947,6 +3976,10 @@ func duComputeEstimates(files []duFileInfo, snapDir string, sel duSelectFunc) ([
 			return nil, err
 		}
 		rel = filepath.ToSlash(rel)
+		if _, _, ok := snaptype.ParseFileName("", rel); f.IsState && !ok {
+			unparsed += f.Size
+			continue
+		}
 		sizes[rel] = f.Size
 		items = append(items, snapcfg.PreverifiedItem{Name: rel})
 	}
@@ -3969,7 +4002,7 @@ func duComputeEstimates(files []duFileInfo, snapDir string, sel duSelectFunc) ([
 		if err != nil {
 			return nil, fmt.Errorf("%s estimate: %w", m.name, err)
 		}
-		var total int64
+		total := unparsed
 		for _, p := range kept {
 			total += sizes[p.Name]
 		}
@@ -4280,14 +4313,14 @@ func doDU(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs, logger lo
 		return err
 	}
 	defer tx.Rollback()
-	cc := fromdb.ChainConfig(chainDB)
-	if cc == nil {
-		return errors.New("no chain config in chaindata")
+	cc, pm, err := duReadChain(tx)
+	if err != nil {
+		return err
 	}
 	chainName := cc.ChainName
-	configuredMode := fromdb.PruneMode(chainDB).String()
+	configuredMode := pm.String()
 
-	settings, err := state.ResolveErigonDBSettings(dirs, logger, false)
+	stepSize, err := duStepSize(dirs, logger)
 	if err != nil {
 		return err
 	}
@@ -4323,7 +4356,7 @@ func doDU(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs, logger lo
 
 	// Build result.
 	cats := duAggregateCategories(files)
-	estimates, err := duComputeEstimates(files, dirs.Snap, duPrunerSelect(ctx, pinnedTx, blockReader, cc, settings.StepSize))
+	estimates, err := duComputeEstimates(files, dirs.Snap, duPrunerSelect(ctx, pinnedTx, blockReader, cc, stepSize))
 	if err != nil {
 		return err
 	}

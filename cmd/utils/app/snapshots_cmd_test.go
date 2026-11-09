@@ -925,6 +925,36 @@ func TestDUComputeEstimates_ExcludesCaplin(t *testing.T) {
 	require.Equal(t, int64(9500), duCaplinBytes(files))
 }
 
+func TestDUComputeEstimates_CountsUnparseableStateFilesInEveryMode(t *testing.T) {
+	snapDir := t.TempDir()
+	files := []duFileInfo{
+		{Path: filepath.Join(snapDir, "domain", "v1.1-accounts.0-10.kv"), Name: "v1.1-accounts.0-10.kv", Size: 100, Category: duCatDomains, IsState: true, From: 0, To: 10},
+		{Path: filepath.Join(snapDir, "domain", ".DS_Store"), Name: ".DS_Store", Size: 7, Category: duCatDomains, IsState: true},
+	}
+
+	estimates, err := duComputeEstimates(files, snapDir, duTestSelect(t, 300_000))
+	require.NoError(t, err)
+	for _, e := range estimates {
+		require.Equal(t, int64(107), e.TotalBytes, "mode %q", e.Mode)
+	}
+}
+
+func TestDUReadChain_UninitialisedChaindataIsAnError(t *testing.T) {
+	_, tx := mdbxtest.NewTestTx(t)
+	var err error
+	require.NotPanics(t, func() { _, _, err = duReadChain(tx) })
+	require.Error(t, err)
+}
+
+func TestDUStepSize_LegacyDatadirIsNotWritten(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, datadir.PreverifiedFileName), nil, 0o644))
+
+	_, err := duStepSize(dirs, log.New())
+	require.Error(t, err)
+	require.NoFileExists(t, filepath.Join(dirs.Snap, state.ERIGONDB_SETTINGS_FILE))
+}
+
 func TestDUComputeEstimates_ArchiveSkipsCommitmentHistory(t *testing.T) {
 	snapDir := t.TempDir()
 	files := []duFileInfo{
