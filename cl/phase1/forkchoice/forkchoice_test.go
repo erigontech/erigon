@@ -668,6 +668,12 @@ func TestNewForkChoiceStoreSeedsAnchorExecutionHash(t *testing.T) {
 			legacyHeader.BlockHash = legacyHash
 			anchor.SetLatestExecutionPayloadHeader(legacyHeader)
 			anchor.SetLatestBlockHash(latestHash)
+			if tc.version >= clparams.GloasVersion {
+				anchor.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{
+					Slot:            tc.slot,
+					ParentBlockHash: latestHash,
+				})
+			}
 			anchorRoot, err := anchor.BlockRoot()
 			require.NoError(t, err)
 			graph := &getFinalizedExecutionHashForkGraph{
@@ -1000,6 +1006,8 @@ func TestBlockProcessingTracksQueuedAndOverlappingImports(t *testing.T) {
 }
 
 func TestGetFinalizedExecutionHash(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.GloasForkEpoch = 1
 	cache, err := lru.New[common.Hash, common.Hash](16)
 	require.NoError(t, err)
 
@@ -1021,19 +1029,38 @@ func TestGetFinalizedExecutionHash(t *testing.T) {
 	missingExecutionHash := common.Hash{0xdd}
 	cache.Add(missingRoot, missingExecutionHash)
 
+	anchorRoot := common.Hash{0x04}
+	anchorBid := &cltypes.ExecutionPayloadBid{
+		Slot:            cfg.SlotsPerEpoch,
+		BlockHash:       common.Hash{0xee},
+		ParentBlockHash: common.Hash{0xff},
+	}
+	cache.Add(anchorRoot, anchorBid.BlockHash)
+
 	store := &ForkChoiceStore{
+		beaconCfg: &cfg,
 		forkGraph: &getFinalizedExecutionHashForkGraph{
 			blocks: map[common.Hash]*cltypes.SignedBeaconBlock{
 				gloasRoot:    gloasBlock,
 				preGloasRoot: preGloasBlock,
 			},
+			anchorRoot: anchorRoot,
+			anchorSlot: anchorBid.Slot,
 		},
-		eth2Roots: cache,
+		eth2Roots:                 cache,
+		anchorExecutionPayloadBid: anchorBid,
 	}
 
 	require.Equal(t, gloasParentBlockHash, store.GetFinalizedExecutionHash(gloasRoot))
 	require.Equal(t, preGloasExecutionHash, store.GetFinalizedExecutionHash(preGloasRoot))
 	require.Equal(t, missingExecutionHash, store.GetFinalizedExecutionHash(missingRoot))
+	t.Run("Gloas anchor", func(t *testing.T) {
+		require.Equal(t, anchorBid.ParentBlockHash, store.GetFinalizedExecutionHash(anchorRoot))
+	})
+	t.Run("pre-Gloas anchor with upgraded state", func(t *testing.T) {
+		anchorBid.Slot--
+		require.Equal(t, anchorBid.BlockHash, store.GetFinalizedExecutionHash(anchorRoot))
+	})
 }
 
 func TestAddChainSegmentDoesNotQueueLightClientEventsOnError(t *testing.T) {

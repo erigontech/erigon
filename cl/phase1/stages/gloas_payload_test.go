@@ -1116,6 +1116,8 @@ func TestAnchorPayloadDecodeFailureIsTerminal(t *testing.T) {
 				require.EqualValues(t, execution_client.PayloadStatusInvalidated, status)
 				require.True(t, store.IsBlockInvalid(root))
 				require.False(t, store.IsEnvelopeRejected(root))
+				require.Equal(t, bid.ParentBlockHash, store.GetFinalizedExecutionHash(store.FinalizedCheckpoint().Root))
+				require.Equal(t, bid.ParentBlockHash, store.GetFinalizedExecutionHash(store.JustifiedCheckpoint().Root))
 				require.Zero(t, engine.newPayloadCalls)
 
 				retryUnverifiedAnchorPayload(t.Context(), stageCfg)
