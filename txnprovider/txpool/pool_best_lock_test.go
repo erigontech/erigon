@@ -112,8 +112,44 @@ func TestBestReturnsWhenItsCallerGoesAwayWhileWaitingForABlock(t *testing.T) {
 	}
 }
 
+func TestProvideTxnsReturnsWhileTheStartupReloadHoldsTheLock(t *testing.T) {
+	p, _ := newLoggingPool()
+	require.False(t, p.Started())
+
+	p.lock.Lock()
+	t.Cleanup(p.lock.Unlock)
+
+	type provided struct {
+		txns []types.Transaction
+		err  error
+	}
+	returned := make(chan provided, 1)
+	go func() {
+		txns, err := p.ProvideTxns(t.Context(), txnprovider.WithParentBlockNum(1))
+		returned <- provided{txns, err}
+	}()
+
+	select {
+	case got := <-returned:
+		require.NoError(t, got.err)
+		require.Empty(t, got.txns)
+	case <-time.After(5 * time.Second):
+		t.Fatal("ProvideTxns waited for the lock that the startup reload holds")
+	}
+}
+
+func TestProvideTxnsReportsACancelledCallerBeforeStartup(t *testing.T) {
+	p, _ := newLoggingPool()
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	_, err := p.ProvideTxns(ctx, txnprovider.WithParentBlockNum(1))
+	require.ErrorIs(t, err, context.Canceled)
+}
+
 func TestProvideTxnsReturnsNothingOnceTheParentBlockWaitIsStopped(t *testing.T) {
 	p, logs := newLoggingPool()
+	p.started.Store(true)
 	stop := make(chan struct{})
 
 	type provided struct {
@@ -141,6 +177,7 @@ func TestProvideTxnsReturnsNothingOnceTheParentBlockWaitIsStopped(t *testing.T) 
 
 func TestProvideTxnsReportsCancellationWhenTheParentBlockWaitIsAlsoStopped(t *testing.T) {
 	p, _ := newLoggingPool()
+	p.started.Store(true)
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	stop := make(chan struct{})
