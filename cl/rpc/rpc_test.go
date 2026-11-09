@@ -478,6 +478,24 @@ func (s *blockResponseSentinel) BanPeerForInvalidData(_ context.Context, peer *s
 	return &sentinelproto.EmptyMessage{}, nil
 }
 
+func TestBlocksByRangeRejectsMoreChunksThanRequested(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.InitializeForkSchedule()
+	clock := eth_clock.NewEthereumClock(0, common.Hash{}, &cfg)
+	digest, err := clock.ComputeForkDigest(cfg.GloasForkEpoch)
+	require.NoError(t, err)
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&cfg)}
+	var response bytes.Buffer
+	require.NoError(t, ssz_snappy.EncodeAndWrite(&response, envelope, digest[:]...))
+	require.NoError(t, response.WriteByte(0))
+	require.NoError(t, ssz_snappy.EncodeAndWrite(&response, envelope, digest[:]...))
+	sentinel := &blockResponseSentinel{response: response.Bytes()}
+	client := &BeaconRpcP2P{ctx: t.Context(), sentinel: sentinel, beaconConfig: &cfg, ethClock: clock}
+
+	_, _, err = client.SendBeaconBlocksByRangeReq(t.Context(), 1, 1)
+	require.ErrorContains(t, err, "more chunks than requested")
+}
+
 func TestExecutionPayloadEnvelopesByRootRejectsOverLimit(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	cfg.MaxRequestPayloads = 1
