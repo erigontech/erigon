@@ -18,25 +18,8 @@ package crypto
 
 import (
 	"bytes"
-	"crypto/rand"
 	"testing"
 )
-
-func BenchmarkZeroGammas(b *testing.B) {
-	b.ReportAllocs()
-	for b.Loop() {
-		ZeroGammas(1000)
-	}
-}
-
-func BenchmarkRandomPolynomial(b *testing.B) {
-	b.ReportAllocs()
-	for b.Loop() {
-		if _, err := RandomPolynomial(rand.Reader, 1000); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
 
 func BenchmarkEncryptedMessageUnmarshal(b *testing.B) {
 	m := encryptedMessage()
