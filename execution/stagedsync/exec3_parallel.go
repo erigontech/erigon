@@ -1,7 +1,6 @@
 package stagedsync
 
 import (
-	"bytes"
 	"cmp"
 	"context"
 	"errors"
@@ -26,7 +25,6 @@ import (
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/changeset"
@@ -768,18 +766,11 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					isAmsterdam := pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime)
 					var computedBAL types.BlockAccessList
 					var balErr error
-					var storedBAL []byte
-					if isAmsterdam && lastHeader != nil {
-						storedBAL, balErr = rawdb.ReadBlockAccessListBytes(rwTx, applyResult.BlockHash, applyResult.BlockNum)
-						storedBAL = bytes.Clone(storedBAL)
-					}
 					balDone := make(chan struct{})
-					h, txIO := lastHeader, applyResult.TxIO
+					h, txIO, blockBAL := lastHeader, applyResult.TxIO, applyResult.BAL
 					go func() {
 						defer close(balDone)
-						if balErr == nil {
-							computedBAL, balErr = bal.Process(storedBAL, h, built, txIO, isAmsterdam, pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir, pe.logger)
-						}
+						computedBAL, balErr = bal.Process(blockBAL, h, built, txIO, isAmsterdam, pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir, pe.logger)
 					}()
 
 					// StartChange + NotifyAccumulator both run in the apply goroutine to
@@ -1271,6 +1262,7 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 
 			if !ok {
 				executor = newBlockExec(blockNum, execRequest.blockHash, execRequest.gasPool, execRequest.accessList, execRequest.consumers, execRequest.profile, execRequest.exhausted)
+				executor.balSidecar = execRequest.balSidecar
 				// Set the coinbase once, before any worker runs, so self-loop workers
 				// can read it during validation without racing the exec loop.
 				if h := txTask.BlockHeader(); h != nil {
@@ -1695,6 +1687,7 @@ type blockResult struct {
 	Exhausted        *ErrLoopExhausted
 	Header           *types.Header      // for accumulator.StartChange in apply loop
 	Txs              types.Transactions // for accumulator.StartChange in apply loop
+	BAL              *types.BlockAccessListSidecar
 
 	// Exec window for newPayload wall attribution; the calculator pairs these with
 	// its own commit-window timestamps to measure exec/commit overlap.
@@ -2543,12 +2536,14 @@ type execRequest struct {
 	consumers  *resultStream
 	profile    bool
 	exhausted  *ErrLoopExhausted
+	balSidecar *types.BlockAccessListSidecar
 }
 
 type blockExecutor struct {
 	sync.Mutex
-	blockNum  uint64
-	blockHash common.Hash
+	blockNum   uint64
+	blockHash  common.Hash
+	balSidecar *types.BlockAccessListSidecar
 
 	tasks   []*execTask
 	results []*execResult
@@ -3472,12 +3467,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				if err == nil {
 					vio, err = bal.RederiveFromHistory(ctx, pe.cfg.chainConfig, pe.cfg.engine, pe.cfg.blockReader, applyTx, block, blockStartTxNum, pe.logger)
 				}
-				var storedBAL []byte
 				if err == nil {
-					storedBAL, err = rawdb.ReadBlockAccessListBytes(applyTx, be.blockHash, be.blockNum)
-				}
-				if err == nil {
-					_, err = bal.Process(storedBAL, header, nil, vio, true, false, pe.cfg.dirs.DataDir, pe.logger)
+					_, err = bal.Process(be.balSidecar, header, nil, vio, true, false, pe.cfg.dirs.DataDir, pe.logger)
 				}
 				if errors.Is(err, rules.ErrInvalidBlock) {
 					return be.invalidBlockResult(fmt.Errorf("block %d resumed mid-block: %w", be.blockNum, err)), nil
@@ -3614,6 +3605,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			Exhausted:        be.exhausted,
 			Header:           header,
 			Txs:              txs,
+			BAL:              be.balSidecar,
 			execStartedAt:    be.execStarted,
 			execEndedAt:      time.Now(),
 		}
