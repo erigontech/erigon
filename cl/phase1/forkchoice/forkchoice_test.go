@@ -968,7 +968,7 @@ func TestAddChainSegmentDoesNotQueueLightClientEventsOnError(t *testing.T) {
 }
 
 func TestAddChainSegmentQueuesLightClientEventsOnSuccess(t *testing.T) {
-	update := &cltypes.LightClientUpdate{}
+	update := cltypes.NewLightClientUpdate(clparams.AltairVersion, &clparams.MainnetBeaconConfig)
 	store := &ForkChoiceStore{
 		forkGraph: &getFinalizedExecutionHashForkGraph{
 			afterUpdate:           update,
@@ -983,6 +983,33 @@ func TestAddChainSegmentQueuesLightClientEventsOnSuccess(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, fork_graph.Success, status)
 	require.Len(t, store.queuedEmits, 1)
+}
+
+// Light client events take the fork of the update's attested header, which at a fork boundary is older than the
+// block's.
+func TestLightClientEventsTakeTheAttestedHeaderFork(t *testing.T) {
+	update := cltypes.NewLightClientUpdate(clparams.DenebVersion, &clparams.MainnetBeaconConfig)
+	store := &ForkChoiceStore{
+		forkGraph: &getFinalizedExecutionHashForkGraph{
+			afterUpdate:           update,
+			addChainSegmentStatus: fork_graph.Success,
+		},
+		emitters: beaconevents.NewEventEmitter(),
+	}
+	events := make(chan *beaconevents.EventStream, 2)
+	subscription := store.emitters.State().Subscribe(events)
+	defer subscription.Unsubscribe()
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.ElectraVersion)
+
+	_, _, err := store.addChainSegmentAndQueueLightClientEvents(block, true)
+	require.NoError(t, err)
+	require.Len(t, store.queuedEmits, 1)
+	store.queuedEmits[0]()
+
+	finality := (<-events).Data.(*beaconevents.LightClientFinalityUpdateData)
+	optimistic := (<-events).Data.(*beaconevents.LightClientOptimisticUpdateData)
+	require.Equal(t, clparams.DenebVersion.String(), finality.Version)
+	require.Equal(t, clparams.DenebVersion.String(), optimistic.Version)
 }
 
 func TestUpdateCheckpointsPrunesOperationsWithExactFinalizedState(t *testing.T) {
