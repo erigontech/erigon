@@ -377,6 +377,14 @@ func WithoutSystemContracts() Option {
 	}
 }
 
+// WithUnexecutedGenesis leaves genesis written but not executed, as a node's
+// database is before its first stage loop: no genesis state or commitment.
+func WithUnexecutedGenesis() Option {
+	return func(opts *options) {
+		opts.unexecutedGenesis = true
+	}
+}
+
 // WithAlwaysGenerateChangesets pins --experimental.always-generate-changesets
 // regardless of the tester default: true for tests that reorg deeper than
 // MaxReorgDepth, false for tests that rely on the windowed-changesets
@@ -448,6 +456,7 @@ type options struct {
 	sentryProtocol           uint
 	stateTransitionObserver  execmodule.StateTransitionObserver
 	skipSystemContracts      bool
+	unexecutedGenesis        bool
 }
 
 func applyOptions(opts []Option) options {
@@ -882,6 +891,9 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	})
 	mock.StreamWg.Wait()
 
+	if opt.unexecutedGenesis {
+		return mock
+	}
 	// app expecting that genesis will always be in db
 	c := &blockgen.ChainPack{
 		Headers:  []*types.Header{mock.Genesis.HeaderNoCopy()},
