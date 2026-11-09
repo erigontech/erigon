@@ -17,6 +17,7 @@
 package jsonrpc
 
 import (
+	"context"
 	"math/big"
 	"testing"
 
@@ -26,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
@@ -156,4 +158,18 @@ func TestGetLatestLogsFailsOnAMissingBody(t *testing.T) {
 	logs, err := api.GetLatestLogs(m.Ctx, fullRangeCriteria(), filters.LogFilterOptions{BlockCount: missingHeaderChainLen})
 	require.ErrorContains(t, err, "transaction not found")
 	require.Nil(t, logs)
+}
+
+func dropBodies(t *testing.T, db kv.TemporalRwDB, from, to uint64) {
+	t.Helper()
+	ctx := context.Background()
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	for num := from; num < to; num++ {
+		hash, err := rawdb.ReadCanonicalHash(rwTx, num)
+		require.NoError(t, err)
+		rawdb.DeleteBody(rwTx, hash, num)
+	}
+	require.NoError(t, rwTx.Commit())
 }
