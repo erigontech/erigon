@@ -65,11 +65,9 @@ func ValidEip(eipNum int) bool {
 }
 
 func ActivateableEips() []string {
-	nums := make([]string, len(activators))
-	i := 0
+	nums := make([]string, 0, len(activators))
 	for k := range activators {
-		nums[i] = strconv.Itoa(k)
-		i++
+		nums = append(nums, strconv.Itoa(k))
 	}
 	slices.Sort(nums)
 	return nums
