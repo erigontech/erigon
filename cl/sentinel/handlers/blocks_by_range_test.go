@@ -316,7 +316,6 @@ func TestOversizedFixedSizeRequestGetsInvalidRequest(t *testing.T) {
 			require.NoError(t, stream.SetDeadline(time.Now().Add(5*time.Second)))
 			_, err := stream.Write(binary.AppendUvarint(nil, uint64(clparams.MaxPayloadSize)))
 			require.NoError(t, err)
-			require.NoError(t, stream.CloseWrite())
 			requireResponseCode(t, stream, InvalidRequestPrefix)
 		})
 	}
