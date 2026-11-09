@@ -127,6 +127,59 @@ func TestInitializeStoresParentHashFromPrague(t *testing.T) {
 	}
 }
 
+func TestInitializeInstallsJennerContractsOnFirstJennerBlock(t *testing.T) {
+	t.Parallel()
+
+	spec, err := chainspec.ChainSpecByName(networkname.Chapel)
+	require.NoError(t, err)
+	p := New(spec.Config, log.New())
+
+	paymentLane := accounts.InternAddress(common.HexToAddress("0x0000000000000000000000000000000000002007"))
+	activationRegistry := accounts.InternAddress(common.HexToAddress("0x7020000000000000000000000000000000000001"))
+	policyRegistry := accounts.InternAddress(common.HexToAddress("0x7020000000000000000000000000000000000002"))
+	const forkBlock, forkTime = 139533776, 1793241000
+	require.Equal(t, uint64(forkTime), *spec.Config.JennerTime)
+
+	for _, tc := range []struct {
+		name       string
+		parentTime uint64
+		time       uint64
+		upgraded   bool
+	}{
+		{"last pasteur block", forkTime - 2, forkTime - 1, false},
+		{"first jenner block", forkTime - 1, forkTime, true},
+		{"later jenner block", forkTime, forkTime + 1, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			header := &types.Header{Number: *uint256.NewInt(forkBlock), Time: tc.time}
+			parent := &types.Header{Number: *uint256.NewInt(forkBlock - 1), Time: tc.parentTime}
+
+			ibs := state.New(state.NewNoopReader())
+			require.NoError(t, p.Initialize(spec.Config, parentReader{parent: parent}, header, ibs, nil, log.New(), nil))
+
+			for _, c := range []struct {
+				addr accounts.Address
+				hash common.Hash
+			}{
+				{paymentLane, common.HexToHash("0x4788eca234a073d5c9d9576efadc253cfdbcb81bbe2073691e8c640577ac5e31")},
+				{activationRegistry, crypto.Keccak256Hash([]byte{0xef})},
+				{policyRegistry, crypto.Keccak256Hash([]byte{0xef})},
+			} {
+				code, err := ibs.GetCode(c.addr)
+				require.NoError(t, err)
+				nonce, err := ibs.GetNonce(c.addr)
+				require.NoError(t, err)
+				require.Zero(t, nonce)
+				if !tc.upgraded {
+					require.Empty(t, code)
+					continue
+				}
+				require.Equal(t, c.hash, crypto.Keccak256Hash(code))
+			}
+		})
+	}
+}
+
 func TestInitializeUpgradesSystemContractsOnFirstPasteurBlock(t *testing.T) {
 	t.Parallel()
 

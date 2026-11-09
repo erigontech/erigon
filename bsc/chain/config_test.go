@@ -480,6 +480,9 @@ func TestParliaUpgradeSchedule(t *testing.T) {
 					want[strconv.FormatUint(*v, 10)] = struct{}{}
 				}
 			}
+			if cfg.JennerTime != nil {
+				want[strconv.FormatUint(*cfg.JennerTime, 10)] = struct{}{}
+			}
 			got := map[string]struct{}{}
 			for k := range cfg.Parlia.BlockAlloc {
 				got[k] = struct{}{}
