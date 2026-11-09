@@ -22,13 +22,14 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
-	"math"
+	"os"
 	"testing"
 
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/protocol"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -38,10 +39,147 @@ import (
 	"github.com/erigontech/erigon/cl/sentinel/communication"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/snappypool"
 )
+
+func TestBeaconBlocksByRootRequestLimit(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	for _, tc := range []struct {
+		name  string
+		count int
+		epoch uint64
+		limit int
+	}{
+		{"Deneb at limit", 128, cfg.DenebForkEpoch, 128},
+		{"Deneb above limit", 129, cfg.DenebForkEpoch, 128},
+		{"before Deneb above 128", 129, cfg.DenebForkEpoch - 1, 1024},
+		{"before Deneb at limit", 1024, cfg.DenebForkEpoch - 1, 1024},
+		{"before Deneb above limit", 1025, cfg.DenebForkEpoch - 1, 1024},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, db := setupStore(t)
+			store := &countingBlockReader{MockBlockReader: tests.NewMockBlockReader()}
+			tx, err := db.BeginRw(t.Context())
+			require.NoError(t, err)
+			defer tx.Rollback()
+			blocks := populateDatabaseWithBlocks(t, store.MockBlockReader, tx, 100, uint64(tc.count-1))
+			require.NoError(t, tx.Commit())
+			forkClock := getEthClock(t)
+			clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
+			clock.EXPECT().GetCurrentEpoch().Return(tc.epoch)
+			clock.EXPECT().ComputeForkDigest(gomock.Any()).DoAndReturn(forkClock.ComputeForkDigest).AnyTimes()
+			c := &ConsensusHandlers{
+				ctx: t.Context(), beaconDB: store, indiciesDB: db, beaconConfig: &cfg,
+				ethClock: clock, rateLimiter: newPeerRateLimiter(),
+			}
+			req := solid.NewHashList(tc.count)
+			for _, block := range blocks {
+				root, err := block.Block.HashSSZ()
+				require.NoError(t, err)
+				req.Append(root)
+			}
+			stream := newHandlerTestStream(t, communication.BeaconBlocksByRootProtocolV2, req)
+			require.NoError(t, c.beaconBlocksByRootHandler(stream))
+			if tc.count > tc.limit {
+				code, err := stream.response.ReadByte()
+				require.NoError(t, err)
+				require.Equal(t, byte(InvalidRequestPrefix), code)
+				require.Zero(t, store.readBlockByRootCalls)
+				return
+			}
+			require.Equal(t, MaxRequestsBlocks, store.readBlockByRootCalls)
+			stream.request = bytes.NewReader(stream.response.Bytes())
+			require.Len(t, readBlocksByRangeSlots(t, stream, forkClock), MaxRequestsBlocks)
+		})
+	}
+}
+
+func TestBeaconBlocksByRootLeavesCreditForRemainingRoots(t *testing.T) {
+	_, db := setupStore(t)
+	store := &countingBlockReader{MockBlockReader: tests.NewMockBlockReader()}
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	blocks := populateDatabaseWithBlocks(t, store.MockBlockReader, tx, 100, 127)
+	require.NoError(t, tx.Commit())
+	cfg := clparams.MainnetBeaconConfig
+	c := &ConsensusHandlers{
+		ctx: t.Context(), beaconDB: store, indiciesDB: db, beaconConfig: &cfg,
+		ethClock: getEthClock(t), rateLimiter: newPeerRateLimiter(),
+	}
+	for _, tc := range []struct {
+		start, responses int
+		tokensLeft       float64
+	}{{0, 96, 32}, {96, 32, 0}} {
+		req := solid.NewHashList(len(blocks) - tc.start)
+		for _, block := range blocks[tc.start:] {
+			root, err := block.Block.HashSSZ()
+			require.NoError(t, err)
+			req.Append(root)
+		}
+		stream := newHandlerTestStream(t, communication.BeaconBlocksByRootProtocolV2, req)
+		bucket := admitHandlerTestRequest(t, c, stream)
+		require.NoError(t, c.beaconBlocksByRootHandler(stream))
+		stream.request = bytes.NewReader(stream.response.Bytes())
+		require.Len(t, readBlocksByRangeSlots(t, stream, c.ethClock), tc.responses)
+		require.Equal(t, tc.tokensLeft, bucket.tokens)
+	}
+	require.Equal(t, 128, store.readBlockByRootCalls)
+}
+
+func TestBeaconBlocksByRootReturnsWriteError(t *testing.T) {
+	_, db := setupStore(t)
+	store := tests.NewMockBlockReader()
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	block := populateDatabaseWithBlocks(t, store, tx, 100, 0)[0]
+	require.NoError(t, tx.Commit())
+	cfg := clparams.MainnetBeaconConfig
+	c := &ConsensusHandlers{
+		ctx: t.Context(), beaconDB: store, indiciesDB: db, beaconConfig: &cfg,
+		ethClock: getEthClock(t), rateLimiter: newPeerRateLimiter(),
+	}
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	req := solid.NewHashList(1)
+	req.Append(root)
+	stream := newHandlerTestStream(t, communication.BeaconBlocksByRootProtocolV2, req)
+	stream.expired = true
+	require.ErrorIs(t, c.beaconBlocksByRootHandler(stream), os.ErrDeadlineExceeded)
+}
+
+func TestBeaconBlocksByRootDeduplicates(t *testing.T) {
+	_, db := setupStore(t)
+	store := &countingBlockReader{MockBlockReader: tests.NewMockBlockReader()}
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	blocks := populateDatabaseWithBlocks(t, store.MockBlockReader, tx, 100, 1)
+	require.NoError(t, tx.Commit())
+	cfg := clparams.MainnetBeaconConfig
+	c := &ConsensusHandlers{
+		ctx: t.Context(), beaconDB: store, indiciesDB: db, beaconConfig: &cfg,
+		ethClock: getEthClock(t), rateLimiter: newPeerRateLimiter(),
+	}
+	req := solid.NewHashList(6)
+	req.Append(common.Hash{0xff})
+	req.Append(common.Hash{0xff})
+	for _, block := range blocks {
+		root, err := block.Block.HashSSZ()
+		require.NoError(t, err)
+		req.Append(root)
+		req.Append(root)
+	}
+	stream := newHandlerTestStream(t, communication.BeaconBlocksByRootProtocolV2, req)
+	require.NoError(t, c.beaconBlocksByRootHandler(stream))
+	require.Equal(t, 3, store.readBlockByRootCalls)
+	stream.request = bytes.NewReader(stream.response.Bytes())
+	require.Equal(t, []uint64{100, 101}, readBlocksByRangeSlots(t, stream, c.ethClock))
+}
 
 func TestBlocksByRangeHandler(t *testing.T) {
 	ctx := context.Background()
@@ -242,14 +380,6 @@ func setupBlocksByRootHandler(t *testing.T, denebForkEpoch uint64) *blocksByRoot
 	return b
 }
 
-func (b *blocksByRootTester) repeatRoot(n int) []common.Hash {
-	roots := make([]common.Hash, n)
-	for i := range roots {
-		roots[i] = b.root
-	}
-	return roots
-}
-
 func (b *blocksByRootTester) requireBlocks(t *testing.T, resp []byte, want int) {
 	t.Helper()
 	require.Zero(t, len(resp)%b.chunkSize)
@@ -260,23 +390,6 @@ func requireInvalidRequest(t *testing.T, resp []byte) {
 	t.Helper()
 	require.NotEmpty(t, resp)
 	require.Equal(t, byte(InvalidRequestPrefix), resp[0])
-}
-
-func TestBlocksByRootHandlerRequestLimit(t *testing.T) {
-	b := setupBlocksByRootHandler(t, 0)
-	limit := int(clparams.MainnetBeaconConfig.MaxRequestBlocksDeneb)
-
-	b.requireBlocks(t, b.request(t, b.repeatRoot(limit)), MaxRequestsBlocks)
-	requireInvalidRequest(t, b.request(t, b.repeatRoot(limit+1)))
-}
-
-func TestBlocksByRootHandlerRequestLimitPreDeneb(t *testing.T) {
-	b := setupBlocksByRootHandler(t, math.MaxUint64)
-	limit := int(clparams.MainnetBeaconConfig.MaxRequestBlocks)
-
-	b.requireBlocks(t, b.request(t, b.repeatRoot(int(clparams.MainnetBeaconConfig.MaxRequestBlocksDeneb)+1)), MaxRequestsBlocks)
-	b.requireBlocks(t, b.request(t, b.repeatRoot(limit)), MaxRequestsBlocks)
-	requireInvalidRequest(t, b.request(t, b.repeatRoot(limit+1)))
 }
 
 func TestBlocksByRootHandlerServesBlockAfterUnknownRoots(t *testing.T) {
@@ -305,15 +418,4 @@ func TestBlocksByRootHandlerRejectsLengthPrefixAboveMaxPayloadSize(t *testing.T)
 
 	prefix := binary.AppendUvarint(nil, clparams.MaxPayloadSize+1)
 	requireInvalidRequest(t, b.requestRaw(prefix))
-}
-
-func TestBlocksByRootHandlerRetryAfterResponseCap(t *testing.T) {
-	b := setupBlocksByRootHandler(t, 0)
-	limit := int(clparams.MainnetBeaconConfig.MaxRequestBlocksDeneb)
-
-	// The first response is capped at MaxRequestsBlocks, so the remaining roots
-	// must still fit in the bucket when the peer asks for them straight away.
-	b.clearBuckets()
-	b.requireBlocks(t, b.requestSharedBucket(t, b.repeatRoot(limit)), MaxRequestsBlocks)
-	b.requireBlocks(t, b.requestSharedBucket(t, b.repeatRoot(limit-MaxRequestsBlocks)), limit-MaxRequestsBlocks)
 }

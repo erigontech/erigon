@@ -50,7 +50,7 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRangeHandler(s network.St
 	// Use current epoch's version for decoding
 	version := c.beaconConfig.GetCurrentStateVersion(curEpoch)
 	req := &cltypes.ExecutionPayloadEnvelopesByRangeRequest{}
-	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, req, version); err != nil {
+	if err := ssz_snappy.DecodeAndReadFixedSizeNoForkDigest(s, req, version); err != nil {
 		return err
 	}
 
@@ -350,11 +350,16 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRootHandler(s network.Str
 	}
 
 	rebuildCandidates := make([]rebuildCandidate, 0, req.Length())
+	seen := make(map[common.Hash]struct{}, req.Length())
 	stopped := false
 	req.Range(func(_ int, blockRoot common.Hash, _ int) bool {
 		if count >= int(maxPayloads) {
 			return false
 		}
+		if _, ok := seen[blockRoot]; ok {
+			return true
+		}
+		seen[blockRoot] = struct{}{}
 
 		slot, readErr := beacon_indicies.ReadBlockSlotByBlockRoot(tx, blockRoot)
 		if readErr != nil {

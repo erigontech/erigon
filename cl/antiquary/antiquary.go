@@ -519,6 +519,20 @@ func (s *Antiquary) NotifyBlobBackfilled(completed bool) {
 	s.blobBackfilled.Store(completed)
 }
 
+// RetireBlobSnapshotsBelow drops blob snapshot segments that hold nothing at or above floor
+// and stops seeding them.
+func (s *Antiquary) RetireBlobSnapshotsBelow(floor uint64) error {
+	if s == nil || s.sn == nil {
+		return nil
+	}
+	var onDelete func([]string) error
+	if s.downloader != nil {
+		onDelete = func(paths []string) error { return s.downloader.Delete(s.ctx, paths) }
+	}
+	_, err := s.sn.RetireBlobsBelow(floor, onDelete)
+	return err
+}
+
 const caplinSnapshotBuildSemaWeight int64 = 1
 
 // blobCompressWorkers picks the compression parallelism for a dump, with a func to release the

@@ -1441,3 +1441,17 @@ func TestGrpcServerDeleteKeepsFilesOutsideSnapDir(t *testing.T) {
 	require.Error(t, err)
 	require.FileExists(t, victim)
 }
+
+func TestDownloadRequestsCountIsReadUnderLock(t *testing.T) {
+	d := &Downloader{}
+	d.zeroActiveDownloadRequests.L = &d.activeDownloadRequestsLock
+	var wg sync.WaitGroup
+	for range 64 {
+		wg.Go(func() {
+			d.incDownloadRequests()
+			d.decDownloadRequests()
+		})
+	}
+	wg.Wait()
+	require.Zero(t, d.activeDownloadRequests)
+}

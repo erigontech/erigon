@@ -37,7 +37,7 @@ const (
 
 func (c *ConsensusHandlers) beaconBlocksByRangeHandler(s network.Stream) error {
 	req := &cltypes.BeaconBlocksByRangeRequest{}
-	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, req, clparams.Phase0Version); err != nil {
+	if err := ssz_snappy.DecodeAndReadFixedSizeNoForkDigest(s, req, clparams.Phase0Version); err != nil {
 		return err
 	}
 
@@ -45,9 +45,7 @@ func (c *ConsensusHandlers) beaconBlocksByRangeHandler(s network.Stream) error {
 		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, InvalidRequestPrefix)
 	}
 
-	// Consume additional rate-limit tokens proportional to the blocks we may serve.
-	// The wrapper already consumed 1 token for admission.
-	if cost := int(min(req.Count, MaxRequestsBlocks)) - 1; !c.consumeRateLimit(s, cost) {
+	if cost := requestCost(req.Count, 1, MaxRequestsBlocks); !c.consumeRateLimit(s, cost) {
 		return nil
 	}
 
@@ -97,7 +95,7 @@ func (c *ConsensusHandlers) beaconBlocksByRangeHandler(s network.Stream) error {
 }
 
 func (c *ConsensusHandlers) beaconBlocksByRootHandler(s network.Stream) error {
-	// Altair keeps MAX_REQUEST_BLOCKS for BeaconBlocksByRoot v2, Deneb lowers it to MAX_REQUEST_BLOCKS_DENEB.
+	// BeaconBlocksByRoot v2 keeps the original request limit until Deneb activates.
 	maxRoots := c.beaconConfig.MaxRequestBlocks
 	if c.ethClock.GetCurrentEpoch() >= c.beaconConfig.DenebForkEpoch {
 		maxRoots = c.beaconConfig.MaxRequestBlocksDeneb
@@ -114,10 +112,8 @@ func (c *ConsensusHandlers) beaconBlocksByRootHandler(s network.Stream) error {
 		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavailablePrefix)
 	}
 
-	// Consume additional rate-limit tokens proportional to the number of roots,
-	// capped at the number of blocks one response can carry so that the roots
-	// beyond the cap can be requested again without a punishment.
-	if cost := min(req.Length(), MaxRequestsBlocks) - 1; !c.consumeRateLimit(s, cost) {
+	// Cap the charge at the response limit so peers retain credit for the remaining roots.
+	if cost := requestCost(uint64(req.Length()), 1, MaxRequestsBlocks); !c.consumeRateLimit(s, cost) {
 		return nil
 	}
 
@@ -127,19 +123,22 @@ func (c *ConsensusHandlers) beaconBlocksByRootHandler(s network.Stream) error {
 	}
 	defer tx.Rollback()
 
-	var block *cltypes.SignedBeaconBlock
+	seen := make(map[common.Hash]struct{}, req.Length())
+	// Only successfully written blocks count toward the response limit; missing or
+	// duplicate roots must not prevent later known blocks from being served.
 	written := 0
-	req.Range(func(index int, blockRoot common.Hash, length int) bool {
-		// Limit the number of blocks served, not the number of roots inspected.
-		if written >= MaxRequestsBlocks {
-			return false
+	for i := 0; i < req.Length() && written < MaxRequestsBlocks; i++ {
+		blockRoot := req.Get(i)
+		if _, ok := seen[blockRoot]; ok {
+			continue
 		}
-		block, err = c.beaconDB.ReadBlockByRoot(c.ctx, tx, blockRoot)
+		seen[blockRoot] = struct{}{}
+		block, err := c.beaconDB.ReadBlockByRoot(c.ctx, tx, blockRoot)
 		if errors.Is(err, snapshot_format.ErrExecutionBodyNotFound) {
 			block, err = nil, nil
 		}
 		if err != nil {
-			return false
+			return err
 		}
 		// If the block is not in the database, check the fork choice store.
 		// Recently received blocks (e.g. via gossip) may not have been persisted yet.
@@ -148,31 +147,28 @@ func (c *ConsensusHandlers) beaconBlocksByRootHandler(s network.Stream) error {
 		}
 		if block == nil {
 			log.Debug("[Sentinel] beaconBlocksByRoot: block not found", "root", blockRoot)
-			return true
+			continue
 		}
 
-		// Read the fork digest
 		forkDigest, err := c.ethClock.ComputeForkDigest(block.Block.Slot / c.beaconConfig.SlotsPerEpoch)
 		if err != nil {
-			return false
+			return err
 		}
 
-		if _, err = s.Write([]byte{0}); err != nil {
-			return false
+		if _, err := s.Write([]byte{SuccessfulResponsePrefix}); err != nil {
+			return err
 		}
 
-		if _, err = s.Write(forkDigest[:]); err != nil {
-			return false
+		if _, err := s.Write(forkDigest[:]); err != nil {
+			return err
 		}
-		// obtain block and write
-		if err = ssz_snappy.EncodeAndWrite(s, block); err != nil {
-			return false
+		if err := ssz_snappy.EncodeAndWrite(s, block); err != nil {
+			return err
 		}
 		written++
-		return true
-	})
+	}
 
-	return err
+	return nil
 }
 
 type emptyString struct{}
