@@ -2900,7 +2900,13 @@ func (b *BlockAccessListBuilder) Add(txIndex int, rs ReadSet, writes *WriteSet) 
 			if addr.IsNil() {
 				continue
 			}
-			ensureAccountState(ac, addr).applyWriteCode(w.Val, w.Version.blockAccessIndex())
+			account := ensureAccountState(ac, addr)
+			// An account absent at the tx start had no code before the block: an account with code
+			// is never removed within a block (EIP-161, EIP-6780).
+			if tr, ok := rs.address[addr]; ok && (tr.Val == nil || tr.Val.IsNil()) {
+				account.initialCodeEmpty = true
+			}
+			account.applyWriteCode(w.Val, w.Version.blockAccessIndex())
 		}
 		for addr, byKey := range writes.Storages() {
 			if addr.IsNil() {

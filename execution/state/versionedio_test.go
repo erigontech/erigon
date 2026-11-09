@@ -1618,6 +1618,42 @@ func TestVersionedIO_CreatedAccountEmptyCodeChangeOmitted(t *testing.T) {
 	require.True(t, found, "authority account must appear in BAL")
 }
 
+// The authority was read as absent at the tx start (an earlier tx removed it), and the tx sets and
+// clears its delegation: no code change.
+func TestVersionedIO_AbsentAccountEmptyCodeChangeOmitted(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress(common.HexToAddress("0xc0f6dca"))
+	io := NewVersionedIO(1)
+	reads := ReadSet{}
+	reads.SetAddress(addr, VersionedRead[AccountView]{ReadHeader: ReadHeader{Source: MapRead}})
+	io.RecordReads(Version{TxIndex: 0}, reads)
+	io.RecordWrites(Version{TxIndex: 0}, newWriteSet(
+		&VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: NoncePath, Version: Version{TxIndex: 0}}, Val: uint64(2)},
+		&VersionedWrite[accounts.Code]{WriteHeader: WriteHeader{Address: addr, Path: CodePath, Version: Version{TxIndex: 0}}, Val: accounts.Code{}},
+	))
+	bal := io.AsBlockAccessList()
+	require.Len(t, bal, 1)
+	require.Empty(t, bal[0].CodeChanges, "\n%s", bal.DebugString())
+}
+
+// The authority existed with a delegation, which the tx clears: a code change to empty code.
+func TestVersionedIO_PresentAccountClearedDelegationKept(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress(common.HexToAddress("0xc0f6dcb"))
+	delegation := accounts.NewCode([]byte{0xef, 0x01, 0x00, 0x11, 0x22})
+	io := NewVersionedIO(1)
+	reads := ReadSet{}
+	reads.SetAddress(addr, VersionedRead[AccountView]{Val: NewAccountView(&accounts.Account{Nonce: 4, CodeHash: delegation.Hash})})
+	io.RecordReads(Version{TxIndex: 0}, reads)
+	io.RecordWrites(Version{TxIndex: 0}, newWriteSet(
+		&VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: NoncePath, Version: Version{TxIndex: 0}}, Val: uint64(5)},
+		&VersionedWrite[accounts.Code]{WriteHeader: WriteHeader{Address: addr, Path: CodePath, Version: Version{TxIndex: 0}}, Val: accounts.Code{}},
+	))
+	bal := io.AsBlockAccessList()
+	require.Len(t, bal, 1)
+	require.Len(t, bal[0].CodeChanges, 1, "\n%s", bal.DebugString())
+}
+
 func TestVersionedIO_MidBlockEmptyCodeHashReadMustNotDropRealClear(t *testing.T) {
 	t.Parallel()
 
