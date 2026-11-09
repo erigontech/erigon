@@ -66,8 +66,8 @@ type Antiquary struct {
 	dirs                           datadir.Dirs
 	downloader                     dbservices.DownloaderClient
 	logger                         log.Logger
-	lastBlobGapLog                 time.Time // the retirement loop's last log of a blob gap that blocks retirement
-	blobCheckedTo                  uint64    // every blob below it, from the next blob segment's start, is stored
+	lastBlobGapLog                 time.Time
+	blobCheckedTo                  uint64 // every blob below it, from the next blob segment's start, is stored
 	sn                             *freezeblocks.CaplinSnapshots
 	stateSn                        *snapshotsync.CaplinStateSnapshots
 	snReader                       freezeblocks.BeaconSnapshotReader
@@ -579,58 +579,28 @@ func nextBlobSegment(sn blobRetirementSnapshots, cfg *clparams.BeaconChainConfig
 
 const blobRetirementGapLogInterval = 10 * time.Minute
 
-// firstMissingBlobSlot returns the first slot in [from, to) whose blob sidecars are not all stored.
-func (s *Antiquary) firstMissingBlobSlot(tx kv.Tx, from, to uint64, blobCount freezeblocks.BlobCountBySlotFn) (uint64, bool, error) {
-	for slot := from; slot < to; slot++ {
-		want, err := blobCount(slot)
-		if err != nil {
-			return 0, false, err
-		}
-		if want == 0 {
-			continue
-		}
-		ok, err := s.blobSidecarsStored(tx, slot, want)
-		if err != nil {
-			return 0, false, err
-		}
-		if !ok {
-			return slot, true, nil
-		}
-	}
-	return 0, false, nil
-}
-
-// blobSidecarsStored checks the files too: a count row stays after its sidecar file is lost.
-func (s *Antiquary) blobSidecarsStored(tx kv.Tx, slot, want uint64) (bool, error) {
-	blockRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
-	if err != nil {
-		return false, err
-	}
-	count, err := s.blobStorage.KzgCommitmentsCount(s.ctx, blockRoot)
-	if err != nil || uint64(count) != want {
-		return false, err
-	}
-	for idx := range want {
-		exists, err := s.blobStorage.BlobSidecarExists(s.ctx, slot, blockRoot, idx)
-		if err != nil || !exists {
-			return false, err
-		}
-	}
-	return true, nil
-}
-
 // blobSegmentComplete reports whether [from, to) can retire. An unfillable gap keeps backfill incomplete, but the
 // segments below it are still complete.
 func (s *Antiquary) blobSegmentComplete(tx kv.Tx, from, to uint64, blobCount freezeblocks.BlobCountBySlotFn) (bool, error) {
 	if !s.blobBackfilled.Load() {
-		gap, missing, err := s.firstMissingBlobSlot(tx, max(from, s.blobCheckedTo), to, blobCount)
-		if err != nil {
-			return false, err
-		}
-		if missing {
-			s.blobCheckedTo = gap
-			s.reportBlobRetirementGap(from, gap, time.Now())
-			return false, nil
+		for slot := max(from, s.blobCheckedTo); slot < to; slot++ {
+			want, err := blobCount(slot)
+			if err != nil {
+				return false, err
+			}
+			blockRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
+			if err != nil {
+				return false, err
+			}
+			stored, err := blob_storage.BlobsStored(s.ctx, s.blobStorage, slot, blockRoot, int(want))
+			if err != nil {
+				return false, err
+			}
+			if !stored {
+				s.blobCheckedTo = slot
+				s.reportBlobRetirementGap(from, slot, time.Now())
+				return false, nil
+			}
 		}
 	}
 	mxBlobRetirementGapSlot.SetUint64(0)
