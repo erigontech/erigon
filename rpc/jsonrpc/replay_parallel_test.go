@@ -33,8 +33,8 @@ import (
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
-// readTxLimitDB opens the first n read txs and fails the next ones as a full read-tx
-// semaphore does under kv.WithNonBlockingAcquire.
+// readTxLimitDB opens the first n read txs; past them it acts as a full read-tx semaphore:
+// it fails under kv.WithNonBlockingAcquire or kv.WithTryAcquire and blocks until ctx is done otherwise.
 type readTxLimitDB struct {
 	kv.TemporalRoDB
 	left atomic.Int32
@@ -48,19 +48,32 @@ func newReadTxLimitDB(db kv.TemporalRoDB, n int32) *readTxLimitDB {
 
 func (db *readTxLimitDB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 	if db.left.Add(-1) < 0 {
-		return nil, kv.ErrReadTxLimitExceeded
+		if kv.IsNonBlockingAcquire(ctx) || kv.IsTryAcquire(ctx) {
+			return nil, kv.ErrReadTxLimitExceeded
+		}
+		<-ctx.Done()
+		return nil, ctx.Err()
 	}
 	return db.TemporalRoDB.BeginTemporalRo(ctx)
 }
 
+// readTxLimitCtx is a request ctx without kv.WithNonBlockingAcquire, as on IPC, bounded so
+// that a request blocked on the read-tx limit fails instead of hanging.
+func readTxLimitCtx(t *testing.T, ctx context.Context) context.Context {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	t.Cleanup(cancel)
+	return ctx
+}
+
 // TestTraceBlockUnderReadTxLimit pins that debug_traceBlock answers with the read txs it
-// gets: the request's own one only, or that one and one worker.
+// gets: the request's own one only, or that one and one worker, also when the request
+// itself would wait for a read tx.
 func TestTraceBlockUnderReadTxLimit(t *testing.T) {
 	m, _ := createLogIndexTestModule(t)
 	trace := func(t *testing.T, api *DebugAPIImpl) string {
 		var buf bytes.Buffer
 		stream := jsonstream.New(&buf)
-		require.NoError(t, api.TraceBlockByNumber(m.Ctx, rpc.BlockNumber(1), withLogCallTracer(), stream))
+		require.NoError(t, api.TraceBlockByNumber(readTxLimitCtx(t, m.Ctx), rpc.BlockNumber(1), withLogCallTracer(), stream))
 		require.NoError(t, stream.Flush())
 		return buf.String()
 	}
@@ -88,7 +101,7 @@ func TestTraceBlockParityUnderReadTxLimit(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			api := newTraceApiForTest(m)
 			api.kv = newReadTxLimitDB(m.DB, readTxs)
-			got, err := api.Block(m.Ctx, 1, nil, nil)
+			got, err := api.Block(readTxLimitCtx(t, m.Ctx), 1, nil, nil)
 			require.NoError(t, err)
 			require.Equal(t, want, got)
 		})

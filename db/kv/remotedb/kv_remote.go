@@ -181,7 +181,11 @@ func (db *DB) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 	default:
 	}
 
-	if semErr := db.roTxsLimiter.Acquire(ctx, 1); semErr != nil {
+	if kv.IsTryAcquire(ctx) {
+		if !db.roTxsLimiter.TryAcquire(1) {
+			return nil, kv.ErrReadTxLimitExceeded
+		}
+	} else if semErr := db.roTxsLimiter.Acquire(ctx, 1); semErr != nil {
 		return nil, fmt.Errorf("remotedb.DB.BeginRo: roTxsLimiter error %w", semErr)
 	}
 
