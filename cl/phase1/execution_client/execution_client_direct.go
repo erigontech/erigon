@@ -123,7 +123,7 @@ func (cc *ExecutionClientDirect) NewPayload(
 	}
 
 	startValidateChain := time.Now()
-	status, _, _, err := cc.chainRW.ValidateChain(ctx, payload.BlockHash, payload.BlockNumber)
+	status, _, lvh, err := cc.chainRW.ValidateChain(ctx, payload.BlockHash, payload.BlockNumber)
 	if err != nil {
 		return PayloadStatusNone, err
 	}
@@ -131,7 +131,11 @@ func (cc *ExecutionClientDirect) NewPayload(
 	// check status
 	switch status {
 	case execmodule.ExecutionStatusBadBlock, execmodule.ExecutionStatusInvalidForkchoice:
-		return PayloadStatusInvalidated, errors.New("bad block")
+		err := errors.New("bad block")
+		if status == execmodule.ExecutionStatusBadBlock && lvh != (common.Hash{}) {
+			return PayloadStatusInvalidated, &InvalidPayloadError{LatestValidHash: lvh, Err: err}
+		}
+		return PayloadStatusInvalidated, err
 	case execmodule.ExecutionStatusBusy, execmodule.ExecutionStatusMissingSegment, execmodule.ExecutionStatusTooFarAway:
 		return PayloadStatusNotValidated, nil
 	case execmodule.ExecutionStatusSuccess:

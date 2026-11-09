@@ -257,18 +257,18 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 		}
 	}
 
-	ret := make([][]map[string]any, 0)
+	ret := make([][]map[string]any, len(bundles))
 
 	// Every transaction of the request gets the next index, so each sees the ones before it.
 	txIndex := st.TxnIndex()
-	for _, bundle := range bundles {
+	for bundleIdx, bundle := range bundles {
 		// first change blockContext
 		bundle.BlockOverride.OverrideBlockContext(&blockCtx, ethapi.BlockHashOverrides(overrideBlockHash))
 		activePrecompiles, err := stateOverride.ActivePrecompiles(blockCtx.Rules(chainConfig))
 		if err != nil {
 			return nil, err
 		}
-		results := []map[string]any{}
+		results := make([]map[string]any, len(bundle.Transactions))
 		for i := range bundle.Transactions {
 			txn := &bundle.Transactions[i]
 			st.SetTxContext(blockNum, txIndex)
@@ -313,12 +313,12 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 				jsonResult["value"] = hex.EncodeToString(result.Return())
 			}
 
-			results = append(results, jsonResult)
+			results[i] = jsonResult
 		}
 
 		blockCtx.BlockNumber++
 		blockCtx.Time++
-		ret = append(ret, results)
+		ret[bundleIdx] = results
 	}
 
 	return ret, err
