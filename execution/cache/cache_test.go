@@ -1711,3 +1711,36 @@ func TestAccountCodeHashes(t *testing.T) {
 
 	require.Equal(t, hash[:], prepareStateUpdate(codeUpd, nil).codeHash, "no account hash falls back to hashing")
 }
+
+func TestStateCache_FillOnSecondMiss(t *testing.T) {
+	b := 1 * datasize.MB
+	sc := NewStateCache(b, b, b, b)
+	t.Cleanup(sc.Close)
+
+	key := makeAddr(1)
+	view := sc.View(frontierAt(11))
+	view.FillOnSecondMiss(kv.AccountsDomain, key, makeValue(1), 10)
+	_, ok := sc.get(kv.AccountsDomain, key)
+	require.False(t, ok, "a key missed once is not inserted")
+
+	view.FillOnSecondMiss(kv.AccountsDomain, key, makeValue(1), 10)
+	_, ok = sc.get(kv.AccountsDomain, key)
+	require.True(t, ok, "a key missed twice is inserted")
+}
+
+func TestStateCache_FillDoorkeeperResetsWhenAQuarterIsSet(t *testing.T) {
+	b := 1 * datasize.MB
+	sc := NewStateCache(b, b, b, b)
+	t.Cleanup(sc.Close)
+
+	first := []byte("first")
+	require.False(t, sc.fillSeenBefore(first))
+	door := sc.fillDoor.Load()
+	key := make([]byte, 8)
+	for i := uint64(0); sc.fillDoor.Load() == door; i++ {
+		binary.BigEndian.PutUint64(key, i)
+		sc.fillSeenBefore(key)
+		require.Less(t, i, uint64(fillDoorWords*64), "the bitset was never replaced")
+	}
+	require.False(t, sc.fillSeenBefore(first), "a key marked before the reset is new again")
+}
