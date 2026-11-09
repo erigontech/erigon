@@ -1012,6 +1012,17 @@ func TestDUOpenBlockSnapshots_IgnoresBrokenTransactions(t *testing.T) {
 	require.Equal(t, uint64(499_999), snaps.SegmentsMax())
 }
 
+func TestDUCollect_WorksWithoutChaindata(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, state.ERIGONDB_SETTINGS_FILE), []byte("step_size = 1000\nsteps_in_frozen_file = 64\n"), 0o644))
+
+	result, err := duCollect(context.Background(), dirs, log.New())
+	require.NoError(t, err)
+	require.Equal(t, "unknown", result.Chain)
+	require.Len(t, result.Estimates, 4)
+	require.NoFileExists(t, filepath.Join(dirs.Chaindata, "mdbx.dat"))
+}
+
 func TestDUStepSize_LegacyDatadirIsNotWritten(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, datadir.PreverifiedFileName), nil, 0o644))

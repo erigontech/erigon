@@ -3910,6 +3910,25 @@ func duCaplinBytes(files []duFileInfo) int64 {
 	return total
 }
 
+func duChainInfo(ctx context.Context, dirs datadir.Dirs, logger log.Logger) (*chain.Config, string) {
+	db, err := dbCfg(dbcfg.ChainDB, dirs.Chaindata).Open(ctx)
+	if err != nil {
+		logger.Warn("seg du: chaindata not readable, chain and configured mode unknown", "err", err)
+		return nil, ""
+	}
+	defer db.Close()
+	var cc *chain.Config
+	var pm prune.Mode
+	if err := db.View(ctx, func(tx kv.Tx) error {
+		cc, pm, err = duReadChain(tx)
+		return err
+	}); err != nil {
+		logger.Warn("seg du: chaindata not readable, chain and configured mode unknown", "err", err)
+		return nil, ""
+	}
+	return cc, pm.String()
+}
+
 func duReadChain(tx kv.Tx) (*chain.Config, prune.Mode, error) {
 	genesis, err := rawdb.ReadCanonicalHash(tx, 0)
 	if err != nil {
@@ -4232,31 +4251,30 @@ func duFormatJSON(w io.Writer, result duResult) error {
 }
 
 // doDU implements the "erigon seg du" subcommand.
-func doDU(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs, logger log.Logger) error {
-	chainDB, err := dbCfg(dbcfg.ChainDB, dirs.Chaindata).Open(ctx)
-	if err != nil {
-		return fmt.Errorf("opening chaindata: %w", err)
+func duCollect(ctx context.Context, dirs datadir.Dirs, logger log.Logger) (duResult, error) {
+	cc, configuredMode := duChainInfo(ctx, dirs, logger)
+	chainName := "unknown"
+	if cc != nil {
+		chainName = cc.ChainName
 	}
-	defer chainDB.Close()
-	tx, err := chainDB.BeginRo(ctx)
+	emptyDB, err := mdbx.New(dbcfg.ChainDB, logger).InMem("").Open(ctx)
 	if err != nil {
-		return err
+		return duResult{}, err
+	}
+	defer emptyDB.Close()
+	tx, err := emptyDB.BeginRo(ctx)
+	if err != nil {
+		return duResult{}, err
 	}
 	defer tx.Rollback()
-	cc, pm, err := duReadChain(tx)
-	if err != nil {
-		return err
-	}
-	chainName := cc.ChainName
-	configuredMode := pm.String()
 
 	stepSize, err := duStepSize(dirs, logger)
 	if err != nil {
-		return err
+		return duResult{}, err
 	}
 	blockSnaps, err := duOpenBlockSnapshots(dirs, chainName, logger)
 	if err != nil {
-		return err
+		return duResult{}, err
 	}
 	defer blockSnaps.Close()
 	blockReader := freezeblocks.NewBlockReader(blockSnaps)
@@ -4267,7 +4285,7 @@ func doDU(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs, logger lo
 	// Walk snapshot files.
 	files, err := duWalkSnapshots(dirs)
 	if err != nil {
-		return fmt.Errorf("walking snapshots: %w", err)
+		return duResult{}, fmt.Errorf("walking snapshots: %w", err)
 	}
 
 	// Compute ranges.
@@ -4288,7 +4306,7 @@ func doDU(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs, logger lo
 	cats := duAggregateCategories(files)
 	estimates, err := duComputeEstimates(files, dirs.Snap, duPrunerSelect(ctx, pinnedTx, blockReader, cc, stepSize))
 	if err != nil {
-		return err
+		return duResult{}, err
 	}
 
 	var totalBytes int64
@@ -4298,7 +4316,7 @@ func doDU(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs, logger lo
 		totalFiles += s.Files
 	}
 
-	result := duResult{
+	return duResult{
 		Chain:           chainName,
 		ConfiguredMode:  configuredMode,
 		BlockRange:      [2]uint64{0, maxBlock},
@@ -4310,8 +4328,14 @@ func doDU(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs, logger lo
 		OtherExtensions: duOtherExtensions(files),
 		Estimates:       estimates,
 		CaplinBytes:     duCaplinBytes(files),
-	}
+	}, nil
+}
 
+func doDU(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs, logger log.Logger) error {
+	result, err := duCollect(ctx, dirs, logger)
+	if err != nil {
+		return err
+	}
 	verbose := cliCtx.Bool("v")
 
 	// Output.
