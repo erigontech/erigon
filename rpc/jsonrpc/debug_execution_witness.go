@@ -1369,9 +1369,9 @@ func buildWitnessTrie(
 		return nil, fmt.Errorf("collapse witness root mismatch: calculated=%x, expected=%x", common.BytesToHash(witnessRoot), expectedParentRoot)
 	}
 
-	encodedNodes = make([]hexutil.Bytes, 0, len(witnessNodes))
-	for _, node := range witnessNodes {
-		encodedNodes = append(encodedNodes, node)
+	encodedNodes = make([]hexutil.Bytes, len(witnessNodes))
+	for i, node := range witnessNodes {
+		encodedNodes[i] = node
 	}
 	return encodedNodes, nil
 }
