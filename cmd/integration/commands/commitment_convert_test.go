@@ -92,13 +92,9 @@ func TestNewTemporalDBRejectsV3FilesWhenV3IsDisabled(t *testing.T) {
 }
 
 func TestCommitmentConvertRestoreResetsExecution(t *testing.T) {
-	previous := statecfg.ExperimentalCommitmentV3
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	previousDatadir, previousChaindata := datadirCli, chaindata
-	t.Cleanup(func() {
-		statecfg.ExperimentalCommitmentV3 = previous
-		datadirCli, chaindata = previousDatadir, previousChaindata
-	})
-	statecfg.ExperimentalCommitmentV3 = false
+	t.Cleanup(func() { datadirCli, chaindata = previousDatadir, previousChaindata })
 
 	db, dirs := dbWithV3State(t)
 	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
