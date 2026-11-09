@@ -452,7 +452,11 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 	}
 
 	if !(dbg.Exec3Parallel || cfg.experimentalBAL) {
-		return execV3Serial(ctx, s, u, cfg, doms, rwTx, rng, logger)
+		dbg.NpMark("exec_seek")
+		serialErr := execV3Serial(ctx, s, u, cfg, doms, rwTx, rng, logger)
+		dbg.NpMark("exec_v3_ret")
+		dbg.NpStageEnd(time.Now())
+		return serialErr
 	}
 
 	dbg.NpMark("exec_seek")
