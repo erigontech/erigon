@@ -1499,14 +1499,12 @@ func fileContentsMapChart(fileName string, data *visualizeOverallStat) *charts.T
 	}
 
 	keysIndex := 0
-	TreeMap[keysIndex].Children = make([]opts.TreeMapNode, len(data.prefixes))
-	i := 0
+	TreeMap[keysIndex].Children = make([]opts.TreeMapNode, 0, len(data.prefixes))
 	for prefSize, stat := range data.prefixes {
-		TreeMap[keysIndex].Children[i] = opts.TreeMapNode{
+		TreeMap[keysIndex].Children = append(TreeMap[keysIndex].Children, opts.TreeMapNode{
 			Name:  strconv.FormatUint(prefSize, 10),
 			Value: int(stat.KeySize),
-		}
-		i++
+		})
 	}
 
 	valsIndex := 1
