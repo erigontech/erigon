@@ -123,6 +123,7 @@ type Config struct {
 	FermiTime      *uint64 `json:"fermiTime,omitempty"`
 	MendelTime     *uint64 `json:"mendelTime,omitempty"` // also activates BSC Osaka (same timestamp)
 	PasteurTime    *uint64 `json:"pasteurTime,omitempty"`
+	JennerTime     *uint64 `json:"jennerTime,omitempty"`
 
 	// (Optional) governance contract where EIP-1559 fees will be sent to, which otherwise would be burnt since the London fork.
 	// A key corresponds to the block number, starting from which the fees are sent to the address (map value).
@@ -491,6 +492,10 @@ func (c *Config) IsHaber(num, time uint64) bool {
 
 func (c *Config) IsPasteur(num, time uint64) bool {
 	return c.IsLondon(num) && isForked(c.PasteurTime, time)
+}
+
+func (c *Config) IsJenner(num, time uint64) bool {
+	return c.IsLondon(num) && isForked(c.JennerTime, time)
 }
 
 func (c *Config) GetBurntContract(num uint64) accounts.Address {
@@ -1028,7 +1033,7 @@ type Rules struct {
 	IsAura                                            bool
 	IsParlia, IsNano, IsMoran, IsPlanck               bool
 	IsLuban, IsPlato, IsHertz, IsFeynman, IsHaber     bool
-	IsPasteur                                         bool
+	IsPasteur, IsJenner                               bool
 
 	// L2Version is the L2 stack's own upgrade version (e.g. an ArbOS-style
 	// version ladder), resolved per block by the chain's L2Config oracle.

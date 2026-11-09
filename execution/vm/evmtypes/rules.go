@@ -57,6 +57,7 @@ func (bc *BlockContext) Rules(c *chain.Config) *chain.Rules {
 		IsFeynman:          c.IsFeynman(bc.BlockNumber, bc.Time),
 		IsHaber:            c.IsHaber(bc.BlockNumber, bc.Time),
 		IsPasteur:          c.IsPasteur(bc.BlockNumber, bc.Time),
+		IsJenner:           c.IsJenner(bc.BlockNumber, bc.Time),
 	}
 
 	if c.L2 != nil {

@@ -425,6 +425,7 @@
   "osakaTime": 1774319400,
   "mendelTime": 1774319400,
   "pasteurTime": 1784601000,
+  "jennerTime": 1793241000,
   "blobSchedule": {
     "cancun": {
       "target": 3,

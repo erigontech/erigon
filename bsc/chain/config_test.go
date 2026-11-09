@@ -18,6 +18,7 @@ package chain_test
 
 import (
 	"maps"
+	"math"
 	"math/big"
 	"slices"
 	"strconv"
@@ -169,6 +170,23 @@ func TestChapelIsPasteur(t *testing.T) {
 	assert.False(t, cfg.IsPasteur(120346348, 1784600999))
 	assert.True(t, cfg.IsPasteur(120346349, 1784601000))
 	assert.False(t, cfg.IsPasteur(*cfg.LondonBlock-1, *cfg.PasteurTime))
+}
+
+func TestChapelIsJenner(t *testing.T) {
+	t.Parallel()
+
+	spec, err := chainspec.ChainSpecByName(networkname.Chapel)
+	require.NoError(t, err)
+	cfg := spec.Config
+
+	require.NotNil(t, cfg.JennerTime)
+	assert.Equal(t, uint64(1793241000), *cfg.JennerTime)
+	assert.False(t, cfg.IsJenner(139533775, 1793240999))
+	assert.True(t, cfg.IsJenner(139533776, 1793241000))
+	assert.False(t, cfg.IsJenner(*cfg.LondonBlock-1, *cfg.JennerTime))
+
+	assert.False(t, (&evmtypes.BlockContext{BlockNumber: 139533775, Time: 1793240999}).Rules(cfg).IsJenner)
+	assert.True(t, (&evmtypes.BlockContext{BlockNumber: 139533776, Time: 1793241000}).Rules(cfg).IsJenner)
 }
 
 // TestChapelPasteurPrecompiles pins the Pasteur precompile set on the first Pasteur
@@ -387,6 +405,17 @@ func TestBSCIsPasteur(t *testing.T) {
 	assert.False(t, cfg.IsPasteur(66000000, 1787624999))
 	assert.True(t, cfg.IsPasteur(66000001, 1787625000))
 	assert.False(t, cfg.IsPasteur(*cfg.LondonBlock-1, *cfg.PasteurTime))
+}
+
+func TestBSCHasNoJenner(t *testing.T) {
+	t.Parallel()
+
+	spec, err := chainspec.ChainSpecByName(networkname.BSC)
+	require.NoError(t, err)
+	cfg := spec.Config
+
+	assert.Nil(t, cfg.JennerTime)
+	assert.False(t, cfg.IsJenner(math.MaxUint64, math.MaxUint64))
 }
 
 func TestBSCPasteurPrecompiles(t *testing.T) {
