@@ -919,14 +919,6 @@ func CompleteCommitmentRestore(dirs datadir.Dirs, logger log.Logger) error {
 	return nil
 }
 
-func commitmentFileVersion(name string) (uint64, bool) {
-	info, _, ok := snaptype.ParseFileName("", name)
-	if !ok || info.TypeString != "commitment" || (info.Ext != ".kv" && info.Ext != ".v") {
-		return 0, false
-	}
-	return info.Version.Major, true
-}
-
 func forEachCommitmentDataFile(dirPath string, fn func(name string, major uint64) error) error {
 	entries, err := os.ReadDir(dirPath)
 	if errors.Is(err, os.ErrNotExist) {
@@ -936,11 +928,15 @@ func forEachCommitmentDataFile(dirPath string, fn func(name string, major uint64
 		return err
 	}
 	for _, entry := range entries {
-		major, ok := commitmentFileVersion(entry.Name())
-		if !entry.IsDir() && ok {
-			if err := fn(entry.Name(), major); err != nil {
-				return err
-			}
+		if entry.IsDir() {
+			continue
+		}
+		info, _, ok := snaptype.ParseFileName("", entry.Name())
+		if !ok || info.TypeString != "commitment" || (info.Ext != ".kv" && info.Ext != ".v") {
+			continue
+		}
+		if err := fn(entry.Name(), info.Version.Major); err != nil {
+			return err
 		}
 	}
 	return nil

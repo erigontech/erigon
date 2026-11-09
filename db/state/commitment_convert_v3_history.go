@@ -42,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
+	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/recsplit/multiencseq"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/version"
@@ -279,14 +280,8 @@ func appendFileTxNums(dst []uint64, iit *InvertedIndexRoTx, from, to uint64, key
 		return dst, err
 	}
 	defer it.Close()
-	for it.HasNext() {
-		txNum, err := it.Next()
-		if err != nil {
-			return dst, err
-		}
-		dst = append(dst, txNum)
-	}
-	return dst, nil
+	txNums, err := stream.ToArrayU64(it)
+	return append(dst, txNums...), err
 }
 
 func encodeLegacyPrefix(path []byte, keysV2 bool) []byte {
@@ -852,8 +847,7 @@ func convertCommitmentHistoryFileV3(ctx context.Context, at *AggregatorRoTx, vFi
 					}
 				}
 			}
-			weight := batch.weight
-			inFlight.Release(weight)
+			inFlight.Release(batch.weight)
 			historyChainBatchPool.Put(batch)
 			if err := sink.send(); err != nil {
 				return err

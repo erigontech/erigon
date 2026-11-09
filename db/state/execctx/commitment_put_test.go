@@ -182,12 +182,11 @@ func TestFlushPendingDeltasLandInTheBlockChangeset(t *testing.T) {
 
 type latestOptionsTx struct {
 	kv.TemporalTx
-	seen []kv.GetLatestOptions
+	buf []byte
 }
 
 func (tx *latestOptionsTx) GetLatest(d kv.Domain, key []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
-	tx.seen = append(tx.seen, opts)
-	return tx.TemporalTx.GetLatest(d, key, opts)
+	return tx.buf, 0, nil
 }
 
 func TestCommitmentV3OwnsOnlyCommitmentReads(t *testing.T) {
@@ -198,16 +197,15 @@ func TestCommitmentV3OwnsOnlyCommitmentReads(t *testing.T) {
 			tx, err := db.BeginTemporalRo(t.Context())
 			require.NoError(t, err)
 			t.Cleanup(tx.Rollback)
-			spy := &latestOptionsTx{TemporalTx: tx}
-			sd, err := execctx.NewSharedDomains(t.Context(), spy, log.New())
+			spy := &latestOptionsTx{TemporalTx: tx, buf: []byte{1, 2, 3}}
+			sd, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
 			require.NoError(t, err)
 			t.Cleanup(sd.Close)
 			for _, d := range []kv.Domain{kv.CommitmentDomain, kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
-				spy.seen = nil
-				_, _, err := sd.GetLatest(d, spy, make([]byte, 52))
+				v, _, err := sd.GetLatest(d, spy, make([]byte, 52))
 				require.NoError(t, err)
-				require.Len(t, spy.seen, 1)
-				require.Equal(t, v3 && d == kv.CommitmentDomain, spy.seen[0].Owned(), "domain %s", d)
+				require.NotEmpty(t, v)
+				require.Equal(t, !v3 || d != kv.CommitmentDomain, &v[0] == &spy.buf[0], "domain %s value %x", d, v)
 			}
 		})
 	}

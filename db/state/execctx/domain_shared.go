@@ -1504,9 +1504,6 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 	if useBranchCache && !sd.hasLocalCacheUnwind() {
 		getOpts = getOpts.WithBranchCache()
 	}
-	if domain == kv.CommitmentDomain && sd.commitmentV3 {
-		getOpts = getOpts.WithOwned()
-	}
 	willFill := !sd.hasLocalCacheUnwind() && maxStep == kv.NoStepBound && sd.stateCache != nil && sd.stateCache.Caches(domain)
 	fillsCode := willFill && len(opts.codeHash) == len(common.Hash{})
 	if fillsCode {
@@ -1516,6 +1513,9 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 	v, step, err = tx.GetLatest(domain, k, getOpts)
 	if err != nil {
 		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
+	}
+	if domain == kv.CommitmentDomain && sd.commitmentV3 {
+		v = bytes.Clone(v)
 	}
 
 	// A bounded read observes a staged unwind, not stable committed state.

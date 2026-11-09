@@ -173,9 +173,7 @@ func incompatibleCommitmentFiles(items snapcfg.PreverifiedItems) map[string]stru
 	dependents := make(map[string]bool)
 	if v3 {
 		for _, pair := range statecfg.DomainDependencies() {
-			if pair[1] == kv.CommitmentDomain {
-				dependents[pair[0].String()] = true
-			}
+			dependents[pair[0].String()] = true
 		}
 	}
 	ranges := make(map[string]stepRange)

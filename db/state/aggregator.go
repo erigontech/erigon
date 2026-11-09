@@ -17,7 +17,6 @@
 package state
 
 import (
-	"bytes"
 	"cmp"
 	"context"
 	"encoding/binary"
@@ -2842,9 +2841,6 @@ func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx, opts k
 		if metrics != nil && dbg.KVReadLevelledMetrics {
 			metrics.UpdateDbReads(domain, start)
 		}
-		if opts.Owned() {
-			v = bytes.Clone(v)
-		}
 		at.cacheLatestBranch(cacheBranch, k, v, step, step.LastTxNum(at.StepSize()), tx)
 		return v, step, true, nil
 	}
@@ -2858,9 +2854,6 @@ func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx, opts k
 		metrics.UpdateFileReadsUnique(domain, k, start)
 	}
 	v, err = at.replaceShortenedKeysInBranch(k, commitment.BranchData(v), fileStartTxNum, fileEndTxNum)
-	if opts.Owned() {
-		v = bytes.Clone(v)
-	}
 	step = kv.Step(fileEndTxNum / at.StepSize())
 	if err == nil {
 		at.cacheLatestBranch(cacheBranch, k, v, step, fileEndTxNum, tx)

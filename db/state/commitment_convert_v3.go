@@ -297,12 +297,8 @@ func convertCommitmentFileV3(
 		defer wat.Close()
 		vals := &legacyFileValues{accounts: wat.d[kv.AccountsDomain], storage: wat.d[kv.StorageDomain], maxStep: stepTo - 1}
 		conv := v3.NewLegacyConverter(vals, st.keysV2, incremental)
-		prevs := wat.d[kv.CommitmentDomain]
-		reach := &legacyReach{keysV2: st.keysV2, read: func(key []byte) ([]byte, error) {
-			v, _, _, _, readErr := prevs.getLatestFromFiles(key, nil, stepTo-1)
-			return v, readErr
-		}}
-		delta := &legacyDelta{commitment: prevs, before: stepFrom - 1, after: stepTo - 1, keysV2: st.keysV2}
+		delta := &legacyDelta{commitment: wat.d[kv.CommitmentDomain], before: stepFrom - 1, after: stepTo - 1, keysV2: st.keysV2}
+		reach := &legacyReach{keysV2: st.keysV2, read: func(key []byte) ([]byte, error) { return delta.read(key, delta.after) }}
 		delta.reachBefore = &legacyReach{keysV2: st.keysV2, read: func(key []byte) ([]byte, error) { return delta.read(key, delta.before) }}
 		sink := &convertedSink{ctx: gctx, out: out}
 		for batch := range in {
