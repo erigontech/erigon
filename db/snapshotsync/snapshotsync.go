@@ -100,31 +100,54 @@ func isStateHistory(name string) bool {
 	return strings.HasPrefix(name, "idx") || strings.HasPrefix(name, "history") || strings.HasPrefix(name, "accessor")
 }
 
-func legacyCommitmentFiles(items snapcfg.PreverifiedItems) map[string]struct{} {
+func incompatibleCommitmentFiles(items snapcfg.PreverifiedItems) map[string]struct{} {
 	type stepRange struct {
 		history  bool
 		from, to uint64
 	}
+	v3 := statecfg.ExperimentalCommitmentV3
+	dependents := make(map[string]bool)
+	if v3 {
+		for _, pair := range statecfg.DomainDependencies() {
+			if pair[1] == kv.CommitmentDomain {
+				dependents[pair[0].String()] = true
+			}
+		}
+	}
 	ranges := make(map[string]stepRange)
-	v3 := make(map[stepRange]bool)
+	compatible := make(map[stepRange]bool)
+	skipped := make(map[string]struct{})
 	for _, p := range items {
+		if !v3 && !strings.Contains(p.Name, "commitment.") {
+			continue
+		}
 		info, _, ok := snaptype.ParseFileName("", p.Name)
-		if !ok || info.TypeString != kv.CommitmentDomain.String() {
+		if !ok {
 			continue
 		}
 		r := stepRange{history: isStateHistory(p.Name), from: info.From, to: info.To}
-		ranges[p.Name] = r
+		if info.TypeString != kv.CommitmentDomain.String() {
+			if v3 && !r.history && dependents[info.TypeString] {
+				ranges[p.Name] = r
+			}
+			continue
+		}
 		if info.Ext == ".kv" || info.Ext == ".v" {
-			v3[r] = info.Version.Major >= 3
+			if (info.Version.Major >= 3) == v3 {
+				compatible[r] = true
+			} else {
+				skipped[p.Name] = struct{}{}
+			}
+		} else {
+			ranges[p.Name] = r
 		}
 	}
-	legacy := make(map[string]struct{})
 	for name, r := range ranges {
-		if !v3[r] {
-			legacy[name] = struct{}{}
+		if !compatible[r] {
+			skipped[name] = struct{}{}
 		}
 	}
-	return legacy
+	return skipped
 }
 
 func canSnapshotBePruned(name string) bool {
@@ -497,10 +520,7 @@ func SyncSnapshots(
 		// send all hashes to the Downloader service
 		preverifiedBlockSnapshots := snapCfg.Preverified
 		downloadRequest := make([]dbservices.DownloadRequest, 0, len(preverifiedBlockSnapshots.Items))
-		var legacyCommitment map[string]struct{}
-		if statecfg.ExperimentalCommitmentV3 {
-			legacyCommitment = legacyCommitmentFiles(preverifiedBlockSnapshots.Items)
-		}
+		incompatibleCommitment := incompatibleCommitmentFiles(preverifiedBlockSnapshots.Items)
 
 		blockPrune, historyPrune := computeBlocksToPrune(blockReader, prune)
 		blackListForPruning := make(map[string]struct{})
@@ -573,7 +593,7 @@ func SyncSnapshots(
 			if !syncCfg.KeepExecutionProofs && isStateHistory(p.Name) && strings.Contains(p.Name, kv.CommitmentDomain.String()) {
 				continue
 			}
-			if _, ok := legacyCommitment[p.Name]; ok {
+			if _, ok := incompatibleCommitment[p.Name]; ok {
 				continue
 			}
 

@@ -67,11 +67,16 @@ func Configure(Schema SchemaGen, a AggSetters, dirs datadir.Dirs, salt *uint32, 
 		return err
 	}
 
-	a.AddDependencyBtwnDomains(kv.AccountsDomain, kv.CommitmentDomain)
-	a.AddDependencyBtwnDomains(kv.StorageDomain, kv.CommitmentDomain)
+	for _, pair := range DomainDependencies() {
+		a.AddDependencyBtwnDomains(pair[0], pair[1])
+	}
 
 	a.KeepRecentTxnsOfHistoriesWithDisabledSnapshots(100_000) // ~1k blocks of history
 	return nil
+}
+
+func DomainDependencies() [2][2]kv.Domain {
+	return [2][2]kv.Domain{{kv.AccountsDomain, kv.CommitmentDomain}, {kv.StorageDomain, kv.CommitmentDomain}}
 }
 
 const MaxNonFuriousDirtySpacePerTx = 64 * datasize.MB

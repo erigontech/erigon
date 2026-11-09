@@ -19,6 +19,7 @@ package snapshotsync
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -34,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 )
@@ -296,25 +298,52 @@ func TestLegacyCommitmentFiles(t *testing.T) {
 	items := snapcfg.PreverifiedItems{
 		{Name: "domain/v2.2-commitment.0-16.kv"},
 		{Name: "domain/v2.0-commitment.0-16.kvi"},
-		{Name: "domain/v1.1-commitment.0-16.bt"},
+		{Name: "domain/v2.2-commitment.16-32.kv"},
 		{Name: "domain/v3.0-commitment.16-32.kv"},
 		{Name: "domain/v2.0-commitment.16-32.bt"},
+		{Name: "domain/v3.0-commitment.32-48.kv"},
+		{Name: "domain/v2.0-commitment.32-48.bt"},
 		{Name: "history/v2.0-commitment.0-16.v"},
 		{Name: "idx/v2.0-commitment.0-16.ef"},
 		{Name: "accessor/v2.0-commitment.0-16.vi"},
+		{Name: "history/v2.0-commitment.16-32.v"},
 		{Name: "history/v3.0-commitment.16-32.v"},
 		{Name: "idx/v2.0-commitment.16-32.ef"},
+		{Name: "history/v3.0-commitment.32-48.v"},
+		{Name: "idx/v2.0-commitment.32-48.ef"},
 		{Name: "domain/v2.0-accounts.0-16.kv"},
+		{Name: "domain/v2.0-accounts.0-16.bt"},
+		{Name: "domain/v2.0-storage.0-16.kv"},
+		{Name: "domain/v2.0-storage.0-16.kvei"},
+		{Name: "domain/v2.0-code.0-16.kv"},
+		{Name: "domain/v2.0-accounts.16-32.kv"},
+		{Name: "history/v2.0-accounts.0-16.v"},
+		{Name: "idx/v2.0-storage.0-16.ef"},
+		{Name: "accessor/v2.0-accounts.0-16.vi"},
 		{Name: "v1.0-000000-000100-transactions.seg"},
 	}
-	require.Equal(t, map[string]struct{}{
-		"domain/v2.2-commitment.0-16.kv":   {},
-		"domain/v2.0-commitment.0-16.kvi":  {},
-		"domain/v1.1-commitment.0-16.bt":   {},
-		"history/v2.0-commitment.0-16.v":   {},
-		"idx/v2.0-commitment.0-16.ef":      {},
-		"accessor/v2.0-commitment.0-16.vi": {},
-	}, legacyCommitmentFiles(items))
+	for _, v3 := range []bool{true, false} {
+		for _, reverse := range []bool{false, true} {
+			t.Run(fmt.Sprintf("v3=%t/reverse=%t", v3, reverse), func(t *testing.T) {
+				t.Cleanup(statecfg.SetCommitmentV3(v3))
+				ordered := slices.Clone(items)
+				if reverse {
+					slices.Reverse(ordered)
+				}
+				want := map[string]struct{}{}
+				var names []string
+				if v3 {
+					names = []string{"domain/v2.2-commitment.0-16.kv", "domain/v2.0-commitment.0-16.kvi", "domain/v2.2-commitment.16-32.kv", "history/v2.0-commitment.0-16.v", "idx/v2.0-commitment.0-16.ef", "accessor/v2.0-commitment.0-16.vi", "history/v2.0-commitment.16-32.v", "domain/v2.0-accounts.0-16.kv", "domain/v2.0-accounts.0-16.bt", "domain/v2.0-storage.0-16.kv", "domain/v2.0-storage.0-16.kvei"}
+				} else {
+					names = []string{"domain/v3.0-commitment.16-32.kv", "domain/v3.0-commitment.32-48.kv", "domain/v2.0-commitment.32-48.bt", "history/v3.0-commitment.16-32.v", "history/v3.0-commitment.32-48.v", "idx/v2.0-commitment.32-48.ef"}
+				}
+				for _, name := range names {
+					want[name] = struct{}{}
+				}
+				require.Equal(t, want, incompatibleCommitmentFiles(ordered))
+			})
+		}
+	}
 }
 
 // TestBuildBlackListForPruning_CommitmentHistory locks down the commitment
