@@ -879,10 +879,12 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 	}()
 
 	executorCancel(nil)
+	dbg.NpMark("exec_loop_exit")
 
 	if !hasLoggedExecution {
 		pe.LogExecution()
 	}
+	dbg.NpMark("exec_log")
 
 	// Wait for all goroutines to complete before reading shared state.
 	if waitErr := pe.wait(); waitErr != nil {
@@ -892,6 +894,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 			execErr = errors.Join(execErr, waitErr)
 		}
 	}
+	dbg.NpMark("exec_wait")
 
 	// Commitment is computed per-block by the calculator. Stage progress
 	// is updated in handleCommitResult when results are consumed.

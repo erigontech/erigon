@@ -289,6 +289,7 @@ func (fv *ForkValidator) ValidatePayload(ctx context.Context, sd *execctx.Shared
 	fv.extendingForkNotifications = fv.executor.ValidationNotifications()
 	fv.extendingForkNotifications.Accumulator.Reset(0)
 	fv.extendingForkNotifications.RecentReceipts.Clear()
+	dbg.NpMark("fv_checks")
 	status, latestValidHash, validationError, criticalError = fv.validateAndStorePayload(fv.sharedDom, tx, header, body, unwindPoint, headersChain, bodiesChain)
 
 	if fv.sharedDom != nil &&
@@ -344,9 +345,11 @@ func (fv *ForkValidator) validateAndStorePayload(sd *execctx.SharedDomains, tx k
 			return
 		}
 	}
+	dbg.NpMark("fv_validate_ret")
 	validation := time.Since(start)
 	fv.timingsCache.Add(hash, BlockTimings{validation, 0})
 	fv.recordBlockMetrics(sd, header, body, hash, &beforeIO, len(headersChain), validation, fv.executor.lastValidationExecStageTiming())
+	dbg.NpMark("fv_record_metrics")
 
 	latestValidHash = hash
 	fv.extendingForkHeadHash = hash
@@ -391,6 +394,7 @@ func (fv *ForkValidator) validateAndStorePayload(sd *execctx.SharedDomains, tx k
 	if criticalError != nil {
 		return //nolint:nilnesserr
 	}
+	dbg.NpMark("fv_write_body")
 
 	status = engine_types.ValidStatus
 	return

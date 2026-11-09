@@ -526,12 +526,15 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		}, nil
 	}
 	defer e.semaphore.Release(1)
+	defer dbg.NpMark("vc_cancel_warmup")
 	if e.readAheader != nil {
 		defer e.readAheader.CancelWarmup()
 	}
+	defer dbg.NpMark("vc_rollback_ro")
 	e.hook.LastNewBlockSeen(blockNumber) // used by eth_syncing
 	e.currentContext.ResetPendingUpdates()
 	e.forkValidator.ClearWithUnwind()
+	dbg.NpMark("vc_clear")
 	e.logger.Debug("[execmodule] validating chain", "number", blockNumber, "hash", blockHash)
 	var (
 		header             *types.Header
@@ -608,6 +611,7 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 			LatestValidHash:  common.Hash{},
 		}, nil
 	}
+	dbg.NpMark("vc_read_block")
 	// Finality fixes canonical hashes even after their unwind history is pruned.
 	if payloadExecuted || (!canonical && e.forkValidator.IsValidated(blockHash)) {
 		return ValidationResult{
@@ -638,6 +642,7 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		}
 		return ValidationResult{}, err
 	}
+	dbg.NpMark("vc_new_sd")
 	// Do not defer doms.Close(): on the success path ownership transfers to
 	// forkValidator.sharedDom inside ValidatePayload and later phases close it,
 	// so we Close explicitly only on the early-return error paths below.
@@ -669,6 +674,7 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 			return ValidationResult{}, fmt.Errorf("ValidateChain: flush overlay to validation tx: %w", err)
 		}
 	}
+	dbg.NpMark("vc_flush_overlay")
 	// Set state cache in SharedDomains for use during state reading
 	doms.SetStateCache(e.stateCache)
 	// Either unwind path may run, and both can run in one validation. Share one
@@ -693,6 +699,7 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		doms.Close()
 		return ValidationResult{}, err
 	}
+	dbg.NpMark("vc_unwind_common")
 	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(ctx, doms, tx, header, body.RawBody(), ensureReadAheadSuspended, e.logger)
 	if criticalError != nil {
 		return ValidationResult{}, criticalError
@@ -741,6 +748,7 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 	if validationError != nil {
 		result.ValidationError = validationError.Error()
 	}
+	dbg.NpMark("vc_tail")
 	return result, nil
 }
 

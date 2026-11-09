@@ -282,6 +282,7 @@ func ExecV3(ctx context.Context,
 
 	execErr = execV3Finalize(ctx, nil, cfg, doms, pe.lastCommittedTxNum.Load(), out.lastCommittedBlockNum,
 		lastHeader, shouldReportToTxPool, logPrefix, logger)
+	dbg.NpMark("exec_finalize")
 	return finalizeExecV3Outcome(out, execErr)
 }
 

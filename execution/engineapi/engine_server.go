@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/crypto/kzg"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -285,6 +286,8 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	if req == nil {
 		return nil, &rpc.InvalidParamsError{Message: "missing payload"}
 	}
+	dbg.NpBegin(req.BlockNumber.Uint64())
+	defer dbg.NpEnd(e.logger)
 	if !e.consuming.Load() {
 		return nil, errors.New("engine payload consumption is not enabled")
 	}
@@ -419,6 +422,7 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		}
 	}
 
+	dbg.NpMark("np_header_bal")
 	if (!e.config.IsCancun(header.Time) && version >= clparams.DenebVersion) ||
 		(e.config.IsCancun(header.Time) && version < clparams.DenebVersion) ||
 		(!e.config.IsPrague(header.Time) && version >= clparams.ElectraVersion) ||
@@ -485,6 +489,7 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		}
 	}
 
+	dbg.NpMark("np_txs_decode")
 	var sendersRecovery *exec.SendersRecovery
 	if invalidTransactionStatus == nil && len(transactions) > 0 {
 		sendersRecovery = exec.StartSendersRecovery(ctx, types.MakeSigner(e.config, req.BlockNumber.Uint64(), uint64(req.Timestamp)), transactions)
@@ -505,6 +510,7 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 			ValidationError: engine_types.NewStringifiedErrorFromString("invalid block hash"),
 		}, nil
 	}
+	dbg.NpMark("np_tx_root")
 	if invalidTransactionStatus != nil {
 		return invalidTransactionStatus, nil
 	}
@@ -547,6 +553,7 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		}
 	}
 
+	dbg.NpMark("np_bal_blobs_check")
 	possibleStatus, err := e.getQuickPayloadStatusIfPossible(ctx, blockHash, uint64(req.BlockNumber), header.ParentHash, nil, true, defaultReadinessWait)
 	if err != nil {
 		return nil, err
@@ -556,8 +563,10 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		return possibleStatus, nil
 	}
 
+	dbg.NpMark("np_quick_status")
 	e.lock.Lock()
 	defer e.lock.Unlock()
+	dbg.NpMark("np_lock_wait")
 
 	e.logger.Debug("[NewPayload] sending block", "height", header.Number, "hash", blockHash)
 	// Pass `txs` (the binary tx encodings from the CL) through as the Block's
@@ -567,6 +576,7 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	// byte buffers from req.Transactions.
 	block := types.NewBlockFromStorageWithBinaryTxs(blockHash, &header, transactions, txs, nil /* uncles */, withdrawals, blockAccessList)
 	payloadStatus, err := e.HandleNewPayload(ctx, "NewPayload", block)
+	dbg.NpMark("np_response")
 	if err != nil {
 		if errors.Is(err, rules.ErrInvalidBlock) {
 			return &engine_types.PayloadStatus{
@@ -1133,6 +1143,7 @@ func (e *EngineServer) HandleNewPayload(
 		}
 	}
 
+	dbg.NpMark("hnp_parent")
 	if err := e.chainRW.InsertBlocks(ctx, []*types.Block{block}); err != nil {
 		if errors.Is(err, types.ErrBlockExceedsMaxRlpSize) || errors.Is(err, types.ErrInvalidBlockAccessList) {
 			return &engine_types.PayloadStatus{
@@ -1143,12 +1154,14 @@ func (e *EngineServer) HandleNewPayload(
 		return nil, err
 	}
 
+	dbg.NpMark("hnp_insert")
 	if math.AbsoluteDifference(*currentHeadNumber, headerNumber) >= e.maxReorgDepth {
 		return &engine_types.PayloadStatus{Status: engine_types.AcceptedStatus}, nil
 	}
 
 	e.logger.Debug(fmt.Sprintf("[%s] New payload begin verification", logPrefix))
 	status, validationErr, latestValidHash, err := e.chainRW.ValidateChain(ctx, headerHash, headerNumber)
+	dbg.NpMark("hnp_validate_ret")
 	e.logger.Debug(fmt.Sprintf("[%s] New payload verification ended", logPrefix), "status", status.String(), "err", err)
 	if err != nil {
 		missingBlkHash, isMissingChainErr := execmodule.GetBlockHashFromMissingSegmentError(err)

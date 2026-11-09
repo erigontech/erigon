@@ -25,6 +25,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
@@ -67,6 +68,7 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.Block) (E
 	defer e.semaphore.Release(1)
 	e.logger.Debug("ethereumExecutionModule.InsertBlocks: semaphore acquired", "wait", time.Since(start))
 	e.forkValidator.ClearWithUnwind()
+	dbg.NpMark("ins_sem_clear")
 	frozenBlocks := e.blockReader.FrozenBlocks()
 
 	// Open a read-only tx for the base data; writes accumulate in the
@@ -138,6 +140,7 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.Block) (E
 			}
 		}
 
+		dbg.NpMark("ins_validate")
 		var parentTd *uint256.Int
 		if height > 0 {
 			// Parent's total difficulty — reads from overlay first, then base RO tx.
@@ -176,6 +179,7 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.Block) (E
 		e.logger.Trace("Inserted block", "hash", blockHash, "number", header.Number)
 	}
 
+	dbg.NpMark("ins_write")
 	// On ChainTip - store blocks in Overlay
 	// On Non-ChainTip - flush to db because batches are big
 	if len(blocks) > 16 {
