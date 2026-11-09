@@ -65,6 +65,12 @@ const disconnectedPeerMemory = time.Minute
 // Other traffic shares the queue, so a retry can still be dropped; retryAnswerTimeout frees its slot.
 const maxRetryRequestsPerPeer = 8
 
+// A reply echoes its request's id, so only a reply to a retry frees a retry slot.
+const (
+	initialRequestID uint64 = 1
+	retryRequestID   uint64 = 2
+)
+
 // retryAnswerTimeout frees the slot of a retry left unanswered this long. A full 32-message sentry queue drains
 // within this time at the 20-second write timeout, so an older retry was written or dropped and is not queued.
 const retryAnswerTimeout = 32 * 20 * time.Second
@@ -431,7 +437,7 @@ func (f *Fetch) requestFromAlternates(ctx context.Context, tx kv.Tx) {
 			defer cancel()
 			for _, peer := range peers {
 				for _, hashes := range plans[peer].reqs {
-					unsent, at, n, err := f.requestPooledTxns(sendCtx, peer, hashes, sent)
+					unsent, at, n, err := f.requestPooledTxns(sendCtx, peer, retryRequestID, hashes, sent)
 					if n == 0 {
 						f.releaseRetry(peer)
 					}
@@ -563,7 +569,7 @@ func (f *Fetch) forget(hash []byte, r *fetchRequest) {
 // requestPooledTxns sends the hashes reserved for peer at reservedAt in requests of 256, because a responder
 // answers only the first 256. Each request claims its hashes when it is sent, so an earlier stalled send cannot
 // make a later one stale. On a failed send it returns the hashes not sent and when they were claimed.
-func (f *Fetch) requestPooledTxns(ctx context.Context, peer fetchPeer, hashes Hashes, reservedAt time.Time) (unsent Hashes, at time.Time, sent int, err error) {
+func (f *Fetch) requestPooledTxns(ctx context.Context, peer fetchPeer, requestID uint64, hashes Hashes, reservedAt time.Time) (unsent Hashes, at time.Time, sent int, err error) {
 	for start := 0; start < len(hashes); start += 256 * 32 {
 		end := min(start+256*32, len(hashes))
 		var chunk Hashes
@@ -572,7 +578,7 @@ func (f *Fetch) requestPooledTxns(ctx context.Context, peer fetchPeer, hashes Ha
 			continue
 		}
 		var encodedRequest []byte
-		encodedRequest, err = EncodeGetPooledTransactions66(chunk, uint64(1), nil)
+		encodedRequest, err = EncodeGetPooledTransactions66(chunk, requestID, nil)
 		if err == nil {
 			var sentTo *sentryproto.SentPeers
 			sentTo, err = peer.sentry.SendMessageById(ctx, &sentryproto.SendMessageByIdRequest{
@@ -613,8 +619,8 @@ func (f *Fetch) expireRetries(now time.Time) {
 	}
 }
 
-// releaseRetry frees one of peer's retry slots: on a PooledTransactions reply, which a peer sends for every request
-// it reads, or for a retry that was not sent. Waiting requests may go to the peer again.
+// releaseRetry frees one of peer's retry slots: on a reply to a retry, which a peer sends for every request it reads,
+// or for a retry that was not sent. Waiting requests may go to the peer again.
 func (f *Fetch) releaseRetry(peer fetchPeer) {
 	f.requestedLock.Lock()
 	defer f.requestedLock.Unlock()
@@ -937,7 +943,9 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentryproto.Sen
 		// Keep announcements for peer fallback. A new block can make a rejected
 		// transaction valid, so it starts a new deduplication scope.
 		if req.Id == sentryproto.MessageId_POOLED_TRANSACTIONS_66 {
-			f.releaseRetry(fetchPeer{sentryClient, gointerfaces.ConvertH512ToHash(req.PeerId)}) // before dedup: replies to different requests can be identical
+			if id, err := pooledTransactions66RequestID(req.Data); err == nil && id == retryRequestID {
+				f.releaseRetry(fetchPeer{sentryClient, gointerfaces.ConvertH512ToHash(req.PeerId)}) // before dedup: replies to different requests can be identical
+			}
 		}
 		switch req.Id {
 		case sentryproto.MessageId_TRANSACTIONS_66, sentryproto.MessageId_POOLED_TRANSACTIONS_66:
@@ -1013,7 +1021,7 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 		if len(unknownHashes) > 0 {
 			peer := fetchPeer{sentryClient, gointerfaces.ConvertH512ToHash(req.PeerId)}
 			sendCtx, cancel := context.WithTimeout(f.ctx, txFetchTimeout) // a blocked send must not strand later chunks as unsent
-			unsent, _, _, err := f.requestPooledTxns(sendCtx, peer, unknownHashes, reservedAt)
+			unsent, _, _, err := f.requestPooledTxns(sendCtx, peer, initialRequestID, unknownHashes, reservedAt)
 			cancel()
 			if err != nil {
 				f.releaseRequested(peer, unsent)
@@ -1046,7 +1054,7 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 		if len(unknownHashes) > 0 {
 			peer := fetchPeer{sentryClient, gointerfaces.ConvertH512ToHash(req.PeerId)}
 			sendCtx, cancel := context.WithTimeout(f.ctx, txFetchTimeout) // a blocked send must not strand later chunks as unsent
-			unsent, _, _, err := f.requestPooledTxns(sendCtx, peer, unknownHashes, reservedAt)
+			unsent, _, _, err := f.requestPooledTxns(sendCtx, peer, initialRequestID, unknownHashes, reservedAt)
 			cancel()
 			if err != nil {
 				f.releaseRequested(peer, unsent)

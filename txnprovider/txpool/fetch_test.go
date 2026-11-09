@@ -892,7 +892,8 @@ type announceFetchTest struct {
 	lookedUp      int      // hashes passed to HeldOrQueuedIdHashes
 	sentHashes    []Hashes // hashes of each request, in send order
 	blockSend     bool     // the next send blocks until its context is done
-	noDeadline    bool     // a send reached sentry without a deadline
+	requestIDs    []uint64
+	noDeadline    bool // a send reached sentry without a deadline
 	sendErr       error
 	failSendAt    int               // when > 0, only that send (1-based) fails with sendErr
 	gone          map[[64]byte]bool // peers sentry no longer knows: a send reaches no one
@@ -948,7 +949,8 @@ func newAnnounceFetchTest(t *testing.T) *announceFetchTest {
 				a.noDeadline = true
 			}
 			a.requestedFrom = append(a.requestedFrom, gointerfaces.ConvertH512ToHash(r.PeerId))
-			_, sentHashes, _, err := ParseGetPooledTransactions66(r.Data.Data, 0, nil)
+			requestID, sentHashes, _, err := ParseGetPooledTransactions66(r.Data.Data, 0, nil)
+			a.requestIDs = append(a.requestIDs, requestID)
 			if err != nil {
 				return nil, err
 			}
@@ -1132,7 +1134,8 @@ func TestFetchBoundsQueuedBatch(t *testing.T) {
 }
 
 // Every PooledTransactions reply frees one retry slot of its peer, even one whose body a dedup drops.
-func TestIdenticalRepliesEachFreeARetrySlot(t *testing.T) {
+func retrySlotsLeftAfterTwoReplies(t *testing.T, requestID uint64) int {
+	t.Helper()
 	ctrl := gomock.NewController(t)
 	pool := NewMockPool(ctrl)
 	pool.EXPECT().Started().Return(false).AnyTimes()
@@ -1141,7 +1144,7 @@ func TestIdenticalRepliesEachFreeARetrySlot(t *testing.T) {
 	peerB := [64]byte{0xb}
 	peer := fetchPeer{client, peerB}
 	fetch.retriesOutstanding[peer] = []time.Time{time.Unix(1, 0), time.Unix(1, 0)}
-	reply := &sentryproto.InboundMessage{Id: sentryproto.MessageId_POOLED_TRANSACTIONS_66, Data: []byte{0xc0}, PeerId: gointerfaces.ConvertHashToH512(peerB)}
+	reply := &sentryproto.InboundMessage{Id: sentryproto.MessageId_POOLED_TRANSACTIONS_66, Data: EncodePooledTransactions66(nil, requestID, nil), PeerId: gointerfaces.ConvertHashToH512(peerB)}
 	replies := []*sentryproto.InboundMessage{reply, reply}
 	stream := &boundedBatchStream{recv: func() (*sentryproto.InboundMessage, error) {
 		if len(replies) == 0 {
@@ -1153,7 +1156,25 @@ func TestIdenticalRepliesEachFreeARetrySlot(t *testing.T) {
 	}}
 	client.EXPECT().Messages(gomock.Any(), gomock.Any(), gomock.Any()).Return(stream, nil)
 	require.NoError(t, fetch.receiveMessage(t.Context(), client))
-	require.Empty(t, fetch.retriesOutstanding[peer], "a duplicate reply still answers a retry")
+	return len(fetch.retriesOutstanding[peer])
+}
+
+func TestIdenticalRepliesEachFreeARetrySlot(t *testing.T) {
+	require.Zero(t, retrySlotsLeftAfterTwoReplies(t, retryRequestID), "a duplicate reply still answers a retry")
+}
+
+func TestRepliesToInitialRequestsKeepTheRetrySlots(t *testing.T) {
+	require.Equal(t, 2, retrySlotsLeftAfterTwoReplies(t, initialRequestID))
+}
+
+func TestRetriesCarryTheRetryRequestID(t *testing.T) {
+	t.Parallel()
+	a := newAnnounceFetchTest(t)
+	hash, peerA, peerB := [32]byte{0xe3}, [64]byte{0xa}, [64]byte{0xb}
+	a.announce(t, peerA, hash)
+	a.announce(t, peerB, hash)
+	a.timeoutSweep()
+	require.Equal(t, []uint64{initialRequestID, retryRequestID}, a.requestIDs)
 }
 
 func TestFetchRevalidatesDuplicateReplyAfterNewBlock(t *testing.T) {
