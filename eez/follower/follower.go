@@ -308,6 +308,9 @@ func (f *Follower) Boot(ctx context.Context) error {
 }
 
 func (f *Follower) boot(ctx context.Context) error {
+	if err := f.executeGenesis(ctx); err != nil {
+		return err
+	}
 	id, err := f.reader.ChainID(ctx)
 	if err != nil {
 		return err
@@ -339,6 +342,17 @@ func (f *Follower) boot(ctx context.Context) error {
 		return err
 	}
 	return f.watcher.Seed(ctx, f.scanned)
+}
+
+// executeGenesis executes the genesis of a chain still at it, which a node
+// writes without the state that block building, derivation and witness pins
+// read.
+func (f *Follower) executeGenesis(ctx context.Context) error {
+	head, err := f.chain.Head(ctx)
+	if err != nil || head.Number.Sign() > 0 {
+		return err
+	}
+	return f.deriver.ForkChoiceTo(ctx, head.Hash())
 }
 
 // resume seeds the deriver and returns the L1 block to scan from: the
