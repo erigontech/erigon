@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -535,6 +536,10 @@ func (e *ExecModule) ValidateChain(ctx context.Context, block *types.Block) (Val
 	e.forkValidator.ClearWithUnwind()
 	e.logger.Debug("[execmodule] validating chain", "number", blockNumber, "hash", blockHash)
 	header, body := block.HeaderNoCopy(), block.Body()
+	body.Transactions = slices.Clone(body.Transactions)
+	for i, txn := range body.Transactions {
+		body.Transactions[i] = txn.Unwrap()
+	}
 	var (
 		currentBlockNumber *uint64
 		payloadExecuted    bool
@@ -553,9 +558,6 @@ func (e *ExecModule) ValidateChain(ctx context.Context, block *types.Block) (Val
 		progress, err := stages.GetStageProgress(tx, stages.Execution)
 		return progress >= blockNumber, err
 	}
-	// Read header/body from the block overlay on currentContext if available
-	// (block data written by InsertBlocks hasn't been flushed to DB yet),
-	// falling back to a plain DB read otherwise.
 	if e.currentContext != nil && e.currentContext.BlockOverlay() != nil {
 		overlay := e.currentContext.BlockOverlay()
 		roTx, err := e.db.BeginTemporalRo(ctx)

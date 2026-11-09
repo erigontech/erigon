@@ -17,6 +17,7 @@
 package engineapi
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"testing"
@@ -30,11 +31,49 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/builder"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/execmodule"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/rpc"
 )
+
+func TestCommitBlockV1MempoolBlobTransaction(t *testing.T) {
+	m := execmoduletester.New(t, execmoduletester.WithTxPool(), execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	pack, err := m.GenerateChain(1, nil)
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(pack))
+	parent := pack.TopBlock
+	require.NoError(t, m.WaitForTxPool(t.Context(), parent.Hash()))
+
+	wrapped := types.MakeV1WrappedBlobTxn(m.ChainConfig.ChainID)
+	signed, err := types.SignTx(&wrapped.Tx, *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
+	require.NoError(t, err)
+	v, r, s := signed.RawSignatureValues()
+	wrapped.Tx.V.Set(v)
+	wrapped.Tx.R.Set(r)
+	wrapped.Tx.S.Set(s)
+	var encoded bytes.Buffer
+	require.NoError(t, wrapped.MarshalBinaryWrapped(&encoded))
+	added, err := m.TxPoolGrpcServer.Add(t.Context(), &txpoolproto.AddRequest{RlpTxs: [][]byte{encoded.Bytes()}})
+	require.NoError(t, err)
+	require.Equal(t, []string{"success"}, added.Errors)
+
+	server := NewEngineServer(m.Log, m.ChainConfig, m.ExecModule, nil, false, false, true, true, nil, nil, 0, 0)
+	api := NewTestingImpl(server, m.Log, m.DB)
+	attrs := validPayloadAttrs(parent.Time())
+	slot := hexutil.Uint64(parent.NumberU64() + 1)
+	attrs.SlotNumber = &slot
+	hash, err := api.CommitBlockV1(t.Context(), attrs, nil, nil)
+	require.NoError(t, err)
+	block := server.chainRW.GetBlockByHash(t.Context(), hash)
+	require.NotNil(t, block)
+	require.Len(t, block.Transactions(), 1)
+	require.Equal(t, wrapped.Hash(), block.Transactions()[0].Hash())
+	require.Equal(t, hash, server.chainRW.CurrentHeader(t.Context()).Hash())
+}
 
 // commitRecorder captures the chain mutations performed by CommitBlockV1 so
 // tests can assert on what was inserted and which fork choice was applied.
