@@ -48,6 +48,28 @@ import (
 
 var initDataColumnSidecarTestConfig sync.Once
 
+func TestRequestCost(t *testing.T) {
+	for _, tc := range []struct {
+		name                     string
+		count, multiplier, limit uint64
+		want                     int
+	}{
+		{"zero count", 0, 6, 72, 0},
+		{"zero multiplier", 2, 0, 72, 0},
+		{"zero limit", 2, 6, 0, 0},
+		{"admission only", 1, 1, 72, 0},
+		{"small product", 2, 6, 72, 11},
+		{"at cap", 12, 6, 72, 71},
+		{"above cap", 13, 6, 72, 71},
+		{"cap not divisible by multiplier", 12, 6, 71, 70},
+		{"overflowing product", math.MaxUint64, math.MaxUint64, 72, 71},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, requestCost(tc.count, tc.multiplier, tc.limit))
+		})
+	}
+}
+
 func TestDataColumnSidecarsByRootMissingRootReturnsEmptySuccess(t *testing.T) {
 	ctx, host, host1, beaconCfg := setupDataColumnSidecarHandlerTest(t)
 

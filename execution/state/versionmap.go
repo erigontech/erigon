@@ -493,7 +493,6 @@ func (vm *VersionMap) StorageKeys(addr accounts.Address) []accounts.StorageKey {
 func (vm *VersionMap) WriteChanges(changes types.BlockAccessList) {
 	for i := range changes {
 		accountChanges := &changes[i]
-		addr := accounts.InternAddress(accountChanges.Address)
 		if dbg.TraceBALFeed {
 			fmt.Printf(
 				"BAL-ACCT %x storage=%d balance=%d nonce=%d code=%d reads=%d\n",
@@ -505,6 +504,11 @@ func (vm *VersionMap) WriteChanges(changes types.BlockAccessList) {
 				len(accountChanges.StorageReads),
 			)
 		}
+		if len(accountChanges.StorageChanges) == 0 && len(accountChanges.BalanceChanges) == 0 &&
+			len(accountChanges.NonceChanges) == 0 && len(accountChanges.CodeChanges) == 0 {
+			continue
+		}
+		addr := accounts.InternAddress(accountChanges.Address)
 		for _, storageChanges := range accountChanges.StorageChanges {
 			for _, change := range storageChanges.Changes {
 				if dbg.TraceBALFeed {
@@ -1443,13 +1447,8 @@ func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool) {
 		// entirely when nothing changes, so a flush never parks the concurrent readers on a
 		// hot account. Promotes to the write lock below only when a cell actually changes.
 		if vm.HasBAL && !complete {
-			if e := vm.load(addr); e != nil {
-				e.mu.RLock()
-				noop := flushAllNoOp(e, writes, addr, flag)
-				e.mu.RUnlock()
-				if noop {
-					return
-				}
+			if e := vm.load(addr); e != nil && flushAllNoOpUnderRLock(e, writes, addr, flag) {
+				return
 			}
 		}
 		if !stamped && vm.stamps != nil {
@@ -1527,6 +1526,13 @@ func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool) {
 			}
 		}
 	})
+}
+
+// flushAllNoOpUnderRLock is flushAllNoOp under the account's read lock, released before the flush takes the write lock.
+func flushAllNoOpUnderRLock(e *AddressEntry, writes *WriteSet, addr accounts.Address, flag statusFlag) bool {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return flushAllNoOp(e, writes, addr, flag)
 }
 
 // hasDestruct reports a true SelfDestruct cell; a created account holds only false markers.
