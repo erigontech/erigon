@@ -6,6 +6,8 @@ import (
 	"math/rand"
 	"reflect"
 	"runtime"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -807,6 +809,47 @@ func TestFlushEstimate_ValidTxNotMarkedEstimate(t *testing.T) {
 	require.Equal(t, MVReadResultDependency, res2.Status(),
 		"invalid TX flush should produce Estimate entries")
 	require.Equal(t, 7, res2.DepIdx())
+}
+
+func TestFlushEstimateRacingMarkWritesCompleteKeepsDone(t *testing.T) {
+	addr := getAddress(45)
+	vm := NewVersionMap(nil)
+	writes := newWriteSet(
+		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: Version{TxIndex: 5, Incarnation: 1}}, Val: *uint256.NewInt(100)},
+	)
+	rerun := newWriteSet(cloneVW(writes.balance[addr]))
+	vm.FlushVersionedWrites(writes, false)
+	vm.MarkWritesValidated(writes, nil)
+	cell := writes.balance[addr].cell
+	const iterations = 10000
+	downgraded := 0
+	for range iterations {
+		cell.setState(1, FlagValidated)
+		var ready atomic.Int32
+		var workers sync.WaitGroup
+		workers.Go(func() {
+			ready.Add(1)
+			for ready.Load() != 2 {
+				runtime.Gosched()
+			}
+			for range 16 {
+				vm.FlushVersionedWrites(rerun, false)
+			}
+		})
+		workers.Go(func() {
+			ready.Add(1)
+			for ready.Load() != 2 {
+				runtime.Gosched()
+			}
+			runtime.Gosched()
+			vm.MarkWritesComplete(writes)
+		})
+		workers.Wait()
+		if cell.loadFlag() != FlagDone {
+			downgraded++
+		}
+	}
+	require.Zerof(t, downgraded, "%d of %d iterations downgraded Done", downgraded, iterations)
 }
 
 func TestMarkWritesCompleteRunsUnderReadersOfTheEntry(t *testing.T) {

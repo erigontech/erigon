@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
-	"slices"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -1334,9 +1333,7 @@ func (vm *VersionMap) netAbsentDestruct(addr accounts.Address, txIndex int) bool
 func flushCell[T any](vm *VersionMap, cells *btree.Map[int, *WriteCell[T]], addr accounts.Address, path AccountPath, version Version, flag statusFlag, value T, valStatus valueStatus, eq func(a, b T) bool, destructed bool) (*btree.Map[int, *WriteCell[T]], *WriteCell[T]) {
 	if !destructed && cells != nil {
 		if ci, ok := cells.Get(version.TxIndex); ok && eq(ci.Value, value) {
-			if !(ci.loadFlag() == FlagDone && flag == FlagEstimate) { // never downgrade Done->Estimate
-				ci.setFlag(flag)
-			}
+			ci.setFlagUnlessDone(flag)
 			ci.valStatus = valStatus
 			ci.accSource = AccountFromBase
 			return cells, ci
@@ -1474,43 +1471,52 @@ func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool) {
 			}
 		}
 		if vw, ok := writes.address[addr]; ok {
-			e.Address, vw.cell = flushCell(vm, e.Address, addr, AddressPath, vw.Version, flag, vw.Val, vw.valStatus, eqAccount, destructed)
-			vw.entry = e
+			cells, cell := flushCell(vm, e.Address, addr, AddressPath, vw.Version, flag, vw.Val, vw.valStatus, eqAccount, destructed)
+			e.Address = cells
+			vw.bind(e, cell)
 		}
 		if vw, ok := writes.selfDestruct[addr]; ok {
-			e.SelfDestruct, vw.cell = putCell(vm, e.SelfDestruct, addr, SelfDestructPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, vw.valStatus)
-			vw.entry = e
+			cells, cell := putCell(vm, e.SelfDestruct, addr, SelfDestructPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, vw.valStatus)
+			e.SelfDestruct = cells
+			vw.bind(e, cell)
 			if vw.Val {
 				e.destructed.Store(true)
 			}
 		}
 		if vw, ok := writes.balance[addr]; ok {
-			e.Balance, vw.cell = flushCell(vm, e.Balance, addr, BalancePath, vw.Version, flag, vw.Val, vw.valStatus, eqUint256, destructed)
-			vw.entry = e
+			cells, cell := flushCell(vm, e.Balance, addr, BalancePath, vw.Version, flag, vw.Val, vw.valStatus, eqUint256, destructed)
+			e.Balance = cells
+			vw.bind(e, cell)
 		}
 		if vw, ok := writes.nonce[addr]; ok {
-			e.Nonce, vw.cell = flushCell(vm, e.Nonce, addr, NoncePath, vw.Version, flag, vw.Val, vw.valStatus, eqUint64, destructed)
-			vw.entry = e
+			cells, cell := flushCell(vm, e.Nonce, addr, NoncePath, vw.Version, flag, vw.Val, vw.valStatus, eqUint64, destructed)
+			e.Nonce = cells
+			vw.bind(e, cell)
 		}
 		if vw, ok := writes.incarnation[addr]; ok {
-			e.Incarnation, vw.cell = putCell(vm, e.Incarnation, addr, IncarnationPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, vw.valStatus)
-			vw.entry = e
+			cells, cell := putCell(vm, e.Incarnation, addr, IncarnationPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, vw.valStatus)
+			e.Incarnation = cells
+			vw.bind(e, cell)
 		}
 		if vw, ok := writes.code[addr]; ok {
-			e.Code, vw.cell = flushCell(vm, e.Code, addr, CodePath, vw.Version, flag, vw.Val, vw.valStatus, eqCode, destructed)
-			vw.entry = e
+			cells, cell := flushCell(vm, e.Code, addr, CodePath, vw.Version, flag, vw.Val, vw.valStatus, eqCode, destructed)
+			e.Code = cells
+			vw.bind(e, cell)
 		}
 		if vw, ok := writes.codeHash[addr]; ok {
-			e.CodeHash, vw.cell = flushCell(vm, e.CodeHash, addr, CodeHashPath, vw.Version, flag, vw.Val, vw.valStatus, eqCodeHash, destructed)
-			vw.entry = e
+			cells, cell := flushCell(vm, e.CodeHash, addr, CodeHashPath, vw.Version, flag, vw.Val, vw.valStatus, eqCodeHash, destructed)
+			e.CodeHash = cells
+			vw.bind(e, cell)
 		}
 		if vw, ok := writes.codeSize[addr]; ok {
-			e.CodeSize, vw.cell = flushCell(vm, e.CodeSize, addr, CodeSizePath, vw.Version, flag, vw.Val, vw.valStatus, eqInt, destructed)
-			vw.entry = e
+			cells, cell := flushCell(vm, e.CodeSize, addr, CodeSizePath, vw.Version, flag, vw.Val, vw.valStatus, eqInt, destructed)
+			e.CodeSize = cells
+			vw.bind(e, cell)
 		}
 		if vw, ok := writes.createContract[addr]; ok {
-			e.CreateContract, vw.cell = putCell(vm, e.CreateContract, addr, CreateContractPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, vw.valStatus)
-			vw.entry = e
+			cells, cell := putCell(vm, e.CreateContract, addr, CreateContractPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, vw.valStatus)
+			e.CreateContract = cells
+			vw.bind(e, cell)
 		}
 		if inner, ok := writes.storage[addr]; ok {
 			if e.Storage == nil {
@@ -1533,16 +1539,16 @@ func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool) {
 								}
 								c.Value, c.valStatus = seed, ValueChanged
 								c.setState(inc, FlagDone)
-							} else {
+							} else if c.setFlagUnlessDone(flagDeleted) {
 								cells.Delete(vw.Version.TxIndex)
-								c.setFlag(flagDeleted)
 							}
 						}
 					}
 					continue
 				}
-				e.Storage[key], vw.cell = flushCell(vm, e.Storage[key], addr, StoragePath, vw.Version, flag, vw.Val, vw.valStatus, eqUint256, destructed)
-				vw.entry = e
+				cells, cell := flushCell(vm, e.Storage[key], addr, StoragePath, vw.Version, flag, vw.Val, vw.valStatus, eqUint256, destructed)
+				e.Storage[key] = cells
+				vw.bind(e, cell)
 			}
 		}
 	})
@@ -1576,6 +1582,7 @@ type cellMarks struct {
 	flag   statusFlag
 	fee    func(accounts.Address) bool
 	locked []accounts.Address
+	seen   map[accounts.Address]struct{}
 }
 
 func (vm *VersionMap) markWrites(writes *WriteSet, flag statusFlag, isFeeRecipient func(accounts.Address) bool) {
@@ -1651,9 +1658,14 @@ func markCell[T any](m *cellMarks, addr accounts.Address, vw *VersionedWrite[T],
 }
 
 func (m *cellMarks) lock(addr accounts.Address) {
-	if !slices.Contains(m.locked, addr) {
-		m.locked = append(m.locked, addr)
+	if _, ok := m.seen[addr]; ok {
+		return
 	}
+	if m.seen == nil {
+		m.seen = make(map[accounts.Address]struct{})
+	}
+	m.seen[addr] = struct{}{}
+	m.locked = append(m.locked, addr)
 }
 
 func (vm *VersionMap) markAccountLocked(addr accounts.Address, writes *WriteSet, flag statusFlag, isFeeRecipient func(accounts.Address) bool) {
@@ -1661,8 +1673,14 @@ func (vm *VersionMap) markAccountLocked(addr accounts.Address, writes *WriteSet,
 	if e == nil {
 		panic(fmt.Sprintf("mark: no entry addr=%x", addr.Value()))
 	}
-	e.mu.Lock()
-	defer e.mu.Unlock()
+	e.mu.RLock()
+	if e.destructed.Load() || vm.stamps != nil {
+		e.mu.RUnlock()
+		e.mu.Lock()
+		defer e.mu.Unlock()
+	} else {
+		defer e.mu.RUnlock()
+	}
 	if vm.stamps != nil && hasLifecycleCells(e) {
 		wtx := writes.txIndex()
 		vm.mutBegin(wtx)
@@ -2226,6 +2244,19 @@ func (c *WriteCell[T]) setFlag(flag statusFlag) {
 		inc, _ := unpackCellState(old)
 		if c.state.CompareAndSwap(old, packCellState(inc, flag)) {
 			return
+		}
+	}
+}
+
+func (c *WriteCell[T]) setFlagUnlessDone(flag statusFlag) bool {
+	for {
+		old := c.state.Load()
+		inc, have := unpackCellState(old)
+		if have == FlagDone && flag != FlagDone {
+			return false
+		}
+		if c.state.CompareAndSwap(old, packCellState(inc, flag)) {
+			return true
 		}
 	}
 }
