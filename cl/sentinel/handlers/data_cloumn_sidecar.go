@@ -1,8 +1,8 @@
 package handlers
 
 import (
+	"context"
 	"errors"
-	"time"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -77,14 +77,12 @@ func (c *ConsensusHandlers) dataColumnSidecarsByRangeHandler(s network.Stream) e
 
 // writeColumnsByRange counts every existence check, not only hits: a miss answers nothing and costs the peer no response budget.
 func (c *ConsensusHandlers) writeColumnsByRange(s network.Stream, tx kv.Tx, req *cltypes.ColumnSidecarsByRangeRequest, startSlot, endSlot, curSlot uint64) error {
-	deadline := time.Now().Add(StreamDeadline)
+	requestCtx, cancel := context.WithTimeout(c.ctx, StreamDeadline)
+	defer cancel()
 	count, checked := 0, uint64(0)
 	var responseErr error
 	for slot := startSlot; slot < endSlot; slot++ {
-		if err := c.ctx.Err(); err != nil {
-			return err
-		}
-		if checked >= c.beaconConfig.MaxRequestDataColumnSidecars || time.Now().After(deadline) {
+		if requestCtx.Err() != nil || checked >= c.beaconConfig.MaxRequestDataColumnSidecars {
 			break
 		}
 		if slot > curSlot {
