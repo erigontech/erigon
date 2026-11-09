@@ -89,6 +89,29 @@ func TestFinalizeMinedBlobsAfterDeletion(t *testing.T) {
 	require.Same(t, pool.minedBlobTxnsByBlock[4][0], pool.minedBlobTxnsByHash[string(txns[3].IDHash[:])])
 }
 
+func TestMinedBlobBatchReplayKeepsOneCacheEntry(t *testing.T) {
+	pool := &TxPool{
+		minedBlobTxnsByBlock: make(map[uint64][]*metaTxn),
+		minedBlobTxnsByHash:  make(map[string]*metaTxn),
+	}
+	txn := newTestBlobTxnSlot(0, 1, 1, 1, 21_000)
+	txn.IDHash[0] = 1
+	for _, head := range []uint64{1, 2, 2} {
+		pool.lastSeenBlock.Store(head)
+		require.NoError(t, pool.processMinedFinalizedBlobs([]*TxnSlot{txn}, 0))
+	}
+	entries := 0
+	for _, items := range pool.minedBlobTxnsByBlock {
+		entries += len(items)
+	}
+	require.Equal(t, 1, entries, "retrying an applied batch must not duplicate its mined blobs")
+	pool.deleteMinedBlobTxn(string(txn.IDHash[:]))
+	require.Empty(t, pool.minedBlobTxnsByHash)
+	for _, items := range pool.minedBlobTxnsByBlock {
+		require.Empty(t, items)
+	}
+}
+
 func TestUnwoundBlobTxnWithoutSidecarIsNotAdded(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)

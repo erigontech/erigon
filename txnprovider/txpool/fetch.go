@@ -792,7 +792,6 @@ func (f *Fetch) handleStateChanges(ctx context.Context, client StateChangesClien
 	if err != nil {
 		return err
 	}
-	var needsRefresh bool
 	for req, err := stream.Recv(); ; req, err = stream.Recv() {
 		if err != nil {
 			return err
@@ -800,16 +799,28 @@ func (f *Fetch) handleStateChanges(ctx context.Context, client StateChangesClien
 		if req == nil {
 			return nil
 		}
-		// Delivery can succeed even when applying the changes fails. Preserve the
-		// gap until an update succeeds, without changing other subscribers' batches.
-		if needsRefresh && !req.StateChangesIncomplete {
-			req = proto.Clone(req).(*remoteproto.StateChangeBatch)
-			req.StateChangesIncomplete = true
-		}
-		applyErr := f.handleStateChangesRequest(ctx, req)
-		needsRefresh = applyErr != nil
-		if applyErr != nil && !errors.Is(applyErr, context.Canceled) {
-			f.logger.Warn("[fetch] onNewBlock", "err", applyErr)
+		for {
+			applyErr := f.handleStateChangesRequest(ctx, req)
+			if applyErr == nil {
+				break
+			}
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if !errors.Is(applyErr, context.Canceled) {
+				f.logger.Warn("[fetch] onNewBlock", "err", applyErr)
+			}
+			// Retain the failed batch, including its transaction changes. Recovery
+			// must not depend on another block arriving, and a partial apply needs a full refresh.
+			if !req.StateChangesIncomplete {
+				req = proto.Clone(req).(*remoteproto.StateChangeBatch)
+				req.StateChangesIncomplete = true
+			}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(time.Second):
+			}
 		}
 
 		if f.wg != nil { // to help tests

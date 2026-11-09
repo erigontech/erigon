@@ -341,30 +341,29 @@ func TestFetchRevalidatesFramesAfterFailedStateChange(t *testing.T) {
 		Address: gointerfaces.ConvertAddressToH160(types.FrameRecentRootVerifier), Action: remoteproto.Action_STORAGE,
 		StorageChanges: []*remoteproto.StorageChange{{Location: gointerfaces.ConvertHashToH256(frame.frameValidation.RecentRoots[0].StorageKey)}},
 	}}
-	replacement := newBlockChangeForAccounts(common.Hash{3}, 0)
-	replacement.ChangeBatch[0].BlockHeight = 12
-	replacement.ChangeBatch[0].SlotNumber = common.NewUint64(12)
+	reads := 0
+	pool._chainDB = stateReadHookDB{pool._chainDB, func() error {
+		reads++
+		if reads == 1 {
+			return errors.New("state read failed")
+		}
+		return nil
+	}}
 
 	ctrl := gomock.NewController(t)
 	stream := remoteproto.NewMockKV_StateChangesClient[*remoteproto.StateChangeBatch](ctrl)
 	gomock.InOrder(
 		stream.EXPECT().Recv().Return(unwind, nil),
-		stream.EXPECT().Recv().Return(replacement, nil),
 		stream.EXPECT().Recv().Return(nil, io.EOF),
 	)
 	client := remoteproto.NewMockKVClient(ctrl)
 	client.EXPECT().StateChanges(gomock.Any(), gomock.Any(), gomock.Any()).Return(stream, nil)
-	wrapped := NewMockPool(ctrl)
-	gomock.InOrder(
-		wrapped.EXPECT().OnNewBlock(gomock.Any(), unwind, gomock.Any(), gomock.Any(), gomock.Any()).Return(errors.New("state read failed")),
-		wrapped.EXPECT().OnNewBlock(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(pool.OnNewBlock),
-	)
-	fetch := NewFetch(ctx, nil, wrapped, client, pool.poolDB, pool.chainID, log.New())
+	fetch := NewFetch(ctx, nil, pool, client, pool.poolDB, pool.chainID, log.New())
 	require.ErrorIs(t, fetch.handleStateChanges(ctx, client), io.EOF)
-	require.Equal(t, []common.Hash{frame.IDHash}, backend.calls, "the next batch must recover the missed root change")
+	require.Equal(t, []common.Hash{frame.IDHash}, backend.calls, "recovery must retry the missed root change")
 	require.NotContains(t, pool.byHash, string(frame.IDHash[:]))
 	require.Empty(t, pool.frameReservations)
-	require.False(t, replacement.StateChangesIncomplete, "a shared batch must not be modified")
+	require.False(t, unwind.StateChangesIncomplete, "a shared batch must not be modified")
 }
 
 func TestFetchStateChangeRecoveryUntilSuccess(t *testing.T) {
@@ -378,7 +377,7 @@ func TestFetchStateChangeRecoveryUntilSuccess(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			stream := remoteproto.NewMockKV_StateChangesClient[*remoteproto.StateChangeBatch](ctrl)
-			batches := make([]*remoteproto.StateChangeBatch, 4)
+			batches := make([]*remoteproto.StateChangeBatch, 2)
 			for i := range batches {
 				batches[i] = newBlockChangeForAccounts(common.Hash{byte(i + 1)}, 0)
 				batches[i].ChangeBatch[0].BlockHeight = uint64(i + 1)
@@ -389,23 +388,44 @@ func TestFetchStateChangeRecoveryUntilSuccess(t *testing.T) {
 			client.EXPECT().StateChanges(gomock.Any(), gomock.Any(), gomock.Any()).Return(stream, nil)
 			pool := NewMockPool(ctrl)
 			var incomplete []bool
+			var heights []uint64
 			pool.EXPECT().OnNewBlock(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
 				func(_ context.Context, batch *remoteproto.StateChangeBatch, _, _, _ TxnSlots) error {
 					incomplete = append(incomplete, batch.StateChangesIncomplete)
+					heights = append(heights, batch.ChangeBatch[0].BlockHeight)
 					if len(incomplete) <= 2 {
 						return tc.err
 					}
 					return nil
-				}).Times(len(batches))
+				}).Times(4)
 			fetch := NewFetch(t.Context(), nil, pool, client, nil, u256.N1, log.New())
 			require.ErrorIs(t, fetch.handleStateChanges(t.Context(), client), io.EOF)
 			require.Equal(t, []bool{false, true, true, false}, incomplete)
+			require.Equal(t, []uint64{1, 1, 1, 2}, heights, "retry the failed update before reading another batch")
 			require.Equal(t, uint64(2), fetch.newBlocks.Load(), "only successful updates advance the gossip epoch")
 			for _, batch := range batches {
 				require.False(t, batch.StateChangesIncomplete, "a shared batch must not be modified")
 			}
 		})
 	}
+}
+
+func TestFetchStateChangeRecoveryStopsOnCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	ctrl := gomock.NewController(t)
+	stream := remoteproto.NewMockKV_StateChangesClient[*remoteproto.StateChangeBatch](ctrl)
+	stream.EXPECT().Recv().Return(newBlockChangeForAccounts(common.Hash{1}, 0), nil)
+	client := remoteproto.NewMockKVClient(ctrl)
+	client.EXPECT().StateChanges(gomock.Any(), gomock.Any(), gomock.Any()).Return(stream, nil)
+	pool := NewMockPool(ctrl)
+	pool.EXPECT().OnNewBlock(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+		func(context.Context, *remoteproto.StateChangeBatch, TxnSlots, TxnSlots, TxnSlots) error {
+			cancel()
+			return errors.New("state read failed")
+		})
+	fetch := NewFetch(ctx, nil, pool, client, nil, u256.N1, log.New())
+	require.ErrorIs(t, fetch.handleStateChanges(ctx, client), context.Canceled)
 }
 
 func TestFetchRetainedForwardThenUnwindKeepsReplacement(t *testing.T) {

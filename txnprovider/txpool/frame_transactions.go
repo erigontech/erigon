@@ -169,7 +169,7 @@ func (p *TxPool) prepareFrames(ctx context.Context, txns TxnSlots, waitForHead b
 		if result, ok := batch.results[txn]; ok && result.reason == txpoolcfg.Success {
 			result = p.simulateFrameResult(ctx, txn, batch.generation, stateBlockHash)
 			batch.results[txn] = result
-			if waitForHead && result.headChanged && p.waitForFrameStateChange(ctx, batch.generation) {
+			if waitForHead && result.headChanged && p.waitForStateChange(ctx, batch.generation) {
 				break
 			}
 		}
@@ -194,9 +194,9 @@ func (p *TxPool) precheckFrames(txns TxnSlots) (frameValidationBatch, common.Has
 	return batch, p.stateBlockHash
 }
 
-// Execution can publish a head before the pool receives its notification. Wait
-// for a new generation, including same-height reorgs, without polling the backend.
-func (p *TxPool) waitForFrameStateChange(ctx context.Context, generation uint64) bool {
+// Head publication can precede pool updates. Waiting on the generation also
+// covers recovery and same-height reorgs without polling the backend.
+func (p *TxPool) waitForStateChange(ctx context.Context, generation uint64) bool {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	// Serialize cancellation with Wait so its wakeup cannot be lost.
@@ -285,6 +285,10 @@ func (p *TxPool) simulateFrame(ctx context.Context, txn *TxnSlot, generation uin
 	// Publish rejections before releasing the gate so its waiters can reuse them.
 	hash := string(txn.IDHash[:])
 	p.lock.Lock()
+	if p.stateViewStale {
+		p.lock.Unlock()
+		return nil, errFrameStateChanged
+	}
 	rejectedAt, rejected := p.frameRejections.Get(hash)
 	p.lock.Unlock()
 	if rejected && rejectedAt == generation {

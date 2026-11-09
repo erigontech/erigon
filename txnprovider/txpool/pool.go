@@ -146,6 +146,7 @@ type TxPool struct {
 	chainID                 uint256.Int
 	chainConfig             *chain.Config
 	stateGeneration         uint64
+	stateViewStale          bool
 	stateBlockHash          common.Hash // Head of the pool's state view; pins frame validation to the same block
 	headIsBogota            bool        // Canonical activation, independent of pending-block time
 	lastSeenBlock           atomic.Uint64
@@ -317,6 +318,27 @@ func (p *TxPool) start(ctx context.Context) error {
 	})
 }
 
+// markStateStale invalidates simulations before any wait for state. Parked
+// frames keep their reservations and nonce indexes until recovery can validate them.
+func (p *TxPool) markStateStale() {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+	if p.stateViewStale {
+		return
+	}
+	p.stateViewStale = true
+	p.stateGeneration++
+	for _, mt := range p.all.senderIDFrameTxn {
+		p.removeFromSubPool(mt, "state recovery pending")
+		frame := mt.TxnSlot.Txn.(*types.FrameTransaction)
+		if frame.UsesLegacyNonce() {
+			p.frameAccountsToRefresh[frame.SenderAddress] = struct{}{}
+		}
+	}
+	p.lastSeenCond.Broadcast()
+	p.publishDepthMetrics()
+}
+
 // Incomplete notifications cannot supply every changed account before commit.
 // Wait for their state version without holding the pool lock or a database snapshot.
 func beginBlockState(ctx context.Context, db kv.TemporalRoDB, changes *remoteproto.StateChangeBatch) (kv.TemporalTx, error) {
@@ -346,8 +368,16 @@ func beginBlockState(ctx context.Context, db kv.TemporalRoDB, changes *remotepro
 	}
 }
 
-func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.StateChangeBatch, unwindTxns, unwindBlobTxns, minedTxns TxnSlots) error {
+func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.StateChangeBatch, unwindTxns, unwindBlobTxns, minedTxns TxnSlots) (err error) {
 	defer newBlockTimer.ObserveDuration(time.Now())
+	defer func() {
+		if err != nil {
+			p.markStateStale()
+		}
+	}()
+	if stateChanges.StateChangesIncomplete {
+		p.markStateStale()
+	}
 	for _, txn := range unwindTxns.Txns {
 		p.recoverAuthorizations(txn)
 	}
@@ -419,6 +449,7 @@ func (p *TxPool) applyBlockUpdate(stateChanges *remoteproto.StateChangeBatch, un
 	frames.blockHash = p.stateBlockHash
 	defer func() {
 		if err == nil {
+			p.stateViewStale = false
 			p.lastSeenBlock.Store(block)
 			p.lastSeenCond.Broadcast()
 		}
@@ -832,6 +863,10 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 	defer tx.Rollback()
 	p.lock.Lock()
 	defer p.lock.Unlock()
+
+	if p.stateViewStale {
+		return false, 0, nil
+	}
 
 	best := p.pending.best
 
@@ -1521,7 +1556,14 @@ func (p *TxPool) withLockedState(ctx context.Context, txns *TxnSlots, f func(kv.
 	for {
 		p.lock.Lock()
 		coreDB, cache, generation := p._chainDB, p._stateCache, p.stateGeneration
+		stale := p.stateViewStale
 		p.lock.Unlock()
+		if stale {
+			if !p.waitForStateChange(ctx, generation) {
+				return ctx.Err()
+			}
+			continue
+		}
 
 		var retry bool
 		// The cache may wait for a block update, so open the view outside the pool lock.
@@ -1532,7 +1574,7 @@ func (p *TxPool) withLockedState(ctx context.Context, txns *TxnSlots, f func(kv.
 			}
 			p.lock.Lock()
 			defer p.lock.Unlock()
-			if generation != p.stateGeneration {
+			if generation != p.stateGeneration || p.stateViewStale {
 				retry = true
 				return nil
 			}
@@ -2285,11 +2327,17 @@ func (p *TxPool) processMinedFinalizedBlobs(minedTxns []*TxnSlot, finalizedBlock
 		finalizedBlock--
 	}
 
-	// Add mined blobs
+	// A retry may repeat already-applied transaction changes. Keep each cached
+	// blob transaction in only one block bucket.
 	minedBlock := p.lastSeenBlock.Load()
-	p.minedBlobTxnsByBlock[minedBlock] = make([]*metaTxn, 0)
+	if _, ok := p.minedBlobTxnsByBlock[minedBlock]; !ok {
+		p.minedBlobTxnsByBlock[minedBlock] = make([]*metaTxn, 0)
+	}
 	for _, txn := range minedTxns {
 		if txn.HasBlobs() {
+			if p.minedBlobTxnsByHash[string(txn.IDHash[:])] != nil {
+				continue
+			}
 			mt := &metaTxn{TxnSlot: txn, minedBlockNum: minedBlock}
 			p.minedBlobTxnsByBlock[minedBlock] = append(p.minedBlobTxnsByBlock[minedBlock], mt)
 			mt.bestIndex = len(p.minedBlobTxnsByBlock[minedBlock]) - 1
