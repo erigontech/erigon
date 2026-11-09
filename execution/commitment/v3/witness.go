@@ -52,7 +52,6 @@ type witnessWalk struct {
 	byHash    map[string][]byte
 	nodes     map[string]*witnessNode
 	roots     map[string]*witnessRoot
-	exts      map[string]struct{}
 	kbuf      []byte
 }
 
@@ -70,7 +69,7 @@ func (t *Trie) WitnessesByHash(ctx context.Context, updates *commitment.Updates,
 		reads = &recordCache{PatriciaContext: t.ctx, recs: t.preRecs}
 	}
 	t.preRecs, t.preRoot = nil, nil
-	w := &witnessWalk{ctx: reads, exclusion: produceExclusionProofs, byHash: make(map[string][]byte), nodes: make(map[string]*witnessNode), roots: make(map[string]*witnessRoot), exts: make(map[string]struct{})}
+	w := &witnessWalk{ctx: reads, exclusion: produceExclusionProofs, byHash: make(map[string][]byte), nodes: make(map[string]*witnessNode), roots: make(map[string]*witnessRoot)}
 	for _, key := range keys {
 		if err := ctx.Err(); err != nil {
 			return nil, nil, nil, err
@@ -86,14 +85,6 @@ func (w *witnessWalk) emit(rlp []byte, hash [32]byte) {
 	if _, ok := w.byHash[string(hash[:])]; !ok {
 		w.byHash[string(hash[:])] = rlp
 	}
-}
-
-func (w *witnessWalk) seen(key string) bool {
-	if _, ok := w.exts[key]; ok {
-		return true
-	}
-	w.exts[key] = struct{}{}
-	return false
 }
 
 func (w *witnessWalk) load(plane byte, addrHash, path []byte) (*witnessNode, error) {
@@ -218,10 +209,8 @@ func (w *witnessWalk) descend(plane byte, addrHash, fullKey []byte, b *node, pat
 		ext := b.childExtAt(nib)
 		childPath := append(append(append(make([]byte, 0, len(path)+1+len(ext)), path...), byte(nib)), ext...)
 		if len(ext) != 0 {
-			if extKey := string(nodeKey(plane, addrHash, childPath, nil)); !w.seen(extKey) {
-				rlp := appendExtensionRLP(nil, ext, b.childHashAt(nib))
-				w.emit(rlp, keccak.Sum256(rlp))
-			}
+			rlp := appendExtensionRLP(nil, ext, b.childHashAt(nib))
+			w.emit(rlp, keccak.Sum256(rlp))
 			if !bytes.HasPrefix(k, ext) {
 				if !w.exclusion || len(k) == 0 {
 					return nil
