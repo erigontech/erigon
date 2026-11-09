@@ -239,8 +239,8 @@ github.com/erigontech/evmone_precompiles v0.0.0-20261020072006-fc5972e25a08 h1:w
 github.com/erigontech/evmone_precompiles v0.0.0-20261020072006-fc5972e25a08/go.mod h1:WQvAqmoairhdM5RFNFDKK9oT6dzuZEbWMJH+ZdRTjP0=
 github.com/erigontech/fastkeccak v0.1.1-0.20260408010752-08e7b6602268 h1:NHl4+DjblLuHBJradIg9KriKmtByjRvLqLhkVODibac=
 github.com/erigontech/fastkeccak v0.1.1-0.20260408010752-08e7b6602268/go.mod h1:CwJFJVKFVWpQyKSfRrQyY56IqV16sR5xnQoFThGHiZA=
-github.com/erigontech/mdbx-go v0.43.0 h1:km4NnoGZ3zieFGWE9K1btMhRMnduZNybW7oebFg0ZWQ=
-github.com/erigontech/mdbx-go v0.43.0/go.mod h1:Ps2n0MMTlU+BgecMWznc/Z7oGJWDJX/EQk+gUCTSaRo=
+github.com/erigontech/mdbx-go v0.43.1 h1:0wCMZVU2COvRPZ5sjEX4H/1zLHpXsqSzH2yj7G9haS0=
+github.com/erigontech/mdbx-go v0.43.1/go.mod h1:Ps2n0MMTlU+BgecMWznc/Z7oGJWDJX/EQk+gUCTSaRo=
 github.com/erigontech/secp256k1 v1.4.1 h1:LnD0xscr390TAiVzpiRGvibkLbqk5o6+sDNKxJjzOh0=
 github.com/erigontech/secp256k1 v1.4.1/go.mod h1:CnigLRUsfobnTYoUzwdT/De67fw9OhTA0KTkxa+svik=
 github.com/fatih/color v1.19.0 h1:Zp3PiM21/9Ld6FzSKyL5c/BULoe/ONr9KlbYVOfG8+w=
@@ -560,8 +560,6 @@ github.com/ncruces/go-strftime v0.1.9 h1:bY0MQC28UADQmHmaF5dgpLmImcShSi2kHU9XLdh
 github.com/ncruces/go-strftime v0.1.9/go.mod h1:Fwc5htZGVVkseilnfgOVb9mKy6w1naJmn9CehxcKcls=
 github.com/nxadm/tail v1.4.11 h1:8feyoE3OzPrcshW5/MJ4sGESc5cqmGkGCWlco4l0bqY=
 github.com/nxadm/tail v1.4.11/go.mod h1:OTaG3NK980DZzxbRq6lEuzgU+mug70nY11sMd4JXXHc=
-github.com/nyaosorg/go-windows-shortcut v0.0.0-20220529122037-8b0c89bca4c4 h1:+3bXHpIl3RiBuPKlqeCZZeShGHC9RFhR/P2OJfOLRyA=
-github.com/nyaosorg/go-windows-shortcut v0.0.0-20220529122037-8b0c89bca4c4/go.mod h1:9YR30vCq/4djj0WO7AvLm48YvNs7M094LWRieEFDE4A=
 github.com/onsi/ginkgo v1.6.0/go.mod h1:lLunBs/Ym6LB5Z9jYTR76FiuTmxDTDusOGeTQH+WWjE=
 github.com/onsi/ginkgo v1.7.0/go.mod h1:lLunBs/Ym6LB5Z9jYTR76FiuTmxDTDusOGeTQH+WWjE=
 github.com/onsi/ginkgo v1.16.5 h1:8xi0RTUf59SOSfEtZMvwTvXYMzG4gV23XVHOZiXNtnE=

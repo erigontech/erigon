@@ -19,6 +19,7 @@ package handler
 import (
 	"context"
 	"errors"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -463,4 +464,30 @@ func TestPayloadAttributesEventDropsHeadChangedBeforePublication(t *testing.T) {
 	require.NoError(t, handler.emitPayloadAttributes())
 
 	require.Empty(t, events)
+}
+
+// A missed head_v2 event must not stop the loop: it stays subscribed and keeps taking head changes.
+func TestPayloadAttributesLoopSurvivesAMissedHeadEvent(t *testing.T) {
+	headState, handler, _, parentRoot := setupEmptyGloasHead(t)
+	mockSlotClock(t, handler, headState.Slot()+1)
+	emitter := beaconevents.NewEventEmitter()
+	handler.emitters = emitter
+	defer emitter.TrackPayloadAttributesSubscriber()()
+	ctx, cancel := context.WithCancel(t.Context())
+	done := handler.StartPayloadAttributes(ctx)
+	defer func() {
+		cancel()
+		<-done
+	}()
+	head := &beaconevents.HeadV2Data{
+		Version: "gloas",
+		Data:    beaconevents.HeadV2Content{Slot: headState.Slot(), Block: parentRoot, PayloadStatus: "empty"},
+	}
+	// The loop is the only head_v2 subscriber. On one P the flooding goroutine runs until preempted, far longer than
+	// filling the loop's buffer takes, so the loop cannot keep up.
+	defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(1))
+	floodUntilLagged(t, func() int { return emitter.State().SendHeadV2(head) }, 1, 1<<16)
+
+	require.Eventually(t, func() bool { return emitter.State().SendHeadV2(head) == 1 }, 5*time.Second, time.Millisecond,
+		"the loop stopped taking head_v2 events after missing one")
 }

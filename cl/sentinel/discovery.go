@@ -103,6 +103,8 @@ func (s *Sentinel) findPeersForSubnets(subnets []subnetSearchState) {
 
 	ctx, cancel := context.WithTimeout(s.ctx, subnetSearchTimeout)
 	defer cancel()
+	// The filter skips non-matching nodes inside Next, so a walk would outlive the timeout unless it is closed.
+	defer context.AfterFunc(ctx, filteredIterator.Close)()
 
 	checked := 0
 	maxChecks := 2000 // Higher limit since we're searching for multiple subnets
@@ -117,18 +119,8 @@ func (s *Sentinel) findPeersForSubnets(subnets []subnetSearchState) {
 		return true
 	}
 
-	for !allSatisfied() && checked < maxChecks {
-		select {
-		case <-ctx.Done():
-			log.Debug("[Sentinel] Subnet peer search timeout", "checked", checked)
-			return
-		default:
-		}
-
-		if !filteredIterator.Next() {
-			// Iterator exhausted
-			break
-		}
+	// The walk ends when the iterator is exhausted or when the context ends, which closes the iterator.
+	for !allSatisfied() && checked < maxChecks && filteredIterator.Next() {
 		checked++
 		node := filteredIterator.Node()
 
@@ -196,7 +188,8 @@ func (s *Sentinel) findPeersForSubnets(subnets []subnetSearchState) {
 			satisfied++
 		}
 	}
-	log.Debug("[Sentinel] Subnet peer search completed", "nodesChecked", checked, "subnetsReachedMinPeers", satisfied, "subnetsSearched", len(subnets), "peersFound", totalFound)
+	// ctxErr tells a search that ran out of time or was cancelled from one whose walk ended on its own.
+	log.Debug("[Sentinel] Subnet peer search ended", "nodesChecked", checked, "subnetsReachedMinPeers", satisfied, "subnetsSearched", len(subnets), "peersFound", totalFound, "ctxErr", ctx.Err())
 }
 
 // proactiveSubnetPeerSearch is a goroutine that monitors subnet coverage

@@ -564,3 +564,27 @@ func (s *CaplinSnapshots) FrozenBlobs() uint64 {
 	}
 	return s.VisibleSegmentsMaxTo(snaptype.BlobSidecars.Enum())
 }
+
+// RetireBlobsBelow retires blob sidecar segments holding no slot at or above floor and hands
+// their files to onDelete so the seeder drops them. The newest segment always stays, so
+// FrozenBlobs and the backfill boundary it sets do not move. It waits while superseded segments
+// are still on disk: retiring the visible copy of a range would surface the hidden one and cut
+// visibility at the next gap.
+func (s *CaplinSnapshots) RetireBlobsBelow(floor uint64, onDelete func([]string) error) (bool, error) {
+	if floor == 0 {
+		return false, nil
+	}
+	var dirty int
+	s.WalkDirtySegments(snaptype.BlobSidecars.Enum(), func(*snapshotsync.DirtySegment) bool {
+		dirty++
+		return true
+	})
+	view := s.View()
+	visible := len(view.BlobSidecars())
+	view.Close()
+	if dirty != visible {
+		s.logger.Debug("Skipping blob retirement while dirty and visible segment counts differ", "dirty", dirty, "visible", visible)
+		return false, nil
+	}
+	return s.RetireFilesBelow(snaptype.BlobSidecars, min(floor+1, s.FrozenBlobs()), onDelete)
+}
