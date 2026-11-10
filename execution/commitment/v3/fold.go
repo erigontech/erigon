@@ -46,7 +46,7 @@ func fold(n *node, depth int) ([32]byte, error) {
 		return [32]byte{}, fmt.Errorf("%w: path %d", errFoldNode, len(n.path))
 	}
 
-	if depth == 0 && len(n.path) == 0 && bits.OnesCount16(n.childMask) == 1 && n.leafMask == n.childMask {
+	if depth == 0 && n.isLeafRoot() {
 		nib := bits.TrailingZeros16(n.childMask)
 		var rootRef [32]byte
 		ref, err := foldLeaf(n, nib, true, rootRef[:0])
@@ -55,7 +55,7 @@ func fold(n *node, depth int) ([32]byte, error) {
 		}
 		return [32]byte(ref), nil
 	}
-	if depth == 0 && len(n.path) != 0 && bits.OnesCount16(n.childMask) == 1 && n.leafMask == 0 {
+	if depth == 0 && n.isExtension() {
 		nib := bits.TrailingZeros16(n.childMask)
 		var childHash []byte
 		if child := n.child(nib); child != nil {

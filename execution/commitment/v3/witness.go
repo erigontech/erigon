@@ -129,12 +129,12 @@ func (w *witnessWalk) root(plane byte, addrHash []byte) (*witnessRoot, error) {
 	var r *witnessRoot
 	switch {
 	case n == nil || n.childMask == 0:
-	case len(n.path) == 0 && bits.OnesCount16(n.childMask) == 1 && n.leafMask == n.childMask:
+	case n.isLeafRoot():
 		r = &witnessRoot{n: n}
 		if r.rlp, r.leafKey, r.payload, err = leafRLP(n, bits.TrailingZeros16(n.childMask), true); err != nil {
 			return nil, err
 		}
-	case len(n.path) != 0 && n.leafMask == 0 && bits.OnesCount16(n.childMask) == 1:
+	case n.isExtension():
 		r = &witnessRoot{n: n}
 		if r.branch, err = w.child(plane, addrHash, n, bits.TrailingZeros16(n.childMask), n.path); err != nil {
 			return nil, err

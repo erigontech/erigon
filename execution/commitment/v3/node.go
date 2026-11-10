@@ -50,6 +50,14 @@ type node struct {
 	slotMask  uint16
 }
 
+func (n *node) isLeafRoot() bool {
+	return len(n.path) == 0 && bits.OnesCount16(n.childMask) == 1 && n.leafMask == n.childMask
+}
+
+func (n *node) isExtension() bool {
+	return len(n.path) != 0 && bits.OnesCount16(n.childMask) == 1 && n.leafMask == 0
+}
+
 func fork(prefix []byte) *node {
 	return &node{path: append([]byte(nil), prefix...)}
 }

@@ -158,7 +158,7 @@ func (s *collapseSim) loadRoot() error {
 		return err
 	}
 	switch {
-	case len(root.path) == 0 && bits.OnesCount16(root.childMask) == 1 && root.leafMask == root.childMask:
+	case root.isLeafRoot():
 		nib := bits.TrailingZeros16(root.childMask)
 		s.root = recordCell(root, nib, nil)
 		s.root.hext = append([]byte{byte(nib)}, s.root.hext...)
@@ -199,7 +199,7 @@ func (s *collapseSim) resolve(c *collapseCell) error {
 		return err
 	}
 	switch {
-	case len(root.path) == 0 && bits.OnesCount16(root.childMask) == 1 && root.leafMask == root.childMask:
+	case root.isLeafRoot():
 		nib := bits.TrailingZeros16(root.childMask)
 		suffix, _ := root.leafAt(nib)
 		c.stor = true

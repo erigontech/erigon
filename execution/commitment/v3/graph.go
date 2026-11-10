@@ -97,7 +97,7 @@ func (g graph) ensurePath(ctx commitment.PatriciaContext, n *node, path []byte) 
 	}
 	nib := int(path[len(n.path)])
 	bit := uint16(1) << nib
-	if len(n.path) != 0 && bits.OnesCount16(n.childMask) == 1 && n.leafMask == 0 {
+	if n.isExtension() {
 		nib = bits.TrailingZeros16(n.childMask)
 		if child := n.child(nib); child != nil && bytes.Equal(child.path, n.path) {
 			return g.ensurePath(ctx, child, path)
