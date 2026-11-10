@@ -218,9 +218,7 @@ func (f *Fetch) skipRecentlyRequested(hashes Hashes, sentryClient sentryproto.Se
 		h := hashes[i : i+32]
 		r, ok := f.requested.Get(h)
 		if ok && (now.Sub(r.at) < txFetchTimeout || len(r.alternates) > 0 || r.unsent) {
-			if peer != r.peer {
-				f.addAlternate(r, peer) // a timed-out request asks its waiting alternates first
-			}
+			f.addAlternate(r, peer) // a timed-out request asks its waiting alternates first
 			continue
 		}
 		// An announcement flood: forget the oldest requests before the insert, so a full LRU evicts no other
@@ -332,7 +330,6 @@ func (f *Fetch) requestFromAlternates(ctx context.Context, tx kv.Tx) {
 				expired = append(expired, p.hash[:]...)
 			}
 		}
-		clear(f.waiting[len(kept):])
 		f.waiting = kept
 	}
 	for _, p := range f.pending {
@@ -365,13 +362,9 @@ func (f *Fetch) requestFromAlternates(ctx context.Context, tx kv.Tx) {
 	sent := f.now() // the lookup may have been slow; retries time out from when they are sent
 	plans := map[fetchPeer]*retryPlan{}
 	var deferred []pendingFetch
-	waiting := f.waiting
+	waiting, timedOut := f.waiting, []pendingFetch(nil)
 	if scanWaiting {
-		waiting = nil
-	}
-	timedOut := slices.Clip(f.waiting)
-	if !scanWaiting {
-		timedOut = nil
+		waiting, timedOut = nil, f.waiting
 	}
 	for len(timedOut) > 0 || len(f.pending) > 0 && now.Sub(f.pending[0].at) >= txFetchTimeout {
 		var p pendingFetch
@@ -412,7 +405,7 @@ func (f *Fetch) requestFromAlternates(ctx context.Context, tx kv.Tx) {
 				plan = &retryPlan{limit: maxRetryRequestsPerPeer - len(f.retriesOutstanding[alt])}
 				plans[alt] = plan
 			}
-			return plan.limit > 0 && plan.add(p.hash[:], f.announcedSize(p.hash[:], alt))
+			return plan.add(p.hash[:], f.announcedSize(p.hash[:], alt))
 		})
 		if picked < 0 { // no alternate has retry room: wait until one answers
 			waiting = append(waiting, p)
@@ -544,13 +537,7 @@ func (f *Fetch) keepAnnouncersOfTracked(hashes, unknown Hashes, sentryClient sen
 
 // addAlternate keeps an announcer to ask after the requested peer.
 func (f *Fetch) addAlternate(r *fetchRequest, peer fetchPeer) {
-	if peer != r.peer {
-		f.appendAlternate(r, peer)
-	}
-}
-
-func (f *Fetch) appendAlternate(r *fetchRequest, peer fetchPeer) {
-	if _, gone := f.disconnected[peer]; gone || slices.Contains(r.alternates, peer) || f.alternatesOf[peer] >= maxAlternatesPerPeer {
+	if _, gone := f.disconnected[peer]; peer == r.peer || gone || slices.Contains(r.alternates, peer) || f.alternatesOf[peer] >= maxAlternatesPerPeer {
 		return
 	}
 	r.alternates = append(r.alternates, peer)
@@ -580,6 +567,19 @@ func (f *Fetch) forget(hash []byte, r *fetchRequest) {
 // requestPooledTxns sends the hashes reserved for peer at reservedAt in requests of 256, because a responder
 // answers only the first 256. Each request claims its hashes when it is sent, so an earlier stalled send cannot
 // make a later one stale. On a failed send it returns the hashes not sent and when they were claimed.
+func (f *Fetch) requestUnknown(hashes Hashes, reservedAt time.Time, peer fetchPeer) error {
+	if len(hashes) == 0 {
+		return nil
+	}
+	sendCtx, cancel := context.WithTimeout(f.ctx, txFetchTimeout) // a blocked send must not strand later chunks as unsent
+	defer cancel()
+	unsent, _, _, err := f.requestPooledTxns(sendCtx, peer, initialRequestID, hashes, reservedAt)
+	if err != nil {
+		f.releaseRequested(peer, unsent)
+	}
+	return err
+}
+
 func (f *Fetch) requestPooledTxns(ctx context.Context, peer fetchPeer, requestID uint64, hashes Hashes, reservedAt time.Time) (unsent Hashes, at time.Time, sent int, err error) {
 	for start := 0; start < len(hashes); start += 256 * 32 {
 		end := min(start+256*32, len(hashes))
@@ -953,14 +953,14 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentryproto.Sen
 			return nil
 		}
 
-		// Deduplicate transaction bodies to avoid repeated blob verification.
-		// Keep announcements for peer fallback. A new block can make a rejected
-		// transaction valid, so it starts a new deduplication scope.
 		if req.Id == sentryproto.MessageId_POOLED_TRANSACTIONS_66 {
 			if id, err := pooledTransactions66RequestID(req.Data); err == nil {
 				f.releaseRetry(fetchPeer{sentryClient, gointerfaces.ConvertH512ToHash(req.PeerId)}, id)
 			}
 		}
+		// Deduplicate transaction bodies to avoid repeated blob verification.
+		// Keep announcements for peer fallback. A new block can make a rejected
+		// transaction valid, so it starts a new deduplication scope.
 		switch req.Id {
 		case sentryproto.MessageId_TRANSACTIONS_66, sentryproto.MessageId_POOLED_TRANSACTIONS_66:
 			if newBlocks := f.newBlocks.Load(); newBlocks != seenNewBlocks {
@@ -1032,15 +1032,8 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 		}
 		f.keepAnnouncersOfTracked(hashes, unknownHashes, sentryClient, req.PeerId)
 		unknownHashes, reservedAt := f.skipRecentlyRequested(unknownHashes, sentryClient, req.PeerId)
-		if len(unknownHashes) > 0 {
-			peer := fetchPeer{sentryClient, gointerfaces.ConvertH512ToHash(req.PeerId)}
-			sendCtx, cancel := context.WithTimeout(f.ctx, txFetchTimeout) // a blocked send must not strand later chunks as unsent
-			unsent, _, _, err := f.requestPooledTxns(sendCtx, peer, initialRequestID, unknownHashes, reservedAt)
-			cancel()
-			if err != nil {
-				f.releaseRequested(peer, unsent)
-				return err
-			}
+		if err := f.requestUnknown(unknownHashes, reservedAt, fetchPeer{sentryClient, gointerfaces.ConvertH512ToHash(req.PeerId)}); err != nil {
+			return err
 		}
 	case sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_68:
 		if count, err := peekAnnouncementCount(req.Data); err == nil && count > maxHashesPerMsg {
@@ -1065,15 +1058,8 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 		f.recordAnnouncement(req.PeerId, txTypes, sizes, hashes, f.keepAnnouncersOfTracked(hashes, unknownHashes, sentryClient, req.PeerId))
 		unknownHashes, reservedAt := f.skipRecentlyRequested(unknownHashes, sentryClient, req.PeerId)
 
-		if len(unknownHashes) > 0 {
-			peer := fetchPeer{sentryClient, gointerfaces.ConvertH512ToHash(req.PeerId)}
-			sendCtx, cancel := context.WithTimeout(f.ctx, txFetchTimeout) // a blocked send must not strand later chunks as unsent
-			unsent, _, _, err := f.requestPooledTxns(sendCtx, peer, initialRequestID, unknownHashes, reservedAt)
-			cancel()
-			if err != nil {
-				f.releaseRequested(peer, unsent)
-				return err
-			}
+		if err := f.requestUnknown(unknownHashes, reservedAt, fetchPeer{sentryClient, gointerfaces.ConvertH512ToHash(req.PeerId)}); err != nil {
+			return err
 		}
 	case sentryproto.MessageId_GET_POOLED_TRANSACTIONS_66:
 		// TODO: handleInboundMessage is single-threaded - means it can accept as argument couple buffers (or analog of txParseContext). Protobuf encoding will copy data anyway, but DirectClient doesn't

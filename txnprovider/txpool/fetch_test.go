@@ -1877,6 +1877,7 @@ func TestFailedRetrySendKeepsThePeer(t *testing.T) {
 	a.announce(t, peerB, hash)
 	a.sendErr = errors.New("sentry busy")
 	a.timeoutSweep()
+	require.Empty(t, a.fetch.retriesOutstanding[fetchPeer{a.sentryClient, peerB}], "a retry that was not sent holds no slot")
 	a.sendErr = nil
 	a.timeoutSweep()
 	require.Equal(t, [][64]byte{peerA, peerB, peerB}, a.requestedFrom, "the last alternate is asked again after a failed send")
