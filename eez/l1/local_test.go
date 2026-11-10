@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/eez/l1"
 	"github.com/erigontech/erigon/eez/l1/l1test"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -70,4 +71,86 @@ func TestLocalConformance(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("heads still open")
 	}
+}
+
+// TestLocalHeadsAfterCommit: the chain announces a header before it commits
+// its block; the reader delivers the head only once it reads that block as
+// its head.
+func TestLocalHeadsAfterCommit(t *testing.T) {
+	m, _ := l1test.ErigonL1(t)
+	r := l1.NewLocal(m.DB, m.BlockReader, m.ReceiptsReader, m.ChainConfig, m.Notifications.Events)
+	heads, err := r.Heads(t.Context())
+	require.NoError(t, err)
+	head, err := r.Head(t.Context())
+	require.NoError(t, err)
+	var parent *types.Block
+	require.NoError(t, m.DB.View(t.Context(), func(tx kv.Tx) (err error) {
+		parent, err = m.BlockReader.BlockByNumber(t.Context(), tx, head.Number)
+		return err
+	}))
+	next, err := m.GenerateChainFrom(parent, 1, func(int, *blockgen.BlockGen) {})
+	require.NoError(t, err)
+	announced, err := rlp.EncodeToBytes(next.Blocks[0].Header())
+	require.NoError(t, err)
+
+	m.Notifications.Events.OnNewHeader([][]byte{announced})
+	select {
+	case <-heads:
+		t.Fatal("head delivered before its block is committed")
+	case <-time.After(300 * time.Millisecond):
+	}
+	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), next.Blocks))
+	select {
+	case <-heads:
+	case <-time.After(10 * time.Second):
+		t.Fatal("no head event")
+	}
+	h, err := r.Head(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, next.Blocks[0].Hash(), h.Hash, "the delivered head is readable")
+
+	// An announced head that never becomes the head does not hold the next
+	// one.
+	stale, err := m.GenerateChainFrom(next.Blocks[0], 1, func(int, *blockgen.BlockGen) {})
+	require.NoError(t, err)
+	staleHeader := types.CopyHeader(stale.Blocks[0].Header())
+	staleHeader.Extra = []byte("never committed")
+	never, err := rlp.EncodeToBytes(staleHeader)
+	require.NoError(t, err)
+	for drained := false; !drained; {
+		select {
+		case <-heads:
+		case <-time.After(300 * time.Millisecond):
+			drained = true
+		}
+	}
+	m.Notifications.Events.OnNewHeader([][]byte{never})
+	start := time.Now()
+	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), stale.Blocks))
+	select {
+	case <-heads:
+	case <-time.After(10 * time.Second):
+		t.Fatal("no head event")
+	}
+	require.Less(t, time.Since(start), time.Second, "a superseded announcement held the next head")
+	h, err = r.Head(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, stale.Blocks[0].Hash(), h.Hash)
+
+	// One alone is delivered once the wait for it ends.
+	for drained := false; !drained; {
+		select {
+		case <-heads:
+		case <-time.After(300 * time.Millisecond):
+			drained = true
+		}
+	}
+	m.Notifications.Events.OnNewHeader([][]byte{never})
+	start = time.Now()
+	select {
+	case <-heads:
+	case <-time.After(10 * time.Second):
+		t.Fatal("an announced head that never came held the event")
+	}
+	require.GreaterOrEqual(t, time.Since(start), time.Second, "delivered before the wait for the head ended")
 }
