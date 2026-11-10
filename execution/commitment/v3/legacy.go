@@ -57,7 +57,7 @@ var (
 	errLegacyBranch   = errors.New("commitment v3: invalid legacy branch")
 	errLegacyValue    = errors.New("commitment v3: legacy leaf value is missing")
 	errLegacyState    = errors.New("commitment v3: invalid legacy state")
-	errLegacyLeafRoot = errors.New("the trie root is a single leaf, which convert does not support: rebuild commitment with COMMITMENT_V3=true instead")
+	errLegacyLeafRoot = errors.New("the trie root is a single leaf, which convert does not support: remove the commitment files with `erigon seg rm-state --domain=commitment`, then run `integration commitment rebuild` with COMMITMENT_V3=true")
 	ErrLegacyConflict = errors.New("commitment v3: conflicting legacy conversions")
 
 	errStaleStorageRecord = errors.New("commitment v3: legacy storage record references a deleted slot")
