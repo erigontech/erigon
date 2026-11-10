@@ -43,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/sentinel/communication"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 )
@@ -307,38 +308,70 @@ func TestDataColumnSidecarsByRootTooManyColumnsReturnsInvalidRequest(t *testing.
 	expectDataColumnSidecarResponsePrefix(t, stream, reqBuf.Bytes(), InvalidRequestPrefix)
 }
 
-type missingColumnsStore struct {
+type savedColumnsStore struct {
 	blob_storage.DataColumnStorage
-	checks int
+	saved  func(slot uint64) []uint64
+	served int
 }
 
-func (m *missingColumnsStore) ColumnSidecarExists(context.Context, uint64, common.Hash, int64) (bool, error) {
-	m.checks++
-	return false, nil
+func (m *savedColumnsStore) GetSavedColumnIndex(_ context.Context, slot uint64, _ common.Hash) ([]uint64, error) {
+	return m.saved(slot), nil
 }
 
-func TestDataColumnSidecarsByRangeBoundsTheChecksOfMissingColumns(t *testing.T) {
+func (m *savedColumnsStore) WriteStream(io.Writer, uint64, common.Hash, uint64) error {
+	m.served++
+	return nil
+}
+
+type discardStream struct{ network.Stream }
+
+func (discardStream) Write(p []byte) (int, error) { return len(p), nil }
+
+func serveColumnsByRange(t *testing.T, ctx context.Context, limit, slots uint64, saved func(slot uint64) []uint64) int {
+	t.Helper()
 	_, mainnetCfg := clparams.GetConfigsByNetwork(1)
 	cfg := *mainnetCfg
-	cfg.MaxRequestDataColumnSidecars = 10
+	cfg.MaxRequestDataColumnSidecars = limit
 	cfg.AltairForkEpoch, cfg.BellatrixForkEpoch, cfg.CapellaForkEpoch, cfg.DenebForkEpoch, cfg.ElectraForkEpoch, cfg.FuluForkEpoch = 0, 0, 0, 0, 0, 0
+	cfg.InitializeForkSchedule()
 	_, indiciesDB := setupStore(t)
 	tx, err := indiciesDB.BeginRw(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
-	const slots = uint64(32)
 	for slot := range slots {
 		require.NoError(t, beacon_indicies.MarkRootCanonical(tx, slot, common.Hash{byte(slot + 1)}))
 	}
-	store := &missingColumnsStore{}
-	c := &ConsensusHandlers{ctx: t.Context(), beaconConfig: &cfg, dataColumnStorage: store}
+	store := &savedColumnsStore{saved: saved}
+	c := &ConsensusHandlers{ctx: t.Context(), beaconConfig: &cfg, dataColumnStorage: store, ethClock: eth_clock.NewEthereumClock(0, common.Hash{}, &cfg)}
 	req := &cltypes.ColumnSidecarsByRangeRequest{Columns: solid.NewUint64ListSSZ(int(cfg.NumberOfColumns))}
-	req.Columns.Append(0)
-	req.Columns.Append(1)
-	req.Columns.Append(2)
+	for column := range uint64(3) {
+		req.Columns.Append(column)
+	}
 
-	require.NoError(t, c.writeColumnsByRange(t.Context(), nil, tx, req, 0, slots, slots))
-	require.Equal(t, int(cfg.MaxRequestDataColumnSidecars), store.checks)
+	require.NoError(t, c.writeColumnsByRange(ctx, discardStream{}, tx, req, 0, slots, slots))
+	return store.served
+}
+
+func TestDataColumnSidecarsByRangeServesAfterBloblessBlocks(t *testing.T) {
+	served := serveColumnsByRange(t, t.Context(), 10, 64, func(slot uint64) []uint64 {
+		if slot == 63 {
+			return []uint64{0, 1, 2}
+		}
+		return nil
+	})
+	require.Equal(t, 3, served)
+}
+
+func TestDataColumnSidecarsByRangeStopsBetweenWholeBlocks(t *testing.T) {
+	served := serveColumnsByRange(t, t.Context(), 10, 32, func(uint64) []uint64 { return []uint64{0, 1, 2} })
+	require.Equal(t, 9, served)
+}
+
+func TestDataColumnSidecarsByRangeStopsAtTheDeadline(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	served := serveColumnsByRange(t, ctx, 10, 32, func(uint64) []uint64 { return []uint64{0, 1, 2} })
+	require.Zero(t, served)
 }
 
 func TestDataColumnSidecarsByRangeZeroCountReturnsEmptySuccess(t *testing.T) {

@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"slices"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -77,15 +78,10 @@ func (c *ConsensusHandlers) dataColumnSidecarsByRangeHandler(s network.Stream) e
 	return c.writeColumnsByRange(requestCtx, s, tx, req, startSlot, endSlot, curSlot)
 }
 
-// writeColumnsByRange counts every existence check, not only hits: a miss answers nothing and costs the peer no response budget.
+// writeColumnsByRange serves whole blocks. A block with no stored column costs one lookup and no part of the response limit.
 func (c *ConsensusHandlers) writeColumnsByRange(ctx context.Context, s network.Stream, tx kv.Tx, req *cltypes.ColumnSidecarsByRangeRequest, startSlot, endSlot, curSlot uint64) error {
-	checked := uint64(0)
-	scanOver := func() bool { return ctx.Err() != nil || checked >= c.beaconConfig.MaxRequestDataColumnSidecars }
-	var responseErr error
-	for slot := startSlot; slot < endSlot; slot++ {
-		if scanOver() {
-			break
-		}
+	served := uint64(0)
+	for slot := startSlot; slot < endSlot && ctx.Err() == nil; slot++ {
 		if slot > curSlot {
 			// slot is in the future
 			break
@@ -105,53 +101,47 @@ func (c *ConsensusHandlers) writeColumnsByRange(ctx context.Context, s network.S
 			continue
 		}
 
-		req.Columns.Range(func(index int, columnIndex uint64, length int) bool {
-			if scanOver() {
-				return false
-			}
-
-			checked++
-			exists, err := c.dataColumnStorage.ColumnSidecarExists(c.ctx, slot, blockRoot, int64(columnIndex))
-			if err != nil {
-				log.Debug("failed to check if data column sidecar exists", "error", err)
-				responseErr = err
-				return false
-			}
-			if !exists {
-				// skip
-				return true
-			}
-
-			forkDigest, err := c.ethClock.ComputeForkDigest(slot / c.beaconConfig.SlotsPerEpoch)
-			if err != nil {
-				log.Debug("failed to compute fork digest", "error", err)
-				responseErr = err
-				return false
-			}
-			if _, err := s.Write([]byte{SuccessfulResponsePrefix}); err != nil {
-				log.Debug("failed to write success byte", "error", err)
-				responseErr = err
-				return false
-			}
-
-			if _, err := s.Write(forkDigest[:]); err != nil {
-				log.Debug("failed to write fork digest", "error", err)
-				responseErr = err
-				return false
-			}
-
-			if err := c.dataColumnStorage.WriteStream(s, slot, blockRoot, columnIndex); err != nil {
-				log.Debug("failed to write stream data column sidecar", "error", err)
-				responseErr = err
-				return false
+		saved, err := c.dataColumnStorage.GetSavedColumnIndex(ctx, slot, blockRoot)
+		if err != nil {
+			log.Debug("failed to list saved data column sidecars", "error", err)
+			return err
+		}
+		columns := make([]uint64, 0, len(saved))
+		req.Columns.Range(func(_ int, columnIndex uint64, _ int) bool {
+			if slices.Contains(saved, columnIndex) {
+				columns = append(columns, columnIndex)
 			}
 			return true
 		})
-		if responseErr != nil {
+		if len(columns) == 0 {
+			continue
+		}
+		if served > 0 && served+uint64(len(columns)) > c.beaconConfig.MaxRequestDataColumnSidecars {
 			break
 		}
+
+		forkDigest, err := c.ethClock.ComputeForkDigest(epoch)
+		if err != nil {
+			log.Debug("failed to compute fork digest", "error", err)
+			return err
+		}
+		for _, columnIndex := range columns {
+			if _, err := s.Write([]byte{SuccessfulResponsePrefix}); err != nil {
+				log.Debug("failed to write success byte", "error", err)
+				return err
+			}
+			if _, err := s.Write(forkDigest[:]); err != nil {
+				log.Debug("failed to write fork digest", "error", err)
+				return err
+			}
+			if err := c.dataColumnStorage.WriteStream(s, slot, blockRoot, columnIndex); err != nil {
+				log.Debug("failed to write stream data column sidecar", "error", err)
+				return err
+			}
+		}
+		served += uint64(len(columns))
 	}
-	return responseErr
+	return nil
 }
 
 func (c *ConsensusHandlers) dataColumnSidecarsByRootHandler(s network.Stream) error {
