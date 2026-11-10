@@ -653,6 +653,9 @@ func (ibs *IntraBlockState) Empty(addr accounts.Address) (empty bool, err error)
 
 		return so == nil || so.deleted || so.data.Empty(), nil
 	}
+	if warmEmpty, ok := ibs.emptyFromWarmReads(addr); ok {
+		return warmEmpty, nil
+	}
 	// Existence + the self-destruct/revival gate, without reconstructing the
 	// whole account: the EIP-161 verdict needs only the current balance, nonce
 	// and code hash, read per-field below (short-circuiting), so the per-field
@@ -699,6 +702,39 @@ func (ibs *IntraBlockState) Empty(addr accounts.Address) (empty bool, err error)
 // balance/nonce/codeHash per-field (short-circuiting on the first non-empty
 // field) instead of reconstructing the whole account. The per-field refresh
 // reads apply the same self-destruct gate as the whole-account path.
+// emptyFromWarmReads answers Empty from reads this attempt already recorded, so that a
+// repeat Empty looks each one up once. ok is false when the full path must decide: addr
+// has an own write, a read is missing, or the account read found no account (a field cell
+// can exist with no account record, so a recorded balance does not prove existence).
+func (ibs *IntraBlockState) emptyFromWarmReads(addr accounts.Address) (empty, ok bool) {
+	if !ibs.warmReadable(addr) {
+		return false, false
+	}
+	account, ok := ibs.versionedReads.GetAddress(addr)
+	if !ok || !warmSource(account.Source) || account.Val == nil || account.Val.IsNil() {
+		return false, false
+	}
+	balance, ok := ibs.versionedReads.GetBalance(addr)
+	if !ok || !warmSource(balance.Source) {
+		return false, false
+	}
+	if !balance.Val.IsZero() {
+		return false, true
+	}
+	nonce, ok := ibs.versionedReads.GetNonce(addr)
+	if !ok || !warmSource(nonce.Source) {
+		return false, false
+	}
+	if nonce.Val != 0 {
+		return false, true
+	}
+	codeHash, ok := ibs.versionedReads.GetCodeHash(addr)
+	if !ok || !warmSource(codeHash.Source) {
+		return false, false
+	}
+	return codeHash.Val == accounts.EmptyCodeHash, true
+}
+
 func (ibs *IntraBlockState) emptyFromVersionedFields(addr accounts.Address, account *accounts.Account) (bool, error) {
 	balance, _, _, err := refreshBalance(ibs, addr, account.Balance)
 	if err != nil {
