@@ -38,7 +38,7 @@ func (c *ConsensusHandlers) blobsSidecarsByRangeHandlerDeneb(s network.Stream) e
 
 func (c *ConsensusHandlers) blobsSidecarsByRangeHandler(s network.Stream, version clparams.StateVersion) error {
 	req := &cltypes.BlobsByRangeRequest{}
-	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, req, version); err != nil {
+	if err := ssz_snappy.DecodeAndReadFixedSizeNoForkDigest(s, req, version); err != nil {
 		return err
 	}
 	if req.StartSlot+req.Count < req.StartSlot {

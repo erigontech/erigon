@@ -456,3 +456,11 @@ func TestReadSnappyMaxCompressedMessage(t *testing.T) {
 	peer2.SetSnappy(true)
 	checkMsgReadWrite(t, peer1, peer2, 1, make([]byte, maxUint24))
 }
+
+func TestHandshakeRejectsOversizedMessage(t *testing.T) {
+	const size = 5000
+	input := bytes.NewReader(append([]byte{size >> 8, size & 0xff}, make([]byte, size)...))
+	var h handshakeState
+	_, err := h.readMsg(new(authMsgV4), newkey(), input)
+	require.ErrorIs(t, err, errHandshakeMsgTooLarge)
+}

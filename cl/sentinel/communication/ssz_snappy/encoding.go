@@ -98,6 +98,11 @@ func DecodeAndReadNoForkDigest(r io.Reader, val ssz.EncodableSSZ, version clpara
 	return decodeAndReadNoForkDigest(r, val, version, nil, clparams.MaxPayloadSize, false)
 }
 
+// DecodeAndReadFixedSizeNoForkDigest refuses a payload larger than val's fixed size before decoding it.
+func DecodeAndReadFixedSizeNoForkDigest(r io.Reader, val ssz.EncodableSSZ, version clparams.StateVersion) error {
+	return DecodeAndReadNoForkDigestMax(r, val, version, uint64(val.EncodingSizeSSZ()))
+}
+
 // DecodeAndReadNoForkDigestMax decodes a payload whose uncompressed size is at most maxSize.
 // The length prefix is checked before any decompression, and ErrPayloadExceedsLimit is returned when it is too big.
 // The payload must end at the declared length, otherwise ErrTrailingData is returned.

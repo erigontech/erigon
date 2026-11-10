@@ -33,6 +33,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/libp2p/go-libp2p/core/peer"
 )
 
 type rpcReceiveTracer struct {
@@ -138,4 +139,37 @@ func TestPubsubFrameLimitFollowsMaxGossipMessageSize(t *testing.T) {
 
 	require.True(t, sendRawRPC(t, publishRPC(limit)), "an RPC at max_message_size must be accepted")
 	require.False(t, sendRawRPC(t, publishRPC(limit+1)), "an RPC above max_message_size must reset the stream")
+}
+
+func TestGossipSubscriptionFilter(t *testing.T) {
+	t.Parallel()
+	filter := gossipSubscriptionFilter()
+	require.True(t, filter.CanSubscribe("/eth2/4a26c58b/beacon_block/ssz_snappy"))
+	require.True(t, filter.CanSubscribe("/eth2/4a26c58b/data_column_sidecar_127/ssz_snappy"))
+	require.False(t, filter.CanSubscribe("/eth2/4a26c58b/beacon_block/ssz"))
+	require.False(t, filter.CanSubscribe("/junk/topic"))
+
+	subscribe, topic := true, "/eth2/4a26c58b/beacon_block/ssz_snappy"
+	subs := make([]*pb.RPC_SubOpts, maxSubscriptionsPerRPC+1)
+	for i := range subs {
+		subs[i] = &pb.RPC_SubOpts{Subscribe: &subscribe, Topicid: &topic}
+	}
+	_, err := filter.FilterIncomingSubscriptions(peer.ID("p"), subs)
+	require.ErrorIs(t, err, pubsub.ErrTooManySubscriptions)
+}
+
+func TestPubsubOptionsRefuseNonGossipTopics(t *testing.T) {
+	t.Parallel()
+	mn := mocknet.New()
+	t.Cleanup(func() { require.NoError(t, mn.Close()) })
+	host, err := mn.GenPeer()
+	require.NoError(t, err)
+	networkConfig, beaconConfig, _, err := clparams.GetConfigsByNetworkName("mainnet")
+	require.NoError(t, err)
+	manager := &p2pManager{cfg: &P2PConfig{NetworkConfig: networkConfig, BeaconConfig: beaconConfig}}
+	ps, err := pubsub.NewGossipSub(t.Context(), host, manager.pubsubOptions(beaconConfig)...)
+	require.NoError(t, err)
+
+	_, err = ps.Join("/junk/topic")
+	require.ErrorContains(t, err, "subscription filter")
 }
