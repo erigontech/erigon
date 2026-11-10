@@ -499,6 +499,16 @@ func (p *TxPool) refreshFrameAccounts(cacheView kvcache.CacheView) error {
 	return nil
 }
 
+// Parked frames keep their reservations and nonce indexes. Refresh legacy-nonce
+// senders so their successors also stop being selectable until validation succeeds.
+func (p *TxPool) parkFrameLocked(mt *metaTxn, reason string) {
+	p.removeFromSubPool(mt, reason)
+	frame := mt.TxnSlot.Txn.(*types.FrameTransaction)
+	if frame.UsesLegacyNonce() {
+		p.frameAccountsToRefresh[frame.SenderAddress] = struct{}{}
+	}
+}
+
 // invalidateFrames drops expired transactions and parks those whose validation may be stale.
 // The caller holds the pool lock; revalidateFrames performs the EVM work later.
 func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*metaTxn {
@@ -616,12 +626,7 @@ func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*meta
 		if !affected {
 			continue
 		}
-		// Keep the reservation and nonce index while validation is pending. Legacy-nonce
-		// successors must also stop being selectable until their predecessor is usable.
-		p.removeFromSubPool(mt, "frame validation pending")
-		if !keyedNonce {
-			p.frameAccountsToRefresh[frame.SenderAddress] = struct{}{}
-		}
+		p.parkFrameLocked(mt, "frame validation pending")
 		parked = append(parked, mt)
 	}
 	return parked

@@ -318,8 +318,7 @@ func (p *TxPool) start(ctx context.Context) error {
 	})
 }
 
-// markStateStale invalidates simulations before any wait for state. Parked
-// frames keep their reservations and nonce indexes until recovery can validate them.
+// markStateStale invalidates simulations before waiting for a usable state view.
 func (p *TxPool) markStateStale() {
 	p.lock.Lock()
 	defer p.lock.Unlock()
@@ -329,11 +328,7 @@ func (p *TxPool) markStateStale() {
 	p.stateViewStale = true
 	p.stateGeneration++
 	for _, mt := range p.all.senderIDFrameTxn {
-		p.removeFromSubPool(mt, "state recovery pending")
-		frame := mt.TxnSlot.Txn.(*types.FrameTransaction)
-		if frame.UsesLegacyNonce() {
-			p.frameAccountsToRefresh[frame.SenderAddress] = struct{}{}
-		}
+		p.parkFrameLocked(mt, "state recovery pending")
 	}
 	p.lastSeenCond.Broadcast()
 	p.publishDepthMetrics()
@@ -1946,23 +1941,19 @@ func (p *TxPool) addTxnsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView,
 	// appearing in a block's stateChanges, which doesn't happen if the
 	// queued tx is the sender's only outstanding tx.
 	sendersToRefresh := map[uint64]struct{}{}
-	for _, mt := range p.queued.best.ms {
-		senderID := mt.TxnSlot.SenderID
-		if _, alreadyCovered := sendersWithChangedState[senderID]; alreadyCovered {
-			continue
-		}
-		sendersToRefresh[senderID] = struct{}{}
-	}
 	if stateChanges.StateChangesIncomplete {
 		// Missing account changes can leave mined transactions spending a frame payer's balance.
 		for senderID := range p.all.senderIDTxnCount {
-			if _, changed := sendersWithChangedState[senderID]; !changed {
-				sendersToRefresh[senderID] = struct{}{}
-			}
+			sendersToRefresh[senderID] = struct{}{}
+		}
+	} else {
+		for _, mt := range p.queued.best.ms {
+			sendersToRefresh[mt.TxnSlot.SenderID] = struct{}{}
 		}
 	}
 
 	for senderID := range sendersWithChangedState {
+		delete(sendersToRefresh, senderID)
 		// Reset the dormancy timer: this sender had a real on-chain state change.
 		p.senderLastActivity[senderID] = blockNum
 		nonce, balance, codeHash, err := senders.info(cacheView, senderID)
