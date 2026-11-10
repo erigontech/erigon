@@ -2180,3 +2180,56 @@ func TestAccountStateBalanceTrackingDoesNotAllocate(t *testing.T) {
 	})
 	require.Zero(t, allocs, "allocations per run for %d accounts", len(states))
 }
+
+func TestWriteSetMergeAllocationsIgnoreUntouchedWrites(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0x01"))
+	coinbase := accounts.InternAddress(common.HexToAddress("0x02"))
+
+	mergeAllocs := func(slots int) float64 {
+		prev := &WriteSet{}
+		for i := range slots {
+			key := accounts.InternKey(common.BigToHash(big.NewInt(int64(i + 1))))
+			prev.SetStorage(addr, key, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Key: key, Path: StoragePath}})
+		}
+		tip := &WriteSet{}
+		tip.SetBalance(coinbase, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: coinbase, Path: BalancePath}})
+		return testing.AllocsPerRun(5, func() { prev.Merge(tip) })
+	}
+
+	require.Equal(t, mergeAllocs(2), mergeAllocs(200))
+}
+
+func TestWriteSetMergeLeavesInputsUnchanged(t *testing.T) {
+	t.Parallel()
+
+	addr := accounts.InternAddress(common.HexToAddress("0x01"))
+	coinbase := accounts.InternAddress(common.HexToAddress("0x02"))
+	slot := accounts.InternKey(common.HexToHash("0x01"))
+	balance := func(a accounts.Address, v uint64) *VersionedWrite[uint256.Int] {
+		return &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: a, Path: BalancePath}, Val: *uint256.NewInt(v)}
+	}
+
+	prev := &WriteSet{}
+	prev.SetBalance(addr, balance(addr, 1))
+	prev.SetStorage(addr, slot, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Key: slot, Path: StoragePath}, Val: *uint256.NewInt(7)})
+	next := &WriteSet{}
+	next.SetBalance(addr, balance(addr, 2))
+	next.SetBalance(coinbase, balance(coinbase, 3))
+
+	merged := prev.Merge(next)
+
+	vw, ok := merged.GetBalance(addr)
+	require.True(t, ok)
+	require.Equal(t, uint64(2), vw.Val.Uint64(), "next wins on the same path")
+	nextVW, _ := next.GetBalance(addr)
+	require.NotSame(t, nextVW, vw, "the merged set owns the writes taken from next")
+	_, ok = merged.GetStorage(addr, slot)
+	require.True(t, ok)
+
+	vw, ok = prev.GetBalance(addr)
+	require.True(t, ok)
+	require.Equal(t, uint64(1), vw.Val.Uint64(), "the receiver keeps its value")
+	_, ok = prev.GetBalance(coinbase)
+	require.False(t, ok, "the receiver gets no entry from next")
+	require.Equal(t, 2, next.Count())
+}
