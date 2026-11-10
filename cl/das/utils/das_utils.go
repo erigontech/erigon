@@ -135,6 +135,7 @@ func ComputeBlobsCells(blobs [][]byte) ([][]cltypes.Cell, error) {
 
 // RecoverMatrix takes a partial matrix and the total blob count and returns a complete matrix.
 // Rows are recovered in parallel; an error names the lowest row that cannot be recovered.
+// A complete row is returned without checks, so the caller must pass verified cells.
 func RecoverMatrix(partialMatrix []cltypes.MatrixEntry, blobCount uint64) ([][]cltypes.MatrixEntry, error) {
 	matrix := make([][]cltypes.MatrixEntry, blobCount)
 	errs := make([]error, blobCount)
@@ -143,14 +144,21 @@ func RecoverMatrix(partialMatrix []cltypes.MatrixEntry, blobCount uint64) ([][]c
 		rowRecoverySlots <- struct{}{}
 		wg.Go(func() {
 			defer func() { <-rowRecoverySlots }()
-			var cellIndices []ColumnIndex
-			var cells []cltypes.Cell
+			var row []*cltypes.MatrixEntry
 			for i := range partialMatrix {
-				entry := &partialMatrix[i]
-				if entry.RowIndex == blobIndex {
-					cellIndices = append(cellIndices, entry.ColumnIndex)
-					cells = append(cells, entry.Cell)
+				if partialMatrix[i].RowIndex == blobIndex {
+					row = append(row, &partialMatrix[i])
 				}
+			}
+			if complete := completeRow(row); complete != nil {
+				matrix[blobIndex] = complete
+				return
+			}
+			cellIndices := make([]ColumnIndex, len(row))
+			cells := make([]cltypes.Cell, len(row))
+			for i, entry := range row {
+				cellIndices[i] = entry.ColumnIndex
+				cells[i] = entry.Cell
 			}
 			recoveredCells, recoveredProofs, err := RecoverCellsAndKZGProofs(cellIndices, cells)
 			if err != nil {
@@ -176,6 +184,23 @@ func RecoverMatrix(partialMatrix []cltypes.MatrixEntry, blobCount uint64) ([][]c
 		}
 	}
 	return matrix, nil
+}
+
+// completeRow returns the row ordered by column if it holds every column below CellsPerExtBlob exactly once, else nil.
+func completeRow(row []*cltypes.MatrixEntry) []cltypes.MatrixEntry {
+	if len(row) != goethkzg.CellsPerExtBlob {
+		return nil
+	}
+	ordered := make([]cltypes.MatrixEntry, len(row))
+	var seen [goethkzg.CellsPerExtBlob]bool
+	for _, entry := range row {
+		if entry.ColumnIndex >= goethkzg.CellsPerExtBlob || seen[entry.ColumnIndex] {
+			return nil
+		}
+		seen[entry.ColumnIndex] = true
+		ordered[entry.ColumnIndex] = *entry
+	}
+	return ordered
 }
 
 // RecoverCellsAndKZGProofs uses the go-eth-kzg library to recover the cells and proofs.
