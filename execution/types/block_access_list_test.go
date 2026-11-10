@@ -894,3 +894,23 @@ func TestBlockAccessListDecodeAcceptsOnlyCanonicalEncoding(t *testing.T) {
 		t.Fatal("no mutated encoding was accepted, the test checks nothing")
 	}
 }
+
+func TestAccountChangesEqualComparesAddressAndCode(t *testing.T) {
+	base := func() *AccountChanges {
+		return &AccountChanges{Address: common.Address{1}, CodeChanges: []*CodeChange{{Index: 1, Bytecode: []byte{0x60}}}}
+	}
+	if !base().Equal(base()) {
+		t.Fatal("identical changes must be equal")
+	}
+	for name, change := range map[string]func(*AccountChanges){
+		"address":    func(ac *AccountChanges) { ac.Address = common.Address{2} },
+		"code index": func(ac *AccountChanges) { ac.CodeChanges[0].Index = 2 },
+		"code bytes": func(ac *AccountChanges) { ac.CodeChanges[0].Bytecode = []byte{0x61} },
+	} {
+		other := base()
+		change(other)
+		if base().Equal(other) {
+			t.Fatalf("a different %s must not be equal", name)
+		}
+	}
+}
