@@ -2,6 +2,7 @@
 """Bounce a witness between two live CL branches, then verify recovery."""
 
 import argparse
+from contextlib import ExitStack
 import json
 import http.client
 import os
@@ -54,6 +55,9 @@ def run(enclave):
     def cli(*args):
         return subprocess.check_output([kurtosis, *args], text=True, timeout=180).strip()
 
+    def docker(*args):
+        return subprocess.check_output(["docker", *args], text=True, timeout=180).strip()
+
     def endpoint(service, port):
         address = cli("port", "print", enclave, service, port)
         return "http://" + address.removeprefix("http://").removeprefix("tcp://")
@@ -73,6 +77,13 @@ def run(enclave):
     def finality():
         return [int(request(url + "/eth/v1/beacon/states/head/finality_checkpoints")
                     ["data"]["finalized"]["epoch"]) for url in consensus]
+
+    def branch_weight(node, block_hash):
+        nodes = request(consensus[node] + "/eth/v1/debug/fork_choice")["fork_choice_nodes"]
+        for entry in nodes:
+            if entry["execution_block_hash"] == block_hash:
+                return int(entry["weight"])
+        raise RPCUnavailable(f"node {node+1}: fork choice has no block {block_hash}")
 
     def converged(minimum):
         height = min(int(block(i)["number"], 16) for i in range(len(clients))) - 2
@@ -95,12 +106,26 @@ def run(enclave):
             assert all(proof == proofs[0] for proof in proofs), f"state disagreement for {address} at {height}"
 
     wait("initial finality on every CL", lambda: min(finality()) >= 2, timeout=1200)
+    partitioned = False
+
     def partition(groups):
-        request(disruptoor + "/v1/state", {"partitions": [{
-            "name": "reorg-test", "groups": [
-                {"node-index": group, "client-type": ["execution", "beacon"]} for group in groups
-            ], "scope": ["el_p2p", "cl_p2p"], "symmetric": True,
-        }]}, "PUT")
+        nonlocal partitioned
+        with ExitStack() as resume:
+            # Disruptoor clears old rules before installing replacements. Pause
+            # beacon clients during that gap, keeping their network namespaces alive.
+            if partitioned:
+                containers = docker("ps", "-q", "--filter", f"label=com.kurtosistech.enclave-name={enclave}",
+                                    "--filter", "label=com.kurtosistech.custom.ethereum-package.client-type=beacon").split()
+                assert len(containers) == len(clients), f"expected {len(clients)} beacon containers, found {containers}"
+                for container in containers:
+                    docker("pause", container)
+                    resume.callback(docker, "unpause", container)
+            request(disruptoor + "/v1/state", {"partitions": [{
+                "name": "reorg-test", "groups": [
+                    {"node-index": group, "client-type": ["execution", "beacon"]} for group in groups
+                ], "scope": ["el_p2p", "cl_p2p"], "symmetric": True,
+            }]}, "PUT")
+            partitioned = True
 
     stopped_validators = set()
 
@@ -145,6 +170,7 @@ def run(enclave):
 
         for node in (2, 6):
             validators(node, True)
+        wait("A has greater fork-choice weight than B", lambda: branch_weight(0, branch_a) > branch_weight(4, branch_b))
         partition([[1, 2, 5, 6], [3, 4]])
         wait("witness returns from B to A", lambda: block(4, height)["hash"] == branch_a)
         assert block(0, height)["hash"] == branch_a, "A's original branch was lost"

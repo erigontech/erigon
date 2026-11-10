@@ -39,24 +39,44 @@ class ReorgRecoveryTests(unittest.TestCase):
         finalized_reads = 0
         elapsed = 0
         checked_heights = []
+        running_beacons = set(range(1, 7))
+        votes_ready = False
+        restarted_at = None
 
         def cli(command, **kwargs):
-            nonlocal restarted
+            nonlocal restarted, restarted_at
+            if command[0] == "docker":
+                if command[1] == "ps":
+                    return "\n".join(f"beacon-{node}" for node in range(1, 7))
+                node = int(command[2].split("-")[1])
+                if command[1] == "pause":
+                    running_beacons.remove(node)
+                elif command[1] == "unpause":
+                    running_beacons.add(node)
+                else:
+                    self.fail(f"unexpected Docker command: {command}")
+                return ""
             if command[1:3] == ["port", "print"]:
                 return "http://" + command[4]
             self.assertEqual("service", command[1])
             if command[2] == "start" and command[4].startswith("el-"):
                 restarted = True
+                restarted_at = elapsed
             return ""
 
         def request(url, data=None, method=None):
             nonlocal partitioned, healed, finalized_reads
             if url.endswith("/v1/state"):
+                returning = partitioned and branches[4] == "B" and 5 in data["partitions"][0]["groups"][0]["node-index"]
+                if partitioned and (running_beacons or (returning and not votes_ready)):
+                    # Rule replacement briefly reconnects the network; B has more votes.
+                    branches[:] = ["B"] * 6
+                previous = branches[:]
                 partitioned = True
                 for group in data["partitions"][0]["groups"]:
                     nodes = group["node-index"]
                     for node in nodes:
-                        branches[node - 1] = "A" if 1 in nodes else "B"
+                        branches[node - 1] = previous[0] if 1 in nodes else "B"
                 return {}
             if url.endswith("/v1/state/clear"):
                 healed = True
@@ -64,6 +84,11 @@ class ReorgRecoveryTests(unittest.TestCase):
                 return {}
 
             node = int(url.split("-")[1]) - 1
+            if url.endswith("/debug/fork_choice"):
+                return {"fork_choice_nodes": [{
+                    "execution_block_hash": f"{branches[node]}-28",
+                    "weight": "3" if node == 0 and votes_ready else "2" if node == 4 else "1",
+                }]}
             if url.endswith("/finality_checkpoints"):
                 epoch = 2
                 if restarted:
@@ -76,7 +101,7 @@ class ReorgRecoveryTests(unittest.TestCase):
                 latest = 110 if healed else 30 if partitioned else 20
                 if restarted:
                     # The witness first lags its peers; only later reads can show new production.
-                    latest = next_heads[node] if elapsed else (100 if node == 4 else 110)
+                    latest = next_heads[node] if elapsed > restarted_at else (100 if node == 4 else 110)
                 height = latest if params[0] == "latest" else int(params[0], 16)
                 if height > latest:
                     return {"result": None}
@@ -96,8 +121,9 @@ class ReorgRecoveryTests(unittest.TestCase):
             self.fail(f"unexpected RPC method: {method}")
 
         def sleep(seconds):
-            nonlocal elapsed
+            nonlocal elapsed, votes_ready
             elapsed += seconds
+            votes_ready = True
 
         output = io.StringIO()
         with (patch.object(reorg.subprocess, "check_output", side_effect=cli),
@@ -106,6 +132,7 @@ class ReorgRecoveryTests(unittest.TestCase):
               patch.object(reorg.time, "sleep", side_effect=sleep),
               redirect_stdout(output)):
             reorg.run("test")
+        self.assertEqual(set(range(1, 7)), running_beacons)
         return json.loads(output.getvalue().splitlines()[-1]), checked_heights
 
     def test_recovery_rejects_only_catching_up_to_existing_blocks(self):
