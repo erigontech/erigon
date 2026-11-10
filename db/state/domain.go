@@ -1600,30 +1600,32 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 		return err
 	}
 	defer valsCursor.Close()
-	unwindStepBytes := make([]byte, 8)
-	binary.BigEndian.PutUint64(unwindStepBytes, ^uint64(step))
+	unwindStepInverted := make([]byte, 8)
+	binary.BigEndian.PutUint64(unwindStepInverted, ^uint64(step))
 
 	for _, diff := range domainDiffs {
 		key := common.ToBytesZeroCopy(diff.Key)
-		stepBytes, fullKey := key[len(key)-8:], key[:len(key)-8]
+		diffStepInverted, fullKey := key[len(key)-8:], key[:len(key)-8]
 		var previous []byte
 		var found bool
 		k, v, err := valsCursor.Seek(fullKey)
 		for err == nil && k != nil {
-			var version, value []byte
+			var storedStepInverted, value []byte
 			if d.LargeValues {
 				if len(k) != len(fullKey)+8 || !bytes.Equal(k[:len(fullKey)], fullKey) {
 					break
 				}
-				version, value = k[len(fullKey):], v
+				storedStepInverted, value = k[len(fullKey):], v
 			} else {
 				if !bytes.Equal(k, fullKey) {
 					break
 				}
-				version, value = v[:8], v[8:]
+				storedStepInverted, value = v[:8], v[8:]
 			}
 			// Earlier restores can leave newer versions absent from this branch's diffs.
-			if bytes.Compare(version, unwindStepBytes) >= 0 && !bytes.Equal(version, stepBytes) {
+			newerThanUnwind := bytes.Compare(storedStepInverted, unwindStepInverted) < 0
+			writtenAtDiffStep := bytes.Equal(storedStepInverted, diffStepInverted)
+			if !newerThanUnwind && !writtenAtDiffStep {
 				previous, found = value, true
 				break
 			}
@@ -1636,7 +1638,7 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 			return err
 		}
 		// Only the partially retained step needs its overwritten value restored.
-		if diff.Value == nil || txNumUnwindTo%dt.stepSize == 0 || !bytes.Equal(stepBytes, unwindStepBytes) {
+		if diff.Value == nil || txNumUnwindTo%dt.stepSize == 0 || !bytes.Equal(diffStepInverted, unwindStepInverted) {
 			continue
 		}
 		// A value already supplied by an older version needs no new entry.
@@ -1653,7 +1655,7 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 		if d.LargeValues {
 			err = rwTx.Put(d.ValuesTable, key, diff.Value)
 		} else {
-			err = valsCursor.Put(fullKey, append(unwindStepBytes, diff.Value...)) //nolint:makezero
+			err = valsCursor.Put(fullKey, append(unwindStepInverted, diff.Value...)) //nolint:makezero
 		}
 		if err != nil {
 			return err

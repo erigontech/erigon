@@ -63,15 +63,17 @@ def run(enclave):
         return "http://" + address.removeprefix("http://").removeprefix("tcp://")
 
     clients = ["lighthouse", "lighthouse", "teku", "teku", "lighthouse", "lighthouse"]
+    node_ids = range(1, len(clients) + 1)
+    branch_a_node, branch_b_node, witness = 1, 3, 5
     execution = [endpoint(f"el-{i}-erigon-{client}", "ws-rpc")
                  for i, client in enumerate(clients, 1)]
     consensus = [endpoint(f"cl-{i}-{client}-erigon", "http") for i, client in enumerate(clients, 1)]
     disruptoor = endpoint("disruptoor", "http")
 
     def block(node, number="latest"):
-        result = rpc(execution[node], "eth_getBlockByNumber", number, False)
+        result = rpc(execution[node-1], "eth_getBlockByNumber", number, False)
         if result is None:
-            raise RPCUnavailable(f"node {node+1}: block {number} is not available")
+            raise RPCUnavailable(f"node {node}: block {number} is not available")
         return result
 
     def finality():
@@ -79,17 +81,17 @@ def run(enclave):
                     ["data"]["finalized"]["epoch"]) for url in consensus]
 
     def branch_weight(node, block_hash):
-        nodes = request(consensus[node] + "/eth/v1/debug/fork_choice")["fork_choice_nodes"]
+        nodes = request(consensus[node-1] + "/eth/v1/debug/fork_choice")["fork_choice_nodes"]
         for entry in nodes:
             if entry["execution_block_hash"] == block_hash:
                 return int(entry["weight"])
-        raise RPCUnavailable(f"node {node+1}: fork choice has no block {block_hash}")
+        raise RPCUnavailable(f"node {node}: fork choice has no block {block_hash}")
 
     def converged(minimum):
-        height = min(int(block(i)["number"], 16) for i in range(len(clients))) - 2
+        height = min(int(block(node)["number"], 16) for node in node_ids) - 2
         if height < minimum:
             return None
-        blocks = [block(i, hex(height)) for i in range(len(clients))]
+        blocks = [block(node, hex(height)) for node in node_ids]
         return blocks if same_block(blocks) and blocks[0]["transactions"] else None
 
     def check_state(blocks):
@@ -138,24 +140,24 @@ def run(enclave):
 
     common = wait("common canonical chain", lambda: converged(1))
     start = int(common[0]["number"], 16)
-    # Six equal validator groups: A starts with one, B with two, and node 5
+    # Six equal validator groups: A starts with one, B with two, and the witness
     # only observes. Activating A's two reserves makes A heavier than B without
     # either isolated branch having the two-thirds needed for finality.
     try:
-        for node in (2, 5, 6):
+        for node in (2, witness, 6):
             validators(node, False)
-        left, right = [1, 2, 5, 6], [3, 4]
+        left, right = [branch_a_node, 2, witness, 6], [branch_b_node, 4]
         partition([left, right])
         print(json.dumps({"phase": "partition", "groups": [left, right], "split_at": start}), flush=True)
 
         def split_heads():
-            height = min(int(block(i)["number"], 16) for i in range(len(clients))) - 2
+            height = min(int(block(node)["number"], 16) for node in node_ids) - 2
             if height < start + 3:
                 return None
-            heads = [block(i, hex(height)) for i in range(len(clients))]
-            if not all(same_block([heads[i-1] for i in group]) for group in (left, right)):
+            heads = [block(node, hex(height)) for node in node_ids]
+            if not all(same_block([heads[node-1] for node in group]) for group in (left, right)):
                 return None
-            if heads[0]["hash"] == heads[2]["hash"]:
+            if heads[branch_a_node-1]["hash"] == heads[branch_b_node-1]["hash"]:
                 return None
             if any(int(heads[group[0]-1]["gasUsed"], 16) == 0 for group in (left, right)):
                 return None
@@ -163,18 +165,18 @@ def run(enclave):
 
         before = wait("two live branches with transactions", split_heads, timeout=1200)
         height = before[0]["number"]
-        branch_a, branch_b = before[0]["hash"], before[2]["hash"]
-        partition([[1, 2, 6], [3, 4, 5]])
-        wait("witness switches from A to B", lambda: block(4, height)["hash"] == branch_b)
+        branch_a, branch_b = before[branch_a_node-1]["hash"], before[branch_b_node-1]["hash"]
+        partition([[branch_a_node, 2, 6], [branch_b_node, 4, witness]])
+        wait("witness switches from A to B", lambda: block(witness, height)["hash"] == branch_b)
         print(json.dumps({"phase": "A_to_B", "height": height, "old": branch_a, "new": branch_b}), flush=True)
 
         for node in (2, 6):
             validators(node, True)
-        wait("A has greater fork-choice weight than B", lambda: branch_weight(0, branch_a) > branch_weight(4, branch_b))
-        partition([[1, 2, 5, 6], [3, 4]])
-        wait("witness returns from B to A", lambda: block(4, height)["hash"] == branch_a)
-        assert block(0, height)["hash"] == branch_a, "A's original branch was lost"
-        assert block(2, height)["hash"] == branch_b, "B's original branch was lost"
+        wait("A has greater fork-choice weight than B", lambda: branch_weight(branch_a_node, branch_a) > branch_weight(witness, branch_b))
+        partition([left, right])
+        wait("witness returns from B to A", lambda: block(witness, height)["hash"] == branch_a)
+        assert block(branch_a_node, height)["hash"] == branch_a, "A's original branch was lost"
+        assert block(branch_b_node, height)["hash"] == branch_b, "B's original branch was lost"
         print(json.dumps({"phase": "B_to_A", "height": height, "old": branch_b, "new": branch_a}), flush=True)
     finally:
         request(disruptoor + "/v1/state/clear", {}, "POST")
@@ -182,23 +184,23 @@ def run(enclave):
             validators(node, True)
 
     wait("healed chain advances", lambda: converged(int(height, 16) + 6))
-    after = [block(i, height) for i in range(len(clients))]
-    assert same_block(after) and after[0]["hash"] == branch_a, "healing lost the restored branch"
+    after = [block(node, height) for node in node_ids]
+    assert same_block(after) and after[branch_a_node-1]["hash"] == branch_a, "healing lost the restored branch"
     check_state(after)
-    for tx_hash in before[2]["transactions"]:
-        receipt = rpc(execution[4], "eth_getTransactionReceipt", tx_hash)
+    for tx_hash in before[branch_b_node-1]["transactions"]:
+        receipt = rpc(execution[witness-1], "eth_getTransactionReceipt", tx_hash)
         if receipt:
-            canonical = block(4, receipt["blockNumber"])
+            canonical = block(witness, receipt["blockNumber"])
             assert receipt["blockHash"] == canonical["hash"], f"stale receipt for {tx_hash}"
 
-    service = "el-5-erigon-lighthouse"
+    service = f"el-{witness}-erigon-{clients[witness-1]}"
     cli("service", "stop", enclave, service)
     cli("service", "start", enclave, service)
-    execution[4] = endpoint(service, "ws-rpc")
+    execution[witness-1] = endpoint(service, "ws-rpc")
     recovered = wait("restarted witness EL catches up", lambda: converged(int(height, 16) + 12))
     check_state(recovered)
     # Convergence trails the slowest node; require a block beyond every current EL head.
-    head_after_recovery = max(int(block(i)["number"], 16) for i in range(len(clients)))
+    head_after_recovery = max(int(block(node)["number"], 16) for node in node_ids)
     finalized_after_recovery = max(finality())
     recovered = wait("new execution blocks after recovery", lambda: converged(head_after_recovery + 1))
     check_state(recovered)

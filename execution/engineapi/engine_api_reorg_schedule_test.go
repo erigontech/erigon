@@ -63,14 +63,55 @@ func TestEngineApiReorgSchedules(t *testing.T) {
 	if testing.Short() {
 		t.Skip("node restart and snapshot reorg integration test")
 	}
+	const (
+		opExtend = iota
+		opSelectBranch
+		opBounce
+		opRestart
+		opPrune
+		opInvalidPayload
+		opCount
+	)
+	opNames := [opCount]string{
+		opExtend:         "extend",
+		opSelectBranch:   "select_branch",
+		opBounce:         "bounce",
+		opRestart:        "restart",
+		opPrune:          "prune",
+		opInvalidPayload: "invalid_payload",
+	}
 	type scheduleCase struct {
 		name     string
 		schedule []byte
 	}
 	cases := []scheduleCase{
-		{"bounce_restart", []byte{0, 23, 1, 47, 2, 7, 3, 0, 4, 0, 5, 0, 1, 0, 3, 0, 0, 19}},
-		{"prune_invalid", []byte{4, 0, 1, 71, 5, 0, 3, 0, 2, 0, 0, 23, 4, 0, 1, 24}},
-		{"repeated_unwind", []byte{1, 98, 0, 89, 1, 179, 2, 16}},
+		{"bounce_restart", []byte{
+			opExtend, 23,
+			opSelectBranch, 47,
+			opBounce, 7,
+			opRestart, 0,
+			opPrune, 0,
+			opInvalidPayload, 0,
+			opSelectBranch, 0,
+			opRestart, 0,
+			opExtend, 19,
+		}},
+		{"prune_invalid", []byte{
+			opPrune, 0,
+			opSelectBranch, 71,
+			opInvalidPayload, 0,
+			opRestart, 0,
+			opBounce, 0,
+			opExtend, 23,
+			opPrune, 0,
+			opSelectBranch, 24,
+		}},
+		{"repeated_unwind", []byte{
+			opSelectBranch, 98,
+			opExtend, 89,
+			opSelectBranch, 179,
+			opBounce, 16,
+		}},
 		{"restored_versions", generatedReorgSchedule(3)},
 	}
 	if value, ok := os.LookupEnv("ERIGON_REORG_SEED"); ok {
@@ -90,7 +131,7 @@ func TestEngineApiReorgSchedules(t *testing.T) {
 	var branches []reorgReference
 	var address common.Address
 	const prefixPokes, suffixPokes = 48, 24
-	const fork = prefixPokes + 1 // payload index: block 1, deployment, then pokes
+	const forkIndex = prefixPokes + 1 // payload index: block 1, deployment, then pokes
 	require.Greater(t, prefixPokes, snapshotCrashReorgDepth, "the shared prefix must be eligible for snapshots")
 	require.Less(t, suffixPokes, snapshotCrashReorgDepth, "every generated reorg must fit inside the retained window")
 	genesis, key, err := engineapitester.DefaultEngineApiTesterGenesis()
@@ -119,7 +160,7 @@ func TestEngineApiReorgSchedules(t *testing.T) {
 			states:   make(map[common.Hash]crashRecoveryState),
 		}
 		if branch > 0 {
-			require.Equal(t, branches[0].payloads[fork].ExecutionPayload.BlockHash, ref.payloads[fork].ExecutionPayload.BlockHash)
+			require.Equal(t, branches[0].payloads[forkIndex].ExecutionPayload.BlockHash, ref.payloads[forkIndex].ExecutionPayload.BlockHash)
 		}
 		for k := 0; k <= suffixPokes; k++ {
 			eat.ExecutionModule.Drain()
@@ -157,54 +198,54 @@ func TestEngineApiReorgSchedules(t *testing.T) {
 			eat, err := engineapitester.InitialiseEngineApiTester(ctx, args)
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, eat.Close()) })
-			branch, head := 0, fork
-			selectHead := func(nextBranch, nextHead int) {
+			branch, headIndex := 0, forkIndex
+			selectHead := func(nextBranch, nextHeadIndex int) {
 				ref := branches[nextBranch]
-				status, err := eat.ExecutionModule.InsertBlocks(ctx, ref.blocks[:nextHead+1])
+				status, err := eat.ExecutionModule.InsertBlocks(ctx, ref.blocks[:nextHeadIndex+1])
 				require.NoError(t, err)
 				require.Equal(t, execmodule.ExecutionStatusSuccess, status)
-				payload := ref.payloads[nextHead]
+				payload := ref.payloads[nextHeadIndex]
 				require.NoError(t, eat.MockCl.UpdateForkChoice(ctx, payload))
 				eat.ExecutionModule.Drain()
 				if slot := payload.ExecutionPayload.SlotNumber; slot != nil {
 					eat.MockCl.State().SlotNumber = max(eat.MockCl.State().SlotNumber, uint64(*slot)+1)
 				}
-				branch, head = nextBranch, nextHead
+				branch, headIndex = nextBranch, nextHeadIndex
 			}
 			check := func() {
 				t.Helper()
 				ref := branches[branch]
 				churn, err := contracts.NewStateChurn(address, eat.ContractBackend)
 				require.NoError(t, err)
-				assertChurnState(ctx, t, eat, churn, ref.payloads[head], ref.sums[head])
+				assertChurnState(ctx, t, eat, churn, ref.payloads[headIndex], ref.sums[headIndex])
 				require.NoError(t, eat.ChainDB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
-					assertEquivalentCrashRecoveryState(t, ref.states[ref.payloads[head].ExecutionPayload.BlockHash], readCrashRecoveryTx(t, tx))
+					assertEquivalentCrashRecoveryState(t, ref.states[ref.payloads[headIndex].ExecutionPayload.BlockHash], readCrashRecoveryTx(t, tx))
 					return nil
 				}))
 			}
-			selectHead(branch, head)
+			selectHead(branch, headIndex)
 			require.Positive(t, catchupCommits.Load(), "the mode matrix must exercise multi-block catch-up")
 			check()
 			for i := 0; i+1 < len(schedule); i += 2 {
-				op, target := schedule[i]%6, int(schedule[i+1])
-				t.Logf("step=%d op=%d target=%d branch=%d height=%d schedule=%x", i/2, op, target, branch, head+1, schedule)
+				op, target := schedule[i]%opCount, int(schedule[i+1])
+				t.Logf("step=%d op=%s target=%d branch=%d height=%d schedule=%x", i/2, opNames[op], target, branch, headIndex+1, schedule)
 				switch op {
-				case 0:
-					selectHead(branch, min(head+1+target%suffixPokes, len(branches[branch].payloads)-1))
-				case 1:
-					selectHead(target%len(branches), fork+(target/len(branches))%(suffixPokes+1))
-				case 2:
-					previousBranch, previousHead := branch, head
-					selectHead((branch+1)%len(branches), fork+target%(suffixPokes+1))
+				case opExtend:
+					selectHead(branch, min(headIndex+1+target%suffixPokes, len(branches[branch].payloads)-1))
+				case opSelectBranch:
+					selectHead(target%len(branches), forkIndex+(target/len(branches))%(suffixPokes+1))
+				case opBounce:
+					previousBranch, previousHeadIndex := branch, headIndex
+					selectHead((branch+1)%len(branches), forkIndex+target%(suffixPokes+1))
 					check()
-					selectHead(previousBranch, previousHead)
-					assertCanonicalHead(ctx, t, eat, branches[previousBranch].payloads[previousHead])
-				case 3:
+					selectHead(previousBranch, previousHeadIndex)
+					assertCanonicalHead(ctx, t, eat, branches[previousBranch].payloads[previousHeadIndex])
+				case opRestart:
 					args.MockClState = eat.MockCl.State()
 					require.NoError(t, eat.Close())
 					eat, err = engineapitester.InitialiseEngineApiTester(ctx, args)
 					require.NoError(t, err)
-				case 4:
+				case opPrune:
 					// A pass may build files; the next can prune their MDBX copies.
 					for range 2 {
 						finished, err := eat.ExecutionModule.Prune(ctx)
@@ -220,7 +261,7 @@ func TestEngineApiReorgSchedules(t *testing.T) {
 						require.Positive(t, tx.Debug().DomainFiles(kv.AccountsDomain).EndRootNum(), "pruning must exercise snapshot-backed state")
 						return nil
 					}))
-				case 5:
+				case opInvalidPayload:
 					payload, err := eat.MockCl.BuildNewPayload(ctx)
 					require.NoError(t, err)
 					bad := engineapitester.TamperMockClPayloadStateRoot(payload, common.Hash{1})
@@ -228,7 +269,7 @@ func TestEngineApiReorgSchedules(t *testing.T) {
 					require.NoError(t, err)
 					require.Equal(t, enginetypes.InvalidStatus, status.Status)
 					require.Equal(t, &payload.ExecutionPayload.ParentHash, status.LatestValidHash, "the payload must reach execution validation")
-					require.NoError(t, eat.MockCl.UpdateForkChoice(ctx, branches[branch].payloads[head]))
+					require.NoError(t, eat.MockCl.UpdateForkChoice(ctx, branches[branch].payloads[headIndex]))
 					eat.ExecutionModule.Drain()
 				}
 				check()
