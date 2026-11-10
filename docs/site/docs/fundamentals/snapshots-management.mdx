@@ -50,7 +50,7 @@ total: 1.8TB (4285 files)
 
 Sizes use Erigon's `ByteCount` format (e.g. `850.4GB`, `1.2TB` — binary scale, no space). Block/step counts and prune-window sizes use `.` as the thousands separator, matching the binary's own output.
 
-The estimator only sums files already on disk, so no node-type estimate can exceed what is present. Commitment history and Caplin data are left out of every row, as a default node does not download them. Estimates are therefore most meaningful against an archive datadir (shown above); on an already-pruned node the larger modes are capped at what is physically present. Rows are printed in the fixed order `archive → full → blocks → minimal`. When a headers or bodies segment cannot be read, or the bodies are not indexed up to the last segment on disk, `seg du` logs a warning and prints the report without estimates (`"estimates": null` in JSON).
+The estimator only sums files already on disk, so no node-type estimate can exceed what is present. Commitment history and Caplin data are left out of every row, as a default node does not download them. Estimates are therefore most meaningful against an archive datadir (shown above); on an already-pruned node the larger modes are capped at what is physically present. Rows are printed in the fixed order `archive → full → blocks → minimal`. When a headers or bodies segment cannot be read, or the indexed bodies do not cover every block in the headers and bodies segments on disk, `seg du` logs a warning and prints the report without estimates (`"estimates": null` in JSON).
 
 **Header fields explained:**
 
