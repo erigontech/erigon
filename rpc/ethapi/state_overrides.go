@@ -18,6 +18,7 @@ package ethapi
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"slices"
 
@@ -184,6 +185,9 @@ func FinalizeCallTx(ibs *state.IntraBlockState, rules *chain.Rules) error {
 // FinalizeCallTxTo is FinalizeCallTx that also hands the tx's state changes to stateWriter;
 // a nil stateWriter takes none.
 func FinalizeCallTxTo(ibs *state.IntraBlockState, rules *chain.Rules, stateWriter state.StateWriter) error {
+	if !ibs.IsVersioned() {
+		return errors.New("call state has no version map")
+	}
 	writes, err := ibs.FinalizedWrites(rules)
 	if err != nil {
 		return err

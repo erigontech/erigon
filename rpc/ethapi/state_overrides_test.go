@@ -336,3 +336,7 @@ func TestFinalizeCallTxKeepsARecreatedEmptyAccountDeleted(t *testing.T) {
 		})
 	}
 }
+
+func TestFinalizeCallTxRejectsAStateWithoutAVersionMap(t *testing.T) {
+	require.ErrorContains(t, FinalizeCallTx(state.New(state.NewNoopReader()), &chain.Rules{}), "no version map")
+}
