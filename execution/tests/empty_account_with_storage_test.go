@@ -35,7 +35,6 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/program"
-	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 func storageAt(t *testing.T, st *state.IntraBlockState, addr common.Address, slot byte) uint256.Int {
@@ -49,9 +48,7 @@ func storageAt(t *testing.T, st *state.IntraBlockState, addr common.Address, slo
 // account with its storage. A later tx delegates the account by EIP-7702 to
 // code that stores SLOAD(1)+1 in slot 2, so slot 2 must be 1.
 func TestTouchedEmptyAccountWithStorageIsWiped(t *testing.T) {
-	prevWorkers := ethconfig.Defaults.Sync.ExecWorkerCount
-	t.Cleanup(func() { ethconfig.Defaults.Sync.ExecWorkerCount = prevWorkers })
-	ethconfig.Defaults.Sync.ExecWorkerCount = 4
+	setExecWorkers(t, 4)
 
 	authorityKey, err := crypto.ToECDSA(common.LeftPadBytes([]byte{0xa0}, 32))
 	require.NoError(t, err)
@@ -84,38 +81,33 @@ func TestTouchedEmptyAccountWithStorageIsWiped(t *testing.T) {
 			auth, err := types.SignAuthorization(authorityKey, *config.ChainID, delegate, 0)
 			require.NoError(t, err)
 
-			generate := func() *blockgen.ChainPack {
-				m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(keys[0]))
-				chainPack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) {
-					b.SetCoinbase(common.Address{1})
-					for i, to := range []common.Address{burner, authority} {
-						gas := uint64(100_000)
-						if to == burner {
-							gas = 1_000_000
-						}
-						sender := crypto.PubkeyToAddress(keys[i].PublicKey)
-						txn, err := types.SignTx(types.NewTransaction(b.TxNonce(sender), to, uint256.NewInt(0), gas, gasPrice, nil), *signer, keys[i])
-						require.NoError(t, err)
-						b.AddTx(txn)
+			m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(keys[0]))
+			chainPack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) {
+				b.SetCoinbase(common.Address{1})
+				for i, to := range []common.Address{burner, authority} {
+					gas := uint64(100_000)
+					if to == burner {
+						gas = 1_000_000
 					}
-					sender := crypto.PubkeyToAddress(keys[2].PublicKey)
-					setCode, err := types.SignTx(&types.SetCodeTransaction{
-						DynamicFeeTransaction: types.DynamicFeeTransaction{
-							CommonTx: types.CommonTx{Nonce: b.TxNonce(sender), GasLimit: 500_000, To: &authority},
-							ChainID:  *config.ChainID,
-							TipCap:   *gasPrice,
-							FeeCap:   *gasPrice,
-						},
-						Authorizations: []types.Authorization{auth},
-					}, *signer, keys[2])
+					sender := crypto.PubkeyToAddress(keys[i].PublicKey)
+					txn, err := types.SignTx(types.NewTransaction(b.TxNonce(sender), to, uint256.NewInt(0), gas, gasPrice, nil), *signer, keys[i])
 					require.NoError(t, err)
-					b.AddTx(setCode)
-				})
+					b.AddTx(txn)
+				}
+				sender := crypto.PubkeyToAddress(keys[2].PublicKey)
+				setCode, err := types.SignTx(&types.SetCodeTransaction{
+					DynamicFeeTransaction: types.DynamicFeeTransaction{
+						CommonTx: types.CommonTx{Nonce: b.TxNonce(sender), GasLimit: 500_000, To: &authority},
+						ChainID:  *config.ChainID,
+						TipCap:   *gasPrice,
+						FeeCap:   *gasPrice,
+					},
+					Authorizations: []types.Authorization{auth},
+				}, *signer, keys[2])
 				require.NoError(t, err)
-				return chainPack
-			}
-
-			chainPack := generate()
+				b.AddTx(setCode)
+			})
+			require.NoError(t, err)
 			for _, workers := range []int{1, 4} {
 				t.Run(fmt.Sprintf("workers=%d", workers), func(t *testing.T) {
 					setExecWorkers(t, workers)

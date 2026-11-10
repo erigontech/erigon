@@ -24,23 +24,18 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
-	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 // Before Spurious Dragon, paying the coinbase a zero fee creates it as an
 // empty account, so a later CALL to the coinbase in the same block does not
 // pay the new-account gas. Parallel import must accept the block.
 func TestZeroFeeCreatesCoinbaseBeforeSpuriousDragon(t *testing.T) {
-	prevParallel, prevWorkers := dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount
-	t.Cleanup(func() { dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount = prevParallel, prevWorkers })
-
 	config := &chain.Config{ChainID: uint256.NewInt(1), HomesteadBlock: common.NewUint64(0), TangerineWhistleBlock: common.NewUint64(0)}
 	signer := types.MakeFrontierSigner()
 	coinbase := common.HexToAddress("0xc0ffee")

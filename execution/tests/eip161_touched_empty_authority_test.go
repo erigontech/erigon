@@ -33,7 +33,6 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
-	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 var eip161TouchForks = func() []struct {
@@ -104,11 +103,7 @@ func callCode(addr common.Address, value byte) []byte {
 // The blocks with and without the empty account must both import.
 func TestTouchedEmptyAuthorityIsAbsentForLaterTx(t *testing.T) {
 	// This test changes the worker count and cannot run in parallel.
-	prevWorkers := ethconfig.Defaults.Sync.ExecWorkerCount
-	t.Cleanup(func() {
-		ethconfig.Defaults.Sync.ExecWorkerCount = prevWorkers
-	})
-	ethconfig.Defaults.Sync.ExecWorkerCount = 4
+	setExecWorkers(t, 4)
 
 	keys, senders := eip161TouchKeys(t, 2)
 	authorityKey, err := crypto.HexToECDSA("9a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")

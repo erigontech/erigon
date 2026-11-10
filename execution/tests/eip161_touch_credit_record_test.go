@@ -26,7 +26,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
@@ -34,7 +33,6 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
-	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 // A CREATE before Spurious Dragon that returns empty code leaves an empty
@@ -43,12 +41,7 @@ import (
 // on serial. The slow first transaction finishes last, so the parallel executor
 // usually validates the touch and the credit in one pass.
 func TestTouchedEmptyAccountCreditedInSameBlock(t *testing.T) {
-	prevParallel, prevWorkers := dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount
-	t.Cleanup(func() {
-		dbg.Exec3Parallel = prevParallel
-		ethconfig.Defaults.Sync.ExecWorkerCount = prevWorkers
-	})
-	ethconfig.Defaults.Sync.ExecWorkerCount = 4
+	setExecWorkers(t, 4)
 
 	var keys [3]*ecdsa.PrivateKey
 	var senders [3]common.Address

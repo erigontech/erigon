@@ -26,7 +26,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/state"
@@ -34,7 +33,6 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
-	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 // A chain config with a burnt-fee contract credits the base fee to that
@@ -42,9 +40,6 @@ import (
 // block; parallel import must accept the block and end with the balances the
 // fees and transfers give.
 func TestBurntContractFeeRecipients(t *testing.T) {
-	prevParallel, prevWorkers := dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount
-	t.Cleanup(func() { dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount = prevParallel, prevWorkers })
-
 	alloc := types.GenesisAlloc{}
 	keys := revivalKeys(t, alloc, 2)
 	sender := crypto.PubkeyToAddress(keys[0].PublicKey)
