@@ -204,8 +204,26 @@ func TestCallManySharesTheGasCapAcrossTheRequest(t *testing.T) {
 	code := hexutil.Bytes(hexutil.MustDecode("0x5b600056"))
 	overrides := ethapi.StateOverrides{accounts.InternAddress(burner): {Code: &code}}
 
-	_, err := api.CallMany(context.Background(), []Bundle{{Transactions: []ethapi.CallArgs{{To: &cheap}, {To: &burner}, {To: &burner}}}}, stateCtx, &overrides, nil)
-	require.ErrorContains(t, err, "--rpc.gascap")
+	aboveBudget := hexutil.Uint64(api.GasCap)
+	for name, gas := range map[string]*hexutil.Uint64{"default gas": nil, "gas above the remaining budget": &aboveBudget} {
+		t.Run(name, func(t *testing.T) {
+			_, err := api.CallMany(context.Background(), []Bundle{{Transactions: []ethapi.CallArgs{{To: &cheap}, {To: &burner, Gas: gas}, {To: &burner, Gas: gas}}}}, stateCtx, &overrides, nil)
+			require.ErrorContains(t, err, "--rpc.gascap")
+		})
+	}
+}
+
+func TestCallManyWithoutAGasCapRunsTheCalls(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api, _ := newCallManyApisForTest(m)
+	api.GasCap = 0
+	txIndex := -1
+	stateCtx := StateContext{BlockNumber: rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber), TransactionIndex: &txIndex}
+	to := common.HexToAddress("0x00000000000000000000000000000000000000ae")
+
+	results, err := api.CallMany(context.Background(), []Bundle{{Transactions: []ethapi.CallArgs{{To: &to}}}}, stateCtx, nil, nil)
+	require.NoError(t, err)
+	require.NotContains(t, results[0][0], "error")
 }
 
 func TestCallManyEmptyBundles(t *testing.T) {

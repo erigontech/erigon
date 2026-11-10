@@ -262,6 +262,9 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 	// Every transaction of the request gets the next index, so each sees the ones before it.
 	txIndex := st.TxnIndex()
 	gasBudget := api.GasCap // shared by the whole request, as in eth_simulateV1: return data costs memory gas
+	if gasBudget == 0 {
+		gasBudget = math.MaxUint64 / 2 // --rpc.gascap=0 means no cap
+	}
 	for bundleIdx, bundle := range bundles {
 		// first change blockContext
 		bundle.BlockOverride.OverrideBlockContext(&blockCtx, ethapi.BlockHashOverrides(overrideBlockHash))
