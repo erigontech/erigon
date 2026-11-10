@@ -86,7 +86,7 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (comm
 
 	var milliseconds uint16
 	if config.Parlia != nil {
-		milliseconds = binary.BigEndian.Uint16(header.MixDigest[30:])
+		milliseconds = uint16(binary.BigEndian.Uint64(header.MixDigest[24:]))
 	}
 
 	blockContext := evmtypes.BlockContext{

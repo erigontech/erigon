@@ -17,42 +17,22 @@
 package vm
 
 import (
-	"errors"
-
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/execution/protocol/params"
-	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
-// blockContextPrecompile is a precompile whose output depends on the block. The
-// EVM binds it to its block context before running it.
-type blockContextPrecompile interface {
-	withBlockContext(ctx *evmtypes.BlockContext) PrecompiledContract
-}
-
 // milliTimestamp returns the block time in milliseconds as a 32-byte word (BEP-706).
-// Calldata is ignored.
-type milliTimestamp struct{}
+// Calldata is ignored. The fork set holds it unbound; runPrecompile binds it to the block.
+type milliTimestamp struct {
+	millis uint64
+}
 
 func (c *milliTimestamp) RequiredGas(input []byte) uint64 { return params.MilliTimestampGas }
 
 func (c *milliTimestamp) Name() string { return "MilliTimestamp" }
 
 func (c *milliTimestamp) Run(input []byte) ([]byte, error) {
-	return nil, errors.New("milliTimestamp: needs the block context")
-}
-
-func (c *milliTimestamp) withBlockContext(ctx *evmtypes.BlockContext) PrecompiledContract {
-	return &boundMilliTimestamp{millis: ctx.Time*1000 + uint64(ctx.Milliseconds)}
-}
-
-type boundMilliTimestamp struct {
-	milliTimestamp
-	millis uint64
-}
-
-func (c *boundMilliTimestamp) Run(input []byte) ([]byte, error) {
 	out := uint256.NewInt(c.millis).Bytes32()
 	return out[:], nil
 }
