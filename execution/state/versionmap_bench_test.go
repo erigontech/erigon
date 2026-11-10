@@ -2,12 +2,14 @@ package state
 
 import (
 	"fmt"
+	"math/big"
 	"math/rand"
 	"sync"
 	"testing"
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -50,8 +52,11 @@ func BenchmarkMarkWritesValidated(b *testing.B) {
 	vm := NewVersionMap(nil)
 	writes := make([]*WriteSet, n)
 	addrs := make([]accounts.Address, 0, 2*n)
+	addrAt := func(i int) accounts.Address {
+		return accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i))))
+	}
 	for i := range n {
-		sender, recipient := getAddress(2*i+1), getAddress(2*i+2)
+		sender, recipient := addrAt(2*i+1), addrAt(2*i+2)
 		v := Version{TxIndex: i, Incarnation: 1}
 		ws := &WriteSet{}
 		ws.SetBalance(sender, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: sender, Path: BalancePath, Key: accounts.NilKey, Version: v}, Val: *uint256.NewInt(uint64(i))})
