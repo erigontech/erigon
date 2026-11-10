@@ -242,6 +242,7 @@ func convertCommitmentFileV3(
 	out := make(chan *convertedBatch, workers*2)
 	var read atomic.Uint64
 
+	defer vf.src.decompressor.MadvNormal().DisableReadAhead()
 	g, gctx := errgroup.WithContext(ctx)
 	g.Go(func() error {
 		defer close(in)

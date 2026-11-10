@@ -641,7 +641,6 @@ func commitmentConvert(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 	agg.PresetOfflineMerge()
 	agg.SetSnapshotBuildSema(semaphore.NewWeighted(int64(runtime.NumCPU())))
 	agg.DisableAllDependencies()
-	defer agg.MadvNormal().DisableReadAhead()
 
 	acRo := agg.BeginFilesRo()
 	defer acRo.Close()

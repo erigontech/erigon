@@ -437,6 +437,7 @@ func convertCommitmentFile(
 	if src.StepCount(stepSize) < DomainMinStepsToCompress {
 		srcCompression = seg.CompressNone
 	}
+	defer src.decompressor.MadvNormal().DisableReadAhead()
 	reader := seg.NewReader(src.decompressor.MakeGetter(), srcCompression)
 	reader.Reset(0)
 
