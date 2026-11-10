@@ -1648,3 +1648,28 @@ func TestVersionedRead_FailedParkRecordsDependency(t *testing.T) {
 	require.Equal(t, *uint256.NewInt(5), got)
 	require.Equal(t, 1, ibs.DepTxIndex())
 }
+
+// A read parked on an in-flight self-destruct re-reads a fresh probe of that cell after the
+// wake: the probe memoized before the park still says in-flight, and would park the read again.
+func TestVersionedRead_ParkOnInFlightSelfDestructDropsMemo(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0xb4})
+	vm := NewVersionMap(nil)
+	vm.WriteBalance(addr, Version{TxIndex: 0}, *uint256.NewInt(3), true)
+	vm.WriteSelfDestruct(addr, Version{TxIndex: 1}, true, false)
+
+	ibs := NewWithVersionMap(&emptyReader{}, vm)
+	defer ibs.Close()
+	ibs.SetTxContext(1, 2)
+	waits := 0
+	vm.SetWriterWait(func(_, _ int, _ func() bool) bool {
+		waits++
+		require.Equal(t, 1, waits, "the read must not park on the stale memo")
+		vm.WriteSelfDestruct(addr, Version{TxIndex: 1}, true, true)
+		return true
+	})
+	_, err := ibs.GetBalance(addr)
+	require.NoError(t, err)
+	require.Equal(t, 1, waits)
+	require.False(t, ibs.HadInvalidRead())
+}
