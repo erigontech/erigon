@@ -85,13 +85,16 @@ func (m *addMockTxPool) NonceFromAddress(addr [20]byte) (nonce uint64, inPool bo
 
 func (m *addMockTxPool) GetBlobs(blobhashes []common.Hash) (blobBundles []PoolBlobBundle) { return nil }
 
-func TestMapFrameDiscardReasonToProto(t *testing.T) {
+func TestMapDiscardReasonToProto(t *testing.T) {
 	t.Parallel()
 
 	for _, tc := range []struct {
 		reason txpoolcfg.DiscardReason
 		want   txpoolproto.ImportResult
 	}{
+		{txpoolcfg.IntrinsicGas, txpoolproto.ImportResult_INVALID},
+		{txpoolcfg.GasLimitTooHigh, txpoolproto.ImportResult_INVALID},
+		{txpoolcfg.NonceTooDistant, txpoolproto.ImportResult_INVALID},
 		{txpoolcfg.InvalidFrame, txpoolproto.ImportResult_INVALID},
 		{txpoolcfg.FrameValidationUnavailable, txpoolproto.ImportResult_INTERNAL_ERROR},
 		{txpoolcfg.FrameStateChanged, txpoolproto.ImportResult_INTERNAL_ERROR},
@@ -383,7 +386,7 @@ func TestGrpcServerAddRetriesNonceGapAfterStateUpdate(t *testing.T) {
 
 			first, err := server.Add(ctx, request)
 			require.NoError(t, err)
-			require.Equal(t, []txpoolproto.ImportResult{txpoolproto.ImportResult_INTERNAL_ERROR}, first.Imported)
+			require.Equal(t, []txpoolproto.ImportResult{txpoolproto.ImportResult_INVALID}, first.Imported)
 			require.Equal(t, []string{txpoolcfg.NonceTooDistant.String()}, first.Errors)
 			require.Empty(t, pool.byHash)
 			if persisted {
