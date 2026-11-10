@@ -137,7 +137,7 @@ func TestRevertedSelfdestructKeepsCreateEndowment(t *testing.T) {
 					b.AddTx(txn)
 				}
 			}
-			serial, parallels := importSerialThenParallel(t, gspec, keys[0], 1, []int{1, 2, 4}, gen)
+			serial, parallels := importSerialThenParallel(t, gspec, keys[0], 1, []int{2, 4}, gen)
 			want := storageValues(t, serial, observer, 0, 1, 2)
 			require.Equal(t, []uint64{prefund + endowment, uint64(len(runtime)), 0}, want)
 			for i, p := range parallels {

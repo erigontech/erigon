@@ -112,8 +112,8 @@ func revivalKeys(t *testing.T, alloc types.GenesisAlloc, n int) []*ecdsa.Private
 
 // The coinbase is created by CREATE2 and destroyed in the same tx, a later
 // tx's fee revives it with a balance only, and a third tx re-creates it by the
-// same CREATE2, this time with code. Parallel import must accept the block that
-// serial execution built, and the coinbase must end with the code.
+// same CREATE2, this time with code. Parallel import must accept the block, and the
+// coinbase must end with the code.
 func TestCoinbaseRecreatedWithCodeAfterFeeRevival(t *testing.T) {
 	// The constructor self-destructs while the account has no balance and
 	// deploys 32 bytes of code once a fee has revived it.
@@ -183,8 +183,7 @@ func TestCreate2AfterDestructAndTransferRevival(t *testing.T) {
 
 // Before Cancun, in one block: a slow tx destroys a pre-existing contract that is
 // the coinbase, the next tx's fee revives it as a plain account, and a third tx
-// re-creates it by CREATE2. Parallel import must accept the block that serial
-// execution built.
+// re-creates it by CREATE2. Parallel import must accept the block.
 func TestCreate2AfterCoinbaseDestructAndFeeRevival(t *testing.T) {
 	initCode := []byte{byte(vm.STOP)}
 	factory := common.HexToAddress("0xfac7")

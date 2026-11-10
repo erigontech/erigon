@@ -36,8 +36,7 @@ import (
 
 // Before Spurious Dragon, paying the coinbase a zero fee creates it as an
 // empty account, so a later CALL to the coinbase in the same block does not
-// pay the new-account gas. Parallel import must accept the block that serial
-// execution built.
+// pay the new-account gas. Parallel import must accept the block.
 func TestZeroFeeCreatesCoinbaseBeforeSpuriousDragon(t *testing.T) {
 	prevParallel, prevWorkers := dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount
 	t.Cleanup(func() { dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount = prevParallel, prevWorkers })

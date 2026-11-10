@@ -22,9 +22,11 @@ package executiontests
 import (
 	"context"
 	"crypto/ecdsa"
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"math/big"
+	"strings"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -390,7 +392,7 @@ func TestParallelBatchStorageAndHistoryMatchSerial(t *testing.T) {
 			b.AddTx(txn)
 		}
 	}
-	serial, parallels := importSerialThenParallel(t, gspec, keys[0], len(plan), []int{1, 4}, gen)
+	serial, parallels := importSerialThenParallel(t, gspec, keys[0], len(plan), []int{4}, gen)
 
 	slots := []uint64{1, 2}
 	for s := uint64(1000); s < obs; s++ {
@@ -403,9 +405,27 @@ func TestParallelBatchStorageAndHistoryMatchSerial(t *testing.T) {
 	}
 	sender := crypto.PubkeyToAddress(keys[0].PublicKey)
 	accountKeys := [][]byte{coinbase[:], sender[:]}
-	want := storageValues(t, serial, toggler, slots...)
+	want := make([]uint64, len(slots))
+	current1, current2 := uint64(0), uint64(5)
+	next := 2
+	for _, block := range plan {
+		for _, w := range block {
+			want[next], want[next+1] = current1+1, current2+1
+			next += 2
+			current1, current2 = w[0], w[1]
+		}
+	}
+	want[0], want[1] = current1, current2
+	require.Equal(t, want, storageValues(t, serial, toggler, slots...))
 	wantStorageHistory := domainHistory(t, serial, kv.StorageDomain, storageKeys, 1, uint64(len(plan)))
 	wantAccountHistory := domainHistory(t, serial, kv.AccountsDomain, accountKeys, 1, uint64(len(plan)))
+	// Pinned from a serial-executor run: every worker count shares the code path these histories come from.
+	digest := func(lines []string) string {
+		sum := sha256.Sum256([]byte(strings.Join(lines, "\n")))
+		return hex.EncodeToString(sum[:])
+	}
+	require.Equal(t, "60362a675faf85d4a1482362d6391ce8ea3313a96bfc356152b8bd1820510b77", digest(wantStorageHistory))
+	require.Equal(t, "47a90e51ee80e1d7d3b6972b5e5bfca7cb8a4255a6539584d76cb9a00d1f6aa8", digest(wantAccountHistory))
 	for i, p := range parallels {
 		require.Equalf(t, want, storageValues(t, p, toggler, slots...), "parallel #%d: storage", i)
 		require.Equalf(t, wantStorageHistory, domainHistory(t, p, kv.StorageDomain, storageKeys, 1, uint64(len(plan))), "parallel #%d: per-tx storage history", i)

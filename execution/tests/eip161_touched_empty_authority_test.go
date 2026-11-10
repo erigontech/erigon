@@ -28,8 +28,10 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
@@ -260,7 +262,12 @@ func TestCreditedEmptyAccountIsKept(t *testing.T) {
 				}
 				fill := func(b *blockgen.BlockGen) { tc.fill(b, config) }
 				chainPack := generateEIP161TouchBlock(t, gspec, keys[0], fill)
-				importEIP161TouchBlock(t, gspec, keys[0], chainPack)
+				importInParallel(t, gspec, keys[0], chainPack, func(t *testing.T, st *state.IntraBlockState) {
+					exist, err := st.Exist(accounts.InternAddress(empty))
+					require.NoError(t, err)
+					require.True(t, exist)
+					require.Equal(t, *uint256.NewInt(1), storageAt(t, st, empty, 1))
+				})
 			})
 		}
 	}
@@ -298,7 +305,17 @@ func TestEmptiedContractIsKept(t *testing.T) {
 				b.AddTx(txn)
 			}
 			chainPack := generateEIP161TouchBlock(t, gspec, keys[0], fill)
-			importEIP161TouchBlock(t, gspec, keys[0], chainPack)
+			importInParallel(t, gspec, keys[0], chainPack, func(t *testing.T, st *state.IntraBlockState) {
+				code, err := st.GetCode(accounts.InternAddress(wallet))
+				require.NoError(t, err)
+				require.Equal(t, forward, code)
+				balance, err := st.GetBalance(accounts.InternAddress(wallet))
+				require.NoError(t, err)
+				require.True(t, balance.IsZero())
+				balance, err = st.GetBalance(accounts.InternAddress(sink))
+				require.NoError(t, err)
+				require.Equal(t, *uint256.NewInt(1), balance)
+			})
 		})
 	}
 }
@@ -330,7 +347,12 @@ func TestTouchedStorageOnlyAccountIsAbsentForLaterTx(t *testing.T) {
 			for _, receipt := range chainPack.Receipts[0] {
 				require.Equal(t, types.ReceiptStatusSuccessful, receipt.Status)
 			}
-			importEIP161TouchBlock(t, gspec, keys[0], chainPack)
+			importInParallel(t, gspec, keys[0], chainPack, func(t *testing.T, st *state.IntraBlockState) {
+				balance, err := st.GetBalance(accounts.InternAddress(storageOnly))
+				require.NoError(t, err)
+				require.Equal(t, *uint256.NewInt(1), balance)
+				require.Equal(t, uint256.Int{}, storageAt(t, st, storageOnly, 1))
+			})
 		})
 	}
 }
