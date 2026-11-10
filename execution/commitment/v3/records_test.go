@@ -319,6 +319,15 @@ func TestRecordGraph(t *testing.T) {
 		require.NoError(t, matcher.Expect(key, h1[:]))
 		require.ErrorContains(t, matcher.Record(key, h2), "folds to")
 	})
+	t.Run("E66/RecordMatcherRejectsStorageRootMismatch", func(t *testing.T) {
+		matcher := NewRecordMatcher()
+		var addrHash [32]byte
+		addrHash[0] = 1
+		stored, folded := [32]byte{2}, [32]byte{3}
+		require.NoError(t, matcher.Expect(StorageNodeKey(addrHash, nil, nil), stored[:]))
+		require.NoError(t, matcher.Record(AccountNodeKey(nil, nil), [32]byte{4}))
+		require.ErrorContains(t, matcher.Record(StorageNodeKey(addrHash, nil, nil), folded), "storage trie folds to")
+	})
 	t.Run("E66/RecordMatcherRejectsDuplicateRecord", func(t *testing.T) {
 		matcher := NewRecordMatcher()
 		key := AccountNodeKey([]byte{1}, nil)
