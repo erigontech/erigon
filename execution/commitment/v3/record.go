@@ -273,7 +273,7 @@ func encodeRecord(n *node, depth int, dst []byte) []byte {
 
 	selfExt := depth == 0 && len(n.path) != 0
 	if selfExt {
-		if bits.OnesCount16(n.childMask) != 1 || n.leafMask != 0 {
+		if !n.isExtension() {
 			panic("commitment v3: root extension needs one non-leaf child")
 		}
 	} else if depth == 0 && bits.OnesCount16(n.childMask) < 2 {
