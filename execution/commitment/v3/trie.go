@@ -156,9 +156,6 @@ func (t *Trie) TraceCollapsesRoot(ctx context.Context, updates *commitment.Updat
 }
 
 func (t *Trie) ProcessFeed(ctx context.Context, feed *commitment.Feed, onProgress func(*commitment.CommitProgress)) ([]byte, error) {
-	if feed == nil {
-		return nil, errors.New("commitment v3: nil feed")
-	}
 	return t.round(ctx, onProgress, func() ([]storageTask, []accountEntry, int, error) {
 		storage, accounts := partitionAccounts(feed.Accounts, t.scheduleWorkers)
 		return storage, accounts, feed.Keys, nil

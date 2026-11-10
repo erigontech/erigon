@@ -212,6 +212,21 @@ func TestTrieAPI(t *testing.T) {
 		_, err := trie.Process(context.Background(), updates, "", nil, commitment.WarmupConfig{})
 		require.EqualError(t, err, "commitment v3: Process requires ModeCollect updates")
 	})
+	t.Run("E45/TraceCollapsesRootRequiresContext", func(t *testing.T) {
+		trie := &Trie{}
+		t.Cleanup(trie.Release)
+
+		_, err := trie.TraceCollapsesRoot(t.Context(), testUpdates(t, commitment.ModeCollect, nil), nil)
+		require.ErrorIs(t, err, errTrieContext)
+	})
+	t.Run("E45/TraceCollapsesRootRejectsWrongUpdateMode", func(t *testing.T) {
+		trie := &Trie{}
+		t.Cleanup(trie.Release)
+		trie.ResetContext(newMockContext())
+
+		_, err := trie.TraceCollapsesRoot(t.Context(), testUpdates(t, commitment.ModeDirect, nil), nil)
+		require.EqualError(t, err, "commitment v3: TraceCollapses requires ModeCollect updates")
+	})
 	t.Run("E45/EmptyCodeTouchLeavesEmptyTrieEmpty", func(t *testing.T) {
 		trie, updates := NewTrie(t.TempDir(), commitment.TrieConfig{})
 		t.Cleanup(trie.Release)
