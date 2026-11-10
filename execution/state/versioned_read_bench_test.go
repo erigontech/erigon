@@ -84,3 +84,29 @@ func BenchmarkWarmExtCodeHashSeq(b *testing.B) {
 		_, _ = s.GetCodeHash(addr)
 	}
 }
+
+// BenchmarkWarmExtCodeHashAbsent measures the warm EXTCODEHASH state sequence on an
+// absent account, with a revert every txOps ops as in a loop that ends out of gas.
+func BenchmarkWarmExtCodeHashAbsent(b *testing.B) {
+	_, tx, domains := NewTestRwTx(b)
+	reader := NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
+	addr := accounts.InternAddress([20]byte{0xAB, 0x5E})
+	s := NewWithVersionMap(reader, NewVersionMap(nil))
+	s.txIndex = 1
+	s.StartAccessRecording()
+
+	const txOps = 150_000
+	snapshot := s.PushSnapshot()
+	ops := 0
+	b.ReportAllocs()
+	for b.Loop() {
+		s.AddAddressToAccessList(addr)
+		s.MarkAddressAccess(addr, false)
+		_, _ = s.Empty(addr)
+		if ops++; ops == txOps {
+			s.RevertToSnapshot(snapshot, nil)
+			snapshot = s.PushSnapshot()
+			ops = 0
+		}
+	}
+}

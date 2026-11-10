@@ -662,7 +662,6 @@ func (ibs *IntraBlockState) Empty(addr accounts.Address) (empty bool, err error)
 		return false, err
 	}
 	if account == nil {
-		ibs.touchAccount(addr)
 		// Do NOT call accountRead here: versionedAccountBase already recorded the
 		// AddressPath read with Val=nil. Overwriting it with a non-nil empty
 		// account would make downstream reads treat the account as existing,

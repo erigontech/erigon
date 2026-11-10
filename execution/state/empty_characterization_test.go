@@ -98,3 +98,23 @@ func TestEmpty_Characterization(t *testing.T) {
 		require.True(t, empty)
 	})
 }
+
+func TestEmptyOnAbsentAccountOnlyRecordsTheRead(t *testing.T) {
+	t.Parallel()
+
+	addr := getAddress(90)
+	reader := &accountStateReader{accounts: map[accounts.Address]*accounts.Account{}}
+	ibs := emptyCharIBS(reader, NewVersionMap(nil), 3)
+
+	for range 3 {
+		empty, err := ibs.Empty(addr)
+		require.NoError(t, err)
+		require.True(t, empty)
+	}
+
+	require.Empty(t, ibs.journal.entries, "a read must not grow the journal")
+	require.True(t, ibs.warmReadable(addr), "a read must not disable the read-once path")
+	read, ok := ibs.versionedReads.GetAddress(addr)
+	require.True(t, ok, "the absence must stay in the read set for validation")
+	require.Nil(t, read.Val)
+}
