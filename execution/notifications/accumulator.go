@@ -46,7 +46,9 @@ func (a *Accumulator) Changes() []StateChange {
 	return a.changes
 }
 
-// An incomplete batch still needs delivery when no individual changes were recorded.
+// An incomplete batch still needs dispatch without recorded block changes.
+// Before sending it, the dispatcher adds an entry for the current head so
+// consumers can identify the announced state.
 func (a *Accumulator) HasPendingChanges() bool {
 	return a != nil && (len(a.changes) > 0 || a.stateChangesIncomplete)
 }
