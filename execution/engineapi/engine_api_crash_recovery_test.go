@@ -651,7 +651,7 @@ func crashRecoveryExitError(err error) error {
 	return fmt.Errorf("child exited without the expected kill: %w", err)
 }
 
-func (request crashRecoveryRequest) validateMode() error {
+func (request crashRecoveryRequest) validate() error {
 	if request.StartupCycle < 0 {
 		return errors.New("startup cycle must not be negative")
 	}
@@ -667,39 +667,44 @@ func (request crashRecoveryRequest) validateMode() error {
 	if request.CatchupCycle < 0 {
 		return errors.New("catch-up cycle must not be negative")
 	}
+	if len(request.Canonical) == 0 {
+		return errors.New("forkchoice crash requests require canonical blocks")
+	}
 	if request.CatchupCycle > 0 {
 		if request.Point != execmodule.StateTransitionFCUCatchupCommitReady && request.Point != execmodule.StateTransitionFCUCatchupCommitComplete {
 			return fmt.Errorf("catch-up mode requires a catch-up commit boundary, got %d", request.Point)
 		}
-	} else {
-		switch request.Point {
-		case execmodule.StateTransitionUnwindComplete, execmodule.StateTransitionOverlayPublished,
-			execmodule.StateTransitionCommitReady, execmodule.StateTransitionCommitComplete, execmodule.StateTransitionOverlayCleared:
-		default:
-			return fmt.Errorf("tip mode requires a tip FCU boundary, got %d", request.Point)
+		if len(request.Replacement) > 0 {
+			return errors.New("catch-up imports use only the downloaded blocks")
 		}
-		if len(request.Downloaded) > 0 {
-			return errors.New("tip-mode crash requests must not include downloaded blocks")
+		if len(request.Downloaded) == 0 {
+			return errors.New("catch-up crash requests require downloaded blocks")
 		}
+		return nil
+	}
+	switch request.Point {
+	case execmodule.StateTransitionUnwindComplete, execmodule.StateTransitionOverlayPublished,
+		execmodule.StateTransitionCommitReady, execmodule.StateTransitionCommitComplete, execmodule.StateTransitionOverlayCleared:
+	default:
+		return fmt.Errorf("tip mode requires a tip FCU boundary, got %d", request.Point)
+	}
+	if len(request.Downloaded) > 0 {
+		return errors.New("tip-mode crash requests must not include downloaded blocks")
+	}
+	if len(request.Replacement) == 0 {
+		return errors.New("tip-mode crash requests require replacement blocks")
+	}
+	canonicalHead := request.Canonical[len(request.Canonical)-1].ExecutionPayload.BlockNumber
+	replacementHead := request.Replacement[len(request.Replacement)-1].ExecutionPayload.BlockNumber
+	if replacementHead > canonicalHead {
+		return fmt.Errorf("replacement FCU must stay in tip mode: head %d exceeds canonical head %d", replacementHead, canonicalHead)
 	}
 	return nil
 }
 
 func killAtUnwindBoundary(t *testing.T, request crashRecoveryRequest) {
 	t.Helper()
-	require.NoError(t, request.validateMode())
-	if request.StartupCycle == 0 {
-		require.NotEmpty(t, request.Canonical)
-		canonicalHead := request.Canonical[len(request.Canonical)-1].ExecutionPayload.BlockNumber
-		if request.CatchupCycle > 0 {
-			require.Empty(t, request.Replacement, "catch-up imports use only the downloaded blocks")
-			require.NotEmpty(t, request.Downloaded)
-		} else {
-			require.NotEmpty(t, request.Replacement)
-			replacementHead := request.Replacement[len(request.Replacement)-1].ExecutionPayload.BlockNumber
-			require.LessOrEqual(t, replacementHead, canonicalHead, "the replacement FCU must stay in tip mode, without catch-up commits")
-		}
-	}
+	require.NoError(t, request.validate())
 	killAtCrashBoundary(t, "TestEngineApiCrashRecovery", unwindCrashChild, int(request.Point), func(address string, deadline time.Time) any {
 		request.ControlAddress, request.Deadline = address, deadline
 		return request

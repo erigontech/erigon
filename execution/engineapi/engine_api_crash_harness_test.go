@@ -29,15 +29,25 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv"
+	enginetypes "github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/engineapi/engineapitester"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 )
 
-func TestCrashRecoveryRequestMode(t *testing.T) {
+func TestCrashRecoveryRequest(t *testing.T) {
+	chain := func(head hexutil.Uint64) []*engineapitester.MockClPayload {
+		return []*engineapitester.MockClPayload{{
+			GetPayloadResponse: &enginetypes.GetPayloadResponse{
+				ExecutionPayload: &enginetypes.ExecutionPayload{BlockNumber: head},
+			},
+		}}
+	}
 	t.Run("tip", func(t *testing.T) {
-		var request crashRecoveryRequest
+		request := crashRecoveryRequest{Canonical: chain(2), Replacement: chain(2)}
 		for _, point := range []execmodule.StateTransitionPoint{
 			execmodule.StateTransitionUnwindComplete,
 			execmodule.StateTransitionOverlayPublished,
@@ -46,7 +56,7 @@ func TestCrashRecoveryRequestMode(t *testing.T) {
 			execmodule.StateTransitionOverlayCleared,
 		} {
 			request.Point = point
-			require.NoError(t, request.validateMode(), "point %d", point)
+			require.NoError(t, request.validate(), "point %d", point)
 		}
 		for _, point := range []execmodule.StateTransitionPoint{
 			execmodule.StateTransitionRPCViewBound,
@@ -57,27 +67,57 @@ func TestCrashRecoveryRequestMode(t *testing.T) {
 			255,
 		} {
 			request.Point = point
-			require.ErrorContains(t, request.validateMode(), "tip mode requires a tip FCU boundary", "point %d", point)
+			require.ErrorContains(t, request.validate(), "tip mode requires a tip FCU boundary", "point %d", point)
 		}
 		request.Point = execmodule.StateTransitionCommitReady
+		t.Run("missing_canonical", func(t *testing.T) {
+			invalid := request
+			invalid.Canonical = nil
+			require.ErrorContains(t, invalid.validate(), "require canonical blocks")
+		})
+		t.Run("missing_replacement", func(t *testing.T) {
+			invalid := request
+			invalid.Replacement = nil
+			require.ErrorContains(t, invalid.validate(), "require replacement blocks")
+		})
+		t.Run("replacement_ahead", func(t *testing.T) {
+			invalid := request
+			invalid.Replacement = chain(3)
+			require.ErrorContains(t, invalid.validate(), "replacement FCU must stay in tip mode")
+		})
 		request.Downloaded = []crashRecoveryBlock{{}}
-		require.ErrorContains(t, request.validateMode(), "tip-mode crash requests must not include downloaded blocks")
+		require.ErrorContains(t, request.validate(), "tip-mode crash requests must not include downloaded blocks")
 	})
 	t.Run("catchup", func(t *testing.T) {
-		request := crashRecoveryRequest{CatchupCycle: 1}
+		request := crashRecoveryRequest{CatchupCycle: 1, Canonical: chain(2), Downloaded: []crashRecoveryBlock{{}}}
 		for _, point := range []execmodule.StateTransitionPoint{
 			execmodule.StateTransitionFCUCatchupCommitReady,
 			execmodule.StateTransitionFCUCatchupCommitComplete,
 		} {
 			request.Point = point
-			require.NoError(t, request.validateMode())
+			require.NoError(t, request.validate())
 		}
+		t.Run("missing_canonical", func(t *testing.T) {
+			invalid := request
+			invalid.Canonical = nil
+			require.ErrorContains(t, invalid.validate(), "require canonical blocks")
+		})
+		t.Run("unexpected_replacement", func(t *testing.T) {
+			invalid := request
+			invalid.Replacement = chain(2)
+			require.ErrorContains(t, invalid.validate(), "catch-up imports use only the downloaded blocks")
+		})
+		t.Run("missing_downloaded", func(t *testing.T) {
+			invalid := request
+			invalid.Downloaded = nil
+			require.ErrorContains(t, invalid.validate(), "require downloaded blocks")
+		})
 		request.Point = execmodule.StateTransitionCommitReady
-		require.ErrorContains(t, request.validateMode(), "catch-up mode requires a catch-up commit boundary")
+		require.ErrorContains(t, request.validate(), "catch-up mode requires a catch-up commit boundary")
 	})
 	t.Run("negative_cycle", func(t *testing.T) {
 		request := crashRecoveryRequest{CatchupCycle: -1, Point: execmodule.StateTransitionCommitReady}
-		require.ErrorContains(t, request.validateMode(), "catch-up cycle must not be negative")
+		require.ErrorContains(t, request.validate(), "catch-up cycle must not be negative")
 	})
 	t.Run("startup", func(t *testing.T) {
 		request := crashRecoveryRequest{StartupCycle: 1}
@@ -86,18 +126,18 @@ func TestCrashRecoveryRequestMode(t *testing.T) {
 			execmodule.StateTransitionStartupCommitComplete,
 		} {
 			request.Point = point
-			require.NoError(t, request.validateMode())
+			require.NoError(t, request.validate())
 		}
 		request.CatchupCycle = 1
-		require.ErrorContains(t, request.validateMode(), "without importing blocks")
+		require.ErrorContains(t, request.validate(), "without importing blocks")
 		request.CatchupCycle = 0
 		request.Downloaded = []crashRecoveryBlock{{}}
-		require.ErrorContains(t, request.validateMode(), "without importing blocks")
+		require.ErrorContains(t, request.validate(), "without importing blocks")
 		request.Downloaded = nil
 		request.Point = execmodule.StateTransitionFCUCatchupCommitReady
-		require.ErrorContains(t, request.validateMode(), "requires a startup commit boundary")
+		require.ErrorContains(t, request.validate(), "requires a startup commit boundary")
 		request.StartupCycle = -1
-		require.ErrorContains(t, request.validateMode(), "startup cycle must not be negative")
+		require.ErrorContains(t, request.validate(), "startup cycle must not be negative")
 	})
 }
 

@@ -542,29 +542,32 @@ func snapshotMergeBoundaryReached(point state.MaintenancePoint, agg *state.Aggre
 			return false, fmt.Errorf("merge input lost before the merging reader closed: %s: %w", path, err)
 		}
 	}
-	if point == state.MaintenanceMergeComplete {
-		// File dependencies can delay retirement until a later merge cycle.
-		return reclaimed > 0, nil
-	}
-	if point != state.MaintenanceMergeFilesBuilt {
+	switch point {
+	case state.MaintenanceMergeFilesBuilt:
+		if removed != 0 {
+			return false, fmt.Errorf("merge outputs were published before MergeFilesBuilt")
+		}
+		paths, err := filepath.Glob(filepath.Join(agg.Dirs().SnapDomain, "*.kv"))
+		if err != nil {
+			return false, err
+		}
+		for _, path := range paths {
+			if !slices.Contains(visible, path) {
+				return true, nil
+			}
+		}
+		return false, fmt.Errorf("MergeFilesBuilt has no unpublished output files on disk")
+	case state.MaintenanceMergeFilesPublished:
 		if removed == 0 {
 			return false, fmt.Errorf("merge boundary %d did not replace any visible input files", point)
 		}
 		return true, nil
+	case state.MaintenanceMergeComplete:
+		// File dependencies can delay retirement until a later merge cycle.
+		return reclaimed > 0, nil
+	default:
+		return false, fmt.Errorf("unexpected merge boundary %d", point)
 	}
-	if removed != 0 {
-		return false, fmt.Errorf("merge outputs were published before MergeFilesBuilt")
-	}
-	paths, err := filepath.Glob(filepath.Join(agg.Dirs().SnapDomain, "*.kv"))
-	if err != nil {
-		return false, err
-	}
-	for _, path := range paths {
-		if !slices.Contains(visible, path) {
-			return true, nil
-		}
-	}
-	return false, fmt.Errorf("MergeFilesBuilt has no unpublished output files on disk")
 }
 
 // A time-budgeted FCU pass may leave all state pruning for a later pass.
