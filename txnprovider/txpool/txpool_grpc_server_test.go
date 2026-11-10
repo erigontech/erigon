@@ -54,7 +54,7 @@ import (
 
 type addMockTxPool struct {
 	knownByCall      []bool
-	hasTxnCalls      int
+	knownTxnCalls    int
 	addReasons       []txpoolcfg.DiscardReason
 	addLocalSlotsLen int
 }
@@ -72,17 +72,10 @@ func (m *addMockTxPool) deprecatedForEach(f func(rlp []byte, sender common.Addre
 }
 func (m *addMockTxPool) CountContent() (int, int, int) { return 0, 0, 0 }
 func (m *addMockTxPool) RejectFramePrefix(common.Hash) {}
-func (m *addMockTxPool) HasTxn(hash []byte) bool {
-	i := m.hasTxnCalls
-	m.hasTxnCalls++
-	if i < len(m.knownByCall) {
-		return m.knownByCall[i]
-	}
-	return false
-}
-
 func (m *addMockTxPool) KnownTxnReason(hash []byte) txpoolcfg.DiscardReason {
-	if m.HasTxn(hash) {
+	i := m.knownTxnCalls
+	m.knownTxnCalls++
+	if i < len(m.knownByCall) && m.knownByCall[i] {
 		return txpoolcfg.AlreadyKnown
 	}
 	return txpoolcfg.NotSet
@@ -200,7 +193,7 @@ func TestGrpcServerAddBlobNonceGap(t *testing.T) {
 		Errors:   []string{"nonce-gapped blob transaction"},
 	}, reply)
 	hash := signed.Hash()
-	require.False(t, pool.HasTxn(hash[:]))
+	require.NotEqual(t, txpoolcfg.AlreadyKnown, pool.KnownTxnReason(hash[:]))
 	require.NoError(t, poolDB.View(ctx, func(tx kv.Tx) error {
 		known, knownErr := pool.IdHashKnown(tx, hash[:])
 		require.NoError(t, knownErr)
@@ -221,7 +214,7 @@ func TestGrpcServerAddBlobNonceGap(t *testing.T) {
 	reply, err = server.Add(ctx, &txpoolproto.AddRequest{RlpTxs: [][]byte{encoded.Bytes()}})
 	require.NoError(t, err)
 	require.Equal(t, []txpoolproto.ImportResult{txpoolproto.ImportResult_SUCCESS}, reply.Imported)
-	require.True(t, pool.HasTxn(hash[:]))
+	require.Equal(t, txpoolcfg.AlreadyKnown, pool.KnownTxnReason(hash[:]))
 }
 
 func TestGrpcServerAddInvalidSelfAuthorizationNonce(t *testing.T) {
@@ -257,7 +250,7 @@ func TestGrpcServerAddInvalidSelfAuthorizationNonce(t *testing.T) {
 				}, reply)
 			}
 			hash := signed.Hash()
-			require.False(t, pool.HasTxn(hash[:]))
+			require.NotEqual(t, txpoolcfg.AlreadyKnown, pool.KnownTxnReason(hash[:]))
 			require.NoError(t, poolDB.View(ctx, func(tx kv.Tx) error {
 				known, knownErr := pool.IdHashKnown(tx, hash[:])
 				require.NoError(t, knownErr)
@@ -339,7 +332,7 @@ func TestGrpcServerAddFrameFailureAfterConcurrentAdmission(t *testing.T) {
 			require.NoError(t, accepted.err)
 			require.Equal(t, []txpoolproto.ImportResult{txpoolproto.ImportResult_SUCCESS}, accepted.reply.Imported)
 			require.NoError(t, err)
-			require.True(t, pool.HasTxn(frame.IDHash[:]))
+			require.Equal(t, txpoolcfg.AlreadyKnown, pool.KnownTxnReason(frame.IDHash[:]))
 			require.Equal(t, &txpoolproto.AddReply{
 				Imported: []txpoolproto.ImportResult{txpoolproto.ImportResult_ALREADY_EXISTS},
 				Errors:   []string{txpoolcfg.AlreadyKnown.String()},
@@ -511,7 +504,7 @@ func TestGrpcServerCachedFrameRejectionBeforeSignatures(t *testing.T) {
 			require.Equal(t, []string{tc.reason.String()}, reply.Errors)
 			require.Equal(t, []txpoolproto.ImportResult{tc.want}, reply.Imported)
 			require.Empty(t, pool.ethBackend.(*frameValidationBackend).calls)
-			require.False(t, pool.HasTxn(hash[:]))
+			require.NotEqual(t, txpoolcfg.AlreadyKnown, pool.KnownTxnReason(hash[:]))
 		})
 	}
 }
@@ -577,7 +570,7 @@ func TestGrpcServerFramePrefixRejectionKnownToGossip(t *testing.T) {
 	retry, err := server.Add(ctx, request)
 	require.NoError(t, err)
 	require.Equal(t, reply, retry)
-	require.False(t, pool.HasTxn(hash[:]))
+	require.NotEqual(t, txpoolcfg.AlreadyKnown, pool.KnownTxnReason(hash[:]))
 	require.Empty(t, pool.ethBackend.(*frameValidationBackend).calls)
 }
 

@@ -104,7 +104,7 @@ func TestFramePoolConsumedNonceReply(t *testing.T) {
 				request.RlpTxs = request.RlpTxs[:1]
 			}
 			hash := frame.Hash()
-			require.False(t, pool.HasTxn(hash[:]))
+			require.NotEqual(t, txpoolcfg.AlreadyKnown, pool.KnownTxnReason(hash[:]))
 			require.NoError(t, poolDB.View(ctx, func(tx kv.Tx) error {
 				known, err := pool.IdHashKnown(tx, hash[:])
 				require.NoError(t, err)

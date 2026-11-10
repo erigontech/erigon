@@ -116,6 +116,8 @@ func TestIdHashKnownRecognizesMinedBlobAfterNonceGap(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NonceTooDistant}, reasons)
 	require.Empty(t, pool.byHash)
+	// A gap found after insertion also leaves a retryable discard-cache entry.
+	pool.discardReasonsLRU.Add(string(blobTxn.IDHash[:]), txpoolcfg.NonceTooDistant)
 	require.NoError(t, pool.poolDB.View(ctx, func(tx kv.Tx) error {
 		known, err := pool.IdHashKnown(tx, blobTxn.IDHash[:])
 		require.NoError(t, err)

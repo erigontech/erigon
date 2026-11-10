@@ -667,15 +667,6 @@ func (p *TxPool) IdHashKnown(tx kv.Tx, hash []byte) (bool, error) {
 	return p.idHashKnown(tx, hash, hashS)
 }
 
-// HasTxn reports pool membership. Gossip also treats cached rejections as known,
-// but RPC must not tell callers that a rejected transaction was accepted.
-func (p *TxPool) HasTxn(hash []byte) bool {
-	p.lock.Lock()
-	defer p.lock.Unlock()
-	_, ok := p.byHash[string(hash)]
-	return ok
-}
-
 // KnownTxnReason returns AlreadyKnown or a reusable rejection, or NotSet if admission is needed.
 func (p *TxPool) KnownTxnReason(hash []byte) txpoolcfg.DiscardReason {
 	p.lock.Lock()
@@ -1565,21 +1556,24 @@ func (p *TxPool) prepareTxns(ctx context.Context, txns TxnSlots, sources []remot
 		return nil, nil, nil
 	}
 
-	var precheckReasons []txpoolcfg.DiscardReason
+	reasons := make([]txpoolcfg.DiscardReason, len(txns.Txns))
 	var goodTxns TxnSlots
 	err := p.withLockedState(ctx, &prechecked, func(_ kv.TemporalTx, view kvcache.CacheView) error {
 		var err error
+		var precheckReasons []txpoolcfg.DiscardReason
 		precheckReasons, goodTxns, _, err = p.validateTxns(&prechecked, view, nil, nil)
-		return err
+		if err != nil {
+			return err
+		}
+		for i, index := range indices {
+			reasons[index] = precheckReasons[i]
+		}
+		return p.checkBlobNonceGaps(txns, reasons, view)
 	})
 	if err != nil {
 		return nil, nil, err
 	}
 
-	reasons := make([]txpoolcfg.DiscardReason, len(txns.Txns))
-	for i, index := range indices {
-		reasons[index] = precheckReasons[i]
-	}
 	for _, txn := range goodTxns.Txns {
 		if txn.TxType() == SetCodeTxnType {
 			p.recoverAuthorizations(txn)
@@ -1603,6 +1597,63 @@ func (p *TxPool) prepareTxns(ctx context.Context, txns TxnSlots, sources []remot
 		}
 	}
 	return reasons, cells, nil
+}
+
+// checkBlobNonceGaps rejects gaps before KZG verification, with p.lock held.
+// Batch predecessors are provisional; admission rechecks the surviving nonce chain.
+func (p *TxPool) checkBlobNonceGaps(txns TxnSlots, reasons []txpoolcfg.DiscardReason, view kvcache.CacheView) error {
+	type nonceChain struct {
+		next   uint64
+		nonces map[uint64]struct{}
+	}
+	chains := make(map[common.Address]*nonceChain)
+	for i, txn := range txns.Txns {
+		if txn.TxType() != BlobTxnType || reasons[i] != txpoolcfg.NotSet || p.hasParkedLegacyFrame(txn.SenderID) {
+			continue
+		}
+		sender := txns.Senders.AddressAt(i)
+		if chains[sender] == nil {
+			nonce, _, _, err := p.senders.info(view, txn.SenderID)
+			if err != nil {
+				return err
+			}
+			chains[sender] = &nonceChain{next: nonce, nonces: make(map[uint64]struct{})}
+		}
+	}
+	if len(chains) == 0 {
+		return nil
+	}
+	for i, txn := range txns.Txns {
+		if reasons[i] != txpoolcfg.NotSet || txn.hasKeyedNonce() {
+			continue
+		}
+		if chain := chains[txns.Senders.AddressAt(i)]; chain != nil {
+			chain.nonces[txn.Nonce] = struct{}{}
+		}
+	}
+	for i, txn := range txns.Txns {
+		if txn.TxType() != BlobTxnType || reasons[i] != txpoolcfg.NotSet {
+			continue
+		}
+		chain := chains[txns.Senders.AddressAt(i)]
+		if chain == nil {
+			continue
+		}
+		for chain.next < txn.Nonce {
+			_, inBatch := chain.nonces[chain.next]
+			if !inBatch && p.all.get(txn.SenderID, chain.next) == nil {
+				break
+			}
+			chain.next++
+		}
+		if txn.Nonce > chain.next {
+			reasons[i] = txpoolcfg.BlobNonceGap
+			if p.cfg.MaxNonceGap > 0 && txn.Nonce-chain.next > p.cfg.MaxNonceGap {
+				reasons[i] = txpoolcfg.NonceTooDistant
+			}
+		}
+	}
+	return nil
 }
 
 // kzgOffenders tracks the remote sources of txns that failed KZG verification, so their later txns are skipped.

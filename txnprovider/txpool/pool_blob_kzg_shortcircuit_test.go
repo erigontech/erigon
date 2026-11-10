@@ -18,6 +18,7 @@ package txpool
 
 import (
 	"context"
+	"math"
 	"testing"
 	"time"
 
@@ -319,6 +320,97 @@ func TestBlobPoolLimitsCheckedBeforeKZG(t *testing.T) {
 			require.Equal(t, []txpoolcfg.DiscardReason{tc.reason}, reasons)
 		})
 	}
+}
+
+func TestPrepareTxnsBlobNonceGapBeforeKZG(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		nonce  uint64
+		pooled []uint64
+		batch  []uint64
+		want   txpoolcfg.DiscardReason
+	}{
+		{name: "gap", nonce: 1, want: txpoolcfg.BlobNonceGap},
+		{name: "large gap", nonce: math.MaxUint64, want: txpoolcfg.NonceTooDistant},
+		{name: "current nonce", want: txpoolcfg.UnmatchedBlobTxExt},
+		{name: "pooled predecessor", nonce: 1, pooled: []uint64{0}, want: txpoolcfg.UnmatchedBlobTxExt},
+		{name: "batch predecessor", nonce: 1, batch: []uint64{0}, want: txpoolcfg.UnmatchedBlobTxExt},
+		{name: "combined predecessors", nonce: 3, pooled: []uint64{0, 2}, batch: []uint64{1}, want: txpoolcfg.UnmatchedBlobTxExt},
+		{name: "gap before pooled predecessors", nonce: 3, pooled: []uint64{1, 2}, want: txpoolcfg.BlobNonceGap},
+		{name: "gap within batch", nonce: 3, batch: []uint64{0, 2}, want: txpoolcfg.BlobNonceGap},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := t.Context()
+			pool := seedBlobKZGTestPool(t, ctx)
+			sender := common.Address{1}
+			var pooled TxnSlots
+			for _, nonce := range tc.pooled {
+				txn := newTestTxnSlot(nonce, 0, 300_000, 300_000, 100_000)
+				txn.IDHash = txn.Txn.Hash()
+				pooled.Append(txn, sender[:], true)
+			}
+			reasons, err := pool.AddLocalTxns(ctx, pooled)
+			require.NoError(t, err)
+			for _, reason := range reasons {
+				require.Equal(t, txpoolcfg.Success, reason)
+			}
+
+			bad := makeBlobSlot(0x80, true)
+			bad.Nonce, bad.Txn.(*types.BlobTx).Nonce = tc.nonce, tc.nonce
+			var batch TxnSlots
+			batch.Append(&bad, sender[:], true)
+			for _, nonce := range tc.batch {
+				batch.Append(newTestTxnSlot(nonce, 0, 300_000, 300_000, 100_000), sender[:], true)
+			}
+			reasons, _, err = pool.prepareTxns(ctx, batch, nil)
+			require.NoError(t, err)
+			require.Equal(t, tc.want, reasons[0], "a nonce gap must be rejected before checking the bad proof")
+		})
+	}
+}
+
+func TestPrepareTxnsBlobNonceGapWithFramePredecessor(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		key  uint256.Int
+		want txpoolcfg.DiscardReason
+	}{
+		{name: "legacy nonce", want: txpoolcfg.UnmatchedBlobTxExt},
+		{name: "keyed nonce", key: uint256.Int{1}, want: txpoolcfg.BlobNonceGap},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, pool, sender := keyedFramePoolEnv(t)
+			bad := makeBlobSlot(0x80, true)
+			bad.Nonce, bad.Txn.(*types.BlobTx).Nonce = 1, 1
+			bad.Txn.(*types.BlobTx).GasLimit = 100_000
+			var batch TxnSlots
+			batch.Append(&bad, sender[:], true)
+			batch.Append(framePoolSlot(t, sender, 1, 2, tc.key), sender[:], true)
+			reasons, _, err := pool.prepareTxns(ctx, batch, nil)
+			require.NoError(t, err)
+			require.Equal(t, tc.want, reasons[0])
+		})
+	}
+}
+
+func TestPrepareTxnsBlobNonceGapDefersForParkedFrame(t *testing.T) {
+	ctx, pool, sender := keyedFramePoolEnv(t)
+	var restored TxnSlots
+	restored.Append(framePoolSlot(t, sender, 1, 2), sender[:], true)
+	pool.lock.Lock()
+	parked := pool.restoreFramesLocked(0, restored)
+	pool.lock.Unlock()
+	require.Len(t, parked, 1)
+	require.Zero(t, parked[0].currentSubPool)
+
+	bad := makeBlobSlot(0x80, true)
+	bad.Nonce, bad.Txn.(*types.BlobTx).Nonce = 2, 2
+	bad.Txn.(*types.BlobTx).GasLimit = 100_000
+	var batch TxnSlots
+	batch.Append(&bad, sender[:], true)
+	reasons, _, err := pool.prepareTxns(ctx, batch, nil)
+	require.NoError(t, err)
+	require.Equal(t, txpoolcfg.UnmatchedBlobTxExt, reasons[0], "parked legacy frames defer nonce-gap rejection, not proof verification")
 }
 
 func TestBlobKZGVerifiedOutsidePoolLock(t *testing.T) {

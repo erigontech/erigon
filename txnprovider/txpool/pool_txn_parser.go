@@ -44,10 +44,9 @@ const (
 )
 
 var (
-	ErrParseTxn     = fmt.Errorf("%w transaction", rlp.ErrParse)
-	ErrRejected     = errors.New("rejected")
-	ErrAlreadyKnown = errors.New("already known")
-	ErrRlpTooBig    = errors.New("txn rlp too big")
+	ErrParseTxn  = fmt.Errorf("%w transaction", rlp.ErrParse)
+	ErrRejected  = errors.New("rejected")
+	ErrRlpTooBig = errors.New("txn rlp too big")
 )
 
 // TxnParseContext is object that is required to parse transactions and turn transaction payload into TxnSlot objects

@@ -70,18 +70,20 @@ func StageBuilderExecCfg(
 	interrupt *atomic.Bool,
 	payloadId uint64,
 	txnProvider txnprovider.TxnProvider,
+	requireAllTransactions bool,
 	blockReader dbservices.FullBlockReader,
 ) BuilderExecCfg {
 	return BuilderExecCfg{
-		builderState: builderState,
-		notifier:     notifier,
-		chainConfig:  chainConfig,
-		engine:       engine,
-		blockReader:  blockReader,
-		vmConfig:     vmConfig,
-		interrupt:    interrupt,
-		payloadId:    payloadId,
-		txnProvider:  txnProvider,
+		builderState:           builderState,
+		notifier:               notifier,
+		chainConfig:            chainConfig,
+		engine:                 engine,
+		blockReader:            blockReader,
+		vmConfig:               vmConfig,
+		interrupt:              interrupt,
+		payloadId:              payloadId,
+		txnProvider:            txnProvider,
+		requireAllTransactions: requireAllTransactions,
 	}
 }
 

@@ -46,7 +46,6 @@ type txPool interface {
 	AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcfg.DiscardReason, error)
 	deprecatedForEach(f func(rlp []byte, sender common.Address, t SubPoolType), tx kv.Tx)
 	CountContent() (int, int, int)
-	HasTxn(hash []byte) bool
 	KnownTxnReason(hash []byte) txpoolcfg.DiscardReason
 	RejectFramePrefix(hash common.Hash)
 	NonceFromAddress(addr [20]byte) (nonce uint64, inPool bool)
@@ -231,7 +230,7 @@ func (s *GrpcServer) Add(ctx context.Context, in *txpoolproto.AddRequest) (*txpo
 		// Another request may admit the transaction while this one validates.
 		// Failed simulations bypass admission's duplicate check, so recheck membership.
 		// A confirmed DuplicateHash remains valid even if the transaction has since left the pool.
-		if reason == txpoolcfg.DuplicateHash || (reason != txpoolcfg.Success && s.txPool.HasTxn(slots.Txns[j].IDHash[:])) {
+		if reason == txpoolcfg.DuplicateHash || (reason != txpoolcfg.Success && s.txPool.KnownTxnReason(slots.Txns[j].IDHash[:]) == txpoolcfg.AlreadyKnown) {
 			reason = txpoolcfg.AlreadyKnown
 		}
 		reply.Imported[i] = mapDiscardReasonToProto(reason)
