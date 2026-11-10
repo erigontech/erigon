@@ -738,10 +738,11 @@ func TestSyncSnapshotsCommitmentRequestList(t *testing.T) {
 		v3, legacy bool
 	}{
 		{"domain/v2.2-commitment.0-16.kv", false, true},
-		{"domain/v2.0-commitment.0-16.bt", false, true},
-		{"domain/v2.0-accounts.0-16.kv", false, true},
-		{"domain/v2.0-accounts.0-16.bt", false, true},
-		{"domain/v2.0-storage.0-16.kv", false, true},
+		{"domain/v3.0-commitment.0-16.kv", true, false},
+		{"domain/v2.0-commitment.0-16.bt", true, true},
+		{"domain/v2.0-accounts.0-16.kv", true, true},
+		{"domain/v2.0-accounts.0-16.bt", true, true},
+		{"domain/v2.0-storage.0-16.kv", true, true},
 		{"domain/v2.0-code.0-16.kv", true, true},
 		{"domain/v2.2-commitment.16-32.kv", false, true},
 		{"domain/v3.0-commitment.16-32.kv", true, false},
@@ -801,11 +802,13 @@ func TestSyncSnapshotsCommitmentV3StateTip(t *testing.T) {
 	t.Cleanup(func() { *cfg = previous })
 	cfg.Local = false
 	for _, tc := range []struct {
-		name        string
-		v3, olderV3 bool
+		name         string
+		v3           bool
+		extraV3Files []string
 	}{
 		{name: "v3 on legacy only", v3: true},
-		{name: "v3 below state tip", v3: true, olderV3: true},
+		{name: "v3 below state tip", v3: true, extraV3Files: []string{"domain/v3.0-commitment.0-16.kv"}},
+		{name: "v3 above a legacy-only range", v3: true, extraV3Files: []string{"domain/v3.0-commitment.16-32.kv"}},
 		{name: "v3 off legacy only"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -814,8 +817,8 @@ func TestSyncSnapshotsCommitmentV3StateTip(t *testing.T) {
 			for _, name := range legacyFiles {
 				cfg.Preverified.Items = append(cfg.Preverified.Items, snapcfg.PreverifiedItem{Name: name, Hash: strings.Repeat("0", 40)})
 			}
-			if tc.olderV3 {
-				cfg.Preverified.Items = append(cfg.Preverified.Items, snapcfg.PreverifiedItem{Name: "domain/v3.0-commitment.0-16.kv", Hash: strings.Repeat("0", 40)})
+			for _, name := range tc.extraV3Files {
+				cfg.Preverified.Items = append(cfg.Preverified.Items, snapcfg.PreverifiedItem{Name: name, Hash: strings.Repeat("0", 40)})
 			}
 			downloader := &requestListDownloader{}
 			err := SyncSnapshots(t.Context(), "test", "test", false, false, false, BlobRetention{}, prune.ArchiveMode, NoCaplin, nil, &requestListBlockReader{}, &chain.Config{ChainName: networkname.Mainnet}, downloader, ethconfig.Sync{KeepExecutionProofs: true}, 16)

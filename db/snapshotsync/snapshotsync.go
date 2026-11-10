@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 	"time"
 
@@ -706,7 +707,8 @@ func SyncSnapshots(
 		}
 
 		if statecfg.ExperimentalCommitmentV3 {
-			var stateTip, commitmentTip uint64
+			var stateTip uint64
+			var commitmentRanges []snaptype.FileInfo
 			for _, request := range downloadRequest {
 				if !strings.HasPrefix(request.Path, "domain/") {
 					continue
@@ -717,11 +719,23 @@ func SyncSnapshots(
 				}
 				stateTip = max(stateTip, info.To)
 				if info.TypeString == kv.CommitmentDomain.String() && info.Ext == ".kv" {
-					commitmentTip = max(commitmentTip, info.To)
+					commitmentRanges = append(commitmentRanges, info)
 				}
 			}
-			if stateTip > commitmentTip {
-				return errors.New("commitment v3 is enabled, but the snapshot manifest has no v3 commitment at its state tip: sync with `--experimental.commitment-v3` off, then convert it with `integration commitment convert --v3` before enabling it")
+			sort.Slice(commitmentRanges, func(i, j int) bool {
+				return commitmentRanges[i].From < commitmentRanges[j].From
+			})
+			var coveredTo uint64
+			gapTo := stateTip
+			for _, r := range commitmentRanges {
+				if r.From > coveredTo {
+					gapTo = min(stateTip, r.From)
+					break
+				}
+				coveredTo = max(coveredTo, r.To)
+			}
+			if coveredTo < stateTip {
+				return fmt.Errorf("commitment v3 is enabled, but the snapshot manifest has no v3 commitment for steps %d-%d of its state: sync with `--experimental.commitment-v3` off, then convert it with `integration commitment convert --v3` before enabling it", coveredTo, gapTo)
 			}
 		}
 
