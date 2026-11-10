@@ -626,6 +626,10 @@ func SyncSnapshots(
 			}
 		}
 		incompatibleCommitment := incompatibleCommitmentFiles(preverifiedBlockSnapshots.Items, localV3Tip)
+		v3Remedy := "sync with `--experimental.commitment-v3` off, then convert it with `integration commitment convert --v3` before enabling it"
+		if localV3Tip > 0 {
+			v3Remedy = "run with `--snap.skip-state-snapshot-download`, or restore with `integration commitment convert --restore`, sync with `--experimental.commitment-v3` off and convert again"
+		}
 
 		blockPrune, historyPrune := computeBlocksToPrune(blockReader, prune)
 		blackListForPruning := make(map[string]struct{})
@@ -740,7 +744,7 @@ func SyncSnapshots(
 
 			if missingV3, ok := incompatibleCommitment[p.Name]; ok {
 				if missingV3 {
-					return fmt.Errorf("commitment v3 is enabled, but the snapshot manifest has no v3 commitment for %s: sync with `--experimental.commitment-v3` off, then convert it with `integration commitment convert --v3` before enabling it", p.Name)
+					return fmt.Errorf("commitment v3 is enabled, but the snapshot manifest has no v3 commitment for %s: %s", p.Name, v3Remedy)
 				}
 				continue
 			}
@@ -768,7 +772,7 @@ func SyncSnapshots(
 				}
 			}
 			if stateTip > commitmentTip {
-				return fmt.Errorf("commitment v3 is enabled, but the snapshot manifest has no v3 commitment for steps %d-%d of its state: sync with `--experimental.commitment-v3` off, then convert it with `integration commitment convert --v3` before enabling it", commitmentTip, stateTip)
+				return fmt.Errorf("commitment v3 is enabled, but the snapshot manifest has no v3 commitment for steps %d-%d of its state: %s", commitmentTip, stateTip, v3Remedy)
 			}
 		}
 

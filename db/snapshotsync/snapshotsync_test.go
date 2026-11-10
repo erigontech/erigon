@@ -830,6 +830,7 @@ func TestSyncSnapshotsCommitmentV3StateTip(t *testing.T) {
 		{name: "v3 code above every commitment", v3: true, extraFiles: []string{"domain/v3.0-commitment.0-16.kv", "domain/v3.0-commitment.16-32.kv", "domain/v2.0-code.32-48.kv"}, wantFile: "steps 32-48"},
 		{name: "v3 on a converted datadir", v3: true, localFiles: []string{"v3.0-commitment.0-16.kv", "v3.0-commitment.16-32.kv"}},
 		{name: "v3 on a datadir converted below the state tip", v3: true, localFiles: []string{"v3.0-commitment.0-16.kv"}, wantFile: ".16-32."},
+		{name: "v3 code above a converted datadir", v3: true, localFiles: []string{"v3.0-commitment.0-16.kv", "v3.0-commitment.16-32.kv"}, extraFiles: []string{"domain/v2.0-code.32-48.kv"}, wantFile: "steps 32-48"},
 		{name: "v3 off legacy only"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -855,7 +856,11 @@ func TestSyncSnapshotsCommitmentV3StateTip(t *testing.T) {
 				return
 			}
 			if tc.wantFile != "" {
-				require.ErrorContains(t, err, "commitment convert --v3")
+				remedy := "commitment convert --v3"
+				if len(tc.localFiles) > 0 {
+					remedy = "--snap.skip-state-snapshot-download"
+				}
+				require.ErrorContains(t, err, remedy)
 				require.ErrorContains(t, err, tc.wantFile)
 				require.Empty(t, downloader.names)
 				return
