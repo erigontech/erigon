@@ -1564,6 +1564,7 @@ func gnosisConfig() BeaconChainConfig {
 func chiadoConfig() BeaconChainConfig {
 	cfg := MainnetBeaconConfig
 	cfg.PresetBase = "gnosis"
+	cfg.MaxPendingPartialsPerWithdrawalsSweep = 6
 	cfg.MinGenesisTime = 1665396000
 	cfg.MinGenesisActiveValidatorCount = 6000
 	cfg.GenesisDelay = 300
