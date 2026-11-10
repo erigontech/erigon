@@ -233,26 +233,18 @@ func buildAndApply(c *rpcClient, parent string, timestamp, slot uint64, txs [][]
 		GasUsed   string   `json:"gasUsed"`
 		Txs       []string `json:"transactions"`
 	}
-	// The builder reads committed state, which trails the fork choice update of the parent.
-	for attempt := 0; ; attempt++ {
-		raw, err := c.call(c.http, false, "testing_buildBlockV1", parent, attrs, hexs(txs), "0x00")
-		if err != nil {
-			return nil, "", fmt.Errorf("build: %w", err)
-		}
-		if err := json.Unmarshal(raw, &resp); err != nil {
-			return nil, "", err
-		}
-		hdr.Txs = nil
-		if err := json.Unmarshal(resp.ExecutionPayload, &hdr); err != nil {
-			return nil, "", err
-		}
-		if len(hdr.Txs) == len(txs) {
-			break
-		}
-		if attempt == 2 {
-			return nil, "", fmt.Errorf("built block has %d of %d txs", len(hdr.Txs), len(txs))
-		}
-		time.Sleep(2 * time.Second)
+	raw, err := c.call(c.http, false, "testing_buildBlockV1", parent, attrs, hexs(txs), "0x00")
+	if err != nil {
+		return nil, "", fmt.Errorf("build: %w", err)
+	}
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return nil, "", err
+	}
+	if err := json.Unmarshal(resp.ExecutionPayload, &hdr); err != nil {
+		return nil, "", err
+	}
+	if len(hdr.Txs) != len(txs) {
+		return nil, "", fmt.Errorf("built block has %d of %d txs", len(hdr.Txs), len(txs))
 	}
 	log.Printf("built %s txs=%d gasUsed=%s", hdr.BlockHash, len(hdr.Txs), hdr.GasUsed)
 	statusRaw, err := c.call(c.auth, true, "engine_newPayloadV5", resp.ExecutionPayload, []any{}, zero, []any{})
@@ -283,19 +275,17 @@ func payloadEntry(payload json.RawMessage, phase string) map[string]any {
 	}
 }
 
-func generate(c *rpcClient, s shape, startHash, outDir string, snapshotNumber uint64, nonceBase uint64) error {
+func generate(c *rpcClient, s shape, startHash, outDir string, snapshotNumber uint64) error {
 	seedKey, err := crypto.HexToECDSA(seedKeyHex)
 	if err != nil {
 		return err
 	}
 	seed := crypto.PubkeyToAddress(seedKey.PublicKey)
-	if nonceBase == ^uint64(0) {
-		r, err := c.call(c.http, false, "eth_getTransactionCount", seed.Hex(), "latest")
-		if err != nil {
-			return err
-		}
-		nonceBase = mustUint(r)
+	r, err := c.call(c.http, false, "eth_getTransactionCount", seed.Hex(), "latest")
+	if err != nil {
+		return err
 	}
+	nonceBase := mustUint(r)
 
 	var runtime []byte
 	if s.fan {
@@ -354,11 +344,6 @@ func generate(c *rpcClient, s shape, startHash, outDir string, snapshotNumber ui
 	}
 	testPayload, testHash, err := buildAndApply(c, setupHash, ts+24, 1, test)
 	if err != nil {
-		first := crypto.PubkeyToAddress(eoaKey(s.name, 0).PublicKey)
-		for _, q := range [][]any{{"eth_blockNumber"}, {"eth_getBalance", first.Hex(), "latest"}, {"eth_getTransactionCount", seed.Hex(), "latest"}, {"eth_getCode", contract.Hex(), "latest"}, {"eth_getBlockReceipts", setupHash}} {
-			r, qerr := c.call(c.http, false, q[0].(string), q[1:]...)
-			log.Printf("debug %s: %.3000s err=%v", q[0], r, qerr)
-		}
 		return fmt.Errorf("test: %w", err)
 	}
 	var built struct {
@@ -471,7 +456,7 @@ func main() {
 		if s.name != *shapeName {
 			continue
 		}
-		if err := generate(c, s, head.Hash, *out, number, ^uint64(0)); err != nil {
+		if err := generate(c, s, head.Hash, *out, number); err != nil {
 			log.Fatalf("%s: %v", s.name, err)
 		}
 		return
