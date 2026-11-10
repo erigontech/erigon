@@ -629,49 +629,49 @@ func (s *simulator) checkStorageReplacements(ctx context.Context, stateOverrides
 		}
 		addrValue := addr.Value()
 		budget := limit - s.replacedSlots
-		headSlots := 0
-		if err := sd.IteratePrefix(kv.StorageDomain, addrValue[:], tx, func(_, _ []byte) (bool, error) {
-			headSlots++
-			return headSlots <= budget, ctx.Err()
+		replaced := make(map[string]struct{})
+		add := func(key []byte) bool {
+			replaced[string(key)] = struct{}{}
+			return len(replaced) <= budget
+		}
+		if err := sd.IteratePrefix(kv.StorageDomain, addrValue[:], tx, func(k, _ []byte) (bool, error) {
+			return add(k), ctx.Err()
 		}); err != nil {
 			return err
 		}
-		baseSlots := 0
-		if !latest {
-			var err error
-			if baseSlots, err = countStorageSlotsAsOf(ctx, tx, addrValue[:], firstMinTxNum, budget+1); err != nil {
+		if !latest && len(replaced) <= budget {
+			if err := visitStorageSlotsAsOf(ctx, tx, addrValue[:], firstMinTxNum, add); err != nil {
 				return err
 			}
 		}
-		if max(headSlots, baseSlots) > budget {
-			return fmt.Errorf("state overrides replace more than %d storage slots", limit)
+		if len(replaced) > budget {
+			return clientLimitExceededError(fmt.Sprintf("state overrides replace more than %d storage slots", limit))
 		}
-		s.replacedSlots += max(headSlots, baseSlots)
+		s.replacedSlots += len(replaced)
 	}
 	return nil
 }
 
-func countStorageSlotsAsOf(ctx context.Context, tx kv.TemporalTx, prefix []byte, txNum uint64, stopAt int) (int, error) {
+func visitStorageSlotsAsOf(ctx context.Context, tx kv.TemporalTx, prefix []byte, txNum uint64, visit func(key []byte) bool) error {
 	to, _ := kv.NextSubtree(prefix)
 	it, err := tx.RangeAsOf(kv.StorageDomain, prefix, to, txNum, order.Asc, kv.Unlim)
 	if err != nil {
-		return 0, err
+		return err
 	}
 	defer it.Close()
-	slots := 0
-	for slots < stopAt && it.HasNext() {
-		_, enc, err := it.Next()
+	for it.HasNext() {
+		k, enc, err := it.Next()
 		if err != nil {
-			return slots, err
+			return err
 		}
-		if len(enc) > 0 {
-			slots++
+		if len(enc) > 0 && !visit(k) {
+			return nil
 		}
 		if err := ctx.Err(); err != nil {
-			return slots, err
+			return err
 		}
 	}
-	return slots, nil
+	return nil
 }
 
 func commitSimOverrides(stateOverrides *ethapi.StateOverrides, base state.StateReader, precompiles vm.PrecompiledContracts, rules *chain.Rules, stateWriter state.StateWriter) (*simOverrideReader, error) {
