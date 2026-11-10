@@ -165,20 +165,35 @@ func newJsTracer(code string, ctx *tracers.Context, cfg json.RawMessage) (*trace
 	if err != nil {
 		return nil, err
 	}
+	if goja.IsNull(ret) || goja.IsUndefined(ret) {
+		return nil, fmt.Errorf("tracer must evaluate to an object, got %s", ret)
+	}
 	// Check tracer's interface for required and optional methods.
 	obj := ret.ToObject(vm)
-	result, ok := goja.AssertFunction(obj.Get("result"))
+	// A getter that throws panics in obj.Get; vm.Try returns it as an error.
+	var resultV, faultV, stepV, enterV, exitV, setupV goja.Value
+	if ex := vm.Try(func() {
+		resultV = obj.Get("result")
+		faultV = obj.Get("fault")
+		stepV = obj.Get("step")
+		enterV = obj.Get("enter")
+		exitV = obj.Get("exit")
+		setupV = obj.Get("setup")
+	}); ex != nil {
+		return nil, ex
+	}
+	result, ok := goja.AssertFunction(resultV)
 	if !ok {
 		return nil, errors.New("trace object must expose a function result()")
 	}
-	fault, ok := goja.AssertFunction(obj.Get("fault"))
+	fault, ok := goja.AssertFunction(faultV)
 	if !ok {
 		return nil, errors.New("trace object must expose a function fault()")
 	}
-	step, ok := goja.AssertFunction(obj.Get("step"))
+	step, ok := goja.AssertFunction(stepV)
 	t.traceStep = ok
-	enter, hasEnter := goja.AssertFunction(obj.Get("enter"))
-	exit, hasExit := goja.AssertFunction(obj.Get("exit"))
+	enter, hasEnter := goja.AssertFunction(enterV)
+	exit, hasExit := goja.AssertFunction(exitV)
 	if hasEnter != hasExit {
 		return nil, errors.New("trace object must expose either both or none of enter() and exit()")
 	}
@@ -191,7 +206,7 @@ func newJsTracer(code string, ctx *tracers.Context, cfg json.RawMessage) (*trace
 	t.fault = fault
 
 	// Pass in config
-	if setup, ok := goja.AssertFunction(obj.Get("setup")); ok {
+	if setup, ok := goja.AssertFunction(setupV); ok {
 		cfgStr := "{}"
 		if cfg != nil {
 			cfgStr = string(cfg)
