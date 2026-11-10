@@ -113,11 +113,10 @@ func liveBranch(load func(plane byte, addrHash, path []byte) (*node, error), pre
 	if err != nil || n == nil || n.childMask == 0 || !bytes.HasPrefix(path, n.path) {
 		return nil, err
 	}
-	single := bits.OnesCount16(n.childMask) == 1
-	if len(n.path) == 0 && single && n.leafMask == n.childMask {
+	if n.isLeafRoot() {
 		return nil, nil
 	}
-	if len(n.path) != 0 && single && n.leafMask == 0 {
+	if n.isExtension() {
 		if n, err = load(plane, addrHash, n.path); err != nil || n == nil {
 			return nil, err
 		}

@@ -51,7 +51,7 @@ func (g graph) loadRoot(ctx commitment.PatriciaContext) (*node, error) {
 		root.loaded = true
 	}
 	root.plane = g.plane
-	if len(root.path) == 0 || root.leafMask != 0 || bits.OnesCount16(root.childMask) != 1 {
+	if !root.isExtension() {
 		return root, nil
 	}
 	nib := bits.TrailingZeros16(root.childMask)
@@ -78,7 +78,7 @@ func (g graph) unfoldChild(ctx commitment.PatriciaContext, path []byte) (*node, 
 }
 
 func rootExtensionChild(n *node) *node {
-	if n == nil || len(n.path) == 0 || n.leafMask != 0 || bits.OnesCount16(n.childMask) != 1 {
+	if n == nil || !n.isExtension() {
 		return nil
 	}
 	child := n.child(bits.TrailingZeros16(n.childMask))

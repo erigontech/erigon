@@ -53,7 +53,7 @@ func insertRoot(n *node, path, value []byte) error {
 }
 
 func splitRootExtension(n *node, path, value []byte, common int) error {
-	if bits.OnesCount16(n.childMask) != 1 || n.leafMask != 0 {
+	if !n.isExtension() {
 		return ErrRootShape
 	}
 	nib := bits.TrailingZeros16(n.childMask)
