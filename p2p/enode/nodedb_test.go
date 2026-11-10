@@ -595,3 +595,21 @@ func TestDBExpiresStalePingRowOfALiveNode(t *testing.T) {
 	require.Zero(t, db.LastPingReceived(id, oldIP).Unix(), "a source IP that stopped pinging must not stay")
 	require.Equal(t, now.Unix(), db.LastPingReceived(id, newIP).Unix())
 }
+
+func TestDBExpiresNodeRecordByItsPing(t *testing.T) {
+	db, err := OpenDB("")
+	require.NoError(t, err)
+	defer db.Close()
+
+	seeds := makeDBExpirationNodes()
+	stale, fresh := seeds[0].node, seeds[1].node
+	require.NoError(t, db.UpdateNode(stale))
+	require.NoError(t, db.UpdateNode(fresh))
+	require.NoError(t, db.UpdateLastPingReceived(stale.ID(), stale.IPAddr(), time.Now().Add(-dbNodeExpiration-time.Minute)))
+	require.NoError(t, db.UpdateLastPingReceived(fresh.ID(), fresh.IPAddr(), time.Now()))
+
+	db.expireNodes()
+
+	require.Nil(t, db.Node(stale.ID()), "a node whose only proof is a stale ping must be deleted")
+	require.NotNil(t, db.Node(fresh.ID()))
+}
