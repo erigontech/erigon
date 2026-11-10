@@ -13,7 +13,7 @@
 - db: the `chaindata` log and trace indices now store txNums in chunks: these tables are 2-6x smaller and `eth_getLogs` over recent blocks is about 10x faster. Existing datadirs need no migration, but the DB schema version becomes 7.1, so older Erigon versions and an older local `rpcdaemon --datadir` refuse the datadir. To downgrade, remove `chaindata/`. Upgrade a local `rpcdaemon` together with `erigon`. This can be a breaking change (#25304) — by @AskAlexSharov
 - rpc: `/health` on the authenticated Engine port now requires a valid JWT, like every other request on that port, and answers 403 without one. The public HTTP port is unchanged. Update monitoring that probes `/health` on the Engine port without a token. `/health` request bodies are limited to 4 KiB. This can be a breaking change (#25871) — by @lupin012
 - rpc: `--rpc.batch.limit` now applies to the authenticated Engine port too; before, batches there had no size limit. A client that sends Engine batches with more requests than the limit (default 100) now gets a batch-limit error. This can be a breaking change (#25872) — by @lupin012
-- rpc: `trace_filter` now returns `-32602` instead of `-32000` for a block range wider than `--rpc.blockrange.limit`, as `eth_getLogs` does. This can be a breaking change for clients that match on the error code (#PR) — by @lupin012
+- rpc: `trace_filter` now returns `-32602` instead of `-32000` for a block range wider than `--rpc.blockrange.limit`, as `eth_getLogs` does. This can be a breaking change for clients that match on the error code (#26094) — by @lupin012
 
 ### Added
 
