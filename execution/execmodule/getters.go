@@ -80,6 +80,11 @@ func (e *ExecModule) InclusionListSatisfied(ctx context.Context, blockHash commo
 	if err != nil || block == nil {
 		return nil, err
 	}
+	if allTxnsInBlock(block.Transactions(), il) {
+		satisfied := true
+		e.readAheader.SetInclusionListResult(blockHash, ilHash, satisfied)
+		return &satisfied, nil
+	}
 	blockEndTxNum, err := e.blockReader.TxnumReader().Max(ctx, tx, blockNumber)
 	if err != nil {
 		return nil, err
@@ -125,6 +130,19 @@ func (e *ExecModule) InclusionListSatisfied(ctx context.Context, blockHash commo
 	}
 	e.readAheader.SetInclusionListResult(blockHash, ilHash, *result)
 	return result, nil
+}
+
+func allTxnsInBlock(blockTxns, il types.Transactions) bool {
+	inBlock := make(map[common.Hash]struct{}, len(blockTxns))
+	for _, txn := range blockTxns {
+		inBlock[txn.Hash()] = struct{}{}
+	}
+	for _, txn := range il {
+		if _, ok := inBlock[txn.Hash()]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 // replayBlockGasPool re-executes block on the state before it to recover the

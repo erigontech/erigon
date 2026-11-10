@@ -1428,6 +1428,31 @@ func TestSSZRESTNewPayloadForkMatching(t *testing.T) {
 	}
 }
 
+func TestSSZRESTNewPayloadBogotaForwardsInclusionList(t *testing.T) {
+	cfg := bogotaChainConfig()
+	parent := makeParentHeader(1000)
+	srv, inserted := newInclusionListServer(cfg, parent, execmodule.ValidationResult{
+		ValidationStatus: execmodule.ExecutionStatusSuccess,
+		LatestValidHash:  common.Hash{0x1},
+	}, new(bool), ilTestMaxReorgDepth)
+	payload := bogotaPayload(t, parent)
+	payload.SSZVersion = clparams.HezeVersion
+	inclusionList := signedInclusionList(t, cfg)
+	body, err := encodeNewPayloadEnvelope(clparams.HezeVersion, payload, common.Hash{}, nil, inclusionList)
+	require.NoError(t, err)
+
+	rec := httptest.NewRecorder()
+	srv.SSZRESTHandler().ServeHTTP(rec, newSSZRequest(t.Context(), http.MethodPost, "/engine/v1/payloads", "bogota", body))
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Len(t, *inserted, 1)
+	want, err := types.DecodeTransaction(inclusionList[0])
+	require.NoError(t, err)
+	got := (*inserted)[0].InclusionList()
+	require.Len(t, got, 1)
+	require.Equal(t, want.Hash(), got[0].Hash())
+}
+
 func TestSSZRESTNewPayloadRejectsExcessTransactionsBeforeDecoding(t *testing.T) {
 	const txCount = 10_000
 	var tx bytes.Buffer
@@ -1721,6 +1746,38 @@ func TestSSZRESTForkchoiceHeaderForkMustMatchAttributes(t *testing.T) {
 			})
 		}
 	}
+}
+
+// Without this rejection, Bogota forkchoice replies use the pre-Heze PayloadStatus schema.
+func TestSSZRESTForkchoiceRejectsBogota(t *testing.T) {
+	cfg := allForksConfig()
+	cfg.TerminalTotalDifficulty = uint256.NewInt(0)
+	state := &engine_types.ForkChoiceState{
+		HeadHash:           common.Hash{0x01},
+		SafeBlockHash:      common.Hash{0x02},
+		FinalizedBlockHash: common.Hash{0x03},
+	}
+	var forkchoiceReads int
+	module := &stubExecutionModule{
+		getForkChoiceFunc: func(context.Context) (execmodule.ForkChoiceState, error) {
+			forkchoiceReads++
+			return execmodule.ForkChoiceState{}, nil
+		},
+	}
+	srv := newProposingEngineServerWithConfig(cfg, module)
+	srv.blockDownloader = engine_block_downloader.NewEngineBlockDownloader(
+		t.Context(), log.New(), module, nil, nil, cfg, ethconfig.Sync{}, nil,
+	)
+	srv.test = true
+	body, err := encodeForkchoiceUpdate(clparams.HezeVersion, state, nil, nil)
+	require.NoError(t, err)
+	rec := httptest.NewRecorder()
+	srv.SSZRESTHandler().ServeHTTP(rec,
+		newSSZRequest(t.Context(), http.MethodPost, "/engine/v1/forkchoice", "bogota", body))
+
+	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+	require.Equal(t, problemUnsupportedFork, problemType(t, rec))
+	require.Zero(t, forkchoiceReads, "bogota forkchoice must be rejected before forkchoice processing")
 }
 
 func TestSSZRESTBlobsV2V3Availability(t *testing.T) {

@@ -1321,7 +1321,7 @@ func TestValidateChainChecksInclusionListAgainstStateAfterBlockTxns(t *testing.T
 	}
 }
 
-func TestInclusionListSatisfiedWithoutStateHistoryIsNil(t *testing.T) {
+func TestInclusionListSatisfiedWithoutStateHistoryWhenAllTxnsInBlock(t *testing.T) {
 	t.Parallel()
 	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
 	blockTxn := signedInclusionListTxn(t, m)
@@ -1332,7 +1332,22 @@ func TestInclusionListSatisfiedWithoutStateHistoryIsNil(t *testing.T) {
 	block := chainPack.Blocks[0]
 	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), []*types.Block{block}))
 	clearStateHistory(t, m)
-	il := types.Transactions{blockTxn}
+
+	satisfied, err := m.ExecModule.InclusionListSatisfied(t.Context(), block.Hash(), block.NumberU64(), types.Transactions{blockTxn})
+	require.NoError(t, err)
+	require.NotNil(t, satisfied)
+	require.True(t, *satisfied)
+}
+
+func TestInclusionListSatisfiedWithoutStateHistoryIsNil(t *testing.T) {
+	t.Parallel()
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	chainPack, err := m.GenerateChain(1, nil)
+	require.NoError(t, err)
+	block := chainPack.Blocks[0]
+	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), []*types.Block{block}))
+	clearStateHistory(t, m)
+	il := types.Transactions{signedInclusionListTxn(t, m)}
 
 	satisfied, err := m.ExecModule.InclusionListSatisfied(t.Context(), block.Hash(), block.NumberU64(), il)
 	require.NoError(t, err)

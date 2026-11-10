@@ -18,6 +18,7 @@ package protocol
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -64,21 +65,16 @@ func CheckInclusionListTransactions(
 			continue
 		}
 
-		executor := NewTxnExecutor(evm, msg, gp)
-
-		intrinsicGasResult, overflow := executor.calcIntrinsicGas(
-			msg.To().IsNil(),
-			msg.Authorizations(),
-			msg.AccessList(),
-		)
-		if overflow {
-			continue
+		var valid bool
+		if frameTxn, ok := tx.(*types.FrameTransaction); ok {
+			valid, err = frameTxnValidAtBlockEnd(evm, ibs, gp, msg, frameTxn)
+		} else {
+			valid, err = txnValidAtBlockEnd(evm, gp, msg)
 		}
-
-		if _, err := executor.preCheck(false, intrinsicGasResult); err != nil {
-			if errors.Is(err, ErrTxnExecutionFailed) {
-				return false, err
-			}
+		if err != nil {
+			return false, err
+		}
+		if !valid {
 			continue
 		}
 
@@ -88,4 +84,35 @@ func CheckInclusionListTransactions(
 		return false, nil
 	}
 	return true, nil
+}
+
+func txnValidAtBlockEnd(evm *vm.EVM, gp *GasPool, msg *types.Message) (bool, error) {
+	executor := NewTxnExecutor(evm, msg, gp)
+	intrinsicGasResult, overflow := executor.calcIntrinsicGas(msg.To().IsNil(), msg.Authorizations(), msg.AccessList())
+	if overflow {
+		return false, nil
+	}
+	if _, err := executor.preCheck(false, intrinsicGasResult); err != nil {
+		if errors.Is(err, ErrTxnExecutionFailed) {
+			return false, err
+		}
+		return false, nil
+	}
+	return true, nil
+}
+
+// frameTxnValidAtBlockEnd executes the frame transaction, so approval and nonce
+// rules match consensus execution. A rejected transaction reverts its own state
+// changes, and a valid one ends the inclusion-list check.
+func frameTxnValidAtBlockEnd(evm *vm.EVM, ibs *state.IntraBlockState, gp *GasPool, msg *types.Message, txn *types.FrameTransaction) (bool, error) {
+	evm.Reset(NewEVMTxContext(msg), ibs)
+	isolatedGas := NewBlockGasPool(gp.ExecutionGasAvailable(), gp.StateGasAvailable(), gp.BlobGas())
+	_, err := NewTxnExecutor(evm, msg, isolatedGas).executeFrameTransaction(txn, true, false, nil)
+	if readErr := ibs.StateReadError(); readErr != nil {
+		return false, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, readErr)
+	}
+	if errors.Is(err, vm.ErrIntraBlockStateFailed) {
+		return false, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
+	}
+	return err == nil, nil
 }

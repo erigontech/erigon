@@ -18,7 +18,6 @@ package stagedsync
 
 import (
 	"context"
-	"runtime"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -26,6 +25,8 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
@@ -37,11 +38,8 @@ import (
 )
 
 func TestParallelResumedBlockEndLeavesInclusionListUnchecked(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("mdbx InMem test databases are not supported on windows")
-	}
 	ctx := context.Background()
-	db := newResumeTestDB(t)
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	config := chain.TestChainBerlinConfig
 
 	pe, roTx := newResumeTestExec(t, db, config)

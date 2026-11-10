@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state"
@@ -80,13 +81,28 @@ func ilUnsignedTxn() types.Transaction {
 type ilStateReader struct {
 	state.StateReader
 	accounts map[accounts.Address]*accounts.Account
+	code     map[accounts.Address][]byte
 }
 
 func newILStateReader() *ilStateReader {
 	return &ilStateReader{
 		StateReader: state.NewNoopReader(),
 		accounts:    map[accounts.Address]*accounts.Account{},
+		code:        map[accounts.Address][]byte{},
 	}
+}
+
+func (r *ilStateReader) setCode(addr accounts.Address, code []byte) {
+	r.account(addr).CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(code))
+	r.code[addr] = code
+}
+
+func (r *ilStateReader) ReadAccountCode(addr accounts.Address) ([]byte, error) {
+	return r.code[addr], nil
+}
+
+func (r *ilStateReader) ReadAccountCodeSize(addr accounts.Address) (int, error) {
+	return len(r.code[addr]), nil
 }
 
 func (r *ilStateReader) account(addr accounts.Address) *accounts.Account {
@@ -284,4 +300,39 @@ func TestCheckInclusionListTransactions_LeavesGasPoolUntouched(t *testing.T) {
 	require.Equal(t, uint64(ilBlockGasLimit), gp.ExecutionGasAvailable())
 	require.Equal(t, uint64(ilBlockGasLimit), gp.StateGasAvailable())
 	require.Equal(t, params.GasPerBlob*params.MaxBlobsPerTxn, gp.BlobGas())
+}
+
+func TestCheckInclusionListTransactions_MissingContractApprovedFrameTxn(t *testing.T) {
+	t.Parallel()
+
+	cfg := chain.AllProtocolChanges.Copy()
+	cfg.BogotaTime = common.NewUint64(0)
+	sender := common.HexToAddress("0x1000")
+	reader := newILStateReader()
+	reader.setBalance(accounts.InternAddress(sender), *uint256.NewInt(10_000_000))
+	// PUSH1 3, PUSH0, PUSH0, APPROVE: approves execution and payment.
+	reader.setCode(accounts.InternAddress(sender), []byte{0x60, 3, 0x5f, 0x5f, 0xaa})
+	txn := &types.FrameTransaction{
+		NonceKeys: []uint256.Int{{}}, ChainID: *cfg.ChainID, SenderAddress: sender,
+		Frames: []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}}},
+	}
+
+	require.False(t, ilCheck(t, reader, cfg, ilGasPool(), nil, types.Transactions{txn}))
+}
+
+func TestCheckInclusionListTransactions_MissingUnapprovedFrameTxnIsInvalid(t *testing.T) {
+	t.Parallel()
+
+	cfg := chain.AllProtocolChanges.Copy()
+	cfg.BogotaTime = common.NewUint64(0)
+	sender := common.HexToAddress("0x1000")
+	reader := newILStateReader()
+	reader.setBalance(accounts.InternAddress(sender), *uint256.NewInt(10_000_000))
+	// The sender is an EOA, so its VERIFY frame needs a signature the txn lacks.
+	txn := &types.FrameTransaction{
+		NonceKeys: []uint256.Int{{}}, ChainID: *cfg.ChainID, SenderAddress: sender,
+		Frames: []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}}},
+	}
+
+	require.True(t, ilCheck(t, reader, cfg, ilGasPool(), nil, types.Transactions{txn}))
 }

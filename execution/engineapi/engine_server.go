@@ -751,6 +751,8 @@ func (e *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 	if newPayload {
 		// A validated non-canonical payload is answered before InsertBlocks,
 		// whose ClearWithUnwind would drop the executed state FCU merges.
+		// NewPayload still re-inserts it when its inclusion list has no result yet,
+		// and ValidateChain rebuilds that state.
 		if header != nil && (isCanonical || e.chainRW.IsValidated(blockHash)) {
 			return &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &blockHash}, nil
 		}
