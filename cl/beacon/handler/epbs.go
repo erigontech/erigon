@@ -1133,7 +1133,8 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 			a.forkchoiceStore.FinishExecutionPayloadEnvelopeForGossip(admissionToken, accepted)
 		}()
 	}
-	if contents == nil && a.executionPayloadEnvelopeContentsRequired(gossipKey, signedEnvelope) {
+	contentsRequired := a.executionPayloadEnvelopeContentsRequired(gossipKey, signedEnvelope)
+	if contents == nil && contentsRequired {
 		beaconhttp.NewEndpointError(http.StatusBadRequest, errExecutionPayloadEnvelopeContentsRequired).WriteTo(w)
 		return
 	}
@@ -1180,6 +1181,21 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 			return
 		}
 	}
+	blockEquivocated := func() bool {
+		block, ok := a.forkchoiceStore.GetBlock(signedEnvelope.Message.BeaconBlockRoot)
+		return !ok || block == nil || block.Block == nil ||
+			a.forkchoiceStore.HasBlockEquivocation(block.Block.Slot, block.Block.ProposerIndex, signedEnvelope.Message.BeaconBlockRoot)
+	}
+	if validation != BlockPublishingValidationGossip {
+		if err := a.forkchoiceStore.ValidateExecutionPayloadEnvelopeForConsensus(r.Context(), signedEnvelope, columnWork == nil); err != nil {
+			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+			return
+		}
+		if validation == BlockPublishingValidationConsensusAndEquivocation && blockEquivocated() {
+			beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("execution payload envelope block has an equivocation")).WriteTo(w)
+			return
+		}
+	}
 	// The block epoch's digest, not the wall clock's, so that a POST after an epoch boundary still reaches
 	// the block's topics.
 	var forkDigest common.Bytes4
@@ -1205,6 +1221,7 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 		}
 	}
 	contentsIntegrationFailed := false
+	columnWriteFailed := false
 	var columnPublishErr error
 	if columnWork != nil {
 		publishCtx := workCtx
@@ -1215,6 +1232,7 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 			defer cancelPublish()
 		}
 		if err := a.publishAndStoreExecutionPayloadEnvelopeColumns(workCtx, publishCtx, columnWork, forkDigest); err != nil {
+			columnWriteFailed = errors.Is(err, errExecutionPayloadEnvelopeIntegration)
 			if errors.Is(err, errExecutionPayloadColumnPublish) {
 				columnPublishErr = err
 			} else if !envelopeFirst && !errors.Is(err, errExecutionPayloadEnvelopeIntegration) {
@@ -1225,8 +1243,9 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 		}
 	}
 	if validation != BlockPublishingValidationGossip {
-		if err := a.forkchoiceStore.ValidateExecutionPayloadEnvelopeForConsensus(r.Context(), signedEnvelope); err != nil {
-			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+		finalizedSlot := a.forkchoiceStore.FinalizedCheckpoint().Epoch * a.beaconChainCfg.SlotsPerEpoch
+		if signedEnvelope.Message.Payload.SlotNumber < finalizedSlot {
+			beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("envelope slot %d is before finalized slot %d", signedEnvelope.Message.Payload.SlotNumber, finalizedSlot)).WriteTo(w)
 			return
 		}
 	}
@@ -1244,15 +1263,24 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 	integrationPending := false
 	if err := a.processExecutionPayloadEnvelope(workCtx, signedEnvelope); err != nil {
 		switch {
+		case validation != BlockPublishingValidationGossip &&
+			a.forkchoiceStore.ExecutionPayloadInvalidated(gossipKey.BeaconBlockRoot, signedEnvelope.Message.Payload.BlockHash):
+			// A payload marked invalid after the consensus validation is never accepted or published, whatever error
+			// the import returned: an ignored or interrupted import does not recheck it.
+			beaconhttp.NewEndpointError(http.StatusBadRequest, errExecutionPayloadInvalidated).WriteTo(w)
+			return
 		case errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopePersistenceFailed):
 			persistenceErr = err
 		case errors.Is(err, forkchoice.ErrPayloadValidationInterrupted):
 			// The envelope passed every consensus check; only the EL verdict is pending.
 			integrationPending = true
+		case validation != BlockPublishingValidationGossip && columnWriteFailed && errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable):
+			// Consensus validation saw the blob data, so this local write failure remains repairable.
 		case !envelopeFirst && !blobDataIncluded && errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable):
 			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 			return
-		case canonical && validation != BlockPublishingValidationGossip && !(retrying && errors.Is(err, forkchoice.ErrIgnore)):
+		case canonical && validation != BlockPublishingValidationGossip &&
+			!(errors.Is(err, forkchoice.ErrIgnore) && (retrying || contentsRequired)):
 			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 			return
 		}
@@ -1300,8 +1328,7 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 		emitIntegrationEvents = true
 	}
 	if gossipValidated && (canonical || a.sentinel != nil) && validation == BlockPublishingValidationConsensusAndEquivocation {
-		block, ok := a.forkchoiceStore.GetBlock(signedEnvelope.Message.BeaconBlockRoot)
-		if !ok || block == nil || block.Block == nil || a.forkchoiceStore.HasBlockEquivocation(block.Block.Slot, block.Block.ProposerIndex, signedEnvelope.Message.BeaconBlockRoot) {
+		if blockEquivocated() {
 			beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("execution payload envelope block has an equivocation")).WriteTo(w)
 			return
 		}
@@ -1568,6 +1595,7 @@ var (
 	errExecutionPayloadEnvelopeIntegration      = errors.New("execution payload envelope integration failed")
 	errExecutionPayloadColumnPublish            = errors.New("execution payload data columns were not published")
 	errExecutionPayloadEnvelopeContentsRequired = errors.New("blob data is required to repair the columns of this execution payload envelope")
+	errExecutionPayloadInvalidated              = errors.New("execution payload was marked invalid")
 )
 
 func (a *ApiHandler) publishAndStoreExecutionPayloadEnvelopeColumns(storeCtx, publishCtx context.Context, work *envelopeColumnWork, forkDigest common.Bytes4) error {
