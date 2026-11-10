@@ -6,7 +6,7 @@ package engine_types
 import (
 	"bytes"
 	"fmt"
-	"unicode/utf8"
+	"strings"
 
 	"github.com/holiman/uint256"
 
@@ -213,23 +213,9 @@ func (s *PayloadStatus) EncodeSSZ(dst []byte) ([]byte, error) {
 	var validationErr [][]byte
 	if s.ValidationError != nil && s.ValidationError.Error() != nil {
 		msg := s.ValidationError.Error().Error()
-		validationErr = [][]byte{[]byte(truncateUTF8(msg, sszMaxValidationError))}
+		validationErr = [][]byte{[]byte(strings.ToValidUTF8(msg[:min(len(msg), sszMaxValidationError)], ""))}
 	}
 	return ssz2.MarshalSSZ(dst, []byte{status}, latestHashes, solid.NewTransactionsSSZFromTransactions(validationErr))
-}
-
-// truncateUTF8 returns at most maxBytes bytes of msg. When the cut falls inside a
-// multibyte character, it moves back to the start of that character so that
-// valid UTF-8 input stays valid UTF-8.
-func truncateUTF8(msg string, maxBytes int) string {
-	if len(msg) <= maxBytes {
-		return msg
-	}
-	cut := maxBytes
-	for i := 0; i < utf8.UTFMax-1 && cut > 0 && !utf8.RuneStart(msg[cut]); i++ {
-		cut--
-	}
-	return msg[:cut]
 }
 
 func (s *PayloadStatus) DecodeSSZ(buf []byte, version int) error {
