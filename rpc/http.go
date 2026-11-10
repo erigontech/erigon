@@ -484,6 +484,7 @@ func validateRequest(r *http.Request) (int, error) {
 }
 
 func CheckJwtSecret(w http.ResponseWriter, r *http.Request, jwtSecret []byte) bool {
+	dbg.NpJWTStart()
 	if err := ValidateJWT(r, jwtSecret); err != nil {
 		http.Error(w, err.Error(), http.StatusForbidden)
 		return false

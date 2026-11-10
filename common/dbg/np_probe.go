@@ -15,6 +15,7 @@ var (
 	npMu       sync.Mutex
 	npActive   bool
 	npMarks    []npMark
+	npJWTAt    atomic.Int64
 	npHTTPAt   atomic.Int64
 	npBatchAt  atomic.Int64
 	npParsedAt atomic.Int64
@@ -23,6 +24,12 @@ var (
 type npMark struct {
 	name string
 	at   time.Time
+}
+
+func NpJWTStart() {
+	if npOn {
+		npJWTAt.Store(time.Now().UnixNano())
+	}
 }
 
 func NpHTTPStart() {
@@ -51,6 +58,7 @@ func NpBegin() {
 	defer npMu.Unlock()
 	npActive = true
 	npMarks = append(npMarks[:0],
+		npMark{"jwtStart", time.Unix(0, npJWTAt.Load())},
 		npMark{"httpStart", time.Unix(0, npHTTPAt.Load())},
 		npMark{"httpRead", time.Unix(0, npBatchAt.Load())},
 		npMark{"argsParse", time.Unix(0, npParsedAt.Load())},
