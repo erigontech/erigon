@@ -466,9 +466,10 @@ func (d *Domain) minStepInDB(tx kv.Tx) (lstInDb uint64) {
 	return binary.BigEndian.Uint64(lstIdx) / d.stepSize
 }
 
-func (d *Domain) firstStepInDB(tx kv.Tx) (kv.Step, bool, error) {
+func (d *Domain) firstStepToBuild(tx kv.Tx, filesEnd kv.Step) (kv.Step, bool, error) {
 	if !d.HistoryDisabled && !d.SnapshotsDisabled {
-		return d.InvertedIndex.firstStepInDB(tx)
+		first, found, err := d.InvertedIndex.firstStepInDB(tx)
+		return max(filesEnd, first), found, err
 	}
 	// History can be absent or pruned independently of the pending values.
 	cursor, err := tx.Cursor(d.ValuesTable)
@@ -489,11 +490,12 @@ func (d *Domain) firstStepInDB(tx kv.Tx) (kv.Step, bool, error) {
 		} else {
 			first = min(first, kv.Step(^binary.BigEndian.Uint64(value[:8])))
 		}
-		if first == 0 {
+		// Older versions cannot move the restart point below filesEnd.
+		if first <= filesEnd {
 			break
 		}
 	}
-	return first, first != kv.Step(math.MaxUint64), nil
+	return max(filesEnd, first), first != kv.Step(math.MaxUint64), nil
 }
 
 func (dt *DomainRoTx) NewWriter(db kv.RoDB) *DomainBufferedWriter {

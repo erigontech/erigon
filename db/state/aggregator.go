@@ -2217,12 +2217,12 @@ func (at *AggregatorRoTx) firstStepToBuild(tx kv.Tx) (kv.Step, error) {
 		if d == nil || !d.d.Enabled.Load() || d.FirstStepNotInFiles() >= step {
 			continue
 		}
-		first, found, err := d.d.firstStepInDB(tx)
+		first, found, err := d.d.firstStepToBuild(tx, d.FirstStepNotInFiles())
 		if err != nil {
 			return 0, err
 		}
 		if found {
-			step = min(step, max(d.FirstStepNotInFiles(), first))
+			step = min(step, first)
 		}
 	}
 	for _, ii := range at.standaloneIIs() {
