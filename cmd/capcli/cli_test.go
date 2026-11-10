@@ -18,6 +18,8 @@ package main
 
 import (
 	"net"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -62,24 +64,46 @@ func TestBeaconAPIRequestsKeepTheEndpointSecretOutOfErrors(t *testing.T) {
 			}
 			require.Contains(t, err.Error(), host)
 
-			err = request("http://h/%zz/path-secret")
-			require.Error(t, err)
-			require.NotContains(t, err.Error(), "path-secret")
+			for _, malformed := range []string{"http://h/%zz/path-secret", "http://user:Ab3x/path-secret@h/"} {
+				err = request(malformed)
+				require.Error(t, err)
+				require.NotContains(t, err.Error(), "path-secret")
+				require.NotContains(t, err.Error(), "Ab3x", "a parse error quotes the malformed part")
+			}
 		})
 	}
 }
 
+// notADatadir is a regular file: a command that touches its datadir fails on it.
+func notADatadir(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "file")
+	require.NoError(t, os.WriteFile(path, nil, 0o600))
+	return path
+}
+
+var malformedEndpoints = []string{"beacon.example:5052/?apikey=key-secret", "ftp://beacon.example/key-secret", "http:///key-secret", "http://h/%zz/key-secret", "http://user:key-secret/x@h/"}
+
 // A malformed --endpoint stops the fill before it touches the datadir, and the error names the flag by position so a
 // key in the value stays out of it.
 func TestBlobArchiveStoreFillRefusesAMalformedEndpoint(t *testing.T) {
-	for _, endpoint := range []string{"beacon.example:5052/?apikey=key-secret", "ftp://beacon.example/key-secret", "http:///key-secret", "http://h/%zz/key-secret"} {
+	for _, endpoint := range malformedEndpoints {
 		fill := &BlobArchiveStoreFill{
 			chainCfg:     chainCfg{Chain: "mainnet"},
-			outputFolder: outputFolder{Datadir: t.TempDir()},
+			outputFolder: outputFolder{Datadir: notADatadir(t)},
 			Endpoints:    []string{"https://beacon.example", endpoint},
 		}
 		err := fill.Run(t.Context())
 		require.ErrorContains(t, err, "--endpoint 2", endpoint)
+		require.NotContains(t, err.Error(), "key-secret")
+	}
+}
+
+func TestChainEndpointRefusesAMalformedEndpoint(t *testing.T) {
+	for _, endpoint := range malformedEndpoints {
+		chain := &ChainEndpoint{chainCfg: chainCfg{Chain: "mainnet"}, outputFolder: outputFolder{Datadir: notADatadir(t)}, Endpoint: endpoint}
+		err := chain.Run(t.Context())
+		require.ErrorContains(t, err, "--endpoint", endpoint)
 		require.NotContains(t, err.Error(), "key-secret")
 	}
 }

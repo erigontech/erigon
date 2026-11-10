@@ -21,7 +21,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -91,9 +90,8 @@ func (b *BlobArchiveStoreFill) Run(ctx context.Context) error {
 		return errors.New("--endpoint is required unless --dry-run is set")
 	}
 	for i, endpoint := range b.Endpoints {
-		// The value is not echoed: it can carry an API key.
-		if u, err := url.Parse(endpoint); err != nil || u.Scheme != "http" && u.Scheme != "https" || u.Host == "" {
-			return fmt.Errorf("--endpoint %d is not an http or https URL", i+1)
+		if !validEndpoint(endpoint) {
+			return fmt.Errorf("--endpoint %d is not an http or https URL with a host", i+1)
 		}
 	}
 

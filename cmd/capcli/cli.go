@@ -239,10 +239,7 @@ const maxBlobSidecarJSONSize = 512 << 10
 func retrieveBlobsFromRemoteEndpoint(ctx context.Context, endpoint string, root common.Hash, maxSidecars int) ([]*cltypes.BlobSidecar, error) {
 	base, err := url.Parse(endpoint)
 	if err != nil {
-		if ue, ok := errors.AsType[*url.Error](err); ok {
-			err = ue.Err // ue.URL is the whole endpoint
-		}
-		return nil, fmt.Errorf("invalid endpoint: %w", err)
+		return nil, redactURLError(err)
 	}
 	blobUri := base.JoinPath("eth/v1/beacon/blob_sidecars", fmt.Sprintf("0x%x", root))
 	log.Debug("[Blob Retrieval] Requesting blob sidecars", "endpoint", redactURL(base), "blockRoot", root)
@@ -291,6 +288,9 @@ func (c *ChainEndpoint) Run(ctx context.Context) error {
 	_, beaconConfig, _, err := clparams.GetConfigsByNetworkName(c.Chain)
 	if err != nil {
 		return err
+	}
+	if !validEndpoint(c.Endpoint) {
+		return errors.New("--endpoint is not an http or https URL with a host")
 	}
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 
@@ -1687,10 +1687,23 @@ func redactURL(u *url.URL) string {
 
 // redactURLError redacts the request URL that a *url.Error from net/http carries.
 func redactURLError(err error) error {
-	if ue, ok := errors.AsType[*url.Error](err); ok {
-		ue.URL = redactEndpoint(ue.URL)
+	ue, ok := errors.AsType[*url.Error](err)
+	if !ok {
+		return err
 	}
+	if ue.Op == "parse" {
+		// The parse error quotes the malformed part of the URL, which can be the key.
+		return errors.New("malformed endpoint URL")
+	}
+	ue.URL = redactEndpoint(ue.URL)
 	return err
+}
+
+// validEndpoint reports whether endpoint is an http or https URL with a host. Callers do not echo a rejected value: it
+// can carry an API key.
+func validEndpoint(endpoint string) bool {
+	u, err := url.Parse(endpoint)
+	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
 }
 
 // redactEndpoint is redactURL for an --endpoint value.
