@@ -23,6 +23,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/types"
@@ -141,6 +142,11 @@ type ExecutionModule interface {
 	// ValidateChain validates the chain ending at the block identified by
 	// blockHash and blockNumber.
 	ValidateChain(ctx context.Context, blockHash common.Hash, blockNumber uint64) (ValidationResult, error)
+
+	// ViewValidatedBlock calls fn with a view of the state after blockHash and with its
+	// parent's state, when blockHash was validated directly on top of the committed head
+	// and is not committed yet. It reports whether fn was called.
+	ViewValidatedBlock(ctx context.Context, blockHash common.Hash, fn func(blockTx, parentTx kv.TemporalTx) error) (bool, error)
 
 	// --- Fork choice ------------------------------------------------------
 

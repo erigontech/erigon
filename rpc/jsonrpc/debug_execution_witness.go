@@ -889,6 +889,16 @@ func (api *DebugAPIImpl) buildWitnessResultHeadCapture(ctx context.Context, comm
 	return api.buildWitnessResult(ctx, committedTx, hc, info, mode)
 }
 
+// ValidatedBlockWitness builds the canonical-mode witness of blockHash from blockTx, a view
+// that holds the block and its executed state, reading the parent commitment from parentTx.
+func (api *DebugAPIImpl) ValidatedBlockWitness(ctx context.Context, blockTx, parentTx kv.TemporalTx, blockHash common.Hash) (*ExecutionWitnessResult, error) {
+	info, err := api.resolveWitnessBlock(ctx, blockTx, rpc.BlockNumberOrHashWithHash(blockHash, false))
+	if err != nil {
+		return nil, err
+	}
+	return api.buildWitnessResultHeadCapture(ctx, blockTx, parentTx, info, witnessModeCanonical)
+}
+
 // buildWitnessResult runs the witness-building pipeline for an already-resolved block
 // against an open temporal tx: re-execute to record accesses, fold the commitment trie,
 // collect ancestor headers, verify statelessly, then append the legacy empty-storage node

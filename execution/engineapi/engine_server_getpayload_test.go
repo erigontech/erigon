@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
@@ -334,6 +335,10 @@ func (s *getPayloadStubModule) GetForkChoice(_ context.Context) (execmodule.Fork
 }
 
 func (s *getPayloadStubModule) AssembleBlock(_ context.Context, _ *builder.Parameters) (execmodule.AssembleBlockResult, error) {
+	panic("not implemented")
+}
+
+func (s *getPayloadStubModule) ViewValidatedBlock(context.Context, common.Hash, func(blockTx, parentTx kv.TemporalTx) error) (bool, error) {
 	panic("not implemented")
 }
 

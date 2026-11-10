@@ -21,11 +21,13 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/jsonrpc"
 	"github.com/erigontech/erigon/txnprovider/txpool"
 )
 
@@ -99,6 +101,7 @@ type sszForkRoute uint8
 const (
 	sszForkRouteNotFound sszForkRoute = iota
 	sszForkRouteNewPayload
+	sszForkRouteNewPayloadWithWitness
 	sszForkRouteGetPayload
 	sszForkRouteForkchoice
 	sszForkRouteBodiesByHash
@@ -109,6 +112,8 @@ func matchSSZForkRoute(method string, rest []string) sszForkRoute {
 	switch {
 	case len(rest) == 1 && rest[0] == "payloads" && method == http.MethodPost:
 		return sszForkRouteNewPayload
+	case len(rest) == 2 && rest[0] == "payloads" && rest[1] == "witness" && method == http.MethodPost:
+		return sszForkRouteNewPayloadWithWitness
 	case len(rest) == 2 && rest[0] == "payloads" && method == http.MethodGet:
 		return sszForkRouteGetPayload
 	case len(rest) == 1 && rest[0] == "forkchoice" && method == http.MethodPost:
@@ -142,6 +147,8 @@ func (e *EngineServer) handleSSZForkScoped(w http.ResponseWriter, r *http.Reques
 	switch route {
 	case sszForkRouteNewPayload:
 		e.handleSSZNewPayload(w, r, forkName, version)
+	case sszForkRouteNewPayloadWithWitness:
+		e.handleSSZNewPayloadWithWitness(w, r, forkName, version)
 	case sszForkRouteGetPayload:
 		e.handleSSZGetPayload(w, r, forkName, version, rest[1])
 	case sszForkRouteForkchoice:
@@ -269,20 +276,78 @@ func writeJSON(w http.ResponseWriter, v any) {
 }
 
 func (e *EngineServer) handleSSZNewPayload(w http.ResponseWriter, r *http.Request, forkName string, version clparams.StateVersion) {
-	if !checkSSZContentType(w, r) {
+	status, _, ok := e.sszNewPayload(w, r, forkName, version)
+	if !ok {
 		return
+	}
+	e.logger.Debug("[SSZ-REST] handled new payload", "fork", forkName)
+	writeSSZ(w, status)
+}
+
+func (e *EngineServer) handleSSZNewPayloadWithWitness(w http.ResponseWriter, r *http.Request, forkName string, version clparams.StateVersion) {
+	if version < clparams.GloasVersion {
+		writeProblem(w, http.StatusBadRequest, problemUnsupportedFork, fmt.Sprintf("payloads/witness is not served for %q", forkName))
+		return
+	}
+	status, blockHash, ok := e.sszNewPayload(w, r, forkName, version)
+	if !ok {
+		return
+	}
+	var witness *jsonrpc.ExecutionWitnessResult
+	if status.Status == engine_types.ValidStatus {
+		var err error
+		if witness, err = e.payloadWitness(r.Context(), blockHash); err != nil {
+			writeProblem(w, http.StatusInternalServerError, problemInternal, err.Error())
+			return
+		}
+	}
+	out, err := encodePayloadStatusWithWitness(status, witness)
+	if err != nil {
+		writeProblem(w, http.StatusInternalServerError, problemInternal, err.Error())
+		return
+	}
+	e.logger.Debug("[SSZ-REST] handled new payload with witness", "fork", forkName)
+	writeSSZBytes(w, out)
+}
+
+var errPayloadWitnessUnavailable = errors.New("payload witness unavailable: the payload's state is no longer held")
+
+func (e *EngineServer) payloadWitness(ctx context.Context, blockHash common.Hash) (*jsonrpc.ExecutionWitnessResult, error) {
+	if witness, ok := e.payloadWitnesses.Get(blockHash); ok {
+		return witness, nil
+	}
+	var witness *jsonrpc.ExecutionWitnessResult
+	held, err := e.executionService.ViewValidatedBlock(ctx, blockHash, func(blockTx, parentTx kv.TemporalTx) error {
+		var err error
+		witness, err = e.witnessBuilder.ValidatedBlockWitness(ctx, blockTx, parentTx, blockHash)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	if !held {
+		return nil, errPayloadWitnessUnavailable
+	}
+	e.payloadWitnesses.Add(blockHash, witness)
+	return witness, nil
+}
+
+// sszNewPayload returns false once it has written an error response.
+func (e *EngineServer) sszNewPayload(w http.ResponseWriter, r *http.Request, forkName string, version clparams.StateVersion) (*engine_types.PayloadStatus, common.Hash, bool) {
+	if !checkSSZContentType(w, r) {
+		return nil, common.Hash{}, false
 	}
 	body, ok := readSSZBody(w, r, sszMaxPayloadRequestBody)
 	if !ok {
-		return
+		return nil, common.Hash{}, false
 	}
 	payload, parentRoot, executionRequests, err := decodeNewPayloadEnvelope(body, version)
 	if err != nil {
 		e.writeSSZDecodeProblem(w, r, err)
-		return
+		return nil, common.Hash{}, false
 	}
 	if !e.checkSSZForkTimestamp(w, forkName, uint64(payload.Timestamp)) {
-		return
+		return nil, common.Hash{}, false
 	}
 	var status *engine_types.PayloadStatus
 	switch version {
@@ -297,10 +362,9 @@ func (e *EngineServer) handleSSZNewPayload(w http.ResponseWriter, r *http.Reques
 	}
 	if err != nil {
 		writeEngineProblem(w, err)
-		return
+		return nil, common.Hash{}, false
 	}
-	e.logger.Debug("[SSZ-REST] handled new payload", "fork", forkName)
-	writeSSZ(w, status)
+	return status, payload.BlockHash, true
 }
 
 func (e *EngineServer) handleSSZGetPayload(w http.ResponseWriter, r *http.Request, forkName string, version clparams.StateVersion, payloadID string) {
@@ -594,7 +658,7 @@ type sszRestCapabilities struct {
 func (e *EngineServer) handleSSZCapabilities(w http.ResponseWriter) {
 	writeJSON(w, sszRestCapabilities{
 		SupportedForks:         engineForkOrder,
-		ForkScopedEndpoints:    []string{"payloads", "forkchoice", "bodies"},
+		ForkScopedEndpoints:    []string{"payloads", "payloads/witness", "forkchoice", "bodies"},
 		IndependentlyVersioned: map[string][]string{"blobs": {"v1", "v2", "v3", "v4"}},
 		UnscopedEndpoints:      []string{"capabilities", "identity", "inclusion-list"},
 		Limits: map[string]uint64{

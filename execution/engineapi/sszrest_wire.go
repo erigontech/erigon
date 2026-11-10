@@ -12,6 +12,7 @@
 package engineapi
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/holiman/uint256"
@@ -25,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/rpc/jsonrpc"
 )
 
 const (
@@ -212,6 +214,49 @@ func encodeForkchoiceResponse(resp *engine_types.ForkChoiceUpdatedResponse) ([]b
 		}
 	}
 	return ssz2.MarshalSSZ(nil, resp.PayloadStatus, payloadID)
+}
+
+// ExecutionWitness list bounds: MAX_WITNESS_ITEMS, MAX_BYTES_PER_WITNESS_NODE,
+// MAX_BYTES_PER_CODE, MAX_WITNESS_HEADERS and MAX_BYTES_PER_HEADER.
+const (
+	sszMaxWitnessItems        = 1 << 20
+	sszMaxBytesPerWitnessNode = 1 << 10
+	sszMaxBytesPerCode        = 1 << 16
+	sszMaxWitnessHeaders      = 1 << 8
+	sszMaxBytesPerHeader      = 1 << 10
+)
+
+// PayloadStatusWithWitness is {payload_status: PayloadStatus, witness: Optional[ExecutionWitness]}.
+// TransactionsSSZ gives Optional[T] = List[T, 1] its offset-prefixed encoding.
+func encodePayloadStatusWithWitness(status *engine_types.PayloadStatus, witness *jsonrpc.ExecutionWitnessResult) ([]byte, error) {
+	var optional [][]byte
+	if witness != nil {
+		if err := errors.Join(
+			checkByteLists("state", witness.State, sszMaxWitnessItems, sszMaxBytesPerWitnessNode),
+			checkByteLists("codes", witness.Codes, sszMaxWitnessItems, sszMaxBytesPerCode),
+			checkByteLists("headers", witness.Headers, sszMaxWitnessHeaders, sszMaxBytesPerHeader),
+		); err != nil {
+			return nil, err
+		}
+		enc, err := ssz2.MarshalSSZ(nil, newTransactionsSSZ(witness.State), newTransactionsSSZ(witness.Codes), newTransactionsSSZ(witness.Headers))
+		if err != nil {
+			return nil, err
+		}
+		optional = [][]byte{enc}
+	}
+	return ssz2.MarshalSSZ(nil, status, solid.NewTransactionsSSZFromTransactions(optional))
+}
+
+func checkByteLists(name string, items []hexutil.Bytes, maxItems, maxBytes int) error {
+	if len(items) > maxItems {
+		return fmt.Errorf("witness %s count %d exceeds %d", name, len(items), maxItems)
+	}
+	for i, item := range items {
+		if len(item) > maxBytes {
+			return fmt.Errorf("witness %s[%d] length %d exceeds %d", name, i, len(item), maxBytes)
+		}
+	}
+	return nil
 }
 
 func encodeBlockValue(v *hexutil.U256) common.Hash {

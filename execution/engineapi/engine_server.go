@@ -99,7 +99,17 @@ type EngineServer struct {
 
 	engineLogSpamer *engine_logs_spammer.EngineLogsSpammer
 	maxReorgDepth   uint64
+
+	witnessBuilder   *jsonrpc.DebugAPIImpl
+	payloadWitnesses *jsonrpc.WitnessResultCache
 }
+
+// Bounds for the witnesses kept for payloads resubmitted after their state was committed.
+// One witness can reach hundreds of MB, so the byte bound is the one that matters.
+const (
+	payloadWitnessCacheSize  = 8
+	payloadWitnessCacheBytes = 256 << 20
+)
 
 func NewEngineServer(
 	logger log.Logger,
@@ -129,6 +139,7 @@ func NewEngineServer(
 		txpool:           txPool,
 		blobGetter:       blobGetter,
 		maxReorgDepth:    maxReorgDepth,
+		payloadWitnesses: jsonrpc.NewWitnessResultCache(payloadWitnessCacheSize, payloadWitnessCacheBytes),
 	}
 
 	srv.consuming.Store(consuming)
@@ -172,6 +183,7 @@ func (e *EngineServer) Start(
 	}
 	base := jsonrpc.NewBaseApi(filters, stateCache, blockReader, engine, jsonrpc.NewBaseApiConfig(httpConfig))
 	ethImpl := jsonrpc.NewEthAPI(base, db, eth, e.txpool, mining, jsonrpc.NewEthApiConfig(httpConfig), e.logger)
+	e.witnessBuilder = jsonrpc.NewPrivateDebugAPI(base, db, eth, jsonrpc.NewDebugApiConfig(httpConfig))
 
 	apiList := []rpc.API{
 		{

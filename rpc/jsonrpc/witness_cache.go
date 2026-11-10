@@ -75,6 +75,15 @@ type witnessResultCache struct {
 	building      map[common.Hash]*witnessBuild
 }
 
+// WitnessResultCache is a witness LRU bounded by entry count and resident bytes.
+type WitnessResultCache = witnessResultCache
+
+// NewWitnessResultCache holds at most blocks witnesses and maxBytes resident bytes,
+// always keeping the newest witness.
+func NewWitnessResultCache(blocks uint, maxBytes int) *WitnessResultCache {
+	return newWitnessResultCache(blocks, maxBytes, false, false)
+}
+
 type witnessBuild struct {
 	done   chan struct{}
 	result *ExecutionWitnessResult

@@ -744,6 +744,42 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 	return result, nil
 }
 
+func (e *ExecModule) ViewValidatedBlock(ctx context.Context, blockHash common.Hash, fn func(blockTx, parentTx kv.TemporalTx) error) (bool, error) {
+	if err := e.semaphore.Acquire(ctx, 1); err != nil {
+		return false, err
+	}
+	defer e.semaphore.Release(1)
+	head, number, sd := e.forkValidator.ExtendingFork()
+	if sd == nil || head != blockHash || number == 0 {
+		return false, nil
+	}
+	parentTx, err := e.db.BeginTemporalRo(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer parentTx.Rollback()
+	blockTx := sd.BlockOverlayTemporalTx(parentTx)
+	if blockTx == nil {
+		return false, nil
+	}
+	header, err := e.blockReader.Header(ctx, blockTx, blockHash, number)
+	if err != nil || header == nil {
+		return false, err
+	}
+	executedTo, err := stages.GetStageProgress(parentTx, stages.Execution)
+	if err != nil {
+		return false, err
+	}
+	committedParent, err := rawdb.ReadCanonicalHash(parentTx, number-1)
+	if err != nil {
+		return false, err
+	}
+	if executedTo != number-1 || committedParent != header.ParentHash {
+		return false, nil
+	}
+	return true, fn(blockTx, parentTx)
+}
+
 func (e *ExecModule) purgeBadChain(ctx context.Context, tx kv.RwTx, latestValidHash, headHash common.Hash) error {
 	tip, err := e.blockReader.HeaderNumber(ctx, tx, headHash)
 	if err != nil {
