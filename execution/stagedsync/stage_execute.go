@@ -400,10 +400,12 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 		return nil
 	}
 
+	dbg.NpMark("seEnter")
 	prevStageProgress, err := stageProgress(rwTx, cfg.db, stages.Senders)
 	if err != nil {
 		return err
 	}
+	dbg.NpMark("seProgress")
 
 	to := prevStageProgress
 	if toBlock > 0 {
@@ -419,11 +421,13 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 	if err != nil {
 		return err
 	}
+	dbg.NpMark("seSeek")
 	initialTxNum, blockNum, err = resolveExecResumePoint(ctx, cfg.blockReader.TxnumReader(), rwTx, cfg.discardCommitment, s.BlockNumber, initialTxNum, blockNum)
 	if err != nil {
 		return err
 	}
 
+	dbg.NpMark("seResolve")
 	if s.SyncMode() == stages.ModeApplyingBlocks {
 		agg := cfg.db.(state.HasAgg).Agg().(*state.Aggregator)
 		if s.CurrentSyncCycle.IsInitialCycle {
@@ -442,6 +446,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 		return err
 	}
 
+	dbg.NpMark("seRestore")
 	if maxTxNum == 0 {
 		// nothing to exec, make sure the stage is in sync with the sd
 		if s.BlockNumber < blockNum {

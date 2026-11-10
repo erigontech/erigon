@@ -318,8 +318,10 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 	// calculator. Both are fed by the fan-out in the execLoop's blockExecutor.
 	// Room for a whole 150M-gas block of transfers, so the exec loop does not stall
 	// on a consumer that folds each tx as it is published.
+	dbg.NpMark("piEnter")
 	applyResults := make(chan applyResult, 16_384)
 	commitResults := make(chan applyResult, 16_384)
+	dbg.NpMark("piChans")
 	// Exec-only (DISCARD_COMMITMENT): nil the commit stream so no commitment work
 	// runs — fan-out and batch-commit trigger no-op on a nil channel, and the
 	// calculator exits immediately and closes rootResults.
@@ -359,6 +361,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 		}
 	}
 
+	dbg.NpMark("piRestore")
 	// Set accumulator before pe.run() so execLoop sees it without a race.
 	pe.accumulator = accumulator
 
@@ -376,14 +379,17 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 	pe.consumers.register("commitResults", commitResults)
 	pe.maxBlockNum = maxBlockNum
 
+	dbg.NpMark("piPreRun")
 	executorContext, executorCancel, err := pe.run(ctx)
 	defer executorCancel(nil)
+	dbg.NpMark("piRun")
 
 	if err != nil {
 		return nil, rwTx, err
 	}
 
 	pe.resetWorkers(pe.rs)
+	dbg.NpMark("piResetWorkers")
 
 	// Disable inline TouchKey — the commitment calculator accumulates touches
 	// via its own Updates buffer.
@@ -423,12 +429,15 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 	// committedTransactions=0: handleCommitResult already stored the absolute
 	// lastCommittedTxNum, so the commit log must not re-add a delta.
 	logCommit := func(p commitment.CommitProgress) { pe.LogCommitments(0, stepsInDb, p) }
+	dbg.NpMark("piPreCalc")
 	calculator, err := newCommitmentCalculator(ctx, executorContext, pe.rs.Domains(), pe.cfg.db, pe.cfg.chainConfig, pe.logPrefix, pe.logger, forcePerBlockCompute, pe.changesetWindowStart, commitResults, blockRequests, rootResults, commitDomainReader, logCommit)
 	if err != nil {
 		return nil, nil, err
 	}
+	dbg.NpMark("piCalcNew")
 	calculator.Start(ctx)
 	defer calculator.Stop()
+	dbg.NpMark("piCalcStart")
 
 	if err := pe.executeBlocks(executorContext, startBlockNum, maxBlockNum, blockLimit, initialTxNum, restoredTxNum, readAhead, initialCycle, pe.consumers, blockRequests); err != nil {
 		return nil, rwTx, err
@@ -1358,6 +1367,7 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 		}
 	}
 
+	dbg.NpMark("plTasksReady")
 	if scheduleable != nil {
 		return pe.startBlock(ctx, scheduleable)
 	}
