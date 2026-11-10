@@ -87,6 +87,11 @@ var numOfBlobRecoveryWorkers = 8
 const (
 	blobRecoveryValidationRetryInterval = 500 * time.Millisecond
 	maxBlobRecoveryResultBytes          = 16 << 20
+
+	// A recovery scheduled by a stored column starts once no column of the block has been stored for the quiet period,
+	// so gossip can deliver the remaining columns first. The slot deadline caps the wait when columns keep trickling in.
+	blobRecoveryQuietPeriod         = 150 * time.Millisecond
+	blobRecoveryDeadlineSlotDivisor = 4
 )
 
 type peerdas struct {
@@ -582,6 +587,8 @@ type recoverBlobsRequest struct {
 	slot      uint64
 	blockRoot common.Hash
 	metadata  *blobRecoveryMetadata
+	// lastColumn is when a column of the block was last stored; zero starts the recovery without waiting.
+	lastColumn time.Time
 }
 
 type delayedRecoverBlobsRequest struct {
@@ -881,6 +888,31 @@ func (d *peerdas) delayBlobRecovery(request recoverBlobsRequest) bool {
 	return true
 }
 
+// parkBlobRecovery releases the claim on the root but keeps it owned: the root sits in no queue until the timer puts
+// its newest request back.
+func (d *peerdas) parkBlobRecovery(blockRoot common.Hash, notBefore time.Time) {
+	d.recoveringMutex.Lock()
+	d.isRecovering[blockRoot] = false
+	d.recoveringMutex.Unlock()
+	time.AfterFunc(time.Until(notBefore), func() { d.requeueParkedBlobRecovery(blockRoot) })
+}
+
+func (d *peerdas) requeueParkedBlobRecovery(blockRoot common.Hash) {
+	d.recoveringMutex.Lock()
+	request, exists := d.recoveryRequests[blockRoot]
+	if !exists {
+		d.recoveringMutex.Unlock()
+		return
+	}
+	select {
+	case d.recoverBlobsQueue <- request:
+		d.recoveringMutex.Unlock()
+	default:
+		d.recoveringMutex.Unlock()
+		d.delayBlobRecovery(request)
+	}
+}
+
 func (d *peerdas) nextBlobRecoveryRequest(ctx context.Context) (recoverBlobsRequest, bool) {
 	d.initBlobRecoveryRetries()
 	for {
@@ -1017,10 +1049,12 @@ func (d *peerdas) enqueueBlobRecovery(request recoverBlobsRequest) error {
 		return nil
 	}
 	if _, ok := d.isRecovering[request.blockRoot]; ok {
-		owned := d.recoveryRequests[request.blockRoot]
+		owned, exists := d.recoveryRequests[request.blockRoot]
 		if owned.metadata == nil && request.metadata != nil {
 			d.recoveryRequests[request.blockRoot] = request
 			d.recoveryGenerations[request.blockRoot]++
+		} else if exists && owned.metadata == nil && request.lastColumn.After(owned.lastColumn) {
+			d.recoveryRequests[request.blockRoot] = request
 		}
 		d.recoveringMutex.Unlock()
 		return nil
@@ -1381,7 +1415,10 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 		}
 
 		var retryScheduled bool
-		if toRecover.metadata != nil {
+		if notBefore := d.blobRecoveryNotBefore(toRecover); time.Now().Before(notBefore) {
+			d.parkBlobRecovery(toRecover.blockRoot, notBefore)
+			retryScheduled = true
+		} else if toRecover.metadata != nil {
 			validation, _ := d.storedBlobRecoveryValidation(ctx, toRecover.metadata)
 			switch validation {
 			case blobRecoveryUnavailable:
@@ -1407,6 +1444,18 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 	}
 }
 
+func (d *peerdas) blobRecoveryNotBefore(request recoverBlobsRequest) time.Time {
+	if request.lastColumn.IsZero() {
+		return time.Time{}
+	}
+	notBefore := request.lastColumn.Add(blobRecoveryQuietPeriod)
+	deadline := d.ethClock.GetSlotTime(request.slot).Add(d.slotDuration() / blobRecoveryDeadlineSlotDivisor)
+	if deadline.Before(notBefore) {
+		return deadline
+	}
+	return notBefore
+}
+
 func (d *peerdas) TryScheduleRecover(slot uint64, blockRoot common.Hash) error {
 	return d.tryScheduleRecover(slot, blockRoot, nil)
 }
@@ -1425,6 +1474,9 @@ func (d *peerdas) tryScheduleRecover(slot uint64, blockRoot common.Hash, metadat
 		slot:      slot,
 		blockRoot: blockRoot,
 		metadata:  metadata,
+	}
+	if metadata == nil {
+		request.lastColumn = time.Now()
 	}
 	return d.enqueueBlobRecovery(request)
 }
