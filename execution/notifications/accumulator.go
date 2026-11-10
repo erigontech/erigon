@@ -54,12 +54,7 @@ func (a *Accumulator) HasPendingChanges() bool {
 }
 
 func (a *Accumulator) Reset(plainStateID uint64) {
-	a.changes = nil
-	a.stateChangesIncomplete = false
-	a.latestChange = nil
-	a.accountChangeIndex = nil
-	a.storageChangeIndex = nil
-	a.plainStateID = plainStateID
+	*a = Accumulator{plainStateID: plainStateID}
 }
 
 // Checkpoint returns a rollback to completed block changes. Later writes must
