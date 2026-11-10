@@ -769,6 +769,8 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					h, txIO, blockBAL := lastHeader, applyResult.TxIO, applyResult.BAL
 					go func() {
 						defer close(balDone)
+						dbg.NpMark("bal-start")
+						defer dbg.NpMark("bal-end")
 						computedBAL, balErr = bal.Process(blockBAL, h, built, txIO, isAmsterdam, pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir, pe.logger)
 					}()
 
@@ -808,9 +810,12 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					blockApplyCount = 0
 
 					<-balDone
+					dbg.NpMark("bal-joined")
 					// Join the per-block validator spawned above; its verdict wins over
 					// a bal.Process error.
-					if err := blockValidatorWaiter.Wait(); err != nil {
+					valErr := blockValidatorWaiter.Wait()
+					dbg.NpMark("validator-joined")
+					if err := valErr; err != nil {
 						failInfra(fmt.Errorf("%w, block=%d, %w", rules.ErrInvalidBlock, applyResult.BlockNum, err))
 						continue
 					}
@@ -824,6 +829,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					}
 
 					appliedBlocks[applyResult.BlockNum] = struct{}{}
+					dbg.NpMark("block-applied")
 
 					// A commit wrong-root deferred for this (or an earlier) block: exec
 					// has now applied it cleanly, so the divergence is real. Finalize on
@@ -868,14 +874,19 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 		}
 	}()
 
+	dbg.NpMark("apply-loop-exit")
 	executorCancel(nil)
 
 	if !hasLoggedExecution {
 		pe.LogExecution()
 	}
+	dbg.NpMark("logexec-ret")
 
 	// Wait for all goroutines to complete before reading shared state.
-	if waitErr := pe.wait(); waitErr != nil {
+	defer dbg.NpMark("execimpl-ret")
+	waitErr := pe.wait()
+	dbg.NpMark("pe-wait-ret")
+	if waitErr != nil {
 		if execErr == nil {
 			execErr = waitErr
 		} else {
@@ -973,6 +984,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 	// The exec loop owns shutdown sequencing: on exit it closes commitResults then
 	// applyResults, draining the calculator and apply loop. It owns the workers'
 	// inner context too — whatever exit path it takes, the workers must not outlive it.
+	defer dbg.NpMark("execloop-defers")
 	defer pe.cancelWorkers()
 	defer pe.closeApplyChannels()
 	defer func() {

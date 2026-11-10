@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/crypto/kzg"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -282,6 +283,8 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	executionRequests []hexutil.Bytes, version clparams.StateVersion, deriveBlobHashes bool,
 ) (*engine_types.PayloadStatus, error) {
 	defer engineNewPayloadDuration.ObserveDuration(time.Now())
+	dbg.NpStart()
+	defer func() { e.logger.Info("[np-post]", "marks", dbg.NpLine()) }()
 	if req == nil {
 		return nil, &rpc.InvalidParamsError{Message: "missing payload"}
 	}
@@ -1133,6 +1136,8 @@ func (e *EngineServer) HandleNewPayload(
 		}
 	}
 
+	dbg.NpMark("ins-call")
+	defer dbg.NpMark("np-defers")
 	if err := e.chainRW.InsertBlocks(ctx, []*types.Block{block}); err != nil {
 		if errors.Is(err, types.ErrBlockExceedsMaxRlpSize) || errors.Is(err, types.ErrInvalidBlockAccessList) {
 			return &engine_types.PayloadStatus{
@@ -1148,7 +1153,9 @@ func (e *EngineServer) HandleNewPayload(
 	}
 
 	e.logger.Debug(fmt.Sprintf("[%s] New payload begin verification", logPrefix))
+	dbg.NpMark("vc-call")
 	status, validationErr, latestValidHash, err := e.chainRW.ValidateChain(ctx, headerHash, headerNumber)
+	dbg.NpMark("vc-ret")
 	e.logger.Debug(fmt.Sprintf("[%s] New payload verification ended", logPrefix), "status", status.String(), "err", err)
 	if err != nil {
 		missingBlkHash, isMissingChainErr := execmodule.GetBlockHashFromMissingSegmentError(err)

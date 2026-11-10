@@ -332,6 +332,8 @@ func (fv *ForkValidator) validateAndStorePayload(sd *execctx.SharedDomains, tx k
 		sd.TakeCommitmentTime() // discard anything left by an earlier block
 		beforeIO = blockmetrics.Take(sd.Metrics(), sd.NonExecMetrics())
 	}
+	dbg.NpMark("vb-call")
+	defer dbg.NpMark("vs-ret")
 	if err := fv.executor.ValidateBlock(sd, tx, unwindPoint, headersChain, bodiesChain); err != nil {
 		switch {
 		case errors.Is(err, rules.ErrInvalidBlock):
@@ -344,9 +346,11 @@ func (fv *ForkValidator) validateAndStorePayload(sd *execctx.SharedDomains, tx k
 			return
 		}
 	}
+	dbg.NpMark("vb-ret")
 	validation := time.Since(start)
 	fv.timingsCache.Add(hash, BlockTimings{validation, 0})
 	fv.recordBlockMetrics(sd, header, body, hash, &beforeIO, len(headersChain), validation, fv.executor.lastValidationExecStageTiming())
+	dbg.NpMark("metrics-ret")
 
 	latestValidHash = hash
 	fv.extendingForkHeadHash = hash

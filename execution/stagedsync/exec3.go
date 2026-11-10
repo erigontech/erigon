@@ -257,9 +257,11 @@ func ExecV3(ctx context.Context,
 		pe.LogComplete(stepsInDb)
 	}()
 
+	defer dbg.NpMark("execv3-all-defers")
 	var lastHeader *types.Header
 	lastHeader, applyTx, execErr = pe.exec(ctx, startBlockNum, offsetFromBlockBeginning, maxBlockNum, blockLimit,
 		initialTxNum, inputTxNum, initialCycle, applyTx, stepsInDb, accumulator, readAhead, logEvery)
+	dbg.NpMark("pe-exec-ret")
 
 	out = execV3Outcome{
 		applyTx:               applyTx,
@@ -282,6 +284,7 @@ func ExecV3(ctx context.Context,
 
 	execErr = execV3Finalize(ctx, nil, cfg, doms, pe.lastCommittedTxNum.Load(), out.lastCommittedBlockNum,
 		lastHeader, shouldReportToTxPool, logPrefix, logger)
+	dbg.NpMark("execv3-finalize-ret")
 	return finalizeExecV3Outcome(out, execErr)
 }
 

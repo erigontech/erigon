@@ -514,6 +514,8 @@ func (s *Sync) runStage(stage *Stage, doms *execctx.SharedDomains, rwTx kv.Tempo
 		return false, err
 	}
 
+	dbg.NpMark("stage-" + string(stage.ID) + "-start")
+	defer dbg.NpMark("stage-" + string(stage.ID) + "-end")
 	if err = stage.Forward(badBlockUnwind, stageState, s, doms, rwTx, s.logger); err != nil {
 		// Only a purely-exhausted loop saves progress and continues. errors.AsType
 		// would also match errors.Join(exhausted, waitErr) and silently drop the

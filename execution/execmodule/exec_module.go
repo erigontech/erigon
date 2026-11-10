@@ -518,6 +518,7 @@ const nextForkBanner = `
 `
 
 func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, blockNumber uint64) (ValidationResult, error) {
+	defer dbg.NpMark("vc-all-defers")
 	defer validateChainDuration.ObserveDuration(time.Now())
 	if !e.semaphore.TryAcquire(1) {
 		e.logger.Trace("ethereumExecutionModule.ValidateChain: ExecutionStatus_Busy")
@@ -693,7 +694,10 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		doms.Close()
 		return ValidationResult{}, err
 	}
+	dbg.NpMark("vp-call")
+	defer dbg.NpMark("vc-body-end")
 	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(ctx, doms, tx, header, body.RawBody(), ensureReadAheadSuspended, e.logger)
+	dbg.NpMark("vp-ret")
 	if criticalError != nil {
 		return ValidationResult{}, criticalError
 	}

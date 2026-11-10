@@ -460,6 +460,7 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 			cc.compute(ctx, targetOf(r), computeMode{checkRoot: true})
 		}
 		if logNpPhases && !r.execStartedAt.IsZero() {
+			dbg.NpMark("commit-end")
 			commitEnd := time.Now()
 			execActive := r.execEndedAt.Sub(r.execStartedAt)
 			commitActive := commitEnd.Sub(commitStart)

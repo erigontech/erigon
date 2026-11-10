@@ -124,10 +124,14 @@ func matchesSidecar(blockBal *types.BlockAccessListSidecar, h *types.Header, bui
 	if hash, err := blockBal.Hash(); err != nil || hash != *h.BlockAccessListHash {
 		return false
 	}
+	dbg.NpMark("bal-hash")
 	if blockBal.ValidateForHeader(h.GasLimit) != nil {
 		return false
 	}
+	dbg.NpMark("bal-vfh")
 	built.AddRemaining(vio)
+	dbg.NpMark("bal-addrem")
+	defer dbg.NpMark("bal-matches")
 	return built.Matches(blockBal.BlockAccessList())
 }
 
