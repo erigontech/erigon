@@ -78,7 +78,11 @@ func TestVisibleFilesAligned_GapHidesEveryFileAfterIt(t *testing.T) {
 	generateCommitmentFile(t, agg.Dirs(), ranges)
 	require.NoError(t, agg.OpenFolder(db))
 
-	requireVisibleEnd(t, agg, alignStepSize)
+	at := agg.BeginFilesRo()
+	defer at.Close()
+	for _, d := range kv.StateDomains {
+		require.EqualValues(t, alignStepSize, at.d[d].files.EndTxNum(), "domain %s", d)
+	}
 }
 
 // domains visible past the log/trace indexes answer eth_getLogs from blocks no index saw

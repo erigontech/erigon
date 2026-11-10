@@ -74,7 +74,7 @@ func TestDomain_RmStateLatestHole(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, found)
 	require.Equal(t, v2, got)
-	require.NoError(t, drt.checkFilesDBGap(tx), "no gap before the file is removed")
+	require.NoError(t, drt.checkFilesDBGap(tx, math.MaxUint64), "no gap before the file is removed")
 	drt.Close()
 
 	// `rm-state --latest`: drop the newest file (step 1), the one holding v2.
@@ -91,7 +91,7 @@ func TestDomain_RmStateLatestHole(t *testing.T) {
 	require.Equal(t, v1, got, "stale value served from below the hole")
 
 	// The gap check catches what GetLatest cannot.
-	require.ErrorContains(t, drt.checkFilesDBGap(tx), "gap between snapshot files and DB")
+	require.ErrorContains(t, drt.checkFilesDBGap(tx, math.MaxUint64), "gap between snapshot files and DB")
 }
 
 // A file that lost only its accessor still holds its data and BuildMissedAccessors can restore it, so it is no hole.
@@ -136,7 +136,7 @@ func TestDomain_MissingAccessorIsNotAFilesDBGap(t *testing.T) {
 	drt = d.beginForTests()
 	defer drt.Close()
 	require.EqualValues(t, aggStep, drt.files.EndTxNum(), "the hidden file cuts the visible list")
-	require.NoError(t, drt.checkFilesDBGap(tx))
+	require.NoError(t, drt.checkFilesDBGap(tx, math.MaxUint64))
 }
 
 // TestInvertedIndex_RmStateLatestHole verifies the standalone-index gap check with
@@ -184,4 +184,74 @@ func TestInvertedIndex_RmStateLatestHole(t *testing.T) {
 	defer ic.Close()
 	require.Less(t, ic.files.EndTxNum(), filesEnd, "newest file dropped")
 	require.ErrorContains(t, ic.checkFilesDBGap(tx), "gap between snapshot files and DB")
+}
+
+func TestDomain_HistoryHoleKeepsFilesAfterItReadable(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	logEvery := time.NewTicker(time.Hour)
+	defer logEvery.Stop()
+
+	const aggStep = uint64(4)
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, aggStep, log.New())
+	tx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	k := []byte("k")
+	drt := d.beginForTests()
+	w := drt.NewWriter(db)
+	var prev []byte
+	for step := range uint64(4) {
+		v := []byte{byte(step + 1)}
+		require.NoError(t, w.PutWithPrev(k, v, step*aggStep+1, prev))
+		prev = v
+	}
+	require.NoError(t, w.Flush(ctx, tx))
+	w.Close()
+	drt.Close()
+	for step := range kv.Step(4) {
+		require.NoError(t, d.collateBuildIntegrate(ctx, step, tx, background.NewProgressSet()))
+	}
+	drt = d.beginForTests()
+	_, err = drt.Prune(ctx, tx, 0, 0, 4*aggStep, math.MaxUint64, logEvery)
+	require.NoError(t, err)
+	_, err = drt.ht.Prune(ctx, tx, 0, 4*aggStep, math.MaxUint64, true, logEvery)
+	require.NoError(t, err)
+	drt.Close()
+
+	d.History.dirtyFiles.Scan(func(item *FilesItem) bool {
+		if item.startTxNum == aggStep {
+			item.index, item.vAccessor = nil, nil
+		}
+		return true
+	})
+
+	drt = d.beginForTests()
+	defer drt.Close()
+	got, found, err := drt.GetAsOf(k, 2*aggStep+2, tx)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, []byte{3}, got, "the value set in step 2, from the history file above the hole")
+}
+
+func TestCheckFilesDBGapRefusesFilesPastTheSharedCeiling(t *testing.T) {
+	t.Parallel()
+	db, agg := testDbAndAggregatorv3(t, 10)
+	dirs := agg.Dirs()
+	ranges := []testFileRange{{0, 1}, {1, 2}, {2, 3}}
+	generateAccountsFile(t, dirs, ranges)
+	generateStorageFile(t, dirs, ranges)
+	generatePlainCommitmentFile(t, dirs, []testFileRange{{0, 1}})
+	require.NoError(t, agg.OpenFolder(db))
+
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	require.NoError(t, SavePruneValProgress(tx, agg.d[kv.AccountsDomain].ValuesTable, &prune.Stat{TxTo: 30}))
+
+	at := agg.BeginFilesRo()
+	defer at.Close()
+	require.EqualValues(t, 10, at.d[kv.AccountsDomain].files.EndTxNum())
+	require.ErrorContains(t, at.CheckFilesDBGap(tx), "gap between snapshot files and DB")
 }

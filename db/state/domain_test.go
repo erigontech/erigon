@@ -2205,6 +2205,9 @@ func TestDomain_CanScanPruneAfterAggregation(t *testing.T) {
 	require.LessOrEqual(t, stepToPrune, untilStep)
 	domainRoTx.Close()
 
+	for step := kv.Step(4); step < 30; step++ {
+		collateAndMergeOnceWithScanPrune(t, d, tx, step, false)
+	}
 	stepToPrune = 30
 	collateAndMergeOnceWithScanPrune(t, d, tx, stepToPrune, true)
 
@@ -2214,6 +2217,9 @@ func TestDomain_CanScanPruneAfterAggregation(t *testing.T) {
 	require.Equal(t, stepToPrune, untilStep)
 	domainRoTx.Close()
 
+	for step := kv.Step(31); step < 35; step++ {
+		collateAndMergeOnceWithScanPrune(t, d, tx, step, false)
+	}
 	stepToPrune = 35
 	collateAndMergeOnceWithScanPrune(t, d, tx, stepToPrune, false)
 

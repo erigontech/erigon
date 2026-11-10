@@ -651,18 +651,25 @@ func calcVisibleFiles(files *DirtyFiles, l statecfg.Accessors, checker func(star
 		newVisibleFiles = visibleFiles{}
 	}
 
-	return keepFilesBeforeFirstGap(newVisibleFiles)
-}
-
-// keepFilesBeforeFirstGap drops the first file after a hole and all newer ones: a read cannot tell that a key's
-// latest value was in the hole.
-func keepFilesBeforeFirstGap(files visibleFiles) visibleFiles {
-	for i := 1; i < len(files); i++ {
-		prev, curr := files[i-1], files[i]
-		if prev.endTxNum < curr.startTxNum {
+	// Check for gaps in visible files and warn if found
+	for i := 1; i < len(newVisibleFiles); i++ {
+		prev := newVisibleFiles[i-1]
+		curr := newVisibleFiles[i]
+		if prev.endTxNum != curr.startTxNum {
 			log.Warn("[agg] gap in visible files", "prev", prev.src.decompressor.FileName(),
 				"prevEnd", prev.endTxNum, "curr", curr.src.decompressor.FileName(), "currStart", curr.startTxNum,
 				"gap", curr.startTxNum-prev.endTxNum)
+		}
+	}
+
+	return newVisibleFiles
+}
+
+// keepFilesBeforeFirstGap drops the first values file after a hole and all newer ones: a latest read cannot tell
+// that a key's value was in the hole. History reads go by txNum, so a hole affects only the reads that land in it.
+func keepFilesBeforeFirstGap(files visibleFiles) visibleFiles {
+	for i := 1; i < len(files); i++ {
+		if files[i-1].endTxNum < files[i].startTxNum {
 			return files[:i]
 		}
 	}

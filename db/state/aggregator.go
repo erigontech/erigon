@@ -2483,11 +2483,12 @@ func (at *AggregatorRoTx) Generation() uint64 { return at.visible.generation }
 func (at *AggregatorRoTx) CheckFilesDBGap(tx kv.Tx) error {
 	at.a.dirtyFilesLock.Lock()
 	defer at.a.dirtyFilesLock.Unlock()
+	visibleCeiling := at.a.dirtyFilesEndTxNumMinimax()
 	for _, dt := range at.d {
 		if dt == nil || !dt.d.Enabled {
 			continue
 		}
-		if err := dt.checkFilesDBGap(tx); err != nil {
+		if err := dt.checkFilesDBGap(tx, visibleCeiling); err != nil {
 			return err
 		}
 	}
