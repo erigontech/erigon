@@ -2250,7 +2250,9 @@ func (p *TxPool) processMinedFinalizedBlobs(minedTxns []*TxnSlot, finalizedBlock
 
 	// Add mined blobs
 	minedBlock := p.lastSeenBlock.Load()
-	p.minedBlobTxnsByBlock[minedBlock] = make([]*metaTxn, 0)
+	if p.minedBlobTxnsByBlock[minedBlock] == nil {
+		p.minedBlobTxnsByBlock[minedBlock] = make([]*metaTxn, 0) // a same-height reorg reuses the block number, and its entries stay indexed
+	}
 	for _, txn := range minedTxns {
 		if txn.HasBlobs() {
 			mt := &metaTxn{TxnSlot: txn, minedBlockNum: minedBlock}
