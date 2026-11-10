@@ -19,6 +19,7 @@ package commands
 import (
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -73,6 +74,31 @@ func TestCommitmentVerifyRejectsAsOfWithoutHistory(t *testing.T) {
 	chaindata = dbPath
 	verifyAsOf = []uint{0}
 	require.ErrorContains(t, commitmentVerify(t.Context(), log.New()), "history is disabled")
+}
+
+func TestCommitmentVerifyRejectsAsOfBelowHistory(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(true))
+	statecfg.EnableHistoricalCommitment()
+	previousDatadir, previousChaindata, previousVerifyAsOf := datadirCli, chaindata, verifyAsOf
+	t.Cleanup(func() { datadirCli, chaindata, verifyAsOf = previousDatadir, previousChaindata, previousVerifyAsOf })
+
+	db, dirs := dbWithV3State(t)
+	db.Close()
+	var pruned []string
+	for _, d := range []string{dirs.SnapHistory, dirs.SnapIdx, dirs.SnapAccessors} {
+		files, err := filepath.Glob(filepath.Join(d, "*-commitment.0-*"))
+		require.NoError(t, err)
+		pruned = append(pruned, files...)
+	}
+	require.NotEmpty(t, pruned)
+	for _, f := range pruned {
+		require.NoError(t, dir.RemoveFile(f))
+	}
+
+	datadirCli, chaindata = dirs.DataDir, dirs.Chaindata
+	verifyAsOf = []uint{1}
+	openSnapshotOnce = sync.Once{}
+	require.ErrorContains(t, commitmentVerify(t.Context(), log.New()), "no commitment history covers txNum 1")
 }
 
 func TestNewTemporalDBRejectsV3FilesWhenV3IsDisabled(t *testing.T) {
