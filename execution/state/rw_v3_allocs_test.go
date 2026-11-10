@@ -19,6 +19,7 @@ package state
 import (
 	"bytes"
 	"math/big"
+	"slices"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -26,6 +27,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -337,4 +339,85 @@ func TestApplyWritesAccountFieldsDoNotAllocatePerField(t *testing.T) {
 	perAccount := (applyAllocs(true) - applyAllocs(false)) / n
 	require.Less(t, perAccount, 1.5,
 		"three more account fields cost %v allocations per account; holding them by value costs none", perAccount)
+}
+
+// storageLatestReads counts the storage reads ApplyWrites sends to the database.
+type storageLatestReads struct {
+	kv.TemporalTx
+	count int
+}
+
+func (s *storageLatestReads) GetLatest(name kv.Domain, k []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
+	if name == kv.StorageDomain {
+		s.count++
+	}
+	return s.TemporalTx.GetLatest(name, k, opts)
+}
+
+func storageFoldView(addr accounts.Address, key accounts.StorageKey, vw *VersionedWrite[uint256.Int]) WriteSetView {
+	vw.WriteHeader.Address, vw.WriteHeader.Key, vw.WriteHeader.Path = addr, key, StoragePath
+	ws := &WriteSet{}
+	ws.SetStorage(addr, key, vw)
+	return NewVersionMapWriteView(ws, NewVersionMap(nil), 0)
+}
+
+// A storage write recorded by a tx already holds the value the tx read, so the fold
+// must take the slot's previous value from it and not read the state again.
+func TestApplyWritesFoldTakesPrevFromRecordedOrigin(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0x01"))
+	key := accounts.InternKey(common.HexToHash("0x02"))
+	addrValue, keyValue := addr.Value(), key.Value()
+	composite := slices.Concat(addrValue[:], keyValue[:])
+
+	for _, tc := range []struct {
+		name   string
+		status valueStatus
+		orig   uint64
+		val    uint64
+		want   []byte
+	}{
+		{"deleted", ValueDeleted, 5, 0, []byte{}},
+		{"created", ValueCreated, 0, 7, []byte{7}},
+		{"changed", ValueChanged, 5, 7, []byte{7}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, tx, domains := NewTestRwTx(t)
+			reads := &storageLatestReads{TemporalTx: tx}
+			changes := &changeset.StateChangeSet{}
+			domains.SetChangesetAccumulator(changes)
+			view := storageFoldView(addr, key, &VersionedWrite[uint256.Int]{
+				WriteHeader: WriteHeader{valStatus: tc.status},
+				Val:         *uint256.NewInt(tc.val),
+				orig:        *uint256.NewInt(tc.orig),
+			})
+
+			require.NoError(t, ApplyWrites(view, domains, reads, 1, 1, nil, &chain.Rules{}, false))
+
+			require.Zero(t, reads.count, "the recorded origin is the previous value")
+			got, _, ok := domains.GetLatestFromMemory(kv.StorageDomain, composite)
+			require.True(t, ok, "the write reaches the shared domains")
+			require.True(t, bytes.Equal(tc.want, got), "got %x want %x", got, tc.want)
+			diff := changes.Diffs[kv.StorageDomain].GetDiffSet()
+			require.Len(t, diff, 1)
+			require.True(t, bytes.Equal(uint256.NewInt(tc.orig).Bytes(), diff[0].Value), "the changeset keeps the origin as prev, got %x", diff[0].Value)
+		})
+	}
+}
+
+// A write without a recorded origin (zero origin, default status) must still read the
+// previous value: a zero prev would turn a real delete into a no-op.
+func TestApplyWritesFoldReadsPrevWithoutRecordedOrigin(t *testing.T) {
+	_, tx, domains := NewTestRwTx(t)
+	addr := accounts.InternAddress(common.HexToAddress("0x01"))
+	key := accounts.InternKey(common.HexToHash("0x02"))
+	addrValue, keyValue := addr.Value(), key.Value()
+	composite := slices.Concat(addrValue[:], keyValue[:])
+	require.NoError(t, domains.DomainPut(kv.StorageDomain, tx, composite, []byte{9}, 1, nil))
+
+	view := storageFoldView(addr, key, &VersionedWrite[uint256.Int]{})
+	require.NoError(t, ApplyWrites(view, domains, tx, 1, 2, nil, &chain.Rules{}, false))
+
+	got, _, ok := domains.GetLatestFromMemory(kv.StorageDomain, composite)
+	require.True(t, ok)
+	require.Empty(t, got, "the delete must be applied")
 }

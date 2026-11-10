@@ -728,6 +728,17 @@ type VersionedWrite[T any] struct {
 	orig T
 }
 
+// prevFromRecord returns the slot's value before this write, empty if it had none, or nil when
+// the write recorded no origin, which makes DomainPut and DomainDel read the value themselves.
+// A recorded change from zero is ValueCreated, so ValueChanged with a zero origin is a write
+// that was never stamped.
+func prevFromRecord(w *VersionedWrite[uint256.Int]) []byte {
+	if w.valStatus == ValueChanged && w.orig.IsZero() {
+		return nil
+	}
+	return w.orig.Bytes()
+}
+
 func cloneVW[T any](w *VersionedWrite[T]) *VersionedWrite[T] {
 	c := *w
 	return &c
