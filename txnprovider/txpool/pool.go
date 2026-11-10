@@ -667,7 +667,9 @@ func (p *TxPool) IdHashKnown(tx kv.Tx, hash []byte) (bool, error) {
 	return p.idHashKnown(tx, hash, hashS)
 }
 
-// KnownTxnReason returns AlreadyKnown or a reusable rejection, or NotSet if admission is needed.
+// KnownTxnReason returns AlreadyKnown only for transactions currently in the pool.
+// Otherwise it returns a cached rejection valid for the current state generation,
+// or NotSet if admission is needed.
 func (p *TxPool) KnownTxnReason(hash []byte) txpoolcfg.DiscardReason {
 	p.lock.Lock()
 	defer p.lock.Unlock()
@@ -1782,10 +1784,8 @@ func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView,
 		}
 	}
 
-	// This can be thought of a reverse operation from the one described before.
-	// When a block that was deemed "the best" of its height, is no longer deemed "the best", the
-	// transactions contained in it, are now viable for inclusion in other blocks, and therefore should
-	// be returned into the transaction pool.
+	// Refresh senders after inserting the batch so their nonce-chain and balance
+	// checks account for all accepted transactions in the batch.
 	sendersWithChangedState := map[uint64]struct{}{}
 	discardReasons := make([]txpoolcfg.DiscardReason, len(newTxns.Txns))
 	announcements := Announcements{}
