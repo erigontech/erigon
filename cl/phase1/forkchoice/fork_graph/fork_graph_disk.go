@@ -151,6 +151,9 @@ type forkGraphDisk struct {
 	newestLightClientUpdate atomic.Value
 	// the lightclientUpdates leaks memory, but it's not a big deal since new data is added every 27 hours.
 	lightClientUpdates sync.Map // period -> lightclientupdate
+	// lightClientUpdateCandidates holds the updates of blocks that are not finalized yet, by signature block root.
+	// Finalization moves the canonical ones into lightClientUpdates. Guarded by addPruneMu.
+	lightClientUpdateCandidates map[common.Hash]*cltypes.LightClientUpdate
 
 	// in-memory cache of block roots that have envelopes on disk [Optimization for Gloas:EIP7732]
 	envelopeExists   sync.Map // common.Hash -> struct{}
@@ -343,7 +346,9 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 	finalizedBlock, hasFinalized := f.GetBlock(newState.FinalizedCheckpoint().Root)
 	parentBlock, hasParentBlock := f.GetBlock(block.ParentRoot)
 
-	// Before processing the state: update the newest lightclient update.
+	// The update is built from the parent state, which the transition consumes, and kept only once the transition has
+	// verified the block's sync aggregate.
+	var lcUpdate *cltypes.LightClientUpdate
 	if block.Version() >= clparams.AltairVersion && hasParentBlock && fullValidation && hasFinalized && f.rcfg.Beacon && !isBlockRootTheCurrentState {
 		nextSyncCommitteeBranch, err := newState.NextSyncCommitteeBranch()
 		if err != nil {
@@ -353,21 +358,10 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 		if err != nil {
 			return nil, LogisticError, err
 		}
-		lcUpdate, err := lightclient_utils.CreateLightClientUpdate(f.beaconCfg, signedBlock, finalizedBlock, parentBlock, newState.Slot(),
+		lcUpdate, err = lightclient_utils.CreateLightClientUpdate(f.beaconCfg, signedBlock, finalizedBlock, parentBlock, newState.Slot(),
 			newState.NextSyncCommittee(), newState.FinalizedCheckpoint(), convertHashSliceToHashList(nextSyncCommitteeBranch), convertHashSliceToHashList(finalityBranch))
 		if err != nil {
 			log.Debug("Could not create light client update", "err", err)
-		} else {
-			// The caller emits the corresponding light client events: fork graph
-			// methods run under the fork choice store's lock, where event sends
-			// must not happen (a stalled subscriber would wedge the store).
-			f.newestLightClientUpdate.Store(lcUpdate)
-			period := f.beaconCfg.SyncCommitteePeriod(newState.Slot())
-			_, hasPeriod := f.lightClientUpdates.Load(period)
-			if !hasPeriod {
-				log.Info("Adding light client update", "period", period)
-				f.lightClientUpdates.Store(period, lcUpdate)
-			}
 		}
 	}
 
@@ -409,6 +403,9 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 			}
 		}
 		f.blockRewards.Store(common.Hash(blockRoot), blockRewardsCollector)
+		if lcUpdate != nil {
+			f.recordLightClientUpdateLocked(common.Hash(blockRoot), lcUpdate)
+		}
 	}
 
 	f.currentState = newState
@@ -961,6 +958,58 @@ func (f *forkGraphDisk) NewestLightClientUpdate() *cltypes.LightClientUpdate {
 		return nil
 	}
 	return f.newestLightClientUpdate.Load().(*cltypes.LightClientUpdate)
+}
+
+// recordLightClientUpdateLocked takes the update of a block whose transition succeeded: it is the newest update at
+// once, and a candidate for its period's store until finalization settles it. Only an update signed in the period of
+// its attested header is a candidate for that period. A candidate lives no longer than its block, which the fork graph
+// holds until finalization as well. The caller holds addPruneMu. The caller emits the light client events: fork graph
+// methods run under the fork choice store's lock, where event sends must not happen (a stalled subscriber would wedge
+// the store).
+func (f *forkGraphDisk) recordLightClientUpdateLocked(signatureBlock common.Hash, update *cltypes.LightClientUpdate) {
+	f.newestLightClientUpdate.Store(update)
+	if f.beaconCfg.SyncCommitteePeriod(update.AttestedHeader.Beacon.Slot) != f.beaconCfg.SyncCommitteePeriod(update.SignatureSlot) {
+		return
+	}
+	if f.lightClientUpdateCandidates == nil {
+		f.lightClientUpdateCandidates = make(map[common.Hash]*cltypes.LightClientUpdate)
+	}
+	f.lightClientUpdateCandidates[signatureBlock] = update
+}
+
+// KeepFinalizedLightClientUpdates moves the candidates whose signature block is on the finalized block's chain into
+// the period store, and drops the other candidates at or below the finalized slot: they can no longer be canonical.
+func (f *forkGraphDisk) KeepFinalizedLightClientUpdates(finalized common.Hash) {
+	f.addPruneMu.Lock()
+	defer f.addPruneMu.Unlock()
+	header, ok := f.GetHeader(finalized)
+	if !ok {
+		return
+	}
+	finalizedSlot, lowest := header.Slot, header.Slot
+	for _, update := range f.lightClientUpdateCandidates {
+		lowest = min(lowest, update.SignatureSlot)
+	}
+	for root := finalized; ok && header.Slot >= lowest; header, ok = f.GetHeader(root) {
+		if update, isCandidate := f.lightClientUpdateCandidates[root]; isCandidate {
+			f.storeLightClientUpdate(update)
+		}
+		root = header.ParentRoot
+	}
+	for root, update := range f.lightClientUpdateCandidates {
+		if update.SignatureSlot <= finalizedSlot {
+			delete(f.lightClientUpdateCandidates, root)
+		}
+	}
+}
+
+// storeLightClientUpdate keeps the best update of its attested header's sync committee period.
+func (f *forkGraphDisk) storeLightClientUpdate(update *cltypes.LightClientUpdate) {
+	period := f.beaconCfg.SyncCommitteePeriod(update.AttestedHeader.Beacon.Slot)
+	if best, ok := f.lightClientUpdates.Load(period); ok && !lightclient_utils.IsBetterUpdate(f.beaconCfg, update, best.(*cltypes.LightClientUpdate)) {
+		return
+	}
+	f.lightClientUpdates.Store(period, update)
 }
 
 func (f *forkGraphDisk) GetLightClientUpdate(period uint64) (*cltypes.LightClientUpdate, bool) {
