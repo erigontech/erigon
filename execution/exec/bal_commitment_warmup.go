@@ -453,7 +453,8 @@ func prefetchCommitment(ctx context.Context, db kv.RoDB, hashedKeys [][]byte) er
 		if !ok || trieMostlyResident(ctx, p, hashedKeys) {
 			return
 		}
-		if err = prefetchKeys(ctx, db, ttx, kv.CommitmentDomain, flatPrefixes(hashedKeys, 0)); err != nil {
+		flat := append(flatPrefixes(hashedKeys, 0), flatPrefixes(storageKeysOf(hashedKeys), storageTrieDepth)...)
+		if err = prefetchKeys(ctx, db, ttx, kv.CommitmentDomain, flat); err != nil {
 			return
 		}
 		// The account trie walk loses a storage key at the extension above its account, so storage tries start again at their root.
@@ -479,15 +480,14 @@ func storageKeysOf(hashedKeys [][]byte) [][]byte {
 // walkTriePrefixes prefetches the trie levels below the flat depth and stops at the first read error.
 func walkTriePrefixes(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, keys [][]byte, start int) error {
 	active := keys
-	for depth := start; len(active) > 0 && depth <= commitment.WarmupMaxDepth; depth++ {
-		if depth > prefetchFlatDepth {
+	flatEnd := start + prefetchFlatDepth
+	for depth := flatEnd; len(active) > 0 && depth <= commitment.WarmupMaxDepth; depth++ {
+		if depth > flatEnd {
 			if err := prefetchKeys(ctx, db, ttx, kv.CommitmentDomain, compactPrefixes(active, depth)); err != nil {
 				return err
 			}
 		}
-		if depth >= prefetchFlatDepth {
-			active = keysWithChild(ctx, db, ttx, active, depth)
-		}
+		active = keysWithChild(ctx, db, ttx, active, depth)
 	}
 	return nil
 }

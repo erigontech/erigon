@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"maps"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -547,6 +548,98 @@ func TestKeysWithChildKeepsKeysWhoseBranchHasTheirNextNibble(t *testing.T) {
 	keys := [][]byte{{1, 2, 0}, {1, 5, 0}, {3, 0, 0}, {4}}
 	got := keysWithChild(context.Background(), nil, tx, keys, 1)
 	require.Equal(t, [][]byte{{1, 2, 0}}, got, "1-5 has no child at branch 1, 3 has no branch, 4 ends above depth 1")
+}
+
+// trieReadRecorder serves raw branches from children and records every prefix read, except the residency sample.
+type trieReadRecorder struct {
+	children    map[string]uint16
+	mu          sync.Mutex
+	sampled     bool
+	reads       []string
+	branchReads []string
+}
+
+func (r *trieReadRecorder) PrefetchLatest(_ context.Context, _ kv.Domain, keys [][]byte) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.sampled {
+		for _, k := range keys {
+			r.reads = append(r.reads, string(k))
+		}
+	}
+	r.sampled = true
+	return len(keys), nil
+}
+
+func (r *trieReadRecorder) GetLatestBranchRaw(prefix []byte, tx kv.Tx) ([]byte, bool, error) {
+	r.mu.Lock()
+	r.branchReads = append(r.branchReads, string(prefix))
+	r.mu.Unlock()
+	return branchTx{children: r.children}.GetLatestBranchRaw(prefix, tx)
+}
+
+// wantTriePrefixes returns the distinct compact prefixes of keys at the inclusive depth ranges.
+func wantTriePrefixes(keys [][]byte, depths ...[2]int) []string {
+	seen := map[string]struct{}{}
+	for _, r := range depths {
+		for depth := r[0]; depth <= r[1]; depth++ {
+			for _, k := range keys {
+				seen[string(nibbles.HexToCompactInto(nil, k[:depth]))] = struct{}{}
+			}
+		}
+	}
+	return slices.Collect(maps.Keys(seen))
+}
+
+// requireTrieReads runs prefetchCommitment and requires each wanted prefix to be read exactly once.
+func requireTrieReads(t *testing.T, children map[string]uint16, keys [][]byte, wantReads, wantBranchReads []string) {
+	t.Helper()
+	r := &trieReadRecorder{children: children}
+	require.NoError(t, prefetchCommitment(t.Context(), prefetcherDB{p: r}, keys))
+	require.ElementsMatch(t, wantReads, r.reads)
+	require.ElementsMatch(t, wantBranchReads, r.branchReads)
+}
+
+func TestPrefetchCommitmentReadsTopStorageLevelsInTheFlatBatch(t *testing.T) {
+	keys := [][]byte{make([]byte, 128), make([]byte, 128)}
+	keys[0][64], keys[1][64] = 1, 2
+	flatEnd := storageTrieDepth + prefetchFlatDepth
+	keys[0][flatEnd] = 5
+	children := map[string]uint16{
+		string(nibbles.HexToCompactInto(nil, keys[0][:flatEnd])): 1 << 5,
+	}
+
+	requireTrieReads(t, children, keys,
+		slices.Concat(
+			wantTriePrefixes(keys, [2]int{0, prefetchFlatDepth}, [2]int{storageTrieDepth, flatEnd}),
+			wantTriePrefixes(keys[:1], [2]int{flatEnd + 1, flatEnd + 1}),
+		),
+		slices.Concat(
+			wantTriePrefixes(keys[:1], [2]int{prefetchFlatDepth, prefetchFlatDepth}),
+			wantTriePrefixes(keys, [2]int{flatEnd, flatEnd}),
+			wantTriePrefixes(keys[:1], [2]int{flatEnd + 1, flatEnd + 1}),
+		),
+	)
+}
+
+func TestPrefetchCommitmentOfAccountKeysReadsOnlyTheAccountTrie(t *testing.T) {
+	keys := [][]byte{make([]byte, 64), make([]byte, 64)}
+	keys[0][0], keys[1][0] = 1, 2
+	keys[0][prefetchFlatDepth] = 5
+	children := map[string]uint16{
+		string(nibbles.HexToCompactInto(nil, keys[0][:prefetchFlatDepth])): 1 << 5,
+	}
+
+	requireTrieReads(t, children, keys,
+		slices.Concat(
+			wantTriePrefixes(keys, [2]int{0, prefetchFlatDepth}),
+			wantTriePrefixes(keys[:1], [2]int{prefetchFlatDepth + 1, prefetchFlatDepth + 1}),
+		),
+		slices.Concat(
+			wantTriePrefixes(keys, [2]int{prefetchFlatDepth, prefetchFlatDepth}),
+			wantTriePrefixes(keys[:1], [2]int{prefetchFlatDepth + 1, prefetchFlatDepth + 1}),
+		),
+	)
 }
 
 func TestFirstFailurePrefersAReadFailureOverAnIncompleteBatch(t *testing.T) {
