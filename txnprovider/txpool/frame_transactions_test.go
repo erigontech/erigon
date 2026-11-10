@@ -2377,3 +2377,15 @@ func keyedFramePoolEnv(t *testing.T) (context.Context, *TxPool, common.Address) 
 	pool.ethBackend = &frameValidationBackend{payer: sender, balance: 1_000_000, valid: true}
 	return ctx, pool, sender
 }
+
+func TestKeyedFrameReplacesNoAccountNonceTxn(t *testing.T) {
+	_, pool, sender := keyedFramePoolEnv(t)
+	keyed := framePoolSlot(t, sender, 1, 2, uint256.Int{1})
+	keyed.SenderID = 7
+	ordinary := newTestTxnSlot(keyed.Nonce, 0, 1, 2, 21_000)
+	ordinary.SenderID = 7
+	pool.all.replaceOrInsert(&metaTxn{TxnSlot: ordinary}, pool.logger)
+
+	require.Nil(t, pool.pooledTxnReplacedBy(keyed))
+	require.NotNil(t, pool.pooledTxnReplacedBy(ordinary))
+}

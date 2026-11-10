@@ -1615,6 +1615,15 @@ func (o *kzgOffenders) add(i int) {
 	}
 }
 
+// pooledTxnReplacedBy returns the txn that txn would replace. Account nonces and keyed sequences can have equal
+// values without conflicting.
+func (p *TxPool) pooledTxnReplacedBy(txn *TxnSlot) *metaTxn {
+	if txn.hasKeyedNonce() {
+		return nil
+	}
+	return p.all.get(txn.SenderID, txn.Nonce)
+}
+
 // validateTxns returns per-slot discard reasons and the txns that passed.
 // A remote KZG failure skips later txns from that peer; with nil sources,
 // it skips all later remote txns. Skipped txns keep NotSet and are not returned.
@@ -1639,7 +1648,7 @@ func (p *TxPool) validateTxns(txns *TxnSlots, stateCache kvcache.CacheView, reas
 		if reasons[i] != txpoolcfg.NotSet || (!txns.IsLocal[i] && offenders.skip(i)) {
 			continue
 		}
-		replaced := p.all.get(txn.SenderID, txn.Nonce)
+		replaced := p.pooledTxnReplacedBy(txn)
 		reason, err := p.validateTxWithCells(txn, txns.IsLocal[i], stateCache, cells, batch, replaced)
 		if err != nil {
 			if reason == txpoolcfg.ErrGetSenderInfo {

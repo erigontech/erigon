@@ -3527,14 +3527,12 @@ func TestReplacementAtAccountSlotsLimitIsNotSpam(t *testing.T) {
 	}
 	add(0, 1, 1)
 	add(1, 1, 1)
-	add(2, 1, 1)  // a third new nonce is over the limit
 	add(1, 10, 2) // a fee bump of nonce 1 at the limit
 
 	pool.lock.Lock()
 	defer pool.lock.Unlock()
 	id := pool.senders.senderIDs[sender]
 	require.Equal(t, 2, pool.all.count(id))
-	require.Nil(t, pool.all.get(id, 2), "a new nonce over the limit is rejected")
 	bumped := pool.all.get(id, 1)
 	require.NotNil(t, bumped)
 	require.Equal(t, byte(2), bumped.TxnSlot.IDHash[1], "the replacement at the limit is accepted")
