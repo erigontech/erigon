@@ -171,7 +171,7 @@ func incompatibleCommitmentFiles(items snapcfg.PreverifiedItems) map[string]bool
 	}
 	type rangedFile struct {
 		stepRange
-		dependent bool
+		required bool
 	}
 	v3 := statecfg.ExperimentalCommitmentV3
 	dependents := make(map[string]bool)
@@ -194,7 +194,7 @@ func incompatibleCommitmentFiles(items snapcfg.PreverifiedItems) map[string]bool
 		r := stepRange{history: isStateHistory(p.Name), from: info.From, to: info.To}
 		if info.TypeString != kv.CommitmentDomain.String() {
 			if v3 && !r.history && dependents[info.TypeString] {
-				ranges[p.Name] = rangedFile{stepRange: r, dependent: true}
+				ranges[p.Name] = rangedFile{stepRange: r, required: true}
 			}
 			continue
 		}
@@ -203,14 +203,17 @@ func incompatibleCommitmentFiles(items snapcfg.PreverifiedItems) map[string]bool
 				compatible[r] = true
 			} else {
 				skipped[p.Name] = false
+				if v3 && !r.history {
+					ranges[p.Name] = rangedFile{stepRange: r, required: true}
+				}
 			}
 		} else {
-			ranges[p.Name] = rangedFile{stepRange: r, dependent: false}
+			ranges[p.Name] = rangedFile{stepRange: r, required: false}
 		}
 	}
 	for name, f := range ranges {
 		if !compatible[f.stepRange] {
-			skipped[name] = f.dependent
+			skipped[name] = f.required
 		}
 	}
 	return skipped

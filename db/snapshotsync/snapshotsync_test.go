@@ -346,6 +346,7 @@ func TestLegacyCommitmentFiles(t *testing.T) {
 					want[name] = false
 				}
 				if v3 {
+					want["domain/v2.2-commitment.0-16.kv"] = true
 					want["domain/v2.0-accounts.0-16.kv"] = true
 					want["domain/v2.0-accounts.0-16.bt"] = true
 					want["domain/v2.0-storage.0-16.kv"] = true
@@ -808,15 +809,16 @@ func TestSyncSnapshotsCommitmentV3StateTip(t *testing.T) {
 	t.Cleanup(func() { *cfg = previous })
 	cfg.Local = false
 	for _, tc := range []struct {
-		name         string
-		v3           bool
-		extraV3Files []string
-		wantFile     string
+		name       string
+		v3         bool
+		extraFiles []string
+		wantFile   string
 	}{
 		{name: "v3 on legacy only", v3: true, wantFile: ".0-16."},
-		{name: "v3 below state tip", v3: true, extraV3Files: []string{"domain/v3.0-commitment.0-16.kv"}, wantFile: ".16-32."},
-		{name: "v3 above a legacy-only range", v3: true, extraV3Files: []string{"domain/v3.0-commitment.16-32.kv"}, wantFile: ".0-16."},
-		{name: "v3 commitment split across one accounts range", v3: true, extraV3Files: []string{"domain/v3.0-commitment.0-16.kv", "domain/v3.0-commitment.16-32.kv", "domain/v2.0-accounts.0-32.kv"}, wantFile: ".0-32."},
+		{name: "v3 below state tip", v3: true, extraFiles: []string{"domain/v3.0-commitment.0-16.kv"}, wantFile: ".16-32."},
+		{name: "v3 above a legacy-only range", v3: true, extraFiles: []string{"domain/v3.0-commitment.16-32.kv"}, wantFile: ".0-16."},
+		{name: "v3 commitment split across one accounts range", v3: true, extraFiles: []string{"domain/v3.0-commitment.0-16.kv", "domain/v3.0-commitment.16-32.kv", "domain/v2.0-accounts.0-32.kv"}, wantFile: ".0-32."},
+		{name: "v3 code-only tip", v3: true, extraFiles: []string{"domain/v3.0-commitment.0-16.kv", "domain/v3.0-commitment.16-32.kv", "domain/v2.2-commitment.32-48.kv", "domain/v2.0-code.32-48.kv"}, wantFile: ".32-48."},
 		{name: "v3 off legacy only"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -825,7 +827,7 @@ func TestSyncSnapshotsCommitmentV3StateTip(t *testing.T) {
 			for _, name := range legacyFiles {
 				cfg.Preverified.Items = append(cfg.Preverified.Items, snapcfg.PreverifiedItem{Name: name, Hash: strings.Repeat("0", 40)})
 			}
-			for _, name := range tc.extraV3Files {
+			for _, name := range tc.extraFiles {
 				cfg.Preverified.Items = append(cfg.Preverified.Items, snapcfg.PreverifiedItem{Name: name, Hash: strings.Repeat("0", 40)})
 			}
 			downloader := &requestListDownloader{}
