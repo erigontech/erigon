@@ -191,7 +191,7 @@ func incompatibleCommitmentFiles(items snapcfg.PreverifiedItems, localV3Tip uint
 	}
 	type rangedFile struct {
 		stepRange
-		required, commitment bool
+		required bool
 	}
 	v3 := statecfg.ExperimentalCommitmentV3
 	dependents := make(map[string]bool)
@@ -224,21 +224,15 @@ func incompatibleCommitmentFiles(items snapcfg.PreverifiedItems, localV3Tip uint
 			} else {
 				skipped[p.Name] = false
 				if v3 && !r.history {
-					ranges[p.Name] = rangedFile{stepRange: r, required: true, commitment: true}
+					ranges[p.Name] = rangedFile{stepRange: r, required: true}
 				}
 			}
 		} else {
-			ranges[p.Name] = rangedFile{stepRange: r, commitment: true}
+			ranges[p.Name] = rangedFile{stepRange: r}
 		}
 	}
 	for name, f := range ranges {
-		if compatible[f.stepRange] {
-			continue
-		}
-		if f.to <= localV3Tip {
-			if f.commitment {
-				skipped[name] = false
-			}
+		if compatible[f.stepRange] || f.required && f.to <= localV3Tip {
 			continue
 		}
 		skipped[name] = f.required
