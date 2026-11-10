@@ -2642,8 +2642,8 @@ func (io *VersionedIO) WriteCount() (count int64) {
 }
 
 func (io *VersionedIO) ReadCount() (count int64) {
-	for _, input := range io.inputs {
-		count += int64(input.readSet.Len())
+	for i := range io.inputs {
+		count += int64(io.inputs[i].readSet.Len())
 	}
 
 	return count
