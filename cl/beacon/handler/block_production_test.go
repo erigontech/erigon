@@ -6159,6 +6159,7 @@ func TestGetEthV1ValidatorAttestationDataUsesForkChoiceHead(t *testing.T) {
 					attestationSlot: {Root: attestationRoot},
 				}
 			}
+			fcu.Headers[fcu.HeadVal] = &cltypes.BeaconBlockHeader{Slot: fcu.HeadSlotVal}
 			var queriedHeadRoot common.Hash
 			var queriedSlot uint64
 			fcu.AttestationDataFn = func(gotHeadRoot common.Hash, gotSlot uint64) (solid.AttestationData, bool) {
@@ -6186,6 +6187,56 @@ func TestGetEthV1ValidatorAttestationDataUsesForkChoiceHead(t *testing.T) {
 			require.Equal(t, attestationRoot, data.BeaconBlockRoot)
 			require.Equal(t, attestationSlot/handler.beaconChainCfg.SlotsPerEpoch, data.Target.Epoch)
 			require.Equal(t, attestationRoot, data.Target.Root)
+		})
+	}
+}
+
+func TestGetEthV1ValidatorAttestationDataBoundsAncestorLookup(t *testing.T) {
+	slotsPerEpoch := clparams.MainnetBeaconConfig.SlotsPerEpoch
+	for _, tt := range []struct {
+		name              string
+		headSlot          uint64
+		slot              uint64
+		missingHeader     bool
+		wantAncestorCalls int64
+	}{
+		{name: "before previous epoch", headSlot: 2 * slotsPerEpoch, slot: slotsPerEpoch - 1},
+		{name: "previous epoch start", headSlot: 3*slotsPerEpoch - 1, slot: slotsPerEpoch, wantAncestorCalls: 1},
+		{name: "current epoch", headSlot: 2*slotsPerEpoch + 1, slot: 2 * slotsPerEpoch, wantAncestorCalls: 1},
+		{name: "epoch zero", headSlot: 1, slot: 0, wantAncestorCalls: 1},
+		{name: "previous epoch zero", headSlot: slotsPerEpoch, slot: 0, wantAncestorCalls: 1},
+		{name: "epoch after head", headSlot: slotsPerEpoch - 1, slot: slotsPerEpoch},
+		{name: "head header unavailable", headSlot: 2 * slotsPerEpoch, slot: 2*slotsPerEpoch - 1, missingHeader: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			_, _, _, _, headState, handler, _, syncedData, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+			handler.aggregatePool = nil
+			publishedRoot, headRoot, ancestorRoot := common.Hash{1}, common.Hash{2}, common.Hash{3}
+			require.NoError(t, headState.SetSlot(tt.slot))
+			require.NoError(t, syncedData.OnHeadStateWithBlockRoot(headState, publishedRoot))
+			clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
+			clock.EXPECT().GetCurrentSlot().Return(tt.headSlot + 2*slotsPerEpoch).AnyTimes()
+			handler.ethClock = clock
+			fcu.HeadVal, fcu.HeadSlotVal = headRoot, tt.headSlot
+			if !tt.missingHeader {
+				fcu.Headers[headRoot] = &cltypes.BeaconBlockHeader{Slot: tt.headSlot}
+			}
+			data := solid.AttestationData{Slot: tt.slot, BeaconBlockRoot: ancestorRoot}
+			handler.attestationProducer = cachedAttestationDataProducer{data: data, cached: true}
+			fcu.AttestationDataFn = func(root common.Hash, slot uint64) (solid.AttestationData, bool) {
+				require.Equal(t, tt.slot, slot)
+				return data, root == ancestorRoot
+			}
+			fcu.AncestorFn = func(root common.Hash, slot uint64) forkchoice.ForkChoiceNode {
+				require.Equal(t, headRoot, root)
+				require.Equal(t, tt.slot, slot)
+				return forkchoice.ForkChoiceNode{Root: ancestorRoot}
+			}
+
+			status, got := requestAttestationData(t, handler, t.Context(), tt.slot)
+			require.Equal(t, http.StatusOK, status)
+			require.Equal(t, ancestorRoot, got.BeaconBlockRoot)
+			require.Equal(t, tt.wantAncestorCalls, fcu.AncestorCalls.Load())
 		})
 	}
 }

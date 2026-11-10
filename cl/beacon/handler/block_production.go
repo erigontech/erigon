@@ -713,9 +713,15 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 	if haveHead {
 		attestationData, ok = a.forkchoiceStore.AttestationData(head.Root, *slot)
 		if !ok {
-			ancestor := a.forkchoiceStore.Ancestor(head.Root, *slot)
-			if ancestor.Root != (common.Hash{}) && ancestor.Root != head.Root {
-				attestationData, ok = a.forkchoiceStore.AttestationData(ancestor.Root, *slot)
+			if header, known := a.forkchoiceStore.GetHeader(head.Root); known {
+				headEpoch := header.Slot / a.beaconChainCfg.SlotsPerEpoch
+				slotEpoch := *slot / a.beaconChainCfg.SlotsPerEpoch
+				if slotEpoch <= headEpoch && headEpoch-slotEpoch <= 1 {
+					ancestor := a.forkchoiceStore.Ancestor(head.Root, *slot)
+					if ancestor.Root != (common.Hash{}) && ancestor.Root != head.Root {
+						attestationData, ok = a.forkchoiceStore.AttestationData(ancestor.Root, *slot)
+					}
+				}
 			}
 		}
 	}
