@@ -2255,6 +2255,7 @@ func (p *TxPool) processMinedFinalizedBlobs(minedTxns []*TxnSlot, finalizedBlock
 	}
 	for _, txn := range minedTxns {
 		if txn.HasBlobs() {
+			p.deleteMinedBlobTxn(string(txn.IDHash[:])) // a txn mined again: finalizing its old block must not drop the new entry
 			mt := &metaTxn{TxnSlot: txn, minedBlockNum: minedBlock}
 			p.minedBlobTxnsByBlock[minedBlock] = append(p.minedBlobTxnsByBlock[minedBlock], mt)
 			mt.bestIndex = len(p.minedBlobTxnsByBlock[minedBlock]) - 1

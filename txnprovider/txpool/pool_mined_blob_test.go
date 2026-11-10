@@ -181,3 +181,26 @@ func TestSecondSameHeightReorgReinjectsMinedBlobTxn(t *testing.T) {
 	require.Contains(t, pool.byHash, string(blobTxn.IDHash[:]), "the unwound txn is back in the pool")
 	require.NotContains(t, pool.minedBlobTxnsByHash, string(blobTxn.IDHash[:]))
 }
+
+func TestMinedBlobTxnMinedAgainSurvivesFinalizingItsOldBlock(t *testing.T) {
+	pool := &TxPool{
+		minedBlobTxnsByBlock: make(map[uint64][]*metaTxn),
+		minedBlobTxnsByHash:  make(map[string]*metaTxn),
+	}
+	blobTxn := newTestBlobTxnSlot(0, 1, 1, 1, 21000)
+	blobTxn.IDHash[0] = 1
+	hash := string(blobTxn.IDHash[:])
+	mineAt := func(block uint64) {
+		pool.lastSeenBlock.Store(block)
+		require.NoError(t, pool.processMinedFinalizedBlobs([]*TxnSlot{blobTxn}, 0))
+	}
+	mineAt(5)
+	mineAt(5) // a same-height reorg to a block with the same txn
+	mineAt(7)
+
+	require.NoError(t, pool.processMinedFinalizedBlobs(nil, 5))
+
+	require.Contains(t, pool.minedBlobTxnsByHash, hash, "block 7 is not finalized")
+	require.Equal(t, uint64(7), pool.minedBlobTxnsByHash[hash].minedBlockNum)
+	require.Len(t, pool.minedBlobTxnsByBlock[7], 1)
+}
