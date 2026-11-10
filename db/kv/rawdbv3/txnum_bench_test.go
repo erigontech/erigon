@@ -89,7 +89,7 @@ func BenchmarkMapTxNum2BlockNumIter(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			it := TxNums2BlockNums(ctx, tx, TxNums, stream.Array(txNumsPerBlock), order.Asc)
 			for it.HasNext() {
-				if _, _, _, _, _, err := it.Next(); err != nil {
+				if _, _, _, _, _, _, err := it.Next(); err != nil {
 					b.Fatal(err)
 				}
 			}

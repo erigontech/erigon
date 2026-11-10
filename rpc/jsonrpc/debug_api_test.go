@@ -1355,7 +1355,7 @@ func TestMapTxNum2BlockNum(t *testing.T) {
 		for expectTxNums.HasNext() {
 			require.True(t, txNumsIter.HasNext())
 			expectTxNum, _ := expectTxNums.Next()
-			txNum, _, _, _, _, _ := txNumsIter.Next()
+			txNum, _, _, _, _, _, _ := txNumsIter.Next()
 			require.Equal(t, expectTxNum, txNum)
 		}
 	}
