@@ -70,7 +70,7 @@ func TestReinitCachesInitializesValidatorPhase0DataOnlyAtPhase0(t *testing.T) {
 	s.ValidatorSet().ClearPhase0Data()
 	s.SetVersion(clparams.AltairVersion)
 
-	require.NoError(t, s.reinitCaches())
+	require.NoError(t, s.reinitCaches(nil))
 	requireNoPhase0ValidatorData(t, s)
 }
 

@@ -408,11 +408,12 @@ func gloas(cfg *clparams.BeaconChainConfig, balData []byte) *cltypes.Eth1Block {
 
 type newPayloadEngineStub struct {
 	engineapi.EngineAPI
-	err error
+	status *engine_types.PayloadStatus
+	err    error
 }
 
 func (s *newPayloadEngineStub) NewPayloadV4(context.Context, *engine_types.ExecutionPayload, []common.Hash, *common.Hash, []hexutil.Bytes) (*engine_types.PayloadStatus, error) {
-	return nil, s.err
+	return s.status, s.err
 }
 
 func (s *newPayloadEngineStub) NewPayloadV5(context.Context, *engine_types.ExecutionPayload, []common.Hash, *common.Hash, []hexutil.Bytes) (*engine_types.PayloadStatus, error) {
@@ -434,6 +435,37 @@ func TestNewPayloadReportsAClientTimeoutAsNoVerdict(t *testing.T) {
 			status, err := client.NewPayload(t.Context(), payload, nil, nil, nil)
 			require.ErrorIs(t, err, context.DeadlineExceeded)
 			require.EqualValues(t, PayloadStatusNone, status)
+		})
+	}
+}
+
+func TestNewPayloadCarriesLatestValidHashOfInvalidStatus(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	payload := cltypes.NewEth1Block(clparams.ElectraVersion, &cfg)
+	payload.Extra = solid.NewExtraData()
+	payload.Transactions = &solid.TransactionsSSZ{}
+	payload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(cfg.MaxWithdrawalsPerPayload), 44)
+	lvh := common.Hash{1}
+	for name, tc := range map[string]struct {
+		status  *engine_types.PayloadStatus
+		wantLVH *common.Hash
+	}{
+		"invalid with hash":    {&engine_types.PayloadStatus{Status: engine_types.InvalidStatus, LatestValidHash: &lvh}, &lvh},
+		"invalid without hash": {&engine_types.PayloadStatus{Status: engine_types.InvalidStatus}, nil},
+		"invalid zero hash":    {&engine_types.PayloadStatus{Status: engine_types.InvalidStatus, LatestValidHash: &common.Hash{}}, nil},
+		"syncing with hash":    {&engine_types.PayloadStatus{Status: engine_types.SyncingStatus, LatestValidHash: &lvh}, nil},
+		"invalid block hash":   {&engine_types.PayloadStatus{Status: engine_types.InvalidBlockHashStatus, LatestValidHash: &lvh}, nil},
+	} {
+		t.Run(name, func(t *testing.T) {
+			client := &ExecutionClientEngine{engine: &newPayloadEngineStub{status: tc.status}, beaconCfg: &cfg}
+			_, err := client.NewPayload(t.Context(), payload, nil, nil, nil)
+			var invalid *InvalidPayloadError
+			if tc.wantLVH == nil {
+				require.NotErrorAs(t, err, &invalid)
+				return
+			}
+			require.ErrorAs(t, err, &invalid)
+			require.Equal(t, *tc.wantLVH, invalid.LatestValidHash)
 		})
 	}
 }

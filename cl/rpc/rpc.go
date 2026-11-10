@@ -111,8 +111,8 @@ func (b *BeaconRpcP2P) sendBlocksRequest(ctx context.Context, topic string, reqD
 }
 
 func (b *BeaconRpcP2P) decodeBlocks(ctx context.Context, responses []responseData, pid string) ([]*cltypes.SignedBeaconBlock, error) {
-	responsePacket := []*cltypes.SignedBeaconBlock{}
-	for _, data := range responses {
+	responsePacket := make([]*cltypes.SignedBeaconBlock, len(responses))
+	for i, data := range responses {
 		responseChunk := cltypes.NewSignedBeaconBlock(b.beaconConfig, data.version)
 		if err := responseChunk.DecodeSSZ(data.raw, int(data.version)); err != nil {
 			return nil, err
@@ -121,7 +121,7 @@ func (b *BeaconRpcP2P) decodeBlocks(ctx context.Context, responses []responseDat
 			b.BanPeerForInvalidData(ctx, pid)
 			return nil, fmt.Errorf("%w: slot %d, decoded version %s", errBlockForkSchemaSlotMismatch, responseChunk.Block.Slot, responseChunk.Version())
 		}
-		responsePacket = append(responsePacket, responseChunk)
+		responsePacket[i] = responseChunk
 	}
 
 	return responsePacket, nil
@@ -133,13 +133,13 @@ func (b *BeaconRpcP2P) sendBlobsSidecar(ctx context.Context, topic string, reqDa
 		return nil, pid, err
 	}
 
-	responsePacket := []*cltypes.BlobSidecar{}
-	for _, data := range responses {
+	responsePacket := make([]*cltypes.BlobSidecar, len(responses))
+	for i, data := range responses {
 		responseChunk := &cltypes.BlobSidecar{}
 		if err := responseChunk.DecodeSSZ(data.raw, int(data.version)); err != nil {
 			return nil, pid, err
 		}
-		responsePacket = append(responsePacket, responseChunk)
+		responsePacket[i] = responseChunk
 	}
 
 	return responsePacket, pid, nil
@@ -186,8 +186,8 @@ func (b *BeaconRpcP2P) SendColumnSidecarsByRootIdentifierReqWithSnapshot(
 		return nil, pid, filteredReq, fmt.Errorf("response count %d exceeds requested column count %d", len(responsePacket), requestedColumnCount)
 	}
 
-	ColumnSidecars := []*cltypes.DataColumnSidecar{}
-	for _, data := range responsePacket {
+	ColumnSidecars := make([]*cltypes.DataColumnSidecar, len(responsePacket))
+	for i, data := range responsePacket {
 		columnSidecar := &cltypes.DataColumnSidecar{}
 		if err := columnSidecar.DecodeSSZ(data.raw, int(data.version)); err != nil {
 			return nil, pid, filteredReq, err
@@ -210,7 +210,7 @@ func (b *BeaconRpcP2P) SendColumnSidecarsByRootIdentifierReqWithSnapshot(
 			b.BanPeerForInvalidData(ctx, pid)
 			return nil, pid, filteredReq, fmt.Errorf("column sidecar fork digest %x disagrees with slot %d fork digest %x", data.forkDigest, slot, expectedForkDigest)
 		}
-		ColumnSidecars = append(ColumnSidecars, columnSidecar)
+		ColumnSidecars[i] = columnSidecar
 	}
 
 	return ColumnSidecars, pid, filteredReq, nil
