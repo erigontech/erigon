@@ -67,6 +67,26 @@ func TestCollectedHashedKeysIncludeHashedTouches(t *testing.T) {
 	require.Equal(t, want, u.CollectedHashedKeys())
 }
 
+func TestTouchPlainKeyDirectCollectMergesRepeatedTouches(t *testing.T) {
+	u := NewUpdates(ModeCollect, t.TempDir(), KeyToHexNibbleHash)
+	account := "0123456789abcdefghij"
+	first := &Update{Flags: BalanceUpdate, DeleteStorageSubtree: true}
+	first.Balance.SetUint64(5)
+	u.TouchPlainKeyDirect(account, first)
+	u.TouchPlainKeyDirect(account, &Update{Flags: NonceUpdate, Nonce: 7})
+
+	var got []*Update
+	require.NoError(t, u.Drain(func(_ string, upd *Update) error {
+		got = append(got, upd)
+		return nil
+	}))
+	require.Len(t, got, 1)
+	require.True(t, got[0].DeleteStorageSubtree)
+	require.Equal(t, BalanceUpdate|NonceUpdate, got[0].Flags)
+	require.Equal(t, uint64(5), got[0].Balance.Uint64())
+	require.Equal(t, uint64(7), got[0].Nonce)
+}
+
 type gatedPatriciaContext struct {
 	sleep       time.Duration
 	descend     bool
