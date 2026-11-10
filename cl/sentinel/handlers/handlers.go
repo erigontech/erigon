@@ -208,7 +208,8 @@ func (c *ConsensusHandlers) wrapStreamHandler(name string, fn func(s network.Str
 		}
 
 		if err := fn(s); err != nil {
-			if errors.Is(err, ssz_snappy.ErrPayloadExceedsLimit) && ssz_snappy.EncodeAndWrite(s, &emptyString{}, InvalidRequestPrefix) == nil {
+			if (errors.Is(err, ssz_snappy.ErrPayloadExceedsLimit) || errors.Is(err, ssz_snappy.ErrTrailingData)) &&
+				ssz_snappy.EncodeAndWrite(s, &emptyString{}, InvalidRequestPrefix) == nil {
 				_ = s.Close()
 				return
 			}
