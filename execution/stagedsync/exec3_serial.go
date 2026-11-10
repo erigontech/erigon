@@ -361,7 +361,8 @@ func (se *serialExecutor) resetWorkers(ctx context.Context, rs *state.StateV3Buf
 
 func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, isInitialCycle bool) (cont bool, err error) {
 	blockReceipts := make([]*types.Receipt, 0, len(tasks))
-	recipientHasCode := make([]bool, 0, len(tasks))
+	laneTxs := make([]rules.LaneTx, 0, len(tasks))
+	var lanes any
 	var startTxIndex int
 
 	if se.blockExecMetrics == nil {
@@ -474,7 +475,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 					// Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
 					// Block gas = max(execution, state). Pre-Amsterdam: blockStateGasUsed is 0.
 					blockGasUsed := max(se.blockGasUsed, se.blockStateGasUsed)
-					if err := validateBlockPostExecution(se.cfg.engine, se.cfg.chainConfig, txTask.Header, blockGasUsed, se.blobGasUsed, checkReceipts, checkBloom, blockReceipts, recipientHasCode, txTask.Txs, se.logger); err != nil {
+					if err := validateBlockPostExecution(se.cfg.engine, se.cfg.chainConfig, txTask.Header, blockGasUsed, se.blobGasUsed, checkReceipts, checkBloom, blockReceipts, lanes, laneTxs, txTask.Txs, se.logger); err != nil {
 						return fmt.Errorf("%w, txnIdx=%d, %w", rules.ErrInvalidBlock, txTask.TxIndex, err) // same as in stage_exec.go
 					}
 				}
@@ -517,9 +518,10 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 				}
 
 				blockReceipts = append(blockReceipts, receipt)
-				recipientHasCode = append(recipientHasCode, result.RecipientHasCode)
+				laneTxs = append(laneTxs, rules.LaneTx{GasUsed: result.ExecutionResult.BlockExecutionGasUsed, RecipientHasCode: result.RecipientHasCode})
 				result.TracingHooks().EmitTxEnd(receipt, result.ExecutionResult.TxnGasUsage, result.Err)
 			} else {
+				lanes = result.Lanes
 				se.onBlockStart(ctx, txTask.BlockNumber(), txTask.BlockHash())
 			}
 

@@ -37,7 +37,7 @@ func recipientHasCode(tx types.Transaction, ibs *state.IntraBlockState) (bool, e
 	return !hash.IsEmpty(), nil
 }
 
-func isLaneEngine(engine rules.Engine) bool {
-	_, ok := engine.(rules.LaneEngine)
-	return ok
+func laneEngine(engine rules.Engine, header *types.Header) (rules.LaneEngine, bool) {
+	lanes, ok := engine.(rules.LaneEngine)
+	return lanes, ok && lanes.HasLanes(header)
 }

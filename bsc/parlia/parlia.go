@@ -23,12 +23,10 @@ import (
 	"sort"
 	"strconv"
 
-	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/holiman/uint256"
 
 	bscchain "github.com/erigontech/erigon/bsc/chain"
 	"github.com/erigontech/erigon/bsc/parlia/seal"
-	"github.com/erigontech/erigon/bsc/paymentlane"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/chain"
@@ -81,17 +79,12 @@ type Parlia struct {
 	signer      *types.Signer
 	logger      log.Logger
 	upgrades    []systemContractUpgrade
-	laneMeta    *lru.Cache[common.Hash, *paymentlane.Meta]
 
 	storageOverrides state.StorageOverrideTable
 }
 
 func New(chainConfig *chain.Config, logger log.Logger) *Parlia {
-	laneMeta, err := lru.New[common.Hash, *paymentlane.Meta](laneMetaCacheSize)
-	if err != nil {
-		panic(err)
-	}
-	p := &Parlia{chainConfig: chainConfig, signer: types.LatestSigner(chainConfig), logger: logger, laneMeta: laneMeta}
+	p := &Parlia{chainConfig: chainConfig, signer: types.LatestSigner(chainConfig), logger: logger}
 	if chainConfig.Parlia != nil {
 		p.upgrades = parseSystemContractUpgrades(chainConfig.Parlia.BlockAlloc)
 		if chainConfig.PragueTime != nil {
@@ -255,9 +248,6 @@ func (p *Parlia) Prepare(chain rules.ChainHeaderReader, header *types.Header, st
 func (p *Parlia) Initialize(config *chain.Config, chain rules.ChainHeaderReader, header *types.Header,
 	ibs *state.IntraBlockState, syscall rules.SysCallCustom, logger log.Logger, tracer *tracing.Hooks,
 ) error {
-	if err := p.loadLaneMeta(chain, header, ibs, syscall); err != nil {
-		return err
-	}
 	if err := p.upgradeSystemContracts(chain, header, ibs); err != nil {
 		return err
 	}

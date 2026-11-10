@@ -34,15 +34,15 @@ type Meta struct {
 	listed map[common.Address]struct{}
 }
 
-func (m *Meta) Quota(gasLimit uint64) uint64 { return Quota(m.ratio, gasLimit) }
+func (m *Meta) Quota(gasLimit uint64) uint64 { return quota(m.ratio, gasLimit) }
 
 func (m *Meta) Listed() map[common.Address]struct{} { return m.listed }
 
-// Getter calls a PaymentLane view function on the parent post-state.
-type Getter func(input []byte) ([]byte, error)
+type getter func(input []byte) ([]byte, error)
 
-// LoadMeta reads the ratio and the listed contracts through the PaymentLane getters.
-func LoadMeta(call Getter) (*Meta, error) {
+// LoadMeta reads the ratio and the listed contracts through call, which runs a PaymentLane
+// view function on the parent post-state.
+func LoadMeta(call func(input []byte) ([]byte, error)) (*Meta, error) {
 	ratio, err := loadRatio(call)
 	if err != nil {
 		return nil, err
@@ -54,7 +54,7 @@ func LoadMeta(call Getter) (*Meta, error) {
 	return &Meta{ratio: ratio, listed: listed}, nil
 }
 
-func loadRatio(call Getter) (uint64, error) {
+func loadRatio(call getter) (uint64, error) {
 	ret, err := callGetter(call, packGetPaymentLaneRatio())
 	if err != nil {
 		return 0, err
@@ -62,7 +62,7 @@ func loadRatio(call Getter) (uint64, error) {
 	return unpackGetPaymentLaneRatio(ret)
 }
 
-func loadListed(call Getter) (map[common.Address]struct{}, error) {
+func loadListed(call getter) (map[common.Address]struct{}, error) {
 	ret, err := callGetter(call, packGetPaymentContracts(0, pageSize))
 	if err != nil {
 		return nil, err
@@ -71,8 +71,8 @@ func loadListed(call Getter) (map[common.Address]struct{}, error) {
 	if err != nil {
 		return nil, err
 	}
-	if total > MaxListedContracts {
-		return nil, fmt.Errorf("%w: getPaymentContracts totalLength %d exceeds limit %d", ErrCorruptConfig, total, MaxListedContracts)
+	if total > maxListedContracts {
+		return nil, fmt.Errorf("%w: getPaymentContracts totalLength %d exceeds limit %d", ErrCorruptConfig, total, maxListedContracts)
 	}
 	if total == 0 {
 		return nil, nil
@@ -129,7 +129,7 @@ func appendPage(listed map[common.Address]struct{}, offset uint64, page []common
 	return nil
 }
 
-func callGetter(call Getter, input []byte) ([]byte, error) {
+func callGetter(call getter, input []byte) ([]byte, error) {
 	ret, err := call(input)
 	if err != nil {
 		return nil, fmt.Errorf("%w: payment lane getter %x: %w", ErrCorruptConfig, input[:4], err)
@@ -177,7 +177,7 @@ func unpackGetPaymentLaneRatio(ret []byte) (uint64, error) {
 	if len(values) != 1 {
 		return 0, unexpectedOutputCount(getPaymentLaneRatioMethod, len(values), 1)
 	}
-	return CheckRatio(*abi.ConvertType(values[0], new(*big.Int)).(**big.Int))
+	return checkRatio(*abi.ConvertType(values[0], new(*big.Int)).(**big.Int))
 }
 
 func unpackGetPaymentContracts(ret []byte) ([]common.Address, uint64, error) {

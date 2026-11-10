@@ -100,11 +100,22 @@ type AuthorityBlocker interface {
 }
 
 // LaneEngine is implemented by engines (Parlia) whose blocks reserve gas for a lane of
-// transactions. recipientHasCode[i] reports whether transaction i moved value to an account
-// that held code on the state the transaction started from. The executor calls VerifyLanes
-// with the post-execution checks of every fully executed block.
+// transactions. For a block with lanes, the executor calls LoadLanes on the parent post-state
+// before Initialize, records a LaneTx for every transaction, and passes both to VerifyLanes
+// with the post-execution checks of the fully executed block. lanes is nil when the block
+// start was not executed in this run.
 type LaneEngine interface {
-	VerifyLanes(header *types.Header, txs types.Transactions, receipts types.Receipts, recipientHasCode []bool) error
+	HasLanes(header *types.Header) bool
+	LoadLanes(chain ChainHeaderReader, header *types.Header, ibs *state.IntraBlockState) (lanes any, err error)
+	VerifyLanes(header *types.Header, lanes any, txs types.Transactions, laneTxs []LaneTx) error
+}
+
+// LaneTx is what a LaneEngine needs to know about an executed transaction.
+type LaneTx struct {
+	GasUsed uint64
+	// RecipientHasCode reports whether the transaction moved value to an account that held
+	// code on the state the transaction started from.
+	RecipientHasCode bool
 }
 
 // RewardKind - The kind of block reward.

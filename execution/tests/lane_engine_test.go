@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/protocol/rules/merge"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
@@ -46,16 +47,28 @@ type laneRecorder struct {
 	err error
 
 	mu    sync.Mutex
-	calls map[uint64][]bool
+	calls map[uint64][]rules.LaneTx
 }
 
-func (e *laneRecorder) VerifyLanes(header *types.Header, txs types.Transactions, receipts types.Receipts, recipientHasCode []bool) error {
+type recordedLanes struct{ number uint64 }
+
+func (e *laneRecorder) HasLanes(header *types.Header) bool { return header.Number.Uint64() > 0 }
+
+func (e *laneRecorder) LoadLanes(_ rules.ChainHeaderReader, header *types.Header, _ *state.IntraBlockState) (any, error) {
+	return &recordedLanes{number: header.Number.Uint64()}, nil
+}
+
+func (e *laneRecorder) VerifyLanes(header *types.Header, lanes any, txs types.Transactions, laneTxs []rules.LaneTx) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if len(receipts) != len(txs) || len(recipientHasCode) != len(txs) {
-		return fmt.Errorf("misaligned lane inputs: %d txs, %d receipts, %d flags", len(txs), len(receipts), len(recipientHasCode))
+	loaded, ok := lanes.(*recordedLanes)
+	if !ok || loaded.number != header.Number.Uint64() {
+		return fmt.Errorf("block %d: lanes loaded for another block: %v", header.Number.Uint64(), lanes)
 	}
-	e.calls[header.Number.Uint64()] = append([]bool(nil), recipientHasCode...)
+	if len(laneTxs) != len(txs) {
+		return fmt.Errorf("misaligned lane inputs: %d txs, %d lane txs", len(txs), len(laneTxs))
+	}
+	e.calls[header.Number.Uint64()] = append([]rules.LaneTx(nil), laneTxs...)
 	return e.err
 }
 
@@ -124,19 +137,23 @@ func TestLaneEngineSeesRecipientCodeBeforeEachTx(t *testing.T) {
 		send(&authority, 1)
 	})
 	require.NoError(t, err)
-	want := []bool{false, true, false, false, false, false, true}
+	wantCode := []bool{false, true, false, false, false, false, true}
 
 	for _, parallel := range []bool{false, true} {
 		t.Run(fmt.Sprintf("parallel=%v", parallel), func(t *testing.T) {
 			dbg.Exec3Parallel = parallel
-			engine := &laneRecorder{Engine: merge.NewFaker(ethash.NewFaker()), calls: map[uint64][]bool{}}
+			engine := &laneRecorder{Engine: merge.NewFaker(ethash.NewFaker()), calls: map[uint64][]rules.LaneTx{}}
 			require.NoError(t, newTester(engine).InsertChain(chainPack))
-			require.Equal(t, map[uint64][]bool{1: want}, engine.calls)
+			want := make([]rules.LaneTx, len(wantCode))
+			for i, receipt := range chainPack.Receipts[0] {
+				want[i] = rules.LaneTx{GasUsed: receipt.GasUsed, RecipientHasCode: wantCode[i]}
+			}
+			require.Equal(t, map[uint64][]rules.LaneTx{1: want}, engine.calls)
 		})
 		t.Run(fmt.Sprintf("parallel=%v rejects", parallel), func(t *testing.T) {
 			dbg.Exec3Parallel = parallel
 			violation := errors.New("lane violated")
-			engine := &laneRecorder{Engine: merge.NewFaker(ethash.NewFaker()), calls: map[uint64][]bool{}, err: violation}
+			engine := &laneRecorder{Engine: merge.NewFaker(ethash.NewFaker()), calls: map[uint64][]rules.LaneTx{}, err: violation}
 			err := newTester(engine).InsertChain(chainPack)
 			require.ErrorContains(t, err, violation.Error())
 		})

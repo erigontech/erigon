@@ -39,19 +39,19 @@ func TestQuotaIsTheRatioOfTheGasLimit(t *testing.T) {
 		{500, 30_000_001, 1_500_000},
 		{1_000, math.MaxInt64, 922_337_203_685_477_580},
 	} {
-		require.Equalf(t, tc.want, Quota(tc.ratio, tc.gasLimit), "Quota(%d, %d)", tc.ratio, tc.gasLimit)
+		require.Equalf(t, tc.want, quota(tc.ratio, tc.gasLimit), "quota(%d, %d)", tc.ratio, tc.gasLimit)
 	}
 }
 
 func TestCheckRatioGuardsAtFullWidth(t *testing.T) {
-	for _, ok := range []uint64{1, 500, MaxLaneRatio} {
-		got, err := CheckRatio(new(big.Int).SetUint64(ok))
+	for _, ok := range []uint64{1, 500, maxLaneRatio} {
+		got, err := checkRatio(new(big.Int).SetUint64(ok))
 		require.NoError(t, err)
 		require.Equal(t, ok, got)
 	}
 	wraps := new(big.Int).Add(new(big.Int).Lsh(big.NewInt(1), 64), big.NewInt(500))
-	for _, bad := range []*big.Int{nil, big.NewInt(0), big.NewInt(MaxLaneRatio + 1), wraps} {
-		_, err := CheckRatio(bad)
+	for _, bad := range []*big.Int{nil, big.NewInt(0), big.NewInt(maxLaneRatio + 1), wraps} {
+		_, err := checkRatio(bad)
 		require.ErrorIsf(t, err, ErrCorruptConfig, "ratio %v", bad)
 	}
 }
@@ -120,7 +120,7 @@ func newTx(t *testing.T, txType byte, to *common.Address, value uint64) types.Tr
 	return nil
 }
 
-func TestClassifyGates(t *testing.T) {
+func TestIsPaymentGates(t *testing.T) {
 	listed := map[common.Address]struct{}{listedDest: {}, ContractAddress: {}}
 	for _, txType := range []byte{types.LegacyTxType, types.AccessListTxType, types.DynamicFeeTxType, types.BlobTxType, types.SetCodeTxType} {
 		for _, dest := range []struct {
@@ -136,15 +136,15 @@ func TestClassifyGates(t *testing.T) {
 			for _, value := range []uint64{0, 1} {
 				for _, hasCode := range []bool{false, true} {
 					typeOK := txType == types.LegacyTxType || txType == types.AccessListTxType || txType == types.DynamicFeeTxType
-					want := GeneralLane
+					want := false
 					switch {
 					case dest.addr == nil, !typeOK:
 					case dest.listed:
-						want = PaymentLane
+						want = true
 					case value > 0 && !hasCode:
-						want = PaymentLane
+						want = true
 					}
-					got := Classify(newTx(t, txType, dest.addr, value), false, listed, hasCode)
+					got := IsPayment(newTx(t, txType, dest.addr, value), false, listed, hasCode)
 					require.Equalf(t, want, got, "type=%d dest=%s value=%d hasCode=%v", txType, dest.name, value, hasCode)
 				}
 			}
@@ -154,9 +154,9 @@ func TestClassifyGates(t *testing.T) {
 
 func TestSystemTransactionIsGeneralBeforeAnythingElse(t *testing.T) {
 	transfer := newTx(t, types.LegacyTxType, &plainDest, 1)
-	require.Equal(t, PaymentLane, Classify(transfer, false, nil, false))
-	require.Equal(t, GeneralLane, Classify(transfer, true, nil, false))
+	require.True(t, IsPayment(transfer, false, nil, false))
+	require.False(t, IsPayment(transfer, true, nil, false))
 
 	toListed := newTx(t, types.LegacyTxType, &listedDest, 1)
-	require.Equal(t, GeneralLane, Classify(toListed, true, map[common.Address]struct{}{listedDest: {}}, false))
+	require.False(t, IsPayment(toListed, true, map[common.Address]struct{}{listedDest: {}}, false))
 }

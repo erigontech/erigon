@@ -113,7 +113,9 @@ type TxResult struct {
 	Receipt *types.Receipt
 	Logs    []*types.Log
 
-	// RecipientHasCode is recorded for a rules.LaneEngine, see recipientHasCode.
+	// Lanes and RecipientHasCode are recorded for a rules.LaneEngine: Lanes by the block
+	// start, RecipientHasCode by every transaction.
+	Lanes            any
 	RecipientHasCode bool
 
 	TraceFroms map[accounts.Address]struct{}
@@ -548,6 +550,11 @@ func (t *TxTask) Execute(evm *vm.EVM,
 			ret, err := protocol.SysCallContractWithEVM(evm, contract, data, chainConfig, ibs, header, engine, constCall /* constCall */, evm.Config())
 			return ret, err
 		}
+		if lanes, ok := laneEngine(engine, header); ok {
+			if result.Lanes, result.Err = lanes.LoadLanes(chainReader, header, ibs); result.Err != nil {
+				break
+			}
+		}
 		result.Err = engine.Initialize(chainConfig, chainReader, header, ibs, syscall, t.Logger, nil)
 		if result.Err == nil && !ibs.IsVersioned() {
 			// The versionMap path finalizes from the write-set after the switch;
@@ -587,7 +594,7 @@ func (t *TxTask) Execute(evm *vm.EVM,
 
 		result.Coinbase = evm.Context.Coinbase
 
-		if isLaneEngine(engine) {
+		if _, ok := laneEngine(engine, t.Header); ok {
 			if result.RecipientHasCode, result.Err = recipientHasCode(t.Tx(), ibs); result.Err != nil {
 				break
 			}

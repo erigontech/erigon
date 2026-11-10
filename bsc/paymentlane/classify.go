@@ -21,41 +21,24 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
-type LaneType uint8
-
-const (
-	GeneralLane LaneType = iota
-	PaymentLane
-)
-
-func (c LaneType) String() string {
-	if c == PaymentLane {
-		return "paymentLane"
-	}
-	return "generalLane"
-}
-
-// Classify runs BEP-703 section 3.2's gates in order. listed comes from the parent post-state.
-// recipientHasCode is read on the state the transaction starts from; only an unlisted transfer
-// with value reaches it.
-func Classify(tx types.Transaction, isSystemTx bool, listed map[common.Address]struct{}, recipientHasCode bool) LaneType {
+// IsPayment runs BEP-703 section 3.2's gates in order. listed comes from the parent
+// post-state. recipientHasCode is read on the state the transaction starts from; only an
+// unlisted transfer with value reaches it.
+func IsPayment(tx types.Transaction, isSystemTx bool, listed map[common.Address]struct{}, recipientHasCode bool) bool {
 	if isSystemTx {
-		return GeneralLane
+		return false
 	}
 	to := tx.GetTo()
 	if to == nil {
-		return GeneralLane
+		return false
 	}
 	switch tx.Type() {
 	case types.LegacyTxType, types.AccessListTxType, types.DynamicFeeTxType:
 	default:
-		return GeneralLane
+		return false
 	}
 	if _, ok := listed[*to]; ok {
-		return PaymentLane
+		return true
 	}
-	if tx.GetValue().IsZero() || recipientHasCode {
-		return GeneralLane
-	}
-	return PaymentLane
+	return !tx.GetValue().IsZero() && !recipientHasCode
 }

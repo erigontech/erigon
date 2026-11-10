@@ -37,9 +37,9 @@ import (
 var ContractAddress = common.HexToAddress("0x0000000000000000000000000000000000002007")
 
 const (
-	RatioDenom                = 10_000
-	MaxLaneRatio              = 1_000
-	MaxListedContracts uint64 = 100_000
+	ratioDenom                = 10_000
+	maxLaneRatio              = 1_000
+	maxListedContracts uint64 = 100_000
 )
 
 var (
@@ -47,22 +47,22 @@ var (
 	ErrCorruptConfig = errors.New("payment lane config mismatch")
 )
 
-// CheckRatio checks the ratio at the getter's full uint256 width: a value narrowed to 64 bits
+// checkRatio checks the ratio at the getter's full uint256 width: a value narrowed to 64 bits
 // first can land inside the guard when the returned value did not.
-func CheckRatio(ratio *big.Int) (uint64, error) {
-	if ratio == nil || !ratio.IsUint64() || ratio.Uint64() == 0 || ratio.Uint64() > MaxLaneRatio {
-		return 0, fmt.Errorf("%w: ratio 0 < %v <= %d", ErrCorruptConfig, ratio, MaxLaneRatio)
+func checkRatio(ratio *big.Int) (uint64, error) {
+	if ratio == nil || !ratio.IsUint64() || ratio.Uint64() == 0 || ratio.Uint64() > maxLaneRatio {
+		return 0, fmt.Errorf("%w: ratio 0 < %v <= %d", ErrCorruptConfig, ratio, maxLaneRatio)
 	}
 	return ratio.Uint64(), nil
 }
 
-// Quota is ratio × gasLimit / RatioDenom with a 128-bit product.
-func Quota(ratio, gasLimit uint64) uint64 {
+// quota is ratio × gasLimit / ratioDenom with a 128-bit product.
+func quota(ratio, gasLimit uint64) uint64 {
 	hi, lo := bits.Mul64(ratio, gasLimit)
-	if hi >= RatioDenom {
+	if hi >= ratioDenom {
 		return math.MaxUint64
 	}
-	q, _ := bits.Div64(hi, lo, RatioDenom)
+	q, _ := bits.Div64(hi, lo, ratioDenom)
 	return q
 }
 

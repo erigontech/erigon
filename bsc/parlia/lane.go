@@ -19,59 +19,80 @@ package parlia
 import (
 	"fmt"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/bsc/paymentlane"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
-const laneMetaCacheSize = 4096
+const paymentLaneGetterGas = 50_000_000
 
 var _ rules.LaneEngine = (*Parlia)(nil)
 
-// loadLaneMeta reads the payment lane metadata from the parent post-state, so it must run
-// before this block's system contract upgrades. The lane starts on the block after Jenner;
-// the Jenner block itself is stored with nil metadata.
-func (p *Parlia) loadLaneMeta(chain rules.ChainHeaderReader, header *types.Header, ibs *state.IntraBlockState, syscall rules.SysCallCustom) error {
-	number := header.Number.Uint64()
-	if !p.chainConfig.IsJenner(number, header.Time) {
-		return nil
-	}
-	parent := chain.GetHeader(header.ParentHash, number-1)
-	if parent == nil {
-		return fmt.Errorf("parlia: missing parent header for block %d, cannot load the payment lane", number)
-	}
-	if !p.chainConfig.IsJenner(parent.Number.Uint64(), parent.Time) {
-		p.laneMeta.Add(header.Hash(), nil)
-		return nil
-	}
-	contract := accounts.InternAddress(paymentlane.ContractAddress)
-	meta, err := paymentlane.LoadMeta(func(input []byte) ([]byte, error) {
-		return syscall(contract, input, ibs, header, true)
-	})
-	if err != nil {
-		return fmt.Errorf("parlia: block %d: %w", number, err)
-	}
-	p.laneMeta.Add(header.Hash(), meta)
-	return nil
+// HasLanes reports whether the block may carry the payment lane (BEP-703).
+func (p *Parlia) HasLanes(header *types.Header) bool {
+	return p.chainConfig.IsJenner(header.Number.Uint64(), header.Time)
 }
 
-// VerifyLanes checks the payment lane rule (BEP-703) on an executed block.
-func (p *Parlia) VerifyLanes(header *types.Header, txs types.Transactions, receipts types.Receipts, recipientHasCode []bool) error {
+// LoadLanes reads the payment lane metadata from the parent post-state. The lane starts on
+// the block after Jenner, so the Jenner block itself has none.
+func (p *Parlia) LoadLanes(chain rules.ChainHeaderReader, header *types.Header, ibs *state.IntraBlockState) (any, error) {
 	number := header.Number.Uint64()
-	if !p.chainConfig.IsJenner(number, header.Time) {
-		return nil
+	parent := chain.GetHeader(header.ParentHash, number-1)
+	if parent == nil {
+		return nil, fmt.Errorf("parlia: missing parent header for block %d, cannot load the payment lane", number)
 	}
-	meta, ok := p.laneMeta.Get(header.Hash())
-	if !ok {
-		return fmt.Errorf("parlia: payment lane metadata for block %d was not loaded", number)
+	if !p.chainConfig.IsJenner(parent.Number.Uint64(), parent.Time) {
+		return nil, nil
 	}
+	evm := vm.NewEVM(paymentLaneBlockContext(header), evmtypes.TxContext{}, ibs, p.chainConfig, vm.Config{RestoreState: true})
+	contract := accounts.InternAddress(paymentlane.ContractAddress)
+	meta, err := paymentlane.LoadMeta(func(input []byte) ([]byte, error) {
+		ret, _, _, err := evm.StaticCall(accounts.ZeroAddress, contract, input, mdgas.MdGas{Execution: paymentLaneGetterGas})
+		return ret, err
+	})
+	if stateErr := ibs.StateReadError(); stateErr != nil {
+		return nil, fmt.Errorf("parlia: block %d: payment lane state read: %w", number, stateErr)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("parlia: block %d: %w", number, err)
+	}
+	return meta, nil
+}
+
+func paymentLaneBlockContext(header *types.Header) evmtypes.BlockContext {
+	return evmtypes.BlockContext{
+		CanTransfer: func(evmtypes.IntraBlockState, accounts.Address, uint256.Int) (bool, error) { return true, nil },
+		Transfer: func(evmtypes.IntraBlockState, accounts.Address, accounts.Address, uint256.Int, bool, *chain.Rules) error {
+			return nil
+		},
+		GetHash:     func(uint64) (common.Hash, error) { return common.Hash{}, nil },
+		Coinbase:    accounts.InternAddress(header.Coinbase),
+		BlockNumber: header.Number.Uint64(),
+		Time:        header.Time,
+		Difficulty:  header.Difficulty,
+		GasLimit:    header.GasLimit,
+	}
+}
+
+// VerifyLanes checks the payment lane rule on an executed block. A block whose start was
+// not executed in this run has no lanes to check against.
+func (p *Parlia) VerifyLanes(header *types.Header, lanes any, txs types.Transactions, laneTxs []rules.LaneTx) error {
+	meta, _ := lanes.(*paymentlane.Meta)
 	if meta == nil {
 		return nil
 	}
-	if len(receipts) != len(txs) || len(recipientHasCode) != len(txs) {
-		return fmt.Errorf("parlia: block %d: payment lane inputs for %d txs: %d receipts, %d code flags", number, len(txs), len(receipts), len(recipientHasCode))
+	number := header.Number.Uint64()
+	if len(laneTxs) != len(txs) {
+		return fmt.Errorf("parlia: block %d: payment lane inputs for %d txs, got %d", number, len(txs), len(laneTxs))
 	}
 	var paymentGasUsed uint64
 	for i, tx := range txs {
@@ -79,8 +100,8 @@ func (p *Parlia) VerifyLanes(header *types.Header, txs types.Transactions, recei
 		if err != nil {
 			return err
 		}
-		if paymentlane.Classify(tx, isSystemTx, meta.Listed(), recipientHasCode[i]) == paymentlane.PaymentLane {
-			paymentGasUsed += receipts[i].GasUsed
+		if paymentlane.IsPayment(tx, isSystemTx, meta.Listed(), laneTxs[i].RecipientHasCode) {
+			paymentGasUsed += laneTxs[i].GasUsed
 		}
 	}
 	return paymentlane.CheckInequality(header.GasLimit, header.GasUsed, paymentGasUsed, meta.Quota(header.GasLimit))

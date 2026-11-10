@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package paymentlane_test
+package paymentlane
 
 import (
 	"math"
@@ -25,7 +25,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	_ "github.com/erigontech/erigon/bsc/chain"
-	"github.com/erigontech/erigon/bsc/paymentlane"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/execution/chain"
@@ -47,7 +46,7 @@ const (
 	paymentContractsLenSlot = 1
 )
 
-var contract = accounts.InternAddress(paymentlane.ContractAddress)
+var contract = accounts.InternAddress(ContractAddress)
 
 type laneState struct {
 	ibs *state.IntraBlockState
@@ -62,7 +61,7 @@ func newLaneState(t *testing.T) *laneState {
 	require.NoError(t, err)
 	ibs := state.New(state.NewNoopReader())
 	t.Cleanup(ibs.Close)
-	require.NoError(t, ibs.SetCode(contract, alloc[paymentlane.ContractAddress].Code, tracing.CodeChangeUnspecified))
+	require.NoError(t, ibs.SetCode(contract, alloc[ContractAddress].Code, tracing.CodeChangeUnspecified))
 	return &laneState{ibs: ibs, cfg: spec.Config}
 }
 
@@ -81,7 +80,7 @@ func (s *laneState) setList(t *testing.T, length uint64, addrs []common.Address)
 	}
 }
 
-func (s *laneState) getter(t *testing.T) paymentlane.Getter {
+func (s *laneState) call(t *testing.T) getter {
 	t.Helper()
 	blockContext := evmtypes.BlockContext{
 		CanTransfer: func(evmtypes.IntraBlockState, accounts.Address, uint256.Int) (bool, error) { return true, nil },
@@ -98,7 +97,7 @@ func (s *laneState) getter(t *testing.T) paymentlane.Getter {
 
 func TestLoadMetaReadsTheUnwrittenDefault(t *testing.T) {
 	s := newLaneState(t)
-	meta, err := paymentlane.LoadMeta(s.getter(t))
+	meta, err := LoadMeta(s.call(t))
 	require.NoError(t, err)
 	require.EqualValues(t, 2_750_000, meta.Quota(55_000_000))
 	require.Empty(t, meta.Listed())
@@ -113,7 +112,7 @@ func TestLoadMetaPagesLongListsAndReadsTheGovernedRatio(t *testing.T) {
 	}
 	s.setList(t, uint64(len(listed)), listed)
 
-	meta, err := paymentlane.LoadMeta(s.getter(t))
+	meta, err := LoadMeta(s.call(t))
 	require.NoError(t, err)
 	require.EqualValues(t, 800*55_000_000/10_000, meta.Quota(55_000_000))
 	require.Len(t, meta.Listed(), len(listed))
@@ -124,9 +123,9 @@ func TestLoadMetaPagesLongListsAndReadsTheGovernedRatio(t *testing.T) {
 
 func TestLoadMetaRejectsListedSetAboveContractLimit(t *testing.T) {
 	s := newLaneState(t)
-	s.setList(t, paymentlane.MaxListedContracts+1, nil)
-	_, err := paymentlane.LoadMeta(s.getter(t))
-	require.ErrorIs(t, err, paymentlane.ErrCorruptConfig)
+	s.setList(t, maxListedContracts+1, nil)
+	_, err := LoadMeta(s.call(t))
+	require.ErrorIs(t, err, ErrCorruptConfig)
 	require.Contains(t, err.Error(), "exceeds limit")
 }
 
@@ -134,22 +133,22 @@ func TestLoadMetaRejectsDuplicates(t *testing.T) {
 	s := newLaneState(t)
 	dup := common.Address{0xaa}
 	s.setList(t, 2, []common.Address{dup, dup})
-	_, err := paymentlane.LoadMeta(s.getter(t))
-	require.ErrorIs(t, err, paymentlane.ErrCorruptConfig)
+	_, err := LoadMeta(s.call(t))
+	require.ErrorIs(t, err, ErrCorruptConfig)
 	require.Contains(t, err.Error(), "duplicate")
 }
 
 func TestLoadMetaRejectsARatioOutsideTheGuard(t *testing.T) {
-	for _, bad := range []uint64{paymentlane.MaxLaneRatio + 1, math.MaxUint64} {
+	for _, bad := range []uint64{maxLaneRatio + 1, math.MaxUint64} {
 		s := newLaneState(t)
 		s.set(t, common.Hash{31: ratioSlot}, uint256.NewInt(bad))
-		_, err := paymentlane.LoadMeta(s.getter(t))
-		require.ErrorIsf(t, err, paymentlane.ErrCorruptConfig, "ratio %d", bad)
+		_, err := LoadMeta(s.call(t))
+		require.ErrorIsf(t, err, ErrCorruptConfig, "ratio %d", bad)
 	}
 }
 
 func TestLoadMetaRejectsAFailingGetter(t *testing.T) {
-	_, err := paymentlane.LoadMeta(func([]byte) ([]byte, error) { return nil, vm.ErrExecutionReverted })
-	require.ErrorIs(t, err, paymentlane.ErrCorruptConfig)
+	_, err := LoadMeta(func([]byte) ([]byte, error) { return nil, vm.ErrExecutionReverted })
+	require.ErrorIs(t, err, ErrCorruptConfig)
 	require.ErrorIs(t, err, vm.ErrExecutionReverted)
 }
