@@ -209,8 +209,8 @@ A failure inside the EVM, such as a revert or an out-of-gas halt, is reported in
 | Code | Cause |
 | --- | --- |
 | `-32602` | Invalid parameters: a malformed value, a missing required parameter or too many parameters; an unknown trace type; the `pending` block tag; `data` and `input` both set and different; a `chainId` that does not match the chain; `maxPriorityFeePerGas` above `maxFeePerGas`; an integer element in a `trace_get` path; a malformed raw transaction; the `trace_filter` errors listed under [trace\_filter](#trace_filter). |
-| `-32001` | The selected block is unknown: a block number above the head, a hash the node does not know, or a `safe` or `finalized` tag that cannot be resolved. |
-| `-32603` | A block hash that is known but not canonical (`trace_call`, `trace_callMany`, `trace_replayBlockTransactions`). These methods trace canonical blocks only. |
+| `-32001` | The selected block is unknown: a block number above the head, a hash the node does not know, or a `safe` or `finalized` tag that cannot be resolved. Also a known hash that is not canonical, in `trace_replayBlockTransactions` and with `requireCanonical: true` in `trace_call` and `trace_callMany`. |
+| `4444` | `trace_call`, `trace_callMany`: a known hash that is not canonical, without `requireCanonical`. The node keeps state only for canonical blocks. |
 | `-38012` | `trace_call`, `trace_callMany`: the fee cap or gas price is below the block base fee. |
 | `-38013` | `trace_call`, `trace_callMany`: the gas limit is below the intrinsic gas. |
 | `-38014` | `trace_call`, `trace_callMany`: the sender cannot pay for the gas and the value. |
@@ -432,7 +432,7 @@ The call runs on the state at the end of the selected block, with the block envi
 
 1. `Object` - Call object. Supported fields: `from`, `to`, `gas`, `gasPrice`, `maxFeePerGas`, `maxPriorityFeePerGas`, `maxFeePerBlobGas`, `value`, `data` or `input`, `accessList`, `nonce`, `chainId`, `blobVersionedHashes`, `authorizationList`. All fields are optional, and `null` is the same as omitting a field. An omitted or `null` `to` creates a contract. `data` and `input` must be equal when both are set. `nonce` is accepted but neither checked nor used, so a creation derives its address from the sender's nonce in the state. `type` and unknown fields are ignored.
 2. `Array` - Trace types: zero or more of `"vmTrace"`, `"trace"`, `"stateDiff"`.
-3. `Quantity`, `Tag` or `Hash` - (optional) Block number, one of the tags `"latest"` (default), `"earliest"`, `"safe"`, `"finalized"`, or a block hash, as a string or as an EIP-1898 object (`{"blockHash": …}` or `{"blockNumber": …}`). `null` is the same as `"latest"`. The block must be canonical. `"pending"` is not supported and returns `-32602`: the call is executed against committed state, so there is no pending block to execute on top of.
+3. `Quantity`, `Tag` or `Hash` - (optional) Block number, one of the tags `"latest"` (default), `"earliest"`, `"safe"`, `"finalized"`, or a block hash, as a string or as an EIP-1898 object (`{"blockHash": …}` or `{"blockNumber": …}`). `null` is the same as `"latest"`. A hash selects its block even if it is not canonical, but the node keeps no state for such a block, so the call returns `4444`; with `requireCanonical: true` it returns `-32001`. `"pending"` is not supported and returns `-32602`: the call is executed against committed state, so there is no pending block to execute on top of.
 4. `Object` - (optional) Trace settings; see [Optional parameters and trace settings](#optional-parameters-and-trace-settings).
 
 Fees and gas follow `eth_call`:
