@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -88,6 +89,12 @@ func (b *BlobArchiveStoreFill) Run(ctx context.Context) error {
 	}
 	if len(b.Endpoints) == 0 && !b.DryRun {
 		return errors.New("--endpoint is required unless --dry-run is set")
+	}
+	for i, endpoint := range b.Endpoints {
+		// The value is not echoed: it can carry an API key.
+		if u, err := url.Parse(endpoint); err != nil || u.Scheme != "http" && u.Scheme != "https" || u.Host == "" {
+			return fmt.Errorf("--endpoint %d is not an http or https URL", i+1)
+		}
 	}
 
 	// Open, not New: New creates the datadir's directories, and a dry run writes nothing.

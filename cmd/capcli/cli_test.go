@@ -68,3 +68,18 @@ func TestBeaconAPIRequestsKeepTheEndpointSecretOutOfErrors(t *testing.T) {
 		})
 	}
 }
+
+// A malformed --endpoint stops the fill before it touches the datadir, and the error names the flag by position so a
+// key in the value stays out of it.
+func TestBlobArchiveStoreFillRefusesAMalformedEndpoint(t *testing.T) {
+	for _, endpoint := range []string{"beacon.example:5052/?apikey=key-secret", "ftp://beacon.example/key-secret", "http:///key-secret", "http://h/%zz/key-secret"} {
+		fill := &BlobArchiveStoreFill{
+			chainCfg:     chainCfg{Chain: "mainnet"},
+			outputFolder: outputFolder{Datadir: t.TempDir()},
+			Endpoints:    []string{"https://beacon.example", endpoint},
+		}
+		err := fill.Run(t.Context())
+		require.ErrorContains(t, err, "--endpoint 2", endpoint)
+		require.NotContains(t, err.Error(), "key-secret")
+	}
+}
