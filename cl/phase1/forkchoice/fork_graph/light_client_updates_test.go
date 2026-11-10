@@ -32,11 +32,11 @@ func TestLightClientUpdateCandidatesSkipOtherPeriods(t *testing.T) {
 	f := &forkGraphDisk{beaconCfg: cfg}
 	periodStart := cfg.SlotsPerEpoch * cfg.EpochsPerSyncCommitteePeriod
 
-	f.addLightClientUpdateCandidateLocked(common.Hash{1}, lightClientTestUpdate(cfg, 400, periodStart+5))
-	f.addLightClientUpdateCandidateLocked(common.Hash{2}, lightClientTestUpdate(cfg, int(cfg.SyncCommitteeSize), 2*periodStart-1))
+	f.recordLightClientUpdateLocked(common.Hash{1}, lightClientTestUpdate(cfg, 400, periodStart+5))
+	f.recordLightClientUpdateLocked(common.Hash{2}, lightClientTestUpdate(cfg, int(cfg.SyncCommitteeSize), 2*periodStart-1))
 
-	require.Len(t, f.lightClientUpdateCandidates[1].candidates, 1)
-	require.Equal(t, common.Hash{1}, f.lightClientUpdateCandidates[1].candidates[0].signatureBlock)
+	require.Len(t, f.lightClientUpdateCandidates, 1)
+	require.Contains(t, f.lightClientUpdateCandidates, common.Hash{1})
 }
 
 // The update of a block that passed its transition is served at once as the newest update, but its period store waits
@@ -52,7 +52,7 @@ func TestRecordLightClientUpdateWaitsForFinalizationForThePeriodStore(t *testing
 	require.Same(t, update, f.NewestLightClientUpdate())
 	_, ok := f.GetLightClientUpdate(1)
 	require.False(t, ok)
-	require.Len(t, f.lightClientUpdateCandidates[1].candidates, 1)
+	require.Len(t, f.lightClientUpdateCandidates, 1)
 }
 
 func lightClientTestUpdate(cfg *clparams.BeaconChainConfig, participants int, attestedSlot uint64) *cltypes.LightClientUpdate {
@@ -78,14 +78,14 @@ func TestFinalizationKeepsOnlyCanonicalLightClientUpdates(t *testing.T) {
 	f.headers.Store(finalized, &cltypes.BeaconBlockHeader{Slot: periodStart + 64, ParentRoot: canonical})
 
 	canonicalUpdate := lightClientTestUpdate(cfg, 400, periodStart+10)
-	f.addLightClientUpdateCandidateLocked(canonical, canonicalUpdate)
-	f.addLightClientUpdateCandidateLocked(orphan, lightClientTestUpdate(cfg, 450, periodStart+10))
+	f.recordLightClientUpdateLocked(canonical, canonicalUpdate)
+	f.recordLightClientUpdateLocked(orphan, lightClientTestUpdate(cfg, 450, periodStart+10))
 	// Signed after the finalized block, so finalization cannot settle it yet.
 	later, nextFinalized := common.Hash{5}, common.Hash{6}
 	f.headers.Store(later, &cltypes.BeaconBlockHeader{Slot: periodStart + 70, ParentRoot: finalized})
 	f.headers.Store(nextFinalized, &cltypes.BeaconBlockHeader{Slot: periodStart + 96, ParentRoot: later})
 	laterUpdate := lightClientTestUpdate(cfg, 500, periodStart+69)
-	f.addLightClientUpdateCandidateLocked(later, laterUpdate)
+	f.recordLightClientUpdateLocked(later, laterUpdate)
 	_, ok := f.GetLightClientUpdate(1)
 	require.False(t, ok, "served before finalization")
 
@@ -94,11 +94,7 @@ func TestFinalizationKeepsOnlyCanonicalLightClientUpdates(t *testing.T) {
 	got, ok := f.GetLightClientUpdate(1)
 	require.True(t, ok)
 	require.Same(t, canonicalUpdate, got)
-	require.Len(t, f.lightClientUpdateCandidates[1].candidates, 1, "only the candidate above the finalized slot waits")
-	pending := f.lightClientUpdateCandidates[1].candidates
-	for _, dropped := range pending[len(pending):cap(pending)] {
-		require.Zero(t, dropped, "settled candidates must not stay reachable through the backing array")
-	}
+	require.Len(t, f.lightClientUpdateCandidates, 1, "only the candidate above the finalized slot waits")
 
 	f.KeepFinalizedLightClientUpdates(nextFinalized)
 
@@ -119,9 +115,9 @@ func TestFinalizationKeepsTheCanonicalCandidateAmongManyBetterSideBranchOnes(t *
 	f.headers.Store(finalized, &cltypes.BeaconBlockHeader{Slot: periodStart + 64, ParentRoot: canonical})
 
 	canonicalUpdate := lightClientTestUpdate(cfg, 400, periodStart+10)
-	f.addLightClientUpdateCandidateLocked(canonical, canonicalUpdate)
+	f.recordLightClientUpdateLocked(canonical, canonicalUpdate)
 	for i := range 20 {
-		f.addLightClientUpdateCandidateLocked(common.Hash{0xee, byte(i)}, lightClientTestUpdate(cfg, 450, periodStart+10))
+		f.recordLightClientUpdateLocked(common.Hash{0xee, byte(i)}, lightClientTestUpdate(cfg, 450, periodStart+10))
 	}
 	f.KeepFinalizedLightClientUpdates(finalized)
 
@@ -141,28 +137,14 @@ func TestFinalizationKeepsACanonicalCandidateThatArrivesAfterManySideBranchOnes(
 	f.headers.Store(canonical, &cltypes.BeaconBlockHeader{Slot: 41, ParentRoot: attested})
 	f.headers.Store(finalized, &cltypes.BeaconBlockHeader{Slot: 50, ParentRoot: canonical})
 	for i := range 40 {
-		f.addLightClientUpdateCandidateLocked(common.Hash{0xee, byte(i)}, lightClientTestUpdate(&cfg, 450, 40))
+		f.recordLightClientUpdateLocked(common.Hash{0xee, byte(i)}, lightClientTestUpdate(&cfg, 450, 40))
 	}
 	canonicalUpdate := lightClientTestUpdate(&cfg, 400, 40)
-	f.addLightClientUpdateCandidateLocked(canonical, canonicalUpdate)
+	f.recordLightClientUpdateLocked(canonical, canonicalUpdate)
 
 	f.KeepFinalizedLightClientUpdates(finalized)
 
 	got, ok := f.GetLightClientUpdate(1)
 	require.True(t, ok)
 	require.Same(t, canonicalUpdate, got)
-}
-
-// Candidates of a period share one copy of each distinct next sync committee instead of holding one each.
-func TestLightClientUpdateCandidatesShareTheirSyncCommittee(t *testing.T) {
-	cfg := &clparams.MainnetBeaconConfig
-	f := &forkGraphDisk{beaconCfg: cfg}
-	periodStart := cfg.SlotsPerEpoch * cfg.EpochsPerSyncCommitteePeriod
-	first, second := lightClientTestUpdate(cfg, 400, periodStart+1), lightClientTestUpdate(cfg, 400, periodStart+2)
-	require.NotSame(t, first.NextSyncCommittee, second.NextSyncCommittee)
-
-	f.addLightClientUpdateCandidateLocked(common.Hash{1}, first)
-	f.addLightClientUpdateCandidateLocked(common.Hash{2}, second)
-
-	require.Same(t, first.NextSyncCommittee, second.NextSyncCommittee)
 }

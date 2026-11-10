@@ -261,10 +261,5 @@ func hasRelevantSyncCommittee(cfg *clparams.BeaconChainConfig, update *cltypes.L
 }
 
 func isZeroBranch(branch solid.HashVectorSSZ) bool {
-	for i := range branch.Length() {
-		if branch.Get(i) != (common.Hash{}) {
-			return false
-		}
-	}
-	return true
+	return len(common.TrimLeftZeroes(branch.Bytes())) == 0
 }

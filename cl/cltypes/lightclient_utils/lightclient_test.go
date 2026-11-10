@@ -48,11 +48,9 @@ func createTestUpdate(t *testing.T, signature, attested, finalized *cltypes.Sign
 	t.Helper()
 	finalizedRoot, err := finalized.Block.HashSSZ()
 	require.NoError(t, err)
-	attestedVersion := attested.Version()
+	zero := cltypes.NewLightClientUpdate(attested.Version(), lcTestCfg)
 	update, err := CreateLightClientUpdate(lcTestCfg, signature, finalized, attested, attested.Block.Slot,
-		solid.NewSyncCommitteeWithSize(int(lcTestCfg.SyncCommitteeSize)), solid.Checkpoint{Root: finalizedRoot},
-		solid.NewHashVector(len(cltypes.NewLightClientUpdate(attestedVersion, lcTestCfg).NextSyncCommitteeBranch.Bytes())/32),
-		solid.NewHashVector(len(cltypes.NewLightClientUpdate(attestedVersion, lcTestCfg).FinalityBranch.Bytes())/32))
+		zero.NextSyncCommittee, solid.Checkpoint{Root: finalizedRoot}, zero.NextSyncCommitteeBranch, zero.FinalityBranch)
 	require.NoError(t, err)
 	return update
 }
