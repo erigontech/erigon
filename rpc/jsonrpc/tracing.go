@@ -18,9 +18,7 @@ package jsonrpc
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"math"
 	"time"
 
 	"github.com/erigontech/erigon/common"
@@ -329,12 +327,8 @@ func prepareTraceCallState[I int | hexutil.Uint](ctx context.Context, api *Debug
 		var minTxNum uint64
 		var index int
 		if txIndex != nil {
-			index = int(min(*txIndex, I(math.MaxInt)))
-			minTxNum, err = api.checkTxIndexInBlock(ctx, tx, blockNumber, index)
+			minTxNum, index, err = checkTxIndexInBlock(ctx, api.BaseAPI, tx, blockNumber, *txIndex)
 			if err != nil {
-				if _, ok := errors.AsType[*rpc.InvalidParamsError](err); ok {
-					err = &rpc.InvalidParamsError{Message: fmt.Sprintf("transaction index %d out of range for block %d", *txIndex, blockNumber)}
-				}
 				return result, err
 			}
 		}

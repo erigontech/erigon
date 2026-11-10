@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -35,7 +36,6 @@ import (
 	"github.com/erigontech/erigon/common/concurrent"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
@@ -555,19 +555,23 @@ func (api *BaseAPI) readBlockTxNumBounds(ctx context.Context, tx kv.Tx, blockNum
 
 // checkTxIndexInBlock validates an index and returns the txNum of the block's
 // initial system transaction. User transaction zero has pre-state at minTxNum+1.
-func (api *BaseAPI) checkTxIndexInBlock(ctx context.Context, tx kv.Tx, blockNum uint64, txIndex int) (minTxNum uint64, err error) {
-	if txIndex < -1 {
-		return 0, checkTxIndex(blockNum, txIndex, 0)
+func checkTxIndexInBlock[I int | uint64 | hexutil.Uint](ctx context.Context, api *BaseAPI, tx kv.Tx, blockNum uint64, txIndex I) (minTxNum uint64, index int, err error) {
+	index = int(min(txIndex, I(math.MaxInt)))
+	if index < -1 {
+		return 0, index, checkTxIndex(blockNum, index, 0)
 	}
 	minTxNum, maxTxNum, ok, err := api.readBlockTxNumBounds(ctx, tx, blockNum)
 	if err != nil {
-		return 0, err
+		return 0, index, err
 	}
 	if !ok {
-		return 0, fmt.Errorf("%w: transaction bounds are unavailable for block %d", state.ErrPruned, blockNum)
+		return 0, index, fmt.Errorf("%w: transaction bounds are unavailable for block %d", state.ErrPruned, blockNum)
 	}
 	txCount := int(maxTxNum-minTxNum) - 1
-	return minTxNum, checkTxIndex(blockNum, txIndex, txCount)
+	if err := checkTxIndex(blockNum, index, txCount); err != nil {
+		return minTxNum, index, &rpc.InvalidParamsError{Message: fmt.Sprintf("transaction index %d out of range for block %d", txIndex, blockNum)}
+	}
+	return minTxNum, index, nil
 }
 
 // checkPruneHistory requires history from the block's first system transaction.

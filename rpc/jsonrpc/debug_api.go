@@ -21,7 +21,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"runtime"
 	"runtime/debug"
 
@@ -202,11 +201,8 @@ func (api *DebugAPIImpl) storageRangeAt(ctx context.Context, tx kv.TemporalTx, b
 	if err := rpchelper.CheckBlockExecuted(tx, blockNumber); err != nil {
 		return StorageRangeResult{}, err
 	}
-	minTxNum, err := api.checkTxIndexInBlock(ctx, tx, blockNumber, int(min(txIndex, math.MaxInt)))
+	minTxNum, _, err := checkTxIndexInBlock(ctx, api.BaseAPI, tx, blockNumber, txIndex)
 	if err != nil {
-		if _, ok := errors.AsType[*rpc.InvalidParamsError](err); ok {
-			err = &rpc.InvalidParamsError{Message: fmt.Sprintf("transaction index %d out of range for block %d", txIndex, blockNumber)}
-		}
 		return StorageRangeResult{}, err
 	}
 
@@ -637,18 +633,14 @@ func (api *DebugAPIImpl) accountAt(ctx context.Context, tx kv.TemporalTx, blockH
 	if !ok {
 		return nil, fmt.Errorf("canonical hash not found %d", *blockNumber)
 	}
-	isCanonical := canonicalHash == blockHash
-	if !isCanonical {
+	if canonicalHash != blockHash {
 		return nil, errors.New("block hash is not canonical")
 	}
 	if err := rpchelper.CheckBlockExecuted(tx, *blockNumber); err != nil {
 		return nil, err
 	}
-	minTxNum, err := api.checkTxIndexInBlock(ctx, tx, *blockNumber, int(min(txIndex, math.MaxInt)))
+	minTxNum, _, err := checkTxIndexInBlock(ctx, api.BaseAPI, tx, *blockNumber, txIndex)
 	if err != nil {
-		if _, ok := errors.AsType[*rpc.InvalidParamsError](err); ok {
-			err = &rpc.InvalidParamsError{Message: fmt.Sprintf("transaction index %d out of range for block %d", txIndex, *blockNumber)}
-		}
 		return nil, err
 	}
 
@@ -657,9 +649,8 @@ func (api *DebugAPIImpl) accountAt(ctx context.Context, tx kv.TemporalTx, blockH
 		return nil, err
 	}
 
-	ttx := tx
 	asOfTxNum := minTxNum + txIndex + 1
-	v, ok, err := ttx.GetAsOf(kv.AccountsDomain, address[:], asOfTxNum)
+	v, ok, err := tx.GetAsOf(kv.AccountsDomain, address[:], asOfTxNum)
 	if err != nil {
 		return nil, err
 	}
@@ -676,7 +667,7 @@ func (api *DebugAPIImpl) accountAt(ctx context.Context, tx kv.TemporalTx, blockH
 	result.Nonce = hexutil.Uint64(a.Nonce)
 	result.CodeHash = a.CodeHash.Value()
 
-	code, _, err := ttx.GetAsOf(kv.CodeDomain, address[:], asOfTxNum)
+	code, _, err := tx.GetAsOf(kv.CodeDomain, address[:], asOfTxNum)
 	if err != nil {
 		return nil, err
 	}
