@@ -275,7 +275,8 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 			st.SetTxContext(blockNum, txIndex)
 			txIndex++
 			if txn.Gas == nil || *txn.Gas == 0 {
-				txn.Gas = (*hexutil.Uint64)(&api.GasCap)
+				gas := hexutil.Uint64(gasBudget)
+				txn.Gas = &gas
 			}
 			if gasBudget == 0 {
 				return nil, clientLimitExceededError("the transactions of the request used all of --rpc.gascap")
