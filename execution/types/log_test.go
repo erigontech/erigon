@@ -682,3 +682,36 @@ func at(v uint64) *hexutil.Uint64 {
 	h := hexutil.Uint64(v)
 	return &h
 }
+
+// A log already stamped with the block time, as receipts are when they enter the RPC cache, is
+// returned as it is: no copy and no allocation.
+func TestAppendFilteredLogsReusesStampedLogs(t *testing.T) {
+	logs := Logs{{Address: common.Address{1}}, {Address: common.Address{2}}}
+	logs.SetBlockTimestamp(7)
+	f := NewLogFilter(nil, nil)
+	dst := make(Logs, 0, len(logs))
+	allocs := testing.AllocsPerRun(10, func() {
+		dst = logs.AppendFilteredLogs(dst[:0], f, 7, 0)
+	})
+	require.Zero(t, allocs)
+	require.Same(t, logs[0], dst[0])
+	require.Same(t, logs[1], dst[1])
+}
+
+func TestAppendFilteredLogsCopiesLogsStampedWithAnotherTime(t *testing.T) {
+	logs := Logs{{Address: common.Address{1}}, {Address: common.Address{2}}}
+	logs[0].BlockTimestamp = at(5)
+	got := logs.AppendFilteredLogs(nil, NewLogFilter(nil, nil), 7, 0)
+	require.NotSame(t, logs[0], got[0])
+	require.Equal(t, at(7), got[0].BlockTimestamp)
+	require.Equal(t, at(5), logs[0].BlockTimestamp)
+	require.Equal(t, at(7), got[1].BlockTimestamp)
+}
+
+func TestSetBlockTimestamp(t *testing.T) {
+	logs := Logs{{}, {}}
+	logs.SetBlockTimestamp(7)
+	require.Equal(t, at(7), logs[0].BlockTimestamp)
+	*logs[0].BlockTimestamp = 0
+	require.Equal(t, at(7), logs[1].BlockTimestamp, "each log owns its timestamp")
+}
