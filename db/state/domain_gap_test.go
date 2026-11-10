@@ -128,6 +128,8 @@ func TestDomain_MissingAccessorIsNotAFilesDBGap(t *testing.T) {
 
 	d.dirtyFiles.Scan(func(item *FilesItem) bool {
 		if item.startTxNum == aggStep {
+			item.bindex.Close()
+			item.index.Close()
 			item.bindex, item.index = nil, nil
 		}
 		return true
@@ -222,6 +224,8 @@ func TestDomain_HistoryHoleKeepsFilesAfterItReadable(t *testing.T) {
 
 	d.History.dirtyFiles.Scan(func(item *FilesItem) bool {
 		if item.startTxNum == aggStep {
+			item.index.Close()
+			item.vAccessor.Close()
 			item.index, item.vAccessor = nil, nil
 		}
 		return true
