@@ -5,6 +5,8 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
@@ -18,6 +20,20 @@ const (
 	psRecheck
 )
 
+const (
+	rerunSpine = iota
+	rerunDep
+	rerunInvalid
+	rerunRecheck
+	rerunErr
+	rerunCauses
+)
+
+type rerunProbe struct {
+	runs, runNs     atomic.Int64
+	reruns, wasteNs [rerunCauses]atomic.Int64
+}
+
 type poolTask struct {
 	be         *blockExecutor
 	tv         *taskVersion
@@ -25,6 +41,8 @@ type poolTask struct {
 	prevWrites *state.WriteSet
 	result     *exec.TxResult
 	reruns     int
+	lastRunNs  int64
+	rerunCause int
 
 	mu      sync.Mutex
 	parked  bool
@@ -202,6 +220,7 @@ func (pt *poolTask) step(p *taskPool, wk *poolWorker) {
 		case psRecheck:
 			valid, _, blocker := be.selfLoopEvaluate(tv, pt.result)
 			if !valid {
+				pt.rerunCause = rerunRecheck
 				if !pt.rerunAfter(blocker) {
 					return
 				}
@@ -238,9 +257,19 @@ func (pt *poolTask) run(p *taskPool, wk *poolWorker) bool {
 	if poolOnRun != nil {
 		poolOnRun(int(tv.version.Incarnation) + 1)
 	}
+	if pt.lastRunNs != 0 {
+		be.probe.reruns[pt.rerunCause].Add(1)
+		be.probe.wasteNs[pt.rerunCause].Add(pt.lastRunNs)
+	}
+	pt.rerunCause = rerunSpine
+	runStart := time.Now()
 	result := wk.w.RunTxTask(tv)
+	pt.lastRunNs = max(time.Since(runStart).Nanoseconds(), 1)
+	be.probe.runs.Add(1)
+	be.probe.runNs.Add(pt.lastRunNs)
 	if txTask, ok := tv.Task.(*exec.TxTask); ok && txTask.ChargesSenderAtValidation(int(tv.version.Incarnation)) &&
 		(result.Err != nil || touchedSenderAccount(txTask, result)) {
+		pt.rerunCause = rerunErr
 		return pt.rerunAfter(tv.index - 1)
 	}
 	if result.Err != nil {
@@ -248,9 +277,11 @@ func (pt *poolTask) run(p *taskPool, wk *poolWorker) bool {
 			pt.send(p, result)
 			return false
 		}
+		pt.rerunCause = rerunErr
 		return pt.rerunAfter(tv.index - 1)
 	}
 	if result.Dep >= 0 {
+		pt.rerunCause = rerunDep
 		return pt.rerunAfter(be.taskIndexOf(result.Dep))
 	}
 	be.selfLoopFlush(tv.version, result, pt.prevWrites)
@@ -258,6 +289,7 @@ func (pt *poolTask) run(p *taskPool, wk *poolWorker) bool {
 
 	valid, target, blocker := be.selfLoopEvaluate(tv, result)
 	if !valid {
+		pt.rerunCause = rerunInvalid
 		return pt.rerunAfter(blocker)
 	}
 	return pt.settle(p, result, target)
