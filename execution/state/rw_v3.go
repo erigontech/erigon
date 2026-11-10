@@ -83,7 +83,13 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 	if writes != nil && !writes.IsEmpty() {
 		// One buffer for every storage key this call writes: consumers copy what they keep.
 		// Made on the first slot, since an array here escapes even when unused.
-		var storageKey []byte
+		var storageKey, originBuf []byte
+		type foldedSlot struct {
+			key         accounts.StorageKey
+			value       uint256.Int
+			origin      uint256.Int
+			originKnown bool
+		}
 		type addrState struct {
 			balance        g.Option[uint256.Int]
 			balanceDeleted bool
@@ -94,7 +100,7 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 			codeWritten    bool
 			selfDestruct   bool
 			createContract bool
-			storage        []storageItem
+			storage        []foldedSlot
 		}
 
 		perAddr := make(map[accounts.Address]*addrState)
@@ -136,7 +142,7 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 		for a, byKey := range writes.StorageChanges() {
 			d := ensure(a)
 			for k, vw := range byKey {
-				d.storage = append(d.storage, storageItem{k, vw.Val})
+				d.storage = append(d.storage, foldedSlot{key: k, value: vw.Val, origin: vw.orig, originKnown: storageOriginKnown(vw)})
 			}
 		}
 
@@ -292,23 +298,29 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 				key := item.key.Value()
 				if storageKey == nil {
 					storageKey = make([]byte, length.Addr+length.Hash)
+					originBuf = make([]byte, length.Hash)
 				}
 				copy(storageKey, address[:])
 				copy(storageKey[length.Addr:], key[:])
 				composite := storageKey
 				v := item.value.Bytes()
+				var prev []byte
+				if item.originKnown {
+					prev = originBuf[length.Hash-item.origin.ByteLen():]
+					item.origin.WriteToSlice(prev)
+				}
 				if len(v) == 0 {
 					if dbg.TraceApply && (trace || dbg.TraceAccount(addr.Handle())) {
 						fmt.Printf("%d apply:del storage: %x %x\n", blockNum, addr, item.key)
 					}
-					if err := domains.DomainDel(kv.StorageDomain, roTx, composite, txNum, nil); err != nil {
+					if err := domains.DomainDel(kv.StorageDomain, roTx, composite, txNum, prev); err != nil {
 						return err
 					}
 				} else {
 					if dbg.TraceApply && (trace || dbg.TraceAccount(addr.Handle())) {
 						fmt.Printf("%d apply:put storage: %x %x %x\n", blockNum, addr, item.key, v)
 					}
-					if err := domains.DomainPut(kv.StorageDomain, roTx, composite, v, txNum, nil); err != nil {
+					if err := domains.DomainPut(kv.StorageDomain, roTx, composite, v, txNum, prev); err != nil {
 						return err
 					}
 				}

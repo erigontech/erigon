@@ -728,6 +728,13 @@ type VersionedWrite[T any] struct {
 	orig T
 }
 
+// storageOriginKnown reports whether orig holds the value the tx read for the slot.
+// recordWriteStorage never leaves ValueChanged with a zero origin, so that pair
+// marks a write built without one.
+func storageOriginKnown(w *VersionedWrite[uint256.Int]) bool {
+	return w.valStatus != ValueChanged || !w.orig.IsZero()
+}
+
 func cloneVW[T any](w *VersionedWrite[T]) *VersionedWrite[T] {
 	c := *w
 	return &c
