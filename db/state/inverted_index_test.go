@@ -122,6 +122,41 @@ func TestInvertedIndexVisibleEnd(t *testing.T) {
 	require.Equal(t, uint64(200), iit.visibleEnd(tx))
 }
 
+// Read-only txs share lastTxNumInDB per snapshot: a tx begun after a commit sees the new
+// value, and a tx begun before it keeps its own.
+func TestLastTxNumInDBPerSnapshot(t *testing.T) {
+	db, ii := testDbAndInvertedIndex(t, 16, log.New())
+	put := func(txNum uint64) {
+		var k [8]byte
+		binary.BigEndian.PutUint64(k[:], txNum)
+		require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error { return tx.Put(ii.KeysTable, k[:], []byte{1}) }))
+	}
+	last := func(tx kv.Tx) uint64 { n, _ := ii.lastTxNumInDB(tx); return n }
+
+	put(10)
+	old, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer old.Rollback()
+	require.Equal(t, uint64(10), last(old))
+
+	put(100)
+	cur, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer cur.Rollback()
+	require.Equal(t, uint64(100), last(cur))
+	require.Equal(t, uint64(10), last(old))
+	require.Equal(t, uint64(100), last(cur))
+
+	// A second reader of the same snapshot is served from the cached answer.
+	same, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer same.Rollback()
+	require.Equal(t, cur.ViewID(), same.ViewID())
+	n, found := ii.lastTxNumInDB(same)
+	require.Equal(t, uint64(100), n)
+	require.True(t, found)
+}
+
 func TestInvIndexPruningCorrectness(t *testing.T) {
 	t.Parallel()
 
@@ -1119,7 +1154,7 @@ func TestInvertedIndex_IdxRange_SkipsFileRange(t *testing.T) {
 	var key [8]byte
 	binary.BigEndian.PutUint64(key[:], 1)
 
-	txNums := []uint64{2, 5, 10, 18, 25, 30, 35, 42}
+	txNums := []uint64{2, 5, 10, 18, 25, 30, 32, 35, 42}
 
 	err := db.Update(ctx, func(tx kv.RwTx) error {
 		ic := ii.beginForTests()
@@ -1188,6 +1223,18 @@ func TestInvertedIndex_IdxRange_SkipsFileRange(t *testing.T) {
 		wantDesc[i], wantDesc[j] = wantDesc[j], wantDesc[i]
 	}
 	require.Equal(wantDesc, gotDesc, "descending IdxRange after prune")
+
+	// Descending from exactly the files end: 32 lives only in the DB.
+	it, err = ic.IdxRange(key[:], 32, -1, order.Desc, -1, roTx)
+	require.NoError(err)
+	gotDesc = gotDesc[:0]
+	for it.HasNext() {
+		v, err := it.Next()
+		require.NoError(err)
+		gotDesc = append(gotDesc, v)
+	}
+	it.Close()
+	require.Equal([]uint64{32, 30, 25, 18, 10, 5, 2}, gotDesc)
 }
 
 // TestInvertedIndex_IdxRange_IgnoresDBInFileRange proves the DB is not consulted
@@ -2030,4 +2077,80 @@ func TestInvertedIndexChunkLayout(t *testing.T) {
 	require.Error(t, err, "delta above max")
 	_, err = decodeIIChunk(nil, []byte{0, 0, 0, 0, 0, 0, 0, 9, 2})
 	require.Error(t, err, "odd deltas length")
+}
+
+func TestInvertedIndex_IdxRange_Seek(t *testing.T) {
+	t.Parallel()
+	db, ii, txs := filledInvIndexOfSize(t, 512, 16, 7, log.New())
+	mergeInverted(t, db, ii, txs)
+
+	roTx, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	ic := ii.beginForTests()
+	defer ic.Close()
+
+	ranges := map[order.By][][2]int{
+		order.Asc:  {{-1, -1}, {0, -1}, {37, 450}, {100, 101}, {300, 510}},
+		order.Desc: {{-1, -1}, {450, 37}, {510, -1}, {101, 100}, {600, 300}},
+	}
+	for _, keyNum := range []uint64{1, 3, 7} {
+		var key [8]byte
+		binary.BigEndian.PutUint64(key[:], keyNum)
+		for asc, rs := range ranges {
+			for _, r := range rs {
+				want := filledInvIndexRange(keyNum, txs, r[0], r[1], asc)
+				for _, gap := range []uint64{1, 2, 15, 16, 100, 1000} {
+					t.Run(fmt.Sprintf("key=%d/asc=%t/range=%v/gap=%d", keyNum, asc, r, gap), func(t *testing.T) {
+						it, err := ic.IdxRange(key[:], r[0], r[1], asc, -1, roTx)
+						require.NoError(t, err)
+						defer it.Close()
+						requireSeekEvery(t, it, want, asc, gap)
+					})
+				}
+			}
+		}
+	}
+}
+
+// filledInvIndexRange is what IdxRange returns for keyNum over filledInvIndexOfSize data.
+func filledInvIndexRange(keyNum, txs uint64, from, to int, asc order.By) []uint64 {
+	var want []uint64
+	for n := uint64(1); n <= txs; n++ {
+		inRange := (from < 0 || n >= uint64(from)) && (to < 0 || n < uint64(to))
+		if !asc {
+			inRange = (from < 0 || n <= uint64(from)) && (to < 0 || n > uint64(to))
+		}
+		if n%keyNum == 0 && inRange {
+			want = append(want, n)
+		}
+	}
+	if !asc {
+		slices.Reverse(want)
+	}
+	return want
+}
+
+// requireSeekEvery reads it to the end, seeking gap past every element it returns, and checks it against want.
+func requireSeekEvery(t *testing.T, it stream.U64, want []uint64, asc order.By, gap uint64) {
+	t.Helper()
+	s, ok := it.(stream.Seeker[uint64])
+	require.True(t, len(want) == 0 || ok && s.CanSeek())
+	i := 0
+	for it.HasNext() {
+		n, err := it.Next()
+		require.NoError(t, err)
+		require.Less(t, i, len(want))
+		require.Equal(t, want[i], n)
+		i++
+		target := n + gap
+		if !asc {
+			target = n - min(n, gap)
+		}
+		require.NoError(t, s.Seek(target))
+		for i < len(want) && (asc && want[i] < target || !asc && want[i] > target) {
+			i++
+		}
+	}
+	require.Equal(t, len(want), i)
 }

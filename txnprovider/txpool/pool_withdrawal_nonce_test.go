@@ -57,8 +57,8 @@ func TestWithdrawalCreditKeepsPoolSenderNonce(t *testing.T) {
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(keyR), execmoduletester.WithTxPool())
 
 	newTxn := func(k *ecdsa.PrivateKey, nonce uint64) types.Transaction {
-		txn, err := types.SignTx(types.NewTransaction(nonce, common.Address{1}, uint256.NewInt(1), 21_000, uint256.NewInt(10_000_000_000), nil), *signer, k)
-		require.NoError(t, err)
+		txn, signErr := types.SignTx(types.NewTransaction(nonce, common.Address{1}, uint256.NewInt(1), 21_000, uint256.NewInt(10_000_000_000), nil), *signer, k)
+		require.NoError(t, signErr)
 		return txn
 	}
 	rlp := func(k *ecdsa.PrivateKey, nonce uint64) []byte {

@@ -162,13 +162,13 @@ func (v *versionMapWriteView) Storages() iter.Seq2[accounts.Address, map[account
 	}
 }
 
-// StoragesChanged drops the no-op writes — those the writing tx stamped
+// StorageChanges drops the no-op writes — those the writing tx stamped
 // ValueUnchanged because their value equalled what the tx read, so they leave the
 // domain/commitment leaf untouched. The status is decided at write time from the
 // tx's own (lifecycle-aware) prior read, so there is no baseline to re-derive here
 // and a destruct needs no special case. Only the domain and commitment paths may
 // use it — the access list and notification accumulator must see every write.
-func (v *versionMapWriteView) StoragesChanged() iter.Seq2[accounts.Address, map[accounts.StorageKey]*VersionedWrite[uint256.Int]] {
+func (v *versionMapWriteView) StorageChanges() iter.Seq2[accounts.Address, map[accounts.StorageKey]*VersionedWrite[uint256.Int]] {
 	return func(yield func(accounts.Address, map[accounts.StorageKey]*VersionedWrite[uint256.Int]) bool) {
 		out := map[accounts.StorageKey]*VersionedWrite[uint256.Int]{}
 		var scratch []VersionedWrite[uint256.Int]
@@ -197,11 +197,12 @@ func (v *versionMapWriteView) StoragesChanged() iter.Seq2[accounts.Address, map[
 	}
 }
 
+func (v *versionMapWriteView) AccountChanges() iter.Seq[accounts.Address] {
+	return v.keys.AccountChanges()
+}
+
 var _ WriteSetView = (*versionMapWriteView)(nil)
 
-// WithoutVanished returns ws without the accounts tx txIdx created and self-destructed
-// that did not exist before it: they leave no state, so publishing their deletes would
-// only cost domain lookups and commitment work. preBlock reads the state before the block.
 func WithoutVanished(ws *WriteSet, vm *VersionMap, txIdx int, eip8246 bool, preBlock StateReader) (*WriteSet, error) {
 	var vanished map[accounts.Address]bool
 	for addr := range ws.SelfDestructs() {
@@ -226,8 +227,10 @@ func vanishedInTx(ws *WriteSet, vm *VersionMap, addr accounts.Address, txIdx int
 	if sd, res, ok := vm.ReadSelfDestruct(addr, txIdx+1); !ok || !res.resolved() || !sd {
 		return false, nil
 	}
-	if cc, ok := ws.GetCreateContract(addr); !ok || !cc.Val {
-		return false, nil
+	if bal, ok := ws.GetBalance(addr); !ok || !bal.Deletes() {
+		if cc, ok := ws.GetCreateContract(addr); !ok || !cc.Val {
+			return false, nil
+		}
 	}
 	if bal, res, ok := vm.ReadBalance(addr, txIdx+1); eip8246 && ok && (!res.resolved() || !bal.IsZero()) {
 		return false, nil

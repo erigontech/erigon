@@ -1406,7 +1406,29 @@ func TestHistoryRange1(t *testing.T) {
 		}
 		it.Close()
 		require.Equal([]string{"0100000000000001", "0100000000000002"}, keys)
-		require.Equal([]string{"ff000000000003cf", "ff000000000001e7"}, vals)
+		require.Equal([]string{"", ""}, vals)
+
+		collect := func(from, to int) (keys, vals []string) {
+			it, err := ic.HistoryRange(from, to, order.Asc, -1, tx)
+			require.NoError(err)
+			defer it.Close()
+			for it.HasNext() {
+				k, v, err := it.Next()
+				require.NoError(err)
+				keys = append(keys, fmt.Sprintf("%x", k))
+				vals = append(vals, fmt.Sprintf("%x", v))
+			}
+			return keys, vals
+		}
+		unboundedKeys, unboundedVals := collect(-1, 1000)
+		boundedKeys, boundedVals := collect(0, 1000)
+		require.Equal(boundedKeys, unboundedKeys)
+		require.Equal(boundedVals, unboundedVals)
+
+		unboundedKeys, unboundedVals = collect(500, -1)
+		boundedKeys, boundedVals = collect(500, int(txs)+1)
+		require.Equal(boundedKeys, unboundedKeys)
+		require.Equal(boundedVals, unboundedVals)
 	}
 	t.Run("large_values", func(t *testing.T) {
 		db, h, txs := filledHistory(t, true, logger)
@@ -2487,4 +2509,75 @@ func TestIntegrityHistoryValueAccessor(t *testing.T) {
 	a.vAccessor = nil
 	require.Error(t, ht.IntegrityHistoryValueAccessor(t.Context(), true, 0))
 	a.vAccessor = acc
+}
+
+func TestHistoryCanPruneUntilMalformedProgress(t *testing.T) {
+	t.Parallel()
+	db, h := testDbAndHistory(t, false, log.New())
+	rwTx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	require.NoError(t, rwTx.Put(kv.TblPruningValsProg, append([]byte(h.ValuesTable), "range"...), []byte{1}))
+
+	hc := h.beginForTests()
+	defer hc.Close()
+	require.NotPanics(t, func() { hc.canPruneUntil(rwTx, 100) })
+}
+
+func TestHistoryIdxRange_DescDBBounds(t *testing.T) {
+	t.Parallel()
+	logger := log.New()
+	for _, largeValues := range []bool{false, true} {
+		t.Run(fmt.Sprintf("largeValues=%t", largeValues), func(t *testing.T) {
+			db, h, _ := filledHistory(t, largeValues, logger)
+			roTx, err := db.BeginRo(t.Context())
+			require.NoError(t, err)
+			defer roTx.Rollback()
+			hc := h.beginForTests()
+			defer hc.Close()
+
+			var key [8]byte
+			binary.BigEndian.PutUint64(key[:], 1)
+			key[0] = 1
+
+			rangeOf := func(from, to uint64) []uint64 {
+				var res []uint64
+				for n := from; n > to; n-- {
+					res = append(res, n)
+				}
+				return res
+			}
+
+			it, err := hc.IdxRange(key[:], 19, 2, order.Desc, -1, roTx)
+			require.NoError(t, err)
+			got, err := stream.ToArrayU64(it)
+			require.NoError(t, err)
+			require.Equal(t, rangeOf(19, 2), got)
+
+			it, err = hc.IdxRange(key[:], 5, -1, order.Desc, -1, roTx)
+			require.NoError(t, err)
+			got, err = stream.ToArrayU64(it)
+			require.NoError(t, err)
+			require.Equal(t, rangeOf(5, 0), got)
+
+			// adjacent bounds, and an empty previous value right after endTxNum
+			it, err = hc.IdxRange(key[:], 3, 2, order.Desc, -1, roTx)
+			require.NoError(t, err)
+			got, err = stream.ToArrayU64(it)
+			require.NoError(t, err)
+			require.Equal(t, rangeOf(3, 2), got)
+
+			it, err = hc.IdxRange(key[:], 5, 0, order.Desc, -1, roTx)
+			require.NoError(t, err)
+			got, err = stream.ToArrayU64(it)
+			require.NoError(t, err)
+			require.Equal(t, rangeOf(5, 0), got)
+
+			it, err = hc.IdxRange(key[:], -1, 995, order.Desc, -1, roTx)
+			require.NoError(t, err)
+			got, err = stream.ToArrayU64(it)
+			require.NoError(t, err)
+			require.Equal(t, rangeOf(1000, 995), got)
+		})
+	}
 }

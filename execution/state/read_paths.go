@@ -50,7 +50,7 @@ func codeSizeFromStateObject(ibs *IntraBlockState, so *stateObject, addr account
 		ibs.codeReadCount++
 	}
 	ibs.stateReader.SetTrace(false, "")
-	ibs.recordStateReadError(err)
+	ibs.RecordStateReadError(err)
 	return size, err
 }
 
@@ -74,7 +74,7 @@ func (ibs *IntraBlockState) originStorageDirect(addr accounts.Address, key accou
 	}
 	ibs.storageReadCount++
 	ibs.stateReader.SetTrace(false, "")
-	ibs.recordStateReadError(err)
+	ibs.RecordStateReadError(err)
 	if err != nil {
 		return uint256.Int{}, err
 	}
@@ -98,6 +98,9 @@ func (ibs *IntraBlockState) originCodeDirect(addr accounts.Address) (accounts.Co
 	if codeHash.IsEmpty() {
 		return accounts.EmptyCode, nil
 	}
+	if code, ok := ibs.sharedCode(codeHash); ok {
+		return accounts.Code{Hash: codeHash, Bytes: code}, nil
+	}
 	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle()))) {
 		ibs.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", ibs.blockNum, ibs.txIndex, ibs.version))
 	}
@@ -111,7 +114,7 @@ func (ibs *IntraBlockState) originCodeDirect(addr accounts.Address) (accounts.Co
 		ibs.codeReadCount++
 	}
 	ibs.stateReader.SetTrace(false, "")
-	ibs.recordStateReadError(err)
+	ibs.RecordStateReadError(err)
 	if len(code) == 0 {
 		return accounts.EmptyCode, err
 	}
@@ -165,6 +168,9 @@ func (ibs *IntraBlockState) originCodeSizeDirect(addr accounts.Address) (int, er
 	if codeHash.IsEmpty() {
 		return 0, nil
 	}
+	if code, ok := ibs.sharedCode(codeHash); ok {
+		return len(code), nil
+	}
 	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle()))) {
 		ibs.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", ibs.blockNum, ibs.txIndex, ibs.version))
 	}
@@ -178,7 +184,7 @@ func (ibs *IntraBlockState) originCodeSizeDirect(addr accounts.Address) (int, er
 		ibs.codeReadCount++
 	}
 	ibs.stateReader.SetTrace(false, "")
-	ibs.recordStateReadError(err)
+	ibs.RecordStateReadError(err)
 	return size, err
 }
 
@@ -447,7 +453,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 		panic(fmt.Errorf("readPaths: unknown path %v", path))
 	}
 
-	hdr := ReadHeader{Version: Version{TxIndex: res.DepIdx(), Incarnation: res.Incarnation()}}
+	hdr := ReadHeader{Version: Version{TxIndex: res.DepIdx(), Incarnation: res.Incarnation()}, accSource: res.accSource()}
 
 	if !commited {
 		if hasWrite := s.versionedWriteHit(addr, path, key, r); hasWrite {
@@ -774,15 +780,29 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 		}
 		if so == nil && r.account == nil {
 			hdr.Source = StorageRead
-			obj, err := s.getStateObject(addr, true)
-			if err != nil {
-				r.err = err
-				r.outcome = outcomeReturnDefault
-				r.source = StorageRead
-				r.version = UnknownVersion
-				return
+			// An absent account's field is its default. readAccountInternal already
+			// resolved the committed base (seedOrigin); a nil result means the account
+			// is in neither the map nor the base, so a materialized stateObject could
+			// add nothing. Record the absent read and return the default — the
+			// noMaterialize flow must never resolve through a stateObject.
+			if !s.noMaterialize {
+				obj, err := s.getStateObject(addr, true)
+				if err != nil {
+					r.err = err
+					r.outcome = outcomeReturnDefault
+					r.source = StorageRead
+					r.version = UnknownVersion
+					return
+				}
+				so = obj
 			}
-			so = obj
+		}
+		if s.noMaterialize && so != nil {
+			r.err = fmt.Errorf("noMaterialize read fell back to a materialized stateObject: %x %s", addr, AccountKey{path, key})
+			r.outcome = outcomeReturnDefault
+			r.source = StorageRead
+			r.version = UnknownVersion
+			return
 		}
 		r.outcome = outcomeStorageRead
 		r.so = so
@@ -834,6 +854,28 @@ func readAccountInternal(s *IntraBlockState, addr accounts.Address) (*accounts.A
 		// cross-check against the destruct's Incarnation cell and invalidate the tx forever.
 		if r.version.TxIndex == originIndex && !gateOriginAccount(s, addr, acc) {
 			return nil, r.source, r.version, nil
+		}
+		// An AccountFromBAL AddressPath is an existence-only marker — the account exists but
+		// its value lives in the committed base. Read the base through for the data
+		// (field reads resolve their value off this account); a block-created account has
+		// no base record, so its value is the marker itself (its field cells). The read
+		// stays recorded at the marker's version, so it does not add a second AddressPath
+		// origin that would trip OCC against the marker cell.
+		if r.hdr.accSource == AccountFromBAL {
+			base, ok := s.versionMap.LoadOriginAccount(addr)
+			if !ok {
+				var err error
+				if base, err = s.committedAccount(addr); err != nil {
+					return nil, r.source, r.version, err
+				}
+				if base != nil {
+					origin := *base
+					s.recordAddressOrigin(addr, &origin)
+				}
+			}
+			if base != nil {
+				acc = base
+			}
 		}
 		if r.recordVR {
 			s.versionedReads.SetAddress(addr, VersionedRead[AccountView]{r.hdr, NewAccountView(acc)})
@@ -977,7 +1019,7 @@ func readBalance(s *IntraBlockState, addr accounts.Address) (uint256.Int, ReadSo
 	var r readPathResult
 	versionedReadCore(s, addr, BalancePath, accounts.NilKey, false, false, &r)
 	if r.err != nil {
-		s.recordStateReadError(r.err)
+		s.RecordStateReadError(r.err)
 		return uint256.Int{}, r.source, r.version, r.err
 	}
 	switch r.outcome {
@@ -1065,7 +1107,7 @@ func readNonce(s *IntraBlockState, addr accounts.Address) (uint64, ReadSource, V
 	var r readPathResult
 	versionedReadCore(s, addr, NoncePath, accounts.NilKey, false, false, &r)
 	if r.err != nil {
-		s.recordStateReadError(r.err)
+		s.RecordStateReadError(r.err)
 		return 0, r.source, r.version, r.err
 	}
 	switch r.outcome {
@@ -1250,7 +1292,7 @@ func readCode(s *IntraBlockState, addr accounts.Address) (accounts.Code, ReadSou
 	var r readPathResult
 	versionedReadCore(s, addr, CodePath, accounts.NilKey, false, false, &r)
 	if r.err != nil {
-		s.recordStateReadError(r.err)
+		s.RecordStateReadError(r.err)
 		return accounts.Code{}, r.source, r.version, r.err
 	}
 	switch r.outcome {
@@ -1330,7 +1372,7 @@ func readCodeSize(s *IntraBlockState, addr accounts.Address) (int, ReadSource, V
 	var r readPathResult
 	versionedReadCore(s, addr, CodeSizePath, accounts.NilKey, false, false, &r)
 	if r.err != nil {
-		s.recordStateReadError(r.err)
+		s.RecordStateReadError(r.err)
 		return 0, r.source, r.version, r.err
 	}
 	switch r.outcome {
@@ -1383,7 +1425,7 @@ func readCodeHash(s *IntraBlockState, addr accounts.Address, commited bool) (acc
 	var r readPathResult
 	versionedReadCore(s, addr, CodeHashPath, accounts.NilKey, commited, false, &r)
 	if r.err != nil {
-		s.recordStateReadError(r.err)
+		s.RecordStateReadError(r.err)
 		return accounts.NilCodeHash, r.source, r.version, r.err
 	}
 	switch r.outcome {
@@ -1733,4 +1775,12 @@ func (ibs *IntraBlockState) ReadStamp() (ReadStamp, bool) {
 		return ReadStamp{}, false
 	}
 	return ReadStamp{len(ibs.journal.entries), ibs.journal.epoch}, true
+}
+
+func (ibs *IntraBlockState) sharedCode(codeHash accounts.CodeHash) ([]byte, bool) {
+	if ibs.codeByHash == nil {
+		return nil, false
+	}
+	h := codeHash.Value()
+	return ibs.codeByHash.GetCodeByHash(h[:])
 }

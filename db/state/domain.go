@@ -42,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/mmap"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/datastruct/btindex"
 	"github.com/erigontech/erigon/db/datastruct/existence"
@@ -745,6 +746,7 @@ func (w *DomainBufferedWriter) addValue(k, value []byte, step kv.Step) error {
 
 // DomainRoTx allows accesing the same domain from multiple go-routines
 type DomainRoTx struct {
+	probe    *mmap.Probe // set only while PrefetchLatest plans its page batches
 	files    visibleFiles
 	visible  *domainVisible
 	name     kv.Domain
@@ -774,12 +776,14 @@ func domainReadMetric(name kv.Domain, level int) metrics.Summary {
 }
 
 func (dt *DomainRoTx) getLatestFromFile(i int, filekey, buf []byte, hi, lo uint64) (v []byte, ok bool, offset uint64, err error) {
-	if dbg.KVReadLevelledMetrics {
+	if dbg.KVFileReadSummaries {
 		defer domainReadMetric(dt.name, i).ObserveDuration(time.Now())
 	}
 
 	if dt.d.Accessors.Has(statecfg.AccessorBTree) {
-		_, v, offset, ok, err = dt.statelessBtree(i).Get(filekey, buf, dt.reusableReader(i))
+		g := dt.reusableReader(i)
+		g.SetProbe(dt.probe)
+		_, v, offset, ok, err = dt.statelessBtree(i).Get(filekey, buf, g)
 		if err != nil || !ok {
 			return nil, false, 0, err
 		}
@@ -791,11 +795,12 @@ func (dt *DomainRoTx) getLatestFromFile(i int, filekey, buf []byte, hi, lo uint6
 		if reader.Empty() {
 			return nil, false, 0, nil
 		}
-		offset, ok := reader.TwoLayerLookupByHash(hi, lo)
+		offset, ok := reader.TwoLayerLookupByHashProbe(hi, lo, dt.probe)
 		if !ok {
 			return nil, false, 0, nil
 		}
 		g := dt.reusableReader(i)
+		g.SetProbe(dt.probe)
 		g.Reset(offset)
 
 		if g.MatchCmp(filekey) != 0 { // MPH false-positives protection
@@ -808,7 +813,7 @@ func (dt *DomainRoTx) getLatestFromFile(i int, filekey, buf []byte, hi, lo uint6
 }
 
 func (dt *DomainRoTx) getLatestFromFileValSize(i int, filekey []byte, hi, lo uint64) (size int, ok bool, err error) {
-	if dbg.KVReadLevelledMetrics {
+	if dbg.KVFileReadSummaries {
 		defer domainReadMetric(dt.name, i).ObserveDuration(time.Now())
 	}
 	if dt.d.Accessors.Has(statecfg.AccessorBTree) {
@@ -1222,7 +1227,7 @@ func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo kv.Step, c
 			return StaticFiles{}, fmt.Errorf("build %s .kvei: %w", d.FilenameBase, err)
 		}
 		if exists {
-			existenceFilter, err = existence.OpenFilter(fPath, false)
+			existenceFilter, err = d.openExistenceFilter(fPath)
 			if err != nil {
 				return StaticFiles{}, fmt.Errorf("build %s .kvei: %w", d.FilenameBase, err)
 			}
@@ -1325,7 +1330,7 @@ func (d *Domain) buildFiles(ctx context.Context, step kv.Step, collation Collati
 			return StaticFiles{}, fmt.Errorf("build %s .kvei: %w", d.FilenameBase, err)
 		}
 		if exists {
-			bloom, err = existence.OpenFilter(fPath, false)
+			bloom, err = d.openExistenceFilter(fPath)
 			if err != nil {
 				return StaticFiles{}, fmt.Errorf("build %s .kvei: %w", d.FilenameBase, err)
 			}
@@ -1650,6 +1655,24 @@ func (dt *DomainRoTx) getLatestFromFiles(k, buf []byte, maxStep kv.Step) (v []by
 	return dt.lookupLatestFromFiles(k, buf, maxTxNum, true)
 }
 
+// mayContainInFiles reports whether some file may hold k. Only filters in the heap reject a key: a mapped filter
+// would read its pages one at a time here, so its key stays for the probed lookup, which batches those pages.
+func (dt *DomainRoTx) mayContainInFiles(k []byte) bool {
+	if len(dt.files) == 0 {
+		return false
+	}
+	if !dt.d.Accessors.Has(statecfg.AccessorExistence) {
+		return true
+	}
+	hi, _ := dt.ht.iit.hashKey(k)
+	for _, f := range slices.Backward(dt.files) {
+		if f.src.existence == nil || !f.src.existence.InMem() || f.src.existence.ContainsHash(hi) {
+			return true
+		}
+	}
+	return false
+}
+
 func (dt *DomainRoTx) lookupLatestFromFiles(k, buf []byte, maxTxNum uint64, bounded bool) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error) {
 	if len(dt.files) == 0 {
 		return
@@ -1658,7 +1681,7 @@ func (dt *DomainRoTx) lookupLatestFromFiles(k, buf []byte, maxTxNum uint64, boun
 		maxTxNum = math.MaxUint64
 	}
 	useExistenceFilter := dt.d.Accessors.Has(statecfg.AccessorExistence)
-	useCache := dt.name != kv.CommitmentDomain && !bounded && buf == nil
+	useCache := dt.name != kv.CommitmentDomain && !bounded && buf == nil && dt.probe == nil // a cache hit would hide a cold page from the probe
 
 	hi, lo := dt.ht.iit.hashKey(k)
 
@@ -1685,7 +1708,8 @@ func (dt *DomainRoTx) lookupLatestFromFiles(k, buf []byte, maxTxNum uint64, boun
 		// fmt.Printf("getLatestFromFiles: lim=%d %d %d %d %d\n", maxTxNum, dt.files[i].startTxNum, dt.files[i].endTxNum, dt.files[i].startTxNum/dt.stepSize, dt.files[i].endTxNum/dt.stepSize)
 		if useExistenceFilter {
 			if f.src.existence != nil {
-				if !f.src.existence.ContainsHash(hi) {
+				maybe := dt.probe == nil && f.src.existence.ContainsHash(hi) || dt.probe != nil && f.src.existence.ContainsHashProbe(hi, dt.probe)
+				if !maybe {
 					if traceGetLatest == dt.name {
 						fmt.Printf("GetLatest(%s, %x) -> existence index %s -> false\n", dt.d.FilenameBase, k, f.src.existence.FileName)
 					}
@@ -1693,10 +1717,8 @@ func (dt *DomainRoTx) lookupLatestFromFiles(k, buf []byte, maxTxNum uint64, boun
 				} else if traceGetLatest == dt.name {
 					fmt.Printf("GetLatest(%s, %x) -> existence index %s -> true\n", dt.d.FilenameBase, k, f.src.existence.FileName)
 				}
-			} else {
-				if traceGetLatest == dt.name {
-					fmt.Printf("GetLatest(%s, %x) -> existence index is nil %s\n", dt.name.String(), k, f.src.decompressor.FileName())
-				}
+			} else if traceGetLatest == dt.name {
+				fmt.Printf("GetLatest(%s, %x) -> existence index is nil %s\n", dt.name.String(), k, f.src.decompressor.FileName())
 			}
 		}
 
@@ -2237,11 +2259,6 @@ func (dc *DomainPruneStat) Accumulate(other *DomainPruneStat) {
 	} else {
 		dc.History.Accumulate(other.History)
 	}
-}
-
-func (dt *DomainRoTx) OldPrune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txFrom, txTo, limit uint64, logEvery *time.Ticker) (stat *DomainPruneStat, err error) {
-	txTo = min(txTo, dt.files.EndTxNum())
-	return dt.prune(ctx, rwTx, step, txFrom, txTo, limit, logEvery)
 }
 
 func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txFrom, txTo, limit uint64, logEvery *time.Ticker) (stat *DomainPruneStat, err error) {

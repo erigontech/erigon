@@ -461,9 +461,6 @@ func (ht *HistoryRoTx) newWriter(db kv.RoDB, tmpdir string, discard bool) *histo
 	return w
 }
 
-func (w *historyBufferedWriter) init() {
-}
-
 func (w *historyBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 	if w.discard {
 		return nil
@@ -1036,12 +1033,13 @@ func (ht *HistoryRoTx) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txTo u
 	minIdxTx, _ := ht.iit.ii.minTxNumInDB(tx)
 	maxIdxTx := ht.iit.ii.maxTxNumInDB(tx)
 
+	var pruneInProgress bool
 	stat, err := GetPruneValProgress(tx, []byte(ht.h.ValuesTable))
 	if err != nil {
 		ht.h.logger.Warn("CanPrune GetPruneValProgress error", "err", err)
+	} else {
+		pruneInProgress = (stat.KeyProgress != prune.Done || stat.ValueProgress != prune.Done) && untilTx == stat.TxTo
 	}
-
-	pruneInProgress := (stat.KeyProgress != prune.Done || stat.ValueProgress != prune.Done) && untilTx == stat.TxTo
 
 	if ht.h.SnapshotsDisabled {
 		if ht.h.KeepRecentTxnInDB >= maxIdxTx {
@@ -1138,15 +1136,6 @@ func (ht *HistoryRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, li
 	}
 
 	return ht.iit.TableScanningPrune(ctx, rwTx, txFrom, txTo, limit, logEvery, forced, valsCP, &ht.h.ValuesTable, mxPruneSizeHistory, mode)
-}
-
-// Prune [txFrom; txTo)
-// `force` flag to prune even if canPruneUntil returns false (when Unwind is needed, canPruneUntil always returns false)
-// `useProgress` flag to restore and update prune progress.
-//   - E.g. Unwind can't use progress, because it's not linear
-//     and will wrongly update progress of steps cleaning and could end up with inconsistent history.
-func (ht *HistoryRoTx) OldPrune(ctx context.Context, tx kv.RwTx, txFrom, txTo, limit uint64, forced bool, logEvery *time.Ticker) (*InvertedIndexPruneStat, error) {
-	return ht.Prune(ctx, tx, txFrom, txTo, limit, forced, logEvery)
 }
 
 func (ht *HistoryRoTx) Close() {
@@ -1371,7 +1360,7 @@ func (ht *HistoryRoTx) iterateChangedFrozen(fromTxNum, toTxNum int, asc order.By
 
 	s := &HistoryChangesIterFiles{
 		hc:         ht,
-		startTxNum: max(0, uint64(fromTxNum)),
+		startTxNum: uint64(max(0, fromTxNum)),
 		endTxNum:   toTxNum,
 		limit:      limit,
 	}
@@ -1555,14 +1544,19 @@ func (ht *HistoryRoTx) idxRangeOnDB(key []byte, startTxNum, endTxNum int, asc or
 		var fromTxNum uint64
 		if startTxNum >= 0 {
 			fromTxNum = uint64(startTxNum)
+		} else if !asc {
+			fromTxNum = math.MaxUint64
 		}
 		binary.BigEndian.PutUint64(from[len(key):], fromTxNum)
 		to := bytes.Clone(from)
-		toTxNum := uint64(math.MaxUint64)
-		if endTxNum >= 0 {
-			toTxNum = uint64(endTxNum)
+		switch {
+		case endTxNum >= 0:
+			binary.BigEndian.PutUint64(to[len(key):], uint64(endTxNum))
+		case asc == order.Asc:
+			binary.BigEndian.PutUint64(to[len(key):], math.MaxUint64)
+		default:
+			to = to[:len(key)]
 		}
-		binary.BigEndian.PutUint64(to[len(key):], toTxNum)
 		it, err := roTx.Range(ht.h.ValuesTable, from, to, asc, limit)
 		if err != nil {
 			return nil, err
@@ -1588,12 +1582,18 @@ func (ht *HistoryRoTx) idxRangeOnDB(key []byte, startTxNum, endTxNum int, asc or
 	if err != nil {
 		return nil, err
 	}
-	return stream.TransformKV2U64(it, func(k, v []byte) (uint64, error) {
+	res := stream.TransformKV2U64(it, func(k, v []byte) (uint64, error) {
 		if len(v) < 8 {
 			return 0, fmt.Errorf("unexpected small value length %d", len(v))
 		}
 		return binary.BigEndian.Uint64(v), nil
-	}), nil
+	})
+	if !asc && endTxNum >= 0 {
+		// dup values are txNum followed by the previous value, so a non-empty previous value at endTxNum sorts above the
+		// 8-byte bound and leaks through the exclusive desc end; there is at most one such entry, and it is the last one
+		return stream.FilterU64(res, func(n uint64) bool { return n != uint64(endTxNum) }), nil
+	}
+	return res, nil
 }
 
 func (ht *HistoryRoTx) IdxRange(key []byte, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) (stream.U64, error) {

@@ -1,6 +1,8 @@
 package das
 
 import (
+	"os"
+	"sync/atomic"
 	"testing"
 
 	goethkzg "github.com/crate-crypto/go-eth-kzg"
@@ -102,6 +104,41 @@ func TestImportColumnsFromBlobsStoresCustodyColumns(t *testing.T) {
 	}
 }
 
+type statCountingFs struct {
+	afero.Fs
+	stats atomic.Int32
+}
+
+func (f *statCountingFs) Stat(name string) (os.FileInfo, error) {
+	f.stats.Add(1)
+	return f.Fs.Stat(name)
+}
+
+func TestIsDataAvailableReadsOnlyCustodyColumns(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	initTestBeaconConfig(&cfg)
+	d := newELBlobsTestPeerDas(t, &cfg, &clparams.CaplinConfig{})
+	fs := &statCountingFs{Fs: afero.NewMemMapFs()}
+	d.columnStorage = blob_storage.NewDataColumnStore(fs, &cfg, beaconevents.NewEventEmitter())
+	block, root, blobs, proofs := elBlobsFixture(t, &cfg, 1)
+	custody, err := d.state.GetMyCustodyColumns()
+	require.NoError(t, err)
+	require.Less(t, len(custody), int(cfg.NumberOfColumns))
+
+	available, err := d.IsDataAvailable(block.Block.Slot, root)
+	require.NoError(t, err)
+	require.False(t, available)
+	require.Equal(t, int32(1), fs.stats.Load(), "the check must stop at the first missing custody column")
+
+	_, err = d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs)
+	require.NoError(t, err)
+	fs.stats.Store(0)
+	available, err = d.IsDataAvailable(block.Block.Slot, root)
+	require.NoError(t, err)
+	require.True(t, available)
+	require.Equal(t, int32(len(custody)), fs.stats.Load())
+}
+
 func TestImportColumnsFromBlobsStoresAllColumnsInArchiveMode(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	initTestBeaconConfig(&cfg)
@@ -122,6 +159,21 @@ func TestImportColumnsFromBlobsStoresAllColumnsInArchiveMode(t *testing.T) {
 	default:
 		t.Fatal("blob recovery was not scheduled")
 	}
+}
+
+func TestImportColumnsFromBlobsStoresAllColumnsOnCustodyLookupError(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	initTestBeaconConfig(&cfg)
+	d := newELBlobsTestPeerDas(t, &cfg, &clparams.CaplinConfig{})
+	d.state.SetCustodyGroupCount(cfg.NumberOfCustodyGroups+1, func() uint64 { return 0 })
+	block, root, blobs, proofs := elBlobsFixture(t, &cfg, 2)
+
+	_, err := d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs)
+	require.NoError(t, err)
+
+	saved, err := d.columnStorage.GetSavedColumnIndex(t.Context(), block.Block.Slot, root)
+	require.NoError(t, err)
+	require.Len(t, saved, int(cfg.NumberOfColumns))
 }
 
 func TestImportColumnsFromBlobsRejectsUnusableResponses(t *testing.T) {

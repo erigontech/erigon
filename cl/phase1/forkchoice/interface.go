@@ -63,8 +63,9 @@ type ForkChoiceStorageReader interface {
 	ProposerBoostRoot() common.Hash
 	GetStateAtBlockRoot(blockRoot common.Hash) (*state.CachingBeaconState, error)
 	GetOwnedStateAtBlockRoot(blockRoot common.Hash) (*state.CachingBeaconState, error)
-	// ViewStateAtBlockRoot callbacks must not call fork choice, mutate the state or keep it after returning.
+	// State-view callbacks must not call fork choice, mutate the state or keep it after returning.
 	ViewStateAtBlockRoot(blockRoot common.Hash, fn func(*state.CachingBeaconState) error) error
+	ViewCurrentStateAtBlockRoot(blockRoot common.Hash, fn func(*state.CachingBeaconState) error) error
 	GetFinalityCheckpoints(
 		blockRoot common.Hash,
 	) (solid.Checkpoint, solid.Checkpoint, solid.Checkpoint, bool)
@@ -88,11 +89,12 @@ type ForkChoiceStorageReader interface {
 	HasBlockEquivocation(slot, proposerIndex uint64, exceptRoot common.Hash) bool
 	// [New in Gloas:EIP7732] HasEnvelope checks if a signed execution payload envelope exists.
 	HasEnvelope(blockRoot common.Hash) bool
+	IsBlockInvalid(blockRoot common.Hash) bool
 	// [New in Gloas:EIP7732] HasPendingExecutionPayloadEnvelope reports an envelope that is
 	// waiting for its block or its data columns.
 	HasPendingExecutionPayloadEnvelope(blockRoot common.Hash) bool
-	// [New in Gloas:EIP7732] ExecutionPayloadApplyInFlight reports an envelope that is being
-	// applied after passing its signature check.
+	// [New in Gloas:EIP7732] ExecutionPayloadApplyInFlight reports an envelope held for import or past its signature
+	// check with the apply still running.
 	ExecutionPayloadApplyInFlight(blockRoot common.Hash) bool
 	// [New in Gloas:EIP7732] PayloadVotesRuleOutFull reports PTC votes recorded for blockRoot that
 	// already rule out building on its FULL variant.
