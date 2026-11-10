@@ -199,9 +199,8 @@ func (dt *DomainRoTx) probedFileReader(from, to uint64, pr *mmap.Probe) *seg.Rea
 
 func probeWord(r *seg.Reader, offset uint64) (page uintptr, cold bool) {
 	defer recoverColdPage(&page, &cold)
-	r.Reset(offset)
-	if r.HasNext() {
-		r.Skip()
+	if offset < uint64(r.Size()) {
+		r.Reset(offset)
 	}
 	return 0, false
 }
