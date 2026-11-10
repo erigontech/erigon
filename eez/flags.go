@@ -70,6 +70,10 @@ var (
 		Name:  "eez.sequencer.rpc",
 		Usage: "JSON-RPC endpoint of the sequencer, whose blocks the follower takes as its unsafe head",
 	}
+	SyncL1OnlyFlag = cli.BoolFlag{
+		Name:  "eez.sync.l1only",
+		Usage: "Derive the whole history from L1 rather than take the history below L1's finalized root from L2 peers; unset, true on rollupX networks and false on rollup0 networks",
+	}
 	ChainFlag = cli.StringFlag{
 		Name:  "eez.chain",
 		Usage: "EEZ network to run in the same process as the L1 chain of --chain, whose database the follower reads",
@@ -115,7 +119,7 @@ var (
 
 // Flags lists the EEZ command-line flags.
 var Flags = []cli.Flag{
-	&EnabledFlag, &L1RPCFlag, &L1KVFlag, &L1BeaconFlag, &L1BlobsFlag, &L1PollFlag, &L1LogChunkFlag, &L1ReorgDepthFlag, &SequencerRPCFlag,
+	&EnabledFlag, &L1RPCFlag, &L1KVFlag, &L1BeaconFlag, &L1BlobsFlag, &L1PollFlag, &L1LogChunkFlag, &L1ReorgDepthFlag, &SequencerRPCFlag, &SyncL1OnlyFlag,
 	&ChainFlag, &HTTPPortFlag, &HTTPAPIFlag, &L1ChainIDFlag, &RegistryFlag, &RegistryDeployBlockFlag, &RollupIDFlag, &L1BlockTimeFlag, &L2BlockTimeFlag,
 }
 
@@ -129,6 +133,9 @@ type Config struct {
 	L1LogChunk   uint64
 	L1ReorgDepth int
 	SequencerRPC string
+	// SyncL1Only, when set, chooses L1-only derivation or the history below
+	// L1's finalized root from L2 peers; unset, the rule set chooses.
+	SyncL1Only *bool
 	// Chain is the EEZ network an all-in-one node runs beside its L1 chain,
 	// served on HTTPPort with the namespaces HTTPAPI.
 	Chain    string
@@ -168,6 +175,10 @@ func ConfigFromCLI(cmd *cli.Command) (*Config, error) {
 		L1ReorgDepth: int(cmd.Int(L1ReorgDepthFlag.Name)),
 		SequencerRPC: cmd.String(SequencerRPCFlag.Name),
 		Chain:        cmd.String(ChainFlag.Name),
+	}
+	if cmd.IsSet(SyncL1OnlyFlag.Name) {
+		l1Only := cmd.Bool(SyncL1OnlyFlag.Name)
+		c.SyncL1Only = &l1Only
 	}
 	if c.Chain != "" {
 		c.HTTPPort = int(cmd.Int(HTTPPortFlag.Name))
@@ -248,7 +259,24 @@ func (c *Config) CheckNode() error {
 	if sources != 1 {
 		return fmt.Errorf("%w: the follower needs one L1 source, --%s, --%s or --%s", ErrConfig, L1RPCFlag.Name, L1KVFlag.Name, ChainFlag.Name)
 	}
+	if c.AllInOne() && c.SyncL1Only != nil && !*c.SyncL1Only {
+		return fmt.Errorf("%w: --%s=false: the EEZ chain beside its L1 (--%s) takes no L2 peers", ErrConfig, SyncL1OnlyFlag.Name, ChainFlag.Name)
+	}
 	return nil
+}
+
+// L1Only reports whether the follower of chainConfig derives its whole
+// history from L1.
+func (c *Config) L1Only(chainConfig *chain.Config) (bool, error) {
+	l2, ok := chainConfig.L2.(*config.L2Config)
+	rollupX := ok && l2.RollupX != nil
+	if c.SyncL1Only == nil {
+		return rollupX || c.AllInOne(), nil
+	}
+	if !*c.SyncL1Only && rollupX {
+		return false, fmt.Errorf("%w: --%s=false: rollupX chains derive their history from L1 alone", ErrConfig, SyncL1OnlyFlag.Name)
+	}
+	return *c.SyncL1Only, nil
 }
 
 // AllInOne reports whether the node runs its L1 chain in the same process.

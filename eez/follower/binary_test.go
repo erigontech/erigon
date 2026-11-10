@@ -133,9 +133,12 @@ func waitStatus(t *testing.T, url string, cursor, safe uint64) {
 // TestFollowerBinary runs the erigon binary named by EEZ_ERIGON as an EEZ
 // node against a composed L1 served over JSON-RPC: it derives the settled
 // blocks into <datadir>/eez/chaindata, serves no engine API, and exits with
-// status 3 when its chain diverges from L1. A second node with the first as
-// trusted peer and discovery off completes the eth/68 and eth/69 handshake
-// with it; discovery without --bootnodes is refused.
+// status 3 when its chain diverges from L1. A second node in peers mode,
+// with the first as trusted peer and discovery off, completes the eth/68
+// and eth/69 handshake with it, syncs from it the history below the root
+// L1's finalized block F holds, seeds derivation at F and keeps no
+// checkpoint. Discovery without --bootnodes, and peers mode on a rollupX
+// chain, are refused.
 func TestFollowerBinary(t *testing.T) {
 	bin := os.Getenv("EEZ_ERIGON")
 	if bin == "" {
@@ -158,14 +161,18 @@ func TestFollowerBinary(t *testing.T) {
 
 	refused, cancel := context.WithTimeout(t.Context(), time.Minute)
 	defer cancel()
-	out, err := exec.CommandContext(refused, bin, "--eez.enabled", "--chain=eez-devnet", "--datadir", t.TempDir(),
+	out, err := exec.CommandContext(refused, bin, "--eez.enabled", "--chain=eez-devnet", "--datadir", t.TempDir(), "--eez.sync.l1only=true",
 		"--eez.l1.rpc", l1.URL, "--http.port", freePort(t), "--authrpc.port", freePort(t),
 		"--private.api.addr", "127.0.0.1:"+freePort(t), "--port", freePort(t), "--torrent.port", freePort(t)).CombinedOutput()
 	require.True(t, bytes.Contains(out, []byte("discovery finds no L2 peers without --bootnodes")), "not refused: %v", err)
+	out, err = exec.CommandContext(refused, bin, "--eez.enabled", "--chain=eez-chiado", "--datadir", t.TempDir(), "--eez.sync.l1only=false",
+		"--eez.l1.rpc", l1.URL, "--http.port", freePort(t), "--authrpc.port", freePort(t),
+		"--private.api.addr", "127.0.0.1:"+freePort(t), "--port", freePort(t), "--torrent.port", freePort(t)).CombinedOutput()
+	require.True(t, bytes.Contains(out, []byte("rollupX chains derive their history from L1 alone")), "not refused: %v", err)
 
 	dir := t.TempDir()
 	httpPort, authPort, p2pPort := freePort(t), freePort(t), freePort(t)
-	cmd := exec.CommandContext(t.Context(), bin, "--eez.enabled", "--chain=eez-devnet", "--datadir", dir,
+	cmd := exec.CommandContext(t.Context(), bin, "--eez.enabled", "--chain=eez-devnet", "--datadir", dir, "--eez.sync.l1only=true",
 		"--eez.l1.rpc", l1.URL, "--eez.l1.poll=200ms", "--http.port", httpPort, "--http.api=eth,eez,admin", "--authrpc.port", authPort,
 		"--private.api.addr", "127.0.0.1:"+freePort(t), "--port", p2pPort, "--torrent.port", freePort(t), "--nodiscover")
 	var output bytes.Buffer
@@ -214,14 +221,17 @@ func TestFollowerBinary(t *testing.T) {
 	var id string
 	_, err = fmt.Sscanf(info.Enode, "enode://%128s", &id)
 	require.NoError(t, err, info.Enode)
-	peerHTTP := freePort(t)
+	f, err := c.L1.Head(t.Context())
+	require.NoError(t, err)
+	require.NoError(t, c.L1.Finalize(f.Number))
+	peerHTTP, peerDir := freePort(t), t.TempDir()
 	peerURL := "http://127.0.0.1:" + peerHTTP
-	peer := exec.CommandContext(t.Context(), bin, "--eez.enabled", "--chain=eez-devnet", "--datadir", t.TempDir(),
+	peer := exec.CommandContext(t.Context(), bin, "--eez.enabled", "--chain=eez-devnet", "--datadir", peerDir, "--eez.sync.l1only=false",
 		"--eez.l1.rpc", l1.URL, "--eez.l1.poll=200ms", "--http.port", peerHTTP, "--http.api=eth,eez,admin",
 		"--authrpc.port", freePort(t), "--private.api.addr", "127.0.0.1:"+freePort(t), "--port", freePort(t), "--torrent.port", freePort(t),
 		"--nodiscover", "--trustedpeers", "enode://"+id+"@127.0.0.1:"+p2pPort)
-	var peerOutput bytes.Buffer
-	peer.Stdout, peer.Stderr = &peerOutput, &peerOutput
+	peerOutput := &syncBuffer{}
+	peer.Stdout, peer.Stderr = peerOutput, peerOutput
 	require.NoError(t, peer.Start())
 	t.Cleanup(func() {
 		_ = peer.Process.Kill()
@@ -245,6 +255,17 @@ func TestFollowerBinary(t *testing.T) {
 		assert.True(c, peers[0].Network.Trusted, "trusted")
 		assert.True(c, peers[0].Network.Static, "static")
 	}, 2*time.Minute, 250*time.Millisecond, "admin_peers")
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
+		h, err := blockHash(t.Context(), peerURL, "finalized")
+		require.NoError(c, err)
+		assert.Equal(c, second.Blocks[0].Hash(), h)
+	}, 2*time.Minute, 250*time.Millisecond, "the root at L1 finality")
+	// The sync moves finalized to the root before boot seeds derivation.
+	require.Eventually(t, func() bool {
+		return bytes.Contains([]byte(peerOutput.String()), []byte("event=eez.node.sync.seeded l1Block="+strconv.FormatUint(f.Number, 10)))
+	}, 2*time.Minute, 250*time.Millisecond, "seeded at F")
+	require.NotContains(t, peerOutput.String(), "deriving from the registry deploy block")
+	require.NoFileExists(t, filepath.Join(peerDir, "eez", "eez-reconcile-checkpoint"))
 
 	c.Post(derivertest.Posting{Batch: tampered(c)})
 	select {

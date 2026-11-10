@@ -148,13 +148,14 @@ func allInOneConfigs(l1Node *nodecfg.Config, l1Eth *ethconfig.Config, cfg *eez.C
 }
 
 // startStandalone registers on n, the node of an EEZ chain, its follower,
-// which reads the L1 node of cfg.
-func startStandalone(ctx context.Context, n *node.ErigonNode, cfg *eez.Config, api *eezrpc.API, dirs datadir.Dirs, logger log.Logger) (*follower.Service, error) {
+// which reads the L1 node of cfg and syncs from L2 peers loopBlockLimit
+// blocks at a time.
+func startStandalone(ctx context.Context, n *node.ErigonNode, cfg *eez.Config, api *eezrpc.API, dirs datadir.Dirs, loopBlockLimit uint, logger log.Logger) (*follower.Service, error) {
 	reader, err := dialL1(ctx, cfg, dirs, logger)
 	if err != nil {
 		return nil, err
 	}
-	return startFollower(ctx, n, n, reader, cfg, api, dirs, eez.Dir(dirs), logger)
+	return startFollower(ctx, n, n, reader, cfg, api, dirs, eez.Dir(dirs), loopBlockLimit, logger)
 }
 
 // allInOneTracer returns the EEZ chain's own instance of the --vmtrace tracer
@@ -180,7 +181,7 @@ func startAllInOne(ctx context.Context, l1Node *node.ErigonNode, l1Dirs datadir.
 	var svc *follower.Service
 	reader, err := localL1(ctx, l1Node.Backend(), l1Dirs, logger)
 	if err == nil {
-		svc, err = startFollower(ctx, l2Node, l1Node, reader, cfg, api, nodeCfg.Dirs, nodeCfg.Dirs.DataDir, logger)
+		svc, err = startFollower(ctx, l2Node, l1Node, reader, cfg, api, nodeCfg.Dirs, nodeCfg.Dirs.DataDir, ethCfg.Sync.LoopBlockLimit, logger)
 	}
 	if err != nil {
 		l2Node.Close()
@@ -215,10 +216,14 @@ func dialL1(ctx context.Context, cfg *eez.Config, dirs datadir.Dirs, logger log.
 // startFollower registers on n the follower of its EEZ chain, reading L1
 // from reader and keeping its stores in dir. When it halts on its own it
 // closes stop, the node whose exit ends the process.
-func startFollower(ctx context.Context, n *node.ErigonNode, stop interface{ Close() }, reader l1.ChainReader, cfg *eez.Config, api *eezrpc.API, dirs datadir.Dirs, dir string, logger log.Logger) (*follower.Service, error) {
+func startFollower(ctx context.Context, n *node.ErigonNode, stop interface{ Close() }, reader l1.ChainReader, cfg *eez.Config, api *eezrpc.API, dirs datadir.Dirs, dir string, loopBlockLimit uint, logger log.Logger) (*follower.Service, error) {
 	backend := n.Backend()
 	chainConfig := backend.ChainConfig()
 	if err := cfg.L2.Check(chainConfig); err != nil {
+		return nil, err
+	}
+	l1Only, err := cfg.L1Only(chainConfig)
+	if err != nil {
 		return nil, err
 	}
 	db, ok := backend.ChainDB().(kv.TemporalRwDB)
@@ -245,6 +250,10 @@ func startFollower(ctx context.Context, n *node.ErigonNode, stop interface{ Clos
 			return nil, err
 		}
 	}
+	if !l1Only {
+		fc.Peers = follower.NewFetcher(backend.BackwardBlockDownloader(), backend, chain, logger)
+		fc.LoopBlockLimit = uint64(loopBlockLimit)
+	}
 	f, err := follower.New(reader, chain, chainConfig, fc, logger)
 	if err != nil {
 		return nil, err
@@ -259,6 +268,6 @@ func startFollower(ctx context.Context, n *node.ErigonNode, stop interface{ Clos
 	if cfg.AllInOne() {
 		l1Source = "in-process"
 	}
-	logger.Info("[eez] follower mode", "chaindata", dirs.Chaindata, "l1", l1Source)
+	logger.Info("[eez] follower mode", "chaindata", dirs.Chaindata, "l1", l1Source, "l1Only", l1Only)
 	return svc, nil
 }

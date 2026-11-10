@@ -44,7 +44,7 @@ start_erigon() {
 	"$ERIGON" --eez.enabled --datadir "$DATADIR" \
 		--eez.l1.rpc "$EEZ_DEVNET_L1_RPC" --eez.l1.poll=1s --eez.sequencer.rpc "$EEZ_DEVNET_L2_RPC" \
 		--http.api=eth,debug,eez --http.port 18545 --authrpc.port 18551 --private.api.addr 127.0.0.1:19090 \
-		--port 30399 --nodiscover --torrent.port 42099 --log.console.verbosity=info >> "$OUT/erigon.log" 2>&1 &
+		--port 30399 --nodiscover --eez.sync.l1only=true --torrent.port 42099 --log.console.verbosity=info >> "$OUT/erigon.log" 2>&1 &
 	ERIGON_PID=$!
 	for _ in $(seq 120); do
 		rpc "$ERIGON_RPC" eez_followerStatus '[]' 2>/dev/null | jq -e '.result.safe' > /dev/null && return
