@@ -482,6 +482,18 @@ func TestConvertedSinkEmitSendsFullBatch(t *testing.T) {
 	require.Len(t, sink.res.ents, 1)
 }
 
+func TestConvertResolveLegacyHistoryConflicts(t *testing.T) {
+	for _, kind := range []v3.LegacyKind{v3.LegacyDirect, v3.LegacySynthesized} {
+		t.Run(fmt.Sprint(kind), func(t *testing.T) {
+			_, err := resolveLegacyHistory(v3.StorageNodeKey([32]byte{}, nil, nil), []v3.LegacyEntry{
+				{Kind: kind, Value: []byte{1}},
+				{Kind: kind, Value: []byte{2}},
+			})
+			require.ErrorIs(t, err, v3.ErrLegacyConflict)
+		})
+	}
+}
+
 func TestHistoryConvertTxNumLookups(t *testing.T) {
 	const txs, stepSize, keys = 160, 16, 31
 	db, ii, _ := filledInvIndexOfSize(t, txs, stepSize, keys, log.New())

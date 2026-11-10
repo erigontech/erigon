@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/internal/commitmenttest"
 	"github.com/erigontech/erigon/internal/commitmenttest/runner"
@@ -545,6 +546,90 @@ func seedLegacyWorld(t *testing.T, rng *rand.Rand) (*legacyWorld, []legacyAccoun
 }
 
 func TestConversion(t *testing.T) {
+	t.Run("rejects_invalid_branches", func(t *testing.T) {
+		owner := common.Address{19: 1}
+		other := common.Address{19: 2}
+		slot := common.Hash{31: 1}
+		ownerHash := keccak.Sum256(owner[:])
+		slotHash := keccak.Sum256(slot[:])
+		accountNib := int(ownerHash[0] >> 4)
+		slotNib := int(slotHash[0] >> 4)
+		storageKey := commitmenttest.SlotKey(other[:], slot[:])
+		hash := bytes.Repeat([]byte{1}, 32)
+		for _, tc := range []struct {
+			name   string
+			prefix []byte
+			cells  map[int]commitment.BranchCell
+		}{
+			{"storage_owner_mismatch", unpackPath(ownerHash[:], 64, nil), map[int]commitment.BranchCell{
+				slotNib:            {StorageAddr: storageKey},
+				(slotNib + 1) % 16: {Hash: hash},
+			}},
+			{"child_beyond_hash", bytes.Repeat([]byte{1}, 62), map[int]commitment.BranchCell{
+				0: {Hash: hash, Extension: []byte{1}},
+				1: {Hash: hash},
+			}},
+			{"single_child", []byte{1}, map[int]commitment.BranchCell{0: {Hash: hash}}},
+			{"account_storage_owner_mismatch", nil, map[int]commitment.BranchCell{
+				accountNib:            {AccountAddr: owner[:], StorageAddr: storageKey},
+				(accountNib + 1) % 16: {Hash: hash},
+			}},
+			{"leaf_outside_prefix", []byte{ownerHash[0]>>4 ^ 1}, map[int]commitment.BranchCell{
+				int(ownerHash[0] & 15):          {AccountAddr: owner[:]},
+				(int(ownerHash[0]&15) + 1) % 16: {Hash: hash},
+			}},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				memory := runner.NewMemory(runner.ContextSpec{})
+				memory.Apply([]commitmenttest.Op{
+					commitmenttest.AccountAt(owner[:], commitmenttest.AccountSpec{Nonce: 1, Balance: 1, CodeHash: empty.CodeHash}),
+					{Key: storageKey, Storage: []byte{1}},
+				})
+				data := make([]byte, 4)
+				var mask uint16
+				for nib := range 16 {
+					cell, ok := tc.cells[nib]
+					if !ok {
+						continue
+					}
+					mask |= 1 << nib
+					fields := [][]byte{cell.Extension, cell.AccountAddr, cell.StorageAddr, cell.Hash}
+					var flags byte
+					for i, field := range fields {
+						if len(field) != 0 {
+							flags |= 1 << i
+						}
+					}
+					data = append(data, flags)
+					for _, field := range fields {
+						if len(field) != 0 {
+							data = append(binary.AppendUvarint(data, uint64(len(field))), field...)
+						}
+					}
+				}
+				binary.BigEndian.PutUint16(data, mask)
+				binary.BigEndian.PutUint16(data[2:], mask)
+				converter := NewLegacyConverter(legacyValues{memory}, false, false)
+				err := converter.Convert(nibbles.HexToCompact(tc.prefix), data, nil, func(_, _ []byte, _ LegacyKind) error { return nil })
+				require.ErrorIs(t, err, errLegacyBranch)
+			})
+		}
+	})
+	t.Run("rejects_conflicting_records", func(t *testing.T) {
+		for _, tc := range []struct {
+			name    string
+			entries []LegacyEntry
+		}{
+			{"direct", []LegacyEntry{{Kind: LegacyDirect, Value: []byte{1}}, {Kind: LegacyDirect, Value: []byte{2}}}},
+			{"synthesized", []LegacyEntry{{Kind: LegacySynthesized, Value: []byte{1}}, {Kind: LegacySynthesized, Value: []byte{2}}}},
+			{"kept_tombstone", []LegacyEntry{{Kind: LegacyDirect}, {Kind: LegacyKeep}}},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				_, _, err := ResolveLegacy(StorageNodeKey([32]byte{}, nil, nil), tc.entries)
+				require.ErrorIs(t, err, ErrLegacyConflict)
+			})
+		}
+	})
 	t.Run("trie_matches_hex_patricia_root", func(t *testing.T) {
 		w, accounts, root := seedLegacyWorld(t, rand.New(rand.NewSource(7)))
 		records := map[string][]byte{}

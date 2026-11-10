@@ -322,6 +322,42 @@ var commonWitnessShapes = []witnessShape{
 	{name: "storage-inner-extension", accounts: 1, slots: 5, slotPrefixes: [][]byte{{0x3, 0xa, 0x1}, {0x3, 0xa, 0x1}, {0xc}}},
 }
 
+func TestWitnessRejectsCorruptRecords(t *testing.T) {
+	for _, corruption := range []string{"missing_root", "stale_root", "stale_child"} {
+		t.Run(corruption, func(t *testing.T) {
+			child := newNode(planeAccount, 1)
+			child.setStoredChild(2, bytes.Repeat([]byte{2}, 32), nil)
+			child.setStoredChild(3, bytes.Repeat([]byte{3}, 32), nil)
+			childHash, err := fold(child, 1)
+			require.NoError(t, err)
+			root := newNode(planeAccount)
+			root.setStoredChild(1, childHash[:], nil)
+			root.setStoredChild(8, bytes.Repeat([]byte{8}, 32), nil)
+			rootHash, err := fold(root, 0)
+			require.NoError(t, err)
+			ctx := newMockContext()
+			ctx.branches[string(AccountNodeKey(nil, nil))] = encodeRecord(root, 0, nil)
+			ctx.branches[string(AccountNodeKey(child.path, nil))] = encodeRecord(child, 1, nil)
+			switch corruption {
+			case "missing_root":
+				delete(ctx.branches, string(AccountNodeKey(nil, nil)))
+			case "stale_root":
+				root.setStoredChild(8, bytes.Repeat([]byte{9}, 32), nil)
+				ctx.branches[string(AccountNodeKey(nil, nil))] = encodeRecord(root, 0, nil)
+			case "stale_child":
+				child.setStoredChild(3, bytes.Repeat([]byte{4}, 32), nil)
+				ctx.branches[string(AccountNodeKey(child.path, nil))] = encodeRecord(child, 1, nil)
+			}
+			tr := &Trie{ctx: ctx, root: rootHash[:]}
+			u := commitment.NewUpdates(commitment.ModeCollect, t.TempDir(), commitment.KeyToHexNibbleHash)
+			defer u.Close()
+			u.TouchHashedKey([]byte{1, 4})
+			_, _, _, err = tr.WitnessesByHash(t.Context(), u, false)
+			require.ErrorIs(t, err, errWitnessHash)
+		})
+	}
+}
+
 func TestWitnessMatchesHPH(t *testing.T) {
 	shapes := slices.Concat(commonWitnessShapes, []witnessShape{
 		{name: "shared-storage-extension", accounts: 3, slots: 5, slotPrefixes: [][]byte{{0x3, 0xa, 0x1}, {0x3, 0xa, 0x1}, {0xc}}, sharedSlots: true},
