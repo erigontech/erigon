@@ -1880,9 +1880,7 @@ func TestPostForkchoiceSameRootAfterOtherWriterCachesAttestationData(t *testing.
 
 func TestPostForkchoiceSameRootSkipsWarmUpWhenAttestationDataCached(t *testing.T) {
 	f := newSameRootFixture(t, 0, 32)
-	noExpiryCfg := *f.cfg.beaconCfg
-	noExpiryCfg.SecondsPerSlot = 0 // a zero cache ttl disables expiry, so the result does not depend on the wall clock
-	producer := &countingAttestationDataProducer{AttestationDataProducer: attestation_producer.New(&noExpiryCfg)}
+	producer := &countingAttestationDataProducer{AttestationDataProducer: attestation_producer.New(f.cfg.beaconCfg)}
 	f.cfg.attestationDataProducer = producer
 	require.NoError(t, f.syncedData.OnHeadStateWithBlockRoot(f.headState, f.headRoot))
 
