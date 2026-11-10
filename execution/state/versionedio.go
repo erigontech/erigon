@@ -2477,48 +2477,8 @@ func (ws *WriteSet) hasHeader(h WriteHeader) bool {
 	return false
 }
 
-// copyFrom merges src into s, value-copying each VersionedWrite so the result
-// shares no *VersionedWrite with src — the in-place recordWrite mutators would
-// otherwise make either side observe the other's later edits.
-func (ws *WriteSet) copyFrom(src *WriteSet) {
-	if src == nil {
-		return
-	}
-	for a, vw := range src.address {
-		ws.SetAddress(a, cloneVW(vw))
-	}
-	for a, vw := range src.balance {
-		ws.SetBalance(a, cloneVW(vw))
-	}
-	for a, vw := range src.nonce {
-		ws.SetNonce(a, cloneVW(vw))
-	}
-	for a, vw := range src.incarnation {
-		ws.SetIncarnation(a, cloneVW(vw))
-	}
-	for a, vw := range src.selfDestruct {
-		ws.SetSelfDestruct(a, cloneVW(vw))
-	}
-	for a, vw := range src.createContract {
-		ws.SetCreateContract(a, cloneVW(vw))
-	}
-	for a, vw := range src.code {
-		ws.SetCode(a, cloneVW(vw))
-	}
-	for a, vw := range src.codeHash {
-		ws.SetCodeHash(a, cloneVW(vw))
-	}
-	for a, vw := range src.codeSize {
-		ws.SetCodeSize(a, cloneVW(vw))
-	}
-	for a, inner := range src.storage {
-		for key, vw := range inner {
-			ws.SetStorage(a, key, cloneVW(vw))
-		}
-	}
-}
-
-// Merge returns the union of prev and next, with next winning on (addr,path,key).
+// Merge returns the union of ws and next, with next winning on (addr,path,key). Paths next
+// does not write share ws's maps and writes, so neither set may be changed in place afterwards.
 func (ws *WriteSet) Merge(next *WriteSet) *WriteSet {
 	ws.assertNotArena("merge")
 	next.assertNotArena("merge")
@@ -2528,9 +2488,41 @@ func (ws *WriteSet) Merge(next *WriteSet) *WriteSet {
 	if next.IsEmpty() {
 		return ws
 	}
-	out := &WriteSet{}
-	out.copyFrom(ws)
-	out.copyFrom(next)
+	return &WriteSet{
+		address:        mergedWrites(ws.address, next.address),
+		balance:        mergedWrites(ws.balance, next.balance),
+		nonce:          mergedWrites(ws.nonce, next.nonce),
+		incarnation:    mergedWrites(ws.incarnation, next.incarnation),
+		selfDestruct:   mergedWrites(ws.selfDestruct, next.selfDestruct),
+		createContract: mergedWrites(ws.createContract, next.createContract),
+		code:           mergedWrites(ws.code, next.code),
+		codeHash:       mergedWrites(ws.codeHash, next.codeHash),
+		codeSize:       mergedWrites(ws.codeSize, next.codeSize),
+		storage:        mergedStorage(ws.storage, next.storage),
+	}
+}
+
+func mergedWrites[K comparable, V any](prev, next map[K]*VersionedWrite[V]) map[K]*VersionedWrite[V] {
+	if len(next) == 0 {
+		return prev
+	}
+	out := make(map[K]*VersionedWrite[V], len(prev)+len(next))
+	maps.Copy(out, prev)
+	for k, vw := range next {
+		out[k] = cloneVW(vw)
+	}
+	return out
+}
+
+func mergedStorage(prev, next map[accounts.Address]map[accounts.StorageKey]*VersionedWrite[uint256.Int]) map[accounts.Address]map[accounts.StorageKey]*VersionedWrite[uint256.Int] {
+	if len(next) == 0 {
+		return prev
+	}
+	out := make(map[accounts.Address]map[accounts.StorageKey]*VersionedWrite[uint256.Int], len(prev)+len(next))
+	maps.Copy(out, prev)
+	for a, inner := range next {
+		out[a] = mergedWrites(prev[a], inner)
+	}
 	return out
 }
 
