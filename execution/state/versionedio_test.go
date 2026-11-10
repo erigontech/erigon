@@ -2180,3 +2180,28 @@ func TestAccountStateBalanceTrackingDoesNotAllocate(t *testing.T) {
 	})
 	require.Zero(t, allocs, "allocations per run for %d accounts", len(states))
 }
+
+func TestWriteSetMergeFromExtendsTheSetInPlace(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
+	balance := func(v uint64) *VersionedWrite[uint256.Int] {
+		return &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath}, Val: *uint256.NewInt(v)}
+	}
+	nonce := &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: NoncePath}, Val: 7}
+
+	ws := &WriteSet{}
+	ws.SetBalance(addr, balance(1))
+	ws.SetNonce(addr, nonce)
+	next := &WriteSet{}
+	nextBalance := balance(2)
+	next.SetBalance(addr, nextBalance)
+
+	ws.MergeFrom(next)
+
+	got, ok := ws.GetBalance(addr)
+	require.True(t, ok)
+	require.Equal(t, *uint256.NewInt(2), got.Val, "next wins on the same path")
+	gotNonce, ok := ws.GetNonce(addr)
+	require.True(t, ok)
+	require.Equal(t, uint64(7), gotNonce.Val)
+	require.NotSame(t, nextBalance, got, "the merged cell must not alias next")
+}

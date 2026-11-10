@@ -2509,6 +2509,13 @@ func (ws *WriteSet) copyFrom(src *WriteSet) {
 	}
 }
 
+// MergeFrom merges next into ws in place, with next winning on (addr,path,key).
+func (ws *WriteSet) MergeFrom(next *WriteSet) {
+	ws.assertNotArena("merge")
+	next.assertNotArena("merge")
+	ws.copyFrom(next)
+}
+
 // Merge returns the union of prev and next, with next winning on (addr,path,key).
 func (ws *WriteSet) Merge(next *WriteSet) *WriteSet {
 	ws.assertNotArena("merge")
