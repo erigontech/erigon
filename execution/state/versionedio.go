@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"unsafe"
 
 	g "github.com/anacrolix/generics"
 	"github.com/heimdalr/dag"
@@ -2750,12 +2751,46 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 // BlockAccessListBuilder assembles the block access list one tx index at a time,
 // so a block's list can be built while its txs are published.
 type BlockAccessListBuilder struct {
-	ac   map[accounts.Address]*accountState
+	ac   []map[accounts.Address]*accountState // one map per shard, so a large tx can fold its shards in parallel
 	next int
 }
 
 func NewBlockAccessListBuilder() *BlockAccessListBuilder {
-	return &BlockAccessListBuilder{ac: make(map[accounts.Address]*accountState), next: -1}
+	return newBALBuilder(runtime.GOMAXPROCS(0))
+}
+
+func newBALBuilder(shards int) *BlockAccessListBuilder {
+	ac := make([]map[accounts.Address]*accountState, shards)
+	for i := range ac {
+		ac[i] = make(map[accounts.Address]*accountState)
+	}
+	return &BlockAccessListBuilder{ac: ac, next: -1}
+}
+
+func (b *BlockAccessListBuilder) shardOf(addr accounts.Address) int {
+	return int((uint64(addrHandleBits(addr)) * 0x9E3779B97F4A7C15 >> 32) % uint64(len(b.ac)))
+}
+
+// addrHandleBits is the interned pointer of addr: hashing it needs no read of the address bytes.
+func addrHandleBits(addr accounts.Address) uintptr {
+	return *(*uintptr)(unsafe.Pointer(&addr))
+}
+
+func (b *BlockAccessListBuilder) account(addr accounts.Address) *accountState {
+	return ensureAccountState(b.ac[b.shardOf(addr)], addr)
+}
+
+// skip reports whether addr belongs to another worker; a shard belongs to exactly one, so its map needs no lock.
+func (b *BlockAccessListBuilder) skip(addr accounts.Address, worker, workers int) bool {
+	return addr.IsNil() || (workers > 1 && b.shardOf(addr)%workers != worker)
+}
+
+func (b *BlockAccessListBuilder) accountCount() int {
+	n := 0
+	for _, shard := range b.ac {
+		n += len(shard)
+	}
+	return n
 }
 
 // Next is the tx index Add expects; indexes start at -1, the pre-block system calls.
@@ -2774,27 +2809,43 @@ func (b *BlockAccessListBuilder) Add(txIndex int, rs ReadSet, writes *WriteSet) 
 		panic(fmt.Sprintf("block access list: added tx %d, expected %d", txIndex, b.next))
 	}
 	b.next++
-	ac := b.ac
+	b.foldWorkers(rs, writes, min(len(b.ac), (rs.Len()+len(rs.access)+writes.Count())/addsPerWorker))
+}
+
+func (b *BlockAccessListBuilder) foldWorkers(rs ReadSet, writes *WriteSet, workers int) {
+	if workers < 2 {
+		b.fold(rs, writes, 0, 1)
+		return
+	}
+	var wg sync.WaitGroup
+	for worker := range workers {
+		wg.Go(func() { b.fold(rs, writes, worker, workers) })
+	}
+	wg.Wait()
+}
+
+// fold records rs and writes for the addresses of one worker's shards.
+func (b *BlockAccessListBuilder) fold(rs ReadSet, writes *WriteSet, worker, workers int) {
 	// EIP-7928 requires every accessed address to appear in the BAL, so each per-path read map must register its address.
 	for addr, tr := range rs.balance {
-		if addr.IsNil() || tr.internal {
+		if b.skip(addr, worker, workers) || tr.internal {
 			continue
 		}
-		ensureAccountState(ac, addr).updateReadBalance(tr.Val)
+		b.account(addr).updateReadBalance(tr.Val)
 	}
 	for addr, inner := range rs.storage {
-		if addr.IsNil() {
+		if b.skip(addr, worker, workers) {
 			continue
 		}
 		for key, tr := range inner {
 			if tr.internal {
 				continue
 			}
-			ensureAccountState(ac, addr).updateReadStorage(key, tr.Val)
+			b.account(addr).updateReadStorage(key, tr.Val)
 		}
 	}
 	for addr, tr := range rs.address {
-		if addr.IsNil() || tr.internal {
+		if b.skip(addr, worker, workers) || tr.internal {
 			continue
 		}
 		// Skip validation-only reads for non-existent accounts.
@@ -2804,43 +2855,43 @@ func (b *BlockAccessListBuilder) Add(txIndex int, rs ReadSet, writes *WriteSet) 
 		if tr.Val == nil || tr.Val.IsNil() {
 			continue
 		}
-		ensureAccountState(ac, addr)
+		b.account(addr)
 	}
 	for addr, tr := range rs.nonce {
-		if addr.IsNil() || tr.internal {
+		if b.skip(addr, worker, workers) || tr.internal {
 			continue
 		}
-		ensureAccountState(ac, addr)
+		b.account(addr)
 	}
 	for addr, tr := range rs.incarnation {
-		if addr.IsNil() || tr.internal {
+		if b.skip(addr, worker, workers) || tr.internal {
 			continue
 		}
-		ensureAccountState(ac, addr)
+		b.account(addr)
 	}
 	for addr, tr := range rs.selfDestruct {
-		if addr.IsNil() || tr.internal {
+		if b.skip(addr, worker, workers) || tr.internal {
 			continue
 		}
-		ensureAccountState(ac, addr)
+		b.account(addr)
 	}
 	for addr, tr := range rs.createContract {
-		if addr.IsNil() || tr.internal {
+		if b.skip(addr, worker, workers) || tr.internal {
 			continue
 		}
-		ensureAccountState(ac, addr)
+		b.account(addr)
 	}
 	for addr, tr := range rs.code {
-		if addr.IsNil() || tr.internal {
+		if b.skip(addr, worker, workers) || tr.internal {
 			continue
 		}
-		ensureAccountState(ac, addr)
+		b.account(addr)
 	}
 	for addr, tr := range rs.codeHash {
-		if addr.IsNil() || tr.internal {
+		if b.skip(addr, worker, workers) || tr.internal {
 			continue
 		}
-		account := ensureAccountState(ac, addr)
+		account := b.account(addr)
 		// A pre-block-empty code hash marks the baseline empty so applyToCode
 		// drops a net-zero same-tx set-then-clear. Only an empty read seen
 		// before any code change is the pre-block value.
@@ -2849,60 +2900,60 @@ func (b *BlockAccessListBuilder) Add(txIndex int, rs ReadSet, writes *WriteSet) 
 		}
 	}
 	for addr, tr := range rs.codeSize {
-		if addr.IsNil() || tr.internal {
+		if b.skip(addr, worker, workers) || tr.internal {
 			continue
 		}
-		ensureAccountState(ac, addr)
+		b.account(addr)
 	}
 
 	if writes != nil {
 		// Self-destruct is applied before the balance writes so the EIP-7928
 		// burn (zeroing a non-zero balance written by the destroying tx) fires.
 		for addr, w := range writes.SelfDestructs() {
-			if addr.IsNil() || !w.Val {
+			if b.skip(addr, worker, workers) || !w.Val {
 				continue
 			}
-			ensureAccountState(ac, addr)
+			b.account(addr)
 		}
 		for addr, w := range writes.Balances() {
-			if addr.IsNil() {
+			if b.skip(addr, worker, workers) {
 				continue
 			}
-			ensureAccountState(ac, addr).applyWriteBalance(w.Val, w.Version.blockAccessIndex())
+			b.account(addr).applyWriteBalance(w.Val, w.Version.blockAccessIndex())
 		}
 		for addr, w := range writes.Nonces() {
-			if addr.IsNil() {
+			if b.skip(addr, worker, workers) {
 				continue
 			}
-			ensureAccountState(ac, addr).applyWriteNonce(w.Val, w.Version.blockAccessIndex())
+			b.account(addr).applyWriteNonce(w.Val, w.Version.blockAccessIndex())
 		}
 		for addr, w := range writes.Codes() {
-			if addr.IsNil() {
+			if b.skip(addr, worker, workers) {
 				continue
 			}
-			ensureAccountState(ac, addr).applyWriteCode(w.Val, w.Version.blockAccessIndex())
+			b.account(addr).applyWriteCode(w.Val, w.Version.blockAccessIndex())
 		}
 		for addr, byKey := range writes.Storages() {
-			if addr.IsNil() {
+			if b.skip(addr, worker, workers) {
 				continue
 			}
-			account := ensureAccountState(ac, addr)
+			account := b.account(addr)
 			for key, w := range byKey {
 				account.applyWriteStorage(key, w.Val, w.Version.blockAccessIndex())
 			}
 		}
 		// EIP-7928 requires every touched address to appear; these paths carry
 		// no value the loops above record.
-		registerAddrs(ac, writes.address)
-		registerAddrs(ac, writes.incarnation)
-		registerAddrs(ac, writes.selfDestruct)
-		registerAddrs(ac, writes.codeHash)
-		registerAddrs(ac, writes.codeSize)
+		registerAddrs(b, worker, workers, writes.address)
+		registerAddrs(b, worker, workers, writes.incarnation)
+		registerAddrs(b, worker, workers, writes.selfDestruct)
+		registerAddrs(b, worker, workers, writes.codeHash)
+		registerAddrs(b, worker, workers, writes.codeSize)
 		for addr, w := range writes.createContract {
-			if addr.IsNil() {
+			if b.skip(addr, worker, workers) {
 				continue
 			}
-			account := ensureAccountState(ac, addr)
+			account := b.account(addr)
 			// A contract created this block has empty pre-block code; applyToCode
 			// uses this to drop a net-zero empty code change.
 			if w.Val {
@@ -2912,10 +2963,10 @@ func (b *BlockAccessListBuilder) Add(txIndex int, rs ReadSet, writes *WriteSet) 
 	}
 
 	for addr := range rs.access {
-		if addr.IsNil() {
+		if b.skip(addr, worker, workers) {
 			continue
 		}
-		ensureAccountState(ac, addr)
+		b.account(addr)
 	}
 }
 
@@ -2928,10 +2979,12 @@ func (b *BlockAccessListBuilder) Build() types.BlockAccessList {
 		lo      uint32
 		account *accountState
 	}
-	keys := make([]sortKey, 0, len(b.ac))
-	for _, account := range b.ac {
-		a := &account.changes.Address
-		keys = append(keys, sortKey{binary.BigEndian.Uint64(a[:8]), binary.BigEndian.Uint64(a[8:16]), binary.BigEndian.Uint32(a[16:]), account})
+	keys := make([]sortKey, 0, b.accountCount())
+	for _, shard := range b.ac {
+		for _, account := range shard {
+			a := &account.changes.Address
+			keys = append(keys, sortKey{binary.BigEndian.Uint64(a[:8]), binary.BigEndian.Uint64(a[8:16]), binary.BigEndian.Uint32(a[16:]), account})
+		}
 	}
 	slices.SortFunc(keys, func(a, b sortKey) int {
 		if c := cmp.Compare(a.hi, b.hi); c != 0 {
@@ -2953,8 +3006,11 @@ func (b *BlockAccessListBuilder) Build() types.BlockAccessList {
 
 const matchesPerWorker = 4096
 
+// addsPerWorker is the smallest slice of a tx where a worker of the fold saves more than it costs.
+const addsPerWorker = 512
+
 func (b *BlockAccessListBuilder) Matches(bal types.BlockAccessList) bool {
-	if len(bal) != len(b.ac) {
+	if len(bal) != b.accountCount() {
 		return false
 	}
 	for i := 1; i < len(bal); i++ {
@@ -2964,7 +3020,8 @@ func (b *BlockAccessListBuilder) Matches(bal types.BlockAccessList) bool {
 	}
 	match := func(from, to int) bool {
 		for i := from; i < to; i++ {
-			account, ok := b.ac[accounts.InternAddress(bal[i].Address)]
+			addr := accounts.InternAddress(bal[i].Address)
+			account, ok := b.ac[b.shardOf(addr)][addr]
 			if !ok {
 				return false
 			}
@@ -3108,10 +3165,10 @@ func (ct *changeTracker[T]) apply(applyFn func(uint32, T)) {
 	}
 }
 
-func registerAddrs[V any](ac map[accounts.Address]*accountState, writes map[accounts.Address]V) {
+func registerAddrs[V any](b *BlockAccessListBuilder, worker, workers int, writes map[accounts.Address]V) {
 	for addr := range writes {
-		if !addr.IsNil() {
-			ensureAccountState(ac, addr)
+		if !b.skip(addr, worker, workers) {
+			b.account(addr)
 		}
 	}
 }

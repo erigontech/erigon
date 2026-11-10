@@ -32,16 +32,16 @@ func matchTestBuilder() *BlockAccessListBuilder {
 	addr := func(n byte) accounts.Address { return accounts.InternAddress(common.Address{19: n}) }
 	key := func(n int) accounts.StorageKey { return accounts.InternKey(common.Hash{30: byte(n >> 8), 31: byte(n)}) }
 
-	ensureAccountState(b.ac, addr(1)).updateReadBalance(*uint256.NewInt(7))
+	b.account(addr(1)).updateReadBalance(*uint256.NewInt(7))
 
-	writer := ensureAccountState(b.ac, addr(2))
+	writer := b.account(addr(2))
 	writer.updateReadBalance(*uint256.NewInt(100))
 	writer.applyWriteBalance(*uint256.NewInt(90), 1)
 	writer.applyWriteBalance(*uint256.NewInt(80), 3)
 	writer.applyWriteNonce(5, 1)
 	writer.applyWriteCode(accounts.Code{Bytes: []byte{0x60, 0x00}}, 2)
 
-	slots := ensureAccountState(b.ac, addr(3))
+	slots := b.account(addr(3))
 	slots.updateReadStorage(key(3), *uint256.NewInt(1))
 	slots.updateReadStorage(key(1), *uint256.NewInt(1))
 	slots.updateReadStorage(key(3), *uint256.NewInt(1))
@@ -50,7 +50,7 @@ func matchTestBuilder() *BlockAccessListBuilder {
 	slots.applyWriteStorage(key(4), *uint256.NewInt(8), 1)
 	slots.applyWriteStorage(key(4), *uint256.NewInt(6), 2)
 
-	bulk := ensureAccountState(b.ac, addr(4))
+	bulk := b.account(addr(4))
 	for i := 40; i > 0; i-- {
 		bulk.updateReadStorage(key(1000+i), *uint256.NewInt(1))
 		bulk.applyWriteStorage(key(i), *uint256.NewInt(uint64(i)), uint32(i%3+1))
@@ -138,7 +138,7 @@ func TestBlockAccessListBuilderMatchesAcrossWorkers(t *testing.T) {
 	build := func() *BlockAccessListBuilder {
 		b := NewBlockAccessListBuilder()
 		for i, a := range addrs {
-			account := ensureAccountState(b.ac, a)
+			account := b.account(a)
 			account.updateReadBalance(*uint256.NewInt(uint64(i)))
 			if i%7 == 0 {
 				account.applyWriteBalance(*uint256.NewInt(uint64(i) + 1), uint32(i%5+1))
