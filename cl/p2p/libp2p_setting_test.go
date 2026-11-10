@@ -148,7 +148,9 @@ func TestPubsubFrameLimitFollowsMaxGossipMessageSize(t *testing.T) {
 
 func TestGossipSubscriptionFilter(t *testing.T) {
 	t.Parallel()
-	filter := gossipSubscriptionFilter([]string{"4a26c58b"})
+	networkConfig, beaconConfig, _, err := clparams.GetConfigsByNetworkName("mainnet")
+	require.NoError(t, err)
+	filter := gossipSubscriptionFilter([]string{"4a26c58b"}, gossipTopicNames(networkConfig, beaconConfig))
 	require.True(t, filter.CanSubscribe("/eth2/4a26c58b/beacon_block/ssz_snappy"))
 	require.True(t, filter.CanSubscribe("/eth2/4a26c58b/data_column_sidecar_127/ssz_snappy"))
 	require.True(t, filter.CanSubscribe("/eth2/4a26c58b/beacon_attestation_63/ssz_snappy"))
@@ -156,6 +158,8 @@ func TestGossipSubscriptionFilter(t *testing.T) {
 	require.True(t, filter.CanSubscribe("/eth2/4a26c58b/proposer_preferences/ssz_snappy"))
 	require.False(t, filter.CanSubscribe("/eth2/deadbeef/beacon_block/ssz_snappy"), "a digest outside the schedule")
 	require.False(t, filter.CanSubscribe("/eth2/4a26c58b/made_up_topic/ssz_snappy"), "a name that is not a gossip topic")
+	require.False(t, filter.CanSubscribe("/eth2/4a26c58b/beacon_attestation_64/ssz_snappy"), "a subnet past the count")
+	require.False(t, filter.CanSubscribe("/eth2/4a26c58b/beacon_attestation_007/ssz_snappy"), "a zero-padded subnet")
 	require.False(t, filter.CanSubscribe("/eth2/4a26c58b/beacon_block/ssz"))
 	require.False(t, filter.CanSubscribe("/junk/topic"))
 
@@ -164,7 +168,7 @@ func TestGossipSubscriptionFilter(t *testing.T) {
 	for i := range subs {
 		subs[i] = &pb.RPC_SubOpts{Subscribe: &subscribe, Topicid: &topic}
 	}
-	_, err := filter.FilterIncomingSubscriptions(peer.ID("p"), subs)
+	_, err = filter.FilterIncomingSubscriptions(peer.ID("p"), subs)
 	require.ErrorIs(t, err, pubsub.ErrTooManySubscriptions)
 }
 
