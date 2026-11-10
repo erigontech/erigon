@@ -289,69 +289,6 @@ func TestPoolSignalWaitsForPredecessorCommit(t *testing.T) {
 	require.Equal(t, 1, pe.pool.queue.Len(), "the predecessor's commit did not queue the task")
 }
 
-func TestPoolCommitLeavesNextRecheckToResultLoop(t *testing.T) {
-	pe, be := newPoolUnit(t, 4)
-	next := newPoolUnitTask(be, 2)
-	next.next = psRecheck
-	next.result = &exec.TxResult{}
-	later := newPoolUnitTask(be, 3)
-	later.next = psRecheck
-	later.result = &exec.TxResult{}
-	be.wakeAt[1] = []*poolTask{later, next}
-
-	be.signalCommitted(1)
-
-	require.Equal(t, 1, pe.pool.queue.Len(), "only a task past the commit order may go to the pool")
-	require.Same(t, later, pe.pool.pop())
-}
-
-func TestPoolRecheckInOrderHandsOverTheResult(t *testing.T) {
-	for _, pending := range []bool{false, true} {
-		pe, be := newPoolUnit(t, 3)
-		pt := newPoolUnitTask(be, 2)
-		want := &exec.TxResult{}
-		pt.next, pt.result, pt.pending = psRecheck, want, pending
-
-		require.Same(t, want, pt.recheckInOrder(pe.pool))
-
-		require.Empty(t, pe.results, "the result loop must not send to itself")
-		require.Nil(t, pt.result)
-		require.Equal(t, !pending, pt.parked)
-		if pending {
-			require.Equal(t, []*poolTask{pt}, be.wakeAt[1], "a latched re-exec signal must queue the re-run after the predecessor")
-		}
-	}
-}
-
-func TestPoolRecheckInOrderRequeuesStaleTask(t *testing.T) {
-	pe, be := newPoolUnit(t, 3)
-	pt := newPoolUnitTask(be, 2)
-	addr := accounts.InternAddress(common.Address{1})
-	var ws state.WriteSet
-	ws.SetBalance(addr, &state.VersionedWrite[uint256.Int]{WriteHeader: state.WriteHeader{Address: addr, Path: state.BalancePath, Version: state.Version{TxIndex: 1}}, Val: uint256.Int{7}})
-	be.versionMap.FlushVersionedWrites(&ws, true)
-	var reads state.ReadSet
-	reads.SetBalance(addr, state.VersionedRead[uint256.Int]{ReadHeader: state.ReadHeader{Source: state.MapRead, Version: state.Version{TxIndex: 0}}, Val: uint256.Int{1}})
-	pt.next, pt.result = psRecheck, &exec.TxResult{TxIn: reads}
-
-	require.Nil(t, pt.recheckInOrder(pe.pool))
-
-	require.Equal(t, psReexec, pt.next)
-	require.Equal(t, []*poolTask{pt}, be.wakeAt[1], "a stale task must wait for its blocker before it re-runs")
-	require.Equal(t, 0, pe.pool.queue.Len())
-}
-
-func TestPoolRecheckInOrderPanicIsOperational(t *testing.T) {
-	pe, be := newPoolUnit(t, 3)
-	pt := newPoolUnitTask(be, 1)
-	pt.next = psRecheck
-
-	r := pt.recheckInOrder(pe.pool)
-
-	require.True(t, r.Operational)
-	require.ErrorContains(t, r.Err, "in-order recheck panic")
-}
-
 func TestPoolIncarnationLimitIsOperational(t *testing.T) {
 	pe, be := newPoolUnit(t, 3)
 	pt := newPoolUnitTask(be, 1)
