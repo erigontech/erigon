@@ -161,14 +161,15 @@ func TestIsBetterUpdate(t *testing.T) {
 		name          string
 		better, worse rankedUpdate
 	}{
-		{"supermajority", with(func(r *rankedUpdate) { r.participants = supermajority }), with(func(r *rankedUpdate) { r.participants = supermajority - 1; r.attestedSlot = period + 5 })},
+		{"supermajority", with(func(r *rankedUpdate) { r.participants = supermajority; r.finality = false }), with(func(r *rankedUpdate) { r.participants = supermajority - 1 })},
 		{"more participants below supermajority", with(func(r *rankedUpdate) { r.participants = 10; r.finality = false }), with(func(r *rankedUpdate) { r.participants = 9 })},
 		{"relevant sync committee", base, with(func(r *rankedUpdate) { r.syncCommittee = false })},
-		{"sync committee signed in another period", base, with(func(r *rankedUpdate) { r.signatureSlot = 2*period + 1 })},
+		{"sync committee signed in another period", base, with(func(r *rankedUpdate) { r.attestedSlot = period + 5; r.signatureSlot = 2*period + 1 })},
+		{"relevant sync committee before finality", with(func(r *rankedUpdate) { r.finality = false }), with(func(r *rankedUpdate) { r.syncCommittee = false })},
 		{"finality", base, with(func(r *rankedUpdate) { r.finality = false })},
 		{"sync committee finality", base, with(func(r *rankedUpdate) { r.finalizedSlot = period - 1 })},
 		{"more participants above supermajority", base, with(func(r *rankedUpdate) { r.participants = size - 1 })},
-		{"older attested header", base, with(func(r *rankedUpdate) { r.attestedSlot = period + 11; r.signatureSlot = period + 12 })},
+		{"older attested header", with(func(r *rankedUpdate) { r.signatureSlot = period + 13 }), with(func(r *rankedUpdate) { r.attestedSlot = period + 11; r.signatureSlot = period + 12 })},
 		{"earlier signature", base, with(func(r *rankedUpdate) { r.signatureSlot = period + 12 })},
 	}
 	for _, tt := range tests {

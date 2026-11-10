@@ -1012,6 +1012,21 @@ func TestLightClientEventsTakeTheAttestedHeaderFork(t *testing.T) {
 	require.Equal(t, clparams.DenebVersion.String(), optimistic.Version)
 }
 
+// A newer finalized checkpoint settles the fork graph's light client update candidates, once.
+func TestUpdateCheckpointsKeepsFinalizedLightClientUpdates(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	finalizedRoot := common.Hash{0x51}
+	graph := &getFinalizedExecutionHashForkGraph{headers: map[common.Hash]*cltypes.BeaconBlockHeader{finalizedRoot: {}}}
+	store := &ForkChoiceStore{forkGraph: graph, beaconCfg: &cfg, emitters: beaconevents.NewEventEmitter()}
+	store.justifiedCheckpoint.Store(solid.Checkpoint{})
+	store.finalizedCheckpoint.Store(solid.Checkpoint{})
+
+	store.updateCheckpoints(solid.Checkpoint{}, solid.Checkpoint{Epoch: 2, Root: finalizedRoot})
+	store.updateCheckpoints(solid.Checkpoint{}, solid.Checkpoint{Epoch: 2, Root: finalizedRoot})
+
+	require.Equal(t, []common.Hash{finalizedRoot}, graph.keptLightClientRoots)
+}
+
 func TestUpdateCheckpointsPrunesOperationsWithExactFinalizedState(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	finalizedRoot := common.Hash{0x42}
@@ -1895,6 +1910,11 @@ type getFinalizedExecutionHashForkGraph struct {
 	anchorSlot            uint64
 	currentJustified      solid.Checkpoint
 	hasBlockEquivocation  bool
+	keptLightClientRoots  []common.Hash
+}
+
+func (g *getFinalizedExecutionHashForkGraph) KeepFinalizedLightClientUpdates(finalized common.Hash) {
+	g.keptLightClientRoots = append(g.keptLightClientRoots, finalized)
 }
 
 func (g *getFinalizedExecutionHashForkGraph) HasBlockEquivocation(uint64, uint64, common.Hash) bool {

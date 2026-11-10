@@ -30,31 +30,39 @@ import (
 	"github.com/erigontech/erigon/common"
 )
 
-// A period serves its best light client update, not its first one, and an update signed in the next period is not a
-// candidate for the period of its attested header.
-func TestStoreLightClientUpdateKeepsTheBestOfAPeriod(t *testing.T) {
+// A period ranks its candidates best first, and an update signed in the next period is not a candidate for the period
+// of its attested header.
+func TestLightClientUpdateCandidatesRankAndSkipOtherPeriods(t *testing.T) {
 	cfg := &clparams.MainnetBeaconConfig
 	f := &forkGraphDisk{beaconCfg: cfg}
 	periodStart := cfg.SlotsPerEpoch * cfg.EpochsPerSyncCommitteePeriod
-	update := func(participants int, attestedSlot uint64) *cltypes.LightClientUpdate {
-		u := cltypes.NewLightClientUpdate(clparams.DenebVersion, cfg)
-		for i := range participants {
-			u.SyncAggregate.SyncCommiteeBits[i/8] |= 1 << (i % 8)
-		}
-		u.AttestedHeader.Beacon.Slot = attestedSlot
-		u.SignatureSlot = attestedSlot + 1
-		return u
-	}
 
-	f.storeLightClientUpdate(update(10, periodStart+1))
-	best := update(400, periodStart+5)
-	f.storeLightClientUpdate(best)
-	f.storeLightClientUpdate(update(300, periodStart+7))
-	f.storeLightClientUpdate(update(int(cfg.SyncCommitteeSize), 2*periodStart-1))
+	f.addLightClientUpdateCandidate(common.Hash{1}, lightClientTestUpdate(cfg, 10, periodStart+1))
+	best := lightClientTestUpdate(cfg, 400, periodStart+5)
+	f.addLightClientUpdateCandidate(common.Hash{2}, best)
+	f.addLightClientUpdateCandidate(common.Hash{3}, lightClientTestUpdate(cfg, 300, periodStart+7))
+	f.addLightClientUpdateCandidate(common.Hash{4}, lightClientTestUpdate(cfg, int(cfg.SyncCommitteeSize), 2*periodStart-1))
 
-	got, ok := f.GetLightClientUpdate(1)
-	require.True(t, ok)
-	require.Same(t, best, got)
+	candidates := f.lightClientUpdateCandidates[1]
+	require.Len(t, candidates, 3)
+	require.Same(t, best, candidates[0].update)
+	require.Equal(t, []common.Hash{{2}, {3}, {1}}, []common.Hash{candidates[0].signatureBlock, candidates[1].signatureBlock, candidates[2].signatureBlock})
+}
+
+// The update of a block that passed its transition is served at once as the newest update, but its period store waits
+// for finalization.
+func TestRecordLightClientUpdateWaitsForFinalizationForThePeriodStore(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	f := &forkGraphDisk{beaconCfg: cfg}
+	periodStart := cfg.SlotsPerEpoch * cfg.EpochsPerSyncCommitteePeriod
+	update := lightClientTestUpdate(cfg, 400, periodStart+10)
+
+	f.recordLightClientUpdate(common.Hash{1}, update)
+
+	require.Same(t, update, f.NewestLightClientUpdate())
+	_, ok := f.GetLightClientUpdate(1)
+	require.False(t, ok)
+	require.Len(t, f.lightClientUpdateCandidates[1], 1)
 }
 
 // A block that fails the state transition must leave no light client update behind: its sync aggregate is unverified.
@@ -104,4 +112,57 @@ func TestAddChainSegmentKeepsNoLightClientUpdateOfAnInvalidBlock(t *testing.T) {
 	require.Nil(t, f.NewestLightClientUpdate())
 	_, ok := f.GetLightClientUpdate(cfg.SyncCommitteePeriod(parentSlot))
 	require.False(t, ok)
+	require.Empty(t, f.lightClientUpdateCandidates)
+}
+
+func lightClientTestUpdate(cfg *clparams.BeaconChainConfig, participants int, attestedSlot uint64) *cltypes.LightClientUpdate {
+	u := cltypes.NewLightClientUpdate(clparams.DenebVersion, cfg)
+	for i := range participants {
+		u.SyncAggregate.SyncCommiteeBits[i/8] |= 1 << (i % 8)
+	}
+	u.AttestedHeader.Beacon.Slot = attestedSlot
+	u.SignatureSlot = attestedSlot + 1
+	return u
+}
+
+// Only an update whose signature block is on the finalized chain reaches the period store: a better update of a
+// sibling that lost fork choice is dropped, and nothing is served for the period before finalization reaches it.
+func TestFinalizationKeepsOnlyCanonicalLightClientUpdates(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	f := &forkGraphDisk{beaconCfg: cfg}
+	periodStart := cfg.SlotsPerEpoch * cfg.EpochsPerSyncCommitteePeriod
+	attested, canonical, orphan, finalized := common.Hash{1}, common.Hash{2}, common.Hash{3}, common.Hash{4}
+	f.headers.Store(attested, &cltypes.BeaconBlockHeader{Slot: periodStart + 10})
+	f.headers.Store(canonical, &cltypes.BeaconBlockHeader{Slot: periodStart + 11, ParentRoot: attested})
+	f.headers.Store(orphan, &cltypes.BeaconBlockHeader{Slot: periodStart + 11, ParentRoot: attested})
+	f.headers.Store(finalized, &cltypes.BeaconBlockHeader{Slot: periodStart + 64, ParentRoot: canonical})
+
+	canonicalUpdate := lightClientTestUpdate(cfg, 400, periodStart+10)
+	f.addLightClientUpdateCandidate(canonical, canonicalUpdate)
+	f.addLightClientUpdateCandidate(orphan, lightClientTestUpdate(cfg, 450, periodStart+10))
+	_, ok := f.GetLightClientUpdate(1)
+	require.False(t, ok, "served before finalization")
+
+	f.KeepFinalizedLightClientUpdates(finalized)
+
+	got, ok := f.GetLightClientUpdate(1)
+	require.True(t, ok)
+	require.Same(t, canonicalUpdate, got)
+	require.Empty(t, f.lightClientUpdateCandidates, "candidates at or below the finalized slot are settled")
+}
+
+// A period keeps a bounded number of candidates, the best ones, so a long stretch without finality does not hold a
+// sync committee per block.
+func TestLightClientUpdateCandidatesKeepTheBestOfAPeriod(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	f := &forkGraphDisk{beaconCfg: cfg}
+	periodStart := cfg.SlotsPerEpoch * cfg.EpochsPerSyncCommitteePeriod
+	for i := range maxLightClientUpdateCandidates + 1 {
+		f.addLightClientUpdateCandidate(common.Hash{byte(i + 1)}, lightClientTestUpdate(cfg, 400+i, periodStart+uint64(i)))
+	}
+	candidates := f.lightClientUpdateCandidates[1]
+	require.Len(t, candidates, maxLightClientUpdateCandidates)
+	for _, c := range candidates {
+		require.NotEqual(t, common.Hash{1}, c.signatureBlock, "the worst candidate is dropped")
+	}
 }

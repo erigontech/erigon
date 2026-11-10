@@ -65,6 +65,7 @@ type ForkGraph interface {
 	GetLightClientBootstrap(blockRoot common.Hash) (*cltypes.LightClientBootstrap, bool)
 	NewestLightClientUpdate() *cltypes.LightClientUpdate
 	GetLightClientUpdate(period uint64) (*cltypes.LightClientUpdate, bool)
+	KeepFinalizedLightClientUpdates(finalized common.Hash)
 	GetCurrentParticipationIndicies(epoch uint64) (*solid.ParticipationBitList, error)
 	GetPreviousParticipationIndicies(epoch uint64) (*solid.ParticipationBitList, error)
 	DumpBeaconStateOnDisk(blockRoot common.Hash, state *state.CachingBeaconState, forced bool) error

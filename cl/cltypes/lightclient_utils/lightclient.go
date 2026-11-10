@@ -134,8 +134,9 @@ func BlockToLightClientHeader(block *cltypes.SignedBeaconBlock) (*cltypes.LightC
 	return blockToLightClientHeaderAt(block, block.Version())
 }
 
-// blockToLightClientHeaderAt is block_to_light_client_header of the given fork, which also takes a block of an
-// earlier fork: before Capella the header carries no execution data, and payload fields of later forks stay zero.
+// blockToLightClientHeaderAt is block_to_light_client_header of the given pre-Gloas fork, which also takes a block of
+// an earlier fork: before Capella the header carries no execution data, and payload fields of later forks stay zero.
+// A Gloas header gets only the beacon block header.
 func blockToLightClientHeaderAt(block *cltypes.SignedBeaconBlock, version clparams.StateVersion) (*cltypes.LightClientHeader, error) {
 	h := cltypes.NewLightClientHeader(version)
 	h.Beacon = block.SignedBeaconBlockHeader().Header
