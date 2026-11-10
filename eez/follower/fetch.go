@@ -51,7 +51,9 @@ type PeerCounter interface {
 // FetchOptions bound a Fetch.
 type FetchOptions struct {
 	// Limit, when set, refuses a target more than Limit blocks from the
-	// local head and a chain of more than Limit missing blocks.
+	// local head and a chain of more than Limit missing blocks, inserting
+	// none past the Limit-th; with Batch below the chain's length, up to
+	// Limit blocks of a refused chain stay inserted.
 	Limit uint64
 	// Batch, when set, is the number of blocks each request asks for and
 	// each insert takes; zero is fetchBatch.
@@ -115,6 +117,7 @@ func (f *Fetcher) Fetch(ctx context.Context, hash common.Hash, opts FetchOptions
 		return nil, fmt.Errorf("fetch %x: %w", hash, err)
 	}
 	var tip *types.Header
+	var missing uint64
 	for {
 		batch, err := feed.Next(ctx)
 		if errors.Is(err, execp2p.ErrNoPeers) || errors.Is(err, execp2p.ErrNoPeerHasHeader) {
@@ -126,6 +129,20 @@ func (f *Fetcher) Fetch(ctx context.Context, hash common.Hash, opts FetchOptions
 		blocks := batch.Blocks
 		if len(blocks) == 0 {
 			break
+		}
+		if opts.Limit > 0 {
+			for _, b := range blocks {
+				h, err := f.chain.HeaderByHash(ctx, b.Hash())
+				if err != nil {
+					return nil, err
+				}
+				if h == nil {
+					missing++
+				}
+			}
+			if missing > opts.Limit {
+				return nil, fmt.Errorf("fetch %x: %w: more than %d missing blocks", hash, execp2p.ErrChainLengthExceedsLimit, opts.Limit)
+			}
 		}
 		first, last := blocks[0].NumberU64(), blocks[len(blocks)-1].NumberU64()
 		if err := f.chain.Insert(ctx, blocks); err != nil {
@@ -147,7 +164,8 @@ func (f *Fetcher) Fetch(ctx context.Context, hash common.Hash, opts FetchOptions
 
 // boundedHeaders fails the downloader's walk back once it has asked for
 // more than limit missing blocks: the walk checks its length only between
-// header batches.
+// header batches. The walk takes the target's parent without asking, so one
+// block more may pass, which Fetch refuses before inserting it.
 type boundedHeaders struct {
 	headers execp2p.BbdHeaderReader
 	limit   uint64

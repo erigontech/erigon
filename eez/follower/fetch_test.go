@@ -494,4 +494,50 @@ func TestFetch(t *testing.T) {
 		require.ErrorIs(t, err, execp2p.ErrChainLengthExceedsLimit)
 		require.NotContains(t, s.sent(), sentryproto.MessageId_GET_BLOCK_BODIES_66)
 	})
+
+	t.Run("fork one block past the limit", func(t *testing.T) {
+		// A local chain of 2 blocks on another branch: the target at its
+		// height lacks 2 blocks.
+		other := derivertest.NewComposer(t)
+		stray := derivertest.Block{Coinbase: bob, Extra: []byte("stray"), Txs: [][]byte{}}
+		branch := other.Compose(nil, stray, stray).Blocks
+		onBranch := func(t *testing.T) (*follower.Fetcher, *deriver.ExecChain) {
+			s, chain := newPeer(t)
+			require.NoError(t, chain.Insert(t.Context(), branch))
+			require.NoError(t, chain.ForkChoice(t.Context(), branch[1].Hash(), common.Hash{}, common.Hash{}))
+			return newFetcher(t, s, chain), chain
+		}
+		stored := func(t *testing.T, chain *deriver.ExecChain, b *types.Block) bool {
+			h, err := chain.HeaderByHash(t.Context(), b.Hash())
+			require.NoError(t, err)
+			return h != nil
+		}
+
+		f, chain := onBranch(t)
+		_, err := f.Fetch(t.Context(), want[1].Hash(), follower.FetchOptions{Limit: 1, Inserted: noInsert(t)})
+		require.ErrorIs(t, err, execp2p.ErrChainLengthExceedsLimit)
+		for _, b := range want[:2] {
+			require.False(t, stored(t, chain, b), "block %d stored", b.NumberU64())
+		}
+		got, err := f.Fetch(t.Context(), want[1].Hash(), follower.FetchOptions{Limit: 2})
+		require.NoError(t, err)
+		require.Equal(t, want[1].Hash(), got.Hash())
+
+		// A batch at a time, the blocks up to the limit go in, the one past
+		// it does not.
+		f, chain = onBranch(t)
+		_, err = f.Fetch(t.Context(), want[1].Hash(), follower.FetchOptions{Limit: 1, Batch: 1})
+		require.ErrorIs(t, err, execp2p.ErrChainLengthExceedsLimit)
+		require.True(t, stored(t, chain, want[0]))
+		require.False(t, stored(t, chain, want[1]))
+	})
+
+	t.Run("one block on the local head at the limit", func(t *testing.T) {
+		s, chain := newPeer(t)
+		require.NoError(t, chain.Insert(t.Context(), want[:1]))
+		require.NoError(t, chain.ForkChoice(t.Context(), want[0].Hash(), common.Hash{}, common.Hash{}))
+		got, err := newFetcher(t, s, chain).Fetch(t.Context(), want[1].Hash(), follower.FetchOptions{Limit: 1})
+		require.NoError(t, err)
+		require.Equal(t, want[1].Hash(), got.Hash())
+	})
 }
