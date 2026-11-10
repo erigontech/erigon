@@ -90,6 +90,8 @@ This is useful for understanding what a contract would have initialised to if it
 { "code": "0x<effective_creation_code>" }
 ```
 
+`null` if the replacement constructor runs without an error but leaves no code at the address.
+
 **Example**
 
 ```bash
@@ -110,7 +112,7 @@ Internally, this method:
 1. Looks up the contract's creation transaction via the Otterscan API
 2. Replays all transactions in that block up to (but not including) the creation tx
 3. Executes the creation tx using the provided bytecode instead of the original
-4. Returns the effective code that would have been stored at the contract address
+4. Returns the effective code that would have been stored at the contract address, or `null` if no code would have been stored
 
 :::info
 `overlay_callConstructor` requires the Otterscan API (`--http.api=...,ots,overlay`) to resolve the contract creation transaction.

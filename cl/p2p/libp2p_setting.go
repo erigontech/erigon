@@ -2,6 +2,7 @@ package p2p
 
 import (
 	"math"
+	"regexp"
 	"time"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -12,9 +13,8 @@ import (
 
 const (
 	// overlay parameters
-	gossipSubDlo  = 2 // topic stable mesh low watermark
-	gossipSubDhi  = 6 // topic stable mesh high watermark
-	gossipSubDout = 1 // topic stable mesh target out degree. // Dout must be set below Dlo, and must not exceed D / 2.
+	gossipSubDhi  = 12 // topic stable mesh high watermark
+	gossipSubDout = 1  // topic stable mesh target out degree. // Dout must be set below Dlo, and must not exceed D / 2.
 
 	// gossip parameters
 	gossipSubMcacheLen    = 6   // number of windows to retain full messages in cache for `IWANT` responses
@@ -70,14 +70,25 @@ func (p *p2pManager) pubsubOptions(beaconConfig *clparams.BeaconChainConfig) []p
 		pubsub.WithValidateQueueSize(pubsubQueueSize),
 		pubsub.WithPeerScore(scoreParams, thresholds),
 		pubsub.WithGossipSubParams(pubsubGossipParam()),
+		pubsub.WithSubscriptionFilter(gossipSubscriptionFilter()),
 	}
 	return psOpts
+}
+
+// maxSubscriptionsPerRPC is above what an honest peer sends for all subnets of two fork digests.
+const maxSubscriptionsPerRPC = 500
+
+var eth2TopicFormat = regexp.MustCompile(`^/eth2/[0-9a-f]{8}/[a-z0-9_]{1,64}/ssz_snappy$`)
+
+// gossipSubscriptionFilter drops subscriptions to topics that are not eth2 gossip topics, and refuses oversized batches.
+func gossipSubscriptionFilter() pubsub.SubscriptionFilter {
+	return pubsub.WrapLimitSubscriptionFilter(pubsub.NewRegexpSubscriptionFilter(eth2TopicFormat), maxSubscriptionsPerRPC)
 }
 
 // creates a custom gossipsub parameter set.
 func pubsubGossipParam() pubsub.GossipSubParams {
 	gParams := pubsub.DefaultGossipSubParams()
-	gParams.Dlo = gossipSubDlo
+	gParams.Dlo = gossip.GossipSubDlo
 	gParams.Dhi = gossipSubDhi
 	gParams.D = gossip.GossipSubD
 	gParams.Dout = gossipSubDout

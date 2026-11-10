@@ -41,7 +41,7 @@ type recordingColumnsPublisher struct {
 	contextErr []error
 }
 
-func (r *recordingColumnsPublisher) PublishColumnsFromEL(ctx context.Context, sidecars []*cltypes.DataColumnSidecar) {
+func (r *recordingColumnsPublisher) PublishColumns(ctx context.Context, sidecars []*cltypes.DataColumnSidecar) {
 	r.published = append(r.published, sidecars)
 	r.contextErr = append(r.contextErr, ctx.Err())
 }
@@ -226,8 +226,8 @@ func TestBlockAboveBlobLimitDoesNotTakeTheELColumnsImport(t *testing.T) {
 	require.Equal(t, []*cltypes.SignedBeaconBlock{valid}, started)
 }
 
-// A block the importer would skip, e.g. one without blobs, does not take the import of its proposer and slot from a
-// block with blobs.
+// A Fulu block whose blob count is out of range, here one without blobs, does not take the import of its proposer and
+// slot from a block with blobs.
 func TestBlockWithoutBlobsDoesNotTakeTheELColumnsImport(t *testing.T) {
 	b, _, _, _ := setupELBlobsBlockService(t)
 	empty, _, _ := elBlobsTestBlock(t, clparams.FuluVersion, 0)

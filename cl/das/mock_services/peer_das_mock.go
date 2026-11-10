@@ -386,6 +386,42 @@ func (c *MockPeerDasPruneBelowCall) DoAndReturn(f func(uint64) error) *MockPeerD
 	return c
 }
 
+// SetColumnPublisher mocks base method.
+func (m *MockPeerDas) SetColumnPublisher(publish func(context.Context, []*cltypes.DataColumnSidecar)) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "SetColumnPublisher", publish)
+}
+
+// SetColumnPublisher indicates an expected call of SetColumnPublisher.
+func (mr *MockPeerDasMockRecorder) SetColumnPublisher(publish any) *MockPeerDasSetColumnPublisherCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetColumnPublisher", reflect.TypeOf((*MockPeerDas)(nil).SetColumnPublisher), publish)
+	return &MockPeerDasSetColumnPublisherCall{Call: call}
+}
+
+// MockPeerDasSetColumnPublisherCall wrap *gomock.Call
+type MockPeerDasSetColumnPublisherCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockPeerDasSetColumnPublisherCall) Return() *MockPeerDasSetColumnPublisherCall {
+	c.Call = c.Call.Return()
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockPeerDasSetColumnPublisherCall) Do(f func(func(context.Context, []*cltypes.DataColumnSidecar))) *MockPeerDasSetColumnPublisherCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockPeerDasSetColumnPublisherCall) DoAndReturn(f func(func(context.Context, []*cltypes.DataColumnSidecar))) *MockPeerDasSetColumnPublisherCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // SetForkChoice mocks base method.
 func (m *MockPeerDas) SetForkChoice(forkChoice das.BlockGetter) {
 	m.ctrl.T.Helper()

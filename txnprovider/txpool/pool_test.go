@@ -575,6 +575,26 @@ func TestFromDBSkipsUnderpricedBlobTxns(t *testing.T) {
 	require.NotContains(t, pool.byHash, string(underpricedHash[:]))
 }
 
+func TestFromDBSkipsBlobTxnWithBadSidecar(t *testing.T) {
+	ctx, pool, poolDB, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+	wrapped := types.MakeV1WrappedBlobTxn(chain.AllProtocolChanges.ChainID)
+	wrapped.Tx.FeeCap = *uint256.NewInt(1_000_000_000)
+	wrapped.Tx.TipCap = *uint256.NewInt(1_000_000_000)
+	wrapped.Blobs[0][31] ^= 0x01
+	var encoded bytes.Buffer
+	require.NoError(t, wrapped.MarshalBinaryWrapped(&encoded))
+	hash := wrapped.Tx.Hash()
+	require.NoError(t, poolDB.Update(ctx, func(tx kv.RwTx) error {
+		return tx.Put(kv.PoolTransaction, hash[:], append(sender[:], encoded.Bytes()...))
+	}))
+
+	require.NoError(t, poolDB.View(ctx, func(poolTx kv.Tx) error {
+		return pool.fromDB(ctx, poolTx)
+	}))
+
+	require.NotContains(t, pool.byHash, string(hash[:]))
+}
+
 func TestGetCachedBlobTxnLockedSkipsUnparseableCachedRow(t *testing.T) {
 	ctx, pool, poolDB, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
 
@@ -637,6 +657,7 @@ func newAmsterdamPoolWithPendingSelfTransfer(t *testing.T, ctx context.Context, 
 		WithFeeCalculator(nil),
 	)
 	require.NoError(t, err)
+	pool.started.Store(true)
 
 	account := accounts.Account{
 		Balance:  *uint256.NewInt(1 * common.Ether),
@@ -700,6 +721,34 @@ func TestProvideTxnsAmsterdamGasAdmission(t *testing.T) {
 	}
 }
 
+func TestPoolBlockGasLimitEquality(t *testing.T) {
+	for _, updateSender := range []bool{false, true} {
+		name := "block limit update"
+		if updateSender {
+			name = "sender state update"
+		}
+		t.Run(name, func(t *testing.T) {
+			ctx := t.Context()
+			pool := newAmsterdamPoolWithPendingSelfTransfer(t, ctx, 100_000)
+			change := &remoteproto.StateChangeBatch{
+				PendingBlockBaseFee: 200_000, BlockGasLimit: 100_000,
+				ChangeBatch: []*remoteproto.StateChange{{BlockHeight: 1, BlockHash: gointerfaces.ConvertHashToH256(common.Hash{1})}},
+			}
+			if updateSender {
+				account := accounts.Account{Balance: *uint256.NewInt(common.Ether), CodeHash: accounts.EmptyCodeHash}
+				change.ChangeBatch[0].Changes = []*remoteproto.AccountChange{{
+					Action: remoteproto.Action_UPSERT, Address: gointerfaces.ConvertAddressToH160(common.Address{1}), Data: accounts.SerialiseV3(&account),
+				}}
+			}
+			require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+			require.Equal(t, 1, pool.pending.Len(), "a transaction may use the full block gas limit")
+			txns, err := pool.ProvideTxns(ctx, txnprovider.WithGasTarget(mdgas.NewFullMdGas(100_000, 100_000, 0)))
+			require.NoError(t, err)
+			require.Len(t, txns, 1, "a pending transaction at the gas limit must be selectable")
+		})
+	}
+}
+
 func TestOnNewBlockKeepsTxnAtBlockGasLimitPending(t *testing.T) {
 	ctx := t.Context()
 	pool := newAmsterdamPoolWithPendingSelfTransfer(t, ctx, 40_000_000)
@@ -738,13 +787,13 @@ func TestProvideTxnsUsesRemainingGasForAdmission(t *testing.T) {
 	}
 }
 
-func TestProvideTxnsRejectsAAAboveExecutionGasTarget(t *testing.T) {
+func TestProvideTxnsRejectsFrameAboveExecutionGasTarget(t *testing.T) {
 	pool := newAmsterdamPoolWithPendingSelfTransfer(t, t.Context(), 100_000)
-	aaTxn := &types.AccountAbstractionTransaction{
-		SenderAddress: accounts.InternAddress(common.Address{1}),
-		GasLimit:      100_000 - params.TxAAGas,
+	frameTxn := &types.FrameTransaction{
+		NonceKeys:     []uint256.Int{{}},
+		SenderAddress: common.Address{1}, Frames: []types.Frame{{Limits: mdgas.MdGas{Execution: 87_525}}},
 	}
-	pool.pending.best.ms[0].TxnSlot.Txn = aaTxn
+	pool.pending.best.ms[0].TxnSlot.Txn = frameTxn
 	txns, err := pool.ProvideTxns(t.Context(),
 		txnprovider.WithGasTarget(mdgas.NewFullMdGas(50_000, 100_000, 0)))
 	require.NoError(t, err)
@@ -978,7 +1027,7 @@ func TestSetCodeAuthorizationAdmission(t *testing.T) {
 					reasons, err = pool.AddLocalTxns(ctx, txns)
 				} else {
 					pool.AddRemoteTxns(ctx, txns, nil, nil)
-					reasons, err = pool.addNewTxns(ctx, *pool.unprocessedRemoteTxns, true)
+					reasons, err = pool.processRemoteBatch(ctx)
 				}
 				require.NoError(t, err)
 				require.Equal(t, []txpoolcfg.DiscardReason{tc.reason}, reasons)
@@ -2061,7 +2110,7 @@ func makeBlobTxn() TxnSlot {
 	return blobTxn
 }
 
-func makeWrappedBlobTxnRlpWithCellProofs(t *testing.T, chainID *uint256.Int, blobCount int) []byte {
+func makeWrappedBlobTxnRlpWithCellProofs(t testing.TB, chainID *uint256.Int, blobCount int) []byte {
 	t.Helper()
 
 	require := require.New(t)
@@ -3527,6 +3576,7 @@ func providedNonces(t *testing.T, ctx context.Context, pool *TxPool) []uint64 {
 // local.
 func TestProvideTxnsKeepsSenderNonceOrderAfterUnwind(t *testing.T) {
 	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+	pool.started.Store(true)
 
 	block := func(height byte, nonce uint64, direction remoteproto.Direction) *remoteproto.StateChangeBatch {
 		account := accounts.Account{Nonce: nonce, Balance: *uint256.NewInt(common.Ether), CodeHash: accounts.EmptyCodeHash}
@@ -3654,6 +3704,199 @@ func TestRemoteSpammerKeepsLocalTransactions(t *testing.T) {
 			require.Equal(t, len(tc.want), pending)
 			require.Zero(t, baseFee)
 			require.Zero(t, queued)
+		})
+	}
+}
+
+func nonceRetryBlob(t testing.TB, fork string, nonce uint64) (*TxPool, *TxnSlot) {
+	t.Helper()
+	pool := seedBlobKZGTestPool(t, t.Context())
+	require.NoError(t, pool.start(t.Context()))
+	pool.cfg.MaxNonceGap = 64
+	pool.cfg.AccountSlots = 128
+	pool.chainConfig = testforks.Forks[fork].Copy()
+	pool.pragueTime, pool.osakaTime = pool.chainConfig.PragueTime, pool.chainConfig.OsakaTime
+	slot := makeBlobTxn()
+	if fork == "Osaka" {
+		slot = TxnSlot{}
+		wire := makeWrappedBlobTxnRlpWithCellProofs(t, &pool.chainID, 2)
+		parse := NewTxnParseContext(pool.chainID)
+		parse.WithSender(false)
+		_, err := parse.ParseTransaction(wire, 0, &slot, nil, false, true, nil)
+		require.NoError(t, err)
+	}
+	slot.Nonce = nonce
+	blob := slot.Txn.(*types.BlobTx)
+	blob.Nonce, blob.ChainID = nonce, pool.chainID
+	blob.TipCap, blob.FeeCap = *uint256.NewInt(300_000), *uint256.NewInt(300_000)
+	slot.IDHash = blob.Hash()
+	return pool, &slot
+}
+
+func nonceRetrySender(t testing.TB, pool *TxPool, nonce uint64) {
+	t.Helper()
+	change := newBlockChangeForAccounts(common.Hash{}, nonce, common.Address{1})
+	change.PendingBlockBaseFee, change.PendingBlobFeePerGas = 200_000, 100_000
+	change.BlockGasLimit = 30_000_000
+	change.ChangeBatch[0].BlockHeight = pool.lastSeenBlock.Load() + 1
+	require.NoError(t, pool.OnNewBlock(t.Context(), change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+}
+
+func TestBlobNonceRetryPrecheck(t *testing.T) {
+	for _, fork := range []string{"Cancun", "Osaka"} {
+		t.Run(fork, func(t *testing.T) {
+			pool, slot := nonceRetryBlob(t, fork, 1000)
+			var txns TxnSlots
+			sender := common.Address{1}
+			txns.Append(slot, sender[:], false)
+			reasons, err := pool.AddLocalTxns(t.Context(), txns)
+			require.NoError(t, err)
+			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NonceTooDistant}, reasons)
+			for nonce := uint64(1); nonce <= 3; nonce++ {
+				nonceRetrySender(t, pool, nonce)
+				reasons, _, err = pool.prepareTxns(t.Context(), txns, nil)
+				require.NoError(t, err)
+				require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NonceTooDistant}, reasons)
+			}
+		})
+	}
+}
+
+func TestBlobNonceRetryEligibilityChanges(t *testing.T) {
+	for _, mode := range []string{"sender nonce", "pooled predecessors", "batch predecessors", "reorg", "evicted discard", "disabled gap limit", "gap boundary"} {
+		t.Run(mode, func(t *testing.T) {
+			pool, slot := nonceRetryBlob(t, "Cancun", 65)
+			var txns TxnSlots
+			sender := common.Address{1}
+			txns.Append(slot, sender[:], false)
+			reasons, err := pool.AddLocalTxns(t.Context(), txns)
+			require.NoError(t, err)
+			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NonceTooDistant}, reasons)
+			var prefix TxnSlots
+			for nonce := range uint64(65) {
+				ordinary := newTestTxnSlot(nonce, 0, 300_000, 300_000, 100_000)
+				ordinary.IDHash[0], ordinary.IDHash[31] = byte(nonce+1), 0xab
+				prefix.Append(ordinary, sender[:], true)
+			}
+			switch mode {
+			case "sender nonce":
+				nonceRetrySender(t, pool, 65)
+			case "pooled predecessors":
+				reasons, err = pool.AddLocalTxns(t.Context(), prefix)
+				require.NoError(t, err)
+				for _, reason := range reasons {
+					require.Equal(t, txpoolcfg.Success, reason)
+				}
+			case "batch predecessors":
+				prefix.Append(slot, sender[:], false)
+				txns = prefix
+			case "reorg":
+				nonceRetrySender(t, pool, 66)
+				reasons, _, err = pool.prepareTxns(t.Context(), txns, nil)
+				require.NoError(t, err)
+				require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NonceTooLow}, reasons)
+				nonceRetrySender(t, pool, 65)
+			case "evicted discard":
+				pool.discardReasonsLRU.Purge()
+			case "disabled gap limit":
+				pool.cfg.MaxNonceGap = 0
+			case "gap boundary":
+				nonceRetrySender(t, pool, 1)
+			}
+			reasons, _, err = pool.prepareTxns(t.Context(), txns, nil)
+			require.NoError(t, err)
+			for _, reason := range reasons {
+				require.Equal(t, txpoolcfg.NotSet, reason)
+			}
+			if mode == "evicted discard" || mode == "disabled gap limit" || mode == "gap boundary" {
+				return
+			}
+			reasons, err = pool.AddLocalTxns(t.Context(), txns)
+			require.NoError(t, err)
+			for _, reason := range reasons {
+				require.Equal(t, txpoolcfg.Success, reason)
+			}
+			require.Contains(t, pool.byHash, string(slot.IDHash[:]))
+		})
+	}
+}
+
+func TestBlobNonceRetryFrameBypass(t *testing.T) {
+	for _, parked := range []bool{false, true} {
+		t.Run(fmt.Sprintf("parked=%t", parked), func(t *testing.T) {
+			pool, slot := nonceRetryBlob(t, "Cancun", 1000)
+			var txns TxnSlots
+			sender := common.Address{1}
+			txns.Append(slot, sender[:], false)
+			reasons, err := pool.AddLocalTxns(t.Context(), txns)
+			require.NoError(t, err)
+			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NonceTooDistant}, reasons)
+			frame := framePoolSlot(t, sender, 300_000, 300_000)
+			if parked {
+				pool.chainConfig.BogotaTime = common.NewUint64(0)
+				pool.ethBackend = &frameValidationBackend{payer: sender, balance: common.Ether, valid: true}
+				var frames TxnSlots
+				frames.Append(frame, sender[:], true)
+				reasons, err = pool.AddLocalTxns(t.Context(), frames)
+				require.NoError(t, err)
+				require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+				pool.lock.Lock()
+				pool.removeFromSubPool(pool.byHash[string(frame.IDHash[:])], "test revalidation")
+				require.True(t, pool.hasParkedLegacyFrame(frame.SenderID))
+				pool.lock.Unlock()
+			} else {
+				txns.Append(frame, sender[:], true)
+			}
+			reasons, _, err = pool.prepareTxns(t.Context(), txns, nil)
+			require.NoError(t, err)
+			require.Equal(t, txpoolcfg.NotSet, reasons[0])
+		})
+	}
+}
+
+func TestBlobNonceRetryStillChecksHonestSidecar(t *testing.T) {
+	pool, slot := nonceRetryBlob(t, "Cancun", 1000)
+	var txns TxnSlots
+	sender := common.Address{1}
+	txns.Append(slot, sender[:], false)
+	reasons, err := pool.AddLocalTxns(t.Context(), txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NonceTooDistant}, reasons)
+	slot.BlobBundles[0].Blob[31] ^= 1
+	reasons, _, err = pool.prepareTxns(t.Context(), txns, nil)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NonceTooDistant}, reasons)
+	nonceRetrySender(t, pool, 1000)
+	reasons, _, err = pool.prepareTxns(t.Context(), txns, nil)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.UnmatchedBlobTxExt}, reasons)
+	slot.BlobBundles[0].Blob[31] ^= 1
+	reasons, err = pool.AddLocalTxns(t.Context(), txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+}
+
+func TestBlobNonceRetryNonceBounds(t *testing.T) {
+	for _, tc := range []struct {
+		nonce uint64
+		want  txpoolcfg.DiscardReason
+	}{
+		{math.MaxUint64 - 1000, txpoolcfg.NonceTooDistant},
+		{math.MaxUint64 - 64, txpoolcfg.NotSet},
+		{math.MaxUint64, txpoolcfg.NotSet},
+	} {
+		t.Run(fmt.Sprint(tc.nonce), func(t *testing.T) {
+			pool, slot := nonceRetryBlob(t, "Cancun", math.MaxUint64)
+			var txns TxnSlots
+			sender := common.Address{1}
+			txns.Append(slot, sender[:], false)
+			reasons, err := pool.AddLocalTxns(t.Context(), txns)
+			require.NoError(t, err)
+			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NonceTooDistant}, reasons)
+			nonceRetrySender(t, pool, tc.nonce)
+			reasons, _, err = pool.prepareTxns(t.Context(), txns, nil)
+			require.NoError(t, err)
+			require.Equal(t, []txpoolcfg.DiscardReason{tc.want}, reasons)
 		})
 	}
 }

@@ -28,6 +28,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
@@ -1715,8 +1716,7 @@ func TestNoBALSkipsAccessRecording(t *testing.T) {
 	recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
 	coinbase := accounts.InternAddress(common.HexToAddress("0x3333333333333333333333333333333333333333"))
 	entries := map[string]func(*TxnExecutor) error{
-		"Execute":    func(st *TxnExecutor) error { _, err := st.Execute(true, false); return err },
-		"ApplyFrame": func(st *TxnExecutor) error { _, err := st.ApplyFrame(); return err },
+		"Execute": func(st *TxnExecutor) error { _, err := st.Execute(true, false); return err },
 	}
 	for name, apply := range entries {
 		for _, noBAL := range []bool{false, true} {
@@ -1815,4 +1815,42 @@ func TestRecipientCreditedAtValidationReportsCallToTracer(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, balance.IsZero(), "the run credited the recipient; validation must do it")
 	require.Equal(t, []frame{{depth: 0, typ: byte(vm.CALL), to: recipient, value: *uint256.NewInt(5), exitSeen: true}}, frames)
+}
+
+// TestApplyTransactionTxEndSeesTxWrites pins that a tracer reading state at tx end sees the tx's own writes.
+func TestApplyTransactionTxEndSeesTxWrites(t *testing.T) {
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	sender := accounts.InternAddress(crypto.PubkeyToAddress(key.PublicKey))
+	to := common.HexToAddress("0x2222222222222222222222222222222222222222")
+	coinbase := accounts.InternAddress(common.HexToAddress("0x3333333333333333333333333333333333333333"))
+	cfg := chain.TestChainOsakaConfig
+	signer := types.MakeSigner(cfg, 1, 0)
+	txn, err := types.SignTx(types.NewTransaction(0, to, uint256.NewInt(7), 100_000, uint256.NewInt(0), nil), *signer, key)
+	require.NoError(t, err)
+	for _, versioned := range []bool{false, true} {
+		t.Run(fmt.Sprintf("versioned=%v", versioned), func(t *testing.T) {
+			ibs := state.New(state.NewNoopReader())
+			if versioned {
+				ibs = state.NewWithVersionMap(state.NewNoopReader(), state.NewVersionMap(nil))
+			}
+			defer ibs.Close()
+			ibs.SetTxContext(1, 0)
+			require.NoError(t, ibs.SetBalance(sender, *uint256.NewInt(1e18), tracing.BalanceChangeUnspecified))
+			var balance uint256.Int
+			var nonce uint64
+			hooks := &tracing.Hooks{OnTxEndV2: func(*types.Receipt, mdgas.TxnGasUsage, error) {
+				balance, err = ibs.GetBalance(accounts.InternAddress(to))
+				require.NoError(t, err)
+				nonce, err = ibs.GetNonce(sender)
+				require.NoError(t, err)
+			}}
+			header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 30_000_000, BaseFee: uint256.NewInt(0)}
+			_, err := ApplyTransaction(cfg, func(uint64) (common.Hash, error) { return common.Hash{}, nil }, nil, coinbase,
+				NewGasPool(header.GasLimit, 0), ibs, state.NewNoopWriter(), header, txn, &GasUsed{}, vm.Config{Tracer: hooks, NoBaseFee: true})
+			require.NoError(t, err)
+			require.Equal(t, uint64(7), balance.Uint64())
+			require.Equal(t, uint64(1), nonce)
+		})
+	}
 }

@@ -271,3 +271,105 @@ func TestNoMaterialize_CreatedAccountSetCode(t *testing.T) {
 	require.True(t, ok, "the code is this tx's write")
 	require.Equal(t, code, cw.Val.Bytes)
 }
+
+// Reverting a credit made after a burning SELFDESTRUCT must restore the burn's
+// deletion stamp, not just the value; before EIP-161 nothing else removes the
+// destroyed account.
+func TestNoMaterialize_RevertedCreditAfterBurnKeepsBalanceDeleted(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0xc0, 0x88})
+	code := []byte("destroyed-contract-code")
+	committed := accounts.NewAccount()
+	committed.Nonce = 1
+	committed.Balance = *uint256.NewInt(1000)
+	committed.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(code))
+	ibs := NewWithVersionMap(&fieldReader{addr: addr, account: &committed, code: code}, NewVersionMap(nil))
+	ibs.SetTxContext(1, 0)
+
+	_, err := ibs.Selfdestruct(addr, false)
+	require.NoError(t, err)
+	snap := ibs.PushSnapshot()
+	require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(5), tracing.BalanceChangeTransfer))
+	ibs.RevertToSnapshot(snap, nil)
+
+	writes := finalizedWrites(t, ibs, &chain.Rules{IsHomestead: true})
+	bal, ok := writes.GetBalance(addr)
+	require.True(t, ok)
+	require.True(t, bal.Deletes(), "the burned account must stay deleted after the revert")
+}
+
+// A second SELFDESTRUCT over a burned-then-credited account journals a balance cell
+// that already carries the burn's deletion stamp; reverting it must keep the stamp.
+func TestNoMaterialize_RevertedRepeatDestructAfterBurnKeepsBalanceDeleted(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0xc0, 0x99})
+	code := []byte("destroyed-contract-code")
+	committed := accounts.NewAccount()
+	committed.Nonce = 1
+	committed.Balance = *uint256.NewInt(1000)
+	committed.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(code))
+	ibs := NewWithVersionMap(&fieldReader{addr: addr, account: &committed, code: code}, NewVersionMap(nil))
+	ibs.SetTxContext(1, 0)
+
+	_, err := ibs.Selfdestruct(addr, false)
+	require.NoError(t, err)
+	require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(5), tracing.BalanceChangeTransfer))
+	snap := ibs.PushSnapshot()
+	_, err = ibs.Selfdestruct(addr, false)
+	require.NoError(t, err)
+	ibs.RevertToSnapshot(snap, nil)
+
+	writes := finalizedWrites(t, ibs, &chain.Rules{IsHomestead: true})
+	bal, ok := writes.GetBalance(addr)
+	require.True(t, ok)
+	require.True(t, bal.Deletes(), "the burned account must stay deleted after the revert")
+}
+
+// Reverting the only SELFDESTRUCT restores the credited balance as a live value.
+func TestNoMaterialize_RevertedDestructRestoresLiveBalance(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0xc0, 0xaa})
+	code := []byte("reverted-destruct-code")
+	committed := accounts.NewAccount()
+	committed.Nonce = 1
+	committed.Balance = *uint256.NewInt(1000)
+	committed.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(code))
+	ibs := NewWithVersionMap(&fieldReader{addr: addr, account: &committed, code: code}, NewVersionMap(nil))
+	ibs.SetTxContext(1, 0)
+
+	require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(5), tracing.BalanceChangeTransfer))
+	snap := ibs.PushSnapshot()
+	_, err := ibs.Selfdestruct(addr, false)
+	require.NoError(t, err)
+	ibs.RevertToSnapshot(snap, nil)
+
+	writes := finalizedWrites(t, ibs, &chain.Rules{IsHomestead: true})
+	bal, ok := writes.GetBalance(addr)
+	require.True(t, ok)
+	require.False(t, bal.Deletes(), "a reverted destruct must not leave the deletion stamp")
+	require.Equal(t, *uint256.NewInt(1005), bal.Val)
+}
+
+// A credit that revives a destroyed account starts it at nonce 0, not at the destroyed
+// incarnation's nonce left in the version-map floor.
+func TestNoMaterialize_RevivedAccountDropsDestroyedNonce(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0xc0, 0xbb})
+	vm := NewVersionMap(nil)
+	ibs := newNoMaterializeTx(vm, 0)
+	require.NoError(t, ibs.CreateAccount(addr, true))
+	require.NoError(t, ibs.SetNonce(addr, 8, tracing.NonceChangeUnspecified))
+	vm.FlushVersionedWrites(ibs.VersionedWrites(), true)
+	ibs = newNoMaterializeTx(vm, 1)
+	_, err := ibs.Selfdestruct(addr, false)
+	require.NoError(t, err)
+	vm.FlushVersionedWrites(ibs.VersionedWrites(), true)
+	ibs = newNoMaterializeTx(vm, 2)
+	require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(5), tracing.BalanceChangeTransfer))
+	vm.FlushVersionedWrites(ibs.VersionedWrites(), true)
+
+	acc, ok, _ := vm.View(3, &emptyReader{}).GetAccount(addr)
+	require.True(t, ok)
+	require.Zero(t, acc.Nonce)
+	require.Equal(t, *uint256.NewInt(5), acc.Balance)
+}

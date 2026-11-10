@@ -17,6 +17,7 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"sync"
@@ -39,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/persistence/state/historical_states_reader"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
+	"github.com/erigontech/erigon/cl/phase1/envelope_history"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/network/gossip"
@@ -209,6 +211,7 @@ type ApiHandler struct {
 	mux *chi.Mux
 
 	blockReader          freezeblocks.BeaconSnapshotReader
+	envelopeRebuilder    envelopeRebuilder
 	indiciesDB           kv.RwDB
 	netConfig            *clparams.NetworkConfig
 	ethClock             eth_clock.EthereumClock
@@ -293,6 +296,11 @@ type ApiHandler struct {
 	executionPayloadEnvelopeBroadcasts *lru.Cache[[32]byte, struct{}]
 }
 
+type envelopeRebuilder interface {
+	Prepare(context.Context, kv.Tx, uint64, common.Hash) (*envelope_history.PreparedRebuild, error)
+	Rebuild(context.Context, *envelope_history.PreparedRebuild) (*cltypes.SignedExecutionPayloadEnvelope, error)
+}
+
 func NewApiHandler(
 	logger log.Logger,
 	netConfig *clparams.NetworkConfig,
@@ -334,6 +342,7 @@ func NewApiHandler(
 	executionPayloadBidService services.ExecutionPayloadBidService,
 	payloadAttestationService services.PayloadAttestationService,
 	proposerPreferencesService services.ProposerPreferencesService,
+	rebuilder envelopeRebuilder,
 ) *ApiHandler {
 	blobBundles, err := lru.New[common.Bytes48, BlobBundle]("blobs", blobBundleCacheSize(beaconChainConfig))
 	if err != nil {
@@ -377,6 +386,7 @@ func NewApiHandler(
 		forkchoiceStore:       forkchoiceStore,
 		operationsPool:        operationsPool,
 		blockReader:           rcsn,
+		envelopeRebuilder:     rebuilder,
 		syncedData:            syncedData,
 		stateReader:           stateReader,
 		caplinStateSnapshots:  caplinStateSnapshots,

@@ -771,7 +771,8 @@ func (do *dbObj) GetCode(addrSlice goja.Value) goja.Value {
 		do.vm.Interrupt(err)
 		return nil
 	}
-	res, err := do.toBuf(do.vm, code)
+	// The JS buffer is writable and code may be shared with other readers.
+	res, err := do.toBuf(do.vm, bytes.Clone(code))
 	if err != nil {
 		do.vm.Interrupt(err)
 		return nil
