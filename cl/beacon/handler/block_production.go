@@ -29,6 +29,7 @@ import (
 	"math/big"
 	"math/bits"
 	"net/http"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -38,6 +39,7 @@ import (
 
 	goethkzg "github.com/crate-crypto/go-eth-kzg"
 	"github.com/go-chi/chi/v5"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/cl/abstract"
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
@@ -2375,9 +2377,7 @@ func (a *ApiHandler) postBeaconBlocks(r *http.Request, apiVersion int) (*beaconh
 }
 
 // requestBlobBundles returns the blob bundles for every commitment of a published block, so that a
-// beacon node that did not produce the block can still build its sidecars. Bundles this node already
-// has are taken from its cache; the rest come from the request and are KZG-verified. Nothing is
-// written to the cache, since the block itself is validated only later.
+// beacon node that did not produce the block can still build its sidecars.
 func (a *ApiHandler) requestBlobBundles(block *cltypes.DenebSignedBeaconBlock) (map[common.Bytes48]BlobBundle, error) {
 	if block == nil || block.SignedBlock == nil || block.SignedBlock.Block == nil || block.SignedBlock.Block.Body == nil ||
 		block.Blobs == nil || block.Blobs.Len() == 0 {
@@ -2405,19 +2405,43 @@ func (a *ApiHandler) requestBlobBundles(block *cltypes.DenebSignedBeaconBlock) (
 	if commitments.Len() != block.Blobs.Len() || block.KZGProofs == nil || block.KZGProofs.Len() != block.Blobs.Len()*proofsPerBlob {
 		return nil, errors.New("blobs and kzg_proofs do not match the block's blob commitments")
 	}
-	bundles := make(map[common.Bytes48]BlobBundle, block.Blobs.Len())
+	return a.blobBundlesFor(commitments, block.Blobs, block.KZGProofs, proofsPerBlob, cellProofs)
+}
+
+// blobBundlesFor returns a bundle for every commitment. A bundle this node already has is taken from
+// its cache; the rest come from blobs and proofs and are KZG-verified. Nothing is written to the cache,
+// since the caller accepts the data only later. The callers check that the list lengths agree.
+func (a *ApiHandler) blobBundlesFor(
+	commitments *solid.ListSSZ[*cltypes.KZGCommitment],
+	blobs *solid.ListSSZ[*cltypes.Blob],
+	proofs *solid.ListSSZ[*cltypes.KZGProof],
+	proofsPerBlob int,
+	cellProofs bool,
+) (map[common.Bytes48]BlobBundle, error) {
+	requested := make([]BlobBundle, blobs.Len())
+	for i := range requested {
+		commitment, blob := commitments.Get(i), blobs.Get(i)
+		if commitment == nil || blob == nil {
+			return nil, fmt.Errorf("commitment or blob %d is nil", i)
+		}
+		blobProofs := make([]common.Bytes48, proofsPerBlob)
+		for j := range blobProofs {
+			proof := proofs.Get(i*proofsPerBlob + j)
+			if proof == nil {
+				return nil, fmt.Errorf("proof %d of blob %d is nil", j, i)
+			}
+			blobProofs[j] = common.Bytes48(*proof)
+		}
+		requested[i] = BlobBundle{Commitment: common.Bytes48(*commitment), Blob: blob, KzgProofs: blobProofs}
+	}
+	bundles := make(map[common.Bytes48]BlobBundle, len(requested))
 	var unverified []BlobBundle
-	for i := range block.Blobs.Len() {
-		commitment := common.Bytes48(*commitments.Get(i))
-		if cached, ok := a.blobBundles.Get(commitment); ok && len(cached.KzgProofs) == proofsPerBlob {
-			bundles[commitment] = cached
+	for _, bundle := range requested {
+		if cached, ok := a.blobBundles.Get(bundle.Commitment); ok && len(cached.KzgProofs) == proofsPerBlob && cached.Blob != nil {
+			bundles[bundle.Commitment] = cached
 			continue
 		}
-		proofs := make([]common.Bytes48, proofsPerBlob)
-		for j := range proofs {
-			proofs[j] = common.Bytes48(*block.KZGProofs.Get(i*proofsPerBlob + j))
-		}
-		unverified = append(unverified, BlobBundle{Commitment: commitment, Blob: block.Blobs.Get(i), KzgProofs: proofs})
+		unverified = append(unverified, bundle)
 	}
 	if err := verifyBlobBundles(unverified, cellProofs); err != nil {
 		return nil, fmt.Errorf("invalid blob kzg proofs: %w", err)
@@ -2428,8 +2452,9 @@ func (a *ApiHandler) requestBlobBundles(block *cltypes.DenebSignedBeaconBlock) (
 	return bundles, nil
 }
 
-// verifyBlobBundles checks the bundles' KZG proofs. From Fulu on it also keeps each blob's cells on
-// its bundle, so the column build does not compute them again.
+// verifyBlobBundles checks the bundles' KZG proofs. From Fulu on it verifies one cell-proof batch per
+// blob, the blobs in parallel, and keeps each blob's cells on its bundle, so the column build does not
+// compute them again.
 func verifyBlobBundles(bundles []BlobBundle, cellProofs bool) error {
 	if len(bundles) == 0 {
 		return nil
@@ -2445,26 +2470,36 @@ func verifyBlobBundles(bundles []BlobBundle, cellProofs bool) error {
 		}
 		return kzg.Ctx().VerifyBlobKZGProofBatch(blobs, commitments, proofs)
 	}
-	var (
-		commitments []goethkzg.KZGCommitment
-		cellIndices []uint64
-		cells       []*goethkzg.Cell
-		proofs      []goethkzg.KZGProof
-	)
+	g, ctx := errgroup.WithContext(context.Background())
+	g.SetLimit(runtime.GOMAXPROCS(0))
 	for i := range bundles {
-		blobCells, err := peerdasutils.ComputeCells(bundles[i].Blob)
-		if err != nil {
-			return err
-		}
-		bundles[i].Cells = blobCells
-		for j := range blobCells {
-			commitments = append(commitments, goethkzg.KZGCommitment(bundles[i].Commitment))
-			cellIndices = append(cellIndices, uint64(j))
-			cells = append(cells, (*goethkzg.Cell)(&blobCells[j]))
-			proofs = append(proofs, goethkzg.KZGProof(bundles[i].KzgProofs[j]))
-		}
+		g.Go(func() error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			bundle := &bundles[i]
+			blobCells, err := peerdasutils.ComputeCells(bundle.Blob)
+			if err != nil {
+				return err
+			}
+			bundle.Cells = blobCells
+			if len(bundle.KzgProofs) != len(blobCells) {
+				return fmt.Errorf("blob has %d kzg proofs for %d cells", len(bundle.KzgProofs), len(blobCells))
+			}
+			commitments := make([]goethkzg.KZGCommitment, len(blobCells))
+			cellIndices := make([]uint64, len(blobCells))
+			cells := make([]*goethkzg.Cell, len(blobCells))
+			proofs := make([]goethkzg.KZGProof, len(blobCells))
+			for j := range blobCells {
+				commitments[j] = goethkzg.KZGCommitment(bundle.Commitment)
+				cellIndices[j] = uint64(j)
+				cells[j] = (*goethkzg.Cell)(&blobCells[j])
+				proofs[j] = goethkzg.KZGProof(bundle.KzgProofs[j])
+			}
+			return kzg.Ctx().VerifyCellKZGProofBatch(commitments, cellIndices, cells, proofs)
+		})
 	}
-	return kzg.Ctx().VerifyCellKZGProofBatch(commitments, cellIndices, cells, proofs)
+	return g.Wait()
 }
 
 func (a *ApiHandler) forwardPublishedBlockToBuilder(builderURL string, block *cltypes.SignedBeaconBlock) {
@@ -3123,10 +3158,12 @@ func (a *ApiHandler) publishGossip(ctx context.Context, topic string, data []byt
 
 func collectPublishedPayloadData(
 	commitments *solid.ListSSZ[*cltypes.KZGCommitment],
-	isGloas bool,
+	deferMissing bool,
 	lookup func(common.Bytes48) (BlobBundle, bool),
 ) ([]peerdasutils.CellsAndKZGProofs, bool, error) {
 	cellsAndProofs := make([]peerdasutils.CellsAndKZGProofs, 0, commitments.Len())
+	var withoutCells []int
+	var blobsWithoutCells [][]byte
 	for i := 0; i < commitments.Len(); i++ {
 		commitment := commitments.Get(i)
 		if commitment == nil {
@@ -3134,7 +3171,7 @@ func collectPublishedPayloadData(
 		}
 		bundle, ok := lookup(common.Bytes48(*commitment))
 		if !ok {
-			if isGloas {
+			if deferMissing {
 				return nil, true, nil
 			}
 			return nil, false, fmt.Errorf("missing blob bundle for commitment %x", commitment)
@@ -3142,18 +3179,22 @@ func collectPublishedPayloadData(
 		if bundle.Blob == nil {
 			return nil, false, fmt.Errorf("nil blob bundle for commitment %x", commitment)
 		}
-		cells := bundle.Cells
-		if cells == nil {
-			var err error
-			if cells, err = peerdasutils.ComputeCells(bundle.Blob); err != nil {
-				return nil, false, err
-			}
+		if bundle.Cells == nil {
+			withoutCells = append(withoutCells, i)
+			blobsWithoutCells = append(blobsWithoutCells, bundle.Blob[:])
 		}
 		proofs := make([]cltypes.KZGProof, len(bundle.KzgProofs))
 		for i := range proofs {
 			proofs[i] = cltypes.KZGProof(bundle.KzgProofs[i])
 		}
-		cellsAndProofs = append(cellsAndProofs, peerdasutils.CellsAndKZGProofs{Blobs: cells, Proofs: proofs})
+		cellsAndProofs = append(cellsAndProofs, peerdasutils.CellsAndKZGProofs{Blobs: bundle.Cells, Proofs: proofs})
+	}
+	cells, err := peerdasutils.ComputeBlobsCells(blobsWithoutCells)
+	if err != nil {
+		return nil, false, err
+	}
+	for j, i := range withoutCells {
+		cellsAndProofs[i].Blobs = cells[j]
 	}
 	return cellsAndProofs, false, nil
 }
@@ -3657,7 +3698,11 @@ func (a *ApiHandler) findBestAttestationsForBlockProduction(
 		}
 	}
 
-	attestationCandidates := []attestationCandidate{}
+	candidateCount := 0
+	for _, atts := range hashToAtts {
+		candidateCount += len(atts)
+	}
+	attestationCandidates := make([]attestationCandidate, 0, candidateCount)
 	for _, atts := range hashToAtts {
 		for _, att := range atts {
 			candidate, err := newAttestationCandidate(s, att)

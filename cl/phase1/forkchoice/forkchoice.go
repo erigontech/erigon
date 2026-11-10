@@ -138,6 +138,8 @@ type ForkChoiceStore struct {
 	// childrens
 	childrens sync.Map
 
+	hasEquivocator bool
+
 	// Use go map because this is actually an unordered set
 	equivocatingIndicies []byte
 	forkGraph            fork_graph.ForkGraph
@@ -438,7 +440,14 @@ func NewForkChoiceStore(
 	publicKeysRegistry.ResetAnchor(anchorState)
 	participation.Add(state.Epoch(anchorState.BeaconState), anchorState.CurrentEpochParticipation().Copy())
 
-	totalActiveBalances.Add(anchorRoot, anchorState.GetTotalActiveBalance())
+	// The caller's anchor state can carry a stale cached total, so take it from the fork graph's rescanned copy.
+	anchorTotalActiveBalance := anchorState.GetTotalActiveBalance()
+	if forkGraph != nil {
+		if current := forkGraph.CurrentStateLocked(anchorRoot); current != nil {
+			anchorTotalActiveBalance = current.GetTotalActiveBalance()
+		}
+	}
+	totalActiveBalances.Add(anchorRoot, anchorTotalActiveBalance)
 	r := solid.NewHashVector(int(anchorState.BeaconConfig().EpochsPerHistoricalVector))
 	anchorState.RandaoMixes().CopyTo(r)
 	randaoMixesLists.Add(anchorRoot, r)
@@ -683,9 +692,9 @@ func (f *ForkChoiceStore) HasImportedDescendantAfter(root common.Hash, slot uint
 	return false
 }
 
-// markViableUncutBlocks is getFilterBlockTree without the children an invalidation cut off: a
-// block whose other children are all cut off is judged as a leaf, as get_head judges its EMPTY
-// node.
+// markViableUncutBlocks collects the viable blocks of the subtree, skipping children an
+// invalidation cut off. A block whose children are all cut off is judged as a leaf, as get_head
+// judges its EMPTY node.
 func (f *ForkChoiceStore) markViableUncutBlocks(blockRoot common.Hash, blocks map[common.Hash]*cltypes.BeaconBlockHeader, currentEpoch uint64, justified solid.Checkpoint) bool {
 	header, has := f.forkGraph.GetHeader(blockRoot)
 	if !has {
@@ -844,6 +853,12 @@ func (f *ForkChoiceStore) copyCurrentStateLocked(blockRoot common.Hash) (*state.
 	}
 	start := time.Now()
 	defer currentStateCopy.ObserveDuration(start)
+	if f.totalActiveBalances != nil {
+		if total, ok := f.totalActiveBalances.Get(blockRoot); ok {
+			copied, err := current.CopyWithTotalActiveBalance(total)
+			return copied, true, err
+		}
+	}
 	copied, err := current.Copy()
 	return copied, true, err
 }
@@ -1539,16 +1554,6 @@ func (f *ForkChoiceStore) addPendingPartialWithdrawals(blockRoot common.Hash, pe
 		}
 	}
 	f.partialWithdrawals.Add(blockRoot, pendingPartialWithdrawals.ShallowCopy())
-	return nil
-}
-
-func (f *ForkChoiceStore) addProposerLookahead(slot uint64, proposerLookahead solid.Uint64VectorSSZ) error {
-	epoch := slot / f.beaconCfg.SlotsPerEpoch
-	if _, ok := f.proposerLookahead.Get(epoch); !ok {
-		pl := solid.NewUint64VectorSSZ(proposerLookahead.Length())
-		proposerLookahead.CopyTo(pl)
-		f.proposerLookahead.Add(epoch, pl)
-	}
 	return nil
 }
 

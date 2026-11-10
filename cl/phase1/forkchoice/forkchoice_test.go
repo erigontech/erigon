@@ -1941,6 +1941,14 @@ func (g *getFinalizedExecutionHashForkGraph) AddChainSegment(*cltypes.SignedBeac
 	return nil, g.addChainSegmentStatus, g.addChainSegmentErr
 }
 
+func (g *getFinalizedExecutionHashForkGraph) BeginChainSegment(*cltypes.SignedBeaconBlock, bool) (*fork_graph.ChainSegment, fork_graph.ChainSegmentInsertionResult, error) {
+	return nil, fork_graph.ReplayRequired, nil
+}
+
+func (g *getFinalizedExecutionHashForkGraph) CommitChainSegment(*fork_graph.ChainSegment) (*state.CachingBeaconState, fork_graph.ChainSegmentInsertionResult, error) {
+	panic("BeginChainSegment never starts a segment")
+}
+
 func (g *getFinalizedExecutionHashForkGraph) SetNextEpochState(common.Hash, *state.CachingBeaconState) {
 }
 

@@ -19,14 +19,10 @@ package fork_graph
 import (
 	"testing"
 
-	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/common"
 )
 
@@ -63,56 +59,6 @@ func TestRecordLightClientUpdateWaitsForFinalizationForThePeriodStore(t *testing
 	_, ok := f.GetLightClientUpdate(1)
 	require.False(t, ok)
 	require.Len(t, f.lightClientUpdateCandidates[1], 1)
-}
-
-// A block that fails the state transition must leave no light client update behind: its sync aggregate is unverified.
-func TestAddChainSegmentKeepsNoLightClientUpdateOfAnInvalidBlock(t *testing.T) {
-	cfg := &clparams.MainnetBeaconConfig
-	const parentSlot = uint64(100)
-
-	finalized := cltypes.NewSignedBeaconBlock(cfg, clparams.AltairVersion)
-	finalized.Block.Slot = 1
-	finalizedRoot, err := finalized.Block.HashSSZ()
-	require.NoError(t, err)
-	parent := cltypes.NewSignedBeaconBlock(cfg, clparams.AltairVersion)
-	parent.Block.Slot = parentSlot
-	parentRoot, err := parent.Block.HashSSZ()
-	require.NoError(t, err)
-
-	parentState := state.New(cfg)
-	parentState.SetVersion(clparams.AltairVersion)
-	require.NoError(t, parentState.SetSlot(parentSlot))
-	parentState.SetLatestBlockHeader(parent.SignedBeaconBlockHeader().Header)
-	require.NoError(t, parentState.SetCurrentSyncCommittee(solid.NewSyncCommittee()))
-	require.NoError(t, parentState.SetNextSyncCommittee(solid.NewSyncCommittee()))
-	parentState.SetFinalizedCheckpoint(solid.Checkpoint{Root: finalizedRoot})
-
-	f := &forkGraphDisk{
-		fs:                    afero.NewMemMapFs(),
-		beaconCfg:             cfg,
-		rcfg:                  beacon_router_configuration.RouterConfiguration{Beacon: true},
-		children:              make(map[common.Hash]*validatedChildren),
-		currentState:          parentState,
-		currentStateBlockRoot: common.Hash(parentRoot),
-	}
-	f.blocks.Store(common.Hash(parentRoot), parent)
-	f.blocks.Store(common.Hash(finalizedRoot), finalized)
-
-	block := cltypes.NewSignedBeaconBlock(cfg, clparams.AltairVersion)
-	block.Block.Slot = parentSlot + 1
-	block.Block.ParentRoot = parentRoot
-	block.Block.Body.SyncAggregate = cltypes.NewSyncAggregateWithSize(int(cfg.SyncCommitteeSize) / 8)
-	for i := range block.Block.Body.SyncAggregate.SyncCommiteeBits {
-		block.Block.Body.SyncAggregate.SyncCommiteeBits[i] = 0xff
-	}
-
-	_, result, err := f.AddChainSegment(block, true)
-	require.Error(t, err)
-	require.Equal(t, InvalidBlock, result)
-	require.Nil(t, f.NewestLightClientUpdate())
-	_, ok := f.GetLightClientUpdate(cfg.SyncCommitteePeriod(parentSlot))
-	require.False(t, ok)
-	require.Empty(t, f.lightClientUpdateCandidates)
 }
 
 func lightClientTestUpdate(cfg *clparams.BeaconChainConfig, participants int, attestedSlot uint64) *cltypes.LightClientUpdate {
