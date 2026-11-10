@@ -115,6 +115,9 @@ func TestConfigFromCLI(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 9645, cfg.HTTPPort)
 	require.Equal(t, []string{"eth", "eez"}, cfg.HTTPAPI)
+	cfg, err = parse(t, "--eez.enabled", "--eez.chain=eez-devnet", "--eez.http.api= eth, debug,,eez ")
+	require.NoError(t, err)
+	require.Equal(t, []string{"eth", "debug", "eez"}, cfg.HTTPAPI, "spaces and empty entries")
 	_, err = parse(t, "--eez.enabled", "--eez.l1.rpc=http://l1:8545", "--eez.http.port=9645")
 	require.ErrorIs(t, err, ErrConfig, "--eez.http.port without --eez.chain")
 

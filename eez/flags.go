@@ -171,7 +171,7 @@ func ConfigFromCLI(cmd *cli.Command) (*Config, error) {
 	}
 	if c.Chain != "" {
 		c.HTTPPort = int(cmd.Int(HTTPPortFlag.Name))
-		c.HTTPAPI = strings.Split(cmd.String(HTTPAPIFlag.Name), ",")
+		c.HTTPAPI = common.CliString2Array(cmd.String(HTTPAPIFlag.Name))
 	} else {
 		for _, f := range []cli.Flag{&HTTPPortFlag, &HTTPAPIFlag} {
 			if name := f.Names()[0]; cmd.IsSet(name) {
