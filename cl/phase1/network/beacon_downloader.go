@@ -1149,7 +1149,7 @@ type fetchEnvelopeHTTPResult struct {
 	fetched int
 }
 
-// fetchEnvelopesFromBeaconAPI fetches envelopes for requested roots not present in received.
+// fetchEnvelopesFromBeaconAPI fetches envelopes for the requested block roots.
 // Callers must check bid commitments and the payload hash before treating an envelope as available.
 func fetchEnvelopesFromBeaconAPI(
 	ctx context.Context,
@@ -1180,9 +1180,6 @@ func fetchEnvelopesFromBeaconAPI(
 	}
 	for _, root := range fullRoots {
 		h := common.Hash(root)
-		if _, ok := received[h]; ok {
-			continue
-		}
 		slot, ok := rootToSlot[h]
 		if !ok {
 			continue
