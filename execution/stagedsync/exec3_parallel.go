@@ -1318,7 +1318,7 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 					executor.coinbase, *tx.GetValue(), txTask.Hooks, txTask.Rules(), blockStart) {
 					// Credited at validation: a later user of the recipient still waits for it.
 					prevAccountTx[to] = i
-				} else {
+				} else if !ok || !precompileCallRunsOutOfGas(txTask, accounts.InternAddress(to)) {
 					addresses = append(addresses, to)
 				}
 			}
@@ -2344,6 +2344,14 @@ func touchedSenderAccount(txTask *exec.TxTask, result *exec.TxResult) bool {
 	_, wroteBalance := result.TxOut.GetBalance(sender)
 	_, wroteNonce := result.TxOut.GetNonce(sender)
 	return readBalance || readNonce || wroteBalance || wroteNonce
+}
+
+func precompileCallRunsOutOfGas(txTask *exec.TxTask, to accounts.Address) bool {
+	if _, ok := vm.Precompiles(txTask.Rules())[to]; !ok {
+		return false
+	}
+	msg, err := txTask.TxMessage()
+	return err == nil && protocol.PrecompileCallRunsOutOfGas(msg, txTask.Rules())
 }
 
 // chargeSenderAtValidation returns the sender charge writes and the account it charged, or nil when the sender's nonce or balance after prior txs rejects the tx.
