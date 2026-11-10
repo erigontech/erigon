@@ -943,6 +943,49 @@ func (branchData BranchData) MergeHexBranches(branchData2 BranchData, newData []
 	return newData, nil
 }
 
+// AccountLeafStorageKey reports whether the cell at nibble holds an account and returns the storage key the cell keeps,
+// which only a single-slot storage trie leaves there.
+func (branchData BranchData) AccountLeafStorageKey(nibble int) (isAccount bool, storageKey []byte, err error) {
+	if len(branchData) < 4 {
+		return false, nil, nil
+	}
+	touchMap := binary.BigEndian.Uint16(branchData[0:])
+	afterMap := binary.BigEndian.Uint16(branchData[2:])
+	pos := 4
+	for bitset := touchMap & afterMap; bitset != 0; bitset &= bitset - 1 {
+		if pos >= len(branchData) {
+			return false, nil, errors.New("AccountLeafStorageKey: buffer too small for cell fields")
+		}
+		fields := cellFields(branchData[pos])
+		pos++
+		var account, storage []byte
+		for flag := fieldExtension; flag <= fieldStateHash; flag <<= 1 {
+			if fields&flag == 0 {
+				continue
+			}
+			l, n, err := readUvarint(branchData[pos:])
+			if err != nil {
+				return false, nil, err
+			}
+			pos += n
+			if l > uint64(len(branchData)-pos) {
+				return false, nil, fmt.Errorf("AccountLeafStorageKey: buffer too small for %v", flag)
+			}
+			switch flag {
+			case fieldAccountAddr:
+				account = branchData[pos : pos+int(l)]
+			case fieldStorageAddr:
+				storage = branchData[pos : pos+int(l)]
+			}
+			pos += int(l)
+		}
+		if bits.TrailingZeros16(bitset) == nibble {
+			return len(account) > 0, storage, nil
+		}
+	}
+	return false, nil, nil
+}
+
 func (branchData BranchData) decodeCells() (touchMap, afterMap uint16, row [16]*cell, err error) {
 	touchMap = binary.BigEndian.Uint16(branchData[0:])
 	afterMap = binary.BigEndian.Uint16(branchData[2:])

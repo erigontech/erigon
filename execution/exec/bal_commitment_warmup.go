@@ -272,17 +272,15 @@ func withTemporalTx(ctx context.Context, db kv.RoDB, fn func(ttx kv.TemporalTx))
 	return nil
 }
 
-// keysWithChild keeps the keys whose branch at depth has their next nibble.
-// A key whose path ends above depth has no branch there, so checks at shallower depths can be skipped.
-func keysWithChild(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, keys [][]byte, depth int) [][]byte {
-	keep := make([]bool, len(keys))
+// forEachKeyBranch calls visit with the raw branch at depth of each key that reaches it; the branch is nil when absent
+// and is valid only during the call.
+func forEachKeyBranch(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, keys [][]byte, depth int, visit func(i int, branch []byte)) {
 	inChunks(ctx, db, ttx, len(keys), max(1, min(prefetchPar, len(keys)/256)), func(tx kv.TemporalTx, from, to int) {
-		// Only the child bitmap is needed: a raw branch skips the reads that resolve shortened keys.
+		// Only the cells are needed: a raw branch skips the reads that resolve shortened keys.
 		raw, rawOK := tx.AggTx().(rawBranchReader)
 		compact := make([]byte, 0, 128)
 		// Keys are sorted, so keys sharing a branch are adjacent: read it once.
-		var lastPrefix []byte
-		var bits uint16
+		var lastPrefix, branch []byte
 		for i := from; i < to && ctx.Err() == nil; i++ {
 			k := keys[i]
 			if depth >= len(k) {
@@ -290,22 +288,27 @@ func keysWithChild(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, keys [][]
 			}
 			if lastPrefix == nil || !bytes.Equal(lastPrefix, k[:depth]) {
 				prefix := nibbles.HexToCompactInto(compact[:cap(compact)], k[:depth])
-				var branch []byte
 				var err error
 				if rawOK {
 					branch, _, err = raw.GetLatestBranchRaw(prefix, tx)
 				} else {
 					branch, _, err = tx.GetLatest(kv.CommitmentDomain, prefix, kv.GetLatestOptions{})
 				}
-				bits = 0
-				if err == nil && len(branch) >= 4 {
-					bits = binary.BigEndian.Uint16(branch[2:4])
+				if err != nil {
+					branch = nil
 				}
 				lastPrefix = k[:depth]
 			}
-			keep[i] = bits&(uint16(1)<<k[depth]) != 0
+			visit(i, branch)
 		}
 	})
+}
+
+func branchHasChild(branch []byte, nibble byte) bool {
+	return len(branch) >= 4 && binary.BigEndian.Uint16(branch[2:4])&(uint16(1)<<nibble) != 0
+}
+
+func keptKeys(keys [][]byte, keep []bool) [][]byte {
 	next := keys[:0:0]
 	for i, k := range keys {
 		if keep[i] {
@@ -313,6 +316,56 @@ func keysWithChild(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, keys [][]
 		}
 	}
 	return next
+}
+
+// keysWithChild keeps the keys whose branch at depth has their next nibble.
+// A key whose path ends above depth has no branch there, so checks at shallower depths can be skipped.
+func keysWithChild(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, keys [][]byte, depth int) [][]byte {
+	keep := make([]bool, len(keys))
+	forEachKeyBranch(ctx, db, ttx, keys, depth, func(i int, branch []byte) {
+		keep[i] = branchHasChild(branch, keys[i][depth])
+	})
+	return keptKeys(keys, keep)
+}
+
+// accountLeafSlotKeys returns the plain storage keys held by the account leaf cells of accountKeys. A leaf keeps the key
+// of a single-slot storage trie but not its hash, so the fold reads that slot for each changed account.
+func accountLeafSlotKeys(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, accountKeys [][]byte) [][]byte {
+	var mu sync.Mutex
+	var slots [][]byte
+	active := accountKeys
+	for depth := 0; len(active) > 0 && depth < storageTrieDepth && ctx.Err() == nil; depth++ {
+		keys, keep := active, make([]bool, len(active))
+		forEachKeyBranch(ctx, db, ttx, keys, depth, func(i int, branch []byte) {
+			nibble := keys[i][depth]
+			if !branchHasChild(branch, nibble) {
+				return
+			}
+			isAccount, slot, err := commitment.BranchData(branch).AccountLeafStorageKey(int(nibble))
+			if err != nil {
+				return
+			}
+			if !isAccount {
+				keep[i] = true
+				return
+			}
+			if len(slot) == length.Addr+length.Hash {
+				mu.Lock()
+				slots = append(slots, bytes.Clone(slot))
+				mu.Unlock()
+			}
+		})
+		active = keptKeys(keys, keep)
+	}
+	return slots
+}
+
+func prefetchAccountLeafSlots(ctx context.Context, db kv.RoDB, accountKeys [][]byte) error {
+	var err error
+	txErr := withTemporalTx(ctx, db, func(ttx kv.TemporalTx) {
+		err = prefetchKeys(ctx, db, ttx, kv.StorageDomain, accountLeafSlotKeys(ctx, db, ttx, accountKeys))
+	})
+	return cmp.Or(txErr, err)
 }
 
 // prefetchKeys spreads keys over prefetchPar read txs and returns the first read failure (see firstFailure).
@@ -456,16 +509,23 @@ func prefetchCommitment(ctx context.Context, db kv.RoDB, hashedKeys [][]byte) er
 		if err = prefetchKeys(ctx, db, ttx, kv.CommitmentDomain, flatPrefixes(hashedKeys)); err != nil {
 			return
 		}
-		var storageKeys [][]byte
+		var storageKeys, accountKeys [][]byte
 		for _, k := range hashedKeys {
 			if len(k) > storageTrieDepth {
 				storageKeys = append(storageKeys, k)
+			} else {
+				accountKeys = append(accountKeys, k)
 			}
 		}
+		var wg sync.WaitGroup
+		var slotErr error
+		wg.Go(func() { slotErr = prefetchAccountLeafSlots(ctx, db, accountKeys) })
 		// The account trie walk loses a storage key at the extension above its account, so storage tries start again at their root.
 		if err = walkTriePrefixes(ctx, db, ttx, hashedKeys, 0); err == nil {
 			err = walkTriePrefixes(ctx, db, ttx, storageKeys, storageTrieDepth)
 		}
+		wg.Wait()
+		err = firstFailure(err, slotErr)
 	})
 	return cmp.Or(txErr, err)
 }

@@ -19,6 +19,7 @@ package exec
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"slices"
 	"sync"
@@ -532,4 +533,82 @@ func TestFirstFailurePrefersAReadFailureOverAnIncompleteBatch(t *testing.T) {
 	require.Equal(t, failed, firstFailure(context.Canceled, failed), "a cancelled chunk does not hide a read failure")
 	require.Equal(t, kv.ErrPrefetchIncomplete, firstFailure(nil, kv.ErrPrefetchIncomplete))
 	require.NoError(t, firstFailure(nil, nil))
+}
+
+// leafTrie serves raw commitment branches and records the keys each domain is asked to prefetch.
+type leafTrie struct {
+	branches map[string][]byte
+	mu       sync.Mutex
+	read     map[kv.Domain][][]byte
+}
+
+func (t *leafTrie) GetLatestBranchRaw(prefix []byte, _ kv.Tx) ([]byte, bool, error) {
+	b, ok := t.branches[string(prefix)]
+	return b, ok, nil
+}
+
+func (t *leafTrie) PrefetchLatest(_ context.Context, domain kv.Domain, keys [][]byte) (int, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.read[domain] = append(t.read[domain], keys...)
+	return len(keys), nil
+}
+
+func branchOfNibbles(cells map[byte][]byte) []byte {
+	var bitmap uint16
+	for nibble := range cells {
+		bitmap |= uint16(1) << nibble
+	}
+	branch := binary.BigEndian.AppendUint16(binary.BigEndian.AppendUint16(nil, bitmap), bitmap)
+	for nibble := range byte(16) {
+		branch = append(branch, cells[nibble]...)
+	}
+	return branch
+}
+
+func cellWithKeys(fields byte, keys ...[]byte) []byte {
+	cell := []byte{fields}
+	for _, key := range keys {
+		cell = append(append(cell, byte(len(key))), key...)
+	}
+	return cell
+}
+
+func accountKey(path ...byte) []byte {
+	key := make([]byte, storageTrieDepth)
+	copy(key, path)
+	return key
+}
+
+// singleSlotTrie has a root with an inner child 0 whose branch holds three account leaves at nibbles 1, 2 and 3:
+// a plain single slot, no slot, and a shortened slot key.
+func singleSlotTrie(slot []byte) *leafTrie {
+	compact := func(path ...byte) string { return string(nibbles.HexToCompactInto(nil, path)) }
+	account := make([]byte, 20)
+	return &leafTrie{
+		read: map[kv.Domain][][]byte{},
+		branches: map[string][]byte{
+			compact(): branchOfNibbles(map[byte][]byte{0: cellWithKeys(0x08, make([]byte, 32))}),
+			compact(0): branchOfNibbles(map[byte][]byte{
+				1: cellWithKeys(0x06, account, slot),
+				2: cellWithKeys(0x02, account),
+				3: cellWithKeys(0x06, account, []byte{0x81, 0x02}),
+			}),
+		},
+	}
+}
+
+func TestAccountLeafSlotKeysKeepsThePlainSlotOfEachAccountLeaf(t *testing.T) {
+	slot := bytes.Repeat([]byte{0xbb}, 52)
+	trie := singleSlotTrie(slot)
+	keys := [][]byte{accountKey(0, 1), accountKey(0, 2), accountKey(0, 3), accountKey(0, 4), accountKey(1)}
+	got := accountLeafSlotKeys(context.Background(), prefetcherDB{p: trie}, prefetcherTx{p: trie}, keys)
+	require.Equal(t, [][]byte{slot}, got)
+}
+
+func TestPrefetchCommitmentReadsTheSingleSlotOfChangedAccounts(t *testing.T) {
+	slot := bytes.Repeat([]byte{0xbb}, 52)
+	trie := singleSlotTrie(slot)
+	require.NoError(t, prefetchCommitment(context.Background(), prefetcherDB{p: trie}, [][]byte{accountKey(0, 1)}))
+	require.Equal(t, [][]byte{slot}, trie.read[kv.StorageDomain])
 }
