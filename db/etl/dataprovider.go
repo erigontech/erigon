@@ -48,7 +48,10 @@ type fileDataProvider struct {
 	prefetched int
 }
 
-const spillPrefetch = 2 << 20
+const (
+	spillPrefetch     = 2 << 20
+	spillPrefetchCall = 128 << 10
+)
 
 // mmapBytesReader tracks position for reading from mmap'd data
 type mmapBytesReader struct {
@@ -138,7 +141,9 @@ func (p *fileDataProvider) Next() ([]byte, []byte, error) {
 	}
 	if p.prefetched < len(p.mmapData) && p.mmapReader.pos+spillPrefetch/2 >= p.prefetched {
 		end := min(p.prefetched+spillPrefetch, len(p.mmapData))
-		_ = mmap.MadviseWillNeed(p.mmapData[p.prefetched:end])
+		for off := p.prefetched; off < end; off += spillPrefetchCall {
+			_ = mmap.MadviseWillNeed(p.mmapData[off:min(off+spillPrefetchCall, end)])
+		}
 		p.prefetched = end
 	}
 	key, err := readKeyField(p.mmapReader)
