@@ -77,7 +77,7 @@ func (a *Accumulator) SendAndReset(ctx context.Context, c StateChangeConsumer, p
 	if c != nil {
 		c.SendStateChanges(ctx, batch.ToProtoBatch())
 	}
-	a.Reset(0) // reset here for GC, but there will be another Reset with correct viewID
+	a.Reset(0)
 }
 
 func (a *Accumulator) SetStateID(stateID uint64) {
