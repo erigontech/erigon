@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -334,4 +335,10 @@ func TestInstallSqueezedFile(t *testing.T) {
 
 		require.FileExists(t, original)
 	})
+}
+
+func TestRequireFreeDiskSpace(t *testing.T) {
+	t.Parallel()
+	require.NoError(t, requireFreeDiskSpace(t.TempDir(), 0))
+	require.ErrorContains(t, requireFreeDiskSpace(t.TempDir(), math.MaxUint64), "squeeze needs")
 }

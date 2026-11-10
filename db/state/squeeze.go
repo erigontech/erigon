@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/db/version"
+	"github.com/shirou/gopsutil/v4/disk"
 
 	"github.com/c2h5oh/datasize"
 
@@ -186,6 +187,14 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 		return errors.New("no account files found")
 	}
 
+	var neededDisk uint64
+	for _, f := range sf.d[kv.CommitmentDomain] {
+		neededDisk += uint64(f.decompressor.Size())
+	}
+	if err := requireFreeDiskSpace(dirs.SnapDomain, neededDisk); err != nil {
+		return err
+	}
+
 	var (
 		squeezed       []squeezedFile
 		processedFiles int
@@ -320,6 +329,20 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 	}
 	logger.Info("[squeeze_migration] done", "sizeDelta", sizeDelta.HR(), "files", len(ranges))
 
+	return nil
+}
+
+// requireFreeDiskSpace refuses a squeeze that could run out of disk half way. The originals stay until the end,
+// so the squeezed files need room next to them, and the size of the originals bounds theirs.
+func requireFreeDiskSpace(path string, needed uint64) error {
+	usage, err := disk.Usage(path)
+	if err != nil {
+		return fmt.Errorf("squeeze: free disk space of %s: %w", path, err)
+	}
+	if usage.Free < needed {
+		return fmt.Errorf("squeeze needs %s free in %s for the squeezed commitment files, but only %s is available",
+			datasize.ByteSize(needed).HR(), path, datasize.ByteSize(usage.Free).HR())
+	}
 	return nil
 }
 
