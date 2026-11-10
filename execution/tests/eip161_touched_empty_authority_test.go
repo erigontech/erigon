@@ -94,13 +94,14 @@ func callCode(addr common.Address, value byte) []byte {
 }
 
 // A transaction touches an empty account, by a zero-value call (also when the
-// account is the burnt-fee recipient and the burn is zero) or by paying it a
-// zero tip as the coinbase, so EIP-161 removes it at the end of that
-// transaction. A later transaction in the
+// account is the burnt-fee recipient and the burn is zero), by paying it a
+// zero tip as the coinbase or by naming it as a self-destruct beneficiary, so
+// EIP-161 removes it at the end of that transaction. A later transaction in the
 // block, from another sender, uses the account as an EIP-7702 authority, whose
 // gas depends on whether the authority exists: it must cost the same as for an
 // authority that never existed. The touch comes after a long loop, so the
 // parallel executor usually runs the authorization first and must invalidate it.
+// The blocks with and without the empty account must both import.
 func TestTouchedEmptyAuthorityIsAbsentForLaterTx(t *testing.T) {
 	// This test changes the worker count and cannot run in parallel.
 	prevWorkers := ethconfig.Defaults.Sync.ExecWorkerCount
@@ -113,7 +114,7 @@ func TestTouchedEmptyAuthorityIsAbsentForLaterTx(t *testing.T) {
 	authorityKey, err := crypto.HexToECDSA("9a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
 	require.NoError(t, err)
 	authority := crypto.PubkeyToAddress(authorityKey.PublicKey)
-	// Count down from 30000, then CALL the authority with no value.
+	// Count down from 30000 before the touch.
 	loop := []byte{
 		byte(vm.PUSH2), 0x75, 0x30, byte(vm.JUMPDEST), byte(vm.PUSH1), 1, byte(vm.SWAP1), byte(vm.SUB),
 		byte(vm.DUP1), byte(vm.PUSH1), 3, byte(vm.JUMPI), byte(vm.POP),
@@ -131,6 +132,7 @@ func TestTouchedEmptyAuthorityIsAbsentForLaterTx(t *testing.T) {
 		{"zero-value call", common.Address{1}, 1, append(loop, callCode(authority, 0)...), false},
 		{"zero tip", authority, 0, append(loop, byte(vm.STOP)), false},
 		{"zero burn", common.Address{1}, 1, append(loop, callCode(authority, 0)...), true},
+		{"self-destruct beneficiary", common.Address{1}, 1, append(append(loop, byte(vm.PUSH20)), append(authority[:], byte(vm.SELFDESTRUCT))...), false},
 	} {
 		for _, fork := range eip161TouchForks {
 			t.Run(tc.name+"/"+fork.name, func(t *testing.T) {
@@ -182,9 +184,10 @@ func TestTouchedEmptyAuthorityIsAbsentForLaterTx(t *testing.T) {
 				}
 
 				gspec := genesis(true)
-				want := generateEIP161TouchBlock(t, genesis(false), keys[0], fill).Receipts[0][1].GasUsed
+				absent := generateEIP161TouchBlock(t, genesis(false), keys[0], fill)
+				importEIP161TouchBlock(t, genesis(false), keys[0], absent)
 				chainPack := generateEIP161TouchBlock(t, gspec, keys[0], fill)
-				require.Equal(t, want, chainPack.Receipts[0][1].GasUsed, "authorization gas")
+				require.Equal(t, absent.Receipts[0][1].GasUsed, chainPack.Receipts[0][1].GasUsed, "authorization gas")
 				importEIP161TouchBlock(t, gspec, keys[0], chainPack)
 			})
 		}
