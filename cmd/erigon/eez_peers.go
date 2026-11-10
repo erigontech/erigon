@@ -17,6 +17,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"path/filepath"
@@ -91,6 +92,45 @@ func configureFollowerPeers(p *p2p.Config, dns []string, chainConfig *chain.Conf
 		}
 	}
 	return nil
+}
+
+// configureAllInOneNetwork gives n and e, the node of the EEZ chain of an
+// all-in-one node, the network of the chain they run. The plain devp2p
+// flags are the L1's: on an R0 chain the EEZ chain runs its own sentry once
+// one of the --eez.* devp2p flags of cfg is set, with its node key and node
+// database under its datadir, discovery only from cfg.Bootnodes, the L1's
+// node name, NAT, netrestrict and metrics, and Erigon's defaults otherwise.
+// On a RollupX chain it runs no sentry.
+func configureAllInOneNetwork(ctx context.Context, n *nodecfg.Config, e *ethconfig.Config, cfg *eez.Config, logger log.Logger) error {
+	chainConfig, own, err := followerChain(ctx, n.Dirs, e, logger)
+	if err != nil {
+		return err
+	}
+	if !own {
+		e.NetworkID = chainConfig.ChainID.Uint64()
+	}
+	peers := len(cfg.Bootnodes)+len(cfg.StaticPeers)+len(cfg.TrustedPeers) > 0
+	if l2, ok := chainConfig.L2.(*config.L2Config); ok && l2.RollupX != nil || !peers && cfg.Port == 0 {
+		n.P2P.MaxPeers, n.P2P.NoDiscovery = 0, true
+		n.DisableSentry = true
+		return nil
+	}
+	port := cmp.Or(cfg.Port, int(eez.PortFlag.Value))
+	if port == n.P2P.ListenPort() {
+		return fmt.Errorf("%w: --%s %d is the L1's --%s", eez.ErrConfig, eez.PortFlag.Name, port, utils.ListenPortFlag.Name)
+	}
+	key, err := p2p.NodeKeyConfig{}.LoadOrGenerateAndSave(filepath.Join(n.Dirs.DataDir, "nodekey"))
+	if err != nil {
+		return err
+	}
+	host := n.P2P
+	p := nodecfg.DefaultConfig.P2P
+	p.Name, p.NAT, p.NATSpec, p.NetRestrict, p.MetricsEnabled = host.Name, host.NAT, host.NATSpec, host.NetRestrict, host.MetricsEnabled
+	p.PrivateKey, p.ListenAddr, p.TmpDir = key, fmt.Sprintf(":%d", port), n.Dirs.Tmp
+	p.BootstrapNodes, p.BootstrapNodesV5, p.NoDiscovery = cfg.Bootnodes, cfg.Bootnodes, len(cfg.Bootnodes) == 0
+	p.StaticNodes, p.TrustedNodes = slices.Clone(cfg.StaticPeers), slices.Clone(cfg.TrustedPeers)
+	n.P2P = p
+	return configureFollowerPeers(&n.P2P, nil, chainConfig)
 }
 
 // followerChain returns the chain config the node of dirs runs, the one its

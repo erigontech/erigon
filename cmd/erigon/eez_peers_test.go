@@ -18,14 +18,18 @@ package main
 
 import (
 	"context"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v3"
 
 	erigonnode "github.com/erigontech/erigon/cmd/erigon/node"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -33,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/eez"
+	"github.com/erigontech/erigon/eez/config"
 	"github.com/erigontech/erigon/eez/networks"
 	"github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
@@ -209,4 +214,112 @@ func TestConfigureFollowerNetwork(t *testing.T) {
 	n, _, err = followerConfigs(t, initialised(t, networks.Chiado699169))
 	require.NoError(t, err, "a RollupX genesis file under the default --chain")
 	require.True(t, n.P2P.NoDial)
+}
+
+// TestAllInOneNetwork: the EEZ chain of an all-in-one node runs its own
+// sentry once an --eez.* devp2p flag is set: on --eez.port, with a node key
+// generated once in <datadir>/eez/nodekey and its node database under
+// <datadir>/eez, discovery only from --eez.bootnodes, trusted peers dialled,
+// the L1's node name, NAT, netrestrict and metrics, Erigon's defaults
+// otherwise, and none of the L1's port, key, peers, discovery, protocols or
+// external sentry. Without those flags, and on a RollupX chain, it runs no
+// sentry. --eez.port must differ from the L1's --port. A chain initialised
+// from a genesis file takes its chain id as network id.
+func TestAllInOneNetwork(t *testing.T) {
+	eez.Register()
+	boot, s, tr := enode.MustParse(bootnode), enode.MustParse(static), enode.MustParse(trusted)
+	l1Only := true
+	// Spare capacity: the node's peer list must not share the flags' array.
+	cfg := &eez.Config{
+		Chain: networks.Devnet.Name, HTTPPort: 8645, SyncL1Only: &l1Only,
+		StaticPeers: append(make([]*enode.Node, 0, 4), s), TrustedPeers: []*enode.Node{tr},
+	}
+	l1Node, l1Eth := l1Configs(t, 1337)
+	keyFile := filepath.Join(l1Node.Dirs.DataDir, "eez", "nodekey")
+
+	n, e, err := allInOneConfigs(t.Context(), l1Node, l1Eth, cfg, log.New())
+	require.NoError(t, err)
+	require.False(t, n.DisableSentry)
+	require.Equal(t, ":30403", n.P2P.ListenAddr, "default port")
+	key, err := crypto.LoadECDSA(keyFile)
+	require.NoError(t, err)
+	require.True(t, key.Equal(n.P2P.PrivateKey))
+	require.False(t, key.Equal(l1Node.P2P.PrivateKey))
+	require.Equal(t, filepath.Join(l1Node.Dirs.DataDir, "eez", "nodes"), n.Dirs.Nodes)
+	require.Equal(t, n.Dirs.Tmp, n.P2P.TmpDir)
+	require.True(t, n.P2P.NoDiscovery)
+	require.Empty(t, n.P2P.BootstrapNodes)
+	require.Empty(t, n.P2P.BootstrapNodesV5)
+	require.Equal(t, []*enode.Node{s, tr}, n.P2P.StaticNodes, "trusted peers dialled")
+	require.Equal(t, []*enode.Node{tr}, n.P2P.TrustedNodes)
+	require.Equal(t, []*enode.Node{s}, cfg.StaticPeers)
+	require.Equal(t, []uint{direct.ETH68, direct.ETH69}, n.P2P.ProtocolVersion)
+	require.Equal(t, nodecfg.DefaultConfig.P2P.MaxPeers, n.P2P.MaxPeers)
+	require.Empty(t, n.P2P.SentryAddr)
+	require.Equal(t, l1Node.P2P.Name, n.P2P.Name)
+	require.Equal(t, l1Node.P2P.NAT, n.P2P.NAT)
+	require.Equal(t, l1Node.P2P.NATSpec, n.P2P.NATSpec)
+	require.Same(t, l1Node.P2P.NetRestrict, n.P2P.NetRestrict)
+	require.True(t, n.P2P.MetricsEnabled)
+	require.Equal(t, nodecfg.DefaultConfig.P2P.DiscoveryV4, n.P2P.DiscoveryV4)
+	require.Equal(t, nodecfg.DefaultConfig.P2P.DiscoveryV5, n.P2P.DiscoveryV5)
+	require.NotEqual(t, l1Node.P2P.DiscoveryV5, n.P2P.DiscoveryV5)
+	require.Empty(t, e.EthDiscoveryURLs)
+	require.Equal(t, networks.Devnet.Config.ChainID.Uint64(), e.NetworkID)
+	n.P2P.StaticNodes[0] = boot
+	require.Equal(t, []*enode.Node{s}, cfg.StaticPeers, "the node's peers alias the flags")
+
+	n, _, err = allInOneConfigs(t.Context(), l1Node, l1Eth, cfg, log.New())
+	require.NoError(t, err)
+	require.True(t, key.Equal(n.P2P.PrivateKey), "the key is kept")
+
+	port := eez.Config{Chain: networks.Devnet.Name, SyncL1Only: &l1Only, Port: 30404}
+	n, _, err = allInOneConfigs(t.Context(), l1Node, l1Eth, &port, log.New())
+	require.NoError(t, err)
+	require.False(t, n.DisableSentry, "--eez.port alone")
+	require.Equal(t, ":30404", n.P2P.ListenAddr)
+	port.Port = l1Node.P2P.ListenPort()
+	_, _, err = allInOneConfigs(t.Context(), l1Node, l1Eth, &port, log.New())
+	require.ErrorIs(t, err, eez.ErrConfig)
+	require.ErrorContains(t, err, "--eez.port 30303 is the L1's --port")
+
+	l1Node, l1Eth = l1Configs(t, 1337)
+	n, _, err = allInOneConfigs(t.Context(), l1Node, l1Eth, &eez.Config{Chain: networks.Devnet.Name, SyncL1Only: &l1Only}, log.New())
+	require.NoError(t, err)
+	require.True(t, n.DisableSentry, "no --eez.* devp2p flag")
+	require.NoFileExists(t, filepath.Join(l1Node.Dirs.DataDir, "eez", "nodekey"))
+
+	discovery := *cfg
+	discovery.Bootnodes = []*enode.Node{boot}
+	n, _, err = allInOneConfigs(t.Context(), l1Node, l1Eth, &discovery, log.New())
+	require.NoError(t, err)
+	require.False(t, n.P2P.NoDiscovery)
+	require.Equal(t, []*enode.Node{boot}, n.P2P.BootstrapNodes)
+	require.Equal(t, []*enode.Node{boot}, n.P2P.BootstrapNodesV5)
+
+	rollupX := discovery
+	rollupX.Chain = networks.Chiado699169.Name
+	for name, dir := range map[string]string{"spec": "", "stored": initialised(t, networks.Chiado699169)} {
+		l1Node, l1Eth := l1Configs(t, networks.Chiado699169.Config.L2.(*config.L2Config).L1ChainID)
+		c := rollupX
+		if dir != "" {
+			l1Node.Dirs, c.Chain = datadir.New(dir), networks.Devnet.Name
+		}
+		n, _, err := allInOneConfigs(t.Context(), l1Node, l1Eth, &c, log.New())
+		require.NoError(t, err, name)
+		require.True(t, n.DisableSentry, name)
+		require.Zero(t, n.P2P.MaxPeers, name)
+		require.NoFileExists(t, filepath.Join(l1Node.Dirs.DataDir, "eez", "nodekey"), name)
+	}
+
+	file := networks.Devnet
+	file.GenesisHash = common.HexToHash("0x01")
+	file.Config = networks.Devnet.Config.Copy()
+	file.Config.ChainID = uint256.NewInt(4242)
+	l1Node, l1Eth = l1Configs(t, 1337)
+	l1Node.Dirs = datadir.New(initialised(t, file))
+	n, e, err = allInOneConfigs(t.Context(), l1Node, l1Eth, cfg, log.New())
+	require.NoError(t, err)
+	require.Equal(t, uint64(4242), e.NetworkID)
+	require.False(t, n.DisableSentry)
 }

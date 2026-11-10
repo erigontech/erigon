@@ -93,10 +93,11 @@ func configureFollowerEth(cfg *ethconfig.Config) {
 
 // allInOneConfigs returns the configuration of the EEZ chain cfg.Chain that
 // an all-in-one node runs beside the L1 chain of l1Node and l1Eth: the L1's
-// settings under eez.AllInOneDirs, off the P2P network, on its own HTTP-RPC
-// port, without private API, engine API, consensus layer, txpool, downloader
-// or MCP server, and with none of the L1's chain-specific settings.
-func allInOneConfigs(l1Node *nodecfg.Config, l1Eth *ethconfig.Config, cfg *eez.Config) (*nodecfg.Config, *ethconfig.Config, error) {
+// settings under eez.AllInOneDirs, with its own devp2p network
+// (configureAllInOneNetwork) and HTTP-RPC port, without private API, engine
+// API, consensus layer, txpool, downloader or MCP server, and with none of
+// the L1's chain-specific settings.
+func allInOneConfigs(ctx context.Context, l1Node *nodecfg.Config, l1Eth *ethconfig.Config, cfg *eez.Config, logger log.Logger) (*nodecfg.Config, *ethconfig.Config, error) {
 	if slices.Contains(cfg.HTTPAPI, "testing") {
 		return nil, nil, errTestingAPI
 	}
@@ -113,8 +114,6 @@ func allInOneConfigs(l1Node *nodecfg.Config, l1Eth *ethconfig.Config, cfg *eez.C
 
 	n := *l1Node
 	n.Dirs = eez.AllInOneDirs(l1Node.Dirs)
-	n.P2P.MaxPeers, n.P2P.NoDiscovery = 0, true
-	n.DisableSentry = true
 	n.PrivateApiAddr = ""
 	n.Http.Dirs, n.Http.DataDir = n.Dirs, n.Dirs.DataDir
 	n.Http.HttpPort, n.Http.WebsocketPort = cfg.HTTPPort, cfg.HTTPPort
@@ -144,6 +143,9 @@ func allInOneConfigs(l1Node *nodecfg.Config, l1Eth *ethconfig.Config, cfg *eez.C
 	e.Ethstats, e.MCPAddress = "", ""
 	e.ExtraAPIs = nil
 	e.WarmupKzgCtxOnInit = false
+	if err := configureAllInOneNetwork(ctx, &n, &e, cfg, logger); err != nil {
+		return nil, nil, err
+	}
 	n.Http.Snap = e.Snapshot
 	return &n, &e, nil
 }

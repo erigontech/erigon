@@ -27,7 +27,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"testing"
@@ -37,12 +39,16 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/eez/deriver/derivertest"
+	"github.com/erigontech/erigon/eez/l1"
 	"github.com/erigontech/erigon/eez/l1/l1test"
+	"github.com/erigontech/erigon/eez/l1/recording"
 	"github.com/erigontech/erigon/eez/networks"
+	"github.com/erigontech/erigon/p2p/enode"
 )
 
 // handedOut holds the ports freePort returned: the OS may hand a port out
@@ -130,6 +136,16 @@ func waitStatus(t *testing.T, url string, cursor, safe uint64) {
 	}, 10*time.Second, 100*time.Millisecond, "eez_followerStatus")
 }
 
+// devChain returns the flags that keep a node of the dev chain off the
+// default ports of its consensus layer and MCP server.
+func devChain(t *testing.T) []string {
+	return []string{
+		"--chain=dev", "--beacon.api.port", freePort(t), "--caplin.discovery.port", freePort(t),
+		"--caplin.discovery.tcpport", freePort(t), "--caplin.discovery.quicport", freePort(t), "--sentinel.port", freePort(t),
+		"--mcp.disable",
+	}
+}
+
 // overlaySigner is the sequencer address of the binary tests' overlay.
 const overlaySigner = "0x5fbdb2315678afecb367f032d93f642f64180aa3"
 
@@ -138,7 +154,9 @@ func refused(t *testing.T, bin, want string, args ...string) {
 	t.Helper()
 	args = append(args, "--datadir", t.TempDir(), "--http.port", freePort(t), "--authrpc.port", freePort(t),
 		"--private.api.addr", "127.0.0.1:"+freePort(t), "--port", freePort(t), "--torrent.port", freePort(t))
-	out, err := exec.CommandContext(t.Context(), bin, args...).CombinedOutput()
+	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, bin, args...).CombinedOutput()
 	var exit *exec.ExitError
 	require.ErrorAs(t, err, &exit, "%v: %s", args, out)
 	require.Equal(t, 1, exit.ExitCode(), "%v: %s", args, out)
@@ -185,7 +203,7 @@ func TestFollowerBinary(t *testing.T) {
 	refused(t, bin, "both set the unsafe head", append(sequencerRPC, overlay()...)...)
 	unsigned := []string{"--eez.enabled", "--chain=eez-chiado", "--eez.l1.rpc", l1.URL}
 	refused(t, bin, "signs no heads", append(unsigned, overlay()...)...)
-	allInOne := []string{"--eez.enabled", "--chain=dev", "--eez.chain=eez-devnet"}
+	allInOne := append(devChain(t), "--eez.enabled", "--eez.chain=eez-devnet")
 	refused(t, bin, "not available with --eez.chain", append(allInOne, overlay()...)...)
 
 	dir := t.TempDir()
@@ -300,17 +318,50 @@ func TestFollowerBinary(t *testing.T) {
 	}
 }
 
+// nodeInfo returns the enode of the node whose admin API is at url.
+func nodeInfo(t *testing.T, url string) *enode.Node {
+	t.Helper()
+	var info struct {
+		Enode string `json:"enode"`
+	}
+	require.NoError(t, call(t.Context(), url, "admin_nodeInfo", &info))
+	n, err := enode.ParseV4(info.Enode)
+	require.NoError(t, err, info.Enode)
+	return n
+}
+
+// peerInfo is an entry of admin_peers.
+type peerInfo struct {
+	Enode   string   `json:"enode"`
+	Caps    []string `json:"caps"`
+	Network struct {
+		Static bool `json:"static"`
+	} `json:"network"`
+}
+
+// peers returns the peers that completed the eth handshake with the node
+// whose admin API is at url.
+func peers(t require.TestingT, ctx context.Context, url string) []peerInfo {
+	var out []peerInfo
+	require.NoError(t, call(ctx, url, "admin_peers", &out))
+	return out
+}
+
 // TestAllInOneBinary runs the erigon binary named by EEZ_ERIGON as an
 // all-in-one node: the dev chain as L1 and beside it an EEZ chain settling
-// on it, under <datadir>/eez with its own lock and HTTP-RPC port, whose
-// follower takes the L1 heads in-process. SIGTERM stops both chains: the L1's
+// on it, under <datadir>/eez with its own lock, HTTP-RPC port and sentry,
+// whose follower takes the L1 heads in-process. The EEZ chain's sentry
+// listens on --eez.port with the node key in <datadir>/eez/nodekey and
+// completes the eth/68 and eth/69 handshake with a standalone node of its
+// chain named by --eez.staticpeers, which the L1, whose --staticpeers names
+// it too, refuses at the eth handshake. SIGTERM stops both chains: the L1's
 // consensus layer resets SIGINT to its default action once it starts.
 func TestAllInOneBinary(t *testing.T) {
 	bin := os.Getenv("EEZ_ERIGON")
 	if bin == "" {
 		t.Skip("EEZ_ERIGON names no erigon binary")
 	}
-	dir := t.TempDir()
+	dir, peerDir := t.TempDir(), t.TempDir()
 
 	// eez-devnet settling on the dev chain, with the timestamp rewritten
 	// as a deployment does, so the stored l2 section stands.
@@ -323,30 +374,79 @@ func TestAllInOneBinary(t *testing.T) {
 	require.NoError(t, err)
 	genesisFile := filepath.Join(t.TempDir(), "genesis.json")
 	require.NoError(t, os.WriteFile(genesisFile, raw, 0o644))
-	out, err := exec.CommandContext(t.Context(), bin, "init", "--eez.enabled", "--datadir", dir, "--eez.l1.chainid=1337",
-		"--eez.registry=0x5fbdb2315678afecb367f032d93f642f64180aa3", "--eez.registry.deployblock=0", "--eez.rollupid=1",
-		"--eez.l1.blocktime=12s", "--eez.l2.blocktime=2s", genesisFile).CombinedOutput()
-	require.NoError(t, err, "%s", out)
+	for _, d := range []string{dir, peerDir} {
+		out, err := exec.CommandContext(t.Context(), bin, "init", "--eez.enabled", "--datadir", d, "--eez.l1.chainid=1337",
+			"--eez.registry=0x5fbdb2315678afecb367f032d93f642f64180aa3", "--eez.registry.deployblock=0", "--eez.rollupid=1",
+			"--eez.l1.blocktime=12s", "--eez.l2.blocktime=2s", genesisFile).CombinedOutput()
+		require.NoError(t, err, "%s", out)
+	}
 
-	l1Port, l2Port := freePort(t), freePort(t)
-	cmd := exec.CommandContext(t.Context(), bin, "--chain=dev", "--datadir", dir, "--eez.enabled", "--eez.chain=eez-devnet",
-		"--eez.http.port", l2Port, "--http.port", l1Port, "--http.api=eth", "--authrpc.port", freePort(t),
-		"--private.api.addr", "127.0.0.1:"+freePort(t), "--port", freePort(t), "--torrent.port", freePort(t),
-		"--beacon.api.port", freePort(t), "--caplin.discovery.port", freePort(t), "--caplin.discovery.tcpport", freePort(t),
-		"--sentinel.port", freePort(t), "--mcp.disable")
-	var output bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &output, &output
-	require.NoError(t, cmd.Start())
-	exited := make(chan error, 1)
-	go func() { exited <- cmd.Wait() }()
+	// A standalone node of the same chain, on an L1 that holds its genesis
+	// block only.
+	peerL1, err := recording.NewMemoryChain(1337, &recording.Block{Header: l1.Header{Hash: common.HexToHash("0x01")}})
+	require.NoError(t, err)
+	server, err := l1test.NewServer(peerL1, log.New())
+	require.NoError(t, err)
+	t.Cleanup(server.Stop)
+	peerL1RPC := httptest.NewServer(server)
+	t.Cleanup(peerL1RPC.Close)
+	peerHTTP, peerP2P := freePort(t), freePort(t)
+	peerURL := "http://127.0.0.1:" + peerHTTP
+	peer := exec.CommandContext(t.Context(), bin, "--eez.enabled", "--datadir", peerDir, "--eez.sync.l1only=true",
+		"--eez.l1.rpc", peerL1RPC.URL, "--http.port", peerHTTP, "--http.api=eth,eez,admin", "--authrpc.port", freePort(t),
+		"--private.api.addr", "127.0.0.1:"+freePort(t), "--port", peerP2P, "--torrent.port", freePort(t), "--nodiscover")
+	peerOutput := &syncBuffer{}
+	peer.Stdout, peer.Stderr = peerOutput, peerOutput
+	require.NoError(t, peer.Start())
 	t.Cleanup(func() {
-		_ = cmd.Process.Kill()
+		_ = peer.Process.Kill()
 		if t.Failed() {
-			t.Log(output.String())
+			t.Log(peerOutput.String())
 		}
 	})
+	var peerNode *enode.Node
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
+		var info struct {
+			Enode string `json:"enode"`
+		}
+		require.NoError(c, call(t.Context(), peerURL, "admin_nodeInfo", &info))
+		n, err := enode.ParseV4(info.Enode)
+		require.NoError(c, err)
+		peerNode = n
+	}, 2*time.Minute, 250*time.Millisecond, "the standalone node's enode")
+	peerEnode := enode.NewV4(peerNode.Pubkey(), net.IPv4(127, 0, 0, 1), peerNode.TCP(), 0).URLv4()
 
+	l1Port, l2Port, l1P2P, l2P2P := freePort(t), freePort(t), freePort(t), freePort(t)
 	l1URL, l2URL := "http://127.0.0.1:"+l1Port, "http://127.0.0.1:"+l2Port
+	// A static peer of the L1 alone, which the EEZ chain must not dial.
+	l1PeerKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	l1Peer := enode.NewV4(&l1PeerKey.PublicKey, net.IPv4(127, 0, 0, 1), 1, 0)
+	node := slices.Clip(append(devChain(t), "--datadir", dir, "--eez.enabled", "--eez.chain=eez-devnet",
+		"--eez.http.port", l2Port, "--eez.http.api=eth,eez,admin", "--http.port", l1Port, "--http.api=eth,admin",
+		"--authrpc.port", freePort(t), "--private.api.addr", "127.0.0.1:"+freePort(t), "--port", l1P2P, "--torrent.port", freePort(t),
+		"--eez.port", l2P2P, "--eez.staticpeers", peerEnode, "--staticpeers", peerEnode+","+l1Peer.URLv4(), "--log.dir.verbosity=trace"))
+	// start runs the node with args added, waitFor fails the test if it
+	// exits, and stop interrupts it and checks that it released both locks.
+	var cmd *exec.Cmd
+	var exited chan error
+	start := func(args ...string) *syncBuffer {
+		t.Helper()
+		c := exec.CommandContext(t.Context(), bin, append(slices.Clone(node), args...)...)
+		output := &syncBuffer{}
+		c.Stdout, c.Stderr = output, output
+		require.NoError(t, c.Start())
+		done := make(chan error, 1)
+		go func() { done <- c.Wait() }()
+		t.Cleanup(func() {
+			_ = c.Process.Kill()
+			if t.Failed() {
+				t.Log(output.String())
+			}
+		})
+		cmd, exited = c, done
+		return output
+	}
 	waitFor := func(what string, ok func() bool) {
 		t.Helper()
 		deadline := time.Now().Add(3 * time.Minute)
@@ -359,11 +459,29 @@ func TestAllInOneBinary(t *testing.T) {
 			require.True(t, time.Now().Before(deadline), what)
 		}
 	}
+	stop := func() {
+		t.Helper()
+		require.NoError(t, cmd.Process.Signal(syscall.SIGTERM))
+		select {
+		case err := <-exited:
+			require.NoError(t, err)
+		case <-time.After(2 * time.Minute):
+			t.Fatal("erigon did not stop")
+		}
+		for _, d := range []string{dir, filepath.Join(dir, "eez")} {
+			l, ok, err := datadir.TryFlock(datadir.Open(d))
+			require.NoError(t, err)
+			require.True(t, ok, "%s unlocked", d)
+			require.NoError(t, l.Unlock())
+		}
+	}
+
 	chainID := func(url string) uint64 {
 		var id hexutil.Uint64
 		_ = call(t.Context(), url, "eth_chainId", &id)
 		return uint64(id)
 	}
+	start("--eez.sync.l1only=true")
 	waitFor("L1 chain id", func() bool { return chainID(l1URL) == 1337 })
 	waitFor("EEZ chain id", func() bool { return chainID(l2URL) == networks.Devnet.Config.ChainID.Uint64() })
 	var status struct {
@@ -380,17 +498,66 @@ func TestAllInOneBinary(t *testing.T) {
 	require.DirExists(t, filepath.Join(dir, "eez", "temp"))
 	require.Error(t, call(t.Context(), l1URL, "eez_followerStatus", &status), "the L1 serves no eez API")
 
-	require.NoError(t, cmd.Process.Signal(syscall.SIGTERM))
-	select {
-	case err := <-exited:
+	// Each chain has its own sentry: port, key and node database.
+	l1Node, l2Node := nodeInfo(t, l1URL), nodeInfo(t, l2URL)
+	require.NotEqual(t, l1Node.ID(), l2Node.ID())
+	require.Equal(t, l1P2P, strconv.Itoa(l1Node.TCP()))
+	require.Equal(t, l2P2P, strconv.Itoa(l2Node.TCP()))
+	for d, n := range map[string]*enode.Node{dir: l1Node, filepath.Join(dir, "eez"): l2Node} {
+		key, err := crypto.LoadECDSA(filepath.Join(d, "nodekey"))
 		require.NoError(t, err)
-	case <-time.After(2 * time.Minute):
-		t.Fatal("erigon did not stop")
+		require.Equal(t, enode.PubkeyToIDV4(&key.PublicKey), n.ID(), "%s/nodekey", d)
 	}
-	for _, d := range []string{dir, filepath.Join(dir, "eez")} {
-		l, ok, err := datadir.TryFlock(datadir.Open(d))
-		require.NoError(t, err)
-		require.True(t, ok, "%s unlocked", d)
-		require.NoError(t, l.Unlock())
+	require.DirExists(t, filepath.Join(dir, "eez", "nodes", "eth"))
+
+	// The EEZ chain peers the standalone node; the L1 refuses it at the
+	// eth handshake, a peer of another network, genesis and fork id. The
+	// trace log tells the chains apart: the EEZ chain's lines carry chain=.
+	traced := func(parts ...string) bool {
+		raw, err := os.ReadFile(filepath.Join(dir, "logs", "erigon.log"))
+		if err != nil {
+			return false
+		}
+		for line := range strings.SplitSeq(string(raw), "\n") {
+			if !slices.ContainsFunc(parts, func(p string) bool {
+				if absent, ok := strings.CutPrefix(p, "!"); ok {
+					return strings.Contains(line, absent)
+				}
+				return !strings.Contains(line, p)
+			}) {
+				return true
+			}
+		}
+		return false
 	}
+	peerPub := strings.TrimPrefix(strings.Split(peerEnode, "@")[0], "enode://")
+	require.Eventually(t, func() bool {
+		return traced("Removing p2p peer", "!chain=", peerPub, "incompatible remote status")
+	}, 2*time.Minute, 250*time.Millisecond, "the L1 refuses the EEZ node")
+	require.True(t, traced("[p2p] Adding static node", "!chain=", "id="+l1Peer.ID().String()), "the L1 dials its own static peer")
+	require.False(t, traced("chain=eez-devnet", "id="+l1Peer.ID().String()), "the EEZ chain dials the L1's static peer")
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
+		got := peers(c, t.Context(), l2URL)
+		require.Len(c, got, 1)
+		assert.Equal(c, peerNode.ID(), enode.MustParse(got[0].Enode).ID())
+		assert.ElementsMatch(c, []string{"eth/68", "eth/69"}, got[0].Caps)
+		assert.True(c, got[0].Network.Static, "static")
+	}, 2*time.Minute, 250*time.Millisecond, "the EEZ chain's peers")
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
+		got := peers(c, t.Context(), peerURL)
+		require.Len(c, got, 1)
+		assert.Equal(c, l2Node.ID(), enode.MustParse(got[0].Enode).ID())
+	}, 2*time.Minute, 250*time.Millisecond, "the standalone node's peers")
+	require.Empty(t, peers(t, t.Context(), l1URL), "the L1's peers")
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
+		var status struct {
+			SyncMode string         `json:"syncMode"`
+			Peers    hexutil.Uint64 `json:"peers"`
+		}
+		require.NoError(c, call(t.Context(), l2URL, "eez_followerStatus", &status))
+		assert.Equal(c, "l1_only", status.SyncMode)
+		assert.Equal(c, uint64(1), uint64(status.Peers))
+	}, time.Minute, 250*time.Millisecond, "eez_followerStatus")
+
+	stop()
 }

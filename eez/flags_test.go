@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/eez/networks"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/p2p/enode"
 )
 
 func parse(t *testing.T, args ...string) (*Config, error) {
@@ -120,6 +121,40 @@ func TestConfigFromCLI(t *testing.T) {
 	require.Equal(t, []string{"eth", "debug", "eez"}, cfg.HTTPAPI, "spaces and empty entries")
 	_, err = parse(t, "--eez.enabled", "--eez.l1.rpc=http://l1:8545", "--eez.http.port=9645")
 	require.ErrorIs(t, err, ErrConfig, "--eez.http.port without --eez.chain")
+
+	// The EEZ chain beside the L1 takes its devp2p from the --eez.* flags.
+	const (
+		boot    = "enode://a972e9d344f799985aad905fe9e460a5e11c6507a30f37e85ad508af27f8da6e1a641305466947462f782db70c08c3a9931e6f5f3c3891ff54c4a07d72e40155@10.0.0.1:30403"
+		static  = "enode://d860a01f9722d78051619d1e2351aba3f43f943f6f00718d1b9baa4101932a1f5011f16bb2b1bb35db20d6fe28fa0bf09636d26a87d31de9ec6203eeedb1f666@10.0.0.2:30403"
+		trusted = "enode://22a8232c3abc76a16ae9d6c3b164f98775fe226f0917b0ca871128a74a8e9630b458460865bab457221f1d448dd9791d24c4e5d88786180ac185df813a68d4de@10.0.0.3:30403"
+	)
+	cfg, err = parse(t, "--eez.enabled", "--eez.chain=eez-devnet")
+	require.NoError(t, err)
+	require.Zero(t, cfg.Port, "unset")
+	require.Nil(t, cfg.Bootnodes)
+	require.Nil(t, cfg.StaticPeers)
+	require.Nil(t, cfg.TrustedPeers)
+	cfg, err = parse(t, "--eez.enabled", "--eez.chain=eez-devnet", "--eez.port=30404", "--eez.bootnodes="+boot,
+		"--eez.staticpeers="+static+", "+trusted, "--eez.trustedpeers="+trusted)
+	require.NoError(t, err)
+	require.Equal(t, 30404, cfg.Port)
+	require.Equal(t, []*enode.Node{enode.MustParse(boot)}, cfg.Bootnodes)
+	require.Equal(t, []*enode.Node{enode.MustParse(static), enode.MustParse(trusted)}, cfg.StaticPeers)
+	require.Equal(t, []*enode.Node{enode.MustParse(trusted)}, cfg.TrustedPeers)
+	for _, flag := range []string{"--eez.port=30404", "--eez.bootnodes=" + boot, "--eez.staticpeers=" + static, "--eez.trustedpeers=" + trusted} {
+		_, err := parse(t, "--eez.enabled", "--eez.l1.rpc=http://l1:8545", flag)
+		require.ErrorIs(t, err, ErrConfig, "%s without --eez.chain", flag)
+		require.ErrorContains(t, err, "requires --eez.chain", flag)
+	}
+	for _, flag := range []string{"--eez.bootnodes", "--eez.staticpeers", "--eez.trustedpeers"} {
+		_, err := parse(t, "--eez.enabled", "--eez.chain=eez-devnet", flag+"=enode://00@10.0.0.1:30403")
+		require.ErrorIs(t, err, ErrConfig, "%s with a bad enode URL", flag)
+	}
+	for _, port := range []string{"0", "-1", "65536"} {
+		_, err := parse(t, "--eez.enabled", "--eez.chain=eez-devnet", "--eez.port="+port)
+		require.ErrorIs(t, err, ErrConfig, "--eez.port=%s", port)
+		require.ErrorContains(t, err, "--eez.port "+port+" is out of range", port)
+	}
 
 	// init needs no L1 source; a running node needs exactly one.
 	for _, args := range [][]string{

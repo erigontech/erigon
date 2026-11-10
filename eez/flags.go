@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/eez/overlay"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/p2p/enode"
 )
 
 // ErrConfig reports EEZ flags that do not make a configuration.
@@ -103,6 +104,23 @@ var (
 		Usage: "API namespaces the HTTP-RPC of the EEZ chain of --eez.chain serves",
 		Value: "eth,debug,eez",
 	}
+	PortFlag = cli.IntFlag{
+		Name:  "eez.port",
+		Usage: "devp2p listening port of the EEZ chain of --eez.chain",
+		Value: 30403,
+	}
+	BootnodesFlag = cli.StringFlag{
+		Name:  "eez.bootnodes",
+		Usage: "Comma-separated enode URLs from which the EEZ chain of --eez.chain discovers its L2 peers; unset, it runs no discovery",
+	}
+	StaticPeersFlag = cli.StringFlag{
+		Name:  "eez.staticpeers",
+		Usage: "Comma-separated enode URLs of L2 peers the EEZ chain of --eez.chain keeps connected",
+	}
+	TrustedPeersFlag = cli.StringFlag{
+		Name:  "eez.trustedpeers",
+		Usage: "Comma-separated enode URLs of L2 peers the EEZ chain of --eez.chain keeps connected, even above its peer limit",
+	}
 
 	// The l2 section of the chain config; init writes them into the
 	// section, a running node checks them against it.
@@ -136,7 +154,7 @@ var (
 var Flags = []cli.Flag{
 	&EnabledFlag, &L1RPCFlag, &L1KVFlag, &L1BeaconFlag, &L1BlobsFlag, &L1PollFlag, &L1LogChunkFlag, &L1ReorgDepthFlag, &SequencerRPCFlag, &SyncL1OnlyFlag,
 	&P2PListenFlag, &P2PPeersFlag, &SequencerAddressFlag,
-	&ChainFlag, &HTTPPortFlag, &HTTPAPIFlag, &L1ChainIDFlag, &RegistryFlag, &RegistryDeployBlockFlag, &RollupIDFlag, &L1BlockTimeFlag, &L2BlockTimeFlag,
+	&ChainFlag, &HTTPPortFlag, &HTTPAPIFlag, &PortFlag, &BootnodesFlag, &StaticPeersFlag, &TrustedPeersFlag, &L1ChainIDFlag, &RegistryFlag, &RegistryDeployBlockFlag, &RollupIDFlag, &L1BlockTimeFlag, &L2BlockTimeFlag,
 }
 
 // Config is a node's EEZ configuration.
@@ -159,10 +177,16 @@ type Config struct {
 	P2PPeers         []peer.AddrInfo
 	SequencerAddress *common.Address
 	// Chain is the EEZ network an all-in-one node runs beside its L1 chain,
-	// served on HTTPPort with the namespaces HTTPAPI.
-	Chain    string
-	HTTPPort int
-	HTTPAPI  []string
+	// served on HTTPPort with the namespaces HTTPAPI. Its devp2p listens on
+	// Port, zero unless set, and takes its peers from Bootnodes, StaticPeers
+	// and TrustedPeers.
+	Chain        string
+	HTTPPort     int
+	HTTPAPI      []string
+	Port         int
+	Bootnodes    []*enode.Node
+	StaticPeers  []*enode.Node
+	TrustedPeers []*enode.Node
 	// L2 holds the l2 section fields the flags set.
 	L2 L2Flags
 }
@@ -205,8 +229,27 @@ func ConfigFromCLI(cmd *cli.Command) (*Config, error) {
 	if c.Chain != "" {
 		c.HTTPPort = int(cmd.Int(HTTPPortFlag.Name))
 		c.HTTPAPI = common.CliString2Array(cmd.String(HTTPAPIFlag.Name))
+		if cmd.IsSet(PortFlag.Name) {
+			if c.Port = int(cmd.Int(PortFlag.Name)); c.Port < 1 || c.Port > 65535 {
+				return nil, fmt.Errorf("%w: --%s %d is out of range", ErrConfig, PortFlag.Name, c.Port)
+			}
+		}
+		for _, p := range []struct {
+			flag *cli.StringFlag
+			out  *[]*enode.Node
+		}{{&BootnodesFlag, &c.Bootnodes}, {&StaticPeersFlag, &c.StaticPeers}, {&TrustedPeersFlag, &c.TrustedPeers}} {
+			urls := common.CliString2Array(cmd.String(p.flag.Name))
+			if len(urls) == 0 {
+				continue
+			}
+			nodes, err := enode.ParseNodesFromURLs(urls)
+			if err != nil {
+				return nil, fmt.Errorf("%w: --%s: %w", ErrConfig, p.flag.Name, err)
+			}
+			*p.out = nodes
+		}
 	} else {
-		for _, f := range []cli.Flag{&HTTPPortFlag, &HTTPAPIFlag} {
+		for _, f := range []cli.Flag{&HTTPPortFlag, &HTTPAPIFlag, &PortFlag, &BootnodesFlag, &StaticPeersFlag, &TrustedPeersFlag} {
 			if name := f.Names()[0]; cmd.IsSet(name) {
 				return nil, fmt.Errorf("%w: --%s requires --%s", ErrConfig, name, ChainFlag.Name)
 			}

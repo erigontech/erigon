@@ -60,9 +60,9 @@ With `--eez.chain` one Erigon process runs both chains: the L1 of `--chain`, as 
   --eez.http.port=8645
 ```
 
-The L1 keeps the datadir's usual layout and every component of a node: P2P, snapshot downloader, consensus layer, transaction pool, engine API, private API and the JSON-RPC of `--http.*`. The EEZ chain keeps the layout above and adds its own lock, temporary files and migration records under `<datadir>/eez`; it serves JSON-RPC on `--eez.http.port` with the namespaces of `--eez.http.api`, and none of the L1's components. Its log lines carry `chain=<eez-network>`. Stopping the node stops the EEZ chain before the L1, and a follower that halts stops both.
+The L1 keeps the datadir's usual layout and every component of a node: P2P, snapshot downloader, consensus layer, transaction pool, engine API, private API and the JSON-RPC of `--http.*`. The EEZ chain keeps the layout above and adds its own lock, temporary files and migration records under `<datadir>/eez`; it serves JSON-RPC on `--eez.http.port` with the namespaces of `--eez.http.api`, and none of the L1's components. On rollup0 networks it runs its own P2P, set by the `--eez.*` P2P flags of [Peers](#peers). Its log lines carry `chain=<eez-network>`. Stopping the node stops the EEZ chain before the L1, and a follower that halts stops both.
 
-Erigon's execution, staged-sync and database metrics are process-wide: in this mode they mix both chains. The `eez_*` metrics below are the EEZ chain's own.
+Erigon's execution, staged-sync, database and P2P metrics are process-wide: in this mode they mix both chains. The `eez_*` metrics below are the EEZ chain's own.
 
 ### Following the sequencer
 
@@ -85,7 +85,15 @@ A node that must not depend on how far L1 has finalized, such as a test or devne
 
 ### Peers
 
-The node takes L2 peers over eth/68 and eth/69 and serves them its blocks. A block reaches the chain only through the follower, never from devp2p on its own, and the node takes no transactions from its peers. Peers come from Erigon's P2P flags: `--bootnodes` with discovery, or `--staticpeers` and `--trustedpeers` with `--nodiscover`; trusted peers are dialled like static ones. EEZ networks list no bootnodes, so the node refuses to start with discovery on and neither `--bootnodes` nor `--discovery.dns`. A chain initialised from a genesis file never takes the network id, bootnodes or DNS list of the default `--chain`: its network id is its chain id unless `--networkid` is set. On rollupX networks, and for the EEZ chain of a node running beside its L1, the node stays off the P2P network whatever the flags.
+The node takes L2 peers over eth/68 and eth/69 and serves them its blocks. A block reaches the chain only through the follower, never from devp2p on its own, and the node takes no transactions from its peers. Peers come from Erigon's P2P flags: `--bootnodes` with discovery, or `--staticpeers` and `--trustedpeers` with `--nodiscover`; trusted peers are dialled like static ones. EEZ networks list no bootnodes, so the node refuses to start with discovery on and neither `--bootnodes` nor `--discovery.dns`. A chain initialised from a genesis file never takes the network id, bootnodes or DNS list of the default `--chain`: its network id is its chain id unless `--networkid` is set. On rollupX networks the node stays off the P2P network whatever the flags.
+
+Erigon's P2P flags belong to the L1 of a node [running beside its L1](#running-beside-its-l1-in-one-process). Its EEZ chain joins the P2P network once one of `--eez.port`, `--eez.bootnodes`, `--eez.staticpeers` or `--eez.trustedpeers` is set. It then listens on `--eez.port`, which must differ from the L1's `--port`, with a node key of its own, generated at its first start in `<datadir>/eez/nodekey`, and its node database under `<datadir>/eez`. It discovers peers only from `--eez.bootnodes`, and dials `--eez.staticpeers` and `--eez.trustedpeers`. It shares the L1's node name, `--nat`, `--netrestrict` and `--metrics`, and takes Erigon's defaults for the other P2P settings, such as `--maxpeers`. A chain initialised from a genesis file takes its chain id as network id.
+
+```bash
+./build/bin/erigon --chain=<l1-network> --datadir=/data/node \
+  --eez.enabled --eez.chain=<eez-network> \
+  --eez.port=30403 --eez.staticpeers=enode://<node-a>@<host>:30303
+```
 
 ### History at L1 finality
 
@@ -126,6 +134,7 @@ The node refuses to start with:
 - the overlay flags on rollupX networks, whose sequencer signs no heads, or with `--eez.chain`;
 - `--eez.sync.l1only=false` on rollupX networks or with `--eez.chain`;
 - discovery on a rollup0 network without `--bootnodes` or `--discovery.dns`;
+- `--eez.port` out of range or equal to the L1's `--port`;
 - a listen address that is not TCP or has port 0, and a static overlay peer given by DNS name or without `/p2p/<peer id>`.
 
 Peers mode stops the node when the root's chain leaves the local finalized block ("datadir is not on L1's chain"), when an L1 reorg drops F ("L1 reorg below the seed at L1 finality"), and when the local chain refuses the blocks its peers served ("the local chain refuses the history from L2 peers").
@@ -159,6 +168,10 @@ Peers mode stops the node when the root's chain leaves the local finalized block
 | `--eez.chain` | | EEZ network to run in the same process as the L1 of `--chain`. |
 | `--eez.http.port` | `8645` | JSON-RPC port of the EEZ chain of `--eez.chain`. |
 | `--eez.http.api` | `eth,debug,eez` | JSON-RPC namespaces of the EEZ chain of `--eez.chain`. |
+| `--eez.port` | `30403` | P2P listening port of the EEZ chain of `--eez.chain`. |
+| `--eez.bootnodes` | | Enode URLs from which the EEZ chain of `--eez.chain` discovers its L2 peers; unset, it runs no discovery. |
+| `--eez.staticpeers` | | Enode URLs of L2 peers the EEZ chain of `--eez.chain` keeps connected. |
+| `--eez.trustedpeers` | | Enode URLs of L2 peers the EEZ chain of `--eez.chain` keeps connected, even above its peer limit. |
 | `--eez.l1.poll` | `2s` | Interval between reads of the L1 head. |
 | `--eez.l1.logchunk` | `100000` | Widest block range of one L1 log query; halved when the node refuses it. |
 | `--eez.l1.reorgdepth` | `62` | Deepest L1 reorg the follower survives. |
