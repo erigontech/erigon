@@ -1,4 +1,4 @@
-// Copyright 2024 The Erigon Authors
+// Copyright 2026 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -14,18 +14,32 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-//go:build !darwin && !windows && !linux
+package services
 
-package diskutils
+import (
+	"bytes"
+	"errors"
 
-import "github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/cl/clparams"
+)
 
-func MountPointForDirPath(dirPath string) string {
-	log.Debug("[diskutils] Implemented only for darwin")
-	return "/"
+var errNonCanonicalSSZ = errors.New("non-canonical SSZ encoding")
+
+type gossipSSZObject interface {
+	DecodeSSZ(buf []byte, version int) error
+	EncodeSSZ(buf []byte) ([]byte, error)
 }
 
-func DiskInfo(disk string) (string, error) {
-	log.Debug("[diskutils] Implemented only for darwin")
-	return "", nil
+func decodeGossipSSZ(obj gossipSSZObject, data []byte, version clparams.StateVersion) error {
+	if err := obj.DecodeSSZ(data, int(version)); err != nil {
+		return err
+	}
+	canonical, err := obj.EncodeSSZ(make([]byte, 0, len(data)))
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(canonical, data) {
+		return errNonCanonicalSSZ
+	}
+	return nil
 }

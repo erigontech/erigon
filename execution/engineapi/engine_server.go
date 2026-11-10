@@ -486,9 +486,7 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	}
 
 	var sendersRecovery *exec.SendersRecovery
-	// With a non-empty BAL the exec workers recover the senders themselves.
-	execRecoversSenders := exec.ExecRecoversBALSenders() && blockAccessList != nil && len(blockAccessList.BlockAccessList()) > 0
-	if invalidTransactionStatus == nil && len(transactions) > 0 && !execRecoversSenders {
+	if invalidTransactionStatus == nil && len(transactions) > 0 {
 		sendersRecovery = exec.StartSendersRecovery(ctx, types.MakeSigner(e.config, req.BlockNumber.Uint64(), uint64(req.Timestamp)), transactions)
 	}
 	header.TxHash = types.DeriveSha(types.BinaryTransactions(txs))
@@ -683,9 +681,7 @@ func (e *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 		bad, lastValidHash, cachedErr = e.blockDownloader.IsBadHeader(parentHash)
 		if bad {
 			e.logger.Warn(fmt.Sprintf("[%s] Previously known bad block", prefix), "hash", blockHash, "parentHash", parentHash)
-			if cachedErr != "" {
-				cachedErr = fmt.Sprintf("ancestor %s rejected: %s", parentHash, cachedErr)
-			}
+			cachedErr = ancestorRejected(parentHash, cachedErr)
 		}
 	}
 	if bad {
@@ -1006,9 +1002,16 @@ func (e *EngineServer) getPayloadBodiesByHash(ctx context.Context, request []com
 
 	resp := make([]*engine_types.ExecutionPayloadBody, len(bodies))
 	for i, body := range bodies {
-		resp[i] = extractPayloadBodyFromBody(body)
+		if !e.isKnownBadBlock(request[i]) {
+			resp[i] = extractPayloadBodyFromBody(body)
+		}
 	}
 	return resp, nil
+}
+
+func (e *EngineServer) isKnownBadBlock(hash common.Hash) bool {
+	bad, _, _ := e.blockDownloader.IsBadHeader(hash)
+	return bad
 }
 
 func extractPayloadBodyFromBody(body *types.RawBody) *engine_types.ExecutionPayloadBody {
@@ -1184,6 +1187,14 @@ func (e *EngineServer) validatedPayloadStatus(block *types.Block, status execmod
 	return resp
 }
 
+// ancestorRejected is the validation error of a block whose ancestor is in the bad-block cache.
+func ancestorRejected(ancestor common.Hash, ancestorErr string) string {
+	if ancestorErr == "" {
+		return ""
+	}
+	return fmt.Sprintf("ancestor %s rejected: %s", ancestor, ancestorErr)
+}
+
 func latestValidOrNull(h common.Hash) *common.Hash {
 	if h == (common.Hash{}) {
 		return nil
@@ -1287,7 +1298,9 @@ func (e *EngineServer) HandleForkChoice(
 		return nil, &engine_helpers.ReorgTooDeepErr
 	}
 	if status == execmodule.ExecutionStatusMissingSegment && result.MissingHash != (common.Hash{}) {
-		if bad, lastValidHash, validationErr := e.blockDownloader.IsBadHeader(result.MissingHash); bad {
+		if bad, lastValidHash, ancestorErr := e.blockDownloader.IsBadHeader(result.MissingHash); bad {
+			validationErr := ancestorRejected(result.MissingHash, ancestorErr)
+			e.blockDownloader.ReportBadHeader(headerHash, lastValidHash, validationErr)
 			invalid := &engine_types.PayloadStatus{Status: engine_types.InvalidStatus, LatestValidHash: latestValidOrNull(lastValidHash)}
 			if validationErr != "" {
 				invalid.ValidationError = engine_types.NewStringifiedErrorFromString(validationErr)

@@ -305,6 +305,7 @@ func (f *ForkChoiceStore) setUnequivocating(validatorIndex uint64) {
 	}
 	subIndex := int(validatorIndex) % 8
 	f.equivocatingIndicies[index] |= 1 << uint(subIndex)
+	f.hasEquivocator = true
 	f.gloasWeightTree.update(validatorIndex)
 	f.voteTally.update(f, validatorIndex)
 }

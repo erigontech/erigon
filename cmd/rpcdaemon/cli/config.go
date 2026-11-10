@@ -1143,7 +1143,7 @@ func (e *remoteRulesEngine) VerifyUncles(_ rules.ChainReader, _ *types.Header, _
 	panic("remoteRulesEngine.VerifyUncles not supported")
 }
 
-func (e *remoteRulesEngine) Prepare(_ rules.ChainHeaderReader, _ *types.Header, _ *state.IntraBlockState) error {
+func (e *remoteRulesEngine) Prepare(_ rules.ChainHeaderReader, _ *types.Header) error {
 	panic("remoteRulesEngine.Prepare not supported")
 }
 

@@ -51,6 +51,7 @@ import (
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/filters"
 	"github.com/erigontech/erigon/rpc/jsonrpc/receipts"
+	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
 // TestGetLogsFromPersistedReceipts serves eth_getLogs from the persistent receipt cache, where
@@ -118,6 +119,23 @@ func TestGetLogs(t *testing.T) {
 		})
 		require.NoError(err)
 		assert.Len(logs, 1)
+	}
+}
+
+func TestErigonGetLatestLogsWithCountStaysInsideTheRangeLimit(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	const rangeLimit = 1
+	api := NewErigonAPI(newBaseApiWithLimits(m, rangeLimit, 0, 0), m.DB, nil)
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	latest, err := rpchelper.GetLatestBlockNumber(tx)
+	require.NoError(t, err)
+
+	logs, err := api.GetLatestLogs(m.Ctx, filters.FilterCriteria{}, filters.LogFilterOptions{LogCount: 1_000_000})
+	require.NoError(t, err)
+	for _, l := range logs {
+		require.GreaterOrEqual(t, uint64(l.BlockNumber), latest-rangeLimit)
 	}
 }
 
