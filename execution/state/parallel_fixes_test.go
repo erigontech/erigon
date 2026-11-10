@@ -343,7 +343,7 @@ func TestMapRead_EqualValueReExecKeepsIncarnation(t *testing.T) {
 	balanceIncarnation := func(vm *VersionMap) Incarnation {
 		cell, ok := vm.load(addr).Balance.Get(5)
 		require.True(t, ok)
-		return cell.incarnation
+		return cell.loadInc()
 	}
 
 	// tx5 inc0 wrote 1000; it re-executes at inc1 and re-flushes the same 1000. No-bump
