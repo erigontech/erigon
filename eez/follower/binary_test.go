@@ -133,7 +133,9 @@ func waitStatus(t *testing.T, url string, cursor, safe uint64) {
 // TestFollowerBinary runs the erigon binary named by EEZ_ERIGON as an EEZ
 // node against a composed L1 served over JSON-RPC: it derives the settled
 // blocks into <datadir>/eez/chaindata, serves no engine API, and exits with
-// status 3 when its chain diverges from L1.
+// status 3 when its chain diverges from L1. A second node with the first as
+// trusted peer and discovery off completes the eth/68 and eth/69 handshake
+// with it; discovery without --bootnodes is refused.
 func TestFollowerBinary(t *testing.T) {
 	bin := os.Getenv("EEZ_ERIGON")
 	if bin == "" {
@@ -154,11 +156,18 @@ func TestFollowerBinary(t *testing.T) {
 	l1 := httptest.NewServer(server)
 	t.Cleanup(l1.Close)
 
+	refused, cancel := context.WithTimeout(t.Context(), time.Minute)
+	defer cancel()
+	out, err := exec.CommandContext(refused, bin, "--eez.enabled", "--chain=eez-devnet", "--datadir", t.TempDir(),
+		"--eez.l1.rpc", l1.URL, "--http.port", freePort(t), "--authrpc.port", freePort(t),
+		"--private.api.addr", "127.0.0.1:"+freePort(t), "--port", freePort(t), "--torrent.port", freePort(t)).CombinedOutput()
+	require.True(t, bytes.Contains(out, []byte("discovery finds no L2 peers without --bootnodes")), "not refused: %v", err)
+
 	dir := t.TempDir()
-	httpPort, authPort := freePort(t), freePort(t)
+	httpPort, authPort, p2pPort := freePort(t), freePort(t), freePort(t)
 	cmd := exec.CommandContext(t.Context(), bin, "--eez.enabled", "--chain=eez-devnet", "--datadir", dir,
-		"--eez.l1.rpc", l1.URL, "--eez.l1.poll=200ms", "--http.port", httpPort, "--http.api=eth,eez", "--authrpc.port", authPort,
-		"--private.api.addr", "127.0.0.1:"+freePort(t), "--port", freePort(t), "--torrent.port", freePort(t))
+		"--eez.l1.rpc", l1.URL, "--eez.l1.poll=200ms", "--http.port", httpPort, "--http.api=eth,eez,admin", "--authrpc.port", authPort,
+		"--private.api.addr", "127.0.0.1:"+freePort(t), "--port", p2pPort, "--torrent.port", freePort(t), "--nodiscover")
 	var output bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &output, &output
 	require.NoError(t, cmd.Start())
@@ -197,6 +206,45 @@ func TestFollowerBinary(t *testing.T) {
 	waitStatus(t, url, 3, 3)
 	_, err = (&net.Dialer{Timeout: time.Second}).DialContext(t.Context(), "tcp", "127.0.0.1:"+authPort)
 	require.Error(t, err, "the engine API is down")
+
+	var info struct {
+		Enode string `json:"enode"`
+	}
+	require.NoError(t, call(t.Context(), url, "admin_nodeInfo", &info))
+	var id string
+	_, err = fmt.Sscanf(info.Enode, "enode://%128s", &id)
+	require.NoError(t, err, info.Enode)
+	peerHTTP := freePort(t)
+	peerURL := "http://127.0.0.1:" + peerHTTP
+	peer := exec.CommandContext(t.Context(), bin, "--eez.enabled", "--chain=eez-devnet", "--datadir", t.TempDir(),
+		"--eez.l1.rpc", l1.URL, "--eez.l1.poll=200ms", "--http.port", peerHTTP, "--http.api=eth,eez,admin",
+		"--authrpc.port", freePort(t), "--private.api.addr", "127.0.0.1:"+freePort(t), "--port", freePort(t), "--torrent.port", freePort(t),
+		"--nodiscover", "--trustedpeers", "enode://"+id+"@127.0.0.1:"+p2pPort)
+	var peerOutput bytes.Buffer
+	peer.Stdout, peer.Stderr = &peerOutput, &peerOutput
+	require.NoError(t, peer.Start())
+	t.Cleanup(func() {
+		_ = peer.Process.Kill()
+		if t.Failed() {
+			t.Log(peerOutput.String())
+		}
+	})
+	// A peer is listed once its eth handshake passes; a trusted peer is
+	// dialled as a static one.
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
+		var peers []struct {
+			Caps    []string `json:"caps"`
+			Network struct {
+				Trusted bool `json:"trusted"`
+				Static  bool `json:"static"`
+			} `json:"network"`
+		}
+		require.NoError(c, call(t.Context(), peerURL, "admin_peers", &peers))
+		require.Len(c, peers, 1)
+		assert.ElementsMatch(c, []string{"eth/68", "eth/69"}, peers[0].Caps)
+		assert.True(c, peers[0].Network.Trusted, "trusted")
+		assert.True(c, peers[0].Network.Static, "static")
+	}, 2*time.Minute, 250*time.Millisecond, "admin_peers")
 
 	c.Post(derivertest.Posting{Batch: tampered(c)})
 	select {

@@ -18,10 +18,10 @@ An EEZ node keeps its chain's database in `<datadir>/eez/chaindata` and its snap
 ./build/bin/erigon --eez.enabled --chain=eez-devnet \
   --datadir=/data/eez-devnet \
   --eez.l1.rpc=http://l1-node:8545 \
-  --http.api=eth,debug,eez
+  --http.api=eth,debug,eez --nodiscover
 ```
 
-An EEZ node runs no consensus layer, no engine API, no transaction pool, no snapshot downloader and no P2P networking: the follower is the only source and the only driver of the chain.
+An EEZ node runs no consensus layer, no engine API, no transaction pool and no snapshot downloader: the follower is the only source and the only driver of the chain. On rollup0 networks it serves its blocks to [L2 peers](#l2-peers).
 
 ### A chain from its genesis file
 
@@ -36,7 +36,7 @@ For a chain that is not built in, such as a Kurtosis devnet enclave, initialise 
   --eez.l1.blocktime=12s --eez.l2.blocktime=2s \
   genesis.json
 
-./build/bin/erigon --eez.enabled --datadir=/data/eez --eez.l1.rpc=http://l1-node:8545
+./build/bin/erigon --eez.enabled --datadir=/data/eez --eez.l1.rpc=http://l1-node:8545 --nodiscover
 ```
 
 A follower checks these flags against the stored `l2` section and refuses to start when they differ.
@@ -47,7 +47,7 @@ Next to an Erigon L1 node, read its database over the private API instead of JSO
 
 ```bash
 ./build/bin/erigon --eez.enabled --chain=eez-devnet \
-  --datadir=/data/eez-devnet --eez.l1.kv=127.0.0.1:9090
+  --datadir=/data/eez-devnet --eez.l1.kv=127.0.0.1:9090 --nodiscover
 ```
 
 ### Running beside its L1 in one process
@@ -63,6 +63,10 @@ With `--eez.chain` one Erigon process runs both chains: the L1 of `--chain`, as 
 The L1 keeps the datadir's usual layout and every component of a node: P2P, snapshot downloader, consensus layer, transaction pool, engine API, private API and the JSON-RPC of `--http.*`. The EEZ chain keeps the layout above and adds its own lock, temporary files and migration records under `<datadir>/eez`; it serves JSON-RPC on `--eez.http.port` with the namespaces of `--eez.http.api`, and none of the L1's components. Its log lines carry `chain=<eez-network>`. Stopping the node stops the EEZ chain before the L1, and a follower that halts stops both.
 
 Erigon's execution, staged-sync and database metrics are process-wide: in this mode they mix both chains. The `eez_*` metrics below are the EEZ chain's own.
+
+### L2 peers
+
+On rollup0 networks the node takes L2 peers over eth/68 and eth/69 and serves them its blocks. A block reaches the chain only through the follower, never from devp2p on its own, and the node takes no transactions from its peers. Peers come from Erigon's P2P flags: `--bootnodes` with discovery, or `--staticpeers` and `--trustedpeers` with `--nodiscover`; trusted peers are dialled like static ones. EEZ networks list no bootnodes, so the node refuses to start with discovery on and neither `--bootnodes` nor `--discovery.dns`. A chain initialised from a genesis file never takes the network id, bootnodes or DNS list of the default `--chain`: its network id is its chain id unless `--networkid` is set. On rollupX networks, and for the EEZ chain of a node running beside its L1, the node stays off the P2P network whatever the flags.
 
 ### Following the sequencer
 
@@ -133,7 +137,7 @@ The `erigon` binary of the standard image runs EEZ chains. To add the `eez` tool
 docker build --build-arg BINARIES="erigon eez" -t erigon-eez .
 docker run -v /data/eez:/home/erigon/data erigon-eez \
   --eez.enabled --chain=eez-devnet --datadir=/home/erigon/data \
-  --eez.l1.rpc=http://l1-node:8545
+  --eez.l1.rpc=http://l1-node:8545 --nodiscover
 ```
 
 ## Networks

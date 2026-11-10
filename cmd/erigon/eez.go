@@ -72,15 +72,12 @@ func haltError(err error) error {
 // errTestingAPI rejects the API that builds blocks on a follower's chain.
 var errTestingAPI = fmt.Errorf("%w: the testing API builds blocks; the follower must be the chain's only driver", eez.ErrConfig)
 
-// configureFollowerNode keeps the chain under <datadir>/eez and the node off
-// the P2P network: the follower is the chain's only source of blocks.
+// configureFollowerNode keeps the chain under <datadir>/eez.
 func configureFollowerNode(cfg *nodecfg.Config) error {
 	if slices.Contains(cfg.Http.API, "testing") {
 		return errTestingAPI
 	}
 	cfg.Dirs = eez.Dirs(cfg.Dirs)
-	cfg.P2P.MaxPeers = 0
-	cfg.P2P.NoDiscovery = true
 	return nil
 }
 

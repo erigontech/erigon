@@ -122,6 +122,12 @@ func runErigon(ctx context.Context, cliCtx *cli.Command) (err error) {
 		}
 	}
 
+	if standalone {
+		if err := configureFollowerNetwork(ctx, cliCtx, nodeCfg, ethCfg, logger); err != nil {
+			return err
+		}
+	}
+
 	ethNode, err := node.New(ctx, nodeCfg, ethCfg, logger, tracer)
 	if err != nil {
 		log.Error("Erigon startup", "err", err)
