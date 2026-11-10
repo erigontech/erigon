@@ -23,14 +23,26 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 func BenchmarkLogsMarshalFastJSON(b *testing.B) {
 	topic := common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef")
+	timestamp := hexutil.Uint64(1_700_000_000)
 	logs := make(Logs, 1000)
 	for i := range logs {
-		logs[i] = &Log{Topics: []common.Hash{topic, {}, {}}, Data: make([]byte, 32)}
+		tx := i / 8
+		logs[i] = &Log{
+			Topics:         []common.Hash{topic, {}, {}},
+			Data:           make([]byte, 32),
+			BlockNumber:    26_000_000,
+			TxHash:         common.Hash{byte(tx), byte(tx >> 8)},
+			TxIndex:        hexutil.Uint(tx),
+			BlockHash:      common.Hash{0xbb},
+			Index:          hexutil.Uint(i),
+			BlockTimestamp: &timestamp,
+		}
 	}
 	b.Run("stream", func(b *testing.B) {
 		b.ReportAllocs()
