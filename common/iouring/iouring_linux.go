@@ -44,6 +44,11 @@ const (
 	cqeSize = 16
 )
 
+var ioUringEnter = func(fd int, toSubmit, minComplete, flags uint32) (uintptr, unix.Errno) {
+	taken, _, errno := unix.Syscall6(unix.SYS_IO_URING_ENTER, uintptr(fd), uintptr(toSubmit), uintptr(minComplete), uintptr(flags), 0, 0)
+	return taken, errno
+}
+
 // io_uring_params layout (Linux). Only the fields we read are named precisely.
 type params struct {
 	sqEntries    uint32
@@ -204,7 +209,7 @@ func (r *Ring) complete(count int, process func(uint64, int32) error) error {
 		if reaped == count {
 			break
 		}
-		taken, _, errno := unix.Syscall6(unix.SYS_IO_URING_ENTER, uintptr(r.fd), uintptr(count-submitted), uintptr(count-reaped), enterGetevents, 0, 0)
+		taken, errno := ioUringEnter(r.fd, uint32(count-submitted), uint32(count-reaped), enterGetevents)
 		if errno == unix.EINTR {
 			continue
 		}

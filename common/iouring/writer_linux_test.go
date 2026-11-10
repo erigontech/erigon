@@ -245,29 +245,67 @@ func TestWriterFsyncDrainsEarlierWrite(t *testing.T) {
 }
 
 func TestWriterFallsBackAfterRingReset(t *testing.T) {
-	f, err := os.Create(filepath.Join(t.TempDir(), "output"))
-	require.NoError(t, err)
-	w := NewWriter(f)
-	require.NotNil(t, w.ring)
-	ringFD := w.ring.fd
-	defer func() {
-		if w.ring != nil {
-			w.ring.fd = ringFD
-			w.ring.Close()
+	t.Run("nothing in flight", func(t *testing.T) {
+		f, err := os.Create(filepath.Join(t.TempDir(), "output"))
+		require.NoError(t, err)
+		w := NewWriter(f)
+		require.NotNil(t, w.ring)
+		ringFD := w.ring.fd
+		t.Cleanup(func() {
+			_ = unix.Close(ringFD)
+			_ = f.Close()
+		})
+		previousEnter := ioUringEnter
+		ioUringEnter = func(int, uint32, uint32, uint32) (uintptr, unix.Errno) {
+			return 0, unix.EAGAIN
 		}
-		_ = f.Close()
-	}()
+		t.Cleanup(func() { ioUringEnter = previousEnter })
 
-	data := []byte("data after ring reset")
-	_, err = w.Write(data)
-	require.NoError(t, err)
-	w.ring.fd = -1
+		data := []byte("data after ring reset")
+		_, err = w.Write(data)
+		require.NoError(t, err)
 
-	err = w.flush(true)
-	require.NoError(t, err, "flush returned %v after ErrRingReset", err)
-	actual, err := os.ReadFile(f.Name())
-	require.NoError(t, err)
-	require.Equal(t, data, actual)
+		require.NoError(t, w.flush(true))
+		require.Nil(t, w.ring)
+		actual, err := os.ReadFile(f.Name())
+		require.NoError(t, err)
+		require.Equal(t, data, actual)
+	})
+
+	t.Run("pending write", func(t *testing.T) {
+		f, err := os.Create(filepath.Join(t.TempDir(), "output"))
+		require.NoError(t, err)
+		w := NewWriter(f)
+		require.NotNil(t, w.ring)
+		ringFD := w.ring.fd
+		t.Cleanup(func() {
+			_ = unix.Close(ringFD)
+			_ = f.Close()
+		})
+		previousEnter := ioUringEnter
+		calls := 0
+		ioUringEnter = func(int, uint32, uint32, uint32) (uintptr, unix.Errno) {
+			calls++
+			if calls == 1 {
+				return 1, 0
+			}
+			return 0, unix.EAGAIN
+		}
+		t.Cleanup(func() { ioUringEnter = previousEnter })
+
+		data := []byte("data after partial submit")
+		_, err = w.Write(data)
+		require.NoError(t, err)
+
+		err = w.flush(true)
+		require.ErrorIs(t, err, unix.EAGAIN)
+		require.Nil(t, w.ring)
+		_, statErr := unix.FcntlInt(uintptr(ringFD), unix.F_GETFD, 0)
+		require.NoError(t, statErr)
+		actual, err := os.ReadFile(f.Name())
+		require.NoError(t, err)
+		require.Empty(t, actual)
+	})
 }
 
 func injectCompletion(r *Ring, id uint64, res int32) {
