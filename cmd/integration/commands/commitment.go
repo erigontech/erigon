@@ -587,6 +587,9 @@ Examples:
 		if convertRestore {
 			return commitmentRestore(ctx, logger)
 		}
+		if err := dbstate.CheckRestoreResetDone(datadir.New(datadirCli)); err != nil {
+			return err
+		}
 
 		if convertV3 {
 			legacyHistory, err := filepath.Glob(filepath.Join(datadir.New(datadirCli).SnapHistory, "*-commitment.*.v"))

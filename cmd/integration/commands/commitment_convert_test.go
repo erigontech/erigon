@@ -63,6 +63,14 @@ func TestCommitmentConvertReturnsErrors(t *testing.T) {
 	convertV3 = false
 	root.SetArgs([]string{"--log.dir.disable", "commitment", "convert", "--datadir", t.TempDir(), "--chain", "mainnet", "--restore"})
 	require.ErrorContains(t, root.ExecuteContext(t.Context()), "without COMMITMENT_V3=true")
+
+	convertRestore = false
+	statecfg.ExperimentalCommitmentV3 = false
+	dirs := datadir.New(t.TempDir())
+	require.NoError(t, os.MkdirAll(filepath.Join(dirs.Snap, "backup"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, "backup", ".restore_v3_reset_pending"), nil, 0o644))
+	root.SetArgs([]string{"--log.dir.disable", "commitment", "convert", "--datadir", dirs.DataDir, "--chain", "mainnet", "--v3"})
+	require.ErrorContains(t, root.ExecuteContext(t.Context()), "convert --restore")
 }
 
 func TestCommitmentVerifyRejectsAsOfWithoutHistory(t *testing.T) {

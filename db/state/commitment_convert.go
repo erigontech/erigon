@@ -847,7 +847,7 @@ const restoreManifestTmpName = ".restore_manifest.tmp"
 
 const restoreV3ResetPendingName = ".restore_v3_reset_pending"
 
-func checkRestoreResetDone(dirs datadir.Dirs) error {
+func CheckRestoreResetDone(dirs datadir.Dirs) error {
 	_, err := os.Stat(filepath.Join(dirs.Snap, "backup", restoreV3ResetPendingName))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
@@ -855,7 +855,7 @@ func checkRestoreResetDone(dirs datadir.Dirs) error {
 	if err != nil {
 		return fmt.Errorf("check pending commitment restore: %w", err)
 	}
-	return errors.New("commitment restore has not reset the execution state: re-run `integration commitment convert --restore` before starting erigon")
+	return errors.New("commitment restore has not reset the execution state: re-run `integration commitment convert --restore` first")
 }
 
 // RestoreCommitmentFiles undoes ConvertCommitmentFiles by moving every file

@@ -140,10 +140,12 @@ func TestCheckSnapshotsCompatibilityV3RecordsRequiresFlag(t *testing.T) {
 }
 
 func TestOpenRefusesPendingRestoreReset(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(true))
 	dirs := datadir.New(t.TempDir())
 	backup := filepath.Join(dirs.Snap, "backup")
 	require.NoError(t, os.MkdirAll(backup, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(backup, restoreV3ResetPendingName), nil, 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v2.0-commitment.0-1.kv"), nil, 0o644))
 
 	agg, err := NewTest(dirs).SanityOldNaming().Open(t.Context())
 	if err == nil {
