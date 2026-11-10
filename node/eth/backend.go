@@ -1362,7 +1362,13 @@ func (s *Ethereum) RemoveTrustedPeer(ctx context.Context, req *remoteproto.Remov
 	return &remoteproto.RemovePeerReply{Success: true}, nil
 }
 
+// ErrSetHeadRefused reports a head move the node refuses on request.
+var ErrSetHeadRefused = errors.New("moving the head on request is refused")
+
 func (s *Ethereum) SetHead(ctx context.Context, targetBlock uint64) error {
+	if r := s.config.SetHeadRefusal; r != "" {
+		return fmt.Errorf("%w: %s", ErrSetHeadRefused, r)
+	}
 	return s.execModule.SetHead(ctx, targetBlock)
 }
 

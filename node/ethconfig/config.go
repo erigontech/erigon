@@ -256,6 +256,10 @@ type Config struct {
 	// NoEngineAPI keeps the engine API server down, for a chain an in-process
 	// service drives instead of a consensus layer.
 	NoEngineAPI bool
+	// SetHeadRefusal, when set, is why the node refuses to move its head on
+	// request (debug_setHead, ETHBACKEND.SetHead): another component is the
+	// chain's only driver.
+	SetHeadRefusal string `toml:"-"`
 	// ExtraAPIs are RPC namespaces served beside the built-in ones, subject
 	// to the same --http.api selection.
 	ExtraAPIs []rpc.API `toml:"-"`

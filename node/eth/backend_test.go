@@ -18,6 +18,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/ethconfig"
@@ -140,4 +141,19 @@ func TestBackwardBlockDownloader(t *testing.T) {
 	require.NoError(t, err)
 	_, err = feed.Next(t.Context())
 	require.ErrorContains(t, err, "no peers available")
+}
+
+// TestSetHeadRefusal: SetHead moves the head through the execution module,
+// unless the node refuses head moves on request, which it does with the
+// reason before reaching the module.
+func TestSetHeadRefusal(t *testing.T) {
+	m := execmoduletester.New(t)
+	s := &Ethereum{config: &ethconfig.Config{}, execModule: m.ExecModule}
+	require.NoError(t, s.SetHead(t.Context(), 0))
+	require.ErrorContains(t, s.SetHead(t.Context(), 1), "future block", "the execution module checks the target")
+
+	refusing := &Ethereum{config: &ethconfig.Config{SetHeadRefusal: "another component drives the chain"}}
+	err := refusing.SetHead(t.Context(), 0)
+	require.ErrorIs(t, err, ErrSetHeadRefused)
+	require.ErrorContains(t, err, "another component drives the chain")
 }
