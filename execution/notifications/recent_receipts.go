@@ -94,6 +94,19 @@ func (r *RecentReceipts) Missing(from, to uint64) []uint64 {
 }
 
 // evictBefore drops blocks more than limit below from; caller holds r.mu.
+// DropUpTo removes blocks at or below blockNum.
+func (r *RecentReceipts) DropUpTo(blockNum uint64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for bn := range r.receipts {
+		if bn <= blockNum {
+			delete(r.receipts, bn)
+			delete(r.txs, bn)
+			delete(r.headers, bn)
+		}
+	}
+}
+
 func (r *RecentReceipts) evictBefore(from uint64) {
 	for bn := range r.receipts {
 		if bn+r.limit < from {

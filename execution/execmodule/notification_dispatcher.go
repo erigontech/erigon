@@ -164,8 +164,8 @@ func (d *Dispatcher) Dispatch(
 			d.cacheMissingReceipts(ctx, committedTx, recentReceipts, notifyFrom, notifyTo)
 			recentReceipts.NotifyReceipts(d.events, notifyFrom, notifyTo)
 			recentReceipts.NotifyLogs(d.events, notifyFrom, notifyTo)
-			if !d.events.HasLogSubscriptions() && !d.events.HasReceiptSubscriptions() {
-				recentReceipts.Clear()
+			if !d.events.HasReceiptOrLogSubscribers() {
+				recentReceipts.DropUpTo(rawdb.ReadForkchoiceFinalizedNum(tx)) // a reorg cannot reach these, and a later subscriber needs removed logs only for blocks above them
 			}
 		}
 	}
@@ -197,7 +197,7 @@ func (d *Dispatcher) Dispatch(
 
 // cacheMissingReceipts regenerates from committedTx the receipts of the blocks in [from,to) the cache lacks.
 func (d *Dispatcher) cacheMissingReceipts(ctx context.Context, committedTx kv.TemporalTx, recentReceipts *notifications.RecentReceipts, from, to uint64) {
-	if committedTx == nil || d.loadReceipts == nil || !(d.events.HasLogSubscriptions() || d.events.HasReceiptSubscriptions()) {
+	if committedTx == nil || d.loadReceipts == nil || !d.events.HasReceiptOrLogSubscribers() {
 		return
 	}
 	var failed []uint64

@@ -251,14 +251,15 @@ func TestDispatcherForkchoicePathDeliversLogsOfTheWholeNotifySpan(t *testing.T) 
 	}
 }
 
-func TestDispatcherClearsTheCacheWithoutSubscribers(t *testing.T) {
+func TestDispatcherKeepsBlocksAboveFinalizedWithoutSubscribers(t *testing.T) {
 	const blocks = 3
 	_, tx := temporaltest.NewTestTx(t)
 	recent := notifications.NewRecentReceipts(notifications.MaxNotifiedBlocks)
 	writeHeadersAndFillCache(t, tx, recent, blocks)
+	rawdb.WriteForkchoiceFinalized(tx, oneLogBlockReceipts(2).Header.Hash())
 	dispatcher := NewDispatcher(chain.AllProtocolChanges, shards.NewEvents(), nil, nil, log.New())
 
 	require.NoError(t, dispatcher.Dispatch(t.Context(), tx, 0, nil, recent, 0, blocks, nil, nil))
 
-	require.Len(t, recent.Missing(1, blocks+1), blocks)
+	require.Equal(t, []uint64{1, 2}, recent.Missing(1, blocks+1))
 }

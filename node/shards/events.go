@@ -133,6 +133,11 @@ func (e *Events) EmptyReceiptSubscription(empty bool) {
 	e.hasReceiptSubscriptions = !empty
 }
 
+// HasReceiptOrLogSubscribers reports whether anyone reads RecentReceipts.
+func (e *Events) HasReceiptOrLogSubscribers() bool {
+	return e.HasLogSubscriptions() || e.HasReceiptSubscriptions()
+}
+
 func (e *Events) HasReceiptSubscriptions() bool {
 	e.lock.RLock()
 	defer e.lock.RUnlock()
@@ -473,11 +478,6 @@ func (n *Notifications) ClearSnapshotDownloadPin() bool {
 		return false
 	}
 	return n.snapDownload.CompareAndSwap(s, nil)
-}
-
-// HasReceiptOrLogSubscribers reports whether anyone reads RecentReceipts.
-func (n *Notifications) HasReceiptOrLogSubscribers() bool {
-	return n.Events.HasLogSubscriptions() || n.Events.HasReceiptSubscriptions()
 }
 
 func NewNotifications(stateChangesConsumer StateChangeConsumer) *Notifications {

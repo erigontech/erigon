@@ -176,8 +176,6 @@ type Ethereum struct {
 	downloaderClient dbservices.DownloaderClient
 
 	notifications *shards.Notifications
-	// notificationReceipts regenerates receipts for blocks the notification cache misses
-	notificationReceipts execmodule.ReceiptsLoader
 
 	unsubscribeEthstat      func()
 	unsubscribeWitnessCache func()
@@ -859,8 +857,7 @@ func New(
 	validationNotifications := shards.NewNotifications(nil)
 	validationSync := stageloop.NewInMemoryExecution(backend.sentryCtx, backend.chainDB, config, backend.sentryProvider.Client,
 		validationNotifications, blockReader, blockWriter, logger, backend.readAheader)
-	backend.notificationReceipts = execmodule.NewReceiptsLoader(chainConfig, blockReader, receipts.NewGenerator(config.Dirs, blockReader, backend.engine, nil, 5*time.Minute))
-	dispatcher := execmodule.NewDispatcher(chainConfig, backend.notifications.Events, backend.notifications.StateChangesConsumer, backend.notificationReceipts, logger)
+	dispatcher := execmodule.NewDispatcher(chainConfig, backend.notifications.Events, backend.notifications.StateChangesConsumer, nil, logger)
 	pipelineExecutor := execmodule.NewPipelineExecutor(backend.pipelineStagedSync, backend.chainDB, blockReader, chainConfig, backend.engine, validationSync, validationNotifications, dispatcher, logger)
 
 	hook := stageloop.NewHook(backend.sentryCtx, backend.notifications, backend.stagedSync, backend.chainConfig, backend.logger, dispatcher, backend.sentryProvider.Client.SetStatus, statusDataProvider, backend.sentryProvider.ExecutionP2PPublisher, blockReader)
@@ -1393,7 +1390,7 @@ func (s *Ethereum) Start() error {
 		return err
 	}
 
-	stageLoopDispatcher := execmodule.NewDispatcher(s.chainConfig, s.notifications.Events, s.notifications.StateChangesConsumer, s.notificationReceipts, s.logger)
+	stageLoopDispatcher := execmodule.NewDispatcher(s.chainConfig, s.notifications.Events, s.notifications.StateChangesConsumer, execmodule.NewReceiptsLoader(s.chainConfig, s.blockReader, receipts.NewGenerator(s.config.Dirs, s.blockReader, s.engine, nil, 5*time.Minute)), s.logger)
 	hook := stageloop.NewHook(s.sentryCtx, s.notifications, s.stagedSync, s.chainConfig, s.logger, stageLoopDispatcher, s.sentryProvider.Client.SetStatus, s.sentryProvider.StatusDataProvider, s.sentryProvider.ExecutionP2PPublisher, s.blockReader)
 
 	currentTDProvider := func() *uint256.Int {

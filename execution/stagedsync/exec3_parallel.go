@@ -805,7 +805,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 
 					if applyResult.BlockNum > 0 && applyResult.receiptsComplete && applyResult.Header != nil &&
 						pe.cfg.notifications != nil && pe.cfg.notifications.RecentReceipts != nil &&
-						(!initialCycle || pe.cfg.notifications.HasReceiptOrLogSubscribers()) {
+						(!initialCycle || pe.cfg.notifications.Events.HasReceiptOrLogSubscribers()) {
 						pe.cfg.notifications.RecentReceipts.Add(applyResult.Receipts, applyResult.Txs, applyResult.Header)
 					}
 

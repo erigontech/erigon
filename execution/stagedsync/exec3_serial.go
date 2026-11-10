@@ -458,7 +458,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 
 				result.Logs = append(result.Logs, ibs.GetRawLogs(txTask.TxIndex)...)
 
-				if priorComplete && (!isInitialCycle || se.cfg.notifications.HasReceiptOrLogSubscribers()) {
+				if priorComplete && (!isInitialCycle || se.cfg.notifications.Events.HasReceiptOrLogSubscribers()) {
 					se.cfg.notifications.RecentReceipts.Add(finalizeReceipts, txTask.Txs, txTask.Header)
 				}
 				checkBloom := !se.cfg.vmConfig.StatelessExec && !se.cfg.vmConfig.NoReceipts
