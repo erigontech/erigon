@@ -484,6 +484,7 @@ func (sdc *SharedDomainsCommitmentContext) computeCommitment(ctx context.Context
 		return rootHash, nil
 	}
 
+	ppt := time.Now()
 	// data accessing functions should be set when domain is opened/shared context updated
 
 	// Per-ComputeCommitment metrics accumulator for the main (root-fold) reads.
@@ -612,7 +613,11 @@ func (sdc *SharedDomainsCommitmentContext) computeCommitment(ctx context.Context
 		defer ptrie.SetLeaveDeferredForCaller(false)
 	}
 
+	commitment.ProbeAdd(4, ppt)
+	ppt = time.Now()
 	rootHash, err = sdc.patriciaTrie.Process(ctx, sdc.updates, logPrefix, onProgress, warmupConfig)
+	commitment.ProbeAdd(5, ppt)
+	ppt = time.Now()
 	if err != nil {
 		if drainCollectors != nil {
 			for _, c := range drainCollectors() {
@@ -665,12 +670,15 @@ func (sdc *SharedDomainsCommitmentContext) computeCommitment(ctx context.Context
 	}
 
 	sdc.justRestored.Store(false)
+	commitment.ProbeAdd(6, ppt)
+	ppt = time.Now()
 
 	if saveState {
 		if err := sdc.encodeAndStoreCommitmentState(trieContext, blockNum, txNum); err != nil {
 			return nil, err
 		}
 	}
+	commitment.ProbeAdd(7, ppt)
 
 	return rootHash, err
 }

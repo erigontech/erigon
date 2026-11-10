@@ -24,6 +24,7 @@ import (
 	"math/bits"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"golang.org/x/sync/errgroup"
 )
@@ -87,7 +88,9 @@ func (p *ctxLeasePool) tryAcquire() *ctxLease {
 
 func (p *ctxLeasePool) context(l *ctxLease) PatriciaContext {
 	if !l.made {
+		pt := time.Now()
 		l.ctx, l.cleanup = p.factory(p.round)
+		ProbeAdd(13, pt)
 		l.made = true
 	}
 	return l.ctx

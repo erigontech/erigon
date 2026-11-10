@@ -52,6 +52,8 @@ type pendingBlock struct {
 // silently degrading to incremental).
 var computedAheadCount atomic.Int64
 
+var probeNames = [32]string{0: "prefetchWait", 1: "emit", 2: "flushPrev", 3: "ccwd", 4: "setup", 5: "process", 6: "load", 7: "cstate", 8: "build", 9: "mountSetup", 10: "walk", 11: "rootFold", 12: "tail", 13: "lease", 14: "index", 15: "depval", 16: "sched", 17: "publish", 18: "blockEnd", 19: "finalizeTail", 20: "engineFinalize", 21: "firstResult", 22: "ensureCS", 23: "tooBegin", 24: "afterStart"}
+
 // logNpPhases emits the per-block additive newPayload phase breakdown
 // (stage/exec/commit/overlap/gap/residual) for perf attribution.
 var logNpPhases = dbg.EnvBool("NEWPAYLOAD_PHASES", false)
@@ -476,6 +478,14 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 			cc.logger.Info("[np-phase] stage", "blk", r.BlockNum,
 				"stage", stageWall, "exec", execActive, "commit", commitActive,
 				"overlap", overlap, "gap", gap, "residual", residual)
+			kv := make([]any, 0, 64)
+			kv = append(kv, "blk", r.BlockNum)
+			for i, n := range probeNames {
+				if n != "" {
+					kv = append(kv, n, time.Duration(commitment.Probe[i].Swap(0)))
+				}
+			}
+			cc.logger.Info("[np-phase] sub", kv...)
 		}
 		delete(cc.pending, r.BlockNum)
 		delete(cc.computedAhead, r.BlockNum)
@@ -804,7 +814,10 @@ func (cc *commitmentCalculator) finishPrefetch() {
 // path; the per-call differences live in m.
 
 func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m computeMode) {
+	pt := time.Now()
 	cc.finishPrefetch()
+	commitment.ProbeAdd(0, pt)
+	pt = time.Now()
 	// The version map is the ledger: exec's writes already encode every EIP-161 /
 	// self-destruct removal, so emitTouched folds the block's touched keys straight
 	// from the view with no EIP knowledge. In a cross-block batch the touched union
@@ -827,6 +840,7 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 		return
 	}
 
+	commitment.ProbeAdd(1, pt)
 	sdCtx := cc.doms.GetCommitmentContext()
 	sdCtx.SetUpdates(cc.handOffUpdates())
 
@@ -972,6 +986,7 @@ func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context,
 	// Flush block N-1's own pending update (hash-routed to N-1's saved changeset,
 	// independent of N's diff below) — the one remaining changesetMu window, brief
 	// rather than spanning the fold that follows.
+	pt := time.Now()
 	if err := func() error {
 		cc.doms.LockChangesetAccumulator()
 		defer cc.doms.UnlockChangesetAccumulator()
@@ -979,6 +994,8 @@ func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context,
 	}(); err != nil {
 		return nil, err
 	}
+	commitment.ProbeAdd(2, pt)
+	defer func(t time.Time) { commitment.ProbeAdd(3, t) }(time.Now())
 
 	// The exec loop saves the accumulator by hash before dispatching the block, so
 	// this identifies the block's changeset whatever the loop rotated to since. A

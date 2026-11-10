@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"runtime"
+	"time"
 )
 
 func parallelMountConcurrency(numWorkers int) int {
@@ -38,6 +39,7 @@ func (hph *HexPatriciaHashed) mountTo(base *HexPatriciaHashed, nibble int) {
 }
 
 func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Updates) ([]byte, error) {
+	pt := time.Now()
 	pu := updates.parallel
 	base := p.template
 	if base.ctx == nil && p.trieCtxFactory != nil {
@@ -69,10 +71,15 @@ func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Up
 	if err := fw.attach(ctx, bw); err != nil {
 		return nil, err
 	}
+	ProbeAdd(9, pt)
+	pt = time.Now()
 	root := pu.trie.root
 	path := make([]byte, 0, forkPathCap)
 	path = append(path, root.ext...)
 	walkErr := fw.walk(ctx, bw, root, path)
+	ProbeAdd(10, pt)
+	pt = time.Now()
+	defer func() { ProbeAdd(11, pt) }()
 	fw.detach(bw)
 	p.forks.Store(fw.forks.Load())
 	if walkErr != nil {

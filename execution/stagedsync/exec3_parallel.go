@@ -2595,6 +2595,7 @@ type blockExecutor struct {
 	consumers *resultStream // fan-out to the apply loop + commitment calculator
 
 	execStarted time.Time
+	npFirst     bool
 	result      *blockResult
 	applyCount  int
 	exhausted   *ErrLoopExhausted
@@ -3322,6 +3323,11 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 	txVersion := res.Version()
 
+	if !be.npFirst {
+		be.npFirst = true
+		commitment.Probe[21].Add(int64(time.Since(be.execStarted)))
+	}
+	pt := time.Now()
 	be.blockIO.RecordReads(txVersion, res.TxIn)
 	be.indexReads(tx, res.TxIn)
 	// This tx's writes just published; flag any successor that already read one of
@@ -3374,13 +3380,25 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 	// do validations ...
 	var stateReader state.StateReader
+	commitment.ProbeAdd(14, pt)
+	pt = time.Now()
 
 	if r, derr := be.runDepOrderValidation(pe, applyTx, &stateReader); derr != nil || r != nil {
 		return r, derr
 	}
+	commitment.ProbeAdd(15, pt)
+	pt = time.Now()
 
 	maxValidated := be.validateTasks.maxComplete()
 	be.scheduleExecution(ctx, pe)
+	commitment.ProbeAdd(16, pt)
+	pt = time.Now()
+	pubDone := false
+	defer func() {
+		if !pubDone {
+			commitment.ProbeAdd(17, pt)
+		}
+	}()
 
 	if be.publishTasks.minPending() != -1 {
 		toPublish := make(sort.IntSlice, 0, 2)
@@ -3451,6 +3469,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 	}
 
 	if be.publishTasks.countComplete() == len(be.tasks) && be.execTasks.countComplete() == len(be.tasks) {
+		commitment.ProbeAdd(17, pt)
+		pubDone = true
+		defer func(t time.Time) { commitment.ProbeAdd(18, t) }(time.Now())
 		var allDeps map[int]map[int]bool
 
 		var deps state.DAG
@@ -3573,10 +3594,12 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				}
 
 				chainReader := consensuschain.NewReader(pe.cfg.chainConfig, applyTx, pe.cfg.blockReader, pe.logger)
+				ptf := time.Now()
 				_, finErr := pe.cfg.engine.Finalize(
 					pe.cfg.chainConfig, types.CopyHeader(tt.Header), ibs, tt.Uncles, blockReceipts,
 					tt.Withdrawals, chainReader, syscall, false, pe.logger,
 				)
+				commitment.ProbeAdd(20, ptf)
 				// A system-contract read can fail during Finalize and be applied as a
 				// zero value without surfacing through finErr; treat it as an
 				// infrastructure failure, not an invalid block.
