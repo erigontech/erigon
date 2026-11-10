@@ -26,8 +26,10 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -147,4 +149,14 @@ func importBurntContractBlock(t *testing.T, burnt, to common.Address, alloc type
 	dbg.Exec3Parallel = true
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(key))
 	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), blocks.Blocks))
+
+	wantBurn := uint256.NewInt(blocks.Receipts[0][1].GasUsed * blocks.TopBlock.BaseFee().Uint64())
+	require.NoError(t, m.DB.ViewTemporal(t.Context(), func(tx kv.TemporalTx) error {
+		st := state.New(m.NewStateReader(tx))
+		defer st.Close()
+		balance, err := st.GetBalance(accounts.InternAddress(burnt))
+		require.NoError(t, err)
+		require.Equal(t, *wantBurn, balance, "only the second tx's burn survives")
+		return nil
+	}))
 }

@@ -61,6 +61,7 @@ func TestZeroFeeCreatesCoinbaseBeforeSpuriousDragon(t *testing.T) {
 		b.AddTx(call)
 	})
 	require.NoError(t, err)
+	require.Equal(t, uint64(21_720), chainPack.Receipts[0][1].GasUsed)
 	require.NoError(t, m.InsertChain(chainPack))
 
 	importInParallel(t, gspec, keys[0], chainPack, func(t *testing.T, st *state.IntraBlockState) {
