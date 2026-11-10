@@ -824,3 +824,76 @@ func TestAccountChangesDecodeRLPClearsStorageChanges(t *testing.T) {
 		t.Fatalf("decode kept %d storage changes from the previous payload", len(ac.StorageChanges))
 	}
 }
+
+func TestAccountChangesEqualComparesAddressAndCode(t *testing.T) {
+	base := func() *AccountChanges {
+		return &AccountChanges{
+			Address:        common.Address{1},
+			StorageChanges: []SlotChanges{{Slot: accounts.InternKey(common.Hash{1}), Changes: []*StorageChange{{Index: 1, Value: *uint256.NewInt(7)}}}},
+			NonceChanges:   []*NonceChange{{Index: 1, Value: 7}},
+			CodeChanges:    []*CodeChange{{Index: 1, Bytecode: []byte{0x60}}},
+		}
+	}
+	if !base().Equal(base()) {
+		t.Fatal("identical changes must be equal")
+	}
+	for name, change := range map[string]func(*AccountChanges){
+		"address":              func(ac *AccountChanges) { ac.Address = common.Address{2} },
+		"storage change index": func(ac *AccountChanges) { ac.StorageChanges[0].Changes[0].Index = 2 },
+		"nonce change index":   func(ac *AccountChanges) { ac.NonceChanges[0].Index = 2 },
+		"code change index":    func(ac *AccountChanges) { ac.CodeChanges[0].Index = 2 },
+		"code bytes":           func(ac *AccountChanges) { ac.CodeChanges[0].Bytecode = []byte{0x61} },
+	} {
+		other := base()
+		change(other)
+		if base().Equal(other) {
+			t.Fatalf("a different %s must not be equal", name)
+		}
+	}
+}
+
+func TestBlockAccessListDecodeAcceptsOnlyCanonicalEncoding(t *testing.T) {
+	encode := func(v any) rlp.RawValue {
+		raw, err := rlp.EncodeToBytes(v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return raw
+	}
+	one := encode(uint64(1))
+	build := func(extraIn string) []byte {
+		list := func(name string, items ...rlp.RawValue) rlp.RawValue {
+			if name == extraIn {
+				items = append(items, one)
+			}
+			return encode(items)
+		}
+		slot := list("slot", one, list("", list("storage change", one, one)))
+		account := list("account", encode(common.Address{1}), list("", slot), list("", one),
+			list("", list("balance change", one, one)),
+			list("", list("nonce change", one, one)),
+			list("", list("code change", one, encode([]byte{0x60}))))
+		return list("", account)
+	}
+
+	canonical := build("none")
+	decoded, err := DecodeBlockAccessListBytes(canonical)
+	if err != nil {
+		t.Fatalf("canonical list: %v", err)
+	}
+	reencoded, err := EncodeBlockAccessListBytes(decoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(reencoded, canonical) {
+		t.Fatalf("the fixture is not canonical: %x re-encodes to %x", canonical, reencoded)
+	}
+	if _, err := DecodeBlockAccessListBytes(append([]byte{0xf8, canonical[0] - 0xc0}, canonical[1:]...)); err == nil {
+		t.Fatal("a list length in long form must be rejected")
+	}
+	for _, name := range []string{"account", "slot", "storage change", "balance change", "nonce change", "code change"} {
+		if _, err := DecodeBlockAccessListBytes(build(name)); err == nil {
+			t.Fatalf("an extra element in a %s list must be rejected", name)
+		}
+	}
+}
