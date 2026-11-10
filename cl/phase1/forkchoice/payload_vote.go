@@ -479,6 +479,9 @@ func (f *ForkChoiceStore) validateParentPayloadPath(block *cltypes.BeaconBlock, 
 
 	parentBid := f.executionPayloadBid(block.ParentRoot)
 	if parentPayloadStatusFromBid(parentBid, block) == cltypes.PayloadStatusFull {
+		if f.IsBlockInvalid(block.ParentRoot) {
+			return errors.New("parent execution payload is invalid")
+		}
 		if f.IsEnvelopeRejected(block.ParentRoot) {
 			return errors.New("parent execution payload envelope is rejected")
 		}

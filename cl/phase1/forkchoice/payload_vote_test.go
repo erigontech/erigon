@@ -734,7 +734,7 @@ func TestValidateParentPayloadPathUsesValidationAvailability(t *testing.T) {
 	}
 }
 
-func TestValidateParentPayloadPathWithRejectedParent(t *testing.T) {
+func TestValidateParentPayloadPathWithTerminalParent(t *testing.T) {
 	cfg := &clparams.MainnetBeaconConfig
 	parentRoot := common.Hash{1}
 	executionHash := common.Hash{2}
@@ -749,19 +749,28 @@ func TestValidateParentPayloadPathWithRejectedParent(t *testing.T) {
 		name     string
 		full     bool
 		rejected bool
+		invalid  bool
 	}{
 		{name: "rejected FULL", full: true, rejected: true},
 		{name: "rejected EMPTY", rejected: true},
+		{name: "invalid FULL", full: true, invalid: true},
+		{name: "invalid EMPTY", invalid: true},
 		{name: "missing FULL", full: true},
 	} {
 		for _, requireEngineAcceptance := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/requireEngineAcceptance=%t", test.name, requireEngineAcceptance), func(t *testing.T) {
 				f := newPayloadVoteTestStore(t, parentRoot, false, false)
+				var invalidatedRoot common.Hash
 				f.forkGraph = payloadVoteForkGraph{
 					ForkGraph:         ptcVoteForkGraph{blocks: map[common.Hash]*cltypes.SignedBeaconBlock{parentRoot: parent}},
 					rejectedEnvelopes: map[common.Hash]bool{parentRoot: test.rejected},
+					invalidatedHeader: &invalidatedRoot,
 				}
-				f.executionPayloadStatus.Add(executionHash, execution_client.PayloadStatusValidated)
+				if test.invalid {
+					f.forkGraph.MarkHeaderAsInvalid(parentRoot)
+				} else {
+					f.executionPayloadStatus.Add(executionHash, execution_client.PayloadStatusValidated)
+				}
 				child := cltypes.NewBeaconBlock(cfg, clparams.GloasVersion)
 				child.ParentRoot = parentRoot
 				parentHash := previousExecutionHash
@@ -774,7 +783,7 @@ func TestValidateParentPayloadPathWithRejectedParent(t *testing.T) {
 				switch {
 				case !test.full:
 					require.NoError(t, err)
-				case test.rejected:
+				case test.rejected || test.invalid:
 					require.Error(t, err)
 					require.NotErrorIs(t, err, ErrParentEnvelopePending)
 				default:

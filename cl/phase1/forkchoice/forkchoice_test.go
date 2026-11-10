@@ -554,6 +554,70 @@ func TestValidateParentPayloadPathWithRejectedAnchor(t *testing.T) {
 	}
 }
 
+func TestValidateParentPayloadPathWithInvalidAnchorAfterCacheEviction(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	clparams.ApplyMinimalPreset(&cfg)
+	cfg.GloasForkEpoch = 0
+	cfg.InitializeForkSchedule()
+	anchor := state.New(&cfg)
+	anchor.SetVersion(clparams.GloasVersion)
+	require.NoError(t, anchor.SetSlot(64))
+	anchor.SetLatestBlockHeader(&cltypes.BeaconBlockHeader{Slot: 64})
+	bid := cltypes.NewBeaconBlock(&cfg, clparams.GloasVersion).Body.SignedExecutionPayloadBid.Message
+	bid.Slot = 64
+	bid.BlockHash = common.Hash{1}
+	bid.ParentBlockHash = common.Hash{2}
+	anchor.SetLatestExecutionPayloadBid(bid)
+	graph, err := fork_graph.NewForkGraphDisk(anchor, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
+	require.NoError(t, err)
+	root := graph.AnchorRoot()
+	store, err := NewForkChoiceStore(nil, anchor, nil, pool.NewOperationsPool(&cfg), graph, nil, nil, nil,
+		public_keys_registry.NewInMemoryPublicKeysRegistry(), nil, false, nil)
+	require.NoError(t, err)
+	store.MarkPayloadInvalid(root, bid.BlockHash)
+	require.True(t, store.executionHashMarkedInvalid(bid.BlockHash))
+
+	store.verifiedExecutionPayloadHashes.Resize(1)
+	store.verifiedExecutionPayloadHashes.Add(common.Hash{3}, common.Hash{4})
+	_, marked := store.invalidatedExecutionPayloads.Load(bid.BlockHash)
+	require.False(t, marked, "evicting the last root mapping removes the hash verdict")
+	store.executionPayloadStatus.Resize(1)
+	store.executionPayloadStatus.Add(common.Hash{4}, execution_client.PayloadStatusValidated)
+	store.payloadStatusByRoot.Resize(1)
+	store.payloadStatusByRoot.Add(common.Hash{3}, execution_client.PayloadStatusValidated)
+	require.False(t, store.executionHashMarkedInvalid(bid.BlockHash))
+	require.False(t, store.payloadStatusByRoot.Contains(root))
+	require.True(t, store.IsBlockInvalid(root))
+	_, retained := graph.GetHeader(root)
+	require.True(t, retained)
+
+	for _, test := range []struct {
+		name       string
+		parentHash common.Hash
+		invalid    bool
+	}{
+		{name: "FULL", parentHash: bid.BlockHash, invalid: true},
+		{name: "EMPTY", parentHash: bid.ParentBlockHash},
+	} {
+		for _, requireEngineAcceptance := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/requireEngineAcceptance=%t", test.name, requireEngineAcceptance), func(t *testing.T) {
+				child := cltypes.NewBeaconBlock(&cfg, clparams.GloasVersion)
+				child.Slot = 65
+				child.ParentRoot = root
+				child.Body.SignedExecutionPayloadBid.Message.ParentBlockHash = test.parentHash
+
+				err := store.validateParentPayloadPath(child, requireEngineAcceptance)
+				if test.invalid {
+					require.ErrorContains(t, err, "parent execution payload is invalid")
+					require.NotErrorIs(t, err, ErrParentEnvelopePending)
+				} else {
+					require.NoError(t, err)
+				}
+			})
+		}
+	}
+}
+
 func TestParentPayloadPathWithPreGloasAnchorStateUpgradedToGloas(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	clparams.ApplyMinimalPreset(&cfg)
