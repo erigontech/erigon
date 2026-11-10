@@ -115,3 +115,34 @@ func TestMappingOfFindsTheMappingThatHoldsThePage(t *testing.T) {
 	_, ok := mappingOf(uintptr(unsafe.Pointer(&bufs[1][0])))
 	require.False(t, ok, "an unregistered mapping is not found")
 }
+
+// unfaultedPage returns one anonymous page that mincore reports as not resident until it is written.
+func unfaultedPage(t *testing.T) []byte {
+	t.Helper()
+	m, err := unix.Mmap(-1, 0, int(osPageSize), unix.PROT_READ|unix.PROT_WRITE, unix.MAP_ANON|unix.MAP_PRIVATE)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, unix.Munmap(m)) })
+	return m
+}
+
+func TestProbeSecondTouchOfColdPagePanicsWithoutMincore(t *testing.T) {
+	m := unfaultedPage(t)
+	pr := &Probe{resident: map[uintptr]bool{}}
+	touch := func() { pr.Touch(unsafe.Pointer(&m[0])) }
+	cold := ColdPage(unsafe.Pointer(&m[0]))
+	require.PanicsWithValue(t, cold, touch)
+
+	m[0] = 1 // mincore now says resident, so only the remembered answer can panic
+	require.PanicsWithValue(t, cold, touch)
+}
+
+func TestProbeMarkResidentOverridesRememberedColdPage(t *testing.T) {
+	m := unfaultedPage(t)
+	pr := &Probe{resident: map[uintptr]bool{}}
+	touch := func() { pr.Touch(unsafe.Pointer(&m[0])) }
+	cold := ColdPage(unsafe.Pointer(&m[0]))
+	require.PanicsWithValue(t, cold, touch)
+
+	pr.MarkResident([]uintptr{uintptr(cold)})
+	require.NotPanics(t, touch)
+}
