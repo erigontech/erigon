@@ -18,6 +18,7 @@ package follower_test
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -28,6 +29,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/eez/config"
 	"github.com/erigontech/erigon/eez/deriver"
 	"github.com/erigontech/erigon/eez/deriver/derivertest"
@@ -376,4 +378,81 @@ func TestStatusSequencerHead(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEqual(t, unsettled.Blocks[0].Hash(), head.Hash())
 	require.Equal(t, follower.HeadDerivation, f.Status().HeadSource)
+}
+
+func phaseGauge(p follower.Phase) uint64 {
+	return metrics.GetOrCreateGauge(fmt.Sprintf("eez_sync_phase{phase=%q}", p)).GetValueUint64()
+}
+
+// requirePhaseGauge waits for eez_sync_phase to be 1 for want alone.
+func requirePhaseGauge(t *testing.T, want follower.Phase) {
+	t.Helper()
+	all := []follower.Phase{
+		follower.PhaseBooting, follower.PhaseWaitingForFinality, follower.PhaseSyncing,
+		follower.PhaseWaitingForPeers, follower.PhaseDeriving, follower.PhaseFollowing,
+	}
+	require.Eventually(t, func() bool {
+		for _, p := range all {
+			if (phaseGauge(p) == 1) != (p == want) {
+				return false
+			}
+		}
+		return true
+	}, 10*time.Second, 5*time.Millisecond, "phase %s", want)
+}
+
+// TestPhaseMetrics: eez_sync_phase is 1 for the follower's phase alone.
+func TestPhaseMetrics(t *testing.T) {
+	c := derivertest.NewComposer(t)
+	composeBatches(t, c, 1, 3)
+	n, _, _ := newPeersNode(t, c, c.L1, false)
+	requirePhaseGauge(t, follower.PhaseBooting)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- n.follower.Boot(ctx) }()
+	requirePhaseGauge(t, follower.PhaseWaitingForFinality)
+	finalizeHead(t, c)
+	requirePhaseGauge(t, follower.PhaseWaitingForPeers)
+	cancel()
+	require.ErrorIs(t, <-done, context.Canceled)
+
+	require.NoError(t, newNode(t, c.L1).follower.Boot(t.Context()))
+	requirePhaseGauge(t, follower.PhaseFollowing)
+}
+
+// TestPeerMetrics: eez_l2_peers follows the devp2p peer count while boot
+// waits for finality and for peers, and once the follower follows, with no
+// status read.
+func TestPeerMetrics(t *testing.T) {
+	gauge := metrics.GetOrCreateGauge("eez_l2_peers")
+	requireGauge := func(want uint64) {
+		t.Helper()
+		require.Eventually(t, func() bool { return gauge.GetValueUint64() == want }, 10*time.Second, time.Millisecond, "eez_l2_peers %d", want)
+	}
+	gauge.SetUint64(0)
+	c := derivertest.NewComposer(t)
+	composeBatches(t, c, 1, 3)
+	p := &countingPeers{}
+	p.n.Store(5)
+	refresh := func(cfg *follower.Config) { cfg.PeerCount, cfg.PeerRefresh = p.count, 10*time.Millisecond }
+
+	m, chain := derivertest.NewL2(t)
+	s := newPeerSentry(c.L2, false)
+	booting := (&node{m: m, dir: t.TempDir()}).restart(t, c.L1, chain, peersMode(newFetcher(t, s, chain)), refresh)
+	stop, _ := booting.run(t)
+	requirePhaseGauge(t, follower.PhaseWaitingForFinality)
+	requireGauge(5)
+	finalizeHead(t, c)
+	requirePhaseGauge(t, follower.PhaseWaitingForPeers)
+	p.n.Store(6)
+	requireGauge(6)
+	stop()
+
+	m, chain = derivertest.NewL2(t)
+	following := (&node{m: m, dir: t.TempDir()}).restart(t, c.L1, chain, refresh)
+	following.run(t)
+	requirePhaseGauge(t, follower.PhaseFollowing)
+	p.n.Store(7)
+	requireGauge(7)
 }

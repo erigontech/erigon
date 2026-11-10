@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/eez/config"
 	"github.com/erigontech/erigon/eez/deriver"
 	"github.com/erigontech/erigon/eez/deriver/derivertest"
@@ -607,6 +608,105 @@ func TestSignedHeadForkChoice(t *testing.T) {
 		require.Equal(t, uint64(2), opts[0].Batch, "the gap to the local head")
 		require.Equal(t, 3*time.Second, opts[0].Timeout)
 		require.Equal(t, uint64(seqsig.MaxAncestryWalk), opts[0].Limit)
+	})
+}
+
+// counted returns how far each counter of names moved while do ran, the
+// counters that did not move left out.
+func counted(do func(), names ...string) map[string]uint64 {
+	before := make(map[string]uint64, len(names))
+	for _, n := range names {
+		before[n] = metrics.GetOrCreateCounter(n).GetValueUint64()
+	}
+	do()
+	moved := make(map[string]uint64)
+	for _, n := range names {
+		if d := metrics.GetOrCreateCounter(n).GetValueUint64() - before[n]; d > 0 {
+			moved[n] = d
+		}
+	}
+	return moved
+}
+
+const (
+	headAdopted     = "eez_head_adopted_total"
+	headRewound     = "eez_head_rewound_total"
+	headHeld        = "eez_head_held_total"
+	headAhead       = "eez_head_ahead_total"
+	headFetchFailed = "eez_head_fetch_failures_total"
+	headRejected    = "eez_head_rejected_total"
+)
+
+// TestSignedHeadMetrics: the signed-head fork choice counts its moves of the
+// head, those that keep the previous head canonical and those that drop it,
+// the decisions held or waiting for derivation, the fetches that fail, and
+// the heads it does not follow, once per head and reason.
+func TestSignedHeadMetrics(t *testing.T) {
+	names := []string{headAdopted, headRewound, headHeld, headAhead, headFetchFailed, headRejected}
+	steps := func(t *testing.T, n *headsNode, heads ...*seqsig.VerifiedHead) map[string]uint64 {
+		return counted(func() { n.step(t, heads...) }, names...)
+	}
+
+	t.Run("adopted and rewound", func(t *testing.T) {
+		f := newForks(t)
+		_, peers := mapPeers(f.blocks()...)
+		n := newHeadsNode(t, f.c.L1, headsOptions{peers: peers})
+		require.Equal(t, map[string]uint64{headAdopted: 1}, steps(t, n, signedHead(f.a3.Blocks[0], 200, 2, false)))
+		require.Equal(t, map[string]uint64{headRewound: 1}, steps(t, n, signedHead(f.a2.Blocks[0], 200, 3, true)), "back to an ancestor")
+		require.Empty(t, steps(t, n))
+		require.Equal(t, map[string]uint64{headRewound: 1}, steps(t, n, signedHead(f.b3.Blocks[0], 300, 1, false)), "to another branch")
+		n.requireHead(t, f.b3.Blocks[0])
+	})
+
+	t.Run("fetch failed and rejected", func(t *testing.T) {
+		f := newForks(t)
+		fetcher, peers := mapPeers(f.blocks()...)
+		n := newHeadsNode(t, f.c.L1, headsOptions{peers: peers})
+		failed := false
+		fetcher.setHook(func(context.Context) error {
+			if failed {
+				return nil
+			}
+			failed = true
+			return errors.New("peer went away")
+		})
+		require.Equal(t, map[string]uint64{headFetchFailed: 1, headRejected: 1}, steps(t, n, signedHead(f.a3.Blocks[0], 200, 2, false)))
+		require.Equal(t, map[string]uint64{headAdopted: 1}, steps(t, n))
+	})
+
+	t.Run("rejected once per head and reason", func(t *testing.T) {
+		f := newForks(t)
+		f.c.Post(derivertest.Posting{Batch: f.b2})
+		_, peers := mapPeers(f.blocks()...)
+		n := newHeadsNode(t, f.c.L1, headsOptions{peers: peers})
+		require.Equal(t, map[string]uint64{headAdopted: 1, headRejected: 1},
+			steps(t, n, signedHead(f.a3.Blocks[0], 200, 2, true), signedHead(f.b3.Blocks[0], 100, 2, true)))
+		require.Empty(t, steps(t, n))
+	})
+
+	t.Run("held", func(t *testing.T) {
+		f := newForks(t)
+		b4 := f.c.Compose(nil, derivertest.Block{Coinbase: bob, Extra: []byte("b4"), Txs: [][]byte{}})
+		_, peers := mapPeers(append(f.blocks(), b4.Blocks[0])...)
+		var chain *failingExtend
+		n := newHeadsNode(t, f.c.L1, headsOptions{peers: peers, wrap: func(c deriver.Chain) deriver.Chain {
+			chain = &failingExtend{Chain: c, number: 3}
+			return chain
+		}})
+		f.c.Post(derivertest.Posting{Batch: f.b2}, derivertest.Posting{Batch: f.b3})
+		chain.fail.Store(true)
+		require.ErrorIs(t, f.newHead(t, n), errBuild)
+		require.Equal(t, map[string]uint64{headHeld: 1}, steps(t, n, signedHead(b4.Blocks[0], 100, 3, true)))
+		require.Equal(t, map[string]uint64{headHeld: 1}, steps(t, n), "every held decision")
+	})
+
+	t.Run("ahead", func(t *testing.T) {
+		f := newForks(t)
+		_, peers := mapPeers(f.blocks()...)
+		n := newHeadsNode(t, f.c.L1, headsOptions{peers: peers})
+		ahead := signedHead(types.NewBlock(&types.Header{Number: *uint256.NewInt(1 + seqsig.MaxAncestryWalk + 1), ParentHash: common.Hash{1}}, nil, nil, nil, nil, nil), 300, 1, false)
+		require.Equal(t, map[string]uint64{headAhead: 1}, steps(t, n, ahead))
+		require.Equal(t, map[string]uint64{headAhead: 1}, steps(t, n), "every decision that waits")
 	})
 }
 

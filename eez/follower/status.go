@@ -120,6 +120,19 @@ func (f *Follower) setPhase(p Phase) {
 	f.statusMu.Lock()
 	f.status.Phase = p
 	f.statusMu.Unlock()
+	publishPhase(p)
+}
+
+// publishPhase sets the phase gauges, the others' to 0 first, so that a
+// scrape never sees two phases.
+func publishPhase(p Phase) {
+	m := loadMetrics()
+	for q, g := range m.phase {
+		if q != p {
+			g.SetInt(0)
+		}
+	}
+	m.phase[p].SetInt(1)
 }
 
 func (f *Follower) setAnchor(a *Anchor) {
@@ -236,6 +249,7 @@ func (p *peerCount) refresh() {
 		defer cancel()
 		if n, err := p.count(ctx); err == nil {
 			p.n.Store(n)
+			loadMetrics().l2Peers.SetUint64(n)
 		}
 		p.mu.Lock()
 		p.running = false

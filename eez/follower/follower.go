@@ -264,6 +264,7 @@ func New(reader l1.ChainReader, chain deriver.Chain, cfg *chain.Config, c Config
 		status:  Status{Mode: mode, Phase: PhaseBooting},
 	}
 	watch.f = f
+	publishPhase(PhaseBooting)
 	if c.PeerCount != nil {
 		f.peers = &peerCount{count: c.PeerCount, every: cmp.Or(c.PeerRefresh, DefaultConfig.PeerRefresh)}
 	}

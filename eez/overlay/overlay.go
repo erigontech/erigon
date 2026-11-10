@@ -111,6 +111,7 @@ type Overlay struct {
 	self   peer.ID
 	port   uint16
 	logger log.Logger
+	m      *overlayMetrics
 	val    *validator
 	heads  chan *seqsig.VerifiedHead
 	// idle is IdleTimeout, shorter in tests.
@@ -158,6 +159,7 @@ func New(cfg Config, logger log.Logger) (*Overlay, error) {
 		self:    self,
 		port:    port,
 		logger:  logger,
+		m:       loadMetrics(),
 		val:     &validator{domain: cfg.Domain, signer: cfg.Signer, now: nowMs},
 		heads:   make(chan *seqsig.VerifiedHead, HeadsBuffer),
 		idle:    IdleTimeout,
@@ -193,7 +195,7 @@ func (o *Overlay) Start() error {
 	}
 	o.wg.Go(func() { o.deliver(ctx) })
 	o.wg.Go(func() { o.loop(ctx) })
-	o.logger.Info("[eez] overlay listening", "addrs", h.Addrs(), "peer", h.ID(), "topic", topic.String())
+	o.logger.Info("[eez] overlay listening", "event", "eez.p2p.listening", "addrs", h.Addrs(), "peer", h.ID(), "topic", topic.String())
 	return nil
 }
 
@@ -206,6 +208,7 @@ func (o *Overlay) Stop() error {
 	o.cancel()
 	o.cancel = nil
 	o.wg.Wait()
+	o.m.peers.SetInt(0)
 	return o.host.Close()
 }
 
@@ -245,13 +248,23 @@ func (o *Overlay) Peers() int {
 // accepted head to deliver.
 func (o *Overlay) validate(_ context.Context, from peer.ID, msg *pubsub.Message) pubsub.ValidationResult {
 	h, res, err := o.val.check(msg.Data)
-	switch {
-	case res == pubsub.ValidationAccept:
+	if res == pubsub.ValidationAccept {
 		msg.ValidatorData = h
-	case res == pubsub.ValidationReject && from != o.self:
+	}
+	if from == o.self {
+		return res
+	}
+	o.m.received.Inc()
+	switch res {
+	case pubsub.ValidationAccept:
+		o.m.accepted.Inc()
+	case pubsub.ValidationIgnore:
+		o.m.ignored.Inc()
+	case pubsub.ValidationReject:
+		o.m.rejected.Inc()
 		o.rejected.Add(1)
 		o.lastReject.Store(&reject{from: from, err: err})
-		o.logger.Debug("[eez] overlay rejected a message", "peer", from, "err", err)
+		o.logger.Debug("[eez] overlay rejected a message", "event", "eez.p2p.message.rejected", "peer", from, "err", err)
 	}
 	return res
 }
@@ -268,40 +281,54 @@ func (o *Overlay) deliver(ctx context.Context) {
 		if msg.ReceivedFrom == o.self {
 			continue
 		}
-		h, ok := msg.ValidatorData.(*seqsig.VerifiedHead)
-		if !ok {
-			continue
+		if h, ok := msg.ValidatorData.(*seqsig.VerifiedHead); ok {
+			o.hand(h)
 		}
-		select {
-		case o.heads <- h:
-		default:
-			o.dropped.Add(1)
-		}
+	}
+}
+
+// hand passes h to Heads, dropping it when Heads is full.
+func (o *Overlay) hand(h *seqsig.VerifiedHead) {
+	select {
+	case o.heads <- h:
+	default:
+		o.dropped.Add(1)
+		o.m.dropped.Inc()
 	}
 }
 
 func (o *Overlay) loop(ctx context.Context) {
 	t := time.NewTicker(DialInterval)
 	defer t.Stop()
-	// One warning per tick each, so that a flood cannot flood the log.
-	var rejected, dropped uint64
+	var r reported
 	for {
 		o.dialPeers(ctx)
 		o.closeIdle(time.Now())
-		if r := o.lastReject.Swap(nil); r != nil {
-			n := o.rejected.Load()
-			o.logger.Warn("[eez] overlay rejected messages", "count", n-rejected, "last", r.from, "err", r.err)
-			rejected = n
-		}
-		if n := o.dropped.Load(); n != dropped {
-			o.logger.Warn("[eez] overlay head channel full, heads dropped", "count", n-dropped)
-			dropped = n
-		}
+		o.report(&r)
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
 		}
+	}
+}
+
+// reported is what the previous report covered.
+type reported struct{ rejected, dropped uint64 }
+
+// report sets the peer gauge and warns of the messages rejected and heads
+// dropped since the previous report, once each, so that a flood cannot
+// flood the log.
+func (o *Overlay) report(r *reported) {
+	o.m.peers.SetInt(o.Peers())
+	if last := o.lastReject.Swap(nil); last != nil {
+		n := o.rejected.Load()
+		o.logger.Warn("[eez] overlay rejected messages", "event", "eez.p2p.message.rejects", "count", n-r.rejected, "last", last.from, "err", last.err)
+		r.rejected = n
+	}
+	if n := o.dropped.Load(); n != r.dropped {
+		o.logger.Warn("[eez] overlay head channel full, heads dropped", "event", "eez.p2p.inbound.full", "count", n-r.dropped)
+		r.dropped = n
 	}
 }
 
@@ -367,7 +394,7 @@ func (o *Overlay) dial(ctx context.Context, p peer.AddrInfo) {
 		// Forced: the swarm's dial backoff would otherwise skip ticks.
 		dctx = network.WithForceDirectDial(dctx, "overlay peer")
 		if err := o.host.Connect(dctx, p); err != nil && ctx.Err() == nil {
-			o.logger.Debug("[eez] overlay dial failed", "peer", p.ID, "err", err)
+			o.logger.Debug("[eez] overlay dial failed", "event", "eez.p2p.dial.failed", "peer", p.ID, "err", err)
 		}
 		o.mu.Lock()
 		delete(o.dialing, p.ID)

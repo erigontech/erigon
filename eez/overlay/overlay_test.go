@@ -22,17 +22,20 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"net"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
+	pubsubpb "github.com/libp2p/go-libp2p-pubsub/pb"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/eez/seqsig"
 )
 
@@ -385,4 +388,72 @@ func TestPublishDuringStart(t *testing.T) {
 	close(done)
 	<-published
 	require.NoError(t, o.Stop())
+}
+
+func counters(names ...string) map[string]uint64 {
+	out := make(map[string]uint64, len(names))
+	for _, n := range names {
+		out[n] = metrics.GetOrCreateCounter(n).GetValueUint64()
+	}
+	return out
+}
+
+// TestMetricsAndEvents: the overlay counts its peers' messages by verdict,
+// not its own, and the heads it drops, and each report warns once of the
+// rejections and drops since the previous one.
+func TestMetricsAndEvents(t *testing.T) {
+	var out bytes.Buffer
+	logger := log.New()
+	logger.SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StreamHandler(&out, log.LogfmtFormat())))
+	o, err := New(Config{Listen: newTestNode(t, 1).listen(), Key: key(1), Domain: testDomain, Signer: addr(0)}, logger)
+	require.NoError(t, err)
+	from, err := PeerID(&key(2).PublicKey)
+	require.NoError(t, err)
+	names := []string{
+		"eez_p2p_message_received_total", "eez_p2p_message_accepted_total", "eez_p2p_message_ignored_total",
+		"eez_p2p_message_rejected_total", "eez_p2p_inbound_dropped_total",
+	}
+	before := counters(names...)
+	msg := func(data []byte) *pubsub.Message { return &pubsub.Message{Message: &pubsubpb.Message{Data: data}} }
+	first := mustEncode(0, head(nowMs(), 1, 1))
+	require.Equal(t, pubsub.ValidationAccept, o.validate(t.Context(), from, msg(first)))
+	require.Equal(t, pubsub.ValidationIgnore, o.validate(t.Context(), from, msg(first)))
+	require.Equal(t, pubsub.ValidationReject, o.validate(t.Context(), from, msg([]byte("junk"))))
+	require.Equal(t, pubsub.ValidationAccept, o.validate(t.Context(), o.ID(), msg(mustEncode(0, head(nowMs(), 2, 2)))))
+	h := &seqsig.VerifiedHead{Head: head(nowMs(), 3, 3), Signer: addr(0)}
+	for range HeadsBuffer + 2 {
+		o.hand(h)
+	}
+	after := counters(names...)
+	for name, want := range map[string]uint64{
+		"eez_p2p_message_received_total": 3,
+		"eez_p2p_message_accepted_total": 1,
+		"eez_p2p_message_ignored_total":  1,
+		"eez_p2p_message_rejected_total": 1,
+		"eez_p2p_inbound_dropped_total":  2,
+	} {
+		require.Equal(t, want, after[name]-before[name], name)
+	}
+
+	var r reported
+	o.report(&r)
+	o.report(&r)
+	logs := out.String()
+	require.Equal(t, 1, strings.Count(logs, "event=eez.p2p.message.rejected "))
+	require.Equal(t, 1, strings.Count(logs, "event=eez.p2p.message.rejects count=1 "), logs)
+	require.Equal(t, 1, strings.Count(logs, "event=eez.p2p.inbound.full count=2"), logs)
+}
+
+// TestPeerGauge: eez_p2p_peers counts the connected overlay peers, none once
+// the overlay stops.
+func TestPeerGauge(t *testing.T) {
+	gauge := metrics.GetOrCreateGauge("eez_p2p_peers")
+	a, b := newTestNode(t, 1), newTestNode(t, 2)
+	oa := a.start()
+	ob := b.start(a)
+	require.Eventually(t, func() bool { return ob.Peers() == 1 }, deadline, 50*time.Millisecond)
+	require.Eventually(t, func() bool { return gauge.GetValueUint64() == 1 }, DialInterval+time.Second, 50*time.Millisecond)
+	require.NoError(t, ob.Stop())
+	require.NoError(t, oa.Stop())
+	require.Zero(t, gauge.GetValueUint64())
 }

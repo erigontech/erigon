@@ -102,6 +102,7 @@ func (s *signedHeads) follow(ctx context.Context) error {
 				if ctx.Err() != nil {
 					return ctx.Err()
 				}
+				loadMetrics().headFetchFailed.Inc()
 				// Unknown ancestry is not a conflict: a lower version must
 				// not win in its place.
 				s.report(d.Target, err, in.Indexed)
@@ -129,8 +130,8 @@ func (s *signedHeads) move(ctx context.Context, target *seqsig.VerifiedHead, blo
 	if s.bad.has(h.BlockHash) {
 		return nil
 	}
-	var err error
-	if len(blocks) > 0 {
+	prev, err := s.chain.Head(ctx)
+	if err == nil && len(blocks) > 0 {
 		err = s.chain.Insert(ctx, blocks)
 	}
 	if err == nil {
@@ -148,9 +149,25 @@ func (s *signedHeads) move(ctx context.Context, target *seqsig.VerifiedHead, blo
 		return nil
 	}
 	s.report(target, nil, indexed)
+	s.countMove(ctx, prev)
 	s.logger.Info("[eez] head follows the signed head", "event", "eez.node.follower.head.advanced",
 		"number", h.Number, "hash", h.BlockHash, "imported", fetched+len(blocks))
 	return nil
+}
+
+// countMove counts a move of the head from prev: adopted while prev stays
+// canonical, rewound when the move dropped it, to an ancestor or another
+// branch.
+func (s *signedHeads) countMove(ctx context.Context, prev *types.Header) {
+	hash, ok, err := s.chain.CanonicalHash(ctx, prev.Number.Uint64())
+	if err != nil {
+		return
+	}
+	if m := loadMetrics(); ok && hash == prev.Hash() {
+		m.headAdopted.Inc()
+	} else {
+		m.headRewound.Inc()
+	}
 }
 
 // fetchBlocks fetches the blocks up to hash the local chain lacks, at most
@@ -192,8 +209,10 @@ func (s *signedHeads) report(target *seqsig.VerifiedHead, reason error, indexed 
 	case noPeers:
 		s.wait(&s.noPeers, target, reason, log.LvlWarn, "[eez] signed head not followed", "eez.node.follower.head.rejected")
 	case ahead:
+		loadMetrics().headAhead.Inc()
 		s.wait(&s.ahead, target, reason, log.LvlInfo, "[eez] signed head not followed yet, waiting for derivation", "eez.node.follower.head.ahead")
 	case errors.Is(reason, seqsig.ErrHeld):
+		loadMetrics().headHeld.Inc()
 		s.logger.Debug("[eez] safe lags the L1 batch index, holding the head", "event", "eez.node.follower.head.held",
 			"indexed", indexed, "safe", s.deriver.Safe())
 	default:
@@ -218,6 +237,7 @@ func (s *signedHeads) wait(waiting *bool, target *seqsig.VerifiedHead, reason er
 // reject logs that head is not followed, once per head and reason.
 func (s *signedHeads) reject(head *seqsig.VerifiedHead, reason error) {
 	if h := head.Head; s.logged.add(rejection{h.BlockHash, reason.Error()}) {
+		loadMetrics().headRejected.Inc()
 		s.logger.Warn("[eez] signed head not followed", "event", "eez.node.follower.head.rejected",
 			"number", h.Number, "hash", h.BlockHash, "reason", reason)
 	}
