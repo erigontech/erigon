@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -449,4 +450,109 @@ func TestApplyWritesFoldReadsPrevAfterAnEarlierCreate(t *testing.T) {
 	diff := changes.Diffs[kv.StorageDomain].GetDiffSet()
 	require.Len(t, diff, 1)
 	require.Empty(t, diff[0].Value, "the creation cleared the slot, so its prev value is empty")
+}
+
+// A slot cleared by a creation or destruct in an uncommitted prior block must take an empty
+// prev value: the block may still be in the exec window or already folded into the overlay.
+func TestApplyWritesFoldPrevAfterCreationInUncommittedPriorBlock(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0x01"))
+	key := accounts.InternKey(common.HexToHash("0x02"))
+	addrValue, keyValue := addr.Value(), key.Value()
+	composite := slices.Concat(addrValue[:], keyValue[:])
+	rules := &chain.Rules{ChainID: uint256.NewInt(1)}
+
+	for _, tc := range []struct {
+		name          string
+		destructFirst bool
+		inExecWindow  bool
+	}{
+		{name: "created, block in exec window", inExecWindow: true},
+		{name: "created, block folded into the overlay"},
+		{name: "destructed and re-created, block in exec window", destructFirst: true, inExecWindow: true},
+		{name: "destructed and re-created, block folded into the overlay", destructFirst: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, tx, domains := NewTestRwTx(t)
+			acc := accounts.NewAccount()
+			if tc.destructFirst {
+				acc.Nonce = 1
+			}
+			addrKey := addrValue[:]
+			require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, addrKey, accounts.SerialiseV3(&acc), 1, nil))
+			require.NoError(t, domains.DomainPut(kv.StorageDomain, tx, composite, []byte{5}, 1, nil))
+
+			reader := NewReaderV3(domains.AsGetter(tx))
+			block1 := NewVersionMap(nil)
+			var block1Folds []func() error
+			runBlock1Tx := func(txIdx int, txNum uint64, body func(*IntraBlockState) error) {
+				ibs := NewWithVersionMap(reader, block1)
+				t.Cleanup(ibs.Close)
+				ibs.SetTxContext(1, txIdx)
+				require.NoError(t, body(ibs))
+				writes := finalizedWrites(t, ibs, rules)
+				block1.FlushVersionedWrites(writes, true)
+				block1.SealUpTo(txIdx)
+				block1Folds = append(block1Folds, func() error {
+					return ApplyWrites(NewVersionMapWriteView(writes, block1, txIdx), domains, tx, 1, txNum, nil, rules, false)
+				})
+			}
+			createdIdx := 0
+			if tc.destructFirst {
+				runBlock1Tx(0, 2, func(ibs *IntraBlockState) error {
+					_, err := ibs.Selfdestruct(addr, false)
+					return err
+				})
+				createdIdx = 1
+			}
+			runBlock1Tx(createdIdx, 3, func(ibs *IntraBlockState) error {
+				if err := ibs.CreateAccount(addr, true); err != nil {
+					return err
+				}
+				return ibs.SetNonce(addr, 1, tracing.NonceChangeNewContract)
+			})
+			foldBlock1 := func() {
+				for _, fold := range block1Folds {
+					require.NoError(t, fold())
+				}
+			}
+
+			execWindow := NewPrevBlockList()
+			if tc.inExecWindow {
+				execWindow.PushHead(1, 3, block1)
+			} else {
+				foldBlock1()
+			}
+			block2Reader := NewPrevBlockReader(reader, execWindow)
+			block2Reader.SetBlock(2)
+
+			block2 := NewVersionMap(nil)
+			ibs := NewWithVersionMap(block2Reader, block2)
+			t.Cleanup(ibs.Close)
+			ibs.SetTxContext(2, 0)
+			require.NoError(t, ibs.SetState(addr, key, *uint256.NewInt(7)))
+			writes := finalizedWrites(t, ibs, rules)
+
+			if tc.inExecWindow {
+				foldBlock1()
+				execWindow.RemoveTail()
+			}
+			changes := &changeset.StateChangeSet{}
+			domains.SetChangesetAccumulator(changes)
+			require.NoError(t, ApplyWrites(NewVersionMapWriteView(writes, block2, 0), domains, tx, 2, 4, nil, rules, false))
+
+			diff := changes.Diffs[kv.StorageDomain].GetDiffSet()
+			require.Len(t, diff, 1)
+			require.Empty(t, diff[0].Value, "block 1 cleared the slot, so its prev value is empty")
+
+			require.NoError(t, domains.Flush(t.Context(), tx))
+			var unwindDiffs [kv.DomainLen][]kv.DomainEntryDiff
+			for idx, d := range changes.Diffs {
+				unwindDiffs[idx] = d.GetDiffSet()
+			}
+			require.NoError(t, tx.Unwind(t.Context(), 4, &unwindDiffs))
+			got, _, err := tx.GetLatest(kv.StorageDomain, composite, kv.GetLatestOptions{})
+			require.NoError(t, err)
+			require.Empty(t, got, "the unwind must restore the cleared slot, got %x", got)
+		})
+	}
 }
