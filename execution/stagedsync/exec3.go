@@ -181,7 +181,9 @@ func ExecV3(ctx context.Context,
 			accumulator = shards.NewAccumulator()
 		}
 	}
+	dbg.NpMark("ev3Enter")
 	rs := state.NewStateV3Buffered(state.NewStateV3(doms, cfg.syncCfg.PersistReceiptsCacheV2, logger))
+	dbg.NpMark("ev3State")
 
 	commitThreshold := cfg.batchSize.Bytes()
 
@@ -215,9 +217,11 @@ func ExecV3(ctx context.Context,
 		}
 		defer doms.SetDeferCommitmentUpdates(false)
 	}
+	dbg.NpMark("ev3Doms")
 	if shouldWaitForReadAhead(isForkValidation) && cfg.readAheader != nil {
 		cfg.readAheader.WaitForRunningWarmup(ctx)
 	}
+	dbg.NpMark("ev3WaitWarmup")
 	// snapshots are often stored on chaper drives. don't expect low-read-latency and manually read-ahead.
 	// can't use OS-level ReadAhead - because Data >> RAM
 	// it also warmsup state a bit - by touching senders/coninbase accounts and code
@@ -546,6 +550,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			return chaosErr
 		}
 
+		dbg.NpMark("ebGoroutine")
 		// Open a thread-local roTx for block metadata and StepsInFiles.
 		// Must NOT use the stageloop's rwTx — it's thread-bound.
 		execRoTx, err := te.cfg.db.BeginTemporalRo(ctx)
@@ -561,6 +566,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			blockTx = execRoTx
 		}
 
+		dbg.NpMark("ebRoTx")
 		src := te.blockSrc
 		if src == nil {
 			src = &dbBlockSource{cfg: &te.cfg, blockTx: blockTx, cur: startBlockNum, max: maxBlockNum}
@@ -590,6 +596,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			var blockNum uint64
 			var more bool
 			b, dbBAL, blockNum, more, err = src.next(ctx)
+			dbg.NpMark("ebSrcNext")
 			if err != nil {
 				return err
 			}
@@ -673,6 +680,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 					return ctx.Err()
 				}
 			}
+			dbg.NpMark("ebTasks")
 			select {
 			case te.execRequests <- &execRequest{
 				b.NumberU64(), b.Hash(),
