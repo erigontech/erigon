@@ -37,9 +37,9 @@ var (
 	_ HeadNotifier = (*Local)(nil)
 )
 
-// NewLocal returns the reader of the L1 chain config whose blocks blocks
-// reads from db, with receipts from receipts, and whose execution announces
-// its heads on events.
+// NewLocal returns the reader of the L1 chain config, reading its blocks
+// through the block reader blocks from db and its receipts from receipts; the
+// chain's execution announces its heads on events.
 func NewLocal(db kv.TemporalRoDB, blocks dbservices.FullBlockReader, receipts *receipts.Generator, config *chain.Config, events *shards.Events) *Local {
 	return &Local{Native: NewNative(db, blocks, receipts, config), events: events}
 }

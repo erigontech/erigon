@@ -23,9 +23,11 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/eez/l1"
 	"github.com/erigontech/erigon/eez/l1/l1test"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 // TestLocalConformance is T-L1-1 for the native reader of an L1 chain in the
@@ -40,12 +42,11 @@ func TestLocalConformance(t *testing.T) {
 	require.NoError(t, err)
 	head, err := r.Head(t.Context())
 	require.NoError(t, err)
-	tx, err := m.DB.BeginRo(t.Context())
-	require.NoError(t, err)
-	defer tx.Rollback()
-	parent, err := m.BlockReader.BlockByNumber(t.Context(), tx, head.Number)
-	require.NoError(t, err)
-	tx.Rollback()
+	var parent *types.Block
+	require.NoError(t, m.DB.View(t.Context(), func(tx kv.Tx) (err error) {
+		parent, err = m.BlockReader.BlockByNumber(t.Context(), tx, head.Number)
+		return err
+	}))
 	next, err := m.GenerateChainFrom(parent, 1, func(int, *blockgen.BlockGen) {})
 	require.NoError(t, err)
 	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), next.Blocks))
