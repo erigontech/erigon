@@ -21,6 +21,7 @@ import (
 	"crypto/ecdsa"
 	"errors"
 	"fmt"
+	"maps"
 	"math/big"
 	"os"
 	"sync"
@@ -377,6 +378,14 @@ func WithoutSystemContracts() Option {
 	}
 }
 
+// WithUnexecutedGenesis leaves genesis written but not executed, as a node's
+// database is before its first stage loop: no genesis state or commitment.
+func WithUnexecutedGenesis() Option {
+	return func(opts *options) {
+		opts.unexecutedGenesis = true
+	}
+}
+
 // WithAlwaysGenerateChangesets pins --experimental.always-generate-changesets
 // regardless of the tester default: true for tests that reorg deeper than
 // MaxReorgDepth, false for tests that rely on the windowed-changesets
@@ -448,6 +457,7 @@ type options struct {
 	sentryProtocol           uint
 	stateTransitionObserver  execmodule.StateTransitionObserver
 	skipSystemContracts      bool
+	unexecutedGenesis        bool
 }
 
 func applyOptions(opts []Option) options {
@@ -475,6 +485,14 @@ func applyOptions(opts []Option) options {
 	}
 	if !opt.skipSystemContracts {
 		addAmsterdamBuilderContracts(opt.genesis)
+		// New writes the Prague system contracts into executed state, which an
+		// unexecuted genesis does not have; executing genesis deploys them.
+		if opt.unexecutedGenesis && opt.genesis.Config.IsPrague(0) {
+			if opt.genesis.Alloc == nil {
+				opt.genesis.Alloc = types.GenesisAlloc{}
+			}
+			maps.Copy(opt.genesis.Alloc, blockgen.PraguePreDeployAlloc(opt.genesis.Config))
+		}
 	}
 	// engine depends on genesis
 	if opt.engine == nil {
@@ -647,7 +665,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	// Deploy Prague system contracts (EIP-7002, EIP-7251) when Prague is active.
 	// These are required for the Merge engine's FinalizeAndAssemble to process
 	// withdrawal and consolidation requests.
-	if gspec.Config.IsPrague(0) && !opt.skipSystemContracts {
+	if gspec.Config.IsPrague(0) && !opt.skipSystemContracts && !opt.unexecutedGenesis {
 		if err := blockgen.InitPraguePreDeploys(mock.DB, gspec.Config, mock.Log); err != nil {
 			if tb != nil {
 				tb.Fatal(err)
@@ -882,6 +900,9 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	})
 	mock.StreamWg.Wait()
 
+	if opt.unexecutedGenesis {
+		return mock
+	}
 	// app expecting that genesis will always be in db
 	c := &blockgen.ChainPack{
 		Headers:  []*types.Header{mock.Genesis.HeaderNoCopy()},

@@ -36,9 +36,11 @@ import (
 	"github.com/erigontech/erigon/eez/follower"
 	"github.com/erigontech/erigon/eez/l1"
 	"github.com/erigontech/erigon/eez/l1/recording"
+	"github.com/erigontech/erigon/eez/networks"
 	"github.com/erigontech/erigon/eez/protocol"
 	"github.com/erigontech/erigon/eez/protocol/da"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -190,6 +192,46 @@ func TestFollow(t *testing.T) {
 	fc, err := n.m.ExecModule.GetForkChoice(t.Context())
 	require.NoError(t, err)
 	require.Equal(t, first.Blocks[1].Hash(), fc.FinalizedHash)
+}
+
+// failingForkChoice fails every fork choice with err.
+type failingForkChoice struct {
+	deriver.Chain
+	err error
+}
+
+func (c failingForkChoice) ForkChoice(context.Context, common.Hash, common.Hash, common.Hash) error {
+	return c.err
+}
+
+// TestBootUnexecutedGenesis boots on a node that wrote genesis without
+// executing it, as before its first stage loop: the settled blocks derive on
+// genesis state.
+func TestBootUnexecutedGenesis(t *testing.T) {
+	c := derivertest.NewComposer(t)
+	first := c.Compose(nil, derivertest.Block{Coinbase: alice, Extra: []byte{}, Txs: transfers(c, 2)})
+	c.Post(derivertest.Posting{Batch: first})
+
+	_, chain := derivertest.NewL2Of(t, networks.Devnet, execmoduletester.WithUnexecutedGenesis())
+	// The genesis allocates the history contract with nonce 1.
+	historyNonce := func() uint64 {
+		n, err := chain.Nonce(t.Context(), 0, params.HistoryStorageAddress.Value())
+		require.NoError(t, err)
+		return n
+	}
+	require.Zero(t, historyNonce(), "no genesis state before boot")
+	errForkChoice := errors.New("fork choice failed")
+	stuck, err := follower.New(c.L1, failingForkChoice{chain, errForkChoice}, derivertest.Config(), testConfig, log.New())
+	require.NoError(t, err)
+	require.ErrorIs(t, stuck.Boot(t.Context()), errForkChoice, "boot stops at a genesis it cannot execute")
+	f, err := follower.New(c.L1, chain, derivertest.Config(), testConfig, log.New())
+	require.NoError(t, err)
+	require.NoError(t, f.Boot(t.Context()))
+	require.Equal(t, uint64(1), historyNonce())
+	h, ok, err := chain.CanonicalHash(t.Context(), 1)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, first.Blocks[0].Hash(), h)
 }
 
 // observing reports the follower's status on every log query.

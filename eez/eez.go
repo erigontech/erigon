@@ -56,6 +56,19 @@ func Dirs(dirs datadir.Dirs) datadir.Dirs {
 	return dirs
 }
 
+// AllInOneDirs returns the directories of the EEZ chain an all-in-one node
+// runs beside the L1 chain of dirs: the database and snapshots of Dirs, and
+// its own lock, temporary files and migration records under <datadir>/eez,
+// which the L1 chain would otherwise share.
+func AllInOneDirs(dirs datadir.Dirs) datadir.Dirs {
+	shared := Dirs(dirs)
+	l2 := datadir.Open(Dir(dirs))
+	l2.Chaindata = shared.Chaindata
+	l2.Snap, l2.SnapIdx, l2.SnapHistory, l2.SnapDomain, l2.SnapAccessors = shared.Snap, shared.SnapIdx, shared.SnapHistory, shared.SnapDomain, shared.SnapAccessors
+	dir.MustExist(l2.Tmp, l2.Migrations)
+	return l2
+}
+
 // Register adds the EEZ networks, the eez l2 config section, transaction
 // type 0x76 with its RPC rendering and the EEZ rules engine to the
 // process-wide registries. It is idempotent.

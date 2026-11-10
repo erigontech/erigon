@@ -38,6 +38,8 @@ import (
 	eezrpc "github.com/erigontech/erigon/eez/rpc"
 	erigoncli "github.com/erigontech/erigon/node/cli"
 	"github.com/erigontech/erigon/node/debug"
+	"github.com/erigontech/erigon/node/ethconfig"
+	"github.com/erigontech/erigon/node/nodecfg"
 )
 
 func main() {
@@ -90,7 +92,8 @@ func runErigon(ctx context.Context, cliCtx *cli.Command) (err error) {
 	if err != nil {
 		return err
 	}
-	if eezCfg != nil {
+	standalone := eezCfg != nil && !eezCfg.AllInOne()
+	if standalone {
 		if err := configureFollowerNode(nodeCfg); err != nil {
 			return err
 		}
@@ -101,12 +104,22 @@ func runErigon(ctx context.Context, cliCtx *cli.Command) (err error) {
 
 	ethCfg := node.NewEthConfigUrfave(ctx, cliCtx, nodeCfg, logger)
 	var eezAPI *eezrpc.API
+	var l2NodeCfg *nodecfg.Config
+	var l2EthCfg *ethconfig.Config
 	if eezCfg != nil {
 		eezAPI = eezrpc.NewAPI()
-		ethCfg.ExtraAPIs = append(ethCfg.ExtraAPIs, eezAPI.API())
 	}
-	if eezCfg != nil {
+	if standalone {
+		ethCfg.ExtraAPIs = append(ethCfg.ExtraAPIs, eezAPI.API())
 		configureFollowerEth(ethCfg)
+	} else if eezCfg != nil {
+		if l2NodeCfg, l2EthCfg, err = allInOneConfigs(nodeCfg, ethCfg, eezCfg); err != nil {
+			return err
+		}
+		l2EthCfg.ExtraAPIs = append(l2EthCfg.ExtraAPIs, eezAPI.API())
+		if err := backup.ApplyMigrations(ctx, l2NodeCfg.Dirs, logger); err != nil {
+			return err
+		}
 	}
 
 	ethNode, err := node.New(ctx, nodeCfg, ethCfg, logger, tracer)
@@ -115,11 +128,14 @@ func runErigon(ctx context.Context, cliCtx *cli.Command) (err error) {
 		return err
 	}
 	var followerSvc interface{ Err() error }
-	if eezCfg != nil {
-		if followerSvc, err = startFollower(ctx, ethNode, eezCfg, eezAPI, nodeCfg.Dirs, logger); err != nil {
-			ethNode.Close()
-			return err
-		}
+	if standalone {
+		followerSvc, err = startStandalone(ctx, ethNode, eezCfg, eezAPI, nodeCfg.Dirs, logger)
+	} else if eezCfg != nil {
+		followerSvc, err = startAllInOne(ctx, ethNode, nodeCfg.Dirs, l2NodeCfg, l2EthCfg, eezCfg, eezAPI, logger, cliCtx)
+	}
+	if err != nil {
+		ethNode.Close()
+		return err
 	}
 
 	//diagnostics.Setup(cliCtx, ethNode, metricsMux, pprofMux)
