@@ -37,6 +37,14 @@ import (
 
 var ErrChainLengthExceedsLimit = errors.New("chain length exceeds limit")
 
+var (
+	// ErrNoPeers reports a download without a peer to ask.
+	ErrNoPeers = errors.New("no peers available")
+	// ErrNoPeerHasHeader reports a download none of whose peers serves the
+	// header it starts from.
+	ErrNoPeerHasHeader = errors.New("no peers have initial header hash for backward download")
+)
+
 type BbdHeaderReader interface {
 	HeaderByHash(ctx context.Context, hash common.Hash) (*types.Header, error)
 }
@@ -171,7 +179,7 @@ func (bbd *BackwardBlockDownloader) loadPeers(config bbdRequestConfig) (peersCon
 
 	peers := bbd.peerTracker.ListPeers()
 	if len(peers) == 0 {
-		return peersContext{}, errors.New("no peers available")
+		return peersContext{}, ErrNoPeers
 	}
 
 	return newPeersContext(peers), nil
@@ -219,7 +227,7 @@ func (bbd *BackwardBlockDownloader) downloadInitialHeader(
 		}
 	}
 	if header == nil {
-		return nil, fmt.Errorf("no peers have initial header hash for backward download: %s", hash)
+		return nil, fmt.Errorf("%w: %s", ErrNoPeerHasHeader, hash)
 	}
 	headerNum := header.Number.Uint64()
 	if headerNum == 0 {
@@ -437,7 +445,7 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 	if config.peerId == nil {
 		current := bbd.peerTracker.ListPeersMayHaveBlockNum(headers[len(headers)-1].Number.Uint64())
 		if len(current) == 0 {
-			return errors.New("no peers available")
+			return ErrNoPeers
 		}
 		peers = newPeersContext(current)
 	}

@@ -303,3 +303,25 @@ func TestBackwardBlockDownloader_GapAheadOfCurrentHead_FailsFast(t *testing.T) {
 	require.EqualValues(t, 1, fetcher.headersBackwardsCalls.Load(),
 		"should fail-fast at the initial-header check without fetching a header batch")
 }
+
+// TestBackwardBlockDownloader_NoPeers: a download without a peer fails with
+// ErrNoPeers and asks no one; one whose peers lack its first header fails
+// with ErrNoPeerHasHeader.
+func TestBackwardBlockDownloader_NoPeers(t *testing.T) {
+	initialHeader := &types.Header{Number: *uint256.NewInt(500)}
+	fetcher := &stubBbdFetcher{initialHeader: initialHeader}
+	logger := testlog.Logger(t, log.LvlCrit)
+	bbd := NewBackwardBlockDownloader(logger, fetcher, &PeerPenalizer{}, NewPeerTracker(logger, nil), t.TempDir())
+	feed, err := bbd.DownloadBlocksBackwards(t.Context(), initialHeader.Hash(), stubBbdHeaderReader{})
+	require.NoError(t, err)
+	_, err = feed.Next(t.Context())
+	require.ErrorIs(t, err, ErrNoPeers)
+	require.Zero(t, fetcher.headersBackwardsCalls.Load())
+
+	bbd = newTestBbd(t, fetcher)
+	feed, err = bbd.DownloadBlocksBackwards(t.Context(), common.Hash{1}, stubBbdHeaderReader{})
+	require.NoError(t, err)
+	_, err = feed.Next(t.Context())
+	require.ErrorIs(t, err, ErrNoPeerHasHeader)
+	require.EqualValues(t, 1, fetcher.headersBackwardsCalls.Load())
+}
