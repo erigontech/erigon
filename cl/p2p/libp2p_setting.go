@@ -1,8 +1,10 @@
 package p2p
 
 import (
+	"encoding/hex"
 	"math"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -32,7 +34,11 @@ func scoreDecay(totalDurationDecay time.Duration, beaconConfig *clparams.BeaconC
 	return math.Pow(gossip.DecayToZero, 1/float64(numOfTimes))
 }
 
-func (p *p2pManager) pubsubOptions(beaconConfig *clparams.BeaconChainConfig) []pubsub.Option {
+func (p *p2pManager) pubsubOptions(beaconConfig *clparams.BeaconChainConfig) ([]pubsub.Option, error) {
+	forkDigests, err := p.scheduledForkDigests(beaconConfig)
+	if err != nil {
+		return nil, err
+	}
 	oneSlotDuration := time.Duration(beaconConfig.SecondsPerSlot) * time.Second
 	oneEpochDuration := time.Duration(beaconConfig.SlotsPerEpoch) * oneSlotDuration
 
@@ -70,19 +76,66 @@ func (p *p2pManager) pubsubOptions(beaconConfig *clparams.BeaconChainConfig) []p
 		pubsub.WithValidateQueueSize(pubsubQueueSize),
 		pubsub.WithPeerScore(scoreParams, thresholds),
 		pubsub.WithGossipSubParams(pubsubGossipParam()),
-		pubsub.WithSubscriptionFilter(gossipSubscriptionFilter()),
+		pubsub.WithSubscriptionFilter(gossipSubscriptionFilter(forkDigests)),
 	}
-	return psOpts
+	return psOpts, nil
 }
 
 // maxSubscriptionsPerRPC is above what an honest peer sends for all subnets of two fork digests.
 const maxSubscriptionsPerRPC = 500
 
-var eth2TopicFormat = regexp.MustCompile(`^/eth2/[0-9a-f]{8}/[a-z0-9_]{1,64}/ssz_snappy$`)
+// gossipTopicNames matches every gossip topic name. Gossipsub keeps each topic a peer subscribes to until it
+// disconnects, so the accepted set has to be finite. A topic missing here can be neither joined nor seen from peers.
+var gossipTopicNames = strings.Join([]string{
+	gossip.TopicNameBeaconBlock,
+	gossip.TopicNameBeaconAggregateAndProof,
+	gossip.TopicNameVoluntaryExit,
+	gossip.TopicNameProposerSlashing,
+	gossip.TopicNameAttesterSlashing,
+	gossip.TopicNameBlsToExecutionChange,
+	gossip.TopicNameSyncCommitteeContributionAndProof,
+	gossip.TopicNameLightClientFinalityUpdate,
+	gossip.TopicNameLightClientOptimisticUpdate,
+	gossip.TopicNameExecutionPayload,
+	gossip.TopicNameExecutionPayloadBid,
+	gossip.TopicNamePayloadAttestation,
+	gossip.TopicNameProposerPreferences,
+	subnetTopicPattern(gossip.TopicNamePrefixBlobSidecar),
+	subnetTopicPattern(gossip.TopicNamePrefixBeaconAttestation),
+	subnetTopicPattern(gossip.TopicNamePrefixSyncCommittee),
+	subnetTopicPattern(gossip.TopicNamePrefixDataColumnSidecar),
+}, "|")
 
-// gossipSubscriptionFilter drops subscriptions to topics that are not eth2 gossip topics, and refuses oversized batches.
-func gossipSubscriptionFilter() pubsub.SubscriptionFilter {
-	return pubsub.WrapLimitSubscriptionFilter(pubsub.NewRegexpSubscriptionFilter(eth2TopicFormat), maxSubscriptionsPerRPC)
+func subnetTopicPattern(format string) string {
+	return strings.ReplaceAll(format, "%d", "[0-9]{1,3}")
+}
+
+// scheduledForkDigests returns the digest of every fork and blob parameter change in the schedule.
+func (p *p2pManager) scheduledForkDigests(beaconConfig *clparams.BeaconChainConfig) ([]string, error) {
+	epochs := make([]uint64, 0, len(beaconConfig.ForkVersionSchedule)+len(beaconConfig.BlobSchedule))
+	for _, fork := range beaconConfig.ForkVersionSchedule {
+		if fork.Epoch != beaconConfig.FarFutureEpoch {
+			epochs = append(epochs, fork.Epoch)
+		}
+	}
+	for _, blobParameters := range beaconConfig.BlobSchedule {
+		epochs = append(epochs, blobParameters.Epoch)
+	}
+	digests := make([]string, 0, len(epochs))
+	for _, epoch := range epochs {
+		digest, err := p.ethClock.ComputeForkDigest(epoch)
+		if err != nil {
+			return nil, err
+		}
+		digests = append(digests, hex.EncodeToString(digest[:]))
+	}
+	return digests, nil
+}
+
+// gossipSubscriptionFilter accepts only gossip topics of the scheduled forks and refuses oversized batches.
+func gossipSubscriptionFilter(forkDigests []string) pubsub.SubscriptionFilter {
+	topics := regexp.MustCompile(`^/eth2/(?:` + strings.Join(forkDigests, "|") + `)/(?:` + gossipTopicNames + `)/` + gossip.SSZSnappyCodec + `$`)
+	return pubsub.WrapLimitSubscriptionFilter(pubsub.NewRegexpSubscriptionFilter(topics), maxSubscriptionsPerRPC)
 }
 
 // creates a custom gossipsub parameter set.
