@@ -639,7 +639,7 @@ func (s *simulator) checkStorageReplacements(ctx context.Context, stateOverrides
 		}); err != nil {
 			return err
 		}
-		if !latest && len(replaced) <= budget {
+		if _, swept := s.sweptStorage[addr]; !latest && !swept && len(replaced) <= budget {
 			if err := visitStorageSlotsAsOf(ctx, tx, addrValue[:], firstMinTxNum, add); err != nil {
 				return err
 			}

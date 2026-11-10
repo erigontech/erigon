@@ -109,6 +109,28 @@ func TestCheckStorageReplacementsCountsHeadAndBaseSlotsOnce(t *testing.T) {
 	require.ErrorContains(t, (&simulator{}).checkStorageReplacements(t.Context(), &overrides, sd, rwTx, false, 2, 3), "more than 3 storage slots")
 }
 
+func TestCheckStorageReplacementsSkipsBaseSlotsAlreadySwept(t *testing.T) {
+	t.Parallel()
+	_, rwTx := temporaltest.NewTestTx(t)
+	sd, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New())
+	require.NoError(t, err)
+	t.Cleanup(sd.Close)
+	addr := common.HexToAddress("0xaa")
+	putDel := sd.AsPutDel(rwTx)
+	for slot := byte(1); slot <= 3; slot++ {
+		require.NoError(t, putDel.DomainPut(kv.StorageDomain, simStorageKey(addr, slot), []byte{slot}, 1, nil))
+		require.NoError(t, putDel.DomainDel(kv.StorageDomain, simStorageKey(addr, slot), 2, []byte{slot}))
+	}
+	require.NoError(t, sd.Flush(t.Context(), rwTx))
+	empty := map[common.Hash]common.Hash{}
+	interned := accounts.InternAddress(addr)
+	overrides := ethapi.StateOverrides{interned: {State: &empty}}
+	sim := &simulator{sweptStorage: map[accounts.Address]struct{}{interned: {}}}
+
+	require.NoError(t, sim.checkStorageReplacements(t.Context(), &overrides, sd, rwTx, false, 2, 2))
+	require.Zero(t, sim.replacedSlots)
+}
+
 func TestSimulationSkipsDisabledCommitmentHistory(t *testing.T) {
 	t.Parallel()
 	apis, chainInfo := setupPruneGating(t, pruneGatingConfig{mode: prune.ArchiveMode})
