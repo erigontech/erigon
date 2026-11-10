@@ -193,8 +193,9 @@ func openRollingPin(ctx context.Context, db kv.TemporalRoDB) (*rollingPin, error
 	if execctx.PickTrieVariant() != commitment.VariantCommitmentV3 {
 		return p, nil
 	}
+	warmCtx := kv.WithNonBlockingAcquire(ctx)
 	for range headCaptureWarmTxs - 1 {
-		w, err := db.BeginTemporalRo(ctx) //nolint:gocritic
+		w, err := db.BeginTemporalRo(warmCtx) //nolint:gocritic
 		if err != nil {
 			break
 		}

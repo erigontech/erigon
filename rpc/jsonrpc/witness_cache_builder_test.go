@@ -27,13 +27,21 @@ import (
 	"github.com/holiman/uint256"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
@@ -377,6 +385,51 @@ func TestOpenRollingPinWarmTxsOnlyForV3(t *testing.T) {
 	require.NotNil(t, pin)
 	t.Cleanup(pin.close)
 	require.NotEmpty(t, pin.warm)
+}
+
+func TestOpenRollingPinWithFullReadTxLimiter(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(true))
+	rawDB := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, log.New()), t.TempDir()).
+		RoTxsLimiter(semaphore.NewWeighted(2)).MustOpen()
+	agg := state.NewTest(datadir.New(t.TempDir())).MustOpen(t.Context())
+	db, err := temporal.New(rawDB, agg, nil)
+	require.NoError(t, err)
+	t.Cleanup(db.Close)
+	hash := hashN(0x42)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		if err := stages.SaveStageProgress(tx, stages.Finish, 1); err != nil {
+			return err
+		}
+		return rawdb.WriteCanonicalHash(tx, hash, 1)
+	}))
+	committedTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer committedTx.Rollback()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	var pin *rollingPin
+	var pinErr error
+	go func() {
+		defer close(done)
+		pin, pinErr = openRollingPin(ctx, db)
+	}()
+	defer func() {
+		cancel()
+		<-done
+		pin.close()
+	}()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("openRollingPin blocked on optional warm transactions with a full read-tx limiter")
+	}
+	require.NoError(t, pinErr)
+	require.NotNil(t, pin)
+	require.NotNil(t, pin.tx)
+	require.Equal(t, uint64(1), pin.num)
+	require.Equal(t, hash, pin.hash)
+	require.Empty(t, pin.warm)
 }
 
 // TestBuildAndCacheHeadCaptureStalePin drives the head-capture build with no held pin.
