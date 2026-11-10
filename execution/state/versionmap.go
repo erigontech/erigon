@@ -1621,22 +1621,18 @@ func markCell[T any](m *cellMarks, addr accounts.Address, vw *VersionedWrite[T],
 		return
 	}
 	c, e := vw.cell, vw.entry
-	if c == nil || e.destructed.Load() || m.vm.stamps != nil {
+	if c == nil || e.destructed.Load() || m.vm.stamps != nil || (m.flag == FlagDone && dbg.AssertEnabled) {
 		m.lock(addr)
 		return
 	}
 	want := vw.Version.Incarnation
-	if m.flag == FlagDone && !dbg.AssertEnabled {
+	if m.flag == FlagDone {
 		want = -1
 	}
 	switch have, outcome := c.mark(want, m.flag); outcome {
 	case markStale:
 		panic(staleMarkMsg(have, want, addr, vw.Path, vw.Key, vw.Version.TxIndex))
 	case markDeleted:
-		m.lock(addr)
-		return
-	}
-	if m.flag == FlagDone && dbg.AssertEnabled {
 		m.lock(addr)
 	}
 }
