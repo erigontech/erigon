@@ -7,6 +7,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -15,8 +16,11 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/blockreplay"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/state"
@@ -164,29 +168,19 @@ func TestPoolDependencyChainRunsBoundedByNamedReruns(t *testing.T) {
 	}
 }
 
-func TestPoolReexecSignalRequeuesParkedTask(t *testing.T) {
-	pe := &parallelExecutor{}
-	pe.workersCtx = t.Context()
-	pe.pool = newTaskPool(pe, nil)
-	be := newBlockExec(1, common.Hash{}, new(protocol.GasPool).AddGas(1), nil, discardConsumers(1), false, nil)
-	be.pool = pe.pool
-	pt := &poolTask{be: be, tv: &taskVersion{execTask: &execTask{index: 0}}, next: psReexec, parked: true}
-	be.poolTasks = []*poolTask{pt}
+func TestPoolReexecSignalIsLatched(t *testing.T) {
+	be := &blockExecutor{poolTasks: make([]*poolTask, 1)}
+	be.signalSelfLoopReexec(0)
+	pt := &poolTask{reexec: make(chan struct{}, 1), done: make(chan struct{})}
+	be.poolTasks[0] = pt
 
 	be.signalSelfLoopReexec(0)
-	require.False(t, pt.parked, "the re-exec signal left the task parked")
-	require.Equal(t, 1, pe.pool.queue.Len(), "the re-exec signal did not queue the task on the pool")
-	require.Same(t, pt, pe.pool.pop())
-
 	be.signalSelfLoopReexec(0)
-	require.True(t, pt.pending, "a signal for a running task must latch")
-	require.Equal(t, 0, pe.pool.queue.Len(), "a signal for a running task queued it a second time")
+	require.Len(t, pt.reexec, 1, "two signals before the task looks must latch as one request")
 
-	pt.fin = true
-	pt.pending = false
+	<-pt.reexec
+	be.finishTask(0)
 	be.signalSelfLoopReexec(0)
-	require.False(t, pt.pending, "a finalized task must ignore the signal")
-	require.Equal(t, 0, pe.pool.queue.Len())
 }
 
 func TestPoolShutdownMidBlockDoesNotHang(t *testing.T) {
@@ -215,26 +209,33 @@ func TestPoolShutdownMidBlockDoesNotHang(t *testing.T) {
 	require.Positive(t, c.opens.Load(), "no pool worker ran before the cancel: the run measured nothing")
 }
 
-func newPoolUnit(t *testing.T, tasks int) (*parallelExecutor, *blockExecutor) {
+// poolUnit runs f in a synctest bubble on an executor with one block of the given
+// task count. slots are the pool's slots, in channel order.
+func poolUnit(t *testing.T, tasks int, slots []*exec.WorkerContext, f func(t *testing.T, pe *parallelExecutor, be *blockExecutor)) {
 	t.Helper()
-	pe := &parallelExecutor{}
-	pe.workersCtx = t.Context()
-	pe.results = make(chan *exec.TxResult, 8)
-	pe.pool = newTaskPool(pe, nil)
-	be := newBlockExec(1, common.Hash{}, new(protocol.GasPool).AddGas(1), nil, discardConsumers(1), false, nil)
-	be.pool = pe.pool
-	be.wakeAt = map[int][]*poolTask{}
-	be.committedFrontier.Store(-1)
-	be.poolTasks = make([]*poolTask, tasks)
-	be.runInc = make([]atomic.Int64, tasks)
-	for i := range tasks {
-		be.tasks = append(be.tasks, &execTask{Task: &exec.TxTask{TxIndex: i}, index: i})
-	}
-	return pe, be
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		pe := &parallelExecutor{}
+		pe.workersCtx = ctx
+		pe.results = make(chan *exec.TxResult, 8)
+		pe.pool = newTaskPool(pe, slots)
+		be := newBlockExec(1, common.Hash{}, new(protocol.GasPool).AddGas(1), nil, discardConsumers(1), false, nil)
+		be.pool = pe.pool
+		be.committedFrontier.Store(-1)
+		be.poolTasks = make([]*poolTask, tasks)
+		be.writers = make([]writerGate, tasks)
+		for i := range tasks {
+			be.tasks = append(be.tasks, &execTask{Task: &exec.TxTask{TxIndex: i}, index: i})
+		}
+		f(t, pe, be)
+		cancel()
+		pe.runWG.Wait()
+	})
 }
 
 func newPoolUnitTask(be *blockExecutor, i int) *poolTask {
-	pt := &poolTask{be: be, tv: &taskVersion{execTask: be.tasks[i], version: state.Version{BlockNum: 1, TxIndex: i}}}
+	pt := &poolTask{be: be, tv: &taskVersion{execTask: be.tasks[i], version: state.Version{BlockNum: 1, TxIndex: i}},
+		reexec: make(chan struct{}, 1), done: make(chan struct{})}
 	be.poolTasks[i] = pt
 	return pt
 }
@@ -252,66 +253,79 @@ func requireOperational(t *testing.T, pe *parallelExecutor, msg string) *exec.Tx
 	}
 }
 
-func TestPoolStepConsumesSignalLatchedBeforePark(t *testing.T) {
-	for _, pending := range []bool{true, false} {
-		pe, be := newPoolUnit(t, 3)
+func TestPoolPublishedTaskEndsOrReruns(t *testing.T) {
+	poolUnit(t, 3, nil, func(t *testing.T, pe *parallelExecutor, be *blockExecutor) {
 		pt := newPoolUnitTask(be, 2)
-		pt.next = psRecheck
-		pt.result = &exec.TxResult{}
-		pt.pending = pending
-
-		pt.step(pe.pool, nil)
-
-		require.Len(t, pe.results, 1, "the validated result was not sent")
-		if pending {
-			require.False(t, pt.parked, "a task parked although a re-exec signal arrived before it parked")
-			require.False(t, pt.pending, "the latched signal was not consumed")
-			require.Equal(t, []*poolTask{pt}, be.wakeAt[1], "the task was not queued to re-run after its predecessor commits")
-		} else {
-			require.True(t, pt.parked, "a task with no signal must park")
-			require.Empty(t, be.wakeAt)
-		}
-	}
+		res := make(chan bool, 1)
+		go func() { res <- pt.waitReexec(pe.pool) }()
+		synctest.Wait()
+		require.Empty(t, res, "a published task must wait for a signal")
+		be.finishTask(2)
+		synctest.Wait()
+		require.False(t, <-res, "a finished task must end")
+	})
 }
 
 func TestPoolSignalWaitsForPredecessorCommit(t *testing.T) {
-	pe, be := newPoolUnit(t, 3)
-	pt := newPoolUnitTask(be, 2)
-	pt.next = psReexec
-	pt.parked = true
-
-	be.signalSelfLoopReexec(2)
-	require.Equal(t, 0, pe.pool.queue.Len(), "a re-exec signal queued the task before its predecessor committed")
-	require.Equal(t, []*poolTask{pt}, be.wakeAt[1])
-
-	be.committedFrontier.Store(1)
-	be.signalCommitted(1)
-	require.Equal(t, 1, pe.pool.queue.Len(), "the predecessor's commit did not queue the task")
+	poolUnit(t, 3, nil, func(t *testing.T, pe *parallelExecutor, be *blockExecutor) {
+		pt := newPoolUnitTask(be, 2)
+		be.signalSelfLoopReexec(2)
+		res := make(chan bool, 1)
+		go func() { res <- pt.waitReexec(pe.pool) }()
+		synctest.Wait()
+		require.Empty(t, res, "a re-exec signal must wait for the predecessor to commit")
+		be.signalCommitted(0)
+		synctest.Wait()
+		require.Empty(t, res, "a commit below the predecessor must not release the task")
+		be.signalCommitted(1)
+		synctest.Wait()
+		require.True(t, <-res)
+		require.Equal(t, state.Incarnation(1), pt.tv.version.Incarnation)
+	})
 }
 
 func TestPoolIncarnationLimitIsOperational(t *testing.T) {
-	pe, be := newPoolUnit(t, 3)
-	pt := newPoolUnitTask(be, 1)
-	limit := len(be.tasks) + 8
-	pt.tv.version.Incarnation = state.Incarnation(limit - 1)
+	poolUnit(t, 3, nil, func(t *testing.T, pe *parallelExecutor, be *blockExecutor) {
+		pt := newPoolUnitTask(be, 1)
+		limit := len(be.tasks) + 8
+		pt.tv.version.Incarnation = state.Incarnation(limit - 1)
 
-	require.True(t, pt.bumpInc(pe.pool), "incarnation %d is within the limit %d", limit, limit)
-	require.Empty(t, pe.results)
+		require.True(t, pt.bumpInc(pe.pool), "incarnation %d is within the limit %d", limit, limit)
+		require.Empty(t, pe.results)
 
-	require.False(t, pt.bumpInc(pe.pool), "incarnation %d is past the limit %d", limit+1, limit)
-	requireOperational(t, pe, "exceeded the self-loop incarnation limit")
+		require.False(t, pt.bumpInc(pe.pool), "incarnation %d is past the limit %d", limit+1, limit)
+		requireOperational(t, pe, "exceeded the self-loop incarnation limit")
+	})
 }
 
-func TestPoolRerunAfterWaitsForPredecessorAfterNamedReruns(t *testing.T) {
+func TestPoolRerunWaitsForPredecessorAfterNamedReruns(t *testing.T) {
 	for _, tc := range []struct{ reruns, target int }{{0, 0}, {poolNamedReruns - 1, 0}, {poolNamedReruns, 1}} {
-		_, be := newPoolUnit(t, 3)
-		pt := newPoolUnitTask(be, 2)
-		pt.reruns = tc.reruns
-
-		require.False(t, pt.rerunAfter(0), "the task must wait, not re-run in place")
-		require.Equal(t, []*poolTask{pt}, be.wakeAt[tc.target], "after %d named re-runs", tc.reruns)
-		require.Equal(t, psReexec, pt.next)
+		poolUnit(t, 3, nil, func(t *testing.T, pe *parallelExecutor, be *blockExecutor) {
+			pt := newPoolUnitTask(be, 2)
+			pt.reruns = tc.reruns
+			res := make(chan bool, 1)
+			go func() { res <- pt.rerun(pe.pool, 0) }()
+			synctest.Wait()
+			require.Empty(t, res, "the task must wait, not re-run in place")
+			if tc.target == 1 {
+				be.signalCommitted(0)
+				synctest.Wait()
+				require.Empty(t, res, "after %d named re-runs the named writer is not enough", tc.reruns)
+			}
+			be.signalCommitted(tc.target)
+			synctest.Wait()
+			require.True(t, <-res, "after %d named re-runs", tc.reruns)
+			require.Equal(t, state.Incarnation(1), pt.tv.version.Incarnation)
+		})
 	}
+}
+
+func TestPoolWaitCommittedSeesAFireBeforeItBlocks(t *testing.T) {
+	poolUnit(t, 3, nil, func(t *testing.T, pe *parallelExecutor, be *blockExecutor) {
+		pt := newPoolUnitTask(be, 2)
+		be.signalCommitted(1)
+		require.True(t, pt.waitCommitted(pe.pool, 1))
+	})
 }
 
 type failingRoDB struct {
@@ -322,23 +336,111 @@ type failingRoDB struct {
 func (d failingRoDB) BeginTemporalRo(context.Context) (kv.TemporalTx, error) { return nil, d.err }
 
 func TestPoolRoTxOpenFailureIsOperational(t *testing.T) {
-	pe, be := newPoolUnit(t, 3)
-	boom := errors.New("read tx limit")
-	pe.cfg.db = failingRoDB{err: boom}
-	pt := newPoolUnitTask(be, 1)
+	poolUnit(t, 3, []*exec.WorkerContext{nil}, func(t *testing.T, pe *parallelExecutor, be *blockExecutor) {
+		boom := errors.New("read tx limit")
+		pe.cfg.db = failingRoDB{err: boom}
+		pt := newPoolUnitTask(be, 1)
 
-	require.False(t, pt.run(pe.pool, &poolWorker{}))
-	r := requireOperational(t, pe, "open roTx")
-	require.ErrorIs(t, r.Err, boom)
+		pe.pool.push(pt)
+		synctest.Wait()
+		r := requireOperational(t, pe, "open roTx")
+		require.ErrorIs(t, r.Err, boom)
+	})
 }
 
-func TestPoolStepPanicIsOperational(t *testing.T) {
-	pe, be := newPoolUnit(t, 3)
-	pt := newPoolUnitTask(be, 1)
-	pt.next = psRecheck
+type fakeRoTx struct{ kv.TemporalTx }
 
-	pt.step(pe.pool, nil)
-	requireOperational(t, pe, "self-loop worker panic (block 1 tx 1)")
+func TestPoolRunPanicIsOperationalAndReturnsSlot(t *testing.T) {
+	poolUnit(t, 3, []*exec.WorkerContext{nil}, func(t *testing.T, pe *parallelExecutor, be *blockExecutor) {
+		<-pe.pool.slots
+		pt := newPoolUnitTask(be, 1)
+
+		pt.run(pe.pool, poolSlot{tx: fakeRoTx{}})
+		requireOperational(t, pe, "self-loop worker panic (block 1 tx 1)")
+		require.Len(t, pe.pool.slots, 1, "a panicking task must return its slot")
+	})
+}
+
+func newParkContext(t *testing.T) *exec.WorkerContext {
+	t.Helper()
+	return exec.NewWorkerContext(t.Context(), true, nil, nil, nil, chain.AllProtocolChanges, nil, nil, datadir.Dirs{}, log.New())
+}
+
+func TestPoolParkGivesUpTheSlotAndTakesOneBack(t *testing.T) {
+	poolUnit(t, 3, []*exec.WorkerContext{nil}, func(t *testing.T, pe *parallelExecutor, be *blockExecutor) {
+		<-pe.pool.slots
+		tx := fakeRoTx{}
+		own := newParkContext(t)
+		pt := newPoolUnitTask(be, 2)
+		pt.slot = poolSlot{tx: tx, w: own}
+		res := make(chan bool, 1)
+		go func() { res <- be.parkReader(2, 1, func() bool { return true }) }()
+		synctest.Wait()
+
+		require.Empty(t, res, "the reader must block")
+		require.Len(t, pe.pool.slots, 1, "a parked reader must give its slot back")
+		given := <-pe.pool.slots
+		require.Equal(t, kv.TemporalTx(tx), given.tx)
+		require.Nil(t, given.w, "the parked EVM stays on its context")
+
+		other := newParkContext(t)
+		pe.pool.slots <- poolSlot{tx: tx, w: other}
+		be.fireWriter(1)
+		synctest.Wait()
+		require.True(t, <-res)
+		require.Same(t, own, pt.slot.w)
+		require.Equal(t, kv.TemporalTx(tx), pt.slot.tx)
+		require.Equal(t, []*exec.WorkerContext{other}, pe.pool.spare, "the context of the slot taken back must be reusable")
+	})
+}
+
+func TestPoolParkSkipsWaitWhenCellAlreadyResolved(t *testing.T) {
+	poolUnit(t, 3, nil, func(t *testing.T, pe *parallelExecutor, be *blockExecutor) {
+		pt := newPoolUnitTask(be, 2)
+		require.True(t, be.parkReader(2, 1, func() bool { return false }))
+		require.Nil(t, pt.slot.tx)
+		require.Equal(t, 0, cap(pe.pool.slots))
+	})
+}
+
+func TestPoolParkReturnsFalseOnShutdownHoldingASlot(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		pe := &parallelExecutor{}
+		pe.workersCtx = ctx
+		pe.pool = newTaskPool(pe, []*exec.WorkerContext{nil})
+		be := newBlockExec(1, common.Hash{}, new(protocol.GasPool).AddGas(1), nil, discardConsumers(1), false, nil)
+		be.pool = pe.pool
+		be.poolTasks = make([]*poolTask, 2)
+		be.writers = make([]writerGate, 2)
+		for i := range 2 {
+			be.tasks = append(be.tasks, &execTask{Task: &exec.TxTask{TxIndex: i}, index: i})
+		}
+		<-pe.pool.slots
+		tx := fakeRoTx{}
+		pt := newPoolUnitTask(be, 1)
+		pt.slot = poolSlot{tx: tx, w: newParkContext(t)}
+		res := make(chan bool, 1)
+		go func() { res <- be.parkReader(1, 0, func() bool { return true }) }()
+		synctest.Wait()
+		cancel()
+		synctest.Wait()
+		require.False(t, <-res)
+		require.Equal(t, kv.TemporalTx(tx), pt.slot.tx, "the run continues until the EVM sees the cancel, so it needs its tx")
+		pe.runWG.Wait()
+	})
+}
+
+func TestPoolBlockEndAndSystemTasksDoNotPark(t *testing.T) {
+	poolUnit(t, 3, nil, func(t *testing.T, pe *parallelExecutor, be *blockExecutor) {
+		be.tasks[0] = &execTask{Task: &exec.TxTask{TxIndex: -1}, index: 0}
+		be.tasks[1] = &execTask{Task: &exec.TxTask{TxIndex: 0}, index: 1}
+		be.tasks[2] = &execTask{Task: &exec.TxTask{TxIndex: 1, Txs: types.Transactions{nil}}, index: 2}
+		blocked := func() bool { t.Fatal("must not check a cell it will not wait on"); return false }
+		require.False(t, be.parkReader(-1, -2, blocked), "the block-init task must not park")
+		require.False(t, be.parkReader(1, 0, blocked), "the block-end task must not park")
+	})
 }
 
 func TestPoolBALSeededBlockMatchesUnseeded(t *testing.T) {
@@ -371,20 +473,24 @@ func TestPoolBALSeededBlockMatchesUnseeded(t *testing.T) {
 
 func TestPoolSettleWaitsForReadTargetUnlessBAL(t *testing.T) {
 	for _, hasBAL := range []bool{false, true} {
-		pe, be := newPoolUnit(t, 3)
-		be.versionMap.HasBAL = hasBAL
-		pt := newPoolUnitTask(be, 2)
-
-		require.False(t, pt.settle(pe.pool, &exec.TxResult{}, 0))
-
-		if hasBAL {
-			require.Len(t, pe.results, 1, "a BAL block must send the validated result at once, without a second validation")
-			require.True(t, pt.parked)
-			require.Empty(t, be.wakeAt)
-		} else {
-			require.Equal(t, psRecheck, pt.next)
-			require.Empty(t, pe.results)
-			require.Equal(t, []*poolTask{pt}, be.wakeAt[0], "a non-BAL block must wait for the read target to commit")
-		}
+		poolUnit(t, 3, nil, func(t *testing.T, pe *parallelExecutor, be *blockExecutor) {
+			be.versionMap.HasBAL = hasBAL
+			pt := newPoolUnitTask(be, 2)
+			type out struct {
+				ok, valid bool
+			}
+			res := make(chan out, 1)
+			go func() {
+				ok, valid, _ := pt.settle(pe.pool, &exec.TxResult{}, 0)
+				res <- out{ok, valid}
+			}()
+			synctest.Wait()
+			if !hasBAL {
+				require.Empty(t, res, "a non-BAL block must wait for the read target to commit")
+				be.signalCommitted(0)
+				synctest.Wait()
+			}
+			require.Equal(t, out{true, true}, <-res)
+		})
 	}
 }

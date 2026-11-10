@@ -230,6 +230,11 @@ func (rw *WorkerContext) ResetTx(chainTx kv.TemporalTx) error {
 	return rw.bindTx(chainTx)
 }
 
+// BindTxHeld rebinds the worker to chainTx from inside RunTxTask, which holds rw.lock.
+func (rw *WorkerContext) BindTxHeld(chainTx kv.TemporalTx) error {
+	return rw.bindTx(chainTx)
+}
+
 func (rw *WorkerContext) resetTxNum(txNum uint64) {
 	type resettable interface {
 		SetTxNum(txNum uint64)

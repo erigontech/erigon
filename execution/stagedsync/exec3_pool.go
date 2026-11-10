@@ -1,7 +1,6 @@
 package stagedsync
 
 import (
-	"container/heap"
 	"context"
 	"fmt"
 	"sync"
@@ -12,58 +11,60 @@ import (
 	"github.com/erigontech/erigon/execution/state"
 )
 
-const (
-	psRun = iota
-	psReexec
-	psRecheck
-)
+// poolSlot is one permit to run: a read tx and the context bound to it. A slot given
+// up by a task parked mid-EVM has no context, because the EVM stays on that context.
+type poolSlot struct {
+	tx kv.TemporalTx
+	w  *exec.WorkerContext
+}
 
 type poolTask struct {
 	be         *blockExecutor
 	tv         *taskVersion
-	next       int
 	prevWrites *state.WriteSet
-	result     *exec.TxResult
 	reruns     int
-
-	mu      sync.Mutex
-	parked  bool
-	pending bool
-	fin     bool
-}
-
-type poolWorker struct {
-	w  *exec.WorkerContext
-	tx kv.TemporalTx
-}
-
-type taskHeap []*poolTask
-
-func (h taskHeap) Len() int { return len(h) }
-func (h taskHeap) Less(i, j int) bool {
-	if h[i].be.blockNum != h[j].be.blockNum {
-		return h[i].be.blockNum < h[j].be.blockNum
-	}
-	return h[i].tv.index < h[j].tv.index
-}
-func (h taskHeap) Swap(i, j int) { h[i], h[j] = h[j], h[i] }
-func (h *taskHeap) Push(x any)   { *h = append(*h, x.(*poolTask)) }
-func (h *taskHeap) Pop() any {
-	old := *h
-	n := len(old)
-	x := old[n-1]
-	old[n-1] = nil
-	*h = old[:n-1]
-	return x
+	slot       poolSlot
+	// reexec latches a request to re-execute; done closes when the task is published.
+	reexec chan struct{}
+	done   chan struct{}
 }
 
 type taskPool struct {
-	pe *parallelExecutor
+	pe     *parallelExecutor
+	slots  chan poolSlot
+	idleGo chan func()
 
 	mu     sync.Mutex
 	cond   *sync.Cond
-	queue  taskHeap
+	queue  []*poolTask
 	closed bool
+	spare  []*exec.WorkerContext
+	minted []*exec.WorkerContext
+}
+
+// writerGate wakes the readers and waiters of one task. Callers subscribe, re-check
+// their condition, then block, so a fire between the check and the block is not lost.
+type writerGate struct {
+	mu sync.Mutex
+	ch chan struct{}
+}
+
+func (g *writerGate) subscribe() <-chan struct{} {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.ch == nil {
+		g.ch = make(chan struct{})
+	}
+	return g.ch
+}
+
+func (g *writerGate) fire() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.ch != nil {
+		close(g.ch)
+		g.ch = nil
+	}
 }
 
 // Test hooks; nil in production.
@@ -73,26 +74,24 @@ var (
 )
 
 func newTaskPool(pe *parallelExecutor, base []*exec.WorkerContext) *taskPool {
-	p := &taskPool{pe: pe}
+	p := &taskPool{pe: pe, slots: make(chan poolSlot, len(base)), idleGo: make(chan func())}
 	p.cond = sync.NewCond(&p.mu)
+	for _, w := range base {
+		p.slots <- poolSlot{w: w}
+	}
 	context.AfterFunc(pe.workersCtx, func() {
 		p.mu.Lock()
 		p.closed = true
 		p.mu.Unlock()
 		p.cond.Broadcast()
 	})
-	for _, w := range base {
-		pe.runWG.Go(func() { p.workerLoop(&poolWorker{w: w}) })
-	}
+	pe.runWG.Go(p.dispatchLoop)
 	return p
 }
 
 func (p *taskPool) push(pt *poolTask) {
-	if p == nil {
-		return
-	}
 	p.mu.Lock()
-	heap.Push(&p.queue, pt)
+	p.queue = append(p.queue, pt)
 	p.mu.Unlock()
 	p.cond.Signal()
 }
@@ -100,48 +99,148 @@ func (p *taskPool) push(pt *poolTask) {
 func (p *taskPool) pop() *poolTask {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	for !p.closed && p.queue.Len() == 0 {
+	for !p.closed && len(p.queue) == 0 {
 		p.cond.Wait()
 	}
 	if p.closed {
 		return nil
 	}
-	return heap.Pop(&p.queue).(*poolTask)
+	pt := p.queue[0]
+	p.queue[0] = nil
+	p.queue = p.queue[1:]
+	return pt
 }
 
-func (p *taskPool) workerLoop(wk *poolWorker) {
-	defer func() {
-		if wk.tx != nil {
-			wk.tx.Rollback()
+// dispatchLoop starts queued tasks one at a time, each when a slot is free. A task
+// starts only with a slot, so a woken reader queues behind one dispatcher at most,
+// not behind every unstarted task of the block.
+func (p *taskPool) dispatchLoop() {
+	pt := p.pop()
+	if pt == nil {
+		return
+	}
+	if err := p.openReadTxs(); err != nil {
+		pt.sendOperational(p, fmt.Errorf("block %d tx %d: open roTx: %w", pt.be.blockNum, pt.tv.index, err))
+		return
+	}
+	for ; pt != nil; pt = p.pop() {
+		slot, err := p.acquire()
+		if err != nil {
+			pt.sendOperational(p, err)
+			return
 		}
-	}()
-	for pt := p.pop(); pt != nil; pt = p.pop() {
-		pt.step(p, wk)
-		wk.w.PublishReadMetrics()
+		task := pt
+		p.goReused(func() { task.run(p, slot) })
 	}
 }
 
-func (wk *poolWorker) ensureTx(p *taskPool) error {
-	if wk.tx != nil {
-		return nil
+// openReadTxs opens every slot's read tx before any task runs, so that a task resuming
+// mid-EVM always finds an open one. They stay open for the executor's life, so all slots
+// read the same snapshot.
+func (p *taskPool) openReadTxs() error {
+	for range cap(p.slots) {
+		s := <-p.slots
+		tx, err := p.pe.cfg.db.BeginTemporalRo(p.pe.workersCtx) //nolint:gocritic // executor-lifetime rotx: rolled back in closeSlots
+		if err != nil {
+			p.slots <- s
+			return err
+		}
+		if poolOnRoTxOpen != nil {
+			poolOnRoTxOpen()
+		}
+		s.tx = tx
+		if s.w != nil {
+			if err := s.w.ResetTx(tx); err != nil {
+				p.slots <- s
+				return err
+			}
+		}
+		p.slots <- s
 	}
-	tx, err := p.pe.cfg.db.BeginTemporalRo(p.pe.workersCtx) //nolint:gocritic // worker-lifetime rotx: rolled back when the worker exits
-	if err != nil {
-		return err
-	}
-	if poolOnRoTxOpen != nil {
-		poolOnRoTxOpen()
-	}
-	if err := wk.w.ResetTx(tx); err != nil {
-		tx.Rollback()
-		return err
-	}
-	wk.tx = tx
 	return nil
 }
 
+// goReused runs f on an idle task goroutine when there is one, so f starts on an
+// already grown stack instead of growing a new one.
+func (p *taskPool) goReused(f func()) {
+	select {
+	case p.idleGo <- f:
+		return
+	default:
+	}
+	idle, done := p.idleGo, p.pe.workersCtx.Done()
+	p.pe.runWG.Go(func() {
+		for {
+			f()
+			f = nil
+			select {
+			case f = <-idle:
+			case <-done:
+				return
+			}
+		}
+	})
+}
+
+func (p *taskPool) acquire() (poolSlot, error) {
+	select {
+	case s := <-p.slots:
+		if s.w == nil {
+			s.w = p.takeContext()
+			if err := s.w.ResetTx(s.tx); err != nil {
+				p.slots <- s
+				return poolSlot{}, fmt.Errorf("bind roTx: %w", err)
+			}
+		}
+		return s, nil
+	case <-p.pe.workersCtx.Done():
+		return poolSlot{}, p.pe.workersCtx.Err()
+	}
+}
+
+// takeContext returns a spare context, or makes one when every context is held by a task
+// parked mid-EVM.
+func (p *taskPool) takeContext() *exec.WorkerContext {
+	p.mu.Lock()
+	if n := len(p.spare); n > 0 {
+		w := p.spare[n-1]
+		p.spare = p.spare[:n-1]
+		p.mu.Unlock()
+		return w
+	}
+	p.mu.Unlock()
+	pe := p.pe
+	w := exec.NewWorkerContext(pe.workersCtx, true, pe.taskExecMetrics, pe.cfg.db,
+		pe.cfg.blockReader, pe.cfg.chainConfig, pe.cfg.genesis, pe.cfg.engine, pe.cfg.dirs, pe.logger)
+	_ = w.ResetState(pe.rs, nil, nil, state.NewNoopWriter(), nil)
+	w.EnablePrevBlockReads(pe.prevBlocks)
+	p.mu.Lock()
+	p.minted = append(p.minted, w)
+	p.mu.Unlock()
+	return w
+}
+
+// closeSlots rolls back the read txs and closes extra contexts. Idempotent. Call after
+// every task goroutine has exited: each one returns its slot on the way out.
+func (p *taskPool) closeSlots() {
+	for {
+		select {
+		case s := <-p.slots:
+			if s.tx != nil {
+				s.tx.Rollback()
+			}
+		default:
+			for _, w := range p.minted {
+				w.Close()
+			}
+			p.minted = nil
+			return
+		}
+	}
+}
+
 func (pe *parallelExecutor) dispatchPoolTask(be *blockExecutor, tv *taskVersion) {
-	pt := &poolTask{be: be, tv: tv, next: psRun}
+	pt := &poolTask{be: be, tv: tv, reexec: make(chan struct{}, 1), done: make(chan struct{})}
 	be.poolTasks[tv.index] = pt
 	pe.pool.push(pt)
 }
@@ -168,120 +267,187 @@ func (pt *poolTask) bumpInc(p *taskPool) bool {
 	return true
 }
 
-func (pt *poolTask) waitThen(t, next int) bool {
-	pt.next = next
-	return !pt.be.requeueAt(pt.tv.index, t, pt)
-}
-
 const poolNamedReruns = 3
 
-func (pt *poolTask) rerunAfter(named int) bool {
-	t := pt.tv.index - 1
-	if pt.reruns < poolNamedReruns {
-		t = named
+// waitCommitted blocks until the commit frontier reaches target. False on shutdown.
+func (pt *poolTask) waitCommitted(p *taskPool, target int) bool {
+	be, tx := pt.be, pt.tv.index
+	if target >= len(be.tasks) {
+		panic(fmt.Sprintf("[self-loop] block %d: wait target %d out of task range [-1,%d) for task %d — "+
+			"a dependency reached waitCommitted in versionMap space (missing taskIndexOf translation); "+
+			"block start TxIndex=%d", be.blockNum, target, len(be.tasks), tx, be.tasks[0].Version().TxIndex))
 	}
-	pt.reruns++
-	return pt.waitThen(t, psReexec)
+	if target > tx {
+		panic(fmt.Sprintf("[self-loop] block %d: task %d waiting for HIGHER target %d (forward dependency — invariant violation); "+
+			"block start TxIndex=%d", be.blockNum, tx, target, be.tasks[0].Version().TxIndex))
+	}
+	for be.frontier() < target {
+		wake := be.writers[target].subscribe()
+		if be.frontier() >= target {
+			break
+		}
+		select {
+		case <-wake:
+		case <-p.pe.workersCtx.Done():
+			return false
+		}
+	}
+	return true
 }
 
-func (pt *poolTask) step(p *taskPool, wk *poolWorker) {
+// rerun waits for the named writer, or for the predecessor after poolNamedReruns
+// re-runs, and moves the task to its next incarnation.
+func (pt *poolTask) rerun(p *taskPool, named int) bool {
+	target := pt.tv.index - 1
+	if pt.reruns < poolNamedReruns {
+		target = named
+	}
+	pt.reruns++
+	return pt.waitCommitted(p, target) && pt.bumpInc(p)
+}
+
+func (pt *poolTask) release(p *taskPool) {
+	pt.slot.w.PublishReadMetrics()
+	p.slots <- pt.slot
+	pt.slot = poolSlot{}
+}
+
+// run owns the task until it is published. It holds a slot only while the EVM runs.
+func (pt *poolTask) run(p *taskPool, slot poolSlot) {
 	be, tv := pt.be, pt.tv
+	pt.slot = slot
 	defer func() {
 		if rec := recover(); rec != nil {
 			pt.sendOperational(p, fmt.Errorf("self-loop worker panic (block %d tx %d): %v\n%s",
 				be.blockNum, tv.index, rec, dbg.Stack()))
 		}
+		if pt.slot.tx != nil {
+			p.slots <- pt.slot
+			pt.slot = poolSlot{}
+		}
 	}()
 	for {
-		switch pt.next {
-		case psReexec:
-			if !pt.bumpInc(p) {
+		// Captured before the run: a frontier that reaches tx-1 during the run does not
+		// make an error from reads made before it authoritative.
+		finalExec := be.frontier() >= tv.index-1
+		if pt.slot.tx == nil {
+			s, err := p.acquire()
+			if err != nil {
+				pt.sendOperational(p, fmt.Errorf("block %d tx %d: acquire slot: %w", be.blockNum, tv.index, err))
 				return
 			}
-			pt.next = psRun
-		case psRecheck:
-			valid, _, blocker := be.selfLoopEvaluate(tv, pt.result)
-			if !valid {
-				if !pt.rerunAfter(blocker) {
-					return
-				}
-				continue
-			}
-			if !pt.publish(p) {
+			pt.slot = s
+		}
+		if poolOnRun != nil {
+			poolOnRun(int(tv.version.Incarnation) + 1)
+		}
+		result := pt.slot.w.RunTxTask(tv)
+		pt.release(p)
+
+		named := -2
+		switch txTask, ok := tv.Task.(*exec.TxTask); {
+		case ok && txTask.ChargesSenderAtValidation(int(tv.version.Incarnation)) && (result.Err != nil || touchedSenderAccount(txTask, result)):
+			named = tv.index - 1
+		case result.Err != nil:
+			if finalExec {
+				pt.send(p, result)
 				return
 			}
-		case psRun:
-			if !pt.run(p, wk) {
+			named = tv.index - 1
+		case result.Dep >= 0:
+			named = be.taskIndexOf(result.Dep)
+		}
+		if named != -2 {
+			if !pt.rerun(p, named) {
 				return
 			}
+			continue
+		}
+
+		be.selfLoopFlush(tv.version, result, pt.prevWrites)
+		pt.prevWrites = result.TxOut
+		valid, target, blocker := be.selfLoopEvaluate(tv, result)
+		if valid {
+			var ok bool
+			if ok, valid, blocker = pt.settle(p, result, target); !ok {
+				return
+			}
+		}
+		if !valid {
+			if !pt.rerun(p, blocker) {
+				return
+			}
+			continue
+		}
+
+		pt.send(p, result)
+		if !pt.waitReexec(p) {
+			return
 		}
 	}
 }
 
-func (pt *poolTask) run(p *taskPool, wk *poolWorker) bool {
-	be, tv := pt.be, pt.tv
-	finalExec := be.frontier() >= tv.index-1
-	if err := wk.ensureTx(p); err != nil {
-		pt.sendOperational(p, fmt.Errorf("block %d tx %d: open roTx: %w", be.blockNum, tv.index, err))
+// settle waits for a non-BAL task's read target to commit and validates again. A BAL
+// block's reads are proven by its seeded values, so it skips both. ok is false on shutdown.
+func (pt *poolTask) settle(p *taskPool, result *exec.TxResult, target int) (ok, valid bool, blocker int) {
+	if pt.be.versionMap.HasBAL {
+		return true, true, -1
+	}
+	if !pt.waitCommitted(p, target) {
+		return false, false, -1
+	}
+	valid, _, blocker = pt.be.selfLoopEvaluate(pt.tv, result)
+	return true, valid, blocker
+}
+
+// waitReexec blocks a published task until it must re-execute (true, at the next
+// incarnation and once the predecessor has committed) or has finished (false).
+func (pt *poolTask) waitReexec(p *taskPool) bool {
+	select {
+	case <-pt.reexec:
+		return pt.rerun(p, pt.tv.index-1)
+	case <-pt.done:
+		return false
+	case <-p.pe.workersCtx.Done():
 		return false
 	}
-	for {
-		last := be.runInc[tv.index].Load()
-		if int64(tv.version.Incarnation) <= last {
-			panic(fmt.Sprintf("self-loop: tx %d run at incarnation %d <= last-run %d (two runs share an incarnation)",
-				tv.index, tv.version.Incarnation, last))
-		}
-		if be.runInc[tv.index].CompareAndSwap(last, int64(tv.version.Incarnation)) {
-			break
-		}
-	}
-	if poolOnRun != nil {
-		poolOnRun(int(tv.version.Incarnation) + 1)
-	}
-	result := wk.w.RunTxTask(tv)
-	if txTask, ok := tv.Task.(*exec.TxTask); ok && txTask.ChargesSenderAtValidation(int(tv.version.Incarnation)) &&
-		(result.Err != nil || touchedSenderAccount(txTask, result)) {
-		return pt.rerunAfter(tv.index - 1)
-	}
-	if result.Err != nil {
-		if finalExec {
-			pt.send(p, result)
-			return false
-		}
-		return pt.rerunAfter(tv.index - 1)
-	}
-	if result.Dep >= 0 {
-		return pt.rerunAfter(be.taskIndexOf(result.Dep))
-	}
-	be.selfLoopFlush(tv.version, result, pt.prevWrites)
-	pt.prevWrites = result.TxOut
-
-	valid, target, blocker := be.selfLoopEvaluate(tv, result)
-	if !valid {
-		return pt.rerunAfter(blocker)
-	}
-	return pt.settle(p, result, target)
 }
 
-func (pt *poolTask) settle(p *taskPool, result *exec.TxResult, target int) bool {
-	pt.result = result
-	if !pt.be.versionMap.HasBAL {
-		return pt.waitThen(target, psRecheck)
+// parkReader blocks reader's run on an in-flight cell of writer until the writer may have
+// resolved it. The slot is given up while parked; the reader keeps its context, because the
+// EVM is mid-run on it. It returns false when the reader cannot park or the executor stops.
+func (be *blockExecutor) parkReader(reader, writer int, blocked func() bool) bool {
+	r, w := be.taskIndexOf(reader), be.taskIndexOf(writer)
+	// Engine calls in the block-init and block-end tasks hold a chain reader bound to the slot's tx.
+	if w < 0 || w >= r || be.tasks[r].Version().TxIndex < 0 || be.tasks[r].Task.IsBlockEnd() {
+		return false
 	}
-	return pt.publish(p)
-}
-
-func (pt *poolTask) publish(p *taskPool) bool {
-	pt.send(p, pt.result)
-	pt.result = nil
-	pt.next = psReexec
-	pt.mu.Lock()
-	if pt.pending {
-		pt.pending = false
-		pt.mu.Unlock()
-		return pt.rerunAfter(pt.tv.index - 1)
+	wake := be.writers[w].subscribe()
+	if !blocked() {
+		return true
 	}
-	pt.parked = true
-	pt.mu.Unlock()
-	return false
+	pt, p := be.poolTasks[r], be.pool
+	own := pt.slot.w
+	pt.slot.w.PublishReadMetrics()
+	p.slots <- poolSlot{tx: pt.slot.tx}
+	pt.slot = poolSlot{}
+	woke := true
+	select {
+	case <-wake:
+	case <-p.pe.workersCtx.Done():
+		woke = false
+	}
+	// Unconditional even on shutdown: the run goes on until the EVM sees the cancel, so it
+	// must read through its own open tx, and every slot comes back as tasks end.
+	s := <-p.slots
+	if s.w != nil {
+		p.mu.Lock()
+		p.spare = append(p.spare, s.w)
+		p.mu.Unlock()
+	}
+	if err := own.BindTxHeld(s.tx); err != nil {
+		panic(fmt.Sprintf("rebind roTx after park: %v", err))
+	}
+	pt.slot = poolSlot{tx: s.tx, w: own}
+	return woke
 }

@@ -280,6 +280,8 @@ type VersionMap struct {
 	writeSeq atomic.Uint64
 	stamps   *writeStamps
 
+	writerWait func(reader, writer int, blocked func() bool) bool
+
 	// fieldMissHook runs after an account-field probe missed, before the
 	// fallbacks probe the version map again. Tests set it to land a flush there.
 	fieldMissHook func()
@@ -292,6 +294,12 @@ type writeStamps struct {
 	n        int
 	inflight []atomic.Int32
 	last     []atomic.Uint64
+}
+
+// SetWriterWait installs the hook a read calls on an in-flight cell of a lower tx.
+// The hook returns true when the caller must re-read and false when it must not wait.
+func (vm *VersionMap) SetWriterWait(f func(reader, writer int, blocked func() bool) bool) {
+	vm.writerWait = f
 }
 
 func (vm *VersionMap) InitStamps(lastTxIndex int) {

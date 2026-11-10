@@ -345,6 +345,10 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 	destructed, sdRes, ok := s.readSelfDestructMemo(addr)
 	// An in-flight self-destruct may burn a field whose own cell already reads as Done.
 	if ok && sdRes.Status() == MVReadResultDependency {
+		if s.parkOnWriter(sdRes.DepIdx(), addr, SelfDestructPath, accounts.NilKey) {
+			versionedReadCore(s, addr, path, key, commited, skipStorage, r)
+			return
+		}
 		s.dep = max(s.dep, sdRes.DepIdx())
 	}
 	if ok && sdRes.resolved() && destructed {
@@ -553,8 +557,12 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 				res.DepIdx(), res.Incarnation(),
 				addr, AccountKey{path, key})
 		}
-		// The predecessor write is in flight (Estimate): record the dependency verdict
-		// and fall back to the in-flight value.
+		// The predecessor write is in flight (Estimate): park until it resolves and
+		// re-read. If the read cannot park, record the dependency and use the in-flight value.
+		if s.parkOnWriter(res.DepIdx(), addr, path, key) {
+			versionedReadCore(s, addr, path, key, commited, skipStorage, r)
+			return
+		}
 		s.dep = max(s.dep, res.DepIdx())
 		hdr.Source = MapRead
 		s.versionedReads.SetHeader(addr, path, key, hdr)
@@ -819,6 +827,21 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 	r.outcome = outcomeReturnDefault
 	r.source = UnknownSource
 	r.version = UnknownVersion
+}
+
+// parkOnWriter blocks this run until writer's in-flight cell may have resolved. True means
+// the caller re-reads; the self-destruct memo is dropped because the writer may have destructed.
+func (s *IntraBlockState) parkOnWriter(writer int, addr accounts.Address, path AccountPath, key accounts.StorageKey) bool {
+	if s.versionMap.writerWait == nil {
+		return false
+	}
+	if !s.versionMap.writerWait(s.txIndex, writer, func() bool {
+		return s.versionMap.ReadStatus(addr, path, key, s.txIndex).Status() == MVReadResultDependency
+	}) {
+		return false
+	}
+	s.sdProbeEpoch++
+	return true
 }
 
 // readAccountInternal performs an AddressPath versionedReadCore + typed extraction

@@ -1648,6 +1648,7 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 		// Join the scheduler before draining workers: it may still add to runWG.
 		_ = pe.wait()
 		pe.runWG.Wait()
+		pe.pool.closeSlots()
 		pe.stopWorkers()
 	}, nil
 }
@@ -1719,13 +1720,13 @@ type txResult struct {
 
 // Block-STM model: workers own execution AND validation. Each worker flushes its
 // writes to the versionMap speculatively (as estimate), validates its own read-set,
-// and loops — parking on the commit-frontier signal until every read-dependency has
+// and loops — waiting for the commit frontier until every read-dependency has
 // committed — returning only a stable-valid result. The exec loop is a pure in-order
 // commit loop: flush the result's writes as complete, run the coinbase/finalize
 // sweep, broadcast the advanced frontier.
 //
-// A read that observes an in-flight estimate aborts the run (result.Dep); the task
-// is re-queued once the commit frontier reaches its predecessor.
+// A read that observes an in-flight estimate parks at that read until the writer
+// resolves it, then re-reads and the same run continues.
 
 // selfLoopFlush publishes tv's writes to the versionMap, plus deletion of any key
 // the previous incarnation wrote that this one dropped.
@@ -2624,19 +2625,13 @@ type blockExecutor struct {
 	revalidate map[int]bool
 
 	// committedFrontier is the highest contiguous finalized task (== coinbaseFlushedUpTo).
-	// Fan-out: each worker waits for its actual dependency target, not the linear
-	// predecessor. wakeAt maps a frontier value to its waiters; finalizing task F
-	// re-queues exactly wakeAt[F] on the pool (directed, no broadcast).
 	committedFrontier atomic.Int64
-	wakeMu            sync.Mutex
-	wakeAt            map[int][]*poolTask
-	// poolTasks[i] is task i's pool state. After sending its result a task is parked
-	// (no goroutine); the committed-dependent re-check re-queues it to re-execute.
+	// writers[i] wakes the readers parked on task i's in-flight cells and the tasks
+	// waiting for it to commit; it fires when task i is validated and when it commits.
+	writers []writerGate
+	// poolTasks[i] is task i's pool state.
 	poolTasks []*poolTask
 	pool      *taskPool
-	// runInc[i] is the highest incarnation ever RUN for task i, enforcing that each
-	// execution uses a strictly ascending incarnation. Init -1.
-	runInc []atomic.Int64
 	// selfLoopDispatched guards against re-dispatching a task the self-loop worker
 	// already owns: the worker owns all re-execution, so the scheduler dispatches
 	// each task exactly once. Touched only on the exec-loop goroutine.
@@ -3001,80 +2996,37 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 	return nil, nil
 }
 
-// signalCommitted advances the commit frontier to tx and wakes exactly the tasks
-// waiting for that frontier value — directed, no broadcast.
+// signalCommitted advances the commit frontier to tx and wakes the tasks waiting for tx.
 func (be *blockExecutor) signalCommitted(tx int) {
-	be.wakeMu.Lock()
 	be.committedFrontier.Store(int64(tx))
-	waiters := be.wakeAt[tx]
-	delete(be.wakeAt, tx)
-	be.wakeMu.Unlock()
-	for _, pt := range waiters {
-		be.pool.push(pt)
+	be.fireWriter(tx)
+}
+
+func (be *blockExecutor) fireWriter(tx int) {
+	if tx < len(be.writers) {
+		be.writers[tx].fire()
 	}
 }
 
-// signalSelfLoopReexec re-queues the parked task of an already-sent tx to
-// re-execute, or latches the request when the task is still running.
+// signalSelfLoopReexec asks tx's task to re-execute. The request is latched, so a task
+// that is still running acts on it after publishing its result.
 func (be *blockExecutor) signalSelfLoopReexec(tx int) {
-	pt := be.poolTasks[tx]
-	if pt == nil {
-		return
-	}
-	pt.mu.Lock()
-	if pt.fin {
-		pt.mu.Unlock()
-		return
-	}
-	if pt.parked {
-		pt.parked = false
-		pt.mu.Unlock()
-		if !be.requeueAt(tx, tx-1, pt) {
-			be.pool.push(pt)
+	if pt := be.poolTasks[tx]; pt != nil {
+		select {
+		case pt.reexec <- struct{}{}:
+		default:
 		}
-		return
 	}
-	pt.pending = true
-	pt.mu.Unlock()
 }
 
 func (be *blockExecutor) finishTask(tx int) {
 	if pt := be.poolTasks[tx]; pt != nil {
-		pt.mu.Lock()
-		pt.fin = true
-		pt.parked = false
-		pt.mu.Unlock()
+		close(pt.done)
 	}
 }
 
 func (be *blockExecutor) frontier() int {
 	return int(be.committedFrontier.Load())
-}
-
-// requeueAt registers pt to be re-queued when the frontier reaches target. Returns
-// false when the frontier is already there; the caller then continues in place.
-func (be *blockExecutor) requeueAt(tx, target int, pt *poolTask) bool {
-	// A target beyond the last task can never be signalled — the worker would park
-	// forever. That means a versionMap (block-TxIndex) dependency reached here
-	// without a taskIndexOf translation; fail loud at the exact site.
-	if target >= len(be.tasks) {
-		panic(fmt.Sprintf("[self-loop] block %d: park target %d out of task range [-1,%d) for task %d — "+
-			"a dependency reached requeueAt in versionMap space (missing taskIndexOf translation); "+
-			"block start TxIndex=%d", be.blockNum, target, len(be.tasks), tx, be.tasks[0].Version().TxIndex))
-	}
-	// Invariant: a task never waits for a HIGHER task — a forward dependency the
-	// in-order frontier can never satisfy (deadlock). Fail loud.
-	if target > tx {
-		panic(fmt.Sprintf("[self-loop] block %d: task %d waiting for HIGHER target %d (forward dependency — invariant violation); "+
-			"block start TxIndex=%d", be.blockNum, tx, target, be.tasks[0].Version().TxIndex))
-	}
-	be.wakeMu.Lock()
-	defer be.wakeMu.Unlock()
-	if int(be.committedFrontier.Load()) >= target {
-		return false
-	}
-	be.wakeAt[target] = append(be.wakeAt[target], pt)
-	return true
 }
 
 // revalidateCommittedDependents re-checks changedTx's committed-but-not-published
@@ -3202,6 +3154,7 @@ func (be *blockExecutor) runDepOrderValidation(pe *parallelExecutor, applyTx kv.
 				} else {
 					be.versionMap.MarkWritesValidated(be.blockIO.WriteSet(txVersion.TxIndex), be.isFeeRecipient(txResult))
 				}
+				be.fireWriter(tx)
 				be.validateTasks.markComplete(tx)
 				// Validated against current state; only a later write to one of its
 				// read cells (markReadersDirty) re-flags it for finalize re-validation.
@@ -3620,11 +3573,8 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 	if be.poolTasks == nil && len(be.tasks) > 0 {
 		be.poolTasks = make([]*poolTask, len(be.tasks))
 		be.pool = pe.pool
-		be.runInc = make([]atomic.Int64, len(be.tasks))
-		for i := range be.runInc {
-			be.runInc[i].Store(-1)
-		}
-		be.wakeAt = map[int][]*poolTask{}
+		be.writers = make([]writerGate, len(be.tasks))
+		be.versionMap.SetWriterWait(be.parkReader)
 	}
 
 	maxValidated := be.validateTasks.maxComplete()
