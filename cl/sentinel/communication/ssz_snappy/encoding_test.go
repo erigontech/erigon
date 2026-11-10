@@ -247,7 +247,6 @@ func TestDecodeAndReadNoForkDigestMaxRejectsTrailingData(t *testing.T) {
 	err := DecodeAndReadNoForkDigestMax(bytes.NewReader(wire), decoded, clparams.Phase0Version, 16*length.Hash)
 	require.ErrorIs(t, err, ErrTrailingData)
 
-	// The exact decoder already rejects the same input.
 	err = DecodeAndReadNoForkDigestExact(bytes.NewReader(wire), solid.NewHashList(16), clparams.Phase0Version, length.Hash)
 	require.ErrorIs(t, err, ErrTrailingData)
 }
@@ -256,7 +255,27 @@ func TestDecodeAndReadNoForkDigestMaxRejectsTrailingFrames(t *testing.T) {
 	wire := append(encodeHashList(t, 1), snappyStreamIdentifier...)
 
 	err := DecodeAndReadNoForkDigestMax(bytes.NewReader(wire), solid.NewHashList(16), clparams.Phase0Version, 16*length.Hash)
-	require.Error(t, err)
+	require.ErrorIs(t, err, ErrTrailingData)
+}
+
+func TestDecodeAndReadNoForkDigestMaxRejectsMalformedTrailingBytes(t *testing.T) {
+	const maxSize = 16 * length.Hash
+	for _, test := range []struct {
+		name    string
+		trailer []byte
+	}{
+		{name: "zero byte", trailer: []byte{0x00}},
+		{name: "one byte", trailer: []byte{0x01}},
+		{name: "three garbage bytes", trailer: []byte{0xab, 0xab, 0xab}},
+		{name: "padding past compressed limit", trailer: append([]byte{0xfe, 0xff, 0xff, 0x00}, make([]byte, snappy.MaxEncodedLen(maxSize))...)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			wire := append(encodeHashList(t, 1), test.trailer...)
+
+			err := DecodeAndReadNoForkDigestMax(bytes.NewReader(wire), solid.NewHashList(16), clparams.Phase0Version, maxSize)
+			require.ErrorIs(t, err, ErrTrailingData)
+		})
+	}
 }
 
 func TestDecodeAndReadNoForkDigestMaxAcceptsCompletePayload(t *testing.T) {
