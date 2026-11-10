@@ -98,6 +98,7 @@ jobs:
       # the same name, so forks are excluded. A failure here stops the leg, because fuzzing from
       # an empty corpus would replace the kept one.
       - name: Restore fuzz corpus
+        id: restore
         env:
           GH_TOKEN: ${{ github.token }}
           NAME: ${{ matrix.name }}
@@ -194,9 +195,10 @@ jobs:
           path: fuzz-failure/${{ matrix.name }}.tsv
           if-no-files-found: ignore
 
-      # On failure too, so a run that finds a crash keeps the rest of its corpus.
+      # On fuzz failure too, so a run that finds a crash keeps the rest of its corpus.
+      # Never after a failed restore: a partial corpus would become the newest one.
       - name: Upload fuzz corpus
-        if: always()
+        if: ${{ always() && steps.restore.outcome == 'success' }}
         uses: actions/upload-artifact@v7
         with:
           name: fuzz-corpus-${{ matrix.name }}
