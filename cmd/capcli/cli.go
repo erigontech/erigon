@@ -1696,6 +1696,10 @@ func redactURLError(err error) error {
 		return errors.New("malformed endpoint URL")
 	}
 	ue.URL = redactEndpoint(ue.URL)
+	if strings.HasPrefix(ue.Err.Error(), "failed to parse Location header") {
+		// net/http quotes the header, and a server can repeat the request's path and query in it.
+		ue.Err = errors.New("malformed redirect Location header")
+	}
 	return err
 }
 

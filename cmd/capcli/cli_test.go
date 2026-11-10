@@ -18,6 +18,8 @@ package main
 
 import (
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -27,13 +29,9 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 )
 
-func TestBeaconAPIRequestsKeepTheEndpointSecretOutOfErrors(t *testing.T) {
-	closed, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	host := closed.Addr().String()
-	require.NoError(t, closed.Close())
-
-	requests := map[string]func(base string) error{
+// beaconAPIRequests are the request helpers of the older capcli commands, each taking the URL it requests.
+func beaconAPIRequests(t *testing.T) map[string]func(uri string) error {
+	return map[string]func(base string) error{
 		"block": func(base string) error {
 			_, err := retrieveAndSanitizeBlockFromRemoteEndpoint(t.Context(), &clparams.MainnetBeaconConfig, base, nil)
 			return err
@@ -55,6 +53,15 @@ func TestBeaconAPIRequestsKeepTheEndpointSecretOutOfErrors(t *testing.T) {
 			return err
 		},
 	}
+}
+
+func TestBeaconAPIRequestsKeepTheEndpointSecretOutOfErrors(t *testing.T) {
+	closed, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	host := closed.Addr().String()
+	require.NoError(t, closed.Close())
+
+	requests := beaconAPIRequests(t)
 	for name, request := range requests {
 		t.Run(name, func(t *testing.T) {
 			err := request("http://user:pw-secret@" + host + "/path-secret")
@@ -70,6 +77,24 @@ func TestBeaconAPIRequestsKeepTheEndpointSecretOutOfErrors(t *testing.T) {
 				require.NotContains(t, err.Error(), "path-secret")
 				require.NotContains(t, err.Error(), "Ab3x", "a parse error quotes the malformed part")
 			}
+		})
+	}
+}
+
+// A malformed redirect is quoted by net/http, and a server can repeat the request's path and query in it.
+func TestBeaconAPIRequestsKeepTheEndpointSecretOutOfMalformedRedirects(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Location", r.URL.Path+"/%zz?"+r.URL.RawQuery)
+		w.WriteHeader(http.StatusFound)
+	}))
+	t.Cleanup(srv.Close)
+
+	for name, request := range beaconAPIRequests(t) {
+		t.Run(name, func(t *testing.T) {
+			err := request(srv.URL + "/path-secret?apikey=query-secret")
+			require.Error(t, err)
+			require.NotContains(t, err.Error(), "path-secret")
+			require.NotContains(t, err.Error(), "query-secret")
 		})
 	}
 }
