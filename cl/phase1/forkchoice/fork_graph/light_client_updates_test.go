@@ -140,6 +140,12 @@ func TestFinalizationKeepsOnlyCanonicalLightClientUpdates(t *testing.T) {
 	canonicalUpdate := lightClientTestUpdate(cfg, 400, periodStart+10)
 	f.addLightClientUpdateCandidateLocked(canonical, canonicalUpdate)
 	f.addLightClientUpdateCandidateLocked(orphan, lightClientTestUpdate(cfg, 450, periodStart+10))
+	// Signed after the finalized block, so finalization cannot settle it yet.
+	later, nextFinalized := common.Hash{5}, common.Hash{6}
+	f.headers.Store(later, &cltypes.BeaconBlockHeader{Slot: periodStart + 70, ParentRoot: finalized})
+	f.headers.Store(nextFinalized, &cltypes.BeaconBlockHeader{Slot: periodStart + 96, ParentRoot: later})
+	laterUpdate := lightClientTestUpdate(cfg, 500, periodStart+69)
+	f.addLightClientUpdateCandidateLocked(later, laterUpdate)
 	_, ok := f.GetLightClientUpdate(1)
 	require.False(t, ok, "served before finalization")
 
@@ -148,7 +154,14 @@ func TestFinalizationKeepsOnlyCanonicalLightClientUpdates(t *testing.T) {
 	got, ok := f.GetLightClientUpdate(1)
 	require.True(t, ok)
 	require.Same(t, canonicalUpdate, got)
-	require.Empty(t, f.lightClientUpdateCandidates, "candidates at or below the finalized slot are settled")
+	require.Len(t, f.lightClientUpdateCandidates[1], 1, "only the candidate above the finalized slot waits")
+
+	f.KeepFinalizedLightClientUpdates(nextFinalized)
+
+	got, ok = f.GetLightClientUpdate(1)
+	require.True(t, ok)
+	require.Same(t, laterUpdate, got, "the next finalization settles it")
+	require.Empty(t, f.lightClientUpdateCandidates)
 }
 
 // A period keeps a bounded number of candidates, the best ones, so a long stretch without finality does not hold a

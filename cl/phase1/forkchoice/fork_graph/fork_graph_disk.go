@@ -962,9 +962,9 @@ func (f *forkGraphDisk) NewestLightClientUpdate() *cltypes.LightClientUpdate {
 }
 
 // recordLightClientUpdateLocked takes the update of a block whose transition succeeded: it is the newest update at
-// once, and a candidate for its period's store until finalization settles it. The caller holds addPruneMu. The caller emits the light client events: fork
-// graph methods run under the fork choice store's lock, where event sends must not happen (a stalled subscriber would
-// wedge the store).
+// once, and a candidate for its period's store until finalization settles it. The caller holds addPruneMu. The caller
+// emits the light client events: fork graph methods run under the fork choice store's lock, where event sends must not
+// happen (a stalled subscriber would wedge the store).
 func (f *forkGraphDisk) recordLightClientUpdateLocked(signatureBlock common.Hash, update *cltypes.LightClientUpdate) {
 	f.newestLightClientUpdate.Store(update)
 	f.addLightClientUpdateCandidateLocked(signatureBlock, update)
