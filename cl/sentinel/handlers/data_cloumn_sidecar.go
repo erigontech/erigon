@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"errors"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -10,12 +11,15 @@ import (
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/libp2p/go-libp2p/core/network"
 )
 
 var errInvalidDataColumnIndex = errors.New("invalid column index")
 
 func (c *ConsensusHandlers) dataColumnSidecarsByRangeHandler(s network.Stream) error {
+	requestCtx, cancel := context.WithTimeout(c.ctx, StreamDeadline)
+	defer cancel()
 	curEpoch := c.ethClock.GetCurrentEpoch()
 
 	// Use current epoch's version for decoding (supports Fulu and GLOAS)
@@ -65,15 +69,23 @@ func (c *ConsensusHandlers) dataColumnSidecarsByRangeHandler(s network.Stream) e
 		return nil
 	}
 
-	tx, err := c.indiciesDB.BeginRo(c.ctx)
+	tx, err := c.indiciesDB.BeginRo(requestCtx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+	return c.writeColumnsByRange(requestCtx, s, tx, req, startSlot, endSlot, curSlot)
+}
 
-	count := 0
+// writeColumnsByRange counts every existence check, not only hits: a miss answers nothing and costs the peer no response budget.
+func (c *ConsensusHandlers) writeColumnsByRange(ctx context.Context, s network.Stream, tx kv.Tx, req *cltypes.ColumnSidecarsByRangeRequest, startSlot, endSlot, curSlot uint64) error {
+	checked := uint64(0)
+	scanOver := func() bool { return ctx.Err() != nil || checked >= c.beaconConfig.MaxRequestDataColumnSidecars }
 	var responseErr error
 	for slot := startSlot; slot < endSlot; slot++ {
+		if scanOver() {
+			break
+		}
 		if slot > curSlot {
 			// slot is in the future
 			break
@@ -94,11 +106,11 @@ func (c *ConsensusHandlers) dataColumnSidecarsByRangeHandler(s network.Stream) e
 		}
 
 		req.Columns.Range(func(index int, columnIndex uint64, length int) bool {
-			if count >= int(c.beaconConfig.MaxRequestDataColumnSidecars) {
-				// max number of sidecars reached
+			if scanOver() {
 				return false
 			}
 
+			checked++
 			exists, err := c.dataColumnStorage.ColumnSidecarExists(c.ctx, slot, blockRoot, int64(columnIndex))
 			if err != nil {
 				log.Debug("failed to check if data column sidecar exists", "error", err)
@@ -133,14 +145,9 @@ func (c *ConsensusHandlers) dataColumnSidecarsByRangeHandler(s network.Stream) e
 				responseErr = err
 				return false
 			}
-			count++
 			return true
 		})
 		if responseErr != nil {
-			break
-		}
-		if count >= int(c.beaconConfig.MaxRequestDataColumnSidecars) {
-			// max number of sidecars reached
 			break
 		}
 	}
