@@ -438,25 +438,31 @@ func TestSeededRemovalAtMarkerIndexStaysAbsent(t *testing.T) {
 	require.False(t, exists)
 }
 
+// seededRemovalOfPrefundedAccount returns a version map seeded with the access list of a block in
+// which tx 0 creates and destroys the prefunded x and tx 1 re-creates it.
+func seededRemovalOfPrefundedAccount(t *testing.T) (accounts.Address, *accountStateReader, *VersionMap) {
+	t.Helper()
+	x := accounts.InternAddress(common.HexToAddress("0x5a1e"))
+	baseAcc := accounts.NewAccount()
+	baseAcc.Balance = *uint256.NewInt(5)
+	reader := &accountStateReader{accounts: map[accounts.Address]*accounts.Account{x: &baseAcc}}
+	vm := NewVersionMap(types.BlockAccessList{{
+		Address:        x.Value(),
+		BalanceChanges: []*types.BalanceChange{{Index: 1, Value: uint256.Int{}}},
+		NonceChanges:   []*types.NonceChange{{Index: 2, Value: 1}},
+		CodeChanges:    []*types.CodeChange{{Index: 2, Bytecode: []byte{0x00}}},
+	}})
+	vm.SeedAddresses()
+	require.NoError(t, vm.SeedEmptyRemovals(true, false, reader))
+	return x, reader, vm
+}
+
 // Tx 0 creates and destroys the prefunded x, tx 1 re-creates it. Tx 1 reads x while the
 // removal is still the seeded Done cell, then tx 0 flushes its own removal (Estimate) before
 // tx 1 asks for the account: x must stay absent, so the re-creation pays for a new account.
 func TestDestructObservedBeforeItsInFlightFlushKeepsTheAccountAbsent(t *testing.T) {
 	t.Parallel()
-	x := accounts.InternAddress(common.HexToAddress("0x5a1e"))
-	baseAcc := accounts.NewAccount()
-	baseAcc.Balance = *uint256.NewInt(5)
-	reader := &accountStateReader{accounts: map[accounts.Address]*accounts.Account{x: &baseAcc}}
-	bal := types.BlockAccessList{{
-		Address:        x.Value(),
-		BalanceChanges: []*types.BalanceChange{{Index: 1, Value: uint256.Int{}}},
-		NonceChanges:   []*types.NonceChange{{Index: 2, Value: 1}},
-		CodeChanges:    []*types.CodeChange{{Index: 2, Bytecode: []byte{0x00}}},
-	}}
-	vm := NewVersionMap(bal)
-	vm.SeedAddresses()
-	require.NoError(t, vm.SeedEmptyRemovals(true, false, reader))
-
+	x, reader, vm := seededRemovalOfPrefundedAccount(t)
 	ibs := NewWithVersionMap(reader, vm)
 	defer ibs.Close()
 	ibs.SetTxContext(1, 1)
@@ -489,20 +495,7 @@ func TestCreditAfterObservedDestructCreatesAFreshAccount(t *testing.T) {
 	t.Parallel()
 	for _, materialize := range []bool{true, false} {
 		t.Run(fmt.Sprintf("materialize=%v", materialize), func(t *testing.T) {
-			x := accounts.InternAddress(common.HexToAddress("0x5a1e"))
-			baseAcc := accounts.NewAccount()
-			baseAcc.Balance = *uint256.NewInt(5)
-			reader := &accountStateReader{accounts: map[accounts.Address]*accounts.Account{x: &baseAcc}}
-			bal := types.BlockAccessList{{
-				Address:        x.Value(),
-				BalanceChanges: []*types.BalanceChange{{Index: 1, Value: uint256.Int{}}},
-				NonceChanges:   []*types.NonceChange{{Index: 2, Value: 1}},
-				CodeChanges:    []*types.CodeChange{{Index: 2, Bytecode: []byte{0x00}}},
-			}}
-			vm := NewVersionMap(bal)
-			vm.SeedAddresses()
-			require.NoError(t, vm.SeedEmptyRemovals(true, false, reader))
-
+			x, reader, vm := seededRemovalOfPrefundedAccount(t)
 			ibs := NewWithVersionMap(reader, vm)
 			defer ibs.Close()
 			ibs.noMaterialize = !materialize
