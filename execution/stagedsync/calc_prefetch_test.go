@@ -19,6 +19,7 @@ package stagedsync
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -31,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -247,4 +249,76 @@ func TestCalculatorRootSameWithFirstTouchBaseCache(t *testing.T) {
 	want := root(false)
 	require.NotEmpty(t, want)
 	require.Equal(t, want, root(true))
+}
+
+type blockingBranchContext struct {
+	entered chan<- struct{}
+	release <-chan struct{}
+}
+
+func (c *blockingBranchContext) Branch([]byte) ([]byte, kv.Step, error) {
+	c.entered <- struct{}{}
+	<-c.release
+	return nil, 0, nil
+}
+func (*blockingBranchContext) PutBranch([]byte, []byte, []byte) error { return nil }
+func (*blockingBranchContext) Account([]byte) (*commitment.Update, error) {
+	return nil, nil
+}
+func (*blockingBranchContext) Storage([]byte) (*commitment.Update, error) {
+	return nil, nil
+}
+
+// A worker stuck on one key must not hold up the fold; the fold reads queued keys itself.
+func TestFinishPrefetchDoesNotDrainTheQueue(t *testing.T) {
+	entered, release := make(chan struct{}, 2), make(chan struct{})
+	released := false
+	defer func() {
+		if !released {
+			close(release)
+		}
+	}()
+	prefetch := commitment.NewWarmuper(context.Background(), commitment.WarmupConfig{
+		Enabled:    true,
+		NumWorkers: 1,
+		MaxDepth:   commitment.WarmupMaxDepth,
+		LogPrefix:  "test",
+		CtxFactory: func(context.Context) (commitment.PatriciaContext, func()) {
+			return &blockingBranchContext{entered: entered, release: release}, nil
+		},
+	})
+	prefetch.Start()
+	key := make([]byte, 64)
+	prefetch.WarmKey(key, 0, 0)
+	<-entered
+	prefetch.WarmKey(key, 0, 0)
+
+	cc := &commitmentCalculator{prefetch: prefetch}
+	finished := make(chan func(), 1)
+	go func() { finished <- cc.finishPrefetch() }()
+	var join func()
+	select {
+	case join = <-finished:
+	case <-time.After(5 * time.Second):
+		t.Fatal("finishPrefetch waited for a queued key")
+	}
+	require.Nil(t, cc.prefetch)
+
+	joined := make(chan struct{})
+	go func() {
+		join()
+		close(joined)
+	}()
+	select {
+	case <-joined:
+		t.Fatal("join returned while a prefetch worker was still reading")
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(release)
+	released = true
+	select {
+	case <-joined:
+	case <-time.After(5 * time.Second):
+		t.Fatal("join did not return after the worker finished")
+	}
 }
