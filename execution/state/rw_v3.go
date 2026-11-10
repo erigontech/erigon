@@ -165,10 +165,12 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 		for addr := range perAddr {
 			addrs = append(addrs, addr)
 		}
-		slices.SortFunc(addrs, func(a, b accounts.Address) int {
-			av, bv := a.Value(), b.Value()
-			return bytes.Compare(av[:], bv[:])
-		})
+		if dbg.TraceApply {
+			slices.SortFunc(addrs, func(a, b accounts.Address) int {
+				av, bv := a.Value(), b.Value()
+				return bytes.Compare(av[:], bv[:])
+			})
+		}
 
 		for _, addr := range addrs {
 			d := perAddr[addr]
@@ -233,11 +235,13 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 				// overlay it on the current state. Self-destruct is the exception:
 				// its base stays empty so cleared fields cannot be resurrected.
 				acc := accounts.NewAccount()
+				var prev []byte
 				if !d.selfDestruct {
 					v, _, err := domains.GetLatest(kv.AccountsDomain, roTx, address[:])
 					if err != nil {
 						return err
 					}
+					prev = v
 					if len(v) > 0 {
 						if err := accounts.DeserialiseV3(&acc, v); err != nil {
 							return err
@@ -262,7 +266,7 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 					fmt.Printf("%d apply:put account: %x balance:%s,nonce:%d,codehash:%x\n", blockNum, addr, acc.Balance.String(), acc.Nonce, acc.CodeHash)
 				}
 				enc := accounts.SerialiseV3(&acc)
-				if err := domains.DomainPut(kv.AccountsDomain, roTx, address[:], enc, txNum, nil); err != nil {
+				if err := domains.DomainPut(kv.AccountsDomain, roTx, address[:], enc, txNum, prev); err != nil {
 					return err
 				}
 			}
@@ -630,7 +634,7 @@ func (rs *StateV3) NotifyAccumulator(accumulator *shards.Accumulator, roTx kv.Te
 		return nil
 	}
 
-	latest := make(map[accounts.Address]accounts.Account)
+	latest := make(map[accounts.Address]accounts.Account, len(blockWrites))
 	account := func(addr accounts.Address) (accounts.Account, error) {
 		if acc, ok := latest[addr]; ok {
 			return acc, nil
@@ -648,6 +652,21 @@ func (rs *StateV3) NotifyAccumulator(accumulator *shards.Accumulator, roTx kv.Te
 		}
 		latest[addr] = acc
 		return acc, nil
+	}
+
+	// Every call for an address carries its final state, so a repeat would change nothing.
+	changed := make(map[accounts.Address]struct{}, len(blockWrites))
+	changeAccount := func(addr accounts.Address) error {
+		if _, ok := changed[addr]; ok {
+			return nil
+		}
+		changed[addr] = struct{}{}
+		acc, err := account(addr)
+		if err != nil {
+			return err
+		}
+		accumulator.ChangeAccount(addr.Value(), acc.Incarnation, accounts.SerialiseV3(&acc))
+		return nil
 	}
 
 	for _, writes := range blockWrites {
@@ -673,18 +692,14 @@ func (rs *StateV3) NotifyAccumulator(accumulator *shards.Accumulator, roTx kv.Te
 			}
 		}
 		for addr := range keys.Balances() {
-			acc, err := account(addr)
-			if err != nil {
+			if err := changeAccount(addr); err != nil {
 				return err
 			}
-			accumulator.ChangeAccount(addr.Value(), acc.Incarnation, accounts.SerialiseV3(&acc))
 		}
 		for addr := range keys.Nonces() {
-			acc, err := account(addr)
-			if err != nil {
+			if err := changeAccount(addr); err != nil {
 				return err
 			}
-			accumulator.ChangeAccount(addr.Value(), acc.Incarnation, accounts.SerialiseV3(&acc))
 		}
 	}
 	return nil

@@ -7,7 +7,7 @@ replace github.com/holiman/bloomfilter/v2 => github.com/AskAlexSharov/bloomfilte
 require (
 	github.com/erigontech/evmone_precompiles v0.0.0-20261020072006-fc5972e25a08
 	github.com/erigontech/fastkeccak v0.1.1-0.20260408010752-08e7b6602268
-	github.com/erigontech/mdbx-go v0.43.0
+	github.com/erigontech/mdbx-go v0.43.1
 	github.com/erigontech/secp256k1 v1.4.1
 )
 
@@ -76,7 +76,6 @@ require (
 	github.com/maypok86/otter/v2 v2.4.0
 	github.com/miekg/dns v1.1.73
 	github.com/multiformats/go-multiaddr v0.16.1
-	github.com/nyaosorg/go-windows-shortcut v0.0.0-20220529122037-8b0c89bca4c4
 	github.com/pelletier/go-toml/v2 v2.4.3
 	github.com/pion/stun/v3 v3.1.7
 	github.com/prometheus/client_golang v1.25.0

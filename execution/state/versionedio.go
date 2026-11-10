@@ -8,9 +8,11 @@ import (
 	"fmt"
 	"iter"
 	"maps"
+	"runtime"
 	"slices"
 	"strconv"
 	"sync"
+	"sync/atomic"
 
 	g "github.com/anacrolix/generics"
 	"github.com/heimdalr/dag"
@@ -722,9 +724,13 @@ func (h WriteHeader) Deletes() bool { return h.valStatus == ValueDeleted }
 // step of an intra-tx oscillation.
 type VersionedWrite[T any] struct {
 	WriteHeader
-	Val  T
-	orig T
+	Val   T
+	orig  T
+	cell  *WriteCell[T]
+	entry *AddressEntry
 }
+
+func (w *VersionedWrite[T]) bind(e *AddressEntry, c *WriteCell[T]) { w.cell, w.entry = c, e }
 
 func cloneVW[T any](w *VersionedWrite[T]) *VersionedWrite[T] {
 	c := *w
@@ -783,22 +789,27 @@ func getVWStorage() *VersionedWrite[uint256.Int] {
 	return vwPoolStorage.Get().(*VersionedWrite[uint256.Int])
 }
 
+func putVW[T any](pool *sync.Pool, vw *VersionedWrite[T]) {
+	vw.cell, vw.entry = nil, nil
+	pool.Put(vw)
+}
+
 func releaseVWAddress(vw *VersionedWrite[*accounts.Account]) {
 	vw.Val = nil // unpin
-	vwPoolAddress.Put(vw)
+	putVW(&vwPoolAddress, vw)
 }
-func releaseVWBalance(vw *VersionedWrite[uint256.Int]) { vwPoolBalance.Put(vw) }
-func releaseVWNonce(vw *VersionedWrite[uint64])        { vwPoolNonce.Put(vw) }
-func releaseVWIncarnation(vw *VersionedWrite[uint64])  { vwPoolIncarnation.Put(vw) }
-func releaseVWSelfDestruct(vw *VersionedWrite[bool])   { vwPoolSelfDestruct.Put(vw) }
-func releaseVWCreateContract(vw *VersionedWrite[bool]) { vwPoolCreateContract.Put(vw) }
+func releaseVWBalance(vw *VersionedWrite[uint256.Int]) { putVW(&vwPoolBalance, vw) }
+func releaseVWNonce(vw *VersionedWrite[uint64])        { putVW(&vwPoolNonce, vw) }
+func releaseVWIncarnation(vw *VersionedWrite[uint64])  { putVW(&vwPoolIncarnation, vw) }
+func releaseVWSelfDestruct(vw *VersionedWrite[bool])   { putVW(&vwPoolSelfDestruct, vw) }
+func releaseVWCreateContract(vw *VersionedWrite[bool]) { putVW(&vwPoolCreateContract, vw) }
 func releaseVWCode(vw *VersionedWrite[accounts.Code]) {
 	vw.Val = accounts.Code{} // unpin bytecode
-	vwPoolCode.Put(vw)
+	putVW(&vwPoolCode, vw)
 }
-func releaseVWCodeHash(vw *VersionedWrite[accounts.CodeHash]) { vwPoolCodeHash.Put(vw) }
-func releaseVWCodeSize(vw *VersionedWrite[int])               { vwPoolCodeSize.Put(vw) }
-func releaseVWStorage(vw *VersionedWrite[uint256.Int])        { vwPoolStorage.Put(vw) }
+func releaseVWCodeHash(vw *VersionedWrite[accounts.CodeHash]) { putVW(&vwPoolCodeHash, vw) }
+func releaseVWCodeSize(vw *VersionedWrite[int])               { putVW(&vwPoolCodeSize, vw) }
+func releaseVWStorage(vw *VersionedWrite[uint256.Int])        { putVW(&vwPoolStorage, vw) }
 
 // Slabs double from a small first one, so a path that writes a handful of cells
 // buys a handful and a path that writes thousands still amortizes. A reusing set
@@ -2076,7 +2087,7 @@ func (vr *versionedStateReader) HasAccount(address common.Address) (bool, error)
 func versionedUpdateAddress(vm *VersionMap, addr accounts.Address, txIndex int) (*accounts.Account, bool) {
 	val, res, ok := vm.ReadAddress(addr, txIndex)
 	if ok && res.Status() != MVReadResultNone {
-		if res.accSource == AccountFromBAL {
+		if res.accSource() == AccountFromBAL {
 			return nil, false
 		}
 		return val, true
@@ -2880,17 +2891,21 @@ func (b *BlockAccessListBuilder) Add(txIndex int, rs ReadSet, writes *WriteSet) 
 				account.applyWriteStorage(key, w.Val, w.Version.blockAccessIndex())
 			}
 		}
-		// EIP-7928 requires every touched address to appear; a sweep over the
-		// full address union covers the paths the value-carrying loops above
-		// didn't already register.
-		for addr := range writes.addrs() {
+		// EIP-7928 requires every touched address to appear; these paths carry
+		// no value the loops above record.
+		registerAddrs(ac, writes.address)
+		registerAddrs(ac, writes.incarnation)
+		registerAddrs(ac, writes.selfDestruct)
+		registerAddrs(ac, writes.codeHash)
+		registerAddrs(ac, writes.codeSize)
+		for addr, w := range writes.createContract {
 			if addr.IsNil() {
 				continue
 			}
 			account := ensureAccountState(ac, addr)
 			// A contract created this block has empty pre-block code; applyToCode
 			// uses this to drop a net-zero empty code change.
-			if vw, ok := writes.GetCreateContract(addr); ok && vw.Val {
+			if w.Val {
 				account.initialCodeEmpty = true
 			}
 		}
@@ -2931,10 +2946,51 @@ func (b *BlockAccessListBuilder) Build() types.BlockAccessList {
 	bal := make(types.BlockAccessList, 0, len(keys))
 	for _, k := range keys {
 		k.account.finalize()
-		k.account.changes.Normalize()
 		bal = append(bal, k.account.changes)
 	}
 	return bal
+}
+
+const matchesPerWorker = 4096
+
+func (b *BlockAccessListBuilder) Matches(bal types.BlockAccessList) bool {
+	if len(bal) != len(b.ac) {
+		return false
+	}
+	for i := 1; i < len(bal); i++ {
+		if bytes.Compare(bal[i-1].Address[:], bal[i].Address[:]) >= 0 {
+			return false
+		}
+	}
+	match := func(from, to int) bool {
+		for i := from; i < to; i++ {
+			account, ok := b.ac[accounts.InternAddress(bal[i].Address)]
+			if !ok {
+				return false
+			}
+			account.finalize()
+			if !account.changes.Equal(&bal[i]) {
+				return false
+			}
+		}
+		return true
+	}
+	workers := min(runtime.GOMAXPROCS(0), len(bal)/matchesPerWorker)
+	if workers < 2 {
+		return match(0, len(bal))
+	}
+	var mismatch atomic.Bool
+	var wg sync.WaitGroup
+	step := (len(bal) + workers - 1) / workers
+	for from := 0; from < len(bal); from += step {
+		wg.Go(func() {
+			if !match(from, min(from+step, len(bal))) {
+				mismatch.Store(true)
+			}
+		})
+	}
+	wg.Wait()
+	return !mismatch.Load()
 }
 
 type accountState struct {
@@ -2962,6 +3018,7 @@ func (account *accountState) finalize() {
 	applyToBalance(&account.balance, &account.changes, account.initialBalanceValue)
 	applyToNonce(&account.nonce, &account.changes)
 	applyToCode(&account.code, &account.changes, account.initialCodeEmpty)
+	account.changes.Normalize()
 }
 
 type fieldTracker[T any] struct {
@@ -3048,6 +3105,14 @@ func (ct *changeTracker[T]) apply(applyFn func(uint32, T)) {
 
 	for _, idx := range indices {
 		applyFn(idx, ct.entries[idx])
+	}
+}
+
+func registerAddrs[V any](ac map[accounts.Address]*accountState, writes map[accounts.Address]V) {
+	for addr := range writes {
+		if !addr.IsNil() {
+			ensureAccountState(ac, addr)
+		}
 	}
 }
 

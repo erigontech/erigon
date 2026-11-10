@@ -91,6 +91,70 @@ func adjustBlockPrune(blocks, minBlocksToDownload uint64) uint64 {
 	return blocks - blocks%snaptype.Erigon2MergeLimit
 }
 
+// isBlobSidecarFile matches blob sidecar segments and their index, which is named after
+// the index (blocksidecars), not the segment type.
+func isBlobSidecarFile(name string) bool {
+	return strings.Contains(name, snaptype.BlobSidecars.Name()) || strings.Contains(name, snaptype.CaplinIndexes.BlobSidecarSlot.Name)
+}
+
+// BlobRetention bounds the blob sidecar snapshots a bounded blob archive downloads.
+type BlobRetention struct {
+	SnapshotDir string
+	// FromSlot is the first slot the archive keeps; zero keeps every segment.
+	FromSlot uint64
+	// ServeWindowSlots is the spec blob-serving window plus one epoch of rounding slack. It is
+	// kept whatever FromSlot says, because the backfill never fills below the frozen blob tip.
+	ServeWindowSlots uint64
+}
+
+// downloadFloor returns the slot below which blob segments are skipped. The wall clock is not
+// known here, but it is at or past the newest preverified blob segment, so measuring the serving
+// window back from that segment's end never skips a slot the node still has to serve.
+func (r BlobRetention) downloadFloor(items snapcfg.PreverifiedItems) (uint64, error) {
+	if r.FromSlot == 0 {
+		return 0, nil
+	}
+	var tip uint64
+	for _, p := range items {
+		if !isBlobSidecarFile(p.Name) {
+			continue
+		}
+		if info, _, ok := snaptype.ParseFileName("", p.Name); ok {
+			tip = max(tip, info.To)
+		}
+	}
+	if tip <= r.ServeWindowSlots {
+		return 0, nil
+	}
+	floor := min(r.FromSlot, tip-r.ServeWindowSlots)
+	segments, err := snaptype.Segments(r.SnapshotDir)
+	if err != nil {
+		return 0, err
+	}
+	for i := range segments {
+		if segments[i].Type.Enum() == snaptype.BlobSidecars.Enum() {
+			floor = min(floor, segments[i].From)
+		}
+	}
+	return floor, nil
+}
+
+// skipBlobDownload reports whether a preverified file is a blob segment or index the node does
+// not download: every one when blobs are not archived, else those below floor.
+func skipBlobDownload(name string, blobs bool, floor uint64) bool {
+	return isBlobSidecarFile(name) && (!blobs || blobSegmentBelow(name, floor))
+}
+
+// blobSegmentBelow reports whether a blob sidecar segment ends at or before floor,
+// so it holds nothing a bounded blob archive keeps.
+func blobSegmentBelow(name string, floor uint64) bool {
+	if floor == 0 {
+		return false
+	}
+	info, _, ok := snaptype.ParseFileName("", name)
+	return ok && info.To <= floor
+}
+
 func isStateSnapshot(name string) bool {
 	return isStateHistory(name) || strings.HasPrefix(name, "domain")
 }
@@ -221,6 +285,7 @@ func getMinimumBlocksToDownload(
 	minHistoryStep = kv.Step(math.MaxUint32)
 	minCommitmentHistoryStep = kv.Step(math.MaxUint32)
 	minReceiptsStep = kv.Step(math.MaxUint32)
+	resumedBlockStep := kv.Step(math.MaxUint32)
 	stateTxNum := maxStateStep * stepSize
 	if err := blockReader.IterateFrozenBodies(tx, func(blockNum, baseTxNum, txAmount uint64) error {
 		if iterations%1e6 == 0 {
@@ -241,6 +306,9 @@ func getMinimumBlocksToDownload(
 		if stateTxNum <= baseTxNum { // only consider the block if it
 			return nil
 		}
+		if stateTxNum < baseTxNum+txAmount {
+			resumedBlockStep = stepAtTxNum(baseTxNum, stepSize)
+		}
 		newMinToDownload := uint64(0)
 		if frozenBlocks > blockNum {
 			newMinToDownload = frozenBlocks - blockNum
@@ -259,6 +327,9 @@ func getMinimumBlocksToDownload(
 	minHistoryStep = clearUnsetStep(minHistoryStep)
 	minCommitmentHistoryStep = clearUnsetStep(minCommitmentHistoryStep)
 	minReceiptsStep = clearUnsetStep(minReceiptsStep)
+	// Execution resumes inside the block that the state files end in and replays the block's
+	// first transactions from history.
+	minHistoryStep = min(minHistoryStep, resumedBlockStep)
 
 	return frozenBlocks - minToDownload, minHistoryStep, minCommitmentHistoryStep, minReceiptsStep, nil
 }
@@ -400,6 +471,7 @@ func SyncSnapshots(
 	ctx context.Context,
 	logPrefix, task string,
 	headerchain, blobs, caplinState bool,
+	blobRetention BlobRetention,
 	prune prune.Mode,
 	caplin CaplinMode,
 	tx kv.RwTx,
@@ -509,19 +581,32 @@ func SyncSnapshots(
 			unblackListFilesBySubstring(blackListForPruning, kv.LogAddrIdx.String(), kv.LogTopicIdx.String())
 		}
 
+		blobFloor := uint64(0)
+		if !headerchain && blobs && caplin != NoCaplin {
+			var err error
+			blobFloor, err = blobRetention.downloadFloor(preverifiedBlockSnapshots.Items)
+			if err != nil {
+				return err
+			}
+			if blobFloor > 0 {
+				log.Info(fmt.Sprintf("[%s] Filtering old blob sidecar segments", logPrefix), "fromSlot", blobRetention.FromSlot, "floor", blobFloor)
+			}
+		}
+
 		// build all download requests
 		for _, p := range preverifiedBlockSnapshots.Items {
-			if caplin == NoCaplin && (strings.Contains(p.Name, "beaconblocks") || strings.Contains(p.Name, "blobsidecars") || strings.Contains(p.Name, "caplin")) {
+			isCaplinFile := strings.Contains(p.Name, "beaconblocks") || isBlobSidecarFile(p.Name) || strings.Contains(p.Name, "caplin")
+			if caplin == NoCaplin && isCaplinFile {
 				continue
 			}
-			if caplin == OnlyCaplin && !strings.Contains(p.Name, "beaconblocks") && !strings.Contains(p.Name, "blobsidecars") && !strings.Contains(p.Name, "caplin") {
+			if caplin == OnlyCaplin && !isCaplinFile {
 				continue
 			}
 
 			if isStateSnapshot(p.Name) && blockReader.FreezingCfg().DisableDownloadE3 {
 				continue
 			}
-			if !blobs && strings.Contains(p.Name, snaptype.BlobSidecars.Name()) {
+			if skipBlobDownload(p.Name, blobs, blobFloor) {
 				continue
 			}
 			if !caplinState && strings.Contains(p.Name, "caplin/") {

@@ -52,6 +52,7 @@ var blocksByRangeTopic = communication.BeaconBlocksByRangeProtocolV2 + "," + com
 
 var (
 	ErrInvalidResponse             = errors.New("invalid peer response")
+	errTooManyChunks               = errors.New("response contains more chunks than requested")
 	errBlockForkSchemaSlotMismatch = errors.New("block schema fork disagrees with the fork implied by its slot")
 )
 
@@ -97,12 +98,14 @@ func NewBeaconRpcP2P(ctx context.Context, sentinel sentinelproto.SentinelClient,
 	return rpc
 }
 
+// MaxRequestPayloads is at most what one buffered response holds, so a spec-valid response always fits.
 func (b *BeaconRpcP2P) MaxRequestPayloads() uint64 {
-	return b.beaconConfig.MaxRequestPayloadsLimit()
+	return min(b.beaconConfig.MaxRequestPayloadsLimit(), httpreqresp.MaxResponseChunks)
 }
 
-func (b *BeaconRpcP2P) sendBlocksRequest(ctx context.Context, topic string, reqData []byte, maxResponseBytes uint64) ([]*cltypes.SignedBeaconBlock, string, error) {
-	responses, pid, err := b.sendRequest(ctx, topic, reqData, maxResponseBytes)
+func (b *BeaconRpcP2P) sendBlocksRequest(ctx context.Context, topic string, reqData []byte, maxResponseBytes, maxChunks uint64) ([]*cltypes.SignedBeaconBlock, string, error) {
+	responses, pid, err := b.sendRequest(ctx, topic, reqData, maxResponseBytes, maxChunks)
+	b.banExcessChunks(ctx, pid, err)
 	if err != nil {
 		return nil, pid, err
 	}
@@ -111,8 +114,8 @@ func (b *BeaconRpcP2P) sendBlocksRequest(ctx context.Context, topic string, reqD
 }
 
 func (b *BeaconRpcP2P) decodeBlocks(ctx context.Context, responses []responseData, pid string) ([]*cltypes.SignedBeaconBlock, error) {
-	responsePacket := []*cltypes.SignedBeaconBlock{}
-	for _, data := range responses {
+	responsePacket := make([]*cltypes.SignedBeaconBlock, len(responses))
+	for i, data := range responses {
 		responseChunk := cltypes.NewSignedBeaconBlock(b.beaconConfig, data.version)
 		if err := responseChunk.DecodeSSZ(data.raw, int(data.version)); err != nil {
 			return nil, err
@@ -121,25 +124,26 @@ func (b *BeaconRpcP2P) decodeBlocks(ctx context.Context, responses []responseDat
 			b.BanPeerForInvalidData(ctx, pid)
 			return nil, fmt.Errorf("%w: slot %d, decoded version %s", errBlockForkSchemaSlotMismatch, responseChunk.Block.Slot, responseChunk.Version())
 		}
-		responsePacket = append(responsePacket, responseChunk)
+		responsePacket[i] = responseChunk
 	}
 
 	return responsePacket, nil
 }
 
-func (b *BeaconRpcP2P) sendBlobsSidecar(ctx context.Context, topic string, reqData []byte, maxResponseBytes uint64) ([]*cltypes.BlobSidecar, string, error) {
-	responses, pid, err := b.sendRequest(ctx, topic, reqData, maxResponseBytes)
+func (b *BeaconRpcP2P) sendBlobsSidecar(ctx context.Context, topic string, reqData []byte, maxResponseBytes, maxChunks uint64) ([]*cltypes.BlobSidecar, string, error) {
+	responses, pid, err := b.sendRequest(ctx, topic, reqData, maxResponseBytes, maxChunks)
+	b.banExcessChunks(ctx, pid, err)
 	if err != nil {
 		return nil, pid, err
 	}
 
-	responsePacket := []*cltypes.BlobSidecar{}
-	for _, data := range responses {
+	responsePacket := make([]*cltypes.BlobSidecar, len(responses))
+	for i, data := range responses {
 		responseChunk := &cltypes.BlobSidecar{}
 		if err := responseChunk.DecodeSSZ(data.raw, int(data.version)); err != nil {
 			return nil, pid, err
 		}
-		responsePacket = append(responsePacket, responseChunk)
+		responsePacket[i] = responseChunk
 	}
 
 	return responsePacket, pid, nil
@@ -174,20 +178,17 @@ func (b *BeaconRpcP2P) SendColumnSidecarsByRootIdentifierReqWithSnapshot(
 
 	data := buffer.Bytes()
 	maxResponseBytes := communication.MaxWireResponseBytes(b.columnSidecarRawBytes(), requestedColumnCount)
-	responsePacket, pid, err := b.sendRequestWithPeer(ctx, communication.DataColumnSidecarsByRootProtocolV1, data, pid, maxResponseBytes)
+	responsePacket, pid, err := b.sendRequestWithPeer(ctx, communication.DataColumnSidecarsByRootProtocolV1, data, pid, maxResponseBytes, requestedColumnCount)
+	b.banExcessChunks(ctx, pid, err)
 	if err != nil {
 		return nil, pid, filteredReq, err
 	}
 	if len(responsePacket) == 0 {
 		b.columnDataPeers.coolDown(pid)
 	}
-	if uint64(len(responsePacket)) > requestedColumnCount {
-		b.BanPeerForInvalidData(ctx, pid)
-		return nil, pid, filteredReq, fmt.Errorf("response count %d exceeds requested column count %d", len(responsePacket), requestedColumnCount)
-	}
 
-	ColumnSidecars := []*cltypes.DataColumnSidecar{}
-	for _, data := range responsePacket {
+	ColumnSidecars := make([]*cltypes.DataColumnSidecar, len(responsePacket))
+	for i, data := range responsePacket {
 		columnSidecar := &cltypes.DataColumnSidecar{}
 		if err := columnSidecar.DecodeSSZ(data.raw, int(data.version)); err != nil {
 			return nil, pid, filteredReq, err
@@ -210,7 +211,7 @@ func (b *BeaconRpcP2P) SendColumnSidecarsByRootIdentifierReqWithSnapshot(
 			b.BanPeerForInvalidData(ctx, pid)
 			return nil, pid, filteredReq, fmt.Errorf("column sidecar fork digest %x disagrees with slot %d fork digest %x", data.forkDigest, slot, expectedForkDigest)
 		}
-		ColumnSidecars = append(ColumnSidecars, columnSidecar)
+		ColumnSidecars[i] = columnSidecar
 	}
 
 	return ColumnSidecars, pid, filteredReq, nil
@@ -296,7 +297,7 @@ func (b *BeaconRpcP2P) SendBlobsSidecarByIdentifierReq(ctx context.Context, req 
 	}
 
 	data := buffer.Bytes()
-	blobs, pid, err := b.sendBlobsSidecar(ctx, communication.BlobSidecarByRootProtocolV1, data, communication.MaxWireResponseBytes(blobSidecarRawBytes(), uint64(req.Len())))
+	blobs, pid, err := b.sendBlobsSidecar(ctx, communication.BlobSidecarByRootProtocolV1, data, communication.MaxWireResponseBytes(blobSidecarRawBytes(), uint64(req.Len())), uint64(req.Len()))
 	if err != nil {
 		if strings.Contains(err.Error(), "invalid request") {
 			b.BanPeer(pid)
@@ -317,7 +318,7 @@ func (b *BeaconRpcP2P) SendBlobsSidecarByRangerReq(ctx context.Context, start, c
 	}
 
 	data := buffer.Bytes()
-	return b.sendBlobsSidecar(ctx, communication.BlobSidecarByRangeProtocolV1, data, communication.MaxWireResponseBytes(blobSidecarRawBytes(), count*b.beaconConfig.MaxBlobsPerBlockUpperBound()))
+	return b.sendBlobsSidecar(ctx, communication.BlobSidecarByRangeProtocolV1, data, communication.MaxWireResponseBytes(blobSidecarRawBytes(), count*b.beaconConfig.MaxBlobsPerBlockUpperBound()), count*b.beaconConfig.MaxBlobsPerBlockUpperBound())
 }
 
 // SendBeaconBlocksByRangeReq retrieves blocks range from beacon chain.
@@ -326,7 +327,7 @@ func (b *BeaconRpcP2P) SendBeaconBlocksByRangeReq(ctx context.Context, start, co
 	if err != nil {
 		return nil, "", err
 	}
-	return b.sendBlocksRequest(ctx, blocksByRangeTopic, data, communication.MaxWireResponseBytes(int(clparams.MaxPayloadSize), count))
+	return b.sendBlocksRequest(ctx, blocksByRangeTopic, data, communication.MaxWireResponseBytes(int(clparams.MaxPayloadSize), count), count)
 }
 
 // SendBeaconBlocksByRangeReqToPeer retrieves a blocks range from the given peer only.
@@ -336,6 +337,7 @@ func (b *BeaconRpcP2P) SendBeaconBlocksByRangeReqToPeer(ctx context.Context, pid
 		return nil, err
 	}
 	responses, _, err := b.sendRequestWithPeer(ctx, blocksByRangeTopic, data, pid, communication.MaxWireResponseBytes(int(clparams.MaxPayloadSize), count), count)
+	b.banExcessChunks(ctx, pid, err)
 	if err != nil {
 		return nil, err
 	}
@@ -368,7 +370,7 @@ func (b *BeaconRpcP2P) SendBeaconBlocksByRootReq(ctx context.Context, roots [][3
 	data := buffer.Bytes()
 	// Prefer v2 but accept v1 for peers that haven't upgraded yet.
 	blocksByRootTopic := communication.BeaconBlocksByRootProtocolV2 + "," + communication.BeaconBlocksByRootProtocolV1
-	return b.sendBlocksRequest(ctx, blocksByRootTopic, data, communication.MaxWireResponseBytes(int(clparams.MaxPayloadSize), uint64(len(roots))))
+	return b.sendBlocksRequest(ctx, blocksByRootTopic, data, communication.MaxWireResponseBytes(int(clparams.MaxPayloadSize), uint64(len(roots))), uint64(len(roots)))
 }
 
 // Peers retrieves peer count.
@@ -405,6 +407,13 @@ func (b *BeaconRpcP2P) banPeer(ctx context.Context, pid string) {
 	}
 }
 
+// banExcessChunks is for requests whose callers do not ban on an invalid response themselves.
+func (b *BeaconRpcP2P) banExcessChunks(ctx context.Context, pid string, err error) {
+	if errors.Is(err, errTooManyChunks) {
+		b.BanPeerForInvalidData(ctx, pid)
+	}
+}
+
 func (b *BeaconRpcP2P) BanPeerForInvalidData(ctx context.Context, pid string) {
 	if _, err := b.sentinel.BanPeerForInvalidData(ctx, &sentinelproto.Peer{Pid: pid}); err != nil {
 		log.Debug("failed to ban peer for invalid data", "pid", pid, "err", err)
@@ -419,7 +428,7 @@ type responseData struct {
 }
 
 // parseResponseData parses the response data from a sentinel message and returns the parsed response data.
-func (b *BeaconRpcP2P) parseResponseData(ctx context.Context, message *sentinelproto.ResponseData, maxChunks *uint64) ([]responseData, string, error) {
+func (b *BeaconRpcP2P) parseResponseData(ctx context.Context, message *sentinelproto.ResponseData, maxChunks uint64) ([]responseData, string, error) {
 	if message.Error {
 		rd := snappypool.Reader(bytes.NewReader(message.Data))
 		errBytes, _ := io.ReadAll(rd)
@@ -442,9 +451,9 @@ func (b *BeaconRpcP2P) parseResponseData(ctx context.Context, message *sentinelp
 			}
 			return responsePacket, message.Peer.Pid, fmt.Errorf("%w: incomplete response fork digest: %w", ErrInvalidResponse, err)
 		}
-		if maxChunks != nil && uint64(len(responsePacket)) >= *maxChunks {
+		if uint64(len(responsePacket)) >= maxChunks {
 			b.banPeer(ctx, message.Peer.Pid)
-			return responsePacket, message.Peer.Pid, fmt.Errorf("%w: response contains more chunks than requested: limit %d", ErrInvalidResponse, *maxChunks)
+			return responsePacket, message.Peer.Pid, fmt.Errorf("%w: %w: limit %d", ErrInvalidResponse, errTooManyChunks, maxChunks)
 		}
 		// Read varint for length of message.
 		encodedLn, err := ssz_snappy.ReadUvarint(r)
@@ -506,7 +515,7 @@ func (b *BeaconRpcP2P) sendRequest(
 	topic string,
 	reqPayload []byte,
 	maxResponseBytes uint64,
-	maxChunks ...uint64,
+	maxChunks uint64,
 ) ([]responseData, string, error) {
 	requestCtx, cancel := boundReqRespContext(ctx)
 	defer cancel()
@@ -519,7 +528,7 @@ func (b *BeaconRpcP2P) sendRequest(
 	if err != nil {
 		return nil, "", err
 	}
-	return b.parseResponseData(requestCtx, message, chunkLimit(maxChunks))
+	return b.parseResponseData(requestCtx, message, maxChunks)
 }
 
 func (b *BeaconRpcP2P) sendRequestWithPeer(
@@ -528,7 +537,7 @@ func (b *BeaconRpcP2P) sendRequestWithPeer(
 	reqPayload []byte,
 	peerId string,
 	maxResponseBytes uint64,
-	maxChunks ...uint64,
+	maxChunks uint64,
 ) ([]responseData, string, error) {
 	requestCtx, cancel := boundReqRespContext(ctx)
 	defer cancel()
@@ -542,14 +551,7 @@ func (b *BeaconRpcP2P) sendRequestWithPeer(
 	if err != nil {
 		return nil, "", err
 	}
-	return b.parseResponseData(requestCtx, message, chunkLimit(maxChunks))
-}
-
-func chunkLimit(maxChunks []uint64) *uint64 {
-	if len(maxChunks) == 0 {
-		return nil
-	}
-	return &maxChunks[0]
+	return b.parseResponseData(requestCtx, message, maxChunks)
 }
 
 func boundReqRespContext(ctx context.Context) (context.Context, context.CancelFunc) {

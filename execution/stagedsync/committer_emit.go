@@ -34,6 +34,11 @@ import (
 // no re-derivation.
 
 func (cc *commitmentCalculator) clearTouched() {
+	cc.clearFoldedKeys()
+	clear(cc.wipedAt)
+}
+
+func (cc *commitmentCalculator) clearFoldedKeys() {
 	clear(cc.touchedAccounts)
 	clear(cc.touchedStorage)
 	clear(cc.destructed)
@@ -51,6 +56,7 @@ func (cc *commitmentCalculator) accumulateTouched(writes state.WriteSetView, bas
 		cc.touchedAccounts = map[accounts.Address][]byte{}
 		cc.touchedStorage = map[accounts.Address]map[accounts.StorageKey][]byte{}
 		cc.destructed = map[accounts.Address]struct{}{}
+		cc.wipedAt = map[accounts.Address]int{}
 	}
 	for a := range writes.AccountChanges() {
 		cc.addTouchedAccount(a, base)
@@ -118,7 +124,7 @@ func (cc *commitmentCalculator) emitTouched(view *state.VersionMapView, updates 
 	for addr, hashed := range cc.touchedAccounts {
 		address := addr.Value()
 		var u commitment.Update
-		acc, ok := view.GetAccount(addr)
+		acc, ok, wasDeleted := view.GetAccount(addr)
 		if ok {
 			u = commitment.Update{
 				Flags:    commitment.BalanceUpdate | commitment.NonceUpdate | commitment.CodeUpdate,
@@ -132,8 +138,15 @@ func (cc *commitmentCalculator) emitTouched(view *state.VersionMapView, updates 
 		} else {
 			u = commitment.Update{Flags: commitment.DeleteUpdate, CodeHash: empty.CodeHash, DeleteStorageSubtree: true}
 		}
-		if _, ok := cc.destructed[addr]; ok || view.WasDestroyed(addr) {
+		if _, ok := cc.destructed[addr]; ok {
 			u.DeleteStorageSubtree = true
+		}
+		if wasDeleted {
+			at, _ := view.DestroyedAt(addr)
+			if wiped, ok := cc.wipedAt[addr]; !ok || wiped != at {
+				u.DeleteStorageSubtree = true
+			}
+			cc.wipedAt[addr] = at
 		}
 		updates.TouchPlainKeyDirectHashed(string(address[:]), hashed, &u)
 	}
