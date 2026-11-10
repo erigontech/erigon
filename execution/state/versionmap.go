@@ -174,7 +174,8 @@ func putCell[T any](vm *VersionMap, cells *btree.Map[int, *WriteCell[T]], addr a
 		if have > incarnation {
 			panic(fmt.Errorf("existing transaction value does not have lower incarnation: %x %s, %v", addr, path, txIdx))
 		}
-		if dbg.AssertEnabled && haveFlag == FlagDone && flag == FlagEstimate && ci.accSource != AccountFromBAL {
+		// On a BAL block an unsealed Done cell is a seed, which a speculative run may still change.
+		if dbg.AssertEnabled && !vm.HasBAL && haveFlag == FlagDone && flag == FlagEstimate {
 			panic(fmt.Errorf("versionMap: Done->Estimate downgrade addr=%x path=%s txIdx=%d inc %d->%d", addr, path, txIdx, have, incarnation))
 		}
 		ci.setState(incarnation, flag)
@@ -2244,6 +2245,11 @@ func (c *WriteCell[T]) mark(want Incarnation, flag statusFlag) (Incarnation, mar
 		}
 		if want >= 0 && inc > want {
 			return inc, markStale
+		}
+		// Done covers Validated, as it covers an Estimate flush (setFlagUnlessDone): a BAL-seeded
+		// cell that the tx's flush matched stays Done.
+		if f == FlagDone && flag == FlagValidated {
+			return inc, marked
 		}
 		if c.state.CompareAndSwap(old, packCellState(inc, flag)) {
 			return inc, marked
