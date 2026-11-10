@@ -321,6 +321,10 @@ func New(
 			return err
 		}
 
+		if err := rawdb.RaiseCaplinBlobsArchiveFromSlot(tx, config.CaplinConfig.BlobsArchiveFromSlot); err != nil {
+			return err
+		}
+
 		if config.KeepExecutionProofs {
 			statecfg.EnableHistoricalCommitment()
 		}

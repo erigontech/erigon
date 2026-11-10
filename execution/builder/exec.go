@@ -292,6 +292,9 @@ func getNextTransactions(
 	logger log.Logger,
 	stats *filtrationStats,
 ) ([]types.Transaction, int, error) {
+	if cfg.txnProvider == nil {
+		return nil, 0, nil
+	}
 	availableRlpSpace := cfg.builderState.BuiltBlock.AvailableRlpSpace(cfg.chainConfig)
 	remainingBlobGas := uint64(0)
 	if header.BlobGasUsed != nil {

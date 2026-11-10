@@ -161,7 +161,7 @@ func gloasGossipHandler(t *testing.T, root fs.FS, c spectest.TestCase) error {
 		return err
 	}
 	forkStore, err := forkchoice.NewForkChoiceStore(
-		clock, anchorState, forkChoiceSpectestEngine{}, pool.NewOperationsPool(cfg), forkGraph,
+		clock, anchorState, &forkChoiceSpectestEngine{}, pool.NewOperationsPool(cfg), forkGraph,
 		emitters, syncedData, blobStorage, public_keys_registry.NewInMemoryPublicKeysRegistry(),
 		validator_params.NewValidatorParams(), false, db,
 	)

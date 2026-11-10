@@ -1,6 +1,7 @@
 package das
 
 import (
+	"context"
 	"os"
 	"sync/atomic"
 	"testing"
@@ -8,6 +9,7 @@ import (
 	goethkzg "github.com/crate-crypto/go-eth-kzg"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -15,6 +17,7 @@ import (
 	peerdasstate "github.com/erigontech/erigon/cl/das/state"
 	peerdasutils "github.com/erigontech/erigon/cl/das/utils"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
+	blob_storage_mock_services "github.com/erigontech/erigon/cl/persistence/blob_storage/mock_services"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -102,6 +105,34 @@ func TestImportColumnsFromBlobsStoresCustodyColumns(t *testing.T) {
 		require.True(t, VerifyDataColumnSidecarInclusionProof(sidecar))
 		require.True(t, VerifyDataColumnSidecarKZGProofs(sidecar))
 	}
+}
+
+func TestImportColumnsFromBlobsWritesCustodyColumnsInOneBatch(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	initTestBeaconConfig(&cfg)
+	d := newELBlobsTestPeerDas(t, &cfg, &clparams.CaplinConfig{})
+	columnStorage := blob_storage_mock_services.NewMockDataColumnStorage(gomock.NewController(t))
+	d.columnStorage = columnStorage
+	block, root, blobs, proofs := elBlobsFixture(t, &cfg, 2)
+	custody, err := d.state.GetMyCustodyColumns()
+	require.NoError(t, err)
+	require.NotEmpty(t, custody)
+	require.Less(t, len(custody), int(cfg.NumberOfColumns))
+	var written []*cltypes.DataColumnSidecar
+	columnStorage.EXPECT().WriteColumnSidecarsBatch(gomock.Any(), root, gomock.Any()).
+		DoAndReturn(func(_ context.Context, _ common.Hash, sidecars []*cltypes.DataColumnSidecar) error {
+			written = sidecars
+			return nil
+		}).Times(1)
+
+	stored, err := d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs)
+	require.NoError(t, err)
+
+	require.Len(t, written, len(custody))
+	for _, sidecar := range written {
+		require.True(t, custody[sidecar.Index])
+	}
+	require.Equal(t, written, stored)
 }
 
 type statCountingFs struct {
