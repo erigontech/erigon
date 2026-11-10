@@ -2409,9 +2409,18 @@ func chargeSenderAtValidation(txTask *exec.TxTask, result *execResult, version s
 			if overflow {
 				return nil, nil, nil
 			}
-			// An absent account has no origin: a lower reader must still see it absent.
 			if recipient != nil {
 				state.SeedOrigin(vm, to, recipient)
+			} else {
+				// A later touch reads existence from these cells, like a fee credit to an absent coinbase.
+				ws.SetAddress(to, &state.VersionedWrite[*accounts.Account]{
+					WriteHeader: state.WriteHeader{Address: to, Path: state.AddressPath, Version: version},
+					Val:         &accounts.Account{Balance: credit, CodeHash: accounts.EmptyCodeHash},
+				})
+				ws.SetCodeHash(to, &state.VersionedWrite[accounts.CodeHash]{
+					WriteHeader: state.WriteHeader{Address: to, Path: state.CodeHashPath, Version: version},
+					Val:         accounts.EmptyCodeHash,
+				})
 			}
 			ws.SetBalance(to, &state.VersionedWrite[uint256.Int]{
 				WriteHeader: state.WriteHeader{Address: to, Path: state.BalancePath, Version: version, Reason: tracing.BalanceChangeTransfer},
