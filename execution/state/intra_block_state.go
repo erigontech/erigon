@@ -653,15 +653,21 @@ func (ibs *IntraBlockState) Empty(addr accounts.Address) (empty bool, err error)
 
 		return so == nil || so.deleted || so.data.Empty(), nil
 	}
+	if warmEmpty, ok := ibs.emptyFromWarmReads(addr); ok {
+		return warmEmpty, nil
+	}
 	// Existence + the self-destruct/revival gate, without reconstructing the
 	// whole account: the EIP-161 verdict needs only the current balance, nonce
 	// and code hash, read per-field below (short-circuiting), so the per-field
 	// overlay and a full-account allocation are avoided.
-	account, _, _, err := ibs.versionedAccountBase(addr, true)
+	account, source, _, err := ibs.versionedAccountBase(addr, true)
 	if err != nil {
 		return false, err
 	}
 	if account == nil {
+		if source == ReadSetRead {
+			return true, nil
+		}
 		// Do NOT call accountRead here: versionedAccountBase already recorded the
 		// AddressPath read with Val=nil. Overwriting it with a non-nil empty
 		// account would make downstream reads treat the account as existing,
@@ -699,6 +705,39 @@ func (ibs *IntraBlockState) Empty(addr accounts.Address) (empty bool, err error)
 // balance/nonce/codeHash per-field (short-circuiting on the first non-empty
 // field) instead of reconstructing the whole account. The per-field refresh
 // reads apply the same self-destruct gate as the whole-account path.
+// emptyFromWarmReads answers Empty from reads this attempt already recorded, so that a
+// repeat Empty looks each one up once. ok is false when the full path must decide: addr
+// has an own write, a read is missing, or the account read found no account (a field cell
+// can exist with no account record, so a recorded balance does not prove existence).
+func (ibs *IntraBlockState) emptyFromWarmReads(addr accounts.Address) (empty, ok bool) {
+	if !ibs.warmReadable(addr) {
+		return false, false
+	}
+	account, ok := ibs.versionedReads.GetAddress(addr)
+	if !ok || !warmSource(account.Source) || account.Val == nil || account.Val.IsNil() {
+		return false, false
+	}
+	balance, ok := ibs.versionedReads.GetBalance(addr)
+	if !ok || !warmSource(balance.Source) {
+		return false, false
+	}
+	if !balance.Val.IsZero() {
+		return false, true
+	}
+	nonce, ok := ibs.versionedReads.GetNonce(addr)
+	if !ok || !warmSource(nonce.Source) {
+		return false, false
+	}
+	if nonce.Val != 0 {
+		return false, true
+	}
+	codeHash, ok := ibs.versionedReads.GetCodeHash(addr)
+	if !ok || !warmSource(codeHash.Source) {
+		return false, false
+	}
+	return codeHash.Val == accounts.EmptyCodeHash, true
+}
+
 func (ibs *IntraBlockState) emptyFromVersionedFields(addr accounts.Address, account *accounts.Account) (bool, error) {
 	balance, _, _, err := refreshBalance(ibs, addr, account.Balance)
 	if err != nil {
@@ -1302,6 +1341,12 @@ func (ibs *IntraBlockState) readAbsentFromMap(addr accounts.Address) bool {
 	return ok && tr.Source == MapRead && (tr.Val == nil || tr.Val.Account() == nil)
 }
 
+// readAbsentFromCommitted reports whether this tx already read addr as absent from the committed state.
+func (ibs *IntraBlockState) readAbsentFromCommitted(addr accounts.Address) bool {
+	tr, ok := ibs.versionedReads.GetAddress(addr)
+	return ok && tr.Source == StorageRead && (tr.Val == nil || tr.Val.Account() == nil)
+}
+
 // readAbsent is like readAbsentFromMap, but also counts an absence read from the committed state:
 // the base reader can serve a lower tx's creation later in the attempt.
 func (ibs *IntraBlockState) readAbsent(addr accounts.Address) bool {
@@ -1341,7 +1386,10 @@ func (ibs *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 	// committed and in-block-created accounts — unless a later tx re-created it.
 	// Branch-agnostic: a burn stamps the balance ValueDeleted, so the
 	// reconstruction yields nil and this falls through.
-	if readAccount == nil {
+	// A repeat read keeps a recorded committed absence: validation rejects it if a
+	// destruct or re-creation was flushed since.
+	repeatedCommittedAbsence := readAccount == nil && source == StorageRead && ibs.readAbsentFromCommitted(addr)
+	if readAccount == nil && !repeatedCommittedAbsence {
 		if ibs.versionMap.absentAccountHook != nil {
 			ibs.versionMap.absentAccountHook()
 		}
@@ -1391,6 +1439,9 @@ func (ibs *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 			source = StorageRead
 		}
 
+		if readAccount == nil && err == nil && repeatedCommittedAbsence {
+			return nil, ReadSetRead, UnknownVersion, nil
+		}
 		if readAccount == nil || err != nil {
 			return nil, StorageRead, UnknownVersion, err
 		}
