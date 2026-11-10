@@ -94,7 +94,7 @@ func (d *Dispatcher) Dispatch(
 	finishProgressAfter uint64,
 	prevUnwindPoint *uint64,
 ) error {
-	batch, err := d.prepareStateChanges(tx, state, stateVersion, accumulator)
+	batch, err := d.prepareStateChanges(tx, state, stateVersion, finishProgressAfter, accumulator)
 	if err != nil {
 		return err
 	}
@@ -156,11 +156,12 @@ func (d *Dispatcher) Dispatch(
 
 // Preparation can fail on account reads. Complete it before publishing any events,
 // and keep recorded changes intact so a failed dispatch can be retried.
-func (d *Dispatcher) prepareStateChanges(tx kv.Tx, state kv.TemporalGetter, stateVersion uint64, accumulator *notifications.Accumulator) (*notifications.BlockBatchNotification, error) {
+func (d *Dispatcher) prepareStateChanges(tx kv.Tx, state kv.TemporalGetter, stateVersion, finishProgress uint64, accumulator *notifications.Accumulator) (*notifications.BlockBatchNotification, error) {
 	if accumulator == nil {
 		return nil, nil
 	}
-	header := rawdb.ReadCurrentHeader(tx)
+	// Head markers can lead execution. The announced head must match the supplied state.
+	header := rawdb.ReadHeaderByNumber(tx, finishProgress)
 	if header == nil {
 		return nil, nil
 	}
