@@ -80,6 +80,19 @@ func TestVerifyTorrentFilesValidPairs(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestVerifyTorrentFilesRejectsTrailingBytes(t *testing.T) {
+	dir := t.TempDir()
+	writeTorrentPair(t, dir, "test.seg", false)
+	f, err := os.OpenFile(filepath.Join(dir, "test.seg"), os.O_APPEND|os.O_WRONLY, 0o644)
+	require.NoError(t, err)
+	_, err = f.Write([]byte{0xCC})
+	require.NoError(t, err)
+	require.NoError(t, f.Close())
+
+	err = VerifyTorrentFiles(context.Background(), dir, true, log.New())
+	require.Error(t, err)
+}
+
 // Without failFast every file is still verified, but the run must report the
 // failures it collected instead of exiting as a clean verification.
 func TestVerifyTorrentFilesWithoutFailFast(t *testing.T) {
