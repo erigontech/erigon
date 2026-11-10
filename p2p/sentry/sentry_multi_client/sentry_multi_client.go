@@ -231,7 +231,7 @@ func (cs *MultiClient) receipts66(_ context.Context, _ *sentryproto.InboundMessa
 func (cs *MultiClient) getBlockHeaders66(ctx context.Context, inreq *sentryproto.InboundMessage, sentry sentryproto.SentryClient) error {
 	var query eth.GetBlockHeadersPacket66
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
-		return fmt.Errorf("decoding getBlockHeaders66: %w, data: %x", err, inreq.Data)
+		return fmt.Errorf("decoding getBlockHeaders66: %w", err)
 	}
 
 	var headers []*types.Header
@@ -316,7 +316,7 @@ func (r *balReplayRequest) close() {
 func (cs *MultiClient) getBlockAccessLists71(ctx context.Context, inreq *sentryproto.InboundMessage, sentry sentryproto.SentryClient) error {
 	var query eth.GetBlockAccessListsPacket66
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
-		return fmt.Errorf("decoding getBlockAccessLists71: %w, data: %x", err, inreq.Data)
+		return fmt.Errorf("decoding getBlockAccessLists71: %w", err)
 	}
 	// The budget covers the whole batch, not each block. Keep the parent context
 	// for sending the completed prefix after replay reaches its deadline.
@@ -362,7 +362,7 @@ func (cs *MultiClient) getBlockAccessLists71(ctx context.Context, inreq *sentryp
 func (cs *MultiClient) getBlockBodies66(ctx context.Context, inreq *sentryproto.InboundMessage, sentry sentryproto.SentryClient) error {
 	var query eth.GetBlockBodiesPacket66
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
-		return fmt.Errorf("decoding getBlockBodies66: %w, data: %x", err, inreq.Data)
+		return fmt.Errorf("decoding getBlockBodies66: %w", err)
 	}
 	tx, err := cs.db.BeginRo(ctx)
 	if err != nil {
@@ -399,7 +399,7 @@ func (cs *MultiClient) getBlockBodies66(ctx context.Context, inreq *sentryproto.
 func (cs *MultiClient) getReceipts66(ctx context.Context, inreq *sentryproto.InboundMessage, sentryClient sentryproto.SentryClient, ethVersion uint, cacheOnly bool) error {
 	var query eth.GetReceiptsPacket66
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
-		return fmt.Errorf("decoding %s: %w, data: %x", inreq.Id, err, inreq.Data)
+		return fmt.Errorf("decoding %s: %w", inreq.Id, err)
 	}
 	return cs.getReceiptsInner(ctx, inreq.PeerId, sentryClient, requestParams{
 		id:         query.RequestId,
@@ -412,7 +412,7 @@ func (cs *MultiClient) getReceipts66(ctx context.Context, inreq *sentryproto.Inb
 func (cs *MultiClient) getReceipts70(ctx context.Context, inreq *sentryproto.InboundMessage, sentryClient sentryproto.SentryClient, cacheOnly bool) error {
 	var query eth.GetReceiptsPacket70
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
-		return fmt.Errorf("decoding getReceipts70: %w, data: %x", err, inreq.Data)
+		return fmt.Errorf("decoding getReceipts70: %w", err)
 	}
 	return cs.getReceiptsInner(ctx, inreq.PeerId, sentryClient, requestParams{
 		id:                     query.RequestId,
@@ -514,7 +514,7 @@ func (cs *MultiClient) getReceiptsInner(ctx context.Context, peerId *typesproto.
 func (cs *MultiClient) blockRange69(ctx context.Context, inreq *sentryproto.InboundMessage, sentryClient sentryproto.SentryClient) error {
 	var query eth.BlockRangeUpdatePacket
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
-		return fmt.Errorf("decoding blockRange69: %w, data: %x", err, inreq.Data)
+		return fmt.Errorf("decoding blockRange69: %w", err)
 	}
 	if err := query.Validate(); err != nil {
 		cs.logger.Debug("Kick peer for invalid BlockRangeUpdate", "peer", inreq.PeerId.String(), "err", err)
