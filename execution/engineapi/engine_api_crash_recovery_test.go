@@ -73,11 +73,15 @@ func newCrashRecoveryDataDir(t *testing.T) string {
 	if runtime.GOOS == "windows" {
 		if tmpDir := os.Getenv("ERIGON_EXECUTION_TESTS_TMPDIR"); tmpDir != "" {
 			dataDir, err := os.MkdirTemp(tmpDir, "engineapi-crash-recovery-")
-			require.NoError(t, err)
-			t.Cleanup(func() {
-				require.NoError(t, os.RemoveAll(dataDir))
-			})
-			return dataDir
+			if err == nil {
+				t.Cleanup(func() {
+					if err := os.RemoveAll(dataDir); err != nil {
+						t.Errorf("remove crash-recovery datadir %q: %v", dataDir, err)
+					}
+				})
+				return dataDir
+			}
+			t.Logf("could not create crash-recovery datadir on RAM disk %q: %v; using t.TempDir()", tmpDir, err)
 		}
 	}
 	return t.TempDir()
