@@ -187,6 +187,7 @@ func testSentinelBlocksByRange(t *testing.T) {
 		Count:     blocks[len(blocks)-1].Block.Slot - blocks[0].Block.Slot + 1,
 	}
 	noErr(ssz_snappy.EncodeAndWrite(stream, req))
+	noErr(stream.CloseWrite())
 
 	code := make([]byte, 1)
 	_, err = stream.Read(code)
