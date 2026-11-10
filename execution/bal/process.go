@@ -73,6 +73,9 @@ func Process(blockBal *types.BlockAccessListSidecar, h *types.Header, built *sta
 	if built == nil {
 		built = state.NewBlockAccessListBuilder()
 	}
+	if dbg.NpStubBal && isEIP7928 && blockBal != nil {
+		return blockBal.BlockAccessList(), nil
+	}
 	if isEIP7928 && matchesSidecar(blockBal, h, built, vio) {
 		return blockBal.BlockAccessList(), nil
 	}

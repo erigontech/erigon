@@ -663,10 +663,14 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					// The apply loop is the sole sd.mem writer. Folding mid-block is safe:
 					// every cell a published tx wrote is in the versionMap, so later txs
 					// resolve it there and never read it from sd.mem.
+					dbg.NpMark("txrx")
+					npT := time.Now()
 					if !finalized && foldErr == nil {
 						foldErr = pe.foldTx(ctx, rwTx, applyResult)
 					}
-					if applyResult.txIO != nil {
+					dbg.NpAdd("fold", time.Since(npT))
+					npT = time.Now()
+					if applyResult.txIO != nil && !dbg.NpStubBal {
 						if balBuilder == nil {
 							balBuilder = state.NewBlockAccessListBuilder()
 						}
@@ -675,12 +679,14 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 							balBuilder.Add(i, applyResult.txIO.ReadSet(i), applyResult.txIO.WriteSet(i))
 						}
 					}
+					dbg.NpAdd("baladd", time.Since(npT))
 					if pe.accumulator != nil {
 						pendingAccumulatorWrites = append(pendingAccumulatorWrites, applyResult.writes)
 					}
 					blockApplyCount += writeCount
 					pe.rs.SetTrace(false)
 				case *blockResult:
+					dbg.NpMark("blockres-rx")
 					built := balBuilder
 					balBuilder = nil
 					if finalized {

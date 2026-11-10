@@ -17,13 +17,23 @@ var (
 	npMu    sync.Mutex
 	npT0    time.Time
 	npMarks []npMark
+	npSums  = map[string]time.Duration{}
+
+	NpStubBal = EnvBool("NP_STUB_BAL", false)
 )
+
+func NpAdd(name string, d time.Duration) {
+	npMu.Lock()
+	defer npMu.Unlock()
+	npSums[name] += d
+}
 
 func NpStart() {
 	npMu.Lock()
 	defer npMu.Unlock()
 	npT0 = time.Now()
 	npMarks = npMarks[:0]
+	clear(npSums)
 }
 
 func NpMark(name string) {
@@ -47,6 +57,9 @@ func NpLine() string {
 		prev = m.at
 	}
 	fmt.Fprintf(&b, "end=%.2f", float64(now.Sub(npT0).Microseconds())/1000)
+	for k, v := range npSums {
+		fmt.Fprintf(&b, " sum-%s=%.2f", k, float64(v.Microseconds())/1000)
+	}
 	npT0 = time.Time{}
 	return b.String()
 }
