@@ -29,6 +29,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -435,6 +436,10 @@ func (t *testingImpl) assembleTestingBlock(
 	}
 	if execBusy {
 		return nil, 0, errors.New("execution service is busy, cannot build block")
+	}
+	// shortcut: a dbg wait lets a large static list finish before the build is stopped, drop it with this branch.
+	if customProvider != nil {
+		time.Sleep(dbg.EnvDuration("ADV_BUILD_WAIT", 0))
 	}
 
 	var assembled execmodule.AssembledBlockResult
