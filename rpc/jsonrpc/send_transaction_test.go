@@ -373,3 +373,15 @@ func TestWaitForReceiptWithoutSubscriptionBudget(t *testing.T) {
 	require.NotNil(res.receipt)
 	require.Equal(txnHash, res.receipt.TransactionHash)
 }
+
+func TestTxSyncTimeout(t *testing.T) {
+	t.Parallel()
+	api := &APIImpl{RpcTxSyncDefaultTimeout: 20 * time.Second, RpcTxSyncMaxTimeout: time.Minute}
+	ms := func(v uint64) *uint64 { return &v }
+
+	require.Equal(t, 20*time.Second, api.txSyncTimeout(nil))
+	require.Equal(t, 20*time.Second, api.txSyncTimeout(ms(0)))
+	require.Equal(t, 5*time.Second, api.txSyncTimeout(ms(5000)))
+	require.Equal(t, time.Minute, api.txSyncTimeout(ms(60_001)))
+	require.Equal(t, time.Minute, api.txSyncTimeout(ms(10_000_000_000_000)), "overflows a Duration")
+}
