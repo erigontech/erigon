@@ -70,6 +70,10 @@ func haltError(err error) error {
 	return err
 }
 
+// setHeadRefusal is why an EEZ node refuses debug_setHead and
+// ETHBACKEND.SetHead, which would move the head behind the follower.
+const setHeadRefusal = "the EEZ follower is the chain's only driver"
+
 // errTestingAPI rejects the API that builds blocks on a follower's chain.
 var errTestingAPI = fmt.Errorf("%w: the testing API builds blocks; the follower must be the chain's only driver", eez.ErrConfig)
 
@@ -83,10 +87,12 @@ func configureFollowerNode(cfg *nodecfg.Config) error {
 }
 
 // configureFollowerEth turns off every other driver and source of the
-// chain: consensus layer, engine API, txpool and snapshot downloader.
+// chain: consensus layer, engine API, head moves on request, txpool and
+// snapshot downloader.
 func configureFollowerEth(cfg *ethconfig.Config) {
 	cfg.InternalCL = false
 	cfg.NoEngineAPI = true
+	cfg.SetHeadRefusal = setHeadRefusal
 	cfg.TxPool.Disable = true
 	cfg.Snapshot.NoDownloader = true
 }
@@ -95,8 +101,8 @@ func configureFollowerEth(cfg *ethconfig.Config) {
 // an all-in-one node runs beside the L1 chain of l1Node and l1Eth: the L1's
 // settings under eez.AllInOneDirs, with its own devp2p network
 // (configureAllInOneNetwork) and HTTP-RPC port, without private API, engine
-// API, consensus layer, txpool, downloader or MCP server, and with none of
-// the L1's chain-specific settings.
+// API, consensus layer, head moves on request, txpool, downloader or MCP
+// server, and with none of the L1's chain-specific settings.
 func allInOneConfigs(ctx context.Context, l1Node *nodecfg.Config, l1Eth *ethconfig.Config, cfg *eez.Config, logger log.Logger) (*nodecfg.Config, *ethconfig.Config, error) {
 	if slices.Contains(cfg.HTTPAPI, "testing") {
 		return nil, nil, errTestingAPI
@@ -138,6 +144,7 @@ func allInOneConfigs(ctx context.Context, l1Node *nodecfg.Config, l1Eth *ethconf
 	e.OverrideOsakaTime, e.OverrideAmsterdamTime = nil, nil
 	e.InternalCL = false
 	e.NoEngineAPI = true
+	e.SetHeadRefusal = setHeadRefusal
 	e.TxPool.Disable = true
 	e.Shutter.Enabled = false
 	e.Ethstats, e.MCPAddress = "", ""
