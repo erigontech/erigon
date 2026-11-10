@@ -177,27 +177,15 @@ func TestSelfDestructReceive(t *testing.T) {
 // account: GetCode resolves separately and can report empty while a stale code
 // hash survives on the record. A pre-block deploy leaves no in-block CodeHash
 // cell to floor the destruct scan on, so both placements run.
-//
-// The block is built by the serial or the versioned generator and imported in
-// each mode. Clearing experimentalBAL alone leaves the parallel executor running,
-// so the driver sets dbg.Exec3Parallel — which rules out t.Parallel.
 func TestSelfDestructReceiveAccountRecord(t *testing.T) {
 	for _, tc := range []struct {
 		name           string
-		parallelImport bool
 		preBlockDeploy bool
-		parallelGen    bool
 	}{
-		{"serial/same-block-deploy", false, false, false},
-		{"parallel/same-block-deploy", true, false, false},
-		{"serial/pre-block-deploy", false, true, false},
-		{"parallel/pre-block-deploy", true, true, false},
-		{"versioned-gen/same-block-deploy", false, false, true},
+		{"same-block-deploy", false},
+		{"pre-block-deploy", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			prev := dbg.Exec3Parallel
-			dbg.Exec3Parallel = tc.parallelGen
-			t.Cleanup(func() { dbg.Exec3Parallel = prev })
 			var (
 				key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 				address = accounts.InternAddress(crypto.PubkeyToAddress(key.PublicKey))
@@ -253,7 +241,6 @@ func TestSelfDestructReceiveAccountRecord(t *testing.T) {
 				contractBackend.Commit()
 			})
 			require.NoError(t, err)
-			dbg.Exec3Parallel = tc.parallelImport
 			require.NoError(t, m.InsertChain(chain.Slice(0, 3)))
 
 			require.NoError(t, m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
@@ -288,8 +275,8 @@ func shanghaiConfig() *chain.Config {
 	return c
 }
 
-// importSerialThenParallel builds n blocks with serial execution and imports
-// them into a serial node. Then, for each worker count, it imports the blocks as
+// importSerialThenParallel builds n blocks and imports them into a one-worker
+// node. Then, for each worker count, it imports the blocks as
 // one batch into a fresh parallel node.
 func importSerialThenParallel(t *testing.T, gspec *types.Genesis, key *ecdsa.PrivateKey, n int, workerCounts []int, gen func(i int, b *blockgen.BlockGen)) (*execmoduletester.ExecModuleTester, []*execmoduletester.ExecModuleTester) {
 	t.Helper()
@@ -298,7 +285,7 @@ func importSerialThenParallel(t *testing.T, gspec *types.Genesis, key *ecdsa.Pri
 		dbg.Exec3Parallel = prevParallel
 		ethconfig.Defaults.Sync.ExecWorkerCount = prevWorkers
 	})
-	dbg.Exec3Parallel = false
+	ethconfig.Defaults.Sync.ExecWorkerCount = 1
 	serial := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 	chainPack, err := serial.GenerateChain(n, gen)
 	require.NoError(t, err)

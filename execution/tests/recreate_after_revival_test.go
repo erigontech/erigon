@@ -40,13 +40,18 @@ import (
 	"github.com/erigontech/erigon/node/ethconfig"
 )
 
-// buildBlockSerially builds one block with serial execution. Each call is a tx
+// setExecWorkers sets the executor worker count for the test.
+func setExecWorkers(t *testing.T, workers int) {
+	t.Helper()
+	prev := ethconfig.Defaults.Sync.ExecWorkerCount
+	t.Cleanup(func() { ethconfig.Defaults.Sync.ExecWorkerCount = prev })
+	ethconfig.Defaults.Sync.ExecWorkerCount = workers
+}
+
+// buildBlockSerially builds one block, one tx after another. Each call is a tx
 // from its own sender.
 func buildBlockSerially(t *testing.T, gspec *types.Genesis, keys []*ecdsa.PrivateKey, coinbase common.Address, gasPrice uint64, calls []revivalCall) *blockgen.ChainPack {
 	t.Helper()
-	prevParallel := dbg.Exec3Parallel
-	defer func() { dbg.Exec3Parallel = prevParallel }()
-	dbg.Exec3Parallel = false
 	signer := types.LatestSignerForChainID(gspec.Config.ChainID)
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(keys[0]))
 	chainPack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) {

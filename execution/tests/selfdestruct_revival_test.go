@@ -93,7 +93,6 @@ func TestCreditRevivesDestroyedContract(t *testing.T) {
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			dbg.Exec3Parallel = false
 			cfg := config
 			if tc.burnt {
 				cfg = config.Copy()

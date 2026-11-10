@@ -26,7 +26,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
@@ -80,13 +79,11 @@ func baseFeePaid(chainPack *blockgen.ChainPack, i int) uint256.Int {
 	return *uint256.NewInt(chainPack.Receipts[0][i].GasUsed * chainPack.TopBlock.BaseFee().Uint64())
 }
 
-// importSerially imports the block with serial execution and checks the resulting state.
+// importSerially imports the block on one worker and checks the resulting state.
 func importSerially(t *testing.T, gspec *types.Genesis, key *ecdsa.PrivateKey, chainPack *blockgen.ChainPack, check func(t *testing.T, st *state.IntraBlockState)) {
 	t.Helper()
-	prevParallel := dbg.Exec3Parallel
-	t.Cleanup(func() { dbg.Exec3Parallel = prevParallel })
 	t.Run("serial", func(t *testing.T) {
-		dbg.Exec3Parallel = false
+		setExecWorkers(t, 1)
 		m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 		require.NoError(t, m.InsertChain(chainPack))
 		require.NoError(t, m.DB.ViewTemporal(t.Context(), func(tx kv.TemporalTx) error {

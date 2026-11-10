@@ -51,7 +51,6 @@ func TestZeroFeeCreatesCoinbaseBeforeSpuriousDragon(t *testing.T) {
 	senders := []common.Address{crypto.PubkeyToAddress(keys[0].PublicKey), crypto.PubkeyToAddress(keys[1].PublicKey)}
 	gspec := &types.Genesis{Config: config, GasLimit: 30_000_000, Alloc: alloc}
 
-	dbg.Exec3Parallel = false
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(keys[0]))
 	chainPack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) {
 		b.SetCoinbase(coinbase)

@@ -26,7 +26,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
@@ -49,24 +48,22 @@ var eip161TouchForks = func() []struct {
 	}{{"prague", prague}, {"amsterdam", amsterdam}}
 }()
 
-// generateEIP161TouchBlock builds one block with serial or versioned execution.
-// From Amsterdam on GenerateChain always runs versioned execution.
-func generateEIP161TouchBlock(t *testing.T, gspec *types.Genesis, key *ecdsa.PrivateKey, versioned bool, fill func(*blockgen.BlockGen)) *blockgen.ChainPack {
+// generateEIP161TouchBlock builds one block.
+func generateEIP161TouchBlock(t *testing.T, gspec *types.Genesis, key *ecdsa.PrivateKey, fill func(*blockgen.BlockGen)) *blockgen.ChainPack {
 	t.Helper()
-	dbg.Exec3Parallel = versioned
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 	chainPack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) { fill(b) })
 	require.NoError(t, err)
 	return chainPack
 }
 
-// importEIP161TouchBlock imports the block in serial and in parallel mode.
+// importEIP161TouchBlock imports the block with one worker and with four.
 func importEIP161TouchBlock(t *testing.T, gspec *types.Genesis, key *ecdsa.PrivateKey, chainPack *blockgen.ChainPack) {
 	t.Helper()
-	for _, parallel := range []bool{false, true} {
-		dbg.Exec3Parallel = parallel
+	for _, workers := range []int{1, 4} {
+		setExecWorkers(t, workers)
 		m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
-		require.NoError(t, m.InsertChain(chainPack), "parallel=%v", parallel)
+		require.NoError(t, m.InsertChain(chainPack), "workers=%d", workers)
 	}
 }
 
@@ -103,10 +100,9 @@ func callCode(addr common.Address, value byte) []byte {
 // authority that never existed. The touch comes after a long loop, so the
 // parallel executor usually runs the authorization first and must invalidate it.
 func TestTouchedEmptyAuthorityIsAbsentForLaterTx(t *testing.T) {
-	// This test changes dbg.Exec3Parallel and cannot run in parallel.
-	prevParallel, prevWorkers := dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount
+	// This test changes the worker count and cannot run in parallel.
+	prevWorkers := ethconfig.Defaults.Sync.ExecWorkerCount
 	t.Cleanup(func() {
-		dbg.Exec3Parallel = prevParallel
 		ethconfig.Defaults.Sync.ExecWorkerCount = prevWorkers
 	})
 	ethconfig.Defaults.Sync.ExecWorkerCount = 4
@@ -184,25 +180,20 @@ func TestTouchedEmptyAuthorityIsAbsentForLaterTx(t *testing.T) {
 				}
 
 				gspec := genesis(true)
-				for _, versioned := range []bool{false, true} {
-					want := generateEIP161TouchBlock(t, genesis(false), keys[0], versioned, fill).Receipts[0][1].GasUsed
-					chainPack := generateEIP161TouchBlock(t, gspec, keys[0], versioned, fill)
-					require.Equal(t, want, chainPack.Receipts[0][1].GasUsed, "authorization gas, versioned=%v", versioned)
-					importEIP161TouchBlock(t, gspec, keys[0], chainPack)
-				}
+				want := generateEIP161TouchBlock(t, genesis(false), keys[0], fill).Receipts[0][1].GasUsed
+				chainPack := generateEIP161TouchBlock(t, gspec, keys[0], fill)
+				require.Equal(t, want, chainPack.Receipts[0][1].GasUsed, "authorization gas")
+				importEIP161TouchBlock(t, gspec, keys[0], chainPack)
 			})
 		}
 	}
 }
 
-// A transaction credits an empty account, which must be kept: serial and
-// versioned execution must agree. The parallel executor credits fees after the
+// A transaction credits an empty account, which must be kept. The parallel executor credits fees after the
 // transaction's writes are finalized, so a tipped coinbase looks empty there
 // first.
 func TestCreditedEmptyAccountIsKept(t *testing.T) {
-	// This test changes dbg.Exec3Parallel and cannot run in parallel.
-	prevParallel := dbg.Exec3Parallel
-	t.Cleanup(func() { dbg.Exec3Parallel = prevParallel })
+	// This test changes the worker count and cannot run in parallel.
 
 	keys, senders := eip161TouchKeys(t, 1)
 	authorityKey, err := crypto.HexToECDSA("9a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
@@ -268,10 +259,8 @@ func TestCreditedEmptyAccountIsKept(t *testing.T) {
 					},
 				}
 				fill := func(b *blockgen.BlockGen) { tc.fill(b, config) }
-				serial := generateEIP161TouchBlock(t, gspec, keys[0], false, fill)
-				versioned := generateEIP161TouchBlock(t, gspec, keys[0], true, fill)
-				require.Equal(t, serial.TopBlock.Root(), versioned.TopBlock.Root())
-				importEIP161TouchBlock(t, gspec, keys[0], versioned)
+				chainPack := generateEIP161TouchBlock(t, gspec, keys[0], fill)
+				importEIP161TouchBlock(t, gspec, keys[0], chainPack)
 			})
 		}
 	}
@@ -282,9 +271,7 @@ func TestCreditedEmptyAccountIsKept(t *testing.T) {
 // balance. It ends with a zero balance and a zero nonce but keeps its code, so
 // it is not removed.
 func TestEmptiedContractIsKept(t *testing.T) {
-	// This test changes dbg.Exec3Parallel and cannot run in parallel.
-	prevParallel := dbg.Exec3Parallel
-	t.Cleanup(func() { dbg.Exec3Parallel = prevParallel })
+	// This test changes the worker count and cannot run in parallel.
 
 	keys, senders := eip161TouchKeys(t, 1)
 	wallet := common.HexToAddress("0x3a11e7")
@@ -310,17 +297,13 @@ func TestEmptiedContractIsKept(t *testing.T) {
 				require.NoError(t, err)
 				b.AddTx(txn)
 			}
-			serial := generateEIP161TouchBlock(t, gspec, keys[0], false, fill)
-			versioned := generateEIP161TouchBlock(t, gspec, keys[0], true, fill)
-			require.Equal(t, serial.TopBlock.Root(), versioned.TopBlock.Root())
-			importEIP161TouchBlock(t, gspec, keys[0], versioned)
+			chainPack := generateEIP161TouchBlock(t, gspec, keys[0], fill)
+			importEIP161TouchBlock(t, gspec, keys[0], chainPack)
 		})
 	}
 }
 
 func TestTouchedStorageOnlyAccountIsAbsentForLaterTx(t *testing.T) {
-	prevParallel := dbg.Exec3Parallel
-	t.Cleanup(func() { dbg.Exec3Parallel = prevParallel })
 
 	keys, senders := eip161TouchKeys(t, 1)
 	storageOnly := common.HexToAddress("0x7610")
@@ -343,13 +326,11 @@ func TestTouchedStorageOnlyAccountIsAbsentForLaterTx(t *testing.T) {
 					b.AddTx(txn)
 				}
 			}
-			serial := generateEIP161TouchBlock(t, gspec, keys[0], false, fill)
-			for _, receipt := range serial.Receipts[0] {
+			chainPack := generateEIP161TouchBlock(t, gspec, keys[0], fill)
+			for _, receipt := range chainPack.Receipts[0] {
 				require.Equal(t, types.ReceiptStatusSuccessful, receipt.Status)
 			}
-			versioned := generateEIP161TouchBlock(t, gspec, keys[0], true, fill)
-			require.Equal(t, serial.TopBlock.Root(), versioned.TopBlock.Root())
-			importEIP161TouchBlock(t, gspec, keys[0], serial)
+			importEIP161TouchBlock(t, gspec, keys[0], chainPack)
 		})
 	}
 }

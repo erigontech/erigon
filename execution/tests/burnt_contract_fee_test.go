@@ -74,7 +74,7 @@ func TestBurntContractFeeRecipients(t *testing.T) {
 				return txn
 			}
 
-			dbg.Exec3Parallel = false
+			setExecWorkers(t, 1)
 			m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(keys[0]))
 			chainPack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) {
 				b.SetCoinbase(coinbase)

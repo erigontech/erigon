@@ -26,7 +26,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
@@ -50,8 +49,8 @@ func storageAt(t *testing.T, st *state.IntraBlockState, addr common.Address, slo
 // account with its storage. A later tx delegates the account by EIP-7702 to
 // code that stores SLOAD(1)+1 in slot 2, so slot 2 must be 1.
 func TestTouchedEmptyAccountWithStorageIsWiped(t *testing.T) {
-	prevParallel, prevWorkers := dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount
-	t.Cleanup(func() { dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount = prevParallel, prevWorkers })
+	prevWorkers := ethconfig.Defaults.Sync.ExecWorkerCount
+	t.Cleanup(func() { ethconfig.Defaults.Sync.ExecWorkerCount = prevWorkers })
 	ethconfig.Defaults.Sync.ExecWorkerCount = 4
 
 	authorityKey, err := crypto.ToECDSA(common.LeftPadBytes([]byte{0xa0}, 32))
@@ -85,8 +84,7 @@ func TestTouchedEmptyAccountWithStorageIsWiped(t *testing.T) {
 			auth, err := types.SignAuthorization(authorityKey, *config.ChainID, delegate, 0)
 			require.NoError(t, err)
 
-			generate := func(versioned bool) *blockgen.ChainPack {
-				dbg.Exec3Parallel = versioned
+			generate := func() *blockgen.ChainPack {
 				m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(keys[0]))
 				chainPack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) {
 					b.SetCoinbase(common.Address{1})
@@ -117,13 +115,10 @@ func TestTouchedEmptyAccountWithStorageIsWiped(t *testing.T) {
 				return chainPack
 			}
 
-			chainPack := generate(true)
-			t.Run("serial generation", func(t *testing.T) {
-				require.Equal(t, chainPack.TopBlock.Root(), generate(false).TopBlock.Root())
-			})
-			for _, parallel := range []bool{false, true} {
-				t.Run(fmt.Sprintf("parallel=%v", parallel), func(t *testing.T) {
-					dbg.Exec3Parallel = parallel
+			chainPack := generate()
+			for _, workers := range []int{1, 4} {
+				t.Run(fmt.Sprintf("workers=%d", workers), func(t *testing.T) {
+					setExecWorkers(t, workers)
 					m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(keys[0]))
 					require.NoError(t, m.InsertChain(chainPack))
 					require.NoError(t, m.DB.ViewTemporal(t.Context(), func(tx kv.TemporalTx) error {

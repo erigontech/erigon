@@ -46,7 +46,7 @@ import (
 // then re-created at the same CREATE2 address in block 3. Pre-Cancun (no
 // EIP-6780) the self-destruct fully removes the account, so the re-created
 // contract must observe EMPTY storage — the block-1 slot must not survive the
-// cross-block destruct+recreate. Runs both serial and parallel executors.
+// cross-block destruct+recreate.
 func TestRecreateStorageClearedAcrossBlocks(t *testing.T) {
 	// creator: CALLDATACOPY(0,0,CALLDATASIZE); CREATE2(0,0,CALLDATASIZE,0)
 	creatorCode := common.FromHex("0x36600060003760003660006000f5")
@@ -59,7 +59,6 @@ func TestRecreateStorageClearedAcrossBlocks(t *testing.T) {
 		name     string
 		parallel bool
 	}{
-		{"serial", false},
 		{"parallel", true},
 	} {
 		t.Run(mode.name, func(t *testing.T) {
@@ -194,8 +193,6 @@ func TestParallelStorageRewriteAfterDestroyAndRecreate(t *testing.T) {
 			keys := revivalKeys(t, alloc, 6)
 			gspec := &types.Genesis{Config: config, GasLimit: 30_000_000, Alloc: alloc}
 
-			prevParallel := dbg.Exec3Parallel
-			dbg.Exec3Parallel = false
 			m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(keys[0]))
 			signer := types.LatestSignerForChainID(config.ChainID)
 			chainPack, err := m.GenerateChain(len(tc.blocks), func(i int, b *blockgen.BlockGen) {
@@ -206,7 +203,6 @@ func TestParallelStorageRewriteAfterDestroyAndRecreate(t *testing.T) {
 					b.AddTx(txn)
 				}
 			})
-			dbg.Exec3Parallel = prevParallel
 			require.NoError(t, err)
 
 			check := func(t *testing.T, st *state.IntraBlockState) {

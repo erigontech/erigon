@@ -131,7 +131,6 @@ func importBurntContractBlock(t *testing.T, burnt, to common.Address, alloc type
 	alloc[sender] = types.GenesisAccount{Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)}
 	genesis := &types.Genesis{Config: config, Alloc: alloc}
 
-	dbg.Exec3Parallel = false
 	gen := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(key))
 	signer := types.LatestSignerForChainID(config.ChainID)
 	blocks, err := gen.GenerateChain(1, func(i int, b *blockgen.BlockGen) {

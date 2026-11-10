@@ -97,7 +97,7 @@ func TestTouchedEmptyAccountCreditedInSameBlock(t *testing.T) {
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			dbg.Exec3Parallel = false
+			setExecWorkers(t, 1)
 			serial := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(keys[0]))
 			chainPack, err := serial.GenerateChain(2, func(i int, b *blockgen.BlockGen) {
 				sign := func(txn types.Transaction, from int) {
@@ -136,7 +136,7 @@ func TestTouchedEmptyAccountCreditedInSameBlock(t *testing.T) {
 			require.False(t, want.Balance.IsZero())
 			require.Zero(t, want.Incarnation)
 
-			dbg.Exec3Parallel = true
+			setExecWorkers(t, 4)
 			parallel := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(keys[0]))
 			require.NoError(t, parallel.InsertChain(chainPack))
 			require.Equal(t, *want, *record(parallel))
