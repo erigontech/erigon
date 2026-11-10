@@ -133,6 +133,25 @@ func TestBTPeerDiscovery_AddPeersFromENR(t *testing.T) {
 	assert.Empty(t, entries)
 }
 
+// A peer can advertise the same chain.toml the node seeds itself; reading it must not drop the seeded torrent.
+func TestDownloadChainTomlKeepsSeededTorrent(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, SaveChainToml(dir, []byte("local manifest")))
+	cfg := newTestClientConfig(t, dir)
+	cfg.Seed = true
+	client, err := torrent.NewClient(cfg)
+	require.NoError(t, err)
+	defer client.Close()
+	mi := buildTestMetainfo(t, dir, ChainTomlFileName)
+	_, err = client.AddTorrent(&mi)
+	require.NoError(t, err)
+
+	_, err = DownloadChainTomlByInfoHash(t.Context(), client, mi.HashInfoBytes(), dir, t.TempDir(), nil)
+	require.NoError(t, err)
+	_, ok := client.Torrent(mi.HashInfoBytes())
+	require.True(t, ok)
+}
+
 // TestBTPeerDiscovery_NoBTPort verifies that when a peer doesn't advertise
 // a BT port, addTorrentPeerFromENR is a no-op (no panic, no peers added).
 func TestBTPeerDiscovery_NoBTPort(t *testing.T) {

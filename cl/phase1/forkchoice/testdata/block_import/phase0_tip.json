@@ -1,0 +1,30 @@
+{
+  "case": "phase0",
+  "mode": "tip",
+  "blocks": [
+    {
+      "slot": 8288,
+      "block_root": "0x86979f6f6dc7626064ef0d38d4dffb89e91d1d4c18492e3fb7d7ee93cedca3ed",
+      "snapshot_sha256": "1d7efa91294ad61a22d502763d8f24b9af3832640ae2be8af66d4dd2f75054cb",
+      "latest_message_count": 347,
+      "epoch_first": true,
+      "randao_vector_present": true,
+      "proposer_boost_root": "0x86979f6f6dc7626064ef0d38d4dffb89e91d1d4c18492e3fb7d7ee93cedca3ed",
+      "head": "0x86979f6f6dc7626064ef0d38d4dffb89e91d1d4c18492e3fb7d7ee93cedca3ed",
+      "head_slot": 8288,
+      "event_count": 1
+    },
+    {
+      "slot": 8322,
+      "block_root": "0xeffdd8ef40c3c901f0724d48e04ce257967cf1da31929f3b6db614f89ef8d660",
+      "snapshot_sha256": "ea94ac8220cd44bc99034a542b8bcf7efa8c76497dea01806174c19ee2f508cc",
+      "latest_message_count": 416,
+      "epoch_first": false,
+      "randao_vector_present": false,
+      "proposer_boost_root": "0xeffdd8ef40c3c901f0724d48e04ce257967cf1da31929f3b6db614f89ef8d660",
+      "head": "0xeffdd8ef40c3c901f0724d48e04ce257967cf1da31929f3b6db614f89ef8d660",
+      "head_slot": 8322,
+      "event_count": 1
+    }
+  ]
+}
