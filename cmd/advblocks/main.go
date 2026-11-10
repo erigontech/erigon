@@ -223,26 +223,34 @@ func buildAndApply(c *rpcClient, parent string, timestamp, slot uint64, txs [][]
 		"slotNumber":            fmt.Sprintf("0x%x", slot),
 		"targetGasLimit":        fmt.Sprintf("0x%x", uint64(blockGasLimit)),
 	}
-	raw, err := c.call(c.http, false, "testing_buildBlockV1", parent, attrs, hexs(txs), "0x00")
-	if err != nil {
-		return nil, "", fmt.Errorf("build: %w", err)
-	}
 	var resp struct {
 		ExecutionPayload json.RawMessage `json:"executionPayload"`
-	}
-	if err := json.Unmarshal(raw, &resp); err != nil {
-		return nil, "", err
 	}
 	var hdr struct {
 		BlockHash string   `json:"blockHash"`
 		GasUsed   string   `json:"gasUsed"`
 		Txs       []string `json:"transactions"`
 	}
-	if err := json.Unmarshal(resp.ExecutionPayload, &hdr); err != nil {
-		return nil, "", err
-	}
-	if len(hdr.Txs) != len(txs) {
-		return nil, "", fmt.Errorf("built block has %d of %d txs", len(hdr.Txs), len(txs))
+	// The builder reads committed state, which trails the fork choice update of the parent.
+	for attempt := 0; ; attempt++ {
+		raw, err := c.call(c.http, false, "testing_buildBlockV1", parent, attrs, hexs(txs), "0x00")
+		if err != nil {
+			return nil, "", fmt.Errorf("build: %w", err)
+		}
+		if err := json.Unmarshal(raw, &resp); err != nil {
+			return nil, "", err
+		}
+		hdr.Txs = nil
+		if err := json.Unmarshal(resp.ExecutionPayload, &hdr); err != nil {
+			return nil, "", err
+		}
+		if len(hdr.Txs) == len(txs) {
+			break
+		}
+		if attempt == 60 {
+			return nil, "", fmt.Errorf("built block has %d of %d txs", len(hdr.Txs), len(txs))
+		}
+		time.Sleep(2 * time.Second)
 	}
 	log.Printf("built %s txs=%d gasUsed=%s", hdr.BlockHash, len(hdr.Txs), hdr.GasUsed)
 	statusRaw, err := c.call(c.auth, true, "engine_newPayloadV5", resp.ExecutionPayload, []any{}, zero, []any{})
