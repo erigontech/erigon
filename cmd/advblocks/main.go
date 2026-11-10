@@ -247,7 +247,7 @@ func buildAndApply(c *rpcClient, parent string, timestamp, slot uint64, txs [][]
 		if len(hdr.Txs) == len(txs) {
 			break
 		}
-		if attempt == 60 {
+		if attempt == 2 {
 			return nil, "", fmt.Errorf("built block has %d of %d txs", len(hdr.Txs), len(txs))
 		}
 		time.Sleep(2 * time.Second)
@@ -352,6 +352,11 @@ func generate(c *rpcClient, s shape, startHash, outDir string, snapshotNumber ui
 	}
 	testPayload, testHash, err := buildAndApply(c, setupHash, ts+24, 1, test)
 	if err != nil {
+		first := crypto.PubkeyToAddress(eoaKey(s.name, 0).PublicKey)
+		for _, q := range [][]any{{"eth_blockNumber"}, {"eth_getBalance", first.Hex(), "latest"}, {"eth_getTransactionCount", seed.Hex(), "latest"}, {"eth_getCode", contract.Hex(), "latest"}, {"eth_getBlockReceipts", setupHash}} {
+			r, qerr := c.call(c.http, false, q[0].(string), q[1:]...)
+			log.Printf("debug %s: %.3000s err=%v", q[0], r, qerr)
+		}
 		return fmt.Errorf("test: %w", err)
 	}
 	var built struct {
