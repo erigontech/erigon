@@ -30,6 +30,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/db/config3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -352,7 +353,7 @@ func TestLegacyCommitmentFiles(t *testing.T) {
 					want["domain/v2.0-storage.0-16.kv"] = true
 					want["domain/v2.0-storage.0-16.kvei"] = true
 				}
-				require.Equal(t, want, incompatibleCommitmentFiles(ordered))
+				require.Equal(t, want, incompatibleCommitmentFiles(ordered, 0))
 			})
 		}
 	}
@@ -779,8 +780,9 @@ func TestSyncSnapshotsCommitmentRequestList(t *testing.T) {
 	for _, v3 := range []bool{false, true} {
 		t.Run(fmt.Sprintf("v3=%v", v3), func(t *testing.T) {
 			t.Cleanup(statecfg.SetCommitmentV3(v3))
+			dirs := datadir.New(t.TempDir())
 			downloader := &requestListDownloader{}
-			err := SyncSnapshots(t.Context(), "test", "test", false, false, false, BlobRetention{}, prune.ArchiveMode, NoCaplin, nil, &requestListBlockReader{}, &chain.Config{ChainName: networkname.Mainnet}, downloader, ethconfig.Sync{KeepExecutionProofs: true}, 16)
+			err := SyncSnapshots(t.Context(), "test", "test", false, false, false, BlobRetention{}, prune.ArchiveMode, NoCaplin, nil, &requestListBlockReader{}, &chain.Config{ChainName: networkname.Mainnet}, downloader, ethconfig.Sync{KeepExecutionProofs: true}, 16, dirs)
 			require.NoError(t, err)
 			var want []string
 			for _, file := range files {
@@ -816,6 +818,7 @@ func TestSyncSnapshotsCommitmentV3StateTip(t *testing.T) {
 		v3         bool
 		disableE3  bool
 		extraFiles []string
+		localFiles []string
 		wantFile   string
 	}{
 		{name: "v3 on legacy only", v3: true, wantFile: ".0-16."},
@@ -825,6 +828,8 @@ func TestSyncSnapshotsCommitmentV3StateTip(t *testing.T) {
 		{name: "v3 commitment split across one accounts range", v3: true, extraFiles: []string{"domain/v3.0-commitment.0-16.kv", "domain/v3.0-commitment.16-32.kv", "domain/v2.0-accounts.0-32.kv"}, wantFile: ".0-32."},
 		{name: "v3 legacy commitment at the code tip", v3: true, extraFiles: []string{"domain/v3.0-commitment.0-16.kv", "domain/v3.0-commitment.16-32.kv", "domain/v2.2-commitment.32-48.kv", "domain/v2.0-code.32-48.kv"}, wantFile: ".32-48."},
 		{name: "v3 code above every commitment", v3: true, extraFiles: []string{"domain/v3.0-commitment.0-16.kv", "domain/v3.0-commitment.16-32.kv", "domain/v2.0-code.32-48.kv"}, wantFile: "steps 32-48"},
+		{name: "v3 on a converted datadir", v3: true, localFiles: []string{"v3.0-commitment.0-16.kv", "v3.0-commitment.16-32.kv"}},
+		{name: "v3 on a datadir converted below the state tip", v3: true, localFiles: []string{"v3.0-commitment.0-16.kv"}, wantFile: ".16-32."},
 		{name: "v3 off legacy only"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -836,8 +841,12 @@ func TestSyncSnapshotsCommitmentV3StateTip(t *testing.T) {
 			for _, name := range tc.extraFiles {
 				cfg.Preverified.Items = append(cfg.Preverified.Items, snapcfg.PreverifiedItem{Name: name, Hash: strings.Repeat("0", 40)})
 			}
+			dirs := datadir.New(t.TempDir())
+			for _, name := range tc.localFiles {
+				require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, name), nil, 0o644))
+			}
 			downloader := &requestListDownloader{}
-			err := SyncSnapshots(t.Context(), "test", "test", false, false, false, BlobRetention{}, prune.ArchiveMode, NoCaplin, nil, &requestListBlockReader{freezing: ethconfig.BlocksFreezing{DisableDownloadE3: tc.disableE3}}, &chain.Config{ChainName: networkname.Mainnet}, downloader, ethconfig.Sync{KeepExecutionProofs: true}, 16)
+			err := SyncSnapshots(t.Context(), "test", "test", false, false, false, BlobRetention{}, prune.ArchiveMode, NoCaplin, nil, &requestListBlockReader{freezing: ethconfig.BlocksFreezing{DisableDownloadE3: tc.disableE3}}, &chain.Config{ChainName: networkname.Mainnet}, downloader, ethconfig.Sync{KeepExecutionProofs: true}, 16, dirs)
 			if tc.disableE3 {
 				require.NoError(t, err)
 				for _, name := range downloader.names {
@@ -845,14 +854,20 @@ func TestSyncSnapshotsCommitmentV3StateTip(t *testing.T) {
 				}
 				return
 			}
-			if tc.v3 {
+			if tc.wantFile != "" {
 				require.ErrorContains(t, err, "commitment convert --v3")
 				require.ErrorContains(t, err, tc.wantFile)
 				require.Empty(t, downloader.names)
-			} else {
-				require.NoError(t, err)
-				require.ElementsMatch(t, legacyFiles, downloader.names)
+				return
 			}
+			require.NoError(t, err)
+			want := legacyFiles
+			if tc.v3 {
+				want = slices.DeleteFunc(slices.Clone(legacyFiles), func(name string) bool {
+					return strings.Contains(name, kv.CommitmentDomain.String())
+				})
+			}
+			require.ElementsMatch(t, want, downloader.names)
 		})
 	}
 }

@@ -21,10 +21,12 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/downloader/downloadergrpc"
 	"github.com/erigontech/erigon/db/kv"
@@ -164,14 +166,32 @@ func isStateHistory(name string) bool {
 	return strings.HasPrefix(name, "idx") || strings.HasPrefix(name, "history") || strings.HasPrefix(name, "accessor")
 }
 
-func incompatibleCommitmentFiles(items snapcfg.PreverifiedItems) map[string]bool {
+func localV3CommitmentTip(dirs datadir.Dirs) (uint64, error) {
+	entries, err := os.ReadDir(dirs.SnapDomain)
+	if errors.Is(err, os.ErrNotExist) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	var tip uint64
+	for _, entry := range entries {
+		info, _, ok := snaptype.ParseFileName("", entry.Name())
+		if ok && info.TypeString == kv.CommitmentDomain.String() && info.Ext == ".kv" && info.Version.Major >= 3 {
+			tip = max(tip, info.To)
+		}
+	}
+	return tip, nil
+}
+
+func incompatibleCommitmentFiles(items snapcfg.PreverifiedItems, localV3Tip uint64) map[string]bool {
 	type stepRange struct {
 		history  bool
 		from, to uint64
 	}
 	type rangedFile struct {
 		stepRange
-		required bool
+		required, commitment bool
 	}
 	v3 := statecfg.ExperimentalCommitmentV3
 	dependents := make(map[string]bool)
@@ -204,17 +224,24 @@ func incompatibleCommitmentFiles(items snapcfg.PreverifiedItems) map[string]bool
 			} else {
 				skipped[p.Name] = false
 				if v3 && !r.history {
-					ranges[p.Name] = rangedFile{stepRange: r, required: true}
+					ranges[p.Name] = rangedFile{stepRange: r, required: true, commitment: true}
 				}
 			}
 		} else {
-			ranges[p.Name] = rangedFile{stepRange: r, required: false}
+			ranges[p.Name] = rangedFile{stepRange: r, commitment: true}
 		}
 	}
 	for name, f := range ranges {
-		if !compatible[f.stepRange] {
-			skipped[name] = f.required
+		if compatible[f.stepRange] {
+			continue
 		}
+		if f.to <= localV3Tip {
+			if f.commitment {
+				skipped[name] = false
+			}
+			continue
+		}
+		skipped[name] = f.required
 	}
 	return skipped
 }
@@ -536,6 +563,7 @@ func SyncSnapshots(
 	snapshotDownloader dbservices.DownloaderClient,
 	syncCfg ethconfig.Sync,
 	stepSize uint64,
+	dirs datadir.Dirs,
 ) error {
 	if blockReader.FreezingCfg().NoDownloader || snapshotDownloader == nil {
 		return nil
@@ -590,7 +618,14 @@ func SyncSnapshots(
 		// send all hashes to the Downloader service
 		preverifiedBlockSnapshots := snapCfg.Preverified
 		downloadRequest := make([]dbservices.DownloadRequest, 0, len(preverifiedBlockSnapshots.Items))
-		incompatibleCommitment := incompatibleCommitmentFiles(preverifiedBlockSnapshots.Items)
+		var localV3Tip uint64
+		if statecfg.ExperimentalCommitmentV3 {
+			var err error
+			if localV3Tip, err = localV3CommitmentTip(dirs); err != nil {
+				return err
+			}
+		}
+		incompatibleCommitment := incompatibleCommitmentFiles(preverifiedBlockSnapshots.Items, localV3Tip)
 
 		blockPrune, historyPrune := computeBlocksToPrune(blockReader, prune)
 		blackListForPruning := make(map[string]struct{})
@@ -717,7 +752,8 @@ func SyncSnapshots(
 		}
 
 		if statecfg.ExperimentalCommitmentV3 {
-			var stateTip, commitmentTip uint64
+			var stateTip uint64
+			commitmentTip := localV3Tip
 			for _, request := range downloadRequest {
 				if !strings.HasPrefix(request.Path, "domain/") {
 					continue
