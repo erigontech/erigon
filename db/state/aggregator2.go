@@ -55,6 +55,9 @@ func (opts AggOpts) Open(ctx context.Context) (*Aggregator, error) { //nolint:go
 		if err := CheckSnapshotsCompatibility(opts.dirs); err != nil {
 			return nil, err
 		}
+		if err := checkRestoreResetDone(opts.dirs); err != nil {
+			return nil, err
+		}
 	}
 
 	salt, err := GetStateIndicesSalt(opts.dirs, opts.genSaltIfNeed, opts.logger)

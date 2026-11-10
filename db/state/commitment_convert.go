@@ -847,6 +847,17 @@ const restoreManifestTmpName = ".restore_manifest.tmp"
 
 const restoreV3ResetPendingName = ".restore_v3_reset_pending"
 
+func checkRestoreResetDone(dirs datadir.Dirs) error {
+	_, err := os.Stat(filepath.Join(dirs.Snap, "backup", restoreV3ResetPendingName))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("check pending commitment restore: %w", err)
+	}
+	return errors.New("commitment restore has not reset the execution state: re-run `integration commitment convert --restore` before starting erigon")
+}
+
 // RestoreCommitmentFiles undoes ConvertCommitmentFiles by moving every file
 // from snapshots/backup/domains/ back into snapshots/domain/, and from
 // snapshots/backup/{history,idx,accessor}/ into the live history, idx and

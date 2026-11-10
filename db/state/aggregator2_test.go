@@ -138,3 +138,16 @@ func TestCheckSnapshotsCompatibilityV3RecordsRequiresFlag(t *testing.T) {
 
 	require.ErrorContains(t, CheckSnapshotsCompatibility(dirs), "COMMITMENT_V3=true")
 }
+
+func TestOpenRefusesPendingRestoreReset(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	backup := filepath.Join(dirs.Snap, "backup")
+	require.NoError(t, os.MkdirAll(backup, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(backup, restoreV3ResetPendingName), nil, 0o644))
+
+	agg, err := NewTest(dirs).SanityOldNaming().Open(t.Context())
+	if err == nil {
+		agg.Close()
+	}
+	require.ErrorContains(t, err, "convert --restore")
+}
