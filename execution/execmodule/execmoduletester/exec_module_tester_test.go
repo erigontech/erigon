@@ -24,9 +24,12 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 // CLI usage (e.g. evm blocktest via BlockTest.RunCLI) constructs the tester with
@@ -36,6 +39,52 @@ func TestNewWithNilTB(t *testing.T) {
 	m := execmoduletester.New(nil)
 	require.NotNil(t, m)
 	m.Close()
+}
+
+// TestUnexecutedGenesis: WithUnexecutedGenesis leaves the database without
+// genesis state, the Prague system contracts included; executing genesis then
+// deploys them, so the chain extends.
+func TestUnexecutedGenesis(t *testing.T) {
+	t.Parallel()
+	systemContracts := func(m *execmoduletester.ExecModuleTester) (withdrawals, consolidations bool) {
+		t.Helper()
+		require.NoError(t, m.DB.ViewTemporal(t.Context(), func(tx kv.TemporalTx) error {
+			w, c := m.ChainConfig.GetWithdrawalRequestContract().Value(), m.ChainConfig.GetConsolidationRequestContract().Value()
+			v, _, err := tx.GetLatest(kv.AccountsDomain, w[:], kv.GetLatestOptions{})
+			if err != nil {
+				return err
+			}
+			withdrawals = len(v) > 0
+			v, _, err = tx.GetLatest(kv.AccountsDomain, c[:], kv.GetLatestOptions{})
+			consolidations = len(v) > 0
+			return err
+		}))
+		return withdrawals, consolidations
+	}
+	for _, unexecuted := range []bool{false, true} {
+		opts := []execmoduletester.Option{execmoduletester.WithChainConfig(chain.TestChainOsakaConfig)}
+		if unexecuted {
+			opts = append(opts, execmoduletester.WithUnexecutedGenesis())
+		}
+		m := execmoduletester.New(t, opts...)
+		require.True(t, m.ChainConfig.IsPrague(0))
+		withdrawals, consolidations := systemContracts(m)
+		require.Equal(t, !unexecuted, withdrawals, "withdrawal request contract, unexecuted=%v", unexecuted)
+		require.Equal(t, !unexecuted, consolidations, "consolidation request contract, unexecuted=%v", unexecuted)
+		if unexecuted {
+			require.NoError(t, m.InsertChain(&blockgen.ChainPack{
+				Headers:  []*types.Header{m.Genesis.HeaderNoCopy()},
+				Blocks:   []*types.Block{m.Genesis},
+				TopBlock: m.Genesis,
+			}))
+			withdrawals, consolidations = systemContracts(m)
+			require.True(t, withdrawals, "withdrawal request contract after genesis")
+			require.True(t, consolidations, "consolidation request contract after genesis")
+		}
+		next, err := m.GenerateChain(1, func(int, *blockgen.BlockGen) {})
+		require.NoError(t, err, "unexecuted=%v", unexecuted)
+		require.NoError(t, m.InsertChain(next), "unexecuted=%v", unexecuted)
+	}
 }
 
 func TestInsertChain(t *testing.T) {
