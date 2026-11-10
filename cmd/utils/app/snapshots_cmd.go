@@ -4242,36 +4242,53 @@ func duFormatJSON(w io.Writer, result duResult) error {
 	return enc.Encode(result)
 }
 
+func duEstimates(ctx context.Context, dirs datadir.Dirs, files []duFileInfo, cc *chain.Config, chainName string, stepSize uint64, logger log.Logger) ([]duEstimate, error) {
+	blockSnaps, err := duOpenBlockSnapshots(dirs, chainName, logger)
+	if err != nil {
+		logger.Warn("seg du: headers or bodies unreadable, estimates omitted", "err", err)
+		return nil, nil
+	}
+	defer blockSnaps.Close()
+	view := blockSnaps.View()
+	defer view.Close()
+
+	var indexedTo, onDiskTo uint64
+	if bodies := view.Bodies(); len(bodies) > 0 {
+		indexedTo = bodies[len(bodies)-1].To()
+	}
+	for _, f := range files {
+		if f.Subcategory == snaptype2.Bodies.Name() && strings.HasSuffix(f.Name, ".seg") {
+			onDiskTo = max(onDiskTo, f.To)
+		}
+	}
+	if indexedTo < onDiskTo {
+		logger.Warn("seg du: bodies are not indexed up to the last segment, estimates omitted", "indexedTo", indexedTo, "onDiskTo", onDiskTo)
+		return nil, nil
+	}
+
+	emptyDB, err := mdbx.New(dbcfg.ChainDB, logger).InMem("").Open(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer emptyDB.Close()
+	tx, err := emptyDB.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	return duComputeEstimates(ctx, duBlockFilesTx{Tx: tx, view: view}, freezeblocks.NewBlockReader(blockSnaps), cc, stepSize, files, dirs.Snap)
+}
+
 func duCollect(ctx context.Context, dirs datadir.Dirs, logger log.Logger) (duResult, error) {
 	cc, configuredMode := duChainInfo(ctx, dirs, logger)
 	chainName := "unknown"
 	if cc != nil && cc.ChainName != "" {
 		chainName = cc.ChainName
 	}
-	emptyDB, err := mdbx.New(dbcfg.ChainDB, logger).InMem("").Open(ctx)
-	if err != nil {
-		return duResult{}, err
-	}
-	defer emptyDB.Close()
-	tx, err := emptyDB.BeginRo(ctx)
-	if err != nil {
-		return duResult{}, err
-	}
-	defer tx.Rollback()
-
 	stepSize, err := duStepSize(dirs, logger)
 	if err != nil {
 		return duResult{}, err
 	}
-	blockSnaps, err := duOpenBlockSnapshots(dirs, chainName, logger)
-	if err != nil {
-		return duResult{}, err
-	}
-	defer blockSnaps.Close()
-	blockReader := freezeblocks.NewBlockReader(blockSnaps)
-	view := blockSnaps.View()
-	defer view.Close()
-	pinnedTx := duBlockFilesTx{Tx: tx, view: view}
 
 	// Walk snapshot files.
 	files, err := duWalkSnapshots(dirs)
@@ -4295,7 +4312,7 @@ func duCollect(ctx context.Context, dirs datadir.Dirs, logger log.Logger) (duRes
 
 	// Build result.
 	cats := duAggregateCategories(files)
-	estimates, err := duComputeEstimates(ctx, pinnedTx, blockReader, cc, stepSize, files, dirs.Snap)
+	estimates, err := duEstimates(ctx, dirs, files, cc, chainName, stepSize, logger)
 	if err != nil {
 		return duResult{}, err
 	}

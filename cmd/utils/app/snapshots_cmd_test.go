@@ -51,6 +51,8 @@ import (
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
+	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
 
@@ -986,7 +988,12 @@ func duWriteSegment(t *testing.T, dir string, from, to uint64, typ snaptype.Enum
 	require.NoError(t, err)
 	defer c.Close()
 	c.DisableFsync()
-	require.NoError(t, c.AddWord([]byte{1}))
+	word := []byte{1}
+	if typ == snaptype2.Enums.Bodies {
+		word, err = rlp.EncodeToBytes(&types.BodyForStorage{BaseTxnID: types.BaseTxnID(from)})
+		require.NoError(t, err)
+	}
+	require.NoError(t, c.AddWord(word))
 	require.NoError(t, c.Compress())
 	idxNames := []string{typ.String()}
 	if typ == snaptype2.Transactions.Enum() {
@@ -1045,6 +1052,43 @@ func TestDUCollect_WorksWithoutChaindata(t *testing.T) {
 	require.Equal(t, "unknown", result.Chain)
 	require.Len(t, result.Estimates, 4)
 	require.NoFileExists(t, filepath.Join(dirs.Chaindata, "mdbx.dat"))
+}
+
+func duTestDatadirWithBlocks(t *testing.T, ranges ...[2]uint64) datadir.Dirs {
+	dirs := datadir.New(t.TempDir())
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, state.ERIGONDB_SETTINGS_FILE), []byte("step_size = 1000\nsteps_in_frozen_file = 64\n"), 0o644))
+	for _, r := range ranges {
+		duWriteSegment(t, dirs.Snap, r[0], r[1], snaptype2.Enums.Headers)
+		duWriteSegment(t, dirs.Snap, r[0], r[1], snaptype2.Enums.Bodies)
+	}
+	return dirs
+}
+
+func TestDUCollect_BrokenBlockSegmentOmitsEstimates(t *testing.T) {
+	dirs := duTestDatadirWithBlocks(t, [2]uint64{0, 500_000})
+	require.NoError(t, os.Truncate(filepath.Join(dirs.Snap, snaptype.SegmentFileName(version.V1_0, 0, 500_000, snaptype2.Enums.Headers)), 3))
+
+	result, err := duCollect(context.Background(), dirs, log.New())
+	require.NoError(t, err)
+	require.Empty(t, result.Estimates)
+	require.Equal(t, uint64(500_000), result.BlockRange[1])
+}
+
+func TestDUCollect_BodiesIndexGapOmitsEstimates(t *testing.T) {
+	dirs := duTestDatadirWithBlocks(t, [2]uint64{0, 500_000}, [2]uint64{500_000, 1_000_000}, [2]uint64{1_000_000, 1_500_000})
+	require.NoError(t, os.Remove(filepath.Join(dirs.Snap, snaptype.IdxFileName(version.V1_0, 500_000, 1_000_000, snaptype2.Enums.Bodies.String()))))
+
+	result, err := duCollect(context.Background(), dirs, log.New())
+	require.NoError(t, err)
+	require.Empty(t, result.Estimates)
+}
+
+func TestDUCollect_IndexedBlocksKeepEstimates(t *testing.T) {
+	dirs := duTestDatadirWithBlocks(t, [2]uint64{0, 500_000}, [2]uint64{500_000, 1_000_000})
+
+	result, err := duCollect(context.Background(), dirs, log.New())
+	require.NoError(t, err)
+	require.Len(t, result.Estimates, 4)
 }
 
 func TestDUStepSize_LegacyDatadirIsNotWritten(t *testing.T) {
