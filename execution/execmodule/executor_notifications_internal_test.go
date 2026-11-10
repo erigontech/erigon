@@ -75,10 +75,8 @@ func TestProcessFrozenBlocksKeepsCommittedNotifications(t *testing.T) {
 				require.Equal(t, committedCycles, changes[1].BlockHeight)
 				require.Equal(t, [][]byte{{1}}, changes[1].Txs)
 			}
-			capture := new(stateChangesCapture)
-			notifications.Accumulator.SendAndReset(t.Context(), capture, 0, 0, 0, 0)
-			require.NotNil(t, capture.batch)
-			require.False(t, capture.batch.StateChangesIncomplete, "the failed cycle's flag must also roll back")
+			batch := notifications.Accumulator.Batch(&types.Header{Number: *uint256.NewInt(committedCycles)})
+			require.False(t, batch.StateChangesIncomplete, "the failed cycle's flag must also roll back")
 		})
 	}
 }

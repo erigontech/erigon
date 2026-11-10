@@ -18,19 +18,14 @@ package notifications
 
 import (
 	"bytes"
-	"context"
-	"fmt"
+	"slices"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // Accumulator collects state changes per block in native Go types.
-// Protobuf conversion happens only at the gRPC boundary via ToProto methods.
 type Accumulator struct {
-	plainStateID           uint64
 	changes                []StateChange
 	stateChangesIncomplete bool
 	latestChange           *StateChange
@@ -53,8 +48,8 @@ func (a *Accumulator) HasPendingChanges() bool {
 	return a != nil && (len(a.changes) > 0 || a.stateChangesIncomplete)
 }
 
-func (a *Accumulator) Reset(plainStateID uint64) {
-	*a = Accumulator{plainStateID: plainStateID}
+func (a *Accumulator) Reset() {
+	*a = Accumulator{}
 }
 
 // Checkpoint returns a rollback to completed block changes. Later writes must
@@ -67,74 +62,17 @@ func (a *Accumulator) Checkpoint() (restore func()) {
 	return func() { *a = saved }
 }
 
-// SendAndReset converts accumulated changes to protobuf and dispatches them,
-// then resets the accumulator. In-process consumers use the same messages.
-func (a *Accumulator) SendAndReset(ctx context.Context, c StateChangeConsumer, pendingBaseFee uint64, pendingBlobFee uint64, blockGasLimit uint64, finalizedBlock uint64) {
-	if a == nil || len(a.changes) == 0 {
-		return
-	}
+// Batch includes the current head without adding synthetic entries to recorded changes.
+// It shares recorded changes, which must stay unchanged until publication finishes.
+func (a *Accumulator) Batch(head *types.Header) *BlockBatchNotification {
 	batch := &BlockBatchNotification{
-		StateVersionID:         a.plainStateID,
-		Changes:                a.changes,
+		Changes:                slices.Clip(a.changes),
 		StateChangesIncomplete: a.stateChangesIncomplete,
-		PendingBlockBaseFee:    pendingBaseFee,
-		PendingBlobFee:         pendingBlobFee,
-		BlockGasLimit:          blockGasLimit,
-		FinalizedBlock:         finalizedBlock,
 	}
-	if c != nil {
-		c.SendStateChanges(ctx, batch.ToProtoBatch())
+	if len(batch.Changes) == 0 || batch.Changes[len(batch.Changes)-1].BlockHeight < head.Number.Uint64() {
+		batch.Changes = append(batch.Changes, stateChangeForHeader(head))
 	}
-	a.Reset(0)
-}
-
-func (a *Accumulator) SetStateID(stateID uint64) {
-	a.plainStateID = stateID
-}
-
-// RefreshAccounts appends final account values after an incomplete batch's
-// recorded changes, which may precede omitted updates. The getter must include
-// uncommitted state because consumers can receive the batch before commit.
-func (a *Accumulator) RefreshAccounts(getter kv.TemporalGetter) error {
-	if !a.stateChangesIncomplete || len(a.changes) == 0 {
-		return nil
-	}
-	final := a.changes[len(a.changes)-1]
-	final.Txs, final.Changes = nil, nil
-	seen := make(map[common.Address]struct{})
-	for _, block := range a.changes {
-		for _, change := range block.Changes {
-			if change.Action != ActionUpsert && change.Action != ActionUpsertCode && change.Action != ActionRemove {
-				continue
-			}
-			if _, ok := seen[change.Address]; ok {
-				continue
-			}
-			seen[change.Address] = struct{}{}
-			data, _, err := getter.GetLatest(kv.AccountsDomain, change.Address[:], kv.GetLatestOptions{})
-			if err != nil {
-				return fmt.Errorf("refresh notification account %s: %w", change.Address, err)
-			}
-			updated := AccountChange{Address: change.Address, Action: ActionRemove}
-			if len(data) > 0 {
-				var account accounts.Account
-				if err := accounts.DeserialiseV3(&account, data); err != nil {
-					return fmt.Errorf("decode notification account %s: %w", change.Address, err)
-				}
-				updated.Action = ActionUpsert
-				updated.Incarnation = account.Incarnation
-				updated.Data = bytes.Clone(data)
-			}
-			final.Changes = append(final.Changes, updated)
-		}
-	}
-	if len(final.Changes) > 0 {
-		a.changes = append(a.changes, final)
-		a.latestChange = nil
-		a.accountChangeIndex = nil
-		a.storageChangeIndex = nil
-	}
-	return nil
+	return batch
 }
 
 // MarkIncomplete records omitted state changes for the whole batch. Later
@@ -145,16 +83,8 @@ func (a *Accumulator) MarkIncomplete() {
 
 // StartChange begins accumulation of changes for a new block.
 func (a *Accumulator) StartChange(h *types.Header, txs [][]byte, unwind bool) {
-	a.changes = append(a.changes, StateChange{
-		BlockHeight:      h.Number.Uint64(),
-		FirstBlockHeight: h.Number.Uint64(),
-		BlockHash:        h.Hash(),
-		BlockTime:        h.Time,
-	})
+	a.changes = append(a.changes, stateChangeForHeader(h))
 	a.latestChange = &a.changes[len(a.changes)-1]
-	if h.SlotNumber != nil {
-		a.latestChange.SlotNumber = common.NewUint64(*h.SlotNumber)
-	}
 	if unwind {
 		a.latestChange.Direction = DirectionUnwind
 	}
@@ -278,5 +208,5 @@ func (a *Accumulator) AppendAndReset(target *Accumulator) {
 		target.storageChangeIndex = a.storageChangeIndex
 	}
 	target.stateChangesIncomplete = target.stateChangesIncomplete || a.stateChangesIncomplete
-	a.Reset(0)
+	a.Reset()
 }

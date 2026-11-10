@@ -17,7 +17,6 @@
 package stagedsync
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -34,17 +33,8 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/shards"
 )
-
-type stateChangeCapture struct {
-	batch *remoteproto.StateChangeBatch
-}
-
-func (c *stateChangeCapture) SendStateChanges(_ context.Context, batch *remoteproto.StateChangeBatch) {
-	c.batch = batch
-}
 
 func TestUnwindStateNotificationCompleteness(t *testing.T) {
 	for _, tc := range []struct {
@@ -95,21 +85,21 @@ func TestUnwindStateNotificationCompleteness(t *testing.T) {
 
 			// The replacement block does not rewrite the removed root. Its complete
 			// notification must not hide omissions from the unwind in the same batch.
-			accumulator.StartChange(makeHeader(unwindTo+1, common.Hash{2}), nil, false)
-			capture := new(stateChangeCapture)
-			accumulator.SendAndReset(ctx, capture, 1, 1, 1_000_000, 0)
-			require.NotNil(t, capture.batch)
-			require.Equal(t, tc.incomplete, capture.batch.StateChangesIncomplete)
+			header := makeHeader(unwindTo+1, common.Hash{2})
+			accumulator.StartChange(header, nil, false)
+			batch := accumulator.Batch(header).ToProtoBatch()
+			require.Equal(t, tc.incomplete, batch.StateChangesIncomplete)
 			if tc.mode == stages.ModeForkValidation {
-				require.Len(t, capture.batch.ChangeBatch, 1, "speculative unwinds must not be announced")
+				require.Len(t, batch.ChangeBatch, 1, "speculative unwinds must not be announced")
 			} else if !tc.incomplete {
-				require.Len(t, capture.batch.ChangeBatch[0].Changes, 1)
-				require.Len(t, capture.batch.ChangeBatch[0].Changes[0].StorageChanges, 1)
+				require.Len(t, batch.ChangeBatch[0].Changes, 1)
+				require.Len(t, batch.ChangeBatch[0].Changes[0].StorageChanges, 1)
 			}
 
-			accumulator.StartChange(makeHeader(unwindTo+2, common.Hash{3}), nil, false)
-			accumulator.SendAndReset(ctx, capture, 1, 1, 1_000_000, 0)
-			require.False(t, capture.batch.StateChangesIncomplete, "omissions apply only to their batch")
+			accumulator.Reset()
+			header = makeHeader(unwindTo+2, common.Hash{3})
+			accumulator.StartChange(header, nil, false)
+			require.False(t, accumulator.Batch(header).StateChangesIncomplete, "omissions apply only to their batch")
 		})
 	}
 }
@@ -124,11 +114,9 @@ func TestCatchUpStateNotificationCompleteness(t *testing.T) {
 	cfg := ExecuteBlockCfg{db: db, notifications: &shards.Notifications{Accumulator: accumulator}}
 	header := makeHeader(100, common.Hash{})
 	require.NoError(t, execV3Finalize(ctx, nil, cfg, doms, 1, 200, 100, header, false, "test", logger))
-	capture := new(stateChangeCapture)
-	accumulator.SendAndReset(ctx, capture, 1, 1, 1_000_000, 0)
-	require.NotNil(t, capture.batch)
-	require.True(t, capture.batch.StateChangesIncomplete)
-	require.Len(t, capture.batch.ChangeBatch, 1)
-	require.Equal(t, uint64(100), capture.batch.ChangeBatch[0].BlockHeight)
-	require.Empty(t, capture.batch.ChangeBatch[0].Changes)
+	batch := accumulator.Batch(header).ToProtoBatch()
+	require.True(t, batch.StateChangesIncomplete)
+	require.Len(t, batch.ChangeBatch, 1)
+	require.Equal(t, uint64(100), batch.ChangeBatch[0].BlockHeight)
+	require.Empty(t, batch.ChangeBatch[0].Changes)
 }

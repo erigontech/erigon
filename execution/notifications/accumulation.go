@@ -32,7 +32,7 @@ func NewAccumulation() *Accumulation {
 }
 
 // Reset clears both the accumulator and recent receipts.
-func (a *Accumulation) Reset(plainStateID uint64) {
-	a.Accumulator.Reset(plainStateID)
+func (a *Accumulation) Reset() {
+	a.Accumulator.Reset()
 	a.RecentReceipts.Clear()
 }

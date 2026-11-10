@@ -94,33 +94,13 @@ func (d *Dispatcher) Dispatch(
 	finishProgressAfter uint64,
 	prevUnwindPoint *uint64,
 ) error {
+	batch, err := d.prepareStateChanges(tx, state, stateVersion, accumulator)
+	if err != nil {
+		return err
+	}
 	var recordedChanges []notifications.StateChange
 	if accumulator != nil {
-		accumulator.SetStateID(stateVersion)
 		recordedChanges = accumulator.Changes()
-	}
-	currentHeader := rawdb.ReadCurrentHeader(tx)
-	var pendingBaseFee, pendingBlobFee uint64
-	if accumulator != nil && currentHeader != nil {
-		if changes := accumulator.Changes(); len(changes) == 0 || changes[len(changes)-1].BlockHeight < currentHeader.Number.Uint64() {
-			accumulator.StartChange(currentHeader, nil, false)
-		}
-
-		pendingBaseFee = misc.CalcBaseFee(d.chainConfig, currentHeader).Uint64()
-		pendingBlobFee = d.chainConfig.GetMinBlobGasPrice()
-		if currentHeader.ExcessBlobGas != nil {
-			nextBlockTime := currentHeader.Time + d.chainConfig.SecondsPerSlot()
-			excessBlobGas := misc.CalcExcessBlobGas(d.chainConfig, currentHeader, nextBlockTime)
-			f, err := misc.GetBlobGasPrice(d.chainConfig, excessBlobGas, nextBlockTime)
-			if err != nil {
-				return err
-			}
-			pendingBlobFee = f.Uint64()
-		}
-		// Account reads can fail. Finish preparing the batch before publishing events.
-		if err := accumulator.RefreshAccounts(state); err != nil {
-			return err
-		}
 	}
 
 	if d.events != nil {
@@ -165,11 +145,44 @@ func (d *Dispatcher) Dispatch(
 		}
 	}
 
-	if accumulator != nil && currentHeader != nil {
-		finalizedBlock := common.Deref(rawdb.ReadHeaderNumber(tx, rawdb.ReadForkchoiceFinalized(tx)))
-		accumulator.SendAndReset(ctx, d.stateChangeConsumer, pendingBaseFee, pendingBlobFee, currentHeader.GasLimit, finalizedBlock)
+	if batch != nil {
+		if d.stateChangeConsumer != nil {
+			d.stateChangeConsumer.SendStateChanges(ctx, batch.ToProtoBatch())
+		}
+		accumulator.Reset()
 	}
 	return nil
+}
+
+// Preparation can fail on account reads. Complete it before publishing any events,
+// and keep recorded changes intact so a failed dispatch can be retried.
+func (d *Dispatcher) prepareStateChanges(tx kv.Tx, state kv.TemporalGetter, stateVersion uint64, accumulator *notifications.Accumulator) (*notifications.BlockBatchNotification, error) {
+	if accumulator == nil {
+		return nil, nil
+	}
+	header := rawdb.ReadCurrentHeader(tx)
+	if header == nil {
+		return nil, nil
+	}
+	batch := accumulator.Batch(header)
+	batch.StateVersionID = stateVersion
+	batch.PendingBlockBaseFee = misc.CalcBaseFee(d.chainConfig, header).Uint64()
+	batch.PendingBlobFee = d.chainConfig.GetMinBlobGasPrice()
+	if header.ExcessBlobGas != nil {
+		nextBlockTime := header.Time + d.chainConfig.SecondsPerSlot()
+		excessBlobGas := misc.CalcExcessBlobGas(d.chainConfig, header, nextBlockTime)
+		fee, err := misc.GetBlobGasPrice(d.chainConfig, excessBlobGas, nextBlockTime)
+		if err != nil {
+			return nil, err
+		}
+		batch.PendingBlobFee = fee.Uint64()
+	}
+	batch.BlockGasLimit = header.GasLimit
+	batch.FinalizedBlock = common.Deref(rawdb.ReadHeaderNumber(tx, rawdb.ReadForkchoiceFinalized(tx)))
+	if err := batch.RefreshAccounts(state); err != nil {
+		return nil, err
+	}
+	return batch, nil
 }
 
 // PublishOverlay sends the SharedDomains to in-process subscribers via Events.

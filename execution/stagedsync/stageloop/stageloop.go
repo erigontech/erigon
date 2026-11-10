@@ -100,19 +100,6 @@ func NewHook(
 	}
 }
 
-func (h *Hook) beforeRun(tx kv.Tx, inSync bool) error {
-	notifications := h.notifications
-	if notifications != nil && notifications.Accumulator != nil && inSync {
-		stateVersion, err := rawdb.GetStateVersion(tx)
-		if err != nil {
-			h.logger.Error("problem reading plain state version", "err", err)
-		}
-		// Pending canonical changes belong to the next dispatch, even across runs.
-		notifications.Accumulator.SetStateID(stateVersion)
-	}
-	return nil
-}
-
 func (h *Hook) LastNewBlockSeen(n uint64) {
 	if h == nil || h.notifications == nil {
 		return
@@ -120,14 +107,14 @@ func (h *Hook) LastNewBlockSeen(n uint64) {
 	h.notifications.NewLastBlockSeen(n)
 }
 
-func (h *Hook) BeforeRun(tx kv.Tx, inSync bool) error {
+func (h *Hook) BeforeRun(tx kv.Tx, _ bool) error {
 	if h == nil {
 		return nil
 	}
 	// Cycle start is where a node that fell behind first sees it; waiting for
 	// a cycle to end while still behind would miss fast catch-ups entirely.
 	h.NotifySyncState(tx)
-	return h.beforeRun(tx, inSync)
+	return nil
 }
 
 func (h *Hook) CheckpointStateChanges() func() {

@@ -179,9 +179,10 @@ func TestDispatcherDoesNotPublishBeforeAccountRefresh(t *testing.T) {
 	require.NoError(t, rawdb.WriteCanonicalHash(tx, header.Hash(), 1))
 	require.NoError(t, rawdb.WriteHeadHeaderHash(tx, header.Hash()))
 	accumulator := notifications.NewAccumulator()
-	accumulator.StartChange(header, nil, false)
+	accumulator.StartChange(&types.Header{}, nil, false)
 	accumulator.ChangeAccount(common.Address{1}, 0, nil)
 	accumulator.MarkIncomplete()
+	recorded := append([]notifications.StateChange(nil), accumulator.Changes()...)
 	events := shards.NewEvents()
 	headers, unsubscribe := events.AddHeaderSubscription()
 	t.Cleanup(unsubscribe)
@@ -197,7 +198,7 @@ func TestDispatcherDoesNotPublishBeforeAccountRefresh(t *testing.T) {
 	default:
 	}
 	require.Nil(t, capture.batch)
-	require.NotEmpty(t, accumulator.Changes(), "failed preparation must retain pending changes")
+	require.Equal(t, recorded, accumulator.Changes(), "failed preparation must leave recorded changes untouched")
 }
 
 func TestDispatcherNotifiesAfterUnwindToGenesis(t *testing.T) {

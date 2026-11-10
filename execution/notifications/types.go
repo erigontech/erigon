@@ -57,6 +57,19 @@ type StateChange struct {
 	FirstBlockHeight uint64
 }
 
+func stateChangeForHeader(h *types.Header) StateChange {
+	change := StateChange{
+		BlockHeight:      h.Number.Uint64(),
+		FirstBlockHeight: h.Number.Uint64(),
+		BlockHash:        h.Hash(),
+		BlockTime:        h.Time,
+	}
+	if h.SlotNumber != nil {
+		change.SlotNumber = common.NewUint64(*h.SlotNumber)
+	}
+	return change
+}
+
 // AccountChange holds a single account's state change.
 type AccountChange struct {
 	Address        common.Address
