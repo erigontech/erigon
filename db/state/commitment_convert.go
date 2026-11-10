@@ -960,8 +960,8 @@ func forEachCommitmentDataFile(dirPath string, fn func(name string, major uint64
 func legacyCommitmentFilesNotConverted(dirs datadir.Dirs, converted map[string]struct{}) ([]string, error) {
 	var unindexed []string
 	for _, dirPath := range []string{dirs.SnapDomain, dirs.SnapHistory} {
-		err := forEachCommitmentDataFile(dirPath, func(name string, major uint64) error {
-			if _, ok := converted[name]; major < 3 && !ok {
+		err := forEachCommitmentDataFile(dirPath, func(name string, _ uint64) error {
+			if _, ok := converted[name]; !ok {
 				unindexed = append(unindexed, filepath.Join(dirPath, name))
 			}
 			return nil
