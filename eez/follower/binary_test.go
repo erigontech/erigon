@@ -130,15 +130,32 @@ func waitStatus(t *testing.T, url string, cursor, safe uint64) {
 	}, 10*time.Second, 100*time.Millisecond, "eez_followerStatus")
 }
 
+// overlaySigner is the sequencer address of the binary tests' overlay.
+const overlaySigner = "0x5fbdb2315678afecb367f032d93f642f64180aa3"
+
+// refused runs bin with args, which it must refuse at startup naming want.
+func refused(t *testing.T, bin, want string, args ...string) {
+	t.Helper()
+	args = append(args, "--datadir", t.TempDir(), "--http.port", freePort(t), "--authrpc.port", freePort(t),
+		"--private.api.addr", "127.0.0.1:"+freePort(t), "--port", freePort(t), "--torrent.port", freePort(t))
+	out, err := exec.CommandContext(t.Context(), bin, args...).CombinedOutput()
+	var exit *exec.ExitError
+	require.ErrorAs(t, err, &exit, "%v: %s", args, out)
+	require.Equal(t, 1, exit.ExitCode(), "%v: %s", args, out)
+	require.Contains(t, string(out), want, "%v", args)
+}
+
 // TestFollowerBinary runs the erigon binary named by EEZ_ERIGON as an EEZ
 // node against a composed L1 served over JSON-RPC: it derives the settled
-// blocks into <datadir>/eez/chaindata, serves no engine API, and exits with
-// status 3 when its chain diverges from L1. A second node in peers mode,
-// with the first as trusted peer and discovery off, completes the eth/68
-// and eth/69 handshake with it, syncs from it the history below the root
-// L1's finalized block F holds, seeds derivation at F and keeps no
-// checkpoint. Discovery without --bootnodes, and peers mode on a rollupX
-// chain, are refused.
+// blocks into <datadir>/eez/chaindata, serves no engine API, joins the
+// signed-head overlay, and exits with status 3 when its chain diverges from
+// L1. A second node in peers mode, with the first as trusted peer and
+// discovery off, completes the eth/68 and eth/69 handshake with it, syncs
+// from it the history below the root L1's finalized block F holds, seeds
+// derivation at F and keeps no checkpoint. Discovery without --bootnodes,
+// peers mode on a rollupX chain, and the overlay beside the sequencer RPC,
+// on a chain whose sequencer signs no heads, and in all-in-one mode are
+// refused.
 func TestFollowerBinary(t *testing.T) {
 	bin := os.Getenv("EEZ_ERIGON")
 	if bin == "" {
@@ -159,22 +176,24 @@ func TestFollowerBinary(t *testing.T) {
 	l1 := httptest.NewServer(server)
 	t.Cleanup(l1.Close)
 
-	refused, cancel := context.WithTimeout(t.Context(), time.Minute)
-	defer cancel()
-	out, err := exec.CommandContext(refused, bin, "--eez.enabled", "--chain=eez-devnet", "--datadir", t.TempDir(), "--eez.sync.l1only=true",
-		"--eez.l1.rpc", l1.URL, "--http.port", freePort(t), "--authrpc.port", freePort(t),
-		"--private.api.addr", "127.0.0.1:"+freePort(t), "--port", freePort(t), "--torrent.port", freePort(t)).CombinedOutput()
-	require.True(t, bytes.Contains(out, []byte("discovery finds no L2 peers without --bootnodes")), "not refused: %v", err)
-	out, err = exec.CommandContext(refused, bin, "--eez.enabled", "--chain=eez-chiado", "--datadir", t.TempDir(), "--eez.sync.l1only=false",
-		"--eez.l1.rpc", l1.URL, "--http.port", freePort(t), "--authrpc.port", freePort(t),
-		"--private.api.addr", "127.0.0.1:"+freePort(t), "--port", freePort(t), "--torrent.port", freePort(t)).CombinedOutput()
-	require.True(t, bytes.Contains(out, []byte("rollupX chains derive their history from L1 alone")), "not refused: %v", err)
+	overlay := func() []string {
+		return []string{"--eez.p2p.listen=/ip4/127.0.0.1/tcp/" + freePort(t), "--eez.sequencer.address=" + overlaySigner}
+	}
+	refused(t, bin, "discovery finds no L2 peers without --bootnodes", "--eez.enabled", "--chain=eez-devnet", "--eez.sync.l1only=true", "--eez.l1.rpc", l1.URL)
+	refused(t, bin, "rollupX chains derive their history from L1 alone", "--eez.enabled", "--chain=eez-chiado", "--eez.sync.l1only=false", "--eez.l1.rpc", l1.URL)
+	sequencerRPC := []string{"--eez.enabled", "--chain=eez-devnet", "--eez.sync.l1only=true", "--nodiscover", "--eez.l1.rpc", l1.URL, "--eez.sequencer.rpc=http://127.0.0.1:1"}
+	refused(t, bin, "both set the unsafe head", append(sequencerRPC, overlay()...)...)
+	unsigned := []string{"--eez.enabled", "--chain=eez-chiado", "--eez.l1.rpc", l1.URL}
+	refused(t, bin, "signs no heads", append(unsigned, overlay()...)...)
+	allInOne := []string{"--eez.enabled", "--chain=dev", "--eez.chain=eez-devnet"}
+	refused(t, bin, "not available with --eez.chain", append(allInOne, overlay()...)...)
 
 	dir := t.TempDir()
-	httpPort, authPort, p2pPort := freePort(t), freePort(t), freePort(t)
+	httpPort, authPort, p2pPort, overlayPort := freePort(t), freePort(t), freePort(t), freePort(t)
 	cmd := exec.CommandContext(t.Context(), bin, "--eez.enabled", "--chain=eez-devnet", "--datadir", dir, "--eez.sync.l1only=true",
 		"--eez.l1.rpc", l1.URL, "--eez.l1.poll=200ms", "--http.port", httpPort, "--http.api=eth,eez,admin", "--authrpc.port", authPort,
-		"--private.api.addr", "127.0.0.1:"+freePort(t), "--port", p2pPort, "--torrent.port", freePort(t), "--nodiscover")
+		"--private.api.addr", "127.0.0.1:"+freePort(t), "--port", p2pPort, "--torrent.port", freePort(t), "--nodiscover",
+		"--eez.p2p.listen=/ip4/127.0.0.1/tcp/"+overlayPort, "--eez.sequencer.address="+overlaySigner)
 	var output bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &output, &output
 	require.NoError(t, cmd.Start())
@@ -213,6 +232,9 @@ func TestFollowerBinary(t *testing.T) {
 	waitStatus(t, url, 3, 3)
 	_, err = (&net.Dialer{Timeout: time.Second}).DialContext(t.Context(), "tcp", "127.0.0.1:"+authPort)
 	require.Error(t, err, "the engine API is down")
+	conn, err := (&net.Dialer{Timeout: time.Second}).DialContext(t.Context(), "tcp", "127.0.0.1:"+overlayPort)
+	require.NoError(t, err, "the overlay listens")
+	require.NoError(t, conn.Close())
 
 	var info struct {
 		Enode string `json:"enode"`

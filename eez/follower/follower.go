@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/eez/config"
 	"github.com/erigontech/erigon/eez/deriver"
 	"github.com/erigontech/erigon/eez/l1"
+	"github.com/erigontech/erigon/eez/seqsig"
 	"github.com/erigontech/erigon/execution/chain"
 )
 
@@ -75,6 +76,9 @@ type Config struct {
 	// read every SequencerPoll, while it descends from the safe block.
 	Sequencer     Sequencer
 	SequencerPoll time.Duration
+	// Heads, when set, delivers the verified heads of the signed-head
+	// overlay.
+	Heads <-chan *seqsig.VerifiedHead
 	// Blobs serves the blobs of blob-backed batches; without it the
 	// follower cannot derive them.
 	Blobs l1.BlobSource

@@ -173,6 +173,79 @@ func TestSyncMode(t *testing.T) {
 	require.ErrorIs(t, err, ErrConfig, "without --eez.enabled")
 }
 
+func TestOverlayFlags(t *testing.T) {
+	const (
+		listen   = "--eez.p2p.listen=/ip4/0.0.0.0/tcp/9100"
+		address  = "--eez.sequencer.address=0x5fbdb2315678afecb367f032d93f642f64180aa3"
+		peerID   = "16Uiu2HAm8kegYGp6XeybmZAuNcnLosyjsRwZ44yLgfEuqLqYL9zt"
+		peerAddr = "/ip4/10.0.0.1/tcp/9100/p2p/" + peerID
+	)
+	follower := []string{"--eez.enabled", "--eez.l1.rpc=http://l1:8545"}
+
+	cfg, err := parse(t, append(follower, listen, address, "--eez.p2p.peers="+peerAddr)...)
+	require.NoError(t, err)
+	require.Equal(t, "/ip4/0.0.0.0/tcp/9100", cfg.P2PListen.String())
+	require.Len(t, cfg.P2PPeers, 1)
+	require.Equal(t, peerID, cfg.P2PPeers[0].ID.String())
+	require.Equal(t, "/ip4/10.0.0.1/tcp/9100", cfg.P2PPeers[0].Addrs[0].String())
+	require.Equal(t, common.HexToAddress("0x5fbdb2315678afecb367f032d93f642f64180aa3"), *cfg.SequencerAddress)
+	require.NoError(t, cfg.CheckNode())
+
+	cfg, err = parse(t, follower...)
+	require.NoError(t, err)
+	require.Nil(t, cfg.P2PListen, "no overlay")
+	require.Nil(t, cfg.SequencerAddress)
+
+	for name, args := range map[string][]string{
+		"listen without address":   {listen},
+		"address without listen":   {address},
+		"peers without listen":     {address, "--eez.p2p.peers=" + peerAddr},
+		"with the sequencer RPC":   {listen, address, "--eez.sequencer.rpc=http://seq:8545"},
+		"peers with sequencer RPC": {"--eez.p2p.peers=" + peerAddr, "--eez.sequencer.rpc=http://seq:8545"},
+		"listen port 0":            {"--eez.p2p.listen=/ip4/0.0.0.0/tcp/0", address},
+		"listen not TCP":           {"--eez.p2p.listen=/ip4/0.0.0.0/udp/9100", address},
+		"peer without id":          {listen, address, "--eez.p2p.peers=/ip4/10.0.0.1/tcp/9100"},
+		"DNS peer":                 {listen, address, "--eez.p2p.peers=/dns4/seq/tcp/9100/p2p/" + peerID},
+		"bad address":              {listen, "--eez.sequencer.address=0x12"},
+	} {
+		_, err := parse(t, append(follower, args...)...)
+		require.ErrorIs(t, err, ErrConfig, name)
+	}
+
+	_, err = parse(t, append(follower, "--eez.p2p.peers="+peerAddr)...)
+	require.ErrorIs(t, err, ErrConfig)
+	require.ErrorContains(t, err, "--eez.p2p.peers requires --eez.p2p.listen")
+
+	// The EEZ chain of an all-in-one node has no overlay yet.
+	for _, args := range [][]string{{listen, address}, {listen}, {address}, {"--eez.p2p.peers=" + peerAddr}} {
+		_, err := parse(t, append([]string{"--eez.enabled", "--eez.chain=eez-devnet"}, args...)...)
+		require.ErrorIs(t, err, ErrConfig, "all-in-one %v", args)
+	}
+}
+
+func TestCheckChainRefusesOverlay(t *testing.T) {
+	overlay, err := parse(t, "--eez.enabled", "--eez.l1.rpc=http://l1:8545",
+		"--eez.p2p.listen=/ip4/0.0.0.0/tcp/9100", "--eez.sequencer.address=0x5fbdb2315678afecb367f032d93f642f64180aa3")
+	require.NoError(t, err)
+	plain, err := parse(t, "--eez.enabled", "--eez.l1.rpc=http://l1:8545")
+	require.NoError(t, err)
+
+	signedHeads := networks.Devnet.Genesis.Config
+	require.Equal(t, config.Rollup0, signedHeads.L2.(*config.L2Config).RuleSet())
+	require.NoError(t, overlay.CheckChain(signedHeads))
+	require.NoError(t, plain.CheckChain(signedHeads))
+
+	for _, ruleSet := range []*config.RollupXConfig{{}, {FeeCollector: &common.Address{1}}} {
+		l2 := *signedHeads.L2.(*config.L2Config)
+		l2.RollupX = ruleSet
+		cc := *signedHeads
+		cc.L2 = &l2
+		require.True(t, config.IsRollupX(l2.RuleSet()))
+		require.ErrorIs(t, overlay.CheckChain(&cc), ErrConfig, "rule set %d", l2.RuleSet())
+		require.NoError(t, plain.CheckChain(&cc), "rule set %d", l2.RuleSet())
+	}
+}
+
 // initGenesis runs InitGenesis on genesis under the flags args.
 func initGenesis(t *testing.T, genesis *types.Genesis, args ...string) error {
 	t.Helper()

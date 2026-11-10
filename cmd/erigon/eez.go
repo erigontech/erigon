@@ -226,6 +226,9 @@ func startFollower(ctx context.Context, n *node.ErigonNode, stop interface{ Clos
 	if err != nil {
 		return nil, err
 	}
+	if err := cfg.CheckChain(chainConfig); err != nil {
+		return nil, err
+	}
 	db, ok := backend.ChainDB().(kv.TemporalRwDB)
 	if !ok {
 		return nil, fmt.Errorf("chain database %T is not temporal", backend.ChainDB())
@@ -253,6 +256,11 @@ func startFollower(ctx context.Context, n *node.ErigonNode, stop interface{ Clos
 	if !l1Only {
 		fc.Peers = follower.NewFetcher(backend.BackwardBlockDownloader(), backend, chain, logger)
 		fc.LoopBlockLimit = uint64(loopBlockLimit)
+	}
+	if cfg.P2PListen != nil {
+		if fc.Heads, err = startOverlay(n, cfg, chainConfig, logger); err != nil {
+			return nil, err
+		}
 	}
 	f, err := follower.New(reader, chain, chainConfig, fc, logger)
 	if err != nil {
