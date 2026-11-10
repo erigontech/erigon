@@ -2151,8 +2151,11 @@ type FrameValidationRequest struct {
 	state             protoimpl.MessageState `protogen:"open.v1"`
 	Transaction       []byte                 `protobuf:"bytes,1,opt,name=transaction,proto3" json:"transaction,omitempty"`
 	ExpectedBlockHash *typesproto.H256       `protobuf:"bytes,2,opt,name=expected_block_hash,json=expectedBlockHash,proto3" json:"expected_block_hash,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// Check the nonce without executing frames. Successful replies contain no
+	// payer or dependency information in this mode.
+	NonceOnly     bool `protobuf:"varint,3,opt,name=nonce_only,json=nonceOnly,proto3" json:"nonce_only,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *FrameValidationRequest) Reset() {
@@ -2197,6 +2200,13 @@ func (x *FrameValidationRequest) GetExpectedBlockHash() *typesproto.H256 {
 		return x.ExpectedBlockHash
 	}
 	return nil
+}
+
+func (x *FrameValidationRequest) GetNonceOnly() bool {
+	if x != nil {
+		return x.NonceOnly
+	}
+	return false
 }
 
 type FrameValidationReply struct {
@@ -2884,10 +2894,12 @@ const file_remote_ethbackend_proto_rawDesc = "" +
 	"\x06hashes\x18\x01 \x03(\v2\v.types.H256R\x06hashes\"T\n" +
 	"&EngineGetPayloadBodiesByRangeV1Request\x12\x14\n" +
 	"\x05start\x18\x01 \x01(\x04R\x05start\x12\x14\n" +
-	"\x05count\x18\x02 \x01(\x04R\x05count\"w\n" +
+	"\x05count\x18\x02 \x01(\x04R\x05count\"\x96\x01\n" +
 	"\x16FrameValidationRequest\x12 \n" +
 	"\vtransaction\x18\x01 \x01(\fR\vtransaction\x12;\n" +
-	"\x13expected_block_hash\x18\x02 \x01(\v2\v.types.H256R\x11expectedBlockHash\"\xe9\x03\n" +
+	"\x13expected_block_hash\x18\x02 \x01(\v2\v.types.H256R\x11expectedBlockHash\x12\x1d\n" +
+	"\n" +
+	"nonce_only\x18\x03 \x01(\bR\tnonceOnly\"\xe9\x03\n" +
 	"\x14FrameValidationReply\x12\x14\n" +
 	"\x05valid\x18\x01 \x01(\bR\x05valid\x12!\n" +
 	"\x05payer\x18\x02 \x01(\v2\v.types.H160R\x05payer\x12&\n" +

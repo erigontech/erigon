@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/gointerfaces"
@@ -45,11 +46,15 @@ import (
 
 type countingFrameValidationServer struct {
 	remoteproto.ETHBACKENDServer
-	calls int
+	calls       int
+	nonceChecks int
 }
 
 func (s *countingFrameValidationServer) FrameValidation(ctx context.Context, req *remoteproto.FrameValidationRequest) (*remoteproto.FrameValidationReply, error) {
 	s.calls++
+	if req.NonceOnly {
+		s.nonceChecks++
+	}
 	return s.ETHBACKENDServer.FrameValidation(ctx, req)
 }
 
@@ -65,11 +70,13 @@ func TestFramePoolConsumedNonceReply(t *testing.T) {
 	}}
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis))
 	for _, tc := range []struct {
-		name string
-		key  uint256.Int
+		name   string
+		key    uint256.Int
+		pooled bool
 	}{
 		{name: "legacy"},
 		{name: "keyed", key: uint256.Int{1}},
+		{name: "keyed with sender conflict", key: uint256.Int{1}, pooled: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx, logger := t.Context(), log.New()
@@ -90,6 +97,20 @@ func TestFramePoolConsumedNonceReply(t *testing.T) {
 			var encoded bytes.Buffer
 			require.NoError(t, frame.MarshalBinary(&encoded))
 			server := txpool.NewGrpcServer(ctx, pool, poolDB, nil, *cfg.ChainID, logger)
+			wantCalls := 1
+			if tc.pooled {
+				blocker := &types.FrameTransaction{
+					NonceKeys: []uint256.Int{{2}}, ChainID: *cfg.ChainID, SenderAddress: sender,
+					Frames: []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000, State: params.StateGasPerStorageSet}}},
+					Fees:   frame.Fees,
+				}
+				var encodedBlocker bytes.Buffer
+				require.NoError(t, blocker.MarshalBinary(&encodedBlocker))
+				reply, err := server.Add(ctx, &txpoolproto.AddRequest{RlpTxs: [][]byte{encodedBlocker.Bytes()}})
+				require.NoError(t, err)
+				require.Equal(t, []txpoolproto.ImportResult{txpoolproto.ImportResult_SUCCESS}, reply.Imported, "%v", reply.Errors)
+				wantCalls++
+			}
 			request := &txpoolproto.AddRequest{RlpTxs: [][]byte{encoded.Bytes(), encoded.Bytes()}}
 			// The duplicate within the batch and a later submission reach different cache checks.
 			for range 2 {
@@ -100,7 +121,8 @@ func TestFramePoolConsumedNonceReply(t *testing.T) {
 					require.Equal(t, txpoolproto.ImportResult_STALE, reply.Imported[i])
 					require.Equal(t, txpoolcfg.NonceTooLow.String(), reply.Errors[i])
 				}
-				require.Equal(t, 1, backend.calls, "cached rejections must preserve the reason without another simulation")
+				require.Equal(t, wantCalls, backend.calls, "cached rejections must preserve the reason without another simulation")
+				require.Equal(t, wantCalls-1, backend.nonceChecks, "sender conflicts must use only the nonce precheck")
 				request.RlpTxs = request.RlpTxs[:1]
 			}
 			hash := frame.Hash()

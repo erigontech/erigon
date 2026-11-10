@@ -187,14 +187,15 @@ func (p *TxPool) validateFrame(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardReas
 	return txpoolcfg.Success
 }
 
-// prepareFrames checks pool policy under the lock, then simulates against the
-// captured head without holding the lock. applyFrameValidation checks the state
+// prepareFrames checks pool policy under the lock, then validates against the
+// captured head without holding the lock. Sender conflicts need only a keyed-nonce
+// check; other candidates run the prefix. applyFrameValidation checks the state
 // generation under the lock before these results can be used for admission.
 func (p *TxPool) prepareFrames(ctx context.Context, txns TxnSlots) frameValidationBatch {
 	batch, stateBlockHash := p.precheckFrames(txns)
 	for _, txn := range txns.Txns {
-		if result, ok := batch.results[txn]; ok && result.reason == txpoolcfg.Success {
-			result = p.simulateFrameResult(ctx, txn, batch.generation, stateBlockHash)
+		if result, ok := batch.results[txn]; ok && (result.reason == txpoolcfg.Success || result.senderConflict && txn.hasKeyedNonce()) {
+			result = p.validateFrameState(ctx, txn, batch.generation, stateBlockHash, result.senderConflict)
 			batch.results[txn] = result
 			if result.headChanged && p.waitForFrameStateChange(ctx, batch.generation) {
 				break
@@ -312,8 +313,8 @@ func (p *TxPool) applyFrameValidation(ctx context.Context, txns TxnSlots, batch 
 	return reasons, nil
 }
 
-func (p *TxPool) simulateFrameResult(ctx context.Context, txn *TxnSlot, generation uint64, stateBlockHash common.Hash) frameValidationResult {
-	result, err := p.simulateFrame(ctx, txn, generation, stateBlockHash)
+func (p *TxPool) validateFrameState(ctx context.Context, txn *TxnSlot, generation uint64, stateBlockHash common.Hash, nonceOnly bool) frameValidationResult {
+	result, err := p.requestFrameValidation(ctx, txn, generation, stateBlockHash, nonceOnly)
 	if err != nil {
 		// Backend failures do not establish invalidity. New submissions may retry
 		// a head mismatch; admitted transactions remain parked.
@@ -323,7 +324,7 @@ func (p *TxPool) simulateFrameResult(ctx context.Context, txn *TxnSlot, generati
 	return result
 }
 
-func (p *TxPool) simulateFrame(ctx context.Context, txn *TxnSlot, generation uint64, stateBlockHash common.Hash) (frameValidationResult, error) {
+func (p *TxPool) requestFrameValidation(ctx context.Context, txn *TxnSlot, generation uint64, stateBlockHash common.Hash, nonceOnly bool) (frameValidationResult, error) {
 	if p.ethBackend == nil {
 		return frameValidationResult{}, errors.New("frame validation backend is unavailable")
 	}
@@ -346,13 +347,16 @@ func (p *TxPool) simulateFrame(ctx context.Context, txn *TxnSlot, generation uin
 	rejected = rejected && rejection.applies(p, generation)
 	p.lock.Unlock()
 	if rejected {
-		return rejection.validationResult(), nil
+		if rejection.blocker == (common.Hash{}) || !txn.hasKeyedNonce() {
+			return rejection.validationResult(), nil
+		}
+		nonceOnly = true
 	}
 	var data bytes.Buffer
 	if err := txn.Txn.MarshalBinary(&data); err != nil {
 		return frameValidationResult{}, err
 	}
-	req := &remoteproto.FrameValidationRequest{Transaction: data.Bytes()}
+	req := &remoteproto.FrameValidationRequest{Transaction: data.Bytes(), NonceOnly: nonceOnly}
 	if stateBlockHash != (common.Hash{}) {
 		req.ExpectedBlockHash = gointerfaces.ConvertHashToH256(stateBlockHash)
 	}
@@ -365,12 +369,18 @@ func (p *TxPool) simulateFrame(ctx context.Context, txn *TxnSlot, generation uin
 		if reply.RejectionReason == remoteproto.FrameValidationReply_NONCE_TOO_LOW {
 			reason = txpoolcfg.NonceTooLow
 		}
-		p.lock.Lock()
-		if generation == p.stateGeneration {
-			p.frameRejections.Add(hash, frameRejection{generation: generation, reason: reason})
+		if !nonceOnly || reason == txpoolcfg.NonceTooLow {
+			p.lock.Lock()
+			if generation == p.stateGeneration {
+				p.frameRejections.Add(hash, frameRejection{generation: generation, reason: reason})
+			}
+			p.lock.Unlock()
 		}
-		p.lock.Unlock()
-		return frameValidationResult{reason: reason}, nil
+		return frameValidationResult{reason: reason, senderConflict: nonceOnly}, nil
+	}
+	if nonceOnly {
+		// A valid nonce does not clear the pool's sender conflict.
+		return frameValidationResult{reason: txpoolcfg.InvalidFrame, senderConflict: true}, nil
 	}
 	if reply.Payer.GetHi() == nil ||
 		reply.MaxCost.GetHi() == nil || reply.MaxCost.GetLo() == nil ||
@@ -673,7 +683,7 @@ func (p *TxPool) revalidateFrames(ctx context.Context, parked []*metaTxn, genera
 	validationCtx, cancel := context.WithTimeout(ctx, frameValidationTimeout)
 	defer cancel()
 	for _, mt := range parked {
-		result := p.simulateFrameResult(validationCtx, mt.TxnSlot, generation, stateBlockHash)
+		result := p.validateFrameState(validationCtx, mt.TxnSlot, generation, stateBlockHash, false)
 		if result.reason == txpoolcfg.FrameValidationUnavailable {
 			// Keep admitted transactions parked. The next block update retries
 			// them even without further dependency changes.

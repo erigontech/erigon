@@ -497,9 +497,8 @@ func (s *EthBackendServer) SubscribeReceipts(server remoteproto.ETHBACKEND_Subsc
 	return errors.New("no receipts filter available")
 }
 
-// FrameValidation evaluates the pool validation prefix against the published head,
-// including state announced before database commit. It returns the payer and state
-// dependencies needed for admission and later revalidation.
+// FrameValidation uses the published head, including state announced before database
+// commit, for both nonce checks and pool-prefix simulation.
 func (s *EthBackendServer) FrameValidation(ctx context.Context, req *remoteproto.FrameValidationRequest) (*remoteproto.FrameValidationReply, error) {
 	txn, err := types.DecodeTransaction(req.Transaction)
 	if err != nil {
@@ -521,7 +520,7 @@ func (s *EthBackendServer) FrameValidation(ctx context.Context, req *remoteproto
 			return nil, err
 		}
 		sd, seq := s.notifications.Events.OverlaySnapshot()
-		result, err := s.validateFrameTransaction(ctx, frame, sd, expectedHash)
+		result, err := s.validateFrameTransaction(ctx, frame, sd, expectedHash, req.NonceOnly)
 		// Notifications precede commit. Retry if the published head changes while
 		// we open the database snapshot or validate against its overlay.
 		if _, current := s.notifications.Events.OverlaySnapshot(); current == seq {
@@ -530,7 +529,7 @@ func (s *EthBackendServer) FrameValidation(ctx context.Context, req *remoteproto
 	}
 }
 
-func (s *EthBackendServer) validateFrameTransaction(ctx context.Context, frame *types.FrameTransaction, sd *execctx.SharedDomains, expectedHash common.Hash) (*remoteproto.FrameValidationReply, error) {
+func (s *EthBackendServer) validateFrameTransaction(ctx context.Context, frame *types.FrameTransaction, sd *execctx.SharedDomains, expectedHash common.Hash, nonceOnly bool) (*remoteproto.FrameValidationReply, error) {
 	tx, err := s.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -569,35 +568,18 @@ func (s *EthBackendServer) validateFrameTransaction(ctx context.Context, frame *
 	ibs := state.New(reader)
 	defer ibs.Close()
 	transactions.VersionedCallState(ibs)
-	// The validation hook rejects BLOCKHASH but does not stop the opcode from calling GetHash, where
-	// an error would be taken for the node's failure, not for an invalid transaction.
-	noBlockHash := func(uint64) (common.Hash, error) { return common.Hash{}, nil }
-	// State comes from the published head, but inclusion would happen in the next
-	// block. Its context must account for fee changes and fork activation.
-	blockContext := protocol.NewEVMBlockContext(header, noBlockHash, nil, accounts.ZeroAddress, s.chainConfig)
-	blockContext.BlockNumber++
-	blockContext.Time = max(header.Time+s.chainConfig.SecondsPerSlot(), uint64(time.Now().Unix()))
-	if header.BaseFee != nil {
-		blockContext.BaseFee = *misc.CalcBaseFee(s.chainConfig, header)
-	}
-	if frame.GetBlobGas() != 0 {
-		excess := misc.CalcExcessBlobGas(s.chainConfig, header, blockContext.Time)
-		blockContext.BlobBaseFee, err = misc.GetBlobGasPrice(s.chainConfig, excess, blockContext.Time)
+	var result *protocol.FrameValidation
+	if nonceOnly {
+		_, err = protocol.CheckFrameNonce(ibs, frame, true)
+	} else {
+		var evm *vm.EVM
+		evm, err = s.newFrameValidationEVM(frame, header, ibs)
 		if err != nil {
 			return nil, err
 		}
+		defer context.AfterFunc(ctx, evm.Cancel)()
+		result, err = protocol.ValidateFrameTransaction(evm, frame)
 	}
-	// Fee eligibility belongs to pool admission. Clamp fees here so low fee caps
-	// do not become cached failures of prefix validation.
-	if blockContext.BaseFee.Gt(frame.GetFeeCap()) {
-		blockContext.BaseFee.Set(frame.GetFeeCap())
-	}
-	if blockContext.BlobBaseFee.Gt(&frame.Fees.BlobFeeCap) {
-		blockContext.BlobBaseFee.Set(&frame.Fees.BlobFeeCap)
-	}
-	evm := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, s.chainConfig, vm.Config{})
-	defer context.AfterFunc(ctx, evm.Cancel)()
-	result, err := protocol.ValidateFrameTransaction(evm, frame)
 	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return nil, ctxErr
@@ -609,6 +591,9 @@ func (s *EthBackendServer) validateFrameTransaction(ctx context.Context, frame *
 			return &remoteproto.FrameValidationReply{RejectionReason: remoteproto.FrameValidationReply_NONCE_TOO_LOW}, nil
 		}
 		return &remoteproto.FrameValidationReply{}, nil
+	}
+	if nonceOnly {
+		return &remoteproto.FrameValidationReply{Valid: true}, nil
 	}
 	dependencies := make([]*typesproto.H160, len(result.Dependencies))
 	for i := range result.Dependencies {
@@ -625,6 +610,37 @@ func (s *EthBackendServer) validateFrameTransaction(ctx context.Context, frame *
 		MaxCost: gointerfaces.ConvertUint256IntToH256(&result.MaxCost), PayerBalance: gointerfaces.ConvertUint256IntToH256(&result.PayerBalance),
 		Paymaster: result.Paymaster, Deadline: result.Deadline, Dependencies: dependencies, CreationNonces: creationNonces,
 	}, nil
+}
+
+func (s *EthBackendServer) newFrameValidationEVM(frame *types.FrameTransaction, header *types.Header, ibs *state.IntraBlockState) (*vm.EVM, error) {
+	// The validation hook rejects BLOCKHASH but does not stop the opcode from calling GetHash, where
+	// an error would be taken for the node's failure, not for an invalid transaction.
+	noBlockHash := func(uint64) (common.Hash, error) { return common.Hash{}, nil }
+	// State comes from the published head, but inclusion would happen in the next
+	// block. Its context must account for fee changes and fork activation.
+	blockContext := protocol.NewEVMBlockContext(header, noBlockHash, nil, accounts.ZeroAddress, s.chainConfig)
+	blockContext.BlockNumber++
+	blockContext.Time = max(header.Time+s.chainConfig.SecondsPerSlot(), uint64(time.Now().Unix()))
+	if header.BaseFee != nil {
+		blockContext.BaseFee = *misc.CalcBaseFee(s.chainConfig, header)
+	}
+	if frame.GetBlobGas() != 0 {
+		excess := misc.CalcExcessBlobGas(s.chainConfig, header, blockContext.Time)
+		var err error
+		blockContext.BlobBaseFee, err = misc.GetBlobGasPrice(s.chainConfig, excess, blockContext.Time)
+		if err != nil {
+			return nil, err
+		}
+	}
+	// Fee eligibility belongs to pool admission. Clamp fees here so low fee caps
+	// do not become cached failures of prefix validation.
+	if blockContext.BaseFee.Gt(frame.GetFeeCap()) {
+		blockContext.BaseFee.Set(frame.GetFeeCap())
+	}
+	if blockContext.BlobBaseFee.Gt(&frame.Fees.BlobFeeCap) {
+		blockContext.BlobBaseFee.Set(&frame.Fees.BlobFeeCap)
+	}
+	return vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, s.chainConfig, vm.Config{}), nil
 }
 
 func (s *EthBackendServer) BlockForTxNum(ctx context.Context, req *remoteproto.BlockForTxNumRequest) (*remoteproto.BlockForTxNumResponse, error) {
