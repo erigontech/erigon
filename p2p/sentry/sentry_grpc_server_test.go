@@ -1739,6 +1739,7 @@ func TestRunPeer_InvalidMessageCodeKicksPeer(t *testing.T) {
 		{name: "unassigned code on eth/68", version: direct.ETH68, code: 0x0b},
 		{name: "NewBlock on eth/69", version: direct.ETH69, code: eth.NewBlockMsg},
 		{name: "NewBlockHashes on eth/69", version: direct.ETH69, code: eth.NewBlockHashesMsg},
+		{name: "NewBlock on eth/71", version: direct.ETH71, code: eth.NewBlockMsg},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
