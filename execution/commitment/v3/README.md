@@ -23,8 +23,9 @@ storage root   41 || keccak(address) || 00
 ```
 
 The v3 key space is disjoint from V1 `HexToCompact` commitment keys. It is not disjoint from V2
-keys: `EncodeKeyV2([4,0])` equals `40 00`. The package therefore requires a V1-keyed commitment
-domain and rejects V2-keyed domains.
+keys: `EncodeKeyV2([4,0])` equals `40 00`. A v3 domain therefore holds only v3 keys: convert reads
+V1- or V2-keyed legacy files and writes v3 records, and startup refuses legacy commitment files
+while v3 is enabled.
 
 ## Records
 
