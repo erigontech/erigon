@@ -585,7 +585,7 @@ func TestConversion(t *testing.T) {
 					commitmenttest.AccountAt(owner[:], commitmenttest.AccountSpec{Nonce: 1, Balance: 1, CodeHash: empty.CodeHash}),
 					{Key: storageKey, Storage: []byte{1}},
 				})
-				data := make([]byte, 4)
+				data := []byte{0, 0, 0, 0}
 				var mask uint16
 				for nib := range 16 {
 					cell, ok := tc.cells[nib]
