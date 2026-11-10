@@ -323,3 +323,16 @@ func TestCodeLent_UncommittedCodeStaysOnTheNormalPath(t *testing.T) {
 		require.Zero(t, reader.lends)
 	})
 }
+
+func TestCodeLent_RepeatedReadKeepsTheBytes(t *testing.T) {
+	ibs, reader, addr, code := newLendingRead(t, NewVersionMap(nil))
+	for range 3 {
+		got, err := ibs.GetCodeLent(addr)
+		require.NoError(t, err)
+		require.Equal(t, code, got)
+	}
+	require.Equal(t, 1, reader.lends, "a repeated read must not decode again")
+	read, ok := ibs.versionedReads.GetCode(addr)
+	require.True(t, ok)
+	require.Equal(t, code, read.Val.Bytes)
+}

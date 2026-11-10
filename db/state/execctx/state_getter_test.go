@@ -824,3 +824,34 @@ func TestStateGetterLendCodeLeavesTheCacheEmpty(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, lent, "a cached code stays on the normal path")
 }
+
+func TestStateGetterLendCodeRefusesAnAccountWrittenInTheBatch(t *testing.T) {
+	ctx := t.Context()
+	db := newTestDb(t, 16)
+	addr := make([]byte, 20)
+	addr[0] = 0x19
+	committedCode := bytes.Repeat([]byte{0x19}, 1024)
+	batchHash := crypto.Keccak256Hash([]byte{0x1a})
+
+	roTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	tx := codeBufTx{TemporalTx: roTx, code: map[string][]byte{string(addr): committedCode}}
+
+	sc := newSmallStateCache()
+	t.Cleanup(sc.Close)
+	sd, err := execctx.NewSharedDomains(ctx, tx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+	sd.BindStateCache(sc)
+	account := accounts.SerialiseV3(&accounts.Account{Nonce: 1, CodeHash: accounts.InternCodeHash(batchHash)})
+	require.NoError(t, sd.DomainPut(kv.AccountsDomain, tx, addr, account, 5, nil))
+
+	var buf []byte
+	lender := sd.AsStateGetter(tx, execctxapi.StateGetterOptions{}.WithCodeBuf(&buf)).(interface {
+		LendCode(addr []byte, txNum uint64) ([]byte, bool, error)
+	})
+	_, lent, err := lender.LendCode(addr, 5)
+	require.NoError(t, err)
+	require.False(t, lent, "the batch's code hash must not be paired with the committed bytes")
+}

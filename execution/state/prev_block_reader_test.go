@@ -42,3 +42,27 @@ func TestPrevBlockReader_SwitchesPerBlock(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, uint64(5), acc.Balance.Uint64(), "committed block dropped from the prev-block list")
 }
+
+type lendingBaseReader struct{ *fakeBaseReader }
+
+func (lendingBaseReader) LendAccountCode(accounts.Address) ([]byte, bool, error) {
+	return []byte{0x60}, true, nil
+}
+
+func TestPrevBlockReader_LendsOnlyOverTheRawBase(t *testing.T) {
+	t.Parallel()
+	addr := getAddress(1)
+	reg := NewPrevBlockList()
+	reg.PushHead(10, 10, mapWithBalance(addr, 100))
+	o := NewPrevBlockReader(lendingBaseReader{&fakeBaseReader{}}, reg)
+
+	o.SetBlock(11)
+	_, lent, err := o.LendAccountCode(addr)
+	require.NoError(t, err)
+	require.False(t, lent, "a prior block may hold newer code")
+
+	o.SetBlock(10)
+	_, lent, err = o.LendAccountCode(addr)
+	require.NoError(t, err)
+	require.True(t, lent)
+}

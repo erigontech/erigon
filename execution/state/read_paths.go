@@ -1290,7 +1290,7 @@ func readCode(s *IntraBlockState, addr accounts.Address) (accounts.Code, ReadSou
 func readCodeLending(s *IntraBlockState, addr accounts.Address, lend bool) (accounts.Code, ReadSource, Version, error) {
 	if s.warmReadable(addr) {
 		if tr, ok := s.versionedReads.GetCode(addr); ok && warmSource(tr.Source) {
-			code, err := s.recordedCode(addr, tr, lend)
+			code, err := s.recordedCode(addr, tr)
 			return code, tr.Source, tr.Version, err
 		}
 	}
@@ -1317,7 +1317,7 @@ func readCodeLending(s *IntraBlockState, addr accounts.Address, lend bool) (acco
 		return r.vwCode.Val, r.source, r.version, nil
 	case outcomeReadSetHit:
 		tr, _ := s.versionedReads.GetCode(addr)
-		code, err := s.recordedCode(addr, tr, lend)
+		code, err := s.recordedCode(addr, tr)
 		return code, r.source, r.version, err
 	case outcomeMapDone:
 		v := r.mapCodeVal
@@ -1365,14 +1365,9 @@ type codeLender interface {
 }
 
 // recordedCode returns a recorded read's code, re-reading bytes the record dropped.
-func (ibs *IntraBlockState) recordedCode(addr accounts.Address, tr VersionedRead[accounts.Code], lend bool) (accounts.Code, error) {
+func (ibs *IntraBlockState) recordedCode(addr accounts.Address, tr VersionedRead[accounts.Code]) (accounts.Code, error) {
 	if !codeBytesDropped(tr.Val) {
 		return tr.Val, nil
-	}
-	if lend {
-		if code, lent, err := ibs.lendOriginCode(addr); lent || err != nil {
-			return code, err
-		}
 	}
 	code, err := ibs.originCodeDirect(addr)
 	if err != nil {
