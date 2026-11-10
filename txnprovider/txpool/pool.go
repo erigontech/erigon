@@ -1538,13 +1538,40 @@ func (p *TxPool) prepareTxns(ctx context.Context, txns TxnSlots, sources []remot
 	if len(indices) == 0 {
 		return nil, nil, nil
 	}
+	batchLen := len(txns.Txns)
+	hasFrames := slices.ContainsFunc(txns.Txns, func(txn *TxnSlot) bool { return txn.TxType() == FrameTxnType })
 
 	var precheckReasons []txpoolcfg.DiscardReason
 	var goodTxns TxnSlots
 	err := p.withLockedState(ctx, &prechecked, func(_ kv.TemporalTx, view kvcache.CacheView) error {
 		var err error
 		precheckReasons, goodTxns, _, err = p.validateTxns(&prechecked, view, nil, nil)
-		return err
+		if err != nil || p.cfg.MaxNonceGap == 0 || hasFrames {
+			return err
+		}
+		for i, txn := range prechecked.Txns {
+			if txn.TxType() != BlobTxnType || precheckReasons[i] != txpoolcfg.NotSet {
+				continue
+			}
+			reason, found := p.discardReasonsLRU.Peek(string(txn.IDHash[:]))
+			if !found || reason != txpoolcfg.NonceTooDistant || p.hasParkedLegacyFrame(txn.SenderID) {
+				continue
+			}
+			nonce, _, _, err := p.senders.info(view, txn.SenderID)
+			if err != nil {
+				return err
+			}
+			if txn.Nonce <= nonce {
+				continue
+			}
+			// Pool and batch counts overestimate how far predecessors can advance the nonce.
+			predecessors := uint64(p.all.count(txn.SenderID)) + uint64(batchLen) - 1
+			gap := txn.Nonce - nonce
+			if gap > p.cfg.MaxNonceGap && gap-p.cfg.MaxNonceGap > predecessors {
+				precheckReasons[i] = txpoolcfg.NonceTooDistant
+			}
+		}
+		return nil
 	})
 	if err != nil {
 		return nil, nil, err
@@ -2250,9 +2277,12 @@ func (p *TxPool) processMinedFinalizedBlobs(minedTxns []*TxnSlot, finalizedBlock
 
 	// Add mined blobs
 	minedBlock := p.lastSeenBlock.Load()
-	p.minedBlobTxnsByBlock[minedBlock] = make([]*metaTxn, 0)
+	if p.minedBlobTxnsByBlock[minedBlock] == nil {
+		p.minedBlobTxnsByBlock[minedBlock] = make([]*metaTxn, 0) // a same-height reorg reuses the block number, and its entries stay indexed
+	}
 	for _, txn := range minedTxns {
 		if txn.HasBlobs() {
+			p.deleteMinedBlobTxn(string(txn.IDHash[:])) // a txn mined again: finalizing its old block must not drop the new entry
 			mt := &metaTxn{TxnSlot: txn, minedBlockNum: minedBlock}
 			p.minedBlobTxnsByBlock[minedBlock] = append(p.minedBlobTxnsByBlock[minedBlock], mt)
 			mt.bestIndex = len(p.minedBlobTxnsByBlock[minedBlock]) - 1

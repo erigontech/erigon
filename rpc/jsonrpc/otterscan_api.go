@@ -448,10 +448,7 @@ func (api *OtterscanAPIImpl) GetBlockTransactions(ctx context.Context, number rp
 		}
 		txs = append(txs, rpcTx)
 
-		marshalledRcpt := ethutils.MarshalReceipt(receipt, txn, chainConfig, b.HeaderNoCopy(), true, false)
-		marshalledRcpt.Logs = nil
-		marshalledRcpt.LogsBloom = nil
-		result = append(result, marshalledRcpt)
+		result = append(result, ethutils.MarshalReceiptWithoutLogs(receipt, txn, chainConfig, b.HeaderNoCopy()))
 	}
 
 	response := map[string]any{}
