@@ -67,6 +67,7 @@ const (
 	InvalidRequestPrefix      = 0x01
 	ServerErrorPrefix         = 0x02
 	ResourceUnavailablePrefix = 0x03
+	StreamDeadline            = 5 * time.Second
 )
 
 func NewConsensusHandlers(
@@ -187,7 +188,7 @@ func (c *ConsensusHandlers) wrapStreamHandler(name string, fn func(s network.Str
 		}
 
 		// SetDeadline covers both directions.
-		if err := s.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		if err := s.SetDeadline(time.Now().Add(StreamDeadline)); err != nil {
 			log.Trace("failed to set stream deadline", "err", err)
 			_ = s.Reset()
 			_ = s.Close()
