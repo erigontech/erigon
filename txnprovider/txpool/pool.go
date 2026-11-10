@@ -1201,6 +1201,19 @@ func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardRe
 		}
 	}
 
+	if !isLocal && (p.all.blobCount(txn.SenderID)+uint64(blobCount)) > p.cfg.BlobSlots {
+		if txn.Traced {
+			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx marked as spamming (too many blobs) idHash=%x blobs=%d, limit=%d", txn.IDHash, p.all.blobCount(txn.SenderID)+uint64(blobCount), p.cfg.BlobSlots))
+		}
+		return txpoolcfg.Spammer
+	}
+	if p.totalBlobsInPool.Load() >= p.cfg.TotalBlobPoolLimit {
+		if txn.Traced {
+			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx total blobs limit reached in pool limit=%d current blobs=%d", p.cfg.TotalBlobPoolLimit, p.totalBlobsInPool.Load()))
+		}
+		return txpoolcfg.BlobPoolOverflow
+	}
+
 	if p.isOsaka() {
 		err := libkzg.VerifyCellProofBatch(blobs, commitments, proofs)
 		if err != nil {
@@ -1215,18 +1228,6 @@ func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardRe
 		}
 	}
 
-	if !isLocal && (p.all.blobCount(txn.SenderID)+uint64(blobCount)) > p.cfg.BlobSlots {
-		if txn.Traced {
-			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx marked as spamming (too many blobs) idHash=%x slots=%d, limit=%d", txn.IDHash, p.all.count(txn.SenderID), p.cfg.AccountSlots))
-		}
-		return txpoolcfg.Spammer
-	}
-	if p.totalBlobsInPool.Load() >= p.cfg.TotalBlobPoolLimit {
-		if txn.Traced {
-			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx total blobs limit reached in pool limit=%x current blobs=%d", p.cfg.TotalBlobPoolLimit, p.totalBlobsInPool.Load()))
-		}
-		return txpoolcfg.BlobPoolOverflow
-	}
 	return txpoolcfg.Success
 }
 
@@ -2150,11 +2151,17 @@ func (p *TxPool) deleteMinedBlobTxn(hash string) {
 	if !exists {
 		return
 	}
-	l := len(p.minedBlobTxnsByBlock[mt.minedBlockNum])
-	if l > 1 {
-		p.minedBlobTxnsByBlock[mt.minedBlockNum][mt.bestIndex] = p.minedBlobTxnsByBlock[mt.minedBlockNum][l-1]
+	items := p.minedBlobTxnsByBlock[mt.minedBlockNum]
+	last := len(items) - 1
+	if mt.bestIndex != last {
+		moved := items[last]
+		items[mt.bestIndex] = moved
+		moved.bestIndex = mt.bestIndex
 	}
-	p.minedBlobTxnsByBlock[mt.minedBlockNum] = p.minedBlobTxnsByBlock[mt.minedBlockNum][:l-1]
+	items[last] = nil
+	items = items[:last]
+	p.minedBlobTxnsByBlock[mt.minedBlockNum] = items
+	mt.bestIndex = -1
 	delete(p.minedBlobTxnsByHash, hash)
 }
 
