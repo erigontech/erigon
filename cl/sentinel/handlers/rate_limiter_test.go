@@ -292,10 +292,6 @@ func TestRateLimiter_Cleanup(t *testing.T) {
 	rl.allowRequest(peer, proto, 1)
 	rl.allowRequest(peer, proto, 1) // triggers punishment
 
-	// Also create a concurrency entry and release it.
-	rl.acquireConcurrency(peer)
-	rl.releaseConcurrency(peer)
-
 	key := peerProtocolKey{peerID: peer, protocol: proto}
 
 	// Verify entries exist.
@@ -303,8 +299,6 @@ func TestRateLimiter_Cleanup(t *testing.T) {
 	require.True(t, hasBucket)
 	_, hasPunishment := rl.punished.Load(key)
 	require.True(t, hasPunishment)
-	_, hasConcurrency := rl.concurrency.Load(peer)
-	require.True(t, hasConcurrency)
 
 	// Run cleanup — bucket and punishment should survive (recently used / not expired).
 	rl.cleanup()
@@ -313,8 +307,16 @@ func TestRateLimiter_Cleanup(t *testing.T) {
 	require.True(t, hasBucket, "recent bucket should survive cleanup")
 	_, hasPunishment = rl.punished.Load(key)
 	require.True(t, hasPunishment, "unexpired punishment should survive cleanup")
+}
 
-	// Concurrency entries are intentionally not cleaned up (negligible memory).
-	_, hasConcurrency = rl.concurrency.Load(peer)
-	require.True(t, hasConcurrency, "concurrency entries should persist")
+func TestRateLimiter_ConcurrencyEntryFreedWithLastRelease(t *testing.T) {
+	rl := newPeerRateLimiter()
+	peer := "16Uiu2peer1"
+
+	require.True(t, rl.acquireConcurrency(peer))
+	require.True(t, rl.acquireConcurrency(peer))
+	rl.releaseConcurrency(peer)
+	require.Equal(t, 1, rl.concurrency[peer])
+	rl.releaseConcurrency(peer)
+	require.NotContains(t, rl.concurrency, peer)
 }

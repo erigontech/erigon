@@ -1027,7 +1027,7 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config) error {
 
 	var testingEntry *rpc.API
 	if slices.Contains(httpRpcCfg.API, "testing") {
-		entry := engineapi.NewTestingRPCEntry(s.engineBackendRPC, s.logger, s.chainDB)
+		entry := engineapi.NewTestingRPCEntry(s.engineBackendRPC)
 		testingEntry = &entry
 	}
 	// Eager witness cache (embedded RPC only). A datadir built with commitment history
