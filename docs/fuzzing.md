@@ -80,8 +80,8 @@ go test ./db/seg/ -run '^FuzzCompress$'
 
 [`.github/workflows/test-fuzz.yml`](../.github/workflows/test-fuzz.yml) runs
 every target nightly (03:00 UTC) on a free GitHub-hosted runner, each for a
-short `fuzztime`, with a per-target corpus cache so each run builds on the
-previous night's findings. It can also be triggered manually
+short `fuzztime`, with a per-target corpus kept as a `fuzz-corpus-<target>`
+artifact so each run builds on the previous night's findings. It can also be triggered manually
 (`workflow_dispatch`) with a custom `fuzztime` for a deeper ad-hoc run.
 
 This is intentionally **not** part of the PR/merge CI gate: seed-corpus

@@ -18,6 +18,10 @@ inputs:
     description: "Extra segment appended to build cache key (e.g. matrix.test-group)"
     required: false
     default: ''
+  build-cache:
+    description: "Set to 'false' to skip the Go build cache, for jobs that do not save one"
+    required: false
+    default: 'true'
   cache-namespace:
     description: >
       Workflow segment of the Go cache keys. Defaults to the top-level workflow
@@ -315,6 +319,7 @@ runs:
         done
 
     - id: restore-build-cache
+      if: ${{ inputs.build-cache != 'false' }}
       uses: ./.github/actions/restore-build-cache
       with:
         gocache-path: ${{ steps.go-env.outputs.build }}
@@ -323,6 +328,7 @@ runs:
         matrix-key: ${{ inputs.build-cache-extra-key }}
 
     - name: Export build cache key
+      if: ${{ inputs.build-cache != 'false' }}
       shell: bash
       run: echo "ERIGON_CI_GOCACHE_KEY=${{ steps.restore-build-cache.outputs.primary-key }}" >> "$GITHUB_ENV"
 
