@@ -438,7 +438,7 @@ var (
 	}
 	RpcBatchLimit = cli.IntFlag{
 		Name:  "rpc.batch.limit",
-		Usage: "Maximum number of requests in a batch",
+		Usage: "Maximum number of requests in a batch, and of messages handled at once on one WebSocket connection",
 		Value: 100,
 	}
 	RpcSubscriptionLimit = cli.IntFlag{
