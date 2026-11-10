@@ -664,6 +664,9 @@ func runPeer(
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		default:
+			if _, known := eth.ToProto[protocol][msg.Code]; known {
+				logger.Error("[p2p] Message code has no handler", "code", msg.Code, "protocol", protocol)
+			}
 			msg.Discard()
 			return p2p.NewPeerError(p2p.PeerErrorInvalidMessage, p2p.DiscSubprotocolError, nil, fmt.Sprintf("sentry.runPeer: unknown message code %d", msg.Code))
 		}
