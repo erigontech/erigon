@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math/big"
 	"math/rand"
+	"reflect"
 	"runtime"
 	"testing"
 	"time"
@@ -2329,4 +2330,56 @@ func TestOneValuePerVersion_AddressCellIgnoresRoot(t *testing.T) {
 		Val:         &accounts.Account{Balance: *uint256.NewInt(100), CodeHash: accounts.EmptyCodeHash},
 	})
 	require.NotPanics(t, func() { vm.MarkWritesComplete(zeroRoot) })
+}
+
+// A panic inside a flush (here the Done->Estimate assert) must not leave the account's lock held:
+// the self-loop worker recovers it, and every later reader of the account would block forever.
+func TestFlushVersionedWritesPanicReleasesAccountLock(t *testing.T) {
+	prev := dbg.AssertEnabled
+	dbg.AssertEnabled = true
+	t.Cleanup(func() { dbg.AssertEnabled = prev })
+
+	vm := NewVersionMap(nil)
+	addr := accounts.InternAddress(common.Address{0xab})
+	ws := &WriteSet{}
+	ws.SetSelfDestruct(addr, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: Version{TxIndex: 0}}, Val: true})
+	vm.FlushVersionedWrites(ws, true)
+	require.Panics(t, func() { vm.FlushVersionedWrites(ws, false) }, "a Done cell downgraded to Estimate trips the assert")
+
+	read := make(chan struct{})
+	go func() {
+		vm.ReadSelfDestruct(addr, 1)
+		close(read)
+	}()
+	select {
+	case <-read:
+	case <-time.After(5 * time.Second):
+		t.Fatal("a read after the recovered panic blocks on the account lock")
+	}
+}
+
+// TestReadResultFitsInRegisters pins ReadResult to at most 4 fields: the compiler keeps a struct in
+// registers only up to that size, and every version-map read returns one.
+func TestReadResultFitsInRegisters(t *testing.T) {
+	require.LessOrEqual(t, reflect.TypeFor[ReadResult]().NumField(), 4)
+}
+
+// A flush that panics must release the account lock, or the account's readers block forever
+// after the executor recovers the panic.
+func TestFlushVersionedWrites_PanicReleasesTheAccountLock(t *testing.T) {
+	t.Parallel()
+
+	addr := getAddress(45)
+	vm := NewVersionMap(nil)
+	balanceWrite := func(incarnation Incarnation, val uint64) *WriteSet {
+		return newWriteSet(
+			&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Key: accounts.NilKey, Version: Version{TxIndex: 5, Incarnation: incarnation}}, Val: *uint256.NewInt(val)},
+		)
+	}
+	vm.FlushVersionedWrites(balanceWrite(2, 100), false)
+
+	require.Panics(t, func() { vm.FlushVersionedWrites(balanceWrite(1, 42), false) })
+	e := vm.load(addr)
+	require.True(t, e.mu.TryLock(), "the account lock is still held after the panic")
+	e.mu.Unlock()
 }

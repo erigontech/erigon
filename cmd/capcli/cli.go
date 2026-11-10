@@ -230,47 +230,65 @@ func retrieveAndSanitizeBlockFromRemoteEndpoint(ctx context.Context, beaconConfi
 	return block, nil
 }
 
-func retrieveBlobsFromRemoteEndpoint(ctx context.Context, uri string, block *cltypes.SignedBeaconBlock) ([]*cltypes.BlobSidecar, error) {
-	// Construct the blob sidecars endpoint
-	root, err := block.Block.HashSSZ()
+// maxBlobSidecarJSONSize bounds one sidecar in a JSON response: the hex blob is 256 KiB.
+const maxBlobSidecarJSONSize = 512 << 10
+
+// retrieveBlobsFromRemoteEndpoint fetches the blob sidecars of root from a beacon API base URL, which
+// may carry a query such as an API key. A response with more than maxSidecars entries is refused
+// before they are decoded: an empty entry is a few bytes on the wire but a whole blob in memory.
+func retrieveBlobsFromRemoteEndpoint(ctx context.Context, endpoint string, root common.Hash, maxSidecars int) ([]*cltypes.BlobSidecar, error) {
+	base, err := url.Parse(endpoint)
+	if err != nil {
+		if ue, ok := errors.AsType[*url.Error](err); ok {
+			err = ue.Err // ue.URL is the whole endpoint
+		}
+		return nil, fmt.Errorf("invalid endpoint: %w", err)
+	}
+	blobUri := base.JoinPath("eth/v1/beacon/blob_sidecars", fmt.Sprintf("0x%x", root))
+	log.Debug("[Blob Retrieval] Requesting blob sidecars", "endpoint", redactURL(base), "blockRoot", root)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, blobUri.String(), nil)
 	if err != nil {
 		return nil, err
 	}
-	blobUri := fmt.Sprintf("%s/0x%x", uri, root)
-	log.Debug("[Blob Retrieval] Requesting blob sidecars", "uri", blobUri)
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, blobUri, nil)
-	if err != nil {
-		return nil, err
-	}
-
 	req.Header.Set("Accept", "application/json")
 
 	r, err := http.DefaultClient.Do(req)
 	if err != nil {
+		// The *url.Error holds the whole request URL; only its password is masked.
+		if ue, ok := errors.AsType[*url.Error](err); ok {
+			ue.URL = redactURL(blobUri)
+		}
 		return nil, err
 	}
-	defer func() {
-		err = r.Body.Close()
-	}()
+	defer r.Body.Close()
 
 	if r.StatusCode == http.StatusNotFound {
 		// No blobs for this block (pre-Deneb or no blob transactions)
 		return nil, nil
 	}
-
 	if r.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("blob retrieval failed, bad status code %d", r.StatusCode)
 	}
 
 	var blobsResponse struct {
-		Data []*cltypes.BlobSidecar `json:"data"`
+		Data []json.RawMessage `json:"data"`
 	}
-	decoder := json.NewDecoder(r.Body)
-	if err := decoder.Decode(&blobsResponse); err != nil {
+	body := io.LimitReader(r.Body, int64(maxSidecars+1)*maxBlobSidecarJSONSize)
+	if err := json.NewDecoder(body).Decode(&blobsResponse); err != nil {
 		return nil, fmt.Errorf("blob retrieval decode failed %w", err)
 	}
-	return blobsResponse.Data, nil
+	if len(blobsResponse.Data) > maxSidecars {
+		return nil, fmt.Errorf("blob response has %d sidecars, the block has %d commitments", len(blobsResponse.Data), maxSidecars)
+	}
+	sidecars := make([]*cltypes.BlobSidecar, len(blobsResponse.Data))
+	for i, raw := range blobsResponse.Data {
+		sidecars[i] = &cltypes.BlobSidecar{}
+		if err := sidecars[i].UnmarshalJSON(raw); err != nil {
+			return nil, fmt.Errorf("blob retrieval decode failed %w", err)
+		}
+	}
+	return sidecars, nil
 }
 
 func (c *ChainEndpoint) Run(ctx context.Context) error {
@@ -303,11 +321,6 @@ func (c *ChainEndpoint) Run(ctx context.Context) error {
 		return err
 	}
 
-	baseUriBlob, err := url.JoinPath(c.Endpoint, "eth/v1/beacon/blob_sidecars")
-	if err != nil {
-		return err
-	}
-
 	log.Info("Hooked", "uri", baseUri)
 	// Let's fetch the head first
 	currentBlock, err := retrieveAndSanitizeBlockFromRemoteEndpoint(ctx, beaconConfig, baseUri+"/head", nil)
@@ -329,7 +342,7 @@ func (c *ChainEndpoint) Run(ctx context.Context) error {
 	if err := beacon_indicies.WriteBeaconBlockAndIndicies(tx, currentBlock, true); err != nil {
 		return err
 	}
-	if err := c.storeBlobsForBlock(ctx, blobDB, beaconConfig, baseUriBlob, currentBlock); err != nil {
+	if err := c.storeBlobsForBlock(ctx, blobDB, beaconConfig, currentBlock); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
@@ -361,7 +374,7 @@ func (c *ChainEndpoint) Run(ctx context.Context) error {
 		if err := beacon_indicies.WriteBeaconBlockAndIndicies(tx, currentBlock, true); err != nil {
 			return false, err
 		}
-		if err := c.storeBlobsForBlock(ctx, blobDB, beaconConfig, baseUriBlob, currentBlock); err != nil {
+		if err := c.storeBlobsForBlock(ctx, blobDB, beaconConfig, currentBlock); err != nil {
 			return false, err
 		}
 
@@ -390,8 +403,8 @@ func (c *ChainEndpoint) Run(ctx context.Context) error {
 					break
 				}
 
-				// Look the blobs up under the walked root: the stored body has no execution transactions
-				// or withdrawals, so its own hash is not the block root.
+				// Look the blobs up under the walked root: before Gloas the stored body has no execution
+				// transactions or withdrawals, so its own hash is not the block root.
 				kzgCommitments := 0
 				if c := block.Block.Body.GetBlobKzgCommitments(); c != nil {
 					kzgCommitments = c.Len()
@@ -1064,7 +1077,7 @@ func (b *BlobArchiveStoreCheck) Run(ctx context.Context) error {
 	}
 	snr := freezeblocks.NewBeaconSnapshotReader(csn, nil, beaconConfig)
 
-	targetSlot := beaconConfig.DenebForkEpoch * beaconConfig.SlotsPerEpoch
+	targetSlot := storeCheckFloor(beaconConfig, csn.FrozenBlobs())
 	tx, err := db.BeginRo(ctx)
 	if err != nil {
 		return err
@@ -1076,12 +1089,21 @@ func (b *BlobArchiveStoreCheck) Run(ctx context.Context) error {
 	return err
 }
 
+// storeCheckFloor is the lowest slot the store check scans. Below the frozen blob frontier the API
+// serves sidecars from segments and the store holds none by design, so a slot there could only be
+// reported as a false mismatch, and --remove-mismatched would delete what the store holds.
+func storeCheckFloor(beaconConfig *clparams.BeaconChainConfig, frozenBlobs uint64) uint64 {
+	return max(beaconConfig.DenebForkEpoch*beaconConfig.SlotsPerEpoch, frozenBlobs)
+}
+
 // checkBlobStore reports how many blob-bearing slots hold a different number of sidecars than
 // their block commits to, and how many could not be checked at all. Unresolved slots are an error:
 // an audit that silently skips them reports completeness it never established.
 func checkBlobStore(ctx context.Context, tx kv.Tx, snr freezeblocks.BeaconSnapshotReader, blobStorage blob_storage.BlobStorage, fromSlot, targetSlot uint64, removeMismatched bool) (uint64, uint64, error) {
 	var mismatched, unresolved uint64
-	for i := fromSlot; i >= targetSlot; i-- {
+	// done is set from the slot just checked, so the countdown neither wraps below a floor of 0 (a
+	// chain with Deneb at genesis) nor overflows at the largest fromSlot.
+	for i, done := fromSlot, fromSlot < targetSlot; !done; i, done = i-1, i == targetSlot {
 		blk, err := snr.ReadBeaconBlockBodyBySlot(ctx, tx, i)
 		if err != nil {
 			return mismatched, unresolved, err
@@ -1659,4 +1681,19 @@ func (m *MakeDepositArgs) Run(ctx context.Context) error {
 	}
 	fmt.Println(string(depositJSON))
 	return nil
+}
+
+// redactURL keeps only the scheme and host of u for logs and errors: beacon API providers put the API key in
+// the user info, the path or the query.
+func redactURL(u *url.URL) string {
+	return (&url.URL{Scheme: u.Scheme, Host: u.Host}).String()
+}
+
+// redactEndpoint is redactURL for an --endpoint value.
+func redactEndpoint(endpoint string) string {
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return "<invalid endpoint>"
+	}
+	return redactURL(u)
 }

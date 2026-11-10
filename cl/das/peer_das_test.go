@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -738,16 +739,7 @@ func assertDownloadColumnsOverwritesBlobStorage(t *testing.T, initialSidecars fu
 		t.Fatal("incomplete or invalid blob storage was not overwritten by PeerDAS recovery")
 	}
 
-	fresh := blob_storage.NewBlobStore(db, fs)
-	stored, found, err := fresh.ReadBlobSidecars(t.Context(), block.Block.Slot, root)
-	require.NoError(t, err)
-	require.True(t, found)
-	require.Len(t, stored, len(sidecars))
-	require.NoError(t, blob_storage.VerifyBlobSidecars(stored, clparams.FuluVersion, nil))
-	for i := range stored {
-		require.Equal(t, uint64(i), stored[i].Index)
-		require.Equal(t, sidecars[i].KzgCommitment, stored[i].KzgCommitment)
-	}
+	requireBlobSidecarsStored(t, blob_storage.NewBlobStore(db, fs), block.Block.Slot, root, sidecars)
 }
 
 func TestDownloadColumnsAndRecoverBlobsOverwritesPartialBlobStorage(t *testing.T) {
@@ -1148,8 +1140,9 @@ func TestBlobRecoveryRetriesTransientFinalWrite(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("transient final write dropped the recovery owner")
 	}
+	requireBlobRecoveryReleased(t, d, root)
 	require.Equal(t, int32(2), blobStorage.calls.Load())
-	require.Equal(t, int32(3), columnStorage.reads.Load(), "final-write retry must reuse reconstruction")
+	require.Equal(t, int32(4), columnStorage.reads.Load(), "final-write retry must reuse reconstruction")
 	stored, found, err := baseBlobStorage.ReadBlobSidecars(t.Context(), block.Block.Slot, root)
 	require.NoError(t, err)
 	require.True(t, found)
@@ -2199,4 +2192,373 @@ func TestResolveColumnSidecarSlotAndRoot(t *testing.T) {
 		require.Equal(t, 2*spe, slot)
 		require.Equal(t, common.HexToHash("0xabc"), blockRoot)
 	})
+}
+
+type recoveredColumnsPublish struct {
+	ctx      context.Context
+	sidecars []*cltypes.DataColumnSidecar
+}
+
+type failingColumnWrites struct {
+	blob_storage.DataColumnStorage
+}
+
+func (failingColumnWrites) WriteColumnSidecars(context.Context, common.Hash, int64, *cltypes.DataColumnSidecar) error {
+	return errors.New("column write failed")
+}
+
+// recoveryTestSlot is the last slot of the first column bucket, so PruneBelow(recoveryTestSlot+1) drops the bucket.
+const recoveryTestSlot = uint64(9_999)
+
+type recoveryOptions struct {
+	caplinConfig *clparams.CaplinConfig
+	supernode    bool
+	// instrument runs before the worker starts and may wrap the storages of r.d.
+	instrument func(r *recoveryRun)
+}
+
+type recoveryRun struct {
+	d          *peerdas
+	root       common.Hash
+	blobs      []*cltypes.BlobSidecar
+	columns    []*cltypes.DataColumnSidecar
+	stored     map[uint64]bool
+	published  <-chan recoveredColumnsPublish
+	stopWorker context.CancelFunc
+}
+
+func (r *recoveryRun) unstoredColumns() []*cltypes.DataColumnSidecar {
+	return slices.DeleteFunc(slices.Clone(r.columns), func(sidecar *cltypes.DataColumnSidecar) bool { return r.stored[sidecar.Index] })
+}
+
+// startRecoveryWithPublisher stores half of a Fulu block's columns and runs a blob recovery worker whose column
+// publisher blocks until the test ends. The stored columns are all outside custody, except on a supernode, which stores
+// the first half.
+func startRecoveryWithPublisher(t *testing.T, opts recoveryOptions) *recoveryRun {
+	t.Helper()
+	cfg := clparams.MainnetBeaconConfig
+	cfg.FuluForkEpoch = 0
+	cfg.InitializeForkSchedule()
+	initTestBeaconConfig(&cfg)
+	block, root, blobs, columns := recoverableFuluDataAtSlot(t, &cfg, recoveryTestSlot)
+
+	d := newELBlobsTestPeerDas(t, &cfg, opts.caplinConfig)
+	if opts.supernode {
+		d.state.SetCustodyGroupCount(cfg.NumberOfCustodyGroups, func() uint64 { return 0 })
+		require.True(t, d.state.IsSupernode())
+	}
+	custodyColumns, err := d.state.GetMyCustodyColumns()
+	require.NoError(t, err)
+
+	stored := make(map[uint64]bool)
+	for index, sidecar := range columns {
+		if (!opts.supernode && custodyColumns[uint64(index)]) || len(stored) == int((cfg.NumberOfColumns+1)/2) {
+			continue
+		}
+		require.NoError(t, d.columnStorage.WriteColumnSidecars(t.Context(), root, int64(index), sidecar))
+		stored[uint64(index)] = true
+	}
+	metadata, err := newBlobRecoveryMetadata(block, root)
+	require.NoError(t, err)
+	d.blobStorage = blob_storage.NewBlobStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs())
+	d.recoverBlobsQueue = make(chan recoverBlobsRequest, 1)
+	d.isRecovering = make(map[common.Hash]bool)
+	calls := make(chan recoveredColumnsPublish, 1)
+	unblock := make(chan struct{})
+	d.SetColumnPublisher(func(ctx context.Context, sidecars []*cltypes.DataColumnSidecar) {
+		calls <- recoveredColumnsPublish{ctx: ctx, sidecars: sidecars}
+		<-unblock
+	})
+	r := &recoveryRun{d: d, root: root, blobs: blobs, columns: columns, stored: stored, published: calls}
+	if opts.instrument != nil {
+		opts.instrument(r)
+	}
+	require.NoError(t, d.enqueueBlobRecovery(recoverBlobsRequest{slot: recoveryTestSlot, blockRoot: root, metadata: metadata}))
+
+	ctx, cancel := context.WithCancel(t.Context())
+	r.stopWorker = cancel
+	done := make(chan struct{})
+	go func() {
+		d.blobsRecoverWorker(ctx)
+		close(done)
+	}()
+	t.Cleanup(func() { close(unblock); cancel(); <-done })
+	return r
+}
+
+func (r *recoveryRun) requireBlobsRecovered(t *testing.T) {
+	t.Helper()
+	requireBlobSidecarsStored(t, r.d.blobStorage, recoveryTestSlot, r.root, r.blobs)
+}
+
+func requireBlobSidecarsStored(t *testing.T, storage blob_storage.BlobStorage, slot uint64, root common.Hash, want []*cltypes.BlobSidecar) {
+	t.Helper()
+	stored, found, err := storage.ReadBlobSidecars(t.Context(), slot, root)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Len(t, stored, len(want))
+	require.NoError(t, blob_storage.VerifyBlobSidecars(stored, clparams.FuluVersion, nil))
+	for i := range stored {
+		require.Equal(t, uint64(i), stored[i].Index)
+		require.Equal(t, want[i].KzgCommitment, stored[i].KzgCommitment)
+	}
+}
+
+func requireBlobRecoveryReleased(t *testing.T, d *peerdas, root common.Hash) {
+	t.Helper()
+	require.Eventually(t, func() bool {
+		d.recoveringMutex.Lock()
+		defer d.recoveringMutex.Unlock()
+		_, owned := d.isRecovering[root]
+		return !owned
+	}, 30*time.Second, 10*time.Millisecond, "the worker did not release the recovery owner")
+}
+
+func receiveRecoveredColumnsPublish(t *testing.T, published <-chan recoveredColumnsPublish) recoveredColumnsPublish {
+	t.Helper()
+	select {
+	case call := <-published:
+		return call
+	case <-time.After(30 * time.Second):
+		t.Fatal("recovered columns were not published")
+		return recoveredColumnsPublish{}
+	}
+}
+
+func publishedColumnIndices(sidecars []*cltypes.DataColumnSidecar) []uint64 {
+	indices := make([]uint64, 0, len(sidecars))
+	for _, sidecar := range sidecars {
+		indices = append(indices, sidecar.Index)
+	}
+	return indices
+}
+
+// An archive node subscribes to every column subnet, so it publishes every column that recovery reconstructs. The
+// publish runs on a context bounded in time and detached from the worker, and does not hold up the worker.
+func TestBlobRecoveryPublishesReconstructedColumnsOnSubscribedSubnets(t *testing.T) {
+	r := startRecoveryWithPublisher(t, recoveryOptions{caplinConfig: &clparams.CaplinConfig{ArchiveBlobs: true}})
+
+	call := receiveRecoveredColumnsPublish(t, r.published)
+
+	var reconstructed []uint64
+	for index := range r.d.beaconConfig.NumberOfColumns {
+		if !r.stored[index] {
+			reconstructed = append(reconstructed, index)
+		}
+	}
+	require.ElementsMatch(t, reconstructed, publishedColumnIndices(call.sidecars))
+	for _, sidecar := range call.sidecars {
+		require.True(t, VerifyDataColumnSidecarKZGProofs(sidecar))
+	}
+	requireBlobRecoveryReleased(t, r.d, r.root)
+	_, bounded := call.ctx.Deadline()
+	require.True(t, bounded)
+	r.stopWorker()
+	require.NoError(t, call.ctx.Err())
+}
+
+// A node that subscribes only to its custody subnets publishes only its custody columns.
+func TestBlobRecoveryPublishesOnlyColumnsOnSubscribedSubnets(t *testing.T) {
+	r := startRecoveryWithPublisher(t, recoveryOptions{caplinConfig: &clparams.CaplinConfig{}})
+
+	call := receiveRecoveredColumnsPublish(t, r.published)
+
+	custodyColumns, err := r.d.state.GetMyCustodyColumns()
+	require.NoError(t, err)
+	var custody []uint64
+	for index := range custodyColumns {
+		custody = append(custody, index)
+	}
+	require.ElementsMatch(t, custody, publishedColumnIndices(call.sidecars))
+}
+
+// A custody column that recovery fails to write is not published, so it is not marked seen and a gossip copy can
+// still store it.
+func TestBlobRecoveryDoesNotPublishCustodyColumnsItFailedToWrite(t *testing.T) {
+	r := startRecoveryWithPublisher(t, recoveryOptions{
+		caplinConfig: &clparams.CaplinConfig{ArchiveBlobs: true},
+		instrument:   func(r *recoveryRun) { r.d.columnStorage = failingColumnWrites{r.d.columnStorage} },
+	})
+
+	call := receiveRecoveredColumnsPublish(t, r.published)
+
+	custodyColumns, err := r.d.state.GetMyCustodyColumns()
+	require.NoError(t, err)
+	var reconstructedOutsideCustody []uint64
+	for index := range r.d.beaconConfig.NumberOfColumns {
+		if !r.stored[index] && !custodyColumns[index] {
+			reconstructedOutsideCustody = append(reconstructedOutsideCustody, index)
+		}
+	}
+	require.ElementsMatch(t, reconstructedOutsideCustody, publishedColumnIndices(call.sidecars))
+}
+
+// countingColumnStorage counts the column writes made through it.
+type countingColumnStorage struct {
+	blob_storage.DataColumnStorage
+	writes atomic.Int32
+}
+
+func (s *countingColumnStorage) WriteColumnSidecars(ctx context.Context, blockRoot common.Hash, columnIndex int64, sidecar *cltypes.DataColumnSidecar) error {
+	s.writes.Add(1)
+	return s.DataColumnStorage.WriteColumnSidecars(ctx, blockRoot, columnIndex, sidecar)
+}
+
+func (r *recoveryRun) countColumnWrites() *countingColumnStorage {
+	columns := &countingColumnStorage{DataColumnStorage: r.d.columnStorage}
+	r.d.columnStorage = columns
+	return columns
+}
+
+// lateColumnsBlobStorage stores the sidecars in late when the worker writes the blob sidecars: the latest point before the
+// worker reads the stored columns again, so a read moved before the matrix step misses them.
+type lateColumnsBlobStorage struct {
+	blob_storage.BlobStorage
+	columns blob_storage.DataColumnStorage
+	late    []*cltypes.DataColumnSidecar
+	lateErr error
+}
+
+func (s *lateColumnsBlobStorage) WriteBlobSidecars(ctx context.Context, blockRoot common.Hash, sidecars []*cltypes.BlobSidecar) error {
+	for _, sidecar := range s.late {
+		if err := s.columns.WriteColumnSidecars(ctx, blockRoot, int64(sidecar.Index), sidecar); err != nil {
+			s.lateErr = err
+		}
+	}
+	return s.BlobStorage.WriteBlobSidecars(ctx, blockRoot, sidecars)
+}
+
+// storeLateColumns must run before countColumnWrites, so the late writes are not counted as writes by the worker.
+func (r *recoveryRun) storeLateColumns(late []*cltypes.DataColumnSidecar) *lateColumnsBlobStorage {
+	blobs := &lateColumnsBlobStorage{BlobStorage: r.d.blobStorage, columns: r.d.columnStorage, late: late}
+	r.d.blobStorage = blobs
+	return blobs
+}
+
+// Columns that gossip stores during the matrix step are neither written nor published by the worker. The test stores
+// them when the worker writes the blob sidecars.
+func TestBlobRecoverySkipsColumnsStoredDuringMatrixRecovery(t *testing.T) {
+	var late *lateColumnsBlobStorage
+	var columns *countingColumnStorage
+	r := startRecoveryWithPublisher(t, recoveryOptions{
+		caplinConfig: &clparams.CaplinConfig{},
+		supernode:    true,
+		instrument: func(r *recoveryRun) {
+			late = r.storeLateColumns(r.unstoredColumns())
+			columns = r.countColumnWrites()
+		},
+	})
+
+	requireBlobRecoveryReleased(t, r.d, r.root)
+
+	require.NoError(t, late.lateErr)
+	r.requireBlobsRecovered(t)
+	require.Zero(t, columns.writes.Load(), "column writes by the worker")
+	require.Never(t, func() bool { return len(r.published) > 0 }, 100*time.Millisecond, 10*time.Millisecond, "published columns")
+}
+
+// With nothing stored during the matrix recovery, the worker writes and publishes every missing column.
+func TestBlobRecoveryWritesAndPublishesMissingColumns(t *testing.T) {
+	var columns *countingColumnStorage
+	r := startRecoveryWithPublisher(t, recoveryOptions{
+		caplinConfig: &clparams.CaplinConfig{},
+		supernode:    true,
+		instrument:   func(r *recoveryRun) { columns = r.countColumnWrites() },
+	})
+
+	call := receiveRecoveredColumnsPublish(t, r.published)
+
+	requireBlobRecoveryReleased(t, r.d, r.root)
+	r.requireBlobsRecovered(t)
+	missing := publishedColumnIndices(r.unstoredColumns())
+	require.ElementsMatch(t, missing, publishedColumnIndices(call.sidecars))
+	require.Equal(t, int32(len(missing)), columns.writes.Load(), "column writes by the worker")
+}
+
+// A failed read of the stored columns after the matrix recovery leaves the worker with the columns it read before.
+func TestBlobRecoveryKeepsStoredColumnsWhenRereadFails(t *testing.T) {
+	var columns *transientSavedColumnIndexStorage
+	r := startRecoveryWithPublisher(t, recoveryOptions{
+		caplinConfig: &clparams.CaplinConfig{},
+		supernode:    true,
+		instrument: func(r *recoveryRun) {
+			columns = &transientSavedColumnIndexStorage{DataColumnStorage: r.d.columnStorage, failAt: 2, failed: make(chan struct{})}
+			r.d.columnStorage = columns
+		},
+	})
+
+	call := receiveRecoveredColumnsPublish(t, r.published)
+
+	requireBlobRecoveryReleased(t, r.d, r.root)
+	select {
+	case <-columns.failed:
+	default:
+		t.Fatal("the worker did not reread the stored columns")
+	}
+	r.requireBlobsRecovered(t)
+	require.ElementsMatch(t, publishedColumnIndices(r.unstoredColumns()), publishedColumnIndices(call.sidecars))
+}
+
+// An archive node that is not a supernode removes the columns outside its custody that gossip stores during the matrix
+// step, and does not publish them. The test stores them when the worker writes the blob sidecars.
+func TestBlobRecoveryRemovesNonCustodyColumnsStoredDuringMatrixRecovery(t *testing.T) {
+	var late *lateColumnsBlobStorage
+	r := startRecoveryWithPublisher(t, recoveryOptions{
+		caplinConfig: &clparams.CaplinConfig{ArchiveBlobs: true},
+		instrument: func(r *recoveryRun) {
+			custody, err := r.d.state.GetMyCustodyColumns()
+			require.NoError(t, err)
+			late = r.storeLateColumns(slices.DeleteFunc(r.unstoredColumns(), func(sidecar *cltypes.DataColumnSidecar) bool { return custody[sidecar.Index] }))
+		},
+	})
+	custody, err := r.d.state.GetMyCustodyColumns()
+	require.NoError(t, err)
+	require.NotEmpty(t, late.late)
+
+	call := receiveRecoveredColumnsPublish(t, r.published)
+
+	requireBlobRecoveryReleased(t, r.d, r.root)
+	require.NoError(t, late.lateErr)
+	var custodyIndices []uint64
+	for index := range custody {
+		custodyIndices = append(custodyIndices, index)
+	}
+	require.ElementsMatch(t, custodyIndices, publishedColumnIndices(call.sidecars))
+	saved, err := r.d.columnStorage.GetSavedColumnIndex(t.Context(), recoveryTestSlot, r.root)
+	require.NoError(t, err)
+	require.ElementsMatch(t, custodyIndices, saved)
+}
+
+// When a prune drops the block's columns while the worker writes the blob sidecars, the worker still skips the columns
+// it read before the matrix step and rebuilds only the others.
+func TestBlobRecoveryPrunedDuringMatrixRecoveryRebuildsOnlyUnstoredColumns(t *testing.T) {
+	var columns *countingColumnStorage
+	var blobs *blockingBlobWriteStorage
+	r := startRecoveryWithPublisher(t, recoveryOptions{
+		caplinConfig: &clparams.CaplinConfig{},
+		supernode:    true,
+		instrument: func(r *recoveryRun) {
+			columns = r.countColumnWrites()
+			blobs = &blockingBlobWriteStorage{BlobStorage: r.d.blobStorage, entered: make(chan struct{}), release: make(chan struct{})}
+			r.d.blobStorage = blobs
+		},
+	})
+	select {
+	case <-blobs.entered:
+	case <-time.After(30 * time.Second):
+		t.Fatal("blob recovery did not reach persistence")
+	}
+
+	require.NoError(t, r.d.PruneBelow(recoveryTestSlot+1))
+	close(blobs.release)
+	call := receiveRecoveredColumnsPublish(t, r.published)
+
+	requireBlobRecoveryReleased(t, r.d, r.root)
+	r.requireBlobsRecovered(t)
+	missing := publishedColumnIndices(r.unstoredColumns())
+	require.ElementsMatch(t, missing, publishedColumnIndices(call.sidecars))
+	require.Equal(t, int32(len(missing)), columns.writes.Load(), "column writes by the worker")
+	saved, err := r.d.columnStorage.GetSavedColumnIndex(t.Context(), recoveryTestSlot, r.root)
+	require.NoError(t, err)
+	require.Empty(t, saved)
 }

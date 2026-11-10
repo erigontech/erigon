@@ -850,7 +850,7 @@ func (ibs *IntraBlockState) GetCodeSize(addr accounts.Address) (int, error) {
 		// ReadAccountCode there returns nil (EXTCODESIZE 0) and diverges from
 		// consensus.
 		size, err := ibs.stateReader.ReadAccountCodeSize(addr)
-		ibs.recordStateReadError(err)
+		ibs.RecordStateReadError(err)
 		if err != nil {
 			return 0, err
 		}
@@ -1431,7 +1431,7 @@ func (ibs *IntraBlockState) committedAccount(addr accounts.Address) (*accounts.A
 		// Route a committed-base read failure (e.g. a corrupt account record) operationally
 		// like the origin* readers, so the executor surfaces it instead of letting the
 		// EVM swallow it as a gas failure and condemn the block as invalid.
-		ibs.recordStateReadError(err)
+		ibs.RecordStateReadError(err)
 		return nil, err
 	}
 	if ibs.committedBase == nil {
@@ -2086,7 +2086,7 @@ func (ibs *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 		// Record so the executor surfaces it operationally rather than continuing
 		// with a wrong value; the serial (non-versioned) account read reaches the DB
 		// here, bypassing refreshAccount and the typed readers that already record.
-		ibs.recordStateReadError(err)
+		ibs.RecordStateReadError(err)
 		return nil, err
 	}
 
@@ -2831,7 +2831,7 @@ func (ibs *IntraBlockState) encodeExistingEmptyRemovals(chainRules *chain.Rules,
 			// A failed base read zeroes the composed fields, which would read as
 			// an EIP-161 empty and delete a live account. Surface the error and
 			// leave the account's writes intact instead.
-			ibs.recordStateReadError(err)
+			ibs.RecordStateReadError(err)
 			continue
 		}
 		bal, nonce, codeHash := view.GetBalance(), view.GetNonce(), view.GetCodeHash()
@@ -2861,8 +2861,9 @@ func (ibs *IntraBlockState) encodeExistingEmptyRemovals(chainRules *chain.Rules,
 	}
 }
 
-// withholdCreatedEmptyAccounts replaces the writes of accounts the tx observed as
-// absent and left empty (EIP-161) with the EIP-161 removal. An account that existed
+// withholdCreatedEmptyAccounts drops the writes of accounts the tx observed as absent
+// and left empty (EIP-161), or replaces them with the EIP-161 removal when the version
+// map holds cells for the account. An account that existed
 // before is kept even when it ends empty — clearing it needs an explicit delete,
 // which encodeExistingEmptyRemovals emits.
 func (ibs *IntraBlockState) withholdCreatedEmptyAccounts(chainRules *chain.Rules, writes *WriteSet) {
@@ -2888,6 +2889,12 @@ func (ibs *IntraBlockState) withholdCreatedEmptyAccounts(chainRules *chain.Rules
 			if so, soOk := ibs.stateObjects[addr]; soOk && so.original.CodeHash != (accounts.CodeHash{}) {
 				continue
 			}
+		}
+		// With no version-map cell the account is absent before and after the tx, so dropping the
+		// writes is exact; a removal stamp would make every later toucher depend on this tx.
+		if ibs.versionMap == nil || ibs.versionMap.load(addr) == nil {
+			writes.deleteAddr(addr)
+			continue
 		}
 		// Stamp the uniform removal rather than silently dropping the writes: the
 		// during-tx exec cells already live in the version map, so a bare deleteAddr
@@ -3630,7 +3637,7 @@ func (ibs *IntraBlockState) StateReadError() error {
 	return ibs.stateReadErr
 }
 
-func (ibs *IntraBlockState) recordStateReadError(err error) {
+func (ibs *IntraBlockState) RecordStateReadError(err error) {
 	if err != nil && ibs.stateReadErr == nil {
 		ibs.stateReadErr = err
 	}

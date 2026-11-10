@@ -508,6 +508,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	// Define gossip services
 	blobService := services.NewBlobSidecarService(beaconConfig, forkChoice, syncedDataManager, ethClock, emitters, false)
 	dataColumnSidecarService := services.NewDataColumnSidecarService(ctx, beaconConfig, ethClock, forkChoice, syncedDataManager, columnStorage, emitters, gossipManager)
+	peerDas.SetColumnPublisher(dataColumnSidecarService.PublishColumns)
 	blockService := services.NewBlockService(ctx, indexDB, forkChoice, engine, dataColumnSidecarService, syncedDataManager, ethClock, beaconConfig, emitters)
 	syncCommitteeMessagesService := services.NewSyncCommitteeMessagesService(beaconConfig, ethClock, syncedDataManager, syncContributionPool, batchSignatureVerifier, false)
 	attestationService := services.NewAttestationService(ctx, forkChoice, aggregationPool, ethClock, syncedDataManager, beaconConfig, networkConfig, emitters, batchSignatureVerifier)

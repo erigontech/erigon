@@ -239,18 +239,20 @@ func (b *CachingBeaconState) _refreshActiveBalancesIfNeeded() {
 		return
 	}
 	epoch := Epoch(b)
-	b.totalActiveBalanceCache = new(uint64)
-	*b.totalActiveBalanceCache = 0
-
+	var total uint64
 	for i := 0; i < b.ValidatorSet().Length(); i++ {
 		validator := b.ValidatorSet().Get(i)
 		if validator.Active(epoch) {
-			*b.totalActiveBalanceCache += validator.EffectiveBalance()
+			total += validator.EffectiveBalance()
 		}
 	}
+	b.setTotalActiveBalance(total)
+}
 
-	*b.totalActiveBalanceCache = max(b.BeaconConfig().EffectiveBalanceIncrement, *b.totalActiveBalanceCache)
-	b.totalActiveBalanceRootCache = utils.IntegerSquareRoot(*b.totalActiveBalanceCache)
+func (b *CachingBeaconState) setTotalActiveBalance(total uint64) {
+	total = max(b.BeaconConfig().EffectiveBalanceIncrement, total)
+	b.totalActiveBalanceCache = &total
+	b.totalActiveBalanceRootCache = utils.IntegerSquareRoot(total)
 }
 
 func (b *CachingBeaconState) initCaches() error {
@@ -267,16 +269,20 @@ func (b *CachingBeaconState) initCaches() error {
 
 func (b *CachingBeaconState) InitBeaconState() error {
 	b.rebuildPubkeyIndex()
-	return b.reinitCaches()
+	return b.reinitCaches(nil)
 }
 
 func (b *CachingBeaconState) rebuildPubkeyIndex() {
 	b.publicKeyIndices = newPubkeyIndex(b.ValidatorSet())
 }
 
-func (b *CachingBeaconState) reinitCaches() error {
-	b.totalActiveBalanceCache = nil
-	b._refreshActiveBalancesIfNeeded()
+func (b *CachingBeaconState) reinitCaches(totalActiveBalance *uint64) error {
+	if totalActiveBalance == nil {
+		b.totalActiveBalanceCache = nil
+		b._refreshActiveBalancesIfNeeded()
+	} else {
+		b.setTotalActiveBalance(*totalActiveBalance)
+	}
 	b.previousStateRoot = common.Hash{}
 	if err := b.initCaches(); err != nil {
 		return err
