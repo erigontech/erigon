@@ -2944,7 +2944,7 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 					*stateReader = pe.prevBlockBase(state.NewReaderV3(pe.domainsRead().AsGetter(applyTx)), be.blockNum)
 				}
 			}
-			var ownedWrites *state.WriteSet // a copy this loop made, so it can be extended in place, unlike the worker's TxOut
+			var chargedWrites *state.WriteSet
 			if chainTx, ok := txTask.(*exec.TxTask); ok && chainTx.ChargesSenderAtValidation(int(txVersion.Incarnation)) {
 				senderWrites, charged, err := chargeSenderAtValidation(chainTx, txResult, txVersion, be.versionMap, *stateReader)
 				if err != nil {
@@ -2964,13 +2964,13 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 				}
 				be.blockIO.RecordReads(txVersion, reads)
 				be.versionMap.FlushVersionedWrites(senderWrites, false)
-				ownedWrites = be.blockIO.WriteSet(txVersion.TxIndex).Merge(senderWrites)
-				be.blockIO.RecordWrites(txVersion, ownedWrites)
+				chargedWrites = be.blockIO.WriteSet(txVersion.TxIndex).Merge(senderWrites)
+				be.blockIO.RecordWrites(txVersion, chargedWrites)
 				be.markReadersDirty(tx, senderWrites)
 				// A charge-at-validation sender's gas debit is not in the worker's TxOut, so
 				// calcFees' coinbase/burnt override (which reads TxOut) would miss it and credit
 				// the fee onto the stale pre-charge balance when the sender is the fee recipient.
-				txResult.TxOut = ownedWrites
+				txResult.TxOut = chargedWrites
 			}
 			tipWrites, err := txResult.calcFees(taskVer, be.versionMap, *stateReader, txTask.Rules())
 			if err != nil {
@@ -2980,10 +2980,10 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 				// Flush the tip as an Estimate; the whole tx is promoted to Done at the
 				// seal point below.
 				be.versionMap.FlushVersionedWrites(tipWrites, false)
-				if ownedWrites != nil {
-					ownedWrites.MergeFrom(tipWrites)
-				} else {
-					be.blockIO.RecordWrites(txVersion, be.blockIO.WriteSet(txVersion.TxIndex).Merge(tipWrites))
+				merged := be.blockIO.WriteSet(txVersion.TxIndex).Merge(tipWrites)
+				be.blockIO.RecordWrites(txVersion, merged)
+				if chargedWrites != nil {
+					txResult.TxOut = merged
 				}
 				be.markReadersDirty(tx, tipWrites)
 			}
