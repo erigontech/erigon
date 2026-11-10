@@ -56,8 +56,9 @@ func generatedReorgSchedule(seed uint64) []byte {
 	return schedule
 }
 
-// Each pair selects an operation and its target. Reference branches never
-// execute a reorg or prune. A random case can be replayed with ERIGON_REORG_SEED.
+// Each pair selects an operation and its target. Reference branches are built by
+// forward execution with snapshot production disabled. A random case can be
+// replayed with ERIGON_REORG_SEED.
 func TestEngineApiReorgSchedules(t *testing.T) {
 	if testing.Short() {
 		t.Skip("node restart and snapshot reorg integration test")

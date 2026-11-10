@@ -570,8 +570,8 @@ func snapshotMergeBoundaryReached(point state.MaintenancePoint, agg *state.Aggre
 	}
 }
 
-// A time-budgeted FCU pass may leave all state pruning for a later pass.
-// Repeat the same commit/build path while execution is idle until pruning makes progress.
+// Repeat prune/build passes until cancellation or error; one time-budgeted pass
+// may make no progress.
 func continueSnapshotPruning(ctx context.Context, prune func(context.Context) (<-chan struct{}, error)) error {
 	for ctx.Err() == nil {
 		finished, err := prune(ctx)
