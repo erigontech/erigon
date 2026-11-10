@@ -171,7 +171,11 @@ def run(enclave):
     execution[4] = endpoint(service, "ws-rpc")
     recovered = wait("restarted witness EL catches up", lambda: converged(int(height, 16) + 12))
     check_state(recovered)
+    # Convergence trails the slowest node; require a block beyond every current EL head.
+    head_after_recovery = max(int(block(i)["number"], 16) for i in range(len(clients)))
     finalized_after_recovery = max(finality())
+    recovered = wait("new execution blocks after recovery", lambda: converged(head_after_recovery + 1))
+    check_state(recovered)
     wait("new finalized epoch after recovery", lambda: min(finality()) > finalized_after_recovery, timeout=1200)
     print(json.dumps({"phase": "recovered", "height": recovered[0]["number"], "finalized": finality()}), flush=True)
 
