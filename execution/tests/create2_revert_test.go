@@ -40,8 +40,7 @@ import (
 
 // A SELFDESTRUCT credit funds an address without CreateAccount (a value
 // transfer would run it and hide the bug), and a later tx sends to it and then
-// reverts a CREATE2 at it. A tx after that must still see both credits. Both
-// importers must accept the block built by the versioned generator.
+// reverts a CREATE2 at it. A tx after that must still see both credits.
 func TestRevertedCreate2KeepsCredits(t *testing.T) {
 	for _, mode := range []struct {
 		name     string

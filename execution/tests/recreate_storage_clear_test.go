@@ -171,13 +171,14 @@ func TestParallelStorageRewriteAfterDestroyAndRecreate(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
 		committed bool
+		readAfter bool
 		blocks    [][]revivalCall
 	}{
-		{"committed", true, [][]revivalCall{{destroy, create, write}}},
-		{"committed, read after", true, [][]revivalCall{{write, destroy, create, write, read}}},
-		{"created in block", false, [][]revivalCall{{create, write, destroy, create, write}}},
-		{"created in block, read after", false, [][]revivalCall{{create, write, destroy, create, write, read}}},
-		{"created in previous block", false, [][]revivalCall{{create, write}, {destroy, create, write}}},
+		{"committed", true, false, [][]revivalCall{{destroy, create, write}}},
+		{"committed, read after", true, true, [][]revivalCall{{write, destroy, create, write, read}}},
+		{"created in block", false, false, [][]revivalCall{{create, write, destroy, create, write}}},
+		{"created in block, read after", false, true, [][]revivalCall{{create, write, destroy, create, write, read}}},
+		{"created in previous block", false, false, [][]revivalCall{{create, write}, {destroy, create, write}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			alloc := types.GenesisAlloc{
@@ -208,8 +209,10 @@ func TestParallelStorageRewriteAfterDestroyAndRecreate(t *testing.T) {
 			check := func(t *testing.T, st *state.IntraBlockState) {
 				require.Equal(t, *uint256.NewInt(7), storageAt(t, st, victim, 0))
 				require.Equal(t, *uint256.NewInt(0x593d), storageAt(t, st, victim, 0x32))
+				if tc.readAfter {
+					require.Equal(t, *uint256.NewInt(0x593d), storageAt(t, st, reader, 0))
+				}
 			}
-			importSerially(t, gspec, keys[0], chainPack, check)
 			for range 25 {
 				importInParallel(t, gspec, keys[0], chainPack, check)
 			}
