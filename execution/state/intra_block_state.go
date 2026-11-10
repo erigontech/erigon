@@ -201,6 +201,7 @@ type IntraBlockState struct {
 	codeReadCount       int64
 	version             Incarnation
 	dep                 int
+	depFirstNano        int64
 	stateReadErr        error
 
 	// Per-attempt memo of the shared-versionMap SelfDestruct probe: it reads only
@@ -3628,6 +3629,15 @@ func (ibs *IntraBlockState) versionedWriteHit(addr accounts.Address, path Accoun
 func (ibs *IntraBlockState) HadInvalidRead() bool {
 	return ibs.dep >= 0
 }
+
+func (ibs *IntraBlockState) noteDep(idx int) {
+	if ibs.dep < 0 && idx >= 0 {
+		ibs.depFirstNano = time.Now().UnixNano()
+	}
+	ibs.dep = max(ibs.dep, idx)
+}
+
+func (ibs *IntraBlockState) DepFirstNano() int64 { return ibs.depFirstNano }
 
 func (ibs *IntraBlockState) DepTxIndex() int {
 	return ibs.dep
