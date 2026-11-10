@@ -660,11 +660,14 @@ func (ibs *IntraBlockState) Empty(addr accounts.Address) (empty bool, err error)
 	// whole account: the EIP-161 verdict needs only the current balance, nonce
 	// and code hash, read per-field below (short-circuiting), so the per-field
 	// overlay and a full-account allocation are avoided.
-	account, _, _, err := ibs.versionedAccountBase(addr, true)
+	account, source, _, err := ibs.versionedAccountBase(addr, true)
 	if err != nil {
 		return false, err
 	}
 	if account == nil {
+		if source == ReadSetRead {
+			return true, nil
+		}
 		// Do NOT call accountRead here: versionedAccountBase already recorded the
 		// AddressPath read with Val=nil. Overwriting it with a non-nil empty
 		// account would make downstream reads treat the account as existing,
@@ -1338,6 +1341,12 @@ func (ibs *IntraBlockState) readAbsentFromMap(addr accounts.Address) bool {
 	return ok && tr.Source == MapRead && (tr.Val == nil || tr.Val.Account() == nil)
 }
 
+// readAbsentFromCommitted reports whether this tx already read addr as absent from the committed state.
+func (ibs *IntraBlockState) readAbsentFromCommitted(addr accounts.Address) bool {
+	tr, ok := ibs.versionedReads.GetAddress(addr)
+	return ok && tr.Source == StorageRead && (tr.Val == nil || tr.Val.Account() == nil)
+}
+
 // readAbsent is like readAbsentFromMap, but also counts an absence read from the committed state:
 // the base reader can serve a lower tx's creation later in the attempt.
 func (ibs *IntraBlockState) readAbsent(addr accounts.Address) bool {
@@ -1377,7 +1386,10 @@ func (ibs *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 	// committed and in-block-created accounts — unless a later tx re-created it.
 	// Branch-agnostic: a burn stamps the balance ValueDeleted, so the
 	// reconstruction yields nil and this falls through.
-	if readAccount == nil {
+	// A repeat read keeps a recorded committed absence: validation rejects it if a
+	// destruct or re-creation was flushed since.
+	repeatedCommittedAbsence := readAccount == nil && source == StorageRead && ibs.readAbsentFromCommitted(addr)
+	if readAccount == nil && !repeatedCommittedAbsence {
 		if ibs.versionMap.absentAccountHook != nil {
 			ibs.versionMap.absentAccountHook()
 		}
@@ -1427,6 +1439,9 @@ func (ibs *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 			source = StorageRead
 		}
 
+		if readAccount == nil && err == nil && repeatedCommittedAbsence {
+			return nil, ReadSetRead, UnknownVersion, nil
+		}
 		if readAccount == nil || err != nil {
 			return nil, StorageRead, UnknownVersion, err
 		}
