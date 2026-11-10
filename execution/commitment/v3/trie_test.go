@@ -677,6 +677,9 @@ func TestFoldParity(t *testing.T) {
 						updates[i] = foldUpdate(plane, i+1)
 						require.NoError(t, insert(n, path, foldValue(plane, i+1)))
 					}
+					var acc deltaParts
+					_, materializeErr := graph{plane: plane, addrHash: make([]byte, 32)}.materialize(newMockContext(), n, n, &acc)
+					require.NoError(t, materializeErr)
 					want := hexPatriciaRoot(t, plane, keys, paths, updates)
 					if tc.checkBranch {
 						var refs [16][]byte

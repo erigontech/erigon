@@ -17,7 +17,6 @@
 package v3
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"math/bits"
@@ -57,16 +56,7 @@ func fold(n *node, depth int) ([32]byte, error) {
 	}
 	if depth == 0 && n.isExtension() {
 		nib := bits.TrailingZeros16(n.childMask)
-		var childHash []byte
-		if child := n.child(nib); child != nil {
-			hash, err := fold(child, len(child.path))
-			if err != nil {
-				return [32]byte{}, err
-			}
-			childHash = hash[:]
-		} else {
-			childHash = n.childHashAt(nib)
-		}
+		childHash := n.childHashAt(nib)
 		if len(childHash) != 32 {
 			return [32]byte{}, fmt.Errorf("%w: root child %d hash", errFoldNode, nib)
 		}
@@ -157,24 +147,11 @@ func leafParts(n *node, nib int, includeNib bool, keyDst, compactDst, payloadDst
 }
 
 func foldBranchChild(parent *node, nib int, dst *[32]byte) error {
-	depth := len(parent.path)
-	var ext, hash []byte
-	var childHash [32]byte
-	if child := parent.child(nib); child != nil {
-		if len(child.path) <= depth || !bytes.HasPrefix(child.path, parent.path) || child.path[depth] != byte(nib) {
-			return fmt.Errorf("%w: child %d path", errFoldNode, nib)
-		}
-		var err error
-		if childHash, err = fold(child, len(child.path)); err != nil {
-			return err
-		}
-		ext, hash = child.path[depth+1:], childHash[:]
-	} else if !parent.hasChildHash(nib) {
+	if !parent.hasChildHash(nib) {
 		return fmt.Errorf("%w: child %d hash", errFoldNode, nib)
-	} else {
-		var extScratch [64]byte
-		ext, hash = parent.childExtAtInto(nib, extScratch[:0]), parent.childHashAt(nib)
 	}
+	var extScratch [64]byte
+	ext, hash := parent.childExtAtInto(nib, extScratch[:0]), parent.childHashAt(nib)
 	if len(ext) != 0 {
 		*dst = extensionRef(ext, hash)
 		return nil
