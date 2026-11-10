@@ -101,12 +101,17 @@ func TestCheckStorageReplacementsCountsHeadAndBaseSlotsOnce(t *testing.T) {
 		require.NoError(t, putDel.DomainDel(kv.StorageDomain, simStorageKey(addr, slot), 2, []byte{slot}))
 		require.NoError(t, putDel.DomainPut(kv.StorageDomain, simStorageKey(addr, slot+2), []byte{slot}, 2, nil))
 	}
+	require.NoError(t, putDel.DomainPut(kv.StorageDomain, simStorageKey(addr, 5), []byte{5}, 1, nil))
 	require.NoError(t, sd.Flush(t.Context(), rwTx))
 	empty := map[common.Hash]common.Hash{}
 	overrides := ethapi.StateOverrides{accounts.InternAddress(addr): {State: &empty}}
 
-	require.NoError(t, (&simulator{}).checkStorageReplacements(t.Context(), &overrides, sd, rwTx, false, 2, 4))
-	require.ErrorContains(t, (&simulator{}).checkStorageReplacements(t.Context(), &overrides, sd, rwTx, false, 2, 3), "more than 3 storage slots")
+	require.NoError(t, (&simulator{}).checkStorageReplacements(t.Context(), &overrides, sd, rwTx, false, 2, 5))
+	err = (&simulator{}).checkStorageReplacements(t.Context(), &overrides, sd, rwTx, false, 2, 4)
+	require.ErrorContains(t, err, "more than 4 storage slots")
+	var rpcErr rpc.Error
+	require.ErrorAs(t, err, &rpcErr)
+	require.Equal(t, rpc.ErrCodeClientLimitExceeded, rpcErr.ErrorCode())
 }
 
 func TestCheckStorageReplacementsSkipsBaseSlotsAlreadySwept(t *testing.T) {
