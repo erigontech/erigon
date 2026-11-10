@@ -67,6 +67,10 @@ func compatStatusPacket(reply eth.StatusPacket, status *sentryproto.StatusData, 
 }
 
 func compatStatusPacket69(reply eth.StatusPacket69, status *sentryproto.StatusData, version, minVersion uint) error {
+	blockRange := eth.BlockRangeUpdatePacket{Earliest: reply.MinimumBlock, Latest: reply.LatestBlock, LatestHash: reply.LatestBlockHash}
+	if err := blockRange.Validate(); err != nil {
+		return err
+	}
 	return checkCompatibility(reply.NetworkID, reply.ProtocolVersion, reply.Genesis, reply.ForkID, status, version, minVersion)
 }
 

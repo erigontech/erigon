@@ -710,6 +710,67 @@ func (f *ForkChoiceStore) rejectKnownInvalidPayloadStatusLocked(payloadStatus ex
 	return fmt.Errorf("%w: execution payload was invalidated while validation was in progress", ErrInvalidExecutionPayloadEnvelope)
 }
 
+// invalidateOptimisticAncestorsLocked invalidates the ancestors of invalidBlock that descend from
+// the latestValidHash block. It follows the execution parent hashes, so an ancestor is only
+// invalidated when the EL verdict is about its payload. It invalidates nothing when the walk
+// reaches the finalized slot or a validated payload first. It does not mark the justified root or
+// its ancestors: get_head starts from that root, and an invalidated root would be returned as a
+// head that is no longer reported as optimistic.
+func (f *ForkChoiceStore) invalidateOptimisticAncestorsLocked(newPayloadErr error, invalidBlock *cltypes.BeaconBlock) error {
+	var invalidPayload *execution_client.InvalidPayloadError
+	if !errors.As(newPayloadErr, &invalidPayload) {
+		return nil
+	}
+	type ancestor struct {
+		root  common.Hash
+		block *cltypes.BeaconBlock
+	}
+	var ancestors []ancestor
+	finalizedSlot := f.computeStartSlotAtEpoch(f.finalizedCheckpoint.Load().(solid.Checkpoint).Epoch)
+	parentHash := invalidBlock.Body.ExecutionPayload.ParentHash
+	for root := invalidBlock.ParentRoot; parentHash != invalidPayload.LatestValidHash; {
+		block, ok := f.forkGraph.GetBlock(root)
+		if !ok || block.Block.Body.ExecutionPayload == nil || block.Block.Body.ExecutionPayload.BlockHash != parentHash {
+			return nil
+		}
+		if verified, _ := f.forkGraph.PayloadAccepted(root); verified || block.Block.Slot <= finalizedSlot || f.payloadValidatedLocked(root, parentHash) {
+			return nil
+		}
+		ancestors = append(ancestors, ancestor{root, block.Block})
+		parentHash = block.Block.Body.ExecutionPayload.ParentHash
+		root = block.Block.ParentRoot
+	}
+	if len(ancestors) == 0 {
+		return nil
+	}
+	justifiedChain := f.justifiedChainDownTo(ancestors[len(ancestors)-1].block.Slot)
+	for _, a := range ancestors {
+		if _, onJustifiedChain := justifiedChain[a.root]; onJustifiedChain {
+			log.Error("[OnBlock] EL reports the justified checkpoint chain as invalid, keeping its blocks optimistic",
+				"justifiedRoot", f.JustifiedCheckpoint().Root, "invalidAncestor", a.root, "latestValidHash", invalidPayload.LatestValidHash)
+			break
+		}
+		f.markPayloadStatusLocked(a.root, a.block.Body.ExecutionPayload.BlockHash, execution_client.PayloadStatusInvalidated)
+		if err := f.optimisticStore.InvalidateBlock(a.root, a.block); err != nil {
+			return fmt.Errorf("failed to remove block from optimistic store: %w", err)
+		}
+	}
+	return nil
+}
+
+// justifiedChainDownTo returns the justified root and its ancestors at or above slot.
+func (f *ForkChoiceStore) justifiedChainDownTo(slot uint64) map[common.Hash]struct{} {
+	chain := map[common.Hash]struct{}{}
+	for root := f.JustifiedCheckpoint().Root; ; {
+		header, ok := f.forkGraph.GetHeader(root)
+		if !ok || header.Slot < slot {
+			return chain
+		}
+		chain[root] = struct{}{}
+		root = header.ParentRoot
+	}
+}
+
 func (f *ForkChoiceStore) payloadInvalidatedLocked(blockRoot, executionBlockHash common.Hash) bool {
 	return f.rootMarkedInvalid(blockRoot) || f.executionHashMarkedInvalid(executionBlockHash)
 }
