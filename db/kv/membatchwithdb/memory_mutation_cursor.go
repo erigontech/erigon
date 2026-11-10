@@ -362,8 +362,8 @@ func (m *memoryMutationCursor) Last() ([]byte, []byte, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	for dbKey != nil && m.isEntryDeleted(dbKey, dbValue) {
-		if dbKey, dbValue, err = m.cursor.Prev(); err != nil {
+	if dbKey != nil && m.isEntryDeleted(dbKey, dbValue) {
+		if dbKey, dbValue, err = m.lastLiveOnDb(); err != nil {
 			return nil, nil, err
 		}
 	}
@@ -407,6 +407,30 @@ func (m *memoryMutationCursor) Last() ([]byte, []byte, error) {
 	m.currentMemEntry = cursorEntry{}
 	m.isPrevFromDb = true
 	return dbKey, dbValue, nil
+}
+
+// lastLiveOnDb returns the last backing-db entry that is not deleted on this overlay.
+// Cursors of nested memory batches do not implement Prev, so for them it falls back
+// to a forward scan.
+func (m *memoryMutationCursor) lastLiveOnDb() ([]byte, []byte, error) {
+	if _, nested := m.cursor.(*memoryMutationCursor); !nested {
+		k, v, err := m.cursor.Last()
+		for k != nil && err == nil && m.isEntryDeleted(k, v) {
+			k, v, err = m.cursor.Prev()
+		}
+		return k, v, err
+	}
+	var lastK, lastV []byte
+	k, v, err := m.cursor.First()
+	for ; k != nil && err == nil; k, v, err = m.cursor.Next() {
+		if !m.isEntryDeleted(k, v) {
+			lastK, lastV = bytes.Clone(k), bytes.Clone(v)
+		}
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+	return lastK, lastV, nil
 }
 
 func (m *memoryMutationCursor) Prev() ([]byte, []byte, error) {

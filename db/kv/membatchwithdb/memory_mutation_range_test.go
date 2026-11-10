@@ -352,3 +352,19 @@ func TestTxNumsLastAfterTruncateOnOverlay(t *testing.T) {
 	require.Equal(t, uint64(2), blockNum)
 	require.Equal(t, uint64(29), txNum)
 }
+
+func TestCursorLastSkipsDeletedTailOnNestedBatch(t *testing.T) {
+	parent := newBatchOverDbNonDupSort(t)
+	child, err := membatchwithdb.NewMemoryBatch(parent)
+	require.NoError(t, err)
+	t.Cleanup(child.Close)
+	require.NoError(t, child.Delete(kv.HeaderNumber, []byte("CCAA")))
+
+	c, err := child.Cursor(kv.HeaderNumber)
+	require.NoError(t, err)
+	defer c.Close()
+	k, v, err := c.Last()
+	require.NoError(t, err)
+	require.Equal(t, "CBAA", string(k))
+	require.Equal(t, "value2", string(v))
+}
