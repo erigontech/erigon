@@ -54,6 +54,10 @@ func SetConvertPhase5HookForTest(fn func() error) {
 	convertPhase5Hook = fn
 }
 
+func SetConvertHistoryAfterFileHookForTest(fn func(idx int) error) {
+	convertHistoryAfterFileHook = fn
+}
+
 func SetCommitmentV3BatchBytesForTest(n int) int {
 	old := commitmentV3BatchBytes
 	commitmentV3BatchBytes = n

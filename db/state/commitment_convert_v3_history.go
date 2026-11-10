@@ -52,6 +52,8 @@ import (
 
 const commitmentV3HistoryBatch = 256
 
+var convertHistoryAfterFileHook func(idx int) error
+
 type commitmentV3HistoryStage struct {
 	history, idx, accessor string
 }
@@ -427,7 +429,7 @@ func checkCommitmentHistoryV3Start(dt *DomainRoTx, stepSize uint64) error {
 	return fmt.Errorf("[commitment_convert] commitment history below step %d is missing; %s needs the commit before it", vs[0].startTxNum/stepSize, filepath.Base(vs[0].Fullpath()))
 }
 
-func convertCommitmentHistoryV3(ctx context.Context, at *AggregatorRoTx, stage commitmentV3HistoryStage, logger log.Logger) ([]commitmentHistoryRange, error) {
+func convertCommitmentHistoryV3(ctx context.Context, at *AggregatorRoTx, stage commitmentV3HistoryStage, resume bool, logger log.Logger) ([]commitmentHistoryRange, error) {
 	dt := at.d[kv.CommitmentDomain]
 	if dt.ht.h.SnapshotsDisabled {
 		return nil, nil
@@ -436,40 +438,82 @@ func convertCommitmentHistoryV3(ctx context.Context, at *AggregatorRoTx, stage c
 	if err != nil || len(vs) == 0 {
 		return nil, err
 	}
-	for _, d := range []string{stage.history, stage.idx, stage.accessor} {
-		if err := dir.RemoveAll(d); err != nil {
-			return nil, err
+	stepSize := at.StepSize()
+	ranges := make([]commitmentHistoryRange, len(vs))
+	done := make([]bool, len(vs))
+	keep := map[string]bool{}
+	for i, v := range vs {
+		ranges[i] = commitmentHistoryRange{fromStep: kv.Step(v.startTxNum / stepSize), toStep: kv.Step(v.endTxNum / stepSize)}
+		if !resume {
+			continue
 		}
+		outputs := commitmentHistoryV3Outputs(dt.ht.h, stage, ranges[i])
+		done[i] = !slices.ContainsFunc(outputs[:], func(p string) bool {
+			_, statErr := os.Stat(p)
+			return statErr != nil
+		})
+		for _, p := range outputs {
+			keep[p] = done[i]
+		}
+	}
+	for _, d := range []string{stage.history, stage.idx, stage.accessor} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			return nil, err
 		}
+		entries, err := os.ReadDir(d)
+		if err != nil {
+			return nil, err
+		}
+		for _, e := range entries {
+			if p := filepath.Join(d, e.Name()); !keep[p] {
+				if err := dir.RemoveAll(p); err != nil {
+					return nil, err
+				}
+			}
+		}
 	}
 	started := time.Now()
-	ranges := make([]commitmentHistoryRange, 0, len(vs))
+	converted := 0
 	for i := range vs {
-		r, err := convertCommitmentHistoryFileV3(ctx, at, vs[i], efs[i], stage, i+1, len(vs), logger)
-		if err != nil {
+		if done[i] {
+			logger.Info(fmt.Sprintf("[commitment_convert] v3 history: %s is already converted (%d/%d files)", filepath.Base(vs[i].Fullpath()), i+1, len(vs)))
+			continue
+		}
+		if err := convertCommitmentHistoryFileV3(ctx, at, vs[i], efs[i], ranges[i], stage, i+1, len(vs), logger); err != nil {
 			return nil, fmt.Errorf("convertCommitmentHistoryFileV3 %q: %w", vs[i].Fullpath(), err)
 		}
-		ranges = append(ranges, r)
+		converted++
+		if convertHistoryAfterFileHook != nil {
+			if err := convertHistoryAfterFileHook(i); err != nil {
+				return nil, err
+			}
+		}
 	}
-	logger.Info(fmt.Sprintf("[commitment_convert] v3 history: converted %d files in %s", len(ranges), time.Since(started).Round(time.Millisecond)))
+	logger.Info(fmt.Sprintf("[commitment_convert] v3 history: converted %d files, reused %d, in %s", converted, len(vs)-converted, time.Since(started).Round(time.Millisecond)))
 	return ranges, nil
 }
 
-func convertCommitmentHistoryFileV3(ctx context.Context, at *AggregatorRoTx, vFile, efFile visibleFile, stage commitmentV3HistoryStage, fileIdx, fileTotal int, logger log.Logger) (commitmentHistoryRange, error) {
+func commitmentHistoryV3Outputs(h *History, stage commitmentV3HistoryStage, r commitmentHistoryRange) [4]string {
+	ii := h.InvertedIndex
+	return [4]string{
+		filepath.Join(stage.history, filepath.Base(h.vNewFilePath(r.fromStep, r.toStep))),
+		filepath.Join(stage.accessor, filepath.Base(h.vAccessorNewFilePath(r.fromStep, r.toStep))),
+		filepath.Join(stage.idx, filepath.Base(ii.efNewFilePath(r.fromStep, r.toStep))),
+		filepath.Join(stage.accessor, filepath.Base(ii.efAccessorNewFilePath(r.fromStep, r.toStep))),
+	}
+}
+
+func convertCommitmentHistoryFileV3(ctx context.Context, at *AggregatorRoTx, vFile, efFile visibleFile, r commitmentHistoryRange, stage commitmentV3HistoryStage, fileIdx, fileTotal int, logger log.Logger) error {
 	dt := at.d[kv.CommitmentDomain]
 	h := dt.ht.h
 	ii := h.InvertedIndex
-	stepSize := at.StepSize()
 	fromTxNum, toTxNum := vFile.startTxNum, vFile.endTxNum
-	r := commitmentHistoryRange{fromStep: kv.Step(fromTxNum / stepSize), toStep: kv.Step(toTxNum / stepSize)}
 	baseName := filepath.Base(vFile.Fullpath())
 	fileStart := time.Now()
 
 	keysV2, keysErr := detectHistoryKeysV2(ii, efFile.src)
 	if keysErr != nil {
-		return r, keysErr
+		return keysErr
 	}
 	pageValues := vFile.src.decompressor.CompressedPageValuesCount()
 	if vFile.src.decompressor.CompressionFormatVersion() == seg.FileCompressionFormatV0 {
@@ -486,7 +530,7 @@ func convertCommitmentHistoryFileV3(ctx context.Context, at *AggregatorRoTx, vFi
 	var chains, versions atomic.Uint64
 	commits, commitsErr := legacyCommitTxNumsFn(dt, fromTxNum, toTxNum)
 	if commitsErr != nil {
-		return r, commitsErr
+		return commitsErr
 	}
 	leavesAsOf := func(txNum uint64) uint64 {
 		i, _ := slices.BinarySearch(commits, txNum)
@@ -572,7 +616,16 @@ func convertCommitmentHistoryFileV3(ctx context.Context, at *AggregatorRoTx, vFi
 				_, v, valBuf, _ = vReader.Next2(valBuf[:0])
 				batch.txNums = append(batch.txNums, txNum)
 				batch.vals = append(batch.vals, batch.span(v))
+				if len(batch.buf) >= commitmentV3BatchBytes && it.HasNext() {
+					batch.keys = append(batch.keys, key)
+					batch.spans = append(batch.spans, [2]int{start, len(batch.txNums)})
+					if sendErr := send(); sendErr != nil {
+						return sendErr
+					}
+					key, start = batch.span(keyBuf), 0
+				}
 			}
+			chains.Add(1)
 			batch.keys = append(batch.keys, key)
 			batch.spans = append(batch.spans, [2]int{start, len(batch.txNums)})
 			if len(batch.keys) == commitmentV3HistoryBatch || len(batch.buf) >= commitmentV3BatchBytes {
@@ -771,9 +824,8 @@ func convertCommitmentHistoryFileV3(ctx context.Context, at *AggregatorRoTx, vFi
 					if i+1 < len(txNums) {
 						return value(i + 1), nil
 					}
-					return legacyCommitmentAsOf(wdt, legacyKey, toTxNum)
+					return legacyCommitmentAsOf(wdt, legacyKey, txNums[i]+1)
 				}
-				chains.Add(1)
 				versions.Add(uint64(len(txNums)))
 				if commitment.IsCommitmentStateKey(legacyKey) {
 					for i, txNum := range txNums {
@@ -859,22 +911,20 @@ func convertCommitmentHistoryFileV3(ctx context.Context, at *AggregatorRoTx, vFi
 	}, func() { close(out); close(collectDone) })
 	collectConverted(g, out, collectors)
 	if err := g.Wait(); err != nil {
-		return r, err
+		return err
 	}
 	collected := time.Now()
 
-	vPath := filepath.Join(stage.history, filepath.Base(h.vNewFilePath(r.fromStep, r.toStep)))
-	viPath := filepath.Join(stage.accessor, filepath.Base(h.vAccessorNewFilePath(r.fromStep, r.toStep)))
-	efPath := filepath.Join(stage.idx, filepath.Base(ii.efNewFilePath(r.fromStep, r.toStep)))
-	efiPath := filepath.Join(stage.accessor, filepath.Base(ii.efAccessorNewFilePath(r.fromStep, r.toStep)))
+	outputs := commitmentHistoryV3Outputs(h, stage, r)
+	vPath, viPath, efPath, efiPath := outputs[0], outputs[1], outputs[2], outputs[3]
 	vComp, compErr := seg.NewCompressor(ctx, "commitment_convert_v3 .v", vPath, h.dirs.Tmp, h.CompressorCfg, log.LvlTrace, logger)
 	if compErr != nil {
-		return r, compErr
+		return compErr
 	}
 	defer vComp.Close()
 	efComp, compErr := seg.NewCompressor(ctx, "commitment_convert_v3 .ef", efPath, h.dirs.Tmp, ii.CompressorCfg, log.LvlTrace, logger)
 	if compErr != nil {
-		return r, compErr
+		return compErr
 	}
 	defer efComp.Close()
 	vWriter := h.dataWriter(ctx, vComp)
@@ -928,13 +978,13 @@ func convertCommitmentHistoryFileV3(ctx context.Context, at *AggregatorRoTx, vFi
 		loadErr = finishKey()
 	}
 	if loadErr != nil {
-		return r, fmt.Errorf("resolve: %w", loadErr)
+		return fmt.Errorf("resolve: %w", loadErr)
 	}
 	if err := vWriter.Compress(); err != nil {
-		return r, err
+		return err
 	}
 	if err := efWriter.Compress(); err != nil {
-		return r, err
+		return err
 	}
 	vComp.Close()
 	efComp.Close()
@@ -943,19 +993,19 @@ func convertCommitmentHistoryFileV3(ctx context.Context, at *AggregatorRoTx, vFi
 	ps := background.NewProgressSet()
 	efDecomp, err := seg.NewDecompressor(efPath)
 	if err != nil {
-		return r, err
+		return err
 	}
 	defer efDecomp.Close()
 	vDecomp, err := seg.NewDecompressor(vPath)
 	if err != nil {
-		return r, err
+		return err
 	}
 	defer vDecomp.Close()
 	if err := ii.buildMapAccessorAt(ctx, efiPath, efDecomp, ps); err != nil {
-		return r, err
+		return err
 	}
 	if err := h.buildVI(ctx, viPath, vDecomp, efDecomp, fromTxNum, ps); err != nil {
-		return r, err
+		return err
 	}
 
 	legacySize := vFile.src.decompressor.Size() + efFile.src.decompressor.Size()
@@ -968,7 +1018,7 @@ func convertCommitmentHistoryFileV3(ctx context.Context, at *AggregatorRoTx, vFi
 		elapsed.Round(time.Millisecond), formatRate(versions.Load(), elapsed),
 		collected.Sub(fileStart).Round(time.Millisecond), written.Sub(collected).Round(time.Millisecond), time.Since(written).Round(time.Millisecond),
 		fileIdx, fileTotal))
-	return r, nil
+	return nil
 }
 
 func convertHistoryPhase3(dirs datadir.Dirs, backupRoot string, ranges []commitmentHistoryRange) (int, error) {

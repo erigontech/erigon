@@ -715,7 +715,7 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 	var historyRanges []commitmentHistoryRange
 	historyStage := newCommitmentV3HistoryStage(dirs)
 	if opts.TargetV3 {
-		if historyRanges, err = convertCommitmentHistoryV3(ctx, at, historyStage, logger); err != nil {
+		if historyRanges, err = convertCommitmentHistoryV3(ctx, at, historyStage, opts.Continue, logger); err != nil {
 			return fmt.Errorf("[commitment_convert] phase 1 history: %w", err)
 		}
 	}
