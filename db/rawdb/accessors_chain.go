@@ -1284,6 +1284,34 @@ func WriteDBCommitmentHistoryEnabled(tx kv.RwTx, enabled bool) error {
 	return nil
 }
 
+func ReadCaplinBlobsArchiveFromSlot(tx kv.Getter) (uint64, error) {
+	v, err := tx.GetOne(kv.DatabaseInfo, kv.CaplinBlobsArchiveFromSlotKey)
+	if err != nil {
+		return 0, fmt.Errorf("reading caplin blobs archive from-slot: %w", err)
+	}
+	if len(v) == 0 {
+		return 0, nil
+	}
+	if len(v) != 8 {
+		return 0, fmt.Errorf("incorrect length of caplin blobs archive from-slot: %d", len(v))
+	}
+	return binary.BigEndian.Uint64(v), nil
+}
+
+func RaiseCaplinBlobsArchiveFromSlot(tx kv.RwTx, slot uint64) error {
+	stored, err := ReadCaplinBlobsArchiveFromSlot(tx)
+	if err != nil {
+		return err
+	}
+	if slot <= stored {
+		return nil
+	}
+	if err := tx.Put(kv.DatabaseInfo, kv.CaplinBlobsArchiveFromSlotKey, binary.BigEndian.AppendUint64(nil, slot)); err != nil {
+		return fmt.Errorf("writing caplin blobs archive from-slot: %w", err)
+	}
+	return nil
+}
+
 type RCacheV2Query struct {
 	BlockNum  uint64
 	BlockHash common.Hash

@@ -1631,3 +1631,23 @@ func TestTruncateBlocksKeepsGenesis(t *testing.T) {
 		require.Equal(t, []uint64{0, 1}, got, "%s: blocks >= 2 must be gone", table)
 	}
 }
+
+func TestRaiseCaplinBlobsArchiveFromSlotKeepsHighest(t *testing.T) {
+	_, tx := mdbxtest.NewTestTx(t)
+
+	got, err := rawdb.ReadCaplinBlobsArchiveFromSlot(tx)
+	require.NoError(t, err)
+	require.Zero(t, got)
+
+	for _, slot := range []uint64{2_000_000, 1_000_000, 0} {
+		require.NoError(t, rawdb.RaiseCaplinBlobsArchiveFromSlot(tx, slot))
+	}
+	got, err = rawdb.ReadCaplinBlobsArchiveFromSlot(tx)
+	require.NoError(t, err)
+	require.Equal(t, uint64(2_000_000), got)
+
+	require.NoError(t, rawdb.RaiseCaplinBlobsArchiveFromSlot(tx, 3_000_000))
+	got, err = rawdb.ReadCaplinBlobsArchiveFromSlot(tx)
+	require.NoError(t, err)
+	require.Equal(t, uint64(3_000_000), got)
+}
