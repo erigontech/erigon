@@ -33,6 +33,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/rpc/jsonstream"
@@ -675,6 +676,7 @@ func (h *handler) handleCall(cp *callProc, msg *jsonrpcMessage, stream *jsonstre
 	if err != nil {
 		return msg.errorResponse(&InvalidParamsError{err.Error()}), nil
 	}
+	dbg.NpArgsParsed()
 	start := time.Now()
 	answer, answered := h.runMethod(cp.ctx, msg, callb, args, stream)
 
