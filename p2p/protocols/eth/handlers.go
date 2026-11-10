@@ -25,6 +25,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"time"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
@@ -338,6 +339,8 @@ type ReceiptQueryOpts struct {
 	// SizeLimit is the maximum encoded response size for per-receipt truncation.
 	// Use NoSizeLimit to disable truncation (eth/68, eth/69).
 	SizeLimit int
+	// Deadline ends the response after the block being served when it passes; zero means none.
+	Deadline time.Time
 }
 
 func AnswerGetReceiptsQueryCacheOnly(ctx context.Context, receiptsGetter ReceiptsGetter, query GetReceiptsPacket, opts ReceiptQueryOpts) (*CachedReceipts, bool, error) {
@@ -482,6 +485,9 @@ func AnswerGetReceiptsQuery(ctx context.Context, cfg *chain.Config, receiptsGett
 
 		if !complete {
 			return receipts, true, nil
+		}
+		if !opts.Deadline.IsZero() && time.Now().After(opts.Deadline) {
+			return receipts, false, nil
 		}
 	}
 	return receipts, false, nil
