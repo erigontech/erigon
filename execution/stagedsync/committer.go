@@ -1,6 +1,7 @@
 package stagedsync
 
 import (
+	"os"
 	"bytes"
 	"context"
 	"errors"
@@ -805,8 +806,17 @@ func (cc *commitmentCalculator) finishPrefetch() {
 	if cc.prefetch == nil {
 		return
 	}
-	_ = cc.prefetch.WaitBufferFree(0)
-	cc.prefetch.CloseAndWait()
+	switch os.Getenv("PREFETCH_STUB") {
+	case "zero":
+		p := cc.prefetch
+		p.Close()
+		go p.CloseAndWait()
+	case "nodrain":
+		cc.prefetch.CloseAndWait()
+	default:
+		_ = cc.prefetch.WaitBufferFree(0)
+		cc.prefetch.CloseAndWait()
+	}
 	cc.prefetch = nil
 }
 
