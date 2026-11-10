@@ -21,6 +21,7 @@ package state
 import (
 	"encoding/binary"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -173,4 +174,86 @@ func TestPrefetchLatestReportsLookupsLeftAtTheWaveCap(t *testing.T) {
 	at.d[kv.AccountsDomain] = dt
 	_, err := at.PrefetchLatest(t.Context(), kv.AccountsDomain, keys)
 	require.ErrorIs(t, err, kv.ErrPrefetchIncomplete)
+}
+
+// A branch's shortened keys are read ahead from the cold account and storage files; the read of the branch stays the same.
+func TestPrefetchBranchReferencesReadsColdAccountAndStoragePages(t *testing.T) {
+	prev := mmap.BatchPrefetch
+	mmap.BatchPrefetch = true
+	t.Cleanup(func() { mmap.BatchPrefetch = prev })
+	logger := log.New()
+	merged := func(db kv.RwDB, d *Domain, txs uint64) {
+		require.NoError(t, db.UpdateNosync(t.Context(), func(tx kv.RwTx) error {
+			collateAndMerge(t, tx, d, txs)
+			return nil
+		}))
+	}
+	accDB, acc, txs := filledDomain(t, logger)
+	merged(accDB, acc, txs)
+	stoDB, sto, txs := filledDomain(t, logger)
+	merged(stoDB, sto, txs)
+
+	// Reference the first key of each file, and write the branch in step 0 so that it is in the first merged file.
+	const fieldAccountAddr, fieldStorageAddr = 2, 4
+	branch := append([]byte{0, 3, 0, 3, fieldAccountAddr, 1}, EncodeReferenceKey(nil, 0)...)
+	branch = append(branch, fieldStorageAddr, 1)
+	branch = append(branch, EncodeReferenceKey(nil, 0)...)
+	prefix := []byte{0x12, 0x34}
+	comDB, com := testDbAndDomain(t, logger)
+	require.NoError(t, comDB.UpdateNosync(t.Context(), func(tx kv.RwTx) error {
+		comRo := com.beginForTests()
+		defer comRo.Close()
+		w := comRo.NewWriter(comDB)
+		defer w.Close()
+		require.NoError(t, w.PutWithPrev(prefix, branch, 1, nil))
+		require.NoError(t, w.Flush(t.Context(), tx))
+		collateAndMerge(t, tx, com, txs)
+		return nil
+	}))
+
+	accRo, stoRo, comRo := acc.beginForTests(), sto.beginForTests(), com.beginForTests()
+	defer accRo.Close()
+	defer stoRo.Close()
+	defer comRo.Close()
+	at := &AggregatorRoTx{a: &Aggregator{}}
+	at.a.stepSize.Store(com.stepSize)
+	at.d[kv.AccountsDomain], at.d[kv.StorageDomain], at.d[kv.CodeDomain], at.d[kv.CommitmentDomain] = accRo, stoRo, accRo, comRo
+
+	want, ok, _, _, err := at.DebugGetLatestFromFiles(kv.CommitmentDomain, prefix, math.MaxUint64)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.NotEqual(t, branch, want, "the fixture holds references")
+
+	kvMappings := func(d *Domain) []fileMapping {
+		var kvMaps []fileMapping
+		for _, m := range fileMappings(t, d.dirs.SnapDomain) {
+			if strings.HasSuffix(m.path, ".kv") {
+				kvMaps = append(kvMaps, m)
+			}
+		}
+		require.NotEmpty(t, kvMaps)
+		return kvMaps
+	}
+	accMaps, stoMaps := kvMappings(acc), kvMappings(sto)
+	pageOut(t, acc.dirs.SnapDomain, fileMappings(t, acc.dirs.SnapDomain))
+	pageOut(t, sto.dirs.SnapDomain, fileMappings(t, sto.dirs.SnapDomain))
+	accBefore, stoBefore := residentPages(t, accMaps), residentPages(t, stoMaps)
+
+	pages, err := at.PrefetchBranchReferences(t.Context(), [][]byte{prefix})
+	require.NoError(t, err)
+	require.Positive(t, pages)
+	require.Greater(t, residentPages(t, accMaps), accBefore, "the batch read the cold account page")
+	require.Greater(t, residentPages(t, stoMaps), stoBefore, "the batch read the cold storage page")
+	for _, dt := range []*DomainRoTx{accRo, stoRo} {
+		for _, r := range dt.dataReaders {
+			if r != nil {
+				require.Nil(t, r.Probe())
+			}
+		}
+	}
+
+	got, ok, _, _, err := at.DebugGetLatestFromFiles(kv.CommitmentDomain, prefix, math.MaxUint64)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, want, got)
 }

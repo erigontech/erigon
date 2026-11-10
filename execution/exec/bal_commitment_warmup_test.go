@@ -533,3 +533,44 @@ func TestFirstFailurePrefersAReadFailureOverAnIncompleteBatch(t *testing.T) {
 	require.Equal(t, kv.ErrPrefetchIncomplete, firstFailure(nil, kv.ErrPrefetchIncomplete))
 	require.NoError(t, firstFailure(nil, nil))
 }
+
+// referenceRecorder reports a cold trie whose every branch has all children, and records the branch reference prefetches.
+type referenceRecorder struct {
+	mu   sync.Mutex
+	refs []string
+	err  error
+}
+
+func (r *referenceRecorder) PrefetchLatest(_ context.Context, _ kv.Domain, keys [][]byte) (int, error) {
+	return len(keys), nil
+}
+
+func (r *referenceRecorder) GetLatestBranchRaw([]byte, kv.Tx) ([]byte, bool, error) {
+	return []byte{0, 0, 0xff, 0xff}, true, nil
+}
+
+func (r *referenceRecorder) PrefetchBranchReferences(_ context.Context, prefixes [][]byte) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, p := range prefixes {
+		r.refs = append(r.refs, string(p))
+	}
+	return len(prefixes), r.err
+}
+
+func TestPrefetchCommitmentReadsBranchReferencesOfEveryLevel(t *testing.T) {
+	keys := [][]byte{make([]byte, prefetchFlatDepth+3)}
+	recorder := &referenceRecorder{}
+	require.NoError(t, prefetchCommitment(t.Context(), prefetcherDB{p: recorder}, keys))
+
+	var want []string
+	for depth := range len(keys[0]) + 1 {
+		for _, p := range compactPrefixes(keys, depth) {
+			want = append(want, string(p))
+		}
+	}
+	require.ElementsMatch(t, want, recorder.refs, "the flat levels and every walk level")
+
+	recorder.err = errors.New("read failed")
+	require.ErrorIs(t, prefetchCommitment(t.Context(), prefetcherDB{p: recorder}, keys), recorder.err)
+}

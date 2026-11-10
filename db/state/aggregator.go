@@ -2734,11 +2734,7 @@ func (at *AggregatorRoTx) PrefetchLatest(ctx context.Context, domain kv.Domain, 
 	}
 	defer func() {
 		dt.probe = nil
-		for _, r := range dt.dataReaders {
-			if r != nil {
-				r.SetProbe(nil)
-			}
-		}
+		dt.clearReaderProbes()
 	}()
 	// A key that no existence filter holds needs no page: drop it before the probed lookups, which touch every file.
 	pending := make([][]byte, 0, len(keys))
@@ -2794,17 +2790,27 @@ func (at *AggregatorRoTx) PrefetchLatest(ctx context.Context, domain kv.Domain, 
 var prefetchMaxWaves = 64
 
 func probeLatestFromFiles(dt *DomainRoTx, k []byte) (page uintptr, cold bool) {
-	defer func() {
-		if r := recover(); r != nil {
-			p, ok := r.(mmap.ColdPage)
-			if !ok {
-				panic(r)
-			}
-			page, cold = uintptr(p), true
-		}
-	}()
+	defer recoverColdPage(&page, &cold)
 	_, _, _, _, _ = dt.lookupLatestFromFiles(k, nil, 0, false)
 	return 0, false
+}
+
+func recoverColdPage(page *uintptr, cold *bool) {
+	if r := recover(); r != nil {
+		p, ok := r.(mmap.ColdPage)
+		if !ok {
+			panic(r)
+		}
+		*page, *cold = uintptr(p), true
+	}
+}
+
+func (dt *DomainRoTx) clearReaderProbes() {
+	for _, r := range dt.dataReaders {
+		if r != nil {
+			r.SetProbe(nil)
+		}
+	}
 }
 
 func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx, opts kv.GetLatestOptions) (v []byte, step kv.Step, ok bool, err error) {

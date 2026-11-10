@@ -218,6 +218,10 @@ type latestPrefetcher interface {
 	PrefetchLatest(ctx context.Context, domain kv.Domain, keys [][]byte) (coldPages int, err error)
 }
 
+type branchReferencePrefetcher interface {
+	PrefetchBranchReferences(ctx context.Context, prefixes [][]byte) (pages int, err error)
+}
+
 const (
 	prefetchFlatDepth = 8 // trie levels read as one flat batch before the walk checks branches
 	prefetchPar       = 4 // read txs one prefetch step spreads its keys over
@@ -315,23 +319,47 @@ func keysWithChild(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, keys [][]
 	return next
 }
 
-// prefetchKeys spreads keys over prefetchPar read txs and returns the first read failure (see firstFailure).
-func prefetchKeys(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, domain kv.Domain, keys [][]byte) error {
+// prefetchInChunks spreads n items over prefetchPar read txs and returns the first read failure (see firstFailure).
+func prefetchInChunks(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, n int, read func(aggTx any, from, to int) error) error {
 	par := prefetchPar
-	if len(keys) < 2*prefetchPar {
+	if n < 2*prefetchPar {
 		par = 1
 	}
 	var mu sync.Mutex
 	var first error
-	inChunks(ctx, db, ttx, len(keys), par, func(tx kv.TemporalTx, from, to int) {
-		if p, ok := tx.AggTx().(latestPrefetcher); ok {
-			_, err := p.PrefetchLatest(ctx, domain, keys[from:to])
-			mu.Lock()
-			first = firstFailure(first, err)
-			mu.Unlock()
-		}
+	inChunks(ctx, db, ttx, n, par, func(tx kv.TemporalTx, from, to int) {
+		err := read(tx.AggTx(), from, to)
+		mu.Lock()
+		first = firstFailure(first, err)
+		mu.Unlock()
 	})
 	return first
+}
+
+func prefetchKeys(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, domain kv.Domain, keys [][]byte) error {
+	return prefetchInChunks(ctx, db, ttx, len(keys), func(aggTx any, from, to int) error {
+		p, ok := aggTx.(latestPrefetcher)
+		if !ok {
+			return nil
+		}
+		_, err := p.PrefetchLatest(ctx, domain, keys[from:to])
+		return err
+	})
+}
+
+// prefetchBranches reads the file pages of the commitment branches at prefixes, then the pages their shortened keys resolve to.
+func prefetchBranches(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, prefixes [][]byte) error {
+	if err := prefetchKeys(ctx, db, ttx, kv.CommitmentDomain, prefixes); err != nil {
+		return err
+	}
+	return prefetchInChunks(ctx, db, ttx, len(prefixes), func(aggTx any, from, to int) error {
+		p, ok := aggTx.(branchReferencePrefetcher)
+		if !ok {
+			return nil
+		}
+		_, err := p.PrefetchBranchReferences(ctx, prefixes[from:to])
+		return err
+	})
 }
 
 // firstFailure returns the first error that is a real read failure (not an incomplete batch or a cancellation),
@@ -453,7 +481,7 @@ func prefetchCommitment(ctx context.Context, db kv.RoDB, hashedKeys [][]byte) er
 		if !ok || trieMostlyResident(ctx, p, hashedKeys) {
 			return
 		}
-		if err = prefetchKeys(ctx, db, ttx, kv.CommitmentDomain, flatPrefixes(hashedKeys)); err != nil {
+		if err = prefetchBranches(ctx, db, ttx, flatPrefixes(hashedKeys)); err != nil {
 			return
 		}
 		var storageKeys [][]byte
@@ -477,7 +505,7 @@ func walkTriePrefixes(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, keys [
 	active := keys
 	for depth := start; len(active) > 0 && depth <= commitment.WarmupMaxDepth; depth++ {
 		if depth > prefetchFlatDepth {
-			if err := prefetchKeys(ctx, db, ttx, kv.CommitmentDomain, compactPrefixes(active, depth)); err != nil {
+			if err := prefetchBranches(ctx, db, ttx, compactPrefixes(active, depth)); err != nil {
 				return err
 			}
 		}

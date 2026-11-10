@@ -18,15 +18,20 @@ package state
 
 import (
 	"bytes"
+	"cmp"
+	"context"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/mmap"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
@@ -103,15 +108,9 @@ func (at *AggregatorRoTx) replaceShortenedKeysInBranch(prefix []byte, branch com
 	logger := log.Root()
 	aggTx := at
 
-	if len(branch) == 0 || bytes.Equal(prefix, commitmentdb.KeyCommitmentState) ||
-		aggTx.TxNumsInFiles(kv.StateDomains...) == 0 {
-
-		return branch, nil // do not transform, return as is
-	}
-
-	fileVersion, metricI := aggTx.commitmentFileVersionByRange(fStartTxNum, fEndTxNum)
-	if !CommitmentBranchReferenced(fileVersion, at.StepSize(), fStartTxNum, fEndTxNum) {
-		return branch, nil // input file was written plain (v2.2) or below the referencing threshold
+	metricI, referenced := at.branchReferenced(prefix, branch, fStartTxNum, fEndTxNum)
+	if !referenced {
+		return branch, nil
 	}
 
 	sto := aggTx.d[kv.StorageDomain]
@@ -132,6 +131,79 @@ func (at *AggregatorRoTx) replaceShortenedKeysInBranch(prefix []byte, branch com
 	}
 
 	return ExpandShortenedKeysInBranch(branch, acc, sto, accountItem, storageItem, fStartTxNum, fEndTxNum)
+}
+
+// branchReferenced reports whether a branch read from the commitment file over from..to holds shortened keys to expand.
+// It also returns the metric bucket of that file.
+func (at *AggregatorRoTx) branchReferenced(prefix []byte, branch commitment.BranchData, from, to uint64) (metricI int, referenced bool) {
+	if len(branch) == 0 || bytes.Equal(prefix, commitmentdb.KeyCommitmentState) || at.TxNumsInFiles(kv.StateDomains...) == 0 {
+		return 0, false
+	}
+	fileVersion, metricI := at.commitmentFileVersionByRange(from, to)
+	return metricI, CommitmentBranchReferenced(fileVersion, at.StepSize(), from, to)
+}
+
+// PrefetchBranchReferences reads into the page cache, in one io_uring batch, the account and storage file pages that
+// expanding the shortened keys of the commitment branches at prefixes touches; reads stay correct without it.
+func (at *AggregatorRoTx) PrefetchBranchReferences(ctx context.Context, prefixes [][]byte) (pages int, err error) {
+	pr := mmap.NewProbe()
+	if pr == nil {
+		return 0, nil
+	}
+	acc, sto := at.d[kv.AccountsDomain], at.d[kv.StorageDomain]
+	defer acc.clearReaderProbes()
+	defer sto.clearReaderProbes()
+	cold := map[uintptr]struct{}{}
+	for _, prefix := range prefixes {
+		if ctx.Err() != nil {
+			break
+		}
+		branch, _, from, to, lookupErr := at.d[kv.CommitmentDomain].getLatestFromFiles(prefix, nil, kv.NoStepBound)
+		if lookupErr != nil {
+			err = cmp.Or(err, lookupErr)
+			continue
+		}
+		if _, referenced := at.branchReferenced(prefix, branch, from, to); !referenced {
+			continue
+		}
+		accReader, stoReader := acc.probedFileReader(from, to, pr), sto.probedFileReader(from, to, pr)
+		_, walkErr := commitment.BranchData(branch).ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
+			reader, plainLen := accReader, length.Addr
+			if isStorage {
+				reader, plainLen = stoReader, length.Addr+length.Hash
+			}
+			if reader != nil && len(key) > 0 && len(key) != plainLen {
+				if page, isCold := probeWord(reader, DecodeReferenceKey(key)); isCold {
+					cold[page] = struct{}{}
+				}
+			}
+			return nil, nil
+		})
+		err = cmp.Or(err, walkErr)
+	}
+	pagesToRead := slices.Collect(maps.Keys(cold))
+	return len(pagesToRead), cmp.Or(err, mmap.ReadPages(ctx, pagesToRead))
+}
+
+// probedFileReader returns the reusable reader of the visible file over from..to, probing through pr, or nil without one.
+func (dt *DomainRoTx) probedFileReader(from, to uint64, pr *mmap.Probe) *seg.Reader {
+	for i, f := range dt.files {
+		if f.startTxNum == from && f.endTxNum == to && f.src != nil {
+			r := dt.reusableReader(i)
+			r.SetProbe(pr)
+			return r
+		}
+	}
+	return nil
+}
+
+func probeWord(r *seg.Reader, offset uint64) (page uintptr, cold bool) {
+	defer recoverColdPage(&page, &cold)
+	r.Reset(offset)
+	if r.HasNext() {
+		r.Skip()
+	}
+	return 0, false
 }
 
 func DecodeReferenceKey(from []byte) uint64 {
