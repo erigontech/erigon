@@ -1124,6 +1124,12 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 						"tasks", len(blockExecutor.tasks), "exec", blockExecutor.cntExec,
 						"spec", blockExecutor.cntSpecExec,
 						"valFail", blockExecutor.cntValidationFail,
+						"npRuns", blockExecutor.probe.runs.Load(), "npRunNs", blockExecutor.probe.runNs.Load(),
+						"npSpine", blockExecutor.probe.reruns[rerunSpine].Load(), "npWasteSpineNs", blockExecutor.probe.wasteNs[rerunSpine].Load(),
+						"npDep", blockExecutor.probe.reruns[rerunDep].Load(), "npWasteDepNs", blockExecutor.probe.wasteNs[rerunDep].Load(),
+						"npInvalid", blockExecutor.probe.reruns[rerunInvalid].Load(), "npWasteInvalidNs", blockExecutor.probe.wasteNs[rerunInvalid].Load(),
+						"npRecheck", blockExecutor.probe.reruns[rerunRecheck].Load(), "npWasteRecheckNs", blockExecutor.probe.wasteNs[rerunRecheck].Load(),
+						"npErr", blockExecutor.probe.reruns[rerunErr].Load(), "npWasteErrNs", blockExecutor.probe.wasteNs[rerunErr].Load(),
 						"spineUsPerIter", fmt.Sprintf("%.1f", float64(npProc.Nanoseconds())/float64(max(1, blockExecutor.cntExec))/1e3))
 					npWait, npProc = 0, 0
 				}
@@ -2566,6 +2572,7 @@ type blockExecutor struct {
 
 	// Stats for debugging purposes
 	cntExec, cntSpecExec, cntValidationFail int
+	probe                                   rerunProbe
 
 	// finalizedResults stores the finalized execResult snapshot per TX, so the
 	// publish loop can't see a different incarnation if be.results[tx] is overwritten
