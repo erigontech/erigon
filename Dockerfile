@@ -45,7 +45,7 @@ ARG TARGETARCH \
     TARGETPLATFORM \
     BUILD_DBTOOLS \
     BINARIES \
-    GOPROXY="https://proxy.golang.org|direct"
+    GOPROXY="https://proxy.golang.org|https://goproxy.cn|direct"
 
 SHELL ["/bin/bash", "-c"]
 
