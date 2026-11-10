@@ -309,7 +309,7 @@ func commitmentVerify(ctx context.Context, logger log.Logger) error {
 		if err != nil {
 			return fmt.Errorf("as of %s: %w", label, err)
 		}
-		if asOf != math.MaxUint64 && c.TxNum > asOf {
+		if asOf != math.MaxUint64 && c.TxNum >= asOf {
 			return fmt.Errorf("as of %s: no commitment history covers txNum %d", label, asOf)
 		}
 		logger.Info("[commitment verify] ok", "asOf", label, "block", c.BlockNum, "txNum", c.TxNum, "root", hex.EncodeToString(c.Root),

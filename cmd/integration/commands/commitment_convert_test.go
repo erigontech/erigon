@@ -17,6 +17,8 @@
 package commands
 
 import (
+	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"sync"
@@ -87,10 +89,12 @@ func TestCommitmentVerifyRejectsAsOfBelowHistory(t *testing.T) {
 	t.Cleanup(func() { datadirCli, chaindata, verifyAsOf = previousDatadir, previousChaindata, previousVerifyAsOf })
 
 	db, dirs := dbWithV3State(t)
+	latest, err := state.FoldCommitmentV3(t.Context(), db.(state.HasAgg).Agg().(*state.Aggregator), math.MaxUint64)
+	require.NoError(t, err)
 	db.Close()
 	var pruned []string
 	for _, d := range []string{dirs.SnapHistory, dirs.SnapIdx, dirs.SnapAccessors} {
-		files, err := filepath.Glob(filepath.Join(d, "*-commitment.0-*"))
+		files, err := filepath.Glob(filepath.Join(d, "*-commitment.*"))
 		require.NoError(t, err)
 		pruned = append(pruned, files...)
 	}
@@ -100,9 +104,11 @@ func TestCommitmentVerifyRejectsAsOfBelowHistory(t *testing.T) {
 	}
 
 	datadirCli, chaindata = dirs.DataDir, dirs.Chaindata
-	verifyAsOf = []uint{1}
-	openSnapshotOnce = sync.Once{}
-	require.ErrorContains(t, commitmentVerify(t.Context(), log.New()), "no commitment history covers txNum 1")
+	for _, asOf := range []uint64{1, latest.TxNum} {
+		verifyAsOf = []uint{uint(asOf)}
+		openSnapshotOnce = sync.Once{}
+		require.ErrorContains(t, commitmentVerify(t.Context(), log.New()), fmt.Sprintf("no commitment history covers txNum %d", asOf))
+	}
 }
 
 func TestNewTemporalDBRejectsV3FilesWhenV3IsDisabled(t *testing.T) {
