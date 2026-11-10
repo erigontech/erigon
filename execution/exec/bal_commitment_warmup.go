@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	commonerrors "github.com/erigontech/erigon/common/errors"
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
@@ -354,7 +355,7 @@ func logBatchPrefetch(ctx context.Context, what string, keys int, started time.T
 		logPrefetchFailure("[warmBAL] batch prefetch failed", "what", what, "keys", keys, "elapsed", time.Since(started), "err", err)
 		return
 	}
-	log.Debug("[warmBAL] batch prefetch", "what", what, "keys", keys, "elapsed", time.Since(started))
+	log.Info("[warmBAL] batch prefetch", "what", what, "keys", keys, "elapsed", time.Since(started))
 }
 
 var prefetchFailureWarned atomic.Bool
@@ -446,11 +447,18 @@ func flatPrefixes(keys [][]byte) [][]byte {
 	return prefixes
 }
 
+var forceTriePrefetch = dbg.EnvBool("PF_FORCE_TRIE", false)
+
 func prefetchCommitment(ctx context.Context, db kv.RoDB, hashedKeys [][]byte) error {
 	var err error
 	txErr := withTemporalTx(ctx, db, func(ttx kv.TemporalTx) {
 		p, ok := ttx.AggTx().(latestPrefetcher)
-		if !ok || trieMostlyResident(ctx, p, hashedKeys) {
+		if !ok {
+			return
+		}
+		resident := trieMostlyResident(ctx, p, hashedKeys)
+		log.Info("[warmBAL] trie prefetch gate", "keys", len(hashedKeys), "resident", resident, "force", forceTriePrefetch)
+		if resident && !forceTriePrefetch {
 			return
 		}
 		if err = prefetchKeys(ctx, db, ttx, kv.CommitmentDomain, flatPrefixes(hashedKeys)); err != nil {
