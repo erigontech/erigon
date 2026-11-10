@@ -1279,7 +1279,7 @@ func DeleteBlockSnapshots(args DeleteBlockSnapshotsArgs) error {
 		f := &toRemove[i]
 		// Catch both ".torrent" and partial ".torrent<suffix>" companions
 		// (see snaptype.IsTorrentPartial).
-		torrentArtifacts, err := filepath.Glob(f.Path + ".torrent*")
+		torrentArtifacts, err := dir2.Glob(f.Path + ".torrent*")
 		if err != nil {
 			return err
 		}
@@ -1645,12 +1645,17 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) (retErr error) {
 	defer db.Close()
 
 	var commitmentHistoryEnabled bool
+	var blobsFromSlot uint64
 	if err := chainDB.View(ctx, func(tx kv.Tx) error {
 		var err error
 		commitmentHistoryEnabled, _, err = rawdb.ReadDBCommitmentHistoryEnabled(tx)
+		if err != nil {
+			return fmt.Errorf("failed to read CommitmentHistory config: %w", err)
+		}
+		blobsFromSlot, err = rawdb.ReadCaplinBlobsArchiveFromSlot(tx)
 		return err
 	}); err != nil {
-		return fmt.Errorf("failed to read CommitmentHistory config: %w", err)
+		return fmt.Errorf("read integrity config: %w", err)
 	}
 
 	runCheck := func(ctx context.Context, chk integrity.Check) error {
@@ -1676,7 +1681,7 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) (retErr error) {
 		case integrity.CaplinStateRoots:
 			return integrity.CheckCaplinStateRoots(ctx, dirs, failFast, logger)
 		case integrity.CaplinBlobSidecars:
-			return integrity.CheckCaplinBlobSidecars(ctx, res.CaplinIndexDB, res.CaplinSnaps, res.BeaconConfig, failFast, logger)
+			return integrity.CheckCaplinBlobSidecars(ctx, res.CaplinIndexDB, res.CaplinSnaps, res.BeaconConfig, blobsFromSlot, failFast, logger)
 		case integrity.ReceiptsNoDups:
 			return integrity.CheckReceiptsNoDups(ctx, sc, db, blockReader, failFast)
 		case integrity.RCacheNoDups:

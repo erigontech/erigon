@@ -462,18 +462,27 @@ func TestGasChangeV2Precompile(t *testing.T) {
 }
 
 func TestGasChangeV2CodeDeposit(t *testing.T) {
-	ibs := state.New(state.NewNoopReader())
-	defer ibs.Close()
-	recorder := &gasTraceRecorder{t: t}
-	evm := NewEVM(evmtypes.BlockContext{Transfer: misc.Transfer, CanTransfer: func(_ evmtypes.IntraBlockState, _ accounts.Address, value uint256.Int) (bool, error) {
-		return value.IsZero(), nil
-	}}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{Tracer: recorder.hooks()})
-	_, _, _, _, err := evm.Create(accounts.ZeroAddress, []byte{byte(PUSH1), 1, byte(PUSH0), byte(RETURN)},
-		mdgas.MdGas{Execution: 200_000, State: 50_000}, uint256.Int{}, nil, false)
-	require.NoError(t, err)
-	require.True(t, slices.ContainsFunc(recorder.changes, func(change gasChange) bool {
-		return change.reason == tracing.GasChangeCallCodeStorage && change.old.State == change.new.State+params.CostPerStateByte
-	}))
+	for _, frame := range []bool{false, true} {
+		t.Run(map[bool]string{false: "ordinary", true: "frame"}[frame], func(t *testing.T) {
+			ibs := state.New(state.NewNoopReader())
+			defer ibs.Close()
+			recorder := &gasTraceRecorder{t: t}
+			evm := NewEVM(evmtypes.BlockContext{Transfer: misc.Transfer, CanTransfer: func(_ evmtypes.IntraBlockState, _ accounts.Address, value uint256.Int) (bool, error) {
+				return value.IsZero(), nil
+			}}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{Tracer: recorder.hooks()})
+			initial := mdgas.MdGas{Execution: 200_000, State: 50_000}
+			if frame {
+				tx := &types.FrameTransaction{NonceKeys: []uint256.Int{{}}, Frames: []types.Frame{{Limits: initial}}}
+				evm.FrameContext = ibs.NewFrameContext(tx, uint256.Int{})
+			}
+			_, _, _, _, err := evm.Create(accounts.ZeroAddress, []byte{byte(PUSH1), 1, byte(PUSH0), byte(RETURN)},
+				initial, uint256.Int{}, nil, false)
+			require.NoError(t, err)
+			require.True(t, slices.ContainsFunc(recorder.changes, func(change gasChange) bool {
+				return change.reason == tracing.GasChangeCallCodeStorage && change.old.State == change.new.State+params.CostPerStateByte
+			}))
+		})
+	}
 }
 
 func TestGasChangeV2FailedCodeDeposit(t *testing.T) {

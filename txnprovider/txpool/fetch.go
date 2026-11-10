@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -73,6 +74,7 @@ type Fetch struct {
 	stateChangesParseCtxLock sync.Mutex
 	pooledTxnsParseCtxLock   sync.Mutex
 	announcements            *maphash.LRU[announceInfo] // announceKey(txHash, peerHash) -> announced (type, size) from that peer
+	newBlocks                atomic.Uint64
 	logger                   log.Logger
 }
 
@@ -106,7 +108,7 @@ func NewFetch(
 		db:                   db,
 		stateChangesClient:   stateChangesClient,
 		stateChangesParseCtx: NewTxnParseContext(chainID).ChainIDRequired(), // TODO: change ctx if rules changed
-		pooledTxnsParseCtx:   NewTxnParseContext(chainID).ChainIDRequired(),
+		pooledTxnsParseCtx:   NewTxnParseContext(chainID).ChainIDRequired().WithPoolRules(),
 		announcements:        announcements,
 		wg:                   options.p2pFetcherWg,
 		logger:               logger,
@@ -227,7 +229,7 @@ func (f *Fetch) penalizePeer(ctx context.Context, sentryClient sentryproto.Sentr
 // protocol violation via the blob_versioned_hashes / BlobBundles count
 // mismatch below (blob txs must declare >=1 blob per EIP-4844).
 func (f *Fetch) checkBlobSidecar(slot *TxnSlot) error {
-	if slot == nil || slot.Txn == nil || slot.Txn.Type() != types.BlobTxType {
+	if slot == nil || slot.Txn == nil || (slot.Txn.Type() != types.BlobTxType && slot.Txn.GetBlobGas() == 0) {
 		return nil
 	}
 	blobHashes := slot.Txn.GetBlobHashes()
@@ -360,6 +362,7 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentryproto.Sen
 	// LRU cache for deduplication - filters duplicates before they enter the batch
 	// Uses maphash to avoid string allocations
 	seenLRU, _ := maphash.NewLRU[struct{}](1024)
+	var seenNewBlocks uint64
 
 	flushBatch := func() {
 		flushLock.Lock()
@@ -443,10 +446,14 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentryproto.Sen
 		}
 
 		// Deduplicate transaction bodies to avoid repeated blob verification.
-		// Keep announcements for peer fallback. Replies with cached bodies are still
-		// dropped before the pool can revalidate their transactions.
+		// Keep announcements for peer fallback. A new block can make a rejected
+		// transaction valid, so it starts a new deduplication scope.
 		switch req.Id {
 		case sentryproto.MessageId_TRANSACTIONS_66, sentryproto.MessageId_POOLED_TRANSACTIONS_66:
+			if newBlocks := f.newBlocks.Load(); newBlocks != seenNewBlocks {
+				seenLRU.Purge()
+				seenNewBlocks = newBlocks
+			}
 			if _, seen := seenLRU.Get(req.Data); seen {
 				if f.wg != nil {
 					f.wg.Done()
@@ -780,7 +787,7 @@ func (f *Fetch) handleNewPeer(req *sentryproto.PeerEvent) error {
 func (f *Fetch) handleStateChanges(ctx context.Context, client StateChangesClient) error {
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	stream, err := client.StateChanges(streamCtx, &remoteproto.StateChangeRequest{WithStorage: false, WithTransactions: true}, grpc.WaitForReady(true))
+	stream, err := client.StateChanges(streamCtx, &remoteproto.StateChangeRequest{WithStorage: true, WithTransactions: true}, grpc.WaitForReady(true))
 	if err != nil {
 		return err
 	}
@@ -830,7 +837,7 @@ func (f *Fetch) handleStateChangesRequest(ctx context.Context, req *remoteproto.
 					if err != nil {
 						return err
 					}
-					if utx.TxType() == BlobTxnType {
+					if utx.Txn.GetBlobGas() != 0 {
 						unwindBlobTxns.Append(utx, sender, false)
 					} else {
 						unwindTxns.Append(utx, sender, false)
@@ -848,5 +855,6 @@ func (f *Fetch) handleStateChangesRequest(ctx context.Context, req *remoteproto.
 	if err := f.pool.OnNewBlock(ctx, req, unwindTxns, unwindBlobTxns, minedTxns); err != nil && !errors.Is(err, context.Canceled) {
 		return err
 	}
+	f.newBlocks.Add(1)
 	return nil
 }

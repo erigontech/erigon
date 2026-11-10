@@ -181,7 +181,6 @@ var DefaultFlags = []cli.Flag{
 	&utils.DevValidatorSeedFlag,
 	&utils.DevValidatorCountFlag,
 	&utils.DevSlotTimeFlag,
-	&utils.VMEnableDebugFlag,
 	&utils.NetworkIdFlag,
 	&utils.PersistReceiptsV2Flag,
 	&utils.PersistReceiptsDistanceFlag,
@@ -205,10 +204,10 @@ var DefaultFlags = []cli.Flag{
 	&utils.DownloaderVerifyFlag,
 	&utils.HealthCheckFlag,
 	&utils.WebSeedsFlag,
-	&utils.AAFlag,
 	&utils.EthStatsURLFlag,
 	&utils.OverrideOsakaFlag,
 	&utils.OverrideAmsterdamFlag,
+	&utils.OverrideGenesisFlag,
 	&utils.KeepStoredChainConfigFlag,
 
 	&utils.CaplinDiscoveryAddrFlag,
@@ -248,6 +247,7 @@ var DefaultFlags = []cli.Flag{
 
 	&utils.CaplinArchiveBlocksFlag,
 	&utils.CaplinArchiveBlobsFlag,
+	&utils.CaplinArchiveBlobsFromSlotFlag,
 	&utils.CaplinArchiveStatesFlag,
 	&utils.CaplinImmediateBlobBackfillFlag,
 

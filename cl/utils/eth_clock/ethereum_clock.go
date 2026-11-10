@@ -34,6 +34,7 @@ var maximumClockDisparity = 500 * time.Millisecond
 
 //go:generate mockgen -typed=true -source=./ethereum_clock.go -destination=./ethereum_clock_mock.go -package=eth_clock . EthereumClock
 type EthereumClock interface {
+	Now() time.Time
 	GetSlotTime(slot uint64) time.Time
 	GetCurrentSlot() uint64
 	GetEpochAtSlot(slot uint64) uint64
@@ -82,12 +83,16 @@ type ethereumClockImpl struct {
 }
 
 func NewEthereumClock(genesisTime uint64, genesisValidatorsRoot common.Hash, beaconCfg *clparams.BeaconChainConfig) EthereumClock {
+	return NewEthereumClockWithNow(genesisTime, genesisValidatorsRoot, beaconCfg, time.Now)
+}
+
+func NewEthereumClockWithNow(genesisTime uint64, genesisValidatorsRoot common.Hash, beaconCfg *clparams.BeaconChainConfig, now func() time.Time) EthereumClock {
 	impl := &ethereumClockImpl{
 		genesisTime:           genesisTime,
 		beaconCfg:             beaconCfg,
 		genesisValidatorsRoot: genesisValidatorsRoot,
 		forkDigestToVersion:   make(map[common.Bytes4]clparams.StateVersion),
-		now:                   time.Now,
+		now:                   now,
 	}
 
 	for _, fork := range forkList(beaconCfg.ForkVersionSchedule) {
@@ -116,6 +121,10 @@ func NewEthereumClock(genesisTime uint64, genesisValidatorsRoot common.Hash, bea
 		impl.forkDigestToVersion[digest] = stateVersion
 	}
 	return impl
+}
+
+func (t *ethereumClockImpl) Now() time.Time {
+	return t.now()
 }
 
 func (t *ethereumClockImpl) GetSlotTime(slot uint64) time.Time {

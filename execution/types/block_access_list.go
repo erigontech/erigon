@@ -188,8 +188,6 @@ func (s *BlockAccessListSidecar) copy() *BlockAccessListSidecar {
 	return cpy
 }
 
-const maxBlockAccessListBytes = 10 * 1024 * 1024
-
 // EIP-7928: bal_items <= block_gas_limit / BalItemCost
 const BalItemCost = 2000
 
@@ -460,6 +458,19 @@ func (ac *AccountChanges) Normalize() {
 		sortByIndex(ac.CodeChanges)
 		ac.CodeChanges = dedupByIndex(ac.CodeChanges)
 	}
+}
+
+func (ac *AccountChanges) Equal(other *AccountChanges) bool {
+	return ac.Address == other.Address &&
+		slices.EqualFunc(ac.StorageChanges, other.StorageChanges, func(a, b SlotChanges) bool {
+			return a.Slot == b.Slot && slices.EqualFunc(a.Changes, b.Changes, func(x, y *StorageChange) bool { return *x == *y })
+		}) &&
+		slices.Equal(ac.StorageReads, other.StorageReads) &&
+		slices.EqualFunc(ac.BalanceChanges, other.BalanceChanges, func(x, y *BalanceChange) bool { return *x == *y }) &&
+		slices.EqualFunc(ac.NonceChanges, other.NonceChanges, func(x, y *NonceChange) bool { return *x == *y }) &&
+		slices.EqualFunc(ac.CodeChanges, other.CodeChanges, func(x, y *CodeChange) bool {
+			return x.Index == y.Index && bytes.Equal(x.Bytecode, y.Bytecode)
+		})
 }
 
 func (sc *SlotChanges) EncodingSize() int {
@@ -815,9 +826,6 @@ func DecodeBlockAccessListBytes(data []byte) (BlockAccessList, error) {
 }
 
 func decodeBlockAccessListBytes(data []byte, budget *blockAccessListDecodeBudget) (BlockAccessList, error) {
-	if len(data) > maxBlockAccessListBytes {
-		return nil, fmt.Errorf("block access list RLP exceeds maximum size (%d bytes)", len(data))
-	}
 	stream := rlp.NewStream(bytes.NewReader(data), 0)
 	var bal BlockAccessList
 	if err := decodeBlockAccessList(&bal, stream, budget); err != nil {

@@ -34,6 +34,8 @@ type blockResponseSentinel struct {
 	softBannedPeer   string
 	maxResponseBytes []uint64
 	requestData      [][]byte
+	askedPeers       []string
+	topics           []string
 	calls            int
 }
 
@@ -103,9 +105,9 @@ func TestReqRespRequestsPreserveCallerDeadline(t *testing.T) {
 		sentinel := &contextRecordingSentinel{}
 		client := &BeaconRpcP2P{sentinel: sentinel}
 		if withPeer {
-			_, _, _ = client.sendRequestWithPeer(ctx, "topic", nil, "peer", 0)
+			_, _, _ = client.sendRequestWithPeer(ctx, "topic", nil, "peer", 0, math.MaxUint64)
 		} else {
-			_, _, _ = client.sendRequest(ctx, "topic", nil, 0)
+			_, _, _ = client.sendRequest(ctx, "topic", nil, 0, math.MaxUint64)
 		}
 		require.True(t, sentinel.hasDeadline)
 		require.Equal(t, deadline, sentinel.deadline)
@@ -118,9 +120,9 @@ func TestReqRespRequestsBoundContextsWithoutDeadline(t *testing.T) {
 		client := &BeaconRpcP2P{sentinel: sentinel}
 		before := time.Now().Add(30 * time.Second)
 		if withPeer {
-			_, _, _ = client.sendRequestWithPeer(t.Context(), "topic", nil, "peer", 0)
+			_, _, _ = client.sendRequestWithPeer(t.Context(), "topic", nil, "peer", 0, math.MaxUint64)
 		} else {
-			_, _, _ = client.sendRequest(t.Context(), "topic", nil, 0)
+			_, _, _ = client.sendRequest(t.Context(), "topic", nil, 0, math.MaxUint64)
 		}
 		after := time.Now().Add(30 * time.Second)
 		require.True(t, sentinel.hasDeadline)
@@ -281,7 +283,7 @@ func TestColumnSidecarsRequestRejectsOverCardinalityBeforeSidecarDecode(t *testi
 	request.Append(identifier)
 
 	sidecars, pid, snapshot, err := client.SendColumnSidecarsByRootIdentifierReqWithSnapshot(t.Context(), request)
-	require.ErrorContains(t, err, "response count 2 exceeds requested column count 1")
+	require.ErrorContains(t, err, "more chunks than requested")
 	require.Nil(t, sidecars)
 	require.Equal(t, "cap-ignoring-peer", pid)
 	require.Equal(t, 1, snapshot.Len())
@@ -457,6 +459,15 @@ func (s *blockResponseSentinel) SendRequest(_ context.Context, req *sentinelprot
 	}, nil
 }
 
+func (s *blockResponseSentinel) SendPeerRequest(_ context.Context, req *sentinelproto.RequestDataWithPeer, _ ...grpc.CallOption) (*sentinelproto.ResponseData, error) {
+	s.calls++
+	s.askedPeers = append(s.askedPeers, req.Pid)
+	s.topics = append(s.topics, req.Topic)
+	s.maxResponseBytes = append(s.maxResponseBytes, req.MaxResponseBytes)
+	s.requestData = append(s.requestData, bytes.Clone(req.Data))
+	return &sentinelproto.ResponseData{Data: s.response, Peer: &sentinelproto.Peer{Pid: req.Pid}}, nil
+}
+
 func (s *blockResponseSentinel) BanPeer(_ context.Context, peer *sentinelproto.Peer, _ ...grpc.CallOption) (*sentinelproto.EmptyMessage, error) {
 	s.softBannedPeer = peer.Pid
 	return &sentinelproto.EmptyMessage{}, nil
@@ -465,6 +476,38 @@ func (s *blockResponseSentinel) BanPeer(_ context.Context, peer *sentinelproto.P
 func (s *blockResponseSentinel) BanPeerForInvalidData(_ context.Context, peer *sentinelproto.Peer, _ ...grpc.CallOption) (*sentinelproto.EmptyMessage, error) {
 	s.bannedPeer = peer.Pid
 	return &sentinelproto.EmptyMessage{}, nil
+}
+
+func excessChunksClient(t *testing.T) (*BeaconRpcP2P, *blockResponseSentinel) {
+	t.Helper()
+	cfg := clparams.MainnetBeaconConfig
+	cfg.InitializeForkSchedule()
+	clock := eth_clock.NewEthereumClock(0, common.Hash{}, &cfg)
+	digest, err := clock.ComputeForkDigest(cfg.GloasForkEpoch)
+	require.NoError(t, err)
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&cfg)}
+	var response bytes.Buffer
+	require.NoError(t, ssz_snappy.EncodeAndWrite(&response, envelope, digest[:]...))
+	require.NoError(t, response.WriteByte(0))
+	require.NoError(t, ssz_snappy.EncodeAndWrite(&response, envelope, digest[:]...))
+	sentinel := &blockResponseSentinel{response: response.Bytes()}
+	return &BeaconRpcP2P{ctx: t.Context(), sentinel: sentinel, beaconConfig: &cfg, ethClock: clock}, sentinel
+}
+
+func TestBlocksByRangeRejectsMoreChunksThanRequested(t *testing.T) {
+	client, sentinel := excessChunksClient(t)
+
+	_, pid, err := client.SendBeaconBlocksByRangeReq(t.Context(), 1, 1)
+	require.ErrorContains(t, err, "more chunks than requested")
+	require.Equal(t, pid, sentinel.bannedPeer, "block callers do not ban, so the request must")
+}
+
+func TestBlobsRejectMoreChunksThanRequested(t *testing.T) {
+	client, sentinel := excessChunksClient(t)
+
+	_, pid, err := client.sendBlobsSidecar(t.Context(), "topic", nil, 0, 1)
+	require.ErrorContains(t, err, "more chunks than requested")
+	require.Equal(t, pid, sentinel.bannedPeer, "blob callers do not ban, so the request must")
 }
 
 func TestExecutionPayloadEnvelopesByRootRejectsOverLimit(t *testing.T) {
@@ -696,7 +739,7 @@ func TestParseResponseDataRejectsOversizedCompressedChunk(t *testing.T) {
 			chunks, pid, err := client.parseResponseData(t.Context(), &sentinelproto.ResponseData{
 				Data: response,
 				Peer: &sentinelproto.Peer{Pid: "malicious-peer"},
-			}, nil)
+			}, math.MaxUint64)
 			if tc.wantError {
 				require.ErrorContains(t, err, "read error")
 				require.ErrorIs(t, err, ErrInvalidResponse)
@@ -729,7 +772,7 @@ func TestParseResponseDataAcceptsMaxPayloadSize(t *testing.T) {
 	chunks, pid, err := client.parseResponseData(t.Context(), &sentinelproto.ResponseData{
 		Data: response.Bytes(),
 		Peer: &sentinelproto.Peer{Pid: "peer"},
-	}, nil)
+	}, math.MaxUint64)
 	require.NoError(t, err)
 	require.Len(t, chunks, 1)
 	require.Len(t, chunks[0].raw, int(clparams.MaxPayloadSize))
@@ -1033,6 +1076,103 @@ func TestSendBeaconBlocksByRangeReqRejectsDanglingResponseCodeWithoutPartialResu
 	require.Equal(t, "malicious-peer", pid)
 }
 
+func TestSendBeaconBlocksByRangeReqToPeerUsesThatPeer(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.InitializeForkSchedule()
+	clock := eth_clock.NewEthereumClock(0, common.Hash{}, &cfg)
+	fuluDigest, err := clock.ComputeForkDigest(cfg.FuluForkEpoch)
+	require.NoError(t, err)
+	gloasDigest, err := clock.ComputeForkDigest(cfg.GloasForkEpoch)
+	require.NoError(t, err)
+	slot := (cfg.FuluForkEpoch + 1) * cfg.SlotsPerEpoch
+	fuluBlock := cltypes.NewSignedBeaconBlock(&cfg, clparams.FuluVersion)
+	fuluBlock.Block.Slot = slot
+	gloasBlock := cltypes.NewSignedBeaconBlock(&cfg, clparams.GloasVersion)
+	gloasBlock.Block.Slot = slot
+	newClient := func(response []byte) (*BeaconRpcP2P, *blockResponseSentinel) {
+		sentinel := &blockResponseSentinel{response: response}
+		return &BeaconRpcP2P{ctx: t.Context(), sentinel: sentinel, beaconConfig: &cfg, ethClock: clock}, sentinel
+	}
+
+	t.Run("asks the given peer for the range", func(t *testing.T) {
+		var response bytes.Buffer
+		require.NoError(t, ssz_snappy.EncodeAndWrite(&response, fuluBlock, fuluDigest[:]...))
+		client, sentinel := newClient(response.Bytes())
+
+		blocks, err := client.SendBeaconBlocksByRangeReqToPeer(t.Context(), "directed-peer", slot, 5)
+
+		require.NoError(t, err)
+		require.Len(t, blocks, 1)
+		require.Equal(t, slot, blocks[0].Block.Slot)
+		require.Equal(t, []string{"directed-peer"}, sentinel.askedPeers)
+		require.Equal(t, []string{blocksByRangeTopic}, sentinel.topics)
+		require.Equal(t, []uint64{communication.MaxWireResponseBytes(int(clparams.MaxPayloadSize), 5)}, sentinel.maxResponseBytes)
+		require.Len(t, sentinel.requestData, 1)
+		wireRequest := &cltypes.BeaconBlocksByRangeRequest{}
+		require.NoError(t, ssz_snappy.DecodeAndReadNoForkDigest(bytes.NewReader(sentinel.requestData[0]), wireRequest, clparams.FuluVersion))
+		require.Equal(t, &cltypes.BeaconBlocksByRangeRequest{StartSlot: slot, Count: 5, Step: 1}, wireRequest)
+	})
+
+	t.Run("rejects a block whose fork schema disagrees with its slot", func(t *testing.T) {
+		var response bytes.Buffer
+		require.NoError(t, ssz_snappy.EncodeAndWrite(&response, gloasBlock, gloasDigest[:]...))
+		client, sentinel := newClient(response.Bytes())
+
+		blocks, err := client.SendBeaconBlocksByRangeReqToPeer(t.Context(), "directed-peer", slot, 1)
+
+		require.ErrorIs(t, err, errBlockForkSchemaSlotMismatch)
+		require.Nil(t, blocks)
+		require.Equal(t, "directed-peer", sentinel.bannedPeer)
+	})
+
+	t.Run("rejects more chunks than requested", func(t *testing.T) {
+		var response bytes.Buffer
+		require.NoError(t, ssz_snappy.EncodeAndWrite(&response, fuluBlock, fuluDigest[:]...))
+		require.NoError(t, response.WriteByte(0))
+		require.NoError(t, ssz_snappy.EncodeAndWrite(&response, fuluBlock, fuluDigest[:]...))
+		client, sentinel := newClient(response.Bytes())
+
+		blocks, err := client.SendBeaconBlocksByRangeReqToPeer(t.Context(), "directed-peer", slot, 1)
+
+		require.ErrorIs(t, err, ErrInvalidResponse)
+		require.ErrorContains(t, err, "more chunks than requested")
+		require.Nil(t, blocks)
+		require.Equal(t, "directed-peer", sentinel.softBannedPeer)
+		require.Equal(t, "directed-peer", sentinel.bannedPeer)
+	})
+}
+
+func TestSendBeaconBlocksByRangeReqDecodesChunksAcrossForkBoundary(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.GloasForkEpoch = cfg.FuluForkEpoch + 1
+	cfg.InitializeForkSchedule()
+	clock := eth_clock.NewEthereumClock(0, common.Hash{}, &cfg)
+	boundarySlot := cfg.GloasForkEpoch * cfg.SlotsPerEpoch
+
+	var response bytes.Buffer
+	for i, version := range []clparams.StateVersion{clparams.FuluVersion, clparams.GloasVersion} {
+		block := cltypes.NewSignedBeaconBlock(&cfg, version)
+		block.Block.Slot = boundarySlot - 1 + uint64(i)
+		digest, err := clock.ComputeForkDigest(block.Block.Slot / cfg.SlotsPerEpoch)
+		require.NoError(t, err)
+		if i > 0 {
+			require.NoError(t, response.WriteByte(0))
+		}
+		require.NoError(t, ssz_snappy.EncodeAndWrite(&response, block, digest[:]...))
+	}
+
+	sentinel := &blockResponseSentinel{response: response.Bytes()}
+	client := &BeaconRpcP2P{ctx: t.Context(), sentinel: sentinel, beaconConfig: &cfg, ethClock: clock}
+	blocks, _, err := client.SendBeaconBlocksByRangeReq(t.Context(), boundarySlot-1, 2)
+	require.NoError(t, err)
+	require.Len(t, blocks, 2)
+	require.Equal(t, clparams.FuluVersion, blocks[0].Version())
+	require.Equal(t, boundarySlot-1, blocks[0].Block.Slot)
+	require.Equal(t, clparams.GloasVersion, blocks[1].Version())
+	require.Equal(t, boundarySlot, blocks[1].Block.Slot)
+	require.Empty(t, sentinel.bannedPeer)
+}
+
 // TestNewBeaconRpcP2PStopsPeerGoroutinesWhenContextEnds pins that a client's peer refresh loop
 // stops once its ctx is cancelled: four clients, none left. A genesis of now keeps the clock at
 // Phase0, so the loop's first run returns before it asks the sentinel for anything.
@@ -1046,4 +1186,11 @@ func TestNewBeaconRpcP2PStopsPeerGoroutinesWhenContextEnds(t *testing.T) {
 		NewBeaconRpcP2P(ctx, &emptyColumnResponseSentinel{}, &cfg, clock)
 	}
 	cancel()
+}
+
+func TestMaxRequestPayloadsFitsABufferedResponse(t *testing.T) {
+	r := &BeaconRpcP2P{beaconConfig: &clparams.BeaconChainConfig{MaxRequestPayloads: 128}}
+	require.EqualValues(t, httpreqresp.MaxResponseChunks, r.MaxRequestPayloads())
+	r = &BeaconRpcP2P{beaconConfig: &clparams.BeaconChainConfig{MaxRequestPayloads: 8}}
+	require.EqualValues(t, 8, r.MaxRequestPayloads())
 }

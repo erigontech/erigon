@@ -43,6 +43,14 @@ func TestTypedCaplinUsesRegisteredTypes(t *testing.T) {
 	}, typed.Items)
 }
 
+// A registry entry can name an index the type does not have: it is dropped, not a crash.
+func TestTypedDropsAnIndexTheTypeDoesNotHave(t *testing.T) {
+	require.NotPanics(t, func() {
+		names := typedNames(t, PreverifiedItems{{Name: "v1.1-000000-000100-transactions-to-block-blocksidecars.idx", Hash: "h"}})
+		require.Empty(t, names)
+	})
+}
+
 func TestTypedCaplinKeepsNewestPerName(t *testing.T) {
 	names := typedNames(t, PreverifiedItems{
 		{Name: "caplin/v1.0-000000-000100-BlockRoot.seg", Hash: "old"},
@@ -224,8 +232,12 @@ func TestMergeLimitCaplinTypesSkipPreverifiedScan(t *testing.T) {
 	for _, typ := range append(snaptype.CaplinSnapshotTypes, snaptype.CaplinStateSnapshotTypes...) {
 		e := typ.Enum()
 		require.True(t, snaptype.IsCaplinType(e), typ.Name())
-		require.Equal(t, uint64(snaptype.CaplinMergeLimit), cfg.MergeLimit(e, 0), typ.Name())
-		require.Equal(t, uint64(snaptype.CaplinMergeLimit), cfg.MergeLimit(e, 1_000_000), typ.Name())
+		want := uint64(snaptype.CaplinMergeLimit)
+		if e == snaptype.CaplinEnums.BeaconBlocks {
+			want = snaptype.Erigon2MergeLimit
+		}
+		require.Equal(t, want, cfg.MergeLimit(e, 0), typ.Name())
+		require.Equal(t, want, cfg.MergeLimit(e, 1_000_000), typ.Name())
 	}
 
 	require.Equal(t, uint64(snaptype.Erigon2MergeLimit), cfg.MergeLimit(snaptype.MinCoreEnum, 0),
@@ -245,4 +257,8 @@ func TestTypedDropsNameWithoutExtensionAfterLastSeparator(t *testing.T) {
 			require.Empty(t, typed.Items)
 		})
 	}
+}
+
+func TestSetTomlRejectsMalformedToml(t *testing.T) {
+	require.Error(t, SetToml("mainnet", []byte("<html>not toml</html>"), false))
 }
