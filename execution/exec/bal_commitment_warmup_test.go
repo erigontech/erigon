@@ -92,11 +92,13 @@ type commitmentBranchLookupTx struct {
 	aggTx any
 	opts  kv.GetLatestOptions
 	calls int
+	read  kv.Domain
 }
 
-func (tx *commitmentBranchLookupTx) GetLatest(_ kv.Domain, _ []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
+func (tx *commitmentBranchLookupTx) GetLatest(domain kv.Domain, _ []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
 	tx.opts = opts
 	tx.calls++
+	tx.read = domain
 	return tx.data, tx.step, nil
 }
 
@@ -283,6 +285,16 @@ func TestBALCommitmentContextUsesAvailableBranchCache(t *testing.T) {
 			require.Equal(t, testCase.wantCallbackMisses, callbackMisses)
 		})
 	}
+}
+
+func TestBALCommitmentContextAccountReadsTheAccountsDomain(t *testing.T) {
+	tx := &commitmentBranchLookupTx{data: []byte("account")}
+	ctx := &balCommitmentContext{tx: tx, cacheStats: new(balCommitmentCacheStats)}
+
+	_, err := ctx.Account(make([]byte, 20))
+	require.NoError(t, err)
+	require.Equal(t, 1, tx.calls)
+	require.Equal(t, kv.AccountsDomain, tx.read)
 }
 
 func TestWarmBALCommitmentUsesAvailableBranchCache(t *testing.T) {

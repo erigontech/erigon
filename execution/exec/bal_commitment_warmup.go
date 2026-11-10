@@ -97,8 +97,10 @@ func (*balCommitmentContext) PutBranch([]byte, []byte, []byte) error {
 	return errors.New("BAL commitment warmup is read-only")
 }
 
-func (*balCommitmentContext) Account([]byte) (*commitment.Update, error) {
-	return nil, errors.New("BAL commitment warmup does not read accounts")
+// Account pages the account in for the fold; the warmup does not use the value.
+func (c *balCommitmentContext) Account(plainKey []byte) (*commitment.Update, error) {
+	_, _, err := c.tx.GetLatest(kv.AccountsDomain, plainKey, kv.GetLatestOptions{})
+	return nil, err
 }
 
 func (*balCommitmentContext) Storage([]byte) (*commitment.Update, error) {

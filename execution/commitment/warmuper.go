@@ -17,6 +17,7 @@
 package commitment
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -28,6 +29,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
@@ -201,10 +203,30 @@ func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDep
 		case fields&(fieldAccountAddr|fieldStorageAddr|fieldHash) == fieldAccountAddr|fieldHash && depth < 64 && len(hashedKey) > 64:
 			depth = 64 + extLen
 		case fields&(fieldAccountAddr|fieldStorageAddr) != 0:
+			w.loadDisplacedAccount(trieCtx, hashedKey, branchData, pos, fields)
 			return
 		default:
 			depth += 1 + extLen
 		}
+	}
+}
+
+// loadDisplacedAccount reads the account of a leaf that an insert of hashedKey moves one level down: the fold needs the
+// leaf's value to rehash it under its new, shorter key, and no read list names that account.
+func (w *Warmuper) loadDisplacedAccount(trieCtx PatriciaContext, hashedKey, branchData []byte, pos int, fields cellFields) {
+	if fields&fieldAccountAddr == 0 {
+		return
+	}
+	var leaf cell
+	if _, err := leaf.fillFromFields(branchData, pos, fields); err != nil {
+		return
+	}
+	addr := leaf.accountAddr[:leaf.accountAddrLen]
+	if len(addr) != length.Addr || bytes.HasPrefix(hashedKey, KeyToHexNibbleHash(addr)) {
+		return
+	}
+	if _, err := trieCtx.Account(addr); err != nil {
+		log.Debug(fmt.Sprintf("[%s][warmup] failed to get account", w.logPrefix), "addr", common.Bytes2Hex(addr), "error", err)
 	}
 }
 

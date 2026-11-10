@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
 type noopPatriciaContext struct{}
@@ -1341,6 +1342,69 @@ func TestApplyDeferredUpdates_ShardedFlushMergesAndWritesEachPrefixOnce(t *testi
 			require.Equal(t, []byte(raw), written[string([]byte{0x02})], "an empty prev encodes as raw")
 			require.NotContains(t, written, string([]byte{0x03}), "prev==raw stays a skipped write")
 			require.Equal(t, int64(workers), made.Load(), "one trie context per flush worker, none shared")
+		})
+	}
+}
+
+type leafPatriciaContext struct {
+	noopPatriciaContext
+	branches map[string][]byte
+	accounts [][]byte
+}
+
+func (c *leafPatriciaContext) Branch(prefix []byte) ([]byte, kv.Step, error) {
+	return c.branches[string(prefix)], 0, nil
+}
+
+func (c *leafPatriciaContext) Account(plainKey []byte) (*Update, error) {
+	c.accounts = append(c.accounts, bytes.Clone(plainKey))
+	return nil, nil
+}
+
+// singleLeafBranch encodes a branch with the single child at nibble: an account leaf holding addr.
+func singleLeafBranch(nibble byte, addr []byte) []byte {
+	bitmap := uint16(1) << nibble
+	branch := binary.BigEndian.AppendUint16(nil, bitmap) // touch map
+	branch = binary.BigEndian.AppendUint16(branch, bitmap)
+	branch = append(branch, byte(fieldAccountAddr|fieldStateHash))
+	branch = binary.AppendUvarint(branch, uint64(len(addr)))
+	branch = append(branch, addr...)
+	branch = binary.AppendUvarint(branch, length.Hash)
+	return append(branch, make([]byte, length.Hash)...)
+}
+
+func TestWarmupKeyLoadsAccountLeafAnInsertDisplaces(t *testing.T) {
+	leafAddr := bytes.Repeat([]byte{1}, length.Addr)
+	leafKey := KeyToHexNibbleHash(leafAddr)
+	var sameNibble, otherNibble []byte
+	for i := 2; sameNibble == nil || otherNibble == nil; i++ {
+		key := KeyToHexNibbleHash(binary.BigEndian.AppendUint64(make([]byte, length.Addr-8), uint64(i)))
+		if key[0] == leafKey[0] {
+			sameNibble = key
+		} else {
+			otherNibble = key
+		}
+	}
+	root := string(nibbles.HexToCompact(nil))
+
+	for _, tc := range []struct {
+		name      string
+		hashedKey []byte
+		leafAddr  []byte
+		want      [][]byte
+	}{
+		{name: "insert displaces the leaf", hashedKey: sameNibble, leafAddr: leafAddr, want: [][]byte{leafAddr}},
+		{name: "update of the leaf itself", hashedKey: leafKey, leafAddr: leafAddr},
+		{name: "storage key of the leaf account", hashedKey: append(slices.Clone(leafKey), make([]byte, 64)...), leafAddr: leafAddr},
+		{name: "insert into an empty slot", hashedKey: otherNibble, leafAddr: leafAddr},
+		{name: "shortened account key", hashedKey: sameNibble, leafAddr: []byte{1, 2, 3}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			trieCtx := &leafPatriciaContext{branches: map[string][]byte{root: singleLeafBranch(leafKey[0], tc.leafAddr)}}
+			w := testWarmuper(context.Background(), noopCtxFactory, 1)
+			w.maxDepth = WarmupMaxDepth
+			w.warmupKey(trieCtx, tc.hashedKey, 0)
+			require.Equal(t, tc.want, trieCtx.accounts)
 		})
 	}
 }
