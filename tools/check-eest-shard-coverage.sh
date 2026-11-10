@@ -107,11 +107,11 @@ check_partition() {
 	jq -rR --arg rx "$regexes" '
 		($rx | split("\n") | map(select(. != "") | capture("^(?<name>[^=]*)=(?<re>.*)$"))) as $s
 		| split("\t") as [$fork, $cnt, $id]
-		| "\($fork)\t\($cnt)\t\([$s[] | select(.re as $re | $id | test($re)) | .name] | join(","))"' \
+		| [$fork, $cnt, ($s[] | select(.re as $re | $id | test($re)) | .name)] | join("\t")' \
 	| awk -F'\t' '
 		{
-			m=($3=="" ? 0 : split($3, hit, ","))
-			for (i=1;i<=m;i++) tot[hit[i]]+=$2
+			m=NF-2
+			for (i=3;i<=NF;i++) tot[$i]+=$2
 			total+=$2
 			if (m==0) gap[$1]+=$2
 			if (m>=2) over[$1]+=$2
