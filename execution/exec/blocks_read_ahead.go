@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -530,6 +531,9 @@ func perKeyWarmupBAL(bal types.BlockAccessList, cold coldState, storageRead bool
 }
 
 func (bra *BlockReadAheader) warmBALState(ctx context.Context, db kv.RoDB, bal types.BlockAccessList, tasks []balWarmupTask, codeMode balCodeWarmupMode, txCodeDestinations map[accounts.Address]struct{}, workers int) error {
+	if bra.stateCache != nil && slices.ContainsFunc(tasks, func(t balWarmupTask) bool { return t.slotTo > t.slotFrom }) {
+		defer bra.stateCache.BeginStorageWarmup()()
+	}
 	var nextTask atomic.Uint64
 	wg, workerCtx := errgroup.WithContext(ctx)
 	for w := range workers {

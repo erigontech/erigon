@@ -567,6 +567,37 @@ func TestReadFill_DoesNotClobberLiveEntry(t *testing.T) {
 	require.Equal(t, v3, got, "read-fill must not clobber the live entry")
 }
 
+func TestReadFill_StorageWarmupOwnsStorageFills(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	db := newTestDb(t, 16)
+	sc := newSmallStateCache()
+	t.Cleanup(sc.Close)
+	roTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	sd, err := execctx.NewSharedDomains(ctx, roTx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+	sd.BindStateCache(sc)
+
+	slot, account := make([]byte, 52), make([]byte, 20)
+	slot[0], account[0] = 1, 1
+	read := func(domain kv.Domain, key []byte) (cached bool) {
+		_, _, err := sd.GetLatest(domain, roTx, key)
+		require.NoError(t, err)
+		_, cached = sc.View(nil).Get(domain, key)
+		return cached
+	}
+
+	end := sc.BeginStorageWarmup()
+	require.False(t, read(kv.StorageDomain, slot), "the warmup fills storage, a reader must not duplicate it")
+	require.True(t, read(kv.AccountsDomain, account), "accounts are still filled by readers")
+	end()
+	require.True(t, read(kv.StorageDomain, slot), "with no warmup running a reader fills storage")
+}
+
 func TestReadFill_SkipsInFlightUnwindRow(t *testing.T) {
 	t.Parallel()
 

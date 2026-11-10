@@ -70,6 +70,10 @@ type StateCache struct {
 	// (including the content-addressed ones), leaving canonical publication as
 	// the only writer — an A/B lever and an operational kill switch.
 	disableFills bool
+	// storageWarmups counts running warmups that fill every storage slot of their
+	// block. Readers skip those fills: a duplicate put only queues behind the
+	// warmup's puts on the execution path.
+	storageWarmups atomic.Int32
 }
 
 // NewStateCache creates a new StateCache with the specified byte capacities.
@@ -559,6 +563,18 @@ func (c *StateCache) publish(sourceStateVersion, committedStateVersion, unwindTo
 // Caches reports whether the given domain has a cache attached.
 func (c *StateCache) Caches(domain kv.Domain) bool {
 	return domain < kv.DomainLen && c.caches[domain] != nil
+}
+
+// BeginStorageWarmup marks a per-key warmup that reads and fills every storage
+// slot of its block as running until the returned func is called.
+func (c *StateCache) BeginStorageWarmup() (end func()) {
+	c.storageWarmups.Add(1)
+	return func() { c.storageWarmups.Add(-1) }
+}
+
+// StorageWarmupRunning reports whether a storage warmup owns the storage fills.
+func (c *StateCache) StorageWarmupRunning() bool {
+	return c.storageWarmups.Load() > 0
 }
 
 func (c *StateCache) getCache(domain kv.Domain) Cache {

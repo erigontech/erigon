@@ -89,6 +89,46 @@ func (tx *cancelOnReadTx) GetLatest(domain kv.Domain, _ []byte, _ kv.GetLatestOp
 	return nil, 0, nil
 }
 
+type storageWarmupObservingTx struct {
+	kv.TemporalTx
+	stateCache *cache.StateCache
+	running    bool
+}
+
+func (tx *storageWarmupObservingTx) GetLatest(kv.Domain, []byte, kv.GetLatestOptions) ([]byte, kv.Step, error) {
+	tx.running = tx.stateCache.StorageWarmupRunning()
+	return nil, 0, nil
+}
+
+func TestWarmBALStateMarksTheStorageWarmupWhileItReadsStorage(t *testing.T) {
+	address := common.Address{19: 1}
+	for _, test := range []struct {
+		name string
+		bal  types.BlockAccessList
+		want bool
+	}{
+		{name: "storage reads", bal: types.BlockAccessList{{Address: address, StorageReads: []common.Hash{{31: 1}}}}, want: true},
+		{name: "no storage after the batch took it", bal: balAccounts(types.BlockAccessList{{Address: address, StorageReads: []common.Hash{{31: 1}}}})},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := t.Context()
+			db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+			baseTx, err := db.BeginTemporalRo(ctx)
+			require.NoError(t, err)
+			defer baseTx.Rollback()
+			stateCache := newTestStateCache()
+			t.Cleanup(stateCache.Close)
+			observed := &storageWarmupObservingTx{TemporalTx: baseTx, stateCache: stateCache}
+			bra := NewBlockReadAheader()
+			bra.SetStateCache(stateCache)
+			tasks, workers := makeBALWarmupPlan(test.bal, 1)
+			require.NoError(t, bra.warmBALState(ctx, &singleTxRoDB{tx: observed}, test.bal, tasks, balCodeWarmupNone, nil, workers))
+			require.Equal(t, test.want, observed.running)
+			require.False(t, stateCache.StorageWarmupRunning(), "the mark ends with the warmup")
+		})
+	}
+}
+
 func TestBALWarmupStopsWithinStorageChunk(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()

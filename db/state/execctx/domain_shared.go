@@ -1473,7 +1473,8 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 	if useBranchCache && !sd.hasLocalCacheUnwind() {
 		getOpts = getOpts.WithBranchCache()
 	}
-	willFill := !sd.hasLocalCacheUnwind() && maxStep == kv.NoStepBound && sd.stateCache != nil && sd.stateCache.Caches(domain)
+	willFill := !sd.hasLocalCacheUnwind() && maxStep == kv.NoStepBound && sd.stateCache != nil && sd.stateCache.Caches(domain) &&
+		!(domain == kv.StorageDomain && sd.stateCache.StorageWarmupRunning())
 	fillsCode := willFill && len(opts.codeHash) == len(common.Hash{})
 	if fillsCode {
 		getOpts = getOpts.WithBuf(opts.buf)
