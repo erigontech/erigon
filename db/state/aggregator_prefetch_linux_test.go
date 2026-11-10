@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"unsafe"
@@ -30,9 +31,12 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sys/unix"
 
+	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/mmap"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/db/version"
 )
 
 // A batch prefetch over cold domain files changes no latest value and leaves no probe on the readers.
@@ -173,4 +177,81 @@ func TestPrefetchLatestReportsLookupsLeftAtTheWaveCap(t *testing.T) {
 	at.d[kv.AccountsDomain] = dt
 	_, err := at.PrefetchLatest(t.Context(), kv.AccountsDomain, keys)
 	require.ErrorIs(t, err, kv.ErrPrefetchIncomplete)
+}
+
+// A lookup stopped by a cold page continues in that page's file and does not walk the newer files again.
+func TestPrefetchLookupContinuesInTheFileOfItsColdPage(t *testing.T) {
+	prev := mmap.BatchPrefetch
+	mmap.BatchPrefetch = true
+	t.Cleanup(func() { mmap.BatchPrefetch = prev })
+	cfg := statecfg.Schema.AccountsDomain
+	cfg.Accessors = statecfg.AccessorHashMap
+	cfg.FileVersion = statecfg.DomainVersionTypes{DataKV: version.V1_0_standart, AccessorBT: version.V1_0_standart, AccessorKVEI: version.V1_0_standart, AccessorKVI: version.V1_0_standart}
+	db, d := testDbAndDomainOfStep(t, cfg, 16, log.New())
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	const files, keysPerFile = 3, 64
+	writerTx := d.beginForTests()
+	writer := writerTx.NewWriter(db)
+	for step := range files {
+		for i := range keysPerFile {
+			require.NoError(t, writer.PutWithPrev(fmt.Appendf(nil, "key-%d-%d", step, i), []byte("value"), uint64(step)*d.stepSize+1, nil))
+		}
+	}
+	require.NoError(t, writer.Flush(t.Context(), tx))
+	writer.Close()
+	writerTx.Close()
+	for step := range files {
+		require.NoError(t, d.collateBuildIntegrate(t.Context(), kv.Step(step), tx, background.NewProgressSet()))
+	}
+	dt := d.beginForTests()
+	defer dt.Close()
+	require.Len(t, dt.files, files)
+
+	var oldest, newer []fileMapping
+	for _, m := range fileMappings(t, d.dirs.SnapDomain) {
+		if strings.Contains(m.path, ".0-1.") {
+			oldest = append(oldest, m)
+		} else {
+			newer = append(newer, m)
+		}
+	}
+	require.NotEmpty(t, oldest)
+	require.NotEmpty(t, newer)
+	for _, m := range newer {
+		_, err := os.ReadFile(m.path)
+		require.NoError(t, err)
+	}
+	evictFiles(t, d.dirs.SnapDomain, oldest)
+
+	dt.probe = mmap.NewProbe()
+	require.NotNil(t, dt.probe)
+	defer func() { dt.probe = nil }()
+	lookup := newPrefetchLookup(dt, []byte("key-0-0"))
+	page, cold := lookup.probe(dt)
+	require.True(t, cold)
+	require.True(t, inMappings(page, oldest), "the warm newer files pass, the first cold page is in the oldest file")
+
+	evictFiles(t, d.dirs.SnapDomain, newer)
+	dt.probe = mmap.NewProbe()
+	page, cold = lookup.probe(dt)
+	require.True(t, cold)
+	require.True(t, inMappings(page, oldest), "the next wave does not walk the newer files again")
+}
+
+func inMappings(page uintptr, maps []fileMapping) bool {
+	return slices.ContainsFunc(maps, func(m fileMapping) bool { return m.start <= page && page < m.end })
+}
+
+// evictFiles pages out the mappings and drops their clean pages from the page cache.
+func evictFiles(t *testing.T, dir string, maps []fileMapping) {
+	t.Helper()
+	pageOut(t, dir, maps)
+	for _, m := range maps {
+		f, err := os.Open(m.path)
+		require.NoError(t, err)
+		require.NoError(t, unix.Fadvise(int(f.Fd()), 0, 0, unix.FADV_DONTNEED))
+		require.NoError(t, f.Close())
+	}
 }

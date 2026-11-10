@@ -1681,7 +1681,7 @@ func (dt *DomainRoTx) lookupLatestFromFiles(k, buf []byte, maxTxNum uint64, boun
 		maxTxNum = math.MaxUint64
 	}
 	useExistenceFilter := dt.d.Accessors.Has(statecfg.AccessorExistence)
-	useCache := dt.name != kv.CommitmentDomain && !bounded && buf == nil && dt.probe == nil // a cache hit would hide a cold page from the probe
+	useCache := dt.name != kv.CommitmentDomain && !bounded && buf == nil
 
 	hi, lo := dt.ht.iit.hashKey(k)
 
@@ -1708,8 +1708,7 @@ func (dt *DomainRoTx) lookupLatestFromFiles(k, buf []byte, maxTxNum uint64, boun
 		// fmt.Printf("getLatestFromFiles: lim=%d %d %d %d %d\n", maxTxNum, dt.files[i].startTxNum, dt.files[i].endTxNum, dt.files[i].startTxNum/dt.stepSize, dt.files[i].endTxNum/dt.stepSize)
 		if useExistenceFilter {
 			if f.src.existence != nil {
-				maybe := dt.probe == nil && f.src.existence.ContainsHash(hi) || dt.probe != nil && f.src.existence.ContainsHashProbe(hi, dt.probe)
-				if !maybe {
+				if !f.src.existence.ContainsHash(hi) {
 					if traceGetLatest == dt.name {
 						fmt.Printf("GetLatest(%s, %x) -> existence index %s -> false\n", dt.d.FilenameBase, k, f.src.existence.FileName)
 					}

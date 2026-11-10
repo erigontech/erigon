@@ -2723,7 +2723,7 @@ func (at *AggregatorRoTx) cacheLatestBranch(enabled bool, k, v []byte, step kv.S
 }
 
 // PrefetchLatest reads into the page cache, in io_uring batches, the file pages a latest read of each key touches.
-// Each wave runs every pending key's file lookup until its first cold page, then reads all those pages at once; reads
+// Each wave continues every pending key's file lookup to its next cold page, then reads all those pages at once; reads
 // stay correct without it.
 func (at *AggregatorRoTx) PrefetchLatest(ctx context.Context, domain kv.Domain, keys [][]byte) (pages int, err error) {
 	dt := at.d[domain]
@@ -2741,25 +2741,26 @@ func (at *AggregatorRoTx) PrefetchLatest(ctx context.Context, domain kv.Domain, 
 		}
 	}()
 	// A key that no existence filter holds needs no page: drop it before the probed lookups, which touch every file.
-	pending := make([][]byte, 0, len(keys))
+	pending := make([]prefetchLookup, 0, len(keys))
 	for _, k := range keys {
 		if ctx.Err() != nil {
 			return 0, nil
 		}
 		if dt.mayContainInFiles(k) {
-			pending = append(pending, k)
+			pending = append(pending, newPrefetchLookup(dt, k))
 		}
 	}
 	tried := map[uintptr]struct{}{}
 	for waves := 0; len(pending) > 0 && waves < prefetchMaxWaves && ctx.Err() == nil; waves++ {
 		cold := make([]uintptr, 0, len(pending))
 		wave := make(map[uintptr]struct{}, len(pending)) // keys sharing a page count it once
-		next := pending[:0:0]
-		for _, k := range pending {
+		next := pending[:0]
+		for i := range pending {
 			if ctx.Err() != nil {
 				return pages, err
 			}
-			page, ok := probeLatestFromFiles(dt, k)
+			l := &pending[i]
+			page, ok := l.probe(dt)
 			if !ok {
 				continue
 			}
@@ -2770,7 +2771,7 @@ func (at *AggregatorRoTx) PrefetchLatest(ctx context.Context, domain kv.Domain, 
 				wave[page] = struct{}{}
 				cold = append(cold, page)
 			}
-			next = append(next, k)
+			next = append(next, *l)
 		}
 		// A failed page goes into tried below, so the next wave goes on with the other keys.
 		if rerr := mmap.ReadPages(ctx, cold); rerr != nil {
@@ -2793,7 +2794,20 @@ func (at *AggregatorRoTx) PrefetchLatest(ctx context.Context, domain kv.Domain, 
 // prefetchMaxWaves bounds the waves of one PrefetchLatest call.
 var prefetchMaxWaves = 64
 
-func probeLatestFromFiles(dt *DomainRoTx, k []byte) (page uintptr, cold bool) {
+// prefetchLookup is one key's latest-value lookup, advanced one cold page per PrefetchLatest wave.
+type prefetchLookup struct {
+	key    []byte
+	hi, lo uint64
+	file   int // index in dt.files of the file the next wave continues in
+}
+
+func newPrefetchLookup(dt *DomainRoTx, k []byte) prefetchLookup {
+	hi, lo := dt.ht.iit.hashKey(k)
+	return prefetchLookup{key: k, hi: hi, lo: lo, file: len(dt.files) - 1}
+}
+
+// probe walks the remaining files, newest first, until the key's first cold page.
+func (l *prefetchLookup) probe(dt *DomainRoTx) (page uintptr, cold bool) {
 	defer func() {
 		if r := recover(); r != nil {
 			p, ok := r.(mmap.ColdPage)
@@ -2803,7 +2817,16 @@ func probeLatestFromFiles(dt *DomainRoTx, k []byte) (page uintptr, cold bool) {
 			page, cold = uintptr(p), true
 		}
 	}()
-	_, _, _, _, _ = dt.lookupLatestFromFiles(k, nil, 0, false)
+	useExistence := dt.d.Accessors.Has(statecfg.AccessorExistence)
+	for ; l.file >= 0; l.file-- {
+		f := dt.files[l.file]
+		if useExistence && f.src.existence != nil && !f.src.existence.ContainsHashProbe(l.hi, dt.probe) {
+			continue
+		}
+		if _, found, _, err := dt.getLatestFromFile(l.file, l.key, nil, l.hi, l.lo); found || err != nil {
+			return 0, false
+		}
+	}
 	return 0, false
 }
 

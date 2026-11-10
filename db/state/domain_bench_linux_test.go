@@ -82,7 +82,8 @@ func BenchmarkAbsentKeyLatestLookup(b *testing.B) {
 		}
 		defer func() { dt.probe = nil }()
 		for i := 0; b.Loop(); i++ {
-			probeLatestFromFiles(dt, absent[i%len(absent)])
+			l := newPrefetchLookup(dt, absent[i%len(absent)])
+			l.probe(dt)
 		}
 	})
 }
