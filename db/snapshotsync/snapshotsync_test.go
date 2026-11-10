@@ -819,6 +819,7 @@ func TestSyncSnapshotsCommitmentV3StateTip(t *testing.T) {
 		{name: "v3 above a legacy-only range", v3: true, extraFiles: []string{"domain/v3.0-commitment.16-32.kv"}, wantFile: ".0-16."},
 		{name: "v3 commitment split across one accounts range", v3: true, extraFiles: []string{"domain/v3.0-commitment.0-16.kv", "domain/v3.0-commitment.16-32.kv", "domain/v2.0-accounts.0-32.kv"}, wantFile: ".0-32."},
 		{name: "v3 code-only tip", v3: true, extraFiles: []string{"domain/v3.0-commitment.0-16.kv", "domain/v3.0-commitment.16-32.kv", "domain/v2.2-commitment.32-48.kv", "domain/v2.0-code.32-48.kv"}, wantFile: ".32-48."},
+		{name: "v3 code above every commitment", v3: true, extraFiles: []string{"domain/v3.0-commitment.0-16.kv", "domain/v3.0-commitment.16-32.kv", "domain/v2.0-code.32-48.kv"}, wantFile: "steps 32-48"},
 		{name: "v3 off legacy only"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

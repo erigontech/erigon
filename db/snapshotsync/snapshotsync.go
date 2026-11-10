@@ -716,6 +716,26 @@ func SyncSnapshots(
 			})
 		}
 
+		if statecfg.ExperimentalCommitmentV3 {
+			var stateTip, commitmentTip uint64
+			for _, request := range downloadRequest {
+				if !strings.HasPrefix(request.Path, "domain/") {
+					continue
+				}
+				info, _, ok := snaptype.ParseFileName("", request.Path)
+				if !ok {
+					continue
+				}
+				stateTip = max(stateTip, info.To)
+				if info.TypeString == kv.CommitmentDomain.String() && info.Ext == ".kv" {
+					commitmentTip = max(commitmentTip, info.To)
+				}
+			}
+			if stateTip > commitmentTip {
+				return fmt.Errorf("commitment v3 is enabled, but the snapshot manifest has no v3 commitment for steps %d-%d of its state: sync with `--experimental.commitment-v3` off, then convert it with `integration commitment convert --v3` before enabling it", commitmentTip, stateTip)
+			}
+		}
+
 		// Only add the preverified hashes until the initial sync completed for the first time.
 
 		log.Info(fmt.Sprintf("[%s] Requesting %s from downloader", logPrefix, task))
