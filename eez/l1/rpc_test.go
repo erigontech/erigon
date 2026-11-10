@@ -143,7 +143,21 @@ func TestRPCErrorMapping(t *testing.T) {
 		require.ErrorIs(t, err, l1.ErrNotFound, msg)
 		require.NotErrorIs(t, err, l1.ErrNotCanonical, msg)
 	}
+
+	// EIP-4444 history expiry: the source will never serve the block.
+	for _, e := range []error{errors.New("pruned history unavailable"), prunedError{}} {
+		err = l1.MapRPCError(e, "call")
+		require.ErrorIs(t, err, l1.ErrNotFound, e.Error())
+		require.ErrorIs(t, err, l1.ErrBeforeHistory, e.Error())
+	}
 }
+
+// prunedError is the JSON-RPC error of a node that expired a block's
+// history.
+type prunedError struct{}
+
+func (prunedError) Error() string  { return "history expired" }
+func (prunedError) ErrorCode() int { return 4444 }
 
 // TestRPCTransportError checks that a failed connection prints the call, the
 // socket operation, the remote address and the system error only.

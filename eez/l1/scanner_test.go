@@ -497,3 +497,61 @@ func TestScanPostRouting(t *testing.T) {
 	_, _, err := l1.NewScanner(sc, testRegistry, 1).Scan(t.Context(), 11, 11)
 	requireClass(t, err, l1.ErrUndecodable)
 }
+
+// unserved is a source that does not serve the logs of blocks below logsFrom,
+// nor the transactions of block txGone, nor the header of block headerGone;
+// with lagging, it serves logs one block at a time only.
+type unserved struct {
+	*recording.MemoryChain
+	logsFrom   uint64
+	txGone     common.Hash
+	headerGone common.Hash
+	lagging    bool
+}
+
+func (r unserved) HeaderByHash(ctx context.Context, hash common.Hash) (*l1.Header, error) {
+	if hash == r.headerGone {
+		return nil, fmt.Errorf("%w: block %x", l1.ErrNotFound, hash)
+	}
+	return r.MemoryChain.HeaderByHash(ctx, hash)
+}
+
+func (r unserved) Logs(ctx context.Context, from, to uint64, address common.Address, topics [][]common.Hash) ([]*types.Log, error) {
+	if from < r.logsFrom || (r.lagging && to > from) {
+		return nil, fmt.Errorf("%w: logs of [%d, %d]", l1.ErrNotFound, from, to)
+	}
+	return r.MemoryChain.Logs(ctx, from, to, address, topics)
+}
+
+func (r unserved) TransactionByBlockHashAndIndex(ctx context.Context, blockHash common.Hash, index uint64) (types.Transaction, error) {
+	if blockHash == r.txGone {
+		return nil, fmt.Errorf("%w: transactions of block %x", l1.ErrNotFound, blockHash)
+	}
+	return r.MemoryChain.TransactionByBlockHashAndIndex(ctx, blockHash, index)
+}
+
+// TestScanUnserved: a scan reports the first block it needs that the source
+// does not serve, whether its logs, a posting transaction or the header of a
+// block holding a settlement; a range refused while its first block is
+// served names none.
+func TestScanUnserved(t *testing.T) {
+	sc := newScanChain(t)
+	var u *l1.UnservedError
+	_, _, err := l1.NewScanner(unserved{MemoryChain: sc.MemoryChain, logsFrom: 5}, testRegistry, 1).Scan(t.Context(), 2, 10)
+	require.ErrorAs(t, err, &u)
+	require.Equal(t, uint64(2), u.Block)
+	require.ErrorIs(t, err, l1.ErrNotFound)
+
+	h, err := sc.HeaderByNumber(t.Context(), 8)
+	require.NoError(t, err)
+	_, _, err = l1.NewScanner(unserved{MemoryChain: sc.MemoryChain, txGone: h.Hash}, testRegistry, 1).Scan(t.Context(), 0, 10)
+	require.ErrorAs(t, err, &u)
+	require.Equal(t, uint64(8), u.Block)
+	_, _, err = l1.NewScanner(unserved{MemoryChain: sc.MemoryChain, headerGone: h.Hash}, testRegistry, 1).Scan(t.Context(), 0, 10)
+	require.ErrorAs(t, err, &u)
+	require.Equal(t, uint64(8), u.Block)
+
+	_, _, err = l1.NewScanner(unserved{MemoryChain: sc.MemoryChain, lagging: true}, testRegistry, 1).Scan(t.Context(), 0, 10)
+	require.ErrorIs(t, err, l1.ErrNotFound)
+	require.NotErrorAs(t, err, &u, "names no block")
+}

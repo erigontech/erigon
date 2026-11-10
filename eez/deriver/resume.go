@@ -44,7 +44,7 @@ func FindResumePoint(ctx context.Context, reader l1.ChainReader, registry common
 			continue
 		}
 		if err != nil {
-			return nil, err
+			return nil, l1.UnservedLogs(ctx, reader, err, lo, hi, registry, topics)
 		}
 		for _, l := range slices.Backward(logs) {
 			e, err := protocol.ParseL2ExecutionPerformed(l)

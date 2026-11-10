@@ -189,6 +189,10 @@ func (r *RPC) CallAt(ctx context.Context, call Call, blockHash common.Hash) ([]b
 // revertCode is the JSON-RPC error code of an execution revert (EIP-1474).
 const revertCode = 3
 
+// prunedCode is the JSON-RPC error code of a block whose history the node
+// expired (EIP-4444).
+const prunedCode = 4444
+
 func isNull(raw json.RawMessage) bool {
 	return len(raw) == 0 || bytes.Equal(raw, []byte("null"))
 }
@@ -217,6 +221,9 @@ var notCanonical = []string{"not currently canonical", "is not canonical"}
 func mapError(err error, what string) error {
 	err = RedactTransport(err)
 	msg := strings.ToLower(err.Error())
+	if rerr, ok := errors.AsType[rpc.Error](err); (ok && rerr.ErrorCode() == prunedCode) || strings.Contains(msg, "pruned history") {
+		return fmt.Errorf("%w: %w: %s: %w", ErrNotFound, ErrBeforeHistory, what, err)
+	}
 	for _, s := range rangeTooWide {
 		if strings.Contains(msg, s) {
 			return fmt.Errorf("%w: %s: %w", ErrRangeTooWide, what, err)

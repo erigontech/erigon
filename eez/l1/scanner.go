@@ -41,6 +41,34 @@ var (
 	ErrUnsupported = errors.New("batch post the follower cannot verify")
 )
 
+// UnservedError reports an L1 block whose logs or posting transactions a
+// scan needs and the source does not serve.
+type UnservedError struct {
+	Block uint64
+	Err   error
+}
+
+func (e *UnservedError) Error() string {
+	return fmt.Sprintf("L1 block %d not served: %v", e.Block, e.Err)
+}
+
+func (e *UnservedError) Unwrap() error { return e.Err }
+
+// UnservedLogs returns err, the failure of a query of the logs of [from, to],
+// as an UnservedError of block from when the source does not serve that
+// block's logs either: a refused range does not say which block it lacks.
+func UnservedLogs(ctx context.Context, r ChainReader, err error, from, to uint64, address common.Address, topics [][]common.Hash) error {
+	if !errors.Is(err, ErrNotFound) {
+		return err
+	}
+	if from < to {
+		if _, perr := r.Logs(ctx, from, from, address, topics); !errors.Is(perr, ErrNotFound) {
+			return err
+		}
+	}
+	return &UnservedError{Block: from, Err: err}
+}
+
 // LogChunk is the widest range the scanner asks for at once.
 const LogChunk = 100_000
 
@@ -119,7 +147,7 @@ type blockKey struct {
 func (s *Scanner) scanRange(ctx context.Context, from, to uint64) ([]ScannedBatch, error) {
 	logs, err := s.reader.Logs(ctx, from, to, s.registry, RegistryTopics)
 	if err != nil {
-		return nil, err
+		return nil, UnservedLogs(ctx, s.reader, err, from, to, s.registry, RegistryTopics)
 	}
 	// One query per range: separate queries can answer from different forks.
 	forks := map[uint64]common.Hash{}
@@ -158,6 +186,9 @@ func (s *Scanner) scanBlock(ctx context.Context, k blockKey, logs []*types.Log) 
 			return read, nil
 		}
 		h, err := s.reader.HeaderByHash(ctx, k.hash)
+		if errors.Is(err, ErrNotFound) {
+			return nil, &UnservedError{Block: k.number, Err: err}
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -187,6 +218,9 @@ func (s *Scanner) scanBlock(ctx context.Context, k blockKey, logs []*types.Log) 
 			continue
 		}
 		tx, err := s.reader.TransactionByBlockHashAndIndex(ctx, k.hash, uint64(l.TxIndex))
+		if errors.Is(err, ErrNotFound) {
+			return nil, &UnservedError{Block: k.number, Err: err}
+		}
 		if err != nil {
 			return nil, err
 		}

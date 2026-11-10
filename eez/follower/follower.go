@@ -46,6 +46,9 @@ var (
 	// ErrNotOnL1Chain reports a local chain whose finalized block is not on
 	// the chain of the root L1 finalized.
 	ErrNotOnL1Chain = errors.New("datadir is not on L1's chain")
+	// ErrL1HistoryIncomplete reports L1-only derivation that needs history
+	// L1 no longer serves, or did not end holding the root L1 finalized.
+	ErrL1HistoryIncomplete = errors.New("L1 history incomplete")
 )
 
 // Config tunes a Follower.
@@ -348,10 +351,16 @@ func (f *Follower) boot(ctx context.Context) error {
 			return err
 		}
 	}
+	var before *l1.Commitment
+	if f.l1Only() {
+		if before, err = f.finalizedRoot(ctx); err != nil {
+			return err
+		}
+	}
 	if !f.resumed {
 		from, err := f.start(ctx)
 		if err != nil {
-			return err
+			return f.historyIncomplete(ctx, err)
 		}
 		f.scanned, f.resumed = from-1, true
 	}
@@ -361,6 +370,9 @@ func (f *Follower) boot(ctx context.Context) error {
 	}
 	f.target = head.Number
 	if err := f.Sync(ctx); err != nil {
+		return f.historyIncomplete(ctx, err)
+	}
+	if err := f.checkRoot(ctx, before); err != nil {
 		return err
 	}
 	return f.watcher.Seed(ctx, f.scanned)
@@ -656,7 +668,7 @@ func halts(err error) bool {
 	return errors.Is(err, deriver.ErrDiverged) || errors.Is(err, deriver.ErrFinalizedReorged) ||
 		errors.Is(err, l1.ErrReorgTooDeep) || errors.Is(err, l1.ErrFinalityViolation) ||
 		errors.Is(err, l1.ErrUndecodable) || errors.Is(err, l1.ErrUnsupported) || errors.Is(err, ErrL1ChainID) || errors.Is(err, ErrL1Reference) ||
-		errors.Is(err, ErrSeedReorged) || errors.Is(err, ErrNotOnL1Chain) ||
+		errors.Is(err, ErrSeedReorged) || errors.Is(err, ErrNotOnL1Chain) || errors.Is(err, ErrL1HistoryIncomplete) ||
 		errors.Is(err, l1.ErrNoStateReads) || errors.Is(err, l1.ErrZeroRoot) || errors.Is(err, l1.ErrNotRollups) ||
 		errors.Is(err, ErrPeerHistoryRefused)
 }
