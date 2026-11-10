@@ -508,6 +508,23 @@ func convertCommitmentHistoryFileV3(ctx context.Context, at *AggregatorRoTx, vFi
 	rootLegacyKey := encodeLegacyPrefix(nil, keysV2)
 
 	g, gctx := errgroup.WithContext(ctx)
+	collectDone := make(chan struct{})
+	g.Go(func() error {
+		logEvery := time.NewTicker(30 * time.Second)
+		defer logEvery.Stop()
+		totalKeys := uint64(efFile.src.decompressor.Count() / 2)
+		for {
+			select {
+			case <-logEvery.C:
+				n := versions.Load()
+				logger.Info(fmt.Sprintf("[commitment_convert] v3 history file=%s keys=%s/%s entries=%s (%s entries/s) (%d/%d files)",
+					baseName, common.PrettyCounter(chains.Load()), common.PrettyCounter(totalKeys),
+					common.PrettyCounter(n), formatRate(n, time.Since(fileStart)), fileIdx, fileTotal))
+			case <-collectDone:
+				return nil
+			}
+		}
+	})
 	g.Go(func() error {
 		defer close(in)
 		vView, openErr := vFile.src.decompressor.OpenSequentialView()
@@ -849,7 +866,7 @@ func convertCommitmentHistoryFileV3(ctx context.Context, at *AggregatorRoTx, vFi
 			}
 		}
 		return nil
-	}, func() { close(out) })
+	}, func() { close(out); close(collectDone) })
 	collectConverted(g, out, collectors)
 	if err := g.Wait(); err != nil {
 		return r, err
