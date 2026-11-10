@@ -2145,7 +2145,7 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 
 	err = ethapi.FinalizeCallTxTo(ibs, blockRules, stateless)
 	if err != nil {
-		return common.Hash{}, stateless, fmt.Errorf("[statelessExec] ibs.CommitBlock() failed : %w", err)
+		return common.Hash{}, stateless, fmt.Errorf("[statelessExec] FinalizeCallTxTo failed: %w", err)
 	}
 
 	// Finalize and compute the resulting state root
