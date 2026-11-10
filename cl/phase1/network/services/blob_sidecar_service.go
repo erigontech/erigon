@@ -165,6 +165,8 @@ func (b *blobSidecarService) verifyAndStoreBlobSidecar(ctx context.Context, msg 
 		if err := b.verifySidecarsSignature(msg.SignedBlockHeader); err != nil {
 			return err
 		}
+		// Verify proofs and the signature first so unavailable proposer state
+		// cannot turn an invalid sidecar into IGNORE.
 		header := msg.SignedBlockHeader.Header
 		expectedProposer, err := b.expectedProposer(ctx, header.ParentRoot, parentSlot, header.Slot)
 		if err != nil {
@@ -175,7 +177,6 @@ func (b *blobSidecarService) verifyAndStoreBlobSidecar(ctx context.Context, msg 
 		}
 	}
 	monitor.ObserveBlobVerificationTime(start)
-	// operation is not thread safe from here.
 	return b.forkchoiceStore.AddPreverifiedBlobSidecar(msg)
 }
 
