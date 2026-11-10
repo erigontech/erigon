@@ -19,6 +19,7 @@ package state
 import (
 	"bytes"
 	"math/big"
+	"slices"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -26,6 +27,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -365,7 +367,7 @@ func TestApplyWritesFoldTakesPrevFromRecordedOrigin(t *testing.T) {
 	addr := accounts.InternAddress(common.HexToAddress("0x01"))
 	key := accounts.InternKey(common.HexToHash("0x02"))
 	addrValue, keyValue := addr.Value(), key.Value()
-	composite := append(addrValue[:], keyValue[:]...)
+	composite := slices.Concat(addrValue[:], keyValue[:])
 
 	for _, tc := range []struct {
 		name   string
@@ -381,6 +383,8 @@ func TestApplyWritesFoldTakesPrevFromRecordedOrigin(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			_, tx, domains := NewTestRwTx(t)
 			reads := &storageLatestReads{TemporalTx: tx}
+			changes := &changeset.StateChangeSet{}
+			domains.SetChangesetAccumulator(changes)
 			view := storageFoldView(addr, key, &VersionedWrite[uint256.Int]{
 				WriteHeader: WriteHeader{valStatus: tc.status},
 				Val:         *uint256.NewInt(tc.val),
@@ -393,6 +397,9 @@ func TestApplyWritesFoldTakesPrevFromRecordedOrigin(t *testing.T) {
 			got, _, ok := domains.GetLatestFromMemory(kv.StorageDomain, composite)
 			require.True(t, ok, "the write reaches the shared domains")
 			require.True(t, bytes.Equal(tc.want, got), "got %x want %x", got, tc.want)
+			diff := changes.Diffs[kv.StorageDomain].GetDiffSet()
+			require.Len(t, diff, 1)
+			require.True(t, bytes.Equal(uint256.NewInt(tc.orig).Bytes(), diff[0].Value), "the changeset keeps the origin as prev, got %x", diff[0].Value)
 		})
 	}
 }
@@ -404,7 +411,7 @@ func TestApplyWritesFoldReadsPrevWithoutRecordedOrigin(t *testing.T) {
 	addr := accounts.InternAddress(common.HexToAddress("0x01"))
 	key := accounts.InternKey(common.HexToHash("0x02"))
 	addrValue, keyValue := addr.Value(), key.Value()
-	composite := append(addrValue[:], keyValue[:]...)
+	composite := slices.Concat(addrValue[:], keyValue[:])
 	require.NoError(t, domains.DomainPut(kv.StorageDomain, tx, composite, []byte{9}, 1, nil))
 
 	view := storageFoldView(addr, key, &VersionedWrite[uint256.Int]{})

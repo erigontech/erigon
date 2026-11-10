@@ -85,8 +85,7 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 		// Made on the first slot, since an array here escapes even when unused.
 		var storageKey, originBuf []byte
 		type foldedSlot struct {
-			key         accounts.StorageKey
-			value       uint256.Int
+			storageItem
 			origin      uint256.Int
 			originKnown bool
 		}
@@ -142,7 +141,7 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 		for a, byKey := range writes.StorageChanges() {
 			d := ensure(a)
 			for k, vw := range byKey {
-				d.storage = append(d.storage, foldedSlot{key: k, value: vw.Val, origin: vw.orig, originKnown: storageOriginKnown(vw)})
+				d.storage = append(d.storage, foldedSlot{storageItem{k, vw.Val}, vw.orig, storageOriginKnown(vw)})
 			}
 		}
 
