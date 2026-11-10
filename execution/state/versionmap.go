@@ -152,12 +152,49 @@ type AddressEntry struct {
 	CodeHash       *btree.Map[int, *WriteCell[accounts.CodeHash]]
 	CodeSize       *btree.Map[int, *WriteCell[int]]
 	CreateContract *btree.Map[int, *WriteCell[bool]]
-	Storage        map[accounts.StorageKey]*btree.Map[int, *WriteCell[uint256.Int]]
+	// Storage maps a slot to its cells. Whether a slot is present may be read without
+	// mu, its cells may not. Nothing removes a slot.
+	Storage atomic.Pointer[xsync.Map[accounts.StorageKey, *btree.Map[int, *WriteCell[uint256.Int]]]]
+	// selfDestructWritten latches before the first SelfDestruct cell and is never cleared.
+	selfDestructWritten atomic.Bool
 	// mu guards this account's cell maps. Held RLock for reads (readFloor and
 	// the per-path scans) and Lock for writes (putCell / Delete / markFlag).
 	// MarkWritesComplete flips flags to Done under RLock only while no SelfDestruct
 	// cell is true: readers combine several cells' flags only through a destruct.
 	mu sync.RWMutex
+}
+
+// slotCells returns slot key's cells, nil when no tx wrote it. Reading them needs e.mu.
+func (e *AddressEntry) slotCells(key accounts.StorageKey) *btree.Map[int, *WriteCell[uint256.Int]] {
+	m := e.Storage.Load()
+	if m == nil {
+		return nil
+	}
+	cells, _ := m.Load(key)
+	return cells
+}
+
+// slotCellsForWrite returns slot key's cells, publishing an empty map first if needed; caller holds e.mu.Lock().
+func (e *AddressEntry) slotCellsForWrite(key accounts.StorageKey) *btree.Map[int, *WriteCell[uint256.Int]] {
+	if cells := e.slotCells(key); cells != nil {
+		return cells
+	}
+	cells := &btree.Map[int, *WriteCell[uint256.Int]]{}
+	lazyMap(&e.Storage).Store(key, cells)
+	return cells
+}
+
+// putSelfDestructCell is the only way a SelfDestruct cell is inserted; caller holds e.mu.Lock().
+func (e *AddressEntry) putSelfDestructCell(vm *VersionMap, addr accounts.Address, v Version, flag statusFlag, value bool, valStatus valueStatus) {
+	e.selfDestructWritten.Store(true)
+	e.SelfDestruct = putCell(vm, e.SelfDestruct, addr, SelfDestructPath, v.TxIndex, v.Incarnation, flag, value, valStatus, getCellSelfDestruct)
+}
+
+// unwrittenLiveSlot reports, without e.mu, that no tx wrote slot key and the account has no
+// destruct cell. Both facts only turn false once, and the slot is read first, so the two loads
+// together see the account as of the slot load, before any flush still in progress.
+func (e *AddressEntry) unwrittenLiveSlot(key accounts.StorageKey) bool {
+	return e.slotCells(key) == nil && !e.selfDestructWritten.Load()
 }
 
 // putCell sets/updates a typed cell at txIdx; caller holds e.mu.Lock(). Returns the (possibly new) map to assign back.
@@ -477,13 +514,15 @@ func (vm *VersionMap) StorageKeys(addr accounts.Address) []accounts.StorageKey {
 	}
 	e.mu.RLock()
 	defer e.mu.RUnlock()
-	if len(e.Storage) == 0 {
+	m := e.Storage.Load()
+	if m == nil {
 		return nil
 	}
-	keys := make([]accounts.StorageKey, 0, len(e.Storage))
-	for k := range e.Storage {
+	keys := make([]accounts.StorageKey, 0, m.Size())
+	m.Range(func(k accounts.StorageKey, _ *btree.Map[int, *WriteCell[uint256.Int]]) bool {
 		keys = append(keys, k)
-	}
+		return true
+	})
 	return keys
 }
 
@@ -594,7 +633,7 @@ func (vm *VersionMap) WriteSelfDestruct(addr accounts.Address, v Version, value 
 	e := vm.entryOrCreate(addr)
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	e.SelfDestruct = putCell(vm, e.SelfDestruct, addr, SelfDestructPath, v.TxIndex, v.Incarnation, flagFor(complete), value, ValueChanged, getCellSelfDestruct)
+	e.putSelfDestructCell(vm, addr, v, flagFor(complete), value, ValueChanged)
 }
 
 func (vm *VersionMap) WriteBalance(addr accounts.Address, v Version, value uint256.Int, complete bool) {
@@ -666,10 +705,7 @@ func (vm *VersionMap) WriteStorage(addr accounts.Address, key accounts.StorageKe
 	e := vm.entryOrCreate(addr)
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if e.Storage == nil {
-		e.Storage = map[accounts.StorageKey]*btree.Map[int, *WriteCell[uint256.Int]]{}
-	}
-	e.Storage[key] = putCell(vm, e.Storage[key], addr, StoragePath, v.TxIndex, v.Incarnation, flagFor(complete), value, ValueChanged, getCellStorage)
+	putCell(vm, e.slotCellsForWrite(key), addr, StoragePath, v.TxIndex, v.Incarnation, flagFor(complete), value, ValueChanged, getCellStorage)
 }
 
 // entryOrCreate returns the AddressEntry for addr, creating it if absent. The returned
@@ -895,21 +931,26 @@ func readFloorLife[T any](vm *VersionMap, addr accounts.Address, txIdx int, sel 
 	return fv.Value, res, true, life
 }
 
-// ReadStorageLife is ReadStorage folded with the lifecycle verdict (one RLock).
+// ReadStorageLife is ReadStorage folded with the lifecycle verdict (at most one RLock).
 func (vm *VersionMap) ReadStorageLife(addr accounts.Address, key accounts.StorageKey, txIdx int) (uint256.Int, ReadResult, bool, lifecycleVerdict) {
-	val, res, ok, life := readFloorLife(vm, addr, txIdx, func(e *AddressEntry) *btree.Map[int, *WriteCell[uint256.Int]] {
-		if e.Storage == nil {
-			return nil
-		}
-		return e.Storage[key]
-	})
+	if e := vm.load(addr); e == nil || e.unwrittenLiveSlot(key) {
+		val, res, ok := vm.readStorageOrigin(addr, key)
+		return val, res, ok, lifecycleVerdict{state: LifecycleLive}
+	}
+	val, res, ok, life := readFloorLife(vm, addr, txIdx, func(e *AddressEntry) *btree.Map[int, *WriteCell[uint256.Int]] { return e.slotCells(key) })
 	if ok {
 		return val, res, true, life
 	}
+	val, res, ok = vm.readStorageOrigin(addr, key)
+	return val, res, ok, life
+}
+
+// readStorageOrigin resolves a slot with no cell below the reader against the origin layer, lock-free.
+func (vm *VersionMap) readStorageOrigin(addr accounts.Address, key accounts.StorageKey) (uint256.Int, ReadResult, bool) {
 	if ov, seeded := vm.LoadOriginStorage(addr, key); seeded {
-		return ov, ReadResult{depIdx: originIndex}, true, life
+		return ov, ReadResult{depIdx: originIndex}, true
 	}
-	return val, res, false, life
+	return uint256.Int{}, ReadResult{depIdx: UnknownDep, incarnation: -1}, false
 }
 
 // ReadNonceLife is ReadNonce folded with the lifecycle verdict (one RLock).
@@ -974,20 +1015,14 @@ func (vm *VersionMap) ReadCreateContract(addr accounts.Address, txIdx int) (bool
 }
 
 func (vm *VersionMap) ReadStorage(addr accounts.Address, key accounts.StorageKey, txIdx int) (uint256.Int, ReadResult, bool) {
-	val, res, ok := readFloor(vm, addr, txIdx, func(e *AddressEntry) *btree.Map[int, *WriteCell[uint256.Int]] {
-		if e.Storage == nil {
-			return nil
-		}
-		return e.Storage[key]
-	})
+	if e := vm.load(addr); e == nil || e.slotCells(key) == nil {
+		return vm.readStorageOrigin(addr, key)
+	}
+	val, res, ok := readFloor(vm, addr, txIdx, func(e *AddressEntry) *btree.Map[int, *WriteCell[uint256.Int]] { return e.slotCells(key) })
 	if ok {
 		return val, res, true
 	}
-	// Origin fallback: pre-block committed slot value at originIndex (immutable), lock-free.
-	if ov, seeded := vm.LoadOriginStorage(addr, key); seeded {
-		return ov, ReadResult{depIdx: originIndex}, true
-	}
-	return val, res, false
+	return vm.readStorageOrigin(addr, key)
 }
 
 // ReadStatus returns a path's read outcome for callers that need only version/status
@@ -1073,7 +1108,7 @@ func (vm *VersionMap) LatestTxIndex(addr accounts.Address, path AccountPath, key
 			e.CreateContract.Descend(txIdxLimit, func(k int, _ *WriteCell[bool]) bool { fk = k; return false })
 		}
 	case StoragePath:
-		if cells := e.Storage[key]; cells != nil {
+		if cells := e.slotCells(key); cells != nil {
 			cells.Descend(txIdxLimit, func(k int, _ *WriteCell[uint256.Int]) bool { fk = k; return false })
 		}
 	default:
@@ -1118,7 +1153,7 @@ func (vm *VersionMap) accountLifecycleAt(addr accounts.Address, txIdx int, resol
 		return LifecycleLive, Version{}, 0, 0
 	}
 	e := vm.load(addr)
-	if e == nil {
+	if e == nil || !e.selfDestructWritten.Load() {
 		return LifecycleLive, Version{}, 0, 0
 	}
 	// One RLock for the whole verdict so it cannot observe the account mid-flush.
@@ -1400,10 +1435,7 @@ func flushAllNoOp(e *AddressEntry, writes *WriteSet, addr accounts.Address, flag
 	}
 	if inner, ok := writes.storage[addr]; ok {
 		for key, vw := range inner {
-			var cells *btree.Map[int, *WriteCell[uint256.Int]]
-			if e.Storage != nil {
-				cells = e.Storage[key]
-			}
+			cells := e.slotCells(key)
 			if vw.valStatus == ValueUnchanged {
 				if cells != nil {
 					if c, ok := cells.Get(vw.Version.TxIndex); ok && c.loadFlag() != FlagDone {
@@ -1471,7 +1503,7 @@ func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool) {
 			e.Address = flushCell(vm, e.Address, addr, AddressPath, vw.Version, flag, vw.Val, vw.valStatus, getCellAccount, eqAccount, destructed)
 		}
 		if vw, ok := writes.selfDestruct[addr]; ok {
-			e.SelfDestruct = putCell(vm, e.SelfDestruct, addr, SelfDestructPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, vw.valStatus, getCellSelfDestruct)
+			e.putSelfDestructCell(vm, addr, vw.Version, flag, vw.Val, vw.valStatus)
 		}
 		if vw, ok := writes.balance[addr]; ok {
 			e.Balance = flushCell(vm, e.Balance, addr, BalancePath, vw.Version, flag, vw.Val, vw.valStatus, getCellBalance, eqUint256, destructed)
@@ -1495,16 +1527,13 @@ func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool) {
 			e.CreateContract = putCell(vm, e.CreateContract, addr, CreateContractPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, vw.valStatus, getCellCreateContract)
 		}
 		if inner, ok := writes.storage[addr]; ok {
-			if e.Storage == nil {
-				e.Storage = map[accounts.StorageKey]*btree.Map[int, *WriteCell[uint256.Int]]{}
-			}
 			for key, vw := range inner {
 				// On a BAL block a net-zero write is omitted from the BAL and folded away by
 				// StorageChanges, so it is never materialized here (nor sealed below). The slot
 				// must read as the access list seeds it, so a cell an earlier run of the tx left
 				// goes back to the seed or away. Before the seal a Done cell holds the seed.
 				if vm.HasBAL && vw.valStatus == ValueUnchanged {
-					if cells := e.Storage[key]; cells != nil {
+					if cells := e.slotCells(key); cells != nil {
 						if c, ok := cells.Get(vw.Version.TxIndex); ok && c.loadFlag() != FlagDone {
 							if seed, seeded := vm.seededStorage(addr, key, vw.Version.TxIndex); seeded {
 								// As in flushCell, a changed value needs a new version, so that the
@@ -1522,7 +1551,7 @@ func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool) {
 					}
 					continue
 				}
-				e.Storage[key] = flushCell(vm, e.Storage[key], addr, StoragePath, vw.Version, flag, vw.Val, vw.valStatus, getCellStorage, eqUint256, destructed)
+				flushCell(vm, e.slotCellsForWrite(key), addr, StoragePath, vw.Version, flag, vw.Val, vw.valStatus, getCellStorage, eqUint256, destructed)
 			}
 		}
 	})
@@ -1616,7 +1645,7 @@ func (vm *VersionMap) MarkWritesComplete(writes *WriteSet) {
 				if vm.HasBAL && vw.valStatus == ValueUnchanged {
 					continue
 				}
-				markCellComplete(e.Storage[key], addr, StoragePath, key, vw.Version.TxIndex, vw.Version.Incarnation, vw.Val)
+				markCellComplete(e.slotCells(key), addr, StoragePath, key, vw.Version.TxIndex, vw.Version.Incarnation, vw.Val)
 			}
 		}
 	})
@@ -1716,7 +1745,7 @@ func markFlag(e *AddressEntry, addr accounts.Address, path AccountPath, key acco
 	case CreateContractPath:
 		markCellFlag(e.CreateContract, addr, path, key, txIdx, incarnation, flag)
 	case StoragePath:
-		markCellFlag(e.Storage[key], addr, path, key, txIdx, incarnation, flag)
+		markCellFlag(e.slotCells(key), addr, path, key, txIdx, incarnation, flag)
 	default:
 		panic(fmt.Errorf("markFlag: unknown path %v", path))
 	}
@@ -1818,7 +1847,7 @@ func (vm *VersionMap) Delete(addr accounts.Address, path AccountPath, key accoun
 			}
 		}
 	case StoragePath:
-		if cells := e.Storage[key]; cells != nil {
+		if cells := e.slotCells(key); cells != nil {
 			hasField = true
 			if c, ok := deleteCell(vm, cells, txIdx, &stamped); ok {
 				releaseCellStorage(c)
@@ -1887,10 +1916,13 @@ func (vm *VersionMap) DeleteAll(addr accounts.Address, txIdx int) {
 			releaseCellCreateContract(c)
 		}
 	}
-	for _, cells := range e.Storage {
-		if c, ok := deleteCell(vm, cells, txIdx, &stamped); ok {
-			releaseCellStorage(c)
-		}
+	if m := e.Storage.Load(); m != nil {
+		m.Range(func(_ accounts.StorageKey, cells *btree.Map[int, *WriteCell[uint256.Int]]) bool {
+			if c, ok := deleteCell(vm, cells, txIdx, &stamped); ok {
+				releaseCellStorage(c)
+			}
+			return true
+		})
 	}
 }
 
