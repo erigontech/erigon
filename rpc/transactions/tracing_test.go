@@ -406,3 +406,21 @@ func TestAssembleTracerCapsTheClientTimeout(t *testing.T) {
 		return err != nil
 	}, 5*time.Second, 10*time.Millisecond, "the server timeout must stop the tracer")
 }
+
+func TestAssembleTracerStopsAJSConstructorAtTheTimeout(t *testing.T) {
+	t.Parallel()
+	code, timeout := "(function(){ while (true) {} })()", "50ms"
+	done := make(chan error, 1)
+	go func() {
+		_, _, cancel, err := AssembleTracer(t.Context(), &tracersConfig.TraceConfig{Tracer: &code, Timeout: &timeout},
+			common.Hash{}, nil, common.Hash{}, 0, jsonstream.New(io.Discard), time.Minute)
+		cancel()
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		require.ErrorContains(t, err, "execution timeout")
+	case <-time.After(10 * time.Second):
+		t.Fatal("the JS tracer constructor outlived its timeout")
+	}
+}
