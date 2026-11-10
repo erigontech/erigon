@@ -432,6 +432,47 @@ func TestOpenRollingPinWithFullReadTxLimiter(t *testing.T) {
 	require.Empty(t, pin.warm)
 }
 
+type headAdvancingDB struct {
+	kv.TemporalRwDB
+	advance func(context.Context) error
+	opened  int
+}
+
+func (db *headAdvancingDB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
+	db.opened++
+	if db.opened == 2 {
+		if err := db.advance(ctx); err != nil {
+			return nil, err
+		}
+	}
+	return db.TemporalRwDB.BeginTemporalRo(ctx) //nolint:gocritic
+}
+
+func TestOpenRollingPinDropsWarmTxAtAnotherHead(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(true))
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	ctx := context.Background()
+	db := &headAdvancingDB{TemporalRwDB: m.DB, advance: func(ctx context.Context) error {
+		return m.DB.Update(ctx, func(tx kv.RwTx) error {
+			head, err := stages.GetStageProgress(tx, stages.Finish)
+			if err != nil {
+				return err
+			}
+			if err := stages.SaveStageProgress(tx, stages.Finish, head+1); err != nil {
+				return err
+			}
+			return rawdb.WriteCanonicalHash(tx, hashN(0x42), head+1)
+		})
+	}}
+
+	pin, err := openRollingPin(ctx, db)
+	require.NoError(t, err)
+	require.NotNil(t, pin)
+	t.Cleanup(pin.close)
+	require.Equal(t, 2, db.opened)
+	require.Empty(t, pin.warm)
+}
+
 // TestBuildAndCacheHeadCaptureStalePin drives the head-capture build with no held pin.
 // The parent-commitment gate rejects it, so nothing is cached and the pin is
 // re-established at the committed head for the next block.
