@@ -385,23 +385,13 @@ func resolveLegacyHistory(key []byte, entries []v3.LegacyEntry) ([]byte, error) 
 	return value, nil
 }
 
-func detectHistoryKeysV2(ii *InvertedIndex, ef *seg.Decompressor) (bool, error) {
-	keys := ef.Count() / 2
-	if keys == 0 {
+func detectHistoryKeysV2(ii *InvertedIndex, ef *FilesItem) (bool, error) {
+	if ef.decompressor.Count() == 0 {
 		return false, nil
 	}
-	stride := max(1, keys/48)
-	r := seg.NewReader(ef.MakeGetter(), ii.Compression)
-	var pairs []sampledPair
-	for i := 0; r.HasNext(); i++ {
-		if i%stride != 0 {
-			r.Skip()
-			r.Skip()
-			continue
-		}
-		k, _ := r.Next(nil)
-		r.Skip()
-		pairs = append(pairs, sampledPair{k: k})
+	pairs, err := sampleViaStride(seg.NewReader(ef.decompressor.MakeGetter(), ii.Compression), ef, 48)
+	if err != nil {
+		return false, err
 	}
 	keysV2, err := detectKeyEncoding(pairs)
 	if errors.Is(err, errNoNonStateSamples) {
@@ -477,7 +467,7 @@ func convertCommitmentHistoryFileV3(ctx context.Context, at *AggregatorRoTx, vFi
 	baseName := filepath.Base(vFile.Fullpath())
 	fileStart := time.Now()
 
-	keysV2, keysErr := detectHistoryKeysV2(ii, efFile.src.decompressor)
+	keysV2, keysErr := detectHistoryKeysV2(ii, efFile.src)
 	if keysErr != nil {
 		return r, keysErr
 	}
