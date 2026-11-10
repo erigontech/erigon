@@ -261,6 +261,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 
 	// Every transaction of the request gets the next index, so each sees the ones before it.
 	txIndex := st.TxnIndex()
+	gasBudget := api.GasCap // shared by the whole request, as in eth_simulateV1: return data costs memory gas
 	for bundleIdx, bundle := range bundles {
 		// first change blockContext
 		bundle.BlockOverride.OverrideBlockContext(&blockCtx, ethapi.BlockHashOverrides(overrideBlockHash))
@@ -276,7 +277,10 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 			if txn.Gas == nil || *txn.Gas == 0 {
 				txn.Gas = (*hexutil.Uint64)(&api.GasCap)
 			}
-			msg, err := txn.ToMessage(api.GasCap, &blockCtx.BaseFee)
+			if gasBudget == 0 {
+				return nil, clientLimitExceededError("the transactions of the request used all of --rpc.gascap")
+			}
+			msg, err := txn.ToMessage(gasBudget, &blockCtx.BaseFee)
 			if err != nil {
 				return nil, err
 			}
@@ -297,6 +301,10 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 			// If the timer caused an abort, return an appropriate error message
 			if evm.Cancelled() {
 				return nil, fmt.Errorf("execution aborted (timeout = %v)", timeout)
+			}
+			gasBudget -= result.ReceiptGasUsed
+			if len(result.ReturnData) > api.ReturnDataLimit {
+				return nil, fmt.Errorf("call returned result on length %d exceeding --rpc.returndata.limit %d", len(result.ReturnData), api.ReturnDataLimit)
 			}
 			jsonResult := make(map[string]any)
 			if result.Err != nil {
