@@ -954,8 +954,8 @@ func TestValidateSimulationRequest(t *testing.T) {
 
 // ─── computeSimulatedStateRoot tests ─────────────────────────────
 
-// observedFrozenBlocks answers the frozen-blocks sentinel and nothing else: the embedded
-// interface is nil, so any further reader call panics the test.
+// Leave FullBlockReader nil when the test must catch unexpected backend
+// lookups; those calls will panic.
 type observedFrozenBlocks struct {
 	dbservices.FullBlockReader
 	frozen   uint64

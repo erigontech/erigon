@@ -319,7 +319,7 @@ func prepareTraceCallState[I int | hexutil.Uint](ctx context.Context, api *Debug
 		var result traceCallState
 		blockNumber, hash, isLatest, err := rpchelper.GetCanonicalBlockNumber(ctx, block, tx, canonicalViewReader{api._blockReader})
 		if err != nil {
-			return result, err
+			return result, fmt.Errorf("get block number: %w", err)
 		}
 		if err := rpchelper.CheckBlockExecuted(tx, blockNumber); err != nil {
 			return result, err
@@ -349,13 +349,16 @@ func prepareTraceCallState[I int | hexutil.Uint](ctx context.Context, api *Debug
 			result.reader, err = rpchelper.CreateHistoryStateReaderAtTxNum(ctx, tx, blockNumber, txNum, api._txNumReader)
 		}
 		if err != nil {
-			return result, err
+			return result, fmt.Errorf("create state reader: %w", err)
 		}
 		result.header, err = api.headerByHashAndNumber(ctx, tx, hash, blockNumber)
-		if err == nil && result.header == nil {
-			err = fmt.Errorf("block %d(%x) not found", blockNumber, hash)
+		if err != nil {
+			return result, fmt.Errorf("could not fetch header %d(%x): %w", blockNumber, hash, err)
 		}
-		return result, err
+		if result.header == nil {
+			return result, fmt.Errorf("block %d(%x) not found", blockNumber, hash)
+		}
+		return result, nil
 	})
 }
 

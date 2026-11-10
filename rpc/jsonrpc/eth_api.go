@@ -41,6 +41,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/kvcfg"
+	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -316,14 +317,37 @@ func (r canonicalViewReader) HeaderNumber(ctx context.Context, tx kv.Getter, has
 }
 
 func (r canonicalViewReader) CanonicalHash(ctx context.Context, tx kv.Getter, number uint64) (common.Hash, bool, error) {
-	hash, err := rawdb.ReadCanonicalHash(tx, number)
-	if err != nil || hash != (common.Hash{}) {
-		return hash, hash != (common.Hash{}), err
+	dbtx, ok := tx.(kv.Tx)
+	if !ok {
+		return common.Hash{}, false, errors.New("canonical hash lookup requires a database transaction")
+	}
+	// A remote GetOne uses the cursor stream, which can renew the transaction
+	// after its TTL. Range reads the existing transaction through a unary call,
+	// so BLOCKHASH cannot switch the state view during execution.
+	key := hexutil.EncodeTs(number)
+	it, err := dbtx.Range(kv.HeaderCanonical, key, nil, order.Asc, 1)
+	if err != nil {
+		return common.Hash{}, false, err
+	}
+	defer it.Close()
+	if it.HasNext() {
+		k, v, err := it.Next()
+		if err != nil {
+			return common.Hash{}, false, err
+		}
+		hash := common.BytesToHash(v)
+		if bytes.Equal(k, key) && hash != (common.Hash{}) {
+			return hash, true, nil
+		}
 	}
 	// Frozen mappings may be absent from MDBX, but cannot change in a reorg.
-	// A missing mapping above that range must not be replaced by a newer backend view.
+	// Backend fallback is safe only inside a known frozen range. If that range
+	// is unknown, we cannot tell whether a missing row requires a snapshot lookup.
 	frozen, observed := r.FrozenBlocksObserved()
-	if !observed || frozen == 0 || number > frozen {
+	if !observed {
+		return common.Hash{}, false, errors.New("frozen block range is unavailable")
+	}
+	if frozen == 0 || number > frozen {
 		return common.Hash{}, false, nil
 	}
 	return r.FullBlockReader.CanonicalHash(ctx, tx, number)

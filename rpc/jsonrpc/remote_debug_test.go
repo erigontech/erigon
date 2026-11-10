@@ -19,6 +19,8 @@ package jsonrpc
 import (
 	"bytes"
 	"context"
+	"math/big"
+	"slices"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -29,13 +31,18 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/remotedbserver"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/state"
 	tracersConfig "github.com/erigontech/erigon/execution/tracing/tracers/config"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/rpc"
@@ -331,6 +338,148 @@ func TestIndexedTraceBlockHashUsesPinnedView(t *testing.T) {
 			require.Equal(t, viewID, tx.ViewID(), "the KV view must remain pinned throughout tracing")
 		})
 	}
+}
+
+func TestCanonicalViewReaderFrozenFallback(t *testing.T) {
+	_, tx := mdbxtest.NewTestTx(t)
+	viewHash, backendHash := common.Hash{0x11}, common.Hash{0x22}
+	require.NoError(t, rawdb.WriteCanonicalHash(tx, viewHash, 12))
+	require.NoError(t, rawdb.WriteCanonicalHash(tx, viewHash, 15))
+	for _, tc := range []struct {
+		name     string
+		block    uint64
+		frozen   uint64
+		observed bool
+		want     common.Hash
+		wantErr  bool
+	}{
+		{name: "unknown_range", block: 5, wantErr: true},
+		{name: "no_snapshots", block: 5, observed: true},
+		{name: "frozen_block", block: 5, frozen: 10, observed: true, want: backendHash},
+		{name: "last_frozen_block", block: 10, frozen: 10, observed: true, want: backendHash},
+		{name: "above_frozen_range", block: 11, frozen: 10, observed: true},
+		{name: "hole_between_rows", block: 14, frozen: 10, observed: true},
+		{name: "present_in_view", block: 12, want: viewHash},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reader := canonicalViewReader{observedFrozenBlocks{
+				FullBlockReader: liveCanonicalReader{hash: backendHash},
+				frozen:          tc.frozen,
+				observed:        tc.observed,
+			}}
+			hash, found, err := reader.CanonicalHash(t.Context(), tx, tc.block)
+			if tc.wantErr {
+				require.ErrorContains(t, err, "frozen block range is unavailable")
+			} else {
+				require.NoError(t, err)
+			}
+			require.Equal(t, tc.want, hash)
+			require.Equal(t, tc.want != (common.Hash{}), found)
+		})
+	}
+}
+
+// Crossing the renewal interval during execution must not mix state from
+// different views; setup retries cannot repair an already running trace.
+func TestTraceBlockHashDoesNotRenewStateView(t *testing.T) {
+	for _, endpoint := range []string{"traceCall", "traceCallMany"} {
+		t.Run(endpoint, func(t *testing.T) {
+			contract := common.HexToAddress("0xc0ffee31")
+			// Return slot 0, BLOCKHASH(NUMBER - 1), and slot 1, in that order.
+			code := hexutil.MustDecode("0x600054600052600143034060205260015460405260606000f3")
+			m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
+				Config: chain.TestChainBerlinConfig,
+				Alloc: types.GenesisAlloc{
+					testAddr: {Balance: big.NewInt(1_000_000_000_000_000_000)},
+					contract: {Code: code, Storage: map[common.Hash]common.Hash{{}: {31: 1}, {31: 1}: {31: 2}}},
+				},
+			}), execmoduletester.WithKey(testKey))
+			blocks, err := m.GenerateChain(2, nil)
+			require.NoError(t, err)
+			require.NoError(t, m.InsertChain(blocks))
+			parent, target := blocks.Blocks[0], blocks.Blocks[1]
+			storageSlot := common.Hash{31: 1}
+			storageKey := slices.Concat(contract[:], storageSlot[:])
+
+			synctest.Test(t, func(t *testing.T) {
+				ctx := t.Context()
+				_, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
+				reader := freezeblocks.NewRemoteBlockReader(remoteproto.NewETHBACKENDClient(conn))
+				db, _ := remoteHistoryDB(t, m.DB)
+				tx, err := db.BeginTemporalRo(ctx) //nolint:gocritic // The endpoint takes ownership below.
+				require.NoError(t, err)
+				handedOff := false
+				defer func() {
+					if !handedOff {
+						tx.Rollback()
+					}
+				}()
+				viewID := tx.ViewID()
+				view := &expireOnStorageReadTx{TemporalTx: tx, expire: func() {
+					require.NoError(t, m.DB.UpdateTemporal(ctx, func(rw kv.TemporalRwTx) error {
+						maxTxNum, err := rawdbv3.TxNums.Max(ctx, rw, target.NumberU64())
+						require.NoError(t, err)
+						domains, err := execctx.NewSharedDomains(ctx, rw, m.Log)
+						require.NoError(t, err)
+						defer domains.Close()
+						domains.SetTxNum(maxTxNum + 1)
+						require.NoError(t, domains.DomainPut(kv.StorageDomain, rw, storageKey, []byte{9}, maxTxNum+1, nil))
+						require.NoError(t, domains.Flush(ctx, rw))
+						return rawdb.WriteCanonicalHash(rw, common.Hash{0x42}, parent.NumberU64())
+					}))
+					time.Sleep(remotedbserver.MaxTxTTL + time.Nanosecond)
+				}}
+				api := NewPrivateDebugAPI(newBaseApiForTest(m), historyViewDB{TemporalRoDB: db, tx: view}, nil, &rpccfg.DebugApiConfig{})
+				api._pruneMode.Store(&prune.ArchiveMode)
+				api._blockReader = reader
+				api._txNumReader = reader.TxnumReader()
+				api.evmCallTimeout = 2 * remotedbserver.MaxTxTTL
+				config := &tracersConfig.TraceConfig{Tracer: new("callTracer")}
+				block := rpc.BlockNumberOrHashWithHash(target.Hash(), true)
+				args := ethapi.CallArgs{From: &testAddr, To: &contract, Gas: new(hexutil.Uint64(100_000))}
+				first, second, parentHash := common.Hash{31: 1}, common.Hash{31: 2}, parent.Hash()
+				want := slices.Concat(first[:], parentHash[:], second[:])
+				handedOff = true
+				if endpoint == "traceCall" {
+					var trace struct{ Output string }
+					readGasTrace(t, &trace, func(stream *jsonstream.Stream) error {
+						return api.TraceCall(ctx, args, &block, config, stream)
+					})
+					require.Equal(t, hexutil.Encode(want), trace.Output)
+				} else {
+					var traces [][]struct{ Output string }
+					readGasTrace(t, &traces, func(stream *jsonstream.Stream) error {
+						return api.TraceCallMany(ctx, []Bundle{{Transactions: []ethapi.CallArgs{args}}}, StateContext{BlockNumber: block}, config, stream)
+					})
+					require.Len(t, traces, 1)
+					require.Len(t, traces[0], 1)
+					require.Equal(t, hexutil.Encode(want), traces[0][0].Output)
+				}
+				require.Nil(t, view.expire, "execution must pass the first storage read")
+				require.Equal(t, viewID, tx.ViewID(), "BLOCKHASH must not renew the state view during execution")
+				require.NoError(t, m.DB.ViewTemporal(ctx, func(latest kv.TemporalTx) error {
+					value, _, err := latest.GetLatest(kv.StorageDomain, storageKey, kv.GetLatestOptions{})
+					require.Equal(t, []byte{9}, value, "the backend has newer storage than the trace")
+					return err
+				}))
+			})
+		})
+	}
+}
+
+type expireOnStorageReadTx struct {
+	kv.TemporalTx
+	expire func()
+}
+
+func (tx *expireOnStorageReadTx) GetLatest(domain kv.Domain, key []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
+	value, step, err := tx.TemporalTx.GetLatest(domain, key, opts)
+	if domain == kv.StorageDomain && err == nil && tx.expire != nil {
+		expire := tx.expire
+		tx.expire = nil
+		expire()
+	}
+	return value, step, err
 }
 
 func TestIndexedTraceRevalidatesAfterRemoteRenewal(t *testing.T) {

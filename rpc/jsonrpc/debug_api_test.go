@@ -2185,6 +2185,78 @@ func TestCallRejectsTxIndexOutOfBlock(t *testing.T) {
 	})
 }
 
+func TestTraceCallSetupErrors(t *testing.T) {
+	m, aheadHash := newHeaderAheadTester(t)
+	var hash common.Hash
+	require.NoError(t, m.DB.View(m.Ctx, func(tx kv.Tx) error {
+		var err error
+		hash, err = rawdb.ReadCanonicalHash(tx, 1)
+		return err
+	}))
+	readErr := errors.New("test read failure")
+	for _, tc := range []struct {
+		name      string
+		block     rpc.BlockNumberOrHash
+		configure func(*BaseAPI)
+		message   string
+		cause     error
+	}{
+		{
+			name: "unknown_block", block: rpc.BlockNumberOrHashWithNumber(overlayRaceChainSize + 2),
+			message: "get block number: ",
+		},
+		{
+			name: "not_executed", block: rpc.BlockNumberOrHashWithHash(aheadHash, true),
+			message: "not executed",
+		},
+		{
+			name: "reader_error", block: rpc.BlockNumberOrHashWithNumber(1),
+			configure: func(api *BaseAPI) {
+				api._txNumReader = api._txNumReader.WithCustomReadTxNumFunc(rejectTxNumsAboveIndex{err: readErr})
+			},
+			message: "create state reader: ", cause: readErr,
+		},
+		{
+			name: "header_error", block: rpc.BlockNumberOrHashWithNumber(1),
+			configure: func(api *BaseAPI) {
+				api._blockReader = failHeaderReadBlockReader{FullBlockReader: api._blockReader, hash: hash, blockNumber: 1, err: readErr}
+			},
+			message: fmt.Sprintf("could not fetch header 1(%x): ", hash), cause: readErr,
+		},
+		{
+			name: "missing_header", block: rpc.BlockNumberOrHashWithNumber(1),
+			configure: func(api *BaseAPI) {
+				api._blockReader = hideHeaderBlockReader{FullBlockReader: api._blockReader, blockNumber: 1}
+			},
+			message: fmt.Sprintf("block 1(%x) not found", hash),
+		},
+	} {
+		for _, endpoint := range []string{"traceCall", "traceCallMany"} {
+			t.Run(tc.name+"/"+endpoint, func(t *testing.T) {
+				api := newDebugApiForTest(m)
+				if tc.configure != nil {
+					tc.configure(api.BaseAPI)
+				}
+				args := ethapi.CallArgs{From: &m.Address, To: &m.Address, Gas: new(hexutil.Uint64(100_000))}
+				var output bytes.Buffer
+				stream := jsonstream.New(&output)
+				var err error
+				if endpoint == "traceCall" {
+					err = api.TraceCall(m.Ctx, args, &tc.block, nil, stream)
+				} else {
+					err = api.TraceCallMany(m.Ctx, []Bundle{{Transactions: []ethapi.CallArgs{args}}}, StateContext{BlockNumber: tc.block}, nil, stream)
+				}
+				require.ErrorContains(t, err, tc.message)
+				if tc.cause != nil {
+					require.ErrorIs(t, err, tc.cause)
+				}
+				require.Empty(t, stream.Buffer())
+				require.Empty(t, output.Bytes())
+			})
+		}
+	}
+}
+
 func TestTraceCallRejectsTxIndexOutOfLatestBlock(t *testing.T) {
 	m, _, calls := gasTracingTestChain(t)
 	_, debugApi := newCallManyApisForTest(m)
