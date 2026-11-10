@@ -249,7 +249,6 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 			root.setStoredChild(nib, groupHashes[nib][:], nil)
 		case pending[nib] != nil:
 			applyRemoval(root, nib, pending[nib].state)
-			collapsedState(root)
 			remaining = append(remaining, pending[nib].rest...)
 		}
 	}
