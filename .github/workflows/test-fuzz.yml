@@ -91,10 +91,12 @@ jobs:
       - uses: ./.github/actions/setup-erigon
         id: erigon
         with:
-          build-cache: 'false'
+          go-cache: 'false'
 
-      # The Actions cache evicts an idle entry within hours, so the per-target corpus
-      # lives in artifacts: each run continues from the latest run of this ref that has one.
+      # The Actions cache evicts an idle entry within hours, so the per-target corpus lives in
+      # artifacts: each run continues from the newest one of its ref. A fork's branch can have
+      # the same name, so forks are excluded. A failure here stops the leg, because fuzzing from
+      # an empty corpus would replace the kept one.
       - name: Restore fuzz corpus
         env:
           GH_TOKEN: ${{ github.token }}
@@ -102,15 +104,14 @@ jobs:
           CORPUS: ${{ steps.erigon.outputs.build }}/fuzz
         run: |
           mkdir -p "$CORPUS"
-          runs=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow test-fuzz.yml --branch "$GITHUB_REF_NAME" \
-            --status completed --limit 30 --json databaseId --jq '.[].databaseId') || runs=""
-          for run in $runs; do
-            if gh run download "$run" --repo "$GITHUB_REPOSITORY" --name "fuzz-corpus-$NAME" --dir "$CORPUS" 2>/dev/null; then
-              echo "Corpus restored from run $run: $(find "$CORPUS" -type f | wc -l) files"
-              exit 0
-            fi
-          done
-          echo "::notice::No previous corpus for $NAME"
+          run=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=fuzz-corpus-$NAME&per_page=100" \
+            --jq '[.artifacts[] | select(.expired | not) | select(.workflow_run.head_branch == env.GITHUB_REF_NAME and .workflow_run.head_repository_id == .workflow_run.repository_id)] | sort_by(.created_at) | last | .workflow_run.id // empty')
+          if [ -z "$run" ]; then
+            echo "::warning::No previous corpus for $NAME"
+            exit 0
+          fi
+          gh run download "$run" --repo "$GITHUB_REPOSITORY" --name "fuzz-corpus-$NAME" --dir "$CORPUS"
+          echo "Corpus restored from run $run: $(find "$CORPUS" -type f | wc -l) files"
 
       - name: Fuzz ${{ matrix.fn }}
         env:
