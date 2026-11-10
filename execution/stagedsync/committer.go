@@ -53,7 +53,7 @@ type pendingBlock struct {
 // silently degrading to incremental).
 var computedAheadCount atomic.Int64
 
-var probeNames = [32]string{0: "prefetchWait", 1: "emit", 2: "flushPrev", 3: "ccwd", 4: "setup", 5: "process", 6: "load", 7: "cstate", 8: "build", 9: "mountSetup", 10: "walk", 11: "rootFold", 12: "tail", 13: "lease", 14: "index", 15: "depval", 16: "sched", 17: "publish", 18: "blockEnd", 19: "finalizeTail", 20: "engineFinalize", 21: "firstResult", 22: "ensureCS", 23: "tooBegin", 24: "afterStart"}
+var probeNames = [32]string{0: "prefetchWait", 1: "emit", 2: "flushPrev", 3: "ccwd", 4: "setup", 5: "process", 6: "load", 7: "cstate", 8: "build", 9: "mountSetup", 10: "walk", 11: "rootFold", 12: "tail", 13: "lease", 14: "index", 15: "depval", 16: "sched", 17: "publish", 18: "blockEnd", 19: "finalizeTail", 20: "engineFinalize", 21: "firstResult", 22: "ensureCS", 23: "foldMounted", 24: "checkin", 25: "forks", 26: "helpers", 27: "childBusy", 28: "checkout", 29: "unfoldRow", 31: "keys"}
 
 // logNpPhases emits the per-block additive newPayload phase breakdown
 // (stage/exec/commit/overlap/gap/residual) for perf attribution.

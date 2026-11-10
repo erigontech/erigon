@@ -244,6 +244,7 @@ func (p *ParallelPatriciaHashed) Process(
 	p.metrics.Reset()
 	n := updates.Size()
 	p.metrics.AddRoundKeys(n)
+	Probe[31].Add(int64(n) * int64(time.Millisecond))
 	roundStart := time.Now()
 	defer func() { observeRound(p.metrics, roundStart) }()
 

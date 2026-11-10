@@ -204,7 +204,9 @@ func (fw *forkWalk) walkChildren(ctx context.Context, wk *walker, node *prefixNo
 
 func (fw *forkWalk) fork(ctx context.Context, wk *walker, node *prefixNode, path []byte) error {
 	w := wk.trie
+	pu := time.Now()
 	positioned, err := unfoldToRow(ctx, w, path)
+	ProbeAdd(29, pu)
 	if err != nil {
 		return fmt.Errorf("fork[%x]: position: %w", path, err)
 	}
@@ -216,6 +218,7 @@ func (fw *forkWalk) fork(ctx context.Context, wk *walker, node *prefixNode, path
 		opened = openEmptyRow(w, path)
 	}
 	fw.forks.Add(1)
+	Probe[25].Add(int64(time.Millisecond))
 
 	cells := &w.stitchScratch
 	var touched, present atomic.Uint32
@@ -263,6 +266,7 @@ func (fw *forkWalk) fork(ctx context.Context, wk *walker, node *prefixNode, path
 				break
 			}
 			started++
+			Probe[26].Add(int64(time.Millisecond))
 			fw.helpers.Add(1)
 			g.Go(func() error {
 				held := &walker{lease: l, bindsCtx: true}
@@ -332,13 +336,18 @@ func (fw *forkWalk) runChild(ctx context.Context, base *HexPatriciaHashed, cw *w
 	childPath = append(childPath, byte(nib))
 	childPath = append(childPath, child.ext...)
 
+	prc := time.Now()
+	defer func() { ProbeAdd(27, prc) }()
 	fw.checkout(cw, childPath)
-	defer fw.checkin(cw)
+	ProbeAdd(28, prc)
+	defer func() { pk := time.Now(); fw.checkin(cw); ProbeAdd(24, pk) }()
 	cw.trie.mountTo(base, nib)
 	if err := fw.walk(ctx, cw, child, childPath); err != nil {
 		return fmt.Errorf("fork[%x]: child %x: %w", path, nib, err)
 	}
+	pf := time.Now()
 	c, ferr := cw.trie.foldMounted(ctx, nib)
+	ProbeAdd(23, pf)
 	if ferr != nil {
 		return fmt.Errorf("fork[%x]: child %x fold: %w", path, nib, ferr)
 	}
