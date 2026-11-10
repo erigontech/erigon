@@ -19,12 +19,12 @@ package execctx
 import (
 	"slices"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/cache"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 const maxLentCodeBuf = 256 * 1024
@@ -36,13 +36,7 @@ type stateGetter struct {
 	m          kv.GetLatestMetrics
 	codeBuf    *[]byte
 	ownCodeBuf []byte
-	memo       lentCodeMemo
-}
-
-// lentCodeMemo is the code last decoded by LendCode: a code hash maps to immutable bytes.
-type lentCodeMemo struct {
-	hash common.Hash
-	code []byte
+	memo       accounts.Code // last LendCode decode: a code hash maps to immutable bytes
 }
 
 var _ execctxapi.StateGetter = (*stateGetter)(nil)
@@ -58,7 +52,7 @@ func (g *stateGetter) GetLatest(name kv.Domain, k []byte, opts kv.GetLatestOptio
 
 func (g *stateGetter) GetCode(addr []byte, txNum uint64) ([]byte, bool, error) {
 	code, ok, err := g.sd.getCode(g.tx, g.view, addr, txNum, *g.codeBuf)
-	g.memo.code = nil // this read may have decoded over the memo's bytes
+	g.memo.Bytes = nil // this read may have decoded over the memo's bytes
 	*g.codeBuf = slices.Grow((*g.codeBuf)[:0], min(len(code), maxLentCodeBuf))
 	return code, ok, err
 }
