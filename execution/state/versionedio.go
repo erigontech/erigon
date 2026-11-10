@@ -740,6 +740,7 @@ func prevFromRecord(w *VersionedWrite[uint256.Int]) []byte {
 	}
 	return w.orig.Bytes()
 }
+
 func (w *VersionedWrite[T]) bind(e *AddressEntry, c *WriteCell[T]) { w.cell, w.entry = c, e }
 
 func cloneVW[T any](w *VersionedWrite[T]) *VersionedWrite[T] {

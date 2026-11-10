@@ -421,3 +421,32 @@ func TestApplyWritesFoldReadsPrevWithoutRecordedOrigin(t *testing.T) {
 	require.True(t, ok)
 	require.Empty(t, got, "the delete must be applied")
 }
+
+// A slot cleared by a creation earlier in the block must not take its prev value from
+// a later tx's origin, which can predate the clear.
+func TestApplyWritesFoldReadsPrevAfterAnEarlierCreate(t *testing.T) {
+	_, tx, domains := NewTestRwTx(t)
+	addr := accounts.InternAddress(common.HexToAddress("0x01"))
+	key := accounts.InternKey(common.HexToHash("0x02"))
+	addrValue, keyValue := addr.Value(), key.Value()
+	composite := slices.Concat(addrValue[:], keyValue[:])
+	require.NoError(t, domains.DomainPut(kv.StorageDomain, tx, composite, []byte{5}, 1, nil))
+	require.NoError(t, domains.DomainDelPrefix(kv.StorageDomain, tx, addrValue[:], 2))
+	changes := &changeset.StateChangeSet{}
+	domains.SetChangesetAccumulator(changes)
+
+	vm := NewVersionMap(nil)
+	vm.WriteCreateContract(addr, Version{TxIndex: 0}, true, true)
+	ws := &WriteSet{}
+	ws.SetStorage(addr, key, &VersionedWrite[uint256.Int]{
+		WriteHeader: WriteHeader{Address: addr, Key: key, Path: StoragePath, valStatus: ValueChanged},
+		Val:         *uint256.NewInt(7),
+		orig:        *uint256.NewInt(5),
+	})
+
+	require.NoError(t, ApplyWrites(NewVersionMapWriteView(ws, vm, 1), domains, tx, 1, 3, nil, &chain.Rules{}, false))
+
+	diff := changes.Diffs[kv.StorageDomain].GetDiffSet()
+	require.Len(t, diff, 1)
+	require.Empty(t, diff[0].Value, "the creation cleared the slot, so its prev value is empty")
+}
