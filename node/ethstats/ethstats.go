@@ -164,17 +164,20 @@ func (s *Service) Stop() error {
 	return nil
 }
 
+// statsURLs defaults to TLS and never falls back to plaintext on its own: the login sends the secret.
+func statsURLs(host string) []string {
+	path := host + "/api"
+	// url.Parse and url.IsAbs is unsuitable (https://github.com/golang/go/issues/19779)
+	if !strings.Contains(path, "://") {
+		return []string{"wss://" + path}
+	}
+	return []string{path}
+}
+
 // loop keeps trying to connect to the netstats server, reporting chain events
 // until termination.
 func (s *Service) loop() {
-	// Resolve the URL, defaulting to TLS, but falling back to none too
-	path := s.host + "/api"
-	urls := []string{path}
-
-	// url.Parse and url.IsAbs is unsuitable (https://github.com/golang/go/issues/19779)
-	if !strings.Contains(path, "://") {
-		urls = []string{"wss://" + path, "ws://" + path}
-	}
+	urls := statsURLs(s.host)
 
 	errTimer := time.NewTimer(0)
 	defer errTimer.Stop()
@@ -198,6 +201,9 @@ func (s *Service) loop() {
 				if dialErr != nil {
 					if resp != nil {
 						resp.Body.Close()
+					}
+					if strings.HasPrefix(url, "wss://") {
+						log.Warn("Stats server TLS connection failed, a plaintext server needs an explicit ws:// URL", "url", url, "err", dialErr)
 					}
 					continue
 				}
