@@ -43,6 +43,9 @@ type poolTask struct {
 	reruns     int
 	lastRunNs  int64
 	rerunCause int
+	depPrefix  int64
+	rerunTo    int
+	settleTo   int
 
 	mu      sync.Mutex
 	parked  bool
@@ -159,7 +162,7 @@ func (wk *poolWorker) ensureTx(p *taskPool) error {
 }
 
 func (pe *parallelExecutor) dispatchPoolTask(be *blockExecutor, tv *taskVersion) {
-	pt := &poolTask{be: be, tv: tv, next: psRun}
+	pt := &poolTask{be: be, tv: tv, next: psRun, rerunTo: -1, settleTo: -1}
 	be.poolTasks[tv.index] = pt
 	pe.pool.push(pt)
 }
@@ -199,6 +202,7 @@ func (pt *poolTask) rerunAfter(named int) bool {
 		t = named
 	}
 	pt.reruns++
+	pt.rerunTo = t
 	return pt.waitThen(t, psReexec)
 }
 
@@ -260,6 +264,13 @@ func (pt *poolTask) run(p *taskPool, wk *poolWorker) bool {
 	if pt.lastRunNs != 0 {
 		be.probe.reruns[pt.rerunCause].Add(1)
 		be.probe.wasteNs[pt.rerunCause].Add(pt.lastRunNs)
+		pt.depPrefix = 0
+		switch pt.rerunCause {
+		case rerunDep:
+			pt.depPrefix = pt.lastRunNs
+		case rerunSpine:
+			pt.rerunTo = tv.index - 1
+		}
 	}
 	pt.rerunCause = rerunSpine
 	runStart := time.Now()
@@ -297,6 +308,7 @@ func (pt *poolTask) run(p *taskPool, wk *poolWorker) bool {
 
 func (pt *poolTask) settle(p *taskPool, result *exec.TxResult, target int) bool {
 	pt.result = result
+	pt.settleTo = target
 	if !pt.be.versionMap.HasBAL {
 		return pt.waitThen(target, psRecheck)
 	}
@@ -316,4 +328,43 @@ func (pt *poolTask) publish(p *taskPool) bool {
 	pt.parked = true
 	pt.mu.Unlock()
 	return false
+}
+
+// probeCriticalPath models the commit time of the last task with every worker free:
+// each task finishes after the commit it re-ran or waited for, plus its final run.
+// In the pause model a task whose last re-run followed a dependency abort keeps the
+// aborted run's work and only runs the remainder.
+func (be *blockExecutor) probeCriticalPath() (abortNs, pauseNs int64) {
+	commitAbort := make([]int64, len(be.poolTasks))
+	commitPause := make([]int64, len(be.poolTasks))
+	at := func(c []int64, t int) int64 {
+		if t < 0 {
+			return 0
+		}
+		return c[t]
+	}
+	for i, pt := range be.poolTasks {
+		var finishAbort, finishPause int64
+		if pt != nil {
+			run := pt.lastRunNs
+			switch {
+			case pt.rerunTo >= 0:
+				finishAbort = at(commitAbort, pt.rerunTo) + run
+				prefix := min(pt.depPrefix, run)
+				finishPause = max(at(commitPause, pt.rerunTo), prefix) + run - prefix
+			default:
+				finishAbort = max(at(commitAbort, pt.settleTo), run)
+				finishPause = max(at(commitPause, pt.settleTo), run)
+			}
+		}
+		commitAbort[i], commitPause[i] = finishAbort, finishPause
+		if i > 0 {
+			commitAbort[i] = max(commitAbort[i], commitAbort[i-1])
+			commitPause[i] = max(commitPause[i], commitPause[i-1])
+		}
+	}
+	if n := len(be.poolTasks); n > 0 {
+		return commitAbort[n-1], commitPause[n-1]
+	}
+	return 0, 0
 }
