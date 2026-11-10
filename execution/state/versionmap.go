@@ -1535,6 +1535,16 @@ func flushAllNoOpUnderRLock(e *AddressEntry, writes *WriteSet, addr accounts.Add
 	return flushAllNoOp(e, writes, addr, flag)
 }
 
+// WritesAlreadySeeded reports whether ws's writes to addr match complete cells of a BAL
+// block, so publishing them changed nothing a reader saw.
+func (vm *VersionMap) WritesAlreadySeeded(addr accounts.Address, ws *WriteSet) bool {
+	if !vm.HasBAL {
+		return false
+	}
+	e := vm.load(addr)
+	return e != nil && flushAllNoOpUnderRLock(e, ws, addr, FlagDone)
+}
+
 // hasDestruct reports a true SelfDestruct cell; a created account holds only false markers.
 func hasDestruct(cells *btree.Map[int, *WriteCell[bool]]) bool {
 	found := false

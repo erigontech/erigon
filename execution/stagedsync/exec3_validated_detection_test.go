@@ -229,11 +229,25 @@ func TestMarkReadersDirty(t *testing.T) {
 		be.markReadersDirty(1, newWS().stor(addr, slot1, writer, *uint256.NewInt(1)).build())
 		require.Empty(t, be.revalidate)
 	})
-	t.Run("a BAL-seeded write leaves the readers of a BAL block clean", func(t *testing.T) {
+	t.Run("a write the BAL already holds leaves the readers clean", func(t *testing.T) {
+		be := newBE()
+		be.versionMap.HasBAL = true
+		be.versionMap.WriteStorage(addr, slot1, writer, *uint256.NewInt(1), true)
+		be.markReadersDirty(1, newWS().stor(addr, slot1, writer, *uint256.NewInt(1)).build())
+		require.Empty(t, be.revalidate)
+	})
+	t.Run("a write the BAL does not hold flags the readers", func(t *testing.T) {
 		be := newBE()
 		be.versionMap.HasBAL = true
 		be.markReadersDirty(1, newWS().stor(addr, slot1, writer, *uint256.NewInt(1)).build())
-		require.Empty(t, be.revalidate)
+		require.Equal(t, map[int]bool{2: true}, be.revalidate)
+	})
+	t.Run("a write that differs from the BAL flags the readers", func(t *testing.T) {
+		be := newBE()
+		be.versionMap.HasBAL = true
+		be.versionMap.WriteStorage(addr, slot1, writer, *uint256.NewInt(1), true)
+		be.markReadersDirty(1, newWS().stor(addr, slot1, writer, *uint256.NewInt(2)).build())
+		require.Equal(t, map[int]bool{2: true}, be.revalidate)
 	})
 	t.Run("a BAL block still flags readers of a lifecycle write", func(t *testing.T) {
 		be := newBE()

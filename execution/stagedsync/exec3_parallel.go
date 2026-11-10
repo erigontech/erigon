@@ -2732,9 +2732,6 @@ func (be *blockExecutor) markReadersDirty(writerTx int, ws *state.WriteSet) {
 	}
 	written := map[accounts.Address]uint16{}
 	for h := range ws.AllHeaders() {
-		if be.versionMap.HasBAL && h.Path.BALSeeded() {
-			continue // same rule as revalCandidates: a seeded cell keeps its readers valid
-		}
 		if h.Path.AffectsAccountLifecycle() {
 			written[h.Address] = ^uint16(0) // invalidates a read of any path at the address
 		} else {
@@ -2742,6 +2739,9 @@ func (be *blockExecutor) markReadersDirty(writerTx int, ws *state.WriteSet) {
 		}
 	}
 	for addr, paths := range written {
+		if be.versionMap.WritesAlreadySeeded(addr, ws) {
+			continue
+		}
 		for _, r := range readersAbove(be.readerByAddr[addr], writerTx) {
 			if r.paths&paths != 0 && !be.revalidate[r.tx] && be.blockIO.ReadSet(be.tasks[r.tx].Task.Version().TxIndex).DependsOnAt(ws, addr) {
 				be.revalidate[r.tx] = true
@@ -2879,8 +2879,9 @@ func (be *blockExecutor) finalizeValidatedTx(pe *parallelExecutor, applyTx kv.Te
 
 		// Flush the merged writes (including fee changes) so subsequent per-tx
 		// finalizations see the full post-tx state via the versionMap fallback chain.
-		be.versionMap.FlushVersionedWrites(merged, true)
+		// Marks first: a complete flush makes every written cell look already seeded.
 		be.markReadersDirty(tx, merged)
+		be.versionMap.FlushVersionedWrites(merged, true)
 	}
 
 	// A read-only versionMap-slice view over the tx's raw write-set; apply and
