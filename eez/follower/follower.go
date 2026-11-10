@@ -109,6 +109,10 @@ type Config struct {
 	// OnHead, when set, receives from Run the L1 head boot caught up to, then
 	// every new one; it must not block.
 	OnHead func(l1.Header)
+	// OnL2Head, when set, receives from Run the hash of the head boot ended
+	// at, then that of every head the local chain moves to, whichever writer
+	// moves it; it must not block.
+	OnL2Head func(common.Hash)
 }
 
 // DefaultConfig is the reference client's tuning.
@@ -140,6 +144,7 @@ type Follower struct {
 	overlay *overlay
 	heads   *signedHeads
 	peers   *peerCount
+	funnel  *headFunnel
 	logger  log.Logger
 	// commands are the other writers' work, which Run performs.
 	commands chan command
@@ -245,6 +250,13 @@ func New(reader l1.ChainReader, chain deriver.Chain, cfg *chain.Config, c Config
 	}
 	watch := &headWatch{Chain: chain}
 	chain = watch
+	var funnel *headFunnel
+	if c.OnL2Head != nil {
+		// Outside the watch, so that a head reaches OnL2Head once the status
+		// reports its source.
+		funnel = &headFunnel{Chain: chain, sink: c.OnL2Head, logger: logger}
+		chain = funnel
+	}
 	d, err := deriver.New(chain, cfg, dir, c.Blobs, reader, logger)
 	if err != nil {
 		return nil, err
@@ -265,6 +277,7 @@ func New(reader l1.ChainReader, chain deriver.Chain, cfg *chain.Config, c Config
 		chain:    chain,
 		watch:    watch,
 		deriver:  d,
+		funnel:   funnel,
 		logger:   logger,
 		commands: make(chan command),
 		status:   Status{Mode: mode, Phase: PhaseBooting},
@@ -368,6 +381,9 @@ func (f *Follower) Run(ctx context.Context) error {
 	}
 	if err := f.Boot(ctx); err != nil {
 		return err
+	}
+	if f.funnel != nil {
+		f.funnel.start(ctx)
 	}
 	if f.cfg.OnHead != nil {
 		f.cfg.OnHead(f.watcher.Tip())

@@ -28,6 +28,8 @@ type sequencerMetrics struct {
 	offGridSkips  metrics.Counter
 	triggerFailed metrics.Counter
 	witnessFailed metrics.Counter
+	headsSigned   metrics.Counter
+	headsSkipped  metrics.Counter
 }
 
 var (
@@ -49,6 +51,8 @@ func loadMetrics() *sequencerMetrics {
 			offGridSkips:  metrics.GetOrCreateCounter("eez_sequencer_off_grid_skips_total"),
 			triggerFailed: metrics.GetOrCreateCounter("eez_sequencer_trigger_failures_total"),
 			witnessFailed: metrics.GetOrCreateCounter("eez_sequencer_witness_failures_total"),
+			headsSigned:   metrics.GetOrCreateCounter("eez_sequencer_heads_signed_total"),
+			headsSkipped:  metrics.GetOrCreateCounter("eez_sequencer_heads_skipped_total"),
 		}
 	})
 	return sm

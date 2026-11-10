@@ -17,15 +17,18 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"net"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v3"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -211,4 +214,34 @@ func TestConfigureFollower(t *testing.T) {
 	n, _ := l1Configs(t, 1)
 	n.Http.API = append(n.Http.API, "testing")
 	require.ErrorIs(t, configureFollowerNode(n), eez.ErrConfig)
+}
+
+// noBlocks is a chain without blocks.
+type noBlocks struct{}
+
+func (noBlocks) CanonicalBlock(context.Context, common.Hash) (*types.Block, error) { return nil, nil }
+
+// TestNewHeadSigner: a sequencer without a key signs no heads and warns
+// once; with one, it signs under the key's address, and an epoch it takes
+// once signing starts.
+func TestNewHeadSigner(t *testing.T) {
+	var logs bytes.Buffer
+	logger := log.New()
+	logger.SetHandler(log.StreamHandler(&logs, log.LogfmtFormat()))
+	cc := networks.Devnet.Config
+
+	s, err := newHeadSigner(&eez.SequencerConfig{}, cc, noBlocks{}, logger)
+	require.NoError(t, err)
+	require.Nil(t, s)
+	require.Equal(t, 1, strings.Count(logs.String(), "lvl=warn"), logs.String())
+	require.Contains(t, logs.String(), "--eez.sequencer.keyfile")
+
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	s, err = newHeadSigner(&eez.SequencerConfig{Key: key}, cc, noBlocks{}, logger)
+	require.NoError(t, err)
+	require.NotNil(t, s)
+	require.Equal(t, crypto.PubkeyToAddress(key.PublicKey), s.Address())
+	require.Zero(t, s.EpochMs(), "the epoch is taken once signing starts")
+	require.Equal(t, 1, strings.Count(logs.String(), "lvl=warn"), logs.String())
 }

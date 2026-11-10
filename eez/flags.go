@@ -17,8 +17,11 @@
 package eez
 
 import (
+	"crypto/ecdsa"
 	"errors"
 	"fmt"
+	"os"
+	"runtime"
 	"strings"
 	"time"
 
@@ -27,6 +30,7 @@ import (
 	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/eez/config"
 	"github.com/erigontech/erigon/eez/l1"
 	"github.com/erigontech/erigon/eez/overlay"
@@ -144,6 +148,10 @@ var (
 		Name:  "eez.sequencer.feerecipient",
 		Usage: "Beneficiary of the produced blocks; the chain's fee collector when unset",
 	}
+	SequencerKeyFileFlag = cli.StringFlag{
+		Name:  "eez.sequencer.keyfile",
+		Usage: "File holding the sequencer's private key, 64 hex characters, accessible to its owner only; the key signs the sequencer's heads",
+	}
 
 	// The l2 section of the chain config; init writes them into the
 	// section, a running node checks them against it.
@@ -178,7 +186,7 @@ var Flags = []cli.Flag{
 	&EnabledFlag, &L1RPCFlag, &L1KVFlag, &L1BeaconFlag, &L1BlobsFlag, &L1PollFlag, &L1LogChunkFlag, &L1ReorgDepthFlag, &SequencerRPCFlag, &SyncL1OnlyFlag,
 	&P2PListenFlag, &P2PPeersFlag, &SequencerAddressFlag,
 	&ChainFlag, &HTTPPortFlag, &HTTPAPIFlag, &PortFlag, &BootnodesFlag, &StaticPeersFlag, &TrustedPeersFlag,
-	&SequencerFlag, &ProofTimeFlag, &SubmissionSlackFlag, &SequencerMaxDepthFlag, &SequencerFeeRecipientFlag,
+	&SequencerFlag, &ProofTimeFlag, &SubmissionSlackFlag, &SequencerMaxDepthFlag, &SequencerFeeRecipientFlag, &SequencerKeyFileFlag,
 	&L1ChainIDFlag, &RegistryFlag, &RegistryDeployBlockFlag, &RollupIDFlag, &L1BlockTimeFlag, &L2BlockTimeFlag,
 }
 
@@ -225,6 +233,8 @@ type SequencerConfig struct {
 	// FeeRecipient is the produced blocks' beneficiary; zero selects the
 	// chain's fee collector.
 	FeeRecipient common.Address
+	// Key, when set, signs the sequencer's heads.
+	Key *ecdsa.PrivateKey
 }
 
 // L2Flags are the l2 section fields set on the command line.
@@ -375,7 +385,7 @@ func (c *Config) readOverlay(cmd *cli.Command) error {
 // sequencerConfig reads the sequencer flags, nil without --eez.sequencer.
 func sequencerConfig(cmd *cli.Command) (*SequencerConfig, error) {
 	if !cmd.Bool(SequencerFlag.Name) {
-		for _, f := range []cli.Flag{&ProofTimeFlag, &SubmissionSlackFlag, &SequencerMaxDepthFlag, &SequencerFeeRecipientFlag} {
+		for _, f := range []cli.Flag{&ProofTimeFlag, &SubmissionSlackFlag, &SequencerMaxDepthFlag, &SequencerFeeRecipientFlag, &SequencerKeyFileFlag} {
 			if name := f.Names()[0]; cmd.IsSet(name) {
 				return nil, fmt.Errorf("%w: --%s requires --%s", ErrConfig, name, SequencerFlag.Name)
 			}
@@ -396,7 +406,27 @@ func sequencerConfig(cmd *cli.Command) (*SequencerConfig, error) {
 		}
 		s.FeeRecipient = common.HexToAddress(v)
 	}
+	if file := cmd.String(SequencerKeyFileFlag.Name); file != "" {
+		key, err := loadKey(file)
+		if err != nil {
+			return nil, fmt.Errorf("%w: --%s: %w", ErrConfig, SequencerKeyFileFlag.Name, err)
+		}
+		s.Key = key
+	}
 	return s, nil
+}
+
+// loadKey reads the hex private key in file, which other users must not be
+// able to access.
+func loadKey(file string) (*ecdsa.PrivateKey, error) {
+	fi, err := os.Stat(file)
+	if err != nil {
+		return nil, err
+	}
+	if perm := fi.Mode().Perm(); perm&0o077 != 0 && runtime.GOOS != "windows" {
+		return nil, fmt.Errorf("%s is accessible to other users (mode %04o)", file, perm)
+	}
+	return crypto.LoadECDSA(file)
 }
 
 // InitGenesis writes the l2 section the EEZ flags set into the genesis init

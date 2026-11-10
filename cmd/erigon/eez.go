@@ -40,6 +40,7 @@ import (
 	eezrules "github.com/erigontech/erigon/eez/rules"
 	"github.com/erigontech/erigon/eez/sequencer"
 	"github.com/erigontech/erigon/eez/witness"
+	"github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/node/debug"
@@ -294,6 +295,26 @@ func newSequencer(ctx context.Context, backend *eth.Ethereum, chain *deriver.Exe
 	return sequencer.NewService(s, sequencer.NewSchedule(timing, genesis.Time), halt, logger), nil
 }
 
+// newHeadSigner returns the signer of the heads of the chain of chainConfig,
+// whose blocks it reads from blocks; nil without a key, when the sequencer
+// signs nothing.
+func newHeadSigner(cfg *eez.SequencerConfig, chainConfig *chain.Config, blocks sequencer.HeadBlocks, logger log.Logger) (*sequencer.HeadSigner, error) {
+	if cfg.Key == nil {
+		logger.Warn("[eez] sequencer signs no heads: --"+eez.SequencerKeyFileFlag.Name+" is not set", "event", "eez.node.head_signer.disabled")
+		return nil, nil
+	}
+	domain, err := headDomain(chainConfig)
+	if err != nil {
+		return nil, err
+	}
+	s, err := sequencer.NewHeadSigner(sequencer.SignerConfig{Key: cfg.Key, Domain: domain, Blocks: blocks}, logger)
+	if err != nil {
+		return nil, err
+	}
+	logger.Info("[eez] sequencer signs its heads", "signer", s.Address())
+	return s, nil
+}
+
 // onStop is a lifecycle that runs a function when stopped.
 type onStop func()
 
@@ -385,9 +406,16 @@ func startFollower(ctx context.Context, n *node.ErigonNode, stop interface{ Clos
 		fc.Fetcher = fetcher
 	}
 	var seq *sequencer.Service
+	var signer *sequencer.HeadSigner
 	if cfg.Sequencer != nil {
 		// Run hands heads only once started, after seq is set.
 		fc.OnHead = func(h l1.Header) { seq.Head(h) }
+		if signer, err = newHeadSigner(cfg.Sequencer, chainConfig, chain, logger); err != nil {
+			return nil, err
+		}
+		if signer != nil {
+			fc.OnL2Head = signer.Moved
+		}
 	}
 	f, err := follower.New(reader, chain, chainConfig, fc, logger)
 	if err != nil {
@@ -415,6 +443,10 @@ func startFollower(ctx context.Context, n *node.ErigonNode, stop interface{ Clos
 		logger.Crit("[eez] follower halted, stopping the node", "err", err)
 		go stop.Close()
 	})
+	if signer != nil {
+		// Stops after the follower, the writer of the heads it signs.
+		n.RegisterLifecycle(signer)
+	}
 	n.RegisterLifecycle(svc)
 	if seq != nil {
 		// Lifecycles stop in reverse: the sequencer, then the witness store,

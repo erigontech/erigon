@@ -171,6 +171,24 @@ func (c *ExecChain) BlockByNumber(ctx context.Context, number uint64) (b *types.
 	return b, err
 }
 
+// CanonicalBlock returns the canonical block with hash, nil when the chain
+// holds none or another block has replaced it.
+func (c *ExecChain) CanonicalBlock(ctx context.Context, hash common.Hash) (b *types.Block, err error) {
+	err = c.db.View(ctx, func(tx kv.Tx) error {
+		n, err := c.reader.HeaderNumber(ctx, tx, hash)
+		if err != nil || n == nil {
+			return err
+		}
+		canonical, ok, err := c.reader.CanonicalHash(ctx, tx, *n)
+		if err != nil || !ok || canonical != hash {
+			return err
+		}
+		b, _, err = c.reader.BlockWithSenders(ctx, tx, hash, *n)
+		return err
+	})
+	return b, err
+}
+
 func (c *ExecChain) Nonce(ctx context.Context, number uint64, addr common.Address) (nonce uint64, err error) {
 	err = c.db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
 		executed, err := stages.GetStageProgress(tx, stages.Execution)

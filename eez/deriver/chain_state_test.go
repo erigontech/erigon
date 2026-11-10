@@ -99,6 +99,46 @@ func TestNonceAfterBlock(t *testing.T) {
 	}
 }
 
+// TestCanonicalBlock: a block is read by hash while it is canonical, and not
+// once a sibling replaces it.
+func TestCanonicalBlock(t *testing.T) {
+	ctx := t.Context()
+	l2 := derivertest.Config().L2.(*config.L2Config)
+	_, chain := derivertest.NewL2(t)
+	genesis, err := chain.HeaderByNumber(ctx, 0)
+	require.NoError(t, err)
+	build := func(coinbase common.Address) *types.Block {
+		t.Helper()
+		built, err := chain.Extend(ctx, genesis, deriver.HeaderInputs{
+			Number:     1,
+			ParentHash: genesis.Hash(),
+			Time:       genesis.Time + l2.BlockInterval,
+			Coinbase:   coinbase,
+			Extra:      []byte{},
+			GasLimit:   l2.BlockGasLimit,
+		}, nil, common.Hash{}, common.Hash{})
+		require.NoError(t, err)
+		return built.Block
+	}
+	first := build(common.HexToAddress("0xa11ce"))
+	b, err := chain.CanonicalBlock(ctx, first.Hash())
+	require.NoError(t, err)
+	require.NotNil(t, b)
+	require.Equal(t, first.Hash(), b.Hash())
+	require.Equal(t, first.Coinbase(), b.Coinbase())
+
+	sibling := build(common.HexToAddress("0xb0b"))
+	b, err = chain.CanonicalBlock(ctx, first.Hash())
+	require.NoError(t, err)
+	require.Nil(t, b, "a replaced block")
+	b, err = chain.CanonicalBlock(ctx, sibling.Hash())
+	require.NoError(t, err)
+	require.Equal(t, sibling.Hash(), b.Hash())
+	b, err = chain.CanonicalBlock(ctx, common.Hash{0x01})
+	require.NoError(t, err)
+	require.Nil(t, b, "an unknown block")
+}
+
 // TestForkChoiceRefused: a fork choice the execution module refuses is
 // ErrForkChoiceRefused, and one to a chain holding a block that fails
 // validation also ErrBadBlock.

@@ -18,7 +18,10 @@ package follower_test
 
 import (
 	"context"
+	"errors"
+	"slices"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -181,4 +184,90 @@ func TestProduceOutlivesItsCaller(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, head.Hash(), built.Block.Hash())
 	require.Equal(t, uint64(1), head.Number.Uint64())
+}
+
+var errReported = errors.New("fork choice reported failed")
+
+// misreporting reports fork choices failed: while armed after applying them,
+// while refusing without.
+type misreporting struct {
+	deriver.Chain
+	armed, refusing atomic.Bool
+}
+
+func (c *misreporting) ForkChoice(ctx context.Context, head, safe, finalized common.Hash) error {
+	if c.refusing.Load() {
+		return errReported
+	}
+	if err := c.Chain.ForkChoice(ctx, head, safe, finalized); err != nil || !c.armed.Load() {
+		return err
+	}
+	return errReported
+}
+
+// TestOnL2Head: once boot has ended, Run hands OnL2Head the head boot ended
+// at, then each head a writer moves to, once: the commands', and the one a
+// failed write leaves. Heads boot moves through, fork choices that move only
+// safe and a refused fork choice's target are not handed. The status reports
+// the source of each head handed.
+func TestOnL2Head(t *testing.T) {
+	c := derivertest.NewComposer(t)
+	settled := c.Compose(nil,
+		derivertest.Block{Coinbase: alice, Extra: []byte{}, Txs: [][]byte{}},
+		derivertest.Block{Coinbase: alice, Extra: []byte{}, Txs: [][]byte{}},
+	)
+	c.Post(derivertest.Posting{Batch: settled})
+	var mu sync.Mutex
+	var handed []common.Hash
+	_, exec := derivertest.NewL2(t)
+	chain := &misreporting{Chain: exec}
+	n := (&node{dir: t.TempDir()}).restart(t, c.L1, chain, func(cfg *follower.Config) {
+		cfg.OnL2Head = func(h common.Hash) {
+			mu.Lock()
+			handed = append(handed, h)
+			mu.Unlock()
+		}
+	})
+	var want []common.Hash
+	requireHanded := func(heads ...common.Hash) {
+		t.Helper()
+		want = append(want, heads...)
+		require.Eventually(t, func() bool {
+			mu.Lock()
+			defer mu.Unlock()
+			return slices.Equal(want, handed)
+		}, 10*time.Second, 5*time.Millisecond, "want %x", want)
+	}
+	n.run(t)
+	ctx := t.Context()
+	requireHanded(settled.Blocks[1].Hash())
+	require.Equal(t, follower.HeadDerivation, n.follower.Status().HeadSource)
+
+	b3, err := n.follower.Produce(ctx, inputs(settled.Blocks[1].Header()), provide(t), nil)
+	require.NoError(t, err)
+	requireHanded(b3.Block.Hash())
+	require.Equal(t, follower.HeadSequencer, n.follower.Status().HeadSource)
+	third := c.Compose(nil, derivertest.Block{Coinbase: alice, Extra: []byte{}, Txs: [][]byte{}})
+	require.Equal(t, b3.Block.Hash(), third.Blocks[0].Hash())
+	c.Post(derivertest.Posting{Batch: third})
+	require.Eventually(t, func() bool { return n.follower.Status().Safe == 3 }, 10*time.Second, 5*time.Millisecond)
+
+	b4, err := n.follower.Produce(ctx, inputs(b3.Block.Header()), provide(t), nil)
+	require.NoError(t, err)
+	requireHanded(b4.Block.Hash())
+	chain.armed.Store(true)
+	require.ErrorIs(t, n.follower.HeadTo(ctx, b3.Block.Hash()), errReported)
+	chain.armed.Store(false)
+	requireHanded(b3.Block.Hash())
+	require.NoError(t, n.follower.Insert(ctx, []*types.Block{b4.Block}, nil))
+	requireHanded(b4.Block.Hash())
+	chain.refusing.Store(true)
+	require.ErrorIs(t, n.follower.HeadTo(ctx, b3.Block.Hash()), errReported)
+	chain.refusing.Store(false)
+	b5, err := n.follower.Produce(ctx, inputs(b4.Block.Header()), provide(t), nil)
+	require.NoError(t, err)
+	requireHanded(b5.Block.Hash())
+	_, err = n.follower.HeadBefore(ctx, b5.Block.Header())
+	require.NoError(t, err)
+	requireHanded(b4.Block.Hash())
 }

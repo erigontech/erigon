@@ -109,9 +109,15 @@ func newHarness(t *testing.T) *harness {
 // onHead.
 func (h *harness) newFollower(t *testing.T, onHead func(l1.Header)) *follower.Follower {
 	t.Helper()
+	return h.followerOf(t, func(cfg *follower.Config) { cfg.OnHead = onHead })
+}
+
+// followerOf returns a follower of the chain, its configuration set by set.
+func (h *harness) followerOf(t *testing.T, set func(*follower.Config)) *follower.Follower {
+	t.Helper()
 	cfg := follower.DefaultConfig
 	cfg.Poll, cfg.Retry, cfg.MaxRetry, cfg.BootAttempts = 5*time.Millisecond, 5*time.Millisecond, 20*time.Millisecond, 3
-	cfg.OnHead = onHead
+	set(&cfg)
 	f, err := follower.New(h.c.L1, h.chain, derivertest.Config(), cfg, log.New())
 	require.NoError(t, err)
 	return f

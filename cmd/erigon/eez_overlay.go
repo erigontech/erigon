@@ -36,15 +36,15 @@ func startOverlay(n *node.ErigonNode, cfg *eez.Config, chainConfig *chain.Config
 	if srv == nil {
 		return nil, nil, fmt.Errorf("%w: --%s needs the node's own sentry", eez.ErrConfig, eez.P2PListenFlag.Name)
 	}
-	l2, ok := chainConfig.L2.(*config.L2Config)
-	if !ok {
-		return nil, nil, fmt.Errorf("%w: chain %s has no EEZ l2 section", eez.ErrConfig, chainConfig.ChainName)
+	domain, err := headDomain(chainConfig)
+	if err != nil {
+		return nil, nil, err
 	}
 	o, err := overlay.New(overlay.Config{
 		Listen: cfg.P2PListen,
 		Peers:  cfg.P2PPeers,
 		Key:    srv.PrivateKey,
-		Domain: seqsig.Domain{ChainID: chainConfig.ChainID.Uint64(), Registry: l2.Registry, RollupID: l2.RollupID},
+		Domain: domain,
 		Signer: *cfg.SequencerAddress,
 		Devp2p: srv,
 	}, logger)
@@ -53,4 +53,14 @@ func startOverlay(n *node.ErigonNode, cfg *eez.Config, chainConfig *chain.Config
 	}
 	n.RegisterLifecycle(o)
 	return o.Heads(), o.Peers, nil
+}
+
+// headDomain returns the signing domain of the heads of the chain of
+// chainConfig.
+func headDomain(chainConfig *chain.Config) (seqsig.Domain, error) {
+	l2, ok := chainConfig.L2.(*config.L2Config)
+	if !ok {
+		return seqsig.Domain{}, fmt.Errorf("%w: chain %s has no EEZ l2 section", eez.ErrConfig, chainConfig.ChainName)
+	}
+	return seqsig.Domain{ChainID: chainConfig.ChainID.Uint64(), Registry: l2.Registry, RollupID: l2.RollupID}, nil
 }
