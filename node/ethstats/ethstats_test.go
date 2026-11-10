@@ -1,4 +1,4 @@
-// Copyright 2024 The Erigon Authors
+// Copyright 2026 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -22,16 +22,16 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestStatsURLsUsePlaintextOnlyWhenAskedTo(t *testing.T) {
+func TestStatsURLUsesPlaintextOnlyWhenAskedTo(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
 		host string
-		want []string
+		want string
 	}{
-		{"stats.example:3000", []string{"wss://stats.example:3000/api"}},
-		{"wss://stats.example:3000", []string{"wss://stats.example:3000/api"}},
-		{"ws://stats.example:3000", []string{"ws://stats.example:3000/api"}},
+		{"stats.example:3000", "wss://stats.example:3000/api"},
+		{"wss://stats.example:3000", "wss://stats.example:3000/api"},
+		{"ws://stats.example:3000", "ws://stats.example:3000/api"},
 	} {
-		require.Equal(t, tc.want, statsURLs(tc.host), tc.host)
+		require.Equal(t, tc.want, statsURL(tc.host), tc.host)
 	}
 }

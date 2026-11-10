@@ -164,20 +164,20 @@ func (s *Service) Stop() error {
 	return nil
 }
 
-// statsURLs defaults to TLS and never falls back to plaintext on its own: the login sends the secret.
-func statsURLs(host string) []string {
+// statsURL defaults to TLS and never falls back to plaintext on its own: the login sends the secret.
+func statsURL(host string) string {
 	path := host + "/api"
 	// url.Parse and url.IsAbs is unsuitable (https://github.com/golang/go/issues/19779)
 	if !strings.Contains(path, "://") {
-		return []string{"wss://" + path}
+		return "wss://" + path
 	}
-	return []string{path}
+	return path
 }
 
 // loop keeps trying to connect to the netstats server, reporting chain events
 // until termination.
 func (s *Service) loop() {
-	urls := statsURLs(s.host)
+	url := statsURL(s.host)
 
 	errTimer := time.NewTimer(0)
 	defer errTimer.Stop()
@@ -187,34 +187,21 @@ func (s *Service) loop() {
 		case <-s.quitCh:
 			return
 		case <-errTimer.C:
-			// Establish a websocket connection to the server on any supported URL
-			var (
-				conn *connWrapper
-				err  error
-			)
+			// Establish a websocket connection to the server
 			header := make(http.Header)
 			header.Set("origin", "http://localhost")
-			for _, url := range urls {
-				dialCtx, dialCancel := context.WithTimeout(context.Background(), 5*time.Second)
-				c, resp, dialErr := websocket.Dial(dialCtx, url, &websocket.DialOptions{HTTPHeader: header})
-				dialCancel()
-				if dialErr != nil {
-					if resp != nil {
-						resp.Body.Close()
-					}
-					if strings.HasPrefix(url, "wss://") {
-						log.Warn("Stats server TLS connection failed, a plaintext server needs an explicit ws:// URL", "url", url, "err", dialErr)
-					}
-					continue
+			dialCtx, dialCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			c, resp, err := websocket.Dial(dialCtx, url, &websocket.DialOptions{HTTPHeader: header})
+			dialCancel()
+			if err != nil {
+				if resp != nil {
+					resp.Body.Close()
 				}
-				conn = newConnectionWrapper(c)
-				break
-			}
-			if conn == nil {
-				log.Warn("Stats server unreachable")
+				log.Warn("Stats server unreachable, only an explicit ws:// URL uses plaintext", "url", url, "err", err)
 				errTimer.Reset(10 * time.Second)
 				continue
 			}
+			conn := newConnectionWrapper(c)
 			// Authenticate the client with the server
 			if err = s.login(conn); err != nil {
 				log.Warn("Stats login failed", "err", err)
