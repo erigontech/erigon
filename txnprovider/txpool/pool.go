@@ -522,9 +522,7 @@ func (p *TxPool) applyBlockUpdate(stateChanges *remoteproto.StateChangeBatch, un
 		}
 	}
 
-	if err := p.processMinedFinalizedBlobs(minedTxns.Txns, stateChanges.FinalizedBlock); err != nil {
-		return frames, err
-	}
+	p.processMinedFinalizedBlobs(minedTxns.Txns, stateChanges.FinalizedBlock)
 
 	if err := p.removeMined(p.all, minedTxns.Txns); err != nil {
 		return frames, err
@@ -2310,7 +2308,7 @@ func (p *TxPool) GetBlobs(blobHashes []common.Hash) []PoolBlobBundle {
 }
 
 // Cache recently mined blobs in anticipation of reorg, delete finalized ones
-func (p *TxPool) processMinedFinalizedBlobs(minedTxns []*TxnSlot, finalizedBlock uint64) error {
+func (p *TxPool) processMinedFinalizedBlobs(minedTxns []*TxnSlot, finalizedBlock uint64) {
 	p.lastFinalizedBlock.Store(finalizedBlock)
 	// Remove blobs in the finalized block and older, loop through all entries
 	for l := len(p.minedBlobTxnsByBlock); l > 0 && finalizedBlock > 0; l-- {
@@ -2341,7 +2339,6 @@ func (p *TxPool) processMinedFinalizedBlobs(minedTxns []*TxnSlot, finalizedBlock
 			p.minedBlobTxnsByHash[string(txn.IDHash[:])] = mt
 		}
 	}
-	return nil
 }
 
 // Delete individual hash entries from minedBlobTxns cache

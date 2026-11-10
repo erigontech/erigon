@@ -71,13 +71,13 @@ func TestFinalizeMinedBlobsAfterDeletion(t *testing.T) {
 		txns[i] = newTestBlobTxnSlot(uint64(i), 1, 1, 1, 21000)
 		txns[i].IDHash[0] = byte(i + 1)
 		pool.lastSeenBlock.Store(uint64(i + 1))
-		require.NoError(t, pool.processMinedFinalizedBlobs(txns[i:i+1], 0))
+		pool.processMinedFinalizedBlobs(txns[i:i+1], 0)
 	}
 
 	pool.deleteMinedBlobTxn(string(txns[1].IDHash[:]))
 	pool.deleteMinedBlobTxn(string(txns[2].IDHash[:]))
 	pool.lastSeenBlock.Store(5)
-	require.NoError(t, pool.processMinedFinalizedBlobs(nil, 3))
+	pool.processMinedFinalizedBlobs(nil, 3)
 
 	for i := range 3 {
 		require.NotContains(t, pool.minedBlobTxnsByBlock, uint64(i+1))
@@ -98,7 +98,7 @@ func TestMinedBlobBatchReplayKeepsOneCacheEntry(t *testing.T) {
 	txn.IDHash[0] = 1
 	for _, head := range []uint64{1, 2, 2} {
 		pool.lastSeenBlock.Store(head)
-		require.NoError(t, pool.processMinedFinalizedBlobs([]*TxnSlot{txn}, 0))
+		pool.processMinedFinalizedBlobs([]*TxnSlot{txn}, 0)
 	}
 	entries := 0
 	for _, items := range pool.minedBlobTxnsByBlock {
