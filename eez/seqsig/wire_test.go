@@ -190,6 +190,42 @@ func TestWireCapIsInclusive(t *testing.T) {
 	}
 	require.Len(t, data, seqsig.MaxMessageSize)
 	require.Less(t, len(uncompressed(t, data)), seqsig.MaxMessageSize)
+	_, err = seqsig.Decode(data)
+	require.NoError(t, err)
 	_, err = seqsig.Encode(seqsig.Envelope{Block: random[:n+1]})
+	require.ErrorIs(t, err, seqsig.ErrTooLarge)
+}
+
+// literalsOfLen returns enc as a raw Snappy block of exactly n bytes: its first
+// bytes as one-byte literals, the rest as one literal of 2^16 to 2^24 bytes,
+// whose tag takes 4 bytes.
+func literalsOfLen(t *testing.T, enc []byte, n int) []byte {
+	t.Helper()
+	out := binary.AppendUvarint(nil, uint64(len(enc)))
+	k := n - len(out) - len(enc) - 4
+	rest := len(enc) - k
+	require.True(t, k >= 0 && rest > 1<<16 && rest <= 1<<24, "%d one-byte literals, %d in one", k, rest)
+	for _, b := range enc[:k] {
+		out = append(out, 0, b)
+	}
+	out = append(out, 62<<2, byte(rest-1), byte((rest-1)>>8), byte((rest-1)>>16))
+	out = append(out, enc[k:]...)
+	require.Len(t, out, n)
+	return out
+}
+
+// TestWireDecodeSnappyCap: Decode refuses a Snappy block over the cap, as
+// Encode does, also when it decodes to an envelope under the cap.
+func TestWireDecodeSnappyCap(t *testing.T) {
+	e := seqsig.Envelope{Signature: make([]byte, 65), Block: make([]byte, seqsig.MaxMessageSize-200)}
+	data, err := seqsig.Encode(e)
+	require.NoError(t, err)
+	enc := uncompressed(t, data)
+	require.Less(t, len(enc), seqsig.MaxMessageSize)
+
+	got, err := seqsig.Decode(literalsOfLen(t, enc, seqsig.MaxMessageSize))
+	require.NoError(t, err)
+	require.Equal(t, e, got)
+	_, err = seqsig.Decode(literalsOfLen(t, enc, seqsig.MaxMessageSize+1))
 	require.ErrorIs(t, err, seqsig.ErrTooLarge)
 }

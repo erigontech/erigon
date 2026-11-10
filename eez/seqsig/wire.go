@@ -71,9 +71,12 @@ func Encode(e Envelope) ([]byte, error) {
 	return out, nil
 }
 
-// Decode is the inverse of Encode. The uncompressed size is checked against
-// the cap before anything is allocated.
+// Decode is the inverse of Encode. The Snappy block and its uncompressed size
+// are checked against the cap before anything is allocated.
 func Decode(data []byte) (Envelope, error) {
+	if len(data) > MaxMessageSize {
+		return Envelope{}, fmt.Errorf("%w: %d bytes compressed", ErrTooLarge, len(data))
+	}
 	n, err := snappy.DecodedLen(data)
 	if err != nil {
 		return Envelope{}, fmt.Errorf("%w: snappy: %w", ErrMalformed, err)
