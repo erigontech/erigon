@@ -51,6 +51,7 @@ var shapes = []shape{
 
 const (
 	gasPrice       = 460
+	fundGas        = 0x31f38 // a transfer that creates an account also pays state gas
 	blockGasLimit  = 0xe8d4a51000
 	burnThreshold  = 0x0200
 	feeRecipient   = "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba"
@@ -324,7 +325,7 @@ func generate(c *rpcClient, s shape, startHash, outDir string, snapshotNumber ui
 	nonce++
 	for i := range calls {
 		to := crypto.PubkeyToAddress(eoaKey(s.name, i).PublicKey)
-		setup = append(setup, signedTx(seedKey, nonce, 21_000, &to, calls[i].gas*gasPrice*2, nil))
+		setup = append(setup, signedTx(seedKey, nonce, fundGas, &to, calls[i].gas*gasPrice*2, nil))
 		nonce++
 	}
 	test := make([][]byte, 0, len(calls))
