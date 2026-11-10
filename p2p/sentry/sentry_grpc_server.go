@@ -478,7 +478,7 @@ func runPeer(
 
 		if protocol >= direct.ETH69 && (msg.Code == eth.NewBlockHashesMsg || msg.Code == eth.NewBlockMsg) {
 			msg.Discard()
-			return p2p.NewPeerError(p2p.PeerErrorInvalidMessage, p2p.DiscSubprotocolError, nil, fmt.Sprintf("sentry.runPeer: message code %d is not part of eth/%d", msg.Code, protocol))
+			return p2p.NewPeerError(p2p.PeerErrorInvalidMessage, p2p.DiscSubprotocolError, nil, fmt.Sprintf("sentry.runPeer: deprecated block announcement (code %d) on eth/%d", msg.Code, protocol))
 		}
 
 		givePermit := false

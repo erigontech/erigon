@@ -1782,3 +1782,26 @@ func TestRunPeer_InvalidMessageCodeKicksPeer(t *testing.T) {
 		})
 	}
 }
+
+func TestRunPeer_EveryAssignedCodeIsHandled(t *testing.T) {
+	t.Parallel()
+	for version, codes := range eth.ToProto {
+		for code := range codes {
+			if code == eth.StatusMsg || (version >= direct.ETH69 && (code == eth.NewBlockMsg || code == eth.NewBlockHashesMsg)) {
+				continue
+			}
+			t.Run(fmt.Sprintf("eth%d/0x%02x", version, code), func(t *testing.T) {
+				t.Parallel()
+				peerInfo, peerID := newTestPeerInfoWithEth(t)
+				rw := NewMockMsgReadWriter()
+				require.NoError(t, rw.WriteMsg(p2p.Msg{Code: code, Size: 1, Payload: bytes.NewReader([]byte{0xc0})}))
+				rw.WriteToReadBuffer(rw.ReadAllWritten())
+				peerErr := runPeer(t.Context(), peerID, p2p.Cap{Name: eth.ProtocolName, Version: version}, rw, peerInfo,
+					func(sentryproto.MessageId, [64]byte, []byte) {}, func(sentryproto.MessageId) bool { return false }, log.Root())
+				require.NotNil(t, peerErr)
+				require.Equal(t, p2p.PeerErrorMessageReceive, peerErr.Code, peerErr.Error())
+				require.ErrorIs(t, peerErr.Err, io.EOF)
+			})
+		}
+	}
+}
