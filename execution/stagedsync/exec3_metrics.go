@@ -3,6 +3,7 @@ package stagedsync
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -52,6 +53,10 @@ var (
 		"parallel-exec re-executions, by sync mode")
 	mxDiscardsTotal = metrics.GetOrCreateCounterVec("exec_discards_total", []string{"mode", "reason"},
 		"parallel-exec tasks thrown away, by sync mode and reason")
+	mxDiscardSecondsTotal = metrics.GetOrCreateCounterVec("exec_discard_seconds_total", []string{"mode", "reason"},
+		"parallel-exec run time thrown away, by sync mode and reason")
+	mxVoidTailSecondsTotal = metrics.GetOrCreateCounterVec("exec_void_tail_seconds_total", []string{"mode"},
+		"parallel-exec run time from the first dependency read to the end of the run, by sync mode")
 
 	mxExecDomainReads             = metrics.NewGauge(`exec_domain_read_rate{domain="all"}`)
 	mxExecDomainReadDuration      = metrics.NewGauge(`exec_domain_read_dur{domain="all"}`)
@@ -454,8 +459,9 @@ type Progress struct {
 	prevTaskGas             int64
 	prevBlockCount          int64
 	prevBlockDuration       time.Duration
-	prevAbortCount          uint64
-	prevInvalidCount        uint64
+	prevReruns              [rerunCauses]int64
+	prevWastedNs            [rerunCauses]int64
+	prevVoidTailNs          int64
 	prevReadCount           int64
 	prevAccountReadCount    int64
 	prevStorageReadCount    int64
@@ -573,8 +579,6 @@ func (p *Progress) LogExecution(rs *state.StateV3, ex executor) {
 	switch ex.(type) {
 	case *parallelExecutor:
 		execCount := uint64(te.execCount.Load())
-		abortCount := uint64(te.abortCount.Load())
-		invalidCount := uint64(te.invalidCount.Load())
 		readCount := te.readCount.Load()
 		writeCount := uint64(te.writeCount.Load())
 
@@ -586,7 +590,34 @@ func (p *Progress) LogExecution(rs *state.StateV3, ex executor) {
 
 		execDiff := execCount - p.prevExecCount
 
-		repeats := max(int(execDiff)-max(int(te.lastExecutedTxNum.Load())-int(p.prevExecutedTxNum), 0), 0)
+		execMode := "other"
+		switch {
+		case te.isForkValidation:
+			execMode = "newpayload"
+		case te.isApplyingBlocks:
+			execMode = "applyingblocks"
+		}
+
+		var repeats int
+		var curReruns [rerunCauses]int
+		var wasted time.Duration
+		wastedByReason := make([]string, 0, rerunCauses)
+		for cause, reason := range rerunReasons {
+			reruns, wastedNs := te.reruns[cause].Load(), te.wastedNs[cause].Load()
+			curReruns[cause] = int(reruns - p.prevReruns[cause])
+			curWasted := time.Duration(wastedNs - p.prevWastedNs[cause])
+			p.prevReruns[cause], p.prevWastedNs[cause] = reruns, wastedNs
+			repeats += curReruns[cause]
+			wasted += curWasted
+			wastedByReason = append(wastedByReason, fmt.Sprintf("%s=%v", reason, common.Round(curWasted, 0)))
+			mxDiscardsTotal.WithLabelValues(execMode, reason).AddInt(curReruns[cause])
+			mxDiscardSecondsTotal.WithLabelValues(execMode, reason).Add(curWasted.Seconds())
+		}
+		voidTailNs := te.voidTailNs.Load()
+		curVoidTail := time.Duration(voidTailNs - p.prevVoidTailNs)
+		p.prevVoidTailNs = voidTailNs
+		mxVoidTailSecondsTotal.WithLabelValues(execMode).Add(curVoidTail.Seconds())
+
 		var repeatRatio float64
 
 		if repeats > 0 {
@@ -612,8 +643,10 @@ func (p *Progress) LogExecution(rs *state.StateV3, ex executor) {
 		execVals = []any{
 			"exec", common.PrettyCounter(execDiff),
 			"repeat%", fmt.Sprintf("%.2f", repeatRatio),
-			"abort", common.PrettyCounter(abortCount - p.prevAbortCount),
-			"invalid", common.PrettyCounter(invalidCount - p.prevInvalidCount),
+			"abort", common.PrettyCounter(curReruns[rerunAbort]),
+			"invalid", common.PrettyCounter(curReruns[rerunInvalid] + curReruns[rerunPoolInvalid]),
+			"wasted", fmt.Sprintf("%v(%s)", common.Round(wasted, 0), strings.Join(wastedByReason, ",")),
+			"voidtail", common.Round(curVoidTail, 0).String(),
 			"tgas/s", common.PrettyCounter(curTaskGasPerSec),
 			"tcpus", fmt.Sprintf("%.1f", float64(curTaskDur)/float64(interval)),
 			"tdur", common.Round(avgTaskDur, 0).String(),
@@ -628,22 +661,11 @@ func (p *Progress) LogExecution(rs *state.StateV3, ex executor) {
 		}
 
 		mxExecRepeats.SetInt(repeats)
-		execMode := "other"
-		switch {
-		case te.isForkValidation:
-			execMode = "newpayload"
-		case te.isApplyingBlocks:
-			execMode = "applyingblocks"
-		}
 		mxExecsTotal.WithLabelValues(execMode).AddUint64(execDiff)
 		mxRepeatsTotal.WithLabelValues(execMode).AddInt(repeats)
-		mxDiscardsTotal.WithLabelValues(execMode, "abort").AddUint64(abortCount - p.prevAbortCount)
-		mxDiscardsTotal.WithLabelValues(execMode, "invalid").AddUint64(invalidCount - p.prevInvalidCount)
 		mxExecTriggers.SetInt(int(execCount))
 
 		p.prevExecCount = execCount
-		p.prevAbortCount = abortCount
-		p.prevInvalidCount = invalidCount
 		p.prevReadCount = readCount
 		p.prevWriteCount = writeCount
 	case *serialExecutor:

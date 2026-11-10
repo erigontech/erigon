@@ -16,6 +16,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/blockreplay"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
@@ -164,6 +165,53 @@ func TestPoolDependencyChainRunsBoundedByNamedReruns(t *testing.T) {
 	}
 }
 
+func sumExecMetric(cv *metrics.CounterVec, labels ...string) float64 {
+	var total float64
+	for _, mode := range []string{"newpayload", "applyingblocks", "other"} {
+		total += cv.WithLabelValues(append([]string{mode}, labels...)...).GetValue()
+	}
+	return total
+}
+
+func sumDiscardMetric(cv *metrics.CounterVec) float64 {
+	var total float64
+	for _, reason := range rerunReasons {
+		total += sumExecMetric(cv, reason)
+	}
+	return total
+}
+
+func TestPoolRepeatMetricsCountInPoolReruns(t *testing.T) {
+	var runs, reruns atomic.Int64
+	poolOnRun = func(run int) {
+		runs.Add(1)
+		if run > 1 {
+			reruns.Add(1)
+		}
+	}
+	t.Cleanup(func() { poolOnRun = nil })
+	execsBefore, repeatsBefore := sumExecMetric(mxExecsTotal), sumExecMetric(mxRepeatsTotal)
+	discardsBefore, wastedBefore := sumDiscardMetric(mxDiscardsTotal), sumDiscardMetric(mxDiscardSecondsTotal)
+	abortsBefore, abortWastedBefore := sumExecMetric(mxDiscardsTotal, "abort"), sumExecMetric(mxDiscardSecondsTotal, "abort")
+	voidTailBefore := sumExecMetric(mxVoidTailSecondsTotal)
+
+	require.NoError(t, runPoolReplay(t, context.Background(), counterChainFixture(t, poolTestTxs), "16", nil))
+
+	require.Equal(t, float64(runs.Load()), sumExecMetric(mxExecsTotal)-execsBefore, "exec_execs_total must count every run")
+	require.Equal(t, float64(reruns.Load()), sumExecMetric(mxRepeatsTotal)-repeatsBefore, "exec_repeats_total must count every in-pool re-run")
+	require.Equal(t, float64(reruns.Load()), sumDiscardMetric(mxDiscardsTotal)-discardsBefore, "every re-run must have one discard reason")
+
+	wasted := sumDiscardMetric(mxDiscardSecondsTotal) - wastedBefore
+	require.Equal(t, reruns.Load() > 0, wasted > 0, "%d re-runs wasted %v s", reruns.Load(), wasted)
+	aborts, abortWasted := sumExecMetric(mxDiscardsTotal, "abort")-abortsBefore, sumExecMetric(mxDiscardSecondsTotal, "abort")-abortWastedBefore
+	voidTail := sumExecMetric(mxVoidTailSecondsTotal) - voidTailBefore
+	t.Logf("runs=%d reruns=%d aborts=%v wasted=%vs voidTail=%vs", runs.Load(), reruns.Load(), aborts, wasted, voidTail)
+	if aborts > 0 {
+		require.Positive(t, voidTail, "%v aborted runs left no void tail", aborts)
+	}
+	require.LessOrEqual(t, voidTail, abortWasted, "the void tail is a part of the aborted run")
+}
+
 func TestPoolReexecSignalRequeuesParkedTask(t *testing.T) {
 	pe := &parallelExecutor{}
 	pe.workersCtx = t.Context()
@@ -271,6 +319,7 @@ func TestPoolStepConsumesSignalLatchedBeforePark(t *testing.T) {
 			require.True(t, pt.parked, "a task with no signal must park")
 			require.Empty(t, be.wakeAt)
 		}
+		require.Equal(t, rerunInvalid, pt.rerunCause, "a re-run after a sent result is an apply-loop rejection")
 	}
 }
 
@@ -308,7 +357,7 @@ func TestPoolRerunAfterWaitsForPredecessorAfterNamedReruns(t *testing.T) {
 		pt := newPoolUnitTask(be, 2)
 		pt.reruns = tc.reruns
 
-		require.False(t, pt.rerunAfter(0), "the task must wait, not re-run in place")
+		require.False(t, pt.rerunAfter(0, rerunAbort), "the task must wait, not re-run in place")
 		require.Equal(t, []*poolTask{pt}, be.wakeAt[tc.target], "after %d named re-runs", tc.reruns)
 		require.Equal(t, psReexec, pt.next)
 	}
