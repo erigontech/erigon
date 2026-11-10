@@ -502,7 +502,7 @@ func (sdc *SharedDomainsCommitmentContext) BranchChildCount(nibblePrefix []byte)
 }
 
 // ComputeCommitment Evaluates commitment for gathered updates.
-// If warmup was set via EnableTrieWarmup, pre-warms MDBX page cache by reading Branch data in parallel before processing.
+// If TrieConfig.EnableTrieWarmup is set, pre-warms MDBX page cache by reading Branch data in parallel before processing.
 // ComputeCommitment should normally be called via SharedDomains.ComputeCommitment,
 // which flushes pending deferred updates first. Direct callers must ensure
 // pendingUpdate is nil (i.e. deferred mode is not active or was flushed).
