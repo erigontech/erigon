@@ -228,16 +228,21 @@ func TestStatusConcurrentWithBoot(t *testing.T) {
 	done, read := make(chan struct{}), make(chan uint64)
 	go func() {
 		var height uint64
+		readStatus := func() {
+			if a := n.follower.Status().Anchor; a != nil && a.L2Block != nil {
+				height = *a.L2Block
+			}
+		}
 		for {
 			select {
 			case <-done:
+				// Boot returned: this read sees its last write.
+				readStatus()
 				read <- height
 				return
 			default:
 			}
-			if a := n.follower.Status().Anchor; a != nil && a.L2Block != nil {
-				height = *a.L2Block
-			}
+			readStatus()
 		}
 	}()
 	require.NoError(t, n.follower.Boot(t.Context()))
