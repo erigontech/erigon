@@ -500,6 +500,25 @@ func opCallValue(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error
 	return pc, nil, nil
 }
 
+// callDataLoadNoTail reports whether CALLDATALOAD at x needs no partial-tail copy.
+func callDataLoadNoTail(x *uint256.Int, input []byte) bool {
+	offset, overflow := x.Uint64WithOverflow()
+	end := offset + 32
+	return overflow || offset >= uint64(len(input)) || (end >= offset && end <= uint64(len(input)))
+}
+
+// opCallDataLoadNoTail is opCallDataLoad for callDataLoadNoTail words: run inlines it, so its loop has no call here.
+func opCallDataLoadNoTail(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
+	x := scope.Stack.peek()
+	offset, overflow := x.Uint64WithOverflow()
+	if !overflow && offset < uint64(len(scope.input)) {
+		x.SetBytes32(scope.input[offset : offset+32])
+		return pc, nil, nil
+	}
+	x.Clear()
+	return pc, nil, nil
+}
+
 func opCallDataLoad(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	x := scope.Stack.peek()
 	offset, overflow := x.Uint64WithOverflow()

@@ -127,7 +127,7 @@ func coldOps() []fastOp {
 		op("ORIGIN", "opOrigin"),
 		op("CALLER", "opCaller"),
 		op("CALLDATASIZE", "opCallDataSize"),
-		alu("CALLDATALOAD", "opCallDataLoad", 1),
+		{name: "CALLDATALOAD", execute: "opCallDataLoadNoTail", gas: "GasFastestStep", pop: 1, push: 1, allocated: "callDataLoadNoTail(stack.peek(), callContext.input)"},
 		op("CODESIZE", "opCodeSize"),
 		op("GASPRICE", "opGasprice"),
 		forked(op("RETURNDATASIZE", "opReturnDataSize")),
