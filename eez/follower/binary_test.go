@@ -28,6 +28,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -43,12 +45,29 @@ import (
 	"github.com/erigontech/erigon/eez/networks"
 )
 
+// handedOut holds the ports freePort returned: the OS may hand a port out
+// again as soon as freePort closes it.
+var handedOut = struct {
+	sync.Mutex
+	ports map[int]bool
+}{ports: map[int]bool{}}
+
+// freePort returns a loopback TCP port that is free and that no earlier call
+// returned.
 func freePort(t *testing.T) string {
 	t.Helper()
-	l, err := new(net.ListenConfig).Listen(t.Context(), "tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	defer l.Close()
-	return strconv.Itoa(l.Addr().(*net.TCPAddr).Port)
+	handedOut.Lock()
+	defer handedOut.Unlock()
+	for {
+		l, err := new(net.ListenConfig).Listen(t.Context(), "tcp", "127.0.0.1:0")
+		require.NoError(t, err)
+		port := l.Addr().(*net.TCPAddr).Port
+		require.NoError(t, l.Close())
+		if !handedOut.ports[port] {
+			handedOut.ports[port] = true
+			return strconv.Itoa(port)
+		}
+	}
 }
 
 // call makes a JSON-RPC call to url and decodes its result into out.
@@ -193,7 +212,8 @@ func TestFollowerBinary(t *testing.T) {
 // TestAllInOneBinary runs the erigon binary named by EEZ_ERIGON as an
 // all-in-one node: the dev chain as L1 and beside it an EEZ chain settling
 // on it, under <datadir>/eez with its own lock and HTTP-RPC port, whose
-// follower takes the L1 heads in-process. An interrupt stops both chains.
+// follower takes the L1 heads in-process. SIGTERM stops both chains: the L1's
+// consensus layer resets SIGINT to its default action once it starts.
 func TestAllInOneBinary(t *testing.T) {
 	bin := os.Getenv("EEZ_ERIGON")
 	if bin == "" {
@@ -269,7 +289,7 @@ func TestAllInOneBinary(t *testing.T) {
 	require.DirExists(t, filepath.Join(dir, "eez", "temp"))
 	require.Error(t, call(t.Context(), l1URL, "eez_followerStatus", &status), "the L1 serves no eez API")
 
-	require.NoError(t, cmd.Process.Signal(os.Interrupt))
+	require.NoError(t, cmd.Process.Signal(syscall.SIGTERM))
 	select {
 	case err := <-exited:
 		require.NoError(t, err)
