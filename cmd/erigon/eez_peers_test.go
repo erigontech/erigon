@@ -24,6 +24,7 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	ma "github.com/multiformats/go-multiaddr"
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v3"
 
@@ -322,4 +323,52 @@ func TestAllInOneNetwork(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, uint64(4242), e.NetworkID)
 	require.False(t, n.DisableSentry)
+}
+
+// TestAllInOneRuleSet: the EEZ chain of an all-in-one node takes the
+// history from L2 peers and joins the overlay on an R0 chain; on a RollupX
+// chain both are refused before either chain starts. Peers mode without an
+// L2 peer to dial, and the overlay on the devp2p port, are refused too. The
+// overlay runs the sentry whose key it uses.
+func TestAllInOneRuleSet(t *testing.T) {
+	eez.Register()
+	peersMode, l1Only := false, true
+	signer := common.HexToAddress("0x5fbdb2315678afecb367f032d93f642f64180aa3")
+	peers := func(c *eez.Config) { c.StaticPeers = []*enode.Node{enode.MustParse(static)} }
+	overlay := func(port string) func(*eez.Config) {
+		return func(c *eez.Config) {
+			c.P2PListen, c.SequencerAddress = ma.StringCast("/ip4/127.0.0.1/tcp/"+port), &signer
+		}
+	}
+	for _, c := range []struct {
+		name, chain string
+		set         []func(*eez.Config)
+		refused     string
+	}{
+		{"peers", networks.Devnet.Name, []func(*eez.Config){peers}, ""},
+		{"peers, set", networks.Devnet.Name, []func(*eez.Config){peers, func(c *eez.Config) { c.SyncL1Only = &peersMode }}, ""},
+		{"peers, bootnodes", networks.Devnet.Name, []func(*eez.Config){func(c *eez.Config) { c.Bootnodes = []*enode.Node{enode.MustParse(bootnode)} }}, ""},
+		{"peers, trusted", networks.Devnet.Name, []func(*eez.Config){func(c *eez.Config) { c.TrustedPeers = []*enode.Node{enode.MustParse(trusted)} }}, ""},
+		{"peers, none", networks.Devnet.Name, nil, "set --eez.bootnodes, --eez.staticpeers or --eez.trustedpeers, or --eez.sync.l1only"},
+		{"peers, port only", networks.Devnet.Name, []func(*eez.Config){func(c *eez.Config) { c.Port = 30404 }}, "--eez.sync.l1only"},
+		{"overlay", networks.Devnet.Name, []func(*eez.Config){peers, overlay("9100")}, ""},
+		{"overlay, L1 only", networks.Devnet.Name, []func(*eez.Config){overlay("9100"), func(c *eez.Config) { c.SyncL1Only = &l1Only }}, ""},
+		{"overlay on the devp2p port", networks.Devnet.Name, []func(*eez.Config){peers, overlay("30403")}, "--eez.port 30403 is the port of --eez.p2p.listen"},
+		{"rollupX peers", networks.Chiado699169.Name, []func(*eez.Config){peers, func(c *eez.Config) { c.SyncL1Only = &peersMode }}, "rollupX chains derive their history from L1 alone"},
+		{"rollupX overlay", networks.Chiado699169.Name, []func(*eez.Config){overlay("9100")}, "signs no heads"},
+	} {
+		cfg := &eez.Config{Chain: c.chain, HTTPPort: 8645}
+		for _, set := range c.set {
+			set(cfg)
+		}
+		l1Node, l1Eth := l1Configs(t, 1337)
+		n, _, err := allInOneConfigs(t.Context(), l1Node, l1Eth, cfg, log.New())
+		if c.refused == "" {
+			require.NoError(t, err, c.name)
+			require.False(t, n.DisableSentry, c.name)
+			continue
+		}
+		require.ErrorIs(t, err, eez.ErrConfig, c.name)
+		require.ErrorContains(t, err, c.refused, c.name)
+	}
 }

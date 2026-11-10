@@ -170,8 +170,8 @@ func TestConfigFromCLI(t *testing.T) {
 
 // TestSyncMode: --eez.sync.l1only picks where the history below L1's
 // finalized root comes from. Unset, rollupX chains derive it from L1 alone
-// and R0 chains take it from L2 peers, unless they run beside their L1.
-// RollupX chains, and chains beside their L1, refuse L2 peers.
+// and R0 chains take it from L2 peers, also beside their L1. RollupX chains
+// refuse L2 peers.
 func TestSyncMode(t *testing.T) {
 	r0, rollupX := networks.Devnet.Config, networks.Chiado699169.Config
 	standalone := []string{"--eez.enabled", "--eez.l1.rpc=http://l1:8545"}
@@ -186,8 +186,10 @@ func TestSyncMode(t *testing.T) {
 		{append(standalone, "--eez.sync.l1only"), r0, true},
 		{append(standalone, "--eez.sync.l1only=false"), r0, false},
 		{append(standalone, "--eez.sync.l1only=true"), rollupX, true},
-		{beside, r0, true},
+		{beside, r0, false},
+		{beside, rollupX, true},
 		{append(beside, "--eez.sync.l1only"), r0, true},
+		{append(beside, "--eez.sync.l1only=false"), r0, false},
 	} {
 		cfg, err := parse(t, c.args...)
 		require.NoError(t, err, "%v", c.args)
@@ -197,14 +199,13 @@ func TestSyncMode(t *testing.T) {
 		require.Equal(t, c.want, got, "%v on %s", c.args, c.chain.ChainName)
 	}
 
-	cfg, err := parse(t, append(standalone, "--eez.sync.l1only=false")...)
-	require.NoError(t, err)
-	_, err = cfg.L1Only(rollupX)
-	require.ErrorIs(t, err, ErrConfig, "L2 peers on a rollupX chain")
-	cfg, err = parse(t, append(beside, "--eez.sync.l1only=false")...)
-	require.NoError(t, err)
-	require.ErrorIs(t, cfg.CheckNode(), ErrConfig, "L2 peers beside the L1")
-	_, err = parse(t, "--eez.sync.l1only")
+	for _, args := range [][]string{standalone, beside} {
+		cfg, err := parse(t, append(args, "--eez.sync.l1only=false")...)
+		require.NoError(t, err)
+		_, err = cfg.L1Only(rollupX)
+		require.ErrorIs(t, err, ErrConfig, "L2 peers on a rollupX chain, %v", args)
+	}
+	_, err := parse(t, "--eez.sync.l1only")
 	require.ErrorIs(t, err, ErrConfig, "without --eez.enabled")
 }
 
@@ -251,9 +252,15 @@ func TestOverlayFlags(t *testing.T) {
 	require.ErrorIs(t, err, ErrConfig)
 	require.ErrorContains(t, err, "--eez.p2p.peers requires --eez.p2p.listen")
 
-	// The EEZ chain of an all-in-one node has no overlay yet.
-	for _, args := range [][]string{{listen, address}, {listen}, {address}, {"--eez.p2p.peers=" + peerAddr}} {
-		_, err := parse(t, append([]string{"--eez.enabled", "--eez.chain=eez-devnet"}, args...)...)
+	// The EEZ chain beside its L1 joins the overlay on the same terms.
+	beside := []string{"--eez.enabled", "--eez.chain=eez-devnet"}
+	cfg, err = parse(t, append(beside, listen, address, "--eez.p2p.peers="+peerAddr)...)
+	require.NoError(t, err)
+	require.Equal(t, "/ip4/0.0.0.0/tcp/9100", cfg.P2PListen.String())
+	require.Len(t, cfg.P2PPeers, 1)
+	require.NoError(t, cfg.CheckNode())
+	for _, args := range [][]string{{listen}, {address}, {"--eez.p2p.peers=" + peerAddr}} {
+		_, err := parse(t, append(beside, args...)...)
 		require.ErrorIs(t, err, ErrConfig, "all-in-one %v", args)
 	}
 }

@@ -308,8 +308,6 @@ func (c *Config) readOverlay(cmd *cli.Command) error {
 	switch {
 	case len(set) == 0:
 		return nil
-	case c.Chain != "":
-		return fmt.Errorf("%w: --%s is not available with --%s", ErrConfig, set[0], ChainFlag.Name)
 	case c.SequencerRPC != "":
 		return fmt.Errorf("%w: --%s and --%s both set the unsafe head", ErrConfig, set[0], SequencerRPCFlag.Name)
 	case listen != address:
@@ -364,9 +362,6 @@ func (c *Config) CheckNode() error {
 	if sources != 1 {
 		return fmt.Errorf("%w: the follower needs one L1 source, --%s, --%s or --%s", ErrConfig, L1RPCFlag.Name, L1KVFlag.Name, ChainFlag.Name)
 	}
-	if c.AllInOne() && c.SyncL1Only != nil && !*c.SyncL1Only {
-		return fmt.Errorf("%w: --%s=false: the EEZ chain beside its L1 (--%s) takes no L2 peers", ErrConfig, SyncL1OnlyFlag.Name, ChainFlag.Name)
-	}
 	return nil
 }
 
@@ -376,7 +371,7 @@ func (c *Config) L1Only(chainConfig *chain.Config) (bool, error) {
 	l2, ok := chainConfig.L2.(*config.L2Config)
 	rollupX := ok && l2.RollupX != nil
 	if c.SyncL1Only == nil {
-		return rollupX || c.AllInOne(), nil
+		return rollupX, nil
 	}
 	if !*c.SyncL1Only && rollupX {
 		return false, fmt.Errorf("%w: --%s=false: rollupX chains derive their history from L1 alone", ErrConfig, SyncL1OnlyFlag.Name)

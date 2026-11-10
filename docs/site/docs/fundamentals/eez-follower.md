@@ -57,7 +57,7 @@ With `--eez.chain` one Erigon process runs both chains: the L1 of `--chain`, as 
 ```bash
 ./build/bin/erigon --chain=<l1-network> --datadir=/data/node \
   --eez.enabled --eez.chain=<eez-network> \
-  --eez.http.port=8645
+  --eez.http.port=8645 --eez.sync.l1only
 ```
 
 The L1 keeps the datadir's usual layout and every component of a node: P2P, snapshot downloader, consensus layer, transaction pool, engine API, private API and the JSON-RPC of `--http.*`. The EEZ chain keeps the layout above and adds its own lock, temporary files and migration records under `<datadir>/eez`; it serves JSON-RPC on `--eez.http.port` with the namespaces of `--eez.http.api`, and none of the L1's components. On rollup0 networks it runs its own P2P, set by the `--eez.*` P2P flags of [Peers](#peers). Its log lines carry `chain=<eez-network>`. Stopping the node stops the EEZ chain before the L1, and a follower that halts stops both.
@@ -79,7 +79,7 @@ On rollup0 networks a follower takes L2 peers. Over devp2p it fetches blocks by 
 | Mode | Default on | History below L1's finalized root |
 |---|---|---|
 | peers | rollup0 networks | Fetched from L2 peers; derivation starts at L1's finalized block. Set with `--eez.sync.l1only=false`. |
-| L1-only | rollupX networks, and the EEZ chain of a node running beside its L1 | Derived from L1, from the reconcile checkpoint or the registry's deploy block. Set with `--eez.sync.l1only`. |
+| L1-only | rollupX networks | Derived from L1, from the reconcile checkpoint or the registry's deploy block. Set with `--eez.sync.l1only`. |
 
 A node that must not depend on how far L1 has finalized, such as a test or devnet node, sets the mode explicitly.
 
@@ -87,7 +87,7 @@ A node that must not depend on how far L1 has finalized, such as a test or devne
 
 The node takes L2 peers over eth/68 and eth/69 and serves them its blocks. A block reaches the chain only through the follower, never from devp2p on its own, and the node takes no transactions from its peers. Peers come from Erigon's P2P flags: `--bootnodes` with discovery, or `--staticpeers` and `--trustedpeers` with `--nodiscover`; trusted peers are dialled like static ones. EEZ networks list no bootnodes, so the node refuses to start with discovery on and neither `--bootnodes` nor `--discovery.dns`. A chain initialised from a genesis file never takes the network id, bootnodes or DNS list of the default `--chain`: its network id is its chain id unless `--networkid` is set. On rollupX networks the node stays off the P2P network whatever the flags.
 
-Erigon's P2P flags belong to the L1 of a node [running beside its L1](#running-beside-its-l1-in-one-process). Its EEZ chain joins the P2P network once one of `--eez.port`, `--eez.bootnodes`, `--eez.staticpeers` or `--eez.trustedpeers` is set. It then listens on `--eez.port`, which must differ from the L1's `--port`, with a node key of its own, generated at its first start in `<datadir>/eez/nodekey`, and its node database under `<datadir>/eez`. It discovers peers only from `--eez.bootnodes`, and dials `--eez.staticpeers` and `--eez.trustedpeers`. It shares the L1's node name, `--nat`, `--netrestrict` and `--metrics`, and takes Erigon's defaults for the other P2P settings, such as `--maxpeers`. A chain initialised from a genesis file takes its chain id as network id.
+Erigon's P2P flags belong to the L1 of a node [running beside its L1](#running-beside-its-l1-in-one-process). Its EEZ chain joins the P2P network once one of `--eez.port`, `--eez.bootnodes`, `--eez.staticpeers`, `--eez.trustedpeers` or `--eez.p2p.listen` is set. It then listens on `--eez.port`, which must differ from the L1's `--port`, with a node key of its own, generated at its first start in `<datadir>/eez/nodekey`, and its node database under `<datadir>/eez`. It discovers peers only from `--eez.bootnodes`, and dials `--eez.staticpeers` and `--eez.trustedpeers`. It shares the L1's node name, `--nat`, `--netrestrict` and `--metrics`, and takes Erigon's defaults for the other P2P settings, such as `--maxpeers`. A chain initialised from a genesis file takes its chain id as network id. The signed-head overlay of `--eez.p2p.listen` runs on the EEZ chain's node key, on a port other than `--eez.port`. Peers mode, the default on rollup0 networks, refuses to start without `--eez.bootnodes`, `--eez.staticpeers` or `--eez.trustedpeers`.
 
 ```bash
 ./build/bin/erigon --chain=<l1-network> --datadir=/data/node \
@@ -131,10 +131,11 @@ The node refuses to start with:
 
 - `--eez.p2p.listen` without `--eez.sequencer.address` or the reverse, and `--eez.p2p.peers` without `--eez.p2p.listen`;
 - `--eez.p2p.listen` and `--eez.sequencer.rpc` together: both set the head;
-- the overlay flags on rollupX networks, whose sequencer signs no heads, or with `--eez.chain`;
-- `--eez.sync.l1only=false` on rollupX networks or with `--eez.chain`;
+- the overlay flags on rollupX networks, whose sequencer signs no heads;
+- `--eez.sync.l1only=false` on rollupX networks;
+- peers mode beside an L1 without `--eez.bootnodes`, `--eez.staticpeers` or `--eez.trustedpeers`;
 - discovery on a rollup0 network without `--bootnodes` or `--discovery.dns`;
-- `--eez.port` out of range or equal to the L1's `--port`;
+- `--eez.port` out of range, or equal to the L1's `--port` or to the port of `--eez.p2p.listen`;
 - a listen address that is not TCP or has port 0, and a static overlay peer given by DNS name or without `/p2p/<peer id>`.
 
 Peers mode stops the node when the root's chain leaves the local finalized block ("datadir is not on L1's chain"), when an L1 reorg drops F ("L1 reorg below the seed at L1 finality"), and when the local chain refuses the blocks its peers served ("the local chain refuses the history from L2 peers").
@@ -176,7 +177,7 @@ Peers mode stops the node when the root's chain leaves the local finalized block
 | `--eez.l1.logchunk` | `100000` | Widest block range of one L1 log query; halved when the node refuses it. |
 | `--eez.l1.reorgdepth` | `62` | Deepest L1 reorg the follower survives. |
 | `--eez.sequencer.rpc` | | Sequencer endpoint for the unsafe head. |
-| `--eez.sync.l1only` | rule set | Derive the whole history from L1; see [Sync modes](#sync-modes). Unset, true on rollupX networks and beside an L1, false on rollup0 networks. |
+| `--eez.sync.l1only` | rule set | Derive the whole history from L1; see [Sync modes](#sync-modes). Unset, true on rollupX networks and false on rollup0 networks. |
 | `--eez.p2p.listen` | | TCP multiaddr with a fixed port on which the node joins the [signed-head overlay](#signed-heads). Requires `--eez.sequencer.address`. |
 | `--eez.p2p.peers` | | Static overlay peers, comma-separated IP multiaddrs ending in `/p2p/<peer id>`. |
 | `--eez.sequencer.address` | | Address of the sequencer, whose signed heads the overlay accepts. Requires `--eez.p2p.listen`. |

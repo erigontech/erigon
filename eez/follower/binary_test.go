@@ -35,6 +35,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/libp2p/go-libp2p/core/peer"
+	ma "github.com/multiformats/go-multiaddr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -48,6 +50,8 @@ import (
 	"github.com/erigontech/erigon/eez/l1/l1test"
 	"github.com/erigontech/erigon/eez/l1/recording"
 	"github.com/erigontech/erigon/eez/networks"
+	"github.com/erigontech/erigon/eez/overlay"
+	"github.com/erigontech/erigon/eez/seqsig"
 	"github.com/erigontech/erigon/p2p/enode"
 )
 
@@ -171,9 +175,8 @@ func refused(t *testing.T, bin, want string, args ...string) {
 // discovery off, completes the eth/68 and eth/69 handshake with it, syncs
 // from it the history below the root L1's finalized block F holds, seeds
 // derivation at F and keeps no checkpoint. Discovery without --bootnodes,
-// peers mode on a rollupX chain, and the overlay beside the sequencer RPC,
-// on a chain whose sequencer signs no heads, and in all-in-one mode are
-// refused.
+// peers mode on a rollupX chain, and the overlay beside the sequencer RPC
+// and on a chain whose sequencer signs no heads are refused.
 func TestFollowerBinary(t *testing.T) {
 	bin := os.Getenv("EEZ_ERIGON")
 	if bin == "" {
@@ -203,8 +206,6 @@ func TestFollowerBinary(t *testing.T) {
 	refused(t, bin, "both set the unsafe head", append(sequencerRPC, overlay()...)...)
 	unsigned := []string{"--eez.enabled", "--chain=eez-chiado", "--eez.l1.rpc", l1.URL}
 	refused(t, bin, "signs no heads", append(unsigned, overlay()...)...)
-	allInOne := append(devChain(t), "--eez.enabled", "--eez.chain=eez-devnet")
-	refused(t, bin, "not available with --eez.chain", append(allInOne, overlay()...)...)
 
 	dir := t.TempDir()
 	httpPort, authPort, p2pPort, overlayPort := freePort(t), freePort(t), freePort(t), freePort(t)
@@ -356,12 +357,23 @@ func peers(t require.TestingT, ctx context.Context, url string) []peerInfo {
 // chain named by --eez.staticpeers, which the L1, whose --staticpeers names
 // it too, refuses at the eth handshake. SIGTERM stops both chains: the L1's
 // consensus layer resets SIGINT to its default action once it starts.
+// Restarted in peers mode with the same node key, the EEZ chain joins the
+// standalone node's signed-head overlay and relays the heads it is sent.
+// RollupX chains refuse peers mode and the overlay beside their L1 too.
 func TestAllInOneBinary(t *testing.T) {
 	bin := os.Getenv("EEZ_ERIGON")
 	if bin == "" {
 		t.Skip("EEZ_ERIGON names no erigon binary")
 	}
+	rollupX := slices.Clip(append(devChain(t), "--eez.enabled", "--eez.chain=eez-chiado"))
+	refused(t, bin, "rollupX chains derive their history from L1 alone", append(rollupX, "--eez.sync.l1only=false")...)
+	refused(t, bin, "signs no heads", append(rollupX, "--eez.p2p.listen=/ip4/127.0.0.1/tcp/"+freePort(t), "--eez.sequencer.address="+overlaySigner)...)
+	refused(t, bin, "set --eez.bootnodes, --eez.staticpeers or --eez.trustedpeers, or --eez.sync.l1only",
+		append(devChain(t), "--eez.enabled", "--eez.chain=eez-devnet")...)
 	dir, peerDir := t.TempDir(), t.TempDir()
+	sequencer, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	signer := crypto.PubkeyToAddress(sequencer.PublicKey)
 
 	// eez-devnet settling on the dev chain, with the timestamp rewritten
 	// as a deployment does, so the stored l2 section stands.
@@ -390,16 +402,17 @@ func TestAllInOneBinary(t *testing.T) {
 	t.Cleanup(server.Stop)
 	peerL1RPC := httptest.NewServer(server)
 	t.Cleanup(peerL1RPC.Close)
-	peerHTTP, peerP2P := freePort(t), freePort(t)
+	peerHTTP, peerP2P, peerOverlay := freePort(t), freePort(t), freePort(t)
 	peerURL := "http://127.0.0.1:" + peerHTTP
-	peer := exec.CommandContext(t.Context(), bin, "--eez.enabled", "--datadir", peerDir, "--eez.sync.l1only=true",
+	standalone := exec.CommandContext(t.Context(), bin, "--eez.enabled", "--datadir", peerDir, "--eez.sync.l1only=true",
 		"--eez.l1.rpc", peerL1RPC.URL, "--http.port", peerHTTP, "--http.api=eth,eez,admin", "--authrpc.port", freePort(t),
-		"--private.api.addr", "127.0.0.1:"+freePort(t), "--port", peerP2P, "--torrent.port", freePort(t), "--nodiscover")
+		"--private.api.addr", "127.0.0.1:"+freePort(t), "--port", peerP2P, "--torrent.port", freePort(t), "--nodiscover",
+		"--eez.p2p.listen=/ip4/127.0.0.1/tcp/"+peerOverlay, "--eez.sequencer.address="+signer.Hex())
 	peerOutput := &syncBuffer{}
-	peer.Stdout, peer.Stderr = peerOutput, peerOutput
-	require.NoError(t, peer.Start())
+	standalone.Stdout, standalone.Stderr = peerOutput, peerOutput
+	require.NoError(t, standalone.Start())
 	t.Cleanup(func() {
-		_ = peer.Process.Kill()
+		_ = standalone.Process.Kill()
 		if t.Failed() {
 			t.Log(peerOutput.String())
 		}
@@ -558,6 +571,96 @@ func TestAllInOneBinary(t *testing.T) {
 		assert.Equal(c, "l1_only", status.SyncMode)
 		assert.Equal(c, uint64(1), uint64(status.Peers))
 	}, time.Minute, 250*time.Millisecond, "eez_followerStatus")
+	stop()
 
+	// Restarted in peers mode, the default on an R0 chain, set explicitly
+	// as on every test node. The overlay identity is the EEZ chain's node
+	// key.
+	key, err := crypto.LoadECDSA(filepath.Join(dir, "eez", "nodekey"))
+	require.NoError(t, err)
+	self, err := overlay.PeerID(&key.PublicKey)
+	require.NoError(t, err)
+	peerID, err := overlay.PeerID(peerNode.Pubkey())
+	require.NoError(t, err)
+	addr := func(port string, id peer.ID) peer.AddrInfo {
+		return peer.AddrInfo{ID: id, Addrs: []ma.Multiaddr{ma.StringCast("/ip4/127.0.0.1/tcp/" + port)}}
+	}
+	overlayPort := freePort(t)
+	output := start("--eez.sync.l1only=false", "--eez.p2p.listen=/ip4/127.0.0.1/tcp/"+overlayPort, "--eez.sequencer.address="+signer.Hex(),
+		"--eez.p2p.peers=/ip4/127.0.0.1/tcp/"+peerOverlay+"/p2p/"+peerID.String())
+	waitFor("EEZ chain id", func() bool { return chainID(l2URL) == networks.Devnet.Config.ChainID.Uint64() })
+	require.Equal(t, l2Node.ID(), nodeInfo(t, l2URL).ID(), "the node key is kept")
+	var restarted hexutil.Uint64
+	require.NoError(t, call(t.Context(), l1URL, "eth_blockNumber", &restarted))
+	logged := func(parts ...string) bool {
+		for line := range strings.SplitSeq(output.String(), "\n") {
+			if !slices.ContainsFunc(parts, func(p string) bool { return !strings.Contains(line, p) }) {
+				return true
+			}
+		}
+		return false
+	}
+	waitFor("peers mode", func() bool { return logged("event=eez.node.sync.mode mode=peers") })
+	waitFor("the overlay", func() bool { return logged("[eez] overlay listening", "peer="+self.String()) })
+
+	// A head published to the all-in-one node reaches a node that only the
+	// standalone node relays to.
+	domain := seqsig.Domain{ChainID: networks.Devnet.Config.ChainID.Uint64(), Registry: common.HexToAddress("0x5fbdb2315678afecb367f032d93f642f64180aa3"), RollupID: 1}
+	join := func(to peer.AddrInfo) *overlay.Overlay {
+		key, err := crypto.GenerateKey()
+		require.NoError(t, err)
+		listen := ma.StringCast("/ip4/127.0.0.1/tcp/" + freePort(t))
+		o, err := overlay.New(overlay.Config{Listen: listen, Peers: []peer.AddrInfo{to}, Key: key, Domain: domain, Signer: signer}, log.New())
+		require.NoError(t, err)
+		require.NoError(t, o.Start())
+		t.Cleanup(func() { _ = o.Stop() })
+		return o
+	}
+	publisher, subscriber := join(addr(overlayPort, self)), join(addr(peerOverlay, peerID))
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	go func() {
+		epoch := uint64(time.Now().UnixMilli())
+		for counter := uint64(1); ctx.Err() == nil; counter++ {
+			h := seqsig.Head{RollupID: 1, Number: counter, BlockHash: common.Hash{byte(counter)}, ParentHash: common.Hash{0xff}, EpochMs: epoch, Counter: counter}
+			if sig, err := seqsig.Sign(h, domain, sequencer); err == nil {
+				_ = publisher.Publish(ctx, seqsig.Envelope{Head: h, Signature: sig})
+			}
+			select {
+			case <-ctx.Done():
+			case <-time.After(500 * time.Millisecond):
+			}
+		}
+	}()
+	select {
+	case h := <-subscriber.Heads():
+		require.Equal(t, signer, h.Signer)
+	case err := <-exited:
+		t.Fatalf("erigon exited: %v", err)
+	case <-time.After(2 * time.Minute):
+		t.Fatal("no head relayed through the all-in-one node")
+	}
+	cancel()
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
+		var status struct {
+			SyncMode     string          `json:"syncMode"`
+			OverlayPeers *hexutil.Uint64 `json:"overlayPeers"`
+			SignedHeads  []struct {
+				Signer common.Address `json:"signer"`
+			} `json:"signedHeads"`
+		}
+		require.NoError(c, call(t.Context(), l2URL, "eez_followerStatus", &status))
+		assert.Equal(c, "peers", status.SyncMode)
+		require.NotNil(c, status.OverlayPeers)
+		assert.NotZero(c, uint64(*status.OverlayPeers))
+		require.NotEmpty(c, status.SignedHeads)
+		assert.Equal(c, signer, status.SignedHeads[0].Signer)
+	}, time.Minute, 250*time.Millisecond, "eez_followerStatus")
+	// Caplin builds the dev chain's blocks and panics when interrupted while
+	// it starts: wait for a block it built after the restart.
+	waitFor("an L1 block", func() bool {
+		var head hexutil.Uint64
+		return call(t.Context(), l1URL, "eth_blockNumber", &head) == nil && head > restarted
+	})
 	stop()
 }

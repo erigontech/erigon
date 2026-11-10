@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/eez"
 	"github.com/erigontech/erigon/eez/config"
+	"github.com/erigontech/erigon/eez/overlay"
 	"github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/node/direct"
@@ -97,20 +98,33 @@ func configureFollowerPeers(p *p2p.Config, dns []string, chainConfig *chain.Conf
 // configureAllInOneNetwork gives n and e, the node of the EEZ chain of an
 // all-in-one node, the network of the chain they run. The plain devp2p
 // flags are the L1's: on an R0 chain the EEZ chain runs its own sentry once
-// one of the --eez.* devp2p flags of cfg is set, with its node key and node
-// database under its datadir, discovery only from cfg.Bootnodes, the L1's
-// node name, NAT, netrestrict and metrics, and Erigon's defaults otherwise.
-// On a RollupX chain it runs no sentry.
+// one of the --eez.* devp2p flags of cfg is set or it joins the overlay,
+// with its node key and node database under its datadir, discovery only
+// from cfg.Bootnodes, the L1's node name, NAT, netrestrict and metrics, and
+// Erigon's defaults otherwise. On a RollupX chain it runs no sentry. What
+// the node would refuse once started, and peers mode with no L2 peer to
+// dial, is refused here, before either chain starts.
 func configureAllInOneNetwork(ctx context.Context, n *nodecfg.Config, e *ethconfig.Config, cfg *eez.Config, logger log.Logger) error {
 	chainConfig, own, err := followerChain(ctx, n.Dirs, e, logger)
 	if err != nil {
+		return err
+	}
+	l1Only, err := cfg.L1Only(chainConfig)
+	if err != nil {
+		return err
+	}
+	if err := cfg.CheckChain(chainConfig); err != nil {
 		return err
 	}
 	if !own {
 		e.NetworkID = chainConfig.ChainID.Uint64()
 	}
 	peers := len(cfg.Bootnodes)+len(cfg.StaticPeers)+len(cfg.TrustedPeers) > 0
-	if l2, ok := chainConfig.L2.(*config.L2Config); ok && l2.RollupX != nil || !peers && cfg.Port == 0 {
+	if !l1Only && !peers {
+		return fmt.Errorf("%w: peers mode finds no L2 peers for --%s: set --%s, --%s or --%s, or --%s", eez.ErrConfig, eez.ChainFlag.Name,
+			eez.BootnodesFlag.Name, eez.StaticPeersFlag.Name, eez.TrustedPeersFlag.Name, eez.SyncL1OnlyFlag.Name)
+	}
+	if l2, ok := chainConfig.L2.(*config.L2Config); ok && l2.RollupX != nil || !peers && cfg.Port == 0 && cfg.P2PListen == nil {
 		n.P2P.MaxPeers, n.P2P.NoDiscovery = 0, true
 		n.DisableSentry = true
 		return nil
@@ -118,6 +132,11 @@ func configureAllInOneNetwork(ctx context.Context, n *nodecfg.Config, e *ethconf
 	port := cmp.Or(cfg.Port, int(eez.PortFlag.Value))
 	if port == n.P2P.ListenPort() {
 		return fmt.Errorf("%w: --%s %d is the L1's --%s", eez.ErrConfig, eez.PortFlag.Name, port, utils.ListenPortFlag.Name)
+	}
+	if cfg.P2PListen != nil {
+		if p, err := overlay.ListenPort(cfg.P2PListen); err == nil && int(p) == port {
+			return fmt.Errorf("%w: --%s %d is the port of --%s", eez.ErrConfig, eez.PortFlag.Name, port, eez.P2PListenFlag.Name)
+		}
 	}
 	key, err := p2p.NodeKeyConfig{}.LoadOrGenerateAndSave(filepath.Join(n.Dirs.DataDir, "nodekey"))
 	if err != nil {
