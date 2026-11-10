@@ -6,6 +6,7 @@ import (
 	"errors"
 	"math"
 	"os"
+	"slices"
 	"sync"
 	"time"
 
@@ -67,7 +68,7 @@ type PeerDas interface {
 	// between fromSlot and toSlot without them.
 	BackfillCustodyColumns(fromSlot, toSlot uint64)
 	IsDataAvailable(slot uint64, blockRoot common.Hash) (bool, error)
-	ImportColumnsFromBlobs(ctx context.Context, block *cltypes.SignedBeaconBlock, blobs [][]byte, cellProofs [][][]byte) error
+	ImportColumnsFromBlobs(ctx context.Context, block *cltypes.SignedBeaconBlock, blobs [][]byte, cellProofs [][][]byte) ([]*cltypes.DataColumnSidecar, error)
 	PruneBelow(slot uint64) error
 	UpdateValidatorsCustody(cgc uint64)
 	TryScheduleRecover(slot uint64, blockRoot common.Hash) error
@@ -77,6 +78,8 @@ type PeerDas interface {
 	StateReader() peerdasstate.PeerDasStateReader
 	SyncColumnDataLater(block *cltypes.SignedBeaconBlock) error
 	SetForkChoice(forkChoice BlockGetter) // [New in Gloas:EIP7732]
+	// SetColumnPublisher sets how recovered columns are published. It must be called before Start.
+	SetColumnPublisher(publish func(ctx context.Context, sidecars []*cltypes.DataColumnSidecar))
 }
 
 var numOfBlobRecoveryWorkers = 8
@@ -127,6 +130,7 @@ type peerdas struct {
 	indiciesDB     kv.RwDB
 	gloasDataCache *lru.Cache[common.Hash, *gloasBlockData] // cache for GLOAS block data (~1KB per entry)
 	startOnce      sync.Once
+	publishColumns func(ctx context.Context, sidecars []*cltypes.DataColumnSidecar)
 }
 
 func NewPeerDas(
@@ -218,6 +222,10 @@ func (d *peerdas) StateReader() peerdasstate.PeerDasStateReader {
 // [New in Gloas:EIP7732]
 func (d *peerdas) SetForkChoice(forkChoice BlockGetter) {
 	d.forkChoice = forkChoice
+}
+
+func (d *peerdas) SetColumnPublisher(publish func(ctx context.Context, sidecars []*cltypes.DataColumnSidecar)) {
+	d.publishColumns = publish
 }
 
 // getGloasData retrieves the GLOAS block data (kzg_commitments and SignedBlockHeader) for sidecar verification.
@@ -420,26 +428,40 @@ func (d *peerdas) IsDataAvailable(slot uint64, blockRoot common.Hash) (bool, err
 	return d.isMyColumnDataAvailable(slot, blockRoot)
 }
 
+// ColumnsToStore reports which data columns of a block this node keeps: its custody columns, or all of them in archive
+// mode or when the custody set is unknown.
+func ColumnsToStore(d PeerDas) func(columnIndex uint64) bool {
+	all := func(uint64) bool { return true }
+	if d == nil || d.IsArchivedMode() {
+		return all
+	}
+	custody, err := d.StateReader().GetMyCustodyColumns()
+	if err != nil || len(custody) == 0 {
+		return all
+	}
+	return func(columnIndex uint64) bool { return custody[columnIndex] }
+}
+
 func (d *peerdas) isMyColumnDataAvailable(slot uint64, blockRoot common.Hash) (bool, error) {
 	expectedCustodies, err := d.state.GetMyCustodyColumns()
 	if err != nil {
 		return false, err
 	}
-	existingColumns, err := d.columnStorage.GetSavedColumnIndex(context.Background(), slot, blockRoot)
-	if err != nil {
-		return false, err
-	}
 	if len(expectedCustodies) == 0 {
 		// this case is not reasonable due to empty node ID
+		existingColumns, err := d.columnStorage.GetSavedColumnIndex(context.Background(), slot, blockRoot)
+		if err != nil {
+			return false, err
+		}
 		return len(existingColumns) == int(d.beaconConfig.NumberOfColumns), nil
 	}
-	nowCustodies := map[cltypes.CustodyIndex]bool{}
-	for _, column := range existingColumns {
-		if _, ok := expectedCustodies[column]; ok {
-			nowCustodies[column] = true
+	for column := range expectedCustodies {
+		exists, err := d.columnStorage.ColumnSidecarExists(context.Background(), slot, blockRoot, int64(column))
+		if err != nil || !exists {
+			return false, err
 		}
 	}
-	return len(nowCustodies) == len(expectedCustodies), nil
+	return true, nil
 }
 
 func (d *peerdas) resubscribeGossip() {
@@ -1240,6 +1262,16 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 		d.removeBlobRecoveryResult(blockRoot)
 		log.Trace("[blobsRecover] saved blobs", "slot", slot, "blockRoot", blockRoot, "numberOfBlobs", numberOfBlobs)
 
+		// Columns stored while the matrix was recovered need no rebuild. The union keeps the earlier indices when a prune
+		// has dropped the block's columns meanwhile.
+		if stored, err := d.columnStorage.GetSavedColumnIndex(ctx, slot, blockRoot); err != nil {
+			log.Warn("[blobsRecover] failed to get saved column index after recovering the matrix", "err", err, "slot", slot, "blockRoot", blockRoot)
+		} else {
+			existingColumns = slices.Concat(existingColumns, stored)
+			slices.Sort(existingColumns)
+			existingColumns = slices.Compact(existingColumns)
+		}
+
 		// remove column sidecars that are not in our custody group
 		custodyColumns, err := d.state.GetMyCustodyColumns()
 		if err != nil {
@@ -1257,66 +1289,78 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 			log.Warn("[blobsRecover] failed to remove column sidecars", "err", err, "slot", slot, "blockRoot", blockRoot, "columns", toRemove)
 		}
 		timeRemoveColumns := time.Since(beginRemoveColumns)
-		// add custody data column if it doesn't exist
+		// Reconstructed columns are published on the subnets this node subscribes to, and stored if in custody. Recovery
+		// runs only on an archive node or a supernode, and a supernode has every column in custody.
+		subscribedToAll := d.publishColumns != nil && d.IsArchivedMode()
+		var toPublish []*cltypes.DataColumnSidecar
 		beginAddColumns := time.Now()
-		for columnIndex := range custodyColumns {
-			exist, err := d.columnStorage.ColumnSidecarExists(ctx, slot, blockRoot, int64(columnIndex))
-			if err != nil {
-				log.Warn("[blobsRecover] failed to check if column sidecar exists", "err", err, "slot", slot, "blockRoot", blockRoot, "column", columnIndex)
+		for columnIndex := range d.beaconConfig.NumberOfColumns {
+			_, inCustody := custodyColumns[columnIndex]
+			if !inCustody && !subscribedToAll || slices.Contains(existingColumns, columnIndex) {
 				continue
 			}
-			if !exist {
-				blobSize := anyColumnSidecar.Column.Len()
-				version := d.beaconConfig.GetCurrentStateVersion(slot / d.beaconConfig.SlotsPerEpoch)
-				sidecar := cltypes.NewDataColumnSidecarWithVersion(version)
-				sidecar.Index = columnIndex
-				// [Modified in Gloas:EIP7732] GLOAS sidecars don't have KzgCommitmentsInclusionProof and KzgCommitments
-				if isGloas {
-					sidecar.Slot = slot
-					sidecar.BeaconBlockRoot = blockRoot
-				} else {
-					sidecar.SignedBlockHeader = anyColumnSidecar.SignedBlockHeader
-					sidecar.KzgCommitmentsInclusionProof = anyColumnSidecar.KzgCommitmentsInclusionProof
-					sidecar.KzgCommitments = anyColumnSidecar.KzgCommitments
-				}
-				for i := range blobSize {
-					// cell
-					sidecar.Column.Append(&blobMatrix[i][columnIndex].Cell)
-					// kzg proof
-					sidecar.KzgProofs.Append(&blobMatrix[i][columnIndex].KzgProof)
-				}
-				// verify the sidecar
-				// [Modified in Gloas:EIP7732] Version-aware verification
-				if isGloas {
-					if !VerifyDataColumnSidecarWithCommitments(sidecar, kzgCommitmentsFromBlock) {
-						log.Warn("[blobsRecover] failed to verify column sidecar (GLOAS)", "slot", slot, "blockRoot", blockRoot, "column", columnIndex)
-						continue
-					}
-					if !VerifyDataColumnSidecarKZGProofsWithCommitments(sidecar, kzgCommitmentsFromBlock) {
-						log.Warn("[blobsRecover] failed to verify column sidecar kzg proofs (GLOAS)", "slot", slot, "blockRoot", blockRoot, "column", columnIndex)
-						continue
-					}
-				} else {
-					if !VerifyDataColumnSidecar(sidecar) {
-						log.Warn("[blobsRecover] failed to verify column sidecar", "slot", slot, "blockRoot", blockRoot, "column", columnIndex)
-						continue
-					}
-					if !VerifyDataColumnSidecarInclusionProof(sidecar) {
-						log.Warn("[blobsRecover] failed to verify column sidecar inclusion proof", "slot", slot, "blockRoot", blockRoot, "column", columnIndex)
-						continue
-					}
-					if !VerifyDataColumnSidecarKZGProofs(sidecar) {
-						log.Warn("[blobsRecover] failed to verify column sidecar kzg proofs", "slot", slot, "blockRoot", blockRoot, "column", columnIndex)
-						continue
-					}
-				}
-				// save the sidecar to the column storage
-				if err := d.columnStorage.WriteColumnSidecars(ctx, blockRoot, int64(columnIndex), sidecar); err != nil {
-					log.Warn("[blobsRecover] failed to write column sidecar", "err", err, "slot", slot, "blockRoot", blockRoot, "column", columnIndex)
+			blobSize := anyColumnSidecar.Column.Len()
+			version := d.beaconConfig.GetCurrentStateVersion(slot / d.beaconConfig.SlotsPerEpoch)
+			sidecar := cltypes.NewDataColumnSidecarWithVersion(version)
+			sidecar.Index = columnIndex
+			// [Modified in Gloas:EIP7732] GLOAS sidecars don't have KzgCommitmentsInclusionProof and KzgCommitments
+			if isGloas {
+				sidecar.Slot = slot
+				sidecar.BeaconBlockRoot = blockRoot
+			} else {
+				sidecar.SignedBlockHeader = anyColumnSidecar.SignedBlockHeader
+				sidecar.KzgCommitmentsInclusionProof = anyColumnSidecar.KzgCommitmentsInclusionProof
+				sidecar.KzgCommitments = anyColumnSidecar.KzgCommitments
+			}
+			for i := range blobSize {
+				// cell
+				sidecar.Column.Append(&blobMatrix[i][columnIndex].Cell)
+				// kzg proof
+				sidecar.KzgProofs.Append(&blobMatrix[i][columnIndex].KzgProof)
+			}
+			// verify the sidecar
+			// [Modified in Gloas:EIP7732] Version-aware verification
+			if isGloas {
+				if !VerifyDataColumnSidecarWithCommitments(sidecar, kzgCommitmentsFromBlock) {
+					log.Warn("[blobsRecover] failed to verify column sidecar (GLOAS)", "slot", slot, "blockRoot", blockRoot, "column", columnIndex)
 					continue
 				}
-				log.Trace("[blobsRecover] added a custody data column", "slot", slot, "blockRoot", blockRoot, "column", columnIndex)
+				if !VerifyDataColumnSidecarKZGProofsWithCommitments(sidecar, kzgCommitmentsFromBlock) {
+					log.Warn("[blobsRecover] failed to verify column sidecar kzg proofs (GLOAS)", "slot", slot, "blockRoot", blockRoot, "column", columnIndex)
+					continue
+				}
+			} else {
+				if !VerifyDataColumnSidecar(sidecar) {
+					log.Warn("[blobsRecover] failed to verify column sidecar", "slot", slot, "blockRoot", blockRoot, "column", columnIndex)
+					continue
+				}
+				if !VerifyDataColumnSidecarInclusionProof(sidecar) {
+					log.Warn("[blobsRecover] failed to verify column sidecar inclusion proof", "slot", slot, "blockRoot", blockRoot, "column", columnIndex)
+					continue
+				}
+				if !VerifyDataColumnSidecarKZGProofs(sidecar) {
+					log.Warn("[blobsRecover] failed to verify column sidecar kzg proofs", "slot", slot, "blockRoot", blockRoot, "column", columnIndex)
+					continue
+				}
 			}
+			if !inCustody {
+				toPublish = append(toPublish, sidecar)
+				continue
+			}
+			// A published column is marked seen, so a column that failed to write is left for a gossip copy to store.
+			if err := d.columnStorage.WriteColumnSidecars(ctx, blockRoot, int64(columnIndex), sidecar); err != nil {
+				log.Warn("[blobsRecover] failed to write column sidecar", "err", err, "slot", slot, "blockRoot", blockRoot, "column", columnIndex)
+				continue
+			}
+			toPublish = append(toPublish, sidecar)
+			log.Trace("[blobsRecover] added a custody data column", "slot", slot, "blockRoot", blockRoot, "column", columnIndex)
+		}
+		if d.publishColumns != nil && len(toPublish) > 0 {
+			go func() {
+				ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), d.slotDuration())
+				defer cancel()
+				d.publishColumns(ctx, toPublish)
+			}()
 		}
 		timeAddColumns := time.Since(beginAddColumns)
 		log.Debug("[blobsRecover] recovering done", "slot", slot, "blockRoot", blockRoot, "numberOfBlobs", numberOfBlobs, "elapsedTime", time.Since(begin),
@@ -1604,12 +1648,12 @@ mainloop:
 			log.Debug("received column sidecars", "pid", result.pid, "reqLength", result.reqLength, "count", len(result.sidecars))
 			if len(result.sidecars) > result.reqLength {
 				log.Debug("rejecting over-cardinality column response", "pid", result.pid, "reqLength", result.reqLength, "count", len(result.sidecars))
-				d.rpc.BanPeer(result.pid)
+				d.rpc.BanPeerForInvalidData(ctx, result.pid)
 				continue
 			}
 			resolved := make([]resolvedColumn, len(result.sidecars))
 			seen := make(map[requestedDataColumn]struct{}, len(result.sidecars))
-			validResponse := true
+			validResponse, unverifiedSignatureMismatch := true, false
 			for i, sidecar := range result.sidecars {
 				if sidecar == nil {
 					validResponse = false
@@ -1627,8 +1671,7 @@ mainloop:
 				}
 				metadata := req.recovery(blockRoot)
 				if sidecar.Version() < clparams.GloasVersion && metadata != nil && sidecar.SignedBlockHeader.Signature != metadata.signature {
-					validResponse = false
-					break
+					unverifiedSignatureMismatch = true
 				}
 				if _, duplicate := seen[key]; duplicate {
 					validResponse = false
@@ -1639,11 +1682,23 @@ mainloop:
 			}
 			if !validResponse {
 				log.Debug("rejecting malformed, schema-inconsistent, or unrequested column response", "pid", result.pid)
-				d.rpc.BanPeer(result.pid)
+				d.rpc.BanPeerForInvalidData(ctx, result.pid)
 				continue
+			}
+			if unverifiedSignatureMismatch {
+				// Backfill stores blocks without verifying their signature, so the stored one may be the forged side.
+				log.Debug("rejecting column response with a signature that differs from the stored block", "pid", result.pid)
+				if slices.ContainsFunc(result.sidecars, invalidFuluSidecar) {
+					d.rpc.BanPeerForInvalidData(ctx, result.pid)
+					continue
+				}
+				d.rpc.BanPeer(result.pid)
 			}
 			var wg sync.WaitGroup
 			for i, sidecar := range result.sidecars {
+				if unverifiedSignatureMismatch && sidecar.Version() < clparams.GloasVersion {
+					continue
+				}
 				wg.Go(func() {
 					slot, blockRoot := resolved[i].slot, resolved[i].blockRoot
 					isGloasSidecar := sidecar.Version() >= clparams.GloasVersion
@@ -1662,7 +1717,6 @@ mainloop:
 					exist, err := d.columnStorage.ColumnSidecarExists(ctx, slot, blockRoot, int64(columnIndex))
 					if err != nil {
 						log.Debug("failed to check if column sidecar exists", "err", err)
-						d.rpc.BanPeer(result.pid)
 						return
 					}
 					if exist {
@@ -1672,7 +1726,7 @@ mainloop:
 					blobParameters := d.beaconConfig.GetBlobParameters(slot / d.beaconConfig.SlotsPerEpoch)
 					if sidecar.Column.Len() > int(blobParameters.MaxBlobsPerBlock) {
 						log.Warn("invalid column sidecar length", "blockRoot", blockRoot, "columnIndex", sidecar.Index, "columnLen", sidecar.Column.Len())
-						d.rpc.BanPeer(result.pid)
+						d.rpc.BanPeerForInvalidData(ctx, result.pid)
 						return
 					}
 
@@ -1686,29 +1740,29 @@ mainloop:
 						}
 						if !VerifyDataColumnSidecarWithCommitments(sidecar, kzgCommitments) {
 							log.Debug("failed to verify column sidecar (GLOAS)", "blockRoot", blockRoot, "columnIndex", sidecar.Index)
-							d.rpc.BanPeer(result.pid)
+							d.rpc.BanPeerForInvalidData(ctx, result.pid)
 							return
 						}
 						if !VerifyDataColumnSidecarKZGProofsWithCommitments(sidecar, kzgCommitments) {
 							log.Debug("failed to verify column sidecar kzg proofs (GLOAS)", "blockRoot", blockRoot, "columnIndex", sidecar.Index)
-							d.rpc.BanPeer(result.pid)
+							d.rpc.BanPeerForInvalidData(ctx, result.pid)
 							return
 						}
 					} else {
 						// Fulu: kzg_commitments are in the sidecar
 						if !VerifyDataColumnSidecar(sidecar) {
 							log.Debug("failed to verify column sidecar", "blockRoot", blockRoot, "columnIndex", sidecar.Index)
-							d.rpc.BanPeer(result.pid)
+							d.rpc.BanPeerForInvalidData(ctx, result.pid)
 							return
 						}
 						if !VerifyDataColumnSidecarInclusionProof(sidecar) {
 							log.Debug("failed to verify column sidecar inclusion proof", "blockRoot", blockRoot, "columnIndex", sidecar.Index)
-							d.rpc.BanPeer(result.pid)
+							d.rpc.BanPeerForInvalidData(ctx, result.pid)
 							return
 						}
 						if !VerifyDataColumnSidecarKZGProofs(sidecar) {
 							log.Debug("failed to verify column sidecar kzg proofs", "blockRoot", blockRoot, "columnIndex", sidecar.Index)
-							d.rpc.BanPeer(result.pid)
+							d.rpc.BanPeerForInvalidData(ctx, result.pid)
 							return
 						}
 					}
@@ -2272,4 +2326,10 @@ func (d *peerdas) syncColumnDataWorker(ctx context.Context) {
 			}
 		}()
 	}
+}
+
+// invalidFuluSidecar reports a pre-Gloas sidecar whose structure or proofs fail on their own, without the stored block.
+func invalidFuluSidecar(sidecar *cltypes.DataColumnSidecar) bool {
+	return sidecar.Version() < clparams.GloasVersion &&
+		(!VerifyDataColumnSidecar(sidecar) || !VerifyDataColumnSidecarInclusionProof(sidecar) || !VerifyDataColumnSidecarKZGProofs(sidecar))
 }

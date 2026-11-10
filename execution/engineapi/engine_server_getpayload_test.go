@@ -353,6 +353,10 @@ func (s *getPayloadStubModule) GetHeader(_ context.Context, _ *common.Hash, _ *u
 	panic("not implemented")
 }
 
+func (s *getPayloadStubModule) GetHeadersByRange(_ context.Context, _, _ uint64) ([]*types.Header, error) {
+	panic("not implemented")
+}
+
 func (s *getPayloadStubModule) GetBody(_ context.Context, _ *common.Hash, _ *uint64) (*types.RawBody, error) {
 	panic("not implemented")
 }

@@ -94,6 +94,93 @@ func TestRateLimiter_GoodbyeRecoversWithoutPunishment(t *testing.T) {
 	testRateLimiterRecoversWithoutPunishment(t, communication.GoodbyeProtocolV1, 1)
 }
 
+func TestRateLimiter_EnvelopeRebuildDebtRefills(t *testing.T) {
+	rl := newPeerRateLimiter()
+	now := time.Now()
+	rl.now = func() time.Time { return now }
+	peerID := "16Uiu2peer1"
+	key := peerProtocolKey{peerID: peerID, protocol: envelopeRebuildKey}
+
+	bucket := rl.tryStartEnvelopeRebuild(peerID)
+	require.NotNil(t, bucket)
+	rl.finishEnvelopeRebuild(bucket, 2*time.Second, true)
+	require.Nil(t, rl.tryStartEnvelopeRebuild(peerID))
+	setRateLimiterLastRefill(t, rl, key, now.Add(-2*time.Second))
+	bucket = rl.tryStartEnvelopeRebuild(peerID)
+	require.NotNil(t, bucket)
+	rl.finishEnvelopeRebuild(bucket, 0, false)
+}
+
+func TestRateLimiter_EnvelopeRebuildCreditIsCapped(t *testing.T) {
+	rl := newPeerRateLimiter()
+	now := time.Now()
+	rl.now = func() time.Time { return now }
+	peerID := "16Uiu2peer1"
+	key := peerProtocolKey{peerID: peerID, protocol: envelopeRebuildKey}
+
+	bucket := rl.tryStartEnvelopeRebuild(peerID)
+	require.NotNil(t, bucket)
+	rl.finishEnvelopeRebuild(bucket, 0, false)
+	setRateLimiterLastRefill(t, rl, key, now.Add(-time.Hour))
+	bucket = rl.tryStartEnvelopeRebuild(peerID)
+	require.NotNil(t, bucket)
+	rl.finishEnvelopeRebuild(bucket, 1500*time.Millisecond, true)
+	require.Nil(t, rl.tryStartEnvelopeRebuild(peerID))
+}
+
+func TestRateLimiter_EnvelopeRebuildChargeDoesNotRefillSlotTime(t *testing.T) {
+	rl := newPeerRateLimiter()
+	now := time.Now()
+	rl.now = func() time.Time { return now }
+	peerID := "16Uiu2peer1"
+
+	for range 3 {
+		bucket := rl.tryStartEnvelopeRebuild(peerID)
+		require.NotNil(t, bucket)
+		now = now.Add(500 * time.Millisecond)
+		rl.finishEnvelopeRebuild(bucket, 500*time.Millisecond, true)
+	}
+	require.Nil(t, rl.tryStartEnvelopeRebuild(peerID))
+}
+
+func TestRateLimiter_EnvelopeRebuildInProgressDoesNotRefillCredit(t *testing.T) {
+	rl := newPeerRateLimiter()
+	now := time.Now()
+	rl.now = func() time.Time { return now }
+	peerID := "16Uiu2peer1"
+
+	bucket := rl.tryStartEnvelopeRebuild(peerID)
+	require.NotNil(t, bucket)
+	rl.finishEnvelopeRebuild(bucket, time.Second, true)
+	bucket = rl.tryStartEnvelopeRebuild(peerID)
+	require.NotNil(t, bucket)
+	now = now.Add(2 * time.Second)
+	require.Nil(t, rl.tryStartEnvelopeRebuild(peerID))
+	rl.finishEnvelopeRebuild(bucket, 2*time.Second, true)
+	require.Nil(t, rl.tryStartEnvelopeRebuild(peerID))
+	now = now.Add(time.Second)
+	require.Nil(t, rl.tryStartEnvelopeRebuild(peerID))
+	now = now.Add(time.Second)
+	bucket = rl.tryStartEnvelopeRebuild(peerID)
+	require.NotNil(t, bucket)
+	rl.finishEnvelopeRebuild(bucket, 0, false)
+}
+
+func TestRateLimiter_EnvelopeRebuildFinishUsesAdmittedBucket(t *testing.T) {
+	rl := newPeerRateLimiter()
+	peerID := "16Uiu2peer1"
+	key := peerProtocolKey{peerID: peerID, protocol: envelopeRebuildKey}
+
+	first := rl.tryStartEnvelopeRebuild(peerID)
+	require.NotNil(t, first)
+	rl.buckets.Delete(key)
+	second := rl.tryStartEnvelopeRebuild(peerID)
+	require.NotNil(t, second)
+	rl.finishEnvelopeRebuild(first, 0, false)
+	require.Nil(t, rl.tryStartEnvelopeRebuild(peerID))
+	rl.finishEnvelopeRebuild(second, 0, false)
+}
+
 func TestRateLimiter_Concurrency(t *testing.T) {
 	rl := newPeerRateLimiter()
 	peer := "16Uiu2peer1"
@@ -154,11 +241,10 @@ func TestRateLimiter_PerItemCost(t *testing.T) {
 	require.False(t, rl.allowRequest(peer, proto, 1))
 }
 
-func TestRateLimiter_ConsumeTokensZeroCost(t *testing.T) {
+func TestRateLimiter_ConsumeTokensNonPositiveCost(t *testing.T) {
 	rl := newPeerRateLimiter()
-	// Zero and negative costs should always succeed.
 	require.True(t, rl.consumeTokens("peer1", communication.PingProtocolV1, 0))
-	require.True(t, rl.consumeTokens("peer1", communication.PingProtocolV1, -5))
+	require.False(t, rl.consumeTokens("peer1", communication.PingProtocolV1, -5))
 }
 
 func TestRateLimiter_PunishmentDrainsBucket(t *testing.T) {

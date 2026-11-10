@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
@@ -122,12 +123,16 @@ func (c ChainReaderWriterEth1) GetBlockByNumber(ctx context.Context, number uint
 }
 
 func (c ChainReaderWriterEth1) GetHeaderByHash(ctx context.Context, hash common.Hash) *types.Header {
-	h, err := c.executionModule.GetHeader(ctx, &hash, nil)
+	h, err := c.HeaderByHash(ctx, hash)
 	if err != nil {
 		log.Warn("[engine] GetHeaderByHash", "err", err)
 		return nil
 	}
 	return h
+}
+
+func (c ChainReaderWriterEth1) HeaderByHash(ctx context.Context, hash common.Hash) (*types.Header, error) {
+	return c.executionModule.GetHeader(ctx, &hash, nil)
 }
 
 func (c ChainReaderWriterEth1) GetHeaderByNumber(ctx context.Context, number uint64) *types.Header {
@@ -215,6 +220,9 @@ func (c ChainReaderWriterEth1) IsValidated(hash common.Hash) bool {
 func (c ChainReaderWriterEth1) FrozenBlocks(ctx context.Context) (uint64, bool) {
 	frozen, hasGap, err := c.executionModule.FrozenBlocks(ctx)
 	if err != nil {
+		if ctx.Err() != nil {
+			return 0, false
+		}
 		panic(err)
 	}
 	return frozen, hasGap
@@ -229,6 +237,13 @@ func (c ChainReaderWriterEth1) InsertBlocks(ctx context.Context, blocks []*types
 		return fmt.Errorf("InsertBlocks: invalid code received from execution module: %s", status)
 	}
 	return nil
+}
+
+func (c ChainReaderWriterEth1) StartSendersRecovery(ctx context.Context, blockHash common.Hash, header *types.Header, txns types.Transactions) {
+	if len(txns) == 0 {
+		return
+	}
+	c.executionModule.AddSendersRecovery(blockHash, exec.StartSendersRecovery(ctx, types.MakeSigner(c.cfg, header.Number.Uint64(), header.Time), txns))
 }
 
 func (c ChainReaderWriterEth1) InsertBlock(ctx context.Context, block *types.Block) error {

@@ -63,11 +63,15 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 		}
 
 		collectExecution := shouldInsert && block.Version() >= clparams.BellatrixVersion && block.Version() < clparams.GloasVersion
+		previousWrite := cfg.pendingBlockWrite
 		if err = processBlock(ctx, cfg, block, false); err != nil {
-			// Forward sync skips NewPayload, so a pending write must also retain the
-			// collector insertion that would otherwise be lost on a stage transition.
-			if collectExecution && cfg.pendingBlockWrite != nil && cfg.pendingBlockWrite.block == block {
-				cfg.pendingBlockWrite.collectExecution = true
+			if cfg.pendingBlockWrite != nil {
+				// Forward sync skips NewPayload, so a new pending write must retain its
+				// collector insertion. A failed retry must keep the earlier write unchanged.
+				if collectExecution && cfg.pendingBlockWrite != previousWrite {
+					cfg.pendingBlockWrite.collectExecution = true
+				}
+				return newHighestBlockProcessed, fmt.Errorf("%w: persist accepted block: %w", network2.ErrUnattributableProcess, err)
 			}
 			if errors.Is(err, forkchoice.ErrEIP4844DataNotAvailable) || errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
 				logger.Trace("[Caplin] forward sync data not available", "blockSlot", block.Block.Slot, "err", err)
@@ -123,7 +127,7 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 		// the payload is delivered separately via a SignedExecutionPayloadEnvelope.
 		if block.Version() >= clparams.GloasVersion {
 			if env, ok := envelopes[blockRoot]; ok {
-				if err = processDownloadedGloasEnvelope(ctx, logger, cfg.forkChoice, cfg.blockCollector, block.Block, blockRoot, env, shouldInsert, shouldValidateForwardSyncPayload(cfg, shouldInsert)); err != nil {
+				if err = processDownloadedGloasEnvelope(ctx, logger, cfg.forkChoice, cfg.blockCollector, block.Block, blockRoot, env, shouldInsert, shouldValidateForwardSyncPayload(cfg, shouldInsert), false); err != nil {
 					return highestBlockProcessed, fmt.Errorf("%w: %w", network2.ErrUnattributableProcess, err)
 				}
 			}
@@ -136,7 +140,7 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 						err = fmt.Errorf("failed to dump state: %w", err)
 						return
 					}
-					if err = saveFinalizedStateOnDiskIfNeeded(cfg.forkChoice, cfg.beaconCfg, cfg.dirs, st.Slot()); err != nil {
+					if err = saveFinalizedStateOnDiskIfNeeded(cfg.forkChoice, cfg.beaconCfg, cfg.dirs, st.Slot(), &cfg.savedFinalizedRoot); err != nil {
 						err = fmt.Errorf("failed to save finalized state: %w", err)
 						return
 					}
@@ -154,7 +158,7 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 					err = fmt.Errorf("failed to dump state: %w", err)
 					return
 				}
-				if err = saveFinalizedStateOnDiskIfNeeded(cfg.forkChoice, cfg.beaconCfg, cfg.dirs, st.Slot()); err != nil {
+				if err = saveFinalizedStateOnDiskIfNeeded(cfg.forkChoice, cfg.beaconCfg, cfg.dirs, st.Slot(), &cfg.savedFinalizedRoot); err != nil {
 					err = fmt.Errorf("failed to save finalized state: %w", err)
 					return
 				}
@@ -178,12 +182,14 @@ type gloasBlockCollector interface {
 	AddGloasBlock(*cltypes.BeaconBlock, *cltypes.SignedExecutionPayloadEnvelope) error
 }
 
-func processDownloadedGloasEnvelope(ctx context.Context, logger log.Logger, store forkchoice.ForkChoiceStorage, collector gloasBlockCollector, block *cltypes.BeaconBlock, blockRoot common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope, shouldInsert, validate bool) error {
-	err := store.OnExecutionPayload(ctx, envelope, false, validate)
+func processDownloadedGloasEnvelope(ctx context.Context, logger log.Logger, store forkchoice.ForkChoiceStorage, collector gloasBlockCollector, block *cltypes.BeaconBlock, blockRoot common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope, shouldInsert, validate, checkBlobData bool) error {
+	err := store.OnExecutionPayload(ctx, envelope, checkBlobData, validate)
 	persisted := errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeIndicesPending) ||
 		(errors.Is(err, forkchoice.ErrIgnore) && persistedEnvelopeMatches(store, blockRoot, envelope))
 	if err != nil && !persisted {
-		logger.Warn("[Caplin] forward sync: failed to process GLOAS envelope", "slot", block.Slot, "err", err)
+		if !errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
+			logger.Warn("[Caplin] forward sync: failed to process GLOAS envelope", "slot", block.Slot, "err", err)
+		}
 		return err
 	}
 	if shouldInsert {
@@ -305,10 +311,45 @@ func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) er
 	}
 	lastProgressTime := time.Now()
 	lastProgressSlot := currentSlot.Load()
+	endedAtTip := false
+	importTip := func(tip *cltypes.SignedBeaconBlock, root common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope, receivedAt time.Time) bool {
+		if _, known := cfg.forkChoice.GetHeader(root); !known {
+			return false
+		}
+		if envelope == nil {
+			return true
+		}
+		// The apply checks data availability before the signature, and may not check the signature at all.
+		err := cfg.forkChoice.ValidateExecutionPayloadEnvelopeForGossip(envelope)
+		if err == nil {
+			err = cltypes.ValidateExecutionPayloadEnvelopeBidCommitments(cfg.beaconCfg, tip, envelope)
+		}
+		if err != nil {
+			logger.Debug("[Caplin] forward sync: tip envelope failed validation", "slot", tip.Block.Slot, "root", root, "err", err)
+			return false
+		}
+		cfg.forkChoice.RecordExecutionPayloadArrival(root, tip.Block.Slot, receivedAt)
+		err = processDownloadedGloasEnvelope(ctx, logger, cfg.forkChoice, cfg.blockCollector, tip.Block, root, envelope, shouldInsert, shouldValidateForwardSyncPayload(cfg, shouldInsert), true)
+		if errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
+			logger.Debug("[Caplin] forward sync: tip envelope waits for its column data", "slot", tip.Block.Slot, "root", root)
+			// Fork choice does not schedule the download while the head is unpublished.
+			if cfg.peerDas != nil {
+				if err := cfg.peerDas.SyncColumnDataLater(tip); err != nil {
+					logger.Warn("[Caplin] forward sync: failed to schedule the tip's column download", "slot", tip.Block.Slot, "root", root, "err", err)
+				}
+			}
+			return true
+		}
+		return err == nil
+	}
 
 	// Run the log loop until the highest processed slot reaches the chain tip slot
 	for downloader.GetHighestProcessedSlot() < chainTipSlot {
-		downloader.RequestMore(ctx)
+		if downloader.RequestMore(ctx) && downloader.ImportHeldGloasTip(ctx, gloasPayloadRetryBudget, importTip) {
+			endedAtTip = true
+			logger.Info("[Caplin] Forward sync ended at a Gloas tip without a successor", "slot", downloader.GetHighestProcessedSlot())
+			break
+		}
 
 		// Detect stale progress: if no new slots processed for staleTimeout, exit.
 		// ChainTipSync will take over using gossip, which works better near the chain tip.
@@ -352,6 +393,10 @@ func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) er
 		if err := cfg.blockCollector.Flush(ctx); err != nil {
 			logger.Warn("[Caplin] Forward sync: failed to flush the block collector", "err", err)
 		}
+	}
+	if endedAtTip {
+		cfg.forwardSyncTipRoot = cfg.forkChoice.HighestSeenRoot()
+		cfg.forwardSyncTipSlot = cfg.ethClock.GetCurrentSlot()
 	}
 	requestCustodyBackfill(cfg, startSlot, currentSlot.Load())
 	return nil
@@ -454,7 +499,9 @@ func ensureAnchorEnvelopeOnce(ctx context.Context, cfg *Cfg) error {
 		} else {
 			// Fall back to P2P (root-specific request)
 			log.Info("[Caplin] HTTP anchor envelope unavailable or ahead of local anchor, trying P2P...", "anchorSlot", anchorSlot)
-			envMap, err := network2.RequestEnvelopesFrantically(ctx, cfg.rpc, [][32]byte{anchorRoot})
+			envMap, err := network2.RequestEnvelopesFrantically(ctx, cfg.rpc, [][32]byte{anchorRoot}, func(env *cltypes.SignedExecutionPayloadEnvelope) error {
+				return validateAnchorEnvelope(cfg.beaconCfg, anchorState, common.Hash(anchorRoot), bid, env)
+			}, nil)
 			if err != nil {
 				return fmt.Errorf("failed to request anchor envelope: %w", err)
 			}
@@ -512,7 +559,7 @@ func validateAnchorPayloadWithExecutionClient(ctx context.Context, cfg *Cfg, anc
 }
 
 func validateAnchorEnvelope(beaconCfg *clparams.BeaconChainConfig, anchorState *state.CachingBeaconState, anchorRoot common.Hash, bid *cltypes.ExecutionPayloadBid, env *cltypes.SignedExecutionPayloadEnvelope) error {
-	if err := network2.ValidateGloasEnvelopeAgainstBid(beaconCfg, anchorRoot, bid, env); err != nil {
+	if err := cltypes.ValidateGloasEnvelopeAgainstBid(beaconCfg, anchorRoot, bid, env); err != nil {
 		return err
 	}
 	return verifyAnchorEnvelopeSignature(beaconCfg, anchorState, env, bid.Slot)

@@ -72,7 +72,7 @@ func newTestBbd(t *testing.T, fetcher Fetcher) *BackwardBlockDownloader {
 	logger := testlog.Logger(t, log.LvlCrit)
 	peerTracker := NewPeerTracker(logger, nil)
 	peerTracker.PeerConnected(PeerIdFromUint64(1))
-	return NewBackwardBlockDownloader(logger, fetcher, &PeerPenalizer{}, peerTracker, t.TempDir())
+	return NewBackwardBlockDownloader(logger, fetcher, peerTracker, t.TempDir())
 }
 
 // EL behind the requested header by more than the limit: fail-fast at initial-header step.
@@ -150,6 +150,40 @@ func (f balFetcherFunc) Fetch(ctx context.Context, reqs []BALRequest, _ *PeerId,
 	return f(ctx, reqs)
 }
 
+func TestBackwardBlockDownloader_DiscardsBALWithInvalidBlockAccessIndex(t *testing.T) {
+	bal := types.NewBlockAccessListSidecar(types.BlockAccessList{{
+		Address:      common.Address{1},
+		NonceChanges: []*types.NonceChange{{Index: 2, Value: 1}},
+	}})
+	gasLimit := uint64(types.BalItemCost)
+	require.NoError(t, bal.ValidateForHeader(gasLimit))
+	require.ErrorIs(t, bal.ValidateForBlock(gasLimit, 0), types.ErrInvalidBlockAccessList)
+	balHash, err := bal.Hash()
+	require.NoError(t, err)
+	withdrawalsHash := empty.RootHash
+	header := &types.Header{
+		Number:              *uint256.NewInt(1),
+		GasLimit:            gasLimit,
+		TxHash:              empty.RootHash,
+		UncleHash:           empty.UncleHash,
+		WithdrawalsHash:     &withdrawalsHash,
+		BlockAccessListHash: &balHash,
+	}
+	bbd := newTestBbd(t, &bodyServingBbdFetcher{})
+	bbd.balFetcher = balFetcherFunc(func(_ context.Context, _ []BALRequest) map[common.Hash]*types.BlockAccessListSidecar {
+		return map[common.Hash]*types.BlockAccessListSidecar{header.Hash(): bal}
+	})
+	feed := BbdResultFeed{ch: make(chan BlockBatchResult, 1)}
+	ticker := time.NewTicker(time.Hour)
+	defer ticker.Stop()
+	require.NoError(t, bbd.downloadBlocksForHeaders(t.Context(), []*types.Header{header}, peersContext{}, defaultBbdRequestConfig, ticker, feed))
+	batch, err := feed.Next(t.Context())
+	require.NoError(t, err)
+	require.Len(t, batch.Blocks, 1)
+	require.Equal(t, header.Hash(), batch.Blocks[0].Hash())
+	require.Nil(t, batch.Blocks[0].BlockAccessListSidecar())
+}
+
 func TestBackwardBlockDownloader_CancelsBALFetchOnBodyFailure(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
@@ -176,6 +210,7 @@ func TestBackwardBlockDownloader_CancelsBALFetchOnBodyFailure(t *testing.T) {
 		withdrawalsHash := empty.RootHash
 		header := &types.Header{
 			Number:              *uint256.NewInt(1),
+			GasLimit:            types.BalItemCost,
 			TxHash:              empty.RootHash,
 			UncleHash:           empty.UncleHash,
 			WithdrawalsHash:     &withdrawalsHash,
@@ -255,7 +290,7 @@ func requireBbdDeliversChain(t *testing.T, fetcher Fetcher, headers []*types.Hea
 	for i := uint64(1); i <= peers; i++ {
 		peerTracker.PeerConnected(PeerIdFromUint64(i))
 	}
-	bbd := NewBackwardBlockDownloader(logger, NewTrackingFetcher(fetcher, peerTracker), &PeerPenalizer{}, peerTracker, t.TempDir())
+	bbd := NewBackwardBlockDownloader(logger, NewTrackingFetcher(fetcher, peerTracker), peerTracker, t.TempDir())
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	feed, err := bbd.DownloadBlocksBackwards(ctx, headers[len(headers)-1].Hash(), fixedHeaderReader{headers[0]}, WithBlocksBatchSize(10))
@@ -274,7 +309,7 @@ func TestBackwardBlockDownloader_DeliversBlocksDespitePersistentBALDeficit(t *te
 	logger := testlog.Logger(t, log.LvlCrit)
 	peerTracker := NewPeerTracker(logger, nil)
 	peerTracker.PeerConnected(PeerIdFromUint64(1))
-	bbd := NewBackwardBlockDownloader(logger, fetcher, &PeerPenalizer{}, peerTracker, t.TempDir(), WithBALFetcher(balFetcher))
+	bbd := NewBackwardBlockDownloader(logger, fetcher, peerTracker, t.TempDir(), WithBALFetcher(balFetcher))
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	feed, err := bbd.DownloadBlocksBackwards(ctx, initial.Hash(), fixedHeaderReader{headers[0]})

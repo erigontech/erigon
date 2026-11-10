@@ -555,7 +555,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			return nil, execErr
 		}
 		if ot.Tracer() != nil && ot.Tracer().Hooks.HasTxEndHook() {
-			ot.Tracer().EmitTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, execResult.TxnGasUsage, nil)
+			ot.Tracer().EmitTxEnd(execResult.ReceiptForTracing(), execResult.TxnGasUsage, nil)
 		}
 		traceResult.Output = bytes.Clone(execResult.ReturnData)
 		if err := ethapi.FinalizeCallTx(ibs, evm.ChainRules()); err != nil {
@@ -768,7 +768,7 @@ func (api *TraceAPIImpl) callBlock(
 	// The block-start system calls come before tx 0, as block execution runs them.
 	ibs.SetTxContext(block.NumberU64(), -1)
 
-	logger := log.New("trace_filtering")
+	logger := log.New("component", "trace_filtering")
 	consensusHeaderReader := consensuschain.NewReader(cfg, dbtx, api._blockReader, logger)
 	err = protocol.InitializeBlockExecution(engine.(protocolrules.Engine), consensusHeaderReader, block.HeaderNoCopy(), cfg, ibs, nil, logger, nil)
 	if err != nil {
@@ -1004,7 +1004,7 @@ func (api *TraceAPIImpl) doCallBlockParallel(
 				}
 
 				if tracer.Hooks.HasTxEndHook() {
-					tracer.Hooks.EmitTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, execResult.TxnGasUsage, nil)
+					tracer.Hooks.EmitTxEnd(execResult.ReceiptForTracing(), execResult.TxnGasUsage, nil)
 				}
 
 				if err := ethapi.FinalizeCallTx(workerIbs, chainRules); err != nil {
@@ -1082,7 +1082,7 @@ func (api *TraceAPIImpl) callTransaction(
 	defer ibs.Close()
 	transactions.VersionedCallState(ibs)
 
-	logger := log.New("trace_filtering")
+	logger := log.New("component", "trace_filtering")
 	consensusHeaderReader := consensuschain.NewReader(cfg, dbtx, api._blockReader, logger)
 	err = protocol.InitializeBlockExecution(engine.(protocolrules.Engine), consensusHeaderReader, header, cfg, ibs, nil, logger, nil)
 	if err != nil {

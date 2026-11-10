@@ -18,6 +18,7 @@ package ethutils
 
 import (
 	"encoding/json"
+	"slices"
 
 	"github.com/holiman/uint256"
 
@@ -25,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
@@ -36,19 +38,21 @@ import (
 
 // RPCReceipt is the RPC form of a receipt.
 type RPCReceipt struct {
-	BlockHash         common.Hash     `json:"blockHash" ethjson:"data"`
-	BlockNumber       hexutil.Uint64  `json:"blockNumber" ethjson:"quantity"`
-	TransactionHash   common.Hash     `json:"transactionHash" ethjson:"data"`
-	TransactionIndex  hexutil.Uint64  `json:"transactionIndex" ethjson:"quantity"`
-	From              *common.Address `json:"from" ethjson:"data"`
-	To                *common.Address `json:"to" ethjson:"data"`
-	Type              hexutil.Uint    `json:"type" ethjson:"quantity"`
-	GasUsed           hexutil.Uint64  `json:"gasUsed" ethjson:"quantity"`
-	CumulativeGasUsed hexutil.Uint64  `json:"cumulativeGasUsed" ethjson:"quantity"`
-	ContractAddress   *common.Address `json:"contractAddress" ethjson:"data"`
-	Logs              types.Logs      `json:"logs" ethjson:"objects"`
-	LogsBloom         *types.Bloom    `json:"logsBloom" ethjson:"data"`
-	EffectiveGasPrice *hexutil.U256   `json:"effectiveGasPrice" ethjson:"quantity"`
+	Payer             *common.Address     `json:"payer,omitempty" ethjson:"data"`
+	FrameReceipts     types.FrameReceipts `json:"frameReceipts,omitempty" ethjson:"objects"`
+	BlockHash         common.Hash         `json:"blockHash" ethjson:"data"`
+	BlockNumber       hexutil.Uint64      `json:"blockNumber" ethjson:"quantity"`
+	TransactionHash   common.Hash         `json:"transactionHash" ethjson:"data"`
+	TransactionIndex  hexutil.Uint64      `json:"transactionIndex" ethjson:"quantity"`
+	From              *common.Address     `json:"from" ethjson:"data"`
+	To                *common.Address     `json:"to" ethjson:"data"`
+	Type              hexutil.Uint        `json:"type" ethjson:"quantity"`
+	GasUsed           hexutil.Uint64      `json:"gasUsed" ethjson:"quantity"`
+	CumulativeGasUsed hexutil.Uint64      `json:"cumulativeGasUsed" ethjson:"quantity"`
+	ContractAddress   *common.Address     `json:"contractAddress" ethjson:"data"`
+	Logs              types.Logs          `json:"logs" ethjson:"objects"`
+	LogsBloom         *types.Bloom        `json:"logsBloom" ethjson:"data"`
+	EffectiveGasPrice *hexutil.U256       `json:"effectiveGasPrice" ethjson:"quantity"`
 
 	Status       *hexutil.Uint64 `json:"status,omitempty" ethjson:"quantity"`
 	Root         hexutil.Bytes   `json:"root,omitempty" ethjson:"data"`
@@ -84,6 +88,7 @@ func MarshalReceipt(
 	}
 
 	var logsToMarshal types.Logs
+	frameReceiptsToMarshal := receipt.FrameReceipts
 
 	switch {
 	case withBlockTimestamp:
@@ -98,6 +103,11 @@ func MarshalReceipt(
 			stamped[i].log.BlockTimestamp = &stamped[i].timestamp
 			logsToMarshal[i] = &stamped[i].log
 		}
+		if len(receipt.FrameReceipts) > 0 {
+			stampedReceipt := types.Receipt{FrameReceipts: slices.Clone(receipt.FrameReceipts)}
+			stampedReceipt.SetLogs(logsToMarshal)
+			frameReceiptsToMarshal = stampedReceipt.FrameReceipts
+		}
 	case receipt.Logs == nil:
 		logsToMarshal = types.Logs{}
 	default:
@@ -105,6 +115,8 @@ func MarshalReceipt(
 	}
 
 	result := &RPCReceipt{
+		Payer:             receipt.Payer,
+		FrameReceipts:     frameReceiptsToMarshal,
 		BlockHash:         receipt.BlockHash,
 		BlockNumber:       hexutil.Uint64(receipt.BlockNumber.Uint64()),
 		TransactionHash:   receipt.TxHash,
@@ -211,6 +223,14 @@ func MarshalSubscribeReceipt(protoReceipt *remoteproto.SubscribeReceiptsReply) *
 		logs[i] = RPCLogFromProto(protoLog)
 	}
 	result.Logs = logs
+	result.Payer = addressOrNil(protoReceipt.Payer)
+	for _, frame := range protoReceipt.FrameReceipts {
+		frameLogs := make(types.Logs, len(frame.Logs))
+		for i, l := range frame.Logs {
+			frameLogs[i] = RPCLogFromProto(l)
+		}
+		result.FrameReceipts = append(result.FrameReceipts, types.FrameReceipt{Status: frame.Status, GasUsed: mdgas.MdGas{Execution: frame.ExecutionGasUsed, State: frame.StateGasUsed}, Logs: frameLogs})
+	}
 
 	// A backend that does not send the effective gas price yet leaves the base fee as the
 	// closest approximation it carries.

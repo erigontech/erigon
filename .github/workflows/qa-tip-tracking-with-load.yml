@@ -252,7 +252,7 @@ jobs:
           branch_name=$GITHUB_REF_NAME
          else
           branch_name="release"
-          commit=$(git -C $GETH_INSTALL_DIR rev-parse --short HEAD)
+          commit=$(git -c safe.directory="$GETH_INSTALL_DIR" -C "$GETH_INSTALL_DIR" rev-parse --short HEAD || echo no-version)
         fi
         
         # Detect the pre-built db version

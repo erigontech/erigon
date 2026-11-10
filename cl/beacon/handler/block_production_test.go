@@ -22,10 +22,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"math"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -36,6 +38,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/holiman/uint256"
 	libp2ppeer "github.com/libp2p/go-libp2p/core/peer"
+	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
@@ -43,6 +46,7 @@ import (
 	aggregation_mock "github.com/erigontech/erigon/cl/aggregation/mock_services"
 	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
+	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 	"github.com/erigontech/erigon/cl/beacon/builder"
 	builder_mock "github.com/erigontech/erigon/cl/beacon/builder/mock_services"
@@ -50,8 +54,12 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/das"
+	peerdasstate "github.com/erigontech/erigon/cl/das/state"
 	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/gossip"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
+	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	blob_storage_mock "github.com/erigontech/erigon/cl/persistence/blob_storage/mock_services"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
@@ -73,12 +81,14 @@ import (
 	sync_pool_mock "github.com/erigontech/erigon/cl/validator/sync_contribution_pool/mock_services"
 	"github.com/erigontech/erigon/cl/validator/validator_params"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	dbversion "github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/chain"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
@@ -88,6 +98,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
+	"github.com/erigontech/erigon/p2p/enode"
 )
 
 var _ serviceinterface.Service[*cltypes.SignedExecutionPayloadBid] = acceptingExecutionPayloadBidService{}
@@ -331,6 +342,7 @@ type installingForkchoice struct {
 	headers      map[common.Hash]*cltypes.BeaconBlockHeader
 	blocks       map[common.Hash]*cltypes.SignedBeaconBlock
 	onBlockCalls int
+	afterOnBlock func()
 }
 
 type conflictAfterValidationForkchoice struct {
@@ -374,6 +386,9 @@ func (f *installingForkchoice) OnBlock(_ context.Context, block *cltypes.SignedB
 	f.headers[root] = block.SignedBeaconBlockHeader().Header.Copy()
 	f.blocks[root] = block
 	f.onBlockCalls++
+	if f.afterOnBlock != nil {
+		f.afterOnBlock()
+	}
 	return nil
 }
 
@@ -2536,13 +2551,20 @@ func TestStoreBlockAndBlobsDoesNotRepeatForkchoiceAfterDatabaseFailure(t *testin
 	}
 	handler.forkchoiceStore = installing
 	handler.indiciesDB = unavailableUpdateDB{RwDB: handler.indiciesDB}
+	handler.emitters = beaconevents.NewEventEmitter()
+	indicesChanged := handler.emitters.BlockIndicesChanged()
 
 	for range 2 {
-		err := handler.storeBlockAndBlobs(t.Context(), block, nil, nil, BlockPublishingValidationGossip)
+		err := handler.storeBlockAndBlobs(t.Context(), block, nil, nil, BlockPublishingValidationGossip, func() {})
 		require.ErrorContains(t, err, "database unavailable")
 		var writeErr *clservices.AcceptedBlockWriteError
 		require.ErrorAs(t, err, &writeErr)
 		require.Same(t, block, writeErr.Block)
+	}
+	select {
+	case <-indicesChanged:
+		t.Fatal("failed writes must not notify index readers")
+	default:
 	}
 	require.Equal(t, 1, installing.onBlockCalls)
 }
@@ -2564,10 +2586,17 @@ func TestStoreBlockAndBlobsToleratesBusyForkchoice(t *testing.T) {
 		Return(nil, execution_client.ErrForkChoiceUpdateBusy)
 	handler.engine = engine
 	handler.attestationProducer = attestation_producer.New(handler.beaconChainCfg)
+	handler.emitters = beaconevents.NewEventEmitter()
+	indicesChanged := handler.emitters.BlockIndicesChanged()
 
-	err = handler.storeBlockAndBlobs(t.Context(), block, nil, nil, BlockPublishingValidationConsensus)
+	err = handler.storeBlockAndBlobs(t.Context(), block, nil, nil, BlockPublishingValidationConsensus, func() {})
 
 	require.NoError(t, err)
+	select {
+	case <-indicesChanged:
+	default:
+		t.Fatal("the committed block indices must notify readers even if fork choice is busy")
+	}
 }
 
 func TestStoreBlockAndBlobsClassifiesKnownRootMismatchAsPermanent(t *testing.T) {
@@ -2580,7 +2609,7 @@ func TestStoreBlockAndBlobsClassifiesKnownRootMismatchAsPermanent(t *testing.T) 
 	incoming := &cltypes.SignedBeaconBlock{Block: stored.Block, Signature: stored.Signature}
 	incoming.Signature[0] ^= 1
 
-	err = handler.storeBlockAndBlobs(t.Context(), incoming, nil, nil, BlockPublishingValidationConsensus)
+	err = handler.storeBlockAndBlobs(t.Context(), incoming, nil, nil, BlockPublishingValidationConsensus, func() {})
 	require.ErrorIs(t, err, forkchoice.ErrBlockInvalid)
 }
 
@@ -2589,7 +2618,7 @@ func TestStoreBlockAndBlobsClassifiesFinalizedHorizonRaceAsPermanent(t *testing.
 	block := blocks[1]
 	fcu.FinalizedSlotVal = block.Block.Slot
 
-	err := handler.storeBlockAndBlobs(t.Context(), block, nil, nil, BlockPublishingValidationConsensus)
+	err := handler.storeBlockAndBlobs(t.Context(), block, nil, nil, BlockPublishingValidationConsensus, func() {})
 	require.ErrorIs(t, err, forkchoice.ErrBlockInvalid)
 }
 
@@ -2604,8 +2633,396 @@ func TestStoreBlockAndBlobsClassifiesKnownEquivocationAsPermanent(t *testing.T) 
 	conflict.Root[0] ^= 1
 	fcu.Headers[common.Hash{0xff}] = conflict
 
-	err = handler.storeBlockAndBlobs(t.Context(), block, nil, nil, BlockPublishingValidationConsensusAndEquivocation)
+	err = handler.storeBlockAndBlobs(t.Context(), block, nil, nil, BlockPublishingValidationConsensusAndEquivocation, func() {})
 	require.ErrorIs(t, err, forkchoice.ErrBlockInvalid)
+}
+
+// publishedColumnsFixture publishes a block with one blob through a handler that imports it into fork
+// choice, stores its columns in a real column store and runs the store job on its own goroutine, so
+// -race sees the store job and column gossip run concurrently.
+type publishedColumnsFixture struct {
+	handler    *ApiHandler
+	forkchoice *installingForkchoice
+	columns    *hookedColumnStorage
+	published  *publishedGossip
+	// Closed by the gossip goroutine. Polling the recorded topics instead would share their mutex with
+	// that goroutine and, through the test goroutine, order the store's writes before later gossip,
+	// which hides a store/gossip race from -race.
+	columnsGossiped chan struct{}
+	jobs            sync.WaitGroup
+	block           *cltypes.SignedBeaconBlock
+	root            common.Hash
+	store           func(context.Context) error
+}
+
+type hookedColumnStorage struct {
+	blob_storage.DataColumnStorage
+	hook func(write func() error) error
+}
+
+func (s *hookedColumnStorage) WriteColumnSidecars(ctx context.Context, blockRoot common.Hash, columnIndex int64, sidecar *cltypes.DataColumnSidecar) error {
+	write := func() error {
+		return s.DataColumnStorage.WriteColumnSidecars(ctx, blockRoot, columnIndex, sidecar)
+	}
+	if s.hook == nil {
+		return write()
+	}
+	return s.hook(write)
+}
+
+type runningPublishedBlockJob struct {
+	done chan struct{}
+	err  error
+}
+
+func (j *runningPublishedBlockJob) Wait(ctx context.Context) error {
+	select {
+	case <-j.done:
+		return j.err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func newPublishedColumnsFixture(t *testing.T, version clparams.StateVersion) *publishedColumnsFixture {
+	t.Helper()
+	if clparams.GetBeaconConfig() == nil {
+		cfg := clparams.MainnetBeaconConfig
+		clparams.InitGlobalStaticConfig(&cfg)
+	}
+	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
+	f := &publishedColumnsFixture{
+		handler:         handler,
+		published:       &publishedGossip{topics: map[string][]byte{}},
+		columnsGossiped: make(chan struct{}),
+	}
+	t.Cleanup(f.jobs.Wait)
+	ctrl := gomock.NewController(t)
+
+	b := newTestBlob(t, 1, clparams.FuluVersion)
+	proofs := make([]common.Bytes48, len(b.proofs))
+	for i := range b.proofs {
+		proofs[i] = common.Bytes48(b.proofs[i])
+	}
+	handler.blobBundles.Add(common.Bytes48(b.commitment), BlobBundle{Commitment: common.Bytes48(b.commitment), Blob: b.blob, KzgProofs: proofs})
+	f.block = cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, version)
+	f.block.Block.Slot = blocks[1].Block.Slot
+	commitment := b.commitment
+	if version >= clparams.GloasVersion {
+		bid := f.block.Block.Body.SignedExecutionPayloadBid.Message
+		bid.BuilderIndex = clparams.BuilderIndexSelfBuild
+		bid.BlobKzgCommitments.Append(&commitment)
+	} else {
+		f.block.Block.Body.BlobKzgCommitments.Append(&commitment)
+	}
+	root, err := f.block.Block.HashSSZ()
+	require.NoError(t, err)
+	f.root = root
+
+	fcu.StateAtBlockRootVal[f.root] = postState
+	fcu.HeadVal = f.root
+	fcu.HeadSlotVal = f.block.Block.Slot
+	fcu.OnTickFn = func(uint64) {}
+	f.forkchoice = &installingForkchoice{
+		ForkChoiceStorage: fcu,
+		headers:           make(map[common.Hash]*cltypes.BeaconBlockHeader),
+		blocks:            make(map[common.Hash]*cltypes.SignedBeaconBlock),
+	}
+	handler.forkchoiceStore = f.forkchoice
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil, nil).AnyTimes()
+	handler.engine = engine
+	handler.attestationProducer = cachedAttestationDataProducer{}
+
+	gossipManager := gossip_mock.NewMockGossip(ctrl)
+	var allColumnsGossiped sync.Once
+	gossipManager.EXPECT().Publish(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, topic string, data []byte) error {
+		if err := f.published.record(ctx, topic, data); err != nil {
+			return err
+		}
+		if f.published.columnCount() == int(handler.beaconChainCfg.NumberOfColumns) {
+			allColumnsGossiped.Do(func() { close(f.columnsGossiped) })
+		}
+		return nil
+	}).AnyTimes()
+	gossipManager.EXPECT().SubscribeWithExpiry(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
+	handler.gossipManager = gossipManager
+	blockService := network_services_mock.NewMockBlockService(ctrl)
+	blockService.EXPECT().ValidateGossip(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
+	blockService.EXPECT().CommitGossipReservation(gomock.Any()).AnyTimes()
+	blockService.EXPECT().ReleaseGossipReservation(gomock.Any()).AnyTimes()
+	blockService.EXPECT().SchedulePublishedBlockForLaterProcessing(gomock.Any(), gomock.Any()).DoAndReturn(
+		func(_ *cltypes.SignedBeaconBlock, store func(context.Context) error) clservices.PublishedBlockJob {
+			f.store = store
+			job := &runningPublishedBlockJob{done: make(chan struct{})}
+			f.jobs.Go(func() {
+				defer close(job.done)
+				job.err = store(context.Background())
+			})
+			return job
+		},
+	).AnyTimes()
+	handler.blockService = blockService
+
+	f.columns = &hookedColumnStorage{DataColumnStorage: blob_storage.NewDataColumnStore(afero.NewMemMapFs(), handler.beaconChainCfg, beaconevents.NewEventEmitter())}
+	handler.columnStorage = f.columns
+	handler.peerDas = f.newPeerDas(t, clparams.CaplinConfig{})
+	return f
+}
+
+func (f *publishedColumnsFixture) newPeerDas(t *testing.T, caplinConfig clparams.CaplinConfig) das.PeerDas {
+	t.Helper()
+	networkConfig := clparams.NetworkConfigs[chainspec.MainnetChainID]
+	state := peerdasstate.NewPeerDasState(f.handler.beaconChainCfg, &networkConfig)
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	nodeDB, err := enode.OpenDB("")
+	require.NoError(t, err)
+	t.Cleanup(nodeDB.Close)
+	localNode := enode.NewLocalNode(nodeDB, key)
+	state.SetLocalNodeID(localNode)
+	return das.NewPeerDas(nil, f.handler.beaconChainCfg, &caplinConfig, f.columns, nil, nil, localNode.ID(), f.handler.ethClock, state, f.handler.gossipManager, nil, f.handler.indiciesDB)
+}
+
+func (f *publishedColumnsFixture) blockIndexed() (bool, error) {
+	var slot *uint64
+	err := f.handler.indiciesDB.View(context.Background(), func(tx kv.Tx) error {
+		var err error
+		slot, err = beacon_indicies.ReadBlockSlotByBlockRoot(tx, f.root)
+		return err
+	})
+	return slot != nil, err
+}
+
+func (f *publishedColumnsFixture) storedColumns(t *testing.T) []uint64 {
+	t.Helper()
+	saved, err := f.columns.GetSavedColumnIndex(t.Context(), f.block.Block.Slot, f.root)
+	require.NoError(t, err)
+	slices.Sort(saved)
+	return saved
+}
+
+func (f *publishedColumnsFixture) custodyColumns(t *testing.T) []uint64 {
+	t.Helper()
+	custody, err := f.handler.peerDas.StateReader().GetMyCustodyColumns()
+	require.NoError(t, err)
+	return slices.Sorted(maps.Keys(custody))
+}
+
+func requireClosed(t *testing.T, ch <-chan struct{}, msg string) {
+	t.Helper()
+	select {
+	case <-ch:
+	case <-time.After(5 * time.Second):
+		t.Fatal(msg)
+	}
+}
+
+func (p *publishedGossip) columnCount() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	columns := 0
+	for topic := range p.topics {
+		if strings.HasPrefix(topic, "data_column_sidecar_") {
+			columns++
+		}
+	}
+	return columns
+}
+
+func TestBroadcastBlockStoresAllColumnsInArchiveMode(t *testing.T) {
+	for _, version := range []clparams.StateVersion{clparams.FuluVersion, clparams.GloasVersion} {
+		t.Run(version.String(), func(t *testing.T) {
+			f := newPublishedColumnsFixture(t, version)
+			f.handler.peerDas = f.newPeerDas(t, clparams.CaplinConfig{ArchiveBlobs: true})
+
+			require.NoError(t, f.handler.broadcastBlock(t.Context(), f.block, BlockPublishingValidationGossip))
+
+			require.Len(t, f.storedColumns(t), int(f.handler.beaconChainCfg.NumberOfColumns))
+		})
+	}
+}
+
+func TestBroadcastBlockWritesColumnsAfterOnBlockAndIndexWrite(t *testing.T) {
+	for _, version := range []clparams.StateVersion{clparams.FuluVersion, clparams.GloasVersion} {
+		t.Run(version.String(), func(t *testing.T) {
+			f := newPublishedColumnsFixture(t, version)
+			var once sync.Once
+			var onBlockCalls int
+			var indexed bool
+			var indexErr error
+			f.columns.hook = func(write func() error) error {
+				once.Do(func() {
+					onBlockCalls = f.forkchoice.onBlockCalls
+					indexed, indexErr = f.blockIndexed()
+				})
+				return write()
+			}
+
+			require.NoError(t, f.handler.broadcastBlock(t.Context(), f.block, BlockPublishingValidationGossip))
+
+			require.NoError(t, indexErr)
+			require.Equal(t, 1, onBlockCalls, "OnBlock must run before the first column write")
+			require.True(t, indexed, "the block index must be written before the first column write")
+		})
+	}
+}
+
+// TestBroadcastGloasBlockHoldsColumnsUntilBlockIsServable proves Gloas column gossip waits for the
+// block to be imported, so a peer that asks for the block of a column can get it, and that a stalled
+// import holds the columns back for at most publishedBlockStoreWaitBeforeColumns.
+func TestBroadcastGloasBlockHoldsColumnsUntilBlockIsServable(t *testing.T) {
+	f := newPublishedColumnsFixture(t, clparams.GloasVersion)
+	importing, release := make(chan struct{}), make(chan struct{})
+	f.forkchoice.afterOnBlock = func() {
+		close(importing)
+		<-release
+	}
+	start := time.Now()
+	done := make(chan error, 1)
+	go func() { done <- f.handler.broadcastBlock(t.Context(), f.block, BlockPublishingValidationGossip) }()
+	defer func() {
+		close(release)
+		require.NoError(t, <-done)
+	}()
+
+	requireClosed(t, importing, "the block was not imported")
+	requireClosed(t, f.columnsGossiped, "the columns were not gossiped")
+	require.GreaterOrEqual(t, time.Since(start), publishedBlockStoreWaitBeforeColumns, "columns must wait for the block import")
+}
+
+func TestBroadcastGloasBlockGossipsColumnsOnceTheStoreJobFails(t *testing.T) {
+	f := newPublishedColumnsFixture(t, clparams.GloasVersion)
+	f.handler.forkchoiceStore = &rejectingOnBlockForkchoice{ForkChoiceStorage: f.forkchoice, err: forkchoice.ErrBlockInvalid}
+	start := time.Now()
+
+	require.ErrorIs(t, f.handler.broadcastBlock(t.Context(), f.block, BlockPublishingValidationGossip), forkchoice.ErrBlockInvalid)
+
+	requireClosed(t, f.columnsGossiped, "the columns were not gossiped")
+	require.Less(t, time.Since(start), publishedBlockStoreWaitBeforeColumns, "a failed store job must release the columns")
+}
+
+func TestBroadcastGloasBlockGossipsColumnsWhileColumnWriteBlocks(t *testing.T) {
+	f := newPublishedColumnsFixture(t, clparams.GloasVersion)
+	blocked, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	f.columns.hook = func(write func() error) error {
+		err := write()
+		once.Do(func() { close(blocked) })
+		<-release
+		return err
+	}
+	done := make(chan error, 1)
+	go func() { done <- f.handler.broadcastBlock(t.Context(), f.block, BlockPublishingValidationGossip) }()
+	defer func() {
+		close(release)
+		require.NoError(t, <-done)
+	}()
+
+	requireClosed(t, blocked, "no column was written")
+	blockedAt := time.Now()
+	requireClosed(t, f.columnsGossiped, "the columns were not gossiped")
+	require.Less(t, time.Since(blockedAt), publishedBlockStoreWaitBeforeColumns/2, "column gossip must not wait for the column writes")
+}
+
+func TestBroadcastBlockColumnWriteFailureKeepsImportedBlockAndRetries(t *testing.T) {
+	for _, version := range []clparams.StateVersion{clparams.FuluVersion, clparams.GloasVersion} {
+		t.Run(version.String(), func(t *testing.T) {
+			f := newPublishedColumnsFixture(t, version)
+			var failing atomic.Bool
+			failing.Store(true)
+			f.columns.hook = func(write func() error) error {
+				if failing.Load() {
+					return errors.New("disk full")
+				}
+				return write()
+			}
+
+			var writeErr *clservices.AcceptedBlockWriteError
+			require.ErrorAs(t, f.handler.broadcastBlock(t.Context(), f.block, BlockPublishingValidationGossip), &writeErr,
+				"the columns of an accepted block must be retried past the job expiry")
+
+			indexed, err := f.blockIndexed()
+			require.NoError(t, err)
+			require.True(t, indexed, "a block accepted by fork choice must be persisted although its columns failed")
+
+			failing.Store(false)
+			require.NoError(t, f.store(t.Context()), "the block service retries the same store job")
+			require.Equal(t, 1, f.forkchoice.onBlockCalls, "the retry must not import the block again")
+			require.Equal(t, f.custodyColumns(t), f.storedColumns(t))
+		})
+	}
+}
+
+// TestBroadcastBlockStoresCustodyRaisedByItsOwnImport proves the columns are chosen after OnBlock,
+// which may raise the custody group count.
+func TestBroadcastBlockStoresCustodyRaisedByItsOwnImport(t *testing.T) {
+	const raisedCgc = 16
+	for _, version := range []clparams.StateVersion{clparams.FuluVersion, clparams.GloasVersion} {
+		t.Run(version.String(), func(t *testing.T) {
+			f := newPublishedColumnsFixture(t, version)
+			before := f.custodyColumns(t)
+			f.forkchoice.afterOnBlock = func() { f.handler.peerDas.UpdateValidatorsCustody(raisedCgc) }
+
+			require.NoError(t, f.handler.broadcastBlock(t.Context(), f.block, BlockPublishingValidationGossip))
+
+			raised := f.custodyColumns(t)
+			require.Len(t, raised, raisedCgc)
+			require.Less(t, len(before), len(raised))
+			require.Equal(t, raised, f.storedColumns(t))
+			require.Equal(t, int(f.handler.beaconChainCfg.NumberOfColumns), f.published.columnCount(), "every column is gossiped")
+		})
+	}
+}
+
+// TestPostGloasBlockWithoutIntegrationWaitLetsStatefulEnvelopePassDA covers the v1 block POST, which
+// skips the integration wait: a stateful envelope POST that follows must find the custody columns.
+func TestPostGloasBlockWithoutIntegrationWaitLetsStatefulEnvelopePassDA(t *testing.T) {
+	f := newPublishedColumnsFixture(t, clparams.GloasVersion)
+	release := make(chan struct{})
+	releaseWrites := sync.OnceFunc(func() { close(release) })
+	t.Cleanup(releaseWrites)
+	f.columns.hook = func(write func() error) error {
+		<-release
+		return write()
+	}
+	f.forkchoice.ForkChoiceStorage.(*forkchoice_mock.ForkChoiceStorageMock).OnExecutionPayloadFn = func(_ context.Context, envelope *cltypes.SignedExecutionPayloadEnvelope, _, _ bool) error {
+		available, err := f.handler.peerDas.IsDataAvailable(f.block.Block.Slot, envelope.Message.BeaconBlockRoot)
+		if err != nil {
+			return err
+		}
+		if !available {
+			return forkchoice.ErrEIP7594ColumnDataNotAvailable
+		}
+		return nil
+	}
+
+	done := make(chan error, 1)
+	f.jobs.Go(func() {
+		done <- f.handler.broadcastBlockWithIntegrationWait(t.Context(), f.block, BlockPublishingValidationGossip, false)
+	})
+	requireClosed(t, f.columnsGossiped, "the columns were not gossiped")
+	select {
+	case <-done:
+		t.Fatal("the response must not overtake the column writes")
+	case <-time.After(100 * time.Millisecond):
+	}
+	releaseWrites()
+	require.NoError(t, <-done)
+
+	envelope := validTestSignedExecutionPayloadEnvelope(f.handler.beaconChainCfg)
+	envelope.Message.BeaconBlockRoot = f.root
+	envelope.Message.BuilderIndex = clparams.BuilderIndexSelfBuild
+	body, err := json.Marshal(envelope)
+	require.NoError(t, err)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", bytes.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
+	request.Header.Set("Eth-Blob-Data-Included", "false")
+	recorder := httptest.NewRecorder()
+	f.handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
 }
 
 func TestBroadcastBlockExactReplayCompletesMissingDataSidecars(t *testing.T) {
@@ -3917,6 +4334,7 @@ func TestGetEthV3ValidatorBlockKeepsSelfBuildEnvelopeByBlockRoot(t *testing.T) {
 	fixture := newGloasBidSelectionFixture(t, gloasBidSelectionOptions{slotOffset: 1})
 	_, _, _, _, _, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 	handler.beaconChainCfg = fixture.block.Cfg
+	startBuilderHandoffWindow(handler, fixture.block.Slot)
 	forkEpoch := state.Epoch(fixture.productionState)
 	handler.beaconChainCfg.AltairForkEpoch = forkEpoch
 	handler.beaconChainCfg.BellatrixForkEpoch = forkEpoch
@@ -4030,6 +4448,7 @@ func produceAcrossAHeadChange(t *testing.T, publish, cancel bool) (*beaconhttp.B
 	handler.beaconChainCfg.FuluForkEpoch = forkEpoch
 	handler.beaconChainCfg.GloasForkEpoch = forkEpoch
 	handler.beaconChainCfg.InitializeForkSchedule()
+	startBuilderHandoffWindow(handler, fixture.block.Slot)
 	sinceCutoff := proposalWaitCutoff(time.Unix(0, 0), handler.beaconChainCfg, clparams.GloasVersion).Sub(time.Unix(0, 0))
 	handler.ethClock = slotTimeClock{EthereumClock: handler.ethClock, slotStart: time.Now().Add(time.Second - sinceCutoff)}
 
@@ -5748,14 +6167,13 @@ func TestGetEthV1ValidatorAttestationDataWaitsForSlotImport(t *testing.T) {
 		highestSeenAtSlot bool
 		wantNewHead       bool
 		minWait           time.Duration
-		maxWait           time.Duration
 		wantStatus        int
 	}{
-		{name: "in-flight block finishes", claim: true, finishAfter: 20 * time.Millisecond, wantNewHead: true, minWait: 15 * time.Millisecond, maxWait: 100 * time.Millisecond},
-		{name: "no claim", maxWait: 100 * time.Millisecond},
-		{name: "claim for another slot", claim: true, claimNextSlot: true, maxWait: 100 * time.Millisecond},
-		{name: "block already seen", claim: true, highestSeenAtSlot: true, maxWait: 100 * time.Millisecond},
-		{name: "request canceled", claim: true, cancelAfter: 20 * time.Millisecond, minWait: 15 * time.Millisecond, maxWait: 100 * time.Millisecond, wantStatus: http.StatusInternalServerError},
+		{name: "in-flight block finishes", claim: true, finishAfter: 20 * time.Millisecond, wantNewHead: true, minWait: 15 * time.Millisecond},
+		{name: "no claim"},
+		{name: "claim for another slot", claim: true, claimNextSlot: true},
+		{name: "block already seen", claim: true, highestSeenAtSlot: true},
+		{name: "request canceled", claim: true, cancelAfter: 20 * time.Millisecond, minWait: 15 * time.Millisecond, wantStatus: http.StatusInternalServerError},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			_, _, _, _, headState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
@@ -5764,7 +6182,8 @@ func TestGetEthV1ValidatorAttestationDataWaitsForSlotImport(t *testing.T) {
 			clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
 			clock.EXPECT().GetCurrentSlot().Return(attestationSlot).AnyTimes()
 			handler.ethClock = clock
-			handler.attestationDataImportWait = 60 * time.Millisecond
+			const importWait = time.Second
+			handler.attestationDataImportWait = importWait
 			calls := 0
 			handler.attestationProducer = cachedAttestationDataProducer{calls: &calls}
 
@@ -5828,7 +6247,7 @@ func TestGetEthV1ValidatorAttestationDataWaitsForSlotImport(t *testing.T) {
 			}
 
 			require.GreaterOrEqual(t, elapsed, tt.minWait)
-			require.Less(t, elapsed, tt.maxWait)
+			require.NotEqual(t, attestationSlot+1, handler.attestationDataWaitedSlot.Load(), "the response came from the import-wait cap")
 			require.Zero(t, calls)
 			wantStatus := tt.wantStatus
 			if wantStatus == 0 {

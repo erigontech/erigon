@@ -10,6 +10,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -23,6 +25,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/receipts"
 	"github.com/erigontech/erigon/execution/state"
@@ -51,9 +54,22 @@ type serialExecutor struct {
 	accumulator *shards.Accumulator
 }
 
-func warmTxsHashes(block *types.Block) {
+// minAuthIntrinsicGas is the smallest intrinsic charge per authorization on any fork, so no valid tx or block applies
+// more authorizations than its gas limit divided by it.
+const minAuthIntrinsicGas = min(params.PerEmptyAccountCost, params.ExecutionPerAuthBaseCostEIP8038)
+
+func warmTxsHashes(block *types.Block, chainID *uint256.Int) {
+	authBudget := block.GasLimit() / minAuthIntrinsicGas
 	for _, t := range block.Transactions() {
 		_ = t.Hash()
+		if sc, ok := t.(*types.SetCodeTransaction); ok {
+			n := uint64(len(sc.Authorizations))
+			if n > authBudget || n*minAuthIntrinsicGas > min(t.GetGasLimit(), block.GasLimit()) {
+				continue
+			}
+			authBudget -= n
+			sc.WarmAuthorities(chainID)
+		}
 	}
 	_ = block.Hash()
 }
@@ -118,7 +134,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			// TODO: panic here and see that overall process deadlock
 			return nil, rwTx, fmt.Errorf("nil block %d", blockNum)
 		}
-		go warmTxsHashes(b)
+		go warmTxsHashes(b, se.cfg.chainConfig.ChainID)
 
 		txs := b.Transactions()
 		header := b.HeaderNoCopy()
@@ -396,7 +412,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 			if txTask.IsBlockEnd() && txTask.BlockNumber() > 0 { //nolint:gocritic
 				// fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txTask.TxNum, txTask.BlockNum)
 				// End of block transaction in a block
-				if se.cfg.readAheader != nil {
+				if se.cfg.readAheader != nil && startTxIndex == 0 {
 					if inclusionList, ilHash, ok := se.cfg.readAheader.ReadInclusionList(txTask.BlockHash()); ok {
 						ilSatisfied, err := protocol.CheckInclusionListTransactions(gasPool, txTask.Txs, inclusionList, state.NewReaderV3(se.rs.Domains().AsStateGetter(se.applyTx, execctxapi.StateGetterOptions{})), &txTask.EvmBlockContext, se.cfg.chainConfig, se.cfg.vmConfig)
 						if err != nil {

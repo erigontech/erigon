@@ -150,11 +150,7 @@ func (rw *WorkerContext) installWorkerGetHash(txTask Task) {
 	br := rw.blockReader
 	ctx := rw.ctx
 	rw.evm.Context.GetHash = protocol.GetHashFn(header, func(hash common.Hash, number uint64) (*types.Header, error) {
-		h, err := br.Header(ctx, rw.chainTx, hash, number)
-		if h == nil && err == nil {
-			h = &types.Header{}
-		}
-		return h, err
+		return br.Header(ctx, rw.chainTx, hash, number)
 	})
 }
 
@@ -231,13 +227,6 @@ func (rw *WorkerContext) getter(tx kv.TemporalTx) execctxapi.StateGetter {
 func (rw *WorkerContext) ResetTx(chainTx kv.TemporalTx) error {
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
-	return rw.bindTx(chainTx)
-}
-
-// BindTxHeld rebinds the worker to chainTx assuming the caller already holds
-// rw.lock — used for a mid-execution rebind from inside RunTxTask (which holds
-// the lock for the whole run), where ResetTx would re-lock and self-deadlock.
-func (rw *WorkerContext) BindTxHeld(chainTx kv.TemporalTx) error {
 	return rw.bindTx(chainTx)
 }
 

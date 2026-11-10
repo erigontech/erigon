@@ -42,75 +42,6 @@ func (r *emptyReader) SetTrace(bool, string)                                   {
 func (r *emptyReader) Trace() bool                                             { return false }
 func (r *emptyReader) TracePrefix() string                                     { return "" }
 
-// TestValueTiebreaker_BalancePath verifies that validation does not
-// invalidate a StorageRead when the versionMap Done value matches the
-// read value. This prevents unnecessary re-executions that cause
-// cascading state errors.
-func TestValueTiebreaker_BalancePath(t *testing.T) {
-	vm := NewVersionMap(nil)
-
-	addr := accounts.InternAddress([20]byte{0x01})
-	balance := uint256.NewInt(1000)
-
-	// Write a balance to the versionMap at txIndex=5
-	vm.WriteBalance(addr, Version{TxIndex: 5, Incarnation: 0}, *balance, true)
-
-	// Validate a read from txIndex=10 that read the SAME value from storage
-	readVal := *balance // Same value
-
-	valid := validateRead(vm, 10, addr, BalancePath, accounts.NilKey, StorageRead, Version{TxIndex: UnknownDep},
-		readVal, liveBalance, eqUint256, // value tiebreaker
-		func(rv, wv Version) VersionValidity { return VersionValid },
-		false, "")
-
-	assert.Equal(t, VersionValid, valid, "Should be valid when StorageRead value matches versionMap Done value")
-}
-
-// TestValueTiebreaker_DifferentBalance verifies that validation DOES
-// invalidate when the StorageRead value differs from the versionMap value.
-func TestValueTiebreaker_DifferentBalance(t *testing.T) {
-	vm := NewVersionMap(nil)
-
-	addr := accounts.InternAddress([20]byte{0x01})
-
-	// Write balance=1000 to versionMap
-	vm.WriteBalance(addr, Version{TxIndex: 5, Incarnation: 0}, *uint256.NewInt(1000), true)
-
-	// Validate a read that got balance=500 from storage (stale)
-	readVal := *uint256.NewInt(500)
-
-	valid := validateRead(vm, 10, addr, BalancePath, accounts.NilKey, StorageRead, Version{TxIndex: UnknownDep},
-		readVal, liveBalance, eqUint256,
-		func(rv, wv Version) VersionValidity { return VersionValid },
-		false, "")
-
-	assert.Equal(t, VersionInvalid, valid, "Should be invalid when StorageRead value differs from versionMap Done value")
-}
-
-// TestValueTiebreaker_NoncePath verifies nonce comparison works.
-func TestValueTiebreaker_NoncePath(t *testing.T) {
-	vm := NewVersionMap(nil)
-
-	addr := accounts.InternAddress([20]byte{0x02})
-
-	// Write nonce=42 to versionMap
-	vm.WriteNonce(addr, Version{TxIndex: 5, Incarnation: 0}, uint64(42), true)
-
-	// Same nonce from storage → valid
-	valid := validateRead(vm, 10, addr, NoncePath, accounts.NilKey, StorageRead, Version{TxIndex: UnknownDep},
-		uint64(42), liveNonce, eqUint64,
-		func(rv, wv Version) VersionValidity { return VersionValid },
-		false, "")
-	assert.Equal(t, VersionValid, valid, "Same nonce should be valid")
-
-	// Different nonce → invalid
-	valid = validateRead(vm, 10, addr, NoncePath, accounts.NilKey, StorageRead, Version{TxIndex: UnknownDep},
-		uint64(41), liveNonce, eqUint64,
-		func(rv, wv Version) VersionValidity { return VersionValid },
-		false, "")
-	assert.Equal(t, VersionInvalid, valid, "Different nonce should be invalid")
-}
-
 // TestVersionedWriteVersion verifies that VersionedWrite entries at
 // txIndex=0 are still reachable. The bug was that finalizeTx appended
 // writes without Version (zero value = txIndex=0), making them only
@@ -393,32 +324,42 @@ func TestSelfDestructKeepsDirtyStorageReadableSameTx(t *testing.T) {
 	}
 }
 
-// TestValueTiebreaker_MapReadIncarnationBump pins the value tiebreaker for a
-// version-map read: when the writer re-executes and re-publishes the same value
-// under a new incarnation, a reader of the old version is still accurate and
-// must not be forced to re-execute.
-func TestValueTiebreaker_MapReadIncarnationBump(t *testing.T) {
-	vm := NewVersionMap(nil)
-
+// TestMapRead_EqualValueReExecKeepsIncarnation pins the write-side no-bump rule: when the
+// writer re-executes and re-flushes the same value, flushCell keeps the existing incarnation,
+// so a reader bound to the prior version stays valid by the version check alone — no value
+// compare, and no re-exec cascade on a hot cell. A re-exec that changes the value bumps the
+// incarnation and invalidates the stale reader.
+func TestMapRead_EqualValueReExecKeepsIncarnation(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0x04})
-	balance := uint256.NewInt(1000)
-
-	vm.WriteBalance(addr, Version{TxIndex: 5, Incarnation: 1}, *balance, true)
-
-	checkVersion := func(rv, wv Version) VersionValidity {
-		if rv != wv {
-			return VersionInvalid
-		}
-		return VersionValid
+	balance := *uint256.NewInt(1000)
+	flushBalance := func(vm *VersionMap, v Version, val uint256.Int) {
+		ws := &WriteSet{}
+		ws.SetBalance(addr, &VersionedWrite[uint256.Int]{
+			WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: v, valStatus: ValueChanged},
+			Val:         val,
+		})
+		vm.FlushVersionedWrites(ws, false)
+	}
+	balanceIncarnation := func(vm *VersionMap) Incarnation {
+		cell, ok := vm.load(addr).Balance.Get(5)
+		require.True(t, ok)
+		return cell.incarnation
 	}
 
-	valid := validateRead(vm, 10, addr, BalancePath, accounts.NilKey, MapRead, Version{TxIndex: 5, Incarnation: 0},
-		*balance, liveBalance, eqUint256, checkVersion, false, "")
-	assert.Equal(t, VersionValid, valid, "same value under a bumped incarnation must stay valid")
+	// tx5 inc0 wrote 1000; it re-executes at inc1 and re-flushes the same 1000. No-bump
+	// keeps the cell at inc0, so a reader bound to {5,0} still version-matches and is not
+	// forced to re-execute.
+	vm := NewVersionMap(nil)
+	flushBalance(vm, Version{TxIndex: 5, Incarnation: 0}, balance)
+	flushBalance(vm, Version{TxIndex: 5, Incarnation: 1}, balance)
+	assert.Equal(t, Incarnation(0), balanceIncarnation(vm), "equal-value re-exec keeps the prior incarnation")
 
-	valid = validateRead(vm, 10, addr, BalancePath, accounts.NilKey, MapRead, Version{TxIndex: 5, Incarnation: 0},
-		*uint256.NewInt(999), liveBalance, eqUint256, checkVersion, false, "")
-	assert.Equal(t, VersionInvalid, valid, "a changed value must still invalidate")
+	// A re-exec that changes the value bumps the incarnation, so a reader bound to {5,0}
+	// version-mismatches and correctly re-executes.
+	vm2 := NewVersionMap(nil)
+	flushBalance(vm2, Version{TxIndex: 5, Incarnation: 0}, balance)
+	flushBalance(vm2, Version{TxIndex: 5, Incarnation: 1}, *uint256.NewInt(999))
+	assert.Equal(t, Incarnation(1), balanceIncarnation(vm2), "changed-value re-exec bumps the incarnation")
 }
 
 // A different, higher writer publishing an equal value says nothing about the

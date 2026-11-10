@@ -17,12 +17,17 @@
 package txpool
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"fmt"
 	"io"
+	"runtime"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
@@ -283,7 +288,8 @@ func TestOnNewBlock(t *testing.T) {
 	stateChanges.
 		EXPECT().
 		StateChanges(gomock.Any(), gomock.Any(), gomock.Any()).
-		DoAndReturn(func(_ context.Context, _ *remoteproto.StateChangeRequest, _ ...grpc.CallOption) (remoteproto.KV_StateChangesClient, error) {
+		DoAndReturn(func(_ context.Context, request *remoteproto.StateChangeRequest, _ ...grpc.CallOption) (remoteproto.KV_StateChangesClient, error) {
+			assert.True(t, request.WithStorage, "frame nonce revalidation needs changed storage slots")
 			return stream, nil
 		})
 
@@ -372,6 +378,48 @@ func (ms *MockSentry) PeerEvents(_ *sentryproto.PeerEventsRequest, stream sentry
 	}
 }
 
+func TestFramePolicyRejectionKeepsOrdinaryTransactions(t *testing.T) {
+	frame := framePoolSlot(t, [20]byte{1}, 1, 2).Txn.(*types.FrameTransaction)
+	frame.Frames[0].Limits.Execution = 150_000
+	require.NoError(t, frame.Validate())
+	var encoded bytes.Buffer
+	require.NoError(t, frame.MarshalBinary(&encoded))
+	ordinary := tpEncodeTests[1].txns
+	txns := [][]byte{ordinary[0], encoded.Bytes(), ordinary[1]}
+
+	for _, id := range []sentryproto.MessageId{sentryproto.MessageId_TRANSACTIONS_66, sentryproto.MessageId_POOLED_TRANSACTIONS_66} {
+		t.Run(id.String(), func(t *testing.T) {
+			ctx := t.Context()
+			ctrl := gomock.NewController(t)
+			sentryServer := sentryproto.NewMockSentryServer(ctrl)
+			sentryServer.EXPECT().PenalizePeer(gomock.Any(), gomock.Any()).Times(0)
+			pool := NewMockPool(ctrl)
+			pool.EXPECT().Started().Return(true)
+			pool.EXPECT().IdHashKnown(gomock.Any(), gomock.Any()).Return(false, nil).AnyTimes()
+			pool.EXPECT().AddRemoteTxns(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+				Do(func(_ context.Context, slots TxnSlots, _ PeerID, _ sentryproto.SentryClient) {
+					require.Len(t, slots.Txns, len(ordinary))
+					for i, txn := range slots.Txns {
+						require.Equal(t, ordinary[i], txn.Rlp)
+					}
+				})
+
+			m := NewMockSentry(ctx, sentryServer)
+			sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m)
+			require.NoError(t, err)
+			fetch := NewFetch(ctx, []sentryproto.SentryClient{sentryClient}, pool, nil, nil, u256.N1, log.New())
+			payload := EncodeTransactions(txns, nil)
+			if id == sentryproto.MessageId_POOLED_TRANSACTIONS_66 {
+				payload = EncodePooledTransactions66(txns, 1, nil)
+			}
+			err = fetch.handleInboundMessageWithTx(ctx, nil, &sentryproto.InboundMessage{
+				Id: id, Data: payload, PeerId: peerID,
+			}, sentryClient)
+			require.NoError(t, err)
+		})
+	}
+}
+
 func TestPenalizePeerForMalformedMessages(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
@@ -380,6 +428,10 @@ func TestPenalizePeerForMalformedMessages(t *testing.T) {
 	for i := range oversizedTxns {
 		oversizedTxns[i] = txn
 	}
+	frame := framePoolSlot(t, [20]byte{1}, 1, 2).Txn.(*types.FrameTransaction)
+	frame.Signatures = []types.FrameSignature{{Scheme: types.FrameSignatureSecp256k1, Signature: make([]byte, 65)}}
+	var invalidFrame bytes.Buffer
+	require.NoError(t, frame.MarshalBinary(&invalidFrame))
 
 	// Each sub-test sends a malformed message of a given type and asserts that PenalizePeer is called.
 	tests := []struct {
@@ -396,6 +448,16 @@ func TestPenalizePeerForMalformedMessages(t *testing.T) {
 			name: "malformed PooledTransactions66",
 			id:   sentryproto.MessageId_POOLED_TRANSACTIONS_66,
 			data: []byte{0xff, 0xfe},
+		},
+		{
+			name: "invalid frame signature Transactions66",
+			id:   sentryproto.MessageId_TRANSACTIONS_66,
+			data: EncodeTransactions([][]byte{invalidFrame.Bytes()}, nil),
+		},
+		{
+			name: "invalid frame signature PooledTransactions66",
+			id:   sentryproto.MessageId_POOLED_TRANSACTIONS_66,
+			data: EncodePooledTransactions66([][]byte{invalidFrame.Bytes()}, 1, nil),
 		},
 		{
 			name: "oversized Transactions66",
@@ -432,6 +494,7 @@ func TestPenalizePeerForMalformedMessages(t *testing.T) {
 			sentryServer := sentryproto.NewMockSentryServer(ctrl)
 			pool := NewMockPool(ctrl)
 			pool.EXPECT().Started().Return(true)
+			pool.EXPECT().IdHashKnown(gomock.Any(), gomock.Any()).Return(false, nil).AnyTimes()
 
 			// Expect PenalizePeer to be called exactly once with a Kick penalty.
 			sentryServer.EXPECT().
@@ -792,4 +855,158 @@ func toPeerIDs(h ...byte) (out []PeerID) {
 		out = append(out, gointerfaces.ConvertHashToH512(hash))
 	}
 	return out
+}
+
+type boundedBatchStream struct {
+	grpc.ClientStream
+	recv func() (*sentryproto.InboundMessage, error)
+}
+
+func (s *boundedBatchStream) Recv() (*sentryproto.InboundMessage, error) { return s.recv() }
+
+func TestFetchBoundsQueuedBatch(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		bytes, messages int
+		wantFlushes     int32
+	}{
+		{"bytes", 1024 * 1024, 5, 1},
+		{"messages", 1, 257, 1},
+		{"bytes_before_append", 3 * 1024 * 1024, 3, 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				ctrl := gomock.NewController(t)
+				pool := NewMockPool(ctrl)
+				var flushes atomic.Int32
+				pool.EXPECT().Started().DoAndReturn(func() bool { flushes.Add(1); return true }).AnyTimes()
+				client := sentryproto.NewMockSentryClient(ctrl)
+				var wg sync.WaitGroup
+				fetch := NewFetch(t.Context(), nil, pool, nil, nil, u256.N1, log.New(), WithP2PFetcherWg(&wg))
+				received := 0
+				stream := &boundedBatchStream{recv: func() (*sentryproto.InboundMessage, error) {
+					if received == tc.messages {
+						require.Equal(t, tc.wantFlushes, flushes.Load(), "unexpected flush count before stream closure")
+						return nil, nil
+					}
+					received++
+					wg.Add(1)
+					return &sentryproto.InboundMessage{Id: sentryproto.MessageId_GET_POOLED_TRANSACTIONS_66, Data: make([]byte, tc.bytes)}, nil
+				}}
+				client.EXPECT().Messages(gomock.Any(), gomock.Any(), gomock.Any()).Return(stream, nil)
+				require.NoError(t, fetch.receiveMessage(t.Context(), client))
+				wg.Wait()
+				require.Equal(t, tc.messages, received)
+			})
+		})
+	}
+}
+
+func TestFetchRevalidatesDuplicateReplyAfterNewBlock(t *testing.T) {
+	t.Parallel()
+	txnRlp := decodeHex("f867088504a817c8088302e2489435353535353535353535353535353535353535358202008025a064b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c12a064b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c10")
+	reply := &sentryproto.InboundMessage{
+		Id:     sentryproto.MessageId_POOLED_TRANSACTIONS_66,
+		Data:   EncodePooledTransactions66([][]byte{txnRlp}, 1, nil),
+		PeerId: peerID,
+	}
+	ctrl := gomock.NewController(t)
+	pool := NewMockPool(ctrl)
+	pool.EXPECT().Started().Return(true).AnyTimes()
+	pool.EXPECT().IdHashKnown(gomock.Any(), gomock.Any()).Return(false, nil).AnyTimes()
+	pool.EXPECT().OnNewBlock(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil)
+	pool.EXPECT().AddRemoteTxns(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Times(2)
+	fetch := NewFetch(t.Context(), nil, pool, nil, mdbxtest.NewTestDB(t, dbcfg.TxPoolDB), u256.N1, log.New())
+	newBlock := &remoteproto.StateChangeBatch{ChangeBatch: []*remoteproto.StateChange{{BlockHeight: 1}}}
+
+	// reply, duplicate reply in the same block, then the same reply after a new block
+	received := 0
+	stream := &boundedBatchStream{recv: func() (*sentryproto.InboundMessage, error) {
+		received++
+		if received == 3 {
+			require.NoError(t, fetch.handleStateChangesRequest(t.Context(), newBlock))
+		}
+		if received > 3 {
+			return nil, nil
+		}
+		return reply, nil
+	}}
+	client := sentryproto.NewMockSentryClient(ctrl)
+	client.EXPECT().Messages(gomock.Any(), gomock.Any(), gomock.Any()).Return(stream, nil)
+	require.NoError(t, fetch.receiveMessage(t.Context(), client))
+}
+
+func TestFetchSerializesBatchFlushes(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		pool := NewMockPool(ctrl)
+		started := make(chan struct{}, 3)
+		release := make(chan struct{})
+		releaseFirst := sync.OnceFunc(func() { close(release) })
+		defer releaseFirst()
+		pool.EXPECT().Started().DoAndReturn(func() bool {
+			started <- struct{}{}
+			<-release
+			return true
+		}).Times(3)
+		messages := make(chan *sentryproto.InboundMessage)
+		defer close(messages)
+		stream := &boundedBatchStream{recv: func() (*sentryproto.InboundMessage, error) {
+			return <-messages, nil
+		}}
+		client := sentryproto.NewMockSentryClient(ctrl)
+		client.EXPECT().Messages(gomock.Any(), gomock.Any(), gomock.Any()).Return(stream, nil)
+		fetch := NewFetch(t.Context(), nil, pool, nil, nil, u256.N1, log.New())
+		done := make(chan error, 1)
+		go func() { done <- fetch.receiveMessage(t.Context(), client) }()
+
+		message := &sentryproto.InboundMessage{Id: sentryproto.MessageId_GET_POOLED_TRANSACTIONS_66}
+		messages <- message
+		<-started
+		for range 257 {
+			messages <- message
+		}
+
+		// Mutex waits do not quiesce synctest, so observe the blocked receiver directly.
+		stacks := make([]runtime.StackRecord, 16)
+	waitForThreshold:
+		for {
+			select {
+			case <-started:
+				t.Fatal("threshold flush started before the timer flush was released")
+			default:
+			}
+			n, ok := runtime.GoroutineProfile(stacks)
+			if !ok {
+				stacks = make([]runtime.StackRecord, n)
+				continue
+			}
+			for _, stack := range stacks[:n] {
+				frames := runtime.CallersFrames(stack.Stack())
+				var previous string
+				var waiting, flushLocked, receiver bool
+				for {
+					frame, more := frames.Next()
+					waiting = waiting || strings.HasSuffix(frame.Function, ".runtime_SemacquireMutex")
+					if waiting && previous == "sync.(*Mutex).Lock" && strings.HasSuffix(frame.Function, ".(*Fetch).receiveMessage.func1") {
+						flushLocked = true
+					}
+					receiver = receiver || strings.Contains(frame.Function, ".TestFetchSerializesBatchFlushes.")
+					previous = frame.Function
+					if !more {
+						break
+					}
+				}
+				if flushLocked && receiver {
+					break waitForThreshold
+				}
+			}
+			runtime.Gosched()
+		}
+
+		releaseFirst()
+		<-started
+		messages <- nil
+		require.NoError(t, <-done)
+	})
 }

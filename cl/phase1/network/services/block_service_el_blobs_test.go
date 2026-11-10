@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -35,56 +36,127 @@ func elBlobsTestBlock(t *testing.T, version clparams.StateVersion, commitments i
 	return block, root, hashes
 }
 
-func setupELBlobsBlockService(t *testing.T) (*blockService, *execution_client.MockExecutionEngine, *das_mock.MockPeerDas) {
+type recordingColumnsPublisher struct {
+	published  [][]*cltypes.DataColumnSidecar
+	contextErr []error
+}
+
+func (r *recordingColumnsPublisher) PublishColumns(ctx context.Context, sidecars []*cltypes.DataColumnSidecar) {
+	r.published = append(r.published, sidecars)
+	r.contextErr = append(r.contextErr, ctx.Err())
+}
+
+func setupELBlobsBlockService(t *testing.T) (*blockService, *execution_client.MockExecutionEngine, *das_mock.MockPeerDas, *recordingColumnsPublisher) {
 	t.Helper()
 	ctrl := gomock.NewController(t)
 	service, _, _, forkchoiceMock := setupBlockService(t, ctrl)
 	engine := execution_client.NewMockExecutionEngine(ctrl)
 	peerDas := das_mock.NewMockPeerDas(ctrl)
 	forkchoiceMock.MockPeerDas = peerDas
+	columns := &recordingColumnsPublisher{}
 	b := service.(*blockService)
 	b.engine = engine
-	return b, engine, peerDas
+	b.dataColumns = columns
+	return b, engine, peerDas, columns
 }
 
-func TestImportColumnsFromELBlobs(t *testing.T) {
-	b, engine, peerDas := setupELBlobsBlockService(t)
+func TestImportColumnsFromELBlobsPublishesStoredColumns(t *testing.T) {
+	b, engine, peerDas, columns := setupELBlobsBlockService(t)
+	block, root, hashes := elBlobsTestBlock(t, clparams.FuluVersion, 2)
+	blobs := [][]byte{{1}, {2}}
+	proofs := [][][]byte{{{1}}, {{2}}}
+	stored := []*cltypes.DataColumnSidecar{cltypes.NewDataColumnSidecarWithVersion(clparams.FuluVersion)}
+
+	peerDas.EXPECT().IsDataAvailable(block.Block.Slot, root).Return(false, nil)
+	engine.EXPECT().GetBlobs(gomock.Any(), hashes, clparams.FuluVersion).Return(blobs, proofs, nil)
+	peerDas.EXPECT().ImportColumnsFromBlobs(gomock.Any(), block, blobs, proofs).Return(stored, nil)
+
+	b.importColumnsFromELBlobs(t.Context(), block)
+
+	require.Equal(t, [][]*cltypes.DataColumnSidecar{stored}, columns.published)
+}
+
+func TestImportColumnsFromELBlobsDoesNotPublishFailedImport(t *testing.T) {
+	b, engine, peerDas, columns := setupELBlobsBlockService(t)
 	block, root, hashes := elBlobsTestBlock(t, clparams.FuluVersion, 2)
 	blobs := [][]byte{{1}, {2}}
 	proofs := [][][]byte{{{1}}, {{2}}}
 
 	peerDas.EXPECT().IsDataAvailable(block.Block.Slot, root).Return(false, nil)
 	engine.EXPECT().GetBlobs(gomock.Any(), hashes, clparams.FuluVersion).Return(blobs, proofs, nil)
-	peerDas.EXPECT().ImportColumnsFromBlobs(gomock.Any(), block, blobs, proofs).Return(nil)
+	peerDas.EXPECT().ImportColumnsFromBlobs(gomock.Any(), block, blobs, proofs).Return(nil, errors.New("incomplete blobs"))
+
+	b.importColumnsFromELBlobs(t.Context(), block)
+
+	require.Empty(t, columns.published)
+}
+
+func TestImportColumnsFromELBlobsSkipsBlockAboveBlobLimit(t *testing.T) {
+	b, _, _, _ := setupELBlobsBlockService(t)
+	maxBlobs := b.beaconCfg.GetBlobParameters(100 / b.beaconCfg.SlotsPerEpoch).MaxBlobsPerBlock
+	block, _, _ := elBlobsTestBlock(t, clparams.FuluVersion, int(maxBlobs)+1)
 
 	b.importColumnsFromELBlobs(t.Context(), block)
 }
 
+// The limit comes from the blob schedule entry of the block's epoch, not from an earlier fork.
+func TestImportColumnsFromELBlobsUsesTheBlobLimitOfTheBlockEpoch(t *testing.T) {
+	b, _, _, _ := setupELBlobsBlockService(t)
+	cfg := *b.beaconCfg
+	block, _, _ := elBlobsTestBlock(t, clparams.FuluVersion, 5)
+	epoch := block.Block.Slot / cfg.SlotsPerEpoch
+	require.Greater(t, cfg.GetBlobParameters(0).MaxBlobsPerBlock, uint64(5))
+	cfg.BlobSchedule = append(slices.Clone(cfg.BlobSchedule), clparams.BlobParameters{Epoch: epoch, MaxBlobsPerBlock: 4})
+	b.beaconCfg = &cfg
+
+	b.importColumnsFromELBlobs(t.Context(), block)
+}
+
+func TestImportColumnsFromELBlobsPublishesAfterTheImportContextExpires(t *testing.T) {
+	b, engine, peerDas, columns := setupELBlobsBlockService(t)
+	cfg := *b.beaconCfg
+	cfg.SecondsPerSlot = 0
+	b.beaconCfg = &cfg
+	block, root, hashes := elBlobsTestBlock(t, clparams.FuluVersion, 2)
+	blobs := [][]byte{{1}, {2}}
+	proofs := [][][]byte{{{1}}, {{2}}}
+	built := []*cltypes.DataColumnSidecar{cltypes.NewDataColumnSidecarWithVersion(clparams.FuluVersion)}
+
+	peerDas.EXPECT().IsDataAvailable(block.Block.Slot, root).Return(false, nil)
+	engine.EXPECT().GetBlobs(gomock.Any(), hashes, clparams.FuluVersion).Return(blobs, proofs, nil)
+	peerDas.EXPECT().ImportColumnsFromBlobs(gomock.Any(), block, blobs, proofs).Return(built, nil)
+
+	b.importColumnsFromELBlobs(t.Context(), block)
+
+	require.Equal(t, [][]*cltypes.DataColumnSidecar{built}, columns.published)
+	require.Equal(t, []error{nil}, columns.contextErr)
+}
+
 func TestImportColumnsFromELBlobsSkipsWhenNotNeeded(t *testing.T) {
 	t.Run("data available", func(t *testing.T) {
-		b, _, peerDas := setupELBlobsBlockService(t)
+		b, _, peerDas, _ := setupELBlobsBlockService(t)
 		block, root, _ := elBlobsTestBlock(t, clparams.FuluVersion, 2)
 		peerDas.EXPECT().IsDataAvailable(block.Block.Slot, root).Return(true, nil)
 		b.importColumnsFromELBlobs(t.Context(), block)
 	})
 	t.Run("no blobs", func(t *testing.T) {
-		b, _, _ := setupELBlobsBlockService(t)
+		b, _, _, _ := setupELBlobsBlockService(t)
 		block, _, _ := elBlobsTestBlock(t, clparams.FuluVersion, 0)
 		b.importColumnsFromELBlobs(t.Context(), block)
 	})
 	t.Run("before fulu", func(t *testing.T) {
-		b, _, _ := setupELBlobsBlockService(t)
+		b, _, _, _ := setupELBlobsBlockService(t)
 		block, _, _ := elBlobsTestBlock(t, clparams.ElectraVersion, 2)
 		b.importColumnsFromELBlobs(t.Context(), block)
 	})
 	t.Run("no engine", func(t *testing.T) {
-		b, _, _ := setupELBlobsBlockService(t)
+		b, _, _, _ := setupELBlobsBlockService(t)
 		b.engine = nil
 		block, _, _ := elBlobsTestBlock(t, clparams.FuluVersion, 2)
 		b.importColumnsFromELBlobs(t.Context(), block)
 	})
 	t.Run("engine error", func(t *testing.T) {
-		b, engine, peerDas := setupELBlobsBlockService(t)
+		b, engine, peerDas, _ := setupELBlobsBlockService(t)
 		block, root, hashes := elBlobsTestBlock(t, clparams.FuluVersion, 2)
 		peerDas.EXPECT().IsDataAvailable(block.Block.Slot, root).Return(false, nil)
 		engine.EXPECT().GetBlobs(gomock.Any(), hashes, clparams.FuluVersion).Return(nil, nil, errors.New("unavailable"))
@@ -112,6 +184,66 @@ func TestQueuedUnknownParentBlockStartsELColumnsImportOnce(t *testing.T) {
 	require.Len(t, started, 1)
 }
 
+// Equivocating blocks of one proposer and slot, queued on the same unknown parent, start a single EL import.
+func TestQueuedEquivocatingBlocksStartOneELColumnsImport(t *testing.T) {
+	service, child, _, root, job := parkUnknownParentBlockForRetry(t, true)
+	encoded, err := child.EncodeSSZ(nil)
+	require.NoError(t, err)
+	other := cltypes.NewSignedBeaconBlock(service.beaconCfg, child.Version())
+	require.NoError(t, other.DecodeSSZ(encoded, int(child.Version())))
+	other.Block.Body.Graffiti = common.Hash{0x01}
+	otherJob, _ := service.scheduleBlockForLaterProcessing(other, nil, false, false)
+	otherRoot, err := other.Block.HashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, child.Block.ProposerIndex, other.Block.ProposerIndex)
+	require.NotEqual(t, root, common.Hash(otherRoot))
+	started := 0
+	service.startELColumnsImport = func(context.Context, *cltypes.SignedBeaconBlock) { started++ }
+
+	service.processScheduledBlock(t.Context(), root, job, time.Now())
+	service.processScheduledBlock(t.Context(), otherRoot, otherJob, time.Now())
+
+	require.ErrorIs(t, otherJob.lastAttempt.err, forkchoice.ErrEIP7594ColumnDataNotAvailable)
+	require.Equal(t, 1, started)
+}
+
+// A block above the blob limit, e.g. queued on an unknown parent before gossip validation checked its blob count, does
+// not take the import of its proposer and slot from a valid block.
+func TestBlockAboveBlobLimitDoesNotTakeTheELColumnsImport(t *testing.T) {
+	b, _, _, _ := setupELBlobsBlockService(t)
+	maxBlobs := b.beaconCfg.GetBlobParameters(100 / b.beaconCfg.SlotsPerEpoch).MaxBlobsPerBlock
+	oversized, _, _ := elBlobsTestBlock(t, clparams.FuluVersion, int(maxBlobs)+1)
+	valid, _, _ := elBlobsTestBlock(t, clparams.FuluVersion, 2)
+	require.Equal(t, blockGossipKey(oversized), blockGossipKey(valid))
+	var started []*cltypes.SignedBeaconBlock
+	b.startELColumnsImport = func(_ context.Context, block *cltypes.SignedBeaconBlock) {
+		started = append(started, block)
+	}
+
+	b.startELColumnsImportOnce(t.Context(), oversized)
+	b.startELColumnsImportOnce(t.Context(), valid)
+
+	require.Equal(t, []*cltypes.SignedBeaconBlock{valid}, started)
+}
+
+// A Fulu block whose blob count is out of range, here one without blobs, does not take the import of its proposer and
+// slot from a block with blobs.
+func TestBlockWithoutBlobsDoesNotTakeTheELColumnsImport(t *testing.T) {
+	b, _, _, _ := setupELBlobsBlockService(t)
+	empty, _, _ := elBlobsTestBlock(t, clparams.FuluVersion, 0)
+	withBlobs, _, _ := elBlobsTestBlock(t, clparams.FuluVersion, 2)
+	require.Equal(t, blockGossipKey(empty), blockGossipKey(withBlobs))
+	var started []*cltypes.SignedBeaconBlock
+	b.startELColumnsImport = func(_ context.Context, block *cltypes.SignedBeaconBlock) {
+		started = append(started, block)
+	}
+
+	b.startELColumnsImportOnce(t.Context(), empty)
+	b.startELColumnsImportOnce(t.Context(), withBlobs)
+
+	require.Equal(t, []*cltypes.SignedBeaconBlock{withBlobs}, started)
+}
+
 func TestQueuedBlockWithWrongProposerDoesNotStartELColumnsImport(t *testing.T) {
 	service, _, _, root, job := parkUnknownParentBlockForRetry(t, false)
 	started := 0
@@ -120,5 +252,58 @@ func TestQueuedBlockWithWrongProposerDoesNotStartELColumnsImport(t *testing.T) {
 	service.processScheduledBlock(t.Context(), root, job, time.Now())
 
 	require.ErrorIs(t, job.lastAttempt.err, forkchoice.ErrBlockInvalid)
+	require.Zero(t, started)
+}
+
+func TestProcessMessageStartsELColumnsImportForValidGossipBlock(t *testing.T) {
+	service, child, fcu, parentRoot, _ := newGloasGossipValidationFixture(t, nil)
+	fcu.PayloadStatusByRootMap[parentRoot] = execution_client.PayloadStatusValidated
+	b := service.(*blockService)
+	var started []*cltypes.SignedBeaconBlock
+	b.startELColumnsImport = func(_ context.Context, block *cltypes.SignedBeaconBlock) {
+		started = append(started, block)
+	}
+
+	_ = service.ProcessMessage(t.Context(), nil, child)
+
+	require.Equal(t, []*cltypes.SignedBeaconBlock{child}, started)
+}
+
+// A gossip block and an equivocating block of the same proposer and slot queued on an unknown parent start one import:
+// the queued block never adds its key to the seen-blocks cache, so only the import claim stops the second one.
+func TestGossipAndQueuedEquivocatingBlocksStartOneELColumnsImport(t *testing.T) {
+	service, child, fcu, parentRoot, _ := newGloasGossipValidationFixture(t, nil)
+	fcu.PayloadStatusByRootMap[parentRoot] = execution_client.PayloadStatusValidated
+	b := service.(*blockService)
+	encoded, err := child.EncodeSSZ(nil)
+	require.NoError(t, err)
+	other := cltypes.NewSignedBeaconBlock(b.beaconCfg, child.Version())
+	require.NoError(t, other.DecodeSSZ(encoded, int(child.Version())))
+	other.Block.Body.Graffiti = common.Hash{0x01}
+	otherRoot, err := other.Block.HashSSZ()
+	require.NoError(t, err)
+	var started []*cltypes.SignedBeaconBlock
+	b.startELColumnsImport = func(_ context.Context, block *cltypes.SignedBeaconBlock) {
+		started = append(started, block)
+	}
+
+	_ = service.ProcessMessage(t.Context(), nil, child)
+	otherJob, _ := b.scheduleBlockForLaterProcessing(other, nil, false, false)
+	b.processScheduledBlock(t.Context(), otherRoot, otherJob, time.Now())
+
+	require.NotNil(t, otherJob.lastAttempt)
+	require.Equal(t, []*cltypes.SignedBeaconBlock{child}, started)
+}
+
+func TestProcessMessageDoesNotStartELColumnsImportForInvalidGossipBlock(t *testing.T) {
+	service, child, fcu, parentRoot, _ := newGloasGossipValidationFixture(t, nil)
+	fcu.PayloadStatusByRootMap[parentRoot] = execution_client.PayloadStatusValidated
+	child.Signature[0] ^= 0xff
+	b := service.(*blockService)
+	started := 0
+	b.startELColumnsImport = func(context.Context, *cltypes.SignedBeaconBlock) { started++ }
+
+	require.Error(t, service.ProcessMessage(t.Context(), nil, child))
+
 	require.Zero(t, started)
 }
