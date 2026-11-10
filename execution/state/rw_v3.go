@@ -823,6 +823,9 @@ func (w *Writer) DeleteAccount(address accounts.Address, original *accounts.Acco
 	if err := w.tx.DomainDel(kv.AccountsDomain, addressValue[:], w.txNum, nil); err != nil {
 		return err
 	}
+	if w.accumulator != nil {
+		w.accumulator.DeleteAccount(addressValue)
+	}
 	return nil
 }
 

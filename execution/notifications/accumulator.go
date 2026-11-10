@@ -121,12 +121,10 @@ func (a *Accumulator) ChangeAccount(address common.Address, incarnation uint64, 
 	}
 	accountChange := &a.latestChange.Changes[i]
 	switch accountChange.Action {
-	case ActionStorage:
+	case ActionStorage, ActionRemove:
 		accountChange.Action = ActionUpsert
 	case ActionCode:
 		accountChange.Action = ActionUpsertCode
-	case ActionRemove:
-		//panic("")
 	}
 	accountChange.Incarnation = incarnation
 	accountChange.Data = data
@@ -141,9 +139,6 @@ func (a *Accumulator) DeleteAccount(address common.Address) {
 		a.accountChangeIndex[address] = i
 	}
 	accountChange := &a.latestChange.Changes[i]
-	if accountChange.Action != ActionStorage {
-		panic("")
-	}
 	accountChange.Data = nil
 	accountChange.Code = nil
 	accountChange.StorageChanges = nil
@@ -162,12 +157,10 @@ func (a *Accumulator) ChangeCode(address common.Address, incarnation uint64, cod
 	}
 	accountChange := &a.latestChange.Changes[i]
 	switch accountChange.Action {
-	case ActionStorage:
+	case ActionStorage, ActionRemove:
 		accountChange.Action = ActionCode
 	case ActionUpsert:
 		accountChange.Action = ActionUpsertCode
-	case ActionRemove:
-		//panic("")
 	}
 	accountChange.Incarnation = incarnation
 	accountChange.Code = code
