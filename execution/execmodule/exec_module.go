@@ -533,6 +533,7 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 	e.currentContext.ResetPendingUpdates()
 	e.forkValidator.ClearWithUnwind()
 	e.logger.Debug("[execmodule] validating chain", "number", blockNumber, "hash", blockHash)
+	dbg.NpMark("vcInit")
 	var (
 		header             *types.Header
 		body               *types.Body
@@ -568,13 +569,17 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		if err != nil {
 			return ValidationResult{}, err
 		}
+		dbg.NpMark("vcHeader")
 		body, err = e.blockReader.BodyWithTransactions(ctx, overlay, blockHash, blockNumber)
 		if err != nil {
 			return ValidationResult{}, err
 		}
+		dbg.NpMark("vcBody")
 		e.readAheader.AddHeaderAndBody(ctx, e.db, overlay, header, body)
+		dbg.NpMark("vcReadAhead")
 		currentBlockNumber = rawdb.ReadCurrentBlockNumber(overlay)
 		payloadExecuted, err = alreadyExecuted(overlay)
+		dbg.NpMark("vcAlready")
 		if err != nil {
 			return ValidationResult{}, err
 		}
@@ -628,7 +633,9 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		return ValidationResult{}, err
 	}
 	defer roTx.Rollback()
+	dbg.NpMark("vcChecks")
 	doms, err := execctx.NewSharedDomains(ctx, roTx, e.logger, execctx.WithLocalCacheUnwind())
+	dbg.NpMark("vcNewDomains")
 	if err != nil {
 		if doms != nil {
 			doms.Close()
@@ -669,6 +676,7 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 			return ValidationResult{}, fmt.Errorf("ValidateChain: flush overlay to validation tx: %w", err)
 		}
 	}
+	dbg.NpMark("vcOverlayFlush")
 	// Set state cache in SharedDomains for use during state reading
 	doms.SetStateCache(e.stateCache)
 	// Either unwind path may run, and both can run in one validation. Share one
@@ -693,7 +701,11 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		doms.Close()
 		return ValidationResult{}, err
 	}
-	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(ctx, doms, tx, header, body.RawBody(), ensureReadAheadSuspended, e.logger)
+	dbg.NpMark("vcUnwind")
+	vpBody := body.RawBody()
+	dbg.NpMark("vcRawBody")
+	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(ctx, doms, tx, header, vpBody, ensureReadAheadSuspended, e.logger)
+	dbg.NpMark("vcValidatePayload")
 	if criticalError != nil {
 		return ValidationResult{}, criticalError
 	}

@@ -28,6 +28,7 @@ import (
 
 	mapset "github.com/deckarep/golang-set/v2"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpccfg"
@@ -184,6 +185,7 @@ func (s *Server) serveSingleRequest(ctx context.Context, codec ServerCodec, stre
 	defer h.close(io.EOF, nil)
 
 	reqs, batch, err := codec.ReadBatch(s.batchLimit)
+	dbg.NpBatchRead()
 	if tooLarge, ok := errors.AsType[*batchTooLargeError](err); ok {
 		h.handleBatchTooLarge(tooLarge, nil)
 		return nil

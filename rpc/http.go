@@ -372,6 +372,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	dbg.NpHTTPStart()
 	body := s.ingress.reader(r.Body)
 	defer body.release()
 
