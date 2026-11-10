@@ -2,6 +2,7 @@ package p2p
 
 import (
 	"math"
+	"regexp"
 	"time"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -69,8 +70,19 @@ func (p *p2pManager) pubsubOptions(beaconConfig *clparams.BeaconChainConfig) []p
 		pubsub.WithValidateQueueSize(pubsubQueueSize),
 		pubsub.WithPeerScore(scoreParams, thresholds),
 		pubsub.WithGossipSubParams(pubsubGossipParam()),
+		pubsub.WithSubscriptionFilter(gossipSubscriptionFilter()),
 	}
 	return psOpts
+}
+
+// maxSubscriptionsPerRPC is above what an honest peer sends for all subnets of two fork digests.
+const maxSubscriptionsPerRPC = 500
+
+var eth2TopicFormat = regexp.MustCompile(`^/eth2/[0-9a-f]{8}/[a-z0-9_]{1,64}/ssz_snappy$`)
+
+// gossipSubscriptionFilter drops subscriptions to topics that are not eth2 gossip topics, and refuses oversized batches.
+func gossipSubscriptionFilter() pubsub.SubscriptionFilter {
+	return pubsub.WrapLimitSubscriptionFilter(pubsub.NewRegexpSubscriptionFilter(eth2TopicFormat), maxSubscriptionsPerRPC)
 }
 
 // creates a custom gossipsub parameter set.
