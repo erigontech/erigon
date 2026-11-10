@@ -492,7 +492,7 @@ func (f *Follower) boot(ctx context.Context) error {
 	}
 	f.target = head.Number
 	if err := f.Sync(ctx); err != nil {
-		return f.historyIncomplete(ctx, err)
+		return err
 	}
 	if err := f.checkRoot(ctx, before); err != nil {
 		return err
@@ -629,8 +629,13 @@ func (f *Follower) Handle(ctx context.Context, e l1.Event) error {
 }
 
 // Sync reconciles the batches of the L1 blocks up to the target and applies
-// L1 finality.
+// L1 finality. A block L1 no longer serves stops L1-only derivation, as at
+// boot.
 func (f *Follower) Sync(ctx context.Context) error {
+	return f.historyIncomplete(ctx, f.sync(ctx))
+}
+
+func (f *Follower) sync(ctx context.Context) error {
 	defer f.moving(HeadDerivation)()
 	defer f.publish()
 	defer loadMetrics().sync.ObserveDuration(time.Now())

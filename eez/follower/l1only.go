@@ -74,7 +74,7 @@ func (f *Follower) historyIncomplete(ctx context.Context, err error) error {
 	if herr != nil || u.Block+historyMissingDepth >= head.Number {
 		return err
 	}
-	f.logger.Error("[eez] L1 no longer serves a block L1-only derivation needs", "event", "eez.node.deriver.boot_catch_up.history_incomplete",
+	f.logger.Error("[eez] L1 no longer serves a block L1-only derivation needs", "event", "eez.deriver.history_incomplete",
 		"block", u.Block, "l1Head", head.Number, "err", err)
 	return fmt.Errorf("%w: L1 no longer serves block %d, %d blocks below its head: %w", ErrL1HistoryIncomplete, u.Block, head.Number-u.Block, err)
 }

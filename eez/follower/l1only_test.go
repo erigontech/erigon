@@ -18,7 +18,10 @@ package follower_test
 
 import (
 	"context"
+	"fmt"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -28,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/eez/follower"
 	"github.com/erigontech/erigon/eez/l1"
 	"github.com/erigontech/erigon/eez/l1/recording"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 // pruned returns the composer's L1 from block first on, a source that no
@@ -63,6 +67,91 @@ func TestL1OnlyHistoryIncomplete(t *testing.T) {
 	n := newNode(t, pruned(t, c, deploy+1))
 	require.ErrorIs(t, n.follower.Boot(t.Context()), follower.ErrL1HistoryIncomplete)
 	require.False(t, n.logged("boot catch-up failed"), "boot stops without retrying")
+}
+
+// logsBelow is an L1 that no longer serves the logs of the blocks below
+// from, once set.
+type logsBelow struct {
+	*recording.MemoryChain
+	from atomic.Uint64
+}
+
+func (r *logsBelow) Logs(ctx context.Context, from, to uint64, address common.Address, topics [][]common.Hash) ([]*types.Log, error) {
+	if from < r.from.Load() {
+		return nil, fmt.Errorf("%w: logs of [%d, %d]", l1.ErrNotFound, from, to)
+	}
+	return r.MemoryChain.Logs(ctx, from, to, address, topics)
+}
+
+// unserveNext waits until n follows the head of c's L1, then makes src stop
+// serving the logs of the next L1 block, which it returns.
+func unserveNext(t *testing.T, n *node, c *derivertest.Composer, src *logsBelow) uint64 {
+	t.Helper()
+	require.Eventually(t, func() bool { return n.follower.Status().Phase == follower.PhaseFollowing }, 10*time.Second, 5*time.Millisecond)
+	head, err := c.L1.Head(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, head.Number, n.follower.Status().L1Scanned)
+	src.from.Store(head.Number + 2)
+	return head.Number + 1
+}
+
+// TestL1OnlyHistoryIncompleteRunning: a running L1-only follower stops, as
+// its boot does, once L1 no longer serves a block it needs more than 64
+// blocks below the L1 head, and retries while the block is 64 or fewer
+// below.
+func TestL1OnlyHistoryIncompleteRunning(t *testing.T) {
+	c := derivertest.NewComposer(t)
+	composeBatches(t, c, 1, 3)
+	src := &logsBelow{MemoryChain: c.L1}
+	n := newNode(t, src)
+	_, done := n.run(t)
+	next := unserveNext(t, n, c, src)
+
+	c.Advance(65)
+	unserved := fmt.Sprintf("L1 block %d not served", next)
+	require.Eventually(t, func() bool { return n.logged("follower step failed, retrying", unserved) }, 10*time.Second, 5*time.Millisecond)
+	select {
+	case err := <-done:
+		t.Fatalf("stopped with block %d 64 below the head: %v", next, err)
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	c.Advance(1)
+	select {
+	case err := <-done:
+		require.ErrorIs(t, err, follower.ErrL1HistoryIncomplete)
+		var u *l1.UnservedError
+		require.ErrorAs(t, err, &u)
+		require.Equal(t, next, u.Block)
+	case <-time.After(10 * time.Second):
+		t.Fatalf("still retrying block %d 65 below the head", next)
+	}
+}
+
+// TestPeersModeRetriesUnservedHistory: a follower in peers mode, whose
+// history below L1 finality comes from its peers, keeps retrying a block L1
+// no longer serves, however deep below the L1 head.
+func TestPeersModeRetriesUnservedHistory(t *testing.T) {
+	c := derivertest.NewComposer(t)
+	composeBatches(t, c, 2, 3)
+	finalizeHead(t, c)
+	src := &logsBelow{MemoryChain: c.L1}
+	n, _, _ := newPeersNode(t, c, src, true)
+	_, done := n.run(t)
+	next := unserveNext(t, n, c, src)
+
+	c.Advance(66)
+	unserved := fmt.Sprintf("L1 block %d not served", next)
+	require.Eventually(t, func() bool { return n.logged("follower step failed, retrying", unserved) }, 10*time.Second, 5*time.Millisecond)
+	head, err := c.L1.Head(t.Context())
+	require.NoError(t, err)
+	require.Greater(t, head.Number, next+64)
+	select {
+	case err := <-done:
+		t.Fatalf("stopped with block %d %d below the head: %v", next, head.Number-next, err)
+	case <-time.After(500 * time.Millisecond):
+	}
+	require.False(t, n.logged("L1 no longer serves a block"))
 }
 
 // rootAt is an L1 whose registry records root for the rollup at every block.
