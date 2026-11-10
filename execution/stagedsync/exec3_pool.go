@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
@@ -27,6 +28,10 @@ type poolTask struct {
 	// reexec latches a request to re-execute; done closes when the task is published.
 	reexec chan struct{}
 	done   chan struct{}
+
+	lastRunNs  int64
+	parkNs     int64
+	rerunCause int
 }
 
 type taskPool struct {
@@ -344,21 +349,34 @@ func (pt *poolTask) run(p *taskPool, slot poolSlot) {
 		if poolOnRun != nil {
 			poolOnRun(int(tv.version.Incarnation) + 1)
 		}
+		if pt.lastRunNs != 0 {
+			be.probe.reruns[pt.rerunCause].Add(1)
+			be.probe.wasteNs[pt.rerunCause].Add(pt.lastRunNs)
+		}
+		pt.rerunCause = rerunSpine
+		pt.parkNs = 0
+		runStart := time.Now()
 		result := pt.slot.w.RunTxTask(tv)
+		pt.lastRunNs = max(time.Since(runStart).Nanoseconds()-pt.parkNs, 1)
+		be.probe.runs.Add(1)
+		be.probe.runNs.Add(pt.lastRunNs)
 		pt.release(p)
 
 		named := -2
 		switch txTask, ok := tv.Task.(*exec.TxTask); {
 		case ok && txTask.ChargesSenderAtValidation(int(tv.version.Incarnation)) && (result.Err != nil || touchedSenderAccount(txTask, result)):
 			named = tv.index - 1
+			pt.rerunCause = rerunErr
 		case result.Err != nil:
 			if finalExec {
 				pt.send(p, result)
 				return
 			}
 			named = tv.index - 1
+			pt.rerunCause = rerunErr
 		case result.Dep >= 0:
 			named = be.taskIndexOf(result.Dep)
+			pt.rerunCause = rerunDep
 		}
 		if named != -2 {
 			if !pt.rerun(p, named) {
@@ -370,11 +388,16 @@ func (pt *poolTask) run(p *taskPool, slot poolSlot) {
 		be.selfLoopFlush(tv.version, result, pt.prevWrites)
 		pt.prevWrites = result.TxOut
 		valid, target, blocker := be.selfLoopEvaluate(tv, result)
+		pt.rerunCause = rerunInvalid
 		if valid {
+			pt.rerunCause = rerunRecheck
 			var ok bool
 			if ok, valid, blocker = pt.settle(p, result, target); !ok {
 				return
 			}
+		}
+		if valid {
+			pt.rerunCause = rerunSpine
 		}
 		if !valid {
 			if !pt.rerun(p, blocker) {
@@ -434,6 +457,9 @@ func (be *blockExecutor) parkReader(reader, writer int, blocked func() bool) boo
 	pt.slot.w.PublishReadMetrics()
 	p.slots <- poolSlot{tx: pt.slot.tx}
 	pt.slot = poolSlot{}
+	be.probe.parks.Add(1)
+	storeMax(&be.probe.peakParked, be.probe.parked.Add(1))
+	parkStart := time.Now()
 	woke := true
 	select {
 	case <-wake:
@@ -443,6 +469,10 @@ func (be *blockExecutor) parkReader(reader, writer int, blocked func() bool) boo
 	// Unconditional even on shutdown: the run goes on until the EVM sees the cancel, so it
 	// must read through its own open tx, and every slot comes back as tasks end.
 	s := <-p.slots
+	be.probe.parked.Add(-1)
+	parked := time.Since(parkStart).Nanoseconds()
+	pt.parkNs += parked
+	be.probe.parkNs.Add(parked)
 	if s.w != nil {
 		p.mu.Lock()
 		p.spare = append(p.spare, s.w)
