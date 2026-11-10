@@ -36,7 +36,7 @@ type stateGetter struct {
 	m          kv.GetLatestMetrics
 	codeBuf    *[]byte
 	ownCodeBuf []byte
-	memo       accounts.Code // last LendCode decode: a code hash maps to immutable bytes
+	memo       accounts.Code // last BorrowCode decode: a code hash maps to immutable bytes
 }
 
 var _ execctxapi.StateGetter = (*stateGetter)(nil)
@@ -57,11 +57,11 @@ func (g *stateGetter) GetCode(addr []byte, txNum uint64) ([]byte, bool, error) {
 	return code, ok, err
 }
 
-// LendCode returns bytes that alias the lent buffer until the next code read on this getter.
-func (g *stateGetter) LendCode(addr []byte, txNum uint64) ([]byte, bool, error) {
-	code, lent, err := g.sd.lendCode(g.tx, g.view, addr, txNum, *g.codeBuf, &g.memo)
+// BorrowCode returns bytes that alias the code buffer until the next code read on this getter.
+func (g *stateGetter) BorrowCode(addr []byte, txNum uint64) ([]byte, bool, error) {
+	code, borrowed, err := g.sd.borrowCode(g.tx, g.view, addr, txNum, *g.codeBuf, &g.memo)
 	*g.codeBuf = slices.Grow((*g.codeBuf)[:0], min(len(code), maxLentCodeBuf))
-	return code, lent, err
+	return code, borrowed, err
 }
 
 func (g *stateGetter) GetCodeSize(addr []byte, txNum uint64) (int, bool, error) {

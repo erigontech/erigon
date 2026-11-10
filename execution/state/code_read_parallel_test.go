@@ -196,20 +196,20 @@ func TestRefreshCodeAssertsHashPresent(t *testing.T) {
 	assert.Panics(t, func() { _, _ = refreshCode(ibs, addr) })
 }
 
-type lendingReader struct {
+type borrowingReader struct {
 	codeReader
-	lends int
+	borrows int
 }
 
-func (r *lendingReader) LendAccountCode(addr accounts.Address) ([]byte, bool, error) {
+func (r *borrowingReader) BorrowAccountCode(addr accounts.Address) ([]byte, bool, error) {
 	if addr != r.addr {
 		return nil, false, nil
 	}
-	r.lends++
+	r.borrows++
 	return r.code, true, nil
 }
 
-func newLendingRead(t *testing.T, vm *VersionMap) (*IntraBlockState, *lendingReader, accounts.Address, []byte) {
+func newBorrowingRead(t *testing.T, vm *VersionMap) (*IntraBlockState, *borrowingReader, accounts.Address, []byte) {
 	t.Helper()
 	addr := accounts.InternAddress([20]byte{0xC0, 0xDE})
 	code := []byte{0x60, 0x01, 0x60, 0x02, 0x01}
@@ -217,47 +217,47 @@ func newLendingRead(t *testing.T, vm *VersionMap) (*IntraBlockState, *lendingRea
 	acc.Nonce = 1
 	acc.Incarnation = 1
 	acc.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(code))
-	reader := &lendingReader{codeReader: codeReader{addr: addr, account: &acc, code: code}}
+	reader := &borrowingReader{codeReader: codeReader{addr: addr, account: &acc, code: code}}
 	ibs := NewWithVersionMap(reader, vm)
 	ibs.SetTxContext(100, 5)
 	ibs.SetVersion(0)
 	return ibs, reader, addr, code
 }
 
-func TestCodeLent_RecordsTheSameHeaderWithoutBytes(t *testing.T) {
-	normal, _, addr, code := newLendingRead(t, NewVersionMap(nil))
+func TestCodeBorrowed_RecordsTheSameHeaderWithoutBytes(t *testing.T) {
+	normal, _, addr, code := newBorrowingRead(t, NewVersionMap(nil))
 	got, err := normal.GetCode(addr)
 	require.NoError(t, err)
 	require.Equal(t, code, got)
 	wantRead, ok := normal.versionedReads.GetCode(addr)
 	require.True(t, ok)
 
-	lending, reader, addr, code := newLendingRead(t, NewVersionMap(nil))
-	got, err = lending.GetCodeLent(addr)
+	lending, reader, addr, code := newBorrowingRead(t, NewVersionMap(nil))
+	got, err = lending.GetCodeBorrowed(addr)
 	require.NoError(t, err)
 	require.Equal(t, code, got)
-	require.Equal(t, 1, reader.lends)
+	require.Equal(t, 1, reader.borrows)
 	require.Empty(t, lending.stateObjects)
 
 	haveRead, ok := lending.versionedReads.GetCode(addr)
 	require.True(t, ok)
 	require.Equal(t, wantRead.ReadHeader, haveRead.ReadHeader)
-	require.Nil(t, haveRead.Val.Bytes, "the lent bytes must not be retained")
+	require.Nil(t, haveRead.Val.Bytes, "the borrowed bytes must not be retained")
 	require.Equal(t, wantRead.Val.Hash, haveRead.Val.Hash)
 }
 
-func TestCodeLent_LaterReadSeesFullCode(t *testing.T) {
+func TestCodeBorrowed_LaterReadSeesFullCode(t *testing.T) {
 	for name, read := range map[string]func(*IntraBlockState, accounts.Address) ([]byte, error){
 		"GetCode": (*IntraBlockState).GetCode,
 		"ResolveCode": func(ibs *IntraBlockState, addr accounts.Address) ([]byte, error) {
 			code, err := ibs.ResolveCode(addr)
 			return code.Bytes, err
 		},
-		"GetCodeLent": (*IntraBlockState).GetCodeLent,
+		"GetCodeBorrowed": (*IntraBlockState).GetCodeBorrowed,
 	} {
 		t.Run(name, func(t *testing.T) {
-			ibs, _, addr, code := newLendingRead(t, NewVersionMap(nil))
-			_, err := ibs.GetCodeLent(addr)
+			ibs, _, addr, code := newBorrowingRead(t, NewVersionMap(nil))
+			_, err := ibs.GetCodeBorrowed(addr)
 			require.NoError(t, err)
 
 			got, err := read(ibs, addr)
@@ -267,10 +267,10 @@ func TestCodeLent_LaterReadSeesFullCode(t *testing.T) {
 	}
 }
 
-func TestCodeLent_LowerTxCodeWriteInvalidatesTheRead(t *testing.T) {
+func TestCodeBorrowed_LowerTxCodeWriteInvalidatesTheRead(t *testing.T) {
 	vm := NewVersionMap(nil)
-	ibs, _, addr, _ := newLendingRead(t, vm)
-	_, err := ibs.GetCodeLent(addr)
+	ibs, _, addr, _ := newBorrowingRead(t, vm)
+	_, err := ibs.GetCodeBorrowed(addr)
 	require.NoError(t, err)
 
 	ws := &WriteSet{}
@@ -283,10 +283,10 @@ func TestCodeLent_LowerTxCodeWriteInvalidatesTheRead(t *testing.T) {
 	require.Equal(t, VersionInvalid, vm.ValidateVersion(5, io, validateEqualVersion, false, ""))
 }
 
-func TestCodeLent_LowerTxSelfDestructInvalidatesTheRead(t *testing.T) {
+func TestCodeBorrowed_LowerTxSelfDestructInvalidatesTheRead(t *testing.T) {
 	vm := NewVersionMap(nil)
-	ibs, _, addr, _ := newLendingRead(t, vm)
-	_, err := ibs.GetCodeLent(addr)
+	ibs, _, addr, _ := newBorrowingRead(t, vm)
+	_, err := ibs.GetCodeBorrowed(addr)
 	require.NoError(t, err)
 
 	ws := &WriteSet{}
@@ -298,40 +298,40 @@ func TestCodeLent_LowerTxSelfDestructInvalidatesTheRead(t *testing.T) {
 	require.Equal(t, VersionInvalid, vm.ValidateVersion(5, io, validateEqualVersion, false, ""))
 }
 
-func TestCodeLent_UncommittedCodeStaysOnTheNormalPath(t *testing.T) {
+func TestCodeBorrowed_UncommittedCodeStaysOnTheNormalPath(t *testing.T) {
 	t.Run("version map", func(t *testing.T) {
 		vm := NewVersionMap(nil)
-		ibs, reader, addr, _ := newLendingRead(t, vm)
+		ibs, reader, addr, _ := newBorrowingRead(t, vm)
 		mapped := accounts.NewCode([]byte{0x60, 0x00})
 		ws := &WriteSet{}
 		ws.SetCode(addr, &VersionedWrite[accounts.Code]{WriteHeader: WriteHeader{Address: addr, Path: CodePath, Version: Version{TxIndex: 1}, valStatus: ValueChanged}, Val: mapped})
 		vm.FlushVersionedWrites(ws, true)
 
-		got, err := ibs.GetCodeLent(addr)
+		got, err := ibs.GetCodeBorrowed(addr)
 		require.NoError(t, err)
 		require.Equal(t, mapped.Bytes, got)
-		require.Zero(t, reader.lends)
+		require.Zero(t, reader.borrows)
 	})
 	t.Run("own write", func(t *testing.T) {
-		ibs, reader, addr, _ := newLendingRead(t, NewVersionMap(nil))
+		ibs, reader, addr, _ := newBorrowingRead(t, NewVersionMap(nil))
 		own := []byte{0x60, 0x00}
 		require.NoError(t, ibs.SetCode(addr, own, tracing.CodeChangeUnspecified))
 
-		got, err := ibs.GetCodeLent(addr)
+		got, err := ibs.GetCodeBorrowed(addr)
 		require.NoError(t, err)
 		require.Equal(t, own, got)
-		require.Zero(t, reader.lends)
+		require.Zero(t, reader.borrows)
 	})
 }
 
-func TestCodeLent_RepeatedReadKeepsTheBytes(t *testing.T) {
-	ibs, reader, addr, code := newLendingRead(t, NewVersionMap(nil))
+func TestCodeBorrowed_RepeatedReadKeepsTheBytes(t *testing.T) {
+	ibs, reader, addr, code := newBorrowingRead(t, NewVersionMap(nil))
 	for range 3 {
-		got, err := ibs.GetCodeLent(addr)
+		got, err := ibs.GetCodeBorrowed(addr)
 		require.NoError(t, err)
 		require.Equal(t, code, got)
 	}
-	require.Equal(t, 1, reader.lends, "a repeated read must not decode again")
+	require.Equal(t, 1, reader.borrows, "a repeated read must not decode again")
 	read, ok := ibs.versionedReads.GetCode(addr)
 	require.True(t, ok)
 	require.Equal(t, code, read.Val.Bytes)

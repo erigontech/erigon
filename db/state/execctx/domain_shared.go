@@ -1365,7 +1365,7 @@ type getLatestOptions struct {
 	codeHash    []byte
 	buf         []byte
 	hashFromMem bool
-	lent        *bool // non-nil: a fillable miss returns the decoded bytes unfilled and sets *lent
+	borrowed    *bool // non-nil: a fillable miss returns the decoded bytes unfilled and sets *borrowed
 }
 
 // getLatest is the read implementation. wm is the caller's lock-free
@@ -1498,8 +1498,8 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 			fillView = fillView.WithFrontier(sd.cacheFrontierFor(tx))
 		}
 		switch {
-		case fillsCode && opts.lent != nil:
-			*opts.lent = len(v) > 0
+		case fillsCode && opts.borrowed != nil:
+			*opts.borrowed = len(v) > 0
 		case fillsCode && opts.hashFromMem:
 			fillView.Fill(domain, k, v, readTxNum)
 			v = bytes.Clone(v)
@@ -1654,9 +1654,9 @@ func (sd *SharedDomains) getCode(tx kv.TemporalTx, view cache.ReadView, addr []b
 	return v, true, nil
 }
 
-// lendCode decodes a code-cache miss into buf without filling the cache. lent is
+// borrowCode decodes a code-cache miss into buf without filling the cache. borrowed is
 // false when any cache or the in-memory batch holds the code, or the read cannot fill.
-func (sd *SharedDomains) lendCode(tx kv.TemporalTx, view cache.ReadView, addr []byte, txNum uint64, buf []byte, memo *accounts.Code) (code []byte, lent bool, err error) {
+func (sd *SharedDomains) borrowCode(tx kv.TemporalTx, view cache.ReadView, addr []byte, txNum uint64, buf []byte, memo *accounts.Code) (code []byte, borrowed bool, err error) {
 	if tx == nil || sd.stateCache == nil {
 		return nil, false, nil
 	}
@@ -1670,8 +1670,8 @@ func (sd *SharedDomains) lendCode(tx kv.TemporalTx, view cache.ReadView, addr []
 	if h := memo.Hash.Value(); memo.Bytes != nil && bytes.Equal(h[:], codeHash) {
 		return memo.Bytes, true, nil
 	}
-	v, _, err := sd.getLatest(kv.CodeDomain, tx, addr, nil, time.Time{}, kv.NoStepBound, view, getLatestOptions{codeHash: codeHash, buf: buf, lent: &lent})
-	if err != nil || !lent {
+	v, _, err := sd.getLatest(kv.CodeDomain, tx, addr, nil, time.Time{}, kv.NoStepBound, view, getLatestOptions{codeHash: codeHash, buf: buf, borrowed: &borrowed})
+	if err != nil || !borrowed {
 		return nil, false, err
 	}
 	memo.Bytes = v

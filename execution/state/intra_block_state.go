@@ -786,13 +786,13 @@ func (ibs *IntraBlockState) GetCode(addr accounts.Address) ([]byte, error) {
 	return code.Bytes, err
 }
 
-// GetCodeLent is GetCode for a caller that copies the result at once: on a cache miss
+// GetCodeBorrowed is GetCode for a caller that copies the result at once: on a cache miss
 // the result aliases a worker buffer that the next state read overwrites.
-func (ibs *IntraBlockState) GetCodeLent(addr accounts.Address) ([]byte, error) {
+func (ibs *IntraBlockState) GetCodeBorrowed(addr accounts.Address) ([]byte, error) {
 	if ibs.versionMap == nil || ibs.codeAccess != nil {
 		return ibs.GetCode(addr)
 	}
-	code, _, _, err := readCodeLending(ibs, addr, true)
+	code, _, _, err := readCodeBorrowing(ibs, addr, true)
 	return code.Bytes, err
 }
 

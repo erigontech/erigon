@@ -178,7 +178,7 @@ func (tx codeBufTx) GetLatest(domain kv.Domain, key []byte, opts kv.GetLatestOpt
 // A caller-owned buffer outlives each getter, so a later getter decodes into it
 // instead of growing its own.
 // Identical code at many addresses is decoded once; any other read into the buffer ends the reuse.
-func TestStateGetterLendCodeReusesTheLastDecode(t *testing.T) {
+func TestStateGetterBorrowCodeReusesTheLastDecode(t *testing.T) {
 	ctx := t.Context()
 	db := newTestDb(t, 16)
 	code := bytes.Repeat([]byte{0x21}, 1024)
@@ -202,28 +202,28 @@ func TestStateGetterLendCodeReusesTheLastDecode(t *testing.T) {
 	sd.BindStateCache(sc)
 	var buf []byte
 	getter := sd.AsStateGetter(tx, execctxapi.StateGetterOptions{}.WithCodeBuf(&buf))
-	lender := getter.(interface {
-		LendCode(addr []byte, txNum uint64) ([]byte, bool, error)
+	borrower := getter.(interface {
+		BorrowCode(addr []byte, txNum uint64) ([]byte, bool, error)
 	})
-	lend := func(b byte, want []byte, decodes int) {
+	borrow := func(b byte, want []byte, decodes int) {
 		t.Helper()
-		got, lent, lendErr := lender.LendCode(addr(b), 5)
+		got, borrowed, lendErr := borrower.BorrowCode(addr(b), 5)
 		require.NoError(t, lendErr)
-		require.True(t, lent)
+		require.True(t, borrowed)
 		require.Equal(t, want, got)
 		require.Len(t, lentCaps, decodes)
 	}
 
-	lend(1, code, 1)
-	lend(2, code, 1)
-	lend(3, other, 2)
-	lend(1, code, 3)
+	borrow(1, code, 1)
+	borrow(2, code, 1)
+	borrow(3, other, 2)
+	borrow(1, code, 3)
 
 	_, ok, err := getter.GetCode(addr(3), 5)
 	require.NoError(t, err)
 	require.True(t, ok)
 	decodes := len(lentCaps)
-	lend(1, code, decodes+1)
+	borrow(1, code, decodes+1)
 }
 
 func TestStateGetterCallerCodeBufOutlivesGetter(t *testing.T) {
@@ -771,7 +771,7 @@ func TestAsOfGetterServesCommittedValueFromStateCache(t *testing.T) {
 	require.Equal(t, 1, tx.reads, "a value committed at txNum 5 is not the value as of 5")
 }
 
-func TestStateGetterLendCodeLeavesTheCacheEmpty(t *testing.T) {
+func TestStateGetterBorrowCodeLeavesTheCacheEmpty(t *testing.T) {
 	ctx := t.Context()
 	db := newTestDb(t, 16)
 	addr := make([]byte, 20)
@@ -799,33 +799,33 @@ func TestStateGetterLendCodeLeavesTheCacheEmpty(t *testing.T) {
 
 	var buf []byte
 	getter := sd.AsStateGetter(tx, execctxapi.StateGetterOptions{}.WithCodeBuf(&buf))
-	lender := getter.(interface {
-		LendCode(addr []byte, txNum uint64) ([]byte, bool, error)
+	borrower := getter.(interface {
+		BorrowCode(addr []byte, txNum uint64) ([]byte, bool, error)
 	})
 
-	got, lent, err := lender.LendCode(addr, 5)
+	got, borrowed, err := borrower.BorrowCode(addr, 5)
 	require.NoError(t, err)
-	require.True(t, lent)
+	require.True(t, borrowed)
 	require.Equal(t, code, got)
 	_, cached := sc.View(nil).GetCodeByHash(codeHash[:])
-	require.False(t, cached, "a lent read must not fill the code cache")
+	require.False(t, cached, "a borrowed read must not fill the code cache")
 
-	got, lent, err = lender.LendCode(addr2, 5)
+	got, borrowed, err = borrower.BorrowCode(addr2, 5)
 	require.NoError(t, err)
-	require.True(t, lent)
+	require.True(t, borrowed)
 	require.Equal(t, code2, got)
-	require.GreaterOrEqual(t, lentCaps[1], len(code2), "the second lend must decode into the grown buffer")
+	require.GreaterOrEqual(t, lentCaps[1], len(code2), "the second borrow must decode into the grown buffer")
 
 	got, ok, err := getter.GetCode(addr, 5)
 	require.NoError(t, err)
 	require.True(t, ok)
 	require.Equal(t, code, got)
-	_, lent, err = lender.LendCode(addr, 5)
+	_, borrowed, err = borrower.BorrowCode(addr, 5)
 	require.NoError(t, err)
-	require.False(t, lent, "a cached code stays on the normal path")
+	require.False(t, borrowed, "a cached code stays on the normal path")
 }
 
-func TestStateGetterLendCodeRefusesAnAccountWrittenInTheBatch(t *testing.T) {
+func TestStateGetterBorrowCodeRefusesAnAccountWrittenInTheBatch(t *testing.T) {
 	ctx := t.Context()
 	db := newTestDb(t, 16)
 	addr := make([]byte, 20)
@@ -848,10 +848,10 @@ func TestStateGetterLendCodeRefusesAnAccountWrittenInTheBatch(t *testing.T) {
 	require.NoError(t, sd.DomainPut(kv.AccountsDomain, tx, addr, account, 5, nil))
 
 	var buf []byte
-	lender := sd.AsStateGetter(tx, execctxapi.StateGetterOptions{}.WithCodeBuf(&buf)).(interface {
-		LendCode(addr []byte, txNum uint64) ([]byte, bool, error)
+	borrower := sd.AsStateGetter(tx, execctxapi.StateGetterOptions{}.WithCodeBuf(&buf)).(interface {
+		BorrowCode(addr []byte, txNum uint64) ([]byte, bool, error)
 	})
-	_, lent, err := lender.LendCode(addr, 5)
+	_, borrowed, err := borrower.BorrowCode(addr, 5)
 	require.NoError(t, err)
-	require.False(t, lent, "the batch's code hash must not be paired with the committed bytes")
+	require.False(t, borrowed, "the batch's code hash must not be paired with the committed bytes")
 }
