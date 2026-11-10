@@ -349,8 +349,11 @@ func (f *Follower) boot(ctx context.Context) error {
 // read.
 func (f *Follower) executeGenesis(ctx context.Context) error {
 	head, err := f.chain.Head(ctx)
-	if err != nil || head.Number.Sign() > 0 {
+	if err != nil {
 		return err
+	}
+	if head.Number.Sign() > 0 {
+		return nil
 	}
 	return f.deriver.ForkChoiceTo(ctx, head.Hash())
 }
