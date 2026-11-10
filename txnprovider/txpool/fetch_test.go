@@ -301,6 +301,7 @@ func TestOnNewBlock(t *testing.T) {
 		})
 
 	pool := NewMockPool(ctrl)
+	pool.EXPECT().MarkStateStale()
 
 	var minedTxns TxnSlots
 	pool.EXPECT().
@@ -315,6 +316,36 @@ func TestOnNewBlock(t *testing.T) {
 	err := fetch.handleStateChanges(ctx, stateChanges)
 	assert.ErrorIs(t, io.EOF, err)
 	assert.Len(t, minedTxns.Txns, 3)
+}
+
+func TestFetchDisconnectParksFrames(t *testing.T) {
+	ctx, pool, sender := keyedFramePoolEnv(t)
+	head := newBlockChangeForAccounts(common.Hash{1}, 0)
+	head.ChangeBatch[0].SlotNumber = common.NewUint64(10)
+	require.NoError(t, pool.OnNewBlock(ctx, head, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	frame := recentRootPoolSlot(t, sender, 10, 1)
+	var txns TxnSlots
+	txns.Append(frame, sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+	mt := pool.byHash[string(frame.IDHash[:])]
+	require.Equal(t, PendingSubPool, mt.currentSubPool)
+	generation := pool.stateGeneration
+	reservation := pool.frameReservations[sender]
+
+	ctrl := gomock.NewController(t)
+	stream := remoteproto.NewMockKV_StateChangesClient[*remoteproto.StateChangeBatch](ctrl)
+	stream.EXPECT().Recv().Return(nil, io.EOF)
+	client := remoteproto.NewMockKVClient(ctrl)
+	client.EXPECT().StateChanges(gomock.Any(), gomock.Any(), gomock.Any()).Return(stream, nil)
+	fetch := NewFetch(ctx, nil, pool, client, pool.poolDB, pool.chainID, log.New())
+	require.ErrorIs(t, fetch.handleStateChanges(ctx, client), io.EOF)
+
+	require.True(t, pool.stateViewStale, "a disconnected stream cannot establish that the pool state is current")
+	require.Greater(t, pool.stateGeneration, generation)
+	require.Zero(t, mt.currentSubPool)
+	require.Equal(t, reservation, pool.frameReservations[sender])
 }
 
 func TestFetchRevalidatesFramesAfterFailedStateChange(t *testing.T) {
@@ -388,6 +419,7 @@ func TestFetchStateChangeRecoveryUntilSuccess(t *testing.T) {
 			client := remoteproto.NewMockKVClient(ctrl)
 			client.EXPECT().StateChanges(gomock.Any(), gomock.Any(), gomock.Any()).Return(stream, nil)
 			pool := NewMockPool(ctrl)
+			pool.EXPECT().MarkStateStale()
 			var incomplete []bool
 			var heights []uint64
 			pool.EXPECT().OnNewBlock(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
@@ -431,6 +463,7 @@ func TestFetchStateChangeRecoveryStopsOnCancellation(t *testing.T) {
 	client := remoteproto.NewMockKVClient(ctrl)
 	client.EXPECT().StateChanges(gomock.Any(), gomock.Any(), gomock.Any()).Return(stream, nil)
 	pool := NewMockPool(ctrl)
+	pool.EXPECT().MarkStateStale()
 	pool.EXPECT().OnNewBlock(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
 		func(context.Context, *remoteproto.StateChangeBatch, TxnSlots, TxnSlots, TxnSlots) error {
 			cancel()
@@ -475,6 +508,7 @@ func TestFetchCoalescesSupersededStateChanges(t *testing.T) {
 		client := remoteproto.NewMockKVClient(ctrl)
 		client.EXPECT().StateChanges(gomock.Any(), gomock.Any(), gomock.Any()).Return(stream, nil)
 		pool := NewMockPool(ctrl)
+		pool.EXPECT().MarkStateStale()
 		calls := uint64(0)
 		pool.EXPECT().OnNewBlock(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
 			func(_ context.Context, batch *remoteproto.StateChangeBatch, unwind, unwindBlobs, mined TxnSlots) error {
@@ -1110,6 +1144,7 @@ func TestFetchConnectGoroutinesExitOnCancel(t *testing.T) {
 		Return(nil, io.EOF).AnyTimes()
 
 	pool := NewMockPool(ctrl)
+	pool.EXPECT().MarkStateStale().AnyTimes()
 
 	fetch := NewFetch(ctx, []sentryproto.SentryClient{sentryClient}, pool, stateChanges, nil, u256.N1, log.New())
 
@@ -1348,6 +1383,7 @@ func TestFetchSupersededChangesSurviveReconnect(t *testing.T) {
 				client.EXPECT().StateChanges(gomock.Any(), gomock.Any(), gomock.Any()).Return(second, nil),
 			)
 			pool := NewMockPool(ctrl)
+			pool.EXPECT().MarkStateStale().Times(2)
 			var recovered TxnSlots
 			pool.EXPECT().OnNewBlock(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
 				func(_ context.Context, batch *remoteproto.StateChangeBatch, unwind, _, _ TxnSlots) error {

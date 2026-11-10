@@ -532,6 +532,7 @@ type StateChangePubSub struct {
 	chans    map[uint]chan stateChangeEvent
 	id       uint
 	sequence uint64
+	reset    *remoteproto.StateChangeBatch
 	mu       sync.RWMutex
 }
 
@@ -548,6 +549,11 @@ func (s *StateChangePubSub) Sub() (ch chan stateChangeEvent, remove func()) {
 	s.id++
 	id := s.id
 	ch = make(chan stateChangeEvent, 8)
+	// Register and enqueue the reset under the publication lock so a reconnect
+	// sees the latest head before any later changes, even if no new block arrives.
+	if s.reset != nil {
+		ch <- stateChangeEvent{sequence: s.sequence, batch: s.reset}
+	}
 	s.chans[id] = ch
 	return ch, func() { s.remove(id) }
 }
@@ -556,6 +562,25 @@ func (s *StateChangePubSub) Pub(reply *remoteproto.StateChangeBatch) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.sequence++
+	if len(reply.ChangeBatch) > 0 {
+		head := reply.ChangeBatch[len(reply.ChangeBatch)-1]
+		// Retain only head metadata: replaying old deltas could restore orphaned
+		// transactions or overwrite state that has already been committed.
+		s.reset = &remoteproto.StateChangeBatch{
+			StateVersionId:         reply.StateVersionId,
+			StateChangesIncomplete: true,
+			PendingBlockBaseFee:    reply.PendingBlockBaseFee,
+			PendingBlobFeePerGas:   reply.PendingBlobFeePerGas,
+			BlockGasLimit:          reply.BlockGasLimit,
+			FinalizedBlock:         reply.FinalizedBlock,
+			ChangeBatch: []*remoteproto.StateChange{{
+				BlockHeight: head.BlockHeight,
+				BlockHash:   head.BlockHash,
+				BlockTime:   head.BlockTime,
+				SlotNumber:  head.SlotNumber,
+			}},
+		}
+	}
 	event := stateChangeEvent{sequence: s.sequence, batch: reply}
 	for _, ch := range s.chans {
 		common.PrioritizedSend(ch, event)

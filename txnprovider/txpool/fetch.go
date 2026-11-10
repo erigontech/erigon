@@ -794,6 +794,9 @@ func (f *Fetch) handleNewPeer(req *sentryproto.PeerEvent) error {
 }
 
 func (f *Fetch) handleStateChanges(ctx context.Context, client StateChangesClient) error {
+	// Any return ends this subscription, including a clean stream end. Keep the pool
+	// stale until a new subscription restores a usable state view.
+	defer f.pool.MarkStateStale()
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	stream, err := client.StateChanges(streamCtx, &remoteproto.StateChangeRequest{WithStorage: true, WithTransactions: true}, grpc.WaitForReady(true))

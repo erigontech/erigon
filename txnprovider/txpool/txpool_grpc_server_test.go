@@ -29,9 +29,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/status"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -41,10 +39,12 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	"github.com/erigontech/erigon/db/kv/remotedbserver"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 	accounts3 "github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
@@ -529,10 +529,7 @@ func TestP2PPropagationContinuesWhileOnAddSubscriberStalls(t *testing.T) {
 		Peers(gomock.Any(), gomock.Any(), gomock.Any()).
 		Return(&sentryproto.PeersReply{}, nil).AnyTimes()
 
-	stateChanges := remoteproto.NewMockKVClient(ctrl)
-	stateChanges.EXPECT().
-		StateChanges(gomock.Any(), gomock.Any(), gomock.Any()).
-		Return(nil, status.Error(codes.Unavailable, "no core node in this test")).AnyTimes()
+	stateChanges := direct.NewStateDiffClientDirect(remotedbserver.NewKvServer(ctx, nil, nil, nil, logger))
 
 	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	poolDB := mdbxtest.NewTestPoolDB(t)

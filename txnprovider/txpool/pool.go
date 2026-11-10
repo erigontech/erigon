@@ -81,6 +81,7 @@ type Pool interface {
 	AddRemoteTxns(ctx context.Context, newTxns TxnSlots, peerID PeerID, sentry sentryproto.SentryClient)
 	AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcfg.DiscardReason, error)
 	OnNewBlock(ctx context.Context, stateChanges *remoteproto.StateChangeBatch, unwindTxns, unwindBlobTxns, minedTxns TxnSlots) error
+	MarkStateStale()
 	// IdHashKnown check whether transaction with given Id hash is known to the pool
 	IdHashKnown(tx kv.Tx, hash []byte) (bool, error)
 	FilterKnownIdHashes(tx kv.Tx, hashes Hashes) (unknownHashes Hashes, err error)
@@ -318,8 +319,9 @@ func (p *TxPool) start(ctx context.Context) error {
 	})
 }
 
-// markStateStale invalidates simulations before waiting for a usable state view.
-func (p *TxPool) markStateStale() {
+// MarkStateStale invalidates simulations and blocks selection and admission until
+// a notification restores a usable state view.
+func (p *TxPool) MarkStateStale() {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	if p.stateViewStale {
@@ -373,11 +375,11 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 	defer newBlockTimer.ObserveDuration(time.Now())
 	defer func() {
 		if err != nil {
-			p.markStateStale()
+			p.MarkStateStale()
 		}
 	}()
 	if stateChanges.StateChangesIncomplete {
-		p.markStateStale()
+		p.MarkStateStale()
 	}
 	for _, txn := range unwindTxns.Txns {
 		p.recoverAuthorizations(txn)

@@ -22,9 +22,12 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/node/direct"
+	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 )
 
@@ -61,6 +64,51 @@ func TestStateChangesSubscriptionStartsIncomplete(t *testing.T) {
 		_, err = stream.Recv()
 		require.ErrorIs(t, err, io.EOF)
 		server.SendStateChanges(t.Context(), &remoteproto.StateChangeBatch{})
+	}
+}
+
+func TestStateChangesReconnectReceivesCurrentHead(t *testing.T) {
+	server := NewKvServer(t.Context(), nil, nil, nil, log.New())
+	first, remove := server.stateChangeStreams.Sub()
+	server.SendStateChanges(t.Context(), &remoteproto.StateChangeBatch{
+		StateVersionId: 1,
+		ChangeBatch: []*remoteproto.StateChange{{
+			BlockHeight: 10, BlockHash: gointerfaces.ConvertHashToH256(common.Hash{1}),
+		}},
+	})
+	<-first
+	remove()
+
+	head := &remoteproto.StateChange{
+		BlockHeight: 10, BlockHash: gointerfaces.ConvertHashToH256(common.Hash{2}),
+		BlockTime: 120, SlotNumber: common.NewUint64(11),
+	}
+	changed := proto.Clone(head).(*remoteproto.StateChange)
+	changed.Txs = [][]byte{{1}}
+	changed.Changes = []*remoteproto.AccountChange{{Action: remoteproto.Action_REMOVE}}
+	batch := &remoteproto.StateChangeBatch{
+		StateVersionId: 2, PendingBlockBaseFee: 3, PendingBlobFeePerGas: 4,
+		BlockGasLimit: 30_000_000, FinalizedBlock: 8,
+		ChangeBatch: []*remoteproto.StateChange{
+			{Direction: remoteproto.Direction_UNWIND, BlockHeight: 9, Txs: [][]byte{{2}}},
+			changed,
+		},
+	}
+	server.SendStateChanges(t.Context(), batch)
+	second, remove := server.stateChangeStreams.Sub()
+	defer remove()
+	select {
+	case event := <-second:
+		want := &remoteproto.StateChangeBatch{
+			StateVersionId: 2, StateChangesIncomplete: true,
+			PendingBlockBaseFee: 3, PendingBlobFeePerGas: 4,
+			BlockGasLimit: 30_000_000, FinalizedBlock: 8,
+			ChangeBatch: []*remoteproto.StateChange{head},
+		}
+		require.True(t, proto.Equal(want, event.batch), "reset must carry the latest head metadata without old deltas: %v", event.batch)
+		require.False(t, batch.StateChangesIncomplete, "published batches must remain unchanged")
+	default:
+		t.Fatal("reconnecting must receive the current head without another publication")
 	}
 }
 
