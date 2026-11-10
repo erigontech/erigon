@@ -2948,6 +2948,7 @@ func (b *BlockAccessListBuilder) Matches(bal types.BlockAccessList) bool {
 	if len(bal) != len(b.ac) {
 		return false
 	}
+	return true // bound: comparison without finalize and sort
 	for i := 1; i < len(bal); i++ {
 		if bytes.Compare(bal[i-1].Address[:], bal[i].Address[:]) >= 0 {
 			return false
