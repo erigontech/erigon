@@ -95,6 +95,9 @@ func TestMapDiscardReasonToProto(t *testing.T) {
 		{txpoolcfg.IntrinsicGas, txpoolproto.ImportResult_INVALID},
 		{txpoolcfg.GasLimitTooHigh, txpoolproto.ImportResult_INVALID},
 		{txpoolcfg.NonceTooDistant, txpoolproto.ImportResult_INVALID},
+		{txpoolcfg.DelegatedNonceGap, txpoolproto.ImportResult_INVALID},
+		{txpoolcfg.DelegatedTxnLimit, txpoolproto.ImportResult_INVALID},
+		{txpoolcfg.NotReplaced, txpoolproto.ImportResult_FEE_TOO_LOW},
 		{txpoolcfg.InvalidFrame, txpoolproto.ImportResult_INVALID},
 		{txpoolcfg.FrameValidationUnavailable, txpoolproto.ImportResult_INTERNAL_ERROR},
 		{txpoolcfg.FrameStateChanged, txpoolproto.ImportResult_INTERNAL_ERROR},
@@ -244,6 +247,7 @@ func TestGrpcServerAddInvalidSelfAuthorizationNonce(t *testing.T) {
 			var encoded bytes.Buffer
 			require.NoError(t, signed.MarshalBinary(&encoded))
 			server := NewGrpcServer(ctx, pool, poolDB, nil, pool.chainID, pool.logger)
+			hash := signed.Hash()
 			for range 2 {
 				reply, err := server.Add(ctx, &txpoolproto.AddRequest{RlpTxs: [][]byte{encoded.Bytes()}})
 				require.NoError(t, err)
@@ -251,9 +255,8 @@ func TestGrpcServerAddInvalidSelfAuthorizationNonce(t *testing.T) {
 					Imported: []txpoolproto.ImportResult{txpoolproto.ImportResult_INVALID},
 					Errors:   []string{"self-authorization nonce must equal transaction nonce plus one"},
 				}, reply)
+				require.Equal(t, txpoolcfg.InvalidAuthorizationNonce, pool.KnownTxnReason(hash[:]), "repeated RPC submissions must reuse the rejection before signature recovery")
 			}
-			hash := signed.Hash()
-			require.NotEqual(t, txpoolcfg.AlreadyKnown, pool.KnownTxnReason(hash[:]))
 			require.NoError(t, poolDB.View(ctx, func(tx kv.Tx) error {
 				known, knownErr := pool.IdHashKnown(tx, hash[:])
 				require.NoError(t, knownErr)

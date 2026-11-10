@@ -268,14 +268,14 @@ func mapDiscardReasonToProto(reason txpoolcfg.DiscardReason) txpoolproto.ImportR
 		return txpoolproto.ImportResult_ALREADY_EXISTS
 	case txpoolcfg.NonceTooLow:
 		return txpoolproto.ImportResult_STALE
-	case txpoolcfg.UnderPriced, txpoolcfg.ReplaceUnderpriced, txpoolcfg.FeeTooLow:
+	case txpoolcfg.UnderPriced, txpoolcfg.ReplaceUnderpriced, txpoolcfg.NotReplaced, txpoolcfg.FeeTooLow:
 		return txpoolproto.ImportResult_FEE_TOO_LOW
 	case txpoolcfg.InvalidSender, txpoolcfg.InitCodeTooLarge,
 		txpoolcfg.IntrinsicGas, txpoolcfg.GasLimitTooHigh, txpoolcfg.NonceTooDistant,
 		txpoolcfg.RLPTooLong, txpoolcfg.InvalidCreateTxn, txpoolcfg.NoBlobs, txpoolcfg.TooManyBlobs,
 		txpoolcfg.TypeNotActivated, txpoolcfg.UnequalBlobTxExt, txpoolcfg.BlobHashCheckFail, txpoolcfg.BlobNonceGap,
 		txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.NoAuthorizations, txpoolcfg.InvalidAuthorizationNonce,
-		txpoolcfg.TipAboveFeeCap, txpoolcfg.InvalidFrame:
+		txpoolcfg.TipAboveFeeCap, txpoolcfg.DelegatedNonceGap, txpoolcfg.DelegatedTxnLimit, txpoolcfg.InvalidFrame:
 		// INVALID includes rejections under current fork rules or pool policy;
 		// it does not imply that the transaction can never be accepted.
 		return txpoolproto.ImportResult_INVALID

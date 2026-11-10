@@ -668,7 +668,7 @@ func (p *TxPool) IdHashKnown(tx kv.Tx, hash []byte) (bool, error) {
 }
 
 // KnownTxnReason returns AlreadyKnown only for transactions currently in the pool.
-// Otherwise it returns a cached rejection valid for the current state generation,
+// Otherwise it returns a cached rejection that still applies,
 // or NotSet if admission is needed.
 func (p *TxPool) KnownTxnReason(hash []byte) txpoolcfg.DiscardReason {
 	p.lock.Lock()
@@ -676,6 +676,9 @@ func (p *TxPool) KnownTxnReason(hash []byte) txpoolcfg.DiscardReason {
 	hashS := string(hash)
 	if _, ok := p.byHash[hashS]; ok {
 		return txpoolcfg.AlreadyKnown
+	}
+	if reason, ok := p.discardReasonsLRU.Get(hashS); ok && reason == txpoolcfg.InvalidAuthorizationNonce {
+		return reason
 	}
 	// Sender-policy rejections still need admission's current account-nonce check.
 	if rejection, ok := p.frameRejections.Get(hashS); ok && rejection.blocker == (common.Hash{}) && rejection.applies(p, p.stateGeneration) {
