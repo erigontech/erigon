@@ -5957,6 +5957,7 @@ func TestProduceBeaconBodyIncludesPTCVotesReceivedDuringPayloadWait(t *testing.T
 type cachedAttestationDataProducer struct {
 	data         solid.AttestationData
 	cached       bool
+	cacheRoot    *common.Hash
 	calls        *int
 	produceCalls *int
 }
@@ -5982,7 +5983,10 @@ func (p cachedAttestationDataProducer) ProduceAndCacheAttestationData(*state.Cac
 	return p.data, nil
 }
 
-func (p cachedAttestationDataProducer) CachedAttestationData(common.Hash, uint64) (solid.AttestationData, bool, error) {
+func (p cachedAttestationDataProducer) CachedAttestationData(headRoot common.Hash, _ uint64) (solid.AttestationData, bool, error) {
+	if p.cacheRoot != nil {
+		*p.cacheRoot = headRoot
+	}
 	if p.calls != nil {
 		(*p.calls)++
 	}
@@ -6055,9 +6059,11 @@ func TestGetEthV1ValidatorAttestationDataHeadLockBusy(t *testing.T) {
 
 	t.Run("cached fallback does not read state", func(t *testing.T) {
 		handler, fcu, slot, produceCalls := setup(t)
+		var cacheRoot common.Hash
 		handler.attestationProducer = cachedAttestationDataProducer{
 			data:         solid.AttestationData{Slot: slot, BeaconBlockRoot: fallbackRoot},
 			cached:       true,
+			cacheRoot:    &cacheRoot,
 			produceCalls: produceCalls,
 		}
 		syncedData := sync_mock_services.NewMockSyncedData(gomock.NewController(t))
@@ -6070,6 +6076,7 @@ func TestGetEthV1ValidatorAttestationDataHeadLockBusy(t *testing.T) {
 
 		status, data := requestAttestationData(t, handler, t.Context(), slot)
 		require.Equal(t, http.StatusOK, status)
+		require.Equal(t, fallbackRoot, cacheRoot)
 		require.Equal(t, fallbackRoot, data.BeaconBlockRoot)
 		require.Zero(t, *produceCalls)
 	})
