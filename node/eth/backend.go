@@ -636,21 +636,22 @@ func New(
 
 	var txnProvider txnprovider.TxnProvider
 	var blobGetter txpool.BlobGetter
-	txPoolDeps := txpoolcomp.Deps{Ctx: ctx, Config: config.TxPool, Logger: logger}
-	if !config.TxPool.Disable {
-		txPoolDeps.ChainDB = backend.chainDB
-		txPoolDeps.Cache = kvcache.NewLatestBatchCache()
-		txPoolDeps.Sentries = backend.sentryProvider.Client.Sentries()
-		txPoolDeps.StateChanges = backend.stateDiffClient
-		txPoolDeps.NotifyNewTxns = func() {
+	if err := backend.components.BuildTxPool(txpoolcomp.Deps{
+		Ctx:          ctx,
+		Config:       config.TxPool,
+		ChainDB:      backend.chainDB,
+		Cache:        kvcache.NewLatestBatchCache(),
+		Sentries:     backend.sentryProvider.Client.Sentries(),
+		StateChanges: backend.stateDiffClient,
+		NotifyNewTxns: func() {
 			select {
 			case backend.blockBuilderNotifyNewTxns <- struct{}{}:
 			default:
 			}
-		}
-		txPoolDeps.EthBackend = direct.NewEthBackendClientDirect(backend.ethBackendRPC)
-	}
-	if err := backend.components.BuildTxPool(txPoolDeps); err != nil {
+		},
+		EthBackend: direct.NewEthBackendClientDirect(backend.ethBackendRPC),
+		Logger:     logger,
+	}); err != nil {
 		return nil, err
 	}
 	backend.txPool = backend.components.TxPool.Pool

@@ -18,8 +18,6 @@ package txpool_test
 
 import (
 	"context"
-	"encoding/binary"
-	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -31,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
 	txpoolcomp "github.com/erigontech/erigon/node/components/txpool"
 	"github.com/erigontech/erigon/txnprovider/txpool"
@@ -77,15 +76,11 @@ func TestInitializeAssemblesPool(t *testing.T) {
 
 func seedChainConfig(t *testing.T, ctx context.Context, db kv.TemporalRwDB, cfg *chain.Config) {
 	t.Helper()
-	data, err := json.Marshal(cfg)
-	require.NoError(t, err)
 	genesisHash := common.HexToHash("0x01")
-	var key [8]byte
-	binary.BigEndian.PutUint64(key[:], 0)
 	require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
-		if err := tx.Put(kv.HeaderCanonical, key[:], genesisHash[:]); err != nil {
+		if err := rawdb.WriteCanonicalHash(tx, genesisHash, 0); err != nil {
 			return err
 		}
-		return tx.Put(kv.ConfigTable, genesisHash[:], data)
+		return rawdb.WriteChainConfig(tx, genesisHash, cfg)
 	}))
 }
