@@ -14,6 +14,7 @@ import (
 
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/enr"
 )
@@ -217,4 +218,31 @@ func TestTorrentPeerManagerDefaultCheckReachesAUTPOnlyPeer(t *testing.T) {
 
 	m := NewTorrentPeerManager(client, func() NodeSource { return nil }, log.New())
 	require.True(t, m.probe(t.Context(), fmt.Sprintf("127.0.0.1:%d", remote.LocalPort())))
+}
+
+// With dialing disabled (a zero download rate), the client never dials a peer, so the peer manager does not run: its
+// reachability check would otherwise open outbound connections over the client's sockets.
+func TestStartTorrentPeerManagerRespectsDisabledDialing(t *testing.T) {
+	for _, dial := range []bool{false, true} {
+		t.Run(fmt.Sprintf("dial=%v", dial), func(t *testing.T) {
+			cfg := newTestClientConfig(t, t.TempDir())
+			cfg.DialForPeerConns = dial
+			client, err := torrent.NewClient(cfg)
+			require.NoError(t, err)
+			defer client.Close()
+			d := &Downloader{
+				cfg:           &downloadercfg.Cfg{ClientConfig: cfg},
+				torrentClient: client,
+				logger:        log.New(),
+				nodeSourceFn:  func() NodeSource { return &mockNodeSource{} },
+			}
+			ctx, cancel := context.WithCancel(t.Context())
+
+			d.StartTorrentPeerManager(ctx)
+			cancel()
+			d.wg.Wait()
+
+			require.Equal(t, dial, d.peerManager != nil)
+		})
+	}
 }
