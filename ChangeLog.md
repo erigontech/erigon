@@ -21,6 +21,7 @@
 
 ### Changed
 
+- rpc: one WebSocket connection now handles at most `--rpc.batch.limit` messages at once; further messages wait until one finishes (#26059).
 - caplin: nodes without `--caplin.blobs-archive` no longer download blob sidecar indexes (`*-blocksidecars.idx`) (#25879) — by @awskii
 - cmd/utils: `--exec.no-prune` is renamed to `--debug.exec.no-prune`, and Erigon logs a warning at startup while pruning is disabled by this flag or `NO_PRUNE`. The setting is for diagnostics only: chaindata grows without bound and `--prune.mode` is not enforced. `--exec.no-prune` still works as a deprecated alias and will be removed in the next release (#25772) — by @awskii
 - execution, txpool: add EIP-8141 frame transactions and EIP-8250 keyed nonces at the Bogota devnet-1 spec level, activated at the chain's Bogota fork. Deploy the nonce manager before activation or include it in genesis (#25243).

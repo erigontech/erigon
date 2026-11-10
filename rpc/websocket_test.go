@@ -1211,3 +1211,58 @@ func TestWebsocketPeerGoneEndsTheReadOnceASlotIsFree(t *testing.T) {
 	}
 	require.Empty(t, codec.adapter.callSlots, "a failed read must give its slot back")
 }
+
+func TestWebsocketPingAlreadyRunningSparesAConnectionThatStartsWaiting(t *testing.T) {
+	t.Parallel()
+	codec, client := callLimitedWebsocketCodec(t, 1)
+	release := readOneCall(t, codec, client)
+	require.NoError(t, client.Write(t.Context(), websocket.MessageText, []byte(wsTestCall)))
+
+	pinged := make(chan struct{})
+	go func() {
+		defer close(pinged)
+		codec.ping()
+	}()
+	time.Sleep(50 * time.Millisecond) // the ping reads the wait counter before the read loop starts to wait
+	read := readWaitingForSlot(t, codec)
+	<-pinged
+
+	release()
+	require.NoError(t, <-read)
+}
+
+type heldCallService struct {
+	entered, release chan struct{}
+}
+
+func (s *heldCallService) Hold(context.Context) {
+	s.entered <- struct{}{}
+	<-s.release
+}
+
+func (s *heldCallService) Quick() {}
+
+func TestWebsocketServerAppliesBatchLimitToCallsInFlight(t *testing.T) {
+	logger := log.New()
+	srv := newTestServer(logger)
+	defer srv.Stop()
+	srv.SetBatchLimit(1)
+	service := &heldCallService{entered: make(chan struct{}), release: make(chan struct{})}
+	require.NoError(t, srv.RegisterName("held", service))
+	httpsrv := httptest.NewServer(srv.WebsocketHandler([]string{"*"}, nil, false, logger))
+	defer httpsrv.Close()
+	client, err := DialWebsocket(t.Context(), "ws:"+strings.TrimPrefix(httpsrv.URL, "http:"), "", logger)
+	require.NoError(t, err)
+	defer client.Close()
+
+	held := make(chan error, 1)
+	go func() { held <- client.Call(nil, "held_hold") }()
+	<-service.entered
+	quick := make(chan error, 1)
+	go func() { quick <- client.Call(nil, "held_quick") }()
+	require.Never(t, func() bool { return len(quick) > 0 }, 200*time.Millisecond, 10*time.Millisecond)
+
+	close(service.release)
+	require.NoError(t, <-held)
+	require.NoError(t, <-quick)
+}
