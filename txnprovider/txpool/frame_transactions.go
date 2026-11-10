@@ -706,7 +706,7 @@ func (p *TxPool) revalidateFrames(ctx context.Context, parked []*metaTxn, genera
 	}
 	return p.withLockedState(ctx, nil, func(_ kv.TemporalTx, cacheView kvcache.CacheView) error {
 		var announcements Announcements
-		if err := p.promote(cacheView, p.pendingBaseFee.Load(), p.pendingBlobFee.Load(), &announcements, p.logger); err != nil {
+		if err := p.promote(cacheView, p.pendingBaseFee.Load(), p.pendingBlobFee.Load(), &announcements); err != nil {
 			return err
 		}
 		p.notifyPendingTxns(announcements)

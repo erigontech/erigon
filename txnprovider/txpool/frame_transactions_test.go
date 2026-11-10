@@ -724,7 +724,7 @@ func TestFramePoolKeyedNonceIndependent(t *testing.T) {
 	reasons, err := pool.AddLocalTxns(ctx, txns)
 	require.NoError(t, err)
 	require.Equal(t, txpoolcfg.Success, reasons[0])
-	pool.onSenderStateChange(slot.SenderID, 9, *uint256.NewInt(1_000_000), accounts.EmptyCodeHash, 1_000_000, pool.logger)
+	pool.onSenderStateChange(slot.SenderID, 9, *uint256.NewInt(1_000_000), accounts.EmptyCodeHash, 1_000_000)
 	require.Equal(t, 1, pool.pending.Len())
 	require.Contains(t, pool.byHash, string(slot.IDHash[:]))
 }

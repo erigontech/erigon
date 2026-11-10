@@ -484,7 +484,7 @@ func (p *TxPool) applyBlockUpdate(stateChanges *remoteproto.StateChangeBatch, un
 	p.pending.EnforceWorstInvariants()
 	p.baseFee.EnforceInvariants()
 	p.queued.EnforceInvariants()
-	if err := p.promote(cacheView, pendingBaseFee, pendingBlobFee, &announcements, p.logger); err != nil {
+	if err := p.promote(cacheView, pendingBaseFee, pendingBlobFee, &announcements); err != nil {
 		return frames, err
 	}
 	p.notifyPendingTxns(announcements)
@@ -1739,7 +1739,7 @@ func (p *TxPool) addNewTxns(ctx context.Context, newTxns TxnSlots, sources []rem
 			p.kickKZGOffenders(ctx, reasons, sources)
 
 			announcements, addReasons, err := p.addTxns(p.lastSeenBlock.Load(), cacheView, goodTxns, cells,
-				p.pendingBaseFee.Load(), p.pendingBlobFee.Load(), true, p.logger)
+				p.pendingBaseFee.Load(), p.pendingBlobFee.Load(), true)
 			if err != nil {
 				return err
 			}
@@ -1772,7 +1772,7 @@ func (p *TxPool) chainDB() (kv.TemporalRoDB, kvcache.Cache) {
 }
 
 func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView,
-	newTxns TxnSlots, cells blobCells, pendingBaseFee, pendingBlobFee uint64, collect bool, logger log.Logger,
+	newTxns TxnSlots, cells blobCells, pendingBaseFee, pendingBlobFee uint64, collect bool,
 ) (Announcements, []txpoolcfg.DiscardReason, error) {
 	if dbg.AssertEnabled {
 		for _, txn := range newTxns.Txns {
@@ -1804,9 +1804,8 @@ func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView,
 			discardReasons[i] = reason
 			continue
 		}
-		discardReasons[i] = txpoolcfg.NotSet // unnecessary
 		if txn.Traced {
-			logger.Info(fmt.Sprintf("TX TRACING: schedule sendersWithChangedState idHash=%x senderId=%d", txn.IDHash, mt.TxnSlot.SenderID))
+			p.logger.Info(fmt.Sprintf("TX TRACING: schedule sendersWithChangedState idHash=%x senderId=%d", txn.IDHash, mt.TxnSlot.SenderID))
 		}
 		sendersWithChangedState[mt.TxnSlot.SenderID] = struct{}{}
 	}
@@ -1823,7 +1822,7 @@ func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView,
 		}
 	}
 
-	if err := p.promote(cacheView, pendingBaseFee, pendingBlobFee, &announcements, logger); err != nil {
+	if err := p.promote(cacheView, pendingBaseFee, pendingBlobFee, &announcements); err != nil {
 		return announcements, discardReasons, err
 	}
 	return announcements, discardReasons, nil
@@ -2380,7 +2379,7 @@ func (p *TxPool) refreshSender(cacheView kvcache.CacheView, senderID uint64) err
 	if err != nil {
 		return err
 	}
-	p.onSenderStateChange(senderID, nonce, balance, codeHash, p.blockGasLimit.Load(), p.logger)
+	p.onSenderStateChange(senderID, nonce, balance, codeHash, p.blockGasLimit.Load())
 	return nil
 }
 
@@ -2388,7 +2387,7 @@ func (p *TxPool) refreshSender(cacheView kvcache.CacheView, senderID uint64) err
 // Transactions using account nonces depend on earlier nonces and cumulative sender costs.
 // Keyed frames bypass that chain: simulation checks their nonces, and payer
 // reservations cover their fees.
-func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, senderBalance uint256.Int, senderCodeHash accounts.CodeHash, blockGasLimit uint64, logger log.Logger) {
+func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, senderBalance uint256.Int, senderCodeHash accounts.CodeHash, blockGasLimit uint64) {
 	sender := p.senders.senderID2Addr[senderID]
 	delete(p.frameAccountsToRefresh, sender)
 	// A legacy frame awaiting restoration or revalidation cannot advance the account
@@ -2435,7 +2434,7 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 		}
 		if deleteAndContinueReasonLog != "" {
 			if mt.TxnSlot.Traced {
-				logger.Info("TX TRACING: onSenderStateChange loop iteration remove", "idHash", fmt.Sprintf("%x", mt.TxnSlot.IDHash), "senderID", senderID, "senderNonce", senderNonce, "txn.nonce", mt.TxnSlot.Nonce, "currentSubPool", mt.currentSubPool, "reason", deleteAndContinueReasonLog)
+				p.logger.Info("TX TRACING: onSenderStateChange loop iteration remove", "idHash", fmt.Sprintf("%x", mt.TxnSlot.IDHash), "senderID", senderID, "senderNonce", senderNonce, "txn.nonce", mt.TxnSlot.Nonce, "currentSubPool", mt.currentSubPool, "reason", deleteAndContinueReasonLog)
 			}
 			p.removeFromSubPool(mt, deleteAndContinueReasonLog)
 			toDel = append(toDel, mt)
@@ -2508,7 +2507,7 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 		p.updateGasLimitMarker(mt, blockGasLimit)
 
 		if mt.TxnSlot.Traced {
-			logger.Info("TX TRACING: onSenderStateChange loop iteration update", "idHash", fmt.Sprintf("%x", mt.TxnSlot.IDHash), "senderId", mt.TxnSlot.SenderID, "nonce", mt.TxnSlot.Nonce, "subPool", mt.currentSubPool)
+			p.logger.Info("TX TRACING: onSenderStateChange loop iteration update", "idHash", fmt.Sprintf("%x", mt.TxnSlot.IDHash), "senderId", mt.TxnSlot.SenderID, "nonce", mt.TxnSlot.Nonce, "subPool", mt.currentSubPool)
 		}
 
 		// Some fields of mt might have changed, need to fix the invariants in the subpool best and worst queues
@@ -2520,7 +2519,7 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 		p.discardLocked(mt, toDelReasons[i])
 	}
 
-	logger.Trace("[txpool] onSenderStateChange", "sender", senderID, "count", p.all.count(senderID), "pending", p.pending.Len(), "baseFee", p.baseFee.Len(), "queued", p.queued.Len())
+	p.logger.Trace("[txpool] onSenderStateChange", "sender", senderID, "count", p.all.count(senderID), "pending", p.pending.Len(), "baseFee", p.baseFee.Len(), "queued", p.queued.Len())
 }
 
 func (p *TxPool) notifyPendingTxns(announcements Announcements) {
@@ -2543,12 +2542,12 @@ func announceFirstPending(announcements *Announcements, mt *metaTxn) {
 
 // promote reasserts the sub-pool invariants and adds to announcements each txn that enters pending
 // for the first time.
-func (p *TxPool) promote(cacheView kvcache.CacheView, pendingBaseFee uint64, pendingBlobFee uint64, announcements *Announcements, logger log.Logger) error {
+func (p *TxPool) promote(cacheView kvcache.CacheView, pendingBaseFee uint64, pendingBlobFee uint64, announcements *Announcements) error {
 	for {
 		if err := p.refreshFrameAccounts(cacheView); err != nil {
 			return err
 		}
-		p.promoteSubPools(pendingBaseFee, pendingBlobFee, announcements, logger)
+		p.promoteSubPools(pendingBaseFee, pendingBlobFee, announcements)
 		// Eviction can release payer funds or break a sender's nonce chain.
 		// Refresh affected accounts before finishing promotion.
 		if len(p.frameAccountsToRefresh) == 0 {
@@ -2566,14 +2565,14 @@ func coversPendingFees(mt *metaTxn, pendingBaseFee, pendingBlobFee uint64) bool 
 		(!mt.TxnSlot.HasBlobs() || mt.TxnSlot.GetBlobFeeCap().CmpUint64(pendingBlobFee) >= 0)
 }
 
-func (p *TxPool) promoteSubPools(pendingBaseFee uint64, pendingBlobFee uint64, announcements *Announcements, logger log.Logger) {
+func (p *TxPool) promoteSubPools(pendingBaseFee uint64, pendingBlobFee uint64, announcements *Announcements) {
 	// Demote worst transactions that do not qualify for pending sub pool anymore, to other sub pools, or discard
 	for worst := p.pending.Worst(); p.pending.Len() > 0 && (worst.subPool < BaseFeePoolBits || !coversPendingFees(worst, pendingBaseFee, pendingBlobFee)); worst = p.pending.Worst() {
 		tx := p.pending.PopWorst()
 		if worst.subPool >= BaseFeePoolBits {
-			p.baseFee.Add(tx, "demote-pending", logger)
+			p.baseFee.Add(tx, "demote-pending", p.logger)
 		} else {
-			p.queued.Add(tx, "demote-pending", logger)
+			p.queued.Add(tx, "demote-pending", p.logger)
 		}
 	}
 
@@ -2588,16 +2587,16 @@ func (p *TxPool) promoteSubPools(pendingBaseFee uint64, pendingBlobFee uint64, a
 			continue
 		}
 		announceFirstPending(announcements, tx)
-		p.pending.Add(tx, logger)
+		p.pending.Add(tx, p.logger)
 	}
 	for _, tx := range blobFeeBlocked {
-		p.baseFee.Add(tx, "blob-fee", logger)
+		p.baseFee.Add(tx, "blob-fee", p.logger)
 	}
 
 	// Demote worst transactions that do not qualify for base fee pool anymore, to queued sub pool, or discard
 	for worst := p.baseFee.Worst(); p.baseFee.Len() > 0 && worst.subPool < BaseFeePoolBits; worst = p.baseFee.Worst() {
 		tx := p.baseFee.PopWorst()
-		p.queued.Add(tx, "demote-base", logger)
+		p.queued.Add(tx, "demote-base", p.logger)
 	}
 
 	// Promote best transactions from the queued pool to either pending or base fee pool, while they qualify
@@ -2605,9 +2604,9 @@ func (p *TxPool) promoteSubPools(pendingBaseFee uint64, pendingBlobFee uint64, a
 		tx := p.queued.PopBest()
 		if coversPendingFees(best, pendingBaseFee, pendingBlobFee) {
 			announceFirstPending(announcements, tx)
-			p.pending.Add(tx, logger)
+			p.pending.Add(tx, p.logger)
 		} else {
-			p.baseFee.Add(tx, "promote-queued", logger)
+			p.baseFee.Add(tx, "promote-queued", p.logger)
 		}
 	}
 
@@ -2636,7 +2635,7 @@ func (p *TxPool) promoteSubPools(pendingBaseFee uint64, pendingBlobFee uint64, a
 			}
 		}
 		for _, tx := range blocked {
-			p.queued.Remove(tx, "frame validation pending", logger)
+			p.queued.Remove(tx, "frame validation pending", p.logger)
 		}
 	}
 	for p.queued.Len() > p.queued.limit {
@@ -2644,7 +2643,7 @@ func (p *TxPool) promoteSubPools(pendingBaseFee uint64, pendingBlobFee uint64, a
 		p.discardLocked(tx, txpoolcfg.QueuedPoolOverflow)
 	}
 	for _, tx := range blocked {
-		p.queued.Add(tx, "frame validation pending", logger)
+		p.queued.Add(tx, "frame validation pending", p.logger)
 	}
 	p.enforceTotalCapacity(pendingBaseFee)
 }
@@ -3167,7 +3166,7 @@ func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.
 		return err
 	}
 	if _, _, err := p.addTxns(p.lastSeenBlock.Load(), cacheView, txns, cells,
-		pendingBaseFee, pendingBlobFee, false, p.logger); err != nil {
+		pendingBaseFee, pendingBlobFee, false); err != nil {
 		return err
 	}
 
