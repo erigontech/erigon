@@ -48,6 +48,54 @@ func setExecWorkers(t *testing.T, workers int) {
 	ethconfig.Defaults.Sync.ExecWorkerCount = workers
 }
 
+// buildBlockSeriallyWant pins the root and gas of each block, as the non-versioned generator built them.
+// Generation and import share the versioned state code, so neither can check the other.
+var buildBlockSeriallyWant = map[string]struct {
+	root string
+	gas  uint64
+}{
+	"TestBurntContractDestroyedByItsTx/cancun_contract_created_in_the_tx":      {"0x69b6fc2e46395b49b0fc02c9cd85dbb4603f3421098d89495d62d0d1dffe8d11", 60662},
+	"TestBurntContractDestroyedByItsTx/pre-cancun_deployed_contract":           {"0x28291d881c1948415865119fc3f0f3dcdfa56143df21ca6997482d726ed04902", 28603},
+	"TestBurntFeeBurnedWithDestroyedRecipient/created_in_the_same_tx":          {"0x51c89c029a7bbbc9d4460e7c2427a04cc04adfd1b35ed01080eab0bb14807be6", 101196},
+	"TestBurntFeeBurnedWithDestroyedRecipient/existing_contract_before_Cancun": {"0x00dfe16ebaf960b2a54b086388a1fba61a95300aa569a19c1c8031869f114cb5", 47002},
+	"TestBurntFeeIsVisibleToLaterBalanceReads/amsterdam":                       {"0x027d3ca69541add473f80ec2146098693c69042f3245ce6ab4f321152ab410b8", 3133440},
+	"TestBurntFeeIsVisibleToLaterBalanceReads/london":                          {"0x7563357c60eb56bb3d18c32a711309ed4882c44c6dfad3853ff365afbfccbbec", 2134560},
+	"TestBurntFeeIsVisibleToLaterBalanceReads/prague":                          {"0x6a6011fd874825babbadaffc8804837419a0d0711964b5c9cc5dc710b1147830", 2134560},
+	"TestBurntFeeKeepsTouchedEmptyRecipient/london":                            {"0x03e2f50cfa3406887f657499545b930598496ecfd959fcd49b21e763f3ff1873", 23620},
+	"TestBurntFeeKeepsTouchedEmptyRecipient/prague":                            {"0x4b927ff612190493092c88b0c2034de086a1c66f9b720594a3e0ebe281a25380", 23620},
+	"TestBurntFeeKeepsTouchedEmptyRecipient/prague_without_storage":            {"0x855a41e31f5ebd8d237db7c277adf5a7555b2b2029fa8e908541d7a9250d01d1", 23620},
+	"TestCodeHashReadAfterRecreate/berlin":                                     {"0xee66f6f5cd449baa3bb21d72a8e7888d9e96357074f204ad1bf022d838648996", 992637},
+	"TestCodeHashReadAfterRecreate/shanghai":                                   {"0xbb1c78e677d89f32b0a9713c78ebc962e86b884d82c1f3653651ee44a3566701", 1005646},
+	"TestCodeReadAcrossDestructAndRevival/berlin/call":                         {"0xb635e45745d8eac096199c7ba183e515a70a1aa47e9eecaed121db33bfdfdb2b", 971220},
+	"TestCodeReadAcrossDestructAndRevival/berlin/destruct":                     {"0x3e976202378b977d8ea7745e3d099f650a02cc48b910172b5f9db53f670891b6", 945503},
+	"TestCodeReadAcrossDestructAndRevival/shanghai/call":                       {"0x2fe36b9904091bea0c930effad4b7ebebd8d642b1cf58443542523e777d2842e", 995222},
+	"TestCodeReadAcrossDestructAndRevival/shanghai/destruct":                   {"0x9d4d0b482da2d20df66a2dcf69bbe0d9961cec68a6308c11fc61186bbf81929c", 993505},
+	"TestCodeReadAfterRecreateOverCallRevival/berlin":                          {"0xd93a730442d41a1ef894a3caae35b66fc85fa76cc31334000a47a24b2e4fcb9c", 1041893},
+	"TestCodeReadAfterRecreateOverCallRevival/shanghai":                        {"0xa49b24a6b569357d523c2ddf732cc001d0d562f01b3f3e401fec554e71fb393a", 1054902},
+	"TestCodeReadAfterRecreateOverDestructCredit/osaka":                        {"0x20a6ee682515055eb89f31e7b3354b85f8d971b7b475f6299707e41ed31e191d", 1056926},
+	"TestCodeReadAfterRecreateOverDestructCredit/shanghai":                     {"0x413d6cec4b71c663296ec14330c39047eb3cb9169ccdfc7ed594c6b529b53b09", 1056926},
+	"TestCodeSizeAfterDestructOfExistingContract/berlin":                       {"0x21623180efb5b695bb14d699aa3307cbc9735718a7cd70bd4c9d8fa0cb9c893d", 1254937},
+	"TestCodeSizeAfterDestructOfExistingContract/shanghai":                     {"0xc4152bc2a9c06555e05bff66d298b4b442462207052e5a16b23a1633055d5c5c", 1278937},
+	"TestCoinbaseRecreatedWithCodeAfterFeeRevival/amsterdam=false":             {"0xfab54ebf19462690c0c59b1b5535c8f21c6270b00cb39b7067e1234a50a7ae48", 141446},
+	"TestCoinbaseRecreatedWithCodeAfterFeeRevival/amsterdam=true":              {"0x29d9c0b0bbd07c2a06f0e2c55ea1f04676ab9c710b08389f4c9765b3cc556d06", 232560},
+	"TestCreate2AfterCoinbaseDestructAndFeeRevival":                            {"0x9f5bca819162e640333546263ed762c3d3ed5b65f0130b1c242ed6b73c517e60", 908647},
+	"TestCreate2AfterDestructAndTransferRevival":                               {"0x9ac7dae57dab901312f629da58429619436b41ed1da83348ba3a48587444810a", 185647},
+	"TestCreateAfterSameTxRevival/osaka":                                       {"0xa7158442c8b79c9264115e2c6c56a57f62e5f4a150169bd59f80afeb3b674e01", 176348},
+	"TestCreateAfterSameTxRevival/shanghai":                                    {"0xa7158442c8b79c9264115e2c6c56a57f62e5f4a150169bd59f80afeb3b674e01", 176348},
+	"TestDroppedNetZeroWrite":                                                  {"0x658c99d04fb32f9cfd318febd4543a8395ff039618f260537879dfe27298a003", 1297980},
+	"TestFeeRevivingTouchedRecipientIsVisibleToLaterReads/burnt/amsterdam":     {"0xb783fa7ef727c5000fc892b87e2986c9d29dbc17f450401118ccd294756e4dd0", 3035520},
+	"TestFeeRevivingTouchedRecipientIsVisibleToLaterReads/burnt/london":        {"0xd0f79bda6a1fc76765777aca6d20196b31b244edb774d3dbaa17ea6b8270839c", 1440475},
+	"TestFeeRevivingTouchedRecipientIsVisibleToLaterReads/burnt/prague":        {"0xc1c7a7d9d48dc3b9fe223399bff9ab16cf3f6be861086c2fd566f1bf89bb2c0e", 1440475},
+	"TestFeeRevivingTouchedRecipientIsVisibleToLaterReads/coinbase/amsterdam":  {"0x5c5ea277e54881a3c162c7809cb6a290a1ccb031169db6addb45c4289a72bd21", 3035520},
+	"TestFeeRevivingTouchedRecipientIsVisibleToLaterReads/coinbase/london":     {"0x900e3f8a89edc137f241db7977bb6ea17006acc31bf34da241b35ca4e09e450b", 1440475},
+	"TestFeeRevivingTouchedRecipientIsVisibleToLaterReads/coinbase/prague":     {"0x5e40df368f0d786cc4324f0cf3dbecb7ab64e84ab46cba5967825822c58617cf", 1360475},
+	"TestSelfdestructRefundAfterRecreate/berlin":                               {"0x6c00adbbe82a30f808465bf07c80d70793ff29bededc4ab63aab3c50cfa6e5db", 246372},
+	"TestSelfdestructRefundAfterRecreate/petersburg":                           {"0x552c5fe09dfd21423cae06da59d18cb1c44c44e0cc13bc82381217ac952fc1d5", 233172},
+	"TestStorageReadAfterRecreate/osaka":                                       {"0x4566ac309f9379db840cddaad60371b2631881026bee2b0e39410138373c373b", 981981},
+	"TestStorageReadAfterRecreate/shanghai":                                    {"0x110266e0cc2a44f0dc18346331985645aa11e6d811b16108b3157fb53b9a7fec", 1027547},
+	"TestZeroBaseFeeRemovesEmptyBurntRecipient":                                {"0xe0fb98b28045966873e9bd251994c0da40e37f4f8b21843431378f2334eb8c07", 21000},
+}
+
 // buildBlockSerially builds one block, one tx after another. Each call is a tx
 // from its own sender.
 func buildBlockSerially(t *testing.T, gspec *types.Genesis, keys []*ecdsa.PrivateKey, coinbase common.Address, gasPrice uint64, calls []revivalCall) *blockgen.ChainPack {
@@ -66,6 +114,10 @@ func buildBlockSerially(t *testing.T, gspec *types.Genesis, keys []*ecdsa.Privat
 	require.NoError(t, err)
 	for _, receipt := range chainPack.Receipts[0] {
 		require.Equal(t, uint64(types.ReceiptStatusSuccessful), receipt.Status)
+	}
+	if want, ok := buildBlockSeriallyWant[t.Name()]; ok {
+		require.Equal(t, want.root, chainPack.TopBlock.Root().Hex())
+		require.Equal(t, want.gas, chainPack.TopBlock.GasUsed())
 	}
 	return chainPack
 }
