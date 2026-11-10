@@ -92,8 +92,8 @@ type ForkChoiceStorageReader interface {
 	// [New in Gloas:EIP7732] HasPendingExecutionPayloadEnvelope reports an envelope that is
 	// waiting for its block or its data columns.
 	HasPendingExecutionPayloadEnvelope(blockRoot common.Hash) bool
-	// [New in Gloas:EIP7732] ExecutionPayloadApplyInFlight reports an envelope that is being
-	// applied after passing its signature check.
+	// [New in Gloas:EIP7732] ExecutionPayloadApplyInFlight reports an envelope held for import or past its signature
+	// check with the apply still running.
 	ExecutionPayloadApplyInFlight(blockRoot common.Hash) bool
 	// [New in Gloas:EIP7732] PayloadVotesRuleOutFull reports PTC votes recorded for blockRoot that
 	// already rule out building on its FULL variant.
@@ -178,6 +178,8 @@ type ForkChoiceStorageWriter interface {
 	FinishExecutionPayloadEnvelopeForGossip(ExecutionPayloadEnvelopeAdmissionToken, bool)
 	ForgetExecutionPayloadEnvelopeForGossip(common.Hash, uint64)
 	ValidateExecutionPayloadEnvelopeForGossip(signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error
+	QueuePendingExecutionPayloadEnvelope(signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, receivedAt time.Time)
+	RecordExecutionPayloadArrival(blockRoot common.Hash, slot uint64, receivedAt time.Time)
 	ValidateExecutionPayloadEnvelopeForConsensus(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error
 	// [New in Gloas:EIP7732] ApplyLocalSelfBuildEnvelope processes a locally-produced
 	// self-build envelope, skipping BLS signature verification. EL validation still runs.
