@@ -74,7 +74,7 @@ type Fetch struct {
 	db                       kv.RwDB
 	stateChangesClient       StateChangesClient
 	pendingTxnChanges        []txnChange     // Owned by ConnectCore; retained across subscriptions until applied
-	stateRefreshRequired     bool            // A missed batch requires a refresh even if it contains no transactions
+	stateRefreshRequired     bool            // A failed pool update requires a refresh even when no transactions changed
 	wg                       *sync.WaitGroup // used for synchronisation in the tests (nil when not in tests)
 	connectWg                sync.WaitGroup  // tracks goroutines spawned by ConnectCore/ConnectSentries
 	stateChangesParseCtx     *TxnParseContext

@@ -25,9 +25,9 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// RefreshAccounts appends final account values after an incomplete batch's
-// recorded changes, which may precede omitted updates. The getter must include
-// uncommitted state because consumers can receive the batch before commit.
+// RefreshAccounts appends final account values for addresses in an incomplete
+// batch's recorded account changes, which may precede omitted updates. The getter
+// must include uncommitted state because the batch can reach consumers before commit.
 func (b *BlockBatchNotification) RefreshAccounts(getter kv.TemporalGetter) error {
 	if !b.StateChangesIncomplete || len(b.Changes) == 0 {
 		return nil
