@@ -518,7 +518,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 				}
 
 				blockReceipts = append(blockReceipts, receipt)
-				laneTxs = append(laneTxs, rules.LaneTx{GasUsed: result.ExecutionResult.BlockExecutionGasUsed, RecipientHasCode: result.RecipientHasCode})
+				laneTxs = append(laneTxs, rules.LaneTx{GasUsed: result.ExecutionResult.BlockExecutionGasUsed, Info: result.LaneTxInfo})
 				result.TracingHooks().EmitTxEnd(receipt, result.ExecutionResult.TxnGasUsage, result.Err)
 			} else {
 				lanes = result.Lanes

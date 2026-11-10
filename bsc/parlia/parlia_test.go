@@ -134,11 +134,9 @@ func TestInitializeInstallsJennerContractsOnFirstJennerBlock(t *testing.T) {
 	require.NoError(t, err)
 	p := New(spec.Config, log.New())
 
-	paymentLane := accounts.InternAddress(common.HexToAddress("0x0000000000000000000000000000000000002007"))
 	activationRegistry := accounts.InternAddress(common.HexToAddress("0x7020000000000000000000000000000000000001"))
 	policyRegistry := accounts.InternAddress(common.HexToAddress("0x7020000000000000000000000000000000000002"))
-	const forkBlock, forkTime = 139533776, 1793241000
-	require.Equal(t, uint64(forkTime), *spec.Config.JennerTime)
+	require.Equal(t, uint64(jennerTime), *spec.Config.JennerTime)
 
 	for _, tc := range []struct {
 		name       string
@@ -146,13 +144,13 @@ func TestInitializeInstallsJennerContractsOnFirstJennerBlock(t *testing.T) {
 		time       uint64
 		upgraded   bool
 	}{
-		{"last pasteur block", forkTime - 2, forkTime - 1, false},
-		{"first jenner block", forkTime - 1, forkTime, true},
-		{"later jenner block", forkTime, forkTime + 1, false},
+		{"last pasteur block", jennerTime - 2, jennerTime - 1, false},
+		{"first jenner block", jennerTime - 1, jennerTime, true},
+		{"later jenner block", jennerTime, jennerTime + 1, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			header := &types.Header{Number: *uint256.NewInt(forkBlock), Time: tc.time}
-			parent := &types.Header{Number: *uint256.NewInt(forkBlock - 1), Time: tc.parentTime}
+			header := &types.Header{Number: *uint256.NewInt(jennerBlock), Time: tc.time}
+			parent := &types.Header{Number: *uint256.NewInt(jennerBlock - 1), Time: tc.parentTime}
 
 			ibs := state.New(state.NewNoopReader())
 			require.NoError(t, p.Initialize(spec.Config, parentReader{parent: parent}, header, ibs, nil, log.New(), nil))

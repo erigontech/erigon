@@ -19,11 +19,8 @@ package parlia
 import (
 	"fmt"
 
-	"github.com/holiman/uint256"
-
 	"github.com/erigontech/erigon/bsc/paymentlane"
-	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
@@ -53,7 +50,8 @@ func (p *Parlia) LoadLanes(chain rules.ChainHeaderReader, header *types.Header, 
 	if !p.chainConfig.IsJenner(parent.Number.Uint64(), parent.Time) {
 		return nil, nil
 	}
-	evm := vm.NewEVM(paymentLaneBlockContext(header), evmtypes.TxContext{}, ibs, p.chainConfig, vm.Config{RestoreState: true})
+	blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, nil), p, accounts.NilAddress, p.chainConfig)
+	evm := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, p.chainConfig, vm.Config{RestoreState: true})
 	contract := accounts.InternAddress(paymentlane.ContractAddress)
 	meta, err := paymentlane.LoadMeta(func(input []byte) ([]byte, error) {
 		ret, _, _, err := evm.StaticCall(accounts.ZeroAddress, contract, input, mdgas.MdGas{Execution: paymentLaneGetterGas})
@@ -68,19 +66,18 @@ func (p *Parlia) LoadLanes(chain rules.ChainHeaderReader, header *types.Header, 
 	return meta, nil
 }
 
-func paymentLaneBlockContext(header *types.Header) evmtypes.BlockContext {
-	return evmtypes.BlockContext{
-		CanTransfer: func(evmtypes.IntraBlockState, accounts.Address, uint256.Int) (bool, error) { return true, nil },
-		Transfer: func(evmtypes.IntraBlockState, accounts.Address, accounts.Address, uint256.Int, bool, *chain.Rules) error {
-			return nil
-		},
-		GetHash:     func(uint64) (common.Hash, error) { return common.Hash{}, nil },
-		Coinbase:    accounts.InternAddress(header.Coinbase),
-		BlockNumber: header.Number.Uint64(),
-		Time:        header.Time,
-		Difficulty:  header.Difficulty,
-		GasLimit:    header.GasLimit,
+// InspectTx reads whether a value transfer goes to an account with code, on the state the
+// transaction starts from.
+func (p *Parlia) InspectTx(tx types.Transaction, ibs *state.IntraBlockState) (any, error) {
+	to := tx.GetTo()
+	if to == nil || tx.GetValue().IsZero() {
+		return false, nil
 	}
+	hash, err := ibs.GetCodeHash(accounts.InternAddress(*to))
+	if err != nil {
+		return nil, err
+	}
+	return !hash.IsEmpty(), nil
 }
 
 // VerifyLanes checks the payment lane rule on an executed block. A block whose start was
@@ -100,7 +97,8 @@ func (p *Parlia) VerifyLanes(header *types.Header, lanes any, txs types.Transact
 		if err != nil {
 			return err
 		}
-		if paymentlane.IsPayment(tx, isSystemTx, meta.Listed(), laneTxs[i].RecipientHasCode) {
+		recipientHasCode, _ := laneTxs[i].Info.(bool)
+		if paymentlane.IsPayment(tx, isSystemTx, meta.Listed(), recipientHasCode) {
 			paymentGasUsed += laneTxs[i].GasUsed
 		}
 	}

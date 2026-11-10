@@ -42,7 +42,7 @@ type getter func(input []byte) ([]byte, error)
 
 // LoadMeta reads the ratio and the listed contracts through call, which runs a PaymentLane
 // view function on the parent post-state.
-func LoadMeta(call func(input []byte) ([]byte, error)) (*Meta, error) {
+func LoadMeta(call getter) (*Meta, error) {
 	ratio, err := loadRatio(call)
 	if err != nil {
 		return nil, err

@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/program"
 	"github.com/erigontech/erigon/node/ethconfig"
@@ -58,6 +59,15 @@ func (e *laneRecorder) LoadLanes(_ rules.ChainHeaderReader, header *types.Header
 	return &recordedLanes{number: header.Number.Uint64()}, nil
 }
 
+func (e *laneRecorder) InspectTx(tx types.Transaction, ibs *state.IntraBlockState) (any, error) {
+	to := tx.GetTo()
+	if to == nil || tx.GetValue().IsZero() {
+		return false, nil
+	}
+	hash, err := ibs.GetCodeHash(accounts.InternAddress(*to))
+	return !hash.IsEmpty(), err
+}
+
 func (e *laneRecorder) VerifyLanes(header *types.Header, lanes any, txs types.Transactions, laneTxs []rules.LaneTx) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -72,9 +82,8 @@ func (e *laneRecorder) VerifyLanes(header *types.Header, lanes any, txs types.Tr
 	return e.err
 }
 
-// The executor tells a lane engine, per transaction, whether the recipient of a value
-// transfer had code on the state the transaction started from. A 7702 delegation set by
-// an earlier transaction of the same block counts from the next transaction on.
+// The executor runs InspectTx on the state each transaction starts from: a 7702
+// delegation set by an earlier transaction of the same block counts from the next one on.
 func TestLaneEngineSeesRecipientCodeBeforeEachTx(t *testing.T) {
 	prevParallel, prevWorkers := dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount
 	t.Cleanup(func() { dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount = prevParallel, prevWorkers })
@@ -146,7 +155,7 @@ func TestLaneEngineSeesRecipientCodeBeforeEachTx(t *testing.T) {
 			require.NoError(t, newTester(engine).InsertChain(chainPack))
 			want := make([]rules.LaneTx, len(wantCode))
 			for i, receipt := range chainPack.Receipts[0] {
-				want[i] = rules.LaneTx{GasUsed: receipt.GasUsed, RecipientHasCode: wantCode[i]}
+				want[i] = rules.LaneTx{GasUsed: receipt.GasUsed, Info: wantCode[i]}
 			}
 			require.Equal(t, map[uint64][]rules.LaneTx{1: want}, engine.calls)
 		})

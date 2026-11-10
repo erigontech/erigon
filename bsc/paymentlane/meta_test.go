@@ -72,8 +72,8 @@ func (s *laneState) set(t *testing.T, slot common.Hash, v *uint256.Int) {
 
 func (s *laneState) setList(t *testing.T, length uint64, addrs []common.Address) {
 	t.Helper()
-	s.set(t, common.Hash{31: paymentContractsLenSlot}, uint256.NewInt(length))
 	lenSlot := common.Hash{31: paymentContractsLenSlot}
+	s.set(t, lenSlot, uint256.NewInt(length))
 	base := new(uint256.Int).SetBytes(crypto.Keccak256(lenSlot[:]))
 	for i, a := range addrs {
 		s.set(t, new(uint256.Int).AddUint64(base, uint64(i)).Bytes32(), new(uint256.Int).SetBytes(a[:]))

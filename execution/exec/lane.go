@@ -18,24 +18,8 @@ package exec
 
 import (
 	"github.com/erigontech/erigon/execution/protocol/rules"
-	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/execution/types/accounts"
 )
-
-// recipientHasCode reports whether tx moves value to an account that holds code on the state
-// the transaction starts from. It is the state input of a rules.LaneEngine's classification.
-func recipientHasCode(tx types.Transaction, ibs *state.IntraBlockState) (bool, error) {
-	to := tx.GetTo()
-	if to == nil || tx.GetValue().IsZero() {
-		return false, nil
-	}
-	hash, err := ibs.GetCodeHash(accounts.InternAddress(*to))
-	if err != nil {
-		return false, err
-	}
-	return !hash.IsEmpty(), nil
-}
 
 func laneEngine(engine rules.Engine, header *types.Header) (rules.LaneEngine, bool) {
 	lanes, ok := engine.(rules.LaneEngine)

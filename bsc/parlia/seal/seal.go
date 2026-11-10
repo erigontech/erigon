@@ -14,10 +14,12 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-// Package seal computes the hash a Parlia validator signs.
+// Package seal computes the hash a Parlia validator signs and reads the header fields
+// shared code needs.
 package seal
 
 import (
+	"encoding/binary"
 	"errors"
 
 	"github.com/holiman/uint256"
@@ -66,4 +68,10 @@ func Hash(header *types.Header, chainID *uint256.Int) (common.Hash, error) {
 		return common.Hash{}, err
 	}
 	return crypto.Keccak256Hash(enc), nil
+}
+
+// Milliseconds returns the sub-second part of the header time, which BSC keeps in the low
+// bytes of MixDigest from Lorentz on.
+func Milliseconds(header *types.Header) uint64 {
+	return binary.BigEndian.Uint64(header.MixDigest[24:])
 }

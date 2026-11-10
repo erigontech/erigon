@@ -113,10 +113,9 @@ type TxResult struct {
 	Receipt *types.Receipt
 	Logs    []*types.Log
 
-	// Lanes and RecipientHasCode are recorded for a rules.LaneEngine: Lanes by the block
-	// start, RecipientHasCode by every transaction.
-	Lanes            any
-	RecipientHasCode bool
+	// Lanes and LaneTxInfo are recorded for a rules.LaneEngine.
+	Lanes      any
+	LaneTxInfo any
 
 	TraceFroms map[accounts.Address]struct{}
 	TraceTos   map[accounts.Address]struct{}
@@ -594,8 +593,8 @@ func (t *TxTask) Execute(evm *vm.EVM,
 
 		result.Coinbase = evm.Context.Coinbase
 
-		if _, ok := laneEngine(engine, t.Header); ok {
-			if result.RecipientHasCode, result.Err = recipientHasCode(t.Tx(), ibs); result.Err != nil {
+		if lanes, ok := laneEngine(engine, t.Header); ok {
+			if result.LaneTxInfo, result.Err = lanes.InspectTx(t.Tx(), ibs); result.Err != nil {
 				break
 			}
 		}

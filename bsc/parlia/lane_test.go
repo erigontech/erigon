@@ -130,7 +130,7 @@ func TestVerifyLanes(t *testing.T) {
 		gas := []uint64{30_000, 21_000, 40_000}
 		out := make([]rules.LaneTx, len(recipientHasCode))
 		for i, hasCode := range recipientHasCode {
-			out[i] = rules.LaneTx{GasUsed: gas[i], RecipientHasCode: hasCode}
+			out[i] = rules.LaneTx{GasUsed: gas[i], Info: hasCode}
 		}
 		return out
 	}
@@ -164,4 +164,42 @@ func TestVerifyLanes(t *testing.T) {
 	t.Run("no lanes loaded", func(t *testing.T) {
 		require.NoError(t, p.VerifyLanes(laneTestHeader(jennerBlock+1, jennerTime+1, 100_000_000), nil, txs, laneTxs(false, false, true)))
 	})
+}
+
+func TestInspectTxReadsRecipientCode(t *testing.T) {
+	t.Parallel()
+
+	spec, err := chainspec.ChainSpecByName(networkname.Chapel)
+	require.NoError(t, err)
+	p := New(spec.Config, log.New())
+	ibs := state.New(state.NewNoopReader())
+	defer ibs.Close()
+
+	absent := common.HexToAddress("0xa1")
+	eoa := common.HexToAddress("0xa2")
+	contract := common.HexToAddress("0xa3")
+	delegated := common.HexToAddress("0xa4")
+	require.NoError(t, ibs.AddBalance(accounts.InternAddress(eoa), *uint256.NewInt(1), tracing.BalanceChangeUnspecified))
+	require.NoError(t, ibs.SetCode(accounts.InternAddress(contract), []byte{0x60, 0x00}, tracing.CodeChangeUnspecified))
+	require.NoError(t, ibs.SetCode(accounts.InternAddress(delegated), types.AddressToDelegation(accounts.InternAddress(contract)), tracing.CodeChangeUnspecified))
+
+	transfer := func(to *common.Address, value uint64) types.Transaction {
+		return &types.LegacyTx{CommonTx: types.CommonTx{To: to, Value: *uint256.NewInt(value), GasLimit: 21000}}
+	}
+	for _, tc := range []struct {
+		name string
+		tx   types.Transaction
+		want bool
+	}{
+		{"contract creation", transfer(nil, 1), false},
+		{"zero value to a contract", transfer(&contract, 0), false},
+		{"absent account", transfer(&absent, 1), false},
+		{"account without code", transfer(&eoa, 1), false},
+		{"contract", transfer(&contract, 1), true},
+		{"eip-7702 delegation", transfer(&delegated, 1), true},
+	} {
+		info, err := p.InspectTx(tc.tx, ibs)
+		require.NoError(t, err, tc.name)
+		require.Equal(t, tc.want, info, tc.name)
+	}
 }

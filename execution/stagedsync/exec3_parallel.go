@@ -3754,7 +3754,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			}
 			if receipt := txResult.Receipt; receipt != nil {
 				blockReceipts = append(blockReceipts, receipt)
-				laneTxs = append(laneTxs, rules.LaneTx{GasUsed: txResult.ExecutionResult.BlockExecutionGasUsed, RecipientHasCode: txResult.RecipientHasCode})
+				laneTxs = append(laneTxs, rules.LaneTx{GasUsed: txResult.ExecutionResult.BlockExecutionGasUsed, Info: txResult.LaneTxInfo})
 			}
 		}
 
