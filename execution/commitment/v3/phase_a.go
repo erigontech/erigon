@@ -61,10 +61,6 @@ type partitioner struct {
 }
 
 func (p *partitioner) add(hashedKey []byte, update *commitment.Update) error {
-	if len(hashedKey) != 64 && len(hashedKey) != 128 {
-		return nil
-	}
-
 	accountHash := hashedKey[:64:64]
 	if len(p.accounts) == 0 || !bytes.Equal(p.accounts[len(p.accounts)-1].hashedKey, accountHash) {
 		p.accounts = append(p.accounts, accountEntry{hashedKey: accountHash})
