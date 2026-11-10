@@ -1231,3 +1231,33 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 		require.Equal(t, roots[i], rh)
 	}
 }
+
+func TestSqueezeFailureKeepsOriginalCommitmentFiles(t *testing.T) {
+	cfgd := &testAggConfig{stepSize: 10, disableCommitmentBranchTransform: true}
+	db, agg := testDbAggregatorWithFiles(t, cfgd)
+	rwTx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, true)
+
+	originals, err := filepath.Glob(filepath.Join(agg.Dirs().SnapDomain, "*-commitment.*.kv"))
+	require.NoError(t, err)
+	require.Greater(t, len(originals), 1)
+
+	// A directory at the squeezed path of the last range makes that range fail after the others are done.
+	var lastFrom, lastTo kv.Step
+	for _, original := range originals {
+		var from, to kv.Step
+		_, err := fmt.Sscanf(strings.SplitN(filepath.Base(original), "-commitment.", 2)[1], "%d-%d.kv", &from, &to)
+		require.NoError(t, err)
+		if from >= lastFrom {
+			lastFrom, lastTo = from, to
+		}
+	}
+	require.NoError(t, os.MkdirAll(filepath.Join(agg.CommitmentKvNewFilePathForTest(lastFrom, lastTo)+".squeezed", "block"), 0o755))
+
+	require.Error(t, state.SqueezeCommitmentFiles(t.Context(), state.AggTx(rwTx), log.New()))
+	for _, original := range originals {
+		require.FileExists(t, original)
+	}
+}

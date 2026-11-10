@@ -268,6 +268,20 @@ func (i *FilesItem) closeFilesAndRemove() {
 	// Delete accessors before the data file. If the process is killed between
 	// deleting the data file and accessors, the accessor files become
 	// permanently orphaned.
+	i.closeAndRemoveAccessors()
+	if i.decompressor != nil {
+		i.decompressor.Close()
+		if err := dir.RemoveFile(i.decompressor.FilePath()); err != nil {
+			log.Trace("remove after close", "err", err, "file", i.decompressor.FileName())
+		}
+		if err := dir.RemoveFile(i.decompressor.FilePath() + ".torrent"); err != nil {
+			log.Trace("remove after close", "err", err, "file", i.decompressor.FileName()+".torrent")
+		}
+		i.decompressor = nil
+	}
+}
+
+func (i *FilesItem) closeAndRemoveAccessors() {
 	if i.index != nil {
 		i.index.Close()
 		if err := dir.RemoveFile(i.index.FilePath()); err != nil {
@@ -308,16 +322,6 @@ func (i *FilesItem) closeFilesAndRemove() {
 			log.Trace("remove after close", "err", err, "file", i.existence.FilePath)
 		}
 		i.existence = nil
-	}
-	if i.decompressor != nil {
-		i.decompressor.Close()
-		if err := dir.RemoveFile(i.decompressor.FilePath()); err != nil {
-			log.Trace("remove after close", "err", err, "file", i.decompressor.FileName())
-		}
-		if err := dir.RemoveFile(i.decompressor.FilePath() + ".torrent"); err != nil {
-			log.Trace("remove after close", "err", err, "file", i.decompressor.FileName()+".torrent")
-		}
-		i.decompressor = nil
 	}
 }
 

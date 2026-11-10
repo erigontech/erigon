@@ -187,7 +187,7 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 	}
 
 	var (
-		temporalFiles  []string
+		squeezed       []squeezedFile
 		processedFiles int
 		sizeDelta      = datasize.B
 		sqExt          = ".squeezed"
@@ -292,13 +292,12 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 				return err
 			}
 			sizeDelta += delta
-			cf.closeFilesAndRemove()
 
 			squeezedPath := targetPath + sqExt
 			if err := os.Rename(squeezedTmpPath, squeezedPath); err != nil {
 				return err
 			}
-			temporalFiles = append(temporalFiles, squeezedPath)
+			squeezed = append(squeezed, squeezedFile{path: squeezedPath, original: cf})
 
 			logger.Info("[squeeze_migration] file done", "original", filepath.Base(originalPath),
 				"sizeDelta", fmt.Sprintf("%s (%.1f%%)", delta.HR(), deltaP))
@@ -313,14 +312,37 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 		sf.decompressor.DisableReadAhead()
 	}
 
-	for _, path := range temporalFiles {
-		if err := os.Rename(path, strings.TrimSuffix(path, sqExt)); err != nil {
+	for _, f := range squeezed {
+		if err := installSqueezedFile(f.path, strings.TrimSuffix(f.path, sqExt), f.original); err != nil {
 			return err
 		}
-		logger.Debug("[squeeze_migration] temporal file renaming", "path", path)
+		logger.Debug("[squeeze_migration] temporal file renaming", "path", f.path)
 	}
 	logger.Info("[squeeze_migration] done", "sizeDelta", sizeDelta.HR(), "files", len(ranges))
 
+	return nil
+}
+
+type squeezedFile struct {
+	path     string
+	original *FilesItem
+}
+
+// installSqueezedFile puts a squeezed file in place of its original. Accessors go first: a restart rebuilds
+// them for whichever data file it finds, but stale ones would read the new file at wrong offsets.
+func installSqueezedFile(squeezedPath, targetPath string, original *FilesItem) error {
+	originalPath := original.decompressor.FilePath()
+	original.closeAndRemoveAccessors()
+	original.closeFiles()
+	if err := dir.RemoveFile(originalPath + ".torrent"); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if err := os.Rename(squeezedPath, targetPath); err != nil {
+		return err
+	}
+	if originalPath != targetPath {
+		return dir.RemoveFile(originalPath)
+	}
 	return nil
 }
 

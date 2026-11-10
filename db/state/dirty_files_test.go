@@ -279,3 +279,59 @@ func TestRetireSkipsAlreadyDetachedItems(t *testing.T) {
 	_, ok := dirty.Get(reopened)
 	require.True(t, ok, "a stale item must not detach the reopened file of the same range")
 }
+
+func TestInstallSqueezedFile(t *testing.T) {
+	t.Parallel()
+	writeSeg := func(t *testing.T, path, word string) {
+		t.Helper()
+		c, err := seg.NewCompressor(t.Context(), "test", path, t.TempDir(), seg.DefaultCfg, log.LvlDebug, log.New())
+		require.NoError(t, err)
+		defer c.Close()
+		require.NoError(t, c.AddWord([]byte(word)))
+		require.NoError(t, c.Compress())
+	}
+	openItem := func(t *testing.T, path string) *FilesItem {
+		t.Helper()
+		writeSeg(t, path, "original")
+		d, err := seg.NewDecompressor(path)
+		require.NoError(t, err)
+		item := newFilesItem(0, 16)
+		item.decompressor = d
+		return item
+	}
+
+	t.Run("same name", func(t *testing.T) {
+		target := filepath.Join(t.TempDir(), "v2.1-commitment.0-1.kv")
+		item := openItem(t, target)
+		writeSeg(t, target+".squeezed", "squeezed")
+		want, err := os.ReadFile(target + ".squeezed")
+		require.NoError(t, err)
+
+		require.NoError(t, installSqueezedFile(target+".squeezed", target, item))
+
+		got, err := os.ReadFile(target)
+		require.NoError(t, err)
+		require.Equal(t, want, got)
+		require.NoFileExists(t, target+".squeezed")
+	})
+	t.Run("new version removes the original", func(t *testing.T) {
+		tmp := t.TempDir()
+		original, target := filepath.Join(tmp, "v2.0-commitment.0-1.kv"), filepath.Join(tmp, "v2.1-commitment.0-1.kv")
+		item := openItem(t, original)
+		writeSeg(t, target+".squeezed", "squeezed")
+
+		require.NoError(t, installSqueezedFile(target+".squeezed", target, item))
+
+		require.FileExists(t, target)
+		require.NoFileExists(t, original)
+	})
+	t.Run("failed rename keeps the original", func(t *testing.T) {
+		tmp := t.TempDir()
+		original, target := filepath.Join(tmp, "v2.0-commitment.0-1.kv"), filepath.Join(tmp, "v2.1-commitment.0-1.kv")
+		item := openItem(t, original)
+
+		require.Error(t, installSqueezedFile(target+".squeezed", target, item))
+
+		require.FileExists(t, original)
+	})
+}

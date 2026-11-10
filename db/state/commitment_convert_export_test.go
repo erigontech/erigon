@@ -49,3 +49,7 @@ func RebuildCommitmentShardKeysForTest(ctx context.Context, sd *execctx.SharedDo
 func SetConvertPhase1AfterFileHookForTest(fn func(idx int)) {
 	convertPhase1AfterFileHook = fn
 }
+
+func (a *Aggregator) CommitmentKvNewFilePathForTest(from, to kv.Step) string {
+	return a.d[kv.CommitmentDomain].kvNewFilePath(from, to)
+}
