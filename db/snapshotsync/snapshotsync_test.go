@@ -719,10 +719,13 @@ func TestReceiptsSegmentRetentionCutoff_FollowsHistoryWindow(t *testing.T) {
 	require.Zero(t, receiptsSegmentRetentionCutoff(prune.ArchiveMode, nil, head, "idx/v1.0-logaddrs.100-200.ef"))
 }
 
-type requestListBlockReader struct{ fakeBlockReader }
+type requestListBlockReader struct {
+	fakeBlockReader
+	freezing ethconfig.BlocksFreezing
+}
 
-func (*requestListBlockReader) FreezingCfg() ethconfig.BlocksFreezing {
-	return ethconfig.BlocksFreezing{}
+func (r *requestListBlockReader) FreezingCfg() ethconfig.BlocksFreezing {
+	return r.freezing
 }
 
 func (*requestListBlockReader) TxnumReader() rawdbv3.TxNumsReader { return rawdbv3.TxNumsReader{} }
@@ -811,14 +814,16 @@ func TestSyncSnapshotsCommitmentV3StateTip(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
 		v3         bool
+		disableE3  bool
 		extraFiles []string
 		wantFile   string
 	}{
 		{name: "v3 on legacy only", v3: true, wantFile: ".0-16."},
+		{name: "v3 on legacy only with state downloads disabled", v3: true, disableE3: true},
 		{name: "v3 below state tip", v3: true, extraFiles: []string{"domain/v3.0-commitment.0-16.kv"}, wantFile: ".16-32."},
 		{name: "v3 above a legacy-only range", v3: true, extraFiles: []string{"domain/v3.0-commitment.16-32.kv"}, wantFile: ".0-16."},
 		{name: "v3 commitment split across one accounts range", v3: true, extraFiles: []string{"domain/v3.0-commitment.0-16.kv", "domain/v3.0-commitment.16-32.kv", "domain/v2.0-accounts.0-32.kv"}, wantFile: ".0-32."},
-		{name: "v3 code-only tip", v3: true, extraFiles: []string{"domain/v3.0-commitment.0-16.kv", "domain/v3.0-commitment.16-32.kv", "domain/v2.2-commitment.32-48.kv", "domain/v2.0-code.32-48.kv"}, wantFile: ".32-48."},
+		{name: "v3 legacy commitment at the code tip", v3: true, extraFiles: []string{"domain/v3.0-commitment.0-16.kv", "domain/v3.0-commitment.16-32.kv", "domain/v2.2-commitment.32-48.kv", "domain/v2.0-code.32-48.kv"}, wantFile: ".32-48."},
 		{name: "v3 code above every commitment", v3: true, extraFiles: []string{"domain/v3.0-commitment.0-16.kv", "domain/v3.0-commitment.16-32.kv", "domain/v2.0-code.32-48.kv"}, wantFile: "steps 32-48"},
 		{name: "v3 off legacy only"},
 	} {
@@ -832,7 +837,14 @@ func TestSyncSnapshotsCommitmentV3StateTip(t *testing.T) {
 				cfg.Preverified.Items = append(cfg.Preverified.Items, snapcfg.PreverifiedItem{Name: name, Hash: strings.Repeat("0", 40)})
 			}
 			downloader := &requestListDownloader{}
-			err := SyncSnapshots(t.Context(), "test", "test", false, false, false, BlobRetention{}, prune.ArchiveMode, NoCaplin, nil, &requestListBlockReader{}, &chain.Config{ChainName: networkname.Mainnet}, downloader, ethconfig.Sync{KeepExecutionProofs: true}, 16)
+			err := SyncSnapshots(t.Context(), "test", "test", false, false, false, BlobRetention{}, prune.ArchiveMode, NoCaplin, nil, &requestListBlockReader{freezing: ethconfig.BlocksFreezing{DisableDownloadE3: tc.disableE3}}, &chain.Config{ChainName: networkname.Mainnet}, downloader, ethconfig.Sync{KeepExecutionProofs: true}, 16)
+			if tc.disableE3 {
+				require.NoError(t, err)
+				for _, name := range downloader.names {
+					require.False(t, strings.HasPrefix(name, "domain/"), name)
+				}
+				return
+			}
 			if tc.v3 {
 				require.ErrorContains(t, err, "commitment convert --v3")
 				require.ErrorContains(t, err, tc.wantFile)
