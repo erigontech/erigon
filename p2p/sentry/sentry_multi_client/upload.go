@@ -180,16 +180,21 @@ func (cs *MultiClient) runUpload(peerID [64]byte, task uploadTask) {
 		if task.uncached {
 			q.uncachedActive = false
 		}
-		requeue := cacheMiss && task.ctx.Err() == nil && q.canQueue(peer, task.size)
+		requeue := cacheMiss && task.ctx.Err() == nil
 		if requeue {
-			task.uncached = true
 			uncachedEnd := 0
 			for uncachedEnd < len(peer.pending) && peer.pending[uncachedEnd].uncached {
 				uncachedEnd++
 			}
-			peer.pending = slices.Insert(peer.pending, uncachedEnd, task)
-			q.queued++
-			q.bytes += task.size
+			// This handler frees a worker, but ready peers and earlier replays take precedence.
+			mustWait := q.uncachedActive || len(q.ready) > 0 || uncachedEnd > 0
+			requeue = !mustWait || q.canQueue(peer, task.size)
+			if requeue {
+				task.uncached = true
+				peer.pending = slices.Insert(peer.pending, uncachedEnd, task)
+				q.queued++
+				q.bytes += task.size
+			}
 		}
 		if len(peer.pending) > 0 {
 			q.ready = append(q.ready, peerID)

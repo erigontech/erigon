@@ -315,6 +315,109 @@ func TestUploadRequests_ReplayOrderWhenSlotFreesDuringProbe(t *testing.T) {
 	})
 }
 
+func TestUploadRequests_RetryQueueLimits(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		earlierReplay bool
+		readyPeer     bool
+		wantDrops     uint64
+		wantIDs       []uint64
+	}{
+		{name: "immediate", wantIDs: []uint64{1, 2, 3, 4}},
+		{name: "earlier_replay", earlierReplay: true, wantDrops: 1, wantIDs: []uint64{1, 5, 3, 4}},
+		{name: "ready_peer", readyPeer: true, wantDrops: 1, wantIDs: []uint64{1, 3, 4, 5, 6, 7, 8}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				ctx, cancel := context.WithCancel(t.Context())
+				defer cancel()
+				cs := newUploadTestClient(t)
+				dropped := metrics.GetOrCreateCounter(`p2p_sentry_upload_dropped_requests_total{reason="peer_bytes"}`)
+				before := dropped.GetValueUint64()
+				replayRelease := make(chan struct{})
+				probeRelease := make(chan struct{})
+				bodyRelease := make(chan struct{})
+				cs.ethApiWrapper = &mockReceiptsGenerator{
+					ReceiptsGetter: uploadReceiptsGetter{getReceipts: waitForUploadReceipts(replayRelease)},
+					getCachedReceiptsFunc: func(ctx context.Context, hash common.Hash) (types.Receipts, bool) {
+						if hash == (common.Hash{2}) {
+							select {
+							case <-probeRelease:
+							case <-ctx.Done():
+							}
+						}
+						return nil, false
+					},
+				}
+				cs.blockReader.(*uploadBlockReader).body = func(_ context.Context, number uint64) (rlp.RawValue, error) {
+					if number == 1 {
+						select {
+						case <-bodyRelease:
+						case <-ctx.Done():
+							return nil, ctx.Err()
+						}
+					}
+					return rlp.EncodeToBytes(&types.RawBody{})
+				}
+				responses := make(chan *sentryproto.SendMessageByIdRequest, 8)
+				stream := startUploadTestStream(t, ctx, cs, nil, func(response *sentryproto.SendMessageByIdRequest) { responses <- response })
+				require.NoError(t, stream.Send(uploadRequest(t, sentryproto.MessageId_GET_RECEIPTS_69, 1, 1, common.Hash{1})))
+				synctest.Wait()
+				if tc.earlierReplay {
+					require.NoError(t, stream.Send(uploadRequest(t, sentryproto.MessageId_GET_RECEIPTS_69, 2, 5, common.Hash{1})))
+					synctest.Wait()
+				}
+
+				hashes := make([]common.Hash, 200_000)
+				for i := range hashes {
+					hashes[i] = common.Hash{2}
+				}
+				probe := uploadRequest(t, sentryproto.MessageId_GET_RECEIPTS_69, 2, 2, hashes...)
+				require.LessOrEqual(t, len(probe.Data), eth.ProtocolMaxMsgSize)
+				require.NoError(t, stream.Send(probe))
+				synctest.Wait()
+				for id := uint64(3); id <= 4; id++ {
+					require.NoError(t, stream.Send(uploadRequest(t, sentryproto.MessageId_GET_BLOCK_BODIES_66, 2, id, hashes...)))
+				}
+				synctest.Wait()
+
+				close(replayRelease)
+				synctest.Wait()
+				func() {
+					cs.uploads.mu.Lock()
+					defer cs.uploads.mu.Unlock()
+					require.Equal(t, 1, cs.uploads.active)
+					require.False(t, cs.uploads.uncachedActive)
+					require.Empty(t, cs.uploads.ready)
+					require.Greater(t, cs.uploads.bytes+proto.Size(probe), maxUploadQueuedBytesPerPeer)
+				}()
+				if tc.readyPeer {
+					for peer := byte(3); peer <= 6; peer++ {
+						require.NoError(t, stream.Send(uploadRequest(t, sentryproto.MessageId_GET_BLOCK_BODIES_66, peer, uint64(peer)+2, common.Hash{1})))
+					}
+					synctest.Wait()
+				}
+				close(probeRelease)
+				synctest.Wait()
+				require.Equal(t, before+tc.wantDrops, dropped.GetValueUint64(), "only retries that must wait need waiting-queue space")
+				close(bodyRelease)
+				synctest.Wait()
+				var ids []uint64
+				for len(responses) > 0 {
+					var response eth.ReceiptsRLPPacket66
+					require.NoError(t, rlp.DecodeBytes((<-responses).Data.Data, &response))
+					ids = append(ids, response.RequestId)
+				}
+				if tc.readyPeer {
+					require.ElementsMatch(t, tc.wantIDs, ids)
+				} else {
+					require.Equal(t, tc.wantIDs, ids)
+				}
+			})
+		})
+	}
+}
+
 func TestUploadRequests_SlowPeerDoesNotBlockOtherPeers(t *testing.T) {
 	for _, id := range []sentryproto.MessageId{sentryproto.MessageId_GET_RECEIPTS_66, sentryproto.MessageId_GET_RECEIPTS_69, sentryproto.MessageId_GET_RECEIPTS_70} {
 		t.Run(id.String(), func(t *testing.T) {
