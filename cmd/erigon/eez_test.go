@@ -17,10 +17,12 @@
 package main
 
 import (
+	"context"
 	"testing"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
+	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
@@ -29,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/eez/networks"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/rpc"
@@ -58,6 +61,29 @@ func l1Configs(t *testing.T, id uint64) (*nodecfg.Config, *ethconfig.Config) {
 	e.Ethstats = "node:secret@stats"
 	e.ExtraAPIs = []rpc.API{{Namespace: "l1"}}
 	return &n, &e
+}
+
+// TestAllInOneTracer: the EEZ chain of an all-in-one node traces with its own
+// instance of the --vmtrace tracer, never the L1's.
+func TestAllInOneTracer(t *testing.T) {
+	for _, args := range [][]string{{"--vmtrace=4byteTracer"}, nil} {
+		cmd := &cli.Command{Name: "erigon", Flags: debug.Flags, Action: func(_ context.Context, cmd *cli.Command) error {
+			l1, err := debug.SetupTracerCtx(cmd)
+			require.NoError(t, err)
+			l2, err := allInOneTracer(cmd)
+			require.NoError(t, err)
+			if args == nil {
+				require.Nil(t, l1)
+				require.Nil(t, l2)
+				return nil
+			}
+			require.NotNil(t, l2)
+			require.NotSame(t, l1, l2)
+			require.NotSame(t, l1.Hooks, l2.Hooks)
+			return nil
+		}}
+		require.NoError(t, cmd.Run(t.Context(), append([]string{"erigon"}, args...)))
+	}
 }
 
 // TestAllInOneConfigs: the EEZ chain of an all-in-one node takes the L1's

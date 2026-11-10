@@ -131,7 +131,7 @@ func runErigon(ctx context.Context, cliCtx *cli.Command) (err error) {
 	if standalone {
 		followerSvc, err = startStandalone(ctx, ethNode, eezCfg, eezAPI, nodeCfg.Dirs, logger)
 	} else if eezCfg != nil {
-		followerSvc, err = startAllInOne(ctx, ethNode, nodeCfg.Dirs, l2NodeCfg, l2EthCfg, eezCfg, eezAPI, logger, tracer)
+		followerSvc, err = startAllInOne(ctx, ethNode, nodeCfg.Dirs, l2NodeCfg, l2EthCfg, eezCfg, eezAPI, logger, cliCtx)
 	}
 	if err != nil {
 		ethNode.Close()

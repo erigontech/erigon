@@ -24,6 +24,8 @@ import (
 	"slices"
 	"time"
 
+	"github.com/urfave/cli/v3"
+
 	"github.com/erigontech/erigon/cmd/erigon/node"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -38,6 +40,7 @@ import (
 	eezrules "github.com/erigontech/erigon/eez/rules"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
+	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/node/eth"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/nodecfg"
@@ -157,10 +160,22 @@ func startStandalone(ctx context.Context, n *node.ErigonNode, cfg *eez.Config, a
 	return startFollower(ctx, n, n, reader, cfg, api, dirs, eez.Dir(dirs), logger)
 }
 
+// allInOneTracer returns the EEZ chain's own instance of the --vmtrace tracer
+// of cmd: tracer hooks keep state that the L1 and EEZ chains, executing
+// concurrently, must not share.
+func allInOneTracer(cmd *cli.Command) (*tracers.Tracer, error) {
+	return debug.SetupTracerCtx(cmd)
+}
+
 // startAllInOne creates the EEZ chain of nodeCfg and ethCfg with its
-// follower, which reads the L1 chain of l1Node in place, and registers it on
-// l1Node, which then starts it after and stops it before the L1 services.
-func startAllInOne(ctx context.Context, l1Node *node.ErigonNode, l1Dirs datadir.Dirs, nodeCfg *nodecfg.Config, ethCfg *ethconfig.Config, cfg *eez.Config, api *eezrpc.API, logger log.Logger, tracer *tracers.Tracer) (*follower.Service, error) {
+// follower, which reads the L1 chain of l1Node in place, and its own
+// --vmtrace tracer of cmd, and registers it on l1Node, which then starts it
+// after and stops it before the L1 services.
+func startAllInOne(ctx context.Context, l1Node *node.ErigonNode, l1Dirs datadir.Dirs, nodeCfg *nodecfg.Config, ethCfg *ethconfig.Config, cfg *eez.Config, api *eezrpc.API, logger log.Logger, cmd *cli.Command) (*follower.Service, error) {
+	tracer, err := allInOneTracer(cmd)
+	if err != nil {
+		return nil, err
+	}
 	l2Node, err := node.New(ctx, nodeCfg, ethCfg, logger.New("chain", cfg.Chain), tracer)
 	if err != nil {
 		return nil, err
