@@ -6210,6 +6210,8 @@ func TestGetEthV1ValidatorAttestationDataBoundsAncestorLookup(t *testing.T) {
 		{name: "before previous epoch", headSlot: 2 * slotsPerEpoch, slot: slotsPerEpoch - 1},
 		{name: "previous epoch start", headSlot: 3*slotsPerEpoch - 1, slot: slotsPerEpoch, wantAncestorCalls: 1},
 		{name: "current epoch", headSlot: 2*slotsPerEpoch + 1, slot: 2 * slotsPerEpoch, wantAncestorCalls: 1},
+		{name: "head slot", headSlot: 2 * slotsPerEpoch, slot: 2 * slotsPerEpoch},
+		{name: "later slot in head epoch", headSlot: 2 * slotsPerEpoch, slot: 2*slotsPerEpoch + 1},
 		{name: "epoch zero", headSlot: 1, slot: 0, wantAncestorCalls: 1},
 		{name: "previous epoch zero", headSlot: slotsPerEpoch, slot: 0, wantAncestorCalls: 1},
 		{name: "epoch after head", headSlot: slotsPerEpoch - 1, slot: slotsPerEpoch},
