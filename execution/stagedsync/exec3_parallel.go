@@ -668,7 +668,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					}
 					if applyResult.txIO != nil {
 						if balBuilder == nil {
-							balBuilder = state.NewBlockAccessListBuilder()
+							balBuilder = state.NewBlockAccessListBuilderSized(pe.balAccountCount(applyResult.blockNum))
 						}
 						for balBuilder.Next()+1 < applyResult.balSealed {
 							i := balBuilder.Next()
@@ -902,6 +902,15 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 	}
 
 	return lastHeader, rwTx, execErr
+}
+
+func (pe *parallelExecutor) balAccountCount(blockNum uint64) int {
+	pe.RLock()
+	defer pe.RUnlock()
+	if be, ok := pe.blockExecutors[blockNum]; ok {
+		return len(be.balSidecar.BlockAccessList())
+	}
+	return 0
 }
 
 func (pe *parallelExecutor) LogExecution() {

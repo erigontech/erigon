@@ -2742,11 +2742,18 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 // so a block's list can be built while its txs are published.
 type BlockAccessListBuilder struct {
 	ac   map[accounts.Address]*accountState
+	slab []accountState
 	next int
 }
 
 func NewBlockAccessListBuilder() *BlockAccessListBuilder {
-	return &BlockAccessListBuilder{ac: make(map[accounts.Address]*accountState), next: -1}
+	return NewBlockAccessListBuilderSized(0)
+}
+
+// NewBlockAccessListBuilderSized reserves room for accountCount accounts in one
+// allocation. More accounts than that still work.
+func NewBlockAccessListBuilderSized(accountCount int) *BlockAccessListBuilder {
+	return &BlockAccessListBuilder{ac: make(map[accounts.Address]*accountState, accountCount), slab: make([]accountState, accountCount), next: -1}
 }
 
 // Next is the tx index Add expects; indexes start at -1, the pre-block system calls.
@@ -2765,13 +2772,12 @@ func (b *BlockAccessListBuilder) Add(txIndex int, rs ReadSet, writes *WriteSet) 
 		panic(fmt.Sprintf("block access list: added tx %d, expected %d", txIndex, b.next))
 	}
 	b.next++
-	ac := b.ac
 	// EIP-7928 requires every accessed address to appear in the BAL, so each per-path read map must register its address.
 	for addr, tr := range rs.balance {
 		if addr.IsNil() || tr.internal {
 			continue
 		}
-		ensureAccountState(ac, addr).updateReadBalance(tr.Val)
+		b.account(addr).updateReadBalance(tr.Val)
 	}
 	for addr, inner := range rs.storage {
 		if addr.IsNil() {
@@ -2781,7 +2787,7 @@ func (b *BlockAccessListBuilder) Add(txIndex int, rs ReadSet, writes *WriteSet) 
 			if tr.internal {
 				continue
 			}
-			ensureAccountState(ac, addr).updateReadStorage(key, tr.Val)
+			b.account(addr).updateReadStorage(key, tr.Val)
 		}
 	}
 	for addr, tr := range rs.address {
@@ -2795,43 +2801,43 @@ func (b *BlockAccessListBuilder) Add(txIndex int, rs ReadSet, writes *WriteSet) 
 		if tr.Val == nil || tr.Val.IsNil() {
 			continue
 		}
-		ensureAccountState(ac, addr)
+		b.account(addr)
 	}
 	for addr, tr := range rs.nonce {
 		if addr.IsNil() || tr.internal {
 			continue
 		}
-		ensureAccountState(ac, addr)
+		b.account(addr)
 	}
 	for addr, tr := range rs.incarnation {
 		if addr.IsNil() || tr.internal {
 			continue
 		}
-		ensureAccountState(ac, addr)
+		b.account(addr)
 	}
 	for addr, tr := range rs.selfDestruct {
 		if addr.IsNil() || tr.internal {
 			continue
 		}
-		ensureAccountState(ac, addr)
+		b.account(addr)
 	}
 	for addr, tr := range rs.createContract {
 		if addr.IsNil() || tr.internal {
 			continue
 		}
-		ensureAccountState(ac, addr)
+		b.account(addr)
 	}
 	for addr, tr := range rs.code {
 		if addr.IsNil() || tr.internal {
 			continue
 		}
-		ensureAccountState(ac, addr)
+		b.account(addr)
 	}
 	for addr, tr := range rs.codeHash {
 		if addr.IsNil() || tr.internal {
 			continue
 		}
-		account := ensureAccountState(ac, addr)
+		account := b.account(addr)
 		// A pre-block-empty code hash marks the baseline empty so applyToCode
 		// drops a net-zero same-tx set-then-clear. Only an empty read seen
 		// before any code change is the pre-block value.
@@ -2843,7 +2849,7 @@ func (b *BlockAccessListBuilder) Add(txIndex int, rs ReadSet, writes *WriteSet) 
 		if addr.IsNil() || tr.internal {
 			continue
 		}
-		ensureAccountState(ac, addr)
+		b.account(addr)
 	}
 
 	if writes != nil {
@@ -2853,47 +2859,47 @@ func (b *BlockAccessListBuilder) Add(txIndex int, rs ReadSet, writes *WriteSet) 
 			if addr.IsNil() || !w.Val {
 				continue
 			}
-			ensureAccountState(ac, addr)
+			b.account(addr)
 		}
 		for addr, w := range writes.Balances() {
 			if addr.IsNil() {
 				continue
 			}
-			ensureAccountState(ac, addr).applyWriteBalance(w.Val, w.Version.blockAccessIndex())
+			b.account(addr).applyWriteBalance(w.Val, w.Version.blockAccessIndex())
 		}
 		for addr, w := range writes.Nonces() {
 			if addr.IsNil() {
 				continue
 			}
-			ensureAccountState(ac, addr).applyWriteNonce(w.Val, w.Version.blockAccessIndex())
+			b.account(addr).applyWriteNonce(w.Val, w.Version.blockAccessIndex())
 		}
 		for addr, w := range writes.Codes() {
 			if addr.IsNil() {
 				continue
 			}
-			ensureAccountState(ac, addr).applyWriteCode(w.Val, w.Version.blockAccessIndex())
+			b.account(addr).applyWriteCode(w.Val, w.Version.blockAccessIndex())
 		}
 		for addr, byKey := range writes.Storages() {
 			if addr.IsNil() {
 				continue
 			}
-			account := ensureAccountState(ac, addr)
+			account := b.account(addr)
 			for key, w := range byKey {
 				account.applyWriteStorage(key, w.Val, w.Version.blockAccessIndex())
 			}
 		}
 		// EIP-7928 requires every touched address to appear; these paths carry
 		// no value the loops above record.
-		registerAddrs(ac, writes.address)
-		registerAddrs(ac, writes.incarnation)
-		registerAddrs(ac, writes.selfDestruct)
-		registerAddrs(ac, writes.codeHash)
-		registerAddrs(ac, writes.codeSize)
+		registerAddrs(b, writes.address)
+		registerAddrs(b, writes.incarnation)
+		registerAddrs(b, writes.selfDestruct)
+		registerAddrs(b, writes.codeHash)
+		registerAddrs(b, writes.codeSize)
 		for addr, w := range writes.createContract {
 			if addr.IsNil() {
 				continue
 			}
-			account := ensureAccountState(ac, addr)
+			account := b.account(addr)
 			// A contract created this block has empty pre-block code; applyToCode
 			// uses this to drop a net-zero empty code change.
 			if w.Val {
@@ -2906,7 +2912,7 @@ func (b *BlockAccessListBuilder) Add(txIndex int, rs ReadSet, writes *WriteSet) 
 		if addr.IsNil() {
 			continue
 		}
-		ensureAccountState(ac, addr)
+		b.account(addr)
 	}
 }
 
@@ -3099,25 +3105,31 @@ func (ct *changeTracker[T]) apply(applyFn func(uint32, T)) {
 	}
 }
 
-func registerAddrs[V any](ac map[accounts.Address]*accountState, writes map[accounts.Address]V) {
+func registerAddrs[V any](b *BlockAccessListBuilder, writes map[accounts.Address]V) {
 	for addr := range writes {
 		if !addr.IsNil() {
-			ensureAccountState(ac, addr)
+			b.account(addr)
 		}
 	}
 }
 
-func newAccountState(addr accounts.Address) *accountState {
-	return &accountState{changes: types.AccountChanges{Address: addr.Value()}}
-}
-
-func ensureAccountState(accounts map[accounts.Address]*accountState, addr accounts.Address) *accountState {
-	if account, ok := accounts[addr]; ok {
+func (b *BlockAccessListBuilder) account(addr accounts.Address) *accountState {
+	if account, ok := b.ac[addr]; ok {
 		return account
 	}
-	account := newAccountState(addr)
-	accounts[addr] = account
+	var account *accountState
+	if len(b.slab) > 0 {
+		account, b.slab = &b.slab[0], b.slab[1:]
+		account.changes.Address = addr.Value()
+	} else {
+		account = newAccountState(addr)
+	}
+	b.ac[addr] = account
 	return account
+}
+
+func newAccountState(addr accounts.Address) *accountState {
+	return &accountState{changes: types.AccountChanges{Address: addr.Value()}}
 }
 
 func (account *accountState) applyWriteStorage(key accounts.StorageKey, val uint256.Int, accessIndex uint32) {
