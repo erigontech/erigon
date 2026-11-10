@@ -107,16 +107,16 @@ func TestImportBurntContractSelfdestructLosesBurn(t *testing.T) {
 
 	t.Run("existing contract", func(t *testing.T) {
 		x := common.Address{0x33}
-		importBurntContractBlock(t, x, x, types.GenesisAlloc{x: {Balance: big.NewInt(1), Code: destruct}})
+		importBurntContractBlock(t, x, x, types.GenesisAlloc{x: {Balance: big.NewInt(1), Code: destruct}}, 74_603)
 	})
 	t.Run("created in the tx", func(t *testing.T) {
-		importBurntContractBlock(t, created, factory, types.GenesisAlloc{factory: {Code: factoryCode}})
+		importBurntContractBlock(t, created, factory, types.GenesisAlloc{factory: {Code: factoryCode}}, 81_635)
 	})
 }
 
 // importBurntContractBlock builds a pre-Cancun block serially with burnt as the
 // burnt-fee contract and a tx to to, then imports it with parallel execution.
-func importBurntContractBlock(t *testing.T, burnt, to common.Address, alloc types.GenesisAlloc) {
+func importBurntContractBlock(t *testing.T, burnt, to common.Address, alloc types.GenesisAlloc, wantGas uint64) {
 	prevParallel := dbg.Exec3Parallel
 	t.Cleanup(func() { dbg.Exec3Parallel = prevParallel })
 
@@ -145,6 +145,7 @@ func importBurntContractBlock(t *testing.T, burnt, to common.Address, alloc type
 		}
 	})
 	require.NoError(t, err)
+	require.Equal(t, wantGas, blocks.TopBlock.GasUsed())
 
 	dbg.Exec3Parallel = true
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(key))

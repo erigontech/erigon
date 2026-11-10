@@ -77,6 +77,7 @@ func TestRevertedCreate2KeepsCredits(t *testing.T) {
 				}
 			})
 			require.NoError(t, err)
+			requireGeneratedBlock(t, chainPack)
 
 			previousParallel := dbg.Exec3Parallel
 			dbg.Exec3Parallel = mode.parallel

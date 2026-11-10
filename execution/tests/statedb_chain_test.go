@@ -291,6 +291,7 @@ func importSerialThenParallel(t *testing.T, gspec *types.Genesis, key *ecdsa.Pri
 	serial := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 	chainPack, err := serial.GenerateChain(n, gen)
 	require.NoError(t, err)
+	requireGeneratedBlock(t, chainPack)
 	require.NoError(t, serial.InsertChain(chainPack))
 
 	var parallels []*execmoduletester.ExecModuleTester

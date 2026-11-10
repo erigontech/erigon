@@ -262,6 +262,7 @@ func TestCreditedEmptyAccountIsKept(t *testing.T) {
 				}
 				fill := func(b *blockgen.BlockGen) { tc.fill(b, config) }
 				chainPack := generateEIP161TouchBlock(t, gspec, keys[0], fill)
+				requireGeneratedBlock(t, chainPack)
 				importInParallel(t, gspec, keys[0], chainPack, func(t *testing.T, st *state.IntraBlockState) {
 					exist, err := st.Exist(accounts.InternAddress(empty))
 					require.NoError(t, err)
@@ -305,6 +306,7 @@ func TestEmptiedContractIsKept(t *testing.T) {
 				b.AddTx(txn)
 			}
 			chainPack := generateEIP161TouchBlock(t, gspec, keys[0], fill)
+			requireGeneratedBlock(t, chainPack)
 			importInParallel(t, gspec, keys[0], chainPack, func(t *testing.T, st *state.IntraBlockState) {
 				code, err := st.GetCode(accounts.InternAddress(wallet))
 				require.NoError(t, err)
@@ -343,6 +345,7 @@ func TestTouchedStorageOnlyAccountIsAbsentForLaterTx(t *testing.T) {
 				}
 			}
 			chainPack := generateEIP161TouchBlock(t, gspec, keys[0], fill)
+			requireGeneratedBlock(t, chainPack)
 			for _, receipt := range chainPack.Receipts[0] {
 				require.Equal(t, types.ReceiptStatusSuccessful, receipt.Status)
 			}

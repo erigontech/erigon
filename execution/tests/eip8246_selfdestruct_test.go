@@ -80,6 +80,7 @@ func TestEIP8246FundedThenSelfdestructedAccount(t *testing.T) {
 				block.AddTx(sign(types.NewTransaction(block.TxNonce(sender), contract, uint256.NewInt(1), 300_000, gasPrice, nil)))
 			})
 			require.NoError(t, err)
+			requireGeneratedBlock(t, chainPack)
 			for _, receipt := range chainPack.Receipts[0] {
 				require.Equal(t, uint64(types.ReceiptStatusSuccessful), receipt.Status)
 			}
@@ -148,6 +149,7 @@ func TestEIP8246PreserveToNonSelfBeneficiaryThenCredited(t *testing.T) {
 				block.AddTx(sign(types.NewTransaction(block.TxNonce(sender), contract, uint256.NewInt(3), 300_000, gasPrice, nil)))
 			})
 			require.NoError(t, err)
+			requireGeneratedBlock(t, chainPack)
 			for _, receipt := range chainPack.Receipts[0] {
 				require.Equal(t, uint64(types.ReceiptStatusSuccessful), receipt.Status)
 			}
