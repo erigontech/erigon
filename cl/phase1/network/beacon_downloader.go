@@ -820,6 +820,9 @@ func (f *ForwardBeaconDownloader) ImportHeldGloasTip(ctx context.Context, envelo
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	highestSlotProcessed, err := f.process(f.highestSlotProcessed, blocks, nil)
+	if err != nil && ctx.Err() != nil {
+		return false
+	}
 	if err != nil || highestSlotProcessed < tip.Block.Slot || !importTip(tip, root, envelopes[root], receivedAt) {
 		if f.currentSlot != nil {
 			f.gloasTipRetrySlot = saturatingIncrement(f.currentSlot())
