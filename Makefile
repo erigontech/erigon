@@ -255,7 +255,7 @@ test-all: test-filtered
 
 ## test-unwind:                       reorg, snapshot and crash recovery integration tests
 .PHONY: test-unwind
-UNWIND_TEST_PATTERN ?= (Churn|Reorg|Unwind|Fork[Cc]hoice|F[Cc][Uu]|CrashRecovery|BranchRecovery|SetHead|MinimumUnwind|StartupCommitObservations|DeletedKeyNotResurrectedByFiles|AggregatorBuildResumesIncompleteStep|AggregatorEnableDomainDuringFilePlanning|MaintenanceObserver|MergeReplacementClosesAfterReaders|AccumulatorAppendPreservesChanges|HookBeforeRunPreservesPendingNotifications)
+UNWIND_TEST_PATTERN ?= (Churn|Reorg|Unwind|Fork[Cc]hoice|F[Cc][Uu]|CrashRecovery|BranchRecovery|SetHead|MinimumUnwind|RenderExecOutcome|FinalizeExecV3Outcome|StartupCommitObservations|DeletedKeyNotResurrectedByFiles|AggregatorBuildResumesIncompleteStep|AggregatorEnableDomainDuringFilePlanning|MaintenanceObserver|MergeReplacementClosesAfterReaders|AccumulatorAppendPreservesChanges|HookBeforeRunPreservesPendingNotifications)
 test-unwind: override GOTEST_PACKAGES = ./execution/engineapi ./execution/execmodule ./execution/execmodule/execmoduletester ./execution/stagedsync ./execution/stagedsync/stageloop ./execution/notifications ./db/state ./db/rawdb/rawtemporaldb
 test-unwind:
 	$(GOTEST) -run '$(UNWIND_TEST_PATTERN)' -count=1 -timeout=20m

@@ -14,6 +14,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 )
 
@@ -209,7 +210,8 @@ func TestRenderExecOutcome(t *testing.T) {
 		s := &StageState{BlockNumber: 5}
 		s.CurrentSyncCycle.IsInitialCycle = false
 		out := execV3Outcome{verdict: &blockVerdict{blockNum: 15, blockHash: common.HexToHash("0xf00d"), err: wrongRoot}, applyTx: tx}
-		got := renderExecOutcome(nil, out, ExecuteBlockCfg{}, s, u, logger)
+		cfg := ExecuteBlockCfg{blockReader: freezeblocks.NewBlockReader(nil)}
+		got := renderExecOutcome(nil, out, cfg, s, u, logger)
 		require.NoError(t, got)
 		require.Len(t, u.calls, 1)
 		require.Equal(t, uint64(10), u.calls[0].point, "unwind target = implicated - (implicated-s.BlockNumber)/2")
