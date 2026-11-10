@@ -139,6 +139,8 @@ func (r *Native) Finalized(ctx context.Context) (*Header, error) {
 	return r.HeaderByHash(ctx, hash)
 }
 
+// Logs reports a block whose matched logs the node cannot read, lacking its
+// header or a matched transaction, as an UnservedError.
 func (r *Native) Logs(ctx context.Context, from, to uint64, address common.Address, topics [][]common.Hash) (logs []*types.Log, err error) {
 	crit := filters.FilterCriteria{Addresses: []common.Address{address}, Topics: topics}
 	err = r.db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
@@ -152,6 +154,9 @@ func (r *Native) Logs(ctx context.Context, from, to uint64, address common.Addre
 		logs, err = r.query.Logs(ctx, tx, r.config, from, to, crit, 0)
 		return err
 	})
+	if m, ok := errors.AsType[*logquery.MissingError](err); ok {
+		return nil, &UnservedError{Block: m.Block, Err: fmt.Errorf("%w: %w", ErrNotFound, err)}
+	}
 	return logs, err
 }
 

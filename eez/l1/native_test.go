@@ -18,6 +18,7 @@ package l1_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -41,10 +42,18 @@ func TestNativeConformance(t *testing.T) {
 }
 
 // hidingReader serves no transaction of one block, as a node missing its
-// body would.
+// body would, and with header set no header of it either.
 type hidingReader struct {
 	dbservices.FullBlockReader
-	block uint64
+	block  uint64
+	header bool
+}
+
+func (r hidingReader) HeaderByNumber(ctx context.Context, tx kv.Getter, blockNum uint64) (*types.Header, error) {
+	if r.header && blockNum == r.block {
+		return nil, nil
+	}
+	return r.FullBlockReader.HeaderByNumber(ctx, tx, blockNum)
 }
 
 func (r hidingReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, i int) (types.Transaction, bool, error) {
@@ -61,9 +70,10 @@ func (r hidingReader) TxnHashByIdxInBlock(ctx context.Context, tx kv.Getter, blo
 	return r.FullBlockReader.TxnHashByIdxInBlock(ctx, tx, blockNum, txNum, i)
 }
 
-// TestNativeMissingTransaction: a matched log whose transaction the node
-// cannot read fails the query instead of vanishing from it.
-func TestNativeMissingTransaction(t *testing.T) {
+// TestNativeMissingBlockData: a matched log whose transaction or header the
+// node cannot read fails the query instead of vanishing from it, as a block
+// the source does not serve, which a scan of the range reports by number.
+func TestNativeMissingBlockData(t *testing.T) {
 	m, model := l1test.ErigonL1(t)
 	ctx := t.Context()
 	head, err := model.Head(ctx)
@@ -72,11 +82,29 @@ func TestNativeMissingTransaction(t *testing.T) {
 	logs, err := model.Logs(ctx, 0, head.Number, f.Address, f.Topics)
 	require.NoError(t, err)
 	require.NotEmpty(t, logs)
+	block := uint64(logs[0].BlockNumber)
 
-	hiding := hidingReader{m.BlockReader, uint64(logs[0].BlockNumber)}
-	native := l1.NewNative(m.DB, hiding, receipts.NewGenerator(m.Dirs, hiding, m.Engine, nil, time.Minute), m.Engine, m.ChainConfig)
-	_, err = native.Logs(ctx, 0, head.Number, f.Address, f.Topics)
-	require.ErrorContains(t, err, "not found")
+	for _, c := range []struct {
+		name   string
+		header bool
+		msg    string
+	}{
+		{"transaction", false, fmt.Sprintf("transaction not found at block %d, index %d", block, logs[0].TxIndex)},
+		{"header", true, fmt.Sprintf("header not found: %d", block)},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			hiding := hidingReader{FullBlockReader: m.BlockReader, block: block, header: c.header}
+			native := l1.NewNative(m.DB, hiding, receipts.NewGenerator(m.Dirs, hiding, m.Engine, nil, time.Minute), m.Engine, m.ChainConfig)
+			_, err := native.Logs(ctx, 0, head.Number, f.Address, f.Topics)
+			require.ErrorContains(t, err, c.msg)
+			require.ErrorIs(t, err, l1.ErrNotFound)
+			var u *l1.UnservedError
+			require.ErrorAs(t, err, &u)
+			require.Equal(t, block, u.Block)
+			require.ErrorAs(t, l1.UnservedLogs(ctx, native, err, 0, head.Number, f.Address, f.Topics), &u)
+			require.Equal(t, block, u.Block)
+		})
+	}
 }
 
 // staleCanonical reports hash canonical at number, as a block reader that
