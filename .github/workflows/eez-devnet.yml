@@ -23,7 +23,7 @@ on:
         default: false
 
 env:
-  ROLLUP0_REF: 24c71aaf47a9ef1a40182b583255e081102c01f2
+  ROLLUP0_REF: bf80de50fff74a549f1c34e07dbf66a9d27a28d3
   KURTOSIS_VERSION: 1.22.1
   FOUNDRY_VERSION: v1.7.1
   KURTOSIS_ENCLAVE: eez-erigon

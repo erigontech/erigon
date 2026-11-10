@@ -81,6 +81,10 @@ log "starting the devnet"
 bash "$K/start.sh" "$OUT/args.yaml" > "$OUT/start.log" 2>&1 || { tail -50 "$OUT/start.log"; fail "start.sh"; }
 # shellcheck disable=SC1091
 source "$K/ports.sh" > /dev/null
+# eez-node is the enclave's only reference L2 node; it starts the chain, so
+# it has no peers and derives from L1 alone.
+node_service=$(kurtosis service inspect "$KURTOSIS_ENCLAVE" eez-node)
+grep -Eq '^[[:space:]]*EEZ_SYNC_L1_ONLY: 1$' <<< "$node_service" || fail "eez-node does not run with EEZ_SYNC_L1_ONLY=1"
 kurtosis files download "$KURTOSIS_ENCLAVE" eez-deployments "$OUT/deployments" > /dev/null
 env_value() { grep -E "^$1=" "$OUT/deployments/deployments.env" | head -1 | cut -d= -f2- | tr -d '"'; }
 registry=$(env_value EEZ_REGISTRY_ADDRESS)
