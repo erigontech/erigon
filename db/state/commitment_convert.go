@@ -423,6 +423,12 @@ func convertCommitmentFile(
 		return 0, 0, 0, fmt.Errorf("convertCommitmentFile %q: source has no decompressor", file.Fullpath())
 	}
 
+	view, openErr := src.decompressor.OpenSequentialView()
+	if openErr != nil {
+		return 0, 0, 0, fmt.Errorf("convertCommitmentFile %q: %w", file.Fullpath(), openErr)
+	}
+	defer view.Close()
+
 	batch := &TemporalMemBatch{}
 	batch.domainWriters[kv.CommitmentDomain] = commitmentRo.NewWriter(nil)
 	wal := batch.domainWriters[kv.CommitmentDomain]
@@ -437,8 +443,7 @@ func convertCommitmentFile(
 	if src.StepCount(stepSize) < DomainMinStepsToCompress {
 		srcCompression = seg.CompressNone
 	}
-	defer src.decompressor.MadvNormal().DisableReadAhead()
-	reader := seg.NewReader(src.decompressor.MakeGetter(), srcCompression)
+	reader := seg.NewReader(view.MakeGetter(), srcCompression)
 	reader.Reset(0)
 
 	logEvery := time.NewTicker(30 * time.Second)

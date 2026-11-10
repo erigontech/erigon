@@ -236,19 +236,23 @@ func convertCommitmentFileV3(
 	baseName := filepath.Base(file.Fullpath())
 	fileStart := time.Now()
 	workers := max(1, runtime.GOMAXPROCS(0))
+	view, err := vf.src.decompressor.OpenSequentialView()
+	if err != nil {
+		return 0, 0, fmt.Errorf("convertCommitmentFileV3 %q: %w", file.Fullpath(), err)
+	}
+	defer view.Close()
 	collectors, closeCollectors := newV3Collectors("commitment_convert_v3", at.Dirs().Tmp, workers, logger)
 	defer closeCollectors()
 	in := make(chan *kvBatch, workers*2)
 	out := make(chan *convertedBatch, workers*2)
 	var read atomic.Uint64
 
-	defer vf.src.decompressor.MadvNormal().DisableReadAhead()
 	g, gctx := errgroup.WithContext(ctx)
 	g.Go(func() error {
 		defer close(in)
 		logEvery := time.NewTicker(30 * time.Second)
 		defer logEvery.Stop()
-		reader := seg.NewReader(vf.src.decompressor.MakeGetter(), srcCompression)
+		reader := seg.NewReader(view.MakeGetter(), srcCompression)
 		keysCompressed, valsCompressed := srcCompression.Has(seg.CompressKeys), srcCompression.Has(seg.CompressVals)
 		batch := kvBatchPool.Get().(*kvBatch)
 		batch.reset()
