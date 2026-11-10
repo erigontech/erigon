@@ -115,20 +115,21 @@ func (c *rpcClient) jwtToken() string {
 	return head + "." + claims + "." + enc.EncodeToString(mac.Sum(nil))
 }
 
-// burnLoop appends a keccak loop that runs until gas left is below burnThreshold.
+// burnLoop appends a keccak loop over mem[0:32] that runs until gas left is below burnThreshold.
+// The caller seeds mem[0]: a seed repeated across txs would be served by the process-wide keccak cache.
 func burnLoop(code []byte) []byte {
-	code = append(code, 0x60, 0x01, 0x60, 0x00, 0x52) // mem[0]=1
 	label := len(code)
-	code = append(code, 0x5b)                                                               // JUMPDEST
-	code = append(code, 0x60, 0x20, 0x60, 0x00, 0x20, 0x60, 0x00, 0x52)                     // mem[0]=keccak(mem[0:32])
-	code = append(code, 0x61, byte(burnThreshold>>8), byte(burnThreshold&0xff), 0x5a, 0x11) // GAS > threshold
-	return append(code, 0x61, byte(label>>8), byte(label), 0x57)                            // JUMPI label
+	code = append(code, 0x5b)
+	code = append(code, 0x60, 0x20, 0x60, 0x00, 0x20, 0x60, 0x00, 0x52)
+	code = append(code, 0x61, byte(burnThreshold>>8), byte(burnThreshold&0xff), 0x5a, 0x11)
+	return append(code, 0x61, byte(label>>8), byte(label), 0x57)
 }
 
 func chainRuntime() []byte {
-	code := []byte{0x60, 0x00, 0x54, 0x60, 0x01, 0x01, 0x60, 0x00, 0x55} // slot0 = slot0 + 1
+	code := []byte{0x60, 0x00, 0x54, 0x80, 0x60, 0x01, 0x01, 0x60, 0x00, 0x55} // v = slot0; slot0 = v + 1
+	code = append(code, 0x33, 0x01, 0x60, 0x00, 0x52)                          // mem[0] = v + caller
 	code = burnLoop(code)
-	return append(code, 0x00) // STOP
+	return append(code, 0x00)
 }
 
 func fanRuntime(prefix uint16) []byte {
@@ -137,7 +138,7 @@ func fanRuntime(prefix uint16) []byte {
 	patch := len(code) - 2
 	code = append(code, 0x57) // JUMPI
 
-	code = append(code, 0x60, 0x01, 0x60, 0x00, 0x52) // mem[0]=1
+	code = append(code, 0x33, 0x60, 0x00, 0x52) // mem[0] = caller
 	code = append(code, 0x61, byte(prefix>>8), byte(prefix))
 	loop := len(code)
 	code = append(code, 0x5b)
@@ -146,9 +147,9 @@ func fanRuntime(prefix uint16) []byte {
 	code = append(code, 0x80, 0x61, byte(loop>>8), byte(loop), 0x57) // DUP1, JUMPI loop
 	code = append(code, 0x50)                                        // POP
 
-	code = append(code, 0x60, 0x00, 0x54, 0x50) // SLOAD(0), POP
+	code = append(code, 0x60, 0x00, 0x54, 0x33, 0x01, 0x60, 0x00, 0x52) // mem[0] = slot0 + caller
 	code = burnLoop(code)
-	code = append(code, 0x00) // STOP
+	code = append(code, 0x00)
 
 	code[patch], code[patch+1] = byte(len(code)>>8), byte(len(code))
 	code = append(code, 0x5b, 0x60, 0x07, 0x60, 0x00, 0x55, 0x00) // writer: slot0 = 7
