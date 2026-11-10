@@ -200,8 +200,9 @@ type executionPayloadEnvelopeGossipKey struct {
 }
 
 type executionPayloadEnvelopeRetry struct {
-	EnvelopeRoot   [32]byte
-	GossipRequired bool
+	EnvelopeRoot     [32]byte
+	GossipRequired   bool
+	ContentsRequired bool
 }
 
 type ApiHandler struct {
@@ -445,6 +446,17 @@ func (a *ApiHandler) claimExecutionPayloadEnvelopeRetry(
 	return retry, true, true
 }
 
+func (a *ApiHandler) executionPayloadEnvelopeContentsRequired(key executionPayloadEnvelopeGossipKey, envelope *cltypes.SignedExecutionPayloadEnvelope) bool {
+	a.executionPayloadEnvelopeRetryMu.Lock()
+	retry, ok := a.executionPayloadEnvelopeRetries.Peek(key)
+	a.executionPayloadEnvelopeRetryMu.Unlock()
+	if !ok || !retry.ContentsRequired {
+		return false
+	}
+	envelopeRoot, err := envelope.HashSSZ()
+	return err == nil && envelopeRoot == retry.EnvelopeRoot
+}
+
 func (a *ApiHandler) finishExecutionPayloadEnvelopeRetry(key executionPayloadEnvelopeGossipKey) {
 	a.executionPayloadEnvelopeRetryMu.Lock()
 	defer a.executionPayloadEnvelopeRetryMu.Unlock()
@@ -455,6 +467,15 @@ func (a *ApiHandler) recordExecutionPayloadEnvelopeRetry(key executionPayloadEnv
 	a.executionPayloadEnvelopeRetryMu.Lock()
 	defer a.executionPayloadEnvelopeRetryMu.Unlock()
 	a.executionPayloadEnvelopeRetries.Add(key, retry)
+}
+
+func (a *ApiHandler) clearExecutionPayloadEnvelopeContentsRequired(key executionPayloadEnvelopeGossipKey) {
+	a.executionPayloadEnvelopeRetryMu.Lock()
+	defer a.executionPayloadEnvelopeRetryMu.Unlock()
+	if retry, ok := a.executionPayloadEnvelopeRetries.Peek(key); ok && retry.ContentsRequired {
+		retry.ContentsRequired = false
+		a.executionPayloadEnvelopeRetries.Add(key, retry)
+	}
 }
 
 func (a *ApiHandler) clearExecutionPayloadEnvelopeRetry(key executionPayloadEnvelopeGossipKey) {

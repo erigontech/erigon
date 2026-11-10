@@ -306,3 +306,74 @@ func TestUnwoundBlobTxnWithoutSidecarIsNotAdded(t *testing.T) {
 	require.NoError(t, pool.OnNewBlock(ctx, reorg, TxnSlots{}, unwound, TxnSlots{}))
 	require.NotContains(t, pool.byHash, string(blobTxn.IDHash[:]))
 }
+
+func TestSecondSameHeightReorgReinjectsMinedBlobTxn(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	pool, err := New(ctx, make(chan Announcements, 5), mdbxtest.NewTestPoolDB(t), coreDB, txpoolcfg.DefaultConfig,
+		kvcache.New(kvcache.DefaultCoherentConfig), testforks.Forks["Cancun"], nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
+	require.NoError(t, err)
+
+	sender := common.Address{1}
+	change := func(height, fork byte, nonce uint64, direction remoteproto.Direction) *remoteproto.StateChange {
+		account := accounts.Account{Nonce: nonce, Balance: *uint256.NewInt(common.Ether), CodeHash: accounts.EmptyCodeHash, Incarnation: 1}
+		return &remoteproto.StateChange{
+			BlockHeight: uint64(height),
+			BlockHash:   gointerfaces.ConvertHashToH256(common.Hash{height, fork}),
+			Direction:   direction,
+			Changes: []*remoteproto.AccountChange{{
+				Action:  remoteproto.Action_UPSERT,
+				Address: gointerfaces.ConvertAddressToH160(sender),
+				Data:    accounts.SerialiseV3(&account),
+			}},
+		}
+	}
+	batch := func(changes ...*remoteproto.StateChange) *remoteproto.StateChangeBatch {
+		return &remoteproto.StateChangeBatch{PendingBlockBaseFee: 200_000, PendingBlobFeePerGas: 100_000, BlockGasLimit: math.MaxUint64, ChangeBatch: changes}
+	}
+	reorgTo := func(fork byte, nonce uint64) *remoteproto.StateChangeBatch {
+		return batch(change(0, 0, 2, remoteproto.Direction_UNWIND), change(1, fork, nonce, remoteproto.Direction_FORWARD))
+	}
+	require.NoError(t, pool.OnNewBlock(ctx, batch(change(0, 0, 2, remoteproto.Direction_FORWARD)), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	require.NoError(t, pool.OnNewBlock(ctx, batch(change(1, 1, 2, remoteproto.Direction_FORWARD)), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+
+	blobTxn := makeBlobTxn()
+	blobTxn.Nonce = 2
+	var mined TxnSlots
+	mined.Append(&blobTxn, sender[:], false)
+	require.NoError(t, pool.OnNewBlock(ctx, reorgTo(2, 3), TxnSlots{}, TxnSlots{}, mined))
+	require.Contains(t, pool.minedBlobTxnsByHash, string(blobTxn.IDHash[:]))
+
+	unwoundTxn := blobTxn
+	unwoundTxn.BlobBundles = nil
+	var unwound TxnSlots
+	unwound.Append(&unwoundTxn, sender[:], false)
+	require.NoError(t, pool.OnNewBlock(ctx, reorgTo(3, 2), TxnSlots{}, unwound, TxnSlots{}))
+
+	require.Contains(t, pool.byHash, string(blobTxn.IDHash[:]), "the unwound txn is back in the pool")
+	require.NotContains(t, pool.minedBlobTxnsByHash, string(blobTxn.IDHash[:]))
+}
+
+func TestMinedBlobTxnMinedAgainSurvivesFinalizingItsOldBlock(t *testing.T) {
+	pool := &TxPool{
+		minedBlobTxnsByBlock: make(map[uint64][]*metaTxn),
+		minedBlobTxnsByHash:  make(map[string]*metaTxn),
+	}
+	blobTxn := newTestBlobTxnSlot(0, 1, 1, 1, 21000)
+	blobTxn.IDHash[0] = 1
+	hash := string(blobTxn.IDHash[:])
+	mineAt := func(block uint64) {
+		pool.lastSeenBlock.Store(block)
+		require.NoError(t, pool.processMinedFinalizedBlobs([]*TxnSlot{blobTxn}, block, 0))
+	}
+	mineAt(5)
+	mineAt(5) // a same-height reorg to a block with the same txn
+	mineAt(7)
+
+	require.NoError(t, pool.processMinedFinalizedBlobs(nil, 7, 5))
+
+	require.Contains(t, pool.minedBlobTxnsByHash, hash, "block 7 is not finalized")
+	require.Equal(t, uint64(7), pool.minedBlobTxnsByHash[hash].minedBlockNum)
+	require.Len(t, pool.minedBlobTxnsByBlock[7], 1)
+}
