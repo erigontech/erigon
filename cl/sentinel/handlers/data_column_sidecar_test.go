@@ -311,9 +311,10 @@ func TestDataColumnSidecarsByRootTooManyColumnsReturnsInvalidRequest(t *testing.
 
 type savedColumnsStore struct {
 	blob_storage.DataColumnStorage
-	saved   func(slot uint64) []uint64
-	lookups int
-	served  int
+	saved         func(slot uint64) []uint64
+	lookups       int
+	served        int
+	servedColumns []uint64
 }
 
 func (m *savedColumnsStore) ColumnSidecarExists(_ context.Context, slot uint64, _ common.Hash, column int64) (bool, error) {
@@ -321,8 +322,9 @@ func (m *savedColumnsStore) ColumnSidecarExists(_ context.Context, slot uint64, 
 	return slices.Contains(m.saved(slot), uint64(column)), nil
 }
 
-func (m *savedColumnsStore) WriteStream(io.Writer, uint64, common.Hash, uint64) error {
+func (m *savedColumnsStore) WriteStream(_ io.Writer, _ uint64, _ common.Hash, column uint64) error {
 	m.served++
+	m.servedColumns = append(m.servedColumns, column)
 	return nil
 }
 
@@ -331,6 +333,13 @@ type discardStream struct{ network.Stream }
 func (discardStream) Write(p []byte) (int, error) { return len(p), nil }
 
 func serveColumnsByRange(t *testing.T, ctx context.Context, limit, slots uint64, saved func(slot uint64) []uint64) *savedColumnsStore {
+	t.Helper()
+	store, err := serveRequestedColumns(t, ctx, limit, slots, []uint64{0, 1, 2}, saved)
+	require.NoError(t, err)
+	return store
+}
+
+func serveRequestedColumns(t *testing.T, ctx context.Context, limit, slots uint64, columns []uint64, saved func(slot uint64) []uint64) (*savedColumnsStore, error) {
 	t.Helper()
 	_, mainnetCfg := clparams.GetConfigsByNetwork(1)
 	cfg := *mainnetCfg
@@ -347,12 +356,11 @@ func serveColumnsByRange(t *testing.T, ctx context.Context, limit, slots uint64,
 	store := &savedColumnsStore{saved: saved}
 	c := &ConsensusHandlers{ctx: t.Context(), beaconConfig: &cfg, dataColumnStorage: store, ethClock: eth_clock.NewEthereumClock(0, common.Hash{}, &cfg)}
 	req := &cltypes.ColumnSidecarsByRangeRequest{Columns: solid.NewUint64ListSSZ(int(cfg.NumberOfColumns))}
-	for column := range uint64(3) {
+	for _, column := range columns {
 		req.Columns.Append(column)
 	}
 
-	require.NoError(t, c.writeColumnsByRange(ctx, discardStream{}, tx, req, 0, slots, slots))
-	return store
+	return store, c.writeColumnsByRange(ctx, discardStream{}, tx, req, 0, slots, slots)
 }
 
 func TestDataColumnSidecarsByRangeServesAfterBloblessBlocks(t *testing.T) {
@@ -384,12 +392,19 @@ func TestDataColumnSidecarsByRangeStopsLookupsAtTheLimit(t *testing.T) {
 func TestDataColumnSidecarsByRangeStopsAtTheDeadline(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	store := serveColumnsByRange(t, ctx, 10, 32, func(uint64) []uint64 {
+	store, err := serveRequestedColumns(t, ctx, 10, 32, []uint64{0, 1, 2}, func(uint64) []uint64 {
 		cancel()
 		return []uint64{0, 1, 2}
 	})
+	require.ErrorIs(t, err, context.Canceled, "an aborted scan must not end as an empty success")
 	require.Equal(t, 1, store.lookups)
 	require.Zero(t, store.served)
+}
+
+func TestDataColumnSidecarsByRangeServesSortedUniqueColumns(t *testing.T) {
+	store, err := serveRequestedColumns(t, t.Context(), 10, 1, []uint64{2, 0, 2}, func(uint64) []uint64 { return []uint64{0, 1, 2} })
+	require.NoError(t, err)
+	require.Equal(t, []uint64{0, 2}, store.servedColumns)
 }
 
 func TestDataColumnSidecarsByRangeZeroCountReturnsEmptySuccess(t *testing.T) {
