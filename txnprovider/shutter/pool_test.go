@@ -38,6 +38,8 @@ import (
 	"go.uber.org/mock/gomock"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -442,11 +444,23 @@ func TestPoolProvideTxnsAmsterdamGasAdmission(t *testing.T) {
 }
 
 func TestPoolProvideTxnsUsesRemainingGasForAdmission(t *testing.T) {
-	publicPool, err := txpool.New(t.Context(), make(chan txpool.Announcements, 1),
+	stateChanges := remoteproto.NewMockKVClient(gomock.NewController(t))
+	stateChanges.EXPECT().StateChanges(gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(nil, status.Error(codes.Unavailable, "no core node in this test")).AnyTimes()
+
+	poolCtx, stopPool := context.WithCancel(t.Context())
+	publicPool, err := txpool.New(poolCtx, make(chan txpool.Announcements, 1),
 		mdbxtest.NewTestPoolDB(t), temporaltest.NewTestDB(t, datadir.New(t.TempDir())),
 		txpoolcfg.DefaultConfig, kvcache.New(kvcache.DefaultCoherentConfig), chain.AllProtocolChanges,
-		nil, nil, func() {}, nil, nil, log.New(), txpool.WithFeeCalculator(nil))
+		nil, stateChanges, func() {}, nil, nil, log.New(), txpool.WithFeeCalculator(nil))
 	require.NoError(t, err)
+	runDone := make(chan struct{})
+	go func() {
+		defer close(runDone)
+		_ = publicPool.Run(poolCtx)
+	}()
+	t.Cleanup(func() { stopPool(); <-runDone })
+	require.Eventually(t, publicPool.Started, 10*time.Second, time.Millisecond)
 
 	pt := PoolTest{t}
 	pt.Run(func(ctx context.Context, t *testing.T, pool *shutter.Pool, handle PoolTestHandle) {
