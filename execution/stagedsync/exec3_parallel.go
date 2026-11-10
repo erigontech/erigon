@@ -2394,14 +2394,25 @@ func chargeSenderAtValidation(txTask *exec.TxTask, result *execResult, version s
 			if err != nil {
 				return nil, nil, err
 			}
-			if recipient == nil || !recipient.CodeHash.IsEmpty() {
+			// A lower tx destructed it: only the full run re-creates such an account.
+			if recipient == nil && vm.IsNetAbsent(to, version.TxIndex) {
 				return nil, nil, nil
 			}
-			credit, overflow := u256.AddOverflow(recipient.Balance, *msg.Value())
+			var balance uint256.Int
+			if recipient != nil {
+				if !recipient.CodeHash.IsEmpty() {
+					return nil, nil, nil
+				}
+				balance = recipient.Balance
+			}
+			credit, overflow := u256.AddOverflow(balance, *msg.Value())
 			if overflow {
 				return nil, nil, nil
 			}
-			state.SeedOrigin(vm, to, recipient)
+			// An absent account has no origin: a lower reader must still see it absent.
+			if recipient != nil {
+				state.SeedOrigin(vm, to, recipient)
+			}
 			ws.SetBalance(to, &state.VersionedWrite[uint256.Int]{
 				WriteHeader: state.WriteHeader{Address: to, Path: state.BalancePath, Version: version, Reason: tracing.BalanceChangeTransfer},
 				Val:         credit,

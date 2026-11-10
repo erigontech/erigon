@@ -748,7 +748,7 @@ func (st *TxnExecutor) handleRuntimeCreate(destination accounts.Address, gasRema
 }
 
 // RecipientCreditedAtValidation reports whether a value transfer runs no frame: at block start the
-// recipient exists and has no code, so validation credits it after every lower tx. A recorded read
+// recipient is absent or has no code, so validation credits it after every lower tx. A recorded read
 // of the recipient would conflict with each lower credit, so the run peeks at block-start state and
 // validation re-checks the code. A tracer that follows balances or gas needs the frame.
 func RecipientCreditedAtValidation(from, to, coinbase accounts.Address, value uint256.Int, tracer *tracing.Hooks, rules *chain.Rules, blockStart state.StateReader) bool {
@@ -757,7 +757,7 @@ func RecipientCreditedAtValidation(from, to, coinbase accounts.Address, value ui
 		return false
 	}
 	acc, err := blockStart.ReadAccountData(to)
-	return err == nil && acc != nil && acc.CodeHash.IsEmpty()
+	return err == nil && (acc == nil || acc.CodeHash.IsEmpty())
 }
 
 // verifyAuthorities applies the EIP-7702 authorization list, mutating state;

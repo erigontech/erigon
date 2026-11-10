@@ -1774,6 +1774,15 @@ func (r accountsReader) ReadAccountData(addr accounts.Address) (*accounts.Accoun
 	return r.accounts[addr], nil
 }
 
+func TestRecipientCreditedAtValidationCoversAbsentRecipient(t *testing.T) {
+	from := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	to := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
+	coinbase := accounts.InternAddress(common.HexToAddress("0x3333333333333333333333333333333333333333"))
+	reader := accountsReader{accounts: map[accounts.Address]*accounts.Account{}}
+	rules := &chain.Rules{}
+	require.True(t, RecipientCreditedAtValidation(from, to, coinbase, *uint256.NewInt(1), nil, rules, reader), "an absent recipient runs no frame")
+}
+
 // A transfer to a code-less recipient that validation credits skips the frame, but a call tracer
 // still sees its top-level CALL.
 func TestRecipientCreditedAtValidationReportsCallToTracer(t *testing.T) {

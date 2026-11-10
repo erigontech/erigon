@@ -48,6 +48,12 @@ func newDepsTest(t *testing.T, txs types.Transactions, withCode ...accounts.Addr
 
 func newTracedDepsTest(t *testing.T, txs types.Transactions, hooks *tracing.Hooks, withCode ...accounts.Address) *depsTest {
 	t.Helper()
+	return newSeededDepsTest(t, txs, hooks, nil, withCode...)
+}
+
+// newSeededDepsTest leaves an account in absent unseeded, so it does not exist at block start.
+func newSeededDepsTest(t *testing.T, txs types.Transactions, hooks *tracing.Hooks, absent []accounts.Address, withCode ...accounts.Address) *depsTest {
+	t.Helper()
 	chainSpec, _ := chainspec.ChainSpecByName(networkname.Mainnet)
 	header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 10_000_000}
 	db := newResumeTestDB(t)
@@ -65,7 +71,7 @@ func newTracedDepsTest(t *testing.T, txs types.Transactions, hooks *tracing.Hook
 			if err := put(sender.Value(), false); err != nil {
 				return err
 			}
-			if to := txn.GetTo(); to != nil {
+			if to := txn.GetTo(); to != nil && !slices.Contains(absent, accounts.InternAddress(*to)) {
 				if err := put(*to, slices.Contains(withCode, accounts.InternAddress(*to))); err != nil {
 					return err
 				}
@@ -191,8 +197,11 @@ func TestChargedValueTransferDoesNotWaitForRecipient(t *testing.T) {
 			require.True(t, s.be.selfLoopDispatched[2])
 		})
 	}
+	s := newSeededDepsTest(t, valueTransfers([]accounts.Address{a, b, c}, []accounts.Address{f, d, d}), nil, []accounts.Address{d})
+	require.False(t, s.be.execTasks.isBlocked(2), "a recipient absent at block start is credited at validation")
+	require.True(t, s.be.selfLoopDispatched[2])
 	// A recipient with code runs it in the transfer frame, so the transfer still waits.
-	s := newDepsTest(t, valueTransfers([]accounts.Address{a, b, c}, []accounts.Address{f, d, d}), d)
+	s = newDepsTest(t, valueTransfers([]accounts.Address{a, b, c}, []accounts.Address{f, d, d}), d)
 	require.True(t, s.be.execTasks.isBlocked(2))
 	require.False(t, s.be.selfLoopDispatched[2])
 	// The run executes the frame of a funded precompile, so a transfer to it still waits.
@@ -245,6 +254,30 @@ func TestValidationCreditsOnlyCodelessRecipient(t *testing.T) {
 			}
 		})
 	}
+	t.Run("absent_at_block_start", func(t *testing.T) {
+		delete(reader.accounts, recipient)
+		result := &execResult{TxResult: &exec.TxResult{TxOut: &state.WriteSet{}}}
+		vm := state.NewVersionMap(nil)
+		ws, _, err := chargeSenderAtValidation(task, result, state.Version{}, vm, reader)
+		require.NoError(t, err)
+		require.NotNil(t, ws, "a recipient absent at block start was not credited at validation")
+		credit, ok := ws.GetBalance(recipient)
+		require.True(t, ok)
+		require.Equal(t, uint64(1), credit.Val.Uint64())
+		_, seeded := vm.LoadOriginAccount(recipient)
+		require.False(t, seeded, "a lower reader must still see the absent account as absent")
+	})
+	t.Run("destructed_in_block", func(t *testing.T) {
+		delete(reader.accounts, recipient)
+		vm := state.NewVersionMap(nil)
+		var lower state.WriteSet
+		lower.SetSelfDestruct(recipient, &state.VersionedWrite[bool]{WriteHeader: state.WriteHeader{Address: recipient, Path: state.SelfDestructPath, Version: state.Version{TxIndex: 0}}, Val: true})
+		vm.FlushVersionedWrites(&lower, true)
+		result := &execResult{TxResult: &exec.TxResult{TxOut: &state.WriteSet{}}}
+		ws, _, err := chargeSenderAtValidation(task, result, state.Version{TxIndex: 1}, vm, reader)
+		require.NoError(t, err)
+		require.Nil(t, ws, "an account destructed in this block must rerun with the frame")
+	})
 	t.Run("balance_overflow", func(t *testing.T) {
 		to := accounts.NewAccount()
 		to.Balance.SetAllOne()
