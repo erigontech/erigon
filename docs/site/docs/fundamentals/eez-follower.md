@@ -21,7 +21,7 @@ An EEZ node keeps its chain's database in `<datadir>/eez/chaindata` and its snap
   --http.api=eth,debug,eez --nodiscover --eez.sync.l1only
 ```
 
-An EEZ node runs no consensus layer, no engine API, no transaction pool and no snapshot downloader: the follower is the only source and the only driver of the chain. On rollup0 networks it takes the history below L1's finalized root from [L2 peers](#history-from-l2-peers) unless `--eez.sync.l1only` is set, as in the examples here, and serves them its blocks.
+An EEZ node runs no consensus layer, no engine API, no transaction pool and no snapshot downloader: the follower is the only source and the only driver of the chain. On rollup0 networks it takes the history below L1's finalized root from [L2 peers](#l2-peers) unless `--eez.sync.l1only` is set, as in the examples here, and serves them its blocks.
 
 ### A chain from its genesis file
 
@@ -64,13 +64,32 @@ The L1 keeps the datadir's usual layout and every component of a node: P2P, snap
 
 Erigon's execution, staged-sync and database metrics are process-wide: in this mode they mix both chains. The `eez_*` metrics below are the EEZ chain's own.
 
-### L2 peers
+### Following the sequencer
 
-On rollup0 networks the node takes L2 peers over eth/68 and eth/69 and serves them its blocks. A block reaches the chain only through the follower, never from devp2p on its own, and the node takes no transactions from its peers. Peers come from Erigon's P2P flags: `--bootnodes` with discovery, or `--staticpeers` and `--trustedpeers` with `--nodiscover`; trusted peers are dialled like static ones. EEZ networks list no bootnodes, so the node refuses to start with discovery on and neither `--bootnodes` nor `--discovery.dns`. A chain initialised from a genesis file never takes the network id, bootnodes or DNS list of the default `--chain`: its network id is its chain id unless `--networkid` is set. On rollupX networks, and for the EEZ chain of a node running beside its L1, the node stays off the P2P network whatever the flags.
+With `--eez.sequencer.rpc` the follower also takes the sequencer's latest block as its head, ahead of settlement, as long as the sequencer's chain descends from the safe block. The sequencer must serve `debug_getRawBlock`. Settlement later confirms these blocks without rebuilding them. On rollup0 networks [signed heads](#signed-heads) are the other source of the head; the two exclude each other.
 
-### History from L2 peers
+## L2 peers
 
-On rollup0 networks the follower takes the history below the root that L1's finalized block F records from its L2 peers, and derives from L1 only the settlements after F. At boot it reads F and the registry's root at F. When the local chain lacks that root, it rewinds to its own finalized block, fetches the missing blocks by hash from its peers, executing them `--sync.loop.block.limit` blocks at a time, and starts derivation at F. It waits, saying why every 30 seconds, while L1 has no finalized root or no peer serves the blocks, and never derives that history from L1. An L1 reorg below F stops the node, as does a root whose chain leaves the local finalized block ("datadir is not on L1's chain"). This mode keeps no reconcile checkpoint.
+On rollup0 networks a follower takes L2 peers. Over devp2p it fetches blocks by hash from them, the history below L1 finality and the blocks of signed heads, and serves them its own; over the signed-head overlay it receives the heads the sequencer signs. L1 stays the only trust anchor: a block from a peer reaches the chain only through the follower, as an ancestor of the root L1 finalized or of a signed head, and derivation replaces whatever L1 settles differently. RollupX networks run none of this.
+
+### Sync modes
+
+`--eez.sync.l1only` selects where boot takes the history below L1's finalized root from:
+
+| Mode | Default on | History below L1's finalized root |
+|---|---|---|
+| peers | rollup0 networks | Fetched from L2 peers; derivation starts at L1's finalized block. Set with `--eez.sync.l1only=false`. |
+| L1-only | rollupX networks, and the EEZ chain of a node running beside its L1 | Derived from L1, from the reconcile checkpoint or the registry's deploy block. Set with `--eez.sync.l1only`. |
+
+A node that must not depend on how far L1 has finalized, such as a test or devnet node, sets the mode explicitly.
+
+### Peers
+
+The node takes L2 peers over eth/68 and eth/69 and serves them its blocks. A block reaches the chain only through the follower, never from devp2p on its own, and the node takes no transactions from its peers. Peers come from Erigon's P2P flags: `--bootnodes` with discovery, or `--staticpeers` and `--trustedpeers` with `--nodiscover`; trusted peers are dialled like static ones. EEZ networks list no bootnodes, so the node refuses to start with discovery on and neither `--bootnodes` nor `--discovery.dns`. A chain initialised from a genesis file never takes the network id, bootnodes or DNS list of the default `--chain`: its network id is its chain id unless `--networkid` is set. On rollupX networks, and for the EEZ chain of a node running beside its L1, the node stays off the P2P network whatever the flags.
+
+### History at L1 finality
+
+In peers mode the follower takes the history below the root that L1's finalized block F records from its L2 peers, and derives from L1 only the settlements after F. At boot it reads F and the registry's root at F. When the local chain lacks that root, it rewinds to its own finalized block, fetches the missing blocks by hash from its peers, executing them `--sync.loop.block.limit` blocks at a time, and starts derivation at F. It waits, saying why every 30 seconds, while L1 has no finalized root or no peer serves the blocks, and never derives that history from L1. This mode keeps no reconcile checkpoint.
 
 ```bash
 ./build/bin/erigon --eez.enabled --chain=eez-devnet --datadir=/data/eez-b \
@@ -78,11 +97,55 @@ On rollup0 networks the follower takes the history below the root that L1's fina
   --nodiscover --trustedpeers=enode://<node-a>@<host>:30303
 ```
 
-`--eez.sync.l1only` derives the whole history from L1 instead. It is the default on rollupX networks, which refuse `--eez.sync.l1only=false`, and for the EEZ chain of a node running beside its L1. An L1-only boot on a rollup0 network stops with "L1 history incomplete" when L1 no longer serves a block more than 64 below its head that the scan needs, or when the scan ends without the root L1 had finalized before it.
+An L1-only boot on a rollup0 network checks the same root: it stops with "L1 history incomplete" when L1 no longer serves a block more than 64 below its head that the scan needs, or when the scan ends without the root L1 had finalized before it.
 
-### Following the sequencer
+### Signed heads
 
-With `--eez.sequencer.rpc` the follower also takes the sequencer's latest block as its head, ahead of settlement, as long as the sequencer's chain descends from the safe block. The sequencer must serve `debug_getRawBlock`. Settlement later confirms these blocks without rebuilding them.
+The sequencer signs every change of its head: an EIP-712 `SignedHead` of the rollup id, the block's number, hash and parent hash, the start time of the signing process in milliseconds (its epoch) and a counter, in the domain `EEZ Sequencer`, version `0`, of the L2 chain id and the registry. It gossips each head, with its block, on a libp2p gossipsub overlay. With `--eez.p2p.listen` and `--eez.sequencer.address` the follower joins the overlay and takes as its head the highest-version head, latest epoch first, then highest counter, among those that descend from the safe block:
+
+```bash
+./build/bin/erigon --eez.enabled --chain=eez-devnet --datadir=/data/eez-b \
+  --eez.l1.rpc=http://l1-node:8545 \
+  --bootnodes=enode://<node-a>@<host>:30303 \
+  --eez.p2p.listen=/ip4/0.0.0.0/tcp/9100 \
+  --eez.sequencer.address=<sequencer address>
+```
+
+- **Transport.** TCP with Noise and Yamux, on the topic `/eez/<L2 chain id>/<rollup id>/heads/0`. The overlay identity is the node's devp2p key; the node logs its peer id in `[eez] overlay listening`. `--eez.p2p.listen` needs a fixed port.
+- **Overlay peers.** Peers discovered over discv5 whose node record carries the overlay port, in an `eez` entry, and the chain's fork id are dialled every 5 seconds while fewer than 16 are connected. The static peers of `--eez.p2p.peers`, IP multiaddrs ending in `/p2p/<peer id>`, are dialled whenever they are not connected. A node accepts at most 64 inbound connections.
+- **Relay.** A node relays a head only after verifying it: signed by `--eez.sequencer.address` for the chain, registry and rollup, carrying its own block if any, and above the latest head of its source, the signer and epoch. It ignores a repeat, an older head and a head whose epoch is more than 10 seconds ahead of its clock, and rejects anything else, including a second head with the same version.
+- **Missing blocks** come by hash from L2 devp2p peers, at most 1,024 blocks back, each request bounded to 2 seconds, and only while a peer is connected. A head more than 1,024 blocks ahead of the local head waits for derivation. While derivation has indexed a batch above the safe block, the head holds.
+- **Retries.** A head not followed is tried again every L2 block interval. Safe and finalized stay derivation's: L1's settlement of a different block replaces the blocks of a signed head.
+
+### Refusals
+
+The node refuses to start with:
+
+- `--eez.p2p.listen` without `--eez.sequencer.address` or the reverse, and `--eez.p2p.peers` without `--eez.p2p.listen`;
+- `--eez.p2p.listen` and `--eez.sequencer.rpc` together: both set the head;
+- the overlay flags on rollupX networks, whose sequencer signs no heads, or with `--eez.chain`;
+- `--eez.sync.l1only=false` on rollupX networks or with `--eez.chain`;
+- discovery on a rollup0 network without `--bootnodes` or `--discovery.dns`;
+- a listen address that is not TCP or has port 0, and a static overlay peer given by DNS name or without `/p2p/<peer id>`.
+
+Peers mode stops the node when the root's chain leaves the local finalized block ("datadir is not on L1's chain"), when an L1 reorg drops F ("L1 reorg below the seed at L1 finality"), and when the local chain refuses the blocks its peers served ("the local chain refuses the history from L2 peers").
+
+### Status
+
+`eez_followerStatus` reports where the follower takes its history and its head from, beside how far it derived:
+
+| Field | Value |
+|---|---|
+| `l1Scanned`, `l1Finalized` | The last L1 block whose settlements are derived; the latest finalized L1 block. |
+| `cursor`, `safe`, `finalized` | The L2 block the latest settlement ended at; the safe and finalized L2 blocks. |
+| `lastSettlement` | The latest derived settlement: `l1Block`, `l1BlockHash`, `txHash`, `l2Block`. |
+| `syncMode` | `peers` or `l1_only`. |
+| `phase` | `booting`; in peers mode `waiting_for_finality` while L1 names no finalized root, `syncing` while the history comes from peers, `waiting_for_peers` while no peer serves it; then `deriving` while boot derives up to the L1 head, and `following`. |
+| `anchor` | F and the root there, as boot read them: `l1Block`, `l1BlockHash`, `root`, null when the rollup is not registered at F, and `l2Block`, null until the local chain holds the root. Null before boot reads them and on rollupX networks; in L1-only mode, also null when L1 serves no state reads or names no finalized root at boot. |
+| `peers` | Connected L2 devp2p peers, counted every 5 seconds. |
+| `overlayPeers` | Connected overlay peers; null without the overlay. |
+| `signedHeads` | The latest head of each signing source, highest version first: `signer`, `epochMs`, `counter`, `number`, `hash`. Null without the overlay. |
+| `headSource` | What moved the head last: `derivation`, `history_sync`, `signed_head` or `sequencer_rpc`. Null while nothing has since boot. |
 
 ## Flags
 
@@ -100,7 +163,10 @@ With `--eez.sequencer.rpc` the follower also takes the sequencer's latest block 
 | `--eez.l1.logchunk` | `100000` | Widest block range of one L1 log query; halved when the node refuses it. |
 | `--eez.l1.reorgdepth` | `62` | Deepest L1 reorg the follower survives. |
 | `--eez.sequencer.rpc` | | Sequencer endpoint for the unsafe head. |
-| `--eez.sync.l1only` | rule set | Derive the whole history from L1; see [History from L2 peers](#history-from-l2-peers). Unset, true on rollupX networks and beside an L1, false on rollup0 networks. |
+| `--eez.sync.l1only` | rule set | Derive the whole history from L1; see [Sync modes](#sync-modes). Unset, true on rollupX networks and beside an L1, false on rollup0 networks. |
+| `--eez.p2p.listen` | | TCP multiaddr with a fixed port on which the node joins the [signed-head overlay](#signed-heads). Requires `--eez.sequencer.address`. |
+| `--eez.p2p.peers` | | Static overlay peers, comma-separated IP multiaddrs ending in `/p2p/<peer id>`. |
+| `--eez.sequencer.address` | | Address of the sequencer, whose signed heads the overlay accepts. Requires `--eez.p2p.listen`. |
 | `--eez.l1.chainid`, `--eez.registry`, `--eez.registry.deployblock`, `--eez.rollupid`, `--eez.l1.blocktime`, `--eez.l2.blocktime` | | The `l2` section of the chain config, written by `init`. |
 
 ## Restarts and L1 reorgs
@@ -117,7 +183,7 @@ The node exits with status `3` when a settled block contradicts canonical L1: th
 
 The `eez` namespace, enabled with `--http.api=...,eez`:
 
-- `eez_followerStatus()`: the last L1 block scanned, the latest finalized L1 block, the cursor, safe and finalized EEZ blocks, and the latest settlement.
+- `eez_followerStatus()`: the last L1 block scanned, the latest finalized L1 block, the cursor, safe and finalized EEZ blocks, the latest settlement, the sync mode and boot phase, L1's finalized block and root as boot read them, the L2 and overlay peers, the tracked signed heads and the source of the head; see [Status](#status).
 - `eez_settlement(blockNumber)`: the L1 settlement that settled an EEZ block, or `null` while none has, or when it predates the follower's start or the latest finalized settlement.
 - `eez_decodeBatch(input)`: a `postAndVerifyBatch` input decoded, with the DA payload it carries.
 
@@ -127,11 +193,23 @@ On rollupX v0.1 networks, native transactions (type `0x45`) and L1 history updat
 
 ## Metrics and logs
 
-Prometheus metrics: `eez_l1_head`, `eez_l1_scanned`, `eez_l1_finalized`, `eez_l1_lag_blocks`, `eez_l2_cursor`, `eez_l2_safe`, `eez_l2_finalized`, `eez_l2_blocks_derived_total`, `eez_l1_reorgs_total`, `eez_divergences_total` and `eez_sync_seconds`.
+Prometheus metrics of derivation: `eez_l1_head`, `eez_l1_scanned`, `eez_l1_finalized`, `eez_l1_lag_blocks`, `eez_l2_cursor`, `eez_l2_safe`, `eez_l2_finalized`, `eez_l2_blocks_derived_total`, `eez_l1_reorgs_total`, `eez_divergences_total` and `eez_sync_seconds`.
+
+Of boot and [L2 peers](#l2-peers):
+
+- `eez_sync_phase{phase="..."}`: 1 for the follower's [phase](#status), 0 for the others.
+- `eez_l2_peers`: connected L2 devp2p peers, counted every 5 seconds.
+- `eez_head_adopted_total` and `eez_head_rewound_total`: moves of the head to a signed head that keep the previous head canonical, and that drop it, to an ancestor or another branch.
+- `eez_head_held_total` and `eez_head_ahead_total`: decisions on signed heads that hold the head while derivation has indexed a batch above safe, and that wait for derivation to come within 1,024 blocks.
+- `eez_head_fetch_failures_total`: fetches of the blocks of a signed head that failed.
+- `eez_head_rejected_total`: signed heads not followed, once per head and reason.
+- `eez_p2p_peers`: connected overlay peers.
+- `eez_p2p_message_received_total`, and of those `eez_p2p_message_accepted_total`, `eez_p2p_message_ignored_total` and `eez_p2p_message_rejected_total`: overlay messages from peers, by the verdict of the relay rule.
+- `eez_p2p_inbound_dropped_total`: accepted heads dropped because the follower had not taken the previous 64.
 
 Every 30 seconds the follower logs `[eez] following` with the last L1 block it scanned (`l1Scanned`), the L1 head it scans to (`l1Head`), the finalized L1 block, the safe and finalized EEZ blocks, the batches derived since the previous line and the blocks they carry. Each derived batch also logs `[eez] batch derived` with its L1 block, transaction and block range.
 
-Log lines that mark derivation events carry an `event` field named like the reference client's, for example `eez.deriver.l1.reorg.retreated`, `eez.deriver.state.diverged_post` or `eez.l1_watcher.reorg.detected`.
+Log lines that mark derivation events carry an `event` field named like the reference client's, for example `eez.deriver.l1.reorg.retreated`, `eez.deriver.state.diverged_post` or `eez.l1_watcher.reorg.detected`. Boot logs `eez.node.sync.mode`, `eez.node.sync.waiting`, `eez.node.sync.waiting_for_peers`, `eez.node.sync.rewound` and `eez.node.sync.seeded`; the signed-head fork choice `eez.node.follower.head.advanced`, `.rejected`, `.held` and `.ahead`; the overlay `eez.p2p.listening`, and every 5 seconds at most one `eez.p2p.message.rejects` and one `eez.p2p.inbound.full` warning with the count since the previous one.
 
 ## The `eez` tool
 
