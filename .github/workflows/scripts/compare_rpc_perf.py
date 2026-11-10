@@ -8,6 +8,8 @@ p50, p95 and max latency of each client.
 p50, p90 and p95 are the median over the repetitions, max is the worst one.
 HTTP is the share of requests answered with HTTP 200, RPC the share of requests
 answered with a result and no JSON-RPC error; both are the worst over the repetitions.
+A test label listed in any client's ``unsynced.txt`` ran without a sync between the clients
+and is marked as not comparable.
 """
 import argparse
 import glob
@@ -41,6 +43,14 @@ def load_results(root):
     return results
 
 
+def load_unsynced(root):
+    labels = set()
+    for path in glob.glob(os.path.join(root, "**", "unsynced.txt"), recursive=True):
+        with open(path, encoding="utf-8") as fh:
+            labels.update(line.split()[0] for line in fh if line.strip())
+    return labels
+
+
 def client_rank(client):
     return CLIENT_ORDER.index(client) if client in CLIENT_ORDER else len(CLIENT_ORDER)
 
@@ -68,7 +78,7 @@ def latency_cell(step, best, best_rpc, percentile):
     return f"{step[percentile]:.2f}" + ("*" if step[percentile] == best else " ")
 
 
-def render_overview(results, percentile):
+def render_overview(results, unsynced, percentile):
     """Return a plain-text code block, readable in the GitHub summary and pasteable into Discord.
 
     Only the Erigon status at the end of each row is not ASCII: emoji and symbols have no fixed
@@ -84,7 +94,7 @@ def render_overview(results, percentile):
             best = min(ok.values()) if ok else None
             next_best = min((v for c, v in ok.items() if c != "erigon"), default=None)
             cells = [latency_cell(steps.get(c), best, best_rpc, percentile) for c in clients]
-            status = erigon_status(steps.get("erigon"), best, next_best, best_rpc, percentile)
+            status = "⚠️" if label in unsynced else erigon_status(steps.get("erigon"), best, next_best, best_rpc, percentile)
             rows.append((status, [label, qps] + cells))
     header = ["Test", "QPS"] + [c + " " for c in clients]
     widths = [max(len(r[i]) for r in [header] + [cells for _, cells in rows]) for i in range(len(header))]
@@ -96,7 +106,8 @@ def render_overview(results, percentile):
              f"{percentile} latency in ms, lower is better. * fastest, - no result,",
              "err HTTP errors or RPC errors > 1% above the best client.",
              f"Erigon status on {percentile}, at the end of the row: 🟢🟢 fastest by >= 1.3x, 🟢 fastest,",
-             "🟡 < 1.3x the fastest, 🔴 >= 1.3x or errors, ⚪ no Erigon result.",
+             "🟡 < 1.3x the fastest, 🔴 >= 1.3x or errors, ⚪ no Erigon result,",
+             "⚠️ clients not synchronized, latencies not comparable.",
              "",
              line(header)]
     lines += [f"{line(cells)} {status}" for status, cells in rows]
@@ -104,12 +115,13 @@ def render_overview(results, percentile):
     return "\n".join(lines)
 
 
-def render(results):
+def render(results, unsynced):
     lines = []
     for label in sorted(results):
         clients = sorted(results[label], key=lambda c: (client_rank(c), c))
         steps = sorted({q for c in clients for q in results[label][c]}, key=float)
-        lines += [f"<details><summary>{label}</summary>", "",
+        title = f"⚠️ {label} (clients not synchronized)" if label in unsynced else label
+        lines += [f"<details><summary>{title}</summary>", "",
                   "| QPS | Client | p50 (ms) | p95 (ms) | max (ms) | HTTP | RPC |",
                   "|---:|---|---:|---:|---:|---:|---:|"]
         for qps in steps:
@@ -127,11 +139,12 @@ def main():
     parser.add_argument("--results-dir", required=True)
     args = parser.parse_args()
     results = load_results(args.results_dir)
+    unsynced = load_unsynced(args.results_dir)
     print("## RPC Performance Comparison (latest block)\n")
     steps = [s for clients in results.values() for qps in clients.values() for s in qps.values()]
-    overviews = [render_overview(results, percentile) for percentile in ("p50", "p90", "p95", "max")
+    overviews = [render_overview(results, unsynced, percentile) for percentile in ("p50", "p90", "p95", "max")
                  if all(percentile in s for s in steps)]
-    print("\n".join(overviews + [render(results)]) if results else "No results found.")
+    print("\n".join(overviews + [render(results, unsynced)]) if results else "No results found.")
     return 0
 
 
