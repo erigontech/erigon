@@ -1122,6 +1122,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 					pe.logger.Info("[np-phase] execloop", "blk", blockResult.BlockNum,
 						"npCpAbortNs", cpAbortNs, "npCpCancelNs", cpCancelNs, "npCpPauseNs", cpPauseNs,
 						"npDepTailNs", blockExecutor.probe.depTailNs.Load(),
+						"npPeakG", peakGoroutines.Swap(0), "npPeakStackBytes", peakStackBytes.Swap(0),
 						"wait", npWait, "process", npProc,
 						"busy", busy, "workers", pe.workerCount, "occ", fmt.Sprintf("%.2f", occ),
 						"tasks", len(blockExecutor.tasks), "exec", blockExecutor.cntExec,
@@ -1644,6 +1645,7 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 	}
 
 	pe.pool = newTaskPool(pe, pe.execWorkers)
+	startPeakSampler(workersCtx)
 	pe.execLoopGroup.Go(func() error {
 		pe.resetWorkers(pe.rs)
 		pe.results = make(chan *exec.TxResult, len(pe.execWorkers)*8)
