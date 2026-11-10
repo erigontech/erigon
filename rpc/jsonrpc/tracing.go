@@ -351,7 +351,8 @@ func prepareTraceCallState[I int | hexutil.Uint](ctx context.Context, api *Debug
 			result.reader, err = rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, tx, blockNumber, isLatest, -1, api._txNumReader)
 		} else {
 			// User transaction zero reads just after the initial system transaction.
-			result.reader = state.NewHistoryReaderV3(tx, minTxNum+uint64(index)+1)
+			txNum := minTxNum + uint64(index) + 1
+			result.reader, err = rpchelper.CreateHistoryStateReaderAtTxNum(ctx, tx, blockNumber, txNum, api._txNumReader)
 		}
 		if err != nil {
 			return result, err

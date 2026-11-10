@@ -42,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/order"
+	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -2280,6 +2281,57 @@ func TestTraceCallTxIndexSelectsPreStateAtHead(t *testing.T) {
 	require.NoError(t, m.InsertChain(chainPack.Slice(1, 2)))
 	t.Run("older/number", func(t *testing.T) { check(t, rpc.BlockNumberOrHashWithNumber(1)) })
 	t.Run("older/hash", func(t *testing.T) { check(t, rpc.BlockNumberOrHashWithHash(blockHash, true)) })
+}
+
+func TestIndexedTraceRejectsPrunedHistoryAtForkchoiceHead(t *testing.T) {
+	apis, chainInfo := setupPhysicallyPrunedHistory(t, prunedHistoryConfig{mode: prune.Mode{
+		Initialised: true, History: prunedHistoryDistance, Blocks: prune.KeepAllBlocksPruneMode,
+	}})
+	ctx := t.Context()
+	require.NoError(t, apis.rwDB.Update(ctx, func(tx kv.RwTx) error {
+		rawdb.WriteForkchoiceHead(tx, chainInfo.old.hash)
+		return nil
+	}))
+	tx, err := apis.debug.db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	head, err := rpchelper.GetLatestBlockNumber(tx)
+	require.NoError(t, err)
+	require.Equal(t, chainInfo.old.num, head)
+	require.Less(t, head, chainInfo.head)
+	require.NoError(t, rpchelper.CheckBlockExecuted(tx, chainInfo.head))
+	_, err = rpchelper.CreateHistoryStateReader(ctx, tx, head, 0, apis.debug._txNumReader)
+	require.ErrorIs(t, err, state.ErrPruned)
+
+	for _, selector := range []struct {
+		name  string
+		block rpc.BlockNumberOrHash
+	}{
+		{"latest", rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)},
+		{"number", rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(head))},
+		{"hash", rpc.BlockNumberOrHashWithHash(chainInfo.old.hash, true)},
+	} {
+		for _, endpoint := range []string{"traceCall", "traceCallMany"} {
+			t.Run(selector.name+"/"+endpoint, func(t *testing.T) {
+				bundles, simulate := pruneGatingBundle(head)
+				simulate.BlockNumber = selector.block
+				simulate.TransactionIndex = new(0)
+				config := &tracersConfig.TraceConfig{TxIndex: new(hexutil.Uint(0)), Tracer: new("callTracer")}
+				var output bytes.Buffer
+				stream := jsonstream.New(&output)
+				var err error
+				if endpoint == "traceCall" {
+					err = apis.debug.TraceCall(ctx, bundles[0].Transactions[0], &selector.block, config, stream)
+				} else {
+					err = apis.debug.TraceCallMany(ctx, bundles, simulate, config, stream)
+				}
+				require.ErrorIs(t, err, state.ErrPruned)
+				require.ErrorContains(t, err, fmt.Sprintf("requested block %d", head))
+				require.Empty(t, output.Bytes())
+				require.Empty(t, stream.Buffer(), "history must be checked before trace output starts")
+			})
+		}
+	}
 }
 
 type recordingCodeStore map[string]int
