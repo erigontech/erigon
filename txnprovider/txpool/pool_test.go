@@ -657,6 +657,7 @@ func newAmsterdamPoolWithPendingSelfTransfer(t *testing.T, ctx context.Context, 
 		WithFeeCalculator(nil),
 	)
 	require.NoError(t, err)
+	pool.started.Store(true)
 
 	account := accounts.Account{
 		Balance:  *uint256.NewInt(1 * common.Ether),
@@ -3576,6 +3577,7 @@ func providedNonces(t *testing.T, ctx context.Context, pool *TxPool) []uint64 {
 // local.
 func TestProvideTxnsKeepsSenderNonceOrderAfterUnwind(t *testing.T) {
 	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+	pool.started.Store(true)
 
 	block := func(height byte, nonce uint64, direction remoteproto.Direction) *remoteproto.StateChangeBatch {
 		account := accounts.Account{Nonce: nonce, Balance: *uint256.NewInt(common.Ether), CodeHash: accounts.EmptyCodeHash}

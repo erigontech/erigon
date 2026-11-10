@@ -3657,7 +3657,11 @@ func (a *ApiHandler) findBestAttestationsForBlockProduction(
 		}
 	}
 
-	attestationCandidates := []attestationCandidate{}
+	candidateCount := 0
+	for _, atts := range hashToAtts {
+		candidateCount += len(atts)
+	}
+	attestationCandidates := make([]attestationCandidate, 0, candidateCount)
 	for _, atts := range hashToAtts {
 		for _, att := range atts {
 			candidate, err := newAttestationCandidate(s, att)
