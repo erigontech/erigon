@@ -132,6 +132,7 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 	}
 	defer ibs.Close()
 	transactions.VersionedCallState(ibs)
+	api.shareCodeByHash(ibs)
 
 	var precompiles vm.PrecompiledContracts
 	if config.BlockOverrides != nil {
@@ -180,13 +181,16 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 			txnGasUsage, traceErr := transactions.TraceTx(ctx, engine, txn, msg, blockCtx, txCtx, &block.HeaderNoCopy().Number, block.Hash(), txnIndex, ibs, config, chainConfig, s, api.evmCallTimeout, precompiles)
 			gasUsed.BlockExecution += txnGasUsage.BlockExecutionGasUsed
 			gasUsed.BlockState += txnGasUsage.BlockStateGasUsed
-			if traceErr != nil {
-				return traceErr
-			}
-			return ethapi.FinalizeCallTx(ibs, rules)
+			return traceErr
 		})
 
 		stream.WriteObjectEnd()
+
+		// Trace output can fail after execution. Finalize even then so the next
+		// transaction starts with its own storage originals, journal and refunds.
+		if err := ethapi.FinalizeCallTx(ibs, rules); err != nil {
+			return err
+		}
 
 		if err := stream.Flush(); err != nil { // Client can use result of 1 tx-trace
 			return err
@@ -265,6 +269,7 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 	}
 	defer ibs.Close()
 	transactions.VersionedCallState(ibs)
+	api.shareCodeByHash(ibs)
 
 	// The state is built from history at txnIndex, so the earlier transactions of
 	// the block never ran and the log counter they left has to be handed in.
@@ -333,7 +338,7 @@ func prepareTraceCallState[I int | hexutil.Uint](ctx context.Context, api *Debug
 				return result, err
 			}
 		}
-		postState := txIndex == nil || index == -1 || isLatest
+		postState := txIndex == nil || index == -1
 		if postState {
 			err = api.checkPruneState(ctx, tx, blockNumber)
 		} else {

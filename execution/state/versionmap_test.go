@@ -4,7 +4,10 @@ import (
 	"fmt"
 	"math/big"
 	"math/rand"
+	"reflect"
 	"runtime"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -14,6 +17,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
@@ -589,7 +593,7 @@ func TestNoBump_ValuePathKeepsVersionUnlessSelfDestructed(t *testing.T) {
 		require.NotNil(t, e)
 		c, ok := e.Balance.Get(5)
 		require.True(t, ok, "a balance cell exists at txIndex 5")
-		return c.incarnation
+		return c.loadInc()
 	}
 
 	t.Run("fresh create equal-value re-exec keeps the balance cell version", func(t *testing.T) {
@@ -633,7 +637,7 @@ func TestNoBump_CreateAccountMarker(t *testing.T) {
 	balCellInc := func(vm *VersionMap, addr accounts.Address) Incarnation {
 		c, ok := vm.load(addr).Balance.Get(5)
 		require.True(t, ok)
-		return c.incarnation
+		return c.loadInc()
 	}
 
 	t.Run("fresh address keeps the balance version", func(t *testing.T) {
@@ -676,14 +680,14 @@ func TestNoBump_CompleteFlushKeepsEqualValueVersion(t *testing.T) {
 	flush(vm, 0, 100, false)
 	flush(vm, 1, 100, false)
 	flush(vm, 1, 100, true)
-	require.Equal(t, Incarnation(0), cell(vm).incarnation, "an equal value at commit keeps the version")
+	require.Equal(t, Incarnation(0), cell(vm).loadInc(), "an equal value at commit keeps the version")
 	require.Equal(t, FlagDone, cell(vm).loadFlag())
 
 	vm = NewVersionMap(nil)
 	flush(vm, 0, 100, false)
 	flush(vm, 1, 100, false)
 	flush(vm, 1, 101, true)
-	require.Equal(t, Incarnation(1), cell(vm).incarnation, "a changed value at commit re-versions")
+	require.Equal(t, Incarnation(1), cell(vm).loadInc(), "a changed value at commit re-versions")
 }
 
 // TestOriginStorageIsWriteOnce pins the other half of the structural guarantee: the
@@ -805,6 +809,51 @@ func TestFlushEstimate_ValidTxNotMarkedEstimate(t *testing.T) {
 	require.Equal(t, MVReadResultDependency, res2.Status(),
 		"invalid TX flush should produce Estimate entries")
 	require.Equal(t, 7, res2.DepIdx())
+}
+
+func TestFlushEstimateRacingMarkWritesCompleteKeepsDone(t *testing.T) {
+	prevAssert := dbg.AssertEnabled
+	dbg.AssertEnabled = false
+	t.Cleanup(func() { dbg.AssertEnabled = prevAssert })
+
+	addr := getAddress(45)
+	vm := NewVersionMap(nil)
+	writes := newWriteSet(
+		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: Version{TxIndex: 5, Incarnation: 1}}, Val: *uint256.NewInt(100)},
+	)
+	rerun := newWriteSet(cloneVW(writes.balance[addr]))
+	vm.FlushVersionedWrites(writes, false)
+	vm.MarkWritesValidated(writes, nil)
+	cell := writes.balance[addr].cell
+	const iterations = 10000
+	downgraded := 0
+	for range iterations {
+		cell.setState(1, FlagValidated)
+		var ready atomic.Int32
+		var workers sync.WaitGroup
+		workers.Go(func() {
+			ready.Add(1)
+			for ready.Load() != 2 {
+				runtime.Gosched()
+			}
+			for range 16 {
+				vm.FlushVersionedWrites(rerun, false)
+			}
+		})
+		workers.Go(func() {
+			ready.Add(1)
+			for ready.Load() != 2 {
+				runtime.Gosched()
+			}
+			runtime.Gosched()
+			vm.MarkWritesComplete(writes)
+		})
+		workers.Wait()
+		if cell.loadFlag() != FlagDone {
+			downgraded++
+		}
+	}
+	require.Zerof(t, downgraded, "%d of %d iterations downgraded Done", downgraded, iterations)
 }
 
 func TestMarkWritesCompleteRunsUnderReadersOfTheEntry(t *testing.T) {
@@ -2158,8 +2207,8 @@ func TestFlushNetZeroRerunInvalidatesReaderOfEarlierRun(t *testing.T) {
 	require.Equal(t, *uint256.NewInt(42), val)
 }
 
-// Readers combine a destruct's flag with other cells' flags, so marking an entry with destruct
-// cells must wait for its readers.
+// Readers combine a true destruct's flag with other cells' flags, so marking an entry with one
+// must wait for its readers.
 func TestMarkWritesCompleteWaitsForReadersOfADestructEntry(t *testing.T) {
 	t.Parallel()
 
@@ -2196,4 +2245,309 @@ func TestMarkWritesCompleteWaitsForReadersOfADestructEntry(t *testing.T) {
 	<-done
 	_, res, _ := readFor(vm, addr, BalancePath, accounts.NilKey, 10)
 	require.Equal(t, MVReadResultDone, res.Status())
+}
+
+// A created account carries only SelfDestruct=false markers, which no reader combines with other
+// flags, so marking it must not wait for its readers.
+func TestMarkWritesCompleteRunsUnderReadersOfACreatedEntry(t *testing.T) {
+	t.Parallel()
+
+	addr := getAddress(53)
+	vm := NewVersionMap(nil)
+	writes := newWriteSet(
+		&VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Key: accounts.NilKey, Version: Version{TxIndex: 3, Incarnation: 1}}, Val: false},
+		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Key: accounts.NilKey, Version: Version{TxIndex: 3, Incarnation: 1}}, Val: *uint256.NewInt(5)},
+	)
+	vm.FlushVersionedWrites(writes, false)
+
+	e := vm.load(addr)
+	e.mu.RLock()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		vm.MarkWritesComplete(writes)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		e.mu.RUnlock()
+		<-done
+		t.Fatal("MarkWritesComplete waited for a reader of a created entry")
+	}
+	e.mu.RUnlock()
+	_, res, _ := readFor(vm, addr, SelfDestructPath, accounts.NilKey, 10)
+	require.Equal(t, MVReadResultDone, res.Status())
+	_, res, _ = readFor(vm, addr, BalancePath, accounts.NilKey, 10)
+	require.Equal(t, MVReadResultDone, res.Status())
+}
+
+// A revived account carries an earlier destruct, so marking its creation marker must wait for readers.
+func TestMarkWritesCompleteWaitsForReadersOfARevivedEntry(t *testing.T) {
+	t.Parallel()
+
+	addr := getAddress(54)
+	vm := NewVersionMap(nil)
+	vm.FlushVersionedWrites(newWriteSet(&VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Key: accounts.NilKey, Version: Version{TxIndex: 1, Incarnation: 1}}, Val: true}), true)
+	writes := newWriteSet(
+		&VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Key: accounts.NilKey, Version: Version{TxIndex: 3, Incarnation: 1}}, Val: false},
+		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Key: accounts.NilKey, Version: Version{TxIndex: 3, Incarnation: 1}}, Val: *uint256.NewInt(5)},
+	)
+	vm.FlushVersionedWrites(writes, false)
+
+	e := vm.load(addr)
+	e.mu.RLock()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		vm.MarkWritesComplete(writes)
+	}()
+	for {
+		select {
+		case <-done:
+			e.mu.RUnlock()
+			t.Fatal("MarkWritesComplete marked a revived entry under a reader")
+		default:
+		}
+		if !e.mu.TryRLock() {
+			break
+		}
+		e.mu.RUnlock()
+		runtime.Gosched()
+	}
+	e.mu.RUnlock()
+	<-done
+}
+
+// A created account that is then destroyed in the block holds a false marker below the true
+// destruct; marking the destruct must still wait for readers.
+func TestMarkWritesCompleteWaitsForReadersOfACreatedThenDestroyedEntry(t *testing.T) {
+	t.Parallel()
+
+	addr := getAddress(55)
+	vm := NewVersionMap(nil)
+	vm.FlushVersionedWrites(newWriteSet(&VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Key: accounts.NilKey, Version: Version{TxIndex: 1, Incarnation: 1}}, Val: false}), true)
+	writes := newWriteSet(
+		&VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Key: accounts.NilKey, Version: Version{TxIndex: 3, Incarnation: 1}}, Val: true},
+		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Key: accounts.NilKey, Version: Version{TxIndex: 3, Incarnation: 1}}, Val: uint256.Int{}},
+	)
+	vm.FlushVersionedWrites(writes, false)
+
+	e := vm.load(addr)
+	e.mu.RLock()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		vm.MarkWritesComplete(writes)
+	}()
+	for {
+		select {
+		case <-done:
+			e.mu.RUnlock()
+			t.Fatal("MarkWritesComplete marked a destroyed entry under a reader")
+		default:
+		}
+		if !e.mu.TryRLock() {
+			break
+		}
+		e.mu.RUnlock()
+		runtime.Gosched()
+	}
+	e.mu.RUnlock()
+	<-done
+}
+
+// An account's Root is derived by commitment, not part of the versioned value, so completing
+// an Address cell with an account that differs only in Root is not a one-value-per-version violation.
+func TestOneValuePerVersion_AddressCellIgnoresRoot(t *testing.T) {
+	defer func(prev bool) { dbg.AssertEnabled = prev }(dbg.AssertEnabled)
+	dbg.AssertEnabled = true
+
+	addr := getAddress(57)
+	vm := NewVersionMap(nil)
+	ver := Version{TxIndex: 5, Incarnation: 1}
+
+	published := newWriteSet(&VersionedWrite[*accounts.Account]{
+		WriteHeader: WriteHeader{Address: addr, Path: AddressPath, Key: accounts.NilKey, Version: ver},
+		Val:         &accounts.Account{Balance: *uint256.NewInt(100), CodeHash: accounts.EmptyCodeHash, Root: empty.RootHash},
+	})
+	vm.FlushVersionedWrites(published, false)
+
+	zeroRoot := newWriteSet(&VersionedWrite[*accounts.Account]{
+		WriteHeader: WriteHeader{Address: addr, Path: AddressPath, Key: accounts.NilKey, Version: ver},
+		Val:         &accounts.Account{Balance: *uint256.NewInt(100), CodeHash: accounts.EmptyCodeHash},
+	})
+	require.NotPanics(t, func() { vm.MarkWritesComplete(zeroRoot) })
+}
+
+// A panic inside a flush (here the Done->Estimate assert) must not leave the account's lock held:
+// the self-loop worker recovers it, and every later reader of the account would block forever.
+func TestFlushVersionedWritesPanicReleasesAccountLock(t *testing.T) {
+	prev := dbg.AssertEnabled
+	dbg.AssertEnabled = true
+	t.Cleanup(func() { dbg.AssertEnabled = prev })
+
+	vm := NewVersionMap(nil)
+	addr := accounts.InternAddress(common.Address{0xab})
+	ws := &WriteSet{}
+	ws.SetSelfDestruct(addr, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: Version{TxIndex: 0}}, Val: true})
+	vm.FlushVersionedWrites(ws, true)
+	require.Panics(t, func() { vm.FlushVersionedWrites(ws, false) }, "a Done cell downgraded to Estimate trips the assert")
+
+	read := make(chan struct{})
+	go func() {
+		vm.ReadSelfDestruct(addr, 1)
+		close(read)
+	}()
+	select {
+	case <-read:
+	case <-time.After(5 * time.Second):
+		t.Fatal("a read after the recovered panic blocks on the account lock")
+	}
+}
+
+// TestReadResultFitsInRegisters pins ReadResult to at most 4 fields: the compiler keeps a struct in
+// registers only up to that size, and every version-map read returns one.
+func TestReadResultFitsInRegisters(t *testing.T) {
+	require.LessOrEqual(t, reflect.TypeFor[ReadResult]().NumField(), 4)
+}
+
+// A flush that panics must release the account lock, or the account's readers block forever
+// after the executor recovers the panic.
+func TestFlushVersionedWrites_PanicReleasesTheAccountLock(t *testing.T) {
+	t.Parallel()
+
+	addr := getAddress(45)
+	vm := NewVersionMap(nil)
+	balanceWrite := func(incarnation Incarnation, val uint64) *WriteSet {
+		return newWriteSet(
+			&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Key: accounts.NilKey, Version: Version{TxIndex: 5, Incarnation: incarnation}}, Val: *uint256.NewInt(val)},
+		)
+	}
+	vm.FlushVersionedWrites(balanceWrite(2, 100), false)
+
+	require.Panics(t, func() { vm.FlushVersionedWrites(balanceWrite(1, 42), false) })
+	e := vm.load(addr)
+	require.True(t, e.mu.TryLock(), "the account lock is still held after the panic")
+	e.mu.Unlock()
+}
+
+func balanceWrite(addr accounts.Address, v Version, val uint64) *WriteSet {
+	return newWriteSet(&VersionedWrite[uint256.Int]{
+		WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Key: accounts.NilKey, Version: v},
+		Val:         *uint256.NewInt(val),
+	})
+}
+
+func balanceFlag(t *testing.T, vm *VersionMap, addr accounts.Address, txIdx int) statusFlag {
+	t.Helper()
+	c, ok := vm.load(addr).Balance.Get(txIdx)
+	require.True(t, ok)
+	return c.loadFlag()
+}
+
+func TestMarkWritesValidatedDoesNotWaitForTheEntryLock(t *testing.T) {
+	t.Parallel()
+	vm := NewVersionMap(nil)
+	addr := accounts.InternAddress(common.HexToAddress("0x10"))
+	ws := flushPath(vm, addr, 3, BalancePath)
+	e := vm.load(addr)
+	e.mu.Lock()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		vm.MarkWritesValidated(ws, nil)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		e.mu.Unlock()
+		<-done
+		t.Fatal("the mark waited for the entry lock")
+	}
+	e.mu.Unlock()
+	require.Equal(t, FlagValidated, balanceFlag(t, vm, addr, 3))
+}
+
+func TestMarkWritesValidatedLocksADestructedAccount(t *testing.T) {
+	t.Parallel()
+	vm := NewVersionMap(nil)
+	addr := accounts.InternAddress(common.HexToAddress("0x11"))
+	flushPath(vm, addr, 1, SelfDestructPath)
+	ws := flushPath(vm, addr, 3, BalancePath)
+	e := vm.load(addr)
+	e.mu.RLock()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		vm.MarkWritesValidated(ws, nil)
+	}()
+	select {
+	case <-done:
+		e.mu.RUnlock()
+		t.Fatal("a destructed account was marked while a reader held its lock")
+	case <-time.After(50 * time.Millisecond):
+	}
+	e.mu.RUnlock()
+	<-done
+	require.Equal(t, FlagValidated, balanceFlag(t, vm, addr, 3))
+}
+
+func TestMarkWritesValidatedPanicsOnANewerIncarnation(t *testing.T) {
+	t.Parallel()
+	vm := NewVersionMap(nil)
+	addr := accounts.InternAddress(common.HexToAddress("0x12"))
+	stale := balanceWrite(addr, Version{TxIndex: 3}, 1)
+	vm.FlushVersionedWrites(stale, false)
+	vm.FlushVersionedWrites(balanceWrite(addr, Version{TxIndex: 3, Incarnation: 1}, 2), false)
+	require.Panics(t, func() { vm.MarkWritesValidated(stale, nil) })
+	require.Equal(t, FlagEstimate, balanceFlag(t, vm, addr, 3))
+}
+
+func TestMarkWritesMarksAWriteSetMergedBeforeItsFlush(t *testing.T) {
+	t.Parallel()
+	for name, tc := range map[string]struct {
+		mark func(*VersionMap, *WriteSet)
+		want statusFlag
+	}{
+		"validated": {func(vm *VersionMap, ws *WriteSet) { vm.MarkWritesValidated(ws, nil) }, FlagValidated},
+		"complete":  {func(vm *VersionMap, ws *WriteSet) { vm.MarkWritesComplete(ws) }, FlagDone},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			vm := NewVersionMap(nil)
+			a := accounts.InternAddress(common.HexToAddress("0x13"))
+			b := accounts.InternAddress(common.HexToAddress("0x14"))
+			first, second := balanceWrite(a, Version{TxIndex: 3}, 1), balanceWrite(b, Version{TxIndex: 3}, 2)
+			merged := first.Merge(second)
+			vm.FlushVersionedWrites(first, false)
+			vm.FlushVersionedWrites(second, false)
+			tc.mark(vm, merged)
+			require.Equal(t, tc.want, balanceFlag(t, vm, a, 3))
+			require.Equal(t, tc.want, balanceFlag(t, vm, b, 3))
+		})
+	}
+}
+
+func TestMarkWritesValidatedPanicsOnACellRecreatedAtANewerIncarnation(t *testing.T) {
+	t.Parallel()
+	vm := NewVersionMap(nil)
+	addr := accounts.InternAddress(common.HexToAddress("0x15"))
+	stale := balanceWrite(addr, Version{TxIndex: 3}, 1)
+	vm.FlushVersionedWrites(stale, false)
+	vm.Delete(addr, BalancePath, accounts.NilKey, 3, true)
+	vm.FlushVersionedWrites(balanceWrite(addr, Version{TxIndex: 3, Incarnation: 1}, 2), false)
+	require.Panics(t, func() { vm.MarkWritesValidated(stale, nil) })
+	require.Equal(t, FlagEstimate, balanceFlag(t, vm, addr, 3))
+}
+
+func TestMarkWritesValidatedMarksACellRecreatedAtTheSameIncarnation(t *testing.T) {
+	t.Parallel()
+	vm := NewVersionMap(nil)
+	addr := accounts.InternAddress(common.HexToAddress("0x16"))
+	first := balanceWrite(addr, Version{TxIndex: 3}, 1)
+	vm.FlushVersionedWrites(first, false)
+	vm.DeleteAll(addr, 3)
+	vm.FlushVersionedWrites(balanceWrite(addr, Version{TxIndex: 3}, 1), false)
+	vm.MarkWritesValidated(first, nil)
+	require.Equal(t, FlagValidated, balanceFlag(t, vm, addr, 3))
 }

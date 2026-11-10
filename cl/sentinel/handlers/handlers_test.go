@@ -27,8 +27,19 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/sentinel/communication"
 )
+
+func TestConsumeRateLimitRejectsNegativeCost(t *testing.T) {
+	c := &ConsensusHandlers{rateLimiter: newPeerRateLimiter()}
+	stream := newHandlerTestStream(t, communication.PingProtocolV1, &cltypes.Ping{})
+	require.True(t, c.consumeRateLimit(stream, 0))
+	require.False(t, c.consumeRateLimit(stream, -1))
+	code, err := stream.response.ReadByte()
+	require.NoError(t, err)
+	require.Equal(t, byte(InvalidRequestPrefix), code)
+}
 
 type remotePeerConn struct {
 	network.Conn

@@ -2260,6 +2260,70 @@ func TestGasPrice_CachedRequestSkipsCanonicalScan(t *testing.T) {
 		"a request served from the tip cache must not scan the canonical table")
 }
 
+type countTemporalBeginsDB struct {
+	kv.TemporalRoDB
+	begins *atomic.Int64
+}
+
+func (db *countTemporalBeginsDB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
+	db.begins.Add(1)
+	return db.TemporalRoDB.BeginTemporalRo(ctx) //nolint:gocritic
+}
+
+func (db *countTemporalBeginsDB) BeginRo(ctx context.Context) (kv.Tx, error) {
+	db.begins.Add(1)
+	return db.TemporalRoDB.BeginRo(ctx) //nolint:gocritic
+}
+
+func (db *countTemporalBeginsDB) InternalDB() kv.RwDB {
+	return db.TemporalRoDB.(interface{ InternalDB() kv.RwDB }).InternalDB()
+}
+
+// TestGasPrice_CachedRequestOpensNoTemporalTx pins that a request the tip cache
+// answers reads the head markers on a plain db tx: opening a temporal tx pins
+// every state and block file, which dominates the cost of a cached answer.
+func TestGasPrice_CachedRequestOpensNoTemporalTx(t *testing.T) {
+	t.Parallel()
+	h := newOverlayAheadHarness(t, false)
+	var begins atomic.Int64
+	api := newEthApiForTest(h.base, &countTemporalBeginsDB{TemporalRoDB: h.m.DB, begins: &begins}, nil, nil)
+
+	_, err := api.GasPrice(h.m.Ctx)
+	require.NoError(t, err)
+	cold := begins.Load()
+
+	_, err = api.GasPrice(h.m.Ctx)
+	require.NoError(t, err)
+	_, err = api.MaxPriorityFeePerGas(h.m.Ctx)
+	require.NoError(t, err)
+	require.Equal(t, cold, begins.Load(),
+		"a request served from the tip cache must not open a temporal tx")
+}
+
+// TestGasPrice_OverlayHeadInvalidatesCachedTip pins that the cache check sees
+// the published overlay: a tip cached at the committed head must not answer
+// once an overlay publishes a newer head.
+func TestGasPrice_OverlayHeadInvalidatesCachedTip(t *testing.T) {
+	t.Parallel()
+	h := newOverlayAheadHarness(t, false)
+	api := newEthApiForTest(h.base, h.m.DB, nil, nil)
+	h.events.PublishOverlay(nil)
+
+	committed, err := api.GasPrice(h.m.Ctx)
+	require.NoError(t, err)
+
+	publishOverlayHead(t, h, h.overlayHeader)
+	got, err := api.GasPrice(h.m.Ctx)
+	require.NoError(t, err)
+	tip, err := api.MaxPriorityFeePerGas(h.m.Ctx)
+	require.NoError(t, err)
+
+	want := new(big.Int).Add(tip.ToInt(), h.overlayHeader.BaseFee.ToBig())
+	require.NotEqual(t, committed.ToInt(), want)
+	require.Equal(t, want, got.ToInt(),
+		"the price must come from the overlay head, not the tip cached at the committed head")
+}
+
 // TestBeginTemporalRoWithOverlay_ChurnPinsNoOverlay pins that a capture which never
 // stabilizes ends on an explicit no-overlay pin. Serving the last capture instead
 // would layer an overlay generation over a database snapshot the helper just failed

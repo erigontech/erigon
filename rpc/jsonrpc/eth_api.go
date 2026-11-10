@@ -209,6 +209,16 @@ func headerHeapSize(h *types.Header) int64 {
 	return int64(h.EncodingSize()) + int64(unsafe.Sizeof(types.Header{}))
 }
 
+// shareCodeByHash lets a replay read committed code from the node's code store. A store keyed
+// by codeHash cannot mix snapshots: the hash itself comes from the replay's own tx.
+func (api *BaseAPI) shareCodeByHash(ibs *state.IntraBlockState) {
+	if src, ok := api.stateCache.(interface{ CodeByHash() state.CodeByHash }); ok {
+		if store := src.CodeByHash(); store != nil {
+			ibs.SetCodeByHash(store)
+		}
+	}
+}
+
 func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader dbservices.FullBlockReader, engine rules.Engine, conf *rpccfg.BaseApiConfig) *BaseAPI {
 	if conf == nil {
 		conf = &rpccfg.BaseApiConfig{}

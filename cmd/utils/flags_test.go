@@ -31,6 +31,7 @@ import (
 	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/mmap"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
@@ -319,8 +320,14 @@ func TestExecPerfFlags_OverrideDbg(t *testing.T) {
 	t.Run("no-merge and no-prune set to true", func(t *testing.T) {
 		dbg.SetNoMerge(false)
 		dbg.SetNoPrune(false)
-		run("--exec.no-merge=true", "--exec.no-prune=true")
+		run("--exec.no-merge=true", "--debug.exec.no-prune=true")
 		require.True(t, dbg.NoMerge())
+		require.True(t, dbg.NoPrune())
+	})
+
+	t.Run("deprecated exec.no-prune alias still sets NoPrune", func(t *testing.T) {
+		dbg.SetNoPrune(false)
+		run("--exec.no-prune=true")
 		require.True(t, dbg.NoPrune())
 	})
 
@@ -391,6 +398,31 @@ func TestCaplinColumnKeepSlots_UnsetDefersToChainConfig(t *testing.T) {
 
 	require.Zero(t, parse(), "unset must defer to the chain config, not pin mainnet's slot count")
 	require.Equal(t, uint64(12345), parse("--caplin.columns-keep-slots=12345"), "a user-set window must reach the config")
+}
+
+func TestCaplinBlobArchiveFromSlotSetsArchiveConfig(t *testing.T) {
+	parse := func(args ...string) ethconfig.Config {
+		blocks, blobs, fromSlot := CaplinArchiveBlocksFlag, CaplinArchiveBlobsFlag, CaplinArchiveBlobsFromSlotFlag
+		cfg := ethconfig.Config{}
+		app := &cli.Command{
+			Flags: []cli.Flag{&blocks, &blobs, &fromSlot},
+			Action: func(_ context.Context, cmd *cli.Command) error {
+				setCaplin(cmd, &cfg)
+				return nil
+			},
+		}
+		require.NoError(t, app.Run(context.Background(), append([]string{"test"}, args...)))
+		return cfg
+	}
+
+	cfg := parse("--caplin.blobs-archive-from-slot=0")
+	require.True(t, cfg.CaplinConfig.ArchiveBlobs)
+	require.Zero(t, cfg.CaplinConfig.BlobsArchiveFromSlot)
+
+	cfg = parse("--caplin.blobs-archive-from-slot=12345")
+	require.True(t, cfg.CaplinConfig.ArchiveBlocks)
+	require.True(t, cfg.CaplinConfig.ArchiveBlobs)
+	require.Equal(t, uint64(12345), cfg.CaplinConfig.BlobsArchiveFromSlot)
 }
 
 func TestCaplinIPBlockLimitFlagsReachConfig(t *testing.T) {
@@ -505,4 +537,16 @@ func TestDisableBoolFlags_ExplicitFalse(t *testing.T) {
 	require.True(t, ethCfg.TxPool.Disable)
 	require.False(t, builderCfg.EnabledPOS)
 	require.Equal(t, ethashcfg.ModeFake, ethCfg.Ethash.PowMode)
+}
+
+func TestBALBatchPrefetchOffWithoutIOUring(t *testing.T) {
+	prevDbg, prevMmap := dbg.BALBatchPrefetch, mmap.BatchPrefetch
+	t.Cleanup(func() { dbg.BALBatchPrefetch, mmap.BatchPrefetch = prevDbg, prevMmap })
+
+	dbg.BALBatchPrefetch, mmap.BatchPrefetch = true, true
+	disableBALBatchPrefetchWithoutIOUring(true)
+	require.True(t, dbg.BALBatchPrefetch && mmap.BatchPrefetch, "io_uring present: the prefetch stays on")
+
+	disableBALBatchPrefetchWithoutIOUring(false)
+	require.False(t, dbg.BALBatchPrefetch || mmap.BatchPrefetch, "no io_uring, on any platform: both flags go off")
 }

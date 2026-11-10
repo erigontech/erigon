@@ -291,7 +291,7 @@ func TestRegisterTxTypeCollisions(t *testing.T) {
 		RegisterTxType(LegacyTxType, builtinSpec)
 	})
 	require.Panics(t, func() {
-		RegisterTxType(AccountAbstractionTxType, builtinSpec)
+		RegisterTxType(FrameTxType, builtinSpec)
 	})
 
 	registerFakeTxType(t)

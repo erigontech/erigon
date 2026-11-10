@@ -45,7 +45,7 @@ import (
 )
 
 const (
-	maxRequestContentLength = 1024 * 1024 * 32 // 32MB
+	MaxRequestContentLength = 1024 * 1024 * 32 // 32MB
 	contentType             = "application/json"
 	jwtTokenExpiry          = 60 * time.Second
 )
@@ -79,7 +79,7 @@ func (hc *httpConn) remoteAddr() string {
 	return hc.url
 }
 
-func (hc *httpConn) ReadBatch() ([]*jsonrpcMessage, bool, error) {
+func (hc *httpConn) ReadBatch(int) ([]*jsonrpcMessage, bool, error) {
 	<-hc.closeCh
 	return nil, false, io.EOF
 }
@@ -270,7 +270,7 @@ func newHTTPServerConn(r *http.Request, w http.ResponseWriter, body io.Reader) S
 		conn.Reader = buf
 	} else {
 		// it's a post request or whatever, so just process it like normal
-		conn.Reader = io.LimitReader(body, maxRequestContentLength)
+		conn.Reader = io.LimitReader(body, MaxRequestContentLength)
 	}
 	// The body holds one message, so it can be read in one go and checked once.
 	// ServeHTTP holds the body's budget charge for the whole request.
@@ -458,8 +458,8 @@ func validateRequest(r *http.Request) (int, error) {
 	if r.Method == http.MethodPut || r.Method == http.MethodDelete {
 		return http.StatusMethodNotAllowed, errors.New("method not allowed")
 	}
-	if r.ContentLength > maxRequestContentLength {
-		err := fmt.Errorf("content length too large (%d>%d)", r.ContentLength, maxRequestContentLength)
+	if r.ContentLength > MaxRequestContentLength {
+		err := fmt.Errorf("content length too large (%d>%d)", r.ContentLength, MaxRequestContentLength)
 		return http.StatusRequestEntityTooLarge, err
 	}
 	if r.Method == http.MethodOptions {
@@ -479,6 +479,14 @@ func validateRequest(r *http.Request) (int, error) {
 }
 
 func CheckJwtSecret(w http.ResponseWriter, r *http.Request, jwtSecret []byte) bool {
+	if err := ValidateJWT(r, jwtSecret); err != nil {
+		http.Error(w, err.Error(), http.StatusForbidden)
+		return false
+	}
+	return true
+}
+
+func ValidateJWT(r *http.Request, jwtSecret []byte) error {
 	var tokenStr string
 	// Check if JWT signature is correct
 	if auth := r.Header.Get("Authorization"); len(auth) >= 7 && strings.EqualFold(auth[:7], "bearer ") {
@@ -486,8 +494,7 @@ func CheckJwtSecret(w http.ResponseWriter, r *http.Request, jwtSecret []byte) bo
 	}
 
 	if len(tokenStr) == 0 {
-		http.Error(w, "missing token", http.StatusForbidden)
-		return false
+		return errors.New("missing token")
 	}
 
 	keyFunc := func(token *jwt.Token) (any, error) {
@@ -503,22 +510,20 @@ func CheckJwtSecret(w http.ResponseWriter, r *http.Request, jwtSecret []byte) bo
 
 	switch {
 	case err != nil:
-		http.Error(w, err.Error(), http.StatusForbidden)
+		return err
 	case !token.Valid:
-		http.Error(w, "invalid token", http.StatusForbidden)
+		return errors.New("invalid token")
 	case !claims.VerifyExpiresAt(time.Now(), false): // optional
-		http.Error(w, "token is expired", http.StatusForbidden)
+		return errors.New("token is expired")
 	case claims.IssuedAt == nil:
-		http.Error(w, "missing issued-at", http.StatusForbidden)
+		return errors.New("missing issued-at")
 	case time.Since(claims.IssuedAt.Time) > jwtTokenExpiry:
-		http.Error(w, "stale token", http.StatusForbidden)
+		return errors.New("stale token")
 	case time.Until(claims.IssuedAt.Time) > jwtTokenExpiry:
-		http.Error(w, "future token", http.StatusForbidden)
+		return errors.New("future token")
 	default:
-		return true
+		return nil
 	}
-
-	return false
 }
 
 type sentWriter struct {

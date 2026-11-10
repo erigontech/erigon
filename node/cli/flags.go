@@ -19,6 +19,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -421,7 +422,7 @@ func ApplyFlagsForNodeConfig(ctx *cli.Command, cfg *nodecfg.Config, logger log.L
 func setEmbeddedRpcDaemon(ctx *cli.Command, cfg *nodecfg.Config, logger log.Logger) {
 	jwtSecretPath := ctx.String(utils.JWTSecretPath.Name)
 	if jwtSecretPath == "" {
-		jwtSecretPath = cfg.Dirs.DataDir + "/jwt.hex"
+		jwtSecretPath = filepath.Join(cfg.Dirs.DataDir, "jwt.hex")
 	}
 
 	apis := ctx.String(utils.HTTPApiFlag.Name)
@@ -586,11 +587,10 @@ func setPrivateApi(ctx *cli.Command, cfg *nodecfg.Config) {
 		certFile := ctx.String(utils.TLSCertFlag.Name)
 		keyFile := ctx.String(utils.TLSKeyFlag.Name)
 		if certFile == "" {
-			log.Warn("Could not establish TLS grpc: missing certificate")
-			return
-		} else if keyFile == "" {
-			log.Warn("Could not establish TLS grpc: missing key file")
-			return
+			utils.Fatalf("--%s requires --%s", utils.TLSFlag.Name, utils.TLSCertFlag.Name)
+		}
+		if keyFile == "" {
+			utils.Fatalf("--%s requires --%s", utils.TLSFlag.Name, utils.TLSKeyFlag.Name)
 		}
 		cfg.TLSConnection = true
 		cfg.TLSCertFile = certFile
