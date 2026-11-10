@@ -283,8 +283,8 @@ func (s *ChainSegment) transition() error {
 }
 
 // commitChainSegmentLocked re-checks what may have changed since Begin and then
-// publishes what Transition prepared. The light-client update is stored even when
-// the transition failed.
+// publishes what Transition prepared. The light-client update is kept only after a
+// successful transition, which verified the block's sync aggregate.
 func (f *forkGraphDisk) commitChainSegmentLocked(s *ChainSegment) (*state.CachingBeaconState, ChainSegmentInsertionResult, error) {
 	if !s.transitioned.Load() {
 		return nil, LogisticError, errors.New("chain segment committed before its transition")
@@ -298,18 +298,6 @@ func (f *forkGraphDisk) commitChainSegmentLocked(s *ChainSegment) (*state.Cachin
 		return nil, BelowAnchor, nil
 	}
 
-	if s.lcUpdate != nil {
-		// The caller emits the corresponding light client events: fork graph
-		// methods run under the fork choice store's lock, where event sends
-		// must not happen (a stalled subscriber would wedge the store).
-		f.newestLightClientUpdate.Store(s.lcUpdate)
-		period := f.beaconCfg.SyncCommitteePeriod(s.parentSlot)
-		_, hasPeriod := f.lightClientUpdates.Load(period)
-		if !hasPeriod {
-			log.Info("Adding light client update", "period", period)
-			f.lightClientUpdates.Store(period, s.lcUpdate)
-		}
-	}
 	if s.err != nil {
 		f.blocks.Delete(s.blockRoot)
 		return nil, LogisticError, s.err
@@ -320,6 +308,9 @@ func (f *forkGraphDisk) commitChainSegmentLocked(s *ChainSegment) (*state.Cachin
 			f.badBlocks.Store(s.blockRoot, block.Slot)
 		}
 		return nil, InvalidBlock, s.transitionErr
+	}
+	if s.lcUpdate != nil {
+		f.recordLightClientUpdateLocked(s.blockRoot, s.lcUpdate)
 	}
 
 	newState := s.postState
