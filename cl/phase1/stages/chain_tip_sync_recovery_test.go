@@ -1506,6 +1506,53 @@ func TestChainTipBatchPassesARejectionToDescendants(t *testing.T) {
 	require.ErrorIs(t, missing.lastErr, reason)
 }
 
+func TestChainTipBatchPreservesTerminalParentError(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		rejectEnvelope bool
+		wantError      string
+	}{
+		{name: "rejected envelope", rejectEnvelope: true, wantError: "parent execution payload envelope is rejected"},
+		{name: "invalid payload", wantError: "parent execution payload is invalid"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, graph, parentRoot, child, _, engine := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
+			payloadHash := graph.envelopes[parentRoot].Message.Payload.BlockHash
+			delete(graph.envelopes, parentRoot)
+			if tc.rejectEnvelope {
+				cfg.forkChoice.RejectEnvelope(parentRoot)
+			} else {
+				cfg.forkChoice.MarkPayloadInvalid(parentRoot, payloadHash)
+			}
+			childRoot, err := child.Block.HashSSZ()
+			require.NoError(t, err)
+			grandchild, grandchildRoot := newChildOnEmptyParent(t, cfg.beaconCfg, child, child.Block.Slot+1)
+			cfg.chainTipRejections = newChainTipRejections(time.Hour, nil)
+			cfg.chainTipRejections.lastLog = time.Now()
+			seen := make(map[common.Hash]struct{})
+			rejected := make(map[common.Hash]error)
+
+			reachedTarget := processChainTipBatch(t.Context(), cfg, Args{targetSlot: grandchild.Block.Slot + 1}, []*cltypes.SignedBeaconBlock{child, grandchild}, seen, rejected)
+
+			require.False(t, reachedTarget)
+			cause := rejected[childRoot]
+			require.ErrorIs(t, cause, forkchoice.ErrBlockInvalid)
+			require.ErrorContains(t, cause, tc.wantError)
+			require.Equal(t, cause, rejected[grandchildRoot])
+			require.Contains(t, seen, common.Hash(childRoot))
+			_, imported := cfg.forkChoice.GetHeader(childRoot)
+			require.False(t, imported)
+			require.NotContains(t, cfg.chainTipRejections.reasons, errParentEnvelopeUnavailable.Error())
+			for _, reason := range []string{"process block failed", "parent not in fork graph"} {
+				summary := cfg.chainTipRejections.reasons[reason]
+				require.NotNil(t, summary)
+				require.ErrorIs(t, summary.lastErr, cause)
+			}
+			require.Zero(t, engine.newPayloadCalls)
+		})
+	}
+}
+
 // The fetched envelope of a FULL parent that is only in the batch is validated against that batch block.
 func TestChainTipBatchImportsChildOfBatchParentWithPeerEnvelope(t *testing.T) {
 	cfg, graph, parentRoot, fullChild, _, _ := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)

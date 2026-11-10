@@ -537,11 +537,11 @@ func determineParentEnvelopeRoots(cfg *Cfg, blocks []*cltypes.SignedBeaconBlock)
 	return roots, batchBlockByRoot
 }
 
-// parentEnvelopeUnavailable reports a block whose parent envelope it needs was neither fetched
-// nor stored.
+// parentEnvelopeUnavailable reports a missing envelope required by a child on its parent's FULL branch.
+// Terminal parent failures return false so the original validation error is preserved.
 func parentEnvelopeUnavailable(cfg *Cfg, block *cltypes.SignedBeaconBlock, envelopes map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, parentBlockByRoot func(common.Hash) *cltypes.SignedBeaconBlock) bool {
 	parentRoot := common.Hash(block.Block.ParentRoot)
-	if _, fetched := envelopes[parentRoot]; fetched || cfg.forkChoice.HasEnvelope(parentRoot) {
+	if _, fetched := envelopes[parentRoot]; fetched || envelopeResolved(cfg.forkChoice, parentRoot) {
 		return false
 	}
 	return parentEnvelopeRequired(block, parentBlockByRoot(parentRoot))
@@ -684,13 +684,13 @@ func recoverMissingEnvelopes(ctx context.Context, cfg *Cfg) {
 		return
 	}
 
-	envelopeResolved := func(root common.Hash) bool {
-		return cfg.forkChoice.HasEnvelope(root) || cfg.forkChoice.IsEnvelopeRejected(root) || cfg.forkChoice.IsBlockInvalid(root)
+	isResolved := func(root common.Hash) bool {
+		return envelopeResolved(cfg.forkChoice, root)
 	}
 	pendingBeforePrune := len(cfg.gloasEnvelopeRecoveryPending)
 	cfg.gloasEnvelopeRecoveryPending = retainActionableGloasEnvelopeRecoveryRoots(
 		cfg.gloasEnvelopeRecoveryPending,
-		envelopeResolved,
+		isResolved,
 		func(root common.Hash) bool {
 			block, ok := cfg.forkChoice.GetBlock(root)
 			return ok && block != nil && block.Block != nil
@@ -709,7 +709,7 @@ func recoverMissingEnvelopes(ctx context.Context, cfg *Cfg) {
 			newBid := newHeadBlock.Block.Body.GetSignedExecutionPayloadBid()
 			if oldOK && oldHeadBlock != nil && newBid != nil && newBid.Message != nil {
 				oldBid := oldHeadBlock.Block.Body.GetSignedExecutionPayloadBid()
-				if oldBid != nil && oldBid.Message != nil && newBid.Message.ParentBlockHash == oldBid.Message.BlockHash && !envelopeResolved(cfg.gloasEnvelopeRecoveryHead) {
+				if oldBid != nil && oldBid.Message != nil && newBid.Message.ParentBlockHash == oldBid.Message.BlockHash && !isResolved(cfg.gloasEnvelopeRecoveryHead) {
 					if !trackGloasEnvelopeRecoveryRoot(cfg, cfg.gloasEnvelopeRecoveryHead) {
 						directExtensionParent = common.Hash{}
 					}
@@ -742,13 +742,13 @@ func recoverMissingEnvelopes(ctx context.Context, cfg *Cfg) {
 		childBlock,
 		scanRoot,
 		cfg.forkChoice.GetBlock,
-		envelopeResolved,
+		isResolved,
 	)
 	missingRoots := nextGloasEnvelopeRecoveryBatch(cfg)
 	if len(missingRoots) > 0 {
 		log.Info("[chainTipSync] envelope recovery: fetching missing envelopes", "count", len(missingRoots))
 		fetchAndApplyEnvelopes(ctx, cfg, missingRoots)
-		finishGloasEnvelopeRecoveryBatch(cfg, missingRoots, envelopeResolved)
+		finishGloasEnvelopeRecoveryBatch(cfg, missingRoots, isResolved)
 	}
 	advanceGloasEnvelopeRecoveryCursor(cfg, scanRoot, completedScan)
 }
@@ -859,24 +859,33 @@ func advanceGloasEnvelopeRecoveryCursor(cfg *Cfg, scanRoot common.Hash, complete
 	}
 }
 
-type selectedHeadEnvelopeStore interface {
+type envelopeStatusReader interface {
 	HasEnvelope(common.Hash) bool
 	IsEnvelopeRejected(common.Hash) bool
 	IsBlockInvalid(common.Hash) bool
+}
+
+// envelopeResolved reports whether fetching or waiting for an envelope can stop.
+// This includes terminal failures and stored envelopes that still need execution validation.
+func envelopeResolved(store envelopeStatusReader, root common.Hash) bool {
+	return store.HasEnvelope(root) || store.IsEnvelopeRejected(root) || store.IsBlockInvalid(root)
+}
+
+type selectedHeadEnvelopeStore interface {
+	envelopeStatusReader
 	OnExecutionPayload(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool) error
 }
 
 type anchorEnvelopeStore interface {
+	envelopeStatusReader
 	AnchorRoot() common.Hash
-	HasEnvelope(common.Hash) bool
-	IsEnvelopeRejected(common.Hash) bool
-	IsBlockInvalid(common.Hash) bool
 	GetStateAtBlockRoot(common.Hash) (*state.CachingBeaconState, error)
 }
 
 type anchorEnvelopeRecoverer func(context.Context) error
 
-// Terminal payload failures complete recovery so block validation can reject affected children.
+// ensureAnchorEnvelopeForChild reports whether the child can proceed to block validation.
+// Only children that build on the anchor's FULL payload require envelope recovery.
 func ensureAnchorEnvelopeForChild(
 	ctx context.Context,
 	store anchorEnvelopeStore,
@@ -893,7 +902,7 @@ func ensureAnchorEnvelopeForChild(
 	if anchorRoot == (common.Hash{}) || common.Hash(child.Block.ParentRoot) != anchorRoot {
 		return true
 	}
-	if store.HasEnvelope(anchorRoot) || store.IsEnvelopeRejected(anchorRoot) || store.IsBlockInvalid(anchorRoot) {
+	if envelopeResolved(store, anchorRoot) {
 		return true
 	}
 	anchorState, err := store.GetStateAtBlockRoot(anchorRoot)
@@ -914,7 +923,7 @@ func ensureAnchorEnvelopeForChild(
 	if err := recoverAnchor(ctx); err != nil {
 		log.Debug("[chainTipSync] failed to recover anchor envelope", "anchorRoot", anchorRoot, "err", err)
 	}
-	return store.HasEnvelope(anchorRoot) || store.IsEnvelopeRejected(anchorRoot) || store.IsBlockInvalid(anchorRoot)
+	return envelopeResolved(store, anchorRoot)
 }
 
 type envelopeRequestFunc func(context.Context, [][32]byte) (map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, error)
@@ -935,7 +944,7 @@ func waitForSelectedHeadEnvelope(
 ) {
 	pollCtx, pollCancel := context.WithTimeout(ctx, timeout)
 	defer pollCancel()
-	if store.HasEnvelope(headRoot) || store.IsEnvelopeRejected(headRoot) || store.IsBlockInvalid(headRoot) {
+	if envelopeResolved(store, headRoot) {
 		if hooks.done != nil {
 			hooks.done()
 		}
@@ -972,7 +981,7 @@ func waitForSelectedHeadEnvelope(
 		case <-pollCtx.Done():
 			return
 		case <-ticker.C:
-			if store.HasEnvelope(headRoot) || store.IsEnvelopeRejected(headRoot) || store.IsBlockInvalid(headRoot) {
+			if envelopeResolved(store, headRoot) {
 				return
 			}
 		}
