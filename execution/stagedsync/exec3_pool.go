@@ -31,6 +31,7 @@ const (
 
 type rerunProbe struct {
 	runs, runNs     atomic.Int64
+	depTailNs       atomic.Int64
 	reruns, wasteNs [rerunCauses]atomic.Int64
 }
 
@@ -43,6 +44,8 @@ type poolTask struct {
 	reruns     int
 	lastRunNs  int64
 	rerunCause int
+	depRun     int64
+	depTail    int64
 	depPrefix  int64
 	rerunTo    int
 	settleTo   int
@@ -264,10 +267,11 @@ func (pt *poolTask) run(p *taskPool, wk *poolWorker) bool {
 	if pt.lastRunNs != 0 {
 		be.probe.reruns[pt.rerunCause].Add(1)
 		be.probe.wasteNs[pt.rerunCause].Add(pt.lastRunNs)
-		pt.depPrefix = 0
+		pt.depPrefix, pt.depRun = 0, 0
 		switch pt.rerunCause {
 		case rerunDep:
-			pt.depPrefix = pt.lastRunNs
+			pt.depRun = pt.lastRunNs
+			pt.depPrefix = pt.lastRunNs - pt.depTail
 		case rerunSpine:
 			pt.rerunTo = tv.index - 1
 		}
@@ -275,7 +279,8 @@ func (pt *poolTask) run(p *taskPool, wk *poolWorker) bool {
 	pt.rerunCause = rerunSpine
 	runStart := time.Now()
 	result := wk.w.RunTxTask(tv)
-	pt.lastRunNs = max(time.Since(runStart).Nanoseconds(), 1)
+	runEnd := time.Now()
+	pt.lastRunNs = max(runEnd.Sub(runStart).Nanoseconds(), 1)
 	be.probe.runs.Add(1)
 	be.probe.runNs.Add(pt.lastRunNs)
 	if txTask, ok := tv.Task.(*exec.TxTask); ok && txTask.ChargesSenderAtValidation(int(tv.version.Incarnation)) &&
@@ -293,6 +298,8 @@ func (pt *poolTask) run(p *taskPool, wk *poolWorker) bool {
 	}
 	if result.Dep >= 0 {
 		pt.rerunCause = rerunDep
+		pt.depTail = max(min(runEnd.UnixNano()-tv.probeDepNano, pt.lastRunNs), 0)
+		be.probe.depTailNs.Add(pt.depTail)
 		return pt.rerunAfter(be.taskIndexOf(result.Dep))
 	}
 	be.selfLoopFlush(tv.version, result, pt.prevWrites)
@@ -332,39 +339,36 @@ func (pt *poolTask) publish(p *taskPool) bool {
 
 // probeCriticalPath models the commit time of the last task with every worker free:
 // each task finishes after the commit it re-ran or waited for, plus its final run.
-// In the pause model a task whose last re-run followed a dependency abort keeps the
-// aborted run's work and only runs the remainder.
-func (be *blockExecutor) probeCriticalPath() (abortNs, pauseNs int64) {
-	commitAbort := make([]int64, len(be.poolTasks))
-	commitPause := make([]int64, len(be.poolTasks))
-	at := func(c []int64, t int) int64 {
+// A re-run also cannot start before its aborted run ended. Cancel ends that run at the
+// dependency read; pause also keeps the work done before the read.
+func (be *blockExecutor) probeCriticalPath() (abortNs, cancelNs, pauseNs int64) {
+	n := len(be.poolTasks)
+	if n == 0 {
+		return 0, 0, 0
+	}
+	a, c, p := make([]int64, n), make([]int64, n), make([]int64, n)
+	at := func(s []int64, t int) int64 {
 		if t < 0 {
 			return 0
 		}
-		return c[t]
+		return s[t]
 	}
 	for i, pt := range be.poolTasks {
-		var finishAbort, finishPause int64
 		if pt != nil {
 			run := pt.lastRunNs
-			switch {
-			case pt.rerunTo >= 0:
-				finishAbort = at(commitAbort, pt.rerunTo) + run
-				prefix := min(pt.depPrefix, run)
-				finishPause = max(at(commitPause, pt.rerunTo), prefix) + run - prefix
-			default:
-				finishAbort = max(at(commitAbort, pt.settleTo), run)
-				finishPause = max(at(commitPause, pt.settleTo), run)
+			if pt.rerunTo >= 0 {
+				a[i] = max(at(a, pt.rerunTo), pt.depRun) + run
+				c[i] = max(at(c, pt.rerunTo), pt.depPrefix) + run
+				p[i] = max(at(p, pt.rerunTo), pt.depPrefix) + run - min(pt.depPrefix, run)
+			} else {
+				a[i] = max(at(a, pt.settleTo), run)
+				c[i] = max(at(c, pt.settleTo), run)
+				p[i] = max(at(p, pt.settleTo), run)
 			}
 		}
-		commitAbort[i], commitPause[i] = finishAbort, finishPause
 		if i > 0 {
-			commitAbort[i] = max(commitAbort[i], commitAbort[i-1])
-			commitPause[i] = max(commitPause[i], commitPause[i-1])
+			a[i], c[i], p[i] = max(a[i], a[i-1]), max(c[i], c[i-1]), max(p[i], p[i-1])
 		}
 	}
-	if n := len(be.poolTasks); n > 0 {
-		return commitAbort[n-1], commitPause[n-1]
-	}
-	return 0, 0
+	return a[n-1], c[n-1], p[n-1]
 }

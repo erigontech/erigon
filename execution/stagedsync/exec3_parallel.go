@@ -1118,9 +1118,10 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 					if wall > 0 && pe.workerCount > 0 {
 						occ = float64(busy) / (float64(pe.workerCount) * float64(wall))
 					}
-					cpAbortNs, cpPauseNs := blockExecutor.probeCriticalPath()
+					cpAbortNs, cpCancelNs, cpPauseNs := blockExecutor.probeCriticalPath()
 					pe.logger.Info("[np-phase] execloop", "blk", blockResult.BlockNum,
-						"npCpAbortNs", cpAbortNs, "npCpPauseNs", cpPauseNs,
+						"npCpAbortNs", cpAbortNs, "npCpCancelNs", cpCancelNs, "npCpPauseNs", cpPauseNs,
+						"npDepTailNs", blockExecutor.probe.depTailNs.Load(),
 						"wait", npWait, "process", npProc,
 						"busy", busy, "workers", pe.workerCount, "occ", fmt.Sprintf("%.2f", occ),
 						"tasks", len(blockExecutor.tasks), "exec", blockExecutor.cntExec,
@@ -2427,6 +2428,7 @@ type taskVersion struct {
 	stats        map[int]ExecutionStat
 	statsMutex   *sync.Mutex
 	execCpuNanos *atomic.Int64
+	probeDepNano int64
 }
 
 func (ev *taskVersion) Trace() bool {
@@ -2466,6 +2468,7 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 	// mid-execution-changed value and must re-execute once that predecessor commits
 	// — a scheduler verdict, not an execution error.
 	result.Dep = ibs.DepTxIndex()
+	ev.probeDepNano = ibs.DepFirstNano()
 
 	if result.Err != nil {
 		return result
