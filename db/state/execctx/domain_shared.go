@@ -1362,9 +1362,10 @@ func (sd *SharedDomains) latestFromMem(domain kv.Domain, key []byte) (v []byte, 
 }
 
 type getLatestOptions struct {
-	codeHash    []byte
-	buf         []byte
-	hashFromMem bool
+	codeHash     []byte
+	buf          []byte
+	hashFromMem  bool
+	noBranchFill bool
 }
 
 // getLatest is the read implementation. wm is the caller's lock-free
@@ -1470,7 +1471,7 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 	if maxStep != kv.NoStepBound {
 		getOpts = getOpts.WithMaxStep(maxStep)
 	}
-	if useBranchCache && !sd.hasLocalCacheUnwind() {
+	if useBranchCache && !sd.hasLocalCacheUnwind() && !opts.noBranchFill {
 		getOpts = getOpts.WithBranchCache()
 	}
 	willFill := !sd.hasLocalCacheUnwind() && maxStep == kv.NoStepBound && sd.stateCache != nil && sd.stateCache.Caches(domain)
@@ -2088,13 +2089,13 @@ func (sd *SharedDomains) SwapChangesetAccumulatorLocked(acc *changeset.StateChan
 	return func() { sd.setChangesetAccumulatorLocked(prev) }
 }
 
-// GetLatestContext is GetLatest with per-worker metrics carried on ctx: the
-// commitment worker's lock-free accumulator (a nil ctx-value collects nothing,
-// so concurrent workers neither share metrics state nor take a lock).
-func (sd *SharedDomains) GetLatestContext(ctx context.Context, domain kv.Domain, tx kv.TemporalTx, k []byte) (v []byte, step kv.Step, err error) {
+// GetBranchForFold reads a branch the fold will rewrite: Commit publishes the new value, so the read does not fill the
+// BranchCache. Per-worker metrics are carried on ctx: the commitment worker's lock-free accumulator (a nil ctx-value
+// collects nothing, so concurrent workers neither share metrics state nor take a lock).
+func (sd *SharedDomains) GetBranchForFold(ctx context.Context, tx kv.TemporalTx, k []byte) (v []byte, step kv.Step, err error) {
 	var wm kv.GetLatestMetrics
 	if m := kvmetrics.MetricsFromContext(ctx); m != nil {
 		wm = m
 	}
-	return sd.getLatest(domain, tx, k, wm, time.Time{}, kv.NoStepBound, sd.cacheReader(), getLatestOptions{})
+	return sd.getLatest(kv.CommitmentDomain, tx, k, wm, time.Time{}, kv.NoStepBound, sd.cacheReader(), getLatestOptions{noBranchFill: true})
 }

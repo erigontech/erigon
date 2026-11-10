@@ -1000,7 +1000,7 @@ type asOfStateReader struct {
 	roTx  kv.TemporalTx
 	txNum uint64
 	// workerCtx, when non-nil, carries a worker's lock-free metrics accumulator so
-	// the CommitmentDomain read routes through GetLatestContext instead of racing
+	// the CommitmentDomain read carries it into GetBranchForFold instead of racing
 	// the shared main accumulator. Nil on the main reader.
 	workerCtx context.Context
 
@@ -1023,11 +1023,8 @@ func (r *asOfStateReader) CheckDataAvailable(d kv.Domain, step kv.Step) error {
 
 func (r *asOfStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) (enc []byte, step kv.Step, err error) {
 	if d == kv.CommitmentDomain {
-		// Branches: use GetLatest — written only by this calculator, sequential.
-		if r.workerCtx != nil {
-			return r.sd.GetLatestContext(r.workerCtx, d, r.roTx, plainKey)
-		}
-		return r.sd.GetLatest(d, r.roTx, plainKey)
+		// Branches: written only by this calculator, sequential.
+		return r.sd.GetBranchForFold(r.workerCtx, r.roTx, plainKey)
 	}
 	if stepSize > 0 {
 		step = kv.Step(r.txNum / stepSize)

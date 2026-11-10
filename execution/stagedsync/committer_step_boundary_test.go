@@ -969,6 +969,43 @@ func TestAsOfStateReaderCloneForWorkerDoesNotBoxNilMetrics(t *testing.T) {
 	require.True(t, captureTx.nonNilMetrics)
 }
 
+// The fold rewrites every branch it reads and Commit publishes the new value, so a read-through fill is wasted work.
+func TestAsOfStateReaderCommitmentReadDoesNotFillBranchCache(t *testing.T) {
+	ctx := context.Background()
+	db, tx, doms := setupStepTest(t)
+	key := []byte{0x0a, 0x0b}
+	value := []byte{0, 0, 0, 0, 1}
+	require.NoError(t, doms.DomainPut(kv.CommitmentDomain, tx, key, value, 1, nil))
+	require.NoError(t, doms.Flush(ctx, tx))
+	doms.Close()
+	require.NoError(t, tx.Commit())
+
+	roTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	sd, err := execctx.NewSharedDomains(ctx, roTx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+	branchCache := roTx.AggTx().(commitment.BranchCacheProvider).BranchCache()
+	require.NotNil(t, branchCache)
+	branchCache.Clear()
+
+	mainReader := &asOfStateReader{sd: sd, roTx: roTx, dr: state.NewLayeredDomainReader(sd, nil, nil)}
+	for _, reader := range []commitmentdb.StateReader{mainReader, mainReader.CloneForWorker(ctx, roTx)} {
+		got, _, err := reader.Read(kv.CommitmentDomain, key, sd.StepSize())
+		require.NoError(t, err)
+		require.Equal(t, value, got)
+		_, _, ok := branchCache.Get(key)
+		require.False(t, ok)
+	}
+
+	got, _, err := sd.GetLatest(kv.CommitmentDomain, roTx, key)
+	require.NoError(t, err)
+	require.Equal(t, value, got)
+	_, _, ok := branchCache.Get(key)
+	require.True(t, ok, "a plain SharedDomains read must still fill")
+}
+
 func isolatedCommitmentBranchCount(t *testing.T, checkRoot bool) (int, []commitmentResult, bool) {
 	t.Helper()
 	ctx := context.Background()
