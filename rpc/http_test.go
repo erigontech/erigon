@@ -781,3 +781,21 @@ func TestHTTPUndeclaredBodyBudget(t *testing.T) {
 	require.Contains(t, rec.Body.String(), `"result"`)
 	require.Zero(t, srv.ingress.used.Load())
 }
+
+func TestHTTPGetQueryWithInvalidIDIsAParseError(t *testing.T) {
+	srv := newTestServer(log.New())
+	defer srv.Stop()
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, ts.URL+"/?method=test_rets&id=not-json", nil)
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", contentType)
+	resp, err := ts.Client().Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusBadRequest, resp.StatusCode, string(body))
+	require.Contains(t, string(body), "-32700")
+}
