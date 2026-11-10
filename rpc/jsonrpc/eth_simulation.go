@@ -633,31 +633,15 @@ func commitSimOverrides(stateOverrides *ethapi.StateOverrides, base state.StateR
 }
 
 func applySimOverrides(overrides *state.IntraBlockState, stateOverrides *ethapi.StateOverrides, precompiles vm.PrecompiledContracts, rules *chain.Rules, stateWriter state.StateWriter) error {
-	if overrides.IsVersioned() {
-		// The version map hides the replaced storage from this block only; the writer must drop the stored slots.
-		for addr, account := range *stateOverrides {
-			if account.State != nil {
-				if err := stateWriter.CreateContract(addr); err != nil {
-					return err
-				}
+	// The version map hides the replaced storage from this block only; the writer must drop the stored slots.
+	for addr, account := range *stateOverrides {
+		if account.State != nil {
+			if err := stateWriter.CreateContract(addr); err != nil {
+				return err
 			}
 		}
-		return stateOverrides.OverrideTo(overrides, precompiles, rules, stateWriter)
 	}
-	if err := stateOverrides.Override(overrides, precompiles, rules); err != nil {
-		return err
-	}
-	dirty := overrides.ExtractAndClearDirty()
-	for addr, account := range *stateOverrides {
-		// An empty storage replacement journals nothing, but must still clear the stored slots.
-		if account.State != nil {
-			dirty[addr] = struct{}{}
-		}
-	}
-	if err := overrides.CommitOverrideDirtyAccounts(rules, stateWriter, dirty); err != nil {
-		return fmt.Errorf("committing override accounts: %w", err)
-	}
-	return nil
+	return stateOverrides.OverrideTo(overrides, precompiles, rules, stateWriter)
 }
 
 func (r *simOverrideReader) Close() { r.overrides.Close() }
