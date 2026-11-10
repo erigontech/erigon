@@ -90,6 +90,9 @@ func newTaskPool(pe *parallelExecutor, base []*exec.WorkerContext) *taskPool {
 }
 
 func (p *taskPool) push(pt *poolTask) {
+	if p == nil {
+		return
+	}
 	p.mu.Lock()
 	p.queue = append(p.queue, pt)
 	p.mu.Unlock()
