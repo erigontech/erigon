@@ -84,7 +84,8 @@ type ColdPage uintptr
 // Probe makes the read it is handed to stop with a ColdPage panic at its first non-resident page; a nil Probe
 // probes nothing. A Probe belongs to one goroutine.
 type Probe struct {
-	resident map[uintptr]struct{}
+	resident map[uintptr]bool
+	vec      []byte // scratch for mincore, one byte per page of a span
 }
 
 // NewProbe returns nil when ReadPages cannot read pages, so callers fall back to ordinary reads.
@@ -96,7 +97,11 @@ func NewProbe() *Probe {
 	if batchRings == nil {
 		return nil
 	}
-	return &Probe{resident: map[uintptr]struct{}{}}
+	return newProbe()
+}
+
+func newProbe() *Probe {
+	return &Probe{resident: map[uintptr]bool{}, vec: make([]byte, uintptr(iouring.MaxReadSize)/osPageSize)}
 }
 
 func (pr *Probe) Touch(p unsafe.Pointer) {
@@ -108,21 +113,40 @@ func (pr *Probe) Touch(p unsafe.Pointer) {
 // MarkResident records pages that were just read, so later touches skip their mincore.
 func (pr *Probe) MarkResident(pages []uintptr) {
 	for _, page := range pages {
-		pr.resident[page] = struct{}{}
+		pr.resident[page] = true
 	}
 }
 
 func (pr *Probe) touch(p unsafe.Pointer) {
 	page := uintptr(p) &^ (osPageSize - 1)
-	if _, ok := pr.resident[page]; ok {
-		return
+	resident, known := pr.resident[page]
+	if !known {
+		resident = pr.mincoreSpan(page)
 	}
-	var vec [1]byte
-	_, _, errno := unix.Syscall(unix.SYS_MINCORE, page, osPageSize, uintptr(unsafe.Pointer(&vec[0])))
-	if errno == 0 && vec[0]&1 == 0 {
+	if !resident {
 		panic(ColdPage(page))
 	}
-	pr.resident[page] = struct{}{}
+}
+
+// mincoreSpan remembers the residency of the pages around page, clamped to its mapping because mincore fails past it,
+// and returns the residency of page.
+func (pr *Probe) mincoreSpan(page uintptr) bool {
+	start, end := page, page+osPageSize
+	if m, ok := mappingOf(page); ok {
+		span := uintptr(iouring.MaxReadSize)
+		aligned := page - page%span
+		start, end = max(aligned, m.start), min(aligned+span, m.end)
+	}
+	pages := (end - start + osPageSize - 1) / osPageSize
+	_, _, errno := unix.Syscall(unix.SYS_MINCORE, start, pages*osPageSize, uintptr(unsafe.Pointer(&pr.vec[0])))
+	if errno != 0 {
+		pr.resident[page] = true
+		return true
+	}
+	for i := range pages {
+		pr.resident[start+i*osPageSize] = pr.vec[i]&1 != 0
+	}
+	return pr.resident[page]
 }
 
 const batchRingEntries = 256

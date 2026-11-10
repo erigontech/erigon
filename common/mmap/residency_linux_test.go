@@ -27,6 +27,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sys/unix"
+
+	"github.com/erigontech/erigon/common/iouring"
 )
 
 // residencySink defeats dead-code elimination of the page-touching loop.
@@ -114,4 +116,85 @@ func TestMappingOfFindsTheMappingThatHoldsThePage(t *testing.T) {
 	unregisterMapping(bufs[1])
 	_, ok := mappingOf(uintptr(unsafe.Pointer(&bufs[1][0])))
 	require.False(t, ok, "an unregistered mapping is not found")
+}
+
+// probedAnon registers an anonymous mapping of length bytes, offset pages into a MaxReadSize-aligned window, with
+// nothing mapped around it. Its pages stay non-resident until written.
+func probedAnon(t *testing.T, offset, length int) []byte {
+	t.Helper()
+	prev := BatchPrefetch
+	BatchPrefetch = true
+	t.Cleanup(func() { BatchPrefetch = prev })
+
+	pg, span := os.Getpagesize(), iouring.MaxReadSize
+	reserved, err := unix.Mmap(-1, 0, 3*span, unix.PROT_READ|unix.PROT_WRITE, unix.MAP_ANON|unix.MAP_PRIVATE)
+	require.NoError(t, err)
+	base := uintptr(unsafe.Pointer(&reserved[0]))
+	unmap := func(from, to int) {
+		if from < to {
+			_, _, errno := unix.Syscall(unix.SYS_MUNMAP, base+uintptr(from), uintptr(to-from), 0)
+			require.Zero(t, errno)
+		}
+	}
+	start := (span-int(base%uintptr(span)))%span + offset*pg
+	end := start + (length+pg-1)/pg*pg
+	unmap(0, start)
+	unmap(end, len(reserved))
+
+	f, err := os.CreateTemp(t.TempDir(), "f")
+	require.NoError(t, err)
+	t.Cleanup(func() { f.Close() })
+	m := reserved[start : start+length : start+length]
+	registerMapping(m, f)
+	t.Cleanup(func() {
+		unregisterMapping(m)
+		unmap(start, end)
+	})
+	return m
+}
+
+func touchProbe(pr *Probe, b *byte) func() { return func() { pr.Touch(unsafe.Pointer(b)) } }
+
+func coldPageAt(b *byte) ColdPage { return ColdPage(uintptr(unsafe.Pointer(b))) }
+
+func TestProbeRemembersEveryPageOfTheMincoreSpan(t *testing.T) {
+	pg := os.Getpagesize()
+	m := probedAnon(t, 0, 3*pg)
+	m[2*pg] = 1
+	pr := newProbe()
+	require.PanicsWithValue(t, coldPageAt(&m[0]), touchProbe(pr, &m[0]))
+
+	m[0] = 1
+	require.PanicsWithValue(t, coldPageAt(&m[0]), touchProbe(pr, &m[0]), "a remembered cold page needs no new mincore")
+	require.NoError(t, unix.Madvise(m[2*pg:3*pg], unix.MADV_DONTNEED))
+	require.NotPanics(t, touchProbe(pr, &m[2*pg]), "a remembered resident page needs no new mincore")
+}
+
+func TestProbeSpanStaysInsideTheMapping(t *testing.T) {
+	pg := os.Getpagesize()
+	m := probedAnon(t, 1, 2*pg-100)
+	m[pg] = 1
+	pr := newProbe()
+	require.NotPanics(t, touchProbe(pr, &m[pg]))
+	require.PanicsWithValue(t, coldPageAt(&m[0]), touchProbe(pr, &m[0]))
+}
+
+func TestMarkResidentOverridesARememberedColdPage(t *testing.T) {
+	m := probedAnon(t, 0, os.Getpagesize())
+	pr := newProbe()
+	require.PanicsWithValue(t, coldPageAt(&m[0]), touchProbe(pr, &m[0]))
+
+	pr.MarkResident([]uintptr{uintptr(unsafe.Pointer(&m[0]))})
+	require.NotPanics(t, touchProbe(pr, &m[0]))
+}
+
+func TestProbeAsksOnePageOutsideRegisteredMappings(t *testing.T) {
+	pg := os.Getpagesize()
+	m := probedAnon(t, 0, 2*pg)
+	unregisterMapping(m)
+	pr := newProbe()
+	require.PanicsWithValue(t, coldPageAt(&m[0]), touchProbe(pr, &m[0]))
+
+	m[pg] = 1
+	require.NotPanics(t, touchProbe(pr, &m[pg]), "the first mincore must not have answered for this page")
 }
