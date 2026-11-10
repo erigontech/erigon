@@ -87,14 +87,14 @@ func newExpectedProposers(ctx context.Context, cfg *clparams.BeaconChainConfig, 
 
 // get returns the expected proposer on the branch of parentRoot. It uses the matching head state in place
 // when possible; otherwise fork choice may reuse or reconstruct the parent state.
-// It returns ErrIgnore if state is unavailable, the queue is full, or too many callers are waiting.
+// Every returned error wraps ErrIgnore.
 // Shared reads use the service context, so canceling a caller only stops that caller's wait.
 func (e *expectedProposers) get(ctx context.Context, parentRoot common.Hash, parentSlot, slot uint64) (uint64, error) {
 	key := expectedProposerKey{parentRoot: parentRoot, slot: slot}
 	if proposer, ok := e.results.Get(key); ok {
 		return proposer, nil
 	}
-	// A full rebuild queue must not prevent reads from the held head state.
+	// Head-state reads bypass the waiter limit because they do not wait for a shared read.
 	if proposer, found, err := e.readHeld(parentRoot, parentSlot, slot); err != nil {
 		return 0, err
 	} else if found {
@@ -110,7 +110,7 @@ func (e *expectedProposers) get(ctx context.Context, parentRoot common.Hash, par
 		// singleflight runs this on a separate goroutine, outside the gossip validator's panic recovery.
 		defer func() {
 			if r := recover(); r != nil {
-				log.Error("[dataColumnSidecarService] panic reading the expected proposer", "parentRoot", parentRoot, "slot", slot, "err", r, "stack", dbg.Stack())
+				log.Error("[expectedProposers] panic reading the expected proposer", "parentRoot", parentRoot, "slot", slot, "err", r, "stack", dbg.Stack())
 				result, err = uint64(0), fmt.Errorf("%w: expected proposer read panicked: %v", ErrIgnore, r)
 			}
 		}()

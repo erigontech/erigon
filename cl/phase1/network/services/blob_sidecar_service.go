@@ -47,7 +47,7 @@ type blobSidecarService struct {
 	syncedDataManager *synced_data.SyncedDataManager
 	ethClock          eth_clock.EthereumClock
 	emitters          *beaconevents.EventEmitter
-	expectedProposer  func(context.Context, common.Hash, uint64, uint64) (uint64, error)
+	expectedProposer  func(ctx context.Context, parentRoot common.Hash, parentSlot, slot uint64) (uint64, error)
 
 	test bool
 }
