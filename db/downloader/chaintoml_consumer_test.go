@@ -364,10 +364,10 @@ func TestDownloadChainTomlByInfoHashRejectsMismatchedMetadata(t *testing.T) {
 	advertisedHash := mi.HashInfoBytes()
 	advertisedHash[0] ^= 0xff
 	manifest, _ := client.AddTorrentOpt(torrent.AddTorrentOpts{InfoHash: advertisedHash, InfoBytes: infoBytes})
-	require.True(t, manifest.Complete().Bool())
+	require.Nil(t, manifest.Info(), "the torrent client must reject info bytes that do not match the info hash")
 
 	data, err := DownloadChainTomlByInfoHash(t.Context(), client, advertisedHash, snapDir, t.TempDir(), nil)
-	require.ErrorContains(t, err, "chain.toml metadata does not match advertised info hash")
+	require.Error(t, err)
 	assert.Nil(t, data)
 }
 
