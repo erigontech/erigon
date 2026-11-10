@@ -91,9 +91,8 @@ func (f *ForkChoiceStore) shouldApplyProposerBoost() bool {
 // NOTE: Both elements are time-based checks on when the *block* was received.
 // PTC_TIMELINESS_INDEX records whether the block arrived before the PTC deadline
 // (75% of slot), NOT whether the PTC has voted the payload present.
-func (f *ForkChoiceStore) recordBlockTimeliness(block *cltypes.BeaconBlock, blockRoot common.Hash) uint64 {
+func (f *ForkChoiceStore) recordBlockTimeliness(block *cltypes.BeaconBlock, blockRoot common.Hash, timeMs uint64) uint64 {
 	var timeliness [clparams.NumBlockTimelinessDeadlines]bool
-	timeMs := f.timeMs.Load()
 	currentSlot := f.slotAtTimeMs(timeMs)
 	if currentSlot == block.Slot {
 		epoch := f.computeEpochAtSlot(currentSlot)
