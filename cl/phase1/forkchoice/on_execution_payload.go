@@ -604,7 +604,9 @@ func (f *ForkChoiceStore) withPayloadValidationAdmission(ctx context.Context, va
 	return status, err
 }
 
-// NewPayloadWithAdmission serializes EL payload validation across fork-choice and stage retries.
+// NewPayloadWithAdmission serializes payload validation across fork-choice and stage retries.
+// For Gloas, misc.ErrMismatchBlobHashes takes precedence over PayloadStatusInvalidated: callers must
+// reject only the beacon root and must not mark its execution hash invalid.
 func (f *ForkChoiceStore) NewPayloadWithAdmission(
 	ctx context.Context,
 	payload *cltypes.Eth1Block,
@@ -620,8 +622,7 @@ func (f *ForkChoiceStore) NewPayloadWithAdmission(
 		defer finishImport()
 	}
 	return f.withPayloadValidationAdmission(ctx, func() (execution_client.PayloadStatus, error) {
-		// Gloas blob mismatches reject the beacon root without invalidating its execution hash.
-		// Detect them locally because remote Engine API responses lose Go error identity.
+		// Detect blob mismatches locally because remote Engine API responses lose Go error identity.
 		if payload != nil && payload.Version() >= clparams.GloasVersion && versionedHashes != nil {
 			blobErr := ValidatePayloadBlobHashes(payload, versionedHashes)
 			if errors.Is(blobErr, misc.ErrMismatchBlobHashes) {
@@ -1681,6 +1682,8 @@ func (f *ForkChoiceStore) StoreAnchorEnvelope(blockRoot common.Hash, signedEnvel
 // OnExecutionPayload processes an incoming envelope, queuing it if its beacon block is missing.
 // checkBlobData enables PeerDAS availability checks. validatePayload enables immediate EL
 // validation after consensus envelope verification, when an execution client is configured.
+// Setting validatePayload to false defers only the EL call; local signature, commitment and
+// blob checks still run before persistence.
 func (f *ForkChoiceStore) OnExecutionPayload(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, checkBlobData, validatePayload bool) error {
 	return f.OnExecutionPayloadAt(ctx, signedEnvelope, checkBlobData, validatePayload, time.Now())
 }

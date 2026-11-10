@@ -189,8 +189,7 @@ func (f *forkGraphDisk) DumpBeaconStateOnDisk(blockRoot common.Hash, bs *state.C
 	return
 }
 
-// HasEnvelope checks if an envelope exists for the given block root.
-// Only envelopes successfully persisted or validated by this process are reported.
+// HasEnvelope reports cached envelope availability for a retained root.
 // [New in Gloas:EIP7732]
 func (f *forkGraphDisk) HasEnvelope(blockRoot common.Hash) bool {
 	f.lifecycleMu.RLock()
