@@ -45,7 +45,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/recsplit/multiencseq"
 	"github.com/erigontech/erigon/db/seg"
-	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	v3 "github.com/erigontech/erigon/execution/commitment/v3"
@@ -414,9 +413,6 @@ func detectHistoryKeysV2(ii *InvertedIndex, ef *seg.Decompressor) (bool, error) 
 func pendingCommitmentHistoryV3(dt *DomainRoTx) ([]visibleFile, []visibleFile, error) {
 	var vs, efs []visibleFile
 	for _, v := range dt.ht.files {
-		if !v.Version().Less(version.V3_0) {
-			continue
-		}
 		j := slices.IndexFunc(dt.ht.iit.files, func(ef visibleFile) bool { return ef.startTxNum == v.startTxNum && ef.endTxNum == v.endTxNum })
 		if j < 0 {
 			return nil, nil, fmt.Errorf("commitment history %s has no .ef of the same range", v.Fullpath())

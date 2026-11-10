@@ -629,9 +629,7 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 			converted[filepath.Base(f.Fullpath())] = struct{}{}
 		}
 		for _, f := range at.d[kv.CommitmentDomain].ht.files {
-			if f.Version().Major < 3 {
-				converted[filepath.Base(f.Fullpath())] = struct{}{}
-			}
+			converted[filepath.Base(f.Fullpath())] = struct{}{}
 		}
 		unindexed, err := legacyCommitmentFilesNotConverted(at.Dirs(), converted)
 		if err != nil {

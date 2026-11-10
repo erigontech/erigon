@@ -43,7 +43,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/statecfg"
-	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	v3 "github.com/erigontech/erigon/execution/commitment/v3"
@@ -204,9 +203,6 @@ func convertCommitmentFileV3(
 	grandTotalKeys, processedKeys uint64,
 	logger log.Logger,
 ) (sizeDelta int64, ki uint64, err error) {
-	if !file.Version().Less(version.V3_0) {
-		return 0, 0, errSkip
-	}
 	st, err := detectFileState(at, file, 48)
 	if err != nil && !errors.Is(err, errNoNonStateSamples) {
 		return 0, 0, fmt.Errorf("convertCommitmentFileV3 %q: %w", file.Fullpath(), err)
