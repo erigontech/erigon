@@ -56,6 +56,7 @@ func (e *every) due() bool {
 // L1 block to scan from. It waits while L1 cannot name the root or no peer
 // serves it, and never derives that history from L1.
 func (f *Follower) bootFromPeers(ctx context.Context) (uint64, error) {
+	defer f.moving(HeadHistorySync)()
 	waiting, syncing := every{d: statusInterval}, every{d: statusInterval}
 	// The block the root's chain must keep: the local finalized block's
 	// parent for the first sync, the last root for later ones.
@@ -66,6 +67,7 @@ func (f *Follower) bootFromPeers(ctx context.Context) (uint64, error) {
 			return 0, err
 		}
 		if c.Outcome == l1.CommitmentWait {
+			f.setPhase(PhaseWaitingForFinality)
 			if waiting.due() {
 				f.logger.Warn("[eez] waiting for L1 to name the finalized L2 root", "event", "eez.node.sync.waiting", "cause", c.Cause)
 			}
@@ -74,6 +76,7 @@ func (f *Follower) bootFromPeers(ctx context.Context) (uint64, error) {
 			}
 			continue
 		}
+		f.setAnchor(anchorOf(c))
 		var number uint64
 		local := c.Outcome == l1.CommitmentSeedGenesis
 		if local {
@@ -89,6 +92,7 @@ func (f *Follower) bootFromPeers(ctx context.Context) (uint64, error) {
 			return max(c.Finalized.Number, 1), f.seedAt(ctx, c.Finalized, number)
 		}
 
+		f.setPhase(PhaseSyncing)
 		if bound == nil {
 			if bound, err = f.rewindToFinalized(ctx); err != nil {
 				return 0, refused(err)
@@ -98,6 +102,7 @@ func (f *Follower) bootFromPeers(ctx context.Context) (uint64, error) {
 			if errors.Is(err, ErrNotOnL1Chain) || errors.Is(err, deriver.ErrForkChoiceRefused) || ctx.Err() != nil {
 				return 0, refused(err)
 			}
+			f.setPhase(PhaseWaitingForPeers)
 			if syncing.due() {
 				var head uint64
 				if h, err := f.chain.Head(ctx); err == nil {
@@ -249,6 +254,7 @@ func (f *Follower) seedAt(ctx context.Context, finalized l1.Header, number uint6
 	if err := f.deriver.Seed(ctx, r); err != nil {
 		return err
 	}
+	f.anchorReached(number)
 	f.floor, f.l1Finalized = finalized.Number, max(f.l1Finalized, finalized.Number)
 	f.logger.Info("[eez] deriving from L1 finality", "event", "eez.node.sync.seeded", "l1Block", finalized.Number, "l2Block", number)
 	return nil

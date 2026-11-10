@@ -43,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/node/eth"
 	"github.com/erigontech/erigon/node/ethconfig"
+	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/node/rulesconfig"
 	"github.com/erigontech/erigon/rpc/jsonrpc/receipts"
@@ -205,6 +206,21 @@ func localL1(ctx context.Context, backend *eth.Ethereum, dirs datadir.Dirs, logg
 	return l1.NewLocal(db, blockReader, gen, engine, chainConfig, backend.Notifications().Events), nil
 }
 
+// sentryPeers counts the peers of the sentries of backend.
+func sentryPeers(backend *eth.Ethereum) func(context.Context) (uint64, error) {
+	return func(ctx context.Context) (uint64, error) {
+		var n uint64
+		for _, s := range backend.SentryControlServer().Sentries() {
+			r, err := s.PeerCount(ctx, &sentryproto.PeerCountRequest{})
+			if err != nil {
+				return 0, err
+			}
+			n += r.Count
+		}
+		return n, nil
+	}
+}
+
 // dialL1 connects to the L1 node of cfg.
 func dialL1(ctx context.Context, cfg *eez.Config, dirs datadir.Dirs, logger log.Logger) (l1.ChainReader, error) {
 	if cfg.L1KV != "" {
@@ -254,12 +270,13 @@ func startFollower(ctx context.Context, n *node.ErigonNode, stop interface{ Clos
 		}
 	}
 	fetcher := follower.NewFetcher(backend.BackwardBlockDownloader(), backend, chain, logger)
+	fc.PeerCount = sentryPeers(backend)
 	if !l1Only {
 		fc.Peers = fetcher
 		fc.LoopBlockLimit = uint64(loopBlockLimit)
 	}
 	if cfg.P2PListen != nil {
-		if fc.Heads, err = startOverlay(n, cfg, chainConfig, logger); err != nil {
+		if fc.Heads, fc.OverlayPeerCount, err = startOverlay(n, cfg, chainConfig, logger); err != nil {
 			return nil, err
 		}
 		fc.Fetcher = fetcher

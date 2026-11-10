@@ -124,6 +124,8 @@ type Overlay struct {
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 
+	// mu also orders the writes of host and topic before Peers and Publish,
+	// which the node may call while Start runs.
 	mu      sync.Mutex
 	dialing map[peer.ID]struct{}
 	cursor  int
@@ -181,7 +183,10 @@ func (o *Overlay) Start() error {
 		h.Close()
 		return err
 	}
-	o.host, o.topic, o.sub, o.cancel = h, topic, sub, cancel
+	o.mu.Lock()
+	o.host, o.topic = h, topic
+	o.mu.Unlock()
+	o.sub, o.cancel = sub, cancel
 	if srv := o.cfg.Devp2p; srv != nil {
 		srv.LocalNode().Set(Entry(o.port))
 		o.discover = discoveryV5(srv)
@@ -205,27 +210,35 @@ func (o *Overlay) Stop() error {
 }
 
 // Publish gossips e, a head the sequencer signed. The head passes the relay
-// rule first: an error reports a head peers would not relay.
+// rule first: an error reports a head peers would not relay. It is safe to
+// call concurrently with Start.
 func (o *Overlay) Publish(ctx context.Context, e seqsig.Envelope) error {
-	if o.topic == nil {
+	o.mu.Lock()
+	topic := o.topic
+	o.mu.Unlock()
+	if topic == nil {
 		return errors.New("overlay: not started")
 	}
 	data, err := seqsig.Encode(e)
 	if err != nil {
 		return err
 	}
-	return o.topic.Publish(ctx, data)
+	return topic.Publish(ctx, data)
 }
 
 // ID returns the node's peer id.
 func (o *Overlay) ID() peer.ID { return o.self }
 
-// Peers returns the number of connected peers.
+// Peers returns the number of connected peers. It is safe to call
+// concurrently with Start.
 func (o *Overlay) Peers() int {
-	if o.host == nil {
+	o.mu.Lock()
+	h := o.host
+	o.mu.Unlock()
+	if h == nil {
 		return 0
 	}
-	return len(o.host.Network().Peers())
+	return len(h.Network().Peers())
 }
 
 // validate is the topic validator: the relay rule, and the hand-over of an

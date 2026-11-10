@@ -30,15 +30,15 @@ import (
 
 // startOverlay registers on n the signed-head overlay of cfg, on the
 // identity and discv5 table of n's devp2p server, and returns the heads it
-// accepts.
-func startOverlay(n *node.ErigonNode, cfg *eez.Config, chainConfig *chain.Config, logger log.Logger) (<-chan *seqsig.VerifiedHead, error) {
+// accepts and the count of its peers.
+func startOverlay(n *node.ErigonNode, cfg *eez.Config, chainConfig *chain.Config, logger log.Logger) (<-chan *seqsig.VerifiedHead, func() int, error) {
 	srv := n.Backend().P2PServer()
 	if srv == nil {
-		return nil, fmt.Errorf("%w: --%s needs the node's own sentry", eez.ErrConfig, eez.P2PListenFlag.Name)
+		return nil, nil, fmt.Errorf("%w: --%s needs the node's own sentry", eez.ErrConfig, eez.P2PListenFlag.Name)
 	}
 	l2, ok := chainConfig.L2.(*config.L2Config)
 	if !ok {
-		return nil, fmt.Errorf("%w: chain %s has no EEZ l2 section", eez.ErrConfig, chainConfig.ChainName)
+		return nil, nil, fmt.Errorf("%w: chain %s has no EEZ l2 section", eez.ErrConfig, chainConfig.ChainName)
 	}
 	o, err := overlay.New(overlay.Config{
 		Listen: cfg.P2PListen,
@@ -49,8 +49,8 @@ func startOverlay(n *node.ErigonNode, cfg *eez.Config, chainConfig *chain.Config
 		Devp2p: srv,
 	}, logger)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	n.RegisterLifecycle(o)
-	return o.Heads(), nil
+	return o.Heads(), o.Peers, nil
 }

@@ -48,6 +48,17 @@ func (f *Follower) finalizedRoot(ctx context.Context) (*l1.Commitment, error) {
 			"event", "eez.node.sync.history_check_skipped", "cause", c.Cause)
 		return nil, nil
 	}
+	a := anchorOf(c)
+	if c.Outcome == l1.CommitmentAnchor {
+		number, ok, err := f.chain.CanonicalNumber(ctx, c.Root)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			a.L2Block = &number
+		}
+	}
+	f.setAnchor(a)
 	return &c, nil
 }
 
@@ -73,8 +84,13 @@ func (f *Follower) checkRoot(ctx context.Context, before *l1.Commitment) error {
 	if before == nil || before.Outcome != l1.CommitmentAnchor {
 		return nil
 	}
-	if _, ok, err := f.chain.CanonicalNumber(ctx, before.Root); err != nil || ok {
+	number, ok, err := f.chain.CanonicalNumber(ctx, before.Root)
+	if err != nil {
 		return err
+	}
+	if ok {
+		f.anchorReached(number)
+		return nil
 	}
 	return fmt.Errorf("%w: L1-only derivation passed L1 block %d but the local chain lacks its finalized root %x", ErrL1HistoryIncomplete, before.Finalized.Number, before.Root)
 }

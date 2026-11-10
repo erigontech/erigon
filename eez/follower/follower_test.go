@@ -126,12 +126,20 @@ func (n *node) requireBlocks(t *testing.T, want ...*types.Block) {
 	}, 10*time.Second, 5*time.Millisecond)
 }
 
+// run runs the node's follower until the test ends, which waits for it to
+// stop.
 func (n *node) run(t *testing.T) (cancel func(), done <-chan error) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
-	errc := make(chan error, 1)
-	go func() { errc <- n.follower.Run(ctx) }()
-	t.Cleanup(cancel)
+	errc, stopped := make(chan error, 1), make(chan struct{})
+	go func() {
+		defer close(stopped)
+		errc <- n.follower.Run(ctx)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-stopped
+	})
 	return cancel, errc
 }
 

@@ -17,10 +17,14 @@
 package rpc_test
 
 import (
+	"context"
 	"encoding/json"
+	"maps"
 	"net/http/httptest"
 	"slices"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -34,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/eez/internal/testfixtures"
 	"github.com/erigontech/erigon/eez/protocol"
 	eezrpc "github.com/erigontech/erigon/eez/rpc"
+	"github.com/erigontech/erigon/eez/seqsig"
 	"github.com/erigontech/erigon/eez/systemtx"
 	"github.com/erigontech/erigon/execution/types"
 	erigonrpc "github.com/erigontech/erigon/rpc"
@@ -179,4 +184,116 @@ func TestAPI(t *testing.T) {
 	require.NoError(t, client.CallContext(t.Context(), &decoded, "eez_decodeBatch", hexutil.Bytes(input)))
 	require.Len(t, decoded.Payload.Blocks, 1)
 	require.Equal(t, b.Blocks[0].Transactions()[0].Hash(), decoded.Payload.Blocks[0].Transactions[0])
+}
+
+// serve returns a client of api over JSON-RPC.
+func serve(t *testing.T, api *eezrpc.API) *erigonrpc.Client {
+	t.Helper()
+	server := erigonrpc.NewServer(1, false, false, true, log.New(), 0)
+	reg := api.API()
+	require.NoError(t, server.RegisterName(reg.Namespace, reg.Service))
+	t.Cleanup(server.Stop)
+	hs := httptest.NewServer(server)
+	t.Cleanup(hs.Close)
+	client, err := erigonrpc.DialContext(t.Context(), hs.URL, log.New())
+	require.NoError(t, err)
+	t.Cleanup(client.Close)
+	return client
+}
+
+func followerStatus(t *testing.T, client *erigonrpc.Client) map[string]any {
+	t.Helper()
+	var raw json.RawMessage
+	require.NoError(t, client.CallContext(t.Context(), &raw, "eez_followerStatus"))
+	var fields map[string]any
+	require.NoError(t, json.Unmarshal(raw, &fields))
+	return fields
+}
+
+// TestFollowerStatus renders the status of a follower before boot, of an
+// L1-only follower, and of one that follows signed heads: the derivation
+// fields as before, the sync mode and phase, L1's finalized block and root,
+// the devp2p and overlay peers, the latest head of each signing source and
+// the head's source, null where there is none.
+func TestFollowerStatus(t *testing.T) {
+	c := derivertest.NewComposer(t)
+	settled := c.Compose(nil, derivertest.Block{Coinbase: common.Address{1}, Extra: []byte{}, Txs: [][]byte{c.Transfer(common.Address{2}, 1)}})
+	c.Post(derivertest.Posting{Batch: settled})
+	f, err := c.L1.Head(t.Context())
+	require.NoError(t, err)
+	require.NoError(t, c.L1.Finalize(f.Number))
+	unsettled := c.Compose(nil, derivertest.Block{Coinbase: common.Address{3}, Extra: []byte{}, Txs: [][]byte{}}).Blocks[0]
+
+	api := eezrpc.NewAPI()
+	client := serve(t, api)
+	attach := func(cfg follower.Config) *follower.Follower {
+		_, chain := derivertest.NewL2(t)
+		cfg.Dir = t.TempDir()
+		fl, err := follower.New(c.L1, chain, derivertest.Config(), cfg, log.New())
+		require.NoError(t, err)
+		api.Attach(fl)
+		return fl
+	}
+	keys := []string{
+		"anchor", "cursor", "finalized", "headSource", "l1Finalized", "l1Scanned", "lastSettlement", "overlayPeers",
+		"peers", "phase", "safe", "signedHeads", "syncMode",
+	}
+
+	attach(follower.DefaultConfig)
+	fields := followerStatus(t, client)
+	require.Equal(t, keys, slices.Sorted(maps.Keys(fields)))
+	require.Equal(t, "booting", fields["phase"])
+	require.Equal(t, "l1_only", fields["syncMode"])
+	require.Equal(t, "0x0", fields["cursor"])
+	for _, k := range []string{"anchor", "lastSettlement", "overlayPeers", "signedHeads", "headSource"} {
+		require.Nil(t, fields[k], k)
+	}
+
+	require.NoError(t, attach(follower.DefaultConfig).Boot(t.Context()))
+	fields = followerStatus(t, client)
+	require.Equal(t, keys, slices.Sorted(maps.Keys(fields)))
+	require.Equal(t, "0x1", fields["cursor"])
+	require.Equal(t, "following", fields["phase"])
+	require.Equal(t, map[string]any{
+		"l1Block":     hexutil.Uint64(f.Number).String(),
+		"l1BlockHash": f.Hash.Hex(),
+		"root":        settled.Blocks[0].Hash().Hex(),
+		"l2Block":     "0x1",
+	}, fields["anchor"])
+	require.Equal(t, "0x0", fields["peers"])
+	require.Nil(t, fields["overlayPeers"])
+	require.Nil(t, fields["signedHeads"])
+	require.Equal(t, "derivation", fields["headSource"])
+
+	heads := make(chan *seqsig.VerifiedHead, 1)
+	var overlayPeers atomic.Int64
+	cfg := follower.DefaultConfig
+	cfg.Heads = heads
+	cfg.PeerCount = func(context.Context) (uint64, error) { return 3, nil }
+	cfg.OverlayPeerCount = func() int { return int(overlayPeers.Load()) }
+	fl := attach(cfg)
+	require.NoError(t, fl.Boot(t.Context()))
+	require.Eventually(t, func() bool { return followerStatus(t, client)["peers"] == "0x3" }, 10*time.Second, time.Millisecond)
+	fields = followerStatus(t, client)
+	require.Equal(t, "0x0", fields["overlayPeers"])
+	require.Equal(t, []any{}, fields["signedHeads"])
+
+	overlayPeers.Store(2)
+	signer := common.HexToAddress("0x5e9")
+	heads <- &seqsig.VerifiedHead{Signer: signer, Block: unsettled, Head: seqsig.Head{
+		RollupID: 1, Number: unsettled.NumberU64(), BlockHash: unsettled.Hash(), ParentHash: unsettled.ParentHash(),
+		EpochMs: 1_700_000_000_000, Counter: 7,
+	}}
+	require.NoError(t, fl.StepOverlay(t.Context()))
+	fields = followerStatus(t, client)
+	require.Equal(t, keys, slices.Sorted(maps.Keys(fields)))
+	require.Equal(t, "0x2", fields["overlayPeers"])
+	require.Equal(t, []any{map[string]any{
+		"signer":  signer.Hex(),
+		"epochMs": "0x18bcfe56800",
+		"counter": "0x7",
+		"number":  "0x2",
+		"hash":    unsettled.Hash().Hex(),
+	}}, fields["signedHeads"])
+	require.Equal(t, "signed_head", fields["headSource"])
 }

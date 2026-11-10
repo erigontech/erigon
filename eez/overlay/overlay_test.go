@@ -338,3 +338,51 @@ func TestStopTwice(t *testing.T) {
 	require.NoError(t, o.Stop())
 	require.NoError(t, o.Stop())
 }
+
+// TestPeersDuringStart: the node's RPC may count peers while the overlay
+// starts.
+func TestPeersDuringStart(t *testing.T) {
+	o, err := New(Config{Listen: newTestNode(t, 1).listen(), Key: key(1), Domain: testDomain, Signer: addr(0)}, log.New())
+	require.NoError(t, err)
+	done := make(chan struct{})
+	counted := make(chan int)
+	go func() {
+		var peers int
+		for {
+			select {
+			case <-done:
+				counted <- peers
+				return
+			default:
+				peers = max(peers, o.Peers())
+			}
+		}
+	}()
+	require.NoError(t, o.Start())
+	close(done)
+	require.Zero(t, <-counted)
+	require.NoError(t, o.Stop())
+}
+
+// TestPublishDuringStart: a node may publish while the overlay starts.
+func TestPublishDuringStart(t *testing.T) {
+	o, err := New(Config{Listen: newTestNode(t, 1).listen(), Key: key(1), Domain: testDomain, Signer: addr(1)}, log.New())
+	require.NoError(t, err)
+	e := signed(t, 1, head(nowMs(), 1, 1), nil)
+	done, published := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(published)
+		for {
+			select {
+			case <-done:
+				return
+			default:
+				_ = o.Publish(t.Context(), e)
+			}
+		}
+	}()
+	require.NoError(t, o.Start())
+	close(done)
+	<-published
+	require.NoError(t, o.Stop())
+}
