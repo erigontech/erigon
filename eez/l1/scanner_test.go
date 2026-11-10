@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"net/http/httptest"
 	"slices"
 	"testing"
 
@@ -29,8 +30,10 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/eez/internal/testfixtures"
 	"github.com/erigontech/erigon/eez/l1"
+	"github.com/erigontech/erigon/eez/l1/l1test"
 	"github.com/erigontech/erigon/eez/l1/recording"
 	"github.com/erigontech/erigon/eez/protocol"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -499,11 +502,13 @@ func TestScanPostRouting(t *testing.T) {
 }
 
 // unserved is a source that does not serve the logs of blocks below logsFrom,
-// nor the transactions of block txGone, nor the header of block headerGone;
-// with lagging, it serves logs one block at a time only.
+// nor of a range holding block logsGone when set, nor the transactions of
+// block txGone, nor the header of block headerGone; with lagging, it serves
+// logs one block at a time only.
 type unserved struct {
 	*recording.MemoryChain
 	logsFrom   uint64
+	logsGone   uint64
 	txGone     common.Hash
 	headerGone common.Hash
 	lagging    bool
@@ -517,7 +522,7 @@ func (r unserved) HeaderByHash(ctx context.Context, hash common.Hash) (*l1.Heade
 }
 
 func (r unserved) Logs(ctx context.Context, from, to uint64, address common.Address, topics [][]common.Hash) ([]*types.Log, error) {
-	if from < r.logsFrom || (r.lagging && to > from) {
+	if from < r.logsFrom || (r.lagging && to > from) || (r.logsGone > 0 && from <= r.logsGone && r.logsGone <= to) {
 		return nil, fmt.Errorf("%w: logs of [%d, %d]", l1.ErrNotFound, from, to)
 	}
 	return r.MemoryChain.Logs(ctx, from, to, address, topics)
@@ -531,9 +536,9 @@ func (r unserved) TransactionByBlockHashAndIndex(ctx context.Context, blockHash 
 }
 
 // TestScanUnserved: a scan reports the first block it needs that the source
-// does not serve, whether its logs, a posting transaction or the header of a
-// block holding a settlement; a range refused while its first block is
-// served names none.
+// does not serve, whether its logs, also past the first block of the range,
+// a posting transaction or the header of a block holding a settlement; a
+// range refused while each of its blocks is served alone names none.
 func TestScanUnserved(t *testing.T) {
 	sc := newScanChain(t)
 	var u *l1.UnservedError
@@ -541,6 +546,11 @@ func TestScanUnserved(t *testing.T) {
 	require.ErrorAs(t, err, &u)
 	require.Equal(t, uint64(2), u.Block)
 	require.ErrorIs(t, err, l1.ErrNotFound)
+	for _, gone := range []uint64{1, 7, 10} {
+		_, _, err = l1.NewScanner(unserved{MemoryChain: sc.MemoryChain, logsGone: gone}, testRegistry, 1).Scan(t.Context(), 0, 10)
+		require.ErrorAs(t, err, &u, "logs of block %d", gone)
+		require.Equal(t, gone, u.Block)
+	}
 
 	h, err := sc.HeaderByNumber(t.Context(), 8)
 	require.NoError(t, err)
@@ -554,4 +564,137 @@ func TestScanUnserved(t *testing.T) {
 	_, _, err = l1.NewScanner(unserved{MemoryChain: sc.MemoryChain, lagging: true}, testRegistry, 1).Scan(t.Context(), 0, 10)
 	require.ErrorIs(t, err, l1.ErrNotFound)
 	require.NotErrorAs(t, err, &u, "names no block")
+}
+
+// refusals fails each log query with what refuse returns for its range,
+// counting the queries.
+type refusals struct {
+	*recording.MemoryChain
+	refuse  func(from, to uint64) error
+	queries *int
+}
+
+func (r refusals) Logs(ctx context.Context, from, to uint64, address common.Address, topics [][]common.Hash) ([]*types.Log, error) {
+	*r.queries++
+	if err := r.refuse(from, to); err != nil {
+		return nil, err
+	}
+	return r.MemoryChain.Logs(ctx, from, to, address, topics)
+}
+
+// TestUnservedLogs: the search for the block a refused range of [0, 10]
+// lacks costs one query for history pruned from below, names none when a
+// block it ends on is served alone or a query fails otherwise, and keeps an
+// error that is no refusal or names a block already.
+func TestUnservedLogs(t *testing.T) {
+	sc := newScanChain(t)
+	notFound := func(from, to uint64) error { return fmt.Errorf("%w: logs of [%d, %d]", l1.ErrNotFound, from, to) }
+	reset := errors.New("connection reset")
+	holds := func(from, to, n uint64) bool { return from <= n && n <= to }
+	refused := notFound(0, 10)
+	named := &l1.UnservedError{Block: 3, Err: refused}
+	for _, c := range []struct {
+		name    string
+		err     error
+		refuse  func(from, to uint64) error
+		block   int // the block named, -1 for none
+		queries int // -1 for any
+	}{
+		{"pruned below block 4", refused, func(from, to uint64) error {
+			if from < 4 {
+				return notFound(from, to)
+			}
+			return nil
+		}, 0, 1},
+		{"block 7 refused", refused, func(from, to uint64) error {
+			if holds(from, to, 7) {
+				return notFound(from, to)
+			}
+			return nil
+		}, 7, -1},
+		{"behind block 6", refused, func(from, to uint64) error {
+			if to >= 6 {
+				return notFound(from, to)
+			}
+			return nil
+		}, 6, -1},
+		{"ranges wider than 6 refused", refused, func(from, to uint64) error {
+			if to-from >= 6 {
+				return notFound(from, to)
+			}
+			return nil
+		}, -1, -1},
+		{"probe failing otherwise", refused, func(from, to uint64) error {
+			switch {
+			case from == to && from > 0:
+				return notFound(from, to)
+			case from < to:
+				return reset
+			}
+			return nil
+		}, -1, -1},
+		{"confirmation failing otherwise", refused, func(from, to uint64) error {
+			switch {
+			case from == 7 && to == 7:
+				return reset
+			case holds(from, to, 7):
+				return notFound(from, to)
+			}
+			return nil
+		}, -1, -1},
+		{"no refusal", reset, notFound, -1, 0},
+		{"a block named", named, notFound, 3, 0},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			var queries int
+			r := refusals{MemoryChain: sc.MemoryChain, refuse: c.refuse, queries: &queries}
+			got := l1.UnservedLogs(t.Context(), r, c.err, 0, 10, testRegistry, l1.RegistryTopics)
+			var u *l1.UnservedError
+			if c.block < 0 {
+				require.Equal(t, c.err, got)
+				require.NotErrorAs(t, got, &u)
+			} else {
+				require.ErrorAs(t, got, &u)
+				require.Equal(t, uint64(c.block), u.Block)
+				require.ErrorIs(t, got, c.err)
+			}
+			if c.queries >= 0 {
+				require.Equal(t, c.queries, queries)
+			}
+		})
+	}
+}
+
+// missingTx fails a log query over block gone as an Erigon node lacking one
+// of the block's matched transactions does.
+type missingTx struct {
+	*recording.MemoryChain
+	gone uint64
+}
+
+func (r missingTx) Logs(ctx context.Context, from, to uint64, address common.Address, topics [][]common.Hash) ([]*types.Log, error) {
+	if from <= r.gone && r.gone <= to {
+		return nil, fmt.Errorf("transaction not found at block %d, index 0", r.gone)
+	}
+	return r.MemoryChain.Logs(ctx, from, to, address, topics)
+}
+
+// TestScanUnservedRPC: a scan over JSON-RPC names the block whose logs the L1
+// node fails a range for, past the first block of the range.
+func TestScanUnservedRPC(t *testing.T) {
+	sc := newScanChain(t)
+	server, err := l1test.NewServer(missingTx{MemoryChain: sc.MemoryChain, gone: 8}, log.New())
+	require.NoError(t, err)
+	t.Cleanup(server.Stop)
+	httpServer := httptest.NewServer(server)
+	t.Cleanup(httpServer.Close)
+	r, err := l1.DialRPC(t.Context(), httpServer.URL, log.New())
+	require.NoError(t, err)
+	t.Cleanup(r.Close)
+
+	_, _, err = l1.NewScanner(r, testRegistry, 1).Scan(t.Context(), 0, 10)
+	var u *l1.UnservedError
+	require.ErrorAs(t, err, &u)
+	require.Equal(t, uint64(8), u.Block)
+	require.ErrorContains(t, err, "transaction not found at block 8")
 }

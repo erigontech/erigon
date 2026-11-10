@@ -55,18 +55,53 @@ func (e *UnservedError) Error() string {
 func (e *UnservedError) Unwrap() error { return e.Err }
 
 // UnservedLogs returns err, the failure of a query of the logs of [from, to],
-// as an UnservedError of block from when the source does not serve that
-// block's logs either: a refused range does not say which block it lacks.
+// as an UnservedError of the first block in it whose logs the source refuses
+// alone: a refused range does not say which block it lacks. History pruned
+// from below costs one query, a block further in about log2(to-from) more by
+// halving the range. A search ending on a block served alone, or a query
+// failing otherwise, names none; an UnservedError err is returned as is. A
+// source behind the range's end names the first block above its head.
 func UnservedLogs(ctx context.Context, r ChainReader, err error, from, to uint64, address common.Address, topics [][]common.Hash) error {
-	if !errors.Is(err, ErrNotFound) {
+	if _, ok := errors.AsType[*UnservedError](err); ok || !errors.Is(err, ErrNotFound) {
 		return err
 	}
-	if from < to {
-		if _, perr := r.Logs(ctx, from, from, address, topics); !errors.Is(perr, ErrNotFound) {
+	// refused queries the logs of [lo, hi]; ok is false when the source
+	// fails them other than as not served.
+	refused := func(lo, hi uint64) (gone, ok bool) {
+		_, perr := r.Logs(ctx, lo, hi, address, topics)
+		gone = errors.Is(perr, ErrNotFound)
+		return gone, gone || perr == nil
+	}
+	// alone reports whether the logs of lo were refused on their own.
+	lo, hi, alone := from, to, from == to
+	if !alone {
+		gone, ok := refused(from, from)
+		switch {
+		case !ok:
+			return err
+		case gone:
+			return &UnservedError{Block: from, Err: err}
+		}
+		lo = from + 1
+	}
+	for lo < hi {
+		mid := lo + (hi-lo)/2
+		gone, ok := refused(lo, mid)
+		switch {
+		case !ok:
+			return err
+		case gone:
+			hi, alone = mid, lo == mid
+		default:
+			lo = mid + 1
+		}
+	}
+	if !alone {
+		if gone, ok := refused(lo, lo); !ok || !gone {
 			return err
 		}
 	}
-	return &UnservedError{Block: from, Err: err}
+	return &UnservedError{Block: lo, Err: err}
 }
 
 // LogChunk is the widest range the scanner asks for at once.
