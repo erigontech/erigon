@@ -115,9 +115,9 @@ func (w *Writer) flush(final bool) error {
 			slot := tail & r.sqMask
 			r.fillSQE(slot, int(w.file.Fd()), uint64(w.offset), w.buf, 0)
 			s := r.sqes[slot*sqeSize:]
-			s[0] = 23
+			s[0] = opWrite
 			if final {
-				s[1] = 4
+				s[1] = sqeIOLink
 			}
 			r.sqArray[slot] = slot
 			tail++
@@ -127,7 +127,8 @@ func (w *Writer) flush(final bool) error {
 			slot := tail & r.sqMask
 			s := r.sqes[slot*sqeSize : (slot+1)*sqeSize]
 			clear(s)
-			s[0] = 3
+			s[0] = opFsync
+			s[1] = sqeIODrain
 			*(*int32)(unsafe.Pointer(&s[4])) = int32(w.file.Fd())
 			*(*uint64)(unsafe.Pointer(&s[32])) = uint64(count)
 			r.sqArray[slot] = slot
@@ -138,13 +139,23 @@ func (w *Writer) flush(final bool) error {
 			return nil
 		}
 		atomic.StoreUint32(r.sqTail, tail)
-		res, err := r.complete(count)
+		var res [2]int32
+		err := r.complete(count, func(id uint64, result int32) error {
+			if id >= uint64(count) {
+				return unix.EIO
+			}
+			res[id] = result
+			return nil
+		})
 		runtime.KeepAlive(w.buf)
 		if err != nil {
-			if !errors.Is(err, ErrRingReset) {
-				r.Abandon(w.buf)
+			if errors.Is(err, ErrRingReset) {
+				r.Close()
 				w.ring = nil
+				continue
 			}
+			r.Abandon(w.buf)
+			w.ring = nil
 			return err
 		}
 		if len(w.buf) > 0 {
@@ -155,7 +166,7 @@ func (w *Writer) flush(final bool) error {
 					w.ring = nil
 					continue
 				}
-				return errno
+				return &os.PathError{Op: "write", Path: w.file.Name(), Err: errno}
 			}
 			if res[0] == 0 || int(res[0]) > len(w.buf) {
 				return io.ErrShortWrite
@@ -174,44 +185,8 @@ func (w *Writer) flush(final bool) error {
 				w.ring = nil
 				return w.file.Sync()
 			}
-			return errno
+			return &os.PathError{Op: "sync", Path: w.file.Name(), Err: errno}
 		}
 		return nil
 	}
-}
-
-func (r *Ring) complete(count int) ([2]int32, error) {
-	var results [2]int32
-	submitted, reaped := 0, 0
-	for reaped < count {
-		head := atomic.LoadUint32(r.cqHead)
-		tail := atomic.LoadUint32(r.cqTail)
-		for head != tail && reaped < count {
-			cqe := r.cqes + (head&r.cqMask)*cqeSize
-			id := *(*uint64)(unsafe.Pointer(&r.cqRing[cqe]))
-			if id >= uint64(count) {
-				return results, unix.EIO
-			}
-			results[id] = int32(*p32(r.cqRing, cqe+8))
-			head++
-			reaped++
-		}
-		atomic.StoreUint32(r.cqHead, head)
-		if reaped == count {
-			break
-		}
-		taken, _, errno := unix.Syscall6(unix.SYS_IO_URING_ENTER, uintptr(r.fd), uintptr(count-submitted), uintptr(count-reaped), enterGetevents, 0, 0)
-		if errno == unix.EINTR {
-			continue
-		}
-		if errno != 0 {
-			if submitted == reaped {
-				r.reset()
-				return results, errors.Join(ErrRingReset, errno)
-			}
-			return results, errno
-		}
-		submitted += int(taken)
-	}
-	return results, nil
 }

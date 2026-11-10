@@ -221,6 +221,55 @@ func TestWriterSyncsAfterFallback(t *testing.T) {
 	}
 }
 
+func TestWriterFsyncDrainsEarlierWrite(t *testing.T) {
+	f, err := os.Create(filepath.Join(t.TempDir(), "output"))
+	require.NoError(t, err)
+	w := NewWriter(f)
+	require.NotNil(t, w.ring)
+	defer func() {
+		if w.ring != nil {
+			w.ring.Close()
+		}
+		_ = f.Close()
+	}()
+
+	data := []byte("data")
+	_, err = w.Write(data)
+	require.NoError(t, err)
+	injectCompletion(w.ring, 0, int32(len(data)))
+	injectCompletion(w.ring, 1, 0)
+	require.NoError(t, w.flush(true))
+
+	flags := w.ring.sqes[sqeSize+1]
+	require.Equal(t, uint8(1<<1), flags, "fsync SQE flags: got %d", flags)
+}
+
+func TestWriterFallsBackAfterRingReset(t *testing.T) {
+	f, err := os.Create(filepath.Join(t.TempDir(), "output"))
+	require.NoError(t, err)
+	w := NewWriter(f)
+	require.NotNil(t, w.ring)
+	ringFD := w.ring.fd
+	defer func() {
+		if w.ring != nil {
+			w.ring.fd = ringFD
+			w.ring.Close()
+		}
+		_ = f.Close()
+	}()
+
+	data := []byte("data after ring reset")
+	_, err = w.Write(data)
+	require.NoError(t, err)
+	w.ring.fd = -1
+
+	err = w.flush(true)
+	require.NoError(t, err, "flush returned %v after ErrRingReset", err)
+	actual, err := os.ReadFile(f.Name())
+	require.NoError(t, err)
+	require.Equal(t, data, actual)
+}
+
 func injectCompletion(r *Ring, id uint64, res int32) {
 	tail := atomic.LoadUint32(r.cqTail)
 	cqe := r.cqes + (tail&r.cqMask)*cqeSize
