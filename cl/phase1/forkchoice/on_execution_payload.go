@@ -877,10 +877,8 @@ const (
 	queueMissingEnvelope missingEnvelopeMode = true
 )
 
-// applyEnvelope processes envelope mutations under f.mu except while waiting for EL validation.
-// Returns (true, nil) if the envelope was applied,
-// (false, nil) if it was skipped (already processed or block not yet known),
-// or (false, err) on failure.
+// applyEnvelope processes envelope mutations under f.mu and yields it during validation.
+// It returns true only when this call persists the envelope.
 func (f *ForkChoiceStore) applyEnvelope(
 	ctx context.Context,
 	signedEnvelope *cltypes.SignedExecutionPayloadEnvelope,
@@ -1220,26 +1218,7 @@ func (f *ForkChoiceStore) validateEnvelopePersistenceCommitments(block *cltypes.
 	if validatePayload && f.engine != nil {
 		return cltypes.ValidateExecutionPayloadEnvelopeBidCommitments(f.beaconCfg, block, signedEnvelope)
 	}
-	if err := cltypes.ValidateExecutionPayloadEnvelopeCommitments(f.beaconCfg, block, signedEnvelope); err != nil {
-		return err
-	}
-	versionedHashes, err := executionPayloadVersionedHashes(block)
-	if err != nil {
-		return err
-	}
-	envelope := signedEnvelope.Message
-	err = ValidatePayloadBlobHashes(envelope.Payload, versionedHashes)
-	if errors.Is(err, misc.ErrMismatchBlobHashes) {
-		f.RejectEnvelope(envelope.BeaconBlockRoot)
-	} else if err != nil {
-		f.MarkPayloadStatusAndGasLimitIfRetained(
-			envelope.BeaconBlockRoot,
-			envelope.Payload.BlockHash,
-			execution_client.PayloadStatusInvalidated,
-			envelope.Payload.GasLimit,
-		)
-	}
-	return err
+	return cltypes.ValidateExecutionPayloadEnvelopeCommitments(f.beaconCfg, block, signedEnvelope)
 }
 
 func (f *ForkChoiceStore) validateKnownEnvelopeCommitments(signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, validatePayload bool) (bool, error) {
@@ -1439,6 +1418,33 @@ func (f *ForkChoiceStore) applyEnvelopeCoordinated(
 			} else {
 				return false, err
 			}
+		}
+	} else {
+		// Signature and consensus checks must pass before a local payload error becomes permanent.
+		versionedHashes, err := executionPayloadVersionedHashes(block)
+		if err != nil {
+			return false, err
+		}
+		blobErr := f.withForkChoiceLockYielded(func() error {
+			return ValidatePayloadBlobHashes(envelope.Payload, versionedHashes)
+		})
+		block, err = f.refreshEnvelopeBlockLocked(beaconBlockRoot)
+		if err != nil {
+			return false, fmt.Errorf("OnExecutionPayload: failed to refresh block after blob validation: %w", err)
+		}
+		if blobErr != nil {
+			if errors.Is(blobErr, misc.ErrMismatchBlobHashes) {
+				f.rejectEnvelopeLocked(beaconBlockRoot)
+			} else {
+				f.markPayloadStatusIfRetainedLocked(beaconBlockRoot, envelope.Payload.BlockHash, execution_client.PayloadStatusInvalidated, &envelope.Payload.GasLimit)
+			}
+			return false, fmt.Errorf("%w: OnExecutionPayload: local blob validation failed: %w", ErrInvalidExecutionPayloadEnvelope, blobErr)
+		}
+		if err := f.rejectKnownInvalidPayloadStatusLocked(execution_client.PayloadStatusNotValidated, beaconBlockRoot, envelope.Payload.BlockHash); err != nil {
+			return false, err
+		}
+		if f.forkGraph.HasEnvelope(beaconBlockRoot) {
+			return false, nil
 		}
 	}
 

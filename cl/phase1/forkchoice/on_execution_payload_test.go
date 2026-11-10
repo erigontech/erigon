@@ -4298,6 +4298,51 @@ func TestValidatePayloadBlobHashesRejectsUndecodableCandidates(t *testing.T) {
 	}
 }
 
+func TestExecutionPayloadInvalidSignatureDoesNotRecordTerminalVerdict(t *testing.T) {
+	for _, failure := range []string{"blob mismatch", "decode failure"} {
+		for _, mode := range []struct {
+			name            string
+			withEngine      bool
+			validatePayload bool
+		}{
+			{name: "validated", withEngine: true, validatePayload: true},
+			{name: "deferred", withEngine: true},
+			{name: "without engine", validatePayload: true},
+		} {
+			t.Run(failure+"/"+mode.name, func(t *testing.T) {
+				cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
+				payload := envelope.Message.Payload
+				if failure == "blob mismatch" {
+					block.Block.Body.SignedExecutionPayloadBid.Message.BlobKzgCommitments.Append(&cltypes.KZGCommitment{1})
+				} else {
+					payload.Transactions = solid.NewProgressiveTransactionsSSZFromTransactions([][]byte{{types.BlobTxType, 0xc0}})
+					requestsHash := cltypes.ComputeExecutionRequestHash(cltypes.GetExecutionRequestsList(cfg, envelope.Message.ExecutionRequests))
+					var err error
+					payload.BlockHash, err = payload.ComputeBlockHash(&envelope.Message.ParentBeaconBlockRoot, requestsHash, nil)
+					require.NoError(t, err)
+					block.Block.Body.SignedExecutionPayloadBid.Message.BlockHash = payload.BlockHash
+				}
+				rebindAdmissionBlockRoot(t, blockState, block, envelope)
+				signAdmissionEnvelopeWithKey(t, cfg, blockState, envelope, otherSigningKey)
+				f, graph := newEnvelopeApplicationTestStore(t, cfg, blockState, block)
+				if mode.withEngine {
+					f.engine = execution_client.NewMockExecutionEngine(gomock.NewController(t))
+				}
+
+				err := f.OnExecutionPayload(t.Context(), envelope, false, mode.validatePayload)
+
+				require.ErrorIs(t, err, ErrInvalidExecutionPayloadEnvelope)
+				require.False(t, f.IsEnvelopeRejected(envelope.Message.BeaconBlockRoot))
+				require.False(t, graph.invalid.Load())
+				_, recorded := f.GetRecentExecutionPayloadStatus(payload.BlockHash)
+				require.False(t, recorded)
+				require.False(t, graph.HasEnvelope(envelope.Message.BeaconBlockRoot))
+				require.ErrorContains(t, err, "signature")
+			})
+		}
+	}
+}
+
 func TestExecutionPayloadDecodeFailureIsTerminal(t *testing.T) {
 	for _, tx := range []struct {
 		name   string
@@ -5305,7 +5350,7 @@ func TestExecutionPayloadCommitmentFallbackRefreshesAfterYield(t *testing.T) {
 	require.NoError(t, err)
 	f := &ForkChoiceStore{beaconCfg: cfg, forkGraph: graph, eth2Roots: eth2Roots}
 	require.NoError(t, f.OnExecutionPayload(t.Context(), envelope, false, false))
-	require.Equal(t, int32(3), graph.blockReads.Load())
+	require.Equal(t, int32(4), graph.blockReads.Load())
 	require.True(t, graph.HasEnvelope(envelope.Message.BeaconBlockRoot))
 }
 
