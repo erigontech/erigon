@@ -273,15 +273,50 @@ func (pt *poolTask) settle(p *taskPool, result *exec.TxResult, target int) bool 
 
 func (pt *poolTask) publish(p *taskPool) bool {
 	pt.send(p, pt.result)
+	if !pt.parkPublished() {
+		return pt.rerunAfter(pt.tv.index - 1)
+	}
+	return false
+}
+
+// parkPublished ends the task after its result was handed over. It returns false when a
+// re-exec signal latched first, so the task must run again.
+func (pt *poolTask) parkPublished() bool {
 	pt.result = nil
 	pt.next = psReexec
 	pt.mu.Lock()
+	defer pt.mu.Unlock()
 	if pt.pending {
 		pt.pending = false
-		pt.mu.Unlock()
-		return pt.rerunAfter(pt.tv.index - 1)
+		return false
 	}
 	pt.parked = true
-	pt.mu.Unlock()
-	return false
+	return true
+}
+
+// recheckInOrder is the recheck and publish of step for the result loop: it returns the
+// result to process, or nil when the task re-runs on the pool.
+func (pt *poolTask) recheckInOrder(p *taskPool) (result *exec.TxResult) {
+	be, tv := pt.be, pt.tv
+	defer func() {
+		if rec := recover(); rec != nil {
+			result = &exec.TxResult{Task: tv, Err: fmt.Errorf("in-order recheck panic (block %d tx %d): %v\n%s", be.blockNum, tv.index, rec, dbg.Stack()), Operational: true}
+		}
+	}()
+	valid, _, blocker := be.selfLoopEvaluate(tv, pt.result)
+	if !valid {
+		pt.requeueRerun(p, blocker)
+		return nil
+	}
+	result = pt.result
+	if !pt.parkPublished() {
+		pt.requeueRerun(p, tv.index-1)
+	}
+	return result
+}
+
+func (pt *poolTask) requeueRerun(p *taskPool, named int) {
+	if pt.rerunAfter(named) {
+		p.push(pt)
+	}
 }

@@ -1583,7 +1583,15 @@ func (pe *parallelExecutor) processSingleResult(ctx context.Context, applyTx kv.
 	// preceding blockResult to trigger the fast-path install above).
 	pe.ensureChangesetAccumulator(txResult.Version().BlockNum, blockExecutor.blockHash)
 
-	return blockExecutor.nextResult(ctx, pe, txResult, applyTx)
+	blockResult, err := blockExecutor.nextResult(ctx, pe, txResult, applyTx)
+	for blockResult == nil && err == nil && blockExecutor.nextRecheck != nil {
+		pt := blockExecutor.nextRecheck
+		blockExecutor.nextRecheck = nil
+		if result := pt.recheckInOrder(pe.pool); result != nil {
+			blockResult, err = blockExecutor.nextResult(ctx, pe, result, applyTx)
+		}
+	}
+	return blockResult, err
 }
 
 func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.CancelCauseFunc, error) {
@@ -2634,6 +2642,9 @@ type blockExecutor struct {
 	// (no goroutine); the committed-dependent re-check re-queues it to re-execute.
 	poolTasks []*poolTask
 	pool      *taskPool
+	// nextRecheck is the task the last commit unblocked next in commit order. The result loop
+	// rechecks it inline: a pool round trip per tx costs more than the recheck on a dependency chain.
+	nextRecheck *poolTask
 	// runInc[i] is the highest incarnation ever RUN for task i, enforcing that each
 	// execution uses a strictly ascending incarnation. Init -1.
 	runInc []atomic.Int64
@@ -3010,6 +3021,10 @@ func (be *blockExecutor) signalCommitted(tx int) {
 	delete(be.wakeAt, tx)
 	be.wakeMu.Unlock()
 	for _, pt := range waiters {
+		if pt.next == psRecheck && pt.tv.index == tx+1 && be.nextRecheck == nil {
+			be.nextRecheck = pt
+			continue
+		}
 		be.pool.push(pt)
 	}
 }
