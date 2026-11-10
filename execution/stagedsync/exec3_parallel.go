@@ -1128,12 +1128,21 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 					if wall > 0 && pe.workerCount > 0 {
 						occ = float64(busy) / (float64(pe.workerCount) * float64(wall))
 					}
+					cpAbortNs, cpCancelNs, cpPauseNs := blockExecutor.probeCriticalPath()
 					pe.logger.Info("[np-phase] execloop", "blk", blockResult.BlockNum,
+						"npCpAbortNs", cpAbortNs, "npCpCancelNs", cpCancelNs, "npCpPauseNs", cpPauseNs,
+						"npDepTailNs", blockExecutor.probe.depTailNs.Load(),
 						"wait", npWait, "process", npProc,
 						"busy", busy, "workers", pe.workerCount, "occ", fmt.Sprintf("%.2f", occ),
 						"tasks", len(blockExecutor.tasks), "exec", blockExecutor.cntExec,
 						"spec", blockExecutor.cntSpecExec,
 						"valFail", blockExecutor.cntValidationFail,
+						"npRuns", blockExecutor.probe.runs.Load(), "npRunNs", blockExecutor.probe.runNs.Load(),
+						"npSpine", blockExecutor.probe.reruns[rerunSpine].Load(), "npWasteSpineNs", blockExecutor.probe.wasteNs[rerunSpine].Load(),
+						"npDep", blockExecutor.probe.reruns[rerunDep].Load(), "npWasteDepNs", blockExecutor.probe.wasteNs[rerunDep].Load(),
+						"npInvalid", blockExecutor.probe.reruns[rerunInvalid].Load(), "npWasteInvalidNs", blockExecutor.probe.wasteNs[rerunInvalid].Load(),
+						"npRecheck", blockExecutor.probe.reruns[rerunRecheck].Load(), "npWasteRecheckNs", blockExecutor.probe.wasteNs[rerunRecheck].Load(),
+						"npErr", blockExecutor.probe.reruns[rerunErr].Load(), "npWasteErrNs", blockExecutor.probe.wasteNs[rerunErr].Load(),
 						"spineUsPerIter", fmt.Sprintf("%.1f", float64(npProc.Nanoseconds())/float64(max(1, blockExecutor.cntExec))/1e3))
 					npWait, npProc = 0, 0
 				}
@@ -2431,6 +2440,7 @@ type taskVersion struct {
 	stats        map[int]ExecutionStat
 	statsMutex   *sync.Mutex
 	execCpuNanos *atomic.Int64
+	probeDepNano int64
 }
 
 func (ev *taskVersion) Trace() bool {
@@ -2475,6 +2485,7 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 	// mid-execution-changed value and must re-execute once that predecessor commits
 	// — a scheduler verdict, not an execution error.
 	result.Dep = ibs.DepTxIndex()
+	ev.probeDepNano = ibs.DepFirstNano()
 
 	if result.Err != nil {
 		return result
@@ -2583,6 +2594,7 @@ type blockExecutor struct {
 
 	// Stats for debugging purposes
 	cntExec, cntSpecExec, cntValidationFail int
+	probe                                   rerunProbe
 
 	// finalizedResults stores the finalized execResult snapshot per TX, so the
 	// publish loop can't see a different incarnation if be.results[tx] is overwritten

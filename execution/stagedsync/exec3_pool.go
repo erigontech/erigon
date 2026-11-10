@@ -5,6 +5,8 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
@@ -18,6 +20,21 @@ const (
 	psRecheck
 )
 
+const (
+	rerunSpine = iota
+	rerunDep
+	rerunInvalid
+	rerunRecheck
+	rerunErr
+	rerunCauses
+)
+
+type rerunProbe struct {
+	runs, runNs     atomic.Int64
+	depTailNs       atomic.Int64
+	reruns, wasteNs [rerunCauses]atomic.Int64
+}
+
 type poolTask struct {
 	be         *blockExecutor
 	tv         *taskVersion
@@ -25,6 +42,14 @@ type poolTask struct {
 	prevWrites *state.WriteSet
 	result     *exec.TxResult
 	reruns     int
+	lastRunNs  int64
+	rerunCause int
+	depRun     int64
+	depTail    int64
+	depPrefix  int64
+	runEnd     time.Time
+	rerunTo    int
+	settleTo   int
 
 	mu      sync.Mutex
 	parked  bool
@@ -141,7 +166,7 @@ func (wk *poolWorker) ensureTx(p *taskPool) error {
 }
 
 func (pe *parallelExecutor) dispatchPoolTask(be *blockExecutor, tv *taskVersion) {
-	pt := &poolTask{be: be, tv: tv, next: psRun}
+	pt := &poolTask{be: be, tv: tv, next: psRun, rerunTo: -1, settleTo: -1}
 	be.poolTasks[tv.index] = pt
 	pe.pool.push(pt)
 }
@@ -178,6 +203,7 @@ const poolNamedReruns = 3
 func (pt *poolTask) rerunAfter(named int) bool {
 	pt.reruns++
 	if pt.reruns <= poolNamedReruns {
+		pt.rerunTo = named
 		pt.next = psReexec
 		return !pt.be.requeueAtValidated(pt.tv.index, named, pt)
 	}
@@ -188,6 +214,7 @@ func (pt *poolTask) rerunAfter(named int) bool {
 // (pre-Amsterdam) lands only at commit, so waking on its validation could repeat the same failure.
 func (pt *poolTask) rerunAfterPredecessor() bool {
 	pt.reruns++
+	pt.rerunTo = pt.tv.index - 1
 	return pt.waitThen(pt.tv.index-1, psReexec)
 }
 
@@ -209,6 +236,7 @@ func (pt *poolTask) step(p *taskPool, wk *poolWorker) {
 		case psRecheck:
 			valid, _, blocker := be.selfLoopEvaluate(tv, pt.result)
 			if !valid {
+				pt.rerunCause = rerunRecheck
 				if !pt.rerunAfter(blocker) {
 					return
 				}
@@ -245,7 +273,26 @@ func (pt *poolTask) run(p *taskPool, wk *poolWorker) bool {
 	if poolOnRun != nil {
 		poolOnRun(int(tv.version.Incarnation) + 1)
 	}
-	return pt.afterRun(p, wk.w.RunTxTask(tv), finalExec)
+	if pt.lastRunNs != 0 {
+		be.probe.reruns[pt.rerunCause].Add(1)
+		be.probe.wasteNs[pt.rerunCause].Add(pt.lastRunNs)
+		pt.depPrefix, pt.depRun = 0, 0
+		switch pt.rerunCause {
+		case rerunDep:
+			pt.depRun = pt.lastRunNs
+			pt.depPrefix = pt.lastRunNs - pt.depTail
+		case rerunSpine:
+			pt.rerunTo = tv.index - 1
+		}
+	}
+	pt.rerunCause = rerunSpine
+	runStart := time.Now()
+	runResult := wk.w.RunTxTask(tv)
+	pt.runEnd = time.Now()
+	pt.lastRunNs = max(pt.runEnd.Sub(runStart).Nanoseconds(), 1)
+	be.probe.runs.Add(1)
+	be.probe.runNs.Add(pt.lastRunNs)
+	return pt.afterRun(p, runResult, finalExec)
 }
 
 // afterRun decides what follows a run: re-run, publish, or wait for the read target.
@@ -254,10 +301,14 @@ func (pt *poolTask) afterRun(p *taskPool, result *exec.TxResult, finalExec bool)
 	// A run that recorded a read dependency is void whatever it returned (a cancelled frame tx returns an error).
 	// A recorded dependency always names a lower tx.
 	if result.Dep >= 0 && result.Dep < tv.version.TxIndex && !result.Operational {
+		pt.rerunCause = rerunDep
+		pt.depTail = max(min(pt.runEnd.UnixNano()-tv.probeDepNano, pt.lastRunNs), 0)
+		be.probe.depTailNs.Add(pt.depTail)
 		return pt.rerunAfter(be.taskIndexOf(result.Dep))
 	}
 	if txTask, ok := tv.Task.(*exec.TxTask); ok && txTask.ChargesSenderAtValidation(int(tv.version.Incarnation)) &&
 		(result.Err != nil || touchedSenderAccount(txTask, result)) {
+		pt.rerunCause = rerunErr
 		return pt.rerunAfterPredecessor()
 	}
 	if result.Err != nil {
@@ -265,6 +316,7 @@ func (pt *poolTask) afterRun(p *taskPool, result *exec.TxResult, finalExec bool)
 			pt.send(p, result)
 			return false
 		}
+		pt.rerunCause = rerunErr
 		return pt.rerunAfterPredecessor()
 	}
 	be.selfLoopFlush(tv.version, result, pt.prevWrites)
@@ -272,6 +324,7 @@ func (pt *poolTask) afterRun(p *taskPool, result *exec.TxResult, finalExec bool)
 
 	valid, target, blocker := be.selfLoopEvaluate(tv, result)
 	if !valid {
+		pt.rerunCause = rerunInvalid
 		return pt.rerunAfter(blocker)
 	}
 	return pt.settle(p, result, target)
@@ -279,6 +332,7 @@ func (pt *poolTask) afterRun(p *taskPool, result *exec.TxResult, finalExec bool)
 
 func (pt *poolTask) settle(p *taskPool, result *exec.TxResult, target int) bool {
 	pt.result = result
+	pt.settleTo = target
 	if !pt.be.versionMap.HasBAL {
 		return pt.waitThen(target, psRecheck)
 	}
@@ -298,4 +352,40 @@ func (pt *poolTask) publish(p *taskPool) bool {
 	pt.parked = true
 	pt.mu.Unlock()
 	return false
+}
+
+// probeCriticalPath models the commit time of the last task with every worker free:
+// each task finishes after the commit it re-ran or waited for, plus its final run.
+// A re-run also cannot start before its aborted run ended. Cancel ends that run at the
+// dependency read; pause also keeps the work done before the read.
+func (be *blockExecutor) probeCriticalPath() (abortNs, cancelNs, pauseNs int64) {
+	n := len(be.poolTasks)
+	if n == 0 {
+		return 0, 0, 0
+	}
+	a, c, p := make([]int64, n), make([]int64, n), make([]int64, n)
+	at := func(s []int64, t int) int64 {
+		if t < 0 {
+			return 0
+		}
+		return s[t]
+	}
+	for i, pt := range be.poolTasks {
+		if pt != nil {
+			run := pt.lastRunNs
+			if pt.rerunTo >= 0 {
+				a[i] = max(at(a, pt.rerunTo), pt.depRun) + run
+				c[i] = max(at(c, pt.rerunTo), pt.depPrefix) + run
+				p[i] = max(at(p, pt.rerunTo), pt.depPrefix) + run - min(pt.depPrefix, run)
+			} else {
+				a[i] = max(at(a, pt.settleTo), run)
+				c[i] = max(at(c, pt.settleTo), run)
+				p[i] = max(at(p, pt.settleTo), run)
+			}
+		}
+		if i > 0 {
+			a[i], c[i], p[i] = max(a[i], a[i-1]), max(c[i], c[i-1]), max(p[i], p[i-1])
+		}
+	}
+	return a[n-1], c[n-1], p[n-1]
 }
