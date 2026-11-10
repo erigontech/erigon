@@ -2222,16 +2222,10 @@ func (p *TxPool) GetBlobs(blobHashes []common.Hash) []PoolBlobBundle {
 	return p.blobs.get(blobHashes)
 }
 
-// minedBlobReorgDepth bounds the mined-blob cache when finality stalls: two epochs.
-const minedBlobReorgDepth = 64
-
 // Cache recently mined blobs in anticipation of reorg, delete finalized ones
 func (p *TxPool) processMinedFinalizedBlobs(minedTxns []*TxnSlot, minedBlock, finalizedBlock uint64) error {
 	p.lastFinalizedBlock.Store(finalizedBlock)
 	// Add mined blobs
-	if _, ok := p.minedBlobTxnsByBlock[minedBlock]; !ok {
-		p.minedBlobTxnsByBlock[minedBlock] = nil
-	}
 	for _, txn := range minedTxns {
 		if !txn.HasBlobs() {
 			continue
@@ -2242,7 +2236,6 @@ func (p *TxPool) processMinedFinalizedBlobs(minedTxns []*TxnSlot, minedBlock, fi
 			txn = pooled.TxnSlot
 		} else if queued, ok := p.unprocessedRemoteByHash[hash]; ok {
 			full := *queued
-			full.SenderID, full.Traced = txn.SenderID, txn.Traced
 			txn = &full
 		} else if cached, ok := p.minedBlobTxnsByHash[hash]; ok {
 			txn = cached.TxnSlot
@@ -2255,7 +2248,7 @@ func (p *TxPool) processMinedFinalizedBlobs(minedTxns []*TxnSlot, minedBlock, fi
 
 	// Remove blobs of finalized blocks, and of blocks too deep to reorg, after the re-mined txns took their copies.
 	for b, mts := range p.minedBlobTxnsByBlock {
-		if (finalizedBlock > 0 && b <= finalizedBlock) || b+minedBlobReorgDepth < minedBlock {
+		if (finalizedBlock > 0 && b <= finalizedBlock) || b+dbg.MaxReorgDepth < minedBlock {
 			for _, mt := range mts {
 				delete(p.minedBlobTxnsByHash, string(mt.TxnSlot.IDHash[:]))
 			}
@@ -2919,22 +2912,20 @@ func (p *TxPool) flushLocked(tx kv.RwTx) (err error) {
 		if metaTx.TxnSlot.Rlp == nil {
 			continue
 		}
-		v = common.EnsureEnoughSize(v, 20+len(metaTx.TxnSlot.Rlp))
-
 		addr, ok := p.senders.senderID2Addr[metaTx.TxnSlot.SenderID]
 		if !ok {
 			p.logger.Warn("[txpool] flush: sender address not found by ID", "senderID", metaTx.TxnSlot.SenderID)
 			continue
 		}
 
-		copy(v[:20], addr[:])
-		copy(v[20:], metaTx.TxnSlot.Rlp)
-
 		has, err := tx.Has(kv.PoolTransaction, []byte(txHash))
 		if err != nil {
 			return err
 		}
 		if !has {
+			v = common.EnsureEnoughSize(v, 20+len(metaTx.TxnSlot.Rlp))
+			copy(v[:20], addr[:])
+			copy(v[20:], metaTx.TxnSlot.Rlp)
 			if err := tx.Put(kv.PoolTransaction, []byte(txHash), v); err != nil {
 				return err
 			}

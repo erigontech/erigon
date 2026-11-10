@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -84,7 +85,7 @@ func TestFinalizeMinedBlobsAfterDeletion(t *testing.T) {
 		require.NotContains(t, pool.minedBlobTxnsByBlock, uint64(i+1))
 		require.NotContains(t, pool.minedBlobTxnsByHash, string(txns[i].IDHash[:]))
 	}
-	require.Len(t, pool.minedBlobTxnsByBlock, 2)
+	require.Len(t, pool.minedBlobTxnsByBlock, 1)
 	require.Len(t, pool.minedBlobTxnsByHash, 1)
 	require.Same(t, txns[3], pool.minedBlobTxnsByBlock[4][0].TxnSlot)
 	require.Same(t, pool.minedBlobTxnsByBlock[4][0], pool.minedBlobTxnsByHash[string(txns[3].IDHash[:])])
@@ -240,10 +241,10 @@ func TestMinedBlobTxnSurvivesReorgThatMinesItAgain(t *testing.T) {
 func TestMinedBlobTxnSurvivesDeepReorgThatMinesItAgain(t *testing.T) {
 	r := newMinedBlobReorgTest(t)
 	r.mine(t, 1, 3)
-	for height := 2; height <= minedBlobReorgDepth; height++ {
+	for height := 2; height <= int(dbg.MaxReorgDepth); height++ {
 		require.NoError(t, r.pool.OnNewBlock(r.ctx, r.block(byte(height), 3, remoteproto.Direction_FORWARD), TxnSlots{}, TxnSlots{}, TxnSlots{}))
 	}
-	head := byte(2 + minedBlobReorgDepth)
+	head := byte(2 + int(dbg.MaxReorgDepth))
 	reorg := r.block(0, 3, remoteproto.Direction_UNWIND)
 	reorg.ChangeBatch = append(reorg.ChangeBatch, &remoteproto.StateChange{BlockHeight: uint64(head), BlockHash: gointerfaces.ConvertHashToH256(common.Hash{head})})
 	require.NoError(t, r.pool.OnNewBlock(r.ctx, reorg, TxnSlots{}, r.streamed(), r.streamed()))
@@ -254,7 +255,7 @@ func TestMinedBlobCacheIsBoundedWithoutFinality(t *testing.T) {
 	r := newMinedBlobReorgTest(t)
 	r.mine(t, 1, 3)
 	require.Contains(t, r.pool.minedBlobTxnsByHash, r.hash)
-	for height := 2; height <= 2+minedBlobReorgDepth; height++ {
+	for height := 2; height <= 2+int(dbg.MaxReorgDepth); height++ {
 		require.NoError(t, r.pool.OnNewBlock(r.ctx, r.block(byte(height), 3, remoteproto.Direction_FORWARD), TxnSlots{}, TxnSlots{}, TxnSlots{}))
 	}
 	require.NotContains(t, r.pool.minedBlobTxnsByHash, r.hash)
