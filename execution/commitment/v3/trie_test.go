@@ -638,7 +638,7 @@ func TestFoldParity(t *testing.T) {
 						var refs [16][]byte
 						for i, path := range paths {
 							key := append(append([]byte(nil), path[1:]...), nibbles.Terminator)
-							refs[path[0]] = storageLeafRef(nibbles.HexToCompact(key), foldValue(plane, i+1), nil)
+							refs[path[0]] = hashLongRef(appendStorageLeafRLP(nil, nibbles.HexToCompact(key), foldValue(plane, i+1)))
 						}
 						got, err := fold(n, 0)
 						require.NoError(t, err)
@@ -660,7 +660,7 @@ func TestFoldParity(t *testing.T) {
 		var refs [16][]byte
 		wrapped := extensionRef([]byte{3, 4}, stored)
 		refs[2] = wrapped[:]
-		refs[5] = storageLeafRef(nibbles.HexToCompact(append(append([]byte(nil), path[1:]...), nibbles.Terminator)), []byte{7}, nil)
+		refs[5] = hashLongRef(appendStorageLeafRLP(nil, nibbles.HexToCompact(append(append([]byte(nil), path[1:]...), nibbles.Terminator)), []byte{7}))
 		want := branchRef(&refs)
 		require.Equal(t, want, got)
 	})

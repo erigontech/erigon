@@ -98,9 +98,9 @@ func foldLeaf(n *node, nib int, includeNib bool, out []byte) ([]byte, error) {
 	}
 	var encScratch [leafRefScratch]byte
 	if n.plane == planeAccount {
-		return append(out, leafRef(compact, payload, encScratch[:0])...), nil
+		return append(out, hashLongRef(appendLeafRLP(encScratch[:0], compact, payload))...), nil
 	}
-	return append(out, storageLeafRef(compact, payload, encScratch[:0])...), nil
+	return append(out, hashLongRef(appendStorageLeafRLP(encScratch[:0], compact, payload))...), nil
 }
 
 func branchRefs(n *node, refStore *[16][32]byte) (refs [16][]byte, err error) {

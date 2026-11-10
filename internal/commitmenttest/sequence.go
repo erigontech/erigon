@@ -73,7 +73,7 @@ func Generate(seed Seed, spec SequenceSpec) Case {
 			}
 			var ops []Op
 			for i := start; i < start+count; i++ {
-				ops = append(ops, AccountAt(addrs[i], AccountSpec{Kind: "parity", Number: i}), Op{Key: append(bytes.Clone(addrs[i]), slots[i]...), Storage: Storage(i + generation*1000)})
+				ops = append(ops, AccountAt(addrs[i], AccountSpec{Kind: "parity", Number: i}), StorageAt(SlotKey(addrs[i], slots[i]), i+generation*1000))
 			}
 			c.Rounds = append(c.Rounds, ops)
 		}
@@ -86,7 +86,7 @@ func Generate(seed Seed, spec SequenceSpec) Case {
 		for i := range spec.Count {
 			ops = append(ops, AccountAt(address(i), AccountSpec{Kind: "parity", Number: i}))
 			if spec.Kind == "storage" {
-				ops = append(ops, Op{Key: append(address(i), Key(KeySpec{Kind: "bench-slot", Size: 32}, i)...), Storage: Storage(i)})
+				ops = append(ops, StorageAt(append(address(i), Key(KeySpec{Kind: "bench-slot", Size: 32}, i)...), i))
 			}
 		}
 	case "whale":
@@ -96,7 +96,7 @@ func Generate(seed Seed, spec SequenceSpec) Case {
 		for i := range spec.Count {
 			slot := make([]byte, 32)
 			_, _ = rng.Read(slot)
-			ops = append(ops, Op{Key: append(bytes.Clone(addr), slot...), Storage: Storage(i)})
+			ops = append(ops, StorageAt(SlotKey(addr, slot), i))
 		}
 	default:
 		panic(fmt.Sprintf("unknown sequence kind: %s", spec.Kind))
@@ -119,7 +119,7 @@ func Generate(seed Seed, spec SequenceSpec) Case {
 func incrementalRounds() [][]Op {
 	a, b := bytes.Repeat([]byte{0x11}, 20), bytes.Repeat([]byte{0x22}, 20)
 	slot := func(addr []byte, number byte) []byte {
-		return append(bytes.Clone(addr), bytes.Repeat([]byte{number}, 32)...)
+		return SlotKey(addr, bytes.Repeat([]byte{number}, 32))
 	}
 	account := func(addr []byte, nonce, balance uint64) Op {
 		value := Account(AccountSpec{Nonce: nonce, Balance: balance, CodeHash: common.HexToHash("0x1234")})
@@ -219,17 +219,17 @@ func stressRounds(rng *rand.Rand, spec SequenceSpec) [][]Op {
 			case rng.Intn(16) == 0:
 				touched[string(addr)] = struct{}{}
 				delete(live, string(addr))
-				entries = append(entries, Op{Key: addr, Delete: true})
+				entries = append(entries, DeleteAt(addr))
 			case rng.Intn(24) == 0:
 				touched[string(addr)] = struct{}{}
 				if rng.Intn(2) == 0 {
-					entries = append(entries, Op{Key: addr, Delete: true})
+					entries = append(entries, DeleteAt(addr))
 				}
 				wipe := accountOp(addr, RandomAccount(rng))
 				wipe.DeleteStorageSubtree = true
 				entries = append(entries, wipe)
 				for range 1 + rng.Intn(3) {
-					key := append(bytes.Clone(addr), Key(KeySpec{Kind: "integer", Size: 32}, rng.Intn(spec.Slots))...)
+					key := SlotKey(addr, Key(KeySpec{Kind: "integer", Size: 32}, rng.Intn(spec.Slots)))
 					entries = append(entries, Op{Key: key, Storage: RandomStorage(rng)})
 				}
 			default:
@@ -238,9 +238,9 @@ func stressRounds(rng *rand.Rand, spec SequenceSpec) [][]Op {
 					entries = append(entries, accountOp(addr, RandomAccount(rng)))
 				}
 				for range 1 + rng.Intn(3) {
-					key := append(bytes.Clone(addr), Key(KeySpec{Kind: "integer", Size: 32}, rng.Intn(spec.Slots))...)
+					key := SlotKey(addr, Key(KeySpec{Kind: "integer", Size: 32}, rng.Intn(spec.Slots)))
 					if rng.Intn(5) == 0 {
-						entries = append(entries, Op{Key: key, Delete: true})
+						entries = append(entries, DeleteAt(key))
 						continue
 					}
 					entries = append(entries, Op{Key: key, Storage: RandomStorage(rng)})
@@ -280,7 +280,7 @@ func collapseRounds(rng *rand.Rand, spec SequenceSpec) [][]Op {
 			}
 			delete(live, i)
 			touched[i] = struct{}{}
-			entries = append(entries, Op{Key: Key(KeySpec{Kind: "integer", Size: 20}, i), Delete: true})
+			entries = append(entries, DeleteAt(Key(KeySpec{Kind: "integer", Size: 20}, i)))
 		}
 		rounds = append(rounds, entries)
 	}

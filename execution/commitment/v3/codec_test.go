@@ -658,16 +658,16 @@ func TestConsensusHash(t *testing.T) {
 	t.Run("E20-E21/LeafRefVectors", func(t *testing.T) {
 		key := nibbles.HexToCompact([]byte{1, 2})
 		payload := bytes.Repeat([]byte{0x11}, 32)
-		got := leafRef(key, payload, nil)
+		got := hashLongRef(appendLeafRLP(nil, key, payload))
 		require.Equal(t, common.Hex2Bytes("e2d0b037b975d0e18dfaad291e1c147eeab6f0547d7056bdf3ea0b4fbeeca973"), got)
 
-		inline := leafRef(key, []byte{1}, nil)
+		inline := hashLongRef(appendLeafRLP(nil, key, []byte{1}))
 		require.Equal(t, []byte{0xc4, 0x82, 0x00, 0x12, 0x01}, inline)
 	})
 	t.Run("E21/LeafRefHashesAtBoundary", func(t *testing.T) {
 		key := nibbles.HexToCompact([]byte{1, 2})
-		below := leafRef(key, bytes.Repeat([]byte{0x22}, 26), nil)
-		at := leafRef(key, bytes.Repeat([]byte{0x22}, 27), nil)
+		below := hashLongRef(appendLeafRLP(nil, key, bytes.Repeat([]byte{0x22}, 26)))
+		at := hashLongRef(appendLeafRLP(nil, key, bytes.Repeat([]byte{0x22}, 27)))
 		require.Less(t, len(below), 32)
 		require.Len(t, at, 32)
 	})
@@ -721,7 +721,7 @@ func TestConsensusHash(t *testing.T) {
 		for _, keyLen := range []int{0, 1, 2, 30, 62, 63, 64} {
 			suffix := nibbles.HexToCompact(append(bytes.Repeat([]byte{0x0c}, keyLen), nibbles.Terminator))
 			for _, payload := range payloads {
-				require.Equal(t, rlpStorageLeafRef(t, suffix, payload), storageLeafRef(suffix, payload, nil), "key %d payload %x", keyLen, payload)
+				require.Equal(t, rlpStorageLeafRef(t, suffix, payload), hashLongRef(appendStorageLeafRLP(nil, suffix, payload)), "key %d payload %x", keyLen, payload)
 			}
 		}
 	})
@@ -740,7 +740,7 @@ func TestConsensusHash(t *testing.T) {
 						v[0] = 1
 					}
 					rnd.Read(suffix)
-					require.Equal(t, rlpStorageLeafRef(t, suffix, v), storageLeafRef(suffix, v, nil), "suffixLen=%d l=%d v=%x", suffixLen, l, v)
+					require.Equal(t, rlpStorageLeafRef(t, suffix, v), hashLongRef(appendStorageLeafRLP(nil, suffix, v)), "suffixLen=%d l=%d v=%x", suffixLen, l, v)
 				}
 			}
 		}
