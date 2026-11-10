@@ -98,6 +98,40 @@ func TestDeltas(t *testing.T) {
 			})
 		}
 	})
+	t.Run("ParallelPersistKeepsRecreatedChild", func(t *testing.T) {
+		addr := [32]byte{1}
+		ctx := runner.NewMemory(runner.ContextSpec{CaptureDeltas: true, CheckPrevious: true})
+		seed := storageOps([][]byte{slotPath(1, 2), slotPath(1, 3), slotPath(8, 2), slotPath(8, 3)})
+		storageRound(t, ctx, addr, seed)
+		previous, start := ctx.Records(), len(ctx.Deltas())
+		next := []commitmenttest.Op{{Key: seed[0].Key, Delete: true}, {Key: slotPath(1, 4), Storage: []byte{5}}, seed[2]}
+		root, parts, err := runStorageTaskWithPlan(ctx, storageTaskFor(addr, next), foldPlan{ctx: t.Context(), factory: ctx.Open, workers: 2, fanOutMin: 1})
+		require.NoError(t, err)
+		require.NoError(t, applyDeltas(parts, ctx.PutBranch, nil))
+		for _, delta := range ctx.Deltas()[start:] {
+			require.Equal(t, previous[string(delta.Key)], delta.Prev, "previous value for %x", delta.Key)
+		}
+		rebuilt := runner.NewMemory(runner.ContextSpec{})
+		want := storageRound(t, rebuilt, addr, []commitmenttest.Op{seed[1], seed[2], seed[3], next[1]})
+		require.Equal(t, want, root)
+		requireLiveRecords(t, rebuilt.Records(), ctx.Records(), "recreated child")
+	})
+	t.Run("RootPromotionKeepsTombstones", func(t *testing.T) {
+		addr := [32]byte{1}
+		ctx := runner.NewMemory(runner.ContextSpec{CheckPrevious: true})
+		seed := storageOps([][]byte{slotPath(1, 1), slotPath(1, 2), slotPath(8, 1), slotPath(8, 2)})
+		storageRound(t, ctx, addr, seed)
+		added := commitmenttest.Op{Key: slotPath(9, 1), Storage: []byte{5}}
+		root := storageRound(t, ctx, addr, []commitmenttest.Op{{Key: seed[2].Key, Delete: true}, {Key: seed[3].Key, Delete: true}, added})
+		rebuilt := runner.NewMemory(runner.ContextSpec{})
+		want := storageRound(t, rebuilt, addr, []commitmenttest.Op{seed[0], seed[1], added})
+		require.Equal(t, want, root)
+		reachable, err := enumerateStorageRecords(ctx, addr)
+		require.NoError(t, err)
+		orphans := len(liveStorageRecords(ctx.Records())) - len(reachable)
+		require.Zero(t, orphans)
+		requireLiveRecords(t, rebuilt.Records(), ctx.Records(), "root promotion")
+	})
 	t.Run("E43/PersistGraphKeepsRecordsThatOnlyMovedDeeper", func(t *testing.T) {
 		ctx := newMockContext()
 		var addr [32]byte

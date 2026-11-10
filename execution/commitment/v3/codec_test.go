@@ -816,6 +816,24 @@ func TestEnumerateRecordChildrenRejectsUnsafeDepth(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestComputeLeafRefsSkipsInlineStorageLeaves(t *testing.T) {
+	path := bytes.Repeat([]byte{1}, 63)
+	n := newNode(planeStorage, path...)
+	n.addLeaf(0, 0, 1)
+	n.addLeaf(1, 0, bytes.Repeat([]byte{2}, 32)...)
+	data := encodeRecord(n, len(path), nil)
+	require.NoError(t, Validate(data, len(path)))
+	hash, err := foldLeaf(n, 1, false, nil)
+	require.NoError(t, err)
+	require.Len(t, hash, 32)
+	var refs *commitment.LeafRefs
+	require.NotPanics(t, func() {
+		refs, err = ComputeLeafRefs(StorageNodeKey([32]byte{}, path, nil), data)
+	})
+	require.NoError(t, err)
+	require.Equal(t, &commitment.LeafRefs{Mask: 2, Refs: [][32]byte{[32]byte(hash)}}, refs)
+}
+
 func TestComputeLeafRefsRejectsOversizedStorageValue(t *testing.T) {
 	data := commitmenttest.Record(&commitmenttest.RecordSpec{
 		ChildMask: 3,

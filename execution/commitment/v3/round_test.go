@@ -367,6 +367,16 @@ func TestStorageWipe(t *testing.T) {
 			}
 		})
 	}
+	t.Run("missing-child", func(t *testing.T) {
+		addr := [32]byte{1}
+		ctx := newMockContext()
+		storageRound(t, ctx, addr, storageOps([][]byte{slotPath(1, 2), slotPath(1, 3), slotPath(8, 2)}))
+		childKey := string(StorageNodeKey(addr, []byte{1}, nil))
+		require.NotEmpty(t, ctx.branches[childKey])
+		delete(ctx.branches, childKey)
+		_, err := runStorageTask(ctx, storageTask{addrHash: addr, wipe: true})
+		require.ErrorIs(t, err, errWipeRecord)
+	})
 	t.Run("E25/E37/malformed-child", func(t *testing.T) {
 		var address [32]byte
 		address[0] = 0xc3
@@ -418,8 +428,43 @@ func (c *barrierContext) Branch(key []byte) ([]byte, kv.Step, error) {
 	return c.PatriciaContext.Branch(key)
 }
 
+type failingReadContext struct {
+	commitment.PatriciaContext
+	err error
+}
+
+func (c failingReadContext) Branch([]byte) ([]byte, kv.Step, error) {
+	return nil, 0, c.err
+}
+
 func TestScheduling(t *testing.T) {
 	storage := benchEntries("storage", 256)
+	t.Run("storage_read_error_returns", func(t *testing.T) {
+		wantErr := errors.New("storage read failed")
+		ctx := newShardedContext()
+		trie := newFactoryTrie(2, ctx, func(context.Context) (commitment.PatriciaContext, func()) {
+			return failingReadContext{PatriciaContext: ctx, err: wantErr}, nil
+		})
+		feed := &commitment.Feed{Accounts: []commitment.FeedAccount{
+			{Hash: [32]byte{0x10}, Update: testAccountUpdate(commitmenttest.AccountValue{Nonce: 1}), Slots: []commitment.FeedSlot{{Hash: [32]byte{1}, Value: []byte{1}}}},
+			{Hash: [32]byte{0x80}, Update: testAccountUpdate(commitmenttest.AccountValue{Nonce: 2})},
+		}}
+		done := make(chan error, 1)
+		go func() {
+			_, err := trie.ProcessFeed(t.Context(), feed, nil)
+			done <- err
+		}()
+		var err error
+		var returned bool
+		select {
+		case err = <-done:
+			returned = true
+		case <-time.After(5 * time.Second):
+		}
+		require.True(t, returned, "ProcessFeed must return the storage read error within 5s")
+		require.ErrorIs(t, err, wantErr)
+		trie.Release()
+	})
 	t.Run("deferred_builds_worker_contexts", func(t *testing.T) {
 		_, _, calls := runV3(t, newShardedContext(), v3Config{deferred: true}, storage)
 		require.Greater(t, calls, int32(1), "deferred rounds must still build per-worker contexts for the storage phase")
