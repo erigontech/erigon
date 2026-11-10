@@ -299,7 +299,7 @@ func (api *BaseAPI) pendingBlock() *types.Block {
 	return api.filters.LastPendingBlock()
 }
 
-// canonicalViewReader checks canonicality in the transaction used for state reads.
+// canonicalViewReader resolves mutable canonical mappings through the state transaction.
 // RemoteBlockReader opens separate backend transactions, so it can see a newer
 // canonical chain even when the caller's ViewID has not changed.
 type canonicalViewReader struct {
@@ -553,9 +553,11 @@ func (api *BaseAPI) readBlockTxNumBounds(ctx context.Context, tx kv.Tx, blockNum
 	return minTxNum, maxTxNum, hasMin && hasMax && maxTxNum > minTxNum, err
 }
 
-// checkTxIndexInBlock validates an index and returns the txNum of the block's
-// initial system transaction. User transaction zero has pre-state at minTxNum+1.
+// checkTxIndexInBlock returns the block's initial system txNum and the validated
+// index as an int. User transaction zero has pre-state at minTxNum+1.
 func checkTxIndexInBlock[I int | uint64 | hexutil.Uint](ctx context.Context, api *BaseAPI, tx kv.Tx, blockNum uint64, txIndex I) (minTxNum uint64, index int, err error) {
+	// Clamp before conversion so unsigned indices cannot wrap into negative values,
+	// including the -1 whole-block sentinel. Errors still report the original index.
 	index = int(min(txIndex, I(math.MaxInt)))
 	if index < -1 {
 		return 0, index, checkTxIndex(blockNum, index, 0)
