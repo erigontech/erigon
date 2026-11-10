@@ -448,25 +448,35 @@ func newHost(key *ecdsa.PrivateKey, listen ma.Multiaddr) (host.Host, error) {
 	if err != nil {
 		return nil, err
 	}
-	// The gater refuses every connection until setCounter, so no failed
+	// The gater refuses every connection until ready, so no failed
 	// identification precedes the subscription.
 	oh, err := withUnidentified(h)
 	if err != nil {
 		h.Close()
 		return nil, err
 	}
-	g.setCounter(counter(h.Network()))
+	g.ready.Store(true)
 	return oh, nil
 }
 
-// newResourceManager returns the default resource manager with its
-// per-address connection count and burst raised to MaxInbound: followers
-// behind one NAT share an address.
+// connCaps returns limits with MaxInbound inbound connections, handshaken or
+// pending, and MaxConnsPerPeer connections to a peer.
+func connCaps(limits rcmgr.ConcreteLimitConfig) rcmgr.ConcreteLimitConfig {
+	return rcmgr.PartialLimitConfig{
+		System:      rcmgr.ResourceLimits{ConnsInbound: MaxInbound},
+		Transient:   rcmgr.ResourceLimits{ConnsInbound: MaxInbound},
+		PeerDefault: rcmgr.ResourceLimits{Conns: MaxConnsPerPeer},
+	}.Build(limits)
+}
+
+// newResourceManager returns the default resource manager capped by
+// connCaps, with its per-address connection count and burst raised to
+// MaxInbound: followers behind one NAT share an address.
 func newResourceManager() (network.ResourceManager, error) {
 	limits := rcmgr.DefaultLimits
 	libp2p.SetDefaultServiceLimits(&limits)
 	perAddress := rate.Limit{RPS: 0.2, Burst: MaxInbound}
-	return rcmgr.NewResourceManager(rcmgr.NewFixedLimiter(limits.AutoScale()),
+	return rcmgr.NewResourceManager(rcmgr.NewFixedLimiter(connCaps(limits.AutoScale())),
 		rcmgr.WithLimitPerSubnet(
 			[]rcmgr.ConnLimitPerSubnet{{PrefixLength: 32, ConnCount: MaxInbound}},
 			[]rcmgr.ConnLimitPerSubnet{{PrefixLength: 56, ConnCount: MaxInbound}},

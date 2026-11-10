@@ -17,7 +17,7 @@
 package overlay
 
 import (
-	"sync"
+	"sync/atomic"
 
 	"github.com/libp2p/go-libp2p/core/control"
 	"github.com/libp2p/go-libp2p/core/network"
@@ -25,45 +25,17 @@ import (
 	ma "github.com/multiformats/go-multiaddr"
 )
 
-// gater refuses a secured connection past MaxInbound inbound connections or
-// MaxConnsPerPeer connections to its peer.
-type gater struct {
-	mu sync.RWMutex
-	// count returns the established inbound connections and those to p; nil
-	// until the host is up, refusing every connection.
-	count func(p peer.ID) (inbound, toPeer int)
-}
-
-func (g *gater) setCounter(count func(peer.ID) (int, int)) {
-	g.mu.Lock()
-	g.count = count
-	g.mu.Unlock()
-}
-
-func counter(n network.Network) func(peer.ID) (int, int) {
-	return func(p peer.ID) (inbound, toPeer int) {
-		for _, c := range n.Conns() {
-			if c.Stat().Direction == network.DirInbound {
-				inbound++
-			}
-		}
-		return inbound, len(n.ConnsToPeer(p))
-	}
-}
+// gater refuses every secured connection until the host is ready. The
+// resource manager holds the connection caps: it counts a connection from
+// its opening, which a check here of the established ones cannot.
+type gater struct{ ready atomic.Bool }
 
 func (g *gater) InterceptPeerDial(peer.ID) bool               { return true }
 func (g *gater) InterceptAddrDial(peer.ID, ma.Multiaddr) bool { return true }
 func (g *gater) InterceptAccept(network.ConnMultiaddrs) bool  { return true }
 
-func (g *gater) InterceptSecured(dir network.Direction, p peer.ID, _ network.ConnMultiaddrs) bool {
-	g.mu.RLock()
-	count := g.count
-	g.mu.RUnlock()
-	if count == nil {
-		return false
-	}
-	inbound, toPeer := count(p)
-	return toPeer < MaxConnsPerPeer && (dir != network.DirInbound || inbound < MaxInbound)
+func (g *gater) InterceptSecured(network.Direction, peer.ID, network.ConnMultiaddrs) bool {
+	return g.ready.Load()
 }
 
 func (g *gater) InterceptUpgraded(network.Conn) (bool, control.DisconnectReason) { return true, 0 }

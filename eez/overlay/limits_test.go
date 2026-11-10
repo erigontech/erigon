@@ -19,33 +19,23 @@ package overlay
 import (
 	"fmt"
 	"testing"
-	"time"
 
 	"github.com/libp2p/go-libp2p/core/network"
-	"github.com/libp2p/go-libp2p/core/peer"
+	rcmgr "github.com/libp2p/go-libp2p/p2p/host/resource-manager"
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/stretchr/testify/require"
 )
 
-func TestConnectionLimits(t *testing.T) {
+// TestGaterReady: the gater refuses every connection until the host is
+// ready.
+func TestGaterReady(t *testing.T) {
 	g := &gater{}
-	require.False(t, g.InterceptSecured(network.DirOutbound, "p", nil), "before the host is up")
-
-	for _, c := range []struct {
-		name            string
-		dir             network.Direction
-		inbound, toPeer int
-		allow           bool
-	}{
-		{"inbound below the cap", network.DirInbound, MaxInbound - 1, 0, true},
-		{"inbound at the cap", network.DirInbound, MaxInbound, 0, false},
-		{"outbound at the inbound cap", network.DirOutbound, MaxInbound, 0, true},
-		{"second connection to a peer", network.DirInbound, 1, MaxConnsPerPeer - 1, true},
-		{"third connection to a peer", network.DirOutbound, 0, MaxConnsPerPeer, false},
-		{"third inbound from a peer", network.DirInbound, 2, MaxConnsPerPeer, false},
-	} {
-		g.setCounter(func(peer.ID) (int, int) { return c.inbound, c.toPeer })
-		require.Equal(t, c.allow, g.InterceptSecured(c.dir, "p", nil), c.name)
+	for _, dir := range []network.Direction{network.DirInbound, network.DirOutbound} {
+		require.False(t, g.InterceptSecured(dir, "p", nil), "before the host is up")
+	}
+	g.ready.Store(true)
+	for _, dir := range []network.Direction{network.DirInbound, network.DirOutbound} {
+		require.True(t, g.InterceptSecured(dir, "p", nil), "once the host is up")
 	}
 	require.Equal(t, 64, MaxInbound)
 	require.Equal(t, 2, MaxConnsPerPeer)
@@ -67,15 +57,95 @@ func TestResourceManagerPerAddress(t *testing.T) {
 	}
 }
 
-func TestConnectionCounter(t *testing.T) {
-	a, b := newTestNode(t, 1), newTestNode(t, 2)
-	oa := a.start()
-	ob := b.start(a)
-	require.Eventually(t, func() bool { return ob.Peers() == 1 && oa.Peers() == 1 }, deadline, 50*time.Millisecond)
-	inbound, toPeer := counter(oa.host.Network())(ob.ID())
-	require.Equal(t, 1, inbound)
-	require.Equal(t, 1, toPeer)
-	inbound, toPeer = counter(ob.host.Network())(oa.ID())
-	require.Equal(t, 0, inbound)
-	require.Equal(t, 1, toPeer)
+// testAddr is the address of the ith of distinct remote hosts.
+func testAddr(i int) ma.Multiaddr {
+	return ma.StringCast(fmt.Sprintf("/ip4/198.51.100.%d/tcp/40000", i+1))
+}
+
+// TestResourceManagerInboundCap: the resource manager holds MaxInbound,
+// counting an inbound connection from its opening, before its handshake
+// completes, until it is done, so concurrent handshakes cannot pass the cap
+// together.
+func TestResourceManagerInboundCap(t *testing.T) {
+	h, err := newHost(key(1), ma.StringCast("/ip4/127.0.0.1/tcp/0"))
+	require.NoError(t, err)
+	defer h.Close()
+	rm := h.Network().ResourceManager()
+
+	// Every inbound connection pending.
+	inbound := make([]network.ConnManagementScope, MaxInbound)
+	for i := range inbound {
+		inbound[i], err = rm.OpenConnection(network.DirInbound, true, testAddr(i))
+		require.NoError(t, err, "inbound connection %d", i)
+	}
+	_, err = rm.OpenConnection(network.DirInbound, true, testAddr(MaxInbound))
+	require.ErrorIs(t, err, network.ErrResourceLimitExceeded, "pending inbound connections past MaxInbound")
+
+	// Half of them handshaken.
+	for i := 0; i < len(inbound); i += 2 {
+		id, err := PeerID(&key(byte(i + 2)).PublicKey)
+		require.NoError(t, err)
+		require.NoError(t, inbound[i].SetPeer(id), "inbound connection %d", i)
+	}
+	_, err = rm.OpenConnection(network.DirInbound, true, testAddr(MaxInbound))
+	require.ErrorIs(t, err, network.ErrResourceLimitExceeded, "inbound connections past MaxInbound")
+	require.ErrorContains(t, err, "system")
+	out, err := rm.OpenConnection(network.DirOutbound, true, testAddr(MaxInbound))
+	require.NoError(t, err, "outbound connection at the inbound cap")
+	out.Done()
+	inbound[1].Done()
+	again, err := rm.OpenConnection(network.DirInbound, true, testAddr(MaxInbound))
+	require.NoError(t, err, "inbound connection after a pending one is done")
+	again.Done()
+	for i, s := range inbound {
+		if i != 1 {
+			s.Done()
+		}
+	}
+}
+
+// TestConnCaps: the caps hold whatever the memory and file descriptors the
+// default limits scale with.
+func TestConnCaps(t *testing.T) {
+	for _, base := range []rcmgr.ConcreteLimitConfig{rcmgr.DefaultLimits.Scale(0, 0), rcmgr.DefaultLimits.Scale(64<<30, 1<<16)} {
+		limits := connCaps(base).ToPartialLimitConfig()
+		require.Equal(t, rcmgr.LimitVal(MaxInbound), limits.System.ConnsInbound)
+		require.Equal(t, rcmgr.LimitVal(MaxInbound), limits.Transient.ConnsInbound)
+		require.Equal(t, rcmgr.LimitVal(MaxConnsPerPeer), limits.PeerDefault.Conns)
+	}
+}
+
+// TestResourceManagerPeerCap: the resource manager holds MaxConnsPerPeer
+// over the connections to one peer, whatever their direction, counting each
+// from its handshake until it is done.
+func TestResourceManagerPeerCap(t *testing.T) {
+	h, err := newHost(key(1), ma.StringCast("/ip4/127.0.0.1/tcp/0"))
+	require.NoError(t, err)
+	defer h.Close()
+	rm := h.Network().ResourceManager()
+
+	p, err := PeerID(&key(200).PublicKey)
+	require.NoError(t, err)
+	toPeer := make([]network.ConnManagementScope, MaxConnsPerPeer)
+	for i := range toPeer {
+		dir := network.DirInbound
+		if i%2 == 1 {
+			dir = network.DirOutbound
+		}
+		toPeer[i], err = rm.OpenConnection(dir, true, testAddr(i))
+		require.NoError(t, err)
+		require.NoError(t, toPeer[i].SetPeer(p), "connection %d to the peer", i)
+	}
+	extra, err := rm.OpenConnection(network.DirOutbound, true, testAddr(MaxConnsPerPeer))
+	require.NoError(t, err)
+	err = extra.SetPeer(p)
+	require.ErrorIs(t, err, network.ErrResourceLimitExceeded, "connection to the peer past MaxConnsPerPeer")
+	require.ErrorContains(t, err, "peer:")
+	extra.Done()
+	toPeer[0].Done()
+	extra, err = rm.OpenConnection(network.DirOutbound, true, testAddr(MaxConnsPerPeer))
+	require.NoError(t, err)
+	require.NoError(t, extra.SetPeer(p), "connection to the peer after one is done")
+	extra.Done()
+	toPeer[1].Done()
 }
