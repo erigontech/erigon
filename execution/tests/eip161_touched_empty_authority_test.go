@@ -321,7 +321,6 @@ func TestEmptiedContractIsKept(t *testing.T) {
 }
 
 func TestTouchedStorageOnlyAccountIsAbsentForLaterTx(t *testing.T) {
-
 	keys, senders := eip161TouchKeys(t, 1)
 	storageOnly := common.HexToAddress("0x7610")
 	gasPrice := uint256.NewInt(10_000_000_000)
