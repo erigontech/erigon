@@ -1544,6 +1544,12 @@ func (s *Ethereum) SentryControlServer() *sentry_multi_client.MultiClient {
 	return s.sentryProvider.Client
 }
 
+// P2PServer returns the devp2p server of the local sentry; nil with an
+// external or disabled sentry.
+func (s *Ethereum) P2PServer() *p2p.Server {
+	return s.sentryProvider.P2PServer()
+}
+
 func (s *Ethereum) BlockIO() (dbservices.FullBlockReader, *blockio.BlockWriter) {
 	return s.blockReader, s.blockWriter
 }
