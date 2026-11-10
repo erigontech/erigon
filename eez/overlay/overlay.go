@@ -51,6 +51,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/eez/seqsig"
+	"github.com/erigontech/erigon/p2p"
 )
 
 const (
@@ -62,6 +63,10 @@ const (
 	// DialInterval is how often disconnected peers are dialled and rejected
 	// messages summarised.
 	DialInterval = 5 * time.Second
+	// DiscoveryPeerLimit is the connection count below which discovered
+	// peers are dialled; past the mesh's upper bound more peers add churn,
+	// not reach. Static peers are always dialled.
+	DiscoveryPeerLimit = 16
 	// MaxInbound caps inbound connections, and so the peers a publisher
 	// floods each head to.
 	MaxInbound = 64
@@ -95,17 +100,23 @@ type Config struct {
 	// Signer signed for Domain's rollup.
 	Domain seqsig.Domain
 	Signer common.Address
+	// Devp2p, when set, carries the overlay port in its node record and
+	// supplies peers from its discv5 table.
+	Devp2p *p2p.Server
 }
 
 // Overlay is a node of the signed-head overlay.
 type Overlay struct {
 	cfg    Config
 	self   peer.ID
+	port   uint16
 	logger log.Logger
 	val    *validator
 	heads  chan *seqsig.VerifiedHead
 	// idle is IdleTimeout, shorter in tests.
 	idle time.Duration
+	// discover returns the overlay addresses of discovered peers.
+	discover func() []peer.AddrInfo
 
 	host   host.Host
 	topic  *pubsub.Topic
@@ -115,6 +126,7 @@ type Overlay struct {
 
 	mu      sync.Mutex
 	dialing map[peer.ID]struct{}
+	cursor  int
 
 	rejected   atomic.Uint64
 	lastReject atomic.Pointer[reject]
@@ -135,9 +147,14 @@ func New(cfg Config, logger log.Logger) (*Overlay, error) {
 	if err != nil {
 		return nil, err
 	}
+	port, err := ListenPort(cfg.Listen)
+	if err != nil {
+		return nil, err
+	}
 	return &Overlay{
 		cfg:     cfg,
 		self:    self,
+		port:    port,
 		logger:  logger,
 		val:     &validator{domain: cfg.Domain, signer: cfg.Signer, now: nowMs},
 		heads:   make(chan *seqsig.VerifiedHead, HeadsBuffer),
@@ -165,6 +182,10 @@ func (o *Overlay) Start() error {
 		return err
 	}
 	o.host, o.topic, o.sub, o.cancel = h, topic, sub, cancel
+	if srv := o.cfg.Devp2p; srv != nil {
+		srv.LocalNode().Set(Entry(o.port))
+		o.discover = discoveryV5(srv)
+	}
 	o.wg.Go(func() { o.deliver(ctx) })
 	o.wg.Go(func() { o.loop(ctx) })
 	o.logger.Info("[eez] overlay listening", "addrs", h.Addrs(), "peer", h.ID(), "topic", topic.String())
@@ -271,11 +292,47 @@ func (o *Overlay) loop(ctx context.Context) {
 	}
 }
 
-// dialPeers dials the static peers that are not connected.
+// dialPeers dials the static peers that are not connected, and the next
+// discovered ones.
 func (o *Overlay) dialPeers(ctx context.Context) {
 	for _, p := range o.cfg.Peers {
 		o.dial(ctx, p)
 	}
+	for _, p := range o.discovered() {
+		o.dial(ctx, p)
+	}
+}
+
+// discovered returns the discovered peers to dial: those not connected, as
+// many as keep the node below DiscoveryPeerLimit.
+func (o *Overlay) discovered() []peer.AddrInfo {
+	budget := DiscoveryPeerLimit - len(o.host.Network().Peers())
+	if o.discover == nil || budget <= 0 {
+		return nil
+	}
+	var found []peer.AddrInfo
+	for _, p := range o.discover() {
+		if p.ID != o.self && o.host.Network().Connectedness(p.ID) != network.Connected {
+			found = append(found, p)
+		}
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return nextBatch(found, &o.cursor, budget)
+}
+
+// nextBatch returns up to budget of items from cursor on, wrapping, and moves
+// cursor past them, so that unreachable entries cannot take the whole budget
+// on every tick.
+func nextBatch[T any](items []T, cursor *int, budget int) []T {
+	if len(items) == 0 {
+		return nil
+	}
+	start := *cursor % len(items)
+	batch := append(slices.Clone(items[start:]), items[:start]...)
+	batch = batch[:min(budget, len(batch))]
+	*cursor += len(batch)
+	return batch
 }
 
 // dial connects to p in the background unless it is connected or a dial to
