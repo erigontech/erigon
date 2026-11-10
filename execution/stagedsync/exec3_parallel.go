@@ -1118,7 +1118,9 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 					if wall > 0 && pe.workerCount > 0 {
 						occ = float64(busy) / (float64(pe.workerCount) * float64(wall))
 					}
+					cpAbortNs, cpPauseNs := blockExecutor.probeCriticalPath()
 					pe.logger.Info("[np-phase] execloop", "blk", blockResult.BlockNum,
+						"npCpAbortNs", cpAbortNs, "npCpPauseNs", cpPauseNs,
 						"wait", npWait, "process", npProc,
 						"busy", busy, "workers", pe.workerCount, "occ", fmt.Sprintf("%.2f", occ),
 						"tasks", len(blockExecutor.tasks), "exec", blockExecutor.cntExec,
