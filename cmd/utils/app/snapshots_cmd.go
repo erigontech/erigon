@@ -3984,17 +3984,8 @@ type duBlockFilesTx struct {
 
 func (t duBlockFilesTx) BlockFilesRoTx() *blocksnapshots.View { return t.view }
 
-type duSelectFunc func(mode prune.Mode, preverified snapcfg.Preverified) ([]snapcfg.PreverifiedItem, error)
-
-func duPrunerSelect(ctx context.Context, tx kv.Tx, br snapshotsync.BlockReader, cc *chain.Config, stepSize uint64) duSelectFunc {
-	return func(mode prune.Mode, preverified snapcfg.Preverified) ([]snapcfg.PreverifiedItem, error) {
-		return snapshotsync.SnapshotsToDownload(ctx, "seg du", false, false, false, snapshotsync.BlobRetention{}, mode, snapshotsync.NoCaplin,
-			tx, br, cc, ethconfig.Defaults.Sync, stepSize, preverified, 0, kv.Step(math.MaxUint64))
-	}
-}
-
 // duComputeEstimates sums, per prune mode, the files the downloader keeps for that mode.
-func duComputeEstimates(files []duFileInfo, snapDir string, sel duSelectFunc) ([]duEstimate, error) {
+func duComputeEstimates(ctx context.Context, tx kv.Tx, br snapshotsync.BlockReader, cc *chain.Config, stepSize uint64, files []duFileInfo, snapDir string) ([]duEstimate, error) {
 	sizes := make(map[string]int64, len(files))
 	items := make([]snapcfg.PreverifiedItem, 0, len(files))
 	var unparsed int64
@@ -4029,7 +4020,8 @@ func duComputeEstimates(files []duFileInfo, snapDir string, sel duSelectFunc) ([
 	}
 	estimates := make([]duEstimate, 0, len(modes))
 	for _, m := range modes {
-		kept, err := sel(m.mode, snapcfg.Preverified{Items: items})
+		kept, err := snapshotsync.SnapshotsToDownload(ctx, "seg du", false, false, false, snapshotsync.BlobRetention{}, m.mode, snapshotsync.NoCaplin,
+			tx, br, cc, ethconfig.Defaults.Sync, stepSize, snapcfg.Preverified{Items: items}, 0, kv.Step(math.MaxUint64))
 		if err != nil {
 			return nil, fmt.Errorf("%s estimate: %w", m.name, err)
 		}
@@ -4303,7 +4295,7 @@ func duCollect(ctx context.Context, dirs datadir.Dirs, logger log.Logger) (duRes
 
 	// Build result.
 	cats := duAggregateCategories(files)
-	estimates, err := duComputeEstimates(files, dirs.Snap, duPrunerSelect(ctx, pinnedTx, blockReader, cc, stepSize))
+	estimates, err := duComputeEstimates(ctx, pinnedTx, blockReader, cc, stepSize, files, dirs.Snap)
 	if err != nil {
 		return duResult{}, err
 	}

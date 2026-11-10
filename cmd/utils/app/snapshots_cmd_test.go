@@ -898,16 +898,16 @@ func TestDUComputeEstimates_FullKeepsHistoryTheDenseTipNeeds(t *testing.T) {
 		{Path: filepath.Join(snapDir, "v1.1-000000-006000-headers.seg"), Name: "v1.1-000000-006000-headers.seg", Size: 1, Category: duCatBlocks, From: 0, To: 600_000},
 	}
 
-	estimates, err := duComputeEstimates(files, snapDir, duPrunerSelect(context.Background(), tx, br, nil, 1000))
+	estimates, err := duComputeEstimates(context.Background(), tx, br, nil, 1000, files, snapDir)
 	require.NoError(t, err)
 	require.Equal(t, "full", estimates[1].Mode)
 	require.Equal(t, int64(111), estimates[1].TotalBytes)
 }
 
-func duTestSelect(t *testing.T, frozenMax uint64) duSelectFunc {
+func duTestEstimates(t *testing.T, files []duFileInfo, snapDir string, frozenMax uint64) ([]duEstimate, error) {
 	_, tx := mdbxtest.NewTestTx(t)
 	br := duFakeBlockReader{frozenMax: frozenMax, body: func(b uint64) (uint64, uint64) { return b, 1 }}
-	return duPrunerSelect(context.Background(), tx, br, nil, 1000)
+	return duComputeEstimates(context.Background(), tx, br, nil, 1000, files, snapDir)
 }
 
 func TestDUComputeEstimates_NoPruning(t *testing.T) {
@@ -918,7 +918,7 @@ func TestDUComputeEstimates_NoPruning(t *testing.T) {
 		{Path: filepath.Join(snapDir, "v1.1-000000-000500-headers.seg"), Name: "v1.1-000000-000500-headers.seg", Size: 300, Category: duCatBlocks, From: 0, To: 50000},
 	}
 
-	estimates, err := duComputeEstimates(files, snapDir, duTestSelect(t, 50_000))
+	estimates, err := duTestEstimates(t, files, snapDir, 50_000)
 	require.NoError(t, err)
 	require.Len(t, estimates, 4)
 	for _, e := range estimates {
@@ -927,7 +927,7 @@ func TestDUComputeEstimates_NoPruning(t *testing.T) {
 }
 
 func TestDUComputeEstimates_EmptyFiles(t *testing.T) {
-	estimates, err := duComputeEstimates(nil, t.TempDir(), duTestSelect(t, 0))
+	estimates, err := duTestEstimates(t, nil, t.TempDir(), 0)
 	require.NoError(t, err)
 	require.Len(t, estimates, 4)
 	for _, e := range estimates {
@@ -943,7 +943,7 @@ func TestDUComputeEstimates_ExcludesCaplin(t *testing.T) {
 		{Path: filepath.Join(snapDir, "caplin", "v1.1-000000-000100-BalancesDump.seg"), Name: "v1.1-000000-000100-BalancesDump.seg", Size: 500, Category: duCatCaplin, From: 0, To: 100},
 	}
 
-	estimates, err := duComputeEstimates(files, snapDir, duTestSelect(t, 50_000))
+	estimates, err := duTestEstimates(t, files, snapDir, 50_000)
 	require.NoError(t, err)
 	require.Len(t, estimates, 4)
 	for _, e := range estimates {
@@ -959,7 +959,7 @@ func TestDUComputeEstimates_CountsUnparseableStateFilesInEveryMode(t *testing.T)
 		{Path: filepath.Join(snapDir, "domain", ".DS_Store"), Name: ".DS_Store", Size: 7, Category: duCatDomains, IsState: true},
 	}
 
-	estimates, err := duComputeEstimates(files, snapDir, duTestSelect(t, 300_000))
+	estimates, err := duTestEstimates(t, files, snapDir, 300_000)
 	require.NoError(t, err)
 	for _, e := range estimates {
 		require.Equal(t, int64(107), e.TotalBytes, "mode %q", e.Mode)
@@ -1102,7 +1102,7 @@ func TestDUComputeEstimates_LogIndexFollowsHistoryWindow(t *testing.T) {
 		logIdx(448, 600, 1),
 	}
 
-	estimates, err := duComputeEstimates(files, snapDir, duPrunerSelect(context.Background(), tx, br, nil, 1000))
+	estimates, err := duComputeEstimates(context.Background(), tx, br, nil, 1000, files, snapDir)
 	require.NoError(t, err)
 	want := map[string]int64{"archive": 1161, "full": 61, "blocks": 61, "minimal": 1}
 	for _, e := range estimates {
@@ -1118,7 +1118,7 @@ func TestDUComputeEstimates_ArchiveSkipsCommitmentHistory(t *testing.T) {
 		{Path: filepath.Join(snapDir, "accessor", "v1.1-commitment.0-10.vi"), Name: "v1.1-commitment.0-10.vi", Size: 700, Category: duCatCommitHist, IsState: true, From: 0, To: 10},
 	}
 
-	estimates, err := duComputeEstimates(files, snapDir, duTestSelect(t, 50_000))
+	estimates, err := duTestEstimates(t, files, snapDir, 50_000)
 	require.NoError(t, err)
 	require.Equal(t, "archive", estimates[0].Mode)
 	require.Equal(t, int64(100), estimates[0].TotalBytes)
@@ -1351,7 +1351,7 @@ func TestDUAcceptanceCriteria(t *testing.T) {
 	require.Equal(t, len(files), catFiles, "category file count must sum to total files")
 
 	// Compute estimates.
-	estimates, err := duComputeEstimates(files, snapDir, duTestSelect(t, maxBlock))
+	estimates, err := duTestEstimates(t, files, snapDir, maxBlock)
 	require.NoError(t, err)
 	require.Len(t, estimates, 4)
 
