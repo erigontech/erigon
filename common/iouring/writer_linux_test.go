@@ -250,9 +250,7 @@ func TestWriterFallsBackAfterRingReset(t *testing.T) {
 		require.NoError(t, err)
 		w := NewWriter(f)
 		require.NotNil(t, w.ring)
-		ringFD := w.ring.fd
 		t.Cleanup(func() {
-			_ = unix.Close(ringFD)
 			_ = f.Close()
 		})
 		previousEnter := ioUringEnter
