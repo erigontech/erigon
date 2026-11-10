@@ -230,7 +230,7 @@ func TestNewHeadSigner(t *testing.T) {
 	logger.SetHandler(log.StreamHandler(&logs, log.LogfmtFormat()))
 	cc := networks.Devnet.Config
 
-	s, err := newHeadSigner(&eez.SequencerConfig{}, cc, noBlocks{}, logger)
+	s, err := newHeadSigner(&eez.SequencerConfig{}, cc, noBlocks{}, nil, logger)
 	require.NoError(t, err)
 	require.Nil(t, s)
 	require.Equal(t, 1, strings.Count(logs.String(), "lvl=warn"), logs.String())
@@ -238,7 +238,7 @@ func TestNewHeadSigner(t *testing.T) {
 
 	key, err := crypto.GenerateKey()
 	require.NoError(t, err)
-	s, err = newHeadSigner(&eez.SequencerConfig{Key: key}, cc, noBlocks{}, logger)
+	s, err = newHeadSigner(&eez.SequencerConfig{Key: key}, cc, noBlocks{}, nil, logger)
 	require.NoError(t, err)
 	require.NotNil(t, s)
 	require.Equal(t, crypto.PubkeyToAddress(key.PublicKey), s.Address())

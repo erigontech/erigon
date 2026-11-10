@@ -19,6 +19,7 @@ package sequencer_test
 import (
 	"context"
 	"crypto/ecdsa"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -273,13 +274,121 @@ func TestHeadSignerEpoch(t *testing.T) {
 	require.Equal(t, e.Head.EpochMs, s.EpochMs())
 }
 
+// gatedPublisher records the envelopes it publishes; each publication waits
+// for release.
+type gatedPublisher struct {
+	entered chan struct{}
+	release chan struct{}
+
+	mu        sync.Mutex
+	published []seqsig.Envelope
+}
+
+func (p *gatedPublisher) Publish(ctx context.Context, e seqsig.Envelope) error {
+	p.entered <- struct{}{}
+	select {
+	case <-p.release:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.published = append(p.published, e)
+	return nil
+}
+
+// TestHeadSignerPublishes: every envelope signed goes to the publisher.
+// Signing never waits for a publication: an envelope the publisher has not
+// taken when the next is signed is dropped and counted.
+func TestHeadSignerPublishes(t *testing.T) {
+	var blocks []*types.Block
+	for n := uint64(1); n <= 5; n++ {
+		blocks = append(blocks, kaBlock(n))
+	}
+	p := &gatedPublisher{entered: make(chan struct{}, len(blocks)), release: make(chan struct{})}
+	s := startSigner(t, sequencer.SignerConfig{Key: kaKey(t), Domain: kaDomain, Blocks: newBlockSet(blocks...), Publisher: p})
+	s.Moved(blocks[0].Hash())
+	waitSigned(t, s, blocks[0].Hash(), 1)
+	select {
+	case <-p.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the first envelope was not published")
+	}
+	for i, b := range blocks[1:] {
+		s.Moved(b.Hash())
+		waitSigned(t, s, b.Hash(), uint64(i+2))
+	}
+	require.Equal(t, uint64(3), s.Dropped(), "envelopes 2 to 4, replaced while the publisher held 1")
+
+	close(p.release)
+	require.Eventually(t, func() bool {
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		return len(p.published) == 2
+	}, 5*time.Second, time.Millisecond)
+	require.Equal(t, blocks[0].Hash(), p.published[0].Head.BlockHash)
+	require.Equal(t, blocks[4].Hash(), p.published[1].Head.BlockHash)
+	require.Equal(t, uint64(5), p.published[1].Head.Counter)
+}
+
+// closingPublisher holds every publication until it is closed, whatever the
+// publication's context, as gossip does until its overlay stops.
+type closingPublisher struct {
+	entered chan struct{}
+	closed  chan struct{}
+}
+
+func (p *closingPublisher) Publish(context.Context, seqsig.Envelope) error {
+	p.entered <- struct{}{}
+	<-p.closed
+	return errors.New("overlay stopped")
+}
+
+// TestHeadSignerStopsDuringPublication: Stop returns while a publication is
+// in flight; the overlay, which stops after the signer, ends it.
+func TestHeadSignerStopsDuringPublication(t *testing.T) {
+	a := kaBlock(1)
+	p := &closingPublisher{entered: make(chan struct{}, 1), closed: make(chan struct{})}
+	s, err := sequencer.NewHeadSigner(sequencer.SignerConfig{Key: kaKey(t), Domain: kaDomain, Blocks: newBlockSet(a), Publisher: p}, log.New())
+	require.NoError(t, err)
+	require.NoError(t, s.Start())
+	s.Moved(a.Hash())
+	select {
+	case <-p.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the envelope was not published")
+	}
+	stopped := make(chan struct{})
+	go func() {
+		defer close(stopped)
+		_ = s.Stop()
+	}()
+	select {
+	case <-stopped:
+		close(p.closed)
+	case <-time.After(2 * time.Second):
+		close(p.closed)
+		<-stopped
+		t.Fatal("Stop waited for the publication in flight")
+	}
+}
+
+// stalledPublisher never returns from a publication before its context ends.
+type stalledPublisher struct{}
+
+func (stalledPublisher) Publish(ctx context.Context, _ seqsig.Envelope) error {
+	<-ctx.Done()
+	return ctx.Err()
+}
+
 // signing runs the harness's follower with a head signer, and records the
 // heads the follower hands it and the envelopes seen.
 type signing struct {
 	*harness
-	signer *sequencer.HeadSigner
-	domain seqsig.Domain
-	key    *ecdsa.PrivateKey
+	signer    *sequencer.HeadSigner
+	domain    seqsig.Domain
+	key       *ecdsa.PrivateKey
+	publisher sequencer.Publisher
 
 	mu    sync.Mutex
 	moves []common.Hash
@@ -298,7 +407,7 @@ func newSigning(t *testing.T, h *harness) *signing {
 // hands it its heads.
 func (sg *signing) start(t *testing.T) {
 	t.Helper()
-	s, err := sequencer.NewHeadSigner(sequencer.SignerConfig{Key: sg.key, Domain: sg.domain, Blocks: sg.chain}, log.New())
+	s, err := sequencer.NewHeadSigner(sequencer.SignerConfig{Key: sg.key, Domain: sg.domain, Blocks: sg.chain, Publisher: sg.publisher}, log.New())
 	require.NoError(t, err)
 	require.NoError(t, s.Start())
 	t.Cleanup(func() { require.NoError(t, s.Stop()) })
@@ -414,4 +523,28 @@ func TestSignedHeads(t *testing.T) {
 	sg.start(t)
 	restarted := sg.expect(t, rebuilt.Hash())
 	require.Greater(t, restarted.Head.EpochMs, epoch)
+}
+
+// TestStalledOverlay is T-SEQ-6 for publishing: an overlay that never returns
+// from a publication delays neither production nor signing, and the
+// envelopes it cannot take are dropped and counted.
+func TestStalledOverlay(t *testing.T) {
+	c := derivertest.NewComposer(t)
+	_, chain := derivertest.NewL2(t)
+	sg := newSigning(t, &harness{c: c, chain: chain, pool: &queue{}})
+	sg.publisher = stalledPublisher{}
+	sg.start(t)
+	genesis, err := chain.HeaderByNumber(t.Context(), 0)
+	require.NoError(t, err)
+	sg.expect(t, genesis.Hash())
+
+	s := sg.sequencer(t, 0)
+	for n := uint64(1); n <= 6; n++ {
+		start := time.Now()
+		require.NoError(t, s.Handle(t.Context(), sequencer.LiveTick{SyncHeight: 12}))
+		require.Less(t, time.Since(start), time.Second, "block %d", n)
+		sg.expect(t, sg.block(t, n).Hash())
+	}
+	// Of the 7 envelopes, the overlay holds one and one waits for it.
+	require.Equal(t, uint64(5), sg.signer.Dropped())
 }

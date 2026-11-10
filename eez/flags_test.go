@@ -186,10 +186,6 @@ func TestConfigFromCLI(t *testing.T) {
 		{"--eez.enabled", "--eez.l1.rpc=http://l1:8545", "--eez.l1.kv=l1:9090"},
 		{"--eez.enabled", "--eez.l1.rpc=http://l1:8545", "--eez.chain=eez-devnet"},
 		{"--eez.enabled", "--eez.l1.rpc=http://l1:8545", "--eez.sequencer", "--eez.proof.time=5s", "--eez.sequencer.rpc=http://seq:8545"},
-		{
-			"--eez.enabled", "--eez.l1.rpc=http://l1:8545", "--eez.sequencer", "--eez.proof.time=5s",
-			"--eez.p2p.listen=/ip4/0.0.0.0/tcp/9100", "--eez.sequencer.address=0x5fbdb2315678afecb367f032d93f642f64180aa3",
-		},
 		{"--eez.enabled", "--eez.chain=eez-devnet", "--eez.sequencer", "--eez.proof.time=5s"},
 	} {
 		cfg, err := parse(t, args...)
@@ -339,6 +335,45 @@ func TestOverlayFlags(t *testing.T) {
 	_, err = parse(t, append(follower, "--eez.p2p.peers="+peerAddr)...)
 	require.ErrorIs(t, err, ErrConfig)
 	require.ErrorContains(t, err, "--eez.p2p.peers requires --eez.p2p.listen")
+
+	// A sequencer's overlay publishes and relays the heads its key signs:
+	// the key is required, and its address is the one the overlay accepts.
+	keyFile := filepath.Join(t.TempDir(), "key")
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	require.NoError(t, crypto.SaveECDSA(keyFile, key))
+	signer := crypto.PubkeyToAddress(key.PublicKey)
+	withKey := "--eez.sequencer.keyfile=" + keyFile
+	sequencer := []string{"--eez.enabled", "--eez.l1.rpc=http://l1:8545", "--eez.sequencer", "--eez.proof.time=5s"}
+	for name, args := range map[string][]string{
+		"listen":            {listen, withKey},
+		"listen and peers":  {listen, "--eez.p2p.peers=" + peerAddr, withKey},
+		"the key's address": {listen, "--eez.sequencer.address=" + signer.Hex(), withKey},
+	} {
+		cfg, err := parse(t, append(sequencer, args...)...)
+		require.NoError(t, err, name)
+		require.Equal(t, signer, *cfg.SequencerAddress, name)
+		require.NoError(t, cfg.CheckNode(), name)
+	}
+	for name, args := range map[string][]string{
+		"no key":                 {listen},
+		"no key, an address":     {listen, address},
+		"another address":        {listen, address, withKey},
+		"address without listen": {"--eez.sequencer.address=" + signer.Hex(), withKey},
+		"peers without listen":   {"--eez.p2p.peers=" + peerAddr, withKey},
+		"with the sequencer RPC": {listen, withKey, "--eez.sequencer.rpc=http://seq:8545"},
+	} {
+		_, err := parse(t, append(sequencer, args...)...)
+		require.ErrorIs(t, err, ErrConfig, name)
+	}
+	_, err = parse(t, append(sequencer, listen)...)
+	require.ErrorContains(t, err, "--eez.p2p.listen requires --eez.sequencer.keyfile")
+	_, err = parse(t, append(sequencer, listen, address, withKey)...)
+	require.ErrorContains(t, err, "is not the address of --eez.sequencer.keyfile")
+	cfg, err = parse(t, append(sequencer, withKey)...)
+	require.NoError(t, err)
+	require.Nil(t, cfg.P2PListen, "a key alone signs without publishing")
+	require.Nil(t, cfg.SequencerAddress)
 
 	// The EEZ chain beside its L1 joins the overlay on the same terms.
 	beside := []string{"--eez.enabled", "--eez.chain=eez-devnet"}

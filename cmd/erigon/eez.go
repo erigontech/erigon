@@ -296,9 +296,9 @@ func newSequencer(ctx context.Context, backend *eth.Ethereum, chain *deriver.Exe
 }
 
 // newHeadSigner returns the signer of the heads of the chain of chainConfig,
-// whose blocks it reads from blocks; nil without a key, when the sequencer
-// signs nothing.
-func newHeadSigner(cfg *eez.SequencerConfig, chainConfig *chain.Config, blocks sequencer.HeadBlocks, logger log.Logger) (*sequencer.HeadSigner, error) {
+// whose blocks it reads from blocks and whose envelopes publisher, when set,
+// gossips; nil without a key, when the sequencer signs nothing.
+func newHeadSigner(cfg *eez.SequencerConfig, chainConfig *chain.Config, blocks sequencer.HeadBlocks, publisher sequencer.Publisher, logger log.Logger) (*sequencer.HeadSigner, error) {
 	if cfg.Key == nil {
 		logger.Warn("[eez] sequencer signs no heads: --"+eez.SequencerKeyFileFlag.Name+" is not set", "event", "eez.node.head_signer.disabled")
 		return nil, nil
@@ -307,11 +307,11 @@ func newHeadSigner(cfg *eez.SequencerConfig, chainConfig *chain.Config, blocks s
 	if err != nil {
 		return nil, err
 	}
-	s, err := sequencer.NewHeadSigner(sequencer.SignerConfig{Key: cfg.Key, Domain: domain, Blocks: blocks}, logger)
+	s, err := sequencer.NewHeadSigner(sequencer.SignerConfig{Key: cfg.Key, Domain: domain, Blocks: blocks, Publisher: publisher}, logger)
 	if err != nil {
 		return nil, err
 	}
-	logger.Info("[eez] sequencer signs its heads", "signer", s.Address())
+	logger.Info("[eez] sequencer signs its heads", "signer", s.Address(), "publish", publisher != nil)
 	return s, nil
 }
 
@@ -399,18 +399,26 @@ func startFollower(ctx context.Context, n *node.ErigonNode, stop interface{ Clos
 		fc.Peers = fetcher
 		fc.LoopBlockLimit = uint64(loopBlockLimit)
 	}
+	var publisher sequencer.Publisher
 	if cfg.P2PListen != nil {
-		if fc.Heads, fc.OverlayPeerCount, err = startOverlay(n, cfg, chainConfig, logger); err != nil {
+		o, err := startOverlay(n, cfg, chainConfig, logger)
+		if err != nil {
 			return nil, err
 		}
-		fc.Fetcher = fetcher
+		fc.OverlayPeerCount = o.Peers
+		if cfg.Sequencer == nil {
+			fc.Heads, fc.Fetcher = o.Heads(), fetcher
+		} else {
+			// The sequencer writes its own head: no signed head moves it.
+			publisher = o
+		}
 	}
 	var seq *sequencer.Service
 	var signer *sequencer.HeadSigner
 	if cfg.Sequencer != nil {
 		// Run hands heads only once started, after seq is set.
 		fc.OnHead = func(h l1.Header) { seq.Head(h) }
-		if signer, err = newHeadSigner(cfg.Sequencer, chainConfig, chain, logger); err != nil {
+		if signer, err = newHeadSigner(cfg.Sequencer, chainConfig, chain, publisher, logger); err != nil {
 			return nil, err
 		}
 		if signer != nil {
@@ -444,7 +452,8 @@ func startFollower(ctx context.Context, n *node.ErigonNode, stop interface{ Clos
 		go stop.Close()
 	})
 	if signer != nil {
-		// Stops after the follower, the writer of the heads it signs.
+		// Stops after the follower, the writer of the heads it signs, and
+		// before the overlay, whose stop ends a publication in flight.
 		n.RegisterLifecycle(signer)
 	}
 	n.RegisterLifecycle(svc)

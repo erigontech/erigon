@@ -47,6 +47,7 @@ type testNode struct {
 	port int
 	// authorized is the key whose heads the node accepts.
 	authorized byte
+	relayOnly  bool
 }
 
 func newTestNode(t *testing.T, key byte) *testNode {
@@ -68,7 +69,7 @@ func (n *testNode) info() peer.AddrInfo {
 }
 
 func (n *testNode) start(peers ...*testNode) *Overlay {
-	cfg := Config{Listen: n.listen(), Key: key(n.key), Domain: testDomain, Signer: addr(n.authorized)}
+	cfg := Config{Listen: n.listen(), Key: key(n.key), Domain: testDomain, Signer: addr(n.authorized), RelayOnly: n.relayOnly}
 	for _, p := range peers {
 		cfg.Peers = append(cfg.Peers, p.info())
 	}
@@ -82,7 +83,11 @@ func (n *testNode) start(peers ...*testNode) *Overlay {
 // publishHeads publishes a head signed by key 0 every interval until ctx
 // ends; the node may have no peers yet.
 func publishHeads(ctx context.Context, o *Overlay, every time.Duration) {
-	epoch := nowMs()
+	publishHeadsAt(ctx, o, nowMs(), every)
+}
+
+// publishHeadsAt is publishHeads for a signing process of epoch.
+func publishHeadsAt(ctx context.Context, o *Overlay, epoch uint64, every time.Duration) {
 	go func() {
 		for counter := uint64(1); ctx.Err() == nil; counter++ {
 			h := head(epoch, counter, byte(counter))
@@ -182,6 +187,36 @@ func TestHeadsRelayThroughUndrainedNode(t *testing.T) {
 	require.Eventually(t, func() bool { return ob.dropped.Load() > 0 }, 10*time.Second, 100*time.Millisecond, "B dropped no head")
 	require.Len(t, ob.Heads(), HeadsBuffer)
 	require.Empty(t, oa.Heads(), "the publisher delivered its own heads")
+}
+
+// TestRelayOnly: the sequencer's node publishes its heads and relays those
+// another process signs with its key, under an earlier epoch, and delivers
+// none of them.
+func TestRelayOnly(t *testing.T) {
+	t.Parallel()
+	a, b, c := newTestNode(t, 1), newTestNode(t, 2), newTestNode(t, 3)
+	b.relayOnly = true
+	oa := a.start()
+	ob := b.start(a)
+	oc := c.start(b)
+	ctx := t.Context()
+	other := nowMs()
+	publishHeadsAt(ctx, oa, other, 50*time.Millisecond)
+	publishHeadsAt(ctx, ob, other+1000, 50*time.Millisecond)
+
+	epochs := map[uint64]bool{}
+	timeout := time.After(deadline)
+	for !epochs[other] || !epochs[other+1000] {
+		select {
+		case h := <-oc.Heads():
+			require.Equal(t, addr(0), h.Signer)
+			epochs[h.Head.EpochMs] = true
+		case <-timeout:
+			t.Fatalf("C received the heads of epochs %v", epochs)
+		}
+	}
+	require.Empty(t, ob.Heads(), "the relay-only node delivered heads")
+	require.Zero(t, ob.dropped.Load())
 }
 
 func TestRogueFloodDoesNotStallPublisher(t *testing.T) {

@@ -46,6 +46,11 @@ type HeadBlocks interface {
 	CanonicalBlock(ctx context.Context, hash common.Hash) (*types.Block, error)
 }
 
+// Publisher gossips signed heads.
+type Publisher interface {
+	Publish(ctx context.Context, e seqsig.Envelope) error
+}
+
 // SignerConfig configures a HeadSigner.
 type SignerConfig struct {
 	Key    *ecdsa.PrivateKey
@@ -54,12 +59,15 @@ type SignerConfig struct {
 	// takes the time the signer is handed its first head, once boot ends.
 	EpochMs uint64
 	Blocks  HeadBlocks
+	// Publisher, when set, gossips the envelopes signed.
+	Publisher Publisher
 }
 
 // HeadSigner signs every head the chain moves to, with its block attached,
-// under the process's epoch and the next counter, and keeps the latest
-// envelope. It signs the newest head it is handed: a head replaced before
-// its block is readable is never signed.
+// under the process's epoch and the next counter, keeps the latest envelope
+// and hands it to the publisher. It signs the newest head it is handed: a
+// head replaced before its block is readable is never signed. An envelope
+// the publisher has not taken when the next is signed is dropped.
 type HeadSigner struct {
 	cfg     SignerConfig
 	address common.Address
@@ -74,6 +82,10 @@ type HeadSigner struct {
 	wake    chan struct{}
 
 	latest atomic.Pointer[seqsig.Envelope]
+	// outbox is the envelope the publisher has not taken yet.
+	outbox  atomic.Pointer[seqsig.Envelope]
+	publish chan struct{}
+	dropped atomic.Uint64
 
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
@@ -89,6 +101,7 @@ func NewHeadSigner(cfg SignerConfig, logger log.Logger) (*HeadSigner, error) {
 		address: crypto.PubkeyToAddress(cfg.Key.PublicKey),
 		logger:  logger,
 		wake:    make(chan struct{}, 1),
+		publish: make(chan struct{}, 1),
 	}
 	s.epochMs.Store(cfg.EpochMs)
 	return s, nil
@@ -128,10 +141,14 @@ func (s *HeadSigner) Start() error {
 	ctx, cancel := context.WithCancel(context.Background())
 	s.cancel = cancel
 	s.wg.Go(func() { s.run(ctx) })
+	if s.cfg.Publisher != nil {
+		go s.publishLoop(ctx)
+	}
 	return nil
 }
 
-// Stop stops the signer and waits for it.
+// Stop stops the signer and waits for it. A publication in flight is not
+// waited for: the overlay, which stops after the signer, ends it.
 func (s *HeadSigner) Stop() error {
 	if s.cancel == nil {
 		return nil
@@ -170,9 +187,44 @@ func (s *HeadSigner) run(ctx context.Context) {
 		}
 		last = head
 		s.latest.Store(&e)
+		if s.cfg.Publisher != nil {
+			s.queue(&e)
+		}
 		loadMetrics().headsSigned.Inc()
 		s.logger.Debug("[eez] head signed", "event", "eez.node.head_signer.signed", "number", e.Head.Number, "hash", head,
 			"epochMs", e.Head.EpochMs, "counter", e.Head.Counter)
+	}
+}
+
+// queue hands e to the publisher, in place of an envelope it has not taken.
+func (s *HeadSigner) queue(e *seqsig.Envelope) {
+	if s.outbox.Swap(e) != nil {
+		s.dropped.Add(1)
+		loadMetrics().headsDropped.Inc()
+	}
+	select {
+	case s.publish <- struct{}{}:
+	default:
+	}
+}
+
+// publishLoop publishes the envelopes queued. However long a publication
+// takes, the signer goes on signing.
+func (s *HeadSigner) publishLoop(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-s.publish:
+		}
+		e := s.outbox.Swap(nil)
+		if e == nil || ctx.Err() != nil {
+			continue
+		}
+		if err := s.cfg.Publisher.Publish(ctx, *e); err != nil && ctx.Err() == nil {
+			s.logger.Warn("[eez] signed head not published", "event", "eez.p2p.publish.failed", "number", e.Head.Number,
+				"counter", e.Head.Counter, "err", err)
+		}
 	}
 }
 

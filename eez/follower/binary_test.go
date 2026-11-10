@@ -19,7 +19,9 @@ package follower_test
 import (
 	"bytes"
 	"context"
+	"crypto/ecdsa"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"math/big"
@@ -29,6 +31,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -678,7 +681,7 @@ func TestAllInOneBinary(t *testing.T) {
 type proc struct {
 	t      *testing.T
 	url    string
-	output bytes.Buffer
+	output syncBuffer
 	exited chan error
 	cmd    *exec.Cmd
 }
@@ -727,13 +730,29 @@ func (n *proc) enode(p2pPort string) string {
 	return "enode://" + id + "@127.0.0.1:" + p2pPort
 }
 
+func newKey(t *testing.T) *ecdsa.PrivateKey {
+	t.Helper()
+	k, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	return k
+}
+
+// enodeURL returns the enode URL of the node of key on the loopback interface.
+func enodeURL(key *ecdsa.PrivateKey, port string) string {
+	return "enode://" + hex.EncodeToString(crypto.FromECDSAPub(&key.PublicKey)[1:]) + "@127.0.0.1:" + port
+}
+
 // TestSequencerBinary is T-SEQ-3 between Erigon nodes: the erigon binary
 // named by EEZ_ERIGON produces the chain of a fresh devnet genesis on the L1
 // heads of a composed L1, takes a transaction into its pool and block 1, and
-// serves eth/69 to its trusted peer and the block's witness over RPC; an
-// Erigon follower with the sequencer's RPC takes its blocks as its head. The
-// sequencer, first producer of the chain, derives from L1 alone, reports
-// itself as the source of its head and refuses debug_setHead.
+// serves eth/69 to its trusted peers and the block's witness over RPC. An
+// Erigon follower with the sequencer's RPC takes its blocks as its head.
+// Another, started blocks later, follows the heads the sequencer signs and
+// publishes on the overlay, fetching the blocks it lacks over devp2p, within
+// a couple of L2 blocks, while its safe block stays L1's. The sequencer, first
+// producer of the chain, derives from L1 alone, its overlay needs its key, it
+// reports itself as the source of its head and its overlay peers, and it
+// refuses debug_setHead.
 func TestSequencerBinary(t *testing.T) {
 	bin := os.Getenv("EEZ_ERIGON")
 	if bin == "" {
@@ -788,8 +807,8 @@ func TestSequencerBinary(t *testing.T) {
 	require.NoError(t, err)
 	genesisFile := filepath.Join(t.TempDir(), "genesis.json")
 	require.NoError(t, os.WriteFile(genesisFile, raw, 0o644))
-	seqDir, followerDir := t.TempDir(), t.TempDir()
-	for _, dir := range []string{seqDir, followerDir} {
+	seqDir, followerDir, signedDir := t.TempDir(), t.TempDir(), t.TempDir()
+	for _, dir := range []string{seqDir, followerDir, signedDir} {
 		out, err := exec.CommandContext(t.Context(), bin, "init", "--eez.enabled", "--datadir", dir,
 			"--eez.l1.chainid", strconv.FormatUint(l2.L1ChainID, 10), "--eez.registry", l2.Registry.Hex(),
 			"--eez.registry.deployblock", strconv.FormatUint(l2.RegistryDeployBlock, 10), "--eez.rollupid", strconv.FormatUint(l2.RollupID, 10),
@@ -797,14 +816,25 @@ func TestSequencerBinary(t *testing.T) {
 		require.NoError(t, err, "%s", out)
 	}
 
-	seqHTTP, seqP2P, followerP2P := freePort(t), freePort(t), freePort(t)
+	// The node keys, which set the devp2p and overlay identities, are known
+	// before the nodes start.
+	seqNode, signedNode, seqKey := newKey(t), newKey(t), newKey(t)
+	keyFile := filepath.Join(t.TempDir(), "sequencer.key")
+	require.NoError(t, crypto.SaveECDSA(keyFile, seqKey))
+	seqPeer, err := overlay.PeerID(&seqNode.PublicKey)
+	require.NoError(t, err)
+	seqHTTP, seqP2P, seqOverlay, followerP2P, signedP2P := freePort(t), freePort(t), freePort(t), freePort(t), freePort(t)
+	refused(t, bin, "--eez.p2p.listen requires --eez.sequencer.keyfile", "--eez.enabled", "--chain=eez-devnet", "--eez.l1.rpc", l1Server.URL,
+		"--eez.sequencer", "--eez.proof.time=4s", "--eez.p2p.listen=/ip4/127.0.0.1/tcp/"+freePort(t))
+
 	f := start(t, bin, freePort(t), "--eez.enabled", "--chain=eez-devnet", "--datadir", followerDir, "--eez.l1.rpc", l1Server.URL,
 		"--eez.l1.poll=200ms", "--eez.sync.l1only=true", "--eez.sequencer.rpc", "http://127.0.0.1:"+seqHTTP, "--http.api=eth,eez,admin",
 		"--port", followerP2P, "--nat=none", "--nodiscover")
 	s := start(t, bin, seqHTTP, "--eez.enabled", "--chain=eez-devnet", "--datadir", seqDir, "--eez.l1.rpc", l1Server.URL,
 		"--eez.l1.poll=200ms", "--eez.sync.l1only=true", "--eez.sequencer", "--eez.proof.time=4s", "--eez.submission.slack=1500ms",
 		"--eez.sequencer.maxdepth=0", "--http.api=eth,debug,eez,admin", "--port", seqP2P, "--nat=none", "--nodiscover",
-		"--trustedpeers", f.enode(followerP2P))
+		"--nodekeyhex", hex.EncodeToString(crypto.FromECDSA(seqNode)), "--eez.sequencer.keyfile", keyFile,
+		"--eez.p2p.listen=/ip4/127.0.0.1/tcp/"+seqOverlay, "--trustedpeers", f.enode(followerP2P)+","+enodeURL(signedNode, signedP2P))
 
 	var tx hexutil.Bytes = c.Transfer(bob, 7)
 	s.waitFor("the transaction enters the pool", func() bool {
@@ -879,6 +909,43 @@ func TestSequencerBinary(t *testing.T) {
 		return call(t.Context(), s.url, "admin_peers", &peers) == nil && len(peers) == 1 &&
 			peers[0].Network.Trusted && peers[0].Network.Static && slices.Contains(peers[0].Caps, "eth/69")
 	})
+
+	// Started once the sequencer is blocks ahead, the follower of signed
+	// heads gets the earlier blocks over devp2p alone: the overlay carries
+	// the head's block only, and L1 settles none.
+	s.waitFor("the sequencer reaches block 5", func() bool {
+		var n hexutil.Uint64
+		return call(t.Context(), s.url, "eth_blockNumber", &n) == nil && n >= 5
+	})
+	o := start(t, bin, freePort(t), "--eez.enabled", "--chain=eez-devnet", "--datadir", signedDir, "--eez.l1.rpc", l1Server.URL,
+		"--eez.l1.poll=200ms", "--eez.sync.l1only=true", "--http.api=eth,eez", "--port", signedP2P, "--nat=none", "--nodiscover",
+		"--nodekeyhex", hex.EncodeToString(crypto.FromECDSA(signedNode)), "--trustedpeers", enodeURL(seqNode, seqP2P),
+		"--eez.p2p.listen=/ip4/127.0.0.1/tcp/"+freePort(t), "--eez.sequencer.address="+crypto.PubkeyToAddress(seqKey.PublicKey).Hex(),
+		"--eez.p2p.peers=/ip4/127.0.0.1/tcp/"+seqOverlay+"/p2p/"+seqPeer.String())
+	o.waitFor("the follower of signed heads takes block 1", func() bool {
+		h, err := blockHash(t.Context(), o.url, "0x1")
+		return err == nil && h == receipt.BlockHash
+	})
+	first := regexp.MustCompile(`event=eez\.node\.follower\.head\.advanced number=(\d+) .*imported=(\d+)`).FindStringSubmatch(o.output.String())
+	require.NotNil(t, first, "no head followed")
+	require.NotEqual(t, "1", first[2], "the first head followed, block %s, came without its ancestors", first[1])
+	// Three successive heads of the sequencer, each reached within two L2
+	// blocks.
+	var n hexutil.Uint64
+	for range 3 {
+		last := n
+		s.waitFor("the sequencer moves its head", func() bool {
+			return call(t.Context(), s.url, "eth_blockNumber", &n) == nil && n > last
+		})
+		want, err := blockHash(t.Context(), s.url, n.String())
+		require.NoError(t, err)
+		require.Eventually(t, func() bool {
+			h, err := blockHash(t.Context(), o.url, n.String())
+			return err == nil && h == want
+		}, 2*time.Duration(l2.BlockInterval)*time.Second, 100*time.Millisecond, "the follower of signed heads reaches block %d", n)
+	}
+	waitStatus(t, o.url, 0, 0)
+
 	var status struct {
 		Live hexutil.Uint64 `json:"live"`
 		Sync hexutil.Uint64 `json:"sync"`
@@ -895,10 +962,13 @@ func TestSequencerBinary(t *testing.T) {
 	require.NotEmpty(t, w.State)
 	require.NotEmpty(t, w.Headers)
 	var followerStatus struct {
-		HeadSource string `json:"headSource"`
+		HeadSource   string          `json:"headSource"`
+		OverlayPeers *hexutil.Uint64 `json:"overlayPeers"`
 	}
 	require.NoError(t, call(t.Context(), s.url, "eez_followerStatus", &followerStatus))
 	require.Equal(t, "sequencer", followerStatus.HeadSource)
+	require.NotNil(t, followerStatus.OverlayPeers)
+	require.Positive(t, uint64(*followerStatus.OverlayPeers), "the follower of signed heads")
 	var ignored any
 	require.ErrorContains(t, call(t.Context(), s.url, "debug_setHead", &ignored, hexutil.Uint64(0)), "only driver")
 

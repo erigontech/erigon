@@ -103,6 +103,9 @@ type Config struct {
 	// Devp2p, when set, carries the overlay port in its node record and
 	// supplies peers from its discv5 table.
 	Devp2p *p2p.Server
+	// RelayOnly makes the node relay the heads it accepts without delivering
+	// them: the sequencer's node, which writes its own head.
+	RelayOnly bool
 }
 
 // Overlay is a node of the signed-head overlay.
@@ -167,9 +170,9 @@ func New(cfg Config, logger log.Logger) (*Overlay, error) {
 	}, nil
 }
 
-// Heads delivers the heads the node accepts from its peers, verified. A head
-// that finds the channel full is dropped: the overlay never waits for its
-// consumer.
+// Heads delivers the heads the node accepts from its peers, verified, none
+// with RelayOnly. A head that finds the channel full is dropped: the overlay
+// never waits for its consumer.
 func (o *Overlay) Heads() <-chan *seqsig.VerifiedHead { return o.heads }
 
 // Start listens, joins the topic and starts dialling peers.
@@ -278,7 +281,7 @@ func (o *Overlay) deliver(ctx context.Context) {
 		if err != nil {
 			return
 		}
-		if msg.ReceivedFrom == o.self {
+		if msg.ReceivedFrom == o.self || o.cfg.RelayOnly {
 			continue
 		}
 		if h, ok := msg.ValidatorData.(*seqsig.VerifiedHead); ok {

@@ -93,7 +93,7 @@ var (
 	}
 	SequencerAddressFlag = cli.StringFlag{
 		Name:  "eez.sequencer.address",
-		Usage: "Address of the sequencer, whose signed heads the overlay accepts",
+		Usage: "Address of the sequencer, whose signed heads the overlay accepts; on the sequencer, the address of --eez.sequencer.keyfile",
 	}
 	ChainFlag = cli.StringFlag{
 		Name:  "eez.chain",
@@ -205,7 +205,7 @@ type Config struct {
 	SyncL1Only *bool
 	// P2PListen is where the node joins the signed-head overlay, nil for
 	// none; P2PPeers are its static peers and SequencerAddress the signer of
-	// the heads it accepts.
+	// the heads it accepts, on a sequencer its own key's address.
 	P2PListen        ma.Multiaddr
 	P2PPeers         []peer.AddrInfo
 	SequencerAddress *common.Address
@@ -301,14 +301,14 @@ func ConfigFromCLI(cmd *cli.Command) (*Config, error) {
 			}
 		}
 	}
-	if err := c.readOverlay(cmd); err != nil {
-		return nil, err
-	}
 	sequencer, err := sequencerConfig(cmd)
 	if err != nil {
 		return nil, err
 	}
 	c.Sequencer = sequencer
+	if err := c.readOverlay(cmd); err != nil {
+		return nil, err
+	}
 	uintFlag := func(f *cli.Uint64Flag) *uint64 {
 		if !cmd.IsSet(f.Name) {
 			return nil
@@ -347,7 +347,9 @@ func ConfigFromCLI(cmd *cli.Command) (*Config, error) {
 	return c, nil
 }
 
-// readOverlay reads the flags of the signed-head overlay.
+// readOverlay reads the flags of the signed-head overlay. A follower's overlay
+// accepts the heads --eez.sequencer.address signs; a sequencer's publishes
+// those its key signs.
 func (c *Config) readOverlay(cmd *cli.Command) error {
 	var set []string
 	for _, f := range []cli.Flag{&P2PListenFlag, &P2PPeersFlag, &SequencerAddressFlag} {
@@ -361,10 +363,10 @@ func (c *Config) readOverlay(cmd *cli.Command) error {
 		return nil
 	case c.SequencerRPC != "":
 		return fmt.Errorf("%w: --%s and --%s both set the unsafe head", ErrConfig, set[0], SequencerRPCFlag.Name)
-	case listen != address:
+	case c.Sequencer == nil && listen != address:
 		return fmt.Errorf("%w: --%s and --%s require each other", ErrConfig, P2PListenFlag.Name, SequencerAddressFlag.Name)
 	case !listen:
-		return fmt.Errorf("%w: --%s requires --%s", ErrConfig, P2PPeersFlag.Name, P2PListenFlag.Name)
+		return fmt.Errorf("%w: --%s requires --%s", ErrConfig, set[0], P2PListenFlag.Name)
 	}
 	var err error
 	if c.P2PListen, err = overlay.ParseListen(cmd.String(P2PListenFlag.Name)); err != nil {
@@ -373,12 +375,25 @@ func (c *Config) readOverlay(cmd *cli.Command) error {
 	if c.P2PPeers, err = overlay.ParsePeers(cmd.String(P2PPeersFlag.Name)); err != nil {
 		return fmt.Errorf("%w: --%s: %w", ErrConfig, P2PPeersFlag.Name, err)
 	}
-	s := cmd.String(SequencerAddressFlag.Name)
-	if !common.IsHexAddress(s) {
-		return fmt.Errorf("%w: --%s %q is not an address", ErrConfig, SequencerAddressFlag.Name, s)
+	if address {
+		s := cmd.String(SequencerAddressFlag.Name)
+		if !common.IsHexAddress(s) {
+			return fmt.Errorf("%w: --%s %q is not an address", ErrConfig, SequencerAddressFlag.Name, s)
+		}
+		a := common.HexToAddress(s)
+		c.SequencerAddress = &a
 	}
-	a := common.HexToAddress(s)
-	c.SequencerAddress = &a
+	if c.Sequencer == nil {
+		return nil
+	}
+	if c.Sequencer.Key == nil {
+		return fmt.Errorf("%w: --%s requires --%s on the sequencer, whose overlay publishes the heads it signs", ErrConfig, P2PListenFlag.Name, SequencerKeyFileFlag.Name)
+	}
+	signer := crypto.PubkeyToAddress(c.Sequencer.Key.PublicKey)
+	if address && *c.SequencerAddress != signer {
+		return fmt.Errorf("%w: --%s %s is not the address of --%s, %s", ErrConfig, SequencerAddressFlag.Name, c.SequencerAddress.Hex(), SequencerKeyFileFlag.Name, signer.Hex())
+	}
+	c.SequencerAddress = &signer
 	return nil
 }
 
@@ -464,8 +479,6 @@ func (c *Config) CheckNode() error {
 		switch {
 		case c.SequencerRPC != "":
 			return fmt.Errorf("%w: --%s produces the chain --%s would follow", ErrConfig, SequencerFlag.Name, SequencerRPCFlag.Name)
-		case c.P2PListen != nil:
-			return fmt.Errorf("%w: --%s produces the heads --%s would follow", ErrConfig, SequencerFlag.Name, P2PListenFlag.Name)
 		case c.AllInOne():
 			return fmt.Errorf("%w: --%s runs on a node of its own, not beside its L1 (--%s)", ErrConfig, SequencerFlag.Name, ChainFlag.Name)
 		}

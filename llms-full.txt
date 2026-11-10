@@ -3610,6 +3610,7 @@ With `--eez.sequencer` the node also produces the chain ahead of settlement, fro
 ./build/bin/erigon --eez.enabled --chain=eez-devnet --datadir=/data/eez-sequencer \
   --eez.l1.rpc=http://l1-node:8545 \
   --eez.sequencer --eez.proof.time=5s --eez.submission.slack=2500ms \
+  --eez.sequencer.keyfile=/data/sequencer.key --eez.p2p.listen=/ip4/0.0.0.0/tcp/9100 \
   --http.api=eth,debug,eez --eez.sync.l1only --nodiscover --trustedpeers=enode://<follower>@<host>:30303
 ```
 
@@ -3619,7 +3620,7 @@ Every produced block's execution witness is kept in `<datadir>/eez/witnesses` un
 
 With `--eez.sequencer.keyfile` the sequencer signs every change of its head: the blocks it produces or takes from a composer, a rollback, and the heads derivation moves it to when L1 settles other blocks or reorgs. Each head is an EIP-712 `SignedHead` with its block attached, versioned by the time in milliseconds at which the process starts signing, once boot has caught up with L1, and a counter that starts at 1, so a restarted sequencer outranks its earlier self. A head replaced before its block can be read is not signed. The key file holds 64 hex characters and must not be accessible to other users. Without it the node logs a warning and signs nothing.
 
-The sequencer keeps the txpool, without gossip, and serves its blocks to its [L2 peers](https://docs.erigon.tech/fundamentals/eez-follower#l2-peers): a reth-based follower fetches the body of the head it is given this way. Erigon followers take the produced blocks with `--eez.sequencer.rpc`. The first producer of a new chain has no peers to take history from and runs with `--eez.sync.l1only`. The sequencer runs on a node of its own, not beside its L1, follows neither `--eez.sequencer.rpc` nor `--eez.p2p.listen`, and produces rollup0 networks only.
+The sequencer keeps the txpool, without gossip, and serves its blocks to its [L2 peers](https://docs.erigon.tech/fundamentals/eez-follower#l2-peers). With `--eez.p2p.listen` it publishes every head it signs on the overlay. Followers with its key's address in `--eez.sequencer.address` and its overlay address in `--eez.p2p.peers` follow those heads, and fetch the blocks they lack from it over devp2p. A sequencer's overlay requires `--eez.sequencer.keyfile`, and `--eez.sequencer.address`, when set, must be the key's address. The overlay relays the heads another process signs with the same key, under its own epoch, but they never move the sequencer's head. Publishing never holds up production: a head the overlay has not taken when the next one is signed is dropped and counted. Erigon followers can also take the produced blocks with `--eez.sequencer.rpc`. The first producer of a new chain has no peers to take history from and runs with `--eez.sync.l1only`. The sequencer runs on a node of its own, not beside its L1, does not follow `--eez.sequencer.rpc`, and produces rollup0 networks only.
 
 ## Flags
 
@@ -3693,7 +3694,7 @@ Of boot and [L2 peers](https://docs.erigon.tech/fundamentals/eez-follower#l2-pee
 - `eez_p2p_message_received_total`, and of those `eez_p2p_message_accepted_total`, `eez_p2p_message_ignored_total` and `eez_p2p_message_rejected_total`: overlay messages from peers, by the verdict of the relay rule.
 - `eez_p2p_inbound_dropped_total`: accepted heads dropped because the follower had not taken the previous 64.
 
-Of a sequencer: `eez_sequencer_blocks_total{kind}`, `eez_sequencer_head`, `eez_sequencer_off_grid_skips_total`, `eez_sequencer_trigger_failures_total`, `eez_sequencer_witness_failures_total`, `eez_sequencer_heads_signed_total` and `eez_sequencer_heads_skipped_total`.
+Of a sequencer: `eez_sequencer_blocks_total{kind}`, `eez_sequencer_head`, `eez_sequencer_off_grid_skips_total`, `eez_sequencer_trigger_failures_total`, `eez_sequencer_witness_failures_total`, `eez_sequencer_heads_signed_total`, `eez_sequencer_heads_skipped_total` and `eez_sequencer_heads_dropped_total`.
 
 Every 30 seconds the follower logs `[eez] following` with the last L1 block it scanned (`l1Scanned`), the L1 head it scans to (`l1Head`), the finalized L1 block, the safe and finalized EEZ blocks, the batches derived since the previous line and the blocks they carry. Each derived batch also logs `[eez] batch derived` with its L1 block, transaction and block range. A sequencer logs `[eez] Sync slot` with the blocks each trigger produces, and `[eez] produced block` with each block's kind, number and transaction count. A Sync block that would land off the grid is skipped with a warning (`eez.sequencer.sync_slot.off_grid_skipped`), and three in a row log `eez.sequencer.sync_slot.off_grid_stalled` at error level.
 

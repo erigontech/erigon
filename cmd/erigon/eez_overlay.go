@@ -29,30 +29,31 @@ import (
 )
 
 // startOverlay registers on n the signed-head overlay of cfg, on the
-// identity and discv5 table of n's devp2p server, and returns the heads it
-// accepts and the count of its peers.
-func startOverlay(n *node.ErigonNode, cfg *eez.Config, chainConfig *chain.Config, logger log.Logger) (<-chan *seqsig.VerifiedHead, func() int, error) {
+// identity and discv5 table of n's devp2p server. A sequencer's overlay
+// relays heads without delivering them.
+func startOverlay(n *node.ErigonNode, cfg *eez.Config, chainConfig *chain.Config, logger log.Logger) (*overlay.Overlay, error) {
 	srv := n.Backend().P2PServer()
 	if srv == nil {
-		return nil, nil, fmt.Errorf("%w: --%s needs the node's own sentry", eez.ErrConfig, eez.P2PListenFlag.Name)
+		return nil, fmt.Errorf("%w: --%s needs the node's own sentry", eez.ErrConfig, eez.P2PListenFlag.Name)
 	}
 	domain, err := headDomain(chainConfig)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	o, err := overlay.New(overlay.Config{
-		Listen: cfg.P2PListen,
-		Peers:  cfg.P2PPeers,
-		Key:    srv.PrivateKey,
-		Domain: domain,
-		Signer: *cfg.SequencerAddress,
-		Devp2p: srv,
+		Listen:    cfg.P2PListen,
+		Peers:     cfg.P2PPeers,
+		Key:       srv.PrivateKey,
+		Domain:    domain,
+		Signer:    *cfg.SequencerAddress,
+		Devp2p:    srv,
+		RelayOnly: cfg.Sequencer != nil,
 	}, logger)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	n.RegisterLifecycle(o)
-	return o.Heads(), o.Peers, nil
+	return o, nil
 }
 
 // headDomain returns the signing domain of the heads of the chain of
