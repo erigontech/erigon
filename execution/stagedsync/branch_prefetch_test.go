@@ -17,6 +17,7 @@
 package stagedsync
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"testing"
@@ -32,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
@@ -88,6 +90,14 @@ func TestBranchPrefetcherStopsAtByteCap(t *testing.T) {
 	value, _, ok := p.get([]byte("kept"))
 	require.True(t, ok)
 	require.Equal(t, []byte("value"), value)
+}
+
+func TestBranchPrefetcherLeafRefsOnlyForTheStoredRecord(t *testing.T) {
+	p := newPrefetchRecords()
+	key, data, refs := []byte{0x42, 0x00}, []byte{1, 2, 3}, &commitment.LeafRefs{Mask: 1}
+	p.shard(key).records[string(key)] = prefetchedRecord{data: data, refs: refs}
+	require.Same(t, refs, p.leafRefs(key, data))
+	require.Nil(t, p.leafRefs(key, bytes.Clone(data)))
 }
 
 func TestBranchPrefetcherCountsDroppedAndDrained(t *testing.T) {
