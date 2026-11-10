@@ -682,7 +682,7 @@ func (cc *commitmentCalculator) computeRootFromBAL(ctx context.Context, req *blo
 // compute(). Used by BAL compute-ahead, which supplies its own BAL-folded updates
 // buffer rather than compute()'s shared one.
 func (cc *commitmentCalculator) computeRootFromUpdates(ctx context.Context, t commitTarget, updates *commitment.Updates, reader *asOfStateReader) ([]byte, func() error, error) {
-	cc.finishPrefetch()
+	defer cc.finishPrefetch()()
 	sdCtx := cc.doms.GetCommitmentContext()
 	sdCtx.SetUpdates(updates)
 	reader.txNum = t.lastTxNum + 1
@@ -699,7 +699,7 @@ func (cc *commitmentCalculator) computeRootFromUpdates(ctx context.Context, t co
 // incremental root. BALShadowCompute only.
 func (cc *commitmentCalculator) shadowCrossCheck(ctx context.Context, r *blockResult) {
 	balRoot := cc.balRoots[r.BlockNum]
-	cc.finishPrefetch()
+	defer cc.finishPrefetch()()
 	// Recompute block r the raw-view way (emitTouched over the version map) to
 	// cross-check against the BAL-driven root.
 	cc.asOfReader.txNum = r.lastTxNum + 1
@@ -791,20 +791,23 @@ func (cc *commitmentCalculator) prefetchKey(ctx context.Context, plainKey []byte
 	cc.prefetch.WarmKey(commitment.KeyToHexNibbleHash(plainKey), 0, 0)
 }
 
-func (cc *commitmentCalculator) finishPrefetch() {
-	if cc.prefetch == nil {
-		return
+// finishPrefetch cancels the prefetch without draining its queue, because the fold reads the remaining keys itself.
+// The returned func waits for the prefetch workers to exit.
+func (cc *commitmentCalculator) finishPrefetch() func() {
+	prefetch := cc.prefetch
+	if prefetch == nil {
+		return func() {}
 	}
-	_ = cc.prefetch.WaitBufferFree(0)
-	cc.prefetch.CloseAndWait()
 	cc.prefetch = nil
+	prefetch.Close()
+	return prefetch.CloseAndWait
 }
 
 // compute is the shared prologue/compute/footer for every calculator commitment
 // path; the per-call differences live in m.
 
 func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m computeMode) {
-	cc.finishPrefetch()
+	defer cc.finishPrefetch()()
 	// The version map is the ledger: exec's writes already encode every EIP-161 /
 	// self-destruct removal, so emitTouched folds the block's touched keys straight
 	// from the view with no EIP knowledge. In a cross-block batch the touched union
