@@ -331,6 +331,7 @@ func testConvertCommitmentFilesV3CollapsedStorageBranch(t *testing.T, keysV2 boo
 }
 
 func TestConvertCommitmentFiles_V3StorageRootSurvivesBranchCollapseAcrossSteps(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	const stepSize, steps = 1, 4
 	db, agg, rwTx, domains := convertTestDomains(t, stepSize)
 	put, del, putAccount := domainWriter(t, domains, rwTx)

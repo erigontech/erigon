@@ -498,6 +498,7 @@ func TestConvertCommitmentFiles_V3HistoryStaleStorageBranchOfRecreatedAccount(t 
 }
 
 func TestConvertCommitmentFiles_V3HistorySerialRecreatedAccountRefusesBeforeSwap(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	previousSchema := statecfg.Schema
 	previousParallel := statecfg.ExperimentalParallelCommitment
 	statecfg.EnableHistoricalCommitment()
