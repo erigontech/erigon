@@ -22,8 +22,6 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/holiman/uint256"
-
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
@@ -183,6 +181,7 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Paramete
 		return AssembleBlockResult{}, err
 	}
 
+	e.buildersLock.Lock()
 	// A stopped builder is still worth reusing: it holds the payload it was stopped for, which is
 	// exactly what a repeated request is asking for. Only one that cannot produce - failed, or
 	// discarded with its work still winding down - has to be passed over.
@@ -191,20 +190,33 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Paramete
 			!previous.builder.Failed() && !previous.builder.Discarded() {
 			if sameBuildRequest(previous.params, params) {
 				e.buildersByTimestamp[params.Timestamp] = previousID
+				e.buildersLock.Unlock()
 				e.logger.Info("[ForkChoiceUpdated] duplicate build request")
 				return AssembleBlockResult{PayloadID: previousID}, nil
 			}
 		}
 	}
+	e.buildersLock.Unlock()
+
+	ownedParams := params.Copy()
+	ownedParams.PayloadId = e.nextPayloadId + 1
+
+	var empty *types.BlockWithReceipts
+	if e.sealEmptyPayloads && ownedParams.CustomTxnProvider == nil {
+		var err error
+		if empty, err = builder.BuildEmpty(ctx, e.builderFunc, ownedParams); err != nil {
+			return AssembleBlockResult{}, err
+		}
+	}
+
+	e.buildersLock.Lock()
+	defer e.buildersLock.Unlock()
 	e.evictOldBuilders()
 
-	e.nextPayloadId++
-	ownedParams := params.Copy()
-	ownedParams.PayloadId = e.nextPayloadId
-
+	e.nextPayloadId = ownedParams.PayloadId
 	secondsPerSlot := e.config.SecondsPerSlot()
 	e.builders[e.nextPayloadId] = &builderEntry{
-		builder: builder.NewBlockBuilder(e.backgroundCtx, e.builderFunc, ownedParams,
+		builder: builder.NewBlockBuilder(e.backgroundCtx, e.builderFunc, ownedParams, empty,
 			buildDuration(params.Timestamp, time.Now(), secondsPerSlot), stopGraceDuration(secondsPerSlot)),
 		params: ownedParams,
 	}
@@ -214,38 +226,26 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Paramete
 	return AssembleBlockResult{PayloadID: e.nextPayloadId}, nil
 }
 
-// blockValue computes the expected value received by the fee recipient in wei.
-func blockValue(br *types.BlockWithReceipts, baseFee *uint256.Int) *uint256.Int {
-	blockValue := uint256.NewInt(0)
-	txs := br.Block.Transactions()
-	var gas, txValue uint256.Int
-	for i := range txs {
-		gas.SetUint64(br.Receipts[i].GasUsed)
-
-		effectiveTip := txs[i].GetEffectiveGasTip(baseFee)
-
-		txValue.Mul(&gas, &effectiveTip)
-		blockValue.Add(blockValue, &txValue)
-	}
-	return blockValue
-}
-
 func (e *ExecModule) GetAssembledBlock(ctx context.Context, payloadID uint64) (AssembledBlockResult, error) {
 	if err := ctx.Err(); err != nil {
 		return AssembledBlockResult{}, err
 	}
-	if !e.semaphore.TryAcquire(1) {
-		return AssembledBlockResult{Busy: true}, nil
-	}
-	defer e.semaphore.Release(1)
-
+	e.buildersLock.Lock()
 	entry, ok := e.builders[payloadID]
+	e.buildersLock.Unlock()
 	if !ok || entry == nil || entry.builder == nil {
 		return AssembledBlockResult{Unknown: true}, nil
 	}
-	blockWithReceipts, err := entry.builder.Stop(ctx)
+	drop := func() {
+		e.buildersLock.Lock()
+		defer e.buildersLock.Unlock()
+		if e.builders[payloadID] == entry {
+			e.dropBuilder(payloadID, entry)
+		}
+	}
+	blockWithReceipts, err := entry.builder.Resolve(ctx)
 	if errors.Is(err, builder.ErrDiscarded) {
-		e.dropBuilder(payloadID, entry)
+		drop()
 		return AssembledBlockResult{Unknown: true}, nil
 	}
 	if err != nil {
@@ -257,7 +257,7 @@ func (e *ExecModule) GetAssembledBlock(ctx context.Context, payloadID uint64) (A
 			return AssembledBlockResult{}, err
 		}
 		// Keeping a failed entry would hand its latched error to every retry.
-		e.dropBuilder(payloadID, entry)
+		drop()
 		e.logger.Error("Failed to build PoS block", "err", err)
 		return AssembledBlockResult{}, err
 	}
@@ -265,12 +265,19 @@ func (e *ExecModule) GetAssembledBlock(ctx context.Context, payloadID uint64) (A
 		return AssembledBlockResult{}, nil
 	}
 
-	header := blockWithReceipts.Block.Header()
-	baseFee := header.BaseFee
-	value := blockValue(blockWithReceipts, baseFee)
-
 	return AssembledBlockResult{
 		Block:      blockWithReceipts,
-		BlockValue: value,
+		BlockValue: builder.BlockValue(blockWithReceipts),
 	}, nil
+}
+
+func (e *ExecModule) CompletePayload(ctx context.Context, payloadID uint64) error {
+	e.buildersLock.Lock()
+	entry, ok := e.builders[payloadID]
+	e.buildersLock.Unlock()
+	if !ok || entry == nil || entry.builder == nil {
+		return nil
+	}
+	_, _ = entry.builder.Stop(ctx)
+	return ctx.Err()
 }

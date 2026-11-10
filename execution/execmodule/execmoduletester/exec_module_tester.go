@@ -1072,19 +1072,20 @@ func (emt *ExecModuleTester) WaitForTxPool(ctx context.Context, parentHash commo
 }
 
 func (emt *ExecModuleTester) GetAssembledBlock(ctx context.Context, payloadID uint64) (*types.Block, error) {
-	return retryBusy(ctx, func() (*types.Block, bool, error) {
-		result, err := emt.ExecModule.GetAssembledBlock(ctx, payloadID)
-		if err != nil {
-			return nil, false, err
-		}
-		if result.Unknown {
-			return nil, false, chainreader.ErrUnknownPayload
-		}
-		if result.Block == nil {
-			return nil, result.Busy, nil
-		}
-		return result.Block.Block, result.Busy, nil
-	})
+	if err := emt.ExecModule.CompletePayload(ctx, payloadID); err != nil {
+		return nil, err
+	}
+	result, err := emt.ExecModule.GetAssembledBlock(ctx, payloadID)
+	if err != nil {
+		return nil, err
+	}
+	if result.Unknown {
+		return nil, chainreader.ErrUnknownPayload
+	}
+	if result.Block == nil {
+		return nil, nil
+	}
+	return result.Block.Block, nil
 }
 
 func retryBusy[T any](ctx context.Context, f func() (T, bool, error)) (T, error) {
