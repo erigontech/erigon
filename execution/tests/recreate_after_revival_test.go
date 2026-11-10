@@ -88,7 +88,7 @@ var generatedBlockWant = map[string]struct {
 	"TestCreditedEmptyAccountIsKept/delegated_authority/prague":                         {"0xe75ab61004d2c80a2b821719e68630b01f89561b9cf1de54de896d54b901da23", 36800},
 	"TestCreditedEmptyAccountIsKept/tipped_coinbase/amsterdam":                          {"0x1d4bacc661430b8a3b19c2b5769f2733d6837148c01321cacb4b623254b07adf", 15000},
 	"TestCreditedEmptyAccountIsKept/tipped_coinbase/prague":                             {"0x6cb6c6687c6d604cdaa2ff314bd94a4b6f778a532987852c3562c51b54125675", 21000},
-	"TestCreditedEmptyAccountIsKept/value_call/amsterdam":                               {"0x80a99328c67d8a9b4184611368556bd681dcb62272b83c5514a4141ad00fbb1b", 200000},
+	"TestCreditedEmptyAccountIsKept/value_call/amsterdam":                               {"0x34f3de35fc1de9b305678716b564f027d71788d10a6d610c6e74f64a98dcf574", 183600},
 	"TestCreditedEmptyAccountIsKept/value_call/prague":                                  {"0x87a9d76605f9800e1251ab6ab8ea9e19a0a538c282a187f40722777c63a31491", 55320},
 	"TestDroppedNetZeroWrite":                                                           {"0x658c99d04fb32f9cfd318febd4543a8395ff039618f260537879dfe27298a003", 1297980},
 	"TestEIP8246CoinbaseSelfdestructPreservesBalance/parallel":                          {"0xf0ab463ec68d3d0ee3ce4b16fa4416289b51e30619b790516ac5f68920eb4d10", 183600},

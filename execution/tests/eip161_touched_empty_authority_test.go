@@ -208,23 +208,24 @@ func TestCreditedEmptyAccountIsKept(t *testing.T) {
 	gasPrice := uint256.NewInt(10_000_000_000)
 
 	for _, tc := range []struct {
-		name  string
-		burnt bool
-		fill  func(b *blockgen.BlockGen, config *chain.Config)
+		name     string
+		burnt    bool
+		credited bool
+		fill     func(b *blockgen.BlockGen, config *chain.Config)
 	}{
-		{"tipped coinbase", false, func(b *blockgen.BlockGen, config *chain.Config) {
+		{"tipped coinbase", false, true, func(b *blockgen.BlockGen, config *chain.Config) {
 			b.SetCoinbase(empty)
 			txn, err := types.SignTx(types.NewTransaction(b.TxNonce(senders[0]), empty, uint256.NewInt(0), 100_000, gasPrice, nil), *types.LatestSignerForChainID(config.ChainID), keys[0])
 			require.NoError(t, err)
 			b.AddTx(txn)
 		}},
-		{"value call", false, func(b *blockgen.BlockGen, config *chain.Config) {
+		{"value call", false, true, func(b *blockgen.BlockGen, config *chain.Config) {
 			b.SetCoinbase(common.Address{1})
-			txn, err := types.SignTx(types.NewTransaction(b.TxNonce(senders[0]), payer, uint256.NewInt(0), 200_000, gasPrice, nil), *types.LatestSignerForChainID(config.ChainID), keys[0])
+			txn, err := types.SignTx(types.NewTransaction(b.TxNonce(senders[0]), payer, uint256.NewInt(0), 500_000, gasPrice, nil), *types.LatestSignerForChainID(config.ChainID), keys[0])
 			require.NoError(t, err)
 			b.AddTx(txn)
 		}},
-		{"delegated authority", false, func(b *blockgen.BlockGen, config *chain.Config) {
+		{"delegated authority", false, false, func(b *blockgen.BlockGen, config *chain.Config) {
 			b.SetCoinbase(common.Address{1})
 			auth, err := types.SignAuthorization(authorityKey, *config.ChainID, common.HexToAddress("0xcafe"), 0)
 			require.NoError(t, err)
@@ -240,7 +241,7 @@ func TestCreditedEmptyAccountIsKept(t *testing.T) {
 			require.NoError(t, err)
 			b.AddTx(txn)
 		}},
-		{"burnt-fee recipient with a non-zero burn", true, func(b *blockgen.BlockGen, config *chain.Config) {
+		{"burnt-fee recipient with a non-zero burn", true, true, func(b *blockgen.BlockGen, config *chain.Config) {
 			b.SetCoinbase(common.Address{1})
 			txn, err := types.SignTx(types.NewTransaction(b.TxNonce(senders[0]), empty, uint256.NewInt(0), 100_000, gasPrice, nil), *types.LatestSignerForChainID(config.ChainID), keys[0])
 			require.NoError(t, err)
@@ -265,11 +266,15 @@ func TestCreditedEmptyAccountIsKept(t *testing.T) {
 				}
 				fill := func(b *blockgen.BlockGen) { tc.fill(b, config) }
 				chainPack := generateEIP161TouchBlock(t, gspec, keys[0], fill)
+				require.Equal(t, types.ReceiptStatusSuccessful, chainPack.Receipts[0][0].Status)
 				requireGeneratedBlock(t, chainPack)
 				importInParallel(t, gspec, keys[0], chainPack, func(t *testing.T, st *state.IntraBlockState) {
 					exist, err := st.Exist(accounts.InternAddress(empty))
 					require.NoError(t, err)
 					require.True(t, exist)
+					balance, err := st.GetBalance(accounts.InternAddress(empty))
+					require.NoError(t, err)
+					require.Equal(t, tc.credited, !balance.IsZero())
 					require.Equal(t, *uint256.NewInt(1), storageAt(t, st, empty, 1))
 				})
 			})
