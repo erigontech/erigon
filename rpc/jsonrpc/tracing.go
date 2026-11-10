@@ -413,7 +413,8 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, re
 
 	var precompiles vm.PrecompiledContracts
 
-	blockCtx := transactions.NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, dbtx, api._blockReader, chainConfig)
+	getHash := transactions.MakeBlockHashProvider(ctx, dbtx, canonicalViewReader{api._blockReader}, nil)
+	blockCtx := protocol.NewEVMBlockContext(header, getHash, engine, accounts.NilAddress, chainConfig)
 	if config != nil {
 		if config.BlockOverrides != nil {
 			err := config.BlockOverrides.Override(&blockCtx)
@@ -484,7 +485,7 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 	defer ibs.Close()
 	transactions.VersionedCallState(ibs)
 
-	getHash := transactions.MakeBlockHashProvider(ctx, tx, api._blockReader, overrideBlockHash)
+	getHash := transactions.MakeBlockHashProvider(ctx, tx, canonicalViewReader{api._blockReader}, overrideBlockHash)
 
 	blockCtx = protocol.NewEVMBlockContext(header, getHash, api.engine(), accounts.NilAddress /* author */, chainConfig)
 	// Apply global block overrides as the baseline for all bundles.

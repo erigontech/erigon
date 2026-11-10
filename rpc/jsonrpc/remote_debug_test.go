@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/execution/state"
 	tracersConfig "github.com/erigontech/erigon/execution/tracing/tracers/config"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
@@ -255,6 +256,80 @@ func TestIndexedStateReadUsesPinnedCanonicalBlock(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestIndexedTraceBlockHashUsesPinnedView(t *testing.T) {
+	for _, endpoint := range []string{"traceCall", "traceCallMany"} {
+		t.Run(endpoint, func(t *testing.T) {
+			m, chain, _ := rpcdaemontest.CreateTestExecModule(t)
+			ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
+			reader := freezeblocks.NewRemoteBlockReader(remoteproto.NewETHBACKENDClient(conn))
+			db, _ := remoteHistoryDB(t, m.DB)
+			tx, err := db.BeginTemporalRo(ctx) //nolint:gocritic // The endpoint takes ownership below.
+			require.NoError(t, err)
+			handedOff := false
+			defer func() {
+				if !handedOff {
+					tx.Rollback()
+				}
+			}()
+			viewID := tx.ViewID()
+			target := chain.Blocks[len(chain.Blocks)-1]
+			parent := chain.Blocks[len(chain.Blocks)-2]
+			replacementParent := parent.Header()
+			replacementParent.Extra = []byte("replacement")
+			replacementTarget := target.Header()
+			replacementTarget.ParentHash = replacementParent.Hash()
+			require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
+				require.NoError(t, rawdb.WriteHeader(tx, replacementParent))
+				require.NoError(t, rawdb.WriteBody(tx, replacementParent.Hash(), parent.NumberU64(), parent.Body()))
+				require.NoError(t, rawdb.WriteCanonicalHash(tx, replacementParent.Hash(), parent.NumberU64()))
+				require.NoError(t, rawdb.WriteHeader(tx, replacementTarget))
+				require.NoError(t, rawdb.WriteBody(tx, replacementTarget.Hash(), target.NumberU64(), target.Body()))
+				return rawdb.WriteCanonicalHash(tx, replacementTarget.Hash(), target.NumberU64())
+			}))
+			pinnedHash, err := rawdb.ReadCanonicalHash(tx, parent.NumberU64())
+			require.NoError(t, err)
+			require.Equal(t, parent.Hash(), pinnedHash)
+			liveHash, found, err := reader.CanonicalHash(ctx, tx, parent.NumberU64())
+			require.NoError(t, err)
+			require.True(t, found)
+			require.Equal(t, replacementParent.Hash(), liveHash)
+			require.NotEqual(t, pinnedHash, liveHash)
+
+			api := NewPrivateDebugAPI(newBaseApiForTest(m), historyViewDB{TemporalRoDB: db, tx: tx}, nil, &rpccfg.DebugApiConfig{})
+			api._pruneMode.Store(&prune.ArchiveMode)
+			api._blockReader = reader
+			api._txNumReader = reader.TxnumReader()
+			contract := common.HexToAddress("0xc0ffee30")
+			// Return BLOCKHASH(NUMBER - 1), the parent of the selected block.
+			code := hexutil.Bytes{0x60, 0x01, 0x43, 0x03, 0x40, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3}
+			config := &tracersConfig.TraceConfig{
+				Tracer:         new("callTracer"),
+				TxIndex:        new(hexutil.Uint(0)),
+				StateOverrides: &ethapi.StateOverrides{accounts.InternAddress(contract): {Code: &code}},
+			}
+			block := rpc.BlockNumberOrHashWithHash(target.Hash(), true)
+			args := ethapi.CallArgs{From: &m.Address, To: &contract, Gas: new(hexutil.Uint64(100_000))}
+			handedOff = true
+			if endpoint == "traceCall" {
+				var trace struct{ Output string }
+				readGasTrace(t, &trace, func(stream *jsonstream.Stream) error {
+					return api.TraceCall(ctx, args, &block, config, stream)
+				})
+				require.Equal(t, parent.Hash().Hex(), trace.Output)
+			} else {
+				var traces [][]struct{ Output string }
+				readGasTrace(t, &traces, func(stream *jsonstream.Stream) error {
+					return api.TraceCallMany(ctx, []Bundle{{Transactions: []ethapi.CallArgs{args}}}, StateContext{BlockNumber: block, TransactionIndex: new(0)}, config, stream)
+				})
+				require.Len(t, traces, 1)
+				require.Len(t, traces[0], 1)
+				require.Equal(t, parent.Hash().Hex(), traces[0][0].Output)
+			}
+			require.Equal(t, viewID, tx.ViewID(), "the KV view must remain pinned throughout tracing")
+		})
 	}
 }
 
