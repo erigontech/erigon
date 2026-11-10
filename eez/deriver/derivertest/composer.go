@@ -127,12 +127,33 @@ func NewComposer(t testing.TB) *Composer {
 	t.Helper()
 	m, chain := NewL2(t)
 	l2 := m.ChainConfig.L2.(*config.L2Config)
-	l1Chain, err := recording.NewMemoryChain(l2.L1ChainID, &recording.Block{Header: l1.Header{Hash: l1Hash(0, 0)}})
+	c := &Composer{t: t, L2: m, Chain: chain, l2: l2, head: m.Genesis.Header(), settled: m.Genesis.Header()}
+	l1Chain, err := recording.NewMemoryChain(l2.L1ChainID, c.withState(&recording.Block{Header: l1.Header{Hash: l1Hash(0, 0)}}))
 	require.NoError(t, err)
 	for n := uint64(1); n <= l2.RegistryDeployBlock; n++ {
-		require.NoError(t, l1Chain.Append(&recording.Block{Header: l1.Header{Number: n, Hash: l1Hash(n, 0), ParentHash: l1Hash(n-1, 0), Time: n * l2.L1BlockTime}}))
+		require.NoError(t, l1Chain.Append(c.withState(&recording.Block{Header: l1.Header{Number: n, Hash: l1Hash(n, 0), ParentHash: l1Hash(n-1, 0), Time: n * l2.L1BlockTime}})))
 	}
-	return &Composer{t: t, L1: l1Chain, L2: m, Chain: chain, l2: l2, head: m.Genesis.Header(), settled: m.Genesis.Header()}
+	c.L1 = l1Chain
+	return c
+}
+
+// RollupContract is the rollup contract the composer's registry records.
+var RollupContract = common.HexToAddress("0x00000000000000000000000000000000000000c1")
+
+// withState makes b answer the registry's code and its record of the rollup
+// after b: registered from the deploy block on, at the latest settled block.
+func (c *Composer) withState(b *recording.Block) *recording.Block {
+	if b.Header.Number < c.l2.RegistryDeployBlock {
+		b.Code = map[common.Address][]byte{c.l2.Registry: {}}
+		return b
+	}
+	record := make([]byte, 96)
+	copy(record[12:32], RollupContract[:])
+	root := c.settled.Hash()
+	copy(record[32:64], root[:])
+	b.Code = map[common.Address][]byte{c.l2.Registry: {0x00}}
+	b.Calls = []recording.CallResult{{Call: l1.Call{To: c.l2.Registry, Data: protocol.EncodeRollups(c.l2.RollupID)}, Return: record}}
+	return b
 }
 
 // Registry is the devnet registry.
@@ -366,9 +387,20 @@ func (c *Composer) Post(postings ...Posting) *recording.Block {
 		b.Logs = append(b.Logs, c.at(posted, index))
 		b.Logs = append(b.Logs, after...)
 	}
-	require.NoError(c.t, c.L1.Append(b))
 	c.settled = c.settledBy(postings[len(postings)-1])
+	require.NoError(c.t, c.L1.Append(c.withState(b)))
 	return b
+}
+
+// Advance appends n L1 blocks without postings.
+func (c *Composer) Advance(n int) {
+	c.t.Helper()
+	for range n {
+		head, err := c.L1.Head(context.Background())
+		require.NoError(c.t, err)
+		next := head.Number + 1
+		require.NoError(c.t, c.L1.Append(c.withState(&recording.Block{Header: l1.Header{Number: next, Hash: l1Hash(next, c.branch), ParentHash: head.Hash, Time: next * c.l2.L1BlockTime}})))
+	}
 }
 
 // settledBy is the block the posting's last applied entry committed to.

@@ -95,11 +95,14 @@ func newNode(t *testing.T, reader l1.ChainReader) *node {
 }
 
 // restart returns a node with a fresh follower on chain, the checkpoint
-// directory kept.
-func (n *node) restart(t *testing.T, reader l1.ChainReader, chain deriver.Chain) *node {
+// directory kept, its configuration changed by opts.
+func (n *node) restart(t *testing.T, reader l1.ChainReader, chain deriver.Chain, opts ...func(*follower.Config)) *node {
 	t.Helper()
 	cfg := testConfig
 	cfg.Dir = n.dir
+	for _, o := range opts {
+		o(&cfg)
+	}
 	logs := &syncBuffer{}
 	logger := log.New()
 	logger.SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(logs, log.LogfmtFormat())))

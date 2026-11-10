@@ -39,8 +39,17 @@ import (
 	"github.com/erigontech/erigon/txnprovider"
 )
 
-// ErrRejected reports a block the local chain refuses to build or validate.
-var ErrRejected = errors.New("block rejected by the local chain")
+var (
+	// ErrRejected reports a block the local chain refuses to build or
+	// validate.
+	ErrRejected = errors.New("block rejected by the local chain")
+	// ErrForkChoiceRefused reports a fork choice the execution module
+	// refused.
+	ErrForkChoiceRefused = errors.New("fork choice refused by the local chain")
+	// ErrBadBlock reports a fork choice to a chain holding a block that
+	// fails validation.
+	ErrBadBlock = errors.New("bad block")
+)
 
 // Chain is the local L2 chain that derivation reads and extends.
 type Chain interface {
@@ -329,8 +338,12 @@ func (c *ExecChain) ForkChoice(ctx context.Context, head, safe, finalized common
 	if err != nil {
 		return fmt.Errorf("fork choice %x: %w", head, err)
 	}
-	if r.Status != execmodule.ExecutionStatusSuccess {
-		return fmt.Errorf("fork choice %x: %s %s", head, r.Status, r.ValidationError)
+	switch r.Status {
+	case execmodule.ExecutionStatusSuccess:
+	case execmodule.ExecutionStatusBadBlock:
+		return fmt.Errorf("%w: %w: fork choice %x: %s", ErrForkChoiceRefused, ErrBadBlock, head, r.ValidationError)
+	default:
+		return fmt.Errorf("%w: fork choice %x: %s %s", ErrForkChoiceRefused, head, r.Status, r.ValidationError)
 	}
 	// The module commits after it answers; reads go to the database.
 	c.exec.WaitIdle(ctx)

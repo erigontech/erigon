@@ -40,11 +40,18 @@ var (
 	// ErrL1Reference reports an L1 whose canonical block differs from the
 	// rollupX genesis's L1 reference.
 	ErrL1Reference = errors.New("L1 does not hold the genesis's L1 reference")
+	// ErrSeedReorged reports an L1 reorg below the finalized L1 block a sync
+	// from L2 peers seeded derivation at.
+	ErrSeedReorged = errors.New("L1 reorg below the seed at L1 finality")
+	// ErrNotOnL1Chain reports a local chain whose finalized block is not on
+	// the chain of the root L1 finalized.
+	ErrNotOnL1Chain = errors.New("datadir is not on L1's chain")
 )
 
 // Config tunes a Follower.
 type Config struct {
-	// Dir holds the reconcile checkpoint; empty keeps none.
+	// Dir holds the reconcile checkpoint; empty keeps none, and so does peers
+	// mode.
 	Dir string
 	// Poll is the interval between L1 head reads.
 	Poll time.Duration
@@ -71,6 +78,13 @@ type Config struct {
 	// Progress is the interval between info-level progress lines; zero logs
 	// none.
 	Progress time.Duration
+	// Peers, when set, puts the follower in peers mode: boot takes the
+	// history below the root L1's finalized block holds from the chain's L2
+	// peers, never from L1, and derivation starts at that block.
+	Peers *Fetcher
+	// LoopBlockLimit is the number of blocks a sync from peers inserts
+	// between head moves; zero moves the head once, at the root.
+	LoopBlockLimit uint64
 }
 
 // DefaultConfig is the reference client's tuning.
@@ -102,6 +116,8 @@ type Follower struct {
 	// the L1 head to scan to and l1Finalized the latest finalized L1 block.
 	scanned, target, l1Finalized uint64
 	resumed                      bool
+	// floor is the L1 block a sync from peers seeded derivation at.
+	floor uint64
 	// progress is the state at the last progress line.
 	progress progress
 
@@ -181,7 +197,13 @@ func New(reader l1.ChainReader, chain deriver.Chain, cfg *chain.Config, c Config
 	if !ok {
 		return nil, fmt.Errorf("chain %s is not an EEZ chain", cfg.ChainName)
 	}
-	d, err := deriver.New(chain, cfg, c.Dir, c.Blobs, reader, logger)
+	dir := c.Dir
+	if c.Peers != nil {
+		// A checkpoint over history from peers would let an L1-only boot
+		// skip deriving it.
+		dir = ""
+	}
+	d, err := deriver.New(chain, cfg, dir, c.Blobs, reader, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -326,22 +348,36 @@ func (f *Follower) boot(ctx context.Context) error {
 			return err
 		}
 	}
-	head, err := f.reader.Head(ctx)
-	if err != nil {
-		return err
-	}
 	if !f.resumed {
-		from, err := f.resume(ctx, head.Number)
+		from, err := f.start(ctx)
 		if err != nil {
 			return err
 		}
 		f.scanned, f.resumed = from-1, true
+	}
+	head, err := f.reader.Head(ctx)
+	if err != nil {
+		return err
 	}
 	f.target = head.Number
 	if err := f.Sync(ctx); err != nil {
 		return err
 	}
 	return f.watcher.Seed(ctx, f.scanned)
+}
+
+// start seeds derivation and returns the L1 block to scan from.
+func (f *Follower) start(ctx context.Context) (uint64, error) {
+	if f.cfg.Peers != nil {
+		f.logger.Info("[eez] booting the L2 chain", "event", "eez.node.sync.mode", "mode", "peers")
+		return f.bootFromPeers(ctx)
+	}
+	f.logger.Info("[eez] booting the L2 chain", "event", "eez.node.sync.mode", "mode", "l1_only")
+	head, err := f.reader.Head(ctx)
+	if err != nil {
+		return 0, err
+	}
+	return f.resume(ctx, head.Number)
 }
 
 // executeGenesis executes the genesis of a chain still at it, which a node
@@ -543,6 +579,9 @@ func (f *Follower) rewind(ctx context.Context, ancestor uint64) error {
 	if !errors.Is(err, deriver.ErrResumeReorged) {
 		return err
 	}
+	if f.cfg.Peers != nil {
+		return fmt.Errorf("%w: L1 reorg to block %d, the seed is at L1 block %d", ErrSeedReorged, ancestor, f.floor)
+	}
 	f.logger.Info("[eez] L1 reorg dropped the resume point, resuming again", "ancestor", ancestor)
 	f.resumed = false
 	return f.resumeAgain(ctx)
@@ -616,5 +655,8 @@ func halts(err error) bool {
 	}
 	return errors.Is(err, deriver.ErrDiverged) || errors.Is(err, deriver.ErrFinalizedReorged) ||
 		errors.Is(err, l1.ErrReorgTooDeep) || errors.Is(err, l1.ErrFinalityViolation) ||
-		errors.Is(err, l1.ErrUndecodable) || errors.Is(err, l1.ErrUnsupported) || errors.Is(err, ErrL1ChainID) || errors.Is(err, ErrL1Reference)
+		errors.Is(err, l1.ErrUndecodable) || errors.Is(err, l1.ErrUnsupported) || errors.Is(err, ErrL1ChainID) || errors.Is(err, ErrL1Reference) ||
+		errors.Is(err, ErrSeedReorged) || errors.Is(err, ErrNotOnL1Chain) ||
+		errors.Is(err, l1.ErrNoStateReads) || errors.Is(err, l1.ErrZeroRoot) || errors.Is(err, l1.ErrNotRollups) ||
+		errors.Is(err, ErrPeerHistoryRefused)
 }
