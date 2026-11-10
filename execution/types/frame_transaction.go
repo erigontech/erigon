@@ -268,12 +268,10 @@ func (tx *FrameTransaction) validateSignatures() error {
 		return nil
 	}
 	var signingHash common.Hash
-	for i := range tx.Signatures {
-		sig := &tx.Signatures[i]
-		if (sig.Scheme == FrameSignatureSecp256k1 || sig.Scheme == FrameSignatureP256) && len(sig.Message) == 0 {
-			signingHash = tx.SigningHash(nil)
-			break
-		}
+	if slices.ContainsFunc(tx.Signatures, func(sig FrameSignature) bool {
+		return (sig.Scheme == FrameSignatureSecp256k1 || sig.Scheme == FrameSignatureP256) && len(sig.Message) == 0
+	}) {
+		signingHash = tx.SigningHash(nil)
 	}
 	// Successful cryptographic checks are cached; Validate still checks structure and gas.
 	// Copied signer, message and signature bytes, plus a fresh digest for signatures over
