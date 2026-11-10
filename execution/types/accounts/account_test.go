@@ -18,9 +18,14 @@ package accounts
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/json"
+	"runtime"
+	"sync"
 	"testing"
+	"time"
 	"unique"
+	"weak"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -414,7 +419,7 @@ func TestInternSlotCollision(t *testing.T) {
 	require.Same(t, addressSlot(a1), addressSlot(a2))
 	for range 2 {
 		for _, k := range []common.Hash{k1, k2} {
-			require.Equal(t, StorageKey(unique.Make(k)), InternKey(k))
+			require.True(t, internColdKey(k) == InternKey(k))
 			require.Equal(t, k, InternKey(k).Value())
 		}
 		for _, a := range []common.Address{a1, a2} {
@@ -428,4 +433,83 @@ func TestInternSlotCollision(t *testing.T) {
 func TestInternSlotsSpreadLowValues(t *testing.T) {
 	require.NotSame(t, addressSlot(common.BytesToAddress([]byte{1})), addressSlot(common.BytesToAddress([]byte{2})))
 	require.NotSame(t, keySlot(common.BytesToHash([]byte{1})), keySlot(common.BytesToHash([]byte{2})))
+}
+
+func TestInternKeyColdKeysDoNotPayPerKeyWeakRegistration(t *testing.T) {
+	var n uint64 = 1 << 40
+	allocs := testing.AllocsPerRun(640, func() {
+		var k common.Hash
+		binary.BigEndian.PutUint64(k[:8], n)
+		n++
+		InternKey(k)
+	})
+	t.Logf("allocs per cold key: %v", allocs)
+	require.Less(t, allocs, 2.0)
+}
+
+func coldKey(prefix, i uint64) common.Hash {
+	var k common.Hash
+	binary.BigEndian.PutUint64(k[:8], prefix)
+	binary.BigEndian.PutUint64(k[8:16], i)
+	return k
+}
+
+// A key is canonical only while a handle holds its slab; once all are gone its index entry must go too.
+func TestInternColdKeyForgetsKeysOfDeadSlabs(t *testing.T) {
+	// The slab holding this key contains only keys of this test, whatever other keys were interned before.
+	probe := coldKey(2<<40, keySlabLen)
+	for i := range uint64(3 * keySlabLen) {
+		internColdKey(coldKey(2<<40, i))
+	}
+	require.Eventually(t, func() bool {
+		runtime.GC()
+		_, ok := keyIndex.Load(probe)
+		return !ok
+	}, 10*time.Second, 10*time.Millisecond)
+}
+
+func TestInternColdKeyKeepsHeldKeysCanonical(t *testing.T) {
+	first := coldKey(3<<40, 0)
+	held := internColdKey(first)
+	for i := uint64(1); i < 2*keySlabLen; i++ {
+		internColdKey(coldKey(3<<40, i))
+	}
+	for range 5 {
+		runtime.GC()
+		require.True(t, held == internColdKey(first))
+		require.Equal(t, first, held.Value())
+	}
+}
+
+func TestInternColdKeyConcurrentCallersShareHandle(t *testing.T) {
+	const callers = 8
+	var wg sync.WaitGroup
+	results := make([][]StorageKey, callers)
+	for c := range callers {
+		wg.Go(func() {
+			got := make([]StorageKey, 4*keySlabLen)
+			for i := range got {
+				got[i] = internColdKey(coldKey(4<<40, uint64(i)))
+			}
+			results[c] = got
+		})
+	}
+	wg.Wait()
+	for c := 1; c < callers; c++ {
+		for i := range results[c] {
+			require.True(t, results[0][i] == results[c][i])
+		}
+	}
+}
+
+func TestForgetSlabKeysKeepsEntryTakenOverByNewerSlab(t *testing.T) {
+	k := coldKey(6<<40, 0)
+	held := internColdKey(k)
+	other := new(keySlab)
+	keys := new(slabKeys)
+	keys.keys[0] = k
+	keys.n.Store(1)
+	forgetSlabKeys(deadSlab{weak.Make(other), keys})
+	runtime.KeepAlive(other)
+	require.True(t, held == internColdKey(k))
 }

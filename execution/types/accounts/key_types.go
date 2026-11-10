@@ -19,8 +19,13 @@ package accounts
 import (
 	"encoding/binary"
 	"fmt"
+	"runtime"
+	"sync"
 	"sync/atomic"
 	"unique"
+	"weak"
+
+	"github.com/puzpuzpuz/xsync/v4"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
@@ -140,7 +145,7 @@ func (a Address) Cmp(o Address) int {
 	return a.Value().Cmp(o.Value())
 }
 
-type StorageKey unique.Handle[common.Hash]
+type StorageKey struct{ hash *common.Hash }
 
 var (
 	ZeroKey = InternKey(common.Hash{})
@@ -157,9 +162,85 @@ func InternKey(k common.Hash) StorageKey {
 	if h, ok := slot.Load().(StorageKey); ok && h.Value() == k {
 		return h
 	}
-	h := StorageKey(unique.Make(k))
+	h := internColdKey(k)
 	slot.Store(h)
 	return h
+}
+
+// keySlabLen makes a slab exactly a 2 KB size class, and pays one weak pointer per 64 keys instead of one per key.
+const keySlabLen = 64
+
+type keySlab [keySlabLen]common.Hash
+
+type keyRef struct {
+	slab weak.Pointer[keySlab]
+	idx  uint32
+}
+
+var (
+	keyIndex = xsync.NewMap[common.Hash, keyRef]()
+	keySlabs struct {
+		sync.Mutex
+		cur  *keySlab
+		keys *slabKeys
+		weak weak.Pointer[keySlab]
+		next uint32
+	}
+)
+
+// slabKeys copies the keys of a slab, because the cleanup that removes them from keyIndex cannot reach a dead slab.
+// n publishes the written keys to the cleanup goroutine.
+type slabKeys struct {
+	n    atomic.Uint32
+	keys [keySlabLen]common.Hash
+}
+
+type deadSlab struct {
+	slab weak.Pointer[keySlab]
+	keys *slabKeys
+}
+
+// forgetSlabKeys keeps an entry a newer slab has taken over.
+func forgetSlabKeys(d deadSlab) {
+	for _, k := range d.keys.keys[:d.keys.n.Load()] {
+		keyIndex.Compute(k, func(old keyRef, loaded bool) (keyRef, xsync.ComputeOp) {
+			if loaded && old.slab == d.slab {
+				return old, xsync.DeleteOp
+			}
+			return old, xsync.CancelOp
+		})
+	}
+}
+
+// internColdKey is the canonical table behind keyTable. A slab lives while any of its keys has a handle.
+func internColdKey(k common.Hash) (h StorageKey) {
+	keyIndex.Compute(k, func(old keyRef, loaded bool) (keyRef, xsync.ComputeOp) {
+		if loaded {
+			if s := old.slab.Value(); s != nil {
+				h = StorageKey{&s[old.idx]}
+				return old, xsync.CancelOp
+			}
+		}
+		var ref keyRef
+		ref, h = claimKeySlot(k)
+		return ref, xsync.UpdateOp
+	})
+	return h
+}
+
+func claimKeySlot(k common.Hash) (keyRef, StorageKey) {
+	keySlabs.Lock()
+	defer keySlabs.Unlock()
+	if keySlabs.cur == nil || keySlabs.next == keySlabLen {
+		keySlabs.cur, keySlabs.keys, keySlabs.next = new(keySlab), new(slabKeys), 0
+		keySlabs.weak = weak.Make(keySlabs.cur)
+		runtime.AddCleanup(keySlabs.cur, forgetSlabKeys, deadSlab{keySlabs.weak, keySlabs.keys})
+	}
+	i := keySlabs.next
+	keySlabs.next++
+	keySlabs.cur[i], keySlabs.keys.keys[i] = k, k
+	keySlabs.keys.n.Store(i + 1)
+	return keyRef{keySlabs.weak, i}, StorageKey{&keySlabs.cur[i]}
 }
 
 func (k StorageKey) IsNil() bool {
@@ -170,7 +251,7 @@ func (k StorageKey) Value() common.Hash {
 	if k == NilKey {
 		return common.Hash{}
 	}
-	return unique.Handle[common.Hash](k).Value()
+	return *k.hash
 }
 
 func (k StorageKey) String() string {
