@@ -473,10 +473,8 @@ func TestFetchCoalescesSupersededStateChanges(t *testing.T) {
 				}
 				require.True(t, batch.StateChangesIncomplete)
 				require.Equal(t, uint64(3), batch.PendingBlockBaseFee)
-				require.Len(t, batch.ChangeBatch, 3)
-				require.Empty(t, batch.ChangeBatch[0].Changes, "obsolete account values must not overlay the new snapshot")
-				require.Empty(t, batch.ChangeBatch[1].Changes)
-				require.True(t, proto.Equal(batches[2].ChangeBatch[0], batch.ChangeBatch[2]))
+				require.Len(t, batch.ChangeBatch, 1, "only the current view supplies state changes")
+				require.True(t, proto.Equal(batches[2].ChangeBatch[0], batch.ChangeBatch[0]))
 				require.Len(t, unwind.Txns, 1)
 				require.Equal(t, rlps[0], unwind.Txns[0].Rlp)
 				require.Empty(t, unwindBlobs.Txns)
@@ -1304,37 +1302,49 @@ func TestFetchSerializesBatchFlushes(t *testing.T) {
 	})
 }
 
-func TestFetchSupersededUnwindSurvivesReconnect(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	first := remoteproto.NewMockKV_StateChangesClient[*remoteproto.StateChangeBatch](ctrl)
-	second := remoteproto.NewMockKV_StateChangesClient[*remoteproto.StateChangeBatch](ctrl)
-	stale := &remoteproto.StateChangeBatch{StateVersionId: 1, StateChangesIncomplete: true, ChangeBatch: []*remoteproto.StateChange{{
-		Direction: remoteproto.Direction_UNWIND, Txs: [][]byte{decodeHex(TxnParseMainnetTests[1].PayloadStr)},
-	}}}
-	current := &remoteproto.StateChangeBatch{StateVersionId: 2, StateChangesIncomplete: true, ChangeBatch: []*remoteproto.StateChange{{Direction: remoteproto.Direction_FORWARD}}}
-	gomock.InOrder(
-		first.EXPECT().Recv().Return(stale, nil),
-		first.EXPECT().Recv().Return(nil, io.EOF),
-		second.EXPECT().Recv().Return(current, nil),
-		second.EXPECT().Recv().Return(nil, io.EOF),
-	)
-	client := remoteproto.NewMockKVClient(ctrl)
-	gomock.InOrder(
-		client.EXPECT().StateChanges(gomock.Any(), gomock.Any(), gomock.Any()).Return(first, nil),
-		client.EXPECT().StateChanges(gomock.Any(), gomock.Any(), gomock.Any()).Return(second, nil),
-	)
-	pool := NewMockPool(ctrl)
-	var recovered TxnSlots
-	pool.EXPECT().OnNewBlock(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
-		func(_ context.Context, batch *remoteproto.StateChangeBatch, unwind, _, _ TxnSlots) error {
-			if batch.StateVersionId == 1 {
-				return errStateViewSuperseded
-			}
-			recovered = unwind
-			return nil
-		}).Times(2)
-	fetch := NewFetch(t.Context(), nil, pool, client, nil, u256.N1, log.New())
-	require.ErrorIs(t, fetch.handleStateChanges(t.Context(), client), io.EOF)
-	require.ErrorIs(t, fetch.handleStateChanges(t.Context(), client), io.EOF)
-	require.Len(t, recovered.Txns, 1, "reconnecting must retain the pending orphaned transaction")
+func TestFetchSupersededChangesSurviveReconnect(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		txns [][]byte
+	}{
+		{"unwind", [][]byte{decodeHex(TxnParseMainnetTests[1].PayloadStr)}},
+		{"no transactions", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			first := remoteproto.NewMockKV_StateChangesClient[*remoteproto.StateChangeBatch](ctrl)
+			second := remoteproto.NewMockKV_StateChangesClient[*remoteproto.StateChangeBatch](ctrl)
+			stale := &remoteproto.StateChangeBatch{StateVersionId: 1, StateChangesIncomplete: true, ChangeBatch: []*remoteproto.StateChange{{
+				Direction: remoteproto.Direction_UNWIND, Txs: tc.txns,
+			}}}
+			current := &remoteproto.StateChangeBatch{StateVersionId: 2, ChangeBatch: []*remoteproto.StateChange{{Direction: remoteproto.Direction_FORWARD}}}
+			gomock.InOrder(
+				first.EXPECT().Recv().Return(stale, nil),
+				first.EXPECT().Recv().Return(nil, io.EOF),
+				second.EXPECT().Recv().Return(current, nil),
+				second.EXPECT().Recv().Return(nil, io.EOF),
+			)
+			client := remoteproto.NewMockKVClient(ctrl)
+			gomock.InOrder(
+				client.EXPECT().StateChanges(gomock.Any(), gomock.Any(), gomock.Any()).Return(first, nil),
+				client.EXPECT().StateChanges(gomock.Any(), gomock.Any(), gomock.Any()).Return(second, nil),
+			)
+			pool := NewMockPool(ctrl)
+			var recovered TxnSlots
+			pool.EXPECT().OnNewBlock(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+				func(_ context.Context, batch *remoteproto.StateChangeBatch, unwind, _, _ TxnSlots) error {
+					if batch.StateVersionId == 1 {
+						return errStateViewSuperseded
+					}
+					require.True(t, batch.StateChangesIncomplete, "a superseded batch requires a refresh even without transactions")
+					recovered = unwind
+					return nil
+				}).Times(2)
+			fetch := NewFetch(t.Context(), nil, pool, client, nil, u256.N1, log.New())
+			require.ErrorIs(t, fetch.handleStateChanges(t.Context(), client), io.EOF)
+			require.ErrorIs(t, fetch.handleStateChanges(t.Context(), client), io.EOF)
+			require.Len(t, recovered.Txns, len(tc.txns), "reconnecting must retain pending orphaned transactions")
+			require.False(t, current.StateChangesIncomplete, "a shared batch must not be modified")
+		})
+	}
 }
