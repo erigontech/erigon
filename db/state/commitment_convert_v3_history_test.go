@@ -325,31 +325,8 @@ func injectCommitmentHistoryOrphan(t *testing.T, db kv.TemporalRwDB, agg *state.
 	idxPath := filepath.Join(dirs.SnapIdx, base+".ef")
 	cfg := agg.Cfg(kv.CommitmentDomain).Hist
 
-	historyDecomp, err := seg.NewDecompressor(historyPath)
-	require.NoError(t, err)
-	pageValues := historyDecomp.CompressedPageValuesCount()
-	if historyDecomp.CompressionFormatVersion() == seg.FileCompressionFormatV0 {
-		pageValues = cfg.HistoryValuesOnCompressedPage
-	}
-	historyReader := seg.NewPagedReader(seg.NewReader(historyDecomp.MakeGetter(), cfg.Compression), pageValues, true)
-	var historyPairs []commitmentHistoryPair
-	for historyReader.HasNext() {
-		key, value, _, _ := historyReader.Next2(nil)
-		historyPairs = append(historyPairs, commitmentHistoryPair{key: slices.Clone(key), value: slices.Clone(value)})
-	}
-	historyDecomp.Close()
-
-	idxDecomp, err := seg.NewDecompressor(idxPath)
-	require.NoError(t, err)
-	idxReader := seg.NewReader(idxDecomp.MakeGetter(), cfg.IiCfg.Compression)
-	var idxPairs []commitmentHistoryPair
-	for idxReader.HasNext() {
-		key, _ := idxReader.Next(nil)
-		require.True(t, idxReader.HasNext())
-		value, _ := idxReader.Next(nil)
-		idxPairs = append(idxPairs, commitmentHistoryPair{key: slices.Clone(key), value: slices.Clone(value)})
-	}
-	idxDecomp.Close()
+	historyPairs := readCommitmentHistoryValues(t, historyPath, cfg)
+	idxPairs := readCommitmentHistoryIndex(t, idxPath, cfg)
 
 	var sourceKey, sourceValue []byte
 	var orphanTx uint64
@@ -400,6 +377,117 @@ func injectCommitmentHistoryOrphan(t *testing.T, db kv.TemporalRwDB, agg *state.
 	rewriteCommitmentHistoryIndex(t, dirs, idxPath, idxPairs, cfg)
 	require.NoError(t, agg.ReloadFiles())
 	require.NoError(t, agg.BuildMissedAccessors(t.Context(), db, 1))
+}
+
+func readCommitmentHistoryValues(t *testing.T, path string, cfg statecfg.HistCfg) []commitmentHistoryPair {
+	t.Helper()
+	d, err := seg.NewDecompressor(path)
+	require.NoError(t, err)
+	defer d.Close()
+	pageValues := d.CompressedPageValuesCount()
+	if d.CompressionFormatVersion() == seg.FileCompressionFormatV0 {
+		pageValues = cfg.HistoryValuesOnCompressedPage
+	}
+	r := seg.NewPagedReader(seg.NewReader(d.MakeGetter(), cfg.Compression), pageValues, true)
+	var pairs []commitmentHistoryPair
+	for r.HasNext() {
+		key, value, _, _ := r.Next2(nil)
+		pairs = append(pairs, commitmentHistoryPair{key: slices.Clone(key), value: slices.Clone(value)})
+	}
+	return pairs
+}
+
+func readCommitmentHistoryIndex(t *testing.T, path string, cfg statecfg.HistCfg) []commitmentHistoryPair {
+	t.Helper()
+	d, err := seg.NewDecompressor(path)
+	require.NoError(t, err)
+	defer d.Close()
+	r := seg.NewReader(d.MakeGetter(), cfg.IiCfg.Compression)
+	var pairs []commitmentHistoryPair
+	for r.HasNext() {
+		key, _ := r.Next(nil)
+		require.True(t, r.HasNext())
+		value, _ := r.Next(nil)
+		pairs = append(pairs, commitmentHistoryPair{key: slices.Clone(key), value: slices.Clone(value)})
+	}
+	return pairs
+}
+
+func dropHistoryLeafOnlyRewrites(t *testing.T, db kv.TemporalRwDB, agg *state.Aggregator) int {
+	t.Helper()
+	dirs, cfg := agg.Dirs(), agg.Cfg(kv.CommitmentDomain).Hist
+	historyPaths, err := filepath.Glob(filepath.Join(dirs.SnapHistory, "*-commitment.*.v"))
+	require.NoError(t, err)
+	require.NotEmpty(t, historyPaths)
+	agg.CloseFilesNoReopen()
+	total := 0
+	for _, historyPath := range historyPaths {
+		base := strings.TrimSuffix(filepath.Base(historyPath), ".v")
+		_, rangeBase, _ := strings.Cut(base, "-")
+		idxPaths, err := filepath.Glob(filepath.Join(dirs.SnapIdx, "*-"+rangeBase+".ef"))
+		require.NoError(t, err)
+		require.Len(t, idxPaths, 1)
+		idxPath := idxPaths[0]
+		from, _ := commitmentFileRange(t, historyPath)
+		baseTxNum := from * agg.StepSize()
+		historyPairs := readCommitmentHistoryValues(t, historyPath, cfg)
+		versions := map[string][]commitmentHistoryPair{}
+		for _, pair := range historyPairs {
+			if len(pair.key) > 8 {
+				versions[string(pair.key[8:])] = append(versions[string(pair.key[8:])], pair)
+			}
+		}
+		dropped := map[string]bool{}
+		for key, chain := range versions {
+			if commitment.IsCommitmentStateKey([]byte(key)) {
+				continue
+			}
+			for i := 0; i+1 < len(chain); i++ {
+				before, beforeOk := branchCells(chain[i].value)
+				written, writtenOk := branchCells(chain[i+1].value)
+				if len(chain[i].value) != 0 && beforeOk && writtenOk && before == written {
+					dropped[string(chain[i].key)] = true
+				}
+			}
+		}
+		if len(dropped) == 0 {
+			continue
+		}
+		total += len(dropped)
+		historyPairs = slices.DeleteFunc(historyPairs, func(pair commitmentHistoryPair) bool { return dropped[string(pair.key)] })
+		idxPairs := readCommitmentHistoryIndex(t, idxPath, cfg)
+		var sequence multiencseq.SequenceBuilder
+		for i, pair := range idxPairs {
+			var kept []uint64
+			for it := multiencseq.ReadMultiEncSeq(baseTxNum, pair.value).Iterator(0); it.HasNext(); {
+				txNum, err := it.Next()
+				require.NoError(t, err)
+				if !dropped[string(append(binary.BigEndian.AppendUint64(nil, txNum), pair.key...))] {
+					kept = append(kept, txNum)
+				}
+			}
+			sequence.Reset(baseTxNum, uint64(len(kept)), kept[len(kept)-1])
+			for _, txNum := range kept {
+				sequence.AddOffset(txNum)
+			}
+			sequence.Build()
+			idxPairs[i].value = sequence.AppendBytes(nil)
+		}
+		for _, dirPath := range []string{dirs.SnapIdx, dirs.SnapAccessors} {
+			for _, ext := range []string{".bt", ".efi", ".kvei", ".kvi", ".vi"} {
+				accessors, err := filepath.Glob(filepath.Join(dirPath, "*"+rangeBase+ext))
+				require.NoError(t, err)
+				for _, accessor := range accessors {
+					require.NoError(t, dir.RemoveFile(accessor))
+				}
+			}
+		}
+		rewriteCommitmentHistoryV3(t, dirs, historyPath, historyPairs, cfg)
+		rewriteCommitmentHistoryIndex(t, dirs, idxPath, idxPairs, cfg)
+	}
+	require.NoError(t, agg.ReloadFiles())
+	require.NoError(t, agg.BuildMissedAccessors(t.Context(), db, 1))
+	return total
 }
 
 func rewriteCommitmentHistoryV3(t *testing.T, dirs datadir.Dirs, path string, pairs []commitmentHistoryPair, cfg statecfg.HistCfg) {
@@ -557,6 +645,43 @@ func TestConvertCommitmentFiles_V3HistoryExtensionRoot(t *testing.T) {
 	require.NoError(t, domains.Flush(t.Context(), rwTx))
 	require.NoError(t, rwTx.Commit())
 	require.NoError(t, agg.BuildFiles(db, stepSize*steps, unboundedFinalityCtx))
+
+	runOrchestrator(t, db, state.ConvertOpts{TargetV3: true})
+
+	for _, txNum := range slices.Sorted(maps.Keys(roots)) {
+		if txNum >= stepSize*(steps-1) {
+			break
+		}
+		check, err := state.FoldCommitmentV3(t.Context(), agg, txNum+1)
+		require.NoErrorf(t, err, "records as of txNum %d", txNum+1)
+		require.Equalf(t, roots[txNum], check.Root, "root as of txNum %d", txNum+1)
+	}
+}
+
+func TestConvertCommitmentFiles_V3HistoryRootWithOnlyDirectLeaves(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	const stepSize, steps = 4, 8
+	previousSchema := statecfg.Schema
+	statecfg.EnableHistoricalCommitment()
+	t.Cleanup(func() { statecfg.Schema = previousSchema })
+	db, agg, rwTx, domains := convertTestDomains(t, stepSize)
+	_, _, putAccount := domainWriter(t, domains, rwTx)
+	next := uint64(1)
+	addrs := [][]byte{keyWithHashPrefix(length.Addr, []byte{4}, &next), keyWithHashPrefix(length.Addr, []byte{9}, &next)}
+	roots := map[uint64][]byte{}
+	for txNum := range uint64(stepSize * steps) {
+		putAccount(addrs[txNum%2], txNum)
+		if txNum == 0 {
+			putAccount(addrs[1], txNum)
+		}
+		root, err := domains.ComputeCommitment(t.Context(), rwTx, true, txNum, txNum, "", nil)
+		require.NoError(t, err)
+		roots[txNum] = root
+	}
+	require.NoError(t, domains.Flush(t.Context(), rwTx))
+	require.NoError(t, rwTx.Commit())
+	require.NoError(t, agg.BuildFiles(db, stepSize*steps, unboundedFinalityCtx))
+	require.Positive(t, dropHistoryLeafOnlyRewrites(t, db, agg))
 
 	runOrchestrator(t, db, state.ConvertOpts{TargetV3: true})
 
