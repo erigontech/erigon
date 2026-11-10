@@ -157,9 +157,9 @@ type forkGraphDisk struct {
 	newestLightClientUpdate atomic.Value
 	// the lightclientUpdates leaks memory, but it's not a big deal since new data is added every 27 hours.
 	lightClientUpdates sync.Map // period -> lightclientupdate
-	// lightClientUpdateCandidates holds, per sync committee period, the best updates of blocks that are not finalized
-	// yet, best first. Finalization moves the canonical ones into lightClientUpdates. Guarded by addPruneMu.
-	lightClientUpdateCandidates map[uint64][]lightClientUpdateCandidate
+	// lightClientUpdateCandidates holds, per sync committee period, the updates of blocks that are not finalized yet.
+	// Finalization moves the canonical ones into lightClientUpdates. Guarded by addPruneMu.
+	lightClientUpdateCandidates map[uint64]*periodLightClientUpdateCandidates
 
 	// in-memory cache of block roots that have envelopes on disk [Optimization for Gloas:EIP7732]
 	envelopeExists   sync.Map // common.Hash -> struct{}
@@ -779,34 +779,43 @@ func (f *forkGraphDisk) recordLightClientUpdateLocked(signatureBlock common.Hash
 	f.addLightClientUpdateCandidateLocked(signatureBlock, update)
 }
 
-// maxLightClientUpdateCandidates bounds the candidates of a period: each one holds a sync committee (about 25 KB), and
-// without finality a candidate is added for every block.
-const maxLightClientUpdateCandidates = 16
-
 type lightClientUpdateCandidate struct {
 	signatureBlock common.Hash
 	update         *cltypes.LightClientUpdate
 }
 
-// addLightClientUpdateCandidateLocked keeps update among the best candidates of its attested header's sync committee
-// period. Only an update signed in that same period is a candidate for it. The caller holds addPruneMu.
+// periodLightClientUpdateCandidates are the candidates of one period. Its candidates share one copy of each distinct
+// next sync committee (about 25 KB each, the bulk of an update), so a candidate costs a few KB.
+type periodLightClientUpdateCandidates struct {
+	candidates []lightClientUpdateCandidate
+	committees []*solid.SyncCommittee
+}
+
+// addLightClientUpdateCandidateLocked keeps update as a candidate of its attested header's sync committee period. Only
+// an update signed in that same period is a candidate for it. A period holds at most one candidate per slot of the
+// period; only a period without finality for longer than that skips later candidates. The caller holds addPruneMu.
 func (f *forkGraphDisk) addLightClientUpdateCandidateLocked(signatureBlock common.Hash, update *cltypes.LightClientUpdate) {
 	period := f.beaconCfg.SyncCommitteePeriod(update.AttestedHeader.Beacon.Slot)
 	if period != f.beaconCfg.SyncCommitteePeriod(update.SignatureSlot) {
 		return
 	}
-	candidates := f.lightClientUpdateCandidates[period]
-	i := slices.IndexFunc(candidates, func(c lightClientUpdateCandidate) bool {
-		return lightclient_utils.IsBetterUpdate(f.beaconCfg, update, c.update)
-	})
-	if i < 0 {
-		i = len(candidates)
-	}
-	candidates = slices.Insert(candidates, i, lightClientUpdateCandidate{signatureBlock: signatureBlock, update: update})
 	if f.lightClientUpdateCandidates == nil {
-		f.lightClientUpdateCandidates = make(map[uint64][]lightClientUpdateCandidate)
+		f.lightClientUpdateCandidates = make(map[uint64]*periodLightClientUpdateCandidates)
 	}
-	f.lightClientUpdateCandidates[period] = candidates[:min(len(candidates), maxLightClientUpdateCandidates)]
+	p := f.lightClientUpdateCandidates[period]
+	if p == nil {
+		p = &periodLightClientUpdateCandidates{}
+		f.lightClientUpdateCandidates[period] = p
+	}
+	if uint64(len(p.candidates)) >= f.beaconCfg.SlotsPerEpoch*f.beaconCfg.EpochsPerSyncCommitteePeriod {
+		return
+	}
+	if i := slices.IndexFunc(p.committees, update.NextSyncCommittee.Equal); i >= 0 {
+		update.NextSyncCommittee = p.committees[i]
+	} else {
+		p.committees = append(p.committees, update.NextSyncCommittee)
+	}
+	p.candidates = append(p.candidates, lightClientUpdateCandidate{signatureBlock: signatureBlock, update: update})
 }
 
 // KeepFinalizedLightClientUpdates moves the candidates whose signature block is on the finalized block's chain into
@@ -819,8 +828,8 @@ func (f *forkGraphDisk) KeepFinalizedLightClientUpdates(finalized common.Hash) {
 		return
 	}
 	finalizedSlot, lowest := header.Slot, header.Slot
-	for _, candidates := range f.lightClientUpdateCandidates {
-		for _, c := range candidates {
+	for _, p := range f.lightClientUpdateCandidates {
+		for _, c := range p.candidates {
 			lowest = min(lowest, c.update.SignatureSlot)
 		}
 	}
@@ -829,9 +838,9 @@ func (f *forkGraphDisk) KeepFinalizedLightClientUpdates(finalized common.Hash) {
 		finalizedChain[root] = struct{}{}
 		root = header.ParentRoot
 	}
-	for period, candidates := range f.lightClientUpdateCandidates {
-		pending := candidates[:0]
-		for _, c := range candidates {
+	for period, p := range f.lightClientUpdateCandidates {
+		pending := p.candidates[:0]
+		for _, c := range p.candidates {
 			if c.update.SignatureSlot > finalizedSlot {
 				pending = append(pending, c)
 			} else if _, canonical := finalizedChain[c.signatureBlock]; canonical {
@@ -841,7 +850,7 @@ func (f *forkGraphDisk) KeepFinalizedLightClientUpdates(finalized common.Hash) {
 		if len(pending) == 0 {
 			delete(f.lightClientUpdateCandidates, period)
 		} else {
-			f.lightClientUpdateCandidates[period] = pending
+			p.candidates = pending
 		}
 	}
 }

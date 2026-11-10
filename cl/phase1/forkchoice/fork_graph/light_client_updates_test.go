@@ -26,23 +26,17 @@ import (
 	"github.com/erigontech/erigon/common"
 )
 
-// A period ranks its candidates best first, and an update signed in the next period is not a candidate for the period
-// of its attested header.
-func TestLightClientUpdateCandidatesRankAndSkipOtherPeriods(t *testing.T) {
+// An update signed in the next period is not a candidate for the period of its attested header.
+func TestLightClientUpdateCandidatesSkipOtherPeriods(t *testing.T) {
 	cfg := &clparams.MainnetBeaconConfig
 	f := &forkGraphDisk{beaconCfg: cfg}
 	periodStart := cfg.SlotsPerEpoch * cfg.EpochsPerSyncCommitteePeriod
 
-	f.addLightClientUpdateCandidateLocked(common.Hash{1}, lightClientTestUpdate(cfg, 10, periodStart+1))
-	best := lightClientTestUpdate(cfg, 400, periodStart+5)
-	f.addLightClientUpdateCandidateLocked(common.Hash{2}, best)
-	f.addLightClientUpdateCandidateLocked(common.Hash{3}, lightClientTestUpdate(cfg, 300, periodStart+7))
-	f.addLightClientUpdateCandidateLocked(common.Hash{4}, lightClientTestUpdate(cfg, int(cfg.SyncCommitteeSize), 2*periodStart-1))
+	f.addLightClientUpdateCandidateLocked(common.Hash{1}, lightClientTestUpdate(cfg, 400, periodStart+5))
+	f.addLightClientUpdateCandidateLocked(common.Hash{2}, lightClientTestUpdate(cfg, int(cfg.SyncCommitteeSize), 2*periodStart-1))
 
-	candidates := f.lightClientUpdateCandidates[1]
-	require.Len(t, candidates, 3)
-	require.Same(t, best, candidates[0].update)
-	require.Equal(t, []common.Hash{{2}, {3}, {1}}, []common.Hash{candidates[0].signatureBlock, candidates[1].signatureBlock, candidates[2].signatureBlock})
+	require.Len(t, f.lightClientUpdateCandidates[1].candidates, 1)
+	require.Equal(t, common.Hash{1}, f.lightClientUpdateCandidates[1].candidates[0].signatureBlock)
 }
 
 // The update of a block that passed its transition is served at once as the newest update, but its period store waits
@@ -58,7 +52,7 @@ func TestRecordLightClientUpdateWaitsForFinalizationForThePeriodStore(t *testing
 	require.Same(t, update, f.NewestLightClientUpdate())
 	_, ok := f.GetLightClientUpdate(1)
 	require.False(t, ok)
-	require.Len(t, f.lightClientUpdateCandidates[1], 1)
+	require.Len(t, f.lightClientUpdateCandidates[1].candidates, 1)
 }
 
 func lightClientTestUpdate(cfg *clparams.BeaconChainConfig, participants int, attestedSlot uint64) *cltypes.LightClientUpdate {
@@ -100,7 +94,7 @@ func TestFinalizationKeepsOnlyCanonicalLightClientUpdates(t *testing.T) {
 	got, ok := f.GetLightClientUpdate(1)
 	require.True(t, ok)
 	require.Same(t, canonicalUpdate, got)
-	require.Len(t, f.lightClientUpdateCandidates[1], 1, "only the candidate above the finalized slot waits")
+	require.Len(t, f.lightClientUpdateCandidates[1].candidates, 1, "only the candidate above the finalized slot waits")
 
 	f.KeepFinalizedLightClientUpdates(nextFinalized)
 
@@ -110,18 +104,52 @@ func TestFinalizationKeepsOnlyCanonicalLightClientUpdates(t *testing.T) {
 	require.Empty(t, f.lightClientUpdateCandidates)
 }
 
-// A period keeps a bounded number of candidates, the best ones, so a long stretch without finality does not hold a
-// sync committee per block.
-func TestLightClientUpdateCandidatesKeepTheBestOfAPeriod(t *testing.T) {
+// Better updates on a branch that loses fork choice do not push the canonical candidate out before finalization.
+func TestFinalizationKeepsTheCanonicalCandidateAmongManyBetterSideBranchOnes(t *testing.T) {
 	cfg := &clparams.MainnetBeaconConfig
 	f := &forkGraphDisk{beaconCfg: cfg}
 	periodStart := cfg.SlotsPerEpoch * cfg.EpochsPerSyncCommitteePeriod
-	for i := range maxLightClientUpdateCandidates + 1 {
-		f.addLightClientUpdateCandidateLocked(common.Hash{byte(i + 1)}, lightClientTestUpdate(cfg, 400+i, periodStart+uint64(i)))
+	attested, canonical, finalized := common.Hash{1}, common.Hash{2}, common.Hash{3}
+	f.headers.Store(attested, &cltypes.BeaconBlockHeader{Slot: periodStart + 10})
+	f.headers.Store(canonical, &cltypes.BeaconBlockHeader{Slot: periodStart + 11, ParentRoot: attested})
+	f.headers.Store(finalized, &cltypes.BeaconBlockHeader{Slot: periodStart + 64, ParentRoot: canonical})
+
+	canonicalUpdate := lightClientTestUpdate(cfg, 400, periodStart+10)
+	f.addLightClientUpdateCandidateLocked(canonical, canonicalUpdate)
+	for i := range 20 {
+		f.addLightClientUpdateCandidateLocked(common.Hash{0xee, byte(i)}, lightClientTestUpdate(cfg, 450, periodStart+10))
 	}
-	candidates := f.lightClientUpdateCandidates[1]
-	require.Len(t, candidates, maxLightClientUpdateCandidates)
-	for _, c := range candidates {
-		require.NotEqual(t, common.Hash{1}, c.signatureBlock, "the worst candidate is dropped")
+	f.KeepFinalizedLightClientUpdates(finalized)
+
+	got, ok := f.GetLightClientUpdate(1)
+	require.True(t, ok)
+	require.Same(t, canonicalUpdate, got)
+}
+
+// A period holds at most one candidate per slot of the period; past that, later candidates are skipped, so the
+// candidates kept so far, canonical ones included, stay.
+func TestLightClientUpdateCandidatesOfAPeriodAreBounded(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.SlotsPerEpoch, cfg.EpochsPerSyncCommitteePeriod = 4, 2
+	f := &forkGraphDisk{beaconCfg: &cfg}
+	for i := range 9 {
+		f.addLightClientUpdateCandidateLocked(common.Hash{byte(i + 1)}, lightClientTestUpdate(&cfg, 400+i, 8))
 	}
+	candidates := f.lightClientUpdateCandidates[1].candidates
+	require.Len(t, candidates, 8)
+	require.Equal(t, common.Hash{1}, candidates[0].signatureBlock)
+}
+
+// Candidates of a period share one copy of each distinct next sync committee instead of holding one each.
+func TestLightClientUpdateCandidatesShareTheirSyncCommittee(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	f := &forkGraphDisk{beaconCfg: cfg}
+	periodStart := cfg.SlotsPerEpoch * cfg.EpochsPerSyncCommitteePeriod
+	first, second := lightClientTestUpdate(cfg, 400, periodStart+1), lightClientTestUpdate(cfg, 400, periodStart+2)
+	require.NotSame(t, first.NextSyncCommittee, second.NextSyncCommittee)
+
+	f.addLightClientUpdateCandidateLocked(common.Hash{1}, first)
+	f.addLightClientUpdateCandidateLocked(common.Hash{2}, second)
+
+	require.Same(t, first.NextSyncCommittee, second.NextSyncCommittee)
 }
