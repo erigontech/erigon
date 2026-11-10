@@ -226,8 +226,6 @@ type IntraBlockState struct {
 	addrCache   *addressCache
 	internOps   uint32
 	addrOps     uint32
-
-	firstDepReadAt time.Time
 }
 
 type sdProbeEntry struct {
@@ -3636,14 +3634,14 @@ func (ibs *IntraBlockState) HadInvalidRead() bool {
 //go:noinline
 func (ibs *IntraBlockState) noteDep(idx int) {
 	if ibs.dep < 0 && idx >= 0 {
-		ibs.firstDepReadAt = time.Now()
+		ibs.versionedReads.firstDepReadAt = time.Now()
 	}
 	ibs.dep = max(ibs.dep, idx)
 }
 
 // FirstDepReadAt is the time of the run's first dependency read; valid only when DepTxIndex() >= 0.
 func (ibs *IntraBlockState) FirstDepReadAt() time.Time {
-	return ibs.firstDepReadAt
+	return ibs.versionedReads.firstDepReadAt
 }
 
 func (ibs *IntraBlockState) DepTxIndex() int {
