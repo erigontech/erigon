@@ -179,6 +179,7 @@ func (api *OtterscanAPIImpl) runTracer(ctx context.Context, tx kv.TemporalTx, ha
 	}
 	defer ibs.Close()
 	transactions.VersionedCallState(ibs)
+	api.shareCodeByHash(ibs)
 
 	msg, txCtx, err := transactions.ComputeTxContext(ibs, rules, signer, block, int(txIndex))
 	if err != nil {
@@ -447,10 +448,7 @@ func (api *OtterscanAPIImpl) GetBlockTransactions(ctx context.Context, number rp
 		}
 		txs = append(txs, rpcTx)
 
-		marshalledRcpt := ethutils.MarshalReceipt(receipt, txn, chainConfig, b.HeaderNoCopy(), true, false)
-		marshalledRcpt.Logs = nil
-		marshalledRcpt.LogsBloom = nil
-		result = append(result, marshalledRcpt)
+		result = append(result, ethutils.MarshalReceiptWithoutLogs(receipt, txn, chainConfig, b.HeaderNoCopy()))
 	}
 
 	response := map[string]any{}

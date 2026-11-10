@@ -33,7 +33,6 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/erigontech/erigon/cl/transition"
-	"github.com/erigontech/erigon/cl/transition/impl/eth2/statechange"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
@@ -220,6 +219,10 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 	// Count before taking the store mutex so queued imports are visible as in progress.
 	f.blocksProcessing.Add(1)
 	defer f.blocksProcessing.Add(-1)
+	var columns custodyColumnRead
+	if checkDataAvaiability {
+		columns = f.readCustodyColumns(block)
+	}
 	f.mu.Lock()
 	unlocked := false
 	defer f.drainQueuedWork()
@@ -263,7 +266,6 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 	currentSlotOnEntry := f.ethClock.GetCurrentSlot()
 
 	// Validate parent payload status path early (before expensive operations)
-	blockEpoch := f.computeEpochAtSlot(block.Block.Slot)
 	isGloas := blockVersion >= clparams.GloasVersion
 	headBeforeBlock := common.Hash{}
 	if isGloas && f.Slot() == block.Block.Slot {
@@ -302,7 +304,7 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 		}
 
 		if checkDataAvaiability {
-			if err := f.checkPreGloasBlockDataAvailability(ctx, block, common.Hash(blockRoot), versionedHashes); err != nil {
+			if err := f.checkPreGloasBlockDataAvailability(ctx, block, common.Hash(blockRoot), versionedHashes, columns); err != nil {
 				return err
 			}
 		}
@@ -393,6 +395,9 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 				}
 			case execution_client.PayloadStatusInvalidated:
 				log.Warn("OnBlock: block is invalid", "block", common.Hash(blockRoot), "err", err)
+				if ancestorsErr := f.invalidateOptimisticAncestorsLocked(err, block.Block); ancestorsErr != nil {
+					return ancestorsErr
+				}
 				// remove from optimistic candidate
 				if err := f.optimisticStore.InvalidateBlock(blockRoot, block.Block); err != nil {
 					return fmt.Errorf("failed to remove block from optimistic store: %w", err)
@@ -454,7 +459,6 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 		f.processPendingEnvelopeAfterBlock(ctx, common.Hash(blockRoot), checkDataAvaiability)
 		return nil
 	case fork_graph.Success:
-		f.updateChildren(block.Block.Slot-1, block.Block.ParentRoot, blockRoot) // parent slot can be innacurate
 	case fork_graph.BelowAnchor:
 		log.Debug("replay block", "status", status.String())
 		return nil
@@ -463,121 +467,18 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 	default:
 		return fmt.Errorf("replay block, status %+v", status)
 	}
-	if block.Block.Body.ExecutionPayload != nil {
-		f.eth2Roots.Add(blockRoot, block.Block.Body.ExecutionPayload.BlockHash)
-	} else if blockVersion >= clparams.GloasVersion {
-		// [New in Gloas:EIP7732] No ExecutionPayload in beacon block (GLOAS separates them).
-		// Inherit parent's execution head as a placeholder so FCU sends a valid (non-zero) hash.
-		// OnExecutionPayload will overwrite this with the real payload hash if the envelope arrives (FULL path).
-		// If the envelope never arrives (EMPTY path), the parent hash is the correct EL head anyway.
-		if parentHash, ok := f.eth2Roots.Get(block.Block.ParentRoot); ok {
-			f.eth2Roots.Add(blockRoot, parentHash)
-		}
-	}
-	// Note: highestSeen was already updated before AddChainSegment (line ~216)
-	// so aggregates/attestations for this slot are accepted promptly. No second
-	// update needed here.
-
-	// Remove the parent from the head set
-	delete(f.headSet, block.Block.ParentRoot)
-	f.headSet[blockRoot] = struct{}{}
-	// record_block_timeliness: store [block_timely, ptc_timely] vector.
-	// [Modified in Gloas:EIP7732] Post-GLOAS stores a two-element timeliness vector;
-	// pre-GLOAS stores [block_timely, false]. See recordBlockTimeliness for details.
-	currentSlot := f.recordBlockTimeliness(block.Block, common.Hash(blockRoot))
-	// update_proposer_boost_root: conditionally set proposer boost root.
-	f.updateProposerBoostRoot(headBeforeBlock, common.Hash(blockRoot), currentSlot)
-
-	// [New in Gloas:EIP7732] GLOAS-specific on_block logic (post state transition)
-	var pendingEnvelopeFound bool
-	if blockVersion >= clparams.GloasVersion {
-		// Initialize payload timeliness and data availability votes for this block
-		f.payloadTimelinessVote.Store(common.Hash(blockRoot), [clparams.PtcSize]int8{})
-		f.payloadDataAvailabilityVote.Store(common.Hash(blockRoot), [clparams.PtcSize]int8{})
-
-		if block.Block.Body.PayloadAttestations != nil {
-			f.notifyPtcMessages(lastProcessedState, block.Block.Body.PayloadAttestations)
-		}
-
-		if _, ok := f.pendingLocalSelfBuildEnvelopes.Get(common.Hash(blockRoot)); ok {
-			pendingEnvelopeFound = true
-		} else if _, ok := f.pendingEnvelopes.Get(common.Hash(blockRoot)); ok {
-			pendingEnvelopeFound = true
-		}
-	}
-	if lastProcessedState.Slot()%f.beaconCfg.SlotsPerEpoch == 0 {
-		// Update randao mixes
-		r := solid.NewHashVector(int(f.beaconCfg.EpochsPerHistoricalVector))
-		lastProcessedState.RandaoMixes().CopyTo(r)
-		f.randaoMixesLists.Add(blockRoot, r)
-	} else {
-		f.randaoDeltas.Add(blockRoot, randaoDelta{
-			epoch: state.Epoch(lastProcessedState),
-			delta: lastProcessedState.GetRandaoMixes(state.Epoch(lastProcessedState)),
-		})
-	}
-	f.participation.Add(state.Epoch(lastProcessedState), lastProcessedState.CurrentEpochParticipation().Copy())
-	f.preverifiedSizes.Add(blockRoot, preverifiedAppendListsSizes{
-		validatorLength:           uint64(lastProcessedState.ValidatorLength()),
-		historicalRootsLength:     lastProcessedState.HistoricalRootsLength(),
-		historicalSummariesLength: lastProcessedState.HistoricalSummariesLength(),
-	})
-	f.finalityCheckpoints.Add(blockRoot, finalityCheckpoints{
-		finalizedCheckpoint:         lastProcessedState.FinalizedCheckpoint(),
-		currentJustifiedCheckpoint:  lastProcessedState.CurrentJustifiedCheckpoint(),
-		previousJustifiedCheckpoint: lastProcessedState.PreviousJustifiedCheckpoint(),
-	})
-
-	if err := f.addPendingConsolidations(blockRoot, lastProcessedState.PendingConsolidations()); err != nil {
-		return err
-	}
-	if err := f.addPendingDeposits(blockRoot, lastProcessedState.PendingDeposits()); err != nil {
-		return err
-	}
-	if err := f.addPendingPartialWithdrawals(blockRoot, lastProcessedState.PendingPartialWithdrawals()); err != nil {
-		return err
-	}
-	if err := f.addProposerLookahead(block.Block.Slot, lastProcessedState.ProposerLookahead()); err != nil {
-		return err
-	}
-
-	f.totalActiveBalances.Add(blockRoot, lastProcessedState.GetTotalActiveBalance())
-	// Update checkpoints
-	f.updateCheckpoints(lastProcessedState.CurrentJustifiedCheckpoint(), lastProcessedState.FinalizedCheckpoint())
-	// First thing save previous values of the checkpoints (avoid memory copy of all states and ensure easy revert)
-	var (
-		previousJustifiedCheckpoint = lastProcessedState.PreviousJustifiedCheckpoint()
-		currentJustifiedCheckpoint  = lastProcessedState.CurrentJustifiedCheckpoint()
-		stateFinalized              = lastProcessedState.FinalizedCheckpoint()
-		justificationBits           = lastProcessedState.JustificationBits().Copy()
+	storeTimeMs := f.timeMs.Load()
+	prepared := preparePostState(lastProcessedState, block.Block)
+	pendingEnvelopeFound, err := f.applyBlockImportLocked(
+		block.Block,
+		blockRoot,
+		headBeforeBlock,
+		storeTimeMs,
+		lastProcessedState,
+		prepared,
 	)
-	// Eagerly compute unrealized justification and finality (spec: compute_pulled_up_tip)
-	if err := statechange.ProcessJustificationBitsAndFinality(lastProcessedState, nil); err != nil {
+	if err != nil {
 		return err
-	}
-	// Capture post-pull-up values BEFORE restoring lastProcessedState so the
-	// prior-epoch updateCheckpoints below can use them per spec
-	// (compute_pulled_up_tip uses state.current_justified_checkpoint AFTER
-	// process_justification_and_finalization, not before).
-	postPullupJustified := lastProcessedState.CurrentJustifiedCheckpoint()
-	postPullupFinalized := lastProcessedState.FinalizedCheckpoint()
-	// Store per-block unrealized checkpoints (spec: store.unrealized_justifications[block_root])
-	f.unrealizedJustifications.Store(common.Hash(blockRoot), postPullupJustified)
-	f.unrealizedFinalizations.Store(common.Hash(blockRoot), postPullupFinalized)
-	f.updateUnrealizedCheckpoints(postPullupJustified, postPullupFinalized)
-	// Set the changed value pre-simulation
-	lastProcessedState.SetPreviousJustifiedCheckpoint(previousJustifiedCheckpoint)
-	lastProcessedState.SetCurrentJustifiedCheckpoint(currentJustifiedCheckpoint)
-	lastProcessedState.SetFinalizedCheckpoint(stateFinalized)
-	lastProcessedState.SetJustificationBits(justificationBits)
-
-	// Spec compute_pulled_up_tip: if the block is from a prior epoch, apply the
-	// post-pull-up checkpoints to the store. Previously this used the restored
-	// pre-pull-up values, which meant store.justified/finalized lagged what
-	// the spec would have for late-arriving prior-epoch blocks.
-	currentEpoch := f.computeEpochAtSlot(f.Slot())
-	if blockEpoch < currentEpoch {
-		f.updateCheckpoints(postPullupJustified, postPullupFinalized)
 	}
 	if !isVerifiedExecutionPayload {
 		log.Debug("OnBlock", "elapsed", time.Since(start), "slot", block.Block.Slot)
@@ -592,13 +493,6 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 			updateValidatorsCustody = true
 		}
 	}
-
-	block.Block.Body.Attestations.Range(func(_ int, attestation *solid.Attestation, _ int) bool {
-		if err := f.onAttestationLocked(attestation, true, lastProcessedState, blockRoot); err != nil {
-			log.Debug("[OnBlock] block attestation not applied", "slot", block.Block.Slot, "err", err)
-		}
-		return true
-	})
 
 	// Release lock (via defer) before writing DB indices for the applied envelope.
 	unlocked = true
@@ -631,9 +525,34 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 	return nil
 }
 
+// custodyColumnRead is a Fulu custody column availability read taken before f.mu, with the advertised custody group
+// count that defined the custody set at the time of the read.
+type custodyColumnRead struct {
+	available bool
+	cgc       uint64
+	err       error
+}
+
+// readCustodyColumns reads Fulu custody column availability. Callers must not hold f.mu: the read stats column files on
+// disk. Its skip conditions must match the Fulu branch of checkPreGloasBlockDataAvailability, which treats a skipped
+// read as unavailable.
+func (f *ForkChoiceStore) readCustodyColumns(block *cltypes.SignedBeaconBlock) custodyColumnRead {
+	if f.peerDas == nil || block == nil || block.Block == nil || block.Block.Body == nil || block.Version() < clparams.FuluVersion ||
+		block.Version() >= clparams.GloasVersion || block.Block.Body.BlobKzgCommitments == nil || block.Block.Body.BlobKzgCommitments.Len() == 0 {
+		return custodyColumnRead{}
+	}
+	blockRoot, err := block.Block.HashSSZ()
+	if err != nil {
+		return custodyColumnRead{err: invalidBlockError(err)}
+	}
+	cgc := f.peerDas.StateReader().GetAdvertisedCgc()
+	available, err := f.peerDas.IsDataAvailable(block.Block.Slot, blockRoot)
+	return custodyColumnRead{available: available, cgc: cgc, err: err}
+}
+
 // checkPreGloasBlockDataAvailability checks that a pre-Gloas block's blob data is available before the block enters
 // fork choice.
-func (f *ForkChoiceStore) checkPreGloasBlockDataAvailability(ctx context.Context, block *cltypes.SignedBeaconBlock, blockRoot common.Hash, versionedHashes []common.Hash) error {
+func (f *ForkChoiceStore) checkPreGloasBlockDataAvailability(ctx context.Context, block *cltypes.SignedBeaconBlock, blockRoot common.Hash, versionedHashes []common.Hash, columns custodyColumnRead) error {
 	// Before Fulu, blobs in the EL's pool are enough. From Fulu the node must hold its custody columns: peers that see
 	// it treat the block as known ask it for them, and score it down for a partial answer.
 	elHasBlobs := false
@@ -649,11 +568,11 @@ func (f *ForkChoiceStore) checkPreGloasBlockDataAvailability(ctx context.Context
 	// Check if blob data is available (skip if blobs are in txpool)
 	if block.Block.Body.BlobKzgCommitments.Len() > 0 && !elHasBlobs {
 		if block.Version() >= clparams.FuluVersion && f.peerDas != nil {
-			available, err := f.peerDas.IsDataAvailable(block.Block.Slot, blockRoot)
-			if err != nil {
-				return err
+			if columns.err != nil {
+				return columns.err
 			}
-			if !available {
+			// A custody raise while waiting for f.mu adds columns that the read did not check.
+			if !columns.available || f.peerDas.StateReader().GetAdvertisedCgc() != columns.cgc {
 				if !f.syncedDataManager.Syncing() {
 					if err := f.peerDas.SyncColumnDataLater(block); err != nil {
 						log.Warn("failed to schedule deferred column data sync", "slot", block.Block.Slot, "blockRoot", blockRoot, "err", err)
@@ -1096,18 +1015,19 @@ func (f *ForkChoiceStore) addChainSegmentAndQueueLightClientEvents(block *cltype
 	if err != nil {
 		return nil, status, err
 	}
-	f.queueLightClientEvents(lcUpdateBefore, block.Version().String())
+	f.queueLightClientEvents(lcUpdateBefore)
 	return lastProcessedState, status, nil
 }
 
 // queueLightClientEvents emits the light client events for an update stored by
 // AddChainSegment. The fork graph runs under f.mu and must not send events
 // itself, so OnBlock detects a freshly stored update and queues the sends.
-func (f *ForkChoiceStore) queueLightClientEvents(before *cltypes.LightClientUpdate, version string) {
+func (f *ForkChoiceStore) queueLightClientEvents(before *cltypes.LightClientUpdate) {
 	lcUpdate := f.forkGraph.NewestLightClientUpdate()
 	if lcUpdate == nil || lcUpdate == before {
 		return
 	}
+	version := lcUpdate.AttestedHeader.Version().String()
 	f.queueEmit(func() {
 		f.emitters.State().SendLightClientFinalityUpdate(&beaconevents.LightClientFinalityUpdateData{
 			Version: version,

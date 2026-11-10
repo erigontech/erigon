@@ -22,14 +22,11 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
-	"maps"
 	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/erigontech/erigon/common/hexutil"
 
 	"github.com/erigontech/erigon/common"
 )
@@ -235,19 +232,6 @@ func NextSubtree(in []byte) ([]byte, bool) {
 	return nil, false
 }
 
-func IncrementKey(tx RwTx, table string, k []byte) error {
-	v, err := tx.GetOne(table, k)
-	if err != nil {
-		return err
-	}
-	var version uint64
-	if len(v) == 8 {
-		version = binary.BigEndian.Uint64(v)
-	}
-	version++
-	return tx.Put(table, k, hexutil.EncodeTs(version))
-}
-
 type DomainEntryDiff struct {
 	Key   string
 	Value []byte // nil means "delete only" (prev value was at a different step), non-nil means "restore this value"
@@ -260,10 +244,6 @@ type DomainDiff struct {
 	prevValsSlice []DomainEntryDiff
 
 	currentStepBuf, keyBuf []byte
-}
-
-func (d *DomainDiff) Copy() *DomainDiff {
-	return &DomainDiff{prevValues: maps.Clone(d.prevValues)}
 }
 
 func (d *DomainDiff) Len() int {

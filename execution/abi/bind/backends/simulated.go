@@ -31,6 +31,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/event"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -194,15 +195,25 @@ func (b *SimulatedBackend) emptyPendingBlock() {
 	}
 	b.pendingReaderTx = tx
 	b.pendingReader = b.m.NewStateReader(b.pendingReaderTx)
-	b.pendingState = state.New(b.pendingReader)
+	b.pendingState = state.NewWithVersionMap(b.pendingReader, state.NewVersionMap(nil))
 }
 
 // stateByBlockNumber retrieves a state by a given blocknumber.
 func (b *SimulatedBackend) stateByBlockNumber(db kv.TemporalTx, blockNumber *uint256.Int) *state.IntraBlockState {
 	if blockNumber == nil {
-		return state.New(b.m.NewHistoryStateReader(b.pendingBlock.NumberU64()+1, db))
+		return newCallState(b.m.NewHistoryStateReader(b.pendingBlock.NumberU64()+1, db))
 	}
-	return state.New(b.m.NewHistoryStateReader(blockNumber.Uint64()+1, db))
+	return newCallState(b.m.NewHistoryStateReader(blockNumber.Uint64()+1, db))
+}
+
+// newCallState puts a one-shot read or call on the versioned state, like the RPC call sites, unless CALL_NO_MATERIALIZE is off.
+func newCallState(r state.StateReader) *state.IntraBlockState {
+	s := state.New(r)
+	if dbg.CallNoMaterialize {
+		s.SetVersionMap(state.NewVersionMap(nil))
+		s.SetNoConflictDetection()
+	}
+	return s
 }
 
 // CodeAt returns the code associated with a certain account in the blockchain.
@@ -579,7 +590,9 @@ func (b *SimulatedBackend) CallContract(ctx context.Context, call bind.CallMsg, 
 	}
 	var res *evmtypes.ExecutionResult
 	if err := b.m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) (err error) {
-		s := state.New(b.m.NewStateReader(tx))
+		s := newCallState(b.m.NewStateReader(tx))
+		defer s.Close()
+		s.SetTxContext(b.pendingBlock.NumberU64(), len(b.pendingBlock.Transactions()))
 		res, err = b.callContract(ctx, call, b.pendingBlock, s)
 		if err != nil {
 			return err
@@ -764,11 +777,9 @@ func (b *SimulatedBackend) callContract(_ context.Context, call bind.CallMsg, bl
 		call.MaxFeePerBlobGas = new(uint256.Int)
 	}
 	// Set infinite balance to the fake caller account.
-	from, err := statedb.GetOrNewStateObject(accounts.InternAddress(call.From))
-	if err != nil {
+	if err := statedb.SetBalance(accounts.InternAddress(call.From), *(&uint256.Int{}).SetAllOne(), tracing.BalanceChangeUnspecified); err != nil {
 		return nil, err
 	}
-	from.SetBalance(*(&uint256.Int{}).SetAllOne(), true, tracing.BalanceChangeUnspecified)
 	// Execute the call.
 	msg := callMsg{call}
 
@@ -815,6 +826,14 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, txn types.Transa
 	); err != nil {
 		return err
 	}
+	blockContext := protocol.NewEVMBlockContext(b.pendingHeader, protocol.GetHashFn(b.pendingHeader, b.getHeader), b.m.Engine, accounts.InternAddress(b.pendingHeader.Coinbase), b.m.ChainConfig)
+	writes, err := b.pendingState.FinalizedWrites(blockContext.Rules(b.m.ChainConfig))
+	if err != nil {
+		return err
+	}
+	b.pendingState.FlushWritesToVersionMap(writes)
+	b.pendingState.ResetVersionedIO()
+	b.pendingState.SetTxContext(b.pendingBlock.NumberU64(), len(b.pendingBlock.Transactions())+1)
 	protocol.SetGasUsed(b.pendingHeader, b.pendingGasUsed)
 	//fmt.Printf("==== Start producing block %d\n", (b.prependBlock.NumberU64() + 1))
 	chain, err := b.m.GenerateChainFrom(b.prependBlock, 1, func(number int, block *blockgen.BlockGen) {

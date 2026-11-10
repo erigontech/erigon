@@ -193,3 +193,21 @@ func TestGetStatusData_SnapshotFallback(t *testing.T) {
 		})
 	}
 }
+
+func TestMakeStatusData_MinimumHeightNotAboveHead(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name                string
+		minimum, head, want uint64
+	}{
+		{"retained floor above head", 15_000_000, 0, 0},
+		{"retained floor below head", 5, 10, 5},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			status := newTestProvider(t, nil).makeStatusData(ChainHead{HeadHeight: tc.head, MinimumHeight: tc.minimum, HeadTd: new(uint256.Int)})
+			assert.Equal(t, tc.want, status.MinimumBlockHeight)
+		})
+	}
+}

@@ -217,7 +217,7 @@ func (so *stateObject) GetCommittedState(key accounts.StorageKey) (uint256.Int, 
 	}
 	so.db.storageReadCount++
 	so.db.stateReader.SetTrace(false, "")
-	so.db.recordStateReadError(err)
+	so.db.RecordStateReadError(err)
 
 	if err != nil {
 		return uint256.Int{}, err
@@ -380,7 +380,7 @@ func (so *stateObject) printTrie() {
 }
 
 func (so *stateObject) SetBalance(amount uint256.Int, wasCommited bool, reason tracing.BalanceChangeReason) {
-	so.db.journal.balanceChange(so.address, so.data.Balance, wasCommited)
+	so.db.journal.balanceChange(so.address, so.data.Balance, wasCommited, so.db.versionedWrites.balanceDeleted(so.address))
 	if so.db.tracingHooks != nil && so.db.tracingHooks.OnBalanceChange != nil {
 		so.db.tracingHooks.OnBalanceChange(so.address, so.data.Balance, amount, reason)
 	}
@@ -454,7 +454,7 @@ func (so *stateObject) CodeTyped() (accounts.Code, error) {
 		so.db.codeReadCount++
 	}
 	so.db.stateReader.SetTrace(false, "")
-	so.db.recordStateReadError(err)
+	so.db.RecordStateReadError(err)
 
 	if err != nil {
 		return accounts.Code{}, fmt.Errorf("can't read code for %x: %w", so.Address(), err)

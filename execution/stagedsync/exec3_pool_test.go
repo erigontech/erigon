@@ -14,6 +14,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/blockreplay"
 	"github.com/erigontech/erigon/execution/exec"
@@ -222,7 +223,6 @@ func newPoolUnit(t *testing.T, tasks int) (*parallelExecutor, *blockExecutor) {
 	pe.pool = newTaskPool(pe, nil)
 	be := newBlockExec(1, common.Hash{}, new(protocol.GasPool).AddGas(1), nil, discardConsumers(1), false, nil)
 	be.pool = pe.pool
-	be.versionMap = state.NewVersionMap(nil)
 	be.wakeAt = map[int][]*poolTask{}
 	be.committedFrontier.Store(-1)
 	be.poolTasks = make([]*poolTask, tasks)
@@ -342,6 +342,9 @@ func TestPoolStepPanicIsOperational(t *testing.T) {
 }
 
 func TestPoolBALSeededBlockMatchesUnseeded(t *testing.T) {
+	prevAssert := dbg.AssertEnabled
+	dbg.AssertEnabled = true
+	t.Cleanup(func() { dbg.AssertEnabled = prevAssert })
 	fx := loadPoolFixture(t)
 	require.NotNil(t, fx.Outputs)
 	t.Setenv("EPHEMERAL_WORKERS", "4")
