@@ -6648,3 +6648,31 @@ func TestGetEthV1ValidatorAttestationDataPinsOnlyFromElectra(t *testing.T) {
 		})
 	}
 }
+
+// A requested slot far ahead must be rejected before the head state is advanced slot by slot to it.
+func TestGetEthV3ValidatorBlockRejectsFarFutureSlot(t *testing.T) {
+	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
+	clock.EXPECT().GetCurrentSlot().Return(uint64(100)).AnyTimes()
+	handler := &ApiHandler{ethClock: clock}
+
+	slot := fmt.Sprint(uint64(math.MaxUint64))
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet,
+		"/eth/v3/validator/blocks/"+slot+"?randao_reveal="+(common.Bytes96{}).String(), http.NoBody)
+	routeContext := chi.NewRouteContext()
+	routeContext.URLParams.Add("slot", slot)
+	request = request.WithContext(context.WithValue(request.Context(), chi.RouteCtxKey, routeContext))
+
+	_, err := handler.GetEthV3ValidatorBlock(httptest.NewRecorder(), request)
+	var endpointErr *beaconhttp.EndpointError
+	require.ErrorAs(t, err, &endpointErr)
+	require.Equal(t, http.StatusBadRequest, endpointErr.Code)
+}
+
+func TestCheckBlockProductionSlot(t *testing.T) {
+	const current = 100
+	require.NoError(t, checkBlockProductionSlot(current-1, current), "a past slot keeps today's behaviour")
+	require.NoError(t, checkBlockProductionSlot(current, current))
+	require.NoError(t, checkBlockProductionSlot(current+1, current), "a validator may ask for the next slot")
+	require.Error(t, checkBlockProductionSlot(current+2, current))
+	require.Error(t, checkBlockProductionSlot(math.MaxUint64, current))
+}
