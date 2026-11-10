@@ -18,7 +18,6 @@ package protocol
 
 import (
 	"errors"
-	"slices"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -70,7 +69,7 @@ func CheckInclusionListTransactions(
 		intrinsicGasResult, overflow := executor.calcIntrinsicGas(
 			msg.To().IsNil(),
 			msg.Authorizations(),
-			slices.Clone[types.AccessList](msg.AccessList()),
+			msg.AccessList(),
 		)
 		if overflow {
 			continue
