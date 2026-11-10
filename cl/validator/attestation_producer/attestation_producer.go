@@ -114,7 +114,7 @@ func (ap *attestationProducer) computeTargetCheckpoint(baseState *state.CachingB
 	}, nil
 }
 
-func (ap *attestationProducer) CachedAttestationData(slot uint64, headRoot common.Hash) (solid.AttestationData, bool, error) {
+func (ap *attestationProducer) CachedAttestationData(headRoot common.Hash, slot uint64) (solid.AttestationData, bool, error) {
 	epoch := slot / ap.beaconCfg.SlotsPerEpoch
 	ap.attCacheMutex.RLock()
 	defer ap.attCacheMutex.RUnlock()

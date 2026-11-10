@@ -65,7 +65,7 @@ func TestAttestationProducerHeadChange(t *testing.T) {
 			newRoot := common.Hash{2}
 			oldData, err := producer.ProduceAndCacheAttestationData(headState, oldRoot, slot)
 			require.NoError(t, err)
-			_, ok, err := producer.CachedAttestationData(slot, newRoot)
+			_, ok, err := producer.CachedAttestationData(newRoot, slot)
 			require.NoError(t, err)
 			require.False(t, ok)
 			require.NoError(t, headState.SetSlot(slot))
@@ -82,11 +82,11 @@ func TestAttestationProducerHeadChange(t *testing.T) {
 			} else {
 				require.Equal(t, newRoot, data.Target.Root)
 			}
-			cached, ok, err := producer.CachedAttestationData(slot, newRoot)
+			cached, ok, err := producer.CachedAttestationData(newRoot, slot)
 			require.NoError(t, err)
 			require.True(t, ok)
 			require.Equal(t, data, cached)
-			cached, ok, err = producer.CachedAttestationData(slot, oldRoot)
+			cached, ok, err = producer.CachedAttestationData(oldRoot, slot)
 			require.NoError(t, err)
 			require.True(t, ok)
 			require.Equal(t, oldData, cached)
@@ -109,7 +109,7 @@ func TestAttestationProducerPreviousSlotAfterHeadAdvance(t *testing.T) {
 	got, err := producer.ProduceAndCacheAttestationData(headState, newRoot, slot)
 	require.NoError(t, err)
 	require.Equal(t, want, got)
-	cached, ok, err := producer.CachedAttestationData(slot, newRoot)
+	cached, ok, err := producer.CachedAttestationData(newRoot, slot)
 	require.NoError(t, err)
 	require.True(t, ok)
 	require.Equal(t, got, cached)

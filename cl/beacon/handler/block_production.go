@@ -725,7 +725,7 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 			cacheHeadRoot, _, haveCacheHead = a.syncedData.StateHead()
 		}
 		if haveCacheHead {
-			attestationData, ok, err = a.attestationProducer.CachedAttestationData(*slot, cacheHeadRoot)
+			attestationData, ok, err = a.attestationProducer.CachedAttestationData(cacheHeadRoot, *slot)
 			cached = ok
 			if err != nil {
 				log.Warn("Failed to get attestation data", "err", err)

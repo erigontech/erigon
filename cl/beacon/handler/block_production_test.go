@@ -5982,7 +5982,7 @@ func (p cachedAttestationDataProducer) ProduceAndCacheAttestationData(*state.Cac
 	return p.data, nil
 }
 
-func (p cachedAttestationDataProducer) CachedAttestationData(uint64, common.Hash) (solid.AttestationData, bool, error) {
+func (p cachedAttestationDataProducer) CachedAttestationData(common.Hash, uint64) (solid.AttestationData, bool, error) {
 	if p.calls != nil {
 		(*p.calls)++
 	}
