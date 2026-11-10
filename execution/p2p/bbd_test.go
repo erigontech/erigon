@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
@@ -324,4 +325,73 @@ func TestBackwardBlockDownloader_NoPeers(t *testing.T) {
 	_, err = feed.Next(t.Context())
 	require.ErrorIs(t, err, ErrNoPeerHasHeader)
 	require.EqualValues(t, 1, fetcher.headersBackwardsCalls.Load())
+}
+
+// timeoutRecordingFetcher serves a chain and records the response timeout of
+// each request.
+type timeoutRecordingFetcher struct {
+	chainServingBbdFetcher
+	mu       sync.Mutex
+	timeouts []time.Duration
+}
+
+func (s *timeoutRecordingFetcher) record(opts []FetcherOption) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.timeouts = append(s.timeouts, defaultFetcherConfig.CopyWithOptions(opts...).responseTimeout)
+}
+
+func (s *timeoutRecordingFetcher) FetchHeadersBackwards(ctx context.Context, hash common.Hash, amount uint64, peerId *PeerId, opts ...FetcherOption) (FetcherResponse[[]*types.Header], error) {
+	s.record(opts)
+	return s.chainServingBbdFetcher.FetchHeadersBackwards(ctx, hash, amount, peerId, opts...)
+}
+
+func (s *timeoutRecordingFetcher) FetchBodies(ctx context.Context, headers []*types.Header, peerId *PeerId, opts ...FetcherOption) (FetcherResponse[[]*types.Body], error) {
+	s.record(opts)
+	return s.chainServingBbdFetcher.FetchBodies(ctx, headers, peerId, opts...)
+}
+
+// TestBackwardBlockDownloader_RequestTimeout: WithRequestTimeout sets the
+// response timeout of every request, the initial header, header batches and
+// body batches; without it each keeps its default.
+func TestBackwardBlockDownloader_RequestTimeout(t *testing.T) {
+	headers := make([]*types.Header, 6)
+	parentHash, withdrawalsHash := common.Hash{}, empty.RootHash
+	for i := range headers {
+		headers[i] = &types.Header{
+			Number:          *uint256.NewInt(uint64(i + 1)),
+			ParentHash:      parentHash,
+			TxHash:          empty.RootHash,
+			UncleHash:       empty.UncleHash,
+			BaseFee:         uint256.NewInt(1),
+			WithdrawalsHash: &withdrawalsHash,
+		}
+		parentHash = headers[i].Hash()
+	}
+	download := func(opts ...BbdOption) []time.Duration {
+		fetcher := &timeoutRecordingFetcher{chainServingBbdFetcher: chainServingBbdFetcher{headers: headers}}
+		bbd := newTestBbd(t, fetcher)
+		feed, err := bbd.DownloadBlocksBackwards(t.Context(), headers[len(headers)-1].Hash(), fixedHeaderReader{headers[0]}, append(opts, WithBlocksBatchSize(2))...)
+		require.NoError(t, err)
+		var blocks int
+		for {
+			res, err := feed.Next(t.Context())
+			require.NoError(t, err)
+			if res.Blocks == nil {
+				break
+			}
+			blocks += len(res.Blocks)
+		}
+		require.Equal(t, len(headers)-1, blocks)
+		return fetcher.timeouts
+	}
+
+	// The initial header, two header batches, three body batches.
+	defaults := download()
+	require.Equal(t, []time.Duration{time.Second, 10 * time.Second, 10 * time.Second, time.Minute, time.Minute, time.Minute}, defaults)
+	bounded := download(WithRequestTimeout(2 * time.Second))
+	require.Len(t, bounded, len(defaults))
+	for i, timeout := range bounded {
+		require.Equal(t, 2*time.Second, timeout, "request %d", i)
+	}
 }

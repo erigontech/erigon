@@ -89,3 +89,14 @@ var defaultBbdRequestConfig = bbdRequestConfig{
 	balsBatchFetchTimeout:        time.Minute,
 	balsRequestTimeout:           10 * time.Second,
 }
+
+// WithRequestTimeout bounds each peer request of the download: the initial
+// header, every header batch and every body batch.
+func WithRequestTimeout(timeout time.Duration) BbdOption {
+	return func(config bbdRequestConfig) bbdRequestConfig {
+		config.initialHeaderFetchTimeout = timeout
+		config.headerChainBatchFetchTimeout = timeout
+		config.bodiesBatchFetchTimeout = timeout
+		return config
+	}
+}
