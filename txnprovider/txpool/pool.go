@@ -680,7 +680,7 @@ func (p *TxPool) KnownTxnReason(hash []byte) txpoolcfg.DiscardReason {
 	if reason, ok := p.discardReasonsLRU.Get(hashS); ok && reason == txpoolcfg.InvalidAuthorizationNonce {
 		return reason
 	}
-	// Sender-policy rejections still need admission's current account-nonce check.
+	// Sender-policy rejections still need a current nonce check.
 	if rejection, ok := p.frameRejections.Get(hashS); ok && rejection.blocker == (common.Hash{}) && rejection.applies(p, p.stateGeneration) {
 		return rejection.reason
 	}

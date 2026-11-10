@@ -26,12 +26,59 @@ import (
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
+
+// CheckFrameNonce returns the sender's account nonce after checking the frame nonce.
+// Calls may skip sequence matching; the limit and nonce-manager checks still apply.
+func CheckFrameNonce(ibs *state.IntraBlockState, tx *types.FrameTransaction, checkSequence bool) (uint64, error) {
+	sender := accounts.InternAddress(tx.SenderAddress)
+	nonce, err := ibs.GetNonce(sender)
+	if err != nil {
+		return 0, err
+	}
+	if tx.Nonce == math.MaxUint64 {
+		return 0, ErrNonceMax
+	}
+	if !tx.UsesLegacyNonce() {
+		// EIP-8250 requires the manager to be predeployed. Otherwise nonce writes
+		// create an empty account that finalization deletes, allowing replay.
+		exists, err := ibs.Exist(accounts.InternAddress(types.FrameNonceManager))
+		if err != nil {
+			return 0, err
+		}
+		if !exists {
+			return 0, errors.New("nonce manager does not exist")
+		}
+	}
+	if checkSequence && tx.UsesLegacyNonce() {
+		if nonce < tx.Nonce {
+			return 0, &nonceError{ErrNonceTooHigh, sender, tx.Nonce, nonce}
+		}
+		if nonce > tx.Nonce {
+			return 0, &nonceError{ErrNonceTooLow, sender, tx.Nonce, nonce}
+		}
+	} else if checkSequence {
+		for _, key := range tx.NonceKeys {
+			sequence, err := ibs.GetState(accounts.InternAddress(types.FrameNonceManager), accounts.InternKey(types.FrameNonceSlot(tx.SenderAddress, key)))
+			if err != nil {
+				return 0, err
+			}
+			if sequence.LtUint64(tx.Nonce) {
+				return 0, fmt.Errorf("%w: key %s, tx: %d state: %s", ErrNonceTooHigh, key.String(), tx.Nonce, sequence.String())
+			}
+			if sequence.GtUint64(tx.Nonce) {
+				return 0, fmt.Errorf("%w: key %s, tx: %d state: %s", ErrNonceTooLow, key.String(), tx.Nonce, sequence.String())
+			}
+		}
+	}
+	return nonce, nil
+}
 
 // executeFrameTransaction owns transaction validity, frame sequencing, rollback
 // boundaries and fee settlement; the EVM executes each individual frame.
@@ -50,44 +97,9 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 		return nil, err
 	}
 	sender := accounts.InternAddress(tx.SenderAddress)
-	nonce, err := st.state.GetNonce(sender)
+	nonce, err := CheckFrameNonce(st.state, tx, st.msg.CheckNonce())
 	if err != nil {
 		return nil, err
-	}
-	if tx.Nonce == math.MaxUint64 {
-		return nil, ErrNonceMax
-	}
-	if !tx.UsesLegacyNonce() {
-		// EIP-8250 requires the manager to be predeployed. Otherwise nonce writes
-		// create an empty account that finalization deletes, allowing replay.
-		exists, err := st.state.Exist(accounts.InternAddress(types.FrameNonceManager))
-		if err != nil {
-			return nil, err
-		}
-		if !exists {
-			return nil, errors.New("nonce manager does not exist")
-		}
-	}
-	if st.msg.CheckNonce() && tx.UsesLegacyNonce() {
-		if nonce < tx.Nonce {
-			return nil, &nonceError{ErrNonceTooHigh, sender, tx.Nonce, nonce}
-		}
-		if nonce > tx.Nonce {
-			return nil, &nonceError{ErrNonceTooLow, sender, tx.Nonce, nonce}
-		}
-	} else if st.msg.CheckNonce() {
-		for _, key := range tx.NonceKeys {
-			sequence, err := st.state.GetState(accounts.InternAddress(types.FrameNonceManager), accounts.InternKey(types.FrameNonceSlot(tx.SenderAddress, key)))
-			if err != nil {
-				return nil, err
-			}
-			if sequence.LtUint64(tx.Nonce) {
-				return nil, fmt.Errorf("%w: key %s, tx: %d state: %s", ErrNonceTooHigh, key.String(), tx.Nonce, sequence.String())
-			}
-			if sequence.GtUint64(tx.Nonce) {
-				return nil, fmt.Errorf("%w: key %s, tx: %d state: %s", ErrNonceTooLow, key.String(), tx.Nonce, sequence.String())
-			}
-		}
 	}
 	skipFeeCheck := st.evm.Config().NoBaseFee && st.feeCap.IsZero() && st.tipCap.IsZero()
 	if !skipFeeCheck {

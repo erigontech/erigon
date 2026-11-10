@@ -289,6 +289,9 @@ message EngineGetPayloadBodiesByRangeV1Request {
 message FrameValidationRequest {
   bytes transaction = 1;
   types.H256 expected_block_hash = 2;
+  // Check the nonce without executing frames. Successful replies contain no
+  // payer or dependency information in this mode.
+  bool nonce_only = 3;
 }
 
 message FrameValidationReply {

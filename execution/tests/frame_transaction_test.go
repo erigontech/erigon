@@ -144,13 +144,16 @@ func TestFrameValidationUsesPublishedHead(t *testing.T) {
 		name                     string
 		tx                       *types.FrameTransaction
 		validBefore, validAtHead bool
+		nonceOnly                bool
 	}{
-		{"withdrawal", frame(withdrawn, 0, 0, 10_000_000_000), false, true},
-		{"consumed key", frame(sender, 1, 0, 10_000_000_000), true, false},
-		{"next sequence", frame(sender, 1, 1, 10_000_000_000), false, true},
-		{"other key", frame(sender, 2, 0, 10_000_000_000), true, true},
-		{"reduced payer balance", frame(sender, 2, 0, 1_000_000_000_000), true, false},
-		{"expired", expiring, true, false},
+		{"withdrawal", frame(withdrawn, 0, 0, 10_000_000_000), false, true, false},
+		{"consumed key", frame(sender, 1, 0, 10_000_000_000), true, false, false},
+		{"next sequence", frame(sender, 1, 1, 10_000_000_000), false, true, false},
+		{"other key", frame(sender, 2, 0, 10_000_000_000), true, true, false},
+		{"reduced payer balance", frame(sender, 2, 0, 1_000_000_000_000), true, false, false},
+		{"expired", expiring, true, false, false},
+		{"nonce-only consumed key", frame(sender, 1, 0, 10_000_000_000), true, false, true},
+		{"nonce-only next sequence", frame(sender, 1, 1, 10_000_000_000), false, true, true},
 	}
 	server := privateapi.NewEthBackendServer(t.Context(), nil, m.DB, m.Notifications, m.BlockReader, log.New(), nil, cfg)
 	check := func(phase string, atHead bool) {
@@ -159,7 +162,7 @@ func TestFrameValidationUsesPublishedHead(t *testing.T) {
 				t.Run(tt.name, func(t *testing.T) {
 					var encoded bytes.Buffer
 					require.NoError(t, tt.tx.MarshalBinary(&encoded))
-					result, err := server.FrameValidation(t.Context(), &remoteproto.FrameValidationRequest{Transaction: encoded.Bytes()})
+					result, err := server.FrameValidation(t.Context(), &remoteproto.FrameValidationRequest{Transaction: encoded.Bytes(), NonceOnly: tt.nonceOnly})
 					require.NoError(t, err)
 					valid := tt.validBefore
 					if atHead {
@@ -210,6 +213,41 @@ func TestFrameValidationUsesPublishedHead(t *testing.T) {
 	server = privateapi.NewEthBackendServer(t.Context(), nil, db, m.Notifications, m.BlockReader, log.New(), nil, cfg)
 	check("commit during validation", true)
 	check("after commit", true)
+}
+
+func TestFrameValidationNonceOnlySkipsExecution(t *testing.T) {
+	cfg := chain.TestChainOsakaConfig.Copy()
+	cfg.AmsterdamTime, cfg.BogotaTime = common.NewUint64(0), common.NewUint64(0)
+	sender := common.HexToAddress("0x1000")
+	genesis := &types.Genesis{Config: cfg, GasLimit: 30_000_000, Alloc: types.GenesisAlloc{
+		sender: {Nonce: 1, Balance: big.NewInt(1_000_000_000_000_000_000), Code: common.FromHex("5f5ffd")},
+		types.FrameNonceManager: {Nonce: 1, Storage: map[common.Hash]common.Hash{
+			types.FrameNonceSlot(sender, uint256.Int{1}): common.BigToHash(big.NewInt(1)),
+		}},
+	}}
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis))
+	server := privateapi.NewEthBackendServer(t.Context(), nil, m.DB, m.Notifications, m.BlockReader, log.New(), nil, cfg)
+	for _, key := range []uint64{0, 1} {
+		t.Run(fmt.Sprintf("key=%d", key), func(t *testing.T) {
+			frame := &types.FrameTransaction{
+				NonceKeys: []uint256.Int{{key}}, ChainID: *cfg.ChainID, SenderAddress: sender, Nonce: 1,
+				Frames: []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}}},
+				Fees:   types.FrameFees{FeeCap: *uint256.NewInt(10_000_000_000)},
+			}
+			var encoded bytes.Buffer
+			require.NoError(t, frame.MarshalBinary(&encoded))
+			request := &remoteproto.FrameValidationRequest{Transaction: encoded.Bytes(), NonceOnly: true}
+			result, err := server.FrameValidation(t.Context(), request)
+			require.NoError(t, err)
+			require.True(t, result.Valid, "nonce checks must not execute the reverting approval frame")
+			require.Nil(t, result.Payer)
+			require.Empty(t, result.Dependencies)
+			request.NonceOnly = false
+			result, err = server.FrameValidation(t.Context(), request)
+			require.NoError(t, err)
+			require.False(t, result.Valid)
+		})
+	}
 }
 
 func TestFrameValidationCreationNonces(t *testing.T) {
@@ -315,16 +353,18 @@ func TestFrameValidationExpectedHead(t *testing.T) {
 	var encoded bytes.Buffer
 	require.NoError(t, frame.MarshalBinary(&encoded))
 	server := privateapi.NewEthBackendServer(t.Context(), nil, m.DB, m.Notifications, m.BlockReader, log.New(), nil, cfg)
-	for _, hash := range []common.Hash{m.Genesis.Hash(), {1}} {
-		result, err := server.FrameValidation(t.Context(), &remoteproto.FrameValidationRequest{
-			Transaction: encoded.Bytes(), ExpectedBlockHash: gointerfaces.ConvertHashToH256(hash),
-		})
-		if hash != m.Genesis.Hash() {
-			require.Equal(t, codes.Aborted, status.Code(err), "head disagreement must be retryable")
-			continue
+	for _, nonceOnly := range []bool{false, true} {
+		for _, hash := range []common.Hash{m.Genesis.Hash(), {1}} {
+			result, err := server.FrameValidation(t.Context(), &remoteproto.FrameValidationRequest{
+				Transaction: encoded.Bytes(), ExpectedBlockHash: gointerfaces.ConvertHashToH256(hash), NonceOnly: nonceOnly,
+			})
+			if hash != m.Genesis.Hash() {
+				require.Equal(t, codes.Aborted, status.Code(err), "head disagreement must be retryable")
+				continue
+			}
+			require.NoError(t, err)
+			require.True(t, result.Valid)
 		}
-		require.NoError(t, err)
-		require.True(t, result.Valid)
 	}
 }
 
@@ -354,26 +394,42 @@ func TestFrameValidationRejectsBlockhash(t *testing.T) {
 }
 
 func TestFrameValidationPendingBlobFee(t *testing.T) {
-	cfg := chain.TestChainOsakaConfig.Copy()
-	cfg.AmsterdamTime, cfg.BogotaTime = common.NewUint64(0), common.NewUint64(0)
-	sender := common.HexToAddress("0x1000")
-	genesis := &types.Genesis{
-		Config: cfg, GasLimit: 30_000_000, BaseFee: uint256.NewInt(100), ExcessBlobGas: common.NewUint64(100_000_000),
-		Alloc: types.GenesisAlloc{sender: {Balance: big.NewInt(1_000_000_000_000_000_000), Code: []byte{0x60, 3, 0x5f, 0x5f, 0xaa}}},
+	for _, overflow := range []bool{false, true} {
+		t.Run(fmt.Sprintf("overflow=%t", overflow), func(t *testing.T) {
+			cfg := chain.TestChainOsakaConfig.Copy()
+			cfg.AmsterdamTime, cfg.BogotaTime = common.NewUint64(0), common.NewUint64(0)
+			sender := common.HexToAddress("0x1000")
+			genesis := &types.Genesis{
+				Config: cfg, GasLimit: 30_000_000, BaseFee: uint256.NewInt(100), ExcessBlobGas: common.NewUint64(100_000_000),
+				Alloc: types.GenesisAlloc{sender: {Balance: big.NewInt(1_000_000_000_000_000_000), Code: []byte{0x60, 3, 0x5f, 0x5f, 0xaa}}},
+			}
+			m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis))
+			frame := &types.FrameTransaction{
+				NonceKeys: []uint256.Int{{}}, ChainID: *cfg.ChainID, SenderAddress: sender,
+				Frames:              []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}}},
+				Fees:                types.FrameFees{FeeCap: *uint256.NewInt(100), BlobFeeCap: *uint256.NewInt(1)},
+				BlobVersionedHashes: []common.Hash{{1}},
+			}
+			var encoded bytes.Buffer
+			require.NoError(t, frame.MarshalBinary(&encoded))
+			backendConfig := cfg.Copy()
+			if overflow {
+				blobConfig := *cfg.GetBlobConfig(0)
+				blobConfig.BaseFeeUpdateFraction = 1
+				backendConfig.Bpo1Time = common.NewUint64(1)
+				backendConfig.BlobSchedule = map[string]*params.BlobConfig{"bpo1": &blobConfig}
+			}
+			server := privateapi.NewEthBackendServer(t.Context(), nil, m.DB, m.Notifications, m.BlockReader, log.New(), nil, backendConfig)
+			result, err := server.FrameValidation(t.Context(), &remoteproto.FrameValidationRequest{Transaction: encoded.Bytes()})
+			if overflow {
+				require.ErrorContains(t, err, "blob gas price overflow")
+				require.Nil(t, result, "block-context errors must not become transaction rejections")
+				return
+			}
+			require.NoError(t, err)
+			require.True(t, result.Valid, "a low blob fee cap must not invalidate the prefix")
+		})
 	}
-	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis))
-	frame := &types.FrameTransaction{
-		NonceKeys: []uint256.Int{{}}, ChainID: *cfg.ChainID, SenderAddress: sender,
-		Frames:              []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}}},
-		Fees:                types.FrameFees{FeeCap: *uint256.NewInt(100), BlobFeeCap: *uint256.NewInt(1)},
-		BlobVersionedHashes: []common.Hash{{1}},
-	}
-	var encoded bytes.Buffer
-	require.NoError(t, frame.MarshalBinary(&encoded))
-	server := privateapi.NewEthBackendServer(t.Context(), nil, m.DB, m.Notifications, m.BlockReader, log.New(), nil, cfg)
-	result, err := server.FrameValidation(t.Context(), &remoteproto.FrameValidationRequest{Transaction: encoded.Bytes()})
-	require.NoError(t, err)
-	require.True(t, result.Valid, "a low blob fee cap must not invalidate the prefix")
 }
 
 type frameValidationCommitDB struct {

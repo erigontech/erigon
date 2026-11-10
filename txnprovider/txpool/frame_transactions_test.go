@@ -65,6 +65,7 @@ type frameValidationBackend struct {
 	valid          bool
 	err            error
 	calls          []common.Hash
+	nonceCalls     []common.Hash
 	deadlines      []time.Time
 	onValidate     func()
 	dependencies   []*typesproto.H160
@@ -72,18 +73,25 @@ type frameValidationBackend struct {
 }
 
 func (b *frameValidationBackend) FrameValidation(ctx context.Context, req *remoteproto.FrameValidationRequest, opts ...grpc.CallOption) (*remoteproto.FrameValidationReply, error) {
-	if b.onValidate != nil {
+	if b.onValidate != nil && !req.NonceOnly {
 		b.onValidate()
 	}
 	tx, err := types.DecodeTransaction(req.Transaction)
 	if err != nil {
 		return nil, err
 	}
-	b.calls = append(b.calls, tx.Hash())
-	deadline, _ := ctx.Deadline()
-	b.deadlines = append(b.deadlines, deadline)
+	if req.NonceOnly {
+		b.nonceCalls = append(b.nonceCalls, tx.Hash())
+	} else {
+		b.calls = append(b.calls, tx.Hash())
+		deadline, _ := ctx.Deadline()
+		b.deadlines = append(b.deadlines, deadline)
+	}
 	if b.err != nil {
 		return nil, b.err
+	}
+	if req.NonceOnly {
+		return &remoteproto.FrameValidationReply{Valid: true}, nil
 	}
 	var expiry uint64
 	dependencies := append([]*typesproto.H160(nil), b.dependencies...)
@@ -876,6 +884,70 @@ func TestFramePoolSenderPolicyRejectionCache(t *testing.T) {
 	}
 }
 
+func TestFramePoolCachedConflictChecksConsumedKeyedNonce(t *testing.T) {
+	ctx, pool, sender := keyedFramePoolEnv(t)
+	var txns TxnSlots
+	txns.Append(framePoolSlot(t, sender, 1, 2, uint256.Int{1}), sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+	blocker := txns.Txns[0]
+	candidate := framePoolSlot(t, sender, 1, 2, uint256.Int{2})
+	txns.Txns[0] = candidate
+	consumed, calls := false, 0
+	pool.ethBackend = &frameValidationFuncBackend{validate: func(ctx context.Context, req *remoteproto.FrameValidationRequest) (*remoteproto.FrameValidationReply, error) {
+		calls++
+		require.True(t, req.NonceOnly)
+		require.True(t, pool.lock.TryLock(), "nonce checks must run outside the pool lock")
+		pool.lock.Unlock()
+		if consumed {
+			return &remoteproto.FrameValidationReply{RejectionReason: remoteproto.FrameValidationReply_NONCE_TOO_LOW}, nil
+		}
+		return &remoteproto.FrameValidationReply{Valid: true}, nil
+	}}
+	reasons, err = pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.InvalidFrame}, reasons)
+	rejection, ok := pool.frameRejections.Get(string(candidate.IDHash[:]))
+	require.True(t, ok)
+	require.Equal(t, common.Hash(blocker.IDHash), rejection.blocker)
+	consumed = true
+	require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{1}, 0), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	for range 2 {
+		reasons, err = pool.AddLocalTxns(ctx, txns)
+		require.NoError(t, err)
+		require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NonceTooLow}, reasons)
+	}
+	require.Equal(t, 2, calls)
+	require.Contains(t, pool.byHash, string(blocker.IDHash[:]))
+	require.NotContains(t, pool.byHash, string(candidate.IDHash[:]))
+}
+
+func TestFramePoolKeyedNonceCheckRetriesChangedHead(t *testing.T) {
+	ctx, pool, sender := keyedFramePoolEnv(t)
+	var txns TxnSlots
+	txns.Append(framePoolSlot(t, sender, 1, 2, uint256.Int{1}), sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+	txns.Txns[0] = framePoolSlot(t, sender, 1, 2, uint256.Int{2})
+	calls := 0
+	pool.ethBackend = &frameValidationFuncBackend{validate: func(ctx context.Context, req *remoteproto.FrameValidationRequest) (*remoteproto.FrameValidationReply, error) {
+		calls++
+		require.True(t, req.NonceOnly)
+		if calls == 1 {
+			require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{1}, 0), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+			return nil, status.Error(codes.Aborted, "frame validation head changed")
+		}
+		require.Equal(t, common.Hash{1}, common.Hash(gointerfaces.ConvertH256ToHash(req.ExpectedBlockHash)))
+		return &remoteproto.FrameValidationReply{RejectionReason: remoteproto.FrameValidationReply_NONCE_TOO_LOW}, nil
+	}}
+	reasons, err = pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NonceTooLow}, reasons)
+	require.Equal(t, 2, calls)
+}
+
 func TestFramePoolSenderConflictClearedDuringAdmission(t *testing.T) {
 	for _, tc := range []struct {
 		name        string
@@ -1248,6 +1320,10 @@ func TestFramePoolStaleBatchPreservesSenderConflict(t *testing.T) {
 			txns.Append(pending, otherSender[:], true)
 			calls := 0
 			pool.ethBackend = &frameValidationFuncBackend{validate: func(ctx context.Context, req *remoteproto.FrameValidationRequest) (*remoteproto.FrameValidationReply, error) {
+				if req.NonceOnly {
+					require.Equal(t, candidate.Rlp, req.Transaction)
+					return &remoteproto.FrameValidationReply{Valid: true}, nil
+				}
 				calls++
 				require.Equal(t, pending.Rlp, req.Transaction)
 				require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{2}, 0, otherSender), TxnSlots{}, TxnSlots{}, TxnSlots{}))
