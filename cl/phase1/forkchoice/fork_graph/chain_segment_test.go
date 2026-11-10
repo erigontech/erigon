@@ -140,7 +140,8 @@ func TestAddChainSegmentPublishesImportArtifacts(t *testing.T) {
 	}
 }
 
-func TestAddChainSegmentInvalidBlockKeepsOnlyLightClientUpdate(t *testing.T) {
+// An invalid block leaves no light-client update behind: its sync aggregate was never verified.
+func TestAddChainSegmentInvalidBlockLeavesNoLightClientUpdate(t *testing.T) {
 	g, blocks := newLightClientGraph(t)
 	_, result, err := g.AddChainSegment(blocks[0], true)
 	require.NoError(t, err)
@@ -159,11 +160,9 @@ func TestAddChainSegmentInvalidBlockKeepsOnlyLightClientUpdate(t *testing.T) {
 		result:        InvalidBlock,
 		failed:        true,
 		bad:           true,
-		lcUpdate:      got.lcUpdate,
 		participation: before.participation,
 	}, got)
-	require.Zero(t, before.lcUpdate)
-	require.NotZero(t, got.lcUpdate, "the light-client update is built from the parent state before the transition")
+	require.Empty(t, g.lightClientUpdateCandidates)
 	require.Nil(t, g.CurrentStateLocked(parentRoot))
 	require.Nil(t, g.currentState)
 	require.Equal(t, invalid.Block.Slot, g.highestTransitionSlot)
