@@ -462,3 +462,25 @@ func TestReceiptsLoaderRegeneratesCommittedBlockReceipts(t *testing.T) {
 		}
 	}
 }
+
+func TestForwardForkchoiceJumpDeliversReceipts(t *testing.T) {
+	m, privKey, senderAddr := newMetricsTester(t)
+	chainResult, err := m.GenerateChain(20, sendThenDeploy(t, m, privKey, senderAddr, 1_000))
+	require.NoError(t, err)
+	want := 0
+	for _, blockReceipts := range chainResult.Receipts {
+		want += len(blockReceipts)
+	}
+	receipts, unsubscribe := m.Notifications.Events.AddReceiptsSubscription()
+	t.Cleanup(unsubscribe)
+	m.Notifications.Events.EmptyReceiptSubscription(false)
+
+	require.NoError(t, m.InsertChain(chainResult))
+
+	select {
+	case got := <-receipts:
+		require.Len(t, got, want)
+	case <-time.After(10 * time.Second):
+		t.Fatal("a forward forkchoice jump delivered no receipts")
+	}
+}

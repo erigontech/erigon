@@ -164,6 +164,9 @@ func (d *Dispatcher) Dispatch(
 			d.cacheMissingReceipts(ctx, committedTx, recentReceipts, notifyFrom, notifyTo)
 			recentReceipts.NotifyReceipts(d.events, notifyFrom, notifyTo)
 			recentReceipts.NotifyLogs(d.events, notifyFrom, notifyTo)
+			if !d.events.HasLogSubscriptions() && !d.events.HasReceiptSubscriptions() {
+				recentReceipts.Clear()
+			}
 		}
 	}
 

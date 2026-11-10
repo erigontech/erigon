@@ -28,7 +28,7 @@ type Accumulation struct {
 func NewAccumulation() *Accumulation {
 	return &Accumulation{
 		Accumulator:    NewAccumulator(),
-		RecentReceipts: NewRecentReceipts(MaxNotifiedBlocks),
+		RecentReceipts: NewRecentReceipts(512),
 	}
 }
 

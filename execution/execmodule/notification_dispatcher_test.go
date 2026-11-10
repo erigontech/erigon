@@ -231,15 +231,15 @@ func TestDispatcherSendsRemovedLogsOfBlocksLoadedAfterACacheMiss(t *testing.T) {
 func TestDispatcherForkchoicePathDeliversLogsOfTheWholeNotifySpan(t *testing.T) {
 	const blocks = 1_500
 	_, tx := temporaltest.NewTestTx(t)
-	accumulation := NewAccumulation()
-	writeHeadersAndFillCache(t, tx, accumulation.RecentReceipts, blocks)
+	recent := shards.NewNotifications(nil).RecentReceipts
+	writeHeadersAndFillCache(t, tx, recent, blocks)
 	events := shards.NewEvents()
 	logs, unsubscribe := events.AddLogsSubscription()
 	t.Cleanup(unsubscribe)
 	events.EmptyLogSubscription(false)
 	dispatcher := NewDispatcher(chain.AllProtocolChanges, events, nil, nil, log.New())
 
-	require.NoError(t, dispatcher.Dispatch(t.Context(), tx, 0, nil, accumulation.RecentReceipts, 0, blocks, nil, nil))
+	require.NoError(t, dispatcher.Dispatch(t.Context(), tx, 0, nil, recent, 0, blocks, nil, nil))
 
 	select {
 	case got := <-logs:
@@ -249,4 +249,16 @@ func TestDispatcherForkchoicePathDeliversLogsOfTheWholeNotifySpan(t *testing.T) 
 	default:
 		t.Fatal("no logs delivered")
 	}
+}
+
+func TestDispatcherClearsTheCacheWithoutSubscribers(t *testing.T) {
+	const blocks = 3
+	_, tx := temporaltest.NewTestTx(t)
+	recent := notifications.NewRecentReceipts(notifications.MaxNotifiedBlocks)
+	writeHeadersAndFillCache(t, tx, recent, blocks)
+	dispatcher := NewDispatcher(chain.AllProtocolChanges, shards.NewEvents(), nil, nil, log.New())
+
+	require.NoError(t, dispatcher.Dispatch(t.Context(), tx, 0, nil, recent, 0, blocks, nil, nil))
+
+	require.Len(t, recent.Missing(1, blocks+1), blocks)
 }

@@ -475,6 +475,11 @@ func (n *Notifications) ClearSnapshotDownloadPin() bool {
 	return n.snapDownload.CompareAndSwap(s, nil)
 }
 
+// HasReceiptOrLogSubscribers reports whether anyone reads RecentReceipts.
+func (n *Notifications) HasReceiptOrLogSubscribers() bool {
+	return n.Events.HasLogSubscriptions() || n.Events.HasReceiptSubscriptions()
+}
+
 func NewNotifications(stateChangesConsumer StateChangeConsumer) *Notifications {
 	return &Notifications{
 		Events:               NewEvents(),
