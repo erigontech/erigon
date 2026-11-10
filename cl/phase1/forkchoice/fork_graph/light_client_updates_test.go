@@ -126,18 +126,27 @@ func TestFinalizationKeepsTheCanonicalCandidateAmongManyBetterSideBranchOnes(t *
 	require.Same(t, canonicalUpdate, got)
 }
 
-// A period holds at most one candidate per slot of the period; past that, later candidates are skipped, so the
-// candidates kept so far, canonical ones included, stay.
-func TestLightClientUpdateCandidatesOfAPeriodAreBounded(t *testing.T) {
+// A canonical candidate that arrives after many side-branch ones, more than a period has slots, is still kept and wins
+// at finalization.
+func TestFinalizationKeepsACanonicalCandidateThatArrivesAfterManySideBranchOnes(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
-	cfg.SlotsPerEpoch, cfg.EpochsPerSyncCommitteePeriod = 4, 2
+	cfg.SlotsPerEpoch, cfg.EpochsPerSyncCommitteePeriod = 4, 8
 	f := &forkGraphDisk{beaconCfg: &cfg}
-	for i := range 9 {
-		f.addLightClientUpdateCandidateLocked(common.Hash{byte(i + 1)}, lightClientTestUpdate(&cfg, 400+i, 8))
+	attested, canonical, finalized := common.Hash{1}, common.Hash{2}, common.Hash{3}
+	f.headers.Store(attested, &cltypes.BeaconBlockHeader{Slot: 40})
+	f.headers.Store(canonical, &cltypes.BeaconBlockHeader{Slot: 41, ParentRoot: attested})
+	f.headers.Store(finalized, &cltypes.BeaconBlockHeader{Slot: 50, ParentRoot: canonical})
+	for i := range 40 {
+		f.addLightClientUpdateCandidateLocked(common.Hash{0xee, byte(i)}, lightClientTestUpdate(&cfg, 450, 40))
 	}
-	candidates := f.lightClientUpdateCandidates[1].candidates
-	require.Len(t, candidates, 8)
-	require.Equal(t, common.Hash{1}, candidates[0].signatureBlock)
+	canonicalUpdate := lightClientTestUpdate(&cfg, 400, 40)
+	f.addLightClientUpdateCandidateLocked(canonical, canonicalUpdate)
+
+	f.KeepFinalizedLightClientUpdates(finalized)
+
+	got, ok := f.GetLightClientUpdate(1)
+	require.True(t, ok)
+	require.Same(t, canonicalUpdate, got)
 }
 
 // Candidates of a period share one copy of each distinct next sync committee instead of holding one each.

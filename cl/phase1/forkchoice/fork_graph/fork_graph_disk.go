@@ -785,15 +785,15 @@ type lightClientUpdateCandidate struct {
 }
 
 // periodLightClientUpdateCandidates are the candidates of one period. Its candidates share one copy of each distinct
-// next sync committee (about 25 KB each, the bulk of an update), so a candidate costs a few KB.
+// next sync committee (about 25 KB each, the bulk of an update), so a candidate costs a few KB. No count bound is
+// needed: a candidate lives as long as its block, which the fork graph holds until finalization as well.
 type periodLightClientUpdateCandidates struct {
 	candidates []lightClientUpdateCandidate
 	committees []*solid.SyncCommittee
 }
 
 // addLightClientUpdateCandidateLocked keeps update as a candidate of its attested header's sync committee period. Only
-// an update signed in that same period is a candidate for it. A period holds at most one candidate per slot of the
-// period; only a period without finality for longer than that skips later candidates. The caller holds addPruneMu.
+// an update signed in that same period is a candidate for it. The caller holds addPruneMu.
 func (f *forkGraphDisk) addLightClientUpdateCandidateLocked(signatureBlock common.Hash, update *cltypes.LightClientUpdate) {
 	period := f.beaconCfg.SyncCommitteePeriod(update.AttestedHeader.Beacon.Slot)
 	if period != f.beaconCfg.SyncCommitteePeriod(update.SignatureSlot) {
@@ -806,9 +806,6 @@ func (f *forkGraphDisk) addLightClientUpdateCandidateLocked(signatureBlock commo
 	if p == nil {
 		p = &periodLightClientUpdateCandidates{}
 		f.lightClientUpdateCandidates[period] = p
-	}
-	if uint64(len(p.candidates)) >= f.beaconCfg.SlotsPerEpoch*f.beaconCfg.EpochsPerSyncCommitteePeriod {
-		return
 	}
 	if i := slices.IndexFunc(p.committees, update.NextSyncCommittee.Equal); i >= 0 {
 		update.NextSyncCommittee = p.committees[i]
