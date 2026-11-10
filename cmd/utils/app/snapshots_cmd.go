@@ -4242,11 +4242,14 @@ func duFormatJSON(w io.Writer, result duResult) error {
 	return enc.Encode(result)
 }
 
-func duEstimates(ctx context.Context, dirs datadir.Dirs, files []duFileInfo, cc *chain.Config, chainName string, stepSize uint64, logger log.Logger) ([]duEstimate, error) {
+func duEstimates(ctx context.Context, dirs datadir.Dirs, files []duFileInfo, cc *chain.Config, chainName string, logger log.Logger) ([]duEstimate, error) {
+	stepSize, err := duStepSize(dirs, logger)
+	if err != nil {
+		return nil, err
+	}
 	blockSnaps, err := duOpenBlockSnapshots(dirs, chainName, logger)
 	if err != nil {
-		logger.Warn("seg du: headers or bodies unreadable, estimates omitted", "err", err)
-		return nil, nil
+		return nil, err
 	}
 	defer blockSnaps.Close()
 	view := blockSnaps.View()
@@ -4262,8 +4265,7 @@ func duEstimates(ctx context.Context, dirs datadir.Dirs, files []duFileInfo, cc 
 		}
 	}
 	if indexedTo < onDiskTo {
-		logger.Warn("seg du: bodies are not indexed up to the last segment, estimates omitted", "indexedTo", indexedTo, "onDiskTo", onDiskTo)
-		return nil, nil
+		return nil, fmt.Errorf("bodies are indexed to block %d, segments on disk reach block %d", indexedTo, onDiskTo)
 	}
 
 	emptyDB, err := mdbx.New(dbcfg.ChainDB, logger).InMem("").Open(ctx)
@@ -4284,10 +4286,6 @@ func duCollect(ctx context.Context, dirs datadir.Dirs, logger log.Logger) (duRes
 	chainName := "unknown"
 	if cc != nil && cc.ChainName != "" {
 		chainName = cc.ChainName
-	}
-	stepSize, err := duStepSize(dirs, logger)
-	if err != nil {
-		return duResult{}, err
 	}
 
 	// Walk snapshot files.
@@ -4312,9 +4310,12 @@ func duCollect(ctx context.Context, dirs datadir.Dirs, logger log.Logger) (duRes
 
 	// Build result.
 	cats := duAggregateCategories(files)
-	estimates, err := duEstimates(ctx, dirs, files, cc, chainName, stepSize, logger)
+	estimates, err := duEstimates(ctx, dirs, files, cc, chainName, logger)
 	if err != nil {
-		return duResult{}, err
+		if ctx.Err() != nil {
+			return duResult{}, err
+		}
+		logger.Warn("seg du: estimates omitted", "err", err)
 	}
 
 	var totalBytes int64

@@ -31,6 +31,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
+	dir2 "github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -984,15 +985,20 @@ func TestDUStepSize_ZeroStepSizeIsAnError(t *testing.T) {
 }
 
 func duWriteSegment(t *testing.T, dir string, from, to uint64, typ snaptype.Enum) {
+	word := []byte{1}
+	if typ == snaptype2.Enums.Bodies {
+		var err error
+		word, err = rlp.EncodeToBytes(&types.BodyForStorage{BaseTxnID: types.BaseTxnID(from)})
+		require.NoError(t, err)
+	}
+	duWriteSegmentWord(t, dir, from, to, typ, word)
+}
+
+func duWriteSegmentWord(t *testing.T, dir string, from, to uint64, typ snaptype.Enum, word []byte) {
 	c, err := seg.NewCompressor(t.Context(), "test", filepath.Join(dir, snaptype.SegmentFileName(version.V1_0, from, to, typ)), dir, seg.DefaultCfg, log.LvlDebug, log.New())
 	require.NoError(t, err)
 	defer c.Close()
 	c.DisableFsync()
-	word := []byte{1}
-	if typ == snaptype2.Enums.Bodies {
-		word, err = rlp.EncodeToBytes(&types.BodyForStorage{BaseTxnID: types.BaseTxnID(from)})
-		require.NoError(t, err)
-	}
 	require.NoError(t, c.AddWord(word))
 	require.NoError(t, c.Compress())
 	idxNames := []string{typ.String()}
@@ -1076,11 +1082,22 @@ func TestDUCollect_BrokenBlockSegmentOmitsEstimates(t *testing.T) {
 
 func TestDUCollect_BodiesIndexGapOmitsEstimates(t *testing.T) {
 	dirs := duTestDatadirWithBlocks(t, [2]uint64{0, 500_000}, [2]uint64{500_000, 1_000_000}, [2]uint64{1_000_000, 1_500_000})
-	require.NoError(t, os.Remove(filepath.Join(dirs.Snap, snaptype.IdxFileName(version.V1_0, 500_000, 1_000_000, snaptype2.Enums.Bodies.String()))))
+	require.NoError(t, dir2.RemoveFile(filepath.Join(dirs.Snap, snaptype.IdxFileName(version.V1_0, 500_000, 1_000_000, snaptype2.Enums.Bodies.String()))))
 
 	result, err := duCollect(context.Background(), dirs, log.New())
 	require.NoError(t, err)
 	require.Empty(t, result.Estimates)
+}
+
+func TestDUCollect_UndecodableBodiesOmitEstimates(t *testing.T) {
+	dirs := duTestDatadirWithBlocks(t)
+	duWriteSegment(t, dirs.Snap, 0, 500_000, snaptype2.Enums.Headers)
+	duWriteSegmentWord(t, dirs.Snap, 0, 500_000, snaptype2.Enums.Bodies, []byte{1})
+
+	result, err := duCollect(context.Background(), dirs, log.New())
+	require.NoError(t, err)
+	require.Empty(t, result.Estimates)
+	require.Equal(t, uint64(500_000), result.BlockRange[1])
 }
 
 func TestDUCollect_IndexedBlocksKeepEstimates(t *testing.T) {
