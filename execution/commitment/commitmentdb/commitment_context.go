@@ -883,7 +883,7 @@ func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(foldCtx 
 	// building a reader touches tx: AsStateGetter reads the state version off it.
 	var pinnedMu sync.Mutex
 	var pinnedMetrics *kvmetrics.DomainMetrics
-	var pinned StateReader
+	var pinned *syncStateReader
 	if sharedSource || (tx != nil && !caller.writer) {
 		pinnedMetrics = kvmetrics.NewDomainMetrics()
 		src := sdc.stateReader

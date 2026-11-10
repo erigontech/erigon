@@ -118,7 +118,7 @@ type syncStateReader struct {
 
 var _ StateReader = (*syncStateReader)(nil)
 
-func newSyncStateReader(mu *sync.Mutex, src StateReader) StateReader {
+func newSyncStateReader(mu *sync.Mutex, src StateReader) *syncStateReader {
 	return &syncStateReader{mu: mu, src: src, owned: ownsBranches(src)}
 }
 
