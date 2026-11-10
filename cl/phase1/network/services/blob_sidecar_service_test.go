@@ -279,10 +279,11 @@ func TestBlobServiceExpectedProposer(t *testing.T) {
 				missingState  bool
 				invalidProof  bool
 				wantError     string
+				wantIgnore    bool
 			}{
 				{name: "unexpected proposer", proposerIndex: 1, wantError: "does not match expected proposer"},
 				{name: "expected proposer"},
-				{name: "unavailable parent state", missingState: true, wantError: "view parent state"},
+				{name: "unavailable parent state", missingState: true, wantError: "view parent state", wantIgnore: true},
 				{name: "invalid proof with unavailable state", missingState: true, invalidProof: true, wantError: "blob KZG proof verification failed"},
 			} {
 				t.Run(tc.name, func(t *testing.T) {
@@ -307,7 +308,7 @@ func TestBlobServiceExpectedProposer(t *testing.T) {
 						return
 					}
 					require.ErrorContains(t, err, tc.wantError)
-					if tc.missingState && !tc.invalidProof {
+					if tc.wantIgnore {
 						require.ErrorIs(t, err, ErrIgnore)
 					} else {
 						require.NotErrorIs(t, err, ErrIgnore)
