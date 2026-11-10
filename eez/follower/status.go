@@ -227,11 +227,32 @@ type peerCount struct {
 	mu      sync.Mutex
 	started time.Time
 	running bool
+	// done closes when the running count ends.
+	done chan struct{}
 }
 
 // latest returns the latest count and starts another when it is due.
 func (p *peerCount) latest() uint64 {
 	p.refresh()
+	return p.n.Load()
+}
+
+// fresh is latest once the running count ends, waiting for it at most until
+// peerCountTimeout after it started: a sentry that never answers, whatever
+// the context, holds one caller for at most peerCountTimeout.
+func (p *peerCount) fresh() uint64 {
+	p.refresh()
+	p.mu.Lock()
+	running, done, deadline := p.running, p.done, p.started.Add(peerCountTimeout)
+	p.mu.Unlock()
+	if running {
+		t := time.NewTimer(time.Until(deadline))
+		defer t.Stop()
+		select {
+		case <-done:
+		case <-t.C:
+		}
+	}
 	return p.n.Load()
 }
 
@@ -244,7 +265,10 @@ func (p *peerCount) refresh() {
 		return
 	}
 	p.running, p.started = true, time.Now()
+	done := make(chan struct{})
+	p.done = done
 	go func() {
+		defer close(done)
 		ctx, cancel := context.WithTimeout(context.Background(), peerCountTimeout)
 		defer cancel()
 		if n, err := p.count(ctx); err == nil {

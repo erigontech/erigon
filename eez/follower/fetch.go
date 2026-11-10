@@ -43,11 +43,6 @@ type BlockDownloader interface {
 	DownloadBlocksBackwards(ctx context.Context, hash common.Hash, headers execp2p.BbdHeaderReader, opts ...execp2p.BbdOption) (execp2p.BbdResultFeed, error)
 }
 
-// PeerCounter counts the node's connected devp2p peers.
-type PeerCounter interface {
-	NetPeerCount() (uint64, error)
-}
-
 // FetchOptions bound a Fetch.
 type FetchOptions struct {
 	// Limit, when set, refuses a target more than Limit blocks from the
@@ -68,25 +63,23 @@ type FetchOptions struct {
 // chain.
 type Fetcher struct {
 	blocks BlockDownloader
-	peers  PeerCounter
+	peers  *peerCount
 	chain  deriver.Chain
 	logger log.Logger
 }
 
 // NewFetcher returns a fetcher into chain that downloads through blocks;
-// peers counts the connected peers it reports.
-func NewFetcher(blocks BlockDownloader, peers PeerCounter, chain deriver.Chain, logger log.Logger) *Fetcher {
-	return &Fetcher{blocks: blocks, peers: peers, chain: chain, logger: logger}
+// count counts the connected devp2p peers it reports.
+func NewFetcher(blocks BlockDownloader, count func(ctx context.Context) (uint64, error), chain deriver.Chain, logger log.Logger) *Fetcher {
+	return &Fetcher{blocks: blocks, peers: &peerCount{count: count}, chain: chain, logger: logger}
 }
 
-// Peers returns the number of connected peers, zero when it cannot count
-// them.
+// Peers returns the number of connected peers from a count it starts unless
+// one runs, else the latest count, zero before any: it waits for a count at
+// most until peerCountTimeout after the count started, so a sentry that
+// never answers holds no caller longer.
 func (f *Fetcher) Peers() uint64 {
-	n, err := f.peers.NetPeerCount()
-	if err != nil {
-		return 0
-	}
-	return n
+	return f.peers.fresh()
 }
 
 // Fetch inserts into the local chain the blocks up to hash that it does not

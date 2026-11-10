@@ -18,6 +18,7 @@ package follower_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"sync"
@@ -73,6 +74,9 @@ type peerSentry struct {
 	// untracked withholds the peer's connection event, so that the
 	// downloader's tracker lags the sentry.
 	untracked bool
+	// counts, when set, holds every peer count, whatever its context, until
+	// it is closed.
+	counts    chan struct{}
 	requests  []sentryproto.MessageId
 	penalties int
 	streams   map[sentryproto.MessageId][]sentryproto.Sentry_MessagesServer
@@ -93,7 +97,24 @@ func (s *peerSentry) PenalizePeer(context.Context, *sentryproto.PenalizePeerRequ
 	return &emptypb.Empty{}, nil
 }
 
+// holdCounts holds every later peer count, whatever its context, until the
+// test ends, as an in-process sentry stuck on its lock does.
+func (s *peerSentry) holdCounts(t *testing.T) {
+	held := make(chan struct{})
+	t.Cleanup(func() { close(held) })
+	s.mu.Lock()
+	s.counts = held
+	s.mu.Unlock()
+}
+
 func (s *peerSentry) PeerCount(context.Context, *sentryproto.PeerCountRequest) (*sentryproto.PeerCountReply, error) {
+	s.mu.Lock()
+	held := s.counts
+	s.mu.Unlock()
+	if held != nil {
+		<-held
+		return nil, errors.New("count held")
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.connected {
@@ -217,15 +238,15 @@ func (s *peerSentry) penalized() int {
 	return s.penalties
 }
 
-// sentryPeers counts the peers of a sentry.
-type sentryPeers struct{ sentry sentryproto.SentryClient }
-
-func (p sentryPeers) NetPeerCount() (uint64, error) {
-	r, err := p.sentry.PeerCount(context.Background(), &sentryproto.PeerCountRequest{})
-	if err != nil {
-		return 0, err
+// sentryPeers counts the peers of sentry.
+func sentryPeers(sentry sentryproto.SentryClient) func(context.Context) (uint64, error) {
+	return func(ctx context.Context) (uint64, error) {
+		r, err := sentry.PeerCount(ctx, &sentryproto.PeerCountRequest{})
+		if err != nil {
+			return 0, err
+		}
+		return r.Count, nil
 	}
-	return r.Count, nil
 }
 
 // newFetcher returns a follower's fetcher of blocks into chain from its
@@ -260,7 +281,7 @@ func newFetcher(t *testing.T, s *peerSentry, chain deriver.Chain) *follower.Fetc
 		return !s.connected || s.untracked || len(tracker.ListPeers()) == 1
 	}, 10*time.Second, 5*time.Millisecond)
 	bbd := execp2p.NewBackwardBlockDownloader(logger, fetcher, penalizer, tracker, t.TempDir())
-	return follower.NewFetcher(bbd, sentryPeers{mux}, chain, logger)
+	return follower.NewFetcher(bbd, sentryPeers(mux), chain, logger)
 }
 
 // fetchChain composes blocks of the devnet whose Sync blocks hold system
@@ -440,6 +461,30 @@ func TestFetch(t *testing.T) {
 		_, err := f.Fetch(t.Context(), head.Hash(), follower.FetchOptions{})
 		require.ErrorIs(t, err, follower.ErrNoPeers)
 		require.Empty(t, s.sent())
+	})
+
+	t.Run("unresponsive sentry", func(t *testing.T) {
+		s, chain := newPeer(t)
+		f := newFetcher(t, s, chain)
+		// peers returns the count once Peers returns, failing the test when it
+		// takes longer than within.
+		peers := func(within time.Duration) uint64 {
+			got := make(chan uint64, 1)
+			go func() { got <- f.Peers() }()
+			select {
+			case n := <-got:
+				return n
+			case <-time.After(within):
+				t.Fatalf("peer count held past %v", within)
+				return 0
+			}
+		}
+		require.Equal(t, uint64(1), peers(5*time.Second))
+		// A count the sentry never answers holds the first caller until its
+		// deadline and later ones not at all; each takes the latest count.
+		s.holdCounts(t)
+		require.Equal(t, uint64(1), peers(5*time.Second))
+		require.Equal(t, uint64(1), peers(500*time.Millisecond))
 	})
 
 	t.Run("peer not yet tracked", func(t *testing.T) {

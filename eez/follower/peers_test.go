@@ -277,6 +277,29 @@ func TestBootFromPeersRestart(t *testing.T) {
 	require.Equal(t, f2.Number, r.L1Block)
 }
 
+// TestBootFromPeersUnresponsiveSentry: a sentry that never answers a peer
+// count holds neither a boot waiting for L2 peers nor its cancellation.
+func TestBootFromPeersUnresponsiveSentry(t *testing.T) {
+	c := derivertest.NewComposer(t)
+	composeBatches(t, c, 1, 3)
+	finalizeHead(t, c)
+	n, s, _ := newPeersNode(t, c, c.L1, false)
+	s.holdCounts(t)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- n.follower.Boot(ctx) }()
+	require.Eventually(t, func() bool { return n.logged("syncing L2 history from peers", "peers=0") }, 10*time.Second, 5*time.Millisecond)
+	cancel()
+	select {
+	case err := <-done:
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(5 * time.Second):
+		t.Fatal("boot still running after its context ended")
+	}
+}
+
 // TestBootFromPeersSeedFloor: an L1 reorg below the L1 block a follower in
 // peers mode seeded at stops it: L1 no longer holds the evidence of the
 // history its peers served.

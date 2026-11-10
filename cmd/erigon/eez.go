@@ -278,8 +278,8 @@ func startFollower(ctx context.Context, n *node.ErigonNode, stop interface{ Clos
 			return nil, err
 		}
 	}
-	fetcher := follower.NewFetcher(backend.BackwardBlockDownloader(), backend, chain, logger)
 	fc.PeerCount = sentryPeers(backend)
+	fetcher := follower.NewFetcher(backend.BackwardBlockDownloader(), fc.PeerCount, chain, logger)
 	if !l1Only {
 		fc.Peers = fetcher
 		fc.LoopBlockLimit = uint64(loopBlockLimit)

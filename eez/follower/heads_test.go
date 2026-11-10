@@ -778,6 +778,25 @@ func TestSignedHeadTailFetch(t *testing.T) {
 		require.Len(t, n.events("eez.node.follower.head.rejected"), 1)
 	})
 
+	t.Run("sentry not answering peer counts", func(t *testing.T) {
+		s, peers := newPeering(c.L2, true)
+		s.holdCounts(t)
+		n := newHeadsNode(t, c.L1, headsOptions{peers: peers})
+		n.heads <- signedHead(tip, 100, 1, false)
+		stepped := make(chan error, 1)
+		go func() { stepped <- n.follower.StepOverlay(t.Context()) }()
+		select {
+		case err := <-stepped:
+			require.NoError(t, err)
+		case <-time.After(5 * time.Second):
+			t.Fatal("a signed-head decision held by the peer count")
+		}
+		n.requireHead(t, settled.Blocks[0])
+		rejected := n.events("eez.node.follower.head.rejected")
+		require.Len(t, rejected, 1)
+		require.Contains(t, rejected[0], seqsig.ErrNoPeers.Error())
+	})
+
 	t.Run("no connected peer", func(t *testing.T) {
 		s, peers := newPeering(c.L2, false)
 		n := newHeadsNode(t, c.L1, headsOptions{peers: peers})
