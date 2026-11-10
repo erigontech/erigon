@@ -58,9 +58,10 @@ type announceInfo struct {
 	size     uint32
 }
 
-type blockTxnChanges struct {
+type txnChange struct {
+	txn       *TxnSlot
+	sender    [20]byte
 	direction remoteproto.Direction
-	txns      [][]byte
 }
 
 // Fetch connects to sentry and implements eth/66 protocol regarding the transaction
@@ -72,10 +73,10 @@ type Fetch struct {
 	pool                     Pool            // Transaction pool implementation
 	db                       kv.RwDB
 	stateChangesClient       StateChangesClient
-	pendingTxnChanges        []blockTxnChanges // Owned by ConnectCore; retained across subscriptions until applied
-	stateRefreshRequired     bool              // A missed batch requires a refresh even if it contains no transactions
-	wg                       *sync.WaitGroup   // used for synchronisation in the tests (nil when not in tests)
-	connectWg                sync.WaitGroup    // tracks goroutines spawned by ConnectCore/ConnectSentries
+	pendingTxnChanges        []txnChange     // Owned by ConnectCore; retained across subscriptions until applied
+	stateRefreshRequired     bool            // A missed batch requires a refresh even if it contains no transactions
+	wg                       *sync.WaitGroup // used for synchronisation in the tests (nil when not in tests)
+	connectWg                sync.WaitGroup  // tracks goroutines spawned by ConnectCore/ConnectSentries
 	stateChangesParseCtx     *TxnParseContext
 	pooledTxnsParseCtx       *TxnParseContext
 	sentryClients            []sentryproto.SentryClient // sentry clients that will be used for accessing the network
@@ -806,26 +807,8 @@ func (f *Fetch) handleStateChanges(ctx context.Context, client StateChangesClien
 		if req == nil {
 			return nil
 		}
-		for {
-			applyErr := f.handleStateChangesRequest(ctx, req)
-			if applyErr == nil {
-				break
-			}
-			if err := ctx.Err(); err != nil {
-				return err
-			}
-			if errors.Is(applyErr, errStateViewSuperseded) {
-				break
-			}
-			if !errors.Is(applyErr, context.Canceled) {
-				f.logger.Warn("[fetch] onNewBlock", "err", applyErr)
-			}
-			// Retry the failed batch: recovery must not depend on another block arriving.
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(time.Second):
-			}
+		if err := f.handleStateChangesRequest(ctx, req); err != nil && !errors.Is(err, errStateViewSuperseded) {
+			return err
 		}
 
 		if f.wg != nil { // to help tests
@@ -835,55 +818,81 @@ func (f *Fetch) handleStateChanges(ctx context.Context, client StateChangesClien
 }
 
 func (f *Fetch) handleStateChangesRequest(ctx context.Context, req *remoteproto.StateChangeBatch) error {
-	changes := f.pendingTxnChanges
-	for _, change := range req.ChangeBatch {
-		if len(change.Txs) != 0 {
-			changes = append(changes, blockTxnChanges{direction: change.Direction, txns: change.Txs})
+	f.collectStateChangeTxns(req)
+	for {
+		applyErr := f.applyStateChanges(ctx, req)
+		if applyErr == nil {
+			return nil
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if errors.Is(applyErr, errStateViewSuperseded) {
+			return applyErr
+		}
+		if !errors.Is(applyErr, context.Canceled) {
+			f.logger.Warn("[fetch] onNewBlock", "err", applyErr)
+		}
+		// Retry the failed batch: recovery must not depend on another block arriving.
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(time.Second):
 		}
 	}
+}
 
-	type txnChange struct {
-		txn       *TxnSlot
-		sender    [20]byte
-		direction remoteproto.Direction
-	}
-	var txns []txnChange
+func (f *Fetch) collectStateChangeTxns(req *remoteproto.StateChangeBatch) {
+	changes := f.pendingTxnChanges
 	// A transaction can be mined and unwound within one batch. Pool membership
 	// follows its last direction, while state deltas must retain their full order.
-	lastChange := make(map[[32]byte]int)
-	for _, change := range changes {
-		if change.direction != remoteproto.Direction_FORWARD && change.direction != remoteproto.Direction_UNWIND {
+	lastChange := make(map[[32]byte]int, len(changes))
+	for i, change := range changes {
+		lastChange[change.txn.IDHash] = i
+	}
+	for _, change := range req.ChangeBatch {
+		if change.Direction != remoteproto.Direction_FORWARD && change.Direction != remoteproto.Direction_UNWIND {
 			continue
 		}
-		for i, rlp := range change.txns {
-			parsed := txnChange{txn: &TxnSlot{}, direction: change.direction}
+		for i, rlp := range change.Txs {
+			parsed := txnChange{txn: &TxnSlot{}, direction: change.Direction}
 			if err := f.threadSafeParseStateChangeTxn(func(parseContext *TxnParseContext) error {
 				_, err := parseContext.ParseTransaction(rlp, 0, parsed.txn, parsed.sender[:], false /* hasEnvelope */, false /* wrappedWithBlobs */, nil)
 				return err
 			}); err != nil {
 				if !errors.Is(err, context.Canceled) {
 					txnType, _ := PeekTransactionType(rlp)
-					f.logger.Debug("[txpool.fetch] stream.Recv", "dir", change.direction, "txnType", txnType, "index", i, "err", err)
+					f.logger.Debug("[txpool.fetch] stream.Recv", "dir", change.Direction, "txnType", txnType, "index", i, "err", err)
 				}
 				continue // 1 txn handling error must not stop batch processing
 			}
-			lastChange[parsed.txn.IDHash] = len(txns)
-			txns = append(txns, parsed)
+			lastChange[parsed.txn.IDHash] = len(changes)
+			changes = append(changes, parsed)
 		}
 	}
 
-	var unwindTxns, unwindBlobTxns, minedTxns TxnSlots
-	for i, change := range txns {
-		if lastChange[change.txn.IDHash] != i {
-			continue
+	pending := changes[:0]
+	for i, change := range changes {
+		if lastChange[change.txn.IDHash] == i {
+			pending = append(pending, change)
 		}
+	}
+	clear(changes[len(pending):])
+	f.pendingTxnChanges = pending
+}
+
+func (f *Fetch) applyStateChanges(ctx context.Context, req *remoteproto.StateChangeBatch) error {
+	var unwindTxns, unwindBlobTxns, minedTxns TxnSlots
+	for _, change := range f.pendingTxnChanges {
+		// The pool mutates slot metadata, so each attempt needs its own copy.
+		txn := *change.txn
 		switch {
 		case change.direction == remoteproto.Direction_FORWARD:
-			minedTxns.Append(change.txn, change.sender[:], false)
+			minedTxns.Append(&txn, change.sender[:], false)
 		case change.txn.Txn.GetBlobGas() != 0:
-			unwindBlobTxns.Append(change.txn, change.sender[:], false)
+			unwindBlobTxns.Append(&txn, change.sender[:], false)
 		default:
-			unwindTxns.Append(change.txn, change.sender[:], false)
+			unwindTxns.Append(&txn, change.sender[:], false)
 		}
 	}
 
@@ -893,9 +902,6 @@ func (f *Fetch) handleStateChangesRequest(ctx context.Context, req *remoteproto.
 	}
 	if err := f.pool.OnNewBlock(ctx, req, unwindTxns, unwindBlobTxns, minedTxns); err != nil {
 		f.stateRefreshRequired = true
-		if errors.Is(err, errStateViewSuperseded) {
-			f.pendingTxnChanges = changes
-		}
 		return err
 	}
 	f.pendingTxnChanges = nil

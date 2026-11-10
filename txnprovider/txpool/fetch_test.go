@@ -381,6 +381,7 @@ func TestFetchStateChangeRecoveryUntilSuccess(t *testing.T) {
 			for i := range batches {
 				batches[i] = newBlockChangeForAccounts(common.Hash{byte(i + 1)}, 0)
 				batches[i].ChangeBatch[0].BlockHeight = uint64(i + 1)
+				batches[i].ChangeBatch[0].Txs = [][]byte{decodeHex(TxnParseMainnetTests[i+1].PayloadStr)}
 				stream.EXPECT().Recv().Return(batches[i], nil)
 			}
 			stream.EXPECT().Recv().Return(nil, io.EOF)
@@ -390,16 +391,27 @@ func TestFetchStateChangeRecoveryUntilSuccess(t *testing.T) {
 			var incomplete []bool
 			var heights []uint64
 			pool.EXPECT().OnNewBlock(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
-				func(_ context.Context, batch *remoteproto.StateChangeBatch, _, _, _ TxnSlots) error {
+				func(_ context.Context, batch *remoteproto.StateChangeBatch, _, _ TxnSlots, mined TxnSlots) error {
 					incomplete = append(incomplete, batch.StateChangesIncomplete)
 					heights = append(heights, batch.ChangeBatch[0].BlockHeight)
+					require.Len(t, mined.Txns, 1)
+					require.Equal(t, batch.ChangeBatch[0].Txs[0], mined.Txns[0].Rlp, "pool mutations must not affect a retry")
+					require.Zero(t, mined.Txns[0].SenderID)
+					mined.Txns[0].Rlp = nil
+					mined.Txns[0].SenderID = 42
 					if len(incomplete) <= 2 {
 						return tc.err
 					}
 					return nil
 				}).Times(4)
 			fetch := NewFetch(t.Context(), nil, pool, client, nil, u256.N1, log.New())
+			parseCalls := 0
+			fetch.stateChangesParseCtx.ValidateRLP(func(rlp []byte) error {
+				parseCalls++
+				return ValidateSerializedTxn(rlp)
+			})
 			require.ErrorIs(t, fetch.handleStateChanges(t.Context(), client), io.EOF)
+			require.Equal(t, len(batches), parseCalls, "retries must reuse parsed transactions")
 			require.Equal(t, []bool{false, true, true, false}, incomplete)
 			require.Equal(t, []uint64{1, 1, 1, 2}, heights, "retry the failed update before reading another batch")
 			require.Equal(t, uint64(2), fetch.newBlocks.Load(), "only successful updates advance the gossip epoch")
@@ -483,7 +495,13 @@ func TestFetchCoalescesSupersededStateChanges(t *testing.T) {
 				return nil
 			}).Times(3)
 		fetch := NewFetch(ctx, nil, pool, client, nil, u256.N1, log.New())
+		parseCalls := 0
+		fetch.stateChangesParseCtx.ValidateRLP(func(rlp []byte) error {
+			parseCalls++
+			return ValidateSerializedTxn(rlp)
+		})
 		require.ErrorIs(t, fetch.handleStateChanges(ctx, client), io.EOF)
+		require.Equal(t, len(batches), parseCalls, "each received transaction entry must be parsed only once")
 		require.Equal(t, uint64(1), fetch.newBlocks.Load())
 		for i, original := range originals {
 			require.True(t, proto.Equal(original, batches[i]), "shared notifications must remain unchanged")
@@ -1341,8 +1359,14 @@ func TestFetchSupersededChangesSurviveReconnect(t *testing.T) {
 					return nil
 				}).Times(2)
 			fetch := NewFetch(t.Context(), nil, pool, client, nil, u256.N1, log.New())
+			parseCalls := 0
+			fetch.stateChangesParseCtx.ValidateRLP(func(rlp []byte) error {
+				parseCalls++
+				return ValidateSerializedTxn(rlp)
+			})
 			require.ErrorIs(t, fetch.handleStateChanges(t.Context(), client), io.EOF)
 			require.ErrorIs(t, fetch.handleStateChanges(t.Context(), client), io.EOF)
+			require.Equal(t, len(tc.txns), parseCalls, "reconnecting must retain parsed transactions")
 			require.Len(t, recovered.Txns, len(tc.txns), "reconnecting must retain pending orphaned transactions")
 			require.False(t, current.StateChangesIncomplete, "a shared batch must not be modified")
 		})
