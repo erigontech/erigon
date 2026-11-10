@@ -147,6 +147,7 @@ type TxPool struct {
 	chainID                 uint256.Int
 	chainConfig             *chain.Config
 	stateGeneration         uint64
+	stateVersionID          uint64      // Execution's announced state version, independent of the pool generation
 	stateBlockHash          common.Hash // Head of the pool's state view; pins frame validation to the same block
 	lastSeenBlock           atomic.Uint64
 	lastSeenCond            *sync.Cond
@@ -385,6 +386,7 @@ func (p *TxPool) applyBlockUpdate(stateChanges *remoteproto.StateChangeBatch, un
 	block := stateChanges.ChangeBatch[len(stateChanges.ChangeBatch)-1].BlockHeight
 	baseFee := stateChanges.PendingBlockBaseFee
 	p.stateGeneration++
+	p.stateVersionID = stateChanges.StateVersionId
 	frames.generation = p.stateGeneration
 	p.stateBlockHash = common.Hash{}
 	if hash := stateChanges.ChangeBatch[len(stateChanges.ChangeBatch)-1].BlockHash; hash != nil {
@@ -680,7 +682,7 @@ func (p *TxPool) KnownTxnReason(hash []byte) txpoolcfg.DiscardReason {
 	if reason, ok := p.discardReasonsLRU.Get(hashS); ok && reason == txpoolcfg.InvalidAuthorizationNonce {
 		return reason
 	}
-	// Sender-policy rejections still need admission's current account-nonce check.
+	// Sender-policy rejections still need admission's current nonce check.
 	if rejection, ok := p.frameRejections.Get(hashS); ok && rejection.blocker == (common.Hash{}) && rejection.applies(p, p.stateGeneration) {
 		return rejection.reason
 	}
@@ -1755,13 +1757,13 @@ func (p *TxPool) addNewTxns(ctx context.Context, newTxns TxnSlots, sources []rem
 		simulationCtx, cancel = context.WithTimeout(ctx, frameValidationTimeout)
 		defer cancel()
 	}
+	var frames frameValidationBatch
 	for {
-		var frames frameValidationBatch
-		if hasFrames {
+		if hasFrames && frames.results == nil {
 			frames = p.prepareFrames(simulationCtx, newTxns)
 		}
-		err = p.withLockedState(ctx, &newTxns, func(_ kv.TemporalTx, cacheView kvcache.CacheView) error {
-			preparedReasons, err := p.applyFrameValidation(simulationCtx, newTxns, frames, precheckReasons, cacheView)
+		err = p.withLockedState(ctx, &newTxns, func(coreTx kv.TemporalTx, cacheView kvcache.CacheView) error {
+			preparedReasons, err := p.applyFrameValidation(simulationCtx, newTxns, frames, precheckReasons, coreTx, cacheView)
 			if err != nil {
 				return err
 			}
@@ -1792,9 +1794,19 @@ func (p *TxPool) addNewTxns(ctx context.Context, newTxns TxnSlots, sources []rem
 			p.notifyPendingTxns(announcements)
 			return nil
 		})
+		if errors.Is(err, errFrameNonceStateUnavailable) {
+			// A commit does not send another notification. Reopen the snapshot outside
+			// the pool lock, within the existing frame-validation deadline.
+			select {
+			case <-simulationCtx.Done():
+			case <-time.After(10 * time.Millisecond):
+			}
+			continue
+		}
 		if !errors.Is(err, errFrameStateChanged) {
 			return reasons, err
 		}
+		frames = frameValidationBatch{}
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
@@ -3057,6 +3069,13 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx) error {
 }
 
 func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.CacheView, parked *[]*metaTxn) error {
+	if p.stateGeneration == 0 {
+		var err error
+		p.stateVersionID, err = rawdb.GetStateVersion(coreTx)
+		if err != nil {
+			return err
+		}
+	}
 	if p.stateBlockHash == (common.Hash{}) {
 		// Header sync can run ahead of execution, so pin validation to the executed head.
 		p.stateBlockHash = rawdb.ReadHeadBlockHash(coreTx)

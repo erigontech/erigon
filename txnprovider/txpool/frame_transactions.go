@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -97,7 +98,10 @@ type frameRevalidationBatch struct {
 	parked     []*metaTxn
 }
 
-var errFrameStateChanged = errors.New("frame validation state changed")
+var (
+	errFrameStateChanged          = errors.New("frame validation state changed")
+	errFrameNonceStateUnavailable = errors.New("frame nonce state does not match the pool state version")
+)
 
 // Each admission or revalidation batch shares one deadline, including waits for
 // the simulation gate or a newer pool head, so the limit does not grow with the batch size.
@@ -254,7 +258,7 @@ func (p *TxPool) waitForFrameStateChange(ctx context.Context, generation uint64)
 // conflicts are retried while time remains. After the deadline, current prechecks
 // preserve specific rejections; frames needing simulation receive a retryable rejection.
 // Simulation results for the current state generation remain usable after the deadline.
-func (p *TxPool) applyFrameValidation(ctx context.Context, txns TxnSlots, batch frameValidationBatch, precheckReasons []txpoolcfg.DiscardReason, stateCache kvcache.CacheView) ([]txpoolcfg.DiscardReason, error) {
+func (p *TxPool) applyFrameValidation(ctx context.Context, txns TxnSlots, batch frameValidationBatch, precheckReasons []txpoolcfg.DiscardReason, coreTx kv.TemporalTx, stateCache kvcache.CacheView) ([]txpoolcfg.DiscardReason, error) {
 	if len(batch.results) == 0 {
 		return precheckReasons, nil
 	}
@@ -277,14 +281,16 @@ func (p *TxPool) applyFrameValidation(ctx context.Context, txns TxnSlots, batch 
 				result.reason = txpoolcfg.FrameValidationUnavailable
 			}
 		}
-		if result.senderConflict && !txn.hasKeyedNonce() {
-			// A consumed account nonce takes precedence over sender policy, including
+		if result.senderConflict {
+			// A consumed nonce takes precedence over sender policy, including
 			// cached conflicts. Use the same state view as the rest of admission.
-			senderNonce, _, _, err := p.senders.info(stateCache, txn.SenderID)
-			if err != nil {
+			consumed, err := p.frameNonceTooLow(txn, coreTx, stateCache)
+			if errors.Is(err, errFrameNonceStateUnavailable) && ctx.Err() != nil {
+				result.reason = txpoolcfg.FrameValidationUnavailable
+			} else if err != nil {
 				return nil, err
 			}
-			if txn.Nonce < senderNonce {
+			if consumed {
 				result.reason = txpoolcfg.NonceTooLow
 				p.frameRejections.Add(string(txn.IDHash[:]), frameRejection{generation: p.stateGeneration, reason: result.reason})
 			}
@@ -310,6 +316,36 @@ func (p *TxPool) applyFrameValidation(ctx context.Context, txns TxnSlots, batch 
 		}
 	}
 	return reasons, nil
+}
+
+func (p *TxPool) frameNonceTooLow(txn *TxnSlot, coreTx kv.TemporalTx, stateCache kvcache.CacheView) (bool, error) {
+	if !txn.hasKeyedNonce() {
+		nonce, _, _, err := p.senders.info(stateCache, txn.SenderID)
+		return txn.Nonce < nonce, err
+	}
+	// Account changes are overlaid before commit, but storage reads use the DB.
+	// Only a matching committed version can establish a keyed-nonce rejection.
+	version, err := rawdb.GetStateVersion(coreTx)
+	if err != nil {
+		return false, err
+	}
+	if version != p.stateVersionID {
+		return false, errFrameNonceStateUnavailable
+	}
+	frame := txn.Txn.(*types.FrameTransaction)
+	for _, key := range frame.NonceKeys {
+		location := types.FrameNonceSlot(frame.SenderAddress, key)
+		value, _, err := coreTx.GetLatest(kv.StorageDomain, append(types.FrameNonceManager[:], location[:]...), kv.GetLatestOptions{})
+		if err != nil {
+			return false, err
+		}
+		var sequence uint256.Int
+		sequence.SetBytes(value)
+		if cmp := sequence.CmpUint64(txn.Nonce); cmp != 0 {
+			return cmp > 0, nil
+		}
+	}
+	return false, nil
 }
 
 func (p *TxPool) simulateFrameResult(ctx context.Context, txn *TxnSlot, generation uint64, stateBlockHash common.Hash) frameValidationResult {

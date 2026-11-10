@@ -46,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/types"
@@ -987,6 +988,122 @@ func TestFramePoolConsumedNonceBeforeSenderConflict(t *testing.T) {
 				require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 				submit(txpoolproto.ImportResult_INVALID, txpoolcfg.InvalidFrame)
 			}
+		})
+	}
+}
+
+func writeFrameNonceState(t *testing.T, pool *TxPool, sender common.Address, key, nonce, version uint64) {
+	t.Helper()
+	ctx := t.Context()
+	tx, err := pool._chainDB.(kv.TemporalRwDB).BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	sd, err := execctx.NewSharedDomains(ctx, tx, pool.logger)
+	require.NoError(t, err)
+	defer sd.Close()
+	location := types.FrameNonceSlot(sender, uint256.Int{key})
+	require.NoError(t, sd.DomainPut(kv.StorageDomain, tx, append(types.FrameNonceManager[:], location[:]...), uint256.NewInt(nonce).Bytes(), version, nil))
+	require.NoError(t, sd.Flush(ctx, tx))
+	require.NoError(t, tx.Put(kv.Sequence, kv.PlainStateVersion, binary.BigEndian.AppendUint64(nil, version)))
+	require.NoError(t, tx.Commit())
+}
+
+func TestFramePoolConsumedKeyedNonceBeforeSenderConflict(t *testing.T) {
+	for _, cached := range []bool{false, true} {
+		t.Run(fmt.Sprintf("cached=%t", cached), func(t *testing.T) {
+			ctx, pool, sender := keyedFramePoolEnv(t)
+			blocker := framePoolSlot(t, sender, 1, 2, uint256.Int{1})
+			var txns TxnSlots
+			txns.Append(blocker, sender[:], true)
+			reasons, err := pool.AddLocalTxns(ctx, txns)
+			require.NoError(t, err)
+			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+			candidate := framePoolSlot(t, sender, 1, 2, uint256.Int{2})
+			server := NewGrpcServer(ctx, pool, pool.poolDB, nil, *candidate.Txn.GetChainID(), pool.logger)
+			request := &txpoolproto.AddRequest{RlpTxs: [][]byte{candidate.Rlp}}
+			if cached {
+				reply, err := server.Add(ctx, request)
+				require.NoError(t, err)
+				require.Equal(t, []txpoolproto.ImportResult{txpoolproto.ImportResult_INVALID}, reply.Imported)
+			}
+			writeFrameNonceState(t, pool, sender, 2, 1, 1)
+			change := newBlockChangeForAccounts(common.Hash{1}, 0)
+			change.StateVersionId = 1
+			require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+			calls := len(pool.ethBackend.(*frameValidationBackend).calls)
+			for range 2 {
+				reply, err := server.Add(ctx, request)
+				require.NoError(t, err)
+				require.Equal(t, []txpoolproto.ImportResult{txpoolproto.ImportResult_STALE}, reply.Imported)
+				require.Equal(t, []string{txpoolcfg.NonceTooLow.String()}, reply.Errors)
+			}
+			require.Len(t, pool.ethBackend.(*frameValidationBackend).calls, calls, "sender conflicts must not run full simulation")
+			require.NotContains(t, pool.byHash, string(candidate.IDHash[:]))
+		})
+	}
+}
+
+func TestFramePoolKeyedConflictReopensPrecommitState(t *testing.T) {
+	ctx, pool, sender := keyedFramePoolEnv(t)
+	pool._stateCache = kvcache.NewLatestBatchCache()
+	require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{}, 0, sender), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	blocker := framePoolSlot(t, sender, 1, 2, uint256.Int{1})
+	var txns TxnSlots
+	txns.Append(blocker, sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+	change := newBlockChangeForAccounts(common.Hash{1}, 0, sender)
+	change.StateVersionId = 1
+	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	calls := len(pool.ethBackend.(*frameValidationBackend).calls)
+	probe := &stateViewProbe{Cache: pool._stateCache}
+	probe.onView = func() {
+		require.True(t, pool.lock.TryLock(), "commit waits must not hold the pool lock")
+		pool.lock.Unlock()
+		writeFrameNonceState(t, pool, sender, 2, 1, 1)
+	}
+	pool._stateCache = probe
+	txns.Txns[0] = framePoolSlot(t, sender, 1, 2, uint256.Int{2})
+	reasons, err = pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NonceTooLow}, reasons)
+	require.Nil(t, probe.onView)
+	require.Len(t, pool.ethBackend.(*frameValidationBackend).calls, calls)
+}
+
+func TestFramePoolKeyedConflictRequiresCurrentState(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		committed uint64
+		announced uint64
+	}{
+		{"before commit", 1, 2},
+		{"before notification", 2, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, pool, sender := keyedFramePoolEnv(t)
+			pool._stateCache = kvcache.NewLatestBatchCache()
+			require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{}, 0, sender), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+			var txns TxnSlots
+			txns.Append(framePoolSlot(t, sender, 1, 2, uint256.Int{1}), sender[:], true)
+			reasons, err := pool.AddLocalTxns(ctx, txns)
+			require.NoError(t, err)
+			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+			writeFrameNonceState(t, pool, sender, 2, 1, tc.committed)
+			change := newBlockChangeForAccounts(common.Hash{1}, 0, sender)
+			change.StateVersionId = tc.announced
+			require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+			calls := len(pool.ethBackend.(*frameValidationBackend).calls)
+			txns.Txns[0] = framePoolSlot(t, sender, 1, 2, uint256.Int{2})
+			synctest.Test(t, func(t *testing.T) {
+				start := time.Now()
+				reasons, err := pool.AddLocalTxns(t.Context(), txns)
+				require.NoError(t, err)
+				require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.FrameValidationUnavailable}, reasons)
+				require.Equal(t, frameValidationTimeout, time.Since(start))
+			})
+			require.Len(t, pool.ethBackend.(*frameValidationBackend).calls, calls)
 		})
 	}
 }
