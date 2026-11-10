@@ -3,7 +3,6 @@ package handlers
 import (
 	"context"
 	"errors"
-	"slices"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -78,10 +77,10 @@ func (c *ConsensusHandlers) dataColumnSidecarsByRangeHandler(s network.Stream) e
 	return c.writeColumnsByRange(requestCtx, s, tx, req, startSlot, endSlot, curSlot)
 }
 
-// writeColumnsByRange serves whole blocks. A block with no stored column costs one lookup and no part of the response limit.
+// writeColumnsByRange serves whole blocks. Columns a block does not store take none of the response limit.
 func (c *ConsensusHandlers) writeColumnsByRange(ctx context.Context, s network.Stream, tx kv.Tx, req *cltypes.ColumnSidecarsByRangeRequest, startSlot, endSlot, curSlot uint64) error {
 	served := uint64(0)
-	for slot := startSlot; slot < endSlot && ctx.Err() == nil; slot++ {
+	for slot := startSlot; slot < endSlot && served < c.beaconConfig.MaxRequestDataColumnSidecars && ctx.Err() == nil; slot++ {
 		if slot > curSlot {
 			// slot is in the future
 			break
@@ -101,18 +100,24 @@ func (c *ConsensusHandlers) writeColumnsByRange(ctx context.Context, s network.S
 			continue
 		}
 
-		saved, err := c.dataColumnStorage.GetSavedColumnIndex(ctx, slot, blockRoot)
-		if err != nil {
-			log.Debug("failed to list saved data column sidecars", "error", err)
-			return err
-		}
-		columns := make([]uint64, 0, len(saved))
-		req.Columns.Range(func(_ int, columnIndex uint64, _ int) bool {
-			if slices.Contains(saved, columnIndex) {
+		columns := make([]uint64, 0, req.Columns.Length())
+		err = solid.RangeErr(req.Columns, func(_ int, columnIndex uint64, _ int) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			exists, err := c.dataColumnStorage.ColumnSidecarExists(ctx, slot, blockRoot, int64(columnIndex))
+			if exists {
 				columns = append(columns, columnIndex)
 			}
-			return true
+			return err
 		})
+		if ctx.Err() != nil {
+			break
+		}
+		if err != nil {
+			log.Debug("failed to check if data column sidecar exists", "error", err)
+			return err
+		}
 		if len(columns) == 0 {
 			continue
 		}

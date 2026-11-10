@@ -21,6 +21,7 @@ import (
 	"context"
 	"io"
 	"math"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -310,12 +311,14 @@ func TestDataColumnSidecarsByRootTooManyColumnsReturnsInvalidRequest(t *testing.
 
 type savedColumnsStore struct {
 	blob_storage.DataColumnStorage
-	saved  func(slot uint64) []uint64
-	served int
+	saved   func(slot uint64) []uint64
+	lookups int
+	served  int
 }
 
-func (m *savedColumnsStore) GetSavedColumnIndex(_ context.Context, slot uint64, _ common.Hash) ([]uint64, error) {
-	return m.saved(slot), nil
+func (m *savedColumnsStore) ColumnSidecarExists(_ context.Context, slot uint64, _ common.Hash, column int64) (bool, error) {
+	m.lookups++
+	return slices.Contains(m.saved(slot), uint64(column)), nil
 }
 
 func (m *savedColumnsStore) WriteStream(io.Writer, uint64, common.Hash, uint64) error {
@@ -327,7 +330,7 @@ type discardStream struct{ network.Stream }
 
 func (discardStream) Write(p []byte) (int, error) { return len(p), nil }
 
-func serveColumnsByRange(t *testing.T, ctx context.Context, limit, slots uint64, saved func(slot uint64) []uint64) int {
+func serveColumnsByRange(t *testing.T, ctx context.Context, limit, slots uint64, saved func(slot uint64) []uint64) *savedColumnsStore {
 	t.Helper()
 	_, mainnetCfg := clparams.GetConfigsByNetwork(1)
 	cfg := *mainnetCfg
@@ -349,29 +352,44 @@ func serveColumnsByRange(t *testing.T, ctx context.Context, limit, slots uint64,
 	}
 
 	require.NoError(t, c.writeColumnsByRange(ctx, discardStream{}, tx, req, 0, slots, slots))
-	return store.served
+	return store
 }
 
 func TestDataColumnSidecarsByRangeServesAfterBloblessBlocks(t *testing.T) {
-	served := serveColumnsByRange(t, t.Context(), 10, 64, func(slot uint64) []uint64 {
+	store := serveColumnsByRange(t, t.Context(), 10, 64, func(slot uint64) []uint64 {
 		if slot == 63 {
 			return []uint64{0, 1, 2}
 		}
 		return nil
 	})
-	require.Equal(t, 3, served)
+	require.Equal(t, 3, store.served)
 }
 
 func TestDataColumnSidecarsByRangeStopsBetweenWholeBlocks(t *testing.T) {
-	served := serveColumnsByRange(t, t.Context(), 10, 32, func(uint64) []uint64 { return []uint64{0, 1, 2} })
-	require.Equal(t, 9, served)
+	store := serveColumnsByRange(t, t.Context(), 10, 32, func(uint64) []uint64 { return []uint64{0, 1, 2} })
+	require.Equal(t, 9, store.served)
+}
+
+func TestDataColumnSidecarsByRangeStopsLookupsAtTheLimit(t *testing.T) {
+	store := serveColumnsByRange(t, t.Context(), 9, 32, func(slot uint64) []uint64 {
+		if slot < 3 {
+			return []uint64{0, 1, 2}
+		}
+		return nil
+	})
+	require.Equal(t, 9, store.served)
+	require.Equal(t, 9, store.lookups)
 }
 
 func TestDataColumnSidecarsByRangeStopsAtTheDeadline(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
-	cancel()
-	served := serveColumnsByRange(t, ctx, 10, 32, func(uint64) []uint64 { return []uint64{0, 1, 2} })
-	require.Zero(t, served)
+	defer cancel()
+	store := serveColumnsByRange(t, ctx, 10, 32, func(uint64) []uint64 {
+		cancel()
+		return []uint64{0, 1, 2}
+	})
+	require.Equal(t, 1, store.lookups)
+	require.Zero(t, store.served)
 }
 
 func TestDataColumnSidecarsByRangeZeroCountReturnsEmptySuccess(t *testing.T) {
