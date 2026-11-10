@@ -70,6 +70,7 @@ func TestStatefulGasCallReadsEmptinessOnlyWithValue(t *testing.T) {
 		ibs.StartAccessRecording()
 		evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.TestChainOsakaConfig, Config{})
 		scope := &CallContext{}
+		scope.cacheGen++
 		targetVal := target.Value()
 		scope.Stack.push(*new(uint256.Int).SetBytes(targetVal[:]))
 		scope.Stack.push(uint256.Int{})

@@ -101,3 +101,64 @@ func TestFrameCallDoesNotSpillStateGas(t *testing.T) {
 	require.ErrorIs(t, err, ErrOutOfGas)
 	require.Zero(t, evm.FrameContext.Receipts[0].GasUsed.State)
 }
+
+func callFamilyScope(t *testing.T, op OpCode) (*EVM, *state.IntraBlockState, *CallContext, accounts.Address, accounts.Address) {
+	t.Helper()
+	onStack := accounts.InternAddress([20]byte{18: 0x10})
+	memoized := accounts.InternAddress([20]byte{18: 0x20})
+	ibs := state.New(state.NewNoopReader())
+	t.Cleanup(ibs.Close)
+	code := []byte{byte(PUSH1), 1, byte(PUSH0), byte(MSTORE8), byte(PUSH1), 1, byte(PUSH0), byte(RETURN)}
+	require.NoError(t, ibs.CreateAccount(memoized, true))
+	require.NoError(t, ibs.SetCode(memoized, code, tracing.CodeChangeUnspecified))
+	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
+	scope := evm.getCallContext(*NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{}), nil, mdgas.MdGas{Execution: 500_000})
+	t.Cleanup(func() { evm.putCallContext(scope) })
+	scope.cacheGen++
+	for range 4 {
+		scope.Stack.push(uint256.Int{})
+	}
+	if op == CALL || op == CALLCODE {
+		scope.Stack.push(uint256.Int{})
+	}
+	word := onStack.Value()
+	scope.Stack.push(*new(uint256.Int).SetBytes(word[:]))
+	scope.Stack.push(*uint256.NewInt(100_000))
+	return evm, ibs, scope, onStack, memoized
+}
+
+func TestCallFamilyGasAndExecuteShareTheInternedTarget(t *testing.T) {
+	for _, op := range []OpCode{CALL, CALLCODE, DELEGATECALL, STATICCALL} {
+		t.Run(op.String(), func(t *testing.T) {
+			evm, ibs, scope, onStack, memoized := callFamilyScope(t, op)
+			scope.cachedAddr, scope.cachedAddrGen = memoized, scope.cacheGen
+
+			_, err := evm.jt[op].dynamicGas(evm, scope, scope.Gas(), 0)
+			require.NoError(t, err)
+			require.True(t, ibs.AddressInAccessList(memoized))
+			require.False(t, ibs.AddressInAccessList(onStack))
+
+			_, _, err = evm.jt[op].execute(0, evm, scope)
+			require.NoError(t, err)
+			require.Equal(t, []byte{1}, evm.returnData)
+		})
+	}
+}
+
+func TestCallFamilyIgnoresTargetInternedByEarlierDispatch(t *testing.T) {
+	for _, op := range []OpCode{CALL, CALLCODE, DELEGATECALL, STATICCALL} {
+		t.Run(op.String(), func(t *testing.T) {
+			evm, ibs, scope, onStack, memoized := callFamilyScope(t, op)
+			scope.cachedAddr, scope.cachedAddrGen = memoized, scope.cacheGen-1
+
+			_, err := evm.jt[op].dynamicGas(evm, scope, scope.Gas(), 0)
+			require.NoError(t, err)
+			require.True(t, ibs.AddressInAccessList(onStack))
+			require.False(t, ibs.AddressInAccessList(memoized))
+
+			_, _, err = evm.jt[op].execute(0, evm, scope)
+			require.NoError(t, err)
+			require.Empty(t, evm.returnData)
+		})
+	}
+}

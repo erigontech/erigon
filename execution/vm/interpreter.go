@@ -175,8 +175,8 @@ func (ctx *CallContext) peekStorageKey(evm *EVM) accounts.StorageKey {
 	return ctx.memoStorageKey(evm)
 }
 
-// memoStorageKey is outlined from peekStorageKey, and memoAddress from
-// peekAddress, to keep the two peek functions inside the inlining budget.
+// memoStorageKey is outlined from peekStorageKey, memoAddress from peekAddress and
+// memoAddressWord from internAddressOnce, to keep the callers inside the inlining budget.
 // Folding either back into its caller costs about 10% on the call benchmarks.
 func (ctx *CallContext) memoStorageKey(evm *EVM) accounts.StorageKey {
 	ctx.cachedKey = evm.intraBlockState.InternStorageKey(ctx.Stack.peek())
@@ -193,8 +193,24 @@ func (ctx *CallContext) peekAddress(evm *EVM) accounts.Address {
 	return ctx.memoAddress(evm)
 }
 
+// internAddressOnce is peekAddress for an operand below the stack top: every
+// call within one dispatch must pass the same word.
+func (ctx *CallContext) internAddressOnce(evm *EVM, word *uint256.Int) accounts.Address {
+	if ctx.cachedAddrGen == ctx.cacheGen {
+		return ctx.cachedAddr
+	}
+	return ctx.memoAddressWord(evm, word)
+}
+
 func (ctx *CallContext) memoAddress(evm *EVM) accounts.Address {
 	ctx.cachedAddr = evm.intraBlockState.InternAddress(ctx.Stack.peek())
+	ctx.cachedAddrGen = ctx.cacheGen
+	return ctx.cachedAddr
+}
+
+//go:noinline
+func (ctx *CallContext) memoAddressWord(evm *EVM, word *uint256.Int) accounts.Address {
+	ctx.cachedAddr = evm.intraBlockState.InternAddress(word)
 	ctx.cachedAddrGen = ctx.cacheGen
 	return ctx.cachedAddr
 }
