@@ -71,7 +71,7 @@ func Account(spec AccountSpec) AccountValue {
 func RandomAccount(rng *rand.Rand) AccountValue {
 	value := AccountValue{Fields: allFields, Nonce: uint64(rng.Intn(1 << 20)), Balance: *uint256.NewInt(rng.Uint64()), CodeHash: empty.CodeHash}
 	if rng.Intn(3) == 0 {
-		value.CodeHash = common.BigToHash(uint256.NewInt(rng.Uint64()).ToBig())
+		value.CodeHash = uint256.NewInt(rng.Uint64()).Bytes32()
 	}
 	return value
 }

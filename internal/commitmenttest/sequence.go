@@ -44,19 +44,19 @@ func Generate(seed Seed, spec SequenceSpec) Case {
 		spec.Count += size
 	}
 	rng := rand.New(rand.NewSource(int64(seed)))
-	if spec.Kind == "stress" {
+	ops := make([]Op, 0, spec.Count)
+	address := func(i int) []byte { return Key(KeySpec{Kind: "bench-address", Size: 20}, i) }
+	switch spec.Kind {
+	case "stress":
 		c.Rounds = stressRounds(rng, spec)
 		return c
-	}
-	if spec.Kind == "root-collapse" {
+	case "root-collapse":
 		c.Rounds = collapseRounds(rng, spec)
 		return c
-	}
-	if spec.Kind == "incremental" {
+	case "incremental":
 		c.Rounds = incrementalRounds()
 		return c
-	}
-	if spec.Kind == "one-slot" {
+	case "one-slot":
 		addrs, slots := make([][]byte, spec.Count), make([][]byte, spec.Count)
 		for i := range addrs {
 			addrs[i], slots[i] = make([]byte, 20), make([]byte, 32)
@@ -71,17 +71,13 @@ func Generate(seed Seed, spec SequenceSpec) Case {
 					start, generation = 0, 1
 				}
 			}
-			var ops []Op
+			var batch []Op
 			for i := start; i < start+count; i++ {
-				ops = append(ops, AccountAt(addrs[i], AccountSpec{Kind: "parity", Number: i}), StorageAt(SlotKey(addrs[i], slots[i]), i+generation*1000))
+				batch = append(batch, AccountAt(addrs[i], AccountSpec{Kind: "parity", Number: i}), StorageAt(SlotKey(addrs[i], slots[i]), i+generation*1000))
 			}
-			c.Rounds = append(c.Rounds, ops)
+			c.Rounds = append(c.Rounds, batch)
 		}
 		return c
-	}
-	ops := make([]Op, 0, spec.Count)
-	address := func(i int) []byte { return Key(KeySpec{Kind: "bench-address", Size: 20}, i) }
-	switch spec.Kind {
 	case "accounts", "storage":
 		for i := range spec.Count {
 			ops = append(ops, AccountAt(address(i), AccountSpec{Kind: "parity", Number: i}))

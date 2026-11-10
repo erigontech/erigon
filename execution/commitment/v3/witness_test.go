@@ -20,7 +20,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"math/bits"
 	"math/rand"
 	"slices"
 	"strings"
@@ -659,10 +661,9 @@ func requireSameChildCounts(t *testing.T, b *witnessBed, pre, batch []commitment
 	t.Helper()
 	hphRecords, v3Records := b.hphMem.Records(), b.v3Mem.Records()
 	read := func(key []byte) ([]byte, error) { return v3Records[string(key)], nil }
-	tr := &Trie{}
 	check := func(prefix []byte) {
 		want := commitment.BranchData(hphRecords[string(nibbles.HexToCompact(prefix))]).ChildCount()
-		got, err := tr.BranchChildCount(read, prefix)
+		got, err := branchChildCount(read, prefix)
 		require.NoError(t, err)
 		require.Equal(t, want, got, "%s prefix=%x", label, prefix)
 	}
@@ -680,4 +681,28 @@ func requireSameChildCounts(t *testing.T, b *witnessBed, pre, batch []commitment
 			check(full[:cut])
 		}
 	}
+}
+
+var errReadOnlyContext = errors.New("commitment v3: read-only branch context")
+
+type branchReader func(key []byte) ([]byte, error)
+
+func (r branchReader) Branch(key []byte) ([]byte, kv.Step, error) {
+	data, err := r(key)
+	return data, 0, err
+}
+
+func (branchReader) PutBranch([]byte, []byte, []byte) error { return errReadOnlyContext }
+
+func (branchReader) Account([]byte) (*commitment.Update, error) { return nil, errReadOnlyContext }
+
+func (branchReader) Storage([]byte) (*commitment.Update, error) { return nil, errReadOnlyContext }
+
+func branchChildCount(read func([]byte) ([]byte, error), nibblePrefix []byte) (int, error) {
+	ctx := branchReader(read)
+	n, err := liveBranch(func(plane byte, addrHash, path []byte) (*node, error) { return unfold(ctx, path, plane, addrHash) }, nibblePrefix)
+	if err != nil || n == nil {
+		return 0, err
+	}
+	return bits.OnesCount16(n.childMask), nil
 }

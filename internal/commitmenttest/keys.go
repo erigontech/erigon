@@ -16,7 +16,10 @@
 
 package commitmenttest
 
-import "encoding/binary"
+import (
+	"bytes"
+	"encoding/binary"
+)
 
 type KeySpec struct {
 	Kind string
@@ -50,10 +53,7 @@ func Key(spec KeySpec, number int) []byte {
 }
 
 func Path(head []byte, fill byte) []byte {
-	path := make([]byte, 64)
-	n := copy(path, head)
-	for i := n; i < len(path); i++ {
-		path[i] = fill
-	}
+	path := bytes.Repeat([]byte{fill}, 64)
+	copy(path, head)
 	return path
 }
