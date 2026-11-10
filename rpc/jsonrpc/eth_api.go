@@ -742,16 +742,24 @@ func (api *BaseAPI) historyAndCommitmentStartBlocks(ctx context.Context, tx kv.T
 }
 
 func historyFloorCacheKey(tx kv.TemporalTx, head uint64) (pruneFloorCacheKey, bool) {
-	files, ok := tx.Debug().(interface{ HistoryFilesGeneration() uint64 })
+	generation, ok := historyFilesGeneration(tx)
 	if !ok {
 		return pruneFloorCacheKey{}, false
 	}
 	return pruneFloorCacheKey{
 		head:                   head,
 		dbViewID:               tx.ViewID(),
-		historyFilesGeneration: files.HistoryFilesGeneration(),
+		historyFilesGeneration: generation,
 		blockFilesGeneration:   blockFilesGeneration(tx),
 	}, true
+}
+
+func historyFilesGeneration(tx kv.TemporalTx) (uint64, bool) {
+	files, ok := tx.Debug().(interface{ HistoryFilesGeneration() uint64 })
+	if !ok {
+		return 0, false
+	}
+	return files.HistoryFilesGeneration(), true
 }
 
 func (api *BaseAPI) readHistoryStartBlocks(ctx context.Context, tx kv.TemporalTx, head uint64) (historyPruneFloors, error) {

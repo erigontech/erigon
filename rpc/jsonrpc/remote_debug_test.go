@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/remotedbserver"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/execution/state"
 	tracersConfig "github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/rpc"
@@ -41,6 +42,63 @@ import (
 	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 )
+
+func TestReadWithStableTxViewFollowsHistoryFileRenewal(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		firstErr error
+	}{
+		{"result", nil},
+		{"pruning_error", state.ErrPruned},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			apis, _ := setupPhysicallyPrunedHistory(t, prunedHistoryConfig{mode: prune.Mode{
+				Initialised: true, History: prunedHistoryDistance, Blocks: prune.KeepAllBlocksPruneMode,
+			}})
+			synctest.Test(t, func(t *testing.T) {
+				ctx := t.Context()
+				db, _ := remoteHistoryDB(t, apis.eth.db)
+				tx, err := db.BeginTemporalRo(ctx)
+				require.NoError(t, err)
+				defer tx.Rollback()
+				viewID := tx.ViewID()
+				generation := tx.Debug().(interface{ HistoryFilesGeneration() uint64 }).HistoryFilesGeneration()
+				oldStart, err := state.StateHistoryStartTxNum(tx)
+				require.NoError(t, err)
+
+				calls := 0
+				got, err := readWithStableTxView(ctx, tx, func() (uint64, error) {
+					calls++
+					start, err := state.StateHistoryStartTxNum(tx)
+					if err != nil || calls > 1 {
+						return start, err
+					}
+					cursor, err := tx.Cursor(kv.MaxTxNum)
+					require.NoError(t, err)
+					defer cursor.Close()
+					local, err := apis.eth.db.BeginTemporalRo(ctx)
+					require.NoError(t, err)
+					defer local.Rollback()
+					end := local.Debug().TxNumsInFiles(kv.AccountsDomain)
+					retired, err := local.Debug().Retire(ctx, kv.RetireCutoffs{Default: end - prunedHistoryStepSize})
+					require.NoError(t, err)
+					require.Positive(t, retired)
+					// Expire after opening the cursor so its deferred Close renews the view.
+					time.Sleep(remotedbserver.MaxTxTTL + time.Nanosecond)
+					return start, tc.firstErr
+				})
+				require.Equal(t, viewID, tx.ViewID(), "file retirement must not commit MDBX")
+				require.Greater(t, tx.Debug().(interface{ HistoryFilesGeneration() uint64 }).HistoryFilesGeneration(), generation)
+				require.Equal(t, 2, calls, "discard both results and errors from the old history-file view")
+				require.NoError(t, err)
+				want, err := state.StateHistoryStartTxNum(tx)
+				require.NoError(t, err)
+				require.Greater(t, want, oldStart)
+				require.Equal(t, want, got)
+			})
+		})
+	}
+}
 
 func TestReadWithStableTxViewRetryLimit(t *testing.T) {
 	for _, tc := range []struct {
@@ -106,11 +164,13 @@ func TestReadWithStableTxViewCancellation(t *testing.T) {
 }
 
 type stableViewTestTx struct {
-	kv.Tx
+	kv.TemporalTx
 	viewID uint64
 }
 
 func (tx *stableViewTestTx) ViewID() uint64 { return tx.viewID }
+
+func (tx *stableViewTestTx) Debug() kv.TemporalDebugTx { return nil }
 
 func TestIndexedStateReadUsesPinnedCanonicalBlock(t *testing.T) {
 	for _, endpoint := range []string{"account", "storage", "traceCall", "traceCallMany"} {
