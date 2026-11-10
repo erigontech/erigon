@@ -541,7 +541,7 @@ func postForkchoiceOperations(tx kv.RwTx, logger log.Logger, cfg *Cfg, headSlot 
 		if _, err = cfg.attestationDataProducer.ProduceAndCacheAttestationData(headState, headRoot, headState.Slot()); err != nil {
 			logger.Warn("failed to produce and cache attestation data", "err", err)
 		}
-	} else if _, cached, _ := cfg.attestationDataProducer.CachedAttestationData(headRoot, headSlot); !cached {
+	} else if _, cached := cfg.attestationDataProducer.CachedAttestationData(headRoot, headSlot); !cached {
 		warmHead := func(headState *state.CachingBeaconState) error {
 			_, err := cfg.attestationDataProducer.ProduceAndCacheAttestationData(headState, headRoot, headSlot)
 			return err

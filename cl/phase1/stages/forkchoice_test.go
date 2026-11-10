@@ -107,8 +107,8 @@ func (noOpAttestationDataProducer) ProduceAndCacheAttestationData(*state.Caching
 	return solid.AttestationData{}, nil
 }
 
-func (noOpAttestationDataProducer) CachedAttestationData(common.Hash, uint64) (solid.AttestationData, bool, error) {
-	return solid.AttestationData{}, false, nil
+func (noOpAttestationDataProducer) CachedAttestationData(common.Hash, uint64) (solid.AttestationData, bool) {
+	return solid.AttestationData{}, false
 }
 
 type countingAttestationDataProducer struct {
@@ -1872,8 +1872,7 @@ func TestPostForkchoiceSameRootAfterOtherWriterCachesAttestationData(t *testing.
 	require.NoError(t, f.runPass())
 
 	f.requireCopiesAndPublishes(t, 0)
-	data, ok, err := producer.CachedAttestationData(f.headRoot, f.headSlot)
-	require.NoError(t, err)
+	data, ok := producer.CachedAttestationData(f.headRoot, f.headSlot)
 	require.True(t, ok, "attestation data for the head slot is not cached")
 	require.Equal(t, f.headRoot, data.BeaconBlockRoot)
 }
@@ -1932,8 +1931,7 @@ func TestPostForkchoiceSameRootWarmsHeadSlotWhenHeadChangesBeforeWarmUp(t *testi
 			require.NoError(t, f.runPass())
 
 			f.requireCopiesAndPublishes(t, 0)
-			data, ok, err := producer.CachedAttestationData(f.headRoot, f.headSlot)
-			require.NoError(t, err)
+			data, ok := producer.CachedAttestationData(f.headRoot, f.headSlot)
 			require.True(t, ok, "attestation data for the head slot is not cached")
 			require.Equal(t, f.headRoot, data.BeaconBlockRoot)
 			require.Equal(t, f.headState.CurrentJustifiedCheckpoint(), data.Source, "warmed from another head's state")

@@ -5983,14 +5983,14 @@ func (p cachedAttestationDataProducer) ProduceAndCacheAttestationData(*state.Cac
 	return p.data, nil
 }
 
-func (p cachedAttestationDataProducer) CachedAttestationData(headRoot common.Hash, _ uint64) (solid.AttestationData, bool, error) {
+func (p cachedAttestationDataProducer) CachedAttestationData(headRoot common.Hash, _ uint64) (solid.AttestationData, bool) {
 	if p.cacheRoot != nil {
 		*p.cacheRoot = headRoot
 	}
 	if p.calls != nil {
 		(*p.calls)++
 	}
-	return p.data, p.cached, nil
+	return p.data, p.cached
 }
 
 func requestAttestationData(t *testing.T, handler *ApiHandler, ctx context.Context, slot uint64) (int, solid.AttestationData) {

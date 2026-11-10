@@ -114,20 +114,20 @@ func (ap *attestationProducer) computeTargetCheckpoint(baseState *state.CachingB
 	}, nil
 }
 
-func (ap *attestationProducer) CachedAttestationData(headRoot common.Hash, slot uint64) (solid.AttestationData, bool, error) {
+func (ap *attestationProducer) CachedAttestationData(headRoot common.Hash, slot uint64) (solid.AttestationData, bool) {
 	epoch := slot / ap.beaconCfg.SlotsPerEpoch
 	ap.attCacheMutex.RLock()
 	defer ap.attCacheMutex.RUnlock()
 	if baseAttestationData, ok := ap.attestationsCache.Get(attestationCacheKey{epoch: epoch, headRoot: headRoot}); ok {
 		beaconBlockRoot, ok := ap.blockRootsUsedForSlotCache.Get(blockRootCacheKey{slot: slot, headRoot: headRoot})
 		if !ok {
-			return solid.AttestationData{}, false, nil
+			return solid.AttestationData{}, false
 		}
 		baseAttestationData.Slot = slot
 		baseAttestationData.BeaconBlockRoot = beaconBlockRoot
-		return baseAttestationData, true, nil
+		return baseAttestationData, true
 	}
-	return solid.AttestationData{}, false, nil
+	return solid.AttestationData{}, false
 }
 
 func (ap *attestationProducer) ProduceAndCacheAttestationData(baseState *state.CachingBeaconState, baseStateBlockRoot common.Hash, slot uint64) (solid.AttestationData, error) {
