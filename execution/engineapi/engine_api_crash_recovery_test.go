@@ -63,6 +63,26 @@ const unwindCrashChild = "ERIGON_UNWIND_CRASH_CHILD"
 // Windows reports Process.Kill as exit code 1; child failures must stay distinct.
 const crashRecoveryFailureExitCode = 2
 
+// newCrashRecoveryDataDir keeps the crash child database off the Windows
+// runner's D: temporary volume. The all-tests workflow provisions a RAM disk
+// for execution tests, but this package does not use execution/tests/testutil,
+// so t.TempDir would otherwise remain on D:/tmp. Execution tests are skipped
+// on the Windows matrix, leaving this disk available for the crash fixture.
+func newCrashRecoveryDataDir(t *testing.T) string {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		if tmpDir := os.Getenv("ERIGON_EXECUTION_TESTS_TMPDIR"); tmpDir != "" {
+			dataDir, err := os.MkdirTemp(tmpDir, "engineapi-crash-recovery-")
+			require.NoError(t, err)
+			t.Cleanup(func() {
+				require.NoError(t, os.RemoveAll(dataDir))
+			})
+			return dataDir
+		}
+	}
+	return t.TempDir()
+}
+
 type crashRecoveryRequest struct {
 	Genesis        *types.Genesis
 	CoinbaseKey    []byte
@@ -189,7 +209,7 @@ func TestEngineApiCrashRecovery(t *testing.T) {
 					request := crashRecoveryRequest{
 						Genesis:     genesis,
 						CoinbaseKey: crypto.FromECDSA(key),
-						DataDir:     t.TempDir(),
+						DataDir:     newCrashRecoveryDataDir(t),
 						Point:       window.point,
 						Canonical:   canonical.payloads,
 						Replacement: scenario.replacement.payloads,
