@@ -55,13 +55,14 @@ jobs:
         os:
           - ubuntu-latest
         test-group: ${{ fromJson(needs.load-matrix.outputs.test-groups) }}
-        # Run both serial and parallel commitment paths so race-detector
-        # signal covers both. Execution is parallel in both legs (default).
-        # Each entry runs on its own GitHub-hosted runner — wall-clock
-        # unchanged, runner-minutes doubled.
+        # Cover serial, parallel and v3 commitments with the race detector.
+        # Execution stays parallel in every leg (default).
+        # Each entry runs on its own GitHub-hosted runner; wall-clock
+        # unchanged, runner-minutes tripled.
         commitment_mode:
           - serial
           - parallel
+          - v3
     name: tests-linux (${{ matrix.os }}, ${{ matrix.test-group }}, ${{ matrix.commitment_mode }})
     runs-on: ${{ matrix.os }}
     permissions:
@@ -96,6 +97,7 @@ jobs:
           SKIP_FLAKY_TESTS: 'true'
           CGO_CFLAGS: -D__BLST_PORTABLE__
           ERIGON_COMMITMENT_PARALLEL: ${{ matrix.commitment_mode == 'parallel' && 'true' || 'false' }}
+          ERIGON_COMMITMENT_V3: ${{ matrix.commitment_mode == 'v3' && 'true' || 'false' }}
           TEST_GROUP: ${{ matrix.test-group }}
         run: make test-group TEST_GROUP="$TEST_GROUP" GO_FLAGS="-race -timeout=60m"
 
