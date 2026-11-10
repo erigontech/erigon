@@ -246,7 +246,7 @@ func markCellComplete[T any](cells *btree.Map[int, *WriteCell[T]], addr accounts
 			panic(fmt.Sprintf("markComplete: value changed at published version addr=%x path=%s txIdx=%d inc=%d old=%v new=%v", addr.Value(), path, txIdx, incarnation, ci.Value, value))
 		}
 	}
-	ci.setFlag(FlagDone)
+	ci.mark(-1, FlagDone)
 }
 
 // sameCellValue compares accounts with Account.Equals: their Root is derived by commitment, not part of the value.
@@ -1330,40 +1330,39 @@ func (vm *VersionMap) netAbsentDestruct(addr accounts.Address, txIndex int) bool
 // flushCell keeps the cell's incarnation when a re-execution flushes an equal value at
 // the same txIndex, so readers bound to it stay valid. A reincarnated account always
 // re-versions: across a removal an equal value does not mean an unchanged state.
-func flushCell[T any](vm *VersionMap, cells *btree.Map[int, *WriteCell[T]], addr accounts.Address, path AccountPath, version Version, flag statusFlag, value T, valStatus valueStatus, eq func(a, b T) bool, destructed bool) (*btree.Map[int, *WriteCell[T]], *WriteCell[T]) {
+func flushCell[T any](vm *VersionMap, e *AddressEntry, cells *btree.Map[int, *WriteCell[T]], addr accounts.Address, path AccountPath, vw *VersionedWrite[T], flag statusFlag, eq func(a, b T) bool, destructed bool) *btree.Map[int, *WriteCell[T]] {
 	if !destructed && cells != nil {
-		if ci, ok := cells.Get(version.TxIndex); ok && eq(ci.Value, value) {
+		if ci, ok := cells.Get(vw.Version.TxIndex); ok && eq(ci.Value, vw.Val) {
 			ci.setFlagUnlessDone(flag)
-			ci.valStatus = valStatus
+			ci.valStatus = vw.valStatus
 			ci.accSource = AccountFromBase
-			return cells, ci
+			vw.bind(e, ci)
+			return cells
 		}
 	}
-	return putCell(vm, cells, addr, path, version.TxIndex, version.Incarnation, flag, value, valStatus)
+	cells, cell := putCell(vm, cells, addr, path, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, vw.valStatus)
+	vw.bind(e, cell)
+	return cells
 }
 
-// cellNoOp reports whether flushing (value, flag, valStatus) at txIdx would leave the cell
-// unchanged — flushCell would take its no-bump branch and the in-place flag/valStatus update
-// would itself be a no-op. Caller holds the entry's read lock. Mirrors flushCell so skipping
-// the flush is behavior-identical to performing it.
-func cellNoOp[T any](cells *btree.Map[int, *WriteCell[T]], txIdx int, flag statusFlag, value T, valStatus valueStatus, eq func(a, b T) bool) (*WriteCell[T], bool) {
+// noOpBind reports whether flushing vw would leave its cell unchanged — flushCell would take
+// its no-bump branch and the in-place flag/valStatus update would itself be a no-op — and binds
+// vw to that cell. Caller holds the entry's read lock. Mirrors flushCell so skipping the flush
+// is behavior-identical to performing it.
+func noOpBind[T any](e *AddressEntry, cells *btree.Map[int, *WriteCell[T]], vw *VersionedWrite[T], flag statusFlag, eq func(a, b T) bool) bool {
 	if cells == nil {
-		return nil, false
+		return false
 	}
-	ci, ok := cells.Get(txIdx)
-	if !ok || !eq(ci.Value, value) || ci.valStatus != valStatus || ci.accSource != AccountFromBase {
-		return nil, false
+	ci, ok := cells.Get(vw.Version.TxIndex)
+	if !ok || !eq(ci.Value, vw.Val) || ci.valStatus != vw.valStatus || ci.accSource != AccountFromBase {
+		return false
 	}
 	f := ci.loadFlag()
-	return ci, f == flag || (f == FlagDone && flag == FlagEstimate)
-}
-
-func noOpBind[T any](e *AddressEntry, cells *btree.Map[int, *WriteCell[T]], vw *VersionedWrite[T], flag statusFlag, eq func(a, b T) bool) bool {
-	c, ok := cellNoOp(cells, vw.Version.TxIndex, flag, vw.Val, vw.valStatus, eq)
-	if ok {
-		vw.bind(e, c)
+	if f != flag && !(f == FlagDone && flag == FlagEstimate) {
+		return false
 	}
-	return ok
+	vw.bind(e, ci)
+	return true
 }
 
 // flushAllNoOp reports whether every write this tx made to addr is already present, so the
@@ -1471,9 +1470,7 @@ func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool) {
 			}
 		}
 		if vw, ok := writes.address[addr]; ok {
-			cells, cell := flushCell(vm, e.Address, addr, AddressPath, vw.Version, flag, vw.Val, vw.valStatus, eqAccount, destructed)
-			e.Address = cells
-			vw.bind(e, cell)
+			e.Address = flushCell(vm, e, e.Address, addr, AddressPath, vw, flag, eqAccount, destructed)
 		}
 		if vw, ok := writes.selfDestruct[addr]; ok {
 			cells, cell := putCell(vm, e.SelfDestruct, addr, SelfDestructPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, vw.valStatus)
@@ -1484,14 +1481,10 @@ func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool) {
 			}
 		}
 		if vw, ok := writes.balance[addr]; ok {
-			cells, cell := flushCell(vm, e.Balance, addr, BalancePath, vw.Version, flag, vw.Val, vw.valStatus, eqUint256, destructed)
-			e.Balance = cells
-			vw.bind(e, cell)
+			e.Balance = flushCell(vm, e, e.Balance, addr, BalancePath, vw, flag, eqUint256, destructed)
 		}
 		if vw, ok := writes.nonce[addr]; ok {
-			cells, cell := flushCell(vm, e.Nonce, addr, NoncePath, vw.Version, flag, vw.Val, vw.valStatus, eqUint64, destructed)
-			e.Nonce = cells
-			vw.bind(e, cell)
+			e.Nonce = flushCell(vm, e, e.Nonce, addr, NoncePath, vw, flag, eqUint64, destructed)
 		}
 		if vw, ok := writes.incarnation[addr]; ok {
 			cells, cell := putCell(vm, e.Incarnation, addr, IncarnationPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, vw.valStatus)
@@ -1499,19 +1492,13 @@ func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool) {
 			vw.bind(e, cell)
 		}
 		if vw, ok := writes.code[addr]; ok {
-			cells, cell := flushCell(vm, e.Code, addr, CodePath, vw.Version, flag, vw.Val, vw.valStatus, eqCode, destructed)
-			e.Code = cells
-			vw.bind(e, cell)
+			e.Code = flushCell(vm, e, e.Code, addr, CodePath, vw, flag, eqCode, destructed)
 		}
 		if vw, ok := writes.codeHash[addr]; ok {
-			cells, cell := flushCell(vm, e.CodeHash, addr, CodeHashPath, vw.Version, flag, vw.Val, vw.valStatus, eqCodeHash, destructed)
-			e.CodeHash = cells
-			vw.bind(e, cell)
+			e.CodeHash = flushCell(vm, e, e.CodeHash, addr, CodeHashPath, vw, flag, eqCodeHash, destructed)
 		}
 		if vw, ok := writes.codeSize[addr]; ok {
-			cells, cell := flushCell(vm, e.CodeSize, addr, CodeSizePath, vw.Version, flag, vw.Val, vw.valStatus, eqInt, destructed)
-			e.CodeSize = cells
-			vw.bind(e, cell)
+			e.CodeSize = flushCell(vm, e, e.CodeSize, addr, CodeSizePath, vw, flag, eqInt, destructed)
 		}
 		if vw, ok := writes.createContract[addr]; ok {
 			cells, cell := putCell(vm, e.CreateContract, addr, CreateContractPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, vw.valStatus)
@@ -1546,9 +1533,7 @@ func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool) {
 					}
 					continue
 				}
-				cells, cell := flushCell(vm, e.Storage[key], addr, StoragePath, vw.Version, flag, vw.Val, vw.valStatus, eqUint256, destructed)
-				e.Storage[key] = cells
-				vw.bind(e, cell)
+				e.Storage[key] = flushCell(vm, e, e.Storage[key], addr, StoragePath, vw, flag, eqUint256, destructed)
 			}
 		}
 	})
@@ -1581,8 +1566,7 @@ type cellMarks struct {
 	vm     *VersionMap
 	flag   statusFlag
 	fee    func(accounts.Address) bool
-	locked []accounts.Address
-	seen   map[accounts.Address]struct{}
+	locked map[accounts.Address]struct{}
 }
 
 func (vm *VersionMap) markWrites(writes *WriteSet, flag statusFlag, isFeeRecipient func(accounts.Address) bool) {
@@ -1627,7 +1611,7 @@ func (vm *VersionMap) markWrites(writes *WriteSet, flag statusFlag, isFeeRecipie
 			markCell(&m, addr, vw, false)
 		}
 	}
-	for _, addr := range m.locked {
+	for addr := range m.locked {
 		vm.markAccountLocked(addr, writes, flag, isFeeRecipient)
 	}
 }
@@ -1658,14 +1642,10 @@ func markCell[T any](m *cellMarks, addr accounts.Address, vw *VersionedWrite[T],
 }
 
 func (m *cellMarks) lock(addr accounts.Address) {
-	if _, ok := m.seen[addr]; ok {
-		return
+	if m.locked == nil {
+		m.locked = make(map[accounts.Address]struct{})
 	}
-	if m.seen == nil {
-		m.seen = make(map[accounts.Address]struct{})
-	}
-	m.seen[addr] = struct{}{}
-	m.locked = append(m.locked, addr)
+	m.locked[addr] = struct{}{}
 }
 
 func (vm *VersionMap) markAccountLocked(addr accounts.Address, writes *WriteSet, flag statusFlag, isFeeRecipient func(accounts.Address) bool) {
@@ -1742,7 +1722,7 @@ func deleteCell[T any](vm *VersionMap, m *btree.Map[int, *WriteCell[T]], txIdx i
 		*stamped = true
 	}
 	m.Delete(txIdx)
-	c.setFlag(flagDeleted)
+	c.mark(-1, flagDeleted)
 }
 
 func (vm *VersionMap) endDeleteStamp(txIdx int, stamped *bool) {
@@ -2236,16 +2216,6 @@ func (c *WriteCell[T]) loadInc() Incarnation {
 
 func (c *WriteCell[T]) setState(inc Incarnation, flag statusFlag) {
 	c.state.Store(packCellState(inc, flag))
-}
-
-func (c *WriteCell[T]) setFlag(flag statusFlag) {
-	for {
-		old := c.state.Load()
-		inc, _ := unpackCellState(old)
-		if c.state.CompareAndSwap(old, packCellState(inc, flag)) {
-			return
-		}
-	}
 }
 
 func (c *WriteCell[T]) setFlagUnlessDone(flag statusFlag) bool {
