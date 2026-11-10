@@ -22,6 +22,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"math"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -38,7 +39,18 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
+type balCommitmentKey struct {
+	hashed     []byte
+	firstWrite uint32
+}
+
 func balCommitmentWarmupKeys(bal types.BlockAccessList) [][]byte {
+	keys := collectBALCommitmentKeys(bal)
+	slices.SortFunc(keys, func(a, b balCommitmentKey) int { return bytes.Compare(a.hashed, b.hashed) })
+	return hashedBALCommitmentKeys(keys)
+}
+
+func collectBALCommitmentKeys(bal types.BlockAccessList) []balCommitmentKey {
 	keyCount := 0
 	for i := range bal {
 		account := &bal[i]
@@ -47,23 +59,58 @@ func balCommitmentWarmupKeys(bal types.BlockAccessList) [][]byte {
 		}
 		keyCount += len(account.StorageChanges)
 	}
-	keys := make([][]byte, 0, keyCount)
+	keys := make([]balCommitmentKey, 0, keyCount)
 	for i := range bal {
 		account := &bal[i]
 		address := account.Address
-		if len(account.BalanceChanges)+len(account.NonceChanges)+len(account.CodeChanges) > 0 {
-			keys = append(keys, commitment.KeyToHexNibbleHash(address[:]))
+		if firstWrite, changed := accountFirstWrite(account); changed {
+			keys = append(keys, balCommitmentKey{commitment.KeyToHexNibbleHash(address[:]), firstWrite})
 		}
 		for _, storage := range account.StorageChanges {
 			slot := storage.Slot.Value()
 			plainKey := make([]byte, len(address)+len(slot))
 			copy(plainKey, address[:])
 			copy(plainKey[len(address):], slot[:])
-			keys = append(keys, commitment.KeyToHexNibbleHash(plainKey))
+			var firstWrite uint32
+			if len(storage.Changes) > 0 {
+				firstWrite = storage.Changes[0].Index
+			}
+			keys = append(keys, balCommitmentKey{commitment.KeyToHexNibbleHash(plainKey), firstWrite})
 		}
 	}
-	slices.SortFunc(keys, bytes.Compare)
 	return keys
+}
+
+func accountFirstWrite(account *types.AccountChanges) (firstWrite uint32, changed bool) {
+	firstWrite = math.MaxUint32
+	if len(account.BalanceChanges) > 0 {
+		firstWrite, changed = min(firstWrite, account.BalanceChanges[0].Index), true
+	}
+	if len(account.NonceChanges) > 0 {
+		firstWrite, changed = min(firstWrite, account.NonceChanges[0].Index), true
+	}
+	if len(account.CodeChanges) > 0 {
+		firstWrite, changed = min(firstWrite, account.CodeChanges[0].Index), true
+	}
+	return firstWrite, changed
+}
+
+func hashedBALCommitmentKeys(keys []balCommitmentKey) [][]byte {
+	hashed := make([][]byte, len(keys))
+	for i := range keys {
+		hashed[i] = keys[i].hashed
+	}
+	return hashed
+}
+
+// balCommitmentWarmupKeysByFirstWrite orders keys by their first BAL write: a step-edge fold inside the block reads
+// the keys written before that edge, so they have to be warm first.
+func balCommitmentWarmupKeysByFirstWrite(bal types.BlockAccessList) [][]byte {
+	keys := collectBALCommitmentKeys(bal)
+	slices.SortFunc(keys, func(a, b balCommitmentKey) int {
+		return cmp.Or(cmp.Compare(a.firstWrite, b.firstWrite), bytes.Compare(a.hashed, b.hashed))
+	})
+	return hashedBALCommitmentKeys(keys)
 }
 
 type balCommitmentContext struct {

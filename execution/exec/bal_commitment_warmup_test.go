@@ -533,3 +533,76 @@ func TestFirstFailurePrefersAReadFailureOverAnIncompleteBatch(t *testing.T) {
 	require.Equal(t, kv.ErrPrefetchIncomplete, firstFailure(nil, kv.ErrPrefetchIncomplete))
 	require.NoError(t, firstFailure(nil, nil))
 }
+
+func hashDescendingAddresses() (larger, smaller common.Address) {
+	larger, smaller = common.Address{19: 1}, common.Address{19: 2}
+	if bytes.Compare(commitment.KeyToHexNibbleHash(larger[:]), commitment.KeyToHexNibbleHash(smaller[:])) < 0 {
+		larger, smaller = smaller, larger
+	}
+	return larger, smaller
+}
+
+func TestBALCommitmentWarmupKeysByFirstWriteOrdersAccounts(t *testing.T) {
+	early, late := hashDescendingAddresses()
+	bal := types.BlockAccessList{
+		{Address: late, BalanceChanges: []*types.BalanceChange{{Index: 9, Value: *uint256.NewInt(1)}}},
+		{Address: early, BalanceChanges: []*types.BalanceChange{{Index: 3, Value: *uint256.NewInt(1)}}},
+	}
+
+	require.Equal(t, [][]byte{
+		commitment.KeyToHexNibbleHash(early[:]),
+		commitment.KeyToHexNibbleHash(late[:]),
+	}, balCommitmentWarmupKeysByFirstWrite(bal))
+}
+
+func TestBALCommitmentWarmupKeysByFirstWriteUsesEarliestAccountField(t *testing.T) {
+	early, late := hashDescendingAddresses()
+	bal := types.BlockAccessList{
+		{Address: late, BalanceChanges: []*types.BalanceChange{{Index: 5, Value: *uint256.NewInt(1)}}},
+		{
+			Address:        early,
+			BalanceChanges: []*types.BalanceChange{{Index: 9, Value: *uint256.NewInt(1)}},
+			NonceChanges:   []*types.NonceChange{{Index: 2, Value: 1}},
+		},
+	}
+
+	require.Equal(t, [][]byte{
+		commitment.KeyToHexNibbleHash(early[:]),
+		commitment.KeyToHexNibbleHash(late[:]),
+	}, balCommitmentWarmupKeysByFirstWrite(bal))
+}
+
+func TestBALCommitmentWarmupKeysByFirstWriteOrdersStorageByFirstChange(t *testing.T) {
+	account, storageOwner := common.Address{19: 1}, common.Address{19: 2}
+	var slot accounts.StorageKey
+	var storageKey []byte
+	for i := byte(1); ; i++ {
+		slot = accounts.InternKey(common.Hash{31: i})
+		slotValue := slot.Value()
+		storageKey = append(append([]byte{}, storageOwner[:]...), slotValue[:]...)
+		if bytes.Compare(commitment.KeyToHexNibbleHash(storageKey), commitment.KeyToHexNibbleHash(account[:])) > 0 {
+			break
+		}
+	}
+	bal := types.BlockAccessList{
+		{Address: account, BalanceChanges: []*types.BalanceChange{{Index: 5, Value: *uint256.NewInt(1)}}},
+		{Address: storageOwner, StorageChanges: []types.SlotChanges{{
+			Slot: slot, Changes: []*types.StorageChange{{Index: 2, Value: *uint256.NewInt(1)}, {Index: 8, Value: *uint256.NewInt(2)}},
+		}}},
+	}
+	want := [][]byte{commitment.KeyToHexNibbleHash(storageKey), commitment.KeyToHexNibbleHash(account[:])}
+	require.Equal(t, want, balCommitmentWarmupKeysByFirstWrite(bal))
+}
+
+func TestBALCommitmentWarmupKeysByFirstWriteSortsTiesByKey(t *testing.T) {
+	larger, smaller := hashDescendingAddresses()
+	bal := types.BlockAccessList{
+		{Address: larger, BalanceChanges: []*types.BalanceChange{{Index: 4, Value: *uint256.NewInt(1)}}},
+		{Address: smaller, BalanceChanges: []*types.BalanceChange{{Index: 4, Value: *uint256.NewInt(1)}}},
+	}
+
+	require.Equal(t, [][]byte{
+		commitment.KeyToHexNibbleHash(smaller[:]),
+		commitment.KeyToHexNibbleHash(larger[:]),
+	}, balCommitmentWarmupKeysByFirstWrite(bal))
+}
