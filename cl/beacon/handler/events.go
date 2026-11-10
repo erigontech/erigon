@@ -112,22 +112,15 @@ func (a *ApiHandler) EventSourceGetV1Events(w http.ResponseWriter, r *http.Reque
 		beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("streaming unsupported")).WriteTo(w)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
 
 	subscribeTopics := mapset.NewSet[event.EventTopic]()
-	for _, param := range r.URL.Query()["topics"] {
-		for v := range strings.SplitSeq(param, ",") {
-			topic := event.EventTopic(v)
-			if _, ok := validTopics[topic]; !ok {
-				beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("invalid Topic: %s", v)).WriteTo(w)
-				return
-			}
-			subscribeTopics.Add(topic)
+	for v := range strings.SplitSeq(strings.Join(r.URL.Query()["topics"], ","), ",") {
+		topic := event.EventTopic(v)
+		if _, ok := validTopics[topic]; !ok {
+			beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("invalid Topic: %s", v)).WriteTo(w)
+			return
 		}
-	}
-	if subscribeTopics.Cardinality() == 0 {
-		beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("topics are required")).WriteTo(w)
-		return
+		subscribeTopics.Add(topic)
 	}
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")

@@ -88,6 +88,8 @@ func TestEventStreamRejectsMissingOrInvalidTopics(t *testing.T) {
 			(&ApiHandler{}).EventSourceGetV1Events(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/eth/v1/events"+query, nil))
 			require.Equal(t, http.StatusBadRequest, rec.Code)
 			require.Equal(t, "application/json", rec.Header().Get("Content-Type"))
+			require.Empty(t, rec.Header().Get("Cache-Control"))
+			require.Empty(t, rec.Header().Get("Connection"))
 		})
 	}
 }
