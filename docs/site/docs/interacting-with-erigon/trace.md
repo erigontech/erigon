@@ -859,7 +859,7 @@ Returns traces matching the given filter.
 
    A bound past the latest executed block returns `-32602`, as in `eth_getLogs`, rather than an empty or truncated result. As in `eth_getLogs`, a bound is a block number or tag: a block hash or an EIP-1898 object returns `-32602`; use `blockHash` to select a block by hash. An explicit `null` for `blockHash`, `fromBlock` or `toBlock` is the same as omitting it.
 
-   A range wider than `--rpc.blockrange.limit` (1,000 blocks by default) returns `-32000`. An unknown member, for example a misspelled one, returns `-32602`; member names are matched case-insensitively.
+   A range wider than `--rpc.blockrange.limit` (1,000 blocks by default) returns `-32602`, as in `eth_getLogs`. An unknown member, for example a misspelled one, returns `-32602`; member names are matched case-insensitively.
 2. `Boolean` - (optional) `gasBailOut`, default `false`.
 3. `Object` - (optional) Trace settings; see [Optional parameters and trace settings](#optional-parameters-and-trace-settings).
 
