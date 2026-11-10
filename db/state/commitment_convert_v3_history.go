@@ -18,6 +18,7 @@ package state
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -372,6 +373,164 @@ func legacyCommitmentAsOf(dt *DomainRoTx, key []byte, txNum uint64) ([]byte, err
 	return bytes.Clone(v), nil
 }
 
+var legacyShapeMinVersions uint64 = 64
+
+const legacyShapeTableBytes = 1 << 30
+
+type legacyShapeRun struct {
+	lastTxNum uint64
+	shape     uint32
+}
+
+type legacyShapeTable struct {
+	runs   map[string][]legacyShapeRun
+	shapes [][]byte
+}
+
+func (s *legacyShapeTable) asOf(key []byte, txNum uint64) ([]byte, bool) {
+	runs := s.runs[string(key)]
+	i, _ := slices.BinarySearchFunc(runs, txNum, func(r legacyShapeRun, t uint64) int { return cmp.Compare(r.lastTxNum, t) })
+	if i == len(runs) {
+		return nil, false
+	}
+	return s.shapes[runs[i].shape], true
+}
+
+func legacyBranchShape(dst, v []byte) []byte {
+	dst = append(dst[:0], v...)
+	if commitment.BranchData(dst).ForEachCell(func(_ int, c commitment.BranchCell) error {
+		clear(c.Hash)
+		clear(c.StateHash)
+		return nil
+	}) != nil {
+		return append(dst[:0], v...)
+	}
+	dst[0], dst[1] = dst[2], dst[3]
+	return dst
+}
+
+type legacyHotKey struct {
+	key                       []byte
+	offset, ordinal, versions uint64
+}
+
+func hotLegacyHistoryKeys(ctx context.Context, ii *InvertedIndex, efFile visibleFile) ([]legacyHotKey, error) {
+	view, err := efFile.src.decompressor.OpenSequentialView()
+	if err != nil {
+		return nil, err
+	}
+	defer view.Close()
+	r := seg.NewReader(view.MakeGetter(), ii.Compression)
+	var hot []legacyHotKey
+	var key, seq []byte
+	var offset uint64
+	for ordinal := uint64(0); r.HasNext(); ordinal++ {
+		if ordinal%(1<<16) == 0 && ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		keyOffset := offset
+		key, _ = r.Next(key[:0])
+		if !r.HasNext() {
+			return nil, fmt.Errorf("%s truncated at key %x", efFile.Fullpath(), key)
+		}
+		seq, offset = r.Next(seq[:0])
+		if n := multiencseq.Count(seq); n >= legacyShapeMinVersions && !commitment.IsCommitmentStateKey(key) {
+			hot = append(hot, legacyHotKey{key: bytes.Clone(key), offset: keyOffset, ordinal: ordinal, versions: n})
+		}
+	}
+	slices.SortFunc(hot, func(a, b legacyHotKey) int { return cmp.Compare(b.versions, a.versions) })
+	return hot, nil
+}
+
+func buildLegacyShapeTable(ctx context.Context, at *AggregatorRoTx, efFile visibleFile, workers int, baseName string, logger log.Logger) (*legacyShapeTable, error) {
+	started := time.Now()
+	ii := at.d[kv.CommitmentDomain].ht.h.InvertedIndex
+	hot, err := hotLegacyHistoryKeys(ctx, ii, efFile)
+	if err != nil {
+		return nil, err
+	}
+	table := &legacyShapeTable{runs: make(map[string][]legacyShapeRun, len(hot))}
+	ids := map[string]uint32{}
+	var mu sync.Mutex
+	var next, size, runsTotal atomic.Int64
+	intern := func(shape []byte) uint32 {
+		mu.Lock()
+		defer mu.Unlock()
+		if id, ok := ids[string(shape)]; ok {
+			return id
+		}
+		id, k := uint32(len(table.shapes)), string(shape)
+		ids[k] = id
+		table.shapes = append(table.shapes, []byte(k))
+		size.Add(int64(2*len(k) + 64))
+		return id
+	}
+	g, gctx := errgroup.WithContext(ctx)
+	goWorkers(g, workers, func() error {
+		wat := at.a.BeginFilesRo()
+		defer wat.Close()
+		ht := wat.d[kv.CommitmentDomain].ht
+		fileIdx := slices.IndexFunc(ht.iit.files, func(f visibleFile) bool {
+			return f.startTxNum == efFile.startTxNum && f.endTxNum == efFile.endTxNum
+		})
+		if fileIdx < 0 {
+			return fmt.Errorf("%s is not visible", efFile.Fullpath())
+		}
+		er := seg.NewReader(efFile.src.decompressor.MakeGetter(), ii.Compression)
+		var seq multiencseq.SequenceReader
+		var it multiencseq.SequenceIterator
+		var seqBuf, shape, last []byte
+		var runs []legacyShapeRun
+		for {
+			i := next.Add(1) - 1
+			if i >= int64(len(hot)) || size.Load() >= legacyShapeTableBytes {
+				return nil
+			}
+			if err := gctx.Err(); err != nil {
+				return err
+			}
+			h := hot[i]
+			er.Reset(h.offset)
+			if er.MatchCmp(h.key) != 0 {
+				return fmt.Errorf("%s holds no key %x at offset %d", efFile.Fullpath(), h.key, h.offset)
+			}
+			seqBuf, _ = er.Next(seqBuf[:0])
+			seq.Reset(efFile.startTxNum, seqBuf)
+			it.Reset(&seq, 0)
+			runs = runs[:0]
+			for rank := uint64(0); it.HasNext(); rank++ {
+				txNum, err := it.Next()
+				if err != nil {
+					return err
+				}
+				v, _, err := ht.historyValueAt(h.key, iiSeekResult{txNum: txNum, keyOrdinal: h.ordinal, rank: rank, fileIdx: fileIdx}, txNum)
+				if err != nil {
+					return err
+				}
+				shape = legacyBranchShape(shape, v)
+				if len(runs) > 0 && bytes.Equal(shape, last) {
+					runs[len(runs)-1].lastTxNum = txNum
+					continue
+				}
+				last = append(last[:0], shape...)
+				runs = append(runs, legacyShapeRun{lastTxNum: txNum, shape: intern(shape)})
+			}
+			mu.Lock()
+			table.runs[string(h.key)] = slices.Clone(runs)
+			mu.Unlock()
+			runsTotal.Add(int64(len(runs)))
+			size.Add(int64(len(h.key) + 16*len(runs) + 64))
+		}
+	}, func() {})
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+	logger.Info(fmt.Sprintf("[commitment_convert] v3 history file=%s shape table: keys=%s/%s runs=%s shapes=%s size=%s in %s",
+		baseName, common.PrettyCounter(len(table.runs)), common.PrettyCounter(len(hot)), common.PrettyCounter(runsTotal.Load()),
+		common.PrettyCounter(len(table.shapes)), common.ByteCount(uint64(size.Load())), time.Since(started).Round(time.Millisecond)))
+	return table, nil
+}
+
 func resolveLegacyHistory(key []byte, entries []v3.LegacyEntry) ([]byte, error) {
 	var value []byte
 	var kind v3.LegacyKind
@@ -521,6 +680,10 @@ func convertCommitmentHistoryFileV3(ctx context.Context, at *AggregatorRoTx, vFi
 	}
 
 	workers := max(1, runtime.GOMAXPROCS(0))
+	shapes, shapesErr := buildLegacyShapeTable(ctx, at, efFile, workers, baseName, logger)
+	if shapesErr != nil {
+		return shapesErr
+	}
 	collectors, closeCollectors := newV3Collectors("commitment_convert_v3_history", at.Dirs().Tmp, workers, logger)
 	defer closeCollectors()
 	in := make(chan *historyChainBatch, workers*2)
@@ -687,6 +850,9 @@ func convertCommitmentHistoryFileV3(ctx context.Context, at *AggregatorRoTx, vFi
 		}
 		var reachTxNum uint64
 		reach := &legacyReach{keysV2: keysV2, read: func(key []byte) ([]byte, error) {
+			if v, ok := shapes.asOf(key, reachTxNum); ok {
+				return v, nil
+			}
 			return legacyCommitmentAsOf(wdt, key, reachTxNum)
 		}}
 		reachableAsOf := func(legacyKey, value []byte, txNum uint64) (bool, error) {

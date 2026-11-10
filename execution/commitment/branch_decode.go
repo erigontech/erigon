@@ -70,6 +70,7 @@ type BranchCell struct {
 	AccountAddr []byte
 	StorageAddr []byte
 	Hash        []byte
+	StateHash   []byte
 }
 
 func (branchData BranchData) ForEachCell(fn func(nibble int, c BranchCell) error) error {
@@ -100,7 +101,7 @@ func (branchData BranchData) ForEachCell(fn func(nibble int, c BranchCell) error
 			{fieldAccountAddr, &c.AccountAddr},
 			{fieldStorageAddr, &c.StorageAddr},
 			{fieldHash, &c.Hash},
-			{fieldStateHash, nil},
+			{fieldStateHash, &c.StateHash},
 		} {
 			if fields&f.flag == 0 {
 				continue
@@ -113,9 +114,7 @@ func (branchData BranchData) ForEachCell(fn func(nibble int, c BranchCell) error
 			if uint64(len(branchData)-pos) < l {
 				return fmt.Errorf("cell %v at nibble %d: %d bytes past the end", f.flag, nibble, uint64(pos)+l-uint64(len(branchData)))
 			}
-			if f.dst != nil {
-				*f.dst = branchData[pos : pos+int(l)]
-			}
+			*f.dst = branchData[pos : pos+int(l)]
 			pos += int(l)
 		}
 		if err := fn(nibble, c); err != nil {
