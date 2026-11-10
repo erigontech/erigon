@@ -229,6 +229,18 @@ func TestMarkReadersDirty(t *testing.T) {
 		be.markReadersDirty(1, newWS().stor(addr, slot1, writer, *uint256.NewInt(1)).build())
 		require.Empty(t, be.revalidate)
 	})
+	t.Run("a BAL-seeded write leaves the readers of a BAL block clean", func(t *testing.T) {
+		be := newBE()
+		be.versionMap.HasBAL = true
+		be.markReadersDirty(1, newWS().stor(addr, slot1, writer, *uint256.NewInt(1)).build())
+		require.Empty(t, be.revalidate)
+	})
+	t.Run("a BAL block still flags readers of a lifecycle write", func(t *testing.T) {
+		be := newBE()
+		be.versionMap.HasBAL = true
+		be.markReadersDirty(1, newWS().selfDestruct(addr, writer, true).build())
+		require.Equal(t, map[int]bool{2: true, 3: true}, be.revalidate)
+	})
 	writes := map[state.AccountPath]*state.WriteSet{
 		state.BalancePath:  newWS().bal(addr, writer, *uint256.NewInt(1)).build(),
 		state.NoncePath:    newWS().nonce(addr, writer, 1).build(),

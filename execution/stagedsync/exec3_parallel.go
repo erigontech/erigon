@@ -2732,6 +2732,9 @@ func (be *blockExecutor) markReadersDirty(writerTx int, ws *state.WriteSet) {
 	}
 	written := map[accounts.Address]uint16{}
 	for h := range ws.AllHeaders() {
+		if be.versionMap.HasBAL && h.Path.BALSeeded() {
+			continue // same rule as revalCandidates: a seeded cell keeps its readers valid
+		}
 		if h.Path.AffectsAccountLifecycle() {
 			written[h.Address] = ^uint16(0) // invalidates a read of any path at the address
 		} else {
