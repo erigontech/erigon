@@ -203,6 +203,14 @@ func TestRunHasNoJumpTable(t *testing.T) {
 	require.Empty(t, tableJump.FindString(string(out)), "run dispatches through a jump table")
 }
 
+// TestRunMakesNoCallDataLoadTailCall fails when run inlines CALLDATALOAD's partial-tail copy: that call in run slows
+// other ops on the loop, so the tail stays on the jump-table path.
+func TestRunMakesNoCallDataLoadTailCall(t *testing.T) {
+	src, err := os.ReadFile("vm_run_gen.go")
+	require.NoError(t, err)
+	require.NotContains(t, string(src), "getData(")
+}
+
 // TestRunLoopHeadStoresNothing fails when Go spills run's loop-carried registers at
 // the top of the loop, which every op then pays: a value live across a call in any
 // case is spilled there unless vmgen saves it around that call.

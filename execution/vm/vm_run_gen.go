@@ -591,30 +591,16 @@ run:
 						continue run
 					}
 				case CALLDATALOAD:
-					if sLen >= 1 && gasLeft >= GasFastestStep {
+					if sLen >= 1 && callDataLoadWhole(stack.peek(), callContext.input) && gasLeft >= GasFastestStep {
 						gasLeft -= GasFastestStep
 						x := callContext.Stack.peek()
 						offset, overflow := x.Uint64WithOverflow()
-						if overflow {
-							x.Clear()
+						if !overflow && offset < uint64(len(callContext.input)) {
+							x.SetBytes32(callContext.input[offset : offset+32])
 							pc++
 							continue run
 						}
-
-						if end := offset + 32; end >= offset && end <= uint64(len(callContext.input)) {
-							x.SetBytes32(callContext.input[offset:end])
-							pc++
-							continue run
-						}
-
-						if offset >= uint64(len(callContext.input)) {
-							x.Clear()
-							pc++
-							continue run
-						}
-						callContext.gas, callContext.savedPC = gasLeft, pc
-						x.SetBytes(getData(callContext.input, offset, 32))
-						gasLeft, pc = callContext.gas, callContext.savedPC
+						x.Clear()
 						pc++
 						continue run
 					}
