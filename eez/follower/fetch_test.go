@@ -60,6 +60,9 @@ type peerSentry struct {
 	id   *typesproto.H512
 	// tamper, when set, rewrites the node's replies.
 	tamper func(id sentryproto.MessageId, data []byte) []byte
+	// hold, when set, delays the reply to each request by the duration it
+	// returns, or withholds it when the duration is negative.
+	hold func(id sentryproto.MessageId) time.Duration
 
 	// serve orders requests, whose replies the node appends to its log.
 	serve  sync.Mutex
@@ -171,8 +174,21 @@ func (s *peerSentry) SendMessageById(_ context.Context, req *sentryproto.SendMes
 	s.mu.Lock()
 	streams := slices.Clone(s.streams[reply.Id])
 	s.mu.Unlock()
-	for _, stream := range streams {
-		_ = stream.Send(&sentryproto.InboundMessage{Id: reply.Id, Data: data, PeerId: s.id})
+	send := func() {
+		for _, stream := range streams {
+			_ = stream.Send(&sentryproto.InboundMessage{Id: reply.Id, Data: data, PeerId: s.id})
+		}
+	}
+	var delay time.Duration
+	if s.hold != nil {
+		delay = s.hold(req.Data.Id)
+	}
+	switch {
+	case delay < 0:
+	case delay > 0:
+		time.AfterFunc(delay, send)
+	default:
+		send()
 	}
 	return &sentryproto.SentPeers{Peers: []*typesproto.H512{s.id}}, nil
 }

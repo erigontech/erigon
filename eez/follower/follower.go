@@ -19,6 +19,7 @@
 package follower
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -77,8 +78,15 @@ type Config struct {
 	Sequencer     Sequencer
 	SequencerPoll time.Duration
 	// Heads, when set, delivers the verified heads of the signed-head
-	// overlay.
+	// overlay; the head follows the best of them. It excludes Sequencer.
 	Heads <-chan *seqsig.VerifiedHead
+	// Fetcher fetches the missing blocks of signed heads from L2 peers;
+	// without it only heads whose blocks are local or attached are followed.
+	Fetcher BlockFetcher
+	// HeadRetry is the interval between retries of the signed heads, zero
+	// for the L2 block interval; HeadRequest bounds each peer request that
+	// fetches their missing blocks.
+	HeadRetry, HeadRequest time.Duration
 	// Blobs serves the blobs of blob-backed batches; without it the
 	// follower cannot derive them.
 	Blobs l1.BlobSource
@@ -102,6 +110,7 @@ var DefaultConfig = Config{
 	Retry:         2 * time.Second,
 	MaxRetry:      30 * time.Second,
 	SequencerPoll: time.Second,
+	HeadRequest:   2 * time.Second,
 	Progress:      30 * time.Second,
 }
 
@@ -118,6 +127,7 @@ type Follower struct {
 	chain   deriver.Chain
 	deriver *deriver.Deriver
 	overlay *overlay
+	heads   *signedHeads
 	logger  log.Logger
 	// scanned is the last L1 block whose batches were reconciled, target
 	// the L1 head to scan to and l1Finalized the latest finalized L1 block.
@@ -204,6 +214,9 @@ func New(reader l1.ChainReader, chain deriver.Chain, cfg *chain.Config, c Config
 	if !ok {
 		return nil, fmt.Errorf("chain %s is not an EEZ chain", cfg.ChainName)
 	}
+	if c.Sequencer != nil && c.Heads != nil {
+		return nil, errors.New("a sequencer and signed heads both set the unsafe head")
+	}
 	dir := c.Dir
 	if c.Peers != nil {
 		// A checkpoint over history from peers would let an L1-only boot
@@ -234,16 +247,73 @@ func New(reader l1.ChainReader, chain deriver.Chain, cfg *chain.Config, c Config
 	if c.Sequencer != nil {
 		f.overlay = &overlay{seq: c.Sequencer, chain: chain, deriver: d, limit: overlayLimit, logger: logger}
 	}
+	if c.Heads != nil {
+		f.heads = &signedHeads{
+			chain:   chain,
+			deriver: d,
+			fetcher: c.Fetcher,
+			retry:   cmp.Or(c.HeadRetry, time.Duration(l2.BlockInterval)*time.Second),
+			request: cmp.Or(c.HeadRequest, DefaultConfig.HeadRequest),
+			logger:  logger,
+		}
+	}
 	return f, nil
 }
 
-// StepOverlay moves the head toward the sequencer's latest block, when
-// the follower has a sequencer.
+// StepOverlay moves the head toward the unsafe-head source: the sequencer's
+// latest block, or the best of the signed heads received.
 func (f *Follower) StepOverlay(ctx context.Context) error {
-	if f.overlay == nil {
-		return nil
+	switch {
+	case f.overlay != nil:
+		return f.overlay.step(ctx)
+	case f.heads != nil:
+		f.drainHeads()
+		return f.heads.follow(ctx)
 	}
-	return f.overlay.step(ctx)
+	return nil
+}
+
+// drainHeads tracks every signed head received, so that one decision, and
+// one fetch, serves the newest.
+func (f *Follower) drainHeads() {
+	for {
+		select {
+		case h, ok := <-f.cfg.Heads:
+			if !ok {
+				return
+			}
+			f.heads.observe(h)
+		default:
+			return
+		}
+	}
+}
+
+// trackHeads tracks the signed heads as they arrive, through boot and long
+// derivation steps, and wakes the loop to decide on them.
+func (f *Follower) trackHeads(ctx context.Context, wake chan<- struct{}) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case h, ok := <-f.cfg.Heads:
+			if !ok {
+				return
+			}
+			f.heads.observe(h)
+			select {
+			case wake <- struct{}{}:
+			default:
+			}
+		}
+	}
+}
+
+// stepUnsafe steps the unsafe-head source, which retries on its next step.
+func (f *Follower) stepUnsafe(ctx context.Context) {
+	if err := f.StepOverlay(ctx); err != nil && ctx.Err() == nil {
+		f.logger.Warn("[eez] unsafe head step failed", "event", "eez.node.follower.advance.failed", "err", err)
+	}
 }
 
 // Deriver is the follower's deriver.
@@ -253,11 +323,16 @@ func (f *Follower) Deriver() *deriver.Deriver { return f.deriver }
 // divergence from canonical L1, an L1 reorg it cannot follow, or a boot
 // that exhausts BootAttempts.
 func (f *Follower) Run(ctx context.Context) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	var wake chan struct{}
+	if f.heads != nil {
+		wake = make(chan struct{}, 1)
+		go f.trackHeads(ctx, wake)
+	}
 	if err := f.Boot(ctx); err != nil {
 		return err
 	}
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
 	events := make(chan l1.Event, 64)
 	watched := make(chan error, 1)
 	var heads <-chan struct{}
@@ -270,8 +345,13 @@ func (f *Follower) Run(ctx context.Context) error {
 	go func() { watched <- f.watcher.Run(ctx, f.cfg.Poll, f.cfg.FinalityEvery, heads, events) }()
 
 	var unsafeTick <-chan time.Time
-	if f.overlay != nil {
+	switch {
+	case f.overlay != nil:
 		t := time.NewTicker(f.cfg.SequencerPoll)
+		defer t.Stop()
+		unsafeTick = t.C
+	case f.heads != nil:
+		t := time.NewTicker(f.heads.retry)
 		defer t.Stop()
 		unsafeTick = t.C
 	}
@@ -289,10 +369,11 @@ func (f *Follower) Run(ctx context.Context) error {
 			err = f.Handle(ctx, e)
 		case <-retry:
 			err = f.Sync(ctx)
+		case <-wake:
+			f.stepUnsafe(ctx)
+			continue
 		case <-unsafeTick:
-			if err := f.overlay.step(ctx); err != nil && ctx.Err() == nil {
-				f.logger.Warn("[eez] unsafe head step failed", "err", err)
-			}
+			f.stepUnsafe(ctx)
 			continue
 		}
 		if err = f.recover(ctx, err); err != nil {

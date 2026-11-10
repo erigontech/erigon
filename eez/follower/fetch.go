@@ -17,9 +17,11 @@
 package follower
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -51,6 +53,11 @@ type FetchOptions struct {
 	// Limit, when set, refuses a target more than Limit blocks from the
 	// local head and a chain of more than Limit missing blocks.
 	Limit uint64
+	// Batch, when set, is the number of blocks each request asks for and
+	// each insert takes; zero is fetchBatch.
+	Batch uint64
+	// Timeout, when set, bounds each peer request.
+	Timeout time.Duration
 	// Inserted, when set, runs after each inserted batch.
 	Inserted func(ctx context.Context, blocks []*types.Block) error
 }
@@ -88,7 +95,10 @@ func (f *Fetcher) Fetch(ctx context.Context, hash common.Hash, opts FetchOptions
 		return h, err
 	}
 	var headers execp2p.BbdHeaderReader = f.chain
-	dl := []execp2p.BbdOption{execp2p.WithBlocksBatchSize(fetchBatch)}
+	dl := []execp2p.BbdOption{execp2p.WithBlocksBatchSize(cmp.Or(opts.Batch, fetchBatch))}
+	if opts.Timeout > 0 {
+		dl = append(dl, execp2p.WithRequestTimeout(opts.Timeout))
+	}
 	if opts.Limit > 0 {
 		head, err := f.chain.Head(ctx)
 		if err != nil {
