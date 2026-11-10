@@ -581,14 +581,14 @@ Examples:
 		if convertRestore && convertContinue {
 			return errors.New("--continue is mutually exclusive with --restore")
 		}
+		if (convertV3 || convertRestore) && statecfg.ExperimentalCommitmentV3 {
+			return errors.New("convert --v3 and --restore open legacy commitment files; run them without COMMITMENT_V3=true")
+		}
 		if convertRestore {
 			return commitmentRestore(ctx, logger)
 		}
 
 		if convertV3 {
-			if statecfg.ExperimentalCommitmentV3 {
-				return errors.New("convert --v3 reads legacy commitment files; run it without COMMITMENT_V3=true")
-			}
 			legacyHistory, err := filepath.Glob(filepath.Join(datadir.New(datadirCli).SnapHistory, "*-commitment.*.v"))
 			if err != nil {
 				return fmt.Errorf("listing commitment history: %w", err)
