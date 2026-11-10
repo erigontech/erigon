@@ -37,11 +37,11 @@ func TestLightClientUpdateCandidatesRankAndSkipOtherPeriods(t *testing.T) {
 	f := &forkGraphDisk{beaconCfg: cfg}
 	periodStart := cfg.SlotsPerEpoch * cfg.EpochsPerSyncCommitteePeriod
 
-	f.addLightClientUpdateCandidate(common.Hash{1}, lightClientTestUpdate(cfg, 10, periodStart+1))
+	f.addLightClientUpdateCandidateLocked(common.Hash{1}, lightClientTestUpdate(cfg, 10, periodStart+1))
 	best := lightClientTestUpdate(cfg, 400, periodStart+5)
-	f.addLightClientUpdateCandidate(common.Hash{2}, best)
-	f.addLightClientUpdateCandidate(common.Hash{3}, lightClientTestUpdate(cfg, 300, periodStart+7))
-	f.addLightClientUpdateCandidate(common.Hash{4}, lightClientTestUpdate(cfg, int(cfg.SyncCommitteeSize), 2*periodStart-1))
+	f.addLightClientUpdateCandidateLocked(common.Hash{2}, best)
+	f.addLightClientUpdateCandidateLocked(common.Hash{3}, lightClientTestUpdate(cfg, 300, periodStart+7))
+	f.addLightClientUpdateCandidateLocked(common.Hash{4}, lightClientTestUpdate(cfg, int(cfg.SyncCommitteeSize), 2*periodStart-1))
 
 	candidates := f.lightClientUpdateCandidates[1]
 	require.Len(t, candidates, 3)
@@ -57,7 +57,7 @@ func TestRecordLightClientUpdateWaitsForFinalizationForThePeriodStore(t *testing
 	periodStart := cfg.SlotsPerEpoch * cfg.EpochsPerSyncCommitteePeriod
 	update := lightClientTestUpdate(cfg, 400, periodStart+10)
 
-	f.recordLightClientUpdate(common.Hash{1}, update)
+	f.recordLightClientUpdateLocked(common.Hash{1}, update)
 
 	require.Same(t, update, f.NewestLightClientUpdate())
 	_, ok := f.GetLightClientUpdate(1)
@@ -138,8 +138,8 @@ func TestFinalizationKeepsOnlyCanonicalLightClientUpdates(t *testing.T) {
 	f.headers.Store(finalized, &cltypes.BeaconBlockHeader{Slot: periodStart + 64, ParentRoot: canonical})
 
 	canonicalUpdate := lightClientTestUpdate(cfg, 400, periodStart+10)
-	f.addLightClientUpdateCandidate(canonical, canonicalUpdate)
-	f.addLightClientUpdateCandidate(orphan, lightClientTestUpdate(cfg, 450, periodStart+10))
+	f.addLightClientUpdateCandidateLocked(canonical, canonicalUpdate)
+	f.addLightClientUpdateCandidateLocked(orphan, lightClientTestUpdate(cfg, 450, periodStart+10))
 	_, ok := f.GetLightClientUpdate(1)
 	require.False(t, ok, "served before finalization")
 
@@ -158,7 +158,7 @@ func TestLightClientUpdateCandidatesKeepTheBestOfAPeriod(t *testing.T) {
 	f := &forkGraphDisk{beaconCfg: cfg}
 	periodStart := cfg.SlotsPerEpoch * cfg.EpochsPerSyncCommitteePeriod
 	for i := range maxLightClientUpdateCandidates + 1 {
-		f.addLightClientUpdateCandidate(common.Hash{byte(i + 1)}, lightClientTestUpdate(cfg, 400+i, periodStart+uint64(i)))
+		f.addLightClientUpdateCandidateLocked(common.Hash{byte(i + 1)}, lightClientTestUpdate(cfg, 400+i, periodStart+uint64(i)))
 	}
 	candidates := f.lightClientUpdateCandidates[1]
 	require.Len(t, candidates, maxLightClientUpdateCandidates)

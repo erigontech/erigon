@@ -216,7 +216,7 @@ func CreateLightClientBootstrap(state *state.CachingBeaconState, block *cltypes.
 // IsBetterUpdate implements is_better_update: whether newUpdate is a better light client update for its sync
 // committee period than oldUpdate.
 func IsBetterUpdate(cfg *clparams.BeaconChainConfig, newUpdate, oldUpdate *cltypes.LightClientUpdate) bool {
-	maxActiveParticipants := len(newUpdate.SyncAggregate.SyncCommiteeBits) * 8
+	maxActiveParticipants := int(cfg.SyncCommitteeSize)
 	newActiveParticipants := newUpdate.SyncAggregate.Sum()
 	oldActiveParticipants := oldUpdate.SyncAggregate.Sum()
 	newHasSupermajority := newActiveParticipants*3 >= maxActiveParticipants*2

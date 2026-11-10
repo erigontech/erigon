@@ -405,7 +405,7 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 		}
 		f.blockRewards.Store(common.Hash(blockRoot), blockRewardsCollector)
 		if lcUpdate != nil {
-			f.recordLightClientUpdate(common.Hash(blockRoot), lcUpdate)
+			f.recordLightClientUpdateLocked(common.Hash(blockRoot), lcUpdate)
 		}
 	}
 
@@ -961,13 +961,13 @@ func (f *forkGraphDisk) NewestLightClientUpdate() *cltypes.LightClientUpdate {
 	return f.newestLightClientUpdate.Load().(*cltypes.LightClientUpdate)
 }
 
-// recordLightClientUpdate takes the update of a block whose transition succeeded: it is the newest update at once, and
-// a candidate for its period's store until finalization settles it. The caller emits the light client events: fork
+// recordLightClientUpdateLocked takes the update of a block whose transition succeeded: it is the newest update at
+// once, and a candidate for its period's store until finalization settles it. The caller holds addPruneMu. The caller emits the light client events: fork
 // graph methods run under the fork choice store's lock, where event sends must not happen (a stalled subscriber would
 // wedge the store).
-func (f *forkGraphDisk) recordLightClientUpdate(signatureBlock common.Hash, update *cltypes.LightClientUpdate) {
+func (f *forkGraphDisk) recordLightClientUpdateLocked(signatureBlock common.Hash, update *cltypes.LightClientUpdate) {
 	f.newestLightClientUpdate.Store(update)
-	f.addLightClientUpdateCandidate(signatureBlock, update)
+	f.addLightClientUpdateCandidateLocked(signatureBlock, update)
 }
 
 // maxLightClientUpdateCandidates bounds the candidates of a period: each one holds a sync committee (about 25 KB), and
@@ -979,9 +979,9 @@ type lightClientUpdateCandidate struct {
 	update         *cltypes.LightClientUpdate
 }
 
-// addLightClientUpdateCandidate keeps update among the best candidates of its attested header's sync committee period.
-// Only an update signed in that same period is a candidate for it.
-func (f *forkGraphDisk) addLightClientUpdateCandidate(signatureBlock common.Hash, update *cltypes.LightClientUpdate) {
+// addLightClientUpdateCandidateLocked keeps update among the best candidates of its attested header's sync committee
+// period. Only an update signed in that same period is a candidate for it. The caller holds addPruneMu.
+func (f *forkGraphDisk) addLightClientUpdateCandidateLocked(signatureBlock common.Hash, update *cltypes.LightClientUpdate) {
 	period := f.beaconCfg.SyncCommitteePeriod(update.AttestedHeader.Beacon.Slot)
 	if period != f.beaconCfg.SyncCommitteePeriod(update.SignatureSlot) {
 		return
