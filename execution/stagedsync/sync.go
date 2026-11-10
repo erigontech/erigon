@@ -528,6 +528,7 @@ func (s *Sync) runStage(stage *Stage, doms *execctx.SharedDomains, rwTx kv.Tempo
 	}
 
 	s.logRunStageDone(stageState, start)
+	dbg.NpMark("st_" + string(stage.ID))
 	return false, nil
 }
 

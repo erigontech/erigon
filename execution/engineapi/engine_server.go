@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/crypto/kzg"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -357,6 +358,7 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		runtimemetrics.Read(npM)
 		e.logger.Info("[dbg] np-alloc", "npAllocB", npM[0].Value.Uint64()-npA0, "npGcs", npM[1].Value.Uint64()-npG0, "npDecode", npDecode, "npSha", npSha, "npHandler", time.Since(npStart))
 	}()
+	dbg.NpBegin()
 	if req == nil {
 		return nil, &rpc.InvalidParamsError{Message: "missing payload"}
 	}
@@ -516,20 +518,26 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	if deriveBlobHashes {
 		expectedBlobHashes = make([]common.Hash, 0, e.config.GetMaxBlobsPerBlock(header.Time))
 	}
+	dbg.NpMark("npHdr")
 	decodeStart := time.Now()
 	txs, transactions, expectedBlobHashes, invalidTransactionStatus := e.decodePayloadTransactions(req.Transactions, uint64(req.GasLimit), e.config.IsAmsterdam(uint64(req.Timestamp)), deriveBlobHashes, expectedBlobHashes)
 
+	dbg.NpMark("npDecode")
 	var sendersRecovery *exec.SendersRecovery
 	if invalidTransactionStatus == nil && len(transactions) > 0 {
 		sendersRecovery = exec.StartSendersRecovery(ctx, types.MakeSigner(e.config, req.BlockNumber.Uint64(), uint64(req.Timestamp)), transactions)
 	}
 	npDecode = time.Since(decodeStart)
+	dbg.NpMark("npSendersStart")
 	shaStart := time.Now()
 	header.TxHash = types.DeriveSha(types.BinaryTransactions(txs))
 	npSha = time.Since(shaStart)
+	dbg.NpMark("npTxRoot")
 
 	blockHash := req.BlockHash
-	if header.Hash() != blockHash {
+	hdrHash := header.Hash()
+	dbg.NpMark("npHdrHash")
+	if hdrHash != blockHash {
 		e.logger.Error(
 			"[NewPayload] invalid block hash",
 			"stated", blockHash,
@@ -584,7 +592,9 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		}
 	}
 
+	dbg.NpMark("npBlobs")
 	possibleStatus, err := e.getQuickPayloadStatusIfPossible(ctx, blockHash, uint64(req.BlockNumber), header.ParentHash, nil, true, defaultReadinessWait)
+	dbg.NpMark("npQuick")
 	if err != nil {
 		return nil, err
 	}
@@ -595,6 +605,7 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 
 	e.lock.Lock()
 	defer e.lock.Unlock()
+	dbg.NpMark("npLock")
 
 	e.logger.Debug("[NewPayload] sending block", "height", header.Number, "hash", blockHash)
 	// Pass `txs` (the binary tx encodings from the CL) through as the Block's
@@ -603,7 +614,9 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	// via rlp.EncodeToBytes. Both slices reference the same underlying
 	// byte buffers from req.Transactions.
 	block := types.NewBlockFromStorageWithBinaryTxs(blockHash, &header, transactions, txs, nil /* uncles */, withdrawals, blockAccessList)
+	dbg.NpMark("npMkBlock")
 	payloadStatus, err := e.HandleNewPayload(ctx, "NewPayload", block)
+	dbg.NpFlush(e.logger, req.BlockNumber.Uint64())
 	if err != nil {
 		if errors.Is(err, rules.ErrInvalidBlock) {
 			return &engine_types.PayloadStatus{
@@ -1170,6 +1183,7 @@ func (e *EngineServer) HandleNewPayload(
 		}
 	}
 
+	dbg.NpMark("hnpParent")
 	if err := e.chainRW.InsertBlocks(ctx, []*types.Block{block}); err != nil {
 		if errors.Is(err, types.ErrBlockExceedsMaxRlpSize) || errors.Is(err, types.ErrInvalidBlockAccessList) {
 			return &engine_types.PayloadStatus{
@@ -1180,6 +1194,7 @@ func (e *EngineServer) HandleNewPayload(
 		return nil, err
 	}
 
+	dbg.NpMark("hnpInsert")
 	if math.AbsoluteDifference(*currentHeadNumber, headerNumber) >= e.maxReorgDepth {
 		return &engine_types.PayloadStatus{Status: engine_types.AcceptedStatus}, nil
 	}

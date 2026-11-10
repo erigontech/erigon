@@ -473,6 +473,8 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 				gap = -d
 			}
 			residual := stageWall - execActive - commitActive + overlap - gap
+			dbg.NpMarkAt("stageStart", r.execStartedAt)
+			dbg.NpMarkAt("stageEnd", commitEnd)
 			cc.logger.Info("[np-phase] stage", "blk", r.BlockNum,
 				"stage", stageWall, "exec", execActive, "commit", commitActive,
 				"overlap", overlap, "gap", gap, "residual", residual)
