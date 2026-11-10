@@ -140,15 +140,20 @@ func decodeAndReadNoForkDigest(r io.Reader, val ssz.EncodableSSZ, version clpara
 		return fmt.Errorf("unable to readPacket: %w", err)
 	}
 	if rejectTrailing {
-		if compressedReader.read >= maxCompressedSize {
-			return errCompressedPayloadLimit
-		}
 		compressedBytes := compressedReader.read
 		var extra [1]byte
 		_, err := io.ReadFull(sr, extra[:])
 		// Any byte consumed past the payload frames is trailing data, even if it is not valid snappy.
 		if err == nil || compressedReader.read != compressedBytes {
 			return ErrTrailingData
+		}
+		if errors.Is(err, errCompressedPayloadLimit) {
+			// The payload used all max_compressed_len(n) bytes. Read one byte past
+			// the bound only to tell a clean end of stream from trailing data.
+			_, err = io.ReadFull(compressedReader.r, extra[:])
+			if err == nil {
+				return ErrTrailingData
+			}
 		}
 		if err != io.EOF { //nolint:errorlint // Only bare EOF proves clean stream termination.
 			return fmt.Errorf("unable to verify payload end: %w", err)

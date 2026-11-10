@@ -168,7 +168,7 @@ func TestDecodeAndReadNoForkDigestBoundsCompressedInput(t *testing.T) {
 	}
 }
 
-func TestDecodeAndReadNoForkDigestExactFailsClosedAtCompressedLimit(t *testing.T) {
+func TestDecodeAndReadNoForkDigestExactProbesEndAtCompressedLimit(t *testing.T) {
 	const payloadSize = 8
 	const maxCompressedSize = 32 + payloadSize + payloadSize/6
 
@@ -187,13 +187,40 @@ func TestDecodeAndReadNoForkDigestExactFailsClosedAtCompressedLimit(t *testing.T
 	require.Len(t, exactMax, 1+maxCompressedSize)
 
 	exactMaxReader := &countingReader{r: bytes.NewReader(exactMax)}
-	require.ErrorIs(t, DecodeAndReadNoForkDigestExact(exactMaxReader, &cltypes.Ping{}, clparams.Phase0Version, payloadSize), errCompressedPayloadLimit)
-	require.LessOrEqual(t, exactMaxReader.bytes, 1+maxCompressedSize)
+	ping = cltypes.Ping{}
+	require.NoError(t, DecodeAndReadNoForkDigestExact(exactMaxReader, &ping, clparams.Phase0Version, payloadSize))
+	require.Equal(t, uint64(1), ping.Id)
+	require.Equal(t, 1+maxCompressedSize, exactMaxReader.bytes)
 
-	overMax := append(append([]byte{}, exactMax...), 0)
+	overMax := append(append([]byte{}, exactMax...), 0, 0)
 	reader := &countingReader{r: bytes.NewReader(overMax)}
-	require.ErrorIs(t, DecodeAndReadNoForkDigestExact(reader, &cltypes.Ping{}, clparams.Phase0Version, payloadSize), errCompressedPayloadLimit)
-	require.LessOrEqual(t, reader.bytes, 1+maxCompressedSize)
+	require.ErrorIs(t, DecodeAndReadNoForkDigestExact(reader, &cltypes.Ping{}, clparams.Phase0Version, payloadSize), ErrTrailingData)
+	require.Equal(t, 1+maxCompressedSize+1, reader.bytes)
+}
+
+func TestDecodeAndReadNoForkDigestMaxAcceptsPayloadAtCompressedLimit(t *testing.T) {
+	const payloadSize = length.Hash
+	maxCompressedSize := snappy.MaxEncodedLen(payloadSize)
+
+	roots := solid.NewHashList(16)
+	roots.Append(common.Hash{1})
+	var encoded bytes.Buffer
+	require.NoError(t, EncodeAndWrite(&encoded, roots))
+	prefix, body := encoded.Bytes()[:1], encoded.Bytes()[1:]
+	padding := make([]byte, maxCompressedSize-len(body))
+	padding[0] = 0xfe
+	padding[1] = byte(len(padding) - 4)
+	exactMax := append(append(append(append([]byte{}, prefix...), body[:len(snappyStreamIdentifier)]...), padding...), body[len(snappyStreamIdentifier):]...)
+	require.Len(t, exactMax, 1+maxCompressedSize)
+
+	decoded := solid.NewHashList(16)
+	require.NoError(t, DecodeAndReadNoForkDigestMax(bytes.NewReader(exactMax), decoded, clparams.Phase0Version, 16*length.Hash))
+	require.Equal(t, 1, decoded.Length())
+	require.Equal(t, common.Hash{1}, decoded.Get(0))
+
+	withTrailer := append(append([]byte{}, exactMax...), 0x00)
+	err := DecodeAndReadNoForkDigestMax(bytes.NewReader(withTrailer), solid.NewHashList(16), clparams.Phase0Version, 16*length.Hash)
+	require.ErrorIs(t, err, ErrTrailingData)
 }
 
 func TestDecodeAndReadNoForkDigestExactPreservesTerminalReadError(t *testing.T) {
