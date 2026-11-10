@@ -76,7 +76,7 @@ func replayTxnsParallel(ctx context.Context, db kv.TemporalRoDB, canonical dbser
 			defer func() {
 				if r := recover(); r != nil {
 					log.Error("replay worker crashed", "block", blockNum, "err", r, "stack", dbg.Stack())
-					err = fmt.Errorf("%w: %v", errReplayWorkerPanic, r)
+					err = errReplayWorkerPanic
 				}
 			}()
 			// A worker's view can start after the caller's, when pruning has moved on.
