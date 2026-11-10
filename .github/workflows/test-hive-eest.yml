@@ -34,9 +34,8 @@ jobs:
             # Stable consume-enginex: split by fork.
             # Engine API tests only exist from Paris (The Merge) onwards; the
             # osaka shard also carries the BPO fork-transition fixtures.
-            # Pattern format: "<suite-regex>/<test-regex>" — the leading ".*/""
-            # matches the suite name (eest/consume-enginex) while the remainder
-            # filters individual pytest test IDs by fork parameter.
+            # sim-limit is one Python regex the EEST consumer matches against each
+            # test ID, so it can select by fork parameter or by test directory.
             - sim: consume-enginex
               runner: ubuntu-latest
               sim-limit: ".*/.*fork_(Paris|Shanghai)"
