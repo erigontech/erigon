@@ -51,12 +51,6 @@ type fakeStateReader struct {
 	accounts map[common.Address]*accounts.Account
 }
 
-func TestVerifyTracedWitnessRootRejectsCorruption(t *testing.T) {
-	var expected common.Hash
-	err := verifyTracedWitnessRoot(expected, []byte{1})
-	require.ErrorContains(t, err, "traced commitment root mismatch")
-}
-
 func (r *fakeStateReader) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
 	return r.accounts[address.Value()], nil
 }
@@ -998,6 +992,6 @@ func TestHeadCaptureRejectsWrongTracedRoot(t *testing.T) {
 	header.Root = common.Hash{0xde, 0xad}
 	info.Block = info.Block.WithSeal(header)
 	result, err := api.buildWitnessResultHeadCapture(t.Context(), committed, pin, &commitmentdb.ParentRecords{TraceCollapses: true}, info, witnessModeLegacy)
-	require.ErrorContains(t, err, "traced commitment root mismatch")
+	require.ErrorContains(t, err, "commitment root mismatch (traced=true)")
 	require.Nil(t, result)
 }

@@ -1451,29 +1451,23 @@ func detectCollapseSiblings(
 		})
 	}
 	traced := false
-	var tracedRoot []byte
+	var root []byte
 	if mode == witnessModeLegacy && hc != nil && hc.records != nil && hc.records.TraceCollapses {
-		if traced, tracedRoot, err = sdCtx.TraceCollapses(ctx, tx, blockNum, firstTxNumInBlock, trace); err != nil {
+		if traced, root, err = sdCtx.TraceCollapses(ctx, tx, blockNum, firstTxNumInBlock, trace); err != nil {
 			return nil, fmt.Errorf("[debug_executionWitness] collapse detection via TraceCollapses failed: %w", err)
-		}
-		if traced {
-			if err := verifyTracedWitnessRoot(expectedBlockRoot, tracedRoot); err != nil {
-				return nil, err
-			}
 		}
 	}
 	if !traced {
 		sdCtx.SetCollapseTracer(trace)
 		defer sdCtx.SetCollapseTracer(nil)
 
-		computedRootHash, err := sdCtx.ComputeCommitment(ctx, tx, false, blockNum, firstTxNumInBlock, "debug_executionWitness_collapse_detection", nil)
+		root, err = sdCtx.ComputeCommitment(ctx, tx, false, blockNum, firstTxNumInBlock, "debug_executionWitness_collapse_detection", nil)
 		if err != nil {
 			return nil, fmt.Errorf("[debug_executionWitness] collapse detection via ComputeCommitment failed: %w", err)
 		}
-
-		if common.Hash(computedRootHash) != expectedBlockRoot {
-			return nil, fmt.Errorf("[debug_executionWitness] computedRootHash(%x)!= expectedRootHash(%x)", computedRootHash, expectedBlockRoot)
-		}
+	}
+	if !bytes.Equal(root, expectedBlockRoot[:]) {
+		return nil, fmt.Errorf("[debug_executionWitness] commitment root mismatch (traced=%t): got %x, want %x", traced, root, expectedBlockRoot)
 	}
 
 	// The canonical witness (insert-before-delete order) does not touch the sibling of
@@ -1496,13 +1490,6 @@ func detectCollapseSiblings(
 		siblingPaths = append(siblingPaths, c.siblingPath)
 	}
 	return siblingPaths, nil
-}
-
-func verifyTracedWitnessRoot(expected common.Hash, got []byte) error {
-	if !bytes.Equal(expected[:], got) {
-		return fmt.Errorf("[debug_executionWitness] traced commitment root mismatch: got %x, want %x", got, expected)
-	}
-	return nil
 }
 
 // buildWitnessTrie re-seeks the commitment against the parent-state reader, touches
