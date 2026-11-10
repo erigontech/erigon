@@ -95,6 +95,10 @@ func TestFinalizationKeepsOnlyCanonicalLightClientUpdates(t *testing.T) {
 	require.True(t, ok)
 	require.Same(t, canonicalUpdate, got)
 	require.Len(t, f.lightClientUpdateCandidates[1].candidates, 1, "only the candidate above the finalized slot waits")
+	pending := f.lightClientUpdateCandidates[1].candidates
+	for _, dropped := range pending[len(pending):cap(pending)] {
+		require.Zero(t, dropped, "settled candidates must not stay reachable through the backing array")
+	}
 
 	f.KeepFinalizedLightClientUpdates(nextFinalized)
 

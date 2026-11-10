@@ -836,18 +836,18 @@ func (f *forkGraphDisk) KeepFinalizedLightClientUpdates(finalized common.Hash) {
 		root = header.ParentRoot
 	}
 	for period, p := range f.lightClientUpdateCandidates {
-		pending := p.candidates[:0]
-		for _, c := range p.candidates {
+		// DeleteFunc zeroes the dropped tail, so settled updates are not kept alive by the backing array.
+		p.candidates = slices.DeleteFunc(p.candidates, func(c lightClientUpdateCandidate) bool {
 			if c.update.SignatureSlot > finalizedSlot {
-				pending = append(pending, c)
-			} else if _, canonical := finalizedChain[c.signatureBlock]; canonical {
+				return false
+			}
+			if _, canonical := finalizedChain[c.signatureBlock]; canonical {
 				f.storeLightClientUpdate(c.update)
 			}
-		}
-		if len(pending) == 0 {
+			return true
+		})
+		if len(p.candidates) == 0 {
 			delete(f.lightClientUpdateCandidates, period)
-		} else {
-			p.candidates = pending
 		}
 	}
 }
