@@ -67,8 +67,9 @@ type Fetch struct {
 	pool                     Pool            // Transaction pool implementation
 	db                       kv.RwDB
 	stateChangesClient       StateChangesClient
-	wg                       *sync.WaitGroup // used for synchronisation in the tests (nil when not in tests)
-	connectWg                sync.WaitGroup  // tracks goroutines spawned by ConnectCore/ConnectSentries
+	pendingStateChanges      []*remoteproto.StateChange // Owned by ConnectCore; retained across subscriptions until applied
+	wg                       *sync.WaitGroup            // used for synchronisation in the tests (nil when not in tests)
+	connectWg                sync.WaitGroup             // tracks goroutines spawned by ConnectCore/ConnectSentries
 	stateChangesParseCtx     *TxnParseContext
 	pooledTxnsParseCtx       *TxnParseContext
 	sentryClients            []sentryproto.SentryClient // sentry clients that will be used for accessing the network
@@ -792,7 +793,6 @@ func (f *Fetch) handleStateChanges(ctx context.Context, client StateChangesClien
 	if err != nil {
 		return err
 	}
-	var pending []*remoteproto.StateChange
 	for req, err := stream.Recv(); ; req, err = stream.Recv() {
 		if err != nil {
 			return err
@@ -800,15 +800,15 @@ func (f *Fetch) handleStateChanges(ctx context.Context, client StateChangesClien
 		if req == nil {
 			return nil
 		}
-		if len(pending) != 0 {
+		if len(f.pendingStateChanges) != 0 {
 			req = proto.Clone(req).(*remoteproto.StateChangeBatch)
-			req.ChangeBatch = append(pending, req.ChangeBatch...)
+			req.ChangeBatch = append(f.pendingStateChanges, req.ChangeBatch...)
 			req.StateChangesIncomplete = true
-			pending = nil
 		}
 		for {
 			applyErr := f.handleStateChangesRequest(ctx, req)
 			if applyErr == nil {
+				f.pendingStateChanges = nil
 				break
 			}
 			if err := ctx.Err(); err != nil {
@@ -817,8 +817,8 @@ func (f *Fetch) handleStateChanges(ctx context.Context, client StateChangesClien
 			if errors.Is(applyErr, errStateViewSuperseded) {
 				// Keep transaction directions for the next usable view, but do not
 				// overlay old account values onto its snapshot. Incompleteness forces a full refresh.
-				pending = proto.Clone(req).(*remoteproto.StateChangeBatch).ChangeBatch
-				for _, change := range pending {
+				f.pendingStateChanges = proto.Clone(req).(*remoteproto.StateChangeBatch).ChangeBatch
+				for _, change := range f.pendingStateChanges {
 					change.Changes = nil
 				}
 				break

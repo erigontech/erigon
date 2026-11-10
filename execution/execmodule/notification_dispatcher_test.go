@@ -248,3 +248,19 @@ func TestDispatcherCapsHeadersAfterDeepUnwind(t *testing.T) {
 		t.Fatal("headers after deep unwind were not announced")
 	}
 }
+
+func TestDispatcherNoOpDoesNotRepeatHeader(t *testing.T) {
+	_, tx := temporaltest.NewTestTx(t)
+	header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 30_000_000, BaseFee: uint256.NewInt(1_000_000_000)}
+	require.NoError(t, rawdb.WriteHeader(tx, header))
+	require.NoError(t, rawdb.WriteCanonicalHash(tx, header.Hash(), 1))
+	require.NoError(t, rawdb.WriteHeadHeaderHash(tx, header.Hash()))
+	events := shards.NewEvents()
+	headers, unsubscribe := events.AddHeaderSubscription()
+	t.Cleanup(unsubscribe)
+	capture := new(stateChangesCapture)
+	dispatcher := NewDispatcher(chain.AllProtocolChanges, events, capture, log.New())
+	require.NoError(t, dispatcher.Dispatch(t.Context(), tx, tx, 1, notifications.NewAccumulator(), nil, 1, 1, nil))
+	require.NotNil(t, capture.batch, "the pool still needs the head notification")
+	require.Empty(t, headers, "unchanged finish height must not reannounce the current header")
+}

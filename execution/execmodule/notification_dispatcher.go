@@ -94,8 +94,10 @@ func (d *Dispatcher) Dispatch(
 	finishProgressAfter uint64,
 	prevUnwindPoint *uint64,
 ) error {
+	var recordedChanges []notifications.StateChange
 	if accumulator != nil {
 		accumulator.SetStateID(stateVersion)
+		recordedChanges = accumulator.Changes()
 	}
 	currentHeader := rawdb.ReadCurrentHeader(tx)
 	var pendingBaseFee, pendingBlobFee uint64
@@ -126,18 +128,17 @@ func (d *Dispatcher) Dispatch(
 		if prevUnwindPoint != nil && *prevUnwindPoint < finishProgressBefore {
 			base = *prevUnwindPoint
 		}
-		// Undelivered commits may predate the current sync run.
-		if accumulator != nil {
-			for _, change := range accumulator.Changes() {
-				before := change.BlockHeight
-				if change.Direction == notifications.DirectionForward {
-					before = change.FirstBlockHeight
-					if before > 0 {
-						before--
-					}
+		// Undelivered commits may predate this run. Only recorded changes extend
+		// the header range; synthetic head entries do not announce a new block.
+		for _, change := range recordedChanges {
+			before := change.BlockHeight
+			if change.Direction == notifications.DirectionForward {
+				before = change.FirstBlockHeight
+				if before > 0 {
+					before--
 				}
-				base = min(base, before)
 			}
+			base = min(base, before)
 		}
 		var notifyFrom uint64
 		switch {
