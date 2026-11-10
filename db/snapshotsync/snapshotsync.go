@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"sort"
 	"strings"
 	"time"
 
@@ -165,10 +164,14 @@ func isStateHistory(name string) bool {
 	return strings.HasPrefix(name, "idx") || strings.HasPrefix(name, "history") || strings.HasPrefix(name, "accessor")
 }
 
-func incompatibleCommitmentFiles(items snapcfg.PreverifiedItems) map[string]struct{} {
+func incompatibleCommitmentFiles(items snapcfg.PreverifiedItems) map[string]bool {
 	type stepRange struct {
 		history  bool
 		from, to uint64
+	}
+	type rangedFile struct {
+		stepRange
+		dependent bool
 	}
 	v3 := statecfg.ExperimentalCommitmentV3
 	dependents := make(map[string]bool)
@@ -177,9 +180,9 @@ func incompatibleCommitmentFiles(items snapcfg.PreverifiedItems) map[string]stru
 			dependents[pair[0].String()] = true
 		}
 	}
-	ranges := make(map[string]stepRange)
+	ranges := make(map[string]rangedFile)
 	compatible := make(map[stepRange]bool)
-	skipped := make(map[string]struct{})
+	skipped := make(map[string]bool)
 	for _, p := range items {
 		if !v3 && !strings.Contains(p.Name, "commitment.") {
 			continue
@@ -191,7 +194,7 @@ func incompatibleCommitmentFiles(items snapcfg.PreverifiedItems) map[string]stru
 		r := stepRange{history: isStateHistory(p.Name), from: info.From, to: info.To}
 		if info.TypeString != kv.CommitmentDomain.String() {
 			if v3 && !r.history && dependents[info.TypeString] {
-				ranges[p.Name] = r
+				ranges[p.Name] = rangedFile{stepRange: r, dependent: true}
 			}
 			continue
 		}
@@ -199,15 +202,15 @@ func incompatibleCommitmentFiles(items snapcfg.PreverifiedItems) map[string]stru
 			if (info.Version.Major >= 3) == v3 {
 				compatible[r] = true
 			} else {
-				skipped[p.Name] = struct{}{}
+				skipped[p.Name] = false
 			}
 		} else {
-			ranges[p.Name] = r
+			ranges[p.Name] = rangedFile{stepRange: r, dependent: false}
 		}
 	}
-	for name, r := range ranges {
-		if !compatible[r] {
-			skipped[name] = struct{}{}
+	for name, f := range ranges {
+		if !compatible[f.stepRange] {
+			skipped[name] = f.dependent
 		}
 	}
 	return skipped
@@ -670,9 +673,6 @@ func SyncSnapshots(
 			if !syncCfg.KeepExecutionProofs && isStateHistory(p.Name) && strings.Contains(p.Name, kv.CommitmentDomain.String()) {
 				continue
 			}
-			if _, ok := incompatibleCommitment[p.Name]; ok {
-				continue
-			}
 
 			if !syncCfg.PersistReceiptsCacheV2 && isStateSnapshot(p.Name) && strings.Contains(p.Name, kv.RCacheDomain.String()) {
 				continue
@@ -700,43 +700,17 @@ func SyncSnapshots(
 				continue
 			}
 
+			if missingV3, ok := incompatibleCommitment[p.Name]; ok {
+				if missingV3 {
+					return fmt.Errorf("commitment v3 is enabled, but the snapshot manifest has no v3 commitment for %s: sync with `--experimental.commitment-v3` off, then convert it with `integration commitment convert --v3` before enabling it", p.Name)
+				}
+				continue
+			}
+
 			downloadRequest = append(downloadRequest, dbservices.DownloadRequest{
 				Path:        p.Name,
 				TorrentHash: p.Hash,
 			})
-		}
-
-		if statecfg.ExperimentalCommitmentV3 {
-			var stateTip uint64
-			var commitmentRanges []snaptype.FileInfo
-			for _, request := range downloadRequest {
-				if !strings.HasPrefix(request.Path, "domain/") {
-					continue
-				}
-				info, _, ok := snaptype.ParseFileName("", request.Path)
-				if !ok {
-					continue
-				}
-				stateTip = max(stateTip, info.To)
-				if info.TypeString == kv.CommitmentDomain.String() && info.Ext == ".kv" {
-					commitmentRanges = append(commitmentRanges, info)
-				}
-			}
-			sort.Slice(commitmentRanges, func(i, j int) bool {
-				return commitmentRanges[i].From < commitmentRanges[j].From
-			})
-			var coveredTo uint64
-			gapTo := stateTip
-			for _, r := range commitmentRanges {
-				if r.From > coveredTo {
-					gapTo = min(stateTip, r.From)
-					break
-				}
-				coveredTo = max(coveredTo, r.To)
-			}
-			if coveredTo < stateTip {
-				return fmt.Errorf("commitment v3 is enabled, but the snapshot manifest has no v3 commitment for steps %d-%d of its state: sync with `--experimental.commitment-v3` off, then convert it with `integration commitment convert --v3` before enabling it", coveredTo, gapTo)
-			}
 		}
 
 		// Only add the preverified hashes until the initial sync completed for the first time.

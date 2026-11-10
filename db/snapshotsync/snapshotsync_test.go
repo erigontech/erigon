@@ -335,7 +335,7 @@ func TestLegacyCommitmentFiles(t *testing.T) {
 				if reverse {
 					slices.Reverse(ordered)
 				}
-				want := map[string]struct{}{}
+				want := map[string]bool{}
 				var names []string
 				if v3 {
 					names = []string{"domain/v2.2-commitment.0-16.kv", "domain/v2.0-commitment.0-16.kvi", "domain/v2.2-commitment.16-32.kv", "history/v2.0-commitment.0-16.v", "idx/v2.0-commitment.0-16.ef", "accessor/v2.0-commitment.0-16.vi", "history/v2.0-commitment.16-32.v", "domain/v2.0-accounts.0-16.kv", "domain/v2.0-accounts.0-16.bt", "domain/v2.0-storage.0-16.kv", "domain/v2.0-storage.0-16.kvei"}
@@ -343,7 +343,13 @@ func TestLegacyCommitmentFiles(t *testing.T) {
 					names = []string{"domain/v3.0-commitment.16-32.kv", "domain/v3.0-commitment.32-48.kv", "domain/v2.0-commitment.32-48.bt", "history/v3.0-commitment.16-32.v", "history/v3.0-commitment.32-48.v", "idx/v2.0-commitment.32-48.ef"}
 				}
 				for _, name := range names {
-					want[name] = struct{}{}
+					want[name] = false
+				}
+				if v3 {
+					want["domain/v2.0-accounts.0-16.kv"] = true
+					want["domain/v2.0-accounts.0-16.bt"] = true
+					want["domain/v2.0-storage.0-16.kv"] = true
+					want["domain/v2.0-storage.0-16.kvei"] = true
 				}
 				require.Equal(t, want, incompatibleCommitmentFiles(ordered))
 			})
@@ -805,10 +811,12 @@ func TestSyncSnapshotsCommitmentV3StateTip(t *testing.T) {
 		name         string
 		v3           bool
 		extraV3Files []string
+		wantFile     string
 	}{
-		{name: "v3 on legacy only", v3: true},
-		{name: "v3 below state tip", v3: true, extraV3Files: []string{"domain/v3.0-commitment.0-16.kv"}},
-		{name: "v3 above a legacy-only range", v3: true, extraV3Files: []string{"domain/v3.0-commitment.16-32.kv"}},
+		{name: "v3 on legacy only", v3: true, wantFile: ".0-16."},
+		{name: "v3 below state tip", v3: true, extraV3Files: []string{"domain/v3.0-commitment.0-16.kv"}, wantFile: ".16-32."},
+		{name: "v3 above a legacy-only range", v3: true, extraV3Files: []string{"domain/v3.0-commitment.16-32.kv"}, wantFile: ".0-16."},
+		{name: "v3 commitment split across one accounts range", v3: true, extraV3Files: []string{"domain/v3.0-commitment.0-16.kv", "domain/v3.0-commitment.16-32.kv", "domain/v2.0-accounts.0-32.kv"}, wantFile: ".0-32."},
 		{name: "v3 off legacy only"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -824,6 +832,7 @@ func TestSyncSnapshotsCommitmentV3StateTip(t *testing.T) {
 			err := SyncSnapshots(t.Context(), "test", "test", false, false, false, BlobRetention{}, prune.ArchiveMode, NoCaplin, nil, &requestListBlockReader{}, &chain.Config{ChainName: networkname.Mainnet}, downloader, ethconfig.Sync{KeepExecutionProofs: true}, 16)
 			if tc.v3 {
 				require.ErrorContains(t, err, "commitment convert --v3")
+				require.ErrorContains(t, err, tc.wantFile)
 				require.Empty(t, downloader.names)
 			} else {
 				require.NoError(t, err)
