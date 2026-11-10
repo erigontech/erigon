@@ -399,10 +399,16 @@ func convertLegacyPairV3(k, v []byte, incremental bool, conv *v3.LegacyConverter
 		if err != nil {
 			return err
 		}
+		var prev []byte
+		if incremental {
+			if prev, err = delta.read(k, delta.before); err != nil {
+				return err
+			}
+		}
 		if err := emit(commitment.KeyCommitmentV3State, state, v3.LegacyDirect); err != nil {
 			return err
 		}
-		return conv.EmitRootExtension(v, emit)
+		return conv.EmitRootExtension(v, prev, emit)
 	}
 	live, err := reach.reachable(k, v)
 	if err != nil {

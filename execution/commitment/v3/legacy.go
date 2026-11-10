@@ -436,7 +436,7 @@ func (c *LegacyConverter) RootExtensionRecord(stateValue []byte) (key, record []
 	return c.rootKey, c.rootOut, nil
 }
 
-func (c *LegacyConverter) EmitRootExtension(stateValue []byte, emit LegacyEmitFunc) error {
+func (c *LegacyConverter) EmitRootExtension(stateValue, prevStateValue []byte, emit LegacyEmitFunc) error {
 	key, record, err := c.RootExtensionRecord(stateValue)
 	if err != nil {
 		return err
@@ -444,10 +444,14 @@ func (c *LegacyConverter) EmitRootExtension(stateValue []byte, emit LegacyEmitFu
 	if len(record) != 0 {
 		return emit(key, record, LegacySynthesized)
 	}
-	if c.incremental {
-		return emit(key, nil, LegacyTombstone)
+	if !c.incremental {
+		return nil
 	}
-	return nil
+	prevExt, _, err := LegacyRootExtension(prevStateValue)
+	if err != nil || len(prevExt) == 0 {
+		return err
+	}
+	return emit(key, nil, LegacyTombstone)
 }
 
 func ConvertLegacyState(value []byte) ([]byte, error) {
