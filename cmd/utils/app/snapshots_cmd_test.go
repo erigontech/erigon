@@ -1089,6 +1089,24 @@ func TestDUCollect_BodiesIndexGapOmitsEstimates(t *testing.T) {
 	require.Empty(t, result.Estimates)
 }
 
+func TestDUCollect_UnindexedLeadingBodiesOmitEstimates(t *testing.T) {
+	dirs := duTestDatadirWithBlocks(t, [2]uint64{0, 500_000}, [2]uint64{500_000, 1_000_000})
+	require.NoError(t, dir2.RemoveFile(filepath.Join(dirs.Snap, snaptype.IdxFileName(version.V1_0, 0, 500_000, snaptype2.Enums.Bodies.String()))))
+
+	result, err := duCollect(context.Background(), dirs, log.New())
+	require.NoError(t, err)
+	require.Empty(t, result.Estimates)
+}
+
+func TestDUCollect_HeadersBeyondBodiesOmitEstimates(t *testing.T) {
+	dirs := duTestDatadirWithBlocks(t, [2]uint64{0, 500_000})
+	duWriteSegment(t, dirs.Snap, 500_000, 1_000_000, snaptype2.Enums.Headers)
+
+	result, err := duCollect(context.Background(), dirs, log.New())
+	require.NoError(t, err)
+	require.Empty(t, result.Estimates)
+}
+
 func TestDUCollect_UndecodableBodiesOmitEstimates(t *testing.T) {
 	dirs := duTestDatadirWithBlocks(t)
 	duWriteSegment(t, dirs.Snap, 0, 500_000, snaptype2.Enums.Headers)

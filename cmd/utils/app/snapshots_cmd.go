@@ -4260,17 +4260,17 @@ func duEstimates(ctx context.Context, dirs datadir.Dirs, files []duFileInfo, cc 
 	view := blockSnaps.View()
 	defer view.Close()
 
-	var indexedTo, onDiskTo uint64
+	var indexedFrom, indexedTo, onDiskTo uint64
 	if bodies := view.Bodies(); len(bodies) > 0 {
-		indexedTo = bodies[len(bodies)-1].To()
+		indexedFrom, indexedTo = bodies[0].From(), bodies[len(bodies)-1].To()
 	}
 	for _, f := range files {
-		if f.Subcategory == snaptype2.Bodies.Name() && strings.HasSuffix(f.Name, ".seg") {
+		if (f.Subcategory == snaptype2.Headers.Name() || f.Subcategory == snaptype2.Bodies.Name()) && strings.HasSuffix(f.Name, ".seg") {
 			onDiskTo = max(onDiskTo, f.To)
 		}
 	}
-	if indexedTo < onDiskTo {
-		return nil, fmt.Errorf("bodies are indexed to block %d, segments on disk reach block %d", indexedTo, onDiskTo)
+	if indexedFrom > 0 || indexedTo < onDiskTo {
+		return nil, fmt.Errorf("indexed bodies cover blocks %d-%d, headers and bodies on disk reach block %d", indexedFrom, indexedTo, onDiskTo)
 	}
 
 	emptyDB, err := mdbx.New(dbcfg.ChainDB, logger).InMem("").Open(ctx)
