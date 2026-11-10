@@ -171,16 +171,16 @@ func TestPoolDependencyChainRunsBoundedByNamedReruns(t *testing.T) {
 func TestPoolReexecSignalIsLatched(t *testing.T) {
 	be := &blockExecutor{poolTasks: make([]*poolTask, 1)}
 	be.signalSelfLoopReexec(0)
-	pt := &poolTask{reexec: make(chan struct{}, 1), done: make(chan struct{})}
+	pt := &poolTask{}
 	be.poolTasks[0] = pt
 
 	be.signalSelfLoopReexec(0)
 	be.signalSelfLoopReexec(0)
-	require.Len(t, pt.reexec, 1, "two signals before the task looks must latch as one request")
+	require.Equal(t, taskRerunRequested, pt.state.Load(), "two signals before the task looks must latch as one request")
 
-	<-pt.reexec
-	be.finishTask(0)
+	pt.state.Store(taskFinished)
 	be.signalSelfLoopReexec(0)
+	require.Equal(t, taskFinished, pt.state.Load(), "a finished task must ignore the signal")
 }
 
 func TestPoolShutdownMidBlockDoesNotHang(t *testing.T) {
@@ -234,8 +234,7 @@ func poolUnit(t *testing.T, tasks int, slots []*exec.WorkerContext, f func(t *te
 }
 
 func newPoolUnitTask(be *blockExecutor, i int) *poolTask {
-	pt := &poolTask{be: be, tv: &taskVersion{execTask: be.tasks[i], version: state.Version{BlockNum: 1, TxIndex: i}},
-		reexec: make(chan struct{}, 1), done: make(chan struct{})}
+	pt := &poolTask{be: be, tv: &taskVersion{execTask: be.tasks[i], version: state.Version{BlockNum: 1, TxIndex: i}}}
 	be.poolTasks[i] = pt
 	return pt
 }
@@ -253,33 +252,39 @@ func requireOperational(t *testing.T, pe *parallelExecutor, msg string) *exec.Tx
 	}
 }
 
-func TestPoolPublishedTaskEndsOrReruns(t *testing.T) {
+func TestPoolPublishedTaskReleasesItsGoroutine(t *testing.T) {
 	poolUnit(t, 3, nil, func(t *testing.T, pe *parallelExecutor, be *blockExecutor) {
 		pt := newPoolUnitTask(be, 2)
-		res := make(chan bool, 1)
-		go func() { res <- pt.waitReexec(pe.pool) }()
-		synctest.Wait()
-		require.Empty(t, res, "a published task must wait for a signal")
-		be.finishTask(2)
-		synctest.Wait()
-		require.False(t, <-res, "a finished task must end")
+		require.False(t, pt.afterPublish(pe.pool), "a task with no re-exec request must free its goroutine")
+		require.Equal(t, taskReleased, pt.state.Load())
 	})
 }
 
-func TestPoolSignalWaitsForPredecessorCommit(t *testing.T) {
+func TestPoolSignalBeforePublishReruns(t *testing.T) {
 	poolUnit(t, 3, nil, func(t *testing.T, pe *parallelExecutor, be *blockExecutor) {
 		pt := newPoolUnitTask(be, 2)
 		be.signalSelfLoopReexec(2)
 		res := make(chan bool, 1)
-		go func() { res <- pt.waitReexec(pe.pool) }()
+		go func() { res <- pt.afterPublish(pe.pool) }()
 		synctest.Wait()
 		require.Empty(t, res, "a re-exec signal must wait for the predecessor to commit")
-		be.signalCommitted(0)
-		synctest.Wait()
-		require.Empty(t, res, "a commit below the predecessor must not release the task")
 		be.signalCommitted(1)
 		synctest.Wait()
-		require.True(t, <-res)
+		require.True(t, <-res, "a signal that arrived before publish must keep the goroutine")
+		require.Equal(t, state.Incarnation(1), pt.tv.version.Incarnation)
+		require.Equal(t, taskRunning, pt.state.Load())
+	})
+}
+
+func TestPoolSignalResumesReleasedTaskAfterPredecessorCommit(t *testing.T) {
+	poolUnit(t, 3, nil, func(t *testing.T, pe *parallelExecutor, be *blockExecutor) {
+		pt := newPoolUnitTask(be, 2)
+		pt.state.Store(taskReleased)
+		be.signalSelfLoopReexec(2)
+		synctest.Wait()
+		require.Equal(t, state.Incarnation(0), pt.tv.version.Incarnation, "the re-run must wait for the predecessor to commit")
+		be.signalCommitted(1)
+		synctest.Wait()
 		require.Equal(t, state.Incarnation(1), pt.tv.version.Incarnation)
 	})
 }
@@ -374,7 +379,7 @@ func TestPoolParkGivesUpTheSlotAndTakesOneBack(t *testing.T) {
 		pt := newPoolUnitTask(be, 2)
 		pt.slot = poolSlot{tx: tx, w: own}
 		res := make(chan bool, 1)
-		go func() { res <- be.parkReader(2, 1, func() bool { return true }) }()
+		go func() { res <- be.parkReader(2, 1, func() int { return 1 }) }()
 		synctest.Wait()
 
 		require.Empty(t, res, "the reader must block")
@@ -397,9 +402,19 @@ func TestPoolParkGivesUpTheSlotAndTakesOneBack(t *testing.T) {
 func TestPoolParkSkipsWaitWhenCellAlreadyResolved(t *testing.T) {
 	poolUnit(t, 3, nil, func(t *testing.T, pe *parallelExecutor, be *blockExecutor) {
 		pt := newPoolUnitTask(be, 2)
-		require.True(t, be.parkReader(2, 1, func() bool { return false }))
+		require.True(t, be.parkReader(2, 1, func() int { return state.UnknownDep }))
 		require.Nil(t, pt.slot.tx)
 		require.Equal(t, 0, cap(pe.pool.slots))
+	})
+}
+
+// The named writer has already fired, and a different writer now holds the cell. Waiting
+// on the named writer's gate would never end, so the reader must re-read and park on the new one.
+func TestPoolParkReReadsWhenAnotherWriterNowHoldsTheCell(t *testing.T) {
+	poolUnit(t, 3, nil, func(t *testing.T, pe *parallelExecutor, be *blockExecutor) {
+		pt := newPoolUnitTask(be, 2)
+		require.True(t, be.parkReader(2, 0, func() int { return 1 }), "the reader must re-read, not wait on a writer that will not fire")
+		require.Nil(t, pt.slot.tx)
 	})
 }
 
@@ -422,7 +437,7 @@ func TestPoolParkReturnsFalseOnShutdownHoldingASlot(t *testing.T) {
 		pt := newPoolUnitTask(be, 1)
 		pt.slot = poolSlot{tx: tx, w: newParkContext(t)}
 		res := make(chan bool, 1)
-		go func() { res <- be.parkReader(1, 0, func() bool { return true }) }()
+		go func() { res <- be.parkReader(1, 0, func() int { return 0 }) }()
 		synctest.Wait()
 		cancel()
 		synctest.Wait()
@@ -437,7 +452,7 @@ func TestPoolBlockEndAndSystemTasksDoNotPark(t *testing.T) {
 		be.tasks[0] = &execTask{Task: &exec.TxTask{TxIndex: -1}, index: 0}
 		be.tasks[1] = &execTask{Task: &exec.TxTask{TxIndex: 0}, index: 1}
 		be.tasks[2] = &execTask{Task: &exec.TxTask{TxIndex: 1, Txs: types.Transactions{nil}}, index: 2}
-		blocked := func() bool { t.Fatal("must not check a cell it will not wait on"); return false }
+		blocked := func() int { t.Fatal("must not check a cell it will not wait on"); return 0 }
 		require.False(t, be.parkReader(-1, -2, blocked), "the block-init task must not park")
 		require.False(t, be.parkReader(1, 0, blocked), "the block-end task must not park")
 	})

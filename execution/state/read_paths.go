@@ -835,8 +835,11 @@ func (s *IntraBlockState) parkOnWriter(writer int, addr accounts.Address, path A
 	if s.versionMap.writerWait == nil {
 		return false
 	}
-	if !s.versionMap.writerWait(s.txIndex, writer, func() bool {
-		return s.versionMap.ReadStatus(addr, path, key, s.txIndex).Status() == MVReadResultDependency
+	if !s.versionMap.writerWait(s.txIndex, writer, func() int {
+		if rr := s.versionMap.ReadStatus(addr, path, key, s.txIndex); rr.Status() == MVReadResultDependency {
+			return rr.DepIdx()
+		}
+		return UnknownDep
 	}) {
 		return false
 	}

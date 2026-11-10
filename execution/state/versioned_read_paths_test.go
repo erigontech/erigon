@@ -1453,7 +1453,7 @@ func TestVersionedRead_RecreateFlushedAfterAbsentAccountRead(t *testing.T) {
 	defer ibs.Close()
 	ibs.SetTxContext(1, 2)
 	waits := 0
-	vm.SetWriterWait(func(_, _ int, _ func() bool) bool {
+	vm.SetWriterWait(func(_, _ int, _ func() int) bool {
 		waits++
 		vm.MarkWritesComplete(revival)
 		return true
@@ -1484,7 +1484,7 @@ func TestVersionedRead_RevivalWithdrawnDuringReRead(t *testing.T) {
 	defer ibs.Close()
 	ibs.SetTxContext(1, 2)
 	waits := 0
-	vm.SetWriterWait(func(_, _ int, _ func() bool) bool {
+	vm.SetWriterWait(func(_, _ int, _ func() int) bool {
 		waits++
 		vm.Delete(addr, AddressPath, accounts.NilKey, 1, false)
 		vm.Delete(addr, BalancePath, accounts.NilKey, 1, false)
@@ -1525,7 +1525,7 @@ func TestVersionedRead_KeptCheckUsesTheDestructOfTheRecordedAbsence(t *testing.T
 	ibs := NewWithVersionMap(&emptyReader{}, vm)
 	defer ibs.Close()
 	ibs.SetTxContext(1, 3)
-	vm.SetWriterWait(func(_, _ int, _ func() bool) bool {
+	vm.SetWriterWait(func(_, _ int, _ func() int) bool {
 		vm.MarkWritesComplete(recreation)
 		vm.FlushVersionedWrites(destruct, true)
 		return true
@@ -1557,7 +1557,7 @@ func TestVersionedRead_UnresolvedBalanceAtDestructIsWaitedFor(t *testing.T) {
 	defer ibs.Close()
 	ibs.SetTxContext(1, 2)
 	waits := 0
-	vm.SetWriterWait(func(_, _ int, _ func() bool) bool {
+	vm.SetWriterWait(func(_, _ int, _ func() int) bool {
 		waits++
 		vm.WriteBalance(addr, Version{TxIndex: 0}, *uint256.NewInt(7), true)
 		vm.Delete(addr, AddressPath, accounts.NilKey, 1, false)
@@ -1584,13 +1584,13 @@ func TestVersionedRead_InFlightCellParksAndReReads(t *testing.T) {
 	defer ibs.Close()
 	ibs.SetTxContext(1, 2)
 	waits := 0
-	vm.SetWriterWait(func(reader, dep int, blocked func() bool) bool {
+	vm.SetWriterWait(func(reader, dep int, blocking func() int) bool {
 		waits++
 		require.Equal(t, 2, reader)
 		require.Equal(t, 1, dep)
-		require.True(t, blocked(), "the cell is in flight until the writer resolves it")
+		require.Equal(t, 1, blocking(), "the cell is in flight until the writer resolves it")
 		vm.WriteBalance(addr, writer, *uint256.NewInt(7), true)
-		require.False(t, blocked())
+		require.Equal(t, UnknownDep, blocking())
 		return true
 	})
 	got, err := ibs.GetBalance(addr)
@@ -1612,7 +1612,7 @@ func TestVersionedRead_WriterRewritesCellWhileReaderParked(t *testing.T) {
 	defer ibs.Close()
 	ibs.SetTxContext(1, 2)
 	waits := 0
-	vm.SetWriterWait(func(_, _ int, _ func() bool) bool {
+	vm.SetWriterWait(func(_, _ int, _ func() int) bool {
 		waits++
 		if waits == 1 {
 			vm.WriteBalance(addr, Version{TxIndex: 1, Incarnation: 1}, *uint256.NewInt(6), false)
@@ -1642,7 +1642,7 @@ func TestVersionedRead_FailedParkRecordsDependency(t *testing.T) {
 	ibs := NewWithVersionMap(&emptyReader{}, vm)
 	defer ibs.Close()
 	ibs.SetTxContext(1, 2)
-	vm.SetWriterWait(func(_, _ int, _ func() bool) bool { return false })
+	vm.SetWriterWait(func(_, _ int, _ func() int) bool { return false })
 	got, err := ibs.GetBalance(addr)
 	require.NoError(t, err)
 	require.Equal(t, *uint256.NewInt(5), got)
@@ -1662,7 +1662,7 @@ func TestVersionedRead_ParkOnInFlightSelfDestructDropsMemo(t *testing.T) {
 	defer ibs.Close()
 	ibs.SetTxContext(1, 2)
 	waits := 0
-	vm.SetWriterWait(func(_, _ int, _ func() bool) bool {
+	vm.SetWriterWait(func(_, _ int, _ func() int) bool {
 		waits++
 		require.Equal(t, 1, waits, "the read must not park on the stale memo")
 		vm.WriteSelfDestruct(addr, Version{TxIndex: 1}, true, true)

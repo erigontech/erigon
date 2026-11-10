@@ -3019,20 +3019,24 @@ func (be *blockExecutor) fireWriter(tx int) {
 	}
 }
 
-// signalSelfLoopReexec asks tx's task to re-execute. The request is latched, so a task
-// that is still running acts on it after publishing its result.
+// signalSelfLoopReexec asks tx's task to re-execute. A task that is still running acts
+// on the request after publishing its result; a released task starts again.
 func (be *blockExecutor) signalSelfLoopReexec(tx int) {
-	if pt := be.poolTasks[tx]; pt != nil {
-		select {
-		case pt.reexec <- struct{}{}:
-		default:
-		}
+	pt := be.poolTasks[tx]
+	if pt == nil {
+		return
+	}
+	if pt.state.CompareAndSwap(taskRunning, taskRerunRequested) {
+		return
+	}
+	if pt.state.CompareAndSwap(taskReleased, taskRunning) {
+		be.pool.resume(pt)
 	}
 }
 
 func (be *blockExecutor) finishTask(tx int) {
 	if pt := be.poolTasks[tx]; pt != nil {
-		close(pt.done)
+		pt.state.Store(taskFinished)
 	}
 }
 

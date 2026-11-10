@@ -4,12 +4,22 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/state"
+)
+
+// A task's goroutine goes back to the idle pool when its result is sent. state resolves
+// the race between that return and a re-execution request from the exec loop.
+const (
+	taskRunning int32 = iota
+	taskReleased
+	taskRerunRequested
+	taskFinished
 )
 
 // poolSlot is one permit to run: a read tx and the context bound to it. A slot given
@@ -25,9 +35,7 @@ type poolTask struct {
 	prevWrites *state.WriteSet
 	reruns     int
 	slot       poolSlot
-	// reexec latches a request to re-execute; done closes when the task is published.
-	reexec chan struct{}
-	done   chan struct{}
+	state      atomic.Int32
 
 	lastRunNs  int64
 	parkNs     int64
@@ -248,7 +256,7 @@ func (p *taskPool) closeSlots() {
 }
 
 func (pe *parallelExecutor) dispatchPoolTask(be *blockExecutor, tv *taskVersion) {
-	pt := &poolTask{be: be, tv: tv, reexec: make(chan struct{}, 1), done: make(chan struct{})}
+	pt := &poolTask{be: be, tv: tv}
 	be.poolTasks[tv.index] = pt
 	pe.pool.push(pt)
 }
@@ -324,12 +332,14 @@ func (pt *poolTask) release(p *taskPool) {
 func (pt *poolTask) run(p *taskPool, slot poolSlot) {
 	be, tv := pt.be, pt.tv
 	pt.slot = slot
+	// Once the result is sent the exec loop may resume pt on another goroutine.
+	releasing := false
 	defer func() {
 		if rec := recover(); rec != nil {
 			pt.sendOperational(p, fmt.Errorf("self-loop worker panic (block %d tx %d): %v\n%s",
 				be.blockNum, tv.index, rec, dbg.Stack()))
 		}
-		if pt.slot.tx != nil {
+		if !releasing && pt.slot.tx != nil {
 			p.slots <- pt.slot
 			pt.slot = poolSlot{}
 		}
@@ -407,9 +417,11 @@ func (pt *poolTask) run(p *taskPool, slot poolSlot) {
 		}
 
 		pt.send(p, result)
-		if !pt.waitReexec(p) {
+		releasing = true
+		if !pt.afterPublish(p) {
 			return
 		}
+		releasing = false
 	}
 }
 
@@ -426,30 +438,46 @@ func (pt *poolTask) settle(p *taskPool, result *exec.TxResult, target int) (ok, 
 	return true, valid, blocker
 }
 
-// waitReexec blocks a published task until it must re-execute (true, at the next
-// incarnation and once the predecessor has committed) or has finished (false).
-func (pt *poolTask) waitReexec(p *taskPool) bool {
-	select {
-	case <-pt.reexec:
-		return pt.rerun(p, pt.tv.index-1)
-	case <-pt.done:
-		return false
-	case <-p.pe.workersCtx.Done():
+// afterPublish frees the goroutine (false) unless a re-execution was requested while the
+// task was running (true, at the next incarnation and once the predecessor has committed).
+func (pt *poolTask) afterPublish(p *taskPool) bool {
+	if pt.state.CompareAndSwap(taskRunning, taskReleased) {
 		return false
 	}
+	if pt.state.CompareAndSwap(taskRerunRequested, taskRunning) {
+		return pt.rerun(p, pt.tv.index-1)
+	}
+	return false
+}
+
+// resume re-executes a released task on a reused goroutine.
+func (p *taskPool) resume(pt *poolTask) {
+	p.goReused(func() {
+		if !pt.rerun(p, pt.tv.index-1) {
+			return
+		}
+		s, err := p.acquire()
+		if err != nil {
+			pt.sendOperational(p, err)
+			return
+		}
+		pt.run(p, s)
+	})
 }
 
 // parkReader blocks reader's run on an in-flight cell of writer until the writer may have
 // resolved it. The slot is given up while parked; the reader keeps its context, because the
 // EVM is mid-run on it. It returns false when the reader cannot park or the executor stops.
-func (be *blockExecutor) parkReader(reader, writer int, blocked func() bool) bool {
+func (be *blockExecutor) parkReader(reader, writer int, blocking func() int) bool {
 	r, w := be.taskIndexOf(reader), be.taskIndexOf(writer)
 	// Engine calls in the block-init and block-end tasks hold a chain reader bound to the slot's tx.
 	if w < 0 || w >= r || be.tasks[r].Version().TxIndex < 0 || be.tasks[r].Task.IsBlockEnd() {
 		return false
 	}
 	wake := be.writers[w].subscribe()
-	if !blocked() {
+	// Another writer may now hold the cell, and this one may never fire again: re-read
+	// and park on whichever writer holds it.
+	if blocking() != writer {
 		return true
 	}
 	pt, p := be.poolTasks[r], be.pool
