@@ -4314,15 +4314,10 @@ func TestExecutionPayloadInvalidSignatureDoesNotRecordTerminalVerdict(t *testing
 				payload := envelope.Message.Payload
 				if failure == "blob mismatch" {
 					block.Block.Body.SignedExecutionPayloadBid.Message.BlobKzgCommitments.Append(&cltypes.KZGCommitment{1})
+					rebindAdmissionBlockRoot(t, blockState, block, envelope)
 				} else {
-					payload.Transactions = solid.NewProgressiveTransactionsSSZFromTransactions([][]byte{{types.BlobTxType, 0xc0}})
-					requestsHash := cltypes.ComputeExecutionRequestHash(cltypes.GetExecutionRequestsList(cfg, envelope.Message.ExecutionRequests))
-					var err error
-					payload.BlockHash, err = payload.ComputeBlockHash(&envelope.Message.ParentBeaconBlockRoot, requestsHash, nil)
-					require.NoError(t, err)
-					block.Block.Body.SignedExecutionPayloadBid.Message.BlockHash = payload.BlockHash
+					setUndecodablePayload(t, blockState, block, envelope, types.BlobTxType)
 				}
-				rebindAdmissionBlockRoot(t, blockState, block, envelope)
 				signAdmissionEnvelopeWithKey(t, cfg, blockState, envelope, otherSigningKey)
 				f, graph := newEnvelopeApplicationTestStore(t, cfg, blockState, block)
 				if mode.withEngine {
@@ -4363,20 +4358,14 @@ func TestExecutionPayloadDecodeFailureIsTerminal(t *testing.T) {
 			t.Run(tx.name+"/"+mode.name, func(t *testing.T) {
 				cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
 				payload := envelope.Message.Payload
-				payload.Transactions = solid.NewProgressiveTransactionsSSZFromTransactions([][]byte{{tx.txType, 0xc0}})
-				requestsHash := cltypes.ComputeExecutionRequestHash(cltypes.GetExecutionRequestsList(cfg, envelope.Message.ExecutionRequests))
-				var err error
-				payload.BlockHash, err = payload.ComputeBlockHash(&envelope.Message.ParentBeaconBlockRoot, requestsHash, nil)
-				require.NoError(t, err)
-				block.Block.Body.SignedExecutionPayloadBid.Message.BlockHash = payload.BlockHash
-				rebindAdmissionBlockRoot(t, blockState, block, envelope)
+				setUndecodablePayload(t, blockState, block, envelope, tx.txType)
 				resignAdmissionEnvelope(t, cfg, blockState, envelope)
 				f, graph := newEnvelopeApplicationTestStore(t, cfg, blockState, block)
 				if mode.withEngine {
 					f.engine = execution_client.NewMockExecutionEngine(gomock.NewController(t))
 				}
 
-				err = f.OnExecutionPayload(t.Context(), envelope, false, mode.validatePayload)
+				err := f.OnExecutionPayload(t.Context(), envelope, false, mode.validatePayload)
 
 				require.ErrorIs(t, err, ErrInvalidExecutionPayloadEnvelope)
 				require.NotErrorIs(t, err, misc.ErrMismatchBlobHashes)
@@ -5767,6 +5756,24 @@ func validAdmissionCancellationFixtureAtSlot(t testing.TB, slot uint64) (*clpara
 	rebindAdmissionBlockRoot(t, blockState, block, envelope)
 	signAdmissionEnvelopeWithKey(t, &cfg, blockState, envelope, admissionSigningKey)
 	return &cfg, blockState, block, envelope
+}
+
+func setUndecodablePayload(
+	t testing.TB,
+	blockState *state2.CachingBeaconState,
+	block *cltypes.SignedBeaconBlock,
+	envelope *cltypes.SignedExecutionPayloadEnvelope,
+	txType byte,
+) {
+	t.Helper()
+	payload := envelope.Message.Payload
+	payload.Transactions = solid.NewProgressiveTransactionsSSZFromTransactions([][]byte{{txType, 0xc0}})
+	requestsHash := cltypes.ComputeExecutionRequestHash(cltypes.GetExecutionRequestsList(blockState.BeaconConfig(), envelope.Message.ExecutionRequests))
+	blockHash, err := payload.ComputeBlockHash(&envelope.Message.ParentBeaconBlockRoot, requestsHash, nil)
+	require.NoError(t, err)
+	payload.BlockHash = blockHash
+	block.Block.Body.SignedExecutionPayloadBid.Message.BlockHash = blockHash
+	rebindAdmissionBlockRoot(t, blockState, block, envelope)
 }
 
 func rebindAdmissionBlockRoot(

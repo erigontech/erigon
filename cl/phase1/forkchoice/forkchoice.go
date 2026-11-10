@@ -1135,8 +1135,7 @@ func (f *ForkChoiceStore) rejectEnvelopeLocked(blockRoot common.Hash) {
 		f.dataAvailableEnvelopeRetryAt.Remove(blockRoot)
 	}
 	f.dataAvailableEnvelopeRetryMu.Unlock()
-	f.headHash = common.Hash{}
-	f.headPayloadStatus = cltypes.PayloadStatusPending
+	f.invalidateCachedHead()
 	f.selectedHead.Store(nil)
 }
 
@@ -1389,8 +1388,7 @@ func (f *ForkChoiceStore) markPayloadStatus(
 		}
 	}
 	if !known || current != effective {
-		f.headHash = common.Hash{}
-		f.headPayloadStatus = cltypes.PayloadStatusPending
+		f.invalidateCachedHead()
 		// The decision can rule out the published variant; get_head publishes again.
 		f.selectedHead.Store(nil)
 	}

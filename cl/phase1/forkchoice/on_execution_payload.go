@@ -1470,8 +1470,7 @@ func (f *ForkChoiceStore) applyEnvelopeCoordinated(
 	}
 
 	// Payload status participates in Gloas head selection, so a change invalidates the cached head.
-	f.headHash = common.Hash{}
-	f.headPayloadStatus = cltypes.PayloadStatusPending
+	f.invalidateCachedHead()
 
 	// If EL was behind, queue the block+envelope for later EL insertion.
 	if elBehind {
@@ -1651,8 +1650,7 @@ func (f *ForkChoiceStore) StoreAnchorEnvelope(blockRoot common.Hash, signedEnvel
 		return fmt.Errorf("%w: block disappeared while storing anchor payload status for beacon_block_root %v", ErrIgnore, blockRoot)
 	}
 	f.eth2Roots.Add(blockRoot, envelope.Payload.BlockHash)
-	f.headHash = common.Hash{}
-	f.headPayloadStatus = cltypes.PayloadStatusPending
+	f.invalidateCachedHead()
 	f.cacheParentBuilderExitRequests(blockRoot, signedEnvelope)
 	f.mu.Unlock()
 
@@ -2140,8 +2138,7 @@ func (f *ForkChoiceStore) applyLocalSelfBuildEnvelopeCoordinated(ctx context.Con
 		f.eth2Roots.Add(beaconBlockRoot, envelope.Payload.BlockHash)
 	}
 
-	f.headHash = common.Hash{}
-	f.headPayloadStatus = cltypes.PayloadStatusPending
+	f.invalidateCachedHead()
 
 	if elBehind {
 		f.addPendingELPayload(block, signedEnvelope)
