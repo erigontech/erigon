@@ -4443,8 +4443,22 @@ func TestExecutionPayloadUnauthenticatedBlobMismatchAllowsRetry(t *testing.T) {
 }
 
 func TestExecutionPayloadBlobCommitmentMismatchPreservesVerifiedSibling(t *testing.T) {
-	for _, validatePayload := range []bool{true, false} {
-		t.Run(fmt.Sprintf("validatePayload=%t", validatePayload), func(t *testing.T) {
+	for _, mode := range []struct {
+		name            string
+		withEngine      bool
+		validatePayload bool
+		checkBlobData   bool
+		consensus       bool
+	}{
+		{name: "validated", withEngine: true, validatePayload: true},
+		{name: "deferred", withEngine: true},
+		{name: "without engine", validatePayload: true},
+		{name: "validated missing columns", withEngine: true, validatePayload: true, checkBlobData: true},
+		{name: "deferred missing columns", withEngine: true, checkBlobData: true},
+		{name: "without engine missing columns", validatePayload: true, checkBlobData: true},
+		{name: "consensus missing columns", withEngine: true, consensus: true},
+	} {
+		t.Run(mode.name, func(t *testing.T) {
 			cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
 			verifiedRoot := common.Hash(envelope.Message.BeaconBlockRoot)
 			executionHash := envelope.Message.Payload.BlockHash
@@ -4454,10 +4468,23 @@ func TestExecutionPayloadBlobCommitmentMismatchPreservesVerifiedSibling(t *testi
 			resignAdmissionEnvelope(t, cfg, blockState, envelope)
 
 			f, graph := newEnvelopeApplicationTestStore(t, cfg, blockState, block)
-			f.engine = execution_client.NewMockExecutionEngine(gomock.NewController(t))
+			if mode.withEngine {
+				f.engine = execution_client.NewMockExecutionEngine(gomock.NewController(t))
+			}
+			pending, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](queueCacheSize)
+			require.NoError(t, err)
+			f.pendingEnvelopes = pending
+			peerDas := das_mock.NewMockPeerDas(gomock.NewController(t))
+			peerDas.EXPECT().IsDataAvailable(block.Block.Slot, envelope.Message.BeaconBlockRoot).Return(false, nil).AnyTimes()
+			f.peerDas = peerDas
+			f.syncedDataManager = synced_data.NewSyncedDataManager(cfg, true)
 			f.MarkPayloadVerified(verifiedRoot, executionHash)
 
-			err := f.OnExecutionPayload(t.Context(), envelope, false, validatePayload)
+			if mode.consensus {
+				err = f.ValidateExecutionPayloadEnvelopeForConsensus(t.Context(), envelope)
+			} else {
+				err = f.OnExecutionPayload(t.Context(), envelope, mode.checkBlobData, mode.validatePayload)
+			}
 
 			require.ErrorIs(t, err, ErrInvalidExecutionPayloadEnvelope)
 			require.ErrorIs(t, err, misc.ErrMismatchBlobHashes)
@@ -4467,6 +4494,7 @@ func TestExecutionPayloadBlobCommitmentMismatchPreservesVerifiedSibling(t *testi
 			require.False(t, f.IsPayloadVerified(envelope.Message.BeaconBlockRoot))
 			require.False(t, graph.HasEnvelope(envelope.Message.BeaconBlockRoot))
 			require.False(t, graph.invalid.Load())
+			require.False(t, f.HasPendingExecutionPayloadEnvelope(envelope.Message.BeaconBlockRoot))
 			status, ok := f.GetRecentExecutionPayloadStatus(executionHash)
 			require.True(t, ok)
 			require.EqualValues(t, execution_client.PayloadStatusValidated, status)
