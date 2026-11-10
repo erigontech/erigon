@@ -24,7 +24,6 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"golang.org/x/sync/semaphore"
 	"golang.org/x/time/rate"
 
 	"github.com/erigontech/erigon/db/datadir"
@@ -77,6 +76,19 @@ func (cs *MultiClient) RecvUploadMessageLoop(
 	sentry sentryproto.SentryClient,
 	wg *sync.WaitGroup,
 ) {
+	var handlers sync.WaitGroup
+	defer handlers.Wait()
+	done := func() {
+		if wg != nil {
+			wg.Done()
+		}
+		handlers.Done()
+	}
+	handle := func(ctx context.Context, message *sentryproto.InboundMessage, sentry sentryproto.SentryClient) error {
+		handlers.Add(1)
+		cs.enqueueUpload(uploadTask{ctx: ctx, message: message, sentry: sentry, done: done})
+		return nil
+	}
 	ids := []sentryproto.MessageId{
 		eth.ToProto[direct.ETH68][eth.GetBlockBodiesMsg],
 		eth.ToProto[direct.ETH68][eth.GetReceiptsMsg],
@@ -84,10 +96,11 @@ func (cs *MultiClient) RecvUploadMessageLoop(
 		eth.ToProto[direct.ETH70][eth.GetReceiptsMsg],
 	}
 	streamFactory := func(streamCtx context.Context, sentry sentryproto.SentryClient) (grpc.ClientStream, error) {
+		context.AfterFunc(streamCtx, func() { cs.cancelUploads(streamCtx) })
 		return sentry.Messages(streamCtx, &sentryproto.MessagesRequest{Ids: ids}, grpc.WaitForReady(true))
 	}
 
-	libsentry.ReconnectAndPumpStreamLoop(ctx, sentry, cs.makeStatusData, "RecvUploadMessage", streamFactory, MakeInboundMessage, cs.HandleInboundMessage, wg, cs.logger)
+	libsentry.ReconnectAndPumpStreamLoop(ctx, sentry, cs.makeStatusData, "RecvUploadMessage", streamFactory, MakeInboundMessage, handle, nil, cs.logger)
 }
 
 func (cs *MultiClient) RecvUploadBlockAccessListsMessageLoop(
@@ -167,12 +180,12 @@ type MultiClient struct {
 	statusDataProvider StatusGetter
 	logPeerInfo        bool
 
-	logger                           log.Logger
-	getReceiptsActiveGoroutineNumber *semaphore.Weighted
-	ethApiWrapper                    eth.ReceiptsGetter
-	balGenerator                     eth.BlockAccessListGetter
-	balReplayLimiter                 *rate.Limiter
-	balReplayMu                      sync.Mutex
+	logger           log.Logger
+	uploads          uploadQueue
+	ethApiWrapper    eth.ReceiptsGetter
+	balGenerator     eth.BlockAccessListGetter
+	balReplayLimiter *rate.Limiter
+	balReplayMu      sync.Mutex
 }
 
 var (
@@ -192,18 +205,18 @@ func NewMultiClient(
 	logger log.Logger,
 ) (*MultiClient, error) {
 	cs := &MultiClient{
-		sentries:                         sentries,
-		ChainConfig:                      chainConfig,
-		db:                               db,
-		Engine:                           engine,
-		blockReader:                      blockReader,
-		statusDataProvider:               statusDataProvider,
-		logPeerInfo:                      logPeerInfo,
-		logger:                           logger,
-		getReceiptsActiveGoroutineNumber: semaphore.NewWeighted(1),
-		ethApiWrapper:                    receipts.NewGenerator(dirs, blockReader, engine, nil, 5*time.Minute),
-		balGenerator:                     bal.NewRegenerator(blockReader, engine, logger),
-		balReplayLimiter:                 rate.NewLimiter(rate.Every(balReplayInterval), 1),
+		sentries:           sentries,
+		ChainConfig:        chainConfig,
+		db:                 db,
+		Engine:             engine,
+		blockReader:        blockReader,
+		statusDataProvider: statusDataProvider,
+		logPeerInfo:        logPeerInfo,
+		logger:             logger,
+		uploads:            uploadQueue{peers: make(map[[64]byte]*uploadPeer)},
+		ethApiWrapper:      receipts.NewGenerator(dirs, blockReader, engine, nil, 5*time.Minute),
+		balGenerator:       bal.NewRegenerator(blockReader, engine, logger),
+		balReplayLimiter:   rate.NewLimiter(rate.Every(balReplayInterval), 1),
 	}
 
 	return cs, nil
@@ -383,31 +396,20 @@ func (cs *MultiClient) getBlockBodies66(ctx context.Context, inreq *sentryproto.
 	return nil
 }
 
-func (cs *MultiClient) getReceipts66(ctx context.Context, inreq *sentryproto.InboundMessage, sentryClient sentryproto.SentryClient) error {
+func (cs *MultiClient) getReceipts66(ctx context.Context, inreq *sentryproto.InboundMessage, sentryClient sentryproto.SentryClient, ethVersion uint, cacheOnly bool) error {
 	var query eth.GetReceiptsPacket66
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
-		return fmt.Errorf("decoding getReceipts66: %w", err)
+		return fmt.Errorf("decoding %s: %w", inreq.Id, err)
 	}
 	return cs.getReceiptsInner(ctx, inreq.PeerId, sentryClient, requestParams{
 		id:         query.RequestId,
 		query:      query.GetReceiptsPacket,
-		ethVersion: direct.ETH68,
+		ethVersion: ethVersion,
+		cacheOnly:  cacheOnly,
 	})
 }
 
-func (cs *MultiClient) getReceipts69(ctx context.Context, inreq *sentryproto.InboundMessage, sentryClient sentryproto.SentryClient) error {
-	var query eth.GetReceiptsPacket66
-	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
-		return fmt.Errorf("decoding getReceipts69: %w", err)
-	}
-	return cs.getReceiptsInner(ctx, inreq.PeerId, sentryClient, requestParams{
-		id:         query.RequestId,
-		query:      query.GetReceiptsPacket,
-		ethVersion: direct.ETH69,
-	})
-}
-
-func (cs *MultiClient) getReceipts70(ctx context.Context, inreq *sentryproto.InboundMessage, sentryClient sentryproto.SentryClient) error {
+func (cs *MultiClient) getReceipts70(ctx context.Context, inreq *sentryproto.InboundMessage, sentryClient sentryproto.SentryClient, cacheOnly bool) error {
 	var query eth.GetReceiptsPacket70
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
 		return fmt.Errorf("decoding getReceipts70: %w", err)
@@ -417,6 +419,7 @@ func (cs *MultiClient) getReceipts70(ctx context.Context, inreq *sentryproto.Inb
 		query:                  query.GetReceiptsPacket,
 		ethVersion:             direct.ETH70,
 		firstBlockReceiptIndex: query.FirstBlockReceiptIndex,
+		cacheOnly:              cacheOnly,
 	})
 }
 
@@ -426,6 +429,7 @@ type requestParams struct {
 	query                  eth.GetReceiptsPacket
 	ethVersion             uint
 	firstBlockReceiptIndex uint64
+	cacheOnly              bool
 }
 
 // getReceiptsInner handles GetReceipts for all protocol versions.
@@ -453,12 +457,9 @@ func (cs *MultiClient) getReceiptsInner(ctx context.Context, peerId *typesproto.
 		lastBlockIncomplete = cached.LastBlockIncomplete
 	}
 	if needMore {
-		err = cs.getReceiptsActiveGoroutineNumber.Acquire(ctx, 1)
-		if err != nil {
-			return err
+		if p.cacheOnly {
+			return errReceiptCacheMiss
 		}
-		defer cs.getReceiptsActiveGoroutineNumber.Release(1)
-
 		tx, err := cs.db.BeginTemporalRo(ctx)
 		if err != nil {
 			return err
@@ -548,13 +549,17 @@ func MakeInboundMessage() *sentryproto.InboundMessage {
 	return new(sentryproto.InboundMessage)
 }
 
-func (cs *MultiClient) HandleInboundMessage(ctx context.Context, message *sentryproto.InboundMessage, sentry sentryproto.SentryClient) (err error) {
+func (cs *MultiClient) HandleInboundMessage(ctx context.Context, message *sentryproto.InboundMessage, sentry sentryproto.SentryClient) error {
+	return cs.handleInboundMessage(ctx, message, sentry, false)
+}
+
+func (cs *MultiClient) handleInboundMessage(ctx context.Context, message *sentryproto.InboundMessage, sentry sentryproto.SentryClient, receiptCacheOnly bool) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("%+v, msgID=%s, trace: %s", rec, message.Id.String(), dbg.Stack())
 		}
 	}() // avoid crash because Erigon's core does many things
-	err = cs.handleInboundMessage(ctx, message, sentry)
+	err = cs.dispatchInboundMessage(ctx, message, sentry, receiptCacheOnly)
 
 	if (err != nil) && rlp.IsInvalidRLPError(err) {
 		cs.logger.Debug("Kick peer for invalid RLP", "err", err)
@@ -570,7 +575,7 @@ func (cs *MultiClient) HandleInboundMessage(ctx context.Context, message *sentry
 	return err
 }
 
-func (cs *MultiClient) handleInboundMessage(ctx context.Context, inreq *sentryproto.InboundMessage, sentry sentryproto.SentryClient) error {
+func (cs *MultiClient) dispatchInboundMessage(ctx context.Context, inreq *sentryproto.InboundMessage, sentry sentryproto.SentryClient, receiptCacheOnly bool) error {
 	switch inreq.Id {
 	case sentryproto.MessageId_NEW_BLOCK_HASHES_66,
 		sentryproto.MessageId_BLOCK_HEADERS_66,
@@ -585,11 +590,11 @@ func (cs *MultiClient) handleInboundMessage(ctx context.Context, inreq *sentrypr
 	case sentryproto.MessageId_RECEIPTS_66:
 		return cs.receipts66(ctx, inreq, sentry)
 	case sentryproto.MessageId_GET_RECEIPTS_66:
-		return cs.getReceipts66(ctx, inreq, sentry)
+		return cs.getReceipts66(ctx, inreq, sentry, direct.ETH68, receiptCacheOnly)
 	case sentryproto.MessageId_GET_RECEIPTS_69:
-		return cs.getReceipts69(ctx, inreq, sentry)
+		return cs.getReceipts66(ctx, inreq, sentry, direct.ETH69, receiptCacheOnly)
 	case sentryproto.MessageId_GET_RECEIPTS_70:
-		return cs.getReceipts70(ctx, inreq, sentry)
+		return cs.getReceipts70(ctx, inreq, sentry, receiptCacheOnly)
 	case sentryproto.MessageId_RECEIPTS_70:
 		return cs.receipts66(ctx, inreq, sentry) // client-side receipt handling is a no-op
 	case sentryproto.MessageId_GET_BLOCK_ACCESS_LISTS_71:
