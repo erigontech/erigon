@@ -259,7 +259,11 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 			if typeName == typ.Name() {
 				var versions ver.Versions
 				if strings.HasSuffix(p.Name, "idx") {
-					versions = typ.Indexes()[idxIndex].Version
+					indexes := typ.Indexes()
+					if idxIndex >= len(indexes) {
+						break
+					}
+					versions = indexes[idxIndex].Version
 				} else {
 					versions = typ.Versions()
 				}
