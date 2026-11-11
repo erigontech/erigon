@@ -29,6 +29,7 @@ import (
 	"golang.org/x/sync/semaphore"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
 
@@ -181,7 +182,8 @@ func (db *DB) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 	default:
 	}
 
-	if kv.IsTryAcquire(ctx) {
+	tryAcquire := kv.IsTryAcquire(ctx)
+	if tryAcquire {
 		if !db.roTxsLimiter.TryAcquire(1) {
 			return nil, kv.ErrReadTxLimitExceeded
 		}
@@ -197,6 +199,9 @@ func (db *DB) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 	}()
 
 	streamCtx, streamCancelFn := context.WithCancel(ctx) // We create child context for the stream so we can cancel it to prevent leak
+	if tryAcquire {
+		streamCtx = metadata.AppendToOutgoingContext(streamCtx, remoteproto.TxTryAcquireMetadataKey, "1")
+	}
 	stream, err := db.remoteKV.Tx(streamCtx)
 	if err != nil {
 		streamCancelFn()
@@ -205,6 +210,9 @@ func (db *DB) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 	msg, err := stream.Recv()
 	if err != nil {
 		streamCancelFn()
+		if tryAcquire && status.Code(err) == codes.ResourceExhausted {
+			return nil, kv.ErrReadTxLimitExceeded
+		}
 		return nil, err
 	}
 	remoteTx := &tx{ctx: ctx, db: db, streamCancelFn: streamCancelFn, viewID: msg.ViewId, id: msg.TxId, historyFilesGeneration: msg.HistoryFilesGeneration}
