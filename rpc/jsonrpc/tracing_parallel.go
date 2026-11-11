@@ -66,7 +66,8 @@ func (api *DebugAPIImpl) traceBlockParallel(ctx context.Context, block *types.Bl
 			ibs.ResumeLogIndexAt(firstLogIndex)
 			ibs.SetTxContext(blockCtx.BlockNumber, txnIndex)
 
-			s := jsonstream.New(&outs[txnIndex])
+			s := jsonstream.Get(&outs[txnIndex])
+			defer jsonstream.Put(s)
 			usages[txnIndex] = api.writeTxnTrace(ctx, s, block, txnIndex, ibs, blockCtx, rules, signer, config, chainConfig, nil)
 			if err := s.Flush(); err != nil {
 				return err
