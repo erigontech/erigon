@@ -44,7 +44,6 @@ func legacyMarshalReceipt(
 	header *types.Header,
 	txnHash common.Hash,
 	signed bool,
-	withBlockTimestamp bool,
 ) map[string]any {
 	var chainId *uint256.Int
 	switch t := txn.(type) {
@@ -69,7 +68,7 @@ func legacyMarshalReceipt(
 
 	logsToMarshal := make([]map[string]any, 0, len(receipt.Logs))
 	for _, l := range receipt.Logs {
-		logsToMarshal = append(logsToMarshal, legacyLogFields(l, withBlockTimestamp, header.Time))
+		logsToMarshal = append(logsToMarshal, legacyLogFields(l, header.Time))
 	}
 
 	fields := map[string]any{
@@ -119,7 +118,7 @@ func legacyMarshalReceipt(
 
 // legacyLogFields spells the log object out by hand, so the oracle keeps its shape
 // even if types.Log's own encoder drops a field.
-func legacyLogFields(l *types.Log, withBlockTimestamp bool, timestamp uint64) map[string]any {
+func legacyLogFields(l *types.Log, timestamp uint64) map[string]any {
 	fields := map[string]any{
 		"address":          l.Address,
 		"topics":           l.Topics,
@@ -130,9 +129,7 @@ func legacyLogFields(l *types.Log, withBlockTimestamp bool, timestamp uint64) ma
 		"blockHash":        l.BlockHash,
 		"logIndex":         l.Index,
 		"removed":          l.Removed,
-	}
-	if withBlockTimestamp {
-		fields["blockTimestamp"] = hexutil.Uint64(timestamp)
+		"blockTimestamp":   hexutil.Uint64(timestamp),
 	}
 	return fields
 }
@@ -196,35 +193,33 @@ func TestMarshalReceiptMatchesLegacyJSON(t *testing.T) {
 						{name: "postState", postState: []byte{0x0b}},
 					} {
 						for _, contract := range []common.Address{{}, common.HexToAddress("0x22")} {
-							for _, withBlockTimestamp := range []bool{false, true} {
-								if txName == "blob" && cfg.name == "berlin" {
-									continue
-								}
-								header := &types.Header{Number: *uint256.NewInt(7), Time: 1_750_000_000}
-								if cfg.name == "osaka" {
-									header.BaseFee = uint256.NewInt(50)
-									header.ExcessBlobGas = &excessBlobGas
-								}
-								receipt := &types.Receipt{
-									PostState:         state.postState,
-									Status:            state.status,
-									CumulativeGasUsed: 42_000,
-									Bloom:             bloom,
-									Logs:              logs.value,
-									TxHash:            common.HexToHash("0xbeef"),
-									ContractAddress:   contract,
-									GasUsed:           21_000,
-									BlockHash:         common.HexToHash("0xb10c"),
-									BlockNumber:       uint256.NewInt(7),
-									TransactionIndex:  3,
-								}
-								name := fmt.Sprintf("%s/%s/logs=%s/bloom=%v/%s/contract=%v/ts=%v", cfg.name, txName, logs.name, !bloom.IsEmpty(), state.name, contract != (common.Address{}), withBlockTimestamp)
-								want, err := json.Marshal(legacyMarshalReceipt(receipt, txn, cfg.config, header, receipt.TxHash, true, withBlockTimestamp))
-								require.NoError(t, err)
-								got, err := json.Marshal(MarshalReceipt(receipt, txn, cfg.config, header, true, withBlockTimestamp))
-								require.NoError(t, err)
-								require.JSONEq(t, string(want), string(got), name)
+							if txName == "blob" && cfg.name == "berlin" {
+								continue
 							}
+							header := &types.Header{Number: *uint256.NewInt(7), Time: 1_750_000_000}
+							if cfg.name == "osaka" {
+								header.BaseFee = uint256.NewInt(50)
+								header.ExcessBlobGas = &excessBlobGas
+							}
+							receipt := &types.Receipt{
+								PostState:         state.postState,
+								Status:            state.status,
+								CumulativeGasUsed: 42_000,
+								Bloom:             bloom,
+								Logs:              logs.value,
+								TxHash:            common.HexToHash("0xbeef"),
+								ContractAddress:   contract,
+								GasUsed:           21_000,
+								BlockHash:         common.HexToHash("0xb10c"),
+								BlockNumber:       uint256.NewInt(7),
+								TransactionIndex:  3,
+							}
+							name := fmt.Sprintf("%s/%s/logs=%s/bloom=%v/%s/contract=%v", cfg.name, txName, logs.name, !bloom.IsEmpty(), state.name, contract != (common.Address{}))
+							want, err := json.Marshal(legacyMarshalReceipt(receipt, txn, cfg.config, header, receipt.TxHash, true))
+							require.NoError(t, err)
+							got, err := json.Marshal(MarshalReceipt(receipt, txn, cfg.config, header, true))
+							require.NoError(t, err)
+							require.JSONEq(t, string(want), string(got), name)
 						}
 					}
 				}
