@@ -362,8 +362,8 @@ func TestBlobArchiveStoreFillReportsASlotTheResponseDidNotRepair(t *testing.T) {
 // An endpoint that never answers, or answers with a malformed or oversized body, fails like any
 // other, so the next endpoint fills the slot.
 func TestBlobArchiveStoreFillMovesPastABadEndpoint(t *testing.T) {
-	defer func(old time.Duration) { fillRequestTimeout = old }(fillRequestTimeout)
-	fillRequestTimeout = 200 * time.Millisecond
+	defer func(timeout, wait time.Duration) { fillRequestTimeout, fillRetryWait = timeout, wait }(fillRequestTimeout, fillRetryWait)
+	fillRequestTimeout, fillRetryWait = 200*time.Millisecond, time.Millisecond
 	for name, respond := range map[string]func(good string) http.HandlerFunc{
 		"stalled": func(string) http.HandlerFunc {
 			return func(_ http.ResponseWriter, r *http.Request) { <-r.Context().Done() }
@@ -407,6 +407,73 @@ func TestBlobArchiveStoreFillMovesPastABadEndpoint(t *testing.T) {
 			require.EqualValues(t, want, requestsFor(requests, root), "the slot was filled from the bad endpoint")
 		})
 	}
+}
+
+func failOnce(t *testing.T, good string, fail http.HandlerFunc) string {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) == 1 {
+			fail(w, r)
+			return
+		}
+		http.Redirect(w, r, good+r.URL.Path, http.StatusTemporaryRedirect)
+	}))
+	t.Cleanup(srv.Close)
+	return srv.URL
+}
+
+func TestBlobArchiveStoreFillRetriesATransientFailure(t *testing.T) {
+	defer func(timeout, wait time.Duration) { fillRequestTimeout, fillRetryWait = timeout, wait }(fillRequestTimeout, fillRetryWait)
+	fillRequestTimeout, fillRetryWait = 200*time.Millisecond, time.Millisecond
+	for name, fail := range map[string]http.HandlerFunc{
+		"503":     func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusServiceUnavailable) },
+		"429":     func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusTooManyRequests) },
+		"stalled": func(_ http.ResponseWriter, r *http.Request) { <-r.Context().Done() },
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFillFixture(t)
+			root := f.addBlock(fillTestSlot, 1)
+			good, _ := f.endpoint(false)
+
+			require.NoError(t, f.fill(&BlobArchiveStoreFill{Endpoints: []string{failOnce(t, good, fail)}, FromSlot: fillTestSlot, ToSlot: fillTestSlot}, nil))
+			require.True(t, f.storedValid(fillTestSlot, root))
+		})
+	}
+}
+
+func TestBlobArchiveStoreFillWaitsForRetryAfter(t *testing.T) {
+	defer func(wait time.Duration) { fillRetryWait = wait }(fillRetryWait)
+	fillRetryWait = time.Millisecond
+	f := newFillFixture(t)
+	root := f.addBlock(fillTestSlot, 1)
+	good, _ := f.endpoint(false)
+	url := failOnce(t, good, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Retry-After", "1")
+		w.WriteHeader(http.StatusTooManyRequests)
+	})
+
+	start := time.Now()
+	require.NoError(t, f.fill(&BlobArchiveStoreFill{Endpoints: []string{url}, FromSlot: fillTestSlot, ToSlot: fillTestSlot}, nil))
+	require.True(t, f.storedValid(fillTestSlot, root))
+	require.GreaterOrEqual(t, time.Since(start), time.Second)
+}
+
+func TestBlobArchiveStoreFillDoesNotRetryABadRequest(t *testing.T) {
+	defer func(wait time.Duration) { fillRetryWait = wait }(fillRetryWait)
+	fillRetryWait = time.Millisecond
+	f := newFillFixture(t)
+	root := f.addBlock(fillTestSlot, 1)
+	good, _ := f.endpoint(false)
+	var calls atomic.Int32
+	pruned := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusBadRequest)
+	}))
+	t.Cleanup(pruned.Close)
+
+	require.NoError(t, f.fill(&BlobArchiveStoreFill{Endpoints: []string{pruned.URL, good}, FromSlot: fillTestSlot, ToSlot: fillTestSlot}, nil))
+	require.True(t, f.storedValid(fillTestSlot, root))
+	require.EqualValues(t, 1, calls.Load())
 }
 
 // Providers that authenticate with a query-string key must get the block id in the path.

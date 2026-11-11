@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	goethkzg "github.com/crate-crypto/go-eth-kzg"
 	"github.com/spf13/afero"
@@ -322,6 +323,8 @@ func TestRetrieveBlobsRefusesMoreSidecarsThanCommitments(t *testing.T) {
 // Beacon API providers put the key in the path, the query or the user info, so errors and logs carry only the
 // scheme and host of an endpoint.
 func TestRetrieveBlobsKeepsTheEndpointSecretOutOfErrors(t *testing.T) {
+	defer func(wait time.Duration) { fillRetryWait = wait }(fillRetryWait)
+	fillRetryWait = time.Millisecond
 	closed, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	host := closed.Addr().String()
