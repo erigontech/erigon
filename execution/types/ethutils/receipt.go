@@ -60,6 +60,43 @@ type RPCReceipt struct {
 	BlobGasUsed  *hexutil.Uint64 `json:"blobGasUsed,omitempty" ethjson:"quantity"`
 }
 
+// logsWithTimestamp returns the receipt's logs, and its frame receipts that share them, as the RPC
+// renders them: each log carrying timestamp, or none when timestamp is nil. Logs already in that
+// state are returned as they are; otherwise all are copied, so the cached receipt is never changed.
+func logsWithTimestamp(receipt *types.Receipt, timestamp *hexutil.Uint64) (types.Logs, []types.FrameReceipt) {
+	if receipt.Logs == nil {
+		return types.Logs{}, receipt.FrameReceipts
+	}
+	if !slices.ContainsFunc(receipt.Logs, func(l *types.Log) bool { return !sameTimestamp(l.BlockTimestamp, timestamp) }) {
+		return receipt.Logs, receipt.FrameReceipts
+	}
+	copies := make([]struct {
+		log       types.Log
+		timestamp hexutil.Uint64
+	}, len(receipt.Logs))
+	logs := make(types.Logs, len(receipt.Logs))
+	for i, log := range receipt.Logs {
+		copies[i].log = *log
+		copies[i].log.BlockTimestamp = nil
+		if timestamp != nil {
+			copies[i].timestamp = *timestamp
+			copies[i].log.BlockTimestamp = &copies[i].timestamp
+		}
+		logs[i] = &copies[i].log
+	}
+	frames := receipt.FrameReceipts
+	if len(frames) > 0 {
+		rendered := types.Receipt{FrameReceipts: slices.Clone(frames)}
+		rendered.SetLogs(logs)
+		frames = rendered.FrameReceipts
+	}
+	return logs, frames
+}
+
+func sameTimestamp(a, b *hexutil.Uint64) bool {
+	return a == nil && b == nil || a != nil && b != nil && *a == *b
+}
+
 func MarshalReceipt(
 	receipt *types.Receipt,
 	txn types.Transaction,
@@ -68,6 +105,27 @@ func MarshalReceipt(
 	signed bool,
 	withBlockTimestamp bool,
 ) *RPCReceipt {
+	var timestamp *hexutil.Uint64
+	if withBlockTimestamp {
+		at := hexutil.Uint64(header.Time)
+		timestamp = &at
+	}
+	logs, frames := logsWithTimestamp(receipt, timestamp)
+	result := marshalReceipt(receipt, txn, chainConfig, header, signed, frames)
+	result.Logs, result.LogsBloom = logs, receipt.LogsBloom()
+	return result
+}
+
+// MarshalReceiptWithoutLogs renders a signed receipt without its logs and bloom.
+func MarshalReceiptWithoutLogs(receipt *types.Receipt, txn types.Transaction, chainConfig *chain.Config, header *types.Header) *RPCReceipt {
+	frames := receipt.FrameReceipts
+	if len(frames) > 0 {
+		_, frames = logsWithTimestamp(receipt, nil)
+	}
+	return marshalReceipt(receipt, txn, chainConfig, header, true, frames)
+}
+
+func marshalReceipt(receipt *types.Receipt, txn types.Transaction, chainConfig *chain.Config, header *types.Header, signed bool, frames []types.FrameReceipt) *RPCReceipt {
 	var from *common.Address
 	if signed {
 		sender, ok := txn.GetSender()
@@ -87,36 +145,9 @@ func MarshalReceipt(
 		from = &address
 	}
 
-	var logsToMarshal types.Logs
-	frameReceiptsToMarshal := receipt.FrameReceipts
-
-	switch {
-	case withBlockTimestamp:
-		stamped := make([]struct {
-			log       types.Log
-			timestamp hexutil.Uint64
-		}, len(receipt.Logs))
-		logsToMarshal = make(types.Logs, len(receipt.Logs))
-		for i, log := range receipt.Logs {
-			stamped[i].log = *log
-			stamped[i].timestamp = hexutil.Uint64(header.Time)
-			stamped[i].log.BlockTimestamp = &stamped[i].timestamp
-			logsToMarshal[i] = &stamped[i].log
-		}
-		if len(receipt.FrameReceipts) > 0 {
-			stampedReceipt := types.Receipt{FrameReceipts: slices.Clone(receipt.FrameReceipts)}
-			stampedReceipt.SetLogs(logsToMarshal)
-			frameReceiptsToMarshal = stampedReceipt.FrameReceipts
-		}
-	case receipt.Logs == nil:
-		logsToMarshal = types.Logs{}
-	default:
-		logsToMarshal = receipt.Logs
-	}
-
 	result := &RPCReceipt{
 		Payer:             receipt.Payer,
-		FrameReceipts:     frameReceiptsToMarshal,
+		FrameReceipts:     frames,
 		BlockHash:         receipt.BlockHash,
 		BlockNumber:       hexutil.Uint64(receipt.BlockNumber.Uint64()),
 		TransactionHash:   receipt.TxHash,
@@ -126,8 +157,6 @@ func MarshalReceipt(
 		Type:              hexutil.Uint(txn.Type()),
 		GasUsed:           hexutil.Uint64(receipt.GasUsed),
 		CumulativeGasUsed: hexutil.Uint64(receipt.CumulativeGasUsed),
-		Logs:              logsToMarshal,
-		LogsBloom:         receipt.LogsBloom(),
 	}
 
 	if !chainConfig.IsLondon(header.Number.Uint64()) {

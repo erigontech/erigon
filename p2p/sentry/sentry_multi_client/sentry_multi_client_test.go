@@ -12,7 +12,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"golang.org/x/sync/semaphore"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 
@@ -81,10 +80,9 @@ func TestMultiClient_GetReceipts69(t *testing.T) {
 	}
 
 	cs := &MultiClient{
-		blockReader:                      mockBlockReader,
-		ethApiWrapper:                    mockReceiptsGenerator,
-		getReceiptsActiveGoroutineNumber: semaphore.NewWeighted(1),
-		logger:                           log.New(),
+		blockReader:   mockBlockReader,
+		ethApiWrapper: mockReceiptsGenerator,
+		logger:        log.New(),
 	}
 
 	request := eth.GetReceiptsPacket66{
@@ -106,7 +104,7 @@ func TestMultiClient_GetReceipts69(t *testing.T) {
 			Lo: &proto_types.H256{},
 		},
 	}
-	err = cs.getReceipts69(ctx, inreq, mockSentry)
+	err = cs.HandleInboundMessage(ctx, inreq, mockSentry)
 	if err != nil {
 		t.Fatalf("getReceipts69 failed: %v", err)
 	}
@@ -126,8 +124,7 @@ func TestMultiClient_GetReceipts69(t *testing.T) {
 		t.Errorf("Expected request ID %d, got %d", request.RequestId, response.RequestId)
 	}
 
-	// Decode the receipt to verify Bloom field is not populated
-	// The ReceiptsRLPPacket contains an RLP-encoded list of receipts
+	// ETH69 omits the bloom field from the wire encoding.
 	var receiptsList []*receiptRLP69
 	if err := rlp.DecodeBytes(response.ReceiptsRLPPacket[0], &receiptsList); err != nil {
 		t.Fatalf("Failed to decode receipts list: %v", err)
