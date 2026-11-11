@@ -73,64 +73,6 @@ type BranchCell struct {
 	StateHash   []byte
 }
 
-func (branchData BranchData) AppendWithoutHashes(dst []byte) ([]byte, error) {
-	return appendBranchHashes(dst, branchData, false)
-}
-
-func AppendZeroHashes(dst, branch []byte) ([]byte, error) {
-	return appendBranchHashes(dst, branch, true)
-}
-
-func appendBranchHashes(dst, src []byte, zeros bool) ([]byte, error) {
-	if len(src) < 4 {
-		return dst, fmt.Errorf("branch data too short: %d bytes", len(src))
-	}
-	if !BranchData(src).IsComplete() {
-		return dst, fmt.Errorf("branch data is a partial update: touchMap %04x afterMap %04x",
-			binary.BigEndian.Uint16(src[0:]), binary.BigEndian.Uint16(src[2:]))
-	}
-	dst = append(dst, src[:4]...)
-	pos := 4
-	for bitset := binary.BigEndian.Uint16(src[2:]); bitset != 0; bitset &= bitset - 1 {
-		if pos >= len(src) {
-			return dst, fmt.Errorf("branch data truncated before cell at nibble %d", bits.TrailingZeros16(bitset))
-		}
-		fields := cellFields(src[pos])
-		if fields&^(fieldExtension|fieldAccountAddr|fieldStorageAddr|fieldHash|fieldStateHash) != 0 {
-			return dst, fmt.Errorf("unknown cell fields %08b", fields)
-		}
-		dst = append(dst, src[pos])
-		pos++
-		for _, f := range [...]cellFields{fieldExtension, fieldAccountAddr, fieldStorageAddr, fieldHash, fieldStateHash} {
-			if fields&f == 0 {
-				continue
-			}
-			l, n, err := readUvarint(src[pos:])
-			if err != nil {
-				return dst, fmt.Errorf("cell %v: %w", f, err)
-			}
-			dst = append(dst, src[pos:pos+n]...)
-			pos += n
-			hash := f == fieldHash || f == fieldStateHash
-			if hash && zeros {
-				dst = append(dst, make([]byte, l)...)
-				continue
-			}
-			if uint64(len(src)-pos) < l {
-				return dst, fmt.Errorf("cell %v: %d bytes past the end", f, uint64(pos)+l-uint64(len(src)))
-			}
-			if !hash {
-				dst = append(dst, src[pos:pos+int(l)]...)
-			}
-			pos += int(l)
-		}
-	}
-	if pos != len(src) {
-		return dst, fmt.Errorf("branch data has %d trailing bytes", len(src)-pos)
-	}
-	return dst, nil
-}
-
 func (branchData BranchData) ForEachCell(fn func(nibble int, c BranchCell) error) error {
 	if len(branchData) < 4 {
 		return fmt.Errorf("branch data too short: %d bytes", len(branchData))

@@ -17,14 +17,12 @@
 package commitment
 
 import (
-	"bytes"
 	"encoding/binary"
 	"math/rand"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
@@ -90,38 +88,6 @@ func TestForEachCellRejectsInvalidBranch(t *testing.T) {
 			require.ErrorContains(t, err, tc.want)
 		})
 	}
-}
-
-func TestBranchDataWithoutHashesRoundTrip(t *testing.T) {
-	rng := rand.New(rand.NewSource(1))
-	random := func(n int) []byte {
-		b := make([]byte, n)
-		rng.Read(b)
-		return b
-	}
-	branch := branchOfCells(t,
-		cellOf(byte(fieldHash), random(length.Hash)),
-		cellOf(byte(fieldExtension|fieldHash), []byte{1, 2, 3}, random(length.Hash)),
-		cellOf(byte(fieldAccountAddr|fieldHash|fieldStateHash), random(length.Addr), random(length.Hash), random(length.Hash)),
-		cellOf(byte(fieldAccountAddr|fieldStorageAddr), random(length.Addr), random(length.Addr+length.Hash)),
-		cellOf(byte(fieldHash), random(17)),
-	)
-	compact, err := branch.AppendWithoutHashes(nil)
-	require.NoError(t, err)
-	require.Len(t, compact, len(branch)-4*length.Hash-17)
-
-	expanded, err := AppendZeroHashes(nil, compact)
-	require.NoError(t, err)
-	want := BranchData(bytes.Clone(branch))
-	require.NoError(t, want.ForEachCell(func(_ int, c BranchCell) error {
-		clear(c.Hash)
-		clear(c.StateHash)
-		return nil
-	}))
-	require.Equal(t, want, BranchData(expanded))
-
-	_, err = BranchData{0, 0, 0, 1}.AppendWithoutHashes(nil)
-	require.ErrorContains(t, err, "partial update")
 }
 
 func contractHashFromPrefixReference(prefix []byte) (hash [32]byte, ok bool) {
