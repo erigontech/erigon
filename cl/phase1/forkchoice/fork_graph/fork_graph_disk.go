@@ -829,20 +829,22 @@ func (f *forkGraphDisk) storeLightClientUpdate(update *cltypes.LightClientUpdate
 // GetLightClientUpdate returns the best update of a sync committee period: the one finalization settled, or a better
 // candidate whose signature block is on head's chain. A zero head gives the settled update only.
 func (f *forkGraphDisk) GetLightClientUpdate(period uint64, head common.Hash) (*cltypes.LightClientUpdate, bool) {
+	// Finalization moves candidates into the period store under the write lock, so both are read in one state.
+	f.lightClientUpdateCandidatesMu.RLock()
+	defer f.lightClientUpdateCandidatesMu.RUnlock()
 	var best *cltypes.LightClientUpdate
 	if obj, ok := f.lightClientUpdates.Load(period); ok {
 		best = obj.(*cltypes.LightClientUpdate)
 	}
-	if candidate := f.bestLightClientUpdateCandidate(period, head); candidate != nil && (best == nil || lightclient_utils.IsBetterUpdate(f.beaconCfg, candidate, best)) {
+	if candidate := f.bestLightClientUpdateCandidateLocked(period, head); candidate != nil && (best == nil || lightclient_utils.IsBetterUpdate(f.beaconCfg, candidate, best)) {
 		best = candidate
 	}
 	return best, best != nil
 }
 
-// bestLightClientUpdateCandidate returns the best candidate of period whose signature block is on head's chain.
-func (f *forkGraphDisk) bestLightClientUpdateCandidate(period uint64, head common.Hash) *cltypes.LightClientUpdate {
-	f.lightClientUpdateCandidatesMu.RLock()
-	defer f.lightClientUpdateCandidatesMu.RUnlock()
+// bestLightClientUpdateCandidateLocked returns the best candidate of period whose signature block is on head's chain.
+// The caller holds lightClientUpdateCandidatesMu.
+func (f *forkGraphDisk) bestLightClientUpdateCandidateLocked(period uint64, head common.Hash) *cltypes.LightClientUpdate {
 	lowest := uint64(math.MaxUint64)
 	for _, update := range f.lightClientUpdateCandidates {
 		if f.beaconCfg.SyncCommitteePeriod(update.SignatureSlot) == period {

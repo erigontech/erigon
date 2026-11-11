@@ -275,3 +275,33 @@ func TestGetLightClientUpdateRanksTheCandidatesOnTheHeadChain(t *testing.T) {
 		})
 	}
 }
+
+// A lookup that runs while finalization moves the period's candidate into the period store still finds an update.
+func TestGetLightClientUpdateDuringFinalization(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	p := cfg.SlotsPerEpoch * cfg.EpochsPerSyncCommitteePeriod
+	attested, canonical, finalized := common.Hash{1}, common.Hash{2}, common.Hash{3}
+	for range 2000 {
+		f := &forkGraphDisk{beaconCfg: cfg}
+		f.headers.Store(attested, &cltypes.BeaconBlockHeader{Slot: p + 10})
+		f.headers.Store(canonical, &cltypes.BeaconBlockHeader{Slot: p + 11, ParentRoot: attested})
+		f.headers.Store(finalized, &cltypes.BeaconBlockHeader{Slot: p + 64, ParentRoot: canonical})
+		f.recordLightClientUpdateLocked(canonical, lightClientTestUpdate(cfg, 400, p+10))
+
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			f.KeepFinalizedLightClientUpdates(finalized)
+		}()
+		for {
+			_, ok := f.GetLightClientUpdate(1, finalized)
+			require.True(t, ok)
+			select {
+			case <-done:
+			default:
+				continue
+			}
+			break
+		}
+	}
+}
