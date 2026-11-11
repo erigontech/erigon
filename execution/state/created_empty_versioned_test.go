@@ -17,6 +17,7 @@
 package state
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -68,6 +69,28 @@ func TestSetEmptyRemoval(t *testing.T) {
 		ch, ok := ws.GetCodeHash(addr)
 		require.True(t, ok && ch.Deletes(), "a destroyed contract stamps the code-deleted marker (was a contract, code removed)")
 	})
+}
+
+// A created-then-destructed account decides emptiness from its own writes: a failing base read proves no base read ran.
+func TestEncodeExistingEmptyRemovals_CreatedSelfDestructSkipsBaseRead(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0xc1})
+	vm := NewVersionMap(nil)
+	ibs := New(NewVersionedStateReader(0, ReadSet{}, vm, &failingBaseReader{err: errors.New("domain read failed")}))
+	ibs.SetTxContext(1, 0)
+	ibs.SetVersion(0)
+	ibs.SetVersionMap(vm)
+	ver := ibs.Version()
+	writes := newWriteSet(
+		&VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: CreateContractPath, Version: ver}, Val: true},
+		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: ver}},
+	)
+
+	ibs.encodeExistingEmptyRemovals(&chain.Rules{IsSpuriousDragon: true}, writes, map[accounts.Address]struct{}{addr: {}})
+
+	require.NoError(t, ibs.StateReadError())
+	ch, ok := writes.GetCodeHash(addr)
+	require.True(t, ok && ch.Deletes(), "the code-deleted marker is present")
 }
 
 func TestFinalizedWritesWithholdCreatedEmptyAccount(t *testing.T) {
@@ -516,4 +539,50 @@ func TestRecreateAfterEmptyRemovalShadowsBalanceDelete(t *testing.T) {
 			require.Equal(t, uint64(1), acc.Nonce)
 		})
 	}
+}
+
+func TestCreatedSelfDestructEmpty(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0xd0})
+	realSD := map[accounts.Address]struct{}{addr: {}}
+	writes := func(created bool, bal uint64) *WriteSet {
+		ws := &WriteSet{}
+		if created {
+			ws.SetCreateContract(addr, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: CreateContractPath}, Val: true})
+		}
+		ws.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath}, Val: *uint256.NewInt(bal)})
+		return ws
+	}
+
+	empty, known := createdSelfDestructEmpty(writes(true, 0), realSD, addr)
+	require.True(t, known)
+	require.True(t, empty, "created, self-destructed, no balance left: removed")
+
+	empty, known = createdSelfDestructEmpty(writes(true, 7), realSD, addr)
+	require.True(t, known)
+	require.False(t, empty, "a balance left after the self-destruct keeps the account")
+
+	_, known = createdSelfDestructEmpty(writes(false, 0), realSD, addr)
+	require.False(t, known, "an account that existed before the tx needs the account view")
+
+	_, known = createdSelfDestructEmpty(writes(true, 0), nil, addr)
+	require.False(t, known, "without a real self-destruct the account view decides")
+}
+
+func TestFinalizedWritesCreatedSelfDestructKeepsCodeDeletedMarker(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0xd1})
+	ibs := NewWithVersionMap(&minimalStateReader{}, NewVersionMap(nil))
+	t.Cleanup(ibs.Close)
+	ibs.SetTxContext(1, 0)
+	require.NoError(t, ibs.CreateAccount(addr, true))
+	require.NoError(t, ibs.SetCode(addr, []byte{0x60, 0x00}, tracing.CodeChangeUnspecified))
+	_, err := ibs.Selfdestruct(addr, false)
+	require.NoError(t, err)
+
+	writes := finalizedWrites(t, ibs, &chain.Rules{IsSpuriousDragon: true, IsCancun: true})
+
+	sd, ok := writes.GetSelfDestruct(addr)
+	require.True(t, ok && sd.Val, "the created contract is removed")
+	ch, ok := writes.GetCodeHash(addr)
+	require.True(t, ok && ch.Deletes(), "a destroyed contract keeps the code-deleted marker, so the fee calc burns its delayed fee")
 }

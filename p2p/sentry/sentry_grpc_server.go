@@ -476,6 +476,11 @@ func runPeer(
 			return p2p.NewPeerError(p2p.PeerErrorMessageSizeLimit, p2p.DiscSubprotocolError, nil, fmt.Sprintf("sentry.runPeer: message is too large %d, limit %d", msg.Size, eth.ProtocolMaxMsgSize))
 		}
 
+		if protocol >= direct.ETH69 && (msg.Code == eth.NewBlockHashesMsg || msg.Code == eth.NewBlockMsg) {
+			msg.Discard()
+			return p2p.NewPeerError(p2p.PeerErrorInvalidMessage, p2p.DiscSubprotocolError, nil, fmt.Sprintf("sentry.runPeer: deprecated block announcement (code %d) on eth/%d", msg.Code, protocol))
+		}
+
 		givePermit := false
 		switch msg.Code {
 		case eth.StatusMsg:
@@ -659,7 +664,11 @@ func runPeer(
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		default:
-			logger.Error("[p2p] Unknown message code", "code", msg.Code, "peer", hex.EncodeToString(peerID[:]))
+			if _, known := eth.ToProto[protocol][msg.Code]; known {
+				logger.Error("[p2p] Message code has no handler", "code", msg.Code, "protocol", protocol)
+			}
+			msg.Discard()
+			return p2p.NewPeerError(p2p.PeerErrorInvalidMessage, p2p.DiscSubprotocolError, nil, fmt.Sprintf("sentry.runPeer: unknown message code %d", msg.Code))
 		}
 
 		if diaglib.TypeOf(diaglib.PeerStatisticMsgUpdate{}).Enabled() {

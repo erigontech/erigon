@@ -46,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/ethutils"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/program"
 	"github.com/erigontech/erigon/rpc"
@@ -90,6 +91,40 @@ func TestGetLogsFromPersistedReceipts(t *testing.T) {
 		require.Equal(t, c.Blocks[0].Transactions()[i].Hash(), l.TxHash)
 		require.Equal(t, []common.Hash{topics[i]}, l.Topics)
 	}
+}
+
+// TestGetReceiptAssertsBeforeStamping re-executes a persisted receipt with logs under ERIGON_ASSERT,
+// which compares it with the persisted one before the cache stamps its logs with the block time.
+func TestGetReceiptAssertsBeforeStamping(t *testing.T) {
+	defer func(prev bool) { dbg.AssertEnabled = prev }(dbg.AssertEnabled)
+	dbg.AssertEnabled = true
+
+	m := execmoduletester.New(
+		t,
+		execmoduletester.WithGenesisSpec(&types.Genesis{
+			Config: chain.TestChainBerlinConfig,
+			Alloc:  types.GenesisAlloc{testAddr: {Balance: big.NewInt(1_000_000_000)}},
+		}),
+		execmoduletester.WithKey(testKey),
+		execmoduletester.WithEnableDomain(kv.RCacheDomain),
+	)
+	signer := types.LatestSignerForChainID(nil)
+	logOnCreate := []byte{0x60, 0x00, 0x60, 0x00, 0xa0, 0x00} // PUSH1 0 PUSH1 0 LOG0 STOP
+	c, err := m.GenerateChain(1, func(i int, block *blockgen.BlockGen) {
+		txn, err := types.SignTx(types.NewContractCreation(block.TxNonce(testAddr), uint256.NewInt(0), 100_000, uint256.NewInt(1), logOnCreate), *signer, testKey)
+		require.NoError(t, err)
+		block.AddTx(txn)
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(c))
+
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	var receipt *ethutils.RPCReceipt
+	require.NotPanics(t, func() {
+		receipt, err = api.GetTransactionReceipt(m.Ctx, c.Blocks[0].Transactions()[0].Hash())
+	})
+	require.NoError(t, err)
+	require.Len(t, receipt.Logs, 1)
 }
 
 func TestGetLogs(t *testing.T) {
@@ -1070,4 +1105,23 @@ func TestGetReceiptChecksCanonicalInReadViewNotLiveBackend(t *testing.T) {
 	require.NoError(t, err)
 	_, cached := gen.TryGetCachedReceipt(block.Hash(), txNum, 0)
 	require.False(t, cached)
+}
+
+// TestGetLogsServesCachedLogsWithoutCopy pins that receipts enter the cache with their logs
+// stamped, so a repeated eth_getLogs returns the cached logs themselves.
+func TestGetLogsServesCachedLogsWithoutCopy(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	crit := filters.FilterCriteria{FromBlock: big.NewInt(0), ToBlock: big.NewInt(rpc.LatestBlockNumber.Int64())}
+
+	first, err := api.GetLogs(m.Ctx, crit)
+	require.NoError(t, err)
+	require.NotEmpty(t, first)
+	second, err := api.GetLogs(m.Ctx, crit)
+	require.NoError(t, err)
+	require.Len(t, second, len(first))
+	for i := range first {
+		require.Same(t, first[i], second[i])
+		require.NotNil(t, second[i].BlockTimestamp)
+	}
 }

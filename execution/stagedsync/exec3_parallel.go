@@ -2962,9 +2962,9 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 					reads.SetNonce(sender, state.VersionedRead[uint64]{ReadHeader: state.ReadHeader{Source: state.StorageRead}, Val: charged.Nonce})
 				}
 				be.blockIO.RecordReads(txVersion, reads)
+				be.versionMap.FlushVersionedWrites(senderWrites, false)
 				ownedWrites = be.blockIO.WriteSet(txVersion.TxIndex).Merge(senderWrites)
 				be.blockIO.RecordWrites(txVersion, ownedWrites)
-				be.versionMap.FlushVersionedWrites(senderWrites, false)
 				be.markReadersDirty(tx, senderWrites)
 				// A charge-at-validation sender's gas debit is not in the worker's TxOut, so
 				// calcFees' coinbase/burnt override (which reads TxOut) would miss it and credit
@@ -2976,14 +2976,14 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 				return nil, err
 			}
 			if !tipWrites.IsEmpty() {
+				// Flush the tip as an Estimate; the whole tx is promoted to Done at the
+				// seal point below.
+				be.versionMap.FlushVersionedWrites(tipWrites, false)
 				if ownedWrites != nil {
 					ownedWrites.MergeFrom(tipWrites)
 				} else {
 					be.blockIO.RecordWrites(txVersion, be.blockIO.WriteSet(txVersion.TxIndex).Merge(tipWrites))
 				}
-				// Flush the tip as an Estimate; the whole tx is promoted to Done at the
-				// seal point below.
-				be.versionMap.FlushVersionedWrites(tipWrites, false)
 				be.markReadersDirty(tx, tipWrites)
 			}
 		}

@@ -968,7 +968,7 @@ func TestAddChainSegmentDoesNotQueueLightClientEventsOnError(t *testing.T) {
 }
 
 func TestAddChainSegmentQueuesLightClientEventsOnSuccess(t *testing.T) {
-	update := &cltypes.LightClientUpdate{}
+	update := cltypes.NewLightClientUpdate(clparams.AltairVersion, &clparams.MainnetBeaconConfig)
 	store := &ForkChoiceStore{
 		forkGraph: &getFinalizedExecutionHashForkGraph{
 			afterUpdate:           update,
@@ -983,6 +983,48 @@ func TestAddChainSegmentQueuesLightClientEventsOnSuccess(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, fork_graph.Success, status)
 	require.Len(t, store.queuedEmits, 1)
+}
+
+// Light client events take the fork of the update's attested header, which at a fork boundary is older than the
+// block's.
+func TestLightClientEventsTakeTheAttestedHeaderFork(t *testing.T) {
+	update := cltypes.NewLightClientUpdate(clparams.DenebVersion, &clparams.MainnetBeaconConfig)
+	store := &ForkChoiceStore{
+		forkGraph: &getFinalizedExecutionHashForkGraph{
+			afterUpdate:           update,
+			addChainSegmentStatus: fork_graph.Success,
+		},
+		emitters: beaconevents.NewEventEmitter(),
+	}
+	events := make(chan *beaconevents.EventStream, 2)
+	subscription := store.emitters.State().Subscribe(events)
+	defer subscription.Unsubscribe()
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.ElectraVersion)
+
+	_, _, err := store.addChainSegmentAndQueueLightClientEvents(block, true)
+	require.NoError(t, err)
+	require.Len(t, store.queuedEmits, 1)
+	store.queuedEmits[0]()
+
+	finality := (<-events).Data.(*beaconevents.LightClientFinalityUpdateData)
+	optimistic := (<-events).Data.(*beaconevents.LightClientOptimisticUpdateData)
+	require.Equal(t, clparams.DenebVersion.String(), finality.Version)
+	require.Equal(t, clparams.DenebVersion.String(), optimistic.Version)
+}
+
+// A newer finalized checkpoint settles the fork graph's light client update candidates, once.
+func TestUpdateCheckpointsKeepsFinalizedLightClientUpdates(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	finalizedRoot := common.Hash{0x51}
+	graph := &getFinalizedExecutionHashForkGraph{headers: map[common.Hash]*cltypes.BeaconBlockHeader{finalizedRoot: {}}}
+	store := &ForkChoiceStore{forkGraph: graph, beaconCfg: &cfg, emitters: beaconevents.NewEventEmitter()}
+	store.justifiedCheckpoint.Store(solid.Checkpoint{})
+	store.finalizedCheckpoint.Store(solid.Checkpoint{})
+
+	store.updateCheckpoints(solid.Checkpoint{}, solid.Checkpoint{Epoch: 2, Root: finalizedRoot})
+	store.updateCheckpoints(solid.Checkpoint{}, solid.Checkpoint{Epoch: 2, Root: finalizedRoot})
+
+	require.Equal(t, []common.Hash{finalizedRoot}, graph.keptLightClientRoots)
 }
 
 func TestUpdateCheckpointsPrunesOperationsWithExactFinalizedState(t *testing.T) {
@@ -1868,6 +1910,11 @@ type getFinalizedExecutionHashForkGraph struct {
 	anchorSlot            uint64
 	currentJustified      solid.Checkpoint
 	hasBlockEquivocation  bool
+	keptLightClientRoots  []common.Hash
+}
+
+func (g *getFinalizedExecutionHashForkGraph) KeepFinalizedLightClientUpdates(finalized common.Hash) {
+	g.keptLightClientRoots = append(g.keptLightClientRoots, finalized)
 }
 
 func (g *getFinalizedExecutionHashForkGraph) HasBlockEquivocation(uint64, uint64, common.Hash) bool {
@@ -1892,6 +1939,14 @@ func TestOnBlockWithEquivocationCheckRejectsKnownGloasConflict(t *testing.T) {
 func (g *getFinalizedExecutionHashForkGraph) AddChainSegment(*cltypes.SignedBeaconBlock, bool) (*state.CachingBeaconState, fork_graph.ChainSegmentInsertionResult, error) {
 	g.addChainSegmentCalled = true
 	return nil, g.addChainSegmentStatus, g.addChainSegmentErr
+}
+
+func (g *getFinalizedExecutionHashForkGraph) BeginChainSegment(*cltypes.SignedBeaconBlock, bool) (*fork_graph.ChainSegment, fork_graph.ChainSegmentInsertionResult, error) {
+	return nil, fork_graph.ReplayRequired, nil
+}
+
+func (g *getFinalizedExecutionHashForkGraph) CommitChainSegment(*fork_graph.ChainSegment) (*state.CachingBeaconState, fork_graph.ChainSegmentInsertionResult, error) {
+	panic("BeginChainSegment never starts a segment")
 }
 
 func (g *getFinalizedExecutionHashForkGraph) SetNextEpochState(common.Hash, *state.CachingBeaconState) {
