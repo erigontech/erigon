@@ -138,6 +138,8 @@ type ForkChoiceStore struct {
 	// childrens
 	childrens sync.Map
 
+	hasEquivocator bool
+
 	// Use go map because this is actually an unordered set
 	equivocatingIndicies []byte
 	forkGraph            fork_graph.ForkGraph
@@ -683,9 +685,9 @@ func (f *ForkChoiceStore) HasImportedDescendantAfter(root common.Hash, slot uint
 	return false
 }
 
-// markViableUncutBlocks is getFilterBlockTree without the children an invalidation cut off: a
-// block whose other children are all cut off is judged as a leaf, as get_head judges its EMPTY
-// node.
+// markViableUncutBlocks collects the viable blocks of the subtree, skipping children an
+// invalidation cut off. A block whose children are all cut off is judged as a leaf, as get_head
+// judges its EMPTY node.
 func (f *ForkChoiceStore) markViableUncutBlocks(blockRoot common.Hash, blocks map[common.Hash]*cltypes.BeaconBlockHeader, currentEpoch uint64, justified solid.Checkpoint) bool {
 	header, has := f.forkGraph.GetHeader(blockRoot)
 	if !has {

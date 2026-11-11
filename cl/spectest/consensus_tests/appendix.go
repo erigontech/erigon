@@ -115,7 +115,7 @@ func init() {
 	TestFormats.Add("ssz_generic").
 		With("", spectest.UnimplementedHandler)
 	TestFormats.Add("sync").
-		With("", spectest.UnimplementedHandler)
+		With("optimistic", &ForkChoice{})
 	TestFormats.Add("transition").
 		With("core", &TransitionCore{})
 	TestFormats.Add("networking").
