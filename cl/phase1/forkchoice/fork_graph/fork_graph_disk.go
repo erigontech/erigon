@@ -886,16 +886,17 @@ func (f *forkGraphDisk) GetLightClientUpdates(startPeriod, endPeriod uint64, hea
 	// another branch adds none of its candidates to that branch's settled updates.
 	found := make([]*cltypes.LightClientUpdate, len(updates))
 	onFinalizedChain := f.lightClientFinalized == (common.Hash{})
-	header, ok := f.GetHeader(head)
-	for ok && (header.Slot >= lowest || !onFinalizedChain) {
-		if !onFinalizedChain && header.Slot <= f.lightClientFinalizedSlot {
-			if head != f.lightClientFinalized {
-				return updates
-			}
+	for {
+		// The finalized root is recognised before its header is read: pruning can hide that header.
+		if !onFinalizedChain && head == f.lightClientFinalized {
 			onFinalizedChain = true
-			if header.Slot < lowest {
-				break
-			}
+		}
+		header, ok := f.GetHeader(head)
+		if !ok || (onFinalizedChain && header.Slot < lowest) {
+			break
+		}
+		if !onFinalizedChain && header.Slot <= f.lightClientFinalizedSlot {
+			return updates // past the finalized slot on another branch
 		}
 		period := f.beaconCfg.SyncCommitteePeriod(header.Slot)
 		if update, isCandidate := f.lightClientUpdateCandidates[period][head]; isCandidate && period >= startPeriod && period < endPeriod {
@@ -904,7 +905,6 @@ func (f *forkGraphDisk) GetLightClientUpdates(startPeriod, endPeriod uint64, hea
 			}
 		}
 		head = header.ParentRoot
-		header, ok = f.GetHeader(head)
 	}
 	if !onFinalizedChain {
 		return updates

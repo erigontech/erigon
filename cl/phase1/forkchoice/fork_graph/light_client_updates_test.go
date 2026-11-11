@@ -383,3 +383,24 @@ func TestGetLightClientUpdatesIgnoresAHeadOffTheFinalizedChain(t *testing.T) {
 	require.Equal(t, []*cltypes.LightClientUpdate{settled}, f.GetLightClientUpdates(1, 2, a1), "the stale head's candidate is not served")
 	require.Equal(t, []*cltypes.LightClientUpdate{settled}, f.GetLightClientUpdates(1, 2, b2))
 }
+
+// Pruning can hide the finalized block's own header while the head still descends from it: the walk recognises the
+// finalized root without loading its header.
+func TestGetLightClientUpdatesServesCandidatesWhenTheFinalizedHeaderIsPruned(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	f := &forkGraphDisk{beaconCfg: cfg}
+	p := cfg.SlotsPerEpoch * cfg.EpochsPerSyncCommitteePeriod
+	fin, c, head := common.Hash{1}, common.Hash{2}, common.Hash{3}
+	f.headers.Store(fin, &cltypes.BeaconBlockHeader{Slot: p + 10})
+	f.headers.Store(c, &cltypes.BeaconBlockHeader{Slot: p + 40, ParentRoot: fin})
+	f.headers.Store(head, &cltypes.BeaconBlockHeader{Slot: p + 50, ParentRoot: c})
+	candidate := lightClientTestUpdate(cfg, 400, p+39)
+	f.recordLightClientUpdateLocked(c, candidate)
+	f.KeepFinalizedLightClientUpdates(fin)
+
+	f.lowestAvailableBlock.Store(p + 20)
+	_, visible := f.GetHeader(fin)
+	require.False(t, visible, "the finalized header is below the pruned boundary")
+
+	require.Equal(t, []*cltypes.LightClientUpdate{candidate}, f.GetLightClientUpdates(1, 2, head))
+}
