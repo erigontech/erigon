@@ -19,7 +19,6 @@ package handlers
 import (
 	"context"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon/cl/sentinel/communication"
@@ -135,7 +134,8 @@ type peerRateLimiter struct {
 	buckets sync.Map // map[peerProtocolKey]*tokenBucket
 
 	// concurrency maps peerID -> current in-flight request count
-	concurrency sync.Map // map[string]*atomic.Int32
+	concurrencyMu sync.Mutex
+	concurrency   map[string]int // an idle peer has no entry
 
 	// punished maps (peerID, protocol) -> punishment expiry time
 	punished sync.Map // map[peerProtocolKey]time.Time
@@ -151,6 +151,7 @@ const blockRateBurst = 128
 func newPeerRateLimiter() *peerRateLimiter {
 	rl := &peerRateLimiter{
 		protocolLimits: make(map[string]protocolRateConfig),
+		concurrency:    make(map[string]int),
 		now:            time.Now,
 	}
 
@@ -273,25 +274,24 @@ func (rl *peerRateLimiter) consumeTokens(peerID string, protocol string, cost in
 // acquireConcurrency tries to increment the in-flight count for a peer.
 // Returns true if the request is allowed (under the concurrency cap).
 func (rl *peerRateLimiter) acquireConcurrency(peerID string) bool {
-	counterI, _ := rl.concurrency.LoadOrStore(peerID, &atomic.Int32{})
-	counter := counterI.(*atomic.Int32)
-	for {
-		cur := counter.Load()
-		if cur >= int32(maxConcurrentRequestsPerPeer) {
-			return false
-		}
-		if counter.CompareAndSwap(cur, cur+1) {
-			return true
-		}
+	rl.concurrencyMu.Lock()
+	defer rl.concurrencyMu.Unlock()
+	if rl.concurrency[peerID] >= maxConcurrentRequestsPerPeer {
+		return false
 	}
+	rl.concurrency[peerID]++
+	return true
 }
 
 // releaseConcurrency decrements the in-flight count for a peer.
 func (rl *peerRateLimiter) releaseConcurrency(peerID string) {
-	if counterI, ok := rl.concurrency.Load(peerID); ok {
-		counter := counterI.(*atomic.Int32)
-		counter.Add(-1)
+	rl.concurrencyMu.Lock()
+	defer rl.concurrencyMu.Unlock()
+	if rl.concurrency[peerID] <= 1 {
+		delete(rl.concurrency, peerID)
+		return
 	}
+	rl.concurrency[peerID]--
 }
 
 // startCleanup runs a background goroutine that periodically evicts stale
@@ -334,10 +334,4 @@ func (rl *peerRateLimiter) cleanup() {
 		}
 		return true
 	})
-
-	// Concurrency entries are not cleaned up. Each is a single *atomic.Int32
-	// per peer (~40 bytes), so even over the lifetime of a long-running node
-	// the memory is negligible. Cleaning them up would require synchronization
-	// with acquireConcurrency/releaseConcurrency that adds complexity for no
-	// practical benefit.
 }

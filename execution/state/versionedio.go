@@ -8,10 +8,11 @@ import (
 	"fmt"
 	"iter"
 	"maps"
+	"runtime"
 	"slices"
-	"sort"
 	"strconv"
 	"sync"
+	"sync/atomic"
 
 	g "github.com/anacrolix/generics"
 	"github.com/heimdalr/dag"
@@ -723,9 +724,13 @@ func (h WriteHeader) Deletes() bool { return h.valStatus == ValueDeleted }
 // step of an intra-tx oscillation.
 type VersionedWrite[T any] struct {
 	WriteHeader
-	Val  T
-	orig T
+	Val   T
+	orig  T
+	cell  *WriteCell[T]
+	entry *AddressEntry
 }
+
+func (w *VersionedWrite[T]) bind(e *AddressEntry, c *WriteCell[T]) { w.cell, w.entry = c, e }
 
 func cloneVW[T any](w *VersionedWrite[T]) *VersionedWrite[T] {
 	c := *w
@@ -784,22 +789,27 @@ func getVWStorage() *VersionedWrite[uint256.Int] {
 	return vwPoolStorage.Get().(*VersionedWrite[uint256.Int])
 }
 
+func putVW[T any](pool *sync.Pool, vw *VersionedWrite[T]) {
+	vw.cell, vw.entry = nil, nil
+	pool.Put(vw)
+}
+
 func releaseVWAddress(vw *VersionedWrite[*accounts.Account]) {
 	vw.Val = nil // unpin
-	vwPoolAddress.Put(vw)
+	putVW(&vwPoolAddress, vw)
 }
-func releaseVWBalance(vw *VersionedWrite[uint256.Int]) { vwPoolBalance.Put(vw) }
-func releaseVWNonce(vw *VersionedWrite[uint64])        { vwPoolNonce.Put(vw) }
-func releaseVWIncarnation(vw *VersionedWrite[uint64])  { vwPoolIncarnation.Put(vw) }
-func releaseVWSelfDestruct(vw *VersionedWrite[bool])   { vwPoolSelfDestruct.Put(vw) }
-func releaseVWCreateContract(vw *VersionedWrite[bool]) { vwPoolCreateContract.Put(vw) }
+func releaseVWBalance(vw *VersionedWrite[uint256.Int]) { putVW(&vwPoolBalance, vw) }
+func releaseVWNonce(vw *VersionedWrite[uint64])        { putVW(&vwPoolNonce, vw) }
+func releaseVWIncarnation(vw *VersionedWrite[uint64])  { putVW(&vwPoolIncarnation, vw) }
+func releaseVWSelfDestruct(vw *VersionedWrite[bool])   { putVW(&vwPoolSelfDestruct, vw) }
+func releaseVWCreateContract(vw *VersionedWrite[bool]) { putVW(&vwPoolCreateContract, vw) }
 func releaseVWCode(vw *VersionedWrite[accounts.Code]) {
 	vw.Val = accounts.Code{} // unpin bytecode
-	vwPoolCode.Put(vw)
+	putVW(&vwPoolCode, vw)
 }
-func releaseVWCodeHash(vw *VersionedWrite[accounts.CodeHash]) { vwPoolCodeHash.Put(vw) }
-func releaseVWCodeSize(vw *VersionedWrite[int])               { vwPoolCodeSize.Put(vw) }
-func releaseVWStorage(vw *VersionedWrite[uint256.Int])        { vwPoolStorage.Put(vw) }
+func releaseVWCodeHash(vw *VersionedWrite[accounts.CodeHash]) { putVW(&vwPoolCodeHash, vw) }
+func releaseVWCodeSize(vw *VersionedWrite[int])               { putVW(&vwPoolCodeSize, vw) }
+func releaseVWStorage(vw *VersionedWrite[uint256.Int])        { putVW(&vwPoolStorage, vw) }
 
 // Slabs double from a small first one, so a path that writes a handful of cells
 // buys a handful and a path that writes thousands still amortizes. A reusing set
@@ -2740,9 +2750,8 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 // BlockAccessListBuilder assembles the block access list one tx index at a time,
 // so a block's list can be built while its txs are published.
 type BlockAccessListBuilder struct {
-	ac        map[accounts.Address]*accountState
-	next      int
-	finalized bool
+	ac   map[accounts.Address]*accountState
+	next int
 }
 
 func NewBlockAccessListBuilder() *BlockAccessListBuilder {
@@ -2882,17 +2891,21 @@ func (b *BlockAccessListBuilder) Add(txIndex int, rs ReadSet, writes *WriteSet) 
 				account.applyWriteStorage(key, w.Val, w.Version.blockAccessIndex())
 			}
 		}
-		// EIP-7928 requires every touched address to appear; a sweep over the
-		// full address union covers the paths the value-carrying loops above
-		// didn't already register.
-		for addr := range writes.addrs() {
+		// EIP-7928 requires every touched address to appear; these paths carry
+		// no value the loops above record.
+		registerAddrs(ac, writes.address)
+		registerAddrs(ac, writes.incarnation)
+		registerAddrs(ac, writes.selfDestruct)
+		registerAddrs(ac, writes.codeHash)
+		registerAddrs(ac, writes.codeSize)
+		for addr, w := range writes.createContract {
 			if addr.IsNil() {
 				continue
 			}
 			account := ensureAccountState(ac, addr)
 			// A contract created this block has empty pre-block code; applyToCode
 			// uses this to drop a net-zero empty code change.
-			if vw, ok := writes.GetCreateContract(addr); ok && vw.Val {
+			if w.Val {
 				account.initialCodeEmpty = true
 			}
 		}
@@ -2932,45 +2945,53 @@ func (b *BlockAccessListBuilder) Build() types.BlockAccessList {
 
 	bal := make(types.BlockAccessList, 0, len(keys))
 	for _, k := range keys {
-		if !b.finalized {
-			k.account.finalize()
-			k.account.changes.Normalize()
-		}
+		k.account.finalize()
 		bal = append(bal, k.account.changes)
 	}
 	return bal
 }
 
-// MatchesSorted reports whether the list Build would return equals want, whose
-// addresses must be strictly increasing. Only Build may follow it.
-func (b *BlockAccessListBuilder) MatchesSorted(want types.BlockAccessList) bool {
-	const prefixes = 256 * 256
-	bucketEnd := make([]int32, prefixes+1)
-	for i := range want {
-		bucketEnd[addressPrefix(want[i].Address)+1]++
-	}
-	for i := 1; i <= prefixes; i++ {
-		bucketEnd[i] += bucketEnd[i-1]
-	}
-	match := len(b.ac) == len(want)
-	for _, account := range b.ac {
-		account.finalize()
-		account.changes.Normalize()
-		if !match {
-			continue
-		}
-		addr := account.changes.Address
-		prefix := addressPrefix(addr)
-		lo, hi := int(bucketEnd[prefix]), int(bucketEnd[prefix+1])
-		// sort.Search: BinarySearchFunc would copy each 144-byte AccountChanges.
-		at := lo + sort.Search(hi-lo, func(i int) bool { return bytes.Compare(want[lo+i].Address[:], addr[:]) >= 0 })
-		match = at < hi && account.changes.Equal(&want[at])
-	}
-	b.finalized = true
-	return match
-}
+const matchesPerWorker = 4096
 
-func addressPrefix(a common.Address) uint32 { return uint32(a[0])<<8 | uint32(a[1]) }
+func (b *BlockAccessListBuilder) Matches(bal types.BlockAccessList) bool {
+	if len(bal) != len(b.ac) {
+		return false
+	}
+	for i := 1; i < len(bal); i++ {
+		if bytes.Compare(bal[i-1].Address[:], bal[i].Address[:]) >= 0 {
+			return false
+		}
+	}
+	match := func(from, to int) bool {
+		for i := from; i < to; i++ {
+			account, ok := b.ac[accounts.InternAddress(bal[i].Address)]
+			if !ok {
+				return false
+			}
+			account.finalize()
+			if !account.changes.Equal(&bal[i]) {
+				return false
+			}
+		}
+		return true
+	}
+	workers := min(runtime.GOMAXPROCS(0), len(bal)/matchesPerWorker)
+	if workers < 2 {
+		return match(0, len(bal))
+	}
+	var mismatch atomic.Bool
+	var wg sync.WaitGroup
+	step := (len(bal) + workers - 1) / workers
+	for from := 0; from < len(bal); from += step {
+		wg.Go(func() {
+			if !match(from, min(from+step, len(bal))) {
+				mismatch.Store(true)
+			}
+		})
+	}
+	wg.Wait()
+	return !mismatch.Load()
+}
 
 type accountState struct {
 	changes             types.AccountChanges
@@ -2997,6 +3018,7 @@ func (account *accountState) finalize() {
 	applyToBalance(&account.balance, &account.changes, account.initialBalanceValue)
 	applyToNonce(&account.nonce, &account.changes)
 	applyToCode(&account.code, &account.changes, account.initialCodeEmpty)
+	account.changes.Normalize()
 }
 
 type fieldTracker[T any] struct {
@@ -3086,6 +3108,14 @@ func (ct *changeTracker[T]) apply(applyFn func(uint32, T)) {
 	}
 }
 
+func registerAddrs[V any](ac map[accounts.Address]*accountState, writes map[accounts.Address]V) {
+	for addr := range writes {
+		if !addr.IsNil() {
+			ensureAccountState(ac, addr)
+		}
+	}
+}
+
 func newAccountState(addr accounts.Address) *accountState {
 	return &accountState{changes: types.AccountChanges{Address: addr.Value()}}
 }
@@ -3157,16 +3187,14 @@ func (account *accountState) updateReadStorage(key accounts.StorageKey, val uint
 	if account.storageReadValues == nil {
 		account.storageReadValues = make(map[accounts.StorageKey]uint256.Int)
 	}
-	if _, exists := account.storageReadValues[key]; !exists {
-		account.storageReadValues[key] = val
+	if _, seen := account.storageReadValues[key]; seen {
+		return
 	}
+	account.storageReadValues[key] = val
 	if account.hasStorageWrite(key) {
 		return
 	}
 	if account.slotReads != nil {
-		if _, seen := account.slotReads[key]; seen {
-			return
-		}
 		account.slotReads[key] = len(account.storageReads)
 	}
 	account.storageReads = append(account.storageReads, key)
@@ -3241,19 +3269,10 @@ func (account *accountState) addStorageUpdate(at int, slot accounts.StorageKey, 
 		for i := range ac.StorageChanges {
 			account.slotWrites[ac.StorageChanges[i].Slot] = i
 		}
-		// StorageReads can hold the same slot twice: below the threshold reads are
-		// appended unchecked, and Normalize is what dedups them. The index needs
-		// one entry per slot, so drop the repeats while building it.
 		account.slotReads = make(map[accounts.StorageKey]int, len(account.storageReads))
-		deduped := account.storageReads[:0]
-		for _, slot := range account.storageReads {
-			if _, seen := account.slotReads[slot]; seen {
-				continue
-			}
-			account.slotReads[slot] = len(deduped)
-			deduped = append(deduped, slot)
+		for i, slot := range account.storageReads {
+			account.slotReads[slot] = i
 		}
-		account.storageReads = deduped
 	}
 }
 

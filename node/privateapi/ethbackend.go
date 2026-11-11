@@ -599,11 +599,14 @@ func (s *EthBackendServer) validateFrameTransaction(ctx context.Context, frame *
 	defer context.AfterFunc(ctx, evm.Cancel)()
 	result, err := protocol.ValidateFrameTransaction(evm, frame)
 	if err != nil {
-		if err := ctx.Err(); err != nil {
-			return nil, err
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
 		}
-		if err := ibs.StateReadError(); err != nil {
-			return nil, err
+		if stateErr := ibs.StateReadError(); stateErr != nil {
+			return nil, stateErr
+		}
+		if errors.Is(err, protocol.ErrNonceTooLow) {
+			return &remoteproto.FrameValidationReply{RejectionReason: remoteproto.FrameValidationReply_NONCE_TOO_LOW}, nil
 		}
 		return &remoteproto.FrameValidationReply{}, nil
 	}

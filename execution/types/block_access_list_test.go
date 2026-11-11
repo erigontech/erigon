@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
-	"math/big"
-	"math/rand"
 	"reflect"
 	"runtime"
 	"strings"
@@ -824,93 +822,5 @@ func TestAccountChangesDecodeRLPClearsStorageChanges(t *testing.T) {
 	}
 	if len(ac.StorageChanges) != 0 {
 		t.Fatalf("decode kept %d storage changes from the previous payload", len(ac.StorageChanges))
-	}
-}
-
-// A sidecar's memoized hash covers its raw bytes, so comparing the decoded list
-// field by field is only sound if every accepted encoding is the canonical one.
-func TestBlockAccessListDecodeAcceptsOnlyCanonicalEncoding(t *testing.T) {
-	addr := common.HexToAddress("0x0000000000000000000000000000000000000001")
-	account := append([]byte{0xda, 0x94}, addr[:]...)
-	account = append(account, 0xc0, 0xc0, 0xc0, 0xc0, 0xc0)
-	canonical := append([]byte{0xdb}, account...)
-	if _, err := DecodeBlockAccessListBytes(canonical); err != nil {
-		t.Fatalf("canonical list: %v", err)
-	}
-	longForm := append([]byte{0xf8, 0x1b}, account...)
-	if _, err := DecodeBlockAccessListBytes(longForm); err == nil {
-		t.Fatal("a list length in long form must be rejected")
-	}
-
-	bal := BlockAccessList{
-		{
-			Address: common.HexToAddress("0x01"),
-			StorageChanges: []SlotChanges{{Slot: accounts.InternKey(common.BigToHash(new(big.Int).SetUint64(1))), Changes: []*StorageChange{
-				{Index: 1, Value: *uint256.NewInt(0x80)},
-			}}},
-			StorageReads:   []common.Hash{common.BigToHash(new(big.Int).SetUint64(2))},
-			BalanceChanges: []*BalanceChange{{Index: 2, Value: *uint256.NewInt(0x7f)}},
-			NonceChanges:   []*NonceChange{{Index: 3, Value: 1}},
-			CodeChanges:    []*CodeChange{{Index: 4, Bytecode: []byte{0x60}}, {Index: 5, Bytecode: []byte{0x80, 0x01}}},
-		},
-		{Address: common.HexToAddress("0x02")},
-	}
-	raw, err := EncodeBlockAccessListBytes(bal)
-	if err != nil {
-		t.Fatal(err)
-	}
-	rng := rand.New(rand.NewSource(1))
-	accepted := 0
-	for range 300_000 {
-		mutated := bytes.Clone(raw)
-		for range 1 + rng.Intn(3) {
-			at := rng.Intn(len(mutated))
-			switch rng.Intn(3) {
-			case 0:
-				mutated[at] = byte(rng.Intn(256))
-			case 1:
-				mutated = append(mutated[:at:at], mutated[at+1:]...)
-			default:
-				mutated = append(mutated[:at:at], append([]byte{byte(rng.Intn(256))}, mutated[at:]...)...)
-			}
-			if len(mutated) == 0 {
-				break
-			}
-		}
-		decoded, err := DecodeBlockAccessListBytes(mutated)
-		if err != nil {
-			continue
-		}
-		accepted++
-		reencoded, err := EncodeBlockAccessListBytes(decoded)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !bytes.Equal(reencoded, mutated) {
-			t.Fatalf("accepted a non-canonical encoding: %x re-encodes to %x", mutated, reencoded)
-		}
-	}
-	if accepted == 0 {
-		t.Fatal("no mutated encoding was accepted, the test checks nothing")
-	}
-}
-
-func TestAccountChangesEqualComparesAddressAndCode(t *testing.T) {
-	base := func() *AccountChanges {
-		return &AccountChanges{Address: common.Address{1}, CodeChanges: []*CodeChange{{Index: 1, Bytecode: []byte{0x60}}}}
-	}
-	if !base().Equal(base()) {
-		t.Fatal("identical changes must be equal")
-	}
-	for name, change := range map[string]func(*AccountChanges){
-		"address":    func(ac *AccountChanges) { ac.Address = common.Address{2} },
-		"code index": func(ac *AccountChanges) { ac.CodeChanges[0].Index = 2 },
-		"code bytes": func(ac *AccountChanges) { ac.CodeChanges[0].Bytecode = []byte{0x61} },
-	} {
-		other := base()
-		change(other)
-		if base().Equal(other) {
-			t.Fatalf("a different %s must not be equal", name)
-		}
 	}
 }

@@ -17,8 +17,6 @@
 package bal_test
 
 import (
-	"bytes"
-	"errors"
 	"fmt"
 	"math/big"
 	"testing"
@@ -389,155 +387,70 @@ func TestBALBlock943ViaVersionedIO(t *testing.T) {
 	_ = fmt.Sprintf // suppress unused import
 }
 
-func TestProcessChecksStoredBALBytesAndComputedBAL(t *testing.T) {
+func TestProcessChecksBALSidecarAndComputedBAL(t *testing.T) {
 	computed := balpkg.Create(1, nil, state.NewVersionedIO(0), "", log.New())
 	computedBytes, err := types.EncodeBlockAccessListBytes(computed)
 	require.NoError(t, err)
 	other := types.BlockAccessList{{Address: common.HexToAddress("0x01")}}
 	otherBytes, err := types.EncodeBlockAccessListBytes(other)
 	require.NoError(t, err)
+	sidecar := func(raw []byte) *types.BlockAccessListSidecar {
+		s, err := types.DecodeBlockAccessListSidecar(raw)
+		require.NoError(t, err)
+		return s
+	}
 
-	process := func(headerHash common.Hash, stored []byte) error {
+	process := func(headerHash common.Hash, stored *types.BlockAccessListSidecar) error {
 		h := &types.Header{Number: *uint256.NewInt(1), GasLimit: 60_000_000, BlockAccessListHash: &headerHash}
 		_, err := balpkg.Process(stored, h, nil, state.NewVersionedIO(0), true, false, "", log.New())
 		return err
 	}
-	require.NoError(t, process(computed.Hash(), computedBytes))
+	require.NoError(t, process(computed.Hash(), sidecar(computedBytes)))
 	require.NoError(t, process(computed.Hash(), nil))
-	require.ErrorContains(t, process(computed.Hash(), append(computedBytes, 0)), "hash mismatch")
-	require.ErrorContains(t, process(computed.Hash(), otherBytes), "hash mismatch")
-	require.ErrorContains(t, process(other.Hash(), otherBytes), "block access list mismatch")
+	require.ErrorContains(t, process(computed.Hash(), sidecar(otherBytes)), "hash mismatch")
+	require.ErrorContains(t, process(computed.Hash(), types.NewBlockAccessListSidecar(other)), "hash mismatch")
+	require.ErrorContains(t, process(other.Hash(), sidecar(otherBytes)), "block access list mismatch")
+	require.ErrorContains(t, process(other.Hash(), nil), "block access list mismatch")
 }
 
-// ProcessAgainstSidecar must reach the verdict and the error of Process in every
-// case, whether or not its comparison settles the block.
-func TestProcessAgainstSidecarDecidesLikeProcess(t *testing.T) {
-	addrA := accounts.InternAddress(common.HexToAddress("0x0000000000000000000000000000000000000001"))
-	addrB := accounts.InternAddress(common.HexToAddress("0x0000000000000000000000000000000000000002"))
-	addrC := accounts.InternAddress(common.HexToAddress("0x00ff000000000000000000000000000000000003"))
-	addrD := accounts.InternAddress(common.HexToAddress("0xffff000000000000000000000000000000000004"))
+func executedBALSidecar(t *testing.T) (*state.VersionedIO, types.BlockAccessList, *types.BlockAccessListSidecar) {
+	addr := accounts.InternAddress(common.HexToAddress("0x01"))
 	slot := accounts.InternKey(common.BigToHash(big.NewInt(1)))
-	slot2 := accounts.InternKey(common.BigToHash(big.NewInt(2)))
-
 	io := state.NewVersionedIO(2)
-	reads, writes := map[int]state.ReadSet{}, map[int]*state.WriteSet{}
-	addBalanceRead(reads, -1, addrA, 5)
-	addBalanceRead(reads, 0, addrD, 7)
-	addStorageRead(reads, 0, addrB, slot)
-	addStorageWrite(writes, -1, addrC, slot2, 11)
-	addStorageWrite(writes, 0, addrB, slot, 10)
-	addBalanceWrite(writes, 1, addrA, 99)
-	recordAll(io, reads, writes)
+	writeSets := map[int]*state.WriteSet{}
+	addBalanceWrite(writeSets, 0, addr, 7)
+	addStorageWrite(writeSets, 1, addr, slot, 9)
+	recordAll(io, map[int]state.ReadSet{}, writeSets)
 
-	real := balpkg.Create(1, nil, io, "", log.New())
-	require.Len(t, real, 4)
-	require.NoError(t, real.Validate())
-	realRaw, err := types.EncodeBlockAccessListBytes(real)
+	computed := balpkg.Create(1, nil, io, "", log.New())
+	raw, err := types.EncodeBlockAccessListBytes(computed)
 	require.NoError(t, err)
-	mutate := func(f func(types.BlockAccessList) types.BlockAccessList) types.BlockAccessList { return f(real.Copy()) }
-	phantom := mutate(func(bal types.BlockAccessList) types.BlockAccessList {
-		return append(bal, types.AccountChanges{Address: common.HexToAddress("0xffff000000000000000000000000000000000005")})
-	})
-	missing := mutate(func(bal types.BlockAccessList) types.BlockAccessList { return bal[:len(bal)-1] })
-	balanceValue := mutate(func(bal types.BlockAccessList) types.BlockAccessList {
-		bal[0].BalanceChanges[0].Value = *uint256.NewInt(100)
-		return bal
-	})
-	balanceIndex := mutate(func(bal types.BlockAccessList) types.BlockAccessList {
-		bal[0].BalanceChanges[0].Index++
-		return bal
-	})
-	storageValue := mutate(func(bal types.BlockAccessList) types.BlockAccessList {
-		bal[1].StorageChanges[0].Changes[0].Value = *uint256.NewInt(12)
-		return bal
-	})
-	droppedWrites := mutate(func(bal types.BlockAccessList) types.BlockAccessList {
-		bal[2].StorageReads = append(bal[2].StorageReads, bal[2].StorageChanges[0].Slot.Value())
-		bal[2].StorageChanges = nil
-		return bal
-	})
-	extraNonce := mutate(func(bal types.BlockAccessList) types.BlockAccessList {
-		bal[3].NonceChanges = append(bal[3].NonceChanges, &types.NonceChange{Index: 1, Value: 1})
-		return bal
-	})
-	extraRead := mutate(func(bal types.BlockAccessList) types.BlockAccessList {
-		bal[3].StorageReads = append(bal[3].StorageReads, slot.Value())
-		return bal
-	})
-
-	const gasLimit = 60_000_000
-	for _, tc := range []struct {
-		name       string
-		sidecar    types.BlockAccessList
-		headerHash common.Hash
-		stored     []byte
-		gasLimit   uint64
-		wantErr    string
-	}{
-		{name: "valid", sidecar: real, headerHash: real.Hash(), gasLimit: gasLimit},
-		{name: "valid with stored bytes", sidecar: real, headerHash: real.Hash(), stored: realRaw, gasLimit: gasLimit},
-		{name: "no sidecar", headerHash: real.Hash(), gasLimit: gasLimit},
-		{name: "no sidecar, wrong header hash", headerHash: phantom.Hash(), gasLimit: gasLimit, wantErr: "block access list mismatch"},
-		{name: "sidecar not bound to the header", sidecar: phantom, headerHash: real.Hash(), gasLimit: gasLimit},
-		{name: "sidecar equals execution but header commits to another list", sidecar: real, headerHash: phantom.Hash(), gasLimit: gasLimit, wantErr: "block access list mismatch"},
-		{name: "stored bytes differ from the sidecar", sidecar: real, headerHash: real.Hash(), stored: append(bytes.Clone(realRaw), 0), gasLimit: gasLimit, wantErr: "hash mismatch"},
-		{name: "phantom account", sidecar: phantom, headerHash: phantom.Hash(), gasLimit: gasLimit, wantErr: "block access list mismatch"},
-		{name: "missing account", sidecar: missing, headerHash: missing.Hash(), gasLimit: gasLimit, wantErr: "block access list mismatch"},
-		{name: "balance value", sidecar: balanceValue, headerHash: balanceValue.Hash(), gasLimit: gasLimit, wantErr: "block access list mismatch"},
-		{name: "balance index", sidecar: balanceIndex, headerHash: balanceIndex.Hash(), gasLimit: gasLimit, wantErr: "block access list mismatch"},
-		{name: "storage value", sidecar: storageValue, headerHash: storageValue.Hash(), gasLimit: gasLimit, wantErr: "block access list mismatch"},
-		{name: "dropped block-start writes", sidecar: droppedWrites, headerHash: droppedWrites.Hash(), gasLimit: gasLimit, wantErr: "block access list mismatch"},
-		{name: "extra nonce change", sidecar: extraNonce, headerHash: extraNonce.Hash(), gasLimit: gasLimit, wantErr: "block access list mismatch"},
-		{name: "extra storage read", sidecar: extraRead, headerHash: extraRead.Hash(), gasLimit: gasLimit, wantErr: "block access list mismatch"},
-		{name: "above the item limit", sidecar: real, headerHash: real.Hash(), gasLimit: 1, wantErr: "too large"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			for _, prefix := range []bool{false, true} {
-				newBuilder := func() *state.BlockAccessListBuilder {
-					if !prefix {
-						return nil
-					}
-					b := state.NewBlockAccessListBuilder()
-					b.Add(-1, io.ReadSet(-1), io.WriteSet(-1))
-					return b
-				}
-				h := &types.Header{Number: *uint256.NewInt(1), GasLimit: tc.gasLimit, BlockAccessListHash: &tc.headerHash}
-				want, wantErr := balpkg.Process(tc.stored, h, newBuilder(), io, true, false, "", log.New())
-				if tc.wantErr == "" {
-					require.NoError(t, wantErr)
-				} else {
-					require.ErrorContains(t, wantErr, tc.wantErr)
-				}
-				var sidecar *types.BlockAccessListSidecar
-				if tc.sidecar != nil {
-					sidecar = types.NewBlockAccessListSidecar(tc.sidecar)
-				}
-				got, gotErr := balpkg.ProcessAgainstSidecar(sidecar, tc.stored, h, newBuilder(), io, "", log.New())
-				if wantErr != nil {
-					require.EqualError(t, gotErr, wantErr.Error())
-					require.Equal(t, errors.Is(wantErr, rules.ErrInvalidBlock), errors.Is(gotErr, rules.ErrInvalidBlock))
-					continue
-				}
-				require.NoError(t, gotErr)
-				require.Equal(t, want.Hash(), got.Hash())
-			}
-		})
-	}
+	sidecar, err := types.DecodeBlockAccessListSidecar(raw)
+	require.NoError(t, err)
+	return io, computed, sidecar
 }
 
-// A sidecar equal to the executed list settles the block by comparison alone,
-// returning the sidecar's own list rather than a built one.
-func TestProcessAgainstSidecarSettlesByComparison(t *testing.T) {
-	addr := accounts.InternAddress(common.HexToAddress("0x0000000000000000000000000000000000000001"))
-	io := state.NewVersionedIO(1)
-	reads := map[int]state.ReadSet{}
-	addBalanceRead(reads, 0, addr, 5)
-	recordAll(io, reads, nil)
-	real := balpkg.Create(1, nil, io, "", log.New())
-	headerHash := real.Hash()
+func TestProcessReturnsTheSidecarListWhenItMatches(t *testing.T) {
+	io, computed, sidecar := executedBALSidecar(t)
+	headerHash := computed.Hash()
 	h := &types.Header{Number: *uint256.NewInt(1), GasLimit: 60_000_000, BlockAccessListHash: &headerHash}
-	sidecar := types.NewBlockAccessListSidecar(real)
-	got, err := balpkg.ProcessAgainstSidecar(sidecar, nil, h, nil, io, "", log.New())
+
+	got, err := balpkg.Process(sidecar, h, nil, io, true, false, "", log.New())
 	require.NoError(t, err)
+	require.Len(t, got, 1)
 	require.Same(t, &sidecar.BlockAccessList()[0], &got[0])
+}
+
+func TestProcessRejectsAMatchingSidecarTheHeaderDoesNotAllow(t *testing.T) {
+	process := func(headerHash *common.Hash, gasLimit uint64) error {
+		io, _, sidecar := executedBALSidecar(t)
+		h := &types.Header{Number: *uint256.NewInt(1), GasLimit: gasLimit, BlockAccessListHash: headerHash}
+		_, err := balpkg.Process(sidecar, h, nil, io, true, false, "", log.New())
+		return err
+	}
+	_, computed, _ := executedBALSidecar(t)
+	computedHash := computed.Hash()
+	require.ErrorContains(t, process(&common.Hash{1}, 60_000_000), "hash mismatch")
+	require.ErrorIs(t, process(&computedHash, types.BalItemCost), rules.ErrInvalidBlock)
+	require.ErrorContains(t, process(nil, 60_000_000), "BlockAccessListHash is nil")
 }

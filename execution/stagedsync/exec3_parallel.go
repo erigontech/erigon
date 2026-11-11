@@ -1,7 +1,6 @@
 package stagedsync
 
 import (
-	"bytes"
 	"cmp"
 	"context"
 	"errors"
@@ -26,7 +25,6 @@ import (
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/changeset"
@@ -767,25 +765,11 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					isAmsterdam := pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime)
 					var computedBAL types.BlockAccessList
 					var balErr error
-					var storedBAL []byte
-					if isAmsterdam && lastHeader != nil {
-						storedBAL, balErr = rawdb.ReadBlockAccessListBytes(rwTx, applyResult.BlockHash, applyResult.BlockNum)
-						storedBAL = bytes.Clone(storedBAL)
-					}
 					balDone := make(chan struct{})
-					h, txIO := lastHeader, applyResult.TxIO
-					verifyAgainstSidecar := isAmsterdam && applyResult.BlockNum > 0 && !applyResult.isPartial && applyResult.balSidecar != nil && pe.cfg.balSink == nil
-					sidecar := applyResult.balSidecar
+					h, txIO, blockBAL := lastHeader, applyResult.TxIO, applyResult.BAL
 					go func() {
 						defer close(balDone)
-						if balErr != nil {
-							return
-						}
-						if verifyAgainstSidecar {
-							computedBAL, balErr = bal.ProcessAgainstSidecar(sidecar, storedBAL, h, built, txIO, pe.cfg.dirs.DataDir, pe.logger)
-							return
-						}
-						computedBAL, balErr = bal.Process(storedBAL, h, built, txIO, isAmsterdam, pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir, pe.logger)
+						computedBAL, balErr = bal.Process(blockBAL, h, built, txIO, isAmsterdam, pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir, pe.logger)
 					}()
 
 					// StartChange + NotifyAccumulator both run in the apply goroutine to
@@ -809,8 +793,9 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 						}
 					}
 
-					if applyResult.BlockNum > 0 && applyResult.receiptsComplete && !initialCycle && applyResult.Header != nil &&
-						pe.cfg.notifications != nil && pe.cfg.notifications.RecentReceipts != nil {
+					if applyResult.BlockNum > 0 && applyResult.receiptsComplete && applyResult.Header != nil &&
+						pe.cfg.notifications != nil && pe.cfg.notifications.RecentReceipts != nil &&
+						(!initialCycle || pe.cfg.notifications.Events.HasReceiptOrLogSubscribers()) {
 						pe.cfg.notifications.RecentReceipts.Add(applyResult.Receipts, applyResult.Txs, applyResult.Header)
 					}
 
@@ -1703,7 +1688,7 @@ type blockResult struct {
 	Exhausted        *ErrLoopExhausted
 	Header           *types.Header      // for accumulator.StartChange in apply loop
 	Txs              types.Transactions // for accumulator.StartChange in apply loop
-	balSidecar       *types.BlockAccessListSidecar
+	BAL              *types.BlockAccessListSidecar
 
 	// Exec window for newPayload wall attribution; the calculator pairs these with
 	// its own commit-window timestamps to measure exec/commit overlap.
@@ -2552,8 +2537,9 @@ type execRequest struct {
 
 type blockExecutor struct {
 	sync.Mutex
-	blockNum  uint64
-	blockHash common.Hash
+	blockNum   uint64
+	blockHash  common.Hash
+	balSidecar *types.BlockAccessListSidecar
 
 	tasks   []*execTask
 	results []*execResult
@@ -2566,7 +2552,6 @@ type blockExecutor struct {
 
 	// Publish tasks stores the state tasks ready for publication
 	publishTasks execStatusList
-	balSidecar   *types.BlockAccessListSidecar
 
 	// Multi-version map
 	versionMap *state.VersionMap
@@ -2977,8 +2962,8 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 					reads.SetNonce(sender, state.VersionedRead[uint64]{ReadHeader: state.ReadHeader{Source: state.StorageRead}, Val: charged.Nonce})
 				}
 				be.blockIO.RecordReads(txVersion, reads)
-				be.blockIO.RecordWrites(txVersion, be.blockIO.WriteSet(txVersion.TxIndex).Merge(senderWrites))
 				be.versionMap.FlushVersionedWrites(senderWrites, false)
+				be.blockIO.RecordWrites(txVersion, be.blockIO.WriteSet(txVersion.TxIndex).Merge(senderWrites))
 				be.markReadersDirty(tx, senderWrites)
 				// A charge-at-validation sender's gas debit is not in the worker's TxOut, so
 				// calcFees' coinbase/burnt override (which reads TxOut) would miss it and credit
@@ -2990,12 +2975,12 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 				return nil, err
 			}
 			if !tipWrites.IsEmpty() {
-				existingWrites := be.blockIO.WriteSet(txVersion.TxIndex)
-				merged := existingWrites.Merge(tipWrites)
-				be.blockIO.RecordWrites(txVersion, merged)
 				// Flush the tip as an Estimate; the whole tx is promoted to Done at the
 				// seal point below.
 				be.versionMap.FlushVersionedWrites(tipWrites, false)
+				existingWrites := be.blockIO.WriteSet(txVersion.TxIndex)
+				merged := existingWrites.Merge(tipWrites)
+				be.blockIO.RecordWrites(txVersion, merged)
 				be.markReadersDirty(tx, tipWrites)
 			}
 		}
@@ -3483,12 +3468,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				if err == nil {
 					vio, err = bal.RederiveFromHistory(ctx, pe.cfg.chainConfig, pe.cfg.engine, pe.cfg.blockReader, applyTx, block, blockStartTxNum, pe.logger)
 				}
-				var storedBAL []byte
 				if err == nil {
-					storedBAL, err = rawdb.ReadBlockAccessListBytes(applyTx, be.blockHash, be.blockNum)
-				}
-				if err == nil {
-					_, err = bal.Process(storedBAL, header, nil, vio, true, false, pe.cfg.dirs.DataDir, pe.logger)
+					_, err = bal.Process(be.balSidecar, header, nil, vio, true, false, pe.cfg.dirs.DataDir, pe.logger)
 				}
 				if errors.Is(err, rules.ErrInvalidBlock) {
 					return be.invalidBlockResult(fmt.Errorf("block %d resumed mid-block: %w", be.blockNum, err)), nil
@@ -3625,7 +3606,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			Exhausted:        be.exhausted,
 			Header:           header,
 			Txs:              txs,
-			balSidecar:       be.balSidecar,
+			BAL:              be.balSidecar,
 			execStartedAt:    be.execStarted,
 			execEndedAt:      time.Now(),
 		}

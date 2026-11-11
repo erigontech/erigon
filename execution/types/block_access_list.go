@@ -241,20 +241,6 @@ type CodeChange struct {
 	Bytecode []byte
 }
 
-// Equal reports whether ac and other have the same RLP encoding.
-func (ac *AccountChanges) Equal(other *AccountChanges) bool {
-	return ac.Address == other.Address &&
-		slices.EqualFunc(ac.StorageChanges, other.StorageChanges, func(a, b SlotChanges) bool {
-			return a.Slot.Value() == b.Slot.Value() && slices.EqualFunc(a.Changes, b.Changes, func(x, y *StorageChange) bool { return *x == *y })
-		}) &&
-		slices.Equal(ac.StorageReads, other.StorageReads) &&
-		slices.EqualFunc(ac.BalanceChanges, other.BalanceChanges, func(x, y *BalanceChange) bool { return *x == *y }) &&
-		slices.EqualFunc(ac.NonceChanges, other.NonceChanges, func(x, y *NonceChange) bool { return *x == *y }) &&
-		slices.EqualFunc(ac.CodeChanges, other.CodeChanges, func(x, y *CodeChange) bool {
-			return x.Index == y.Index && bytes.Equal(x.Bytecode, y.Bytecode)
-		})
-}
-
 // Copy returns a deep copy of bal.
 func (bal BlockAccessList) Copy() BlockAccessList {
 	if bal == nil {
@@ -472,6 +458,19 @@ func (ac *AccountChanges) Normalize() {
 		sortByIndex(ac.CodeChanges)
 		ac.CodeChanges = dedupByIndex(ac.CodeChanges)
 	}
+}
+
+func (ac *AccountChanges) Equal(other *AccountChanges) bool {
+	return ac.Address == other.Address &&
+		slices.EqualFunc(ac.StorageChanges, other.StorageChanges, func(a, b SlotChanges) bool {
+			return a.Slot == b.Slot && slices.EqualFunc(a.Changes, b.Changes, func(x, y *StorageChange) bool { return *x == *y })
+		}) &&
+		slices.Equal(ac.StorageReads, other.StorageReads) &&
+		slices.EqualFunc(ac.BalanceChanges, other.BalanceChanges, func(x, y *BalanceChange) bool { return *x == *y }) &&
+		slices.EqualFunc(ac.NonceChanges, other.NonceChanges, func(x, y *NonceChange) bool { return *x == *y }) &&
+		slices.EqualFunc(ac.CodeChanges, other.CodeChanges, func(x, y *CodeChange) bool {
+			return x.Index == y.Index && bytes.Equal(x.Bytecode, y.Bytecode)
+		})
 }
 
 func (sc *SlotChanges) EncodingSize() int {
