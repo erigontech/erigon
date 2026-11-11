@@ -2496,13 +2496,14 @@ func (ws *WriteSet) hasHeader(h WriteHeader) bool {
 	return false
 }
 
-// copyFrom merges src into s, value-copying each VersionedWrite so the result
-// shares no *VersionedWrite with src — the in-place recordWrite mutators would
-// otherwise make either side observe the other's later edits.
-func (ws *WriteSet) copyFrom(src *WriteSet) {
+// MergeFrom merges src into ws in place, with src winning on (addr,path,key). It value-copies
+// each VersionedWrite, so neither set sees the other's later in-place recordWrite edits.
+func (ws *WriteSet) MergeFrom(src *WriteSet) {
 	if src == nil {
 		return
 	}
+	ws.assertNotArena("merge")
+	src.assertNotArena("merge")
 	for a, vw := range src.address {
 		ws.SetAddress(a, cloneVW(vw))
 	}
@@ -2548,8 +2549,8 @@ func (ws *WriteSet) Merge(next *WriteSet) *WriteSet {
 		return ws
 	}
 	out := &WriteSet{}
-	out.copyFrom(ws)
-	out.copyFrom(next)
+	out.MergeFrom(ws)
+	out.MergeFrom(next)
 	return out
 }
 
