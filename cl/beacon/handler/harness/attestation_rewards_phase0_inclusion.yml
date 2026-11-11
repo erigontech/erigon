@@ -11,5 +11,7 @@ tests:
     compare:
       exprs:
         - actual_code == 200
+        - size(actual.data.ideal_rewards) > 0
+        - size(actual.data.total_rewards) > 0
         - actual.data.ideal_rewards.all(reward, has(reward.inclusion_delay) && reward.inclusion_delay == "0")
         - actual.data.total_rewards.all(reward, has(reward.inclusion_delay) && reward.inclusion_delay == "0")
