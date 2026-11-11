@@ -28,7 +28,7 @@ func TestWitnessPrefixIteration(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	doms, _, err := blockreplay.NewWitnessDomains(ctx, tx, fx, seedTxNum, logger)
+	doms, err := blockreplay.NewWitnessDomains(ctx, tx, fx, seedTxNum, logger)
 	require.NoError(t, err)
 	defer doms.Close()
 

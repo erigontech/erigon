@@ -147,7 +147,7 @@ func (r *ephemeralReplay) newDomains(tb testing.TB, fx *blockreplay.Fixture) (kv
 	tb.Helper()
 	tx, err := r.db.BeginTemporalRw(r.ctx) //nolint:gocritic
 	require.NoError(tb, err)
-	doms, _, err := blockreplay.NewWitnessDomains(r.ctx, tx, fx, ephemeralSeedTxNum, r.logger)
+	doms, err := blockreplay.NewWitnessDomains(r.ctx, tx, fx, ephemeralSeedTxNum, r.logger)
 	require.NoError(tb, err)
 	doms.SetTxNum(r.inputTxNum)
 	return tx, doms
