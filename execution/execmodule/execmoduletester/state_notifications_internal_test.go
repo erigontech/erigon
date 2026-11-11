@@ -134,7 +134,8 @@ func TestReorgReportsUntouchedAccountAcrossSteps(t *testing.T) {
 	}
 }
 
-func TestForkchoiceReportsAccountDeletion(t *testing.T) {
+func newAccountDeletionTester(t *testing.T) (*ExecModuleTester, func(types.Transaction) types.Transaction, *uint256.Int) {
+	t.Helper()
 	key, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	sender := crypto.PubkeyToAddress(key.PublicKey)
@@ -147,12 +148,17 @@ func TestForkchoiceReportsAccountDeletion(t *testing.T) {
 	}))
 	signer := *types.LatestSignerForChainID(m.ChainConfig.ChainID)
 	sign := func(tx types.Transaction) types.Transaction {
+		t.Helper()
 		signed, err := types.SignTx(tx, signer, key)
 		require.NoError(t, err)
 		return signed
 	}
-	address := types.CreateAddress(sender, 0)
-	gasPrice := uint256.NewInt(m.Genesis.BaseFee().Uint64() * 2)
+	return m, sign, uint256.NewInt(m.Genesis.BaseFee().Uint64() * 2)
+}
+
+func TestForkchoiceReportsAccountDeletion(t *testing.T) {
+	m, sign, gasPrice := newAccountDeletionTester(t)
+	address := types.CreateAddress(m.Address, 0)
 	blocks, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) {
 		// The constructor writes slot 0, then returns CALLER SELFDESTRUCT as runtime code.
 		init := common.FromHex("60016000556002601160003960026000f333ff")
@@ -207,23 +213,8 @@ func TestForkchoiceInvalidatesDeletedStorage(t *testing.T) {
 			name = "same_block_refund"
 		}
 		t.Run(name, func(t *testing.T) {
-			key, err := crypto.GenerateKey()
-			require.NoError(t, err)
-			sender := crypto.PubkeyToAddress(key.PublicKey)
-			cfg := *chain.AllProtocolChanges
-			cfg.CancunTime, cfg.PragueTime, cfg.OsakaTime, cfg.AmsterdamTime = nil, nil, nil, nil
-			m := New(t, WithKey(key), WithoutExperimentalBAL(), WithGenesisSpec(&types.Genesis{
-				Config: &cfg,
-				Alloc:  types.GenesisAlloc{sender: {Balance: big.NewInt(1e18)}},
-			}))
-			signer := *types.LatestSignerForChainID(m.ChainConfig.ChainID)
-			sign := func(tx types.Transaction) types.Transaction {
-				signed, err := types.SignTx(tx, signer, key)
-				require.NoError(t, err)
-				return signed
-			}
-			address := types.CreateAddress(sender, 0)
-			gasPrice := uint256.NewInt(m.Genesis.BaseFee().Uint64() * 2)
+			m, sign, gasPrice := newAccountDeletionTester(t)
+			address := types.CreateAddress(m.Address, 0)
 			refund := sign(types.NewTransaction(2, address, uint256.NewInt(1), 21_000, gasPrice, nil))
 			blocks, err := m.GenerateChain(3, func(i int, b *blockgen.BlockGen) {
 				switch i {
