@@ -111,8 +111,12 @@ func allInOneConfigs(ctx context.Context, l1Node *nodecfg.Config, l1Eth *ethconf
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: --%s: %w", eez.ErrConfig, eez.ChainFlag.Name, err)
 	}
-	if _, ok := spec.Config.L2.(*config.L2Config); !ok {
+	l2, ok := spec.Config.L2.(*config.L2Config)
+	if !ok {
 		return nil, nil, fmt.Errorf("%w: --%s %s is not an EEZ network", eez.ErrConfig, eez.ChainFlag.Name, cfg.Chain)
+	}
+	if l2.RollupX != nil && l1Eth.InternalCL && !l1Eth.CaplinConfig.ArchiveBlobs && !l1Eth.CaplinConfig.ImmediateBlobsBackfilling {
+		logger.Warn("[eez] since Fulu the L1's consensus layer keeps full blobs only with --caplin.blobs-immediate-backfill or --caplin.blobs-archive, or as a supernode; without them the EEZ chain reads blobs from --eez.l1.blobs and --eez.l1.beacon alone", "chain", cfg.Chain)
 	}
 	if g := l1Eth.Genesis; g != nil && g.Config.IsL2() {
 		return nil, nil, fmt.Errorf("%w: --%s with --%s names the L1 chain, not an EEZ network", eez.ErrConfig, "chain", eez.ChainFlag.Name)
@@ -165,7 +169,7 @@ func startStandalone(ctx context.Context, n *node.ErigonNode, cfg *eez.Config, a
 	if err != nil {
 		return nil, err
 	}
-	return startFollower(ctx, n, n, reader, cfg, api, dirs, eez.Dir(dirs), loopBlockLimit, logger)
+	return startFollower(ctx, n, n, reader, nil, cfg, api, dirs, eez.Dir(dirs), loopBlockLimit, logger)
 }
 
 // allInOneTracer returns the EEZ chain's own instance of the --vmtrace tracer
@@ -176,9 +180,10 @@ func allInOneTracer(cmd *cli.Command) (*tracers.Tracer, error) {
 }
 
 // startAllInOne creates the EEZ chain of nodeCfg and ethCfg with its
-// follower, which reads the L1 chain of l1Node in place, and its own
-// --vmtrace tracer of cmd, and registers it on l1Node, which then starts it
-// after and stops it before the L1 services.
+// follower, which reads the L1 chain of l1Node and the blobs its consensus
+// layer stores in place, and its own --vmtrace tracer of cmd, and registers
+// it on l1Node, which then starts it after and stops it before the L1
+// services.
 func startAllInOne(ctx context.Context, l1Node *node.ErigonNode, l1Dirs datadir.Dirs, nodeCfg *nodecfg.Config, ethCfg *ethconfig.Config, cfg *eez.Config, api *eezrpc.API, logger log.Logger, cmd *cli.Command) (*follower.Service, error) {
 	tracer, err := allInOneTracer(cmd)
 	if err != nil {
@@ -191,7 +196,7 @@ func startAllInOne(ctx context.Context, l1Node *node.ErigonNode, l1Dirs datadir.
 	var svc *follower.Service
 	reader, err := localL1(ctx, l1Node.Backend(), l1Dirs, logger)
 	if err == nil {
-		svc, err = startFollower(ctx, l2Node, l1Node, reader, cfg, api, nodeCfg.Dirs, nodeCfg.Dirs.DataDir, ethCfg.Sync.LoopBlockLimit, logger)
+		svc, err = startFollower(ctx, l2Node, l1Node, reader, caplinBlobs(l1Node.Backend()), cfg, api, nodeCfg.Dirs, nodeCfg.Dirs.DataDir, ethCfg.Sync.LoopBlockLimit, logger)
 	}
 	if err != nil {
 		l2Node.Close()
@@ -238,10 +243,38 @@ func dialL1(ctx context.Context, cfg *eez.Config, dirs datadir.Dirs, logger log.
 	return l1.DialRPC(ctx, cfg.L1RPC, logger)
 }
 
+// blobSources returns the blob source of the follower of cfg: the
+// directory of --eez.l1.blobs, then local, the L1's consensus layer in this
+// process, then the beacon API of --eez.l1.beacon, each when set; nil with
+// none.
+func blobSources(cfg *eez.Config, local l1.BeaconStore) l1.BlobSource {
+	var src l1.BlobSource
+	if cfg.L1Beacon != "" {
+		src = l1.NewBeacon(cfg.L1Beacon)
+	}
+	if local != nil {
+		src = l1.NewLocalBeacon(local, src)
+	}
+	if cfg.L1Blobs != "" {
+		src = l1.NewBlobDir(cfg.L1Blobs, src)
+	}
+	return src
+}
+
+// caplinBlobs returns the blob store of the consensus layer embedded in
+// backend, nil without one.
+func caplinBlobs(backend *eth.Ethereum) l1.BeaconStore {
+	if r := backend.CaplinBlobs(); r != nil {
+		return r
+	}
+	return nil
+}
+
 // startFollower registers on n the follower of its EEZ chain, reading L1
-// from reader and keeping its stores in dir. When it halts on its own it
-// closes stop, the node whose exit ends the process.
-func startFollower(ctx context.Context, n *node.ErigonNode, stop interface{ Close() }, reader l1.ChainReader, cfg *eez.Config, api *eezrpc.API, dirs datadir.Dirs, dir string, loopBlockLimit uint, logger log.Logger) (*follower.Service, error) {
+// from reader, blobs also from local when not nil, and keeping its stores in
+// dir. When it halts on its own it closes stop, the node whose exit ends the
+// process.
+func startFollower(ctx context.Context, n *node.ErigonNode, stop interface{ Close() }, reader l1.ChainReader, local l1.BeaconStore, cfg *eez.Config, api *eezrpc.API, dirs datadir.Dirs, dir string, loopBlockLimit uint, logger log.Logger) (*follower.Service, error) {
 	backend := n.Backend()
 	chainConfig := backend.ChainConfig()
 	if err := cfg.L2.Check(chainConfig); err != nil {
@@ -267,12 +300,7 @@ func startFollower(ctx context.Context, n *node.ErigonNode, stop interface{ Clos
 		receipts.NewGenerator(dirs, blockReader, engine, nil, time.Minute), chainConfig)
 	fc := follower.DefaultConfig
 	fc.Dir, fc.Poll, fc.ReorgDepth, fc.LogChunk = dir, cfg.L1Poll, cfg.L1ReorgDepth, cfg.L1LogChunk
-	if cfg.L1Beacon != "" {
-		fc.Blobs = l1.NewBeacon(cfg.L1Beacon)
-	}
-	if cfg.L1Blobs != "" {
-		fc.Blobs = l1.NewBlobDir(cfg.L1Blobs, fc.Blobs)
-	}
+	fc.Blobs = blobSources(cfg, local)
 	if cfg.SequencerRPC != "" {
 		if fc.Sequencer, err = follower.DialSequencer(ctx, cfg.SequencerRPC, logger); err != nil {
 			return nil, err

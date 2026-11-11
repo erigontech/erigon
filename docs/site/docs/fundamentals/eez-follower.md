@@ -52,7 +52,7 @@ Next to an Erigon L1 node, read its database over the private API instead of JSO
 
 ### Running beside its L1 in one process
 
-With `--eez.chain` one Erigon process runs both chains: the L1 of `--chain`, as any Erigon node runs it, and beside it the EEZ network of `--eez.chain`, which must settle on that L1. The follower reads the L1 chain's database in place and derives each L1 block as soon as it is executed; it needs no L1 endpoint. Batches posted as blobs still come from `--eez.l1.beacon` or `--eez.l1.blobs`; the beacon API of the L1's own consensus layer, enabled with `--beacon.api=beacon`, serves the blobs it still holds.
+With `--eez.chain` one Erigon process runs both chains: the L1 of `--chain`, as any Erigon node runs it, and beside it the EEZ network of `--eez.chain`, which must settle on that L1. The follower reads the L1 chain's database in place and derives each L1 block as soon as it is executed; it needs no L1 endpoint. It reads the blobs of rollupX batches from `--eez.l1.blobs`, then from the stores of the L1's own consensus layer, then from `--eez.l1.beacon`; each is optional. Since Fulu the consensus layer keeps full blobs only with `--caplin.blobs-immediate-backfill`, for `MIN_EPOCHS_FOR_BLOB_SIDECARS_REQUESTS` epochs (about 15 days on Chiado), with `--caplin.blobs-archive`, or as a supernode; without either flag the node warns at start. Even then it lacks the blobs of a block whose columns its peers do not serve, so keep `--eez.l1.beacon` set.
 
 ```bash
 ./build/bin/erigon --chain=<l1-network> --datadir=/data/node \
