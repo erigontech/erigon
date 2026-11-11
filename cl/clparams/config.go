@@ -265,8 +265,8 @@ type NetworkConfig struct {
 	MessageDomainInvalidSnappy      ConfigHex4Bytes    `yaml:"-" json:"MESSAGE_DOMAIN_INVALID_SNAPPY"`                                              // 4-byte domain for gossip message-id isolation of invalid snappy messages
 	MessageDomainValidSnappy        ConfigHex4Bytes    `yaml:"-" json:"MESSAGE_DOMAIN_VALID_SNAPPY"`                                                // 4-byte domain for gossip message-id isolation of valid snappy messages
 	MaximumGossipClockDisparity     ConfigDurationMSec `yaml:"-" json:"MAXIMUM_GOSSIP_CLOCK_DISPARITY_MILLIS"`                                      // The maximum milliseconds of clock disparity assumed between honest nodes.
-	AttestationSubnetExtraBits      uint64             `yaml:"ATTESTATION_SUBNET_EXTRA_BITS" json:"ATTESTATION_SUBNET_EXTRA_BITS,string"`
-	EpochsPerSubnetSubscription     uint64             `yaml:"EPOCHS_PER_SUBNET_SUBSCRIPTION" json:"EPOCHS_PER_SUBNET_SUBSCRIPTION,string"`
+	AttestationSubnetExtraBits      uint64             `yaml:"-" json:"ATTESTATION_SUBNET_EXTRA_BITS,string"`
+	EpochsPerSubnetSubscription     uint64             `yaml:"-" json:"EPOCHS_PER_SUBNET_SUBSCRIPTION,string"`
 	TtfbTimeout                     ConfigDurationSec  `yaml:"-" json:"TTFB_TIMEOUT"` // The maximum time to wait for first byte of request response (time-to-first-byte).
 	RespTimeout                     ConfigDurationSec  `yaml:"-" json:"RESP_TIMEOUT"` // The maximum time for complete response transfer.
 
@@ -303,7 +303,7 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		AttestationPropagationSlotRange: 32,
 		AttestationSubnetPrefixBits:     6,
 		AttestationSubnetExtraBits:      0,
-		EpochsPerSubnetSubscription:     256,
+		EpochsPerSubnetSubscription:     EpochsPerSubnetSubscription,
 		TtfbTimeout:                     ConfigDurationSec(ReqTimeout),
 		RespTimeout:                     ConfigDurationSec(RespTimeout),
 		MaximumGossipClockDisparity:     ConfigDurationMSec(500 * time.Millisecond),
@@ -326,7 +326,7 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		AttestationPropagationSlotRange: 32,
 		AttestationSubnetPrefixBits:     6,
 		AttestationSubnetExtraBits:      0,
-		EpochsPerSubnetSubscription:     256,
+		EpochsPerSubnetSubscription:     EpochsPerSubnetSubscription,
 		TtfbTimeout:                     ConfigDurationSec(ReqTimeout),
 		RespTimeout:                     ConfigDurationSec(RespTimeout),
 		MaximumGossipClockDisparity:     ConfigDurationMSec(500 * time.Millisecond),
@@ -349,7 +349,7 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		AttestationPropagationSlotRange: 32,
 		AttestationSubnetPrefixBits:     6,
 		AttestationSubnetExtraBits:      0,
-		EpochsPerSubnetSubscription:     256,
+		EpochsPerSubnetSubscription:     EpochsPerSubnetSubscription,
 		TtfbTimeout:                     ConfigDurationSec(ReqTimeout),
 		RespTimeout:                     ConfigDurationSec(RespTimeout),
 		MaximumGossipClockDisparity:     ConfigDurationMSec(500 * time.Millisecond),
@@ -372,7 +372,7 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		AttestationPropagationSlotRange: 32,
 		AttestationSubnetPrefixBits:     6,
 		AttestationSubnetExtraBits:      0,
-		EpochsPerSubnetSubscription:     256,
+		EpochsPerSubnetSubscription:     EpochsPerSubnetSubscription,
 		TtfbTimeout:                     ConfigDurationSec(ReqTimeout),
 		RespTimeout:                     ConfigDurationSec(RespTimeout),
 		MaximumGossipClockDisparity:     ConfigDurationMSec(500 * time.Millisecond),
@@ -395,7 +395,7 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		AttestationPropagationSlotRange: 32,
 		AttestationSubnetPrefixBits:     6,
 		AttestationSubnetExtraBits:      0,
-		EpochsPerSubnetSubscription:     256,
+		EpochsPerSubnetSubscription:     EpochsPerSubnetSubscription,
 		TtfbTimeout:                     ConfigDurationSec(ReqTimeout),
 		RespTimeout:                     ConfigDurationSec(RespTimeout),
 		MaximumGossipClockDisparity:     ConfigDurationMSec(500 * time.Millisecond),
@@ -418,7 +418,7 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		AttestationPropagationSlotRange: 32,
 		AttestationSubnetPrefixBits:     6,
 		AttestationSubnetExtraBits:      0,
-		EpochsPerSubnetSubscription:     256,
+		EpochsPerSubnetSubscription:     EpochsPerSubnetSubscription,
 		TtfbTimeout:                     ConfigDurationSec(ReqTimeout),
 		RespTimeout:                     ConfigDurationSec(RespTimeout),
 		MaximumGossipClockDisparity:     ConfigDurationMSec(500 * time.Millisecond),
@@ -635,10 +635,10 @@ type BeaconChainConfig struct {
 	ProposerScoreBoost              uint64 `yaml:"PROPOSER_SCORE_BOOST" spec:"true" json:"PROPOSER_SCORE_BOOST,string"` // ProposerScoreBoost defines a value that is a % of the committee weight for fork-choice boosting.
 	IntervalsPerSlot                uint64 `yaml:"INTERVALS_PER_SLOT" spec:"true" json:"INTERVALS_PER_SLOT,string"`     // IntervalsPerSlot defines the number of fork choice intervals in a slot defined in the fork choice spec.
 	ReorgHeadWeightThreshold        uint64 `yaml:"REORG_HEAD_WEIGHT_THRESHOLD" json:"REORG_HEAD_WEIGHT_THRESHOLD,string"`
-	ReorgParentWeightThreshold      uint64 `yaml:"REORG_PARENT_WEIGHT_THRESHOLD" json:"REORG_PARENT_WEIGHT_THRESHOLD,string"`
-	ReorgMaxEpochsSinceFinalization uint64 `yaml:"REORG_MAX_EPOCHS_SINCE_FINALIZATION" json:"REORG_MAX_EPOCHS_SINCE_FINALIZATION,string"`
-	ConfirmationByzantineThreshold  uint64 `yaml:"CONFIRMATION_BYZANTINE_THRESHOLD" json:"CONFIRMATION_BYZANTINE_THRESHOLD,string"`
-	ProposerReorgCutoffBps          uint64 `yaml:"PROPOSER_REORG_CUTOFF_BPS" json:"PROPOSER_REORG_CUTOFF_BPS,string"`
+	ReorgParentWeightThreshold      uint64 `yaml:"-" json:"REORG_PARENT_WEIGHT_THRESHOLD,string"`
+	ReorgMaxEpochsSinceFinalization uint64 `yaml:"-" json:"REORG_MAX_EPOCHS_SINCE_FINALIZATION,string"`
+	ConfirmationByzantineThreshold  uint64 `yaml:"-" json:"CONFIRMATION_BYZANTINE_THRESHOLD,string"`
+	ProposerReorgCutoffBps          uint64 `yaml:"-" json:"PROPOSER_REORG_CUTOFF_BPS,string"`
 	AttestationDueBps               uint64 `yaml:"ATTESTATION_DUE_BPS" json:"ATTESTATION_DUE_BPS,string"`
 	AggregateDueBps                 uint64 `yaml:"AGGREGATE_DUE_BPS" json:"AGGREGATE_DUE_BPS,string"`
 	SyncMessageDueBps               uint64 `yaml:"SYNC_MESSAGE_DUE_BPS" json:"SYNC_MESSAGE_DUE_BPS,string"`
@@ -808,15 +808,12 @@ type BeaconChainConfig struct {
 	MaxPendingPartialsPerWithdrawalsSweep uint64 `yaml:"MAX_PENDING_PARTIALS_PER_WITHDRAWALS_SWEEP" spec:"true" json:"MAX_PENDING_PARTIALS_PER_WITHDRAWALS_SWEEP,string"` // MaxPendingPartialsPerWithdrawalsSweep bounds the size of the sweep searching for pending partials per slot.
 	MaxPendingDepositsPerEpoch            uint64 `yaml:"MAX_PENDING_DEPOSITS_PER_EPOCH" spec:"true" json:"MAX_PENDING_DEPOSITS_PER_EPOCH,string"`                         // MaxPendingDepositsPerEpoch defines the maximum number of pending deposits per epoch.
 	PendingDepositLimits                  uint64 `yaml:"PENDING_DEPOSITS_LIMIT" spec:"true" json:"PENDING_DEPOSIT_LIMIT,string"`                                          // PendingDepositLimit defines the maximum number of pending deposits.
-	CellsPerExtBlob                       uint64 `yaml:"CELLS_PER_EXT_BLOB" json:"CELLS_PER_EXT_BLOB,string"`
-	FieldElementsPerCell                  uint64 `yaml:"FIELD_ELEMENTS_PER_CELL" json:"FIELD_ELEMENTS_PER_CELL,string"`
-	FieldElementsPerExtBlob               uint64 `yaml:"FIELD_ELEMENTS_PER_EXT_BLOB" json:"FIELD_ELEMENTS_PER_EXT_BLOB,string"`
-	KzgCommitmentInclusionProofDepth      uint64 `yaml:"KZG_COMMITMENT_INCLUSION_PROOF_DEPTH" json:"KZG_COMMITMENT_INCLUSION_PROOF_DEPTH,string"`
-	KzgCommitmentsInclusionProofDepth     uint64 `yaml:"KZG_COMMITMENTS_INCLUSION_PROOF_DEPTH" json:"KZG_COMMITMENTS_INCLUSION_PROOF_DEPTH,string"`
-	MaxAttesterSlashingSize               uint64 `yaml:"MAX_ATTESTER_SLASHING_SIZE" json:"MAX_ATTESTER_SLASHING_SIZE,string"`
-	MaxSignedAggregateAndProofSize        uint64 `yaml:"MAX_SIGNED_AGGREGATE_AND_PROOF_SIZE" json:"MAX_SIGNED_AGGREGATE_AND_PROOF_SIZE,string"`
-	MaxSignedExecutionPayloadBidSize      uint64 `yaml:"MAX_SIGNED_EXECUTION_PAYLOAD_BID_SIZE" json:"MAX_SIGNED_EXECUTION_PAYLOAD_BID_SIZE,string"`
-	UpdateTimeout                         uint64 `yaml:"UPDATE_TIMEOUT" json:"UPDATE_TIMEOUT,string"`
+	CellsPerExtBlob                       uint64 `yaml:"-" json:"CELLS_PER_EXT_BLOB,string"`
+	FieldElementsPerCell                  uint64 `yaml:"-" json:"FIELD_ELEMENTS_PER_CELL,string"`
+	FieldElementsPerExtBlob               uint64 `yaml:"-" json:"FIELD_ELEMENTS_PER_EXT_BLOB,string"`
+	KzgCommitmentInclusionProofDepth      uint64 `yaml:"-" json:"KZG_COMMITMENT_INCLUSION_PROOF_DEPTH,string"`
+	KzgCommitmentsInclusionProofDepth     uint64 `yaml:"-" json:"KZG_COMMITMENTS_INCLUSION_PROOF_DEPTH,string"`
+	UpdateTimeout                         uint64 `yaml:"-" json:"UPDATE_TIMEOUT,string"`
 	PendingPartialWithdrawalsLimit        uint64 `yaml:"PENDING_PARTIAL_WITHDRAWALS_LIMIT" spec:"true" json:"PENDING_PARTIAL_WITHDRAWALS_LIMIT,string"` // PendingPartialWithdrawalsLimit defines the maximum number of pending partial withdrawals.
 	PendingConsolidationsLimit            uint64 `yaml:"PENDING_CONSOLIDATIONS_LIMIT" spec:"true" json:"PENDING_CONSOLIDATIONS_LIMIT,string"`           // PendingConsolidationsLimit defines the maximum number of pending consolidations.
 	MaxBlobsPerBlockElectra               uint64 `yaml:"MAX_BLOBS_PER_BLOCK_ELECTRA" spec:"true" json:"MAX_BLOBS_PER_BLOCK_ELECTRA,string"`             // MaxBlobsPerBlockElectra defines the maximum number of blobs per block for Electra.
@@ -971,14 +968,14 @@ func (b *BeaconChainConfig) AttestationDueMs(gloas bool) uint64 {
 		return 0
 	}
 	if gloas {
-		return b.SecondsPerSlot * AttestationDueBpsGloas / (BpsFactor / 1000)
+		return b.SecondsPerSlot * b.AttestationDueBpsGloas / (BpsFactor / 1000)
 	}
-	return b.SecondsPerSlot * AttestationDueBps / (BpsFactor / 1000)
+	return b.SecondsPerSlot * b.AttestationDueBps / (BpsFactor / 1000)
 }
 
 // PayloadAttestationDueMs returns the Gloas PTC deadline in milliseconds from slot start.
 func (b *BeaconChainConfig) PayloadAttestationDueMs() uint64 {
-	return b.SecondsPerSlot * PayloadAttestationDueBps / (BpsFactor / 1000)
+	return b.SecondsPerSlot * b.PayloadAttestationDueBps / (BpsFactor / 1000)
 }
 
 // InitializeForkSchedule initializes the schedules forks baked into the config.
@@ -1064,20 +1061,20 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	// Time parameter constants.
 	MinAttestationInclusionDelay:     1,
 	SecondsPerSlot:                   12,
-	ProposerReorgCutoffBps:           1667,
+	ProposerReorgCutoffBps:           ProposerReorgCutoffBps,
 	AttestationDueBps:                AttestationDueBps,
-	AggregateDueBps:                  6667,
-	SyncMessageDueBps:                3333,
-	ContributionDueBps:               6667,
+	AggregateDueBps:                  AggregateDueBps,
+	SyncMessageDueBps:                SyncMessageDueBps,
+	ContributionDueBps:               ContributionDueBps,
 	AttestationDueBpsGloas:           AttestationDueBpsGloas,
 	AggregateDueBpsGloas:             AggregateDueBpsGloas,
-	SyncMessageDueBpsGloas:           2500,
-	ContributionDueBpsGloas:          5000,
+	SyncMessageDueBpsGloas:           SyncMessageDueBpsGloas,
+	ContributionDueBpsGloas:          ContributionDueBpsGloas,
 	PayloadAttestationDueBps:         PayloadAttestationDueBps,
 	ReorgHeadWeightThreshold:         ReorgHeadWeightThreshold,
 	ReorgParentWeightThreshold:       ReorgParentWeightThreshold,
-	ReorgMaxEpochsSinceFinalization:  2,
-	ConfirmationByzantineThreshold:   25,
+	ReorgMaxEpochsSinceFinalization:  ReorgMaxEpochsSinceFinalization,
+	ConfirmationByzantineThreshold:   ConfirmationByzantineThreshold,
 	SlotsPerEpoch:                    32,
 	MinSeedLookahead:                 1,
 	MaxSeedLookahead:                 4,
@@ -1263,9 +1260,6 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	FieldElementsPerExtBlob:               8192,
 	KzgCommitmentInclusionProofDepth:      17,
 	KzgCommitmentsInclusionProofDepth:     4,
-	MaxAttesterSlashingSize:               2097616,
-	MaxSignedAggregateAndProofSize:        16829,
-	MaxSignedExecutionPayloadBidSize:      196932,
 	UpdateTimeout:                         8192,
 	PendingPartialWithdrawalsLimit:        1 << 27,
 	PendingConsolidationsLimit:            1 << 18,

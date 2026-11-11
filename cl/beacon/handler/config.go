@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/utils"
 )
 
@@ -32,19 +33,25 @@ func (a *ApiHandler) getSpec(w http.ResponseWriter, r *http.Request) (*beaconhtt
 	outSpec := struct {
 		*clparams.BeaconChainConfig
 		*clparams.NetworkConfig
-		MaxPayloadSize              uint64                       `json:"MAX_PAYLOAD_SIZE,string"`
-		MaximumGossipClockDisparity *clparams.ConfigDurationMSec `json:"MAXIMUM_GOSSIP_CLOCK_DISPARITY"`
-		PendingDepositsLimit        uint64                       `json:"PENDING_DEPOSITS_LIMIT,string"`
-		SlotDurationMs              uint64                       `json:"SLOT_DURATION_MS,string"`
-		MinEpochsForBlockRequests   uint64                       `json:"MIN_EPOCHS_FOR_BLOCK_REQUESTS,string"`
+		MaxPayloadSize                   uint64                       `json:"MAX_PAYLOAD_SIZE,string"`
+		MaximumGossipClockDisparity      *clparams.ConfigDurationMSec `json:"MAXIMUM_GOSSIP_CLOCK_DISPARITY"`
+		PendingDepositsLimit             uint64                       `json:"PENDING_DEPOSITS_LIMIT,string"`
+		MaxAttesterSlashingSize          uint64                       `json:"MAX_ATTESTER_SLASHING_SIZE,string"`
+		MaxSignedAggregateAndProofSize   uint64                       `json:"MAX_SIGNED_AGGREGATE_AND_PROOF_SIZE,string"`
+		MaxSignedExecutionPayloadBidSize uint64                       `json:"MAX_SIGNED_EXECUTION_PAYLOAD_BID_SIZE,string"`
+		SlotDurationMs                   uint64                       `json:"SLOT_DURATION_MS,string"`
+		MinEpochsForBlockRequests        uint64                       `json:"MIN_EPOCHS_FOR_BLOCK_REQUESTS,string"`
 	}{
-		BeaconChainConfig:           a.beaconChainCfg,
-		NetworkConfig:               a.netConfig,
-		MaxPayloadSize:              a.netConfig.GossipMaxSize,
-		MaximumGossipClockDisparity: &a.netConfig.MaximumGossipClockDisparity,
-		PendingDepositsLimit:        a.beaconChainCfg.PendingDepositLimits,
-		SlotDurationMs:              a.beaconChainCfg.SecondsPerSlot * 1000,
-		MinEpochsForBlockRequests:   a.beaconChainCfg.MinEpochsForBlockRequests(),
+		BeaconChainConfig:                a.beaconChainCfg,
+		NetworkConfig:                    a.netConfig,
+		MaxPayloadSize:                   a.netConfig.GossipMaxSize,
+		MaximumGossipClockDisparity:      &a.netConfig.MaximumGossipClockDisparity,
+		PendingDepositsLimit:             a.beaconChainCfg.PendingDepositLimits,
+		MaxAttesterSlashingSize:          gossip.MaxUncompressedSize(gossip.TopicNameAttesterSlashing, a.beaconChainCfg, a.netConfig),
+		MaxSignedAggregateAndProofSize:   gossip.MaxUncompressedSize(gossip.TopicNameBeaconAggregateAndProof, a.beaconChainCfg, a.netConfig),
+		MaxSignedExecutionPayloadBidSize: uint64(maxSignedExecutionPayloadBidSSZSize()),
+		SlotDurationMs:                   a.beaconChainCfg.SecondsPerSlot * 1000,
+		MinEpochsForBlockRequests:        a.beaconChainCfg.MinEpochsForBlockRequests(),
 	}
 
 	return newBeaconResponse(outSpec), nil

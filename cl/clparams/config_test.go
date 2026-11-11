@@ -74,7 +74,7 @@ func TestAttestationDueMs(t *testing.T) {
 		postGloas uint64
 	}{
 		{name: "mainnet", config: MainnetBeaconConfig, preGloas: 3999, postGloas: 3000},
-		{name: "6 second slots", config: BeaconChainConfig{SecondsPerSlot: 6}, preGloas: 1999, postGloas: 1500},
+		{name: "6 second slots", config: BeaconChainConfig{SecondsPerSlot: 6, AttestationDueBps: AttestationDueBps, AttestationDueBpsGloas: AttestationDueBpsGloas}, preGloas: 1999, postGloas: 1500},
 		{name: "gnosis", config: BeaconConfigs[chainspec.GnosisChainID], preGloas: 1666, postGloas: 1250},
 	} {
 		t.Run(test.name, func(t *testing.T) {
