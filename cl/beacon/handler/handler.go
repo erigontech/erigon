@@ -523,7 +523,7 @@ func (a *ApiHandler) init() {
 	}
 	r.Route("/eth", func(r chi.Router) {
 		r.Route("/v1", func(r chi.Router) {
-			if a.routerCfg.Builder {
+			if a.routerCfg.BuilderNamespace || a.routerCfg.Builder {
 				r.Get("/builder/states/{state_id}/expected_withdrawals", beaconhttp.HandleEndpointFunc(a.GetEth1V1BuilderStatesExpectedWithdrawals))
 			}
 			if a.routerCfg.Events {
