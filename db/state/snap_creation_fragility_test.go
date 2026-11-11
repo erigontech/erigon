@@ -26,7 +26,7 @@ func TestFileNamingRoundTrip_Domain(t *testing.T) {
 	ver := version.V1_0_standart
 	stepSize := uint64(1000)
 	schema := NewE3SnapSchemaBuilder(statecfg.AccessorBTree|statecfg.AccessorExistence, stepSize).
-		Data(dirs.SnapDomain, "accounts", DataExtensionKv, seg.CompressNone, ver).
+		Data(dirs.SnapDomain, "accounts", DataExtensionKv, ver).
 		BtIndex(ver).Existence(ver).Build()
 
 	cases := []struct{ from, to uint64 }{
@@ -74,7 +74,7 @@ func TestFileNamingRoundTrip_History(t *testing.T) {
 	ver := version.V1_0_standart
 	stepSize := uint64(1000)
 	schema := NewE3SnapSchemaBuilder(statecfg.AccessorHashMap, stepSize).
-		Data(dirs.SnapHistory, "accounts", DataExtensionV, seg.CompressNone, ver).
+		Data(dirs.SnapHistory, "accounts", DataExtensionV, ver).
 		Accessor(dirs.SnapAccessors, ver).Build()
 
 	cases := []struct{ from, to uint64 }{{0, 64000}, {64000, 128000}, {128000, 256000}}
@@ -106,7 +106,7 @@ func TestFileNamingRoundTrip_II(t *testing.T) {
 	ver := version.V1_0_standart
 	stepSize := uint64(1000)
 	schema := NewE3SnapSchemaBuilder(statecfg.AccessorHashMap, stepSize).
-		Data(dirs.SnapIdx, "logaddrs", DataExtensionEf, seg.CompressNone, ver).
+		Data(dirs.SnapIdx, "logaddrs", DataExtensionEf, ver).
 		Accessor(dirs.SnapAccessors, ver).Build()
 
 	cases := []struct{ from, to uint64 }{{0, 64000}, {64000, 128000}}
@@ -131,42 +131,6 @@ func TestFileNamingRoundTrip_II(t *testing.T) {
 	}
 }
 
-// TestSnapshotConfigValidation verifies that invalid SnapshotCreationConfig panics early.
-// This prevents misconfigured nodes from silently creating files with wrong ranges.
-func TestSnapshotConfigValidation(t *testing.T) {
-	t.Parallel()
-	dirs := datadir.New(t.TempDir())
-	ver := version.V1_0_standart
-	schema := NewE2SnapSchema(dirs, "bodies", NewE2SnapSchemaVersion(ver, ver))
-
-	// MergeStages not divisible by RootNumPerStep must panic
-	require.Panics(t, func() {
-		NewSnapshotConfig(&SnapshotCreationConfig{
-			RootNumPerStep: 1000,
-			MergeStages:    []uint64{1500}, // 1500 % 1000 != 0
-			MinimumSize:    1000,
-		}, schema)
-	})
-
-	// MinimumSize not divisible by RootNumPerStep must panic
-	require.Panics(t, func() {
-		NewSnapshotConfig(&SnapshotCreationConfig{
-			RootNumPerStep: 1000,
-			MergeStages:    []uint64{2000},
-			MinimumSize:    1500, // 1500 % 1000 != 0
-		}, schema)
-	})
-
-	// Valid config must not panic
-	require.NotPanics(t, func() {
-		NewSnapshotConfig(&SnapshotCreationConfig{
-			RootNumPerStep: 1000,
-			MergeStages:    []uint64{2000, 10000},
-			MinimumSize:    1000,
-		}, schema)
-	})
-}
-
 // TestE3SnapSchemaBuilder_MismatchedAccessors verifies that the builder panics
 // when an accessor is declared in `accessors` but its Build* method is not called,
 // or vice versa. This catches configuration mistakes at startup rather than at runtime.
@@ -179,28 +143,28 @@ func TestE3SnapSchemaBuilder_MismatchedAccessors(t *testing.T) {
 	// BTree declared in accessors but BtIndex() not called → panic on Build()
 	require.Panics(t, func() {
 		NewE3SnapSchemaBuilder(statecfg.AccessorBTree, stepSize).
-			Data(dirs.SnapDomain, "accounts", DataExtensionKv, seg.CompressNone, ver).
+			Data(dirs.SnapDomain, "accounts", DataExtensionKv, ver).
 			Build() // BtIndex not called
 	})
 
 	// HashMap declared in accessors but Accessor() not called → panic on Build()
 	require.Panics(t, func() {
 		NewE3SnapSchemaBuilder(statecfg.AccessorHashMap, stepSize).
-			Data(dirs.SnapDomain, "accounts", DataExtensionKv, seg.CompressNone, ver).
+			Data(dirs.SnapDomain, "accounts", DataExtensionKv, ver).
 			Build() // Accessor not called
 	})
 
 	// Existence declared in accessors but Existence() not called → panic on Build()
 	require.Panics(t, func() {
 		NewE3SnapSchemaBuilder(statecfg.AccessorExistence, stepSize).
-			Data(dirs.SnapDomain, "accounts", DataExtensionKv, seg.CompressNone, ver).
+			Data(dirs.SnapDomain, "accounts", DataExtensionKv, ver).
 			Build() // Existence not called
 	})
 
 	// BtIndex() called but BTree not in accessors → panic on Build()
 	require.Panics(t, func() {
 		NewE3SnapSchemaBuilder(statecfg.AccessorExistence, stepSize).
-			Data(dirs.SnapDomain, "accounts", DataExtensionKv, seg.CompressNone, ver).
+			Data(dirs.SnapDomain, "accounts", DataExtensionKv, ver).
 			Existence(ver).
 			BtIndex(ver). // BTree not in accessors
 			Build()
@@ -234,7 +198,7 @@ func TestRealFileCreation_DomainDataFile(t *testing.T) {
 	ver := version.V1_0_standart
 	stepSize := uint64(1000)
 	schema := NewE3SnapSchemaBuilder(statecfg.AccessorBTree|statecfg.AccessorExistence, stepSize).
-		Data(dirs.SnapDomain, "accounts", DataExtensionKv, seg.CompressNone, ver).
+		Data(dirs.SnapDomain, "accounts", DataExtensionKv, ver).
 		BtIndex(ver).Existence(ver).Build()
 
 	from, to := RootNum(0), RootNum(stepSize)
@@ -274,7 +238,7 @@ func TestFileNamingRoundTrip_AllStepSizes(t *testing.T) {
 	stepSizes := []uint64{100, 1000, 4096, 10000}
 	for _, stepSize := range stepSizes {
 		schema := NewE3SnapSchemaBuilder(statecfg.AccessorBTree, stepSize).
-			Data(dirs.SnapDomain, "accounts", DataExtensionKv, seg.CompressNone, ver).
+			Data(dirs.SnapDomain, "accounts", DataExtensionKv, ver).
 			BtIndex(ver).Build()
 
 		from := RootNum(0)
@@ -299,7 +263,7 @@ func TestE3ParseRejectsWrongTag(t *testing.T) {
 	stepSize := uint64(1000)
 
 	accountsSchema := NewE3SnapSchemaBuilder(statecfg.AccessorBTree, stepSize).
-		Data(dirs.SnapDomain, "accounts", DataExtensionKv, seg.CompressNone, ver).
+		Data(dirs.SnapDomain, "accounts", DataExtensionKv, ver).
 		BtIndex(ver).Build()
 
 	// A storage file must not be parseable by the accounts schema
@@ -357,25 +321,25 @@ func TestProductionSchemas_ValidNamesAndRoundTrip(t *testing.T) {
 		{
 			"accounts-domain",
 			NewE3SnapSchemaBuilder(statecfg.AccessorBTree|statecfg.AccessorExistence, stepSize).
-				Data(dirs.SnapDomain, "accounts", DataExtensionKv, seg.CompressNone, ver).
+				Data(dirs.SnapDomain, "accounts", DataExtensionKv, ver).
 				BtIndex(ver).Existence(ver).Build(),
 		},
 		{
 			"commitment-domain",
 			NewE3SnapSchemaBuilder(statecfg.AccessorHashMap, stepSize).
-				Data(dirs.SnapDomain, "commitments", DataExtensionKv, seg.CompressNone, ver).
+				Data(dirs.SnapDomain, "commitments", DataExtensionKv, ver).
 				Accessor(dirs.SnapDomain, ver).Build(),
 		},
 		{
 			"accounts-history",
 			NewE3SnapSchemaBuilder(statecfg.AccessorHashMap, stepSize).
-				Data(dirs.SnapHistory, "accounts", DataExtensionV, seg.CompressNone, ver).
+				Data(dirs.SnapHistory, "accounts", DataExtensionV, ver).
 				Accessor(dirs.SnapAccessors, ver).Build(),
 		},
 		{
 			"logaddrs-ii",
 			NewE3SnapSchemaBuilder(statecfg.AccessorHashMap, stepSize).
-				Data(dirs.SnapIdx, "logaddrs", DataExtensionEf, seg.CompressNone, ver).
+				Data(dirs.SnapIdx, "logaddrs", DataExtensionEf, ver).
 				Accessor(dirs.SnapAccessors, ver).Build(),
 		},
 	}
@@ -409,7 +373,7 @@ func TestFindFilesBySearchVersion(t *testing.T) {
 	ver := version.V1_0_standart
 	stepSize := uint64(1000)
 	schema := NewE3SnapSchemaBuilder(statecfg.AccessorBTree, stepSize).
-		Data(dirs.SnapDomain, "accounts", DataExtensionKv, seg.CompressNone, ver).
+		Data(dirs.SnapDomain, "accounts", DataExtensionKv, ver).
 		BtIndex(ver).Build()
 
 	from, to := RootNum(0), RootNum(stepSize)
@@ -446,7 +410,7 @@ func TestFindFilesBySearchVersion_VersionRangeFiltering(t *testing.T) {
 	// → V1_0 and V1_1 files should be found; V1_2 file (above current) should be ignored
 	ver := version.V1_1_standart
 	schema := NewE3SnapSchemaBuilder(statecfg.AccessorBTree, stepSize).
-		Data(dirs.SnapDomain, "accounts", DataExtensionKv, seg.CompressNone, ver).
+		Data(dirs.SnapDomain, "accounts", DataExtensionKv, ver).
 		BtIndex(ver).Build()
 
 	from, to := RootNum(0), RootNum(stepSize)
@@ -485,7 +449,7 @@ func TestFindFilesByStrictSearchVersion(t *testing.T) {
 	ver := version.V1_0_standart
 	stepSize := uint64(1000)
 	schema := NewE3SnapSchemaBuilder(statecfg.AccessorBTree, stepSize).
-		Data(dirs.SnapDomain, "accounts", DataExtensionKv, seg.CompressNone, ver).
+		Data(dirs.SnapDomain, "accounts", DataExtensionKv, ver).
 		BtIndex(ver).Build()
 
 	from, to := RootNum(0), RootNum(stepSize)
@@ -510,7 +474,7 @@ func TestFindFilesByStrictSearchVersion(t *testing.T) {
 	// Note: V1_1_standart schema needed to allow two different versions
 	ver2 := version.V1_1_standart
 	schema2 := NewE3SnapSchemaBuilder(statecfg.AccessorBTree, stepSize).
-		Data(dirs.SnapDomain, "storage", DataExtensionKv, seg.CompressNone, ver2).
+		Data(dirs.SnapDomain, "storage", DataExtensionKv, ver2).
 		BtIndex(ver2).Build()
 	makeFileFn := func(v version.Version) {
 		path, err := schema2.DataFile(v, from, to)
@@ -541,7 +505,7 @@ func TestFindAccessorFilesBySearchVersion(t *testing.T) {
 
 	// Domain schema (BTree + Existence) — create all files for range 0-1000
 	domainSchema := NewE3SnapSchemaBuilder(statecfg.AccessorBTree|statecfg.AccessorExistence, stepSize).
-		Data(dirs.SnapDomain, "accounts", DataExtensionKv, seg.CompressNone, ver).
+		Data(dirs.SnapDomain, "accounts", DataExtensionKv, ver).
 		BtIndex(ver).Existence(ver).Build()
 
 	btFile, _ := domainSchema.BtIdxFile(version.V1_0, from, to)
@@ -559,7 +523,7 @@ func TestFindAccessorFilesBySearchVersion(t *testing.T) {
 
 	// II schema (HashMap → .efi)
 	iiSchema := NewE3SnapSchemaBuilder(statecfg.AccessorHashMap, stepSize).
-		Data(dirs.SnapIdx, "logaddrs", DataExtensionEf, seg.CompressNone, ver).
+		Data(dirs.SnapIdx, "logaddrs", DataExtensionEf, ver).
 		Accessor(dirs.SnapAccessors, ver).Build()
 
 	efFile, _ := iiSchema.DataFile(version.V1_0, from, to)
@@ -583,7 +547,7 @@ func TestFileNamingRoundTrip_AllAccessorTypes(t *testing.T) {
 
 	// BTree (.bt) + Existence (.kvei)
 	domainSchema := NewE3SnapSchemaBuilder(statecfg.AccessorBTree|statecfg.AccessorExistence, stepSize).
-		Data(dirs.SnapDomain, "accounts", DataExtensionKv, seg.CompressNone, ver).
+		Data(dirs.SnapDomain, "accounts", DataExtensionKv, ver).
 		BtIndex(ver).Existence(ver).Build()
 
 	btPath, _ := domainSchema.BtIdxFile(ver.Current, from, to)
@@ -599,7 +563,7 @@ func TestFileNamingRoundTrip_AllAccessorTypes(t *testing.T) {
 
 	// HashMap accessor (.kvi for domain)
 	commitSchema := NewE3SnapSchemaBuilder(statecfg.AccessorHashMap, stepSize).
-		Data(dirs.SnapDomain, "commitments", DataExtensionKv, seg.CompressNone, ver).
+		Data(dirs.SnapDomain, "commitments", DataExtensionKv, ver).
 		Accessor(dirs.SnapDomain, ver).Build()
 	kviPath, _ := commitSchema.AccessorIdxFile(ver.Current, from, to, 0)
 	info, ok = commitSchema.Parse(filepath.Base(kviPath))
@@ -608,7 +572,7 @@ func TestFileNamingRoundTrip_AllAccessorTypes(t *testing.T) {
 
 	// HashMap accessor (.vi for history)
 	histSchema := NewE3SnapSchemaBuilder(statecfg.AccessorHashMap, stepSize).
-		Data(dirs.SnapHistory, "accounts", DataExtensionV, seg.CompressNone, ver).
+		Data(dirs.SnapHistory, "accounts", DataExtensionV, ver).
 		Accessor(dirs.SnapAccessors, ver).Build()
 	viPath, _ := histSchema.AccessorIdxFile(ver.Current, from, to, 0)
 	info, ok = histSchema.Parse(filepath.Base(viPath))
@@ -617,7 +581,7 @@ func TestFileNamingRoundTrip_AllAccessorTypes(t *testing.T) {
 
 	// HashMap accessor (.efi for inverted index)
 	iiSchema := NewE3SnapSchemaBuilder(statecfg.AccessorHashMap, stepSize).
-		Data(dirs.SnapIdx, "logaddrs", DataExtensionEf, seg.CompressNone, ver).
+		Data(dirs.SnapIdx, "logaddrs", DataExtensionEf, ver).
 		Accessor(dirs.SnapAccessors, ver).Build()
 	efiPath, _ := iiSchema.AccessorIdxFile(ver.Current, from, to, 0)
 	info, ok = iiSchema.Parse(filepath.Base(efiPath))

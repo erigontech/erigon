@@ -452,19 +452,19 @@ func generateDomainFiles(t *testing.T, name string, dirs datadir.Dirs, ranges []
 	ver := version.V1_0_standart
 	stepSize := uint64(10)
 	domain := NewE3SnapSchemaBuilder(statecfg.AccessorBTree|statecfg.AccessorExistence, stepSize).
-		Data(dirs.SnapDomain, name, DataExtensionKv, seg.CompressNone, ver).
+		Data(dirs.SnapDomain, name, DataExtensionKv, ver).
 		BtIndex(ver).Existence(ver).
 		Build()
 	populateFiles2(t, dirs, domain, stepSize, ranges)
 
 	history := NewE3SnapSchemaBuilder(statecfg.AccessorHashMap, stepSize).
-		Data(dirs.SnapHistory, name, DataExtensionV, seg.CompressNone, ver).
+		Data(dirs.SnapHistory, name, DataExtensionV, ver).
 		Accessor(dirs.SnapAccessors, version.Versions{Current: version.V2_0, MinSupported: version.V2_0}).
 		Build()
 	populateFiles2(t, dirs, history, stepSize, ranges)
 
 	ii := NewE3SnapSchemaBuilder(statecfg.AccessorHashMap, stepSize).
-		Data(dirs.SnapIdx, name, DataExtensionEf, seg.CompressNone, ver).
+		Data(dirs.SnapIdx, name, DataExtensionEf, ver).
 		Accessor(dirs.SnapAccessors, ver).
 		Build()
 	populateFiles2(t, dirs, ii, stepSize, ranges)
@@ -490,7 +490,7 @@ func generateCommitmentFile(t *testing.T, dirs datadir.Dirs, ranges []testFileRa
 	ver := version.V1_0_standart
 	stepSize := uint64(10)
 	schema := NewE3SnapSchemaBuilder(statecfg.AccessorHashMap, stepSize).
-		Data(dirs.SnapDomain, "commitment", DataExtensionKv, seg.CompressNone, ver).
+		Data(dirs.SnapDomain, "commitment", DataExtensionKv, ver).
 		Accessor(dirs.SnapDomain, ver).
 		Build()
 	populateFiles2(t, dirs, schema, stepSize, ranges)
@@ -504,13 +504,13 @@ func generateCommitmentHistoryAndIndexFiles(t *testing.T, dirs datadir.Dirs, ran
 	ver := version.V1_0_standart
 	stepSize := uint64(10)
 	history := NewE3SnapSchemaBuilder(statecfg.AccessorHashMap, stepSize).
-		Data(dirs.SnapHistory, "commitment", DataExtensionV, seg.CompressNone, ver).
+		Data(dirs.SnapHistory, "commitment", DataExtensionV, ver).
 		Accessor(dirs.SnapAccessors, version.Versions{Current: version.V2_0, MinSupported: version.V2_0}).
 		Build()
 	populateFiles2(t, dirs, history, stepSize, ranges)
 
 	ii := NewE3SnapSchemaBuilder(statecfg.AccessorHashMap, stepSize).
-		Data(dirs.SnapIdx, "commitment", DataExtensionEf, seg.CompressNone, ver).
+		Data(dirs.SnapIdx, "commitment", DataExtensionEf, ver).
 		Accessor(dirs.SnapAccessors, ver).
 		Build()
 	populateFiles2(t, dirs, ii, stepSize, ranges)
@@ -939,13 +939,5 @@ func TestAggregatorOpenFolderHidesDataOnlyDomainFile(t *testing.T) {
 	require.Equal(t, 3, agg.d[kv.AccountsDomain].dirtyFiles.Len())
 	at := agg.BeginFilesRo()
 	defer at.Close()
-	require.Equal(t, []string{"0-1", "1-2"}, stepRanges(t, visibleSrc(at.d[kv.AccountsDomain].files), 10))
-}
-
-func visibleSrc(files visibleFiles) []*FilesItem {
-	res := make([]*FilesItem, len(files))
-	for i, f := range files {
-		res[i] = f.src
-	}
-	return res
+	require.Equal(t, "0-1,1-2", at.d[kv.AccountsDomain].files.String(10))
 }

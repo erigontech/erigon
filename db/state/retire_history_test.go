@@ -30,7 +30,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
-	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 )
@@ -65,7 +64,7 @@ func generateStandaloneIIFile(t *testing.T, name kv.InvertedIdx, dirs datadir.Di
 	ver := version.V1_0_standart
 	stepSize := uint64(10)
 	schema := NewE3SnapSchemaBuilder(statecfg.AccessorHashMap, stepSize).
-		Data(dirs.SnapIdx, name.String(), DataExtensionEf, seg.CompressNone, ver).
+		Data(dirs.SnapIdx, name.String(), DataExtensionEf, ver).
 		Accessor(dirs.SnapAccessors, ver).
 		Build()
 	populateFiles2(t, dirs, schema, stepSize, ranges)
