@@ -745,8 +745,8 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 }
 
 func (e *ExecModule) ViewValidatedBlock(ctx context.Context, blockHash common.Hash, fn func(blockTx, parentTx kv.TemporalTx) error) (bool, error) {
-	if err := e.semaphore.Acquire(ctx, 1); err != nil {
-		return false, err
+	if !e.semaphore.TryAcquire(1) {
+		return false, nil
 	}
 	defer e.semaphore.Release(1)
 	head, number, sd := e.forkValidator.ExtendingFork()

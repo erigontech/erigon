@@ -66,6 +66,19 @@ type sideForkReader struct {
 	forkBody      *types.Body
 }
 
+// The payload witness view runs under the engine lock, so a busy module must not make it wait.
+func TestViewValidatedBlockDoesNotWaitForABusyModule(t *testing.T) {
+	module := &ExecModule{semaphore: semaphore.NewWeighted(1)}
+	require.NoError(t, module.semaphore.Acquire(t.Context(), 1))
+	t.Cleanup(func() { module.semaphore.Release(1) })
+
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	held, err := module.ViewValidatedBlock(ctx, common.Hash{1}, func(_, _ kv.TemporalTx) error { return nil })
+	require.NoError(t, err)
+	require.False(t, held)
+}
+
 func TestDrainWaitsForInFlightExecution(t *testing.T) {
 	module := &ExecModule{semaphore: semaphore.NewWeighted(1)}
 	require.NoError(t, module.semaphore.Acquire(t.Context(), 1))

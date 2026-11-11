@@ -145,7 +145,7 @@ type ExecutionModule interface {
 
 	// ViewValidatedBlock calls fn with a view of the state after blockHash and with its
 	// parent's state, when blockHash was validated directly on top of the committed head
-	// and is not committed yet. It reports whether fn was called.
+	// and is not committed yet. It reports whether fn was called; a busy module does not call it.
 	ViewValidatedBlock(ctx context.Context, blockHash common.Hash, fn func(blockTx, parentTx kv.TemporalTx) error) (bool, error)
 
 	// --- Fork choice ------------------------------------------------------

@@ -130,6 +130,25 @@ func requireDebugExecutionWitness(ctx context.Context, t *testing.T, eat enginea
 	require.Equal(t, want.Headers, witness.Headers)
 }
 
+// A payload validated by a plain newPayload gets its witness from the held state when it is resubmitted before
+// the forkchoice update.
+func TestEngineApiPayloadWitnessForValidatedPayload(t *testing.T) {
+	eat := newPayloadWitnessTester(t, engineapitester.EngineApiTesterInitArgs{
+		EthConfigTweaker: func(cfg *ethconfig.Config) { cfg.KeepExecutionProofs = true },
+		EnableDebugAPI:   true,
+	})
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		payload, _ := buildChangerPayload(ctx, t, eat)
+		status, err := eat.MockCl.InsertNewPayload(ctx, payload)
+		require.NoError(t, err)
+		require.Equal(t, enginetypes.ValidStatus, status.Status)
+
+		witness := requirePayloadWitness(ctx, t, eat, payload)
+		require.NoError(t, eat.MockCl.UpdateForkChoice(ctx, payload))
+		requireDebugExecutionWitness(ctx, t, eat, payload, witness)
+	})
+}
+
 // A payload committed before its witness was requested gets the witness rebuilt from commitment history.
 func TestEngineApiPayloadWitnessForCommittedPayload(t *testing.T) {
 	eat := newPayloadWitnessTester(t, engineapitester.EngineApiTesterInitArgs{
