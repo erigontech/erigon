@@ -7,7 +7,7 @@ replace github.com/holiman/bloomfilter/v2 => github.com/AskAlexSharov/bloomfilte
 require (
 	github.com/erigontech/evmone_precompiles v0.0.0-20261020072006-fc5972e25a08
 	github.com/erigontech/fastkeccak v0.1.1-0.20260408010752-08e7b6602268
-	github.com/erigontech/mdbx-go v0.43.0
+	github.com/erigontech/mdbx-go v0.43.1
 	github.com/erigontech/secp256k1 v1.4.1
 )
 
@@ -25,7 +25,7 @@ require (
 	github.com/anacrolix/log v0.17.1-0.20251118025802-918f1157b7bb
 	github.com/anacrolix/missinggo/v2 v2.11.0
 	github.com/anacrolix/sync v0.5.5-0.20251119100342-d78dd1f686f1
-	github.com/anacrolix/torrent v1.61.1-0.20261024051421-5f95cd33fd29
+	github.com/anacrolix/torrent v1.62.0
 	github.com/benesch/cgosymbolizer v0.0.0-20190515212042-bec6fe6e597b
 	github.com/c2h5oh/datasize v0.0.0-20231215233829-aa82cc1e6500
 	github.com/cenkalti/backoff/v4 v4.3.0
@@ -59,7 +59,7 @@ require (
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/heimdalr/dag v1.5.1
 	github.com/holiman/bloomfilter/v2 v2.0.3
-	github.com/holiman/uint256 v1.3.3-0.20260228135838-087f4b32f234
+	github.com/holiman/uint256 v1.3.3-0.20261109190209-808a9d02b85f
 	github.com/huandu/xstrings v1.6.3
 	github.com/huin/goupnp v1.3.0
 	github.com/jackpal/go-nat-pmp v1.1.0
@@ -73,10 +73,9 @@ require (
 	github.com/mark3labs/mcp-go v1.4.0
 	github.com/mattn/go-colorable v0.1.16
 	github.com/mattn/go-isatty v0.0.24
-	github.com/maypok86/otter/v2 v2.3.1-0.20261014230019-58758580496f
+	github.com/maypok86/otter/v2 v2.4.0
 	github.com/miekg/dns v1.1.73
 	github.com/multiformats/go-multiaddr v0.16.1
-	github.com/nyaosorg/go-windows-shortcut v0.0.0-20220529122037-8b0c89bca4c4
 	github.com/pelletier/go-toml/v2 v2.4.3
 	github.com/pion/stun/v3 v3.1.7
 	github.com/prometheus/client_golang v1.25.0

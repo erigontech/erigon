@@ -22,6 +22,7 @@ import (
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
+	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
@@ -30,21 +31,20 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/protocol"
-	"github.com/erigontech/erigon/execution/protocol/aa"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
-	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/rpc/transactions"
 )
 
 type Generator struct {
-	stateCache    kvcache.Cache
-	receiptsCache *lru.Cache[common.Hash, types.Receipts]
-	receiptCache  *cache.ByteLRU[*types.Receipt] // keyed by txNum: avoids TxnByIdxInBlock (snapshot read) on cache hit
+	stateCache      kvcache.Cache
+	receiptsCache   *lru.Cache[common.Hash, types.Receipts]
+	receiptCache    *cache.ByteLRU[*types.Receipt]  // keyed by txNum: avoids TxnByIdxInBlock (snapshot read) on cache hit
+	frozenCanonical *lru.Cache[uint64, common.Hash] // a remote block reader asks the backend for each frozen height
 
 	// blockExecMutex ensuring that only 1 block with given hash
 	// executed at a time - all parallel requests for same hash will wait for results
@@ -87,6 +87,11 @@ func NewGenerator(dirs datadir.Dirs, blockReader dbservices.FullBlockReader, eng
 		panic(err)
 	}
 
+	frozenCanonical, err := lru.New[uint64, common.Hash](receiptsCacheLimit)
+	if err != nil {
+		panic(err)
+	}
+
 	txNumReader := blockReader.TxnumReader()
 
 	var f *rpchelper.Filters
@@ -97,6 +102,7 @@ func NewGenerator(dirs datadir.Dirs, blockReader dbservices.FullBlockReader, eng
 	return &Generator{
 		stateCache:         stateCache,
 		receiptsCache:      receiptsCache,
+		frozenCanonical:    frozenCanonical,
 		blockReader:        blockReader,
 		txNumReader:        txNumReader,
 		engine:             engine,
@@ -167,11 +173,12 @@ func (g *Generator) PersistedReceipt(ctx context.Context, tx kv.TemporalTx, head
 	if err != nil || !ok {
 		return nil, false, err
 	}
-	receipt, ok, err := readPersistedReceipt(g.filters.WithTemporalOverlay(tx), header.Number.Uint64(), header.Hash(), txnHash, txNum)
+	view := g.filters.WithTemporalOverlay(tx)
+	receipt, ok, err := readPersistedReceipt(view, header.Number.Uint64(), header.Hash(), txnHash, txNum)
 	if err != nil || !ok {
 		return nil, false, err
 	}
-	g.addToCacheReceipt(txNum, receipt)
+	g.addToCacheReceipt(ctx, view, header, txNum, receipt)
 	return receipt, true, nil
 }
 
@@ -216,9 +223,35 @@ func (g *Generator) PrepareEnv(ctx context.Context, header *types.Header, cfg *c
 	}, nil
 }
 
-func (g *Generator) addToCacheReceipts(header *types.Header, receipts types.Receipts) {
-	if rpcDisableRLRU {
+// canonicalInView reports whether header is canonical in view, the view its receipts were read from;
+// when it is not, view holds another fork at this height and its receipts must not be cached under header.
+func (g *Generator) canonicalInView(ctx context.Context, view kv.TemporalTx, header *types.Header) bool {
+	n := header.Number.Uint64()
+	// Read the mapping from view: RemoteBlockReader.CanonicalHash ignores the tx and asks the live backend.
+	hash, err := rawdb.ReadCanonicalHash(view, n)
+	if err != nil {
+		return false
+	}
+	if hash == (common.Hash{}) { // frozen blocks have their mapping only in snapshots
+		var ok bool
+		if hash, ok = g.frozenCanonical.Get(n); !ok {
+			if hash, ok, err = g.blockReader.CanonicalHash(ctx, view, n); err != nil || !ok {
+				return false
+			}
+			if n < g.blockReader.FrozenBlocks() {
+				g.frozenCanonical.Add(n, hash)
+			}
+		}
+	}
+	return hash == header.Hash()
+}
+
+func (g *Generator) addToCacheReceipts(ctx context.Context, tx kv.TemporalTx, header *types.Header, receipts types.Receipts) {
+	if rpcDisableRLRU || !g.canonicalInView(ctx, tx, header) {
 		return
+	}
+	for _, r := range receipts {
+		r.Logs.SetBlockTimestamp(header.Time)
 	}
 	//g.receiptsCache.Add(header.Hash(), receipts.Copy()) // .Copy() helps pprof to attribute memory to cache - instead of evm (where it was allocated). but 5% perf
 	g.receiptsCache.Add(header.Hash(), receipts)
@@ -228,10 +261,11 @@ func newReceiptCache(maxBytes datasize.ByteSize) *cache.ByteLRU[*types.Receipt] 
 	return cache.NewByteLRU(maxBytes, func(_ uint64, r *types.Receipt) int64 { return int64(r.Size()) + cache.ByteLRUEntryOverheadBytes })
 }
 
-func (g *Generator) addToCacheReceipt(txNum uint64, receipt *types.Receipt) {
-	if rpcDisableRLRU {
+func (g *Generator) addToCacheReceipt(ctx context.Context, tx kv.TemporalTx, header *types.Header, txNum uint64, receipt *types.Receipt) {
+	if rpcDisableRLRU || !g.canonicalInView(ctx, tx, header) {
 		return
 	}
+	receipt.Logs.SetBlockTimestamp(header.Time)
 	g.receiptCache.Add(txNum, receipt)
 }
 
@@ -293,7 +327,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 			return nil, err
 		}
 		if ok && PersistedReceiptsServed() {
-			g.addToCacheReceipt(txNum, receiptFromDB)
+			g.addToCacheReceipt(ctx, tx, header, txNum, receiptFromDB)
 			return receiptFromDB, nil
 		}
 	}
@@ -321,133 +355,110 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		return nil, err
 	}
 
-	if txn.Type() == types.AccountAbstractionTxType {
-		genEnv, err = g.PrepareEnv(ctx, header, cfg, tx, index)
+	var sharedDomains *execctx.SharedDomains
+	defer func() {
+		if sharedDomains != nil {
+			sharedDomains.Close()
+		}
+	}()
+
+	var stateWriter state.StateWriter
+	var written *blockWrites
+
+	if calculatePostState && postState.CommitmentHistory {
+		sharedDomains, err = execctx.NewSharedDomains(ctx, tx, log.Root(), execctx.WithoutDeferredBranchUpdates(), execctx.WithSequentialCommitment())
 		if err != nil {
 			return nil, err
 		}
 
-		aaTxn := txn.(*types.AccountAbstractionTransaction)
-		blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, accounts.NilAddress, cfg)
-		evm = vm.NewEVM(blockContext, evmtypes.TxContext{}, genEnv.ibs, cfg, vm.Config{})
-		paymasterContext, validationGasUsed, err := aa.ValidateAATransaction(aaTxn, genEnv.ibs, genEnv.gp, header, evm, cfg)
+		genEnv, err = g.PrepareEnv(ctx, header, cfg, tx, 0)
+		if err != nil {
+			return nil, err
+		}
+		transactions.VersionedBlockState(genEnv.ibs)
+
+		minTxNum, err := g.txNumReader.Min(ctx, tx, blockNum)
 		if err != nil {
 			return nil, err
 		}
 
-		ctx, cancel := context.WithTimeout(ctx, g.evmTimeout)
-		defer cancel()
-		defer context.AfterFunc(ctx, evm.Cancel)()
-
-		status, gasUsed, err := aa.ExecuteAATransaction(aaTxn, paymasterContext, validationGasUsed, genEnv.gp, evm, header, genEnv.ibs)
+		// commitment is indexed by txNum of the first tx (system-tx) of the block
+		sharedDomains.GetCommitmentContext().SetHistoryStateReader(tx, minTxNum)
+		latestTxNum, _, err := sharedDomains.SeekCommitment(ctx, tx)
 		if err != nil {
 			return nil, err
 		}
-
-		logs := genEnv.ibs.GetLogs(genEnv.ibs.TxnIndex(), txn.Hash(), header.Number.Uint64(), header.Hash())
-		receipt = aa.CreateAAReceipt(txn.Hash(), status, gasUsed, header.GasUsed, header.Number.Uint64(), uint64(genEnv.ibs.TxnIndex()), logs)
-	} else {
-		var sharedDomains *execctx.SharedDomains
-		defer func() {
-			if sharedDomains != nil {
-				sharedDomains.Close()
-			}
-		}()
-
-		var stateWriter state.StateWriter
-
-		if calculatePostState && postState.CommitmentHistory {
-			sharedDomains, err = execctx.NewSharedDomains(ctx, tx, log.Root(), execctx.WithoutDeferredBranchUpdates(), execctx.WithSequentialCommitment())
-			if err != nil {
-				return nil, err
-			}
-
-			genEnv, err = g.PrepareEnv(ctx, header, cfg, tx, 0)
-			if err != nil {
-				return nil, err
-			}
-
-			minTxNum, err := g.txNumReader.Min(ctx, tx, blockNum)
-			if err != nil {
-				return nil, err
-			}
-
-			// commitment is indexed by txNum of the first tx (system-tx) of the block
-			sharedDomains.GetCommitmentContext().SetHistoryStateReader(tx, minTxNum)
-			latestTxNum, _, err := sharedDomains.SeekCommitment(ctx, tx)
-			if err != nil {
-				return nil, err
-			}
-			stateWriter = state.NewWriter(sharedDomains.AsPutDel(tx), nil, latestTxNum)
-
-			evm = protocol.CreateEVM(cfg, protocol.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, accounts.NilAddress, genEnv.ibs, genEnv.header, vm.Config{})
-			ctx, cancel := context.WithTimeout(ctx, g.evmTimeout)
-			defer cancel()
-			defer context.AfterFunc(ctx, evm.Cancel)()
-
-			// re-run previous txs of the blocks
-			for txnIndex := range index {
-				currTxn := postState.Txns[txnIndex]
-
-				genEnv.ibs.SetTxContext(blockNum, txnIndex)
-				_, err := protocol.ApplyTransactionWithEVM(cfg, g.engine, genEnv.gp, genEnv.ibs, stateWriter, genEnv.header, currTxn, genEnv.gasUsed, vm.Config{}, evm)
-				if err != nil {
-					return nil, fmt.Errorf("ReceiptGen.GetReceipts: bn=%d, txnIdx=%d, %w", blockNum, txnIndex, err)
-				}
-				if evm.Cancelled() {
-					return nil, fmt.Errorf("execution aborted (timeout = %v)", g.evmTimeout)
-				}
-
-				if err := genEnv.ibs.CommitBlock(evm.ChainRules(), stateWriter); err != nil {
-					return nil, fmt.Errorf("CommitBlock failed: %w", err)
-				}
-			}
-
-			genEnv.ibs.SetTxContext(blockNum, index)
-		} else {
-			genEnv, err = g.PrepareEnv(ctx, header, cfg, tx, index)
-			if err != nil {
-				return nil, err
-			}
-			transactions.VersionedCallState(genEnv.ibs)
-			stateWriter = genEnv.noopWriter
-		}
+		written = &blockWrites{TemporalPutDel: sharedDomains.AsPutDel(tx), sd: sharedDomains, tx: tx, blockStart: minTxNum}
+		stateWriter = state.NewWriter(written, nil, latestTxNum)
 
 		evm = protocol.CreateEVM(cfg, protocol.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, accounts.NilAddress, genEnv.ibs, genEnv.header, vm.Config{})
 		ctx, cancel := context.WithTimeout(ctx, g.evmTimeout)
 		defer cancel()
 		defer context.AfterFunc(ctx, evm.Cancel)()
 
-		receipt, err = protocol.ApplyTransactionWithEVM(cfg, g.engine, genEnv.gp, genEnv.ibs, stateWriter, genEnv.header, txn, genEnv.gasUsed, vm.Config{}, evm)
+		// re-run previous txs of the blocks
+		for txnIndex := range index {
+			currTxn := postState.Txns[txnIndex]
+
+			genEnv.ibs.SetTxContext(blockNum, txnIndex)
+			_, err := protocol.ApplyTransactionWithEVM(cfg, g.engine, genEnv.gp, genEnv.ibs, stateWriter, genEnv.header, currTxn, genEnv.gasUsed, vm.Config{}, evm)
+			if err != nil {
+				return nil, fmt.Errorf("ReceiptGen.GetReceipts: bn=%d, txnIdx=%d, %w", blockNum, txnIndex, err)
+			}
+			if evm.Cancelled() {
+				return nil, fmt.Errorf("execution aborted (timeout = %v)", g.evmTimeout)
+			}
+
+			if err := sharedreceipts.EndTx(genEnv.ibs, evm.ChainRules(), stateWriter); err != nil {
+				return nil, fmt.Errorf("ReceiptGen.GetReceipt: bn=%d, txnIdx=%d, %w", blockNum, txnIndex, err)
+			}
+		}
+
+		genEnv.ibs.SetTxContext(blockNum, index)
+	} else {
+		genEnv, err = g.PrepareEnv(ctx, header, cfg, tx, index)
 		if err != nil {
+			return nil, err
+		}
+		transactions.VersionedCallState(genEnv.ibs)
+		stateWriter = genEnv.noopWriter
+	}
+
+	evm = protocol.CreateEVM(cfg, protocol.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, accounts.NilAddress, genEnv.ibs, genEnv.header, vm.Config{})
+	ctx, cancel := context.WithTimeout(ctx, g.evmTimeout)
+	defer cancel()
+	defer context.AfterFunc(ctx, evm.Cancel)()
+
+	receipt, err = protocol.ApplyTransactionWithEVM(cfg, g.engine, genEnv.gp, genEnv.ibs, stateWriter, genEnv.header, txn, genEnv.gasUsed, vm.Config{}, evm)
+	if err != nil {
+		return nil, fmt.Errorf("ReceiptGen.GetReceipt: bn=%d, txnIdx=%d, %w", blockNum, index, err)
+	}
+
+	if calculatePostState {
+		if err := sharedreceipts.EndTx(genEnv.ibs, evm.ChainRules(), stateWriter); err != nil {
 			return nil, fmt.Errorf("ReceiptGen.GetReceipt: bn=%d, txnIdx=%d, %w", blockNum, index, err)
 		}
 
-		if calculatePostState {
-			if err := genEnv.ibs.CommitBlock(evm.ChainRules(), stateWriter); err != nil {
-				return nil, fmt.Errorf("CommitBlock failed: %w", err)
+		// calculate state root after tx identified by txNum (txNim+1)
+		var stateRoot []byte
+		if postState.CommitmentHistory {
+			sharedDomains.GetCommitmentContext().SetHistoryStateReader(tx, txNum+1)
+			latestTxNum, _, err := sharedDomains.SeekCommitment(ctx, tx)
+			if err != nil {
+				return nil, err
 			}
-
-			// calculate state root after tx identified by txNum (txNim+1)
-			var stateRoot []byte
-			if postState.CommitmentHistory {
-				sharedDomains.GetCommitmentContext().SetHistoryStateReader(tx, txNum+1)
-				latestTxNum, _, err := sharedDomains.SeekCommitment(ctx, tx)
-				if err != nil {
-					return nil, err
-				}
-				stateRoot, err = sharedDomains.ComputeCommitment(ctx, tx, false, blockNum, latestTxNum, "getReceipt", nil)
-				if err != nil {
-					return nil, err
-				}
-			} else { // use state history to compute commitment
-				stateRoot, err = g.computeCommitmentFromStateHistory(ctx, tx, blockNum, txNum)
-				if err != nil {
-					return nil, err
-				}
+			written.touchAll()
+			stateRoot, err = sharedDomains.ComputeCommitment(ctx, tx, false, blockNum, latestTxNum, "getReceipt", nil)
+			if err != nil {
+				return nil, err
 			}
-			receipt.PostState = stateRoot
+		} else { // use state history to compute commitment
+			stateRoot, err = g.computeCommitmentFromStateHistory(ctx, tx, blockNum, txNum)
+			if err != nil {
+				return nil, err
+			}
 		}
+		receipt.PostState = stateRoot
 	}
 
 	if evm.Cancelled() {
@@ -464,11 +475,11 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		receipt.Logs[i].Index = hexutil.Uint(firstLogIndex + uint32(i))
 	}
 
-	g.addToCacheReceipt(txNum, receipt)
-
 	if dbg.AssertEnabled && receiptFromDB != nil {
-		g.assertEqualReceipts(receipt, receiptFromDB)
+		g.assertEqualReceipts(receipt, receiptFromDB, txn)
 	}
+
+	g.addToCacheReceipt(ctx, tx, header, txNum, receipt)
 	return receipt, nil
 }
 
@@ -518,7 +529,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 	// A block with no transactions has no receipts to derive, and preparing an
 	// execution environment for it would need state history that may be pruned.
 	if len(block.Transactions()) == 0 {
-		g.addToCacheReceipts(block.HeaderNoCopy(), receipts)
+		g.addToCacheReceipts(ctx, tx, block.HeaderNoCopy(), receipts)
 		return receipts, nil
 	}
 
@@ -534,7 +545,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 			return nil, err
 		}
 		if len(receiptsFromDB) > 0 && PersistedReceiptsServed() {
-			g.addToCacheReceipts(block.HeaderNoCopy(), receiptsFromDB)
+			g.addToCacheReceipts(ctx, tx, block.HeaderNoCopy(), receiptsFromDB)
 			return receiptsFromDB, nil
 		}
 	}
@@ -568,7 +579,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 		if dbg.AssertEnabled && receiptsFromDB != nil {
 			for i, receipt := range receipts {
 				if i < len(receiptsFromDB) {
-					g.assertEqualReceipts(receipt, receiptsFromDB[i])
+					g.assertEqualReceipts(receipt, receiptsFromDB[i], block.Transactions()[i])
 				}
 			}
 		}
@@ -590,6 +601,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 		}
 
 		var stateWriter state.StateWriter
+		var written *blockWrites
 		if opts.CommitmentHistoryEnabled {
 			sharedDomains, err = execctx.NewSharedDomains(ctx, tx, log.Root(), execctx.WithoutDeferredBranchUpdates(), execctx.WithSequentialCommitment())
 			if err != nil {
@@ -600,11 +612,13 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 			if err != nil {
 				return nil, err
 			}
-			stateWriter = state.NewWriter(sharedDomains.AsPutDel(tx), nil, latestTxNum)
+			written = &blockWrites{TemporalPutDel: sharedDomains.AsPutDel(tx), sd: sharedDomains, tx: tx, blockStart: minTxNum}
+			stateWriter = state.NewWriter(written, nil, latestTxNum)
 		} else {
 			stateWriter = genEnv.noopWriter
 		}
 
+		transactions.VersionedBlockState(genEnv.ibs)
 		for i, txn := range block.Transactions() {
 			select {
 			case <-ctx.Done():
@@ -626,8 +640,8 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 
 			txNum := minTxNum + 1 + uint64(i)
 
-			if err := genEnv.ibs.CommitBlock(evm.ChainRules(), stateWriter); err != nil {
-				return nil, fmt.Errorf("CommitBlock failed: %w", err)
+			if err := sharedreceipts.EndTx(genEnv.ibs, evm.ChainRules(), stateWriter); err != nil {
+				return nil, fmt.Errorf("ReceiptGen.GetReceipts: bn=%d, txnIdx=%d, %w", blockNum, i, err)
 			}
 
 			var stateRoot []byte
@@ -637,6 +651,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 				if err != nil {
 					return nil, err
 				}
+				written.touchAll()
 				stateRoot, err = sharedDomains.ComputeCommitment(ctx, tx, false, blockNum, latestTxNum, "getReceipts", nil)
 				if err != nil {
 					return nil, err
@@ -654,7 +669,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 		if dbg.AssertEnabled && receiptsFromDB != nil {
 			for i, receipt := range receipts {
 				if i < len(receiptsFromDB) {
-					g.assertEqualReceipts(receipt, receiptsFromDB[i])
+					g.assertEqualReceipts(receipt, receiptsFromDB[i], block.Transactions()[i])
 				}
 			}
 		}
@@ -670,11 +685,11 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 		}
 	}
 
-	g.addToCacheReceipts(block.HeaderNoCopy(), receipts)
+	g.addToCacheReceipts(ctx, tx, block.HeaderNoCopy(), receipts)
 	return receipts, nil
 }
 
-func (g *Generator) assertEqualReceipts(fromExecution, fromDB *types.Receipt) {
+func (g *Generator) assertEqualReceipts(fromExecution, fromDB *types.Receipt, txn types.Transaction) {
 	toJson := func(v any) string {
 		b, err := json.Marshal(v)
 		if err != nil {
@@ -684,6 +699,8 @@ func (g *Generator) assertEqualReceipts(fromExecution, fromDB *types.Receipt) {
 	}
 
 	generated := fromExecution.Copy()
+	// Blob gas is derived from the transaction and is not stored in the receipt cache.
+	fromDB.BlobGasUsed = txn.GetBlobGas()
 	if generated.TransactionIndex != fromDB.TransactionIndex {
 		panic(fmt.Sprintf("assert: txn index mismatch: %d, %d", generated.TransactionIndex, fromDB.TransactionIndex))
 	}
@@ -784,6 +801,91 @@ func (g *Generator) computeCommitmentFromStateHistory(ctx context.Context, tx kv
 	}
 	baseBlockNum := blockNum - 1
 	return g.commitmentReplay.ComputeCustomCommitmentFromStateHistory(ctx, tx, baseBlockNum, receiptComputeCommitment)
+}
+
+// blockWrites records the keys a replay writes. Each per-tx root starts again from the
+// block-start trie, so it must fold the keys of the block's earlier txs too.
+type blockWrites struct {
+	kv.TemporalPutDel
+	sd         *execctx.SharedDomains
+	tx         kv.TemporalTx
+	blockStart uint64
+	keys       map[kv.Domain]map[string]struct{}
+	scanned    map[string]struct{}
+}
+
+func (w *blockWrites) DomainPut(domain kv.Domain, k, v []byte, txNum uint64, prevVal []byte) error {
+	w.record(domain, k)
+	return w.TemporalPutDel.DomainPut(domain, k, v, txNum, prevVal)
+}
+
+func (w *blockWrites) DomainDel(domain kv.Domain, k []byte, txNum uint64, prevVal []byte) error {
+	w.record(domain, k)
+	if domain == kv.AccountsDomain {
+		if err := w.recordStorageDeleted(k); err != nil {
+			return err
+		}
+	}
+	return w.TemporalPutDel.DomainDel(domain, k, txNum, prevVal)
+}
+
+func (w *blockWrites) DomainDelPrefix(domain kv.Domain, prefix []byte, txNum uint64) error {
+	if err := w.recordStorageDeleted(prefix); err != nil {
+		return err
+	}
+	return w.TemporalPutDel.DomainDelPrefix(domain, prefix, txNum)
+}
+
+// recordStorageDeleted records the account's block-start slots: the shared domains' own storage
+// cascade reads latest state, which misses them.
+func (w *blockWrites) recordStorageDeleted(addr []byte) error {
+	if _, ok := w.scanned[string(addr)]; ok {
+		return nil
+	}
+	if w.scanned == nil {
+		w.scanned = map[string]struct{}{}
+	}
+	w.scanned[string(addr)] = struct{}{}
+	if acc, _, err := w.tx.GetAsOf(kv.AccountsDomain, addr, w.blockStart); err != nil || len(acc) == 0 {
+		return err // no account at block start, no block-start slots: skip scanning its later history
+	}
+	to, ok := kv.NextSubtree(addr)
+	if !ok {
+		to = nil
+	}
+	it, err := w.tx.RangeAsOf(kv.StorageDomain, addr, to, w.blockStart, order.Asc, kv.Unlim)
+	if err != nil {
+		return err
+	}
+	defer it.Close()
+	for it.HasNext() {
+		k, v, err := it.Next()
+		if err != nil {
+			return err
+		}
+		if len(v) > 0 {
+			w.record(kv.StorageDomain, k)
+		}
+	}
+	return nil
+}
+
+func (w *blockWrites) record(domain kv.Domain, k []byte) {
+	if w.keys == nil {
+		w.keys = map[kv.Domain]map[string]struct{}{}
+	}
+	if w.keys[domain] == nil {
+		w.keys[domain] = map[string]struct{}{}
+	}
+	w.keys[domain][string(k)] = struct{}{}
+}
+
+func (w *blockWrites) touchAll() {
+	for domain, keys := range w.keys {
+		for k := range keys {
+			w.sd.GetCommitmentContext().TouchKey(domain, k, nil)
+		}
+	}
 }
 
 // applyCancellable runs apply with the EVM wired to ctx: a cancelled context aborts it

@@ -230,6 +230,7 @@ func (e *ExecModule) unwindIfNeeded(
 	canonicalHash common.Hash,
 	finalisedBlockNum uint64,
 	isSynced bool,
+	isDomainAheadOfBlocks bool,
 ) (*ForkChoiceResult, *uint64, error) {
 	if fcuHeader.Number.Sign() == 0 && canonicalHash != blockHash {
 		return &ForkChoiceResult{
@@ -303,19 +304,24 @@ func (e *ExecModule) unwindIfNeeded(
 	if errLast != nil {
 		return nil, nil, errLast
 	}
-	var unwindPoint *uint64
-	if unwindTarget < lastCanonicalBlock {
+	needsUnwind := unwindTarget < lastCanonicalBlock
+	if needsUnwind {
 		minUnwindableBlock, err := rawtemporaldb.CanUnwindToBlockNum(tx)
 		if err != nil {
 			return nil, nil, err
 		}
-		if unwindTarget < minUnwindableBlock {
+		resentTipAheadOfState := isDomainAheadOfBlocks && canonicalHash == blockHash && fcuHeader.Number.Uint64() == lastCanonicalBlock
+		if unwindTarget < minUnwindableBlock && !resentTipAheadOfState {
 			e.logger.Warn("reorg target below minimum unwindable block", "unwindTarget", unwindTarget, "minUnwindableBlock", minUnwindableBlock)
 			return &ForkChoiceResult{
 				LatestValidHash: common.Hash{},
 				Status:          ExecutionStatusReorgTooDeep,
 			}, nil, nil
 		}
+		needsUnwind = unwindTarget >= minUnwindableBlock
+	}
+	var unwindPoint *uint64
+	if needsUnwind {
 		if err := e.pipelineExecutor.UnwindTo(unwindTarget, stagedsync.ForkChoice, tx); err != nil {
 			return nil, nil, err
 		}
@@ -563,7 +569,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			restoreRecentReceipts()
 		}
 	}()
-	result, fcuUnwindPoint, err := e.unwindIfNeeded(ctx, tx, currentContext, fcuHeader, blockHash, canonicalHash, *finalisedBlockNum, isSynced)
+	result, fcuUnwindPoint, err := e.unwindIfNeeded(ctx, tx, currentContext, fcuHeader, blockHash, canonicalHash, *finalisedBlockNum, isSynced, isDomainAheadOfBlocks)
 	if err != nil {
 		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 	}
@@ -931,6 +937,7 @@ func (e *ExecModule) dispatchNotificationsFromOverlay(ctx context.Context, sd *e
 		finishProgressBefore,
 		finishProgressAfter,
 		prevUnwindPoint,
+		nil, // the overlay's blocks are not committed yet
 	); err != nil {
 		return true, err
 	}

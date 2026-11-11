@@ -62,9 +62,10 @@ var ErrExecutionPayloadEnvelopeIndicesPending = errors.New("execution payload en
 var ErrExecutionPayloadEnvelopePersistenceFailed = errors.New("execution payload envelope persistence failed")
 
 var (
-	ErrInvalidExecutionPayloadEnvelope          = errors.New("invalid execution payload envelope")
-	ErrExecutionPayloadEnvelopeStateUnavailable = fmt.Errorf("%w: execution payload envelope state unavailable", ErrIgnore)
-	errPendingEnvelopeAgeBounded                = errors.New("pending execution payload envelope is age bounded")
+	ErrInvalidExecutionPayloadEnvelope           = errors.New("invalid execution payload envelope")
+	ErrExecutionPayloadEnvelopeStateUnavailable  = fmt.Errorf("%w: execution payload envelope state unavailable", ErrIgnore)
+	ErrExecutionPayloadEnvelopeStateReplayFailed = fmt.Errorf("%w: execution payload envelope state replay failed", ErrIgnore)
+	errPendingEnvelopeAgeBounded                 = errors.New("pending execution payload envelope is age bounded")
 )
 
 var blsVerify = bls.Verify
@@ -164,14 +165,6 @@ func (f *ForkChoiceStore) validateEnvelopeAgainstBlockAfterCommitments(
 	blockState abstract.BeaconState,
 ) error {
 	return f.validateEnvelopeAgainstBlockInternal(signedEnvelope, block, blockState, true, true)
-}
-
-func (f *ForkChoiceStore) validateEnvelopeAgainstBlockForGossip(
-	signedEnvelope *cltypes.SignedExecutionPayloadEnvelope,
-	block *cltypes.SignedBeaconBlock,
-	blockState abstract.BeaconState,
-) error {
-	return f.validateEnvelopeAgainstBlockInternal(signedEnvelope, block, blockState, true, false)
 }
 
 func (f *ForkChoiceStore) validateEnvelopeAgainstBlockInternal(
@@ -717,8 +710,75 @@ func (f *ForkChoiceStore) rejectKnownInvalidPayloadStatusLocked(payloadStatus ex
 	return fmt.Errorf("%w: execution payload was invalidated while validation was in progress", ErrInvalidExecutionPayloadEnvelope)
 }
 
+// invalidateOptimisticAncestorsLocked invalidates the ancestors of invalidBlock that descend from
+// the latestValidHash block. It follows the execution parent hashes, so an ancestor is only
+// invalidated when the EL verdict is about its payload. It invalidates nothing when the walk
+// reaches the finalized slot or a validated payload first. It does not mark the justified root or
+// its ancestors: get_head starts from that root, and an invalidated root would be returned as a
+// head that is no longer reported as optimistic.
+func (f *ForkChoiceStore) invalidateOptimisticAncestorsLocked(newPayloadErr error, invalidBlock *cltypes.BeaconBlock) error {
+	var invalidPayload *execution_client.InvalidPayloadError
+	if !errors.As(newPayloadErr, &invalidPayload) {
+		return nil
+	}
+	type ancestor struct {
+		root  common.Hash
+		block *cltypes.BeaconBlock
+	}
+	var ancestors []ancestor
+	finalizedSlot := f.computeStartSlotAtEpoch(f.finalizedCheckpoint.Load().(solid.Checkpoint).Epoch)
+	parentHash := invalidBlock.Body.ExecutionPayload.ParentHash
+	for root := invalidBlock.ParentRoot; parentHash != invalidPayload.LatestValidHash; {
+		block, ok := f.forkGraph.GetBlock(root)
+		if !ok || block.Block.Body.ExecutionPayload == nil || block.Block.Body.ExecutionPayload.BlockHash != parentHash {
+			return nil
+		}
+		if verified, _ := f.forkGraph.PayloadAccepted(root); verified || block.Block.Slot <= finalizedSlot || f.payloadValidatedLocked(root, parentHash) {
+			return nil
+		}
+		ancestors = append(ancestors, ancestor{root, block.Block})
+		parentHash = block.Block.Body.ExecutionPayload.ParentHash
+		root = block.Block.ParentRoot
+	}
+	if len(ancestors) == 0 {
+		return nil
+	}
+	justifiedChain := f.justifiedChainDownTo(ancestors[len(ancestors)-1].block.Slot)
+	for _, a := range ancestors {
+		if _, onJustifiedChain := justifiedChain[a.root]; onJustifiedChain {
+			log.Error("[OnBlock] EL reports the justified checkpoint chain as invalid, keeping its blocks optimistic",
+				"justifiedRoot", f.JustifiedCheckpoint().Root, "invalidAncestor", a.root, "latestValidHash", invalidPayload.LatestValidHash)
+			break
+		}
+		f.markPayloadStatusLocked(a.root, a.block.Body.ExecutionPayload.BlockHash, execution_client.PayloadStatusInvalidated)
+		if err := f.optimisticStore.InvalidateBlock(a.root, a.block); err != nil {
+			return fmt.Errorf("failed to remove block from optimistic store: %w", err)
+		}
+	}
+	return nil
+}
+
+// justifiedChainDownTo returns the justified root and its ancestors at or above slot.
+func (f *ForkChoiceStore) justifiedChainDownTo(slot uint64) map[common.Hash]struct{} {
+	chain := map[common.Hash]struct{}{}
+	for root := f.JustifiedCheckpoint().Root; ; {
+		header, ok := f.forkGraph.GetHeader(root)
+		if !ok || header.Slot < slot {
+			return chain
+		}
+		chain[root] = struct{}{}
+		root = header.ParentRoot
+	}
+}
+
 func (f *ForkChoiceStore) payloadInvalidatedLocked(blockRoot, executionBlockHash common.Hash) bool {
 	return f.rootMarkedInvalid(blockRoot) || f.executionHashMarkedInvalid(executionBlockHash)
+}
+
+func (f *ForkChoiceStore) ExecutionPayloadInvalidated(blockRoot, executionBlockHash common.Hash) bool {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return f.payloadInvalidatedLocked(blockRoot, executionBlockHash)
 }
 
 func (f *ForkChoiceStore) payloadValidatedLocked(blockRoot, executionBlockHash common.Hash) bool {
@@ -895,43 +955,53 @@ func (f *ForkChoiceStore) ValidateExecutionPayloadEnvelopeForGossip(signedEnvelo
 	if err := f.validateExecutionPayloadEnvelopeInput(signedEnvelope); err != nil {
 		return err
 	}
-	_, _ = signedEnvelope.Message.Payload.HashSSZ()
-	_, _ = signedEnvelope.Message.ExecutionRequests.HashSSZ()
-
 	root := signedEnvelope.Message.BeaconBlockRoot
-	block, validated, err := func() (*cltypes.SignedBeaconBlock, bool, error) {
+	block, err := func() (*cltypes.SignedBeaconBlock, error) {
 		f.mu.RLock()
 		defer f.mu.RUnlock()
 		block, ok := f.forkGraph.GetBlock(root)
 		if !ok || block == nil || block.Block == nil {
-			return nil, false, fmt.Errorf("%w: beacon block %v is unavailable", ErrIgnore, root)
+			if f.forkGraph.IsBlockInvalid(root) {
+				return nil, fmt.Errorf("beacon block %v failed validation", root)
+			}
+			return nil, fmt.Errorf("%w: beacon block %v is unavailable", ErrIgnore, root)
 		}
 		finalizedSlot := f.computeStartSlotAtEpoch(f.FinalizedCheckpoint().Epoch)
 		if signedEnvelope.Message.Payload.SlotNumber < finalizedSlot {
-			return nil, false, fmt.Errorf("%w: envelope slot %d is before finalized slot %d", ErrIgnore, signedEnvelope.Message.Payload.SlotNumber, finalizedSlot)
+			return nil, fmt.Errorf("%w: envelope slot %d is before finalized slot %d", ErrIgnore, signedEnvelope.Message.Payload.SlotNumber, finalizedSlot)
 		}
+		return block, nil
+	}()
+	if err != nil {
+		return err
+	}
+	if err := validateEnvelopeAgainstBlockStateFree(signedEnvelope, block); err != nil {
+		return fmt.Errorf("execution payload envelope failed gossip validation: %w", err)
+	}
+	_, _ = signedEnvelope.Message.Payload.HashSSZ()
+
+	validated, err := func() (bool, error) {
+		f.mu.RLock()
+		defer f.mu.RUnlock()
 		if blockState := f.forkGraph.CurrentStateLocked(root); blockState != nil {
-			if err := f.validateEnvelopeAgainstBlockForGossip(signedEnvelope, block, blockState); err != nil {
-				return nil, false, fmt.Errorf("execution payload envelope failed gossip validation: %w", err)
+			if err := f.validateEnvelopeStateDependent(signedEnvelope, block, blockState, true, false); err != nil {
+				return false, fmt.Errorf("execution payload envelope failed gossip validation: %w", err)
 			}
-			return block, true, nil
+			return true, nil
 		}
-		return block, false, nil
+		return false, nil
 	}()
 	if err != nil {
 		return err
 	}
 	if !validated {
-		if err := validateEnvelopeAgainstBlockStateFree(signedEnvelope, block); err != nil {
-			return fmt.Errorf("execution payload envelope failed gossip validation: %w", err)
-		}
 		if err := func() error {
 			validation := f.envelopeValidationSemaphore()
 			validation <- struct{}{}
 			defer func() { <-validation }()
 			blockState, err := f.forkGraph.ReplayState(root)
 			if err != nil {
-				return fmt.Errorf("%w: beacon block state %v could not be replayed: %w", ErrIgnore, root, err)
+				return fmt.Errorf("%w: beacon block state %v: %w", ErrExecutionPayloadEnvelopeStateReplayFailed, root, err)
 			}
 			if blockState == nil {
 				return fmt.Errorf("%w: beacon block state %v is unavailable", ErrExecutionPayloadEnvelopeStateUnavailable, root)
@@ -1039,7 +1109,7 @@ func (f *ForkChoiceStore) ForgetExecutionPayloadEnvelopeForGossip(beaconBlockRoo
 	f.envelopeGossipAdmissions.ForgetSeen(beaconBlockRoot, builderIndex)
 }
 
-func (f *ForkChoiceStore) ValidateExecutionPayloadEnvelopeForConsensus(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error {
+func (f *ForkChoiceStore) ValidateExecutionPayloadEnvelopeForConsensus(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, checkBlobData bool) error {
 	if err := f.validateExecutionPayloadEnvelopeInput(signedEnvelope); err != nil {
 		return err
 	}
@@ -1065,8 +1135,10 @@ func (f *ForkChoiceStore) ValidateExecutionPayloadEnvelopeForConsensus(ctx conte
 	}
 	finishImport := f.BeginPayloadImport(block.Block.Slot)
 	defer finishImport()
-	if err := f.checkDataAvailability(block, root); err != nil {
-		return err
+	if checkBlobData {
+		if err := f.checkDataAvailability(block, root); err != nil {
+			return err
+		}
 	}
 	blockState.SetPreviousStateRoot(block.Block.StateRoot)
 	if err := transition.DefaultMachine.ProcessExecutionPayloadEnvelope(blockState, signedEnvelope); err != nil {
@@ -1353,9 +1425,12 @@ func (f *ForkChoiceStore) ExecutionPayloadReceivedBefore(blockRoot common.Hash, 
 	return ok && arrival.receivedAt.Before(deadline)
 }
 
-// ExecutionPayloadApplyInFlight reports an envelope for blockRoot that passed its signature check
-// and is still being applied; it stops counting when the apply returns, applied or rejected.
+// ExecutionPayloadApplyInFlight reports an envelope held for import or past its signature check
+// with the apply still running.
 func (f *ForkChoiceStore) ExecutionPayloadApplyInFlight(blockRoot common.Hash) bool {
+	if f.payloadPreparation.HasPendingEnvelope(blockRoot) {
+		return true
+	}
 	f.envelopeAppliesMu.Lock()
 	defer f.envelopeAppliesMu.Unlock()
 	return f.envelopeApplies[blockRoot] > 0

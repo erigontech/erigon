@@ -9,7 +9,6 @@ import (
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
-	"github.com/erigontech/erigon/execution/tracing"
 )
 
 // run is runTraced without the tracing code and with the fast path.
@@ -48,7 +47,7 @@ func (evm *EVM) run(contract Contract, gas mdgas.MdGas, input []byte, readOnly, 
 		// derived uniformly by evm.call/evm.create's defer from the final
 		// gasRemaining (covers precompile/no-code paths and the revert burn).
 		gasUsed.StateSpill = callContext.stateGasSpill
-		gasUsed.State = int64(gas.State) - int64(callContext.stateGas) + int64(callContext.stateGasSpill)
+		gasUsed.State = int64(gas.State) - int64(callContext.Gas().State) + int64(callContext.stateGasSpill)
 		evm.putCallContext(callContext)
 		if restoreReadonly {
 			evm.readOnly = false
@@ -591,6 +590,34 @@ run:
 						pc++
 						continue run
 					}
+				case CALLDATALOAD:
+					if sLen >= 1 && gasLeft >= GasFastestStep {
+						gasLeft -= GasFastestStep
+						x := callContext.Stack.peek()
+						offset, overflow := x.Uint64WithOverflow()
+						if overflow {
+							x.Clear()
+							pc++
+							continue run
+						}
+
+						if end := offset + 32; end >= offset && end <= uint64(len(callContext.input)) {
+							x.SetBytes32(callContext.input[offset:end])
+							pc++
+							continue run
+						}
+
+						if offset >= uint64(len(callContext.input)) {
+							x.Clear()
+							pc++
+							continue run
+						}
+						callContext.gas, callContext.savedPC = gasLeft, pc
+						x.SetBytes(getData(callContext.input, offset, 32))
+						gasLeft, pc = callContext.gas, callContext.savedPC
+						pc++
+						continue run
+					}
 				case CODESIZE:
 					if sLen < stackLimit && gasLeft >= GasQuickStep {
 						gasLeft -= GasQuickStep
@@ -934,13 +961,8 @@ run:
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= dynamicCost.Execution
-			if dynamicCost.State > 0 {
-				ok := callContext.useMdGas(uint64(dynamicCost.State), mdgas.StateGas, nil, tracing.GasChangeIgnored)
-				if !ok {
-					return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
-				}
-			} else if dynamicCost.State < 0 {
-				callContext.refillStateGas(uint64(-dynamicCost.State), nil, tracing.GasChangeIgnored)
+			if dynamicCost.State != 0 && !applyStateGas(callContext, dynamicCost.State) {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 		}
 
@@ -980,6 +1002,7 @@ var isColdOp = [256]bool{
 	ORIGIN:         true,
 	CALLER:         true,
 	CALLDATASIZE:   true,
+	CALLDATALOAD:   true,
 	CODESIZE:       true,
 	GASPRICE:       true,
 	RETURNDATASIZE: true,

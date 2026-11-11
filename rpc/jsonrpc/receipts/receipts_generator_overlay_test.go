@@ -17,22 +17,27 @@
 package receipts_test
 
 import (
+	"math/big"
 	"testing"
 	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/ethutils"
 	"github.com/erigontech/erigon/node/shards"
+	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/rpc/jsonrpc/receipts"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
@@ -129,12 +134,9 @@ func TestGetReceiptSkipsBloomOfPersistedReceipt(t *testing.T) {
 	require.Equal(t, &bloom, served.LogsBloom)
 }
 
-// TestGetReceiptReplayMatchesWithoutNoMaterialize pins that a replayed receipt of a contract call
-// that writes storage and emits a log is the same with CALL_NO_MATERIALIZE on and off. A fresh
-// generator and no persistent receipt cache force the replay in both modes.
-func TestGetReceiptReplayMatchesWithoutNoMaterialize(t *testing.T) {
-	defer func(prev bool) { dbg.CallNoMaterialize = prev }(dbg.CallNoMaterialize)
-
+// TestGetReceiptReplayOfStorageWriteAndLog pins a replayed receipt of a contract call that writes
+// storage and emits a log. A fresh generator and no persistent receipt cache force the replay.
+func TestGetReceiptReplayOfStorageWriteAndLog(t *testing.T) {
 	signer := types.LatestSignerForChainID(nil)
 	runtime := []byte{0x60, 0x01, 0x60, 0x00, 0x55, 0x60, 0x00, 0x60, 0x00, 0xa0, 0x00} // SSTORE(0, 1) LOG0 STOP
 	initCode := append([]byte{0x60, byte(len(runtime)), 0x60, 0x0c, 0x60, 0x00, 0x39, 0x60, byte(len(runtime)), 0x60, 0x00, 0xf3}, runtime...)
@@ -163,18 +165,80 @@ func TestGetReceiptReplayMatchesWithoutNoMaterialize(t *testing.T) {
 	txNum := minTxNum + 1 // txIndex 0, past the block's system tx
 	header, txn := block.HeaderNoCopy(), block.Transactions()[0]
 
-	replay := func(noMaterialize bool) *types.Receipt {
-		dbg.CallNoMaterialize = noMaterialize
+	gen := receipts.NewGenerator(m.Dirs, m.BlockReader, m.Engine, nil, time.Minute)
+	receipt, err := gen.GetReceipt(m.Ctx, m.ChainConfig, tx, header, txn, 0, txNum, nil)
+	require.NoError(t, err)
+	require.Equal(t, types.ReceiptStatusSuccessful, receipt.Status)
+	require.Len(t, receipt.Logs, 1)
+	require.Equal(t, contract, receipt.Logs[0].Address)
+}
+
+// TestPreByzantiumPostStateFromCommitmentHistory pins the per-tx root that the
+// commitment-history replay writes into a pre-Byzantium receipt against the root
+// rebuilt from state history. Later txs of the block read the earlier txs' writes, and
+// one destroys a contract whose storage predates the block, so each root depends on the
+// replay folding every key the block has changed so far.
+func TestPreByzantiumPostStateFromCommitmentHistory(t *testing.T) {
+	statecfg.EnableHistoricalCommitment()
+	cfg := chain.TestChainBerlinConfig.Copy()
+	cfg.ByzantiumBlock, cfg.ConstantinopleBlock, cfg.PetersburgBlock, cfg.IstanbulBlock, cfg.MuirGlacierBlock, cfg.BerlinBlock = nil, nil, nil, nil, nil, nil
+
+	signer := types.LatestSignerForChainID(nil)
+	// no calldata: SSTORE(0, 1) LOG0 STOP; with calldata: SELFDESTRUCT(CALLER)
+	runtime := []byte{0x36, 0x60, 0x0f, 0x57, 0x60, 0x01, 0x60, 0x00, 0x55, 0x60, 0x00, 0x60, 0x00, 0xa0, 0x00, 0x5b, 0x33, 0xff}
+	initCode := append([]byte{0x60, byte(len(runtime)), 0x60, 0x0c, 0x60, 0x00, 0x39, 0x60, byte(len(runtime)), 0x60, 0x00, 0xf3}, runtime...)
+	preBlock, inBlock := types.CreateAddress(testAddr, 0), types.CreateAddress(testAddr, 3)
+	m := mockWithGenerator(t, 2, func(i int, block *blockgen.BlockGen) {
+		nonce := block.TxNonce(testAddr)
+		txns := []types.Transaction{
+			types.NewContractCreation(nonce, uint256.NewInt(0), 100_000, uint256.NewInt(1), initCode),
+			types.NewTransaction(nonce+1, preBlock, uint256.NewInt(0), 100_000, uint256.NewInt(1), nil),
+		}
+		if i == 1 {
+			txns = []types.Transaction{
+				types.NewTransaction(nonce, common.Address{0x01}, uint256.NewInt(1), 21_000, uint256.NewInt(1), nil),
+				types.NewContractCreation(nonce+1, uint256.NewInt(0), 100_000, uint256.NewInt(1), initCode),
+				types.NewTransaction(nonce+2, inBlock, uint256.NewInt(0), 100_000, uint256.NewInt(1), nil),
+				types.NewTransaction(nonce+3, preBlock, uint256.NewInt(0), 100_000, uint256.NewInt(1), []byte{0x01}),
+				types.NewTransaction(nonce+4, common.Address{0x02}, uint256.NewInt(1), 21_000, uint256.NewInt(1), nil),
+				types.NewTransaction(nonce+5, preBlock, uint256.NewInt(1), 21_000, uint256.NewInt(1), nil), // funds the destroyed contract again
+			}
+		}
+		for _, txn := range txns {
+			signed, err := types.SignTx(txn, *signer, testKey)
+			require.NoError(t, err)
+			block.AddTx(signed)
+		}
+	}, execmoduletester.WithGenesisSpec(&types.Genesis{Config: cfg, Alloc: types.GenesisAlloc{testAddr: {Balance: big.NewInt(1000000)}}}))
+
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	const blockNum = uint64(2)
+	block, err := m.BlockReader.BlockByNumber(m.Ctx, tx, blockNum)
+	require.NoError(t, err)
+	txns := block.Transactions()
+	require.Len(t, txns, 6)
+	minTxNum, err := m.BlockReader.TxnumReader().Min(m.Ctx, tx, blockNum)
+	require.NoError(t, err)
+
+	receipt := func(index int, commitmentHistory bool) *types.Receipt {
 		gen := receipts.NewGenerator(m.Dirs, m.BlockReader, m.Engine, nil, time.Minute)
-		receipt, err := gen.GetReceipt(m.Ctx, m.ChainConfig, tx, header, txn, 0, txNum, nil)
+		r, err := gen.GetReceipt(m.Ctx, cfg, tx, block.HeaderNoCopy(), txns[index], index, minTxNum+1+uint64(index), &receipts.PostStateInfo{Txns: txns, CommitmentHistory: commitmentHistory})
 		require.NoError(t, err)
-		return receipt
+		return r
 	}
-	nm, materialized := replay(true), replay(false)
-	require.Equal(t, types.ReceiptStatusSuccessful, materialized.Status)
-	require.Len(t, materialized.Logs, 1)
-	require.Equal(t, materialized.Status, nm.Status)
-	require.Equal(t, materialized.GasUsed, nm.GasUsed)
-	require.Equal(t, materialized.CumulativeGasUsed, nm.CumulativeGasUsed)
-	require.Equal(t, materialized.Logs, nm.Logs)
+	gen := receipts.NewGenerator(m.Dirs, m.BlockReader, m.Engine, nil, time.Minute)
+	blockReceipts, err := gen.GetReceipts(m.Ctx, cfg, tx, block, eth.ReceiptsOpts{CommitmentHistoryEnabled: true})
+	require.NoError(t, err)
+	for i := range txns {
+		want := receipt(i, false)
+		require.Equal(t, types.ReceiptStatusSuccessful, want.Status, "tx %d", i)
+		require.Len(t, want.PostState, 32, "tx %d", i)
+		require.Equal(t, want.PostState, receipt(i, true).PostState, "GetReceipt tx %d", i)
+		require.Equal(t, want.PostState, blockReceipts[i].PostState, "GetReceipts tx %d", i)
+	}
+	require.Len(t, blockReceipts[2].Logs, 1)
+	require.Empty(t, blockReceipts[3].Logs, "tx 3 takes the SELFDESTRUCT branch")
 }

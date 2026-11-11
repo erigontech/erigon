@@ -193,10 +193,6 @@ func ApplyMessageChargeSenderAtValidation(evm *vm.EVM, msg Message, gp *GasPool,
 	return applyMessage(evm, msg, gp, true, false, true, true, engine)
 }
 
-func ApplyFrame(evm *vm.EVM, msg Message, gp *GasPool) (*evmtypes.ExecutionResult, error) {
-	return NewTxnExecutor(evm, msg, gp).ApplyFrame()
-}
-
 // to returns the recipient of the message.
 func (st *TxnExecutor) to() accounts.Address {
 	if st.msg == nil || st.msg.To().IsNil() /* contract creation */ {
@@ -426,108 +422,6 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 	return fees, nil
 }
 
-// ApplyFrame is similar to Execute but without gas accounting, for use in RIP-7560 transactions
-func (st *TxnExecutor) ApplyFrame() (*evmtypes.ExecutionResult, error) {
-	coinbase := st.evm.Context.Coinbase
-	senderInitBalance, err := st.state.GetBalance(st.msg.From())
-	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
-	}
-	coinbaseInitBalance, err := st.state.GetBalance(coinbase)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
-	}
-
-	msg := st.msg
-	sender := msg.From()
-	contractCreation := msg.To().IsNil()
-	rules := st.evm.ChainRules()
-	vmConfig := st.evm.Config()
-	isEIP3860 := vmConfig.HasEip3860(rules)
-	accessTuples := slices.Clone[types.AccessList](msg.AccessList())
-
-	auths := msg.Authorizations()
-	intrinsicGasResult, overflow := st.calcIntrinsicGas(contractCreation, auths, accessTuples)
-	if overflow {
-		return nil, ErrGasUintOverflow
-	}
-	intrinsicGas := intrinsicGasResult.ExecutionGas
-	if st.msg.Gas() < intrinsicGas {
-		return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.msg.Gas(), intrinsicGas)
-	}
-
-	if contractCreation {
-		if err := vm.CheckMaxInitCodeSize(uint64(len(st.data)), isEIP3860, rules.IsAmsterdam); err != nil {
-			return nil, err
-		}
-	}
-
-	// Match the execution-spec error precedence: intrinsic gas and initcode size
-	// are checked before SetCode prerequisites. All validation completes before
-	// verifyAuthorities can update account code or nonces.
-	if err := validateSetCodePrerequisites(auths, contractCreation, rules.IsPrague); err != nil {
-		return nil, err
-	}
-	st.gasRemaining = mdgas.SplitTxnGasLimit(st.msg.Gas(), intrinsicGas, rules, st.msg.SkipExecutionGasCap())
-	st.state.Prepare(rules, msg.From(), coinbase, msg.To(), vm.ActivePrecompiles(rules), accessTuples)
-	if st.evm.Config().NoBAL {
-		st.state.StopAccessRecording()
-	}
-	var (
-		gasUsed         runtimeGasAccounting
-		runtimeGas      mdgas.MdGas
-		runtimeSnapshot = -1
-	)
-	if rules.IsAmsterdam {
-		runtimeGas = st.gasRemaining
-		runtimeSnapshot = st.state.PushSnapshot()
-		defer st.state.PopSnapshot(runtimeSnapshot)
-	}
-	st.gasRemaining, _, err = st.verifyAuthorities(auths, rules.ChainID, st.gasRemaining)
-	if err == nil && !contractCreation {
-		st.gasRemaining, gasUsed.topLevel, err = st.handleRuntimeCall(st.gasRemaining)
-	}
-	if err != nil {
-		if !rules.IsAmsterdam {
-			return nil, err
-		}
-		st.state.RevertToSnapshot(runtimeSnapshot, err)
-		if errors.Is(err, vm.ErrRuntimeOutOfGas) {
-			st.handleRuntimeFailure(vm.CALL, st.to(), runtimeGas, err)
-			return &evmtypes.ExecutionResult{Err: err}, nil
-		}
-		return nil, err
-	}
-	var (
-		ret   []byte
-		vmerr error // vm errors do not affect consensus and are therefore not assigned to err
-	)
-
-	ret, st.gasRemaining, _, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, false)
-	if !contractCreation {
-		gasUsed.refillTopLevelState(&st.gasRemaining, vmConfig.RestoreState, vmerr, vmConfig.Tracer)
-	}
-
-	result := &evmtypes.ExecutionResult{
-		TxnGasUsage: mdgas.TxnGasUsage{
-			BlockExecutionGasUsed: st.blockExecutionGasUsed,
-			BlockStateGasUsed:     st.blockStateGasUsed,
-		},
-		ReceiptGasUsed:      st.txnGasUsed,
-		Err:                 vmerr,
-		Reverted:            errors.Is(vmerr, vm.ErrExecutionReverted),
-		ReturnData:          ret,
-		SenderInitBalance:   senderInitBalance,
-		CoinbaseInitBalance: coinbaseInitBalance,
-	}
-
-	if st.evm.Context.PostApplyMessage != nil {
-		st.evm.Context.PostApplyMessage(st.state, msg.From(), coinbase, result, rules)
-	}
-
-	return result, nil
-}
-
 // Execute will transition the state by applying the current message and
 // returning the evm execution result with following fields.
 //
@@ -552,22 +446,10 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		}()
 	}
 
+	if msg, ok := st.msg.(*types.Message); ok && msg.FrameTransaction() != nil {
+		return st.executeFrameTransaction(msg.FrameTransaction(), refunds, gasBailout, nil)
+	}
 	coinbase := st.evm.Context.Coinbase
-	var senderInitBalance uint256.Int
-	if !st.chargeSenderAtValidation {
-		senderInitBalance, err = st.state.GetBalance(st.msg.From())
-		if err != nil {
-			return nil, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
-		}
-	}
-
-	var coinbaseInitBalance uint256.Int
-	if !st.noFeeBurnAndTip {
-		coinbaseInitBalance, err = st.state.GetBalance(coinbase)
-		if err != nil {
-			return nil, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
-		}
-	}
 	msg := st.msg
 	sender := msg.From()
 	contractCreation := msg.To().IsNil()
@@ -763,42 +645,13 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		}
 	}
 
-	effectiveTip := *st.gasPrice
-	if rules.IsLondon {
-		if st.feeCap.Gt(&st.evm.Context.BaseFee) {
-			effectiveTip = u256.Min(*st.tipCap, u256.Sub(*st.feeCap, st.evm.Context.BaseFee))
-		} else {
-			effectiveTip = u256.Num0
-		}
+	tipAmount, err := st.payCoinbase(st.txnGasUsed)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
 	}
-
-	tipAmount := u256.Mul(u256.U64(st.txnGasUsed), effectiveTip) // gasUsed * effectiveTip = how much goes to the block producer (miner, validator)
-
-	if !st.noFeeBurnAndTip {
-		if err := st.state.AddBalance(coinbase, tipAmount, tracing.BalanceIncreaseRewardTransactionFee); err != nil {
-			return nil, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
-		}
-	}
-
-	var burnAmount uint256.Int
-	var burntContractAddress accounts.Address
-
-	if !st.isFree && rules.IsLondon {
-		burntContractAddress = st.evm.ChainConfig().GetBurntContract(st.evm.Context.BlockNumber)
-		if !burntContractAddress.IsNil() {
-			burnAmount = u256.Mul(u256.U64(st.txnGasUsed), st.evm.Context.BaseFee)
-
-			if rules.IsAura && rules.IsPrague {
-				// https://github.com/gnosischain/specs/blob/master/network-upgrades/pectra.md#eip-4844-pectra
-				burnAmount = u256.Add(burnAmount, fees.blobGasVal)
-			}
-
-			if !st.noFeeBurnAndTip {
-				if err := st.state.AddBalance(burntContractAddress, burnAmount, tracing.BalanceChangeUnspecified); err != nil {
-					return nil, err
-				}
-			}
-		}
+	burnAmount, burntContractAddress, err := st.burnFees(st.txnGasUsed, fees.blobGasVal)
+	if err != nil {
+		return nil, err
 	}
 
 	if dbg.TraceGas || st.state.Trace() || dbg.TraceAccount(st.msg.From().Handle()) {
@@ -811,15 +664,13 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 			BlockStateGasUsed:     st.blockStateGasUsed,
 			GasRefund:             refund,
 		},
-		ReceiptGasUsed:      st.txnGasUsed,
-		MaxGasUsed:          max(st.txnGasUsedB4Refunds, intrinsicGasResult.FloorGasCost),
-		Err:                 vmerr,
-		Reverted:            errors.Is(vmerr, vm.ErrExecutionReverted),
-		ReturnData:          ret,
-		SenderInitBalance:   senderInitBalance,
-		CoinbaseInitBalance: coinbaseInitBalance,
-		FeeTipped:           tipAmount,
-		FeeBurnt:            burnAmount,
+		ReceiptGasUsed: st.txnGasUsed,
+		MaxGasUsed:     max(st.txnGasUsedB4Refunds, intrinsicGasResult.FloorGasCost),
+		Err:            vmerr,
+		Reverted:       errors.Is(vmerr, vm.ErrExecutionReverted),
+		ReturnData:     ret,
+		FeeTipped:      tipAmount,
+		FeeBurnt:       burnAmount,
 	}
 
 	result.BurntContractAddress = burntContractAddress
@@ -998,6 +849,38 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, chainID *u
 	}
 
 	return gasRemaining, gasUsed, nil
+}
+
+func (st *TxnExecutor) payCoinbase(gasUsed uint64) (uint256.Int, error) {
+	effectiveTip := *st.gasPrice
+	if st.evm.ChainRules().IsLondon {
+		effectiveTip = types.CalcEffectiveGasTip(&st.evm.Context.BaseFee, st.msg.TipCap, st.msg.FeeCap)
+	}
+	tipAmount := u256.Mul(u256.U64(gasUsed), effectiveTip)
+	if st.noFeeBurnAndTip {
+		return tipAmount, nil
+	}
+	return tipAmount, st.state.AddBalance(st.evm.Context.Coinbase, tipAmount, tracing.BalanceIncreaseRewardTransactionFee)
+}
+
+func (st *TxnExecutor) burnFees(gasUsed uint64, blobCost uint256.Int) (uint256.Int, accounts.Address, error) {
+	rules := st.evm.ChainRules()
+	if st.isFree || !rules.IsLondon {
+		return uint256.Int{}, accounts.NilAddress, nil
+	}
+	address := st.evm.ChainConfig().GetBurntContract(st.evm.Context.BlockNumber)
+	if address.IsNil() {
+		return uint256.Int{}, address, nil
+	}
+	amount := u256.Mul(u256.U64(gasUsed), st.evm.Context.BaseFee)
+	if rules.IsAura && rules.IsPrague {
+		// https://github.com/gnosischain/specs/blob/master/network-upgrades/pectra.md#eip-4844-pectra
+		amount = u256.Add(amount, blobCost)
+	}
+	if st.noFeeBurnAndTip {
+		return amount, address, nil
+	}
+	return amount, address, st.state.AddBalance(address, amount, tracing.BalanceChangeUnspecified)
 }
 
 func (st *TxnExecutor) refundGas(gasLeft mdgas.MdGas) error {

@@ -200,9 +200,16 @@ func (b *SimulatedBackend) emptyPendingBlock() {
 // stateByBlockNumber retrieves a state by a given blocknumber.
 func (b *SimulatedBackend) stateByBlockNumber(db kv.TemporalTx, blockNumber *uint256.Int) *state.IntraBlockState {
 	if blockNumber == nil {
-		return state.New(b.m.NewHistoryStateReader(b.pendingBlock.NumberU64()+1, db))
+		return newCallState(b.m.NewHistoryStateReader(b.pendingBlock.NumberU64()+1, db))
 	}
-	return state.New(b.m.NewHistoryStateReader(blockNumber.Uint64()+1, db))
+	return newCallState(b.m.NewHistoryStateReader(blockNumber.Uint64()+1, db))
+}
+
+// newCallState puts a one-shot read or call on the versioned state, like the RPC call sites.
+func newCallState(r state.StateReader) *state.IntraBlockState {
+	s := state.NewWithVersionMap(r, state.NewVersionMap(nil))
+	s.SetNoConflictDetection()
+	return s
 }
 
 // CodeAt returns the code associated with a certain account in the blockchain.
@@ -579,7 +586,9 @@ func (b *SimulatedBackend) CallContract(ctx context.Context, call bind.CallMsg, 
 	}
 	var res *evmtypes.ExecutionResult
 	if err := b.m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) (err error) {
-		s := state.New(b.m.NewStateReader(tx))
+		s := newCallState(b.m.NewStateReader(tx))
+		defer s.Close()
+		s.SetTxContext(b.pendingBlock.NumberU64(), len(b.pendingBlock.Transactions()))
 		res, err = b.callContract(ctx, call, b.pendingBlock, s)
 		if err != nil {
 			return err

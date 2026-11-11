@@ -2,12 +2,14 @@ package state
 
 import (
 	"testing"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -884,6 +886,77 @@ func TestVersionedRead_DeletedBalanceKeepsRecordedAbsence(t *testing.T) {
 	require.Equal(t, VersionInvalid, validateReads(vm, ibs, 2))
 }
 
+// A repeat read of a committed absence returns the recorded absence although a lower tx's
+// destruct was flushed in between, and validation still rejects the read.
+func TestVersionedRead_RepeatedCommittedAbsenceKeepsRecordedRead(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0xa1})
+	vm := NewVersionMap(nil)
+	ibs := NewWithVersionMap(&emptyReader{}, vm)
+	defer ibs.Close()
+	ibs.SetTxContext(1, 2)
+	exists, err := ibs.Exist(addr)
+	require.NoError(t, err)
+	require.False(t, exists)
+
+	vm.WriteSelfDestruct(addr, Version{TxIndex: 0}, true, true)
+	vm.WriteBalance(addr, Version{TxIndex: 0}, *uint256.NewInt(5), true)
+	vm.WriteIncarnation(addr, Version{TxIndex: 0}, 1, true)
+
+	exists, err = ibs.Exist(addr)
+	require.NoError(t, err)
+	require.False(t, exists)
+	empty, err := ibs.Empty(addr)
+	require.NoError(t, err)
+	require.True(t, empty)
+	_, balanceRecorded := ibs.versionedReads.GetBalance(addr)
+	require.False(t, balanceRecorded)
+	require.Equal(t, VersionInvalid, validateReads(vm, ibs, 2))
+}
+
+// Repeat reads of a committed absence record nothing beyond the first read and do not take the
+// address entry's lock, which a higher tx's cell has created.
+func TestVersionedRead_RepeatedCommittedAbsenceSkipsVersionMap(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0xa2})
+	vm := NewVersionMap(nil)
+	vm.WriteBalance(addr, Version{TxIndex: 5}, *uint256.NewInt(5), true)
+
+	once := NewWithVersionMap(&emptyReader{}, vm)
+	defer once.Close()
+	once.SetTxContext(1, 2)
+	_, err := once.Empty(addr)
+	require.NoError(t, err)
+
+	repeated := NewWithVersionMap(&emptyReader{}, vm)
+	defer repeated.Close()
+	repeated.SetTxContext(1, 2)
+	_, err = repeated.Empty(addr)
+	require.NoError(t, err)
+
+	entry := vm.load(addr)
+	require.NotNil(t, entry)
+	entry.mu.Lock()
+	done := make(chan error, 1)
+	go func() {
+		_, err := repeated.Empty(addr)
+		if err == nil {
+			_, err = repeated.Exist(addr)
+		}
+		done <- err
+	}()
+	select {
+	case err = <-done:
+		entry.mu.Unlock()
+	case <-time.After(5 * time.Second):
+		entry.mu.Unlock()
+		<-done
+		require.Fail(t, "a repeat read took the version-map lock")
+	}
+	require.NoError(t, err)
+	require.Equal(t, once.VersionedReads(), repeated.VersionedReads())
+}
+
 // storage fallback. Empty reader + no prior writes/reads → falls through
 // to the readStorage callback (returns zero from emptyReader) and records
 // defaultV in readSet.
@@ -1361,4 +1434,74 @@ func TestVersionedRead_CreateCarriesRevivedBalanceAfterEarlierDestroyedRead(t *t
 			require.EqualValues(t, 1000, bal.Uint64())
 		})
 	}
+}
+
+type codeStoreMap map[common.Hash][]byte
+
+func (m codeStoreMap) GetCodeByHash(codeHash []byte) ([]byte, bool) {
+	c, ok := m[common.BytesToHash(codeHash)]
+	return c, ok
+}
+
+type countingCodeReader struct {
+	codeReader
+	codeReads, codeSizeReads int
+}
+
+func (r *countingCodeReader) ReadAccountCode(addr accounts.Address) ([]byte, error) {
+	r.codeReads++
+	return r.codeReader.ReadAccountCode(addr)
+}
+
+func (r *countingCodeReader) ReadAccountCodeSize(addr accounts.Address) (int, error) {
+	r.codeSizeReads++
+	return r.codeReader.ReadAccountCodeSize(addr)
+}
+
+func newSharedCodeReplay(t *testing.T) (*IntraBlockState, *countingCodeReader, accounts.Address, []byte) {
+	t.Helper()
+	code := []byte{0x60, 0x01, 0x60, 0x02, 0x01, 0x00}
+	codeHash := crypto.Keccak256Hash(code)
+	addr := accounts.InternAddress([20]byte{0xC0, 0xDE})
+	acc := accounts.NewAccount()
+	acc.Nonce = 1
+	acc.CodeHash = accounts.InternCodeHash(codeHash)
+	reader := &countingCodeReader{codeReader: codeReader{addr: addr, account: &acc, code: code}}
+	ibs := NewWithVersionMap(reader, NewVersionMap(nil))
+	ibs.SetNoConflictDetection()
+	ibs.SetCodeByHash(codeStoreMap{codeHash: code})
+	ibs.SetTxContext(100, 0)
+	return ibs, reader, addr, code
+}
+
+func TestVersionedRead_CodeServedBySharedStore(t *testing.T) {
+	ibs, reader, addr, code := newSharedCodeReplay(t)
+
+	got, err := ibs.GetCode(addr)
+	require.NoError(t, err)
+	require.Equal(t, code, got)
+	require.Zero(t, reader.codeReads)
+}
+
+func TestVersionedRead_CodeSizeServedBySharedStore(t *testing.T) {
+	ibs, reader, addr, code := newSharedCodeReplay(t)
+
+	size, err := ibs.GetCodeSize(addr)
+	require.NoError(t, err)
+	require.Equal(t, len(code), size)
+	require.Zero(t, reader.codeReads+reader.codeSizeReads)
+}
+
+// A versioned read that finds a stateObject materialized before the IBS was bound to a
+// version map fails the read instead of panicking.
+func TestVersionedRead_MaterializedObjectFailsTheRead(t *testing.T) {
+	t.Parallel()
+	ibs := New(NewNoopReader())
+	addr := accounts.InternAddress(common.HexToAddress("0xab"))
+	require.NoError(t, ibs.CreateAccount(addr, true))
+	ibs.SetVersionMap(NewVersionMap(nil))
+	require.NotPanics(t, func() {
+		_, err := ibs.GetState(addr, accounts.InternKey(common.Hash{31: 1}))
+		require.Error(t, err)
+	})
 }

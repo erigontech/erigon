@@ -728,6 +728,100 @@ func TestUpdateForkChoiceDoesNotFailOnExecutionProgressDiagnosticError(t *testin
 func testUpdateForkChoiceRecoversWhenStateAheadOfTxNums(t *testing.T, invalidExecutionProgress bool) {
 	t.Helper()
 	ctx := t.Context()
+	m, chainPack, commitBlock := newStateAheadOfTxNums(t, invalidExecutionProgress, false)
+
+	// FCU on the same chain's tip (block 10). Walk-back finds canonical ancestor
+	// at the truncated tip (block 5), unwindTarget = 5 = lastCanonicalBlock,
+	// so the no-unwind branch fires. The handler then writes canonical entries
+	// for blocks 6..10 and AppendCanonicalTxNums re-extends TxNums.
+	//
+	// Because the domain was ahead of blocks when the FCU started, the handler
+	// returns ExecutionStatusTooFarAway ("domain ahead of blocks") rather than
+	// ReorgTooDeep — a signal the CL (Caplin/Astrid/EngineServer) knows how to
+	// handle by inserting the missing canonical blocks and retrying.
+	res, err := m.UpdateForkChoice(ctx, chainPack.Blocks[len(chainPack.Blocks)-1].Header())
+	require.NoError(t, err)
+	require.NotEqual(t, execmodule.ExecutionStatusReorgTooDeep, res.Status, "must not be rejected as ReorgTooDeep")
+	require.Equal(t, execmodule.ExecutionStatusTooFarAway, res.Status, "should signal domain-ahead-of-blocks so the CL retries")
+
+	// After the FCU, TxNums must have caught up to (or past) commitBlock so
+	// the next NewSharedDomains() will not return ErrBehindCommitment.
+	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		lastBlock, _, err := rawdbv3.TxNums.Last(tx)
+		require.NoError(t, err)
+		require.GreaterOrEqual(t, lastBlock, commitBlock, "TxNums.Last must have caught up to commitBlock")
+		return nil
+	}))
+}
+
+// Without changesets, a re-sent fork choice for the canonical tip below the
+// commitment block cannot unwind the state; nothing above the head needs it, so
+// it must not be rejected as ReorgTooDeep.
+func TestUpdateForkChoiceResentHeadBelowCommitment(t *testing.T) {
+	m, chainPack, commitBlock := newStateAheadOfTxNums(t, false, false)
+	head := chainPack.Blocks[6].Header()
+	require.Less(t, head.Number.Uint64(), commitBlock)
+	for i := range 2 {
+		res, err := m.UpdateForkChoice(t.Context(), head)
+		require.NoError(t, err)
+		require.Equal(t, execmodule.ExecutionStatusTooFarAway, res.Status, "fork choice %d", i+1)
+	}
+}
+
+// With changesets, the re-sent fork choice still unwinds the state down to the
+// head, so a later one validates it.
+func TestUpdateForkChoiceResentHeadBelowCommitmentWithChangesets(t *testing.T) {
+	m, chainPack, commitBlock := newStateAheadOfTxNums(t, false, true)
+	head := chainPack.Blocks[6].Header()
+	require.Less(t, head.Number.Uint64(), commitBlock)
+	var res execmodule.ForkChoiceResult
+	for range 3 {
+		var err error
+		res, err = m.UpdateForkChoice(t.Context(), head)
+		require.NoError(t, err)
+	}
+	require.Equal(t, execmodule.ExecutionStatusSuccess, res.Status)
+}
+
+// Outside the domain-ahead state an impossible unwind is still rejected: nothing
+// ties the committed state to the canonical head, which here is a fork the
+// domain-ahead path made canonical over the other branch's state.
+func TestUpdateForkChoiceResentForkTipOverOtherBranchStateIsNotValid(t *testing.T) {
+	m, chainPack := newExecutedTransferChain(t)
+	fork, err := m.GenerateChainFrom(chainPack.Blocks[4], 5, func(_ int, b *blockgen.BlockGen) {
+		tx, err := types.SignTx(
+			types.NewTransaction(b.TxNonce(m.Address), common.Address{0xfe}, uint256.NewInt(2_000), 50000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
+			*types.LatestSignerForChainID(nil),
+			m.Key,
+		)
+		require.NoError(t, err)
+		b.AddTx(tx)
+	})
+	require.NoError(t, err)
+	require.NotEqual(t, chainPack.TopBlock.Root(), fork.TopBlock.Root())
+	status, err := m.InsertBlocks(t.Context(), fork.Blocks)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+	require.Equal(t, fork.TopBlock.NumberU64(), truncateTxNumsBelowCommitment(t, m, false, false))
+	require.NoError(t, m.DB.UpdateTemporal(t.Context(), func(tx kv.TemporalRwTx) error {
+		return stages.SaveStageProgress(tx, stages.Finish, 5)
+	}))
+	res, err := m.UpdateForkChoice(t.Context(), fork.TopBlock.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusTooFarAway, res.Status)
+	res, err = m.UpdateForkChoice(t.Context(), fork.TopBlock.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusReorgTooDeep, res.Status)
+}
+
+func newStateAheadOfTxNums(t *testing.T, invalidExecutionProgress, keepChangesets bool) (*execmoduletester.ExecModuleTester, *blockgen.ChainPack, uint64) {
+	t.Helper()
+	m, chainPack := newExecutedTransferChain(t)
+	return m, chainPack, truncateTxNumsBelowCommitment(t, m, invalidExecutionProgress, keepChangesets)
+}
+
+func newExecutedTransferChain(t *testing.T) (*execmoduletester.ExecModuleTester, *blockgen.ChainPack) {
+	t.Helper()
 	privKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
@@ -752,8 +846,13 @@ func testUpdateForkChoiceRecoversWhenStateAheadOfTxNums(t *testing.T, invalidExe
 
 	// Drive the full chain in (insert + validate + UFC). State commitBlock and
 	// TxNums.Last are now both at block 10.
-	require.NoError(t, m.InsertValidateAndUfc1By1(ctx, chainPack.Blocks))
+	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), chainPack.Blocks))
+	return m, chainPack
+}
 
+func truncateTxNumsBelowCommitment(t *testing.T, m *execmoduletester.ExecModuleTester, invalidExecutionProgress, keepChangesets bool) uint64 {
+	t.Helper()
+	ctx := t.Context()
 	const truncateTo uint64 = 5
 	// Simulate the post-OtterSync state where chaindata's canonical+TxNums only
 	// extend to a frozen tip but the snapshot/state files commit to a later
@@ -770,7 +869,9 @@ func testUpdateForkChoiceRecoversWhenStateAheadOfTxNums(t *testing.T, invalidExe
 		commitBlock = binary.BigEndian.Uint64(v[8:16])
 		require.NoError(t, rawdbv3.TxNums.Truncate(tx, truncateTo+1))
 		require.NoError(t, rawdb.TruncateCanonicalHash(tx, truncateTo+1, false))
-		require.NoError(t, tx.ClearTable(kv.ChangeSets3))
+		if !keepChangesets {
+			require.NoError(t, tx.ClearTable(kv.ChangeSets3))
+		}
 		if invalidExecutionProgress {
 			require.NoError(t, tx.Put(kv.SyncStageProgress, []byte(stages.Execution), []byte{1}))
 		}
@@ -783,29 +884,7 @@ func testUpdateForkChoiceRecoversWhenStateAheadOfTxNums(t *testing.T, invalidExe
 		require.Equal(t, truncateTo, lastBlock, "canonical/TxNums must be truncated below commitBlock to set up the misalignment")
 		return nil
 	}))
-
-	// FCU on the same chain's tip (block 10). Walk-back finds canonical ancestor
-	// at the truncated tip (block 5), unwindTarget = 5 = lastCanonicalBlock,
-	// so the no-unwind branch fires. The handler then writes canonical entries
-	// for blocks 6..10 and AppendCanonicalTxNums re-extends TxNums.
-	//
-	// Because the domain was ahead of blocks when the FCU started, the handler
-	// returns ExecutionStatusTooFarAway ("domain ahead of blocks") rather than
-	// ReorgTooDeep — a signal the CL (Caplin/Astrid/EngineServer) knows how to
-	// handle by inserting the missing canonical blocks and retrying.
-	res, err := m.UpdateForkChoice(ctx, chainPack.Blocks[len(chainPack.Blocks)-1].Header())
-	require.NoError(t, err)
-	require.NotEqual(t, execmodule.ExecutionStatusReorgTooDeep, res.Status, "must not be rejected as ReorgTooDeep")
-	require.Equal(t, execmodule.ExecutionStatusTooFarAway, res.Status, "should signal domain-ahead-of-blocks so the CL retries")
-
-	// After the FCU, TxNums must have caught up to (or past) commitBlock so
-	// the next NewSharedDomains() will not return ErrBehindCommitment.
-	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
-		lastBlock, _, err := rawdbv3.TxNums.Last(tx)
-		require.NoError(t, err)
-		require.GreaterOrEqual(t, lastBlock, commitBlock, "TxNums.Last must have caught up to commitBlock")
-		return nil
-	}))
+	return commitBlock
 }
 
 // Companion to TestUpdateForkChoiceRecoversWhenStateAheadOfTxNums that also
@@ -3474,6 +3553,75 @@ func TestBALDrivenComputeAheadChangesetIntegrity(t *testing.T) {
 func TestBALShadowCompute_MatchesIncremental(t *testing.T) {
 	res := runBALComputeAheadChangeset(t, true, true)
 	require.Positive(t, res.computedAhead, "compute-ahead must have run so shadow cross-check exercised the match path")
+}
+
+// A 0-value touch removes an account that was EIP-161 empty before the block, but the block
+// access list shows no removal: the account is listed with reads only, or with the balance a later
+// tx gives it. Compute-ahead must not fold such a block from its BAL, or it keeps the account or
+// its storage and the root differs.
+func TestBALDrivenComputeAheadRemovesTouchedEmptyAccount(t *testing.T) {
+	empty := common.HexToAddress("0xe1e1")
+	for _, tc := range []struct {
+		name    string
+		account types.GenesisAccount
+		values  []uint64
+	}{
+		{"touched", types.GenesisAccount{Balance: big.NewInt(0)}, []uint64{0}},
+		{"touched with storage then funded", types.GenesisAccount{
+			Balance: big.NewInt(0),
+			Storage: map[common.Hash]common.Hash{common.HexToHash("0x01"): common.HexToHash("0x01")},
+		}, []uint64{0, 1}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			defer func(prev bool) { dbg.BALDrivenCommitment = prev }(dbg.BALDrivenCommitment)
+			defer func(prev bool) { dbg.IgnoreBAL = prev }(dbg.IgnoreBAL)
+			dbg.BALDrivenCommitment = true
+			dbg.IgnoreBAL = false
+			stagedsync.ResetComputedAheadForTest()
+
+			ctx := t.Context()
+			privKey, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+			require.NoError(t, err)
+			senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+			m := execmoduletester.New(
+				t,
+				execmoduletester.WithKey(privKey),
+				execmoduletester.WithGenesisSpec(&types.Genesis{
+					Config: chain.AllProtocolChanges,
+					Alloc: types.GenesisAlloc{
+						senderAddr: {Balance: big.NewInt(1 * common.Ether)},
+						empty:      tc.account,
+					},
+				}),
+				execmoduletester.WithExperimentalBAL(),
+				execmoduletester.WithAlwaysGenerateChangesets(false),
+				// Blocks 1 and 2 are compute-ahead candidates; block 2 touches the empty account.
+				execmoduletester.WithMaxReorgDepth(1),
+			)
+			chainPack, err := m.GenerateChain(4, func(i int, b *blockgen.BlockGen) {
+				sends := []uint64{0}
+				to := senderAddr
+				if i == 1 {
+					sends, to = tc.values, empty
+				}
+				for _, value := range sends {
+					tx, err := types.SignTx(types.NewTransaction(b.TxNonce(senderAddr), to, uint256.NewInt(value), 1_000_000, uint256.NewInt(10_000_000_000), nil),
+						*types.LatestSignerForChainID(nil), privKey)
+					require.NoError(t, err)
+					b.AddTx(tx)
+				}
+			})
+			require.NoError(t, err)
+
+			insRes, err := m.InsertBlocks(ctx, chainPack.Blocks)
+			require.NoError(t, err)
+			require.Equal(t, execmodule.ExecutionStatusSuccess, insRes)
+			fcuRes, err := m.UpdateForkChoice(ctx, chainPack.TopBlock.Header())
+			require.NoError(t, err)
+			require.Equal(t, execmodule.ExecutionStatusSuccess, fcuRes.Status, "validationError=%q", fcuRes.ValidationError)
+			require.Positive(t, stagedsync.ComputedAheadCountForTest(), "the block before the touch is computed ahead")
+		})
+	}
 }
 
 type balComputeAheadResult struct {

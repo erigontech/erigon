@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/transition"
+	ethevent "github.com/erigontech/erigon/common/event"
 	"github.com/erigontech/erigon/common/hexutil"
 )
 
@@ -35,8 +36,8 @@ import (
 func (a *ApiHandler) StartPayloadAttributes(ctx context.Context) <-chan struct{} {
 	done := make(chan struct{})
 	events := make(chan *beaconevents.EventStream, 128)
-	subscription := a.emitters.State().Subscribe(events)
-	// Feed sends wait for every subscriber, so state work runs off the receiving goroutine.
+	subscription := a.emitters.State().SubscribeHeadV2(events)
+	// head_v2 is sent without waiting for subscribers, so state work runs off the receiving goroutine to keep up.
 	wake := make(chan struct{}, 1)
 	notify := func() {
 		select {
@@ -54,12 +55,14 @@ func (a *ApiHandler) StartPayloadAttributes(ctx context.Context) <-chan struct{}
 			select {
 			case <-ctx.Done():
 				return
-			case <-subscription.Err():
-				return
-			case event := <-events:
-				if event.Event == beaconevents.StateHeadV2 {
-					notify()
+			case err := <-subscription.Err():
+				if !errors.Is(err, ethevent.ErrSubscriberLagged) {
+					return
 				}
+				// The dropped event may have been a head change.
+				notify()
+			case <-events:
+				notify()
 			case <-decision.C:
 				notify()
 				decision.Reset(a.untilPayloadDecision())

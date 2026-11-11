@@ -19,6 +19,7 @@ package network
 import (
 	"context"
 	"errors"
+	"slices"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -93,6 +94,38 @@ func TestBlobHistoryDownloaderRefreshesFrozenBoundaryAfterRetry(t *testing.T) {
 	require.Empty(t, downloader.retryRanges)
 	require.True(t, downloader.backfillCompleted.Load())
 	require.True(t, notified)
+}
+
+func TestBlobHistoryDownloaderBoundedArchiveStopsAtFloor(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.DenebForkEpoch = 0
+	cfg.MinEpochsForBlobSidecarsRequests = 1
+	const head = uint64(100)
+	serveFloor := cfg.BlobSidecarServeRangeStartSlot(head)
+	require.Equal(t, uint64(64), serveFloor)
+
+	for _, tc := range []struct {
+		name      string
+		fromSlot  uint64
+		wantFloor uint64
+	}{
+		{name: "full archive", fromSlot: 0, wantFloor: 0},
+		{name: "from slot below the serving window", fromSlot: 50, wantFloor: 50},
+		{name: "from slot inside the serving window keeps the window", fromSlot: 90, wantFloor: serveFloor},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reader := &boundaryBlockReader{}
+			downloader := newBoundaryDownloader(t, head, 0, 0, reader)
+			downloader.beaconCfg = &cfg
+			downloader.archiveFromSlot = tc.fromSlot
+
+			require.NoError(t, downloader.downloadOnce(false))
+			require.NotEmpty(t, reader.slots)
+			require.Equal(t, head, reader.slots[0])
+			require.Equal(t, tc.wantFloor, slices.Min(reader.slots))
+			require.True(t, downloader.backfillCompleted.Load())
+		})
+	}
 }
 
 func TestBlobHistoryDownloaderRunsWithSinglePeer(t *testing.T) {

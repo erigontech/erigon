@@ -314,6 +314,8 @@ func (g dataAvailabilityForkGraph) ReplayState(common.Hash) (*state2.CachingBeac
 	return g.state, nil
 }
 
+func (dataAvailabilityForkGraph) IsBlockInvalid(common.Hash) bool { return false }
+
 func (g dataAvailabilityForkGraph) GetBlock(common.Hash) (*cltypes.SignedBeaconBlock, bool) {
 	return g.block, g.block != nil
 }
@@ -2889,9 +2891,10 @@ func TestValidateExecutionPayloadEnvelopeForGossipIgnoresUnavailableBlockData(t 
 		graph                dataAvailabilityForkGraph
 		wantError            string
 		wantStateUnavailable bool
+		wantReplayFailed     bool
 	}{
 		{name: "state", graph: dataAvailabilityForkGraph{block: block}, wantError: "state", wantStateUnavailable: true},
-		{name: "state error", graph: dataAvailabilityForkGraph{block: block, stateErr: &stateErr}, wantError: "state"},
+		{name: "state error", graph: dataAvailabilityForkGraph{block: block, stateErr: &stateErr}, wantError: "state", wantReplayFailed: true},
 		{name: "block", graph: dataAvailabilityForkGraph{state: blockState}, wantError: "block"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -2906,6 +2909,7 @@ func TestValidateExecutionPayloadEnvelopeForGossipIgnoresUnavailableBlockData(t 
 			} else {
 				require.NotErrorIs(t, err, ErrExecutionPayloadEnvelopeStateUnavailable)
 			}
+			require.Equal(t, tc.wantReplayFailed, errors.Is(err, ErrExecutionPayloadEnvelopeStateReplayFailed))
 			require.ErrorContains(t, err, tc.wantError)
 			require.True(t, store.mu.TryLock())
 			store.mu.Unlock()
@@ -2913,8 +2917,10 @@ func TestValidateExecutionPayloadEnvelopeForGossipIgnoresUnavailableBlockData(t 
 	}
 }
 
-func TestValidateExecutionPayloadEnvelopeForGossipRejectsBidMismatchBeforeStateReplay(t *testing.T) {
+func TestValidateExecutionPayloadEnvelopeForGossipRejectsBidMismatchBeforePayloadHashAndStateReplay(t *testing.T) {
 	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
+	envelope.Message.Payload.Transactions = solid.NewProgressiveTransactionsSSZFromTransactions([][]byte{{1, 2, 3}})
+	require.NoError(t, envelope.Message.Payload.BlockAccessList.SetBytes([]byte{4, 5, 6}))
 	envelope.Message.Payload.BlockHash[0]++
 	var replayCalls atomic.Int32
 	store := &ForkChoiceStore{
@@ -2933,6 +2939,8 @@ func TestValidateExecutionPayloadEnvelopeForGossipRejectsBidMismatchBeforeStateR
 	require.NotErrorIs(t, err, ErrIgnore)
 	require.ErrorContains(t, err, "failed gossip validation")
 	require.Zero(t, replayCalls.Load())
+	require.False(t, progressiveRootCached(t, envelope.Message.Payload.Transactions))
+	require.False(t, progressiveRootCached(t, envelope.Message.Payload.BlockAccessList))
 }
 
 func TestValidateExecutionPayloadEnvelopeForGossipBoundsStateCopiesAndAllowsWriter(t *testing.T) {
@@ -3921,6 +3929,17 @@ func TestExecutionPayloadApplyInFlightEndsWithARejectedEnvelope(t *testing.T) {
 
 	require.False(t, f.ExecutionPayloadApplyInFlight(root))
 	require.True(t, f.ExecutionPayloadReceivedBefore(root, time.Now().Add(time.Second)), "the arrival stays recorded")
+}
+
+func TestExecutionPayloadApplyInFlightCoversAcceptedImportBeforeApply(t *testing.T) {
+	root := common.Hash{1}
+	f := &ForkChoiceStore{}
+
+	finish := f.BeginPendingPayloadEnvelope(root)
+	require.True(t, f.ExecutionPayloadApplyInFlight(root))
+	require.False(t, f.ExecutionPayloadApplyInFlight(common.Hash{2}))
+	finish()
+	require.False(t, f.ExecutionPayloadApplyInFlight(root))
 }
 
 // availabilityRecordingForkGraph keeps the payload availability fork choice marks.
@@ -5217,6 +5236,61 @@ func TestExecutionPayloadAdmissionCancellationReconcilesConcurrentOwner(t *testi
 	}
 }
 
+func TestValidateExecutionPayloadEnvelopeForConsensusTakesBlobDataInHand(t *testing.T) {
+	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
+	block.Block.Body.SignedExecutionPayloadBid.Message.BlobKzgCommitments.Append(new(cltypes.KZGCommitment))
+	rebindAdmissionBlockRoot(t, blockState, block, envelope)
+	resignAdmissionEnvelope(t, cfg, blockState, envelope)
+	engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
+	engine.EXPECT().NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(execution_client.PayloadStatusValidated, nil)
+	store := &ForkChoiceStore{
+		beaconCfg: cfg,
+		forkGraph: dataAvailabilityForkGraph{state: blockState, block: block},
+		engine:    engine,
+	}
+	store.finalizedCheckpoint.Store(solid.Checkpoint{})
+
+	require.ErrorIs(t, store.ValidateExecutionPayloadEnvelopeForConsensus(t.Context(), envelope, true), ErrEIP7594ColumnDataNotAvailable)
+	require.NoError(t, store.ValidateExecutionPayloadEnvelopeForConsensus(t.Context(), envelope, false))
+}
+
+func TestExecutionPayloadInvalidated(t *testing.T) {
+	byRoot, err := lru.New[common.Hash, execution_client.PayloadStatus](2)
+	require.NoError(t, err)
+	byHash, err := lru.New[common.Hash, execution_client.PayloadStatus](2)
+	require.NoError(t, err)
+	store := &ForkChoiceStore{payloadStatusByRoot: byRoot, executionPayloadStatus: byHash}
+	blockRoot := common.HexToHash("0x01")
+	executionBlockHash := common.HexToHash("0x02")
+	otherRoot := common.HexToHash("0x03")
+	otherHash := common.HexToHash("0x04")
+
+	require.False(t, store.ExecutionPayloadInvalidated(blockRoot, executionBlockHash))
+	byRoot.Add(blockRoot, execution_client.PayloadStatusInvalidated)
+	require.True(t, store.ExecutionPayloadInvalidated(blockRoot, otherHash))
+	byRoot.Purge()
+	byHash.Add(executionBlockHash, execution_client.PayloadStatusInvalidated)
+	require.True(t, store.ExecutionPayloadInvalidated(otherRoot, executionBlockHash))
+}
+
+func TestValidateExecutionPayloadEnvelopeForConsensusRepeatsForAnAppliedEnvelope(t *testing.T) {
+	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
+	engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
+	engine.EXPECT().NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(execution_client.PayloadStatusValidated, nil).Times(2)
+	store := &ForkChoiceStore{
+		beaconCfg: cfg,
+		forkGraph: &persistedEnvelopeForkGraph{
+			dataAvailabilityForkGraph: dataAvailabilityForkGraph{state: blockState, block: block},
+			hasEnvelope:               true,
+		},
+		engine: engine,
+	}
+	store.finalizedCheckpoint.Store(solid.Checkpoint{})
+
+	require.NoError(t, store.ValidateExecutionPayloadEnvelopeForConsensus(t.Context(), envelope, false))
+	require.NoError(t, store.ValidateExecutionPayloadEnvelopeForConsensus(t.Context(), envelope, false))
+}
+
 func TestValidateExecutionPayloadEnvelopeForConsensusRequiresELValidation(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
@@ -5243,7 +5317,7 @@ func TestValidateExecutionPayloadEnvelopeForConsensusRequiresELValidation(t *tes
 				engine:    engine,
 			}
 			store.finalizedCheckpoint.Store(solid.Checkpoint{})
-			err := store.ValidateExecutionPayloadEnvelopeForConsensus(t.Context(), envelope)
+			err := store.ValidateExecutionPayloadEnvelopeForConsensus(t.Context(), envelope, true)
 			if tc.wantErr {
 				require.Error(t, err)
 			} else {
@@ -5272,7 +5346,7 @@ func TestValidateExecutionPayloadEnvelopeForConsensusHoldsPayloadPreparation(t *
 	}
 	store.finalizedCheckpoint.Store(solid.Checkpoint{})
 	done := make(chan error, 1)
-	go func() { done <- store.ValidateExecutionPayloadEnvelopeForConsensus(t.Context(), envelope) }()
+	go func() { done <- store.ValidateExecutionPayloadEnvelopeForConsensus(t.Context(), envelope, true) }()
 	<-started
 
 	_, _, ok := store.TryBeginPayloadPreparation(t.Context(), block.Block.Slot, block.Block.Slot+1)
@@ -5308,7 +5382,7 @@ func TestValidateExecutionPayloadEnvelopeForConsensusRechecksAfterEL(t *testing.
 					return execution_client.PayloadStatusValidated, nil
 				},
 			)
-			require.Error(t, store.ValidateExecutionPayloadEnvelopeForConsensus(t.Context(), envelope))
+			require.Error(t, store.ValidateExecutionPayloadEnvelopeForConsensus(t.Context(), envelope, true))
 		})
 	}
 }
@@ -5317,7 +5391,7 @@ func TestValidateExecutionPayloadEnvelopeForConsensusWithoutEL(t *testing.T) {
 	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
 	store := &ForkChoiceStore{beaconCfg: cfg, forkGraph: dataAvailabilityForkGraph{state: blockState, block: block}}
 	store.finalizedCheckpoint.Store(solid.Checkpoint{})
-	require.Error(t, store.ValidateExecutionPayloadEnvelopeForConsensus(t.Context(), envelope))
+	require.Error(t, store.ValidateExecutionPayloadEnvelopeForConsensus(t.Context(), envelope, true))
 }
 
 func TestValidateExecutionPayloadEnvelopeForConsensusAdmissionCancellation(t *testing.T) {
@@ -5329,7 +5403,7 @@ func TestValidateExecutionPayloadEnvelopeForConsensusAdmissionCancellation(t *te
 	store.payloadValidationAdmission <- struct{}{}
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	require.ErrorIs(t, store.ValidateExecutionPayloadEnvelopeForConsensus(ctx, envelope), context.Canceled)
+	require.ErrorIs(t, store.ValidateExecutionPayloadEnvelopeForConsensus(ctx, envelope, true), context.Canceled)
 	require.True(t, store.mu.TryLock())
 	store.mu.Unlock()
 	require.Len(t, store.payloadValidationAdmission, 1)
@@ -5363,7 +5437,7 @@ func TestExecutionPayloadEnvelopeValidationUsesFinalizedEpochStart(t *testing.T)
 				if validator == "gossip" {
 					err = store.ValidateExecutionPayloadEnvelopeForGossip(envelope)
 				} else {
-					err = store.ValidateExecutionPayloadEnvelopeForConsensus(t.Context(), envelope)
+					err = store.ValidateExecutionPayloadEnvelopeForConsensus(t.Context(), envelope, true)
 				}
 				if tc.wantErr {
 					require.ErrorContains(t, err, "before finalized slot 64")
@@ -5500,4 +5574,21 @@ func resignAdmissionEnvelope(
 ) {
 	t.Helper()
 	signAdmissionEnvelopeWithKey(t, cfg, blockState, envelope, admissionSigningKey)
+}
+
+type invalidBlockForkGraph struct {
+	dataAvailabilityForkGraph
+}
+
+func (invalidBlockForkGraph) IsBlockInvalid(common.Hash) bool { return true }
+
+func TestValidateExecutionPayloadEnvelopeForGossipRejectsInvalidBlock(t *testing.T) {
+	cfg, _, _, envelope := validAdmissionCancellationFixture(t)
+	store := &ForkChoiceStore{beaconCfg: cfg, forkGraph: invalidBlockForkGraph{}}
+	store.finalizedCheckpoint.Store(solid.Checkpoint{})
+
+	err := store.ValidateExecutionPayloadEnvelopeForGossip(envelope)
+
+	require.Error(t, err)
+	require.NotErrorIs(t, err, ErrIgnore)
 }
