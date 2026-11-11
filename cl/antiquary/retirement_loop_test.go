@@ -219,7 +219,11 @@ func TestRetirementTickWaitsForBackfill(t *testing.T) {
 	h.a.blobBackfilled.Store(false)
 	h.tick(3)
 	require.Equal(t, 3, h.blocksRuns)
-	require.Zero(t, h.blobsRuns)
+	require.Zero(t, h.blobsRuns, "a node without a blob archive has pruned its blobs")
+
+	h.a.blobs = true
+	h.tick(3)
+	require.Equal(t, 3, h.blobsRuns, "a blob archive still retires the complete segments below its lowest gap")
 }
 
 func TestRetirementTickStopsBlobsWhenCompletionIsRevoked(t *testing.T) {
