@@ -28,6 +28,14 @@ func inPostTx(evm *EVM) bool {
 	return evm.FrameContext != nil && evm.FrameContext.Transaction.Frames[evm.FrameContext.Index].Mode == types.FramePostTx
 }
 
+// Assertion read errors must survive call rollback and reach the transaction
+// executor even when a parent catches the failed EVM call.
+func (evm *EVM) assertionReadError(err error) error {
+	err = fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+	evm.IntraBlockState().RecordStateReadError(err)
+	return err
+}
+
 func opTxTrace(pc uint64, evm *EVM, call *CallContext) (uint64, []byte, error) {
 	if !inPostTx(evm) {
 		return pc, nil, ErrFrameContext
@@ -52,7 +60,7 @@ func opTxTrace(pc uint64, evm *EVM, call *CallContext) (uint64, []byte, error) {
 	}
 	trace, err := ctx.TransactionTrace(evm.IntraBlockState())
 	if err != nil {
-		return pc, nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+		return pc, nil, evm.assertionReadError(err)
 	}
 	switch {
 	case p == 0:
@@ -162,7 +170,7 @@ func opTxDiff(pc uint64, evm *EVM, call *CallContext) (uint64, []byte, error) {
 	ibs := evm.IntraBlockState()
 	trace, err := evm.FrameContext.TransactionTrace(ibs)
 	if err != nil {
-		return pc, nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+		return pc, nil, evm.assertionReadError(err)
 	}
 	if p <= 5 {
 		address := ibs.InternAddress(key)
@@ -177,7 +185,7 @@ func opTxDiff(pc uint64, evm *EVM, call *CallContext) (uint64, []byte, error) {
 				value, err = trace.Storage(ibs, address, slot, true)
 			}
 			if err != nil {
-				return pc, nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+				return pc, nil, evm.assertionReadError(err)
 			}
 			index.Set(&value)
 			return pc, nil, nil
@@ -186,14 +194,14 @@ func opTxDiff(pc uint64, evm *EVM, call *CallContext) (uint64, []byte, error) {
 		if p <= 3 {
 			value, err := trace.Balance(ibs, address, p == 2)
 			if err != nil {
-				return pc, nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+				return pc, nil, evm.assertionReadError(err)
 			}
 			index.Set(&value)
 			return pc, nil, nil
 		}
 		hash, err := trace.CodeHash(ibs, address, p == 4)
 		if err != nil {
-			return pc, nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+			return pc, nil, evm.assertionReadError(err)
 		}
 		value := hash.Value()
 		index.SetBytes(value[:])
@@ -230,7 +238,7 @@ func opEventDataCopy(pc uint64, evm *EVM, call *CallContext) (uint64, []byte, er
 	dataOffset, length := call.Stack.pop2()
 	trace, err := evm.FrameContext.TransactionTrace(evm.IntraBlockState())
 	if err != nil {
-		return pc, nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+		return pc, nil, evm.assertionReadError(err)
 	}
 	if !eventIndex.IsUint64() || eventIndex.Uint64() >= uint64(len(trace.Events)) || !dataOffset.IsUint64() || !length.IsUint64() {
 		return pc, nil, ErrFrameParameter
