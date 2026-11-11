@@ -623,8 +623,11 @@ func (r *legacyReach) childDepth(branch, path []byte, depth int) (next int, ok b
 	}
 	nib := int(path[depth])
 	err = commitment.BranchData(branch).ForEachCell(func(i int, cell commitment.BranchCell) error {
-		if i != nib {
+		if i < nib {
 			return nil
+		}
+		if i > nib {
+			return errLegacyCellsDone
 		}
 		ext, from := cell.Extension, depth+1
 		switch {
@@ -643,10 +646,15 @@ func (r *legacyReach) childDepth(branch, path []byte, depth int) (next int, ok b
 		}
 		end := min(from+len(ext), len(path))
 		next, ok = from+len(ext), bytes.Equal(ext[:end-from], path[from:end])
-		return nil
+		return errLegacyCellsDone
 	})
+	if errors.Is(err, errLegacyCellsDone) {
+		err = nil
+	}
 	return next, ok, err
 }
+
+var errLegacyCellsDone = errors.New("legacy cells done")
 
 type legacyFileValues struct {
 	accounts, storage *DomainRoTx
