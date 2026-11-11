@@ -217,6 +217,5 @@ func (arr *RawUint64List) UnmarshalJSON(data []byte) error {
 	}
 	arr.u = values
 	arr.cachedHash = common.Hash{}
-	clear(arr.hahsBuffer)
 	return nil
 }
