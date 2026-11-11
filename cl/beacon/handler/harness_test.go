@@ -45,6 +45,7 @@ func TestHarnessPhase0Finalized(t *testing.T) {
 			beacontest.WithTestFromFs(Harnesses, "liveness"),
 			beacontest.WithTestFromFs(Harnesses, "duties_attester_f"),
 			beacontest.WithTestFromFs(Harnesses, "committees_f"),
+			beacontest.WithTestFromFs(Harnesses, "attestation_rewards_phase0_inclusion"),
 		)...,
 	)
 }

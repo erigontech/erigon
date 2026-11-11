@@ -1,0 +1,15 @@
+vars:
+  justified_epoch: "259"
+tests:
+  - name: all rewards keep zero inclusion delay
+    expect:
+      data: {}
+    actual:
+      handler: i
+      method: post
+      path: /eth/v1/beacon/rewards/attestations/{{.Vars.justified_epoch}}
+    compare:
+      exprs:
+        - actual_code == 200
+        - actual.data.ideal_rewards.all(reward, has(reward.inclusion_delay) && reward.inclusion_delay == "0")
+        - actual.data.total_rewards.all(reward, has(reward.inclusion_delay) && reward.inclusion_delay == "0")
