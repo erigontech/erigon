@@ -676,6 +676,34 @@ func TestGetRandaoMissingPreviousEpochMix(t *testing.T) {
 	require.Equal(t, http.StatusNotFound, rec.Code, "unavailable previous-epoch mix must return 404: GET %s returned %d: %s", path, rec.Code, rec.Body.String())
 }
 
+func TestRandaoFixPreservesCommitteeMissingMixResponse(t *testing.T) {
+	db, _, _, _, post, h, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	fcu.FinalizedSlotVal = post.Slot() + 1
+	epoch := post.Slot()/h.beaconChainCfg.SlotsPerEpoch - 1
+	path := fmt.Sprintf("/eth/v1/beacon/states/%d/committees?epoch=%d", post.Slot(), epoch)
+	request := func() *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		h.mux.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil))
+		return rec
+	}
+	available := request()
+	require.Equal(t, http.StatusOK, available.Code, available.Body.String())
+	mixEpoch := epoch - h.beaconChainCfg.MinSeedLookahead - 1
+	key := base_encoding.Encode64ToBytes4(mixEpoch * h.beaconChainCfg.SlotsPerEpoch)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		mix, err := tx.GetOne(kv.RandaoMixes, key)
+		if err != nil {
+			return err
+		}
+		require.Len(t, mix, 32)
+		return tx.Delete(kv.RandaoMixes, key)
+	}))
+	missing := request()
+	require.Equal(t, http.StatusNotFound, missing.Code, missing.Body.String())
+	expected := "{\"code\":404,\"message\":\"could not read randao mix: invalid mix length 0\"}\n"
+	require.Equal(t, expected, missing.Body.String(), "committee error response changed outside the randao endpoint")
+}
+
 func TestGetPendingQueuesConsensusVersionHeader(t *testing.T) {
 	db, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
 	handler.beaconChainCfg.FuluForkEpoch = 1
