@@ -1696,6 +1696,17 @@ func TestAccountState_IndexCrossoverKeepsSlotsFindable(t *testing.T) {
 	require.Len(t, account.storageReads, 4*slotIndexMin)
 }
 
+// A slot read by many txs must occupy one storageReads entry, otherwise finalize
+// sorts one entry per read instead of one per slot.
+func TestAccountState_RepeatedReadsKeepOneEntry(t *testing.T) {
+	account := newAccountState(accounts.InternAddress(common.HexToAddress("0xbeef")))
+	slot := accounts.InternKey(common.HexToHash("0x01"))
+	for range 3 {
+		account.updateReadStorage(slot, *uint256.NewInt(7))
+	}
+	require.Equal(t, []accounts.StorageKey{slot}, account.storageReads)
+}
+
 // TestAccountState_MatchesReferenceBuilder fuzzes read/write sequences that
 // cross slotIndexMin in both lists and compares the normalized result against a
 // straightforward builder. The indexes are pure bookkeeping, so any divergence

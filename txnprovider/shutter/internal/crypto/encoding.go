@@ -68,8 +68,7 @@ func (m *EncryptedMessage) Unmarshal(d []byte) error {
 	if m.C1 == nil {
 		m.C1 = new(blst.P2Affine)
 	}
-	m.C1.Uncompress(d[1 : 1+blst.BLST_P2_COMPRESS_BYTES])
-	if m.C1 == nil {
+	if m.C1.Uncompress(d[1:1+blst.BLST_P2_COMPRESS_BYTES]) == nil {
 		return errors.New("failed to deserialize C1")
 	}
 	if !m.C1.InG2() {
@@ -79,10 +78,12 @@ func (m *EncryptedMessage) Unmarshal(d []byte) error {
 	copy(m.C2[:], d[1+blst.BLST_P2_COMPRESS_BYTES:1+blst.BLST_P2_COMPRESS_BYTES+BlockSize])
 
 	m.C3 = nil
-	for i := 1 + blst.BLST_P2_COMPRESS_BYTES + BlockSize; i < len(d); i += BlockSize {
-		b := Block{}
-		copy(b[:], d[i:i+BlockSize])
-		m.C3 = append(m.C3, b)
+	if n := len(d) - 1 - blst.BLST_P2_COMPRESS_BYTES - BlockSize; n > 0 {
+		m.C3 = make([]Block, n/BlockSize)
+	}
+	for j := range m.C3 {
+		i := 1 + blst.BLST_P2_COMPRESS_BYTES + BlockSize + j*BlockSize
+		copy(m.C3[j][:], d[i:i+BlockSize])
 	}
 
 	return nil
@@ -110,8 +111,7 @@ func (eonPublicKeyShare *EonPublicKeyShare) Marshal() []byte {
 // Unmarshal deserializes an eon public key share.
 func (eonPublicKeyShare *EonPublicKeyShare) Unmarshal(m []byte) error {
 	p := (*blst.P2Affine)(eonPublicKeyShare)
-	p.Uncompress(m)
-	if p == nil {
+	if p.Uncompress(m) == nil {
 		return errors.New("failed to deserialize eon public key share")
 	}
 	if !p.InG2() {
@@ -128,8 +128,7 @@ func (eonPublicKey *EonPublicKey) Marshal() []byte {
 // Unmarshal deserializes an eon public key from the given byte slice.
 func (eonPublicKey *EonPublicKey) Unmarshal(m []byte) error {
 	p := (*blst.P2Affine)(eonPublicKey)
-	p.Uncompress(m)
-	if p == nil {
+	if p.Uncompress(m) == nil {
 		return errors.New("failed to deserialize eon public key")
 	}
 	if !p.InG2() {
@@ -160,8 +159,7 @@ func (epochID *EpochID) Marshal() []byte {
 // Unmarshal deserializes an epoch id.
 func (epochID *EpochID) Unmarshal(m []byte) error {
 	p := (*blst.P1Affine)(epochID)
-	p.Uncompress(m)
-	if p == nil {
+	if p.Uncompress(m) == nil {
 		return errors.New("failed to deserialize epoch id")
 	}
 	if !p.InG1() {
@@ -179,8 +177,7 @@ func (epochSecretKeyShare *EpochSecretKeyShare) Marshal() []byte {
 // Unmarshal deserializes an epoch secret key share.
 func (epochSecretKeyShare *EpochSecretKeyShare) Unmarshal(m []byte) error {
 	p := (*blst.P1Affine)(epochSecretKeyShare)
-	p.Uncompress(m)
-	if p == nil {
+	if p.Uncompress(m) == nil {
 		return errors.New("failed to deserialize epoch secret key share")
 	}
 	if !p.InG1() {
@@ -197,8 +194,7 @@ func (epochSecretKey *EpochSecretKey) Marshal() []byte {
 // Unmarshal deserializes an epoch secret key.
 func (epochSecretKey *EpochSecretKey) Unmarshal(m []byte) error {
 	p := (*blst.P1Affine)(epochSecretKey)
-	p.Uncompress(m)
-	if p == nil {
+	if p.Uncompress(m) == nil {
 		return errors.New("failed to deserialize epoch secret key")
 	}
 	if !p.InG1() {

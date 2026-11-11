@@ -350,7 +350,7 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, re
 		}
 	}
 
-	postState := config == nil || config.TxIndex == nil || isLatest
+	postState := config == nil || config.TxIndex == nil
 	if postState {
 		err = api.BaseAPI.checkPruneState(ctx, dbtx, blockNumber)
 	} else {
@@ -471,7 +471,7 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 		}
 	}
 
-	postState := simulateContext.TransactionIndex == nil || *simulateContext.TransactionIndex == -1 || isLatest
+	postState := simulateContext.TransactionIndex == nil || *simulateContext.TransactionIndex == -1
 	if postState {
 		err = api.BaseAPI.checkPruneState(ctx, tx, blockNum)
 	} else {

@@ -24,6 +24,8 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -55,7 +57,7 @@ type testBlob struct {
 
 // newTestBlob returns a distinct valid blob with its commitment and the proofs a block request
 // carries for it: one blob proof before Fulu, one proof per cell from Fulu on.
-func newTestBlob(t *testing.T, seed byte, version clparams.StateVersion) testBlob {
+func newTestBlob(t testing.TB, seed byte, version clparams.StateVersion) testBlob {
 	t.Helper()
 	blob := &cltypes.Blob{}
 	blob[31] = seed // last byte of the first field element keeps it below the modulus
@@ -69,6 +71,14 @@ func newTestBlob(t *testing.T, seed byte, version clparams.StateVersion) testBlo
 	proof, err := kzg.Ctx().ComputeBlobKZGProof((*goethkzg.Blob)(blob), commitment, 0)
 	require.NoError(t, err)
 	return testBlob{blob: blob, commitment: cltypes.KZGCommitment(commitment), proofs: []cltypes.KZGProof{cltypes.KZGProof(proof)}}
+}
+
+func bundleOf(b testBlob) BlobBundle {
+	proofs := make([]common.Bytes48, len(b.proofs))
+	for i := range proofs {
+		proofs[i] = common.Bytes48(b.proofs[i])
+	}
+	return BlobBundle{Commitment: common.Bytes48(b.commitment), Blob: b.blob, KzgProofs: proofs}
 }
 
 func newRequestBlock(cfg *clparams.BeaconChainConfig, version clparams.StateVersion, slot uint64, blobs ...testBlob) *cltypes.DenebSignedBeaconBlock {
@@ -327,6 +337,73 @@ func TestRequestBlobBundlesLeavesMissingBlockToValidation(t *testing.T) {
 	require.Nil(t, bundles)
 }
 
+func newCellProofBundles(t testing.TB, n int) []BlobBundle {
+	t.Helper()
+	bundles := make([]BlobBundle, n)
+	for i := range bundles {
+		bundles[i] = bundleOf(newTestBlob(t, byte(i+1), clparams.FuluVersion))
+	}
+	return bundles
+}
+
+func TestVerifyBlobBundlesRejectsBadProofInLastBlob(t *testing.T) {
+	bundles := newCellProofBundles(t, 4)
+	require.NoError(t, verifyBlobBundles(bundles, true))
+
+	bundles[len(bundles)-1].KzgProofs[7] = bundles[0].KzgProofs[7]
+
+	require.Error(t, verifyBlobBundles(bundles, true))
+}
+
+func TestVerifyBlobBundlesKeepsCellsOnEveryBundle(t *testing.T) {
+	bundles := newCellProofBundles(t, 4)
+
+	require.NoError(t, verifyBlobBundles(bundles, true))
+
+	for i := range bundles {
+		want, err := peerdasutils.ComputeCells(bundles[i].Blob)
+		require.NoError(t, err)
+		require.True(t, slices.Equal(want, bundles[i].Cells), "bundle %d must keep its verified cells", i)
+	}
+}
+
+func TestVerifyBlobBundlesRejectsInvalidBlobInLaterBundle(t *testing.T) {
+	bundles := newCellProofBundles(t, 4)
+	bundles[2].Blob = &cltypes.Blob{0xff} // not a canonical field element
+
+	require.ErrorContains(t, verifyBlobBundles(bundles, true), "not canonical")
+}
+
+func TestVerifyBlobBundlesSkipsUnstartedBlobsAfterFailure(t *testing.T) {
+	defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(1))
+	bundles := newCellProofBundles(t, 3)
+	bundles[0].Blob = &cltypes.Blob{0xff} // not a canonical field element
+
+	require.ErrorContains(t, verifyBlobBundles(bundles, true), "not canonical")
+
+	for i := 1; i < len(bundles); i++ {
+		require.Zero(t, len(bundles[i].Cells), "bundle %d must not be verified after an earlier failure", i)
+	}
+}
+
+func TestVerifyBlobBundlesRejectsProofCountOtherThanCellCount(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		resize func([]common.Bytes48) []common.Bytes48
+	}{
+		{"no proofs", func([]common.Bytes48) []common.Bytes48 { return nil }},
+		{"fewer proofs", func(p []common.Bytes48) []common.Bytes48 { return p[:len(p)-1] }},
+		{"more proofs", func(p []common.Bytes48) []common.Bytes48 { return append(slices.Clone(p), common.Bytes48{}) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bundles := newCellProofBundles(t, 3)
+			bundles[1].KzgProofs = tc.resize(bundles[1].KzgProofs)
+
+			require.ErrorContains(t, verifyBlobBundles(bundles, true), "proofs")
+		})
+	}
+}
+
 func TestCollectPublishedPayloadDataReusesCachedCells(t *testing.T) {
 	commitment := cltypes.KZGCommitment{1}
 	commitments := solid.NewStaticListSSZ[*cltypes.KZGCommitment](1, 48)
@@ -386,6 +463,11 @@ func newPublishingHandler(t *testing.T, forkVersion clparams.StateVersion, valid
 	published := &publishedGossip{topics: map[string][]byte{}}
 	gossipManager := gossip_mock.NewMockGossip(ctrl)
 	gossipManager.EXPECT().Publish(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(published.record).AnyTimes()
+	gossipManager.EXPECT().PublishToForkDigest(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+		func(ctx context.Context, _ common.Bytes4, topic string, data []byte) error {
+			return published.record(ctx, topic, data)
+		},
+	).AnyTimes()
 	handler.gossipManager = gossipManager
 	return handler, published
 }
