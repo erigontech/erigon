@@ -113,7 +113,7 @@ func (a *Accumulator) HasAccountChange(address common.Address) bool {
 // ChangeAccount adds modification of account balance or nonce (or both) to the latest change.
 func (a *Accumulator) ChangeAccount(address common.Address, incarnation uint64, data []byte) {
 	i, ok := a.accountChangeIndex[address]
-	if !ok || incarnation > a.latestChange.Changes[i].Incarnation {
+	if !ok || a.latestChange.Changes[i].Action == ActionRemove || incarnation > a.latestChange.Changes[i].Incarnation {
 		i = len(a.latestChange.Changes)
 		a.latestChange.Changes = append(a.latestChange.Changes, AccountChange{Address: address})
 		a.accountChangeIndex[address] = i
@@ -121,7 +121,7 @@ func (a *Accumulator) ChangeAccount(address common.Address, incarnation uint64, 
 	}
 	accountChange := &a.latestChange.Changes[i]
 	switch accountChange.Action {
-	case ActionStorage, ActionRemove:
+	case ActionStorage:
 		accountChange.Action = ActionUpsert
 	case ActionCode:
 		accountChange.Action = ActionUpsertCode
@@ -130,7 +130,8 @@ func (a *Accumulator) ChangeAccount(address common.Address, incarnation uint64, 
 	accountChange.Data = data
 }
 
-// DeleteAccount marks account as deleted.
+// DeleteAccount invalidates the account and all its storage. Later recreation must
+// keep the removal as a separate change so consumers also drop untouched slots.
 func (a *Accumulator) DeleteAccount(address common.Address) {
 	i, ok := a.accountChangeIndex[address]
 	if !ok {
@@ -149,7 +150,7 @@ func (a *Accumulator) DeleteAccount(address common.Address) {
 // ChangeCode adds code to the latest change.
 func (a *Accumulator) ChangeCode(address common.Address, incarnation uint64, code []byte) {
 	i, ok := a.accountChangeIndex[address]
-	if !ok || incarnation > a.latestChange.Changes[i].Incarnation {
+	if !ok || a.latestChange.Changes[i].Action == ActionRemove || incarnation > a.latestChange.Changes[i].Incarnation {
 		i = len(a.latestChange.Changes)
 		a.latestChange.Changes = append(a.latestChange.Changes, AccountChange{Address: address, Action: ActionCode})
 		a.accountChangeIndex[address] = i
@@ -157,7 +158,7 @@ func (a *Accumulator) ChangeCode(address common.Address, incarnation uint64, cod
 	}
 	accountChange := &a.latestChange.Changes[i]
 	switch accountChange.Action {
-	case ActionStorage, ActionRemove:
+	case ActionStorage:
 		accountChange.Action = ActionCode
 	case ActionUpsert:
 		accountChange.Action = ActionUpsertCode
@@ -169,7 +170,7 @@ func (a *Accumulator) ChangeCode(address common.Address, incarnation uint64, cod
 // ChangeStorage adds a storage slot change to the latest change.
 func (a *Accumulator) ChangeStorage(address common.Address, incarnation uint64, location common.Hash, data []byte) {
 	i, ok := a.accountChangeIndex[address]
-	if !ok || incarnation > a.latestChange.Changes[i].Incarnation {
+	if !ok || a.latestChange.Changes[i].Action == ActionRemove || incarnation > a.latestChange.Changes[i].Incarnation {
 		i = len(a.latestChange.Changes)
 		a.latestChange.Changes = append(a.latestChange.Changes, AccountChange{Address: address, Action: ActionStorage})
 		a.accountChangeIndex[address] = i

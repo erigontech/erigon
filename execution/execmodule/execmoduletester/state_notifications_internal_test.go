@@ -199,3 +199,108 @@ func TestForkchoiceReportsAccountDeletion(t *testing.T) {
 		return nil
 	}))
 }
+
+func TestForkchoiceInvalidatesDeletedStorage(t *testing.T) {
+	for _, sameBlockRefund := range []bool{false, true} {
+		name := "later_refund"
+		if sameBlockRefund {
+			name = "same_block_refund"
+		}
+		t.Run(name, func(t *testing.T) {
+			key, err := crypto.GenerateKey()
+			require.NoError(t, err)
+			sender := crypto.PubkeyToAddress(key.PublicKey)
+			cfg := *chain.AllProtocolChanges
+			cfg.CancunTime, cfg.PragueTime, cfg.OsakaTime, cfg.AmsterdamTime = nil, nil, nil, nil
+			m := New(t, WithKey(key), WithoutExperimentalBAL(), WithGenesisSpec(&types.Genesis{
+				Config: &cfg,
+				Alloc:  types.GenesisAlloc{sender: {Balance: big.NewInt(1e18)}},
+			}))
+			signer := *types.LatestSignerForChainID(m.ChainConfig.ChainID)
+			sign := func(tx types.Transaction) types.Transaction {
+				signed, err := types.SignTx(tx, signer, key)
+				require.NoError(t, err)
+				return signed
+			}
+			address := types.CreateAddress(sender, 0)
+			gasPrice := uint256.NewInt(m.Genesis.BaseFee().Uint64() * 2)
+			refund := sign(types.NewTransaction(2, address, uint256.NewInt(1), 21_000, gasPrice, nil))
+			blocks, err := m.GenerateChain(3, func(i int, b *blockgen.BlockGen) {
+				switch i {
+				case 0:
+					// The constructor fills two slots; the runtime overwrites only slot 0 before SELFDESTRUCT.
+					init := common.FromHex("600160005560026001556007601660003960076000f3600360005533ff")
+					b.AddTx(sign(types.NewContractCreation(0, uint256.NewInt(0), 300_000, gasPrice, init)))
+				case 1:
+					b.AddTx(sign(types.NewTransaction(1, address, uint256.NewInt(0), 100_000, gasPrice, nil)))
+					if sameBlockRefund {
+						b.AddTx(refund)
+					}
+				case 2:
+					if !sameBlockRefund {
+						b.AddTx(refund)
+					}
+				}
+			})
+			require.NoError(t, err)
+			for _, receipts := range blocks.Receipts {
+				for _, receipt := range receipts {
+					require.Equal(t, types.ReceiptStatusSuccessful, receipt.Status)
+				}
+			}
+			waitForHead := subscribeStateChangeHeads(t, m)
+			cache := kvcache.New(kvcache.DefaultCoherentConfig)
+			var previousVersion uint64
+			selectHead := func(block *types.Block, storagePresent bool) {
+				t.Helper()
+				result, err := m.UpdateForkChoice(t.Context(), block.Header())
+				require.NoError(t, err)
+				require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status)
+				m.ExecModule.WaitIdle(t.Context())
+				batch := waitForHead(block.Hash())
+				if previousVersion != 0 {
+					require.Equal(t, previousVersion+1, batch.StateVersionId, "cache generations must stay connected")
+				}
+				previousVersion = batch.StateVersionId
+				cache.OnNewBlock(batch)
+				require.NoError(t, m.DB.ViewTemporal(t.Context(), func(tx kv.TemporalTx) error {
+					view, err := cache.View(t.Context(), tx)
+					require.NoError(t, err)
+					account, _, err := tx.GetLatest(kv.AccountsDomain, address[:], kv.GetLatestOptions{})
+					require.NoError(t, err)
+					if block.NumberU64() == 2 && !sameBlockRefund {
+						require.Empty(t, account)
+					} else {
+						require.NotEmpty(t, account)
+					}
+					cachedAccount, err := view.Get(address[:])
+					require.NoError(t, err)
+					require.True(t, bytes.Equal(account, cachedAccount), "account: stored %x cached %x", account, cachedAccount)
+					for slot := range 2 {
+						location := common.Hash{31: byte(slot)}
+						storageKey := append(bytes.Clone(address[:]), location[:]...)
+						stored, _, err := tx.GetLatest(kv.StorageDomain, storageKey, kv.GetLatestOptions{})
+						require.NoError(t, err)
+						if storagePresent {
+							require.Equal(t, []byte{byte(slot + 1)}, stored)
+						} else {
+							require.Empty(t, stored)
+						}
+						cached, err := view.Get(storageKey)
+						require.NoError(t, err)
+						require.True(t, bytes.Equal(stored, cached), "head %d slot %d: stored %x cached %x", block.NumberU64(), slot, stored, cached)
+					}
+					return nil
+				}))
+			}
+			for i, block := range blocks.Blocks {
+				status, err := m.InsertBlocks(t.Context(), []*types.Block{block})
+				require.NoError(t, err)
+				require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+				selectHead(block, i == 0)
+			}
+			selectHead(blocks.Blocks[0], true)
+			selectHead(blocks.TopBlock, false)
+		})
+	}
+}

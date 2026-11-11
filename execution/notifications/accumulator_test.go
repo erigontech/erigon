@@ -66,22 +66,23 @@ func TestAccumulatorDeleteAccount(t *testing.T) {
 
 func TestAccumulatorRecreateAccount(t *testing.T) {
 	for _, incarnation := range []uint64{0, 1} {
-		for _, codeFirst := range []bool{false, true} {
-			t.Run(fmt.Sprintf("incarnation_%d/code_first_%t", incarnation, codeFirst), func(t *testing.T) {
+		for _, first := range []Action{ActionUpsert, ActionCode, ActionStorage} {
+			t.Run(fmt.Sprintf("incarnation_%d/first_%d", incarnation, first), func(t *testing.T) {
 				a := NewAccumulator()
 				address, slot := common.Address{1}, common.Hash{2}
 				a.StartChange(&types.Header{}, nil, false)
 				a.ChangeStorage(address, 1, slot, []byte{3})
 				a.DeleteAccount(address)
-				if codeFirst {
+				switch first {
+				case ActionCode:
 					a.ChangeCode(address, incarnation, []byte{4})
+				case ActionStorage:
+					a.ChangeStorage(address, incarnation, slot, []byte{6})
 				}
 				a.ChangeAccount(address, incarnation, []byte{5})
-				if !codeFirst {
-					a.ChangeCode(address, incarnation, []byte{4})
-				}
+				a.ChangeCode(address, incarnation, []byte{4})
 				a.ChangeStorage(address, incarnation, slot, []byte{6})
-				require.Equal(t, []AccountChange{{
+				require.Equal(t, []AccountChange{{Address: address, Incarnation: 1, Action: ActionRemove}, {
 					Address: address, Incarnation: incarnation, Action: ActionUpsertCode,
 					Data: []byte{5}, Code: []byte{4},
 					StorageChanges: []StorageChange{{Location: slot, Data: []byte{6}}},

@@ -660,7 +660,7 @@ func (rs *StateV3) NotifyAccumulator(accumulator *shards.Accumulator, roTx kv.Te
 		return &acc, nil
 	}
 
-	// Every call for an address carries its final state, so a repeat would change nothing.
+	// Account fields are final for the block; deduplicate them until a removal resets the change.
 	changed := make(map[accounts.Address]struct{}, len(blockWrites))
 	changeAccount := func(addr accounts.Address) error {
 		if _, ok := changed[addr]; ok {
@@ -715,6 +715,17 @@ func (rs *StateV3) NotifyAccumulator(accumulator *shards.Accumulator, roTx kv.Te
 			}
 		}
 		for addr := range keys.Nonces() {
+			if err := changeAccount(addr); err != nil {
+				return err
+			}
+		}
+		for addr, write := range writes.SelfDestructs() {
+			if !write.Val {
+				continue
+			}
+			// A removal clears storage even if a later transaction recreates the account.
+			accumulator.DeleteAccount(addr.Value())
+			delete(changed, addr)
 			if err := changeAccount(addr); err != nil {
 				return err
 			}
