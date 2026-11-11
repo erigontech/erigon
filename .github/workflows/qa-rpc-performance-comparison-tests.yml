@@ -138,7 +138,6 @@ jobs:
       NETWORK: ${{ needs.setup.outputs.network }}
       ERIGON_TESTBED_DATA_DIR: /opt/erigon-testbed/datadir
       TOTAL_TIME_SECONDS: 1200 # 20 minutes
-      SYNC_TIMEOUT_SECONDS: 900 # 15 minutes: a client waits for the slowest one on the previous pattern
       CLIENT_INSTALL_DIR: ${{ matrix.install_dir }}
       CLIENT: ${{ matrix.client }}
       REMOTES: ${{ matrix.remotes }}
@@ -498,11 +497,7 @@ jobs:
             echo "RUNNER_WS=$RUNNER_WS"
           } >> "$GITHUB_ENV"
 
-      # A failed load pattern does not stop the next ones, and neither does a failed sync between clients:
-      # a client that dies or hangs must not cost the others the remaining patterns. Each pattern step has its
-      # own timeout and each sync waits at most SYNC_TIMEOUT_SECONDS. After the first failed sync the later ones
-      # are skipped and the remaining patterns run unsynced, so a dead client costs a single sync timeout.
-      # unsynced.txt lists those patterns, and the comparison marks them as not comparable.
+      # A failed load pattern does not stop the next ones; a failed sync between clients stops the benchmark.
       # Each pattern starts on the same block in all clients, otherwise a saturated client runs the later patterns on a newer chain head.
       - name: Run mixed
         id: perf_mixed
@@ -513,17 +508,8 @@ jobs:
 
       - name: Sync clients before trace_block_call_tracer
         if: needs.setup.outputs.coordinated == 'true' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'trace_block_call_tracer')
-        continue-on-error: true
         working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
-        run: |
-          if [ "${SYNC_FAILED:-}" = true ]; then
-            echo "trace_block_call_tracer sync-skipped" >> "$PAST_TEST_DIR/unsynced.txt"
-            echo "::warning::A previous sync failed: running unsynced"; exit 0
-          fi
-          python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID-trace_block_call_tracer" --chain "$NETWORK" --deadline-timeout "$SYNC_TIMEOUT_SECONDS" || {
-            echo "trace_block_call_tracer sync-failed" >> "$PAST_TEST_DIR/unsynced.txt"
-            echo "SYNC_FAILED=true" >> "$GITHUB_ENV"; exit 1
-          }
+        run: python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID-trace_block_call_tracer" --chain "$NETWORK"
 
       # The traces (blocks=32) follow mixed at a low rate, while their blocks are still inside the recent state.
       - name: Run trace_block_call_tracer
@@ -535,17 +521,8 @@ jobs:
 
       - name: Sync clients before trace_block_struct_log
         if: needs.setup.outputs.coordinated == 'true' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'trace_block_struct_log')
-        continue-on-error: true
         working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
-        run: |
-          if [ "${SYNC_FAILED:-}" = true ]; then
-            echo "trace_block_struct_log sync-skipped" >> "$PAST_TEST_DIR/unsynced.txt"
-            echo "::warning::A previous sync failed: running unsynced"; exit 0
-          fi
-          python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID-trace_block_struct_log" --chain "$NETWORK" --deadline-timeout "$SYNC_TIMEOUT_SECONDS" || {
-            echo "trace_block_struct_log sync-failed" >> "$PAST_TEST_DIR/unsynced.txt"
-            echo "SYNC_FAILED=true" >> "$GITHUB_ENV"; exit 1
-          }
+        run: python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID-trace_block_struct_log" --chain "$NETWORK"
 
       - name: Run trace_block_struct_log
         id: perf_trace_block_struct_log
@@ -556,17 +533,8 @@ jobs:
 
       - name: Sync clients before eth_call_gen
         if: needs.setup.outputs.coordinated == 'true' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_call_gen')
-        continue-on-error: true
         working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
-        run: |
-          if [ "${SYNC_FAILED:-}" = true ]; then
-            echo "eth_call_gen sync-skipped" >> "$PAST_TEST_DIR/unsynced.txt"
-            echo "::warning::A previous sync failed: running unsynced"; exit 0
-          fi
-          python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID-eth_call_gen" --chain "$NETWORK" --deadline-timeout "$SYNC_TIMEOUT_SECONDS" || {
-            echo "eth_call_gen sync-failed" >> "$PAST_TEST_DIR/unsynced.txt"
-            echo "SYNC_FAILED=true" >> "$GITHUB_ENV"; exit 1
-          }
+        run: python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID-eth_call_gen" --chain "$NETWORK"
 
       - name: Run eth_call_gen
         id: perf_eth_call_gen
@@ -577,17 +545,8 @@ jobs:
 
       - name: Sync clients before eth_createAccessList_gen
         if: needs.setup.outputs.coordinated == 'true' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_createAccessList_gen')
-        continue-on-error: true
         working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
-        run: |
-          if [ "${SYNC_FAILED:-}" = true ]; then
-            echo "eth_createAccessList_gen sync-skipped" >> "$PAST_TEST_DIR/unsynced.txt"
-            echo "::warning::A previous sync failed: running unsynced"; exit 0
-          fi
-          python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID-eth_createAccessList_gen" --chain "$NETWORK" --deadline-timeout "$SYNC_TIMEOUT_SECONDS" || {
-            echo "eth_createAccessList_gen sync-failed" >> "$PAST_TEST_DIR/unsynced.txt"
-            echo "SYNC_FAILED=true" >> "$GITHUB_ENV"; exit 1
-          }
+        run: python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID-eth_createAccessList_gen" --chain "$NETWORK"
 
       - name: Run eth_createAccessList_gen
         id: perf_eth_createAccessList_gen
@@ -598,17 +557,8 @@ jobs:
 
       - name: Sync clients before eth_getLogs_gen
         if: needs.setup.outputs.coordinated == 'true' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getLogs_gen')
-        continue-on-error: true
         working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
-        run: |
-          if [ "${SYNC_FAILED:-}" = true ]; then
-            echo "eth_getLogs_gen sync-skipped" >> "$PAST_TEST_DIR/unsynced.txt"
-            echo "::warning::A previous sync failed: running unsynced"; exit 0
-          fi
-          python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID-eth_getLogs_gen" --chain "$NETWORK" --deadline-timeout "$SYNC_TIMEOUT_SECONDS" || {
-            echo "eth_getLogs_gen sync-failed" >> "$PAST_TEST_DIR/unsynced.txt"
-            echo "SYNC_FAILED=true" >> "$GITHUB_ENV"; exit 1
-          }
+        run: python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID-eth_getLogs_gen" --chain "$NETWORK"
 
       - name: Run eth_getLogs_gen
         id: perf_eth_getLogs_gen
@@ -619,17 +569,8 @@ jobs:
 
       - name: Sync clients before eth_getLogs_head
         if: needs.setup.outputs.coordinated == 'true' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getLogs_head')
-        continue-on-error: true
         working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
-        run: |
-          if [ "${SYNC_FAILED:-}" = true ]; then
-            echo "eth_getLogs_head sync-skipped" >> "$PAST_TEST_DIR/unsynced.txt"
-            echo "::warning::A previous sync failed: running unsynced"; exit 0
-          fi
-          python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID-eth_getLogs_head" --chain "$NETWORK" --deadline-timeout "$SYNC_TIMEOUT_SECONDS" || {
-            echo "eth_getLogs_head sync-failed" >> "$PAST_TEST_DIR/unsynced.txt"
-            echo "SYNC_FAILED=true" >> "$GITHUB_ENV"; exit 1
-          }
+        run: python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID-eth_getLogs_head" --chain "$NETWORK"
 
       - name: Run eth_getLogs_head
         id: perf_eth_getLogs_head
@@ -640,17 +581,8 @@ jobs:
 
       - name: Sync clients before eth_getLogs_topics
         if: needs.setup.outputs.coordinated == 'true' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getLogs_topics')
-        continue-on-error: true
         working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
-        run: |
-          if [ "${SYNC_FAILED:-}" = true ]; then
-            echo "eth_getLogs_topics sync-skipped" >> "$PAST_TEST_DIR/unsynced.txt"
-            echo "::warning::A previous sync failed: running unsynced"; exit 0
-          fi
-          python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID-eth_getLogs_topics" --chain "$NETWORK" --deadline-timeout "$SYNC_TIMEOUT_SECONDS" || {
-            echo "eth_getLogs_topics sync-failed" >> "$PAST_TEST_DIR/unsynced.txt"
-            echo "SYNC_FAILED=true" >> "$GITHUB_ENV"; exit 1
-          }
+        run: python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID-eth_getLogs_topics" --chain "$NETWORK"
 
       - name: Run eth_getLogs_topics
         id: perf_eth_getLogs_topics
@@ -661,17 +593,8 @@ jobs:
 
       - name: Sync clients before eth_getLogs_wide
         if: needs.setup.outputs.coordinated == 'true' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getLogs_wide')
-        continue-on-error: true
         working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
-        run: |
-          if [ "${SYNC_FAILED:-}" = true ]; then
-            echo "eth_getLogs_wide sync-skipped" >> "$PAST_TEST_DIR/unsynced.txt"
-            echo "::warning::A previous sync failed: running unsynced"; exit 0
-          fi
-          python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID-eth_getLogs_wide" --chain "$NETWORK" --deadline-timeout "$SYNC_TIMEOUT_SECONDS" || {
-            echo "eth_getLogs_wide sync-failed" >> "$PAST_TEST_DIR/unsynced.txt"
-            echo "SYNC_FAILED=true" >> "$GITHUB_ENV"; exit 1
-          }
+        run: python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID-eth_getLogs_wide" --chain "$NETWORK"
 
       - name: Run eth_getLogs_wide
         id: perf_eth_getLogs_wide
@@ -682,17 +605,8 @@ jobs:
 
       - name: Sync clients before eth_getLogs_latest
         if: needs.setup.outputs.coordinated == 'true' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getLogs_latest')
-        continue-on-error: true
         working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
-        run: |
-          if [ "${SYNC_FAILED:-}" = true ]; then
-            echo "eth_getLogs_latest sync-skipped" >> "$PAST_TEST_DIR/unsynced.txt"
-            echo "::warning::A previous sync failed: running unsynced"; exit 0
-          fi
-          python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID-eth_getLogs_latest" --chain "$NETWORK" --deadline-timeout "$SYNC_TIMEOUT_SECONDS" || {
-            echo "eth_getLogs_latest sync-failed" >> "$PAST_TEST_DIR/unsynced.txt"
-            echo "SYNC_FAILED=true" >> "$GITHUB_ENV"; exit 1
-          }
+        run: python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID-eth_getLogs_latest" --chain "$NETWORK"
 
       - name: Run eth_getLogs_latest
         id: perf_eth_getLogs_latest
@@ -703,17 +617,8 @@ jobs:
 
       - name: Sync clients before eth_getBlockReceipts_latest
         if: needs.setup.outputs.coordinated == 'true' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getBlockReceipts_latest')
-        continue-on-error: true
         working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
-        run: |
-          if [ "${SYNC_FAILED:-}" = true ]; then
-            echo "eth_getBlockReceipts_latest sync-skipped" >> "$PAST_TEST_DIR/unsynced.txt"
-            echo "::warning::A previous sync failed: running unsynced"; exit 0
-          fi
-          python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID-eth_getBlockReceipts_latest" --chain "$NETWORK" --deadline-timeout "$SYNC_TIMEOUT_SECONDS" || {
-            echo "eth_getBlockReceipts_latest sync-failed" >> "$PAST_TEST_DIR/unsynced.txt"
-            echo "SYNC_FAILED=true" >> "$GITHUB_ENV"; exit 1
-          }
+        run: python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID-eth_getBlockReceipts_latest" --chain "$NETWORK"
 
       - name: Run eth_getBlockReceipts_latest
         id: perf_eth_getBlockReceipts_latest
@@ -724,17 +629,8 @@ jobs:
 
       - name: Sync clients before eth_getBlockByNumber_latest
         if: needs.setup.outputs.coordinated == 'true' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getBlockByNumber_latest')
-        continue-on-error: true
         working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
-        run: |
-          if [ "${SYNC_FAILED:-}" = true ]; then
-            echo "eth_getBlockByNumber_latest sync-skipped" >> "$PAST_TEST_DIR/unsynced.txt"
-            echo "::warning::A previous sync failed: running unsynced"; exit 0
-          fi
-          python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID-eth_getBlockByNumber_latest" --chain "$NETWORK" --deadline-timeout "$SYNC_TIMEOUT_SECONDS" || {
-            echo "eth_getBlockByNumber_latest sync-failed" >> "$PAST_TEST_DIR/unsynced.txt"
-            echo "SYNC_FAILED=true" >> "$GITHUB_ENV"; exit 1
-          }
+        run: python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID-eth_getBlockByNumber_latest" --chain "$NETWORK"
 
       - name: Run eth_getBlockByNumber_latest
         id: perf_eth_getBlockByNumber_latest
@@ -745,17 +641,8 @@ jobs:
 
       - name: Sync clients before eth_getBlockReceipts_gen
         if: needs.setup.outputs.coordinated == 'true' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getBlockReceipts_gen')
-        continue-on-error: true
         working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
-        run: |
-          if [ "${SYNC_FAILED:-}" = true ]; then
-            echo "eth_getBlockReceipts_gen sync-skipped" >> "$PAST_TEST_DIR/unsynced.txt"
-            echo "::warning::A previous sync failed: running unsynced"; exit 0
-          fi
-          python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID-eth_getBlockReceipts_gen" --chain "$NETWORK" --deadline-timeout "$SYNC_TIMEOUT_SECONDS" || {
-            echo "eth_getBlockReceipts_gen sync-failed" >> "$PAST_TEST_DIR/unsynced.txt"
-            echo "SYNC_FAILED=true" >> "$GITHUB_ENV"; exit 1
-          }
+        run: python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID-eth_getBlockReceipts_gen" --chain "$NETWORK"
 
       - name: Run eth_getBlockReceipts_gen
         id: perf_eth_getBlockReceipts_gen
@@ -766,17 +653,8 @@ jobs:
 
       - name: Sync clients before eth_getBlockByNumber_gen
         if: needs.setup.outputs.coordinated == 'true' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getBlockByNumber_gen')
-        continue-on-error: true
         working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
-        run: |
-          if [ "${SYNC_FAILED:-}" = true ]; then
-            echo "eth_getBlockByNumber_gen sync-skipped" >> "$PAST_TEST_DIR/unsynced.txt"
-            echo "::warning::A previous sync failed: running unsynced"; exit 0
-          fi
-          python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID-eth_getBlockByNumber_gen" --chain "$NETWORK" --deadline-timeout "$SYNC_TIMEOUT_SECONDS" || {
-            echo "eth_getBlockByNumber_gen sync-failed" >> "$PAST_TEST_DIR/unsynced.txt"
-            echo "SYNC_FAILED=true" >> "$GITHUB_ENV"; exit 1
-          }
+        run: python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID-eth_getBlockByNumber_gen" --chain "$NETWORK"
 
       - name: Run eth_getBlockByNumber_gen
         id: perf_eth_getBlockByNumber_gen
@@ -822,19 +700,10 @@ jobs:
           if [ "$result" = "incomplete" ]; then
             if [ "$JOB_STATUS" = "cancelled" ]; then result=cancelled; else result=failure; fi
           fi
-          # Patterns run after a failed sync are not comparable between clients, but no client failed them:
-          # warn instead of failing, as a failed job would signal an error to the clients still running
-          unsynced_file="$PAST_TEST_DIR/unsynced.txt"
-          if [ -s "$unsynced_file" ]; then
-            unsynced=$(awk '{printf "%s%s (%s)", (NR > 1 ? ", " : ""), $1, $2}' "$unsynced_file")
-            echo "UNSYNCED=$unsynced" >> "$GITHUB_OUTPUT"
-            echo "::warning::Patterns run without sync between clients, latencies not comparable: $unsynced"
-            if [ "$result" = "success" ]; then result=unsynced; fi
-          fi
           echo "TEST_RESULT=$result" >> "$GITHUB_OUTPUT"
 
           case "$result" in
-            success|unsynced)
+            success)
               echo "Tests completed successfully" ;;
             cancelled)
               echo "::notice::Benchmark cancelled before all the load patterns ran" ;;
@@ -848,7 +717,6 @@ jobs:
         env:
           WORKFLOW: ${{ github.workflow }}
           TEST_RESULT: ${{ steps.collect_results.outputs.TEST_RESULT }}
-          UNSYNCED: ${{ steps.collect_results.outputs.UNSYNCED }}
         run: |
           SUMMARY_FILE="$RESULT_DIR/summary.md"
           LOG_FILE="$RESULT_DIR/output.log"
@@ -861,7 +729,6 @@ jobs:
             echo "- **Client:** $CLIENT"
             echo "- **RPC test:** $RPC_TEST"
             echo "- **Result:** $TEST_RESULT"
-            if [ -n "$UNSYNCED" ]; then echo "- **Unsynced patterns:** ⚠️ $UNSYNCED"; fi
             echo
             echo "<details><summary>Test Output</summary>"
             echo
