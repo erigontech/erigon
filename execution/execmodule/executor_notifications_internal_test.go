@@ -50,6 +50,13 @@ type failNthCommitDB struct {
 	err       error
 }
 
+type failedCommitTx struct {
+	kv.TemporalRwTx
+	err error
+}
+
+func (tx failedCommitTx) Commit() error { return tx.err }
+
 func (db *failNthCommitDB) BeginTemporalRw(ctx context.Context) (kv.TemporalRwTx, error) {
 	tx, err := db.TemporalRwDB.BeginTemporalRw(ctx) //nolint:gocritic // The caller owns the returned transaction.
 	if err != nil {

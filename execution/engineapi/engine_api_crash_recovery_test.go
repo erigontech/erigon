@@ -39,9 +39,9 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/testlog"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/execution/abi/bind"
@@ -91,13 +91,7 @@ type crashRecoveryState struct {
 	StateRoot       common.Hash
 	Domains         map[kv.Domain]map[string]string
 	TxLookup        map[string]string
-	History         map[kv.Domain][]crashRecoveryHistoryEntry
-}
-
-type crashRecoveryHistoryEntry struct {
-	Key    string
-	TxNum  uint64
-	Before string
+	History         map[kv.Domain][]temporaltest.HistoryEntry
 }
 
 type crashRecoveryChain struct {
@@ -343,7 +337,7 @@ func readCrashRecoveryTx(t *testing.T, tx kv.TemporalTx) crashRecoveryState {
 		StageProgress:  make(map[stages.SyncStage]uint64),
 		Domains:        make(map[kv.Domain]map[string]string),
 		TxLookup:       make(map[string]string),
-		History:        make(map[kv.Domain][]crashRecoveryHistoryEntry),
+		History:        make(map[kv.Domain][]temporaltest.HistoryEntry),
 	}
 	for block := uint64(0); block <= lastBlock; block++ {
 		state.Canonical[block], err = rawdb.ReadCanonicalHash(tx, block)
@@ -372,56 +366,16 @@ func readCrashRecoveryTx(t *testing.T, tx kv.TemporalTx) crashRecoveryState {
 	require.NotNil(t, header)
 	require.Equal(t, header.Root, state.StateRoot, "persisted commitment root must match its canonical header")
 	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain, kv.CommitmentDomain, kv.ReceiptDomain, kv.RCacheDomain} {
-		state.Domains[domain] = readCrashRecoveryDomain(t, tx, domain)
+		state.Domains[domain] = temporaltest.ReadDomain(t, tx, domain)
 	}
 	require.NoError(t, tx.ForEach(kv.TxLookup, nil, func(key, value []byte) error {
 		state.TxLookup[hex.EncodeToString(key)] = hex.EncodeToString(value)
 		return nil
 	}))
 	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain, kv.ReceiptDomain, kv.RCacheDomain} {
-		state.History[domain] = readCrashRecoveryHistory(t, tx, domain)
+		state.History[domain] = temporaltest.ReadHistory(t, tx, domain)
 	}
 	return state
-}
-
-func readCrashRecoveryDomain(t *testing.T, tx kv.TemporalTx, domain kv.Domain) map[string]string {
-	t.Helper()
-	entries, err := tx.Debug().RangeLatest(domain, nil, nil, kv.Unlim)
-	require.NoError(t, err)
-	defer entries.Close()
-	state := make(map[string]string)
-	for entries.HasNext() {
-		key, value, nextErr := entries.Next()
-		require.NoError(t, nextErr)
-		if len(value) != 0 {
-			state[hex.EncodeToString(key)] = hex.EncodeToString(value)
-		}
-	}
-	entries.Close()
-	return state
-}
-
-func readCrashRecoveryHistory(t *testing.T, tx kv.TemporalTx, domain kv.Domain) []crashRecoveryHistoryEntry {
-	t.Helper()
-	// An unbounded scan also catches history left above the recovered head.
-	entries, err := tx.Debug().HistoryKeyTxNumRange(domain, -1, -1, order.Asc, kv.Unlim)
-	require.NoError(t, err)
-	defer entries.Close()
-	var history []crashRecoveryHistoryEntry
-	for entries.HasNext() {
-		key, txNum, nextErr := entries.Next()
-		require.NoError(t, nextErr)
-		before, ok, readErr := tx.HistorySeek(domain, key, txNum)
-		require.NoError(t, readErr)
-		require.True(t, ok, "history index must have a matching value")
-		history = append(history, crashRecoveryHistoryEntry{
-			Key:    hex.EncodeToString(key),
-			TxNum:  txNum,
-			Before: hex.EncodeToString(before),
-		})
-	}
-	entries.Close()
-	return history
 }
 
 func assertCrashRecoveryState(t *testing.T, want, got crashRecoveryState) {

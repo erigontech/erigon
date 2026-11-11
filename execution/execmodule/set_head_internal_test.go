@@ -48,23 +48,6 @@ func (setHeadReader) CanonicalHash(_ context.Context, tx kv.Getter, number uint6
 	return hash, hash != (common.Hash{}), err
 }
 
-type failedCommitDB struct {
-	kv.TemporalRwDB
-	err error
-}
-
-type failedCommitTx struct {
-	kv.TemporalRwTx
-	err error
-}
-
-func (db failedCommitDB) BeginTemporalRw(ctx context.Context) (kv.TemporalRwTx, error) {
-	tx, err := db.TemporalRwDB.BeginTemporalRw(ctx)
-	return failedCommitTx{tx, db.err}, err
-}
-
-func (tx failedCommitTx) Commit() error { return tx.err }
-
 func TestSetHeadFailureRestoresPendingNotifications(t *testing.T) {
 	for _, failure := range []string{"unwind", "commit"} {
 		t.Run(failure, func(t *testing.T) {
@@ -96,7 +79,7 @@ func TestSetHeadFailureRestoresPendingNotifications(t *testing.T) {
 			}}
 			pipeline := stagedsync.New(rawdbv3.TxNums, ethconfig.Defaults.Sync, []*stagedsync.Stage{stage}, stagedsync.UnwindOrder{stage.ID}, nil, logger, stages.ModeApplyingBlocks)
 			module := &ExecModule{
-				db: failedCommitDB{db, cause}, blockReader: setHeadReader{},
+				db: &failNthCommitDB{TemporalRwDB: db, remaining: 1, err: cause}, blockReader: setHeadReader{},
 				semaphore: semaphore.NewWeighted(1), logger: logger,
 				pipelineExecutor: &PipelineExecutor{sync: pipeline},
 				accum:            &Accumulation{Accumulator: accum},

@@ -28,8 +28,8 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/abi"
@@ -260,12 +260,7 @@ type recoveryState struct {
 	TxNums    []uint64
 	Domains   map[kv.Domain]map[string]string
 	TxLookup  map[string]string
-	History   map[kv.Domain][]recoveryHistoryEntry
-}
-
-type recoveryHistoryEntry struct {
-	Key, Before string
-	TxNum       uint64
+	History   map[kv.Domain][]temporaltest.HistoryEntry
 }
 
 func readRecoveryState(t *testing.T, m *execmoduletester.ExecModuleTester) recoveryState {
@@ -303,7 +298,7 @@ func readRecoveryState(t *testing.T, m *execmoduletester.ExecModuleTester) recov
 	result := recoveryState{
 		Head: head, Canonical: make([]common.Hash, blockNum+1), TxNums: make([]uint64, blockNum+1),
 		Domains: make(map[kv.Domain]map[string]string), TxLookup: make(map[string]string),
-		History: make(map[kv.Domain][]recoveryHistoryEntry),
+		History: make(map[kv.Domain][]temporaltest.HistoryEntry),
 	}
 	for block := range result.Canonical {
 		result.Canonical[block], err = rawdb.ReadCanonicalHash(tx, uint64(block))
@@ -315,7 +310,7 @@ func readRecoveryState(t *testing.T, m *execmoduletester.ExecModuleTester) recov
 	require.NoError(t, err)
 	require.Zero(t, next, "canonical chain must end at the recovered head")
 	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain, kv.CommitmentDomain, kv.ReceiptDomain} {
-		result.Domains[domain] = readRecoveryDomain(t, tx, domain)
+		result.Domains[domain] = temporaltest.ReadDomain(t, tx, domain)
 		require.NotEmpty(t, result.Domains[domain], "%s latest state must be exercised", domain)
 	}
 	require.NoError(t, tx.ForEach(kv.TxLookup, nil, func(key, value []byte) error {
@@ -324,46 +319,10 @@ func readRecoveryState(t *testing.T, m *execmoduletester.ExecModuleTester) recov
 	}))
 	require.NotEmpty(t, result.TxLookup)
 	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain, kv.ReceiptDomain} {
-		result.History[domain] = readRecoveryHistory(t, tx, domain)
+		result.History[domain] = temporaltest.ReadHistory(t, tx, domain)
 		require.NotEmpty(t, result.History[domain], "%s history must be exercised", domain)
 	}
 	return result
-}
-
-func readRecoveryDomain(t *testing.T, tx kv.TemporalTx, domain kv.Domain) map[string]string {
-	t.Helper()
-	entries, err := tx.Debug().RangeLatest(domain, nil, nil, kv.Unlim)
-	require.NoError(t, err)
-	defer entries.Close()
-	values := make(map[string]string)
-	for entries.HasNext() {
-		key, value, err := entries.Next()
-		require.NoError(t, err)
-		if len(value) != 0 {
-			values[hex.EncodeToString(key)] = hex.EncodeToString(value)
-		}
-	}
-	return values
-}
-
-func readRecoveryHistory(t *testing.T, tx kv.TemporalTx, domain kv.Domain) []recoveryHistoryEntry {
-	t.Helper()
-	// Scan without an upper bound to detect history left above the head.
-	entries, err := tx.Debug().HistoryKeyTxNumRange(domain, -1, -1, order.Asc, kv.Unlim)
-	require.NoError(t, err)
-	defer entries.Close()
-	var history []recoveryHistoryEntry
-	for entries.HasNext() {
-		key, txNum, err := entries.Next()
-		require.NoError(t, err)
-		before, ok, err := tx.HistorySeek(domain, key, txNum)
-		require.NoError(t, err)
-		require.True(t, ok, "%s history index must have a value", domain)
-		history = append(history, recoveryHistoryEntry{
-			Key: hex.EncodeToString(key), Before: hex.EncodeToString(before), TxNum: txNum,
-		})
-	}
-	return history
 }
 
 func downloadRecoveryBlocks(t *testing.T, m *execmoduletester.ExecModuleTester, blocks []*types.Block) {
