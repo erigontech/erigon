@@ -39,8 +39,9 @@ on:
         type: string
         default: ""
 
+# Per event, so a push does not cancel a dispatched follower run.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 
 # Grants are per job. The called workflows require actions: write from their
