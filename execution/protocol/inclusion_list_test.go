@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
@@ -302,37 +303,60 @@ func TestCheckInclusionListTransactions_LeavesGasPoolUntouched(t *testing.T) {
 	require.Equal(t, params.GasPerBlob*params.MaxBlobsPerTxn, gp.BlobGas())
 }
 
-func TestCheckInclusionListTransactions_MissingContractApprovedFrameTxn(t *testing.T) {
-	t.Parallel()
-
+func ilFrameTxnSetup(code []byte, blobHashes []common.Hash) (*chain.Config, *ilStateReader, *types.FrameTransaction) {
 	cfg := chain.AllProtocolChanges.Copy()
 	cfg.BogotaTime = common.NewUint64(0)
 	sender := common.HexToAddress("0x1000")
 	reader := newILStateReader()
 	reader.setBalance(accounts.InternAddress(sender), *uint256.NewInt(10_000_000))
-	// PUSH1 3, PUSH0, PUSH0, APPROVE: approves execution and payment.
-	reader.setCode(accounts.InternAddress(sender), []byte{0x60, 3, 0x5f, 0x5f, 0xaa})
+	if code != nil {
+		reader.setCode(accounts.InternAddress(sender), code)
+	}
 	txn := &types.FrameTransaction{
 		NonceKeys: []uint256.Int{{}}, ChainID: *cfg.ChainID, SenderAddress: sender,
-		Frames: []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}}},
+		Frames:              []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 50_000}}},
+		BlobVersionedHashes: blobHashes,
 	}
-
-	require.False(t, ilCheck(t, reader, cfg, ilGasPool(), nil, types.Transactions{txn}))
+	return cfg, reader, txn
 }
 
-func TestCheckInclusionListTransactions_MissingUnapprovedFrameTxnIsInvalid(t *testing.T) {
+func TestCheckInclusionListTransactions_MissingFrameTxn(t *testing.T) {
 	t.Parallel()
 
-	cfg := chain.AllProtocolChanges.Copy()
-	cfg.BogotaTime = common.NewUint64(0)
-	sender := common.HexToAddress("0x1000")
-	reader := newILStateReader()
-	reader.setBalance(accounts.InternAddress(sender), *uint256.NewInt(10_000_000))
-	// The sender is an EOA, so its VERIFY frame needs a signature the txn lacks.
-	txn := &types.FrameTransaction{
-		NonceKeys: []uint256.Int{{}}, ChainID: *cfg.ChainID, SenderAddress: sender,
-		Frames: []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}}},
+	// PUSH1 3, PUSH0, PUSH0, APPROVE: approves execution and payment.
+	approveBoth := []byte{0x60, 3, 0x5f, 0x5f, 0xaa}
+	tests := []struct {
+		name          string
+		code          []byte
+		blobHashes    []common.Hash
+		wantSatisfied bool
+	}{
+		{name: "contract-approved", code: approveBoth, wantSatisfied: false},
+		// An EOA sender's VERIFY frame needs a signature the txn lacks.
+		{name: "unapproved EOA", wantSatisfied: true},
+		{name: "blob-carrying is skipped", code: approveBoth, blobHashes: []common.Hash{{0x01}}, wantSatisfied: true},
 	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			cfg, reader, txn := ilFrameTxnSetup(tt.code, tt.blobHashes)
+			require.Equal(t, tt.wantSatisfied, ilCheck(t, reader, cfg, ilGasPool(), nil, types.Transactions{txn}))
+		})
+	}
+}
 
-	require.True(t, ilCheck(t, reader, cfg, ilGasPool(), nil, types.Transactions{txn}))
+func TestCheckInclusionListTransactions_FrameTxnIsNotTraced(t *testing.T) {
+	t.Parallel()
+
+	cfg, reader, txn := ilFrameTxnSetup([]byte{0x60, 3, 0x5f, 0x5f, 0xaa}, nil)
+	var traced int
+	tracer := &tracing.Hooks{OnEnter: func(int, byte, accounts.Address, accounts.Address, bool, []byte, uint64, uint256.Int, []byte) {
+		traced++
+	}}
+	blockCtx := evmtypes.BlockContext{CanTransfer: CanTransfer, Transfer: misc.Transfer, GasLimit: ilBlockGasLimit}
+
+	satisfied, err := CheckInclusionListTransactions(ilGasPool(), nil, types.Transactions{txn}, reader, &blockCtx, cfg, &vm.Config{NoBaseFee: true, Tracer: tracer})
+	require.NoError(t, err)
+	require.False(t, satisfied)
+	require.Zero(t, traced)
 }

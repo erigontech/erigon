@@ -40,7 +40,9 @@ func CheckInclusionListTransactions(
 ) (bool, error) {
 	ibs := state.New(stateReader)
 	defer ibs.Close()
-	evm := vm.NewEVM(*blockContext, evmtypes.TxContext{}, ibs, chainConfig, *vmConfig)
+	cfg := *vmConfig
+	cfg.Tracer = nil
+	evm := vm.NewEVM(*blockContext, evmtypes.TxContext{}, ibs, chainConfig, cfg)
 	signer := *types.MakeSigner(chainConfig, blockContext.BlockNumber, blockContext.Time)
 
 	inBlock := make(map[common.Hash]struct{}, len(blockTxns))
@@ -56,7 +58,7 @@ func CheckInclusionListTransactions(
 			continue
 		}
 
-		if tx.Type() == types.BlobTxType {
+		if tx.Type() == types.BlobTxType || tx.GetBlobGas() != 0 {
 			continue
 		}
 
