@@ -79,13 +79,27 @@ func (e *EventEmitter) EmitHeadEventsIfCurrent(head *HeadData, headV2 *HeadV2Dat
 		e.lastHeadRoot = head.Block
 		e.hasHeadEvent = true
 	}
+	e.sendHeadV2IfChanged(headV2)
+	return true
+}
+
+func (e *EventEmitter) EmitHeadV2IfCurrent(headV2 *HeadV2Data, current func() bool) bool {
+	e.headEventMu.Lock()
+	defer e.headEventMu.Unlock()
+	if !current() {
+		return false
+	}
+	e.sendHeadV2IfChanged(headV2)
+	return true
+}
+
+func (e *EventEmitter) sendHeadV2IfChanged(headV2 *HeadV2Data) {
 	if !e.hasHeadV2Event || e.lastHeadV2Root != headV2.Data.Block || e.lastHeadV2PayloadStatus != headV2.Data.PayloadStatus {
 		e.stateFeed.SendHeadV2(headV2)
 		e.lastHeadV2Root = headV2.Data.Block
 		e.lastHeadV2PayloadStatus = headV2.Data.PayloadStatus
 		e.hasHeadV2Event = true
 	}
-	return true
 }
 
 func NewEventEmitter() *EventEmitter {
