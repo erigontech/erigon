@@ -206,7 +206,6 @@ type BlockResult struct {
 
 type ApplyMessage func(evm *vm.EVM, msg protocol.Message, gp *protocol.GasPool, refunds bool, gasBailout bool) (*evmtypes.ExecutionResult, error)
 
-// ReadWriteSet contains ReadSet, WriteSet and BalanceIncrease of a transaction.
 type TxTask struct {
 	TxNum              uint64
 	TxIndex            int // -1 for block initialisation
