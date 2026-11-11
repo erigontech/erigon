@@ -17,7 +17,10 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
@@ -25,6 +28,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/clparams"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 )
@@ -127,5 +131,35 @@ func TestGetSpecIncludesMissingKeys(t *testing.T) {
 	for _, key := range keys {
 		require.Contains(t, spec.Data, key, key)
 		require.JSONEq(t, expected[key], string(spec.Data[key]), key)
+	}
+}
+
+func TestGetSpecPreservesExistingKeys(t *testing.T) {
+	for _, name := range []string{"mainnet", "sepolia"} {
+		t.Run(name, func(t *testing.T) {
+			network, config, _, err := clparams.GetConfigsByNetworkName(name)
+			require.NoError(t, err)
+			h := &ApiHandler{beaconChainCfg: config, netConfig: network, routerCfg: &beacon_router_configuration.RouterConfiguration{Config: true}}
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/eth/v1/config/spec", nil))
+			require.Equal(t, http.StatusOK, w.Code)
+			var response struct {
+				Data map[string]json.RawMessage `json:"data"`
+			}
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+			for _, test := range []struct{ key, want string }{
+				{"GOSSIP_MAX_SIZE", `"10485760"`},
+				{"MAXIMUM_GOSSIP_CLOCK_DISPARITY_MILLIS", `"500"`},
+				{"PENDING_DEPOSIT_LIMIT", `"134217728"`},
+			} {
+				t.Run(test.key, func(t *testing.T) {
+					got, ok := response.Data[test.key]
+					if !ok {
+						t.Fatalf("%s: expected %s, got <missing>", test.key, test.want)
+					}
+					require.JSONEq(t, test.want, string(got), test.key)
+				})
+			}
+		})
 	}
 }

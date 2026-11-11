@@ -32,13 +32,19 @@ func (a *ApiHandler) getSpec(w http.ResponseWriter, r *http.Request) (*beaconhtt
 	outSpec := struct {
 		*clparams.BeaconChainConfig
 		*clparams.NetworkConfig
-		SlotDurationMs            uint64 `json:"SLOT_DURATION_MS,string"`
-		MinEpochsForBlockRequests uint64 `json:"MIN_EPOCHS_FOR_BLOCK_REQUESTS,string"`
+		MaxPayloadSize              uint64                       `json:"MAX_PAYLOAD_SIZE,string"`
+		MaximumGossipClockDisparity *clparams.ConfigDurationMSec `json:"MAXIMUM_GOSSIP_CLOCK_DISPARITY"`
+		PendingDepositsLimit        uint64                       `json:"PENDING_DEPOSITS_LIMIT,string"`
+		SlotDurationMs              uint64                       `json:"SLOT_DURATION_MS,string"`
+		MinEpochsForBlockRequests   uint64                       `json:"MIN_EPOCHS_FOR_BLOCK_REQUESTS,string"`
 	}{
-		BeaconChainConfig:         a.beaconChainCfg,
-		NetworkConfig:             a.netConfig,
-		SlotDurationMs:            a.beaconChainCfg.SecondsPerSlot * 1000,
-		MinEpochsForBlockRequests: a.beaconChainCfg.MinEpochsForBlockRequests(),
+		BeaconChainConfig:           a.beaconChainCfg,
+		NetworkConfig:               a.netConfig,
+		MaxPayloadSize:              a.netConfig.GossipMaxSize,
+		MaximumGossipClockDisparity: &a.netConfig.MaximumGossipClockDisparity,
+		PendingDepositsLimit:        a.beaconChainCfg.PendingDepositLimits,
+		SlotDurationMs:              a.beaconChainCfg.SecondsPerSlot * 1000,
+		MinEpochsForBlockRequests:   a.beaconChainCfg.MinEpochsForBlockRequests(),
 	}
 
 	return newBeaconResponse(outSpec), nil
