@@ -24,6 +24,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
@@ -207,4 +208,49 @@ func TestEIP8246PreserveSelfDestructRevert(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, uint64(5), acc.Nonce, "revert leaves the original contract nonce")
 	require.Equal(t, codeHash, acc.CodeHash, "revert leaves the original contract code")
+}
+
+// A destruct that goes back in flight while a later tx reads the account must become a
+// dependency of that read: the committed record the read falls back to is pre-destruct.
+func TestCommittedFallbackDependsOnInFlightDestruct(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress(common.HexToAddress("0x8246AE"))
+	reader := newAccountStateReader(addr)
+	reader.accounts[addr].Balance = *uint256.NewInt(100)
+	vm := NewVersionMap(types.BlockAccessList{{
+		Address:        addr.Value(),
+		BalanceChanges: []*types.BalanceChange{{Index: 1}},
+		NonceChanges:   []*types.NonceChange{{Index: 2, Value: 1}},
+		CodeChanges:    []*types.CodeChange{{Index: 2, Bytecode: []byte{0x60, 0x01}}},
+	}})
+	vm.SeedAddresses()
+
+	header := func(path AccountPath, status valueStatus) WriteHeader {
+		h := WriteHeader{Address: addr, Path: path, Version: Version{TxIndex: 0}}
+		h.valStatus = status
+		return h
+	}
+	destruct := func() *WriteSet {
+		return newWriteSet(
+			&VersionedWrite[bool]{WriteHeader: header(SelfDestructPath, ValueChanged), Val: true},
+			&VersionedWrite[uint256.Int]{WriteHeader: header(BalancePath, ValueDeleted)},
+			&VersionedWrite[accounts.CodeHash]{WriteHeader: header(CodeHashPath, ValueDeleted), Val: accounts.EmptyCodeHash},
+		)
+	}
+	vm.FlushVersionedWrites(newWriteSet(
+		&VersionedWrite[*accounts.Account]{WriteHeader: header(AddressPath, ValueChanged), Val: &accounts.Account{CodeHash: accounts.EmptyCodeHash, Root: empty.RootHash}},
+		&VersionedWrite[bool]{WriteHeader: header(SelfDestructPath, ValueChanged), Val: true},
+		&VersionedWrite[uint256.Int]{WriteHeader: header(BalancePath, ValueDeleted)},
+	), true)
+	vm.absentAccountHook = func() {
+		vm.absentAccountHook = nil
+		vm.FlushVersionedWrites(destruct(), false)
+	}
+
+	ibs := newAmsterdamIBS(reader, vm, 1)
+	defer ibs.Close()
+	_, err := ibs.Empty(addr)
+	require.NoError(t, err)
+	require.Nil(t, vm.absentAccountHook, "the flush must land after the account read")
+	require.Equal(t, 0, ibs.DepTxIndex())
 }

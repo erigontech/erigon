@@ -1454,6 +1454,10 @@ func (ibs *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 		if ibs.versionMap.IsNetAbsent(addr, ibs.txIndex) {
 			return nil, StorageRead, UnknownVersion, nil
 		}
+		// An in-flight destruct below is not net-absent yet, but the committed record predates it.
+		if _, sdRes, ok := ibs.versionMap.ReadSelfDestruct(addr, ibs.txIndex); ok && sdRes.Status() == MVReadResultDependency {
+			ibs.dep = max(ibs.dep, sdRes.DepIdx())
+		}
 	}
 
 	return readAccount, source, version, nil
