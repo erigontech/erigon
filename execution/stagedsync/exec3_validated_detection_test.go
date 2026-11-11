@@ -244,12 +244,19 @@ func TestMarkReadersDirty(t *testing.T) {
 		be.markReadersDirty(1, newWS().stor(addr, slot1, writer, *uint256.NewInt(1)).build())
 		require.Empty(t, be.revalidate)
 	})
+	seeded := types.BlockAccessList{{Address: addr.Value(), StorageChanges: []types.SlotChanges{{Slot: slot1, Changes: []*types.StorageChange{{Index: 2, Value: *uint256.NewInt(1)}}}}}}
 	t.Run("a write the BAL already holds leaves the readers clean", func(t *testing.T) {
 		be := newBE()
-		be.versionMap.HasBAL = true
-		be.versionMap.WriteStorage(addr, slot1, writer, *uint256.NewInt(1), true)
+		be.versionMap = state.NewVersionMap(seeded)
 		be.markReadersDirty(1, newWS().stor(addr, slot1, writer, *uint256.NewInt(1)).build())
 		require.Empty(t, be.revalidate)
+	})
+	t.Run("a Done cell a re-run left with the BAL value flags the readers", func(t *testing.T) {
+		be := newBE()
+		be.versionMap = state.NewVersionMap(seeded)
+		be.versionMap.WriteStorage(addr, slot1, state.Version{TxIndex: 1, Incarnation: 2}, *uint256.NewInt(1), true)
+		be.markReadersDirty(1, newWS().stor(addr, slot1, state.Version{TxIndex: 1, Incarnation: 3}, *uint256.NewInt(1)).build())
+		require.Equal(t, map[int]bool{2: true}, be.revalidate)
 	})
 	t.Run("a write the BAL does not hold flags the readers", func(t *testing.T) {
 		be := newBE()

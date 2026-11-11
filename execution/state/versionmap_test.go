@@ -2567,3 +2567,48 @@ func TestWritesAlreadySeededRefusesANetZeroStorageWrite(t *testing.T) {
 
 	require.False(t, vm.WritesAlreadySeeded(addr, ws))
 }
+
+func seededSlotBAL(addr accounts.Address, slot accounts.StorageKey) types.BlockAccessList {
+	return types.BlockAccessList{{Address: addr.Value(), StorageChanges: []types.SlotChanges{{Slot: slot, Changes: []*types.StorageChange{{Index: 2, Value: *uint256.NewInt(42)}}}}}}
+}
+
+// The net-zero reset puts the access list value back as Done, but a reader may hold the value an
+// earlier run published there.
+func TestWritesAlreadySeededRefusesACellTheNetZeroResetMadeDone(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0xbe, 0xef})
+	slot := accounts.InternKey(common.Hash{0x04})
+	vm := NewVersionMap(seededSlotBAL(addr, slot))
+	for incarnation, val := range []uint64{42, 9} {
+		ws := storageWriteSet(addr, slot, Incarnation(incarnation), val, ValueChanged)
+		vm.FlushVersionedWrites(ws, false)
+		vm.MarkWritesValidated(ws, func(accounts.Address) bool { return false })
+	}
+	vm.FlushVersionedWrites(storageWriteSet(addr, slot, 2, 5, ValueUnchanged), false)
+
+	require.False(t, vm.WritesAlreadySeeded(addr, storageWriteSet(addr, slot, 3, 42, ValueChanged)))
+}
+
+// A run that dropped the slot deleted the seed; the cell a later run re-creates is not the seed,
+// even once the net-zero reset makes it Done.
+func TestWritesAlreadySeededRefusesARecreatedCell(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0xbe, 0xef})
+	slot := accounts.InternKey(common.Hash{0x04})
+	vm := NewVersionMap(seededSlotBAL(addr, slot))
+	vm.Delete(addr, StoragePath, slot, 1, false)
+	vm.FlushVersionedWrites(storageWriteSet(addr, slot, 2, 42, ValueChanged), false)
+	vm.FlushVersionedWrites(storageWriteSet(addr, slot, 3, 5, ValueUnchanged), false)
+
+	require.False(t, vm.WritesAlreadySeeded(addr, storageWriteSet(addr, slot, 4, 42, ValueChanged)))
+}
+
+func TestWritesAlreadySeededRefusesACellATxOverwrote(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0xbe, 0xef})
+	slot := accounts.InternKey(common.Hash{0x04})
+	vm := NewVersionMap(seededSlotBAL(addr, slot))
+	require.True(t, vm.WritesAlreadySeeded(addr, storageWriteSet(addr, slot, 0, 42, ValueChanged)))
+
+	vm.FlushVersionedWrites(storageWriteSet(addr, slot, 0, 9, ValueChanged), true)
+	vm.FlushVersionedWrites(storageWriteSet(addr, slot, 1, 42, ValueChanged), true)
+
+	require.False(t, vm.WritesAlreadySeeded(addr, storageWriteSet(addr, slot, 2, 42, ValueChanged)))
+}
