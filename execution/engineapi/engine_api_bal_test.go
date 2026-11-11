@@ -1404,34 +1404,193 @@ func TestEngineApiBALUnchangedClaimLieInvalid(t *testing.T) {
 		token := findAccountChanges(bal, accounts.InternAddress(contractAddr))
 		require.NotNil(t, token)
 		require.NotEmpty(t, token.StorageChanges)
-		for _, sc := range token.StorageChanges {
-			token.StorageReads = append(token.StorageReads, sc.Slot.Value())
-		}
-		token.StorageChanges = nil
-		slices.SortFunc(token.StorageReads, func(a, b common.Hash) int { return a.Cmp(b) })
-		require.NoError(t, bal.Validate())
-		encoded, err := types.EncodeBlockAccessListBytes(bal)
-		require.NoError(t, err)
-		lie := hexutil.Bytes(encoded)
-
-		executionRequests := payload.ExecutionRequests
-		if executionRequests == nil {
-			executionRequests = []hexutil.Bytes{}
-		}
-		elPayload := *payload.ExecutionPayload
-		elPayload.BlockAccessList = &lie
-		response := *payload.GetPayloadResponse
-		response.ExecutionPayload = &elPayload
-		payloadCopy := *payload
-		payloadCopy.GetPayloadResponse = &response
-		header := engineapitester.MockClPayloadToHeader(&payloadCopy)
-		balHash := crypto.Keccak256Hash(lie)
-		header.BlockAccessListHash = &balHash
-		elPayload.BlockHash = header.Hash()
-
-		status, err := eat.EngineApiClient.NewPayloadV5(ctx, &elPayload, []common.Hash{}, payload.ParentBeaconBlockRoot, executionRequests)
-		require.NoError(t, err)
+		hideStorageWrites(token)
+		status := newPayloadWithBAL(ctx, t, eat, payload, bal)
 		require.Equal(t, enginetypes.InvalidStatus, status.Status)
 		require.NotNil(t, status.ValidationError)
 	})
+}
+
+// TestEngineApiBALUnchangedClaimLieShapesInvalid pins that a BAL hiding a committed storage write makes the block
+// invalid in each shape of the lie, and that a net-zero write inside one tx is an honest read.
+func TestEngineApiBALUnchangedClaimLieShapesInvalid(t *testing.T) {
+	if !dbg.Exec3Parallel {
+		t.Skip("requires parallel exec")
+	}
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
+	eat, err := engineapitester.DefaultEngineApiTester(ctx, logger, t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := eat.Close()
+		require.NoError(t, err)
+	})
+	slot0 := common.Hash{}
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		sender := crypto.PubkeyToAddress(eat.CoinbaseKey.PublicKey)
+
+		t.Run("write after read", func(t *testing.T) {
+			contractAddr, payload, bal := buildBALLieBlock(ctx, t, eat, balLieCall{}, balLieCall{slotValuePairs: []uint64{0, 5}})
+			c := findAccountChanges(bal, accounts.InternAddress(contractAddr))
+			require.NotNil(t, c)
+			require.Len(t, c.StorageChanges, 1)
+			hideStorageWrites(c)
+			requireBALMismatch(t, newPayloadWithBAL(ctx, t, eat, payload, bal))
+		})
+
+		t.Run("original value restored by a later tx", func(t *testing.T) {
+			contractAddr, payload, bal := buildBALLieBlock(ctx, t, eat, balLieCall{slotValuePairs: []uint64{0, 7}}, balLieCall{slotValuePairs: []uint64{0, 1}})
+			c := findAccountChanges(bal, accounts.InternAddress(contractAddr))
+			require.NotNil(t, c)
+			require.Len(t, c.StorageChanges, 1)
+			require.Len(t, c.StorageChanges[0].Changes, 2)
+			hideStorageWrites(c)
+			requireBALMismatch(t, newPayloadWithBAL(ctx, t, eat, payload, bal))
+		})
+
+		t.Run("original value restored inside one tx", func(t *testing.T) {
+			contractAddr, payload, bal := buildBALLieBlock(ctx, t, eat, balLieCall{slotValuePairs: []uint64{0, 2, 0, 1}})
+			c := findAccountChanges(bal, accounts.InternAddress(contractAddr))
+			require.NotNil(t, c)
+			require.Empty(t, c.StorageChanges)
+			require.Equal(t, []common.Hash{slot0}, c.StorageReads)
+
+			t.Run("read omitted", func(t *testing.T) {
+				c.StorageReads = nil
+				requireBALMismatch(t, newPayloadWithBAL(ctx, t, eat, payload, bal))
+			})
+			t.Run("listed as a change", func(t *testing.T) {
+				c.StorageReads = nil
+				c.StorageChanges = []types.SlotChanges{{Slot: accounts.InternKey(slot0), Changes: []*types.StorageChange{{Index: 1, Value: *uint256.NewInt(1)}}}}
+				requireBALMismatch(t, newPayloadWithBAL(ctx, t, eat, payload, bal))
+			})
+		})
+
+		t.Run("written slot listed under another account", func(t *testing.T) {
+			contractAddr, payload, bal := buildBALLieBlock(ctx, t, eat, balLieCall{slotValuePairs: []uint64{0, 5}})
+			c := findAccountChanges(bal, accounts.InternAddress(contractAddr))
+			require.NotNil(t, c)
+			require.Len(t, c.StorageChanges, 1)
+			s := findAccountChanges(bal, accounts.InternAddress(sender))
+			require.NotNil(t, s)
+			require.Empty(t, s.StorageChanges)
+			s.StorageChanges = c.StorageChanges
+			hideStorageWrites(c)
+			requireBALMismatch(t, newPayloadWithBAL(ctx, t, eat, payload, bal))
+		})
+
+		t.Run("hidden write on an account with a declared balance change", func(t *testing.T) {
+			contractAddr, payload, bal := buildBALLieBlock(ctx, t, eat, balLieCall{value: 1, slotValuePairs: []uint64{0, 5}})
+			c := findAccountChanges(bal, accounts.InternAddress(contractAddr))
+			require.NotNil(t, c)
+			require.Len(t, c.StorageChanges, 1)
+			require.NotEmpty(t, c.BalanceChanges)
+			hideStorageWrites(c)
+			requireBALMismatch(t, newPayloadWithBAL(ctx, t, eat, payload, bal))
+		})
+	})
+}
+
+// balLieContractInitCode deploys a runtime that stores each 32-byte (slot, value) calldata pair in order and reads slot 0
+// on empty calldata.
+const balLieContractInitCode = "6020600c60003960206000f3" + "3615601a5760005b8060200135813555604001803611600757005b6000545000"
+
+type balLieCall struct {
+	value          uint64
+	slotValuePairs []uint64
+}
+
+// buildBALLieBlock deploys the balLieContractInitCode contract with slot 0 set to 1, then builds a block with calls from
+// one sender in order.
+func buildBALLieBlock(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester, calls ...balLieCall) (common.Address, *engineapitester.MockClPayload, types.BlockAccessList) {
+	t.Helper()
+	signer := types.LatestSignerForChainID(eat.ChainConfig.ChainID)
+	sender := crypto.PubkeyToAddress(eat.CoinbaseKey.PublicKey)
+	gasPrice, err := eat.RpcApiClient.GasPrice()
+	require.NoError(t, err)
+	pendingNonce, err := eat.RpcApiClient.GetTransactionCount(sender, rpc.PendingBlock)
+	require.NoError(t, err)
+	nonce := pendingNonce.Uint64()
+	send := func(to *common.Address, value uint64, slotValuePairs []uint64) common.Hash {
+		var data []byte
+		for _, v := range slotValuePairs {
+			word := uint256.NewInt(v).Bytes32()
+			data = append(data, word[:]...)
+		}
+		if to == nil {
+			data = common.FromHex(balLieContractInitCode)
+		}
+		tx, err := types.SignTx(&types.LegacyTx{
+			CommonTx: types.CommonTx{Nonce: nonce, GasLimit: 500_000, To: to, Value: *uint256.NewInt(value), Data: data},
+			GasPrice: *gasPrice,
+		}, *signer, eat.CoinbaseKey)
+		require.NoError(t, err)
+		nonce++
+		_, err = eat.RpcApiClient.SendTransaction(tx)
+		require.NoError(t, err)
+		return tx.Hash()
+	}
+
+	contractAddr := types.CreateAddress(sender, nonce)
+	send(nil, 0, nil)
+	send(&contractAddr, 0, []uint64{0, 1})
+	_, err = eat.MockCl.BuildCanonicalBlock(ctx)
+	require.NoError(t, err)
+	code, err := eat.RpcApiClient.GetCode(contractAddr, rpc.LatestBlock)
+	require.NoError(t, err)
+	require.NotEmpty(t, code)
+
+	txHashes := make([]common.Hash, 0, len(calls))
+	for _, c := range calls {
+		txHashes = append(txHashes, send(&contractAddr, c.value, c.slotValuePairs))
+	}
+	payload, err := eat.MockCl.BuildCanonicalBlock(ctx)
+	require.NoError(t, err)
+	require.Len(t, payload.ExecutionPayload.Transactions, len(calls))
+	require.NoError(t, eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, payload.ExecutionPayload, txHashes...))
+	return contractAddr, payload, decodeAndValidateBAL(t, payload)
+}
+
+// hideStorageWrites lists the slots ac writes as reads only.
+func hideStorageWrites(ac *types.AccountChanges) {
+	for _, sc := range ac.StorageChanges {
+		ac.StorageReads = append(ac.StorageReads, sc.Slot.Value())
+	}
+	ac.StorageChanges = nil
+	slices.SortFunc(ac.StorageReads, func(a, b common.Hash) int { return a.Cmp(b) })
+}
+
+// newPayloadWithBAL submits payload with bal as its access list and a block hash that commits to it.
+func newPayloadWithBAL(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester, payload *engineapitester.MockClPayload, bal types.BlockAccessList) *enginetypes.PayloadStatus {
+	t.Helper()
+	require.NoError(t, bal.Validate())
+	encoded, err := types.EncodeBlockAccessListBytes(bal)
+	require.NoError(t, err)
+	balBytes := hexutil.Bytes(encoded)
+
+	executionRequests := payload.ExecutionRequests
+	if executionRequests == nil {
+		executionRequests = []hexutil.Bytes{}
+	}
+	elPayload := *payload.ExecutionPayload
+	elPayload.BlockAccessList = &balBytes
+	response := *payload.GetPayloadResponse
+	response.ExecutionPayload = &elPayload
+	payloadCopy := *payload
+	payloadCopy.GetPayloadResponse = &response
+	header := engineapitester.MockClPayloadToHeader(&payloadCopy)
+	balHash := crypto.Keccak256Hash(balBytes)
+	header.BlockAccessListHash = &balHash
+	elPayload.BlockHash = header.Hash()
+
+	status, err := eat.EngineApiClient.NewPayloadV5(ctx, &elPayload, []common.Hash{}, payload.ParentBeaconBlockRoot, executionRequests)
+	require.NoError(t, err)
+	return status
+}
+
+func requireBALMismatch(t *testing.T, status *enginetypes.PayloadStatus) {
+	t.Helper()
+	require.Equalf(t, enginetypes.InvalidStatus, status.Status, "validation error: %v", status.ValidationError)
+	require.NotNil(t, status.ValidationError)
+	require.ErrorContains(t, status.ValidationError.Error(), "block access list mismatch")
 }
