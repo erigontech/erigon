@@ -508,9 +508,18 @@ func (db *stateCommitOnReadDB) BeginTemporalRo(ctx context.Context) (kv.Temporal
 	return tx, err
 }
 
-func TestFramePoolIncompleteBatchRefreshesOrdinaryPayer(t *testing.T) {
-	for _, beforeCommit := range []bool{false, true} {
-		t.Run(fmt.Sprintf("before commit=%t", beforeCommit), func(t *testing.T) {
+func TestFramePoolRecoveryRefreshesOrdinaryPayer(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		beforeCommit bool
+		failedUpdate bool
+	}{
+		{"incomplete batch", false, false},
+		{"incomplete batch before commit", true, false},
+		{"failed update", false, true},
+		{"failed update before commit", true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			ctx, pool, payer := keyedFramePoolEnv(t)
 			backend := pool.ethBackend.(*frameValidationBackend)
 			backend.balance = common.Ether
@@ -530,17 +539,23 @@ func TestFramePoolIncompleteBatchRefreshesOrdinaryPayer(t *testing.T) {
 			account := accounts.Account{Nonce: 1, Balance: *uint256.NewInt(backend.balance), CodeHash: accounts.EmptyCodeHash}
 			coreDB := pool._chainDB.(kv.TemporalRwDB)
 			change := newBlockChangeForAccounts(common.Hash{1}, 0)
-			change.StateChangesIncomplete = true
+			change.StateChangesIncomplete = !tc.failedUpdate
 			require.NoError(t, coreDB.View(ctx, func(tx kv.Tx) error {
 				var err error
 				change.StateVersionId, err = rawdb.GetStateVersion(tx)
 				return err
 			}))
 			change.StateVersionId++
+			if tc.failedUpdate {
+				readErr := errors.New("state read failed")
+				pool._chainDB = stateReadHookDB{coreDB, func() error { return readErr }}
+				require.ErrorIs(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}), readErr)
+				pool._chainDB = coreDB
+			}
 			commit := func() {
 				writeTestSenderState(t, ctx, coreDB, pool.logger, payer, accounts.SerialiseV3(&account), 1)
 			}
-			if beforeCommit {
+			if tc.beforeCommit {
 				pool._chainDB = &stateCommitOnReadDB{TemporalRoDB: coreDB, commit: commit}
 			} else {
 				commit()
@@ -550,6 +565,7 @@ func TestFramePoolIncompleteBatchRefreshesOrdinaryPayer(t *testing.T) {
 			require.NotContains(t, pool.byHash, string(ordinary.IDHash[:]))
 			require.Equal(t, PendingSubPool, pool.byHash[string(frame.IDHash[:])].currentSubPool)
 			require.Equal(t, frame.frameValidation.MaxCost, pool.frameReservations[payer].cost)
+			require.Equal(t, !tc.failedUpdate, change.StateChangesIncomplete, "a shared batch must not be modified")
 		})
 	}
 }

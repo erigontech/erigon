@@ -29,7 +29,6 @@ import (
 
 	"github.com/holiman/uint256"
 	"google.golang.org/grpc"
-	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	libkzg "github.com/erigontech/erigon/common/crypto/kzg"
@@ -122,7 +121,6 @@ type Fetch struct {
 	db                       kv.RwDB
 	stateChangesClient       StateChangesClient
 	pendingTxnChanges        []txnChange     // Owned by ConnectCore; retained across subscriptions until applied
-	stateRefreshRequired     bool            // A failed pool update requires a refresh even when no transactions changed
 	wg                       *sync.WaitGroup // used for synchronisation in the tests (nil when not in tests)
 	connectWg                sync.WaitGroup  // tracks goroutines spawned by ConnectCore/ConnectSentries
 	stateChangesParseCtx     *TxnParseContext
@@ -1427,16 +1425,10 @@ func (f *Fetch) applyStateChanges(ctx context.Context, req *remoteproto.StateCha
 		}
 	}
 
-	if f.stateRefreshRequired && !req.StateChangesIncomplete {
-		req = proto.Clone(req).(*remoteproto.StateChangeBatch)
-		req.StateChangesIncomplete = true
-	}
 	if err := f.pool.OnNewBlock(ctx, req, unwindTxns, unwindBlobTxns, minedTxns); err != nil {
-		f.stateRefreshRequired = true
 		return err
 	}
 	f.pendingTxnChanges = nil
-	f.stateRefreshRequired = false
 	f.newBlocks.Add(1)
 	return nil
 }

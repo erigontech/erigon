@@ -36,6 +36,7 @@ import (
 	"github.com/google/btree"
 	"github.com/hashicorp/golang-lru/v2/simplelru"
 	"github.com/holiman/uint256"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/erigontech/erigon/common"
 	libkzg "github.com/erigontech/erigon/common/crypto/kzg"
@@ -387,8 +388,17 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 			p.MarkStateStale()
 		}
 	}()
+	p.lock.Lock()
+	stateStale := p.stateViewStale
 	if stateChanges.StateChangesIncomplete {
-		p.MarkStateStale()
+		p.markStateStaleLocked()
+	}
+	p.lock.Unlock()
+	// A complete notification cannot repair a failed update on its own. The pool
+	// needs a full refresh, without changing the batch shared with other consumers.
+	if stateStale && !stateChanges.StateChangesIncomplete {
+		stateChanges = proto.Clone(stateChanges).(*remoteproto.StateChangeBatch)
+		stateChanges.StateChangesIncomplete = true
 	}
 	for _, txn := range unwindTxns.Txns {
 		p.recoverAuthorizations(txn)

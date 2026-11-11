@@ -229,7 +229,7 @@ func TestRemoteAdmissionDefersUntilStateRecovery(t *testing.T) {
 				require.Contains(t, pool.unprocessedRemoteByHash, string(txn.IDHash[:]))
 				require.True(t, pool.hasUnprocessedRemoteTxns.Load())
 
-				change := newBlockChangeForAccounts(common.Hash{1}, 0)
+				change := newBlockChangeForAccounts(common.Hash{1}, 0, sender)
 				require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 				require.NoError(t, pool.processRemoteTxns(ctx))
 				require.Contains(t, pool.byHash, string(txn.IDHash[:]))

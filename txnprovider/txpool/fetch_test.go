@@ -424,18 +424,16 @@ func TestFetchStateChangeRecoveryUntilSuccess(t *testing.T) {
 			client.EXPECT().StateChanges(gomock.Any(), gomock.Any(), gomock.Any()).Return(stream, nil)
 			pool := NewMockPool(ctrl)
 			pool.EXPECT().MarkStateStale()
-			var incomplete []bool
 			var heights []uint64
 			pool.EXPECT().OnNewBlock(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
 				func(_ context.Context, batch *remoteproto.StateChangeBatch, _, _ TxnSlots, mined TxnSlots) error {
-					incomplete = append(incomplete, batch.StateChangesIncomplete)
 					heights = append(heights, batch.ChangeBatch[0].BlockHeight)
 					require.Len(t, mined.Txns, 1)
 					require.Equal(t, batch.ChangeBatch[0].Txs[0], mined.Txns[0].Rlp, "pool mutations must not affect a retry")
 					require.Zero(t, mined.Txns[0].SenderID)
 					mined.Txns[0].Rlp = nil
 					mined.Txns[0].SenderID = 42
-					if len(incomplete) <= 2 {
+					if len(heights) <= 2 {
 						return tc.err
 					}
 					return nil
@@ -448,7 +446,6 @@ func TestFetchStateChangeRecoveryUntilSuccess(t *testing.T) {
 			})
 			require.ErrorIs(t, fetch.handleStateChanges(t.Context(), client), io.EOF)
 			require.Equal(t, len(batches), parseCalls, "retries must reuse parsed transactions")
-			require.Equal(t, []bool{false, true, true, false}, incomplete)
 			require.Equal(t, []uint64{1, 1, 1, 2}, heights, "retry the failed update before reading another batch")
 			require.Equal(t, uint64(2), fetch.newBlocks.Load(), "only successful updates advance the gossip epoch")
 			for _, batch := range batches {
@@ -521,7 +518,6 @@ func TestFetchCoalescesSupersededStateChanges(t *testing.T) {
 				if calls < 3 {
 					return errStateViewSuperseded
 				}
-				require.True(t, batch.StateChangesIncomplete)
 				require.Equal(t, uint64(3), batch.PendingBlockBaseFee)
 				require.Len(t, batch.ChangeBatch, 1, "only the current view supplies state changes")
 				require.True(t, proto.Equal(batches[2].ChangeBatch[0], batch.ChangeBatch[0]))
@@ -1734,7 +1730,6 @@ func TestFetchSupersededChangesSurviveReconnect(t *testing.T) {
 					if batch.StateVersionId == 1 {
 						return errStateViewSuperseded
 					}
-					require.True(t, batch.StateChangesIncomplete, "a superseded batch requires a refresh even without transactions")
 					recovered = unwind
 					return nil
 				}).Times(2)
