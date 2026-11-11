@@ -1707,7 +1707,7 @@ func redactURLError(err error) error {
 // can carry an API key.
 func validEndpoint(endpoint string) bool {
 	u, err := url.Parse(endpoint)
-	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
+	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Hostname() != ""
 }
 
 // redactEndpoint is redactURL for an --endpoint value.

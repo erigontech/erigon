@@ -107,7 +107,7 @@ func notADatadir(t *testing.T) string {
 	return path
 }
 
-var malformedEndpoints = []string{"beacon.example:5052/?apikey=key-secret", "ftp://beacon.example/key-secret", "http:///key-secret", "http://h/%zz/key-secret", "http://user:key-secret/x@h/"}
+var malformedEndpoints = []string{"beacon.example:5052/?apikey=key-secret", "ftp://beacon.example/key-secret", "http:///key-secret", "http://h/%zz/key-secret", "http://user:key-secret/x@h/", "http://:5052/key-secret"}
 
 // A malformed --endpoint stops the fill before it touches the datadir, and the error names the flag by position so a
 // key in the value stays out of it.
