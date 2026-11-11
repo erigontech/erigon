@@ -171,7 +171,7 @@ func (t *prestateTracer) OnEnterV2(depth int, typ byte, from, to accounts.Addres
 	}
 }
 
-// Capture the journaled status after all call and atomic batch rollbacks.
+// Capture the journaled status after call, atomic batch and POST_TX body rollbacks.
 // Finalization can clear these markers before OnTxEnd runs.
 func (t *prestateTracer) OnExitV2(depth int, output []byte, gasUsed mdgas.MdGasUsage, err error, reverted bool) {
 	if depth != 0 || !t.config.DiffMode {

@@ -31,6 +31,8 @@ type BalanceChange struct {
 	Before, After uint256.Int
 }
 
+// TransactionTrace exposes surviving transaction changes to POST_TX, including
+// payment escrow and nonce consumption, before final fee settlement.
 type TransactionTrace struct {
 	Balances      []BalanceChange
 	Slots         []StorageChange
@@ -56,10 +58,10 @@ type CodeChange struct {
 	After   accounts.CodeHash
 }
 
-// TransactionTrace uses surviving journal entries, excluding reverted writes.
+// TransactionTrace builds the view once for the read-only POST_TX suffix. A failed
+// assertion ends the suffix, so the cache is never reused after body rollback.
 // It relies on EIP-8253 preventing creation over non-empty storage, so the first
 // journaled slot value is its transaction prestate: https://eips.ethereum.org/EIPS/eip-8253
-// POST_TX is a read-only suffix: its view stays fixed until settlement, outside the EVM.
 func (ctx *FrameContext) TransactionTrace(ibs *IntraBlockState) (*TransactionTrace, error) {
 	if ctx.trace != nil {
 		return ctx.trace, nil

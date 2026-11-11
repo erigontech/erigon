@@ -25,8 +25,9 @@ import (
 )
 
 // FrameContext shares transaction-wide approvals and gas accounting across frames
-// and their nested calls. Approvals and state-gas charges follow the state journal:
-// call, frame and atomic-batch rollbacks undo them, while execution gas remains charged.
+// and nested calls. State rollback, including POST_TX body rollback, restores
+// journaled approvals and state-gas charges to the chosen snapshot. Execution gas
+// remains charged.
 type FrameContext struct {
 	Transaction    *types.FrameTransaction
 	Receipts       []types.FrameReceipt

@@ -127,8 +127,8 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 	defer func() {
 		st.evm.FrameContext = nil
 		// Transaction rejection and mempool simulation undo every frame's changes.
-		// Ordinary execution failures use the frame or batch snapshot instead,
-		// preserving approvals and nonce consumption from earlier successful frames.
+		// A failure within an accepted transaction uses a frame, atomic batch or
+		// POST_TX body snapshot, preserving changes before that boundary.
 		if err != nil || validation != nil {
 			st.state.RevertToSnapshot(snapshot, err)
 		}

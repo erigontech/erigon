@@ -31,7 +31,7 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// FrameEntryPoint supplies the protocol caller for DEFAULT and VERIFY frames.
+// FrameEntryPoint supplies the protocol caller for DEFAULT, VERIFY and POST_TX frames.
 // Frames enter their targets directly, without executing an entry-point contract.
 var FrameEntryPoint = accounts.InternAddress(common.HexToAddress("0xaa"))
 

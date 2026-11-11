@@ -131,6 +131,8 @@ func (frame *Frame) ResolvedTarget(sender common.Address) common.Address {
 	return *frame.Target
 }
 
+// IsStatic selects STATICCALL execution. VERIFY still allows APPROVE to change
+// nonce and payment state; POST_TX forbids APPROVE.
 func (frame *Frame) IsStatic() bool {
 	return frame.Mode == FrameVerify || frame.Mode == FramePostTx
 }
