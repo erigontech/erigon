@@ -40,9 +40,9 @@ func TestPostTxRollback(t *testing.T) {
 	sender := accounts.InternAddress(tx.SenderAddress)
 	body := common.HexToAddress("0x2000")
 	assertion := common.HexToAddress("0x3000")
-	require.NoError(t, ibs.SetCode(sender, []byte{0x60, 3, 0x5f, 0x5f, 0xaa}, tracing.CodeChangeUnspecified))
+	require.NoError(t, ibs.SetCode(sender, program.New().Push(types.FrameApproveBoth).Push0().Push0().Op(vm.APPROVE).Bytes(), tracing.CodeChangeUnspecified))
 	require.NoError(t, ibs.SetCode(accounts.InternAddress(body), program.New().Sstore(0, 1).Push0().Push0().Op(vm.LOG0).Bytes(), tracing.CodeChangeUnspecified))
-	require.NoError(t, ibs.SetCode(accounts.InternAddress(assertion), []byte{0x5f, 0x5f, 0xfd}, tracing.CodeChangeUnspecified))
+	require.NoError(t, ibs.SetCode(accounts.InternAddress(assertion), program.New().Push0().Push0().Op(vm.REVERT).Bytes(), tracing.CodeChangeUnspecified))
 	tx.Fees.FeeCap.SetUint64(1)
 	tx.Fees.TipCap.SetUint64(1)
 	tx.Frames = []types.Frame{
@@ -54,7 +54,10 @@ func TestPostTxRollback(t *testing.T) {
 	result, err := applyFrameTest(t, evm, tx)
 	require.NoError(t, err)
 	require.ErrorIs(t, result.Err, vm.ErrExecutionReverted)
-	require.Equal(t, []uint64{1, 1, 0, 2}, []uint64{
+	require.Equal(t, []uint64{
+		types.ReceiptStatusSuccessful, types.ReceiptStatusSuccessful,
+		types.ReceiptStatusFailed, types.ReceiptStatusSkipped,
+	}, []uint64{
 		result.FrameReceipts[0].Status, result.FrameReceipts[1].Status,
 		result.FrameReceipts[2].Status, result.FrameReceipts[3].Status,
 	})
@@ -78,7 +81,7 @@ func TestPostTxBalanceTrace(t *testing.T) {
 	ibs := evm.IntraBlockState()
 	target := common.HexToAddress("0x2000")
 	assertion := common.HexToAddress("0x3000")
-	require.NoError(t, ibs.SetCode(accounts.InternAddress(tx.SenderAddress), []byte{0x60, 3, 0x5f, 0x5f, 0xaa}, tracing.CodeChangeUnspecified))
+	require.NoError(t, ibs.SetCode(accounts.InternAddress(tx.SenderAddress), program.New().Push(types.FrameApproveBoth).Push0().Push0().Op(vm.APPROVE).Bytes(), tracing.CodeChangeUnspecified))
 	code := program.New().Push0().Push0().Op(vm.TXTRACE)
 	assertStackWord(code, 2)
 	require.NoError(t, ibs.SetCode(accounts.InternAddress(assertion), code.Bytes(), tracing.CodeChangeUnspecified))
@@ -109,7 +112,7 @@ func TestTxDiffValidationErrors(t *testing.T) {
 			evm, tx := frameTestEnv(t)
 			ibs := evm.IntraBlockState()
 			target := common.HexToAddress("0x2000")
-			require.NoError(t, ibs.SetCode(accounts.InternAddress(tx.SenderAddress), []byte{0x60, 3, 0x5f, 0x5f, 0xaa}, tracing.CodeChangeUnspecified))
+			require.NoError(t, ibs.SetCode(accounts.InternAddress(tx.SenderAddress), program.New().Push(types.FrameApproveBoth).Push0().Push0().Op(vm.APPROVE).Bytes(), tracing.CodeChangeUnspecified))
 			code := program.New().Push(tc.index).Push0().Push(2).Op(vm.TXDIFF, vm.STOP).Bytes()
 			require.NoError(t, ibs.SetCode(accounts.InternAddress(target), code, tracing.CodeChangeUnspecified))
 			tx.Frames = []types.Frame{
@@ -153,7 +156,7 @@ func TestPostTxStateReadErrorAbortsTransaction(t *testing.T) {
 			t.Run(tc.name+"/"+caller.name, func(t *testing.T) {
 				evm, tx := frameTestEnv(t)
 				ibs := evm.IntraBlockState()
-				require.NoError(t, ibs.SetCode(accounts.InternAddress(tx.SenderAddress), []byte{0x60, 3, 0x5f, 0x5f, 0xaa}, tracing.CodeChangeUnspecified))
+				require.NoError(t, ibs.SetCode(accounts.InternAddress(tx.SenderAddress), program.New().Push(types.FrameApproveBoth).Push0().Push0().Op(vm.APPROVE).Bytes(), tracing.CodeChangeUnspecified))
 				require.NoError(t, ibs.SetCode(accounts.InternAddress(target), program.New().Append(tc.args.Bytes()).Op(tc.op, vm.STOP).Bytes(), tracing.CodeChangeUnspecified))
 				require.NoError(t, ibs.SetCode(accounts.InternAddress(body), program.New().Sstore(0, 1).Bytes(), tracing.CodeChangeUnspecified))
 				frameTarget := target

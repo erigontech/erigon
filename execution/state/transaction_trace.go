@@ -26,6 +26,13 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
+const (
+	accountNonceChanged = 1 << iota
+	accountBalanceChanged
+	accountStorageChanged
+	accountCodeChanged
+)
+
 type BalanceChange struct {
 	Address       accounts.Address
 	Before, After uint256.Int
@@ -34,17 +41,17 @@ type BalanceChange struct {
 // TransactionTrace exposes surviving transaction changes to POST_TX, including
 // payment escrow and nonce consumption, before final fee settlement.
 type TransactionTrace struct {
-	Balances      []BalanceChange
-	Slots         []StorageChange
-	Deployed      []CodeChange
-	Events        []*types.Log
-	AccountFlags  map[accounts.Address]uint64
-	AddressSlots  map[accounts.Address][]int
-	AddressEvents map[accounts.Address][]int
-	TopicEvents   map[common.Hash][]int
-	balanceBefore map[accounts.Address]uint256.Int
-	storageBefore map[frameStorageSlot]uint256.Int
-	codeBefore    map[accounts.Address]accounts.CodeHash
+	Balances              []BalanceChange
+	Slots                 []StorageChange
+	Deployed              []CodeChange
+	Events                []*types.Log
+	AccountFlags          map[accounts.Address]uint64
+	SlotIndicesByAddress  map[accounts.Address][]int
+	EventIndicesByAddress map[accounts.Address][]int
+	EventIndicesByTopic   map[common.Hash][]int
+	balanceBefore         map[accounts.Address]uint256.Int
+	storageBefore         map[frameStorageSlot]uint256.Int
+	codeBefore            map[accounts.Address]accounts.CodeHash
 }
 
 type StorageChange struct {
@@ -67,13 +74,13 @@ func (ctx *FrameContext) TransactionTrace(ibs *IntraBlockState) (*TransactionTra
 		return ctx.trace, nil
 	}
 	trace := &TransactionTrace{
-		AccountFlags:  make(map[accounts.Address]uint64),
-		AddressSlots:  make(map[accounts.Address][]int),
-		AddressEvents: make(map[accounts.Address][]int),
-		TopicEvents:   make(map[common.Hash][]int),
-		balanceBefore: make(map[accounts.Address]uint256.Int),
-		storageBefore: make(map[frameStorageSlot]uint256.Int),
-		codeBefore:    make(map[accounts.Address]accounts.CodeHash),
+		AccountFlags:          make(map[accounts.Address]uint64),
+		SlotIndicesByAddress:  make(map[accounts.Address][]int),
+		EventIndicesByAddress: make(map[accounts.Address][]int),
+		EventIndicesByTopic:   make(map[common.Hash][]int),
+		balanceBefore:         make(map[accounts.Address]uint256.Int),
+		storageBefore:         make(map[frameStorageSlot]uint256.Int),
+		codeBefore:            make(map[accounts.Address]accounts.CodeHash),
 	}
 	nonces := make(map[accounts.Address]uint64)
 	for _, entry := range ibs.journal.entries[ctx.journalStart:] {
@@ -108,7 +115,7 @@ func (ctx *FrameContext) TransactionTrace(ibs *IntraBlockState) (*TransactionTra
 		}
 		if value != after {
 			trace.Balances = append(trace.Balances, BalanceChange{address, value, after})
-			trace.AccountFlags[address] |= 2
+			trace.AccountFlags[address] |= accountBalanceChanged
 		}
 	}
 	for address, value := range nonces {
@@ -117,7 +124,7 @@ func (ctx *FrameContext) TransactionTrace(ibs *IntraBlockState) (*TransactionTra
 			return nil, err
 		}
 		if value != after {
-			trace.AccountFlags[address] |= 1
+			trace.AccountFlags[address] |= accountNonceChanged
 		}
 	}
 	for slot, value := range trace.storageBefore {
@@ -127,7 +134,7 @@ func (ctx *FrameContext) TransactionTrace(ibs *IntraBlockState) (*TransactionTra
 		}
 		if value != after {
 			trace.Slots = append(trace.Slots, StorageChange{slot.address, slot.key, value, after})
-			trace.AccountFlags[slot.address] |= 4
+			trace.AccountFlags[slot.address] |= accountStorageChanged
 		}
 	}
 	for address, value := range trace.codeBefore {
@@ -136,7 +143,7 @@ func (ctx *FrameContext) TransactionTrace(ibs *IntraBlockState) (*TransactionTra
 			return nil, err
 		}
 		if value != after {
-			trace.AccountFlags[address] |= 8
+			trace.AccountFlags[address] |= accountCodeChanged
 			if value.IsEmpty() && !after.IsEmpty() {
 				code, err := ibs.GetCode(address)
 				if err != nil {
@@ -161,16 +168,16 @@ func (ctx *FrameContext) TransactionTrace(ibs *IntraBlockState) (*TransactionTra
 		return a.Address.Cmp(b.Address)
 	})
 	for i, slot := range trace.Slots {
-		trace.AddressSlots[slot.Address] = append(trace.AddressSlots[slot.Address], i)
+		trace.SlotIndicesByAddress[slot.Address] = append(trace.SlotIndicesByAddress[slot.Address], i)
 	}
 	trace.Events = ibs.LogsSince(ctx.logStart)
 	for i, event := range trace.Events {
 		address := accounts.InternAddress(event.Address)
-		trace.AddressEvents[address] = append(trace.AddressEvents[address], i)
+		trace.EventIndicesByAddress[address] = append(trace.EventIndicesByAddress[address], i)
 		for j := 1; j < len(event.Topics); j++ {
 			topic := event.Topics[j]
 			if !slices.Contains(event.Topics[1:j], topic) {
-				trace.TopicEvents[topic] = append(trace.TopicEvents[topic], i)
+				trace.EventIndicesByTopic[topic] = append(trace.EventIndicesByTopic[topic], i)
 			}
 		}
 	}

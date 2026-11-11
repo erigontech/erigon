@@ -205,14 +205,14 @@ func opTxDiff(pc uint64, evm *EVM, call *CallContext) (uint64, []byte, error) {
 	var indices []int
 	switch p {
 	case 6, 7:
-		indices = trace.AddressSlots[ibs.InternAddress(key)]
+		indices = trace.SlotIndicesByAddress[ibs.InternAddress(key)]
 	case 8, 9:
-		indices = trace.AddressEvents[ibs.InternAddress(key)]
+		indices = trace.EventIndicesByAddress[ibs.InternAddress(key)]
 	case 0x0a:
 		index.SetUint64(trace.AccountFlags[ibs.InternAddress(key)])
 		return pc, nil, nil
 	case 0x0b, 0x0c:
-		indices = trace.TopicEvents[key.Bytes32()]
+		indices = trace.EventIndicesByTopic[key.Bytes32()]
 	}
 	if p == 6 || p == 8 || p == 0x0b {
 		index.SetUint64(uint64(len(indices)))
