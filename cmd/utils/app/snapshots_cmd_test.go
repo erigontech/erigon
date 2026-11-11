@@ -28,6 +28,7 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
+	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
@@ -1596,6 +1597,123 @@ func Test_DeleteBlockSnaps_NoBlockFilesSweepsTmp(t *testing.T) {
 	require.NoError(t, err)
 
 	confirmDoesntExist(t, tmp)
+}
+
+// TestAccessorCommandRebuildNewSaltRecreatesIndices exercises the production
+// CLI path rather than stopping after prepareAccessorsForRebuild. Both snapshot
+// families must remain readable after their old indices and salts are removed.
+func TestAccessorCommandRebuildNewSaltRecreatesIndices(t *testing.T) {
+	ctx := t.Context()
+	dirs := datadir.New(t.TempDir())
+	logger := log.New()
+
+	// Use the normal on-disk chain metadata and snapshot-state settings.
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, state.ERIGONDB_SETTINGS_FILE),
+		[]byte("step_size = 1000\nsteps_in_frozen_file = 64\n"), 0o644))
+	chainDB := mdbx.New(dbcfg.ChainDB, logger).Path(dirs.Chaindata).MustOpen()
+	writeChainMetadata(t, ctx, chainDB, networkname.Mainnet, 1)
+	chainDB.Close()
+
+	// Create a genuinely encoded header and a body segment, with the block
+	// accessors initially present so --rebuild must invalidate them.
+	header := &types.Header{Number: *uint256.NewInt(0), Time: 1000, Difficulty: *uint256.NewInt(1), Extra: []byte{}}
+	encodedHeader, err := rlp.EncodeToBytes(header)
+	require.NoError(t, err)
+	headerHash := header.Hash()
+	duWriteSegmentWord(t, dirs.Snap, 0, 500_000, snaptype2.Enums.Headers, append([]byte{headerHash[0]}, encodedHeader...))
+	duWriteSegment(t, dirs.Snap, 0, 500_000, snaptype2.Enums.Bodies)
+	headerIndexPath := filepath.Join(dirs.Snap,
+		snaptype.IdxFileName(version.V1_0, 0, 500_000, snaptype2.Enums.Headers.String()))
+	require.FileExists(t, headerIndexPath)
+
+	// A real compressed state domain segment with a pair of key/value words.
+	statePath := filepath.Join(dirs.SnapDomain, "v1.0-accounts.0-64.kv")
+	compressor, err := seg.NewCompressor(ctx, t.Name(), statePath, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, logger)
+	require.NoError(t, err)
+	compressor.DisableFsync()
+	writer := seg.NewWriter(compressor, statecfg.Schema.AccountsDomain.Compression)
+	key, value := []byte("account-key"), []byte("account-value")
+	_, err = writer.Write(key)
+	require.NoError(t, err)
+	_, err = writer.Write(value)
+	require.NoError(t, err)
+	require.NoError(t, compressor.Compress())
+	compressor.Close()
+
+	oldSalt := []byte{0x12, 0x34, 0x56, 0x78}
+	for _, name := range []string{"salt-blocks.txt", "salt-state.txt"} {
+		require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, name), oldSalt, 0o644))
+	}
+
+	// Seed a valid state B-tree and existence filter under the old salt.
+	// --rebuild must replace these, not merely create absent accessors.
+	oldData, err := seg.NewDecompressor(statePath)
+	require.NoError(t, err)
+	oldBtree := filepath.Join(dirs.SnapDomain, "v1.0-accounts.0-64.bt")
+	oldExistence := filepath.Join(dirs.SnapDomain, "v1.0-accounts.0-64.kvei")
+	require.NoError(t, btindex.BuildBtreeIndexWithDecompressor(
+		oldBtree, oldExistence,
+		seg.NewReader(oldData.MakeGetter(), statecfg.Schema.AccountsDomain.Compression),
+		background.NewProgressSet(), dirs.Tmp, 0x12345678, logger, true,
+		statecfg.Schema.AccountsDomain.Accessors,
+	))
+	oldData.Close()
+	require.FileExists(t, oldBtree)
+	require.FileExists(t, oldExistence)
+
+	// Invoke the actual user-facing command, including DB/openSnaps and both
+	// the block and state missing-accessor builders.
+	app := &cli.Command{Name: "erigon", Commands: []*cli.Command{&snapshotCommand}}
+	require.NoError(t, app.Run(ctx, []string{"erigon", "seg", "accessor", "--datadir", dirs.DataDir, "--rebuild", "--new-salt"}))
+
+	for _, name := range []string{"salt-blocks.txt", "salt-state.txt"} {
+		salt, err := os.ReadFile(filepath.Join(dirs.Snap, name))
+		require.NoError(t, err)
+		require.Len(t, salt, 4)
+		require.NotEqual(t, oldSalt, salt)
+	}
+
+	// Block accessors may use a newer format version than the segment data.
+	// Find the regenerated index and prove its lookup works, rather than
+	// assuming the removed v1.0 accessor name is reused.
+	headerIndexes, err := filepath.Glob(filepath.Join(dirs.Snap, "*-headers.idx"))
+	require.NoError(t, err)
+	require.Len(t, headerIndexes, 1, "the full command must recreate a header index")
+	headerIndex, err := recsplit.OpenIndex(headerIndexes[0])
+	require.NoError(t, err)
+	defer headerIndex.Close()
+	require.Greater(t, headerIndex.KeyCount(), uint64(0))
+	_, found := headerIndex.Reader().Lookup(headerHash[:])
+	require.True(t, found, "rebuilt block accessor must resolve the encoded header")
+
+	bodyIndexes, err := filepath.Glob(filepath.Join(dirs.Snap, "*-bodies.idx"))
+	require.NoError(t, err)
+	require.Len(t, bodyIndexes, 1, "the full command must recreate the body index")
+	bodyIndex, err := recsplit.OpenIndex(bodyIndexes[0])
+	require.NoError(t, err)
+	defer bodyIndex.Close()
+	_, found = bodyIndex.Reader().Lookup([]byte{0}) // body at block zero
+	require.True(t, found, "rebuilt body accessor must resolve the original block number")
+
+	// Verify the rebuilt state B-tree and existence filter are actual usable
+	// accessors, not merely files that were touched by the test.
+	btrees, err := filepath.Glob(filepath.Join(dirs.SnapDomain, "*-accounts.0-64.bt"))
+	require.NoError(t, err)
+	require.Len(t, btrees, 1, "the full command must recreate a state B-tree")
+	btPath := btrees[0]
+	existenceFilters, err := filepath.Glob(filepath.Join(dirs.SnapDomain, "*-accounts.0-64.kvei"))
+	require.NoError(t, err)
+	require.Len(t, existenceFilters, 1, "the full command must recreate the state existence filter")
+	decompressor, index, err := btindex.OpenBtreeIndexAndDataFile(btPath, statePath,
+		statecfg.Schema.AccountsDomain.Compression)
+	require.NoError(t, err)
+	defer decompressor.Close()
+	defer index.Close()
+	_, got, _, found, err := index.Get(key, nil,
+		seg.NewReader(decompressor.MakeGetter(), statecfg.Schema.AccountsDomain.Compression))
+	require.NoError(t, err)
+	require.True(t, found, "rebuilt state accessor must retrieve the original account key")
+	require.Equal(t, value, got)
 }
 
 func Test_prepareAccessorsForRebuildRenewsLegacyAndCurrentSalts(t *testing.T) {
