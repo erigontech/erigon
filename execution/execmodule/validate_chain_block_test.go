@@ -18,6 +18,7 @@ package execmodule_test
 
 import (
 	"context"
+	"strconv"
 	"sync/atomic"
 	"testing"
 
@@ -79,21 +80,27 @@ func TestValidateChainExecutesTheGivenBlock(t *testing.T) {
 }
 
 func TestValidateChainReturnsMissingSegmentForUnreadableStoredHeader(t *testing.T) {
-	m, _, _ := newMetricsTester(t)
-	pack, err := m.GenerateChain(1, nil)
-	require.NoError(t, err)
-	header := pack.Blocks[0].Header()
-	header.BaseFee = nil
-	block := types.NewBlockFromNetwork(header, pack.Blocks[0].Body(), pack.Blocks[0].BlockAccessListSidecar())
-	status, err := m.InsertBlocks(t.Context(), []*types.Block{block})
-	require.NoError(t, err)
-	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+	for _, count := range []int{1, 17} {
+		t.Run(strconv.Itoa(count), func(t *testing.T) {
+			m, _, _ := newMetricsTester(t)
+			pack, err := m.GenerateChain(count, nil)
+			require.NoError(t, err)
+			header := pack.Blocks[count-1].Header()
+			header.BaseFee = nil
+			block := types.NewBlockFromNetwork(header, pack.Blocks[count-1].Body(), pack.Blocks[count-1].BlockAccessListSidecar())
+			blocks := append([]*types.Block(nil), pack.Blocks...)
+			blocks[count-1] = block
+			status, err := m.InsertBlocks(t.Context(), blocks)
+			require.NoError(t, err)
+			require.Equal(t, execmodule.ExecutionStatusSuccess, status)
 
-	var result execmodule.ValidationResult
-	var validationErr error
-	require.NotPanics(t, func() {
-		result, validationErr = m.ValidateChain(t.Context(), block)
-	})
-	require.NoError(t, validationErr)
-	require.Equal(t, execmodule.ExecutionStatusMissingSegment, result.ValidationStatus)
+			var result execmodule.ValidationResult
+			var validationErr error
+			require.NotPanics(t, func() {
+				result, validationErr = m.ValidateChain(t.Context(), block)
+			})
+			require.NoError(t, validationErr)
+			require.Equal(t, execmodule.ExecutionStatusMissingSegment, result.ValidationStatus)
+		})
+	}
 }

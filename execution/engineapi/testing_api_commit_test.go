@@ -75,7 +75,7 @@ func TestCommitBlockV1MempoolBlobTransaction(t *testing.T) {
 	require.Equal(t, hash, server.chainRW.CurrentHeader(t.Context()).Hash())
 }
 
-func TestValidateChainPreservesBlobSidecar(t *testing.T) {
+func TestCommitBlockV1PreservesBlobSidecar(t *testing.T) {
 	t.Parallel()
 	const parentTimestamp = 1000
 	cfg := allForksChainConfig()
