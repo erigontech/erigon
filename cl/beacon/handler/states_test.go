@@ -658,6 +658,24 @@ func TestGetRandao(t *testing.T) {
 	require.Equal(t, http.StatusNotFound, resp.StatusCode)
 }
 
+func TestGetRandaoMissingPreviousEpochMix(t *testing.T) {
+	db, _, _, pre, post, h, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), false)
+	epoch := post.Slot() / h.beaconChainCfg.SlotsPerEpoch
+	require.Greater(t, epoch, pre.Slot()/h.beaconChainCfg.SlotsPerEpoch)
+	queryEpoch := epoch - 1
+	path := fmt.Sprintf("/eth/v1/beacon/states/%d/randao?epoch=%d", post.Slot(), queryEpoch)
+	available := httptest.NewRecorder()
+	h.mux.ServeHTTP(available, httptest.NewRequest(http.MethodGet, path, nil))
+	require.Equal(t, http.StatusOK, available.Code, available.Body.String())
+
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return tx.Delete(kv.RandaoMixes, base_encoding.Encode64ToBytes4(queryEpoch*h.beaconChainCfg.SlotsPerEpoch))
+	}))
+	rec := httptest.NewRecorder()
+	h.mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+	require.Equal(t, http.StatusNotFound, rec.Code, "unavailable previous-epoch mix must return 404: GET %s returned %d: %s", path, rec.Code, rec.Body.String())
+}
+
 func TestGetPendingQueuesConsensusVersionHeader(t *testing.T) {
 	db, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
 	handler.beaconChainCfg.FuluForkEpoch = 1
