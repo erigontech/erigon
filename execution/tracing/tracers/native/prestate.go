@@ -112,12 +112,14 @@ func (a *account) exists() bool {
 }
 
 type prestateTracer struct {
-	env       *tracing.VMContext
-	pre       state
-	post      state
-	config    prestateTracerConfig
-	interrupt atomic.Bool           // Atomic flag to signal execution interruption
-	reason    atomic.Pointer[error] // Reason for the interruption, populated by Stop
+	env        *tracing.VMContext
+	pre        state
+	post       state
+	config     prestateTracerConfig
+	frameTx    *types.FrameTransaction
+	frameIndex int
+	interrupt  atomic.Bool           // Atomic flag to signal execution interruption
+	reason     atomic.Pointer[error] // Reason for the interruption, populated by Stop
 }
 
 type prestateTracerConfig struct {
@@ -152,12 +154,21 @@ func newPrestateTracer(ctx *tracers.Context, cfg json.RawMessage) (*tracers.Trac
 			OnSystemCallStartV2: t.OnSystemCallStartV2,
 			OnTxEndV2:           t.OnTxEndV2,
 			OnOpcodeV2:          t.OnOpcodeV2,
+			OnEnterV2:           t.OnEnterV2,
 			OnExitV2:            t.OnExitV2,
 		},
 		GetResult:         t.GetResult,
 		MarshalFastJSONTo: t.MarshalFastJSONTo,
 		Stop:              t.Stop,
 	}, nil
+}
+
+func (t *prestateTracer) OnEnterV2(depth int, typ byte, from, to accounts.Address, precompile bool, input []byte, gas mdgas.MdGas, value uint256.Int, code []byte) {
+	// Frames are the depth-one children of the synthetic transaction root,
+	// including skipped frames. Nested calls keep the current frame's mode.
+	if t.frameTx != nil && depth == 1 {
+		t.frameIndex++
+	}
 }
 
 // Capture the journaled status after all call and atomic batch rollbacks.
@@ -194,12 +205,16 @@ func (t *prestateTracer) OnOpcodeV2(pc uint64, opcode byte, gas mdgas.MdGas, cos
 	caller := scope.Address()
 	switch {
 	case stackLen >= 3 && op == vm.TXDIFF:
-		// Undefined opcodes reach this hook before their execution error is set.
-		if !t.env.Rules.IsBogota {
+		// The hook runs before TXDIFF rejects its context or reserved operand.
+		if !t.env.Rules.IsBogota || t.frameTx == nil || t.frameIndex < 0 || t.frameIndex >= len(t.frameTx.Frames) ||
+			t.frameTx.Frames[t.frameIndex].Mode != types.FramePostTx {
 			return
 		}
 		param := &stackData[stackLen-1]
 		if !param.IsUint64() || param.Uint64() > 5 {
+			return
+		}
+		if param.Uint64() >= 2 && !stackData[stackLen-3].IsZero() {
 			return
 		}
 		addr := accounts.InternAddress(stackData[stackLen-2].Bytes20())
@@ -245,9 +260,11 @@ func (t *prestateTracer) OnOpcodeV2(pc uint64, opcode byte, gas mdgas.MdGas, cos
 
 func (t *prestateTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from accounts.Address) {
 	t.env = env
+	t.frameTx, _ = tx.Unwrap().(*types.FrameTransaction)
+	t.frameIndex = -1
 	t.lookupAccount(from)
 	t.lookupAccount(env.Coinbase)
-	if frameTx, ok := tx.Unwrap().(*types.FrameTransaction); ok {
+	if frameTx := t.frameTx; frameTx != nil {
 		// Capture direct targets before any frame runs; earlier frames may change
 		// the account state or delegation that a later frame will observe.
 		for _, frame := range frameTx.Frames {
@@ -294,6 +311,7 @@ func (t *prestateTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction,
 
 func (t *prestateTracer) OnSystemCallStartV2(env *tracing.VMContext) {
 	t.env = env
+	t.frameTx = nil
 	t.lookupAccount(env.Coinbase)
 }
 

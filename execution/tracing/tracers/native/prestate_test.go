@@ -147,8 +147,13 @@ func TestPrestateTracerTxDiffForkRules(t *testing.T) {
 				IntraBlockState: &postTxIBS{},
 				Rules:           &chain.Rules{IsBogota: tc.bogota},
 			}
+			tr.frameTx = &types.FrameTransaction{Frames: []types.Frame{{Mode: types.FramePostTx}}}
+			var operand uint256.Int
+			if tc.param <= 1 {
+				operand.SetBytes(slot[:])
+			}
 			scope := &fakeOpContext{stack: []uint256.Int{
-				*new(uint256.Int).SetBytes(slot[:]),
+				operand,
 				*new(uint256.Int).SetBytes(addr[:]),
 				*uint256.NewInt(tc.param),
 			}}

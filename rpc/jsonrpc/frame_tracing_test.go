@@ -801,3 +801,44 @@ func TestPostTxPrestateTracer(t *testing.T) {
 	require.Contains(t, trace, queried)
 	require.Equal(t, common.HexToHash("0x2a"), trace[queried].Storage[key])
 }
+
+func TestPrestateTracerNestedTxDiff(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		mode       uint8
+		param      uint64
+		operand    uint64
+		wantAccess bool
+	}{
+		{name: "valid POST_TX storage read", mode: types.FramePostTx, param: 0, operand: 7, wantAccess: true},
+		{name: "outside POST_TX", mode: types.FrameSender, param: 0, operand: 7},
+		{name: "reserved balance before operand", mode: types.FramePostTx, param: 2, operand: 1},
+		{name: "reserved balance after operand", mode: types.FramePostTx, param: 3, operand: 1},
+		{name: "reserved code hash before operand", mode: types.FramePostTx, param: 4, operand: 1},
+		{name: "reserved code hash after operand", mode: types.FramePostTx, param: 5, operand: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			evm, tx := frameTraceTestEnv(t)
+			ibs := evm.IntraBlockState()
+			child, queried := common.HexToAddress("0x4000"), common.HexToAddress("0x5000")
+			require.NoError(t, ibs.SetBalance(accounts.InternAddress(queried), uint256.Int{1}, tracing.BalanceChangeUnspecified))
+			require.NoError(t, ibs.SetState(accounts.InternAddress(queried), accounts.InternKey(common.HexToHash("0x07")), uint256.Int{42}))
+			code := program.New().Push(tc.operand).Push(queried).Push(tc.param).Op(vm.TXDIFF, vm.POP, vm.STOP).Bytes()
+			require.NoError(t, ibs.SetCode(accounts.InternAddress(child), code, tracing.CodeChangeUnspecified))
+			code = program.New().StaticCall(uint256.NewInt(10_000), child, 0, 0, 0, 0).Op(vm.POP, vm.STOP).Bytes()
+			require.NoError(t, ibs.SetCode(accounts.InternAddress(*tx.Frames[1].Target), code, tracing.CodeChangeUnspecified))
+			tx.Frames[1].Mode = tc.mode
+			tx.Frames[1].Limits.Execution = 30_000
+
+			var trace map[common.Address]struct {
+				Storage map[common.Hash]common.Hash `json:"storage"`
+			}
+			require.NoError(t, json.Unmarshal(traceFrameRPC(t, evm, tx, "prestateTracer", json.RawMessage(`{}`)), &trace))
+			_, recorded := trace[queried]
+			require.Equal(t, tc.wantAccess, recorded, "only valid TXDIFF reads belong in the prestate")
+			if tc.wantAccess {
+				require.Equal(t, common.HexToHash("0x2a"), trace[queried].Storage[common.HexToHash("0x07")])
+			}
+		})
+	}
+}
