@@ -107,9 +107,12 @@ func BlockIdFromRequest(r *http.Request) (*SegmentID, error) {
 	if blockId == "genesis" {
 		return &SegmentID{tag: Genesis}, nil
 	}
-	slotMaybe, err := strconv.ParseUint(blockId, 10, 64)
-	if err == nil {
-		return &SegmentID{slot: &slotMaybe}, nil
+	if !strings.HasPrefix(blockId, "0x") {
+		slot, err := strconv.ParseUint(blockId, 10, 64)
+		if err != nil {
+			return nil, errors.New("invalid path variable: {block_id}")
+		}
+		return &SegmentID{slot: &slot}, nil
 	}
 	root := common.HexToHash(blockId)
 	return &SegmentID{
@@ -137,9 +140,12 @@ func StateIdFromRequest(r *http.Request) (*SegmentID, error) {
 	if stateId == "justified" {
 		return &SegmentID{tag: Justified}, nil
 	}
-	slotMaybe, err := strconv.ParseUint(stateId, 10, 64)
-	if err == nil {
-		return &SegmentID{slot: &slotMaybe}, nil
+	if !strings.HasPrefix(stateId, "0x") {
+		slot, err := strconv.ParseUint(stateId, 10, 64)
+		if err != nil {
+			return nil, errors.New("invalid path variable: {state_id}")
+		}
+		return &SegmentID{slot: &slot}, nil
 	}
 	root := common.HexToHash(stateId)
 	return &SegmentID{
