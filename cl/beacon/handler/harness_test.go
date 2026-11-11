@@ -98,7 +98,7 @@ func TestAttestationRewardsLastPhase0EpochKeepsInclusionDelay(t *testing.T) {
 	fcu.FinalizedSlotVal = math.MaxUint64
 	require.Equal(t, clparams.Phase0Version, h.beaconChainCfg.GetCurrentStateVersion(4))
 
-	r := httptest.NewRequest(http.MethodPost, "/eth/v1/beacon/rewards/attestations/4", nil)
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/rewards/attestations/4", nil)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
