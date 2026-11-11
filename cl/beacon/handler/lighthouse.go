@@ -277,7 +277,11 @@ func (a *ApiHandler) GetLighthouseValidatorInclusion(w http.ResponseWriter, r *h
 		if previousEpochParticipation == nil {
 			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("participation not found for previous epoch"))
 		}
-		return newBeaconResponse(a.computeLighthouseValidatorInclusion(int(validatorIndex), prevEpoch, epoch, validatorSet, currentEpochParticipation, previousEpochParticipation)), nil
+		inclusion, err := a.computeLighthouseValidatorInclusion(int(validatorIndex), prevEpoch, epoch, validatorSet, currentEpochParticipation, previousEpochParticipation)
+		if err != nil {
+			return nil, err
+		}
+		return newBeaconResponse(inclusion), nil
 	}
 
 	snRoTx := a.caplinStateSnapshots.View()
@@ -316,10 +320,18 @@ func (a *ApiHandler) GetLighthouseValidatorInclusion(w http.ResponseWriter, r *h
 	if previousEpochParticipation == nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("participation not found for previous epoch"))
 	}
-	return newBeaconResponse(a.computeLighthouseValidatorInclusion(int(validatorIndex), prevEpoch, epoch, validatorSet, currentEpochParticipation, previousEpochParticipation)), nil
+	inclusion, err := a.computeLighthouseValidatorInclusion(int(validatorIndex), prevEpoch, epoch, validatorSet, currentEpochParticipation, previousEpochParticipation)
+	if err != nil {
+		return nil, err
+	}
+	return newBeaconResponse(inclusion), nil
 }
 
-func (a *ApiHandler) computeLighthouseValidatorInclusion(idx int, prevEpoch, epoch uint64, validatorSet *solid.ValidatorSet, currentEpochParticipation, previousEpochParticipation *solid.ParticipationBitList) *LighthouseValidatorInclusion {
+func (a *ApiHandler) computeLighthouseValidatorInclusion(idx int, prevEpoch, epoch uint64, validatorSet *solid.ValidatorSet, currentEpochParticipation, previousEpochParticipation *solid.ParticipationBitList) (*LighthouseValidatorInclusion, error) {
+	if idx < 0 || idx >= validatorSet.Length() || idx >= currentEpochParticipation.Length() || idx >= previousEpochParticipation.Length() {
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("validator not found"))
+	}
+
 	validator := validatorSet.Get(idx)
 	prevFlags := cltypes.ParticipationFlags(previousEpochParticipation.Get(idx))
 	currFlags := cltypes.ParticipationFlags(currentEpochParticipation.Get(idx))
@@ -333,5 +345,5 @@ func (a *ApiHandler) computeLighthouseValidatorInclusion(idx int, prevEpoch, epo
 		IsCurrentEpochTargetAttester:     currFlags.HasFlag(int(a.beaconChainCfg.TimelyTargetFlagIndex)),
 		IsPreviousEpochTargetAttester:    prevFlags.HasFlag(int(a.beaconChainCfg.TimelyTargetFlagIndex)),
 		IsPreviousEpochHeadAttester:      prevFlags.HasFlag(int(a.beaconChainCfg.TimelyHeadFlagIndex)),
-	}
+	}, nil
 }
