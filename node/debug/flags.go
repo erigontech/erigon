@@ -23,6 +23,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon/common/npprof"
 	"net/http"
 	"net/http/pprof" //nolint:gosec
 	"os"
@@ -353,6 +354,8 @@ func StartPProf(address string, metricsMux *http.ServeMux) *http.ServeMux {
 		pprofMux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
 		pprofMux.HandleFunc("/debug/pprof/trace", pprof.Trace)
 		pprofMux.Handle("/debug/fgprof", fgprof.Handler())
+		pprofMux.HandleFunc("/debug/pprof/npcpu", npprof.Handler("npcpu"))
+		pprofMux.HandleFunc("/debug/pprof/npfg", npprof.Handler("npfg"))
 
 		pprofServer := &http.Server{
 			Addr:              address,
@@ -373,6 +376,8 @@ func StartPProf(address string, metricsMux *http.ServeMux) *http.ServeMux {
 		metricsMux.HandleFunc("/debug/pprof/profile", pprof.Profile)
 		metricsMux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
 		metricsMux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+		metricsMux.HandleFunc("/debug/pprof/npcpu", npprof.Handler("npcpu"))
+		metricsMux.HandleFunc("/debug/pprof/npfg", npprof.Handler("npfg"))
 
 		return metricsMux
 	}
