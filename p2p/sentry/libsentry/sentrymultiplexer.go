@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"slices"
 	"sync"
 
 	"golang.org/x/sync/errgroup"
@@ -498,13 +499,9 @@ func (m *sentryMultiplexer) Peers(ctx context.Context, in *emptypb.Empty, opts .
 		total += len(sentPeers.GetPeers())
 	}
 
-	var allPeers []*typesproto.PeerInfo
-	if total > 0 {
-		allPeers = make([]*typesproto.PeerInfo, total)
-		off := 0
-		for _, sentPeers := range allReplies {
-			off += copy(allPeers[off:], sentPeers.GetPeers())
-		}
+	allPeers := slices.Grow([]*typesproto.PeerInfo(nil), total)
+	for _, sentPeers := range allReplies {
+		allPeers = append(allPeers, sentPeers.GetPeers()...)
 	}
 
 	return &sentryproto.PeersReply{Peers: allPeers}, nil
