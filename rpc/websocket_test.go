@@ -136,7 +136,7 @@ func TestWebsocketLargeCall(t *testing.T) {
 
 	// This call sends slightly less than the limit and should work.
 	var result echoResult
-	arg := strings.Repeat("x", maxRequestContentLength-200)
+	arg := strings.Repeat("x", MaxRequestContentLength-200)
 	if err := client.Call(&result, "test_echo", arg, 1); err != nil {
 		t.Fatalf("valid call didn't work: %v", err)
 	}
@@ -145,7 +145,7 @@ func TestWebsocketLargeCall(t *testing.T) {
 	}
 
 	// This call sends twice the allowed size and shouldn't work.
-	arg = strings.Repeat("x", maxRequestContentLength*2)
+	arg = strings.Repeat("x", MaxRequestContentLength*2)
 	if err := client.Call(&result, "test_echo", arg); err == nil {
 		t.Fatal("no error for too large call")
 	}
@@ -910,8 +910,8 @@ func TestWebsocketMessageBudget(t *testing.T) {
 	httpsrv := httptest.NewServer(srv.WebsocketHandler([]string{"*"}, nil, false, logger))
 	defer httpsrv.Close()
 	wsURL := "ws:" + strings.TrimPrefix(httpsrv.URL, "http:")
-	srv.ingress.limit = maxRequestContentLength
-	require.True(t, srv.ingress.acquire(maxRequestContentLength)) // another body holds the whole budget
+	srv.ingress.limit = MaxRequestContentLength
+	require.True(t, srv.ingress.acquire(MaxRequestContentLength)) // another body holds the whole budget
 
 	call := func(size int) (string, error) {
 		conn, resp, err := websocket.Dial(t.Context(), wsURL, nil)
@@ -934,7 +934,7 @@ func TestWebsocketMessageBudget(t *testing.T) {
 	_, err = call(int(smallBodyLimit) + 1)
 	require.Error(t, err) // over budget: the socket is dropped (CloseNow), not gracefully closed
 
-	srv.ingress.release(maxRequestContentLength)
+	srv.ingress.release(MaxRequestContentLength)
 	resp, err = call(int(smallBodyLimit) + 1)
 	require.NoError(t, err)
 	require.Contains(t, resp, `"result"`)
@@ -946,9 +946,9 @@ func TestWebsocketMessageBudgetDropsPartialFrame(t *testing.T) {
 	logger := log.New()
 	srv := newTestServer(logger)
 	defer srv.Stop()
-	srv.ingress.limit = maxRequestContentLength
-	require.True(t, srv.ingress.acquire(maxRequestContentLength))
-	defer srv.ingress.release(maxRequestContentLength)
+	srv.ingress.limit = MaxRequestContentLength
+	require.True(t, srv.ingress.acquire(MaxRequestContentLength))
+	defer srv.ingress.release(MaxRequestContentLength)
 
 	handlerDone := make(chan struct{})
 	handler := srv.WebsocketHandler([]string{"*"}, nil, false, logger)
@@ -995,7 +995,7 @@ func TestWebsocketMessageBudgetDropsPartialFrame(t *testing.T) {
 	case <-time.After(timeout):
 		t.Fatal("the WebSocket handler did not stop after dropping the socket")
 	}
-	require.Equal(t, int64(maxRequestContentLength), srv.ingress.used.Load())
+	require.Equal(t, int64(MaxRequestContentLength), srv.ingress.used.Load())
 }
 
 // holdService keeps a call running until the test releases it.

@@ -104,11 +104,6 @@ func (cc *ExecutionClientEngine) isLocal() bool {
 
 func (cc *ExecutionClientEngine) SetBeaconChainConfig(beaconCfg *clparams.BeaconChainConfig) {
 	cc.beaconCfg = beaconCfg
-	if engineWithCfg, ok := cc.engine.(interface {
-		SetBeaconChainConfig(*clparams.BeaconChainConfig)
-	}); ok {
-		engineWithCfg.SetBeaconChainConfig(beaconCfg)
-	}
 }
 
 func (cc *ExecutionClientEngine) Close() {
@@ -157,7 +152,12 @@ func (cc *ExecutionClientEngine) NewPayload(
 	if payloadStatus.Status == engine_types.AcceptedStatus {
 		log.Info("[ExecutionClientEngine] New block accepted")
 	}
-	return newPayloadStatusByEngineStatus(payloadStatus.Status), checkPayloadStatus(payloadStatus)
+	status := newPayloadStatusByEngineStatus(payloadStatus.Status)
+	err = checkPayloadStatus(payloadStatus)
+	if payloadStatus.Status == engine_types.InvalidStatus && payloadStatus.LatestValidHash != nil && *payloadStatus.LatestValidHash != (common.Hash{}) {
+		err = &InvalidPayloadError{LatestValidHash: *payloadStatus.LatestValidHash, Err: err}
+	}
+	return status, err
 }
 
 func (cc *ExecutionClientEngine) ForkChoiceUpdate(

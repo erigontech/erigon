@@ -226,8 +226,13 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 		return nil, &rpc.CustomError{Message: fmt.Sprintf("invalid block range: end (%d) < begin (%d)", end, begin), Code: rpc.ErrCodeInvalidParams}
 	}
 
-	if !userProvidedCountLimit && api.blockRangeLimit != 0 && (end-begin) > uint64(api.blockRangeLimit) {
-		return nil, &rpc.CustomError{Message: fmt.Sprintf("%s: %d", errExceedBlockRange, api.blockRangeLimit), Code: rpc.ErrCodeInvalidParams}
+	if api.blockRangeLimit != 0 && (end-begin) > uint64(api.blockRangeLimit) {
+		if userProvidedCountLimit {
+			// A count asks for the latest logs, so the scan keeps the newest blocks of the range.
+			begin = end - uint64(api.blockRangeLimit)
+		} else {
+			return nil, &rpc.CustomError{Message: fmt.Sprintf("%s: %d", errExceedBlockRange, api.blockRangeLimit), Code: rpc.ErrCodeInvalidParams}
+		}
 	}
 
 	// A count-limited scan may finish before reaching the pruned part of its range.
