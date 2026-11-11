@@ -56,7 +56,7 @@ start_erigon() {
 	local args
 	if [ "$MODE" = remote ]; then
 		args=(--datadir "$DATADIR" --eez.enabled --eez.l1.rpc "$EEZ_DEVNET_L1_RPC" --eez.l1.poll=1s
-			--http.api=eth,debug,eez --http.port 18545 --nodiscover)
+			"--http.api=eth,debug,eez" --http.port 18545 --nodiscover)
 	else
 		# The L1 node takes the enclave's genesis and peers, which are on a
 		# private network; the EEZ chain serves its JSON-RPC on 18545, as the

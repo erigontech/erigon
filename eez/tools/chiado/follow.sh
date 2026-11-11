@@ -69,7 +69,7 @@ hex() { printf '0x%x' "$1"; }
 
 case $MODE in
 remote)
-	args=(--chain=eez-chiado --eez.enabled --eez.l1.rpc "$L1_RPC" --http.api=eth,eez --http.port 28545)
+	args=(--chain=eez-chiado --eez.enabled --eez.l1.rpc "$L1_RPC" "--http.api=eth,eez" --http.port 28545)
 	START="${START:-90}"
 	;;
 all-in-one)
