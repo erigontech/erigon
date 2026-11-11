@@ -458,7 +458,7 @@ func TestCanonicalViewReaderFrozenRangeFailure(t *testing.T) {
 }
 
 // Crossing the renewal interval during execution must not mix state from
-// different views; setup retries cannot repair an already running trace.
+// different views.
 func TestTraceBlockHashDoesNotRenewStateView(t *testing.T) {
 	for _, endpoint := range []string{"traceCall", "traceCallMany"} {
 		t.Run(endpoint, func(t *testing.T) {
