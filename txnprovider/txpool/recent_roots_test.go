@@ -305,6 +305,83 @@ func TestFramePoolSupersededUpdateKeepsActivation(t *testing.T) {
 	require.True(t, pool.headIsBogota, "completion of an older update must not overwrite the newer activation")
 }
 
+func recentRootPoolHeader(blockTime, slot uint64) *types.Header {
+	return &types.Header{
+		Number: uint256.Int{21}, Time: blockTime, SlotNumber: common.NewUint64(slot),
+		BaseFee: uint256.NewInt(1), WithdrawalsHash: new(common.Hash),
+		BlobGasUsed: new(uint64), ExcessBlobGas: new(uint64),
+		ParentBeaconBlockRoot: new(common.Hash), RequestsHash: new(common.Hash),
+		BlockAccessListHash: new(common.Hash),
+	}
+}
+
+func TestFramePoolReloadRecentRootAge(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		headSlot uint64
+		keep     bool
+	}{
+		{"oldest usable", 10 + protocol.RecentRootHistorySlots - 2, true},
+		{"expired", 10 + protocol.RecentRootHistorySlots - 1, false},
+	} {
+		for _, notificationFirst := range []bool{false, true} {
+			name := "head from database/"
+			if notificationFirst {
+				name = "head from notification/"
+			}
+			t.Run(name+tc.name, func(t *testing.T) {
+				now := uint64(time.Now().Unix())
+				config := chain.AllProtocolChanges.Copy()
+				config.BogotaTime = common.NewUint64(now - 12)
+				ctx, pool, poolDB, coreDB, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash, config)
+				pool.chainID.SetUint64(1)
+				backend := &frameValidationBackend{err: errors.New("validation backend unavailable")}
+				pool.ethBackend = backend
+				header := recentRootPoolHeader(now, tc.headSlot)
+				require.NoError(t, coreDB.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
+					if err := rawdb.WriteHeader(tx, header); err != nil {
+						return err
+					}
+					rawdb.WriteHeadBlockHash(tx, header.Hash())
+					return nil
+				}))
+				if notificationFirst {
+					reset := newBlockChangeForAccounts(header.Hash(), 0, sender)
+					reset.StateChangesIncomplete = true
+					reset.ChangeBatch[0].BlockHeight = header.Number.Uint64()
+					reset.ChangeBatch[0].BlockTime = now
+					reset.ChangeBatch[0].SlotNumber = header.SlotNumber
+					require.NoError(t, pool.OnNewBlock(ctx, reset, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+				}
+				slot := recentRootPoolSlot(t, sender, 10, 1)
+				require.NoError(t, poolDB.Update(ctx, func(tx kv.RwTx) error {
+					return tx.Put(kv.PoolTransaction, slot.IDHash[:], append(sender[:], slot.Rlp...))
+				}))
+
+				require.NoError(t, pool.start(ctx))
+				mt := pool.byHash[string(slot.IDHash[:])]
+				if tc.keep {
+					require.NotNil(t, mt)
+					require.Zero(t, mt.currentSubPool)
+					require.Len(t, backend.calls, 1)
+				} else {
+					require.Nil(t, mt, "expired roots must be discarded without simulation")
+					require.Empty(t, pool.all.senderIDFrameTxn)
+					require.Empty(t, backend.calls)
+				}
+				_, err := pool.flushNoFsync(ctx)
+				require.NoError(t, err)
+				require.NoError(t, poolDB.View(ctx, func(tx kv.Tx) error {
+					persisted, err := tx.Has(kv.PoolTransaction, slot.IDHash[:])
+					require.NoError(t, err)
+					require.Equal(t, tc.keep, persisted)
+					return nil
+				}))
+			})
+		}
+	}
+}
+
 func TestFramePoolRestoredRecentRootEviction(t *testing.T) {
 	for _, tc := range []struct {
 		name             string
@@ -330,7 +407,7 @@ func TestFramePoolRestoredRecentRootEviction(t *testing.T) {
 					backend.err = errors.New("validation backend unavailable")
 				}
 				pool.ethBackend = backend
-				header := &types.Header{Number: uint256.Int{21}, Time: now, SlotNumber: common.NewUint64(21)}
+				header := recentRootPoolHeader(now, 21)
 				require.NoError(t, coreDB.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
 					if err := rawdb.WriteHeader(tx, header); err != nil {
 						return err

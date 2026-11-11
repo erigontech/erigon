@@ -3219,16 +3219,17 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx) error {
 }
 
 func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.CacheView, parked *[]*metaTxn) error {
-	if p.stateBlockHash == (common.Hash{}) {
+	initializeHead := p.stateBlockHash == (common.Hash{})
+	if initializeHead {
 		// Header sync can run ahead of execution, so pin validation to the executed head.
 		p.stateBlockHash = rawdb.ReadHeadBlockHash(coreTx)
-		header, err := rawdb.ReadHeaderByHash(coreTx, p.stateBlockHash)
-		if err != nil {
-			return err
-		}
-		if header != nil {
-			p.headIsBogota = p.chainConfig.IsBogota(header.Time)
-		}
+	}
+	header, err := rawdb.ReadHeaderByHash(coreTx, p.stateBlockHash)
+	if err != nil {
+		return err
+	}
+	if initializeHead && header != nil {
+		p.headIsBogota = p.chainConfig.IsBogota(header.Time)
 	}
 	if p.lastSeenBlock.Load() == 0 {
 		lastSeenBlock, err := LastSeenBlock(tx)
@@ -3341,6 +3342,20 @@ func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.
 
 	immediate, frames := p.splitRestoredTxns(restored)
 	*parked = p.restoreFramesLocked(p.lastSeenBlock.Load(), frames)
+	if header != nil {
+		// Expired roots must not occupy a sender's frame slot while validation is unavailable.
+		pendingSlot := protocol.FrameValidationSlot(header.SlotNumber)
+		*parked = slices.DeleteFunc(*parked, func(mt *metaTxn) bool {
+			roots := protocol.FrameTransactionRecentRoots(mt.TxnSlot.Txn.(*types.FrameTransaction))
+			invalidRoots := slices.ContainsFunc(roots, func(ref protocol.RecentRootReference) bool {
+				return !ref.ValidAt(pendingSlot)
+			})
+			if invalidRoots {
+				p.discardLocked(mt, txpoolcfg.FrameStateChanged)
+			}
+			return invalidRoots
+		})
+	}
 	var txns TxnSlots
 	cells := make(blobCells)
 	for i, txn := range immediate.Txns {
