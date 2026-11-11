@@ -522,6 +522,8 @@ func TestResumedBlockValidatesBlockAccessList(t *testing.T) {
 		{"full/dropped block-start writes", droppedInit, fromBlockStart, true},
 		{"after tx0/valid", fx.block, afterTx0, false},
 		{"after tx0/phantom account", phantom, afterTx0, true},
+		{"after tx0/no sidecar, valid", fx.block.WithBlockAccessListSidecar(nil), afterTx0, false},
+		{"after tx0/no sidecar, phantom account", phantom.WithBlockAccessListSidecar(nil), afterTx0, true},
 		{"after block start/valid", fx.block, afterBlockInit, false},
 		{"after block start/dropped block-start writes", droppedInit, afterBlockInit, true},
 		{"before block end/valid", fx.block, beforeBlockEnd, false},
