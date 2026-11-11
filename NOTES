@@ -9,10 +9,10 @@ Commit 1: skip batched body signature verification when FullValidate is false.
   Direct ProcessBlock calls keep validation enabled, including block production.
 - Baseline gate before edits: make lint, requested Go packages, and make erigon
   passed.
-- BenchmarkReplayStateNonHead -count 6 before: 6.005, 6.065, 6.502, 6.695,
-  7.623, 8.168 ms/op; median 6.599 ms/op.
-- BenchmarkReplayStateNonHead -count 6 after: 3.942, 3.944, 3.974, 4.124,
-  4.204, 4.268 ms/op; median 4.049 ms/op.
+- BenchmarkReplayStateNonHead -count 6 before: 6,000,129; 6,065,258;
+  6,502,145; 6,695,309; 7,623,102; 8,167,865 ns/op; median 6,598,697 ns/op.
+- BenchmarkReplayStateNonHead -count 6 after: 3,942,413; 3,943,759; 3,974,321;
+  4,124,392; 4,201,256; 4,268,152 ns/op; median 4,049,357 ns/op.
 
 Commit 2: retain up to four replayed states by block root and return copies.
 
@@ -26,10 +26,10 @@ Commit 2: retain up to four replayed states by block root and return copies.
   removed from the cache and cannot be replayed.
 - Four entries cap the cache. Mainnet beacon states are hundreds of MB, so the
   cap bounds retained state memory to roughly 1 GB at 250 MB per state.
-- BenchmarkReplayStateNonHead -count 6 before: 3.942, 3.944, 3.974, 4.124,
-  4.204, 4.268 ms/op; median 4.049 ms/op.
-- BenchmarkReplayStateNonHead -count 6 after: 0.253, 0.259, 0.259, 0.260,
-  0.262, 0.264 ms/op; median 0.259 ms/op.
+- BenchmarkReplayStateNonHead -count 6 before: 3,942,413; 3,943,759;
+  3,974,321; 4,124,392; 4,201,256; 4,268,152 ns/op; median 4,049,357 ns/op.
+- BenchmarkReplayStateNonHead -count 6 after: 258,813; 252,654; 263,654;
+  259,350; 259,403; 261,813 ns/op; median 259,377 ns/op.
 
 Compatibility correction after the committed gate exposed block production's
 direct ProcessBlock call. Direct calls retain signature validation; only
@@ -39,7 +39,7 @@ TransitionState forwards its validation flag to the batch check.
   TestProcessProducedBlockRetainsValidBidAfterInvalidPayloadAttestationSignature/invalid
   (expected signature-validation error, got nil). The direct ProcessBlock
   wrapper now keeps validation enabled; the targeted tests pass.
-- BenchmarkReplayStateNonHead -count 6 before this correction: 0.253, 0.259,
-  0.259, 0.260, 0.262, 0.264 ms/op; median 0.260 ms/op.
-- BenchmarkReplayStateNonHead -count 6 after this correction: 0.253, 0.256,
-  0.260, 0.260, 0.328, 0.378 ms/op; median 0.260 ms/op.
+- BenchmarkReplayStateNonHead -count 6 before this correction: 258,813;
+  252,654; 263,654; 259,350; 259,403; 261,813 ns/op; median 259,377 ns/op.
+- BenchmarkReplayStateNonHead -count 6 after this correction: 253,276;
+  255,373; 259,783; 259,822; 328,098; 377,797 ns/op; median 259,803 ns/op.
