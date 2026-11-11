@@ -161,8 +161,9 @@ func (api *DebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash common.Ha
 	})
 }
 
-// Remote cursor operations can renew the view even on Close, and file retirement
-// can change the history generation without changing MDBX's ViewID.
+// Remote cursor operations can renew the database view even on Close.
+// ViewID is always checked; history generation is also checked when the backend
+// provides it, because file retirement need not change MDBX's ViewID.
 // The callback must be safe to repeat and must close its cursors before returning.
 // Results and errors from reads that cross either change are discarded.
 func readWithStableTxView[T any](ctx context.Context, tx kv.TemporalTx, read func() (T, error)) (T, error) {

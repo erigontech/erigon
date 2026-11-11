@@ -189,8 +189,7 @@ func (r *RemoteBlockReader) FrozenBlocksObserved() (uint64, bool) {
 	return value, observed
 }
 
-// IsFrozen can use a cached count to confirm a frozen block, but needs a fresh
-// observation to rule one out: snapshots may have advanced since the last fetch.
+// The frozen range only grows, so a cached positive answer remains valid.
 func (r *RemoteBlockReader) IsFrozen(ctx context.Context, blockNum uint64) (bool, error) {
 	frozen, observed, _ := r.frozenBlocks.Load()
 	if observed && frozen > 0 && blockNum <= frozen {
