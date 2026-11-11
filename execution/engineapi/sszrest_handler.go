@@ -276,7 +276,7 @@ func writeJSON(w http.ResponseWriter, v any) {
 }
 
 func (e *EngineServer) handleSSZNewPayload(w http.ResponseWriter, r *http.Request, forkName string, version clparams.StateVersion) {
-	status, _, ok := e.sszNewPayload(w, r, forkName, version)
+	status, ok := e.sszNewPayload(w, r, forkName, version, nil)
 	if !ok {
 		return
 	}
@@ -289,17 +289,17 @@ func (e *EngineServer) handleSSZNewPayloadWithWitness(w http.ResponseWriter, r *
 		writeProblem(w, http.StatusBadRequest, problemUnsupportedFork, fmt.Sprintf("payloads/witness is not served for %q", forkName))
 		return
 	}
-	status, blockHash, ok := e.sszNewPayload(w, r, forkName, version)
+	var witness *jsonrpc.ExecutionWitnessResult
+	var witnessErr error
+	status, ok := e.sszNewPayload(w, r, forkName, version, func(blockHash common.Hash) {
+		witness, witnessErr = e.payloadWitness(r.Context(), blockHash)
+	})
 	if !ok {
 		return
 	}
-	var witness *jsonrpc.ExecutionWitnessResult
-	if status.Status == engine_types.ValidStatus {
-		var err error
-		if witness, err = e.payloadWitness(r.Context(), blockHash); err != nil {
-			writeProblem(w, http.StatusInternalServerError, problemInternal, err.Error())
-			return
-		}
+	if witnessErr != nil {
+		writeProblem(w, http.StatusInternalServerError, problemInternal, witnessErr.Error())
+		return
 	}
 	out, err := encodePayloadStatusWithWitness(status, witness)
 	if err != nil {
@@ -326,28 +326,32 @@ func (e *EngineServer) payloadWitness(ctx context.Context, blockHash common.Hash
 		return nil, err
 	}
 	if !held {
-		return nil, errPayloadWitnessUnavailable
+		// A committed payload's witness is rebuilt from commitment history.
+		mode := "canonical"
+		if witness, err = e.witnessBuilder.ExecutionWitness(ctx, rpc.BlockNumberOrHashWithHash(blockHash, true), &mode); err != nil {
+			return nil, fmt.Errorf("%w: %w", errPayloadWitnessUnavailable, err)
+		}
 	}
 	e.payloadWitnesses.Add(blockHash, witness)
 	return witness, nil
 }
 
 // sszNewPayload returns false once it has written an error response.
-func (e *EngineServer) sszNewPayload(w http.ResponseWriter, r *http.Request, forkName string, version clparams.StateVersion) (*engine_types.PayloadStatus, common.Hash, bool) {
+func (e *EngineServer) sszNewPayload(w http.ResponseWriter, r *http.Request, forkName string, version clparams.StateVersion, onValid func(blockHash common.Hash)) (*engine_types.PayloadStatus, bool) {
 	if !checkSSZContentType(w, r) {
-		return nil, common.Hash{}, false
+		return nil, false
 	}
 	body, ok := readSSZBody(w, r, sszMaxPayloadRequestBody)
 	if !ok {
-		return nil, common.Hash{}, false
+		return nil, false
 	}
 	payload, parentRoot, executionRequests, err := decodeNewPayloadEnvelope(body, version)
 	if err != nil {
 		e.writeSSZDecodeProblem(w, r, err)
-		return nil, common.Hash{}, false
+		return nil, false
 	}
 	if !e.checkSSZForkTimestamp(w, forkName, uint64(payload.Timestamp)) {
-		return nil, common.Hash{}, false
+		return nil, false
 	}
 	var status *engine_types.PayloadStatus
 	switch version {
@@ -356,15 +360,15 @@ func (e *EngineServer) sszNewPayload(w http.ResponseWriter, r *http.Request, for
 	case clparams.CapellaVersion:
 		status, err = e.NewPayloadV2(r.Context(), payload)
 	case clparams.DenebVersion:
-		status, err = e.newPayload(r.Context(), payload, nil, &parentRoot, nil, version, true)
+		status, err = e.newPayload(r.Context(), payload, nil, &parentRoot, nil, version, true, onValid)
 	default:
-		status, err = e.newPayload(r.Context(), payload, nil, &parentRoot, executionRequests, version, true)
+		status, err = e.newPayload(r.Context(), payload, nil, &parentRoot, executionRequests, version, true, onValid)
 	}
 	if err != nil {
 		writeEngineProblem(w, err)
-		return nil, common.Hash{}, false
+		return nil, false
 	}
-	return status, payload.BlockHash, true
+	return status, true
 }
 
 func (e *EngineServer) handleSSZGetPayload(w http.ResponseWriter, r *http.Request, forkName string, version clparams.StateVersion, payloadID string) {

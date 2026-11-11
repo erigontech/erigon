@@ -288,10 +288,12 @@ func (e *EngineServer) checkRequestsPresence(version clparams.StateVersion, exec
 	return nil
 }
 
-// newPayload validates and may execute a payload.
+// newPayload validates and may execute a payload. A non-nil onValid runs for a VALID payload under the engine
+// lock, so no other engine call replaces or commits the validated state before onValid reads it.
 func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.ExecutionPayload,
 	expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash,
 	executionRequests []hexutil.Bytes, version clparams.StateVersion, deriveBlobHashes bool,
+	onValid func(blockHash common.Hash),
 ) (*engine_types.PayloadStatus, error) {
 	defer engineNewPayloadDuration.ObserveDuration(time.Now())
 	if req == nil {
@@ -565,6 +567,11 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	}
 	if possibleStatus != nil {
 		e.logger.Debug("[NewPayload] got quick payload status", "payloadStatus", possibleStatus)
+		if onValid != nil && possibleStatus.Status == engine_types.ValidStatus {
+			e.lock.Lock()
+			defer e.lock.Unlock()
+			onValid(blockHash)
+		}
 		return possibleStatus, nil
 	}
 
@@ -593,7 +600,9 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	if payloadStatus.CriticalError != nil {
 		return nil, payloadStatus.CriticalError
 	}
-
+	if onValid != nil && payloadStatus.Status == engine_types.ValidStatus {
+		onValid(blockHash)
+	}
 	return payloadStatus, nil
 }
 

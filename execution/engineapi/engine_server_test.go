@@ -179,7 +179,7 @@ func TestNewPayloadBoundsDerivedBlobHashAllocations(t *testing.T) {
 	measure := func(derive bool) uint64 {
 		var before, after runtime.MemStats
 		runtime.ReadMemStats(&before)
-		status, err := srv.newPayload(ctx, payload, []common.Hash{}, &common.Hash{}, nil, clparams.DenebVersion, derive)
+		status, err := srv.newPayload(ctx, payload, []common.Hash{}, &common.Hash{}, nil, clparams.DenebVersion, derive, nil)
 		runtime.ReadMemStats(&after)
 		require.NoError(t, err)
 		require.Equal(t, engine_types.InvalidStatus, status.Status)
@@ -243,6 +243,44 @@ func TestNewPayloadV2WithdrawalsValidation(t *testing.T) {
 			require.Equal(t, engine_types.SyncingStatus, status.Status)
 		})
 	}
+}
+
+// onValid reads the validated state in the engine-lock section of the validation, so no forkchoice update or other
+// payload replaces or commits that state first.
+func TestNewPayloadRunsOnValidUnderTheEngineLock(t *testing.T) {
+	parent := makeParentHeader(1000)
+	parent.Number.SetUint64(99)
+	header := makeParentHeader(1001)
+	header.ParentHash = parent.Hash()
+	header.UncleHash = empty.UncleHash
+	header.TxHash = empty.RootHash
+	withdrawalsHash := types.DeriveSha(types.Withdrawals{})
+	header.WithdrawalsHash = &withdrawalsHash
+	block := types.NewBlockFromStorage(header.Hash(), header, nil, nil, types.Withdrawals{}, nil)
+	payload, err := engine_types.ExecutionPayloadFromBlock(block)
+	require.NoError(t, err)
+
+	cfg := preCancunChainConfig()
+	stub := &stubExecutionModule{
+		getHeaderFunc:     getHeaderReturning(parent.Hash(), parent),
+		currentHeaderFunc: func(context.Context) (*types.Header, error) { return parent, nil },
+	}
+	downloader := engine_block_downloader.NewEngineBlockDownloader(t.Context(), log.New(), stub, nil, nil, cfg, ethconfig.Sync{}, nil)
+	srv := NewEngineServer(log.New(), cfg, stub, downloader, false, false, false, true, nil, nil, 0, 64)
+
+	var validHash common.Hash
+	var lockHeld bool
+	status, err := srv.newPayload(t.Context(), payload, nil, nil, nil, clparams.CapellaVersion, false, func(blockHash common.Hash) {
+		validHash = blockHash
+		lockHeld = !srv.lock.TryLock()
+		if !lockHeld {
+			srv.lock.Unlock()
+		}
+	})
+	require.NoError(t, err)
+	require.Equal(t, engine_types.ValidStatus, status.Status)
+	require.Equal(t, block.Hash(), validHash)
+	require.True(t, lockHeld)
 }
 
 func TestNewPayloadRejectsMoreTransactionsThanGasLimitAllows(t *testing.T) {

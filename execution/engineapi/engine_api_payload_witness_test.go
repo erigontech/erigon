@@ -115,14 +115,38 @@ func TestEngineApiPayloadWitness(t *testing.T) {
 		require.Equal(t, payload.ExecutionPayload.ParentHash, parent.Hash())
 
 		require.NoError(t, eat.MockCl.UpdateForkChoice(ctx, payload))
-		client, err := rpc.DialContext(ctx, eat.JsonRpcUrl, log.Root())
+		requireDebugExecutionWitness(ctx, t, eat, payload, witness)
+	})
+}
+
+func requireDebugExecutionWitness(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester, p *engineapitester.MockClPayload, witness *jsonrpc.ExecutionWitnessResult) {
+	client, err := rpc.DialContext(ctx, eat.JsonRpcUrl, log.Root())
+	require.NoError(t, err)
+	defer client.Close()
+	var want jsonrpc.ExecutionWitnessResult
+	require.NoError(t, client.CallContext(ctx, &want, "debug_executionWitness", p.ExecutionPayload.BlockHash, "canonical"))
+	require.Equal(t, want.State, witness.State)
+	require.Equal(t, want.Codes, witness.Codes)
+	require.Equal(t, want.Headers, witness.Headers)
+}
+
+// A payload committed before its witness was requested gets the witness rebuilt from commitment history.
+func TestEngineApiPayloadWitnessForCommittedPayload(t *testing.T) {
+	eat := newPayloadWitnessTester(t, engineapitester.EngineApiTesterInitArgs{
+		EthConfigTweaker: func(cfg *ethconfig.Config) { cfg.KeepExecutionProofs = true },
+		EnableDebugAPI:   true,
+	})
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		transactOpts, err := bind.NewKeyedTransactorWithChainID(eat.CoinbaseKey, eat.ChainId())
 		require.NoError(t, err)
-		defer client.Close()
-		var want jsonrpc.ExecutionWitnessResult
-		require.NoError(t, client.CallContext(ctx, &want, "debug_executionWitness", payload.ExecutionPayload.BlockHash, "canonical"))
-		require.Equal(t, want.State, witness.State)
-		require.Equal(t, want.Codes, witness.Codes)
-		require.Equal(t, want.Headers, witness.Headers)
+		transactOpts.GasLimit = params.MaxTxnGasLimit
+		_, txn, _, err := contracts.DeployChanger(transactOpts, eat.ContractBackend)
+		require.NoError(t, err)
+		payload, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+		require.NoError(t, eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, payload.ExecutionPayload, txn.Hash()))
+
+		requireDebugExecutionWitness(ctx, t, eat, payload, requirePayloadWitness(ctx, t, eat, payload))
 	})
 }
 
