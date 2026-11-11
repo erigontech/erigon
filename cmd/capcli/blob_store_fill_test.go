@@ -501,7 +501,13 @@ func TestBlobArchiveStoreFillDoesNotRetryABadRequest(t *testing.T) {
 
 const windowTestSlots, windowTestServedFrom = 32, 24
 
-func (f *fillFixture) prunedChain() (url string, roots []common.Hash, prunedRequests, allRequests *atomic.Int32) {
+var notServedAnswers = map[string]http.HandlerFunc{
+	"400":   func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusBadRequest) },
+	"404":   func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNotFound) },
+	"empty": func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{"data":[]}`)) },
+}
+
+func (f *fillFixture) prunedChain(notServed http.HandlerFunc) (url string, roots []common.Hash, prunedRequests, allRequests *atomic.Int32) {
 	pruned := map[common.Hash]bool{}
 	for i := range uint64(windowTestSlots) {
 		roots = append(roots, f.addBlock(fillTestSlot+i, 1))
@@ -513,7 +519,7 @@ func (f *fillFixture) prunedChain() (url string, roots []common.Hash, prunedRequ
 		allRequests.Add(1)
 		if pruned[common.HexToHash(r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:])] {
 			prunedRequests.Add(1)
-			w.WriteHeader(http.StatusBadRequest)
+			notServed(w, r)
 			return
 		}
 		http.Redirect(w, r, good+r.URL.Path, http.StatusTemporaryRedirect)
@@ -523,27 +529,35 @@ func (f *fillFixture) prunedChain() (url string, roots []common.Hash, prunedRequ
 }
 
 func TestBlobArchiveStoreFillSkipsSlotsBelowTheFirstSlotAnEndpointServes(t *testing.T) {
-	f := newFillFixture(t)
-	url, roots, prunedRequests, _ := f.prunedChain()
+	for name, notServed := range notServedAnswers {
+		t.Run(name, func(t *testing.T) {
+			f := newFillFixture(t)
+			url, roots, prunedRequests, _ := f.prunedChain(notServed)
 
-	err := f.fill(&BlobArchiveStoreFill{Endpoints: []string{url}, FromSlot: fillTestSlot, ToSlot: fillTestSlot + windowTestSlots - 1}, nil)
-	require.LessOrEqual(t, prunedRequests.Load(), int32(fillWorkers+5), "every pruned slot was requested")
-	require.ErrorContains(t, err, fmt.Sprintf("%d slots with blobs are not served by any endpoint", windowTestServedFrom))
-	for i := windowTestServedFrom; i < windowTestSlots; i++ {
-		require.True(t, f.storedValid(fillTestSlot+uint64(i), roots[i]))
+			err := f.fill(&BlobArchiveStoreFill{Endpoints: []string{url}, FromSlot: fillTestSlot, ToSlot: fillTestSlot + windowTestSlots - 1}, nil)
+			require.LessOrEqual(t, prunedRequests.Load(), int32(fillWorkers+5), "every pruned slot was requested")
+			require.ErrorContains(t, err, fmt.Sprintf("%d slots with blobs are not served by any endpoint", windowTestServedFrom))
+			for i := windowTestServedFrom; i < windowTestSlots; i++ {
+				require.True(t, f.storedValid(fillTestSlot+uint64(i), roots[i]))
+			}
+		})
 	}
 }
 
 func TestBlobArchiveStoreFillDryRunFindsTheFirstSlotAnEndpointServes(t *testing.T) {
-	f := newFillFixture(t)
-	url, roots, _, allRequests := f.prunedChain()
+	for name, notServed := range notServedAnswers {
+		t.Run(name, func(t *testing.T) {
+			f := newFillFixture(t)
+			url, roots, _, allRequests := f.prunedChain(notServed)
 
-	cmd := &BlobArchiveStoreFill{Endpoints: []string{url}, FromSlot: fillTestSlot, ToSlot: fillTestSlot + windowTestSlots - 1, DryRun: true}
-	require.NoError(t, f.fill(cmd, nil))
-	require.EqualValues(t, fillTestSlot+windowTestServedFrom, cmd.windows[0].from.Load())
-	require.LessOrEqual(t, allRequests.Load(), int32(6), "more requests than a binary search over the range")
-	for i, root := range roots {
-		require.False(t, f.storedValid(fillTestSlot+uint64(i), root))
+			cmd := &BlobArchiveStoreFill{Endpoints: []string{url}, FromSlot: fillTestSlot, ToSlot: fillTestSlot + windowTestSlots - 1, DryRun: true}
+			require.NoError(t, f.fill(cmd, nil))
+			require.EqualValues(t, fillTestSlot+windowTestServedFrom, cmd.windows[0].from.Load())
+			require.LessOrEqual(t, allRequests.Load(), int32(6), "more requests than a binary search over the range")
+			for i, root := range roots {
+				require.False(t, f.storedValid(fillTestSlot+uint64(i), root))
+			}
+		})
 	}
 }
 
