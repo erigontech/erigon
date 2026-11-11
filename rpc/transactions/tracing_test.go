@@ -415,7 +415,7 @@ func TestAssembleTracerCapsTheClientTimeout(t *testing.T) {
 	code, timeout := "{result: function() { return 1 }, fault: function() {}}", "1h"
 	config := &tracersConfig.TraceConfig{Tracer: &code, Timeout: &timeout}
 
-	tracer, _, cancel, err := AssembleTracer(t.Context(), config, common.Hash{}, nil, common.Hash{}, 0, jsonstream.New(io.Discard), 50*time.Millisecond)
+	tracer, _, cancel, err := AssembleTracer(t.Context(), config, common.Hash{}, nil, common.Hash{}, 0, jsonstream.New(io.Discard), time.Second)
 	require.NoError(t, err)
 	defer cancel()
 
