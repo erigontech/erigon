@@ -20,8 +20,10 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"runtime"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -320,4 +322,41 @@ func TestWarmupKeyReadsEveryBranchOnThePath(t *testing.T) {
 	}
 	require.NotZero(t, extensionHops, "fixture must carry extension nodes between branches")
 	require.NotZero(t, storageRootExtensions, "fixture must carry storage roots that are extension nodes")
+}
+
+// hashChildBranches answers every prefix with a branch whose only child, nibble 0, is a hash cell, so a warmup of an
+// all-zero key reads one branch per depth without ever blocking.
+type hashChildBranches struct {
+	reads      atomic.Int32
+	readsSeen  atomic.Int32
+	otherRan   chan struct{}
+	startOther sync.Once
+}
+
+func (b *hashChildBranches) Branch([]byte) ([]byte, kv.Step, error) {
+	b.reads.Add(1)
+	b.startOther.Do(func() {
+		go func() {
+			b.readsSeen.Store(b.reads.Load())
+			close(b.otherRan)
+		}()
+	})
+	return []byte{0, 0, 0, 1, byte(fieldHash)}, 0, nil
+}
+
+func (*hashChildBranches) PutBranch([]byte, []byte, []byte) error { return nil }
+
+func (*hashChildBranches) Account([]byte) (*Update, error) { return nil, nil }
+
+func (*hashChildBranches) Storage([]byte) (*Update, error) { return nil, nil }
+
+func TestWarmupKeyLetsOtherGoroutinesRunBetweenBranchReads(t *testing.T) {
+	defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(1))
+
+	b := &hashChildBranches{otherRan: make(chan struct{})}
+	w := &Warmuper{maxDepth: WarmupMaxDepth}
+	w.warmupKey(b, make([]byte, 64), 0)
+	<-b.otherRan
+	require.EqualValues(t, 65, b.reads.Load())
+	require.Less(t, b.readsSeen.Load(), b.reads.Load(), "a goroutine started at the first read must run before the warmup reads the last branch")
 }

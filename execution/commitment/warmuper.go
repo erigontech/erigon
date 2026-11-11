@@ -21,6 +21,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -145,6 +146,9 @@ func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDep
 	depth := startDepth
 	var compactBuf [maxCompactKeyLen]byte
 	for depth <= len(hashedKey) && depth <= w.maxDepth {
+		// The warmup is off the critical path: yield between reads so runnable exec and fold goroutines get the P
+		// without waiting for preemption.
+		runtime.Gosched()
 		prefix := nibbles.HexToCompactInto(compactBuf[:], hashedKey[:depth])
 
 		branchData, _, err := trieCtx.Branch(prefix)
