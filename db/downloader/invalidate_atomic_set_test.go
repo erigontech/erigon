@@ -63,6 +63,10 @@ func TestInvalidateDataKeepsIndependentPrimariesOfTheSameCoordinate(t *testing.T
 	history := writeSnapFile(t, d, "history/v2.1-accounts.0-1024.v")
 	idx := writeSnapFile(t, d, "idx/v3.1-accounts.0-1024.ef")
 	historyAccessor := writeSnapFile(t, d, "accessor/v1.2-accounts.0-1024.vi")
+	for _, n := range []string{"history/v2.1-accounts.0-1024.v", "idx/v3.1-accounts.0-1024.ef", "accessor/v1.2-accounts.0-1024.vi"} {
+		_, err := BuildTorrentIfNeed(t.Context(), n, d.snapDir(), d.torrentFS)
+		require.NoError(err)
+	}
 
 	_, download := prepareLocalDataForDownload(t, d, snaptype.Hex2InfoHash("aa"), name)
 	require.True(download)
@@ -71,4 +75,35 @@ func TestInvalidateDataKeepsIndependentPrimariesOfTheSameCoordinate(t *testing.T
 	require.FileExists(history, "the history .v is its own primary")
 	require.FileExists(idx, "the index .ef is its own primary")
 	require.FileExists(historyAccessor, "the .vi was built from the .v, not the .kv")
+	for _, p := range []string{history, idx, historyAccessor} {
+		require.FileExists(p+".torrent", "a surviving file keeps the hash of its own bytes")
+	}
+}
+
+// A .torrent describes the bytes it was built from. Invalidation throws those
+// bytes away, so the sidecar outliving them measures the replacement against a
+// generation that was deliberately discarded — and because a present .torrent
+// is what stops the seeder minting a new one, the mismatch never heals. The
+// retire path already pairs every removal with its sidecar; invalidation must
+// too.
+func TestInvalidateDataDiscardsTheMetainfoOfWhatItRemoved(t *testing.T) {
+	require := require.New(t)
+	d, _, name, path := newLocalSnapshotTest(t)
+	accessor := writeSnapFile(t, d, "domain/v1.2-accounts.0-1024.kvi")
+
+	for _, n := range []string{string(name), "domain/v1.2-accounts.0-1024.kvi"} {
+		_, err := BuildTorrentIfNeed(t.Context(), n, d.snapDir(), d.torrentFS)
+		require.NoError(err)
+		require.FileExists(d.metainfoFilePathForName(snapshotName(n)))
+	}
+
+	_, download := prepareLocalDataForDownload(t, d, snaptype.Hex2InfoHash("aa"), name)
+	require.True(download)
+
+	require.NoFileExists(path)
+	require.NoFileExists(accessor)
+	require.NoFileExists(path+".torrent",
+		"the primary's hash describes discarded bytes")
+	require.NoFileExists(accessor+".torrent",
+		"the accessor's hash describes discarded bytes")
 }

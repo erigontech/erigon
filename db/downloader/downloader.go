@@ -1951,6 +1951,12 @@ func (d *Downloader) invalidateData(name snapshotName, preverifiedInfoHash metai
 		case !errors.Is(rmErr, os.ErrNotExist):
 			return rmErr
 		}
+		// The metainfo hashes the bytes just discarded, so it goes with them.
+		// Left behind it condemns the replacement, and because a sidecar that
+		// exists is what stops a new one being minted, nothing heals it.
+		if rmErr := d.torrentFS.Delete(member); rmErr != nil && !errors.Is(rmErr, os.ErrNotExist) {
+			return rmErr
+		}
 	}
 	if !discarded {
 		return nil
