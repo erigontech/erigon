@@ -30,9 +30,12 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sys/unix"
 
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/mmap"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/execution/commitment"
 )
 
 // A batch prefetch over cold domain files changes no latest value and leaves no probe on the readers.
@@ -173,4 +176,49 @@ func TestPrefetchLatestReportsLookupsLeftAtTheWaveCap(t *testing.T) {
 	at.d[kv.AccountsDomain] = dt
 	_, err := at.PrefetchLatest(t.Context(), kv.AccountsDomain, keys)
 	require.ErrorIs(t, err, kv.ErrPrefetchIncomplete)
+}
+
+// Expanding a branch reads the cold file pages its shortened keys point to in one batch, and leaves no probe behind.
+func TestReadReferencePagesReadsColdReferencedPages(t *testing.T) {
+	prev := mmap.BatchPrefetch
+	mmap.BatchPrefetch = true
+	t.Cleanup(func() { mmap.BatchPrefetch = prev })
+	dir := t.TempDir()
+	path := filepath.Join(dir, "refs.kv")
+	c, err := seg.NewCompressor(t.Context(), t.Name(), path, dir, seg.DefaultCfg, log.LvlDebug, log.New())
+	require.NoError(t, err)
+	key := make([]byte, length.Addr)
+	const words = 4096
+	for i := range words {
+		binary.BigEndian.PutUint32(key, uint32(i))
+		require.NoError(t, c.AddUncompressedWord(key))
+	}
+	require.NoError(t, c.Compress())
+	c.Close()
+	d, err := seg.NewDecompressor(path)
+	require.NoError(t, err)
+	defer d.Close()
+
+	offsets := make([]uint64, words)
+	g := d.MakeGetter()
+	for i := 1; i < words; i++ {
+		offsets[i], _ = g.Skip()
+	}
+	const accountKeyField = 2 // commitment.fieldAccountAddr
+	branch := []byte{0, 0x0f, 0, 0x0f}
+	for _, word := range []int{1, 1000, 2000, 3000} {
+		ref := EncodeReferenceKey(nil, offsets[word])
+		branch = append(branch, accountKeyField)
+		branch = binary.AppendUvarint(branch, uint64(len(ref)))
+		branch = append(branch, ref...)
+	}
+
+	maps := fileMappings(t, dir)
+	require.NotEmpty(t, maps)
+	pageOut(t, dir, maps)
+	before := residentPages(t, maps)
+	r := seg.NewReader(d.MakeGetter(), seg.CompressNone)
+	require.Equal(t, 4, readReferencePages(commitment.BranchData(branch), r, r))
+	require.GreaterOrEqual(t, residentPages(t, maps), before+4, "the referenced pages were read")
+	require.Nil(t, r.Probe())
 }
