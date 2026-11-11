@@ -272,6 +272,13 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 		}
 	}
 
+	// A later cycle's rollback must retain notifications from earlier commits.
+	restoreStateChanges := hook.CheckpointStateChanges()
+	defer func() {
+		if restoreStateChanges != nil {
+			restoreStateChanges()
+		}
+	}()
 	var finalityCtx kv.FinalityContext
 	tx, doms, err = pe.RunLoop(ctx, doms, tx, RunLoopConfig{
 		InitialCycle: true,
@@ -288,6 +295,7 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 			}); err != nil {
 				return nil, nil, fmt.Errorf("ProcessFrozenBlocks: flush+commit: %w", err)
 			}
+			restoreStateChanges = hook.CheckpointStateChanges()
 			pe.observeStateTransition(ctx, StateTransitionStartupCommitComplete)
 			// Prune runs via PruneFn (sync.RunPrune); kick file building so
 			// snapshot files advance as PFB processes frozen blocks.
@@ -325,6 +333,8 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 		return fmt.Errorf("ProcessFrozenBlocks: %w", err)
 	}
 
+	// Delivery consumes the committed changes; later publication errors must not restore them.
+	restoreStateChanges = nil
 	if hook != nil {
 		if err := pe.db.View(ctx, func(tx kv.Tx) error {
 			headersProgress, err := stages.GetStageProgress(tx, stages.Headers)

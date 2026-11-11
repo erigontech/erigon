@@ -130,6 +130,13 @@ func (h *Hook) BeforeRun(tx kv.Tx, inSync bool) error {
 	return h.beforeRun(tx, inSync)
 }
 
+func (h *Hook) CheckpointStateChanges() (restore func()) {
+	if h == nil || h.notifications == nil || h.notifications.Accumulator == nil {
+		return nil
+	}
+	return h.notifications.Accumulator.Checkpoint()
+}
+
 // SendNotifications dispatches all pending notifications (state changes,
 // headers, logs, receipts) via the Dispatcher. The tx is the data source —
 // either the SD's blockOverlay (pre-commit) or a committed DB tx.
