@@ -67,7 +67,11 @@ func TestGetLighthouseValidatorInclusionUnknownIndexIsNotFound(t *testing.T) {
 	defer server.Close()
 	get := func(epoch uint64, idx int) (int, string, error) {
 		url := server.URL + "/lighthouse/validator_inclusion/" + strconv.FormatUint(epoch, 10) + "/" + strconv.Itoa(idx)
-		resp, err := server.Client().Get(url)
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, url, nil)
+		if err != nil {
+			return 0, "", err
+		}
+		resp, err := server.Client().Do(req)
 		if err != nil {
 			return 0, "", err
 		}
