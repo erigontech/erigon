@@ -18,6 +18,7 @@ package v3
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"math/bits"
 	"slices"
@@ -28,6 +29,8 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
+
+var errReadOnlyContext = errors.New("commitment v3: read-only branch context")
 
 type collapseCell struct {
 	hext             []byte
@@ -418,4 +421,26 @@ func (c *recordCache) BranchOwned(prefix []byte) ([]byte, kv.Step, error) {
 
 func (c *recordCache) LeafRefs(key, data []byte) *commitment.LeafRefs {
 	return leafRefsOf(c.PatriciaContext, key, data)
+}
+
+type branchReader func(key []byte) ([]byte, error)
+
+func (r branchReader) Branch(key []byte) ([]byte, kv.Step, error) {
+	data, err := r(key)
+	return data, 0, err
+}
+
+func (branchReader) PutBranch([]byte, []byte, []byte) error { return errReadOnlyContext }
+
+func (branchReader) Account([]byte) (*commitment.Update, error) { return nil, errReadOnlyContext }
+
+func (branchReader) Storage([]byte) (*commitment.Update, error) { return nil, errReadOnlyContext }
+
+func (t *Trie) BranchChildCount(read func([]byte) ([]byte, error), nibblePrefix []byte) (int, error) {
+	ctx := branchReader(read)
+	n, err := liveBranch(func(plane byte, addrHash, path []byte) (*node, error) { return unfold(ctx, path, plane, addrHash) }, nibblePrefix)
+	if err != nil || n == nil {
+		return 0, err
+	}
+	return bits.OnesCount16(n.childMask), nil
 }
