@@ -184,6 +184,21 @@ func (tx *stableViewTestTx) ViewID() uint64 { return tx.viewID }
 
 func (tx *stableViewTestTx) Debug() kv.TemporalDebugTx { return nil }
 
+// The returned function transfers rollback ownership to the RPC endpoint.
+// Remote rollback releases a limiter permit on every call, so it must run only once.
+func beginRemoteTxForRPC(t *testing.T, ctx context.Context, db kv.TemporalRoDB) (kv.TemporalTx, func()) {
+	t.Helper()
+	tx, err := db.BeginTemporalRo(ctx) //nolint:gocritic // Test cleanup owns tx until handoff.
+	require.NoError(t, err)
+	handedOff := false
+	t.Cleanup(func() {
+		if !handedOff {
+			tx.Rollback()
+		}
+	})
+	return tx, func() { handedOff = true }
+}
+
 func TestIndexedStateReadUsesPinnedCanonicalBlock(t *testing.T) {
 	for _, endpoint := range []string{"account", "storage", "traceCall", "traceCallMany"} {
 		for _, requested := range []string{"original", "replacement", "missing_canonical_mapping"} {
@@ -222,14 +237,7 @@ func TestIndexedStateReadUsesPinnedCanonicalBlock(t *testing.T) {
 						return tx.Delete(kv.HeaderCanonical, hexutil.EncodeTs(block.NumberU64()))
 					}))
 				}
-				tx, err := db.BeginTemporalRo(ctx) //nolint:gocritic // The endpoint takes ownership below.
-				require.NoError(t, err)
-				handedOff := false
-				defer func() {
-					if !handedOff {
-						tx.Rollback()
-					}
-				}()
+				tx, handOff := beginRemoteTxForRPC(t, ctx, db)
 				viewID := tx.ViewID()
 				replacement := block.Header()
 				replacement.Extra = []byte("replacement")
@@ -256,7 +264,7 @@ func TestIndexedStateReadUsesPinnedCanonicalBlock(t *testing.T) {
 				if requested != "original" {
 					hash = replacement.Hash()
 				}
-				handedOff = true
+				handOff()
 				got, err := read(hash)
 				require.Equal(t, viewID, tx.ViewID(), "the KV transaction did not renew")
 				if requested != "original" {
@@ -277,14 +285,7 @@ func TestIndexedTraceBlockHashUsesPinnedView(t *testing.T) {
 			ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
 			reader := freezeblocks.NewRemoteBlockReader(remoteproto.NewETHBACKENDClient(conn))
 			db, _ := remoteHistoryDB(t, m.DB)
-			tx, err := db.BeginTemporalRo(ctx) //nolint:gocritic // The endpoint takes ownership below.
-			require.NoError(t, err)
-			handedOff := false
-			defer func() {
-				if !handedOff {
-					tx.Rollback()
-				}
-			}()
+			tx, handOff := beginRemoteTxForRPC(t, ctx, db)
 			viewID := tx.ViewID()
 			target := chain.Blocks[len(chain.Blocks)-1]
 			parent := chain.Blocks[len(chain.Blocks)-2]
@@ -323,7 +324,7 @@ func TestIndexedTraceBlockHashUsesPinnedView(t *testing.T) {
 			}
 			block := rpc.BlockNumberOrHashWithHash(target.Hash(), true)
 			args := ethapi.CallArgs{From: &m.Address, To: &contract, Gas: new(hexutil.Uint64(100_000))}
-			handedOff = true
+			handOff()
 			if endpoint == "traceCall" {
 				var trace struct{ Output string }
 				readGasTrace(t, &trace, func(stream *jsonstream.Stream) error {
@@ -484,14 +485,7 @@ func TestTraceBlockHashDoesNotRenewStateView(t *testing.T) {
 				_, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
 				reader := freezeblocks.NewRemoteBlockReader(remoteproto.NewETHBACKENDClient(conn))
 				db, _ := remoteHistoryDB(t, m.DB)
-				tx, err := db.BeginTemporalRo(ctx) //nolint:gocritic // The endpoint takes ownership below.
-				require.NoError(t, err)
-				handedOff := false
-				defer func() {
-					if !handedOff {
-						tx.Rollback()
-					}
-				}()
+				tx, handOff := beginRemoteTxForRPC(t, ctx, db)
 				viewID := tx.ViewID()
 				view := &expireOnStorageReadTx{TemporalTx: tx, expire: func() {
 					require.NoError(t, m.DB.UpdateTemporal(ctx, func(rw kv.TemporalRwTx) error {
@@ -517,7 +511,7 @@ func TestTraceBlockHashDoesNotRenewStateView(t *testing.T) {
 				args := ethapi.CallArgs{From: &testAddr, To: &contract, Gas: new(hexutil.Uint64(100_000))}
 				first, second, parentHash := common.Hash{31: 1}, common.Hash{31: 2}, parent.Hash()
 				want := slices.Concat(first[:], parentHash[:], second[:])
-				handedOff = true
+				handOff()
 				if endpoint == "traceCall" {
 					var trace struct{ Output string }
 					readGasTrace(t, &trace, func(stream *jsonstream.Stream) error {
@@ -580,14 +574,7 @@ func TestIndexedTraceRevalidatesAfterRemoteRenewal(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				ctx := t.Context()
 				db, _ := remoteHistoryDB(t, apis.debug.db)
-				tx, err := db.BeginTemporalRo(ctx) //nolint:gocritic // The endpoint takes ownership below.
-				require.NoError(t, err)
-				handedOff := false
-				defer func() {
-					if !handedOff {
-						tx.Rollback()
-					}
-				}()
+				tx, handOff := beginRemoteTxForRPC(t, ctx, db)
 				viewID := tx.ViewID()
 				minTxNum, err := rawdbv3.TxNums.Min(ctx, tx, ref.num)
 				require.NoError(t, err)
@@ -610,7 +597,7 @@ func TestIndexedTraceRevalidatesAfterRemoteRenewal(t *testing.T) {
 				apis.debug.db = historyViewDB{TemporalRoDB: db, tx: view}
 				var output bytes.Buffer
 				stream := jsonstream.New(&output)
-				handedOff = true
+				handOff()
 				err = trace(stream)
 				require.Nil(t, view.renew, "the pruning check must reach the renewal point")
 				require.NotEqual(t, viewID, tx.ViewID())
@@ -653,14 +640,7 @@ func TestIndexedStateReadFollowsRemoteRenewal(t *testing.T) {
 				synctest.Test(t, func(t *testing.T) {
 					ctx := t.Context()
 					db, _ := remoteHistoryDB(t, apis.debug.db)
-					tx, err := db.BeginTemporalRo(ctx) //nolint:gocritic // Setup defers rollback; the endpoint takes ownership below.
-					require.NoError(t, err)
-					handedOff := false
-					defer func() {
-						if !handedOff {
-							tx.Rollback()
-						}
-					}()
+					tx, handOff := beginRemoteTxForRPC(t, ctx, db)
 					oldViewID := tx.ViewID()
 					minTxNum, err := rawdbv3.TxNums.Min(ctx, tx, ref.num)
 					require.NoError(t, err)
@@ -682,7 +662,7 @@ func TestIndexedStateReadFollowsRemoteRenewal(t *testing.T) {
 						time.Sleep(remotedbserver.MaxTxTTL + time.Nanosecond)
 					}}
 					apis.debug.db = historyViewDB{TemporalRoDB: db, tx: view}
-					handedOff = true
+					handOff()
 					_, err = read(ctx)
 					require.Nil(t, view.renew, "the requested renewal point must be reached")
 					require.NotEqual(t, oldViewID, tx.ViewID())
