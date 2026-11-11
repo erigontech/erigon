@@ -22,6 +22,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"math/rand"
+	"runtime"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -781,4 +783,47 @@ func TestForkWalk_StorageRowFoldsIntoAccountWithoutStorage(t *testing.T) {
 			requireForkParityAcrossGrains(t, k0, u0, k1, u1)
 		})
 	}
+}
+
+// accountReadProbe starts a goroutine at the first account read and records how many reads the walk had made when
+// that goroutine first ran.
+type accountReadProbe struct {
+	noopPatriciaContext
+	reads      atomic.Int32
+	readsSeen  atomic.Int32
+	otherRan   chan struct{}
+	startOther sync.Once
+}
+
+func (p *accountReadProbe) Account([]byte) (*Update, error) {
+	p.reads.Add(1)
+	p.startOther.Do(func() {
+		go func() {
+			p.readsSeen.Store(p.reads.Load())
+			close(p.otherRan)
+		}()
+	})
+	return &Update{Flags: DeleteUpdate}, nil
+}
+
+func TestForkWalk_LetsOtherGoroutinesRunBetweenNodes(t *testing.T) {
+	defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(1))
+
+	p := &accountReadProbe{otherRan: make(chan struct{})}
+	w := NewHexPatriciaHashed(length.Addr, nil, DefaultTrieConfig())
+	w.ResetContext(p)
+	defer w.Release()
+
+	const leaves = 8
+	root := &prefixNode{bitmap: 1<<leaves - 1}
+	for i := range leaves {
+		key := make([]byte, length.Addr)
+		key[0] = byte(i + 1)
+		root.children = append(root.children, &prefixNode{ext: make([]byte, 63), plainKey: key})
+	}
+	fw := forkWalk{grain: ForkGrainNever}
+	require.NoError(t, fw.walk(context.Background(), &walker{trie: w}, root, nil))
+	<-p.otherRan
+	require.EqualValues(t, leaves, p.reads.Load())
+	require.Less(t, p.readsSeen.Load(), p.reads.Load(), "a goroutine started at the first leaf must run before the walk reaches the last one")
 }
