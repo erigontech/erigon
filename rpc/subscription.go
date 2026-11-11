@@ -268,12 +268,15 @@ func (n *RemoteNotifier) activate() error {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
-	for _, data := range n.buffer {
+	// Set first: after a failed flush, later notifications must reach the writer and fail, not buffer.
+	n.activated = true
+	buffer := n.buffer
+	n.buffer = nil
+	for _, data := range buffer {
 		if err := n.send(data); err != nil {
 			return err
 		}
 	}
-	n.activated = true
 	return nil
 }
 

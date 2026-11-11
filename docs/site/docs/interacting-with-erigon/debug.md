@@ -144,9 +144,9 @@ curl -s --data '{"jsonrpc":"2.0","method":"debug_getModifiedAccountsByNumber","p
 
 #### Returns
 
-| Type                    | Description                         |
-| ----------------------- | ----------------------------------- |
-| Array of DATA, 20 Bytes | Array of modified account addresses |
+| Type                    | Description                                                                                          |
+| ----------------------- | ---------------------------------------------------------------------------------------------------- |
+| Array of DATA, 20 Bytes | Array of modified account addresses, or `null` if no account changed in the range (same as Geth)     |
 
 ### debug\_getModifiedAccountsByHash
 
@@ -169,9 +169,9 @@ curl -s --data '{"jsonrpc":"2.0","method":"debug_getModifiedAccountsByHash","par
 
 #### Returns
 
-| Type                    | Description                         |
-| ----------------------- | ----------------------------------- |
-| Array of DATA, 20 Bytes | Array of modified account addresses |
+| Type                    | Description                                                                                          |
+| ----------------------- | ---------------------------------------------------------------------------------------------------- |
+| Array of DATA, 20 Bytes | Array of modified account addresses, or `null` if no account changed in the range (same as Geth)     |
 
 ### debug\_storageRangeAt
 
@@ -253,7 +253,7 @@ curl -s --data '{"jsonrpc":"2.0","method":"debug_traceBlockByNumber","params":["
 
 ### debug\_traceTransaction
 
-Returns Geth style transaction trace.
+Returns a Geth-style transaction trace.
 
 #### Parameters
 
@@ -278,7 +278,7 @@ curl -s --data '{"jsonrpc":"2.0","method":"debug_traceTransaction","params":["0x
 
 ### debug\_traceCall
 
-Returns Geth style call trace.
+Returns a Geth-style call trace.
 
 #### Parameters
 

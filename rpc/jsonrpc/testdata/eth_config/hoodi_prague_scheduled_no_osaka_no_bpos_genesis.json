@@ -35,8 +35,7 @@
         },
         "depositContractAddress": "0x00000000219ab540356cbb839cbe05303d7705fa",
         "defaultBlockGasLimit": 60000000,
-        "ethash": {},
-        "AllowAA": false
+        "ethash": {}
     },
     "nonce": "0x1234",
     "timestamp": "0x67d80ec0",

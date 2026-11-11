@@ -272,7 +272,7 @@ A request may carry the sidecar fields `blobs`, `commitments` and `proofs`. When
 `blobs` is present, the fill builds the sidecar:
 
 * `commitments` and `proofs` are either both supplied or both absent; one without the
-  other is rejected. Absent ones are computed from the blobs, supplied ones are verified
+  other is rejected. Absent ones are computed from the blobs; supplied ones are verified
   with KZG (`failed to verify blob proof`).
 * Once Osaka is active on the head, the proofs are EIP-7594 cell proofs — 128 per blob —
   and the sidecar has wrapper version 1. One blob proof per blob, as pre-Osaka tooling

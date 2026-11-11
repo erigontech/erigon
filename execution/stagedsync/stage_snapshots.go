@@ -20,8 +20,10 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"math"
 	"time"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -56,6 +58,7 @@ type SnapshotsCfg struct {
 	notifier           *shards.Notifications
 	caplin             bool
 	blobs              bool
+	blobsFromSlot      uint64
 	caplinState        bool
 	syncConfig         ethconfig.Sync
 	prune              prune.Mode
@@ -84,6 +87,7 @@ func StageSnapshotsCfg(db kv.TemporalRwDB,
 	notifier *shards.Notifications,
 	caplin bool,
 	blobs bool,
+	blobsFromSlot uint64,
 	caplinState bool,
 	prune prune.Mode,
 	afterDownload func(ctx context.Context) error,
@@ -100,6 +104,7 @@ func StageSnapshotsCfg(db kv.TemporalRwDB,
 		caplin:             caplin,
 		syncConfig:         syncConfig,
 		blobs:              blobs,
+		blobsFromSlot:      blobsFromSlot,
 		prune:              prune,
 		caplinState:        caplinState,
 		afterDownload:      afterDownload,
@@ -279,6 +284,16 @@ func startSnapshotDownloadProgressReporter(ctx context.Context, cfg SnapshotsCfg
 	}
 }
 
+// snapshotBlobRetention resolves the blob serving window of the chain. An unknown chain keeps
+// an unbounded window, so no blob segment is skipped.
+func snapshotBlobRetention(cfg SnapshotsCfg) snapshotsync.BlobRetention {
+	r := snapshotsync.BlobRetention{SnapshotDir: cfg.dirs.Snap, FromSlot: cfg.blobsFromSlot, ServeWindowSlots: math.MaxUint64}
+	if _, beaconCfg, _, err := clparams.GetConfigsByNetworkName(cfg.chainConfig.ChainName); err == nil {
+		r.ServeWindowSlots = beaconCfg.MinSlotsForBlobsSidecarsRequest() + beaconCfg.SlotsPerEpoch
+	}
+	return r
+}
+
 func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.RwTx, cfg SnapshotsCfg, logger log.Logger) (err error) {
 	if !s.CurrentSyncCycle.IsFirstCycle {
 		return nil
@@ -324,6 +339,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		true, /*headerChain=*/
 		cfg.blobs,
 		cfg.caplinState,
+		snapshotBlobRetention(cfg),
 		cfg.prune,
 		cstate,
 		tx,
@@ -374,6 +390,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		false, /*headerChain=*/
 		cfg.blobs,
 		cfg.caplinState,
+		snapshotBlobRetention(cfg),
 		cfg.prune,
 		cstate,
 		tx,
@@ -560,9 +577,6 @@ func pruneCanonicalMarkers(ctx context.Context, tx kv.RwTx, blockReader dbservic
 
 // SnapshotsPrune moving block data from db into snapshots, removing old snapshots (if --prune.* enabled)
 func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.RwTx) (err error) {
-	if dbg.NoPrune() {
-		return nil
-	}
 	freezingCfg := cfg.blockReader.FreezingCfg()
 	if freezingCfg.ProduceE2 && !dbg.NoBackgroundMaintenance() {
 		if s.CurrentSyncCycle.IsInitialCycle {
@@ -594,10 +608,13 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 		}
 	}
 
+	if dbg.NoPrune() {
+		return nil
+	}
 	pruneLimit := 10
 	pruneTimeout := 125 * time.Millisecond
 	if s.CurrentSyncCycle.IsInitialCycle {
-		pruneLimit = 10_000
+		pruneLimit = 100_000
 		pruneTimeout = time.Hour
 	}
 	if _, err := cfg.blockRetire.PruneAncientBlocks(tx, pruneLimit, pruneTimeout); err != nil {
@@ -610,7 +627,7 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 }
 
 func retireBlockSnapshots(ctx context.Context, cfg SnapshotsCfg) (bool, error) {
-	if dbg.NoRetire() {
+	if dbg.NoRetire() || dbg.NoPrune() {
 		return false, nil
 	}
 	tx, err := cfg.db.BeginRo(ctx)

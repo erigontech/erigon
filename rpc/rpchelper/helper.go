@@ -36,12 +36,12 @@ import (
 	"github.com/erigontech/erigon/rpc"
 )
 
-// unable to decode supplied params, or an invalid number of parameters
-type nonCanonicalHashError struct{ hash common.Hash }
+// NonCanonicalHashError reports a known block hash that is not on the canonical chain.
+type NonCanonicalHashError struct{ hash common.Hash }
 
-func (e nonCanonicalHashError) ErrorCode() int { return -32603 }
+func (e NonCanonicalHashError) ErrorCode() int { return -32603 }
 
-func (e nonCanonicalHashError) Error() string {
+func (e NonCanonicalHashError) Error() string {
 	return fmt.Sprintf("hash %x is not currently canonical", e.hash)
 }
 
@@ -149,7 +149,7 @@ func _GetBlockNumber(ctx context.Context, requireCanonical bool, blockNrOrHash r
 			return 0, common.Hash{}, false, false, err
 		}
 		if requireCanonical && (!ok || ch != hash) {
-			return 0, common.Hash{}, false, false, nonCanonicalHashError{hash}
+			return 0, common.Hash{}, false, false, NonCanonicalHashError{hash}
 		}
 	}
 	return blockNumber, hash, blockNumber == plainStateBlockNumber, true, nil
@@ -190,7 +190,11 @@ func CreateHistoryStateReader(ctx context.Context, tx kv.TemporalTx, blockNumber
 		return nil, err
 	}
 	txNum := uint64(int(minTxNum) + txnIndex + /* 1 system txNum in beginning of block */ 1)
-	if minHistoryTxNum := state.StateHistoryStartTxNum(tx); txNum < minHistoryTxNum {
+	minHistoryTxNum, err := state.StateHistoryStartTxNum(tx)
+	if err != nil {
+		return nil, err
+	}
+	if txNum < minHistoryTxNum {
 		firstAvailBlock, _, _ := txNumsReader.FindBlockNum(ctx, tx, minHistoryTxNum)
 		return nil, fmt.Errorf("%w: requested block %d, history is available from block %d", state.ErrPruned, blockNumber, firstAvailBlock)
 	}
@@ -228,7 +232,11 @@ func CreateHistoryCachedStateReader(ctx context.Context, cache kvcache.CacheView
 		return nil, err
 	}
 	txNum := uint64(int(minTxNum) + txnIndex + /* 1 system txNum in beginning of block */ 1)
-	if minHistoryTxNum := state.StateHistoryStartTxNum(tx); txNum < minHistoryTxNum {
+	minHistoryTxNum, err := state.StateHistoryStartTxNum(tx)
+	if err != nil {
+		return nil, err
+	}
+	if txNum < minHistoryTxNum {
 		return nil, fmt.Errorf("%w: block tx: %d, min tx: %d", state.ErrPruned, txNum, minHistoryTxNum)
 	}
 	return &cachedHistoryReaderV3{

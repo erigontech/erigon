@@ -256,6 +256,42 @@ func TestSharedDomain_UnwindDoesNotRestoreOverlayForNewKey(t *testing.T) {
 		unwindTarget, writeTxNum, v)
 }
 
+// A key written again after an unwind must be iterated with its new value, not
+// hidden by the unwind changeset that still covers it until Flush.
+func TestSharedDomain_IteratePrefixAfterUnwindSeesRewrite(t *testing.T) {
+	t.Parallel()
+
+	db := newTestDb(t, 100)
+	ctx := t.Context()
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+	stateChangeset := &changeset.StateChangeSet{}
+	domains.SetChangesetAccumulator(stateChangeset)
+
+	addr, slot := common.HexToAddress("0x01"), common.HexToHash("0x02")
+	key := composite(addr[:], slot[:])
+	require.NoError(t, domains.DomainPut(kv.StorageDomain, rwTx, key, []byte{0x01}, 100, nil))
+
+	var diffSet [kv.DomainLen][]kv.DomainEntryDiff
+	for idx, d := range stateChangeset.Diffs {
+		diffSet[idx] = d.GetDiffSet()
+	}
+	domains.Unwind(50, &diffSet)
+	require.NoError(t, domains.DomainPut(kv.StorageDomain, rwTx, key, []byte{0x05}, 60, nil))
+
+	got := map[string][]byte{}
+	require.NoError(t, domains.IteratePrefix(kv.StorageDomain, addr[:], rwTx, func(k, v []byte) (bool, error) {
+		got[string(k)] = bytes.Clone(v)
+		return true, nil
+	}))
+	require.Equal(t, map[string][]byte{string(key): {0x05}}, got)
+}
+
 // Unwind(t) prunes overlay writes in [t, ∞) and keeps [0, t); t is the resume
 // block's begin-system txNum, so the boundary write itself must not survive.
 func TestSharedDomain_UnwindPrunesBoundaryTxNum(t *testing.T) {
@@ -1954,4 +1990,100 @@ func TestSharedDomain_ZeroUpdateCommitmentAdvancesProgress(t *testing.T) {
 	require.Equal(t, block2, storedBlock2)
 	require.Equal(t, txNum2, storedTx2)
 	require.Equal(t, trieState1, state2[16:])
+}
+
+func TestSharedDomain_MergeUnwindKeepsDeeperTarget(t *testing.T) {
+	t.Parallel()
+
+	stepSize := uint64(10)
+	db := newTestDb(t, stepSize)
+	ctx := t.Context()
+	require := require.New(t)
+
+	const lastBlock = uint64(14)
+	const deepTarget = uint64(4)
+	const shallowTarget = uint64(9)
+
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(err)
+	defer rwTx.Rollback()
+	for bn := uint64(0); bn <= lastBlock; bn++ {
+		require.NoError(rawdbv3.TxNums.Append(rwTx, bn, bn))
+	}
+	doms, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(err)
+	addr := make([]byte, length.Addr)
+	var perBlockDiffs [lastBlock + 1]*changeset.StateChangeSet
+	for bn := uint64(0); bn <= lastBlock; bn++ {
+		cs := &changeset.StateChangeSet{}
+		doms.SetChangesetAccumulator(cs)
+		acc := accounts.Account{Nonce: bn, Balance: *uint256.NewInt(bn * 1000)}
+		pv, _, err := doms.GetLatest(kv.AccountsDomain, rwTx, addr)
+		require.NoError(err)
+		require.NoError(doms.DomainPut(kv.AccountsDomain, rwTx, addr, accounts.SerialiseV3(&acc), bn, pv))
+		perBlockDiffs[bn] = cs
+		doms.SetChangesetAccumulator(nil)
+	}
+	require.NoError(doms.Flush(ctx, rwTx))
+	doms.Close()
+	require.NoError(rwTx.Commit())
+
+	mergeRange := func(from, to uint64) *[kv.DomainLen][]kv.DomainEntryDiff {
+		var merged [kv.DomainLen][]kv.DomainEntryDiff
+		for bn := int64(to); bn >= int64(from); bn-- {
+			for idx, d := range perBlockDiffs[bn].Diffs {
+				keys := d.GetDiffSet()
+				if merged[idx] == nil {
+					merged[idx] = keys
+				} else {
+					merged[idx] = changeset.MergeDiffSets(merged[idx], keys)
+				}
+			}
+		}
+		return &merged
+	}
+
+	mergeAndCheck := func(target1, target2 uint64) {
+		rwTx, err := db.BeginTemporalRw(ctx)
+		require.NoError(err)
+		defer rwTx.Rollback()
+
+		sd1, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+		require.NoError(err)
+		sd1.Unwind(target1+1, mergeRange(target1+1, lastBlock))
+		sd1.SetTxNum(target1)
+
+		sd2, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+		require.NoError(err)
+		sd2.Unwind(target2+1, mergeRange(target2+1, lastBlock))
+		sd2.SetTxNum(target2)
+
+		require.NoError(sd1.Merge(ctx, shallowTarget, sd2, shallowTarget))
+		require.NoError(sd1.Flush(ctx, rwTx))
+		sd1.Close()
+
+		latest, _, err := rwTx.GetLatest(kv.AccountsDomain, addr, kv.GetLatestOptions{})
+		require.NoError(err)
+		var latestAcc accounts.Account
+		require.NoError(accounts.DeserialiseV3(&latestAcc, latest))
+		require.Equal(deepTarget, latestAcc.Nonce)
+
+		for ts := deepTarget + 1; ts <= lastBlock; ts++ {
+			v, ok, err := rwTx.GetAsOf(kv.AccountsDomain, addr, ts)
+			require.NoError(err)
+			require.True(ok)
+			var acc accounts.Account
+			require.NoError(accounts.DeserialiseV3(&acc, v))
+			require.Equalf(deepTarget, acc.Nonce, "GetAsOf(ts=%d) must not see history of unwound blocks", ts)
+		}
+
+		it, err := rwTx.IndexRange(kv.AccountsHistoryIdx, addr, int(deepTarget+1), -1, order.Asc, kv.Unlim)
+		require.NoError(err)
+		txNums, err := stream.ToArrayU64(it)
+		require.NoError(err)
+		require.Empty(txNums)
+	}
+
+	mergeAndCheck(deepTarget, shallowTarget)
+	mergeAndCheck(shallowTarget, deepTarget)
 }

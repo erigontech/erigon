@@ -96,7 +96,7 @@ func ComputeBlockContext(ctx context.Context, engine rules.EngineReader, header 
 }
 
 // ComputeTxContext returns the execution environment of a certain transaction.
-func ComputeTxContext(statedb *state.IntraBlockState, engine rules.EngineReader, rules *chain.Rules, signer *types.Signer, block *types.Block, cfg *chain.Config, txIndex int) (protocol.Message, evmtypes.TxContext, error) {
+func ComputeTxContext(statedb *state.IntraBlockState, rules *chain.Rules, signer *types.Signer, block *types.Block, txIndex int) (protocol.Message, evmtypes.TxContext, error) {
 	txn := block.Transactions()[txIndex]
 	statedb.SetTxContext(block.NumberU64(), txIndex)
 	msg, err := txn.AsMessage(*signer, block.BaseFee(), rules)
@@ -143,13 +143,25 @@ func TraceTx(
 			return result, err
 		}
 		if tracer != nil && tracer.HasTxEndHook() {
-			tracer.EmitTxEnd(&types.Receipt{GasUsed: result.ReceiptGasUsed}, result.TxnGasUsage, nil)
+			tracer.EmitTxEnd(result.ReceiptForTracing(), result.TxnGasUsage, nil)
 		}
 		txnGasUsage = result.TxnGasUsage
 		return result, err
 	}
 	err = ExecuteTraceTx(blockCtx, txCtx, ibs, config, chainConfig, stream, tracer, streaming, precompiles, execCb)
 	return txnGasUsage, err
+}
+
+// traceTimeout lets a client lower the server timeout, never raise it.
+func traceTimeout(serverTimeout time.Duration, clientTimeout *string) (time.Duration, error) {
+	if clientTimeout == nil {
+		return serverTimeout, nil
+	}
+	timeout, err := time.ParseDuration(*clientTimeout)
+	if err != nil {
+		return 0, err
+	}
+	return min(timeout, serverTimeout), nil
 }
 
 func AssembleTracer(
@@ -166,13 +178,9 @@ func AssembleTracer(
 	switch {
 	case config != nil && config.Tracer != nil:
 		// Define a meaningful timeout of a single transaction trace
-		timeout := callTimeout
-		if config.Timeout != nil {
-			var err error
-			timeout, err = time.ParseDuration(*config.Timeout)
-			if err != nil {
-				return nil, false, func() {}, err
-			}
+		timeout, err := traceTimeout(callTimeout, config.Timeout)
+		if err != nil {
+			return nil, false, func() {}, err
 		}
 
 		// Construct the JavaScript tracer to execute with

@@ -38,6 +38,8 @@ import (
 	"go.uber.org/mock/gomock"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -321,6 +323,95 @@ func TestPoolProvideTxnsUsesGasTargetAndTxnsIdFilter(t *testing.T) {
 	})
 }
 
+func TestPoolProvideTxnsReturnsNothingOnceTheParentBlockWaitIsStopped(t *testing.T) {
+	t.Parallel()
+	pt := PoolTest{t}
+	pt.Run(func(ctx context.Context, t *testing.T, pool *shutter.Pool, handle PoolTestHandle) {
+		ekg, err := testhelpers.MockEonKeyGeneration(shutter.EonIndex(0), 1, 2, 1)
+		require.NoError(t, err)
+		handle.SimulateInitialEonRead(t, ekg)
+		handle.SimulateFilterLogs(common.HexToAddress(handle.config.SequencerContractAddress), []types.Log{})
+		require.NoError(t, handle.SimulateNewBlockChange(ctx))
+		synctest.Wait()
+		handle.baseTxnProvider.provide = func(context.Context, ...txnprovider.ProvideOption) ([]types.Transaction, error) {
+			return []types.Transaction{&types.LegacyTx{}}, nil
+		}
+
+		stop := make(chan struct{})
+		type provided struct {
+			txns []types.Transaction
+			err  error
+		}
+		returned := make(chan provided, 1)
+		go func() {
+			txns, err := pool.ProvideTxns(
+				ctx,
+				txnprovider.WithBlockTime(handle.nextBlockTime),
+				txnprovider.WithParentBlockNum(handle.nextBlockNum),
+				txnprovider.WithParentBlockWaitStop(stop),
+			)
+			returned <- provided{txns, err}
+		}()
+		synctest.Wait()
+		close(stop)
+		synctest.Wait()
+
+		select {
+		case got := <-returned:
+			require.NoError(t, got.err)
+			require.Empty(t, got.txns)
+		default:
+			t.Fatal("ProvideTxns kept waiting for the parent block after the wait was stopped")
+		}
+	})
+}
+
+func TestPoolProvideTxnsFallsBackToBaseProviderWhenTheParentBlockWaitTimesOut(t *testing.T) {
+	t.Parallel()
+	pt := PoolTest{t}
+	pt.Run(func(ctx context.Context, t *testing.T, pool *shutter.Pool, handle PoolTestHandle) {
+		ekg, err := testhelpers.MockEonKeyGeneration(shutter.EonIndex(0), 1, 2, 1)
+		require.NoError(t, err)
+		handle.SimulateInitialEonRead(t, ekg)
+		handle.SimulateFilterLogs(common.HexToAddress(handle.config.SequencerContractAddress), []types.Log{})
+		require.NoError(t, handle.SimulateNewBlockChange(ctx))
+		synctest.Wait()
+		want := &types.LegacyTx{CommonTx: types.CommonTx{Nonce: 1}}
+		handle.baseTxnProvider.provide = func(context.Context, ...txnprovider.ProvideOption) ([]types.Transaction, error) {
+			return []types.Transaction{want}, nil
+		}
+
+		txns, err := pool.ProvideTxns(
+			ctx,
+			txnprovider.WithBlockTime(handle.nextBlockTime),
+			txnprovider.WithParentBlockNum(handle.nextBlockNum),
+			txnprovider.WithParentBlockWaitStop(make(chan struct{})),
+		)
+		require.NoError(t, err)
+		require.Equal(t, []types.Transaction{want}, txns)
+	})
+}
+
+func TestPoolProvideTxnsKeepsProvidingAfterTheStopOnceTheParentBlockIsSeen(t *testing.T) {
+	t.Parallel()
+	pt := PoolTest{t}
+	pt.Run(func(ctx context.Context, t *testing.T, pool *shutter.Pool, handle PoolTestHandle) {
+		handle.DecryptTxns(ctx, t, 21_000)
+		stop := make(chan struct{})
+		close(stop)
+		// The stop only ends a wait for a missing parent, so the outcome must not depend on scheduling.
+		for range 1000 {
+			txns, err := pool.ProvideTxns(ctx,
+				txnprovider.WithBlockTime(handle.nextBlockTime),
+				txnprovider.WithParentBlockNum(handle.nextBlockNum-1),
+				txnprovider.WithParentBlockWaitStop(stop),
+			)
+			require.NoError(t, err)
+			require.Len(t, txns, 1)
+		}
+	})
+}
+
 func TestPoolProvideTxnsAmsterdamGasAdmission(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
@@ -353,11 +444,23 @@ func TestPoolProvideTxnsAmsterdamGasAdmission(t *testing.T) {
 }
 
 func TestPoolProvideTxnsUsesRemainingGasForAdmission(t *testing.T) {
-	publicPool, err := txpool.New(t.Context(), make(chan txpool.Announcements, 1),
+	stateChanges := remoteproto.NewMockKVClient(gomock.NewController(t))
+	stateChanges.EXPECT().StateChanges(gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(nil, status.Error(codes.Unavailable, "no core node in this test")).AnyTimes()
+
+	poolCtx, stopPool := context.WithCancel(t.Context())
+	publicPool, err := txpool.New(poolCtx, make(chan txpool.Announcements, 1),
 		mdbxtest.NewTestPoolDB(t), temporaltest.NewTestDB(t, datadir.New(t.TempDir())),
 		txpoolcfg.DefaultConfig, kvcache.New(kvcache.DefaultCoherentConfig), chain.AllProtocolChanges,
-		nil, nil, func() {}, nil, nil, log.New(), txpool.WithFeeCalculator(nil))
+		nil, stateChanges, func() {}, nil, nil, log.New(), txpool.WithFeeCalculator(nil))
 	require.NoError(t, err)
+	runDone := make(chan struct{})
+	go func() {
+		defer close(runDone)
+		_ = publicPool.Run(poolCtx)
+	}()
+	t.Cleanup(func() { stopPool(); <-runDone })
+	require.Eventually(t, publicPool.Started, 10*time.Second, time.Millisecond)
 
 	pt := PoolTest{t}
 	pt.Run(func(ctx context.Context, t *testing.T, pool *shutter.Pool, handle PoolTestHandle) {

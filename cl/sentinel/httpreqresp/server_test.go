@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"strconv"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -44,30 +45,30 @@ func TestMaxResponseBodySize(t *testing.T) {
 	for _, p := range communication.AllProtocols {
 		if !p.MultiChunk {
 			// Single-object protocols ignore the caller's byte budget.
-			require.EqualValuesf(t, maxSingleObjectResponse, maxResponseBodySize(p.ID, 0),
+			require.EqualValuesf(t, maxSingleObjectResponse, MaxResponseBodySize(p.ID, 0),
 				"single-object protocol %s must get the tight cap", p.ID)
-			require.EqualValuesf(t, maxSingleObjectResponse, maxResponseBodySize(p.ID, budget),
+			require.EqualValuesf(t, maxSingleObjectResponse, MaxResponseBodySize(p.ID, budget),
 				"single-object protocol %s must ignore the byte budget", p.ID)
 			continue
 		}
-		// No budget falls back to the tight single-object cap, not the multi-GiB ceiling, so a
+		// No budget falls back to the tight single-object cap, not the multi-chunk ceiling, so a
 		// caller that forgets to size a budget can't turn a flood into an OOM.
-		require.EqualValuesf(t, maxSingleObjectResponse, maxResponseBodySize(p.ID, 0),
+		require.EqualValuesf(t, maxSingleObjectResponse, MaxResponseBodySize(p.ID, 0),
 			"multi-chunk protocol %s with no budget must get the tight cap, not the ceiling", p.ID)
 		// A budget below the ceiling is honored as-is (an internal, wire-sized value).
-		require.EqualValuesf(t, budget, maxResponseBodySize(p.ID, budget),
+		require.EqualValuesf(t, budget, MaxResponseBodySize(p.ID, budget),
 			"multi-chunk protocol %s must honor the caller's byte budget", p.ID)
-		require.Lessf(t, maxResponseBodySize(p.ID, budget), ceiling,
+		require.Lessf(t, MaxResponseBodySize(p.ID, budget), ceiling,
 			"multi-chunk protocol %s with a small budget must be tighter than the ceiling", p.ID)
 		// A budget above the ceiling is clamped to it, so a miscomputed or overflowed budget
-		// can't make the handler stream more than a spec-maximal response.
-		require.EqualValuesf(t, ceiling, maxResponseBodySize(p.ID, ceiling+1),
+		// can't make the handler stream more than the ceiling.
+		require.EqualValuesf(t, ceiling, MaxResponseBodySize(p.ID, ceiling+1),
 			"multi-chunk protocol %s must clamp a budget above the ceiling", p.ID)
 	}
 }
 
 func TestMaxMultiChunkResponse(t *testing.T) {
-	const want = uint64(1024 * (32 + 10485760 + 10485760/6 + 64))
+	const want = uint64(64 * (32 + 10485760 + 10485760/6 + 64))
 	require.Equal(t, want, maxMultiChunkResponse)
 }
 
@@ -192,6 +193,43 @@ func TestDoClosesStreamingBodyOnContextCancel(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("Do leaked the streaming body: it was never closed after context cancel")
 	}
+}
+
+func TestDoPrefersContextErrorToReadyResponse(t *testing.T) {
+	for range 100 {
+		synctest.Test(t, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			closed := make(chan struct{})
+			h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.(*captureWriter).setStreamingBody(&signalCloser{closed: closed})
+				cancel()
+			})
+			req, err := http.NewRequestWithContext(waitForHandlerContext{ctx}, "GET", "http://service.internal/", http.NoBody)
+			require.NoError(t, err)
+
+			resp, err := Do(h, req)
+			if resp != nil {
+				resp.Body.Close()
+			}
+			require.ErrorIs(t, err, context.Canceled)
+			require.Nil(t, resp)
+			synctest.Wait()
+			select {
+			case <-closed:
+			default:
+				t.Fatal("Do did not close the cancelled response body")
+			}
+		})
+	}
+}
+
+type waitForHandlerContext struct{ context.Context }
+
+func (c waitForHandlerContext) Done() <-chan struct{} {
+	// Let the handler finish so its response and cancellation are both ready.
+	synctest.Wait()
+	return c.Context.Done()
 }
 
 func TestRequestContextCancelClosesEstablishedStream(t *testing.T) {
@@ -430,7 +468,7 @@ func TestSingleChunkEmptyCloseReturnsBadRequest(t *testing.T) {
 }
 
 // A multi-chunk request that reaches the handler without a caller budget (a caller that failed to
-// size one, or an empty request) must fall back to the tight single-object cap, not the multi-GiB
+// size one, or an empty request) must fall back to the tight single-object cap, not the multi-chunk
 // ceiling — so a missing budget can never let a flooding peer drive an OOM. A budgeted multi-chunk
 // response above the single-object cap still passes; see TestMultiChunkResponseRejectedOverByteBudget.
 func TestMultiChunkResponseCappedWithoutBudget(t *testing.T) {

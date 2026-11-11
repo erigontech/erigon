@@ -258,7 +258,6 @@ func TestFinalizeCallTxPublishesWritesToNextTx(t *testing.T) {
 	ibs := state.New(state.NewNoopReader())
 	defer ibs.Close()
 	ibs.SetVersionMap(state.NewVersionMap(nil))
-	ibs.SetNoMaterialize(true)
 	ibs.SetNoConflictDetection()
 	ibs.SetTxContext(0, 0)
 	require.NoError(t, ibs.SetState(addr, key, *uint256.NewInt(7)))
@@ -293,16 +292,15 @@ func TestFinalizeCallTxRemovesTouchedEmptyAccount(t *testing.T) {
 	ibs := state.New(emptyAccountReader{NoopReader: state.NewNoopReader(), addr: addr})
 	defer ibs.Close()
 	ibs.SetVersionMap(state.NewVersionMap(nil))
-	ibs.SetNoMaterialize(true)
 	ibs.SetNoConflictDetection()
-	ibs.SetTxContext(0, 0)
+	ibs.SetTxContext(1, 0)
 	exists, err := ibs.Exist(addr)
 	require.NoError(t, err)
 	require.True(t, exists)
 	require.NoError(t, ibs.TouchAccount(addr))
 	require.NoError(t, ethapi.FinalizeCallTx(ibs, &chain.Rules{IsSpuriousDragon: true}))
 
-	ibs.SetTxContext(0, 1)
+	ibs.SetTxContext(1, 1)
 	exists, err = ibs.Exist(addr)
 	require.NoError(t, err)
 	require.False(t, exists)
@@ -315,15 +313,14 @@ func TestFinalizeCallTxKeepsARecreatedEmptyAccountDeleted(t *testing.T) {
 	ibs := state.New(emptyAccountReader{NoopReader: state.NewNoopReader(), addr: addr})
 	defer ibs.Close()
 	ibs.SetVersionMap(state.NewVersionMap(nil))
-	ibs.SetNoMaterialize(true)
 	ibs.SetNoConflictDetection()
 	rules := &chain.Rules{IsSpuriousDragon: true}
 
-	ibs.SetTxContext(0, 0)
+	ibs.SetTxContext(1, 0)
 	require.NoError(t, ibs.TouchAccount(addr))
 	require.NoError(t, ethapi.FinalizeCallTx(ibs, rules))
 
-	ibs.SetTxContext(0, 1)
+	ibs.SetTxContext(1, 1)
 	exists, err := ibs.Exist(addr)
 	require.NoError(t, err)
 	require.False(t, exists)
@@ -331,7 +328,7 @@ func TestFinalizeCallTxKeepsARecreatedEmptyAccountDeleted(t *testing.T) {
 	require.NoError(t, ibs.TouchAccount(addr))
 	require.NoError(t, ethapi.FinalizeCallTx(ibs, rules))
 
-	ibs.SetTxContext(0, 2)
+	ibs.SetTxContext(1, 2)
 	exists, err = ibs.Exist(addr)
 	require.NoError(t, err)
 	require.False(t, exists)
@@ -371,4 +368,41 @@ func BenchmarkTraceTxAccountReads(b *testing.B) {
 			}
 		})
 	}
+}
+
+func TestTraceTimeoutCannotExceedTheServerTimeout(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		client string
+		want   time.Duration
+	}{
+		{"1h", 5 * time.Second},
+		{"1s", time.Second},
+		{"5s", 5 * time.Second},
+	} {
+		got, err := traceTimeout(5*time.Second, &tc.client)
+		require.NoError(t, err)
+		require.Equal(t, tc.want, got, tc.client)
+	}
+	got, err := traceTimeout(5*time.Second, nil)
+	require.NoError(t, err)
+	require.Equal(t, 5*time.Second, got)
+	bad := "soon"
+	_, err = traceTimeout(5*time.Second, &bad)
+	require.Error(t, err)
+}
+
+func TestAssembleTracerCapsTheClientTimeout(t *testing.T) {
+	t.Parallel()
+	code, timeout := "{result: function() { return 1 }, fault: function() {}}", "1h"
+	config := &tracersConfig.TraceConfig{Tracer: &code, Timeout: &timeout}
+
+	tracer, _, cancel, err := AssembleTracer(t.Context(), config, common.Hash{}, nil, common.Hash{}, 0, jsonstream.New(io.Discard), 50*time.Millisecond)
+	require.NoError(t, err)
+	defer cancel()
+
+	require.Eventually(t, func() bool {
+		_, err := tracer.GetResult()
+		return err != nil
+	}, 5*time.Second, 10*time.Millisecond, "the server timeout must stop the tracer")
 }

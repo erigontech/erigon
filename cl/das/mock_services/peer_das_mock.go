@@ -44,6 +44,42 @@ func (m *MockPeerDas) EXPECT() *MockPeerDasMockRecorder {
 	return m.recorder
 }
 
+// BackfillCustodyColumns mocks base method.
+func (m *MockPeerDas) BackfillCustodyColumns(fromSlot, toSlot uint64) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "BackfillCustodyColumns", fromSlot, toSlot)
+}
+
+// BackfillCustodyColumns indicates an expected call of BackfillCustodyColumns.
+func (mr *MockPeerDasMockRecorder) BackfillCustodyColumns(fromSlot, toSlot any) *MockPeerDasBackfillCustodyColumnsCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "BackfillCustodyColumns", reflect.TypeOf((*MockPeerDas)(nil).BackfillCustodyColumns), fromSlot, toSlot)
+	return &MockPeerDasBackfillCustodyColumnsCall{Call: call}
+}
+
+// MockPeerDasBackfillCustodyColumnsCall wrap *gomock.Call
+type MockPeerDasBackfillCustodyColumnsCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockPeerDasBackfillCustodyColumnsCall) Return() *MockPeerDasBackfillCustodyColumnsCall {
+	c.Call = c.Call.Return()
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockPeerDasBackfillCustodyColumnsCall) Do(f func(uint64, uint64)) *MockPeerDasBackfillCustodyColumnsCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockPeerDasBackfillCustodyColumnsCall) DoAndReturn(f func(uint64, uint64)) *MockPeerDasBackfillCustodyColumnsCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // DownloadColumnsAndRecoverBlobs mocks base method.
 func (m *MockPeerDas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []cltypes.ColumnSyncableSignedBlock) error {
 	m.ctrl.T.Helper()
@@ -116,6 +152,45 @@ func (c *MockPeerDasDownloadOnlyCustodyColumnsCall) Do(f func(context.Context, [
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockPeerDasDownloadOnlyCustodyColumnsCall) DoAndReturn(f func(context.Context, []cltypes.ColumnSyncableSignedBlock) error) *MockPeerDasDownloadOnlyCustodyColumnsCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// ImportColumnsFromBlobs mocks base method.
+func (m *MockPeerDas) ImportColumnsFromBlobs(ctx context.Context, block *cltypes.SignedBeaconBlock, blobs [][]byte, cellProofs [][][]byte) ([]*cltypes.DataColumnSidecar, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ImportColumnsFromBlobs", ctx, block, blobs, cellProofs)
+	ret0, _ := ret[0].([]*cltypes.DataColumnSidecar)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ImportColumnsFromBlobs indicates an expected call of ImportColumnsFromBlobs.
+func (mr *MockPeerDasMockRecorder) ImportColumnsFromBlobs(ctx, block, blobs, cellProofs any) *MockPeerDasImportColumnsFromBlobsCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ImportColumnsFromBlobs", reflect.TypeOf((*MockPeerDas)(nil).ImportColumnsFromBlobs), ctx, block, blobs, cellProofs)
+	return &MockPeerDasImportColumnsFromBlobsCall{Call: call}
+}
+
+// MockPeerDasImportColumnsFromBlobsCall wrap *gomock.Call
+type MockPeerDasImportColumnsFromBlobsCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockPeerDasImportColumnsFromBlobsCall) Return(arg0 []*cltypes.DataColumnSidecar, arg1 error) *MockPeerDasImportColumnsFromBlobsCall {
+	c.Call = c.Call.Return(arg0, arg1)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockPeerDasImportColumnsFromBlobsCall) Do(f func(context.Context, *cltypes.SignedBeaconBlock, [][]byte, [][][]byte) ([]*cltypes.DataColumnSidecar, error)) *MockPeerDasImportColumnsFromBlobsCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockPeerDasImportColumnsFromBlobsCall) DoAndReturn(f func(context.Context, *cltypes.SignedBeaconBlock, [][]byte, [][][]byte) ([]*cltypes.DataColumnSidecar, error)) *MockPeerDasImportColumnsFromBlobsCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
@@ -307,6 +382,42 @@ func (c *MockPeerDasPruneBelowCall) Do(f func(uint64) error) *MockPeerDasPruneBe
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockPeerDasPruneBelowCall) DoAndReturn(f func(uint64) error) *MockPeerDasPruneBelowCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// SetColumnPublisher mocks base method.
+func (m *MockPeerDas) SetColumnPublisher(publish func(context.Context, []*cltypes.DataColumnSidecar)) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "SetColumnPublisher", publish)
+}
+
+// SetColumnPublisher indicates an expected call of SetColumnPublisher.
+func (mr *MockPeerDasMockRecorder) SetColumnPublisher(publish any) *MockPeerDasSetColumnPublisherCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetColumnPublisher", reflect.TypeOf((*MockPeerDas)(nil).SetColumnPublisher), publish)
+	return &MockPeerDasSetColumnPublisherCall{Call: call}
+}
+
+// MockPeerDasSetColumnPublisherCall wrap *gomock.Call
+type MockPeerDasSetColumnPublisherCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockPeerDasSetColumnPublisherCall) Return() *MockPeerDasSetColumnPublisherCall {
+	c.Call = c.Call.Return()
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockPeerDasSetColumnPublisherCall) Do(f func(func(context.Context, []*cltypes.DataColumnSidecar))) *MockPeerDasSetColumnPublisherCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockPeerDasSetColumnPublisherCall) DoAndReturn(f func(func(context.Context, []*cltypes.DataColumnSidecar))) *MockPeerDasSetColumnPublisherCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

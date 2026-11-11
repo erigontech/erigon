@@ -17,13 +17,11 @@
 package recsplit
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"math"
-	"math/bits"
 	"os"
 	"path/filepath"
 	"sync/atomic"
@@ -32,7 +30,6 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/mmap"
@@ -426,6 +423,11 @@ func (idx *Index) BucketSize() int  { return idx.bucketSize }
 
 // Lookup is safe for concurrent use: it only reads the index's immutable state
 func (idx *Index) Lookup(bucketHash, fingerprint uint64) (uint64, bool) {
+	return idx.LookupProbe(bucketHash, fingerprint, nil)
+}
+
+// LookupProbe is Lookup with pr touching the pages it reads.
+func (idx *Index) LookupProbe(bucketHash, fingerprint uint64, pr *mmap.Probe) (uint64, bool) {
 	if idx.keyCount == 0 {
 		_, fName := filepath.Split(idx.filePath)
 		panic("no Lookup should be done when keyCount==0, please use Empty function to guard " + fName)
@@ -433,11 +435,11 @@ func (idx *Index) Lookup(bucketHash, fingerprint uint64) (uint64, bool) {
 	if idx.lessFalsePositives {
 		switch idx.dataStructureVersion {
 		case 1:
-			if ok := idx.existenceV1.ContainsHash(bucketHash); !ok {
+			if ok := idx.existenceV1.ContainsHashProbe(bucketHash, pr); !ok {
 				return 0, false
 			}
 		case 2:
-			if ok := idx.existenceV2.ContainsHash(bucketHash); !ok {
+			if ok := idx.existenceV2.ContainsHashProbe(bucketHash, pr); !ok {
 				return 0, false
 			}
 		}
@@ -453,8 +455,17 @@ func (idx *Index) Lookup(bucketHash, fingerprint uint64) (uint64, bool) {
 	gr.data = idx.grData
 
 	bucket := remap(bucketHash, idx.bucketCount)
-	cumKeys, cumKeysNext, bitPos := idx.ef.Get3(bucket)
+	var cumKeys, cumKeysNext, bitPos uint64
+	if pr == nil {
+		cumKeys, cumKeysNext, bitPos = idx.ef.Get3(bucket)
+	} else {
+		cumKeys, cumKeysNext, bitPos = idx.ef.Get3Probe(bucket, pr)
+	}
 	m := uint16(cumKeysNext - cumKeys) // Number of keys in this bucket
+	if pr != nil {
+		pr.Touch(unsafe.Pointer(&gr.data[bitPos/64]))
+		pr.Touch(unsafe.Pointer(&gr.data[(int(bitPos)+int(idx.skipBits(m)))/64]))
+	}
 	gr.ReadReset(int(bitPos), idx.skipBits(m))
 	var level int
 	for m > idx.secondaryAggrBound { // fanout = 2
@@ -497,6 +508,7 @@ func (idx *Index) Lookup(bucketHash, fingerprint uint64) (uint64, bool) {
 	rec := int(cumKeys) + int(remap16(remix(fingerprint+idx.startSeed[level]+b), m))
 
 	pos := 1 + 8 + idx.bytesPerRec*(rec+1)
+	pr.Touch(unsafe.Pointer(&idx.data[pos]))
 
 	found := binary.BigEndian.Uint64(idx.data[pos:]) & idx.recMask
 	if idx.dataStructureVersion == 0 && idx.lessFalsePositives && idx.enums && idx.keyCount > 0 {
@@ -536,47 +548,6 @@ func (idx *Index) ExtractOffsets() map[uint64]uint64 {
 		pos += idx.bytesPerRec
 	}
 	return m
-}
-
-func (idx *Index) RewriteWithOffsets(w *bufio.Writer, m map[uint64]uint64) error {
-	// New max offset
-	var maxOffset uint64
-	for _, offset := range m {
-		if offset > maxOffset {
-			maxOffset = offset
-		}
-	}
-	bytesPerRec := common.BitLenToByteLen(bits.Len64(maxOffset))
-	var numBuf [8]byte
-	// Write baseDataID
-	binary.BigEndian.PutUint64(numBuf[:], idx.baseDataID)
-	if _, err := w.Write(numBuf[:]); err != nil {
-		return fmt.Errorf("write number of keys: %w", err)
-	}
-
-	// Write number of keys
-	binary.BigEndian.PutUint64(numBuf[:], idx.keyCount)
-	if _, err := w.Write(numBuf[:]); err != nil {
-		return fmt.Errorf("write number of keys: %w", err)
-	}
-	// Write number of bytes per index record
-	if err := w.WriteByte(byte(bytesPerRec)); err != nil {
-		return fmt.Errorf("write bytes per record: %w", err)
-	}
-	pos := 1 + 8 + idx.bytesPerRec
-	for rec := uint64(0); rec < idx.keyCount; rec++ {
-		offset := binary.BigEndian.Uint64(idx.data[pos:]) & idx.recMask
-		pos += idx.bytesPerRec
-		binary.BigEndian.PutUint64(numBuf[:], m[offset])
-		if _, err := w.Write(numBuf[8-bytesPerRec:]); err != nil {
-			return err
-		}
-	}
-	// Write the rest as it is (TODO - wrong for indices with enums)
-	if _, err := w.Write(idx.data[16+1+int(idx.keyCount)*idx.bytesPerRec:]); err != nil {
-		return err
-	}
-	return nil
 }
 
 // DisableReadAhead - usage: `defer d.EnableReadAhead().DisableReadAhead()`. Please don't use this funcs without `defer` to avoid leak.

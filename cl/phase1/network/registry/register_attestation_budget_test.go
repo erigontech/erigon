@@ -149,7 +149,7 @@ func TestAttestationGossipBudgetScalesWithExpectedTraffic(t *testing.T) {
 
 			forkChoice := forkchoice_mock.NewForkChoiceStorageMock(t)
 			RegisterGossipServices(
-				gm, forkChoice, clock, func() uint64 { return tt.activeValidators }, blockService,
+				gm, forkChoice, clock, &tt.beaconConfig, func() uint64 { return tt.activeValidators }, blockService,
 				attesterSlashingService, blobService, dataColumnSidecarService, syncCommitteeMessagesService,
 				syncContributionService, aggregateAndProofService, attestationService, voluntaryExitService,
 				blsToExecutionChangeService, proposerSlashingService, executionPayloadService,

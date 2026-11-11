@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
+	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/clonable"
 	"github.com/erigontech/erigon/common/length"
@@ -241,9 +242,13 @@ type IndexedPayloadAttestation struct {
 	Signature        common.Bytes96          `json:"signature"`
 }
 
-func NewIndexedPayloadAttestation() *IndexedPayloadAttestation {
+func NewIndexedPayloadAttestation(cfg *clparams.BeaconChainConfig) *IndexedPayloadAttestation {
+	limit := int(clparams.MaxPtcSize)
+	if cfg != nil && cfg.PtcSize > 0 {
+		limit = int(cfg.PtcSize)
+	}
 	return &IndexedPayloadAttestation{
-		AttestingIndices: solid.NewRawUint64List(int(clparams.MaxPtcSize), []uint64{}),
+		AttestingIndices: solid.NewRawUint64List(limit, nil),
 		Data:             &PayloadAttestationData{},
 	}
 }
@@ -257,7 +262,11 @@ func (i *IndexedPayloadAttestation) EncodeSSZ(buf []byte) ([]byte, error) {
 }
 
 func (i *IndexedPayloadAttestation) DecodeSSZ(buf []byte, version int) error {
-	i.AttestingIndices = solid.NewRawUint64List(int(clparams.MaxPtcSize), nil)
+	limit := int(clparams.MaxPtcSize)
+	if i.AttestingIndices != nil && i.AttestingIndices.Cap() > 0 {
+		limit = i.AttestingIndices.Cap()
+	}
+	i.AttestingIndices = solid.NewRawUint64List(limit, nil)
 	i.Data = new(PayloadAttestationData)
 	return ssz2.UnmarshalSSZ(buf, version, i.AttestingIndices, i.Data, i.Signature[:])
 }
@@ -272,7 +281,11 @@ func (i *IndexedPayloadAttestation) HashSSZ() ([32]byte, error) {
 }
 
 func (i *IndexedPayloadAttestation) Clone() clonable.Clonable {
-	newIndices := solid.NewRawUint64List(int(clparams.MaxPtcSize), make([]uint64, i.AttestingIndices.Length()))
+	limit := int(clparams.MaxPtcSize)
+	if i.AttestingIndices.Cap() > 0 {
+		limit = i.AttestingIndices.Cap()
+	}
+	newIndices := solid.NewRawUint64List(limit, make([]uint64, i.AttestingIndices.Length()))
 	for idx := 0; idx < i.AttestingIndices.Length(); idx++ {
 		newIndices.Set(idx, i.AttestingIndices.Get(idx))
 	}
@@ -298,6 +311,16 @@ type ExecutionPayloadBid struct {
 	ExecutionPayment      uint64                        `json:"execution_payment,string"` // Gwei
 	BlobKzgCommitments    solid.ListSSZ[*KZGCommitment] `json:"blob_kzg_commitments"`
 	ExecutionRequestsRoot common.Hash                   `json:"execution_requests_root"`
+}
+
+// VersionedHashes returns blob versioned hashes in commitment order.
+// The result is non-nil even without commitments because the EL treats nil as missing input.
+func (e *ExecutionPayloadBid) VersionedHashes() []common.Hash {
+	hashes := make([]common.Hash, e.BlobKzgCommitments.Len())
+	for i := range hashes {
+		hashes[i], _ = utils.KzgCommitmentToVersionedHash(common.Bytes48(*e.BlobKzgCommitments.Get(i)))
+	}
+	return hashes
 }
 
 func (e *ExecutionPayloadBid) HashSSZ() ([32]byte, error) {
@@ -882,4 +905,61 @@ func (s *SignedExecutionPayloadEnvelope) Clone() clonable.Clonable {
 		Signature: s.Signature,
 		beaconCfg: s.beaconCfg,
 	}
+}
+
+func ValidateGloasEnvelopeAgainstBid(beaconCfg *clparams.BeaconChainConfig, blockRoot common.Hash, bid *ExecutionPayloadBid, env *SignedExecutionPayloadEnvelope) error {
+	if beaconCfg == nil {
+		return errors.New("nil beacon chain config")
+	}
+	if bid == nil {
+		return errors.New("nil execution payload bid")
+	}
+	if env == nil || env.Message == nil || env.Message.Payload == nil {
+		return errors.New("nil execution payload envelope")
+	}
+	envelope := env.Message
+	payload := envelope.Payload
+	if envelope.BeaconBlockRoot != blockRoot {
+		return fmt.Errorf("beacon block root mismatch: envelope=%v block=%v", envelope.BeaconBlockRoot, blockRoot)
+	}
+	if envelope.ParentBeaconBlockRoot != bid.ParentBlockRoot {
+		return fmt.Errorf("parent beacon block root mismatch: envelope=%v bid=%v", envelope.ParentBeaconBlockRoot, bid.ParentBlockRoot)
+	}
+	if envelope.BuilderIndex != bid.BuilderIndex {
+		return fmt.Errorf("builder index mismatch: envelope=%d bid=%d", envelope.BuilderIndex, bid.BuilderIndex)
+	}
+	if payload.BlockHash != bid.BlockHash {
+		return fmt.Errorf("block hash mismatch: envelope=%v bid=%v", payload.BlockHash, bid.BlockHash)
+	}
+	if payload.ParentHash != bid.ParentBlockHash {
+		return fmt.Errorf("parent block hash mismatch: envelope=%v bid=%v", payload.ParentHash, bid.ParentBlockHash)
+	}
+	if payload.PrevRandao != bid.PrevRandao {
+		return fmt.Errorf("prev randao mismatch: envelope=%v bid=%v", payload.PrevRandao, bid.PrevRandao)
+	}
+	if payload.GasLimit != bid.GasLimit {
+		return fmt.Errorf("gas limit mismatch: envelope=%d bid=%d", payload.GasLimit, bid.GasLimit)
+	}
+	if payload.SlotNumber != bid.Slot {
+		return fmt.Errorf("slot mismatch: envelope=%d bid=%d", payload.SlotNumber, bid.Slot)
+	}
+	if envelope.ExecutionRequests == nil {
+		return errors.New("nil execution requests")
+	}
+	requestsRoot, err := envelope.ExecutionRequests.HashSSZ()
+	if err != nil {
+		return fmt.Errorf("execution requests root: %w", err)
+	}
+	if requestsRoot != bid.ExecutionRequestsRoot {
+		return fmt.Errorf("execution requests root mismatch: envelope=%v bid=%v", requestsRoot, bid.ExecutionRequestsRoot)
+	}
+	requestsHash := ComputeExecutionRequestHash(GetExecutionRequestsList(beaconCfg, envelope.ExecutionRequests))
+	header, err := payload.RlpHeader(&envelope.ParentBeaconBlockRoot, requestsHash, nil)
+	if err != nil {
+		return fmt.Errorf("payload header: %w", err)
+	}
+	if header.Hash() != payload.BlockHash {
+		return fmt.Errorf("payload block hash mismatch: header=%v payload=%v", header.Hash(), payload.BlockHash)
+	}
+	return nil
 }

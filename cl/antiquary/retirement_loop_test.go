@@ -33,10 +33,13 @@ import (
 type tickHarness struct {
 	a            *Antiquary
 	blocks       *retirementStep
+	merges       *retirementStep
 	blobs        *retirementStep
 	blocksRuns   int
+	mergesRuns   int
 	blobsRuns    int
 	blocksFails  bool
+	mergesFails  bool
 	blobsFails   bool
 	cancel       context.CancelFunc
 	denebEnabled bool
@@ -68,6 +71,16 @@ func newTickHarness(t *testing.T) *tickHarness {
 		},
 		onError: func(error) {},
 	}
+	h.merges = &retirementStep{
+		run: func() error {
+			h.mergesRuns++
+			if h.mergesFails {
+				return errors.New("merges failed")
+			}
+			return nil
+		},
+		onError: func(error) {},
+	}
 	h.blobs = &retirementStep{
 		run: func() error {
 			h.blobsRuns++
@@ -83,7 +96,7 @@ func newTickHarness(t *testing.T) *tickHarness {
 
 func (h *tickHarness) tick(n int) {
 	for range n {
-		h.a.retirementTick(h.blocks, h.blobs)
+		h.a.retirementTick(h.blocks, h.merges, h.blobs)
 	}
 }
 
@@ -112,6 +125,18 @@ func TestRetirementTickBacksOffEachStepIndependently(t *testing.T) {
 	require.Equal(t, 6, h.blobsRuns, "a succeeding step must run on every tick")
 	require.Less(t, h.blocksRuns, 6, "a failing step must be skipped on some ticks")
 	require.Positive(t, h.blocksRuns)
+}
+
+func TestRetirementTickBacksOffMergesIndependently(t *testing.T) {
+	h := newTickHarness(t)
+	h.mergesFails = true
+
+	h.tick(6)
+
+	require.Equal(t, 6, h.blocksRuns, "a failing merge must not hold back dumps")
+	require.Equal(t, 6, h.blobsRuns)
+	require.Less(t, h.mergesRuns, 6)
+	require.Positive(t, h.mergesRuns)
 }
 
 func TestRetirementTickBacksOffBlobsIndependently(t *testing.T) {

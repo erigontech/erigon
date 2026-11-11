@@ -98,6 +98,14 @@ func (s *Stream) WriteRawBytes(content []byte) {
 // FlushThreshold, so the value streams through a buffer of about that size.
 const hexChunk = FlushThreshold / 4
 
+// RawFields writes object members already encoded as `"name":value` pairs separated by commas.
+func (s *Stream) RawFields(fields []byte) {
+	s.beforeValue()
+	s.stream.SetBuffer(append(s.stream.Buffer(), fields...))
+	s.separatorPending = true
+	flushIfFull(s.stream)
+}
+
 func (s *Stream) WriteHex(b []byte) {
 	if s.out != nil && len(b) > hexChunk {
 		s.writeHexChunked(b)

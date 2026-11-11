@@ -19,6 +19,7 @@ package execmodule
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"slices"
@@ -28,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -101,6 +103,9 @@ func (e *ExecModule) resolveSegment(ctx context.Context, tx kv.Tx, blockHash *co
 		// Only number: resolve canonical hash
 		hash, err := e.canonicalHash(ctx, tx, *blockNumber)
 		if err != nil {
+			return common.Hash{}, 0, err
+		}
+		if hash == (common.Hash{}) {
 			return common.Hash{}, 0, errNotFound
 		}
 		return hash, *blockNumber, nil
@@ -149,6 +154,54 @@ func (e *ExecModule) GetHeader(ctx context.Context, blockHash *common.Hash, bloc
 		return nil, fmt.Errorf("ethereumExecutionModule.GetHeader: resolveSegment error %w", err)
 	}
 	return e.getHeader(ctx, tx, hash, number)
+}
+
+func (e *ExecModule) GetHeadersByRange(ctx context.Context, start, count uint64) ([]*types.Header, error) {
+	tx, cleanup, err := e.beginOverlayOrRo(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("ethereumExecutionModule.GetHeadersByRange: could not begin database tx %w", err)
+	}
+	defer cleanup()
+
+	// The head marker and its number survive header pruning. Read them in the
+	// same view so gaps in the headers do not look like the end of the chain.
+	headHash, err := tx.GetOne(kv.HeadHeaderKey, []byte(kv.HeadHeaderKey))
+	if err != nil {
+		return nil, fmt.Errorf("ethereumExecutionModule.GetHeadersByRange: read head hash: %w", err)
+	}
+	if len(headHash) == 0 {
+		return nil, nil
+	}
+	headNumber, err := tx.GetOne(kv.HeaderNumber, headHash)
+	if err != nil {
+		return nil, fmt.Errorf("ethereumExecutionModule.GetHeadersByRange: read head number: %w", err)
+	}
+	if len(headNumber) != 8 {
+		return nil, fmt.Errorf("ethereumExecutionModule.GetHeadersByRange: invalid head number length: %d", len(headNumber))
+	}
+	head := binary.BigEndian.Uint64(headNumber)
+
+	headers := make([]*types.Header, 0, count)
+	for i := range count {
+		number := start + i
+		if number < start || number > head {
+			break
+		}
+		hash, err := e.canonicalHash(ctx, tx, number)
+		if err != nil {
+			return nil, fmt.Errorf("ethereumExecutionModule.GetHeadersByRange: canonicalHash error %w", err)
+		}
+		if hash == (common.Hash{}) {
+			headers = append(headers, nil)
+			continue
+		}
+		header, err := e.getHeader(ctx, tx, hash, number)
+		if err != nil {
+			return nil, fmt.Errorf("ethereumExecutionModule.GetHeadersByRange: getHeader error %w", err)
+		}
+		headers = append(headers, header)
+	}
+	return headers, nil
 }
 
 func (e *ExecModule) GetBodiesByHashes(ctx context.Context, hashes []common.Hash) ([]*types.RawBody, error) {
@@ -371,6 +424,10 @@ func (e *ExecModule) isCanonicalHash(ctx context.Context, tx kv.Tx, hash common.
 	return expectedHash == hash, nil
 }
 
+func (e *ExecModule) IsValidated(blockHash common.Hash) bool {
+	return e.forkValidator.IsValidated(blockHash)
+}
+
 func (e *ExecModule) IsCanonicalHash(ctx context.Context, blockHash common.Hash) (bool, error) {
 	tx, cleanup, err := e.beginOverlayOrRo(ctx)
 	if err != nil {
@@ -382,7 +439,22 @@ func (e *ExecModule) IsCanonicalHash(ctx context.Context, blockHash common.Hash)
 	if err != nil {
 		return false, fmt.Errorf("ethereumExecutionModule.IsCanonicalHash: could not read canonical hash %w", err)
 	}
-	return isCanonical, nil
+	if !isCanonical {
+		return false, nil
+	}
+	// Forkchoice commits canonical hashes ahead of the Execution stage during catch-up.
+	blockNumber, err := e.blockReader.HeaderNumber(ctx, tx, blockHash)
+	if err != nil {
+		return false, fmt.Errorf("ethereumExecutionModule.IsCanonicalHash: could not read block number %w", err)
+	}
+	if blockNumber == nil {
+		return false, nil
+	}
+	executedTo, err := stages.GetStageProgress(tx, stages.Execution)
+	if err != nil {
+		return false, fmt.Errorf("ethereumExecutionModule.IsCanonicalHash: could not read execution progress %w", err)
+	}
+	return executedTo >= *blockNumber, nil
 }
 
 func (e *ExecModule) CurrentHeader(ctx context.Context) (*types.Header, error) {

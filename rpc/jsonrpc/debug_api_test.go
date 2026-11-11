@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"math/big"
 	"reflect"
 	"testing"
@@ -1078,6 +1079,15 @@ func TestStorageRangeAtGethCompat(t *testing.T) {
 		require.Empty(t, result.Storage)
 		require.NotNil(t, result.NextKey)
 		require.Equal(t, keys[0], *result.NextKey)
+
+		for _, maxResult := range []int{100_000_000_000, math.MaxInt} {
+			result, err = api.StorageRangeAt(m.Ctx, latestBlock.Hash(), 0, addr, nil, maxResult)
+			require.NoError(t, err)
+			expect = StorageRangeResult{storage, nil}
+			if !reflect.DeepEqual(result, expect) {
+				t.Fatalf("maxResult %d: wrong result:\ngot %s\nwant %s", maxResult, dumper.Sdump(result), dumper.Sdump(&expect))
+			}
+		}
 	})
 }
 
@@ -1397,7 +1407,7 @@ func TestMapTxNum2BlockNum(t *testing.T) {
 		for expectTxNums.HasNext() {
 			require.True(t, txNumsIter.HasNext())
 			expectTxNum, _ := expectTxNums.Next()
-			txNum, _, _, _, _, _ := txNumsIter.Next()
+			txNum, _, _, _, _, _, _ := txNumsIter.Next()
 			require.Equal(t, expectTxNum, txNum)
 		}
 	}
@@ -1499,8 +1509,9 @@ func TestAccountAt(t *testing.T) {
 	})
 	t.Run("large transaction index", func(t *testing.T) {
 		result, err := api.AccountAt(m.Ctx, blockHash10, 1024, contract)
-		require.NoError(t, err)
-		require.Equal(t, 42, int(result.Nonce))
+		var invalidParams *rpc.InvalidParamsError
+		require.ErrorAs(t, err, &invalidParams)
+		require.Nil(t, result)
 	})
 	t.Run("not existing addr", func(t *testing.T) {
 		require := require.New(t)
@@ -2128,4 +2139,174 @@ func TestSetHeadCanonicalCleanup(t *testing.T) {
 	restoredHead, err := rpchelper.GetLatestBlockNumber(roTx)
 	require.NoError(t, err)
 	require.Equal(t, head, restoredHead, "chain head should be restored after UpdateForkChoice")
+}
+
+func TestCallRejectsTxIndexOutOfBlock(t *testing.T) {
+	m, _, calls := gasTracingTestChain(t)
+	api, debugApi := newCallManyApisForTest(m)
+	block := rpc.BlockNumberOrHashWithNumber(1)
+	var invalidParams *rpc.InvalidParamsError
+	for _, txIndex := range []int{-5, len(calls) + 1, 500} {
+		stateCtx := StateContext{BlockNumber: block, TransactionIndex: &txIndex}
+		t.Run(fmt.Sprintf("debug_traceCallMany/%d", txIndex), func(t *testing.T) {
+			err := debugApi.TraceCallMany(m.Ctx, []Bundle{{Transactions: calls}}, stateCtx, nil, jsonstream.New(&bytes.Buffer{}))
+			require.ErrorAs(t, err, &invalidParams)
+		})
+		t.Run(fmt.Sprintf("eth_callMany/%d", txIndex), func(t *testing.T) {
+			_, err := api.CallMany(m.Ctx, []Bundle{{Transactions: calls}}, stateCtx, nil, nil)
+			require.ErrorAs(t, err, &invalidParams)
+		})
+		if txIndex < 0 {
+			continue
+		}
+		t.Run(fmt.Sprintf("debug_traceCall/%d", txIndex), func(t *testing.T) {
+			config := &tracersConfig.TraceConfig{TxIndex: new(hexutil.Uint(txIndex))}
+			err := debugApi.TraceCall(m.Ctx, calls[0], &block, config, jsonstream.New(&bytes.Buffer{}))
+			require.ErrorAs(t, err, &invalidParams)
+		})
+	}
+
+	txCount := len(calls)
+	stateCtx := StateContext{BlockNumber: block, TransactionIndex: &txCount}
+	_, err := api.CallMany(m.Ctx, []Bundle{{Transactions: calls}}, stateCtx, nil, nil)
+	require.NoError(t, err)
+	require.NoError(t, debugApi.TraceCallMany(m.Ctx, []Bundle{{Transactions: calls}}, stateCtx, nil, jsonstream.New(&bytes.Buffer{})))
+	config := &tracersConfig.TraceConfig{TxIndex: new(hexutil.Uint(txCount))}
+	require.NoError(t, debugApi.TraceCall(m.Ctx, calls[0], &block, config, jsonstream.New(&bytes.Buffer{})))
+
+	t.Run("debug_traceCallMany/negative_index_without_bounds", func(t *testing.T) {
+		require.NoError(t, m.DB.Update(m.Ctx, func(tx kv.RwTx) error {
+			return tx.Delete(kv.MaxTxNum, hexutil.EncodeTs(1))
+		}))
+		stateCtx := StateContext{BlockNumber: block, TransactionIndex: new(int(-2))}
+		err := debugApi.TraceCallMany(m.Ctx, []Bundle{{Transactions: calls}}, stateCtx, nil, jsonstream.New(&bytes.Buffer{}))
+		require.ErrorAs(t, err, &invalidParams)
+	})
+}
+
+func TestTraceCallRejectsTxIndexOutOfLatestBlock(t *testing.T) {
+	m, _, calls := gasTracingTestChain(t)
+	_, debugApi := newCallManyApisForTest(m)
+	latest := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
+	var invalidParams *rpc.InvalidParamsError
+	for _, txIndex := range []int{-5, 500} {
+		stateCtx := StateContext{BlockNumber: latest, TransactionIndex: &txIndex}
+		err := debugApi.TraceCallMany(m.Ctx, []Bundle{{Transactions: calls}}, stateCtx, nil, jsonstream.New(&bytes.Buffer{}))
+		require.ErrorAs(t, err, &invalidParams, "debug_traceCallMany %d", txIndex)
+	}
+	config := &tracersConfig.TraceConfig{TxIndex: new(hexutil.Uint(500))}
+	err := debugApi.TraceCall(m.Ctx, calls[0], &latest, config, jsonstream.New(&bytes.Buffer{}))
+	require.ErrorAs(t, err, &invalidParams)
+}
+
+// An explicit transaction index selects the state before that transaction, also in the head block.
+func TestTraceCallTxIndexSelectsPreStateAtHead(t *testing.T) {
+	key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	require.NoError(t, err)
+	bank := crypto.PubkeyToAddress(key.PublicKey)
+	contract := common.HexToAddress("0x00000000000000000000000000000000c0ffee20")
+	// With calldata: SSTORE(0, CALLDATALOAD(0)). Always: return SLOAD(0).
+	code := []byte{
+		byte(vm.CALLDATASIZE), byte(vm.ISZERO), byte(vm.PUSH1), 0x0B, byte(vm.JUMPI),
+		byte(vm.PUSH1), 0x00, byte(vm.CALLDATALOAD), byte(vm.PUSH1), 0x00, byte(vm.SSTORE),
+		byte(vm.JUMPDEST), byte(vm.PUSH1), 0x00, byte(vm.SLOAD), byte(vm.PUSH1), 0x00, byte(vm.MSTORE),
+		byte(vm.PUSH1), 0x20, byte(vm.PUSH1), 0x00, byte(vm.RETURN),
+	}
+	word := func(v uint64) hexutil.Bytes { return common.LeftPadBytes(new(big.Int).SetUint64(v).Bytes(), 32) }
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
+		Config: chain.TestChainOsakaConfig,
+		Alloc: types.GenesisAlloc{
+			bank:     {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(20), nil)},
+			contract: {Balance: new(big.Int), Code: code},
+		},
+	}), execmoduletester.WithKey(key))
+	signer := types.LatestSignerForChainID(m.ChainConfig.ChainID)
+	chainPack, err := m.GenerateChain(2, func(i int, b *blockgen.BlockGen) {
+		if i > 0 {
+			return
+		}
+		for _, v := range []uint64{1, 2} {
+			txn, err := types.SignTx(&types.DynamicFeeTransaction{
+				CommonTx: types.CommonTx{Nonce: b.TxNonce(bank), To: &contract, GasLimit: 100_000, Data: word(v)},
+				ChainID:  *uint256.MustFromBig(m.ChainConfig.ChainID.ToBig()),
+				FeeCap:   *uint256.NewInt(1_000_000_000_000),
+			}, *signer, key)
+			require.NoError(t, err)
+			b.AddTx(txn)
+		}
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(chainPack.Slice(0, 1)))
+	_, debugApi := newCallManyApisForTest(m)
+
+	tracer := "callTracer"
+	gas := hexutil.Uint64(100_000)
+	read := ethapi.CallArgs{From: &bank, To: &contract, Gas: &gas}
+	traceCall := func(block rpc.BlockNumberOrHash, txIndex *int) string {
+		config := &tracersConfig.TraceConfig{Tracer: &tracer}
+		if txIndex != nil {
+			config.TxIndex = new(hexutil.Uint(*txIndex))
+		}
+		var trace struct{ Output string }
+		readGasTrace(t, &trace, func(stream *jsonstream.Stream) error {
+			return debugApi.TraceCall(m.Ctx, read, &block, config, stream)
+		})
+		return trace.Output
+	}
+	traceCallMany := func(block rpc.BlockNumberOrHash, txIndex *int) string {
+		var traces [][]struct{ Output string }
+		readGasTrace(t, &traces, func(stream *jsonstream.Stream) error {
+			stateCtx := StateContext{BlockNumber: block, TransactionIndex: txIndex}
+			return debugApi.TraceCallMany(m.Ctx, []Bundle{{Transactions: []ethapi.CallArgs{read}}}, stateCtx, &tracersConfig.TraceConfig{Tracer: &tracer}, stream)
+		})
+		require.Len(t, traces, 1)
+		require.Len(t, traces[0], 1)
+		return traces[0][0].Output
+	}
+	check := func(t *testing.T, block rpc.BlockNumberOrHash) {
+		preState, postState := word(1).String(), word(2).String()
+		require.Equal(t, preState, traceCall(block, new(1)), "debug_traceCall txIndex 1")
+		require.Equal(t, preState, traceCallMany(block, new(1)), "debug_traceCallMany transactionIndex 1")
+		require.Equal(t, postState, traceCall(block, nil), "debug_traceCall without txIndex")
+		require.Equal(t, postState, traceCallMany(block, nil), "debug_traceCallMany without transactionIndex")
+		require.Equal(t, postState, traceCallMany(block, new(-1)), "debug_traceCallMany transactionIndex -1")
+	}
+
+	blockHash := chainPack.Blocks[0].Hash()
+	t.Run("head/latest", func(t *testing.T) { check(t, rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)) })
+	t.Run("head/number", func(t *testing.T) { check(t, rpc.BlockNumberOrHashWithNumber(1)) })
+	t.Run("head/hash", func(t *testing.T) { check(t, rpc.BlockNumberOrHashWithHash(blockHash, true)) })
+
+	require.NoError(t, m.InsertChain(chainPack.Slice(1, 2)))
+	t.Run("older/number", func(t *testing.T) { check(t, rpc.BlockNumberOrHashWithNumber(1)) })
+	t.Run("older/hash", func(t *testing.T) { check(t, rpc.BlockNumberOrHashWithHash(blockHash, true)) })
+}
+
+type recordingCodeStore map[string]int
+
+func (s recordingCodeStore) GetCodeByHash(h []byte) ([]byte, bool) {
+	s[string(h)]++
+	return nil, false
+}
+
+type codeSharingCache struct {
+	kvcache.Cache
+	store recordingCodeStore
+}
+
+func (c codeSharingCache) CodeByHash() state.CodeByHash { return c.store }
+
+func TestTraceBlockLooksUpSharedCodeByHash(t *testing.T) {
+	m, chain, _ := rpcdaemontest.CreateTestExecModule(t)
+	cache := codeSharingCache{Cache: kvcache.New(kvcache.DefaultCoherentConfig), store: recordingCodeStore{}}
+	baseApi := NewBaseApi(nil, cache, m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
+	api := NewPrivateDebugAPI(baseApi, m.DB, nil, &rpccfg.DebugApiConfig{})
+
+	for n := rpc.BlockNumber(1); n <= rpc.BlockNumber(chain.Length()); n++ {
+		var buf bytes.Buffer
+		s := jsonstream.New(&buf)
+		require.NoError(t, api.TraceBlockByNumber(m.Ctx, n, &tracersConfig.TraceConfig{}, s))
+		require.NoError(t, s.Flush())
+	}
+	require.NotEmpty(t, cache.store, "a block replay must look committed code up in the shared store")
 }

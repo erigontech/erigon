@@ -391,10 +391,13 @@ const (
 	maxBlockHashesPerMsg = 4096
 	// maxNewBlockHashesBytes caps the wire bytes buffered before the entry count is checked, so an oversized packet is dropped before its payload is read.
 	maxNewBlockHashesBytes = maxBlockHashesPerMsg * 48
-	// Each peer gets independent limits for full blocks and block hashes.
-	// Short bursts are allowed; sustained announcement floods disconnect the peer.
+	// Each peer gets independent limits for full blocks, block hashes and block range updates.
+	// Short bursts are allowed; sustained block announcement floods disconnect the peer, excess range updates are dropped.
 	blockAnnouncementsBurst            = 30
 	blockAnnouncementsRate  rate.Limit = 10
+
+	headerRequestsBurst            = 30
+	headerRequestsRate  rate.Limit = 10
 )
 
 // newBlockHashesExceedsCap reports whether the RLP NewBlockHashes payload holds more than maxBlockHashesPerMsg entries; malformed RLP returns false and is left to the decoding subscriber.
@@ -446,6 +449,8 @@ func runPeer(
 
 	newBlockHashesLimiter := rate.NewLimiter(blockAnnouncementsRate, blockAnnouncementsBurst)
 	newBlockLimiter := rate.NewLimiter(blockAnnouncementsRate, blockAnnouncementsBurst)
+	blockRangeUpdateLimiter := rate.NewLimiter(blockAnnouncementsRate, blockAnnouncementsBurst)
+	headerRequestsLimiter := rate.NewLimiter(headerRequestsRate, headerRequestsBurst)
 
 	for {
 		if !peerPrinted {
@@ -471,6 +476,11 @@ func runPeer(
 			return p2p.NewPeerError(p2p.PeerErrorMessageSizeLimit, p2p.DiscSubprotocolError, nil, fmt.Sprintf("sentry.runPeer: message is too large %d, limit %d", msg.Size, eth.ProtocolMaxMsgSize))
 		}
 
+		if protocol >= direct.ETH69 && (msg.Code == eth.NewBlockHashesMsg || msg.Code == eth.NewBlockMsg) {
+			msg.Discard()
+			return p2p.NewPeerError(p2p.PeerErrorInvalidMessage, p2p.DiscSubprotocolError, nil, fmt.Sprintf("sentry.runPeer: deprecated block announcement (code %d) on eth/%d", msg.Code, protocol))
+		}
+
 		givePermit := false
 		switch msg.Code {
 		case eth.StatusMsg:
@@ -478,6 +488,12 @@ func runPeer(
 			// Status messages should never arrive after the handshake
 			return p2p.NewPeerError(p2p.PeerErrorStatusUnexpected, p2p.DiscSubprotocolError, nil, "sentry.runPeer: unexpected status message")
 		case eth.GetBlockHeadersMsg:
+			// Fast sequential downloads can exceed the rate limit.
+			// Waiting keeps the connection open but also delays later ETH messages on it.
+			if err := headerRequestsLimiter.Wait(ctx); err != nil {
+				msg.Discard()
+				return p2p.NewPeerError(p2p.PeerErrorDiscReason, p2p.DiscQuitting, err, "sentry.runPeer: waiting for header request allowance")
+			}
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
 			}
@@ -634,6 +650,10 @@ func runPeer(
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.BlockRangeUpdateMsg:
+			if !blockRangeUpdateLimiter.Allow() {
+				msg.Discard() // a later update carries the newer range
+				continue
+			}
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
 			}
@@ -644,7 +664,11 @@ func runPeer(
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		default:
-			logger.Error("[p2p] Unknown message code", "code", msg.Code, "peer", hex.EncodeToString(peerID[:]))
+			if _, known := eth.ToProto[protocol][msg.Code]; known {
+				logger.Error("[p2p] Message code has no handler", "code", msg.Code, "protocol", protocol)
+			}
+			msg.Discard()
+			return p2p.NewPeerError(p2p.PeerErrorInvalidMessage, p2p.DiscSubprotocolError, nil, fmt.Sprintf("sentry.runPeer: unknown message code %d", msg.Code))
 		}
 
 		if diaglib.TypeOf(diaglib.PeerStatisticMsgUpdate{}).Enabled() {
@@ -1057,7 +1081,7 @@ func (ss *GrpcServer) PenalizePeer(_ context.Context, req *sentryproto.PenalizeP
 	//log.Warn("Received penalty", "kind", req.GetPenalty().Descriptor().FullName, "from", fmt.Sprintf("%s", req.GetPeerId()))
 	peerID := ConvertH512ToPeerID(req.PeerId)
 	peerInfo := ss.getPeer(peerID)
-	if ss.statusData != nil && peerInfo != nil && !peerInfo.peer.Info().Network.Static && !peerInfo.peer.Info().Network.Trusted {
+	if ss.GetStatus() != nil && peerInfo != nil && !peerInfo.peer.Info().Network.Static && !peerInfo.peer.Info().Network.Trusted {
 		ss.removePeer(peerID, p2p.NewPeerError(p2p.PeerErrorDiscReason, p2p.DiscRequested, nil, "penalized peer"))
 	}
 	return &emptypb.Empty{}, nil

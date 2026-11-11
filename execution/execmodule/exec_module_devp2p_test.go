@@ -112,14 +112,25 @@ func TestGetBlockReceiptsFrozenBlocks(t *testing.T) {
 	prunedHeader, err := rawdb.ReadHeaderByHash(tx, emptyBlockHash)
 	require.NoError(t, err)
 	require.Nil(t, prunedHeader)
-	for _, num := range []uint64{1, frozenChainLength} { // a frozen block and a block still in the DB
+	for num := uint64(1); num <= frozenChainLength; num++ { // frozen blocks and blocks still in the DB
 		block, err := m.BlockReader.BlockByNumber(m.Ctx, tx, num)
 		require.NoError(t, err)
-		hash, ok, err := m.BlockReader.TxnHashByIdxInBlock(m.Ctx, tx, num, 0)
+		if len(block.Transactions()) == 0 {
+			continue
+		}
+		minTxNum, err := m.BlockReader.TxnumReader().Min(m.Ctx, tx, num)
+		require.NoError(t, err)
+		hash, ok, err := m.BlockReader.TxnHashByIdxInBlock(m.Ctx, tx, num, minTxNum+1, 0)
 		require.NoError(t, err)
 		require.True(t, ok)
-		require.Equal(t, block.Transactions()[0].Hash(), hash)
+		require.Equal(t, block.Transactions()[0].Hash(), hash, "block %d", num)
 	}
+	// A txNum of the closing system transaction, stored without data in the file, is not a transaction.
+	minTxNum, err := m.BlockReader.TxnumReader().Min(m.Ctx, tx, 1)
+	require.NoError(t, err)
+	_, ok, err := m.BlockReader.TxnHashByIdxInBlock(m.Ctx, tx, 1, minTxNum+2, 1)
+	require.NoError(t, err)
+	require.False(t, ok)
 	receiptsGetter := receipts.NewGenerator(m.Dirs, m.BlockReader, m.Engine, nil, time.Minute)
 	encodedReceipts := func(num uint64) rlp.RawValue {
 		block, err := m.BlockReader.BlockByNumber(m.Ctx, tx, num)
@@ -426,5 +437,50 @@ func TestGetBlockAccessListsResponseMatrix(t *testing.T) {
 			}
 			require.Equal(t, tt.expect, received)
 		})
+	}
+}
+
+func TestReceiptsLoaderRegeneratesCommittedBlockReceipts(t *testing.T) {
+	m, privKey, senderAddr := newMetricsTester(t)
+	chainResult, err := m.GenerateChain(2, sendThenDeploy(t, m, privKey, senderAddr, 1_000))
+	require.NoError(t, err)
+	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), chainResult.Blocks))
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	load := execmodule.NewReceiptsLoader(m.ChainConfig, m.BlockReader, receipts.NewGenerator(m.Dirs, m.BlockReader, m.Engine, nil, time.Minute))
+
+	for i, block := range chainResult.Blocks {
+		got, err := load(m.Ctx, tx, block.NumberU64())
+		require.NoError(t, err)
+		require.Equal(t, block.Hash(), got.Header.Hash())
+		require.Len(t, got.Txs, len(block.Transactions()))
+		require.Len(t, got.Receipts, len(chainResult.Receipts[i]))
+		for j, r := range got.Receipts {
+			require.Equal(t, chainResult.Receipts[i][j].CumulativeGasUsed, r.CumulativeGasUsed)
+			require.Equal(t, block.Hash(), r.BlockHash)
+		}
+	}
+}
+
+func TestForwardForkchoiceJumpDeliversReceipts(t *testing.T) {
+	m, privKey, senderAddr := newMetricsTester(t)
+	chainResult, err := m.GenerateChain(20, sendThenDeploy(t, m, privKey, senderAddr, 1_000))
+	require.NoError(t, err)
+	want := 0
+	for _, blockReceipts := range chainResult.Receipts {
+		want += len(blockReceipts)
+	}
+	receipts, unsubscribe := m.Notifications.Events.AddReceiptsSubscription()
+	t.Cleanup(unsubscribe)
+	m.Notifications.Events.EmptyReceiptSubscription(false)
+
+	require.NoError(t, m.InsertChain(chainResult))
+
+	select {
+	case got := <-receipts:
+		require.Len(t, got, want)
+	case <-time.After(10 * time.Second):
+		t.Fatal("a forward forkchoice jump delivered no receipts")
 	}
 }

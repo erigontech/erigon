@@ -94,7 +94,7 @@ func (prunedHistoryTx) Debug() kv.TemporalDebugTx { return prunedHistoryDebug{} 
 
 type prunedHistoryDebug struct{ kv.TemporalDebugTx }
 
-func (prunedHistoryDebug) HistoryStartFrom(kv.Domain) uint64 { return 100 }
+func (prunedHistoryDebug) HistoryStartFrom(kv.Domain) (uint64, error) { return 100, nil }
 
 func TestRegenerator_PrunedHistoryBypassesReplayAdmission(t *testing.T) {
 	_, tx := temporaltest.NewTestTx(t)

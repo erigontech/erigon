@@ -84,6 +84,15 @@ func TestAttestationDueMs(t *testing.T) {
 	}
 }
 
+func TestCustomConfigReadsMaxPayloadSize(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	require.NoError(t, os.WriteFile(configPath, []byte("MAX_PAYLOAD_SIZE: 20971520\n"), 0o644))
+
+	_, networkCfg, err := CustomConfig(configPath)
+	require.NoError(t, err)
+	require.Equal(t, uint64(20_971_520), networkCfg.GossipMaxSize)
+}
+
 func TestBlockRequestWindowFallsBackToSpecFormula(t *testing.T) {
 	cfg := BeaconChainConfig{MinValidatorWithdrawabilityDelay: 256, ChurnLimitQuotient: 65_536}
 	require.Equal(t, uint64(33_024), cfg.MinEpochsForBlockRequests())
@@ -412,6 +421,25 @@ func TestMaxBlobsPerBlockUpperBound(t *testing.T) {
 	require.EqualValues(t, 9, noSchedule.MaxBlobsPerBlockUpperBound())
 }
 
+func TestMaxRequestBlobSidecarsByVersion(t *testing.T) {
+	cfg := BeaconChainConfig{MaxRequestBlobSidecars: 768, MaxRequestBlobSidecarsElectra: 1152}
+	for _, tc := range []struct {
+		version StateVersion
+		want    int
+	}{
+		{DenebVersion, 768},
+		{ElectraVersion, 1152},
+		{FuluVersion, 1152},
+		{GloasVersion, 1152},
+		{HezeVersion, 1152},
+	} {
+		t.Run(tc.version.String(), func(t *testing.T) {
+			require.Equal(t, tc.want, cfg.MaxRequestBlobSidecarsByVersion(tc.version))
+		})
+	}
+	require.Panics(t, func() { cfg.MaxRequestBlobSidecarsByVersion(CapellaVersion) })
+}
+
 func TestForkSchemaMatchesSlot(t *testing.T) {
 	cfg := MainnetBeaconConfig
 	cfg.AltairForkEpoch = 0
@@ -454,4 +482,15 @@ func TestForkSchemaMatchesSlotFarFutureGloas(t *testing.T) {
 	require.True(t, cfg.ForkSchemaMatchesSlot(fuluSlot, FuluVersion))
 	require.False(t, cfg.ForkSchemaMatchesSlot(fuluSlot, GloasVersion))
 	require.False(t, cfg.ForkSchemaMatchesSlot(math.MaxUint64/cfg.SlotsPerEpoch, GloasVersion))
+}
+
+func TestSnapshotBlobsFromSlotIgnoresCutoffUnderCustomConfig(t *testing.T) {
+	require.Equal(t, uint64(9_000_000), CaplinConfig{BlobsArchiveFromSlot: 9_000_000}.SnapshotBlobsFromSlot())
+	require.Zero(t, CaplinConfig{BlobsArchiveFromSlot: 9_000_000, CustomConfigPath: "config.yaml"}.SnapshotBlobsFromSlot(),
+		"a custom beacon config may widen the serving window the download filter cannot see")
+	require.Zero(t, CaplinConfig{BlobsArchiveFromSlot: 9_000_000, CustomGenesisStatePath: "genesis.ssz"}.SnapshotBlobsFromSlot())
+}
+
+func TestChiadoUsesTheGnosisPartialWithdrawalsSweep(t *testing.T) {
+	require.EqualValues(t, 6, chiadoConfig().MaxPendingPartialsPerWithdrawalsSweep)
 }

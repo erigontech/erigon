@@ -101,3 +101,19 @@ func TestForkChoiceStorageMockEnvelopeAccessIsConcurrentSafe(t *testing.T) {
 	workers.Wait()
 	require.True(t, mock.HasEnvelope(root))
 }
+
+func TestForkChoiceStorageMockPendingEnvelopeRequiresKnownBlock(t *testing.T) {
+	root := common.Hash{1}
+	mock := NewForkChoiceStorageMock(t)
+	mock.Headers[root] = &cltypes.BeaconBlockHeader{Slot: 10}
+	finishPending := mock.BeginPendingPayloadEnvelope(root)
+	defer finishPending()
+
+	_, finishPreparation, ok := mock.TryBeginPayloadPreparation(t.Context(), 10, 11)
+	require.True(t, ok)
+	require.False(t, finishPreparation())
+
+	mock.Blocks[root] = &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 10}}
+	_, _, ok = mock.TryBeginPayloadPreparation(t.Context(), 10, 11)
+	require.False(t, ok)
+}

@@ -48,10 +48,6 @@ var (
 	noMemstat                   = EnvBool("NO_MEMSTAT", false)
 
 	StagesOnlyBlocks = EnvBool("STAGES_ONLY_BLOCKS", false)
-	// CallNoMaterialize runs eth_call on the versioned state path, where reads
-	// go straight to the state reader instead of a resident stateObject.
-	CallNoMaterialize = EnvBool("CALL_NO_MATERIALIZE", true)
-
 	MdbxLockInRam    = EnvBool("MDBX_LOCK_IN_RAM", false)
 	MdbxNoSync       = EnvBool("MDBX_NO_FSYNC", false)
 	MdbxNoSyncUnsafe = EnvBool("MDBX_NO_FSYNC_UNSAFE", false)
@@ -78,6 +74,8 @@ var (
 	// unsynchronised on every domain read, so it may only be written before any
 	// reader goroutine exists: flag parsing, or test setup before the first read.
 	KVReadLevelledMetrics = EnvBool("KV_READ_METRICS", false)
+
+	KVFileReadSummaries = KVReadLevelledMetrics // only KV_READ_METRICS enables it; the slow-block flag sets KVReadLevelledMetrics later
 
 	// allow simultaneous build of multiple snapshot types.
 	// Values from 1 to 4 makes sense since we have only 3 types of snapshots.
@@ -133,16 +131,11 @@ var (
 	// BAL_DRIVEN_COMMITMENT=false (or IGNORE_BAL=true) to fall back to the
 	// incremental path if it ever misbehaves.
 	BALDrivenCommitment = EnvBool("BAL_DRIVEN_COMMITMENT", true)
+	BALBatchPrefetch    = EnvBool("BAL_BATCH_PREFETCH", true)
 	// BALShadowCompute (requires BALDrivenCommitment) also computes each
 	// BAL-driven block incrementally and asserts both roots match before
 	// publishing; without it the BAL-driven root is published directly.
-	BALShadowCompute = EnvBool("BAL_SHADOW_COMPUTE", false)
-	// CommitmentAfterExec makes the exec loop wait for the commitment
-	// calculator to handle block N's result before starting N+1. Diagnostic:
-	// it trades the block-level exec/commitment overlap for most of the
-	// SharedDomains.changesetMu contention. Mid-block computes (step-edge
-	// checkpoints) still run alongside exec.
-	CommitmentAfterExec           = EnvBool("COMMITMENT_AFTER_EXEC", false)
+	BALShadowCompute              = EnvBool("BAL_SHADOW_COMPUTE", false)
 	CaplinEfficientReorg          = EnvBool("CAPLIN_EFFICIENT_REORG", true)
 	UseTxDependencies             = EnvBool("USE_TX_DEPENDENCIES", false)
 	UseStateCache                 = EnvBool("USE_STATE_CACHE", true)

@@ -18,6 +18,7 @@ package cache
 
 import (
 	"bytes"
+	"fmt"
 	"math"
 	"strings"
 	"sync"
@@ -30,17 +31,12 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 const (
 	DefaultAccountCacheBytes = 150 * datasize.MB
 	DefaultStorageCacheBytes = 1 * datasize.GB
-
-	// Per-domain avg bytes held outside freelru's element, translating the byte
-	// budget into the entry-count cap. Entry bookkeeping is excluded: it sits
-	// inside the element, which the slot charge already covers.
-	avgAccountPayloadBytes = 70 // 20 addr + ~50 account record
-	avgStoragePayloadBytes = 64 // 52 addr+slot + ~12 value
 )
 
 // StateCache is a unified cache for domain data (Account, Storage, Code).
@@ -87,8 +83,8 @@ func NewStateCache(accountBytes, storageBytes, codeBytes, addrBytes datasize.Byt
 		sc.disableFills = true
 		log.Info("[cache] STATE_CACHE_FILLS=false — read fills disabled, only post-commit publication populates the cache")
 	}
-	sc.caches[kv.AccountsDomain] = newDomainCacheBytes(accountBytes, avgAccountPayloadBytes, mode)
-	sc.caches[kv.StorageDomain] = newDomainCacheBytes(storageBytes, avgStoragePayloadBytes, mode)
+	sc.caches[kv.AccountsDomain] = NewDomainCacheMode(accountBytes, mode)
+	sc.caches[kv.StorageDomain] = NewDomainCacheMode(storageBytes, mode)
 	sc.caches[kv.CodeDomain] = NewCodeCache(codeBytes, addrBytes)
 	// CommitmentDomain deliberately gets no cache: commitment data lives in the
 	// BranchCache, and the nil slot short-circuits every StateCache path for it
@@ -110,16 +106,6 @@ func stateCacheModeFromEnv() Mode {
 	default:
 		log.Warn("[cache] unrecognised STATE_CACHE_MODE; defaulting to evict", "value", v)
 		return ModeEvictLRU
-	}
-}
-
-// newDomainCacheBytes constructs a DomainCache whose growth ceiling is derived
-// from the byte budget using the supplied per-domain avg. It jump-grows from a
-// small start into the shared envelope on demand, so a domain with a small
-// working set (a test fixture) never pre-commits the full budget.
-func newDomainCacheBytes(capacityBytes datasize.ByteSize, avgBytes uint32, mode Mode) *DomainCache {
-	return &DomainCache{
-		GenericCache: NewGenericCacheWithAvg(capacityBytes, avgBytes, func(v []byte) int { return len(v) }, mode),
 	}
 }
 
@@ -161,7 +147,7 @@ func (c *StateCache) getWithTxNum(domain kv.Domain, key []byte) ([]byte, uint64,
 	return cache.GetWithTxNum(key)
 }
 
-// getCodeByHash retrieves code bytes by their Ethereum codeHash (keccak256),
+// GetCodeByHash retrieves code bytes by their Ethereum codeHash (keccak256),
 // bypassing the addr-keyed CodeDomain lookup. Returns (nil, false) on miss or
 // when the code domain cache is not a CodeCache (defensive fallback).
 //
@@ -169,7 +155,7 @@ func (c *StateCache) getWithTxNum(domain kv.Domain, key []byte) ([]byte, uint64,
 // for EXTCODESIZE / EXTCODEHASH / CALL targets. Lets many-addrs-one-code
 // patterns (proxies, factory clones, ERC-20 holders) share a single codeHashToCode
 // entry.
-func (c *StateCache) getCodeByHash(codeHash []byte) ([]byte, bool) {
+func (c *StateCache) GetCodeByHash(codeHash []byte) ([]byte, bool) {
 	cc, ok := c.caches[kv.CodeDomain].(*CodeCache)
 	if !ok {
 		return nil, false
@@ -262,14 +248,13 @@ func (c *StateCache) fillIfFresh(domain kv.Domain, key []byte, value []byte, rea
 	if cache == nil {
 		return
 	}
-	// Clone outside the lock so admission never waits on the copy.
-	cloned := bytes.Clone(value)
 	if len(value) == 0 {
 		readTxNum = 0
 		if visibleEnd > 0 {
 			readTxNum = visibleEnd - 1
 		}
 	}
+	value = bytes.Clone(value)
 	c.admissionMu.RLock()
 	defer c.admissionMu.RUnlock()
 	if c.publishing ||
@@ -277,7 +262,7 @@ func (c *StateCache) fillIfFresh(domain kv.Domain, key []byte, value []byte, rea
 		visibleEnd < c.appliedEnd[domain] {
 		return
 	}
-	cache.PutIfAbsent(key, cloned, readTxNum)
+	cache.PutIfAbsent(key, value, readTxNum)
 }
 
 // fillCodeIfFresh is fillIfFresh for the code domain. An addr-keyed code entry
@@ -302,6 +287,9 @@ func (c *StateCache) fillCodeWithHashIfFresh(key, value, codeHash []byte, readTx
 	codeCache, ok := c.caches[kv.CodeDomain].(*CodeCache)
 	if !ok || len(value) == 0 || len(codeHash) != len(common.Hash{}) {
 		return
+	}
+	if dbg.AssertEnabled && !bytes.Equal(crypto.Keccak256(value), codeHash) {
+		panic(fmt.Sprintf("code fill: codeHash %x does not match the code", codeHash))
 	}
 	c.admissionMu.RLock()
 	defer c.admissionMu.RUnlock()
@@ -332,7 +320,8 @@ type preparedStateUpdate struct {
 	txNum    uint64
 }
 
-func prepareStateUpdate(update StateUpdate) preparedStateUpdate {
+// prepareStateUpdate hashes a code update unless codeHash already holds its hash.
+func prepareStateUpdate(update StateUpdate, codeHash []byte) preparedStateUpdate {
 	prepared := preparedStateUpdate{
 		domain: update.Domain,
 		key:    update.Key,
@@ -340,9 +329,44 @@ func prepareStateUpdate(update StateUpdate) preparedStateUpdate {
 		txNum:  update.TxNum,
 	}
 	if update.Domain == kv.CodeDomain && len(update.Value) > 0 {
-		prepared.codeHash = crypto.Keccak256(prepared.value)
+		prepared.codeHash = codeHash
+		if prepared.codeHash == nil {
+			prepared.codeHash = crypto.Keccak256(prepared.value)
+		}
 	}
 	return prepared
+}
+
+type codeUpdateKey struct {
+	addr  string
+	txNum uint64
+}
+
+// accountCodeHashes maps each code update of the batch to the code hash of the
+// account written at the same txNum, so publishing does not hash the code again.
+func accountCodeHashes(updates []StateUpdate) map[codeUpdateKey][]byte {
+	var hashes map[codeUpdateKey][]byte
+	for _, u := range updates {
+		if u.Domain == kv.CodeDomain && len(u.Value) > 0 {
+			if hashes == nil {
+				hashes = map[codeUpdateKey][]byte{}
+			}
+			hashes[codeUpdateKey{string(u.Key), u.TxNum}] = nil
+		}
+	}
+	if hashes == nil {
+		return nil
+	}
+	for _, u := range updates {
+		if u.Domain != kv.AccountsDomain {
+			continue
+		}
+		k := codeUpdateKey{string(u.Key), u.TxNum}
+		if _, ok := hashes[k]; ok {
+			hashes[k] = accounts.DeserialiseV3CodeHash(u.Value)
+		}
+	}
+	return hashes
 }
 
 func (c *StateCache) applyPrepared(update preparedStateUpdate) {
@@ -520,8 +544,13 @@ func (c *StateCache) publish(sourceStateVersion, committedStateVersion, unwindTo
 	// true, admission-gated fills cannot mutate state entries or read appliedEnd,
 	// so the serialized applier can install the batch without admissionMu.
 	// One at a time: preparing the batch up front clones every value at once.
+	codeHashes := accountCodeHashes(updates)
 	for i := range updates {
-		c.applyPrepared(prepareStateUpdate(updates[i]))
+		var codeHash []byte
+		if codeHashes != nil && updates[i].Domain == kv.CodeDomain {
+			codeHash = codeHashes[codeUpdateKey{string(updates[i].Key), updates[i].TxNum}]
+		}
+		c.applyPrepared(prepareStateUpdate(updates[i], codeHash))
 	}
 
 	c.finishPublication(committedStateVersion)

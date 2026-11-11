@@ -24,6 +24,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -97,6 +98,46 @@ func TestMaxTxNumNilCursor(t *testing.T) {
 	}))
 }
 
+func TestExactTxNumBounds(t *testing.T) {
+	db, spans := newTxNumsDB(t, 3)
+	ctx := t.Context()
+	require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
+		return tx.Delete(kv.MaxTxNum, hexutil.EncodeTs(1))
+	}))
+	require.NoError(t, db.View(ctx, func(tx kv.Tx) error {
+		cursor, cursorErr := tx.Cursor(kv.MaxTxNum)
+		require.NoError(t, cursorErr)
+		defer cursor.Close()
+		for _, c := range []kv.Cursor{nil, cursor} {
+			for _, tc := range []struct {
+				block, min, max uint64
+				hasMin, hasMax  bool
+			}{
+				{0, 0, spans[0].max, true, true},
+				{1, spans[1].min, 0, true, false},
+				{2, 0, spans[2].max, false, true},
+				{3, spans[2].max + 1, 0, true, false},
+			} {
+				minTxNum, ok, err := TxNums.MinExact(ctx, tx, c, tc.block)
+				require.NoError(t, err)
+				require.Equal(t, tc.hasMin, ok)
+				require.Equal(t, tc.min, minTxNum)
+				maxTxNum, ok, err := TxNums.MaxExact(ctx, tx, c, tc.block)
+				require.NoError(t, err)
+				require.Equal(t, tc.hasMax, ok)
+				require.Equal(t, tc.max, maxTxNum)
+			}
+		}
+		minTxNum, err := TxNums.MinWithCursor(ctx, tx, cursor, 2)
+		require.NoError(t, err)
+		require.Equal(t, spans[2].max+1, minTxNum, "Min retains its latest-state fallback")
+		maxTxNum, err := TxNums.MaxWithCursor(ctx, tx, cursor, 1)
+		require.NoError(t, err)
+		require.Equal(t, spans[2].max, maxTxNum, "Max retains its latest-state fallback")
+		return nil
+	}))
+}
+
 type blockSpan struct{ min, max uint64 }
 
 // newTxNumsDB writes blocks of 2..7 txNums (system txs included) and returns each block's txNum range.
@@ -150,13 +191,14 @@ func TestTxNums2BlockNums(t *testing.T) {
 				prevBlock := -1
 				for _, want := range in {
 					require.True(t, it.HasNext())
-					txNum, blockNum, txIndex, isFinal, changed, err := it.Next()
+					txNum, blockNum, txIndex, isFinal, isSystem, changed, err := it.Next()
 					require.NoError(t, err)
 					b, _ := slices.BinarySearchFunc(spans, want, func(s blockSpan, n uint64) int { return int(s.max) - int(n) })
 					require.Equal(t, want, txNum)
 					require.Equal(t, uint64(b), blockNum, "txNum %d", want)
 					require.Equal(t, int(want)-int(spans[b].min)-1, txIndex)
 					require.Equal(t, bool(asc) && want == spans[b].max || !bool(asc) && want == spans[b].min, isFinal)
+					require.Equal(t, want == spans[b].min || want == spans[b].max, isSystem)
 					require.Equal(t, b != prevBlock, changed)
 					prevBlock = b
 				}
@@ -202,7 +244,7 @@ func TestTxNums2BlockNumsSearchesOnce(t *testing.T) {
 		index.blockNumberCalls = 0
 		it := TxNums2BlockNums(t.Context(), tx, reader, stream.Array(in), asc)
 		for it.HasNext() {
-			_, _, _, _, _, err := it.Next()
+			_, _, _, _, _, _, err := it.Next()
 			require.NoError(t, err)
 		}
 		it.Close()
@@ -225,10 +267,10 @@ func TestTxNums2BlockNumsFarJump(t *testing.T) {
 			slices.Reverse(in)
 		}
 		it := TxNums2BlockNums(t.Context(), tx, reader, stream.Array(in), asc)
-		_, _, _, _, _, err := it.Next()
+		_, _, _, _, _, _, err := it.Next()
 		require.NoError(t, err)
 		index.blockNumberCalls, index.maxTxNumCalls = 0, 0
-		_, blockNum, _, _, _, err := it.Next()
+		_, blockNum, _, _, _, _, err := it.Next()
 		require.NoError(t, err)
 		it.Close()
 		require.Equal(t, map[order.By]uint64{order.Asc: 1010, order.Desc: 10}[asc], blockNum)
@@ -244,9 +286,53 @@ func TestTxNums2BlockNumsPastLastBlock(t *testing.T) {
 	defer tx.Rollback()
 	it := TxNums2BlockNums(t.Context(), tx, TxNums, stream.Array([]uint64{spans[10].min, spans[99].max + 5}), order.Asc)
 	defer it.Close()
-	_, blockNum, _, _, _, err := it.Next()
+	_, blockNum, _, _, _, _, err := it.Next()
 	require.NoError(t, err)
 	require.Equal(t, uint64(10), blockNum)
-	_, _, _, _, _, err = it.Next()
+	_, _, _, _, _, _, err = it.Next()
 	require.ErrorContains(t, err, "can't find blockNumber")
+}
+
+// TestTxNums2BlockNumsFrom pins that a first txNum in or near the start block needs no search over
+// the whole chain, that one in the start block reads only the start block's bounds, and that any
+// first txNum is still mapped right.
+func TestTxNums2BlockNumsFrom(t *testing.T) {
+	db, spans := newTxNumsDB(t, 2000)
+	index := &countingTxBlockIndex{TxBlockIndex: DefaultTxBlockIndexInstance}
+	reader := TxNums.WithCustomReadTxNumFunc(index)
+	tx, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	for _, tc := range []struct {
+		name         string
+		start        uint64
+		first        int
+		wantSearches int
+		wantReads    int // MaxTxNum reads of the first Next, -1 when not pinned
+	}{
+		{"same block", 500, 500, 0, 2},
+		{"near block", 500, 503, 0, -1},
+		{"far block", 500, 1500, 1, -1},
+		{"start past last block", 5000, 500, 1, -1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			in := []uint64{spans[tc.first].min + 1, spans[tc.first].max, spans[tc.first+1].min}
+			index.blockNumberCalls, index.maxTxNumCalls = 0, 0
+			it := TxNums2BlockNumsFrom(t.Context(), tx, reader, stream.Array(in), order.Asc, tc.start)
+			defer it.Close()
+			for k, want := range []int{tc.first, tc.first, tc.first + 1} {
+				txNum, blockNum, txIndex, isFinal, _, changed, err := it.Next()
+				require.NoError(t, err)
+				if k == 0 && tc.wantReads >= 0 {
+					require.Equal(t, tc.wantReads, index.maxTxNumCalls)
+				}
+				require.Equal(t, in[k], txNum)
+				require.Equal(t, uint64(want), blockNum)
+				require.Equal(t, int(in[k])-int(spans[want].min)-1, txIndex)
+				require.Equal(t, in[k] == spans[want].max, isFinal)
+				require.Equal(t, k != 1, changed)
+			}
+			require.Equal(t, tc.wantSearches, index.blockNumberCalls)
+		})
+	}
 }
