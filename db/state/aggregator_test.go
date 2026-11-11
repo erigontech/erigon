@@ -450,38 +450,24 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 func generateDomainFiles(t *testing.T, name string, dirs datadir.Dirs, ranges []testFileRange) {
 	t.Helper()
 	ver := version.V1_0_standart
-	domainR := setupAggSnapRepo(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (dn string, schema SnapNameSchema) {
-		accessors := statecfg.AccessorBTree | statecfg.AccessorExistence
-		schema = NewE3SnapSchemaBuilder(accessors, stepSize).
-			Data(dirs.SnapDomain, name, DataExtensionKv, seg.CompressNone, ver).
-			BtIndex(ver).Existence(ver).
-			Build()
-		return name, schema
-	})
-	defer domainR.Close()
-	populateFiles2(t, dirs, domainR, ranges)
+	stepSize := uint64(10)
+	domain := NewE3SnapSchemaBuilder(statecfg.AccessorBTree|statecfg.AccessorExistence, stepSize).
+		Data(dirs.SnapDomain, name, DataExtensionKv, ver).
+		BtIndex(ver).Existence(ver).
+		Build()
+	populateFiles2(t, dirs, domain, stepSize, ranges)
 
-	domainHR := setupAggSnapRepo(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (dn string, schema SnapNameSchema) {
-		accessors := statecfg.AccessorHashMap
-		schema = NewE3SnapSchemaBuilder(accessors, stepSize).
-			Data(dirs.SnapHistory, name, DataExtensionV, seg.CompressNone, ver).
-			Accessor(dirs.SnapAccessors, version.Versions{Current: version.V2_0, MinSupported: version.V2_0}).
-			Build()
-		return name, schema
-	})
-	defer domainHR.Close()
-	populateFiles2(t, dirs, domainHR, ranges)
+	history := NewE3SnapSchemaBuilder(statecfg.AccessorHashMap, stepSize).
+		Data(dirs.SnapHistory, name, DataExtensionV, ver).
+		Accessor(dirs.SnapAccessors, version.Versions{Current: version.V2_0, MinSupported: version.V2_0}).
+		Build()
+	populateFiles2(t, dirs, history, stepSize, ranges)
 
-	domainII := setupAggSnapRepo(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (dn string, schema SnapNameSchema) {
-		accessors := statecfg.AccessorHashMap
-		schema = NewE3SnapSchemaBuilder(accessors, stepSize).
-			Data(dirs.SnapIdx, name, DataExtensionEf, seg.CompressNone, ver).
-			Accessor(dirs.SnapAccessors, ver).
-			Build()
-		return name, schema
-	})
-	defer domainII.Close()
-	populateFiles2(t, dirs, domainII, ranges)
+	ii := NewE3SnapSchemaBuilder(statecfg.AccessorHashMap, stepSize).
+		Data(dirs.SnapIdx, name, DataExtensionEf, ver).
+		Accessor(dirs.SnapAccessors, ver).
+		Build()
+	populateFiles2(t, dirs, ii, stepSize, ranges)
 }
 
 func generateAccountsFile(t *testing.T, dirs datadir.Dirs, ranges []testFileRange) {
@@ -502,17 +488,12 @@ func generateStorageFile(t *testing.T, dirs datadir.Dirs, ranges []testFileRange
 func generateCommitmentFile(t *testing.T, dirs datadir.Dirs, ranges []testFileRange) {
 	t.Helper()
 	ver := version.V1_0_standart
-	commitmentR := setupAggSnapRepo(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (name string, schema SnapNameSchema) {
-		accessors := statecfg.AccessorHashMap
-		name = "commitment"
-		schema = NewE3SnapSchemaBuilder(accessors, stepSize).
-			Data(dirs.SnapDomain, name, DataExtensionKv, seg.CompressNone, ver).
-			Accessor(dirs.SnapDomain, ver).
-			Build()
-		return name, schema
-	})
-	defer commitmentR.Close()
-	populateFiles2(t, dirs, commitmentR, ranges)
+	stepSize := uint64(10)
+	schema := NewE3SnapSchemaBuilder(statecfg.AccessorHashMap, stepSize).
+		Data(dirs.SnapDomain, "commitment", DataExtensionKv, ver).
+		Accessor(dirs.SnapDomain, ver).
+		Build()
+	populateFiles2(t, dirs, schema, stepSize, ranges)
 }
 
 // generateCommitmentHistoryAndIndexFiles creates only the history (.v) and inverted-index (.ef)
@@ -521,25 +502,18 @@ func generateCommitmentFile(t *testing.T, dirs datadir.Dirs, ranges []testFileRa
 func generateCommitmentHistoryAndIndexFiles(t *testing.T, dirs datadir.Dirs, ranges []testFileRange) {
 	t.Helper()
 	ver := version.V1_0_standart
-	histRepo := setupAggSnapRepo(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (string, SnapNameSchema) {
-		schema := NewE3SnapSchemaBuilder(statecfg.AccessorHashMap, stepSize).
-			Data(dirs.SnapHistory, "commitment", DataExtensionV, seg.CompressNone, ver).
-			Accessor(dirs.SnapAccessors, version.Versions{Current: version.V2_0, MinSupported: version.V2_0}).
-			Build()
-		return "commitment", schema
-	})
-	defer histRepo.Close()
-	populateFiles2(t, dirs, histRepo, ranges)
+	stepSize := uint64(10)
+	history := NewE3SnapSchemaBuilder(statecfg.AccessorHashMap, stepSize).
+		Data(dirs.SnapHistory, "commitment", DataExtensionV, ver).
+		Accessor(dirs.SnapAccessors, version.Versions{Current: version.V2_0, MinSupported: version.V2_0}).
+		Build()
+	populateFiles2(t, dirs, history, stepSize, ranges)
 
-	idxRepo := setupAggSnapRepo(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (string, SnapNameSchema) {
-		schema := NewE3SnapSchemaBuilder(statecfg.AccessorHashMap, stepSize).
-			Data(dirs.SnapIdx, "commitment", DataExtensionEf, seg.CompressNone, ver).
-			Accessor(dirs.SnapAccessors, ver).
-			Build()
-		return "commitment", schema
-	})
-	defer idxRepo.Close()
-	populateFiles2(t, dirs, idxRepo, ranges)
+	ii := NewE3SnapSchemaBuilder(statecfg.AccessorHashMap, stepSize).
+		Data(dirs.SnapIdx, "commitment", DataExtensionEf, ver).
+		Accessor(dirs.SnapAccessors, ver).
+		Build()
+	populateFiles2(t, dirs, ii, stepSize, ranges)
 }
 
 // TestAggregator_BuildFiles_GapRefuses verifies that buildFilesInBackground
@@ -763,25 +737,6 @@ func TestCommitmentVisibleFilesReferenced(t *testing.T) {
 	})
 }
 
-func setupAggSnapRepo(t *testing.T, dirs datadir.Dirs, genRepo func(stepSize uint64, dirs datadir.Dirs) (name string, schema SnapNameSchema)) *SnapshotRepo {
-	t.Helper()
-	stepSize := uint64(10)
-	name, schema := genRepo(stepSize, dirs)
-
-	createConfig := SnapshotCreationConfig{
-		RootNumPerStep: stepSize,
-		MergeStages:    []uint64{20, 40, 80},
-		MinimumSize:    10,
-		SafetyMargin:   5,
-	}
-	d, err := kv.String2Domain(name)
-	require.NoError(t, err)
-	return NewSnapshotRepo(name, FromDomain(d), &SnapshotConfig{
-		SnapshotCreationConfig: &createConfig,
-		Schema:                 schema,
-	}, log.New())
-}
-
 // TestRunningMergesGaugeIgnoresEmptyStep pins that domain_running_merges counts merges
 // and not merge polls: mergeLoopStep still runs findMergeRange and cleanAfterMerge when
 // there is no range, and a scrape landing there used to read one merge in flight.
@@ -936,4 +891,53 @@ func TestAggregatorBtIndexInMemOnlyWhenEnabled(t *testing.T) {
 		}
 		agg.Close()
 	}
+}
+
+func TestAggregatorOpenFolderOpensAccessors(t *testing.T) {
+	t.Parallel()
+	db, agg := testDbAndAggregatorv3(t, 10)
+	ranges := []testFileRange{{0, 1}, {1, 2}}
+	generateAccountsFile(t, agg.Dirs(), ranges)
+	generateCodeFile(t, agg.Dirs(), ranges)
+	generateStorageFile(t, agg.Dirs(), ranges)
+	require.NoError(t, agg.OpenFolder(db))
+
+	d := agg.d[kv.AccountsDomain]
+	require.Equal(t, 2, d.dirtyFiles.Len())
+	d.dirtyFiles.Scan(func(it *FilesItem) bool {
+		require.NotNil(t, it.decompressor)
+		require.NotNil(t, it.bindex)
+		require.NotNil(t, it.existence)
+		return true
+	})
+	require.Equal(t, 2, d.History.dirtyFiles.Len())
+	d.History.dirtyFiles.Scan(func(it *FilesItem) bool {
+		require.NotNil(t, it.decompressor)
+		require.True(t, it.index != nil || it.vAccessor != nil)
+		return true
+	})
+	require.Equal(t, 2, d.History.InvertedIndex.dirtyFiles.Len())
+	d.History.InvertedIndex.dirtyFiles.Scan(func(it *FilesItem) bool {
+		require.NotNil(t, it.decompressor)
+		require.NotNil(t, it.index)
+		return true
+	})
+}
+
+func TestAggregatorOpenFolderHidesDataOnlyDomainFile(t *testing.T) {
+	t.Parallel()
+	db, agg := testDbAndAggregatorv3(t, 10)
+	ranges := []testFileRange{{0, 1}, {1, 2}, {2, 3}}
+	generateAccountsFile(t, agg.Dirs(), ranges)
+	generateCodeFile(t, agg.Dirs(), ranges)
+	generateStorageFile(t, agg.Dirs(), ranges)
+	generateCommitmentFile(t, agg.Dirs(), ranges)
+	require.NoError(t, dir.RemoveFile(filepath.Join(agg.Dirs().SnapDomain, "v1.0-accounts.2-3.bt")))
+	require.NoError(t, dir.RemoveFile(filepath.Join(agg.Dirs().SnapDomain, "v1.0-accounts.2-3.kvei")))
+	require.NoError(t, agg.OpenFolder(db))
+
+	require.Equal(t, 3, agg.d[kv.AccountsDomain].dirtyFiles.Len())
+	at := agg.BeginFilesRo()
+	defer at.Close()
+	require.Equal(t, "0-1,1-2", at.d[kv.AccountsDomain].files.String(10))
 }

@@ -36,12 +36,12 @@ import (
 	"github.com/erigontech/erigon/rpc"
 )
 
-// unable to decode supplied params, or an invalid number of parameters
-type nonCanonicalHashError struct{ hash common.Hash }
+// NonCanonicalHashError reports a known block hash that is not on the canonical chain.
+type NonCanonicalHashError struct{ hash common.Hash }
 
-func (e nonCanonicalHashError) ErrorCode() int { return -32603 }
+func (e NonCanonicalHashError) ErrorCode() int { return -32603 }
 
-func (e nonCanonicalHashError) Error() string {
+func (e NonCanonicalHashError) Error() string {
 	return fmt.Sprintf("hash %x is not currently canonical", e.hash)
 }
 
@@ -149,7 +149,7 @@ func _GetBlockNumber(ctx context.Context, requireCanonical bool, blockNrOrHash r
 			return 0, common.Hash{}, false, false, err
 		}
 		if requireCanonical && (!ok || ch != hash) {
-			return 0, common.Hash{}, false, false, nonCanonicalHashError{hash}
+			return 0, common.Hash{}, false, false, NonCanonicalHashError{hash}
 		}
 	}
 	return blockNumber, hash, blockNumber == plainStateBlockNumber, true, nil
