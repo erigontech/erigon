@@ -198,3 +198,17 @@ func TestLayerVersionMaps_CreationKeepsOnlySlotsWrittenFromIt(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, v.IsZero(), "the creation cleared this slot, got %s", v.String())
 }
+
+// An Estimate slot cell written after the creation is a value the next reader must see, as on the path without a creation.
+func TestLayerVersionMaps_CreationKeepsAnEstimateSlotWrittenAfterIt(t *testing.T) {
+	addr := getAddress(7)
+	slot := accounts.InternKey(common.HexToHash("0x01"))
+	vm := NewVersionMap(nil)
+	vm.WriteCreateContract(addr, Version{TxIndex: 0}, true, true)
+	vm.WriteStorage(addr, slot, Version{TxIndex: 1}, *uint256.NewInt(7), false)
+
+	val, ok, err := NewVersionedStateReader(2, ReadSet{}, vm, nil).ReadAccountStorage(addr, slot)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, *uint256.NewInt(7), val)
+}
