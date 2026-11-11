@@ -18,6 +18,7 @@ package stagedsync
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -176,6 +177,52 @@ func makeHeader(number uint64, root common.Hash) *types.Header {
 		Number:     *uint256.NewInt(number),
 		Root:       root,
 		Difficulty: *uint256.NewInt(1),
+	}
+}
+
+func TestUnwindExec3RequiresExecutedDiffsets(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		stored  []uint64
+		missing uint64
+	}{
+		{"all_missing", nil, 3},
+		{"executed_tip_missing", []uint64{1}, 3},
+		{"complete", []uint64{1, 2, 3}, 0},
+		{"interior_missing", []uint64{1, 3}, 2},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := t.Context()
+			logger := log.New()
+			db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()), temporaltest.WithStepSize(16))
+			br := freezeblocks.NewBlockReader(db.(freezeblocks.HasBlockFiles).DebugBlockFiles())
+			tx, doms := temporaltest.NewTestTxSD(t, db)
+			for number := uint64(0); number <= 3; number++ {
+				header := makeHeader(number, common.Hash{1})
+				require.NoError(t, rawdb.WriteHeader(tx, header))
+				require.NoError(t, rawdb.WriteCanonicalHash(tx, header.Hash(), number))
+				require.NoError(t, rawdbv3.TxNums.Append(tx, number, number*3+2))
+			}
+			for _, number := range test.stored {
+				cs := &changeset.StateChangeSet{}
+				address := common.Address{1}
+				cs.Diffs[kv.AccountsDomain].DomainUpdate(address[:], kv.Step(0), nil)
+				require.NoError(t, changeset.WriteDiffSet(tx, number, makeHeader(number, common.Hash{1}).Hash(), cs))
+			}
+			doms.SetTxNum(11)
+			err := unwindExec3(
+				&UnwindState{ID: stages.Execution, UnwindPoint: 0, CurrentBlockNumber: 3},
+				&StageState{ID: stages.Execution, BlockNumber: 3}, doms, tx, ctx,
+				ExecuteBlockCfg{blockReader: br}, nil, logger,
+			)
+			if test.missing > 0 {
+				require.ErrorContains(t, err, fmt.Sprintf("missing diffset for executed block %d", test.missing))
+				require.Equal(t, uint64(11), doms.TxNum(), "a failed unwind must not move the state boundary")
+			} else {
+				require.NoError(t, err)
+				require.Equal(t, uint64(3), doms.TxNum())
+			}
+		})
 	}
 }
 

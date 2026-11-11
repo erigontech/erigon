@@ -306,19 +306,24 @@ func (e *ExecModule) unwindIfNeeded(
 	}
 	needsUnwind := unwindTarget < lastCanonicalBlock
 	if needsUnwind {
-		minUnwindableBlock, err := rawtemporaldb.CanUnwindToBlockNum(tx)
-		if err != nil {
-			return nil, nil, err
-		}
 		resentTipAheadOfState := isDomainAheadOfBlocks && canonicalHash == blockHash && fcuHeader.Number.Uint64() == lastCanonicalBlock
-		if unwindTarget < minUnwindableBlock && !resentTipAheadOfState {
+		minUnwindableBlock, err := rawtemporaldb.CanUnwindToBlockNum(tx, e.blockReader.TxnumReader())
+		switch {
+		case errors.Is(err, commitmentdb.ErrBehindCommitment) && resentTipAheadOfState:
+			// A re-sent tip may extend the block index toward downloaded state files.
+			// It does not require unwinding files whose block mapping is still missing.
+			needsUnwind = false
+		case err != nil:
+			return nil, nil, err
+		case unwindTarget < minUnwindableBlock && !resentTipAheadOfState:
 			e.logger.Warn("reorg target below minimum unwindable block", "unwindTarget", unwindTarget, "minUnwindableBlock", minUnwindableBlock)
 			return &ForkChoiceResult{
 				LatestValidHash: common.Hash{},
 				Status:          ExecutionStatusReorgTooDeep,
 			}, nil, nil
+		default:
+			needsUnwind = unwindTarget >= minUnwindableBlock
 		}
-		needsUnwind = unwindTarget >= minUnwindableBlock
 	}
 	var unwindPoint *uint64
 	if needsUnwind {
@@ -399,6 +404,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	// The next semaphore acquirer must observe settled state, so the bg-prune
 	// path runs this eagerly before handing the semaphore to its goroutine.
 	cleanupBeforeSemaRelease := sync.OnceFunc(func() {
+		e.pipelineExecutor.Sync().CancelUnwind()
 		e.currentContext.ResetPendingUpdates()
 		e.forkValidator.ClearWithUnwind()
 	})

@@ -347,6 +347,7 @@ func (pe *PipelineExecutor) lastValidationExecStageTiming() time.Duration {
 // ValidateBlock executes a fork validation by running the pipeline block-by-block
 // over a side fork. All pipeline execution goes through PipelineExecutor.
 func (pe *PipelineExecutor) ValidateBlock(sd *execctx.SharedDomains, tx kv.TemporalRwTx, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody) error {
+	defer pe.validationSync.CancelUnwind()
 	// Use a terse logger to suppress low-level noise during fork validation.
 	// Defaults to LvlWarn (matching the original hard-coded level), but can
 	// be overridden via dbg.ExecTerseLoggerLevel for debugging — Erigon's

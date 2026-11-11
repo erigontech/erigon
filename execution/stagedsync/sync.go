@@ -28,15 +28,16 @@ import (
 	commonerrors "github.com/erigontech/erigon/common/errors"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 type Sync struct {
 	cfg             ethconfig.Sync
+	txNumsReader    rawdbv3.TxNumsReader
 	unwindPoint     *uint64 // used to run stages
 	prevUnwindPoint *uint64 // used to get value from outside staged sync after cycle (for example to notify RPCDaemon)
 	unwindReason    UnwindReason
@@ -145,12 +146,7 @@ func (s *Sync) UnwindTo(unwindPoint uint64, reason UnwindReason, tx kv.Tx) error
 	if tx != nil {
 		if ttx, ok := tx.(kv.TemporalTx); ok {
 			// protect from too far unwind
-			unwindPointWithCommitment, ok, err := rawtemporaldb.CanUnwindBeforeBlockNum(unwindPoint, ttx)
-			// Ignore in the case that snapshots are ahead of commitment, it will be resolved later.
-			// This can be a problem if snapshots include a wrong chain so it is ok to ignore it.
-			if errors.Is(err, commitmentdb.ErrBehindCommitment) {
-				return nil
-			}
+			unwindPointWithCommitment, ok, err := rawtemporaldb.CanUnwindBeforeBlockNum(unwindPoint, ttx, s.txNumsReader)
 			if err != nil {
 				return err
 			}
@@ -201,7 +197,7 @@ func (s *Sync) SetCurrentStage(id stages.SyncStage) error {
 	return fmt.Errorf("stage not found with id: %v", id)
 }
 
-func New(cfg ethconfig.Sync, stagesList []*Stage, unwindOrder UnwindOrder, pruneOrder PruneOrder, logger log.Logger, mode stages.Mode) *Sync {
+func New(txNumsReader rawdbv3.TxNumsReader, cfg ethconfig.Sync, stagesList []*Stage, unwindOrder UnwindOrder, pruneOrder PruneOrder, logger log.Logger, mode stages.Mode) *Sync {
 	unwindStages := make([]*Stage, len(unwindOrder))
 	for i, stageIndex := range unwindOrder {
 		for _, s := range stagesList {
@@ -230,6 +226,7 @@ func New(cfg ethconfig.Sync, stagesList []*Stage, unwindOrder UnwindOrder, prune
 
 	return &Sync{
 		cfg:           cfg,
+		txNumsReader:  txNumsReader,
 		stages:        stagesList,
 		currentStage:  0,
 		unwindOrder:   unwindStages,
@@ -260,7 +257,22 @@ func (s *Sync) RunSnapshots(sd *execctx.SharedDomains, tx kv.TemporalRwTx) error
 	return nil
 }
 
+// CancelUnwind drops pending work while retaining the last completed unwind point.
+func (s *Sync) CancelUnwind() {
+	s.unwindPoint = nil
+	s.unwindReason = UnwindReason{}
+}
+
+// RunUnwind executes one request; failure discards it instead of queuing a retry.
 func (s *Sync) RunUnwind(sd *execctx.SharedDomains, tx kv.TemporalRwTx) error {
+	defer func() {
+		s.CancelUnwind()
+		s.currentStage = 0
+	}()
+	return s.runUnwind(false, sd, tx)
+}
+
+func (s *Sync) runUnwind(initialCycle bool, sd *execctx.SharedDomains, tx kv.TemporalRwTx) error {
 	if s.unwindPoint == nil {
 		return nil
 	}
@@ -268,16 +280,13 @@ func (s *Sync) RunUnwind(sd *execctx.SharedDomains, tx kv.TemporalRwTx) error {
 		if s.unwindOrder[j] == nil || s.unwindOrder[j].Disabled || s.unwindOrder[j].Unwind == nil {
 			continue
 		}
-		if err := s.unwindStage(false, s.unwindOrder[j], sd, tx); err != nil {
+		if err := s.unwindStage(initialCycle, s.unwindOrder[j], sd, tx); err != nil {
 			return err
 		}
 	}
 	s.prevUnwindPoint = s.unwindPoint
-	s.unwindPoint = nil
-	s.unwindReason = UnwindReason{}
-	if err := s.SetCurrentStage(s.stages[0].ID); err != nil {
-		return err
-	}
+	s.CancelUnwind()
+	s.currentStage = 0
 	return nil
 }
 
@@ -299,23 +308,13 @@ func (s *Sync) RunNoInterrupt(sd *execctx.SharedDomains, tx kv.TemporalRwTx) (ha
 	for !s.IsDone() {
 		var badBlockUnwind bool
 		if s.unwindPoint != nil {
-			for j := 0; j < len(s.unwindOrder); j++ {
-				if s.unwindOrder[j] == nil || s.unwindOrder[j].Disabled || s.unwindOrder[j].Unwind == nil {
-					continue
-				}
-				if err := s.unwindStage(initialCycle, s.unwindOrder[j], sd, tx); err != nil {
-					return false, err
-				}
-			}
-			s.prevUnwindPoint = s.unwindPoint
-			s.unwindPoint = nil
-			if s.unwindReason.IsBadBlock() {
-				badBlockUnwind = true
-				errBadBlock = s.unwindReason.ErrBadBlock
-			}
-			s.unwindReason = UnwindReason{}
-			if err := s.SetCurrentStage(s.stages[0].ID); err != nil {
+			reason := s.unwindReason
+			if err := s.runUnwind(initialCycle, sd, tx); err != nil {
 				return false, err
+			}
+			if reason.IsBadBlock() {
+				badBlockUnwind = true
+				errBadBlock = reason.ErrBadBlock
 			}
 			// If there were unwinds at the start, a heavier but invalid chain may be present, so
 			// we relax the rules for Stage1
@@ -396,23 +395,13 @@ func (s *Sync) Run(sd *execctx.SharedDomains, tx kv.TemporalRwTx, initialCycle, 
 	for !s.IsDone() {
 		var badBlockUnwind bool
 		if s.unwindPoint != nil {
-			for j := 0; j < len(s.unwindOrder); j++ {
-				if s.unwindOrder[j] == nil || s.unwindOrder[j].Disabled || s.unwindOrder[j].Unwind == nil {
-					continue
-				}
-				if err := s.unwindStage(initialCycle, s.unwindOrder[j], sd, tx); err != nil {
-					return false, err
-				}
-			}
-			s.prevUnwindPoint = s.unwindPoint
-			s.unwindPoint = nil
-			if s.unwindReason.IsBadBlock() {
-				badBlockUnwind = true
-				errBadBlock = s.unwindReason.ErrBadBlock
-			}
-			s.unwindReason = UnwindReason{}
-			if err := s.SetCurrentStage(s.stages[0].ID); err != nil {
+			reason := s.unwindReason
+			if err := s.runUnwind(initialCycle, sd, tx); err != nil {
 				return false, err
+			}
+			if reason.IsBadBlock() {
+				badBlockUnwind = true
+				errBadBlock = reason.ErrBadBlock
 			}
 			// If there were unwinds at the start, a heavier but invalid chain may be present, so
 			// we relax the rules for Stage1

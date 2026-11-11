@@ -785,7 +785,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 
 	blockRetire := freezeblocks.NewBlockRetire(mock.Ctx, 1, dirs, mock.BlockReader, blockWriter, mock.DB, mock.ChainConfig, &cfg, mock.Notifications.Events, nil, logger)
 	mock.blockRetire = blockRetire
-	mock.Sync = stagedsync.New(
+	mock.Sync = stagedsync.New(mock.BlockReader.TxnumReader(),
 		cfg.Sync,
 		stagedsync.DefaultStages(
 			mock.Ctx,
@@ -829,7 +829,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 
 	cfg.Genesis = gspec
 	pipelineStages := stageloop.NewPipelineStages(mock.Ctx, db, &cfg, mock.sentriesClient, mock.Notifications, snapDownloader, mock.BlockReader, blockRetire, tracer, nil, readAheader)
-	mock.posStagedSync = stagedsync.New(cfg.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger, stages.ModeApplyingBlocks)
+	mock.posStagedSync = stagedsync.New(mock.BlockReader.TxnumReader(), cfg.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger, stages.ModeApplyingBlocks)
 
 	// Create validation Sync and PipelineExecutor.
 	validationNotifications := shards.NewNotifications(nil)

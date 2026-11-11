@@ -85,7 +85,7 @@ func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
 	}
 
 	// Check if we can unwind that far back
-	minUnwindableBlock, err := rawtemporaldb.CanUnwindToBlockNum(tx)
+	minUnwindableBlock, err := rawtemporaldb.CanUnwindToBlockNum(tx, e.blockReader.TxnumReader())
 	if err != nil {
 		return fmt.Errorf("failed to check minimum unwindable block: %w", err)
 	}
@@ -117,6 +117,7 @@ func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
 	sd.SetStateCache(e.stateCache)
 
 	// Set the unwind point and run the unwind
+	defer e.pipelineExecutor.Sync().CancelUnwind()
 	if err := e.pipelineExecutor.UnwindTo(targetBlock, stagedsync.StagedUnwind, tx); err != nil {
 		return fmt.Errorf("failed to set unwind point: %w", err)
 	}
