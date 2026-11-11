@@ -2270,6 +2270,46 @@ func TestEmitFullHeadV2KeepsPayloadStatusWithHeadSnapshot(t *testing.T) {
 	}
 }
 
+func TestEmitFullHeadV2SharesHeadCacheWithStage(t *testing.T) {
+	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	root := common.Hash{2}
+	block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
+	block.Block.Slot = 1
+	headState := state.New(handler.beaconChainCfg)
+	headState.SetVersion(clparams.GloasVersion)
+	require.NoError(t, headState.SetSlot(1))
+	require.NoError(t, headState.SetBlockRootAt(0, common.Hash{1}))
+	fcu.HeadVal, fcu.HeadSlotVal = root, 1
+	fcu.HeadPayloadStatusVal = cltypes.PayloadStatusEmpty
+	fcu.StateAtBlockRootVal[root] = headState
+	handler.emitters = beaconevents.NewEventEmitter()
+	events := make(chan *beaconevents.EventStream, 4)
+	subscription := handler.emitters.State().SubscribeHeadV2(events)
+	defer subscription.Unsubscribe()
+
+	stageEvent, err := beaconevents.BuildHeadV2Data(handler.beaconChainCfg, headState, 1, root, block.Block.StateRoot, "empty", false)
+	require.NoError(t, err)
+	require.True(t, handler.emitters.EmitHeadEventsIfCurrent(&beaconevents.HeadData{Slot: 1, Block: root}, stageEvent, func() bool {
+		head, slot, err := fcu.GetHeadNode()
+		return err == nil && head.Root == root && slot == 1 && beaconevents.PayloadStatusName(head.PayloadStatus) == "empty"
+	}))
+	fcu.HeadPayloadStatusVal = cltypes.PayloadStatusFull
+
+	handler.emitFullHeadV2(block, root)
+	fullStageEvent, err := beaconevents.BuildHeadV2Data(handler.beaconChainCfg, headState, 1, root, block.Block.StateRoot, "full", false)
+	require.NoError(t, err)
+	require.True(t, handler.emitters.EmitHeadEventsIfCurrent(&beaconevents.HeadData{Slot: 1, Block: root}, fullStageEvent, func() bool {
+		head, slot, err := fcu.GetHeadNode()
+		return err == nil && head.Root == root && slot == 1 && beaconevents.PayloadStatusName(head.PayloadStatus) == "full"
+	}))
+
+	var statuses []string
+	for len(events) > 0 {
+		statuses = append(statuses, (<-events).Data.(*beaconevents.HeadV2Data).Data.PayloadStatus)
+	}
+	require.Equal(t, []string{"empty", "full"}, statuses, "handler and stage must share the head_v2 root and payload-status cache")
+}
+
 func TestEmitFullHeadV2DoesNotCopyState(t *testing.T) {
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	handler.emitters = beaconevents.NewEventEmitter()
