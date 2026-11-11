@@ -754,10 +754,12 @@ func (f *ForkChoiceStorageMock) NewestLightClientUpdate() *cltypes.LightClientUp
 	return f.NewestLCUpdate
 }
 
-func (f *ForkChoiceStorageMock) GetLightClientUpdate(
-	period uint64,
-) (*cltypes.LightClientUpdate, bool) {
-	return f.LCUpdates[period], f.LCUpdates[period] != nil
+func (f *ForkChoiceStorageMock) GetLightClientUpdates(startPeriod, endPeriod uint64) []*cltypes.LightClientUpdate {
+	var updates []*cltypes.LightClientUpdate
+	for period := startPeriod; period < endPeriod; period++ {
+		updates = append(updates, f.LCUpdates[period])
+	}
+	return updates
 }
 
 func (f *ForkChoiceStorageMock) GetHeader(
