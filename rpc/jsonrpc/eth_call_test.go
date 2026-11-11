@@ -64,7 +64,6 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
-	"github.com/erigontech/erigon/execution/vm/program"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/rpc"
@@ -2690,36 +2689,6 @@ func TestCreateAccessListPreBerlin(t *testing.T) {
 		require.Len(t, *res.Accesslist, 1)
 		require.Equal(t, contractAddress, (*res.Accesslist)[0].Address)
 	})
-}
-
-func TestCreateAccessListPreBogotaTxDiff(t *testing.T) {
-	m, _, from := fundedBankGenesis(t, chain.TestChainOsakaConfig)
-	api := newTestEthAPIWithFilters(t, m)
-	parent := common.HexToAddress("0x10000")
-	child := common.HexToAddress("0x20000")
-	unused := common.HexToAddress("0x30000")
-	parentCode := hexutil.Bytes(program.New().Call(uint256.NewInt(100_000), child, 0, 0, 0, 0, 0).Op(vm.POP, vm.STOP).Bytes())
-	gas := hexutil.Uint64(500_000)
-	call := func(op vm.OpCode) *accessListResult {
-		t.Helper()
-		// The parent catches the failed call. An undefined opcode must not
-		// contribute accesses even when its stack looks like TXDIFF arguments.
-		childCode := hexutil.Bytes(program.New().Push0().Push(unused).Push0().Op(op).Bytes())
-		overrides := ethapi.StateOverrides{
-			accounts.InternAddress(parent): {Code: &parentCode},
-			accounts.InternAddress(child):  {Code: &childCode},
-		}
-		result, err := api.CreateAccessList(t.Context(), ethapi.CallArgs{
-			From: &from, To: &parent, Gas: &gas,
-		}, nil, &overrides, nil)
-		require.NoError(t, err)
-		require.Empty(t, result.Error)
-		return result
-	}
-	baseline := call(vm.INVALID)
-	result := call(vm.TXDIFF)
-	require.Equal(t, types.AccessList{{Address: child, StorageKeys: []common.Hash{}}}, *result.Accesslist)
-	require.Equal(t, baseline.GasUsed, result.GasUsed)
 }
 
 func TestGetProofSystemContractSlotMatchesProof(t *testing.T) {

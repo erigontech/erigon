@@ -24,7 +24,6 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
@@ -71,7 +70,7 @@ func TestNewAccessListTracerExcludedAddress(t *testing.T) {
 		StorageKeys: []common.Hash{slot},
 	}}
 	excl := map[common.Address]struct{}{excluded: {}}
-	tracer := NewAccessListTracer(prelude, excl, nil, &chain.Rules{})
+	tracer := NewAccessListTracer(prelude, excl, nil)
 	got := tracer.AccessList()
 	if len(got) != 0 {
 		t.Fatalf("excluded prelude address must not contribute tuples, got %+v", got)
@@ -201,7 +200,7 @@ func TestOnOpcodeReadsStackOnlyWhenUsed(t *testing.T) {
 				address: accounts.InternAddress(addr),
 				stack:   make([]uint256.Int, 8),
 			}}
-			NewAccessListTracer(nil, nil, nil, &chain.Rules{}).OnOpcodeV2(0, byte(tc.op), mdgas.MdGas{Execution: 100}, mdgas.MdGasCost{Execution: 3}, scope, nil, 1, nil)
+			NewAccessListTracer(nil, nil, nil).OnOpcodeV2(0, byte(tc.op), mdgas.MdGas{Execution: 100}, mdgas.MdGasCost{Execution: 3}, scope, nil, 1, nil)
 			require.Equal(t, tc.reads, scope.stackReads)
 		})
 	}
@@ -248,7 +247,7 @@ func TestTracer_AccessList_SlotFirstAddress(t *testing.T) {
 // contract-address sets nil, and that markCreated/markUsedBeforeCreation
 // allocate them independently on first write.
 func TestAccessListTracerLazyAddressSets(t *testing.T) {
-	tracer := NewAccessListTracer(nil, nil, nil, &chain.Rules{})
+	tracer := NewAccessListTracer(nil, nil, nil)
 	require.Nil(t, tracer.createdContracts)
 	require.False(t, tracer.UsedBeforeCreation(addr))
 
@@ -264,7 +263,7 @@ func TestAccessListTracerLazyAddressSets(t *testing.T) {
 // returns a writable map, even before any CREATE: callers writing through the
 // returned set must not panic on a nil map.
 func TestAccessListTracerCreatedContractsWritable(t *testing.T) {
-	tracer := NewAccessListTracer(nil, nil, nil, &chain.Rules{})
+	tracer := NewAccessListTracer(nil, nil, nil)
 	got := tracer.CreatedContracts()
 	require.NotNil(t, got)
 	got[addr] = struct{}{}
@@ -278,13 +277,13 @@ func TestAccessListTracerSeedNew(t *testing.T) {
 	excluded := common.BytesToAddress([]byte{0x09})
 	excl := map[common.Address]struct{}{excluded: {}}
 
-	prev := NewAccessListTracer(nil, excl, nil, &chain.Rules{})
+	prev := NewAccessListTracer(nil, excl, nil)
 	prev.list.addSlot(addr, slot1)
 	prev.list.addSlot(addr, slot2)
 	prev.list.addAddress(common.BytesToAddress([]byte{0x02, 0x72}))
 
 	seeded := prev.SeedNew(nil)
-	roundTripped := NewAccessListTracer(prev.AccessList(), excl, nil, &chain.Rules{})
+	roundTripped := NewAccessListTracer(prev.AccessList(), excl, nil)
 
 	require.Equal(t, roundTripped.AccessList(), seeded.AccessList())
 	require.True(t, seeded.Equal(prev))
@@ -301,12 +300,12 @@ func TestAccessListTracerSeedNewDropsExcluded(t *testing.T) {
 	excluded := common.BytesToAddress([]byte{0x77})
 	excl := map[common.Address]struct{}{excluded: {}}
 
-	prev := NewAccessListTracer(nil, excl, nil, &chain.Rules{})
+	prev := NewAccessListTracer(nil, excl, nil)
 	prev.list.addSlot(excluded, slot1)
 	prev.list.addSlot(addr, slot2)
 
 	seeded := prev.SeedNew(nil)
-	require.Equal(t, NewAccessListTracer(prev.AccessList(), excl, nil, &chain.Rules{}).AccessList(), seeded.AccessList())
+	require.Equal(t, NewAccessListTracer(prev.AccessList(), excl, nil).AccessList(), seeded.AccessList())
 	require.Equal(t, types.AccessList{{Address: addr, StorageKeys: []common.Hash{slot2}}}, seeded.AccessList())
 }
 
@@ -314,7 +313,7 @@ func TestAccessListTracerSeedNewDropsExcluded(t *testing.T) {
 // opcodes that write its contract sets, which the AccessList-only assertions
 // above never reach.
 func TestAccessListTracerSeedNewTracesOpcodes(t *testing.T) {
-	prev := NewAccessListTracer(nil, nil, nil, &chain.Rules{})
+	prev := NewAccessListTracer(nil, nil, nil)
 	prev.list.addSlot(addr, slot1)
 
 	seeded := prev.SeedNew(nil)
@@ -327,30 +326,4 @@ func TestAccessListTracerSeedNewTracesOpcodes(t *testing.T) {
 	require.Equal(t, types.AccessList{{Address: addr, StorageKeys: []common.Hash{slot1, slot2}}}, seeded.AccessList())
 	require.True(t, seeded.UsedBeforeCreation(addr))
 	require.Empty(t, seeded.CreatedContracts())
-}
-
-func TestAccessListTracerTxDiff(t *testing.T) {
-	for _, tc := range []struct {
-		param         uint64
-		account, slot bool
-	}{
-		{0, true, true}, {1, true, true}, {2, true, false}, {5, true, false}, {6, false, false}, {12, false, false},
-	} {
-		prev := NewAccessListTracer(nil, nil, nil, &chain.Rules{IsBogota: true})
-		tracer := prev.SeedNew(nil)
-		scope := &testOpContext{stack: []uint256.Int{{}, *new(uint256.Int).SetBytes(addr[:]), *uint256.NewInt(tc.param)}}
-		tracer.OnOpcodeV2(0, byte(vm.TXDIFF), mdgas.MdGas{}, mdgas.MdGasCost{}, scope, nil, 1, nil)
-		if !tc.account {
-			require.Empty(t, tracer.AccessList())
-			continue
-		}
-		list := tracer.AccessList()
-		require.Len(t, list, 1)
-		require.Equal(t, addr, list[0].Address)
-		if tc.slot {
-			require.Equal(t, []common.Hash{{}}, list[0].StorageKeys)
-		} else {
-			require.Empty(t, list[0].StorageKeys)
-		}
-	}
 }

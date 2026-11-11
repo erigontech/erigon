@@ -23,7 +23,6 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
@@ -35,7 +34,7 @@ func BenchmarkAccessListTracerSeed(b *testing.B) {
 	for _, shape := range []struct{ nAddrs, nSlots int }{
 		{1, 1}, {1, 5}, {1, 17}, {3, 5}, {5, 20}, {30, 20},
 	} {
-		prev := NewAccessListTracer(nil, nil, nil, &chain.Rules{})
+		prev := NewAccessListTracer(nil, nil, nil)
 		for a := range shape.nAddrs {
 			address := common.BytesToAddress([]byte{byte(a + 1)})
 			for s := range shape.nSlots {
@@ -49,7 +48,7 @@ func BenchmarkAccessListTracerSeed(b *testing.B) {
 		b.Run(name+"/roundTrip", func(b *testing.B) {
 			b.ReportAllocs()
 			for b.Loop() {
-				_ = NewAccessListTracer(acl, nil, nil, &chain.Rules{})
+				_ = NewAccessListTracer(acl, nil, nil)
 			}
 		})
 		b.Run(name+"/seedNew", func(b *testing.B) {
@@ -66,7 +65,7 @@ func BenchmarkAccessListTracerOnOpcode(b *testing.B) {
 		address: accounts.InternAddress(addr),
 		stack:   make([]uint256.Int, 8),
 	}
-	tracer := NewAccessListTracer(nil, nil, nil, &chain.Rules{})
+	tracer := NewAccessListTracer(nil, nil, nil)
 
 	b.ReportAllocs()
 	i := 0

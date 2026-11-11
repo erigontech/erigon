@@ -25,7 +25,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -172,7 +171,6 @@ type AccessListTracer struct {
 	excl               map[common.Address]struct{} // Set of account to exclude from the list
 	list               accessList                  // Set of accounts and storage slots touched
 	state              *state.IntraBlockState      // State for nonce calculation of created contracts
-	rules              *chain.Rules
 	createdContracts   map[common.Address]struct{} // Set of all addresses of contracts created during txn execution
 	usedBeforeCreation map[common.Address]struct{} // Set of all contract addresses first used before creation
 }
@@ -183,8 +181,8 @@ type AccessListTracer struct {
 // An optional set of addresses to be excluded from the resulting accesslist can
 // also be specified.
 // state is borrowed for CREATE nonce lookups; the caller keeps ownership of it.
-func NewAccessListTracer(acl types.AccessList, exclude map[common.Address]struct{}, state *state.IntraBlockState, rules *chain.Rules) *AccessListTracer {
-	t := newAccessListTracer(exclude, newAccessList(), state, rules)
+func NewAccessListTracer(acl types.AccessList, exclude map[common.Address]struct{}, state *state.IntraBlockState) *AccessListTracer {
+	t := newAccessListTracer(exclude, newAccessList(), state)
 	for _, al := range acl {
 		if _, ok := t.excl[al.Address]; ok {
 			continue
@@ -199,7 +197,7 @@ func NewAccessListTracer(acl types.AccessList, exclude map[common.Address]struct
 
 // newAccessListTracer holds the construction both entry points share, so they
 // cannot drift.
-func newAccessListTracer(excl map[common.Address]struct{}, list accessList, state *state.IntraBlockState, rules *chain.Rules) *AccessListTracer {
+func newAccessListTracer(excl map[common.Address]struct{}, list accessList, state *state.IntraBlockState) *AccessListTracer {
 	if excl == nil {
 		excl = make(map[common.Address]struct{})
 	}
@@ -207,7 +205,6 @@ func newAccessListTracer(excl map[common.Address]struct{}, list accessList, stat
 		excl:  excl,
 		list:  list,
 		state: state,
-		rules: rules,
 	}
 }
 
@@ -215,7 +212,7 @@ func newAccessListTracer(excl map[common.Address]struct{}, list accessList, stat
 // convergence iteration, copying the maps directly rather than round-tripping
 // through types.AccessList.
 func (a *AccessListTracer) SeedNew(state *state.IntraBlockState) *AccessListTracer {
-	return newAccessListTracer(a.excl, a.list.cloneExcluding(a.excl), state, a.rules)
+	return newAccessListTracer(a.excl, a.list.cloneExcluding(a.excl), state)
 }
 
 // markCreated and markUsedBeforeCreation each allocate their set lazily, on
@@ -242,7 +239,6 @@ var accessListOpcodes = tracing.NewOpcodeMask(
 	byte(vm.BALANCE), byte(vm.SELFDESTRUCT),
 	byte(vm.DELEGATECALL), byte(vm.CALL), byte(vm.STATICCALL), byte(vm.CALLCODE),
 	byte(vm.CREATE), byte(vm.CREATE2),
-	byte(vm.TXDIFF),
 )
 
 func (a *AccessListTracer) Hooks() *tracing.Hooks {
@@ -256,28 +252,6 @@ func (a *AccessListTracer) OnOpcodeV2(pc uint64, opcode byte, gas mdgas.MdGas, c
 	// StackData crosses an interface, so it cannot inline: keep it off the
 	// opcodes that don't read the stack.
 	switch op := vm.OpCode(opcode); op {
-	case vm.TXDIFF:
-		// Undefined opcodes reach this hook before their execution error is set.
-		if !a.rules.IsBogota || err != nil {
-			return
-		}
-		stack := scope.StackData()
-		if len(stack) < 3 {
-			return
-		}
-		param := &stack[len(stack)-1]
-		if !param.IsUint64() || param.Uint64() > 5 {
-			return
-		}
-		address := common.Address(stack[len(stack)-2].Bytes20())
-		if param.Uint64() <= 1 {
-			a.list.addSlot(address, stack[len(stack)-3].Bytes32())
-			if _, created := a.createdContracts[address]; !created {
-				a.markUsedBeforeCreation(address)
-			}
-		} else {
-			a.addTouchedAddress(address)
-		}
 	case vm.SLOAD, vm.SSTORE:
 		stackData := scope.StackData()
 		if len(stackData) < 1 {
