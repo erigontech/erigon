@@ -184,10 +184,16 @@ func (trace *TransactionTrace) Balance(ibs *IntraBlockState, address accounts.Ad
 }
 
 func (trace *TransactionTrace) Storage(ibs *IntraBlockState, address accounts.Address, key accounts.StorageKey, before bool) (uint256.Int, error) {
-	if value, ok := trace.storageBefore[frameStorageSlot{address, key}]; before && ok {
-		return value, nil
+	// Read even when the before-value is in the diff: TXDIFF records a
+	// storage access in the BAL, unlike TXTRACE's enumeration.
+	value, err := ibs.GetState(address, key)
+	if err != nil || !before {
+		return value, err
 	}
-	return ibs.GetState(address, key)
+	if original, ok := trace.storageBefore[frameStorageSlot{address, key}]; ok {
+		return original, nil
+	}
+	return value, nil
 }
 
 func (trace *TransactionTrace) CodeHash(ibs *IntraBlockState, address accounts.Address, before bool) (accounts.CodeHash, error) {

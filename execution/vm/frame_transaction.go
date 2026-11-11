@@ -180,7 +180,7 @@ func (evm *EVM) ExecuteTransactionFrame() (ret []byte, executionLeft uint64, err
 				return
 			}
 			typ := CALL
-			if frame.Mode == types.FrameVerify || frame.Mode == types.FramePostTx {
+			if frame.IsStatic() {
 				typ = STATICCALL
 			}
 			evm.captureBegin(0, typ, caller, target, false, frame.Data, frame.Limits, frame.Value, nil)
@@ -265,7 +265,7 @@ func (evm *EVM) ExecuteTransactionFrame() (ret []byte, executionLeft uint64, err
 	gas.State = ctx.StateGasLeft()
 	var left mdgas.MdGas
 	entered = true
-	if frame.Mode == types.FrameVerify || frame.Mode == types.FramePostTx {
+	if frame.IsStatic() {
 		ret, left, _, err = evm.StaticCall(caller, target, frame.Data, gas)
 	} else {
 		ret, left, _, err = evm.Call(caller, target, frame.Data, gas, frame.Value, bailout)
@@ -283,7 +283,7 @@ func (evm *EVM) TraceSkippedFrame(index int) {
 	caller, typ := FrameEntryPoint, CALL
 	if frame.Mode == types.FrameSender {
 		caller = accounts.InternAddress(tx.SenderAddress)
-	} else if frame.Mode == types.FrameVerify || frame.Mode == types.FramePostTx {
+	} else if frame.IsStatic() {
 		typ = STATICCALL
 	}
 	tracer.EmitEnter(1, byte(typ), caller, accounts.InternAddress(frame.ResolvedTarget(tx.SenderAddress)), false, frame.Data, frame.Limits, frame.Value, nil)

@@ -131,6 +131,10 @@ func (frame *Frame) ResolvedTarget(sender common.Address) common.Address {
 	return *frame.Target
 }
 
+func (frame *Frame) IsStatic() bool {
+	return frame.Mode == FrameVerify || frame.Mode == FramePostTx
+}
+
 func (frame *Frame) IsExpiryVerifier() bool {
 	return frame.Mode == FrameVerify && frame.Target != nil && *frame.Target == FrameExpiryVerifier
 }
@@ -250,7 +254,7 @@ func (tx *FrameTransaction) Validate() error {
 			return fmt.Errorf("frame %d execution approval requires sender target", i)
 		}
 		atomic := frame.Flags&FrameAtomicBatch != 0
-		if atomic && (frame.Mode == FrameVerify || frame.Mode == FramePostTx || i+1 == len(tx.Frames) || tx.Frames[i+1].Mode == FrameVerify || tx.Frames[i+1].Mode == FramePostTx) {
+		if atomic && (frame.IsStatic() || i+1 == len(tx.Frames) || tx.Frames[i+1].IsStatic()) {
 			return fmt.Errorf("invalid atomic batch at frame %d", i)
 		}
 		if (atomic || i > 0 && tx.Frames[i-1].Flags&FrameAtomicBatch != 0) && frame.Flags&FrameApproveBoth != 0 {

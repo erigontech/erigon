@@ -178,12 +178,7 @@ func opTxDiff(pc uint64, evm *EVM, call *CallContext) (uint64, []byte, error) {
 		if p <= 1 {
 			slot := ibs.InternStorageKey(index)
 			ibs.AddSlotOnlyToAccessList(address, slot)
-			// Read even when the before-value is in the diff: TXDIFF records a
-			// storage access in the BAL, unlike TXTRACE's enumeration.
-			value, err := ibs.GetState(address, slot)
-			if err == nil && p == 0 {
-				value, err = trace.Storage(ibs, address, slot, true)
-			}
+			value, err := trace.Storage(ibs, address, slot, p == 0)
 			if err != nil {
 				return pc, nil, evm.assertionReadError(err)
 			}
