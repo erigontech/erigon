@@ -18,7 +18,6 @@ package handlers
 
 import (
 	"errors"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -83,7 +82,5 @@ func TestStreamHandlerStopsWhenDeadlineCannotBeSet(t *testing.T) {
 	require.False(t, handlerCalled)
 	require.True(t, stream.reset)
 	require.True(t, stream.closed)
-	counter, ok := c.rateLimiter.concurrency.Load(peerID.String())
-	require.True(t, ok)
-	require.Zero(t, counter.(*atomic.Int32).Load())
+	require.NotContains(t, c.rateLimiter.concurrency, peerID.String())
 }
