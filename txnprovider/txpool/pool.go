@@ -72,6 +72,12 @@ import (
 // by the peer.
 const txMaxBroadcastSize = 4 * 1024
 
+// Bound deferred admission work and retained network payloads independently of pool capacity.
+const (
+	remoteTxnQueueLimit     = maxTransactionsPerPacket
+	remoteTxnQueueByteLimit = 32 * 1024 * 1024
+)
+
 // Pool is interface for the transaction pool
 // This interface exists for the convenience of testing, and not yet because
 // there are multiple implementations
@@ -133,8 +139,9 @@ type TxPool struct {
 	//   - batch notifications about new txns (reduced P2P spam to other nodes about txns propagation)
 	//   - and as a result reducing lock contention
 	unprocessedRemoteTxns   *TxnSlots
-	unprocessedRemotePeers  []remoteSource                                  // index-aligned with unprocessedRemoteTxns
-	unprocessedRemoteByHash map[string]*TxnSlot                             // to reject duplicates
+	unprocessedRemotePeers  []remoteSource      // index-aligned with unprocessedRemoteTxns
+	unprocessedRemoteByHash map[string]*TxnSlot // to reject duplicates
+	unprocessedRemoteBytes  uint64
 	byHash                  map[string]*metaTxn                             // All pooled transactions by hash, including parked frames
 	discardReasonsLRU       *simplelru.LRU[string, txpoolcfg.DiscardReason] // txn_hash => discard_reason : non-persisted
 	pending                 *PendingPool
@@ -630,9 +637,11 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 func (p *TxPool) removeProcessedRemoteTxns(n int) {
 	if n == len(p.unprocessedRemoteTxns.Txns) {
 		p.unprocessedRemoteByHash = make(map[string]*TxnSlot)
+		p.unprocessedRemoteBytes = 0
 	} else {
 		for _, txn := range p.unprocessedRemoteTxns.Txns[:n] {
 			delete(p.unprocessedRemoteByHash, string(txn.IDHash[:]))
+			p.unprocessedRemoteBytes -= uint64(txn.Size)
 		}
 	}
 	p.unprocessedRemoteTxns.Txns = slices.Delete(p.unprocessedRemoteTxns.Txns, 0, n)
@@ -1172,6 +1181,9 @@ func (p *TxPool) AddRemoteTxns(_ context.Context, newTxns TxnSlots, peerID PeerI
 	src := remoteSource{peerID: peerID, sentry: sentry}
 	now := time.Now()
 	for i, txn := range newTxns.Txns {
+		if len(p.unprocessedRemoteTxns.Txns) >= remoteTxnQueueLimit {
+			break
+		}
 		hashS := string(txn.IDHash[:])
 		if _, ok := p.remoteFrames.pending[hashS]; ok {
 			continue
@@ -1180,10 +1192,19 @@ func (p *TxPool) AddRemoteTxns(_ context.Context, newTxns TxnSlots, peerID PeerI
 		if ok {
 			continue
 		}
+		if uint64(txn.Size) > remoteTxnQueueByteLimit-p.unprocessedRemoteBytes {
+			continue
+		}
 		if txn.TxType() == FrameTxnType && !p.remoteFrames.reserve(txn, src, now) {
 			continue
 		}
+		// Blob bundles already reference an owned copy. Other RLP slices may
+		// retain an entire network packet outside the queue's byte budget.
+		if len(txn.BlobBundles) == 0 {
+			txn.Rlp = bytes.Clone(txn.Rlp)
+		}
 		p.unprocessedRemoteByHash[hashS] = txn
+		p.unprocessedRemoteBytes += uint64(txn.Size)
 		p.unprocessedRemoteTxns.Append(txn, newTxns.Senders.At(i), false)
 		p.unprocessedRemotePeers = append(p.unprocessedRemotePeers, src)
 	}
