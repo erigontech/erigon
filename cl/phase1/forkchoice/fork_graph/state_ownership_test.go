@@ -298,3 +298,81 @@ func TestReviewReadReplaySkipsImportedBatchSignatures(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, replayed)
 }
+
+func TestReviewCachedHistoricalSummaryIsolation(t *testing.T) {
+	_, _, anchorState := tests.GetCapellaRandom()
+	anchorState.AddHistoricalSummary(&cltypes.HistoricalSummary{
+		BlockSummaryRoot: common.Hash{1},
+		StateSummaryRoot: common.Hash{2},
+	})
+	graphInterface, err := NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
+	require.NoError(t, err)
+	graph := graphInterface.(*forkGraphDisk)
+	root := graph.AnchorRoot()
+	first, err := graph.ReplayState(root)
+	require.NoError(t, err)
+	require.NotNil(t, first)
+	require.Len(t, graph.replayedStates.states, 1)
+	want := first.HistoricalSummary(0).BlockSummaryRoot[0]
+	first.HistoricalSummary(0).BlockSummaryRoot[0] = want + 99
+	second, err := graph.ReplayState(root)
+	require.NoError(t, err)
+	require.NotNil(t, second)
+	require.Equal(t, want, second.HistoricalSummary(0).BlockSummaryRoot[0], "cached historical summary changed through the first reader")
+}
+
+func TestReviewCachedGloasOwnership(t *testing.T) {
+	for _, field := range []string{"builder-payment", "bid-commitment"} {
+		t.Run(field, func(t *testing.T) {
+			fixture := tests.GetGloasFixture("builder_payment_after_missed_epochs", false, 0)
+			anchorState := fixture.PostState
+			require.NotNil(t, anchorState)
+			if field == "bid-commitment" {
+				anchorState.GetLatestExecutionPayloadBid().BlobKzgCommitments.Append(&cltypes.KZGCommitment{1})
+			}
+			graphInterface, err := NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
+			require.NoError(t, err)
+			graph := graphInterface.(*forkGraphDisk)
+			root := graph.AnchorRoot()
+			first, err := graph.ReplayState(root)
+			require.NoError(t, err)
+			require.NotNil(t, first)
+			require.Len(t, graph.replayedStates.states, 1)
+			var want uint64
+			if field == "builder-payment" {
+				want = first.GetBuilderPendingPayments().Get(0).Weight
+				first.GetBuilderPendingPayments().Get(0).Weight = want + 99
+			} else {
+				want = uint64(first.GetLatestExecutionPayloadBid().BlobKzgCommitments.Get(0)[0])
+				first.GetLatestExecutionPayloadBid().BlobKzgCommitments.Get(0)[0] = byte(want + 99)
+			}
+			second, err := graph.ReplayState(root)
+			require.NoError(t, err)
+			require.NotNil(t, second)
+			var got uint64
+			if field == "builder-payment" {
+				got = second.GetBuilderPendingPayments().Get(0).Weight
+			} else {
+				got = uint64(second.GetLatestExecutionPayloadBid().BlobKzgCommitments.Get(0)[0])
+			}
+			require.Equal(t, want, got, "cached %s changed through the first reader", field)
+		})
+	}
+}
+
+func TestReviewCachedBuilderPaymentWithdrawalIsolation(t *testing.T) {
+	fixture := tests.GetGloasFixture("builder_payment_after_missed_epochs", false, 0)
+	graphInterface, err := NewForkGraphDisk(fixture.PostState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
+	require.NoError(t, err)
+	graph := graphInterface.(*forkGraphDisk)
+	root := graph.AnchorRoot()
+	first, err := graph.ReplayState(root)
+	require.NoError(t, err)
+	require.NotNil(t, first)
+	want := first.GetBuilderPendingPayments().Get(0).Withdrawal.Amount
+	first.GetBuilderPendingPayments().Get(0).Withdrawal.Amount = want + 99
+	second, err := graph.ReplayState(root)
+	require.NoError(t, err)
+	require.NotNil(t, second)
+	require.Equal(t, want, second.GetBuilderPendingPayments().Get(0).Withdrawal.Amount, "cached builder-payment withdrawal changed through the first reader")
+}

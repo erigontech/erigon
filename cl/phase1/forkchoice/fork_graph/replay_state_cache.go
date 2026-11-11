@@ -20,6 +20,7 @@ import (
 	"sync"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/common"
@@ -73,6 +74,14 @@ func copyReplayState(source *state.CachingBeaconState) (*state.CachingBeaconStat
 		copied.SetPendingPartialWithdrawals(partialWithdrawals)
 		copied.SetPendingConsolidations(pendingConsolidations)
 	}
+	if version >= clparams.CapellaVersion {
+		historicalSummaries := solid.NewStaticListSSZ[*cltypes.HistoricalSummary](int(source.BeaconConfig().HistoricalRootsLimit), 64)
+		for index := range source.HistoricalSummariesLength() {
+			summary := *source.HistoricalSummary(int(index))
+			historicalSummaries.Append(&summary)
+		}
+		copied.SetHistoricalSummaries(historicalSummaries)
+	}
 	if version >= clparams.GloasVersion {
 		builders, err := copyReplayStateList(source.GetBuilders(), int(version))
 		if err != nil {
@@ -89,6 +98,19 @@ func copyReplayState(source *state.CachingBeaconState) (*state.CachingBeaconStat
 		copied.SetBuilders(builders)
 		copied.SetBuilderPendingWithdrawals(builderWithdrawals)
 		copied.SetPayloadExpectedWithdrawals(expectedWithdrawals)
+		builderPayments := source.GetBuilderPendingPayments()
+		copiedBuilderPayments := builderPayments.Clone().(*solid.VectorSSZ[*cltypes.BuilderPendingPayment])
+		for index := range builderPayments.Length() {
+			copiedBuilderPayments.Set(index, builderPayments.Get(index).Clone().(*cltypes.BuilderPendingPayment))
+		}
+		copied.SetBuilderPendingPayments(copiedBuilderPayments)
+		bid := source.GetLatestExecutionPayloadBid().Copy()
+		commitments, err := copyReplayStateList(&source.GetLatestExecutionPayloadBid().BlobKzgCommitments, int(version))
+		if err != nil {
+			return nil, err
+		}
+		bid.BlobKzgCommitments = *commitments
+		copied.SetLatestExecutionPayloadBid(bid)
 	}
 	return copied, nil
 }

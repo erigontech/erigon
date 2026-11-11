@@ -80,3 +80,21 @@ Review round 1 fixes for commit 54959343c671d820a5f70bf131a6aebbbf0be03f:
   expected `attestations=332205`, saw `attestations=0`. The replay API initially
   dropped Antiquary's BlockRewardsCollector. Passing that collector through the
   replay wrapper restored rewards; the focused test now passes.
+
+Review round 2 fixes for commit cfcb4a2a5cb41f97cbd894c2da8bb045fa143326:
+
+- Red: TestReviewCachedHistoricalSummaryIsolation expected 0x1 after the first
+  reader changed a cached summary; saw 0x64.
+- Red: TestReviewCachedGloasOwnership/builder-payment expected weight 0x0 on the
+  next read; saw 0x63. The bid-commitment case expected 0x1; saw 0x64.
+- Deep copies now cover historical summaries, builder payments and their nested
+  withdrawals, and commitments inside the latest execution payload bid.
+- Guard reverts confirmed each copy: skipping historical-summary copying made
+  its isolation test see 0x64; sharing builder-payment elements made both the
+  weight and nested-withdrawal tests see 0x63; sharing bid commitments made the
+  commitment test see 0x64.
+- BenchmarkReplayStateNonHead -count 6 before: signature-checks median
+  16,592,407 ns/op; read-replay 14,134,017.5 ns/op; cached-read 265,242 ns/op.
+  After: signature-checks 16,303,734 ns/op; read-replay 14,590,466.5 ns/op;
+  cached-read 274,434.5 ns/op. Cached reads rose about 3.5% due to copying the
+  newly covered mutable state fields.
