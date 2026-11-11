@@ -824,3 +824,28 @@ func TestAccountChangesDecodeRLPClearsStorageChanges(t *testing.T) {
 		t.Fatalf("decode kept %d storage changes from the previous payload", len(ac.StorageChanges))
 	}
 }
+
+func TestAccountChangesCount(t *testing.T) {
+	bal := make(BlockAccessList, 3)
+	for i := range bal {
+		bal[i].Address[0] = byte(i + 1)
+	}
+	enc, err := EncodeBlockAccessListBytes(bal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, body, _, err := rlp.Split(enc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := accountChangesCount(body, uint64(len(body))); got != 3 {
+		t.Fatalf("valid list: got %d entries, want 3", got)
+	}
+	if got := accountChangesCount(nil, uint64(len(body))); got != 0 {
+		t.Fatalf("no slice: got %d entries, want 0", got)
+	}
+	short := bytes.Repeat([]byte{0x01}, 10*minAccountChangesLen)
+	if got := accountChangesCount(short, uint64(len(short))); got != 10 {
+		t.Fatalf("values shorter than an entry: got %d, want 10", got)
+	}
+}
