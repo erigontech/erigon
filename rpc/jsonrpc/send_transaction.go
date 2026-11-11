@@ -39,8 +39,6 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutil.By
 		return common.Hash{}, errors.New("only replay-protected (EIP-155) transactions allowed over RPC")
 	}
 
-	// this has been moved to prior to adding of transactions to capture the
-	// pre-state of the db - which is used for logging in the messages below
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return common.Hash{}, err
@@ -49,6 +47,8 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutil.By
 	defer tx.Rollback()
 
 	cc, err := api.chainConfig(ctx, tx)
+	// Admission may wait for pool recovery, which needs its own database reader.
+	tx.Rollback()
 	if err != nil {
 		return common.Hash{}, err
 	}

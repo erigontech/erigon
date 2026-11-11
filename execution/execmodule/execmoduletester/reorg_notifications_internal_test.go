@@ -17,6 +17,7 @@
 package execmoduletester
 
 import (
+	"context"
 	"math/big"
 	"testing"
 	"time"
@@ -29,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
+	"github.com/erigontech/erigon/db/kv/remotedbserver"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule"
@@ -37,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 )
@@ -709,6 +712,48 @@ func TestRepeatedForkchoiceDeliversIncompleteChanges(t *testing.T) {
 	batch := waitForBatchWithHead(canonical.TopBlock.Hash())
 	require.True(t, batch.StateChangesIncomplete)
 	require.Len(t, batch.ChangeBatch, 1)
+}
+
+func TestStateChangesResetAfterUnpublishedCommit(t *testing.T) {
+	m := New(t, WithAlwaysGenerateChangesets(true))
+	blocks, err := m.GenerateChain(2, nil)
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(blocks))
+	m.ExecModule.WaitIdle(t.Context())
+	require.NoError(t, m.ExecModule.SetHead(t.Context(), 1))
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	stream, err := m.stateChangesClient.StateChanges(ctx, &remoteproto.StateChangeRequest{})
+	require.NoError(t, err)
+	batch, err := stream.Recv()
+	require.NoError(t, err)
+	require.True(t, batch.StateChangesIncomplete)
+	require.Len(t, batch.ChangeBatch, 1)
+	require.Equal(t, gointerfaces.ConvertHashToH256(blocks.Blocks[0].Hash()), batch.ChangeBatch[0].BlockHash)
+	require.NoError(t, m.DB.View(ctx, func(tx kv.Tx) error {
+		version, err := rawdb.GetStateVersion(tx)
+		require.NoError(t, err)
+		require.Equal(t, version, batch.StateVersionId)
+		return nil
+	}))
+}
+
+func TestStateChangesResetBeforeFirstPublication(t *testing.T) {
+	m := New(t)
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	server := remotedbserver.NewKvServer(ctx, m.DB, nil, nil, m.Log)
+	dispatcher := execmodule.NewDispatcher(m.ChainConfig, m.BlockReader, nil, nil, nil, m.Log)
+	server.SetStateChangesSnapshot(func(ctx context.Context) (*remoteproto.StateChangeBatch, error) {
+		return dispatcher.StateChangesSnapshot(ctx, m.DB)
+	})
+	stream, err := direct.NewStateDiffClientDirect(server).StateChanges(ctx, &remoteproto.StateChangeRequest{})
+	require.NoError(t, err)
+	batch, err := stream.Recv()
+	require.NoError(t, err, "a subscription must not need another block to learn the committed head")
+	require.True(t, batch.StateChangesIncomplete)
+	require.Len(t, batch.ChangeBatch, 1)
+	require.Equal(t, gointerfaces.ConvertHashToH256(m.Genesis.Hash()), batch.ChangeBatch[0].BlockHash)
 }
 
 func TestSuccessiveSetHeadAnnouncesDeepUnwindTarget(t *testing.T) {

@@ -59,6 +59,7 @@ type addMockTxPool struct {
 	knownTxnCalls    int
 	addReasons       []txpoolcfg.DiscardReason
 	addLocalSlotsLen int
+	addLocalCalls    int
 }
 
 func (m *addMockTxPool) PeekBest(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64) (bool, error) {
@@ -66,6 +67,7 @@ func (m *addMockTxPool) PeekBest(ctx context.Context, n int, txns *TxnsRlp, onTo
 }
 func (m *addMockTxPool) GetRlp(tx kv.Tx, hash []byte) ([]byte, error) { return nil, nil }
 func (m *addMockTxPool) AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcfg.DiscardReason, error) {
+	m.addLocalCalls++
 	m.addLocalSlotsLen = len(newTxns.Txns)
 	return m.addReasons, nil
 }
@@ -106,6 +108,28 @@ func TestMapDiscardReasonToProto(t *testing.T) {
 	} {
 		t.Run(tc.reason.String(), func(t *testing.T) {
 			require.Equal(t, tc.want, mapDiscardReasonToProto(tc.reason))
+		})
+	}
+}
+
+func TestGrpcServerAddDoesNotAdmitEmptySlots(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		rlps  [][]byte
+		known bool
+		want  []txpoolproto.ImportResult
+	}{
+		{"empty", nil, false, []txpoolproto.ImportResult{}},
+		{"invalid", [][]byte{{0xff}}, false, []txpoolproto.ImportResult{txpoolproto.ImportResult_INVALID}},
+		{"known", [][]byte{hexutil.MustDecodeHex(TxnParseMainnetTests[0].PayloadStr)}, true, []txpoolproto.ImportResult{txpoolproto.ImportResult_ALREADY_EXISTS}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pool := &addMockTxPool{knownByCall: []bool{tc.known}}
+			server := NewGrpcServer(t.Context(), pool, nil, nil, uint256.Int{1}, log.New())
+			reply, err := server.Add(t.Context(), &txpoolproto.AddRequest{RlpTxs: tc.rlps})
+			require.NoError(t, err)
+			require.Equal(t, tc.want, reply.Imported)
+			require.Zero(t, pool.addLocalCalls, "rejected submissions must not wait for pool recovery")
 		})
 	}
 }

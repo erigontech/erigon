@@ -192,6 +192,22 @@ func TestFramePoolAdmissionWaitsForStateRecovery(t *testing.T) {
 	})
 }
 
+func TestLocalAdmissionBoundsRecoveryWait(t *testing.T) {
+	_, pool, sender := keyedFramePoolEnv(t)
+	pool.MarkStateStale()
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		stop := time.AfterFunc(time.Minute, cancel)
+		defer stop.Stop()
+		var txns TxnSlots
+		txns.Append(framePoolSlot(t, sender, 1, 2, uint256.Int{1}), sender[:], true)
+		_, err := pool.AddLocalTxns(ctx, txns)
+		require.ErrorIs(t, err, context.DeadlineExceeded, "admission must time out without caller cancellation")
+		require.NoError(t, ctx.Err())
+	})
+}
+
 func TestFramePoolRecoveryDuringAdmission(t *testing.T) {
 	for _, local := range []bool{true, false} {
 		name := "remote"
@@ -334,8 +350,88 @@ func TestPoolRejectsSupersededIncompleteState(t *testing.T) {
 	account.Nonce = 0
 	writeTestSenderState(t, ctx, db, pool.logger, sender, accounts.SerialiseV3(&account), 2)
 
-	require.Error(t, pool.OnNewBlock(ctx, stale, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	require.ErrorIs(t, pool.OnNewBlock(ctx, stale, TxnSlots{}, TxnSlots{}, TxnSlots{}), errStateViewSuperseded)
 	require.Contains(t, pool.byHash, string(txn.IDHash[:]), "an obsolete account update must not discard the valid transaction")
 	require.Equal(t, common.Hash{1}, pool.stateBlockHash)
 	require.True(t, pool.stateViewStale)
+}
+
+func TestPoolRefreshesRemovedSender(t *testing.T) {
+	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+	txn := newTestTxnSlot(0, 0, 1, 2, 21_000)
+	txn.IDHash = txn.Txn.Hash()
+	var txns TxnSlots
+	txns.Append(txn, sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+	require.Equal(t, PendingSubPool, pool.byHash[string(txn.IDHash[:])].currentSubPool)
+
+	change := newBlockChangeForAccounts(common.Hash{2}, 0)
+	change.ChangeBatch = append([]*remoteproto.StateChange{{
+		Direction: remoteproto.Direction_UNWIND,
+		Changes: []*remoteproto.AccountChange{{
+			Action: remoteproto.Action_REMOVE, Address: gointerfaces.ConvertAddressToH160(sender),
+		}},
+	}}, change.ChangeBatch...)
+	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	require.Equal(t, QueuedSubPool, pool.byHash[string(txn.IDHash[:])].currentSubPool, "the orphaned funding must no longer make the transaction executable")
+}
+
+func TestPoolBlockTimeIgnoresRecoveryRetries(t *testing.T) {
+	_, pool, _, _ := newTestPool(t)
+	synctest.Test(t, func(t *testing.T) {
+		ctx := t.Context()
+		change := newBlockChangeForAccounts(common.Hash{1}, 0)
+		change.ChangeBatch[0].BlockHeight = 1
+		pool.lastBlockTimestampMs.Store(time.Now().Add(-12 * time.Second).UnixMilli())
+		pool.avgBlockTimeMs.Store(12_000)
+		readErr := errors.New("account read failed")
+		cache := pool._stateCache
+		pool._stateCache = failingViewCache{Cache: cache, err: readErr}
+		for range 3 {
+			require.ErrorIs(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}), readErr)
+			time.Sleep(time.Second)
+		}
+		require.Equal(t, int64(12_000), pool.avgBlockTimeMs.Load(), "failed attempts are not block arrivals")
+		pool._stateCache = cache
+	})
+}
+
+type failingViewCache struct {
+	kvcache.Cache
+	err error
+}
+
+func (c failingViewCache) View(context.Context, kv.TemporalTx) (kvcache.CacheView, error) {
+	return nil, c.err
+}
+
+func TestPoolBlockTimeIgnoresSubscriptionReset(t *testing.T) {
+	_, pool, _, _ := newTestPool(t)
+	synctest.Test(t, func(t *testing.T) {
+		ctx := t.Context()
+		change := newBlockChangeForAccounts(common.Hash{1}, 0)
+		change.ChangeBatch[0].BlockHeight = 1
+		require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+		previous := pool.lastBlockTimestampMs.Load()
+		time.Sleep(time.Second)
+		change.StateChangesIncomplete = true
+		require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+		require.Equal(t, previous, pool.lastBlockTimestampMs.Load(), "a reset is not a new block arrival")
+		require.Equal(t, int64(12_000), pool.avgBlockTimeMs.Load())
+	})
+}
+
+func TestPoolBlockTimeTracksAdvancingHeads(t *testing.T) {
+	_, pool, _, _ := newTestPool(t)
+	synctest.Test(t, func(t *testing.T) {
+		change := newBlockChangeForAccounts(common.Hash{1}, 0)
+		change.ChangeBatch[0].BlockHeight = 1
+		require.NoError(t, pool.OnNewBlock(t.Context(), change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+		time.Sleep(6 * time.Second)
+		change.ChangeBatch[0].BlockHeight = 2
+		require.NoError(t, pool.OnNewBlock(t.Context(), change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+		require.Equal(t, int64(11_400), pool.avgBlockTimeMs.Load(), "new blocks must still update the moving average")
+	})
 }

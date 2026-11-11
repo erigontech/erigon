@@ -75,11 +75,12 @@ var KvServiceAPIVersion = &typesproto.VersionReply{Major: 7, Minor: 4, Patch: 0}
 type KvServer struct {
 	remoteproto.UnimplementedKVServer // must be embedded to have forward compatible implementations.
 
-	kv                 kv.TemporalRoDB
-	stateChangeStreams *StateChangePubSub
-	blockSnapshots     Snapshots
-	historySnapshots   Snapshots
-	ctx                context.Context
+	kv                   kv.TemporalRoDB
+	stateChangeStreams   *StateChangePubSub
+	stateChangesSnapshot func(context.Context) (*remoteproto.StateChangeBatch, error)
+	blockSnapshots       Snapshots
+	historySnapshots     Snapshots
+	ctx                  context.Context
 
 	// v3 fields
 	txIdGen    atomic.Uint64
@@ -451,9 +452,18 @@ type SubscriptionReadyNotifier interface {
 }
 
 func (s *KvServer) StateChanges(_ *remoteproto.StateChangeRequest, server remoteproto.KV_StateChangesServer) error {
-	ch, remove := s.stateChangeStreams.Sub()
+	var reset *remoteproto.StateChangeBatch
+	if s.stateChangesSnapshot != nil {
+		var err error
+		reset, err = s.stateChangesSnapshot(server.Context())
+		if err != nil {
+			return err
+		}
+	}
+	ch, remove := s.stateChangeStreams.Sub(reset)
 	defer remove()
 	var lastSequence uint64
+	first := true
 	if n, ok := server.(SubscriptionReadyNotifier); ok {
 		n.NotifySubscribed()
 	}
@@ -463,11 +473,12 @@ func (s *KvServer) StateChanges(_ *remoteproto.StateChangeRequest, server remote
 			reply := event.batch
 			// A new subscription or a queue gap may leave earlier changes unseen.
 			// Batches are shared, so mark only this subscriber's response incomplete.
-			if !reply.StateChangesIncomplete && (lastSequence == 0 || event.sequence != lastSequence+1) {
+			if !reply.StateChangesIncomplete && (first || event.sequence != lastSequence+1) {
 				reply = proto.Clone(reply).(*remoteproto.StateChangeBatch)
 				reply.StateChangesIncomplete = true
 			}
 			lastSequence = event.sequence
+			first = false
 			if err := server.Send(reply); err != nil {
 				return err
 			}
@@ -477,6 +488,11 @@ func (s *KvServer) StateChanges(_ *remoteproto.StateChangeRequest, server remote
 			return nil
 		}
 	}
+}
+
+// SetStateChangesSnapshot installs the committed-head reader before serving subscriptions.
+func (s *KvServer) SetStateChangesSnapshot(snapshot func(context.Context) (*remoteproto.StateChangeBatch, error)) {
+	s.stateChangesSnapshot = snapshot
 }
 
 func (s *KvServer) SendStateChanges(_ context.Context, sc *remoteproto.StateChangeBatch) {
@@ -540,7 +556,7 @@ func newStateChangeStreams() *StateChangePubSub {
 	return &StateChangePubSub{}
 }
 
-func (s *StateChangePubSub) Sub() (ch chan stateChangeEvent, remove func()) {
+func (s *StateChangePubSub) Sub(reset *remoteproto.StateChangeBatch) (ch chan stateChangeEvent, remove func()) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.chans == nil {
@@ -549,10 +565,13 @@ func (s *StateChangePubSub) Sub() (ch chan stateChangeEvent, remove func()) {
 	s.id++
 	id := s.id
 	ch = make(chan stateChangeEvent, 8)
-	// Register and enqueue the reset under the publication lock so a reconnect
-	// sees the latest head before any later changes, even if no new block arrives.
-	if s.reset != nil {
-		ch <- stateChangeEvent{sequence: s.sequence, batch: s.reset}
+	// Publication can precede commit or race the snapshot read. Keep the newer
+	// head/version pair and enqueue it before subsequent publications.
+	if s.reset != nil && (reset == nil || s.reset.StateVersionId > reset.StateVersionId) {
+		reset = s.reset
+	}
+	if reset != nil {
+		ch <- stateChangeEvent{sequence: s.sequence, batch: reset}
 	}
 	s.chans[id] = ch
 	return ch, func() { s.remove(id) }

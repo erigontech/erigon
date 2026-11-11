@@ -33,6 +33,8 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	sharedreceipts "github.com/erigontech/erigon/execution/receipts"
 	"github.com/erigontech/erigon/execution/stagedsync"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/shards"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 )
@@ -54,6 +56,7 @@ func NewAccumulation() *Accumulation {
 // supplied separately because only the durable state flush owns that value.
 type Dispatcher struct {
 	chainConfig         *chain.Config
+	headerReader        dbservices.HeaderReader
 	events              *shards.Events
 	stateChangeConsumer notifications.StateChangeConsumer
 	loadReceipts        ReceiptsLoader
@@ -92,6 +95,7 @@ func NewReceiptsLoader(cfg *chain.Config, blockReader dbservices.FullBlockReader
 
 func NewDispatcher(
 	chainConfig *chain.Config,
+	headerReader dbservices.HeaderReader,
 	events *shards.Events,
 	stateChangeConsumer notifications.StateChangeConsumer,
 	loadReceipts ReceiptsLoader,
@@ -99,11 +103,38 @@ func NewDispatcher(
 ) *Dispatcher {
 	return &Dispatcher{
 		chainConfig:         chainConfig,
+		headerReader:        headerReader,
 		events:              events,
 		stateChangeConsumer: stateChangeConsumer,
 		loadReceipts:        loadReceipts,
 		logger:              logger,
 	}
+}
+
+// StateChangesSnapshot builds a subscription reset from one committed execution view.
+func (d *Dispatcher) StateChangesSnapshot(ctx context.Context, db kv.TemporalRoDB) (*remoteproto.StateChangeBatch, error) {
+	var result *remoteproto.StateChangeBatch
+	err := db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		height, err := stages.GetStageProgress(tx, stages.Execution)
+		if err != nil {
+			return err
+		}
+		version, err := rawdb.GetStateVersion(tx)
+		if err != nil {
+			return err
+		}
+		accumulator := notifications.NewAccumulator()
+		accumulator.MarkIncomplete()
+		batch, err := d.prepareStateChanges(ctx, tx, tx, version, height, accumulator)
+		if err != nil {
+			return err
+		}
+		if batch != nil {
+			result = batch.ToProtoBatch()
+		}
+		return nil
+	})
+	return result, err
 }
 
 // Dispatch sends all pending notifications. The tx parameter is the data source
@@ -135,7 +166,7 @@ func (d *Dispatcher) Dispatch(
 	prevUnwindPoint *uint64,
 	committedTx kv.TemporalTx,
 ) error {
-	batch, err := d.prepareStateChanges(tx, state, stateVersion, finishProgressAfter, accumulator)
+	batch, err := d.prepareStateChanges(ctx, tx, state, stateVersion, finishProgressAfter, accumulator)
 	if err != nil {
 		return err
 	}
@@ -201,12 +232,15 @@ func (d *Dispatcher) Dispatch(
 
 // Preparation can fail on account reads. Complete it before publishing any events,
 // and keep recorded changes intact so a failed dispatch can be retried.
-func (d *Dispatcher) prepareStateChanges(tx kv.Tx, state kv.TemporalGetter, stateVersion, finishProgress uint64, accumulator *notifications.Accumulator) (*notifications.BlockBatchNotification, error) {
+func (d *Dispatcher) prepareStateChanges(ctx context.Context, tx kv.Tx, state kv.TemporalGetter, stateVersion, finishProgress uint64, accumulator *notifications.Accumulator) (*notifications.BlockBatchNotification, error) {
 	if accumulator == nil {
 		return nil, nil
 	}
 	// Head markers can lead execution. The announced head must match the supplied state.
-	header := rawdb.ReadHeaderByNumber(tx, finishProgress)
+	header, err := d.headerReader.HeaderByNumber(ctx, tx, finishProgress)
+	if err != nil {
+		return nil, err
+	}
 	if header == nil {
 		return nil, nil
 	}

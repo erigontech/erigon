@@ -429,21 +429,6 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 		defer poolTx.Rollback()
 	}
 
-	// Update EWMA block time (α=0.1) using wall-clock measurements between consecutive blocks.
-	// Gaps >10 min are ignored: they indicate the node was paused, restarted, or fast-syncing
-	// (during fast-sync the txpool receives block batches with large wall-clock gaps between
-	// them, so individual inter-block deltas are not meaningful). As a result the EWMA only
-	// tracks real-time block arrivals at chain tip. Seeded at 12 s (Ethereum mainnet slot time);
-	// converges to actual observed block time (~13 s on mainnet due to missed slots) after ~30
-	// chain-tip blocks. Done outside the lock — atomics only.
-	nowMs := time.Now().UnixMilli()
-	if prev := p.lastBlockTimestampMs.Load(); prev > 0 {
-		if delta := nowMs - prev; delta > 0 && delta < 600_000 {
-			p.avgBlockTimeMs.Store((9*p.avgBlockTimeMs.Load() + delta) / 10)
-		}
-	}
-	p.lastBlockTimestampMs.Store(nowMs)
-
 	if err := minedTxns.Valid(); err != nil {
 		return err
 	}
@@ -492,6 +477,9 @@ func (p *TxPool) applyBlockUpdate(stateChanges *remoteproto.StateChangeBatch, un
 			p.markStateStaleLocked()
 		} else {
 			p.stateViewStale = false
+			if block > p.lastSeenBlock.Load() {
+				p.recordBlockTime(stateChanges.StateChangesIncomplete)
+			}
 			p.lastSeenBlock.Store(block)
 		}
 		p.lastSeenCond.Broadcast()
@@ -588,6 +576,19 @@ func (p *TxPool) applyBlockUpdate(stateChanges *remoteproto.StateChangeBatch, un
 
 	p.publishDepthMetrics()
 	return frames, nil
+}
+
+// Record only successful head advances, so retries and subscription resets do not
+// become block-time samples. Incomplete batches restart the clock after catch-up.
+func (p *TxPool) recordBlockTime(incomplete bool) {
+	nowMs := time.Now().UnixMilli()
+	if prev := p.lastBlockTimestampMs.Load(); prev > 0 && !incomplete {
+		// Ignore pauses over ten minutes; the EWMA (alpha=0.1) tracks arrivals at the tip.
+		if delta := nowMs - prev; delta > 0 && delta < 600_000 {
+			p.avgBlockTimeMs.Store((9*p.avgBlockTimeMs.Load() + delta) / 10)
+		}
+	}
+	p.lastBlockTimestampMs.Store(nowMs)
 }
 
 // Publish at block cadence, including parked frames as queued, as in RPC.
@@ -1895,7 +1896,11 @@ func fillDiscardReasons(reasons []txpoolcfg.DiscardReason, newTxns TxnSlots, dis
 	return reasons
 }
 
+const localAdmissionTimeout = 30 * time.Second
+
 func (p *TxPool) AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcfg.DiscardReason, error) {
+	ctx, cancel := context.WithTimeout(ctx, localAdmissionTimeout)
+	defer cancel()
 	return p.addNewTxns(ctx, newTxns, nil, true)
 }
 
@@ -2079,7 +2084,7 @@ func (p *TxPool) addTxnsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView,
 	for _, changesList := range stateChanges.ChangeBatch {
 		for _, change := range changesList.Changes {
 			switch change.Action {
-			case remoteproto.Action_UPSERT, remoteproto.Action_UPSERT_CODE:
+			case remoteproto.Action_UPSERT, remoteproto.Action_UPSERT_CODE, remoteproto.Action_REMOVE:
 				if change.Incarnation > 0 {
 					continue
 				}

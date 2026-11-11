@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/chain"
@@ -68,7 +69,7 @@ func newPinTestExecutor(t *testing.T, forward stagedsync.ExecFunc) (*PipelineExe
 		nil, nil, logger, stages.ModeApplyingBlocks,
 	)
 
-	dispatcher := NewDispatcher(chainConfig, notifications.Events, notifications.StateChangesConsumer, nil, logger)
+	dispatcher := NewDispatcher(chainConfig, freezeblocks.NewBlockReader(nil), notifications.Events, notifications.StateChangesConsumer, nil, logger)
 	pe := NewPipelineExecutor(sync, db, pinTestBlockReader{}, chainConfig, nil, nil, nil, dispatcher, logger)
 	hook := stageloop.NewHook(t.Context(), notifications, sync, chainConfig, logger, dispatcher, nil, nil, nil, pinTestBlockReader{})
 	return pe, hook, notifications

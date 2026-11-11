@@ -51,17 +51,21 @@ func (c *StateDiffClientDirect) Snapshots(ctx context.Context, in *remoteproto.S
 func (c *StateDiffClientDirect) StateChanges(ctx context.Context, in *remoteproto.StateChangeRequest, opts ...grpc.CallOption) (remoteproto.KV_StateChangesClient, error) {
 	ch := make(chan *stateDiffReply, 16384)
 	subscribed := make(chan struct{})
+	done := make(chan struct{})
 	streamServer := &StateDiffStreamS{ch: ch, ctx: ctx, subscribed: subscribed}
 	go func() {
+		defer close(done)
 		defer close(ch)
 		streamServer.Err(c.server.StateChanges(in, streamServer))
 	}()
 	select {
 	case <-subscribed:
-		return &StateDiffStreamC{ch: ch, ctx: ctx}, nil
+	case <-done:
+		// Setup can fail before the server registers the subscription.
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
+	return &StateDiffStreamC{ch: ch, ctx: ctx}, nil
 }
 
 type stateDiffReply struct {

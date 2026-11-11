@@ -27,10 +27,12 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/notifications"
@@ -65,7 +67,7 @@ func TestDispatcherUsesSuppliedStateVersion(t *testing.T) {
 	accumulator := notifications.NewAccumulator()
 	accumulator.StartChange(header, nil, false)
 	capture := new(stateChangesCapture)
-	dispatcher := NewDispatcher(chain.AllProtocolChanges, nil, capture, nil, log.New())
+	dispatcher := NewDispatcher(chain.AllProtocolChanges, freezeblocks.NewBlockReader(nil), nil, capture, nil, log.New())
 
 	const projectedStateVersion = uint64(7)
 	require.NoError(t, dispatcher.Dispatch(
@@ -118,7 +120,7 @@ func TestDispatcherUsesExecutedHead(t *testing.T) {
 	accumulator := notifications.NewAccumulator()
 	accumulator.StartChange(executed, nil, false)
 	capture := new(stateChangesCapture)
-	dispatcher := NewDispatcher(chain.AllProtocolChanges, nil, capture, nil, log.New())
+	dispatcher := NewDispatcher(chain.AllProtocolChanges, freezeblocks.NewBlockReader(nil), nil, capture, nil, log.New())
 
 	require.NoError(t, dispatcher.Dispatch(t.Context(), tx, tx, 7, accumulator, nil, 89, 90, nil, nil))
 	require.NotNil(t, capture.batch)
@@ -131,6 +133,29 @@ func TestDispatcherUsesExecutedHead(t *testing.T) {
 	require.Equal(t, executed.BaseFee.Uint64(), capture.batch.PendingBlockBaseFee)
 	require.Equal(t, chain.AllProtocolChanges.GetMinBlobGasPrice(), capture.batch.PendingBlobFeePerGas)
 	require.Equal(t, executed.GasLimit, capture.batch.BlockGasLimit)
+}
+
+type notificationHeaderReader struct {
+	dbservices.HeaderReader
+	header *types.Header
+}
+
+func (r notificationHeaderReader) HeaderByNumber(context.Context, kv.Getter, uint64) (*types.Header, error) {
+	return r.header, nil
+}
+
+func TestDispatcherClearsFrozenHeadNotifications(t *testing.T) {
+	_, tx := temporaltest.NewTestTx(t)
+	header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 30_000_000, BaseFee: uint256.NewInt(1_000_000_000)}
+	require.Nil(t, rawdb.ReadHeaderByNumber(tx, 1))
+	accumulator := notifications.NewAccumulator()
+	accumulator.StartChange(header, nil, false)
+	capture := new(stateChangesCapture)
+	dispatcher := NewDispatcher(chain.AllProtocolChanges, notificationHeaderReader{header: header}, nil, capture, nil, log.New())
+	require.NoError(t, dispatcher.Dispatch(t.Context(), tx, tx, 1, accumulator, nil, 0, 1, nil, nil))
+	require.NotNil(t, capture.batch, "snapshot-only headers must still produce a state batch")
+	require.Equal(t, gointerfaces.ConvertHashToH256(header.Hash()), capture.batch.ChangeBatch[0].BlockHash)
+	require.False(t, accumulator.HasPendingChanges(), "delivered changes must not trigger another dispatch at the same head")
 }
 
 func TestDispatcherRefreshesIncompleteAccountChanges(t *testing.T) {
@@ -182,7 +207,7 @@ func TestDispatcherRefreshesIncompleteAccountChanges(t *testing.T) {
 			require.Equal(t, committed, value, "the final account is still uncommitted")
 
 			capture := new(stateChangesCapture)
-			dispatcher := NewDispatcher(chain.AllProtocolChanges, nil, capture, nil, log.New())
+			dispatcher := NewDispatcher(chain.AllProtocolChanges, freezeblocks.NewBlockReader(nil), nil, capture, nil, log.New())
 			module := &ExecModule{
 				pipelineExecutor: &PipelineExecutor{dispatcher: dispatcher},
 				accum:            &Accumulation{Accumulator: accumulator},
@@ -241,7 +266,7 @@ func TestDispatcherDoesNotPublishBeforeAccountRefresh(t *testing.T) {
 	headers, unsubscribe := events.AddHeaderSubscription()
 	t.Cleanup(unsubscribe)
 	capture := new(stateChangesCapture)
-	dispatcher := NewDispatcher(chain.AllProtocolChanges, events, capture, nil, log.New())
+	dispatcher := NewDispatcher(chain.AllProtocolChanges, freezeblocks.NewBlockReader(nil), events, capture, nil, log.New())
 	readErr := errors.New("account read failed")
 	state := failingNotificationState{TemporalGetter: tx, err: readErr}
 
@@ -263,7 +288,7 @@ func TestDispatcherNotifiesAfterUnwindToGenesis(t *testing.T) {
 	events := shards.NewEvents()
 	headers, unsubscribe := events.AddHeaderSubscription()
 	t.Cleanup(unsubscribe)
-	dispatcher := NewDispatcher(chain.AllProtocolChanges, events, nil, nil, log.New())
+	dispatcher := NewDispatcher(chain.AllProtocolChanges, freezeblocks.NewBlockReader(nil), events, nil, nil, log.New())
 	unwindPoint := uint64(0)
 
 	require.NoError(t, dispatcher.Dispatch(t.Context(), tx, tx, 0, nil, nil, 1, 1, &unwindPoint, nil))
@@ -286,7 +311,7 @@ func TestDispatcherCapsHeadersAfterDeepUnwind(t *testing.T) {
 	events := shards.NewEvents()
 	headers, unsubscribe := events.AddHeaderSubscription()
 	t.Cleanup(unsubscribe)
-	dispatcher := NewDispatcher(chain.AllProtocolChanges, events, nil, nil, log.New())
+	dispatcher := NewDispatcher(chain.AllProtocolChanges, freezeblocks.NewBlockReader(nil), events, nil, nil, log.New())
 	unwindPoint := uint64(0)
 
 	require.NoError(t, dispatcher.Dispatch(t.Context(), tx, tx, 0, nil, nil, 2_000, 1_500, &unwindPoint, nil))
@@ -314,7 +339,7 @@ func TestDispatcherNoOpDoesNotRepeatHeader(t *testing.T) {
 	headers, unsubscribe := events.AddHeaderSubscription()
 	t.Cleanup(unsubscribe)
 	capture := new(stateChangesCapture)
-	dispatcher := NewDispatcher(chain.AllProtocolChanges, events, capture, nil, log.New())
+	dispatcher := NewDispatcher(chain.AllProtocolChanges, freezeblocks.NewBlockReader(nil), events, capture, nil, log.New())
 	require.NoError(t, dispatcher.Dispatch(t.Context(), tx, tx, 1, notifications.NewAccumulator(), nil, 1, 1, nil, nil))
 	require.NotNil(t, capture.batch, "the pool still needs the head notification")
 	require.Empty(t, headers, "unchanged finish height must not reannounce the current header")
@@ -351,7 +376,7 @@ func TestDispatcherDeliversLogsOfBlocksMissingFromTheCache(t *testing.T) {
 	logs, unsubscribe := events.AddLogsSubscription()
 	t.Cleanup(unsubscribe)
 	events.EmptyLogSubscription(false)
-	dispatcher := NewDispatcher(chain.AllProtocolChanges, events, nil, loadOneLogBlockReceipts, log.New())
+	dispatcher := NewDispatcher(chain.AllProtocolChanges, freezeblocks.NewBlockReader(nil), events, nil, loadOneLogBlockReceipts, log.New())
 
 	require.NoError(t, dispatcher.Dispatch(t.Context(), tx, tx, 0, nil, recent, 0, blocks, nil, tx))
 
@@ -376,7 +401,7 @@ func TestDispatcherDeliversReceiptsOfBlocksMissingFromTheCache(t *testing.T) {
 	receipts, unsubscribe := events.AddReceiptsSubscription()
 	t.Cleanup(unsubscribe)
 	events.EmptyReceiptSubscription(false)
-	dispatcher := NewDispatcher(chain.AllProtocolChanges, events, nil, loadOneLogBlockReceipts, log.New())
+	dispatcher := NewDispatcher(chain.AllProtocolChanges, freezeblocks.NewBlockReader(nil), events, nil, loadOneLogBlockReceipts, log.New())
 
 	require.NoError(t, dispatcher.Dispatch(t.Context(), tx, tx, 0, nil, recent, 0, blocks, nil, tx))
 
@@ -404,7 +429,7 @@ func TestDispatcherSendsRemovedLogsOfBlocksLoadedAfterACacheMiss(t *testing.T) {
 	logs, unsubscribe := events.AddLogsSubscription()
 	t.Cleanup(unsubscribe)
 	events.EmptyLogSubscription(false)
-	dispatcher := NewDispatcher(chain.AllProtocolChanges, events, nil, loadOneLogBlockReceipts, log.New())
+	dispatcher := NewDispatcher(chain.AllProtocolChanges, freezeblocks.NewBlockReader(nil), events, nil, loadOneLogBlockReceipts, log.New())
 	require.NoError(t, dispatcher.Dispatch(t.Context(), tx, tx, 0, nil, recent, 0, blocks, nil, tx))
 	require.Len(t, <-logs, blocks)
 
@@ -432,7 +457,7 @@ func TestDispatcherForkchoicePathDeliversLogsOfTheWholeNotifySpan(t *testing.T) 
 	logs, unsubscribe := events.AddLogsSubscription()
 	t.Cleanup(unsubscribe)
 	events.EmptyLogSubscription(false)
-	dispatcher := NewDispatcher(chain.AllProtocolChanges, events, nil, nil, log.New())
+	dispatcher := NewDispatcher(chain.AllProtocolChanges, freezeblocks.NewBlockReader(nil), events, nil, nil, log.New())
 
 	require.NoError(t, dispatcher.Dispatch(t.Context(), tx, tx, 0, nil, recent, 0, blocks, nil, nil))
 
@@ -452,7 +477,7 @@ func TestDispatcherKeepsBlocksAboveFinalizedWithoutSubscribers(t *testing.T) {
 	recent := notifications.NewRecentReceipts(notifications.MaxNotifiedBlocks)
 	writeHeadersAndFillCache(t, tx, recent, blocks)
 	rawdb.WriteForkchoiceFinalized(tx, oneLogBlockReceipts(2).Header.Hash())
-	dispatcher := NewDispatcher(chain.AllProtocolChanges, shards.NewEvents(), nil, nil, log.New())
+	dispatcher := NewDispatcher(chain.AllProtocolChanges, freezeblocks.NewBlockReader(nil), shards.NewEvents(), nil, nil, log.New())
 
 	require.NoError(t, dispatcher.Dispatch(t.Context(), tx, tx, 0, nil, recent, 0, blocks, nil, nil))
 

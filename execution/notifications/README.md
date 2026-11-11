@@ -70,6 +70,11 @@ StateChangeConsumer.SendStateChanges(StateChangeBatch)  [protobuf]
 TxPool uses transaction directions to track mined and unwound transactions, and
 account/storage/code changes to refresh sender state and invalidate frame validations.
 
+On subscription, the KV server reads a reset from committed execution state. Under
+the publication lock, it selects the newer of this reset and the latest published
+head, keeping the head and state version together. It sends that reset before later
+batches, including when the latest publication is still awaiting commit.
+
 For incomplete batches, `RefreshAccounts` appends final values for addresses with
 recorded account changes. This keeps older entries from overwriting current values
 in the RPC state cache, but it does not reconstruct omitted changes.

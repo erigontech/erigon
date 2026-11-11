@@ -215,6 +215,9 @@ func (s *GrpcServer) Add(ctx context.Context, in *txpoolproto.AddRequest) (*txpo
 		}
 	}
 
+	if len(slots.Txns) == 0 {
+		return reply, nil
+	}
 	discardReasons, err := s.txPool.AddLocalTxns(ctx, slots)
 	if err != nil {
 		return nil, err
