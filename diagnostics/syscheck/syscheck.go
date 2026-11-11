@@ -97,6 +97,18 @@ func CheckKernelAllocationHints(ctx context.Context, log log.Logger) {
 
 		// Heuristic: if free+cached < 15% of total and swap total == 0, warn.
 		headroom := float64(vmStat.Available) / float64(vmStat.Total+1)
+		// Swapped-out pages can turn otherwise fast state reads into disk I/O.
+		// Warn only when swap actually holds pages: an unused swapfile can be a
+		// useful last resort on memory-constrained systems.
+		if swapStat != nil && swapStat.Used > 0 {
+			logHint(
+				"Swap is in use and can severely reduce Erigon execution throughput",
+				"swap_used_bytes", swapStat.Used,
+				"swap_total_bytes", swapStat.Total,
+				"suggestion", "Ensure sufficient RAM and reduce memory pressure. Disable swap only when enough RAM is available; otherwise an out-of-memory kill may follow.",
+			)
+		}
+
 		if headroom < 0.15 && (swapStat == nil || swapStat.Total == 0) {
 			logHint(
 				"Low available memory headroom and no swap may cause allocation failures",
