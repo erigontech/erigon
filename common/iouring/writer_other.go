@@ -22,6 +22,8 @@ import (
 	"bufio"
 	"errors"
 	"os"
+
+	"github.com/c2h5oh/datasize"
 )
 
 type Writer struct {
@@ -32,7 +34,7 @@ type Writer struct {
 }
 
 func NewWriter(f *os.File) *Writer {
-	return &Writer{file: f, buf: bufio.NewWriterSize(f, 1<<20)}
+	return &Writer{file: f, buf: bufio.NewWriterSize(f, int(datasize.MB))}
 }
 
 func (w *Writer) Write(p []byte) (int, error) {

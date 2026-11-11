@@ -24,6 +24,7 @@ import (
 	"sync/atomic"
 	"unsafe"
 
+	"github.com/c2h5oh/datasize"
 	"golang.org/x/sys/unix"
 )
 
@@ -39,7 +40,7 @@ type Writer struct {
 func NewWriter(f *os.File) *Writer {
 	offset, err := f.Seek(0, io.SeekCurrent)
 	r, _ := New(2)
-	return &Writer{file: f, ring: r, buf: make([]byte, 0, 1<<20), offset: offset, err: err}
+	return &Writer{file: f, ring: r, buf: make([]byte, 0, int(datasize.MB)), offset: offset, err: err}
 }
 
 func (w *Writer) Write(p []byte) (int, error) {
