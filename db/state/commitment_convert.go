@@ -893,12 +893,10 @@ func RestoreCommitmentFiles(ctx context.Context, dirs datadir.Dirs, logger log.L
 	}
 	resetPending := pendingErr == nil
 	historyDirs := [][2]string{{"history", dirs.SnapHistory}, {"idx", dirs.SnapIdx}, {"accessor", dirs.SnapAccessors}}
-	historyPending := false
-	for _, pair := range historyDirs {
-		if _, err := os.Stat(filepath.Join(backupRoot, pair[0])); err == nil {
-			historyPending = true
-		}
-	}
+	historyPending := slices.ContainsFunc(historyDirs, func(pair [2]string) bool {
+		_, err := os.Stat(filepath.Join(backupRoot, pair[0]))
+		return err == nil
+	})
 	restoredV3, err := preflightRestoreV3Orphans(
 		[][2]string{{filepath.Join(backupRoot, "domains"), dirs.SnapDomain}, {filepath.Join(backupRoot, "history"), dirs.SnapHistory}},
 	)
