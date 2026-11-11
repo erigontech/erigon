@@ -159,6 +159,9 @@ func (w *Writer) flush(final bool) error {
 			w.ring = nil
 			return &os.PathError{Op: "write", Path: w.file.Name(), Err: err}
 		}
+		if errno := unix.Errno(-res[count-1]); final && res[count-1] < 0 && errno != unix.ECANCELED && errno != unix.EINVAL && errno != unix.EOPNOTSUPP {
+			return &os.PathError{Op: "sync", Path: w.file.Name(), Err: errno}
+		}
 		if len(w.buf) > 0 {
 			if res[0] < 0 {
 				errno := unix.Errno(-res[0])

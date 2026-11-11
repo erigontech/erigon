@@ -184,6 +184,24 @@ func TestWriterResubmitsShortWrite(t *testing.T) {
 		injectCompletion(w.ring, 1, -int32(unix.EIO))
 		require.ErrorIs(t, w.Close(), unix.EIO)
 	})
+	t.Run("fsync fails beside short write", func(t *testing.T) {
+		w, _ := open(t)
+		_, err := w.Write(data[:100])
+		require.NoError(t, err)
+		injectCompletion(w.ring, 0, 60)
+		injectCompletion(w.ring, 1, -int32(unix.EIO))
+		injectCompletion(w.ring, 0, 40)
+		injectCompletion(w.ring, 1, 0)
+		require.ErrorIs(t, w.Close(), unix.EIO)
+	})
+	t.Run("fsync fails beside unsupported write", func(t *testing.T) {
+		w, _ := open(t)
+		_, err := w.Write(data[:100])
+		require.NoError(t, err)
+		injectCompletion(w.ring, 0, -int32(unix.EOPNOTSUPP))
+		injectCompletion(w.ring, 1, -int32(unix.EIO))
+		require.ErrorIs(t, w.Close(), unix.EIO)
+	})
 }
 
 func TestWriterFallsBackWhenRingFsyncUnsupported(t *testing.T) {
