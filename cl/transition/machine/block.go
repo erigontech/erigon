@@ -136,7 +136,7 @@ func ProcessBlock(impl BlockProcessor, s abstract.BeaconState, block cltypes.Gen
 	signatures, messages, publicKeys = append(signatures, sigs...), append(messages, msgs...), append(publicKeys, pubKeys...)
 
 	// process signature validation
-	if len(signatures) != 0 {
+	if impl.FullValidate() && len(signatures) != 0 {
 		valid, err := bls.VerifyMultipleSignatures(signatures, messages, publicKeys)
 		if err != nil || !valid {
 			if bidSignature != nil {

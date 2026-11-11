@@ -157,9 +157,20 @@ func TestProcessBlockBatchRejectsInvalidPayloadAttestationSignature(t *testing.T
 
 	signPayloadAttestation(t, s, block.Body.PayloadAttestations.Get(0), []*bls.PrivateKey{keys.builder})
 
-	err := machine.ProcessBlock(blockSignatureProcessor{}, s, block)
+	err := machine.ProcessBlock(validatingBlockSignatureProcessor{}, s, block)
 	require.EqualError(t, err, "block signature validation failed")
 	require.NotErrorIs(t, err, machine.ErrInvalidExecutionPayloadBid)
+}
+
+func TestProcessBlockBatchSkipsSignaturesWithoutFullValidation(t *testing.T) {
+	s, _, block := blockSignatureFixture(t, 4)
+	block.Body.PayloadAttestations.Get(0).Signature = common.Bytes96(bls.InfiniteSignature)
+	require.NoError(t, machine.ProcessBlock(blockSignatureProcessor{}, s, block))
+
+	s, _, block = blockSignatureFixture(t, 4)
+	block.Body.PayloadAttestations.Get(0).Signature = common.Bytes96(bls.InfiniteSignature)
+	err := machine.ProcessBlock(validatingBlockSignatureProcessor{}, s, block)
+	require.Error(t, err)
 }
 
 func TestProcessBlockBatchRejectsInvalidExecutionPayloadBidSignature(t *testing.T) {
@@ -168,7 +179,7 @@ func TestProcessBlockBatchRejectsInvalidExecutionPayloadBidSignature(t *testing.
 
 	signExecutionPayloadBid(t, s, block.Body.SignedExecutionPayloadBid, keys.validators[0])
 
-	err := machine.ProcessBlock(blockSignatureProcessor{}, s, block)
+	err := machine.ProcessBlock(validatingBlockSignatureProcessor{}, s, block)
 	require.EqualError(t, err, "processBlock: invalid execution payload bid: invalid bid signature")
 	require.ErrorIs(t, err, machine.ErrInvalidExecutionPayloadBid)
 }
@@ -180,7 +191,7 @@ func TestProcessBlockBatchInvalidBidTakesPrecedenceOverInvalidPayloadAttestation
 	signExecutionPayloadBid(t, s, block.Body.SignedExecutionPayloadBid, keys.validators[0])
 	signPayloadAttestation(t, s, block.Body.PayloadAttestations.Get(0), []*bls.PrivateKey{keys.builder})
 
-	err := machine.ProcessBlock(blockSignatureProcessor{}, s, block)
+	err := machine.ProcessBlock(validatingBlockSignatureProcessor{}, s, block)
 	require.Error(t, err)
 	require.ErrorIs(t, err, machine.ErrInvalidExecutionPayloadBid)
 }
@@ -192,7 +203,7 @@ func TestProcessBlockBatchSelfBuildDoesNotClassifyInvalidPayloadAttestationAsBid
 
 	signPayloadAttestation(t, s, block.Body.PayloadAttestations.Get(0), []*bls.PrivateKey{keys.builder})
 
-	err := machine.ProcessBlock(blockSignatureProcessor{}, s, block)
+	err := machine.ProcessBlock(validatingBlockSignatureProcessor{}, s, block)
 	require.Error(t, err)
 	require.NotErrorIs(t, err, machine.ErrInvalidExecutionPayloadBid)
 }
@@ -219,7 +230,7 @@ func TestProcessBlockBatchDuplicatePTCMemberRequiresDuplicateSignature(t *testin
 
 	signPayloadAttestation(t, s, attestation, []*bls.PrivateKey{keys.validators[0]})
 
-	err := machine.ProcessBlock(blockSignatureProcessor{}, s, block)
+	err := machine.ProcessBlock(validatingBlockSignatureProcessor{}, s, block)
 	require.Error(t, err)
 	require.NotErrorIs(t, err, machine.ErrInvalidExecutionPayloadBid)
 }
@@ -232,7 +243,7 @@ func TestProcessBlockBatchRejectsInfiniteAggregatePayloadPublicKey(t *testing.T)
 	keys := setComplementaryValidatorKeys(t, s)
 	signPayloadAttestation(t, s, block.Body.PayloadAttestations.Get(0), keys)
 
-	err := machine.ProcessBlock(blockSignatureProcessor{}, s, block)
+	err := machine.ProcessBlock(validatingBlockSignatureProcessor{}, s, block)
 	require.ErrorIs(t, err, bls.ErrInfinitePublicKey)
 	require.NotErrorIs(t, err, machine.ErrInvalidExecutionPayloadBid)
 }
@@ -245,7 +256,7 @@ func TestProcessBlockBatchRejectsUndecodablePayloadAttestationSignature(t *testi
 		block.Body.PayloadAttestations.Get(0).Signature[i] = 0xff
 	}
 
-	err := machine.ProcessBlock(blockSignatureProcessor{}, s, block)
+	err := machine.ProcessBlock(validatingBlockSignatureProcessor{}, s, block)
 	require.Error(t, err)
 	require.NotErrorIs(t, err, machine.ErrInvalidExecutionPayloadBid)
 }
@@ -256,7 +267,7 @@ func TestProcessBlockBatchRejectsInfinitePayloadAttestationSignature(t *testing.
 
 	block.Body.PayloadAttestations.Get(0).Signature = common.Bytes96(bls.InfiniteSignature)
 
-	err := machine.ProcessBlock(blockSignatureProcessor{}, s, block)
+	err := machine.ProcessBlock(validatingBlockSignatureProcessor{}, s, block)
 	require.Error(t, err)
 	require.NotErrorIs(t, err, machine.ErrInvalidExecutionPayloadBid)
 }
@@ -286,7 +297,7 @@ func TestProcessBlockBatchRejectsMalformedExecutionPayloadBidSignature(t *testin
 		block.Body.SignedExecutionPayloadBid.Signature[i] = 0xff
 	}
 
-	err := machine.ProcessBlock(blockSignatureProcessor{}, s, block)
+	err := machine.ProcessBlock(validatingBlockSignatureProcessor{}, s, block)
 	require.EqualError(t, err, "processBlock: failed to verify bid signature: bls(signature): could not deserialize")
 	require.NotErrorIs(t, err, machine.ErrInvalidExecutionPayloadBid)
 	require.ErrorIs(t, err, bls.ErrDeserializeSignature)

@@ -1,0 +1,16 @@
+TASK: 26141
+
+Commit 1: skip batched body signature verification when FullValidate is false.
+
+- Red: TestProcessBlockBatchSkipsSignaturesWithoutFullValidation, first
+  require.NoError assertion saw "block signature validation failed" with an
+  infinite payload-attestation signature.
+- Existing signature-rejection tests now use validatingBlockSignatureProcessor
+  so they continue to assert import-mode verification after FullValidate gates
+  the batch. Their expected rejection behavior is unchanged.
+- Baseline gate before edits: make lint, requested Go packages, and make erigon
+  passed.
+- BenchmarkReplayStateNonHead -count 6 before: 6.005, 6.065, 6.502, 6.695,
+  7.623, 8.168 ms/op; median 6.599 ms/op.
+- BenchmarkReplayStateNonHead -count 6 after: 3.942, 3.944, 3.974, 4.124,
+  4.204, 4.268 ms/op; median 4.049 ms/op.
