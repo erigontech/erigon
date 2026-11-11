@@ -1231,7 +1231,6 @@ func VerifyCommitmentV3History(ctx context.Context, a *Aggregator, logger log.Lo
 		}
 		samples = append(samples, txNums[len(txNums)/2]+1, txNums[len(txNums)-1]+1)
 	}
-	files := len(iit.files)
 	at.Close()
 	defer a.MadvNormal().DisableReadAhead()
 	g, gctx := errgroup.WithContext(ctx)
@@ -1252,6 +1251,6 @@ func VerifyCommitmentV3History(ctx context.Context, a *Aggregator, logger log.Lo
 	if err := g.Wait(); err != nil {
 		return err
 	}
-	logger.Info("[commitment_convert] v3 history verified", "files", files, "samples", len(samples), "took", time.Since(started).Round(time.Millisecond))
+	logger.Info("[commitment_convert] v3 history verified", "files", len(samples)/2, "samples", len(samples), "took", time.Since(started).Round(time.Millisecond))
 	return nil
 }
