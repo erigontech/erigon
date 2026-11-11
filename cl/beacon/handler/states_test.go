@@ -591,7 +591,7 @@ func TestGetStateFinalityCheckpoints(t *testing.T) {
 
 func TestGetRandao(t *testing.T) {
 	// setupTestingHandler(t, clparams.Phase0Version)
-	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), false)
+	db, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), false)
 
 	postRoot, err := postState.HashSSZ()
 	require.NoError(t, err)
@@ -645,6 +645,17 @@ func TestGetRandao(t *testing.T) {
 			require.Equal(t, expected, string(out))
 		})
 	}
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return tx.Delete(kv.IntraRandaoMixes, base_encoding.Encode64ToBytes4(postState.Slot()))
+	}))
+	server := httptest.NewServer(handler.mux)
+	defer server.Close()
+	req, err := http.NewRequestWithContext(t.Context(), "GET", server.URL+"/eth/v1/beacon/states/"+strconv.FormatInt(int64(postState.Slot()), 10)+"/randao", nil)
+	require.NoError(t, err)
+	resp, err := server.Client().Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusNotFound, resp.StatusCode)
 }
 
 func TestGetPendingQueuesConsensusVersionHeader(t *testing.T) {

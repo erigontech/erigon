@@ -1012,6 +1012,9 @@ func (r *HistoricalStatesReader) ReadRandaoMixBySlotAndIndex(kvGetter state_acce
 		if err != nil {
 			return common.Hash{}, err
 		}
+		if len(intraRandaoMix) == 0 {
+			return common.Hash{}, ErrRandaoMixUnavailable
+		}
 		if len(intraRandaoMix) != 32 {
 			return common.Hash{}, fmt.Errorf("invalid intra randao mix length %d", len(intraRandaoMix))
 		}
@@ -1031,6 +1034,8 @@ func (r *HistoricalStatesReader) ReadRandaoMixBySlotAndIndex(kvGetter state_acce
 	}
 	return common.BytesToHash(mixBytes), nil
 }
+
+var ErrRandaoMixUnavailable = errors.New("invalid intra randao mix length 0")
 
 func ReadQueueSSZ[T solid.EncodableHashableSSZ](kvGetter state_accessors.GetValFn, slot uint64, dumpTable, diffsTable string, out *solid.ListSSZ[T]) error {
 	remainder := slot % clparams.SlotsPerDump
