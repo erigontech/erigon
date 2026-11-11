@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
+	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/clonable"
 	"github.com/erigontech/erigon/common/length"
@@ -298,6 +299,16 @@ type ExecutionPayloadBid struct {
 	ExecutionPayment      uint64                        `json:"execution_payment,string"` // Gwei
 	BlobKzgCommitments    solid.ListSSZ[*KZGCommitment] `json:"blob_kzg_commitments"`
 	ExecutionRequestsRoot common.Hash                   `json:"execution_requests_root"`
+}
+
+// VersionedHashes returns blob versioned hashes in commitment order.
+// The result is non-nil even without commitments because the EL treats nil as missing input.
+func (e *ExecutionPayloadBid) VersionedHashes() []common.Hash {
+	hashes := make([]common.Hash, e.BlobKzgCommitments.Len())
+	for i := range hashes {
+		hashes[i], _ = utils.KzgCommitmentToVersionedHash(common.Bytes48(*e.BlobKzgCommitments.Get(i)))
+	}
+	return hashes
 }
 
 func (e *ExecutionPayloadBid) HashSSZ() ([32]byte, error) {

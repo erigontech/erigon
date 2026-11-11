@@ -141,7 +141,7 @@ func (t *gloasWeightTree) ensureTopology(root common.Hash) {
 			t.updateMissingRootVotes(current)
 		}
 
-		parentBlock, hasParentBlock := t.f.forkGraph.GetBlock(current)
+		parentBid := t.f.executionPayloadBid(current)
 		liveCount := 0
 		for _, child := range t.f.children(current) {
 			if _, hasHeader := t.f.forkGraph.GetHeader(child); !hasHeader {
@@ -164,11 +164,7 @@ func (t *gloasWeightTree) ensureTopology(root common.Hash) {
 				t.nodes[child] = childNode
 				t.updateMissingRootVotes(child)
 			}
-			if !hasParentBlock || parentBlock == nil {
-				childNode.parentPayloadStatus = cltypes.PayloadStatusEmpty
-			} else {
-				childNode.parentPayloadStatus = ParentPayloadStatusFromBids(parentBlock, block.Block)
-			}
+			childNode.parentPayloadStatus = parentPayloadStatusFromBid(parentBid, block.Block)
 			t.stack = append(t.stack, child)
 		}
 		node.children = node.children[:liveCount]
