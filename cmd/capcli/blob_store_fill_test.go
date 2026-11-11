@@ -61,6 +61,7 @@ type fillFixture struct {
 	sidecars map[common.Hash][]*cltypes.BlobSidecar
 	tip      common.Hash // the last block added; the next one builds on it
 	frozen   uint64      // the frozen blob frontier
+	version  clparams.StateVersion
 }
 
 func newFillFixture(t *testing.T) *fillFixture {
@@ -71,10 +72,11 @@ func newFillFixture(t *testing.T) *fillFixture {
 		blocks:   &storeCheckReader{blocks: map[uint64]*cltypes.SignedBeaconBlock{}},
 		store:    blob_storage.NewBlobStore(db, afero.NewMemMapFs()),
 		sidecars: map[common.Hash][]*cltypes.BlobSidecar{},
+		version:  clparams.DenebVersion,
 	}
 }
 
-// addBlock makes slot hold a canonical Deneb block with valid sidecars for blobs blobs, which the
+// addBlock makes slot hold a canonical block of the fixture's version with valid sidecars for blobs blobs, which the
 // endpoint serves. It returns the block root.
 func (f *fillFixture) addBlock(slot uint64, blobs int) common.Hash {
 	return f.addBlockWithTransactions(slot, blobs, false)
@@ -84,7 +86,7 @@ func (f *fillFixture) addBlock(slot uint64, blobs int) common.Hash {
 // serves the block as storage does, without them, so its own hash is not the canonical root.
 func (f *fillFixture) addBlockWithTransactions(slot uint64, blobs int, txs bool) common.Hash {
 	t := f.t
-	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, f.version)
 	block.Block.Slot = slot
 	block.Block.ParentRoot = f.tip
 	if txs {
@@ -189,6 +191,22 @@ func TestBlobArchiveStoreFillFetchesOnlyMissingSlots(t *testing.T) {
 	require.True(t, f.storedValid(fillTestSlot, missing))
 	require.EqualValues(t, 1, requestsFor(requests, missing))
 	require.Zero(t, requestsFor(requests, stored), "a slot the store serves correctly was fetched again")
+}
+
+// Fulu blocks carry no per-blob KZG proof, so an endpoint that rebuilds sidecars from columns can
+// serve the empty proof, the compressed point at infinity.
+func TestBlobArchiveStoreFillRecomputesAnEmptyKZGProof(t *testing.T) {
+	f := newFillFixture(t)
+	f.version = clparams.FuluVersion
+	root := f.addBlock(fillTestSlot, 2)
+	for _, sidecar := range f.sidecars[root] {
+		sidecar.KzgProof = common.Bytes48{0xc0}
+	}
+	url, _ := f.endpoint(false)
+
+	require.NoError(t, f.fill(&BlobArchiveStoreFill{Endpoints: []string{url}, FromSlot: fillTestSlot, ToSlot: fillTestSlot}, nil))
+
+	require.True(t, f.storedValid(fillTestSlot, root))
 }
 
 func TestBlobArchiveStoreFillReplacesInvalidSidecars(t *testing.T) {
