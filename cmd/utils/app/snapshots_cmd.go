@@ -188,6 +188,7 @@ var snapshotCommand = cli.Command{
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
 				&SnapshotRebuildFlag,
+				&cli.BoolFlag{Name: "new-salt", Usage: "Regenerate snapshot salts while rebuilding all accessors (requires --rebuild)"},
 			}),
 		},
 		{
@@ -578,14 +579,6 @@ var snapshotCommand = cli.Command{
 				return nil
 			},
 			Description: "Check if snapshot is publishable by a webseed client",
-			Flags: joinFlags([]cli.Flag{
-				&utils.DataDirFlag,
-			}),
-		},
-		{
-			Name:        "clearIndexing",
-			Action:      doClearIndexing,
-			Description: "Clear all indexing data",
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
 			}),
@@ -2682,64 +2675,17 @@ func doPublishable(ctx context.Context, dat datadir.Dirs, chainDB kv.RoDB) error
 	return nil
 }
 
-func doClearIndexing(ctx context.Context, cliCtx *cli.Command) error {
-	dat, l, err := datadir.New(cliCtx.String(utils.DataDirFlag.Name)).MustFlock()
-	if err != nil {
-		return err
-	}
-	defer unlockDatadir(log.Root(), l)
-	accessorsDir := dat.SnapAccessors
-	domainDir := dat.SnapDomain
-	snapDir := dat.Snap
-
-	// Delete accessorsDir
-	if err := dir2.RemoveAll(accessorsDir); err != nil {
-		return fmt.Errorf("failed to delete accessorsDir: %w", err)
-	}
-
-	// Delete all files in domainDir with extensions .bt and .bt.torrent
-	if err := deleteFilesWithExtensions(domainDir, []string{".bt", ".bt.torrent", ".kvei", ".kvei.torrent", ".kvi", ".kvi.torrent"}); err != nil {
-		return fmt.Errorf("failed to delete files in domainDir: %w", err)
-	}
-
-	// Delete all files in snapDir with extensions .idx and .idx.torrent
-	if err := deleteFilesWithExtensions(snapDir, []string{".idx", ".idx.torrent"}); err != nil {
-		return fmt.Errorf("failed to delete files in snapDir: %w", err)
-	}
-
-	// remove salt-state.txt and salt-blocks.txt
+// removeSnapshotSaltFilesForRebuild removes both snapshot salt families. Call it
+// only after removing accessors: retained accessors must never be opened with a
+// newly generated salt. The ordinary rebuild path keeps the original salts.
+func removeSnapshotSaltFilesForRebuild(dirs datadir.Dirs) error {
 	for _, name := range []string{"salt-state.txt", "salt-state.txt.torrent", "salt-blocks.txt", "salt-blocks.txt.torrent"} {
-		if err := dir2.RemoveFile(filepath.Join(snapDir, name)); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return fmt.Errorf("failed to remove %s: %w", name, err)
+		path := filepath.Join(dirs.Snap, name)
+		if err := dir2.RemoveFile(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("rebuild: remove %s: %w", path, err)
 		}
 	}
-
 	return nil
-}
-
-func deleteFilesWithExtensions(dir string, extensions []string) error {
-	return filepath.WalkDir(dir, func(path string, info fs.DirEntry, err error) error {
-		if err != nil {
-			if os.IsNotExist(err) { // it's ok if some file get removed during walk
-				return nil
-			}
-			return err
-		}
-		if info.IsDir() {
-			return nil
-		}
-
-		// Check file extensions and delete matching files
-		for _, ext := range extensions {
-			if strings.HasSuffix(info.Name(), ext) {
-				if err := dir2.RemoveFile(path); err != nil {
-					return err
-				}
-			}
-		}
-
-		return nil
-	})
 }
 
 func doBlkTxNum(ctx context.Context, cliCtx *cli.Command) error {
@@ -3015,12 +2961,21 @@ func doIndicesCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dir
 	defer logger.Info("Done")
 
 	rebuild := cliCtx.Bool(SnapshotRebuildFlag.Name)
+	newSalt := cliCtx.Bool("new-salt")
+	if newSalt && !rebuild {
+		return errors.New("--new-salt requires --rebuild")
+	}
 	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 
 	if rebuild {
 		if err := removeAccessorsForRebuild(dirs, logger); err != nil {
 			return err
+		}
+		if newSalt {
+			if err := removeSnapshotSaltFilesForRebuild(dirs); err != nil {
+				return err
+			}
 		}
 	}
 
