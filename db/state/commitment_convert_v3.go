@@ -704,8 +704,8 @@ func verifyCommitmentV3Files(ctx context.Context, a *Aggregator, logger log.Logg
 }
 
 type CommitmentV3Check struct {
-	Root                              []byte
-	BlockNum, TxNum, Records, Orphans uint64
+	Root                     []byte
+	BlockNum, TxNum, Records uint64
 }
 
 func FoldCommitmentV3(ctx context.Context, a *Aggregator, asOfTxNum uint64) (CommitmentV3Check, error) {
@@ -727,7 +727,7 @@ func FoldCommitmentV3(ctx context.Context, a *Aggregator, asOfTxNum uint64) (Com
 		it = stream.UnionKV(hist, latest, -1)
 	}
 	defer it.Close()
-	c, state, err := foldCommitmentV3Records(ctx, it)
+	c, state, orphans, err := foldCommitmentV3Records(ctx, it)
 	if err != nil {
 		return CommitmentV3Check{}, err
 	}
@@ -739,13 +739,13 @@ func FoldCommitmentV3(ctx context.Context, a *Aggregator, asOfTxNum uint64) (Com
 	if !bytes.Equal(c.Root, stateRoot) {
 		return CommitmentV3Check{}, fmt.Errorf("records fold to root %x, state at block %d records %x", c.Root, c.BlockNum, stateRoot)
 	}
-	if c.Orphans != 0 {
-		return CommitmentV3Check{}, fmt.Errorf("%d orphan records (block %d, %d records)", c.Orphans, c.BlockNum, c.Records)
+	if orphans != 0 {
+		return CommitmentV3Check{}, fmt.Errorf("%d orphan records (block %d, %d records)", orphans, c.BlockNum, c.Records)
 	}
 	return c, nil
 }
 
-func foldCommitmentV3Records(ctx context.Context, it stream.KV) (CommitmentV3Check, []byte, error) {
+func foldCommitmentV3Records(ctx context.Context, it stream.KV) (CommitmentV3Check, []byte, uint64, error) {
 	workers := max(1, runtime.GOMAXPROCS(0))
 	in := make(chan *kvBatch, workers*2)
 	out := make(chan *hashedBatch, workers*2)
@@ -842,11 +842,11 @@ func foldCommitmentV3Records(ctx context.Context, it stream.KV) (CommitmentV3Che
 		return nil
 	})
 	if err := g.Wait(); err != nil {
-		return CommitmentV3Check{}, nil, err
+		return CommitmentV3Check{}, nil, 0, err
 	}
 	root, records, orphans, err := matcher.Finish()
 	if err != nil {
-		return CommitmentV3Check{}, nil, err
+		return CommitmentV3Check{}, nil, 0, err
 	}
-	return CommitmentV3Check{Root: root[:], Records: records, Orphans: orphans}, state, nil
+	return CommitmentV3Check{Root: root[:], Records: records}, state, orphans, nil
 }

@@ -325,9 +325,8 @@ func testConvertCommitmentFilesV3CollapsedStorageBranch(t *testing.T, keysV2 boo
 	}
 	runOrchestrator(t, db, state.ConvertOpts{TargetV3: true})
 
-	c, err := state.FoldCommitmentV3(ctx, agg, math.MaxUint64)
+	_, err = state.FoldCommitmentV3(ctx, agg, math.MaxUint64)
 	require.NoError(t, err)
-	require.Zero(t, c.Orphans)
 }
 
 func TestConvertCommitmentFiles_V3StorageRootSurvivesBranchCollapseAcrossSteps(t *testing.T) {
@@ -370,9 +369,8 @@ func TestConvertCommitmentFiles_V3StorageRootSurvivesBranchCollapseAcrossSteps(t
 	require.Eventually(t, func() bool { return agg.EndTxNumMinimax() >= stepSize*(steps-1) }, 30*time.Second, 50*time.Millisecond)
 
 	runOrchestrator(t, db, state.ConvertOpts{TargetV3: true})
-	cnt, err := state.FoldCommitmentV3(ctx, agg, math.MaxUint64)
+	_, err := state.FoldCommitmentV3(ctx, agg, math.MaxUint64)
 	require.NoError(t, err)
-	require.Zero(t, cnt.Orphans)
 }
 
 func commitmentFilesByEnd(t *testing.T, snapDomain string) []string {
@@ -454,9 +452,8 @@ func TestConvertCommitmentFiles_V3PrefixFoldMatchesStateRecord(t *testing.T) {
 
 func testPrefixFoldMatchesStateRecord(t *testing.T, build func(t *testing.T, mode string) (kv.TemporalRwDB, *state.Aggregator), mode string) {
 	db, agg := build(t, mode)
-	latest, err := state.FoldCommitmentV3(t.Context(), agg, math.MaxUint64)
+	_, err := state.FoldCommitmentV3(t.Context(), agg, math.MaxUint64)
 	require.NoError(t, err)
-	require.Zero(t, latest.Orphans)
 	kvs := commitmentFilesByEnd(t, agg.Dirs().SnapDomain)
 	require.Greater(t, len(kvs), 1)
 	type result struct {
