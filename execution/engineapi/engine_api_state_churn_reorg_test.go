@@ -372,9 +372,11 @@ func recordChurnSum(ctx context.Context, t *testing.T, churn *contracts.StateChu
 	return tracked
 }
 
-// assertChurnState waits for the canonical head to settle on want (matching both
-// number and hash) and then asserts the contract's live state is self-consistent,
-// equal to wantSum, and at the cursor expected for want's height.
+// assertChurnState waits for want's hash and number to become canonical, then
+// checks the churn invariant and wantSum. The expected cursor is height-2:
+// block 1 is empty, block 2 deploys the contract, and each later block has one poke.
+// Use assertChurnStateAtCursor when blocks may contain multiple pokes,
+// including requeued transactions.
 func assertChurnState(
 	ctx context.Context,
 	t *testing.T,

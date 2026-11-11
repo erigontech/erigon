@@ -2212,8 +2212,10 @@ func (a *Aggregator) BuildFilesInBackground(db kv.TemporalRoDB, txNum uint64, fi
 func (at *AggregatorRoTx) firstStepToBuild(tx kv.Tx) (kv.Step, error) {
 	step := kv.Step(at.TxNumsInFiles(kv.StateDomains...) / at.StepSize())
 	stateStep := step
-	// Builds finish every entity before advancing to the next step. Resuming
-	// an older range would publish files that lower the shared state-file ceiling.
+	// Builds finish every entity before advancing, so an interruption can leave
+	// an entity at most one step behind the state files. Rebuilding that step
+	// reaches the current state-file boundary; starting earlier would lower
+	// the shared visible-file ceiling.
 	for _, d := range at.d {
 		if d == nil || !d.d.Enabled.Load() || d.FirstStepNotInFiles() >= step {
 			continue
