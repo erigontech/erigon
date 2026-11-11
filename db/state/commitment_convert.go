@@ -1604,21 +1604,33 @@ func convertPhase3(snapDir, backupDir string, ranges []commitmentHistoryRange) (
 	if err := os.MkdirAll(backupDir, 0o755); err != nil {
 		return 0, fmt.Errorf("[commitment_convert] phase 3 mkdir backup %s: %w", backupDir, err)
 	}
-	moved := 0
+	var matches []string
 	for _, r := range ranges {
 		pattern := filepath.Join(snapDir, fmt.Sprintf("*-commitment.%d-%d.*", r.fromStep, r.toStep))
-		matches, err := dir.Glob(pattern)
+		rangeMatches, err := dir.Glob(pattern)
 		if err != nil {
-			return moved, fmt.Errorf("[commitment_convert] phase 3 glob %s: %w", pattern, err)
+			return 0, fmt.Errorf("[commitment_convert] phase 3 glob %s: %w", pattern, err)
 		}
-		for _, src := range matches {
-			dst := filepath.Join(backupDir, filepath.Base(src))
-			if renameErr := os.Rename(src, dst); renameErr != nil {
-				return moved, fmt.Errorf("[commitment_convert] phase 3 mv %s -> %s: %w",
-					src, dst, renameErr)
-			}
-			moved++
+		matches = append(matches, rangeMatches...)
+	}
+	if len(matches) > 0 {
+		manifest := make([]string, len(matches))
+		for i, src := range matches {
+			manifest[i] = filepath.Base(src)
 		}
+		manifestPath := filepath.Join(backupDir, restoreManifestName)
+		if err := writeRestoreManifestAtomic(manifestPath, manifest); err != nil {
+			return 0, fmt.Errorf("[commitment_convert] phase 3 write manifest %s: %w", manifestPath, err)
+		}
+	}
+	moved := 0
+	for _, src := range matches {
+		dst := filepath.Join(backupDir, filepath.Base(src))
+		if renameErr := os.Rename(src, dst); renameErr != nil {
+			return moved, fmt.Errorf("[commitment_convert] phase 3 mv %s -> %s: %w",
+				src, dst, renameErr)
+		}
+		moved++
 	}
 	return moved, nil
 }
