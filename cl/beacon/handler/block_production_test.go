@@ -51,6 +51,7 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/builder"
 	builder_mock "github.com/erigontech/erigon/cl/beacon/builder/mock_services"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
+	sync_mock_services "github.com/erigontech/erigon/cl/beacon/synced_data/mock_services"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -5956,6 +5957,7 @@ func TestProduceBeaconBodyIncludesPTCVotesReceivedDuringPayloadWait(t *testing.T
 type cachedAttestationDataProducer struct {
 	data         solid.AttestationData
 	cached       bool
+	cacheRoot    *common.Hash
 	calls        *int
 	produceCalls *int
 }
@@ -5971,7 +5973,7 @@ func (c *doneObservedContext) Done() <-chan struct{} {
 	return c.Context.Done()
 }
 
-func (p cachedAttestationDataProducer) ProduceAndCacheAttestationData(kv.Tx, *state.CachingBeaconState, common.Hash, uint64) (solid.AttestationData, error) {
+func (p cachedAttestationDataProducer) ProduceAndCacheAttestationData(*state.CachingBeaconState, common.Hash, uint64) (solid.AttestationData, error) {
 	if p.calls != nil {
 		(*p.calls)++
 	}
@@ -5981,11 +5983,14 @@ func (p cachedAttestationDataProducer) ProduceAndCacheAttestationData(kv.Tx, *st
 	return p.data, nil
 }
 
-func (p cachedAttestationDataProducer) CachedAttestationData(uint64) (solid.AttestationData, bool, error) {
+func (p cachedAttestationDataProducer) CachedAttestationData(headRoot common.Hash, _ uint64) (solid.AttestationData, bool) {
+	if p.cacheRoot != nil {
+		*p.cacheRoot = headRoot
+	}
 	if p.calls != nil {
 		(*p.calls)++
 	}
-	return p.data, p.cached, nil
+	return p.data, p.cached
 }
 
 func requestAttestationData(t *testing.T, handler *ApiHandler, ctx context.Context, slot uint64) (int, solid.AttestationData) {
@@ -6052,6 +6057,30 @@ func TestGetEthV1ValidatorAttestationDataHeadLockBusy(t *testing.T) {
 		require.Equal(t, 2, *produceCalls)
 	})
 
+	t.Run("cached fallback does not read state", func(t *testing.T) {
+		handler, fcu, slot, produceCalls := setup(t)
+		var cacheRoot common.Hash
+		handler.attestationProducer = cachedAttestationDataProducer{
+			data:         solid.AttestationData{Slot: slot, BeaconBlockRoot: fallbackRoot},
+			cached:       true,
+			cacheRoot:    &cacheRoot,
+			produceCalls: produceCalls,
+		}
+		syncedData := sync_mock_services.NewMockSyncedData(gomock.NewController(t))
+		syncedData.EXPECT().StateHead().Return(fallbackRoot, slot-1, true).AnyTimes()
+		syncedData.EXPECT().CommitteeCount(gomock.Any()).Return(uint64(1)).AnyTimes()
+		handler.syncedData = syncedData
+		fcu.TryGetHeadNodeFn = func() (forkchoice.ForkChoiceNode, bool) {
+			return forkchoice.ForkChoiceNode{}, false
+		}
+
+		status, data := requestAttestationData(t, handler, t.Context(), slot)
+		require.Equal(t, http.StatusOK, status)
+		require.Equal(t, fallbackRoot, cacheRoot)
+		require.Equal(t, fallbackRoot, data.BeaconBlockRoot)
+		require.Zero(t, *produceCalls)
+	})
+
 	t.Run("uses fork choice when lock becomes free", func(t *testing.T) {
 		handler, fcu, slot, produceCalls := setup(t)
 		handler.attestationDataImportWait = defaultAttestationDataImportWait
@@ -6094,9 +6123,11 @@ func TestGetEthV1ValidatorAttestationDataUsesForkChoiceHead(t *testing.T) {
 		name               string
 		forkChoiceHeadRoot common.Hash
 		headAtSlot         bool
+		headAfterSlot      bool
 	}{
 		{name: "empty slot", forkChoiceHeadRoot: syncedHeadRoot},
 		{name: "head imported but not published, selected head stale, epoch start", forkChoiceHeadRoot: common.HexToHash("0x5678"), headAtSlot: true},
+		{name: "request before unpublished head", forkChoiceHeadRoot: common.HexToHash("0x5678"), headAfterSlot: true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			_, _, _, _, syncedHeadState, handler, _, syncedData, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
@@ -6127,11 +6158,23 @@ func TestGetEthV1ValidatorAttestationDataUsesForkChoiceHead(t *testing.T) {
 			}
 			fcu.HeadVal = tt.forkChoiceHeadRoot
 			fcu.HeadSlotVal = forkChoiceHeadSlot
+			attestationRoot := tt.forkChoiceHeadRoot
+			if tt.headAfterSlot {
+				fcu.HeadSlotVal = attestationSlot + 1
+				attestationRoot = common.HexToHash("0x9abc")
+				fcu.Ancestors = map[uint64]forkchoice.ForkChoiceNode{
+					attestationSlot: {Root: attestationRoot},
+				}
+			}
+			fcu.Headers[fcu.HeadVal] = &cltypes.BeaconBlockHeader{Slot: fcu.HeadSlotVal}
 			var queriedHeadRoot common.Hash
 			var queriedSlot uint64
 			fcu.AttestationDataFn = func(gotHeadRoot common.Hash, gotSlot uint64) (solid.AttestationData, bool) {
 				queriedHeadRoot = gotHeadRoot
 				queriedSlot = gotSlot
+				if gotHeadRoot != attestationRoot {
+					return solid.AttestationData{}, false
+				}
 				return solid.AttestationData{
 					Slot:            gotSlot,
 					BeaconBlockRoot: gotHeadRoot,
@@ -6146,13 +6189,134 @@ func TestGetEthV1ValidatorAttestationDataUsesForkChoiceHead(t *testing.T) {
 			status, data := requestAttestationData(t, handler, t.Context(), attestationSlot)
 			require.Equal(t, http.StatusOK, status)
 			require.Zero(t, calls)
-			require.Equal(t, tt.forkChoiceHeadRoot, queriedHeadRoot)
+			require.Equal(t, attestationRoot, queriedHeadRoot)
 			require.Equal(t, attestationSlot, queriedSlot)
-			require.Equal(t, tt.forkChoiceHeadRoot, data.BeaconBlockRoot)
+			require.Equal(t, attestationRoot, data.BeaconBlockRoot)
 			require.Equal(t, attestationSlot/handler.beaconChainCfg.SlotsPerEpoch, data.Target.Epoch)
-			require.Equal(t, tt.forkChoiceHeadRoot, data.Target.Root)
+			require.Equal(t, attestationRoot, data.Target.Root)
 		})
 	}
+}
+
+func TestGetEthV1ValidatorAttestationDataBoundsAncestorLookup(t *testing.T) {
+	slotsPerEpoch := clparams.MainnetBeaconConfig.SlotsPerEpoch
+	for _, tt := range []struct {
+		name              string
+		headSlot          uint64
+		slot              uint64
+		missingHeader     bool
+		wantAncestorCalls int64
+	}{
+		{name: "before previous epoch", headSlot: 2 * slotsPerEpoch, slot: slotsPerEpoch - 1},
+		{name: "previous epoch start", headSlot: 3*slotsPerEpoch - 1, slot: slotsPerEpoch, wantAncestorCalls: 1},
+		{name: "current epoch", headSlot: 2*slotsPerEpoch + 1, slot: 2 * slotsPerEpoch, wantAncestorCalls: 1},
+		{name: "head slot", headSlot: 2 * slotsPerEpoch, slot: 2 * slotsPerEpoch},
+		{name: "later slot in head epoch", headSlot: 2 * slotsPerEpoch, slot: 2*slotsPerEpoch + 1},
+		{name: "epoch zero", headSlot: 1, slot: 0, wantAncestorCalls: 1},
+		{name: "previous epoch zero", headSlot: slotsPerEpoch, slot: 0, wantAncestorCalls: 1},
+		{name: "epoch after head", headSlot: slotsPerEpoch - 1, slot: slotsPerEpoch},
+		{name: "head header unavailable", headSlot: 2 * slotsPerEpoch, slot: 2*slotsPerEpoch - 1, missingHeader: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			_, _, _, _, headState, handler, _, syncedData, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+			handler.aggregatePool = nil
+			publishedRoot, headRoot, ancestorRoot := common.Hash{1}, common.Hash{2}, common.Hash{3}
+			require.NoError(t, headState.SetSlot(tt.slot))
+			require.NoError(t, syncedData.OnHeadStateWithBlockRoot(headState, publishedRoot))
+			clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
+			clock.EXPECT().GetCurrentSlot().Return(tt.headSlot + 2*slotsPerEpoch).AnyTimes()
+			handler.ethClock = clock
+			fcu.HeadVal, fcu.HeadSlotVal = headRoot, tt.headSlot
+			if !tt.missingHeader {
+				fcu.Headers[headRoot] = &cltypes.BeaconBlockHeader{Slot: tt.headSlot}
+			}
+			data := solid.AttestationData{Slot: tt.slot, BeaconBlockRoot: ancestorRoot}
+			handler.attestationProducer = cachedAttestationDataProducer{data: data, cached: true}
+			fcu.AttestationDataFn = func(root common.Hash, slot uint64) (solid.AttestationData, bool) {
+				require.Equal(t, tt.slot, slot)
+				return data, root == ancestorRoot
+			}
+			fcu.AncestorFn = func(root common.Hash, slot uint64) forkchoice.ForkChoiceNode {
+				require.Equal(t, headRoot, root)
+				require.Equal(t, tt.slot, slot)
+				return forkchoice.ForkChoiceNode{Root: ancestorRoot}
+			}
+
+			status, got := requestAttestationData(t, handler, t.Context(), tt.slot)
+			require.Equal(t, http.StatusOK, status)
+			require.Equal(t, ancestorRoot, got.BeaconBlockRoot)
+			require.Equal(t, tt.wantAncestorCalls, fcu.AncestorCalls.Load())
+		})
+	}
+}
+
+func TestGetEthV1ValidatorAttestationDataCacheHeadChange(t *testing.T) {
+	for _, haveHead := range []bool{true, false} {
+		t.Run(fmt.Sprintf("fork choice head available %t", haveHead), func(t *testing.T) {
+			_, _, _, _, headState, handler, _, syncedData, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+			handler.aggregatePool = nil
+			handler.attestationDataImportWait = 0
+			slot := headState.Slot()
+			oldRoot, newRoot := common.Hash{1}, common.Hash{2}
+			targetSlot := handler.beaconChainCfg.RoundSlotToEpoch(slot)
+			targetRoot := newRoot
+			if targetSlot < slot {
+				var err error
+				targetRoot, err = headState.GetBlockRootAtSlot(targetSlot)
+				require.NoError(t, err)
+			}
+			require.NoError(t, handler.indiciesDB.Update(t.Context(), func(tx kv.RwTx) error {
+				return beacon_indicies.MarkRootCanonical(tx, targetSlot, common.Hash{3})
+			}))
+			producer := attestation_producer.New(handler.beaconChainCfg)
+			handler.attestationProducer = producer
+			_, err := producer.ProduceAndCacheAttestationData(headState, oldRoot, slot)
+			require.NoError(t, err)
+			require.NoError(t, syncedData.OnHeadStateWithBlockRoot(headState, newRoot))
+			clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
+			clock.EXPECT().GetCurrentSlot().Return(slot).AnyTimes()
+			handler.ethClock = clock
+			fcu.TryGetHeadNodeFn = func() (forkchoice.ForkChoiceNode, bool) {
+				return forkchoice.ForkChoiceNode{Root: newRoot}, haveHead
+			}
+			fcu.AttestationDataFn = func(common.Hash, uint64) (solid.AttestationData, bool) {
+				return solid.AttestationData{}, false
+			}
+
+			status, data := requestAttestationData(t, handler, t.Context(), slot)
+			require.Equal(t, http.StatusOK, status)
+			require.Equal(t, newRoot, data.BeaconBlockRoot)
+			require.Equal(t, targetRoot, data.Target.Root)
+		})
+	}
+}
+
+func TestGetEthV1ValidatorAttestationDataRejectsMismatchedHeadState(t *testing.T) {
+	_, _, _, _, headState, handler, _, syncedData, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	handler.aggregatePool = nil
+	slot := headState.Slot()
+	oldRoot, newRoot := common.Hash{1}, common.Hash{2}
+	producer := attestation_producer.New(handler.beaconChainCfg)
+	handler.attestationProducer = producer
+	_, err := producer.ProduceAndCacheAttestationData(headState, oldRoot, slot)
+	require.NoError(t, err)
+	require.NoError(t, syncedData.OnHeadStateWithBlockRoot(headState, oldRoot))
+	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
+	clock.EXPECT().GetCurrentSlot().Return(slot).AnyTimes()
+	handler.ethClock = clock
+	fcu.TryGetHeadNodeFn = func() (forkchoice.ForkChoiceNode, bool) {
+		return forkchoice.ForkChoiceNode{Root: newRoot}, true
+	}
+	fcu.AttestationDataFn = func(common.Hash, uint64) (solid.AttestationData, bool) {
+		return solid.AttestationData{}, false
+	}
+
+	status, _ := requestAttestationData(t, handler, t.Context(), slot)
+	require.Equal(t, http.StatusServiceUnavailable, status)
+	require.NoError(t, syncedData.OnHeadStateWithBlockRoot(headState, newRoot))
+	status, data := requestAttestationData(t, handler, t.Context(), slot)
+	require.Equal(t, http.StatusOK, status)
+	require.Equal(t, newRoot, data.BeaconBlockRoot)
 }
 
 func TestGetEthV1ValidatorAttestationDataWaitsForSlotImport(t *testing.T) {
@@ -6370,7 +6534,7 @@ func TestGetEthV1ValidatorAttestationDataGloasPayloadIndex(t *testing.T) {
 		blockSlot  uint64
 		status     cltypes.PayloadStatus
 		verified   bool
-		childHead  bool // the head is a child of the served root, as when attestation data was cached earlier in the slot
+		childHead  bool // the selected head is a child of the attested block
 		cached     bool
 		headErr    bool
 		forkChoice bool
@@ -6392,7 +6556,7 @@ func TestGetEthV1ValidatorAttestationDataGloasPayloadIndex(t *testing.T) {
 		{name: "optimistic FULL head from fork choice", blockSlot: attestationSlot - 2, status: cltypes.PayloadStatusFull, forkChoice: true, wantStatus: http.StatusServiceUnavailable},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+			_, _, _, _, headState, handler, _, syncedData, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 			handler.attestationDataImportWait = 20 * time.Millisecond
 			cfg := handler.beaconChainCfg
 			cfg.AltairForkEpoch, cfg.BellatrixForkEpoch, cfg.CapellaForkEpoch, cfg.DenebForkEpoch, cfg.ElectraForkEpoch, cfg.FuluForkEpoch, cfg.GloasForkEpoch = 0, 0, 0, 0, 0, 0, 0
@@ -6421,6 +6585,7 @@ func TestGetEthV1ValidatorAttestationDataGloasPayloadIndex(t *testing.T) {
 				fcu.HeadPayloadStatusVal = cltypes.PayloadStatusEmpty
 				fcu.Ancestors = map[uint64]forkchoice.ForkChoiceNode{tt.blockSlot: {Root: root, PayloadStatus: tt.status}}
 			}
+			require.NoError(t, syncedData.OnHeadStateWithBlockRoot(headState, fcu.HeadVal))
 			wantErr := "payload of the beacon block root is not verified"
 			if tt.headErr {
 				wantErr = "fork-choice head unavailable"
@@ -6457,10 +6622,10 @@ func TestGetEthV1ValidatorAttestationDataGloasPayloadIndex(t *testing.T) {
 	}
 }
 
-func TestGetEthV1ValidatorAttestationDataGloasFallbackRefreshesHead(t *testing.T) {
+func TestGetEthV1ValidatorAttestationDataGloasFallbackKeepsRequestHead(t *testing.T) {
 	const attestationSlot = uint64(10)
 	root := common.HexToHash("0xabcd")
-	oldHeadRoot := common.HexToHash("0x1111")
+	childRoot := common.HexToHash("0x1111")
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 	handler.aggregatePool = nil
 	cfg := handler.beaconChainCfg
@@ -6475,8 +6640,9 @@ func TestGetEthV1ValidatorAttestationDataGloasFallbackRefreshesHead(t *testing.T
 	}
 	fcu.Headers[root] = &cltypes.BeaconBlockHeader{Slot: attestationSlot - 1}
 	fcu.VerifiedPayloads = map[common.Hash]bool{root: true}
-	fcu.HeadVal = root
-	fcu.HeadPayloadStatusVal = cltypes.PayloadStatusFull
+	fcu.Ancestors = map[uint64]forkchoice.ForkChoiceNode{
+		attestationSlot - 1: {Root: root, PayloadStatus: cltypes.PayloadStatusEmpty},
+	}
 	fcu.AttestationDataFn = func(common.Hash, uint64) (solid.AttestationData, bool) {
 		return solid.AttestationData{}, false
 	}
@@ -6484,16 +6650,17 @@ func TestGetEthV1ValidatorAttestationDataGloasFallbackRefreshesHead(t *testing.T
 	fcu.TryGetHeadNodeFn = func() (forkchoice.ForkChoiceNode, bool) {
 		tryHeadCalls++
 		if tryHeadCalls == 1 {
-			return forkchoice.ForkChoiceNode{Root: oldHeadRoot}, true
+			return forkchoice.ForkChoiceNode{Root: root, PayloadStatus: cltypes.PayloadStatusFull}, true
 		}
-		return forkchoice.ForkChoiceNode{Root: fcu.HeadVal, PayloadStatus: fcu.HeadPayloadStatusVal}, true
+		return forkchoice.ForkChoiceNode{Root: childRoot, PayloadStatus: cltypes.PayloadStatusEmpty}, true
 	}
 
 	status, data := requestAttestationData(t, handler, t.Context(), attestationSlot)
 
 	require.Equal(t, http.StatusOK, status)
+	require.Equal(t, root, data.BeaconBlockRoot)
 	require.Equal(t, uint64(1), data.CommitteeIndex)
-	require.Equal(t, 2, tryHeadCalls)
+	require.Equal(t, 1, tryHeadCalls)
 }
 
 func TestGetEthV1ValidatorAttestationDataGloasHeadReadDoesNotBlock(t *testing.T) {
@@ -6647,4 +6814,32 @@ func TestGetEthV1ValidatorAttestationDataPinsOnlyFromElectra(t *testing.T) {
 			require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
 		})
 	}
+}
+
+// A requested slot far ahead must be rejected before the head state is advanced slot by slot to it.
+func TestGetEthV3ValidatorBlockRejectsFarFutureSlot(t *testing.T) {
+	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
+	clock.EXPECT().GetCurrentSlot().Return(uint64(100)).AnyTimes()
+	handler := &ApiHandler{ethClock: clock}
+
+	slot := fmt.Sprint(uint64(math.MaxUint64))
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet,
+		"/eth/v3/validator/blocks/"+slot+"?randao_reveal="+(common.Bytes96{}).String(), http.NoBody)
+	routeContext := chi.NewRouteContext()
+	routeContext.URLParams.Add("slot", slot)
+	request = request.WithContext(context.WithValue(request.Context(), chi.RouteCtxKey, routeContext))
+
+	_, err := handler.GetEthV3ValidatorBlock(httptest.NewRecorder(), request)
+	var endpointErr *beaconhttp.EndpointError
+	require.ErrorAs(t, err, &endpointErr)
+	require.Equal(t, http.StatusBadRequest, endpointErr.Code)
+}
+
+func TestCheckBlockProductionSlot(t *testing.T) {
+	const current = 100
+	require.NoError(t, checkBlockProductionSlot(current-1, current), "a past slot keeps today's behaviour")
+	require.NoError(t, checkBlockProductionSlot(current, current))
+	require.NoError(t, checkBlockProductionSlot(current+1, current), "a validator may ask for the next slot")
+	require.Error(t, checkBlockProductionSlot(current+2, current))
+	require.Error(t, checkBlockProductionSlot(math.MaxUint64, current))
 }

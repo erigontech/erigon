@@ -55,7 +55,7 @@ func TestForkchoiceDoesNotPublishFailedStartupChanges(t *testing.T) {
 		},
 	}
 	pipeline := stagedsync.New(m.BlockReader.TxnumReader(), m.Cfg().Sync, []*stagedsync.Stage{stage}, nil, nil, m.Log, stages.ModeApplyingBlocks)
-	dispatcher := execmodule.NewDispatcher(m.ChainConfig, m.Notifications.Events, m.Notifications.StateChangesConsumer, m.Log)
+	dispatcher := execmodule.NewDispatcher(m.ChainConfig, m.Notifications.Events, m.Notifications.StateChangesConsumer, nil, m.Log)
 	executor := execmodule.NewPipelineExecutor(pipeline, m.DB, m.BlockReader, m.ChainConfig, m.Engine, nil, nil, dispatcher, m.Log)
 	hook := stageloop.NewHook(t.Context(), m.Notifications, pipeline, m.ChainConfig, m.Log, dispatcher, nil, nil, nil, m.BlockReader)
 	require.ErrorIs(t, executor.ProcessFrozenBlocks(t.Context(), hook, false), cause)

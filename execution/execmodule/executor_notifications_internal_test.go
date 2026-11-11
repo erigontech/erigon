@@ -124,7 +124,7 @@ func TestProcessFrozenBlocksKeepsCommittedNotifications(t *testing.T) {
 			}
 			pipeline := stagedsync.New(rawdbv3.TxNums, ethconfig.Sync{}, []*stagedsync.Stage{stage}, nil, stagedsync.PruneOrder{stage.ID}, logger, stages.ModeApplyingBlocks)
 			capture := new(stateChangesCapture)
-			dispatcher := NewDispatcher(chain.AllProtocolChanges, nil, capture, logger)
+			dispatcher := NewDispatcher(chain.AllProtocolChanges, nil, capture, nil, logger)
 			pe := NewPipelineExecutor(pipeline, db, pinTestBlockReader{}, chain.AllProtocolChanges, nil, nil, nil, dispatcher, logger)
 			hook := stageloop.NewHook(t.Context(), notifications, pipeline, chain.AllProtocolChanges, logger, dispatcher, nil, nil, nil, pinTestBlockReader{})
 			if tc.failure == "commit" {

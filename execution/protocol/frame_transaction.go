@@ -257,28 +257,13 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 			return nil, err
 		}
 	}
-	tip := tx.GetEffectiveGasTip(&st.evm.Context.BaseFee)
-	tipped := u256.Mul(u256.U64(paid), tip)
-	if !st.noFeeBurnAndTip {
-		if err := st.state.AddBalance(st.evm.Context.Coinbase, tipped, tracing.BalanceIncreaseRewardTransactionFee); err != nil {
-			return nil, err
-		}
+	tipped, err := st.payCoinbase(paid)
+	if err != nil {
+		return nil, err
 	}
-	var burned uint256.Int
-	var burnAddress accounts.Address
-	if !st.isFree {
-		burnAddress = st.evm.ChainConfig().GetBurntContract(st.evm.Context.BlockNumber)
-	}
-	if !burnAddress.IsNil() {
-		burned = u256.Mul(u256.U64(paid), st.evm.Context.BaseFee)
-		if rules.IsAura && rules.IsPrague {
-			burned = u256.Add(burned, blobCost)
-		}
-		if !st.noFeeBurnAndTip {
-			if err := st.state.AddBalance(burnAddress, burned, tracing.BalanceChangeUnspecified); err != nil {
-				return nil, err
-			}
-		}
+	burned, burnAddress, err := st.burnFees(paid, blobCost)
+	if err != nil {
+		return nil, err
 	}
 	if err := st.gp.ConsumeExecution(blockExecution); err != nil {
 		return nil, err

@@ -2018,7 +2018,8 @@ func commitOverlayBlockE(h *overlayAheadHarness) error {
 	return rwTx.Commit()
 }
 
-// beginHookDB runs a hook right after each BeginTemporalRo returns, simulating
+// beginHookDB runs a hook right after each BeginTemporalRo or plain BeginRo
+// (the one Filters.BeginRoWithOverlay opens on InternalDB) returns, simulating
 // commit/publish activity landing while a request acquires its tx. Hooks also
 // run on the oracle's errgroup goroutines (via Fork), so they must not use
 // testify's FailNow family; failures are reported with the goroutine-safe
@@ -2034,9 +2035,31 @@ func (db *beginHookDB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, erro
 	if err != nil {
 		return nil, err
 	}
+	db.runHook()
+	return tx, nil
+}
+
+func (db *beginHookDB) runHook() {
 	if hookErr := db.hook(); hookErr != nil {
 		db.t.Errorf("begin hook: %v", hookErr)
 	}
+}
+
+func (db *beginHookDB) InternalDB() kv.RwDB {
+	return &beginHookRwDB{RwDB: db.TemporalRoDB.(interface{ InternalDB() kv.RwDB }).InternalDB(), parent: db}
+}
+
+type beginHookRwDB struct {
+	kv.RwDB
+	parent *beginHookDB
+}
+
+func (db *beginHookRwDB) BeginRo(ctx context.Context) (kv.Tx, error) {
+	tx, err := db.RwDB.BeginRo(ctx) //nolint:gocritic
+	if err != nil {
+		return nil, err
+	}
+	db.parent.runHook()
 	return tx, nil
 }
 
@@ -2430,6 +2453,49 @@ func TestBlockNumber_PublishCycleDuringTxAcquisition(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, hexutil.Uint64(h.overlayHeader.Number.Uint64()), got,
 		"a publish/commit/unpublish cycle during tx acquisition must not hide the head block")
+}
+
+// TestBlockNumber_OpensNoTemporalTx pins that eth_blockNumber and
+// erigon_blockNumber read the head markers on a plain db tx: opening a temporal
+// tx pins every state and block file, which these lookups never read.
+func TestBlockNumber_OpensNoTemporalTx(t *testing.T) {
+	t.Parallel()
+	h := newOverlayAheadHarness(t, false)
+	overlay := h.doms.BlockOverlay()
+	rawdb.WriteForkchoiceSafe(overlay, h.overlayHeader.Hash())
+	rawdb.WriteForkchoiceFinalized(overlay, h.overlayHeader.Hash())
+	var begins atomic.Int64
+	db := &countTemporalBeginsDB{TemporalRoDB: h.m.DB, begins: &begins}
+
+	_, err := newEthApiForTest(h.base, db, nil, nil).BlockNumber(h.m.Ctx)
+	require.NoError(t, err)
+	erigon := NewErigonAPI(h.base, db, nil)
+	_, err = erigon.BlockNumber(h.m.Ctx, nil)
+	require.NoError(t, err)
+	for _, tag := range []rpc.BlockNumber{rpc.LatestBlockNumber, rpc.SafeBlockNumber, rpc.FinalizedBlockNumber, rpc.PendingBlockNumber} {
+		_, err = erigon.BlockNumber(h.m.Ctx, &tag)
+		require.NoError(t, err, tag)
+	}
+	require.Zero(t, begins.Load(), "a block number lookup must not open a temporal tx")
+}
+
+// TestErigonBlockNumber_ExecutedReadsOverlay pins that the latest executed block
+// comes from the published overlay, like the forkchoice head: the overlay block
+// is executed and RPC already serves its state.
+func TestErigonBlockNumber_ExecutedReadsOverlay(t *testing.T) {
+	t.Parallel()
+	h := newOverlayAheadHarness(t, false)
+	overlayNumber := h.overlayHeader.Number.Uint64()
+	require.NoError(t, stages.SaveStageProgress(h.doms.BlockOverlay(), stages.Execution, overlayNumber))
+	api := NewErigonAPI(h.base, h.m.DB, nil)
+
+	got, err := api.BlockNumber(h.m.Ctx, nil)
+	require.NoError(t, err)
+	require.Equal(t, hexutil.Uint64(overlayNumber), got)
+	pending := rpc.PendingBlockNumber
+	got, err = api.BlockNumber(h.m.Ctx, &pending)
+	require.NoError(t, err)
+	require.Equal(t, hexutil.Uint64(overlayNumber), got)
 }
 
 // TestBaseFee_PublishCycleDuringTxAcquisition pins the same atomic acquisition

@@ -103,12 +103,12 @@ type noOpAttestationDataProducer struct {
 	attestation_producer.AttestationDataProducer
 }
 
-func (noOpAttestationDataProducer) ProduceAndCacheAttestationData(kv.Tx, *state.CachingBeaconState, common.Hash, uint64) (solid.AttestationData, error) {
+func (noOpAttestationDataProducer) ProduceAndCacheAttestationData(*state.CachingBeaconState, common.Hash, uint64) (solid.AttestationData, error) {
 	return solid.AttestationData{}, nil
 }
 
-func (noOpAttestationDataProducer) CachedAttestationData(uint64) (solid.AttestationData, bool, error) {
-	return solid.AttestationData{}, false, nil
+func (noOpAttestationDataProducer) CachedAttestationData(common.Hash, uint64) (solid.AttestationData, bool) {
+	return solid.AttestationData{}, false
 }
 
 type countingAttestationDataProducer struct {
@@ -116,9 +116,9 @@ type countingAttestationDataProducer struct {
 	produceCalls atomic.Int32
 }
 
-func (p *countingAttestationDataProducer) ProduceAndCacheAttestationData(tx kv.Tx, baseState *state.CachingBeaconState, baseStateBlockRoot common.Hash, slot uint64) (solid.AttestationData, error) {
+func (p *countingAttestationDataProducer) ProduceAndCacheAttestationData(baseState *state.CachingBeaconState, baseStateBlockRoot common.Hash, slot uint64) (solid.AttestationData, error) {
 	p.produceCalls.Add(1)
-	return p.AttestationDataProducer.ProduceAndCacheAttestationData(tx, baseState, baseStateBlockRoot, slot)
+	return p.AttestationDataProducer.ProduceAndCacheAttestationData(baseState, baseStateBlockRoot, slot)
 }
 
 type lockOrderFixture struct {
@@ -213,6 +213,10 @@ func newLockOrderFixtureWithConfig(t *testing.T, slot uint64, engine execution_c
 	if executionHash != (common.Hash{}) {
 		if gloas {
 			headState.SetLatestBlockHash(executionHash)
+			headState.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{
+				Slot:            slot,
+				ParentBlockHash: executionHash,
+			})
 		} else {
 			headState.SetVersion(clparams.FuluVersion)
 			header := cltypes.NewEth1Header(clparams.FuluVersion)
@@ -1872,17 +1876,14 @@ func TestPostForkchoiceSameRootAfterOtherWriterCachesAttestationData(t *testing.
 	require.NoError(t, f.runPass())
 
 	f.requireCopiesAndPublishes(t, 0)
-	data, ok, err := producer.CachedAttestationData(f.headSlot)
-	require.NoError(t, err)
+	data, ok := producer.CachedAttestationData(f.headRoot, f.headSlot)
 	require.True(t, ok, "attestation data for the head slot is not cached")
 	require.Equal(t, f.headRoot, data.BeaconBlockRoot)
 }
 
 func TestPostForkchoiceSameRootSkipsWarmUpWhenAttestationDataCached(t *testing.T) {
 	f := newSameRootFixture(t, 0, 32)
-	noExpiryCfg := *f.cfg.beaconCfg
-	noExpiryCfg.SecondsPerSlot = 0 // a zero cache ttl disables expiry, so the result does not depend on the wall clock
-	producer := &countingAttestationDataProducer{AttestationDataProducer: attestation_producer.New(&noExpiryCfg)}
+	producer := &countingAttestationDataProducer{AttestationDataProducer: attestation_producer.New(f.cfg.beaconCfg)}
 	f.cfg.attestationDataProducer = producer
 	require.NoError(t, f.syncedData.OnHeadStateWithBlockRoot(f.headState, f.headRoot))
 
@@ -1934,8 +1935,7 @@ func TestPostForkchoiceSameRootWarmsHeadSlotWhenHeadChangesBeforeWarmUp(t *testi
 			require.NoError(t, f.runPass())
 
 			f.requireCopiesAndPublishes(t, 0)
-			data, ok, err := producer.CachedAttestationData(f.headSlot)
-			require.NoError(t, err)
+			data, ok := producer.CachedAttestationData(f.headRoot, f.headSlot)
 			require.True(t, ok, "attestation data for the head slot is not cached")
 			require.Equal(t, f.headRoot, data.BeaconBlockRoot)
 			require.Equal(t, f.headState.CurrentJustifiedCheckpoint(), data.Source, "warmed from another head's state")

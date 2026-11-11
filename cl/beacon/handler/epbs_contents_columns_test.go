@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -50,39 +51,48 @@ import (
 type contentsEventKind string
 
 const (
-	eventColumnPublish   contentsEventKind = "column publish"
-	eventColumnWrite     contentsEventKind = "column write"
-	eventEnvelopePublish contentsEventKind = "envelope publish"
+	eventColumnPublish       contentsEventKind = "column publish"
+	eventColumnWrite         contentsEventKind = "column write"
+	eventEnvelopePublish     contentsEventKind = "envelope publish"
+	eventConsensusValidation contentsEventKind = "consensus validation"
+	eventImport              contentsEventKind = "import"
 )
 
-// contentsEvent is one entry of the ordered log of everything the contents step does to the
-// network (column and envelope publishes) and to the column store (writes).
+// contentsEvent is one entry of the ordered log of what the handler does.
 type contentsEvent struct {
 	kind       contentsEventKind
 	index      uint64
 	err        error
+	ctxErr     error
 	forkDigest common.Bytes4
 	deadline   time.Time
 	data       []byte
 }
 
 // envelopeContentsFixture posts a Gloas envelope whose block has a bid with real KZG blobs to a
-// handler with a real column store and a real custody-8 PeerDas, and logs publishes and writes.
+// handler with a real column store and a real custody-8 PeerDas, and logs what the handler does.
 type envelopeContentsFixture struct {
-	t              *testing.T
-	handler        *ApiHandler
-	forkchoice     *mock_services2.ForkChoiceStorageMock
-	blobs          []testBlob
-	slot           uint64
-	currentSlot    uint64
-	root           common.Hash
-	signedEnvelope *cltypes.SignedExecutionPayloadEnvelope
-	columnEvents   chan *beaconevents.EventStream
-	digestEpochs   []uint64
-	events         []contentsEvent
+	t                         *testing.T
+	handler                   *ApiHandler
+	forkchoice                *mock_services2.ForkChoiceStorageMock
+	blobs                     []testBlob
+	slot                      uint64
+	currentSlot               uint64
+	root                      common.Hash
+	signedEnvelope            *cltypes.SignedExecutionPayloadEnvelope
+	columnEvents              chan *beaconevents.EventStream
+	digestEpochs              []uint64
+	events                    []contentsEvent
+	duringConsensusValidation func()
+	consensusCheckBlobData    bool
+	payloadInvalidated        bool
+	invalidatedBlockRoot      common.Hash
+	invalidatedExecutionHash  common.Hash
 
-	failWrite   func(index uint64) error
-	failPublish func(index uint64) error
+	failWrite    func(index uint64) error
+	failPublish  func(index uint64) error
+	failEnvelope error
+	onClaim      func()
 }
 
 type loggingColumnStorage struct {
@@ -98,7 +108,8 @@ func (s *loggingColumnStorage) WriteColumnSidecars(ctx context.Context, blockRoo
 	if err == nil {
 		err = s.DataColumnStorage.WriteColumnSidecars(ctx, blockRoot, columnIndex, sidecar)
 	}
-	s.f.record(contentsEvent{kind: eventColumnWrite, index: uint64(columnIndex), err: err})
+	deadline, _ := ctx.Deadline()
+	s.f.record(contentsEvent{kind: eventColumnWrite, index: uint64(columnIndex), err: err, ctxErr: ctx.Err(), deadline: deadline})
 	return err
 }
 
@@ -106,14 +117,39 @@ func (s *loggingColumnStorage) WriteColumnSidecars(ctx context.Context, blockRoo
 // check that the real fork choice runs.
 type dataAvailabilityForkchoice struct {
 	*mock_services2.ForkChoiceStorageMock
-	dataAvailable func() bool
+	f *envelopeContentsFixture
 }
 
-func (f *dataAvailabilityForkchoice) ValidateExecutionPayloadEnvelopeForConsensus(ctx context.Context, envelope *cltypes.SignedExecutionPayloadEnvelope) error {
-	if !f.dataAvailable() {
+func (d *dataAvailabilityForkchoice) ValidateExecutionPayloadEnvelopeForConsensus(ctx context.Context, envelope *cltypes.SignedExecutionPayloadEnvelope, checkBlobData bool) error {
+	d.f.record(contentsEvent{kind: eventConsensusValidation})
+	d.f.consensusCheckBlobData = checkBlobData
+	if d.f.duringConsensusValidation != nil {
+		d.f.duringConsensusValidation()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	finalizedSlot := d.FinalizedCheckpointVal.Epoch * d.f.handler.beaconChainCfg.SlotsPerEpoch
+	if envelope.Message.Payload.SlotNumber < finalizedSlot {
+		return fmt.Errorf("envelope slot %d is before finalized slot %d", envelope.Message.Payload.SlotNumber, finalizedSlot)
+	}
+	if checkBlobData && !d.f.dataAvailable() {
 		return forkchoice.ErrEIP7594ColumnDataNotAvailable
 	}
-	return f.ForkChoiceStorageMock.ValidateExecutionPayloadEnvelopeForConsensus(ctx, envelope)
+	return d.ForkChoiceStorageMock.ValidateExecutionPayloadEnvelopeForConsensus(ctx, envelope, checkBlobData)
+}
+
+func (d *dataAvailabilityForkchoice) ExecutionPayloadInvalidated(blockRoot, executionBlockHash common.Hash) bool {
+	d.f.invalidatedBlockRoot = blockRoot
+	d.f.invalidatedExecutionHash = executionBlockHash
+	return d.f.payloadInvalidated
+}
+
+func (d *dataAvailabilityForkchoice) ClaimExecutionPayloadEnvelopeForGossip(ctx context.Context, root common.Hash, builderIndex uint64) (forkchoice.ExecutionPayloadEnvelopeAdmissionToken, error) {
+	if d.f.onClaim != nil {
+		d.f.onClaim()
+	}
+	return d.ForkChoiceStorageMock.ClaimExecutionPayloadEnvelopeForGossip(ctx, root, builderIndex)
 }
 
 var wallClockForkDigest = common.Bytes4{0xff, 0xff, 0xff, 0xff}
@@ -137,7 +173,7 @@ func newEnvelopeContentsFixture(t *testing.T, slot uint64, blobCount int) *envel
 	if slot == 0 {
 		slot = handler.ethClock.GetCurrentSlot()
 	}
-	f := &envelopeContentsFixture{t: t, handler: handler, forkchoice: fcu, slot: slot, currentSlot: slot}
+	f := &envelopeContentsFixture{t: t, handler: handler, forkchoice: fcu, slot: slot, currentSlot: slot, consensusCheckBlobData: true}
 
 	clock := eth_clock.NewMockEthereumClock(ctrl)
 	clock.EXPECT().GetCurrentSlot().DoAndReturn(func() uint64 { return f.currentSlot }).AnyTimes()
@@ -211,6 +247,7 @@ func newEnvelopeContentsFixture(t *testing.T, slot uint64, blobCount int) *envel
 	}}
 
 	fcu.OnExecutionPayloadFn = func(_ context.Context, envelope *cltypes.SignedExecutionPayloadEnvelope, _, _ bool) error {
+		f.record(contentsEvent{kind: eventImport})
 		if !f.dataAvailable() {
 			return forkchoice.ErrEIP7594ColumnDataNotAvailable
 		}
@@ -220,11 +257,14 @@ func newEnvelopeContentsFixture(t *testing.T, slot uint64, blobCount int) *envel
 		fcu.Envelopes[f.root] = envelope
 		return nil
 	}
-	handler.forkchoiceStore = &dataAvailabilityForkchoice{ForkChoiceStorageMock: fcu, dataAvailable: f.dataAvailable}
+	handler.forkchoiceStore = &dataAvailabilityForkchoice{ForkChoiceStorageMock: fcu, f: f}
 	return f
 }
 
 func (f *envelopeContentsFixture) dataAvailable() bool {
+	if len(f.blobs) == 0 {
+		return true
+	}
 	available, err := f.handler.peerDas.IsDataAvailable(f.slot, f.root)
 	require.NoError(f.t, err)
 	return available
@@ -235,15 +275,14 @@ func (f *envelopeContentsFixture) record(event contentsEvent) {
 }
 
 func (f *envelopeContentsFixture) recordPublish(ctx context.Context, forkDigest common.Bytes4, topic string, data []byte) error {
-	if topic == gossip.TopicNameExecutionPayload {
-		f.record(contentsEvent{kind: eventEnvelopePublish})
-		return nil
-	}
-	sidecar := cltypes.NewDataColumnSidecarWithVersion(clparams.GloasVersion)
-	require.NoError(f.t, sidecar.DecodeSSZ(data, int(clparams.GloasVersion)))
-	event := contentsEvent{kind: eventColumnPublish, index: sidecar.Index, forkDigest: forkDigest, data: data}
-	if f.failPublish != nil {
-		event.err = f.failPublish(sidecar.Index)
+	event := contentsEvent{kind: eventEnvelopePublish, forkDigest: forkDigest, err: f.failEnvelope}
+	if topic != gossip.TopicNameExecutionPayload {
+		sidecar := cltypes.NewDataColumnSidecarWithVersion(clparams.GloasVersion)
+		require.NoError(f.t, sidecar.DecodeSSZ(data, int(clparams.GloasVersion)))
+		event = contentsEvent{kind: eventColumnPublish, index: sidecar.Index, forkDigest: forkDigest, data: data}
+		if f.failPublish != nil {
+			event.err = f.failPublish(sidecar.Index)
+		}
 	}
 	if event.err == nil {
 		event.err = ctx.Err()
@@ -328,16 +367,25 @@ func (f *envelopeContentsFixture) postContents(ctx context.Context, contents *cl
 // so the handler attaches the contents it holds for the bid.
 func (f *envelopeContentsFixture) postAllBlobs(pendingLocal bool, query string) *httptest.ResponseRecorder {
 	f.t.Helper()
+	return f.postAllBlobsWithContext(f.t.Context(), pendingLocal, query)
+}
+
+func (f *envelopeContentsFixture) postAllBlobsWithContext(ctx context.Context, pendingLocal bool, query string) *httptest.ResponseRecorder {
+	f.t.Helper()
 	if !pendingLocal {
-		return f.postContents(f.t.Context(), f.contents(f.blobs...), query)
+		return f.postContents(ctx, f.contents(f.blobs...), query)
 	}
 	body, err := json.Marshal(f.signedEnvelope)
 	require.NoError(f.t, err)
-	return f.post(f.t.Context(), body, "application/json", "false", query)
+	return f.post(ctx, body, "application/json", "false", query)
 }
 
 func (f *envelopeContentsFixture) post(ctx context.Context, body []byte, contentType, blobDataIncluded, query string) *httptest.ResponseRecorder {
-	request := httptest.NewRequestWithContext(ctx, http.MethodPost, "/eth/v1/beacon/execution_payload_envelopes"+query, bytes.NewReader(body))
+	return f.postReader(ctx, bytes.NewReader(body), contentType, blobDataIncluded, query)
+}
+
+func (f *envelopeContentsFixture) postReader(ctx context.Context, body io.Reader, contentType, blobDataIncluded, query string) *httptest.ResponseRecorder {
+	request := httptest.NewRequestWithContext(ctx, http.MethodPost, "/eth/v1/beacon/execution_payload_envelopes"+query, body)
 	request.Header.Set("Content-Type", contentType)
 	request.Header.Set("Eth-Blob-Data-Included", blobDataIncluded)
 	request.Header.Set("Eth-Consensus-Version", "gloas")
@@ -398,24 +446,39 @@ func TestPostEnvelopeContentsPublishesColumnsBeforeFirstWrite(t *testing.T) {
 
 func TestPostEnvelopeContentsWriteFailureStillPublishesColumns(t *testing.T) {
 	for _, tc := range []struct {
-		name         string
-		pendingLocal bool
-		query        string
-		status       int
-		envelopes    int
+		name          string
+		pendingLocal  bool
+		query         string
+		legacy        bool
+		status        int
+		envelopes     int
+		envelopeFirst bool
 	}{
-		{name: "gossip with blob data", status: http.StatusAccepted, envelopes: 1},
-		{name: "consensus", query: "?broadcast_validation=consensus", status: http.StatusBadRequest},
-		{name: "pendingLocal", pendingLocal: true, status: http.StatusBadRequest},
+		{name: "gossip with blob data", status: http.StatusAccepted, envelopes: 1, envelopeFirst: true},
+		{name: "pendingLocal", pendingLocal: true, status: http.StatusAccepted, envelopes: 1, envelopeFirst: true},
+		{name: "consensus", query: "?broadcast_validation=consensus", status: http.StatusAccepted, envelopes: 1},
+		{name: "consensus_and_equivocation", query: "?broadcast_validation=consensus_and_equivocation", status: http.StatusAccepted, envelopes: 1},
+		{name: "consensus with pendingLocal", pendingLocal: true, query: "?broadcast_validation=consensus", status: http.StatusAccepted, envelopes: 1},
+		{name: "legacy route", legacy: true, status: http.StatusBadRequest},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newEnvelopeContentsFixture(t, 0, 2)
 			f.failWrite = func(uint64) error { return errors.New("injected write failure") }
-			recorder := f.postAllBlobs(tc.pendingLocal, tc.query)
+			var recorder *httptest.ResponseRecorder
+			if tc.legacy {
+				recorder = f.postLegacy(t.Context())
+			} else {
+				recorder = f.postAllBlobs(tc.pendingLocal, tc.query)
+			}
 
 			require.Equal(t, tc.status, recorder.Code, recorder.Body.String())
 			f.requireAllColumns("published", f.succeededIndices(eventColumnPublish))
 			require.Len(t, f.eventsOf(eventEnvelopePublish), tc.envelopes)
+			if tc.envelopeFirst {
+				require.Equal(t, eventEnvelopePublish, f.events[0].kind)
+			} else if tc.envelopes == 1 {
+				require.Equal(t, eventEnvelopePublish, f.events[len(f.events)-1].kind)
+			}
 			requireNotCached(t, f.handler, f.blobs...)
 		})
 	}
@@ -473,8 +536,11 @@ func TestPostEnvelopeContentsPublishesColumnsUnderTheBlockEpochDigest(t *testing
 
 func TestPostEnvelopeContentsColumnPublishFailureAllowsRepairingRePost(t *testing.T) {
 	const failedColumn = 5
-	for _, tc := range []struct{ name, query string }{
-		{name: "gossip"},
+	for _, tc := range []struct {
+		name, query   string
+		envelopeFirst bool
+	}{
+		{name: "gossip", envelopeFirst: true},
 		{name: "consensus", query: "?broadcast_validation=consensus"},
 		{name: "consensus_and_equivocation", query: "?broadcast_validation=consensus_and_equivocation"},
 	} {
@@ -498,22 +564,40 @@ func TestPostEnvelopeContentsColumnPublishFailureAllowsRepairingRePost(t *testin
 			writes := f.positions(eventColumnWrite)
 			require.Len(t, envelopes, 1, "a failed column must not withhold the envelope")
 			require.Len(t, writes, int(cfg.NumberOfColumns))
-			require.Less(t, writes[len(writes)-1], envelopes[0], "all columns are stored before the response")
+			if tc.envelopeFirst {
+				require.Less(t, envelopes[0], writes[0], "the envelope goes out before the columns are stored")
+			} else {
+				require.Less(t, writes[len(writes)-1], envelopes[0], "all columns are stored before the envelope goes out")
+			}
 			for _, b := range f.blobs {
 				_, ok := f.handler.blobBundles.Get(common.Bytes48(b.commitment))
 				require.True(t, ok, "the bundles are cached before the response")
 			}
 
+			if tc.envelopeFirst {
+				require.True(t, f.forkchoice.HasEnvelope(f.root), "the retry must find the envelope persisted")
+			}
+
 			f.failPublish = nil
+			published := len(f.eventsOf(eventColumnPublish))
 			second := f.postContents(t.Context(), body, tc.query)
 
 			require.Equal(t, http.StatusOK, second.Code, second.Body.String())
 			f.requireAllColumns("published after the re-POST", slices.Compact(f.succeededIndices(eventColumnPublish)))
+			if tc.envelopeFirst {
+				require.Len(t, f.eventsOf(eventColumnPublish), published+int(cfg.NumberOfColumns))
+			}
 			require.Len(t, f.eventsOf(eventEnvelopePublish), 1, "the re-POST must not publish the envelope again")
 
+			events := len(f.events)
 			third := f.postContents(t.Context(), body, tc.query)
 
-			require.Equal(t, http.StatusBadRequest, third.Code, "a repaired re-POST must clear the retry record")
+			if tc.envelopeFirst {
+				require.Equal(t, http.StatusOK, third.Code, third.Body.String())
+			} else {
+				require.Equal(t, http.StatusBadRequest, third.Code, "a repaired re-POST must clear the retry record")
+			}
+			require.Len(t, f.events, events, "a repaired re-POST must clear the retry record, so nothing is published again")
 		})
 	}
 }
@@ -556,15 +640,20 @@ func TestPostEnvelopeContentsLogsBlockOfFailedColumnPublish(t *testing.T) {
 }
 
 func TestPostEnvelopeContentsUsesCachedLocalBundle(t *testing.T) {
-	f := newEnvelopeContentsFixture(t, 0, 1)
-	f.handler.blobBundles.Add(common.Bytes48(f.blobs[0].commitment), bundleOf(f.blobs[0]))
-	other := newTestBlob(t, 99, clparams.FuluVersion)
-	request := testBlob{blob: other.blob, commitment: f.blobs[0].commitment, proofs: make([]cltypes.KZGProof, len(other.proofs))}
+	for _, query := range []string{"", "?broadcast_validation=consensus", "?broadcast_validation=consensus_and_equivocation"} {
+		t.Run(query, func(t *testing.T) {
+			f := newEnvelopeContentsFixture(t, 0, 1)
+			f.handler.blobBundles.Add(common.Bytes48(f.blobs[0].commitment), bundleOf(f.blobs[0]))
+			other := newTestBlob(t, 99, clparams.FuluVersion)
+			request := testBlob{blob: other.blob, commitment: f.blobs[0].commitment, proofs: make([]cltypes.KZGProof, len(other.proofs))}
 
-	recorder := f.postContents(t.Context(), f.contents(request), "")
+			recorder := f.postContents(t.Context(), f.contents(request), query)
 
-	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
-	f.requirePublishedColumnsEqual(f.expectedColumns(f.blobs...))
+			require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+			require.Equal(t, query == "", f.consensusCheckBlobData)
+			f.requirePublishedColumnsEqual(f.expectedColumns(f.blobs...))
+		})
+	}
 }
 
 func TestPostEnvelopeContentsStoredColumnsPassDataAvailability(t *testing.T) {
@@ -643,7 +732,7 @@ func TestPostEnvelopeContentsRejectsNilElements(t *testing.T) {
 			tc.nilOut(f, contents)
 
 			var err error
-			require.NotPanics(t, func() { err = f.handler.validateAndStoreExecutionPayloadEnvelopeContents(t.Context(), contents) })
+			require.NotPanics(t, func() { _, err = f.handler.validateExecutionPayloadEnvelopeContents(t.Context(), contents) })
 
 			require.Error(t, err)
 			require.NotErrorIs(t, err, errExecutionPayloadEnvelopeIntegration, "invalid input must be answered with 400, not 202")
@@ -734,6 +823,16 @@ func TestPostEnvelopeContentsConsensusModesRetryOfIgnoredEnvelope(t *testing.T) 
 			require.True(t, f.forkchoice.OnExecutionPayloadCalled)
 			require.Empty(t, f.eventsOf(eventEnvelopePublish))
 		})
+		t.Run(mode+"/a fresh claim with a different persisted envelope keeps 400", func(t *testing.T) {
+			f := newEnvelopeContentsFixture(t, 0, 2)
+			importIgnoringAfterPersisting(f, f.differentEnvelope())
+
+			recorder := f.postContents(t.Context(), f.contents(f.blobs...), query)
+
+			require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+			require.True(t, f.forkchoice.OnExecutionPayloadCalled)
+			require.Empty(t, f.eventsOf(eventEnvelopePublish))
+		})
 		t.Run(mode+"/a different persisted envelope answers 503", func(t *testing.T) {
 			f := newEnvelopeContentsFixture(t, 0, 2)
 			f.failPublish = func(index uint64) error {
@@ -751,9 +850,7 @@ func TestPostEnvelopeContentsConsensusModesRetryOfIgnoredEnvelope(t *testing.T) 
 			require.True(t, retryRecorded)
 
 			f.failPublish = nil
-			different := &cltypes.SignedExecutionPayloadEnvelope{Message: f.signedEnvelope.Message}
-			different.Signature[0] ^= 1
-			importIgnoringAfterPersisting(f, different)
+			importIgnoringAfterPersisting(f, f.differentEnvelope())
 			second := f.postContents(t.Context(), body, query)
 
 			require.Equal(t, http.StatusServiceUnavailable, second.Code, second.Body.String())

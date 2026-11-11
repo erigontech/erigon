@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/lightclient_utils"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/transition"
@@ -156,11 +157,16 @@ type forkGraphDisk struct {
 	newestLightClientUpdate atomic.Value
 	// the lightclientUpdates leaks memory, but it's not a big deal since new data is added every 27 hours.
 	lightClientUpdates sync.Map // period -> lightclientupdate
+	// lightClientUpdateCandidates holds the updates of blocks that are not finalized yet, by signature block root.
+	// Finalization moves the canonical ones into lightClientUpdates. Guarded by addPruneMu.
+	lightClientUpdateCandidates map[common.Hash]*cltypes.LightClientUpdate
 
-	// in-memory cache of block roots that have envelopes on disk [Optimization for Gloas:EIP7732]
-	envelopeExists   sync.Map // common.Hash -> struct{}
-	envelopeMissing  sync.Map // common.Hash -> struct{}
-	invalidEnvelopes sync.Map // common.Hash -> struct{}
+	// Envelope state is tracked in memory by beacon block root.
+	// Corrupt files in invalidEnvelopes can be replaced; rejectedEnvelopes blocks redelivery until pruning.
+	envelopeExists    sync.Map // common.Hash -> struct{}
+	envelopeMissing   sync.Map // common.Hash -> struct{}
+	invalidEnvelopes  sync.Map // common.Hash -> struct{}
+	rejectedEnvelopes sync.Map // common.Hash -> struct{}
 
 	// stateDumpLock guards the reusable state buffer and the key of the last state dump
 	stateDumpLock  sync.Mutex
@@ -701,6 +707,7 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 			f.envelopeExists.Delete(root)
 			f.envelopeMissing.Delete(root)
 			f.invalidEnvelopes.Delete(root)
+			f.rejectedEnvelopes.Delete(root)
 			f.unavailablePayloads.Delete(root)
 			f.acceptedPayloads.Delete(root)
 			f.badBlocks.Delete(root)
@@ -764,6 +771,58 @@ func (f *forkGraphDisk) NewestLightClientUpdate() *cltypes.LightClientUpdate {
 		return nil
 	}
 	return f.newestLightClientUpdate.Load().(*cltypes.LightClientUpdate)
+}
+
+// recordLightClientUpdateLocked takes the update of a block whose transition succeeded: it is the newest update at
+// once, and a candidate for its period's store until finalization settles it. Only an update signed in the period of
+// its attested header is a candidate for that period. A candidate lives no longer than its block, which the fork graph
+// holds until finalization as well. The caller holds addPruneMu. The caller emits the light client events: fork graph
+// methods run under the fork choice store's lock, where event sends must not happen (a stalled subscriber would wedge
+// the store).
+func (f *forkGraphDisk) recordLightClientUpdateLocked(signatureBlock common.Hash, update *cltypes.LightClientUpdate) {
+	f.newestLightClientUpdate.Store(update)
+	if f.beaconCfg.SyncCommitteePeriod(update.AttestedHeader.Beacon.Slot) != f.beaconCfg.SyncCommitteePeriod(update.SignatureSlot) {
+		return
+	}
+	if f.lightClientUpdateCandidates == nil {
+		f.lightClientUpdateCandidates = make(map[common.Hash]*cltypes.LightClientUpdate)
+	}
+	f.lightClientUpdateCandidates[signatureBlock] = update
+}
+
+// KeepFinalizedLightClientUpdates moves the candidates whose signature block is on the finalized block's chain into
+// the period store, and drops the other candidates at or below the finalized slot: they can no longer be canonical.
+func (f *forkGraphDisk) KeepFinalizedLightClientUpdates(finalized common.Hash) {
+	f.addPruneMu.Lock()
+	defer f.addPruneMu.Unlock()
+	header, ok := f.GetHeader(finalized)
+	if !ok {
+		return
+	}
+	finalizedSlot, lowest := header.Slot, header.Slot
+	for _, update := range f.lightClientUpdateCandidates {
+		lowest = min(lowest, update.SignatureSlot)
+	}
+	for root := finalized; ok && header.Slot >= lowest; header, ok = f.GetHeader(root) {
+		if update, isCandidate := f.lightClientUpdateCandidates[root]; isCandidate {
+			f.storeLightClientUpdate(update)
+		}
+		root = header.ParentRoot
+	}
+	for root, update := range f.lightClientUpdateCandidates {
+		if update.SignatureSlot <= finalizedSlot {
+			delete(f.lightClientUpdateCandidates, root)
+		}
+	}
+}
+
+// storeLightClientUpdate keeps the best update of its attested header's sync committee period.
+func (f *forkGraphDisk) storeLightClientUpdate(update *cltypes.LightClientUpdate) {
+	period := f.beaconCfg.SyncCommitteePeriod(update.AttestedHeader.Beacon.Slot)
+	if best, ok := f.lightClientUpdates.Load(period); ok && !lightclient_utils.IsBetterUpdate(f.beaconCfg, update, best.(*cltypes.LightClientUpdate)) {
+		return
+	}
+	f.lightClientUpdates.Store(period, update)
 }
 
 func (f *forkGraphDisk) GetLightClientUpdate(period uint64) (*cltypes.LightClientUpdate, bool) {
