@@ -48,6 +48,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 )
 
@@ -689,4 +690,68 @@ func TestBlobArchiveStoreFillRefusesALockedDatadir(t *testing.T) {
 		DryRun:       true,
 	}
 	require.ErrorIs(t, cmd.Run(t.Context()), datadir.ErrDataDirLocked)
+}
+
+type fillReadCounter struct {
+	freezeblocks.BeaconSnapshotReader
+	reads atomic.Uint64
+}
+
+func (r *fillReadCounter) ReadBeaconBlockBodyBySlot(ctx context.Context, tx kv.Tx, slot uint64) (*cltypes.SignedBeaconBlock, error) {
+	r.reads.Add(1)
+	return r.BeaconSnapshotReader.ReadBeaconBlockBodyBySlot(ctx, tx, slot)
+}
+
+func TestBlobArchiveStoreFillSparseWindowReads(t *testing.T) {
+	const slots = uint64(65_536)
+	f := newFillFixture(t)
+	f.addBlock(fillTestSlot-1, 0)
+	f.addBlock(fillTestSlot+slots-1, 1)
+	url, _ := f.endpoint(false)
+	reader := &fillReadCounter{BeaconSnapshotReader: f.blocks}
+	cmd := &BlobArchiveStoreFill{Endpoints: []string{url}, FromSlot: fillTestSlot, ToSlot: fillTestSlot + slots - 1, DryRun: true}
+	start := time.Now()
+	require.NoError(t, cmd.fill(t.Context(), f.db, reader, f.store, 0))
+	t.Logf("sparse slots=%d reads=%d elapsed_ns=%d", slots, reader.reads.Load(), time.Since(start).Nanoseconds())
+	require.LessOrEqual(t, reader.reads.Load(), 2*slots+64, "the window search scanned a blob-free interval more than once")
+}
+
+func TestBlobArchiveStoreFillSparseWindowBoundary(t *testing.T) {
+	for _, served := range []bool{true, false} {
+		t.Run(fmt.Sprint(served), func(t *testing.T) {
+			f := newFillFixture(t)
+			pruned := f.addBlock(fillTestSlot, 1)
+			f.addBlock(fillTestSlot+24, 1)
+			f.addBlock(fillTestSlot+32, 0)
+			good, _ := f.endpoint(false)
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				root := common.HexToHash(r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:])
+				if !served || root == pruned {
+					w.WriteHeader(http.StatusBadRequest)
+					return
+				}
+				http.Redirect(w, r, good+r.URL.Path, http.StatusTemporaryRedirect)
+			}))
+			t.Cleanup(srv.Close)
+			cmd := &BlobArchiveStoreFill{Endpoints: []string{srv.URL}, FromSlot: fillTestSlot, ToSlot: fillTestSlot + 31, DryRun: true}
+			require.NoError(t, f.fill(cmd, nil))
+			want := cmd.ToSlot + 1
+			if served {
+				want = fillTestSlot + 24
+			}
+			require.Equal(t, want, cmd.windows[0].from.Load())
+		})
+	}
+}
+
+func TestBlobArchiveStoreFillDenseWindowReads(t *testing.T) {
+	f := newFillFixture(t)
+	url, _, _, requests := f.prunedChain(notServedAnswers["400"])
+	reader := &fillReadCounter{BeaconSnapshotReader: f.blocks}
+	cmd := &BlobArchiveStoreFill{Endpoints: []string{url}, FromSlot: fillTestSlot, ToSlot: fillTestSlot + windowTestSlots - 1, DryRun: true}
+	start := time.Now()
+	require.NoError(t, cmd.fill(t.Context(), f.db, reader, f.store, 0))
+	t.Logf("dense slots=%d reads=%d requests=%d elapsed_ns=%d", windowTestSlots, reader.reads.Load(), requests.Load(), time.Since(start).Nanoseconds())
+	require.EqualValues(t, fillTestSlot+windowTestServedFrom, cmd.windows[0].from.Load())
+	require.LessOrEqual(t, reader.reads.Load(), uint64(windowTestSlots+64))
 }

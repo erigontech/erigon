@@ -375,29 +375,52 @@ func notServed(err error) bool {
 func (b *BlobArchiveStoreFill) findWindow(ctx context.Context, db kv.RoDB, blocks freezeblocks.BeaconSnapshotReader, i int, lo uint64) {
 	w := &b.windows[i]
 	w.once.Do(func() {
+		scanned := map[uint64]uint64{}
+		answers := map[common.Hash]bool{}
 		n := sort.Search(int(b.ToSlot+1-lo), func(n int) bool {
-			root, block, err := nextSlotWithBlobs(ctx, db, blocks, lo+uint64(n), b.ToSlot)
+			root, block, err := nextSlotWithBlobs(ctx, db, blocks, lo+uint64(n), b.ToSlot, scanned)
 			if err != nil || block == nil {
 				return true
+			}
+			if served, ok := answers[root]; ok {
+				return served
 			}
 			sidecars, err := retrieveBlobsFromRemoteEndpoint(ctx, b.Endpoints[i], root, blobCount(block))
 			if err == nil && len(sidecars) == 0 {
 				err = errNoSidecars
 			}
-			return !notServed(err)
+			answers[root] = !notServed(err)
+			return answers[root]
 		})
-		w.from.Store(lo + uint64(n))
+		_, block, err := nextSlotWithBlobs(ctx, db, blocks, lo+uint64(n), b.ToSlot, scanned)
+		if err != nil {
+			return
+		}
+		if block == nil {
+			w.from.Store(b.ToSlot + 1)
+			log.Info("Endpoint serves no blobs in the requested range", "endpoint", redactEndpoint(b.Endpoints[i]), "fromSlot", lo, "toSlot", b.ToSlot)
+			return
+		}
+		w.from.Store(block.Block.Slot)
 		log.Info("First slot the endpoint serves", "endpoint", redactEndpoint(b.Endpoints[i]), "slot", w.from.Load())
 	})
 }
 
-func nextSlotWithBlobs(ctx context.Context, db kv.RoDB, blocks freezeblocks.BeaconSnapshotReader, from, to uint64) (common.Hash, *cltypes.SignedBeaconBlock, error) {
+func nextSlotWithBlobs(ctx context.Context, db kv.RoDB, blocks freezeblocks.BeaconSnapshotReader, from, to uint64, scanned map[uint64]uint64) (common.Hash, *cltypes.SignedBeaconBlock, error) {
 	for slot := from; slot <= to; slot++ {
+		for start, end := range scanned {
+			if start <= slot && slot < end {
+				slot = end
+				break
+			}
+		}
 		root, block, err := readSlot(ctx, db, blocks, slot)
 		if err != nil || blobCount(block) > 0 {
+			scanned[from] = slot
 			return root, block, err
 		}
 	}
+	scanned[from] = to
 	return common.Hash{}, nil, nil
 }
 
