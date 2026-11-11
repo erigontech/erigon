@@ -548,9 +548,10 @@ type BaseRoSnapshots struct {
 	snCfg             *snapcfg.Cfg
 	logger            log.Logger
 
-	ready     ready
-	operators map[snaptype.Enum]*retireOperators
-	alignMin  bool // do we want to align all visible segments to the minimum available
+	ready         ready
+	producerMarks atomic.Pointer[ProducerMarks]
+	operators     map[snaptype.Enum]*retireOperators
+	alignMin      bool // do we want to align all visible segments to the minimum available
 	// keepUnindexedlyCovered opts RemoveOverlaps into refusing to unlink a subset whose only
 	// covering superset has no index. EL relies on the plain behaviour; caplin state does not.
 	keepUnindexedlyCovered bool
@@ -1811,51 +1812,37 @@ type snapshotNotifier interface {
 // caller that retries makes progress where one that treats it as final does not.
 var ErrSegmentsNotReady = errors.New("not all snapshot segments are available")
 
-// versionlessName drops a snapshot name's leading version so names can be
-// compared across it. A set's members version independently, so the same index
-// is "v2.0-...-headers.idx" here and "v2.1-...-headers.idx" in the manifest.
-func versionlessName(name string) string {
-	if len(name) == 0 || name[0] != 'v' {
-		return name
-	}
-	dash := strings.IndexByte(name, '-')
-	if dash < 0 || strings.IndexByte(name[:dash], '.') < 0 {
-		return name
-	}
-	return name[dash+1:]
+// ProducerMarks records which files a local producer is part-way through
+// writing, so nothing mints a torrent over bytes that are still moving.
+type ProducerMarks interface {
+	MarkProducing(name string)
+	ClearProducing(name string)
 }
 
-// manifestNamedIndexes returns the segment's index files that the manifest
-// advertises a remote source for.
-//
-// A locally built index is not a copy of the advertised one: it embeds this
-// node's salt and is written at this binary's current index version, so its
-// bytes differ from those the manifest's hash was taken over. Building one
-// anyway leaves a publisher serving a file that fails its own infohash check,
-// which is why a named index must be downloaded rather than built.
-//
-// The manifest is read from the registry rather than the Cfg captured at
-// construction: a discovered chain.toml arrives later, via snapcfg.SetToml.
-func (s *BaseRoSnapshots) manifestNamedIndexes(segment *DirtySegment) []string {
-	wanted := segment.Type().IdxFileNames(segment.From(), segment.To())
-	if len(wanted) == 0 {
-		return nil
+// SetProducerMarks wires the producer-state dependency. Production passes the
+// inventory; tools and tests leave it nil and nothing is marked.
+func (s *BaseRoSnapshots) SetProducerMarks(m ProducerMarks) {
+	s.producerMarks.Store(&m)
+}
+
+func (s *BaseRoSnapshots) markProducing(names []string) {
+	m := s.producerMarks.Load()
+	if m == nil {
+		return
 	}
-	cfg, ok := snapcfg.KnownCfg(s.cfg.ChainName)
-	if !ok || cfg == nil {
-		return nil
+	for _, n := range names {
+		(*m).MarkProducing(n)
 	}
-	advertised := make(map[string]struct{}, len(cfg.Preverified.Items))
-	for _, item := range cfg.Preverified.Items {
-		advertised[versionlessName(item.Name)] = struct{}{}
+}
+
+func (s *BaseRoSnapshots) clearProducing(names []string) {
+	m := s.producerMarks.Load()
+	if m == nil {
+		return
 	}
-	var named []string
-	for _, idx := range wanted {
-		if _, remote := advertised[versionlessName(idx)]; remote {
-			named = append(named, idx)
-		}
+	for _, n := range names {
+		(*m).ClearProducing(n)
 	}
-	return named
 }
 
 func (s *BaseRoSnapshots) BuildMissedIndices(ctx context.Context, logPrefix string, notifier snapshotNotifier, dirs datadir.Dirs, cc *chain.Config, logger log.Logger) error {
@@ -2085,11 +2072,6 @@ func (s *BaseRoSnapshots) buildMissedIndices(logPrefix string, ctx context.Conte
 				if segment.IsIndexed() {
 					continue
 				}
-				if named := s.manifestNamedIndexes(segment); len(named) > 0 {
-					logger.Debug(fmt.Sprintf("[%s] not indexing locally, the manifest names it", logPrefix),
-						"seg", segment.FileName(), "indexes", strings.Join(named, ","))
-					continue
-				}
 				// Skip if a merge/dump/another recovery is already building this
 				// (type, range); otherwise claim it so we don't double-build.
 				from, to := segment.From(), segment.To()
@@ -2097,8 +2079,10 @@ func (s *BaseRoSnapshots) buildMissedIndices(logPrefix string, ctx context.Conte
 					continue
 				}
 				info := segment.FileInfo(dir)
+				idxNames := t.Type().IdxFileNames(from, to)
 				logger.Info(fmt.Sprintf("[%s] building index locally", logPrefix),
-					"seg", info.Name(), "indexes", strings.Join(t.Type().IdxFileNames(from, to), ","))
+					"seg", info.Name(), "indexes", strings.Join(idxNames, ","))
+				s.markProducing(idxNames)
 
 				newIdxBuilt = true
 
@@ -2108,6 +2092,7 @@ func (s *BaseRoSnapshots) buildMissedIndices(logPrefix string, ctx context.Conte
 
 				g.Go(func() error {
 					defer s.ReleaseRange(t, from, to)
+					defer s.clearProducing(idxNames)
 					p := &background.Progress{}
 					ps.Add(p)
 					defer notifySegmentIndexingFinished(info.Name())

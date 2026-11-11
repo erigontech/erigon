@@ -648,6 +648,14 @@ func (p *Provider) Initialize(deps Deps) error {
 					if e == nil || !e.Local {
 						return
 					}
+					// A local producer is still writing this one. Seeding
+					// mints a torrent over whatever is on disk now, and the
+					// producer's remaining writes would leave the node
+					// serving a file that fails its own hash. The scan runs
+					// again every 10s, so this is a deferral.
+					if inv.IsProducing(e.Name) {
+						return
+					}
 					relPath := snapshot.RelPathForName(e.Name)
 					if _, seen := alreadySeeded[relPath]; seen {
 						return

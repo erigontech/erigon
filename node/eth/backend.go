@@ -870,6 +870,7 @@ func New(
 	// here by reaching for SetAwaiter via the structural interface
 	// db/state.Aggregator implements.
 	allSnapshots.SetAwaiter(inv)
+	allSnapshots.SetProducerMarks(inv)
 	if dbWithAgg, ok := temporalDb.(interface{ Agg() any }); ok {
 		if agg, ok := dbWithAgg.Agg().(interface {
 			SetAwaiter(views.Awaiter)

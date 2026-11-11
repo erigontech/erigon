@@ -261,6 +261,14 @@ type Inventory struct {
 	// clears the mark (file has been re-materialised locally).
 	producing map[string]struct{}
 
+	// building counts the files a local producer is part-way through
+	// writing. It is kept apart from producing because AddFile clears
+	// producing, and the producer's own output is what triggers AddFile:
+	// a shared mark would be dropped while the bytes were still moving.
+	// Refcounted so overlapping producers of one name cannot release it
+	// early.
+	building map[string]int
+
 	// retired names files consolidated away by a merge. Unlike
 	// producing, nothing will re-materialise them: they sit on disk
 	// only until the merger unlinks them, and the disk scan must not
@@ -280,6 +288,7 @@ func NewInventory() *Inventory {
 		refcount:       make(map[string]int),
 		pendingDeletes: make(map[string]*FileEntry),
 		producing:      make(map[string]struct{}),
+		building:       make(map[string]int),
 		retired:        make(map[string]struct{}),
 	}
 }
@@ -290,9 +299,33 @@ func NewInventory() *Inventory {
 // The mark is set by RemoveFile and cleared by AddFile.
 func (inv *Inventory) IsProducing(name string) bool {
 	inv.mu.RLock()
-	_, ok := inv.producing[name]
+	_, removed := inv.producing[name]
+	building := inv.building[name] > 0
 	inv.mu.RUnlock()
-	return ok
+	return removed || building
+}
+
+// MarkProducing records that a local producer has started writing name.
+// Nothing may mint a torrent over the file or advertise it until the
+// matching ClearProducing: a hash taken while the bytes are still moving
+// describes a file that will not exist.
+func (inv *Inventory) MarkProducing(name string) {
+	inv.mu.Lock()
+	inv.building[name]++
+	inv.mu.Unlock()
+}
+
+// ClearProducing records that the producer has finished with name,
+// whether it succeeded or failed. A failed producer must clear too, or
+// the file is never advertised again.
+func (inv *Inventory) ClearProducing(name string) {
+	inv.mu.Lock()
+	if n := inv.building[name]; n > 1 {
+		inv.building[name] = n - 1
+	} else {
+		delete(inv.building, name)
+	}
+	inv.mu.Unlock()
 }
 
 // RetireFile removes name and marks it as consolidated away, so the disk
