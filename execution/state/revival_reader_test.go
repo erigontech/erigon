@@ -17,6 +17,7 @@
 package state
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -232,6 +233,85 @@ func TestVersionedStateReader_PreBlockValueWipedByInRangeDestruct(t *testing.T) 
 	size, err := vr.ReadAccountCodeSize(addr)
 	require.NoError(t, err)
 	require.Zero(t, size, "code size must agree with code")
+}
+
+func TestVersionedReaders_DestructRevivalWithoutFieldCell(t *testing.T) {
+	t.Parallel()
+	for _, destructIndex := range []int{-1, 0} {
+		for _, path := range []AccountPath{StoragePath, CodePath, CodeSizePath} {
+			t.Run(fmt.Sprintf("destruct=%d/%s", destructIndex, path), func(t *testing.T) {
+				t.Parallel()
+				addr := getAddress(121)
+				key := accounts.InternKey(common.Hash{31: 1})
+				code := accounts.NewCode([]byte{0x60, 0x00})
+				reader := &preBlockStateReader{
+					accountStateReader: newAccountStateReader(addr),
+					slot:               key,
+					val:                *uint256.NewInt(5),
+					code:               code.Bytes,
+				}
+				reader.accounts[addr].CodeHash = code.Hash
+				reader.accounts[addr].Nonce = 1
+				vm := NewVersionMap(nil)
+				vm.WriteSelfDestruct(addr, Version{TxIndex: destructIndex}, true, true)
+				vm.WriteSelfDestruct(addr, Version{TxIndex: 1}, false, true)
+				fresh := accounts.NewAccount()
+				fresh.Balance.SetUint64(1)
+				vm.WriteAddress(addr, Version{TxIndex: 1}, &fresh, true)
+				vm.WriteBalance(addr, Version{TxIndex: 1}, fresh.Balance, true)
+
+				vr := NewVersionedStateReader(3, ReadSet{}, vm, reader)
+				ibs := NewWithVersionMap(reader, vm)
+				t.Cleanup(ibs.Close)
+				ibs.SetTxContext(1, 3)
+				ibs.SetVersion(0)
+				switch path {
+				case StoragePath:
+					value, found, err := vr.ReadAccountStorage(addr, key)
+					require.NoError(t, err)
+					require.True(t, value.IsZero())
+					require.False(t, found)
+					evmValue, err := ibs.GetState(addr, key)
+					require.NoError(t, err)
+					require.Equal(t, value, evmValue)
+				case CodePath:
+					value, err := vr.ReadAccountCode(addr)
+					require.NoError(t, err)
+					require.Empty(t, value)
+					evmValue, err := ibs.GetCode(addr)
+					require.NoError(t, err)
+					require.Equal(t, value, evmValue)
+				case CodeSizePath:
+					value, err := vr.ReadAccountCodeSize(addr)
+					require.NoError(t, err)
+					require.Zero(t, value)
+					evmValue, err := ibs.GetCodeSize(addr)
+					require.NoError(t, err)
+					require.Equal(t, value, evmValue)
+				}
+				reads := ibs.VersionedReads()
+				readKey := accounts.NilKey
+				if path == StoragePath {
+					readKey = key
+				}
+				hdr, ok := reads.getHeader(addr, path, readKey)
+				require.True(t, ok)
+				require.Equal(t, MapRead, hdr.Source)
+				require.Equal(t, Version{TxIndex: destructIndex}, hdr.Version)
+				destructed, err := ibs.HasSelfdestructed(addr)
+				require.NoError(t, err)
+				require.False(t, destructed)
+				ibs.PublishOrigins()
+				require.Equal(t, VersionValid, vm.ValidateReadSet(3, reads, validateEqualVersion, true, ""))
+
+				version := Version{TxIndex: 2}
+				vm.WriteStorage(addr, key, version, *uint256.NewInt(9), true)
+				vm.WriteCode(addr, version, code, true)
+				vm.WriteCodeSize(addr, version, code.Len(), true)
+				require.Equal(t, VersionInvalid, vm.ValidateReadSet(3, reads, validateEqualVersion, true, ""))
+			})
+		}
+	}
 }
 
 // An Estimate destruct belongs to an in-flight incarnation, and these readers

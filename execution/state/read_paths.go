@@ -638,13 +638,16 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 			}
 		}
 
-		// A slot with no cell after an in-block destruct reads post-wipe zero; anchor it as
-		// a MapRead at the wipe version {destroyedAt, wipeInc} so it validates by version
-		// against liveStorage. Mirrors the stale-Done-cell storage branch above.
-		if path == StoragePath && r.life.state != LifecycleLive {
+		// A field with no cell after an in-block destruct reads zero at the wipe
+		// version, so a later write invalidates the read.
+		if (path == StoragePath || path == CodePath || path == CodeSizePath) && r.life.state != LifecycleLive {
 			if !commited {
 				recordWipedSelfDestruct(s, addr, r.life)
-				recordWipedStorageRead(s, addr, key, r.life)
+				if path == StoragePath {
+					recordWipedStorageRead(s, addr, key, r.life)
+				} else {
+					recordWipedCodeRead(s, addr, path, Version{TxIndex: r.life.destroyedAt, Incarnation: r.life.wipeInc})
+				}
 			}
 			r.outcome = outcomeReturnZero
 			r.source = MapRead
