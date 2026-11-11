@@ -47,7 +47,9 @@ _... measured as of {/* ds-date:mainnet */}2025-09-01{/* ds:end */}; ..._
 - `src/data/disk-sizes.json` is the machine-readable source of record. CI
   (`.github/workflows/update-disk-sizes.yml`) writes `full`/`minimal` rows from
   sync-from-scratch artifacts via `scripts/update-disk-sizes.py`; `archive` rows
-  are entered manually.
+  are entered manually. A row with `"method": "seg-du"` is an `erigon seg du`
+  estimate, which the renderer marks with †; a row without `method` is the size
+  of the whole datadir.
 - `scripts/render-disk-sizes.py` projects that JSON onto the page's markers. CI
   runs it after updating the JSON and commits the page; `--check` (run in
   `docs-site-build.yml`) fails the build if the two ever drift.

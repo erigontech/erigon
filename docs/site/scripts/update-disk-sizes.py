@@ -69,6 +69,8 @@ def main() -> None:
             "display": format_bytes(bytes_val),
             "measured_at": today,
             "source": "ci",
+            # The sync-from-scratch workflows report `erigon seg du` estimates, not the datadir size.
+            "method": "seg-du",
         }
         print(f"Updated {chain}/{prune_mode}: {format_bytes(bytes_val)} ({bytes_val:,} bytes)")
         updated = True

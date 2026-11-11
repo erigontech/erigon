@@ -105,6 +105,7 @@ class ArtifactParsingTests(unittest.TestCase):
             self.assertEqual(result["networks"]["mainnet"]["full"]["bytes"], 1234567890123)
             self.assertEqual(result["networks"]["mainnet"]["full"]["display"], "1.23 TB")
             self.assertEqual(result["networks"]["mainnet"]["full"]["source"], "ci")
+            self.assertEqual(result["networks"]["mainnet"]["full"]["method"], "seg-du")
             self.assertIn("ci_last_updated", result)
 
     def test_gnosis_minimal_artifact(self):
