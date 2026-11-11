@@ -724,9 +724,24 @@ func (h WriteHeader) Deletes() bool { return h.valStatus == ValueDeleted }
 // step of an intra-tx oscillation.
 type VersionedWrite[T any] struct {
 	WriteHeader
-	Val  T
-	orig T
+	Val   T
+	orig  T
+	cell  *WriteCell[T]
+	entry *AddressEntry
 }
+
+// prevFromRecord returns the slot's value before this write, empty if it had none, or nil when
+// the write recorded no origin, which makes DomainPut and DomainDel read the value themselves.
+// A recorded change from zero is ValueCreated, so ValueChanged with a zero origin is a write
+// that was never stamped.
+func prevFromRecord(w *VersionedWrite[uint256.Int]) []byte {
+	if w.valStatus == ValueChanged && w.orig.IsZero() {
+		return nil
+	}
+	return w.orig.Bytes()
+}
+
+func (w *VersionedWrite[T]) bind(e *AddressEntry, c *WriteCell[T]) { w.cell, w.entry = c, e }
 
 func cloneVW[T any](w *VersionedWrite[T]) *VersionedWrite[T] {
 	c := *w
@@ -785,22 +800,27 @@ func getVWStorage() *VersionedWrite[uint256.Int] {
 	return vwPoolStorage.Get().(*VersionedWrite[uint256.Int])
 }
 
+func putVW[T any](pool *sync.Pool, vw *VersionedWrite[T]) {
+	vw.cell, vw.entry = nil, nil
+	pool.Put(vw)
+}
+
 func releaseVWAddress(vw *VersionedWrite[*accounts.Account]) {
 	vw.Val = nil // unpin
-	vwPoolAddress.Put(vw)
+	putVW(&vwPoolAddress, vw)
 }
-func releaseVWBalance(vw *VersionedWrite[uint256.Int]) { vwPoolBalance.Put(vw) }
-func releaseVWNonce(vw *VersionedWrite[uint64])        { vwPoolNonce.Put(vw) }
-func releaseVWIncarnation(vw *VersionedWrite[uint64])  { vwPoolIncarnation.Put(vw) }
-func releaseVWSelfDestruct(vw *VersionedWrite[bool])   { vwPoolSelfDestruct.Put(vw) }
-func releaseVWCreateContract(vw *VersionedWrite[bool]) { vwPoolCreateContract.Put(vw) }
+func releaseVWBalance(vw *VersionedWrite[uint256.Int]) { putVW(&vwPoolBalance, vw) }
+func releaseVWNonce(vw *VersionedWrite[uint64])        { putVW(&vwPoolNonce, vw) }
+func releaseVWIncarnation(vw *VersionedWrite[uint64])  { putVW(&vwPoolIncarnation, vw) }
+func releaseVWSelfDestruct(vw *VersionedWrite[bool])   { putVW(&vwPoolSelfDestruct, vw) }
+func releaseVWCreateContract(vw *VersionedWrite[bool]) { putVW(&vwPoolCreateContract, vw) }
 func releaseVWCode(vw *VersionedWrite[accounts.Code]) {
 	vw.Val = accounts.Code{} // unpin bytecode
-	vwPoolCode.Put(vw)
+	putVW(&vwPoolCode, vw)
 }
-func releaseVWCodeHash(vw *VersionedWrite[accounts.CodeHash]) { vwPoolCodeHash.Put(vw) }
-func releaseVWCodeSize(vw *VersionedWrite[int])               { vwPoolCodeSize.Put(vw) }
-func releaseVWStorage(vw *VersionedWrite[uint256.Int])        { vwPoolStorage.Put(vw) }
+func releaseVWCodeHash(vw *VersionedWrite[accounts.CodeHash]) { putVW(&vwPoolCodeHash, vw) }
+func releaseVWCodeSize(vw *VersionedWrite[int])               { putVW(&vwPoolCodeSize, vw) }
+func releaseVWStorage(vw *VersionedWrite[uint256.Int])        { putVW(&vwPoolStorage, vw) }
 
 // Slabs double from a small first one, so a path that writes a handful of cells
 // buys a handful and a path that writes thousands still amortizes. A reusing set
@@ -2192,6 +2212,14 @@ func (vr versionedStateReader) ReadAccountStorage(address accounts.Address, key 
 			}
 			return uint256.Int{}, false, nil
 		}
+		// A creation clears the slots of the prior incarnation without writing them, and a
+		// seeded origin can hold their old values.
+		if created, res, ok := vr.versionMap.ReadCreateContract(address, vr.txIndex); ok && created && res.resolved() {
+			if val, slot, ok := liveStorageValue(vr.versionMap, address, key, vr.txIndex); ok && slot.Status() != MVReadResultNone && slot.DepIdx() >= res.DepIdx() {
+				return val, true, nil
+			}
+			return uint256.Int{}, false, nil
+		}
 		if val, ok := versionedUpdateStorage(vr.versionMap, address, key, vr.txIndex); ok {
 			return val, true, nil
 		}
@@ -2468,13 +2496,14 @@ func (ws *WriteSet) hasHeader(h WriteHeader) bool {
 	return false
 }
 
-// copyFrom merges src into s, value-copying each VersionedWrite so the result
-// shares no *VersionedWrite with src — the in-place recordWrite mutators would
-// otherwise make either side observe the other's later edits.
-func (ws *WriteSet) copyFrom(src *WriteSet) {
+// MergeFrom merges src into ws in place, with src winning on (addr,path,key). It value-copies
+// each VersionedWrite, so neither set sees the other's later in-place recordWrite edits.
+func (ws *WriteSet) MergeFrom(src *WriteSet) {
 	if src == nil {
 		return
 	}
+	ws.assertNotArena("merge")
+	src.assertNotArena("merge")
 	for a, vw := range src.address {
 		ws.SetAddress(a, cloneVW(vw))
 	}
@@ -2520,8 +2549,8 @@ func (ws *WriteSet) Merge(next *WriteSet) *WriteSet {
 		return ws
 	}
 	out := &WriteSet{}
-	out.copyFrom(ws)
-	out.copyFrom(next)
+	out.MergeFrom(ws)
+	out.MergeFrom(next)
 	return out
 }
 
@@ -2959,8 +2988,7 @@ func (b *BlockAccessListBuilder) Matches(bal types.BlockAccessList) bool {
 			if !ok {
 				return false
 			}
-			account.finalize()
-			if !account.changes.Equal(&bal[i]) {
+			if !account.matches(&bal[i]) {
 				return false
 			}
 		}
@@ -2996,6 +3024,47 @@ type accountState struct {
 	storageReads        []accounts.StorageKey               // copied into changes.StorageReads by finalize
 	slotReads           map[accounts.StorageKey]int         // slot -> index into storageReads, built with slotWrites
 	initialCodeEmpty    bool                                // pre-block code was empty (created contract or empty-codehash read)
+}
+
+// matches compares the account with a sidecar entry without building and sorting its lists.
+func (account *accountState) matches(want *types.AccountChanges) bool {
+	if !account.matchesStorage(want) {
+		return false
+	}
+	var got types.AccountChanges
+	applyToBalance(&account.balance, &got, account.initialBalanceValue)
+	applyToNonce(&account.nonce, &got)
+	applyToCode(&account.code, &got, account.initialCodeEmpty)
+	fields := types.AccountChanges{BalanceChanges: want.BalanceChanges, NonceChanges: want.NonceChanges, CodeChanges: want.CodeChanges}
+	return got.Equal(&fields)
+}
+
+// matchesStorage checks that want lists every slot once: only then do equal
+// lengths and membership prove that the sets are equal.
+func (account *accountState) matchesStorage(want *types.AccountChanges) bool {
+	if len(want.StorageReads) != len(account.storageReads) || len(want.StorageChanges) != len(account.changes.StorageChanges) {
+		return false
+	}
+	for i, read := range want.StorageReads {
+		if i > 0 && want.StorageReads[i-1].Cmp(read) >= 0 {
+			return false
+		}
+		key := accounts.InternKey(read)
+		if _, wasRead := account.storageReadValues[key]; !wasRead || account.hasStorageWrite(key) {
+			return false
+		}
+	}
+	for i := range want.StorageChanges {
+		slot := &want.StorageChanges[i]
+		if i > 0 && want.StorageChanges[i-1].Slot.Cmp(slot.Slot) >= 0 {
+			return false
+		}
+		at := account.storageWriteIndex(slot.Slot)
+		if at < 0 || !slices.EqualFunc(account.changes.StorageChanges[at].Changes, slot.Changes, func(x, y *types.StorageChange) bool { return *x == *y }) {
+			return false
+		}
+	}
+	return true
 }
 
 // check pre- and post-values, add to BAL if different
@@ -3178,16 +3247,14 @@ func (account *accountState) updateReadStorage(key accounts.StorageKey, val uint
 	if account.storageReadValues == nil {
 		account.storageReadValues = make(map[accounts.StorageKey]uint256.Int)
 	}
-	if _, exists := account.storageReadValues[key]; !exists {
-		account.storageReadValues[key] = val
+	if _, seen := account.storageReadValues[key]; seen {
+		return
 	}
+	account.storageReadValues[key] = val
 	if account.hasStorageWrite(key) {
 		return
 	}
 	if account.slotReads != nil {
-		if _, seen := account.slotReads[key]; seen {
-			return
-		}
 		account.slotReads[key] = len(account.storageReads)
 	}
 	account.storageReads = append(account.storageReads, key)
@@ -3262,19 +3329,10 @@ func (account *accountState) addStorageUpdate(at int, slot accounts.StorageKey, 
 		for i := range ac.StorageChanges {
 			account.slotWrites[ac.StorageChanges[i].Slot] = i
 		}
-		// StorageReads can hold the same slot twice: below the threshold reads are
-		// appended unchecked, and Normalize is what dedups them. The index needs
-		// one entry per slot, so drop the repeats while building it.
 		account.slotReads = make(map[accounts.StorageKey]int, len(account.storageReads))
-		deduped := account.storageReads[:0]
-		for _, slot := range account.storageReads {
-			if _, seen := account.slotReads[slot]; seen {
-				continue
-			}
-			account.slotReads[slot] = len(deduped)
-			deduped = append(deduped, slot)
+		for i, slot := range account.storageReads {
+			account.slotReads[slot] = i
 		}
-		account.storageReads = deduped
 	}
 }
 

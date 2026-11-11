@@ -194,13 +194,20 @@ func copyToDir(ctx context.Context, from, to string, label kv.Label, growthStep 
 	if err != nil {
 		return nil, err
 	}
-	err = Kv2kv(ctx, src, dst, nil, logger)
-	dst.Close()
-	if err != nil {
+	if err := copyAndClose(ctx, src, dst, logger); err != nil {
 		src.Close()
 		return nil, err
 	}
 	return src, nil
+}
+
+// copyAndClose fills dst and flushes it. Close only logs a failed flush, and a short copy must not replace the original.
+func copyAndClose(ctx context.Context, src kv.RoDB, dst kv.RwDB, logger log.Logger) error {
+	defer dst.Close()
+	if err := Kv2kv(ctx, src, dst, nil, logger); err != nil {
+		return err
+	}
+	return dst.(*mdbx2.MdbxKV).Env().Sync(true, false)
 }
 
 // tablesOnDisk opens every table the file actually holds and reads back the flags

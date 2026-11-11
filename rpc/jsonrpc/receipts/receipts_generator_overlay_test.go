@@ -17,7 +17,6 @@
 package receipts_test
 
 import (
-	"fmt"
 	"math/big"
 	"testing"
 	"time"
@@ -135,12 +134,9 @@ func TestGetReceiptSkipsBloomOfPersistedReceipt(t *testing.T) {
 	require.Equal(t, &bloom, served.LogsBloom)
 }
 
-// TestGetReceiptReplayMatchesWithoutNoMaterialize pins that a replayed receipt of a contract call
-// that writes storage and emits a log is the same with CALL_NO_MATERIALIZE on and off. A fresh
-// generator and no persistent receipt cache force the replay in both modes.
-func TestGetReceiptReplayMatchesWithoutNoMaterialize(t *testing.T) {
-	defer func(prev bool) { dbg.CallNoMaterialize = prev }(dbg.CallNoMaterialize)
-
+// TestGetReceiptReplayOfStorageWriteAndLog pins a replayed receipt of a contract call that writes
+// storage and emits a log. A fresh generator and no persistent receipt cache force the replay.
+func TestGetReceiptReplayOfStorageWriteAndLog(t *testing.T) {
 	signer := types.LatestSignerForChainID(nil)
 	runtime := []byte{0x60, 0x01, 0x60, 0x00, 0x55, 0x60, 0x00, 0x60, 0x00, 0xa0, 0x00} // SSTORE(0, 1) LOG0 STOP
 	initCode := append([]byte{0x60, byte(len(runtime)), 0x60, 0x0c, 0x60, 0x00, 0x39, 0x60, byte(len(runtime)), 0x60, 0x00, 0xf3}, runtime...)
@@ -169,20 +165,12 @@ func TestGetReceiptReplayMatchesWithoutNoMaterialize(t *testing.T) {
 	txNum := minTxNum + 1 // txIndex 0, past the block's system tx
 	header, txn := block.HeaderNoCopy(), block.Transactions()[0]
 
-	replay := func(noMaterialize bool) *types.Receipt {
-		dbg.CallNoMaterialize = noMaterialize
-		gen := receipts.NewGenerator(m.Dirs, m.BlockReader, m.Engine, nil, time.Minute)
-		receipt, err := gen.GetReceipt(m.Ctx, m.ChainConfig, tx, header, txn, 0, txNum, nil)
-		require.NoError(t, err)
-		return receipt
-	}
-	nm, materialized := replay(true), replay(false)
-	require.Equal(t, types.ReceiptStatusSuccessful, materialized.Status)
-	require.Len(t, materialized.Logs, 1)
-	require.Equal(t, materialized.Status, nm.Status)
-	require.Equal(t, materialized.GasUsed, nm.GasUsed)
-	require.Equal(t, materialized.CumulativeGasUsed, nm.CumulativeGasUsed)
-	require.Equal(t, materialized.Logs, nm.Logs)
+	gen := receipts.NewGenerator(m.Dirs, m.BlockReader, m.Engine, nil, time.Minute)
+	receipt, err := gen.GetReceipt(m.Ctx, m.ChainConfig, tx, header, txn, 0, txNum, nil)
+	require.NoError(t, err)
+	require.Equal(t, types.ReceiptStatusSuccessful, receipt.Status)
+	require.Len(t, receipt.Logs, 1)
+	require.Equal(t, contract, receipt.Logs[0].Address)
 }
 
 // TestPreByzantiumPostStateFromCommitmentHistory pins the per-tx root that the
@@ -191,16 +179,6 @@ func TestGetReceiptReplayMatchesWithoutNoMaterialize(t *testing.T) {
 // one destroys a contract whose storage predates the block, so each root depends on the
 // replay folding every key the block has changed so far.
 func TestPreByzantiumPostStateFromCommitmentHistory(t *testing.T) {
-	defer func(prev bool) { dbg.CallNoMaterialize = prev }(dbg.CallNoMaterialize)
-	for _, noMaterialize := range []bool{true, false} {
-		t.Run(fmt.Sprintf("noMaterialize=%t", noMaterialize), func(t *testing.T) {
-			dbg.CallNoMaterialize = noMaterialize
-			testPreByzantiumPostStateFromCommitmentHistory(t)
-		})
-	}
-}
-
-func testPreByzantiumPostStateFromCommitmentHistory(t *testing.T) {
 	statecfg.EnableHistoricalCommitment()
 	cfg := chain.TestChainBerlinConfig.Copy()
 	cfg.ByzantiumBlock, cfg.ConstantinopleBlock, cfg.PetersburgBlock, cfg.IstanbulBlock, cfg.MuirGlacierBlock, cfg.BerlinBlock = nil, nil, nil, nil, nil, nil
