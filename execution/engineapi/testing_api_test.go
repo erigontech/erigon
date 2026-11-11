@@ -153,6 +153,10 @@ func (s *stubExecutionModule) IsCanonicalHash(_ context.Context, _ common.Hash) 
 	return false, nil
 }
 
+func (s *stubExecutionModule) IsValidated(_ common.Hash) bool {
+	return false
+}
+
 func (s *stubExecutionModule) GetHeaderHashNumber(ctx context.Context, hash common.Hash) (*uint64, error) {
 	if s.headerNumberFunc != nil {
 		return s.headerNumberFunc(ctx, hash)

@@ -127,7 +127,7 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 	var pendingMu sync.Mutex
 	var lastBlockIndex int
 
-	errCh := make(chan senderRecoveryError)
+	errCh := make(chan senderRecoveryError, 1)
 	go func() {
 		defer dbg.LogPanic()
 		defer close(errCh)
@@ -174,6 +174,21 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 				}
 				pendingMu.Unlock()
 			}
+		}
+	}()
+	var stopOnce sync.Once
+	stopWorkers := func() {
+		stopOnce.Do(func() {
+			close(jobs)
+			wg.Wait()
+			close(out)
+		})
+	}
+	// Runs before collectorSenders.Close: the result goroutine must exit before the collector is closed.
+	defer func() {
+		cancelWorkers()
+		stopWorkers()
+		for range errCh {
 		}
 	}()
 
@@ -253,10 +268,11 @@ Loop:
 		// Skip blocks with no transactions
 		if len(body.Transactions) == 0 {
 			// Write empty senders for blocks with no transactions
-			if err := collectorSenders.Collect(dbutils.BlockBodyKey(s.BlockNumber+uint64(blockIndex)+1, blockHash), nil); err != nil {
+			err := collectorSenders.Collect(dbutils.BlockBodyKey(s.BlockNumber+uint64(blockIndex)+1, blockHash), nil)
+			pendingMu.Unlock()
+			if err != nil {
 				return err
 			}
-			pendingMu.Unlock()
 			continue
 		}
 		pendingBlocks[blockIndex] = &pendingBlock{
@@ -290,9 +306,7 @@ Loop:
 		}
 	}
 
-	close(jobs)
-	wg.Wait()
-	close(out)
+	stopWorkers()
 	for recoveryErr := range errCh {
 		if recoveryErr.err != nil {
 			cancelWorkers()
@@ -386,7 +400,11 @@ func recoverSenders(ctx context.Context, cryptoContext *secp256k1.Context, confi
 		} else if err = common.Stopped(ctx.Done()); err != nil {
 			job.err = err
 		}
-		out <- job
+		select {
+		case out <- job:
+		case <-ctx.Done():
+			return
+		}
 
 		if errors.Is(job.err, common.ErrStopped) {
 			return

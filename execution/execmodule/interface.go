@@ -200,8 +200,12 @@ type ExecutionModule interface {
 	// --- Hash / number queries --------------------------------------------
 
 	// IsCanonicalHash reports whether blockHash belongs to the canonical
-	// chain.
+	// chain and Execution progress has reached its height.
 	IsCanonicalHash(ctx context.Context, blockHash common.Hash) (bool, error)
+
+	// IsValidated reports whether a payload with blockHash already passed
+	// validation.
+	IsValidated(blockHash common.Hash) bool
 
 	// GetHeaderHashNumber returns the block number for blockHash, or nil
 	// when the hash is unknown.

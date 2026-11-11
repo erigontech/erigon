@@ -6,6 +6,7 @@
   JSON-RPC error when execution lags the payload by more than one state step can run (the parallel
   executor's `--batchSize` cut or `--sync.loop.block.limit`), and `latestValidHash` is null unless
   the status is `VALID` or `INVALID` (#25382) — by @awskii
+- engine: `engine_newPayload` no longer answers `VALID` only because a payload is canonical. It executes the payload when it can, answers `ACCEPTED` while execution is too far behind, and can answer `INVALID` with a null `latestValidHash` (#25566).
 - rpc: `--rpc.batch.limit` now applies to the authenticated Engine port too; before, batches there had no size limit. A client that sends Engine batches with more requests than the limit (default 100) now gets a batch-limit error. This can be a breaking change (#25872) — by @lupin012
 - rpc: `/health` on the authenticated Engine port now requires a valid JWT, like every other request on that port, and answers 403 without one. The public HTTP port is unchanged. Update monitoring that probes `/health` on the Engine port without a token. `/health` request bodies are limited to 4 KiB. This can be a breaking change (#25871) — by @lupin012
 - caplin: historical backfill now bans peers that serve invalid Gloas envelopes and retries other peers, even with fewer than 32 peers connected (#25528).
