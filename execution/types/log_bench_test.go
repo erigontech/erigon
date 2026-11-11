@@ -94,3 +94,34 @@ func BenchmarkAppendFilteredLogs(b *testing.B) {
 		}
 	}
 }
+
+func receiptsOfBlock(receipts, logsPerReceipt int, stamped bool) []Logs {
+	out := make([]Logs, receipts)
+	for i := range out {
+		for j := range logsPerReceipt {
+			out[i] = append(out[i], &Log{Address: common.Address{byte(j % 2)}, Topics: make([]common.Hash, 3), Data: make([]byte, 32)})
+		}
+		if stamped {
+			out[i].SetBlockTimestamp(7)
+		}
+	}
+	return out
+}
+
+func BenchmarkAppendFilteredLogsOfBlock(b *testing.B) {
+	f := NewLogFilter([]common.Address{{0}}, nil)
+	for _, n := range []int{20, 150, 400} {
+		for _, stamped := range []bool{false, true} {
+			block := receiptsOfBlock(n, 2, stamped)
+			b.Run(fmt.Sprintf("receipts=%d/stamped=%v", n, stamped), func(b *testing.B) {
+				b.ReportAllocs()
+				for b.Loop() {
+					var dst Logs
+					for _, r := range block {
+						dst = r.AppendFilteredLogs(dst, f, 7, 0)
+					}
+				}
+			})
+		}
+	}
+}
