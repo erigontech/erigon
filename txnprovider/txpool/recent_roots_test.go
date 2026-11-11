@@ -127,10 +127,13 @@ func TestFramePoolRecentRootForkBoundary(t *testing.T) {
 		initialTime uint64
 		initialSlot uint64
 		direction   remoteproto.Direction
+		activeHead  bool
 		evict       bool
 	}{
-		{"before first Bogota block", 76, 19, remoteproto.Direction_FORWARD, false},
-		{"head crosses back before activation", 100, 21, remoteproto.Direction_UNWIND, true},
+		{"before first Bogota block", 76, 19, remoteproto.Direction_FORWARD, false, false},
+		{"first activation in batch", 76, 19, remoteproto.Direction_FORWARD, true, false},
+		{"head crosses back before activation", 100, 21, remoteproto.Direction_UNWIND, false, true},
+		{"activation unwind followed by active head", 100, 21, remoteproto.Direction_UNWIND, true, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
@@ -157,7 +160,14 @@ func TestFramePoolRecentRootForkBoundary(t *testing.T) {
 				change.ChangeBatch[0].BlockTime = now + 88
 				change.ChangeBatch[0].SlotNumber = common.NewUint64(20)
 				change.ChangeBatch[0].Direction = tc.direction
+				if tc.activeHead {
+					replacement := newBlockChangeForAccounts(common.Hash{3}, 0)
+					replacement.ChangeBatch[0].BlockTime = now + 112
+					replacement.ChangeBatch[0].SlotNumber = common.NewUint64(22)
+					change.ChangeBatch = append(change.ChangeBatch, replacement.ChangeBatch...)
+				}
 				require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+				require.Equal(t, tc.activeHead, pool.headIsBogota)
 				require.Empty(t, backend.calls, "activation and age checks do not require simulation")
 				if tc.evict {
 					require.NotContains(t, pool.byHash, string(slot.IDHash[:]))

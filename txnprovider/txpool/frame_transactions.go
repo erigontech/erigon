@@ -588,9 +588,8 @@ func (p *TxPool) parkFrameLocked(mt *metaTxn, reason string) {
 // The caller holds the pool lock; revalidateFrames performs the EVM work later.
 func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*metaTxn {
 	head := changes.ChangeBatch[len(changes.ChangeBatch)-1]
-	headIsBogota := p.chainConfig.IsBogota(head.BlockTime)
-	activationUnwound := p.headIsBogota && !headIsBogota
-	p.headIsBogota = headIsBogota
+	wasBogota := p.headIsBogota
+	p.headIsBogota = p.chainConfig.IsBogota(head.BlockTime)
 	if len(p.all.senderIDFrameTxn) == 0 {
 		return nil
 	}
@@ -603,7 +602,12 @@ func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*meta
 	accountChanges := make(map[common.Address][]byte)
 	nonceSlots := make(map[common.Hash]struct{})
 	rootSlots := make(map[common.Hash]struct{})
+	// Reactivation later in the batch must not hide an earlier activation unwind.
+	activationUnwound := false
 	for _, batch := range changes.ChangeBatch {
+		isBogota := p.chainConfig.IsBogota(batch.BlockTime)
+		activationUnwound = activationUnwound || wasBogota && !isBogota
+		wasBogota = isBogota
 		for _, change := range batch.Changes {
 			address := gointerfaces.ConvertH160toAddress(change.Address)
 			touched[address] = struct{}{}
