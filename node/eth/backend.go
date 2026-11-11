@@ -148,6 +148,9 @@ type Ethereum struct {
 
 	execModule *execmodule.ExecModule
 	bbd        *execp2p.BackwardBlockDownloader
+	// caplinBlobs reads the blobs the embedded consensus layer stores; nil
+	// without one.
+	caplinBlobs *caplin1.BlobReader
 
 	ethBackendRPC       *privateapi2.EthBackendServer
 	ethRpcClient        rpchelper.ApiBackend
@@ -979,9 +982,10 @@ func New(
 				return nil, err
 			}
 		}
+		backend.caplinBlobs = caplin1.NewBlobReader()
 		go func() {
 			eth1Getter := getters.NewExecutionSnapshotReader(ctx, blockReader, backend.chainDB)
-			if err := caplin1.RunCaplinService(ctx, executionEngine, config.CaplinConfig, dirs, eth1Getter, backend.downloaderClient, creds, segmentsBuildLimiter); err != nil {
+			if err := caplin1.RunCaplinService(ctx, executionEngine, config.CaplinConfig, dirs, eth1Getter, backend.downloaderClient, creds, segmentsBuildLimiter, caplin1.WithBlobReader(backend.caplinBlobs)); err != nil {
 				if !errors.Is(err, context.Canceled) {
 					logger.Error("could not start caplin", "err", err)
 				}
@@ -1576,6 +1580,12 @@ func (s *Ethereum) ExecutionModule() *execmodule.ExecModule {
 // node's peers, the one the engine API server uses.
 func (s *Ethereum) BackwardBlockDownloader() *execp2p.BackwardBlockDownloader {
 	return s.bbd
+}
+
+// CaplinBlobs returns the reader of the blobs the embedded consensus layer
+// stores, nil when the node runs none.
+func (s *Ethereum) CaplinBlobs() *caplin1.BlobReader {
+	return s.caplinBlobs
 }
 
 // RemoveContents is like dir.RemoveAll, but preserve dir itself
