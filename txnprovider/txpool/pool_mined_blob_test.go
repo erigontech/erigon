@@ -225,6 +225,32 @@ func TestMinedBlobTxnKeepsRlpAfterFlushAndUnwind(t *testing.T) {
 	}))
 }
 
+// A blob txn loaded from the pool DB keeps its RLP, so it returns whole after it is mined, flushed out of the DB and unwound.
+func TestMinedBlobTxnKeepsRlpAfterReloadFlushAndUnwind(t *testing.T) {
+	r := newMinedBlobReorgTest(t)
+	want := bytes.Clone(r.blobTxn.Rlp)
+	_, err := r.pool.flush(r.ctx)
+	require.NoError(t, err)
+
+	reloaded, err := New(r.ctx, make(chan Announcements, 5), r.pool.poolDB, r.pool._chainDB, txpoolcfg.DefaultConfig,
+		kvcache.New(kvcache.DefaultCoherentConfig), r.pool.chainConfig, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
+	require.NoError(t, err)
+	r.pool = reloaded
+	require.NoError(t, r.pool.OnNewBlock(r.ctx, r.block(0, 2, remoteproto.Direction_FORWARD), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	require.NoError(t, r.pool.poolDB.View(r.ctx, func(tx kv.Tx) error { return r.pool.fromDB(r.ctx, tx) }))
+	require.Contains(t, r.pool.byHash, r.hash)
+
+	r.mine(t, 1, 3)
+	_, err = r.pool.flush(r.ctx)
+	require.NoError(t, err)
+	r.reorgOneBlock(t, 0x11, false)
+	require.NoError(t, r.pool.poolDB.View(r.ctx, func(tx kv.Tx) error {
+		rlp, err := r.pool.GetRlp(tx, []byte(r.hash))
+		require.Equal(t, want, rlp)
+		return err
+	}))
+}
+
 func TestMinedBlobTxnSurvivesReorgThatMinesItAgain(t *testing.T) {
 	r := newMinedBlobReorgTest(t)
 	r.mine(t, 1, 3)
