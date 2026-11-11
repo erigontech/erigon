@@ -1870,4 +1870,14 @@ func TestPrecompileCallRunsOutOfGas(t *testing.T) {
 	require.True(t, PrecompileCallRunsOutOfGas(call(ecrecover, params.TxGas+params.EcrecoverGas-1), rules))
 	require.False(t, PrecompileCallRunsOutOfGas(call(ecrecover, params.TxGas+params.EcrecoverGas), rules))
 	require.False(t, PrecompileCallRunsOutOfGas(call(plain, params.TxGas), rules))
+
+	sha256 := accounts.InternAddress(common.BytesToAddress([]byte{2}))
+	words := make([]byte, 64)
+	hash := func(gas uint64) Message {
+		return types.NewMessage(sender, sha256, 0, uint256.NewInt(1), gas, uint256.NewInt(0), uint256.NewInt(0), uint256.NewInt(0),
+			words, nil, false, false, true, false, nil)
+	}
+	need := params.TxGas + uint64(len(words))*params.TxDataZeroGas + params.Sha256BaseGas + 2*params.Sha256PerWordGas
+	require.True(t, PrecompileCallRunsOutOfGas(hash(need-1), rules), "the per-word price counts")
+	require.False(t, PrecompileCallRunsOutOfGas(hash(need), rules))
 }
