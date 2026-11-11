@@ -583,10 +583,7 @@ func (te *txExecutor) getHeader(ctx context.Context, hash common.Hash, number ui
 // value, not the block-start pre-state, so the prefix cannot always be
 // reconstructed. Callers MUST treat a failure as non-fatal.
 func (te *txExecutor) reconstructPriorReceipts(ctx context.Context, applyTx kv.TemporalTx, header *types.Header, txs types.Transactions, startTxIndex int, blockStartTxNum uint64) (types.Receipts, error) {
-	priorIbs := state.New(state.NewHistoryReaderV3(applyTx, blockStartTxNum))
-	if dbg.CallNoMaterialize {
-		priorIbs.SetVersionMap(state.NewVersionMap(nil))
-	}
+	priorIbs := state.NewWithVersionMap(state.NewHistoryReaderV3(applyTx, blockStartTxNum), state.NewVersionMap(nil))
 	defer priorIbs.Close()
 	priorGp := protocol.NewGasPool(header.GasLimit, te.cfg.chainConfig.GetMaxBlobGasPerBlock(header.Time))
 	getHeader := func(hash common.Hash, number uint64) (*types.Header, error) {
@@ -847,7 +844,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			case te.execRequests <- &execRequest{
 				b.NumberU64(), b.Hash(),
 				protocol.NewGasPool(b.GasLimit(), te.cfg.chainConfig.GetMaxBlobGasPerBlock(b.Time())),
-				dbBAL, txTasks, consumers, false, exhausted,
+				dbBAL, txTasks, consumers, false, exhausted, b.BlockAccessListSidecar(),
 			}:
 			case <-ctx.Done():
 				return ctx.Err()

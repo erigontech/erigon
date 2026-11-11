@@ -98,7 +98,9 @@ type Cfg struct {
 	forkChoiceIndicesChanged    <-chan struct{}
 	chainTipRejections          *chainTipRejections
 	ancestorLookupFailedSlot    uint64
-	pendingBlockWrite           *pendingBlockWrite
+	// chainTipResumeSlot is the slot after a capped window, so a run of skipped slots longer than one request is crossed.
+	chainTipResumeSlot atomic.Uint64
+	pendingBlockWrite  *pendingBlockWrite
 }
 
 type pendingBlockWrite struct {
@@ -151,6 +153,7 @@ func ClStagesCfg(
 		forkChoice,
 		forkChoice,
 		caplinConfig.ArchiveBlobs,
+		caplinConfig.BlobsArchiveFromSlot,
 		caplinConfig.ImmediateBlobsBackfilling,
 		log.Root(),
 	)
