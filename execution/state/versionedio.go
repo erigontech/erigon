@@ -2988,8 +2988,7 @@ func (b *BlockAccessListBuilder) Matches(bal types.BlockAccessList) bool {
 			if !ok {
 				return false
 			}
-			account.finalize()
-			if !account.changes.Equal(&bal[i]) {
+			if !account.matches(&bal[i]) {
 				return false
 			}
 		}
@@ -3025,6 +3024,47 @@ type accountState struct {
 	storageReads        []accounts.StorageKey               // copied into changes.StorageReads by finalize
 	slotReads           map[accounts.StorageKey]int         // slot -> index into storageReads, built with slotWrites
 	initialCodeEmpty    bool                                // pre-block code was empty (created contract or empty-codehash read)
+}
+
+// matches compares the account with a sidecar entry without building and sorting its lists.
+func (account *accountState) matches(want *types.AccountChanges) bool {
+	if !account.matchesStorage(want) {
+		return false
+	}
+	var got types.AccountChanges
+	applyToBalance(&account.balance, &got, account.initialBalanceValue)
+	applyToNonce(&account.nonce, &got)
+	applyToCode(&account.code, &got, account.initialCodeEmpty)
+	fields := types.AccountChanges{BalanceChanges: want.BalanceChanges, NonceChanges: want.NonceChanges, CodeChanges: want.CodeChanges}
+	return got.Equal(&fields)
+}
+
+// matchesStorage checks that want lists every slot once: only then do equal
+// lengths and membership prove that the sets are equal.
+func (account *accountState) matchesStorage(want *types.AccountChanges) bool {
+	if len(want.StorageReads) != len(account.storageReads) || len(want.StorageChanges) != len(account.changes.StorageChanges) {
+		return false
+	}
+	for i, read := range want.StorageReads {
+		if i > 0 && want.StorageReads[i-1].Cmp(read) >= 0 {
+			return false
+		}
+		key := accounts.InternKey(read)
+		if _, wasRead := account.storageReadValues[key]; !wasRead || account.hasStorageWrite(key) {
+			return false
+		}
+	}
+	for i := range want.StorageChanges {
+		slot := &want.StorageChanges[i]
+		if i > 0 && want.StorageChanges[i-1].Slot.Cmp(slot.Slot) >= 0 {
+			return false
+		}
+		at := account.storageWriteIndex(slot.Slot)
+		if at < 0 || !slices.EqualFunc(account.changes.StorageChanges[at].Changes, slot.Changes, func(x, y *types.StorageChange) bool { return *x == *y }) {
+			return false
+		}
+	}
+	return true
 }
 
 // check pre- and post-values, add to BAL if different
