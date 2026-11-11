@@ -21,6 +21,7 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 	"math/big"
+	"slices"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -1361,5 +1362,76 @@ func TestEngineApiNewPayloadBALInvalid(t *testing.T) {
 		require.NotNil(t, status.ValidationError)
 		require.ErrorContains(t, status.ValidationError.Error(), "block access list mismatch",
 			"an in-range index is only refuted by the post-execution comparison")
+	})
+}
+
+// TestEngineApiBALUnchangedClaimLieInvalid pins that a BAL listing a written account with reads and no changes makes
+// the block invalid, also when a later tx of the block reads what an earlier one wrote.
+func TestEngineApiBALUnchangedClaimLieInvalid(t *testing.T) {
+	if !dbg.Exec3Parallel {
+		t.Skip("requires parallel exec")
+	}
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
+	eat, err := engineapitester.DefaultEngineApiTester(ctx, logger, t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := eat.Close()
+		require.NoError(t, err)
+	})
+	mintReceiver := common.HexToAddress("0x777")
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		sender := crypto.PubkeyToAddress(eat.CoinbaseKey.PublicKey)
+		auth, err := bind.NewKeyedTransactorWithChainID(eat.CoinbaseKey, eat.ChainConfig.ChainID)
+		require.NoError(t, err)
+		contractAddr, _, tokenContract, err := contracts.DeployToken(auth, eat.ContractBackend, sender)
+		require.NoError(t, err)
+		_, err = eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+
+		// The second mint reads totalSupply and balanceOf[mintReceiver] that the first one wrote.
+		for _, amount := range []int64{1000, 500} {
+			auth, err = bind.NewKeyedTransactorWithChainID(eat.CoinbaseKey, eat.ChainConfig.ChainID)
+			require.NoError(t, err)
+			_, err = tokenContract.Mint(auth, mintReceiver, big.NewInt(amount))
+			require.NoError(t, err)
+		}
+		payload, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+		require.Len(t, payload.ExecutionPayload.Transactions, 2)
+
+		bal := decodeAndValidateBAL(t, payload)
+		token := findAccountChanges(bal, accounts.InternAddress(contractAddr))
+		require.NotNil(t, token)
+		require.NotEmpty(t, token.StorageChanges)
+		for _, sc := range token.StorageChanges {
+			token.StorageReads = append(token.StorageReads, sc.Slot.Value())
+		}
+		token.StorageChanges = nil
+		slices.SortFunc(token.StorageReads, func(a, b common.Hash) int { return a.Cmp(b) })
+		require.NoError(t, bal.Validate())
+		encoded, err := types.EncodeBlockAccessListBytes(bal)
+		require.NoError(t, err)
+		lie := hexutil.Bytes(encoded)
+
+		executionRequests := payload.ExecutionRequests
+		if executionRequests == nil {
+			executionRequests = []hexutil.Bytes{}
+		}
+		elPayload := *payload.ExecutionPayload
+		elPayload.BlockAccessList = &lie
+		response := *payload.GetPayloadResponse
+		response.ExecutionPayload = &elPayload
+		payloadCopy := *payload
+		payloadCopy.GetPayloadResponse = &response
+		header := engineapitester.MockClPayloadToHeader(&payloadCopy)
+		balHash := crypto.Keccak256Hash(lie)
+		header.BlockAccessListHash = &balHash
+		elPayload.BlockHash = header.Hash()
+
+		status, err := eat.EngineApiClient.NewPayloadV5(ctx, &elPayload, []common.Hash{}, payload.ParentBeaconBlockRoot, executionRequests)
+		require.NoError(t, err)
+		require.Equal(t, enginetypes.InvalidStatus, status.Status)
+		require.NotNil(t, status.ValidationError)
 	})
 }

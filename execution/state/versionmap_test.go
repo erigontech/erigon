@@ -2551,3 +2551,37 @@ func TestMarkWritesValidatedMarksACellRecreatedAtTheSameIncarnation(t *testing.T
 	vm.MarkWritesValidated(first, nil)
 	require.Equal(t, FlagValidated, balanceFlag(t, vm, addr, 3))
 }
+
+// A base read of an account the BAL lists with no change needs no validation: any in-block write to it fails the
+// block in the BAL check. A read of an in-block write and an account with a BAL change are still validated.
+func TestValidateReadSet_BALReadOnlyAccountSkipsStorageValidation(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name    string
+		account types.AccountChanges
+		read    ReadHeader
+		want    VersionValidity
+	}{
+		{"read only", types.AccountChanges{}, ReadHeader{Source: StorageRead, Version: Version{TxIndex: originIndex}}, VersionValid},
+		{"read of an aborted write", types.AccountChanges{}, ReadHeader{Source: MapRead, Version: Version{TxIndex: 1, Incarnation: 1}}, VersionInvalid},
+		{"balance change", types.AccountChanges{BalanceChanges: []*types.BalanceChange{{Index: 1, Value: *uint256.NewInt(1)}}}, ReadHeader{Source: StorageRead, Version: Version{TxIndex: originIndex}}, VersionInvalid},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			addr := getAddress(91)
+			key := accounts.InternKey(common.Hash{0x07})
+			account := tc.account
+			account.Address = addr.Value()
+			account.StorageReads = []common.Hash{key.Value()}
+			vm := NewVersionMap(types.BlockAccessList{account})
+			writeFor(vm, addr, StoragePath, key, Version{TxIndex: 1}, *uint256.NewInt(8), true)
+
+			rs := ReadSet{}
+			rs.SetStorage(addr, key, VersionedRead[uint256.Int]{
+				ReadHeader: tc.read,
+				Val:        *uint256.NewInt(7),
+			})
+			require.Equal(t, tc.want, vm.ValidateReadSet(3, rs, validateEqualVersion, false, ""))
+		})
+	}
+}
