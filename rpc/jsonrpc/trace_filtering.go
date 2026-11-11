@@ -417,7 +417,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 	var err error
 
 	if api.blockRangeLimit != 0 && (toBlock-fromBlock) > uint64(api.blockRangeLimit) {
-		return fmt.Errorf("%s: %d", errExceedBlockRange, api.blockRangeLimit)
+		return &rpc.InvalidParamsError{Message: fmt.Sprintf("%s: %d", errExceedBlockRange, api.blockRangeLimit)}
 	}
 
 	if fromBlock > 0 {
