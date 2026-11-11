@@ -109,6 +109,7 @@ type PatriciaContext interface {
 	Branch(prefix []byte) ([]byte, kv.Step, error)
 	// Implementations must copy prefix and data rather than retain them: callers may pass
 	// pooled buffers that are recycled for a later, unrelated update.
+	// A nil prevData asks the writer to read the previous value; an empty slice means known absent.
 	PutBranch(prefix []byte, data []byte, prevData []byte) error
 	Account(plainKey []byte) (*Update, error)
 	Storage(plainKey []byte) (*Update, error)
@@ -448,8 +449,8 @@ func (be *BranchEncoder) setMetrics(metrics *Metrics) {
 	be.metrics = metrics
 }
 
-// prev is the record stored at prefix, empty when the branch is new. The caller
-// supplies it because the trie already read it while unfolding the row.
+// prev is the branch to merge with, if it existed when unfolded. A new branch
+// passes nil so PutBranch resolves its undo value when the write is applied.
 func (be *BranchEncoder) CollectUpdate(
 	ctx PatriciaContext,
 	prefix []byte,
@@ -459,9 +460,6 @@ func (be *BranchEncoder) CollectUpdate(
 ) error {
 	if be.deferUpdates {
 		return be.CollectDeferredUpdate(ctx, prefix, bitmap, touchMap, afterMap, cells, prev)
-	}
-	if prev == nil {
-		prev = []byte{}
 	}
 	update, err := be.EncodeBranch(bitmap, touchMap, afterMap, cells)
 	if err != nil {
@@ -487,7 +485,7 @@ func (be *BranchEncoder) CollectUpdate(
 	return nil
 }
 
-// prev is the record stored at prefix, empty when the branch is new; see CollectUpdate.
+// See CollectUpdate for the meaning of prev.
 func (be *BranchEncoder) CollectDeferredUpdate(
 	ctx PatriciaContext,
 	prefix []byte,
@@ -505,10 +503,6 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 		}
 		be.ClearDeferred()
 	}
-	if prev == nil {
-		prev = []byte{}
-	}
-
 	raw, err := be.EncodeBranch(bitmap, touchMap, afterMap, cells)
 	if err != nil {
 		return err

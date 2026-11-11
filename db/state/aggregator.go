@@ -2877,7 +2877,11 @@ func (at *AggregatorRoTx) Unwind(ctx context.Context, tx kv.RwTx, txNumUnwindTo 
 
 	step := txNumUnwindTo / at.StepSize()
 	for idx, d := range at.d {
-		if err := d.unwind(ctx, tx, step, txNumUnwindTo, changeset[idx]); err != nil {
+		var expandBranch func([]byte, commitment.BranchData, uint64, uint64) (commitment.BranchData, error)
+		if kv.Domain(idx) == kv.CommitmentDomain {
+			expandBranch = at.replaceShortenedKeysInBranch
+		}
+		if err := d.unwind(ctx, tx, step, txNumUnwindTo, changeset[idx], expandBranch); err != nil {
 			return err
 		}
 	}

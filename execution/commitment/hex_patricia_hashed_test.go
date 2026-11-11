@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"maps"
 	"math/bits"
 	"math/rand"
 	"os"
@@ -1902,6 +1903,43 @@ type branchReadCounter struct {
 func (c *branchReadCounter) Branch(prefix []byte) ([]byte, kv.Step, error) {
 	c.reads[string(prefix)]++
 	return c.PatriciaContext.Branch(prefix)
+}
+
+func TestBranchRecreationPreservesPreviousValue(t *testing.T) {
+	for _, deferred := range []bool{false, true} {
+		t.Run(fmt.Sprintf("deferred_%t", deferred), func(t *testing.T) {
+			k1, u1, k2, u2 := collapseCorpus()
+			ms := NewMockState(t)
+			ms.SetConcurrentCommitment(true)
+			ms.recordPuts.Store(true)
+			cfg := DefaultTrieConfig()
+			cfg.DeferBranchUpdates = deferred
+			trie := NewHexPatriciaHashed(length.Addr, ms, cfg)
+			defer trie.Release()
+			var recreated int
+			for _, batch := range []struct {
+				keys [][]byte
+				upds []Update
+			}{{k1, u1}, {k2, u2}, {k1, u1}} {
+				before := maps.Clone(ms.cm)
+				ms.putLog = nil
+				require.NoError(t, ms.applyPlainUpdates(batch.keys, batch.upds))
+				updates := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, batch.keys, batch.upds)
+				_, err := trie.Process(t.Context(), updates, "", nil, WarmupConfig{})
+				updates.Close()
+				require.NoError(t, err)
+				for _, write := range ms.putLog {
+					previous := before[string(write.prefix)]
+					require.Truef(t, bytes.Equal(previous, write.prev), "prefix %x: previous value %x, recorded %x", write.prefix, []byte(previous), write.prev)
+					if len(previous) == 4 && previous[2] == 0 && previous[3] == 0 && len(write.data) > 4 {
+						recreated++
+					}
+					before[string(write.prefix)] = write.data
+				}
+			}
+			require.Positive(t, recreated, "the updates must recreate a deleted branch")
+		})
+	}
 }
 
 func TestDeferredCollection_AddsNoBranchRead(t *testing.T) {
