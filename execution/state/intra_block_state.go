@@ -1487,6 +1487,10 @@ func (ibs *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 			ibs.finalizeProvisionalAddressRead(addr)
 			return nil, StorageRead, UnknownVersion, nil
 		}
+		// An in-flight destruct below is not destroyed yet, but the committed record predates it.
+		if _, sdRes, ok := ibs.versionMap.ReadSelfDestruct(addr, ibs.txIndex); ok && sdRes.Status() == MVReadResultDependency {
+			ibs.dep = max(ibs.dep, sdRes.DepIdx())
+		}
 		// readAccount above recorded a nil map-read marker; the DB resolved
 		// the account, so reconcile the recorded read — a later record cell
 		// would otherwise spuriously invalidate the nil against a live
