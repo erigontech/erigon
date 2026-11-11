@@ -3333,33 +3333,125 @@ func TestInsertBlocksWithBatchedFCU_BadBlockRecovery(t *testing.T) {
 	}))
 }
 
-// A block that fails validation while it only exists in the InsertBlocks
-// overlay must not stay readable: purgeBadChain cannot reach it in the DB.
-func TestValidateChainBadBlockIsDroppedFromOverlay(t *testing.T) {
-	ctx := t.Context()
-	m := execmoduletester.New(t)
-	chainPack, err := m.GenerateChain(1, nil)
-	require.NoError(t, err)
+func TestValidateChainBadBlockRemovesStorage(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		blocks    int
+		persisted int
+	}{
+		{name: "overlay", blocks: 1},
+		{name: "database", blocks: 17, persisted: 17},
+		{name: "database_and_overlay", blocks: 18, persisted: 17},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := t.Context()
+			key, err := crypto.GenerateKey()
+			require.NoError(t, err)
+			m := execmoduletester.New(t, execmoduletester.WithKey(key))
+			chainPack, err := m.GenerateChain(tc.blocks+1, transferGen(t, key, common.Address{1}, 1))
+			require.NoError(t, err)
+			parent := chainPack.Blocks[0]
+			require.NoError(t, m.InsertValidateAndUfc1By1(ctx, []*types.Block{parent}))
+			m.ExecModule.WaitIdle(ctx)
 
-	badHeader := types.CopyHeader(chainPack.Blocks[0].HeaderNoCopy())
-	badHeader.Root = common.HexToHash("0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
-	badBlock := types.NewBlockFromNetwork(badHeader, chainPack.Blocks[0].Body(), chainPack.Blocks[0].BlockAccessListSidecar())
-	badHash, badNum := badBlock.Hash(), badBlock.NumberU64()
+			badBlocks := make([]*types.Block, tc.blocks)
+			parentHash := parent.Hash()
+			for i, block := range chainPack.Blocks[1:] {
+				header := block.Header()
+				header.ParentHash = parentHash
+				header.GasUsed++
+				badBlocks[i] = types.NewBlockFromNetwork(header, block.Body(), block.BlockAccessListSidecar())
+				parentHash = badBlocks[i].Hash()
+			}
+			assertRejectedStorageAbsent := func(tx kv.Tx) {
+				t.Helper()
+				for _, block := range badBlocks {
+					key := dbutils.BlockBodyKey(block.NumberU64(), block.Hash())
+					for _, table := range []string{kv.BlockBody, kv.HeaderTD} {
+						exists, err := tx.Has(table, key)
+						require.NoError(t, err)
+						require.False(t, exists, "rejected block %d still has %s", block.NumberU64(), table)
+					}
+				}
+			}
 
-	insRes, err := m.InsertBlocks(ctx, []*types.Block{badBlock})
-	require.NoError(t, err)
-	require.Equal(t, execmodule.ExecutionStatusSuccess, insRes)
-	inserted, err := m.ExecModule.GetHeader(ctx, &badHash, &badNum)
-	require.NoError(t, err)
-	require.NotNil(t, inserted, "InsertBlocks must make the header readable through the overlay")
+			if tc.persisted > 0 {
+				insRes, err := m.InsertBlocks(ctx, badBlocks[:tc.persisted])
+				require.NoError(t, err)
+				require.Equal(t, execmodule.ExecutionStatusSuccess, insRes)
+			}
+			if tc.persisted < len(badBlocks) {
+				insRes, err := m.InsertBlocks(ctx, badBlocks[tc.persisted:])
+				require.NoError(t, err)
+				require.Equal(t, execmodule.ExecutionStatusSuccess, insRes)
+			}
+			require.NoError(t, m.DB.View(ctx, func(tx kv.Tx) error {
+				for i, block := range badBlocks {
+					exists, err := tx.Has(kv.BlockBody, dbutils.BlockBodyKey(block.NumberU64(), block.Hash()))
+					require.NoError(t, err)
+					require.Equal(t, i < tc.persisted, exists)
+				}
+				return nil
+			}))
+			for _, block := range badBlocks {
+				hash, number := block.Hash(), block.NumberU64()
+				body, err := m.ExecModule.GetBody(ctx, &hash, &number)
+				require.NoError(t, err)
+				require.NotNil(t, body)
+				require.Len(t, body.Transactions, 1)
+			}
 
-	validation, err := m.ValidateChain(ctx, badBlock.Header())
-	require.NoError(t, err)
-	require.Equal(t, execmodule.ExecutionStatusBadBlock, validation.ValidationStatus)
+			sibling := chainPack.Blocks[1]
+			insRes, err := m.InsertBlocks(ctx, []*types.Block{sibling})
+			require.NoError(t, err)
+			require.Equal(t, execmodule.ExecutionStatusSuccess, insRes)
 
-	afterBad, err := m.ExecModule.GetHeader(ctx, &badHash, &badNum)
-	require.NoError(t, err)
-	require.Nil(t, afterBad, "header of a block that failed validation must not be readable")
+			validation, err := m.ValidateChain(ctx, badBlocks[len(badBlocks)-1].Header())
+			require.NoError(t, err)
+			require.Equal(t, execmodule.ExecutionStatusBadBlock, validation.ValidationStatus)
+			require.Equal(t, parent.Hash(), validation.LatestValidHash)
+			require.NoError(t, m.DB.View(ctx, func(tx kv.Tx) error {
+				assertRejectedStorageAbsent(tx)
+				count, err := tx.Count(kv.EthTx)
+				require.NoError(t, err)
+				require.Equal(t, uint64(1), count, "only the committed parent transaction should remain")
+				return nil
+			}))
+			for _, block := range badBlocks {
+				hash, number := block.Hash(), block.NumberU64()
+				header, err := m.ExecModule.GetHeader(ctx, &hash, &number)
+				require.NoError(t, err)
+				require.Nil(t, header)
+				body, err := m.ExecModule.GetBody(ctx, &hash, &number)
+				require.NoError(t, err)
+				require.Nil(t, body, "rejected body must be removed")
+			}
+
+			validation, err = m.ValidateChain(ctx, sibling.Header())
+			require.NoError(t, err)
+			require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
+			forkChoice, err := m.UpdateForkChoice(ctx, sibling.Header())
+			require.NoError(t, err)
+			require.Equal(t, execmodule.ExecutionStatusSuccess, forkChoice.Status)
+			m.ExecModule.WaitIdle(ctx)
+			require.NoError(t, m.DB.View(ctx, func(tx kv.Tx) error {
+				assertRejectedStorageAbsent(tx)
+				for _, block := range []*types.Block{parent, sibling} {
+					stored := rawdb.ReadBlock(tx, block.Hash(), block.NumberU64())
+					require.NotNil(t, stored)
+					require.Len(t, stored.Transactions(), 1)
+					require.Equal(t, block.Transactions()[0].Hash(), stored.Transactions()[0].Hash())
+					td, err := rawdb.ReadTd(tx, block.Hash(), block.NumberU64())
+					require.NoError(t, err)
+					require.NotNil(t, td)
+				}
+				count, err := tx.Count(kv.EthTx)
+				require.NoError(t, err)
+				require.Equal(t, uint64(2), count, "only the parent and valid sibling transactions should remain")
+				return nil
+			}))
+		})
+	}
 }
 
 // Rejecting a block must not discard valid siblings that are still only in

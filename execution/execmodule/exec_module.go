@@ -715,13 +715,8 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		}
 		defer purgeTx.Rollback()
 		if (lvh != common.Hash{}) && lvh != blockHash {
-			if err := e.purgeBadChain(ctx, purgeTx, lvh, blockHash); err != nil {
+			if err := e.purgeBadChain(ctx, purgeTx, lvh, blockHash, blockNumber); err != nil {
 				return ValidationResult{}, err
-			}
-			if e.currentContext != nil && e.currentContext.BlockOverlay() != nil {
-				if err := e.purgeBadChain(ctx, e.currentContext.BlockOverlay(), lvh, blockHash); err != nil {
-					return ValidationResult{}, err
-				}
 			}
 		}
 		e.logger.Warn("ethereumExecutionModule.ValidateChain: chain is invalid", "hash", blockHash)
@@ -744,33 +739,40 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 	return result, nil
 }
 
-func (e *ExecModule) purgeBadChain(ctx context.Context, tx kv.RwTx, latestValidHash, headHash common.Hash) error {
-	tip, err := e.blockReader.HeaderNumber(ctx, tx, headHash)
-	if err != nil {
-		return err
+func (e *ExecModule) purgeBadChain(ctx context.Context, tx kv.RwTx, latestValidHash, headHash common.Hash, headNumber uint64) error {
+	chainTx := tx
+	var overlay *membatchwithdb.MemoryMutation
+	if e.currentContext != nil {
+		overlay = e.currentContext.BlockOverlay()
+		if overlay != nil {
+			chainTx = overlay
+		}
 	}
-	if tip == nil {
-		// Block is not in tx — nothing to purge.
-		return nil
-	}
-
 	dbHeadHash := rawdb.ReadHeadBlockHash(tx)
+	canonicalHeadHash := rawdb.ReadHeadBlockHash(chainTx)
 
 	currentHash := headHash
-	currentNumber := *tip
+	currentNumber := headNumber
 	for currentHash != latestValidHash {
-		currentHeader, err := e.getHeader(ctx, tx, currentHash, currentNumber)
+		// Keep both canonical heads available as reconnection points for later forkchoice updates.
+		if currentHash == dbHeadHash || currentHash == canonicalHeadHash {
+			return nil
+		}
+		currentHeader, err := e.getHeader(ctx, chainTx, currentHash, currentNumber)
 		if err != nil {
 			return err
 		}
-
-		// TODO: find a better way to handle this
-		if currentHash == dbHeadHash {
-			// We can't delete the head block stored in the database as that is our canonical reconnection point.
-			return nil
+		if currentHeader == nil {
+			return makeErrMissingChainSegment(currentHash)
 		}
-
-		rawdb.DeleteHeader(tx, currentHash, currentNumber)
+		if err := rawdb.DeleteBlock(tx, currentHash, currentNumber); err != nil {
+			return err
+		}
+		if overlay != nil {
+			if err := rawdb.DeleteBlock(overlay, currentHash, currentNumber); err != nil {
+				return err
+			}
+		}
 		currentHash = currentHeader.ParentHash
 		currentNumber--
 	}

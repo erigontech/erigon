@@ -158,6 +158,42 @@ func TestDeleteMining(t *testing.T) {
 	require.Equal(t, value, []byte(nil))
 }
 
+func TestReadViewCursorObservesFirstDelete(t *testing.T) {
+	for _, table := range []string{kv.HeaderNumber, kv.TblAccountVals} {
+		t.Run(table, func(t *testing.T) {
+			_, rwTx := newTestTx(t)
+			require.NoError(t, rwTx.Put(table, []byte("A"), []byte("a")))
+			require.NoError(t, rwTx.Put(table, []byte("B"), []byte("b")))
+			batch, err := membatchwithdb.NewMemoryBatch(rwTx)
+			require.NoError(t, err)
+			defer batch.Close()
+
+			view := batch.NewReadView(rwTx)
+			cursor, err := view.Cursor(table)
+			require.NoError(t, err)
+			defer cursor.Close()
+			key, value, err := cursor.First()
+			require.NoError(t, err)
+			require.Equal(t, []byte("A"), key)
+			require.Equal(t, []byte("a"), value)
+
+			if table == kv.TblAccountVals {
+				writer, err := batch.RwCursorDupSort(table)
+				require.NoError(t, err)
+				defer writer.Close()
+				require.NoError(t, writer.DeleteExact([]byte("A"), []byte("a")))
+			} else {
+				require.NoError(t, batch.Delete(table, []byte("A")))
+			}
+
+			key, value, err = cursor.First()
+			require.NoError(t, err)
+			require.Equal(t, []byte("B"), key)
+			require.Equal(t, []byte("b"), value)
+		})
+	}
+}
+
 func TestFlush(t *testing.T) {
 	_, rwTx := newTestTx(t)
 
