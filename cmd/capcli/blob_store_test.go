@@ -334,9 +334,12 @@ func TestRetrieveBlobsKeepsTheEndpointSecretOutOfErrors(t *testing.T) {
 	}
 	require.Contains(t, err.Error(), host)
 
-	_, err = retrieveBlobsFromRemoteEndpoint(t.Context(), "http://h/%zz?apikey=query-secret", common.Hash{1}, 1)
-	require.Error(t, err)
-	require.NotContains(t, err.Error(), "query-secret")
+	for _, malformed := range []string{"http://h/%zz?apikey=query-secret", "http://user:Ab3x/query-secret@h/"} {
+		_, err = retrieveBlobsFromRemoteEndpoint(t.Context(), malformed, common.Hash{1}, 1)
+		require.Error(t, err)
+		require.NotContains(t, err.Error(), "query-secret")
+		require.NotContains(t, err.Error(), "Ab3x")
+	}
 }
 
 func TestRedactEndpointKeepsSchemeAndHost(t *testing.T) {
