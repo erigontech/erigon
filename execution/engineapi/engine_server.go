@@ -21,6 +21,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon/common/npprof"
 	"reflect"
 	"runtime"
 	"slices"
@@ -347,6 +348,8 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	executionRequests []hexutil.Bytes, version clparams.StateVersion, deriveBlobHashes bool,
 ) (*engine_types.PayloadStatus, error) {
 	defer engineNewPayloadDuration.ObserveDuration(time.Now())
+	defer npprof.End(time.Now())
+	defer npprof.Begin()()
 	if req == nil {
 		return nil, &rpc.InvalidParamsError{Message: "missing payload"}
 	}
