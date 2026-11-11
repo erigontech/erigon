@@ -2585,3 +2585,54 @@ func TestValidateReadSet_BALReadOnlyAccountSkipsStorageValidation(t *testing.T) 
 		})
 	}
 }
+
+// A base account read of an address the BAL lists with no change needs no validation: any in-block write to it fails
+// the block in the BAL check. A read of an in-block write and an address with a BAL change are still validated.
+func TestValidateReadSet_BALReadOnlyAccountSkipsAccountValidation(t *testing.T) {
+	t.Parallel()
+	baseRead := ReadHeader{Source: StorageRead, Version: Version{TxIndex: originIndex}}
+	abortedRead := ReadHeader{Source: MapRead, Version: Version{TxIndex: 1, Incarnation: 1}}
+	for _, tc := range []struct {
+		name      string
+		read      func(rs *ReadSet, addr accounts.Address, hdr ReadHeader)
+		writePath AccountPath
+		write     any
+	}{
+		{"existence read, created by a lower tx", func(rs *ReadSet, addr accounts.Address, hdr ReadHeader) {
+			rs.SetAddress(addr, VersionedRead[AccountView]{ReadHeader: hdr})
+		}, IncarnationPath, uint64(1)},
+		{"nonce read, created by a lower tx", func(rs *ReadSet, addr accounts.Address, hdr ReadHeader) {
+			rs.SetNonce(addr, VersionedRead[uint64]{ReadHeader: hdr})
+		}, IncarnationPath, uint64(1)},
+		{"code hash read, code written by a lower tx", func(rs *ReadSet, addr accounts.Address, hdr ReadHeader) {
+			rs.SetCodeHash(addr, VersionedRead[accounts.CodeHash]{ReadHeader: hdr})
+		}, CodeHashPath, accounts.InternCodeHash(common.Hash{0x01})},
+		{"code size read, code written by a lower tx", func(rs *ReadSet, addr accounts.Address, hdr ReadHeader) {
+			rs.SetCodeSize(addr, VersionedRead[int]{ReadHeader: hdr})
+		}, CodeSizePath, 3},
+	} {
+		for _, c := range []struct {
+			name    string
+			account types.AccountChanges
+			read    ReadHeader
+			want    VersionValidity
+		}{
+			{"read only", types.AccountChanges{}, baseRead, VersionValid},
+			{"read of an aborted write", types.AccountChanges{}, abortedRead, VersionInvalid},
+			{"balance change", types.AccountChanges{BalanceChanges: []*types.BalanceChange{{Index: 1, Value: *uint256.NewInt(1)}}}, baseRead, VersionInvalid},
+		} {
+			t.Run(tc.name+"/"+c.name, func(t *testing.T) {
+				t.Parallel()
+				addr := getAddress(92)
+				account := c.account
+				account.Address = addr.Value()
+				vm := NewVersionMap(types.BlockAccessList{account})
+				writeFor(vm, addr, tc.writePath, accounts.NilKey, Version{TxIndex: 1}, tc.write, true)
+
+				rs := ReadSet{}
+				tc.read(&rs, addr, c.read)
+				require.Equal(t, c.want, vm.ValidateReadSet(3, rs, validateEqualVersion, false, ""))
+			})
+		}
+	}
+}

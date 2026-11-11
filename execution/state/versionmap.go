@@ -13,6 +13,7 @@ import (
 	"github.com/puzpuzpuz/xsync/v4"
 	"github.com/tidwall/btree"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -265,6 +266,8 @@ type VersionMap struct {
 	nonEmpty atomic.Bool
 	HasBAL   bool // When true, all significant writes are pre-populated from BAL
 	bal      types.BlockAccessList
+	// balUnchanged holds the addresses the access list lists without any change.
+	balUnchanged map[common.Address]struct{}
 
 	// Origin layer: the committed base before the first unpublished tx (published txs are already
 	// folded into it); every reader of it has a higher tx index. Immutable and
@@ -435,6 +438,14 @@ func NewVersionMap(changes types.BlockAccessList) *VersionMap {
 		HasBAL: len(changes) > 0,
 		bal:    changes,
 	}
+	for i := range changes {
+		if a := &changes[i]; len(a.StorageChanges) == 0 && len(a.BalanceChanges) == 0 && len(a.NonceChanges) == 0 && len(a.CodeChanges) == 0 {
+			if vm.balUnchanged == nil {
+				vm.balUnchanged = map[common.Address]struct{}{}
+			}
+			vm.balUnchanged[a.Address] = struct{}{}
+		}
+	}
 	vm.WriteChanges(changes)
 	return vm
 }
@@ -463,13 +474,14 @@ func (vm *VersionMap) seededStorage(addr accounts.Address, key accounts.StorageK
 
 // balListsUnchanged reports whether the access list lists addr without any change.
 func (vm *VersionMap) balListsUnchanged(addr accounts.Address) bool {
-	address := addr.Value()
-	i := sort.Search(len(vm.bal), func(i int) bool { return bytes.Compare(vm.bal[i].Address[:], address[:]) >= 0 })
-	if i == len(vm.bal) || vm.bal[i].Address != address {
-		return false
-	}
-	a := &vm.bal[i]
-	return len(a.StorageChanges) == 0 && len(a.BalanceChanges) == 0 && len(a.NonceChanges) == 0 && len(a.CodeChanges) == 0
+	_, ok := vm.balUnchanged[addr.Value()]
+	return ok
+}
+
+// BALCoversBaseRead reports whether a read of addr from base state needs no validation: a committed in-block write to
+// an address the BAL lists unchanged fails the block in the BAL check.
+func (vm *VersionMap) BALCoversBaseRead(addr accounts.Address, source ReadSource) bool {
+	return source == StorageRead && vm.balListsUnchanged(addr)
 }
 
 // load returns the AddressEntry for addr, or nil when absent. Lock-free.
@@ -2114,6 +2126,9 @@ func (vm *VersionMap) ValidateReadSet(txIdx int, rs ReadSet, checkVersion func(r
 	// authoritative basis for every path except storage, which needs the wipe-aware
 	// liveStorage reader.
 	validatePath := func(addr accounts.Address, path AccountPath, hdr ReadHeader) VersionValidity {
+		if vm.BALCoversBaseRead(addr, hdr.Source) {
+			return VersionValid
+		}
 		return vm.validateReadImpl(txIdx, addr, path, accounts.NilKey, hdr.Source, hdr.Version,
 			vm.ReadStatus(addr, path, accounts.NilKey, txIdx), checkVersion, traceInvalid, tracePrefix, false)
 	}
@@ -2169,6 +2184,9 @@ func (vm *VersionMap) ValidateReadSet(txIdx int, rs ReadSet, checkVersion func(r
 	// A balance-only revival writes no code cell for a committed code read to
 	// version-mismatch against, but the destruct below it wiped the code.
 	wipedCommitted := func(addr accounts.Address, hdr ReadHeader) VersionValidity {
+		if vm.BALCoversBaseRead(addr, hdr.Source) {
+			return VersionValid
+		}
 		if hdr.Source == StorageRead || hdr.Source == MapRead {
 			if _, ok := vm.selfDestructInRange(addr, hdr.Version.TxIndex+1, txIdx, true); ok {
 				return VersionInvalid
