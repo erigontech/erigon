@@ -76,3 +76,18 @@ func (c *replayStateCache) clear() {
 	c.order = nil
 	c.mu.Unlock()
 }
+
+func (c *replayStateCache) remove(root common.Hash) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if _, ok := c.states[root]; !ok {
+		return
+	}
+	delete(c.states, root)
+	for i, cachedRoot := range c.order {
+		if cachedRoot == root {
+			c.order = append(c.order[:i], c.order[i+1:]...)
+			return
+		}
+	}
+}

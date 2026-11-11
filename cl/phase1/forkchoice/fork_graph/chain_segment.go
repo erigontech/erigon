@@ -173,7 +173,6 @@ func (f *forkGraphDisk) beginChainSegmentLocked(signedBlock *cltypes.SignedBeaco
 	// The segment now owns the parent state; no fork-graph reader may reach it.
 	f.currentState = nil
 	f.currentStateBlockRoot = common.Hash{}
-	f.replayedStates.clear()
 	return seg, Started, nil
 }
 

@@ -126,6 +126,63 @@ func TestReplayStateCachesCopyByRoot(t *testing.T) {
 	require.Equal(t, originalAttestationCount, second.PreviousEpochAttestationsLength())
 }
 
+func TestReplayStateCacheSurvivesUnrelatedImport(t *testing.T) {
+	anchorState := state.New(&clparams.MainnetBeaconConfig)
+	require.NoError(t, utils.DecodeSSZSnappy(anchorState, anchor, int(clparams.Phase0Version)))
+	fs := &countingStateOpenFs{Fs: afero.NewMemMapFs()}
+	graphInterface, err := NewForkGraphDisk(anchorState, nil, fs, beacon_router_configuration.RouterConfiguration{})
+	require.NoError(t, err)
+	graph := graphInterface.(*forkGraphDisk)
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+	require.NoError(t, utils.DecodeSSZSnappy(block, block1, int(clparams.Phase0Version)))
+	_, result, err := graph.AddChainSegment(block, true)
+	require.NoError(t, err)
+	require.Equal(t, Success, result)
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	graph.currentState = nil
+	first, err := graph.ReplayState(root)
+	require.NoError(t, err)
+	require.NotNil(t, first)
+	require.Equal(t, 1, fs.count())
+	child := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+	require.NoError(t, utils.DecodeSSZSnappy(child, block2, int(clparams.Phase0Version)))
+	require.Equal(t, common.Hash(root), child.Block.ParentRoot)
+	graph.currentState = first
+	graph.currentStateBlockRoot = root
+	_, result, err = graph.AddChainSegment(child, true)
+	require.NoError(t, err)
+	require.Equal(t, Success, result)
+	second, err := graph.ReplayState(root)
+	require.NoError(t, err)
+	require.NotNil(t, second)
+	require.Equal(t, 1, fs.count(), "unrelated import cleared the replay cache")
+}
+
+func TestGloasPayloadStatusChangeDropsReplayCacheEntry(t *testing.T) {
+	fixture := tests.GetGloasFixture("builder_payment_after_missed_epochs", false, 0)
+	fs := &countingStateOpenFs{Fs: afero.NewMemMapFs()}
+	graphInterface, err := NewForkGraphDisk(fixture.PreState, nil, fs, beacon_router_configuration.RouterConfiguration{})
+	require.NoError(t, err)
+	graph := graphInterface.(*forkGraphDisk)
+	block := fixture.Blocks[0]
+	_, result, err := graph.AddChainSegment(block, true)
+	require.NoError(t, err)
+	require.Equal(t, Success, result)
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	graph.currentState = nil
+	before, err := graph.ReplayState(root)
+	require.NoError(t, err)
+	require.NotNil(t, before)
+	require.Equal(t, 1, fs.count())
+	graph.MarkPayloadAccepted(root, true)
+	after, err := graph.ReplayState(root)
+	require.NoError(t, err)
+	require.NotNil(t, after)
+	require.Equal(t, 2, fs.count(), "payload status change served the cached Gloas state")
+}
+
 func TestReplayStatePruneDropsCachedRoot(t *testing.T) {
 	anchorState := state.New(&clparams.MainnetBeaconConfig)
 	require.NoError(t, utils.DecodeSSZSnappy(anchorState, anchor, int(clparams.Phase0Version)))

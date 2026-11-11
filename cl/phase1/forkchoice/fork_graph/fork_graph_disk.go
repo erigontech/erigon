@@ -593,10 +593,16 @@ func (f *forkGraphDisk) IsBlockInvalid(blockRoot common.Hash) bool {
 }
 
 func (f *forkGraphDisk) MarkPayloadUnavailable(blockRoot common.Hash) {
+	if _, unavailable := f.unavailablePayloads.Load(blockRoot); !unavailable {
+		f.replayedStates.remove(blockRoot)
+	}
 	f.unavailablePayloads.Store(blockRoot, struct{}{})
 }
 
 func (f *forkGraphDisk) MarkPayloadAvailable(blockRoot common.Hash) {
+	if _, unavailable := f.unavailablePayloads.Load(blockRoot); unavailable {
+		f.replayedStates.remove(blockRoot)
+	}
 	f.unavailablePayloads.Delete(blockRoot)
 }
 
@@ -606,10 +612,16 @@ func (f *forkGraphDisk) IsPayloadUnavailable(blockRoot common.Hash) bool {
 }
 
 func (f *forkGraphDisk) MarkPayloadAccepted(blockRoot common.Hash, verified bool) {
+	if previous, accepted := f.acceptedPayloads.Load(blockRoot); !accepted || previous.(bool) != verified {
+		f.replayedStates.remove(blockRoot)
+	}
 	f.acceptedPayloads.Store(blockRoot, verified)
 }
 
 func (f *forkGraphDisk) ClearPayloadAccepted(blockRoot common.Hash) {
+	if _, accepted := f.acceptedPayloads.Load(blockRoot); accepted {
+		f.replayedStates.remove(blockRoot)
+	}
 	f.acceptedPayloads.Delete(blockRoot)
 }
 

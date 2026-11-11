@@ -130,3 +130,31 @@ Copy-contract correction after review round 3:
   median 16,006,132 ns/op; read-replay 14,002,082 ns/op; cached-read
   257,954.5 ns/op. At HEAD after: signature-checks 15,906,570 ns/op;
   read-replay 13,921,035 ns/op; cached-read 258,179 ns/op.
+
+Review point: retain unrelated replay states and evict changed Gloas payload roots:
+
+- Red: TestReplayStateCacheSurvivesUnrelatedImport expected one state-file open
+  after caching a root and importing its child; saw two because BeginChainSegment
+  cleared the whole cache. Removing that clear preserves the root's cached replay.
+- Red: TestGloasPayloadStatusChangeDropsReplayCacheEntry expected a second
+  state-file open after changing an imported Gloas block's payload status; saw
+  one because the old cache entry was returned. Payload availability or
+  acceptance changes now evict only that block root. Repeated writes of the
+  same status do not evict it.
+- Guards: restoring the clear-all in BeginChainSegment made the import assertion
+  see two opens instead of one. Removing MarkPayloadAccepted's per-root
+  invalidation made the Gloas assertion see one open instead of two.
+- Gloas state flow: ProcessExecutionPayloadEnvelope validates and persists the
+  envelope but does not apply its execution effects to that block's state.
+  ProcessParentExecutionPayload applies full-payload effects while transitioning
+  the next block. ReplayState(root) therefore returns the beacon-block post-state
+  for root before and after its own envelope is processed; the full/empty
+  distinction is represented by payload status, and effects appear in the child
+  transition. A status change still invalidates root's cache entry as required.
+- BenchmarkReplayStateNonHead -count 6 at HEAD, 200 ms per run, ns/op:
+  signature-checks 16,171,289; 16,026,298; 15,991,696; 16,190,738;
+  15,977,902; 16,003,214 (median 16,014,756).
+  read-replay 14,078,896; 14,159,458; 14,069,089; 14,161,639; 14,076,194;
+  14,097,094 (median 14,087,995).
+  cached-read 278,121; 272,005; 275,095; 274,411; 272,194; 271,457
+  (median 273,302.5).
