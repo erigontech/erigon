@@ -43,7 +43,7 @@ func transitionBlock(impl Interface, s abstract.BeaconState, block *cltypes.Sign
 	}
 
 	// Transition block
-	if err := ProcessBlock(impl, s, block.Block); err != nil {
+	if err := ProcessBlockWithSignatureValidation(impl, s, block.Block, impl.FullValidate()); err != nil {
 		return err
 	}
 

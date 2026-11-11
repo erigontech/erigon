@@ -5,9 +5,8 @@ Commit 1: skip batched body signature verification when FullValidate is false.
 - Red: TestProcessBlockBatchSkipsSignaturesWithoutFullValidation, first
   require.NoError assertion saw "block signature validation failed" with an
   infinite payload-attestation signature.
-- Existing signature-rejection tests now use validatingBlockSignatureProcessor
-  so they continue to assert import-mode verification after FullValidate gates
-  the batch. Their expected rejection behavior is unchanged.
+- TransitionState now passes FullValidate into signature batch validation.
+  Direct ProcessBlock calls keep validation enabled, including block production.
 - Baseline gate before edits: make lint, requested Go packages, and make erigon
   passed.
 - BenchmarkReplayStateNonHead -count 6 before: 6.005, 6.065, 6.502, 6.695,
@@ -31,3 +30,16 @@ Commit 2: retain up to four replayed states by block root and return copies.
   4.204, 4.268 ms/op; median 4.049 ms/op.
 - BenchmarkReplayStateNonHead -count 6 after: 0.253, 0.259, 0.259, 0.260,
   0.262, 0.264 ms/op; median 0.259 ms/op.
+
+Compatibility correction after the committed gate exposed block production's
+direct ProcessBlock call. Direct calls retain signature validation; only
+TransitionState forwards its validation flag to the batch check.
+- The first committed gate failed TestProcessProducedBlockEvictsInvalidBidSignatureThroughMachine
+  (state identity assertion) and
+  TestProcessProducedBlockRetainsValidBidAfterInvalidPayloadAttestationSignature/invalid
+  (expected signature-validation error, got nil). The direct ProcessBlock
+  wrapper now keeps validation enabled; the targeted tests pass.
+- BenchmarkReplayStateNonHead -count 6 before this correction: 0.253, 0.259,
+  0.259, 0.260, 0.262, 0.264 ms/op; median 0.260 ms/op.
+- BenchmarkReplayStateNonHead -count 6 after this correction: 0.253, 0.256,
+  0.260, 0.260, 0.328, 0.378 ms/op; median 0.260 ms/op.
