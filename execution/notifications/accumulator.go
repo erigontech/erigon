@@ -50,13 +50,13 @@ func (a *Accumulator) Reset(plainStateID uint64) {
 	a.plainStateID = plainStateID
 }
 
-// Checkpoint returns a restore function without copying existing block changes.
-// Call StartChange before recording further changes so the saved blocks stay immutable.
+// Checkpoint saves completed block changes without copying them.
+// Recording changes, including after restore, requires StartChange.
 func (a *Accumulator) Checkpoint() (restore func()) {
-	saved := *a
 	a.latestChange = nil
 	a.accountChangeIndex = nil
 	a.storageChangeIndex = nil
+	saved := *a
 	return func() { *a = saved }
 }
 
@@ -87,9 +87,10 @@ func (a *Accumulator) SetStateID(stateID uint64) {
 // StartChange begins accumulation of changes for a new block.
 func (a *Accumulator) StartChange(h *types.Header, txs [][]byte, unwind bool) {
 	a.changes = append(a.changes, StateChange{
-		BlockHeight: h.Number.Uint64(),
-		BlockHash:   h.Hash(),
-		BlockTime:   h.Time,
+		BlockHeight:      h.Number.Uint64(),
+		FirstBlockHeight: h.Number.Uint64(),
+		BlockHash:        h.Hash(),
+		BlockTime:        h.Time,
 	})
 	a.latestChange = &a.changes[len(a.changes)-1]
 	if unwind {
@@ -103,6 +104,12 @@ func (a *Accumulator) StartChange(h *types.Header, txs [][]byte, unwind bool) {
 			a.latestChange.Txs[i] = bytes.Clone(txs[i])
 		}
 	}
+}
+
+// StartRange records the head of an executed range without individual state changes.
+func (a *Accumulator) StartRange(firstBlock uint64, lastHeader *types.Header) {
+	a.StartChange(lastHeader, nil, false)
+	a.latestChange.FirstBlockHeight = firstBlock
 }
 
 func (a *Accumulator) HasAccountChange(address common.Address) bool {

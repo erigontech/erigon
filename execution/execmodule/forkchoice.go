@@ -576,6 +576,23 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		if err != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 		}
+		dispatcher := e.pipelineExecutor.Dispatcher()
+		hasPendingChanges := e.accum != nil && e.accum.Accumulator != nil && len(e.accum.Accumulator.Changes()) > 0
+		// An ignored ancestor request must leave pending canonical notifications intact.
+		if !belowFinality && result.Status == ExecutionStatusSuccess && dispatcher != nil && hasPendingChanges {
+			// The marker commit may have closed roTx, so read the committed state again.
+			if err := e.db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+				stateVersion, err := rawdb.GetStateVersion(tx)
+				if err != nil {
+					return err
+				}
+				return dispatcher.Dispatch(ctx, tx, stateVersion, e.accum.Accumulator, e.accum.RecentReceipts,
+					finishProgressBefore, finishProgressBefore, nil, tx)
+			}); err != nil {
+				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+			}
+			restoreStateChanges = nil
+		}
 		sendForkchoiceResultWithoutWaiting(outcomeCh, result, false)
 		return nil
 	}

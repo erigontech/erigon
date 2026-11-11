@@ -141,6 +141,20 @@ func (d *Dispatcher) Dispatch(
 		if prevUnwindPoint != nil && *prevUnwindPoint < finishProgressBefore {
 			base = *prevUnwindPoint
 		}
+		// Retained changes can precede this run's Finish progress. Include their
+		// headers when they are finally delivered.
+		if accumulator != nil {
+			for _, change := range accumulator.Changes() {
+				before := change.BlockHeight
+				if change.Direction == notifications.DirectionForward {
+					before = change.FirstBlockHeight
+					if before > 0 {
+						before--
+					}
+				}
+				base = min(base, before)
+			}
+		}
 		var notifyFrom uint64
 		switch {
 		case finishProgressAfter == 0:
@@ -170,7 +184,8 @@ func (d *Dispatcher) Dispatch(
 		}
 	}
 
-	currentHeader := rawdb.ReadCurrentHeader(tx)
+	// Head markers can lead execution; announce the head whose state is available.
+	currentHeader := rawdb.ReadHeaderByNumber(tx, finishProgressAfter)
 	if accumulator != nil && currentHeader != nil {
 		if changes := accumulator.Changes(); len(changes) == 0 || changes[len(changes)-1].BlockHeight < currentHeader.Number.Uint64() {
 			accumulator.StartChange(currentHeader, nil, false)

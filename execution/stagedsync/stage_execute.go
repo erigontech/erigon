@@ -577,7 +577,8 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDom
 		if header == nil {
 			return fmt.Errorf("canonical header for unwind point not found: %s", hash)
 		}
-		txs, err := cfg.blockReader.RawTransactions(ctx, rwTx, u.UnwindPoint, s.BlockNumber)
+		// Transactions in the unwind target remain canonical.
+		txs, err := cfg.blockReader.RawTransactions(ctx, rwTx, u.UnwindPoint+1, s.BlockNumber)
 		if err != nil {
 			return err
 		}

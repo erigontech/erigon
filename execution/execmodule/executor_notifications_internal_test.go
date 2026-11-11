@@ -90,6 +90,7 @@ func TestProcessFrozenBlocksKeepsCommittedNotifications(t *testing.T) {
 			header := &types.Header{GasLimit: 30_000_000, BaseFee: uint256.NewInt(1_000_000_000)}
 			require.NoError(t, db.UpdateTemporal(t.Context(), func(tx kv.TemporalRwTx) error {
 				require.NoError(t, rawdb.WriteHeader(tx, header))
+				require.NoError(t, rawdb.WriteCanonicalHash(tx, header.Hash(), header.Number.Uint64()))
 				return rawdb.WriteHeadHeaderHash(tx, header.Hash())
 			}))
 			accumulator.StartChange(header, nil, false)
@@ -110,6 +111,7 @@ func TestProcessFrozenBlocksKeepsCommittedNotifications(t *testing.T) {
 					accumulator.StartChange(header, nil, false)
 					accumulator.ChangeAccount(address, 0, value)
 					require.NoError(t, rawdb.WriteHeader(tx, header))
+					require.NoError(t, rawdb.WriteCanonicalHash(tx, header.Hash(), header.Number.Uint64()))
 					require.NoError(t, rawdb.WriteHeadHeaderHash(tx, header.Hash()))
 					require.NoError(t, rawdbv3.TxNums.Append(tx, uint64(cycle), uint64(cycle)))
 					require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, uint64(cycle)))

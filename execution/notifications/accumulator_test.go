@@ -120,3 +120,24 @@ func TestAccumulatorAppendPreservesChanges(t *testing.T) {
 		})
 	}
 }
+
+func TestAccumulatorCheckpoint(t *testing.T) {
+	a := NewAccumulator()
+	address, slot := common.Address{1}, common.Hash{2}
+	a.StartChange(&types.Header{Time: 1}, [][]byte{{1}}, true)
+	a.ChangeAccount(address, 0, []byte{2})
+	a.ChangeStorage(address, 0, slot, []byte{3})
+	want := a.Changes()[0].ToProto()
+	restore := a.Checkpoint()
+
+	a.StartChange(&types.Header{Time: 2}, [][]byte{{4}}, false)
+	a.ChangeStorage(address, 0, slot, []byte{5})
+	restore()
+
+	require.Len(t, a.Changes(), 1)
+	require.Equal(t, want, a.Changes()[0].ToProto())
+	require.Panics(t, func() { a.ChangeStorage(address, 0, slot, []byte{6}) }, "restoring a checkpoint must not reopen completed changes")
+	a.StartChange(&types.Header{Time: 3}, nil, false)
+	a.ChangeStorage(address, 0, slot, []byte{7})
+	require.Equal(t, want, a.Changes()[0].ToProto())
+}
