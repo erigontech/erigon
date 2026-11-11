@@ -115,7 +115,7 @@ func NewDispatcher(
 //   - ctx: context for cancellation
 //   - tx: data source (overlay or committed tx)
 //   - state: final state at the announced head
-//   - stateVersion: durable version represented by the accumulated state changes
+//   - stateVersion: announced state version, which may not yet be committed
 //   - accumulator: state change accumulator (may be nil)
 //   - recentReceipts: receipt/log cache (may be nil)
 //   - finishProgressBefore: Finish stage progress before the sync run

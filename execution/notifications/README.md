@@ -69,8 +69,15 @@ StateChangeConsumer.SendStateChanges(StateChangeBatch)  [protobuf]
 
 TxPool uses transaction directions to track mined and unwound transactions, and
 account/storage/code changes to refresh sender state and invalidate frame validations.
-An incomplete batch requires a full state refresh. The protobuf `StateChangeBatch`
-also carries the full account changes for the RPC state cache.
+
+For incomplete batches, `RefreshAccounts` appends final values for addresses with
+recorded account changes. This keeps older entries from overwriting current values
+in the RPC state cache, but it does not reconstruct omitted changes.
+
+The pool waits for committed state matching the announced version before refreshing
+all pooled senders and revalidating frames. If that version has been superseded,
+transaction membership changes are retained for a newer batch; obsolete account
+values are not applied.
 
 ### Consumer Summary
 
