@@ -364,7 +364,6 @@ func TestMinedBlobTxnMinedAgainSurvivesFinalizingItsOldBlock(t *testing.T) {
 	blobTxn.IDHash[0] = 1
 	hash := string(blobTxn.IDHash[:])
 	mineAt := func(block uint64) {
-		pool.lastSeenBlock.Store(block)
 		require.NoError(t, pool.processMinedFinalizedBlobs([]*TxnSlot{blobTxn}, block, 0))
 	}
 	mineAt(5)
