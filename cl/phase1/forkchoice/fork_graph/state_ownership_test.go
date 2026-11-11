@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
@@ -96,14 +97,33 @@ func TestReplayStateCachesCopyByRoot(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, first)
 	require.Equal(t, 1, fs.count())
+	first, err = graph.ReplayState(root)
+	require.NoError(t, err)
+	require.NotNil(t, first)
+	require.Equal(t, 1, fs.count())
+	originalBalance, err := first.ValidatorBalance(0)
+	require.NoError(t, err)
+	validator, err := first.ValidatorForValidatorIndex(0)
+	require.NoError(t, err)
+	originalSlashed := validator.Slashed()
+	originalAttestationCount := first.PreviousEpochAttestationsLength()
 	require.NoError(t, first.SetSlot(99))
+	require.NoError(t, first.SetValidatorBalance(0, originalBalance+1))
+	require.NoError(t, first.SetValidatorSlashed(0, !originalSlashed))
+	first.AddPreviousEpochAttestation(&solid.PendingAttestation{})
 
 	second, err := graph.ReplayState(root)
 	require.NoError(t, err)
 	require.NotNil(t, second)
 	require.Equal(t, 1, fs.count())
-	require.NotSame(t, first, second)
 	require.Equal(t, block.Block.Slot, second.Slot())
+	secondBalance, err := second.ValidatorBalance(0)
+	require.NoError(t, err)
+	require.Equal(t, originalBalance, secondBalance)
+	secondValidator, err := second.ValidatorForValidatorIndex(0)
+	require.NoError(t, err)
+	require.Equal(t, originalSlashed, secondValidator.Slashed())
+	require.Equal(t, originalAttestationCount, second.PreviousEpochAttestationsLength())
 }
 
 func TestReplayStatePruneDropsCachedRoot(t *testing.T) {
@@ -212,31 +232,6 @@ func TestReplayStateIgnoresBlockWithoutHeader(t *testing.T) {
 	require.Nil(t, replayed)
 }
 
-func TestReviewCachedPendingDepositIsolation(t *testing.T) {
-	blocks, anchorState, _ := tests.GetElectraRandom()
-	graphInterface, err := NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
-	require.NoError(t, err)
-	graph := graphInterface.(*forkGraphDisk)
-	for _, block := range blocks {
-		_, result, err := graph.AddChainSegment(block, true)
-		require.NoError(t, err)
-		require.Equal(t, Success, result)
-	}
-	root, err := blocks[0].Block.HashSSZ()
-	require.NoError(t, err)
-	require.NotEqual(t, common.Hash(root), graph.currentStateBlockRoot)
-	first, err := graph.ReplayState(root)
-	require.NoError(t, err)
-	require.NotNil(t, first)
-	require.Positive(t, first.PendingDeposits().Len())
-	want := first.PendingDeposits().Get(0).Amount
-	first.PendingDeposits().Get(0).Amount = want + 99
-	second, err := graph.ReplayState(root)
-	require.NoError(t, err)
-	require.NotNil(t, second)
-	require.Equal(t, want, second.PendingDeposits().Get(0).Amount, "cached pending deposit changed through the first reader")
-}
-
 func TestReviewImportWithoutFullValidationRejectsBadSlashingSignature(t *testing.T) {
 	pre := state.New(&clparams.MainnetBeaconConfig)
 	require.NoError(t, utils.DecodeSSZSnappy(pre, anchor, int(clparams.Phase0Version)))
@@ -297,119 +292,4 @@ func TestReviewReadReplaySkipsImportedBatchSignatures(t *testing.T) {
 	replayed, err := graph.ReplayState(root)
 	require.NoError(t, err)
 	require.NotNil(t, replayed)
-}
-
-func TestReviewCachedHistoricalSummaryIsolation(t *testing.T) {
-	_, _, anchorState := tests.GetCapellaRandom()
-	anchorState.AddHistoricalSummary(&cltypes.HistoricalSummary{
-		BlockSummaryRoot: common.Hash{1},
-		StateSummaryRoot: common.Hash{2},
-	})
-	graphInterface, err := NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
-	require.NoError(t, err)
-	graph := graphInterface.(*forkGraphDisk)
-	root := graph.AnchorRoot()
-	first, err := graph.ReplayState(root)
-	require.NoError(t, err)
-	require.NotNil(t, first)
-	require.Len(t, graph.replayedStates.states, 1)
-	want := first.HistoricalSummary(0).BlockSummaryRoot[0]
-	first.HistoricalSummary(0).BlockSummaryRoot[0] = want + 99
-	second, err := graph.ReplayState(root)
-	require.NoError(t, err)
-	require.NotNil(t, second)
-	require.Equal(t, want, second.HistoricalSummary(0).BlockSummaryRoot[0], "cached historical summary changed through the first reader")
-}
-
-func TestReviewCachedGloasOwnership(t *testing.T) {
-	for _, field := range []string{"builder-payment", "bid-commitment"} {
-		t.Run(field, func(t *testing.T) {
-			fixture := tests.GetGloasFixture("builder_payment_after_missed_epochs", false, 0)
-			anchorState := fixture.PostState
-			require.NotNil(t, anchorState)
-			if field == "bid-commitment" {
-				anchorState.GetLatestExecutionPayloadBid().BlobKzgCommitments.Append(&cltypes.KZGCommitment{1})
-			}
-			graphInterface, err := NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
-			require.NoError(t, err)
-			graph := graphInterface.(*forkGraphDisk)
-			root := graph.AnchorRoot()
-			first, err := graph.ReplayState(root)
-			require.NoError(t, err)
-			require.NotNil(t, first)
-			require.Len(t, graph.replayedStates.states, 1)
-			var want uint64
-			if field == "builder-payment" {
-				want = first.GetBuilderPendingPayments().Get(0).Weight
-				first.GetBuilderPendingPayments().Get(0).Weight = want + 99
-			} else {
-				want = uint64(first.GetLatestExecutionPayloadBid().BlobKzgCommitments.Get(0)[0])
-				first.GetLatestExecutionPayloadBid().BlobKzgCommitments.Get(0)[0] = byte(want + 99)
-			}
-			second, err := graph.ReplayState(root)
-			require.NoError(t, err)
-			require.NotNil(t, second)
-			var got uint64
-			if field == "builder-payment" {
-				got = second.GetBuilderPendingPayments().Get(0).Weight
-			} else {
-				got = uint64(second.GetLatestExecutionPayloadBid().BlobKzgCommitments.Get(0)[0])
-			}
-			require.Equal(t, want, got, "cached %s changed through the first reader", field)
-		})
-	}
-}
-
-func TestReviewCachedBuilderPaymentWithdrawalIsolation(t *testing.T) {
-	fixture := tests.GetGloasFixture("builder_payment_after_missed_epochs", false, 0)
-	graphInterface, err := NewForkGraphDisk(fixture.PostState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
-	require.NoError(t, err)
-	graph := graphInterface.(*forkGraphDisk)
-	root := graph.AnchorRoot()
-	first, err := graph.ReplayState(root)
-	require.NoError(t, err)
-	require.NotNil(t, first)
-	want := first.GetBuilderPendingPayments().Get(0).Withdrawal.Amount
-	first.GetBuilderPendingPayments().Get(0).Withdrawal.Amount = want + 99
-	second, err := graph.ReplayState(root)
-	require.NoError(t, err)
-	require.NotNil(t, second)
-	require.Equal(t, want, second.GetBuilderPendingPayments().Get(0).Withdrawal.Amount, "cached builder-payment withdrawal changed through the first reader")
-}
-
-func TestReviewCachedPhase0InclusionAttestationIsolation(t *testing.T) {
-	blocks, anchorState, _ := tests.GetPhase0Random()
-	graphInterface, err := NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
-	require.NoError(t, err)
-	graph := graphInterface.(*forkGraphDisk)
-	for _, block := range blocks {
-		_, result, err := graph.AddChainSegment(block, true)
-		require.NoError(t, err)
-		require.Equal(t, Success, result)
-	}
-	root, err := blocks[0].Block.HashSSZ()
-	require.NoError(t, err)
-	require.NotEqual(t, root, graph.currentStateBlockRoot)
-	first, err := graph.ReplayState(root)
-	require.NoError(t, err)
-	require.NotNil(t, first)
-	require.Len(t, graph.replayedStates.states, 1)
-	for index := range first.ValidatorLength() {
-		attestation, err := first.ValidatorMinPreviousInclusionDelayAttestation(index)
-		require.NoError(t, err)
-		if attestation == nil {
-			continue
-		}
-		want := attestation.ProposerIndex
-		attestation.ProposerIndex = want + 99
-		second, err := graph.ReplayState(root)
-		require.NoError(t, err)
-		require.NotNil(t, second)
-		got, err := second.ValidatorMinPreviousInclusionDelayAttestation(index)
-		require.NoError(t, err)
-		require.NotNil(t, got)
-		require.Equal(t, want, got.ProposerIndex, "cached Phase0 inclusion attestation changed through the first reader")
-		return
-	}
-	t.Fatal("fixture has no previous inclusion attestation")
 }

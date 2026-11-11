@@ -111,3 +111,22 @@ Review round 3 fix for commit b534209bc1c46ecdffb3d0a76e2c927d0b6ec7c8:
   After: signature-checks 16,436,722 ns/op; read-replay 14,501,146.5 ns/op;
   cached-read 269,337.5 ns/op. The benchmark uses Capella states, so it does not
   exercise the Phase0-only rebind path.
+
+Copy-contract correction after review round 3:
+
+- Removed in-place shared-element isolation tests: TestReviewCachedPendingDepositIsolation,
+  TestReviewCachedHistoricalSummaryIsolation, TestReviewCachedGloasOwnership,
+  TestReviewCachedBuilderPaymentWithdrawalIsolation, and
+  TestReviewCachedPhase0InclusionAttestationIsolation. These asserted stronger
+  guarantees than BeaconState.CopyInto provides.
+- Strengthened TestReplayStateCachesCopyByRoot to warm the cache, then mutate a
+  returned state through SetSlot, SetValidatorBalance, SetValidatorSlashed and
+  AddPreviousEpochAttestation. The next read retains the original values and
+  list length. Returning the cached pointer made its state assertion fail:
+  expected slot 1, saw 99.
+- The changed existing cache test now covers the public state-copy contract;
+  no prior behavioral expectation was weakened.
+- BenchmarkReplayStateNonHead -count 6 before this change: signature-checks
+  median 16,006,132 ns/op; read-replay 14,002,082 ns/op; cached-read
+  257,954.5 ns/op. At HEAD after: signature-checks 15,906,570 ns/op;
+  read-replay 13,921,035 ns/op; cached-read 258,179 ns/op.

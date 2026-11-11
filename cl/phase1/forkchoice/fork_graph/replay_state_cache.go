@@ -19,12 +19,8 @@ package fork_graph
 import (
 	"sync"
 
-	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/clonable"
 )
 
 const replayStateCacheSize = 4
@@ -35,169 +31,6 @@ type replayStateCache struct {
 	order  []common.Hash
 }
 
-type replayStateListItem interface {
-	solid.EncodableHashableSSZ
-	clonable.Clonable
-	DecodeSSZ([]byte, int) error
-}
-
-func copyReplayState(source *state.CachingBeaconState) (*state.CachingBeaconState, error) {
-	copied, err := source.Copy()
-	if err != nil {
-		return nil, err
-	}
-	version := source.Version()
-	copiedCurrentAttestations, err := copyReplayStateList(source.CurrentEpochAttestations(), int(version))
-	if err != nil {
-		return nil, err
-	}
-	copiedPreviousAttestations, err := copyReplayStateList(source.PreviousEpochAttestations(), int(version))
-	if err != nil {
-		return nil, err
-	}
-	copied.SetCurrentEpochAttestations(copiedCurrentAttestations)
-	copied.SetPreviousEpochAttestations(copiedPreviousAttestations)
-	if version == clparams.Phase0Version {
-		if err := rebindReplayAttestations(source, copied); err != nil {
-			return nil, err
-		}
-	}
-	if version >= clparams.ElectraVersion {
-		pendingDeposits, err := copyReplayStateList(source.GetPendingDeposits(), int(version))
-		if err != nil {
-			return nil, err
-		}
-		partialWithdrawals, err := copyReplayStateList(source.GetPendingPartialWithdrawals(), int(version))
-		if err != nil {
-			return nil, err
-		}
-		pendingConsolidations, err := copyReplayStateList(source.GetPendingConsolidations(), int(version))
-		if err != nil {
-			return nil, err
-		}
-		copied.SetPendingDeposits(pendingDeposits)
-		copied.SetPendingPartialWithdrawals(partialWithdrawals)
-		copied.SetPendingConsolidations(pendingConsolidations)
-	}
-	if version >= clparams.CapellaVersion {
-		historicalSummaries := solid.NewStaticListSSZ[*cltypes.HistoricalSummary](int(source.BeaconConfig().HistoricalRootsLimit), 64)
-		for index := range source.HistoricalSummariesLength() {
-			summary := *source.HistoricalSummary(int(index))
-			historicalSummaries.Append(&summary)
-		}
-		copied.SetHistoricalSummaries(historicalSummaries)
-	}
-	if version >= clparams.GloasVersion {
-		builders, err := copyReplayStateList(source.GetBuilders(), int(version))
-		if err != nil {
-			return nil, err
-		}
-		builderWithdrawals, err := copyReplayStateList(source.GetBuilderPendingWithdrawals(), int(version))
-		if err != nil {
-			return nil, err
-		}
-		expectedWithdrawals, err := copyReplayStateList(source.GetPayloadExpectedWithdrawals(), int(version))
-		if err != nil {
-			return nil, err
-		}
-		copied.SetBuilders(builders)
-		copied.SetBuilderPendingWithdrawals(builderWithdrawals)
-		copied.SetPayloadExpectedWithdrawals(expectedWithdrawals)
-		builderPayments := source.GetBuilderPendingPayments()
-		copiedBuilderPayments := builderPayments.Clone().(*solid.VectorSSZ[*cltypes.BuilderPendingPayment])
-		for index := range builderPayments.Length() {
-			copiedBuilderPayments.Set(index, builderPayments.Get(index).Clone().(*cltypes.BuilderPendingPayment))
-		}
-		copied.SetBuilderPendingPayments(copiedBuilderPayments)
-		bid := source.GetLatestExecutionPayloadBid().Copy()
-		commitments, err := copyReplayStateList(&source.GetLatestExecutionPayloadBid().BlobKzgCommitments, int(version))
-		if err != nil {
-			return nil, err
-		}
-		bid.BlobKzgCommitments = *commitments
-		copied.SetLatestExecutionPayloadBid(bid)
-	}
-	return copied, nil
-}
-
-func rebindReplayAttestations(source, copied *state.CachingBeaconState) error {
-	attestations := make(map[*solid.PendingAttestation]*solid.PendingAttestation, source.CurrentEpochAttestationsLength()+source.PreviousEpochAttestationsLength())
-	for index := range source.CurrentEpochAttestationsLength() {
-		attestations[source.CurrentEpochAttestations().Get(index)] = copied.CurrentEpochAttestations().Get(index)
-	}
-	for index := range source.PreviousEpochAttestationsLength() {
-		attestations[source.PreviousEpochAttestations().Get(index)] = copied.PreviousEpochAttestations().Get(index)
-	}
-	for index := range source.ValidatorLength() {
-		current, err := source.ValidatorMinCurrentInclusionDelayAttestation(int(index))
-		if err != nil {
-			return err
-		}
-		if current != nil {
-			original := current
-			current = attestations[original]
-			if current == nil {
-				current, err = copyReplayAttestation(original)
-				if err != nil {
-					return err
-				}
-			}
-			if err := copied.SetValidatorMinCurrentInclusionDelayAttestation(int(index), current); err != nil {
-				return err
-			}
-		}
-		previous, err := source.ValidatorMinPreviousInclusionDelayAttestation(int(index))
-		if err != nil {
-			return err
-		}
-		if previous != nil {
-			original := previous
-			previous = attestations[original]
-			if previous == nil {
-				previous, err = copyReplayAttestation(original)
-				if err != nil {
-					return err
-				}
-			}
-			if err := copied.SetValidatorMinPreviousInclusionDelayAttestation(int(index), previous); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-func copyReplayAttestation(source *solid.PendingAttestation) (*solid.PendingAttestation, error) {
-	encoded, err := source.EncodeSSZ(nil)
-	if err != nil {
-		return nil, err
-	}
-	copied := source.Clone().(*solid.PendingAttestation)
-	if err := copied.DecodeSSZ(encoded, int(clparams.Phase0Version)); err != nil {
-		return nil, err
-	}
-	return copied, nil
-}
-
-func copyReplayStateList[T replayStateListItem](source *solid.ListSSZ[T], version int) (*solid.ListSSZ[T], error) {
-	if source == nil {
-		return nil, nil
-	}
-	copied := source.Clone().(*solid.ListSSZ[T])
-	for index := range source.Len() {
-		encoded, err := source.Get(index).EncodeSSZ(nil)
-		if err != nil {
-			return nil, err
-		}
-		item := source.Get(index).Clone().(T)
-		if err := item.DecodeSSZ(encoded, version); err != nil {
-			return nil, err
-		}
-		copied.Append(item)
-	}
-	return copied, nil
-}
-
 func (c *replayStateCache) get(root common.Hash) (*state.CachingBeaconState, bool) {
 	c.mu.Lock()
 	cached, ok := c.states[root]
@@ -205,7 +38,7 @@ func (c *replayStateCache) get(root common.Hash) (*state.CachingBeaconState, boo
 	if !ok {
 		return nil, false
 	}
-	copy, err := copyReplayState(cached)
+	copy, err := cached.Copy()
 	if err != nil {
 		return nil, false
 	}
@@ -213,7 +46,7 @@ func (c *replayStateCache) get(root common.Hash) (*state.CachingBeaconState, boo
 }
 
 func (c *replayStateCache) add(root common.Hash, bs *state.CachingBeaconState) {
-	copy, err := copyReplayState(bs)
+	copy, err := bs.Copy()
 	if err != nil {
 		return
 	}
