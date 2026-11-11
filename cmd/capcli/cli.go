@@ -17,6 +17,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/json"
@@ -265,6 +266,13 @@ func retrieveBlobsFromRemoteEndpoint(ctx context.Context, endpoint string, root 
 		},
 		ErrorHandler: retryablehttp.PassthroughErrorHandler,
 	}
+	var raw []byte
+	req.SetResponseHandler(func(r *http.Response) (err error) {
+		if r.StatusCode == http.StatusOK {
+			raw, err = io.ReadAll(io.LimitReader(r.Body, int64(maxSidecars+1)*maxBlobSidecarJSONSize))
+		}
+		return err
+	})
 	r, err := client.Do(req)
 	if r != nil {
 		defer r.Body.Close()
@@ -288,8 +296,7 @@ func retrieveBlobsFromRemoteEndpoint(ctx context.Context, endpoint string, root 
 	var blobsResponse struct {
 		Data []json.RawMessage `json:"data"`
 	}
-	body := io.LimitReader(r.Body, int64(maxSidecars+1)*maxBlobSidecarJSONSize)
-	if err := json.NewDecoder(body).Decode(&blobsResponse); err != nil {
+	if err := json.NewDecoder(bytes.NewReader(raw)).Decode(&blobsResponse); err != nil {
 		return nil, fmt.Errorf("blob retrieval decode failed %w", err)
 	}
 	if len(blobsResponse.Data) > maxSidecars {

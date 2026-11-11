@@ -368,6 +368,9 @@ func TestBlobArchiveStoreFillMovesPastABadEndpoint(t *testing.T) {
 		"stalled": func(string) http.HandlerFunc {
 			return func(_ http.ResponseWriter, r *http.Request) { <-r.Context().Done() }
 		},
+		"unavailable": func(string) http.HandlerFunc {
+			return func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusServiceUnavailable) }
+		},
 		"null blob": func(string) http.HandlerFunc {
 			return func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{"data":[{"blob":null}]}`)) }
 		},
@@ -409,17 +412,22 @@ func TestBlobArchiveStoreFillMovesPastABadEndpoint(t *testing.T) {
 	}
 }
 
-func failOnce(t *testing.T, good string, fail http.HandlerFunc) string {
+func failOnce(t *testing.T, good string, fail http.HandlerFunc) (string, *atomic.Int64) {
 	var calls atomic.Int32
+	var failedAt, retryGap atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if calls.Add(1) == 1 {
+		switch calls.Add(1) {
+		case 1:
+			failedAt.Store(time.Now().UnixNano())
 			fail(w, r)
 			return
+		case 2:
+			retryGap.Store(time.Now().UnixNano() - failedAt.Load())
 		}
 		http.Redirect(w, r, good+r.URL.Path, http.StatusTemporaryRedirect)
 	}))
 	t.Cleanup(srv.Close)
-	return srv.URL
+	return srv.URL, &retryGap
 }
 
 func TestBlobArchiveStoreFillRetriesATransientFailure(t *testing.T) {
@@ -429,13 +437,20 @@ func TestBlobArchiveStoreFillRetriesATransientFailure(t *testing.T) {
 		"503":     func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusServiceUnavailable) },
 		"429":     func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusTooManyRequests) },
 		"stalled": func(_ http.ResponseWriter, r *http.Request) { <-r.Context().Done() },
+		"stalled body": func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte(`{"data":[`))
+			w.(http.Flusher).Flush()
+			<-r.Context().Done()
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			f := newFillFixture(t)
 			root := f.addBlock(fillTestSlot, 1)
 			good, _ := f.endpoint(false)
 
-			require.NoError(t, f.fill(&BlobArchiveStoreFill{Endpoints: []string{failOnce(t, good, fail)}, FromSlot: fillTestSlot, ToSlot: fillTestSlot}, nil))
+			url, _ := failOnce(t, good, fail)
+
+			require.NoError(t, f.fill(&BlobArchiveStoreFill{Endpoints: []string{url}, FromSlot: fillTestSlot, ToSlot: fillTestSlot}, nil))
 			require.True(t, f.storedValid(fillTestSlot, root))
 		})
 	}
@@ -447,15 +462,14 @@ func TestBlobArchiveStoreFillWaitsForRetryAfter(t *testing.T) {
 	f := newFillFixture(t)
 	root := f.addBlock(fillTestSlot, 1)
 	good, _ := f.endpoint(false)
-	url := failOnce(t, good, func(w http.ResponseWriter, _ *http.Request) {
+	url, retryGap := failOnce(t, good, func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Retry-After", "1")
 		w.WriteHeader(http.StatusTooManyRequests)
 	})
 
-	start := time.Now()
 	require.NoError(t, f.fill(&BlobArchiveStoreFill{Endpoints: []string{url}, FromSlot: fillTestSlot, ToSlot: fillTestSlot}, nil))
 	require.True(t, f.storedValid(fillTestSlot, root))
-	require.GreaterOrEqual(t, time.Since(start), time.Second)
+	require.GreaterOrEqual(t, time.Duration(retryGap.Load()), time.Second)
 }
 
 func TestBlobArchiveStoreFillDoesNotRetryABadRequest(t *testing.T) {
