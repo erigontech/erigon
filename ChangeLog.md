@@ -12,6 +12,7 @@
 - caplin: historical backfill now bans peers that serve invalid Gloas envelopes and retries other peers, even with fewer than 32 peers connected (#25528).
 - caplin: lower head latency and shorter fork-choice and head-state lock holds: the next-epoch state is precomputed off the fork-choice lock, head events are sent before the head-state copy, and head `validators` responses are encoded after the head-state lock is released (#25473, #25539, #25542, #25543, #25596, #25619, #25646, #25647, #25660).
 - caplin: faster fork-choice head computation: vote weights are kept across `get_head` calls and votes are applied when they are recorded, instead of being recounted on every call (#24985, #25595).
+- cmd: `seg du` now sizes each prune mode with the downloader's own file selection, so its estimates match what a node of that mode downloads. Its output changes: the JSON field `detected_mode` and the detected mode in the header are removed; `estimates` is null when headers or bodies cannot be read or are not fully indexed; the archive estimate leaves out commitment history unless execution proofs are kept; commitment accessor files count under "commitment hist". Scripts that read `detected_mode` or `estimates` need an update (#26115).
 
 ---
 
