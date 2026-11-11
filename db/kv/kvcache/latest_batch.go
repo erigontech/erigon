@@ -61,6 +61,9 @@ func (c *LatestBatchCache) OnNewBlock(sc *remoteproto.StateChangeBatch) {
 	// By the time the next batch arrives, the DB commit for the
 	// previous batch should be visible to new RO transactions.
 	c.accounts = nil
+	if sc.StateChangesIncomplete {
+		return
+	}
 	for _, change := range sc.ChangeBatch {
 		for i := range change.Changes {
 			switch change.Changes[i].Action {

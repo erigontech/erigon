@@ -18,8 +18,7 @@ package notifications
 
 // Accumulation groups an Accumulator and RecentReceipts so they can be
 // associated together — e.g. per-SD for SD chaining, or per-fork for
-// fork validation. On merge (rebase), a child's accumulation is copied
-// to the parent via CopyAndReset.
+// fork validation.
 type Accumulation struct {
 	Accumulator    *Accumulator
 	RecentReceipts *RecentReceipts
@@ -36,12 +35,4 @@ func NewAccumulation() *Accumulation {
 func (a *Accumulation) Reset(plainStateID uint64) {
 	a.Accumulator.Reset(plainStateID)
 	a.RecentReceipts.Clear()
-}
-
-// CopyAndReset moves accumulated data from this instance into target, then
-// resets this instance. Used when merging fork validation results into the
-// main accumulation.
-func (a *Accumulation) CopyAndReset(target *Accumulation) {
-	a.Accumulator.CopyAndReset(target.Accumulator)
-	a.RecentReceipts.CopyAndReset(target.RecentReceipts)
 }

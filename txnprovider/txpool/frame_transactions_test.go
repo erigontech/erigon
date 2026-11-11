@@ -2371,6 +2371,7 @@ func TestFramePoolRevalidationNonceManager(t *testing.T) {
 		managerSender bool
 		direction     remoteproto.Direction
 		revalidate    bool
+		incomplete    bool
 	}{
 		{name: "unrelated sender", key: 1, otherSender: true},
 		{name: "unselected key", key: 3},
@@ -2383,6 +2384,7 @@ func TestFramePoolRevalidationNonceManager(t *testing.T) {
 		{name: "manager account and code", action: remoteproto.Action_UPSERT_CODE, revalidate: true},
 		{name: "manager removed", action: remoteproto.Action_REMOVE, revalidate: true},
 		{name: "manager is sender", key: 1, otherSender: true, managerSender: true, revalidate: true},
+		{name: "omitted changes", key: 3, incomplete: true, revalidate: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx, pool, sender := keyedFramePoolEnv(t)
@@ -2409,7 +2411,7 @@ func TestFramePoolRevalidationNonceManager(t *testing.T) {
 				change.StorageChanges = []*remoteproto.StorageChange{{Location: gointerfaces.ConvertHashToH256(location)}}
 			}
 			pool.lock.Lock()
-			pending := pool.invalidateFrames(&remoteproto.StateChangeBatch{ChangeBatch: []*remoteproto.StateChange{{Direction: tc.direction, Changes: []*remoteproto.AccountChange{change}}}})
+			pending := pool.invalidateFrames(&remoteproto.StateChangeBatch{StateChangesIncomplete: tc.incomplete, ChangeBatch: []*remoteproto.StateChange{{Direction: tc.direction, Changes: []*remoteproto.AccountChange{change}}}})
 			generation := pool.stateGeneration
 			pool.lock.Unlock()
 			require.NoError(t, pool.revalidateFrames(ctx, pending, generation, pool.stateBlockHash))

@@ -56,7 +56,7 @@ func TestEvictionInUnexpectedOrder(t *testing.T) {
 	c.add([]byte{1}, nil, c.roots[2], 2)
 	require.Zero(c.stateEvict.Len())
 
-	c.advanceRoot(2)
+	c.advanceRoot(2, false)
 	require.Len(c.roots, 1)
 	require.Equal(2, int(c.latestStateVersionID))
 	require.True(c.roots[2].isCanonical)
@@ -79,12 +79,12 @@ func TestEvictionInUnexpectedOrder(t *testing.T) {
 	require.Equal(2, int(c.latestStateVersionID))
 	require.False(c.roots[6].isCanonical) // parrent exists, but parent has isCanonical=false
 
-	c.advanceRoot(3)
+	c.advanceRoot(3, false)
 	require.Len(c.roots, 4)
 	require.Equal(3, int(c.latestStateVersionID))
 	require.True(c.roots[3].isCanonical)
 
-	c.advanceRoot(4)
+	c.advanceRoot(4, false)
 	require.Len(c.roots, 5)
 	require.Equal(4, int(c.latestStateVersionID))
 	require.True(c.roots[4].isCanonical)
@@ -94,12 +94,12 @@ func TestEvictionInUnexpectedOrder(t *testing.T) {
 	require.Equal(4, int(c.latestStateVersionID))
 	require.False(c.roots[5].isCanonical)
 
-	c.advanceRoot(5)
+	c.advanceRoot(5, false)
 	require.Len(c.roots, 5)
 	require.Equal(5, int(c.latestStateVersionID))
 	require.True(c.roots[5].isCanonical)
 
-	c.advanceRoot(100)
+	c.advanceRoot(100, false)
 	require.Len(c.roots, 6)
 	require.Equal(100, int(c.latestStateVersionID))
 	require.True(c.roots[100].isCanonical)
@@ -107,6 +107,34 @@ func TestEvictionInUnexpectedOrder(t *testing.T) {
 	//c.add([]byte{1}, nil, c.roots[2], 2)
 	require.Equal(0, c.latestStateView.cache.Len())
 	require.Equal(0, c.stateEvict.Len())
+}
+
+func TestIncompleteStateChangesInvalidateCaches(t *testing.T) {
+	address := common.Address{1}
+	update := []*remoteproto.StateChange{{Changes: []*remoteproto.AccountChange{{
+		Address: gointerfaces.ConvertAddressToH160(address), Action: remoteproto.Action_UPSERT_CODE,
+		Data: []byte{1}, Code: []byte{2},
+	}}}}
+	for _, version := range []uint64{1, 2} {
+		t.Run(fmt.Sprint(version), func(t *testing.T) {
+			coherent := New(DefaultCoherentConfig)
+			latest := NewLatestBatchCache()
+			initial := &remoteproto.StateChangeBatch{StateVersionId: 1, ChangeBatch: update}
+			coherent.OnNewBlock(initial)
+			latest.OnNewBlock(initial)
+			require.Positive(t, coherent.Len())
+			require.Positive(t, latest.Len())
+			incomplete := &remoteproto.StateChangeBatch{
+				StateVersionId: version, StateChangesIncomplete: true,
+				ChangeBatch: update, // included values may be overwritten by omitted blocks
+			}
+			coherent.OnNewBlock(incomplete)
+			latest.OnNewBlock(incomplete)
+			require.Zero(t, coherent.Len())
+			require.Zero(t, coherent.latestStateView.codeCache.Len())
+			require.Zero(t, latest.Len())
+		})
+	}
 }
 
 func TestEviction(t *testing.T) {
@@ -503,6 +531,49 @@ func TestOnNewBlockCodeHashKey(t *testing.T) {
 
 	require.Equal(expectedKey, elems[0].K)
 	require.Equal(code, elems[0].V)
+}
+
+func TestOnNewBlockRemoveInvalidatesStorage(t *testing.T) {
+	c := New(DefaultCoherentConfig)
+	old := c.advanceRoot(1, false)
+	address := common.Address{0xaa}
+	neighbor := common.Address{0xaa, 19: 1}
+	var keys [][]byte
+	for _, addr := range []common.Address{address, neighbor} {
+		keys = append(keys, bytes.Clone(addr[:]))
+		for slot := range 100 {
+			location := common.Hash{31: byte(slot)}
+			keys = append(keys, append(bytes.Clone(addr[:]), location[:]...))
+		}
+		keys = append(keys, append(bytes.Clone(addr[:]), bytes.Repeat([]byte{0xff}, 32)...))
+	}
+	for _, key := range keys {
+		c.add(key, []byte{1}, old, 1)
+	}
+	c.OnNewBlock(&remoteproto.StateChangeBatch{
+		StateVersionId: 2,
+		ChangeBatch: []*remoteproto.StateChange{{Changes: []*remoteproto.AccountChange{{
+			Address: gointerfaces.ConvertAddressToH160(address), Action: remoteproto.Action_REMOVE,
+		}}}},
+	})
+	for _, key := range keys {
+		value, err := c.Get(key, nil, 1)
+		require.NoError(t, err)
+		require.Equal(t, []byte{1}, value, "older readers retain their storage")
+		if bytes.HasPrefix(key, address[:]) && len(key) > len(address) {
+			_, ok := c.latestStateView.cache.Get(&Element{K: key})
+			require.False(t, ok, "deleted storage must fall back to the reader's transaction")
+		} else {
+			value, err = c.Get(key, nil, 2)
+			require.NoError(t, err)
+			if bytes.Equal(key, address[:]) {
+				require.Empty(t, value)
+			} else {
+				require.Equal(t, []byte{1}, value, "neighboring accounts retain their cache entries")
+			}
+		}
+	}
+	require.Equal(t, c.latestStateView.cache.Len(), c.stateEvict.Len())
 }
 
 func TestCode(t *testing.T) {

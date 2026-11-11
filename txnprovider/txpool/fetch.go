@@ -1337,46 +1337,48 @@ func (f *Fetch) handleStateChanges(ctx context.Context, client StateChangesClien
 }
 
 func (f *Fetch) handleStateChangesRequest(ctx context.Context, req *remoteproto.StateChangeBatch) error {
-	var unwindTxns, unwindBlobTxns, minedTxns TxnSlots
+	type txnChange struct {
+		txn       *TxnSlot
+		sender    [20]byte
+		direction remoteproto.Direction
+	}
+	var changes []txnChange
+	lastChange := make(map[[32]byte]int)
 	for _, change := range req.ChangeBatch {
-		if change.Direction == remoteproto.Direction_FORWARD {
-			for i := range change.Txs {
-				if err := f.threadSafeParseStateChangeTxn(func(parseContext *TxnParseContext) error {
-					utx := &TxnSlot{}
-					sender := make([]byte, 20)
-					_, err := parseContext.ParseTransaction(change.Txs[i], 0, utx, sender, false /* hasEnvelope */, false /* wrappedWithBlobs */, nil)
-					if err != nil {
-						return err
-					}
-					minedTxns.Append(utx, sender, false)
-					return nil
-				}); err != nil && !errors.Is(err, context.Canceled) {
-					txnType, _ := PeekTransactionType(change.Txs[i])
+		if change.Direction != remoteproto.Direction_FORWARD && change.Direction != remoteproto.Direction_UNWIND {
+			continue
+		}
+		for i, rlp := range change.Txs {
+			parsed := txnChange{txn: &TxnSlot{}, direction: change.Direction}
+			if err := f.threadSafeParseStateChangeTxn(func(parseContext *TxnParseContext) error {
+				_, err := parseContext.ParseTransaction(rlp, 0, parsed.txn, parsed.sender[:], false /* hasEnvelope */, false /* wrappedWithBlobs */, nil)
+				return err
+			}); err != nil {
+				if !errors.Is(err, context.Canceled) {
+					txnType, _ := PeekTransactionType(rlp)
 					f.logger.Debug("[txpool.fetch] stream.Recv", "dir", change.Direction, "txnType", txnType, "index", i, "err", err)
-					continue // 1 txn handling error must not stop batch processing
 				}
+				continue // 1 txn handling error must not stop batch processing
 			}
-		} else if change.Direction == remoteproto.Direction_UNWIND {
-			for i := range change.Txs {
-				if err := f.threadSafeParseStateChangeTxn(func(parseContext *TxnParseContext) error {
-					utx := &TxnSlot{}
-					sender := make([]byte, 20)
-					_, err := parseContext.ParseTransaction(change.Txs[i], 0, utx, sender, false /* hasEnvelope */, false /* wrappedWithBlobs */, nil)
-					if err != nil {
-						return err
-					}
-					if utx.Txn.GetBlobGas() != 0 {
-						unwindBlobTxns.Append(utx, sender, false)
-					} else {
-						unwindTxns.Append(utx, sender, false)
-					}
-					return nil
-				}); err != nil && !errors.Is(err, context.Canceled) {
-					txnType, _ := PeekTransactionType(change.Txs[i])
-					f.logger.Debug("[txpool.fetch] stream.Recv", "dir", change.Direction, "txnType", txnType, "index", i, "err", err)
-					continue // 1 txn handling error must not stop batch processing
-				}
-			}
+			lastChange[parsed.txn.IDHash] = len(changes)
+			changes = append(changes, parsed)
+		}
+	}
+
+	// Pool membership follows each transaction's last direction. Account and
+	// storage changes still need the full batch in its original order.
+	var unwindTxns, unwindBlobTxns, minedTxns TxnSlots
+	for i, change := range changes {
+		if lastChange[change.txn.IDHash] != i {
+			continue
+		}
+		switch {
+		case change.direction == remoteproto.Direction_FORWARD:
+			minedTxns.Append(change.txn, change.sender[:], false)
+		case change.txn.Txn.GetBlobGas() != 0:
+			unwindBlobTxns.Append(change.txn, change.sender[:], false)
+		default:
+			unwindTxns.Append(change.txn, change.sender[:], false)
 		}
 	}
 

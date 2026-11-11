@@ -32,7 +32,9 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/notifications"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/shards"
 )
@@ -53,6 +55,7 @@ func TestDispatcherUsesSuppliedStateVersion(t *testing.T) {
 		BaseFee:  uint256.NewInt(1_000_000_000),
 	}
 	require.NoError(t, rawdb.WriteHeader(tx, header))
+	require.NoError(t, rawdb.WriteCanonicalHash(tx, header.Hash(), header.Number.Uint64()))
 	require.NoError(t, rawdb.WriteHeadHeaderHash(tx, header.Hash()))
 
 	accumulator := notifications.NewAccumulator()
@@ -262,4 +265,52 @@ func TestDispatcherKeepsBlocksAboveFinalizedWithoutSubscribers(t *testing.T) {
 	require.NoError(t, dispatcher.Dispatch(t.Context(), tx, 0, nil, recent, 0, blocks, nil, nil))
 
 	require.Equal(t, []uint64{1, 2}, recent.Missing(1, blocks+1))
+}
+
+func TestDispatcherUsesExecutedHead(t *testing.T) {
+	_, tx := temporaltest.NewTestTx(t)
+	executed := &types.Header{
+		Number:                *uint256.NewInt(90),
+		Time:                  1_080,
+		GasLimit:              30_000_000,
+		GasUsed:               15_000_000,
+		BaseFee:               uint256.NewInt(1_000_000_000),
+		WithdrawalsHash:       new(common.Hash),
+		BlobGasUsed:           common.NewUint64(0),
+		ExcessBlobGas:         common.NewUint64(0),
+		ParentBeaconBlockRoot: new(common.Hash),
+		RequestsHash:          new(common.Hash),
+		BlockAccessListHash:   new(common.Hash),
+		SlotNumber:            common.NewUint64(90),
+	}
+	ahead := types.CopyHeader(executed)
+	ahead.Number.SetUint64(100)
+	ahead.Time = 1_200
+	ahead.GasLimit = 40_000_000
+	ahead.GasUsed = 20_000_000
+	ahead.BaseFee.SetUint64(2_000_000_000)
+	*ahead.ExcessBlobGas = 100_000_000
+	*ahead.SlotNumber = 100
+	for _, header := range []*types.Header{executed, ahead} {
+		require.NoError(t, rawdb.WriteHeader(tx, header))
+		require.NoError(t, rawdb.WriteCanonicalHash(tx, header.Hash(), header.Number.Uint64()))
+	}
+	require.NoError(t, rawdb.WriteHeadHeaderHash(tx, ahead.Hash()))
+	rawdb.WriteHeadBlockHash(tx, ahead.Hash())
+	require.NoError(t, stages.SaveStageProgress(tx, stages.Finish, executed.Number.Uint64()))
+	accumulator := notifications.NewAccumulator()
+	accumulator.StartChange(executed, nil, false)
+	capture := new(stateChangesCapture)
+	dispatcher := NewDispatcher(chain.AllProtocolChanges, nil, capture, nil, log.New())
+
+	require.NoError(t, dispatcher.Dispatch(t.Context(), tx, 7, accumulator, nil, 89, 90, nil, nil))
+	require.NotNil(t, capture.batch)
+	require.Len(t, capture.batch.ChangeBatch, 1)
+	head := capture.batch.ChangeBatch[0]
+	require.Equal(t, executed.Number.Uint64(), head.BlockHeight)
+	require.Equal(t, gointerfaces.ConvertHashToH256(executed.Hash()), head.BlockHash)
+	require.Equal(t, executed.Time, head.BlockTime)
+	require.Equal(t, executed.BaseFee.Uint64(), capture.batch.PendingBlockBaseFee)
+	require.Equal(t, chain.AllProtocolChanges.GetMinBlobGasPrice(), capture.batch.PendingBlobFeePerGas)
+	require.Equal(t, executed.GasLimit, capture.batch.BlockGasLimit)
 }
