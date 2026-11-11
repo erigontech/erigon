@@ -531,6 +531,11 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 	}
 	e.hook.LastNewBlockSeen(blockNumber) // used by eth_syncing
 	e.currentContext.ResetPendingUpdates()
+	if e.forkValidator.IsValidated(blockHash) && e.inclusionListPending(blockHash) {
+		if kept := e.forkValidator.detachExtendingFork(blockHash); kept != nil {
+			defer e.forkValidator.restoreExtendingFork(kept)
+		}
+	}
 	e.forkValidator.ClearWithUnwind()
 	e.logger.Debug("[execmodule] validating chain", "number", blockNumber, "hash", blockHash)
 	var (
@@ -608,8 +613,13 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 			LatestValidHash:  common.Hash{},
 		}, nil
 	}
-	if e.inclusionListPending(blockHash) {
-		e.forkValidator.ForgetValidHash(blockHash)
+	if e.inclusionListPending(blockHash) && e.forkValidator.ForgetValidHash(blockHash) {
+		// Re-execution cannot change validity, so a re-check that fails keeps the old verdict.
+		defer func() {
+			if !e.forkValidator.IsValidated(blockHash) {
+				e.forkValidator.markValidated(blockHash)
+			}
+		}()
 	}
 	// Finality fixes canonical hashes even after their unwind history is pruned.
 	if payloadExecuted || (!canonical && e.forkValidator.IsValidated(blockHash)) {

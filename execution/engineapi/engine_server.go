@@ -573,24 +573,19 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	}
 	if possibleStatus != nil {
 		e.logger.Debug("[NewPayload] got quick payload status", "payloadStatus", possibleStatus)
-		status := &engine_types.PayloadStatus{
-			Status:          possibleStatus.Status,
-			ValidationError: possibleStatus.ValidationError,
-			LatestValidHash: possibleStatus.LatestValidHash,
-			CriticalError:   possibleStatus.CriticalError,
-		}
-		if err := e.resolveInclusionListSatisfied(ctx, status, blockHash, uint64(req.BlockNumber), il); err != nil {
+		quickValid := possibleStatus.Status == engine_types.ValidStatus
+		if err := e.resolveInclusionListSatisfied(ctx, possibleStatus, blockHash, uint64(req.BlockNumber), il); err != nil {
 			return nil, err
 		}
-		if possibleStatus.Status != engine_types.ValidStatus || status.Status != engine_types.SyncingStatus {
-			return status, nil
+		if !quickValid || possibleStatus.Status != engine_types.SyncingStatus {
+			return possibleStatus, nil
 		}
 		canonical, err := e.chainRW.IsCanonicalHash(ctx, blockHash)
 		if err != nil {
 			return nil, err
 		}
 		if canonical {
-			return status, nil
+			return possibleStatus, nil
 		}
 		e.logger.Debug("[NewPayload] re-executing validated side block for an unchecked inclusion list", "hash", blockHash)
 	}

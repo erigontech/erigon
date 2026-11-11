@@ -45,23 +45,10 @@ func CheckInclusionListTransactions(
 	evm := vm.NewEVM(*blockContext, evmtypes.TxContext{}, ibs, chainConfig, cfg)
 	signer := *types.MakeSigner(chainConfig, blockContext.BlockNumber, blockContext.Time)
 
-	inBlock := make(map[common.Hash]struct{}, len(blockTxns))
-	for _, tx := range blockTxns {
-		inBlock[tx.Hash()] = struct{}{}
-	}
-
 	rules := evm.ChainRules()
 	baseFee := evm.Context.BaseFee
 
-	for _, tx := range inclusionListTxns {
-		if _, ok := inBlock[tx.Hash()]; ok {
-			continue
-		}
-
-		if tx.Type() == types.BlobTxType || tx.GetBlobGas() != 0 {
-			continue
-		}
-
+	for _, tx := range OmittedInclusionListTxns(blockTxns, inclusionListTxns) {
 		msg, err := tx.AsMessage(signer, &baseFee, rules)
 		if err != nil {
 			continue
@@ -86,6 +73,27 @@ func CheckInclusionListTransactions(
 		return false, nil
 	}
 	return true, nil
+}
+
+// OmittedInclusionListTxns returns the IL txns that the block omits and that a
+// builder could include from the IL alone. Blob-carrying txns are excluded
+// because the IL carries no sidecar.
+func OmittedInclusionListTxns(blockTxns, inclusionListTxns types.Transactions) types.Transactions {
+	inBlock := make(map[common.Hash]struct{}, len(blockTxns))
+	for _, tx := range blockTxns {
+		inBlock[tx.Hash()] = struct{}{}
+	}
+	var omitted types.Transactions
+	for _, tx := range inclusionListTxns {
+		if _, ok := inBlock[tx.Hash()]; ok {
+			continue
+		}
+		if tx.Type() == types.BlobTxType || tx.GetBlobGas() != 0 {
+			continue
+		}
+		omitted = append(omitted, tx)
+	}
+	return omitted
 }
 
 func txnValidAtBlockEnd(evm *vm.EVM, gp *GasPool, msg *types.Message) (bool, error) {

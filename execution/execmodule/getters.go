@@ -44,7 +44,10 @@ var errNotFound = errors.New("notfound")
 
 func inclusionListGasPools(header *types.Header, maxBlobGas uint64) []*protocol.GasPool {
 	limit, used := header.GasLimit, header.GasUsed
-	blobLeft := maxBlobGas - *header.BlobGasUsed
+	blobLeft := maxBlobGas
+	if header.BlobGasUsed != nil {
+		blobLeft -= *header.BlobGasUsed
+	}
 	return []*protocol.GasPool{
 		protocol.NewBlockGasPool(limit-used, limit-used, blobLeft),
 		protocol.NewBlockGasPool(limit-used, limit, blobLeft),
@@ -80,7 +83,7 @@ func (e *ExecModule) InclusionListSatisfied(ctx context.Context, blockHash commo
 	if err != nil || block == nil {
 		return nil, err
 	}
-	if allTxnsInBlock(block.Transactions(), il) {
+	if len(protocol.OmittedInclusionListTxns(block.Transactions(), il)) == 0 {
 		satisfied := true
 		e.readAheader.SetInclusionListResult(blockHash, ilHash, satisfied)
 		return &satisfied, nil
@@ -130,19 +133,6 @@ func (e *ExecModule) InclusionListSatisfied(ctx context.Context, blockHash commo
 	}
 	e.readAheader.SetInclusionListResult(blockHash, ilHash, *result)
 	return result, nil
-}
-
-func allTxnsInBlock(blockTxns, il types.Transactions) bool {
-	inBlock := make(map[common.Hash]struct{}, len(blockTxns))
-	for _, txn := range blockTxns {
-		inBlock[txn.Hash()] = struct{}{}
-	}
-	for _, txn := range il {
-		if _, ok := inBlock[txn.Hash()]; !ok {
-			return false
-		}
-	}
-	return true
 }
 
 // replayBlockGasPool re-executes block on the state before it to recover the

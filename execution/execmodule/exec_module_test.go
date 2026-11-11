@@ -55,6 +55,7 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/notifications"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -1232,6 +1233,113 @@ func TestValidateChainKeepsInclusionListResultForValidatedSideFork(t *testing.T)
 	}
 }
 
+type receiptCollector struct {
+	notifications.ChainEventNotifier
+	receipts []*notifications.ReceiptNotification
+}
+
+func (c *receiptCollector) HasReceiptSubscriptions() bool { return true }
+func (c *receiptCollector) OnReceipts(r []*notifications.ReceiptNotification) {
+	c.receipts = append(c.receipts, r...)
+}
+
+// lateCancelCtx is cancelled once its Done channel has been requested more than limit times.
+type lateCancelCtx struct {
+	context.Context
+	calls *atomic.Int64
+	limit int64
+	done  chan struct{}
+	once  *sync.Once
+}
+
+func newLateCancelCtx(parent context.Context, limit int64) lateCancelCtx {
+	return lateCancelCtx{Context: parent, calls: new(atomic.Int64), limit: limit, done: make(chan struct{}), once: new(sync.Once)}
+}
+
+func (c lateCancelCtx) Done() <-chan struct{} {
+	if c.calls.Add(1) > c.limit {
+		c.once.Do(func() { close(c.done) })
+	}
+	return c.done
+}
+
+func (c lateCancelCtx) Err() error {
+	select {
+	case <-c.done:
+		return context.Canceled
+	default:
+		return nil
+	}
+}
+
+func TestFailedInclusionListRecheckKeepsSideForkValidated(t *testing.T) {
+	t.Parallel()
+	for limit := int64(0); ; limit++ {
+		m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+		canonical, err := m.GenerateChain(1, func(_ int, gen *blockgen.BlockGen) {
+			gen.SetCoinbase(common.Address{1})
+		})
+		require.NoError(t, err)
+		fork, err := m.GenerateChain(1, func(_ int, gen *blockgen.BlockGen) {
+			gen.SetCoinbase(common.Address{2})
+		})
+		require.NoError(t, err)
+		require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), canonical.Blocks))
+		sideBlock := fork.TopBlock
+		insertAndValidate(t, m, sideBlock)
+		insertRes, err := m.InsertBlocks(t.Context(), []*types.Block{sideBlock.WithInclusionList(types.Transactions{signedInclusionListTxn(t, m)})})
+		require.NoError(t, err)
+		require.Equal(t, execmodule.ExecutionStatusSuccess, insertRes)
+
+		_, err = m.ValidateChain(newLateCancelCtx(t.Context(), limit), sideBlock.Header())
+		require.True(t, m.ExecModule.IsValidated(sideBlock.Hash()), "limit %d: err=%v", limit, err)
+		if err == nil {
+			require.Positive(t, limit, "no cancellation point was reached")
+			return
+		}
+	}
+}
+
+func TestInclusionListRecheckOfSideForkKeepsExtendingFork(t *testing.T) {
+	t.Parallel()
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	canonical, err := m.GenerateChain(2, func(i int, gen *blockgen.BlockGen) {
+		gen.SetCoinbase(common.Address{1})
+		if i == 1 {
+			gen.AddTx(signedInclusionListTxn(t, m))
+		}
+	})
+	require.NoError(t, err)
+	fork, err := m.GenerateChain(1, func(_ int, gen *blockgen.BlockGen) {
+		gen.SetCoinbase(common.Address{2})
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), canonical.Blocks[:1]))
+	sideBlock := fork.TopBlock
+	insertAndValidate(t, m, sideBlock)
+	next := canonical.Blocks[1]
+	insertAndValidate(t, m, next)
+	extendingHash, _, extendingDomains := m.ForkValidator.ExtendingFork()
+	require.Equal(t, next.Hash(), extendingHash)
+
+	il := types.Transactions{signedInclusionListTxn(t, m)}
+	insertAndValidate(t, m, sideBlock.WithInclusionList(il))
+	satisfied, err := m.ExecModule.InclusionListSatisfied(t.Context(), sideBlock.Hash(), sideBlock.NumberU64(), il)
+	require.NoError(t, err)
+	require.NotNil(t, satisfied)
+	require.False(t, *satisfied)
+
+	keptHash, _, keptDomains := m.ForkValidator.ExtendingFork()
+	require.Equal(t, next.Hash(), keptHash)
+	require.Same(t, extendingDomains, keptDomains)
+	fcuResult, err := m.UpdateForkChoice(t.Context(), next.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, fcuResult.Status)
+	collector := &receiptCollector{}
+	m.Notifications.RecentReceipts.NotifyReceipts(collector, next.NumberU64(), next.NumberU64()+1)
+	require.Len(t, collector.receipts, 1)
+}
+
 func TestInclusionListSatisfiedForCanonicalBlockMissingTxn(t *testing.T) {
 	t.Parallel()
 	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
@@ -1270,6 +1378,30 @@ func TestInclusionListSatisfiedUsesStateAfterBlockTxns(t *testing.T) {
 }
 
 // Not parallel: it toggles the global dbg.Exec3Parallel.
+// Not parallel: it toggles the global dbg.Exec3Parallel.
+func TestValidateChainKeepsCachedInclusionListVerdict(t *testing.T) {
+	prevParallel := dbg.Exec3Parallel
+	t.Cleanup(func() { dbg.Exec3Parallel = prevParallel })
+
+	for _, parallel := range []bool{false, true} {
+		t.Run(fmt.Sprintf("parallel=%t", parallel), func(t *testing.T) {
+			dbg.Exec3Parallel = parallel
+			m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+			chainPack, err := m.GenerateChain(1, nil)
+			require.NoError(t, err)
+			il := types.Transactions{signedInclusionListTxn(t, m)}
+			block := chainPack.Blocks[0].WithInclusionList(il)
+			// The real verdict is false; a re-check would overwrite this seed.
+			m.ReadAheader.SetInclusionListResult(block.Hash(), exec.InclusionListHash(il), true)
+
+			insertAndValidate(t, m, block)
+			satisfied, ok := m.ReadAheader.ReadInclusionListResult(block.Hash(), exec.InclusionListHash(il))
+			require.True(t, ok)
+			require.True(t, satisfied)
+		})
+	}
+}
+
 func TestValidateChainChecksInclusionListAgainstStateAfterBlockTxns(t *testing.T) {
 	prevParallel := dbg.Exec3Parallel
 	t.Cleanup(func() { dbg.Exec3Parallel = prevParallel })
@@ -1339,6 +1471,36 @@ func TestInclusionListSatisfiedWithoutStateHistoryWhenAllTxnsInBlock(t *testing.
 	require.True(t, *satisfied)
 }
 
+func TestInclusionListSatisfiedWithoutStateHistoryWhenOnlyBlobTxnsAreOmitted(t *testing.T) {
+	t.Parallel()
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	blockTxn := signedInclusionListTxn(t, m)
+	chainPack, err := m.GenerateChain(1, func(i int, gen *blockgen.BlockGen) {
+		gen.AddTx(blockTxn)
+	})
+	require.NoError(t, err)
+	block := chainPack.Blocks[0]
+	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), []*types.Block{block}))
+	clearStateHistory(t, m)
+	to := common.Address{9}
+	blobTxn, err := types.SignTx(&types.BlobTx{
+		DynamicFeeTransaction: types.DynamicFeeTransaction{
+			CommonTx: types.CommonTx{Nonce: 1, GasLimit: params.TxGas, To: &to},
+			ChainID:  *m.ChainConfig.ChainID,
+			FeeCap:   *uint256.NewInt(100_000_000_000),
+			TipCap:   *uint256.NewInt(1),
+		},
+		MaxFeePerBlobGas:    *uint256.NewInt(100_000_000_000),
+		BlobVersionedHashes: []common.Hash{{0x01}},
+	}, *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
+	require.NoError(t, err)
+
+	satisfied, err := m.ExecModule.InclusionListSatisfied(t.Context(), block.Hash(), block.NumberU64(), types.Transactions{blockTxn, blobTxn})
+	require.NoError(t, err)
+	require.NotNil(t, satisfied)
+	require.True(t, *satisfied)
+}
+
 func TestInclusionListSatisfiedWithoutStateHistoryIsNil(t *testing.T) {
 	t.Parallel()
 	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
@@ -1377,34 +1539,38 @@ func clearStateHistory(t *testing.T, m *execmoduletester.ExecModuleTester) {
 // func resumes the FCU and waits for it.
 func newOverlayPauseTester(t *testing.T) (*execmoduletester.ExecModuleTester, func(header *types.Header) (release func())) {
 	t.Helper()
-	var armed atomic.Bool
-	published := make(chan struct{})
-	proceed := make(chan struct{})
+	type pause struct{ published, proceed chan struct{} }
+	var armed atomic.Pointer[pause]
 	m := execmoduletester.New(t,
 		execmoduletester.WithChainConfig(chain.AllProtocolChanges),
 		execmoduletester.WithStateTransitionObserver(func(ctx context.Context, point execmodule.StateTransitionPoint) {
-			if point != execmodule.StateTransitionOverlayPublished || !armed.CompareAndSwap(true, false) {
+			if point != execmodule.StateTransitionOverlayPublished {
 				return
 			}
-			close(published)
+			p := armed.Swap(nil)
+			if p == nil {
+				return
+			}
+			close(p.published)
 			select {
-			case <-proceed:
+			case <-p.proceed:
 			case <-ctx.Done():
 			}
 		}),
 	)
 	m.ExecModule.SetPublishedSD(m.Notifications.Events.LatestSD)
 	pauseFCU := func(header *types.Header) func() {
-		armed.Store(true)
+		p := &pause{published: make(chan struct{}), proceed: make(chan struct{})}
+		armed.Store(p)
 		fcuDone := make(chan error, 1)
 		go func() {
 			_, err := m.UpdateForkChoice(t.Context(), header)
 			fcuDone <- err
 		}()
-		resume := sync.OnceFunc(func() { close(proceed) })
+		resume := sync.OnceFunc(func() { close(p.proceed) })
 		t.Cleanup(resume)
 		select {
-		case <-published:
+		case <-p.published:
 		case <-time.After(time.Minute):
 			t.Fatal("FCU result was not published")
 		}
@@ -1599,6 +1765,27 @@ func TestInclusionListSatisfiedUnknownBlockIsNil(t *testing.T) {
 	satisfied, err := m.ExecModule.InclusionListSatisfied(t.Context(), common.Hash{0x1}, 1, types.Transactions{signedInclusionListTxn(t, m)})
 	require.NoError(t, err)
 	require.Nil(t, satisfied)
+}
+
+func TestInclusionListSatisfiedForBlockWithoutBlobGasUsed(t *testing.T) {
+	t.Parallel()
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.TestChainBerlinConfig))
+	chainPack, err := m.GenerateChain(1, nil)
+	require.NoError(t, err)
+	block := chainPack.Blocks[0]
+	require.Nil(t, block.Header().BlobGasUsed)
+	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), []*types.Block{block}))
+	missing, err := types.SignTx(
+		types.NewTransaction(0, common.Address{1}, uint256.NewInt(1), params.TxGas, uint256.NewInt(1_000_000_000), nil),
+		*types.LatestSignerForChainID(m.ChainConfig.ChainID),
+		m.Key,
+	)
+	require.NoError(t, err)
+
+	satisfied, err := m.ExecModule.InclusionListSatisfied(t.Context(), block.Hash(), block.NumberU64(), types.Transactions{missing})
+	require.NoError(t, err)
+	require.NotNil(t, satisfied)
+	require.False(t, *satisfied)
 }
 
 func TestAssembleBlock(t *testing.T) {

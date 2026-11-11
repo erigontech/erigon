@@ -27,10 +27,14 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/cache"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
 type BlockReadAheader struct {
@@ -723,6 +727,24 @@ func (bra *BlockReadAheader) ReadInclusionList(blockHash common.Hash) (types.Tra
 
 func (bra *BlockReadAheader) ReadInclusionListResult(blockHash, ilHash common.Hash) (bool, bool) {
 	return bra.inclusionListResults.Get(inclusionListKey{block: blockHash, il: ilHash})
+}
+
+// CheckInclusionList checks the IL cached for blockHash against the state after
+// blockTxns, unless a verdict for this block and IL is already cached.
+func (bra *BlockReadAheader) CheckInclusionList(gp *protocol.GasPool, blockHash common.Hash, blockTxns types.Transactions, stateReader state.StateReader, blockContext *evmtypes.BlockContext, chainConfig *chain.Config, vmConfig *vm.Config) error {
+	il, ilHash, ok := bra.ReadInclusionList(blockHash)
+	if !ok {
+		return nil
+	}
+	if _, checked := bra.ReadInclusionListResult(blockHash, ilHash); checked {
+		return nil
+	}
+	satisfied, err := protocol.CheckInclusionListTransactions(gp, blockTxns, il, stateReader, blockContext, chainConfig, vmConfig)
+	if err != nil {
+		return err
+	}
+	bra.SetInclusionListResult(blockHash, ilHash, satisfied)
+	return nil
 }
 
 func (bra *BlockReadAheader) ReadBlockWithSenders(blockHash common.Hash) (*types.Block, bool) {
