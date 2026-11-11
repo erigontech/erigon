@@ -1899,6 +1899,28 @@ func (p *TxPool) AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcf
 }
 
 func (p *TxPool) addNewTxns(ctx context.Context, newTxns TxnSlots, sources []remoteSource, waitForRecovery bool) ([]txpoolcfg.DiscardReason, error) {
+	for {
+		reasons, err := p.tryAddNewTxns(ctx, newTxns, sources, waitForRecovery)
+		if !waitForRecovery || !errors.Is(err, errStateViewStale) {
+			return reasons, err
+		}
+		for {
+			p.lock.Lock()
+			stale, generation := p.stateViewStale, p.stateGeneration
+			p.lock.Unlock()
+			if !stale {
+				break
+			}
+			if !p.waitForStateChange(ctx, generation) {
+				return nil, ctx.Err()
+			}
+		}
+	}
+}
+
+// Head-change retries share one simulation deadline. Frame admission returns
+// errStateViewStale so recovery can wait outside that budget and restart admission.
+func (p *TxPool) tryAddNewTxns(ctx context.Context, newTxns TxnSlots, sources []remoteSource, waitForRecovery bool) ([]txpoolcfg.DiscardReason, error) {
 	reasons, preparedCells, err := p.prepareTxns(ctx, newTxns, sources, waitForRecovery)
 	if err != nil {
 		return nil, err
@@ -1914,9 +1936,15 @@ func (p *TxPool) addNewTxns(ctx context.Context, newTxns TxnSlots, sources []rem
 	for {
 		var frames frameValidationBatch
 		if hasFrames {
+			p.lock.Lock()
+			stale := p.stateViewStale
+			p.lock.Unlock()
+			if stale {
+				return nil, errStateViewStale
+			}
 			frames = p.prepareFrames(simulationCtx, newTxns)
 		}
-		err = p.withLockedState(ctx, &newTxns, waitForRecovery, func(_ kv.TemporalTx, cacheView kvcache.CacheView) error {
+		err = p.withLockedState(ctx, &newTxns, waitForRecovery && !hasFrames, func(_ kv.TemporalTx, cacheView kvcache.CacheView) error {
 			preparedReasons, err := p.applyFrameValidation(simulationCtx, newTxns, frames, precheckReasons, cacheView)
 			if err != nil {
 				return err

@@ -24,6 +24,7 @@ import (
 	"sync"
 	"testing"
 	"testing/synctest"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -172,7 +173,7 @@ func TestFramePoolAdmissionWaitsForStateRecovery(t *testing.T) {
 		go func() {
 			reasons, err := pool.AddLocalTxns(ctx, txns)
 			if err == nil && (len(reasons) != 1 || reasons[0] != txpoolcfg.Success) {
-				err = errors.New("frame admission failed")
+				err = fmt.Errorf("frame admission failed: %v", reasons)
 			}
 			admitted <- err
 		}()
@@ -183,11 +184,73 @@ func TestFramePoolAdmissionWaitsForStateRecovery(t *testing.T) {
 		default:
 		}
 		require.Empty(t, pool.ethBackend.(*frameValidationBackend).calls, "simulation must not use the stale head")
+		time.Sleep(2 * frameValidationTimeout)
 		unblock()
 		require.NoError(t, <-updated)
 		require.NoError(t, <-admitted)
 		require.Equal(t, PendingSubPool, pool.byHash[string(frame.IDHash[:])].currentSubPool)
 	})
+}
+
+func TestFramePoolRecoveryDuringAdmission(t *testing.T) {
+	for _, local := range []bool{true, false} {
+		name := "remote"
+		if local {
+			name = "local"
+		}
+		t.Run(name, func(t *testing.T) {
+			_, pool, sender := keyedFramePoolEnv(t)
+			backend := pool.ethBackend.(*frameValidationBackend)
+			backend.onValidate = sync.OnceFunc(pool.MarkStateStale)
+			synctest.Test(t, func(t *testing.T) {
+				ctx := t.Context()
+				frame := framePoolSlot(t, sender, 1, 2, uint256.Int{1})
+				var txns TxnSlots
+				txns.Append(frame, sender[:], local)
+				var reasons []txpoolcfg.DiscardReason
+				var admissionErr error
+				done := make(chan struct{})
+				if local {
+					go func() {
+						defer close(done)
+						reasons, admissionErr = pool.AddLocalTxns(ctx, txns)
+					}()
+				} else {
+					pool.started.Store(true)
+					pool.AddRemoteTxns(ctx, txns, nil, nil)
+					require.NoError(t, pool.processRemoteTxns(ctx))
+					go func() {
+						defer close(done)
+						pool.processRemoteFrame(ctx, <-pool.remoteFrames.ready)
+					}()
+				}
+				synctest.Wait()
+				require.True(t, pool.stateViewStale)
+				time.Sleep(2 * frameValidationTimeout)
+				synctest.Wait()
+				select {
+				case <-done:
+					t.Fatal("admission must wait for recovery despite the simulation deadline")
+				default:
+				}
+				require.Len(t, backend.calls, 1, "recovery must not repeatedly simulate against stale state")
+				if !local {
+					require.Contains(t, pool.remoteFrames.pending, string(frame.IDHash[:]))
+				}
+
+				change := newBlockChangeForAccounts(common.Hash{1}, 0, sender)
+				require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+				<-done
+				require.NoError(t, admissionErr)
+				if local {
+					require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+				}
+				require.Contains(t, pool.byHash, string(frame.IDHash[:]))
+				require.Len(t, backend.calls, 2)
+				require.Empty(t, pool.remoteFrames.pending)
+			})
+		})
+	}
 }
 
 func TestRemoteAdmissionDefersUntilStateRecovery(t *testing.T) {
