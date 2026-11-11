@@ -278,19 +278,13 @@ func TestDecodeAndReadNoForkDigestMaxRejectsTrailingData(t *testing.T) {
 	require.ErrorIs(t, err, ErrTrailingData)
 }
 
-func TestDecodeAndReadNoForkDigestMaxRejectsTrailingFrames(t *testing.T) {
-	wire := append(encodeHashList(t, 1), snappyStreamIdentifier...)
-
-	err := DecodeAndReadNoForkDigestMax(bytes.NewReader(wire), solid.NewHashList(16), clparams.Phase0Version, 16*length.Hash)
-	require.ErrorIs(t, err, ErrTrailingData)
-}
-
 func TestDecodeAndReadNoForkDigestMaxRejectsMalformedTrailingBytes(t *testing.T) {
 	const maxSize = 16 * length.Hash
 	for _, test := range []struct {
 		name    string
 		trailer []byte
 	}{
+		{name: "valid snappy frame", trailer: snappyStreamIdentifier},
 		{name: "zero byte", trailer: []byte{0x00}},
 		{name: "one byte", trailer: []byte{0x01}},
 		{name: "three garbage bytes", trailer: []byte{0xab, 0xab, 0xab}},
