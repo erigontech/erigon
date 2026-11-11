@@ -479,7 +479,7 @@ func execV3Finalize(ctx context.Context, execErr error, cfg ExecuteBlockCfg, dom
 		// However, we should still at the very least report the last block number to it, so it can update its block progress.
 		// Otherwise, we can get in a deadlock situation when there is a block building request in environments where
 		// the Erigon process is the only block builder (e.g. some Hive tests, kurtosis testnets with one erigon block builder, etc.)
-		cfg.notifications.Accumulator.StartRange(firstBlockNum, lastHeader)
+		cfg.notifications.Accumulator.StartHeadOnlyRange(firstBlockNum, lastHeader)
 	}
 
 	return execErr

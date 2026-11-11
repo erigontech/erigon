@@ -137,40 +137,7 @@ func (d *Dispatcher) Dispatch(
 	}
 
 	if d.events != nil {
-		base := finishProgressBefore
-		if prevUnwindPoint != nil && *prevUnwindPoint < finishProgressBefore {
-			base = *prevUnwindPoint
-		}
-		// Retained changes can precede this run's Finish progress. Include their
-		// headers when they are finally delivered.
-		if accumulator != nil {
-			for _, change := range accumulator.Changes() {
-				before := change.BlockHeight
-				if change.Direction == notifications.DirectionForward {
-					before = change.FirstBlockHeight
-					if before > 0 {
-						before--
-					}
-				}
-				base = min(base, before)
-			}
-		}
-		var notifyFrom uint64
-		switch {
-		case finishProgressAfter == 0:
-			// Genesis (block 0): notify from block 0.
-			notifyFrom = 0
-		default:
-			// finishProgressAfter can trail finishProgressBefore, and a wrapped
-			// span would clamp to 1024 and notify over a range that never ran.
-			span, underflow := math.SafeSub(finishProgressAfter, base)
-			if underflow {
-				span = 0
-			}
-			notifyFrom = finishProgressAfter - min(span, notifications.MaxNotifiedBlocks) + 1
-		}
-		notifyTo := finishProgressAfter + 1 //[from, to)
-
+		notifyFrom, notifyTo := notificationRange(finishProgressBefore, finishProgressAfter, prevUnwindPoint, accumulator)
 		if err := stagedsync.NotifyNewHeaders(ctx, notifyFrom, notifyTo, d.events, tx, d.logger); err != nil {
 			return err
 		}
@@ -185,17 +152,17 @@ func (d *Dispatcher) Dispatch(
 	}
 
 	// Head markers can lead execution; announce the head whose state is available.
-	currentHeader := rawdb.ReadHeaderByNumber(tx, finishProgressAfter)
-	if accumulator != nil && currentHeader != nil {
-		if changes := accumulator.Changes(); len(changes) == 0 || changes[len(changes)-1].BlockHeight < currentHeader.Number.Uint64() {
-			accumulator.StartChange(currentHeader, nil, false)
+	executedHeader := rawdb.ReadHeaderByNumber(tx, finishProgressAfter)
+	if accumulator != nil && executedHeader != nil {
+		if changes := accumulator.Changes(); len(changes) == 0 || changes[len(changes)-1].BlockHeight < executedHeader.Number.Uint64() {
+			accumulator.StartChange(executedHeader, nil, false)
 		}
 
-		pendingBaseFee := misc.CalcBaseFee(d.chainConfig, currentHeader)
+		pendingBaseFee := misc.CalcBaseFee(d.chainConfig, executedHeader)
 		pendingBlobFee := d.chainConfig.GetMinBlobGasPrice()
-		if currentHeader.ExcessBlobGas != nil {
-			nextBlockTime := currentHeader.Time + d.chainConfig.SecondsPerSlot()
-			excessBlobGas := misc.CalcExcessBlobGas(d.chainConfig, currentHeader, nextBlockTime)
+		if executedHeader.ExcessBlobGas != nil {
+			nextBlockTime := executedHeader.Time + d.chainConfig.SecondsPerSlot()
+			excessBlobGas := misc.CalcExcessBlobGas(d.chainConfig, executedHeader, nextBlockTime)
 			f, err := misc.GetBlobGasPrice(d.chainConfig, excessBlobGas, nextBlockTime)
 			if err != nil {
 				return err
@@ -205,9 +172,45 @@ func (d *Dispatcher) Dispatch(
 
 		finalizedBlock := common.Deref(rawdb.ReadHeaderNumber(tx, rawdb.ReadForkchoiceFinalized(tx)))
 
-		accumulator.SendAndReset(ctx, d.stateChangeConsumer, pendingBaseFee.Uint64(), pendingBlobFee, currentHeader.GasLimit, finalizedBlock)
+		accumulator.SendAndReset(ctx, d.stateChangeConsumer, pendingBaseFee.Uint64(), pendingBlobFee, executedHeader.GasLimit, finalizedBlock)
 	}
 	return nil
+}
+
+// notificationRange returns [from, to) for pending block notifications.
+func notificationRange(finishProgressBefore, finishProgressAfter uint64, prevUnwindPoint *uint64, accumulator *notifications.Accumulator) (from, to uint64) {
+	base := finishProgressBefore
+	if prevUnwindPoint != nil && *prevUnwindPoint < finishProgressBefore {
+		base = *prevUnwindPoint
+	}
+	// Retained changes can precede this run's Finish progress. Include their
+	// headers when they are finally delivered.
+	if accumulator != nil {
+		for _, change := range accumulator.Changes() {
+			before := change.BlockHeight
+			if change.Direction == notifications.DirectionForward {
+				before = change.FirstBlockHeight
+				if before > 0 {
+					before--
+				}
+			}
+			base = min(base, before)
+		}
+	}
+	switch {
+	case finishProgressAfter == 0:
+		// Genesis (block 0): notify from block 0.
+		from = 0
+	default:
+		// finishProgressAfter can trail finishProgressBefore, and a wrapped
+		// span would clamp to 1024 and notify over a range that never ran.
+		span, underflow := math.SafeSub(finishProgressAfter, base)
+		if underflow {
+			span = 0
+		}
+		from = finishProgressAfter - min(span, notifications.MaxNotifiedBlocks) + 1
+	}
+	return from, finishProgressAfter + 1
 }
 
 // cacheMissingReceipts regenerates from committedTx the receipts of the blocks in [from,to) the cache lacks.

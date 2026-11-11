@@ -713,9 +713,14 @@ func TestRejectedHeadOnlyCatchupRetainsHeaderRange(t *testing.T) {
 }
 
 func TestRejectedCatchupForkchoiceKeepsCommittedNotifications(t *testing.T) {
-	for _, name := range []string{"committed head", "new head"} {
-		t.Run(name, func(t *testing.T) {
-			sameHead := name == "committed head"
+	for _, tc := range []struct {
+		name     string
+		sameHead bool
+	}{
+		{name: "committed head", sameHead: true},
+		{name: "new head"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			m, canonical, side := newReorgChains(t, 2, 27, WithStepSize(16), WithLoopBlockLimit(8))
 			waitForBatchWithHead := subscribeStateChangeHeads(t, m)
 			require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), canonical.Blocks))
@@ -755,7 +760,7 @@ func TestRejectedCatchupForkchoiceKeepsCommittedNotifications(t *testing.T) {
 			headers, unsubscribe := m.Notifications.Events.AddHeaderSubscription()
 			t.Cleanup(unsubscribe)
 			newHead := side.TopBlock
-			if sameHead {
+			if tc.sameHead {
 				newHead = side.Blocks[committed-1]
 			} else {
 				status, err = m.InsertBlocks(t.Context(), []*types.Block{newHead})

@@ -48,13 +48,14 @@ const (
 // No protobuf dependencies — conversion to protobuf happens at the gRPC boundary.
 type StateChange struct {
 	BlockHeight uint64
-	BlockHash   common.Hash
-	BlockTime   uint64
-	Direction   Direction
-	Txs         [][]byte
-	Changes     []AccountChange
-	// Header delivery needs the range's start even when individual state changes are omitted.
+	// Inclusive start of a forward range. It equals BlockHeight unless the
+	// range omits individual state changes.
 	FirstBlockHeight uint64
+	BlockHash        common.Hash
+	BlockTime        uint64
+	Direction        Direction
+	Txs              [][]byte
+	Changes          []AccountChange
 }
 
 // AccountChange holds a single account's state change.

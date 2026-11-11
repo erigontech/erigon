@@ -378,13 +378,21 @@ func TestFetchRetainedForwardThenUnwindKeepsReplacement(t *testing.T) {
 }
 
 func TestFetchStateChangesUseLastTransactionDirection(t *testing.T) {
-	for _, kind := range []string{"ordinary", "frame", "blob frame"} {
-		t.Run(kind, func(t *testing.T) {
+	for _, kind := range []struct {
+		name  string
+		frame bool
+		blob  bool
+	}{
+		{name: "ordinary"},
+		{name: "frame", frame: true},
+		{name: "blob frame", frame: true, blob: true},
+	} {
+		t.Run(kind.name, func(t *testing.T) {
 			rlps := [][]byte{decodeHex(TxnParseMainnetTests[1].PayloadStr), decodeHex(TxnParseMainnetTests[2].PayloadStr)}
-			if kind != "ordinary" {
+			if kind.frame {
 				for i := range rlps {
 					frame := framePoolSlotWithNonce(t, common.Address{1}, uint64(i), 1, 2).Txn.(*types.FrameTransaction)
-					if kind == "blob frame" {
+					if kind.blob {
 						frame.BlobVersionedHashes = []common.Hash{{1}}
 					}
 					var encoded bytes.Buffer
@@ -414,7 +422,7 @@ func TestFetchStateChangesUseLastTransactionDirection(t *testing.T) {
 							switch {
 							case tc.last == remoteproto.Direction_FORWARD:
 								got = mined
-							case kind == "blob frame":
+							case kind.blob:
 								got = unwindBlobs
 							default:
 								got = unwind

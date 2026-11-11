@@ -106,8 +106,8 @@ func (a *Accumulator) StartChange(h *types.Header, txs [][]byte, unwind bool) {
 	}
 }
 
-// StartRange records the head of an executed range without individual state changes.
-func (a *Accumulator) StartRange(firstBlock uint64, lastHeader *types.Header) {
+// StartHeadOnlyRange records the head of an executed range without individual state changes.
+func (a *Accumulator) StartHeadOnlyRange(firstBlock uint64, lastHeader *types.Header) {
 	a.StartChange(lastHeader, nil, false)
 	a.latestChange.FirstBlockHeight = firstBlock
 }
