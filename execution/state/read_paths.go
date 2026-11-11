@@ -991,7 +991,7 @@ func (ibs *IntraBlockState) warmReadable(addr accounts.Address) bool {
 
 // warmField serves a repeat read of an account field without the version-map
 // probe: this tx's own write on a dirty address, else the recorded read.
-func warmField[T any](s *IntraBlockState, addr accounts.Address, pickW func(*addrIO) **VersionedWrite[T], path AccountPath, pick func(*addrIO) *VersionedRead[T]) (T, ReadSource, Version, bool) {
+func warmField[T any](s *IntraBlockState, addr accounts.Address, pickW func(*addrIO) **VersionedWrite[T], path AccountPath, pick func(*ioTable) *[]VersionedRead[T]) (T, ReadSource, Version, bool) {
 	if !s.warmReadable(addr) {
 		if vw, ok := getW(&s.versionedWrites, addr, pickW); ok {
 			return vw.Val, WriteSetRead, Version{TxIndex: s.txIndex, Incarnation: s.version}, true

@@ -35,16 +35,8 @@ type addrIO struct {
 	accessed bool
 	access   accessOptions
 
-	address        VersionedRead[AccountView]
-	balance        VersionedRead[uint256.Int]
-	nonce          VersionedRead[uint64]
-	incarnation    VersionedRead[uint64]
-	selfDestruct   VersionedRead[bool]
-	createContract VersionedRead[bool]
-	code           VersionedRead[accounts.Code]
-	codeHash       VersionedRead[accounts.CodeHash]
-	codeSize       VersionedRead[int]
-	storage        map[accounts.StorageKey]VersionedRead[uint256.Int]
+	ri      [CreateContractPath + 1]int32 // per path: index of this record's read in the table's readSlots
+	storage map[accounts.StorageKey]VersionedRead[uint256.Int]
 
 	wAddress        *VersionedWrite[*accounts.Account]
 	wBalance        *VersionedWrite[uint256.Int]
@@ -61,9 +53,45 @@ type addrIO struct {
 // ioTable holds an IntraBlockState's addrIO records in a slice reused across
 // txs. A record pointer is valid only until the next record is added.
 type ioTable struct {
-	idx  map[accounts.Address]int32
-	recs []addrIO
-	last int32
+	idx   map[accounts.Address]int32
+	recs  []addrIO
+	last  int32
+	reads readSlots
+}
+
+// readSlots holds the non-storage reads of all records, one dense slice per
+// path, so a record pays only for the fields its tx read.
+type readSlots struct {
+	address        []VersionedRead[AccountView]
+	balance        []VersionedRead[uint256.Int]
+	nonce          []VersionedRead[uint64]
+	incarnation    []VersionedRead[uint64]
+	selfDestruct   []VersionedRead[bool]
+	createContract []VersionedRead[bool]
+	code           []VersionedRead[accounts.Code]
+	codeHash       []VersionedRead[accounts.CodeHash]
+	codeSize       []VersionedRead[int]
+}
+
+func resetSlots[T any](s *[]VersionedRead[T]) {
+	if cap(*s) > maxPooledEntries {
+		*s = nil
+		return
+	}
+	clear(*s) // the values must not be pinned by a reused table
+	*s = (*s)[:0]
+}
+
+func (rs *readSlots) reset() {
+	resetSlots(&rs.address)
+	resetSlots(&rs.balance)
+	resetSlots(&rs.nonce)
+	resetSlots(&rs.incarnation)
+	resetSlots(&rs.selfDestruct)
+	resetSlots(&rs.createContract)
+	resetSlots(&rs.code)
+	resetSlots(&rs.codeHash)
+	resetSlots(&rs.codeSize)
 }
 
 func pathBit(p AccountPath) uint16 { return 1 << p }
@@ -107,8 +135,6 @@ const maxReusedSlots = 256
 func (r *addrIO) clearReads() {
 	r.has = 0
 	r.accessed, r.access = false, accessOptions{}
-	// The reads hand out values that must not be pinned by a reused table.
-	r.address, r.code, r.codeHash = VersionedRead[AccountView]{}, VersionedRead[accounts.Code]{}, VersionedRead[accounts.CodeHash]{}
 	if len(r.storage) > maxReusedSlots {
 		r.storage = nil
 	} else {
@@ -136,6 +162,7 @@ func (r *addrIO) hasWrites() bool {
 // unreverted journal changes stay, so their dirty counts survive.
 func (t *ioTable) clearReads() {
 	n := 0
+	t.reads.reset()
 	for i := range t.recs {
 		t.recs[i].clearReads()
 		if t.recs[i].dirty > 0 || t.recs[i].hasWrites() {
@@ -197,28 +224,33 @@ func (t *ioTable) clearAccess() {
 	}
 }
 
-func getRead[T any](t *ioTable, addr accounts.Address, path AccountPath, pick func(*addrIO) *VersionedRead[T]) (VersionedRead[T], bool) {
+func getRead[T any](t *ioTable, addr accounts.Address, path AccountPath, pick func(*ioTable) *[]VersionedRead[T]) (VersionedRead[T], bool) {
 	if r := t.find(addr); r != nil && r.has&pathBit(path) != 0 {
-		return *pick(r), true
+		return (*pick(t))[r.ri[path]], true
 	}
 	return VersionedRead[T]{}, false
 }
 
-func setRead[T any](t *ioTable, addr accounts.Address, path AccountPath, pick func(*addrIO) *VersionedRead[T], tr VersionedRead[T]) {
-	r := t.get(addr)
-	*pick(r) = tr
+func setRead[T any](t *ioTable, addr accounts.Address, path AccountPath, pick func(*ioTable) *[]VersionedRead[T], tr VersionedRead[T]) {
+	r, slots := t.get(addr), pick(t)
+	if r.has&pathBit(path) != 0 {
+		(*slots)[r.ri[path]] = tr
+		return
+	}
+	r.ri[path] = int32(len(*slots))
+	*slots = append(*slots, tr)
 	r.has |= pathBit(path)
 }
 
-func pickAddress(r *addrIO) *VersionedRead[AccountView]        { return &r.address }
-func pickBalance(r *addrIO) *VersionedRead[uint256.Int]        { return &r.balance }
-func pickNonce(r *addrIO) *VersionedRead[uint64]               { return &r.nonce }
-func pickIncarnation(r *addrIO) *VersionedRead[uint64]         { return &r.incarnation }
-func pickSelfDestruct(r *addrIO) *VersionedRead[bool]          { return &r.selfDestruct }
-func pickCreateContract(r *addrIO) *VersionedRead[bool]        { return &r.createContract }
-func pickCode(r *addrIO) *VersionedRead[accounts.Code]         { return &r.code }
-func pickCodeHash(r *addrIO) *VersionedRead[accounts.CodeHash] { return &r.codeHash }
-func pickCodeSize(r *addrIO) *VersionedRead[int]               { return &r.codeSize }
+func pickAddress(t *ioTable) *[]VersionedRead[AccountView]        { return &t.reads.address }
+func pickBalance(t *ioTable) *[]VersionedRead[uint256.Int]        { return &t.reads.balance }
+func pickNonce(t *ioTable) *[]VersionedRead[uint64]               { return &t.reads.nonce }
+func pickIncarnation(t *ioTable) *[]VersionedRead[uint64]         { return &t.reads.incarnation }
+func pickSelfDestruct(t *ioTable) *[]VersionedRead[bool]          { return &t.reads.selfDestruct }
+func pickCreateContract(t *ioTable) *[]VersionedRead[bool]        { return &t.reads.createContract }
+func pickCode(t *ioTable) *[]VersionedRead[accounts.Code]         { return &t.reads.code }
+func pickCodeHash(t *ioTable) *[]VersionedRead[accounts.CodeHash] { return &t.reads.codeHash }
+func pickCodeSize(t *ioTable) *[]VersionedRead[int]               { return &t.reads.codeSize }
 
 func (t *ioTable) GetAddress(addr accounts.Address) (VersionedRead[AccountView], bool) {
 	return getRead(t, addr, AddressPath, pickAddress)
@@ -322,23 +354,23 @@ func (t *ioTable) getHeader(addr accounts.Address, path AccountPath, key account
 	}
 	switch path {
 	case AddressPath:
-		return r.address.ReadHeader, true
+		return t.reads.address[r.ri[AddressPath]].ReadHeader, true
 	case BalancePath:
-		return r.balance.ReadHeader, true
+		return t.reads.balance[r.ri[BalancePath]].ReadHeader, true
 	case NoncePath:
-		return r.nonce.ReadHeader, true
+		return t.reads.nonce[r.ri[NoncePath]].ReadHeader, true
 	case IncarnationPath:
-		return r.incarnation.ReadHeader, true
+		return t.reads.incarnation[r.ri[IncarnationPath]].ReadHeader, true
 	case SelfDestructPath:
-		return r.selfDestruct.ReadHeader, true
+		return t.reads.selfDestruct[r.ri[SelfDestructPath]].ReadHeader, true
 	case CreateContractPath:
-		return r.createContract.ReadHeader, true
+		return t.reads.createContract[r.ri[CreateContractPath]].ReadHeader, true
 	case CodePath:
-		return r.code.ReadHeader, true
+		return t.reads.code[r.ri[CodePath]].ReadHeader, true
 	case CodeHashPath:
-		return r.codeHash.ReadHeader, true
+		return t.reads.codeHash[r.ri[CodeHashPath]].ReadHeader, true
 	case CodeSizePath:
-		return r.codeSize.ReadHeader, true
+		return t.reads.codeSize[r.ri[CodeSizePath]].ReadHeader, true
 	}
 	return ReadHeader{}, false
 }
@@ -376,21 +408,21 @@ func (t *ioTable) ScanAddr(addr accounts.Address, fn func(path AccountPath, key 
 		return 0
 	}
 	n := 0
-	visit := func(path AccountPath, hdr *ReadHeader) {
+	visit := func(path AccountPath, hdr func(int32) *ReadHeader) {
 		if r.has&pathBit(path) != 0 {
-			fn(path, accounts.NilKey, hdr)
+			fn(path, accounts.NilKey, hdr(r.ri[path]))
 			n++
 		}
 	}
-	visit(AddressPath, &r.address.ReadHeader)
-	visit(BalancePath, &r.balance.ReadHeader)
-	visit(NoncePath, &r.nonce.ReadHeader)
-	visit(IncarnationPath, &r.incarnation.ReadHeader)
-	visit(SelfDestructPath, &r.selfDestruct.ReadHeader)
-	visit(CreateContractPath, &r.createContract.ReadHeader)
-	visit(CodePath, &r.code.ReadHeader)
-	visit(CodeHashPath, &r.codeHash.ReadHeader)
-	visit(CodeSizePath, &r.codeSize.ReadHeader)
+	visit(AddressPath, func(i int32) *ReadHeader { return &t.reads.address[i].ReadHeader })
+	visit(BalancePath, func(i int32) *ReadHeader { return &t.reads.balance[i].ReadHeader })
+	visit(NoncePath, func(i int32) *ReadHeader { return &t.reads.nonce[i].ReadHeader })
+	visit(IncarnationPath, func(i int32) *ReadHeader { return &t.reads.incarnation[i].ReadHeader })
+	visit(SelfDestructPath, func(i int32) *ReadHeader { return &t.reads.selfDestruct[i].ReadHeader })
+	visit(CreateContractPath, func(i int32) *ReadHeader { return &t.reads.createContract[i].ReadHeader })
+	visit(CodePath, func(i int32) *ReadHeader { return &t.reads.code[i].ReadHeader })
+	visit(CodeHashPath, func(i int32) *ReadHeader { return &t.reads.codeHash[i].ReadHeader })
+	visit(CodeSizePath, func(i int32) *ReadHeader { return &t.reads.codeSize[i].ReadHeader })
 	for k, tr := range r.storage {
 		fn(StoragePath, k, &tr.ReadHeader)
 		r.storage[k] = tr
@@ -407,31 +439,31 @@ func (t *ioTable) toReadSet() ReadSet {
 		a := r.addr
 		if r.has != 0 {
 			if r.has&pathBit(AddressPath) != 0 {
-				readSetPut(&s.address, a, r.address)
+				readSetPut(&s.address, a, t.reads.address[r.ri[AddressPath]])
 			}
 			if r.has&pathBit(BalancePath) != 0 {
-				readSetPut(&s.balance, a, r.balance)
+				readSetPut(&s.balance, a, t.reads.balance[r.ri[BalancePath]])
 			}
 			if r.has&pathBit(NoncePath) != 0 {
-				readSetPut(&s.nonce, a, r.nonce)
+				readSetPut(&s.nonce, a, t.reads.nonce[r.ri[NoncePath]])
 			}
 			if r.has&pathBit(IncarnationPath) != 0 {
-				readSetPut(&s.incarnation, a, r.incarnation)
+				readSetPut(&s.incarnation, a, t.reads.incarnation[r.ri[IncarnationPath]])
 			}
 			if r.has&pathBit(SelfDestructPath) != 0 {
-				readSetPut(&s.selfDestruct, a, r.selfDestruct)
+				readSetPut(&s.selfDestruct, a, t.reads.selfDestruct[r.ri[SelfDestructPath]])
 			}
 			if r.has&pathBit(CreateContractPath) != 0 {
-				readSetPut(&s.createContract, a, r.createContract)
+				readSetPut(&s.createContract, a, t.reads.createContract[r.ri[CreateContractPath]])
 			}
 			if r.has&pathBit(CodePath) != 0 {
-				readSetPut(&s.code, a, r.code)
+				readSetPut(&s.code, a, t.reads.code[r.ri[CodePath]])
 			}
 			if r.has&pathBit(CodeHashPath) != 0 {
-				readSetPut(&s.codeHash, a, r.codeHash)
+				readSetPut(&s.codeHash, a, t.reads.codeHash[r.ri[CodeHashPath]])
 			}
 			if r.has&pathBit(CodeSizePath) != 0 {
-				readSetPut(&s.codeSize, a, r.codeSize)
+				readSetPut(&s.codeSize, a, t.reads.codeSize[r.ri[CodeSizePath]])
 			}
 		}
 		if len(r.storage) > 0 {
