@@ -38,6 +38,7 @@ type poolTask struct {
 	result     *exec.TxResult
 	reruns     int
 	lastRunNs  int64
+	lastVoidNs int64 // the part of the last run after its first read of an unfinished write
 	rerunCause int
 
 	mu      sync.Mutex
@@ -256,18 +257,21 @@ func (pt *poolTask) run(p *taskPool, wk *poolWorker) bool {
 	if tv.version.Incarnation > 0 {
 		p.pe.reruns[pt.rerunCause].Add(1)
 		p.pe.wastedNs[pt.rerunCause].Add(pt.lastRunNs)
+		if pt.rerunCause == rerunAbort {
+			p.pe.voidTailNs.Add(pt.lastVoidNs)
+		}
 	}
 	be.cntExec.Add(1)
-	p.pe.execCount.Add(1)
 	tv.firstDepReadAt = time.Time{}
 	runStart := time.Now()
 	result := wk.w.RunTxTask(tv)
 	runEnd := time.Now()
 	pt.lastRunNs = runEnd.Sub(runStart).Nanoseconds()
 	errCause := rerunError
+	pt.lastVoidNs = 0
 	if !tv.firstDepReadAt.IsZero() {
 		errCause = rerunAbort
-		p.pe.voidTailNs.Add(runEnd.Sub(tv.firstDepReadAt).Nanoseconds())
+		pt.lastVoidNs = runEnd.Sub(tv.firstDepReadAt).Nanoseconds()
 	}
 	if txTask, ok := tv.Task.(*exec.TxTask); ok && txTask.ChargesSenderAtValidation(int(tv.version.Incarnation)) &&
 		(result.Err != nil || touchedSenderAccount(txTask, result)) {

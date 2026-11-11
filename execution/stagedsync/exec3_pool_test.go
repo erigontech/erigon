@@ -206,9 +206,9 @@ func TestPoolRepeatMetricsCountInPoolReruns(t *testing.T) {
 	aborts, abortWasted := sumExecMetric(mxDiscardsTotal, "abort")-abortsBefore, sumExecMetric(mxDiscardSecondsTotal, "abort")-abortWastedBefore
 	voidTail := sumExecMetric(mxVoidTailSecondsTotal) - voidTailBefore
 	t.Logf("runs=%d reruns=%d aborts=%v wasted=%vs voidTail=%vs", runs.Load(), reruns.Load(), aborts, wasted, voidTail)
-	if aborts > 0 {
-		require.Positive(t, voidTail, "%v aborted runs left no void tail", aborts)
-	}
+	require.Positive(t, reruns.Load(), "the counter chain must re-run")
+	require.Positive(t, aborts, "the counter chain must abort on an unfinished write")
+	require.Positive(t, voidTail, "%v aborted runs left no void tail", aborts)
 	require.LessOrEqual(t, voidTail, abortWasted, "the void tail is a part of the aborted run")
 }
 
