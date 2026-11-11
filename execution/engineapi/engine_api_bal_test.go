@@ -1504,6 +1504,28 @@ type balLieCall struct {
 // one sender in order.
 func buildBALLieBlock(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester, calls ...balLieCall) (common.Address, *engineapitester.MockClPayload, types.BlockAccessList) {
 	t.Helper()
+	slotValueData := func(slotValuePairs []uint64) []byte {
+		var data []byte
+		for _, v := range slotValuePairs {
+			word := uint256.NewInt(v).Bytes32()
+			data = append(data, word[:]...)
+		}
+		return data
+	}
+	send := balLieSender(t, eat)
+	contractAddr := deployBALLieContract(ctx, t, eat, send, balLieContractInitCode, slotValueData([]uint64{0, 1}))
+
+	txHashes := make([]common.Hash, 0, len(calls))
+	for _, c := range calls {
+		txHashes = append(txHashes, send(&contractAddr, c.value, slotValueData(c.slotValuePairs)).Hash())
+	}
+	payload, bal := buildBALLiePayload(ctx, t, eat, txHashes)
+	return contractAddr, payload, bal
+}
+
+// balLieSender returns a func that submits a legacy tx from the coinbase key, with consecutive nonces.
+func balLieSender(t *testing.T, eat engineapitester.EngineApiTester) func(to *common.Address, value uint64, data []byte) types.Transaction {
+	t.Helper()
 	signer := types.LatestSignerForChainID(eat.ChainConfig.ChainID)
 	sender := crypto.PubkeyToAddress(eat.CoinbaseKey.PublicKey)
 	gasPrice, err := eat.RpcApiClient.GasPrice()
@@ -1511,15 +1533,7 @@ func buildBALLieBlock(ctx context.Context, t *testing.T, eat engineapitester.Eng
 	pendingNonce, err := eat.RpcApiClient.GetTransactionCount(sender, rpc.PendingBlock)
 	require.NoError(t, err)
 	nonce := pendingNonce.Uint64()
-	send := func(to *common.Address, value uint64, slotValuePairs []uint64) common.Hash {
-		var data []byte
-		for _, v := range slotValuePairs {
-			word := uint256.NewInt(v).Bytes32()
-			data = append(data, word[:]...)
-		}
-		if to == nil {
-			data = common.FromHex(balLieContractInitCode)
-		}
+	return func(to *common.Address, value uint64, data []byte) types.Transaction {
 		tx, err := types.SignTx(&types.LegacyTx{
 			CommonTx: types.CommonTx{Nonce: nonce, GasLimit: 500_000, To: to, Value: *uint256.NewInt(value), Data: data},
 			GasPrice: *gasPrice,
@@ -1528,27 +1542,34 @@ func buildBALLieBlock(ctx context.Context, t *testing.T, eat engineapitester.Eng
 		nonce++
 		_, err = eat.RpcApiClient.SendTransaction(tx)
 		require.NoError(t, err)
-		return tx.Hash()
+		return tx
 	}
+}
 
-	contractAddr := types.CreateAddress(sender, nonce)
-	send(nil, 0, nil)
-	send(&contractAddr, 0, []uint64{0, 1})
-	_, err = eat.MockCl.BuildCanonicalBlock(ctx)
+// deployBALLieContract deploys initCode and calls it once with setupData in a block of its own.
+func deployBALLieContract(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester, send func(to *common.Address, value uint64, data []byte) types.Transaction, initCode string, setupData []byte) common.Address {
+	t.Helper()
+	deploy := send(nil, 0, common.FromHex(initCode))
+	contractAddr := types.CreateAddress(crypto.PubkeyToAddress(eat.CoinbaseKey.PublicKey), deploy.GetNonce())
+	if setupData != nil {
+		send(&contractAddr, 0, setupData)
+	}
+	_, err := eat.MockCl.BuildCanonicalBlock(ctx)
 	require.NoError(t, err)
 	code, err := eat.RpcApiClient.GetCode(contractAddr, rpc.LatestBlock)
 	require.NoError(t, err)
 	require.NotEmpty(t, code)
+	return contractAddr
+}
 
-	txHashes := make([]common.Hash, 0, len(calls))
-	for _, c := range calls {
-		txHashes = append(txHashes, send(&contractAddr, c.value, c.slotValuePairs))
-	}
+// buildBALLiePayload builds a block that holds exactly the txs with txHashes, in order.
+func buildBALLiePayload(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester, txHashes []common.Hash) (*engineapitester.MockClPayload, types.BlockAccessList) {
+	t.Helper()
 	payload, err := eat.MockCl.BuildCanonicalBlock(ctx)
 	require.NoError(t, err)
-	require.Len(t, payload.ExecutionPayload.Transactions, len(calls))
+	require.Len(t, payload.ExecutionPayload.Transactions, len(txHashes))
 	require.NoError(t, eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, payload.ExecutionPayload, txHashes...))
-	return contractAddr, payload, decodeAndValidateBAL(t, payload)
+	return payload, decodeAndValidateBAL(t, payload)
 }
 
 // hideStorageWrites lists the slots ac writes as reads only.
@@ -1593,4 +1614,98 @@ func requireBALMismatch(t *testing.T, status *enginetypes.PayloadStatus) {
 	require.Equalf(t, enginetypes.InvalidStatus, status.Status, "validation error: %v", status.ValidationError)
 	require.NotNil(t, status.ValidationError)
 	require.ErrorContains(t, status.ValidationError.Error(), "block access list mismatch")
+}
+
+// TestEngineApiBALSameTxSelfdestructLieInvalid pins the honest BAL of an account that two txs each create and
+// self-destruct, the second one reading the slot the first wrote, and that claiming the account unchanged while a tx
+// changes it makes the block invalid.
+func TestEngineApiBALSameTxSelfdestructLieInvalid(t *testing.T) {
+	if !dbg.Exec3Parallel {
+		t.Skip("requires parallel exec")
+	}
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
+	eat, err := engineapitester.DefaultEngineApiTester(ctx, logger, t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := eat.Close()
+		require.NoError(t, err)
+	})
+	slot0 := common.Hash{}
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		t.Run("no balance left", func(t *testing.T) {
+			child, payload, bal := buildSameTxSelfdestructBlock(ctx, t, eat, 0x33, sameTxSelfdestructCall{}, sameTxSelfdestructCall{})
+			c := findAccountChanges(bal, accounts.InternAddress(child))
+			requireOnlyStorageReadsAndBalances(t, c, []common.Hash{slot0})
+			require.Equal(t, enginetypes.ValidStatus, newPayloadWithBAL(ctx, t, eat, payload, bal).Status)
+
+			c.StorageReads = nil
+			requireBALMismatch(t, newPayloadWithBAL(ctx, t, eat, payload, bal))
+		})
+
+		t.Run("no balance left, funded by a later tx", func(t *testing.T) {
+			child, payload, bal := buildSameTxSelfdestructBlock(ctx, t, eat, 0x33, sameTxSelfdestructCall{}, sameTxSelfdestructCall{}, sameTxSelfdestructCall{value: 1, fundChild: true})
+			c := findAccountChanges(bal, accounts.InternAddress(child))
+			requireOnlyStorageReadsAndBalances(t, c, []common.Hash{slot0}, 3, 1)
+			require.Equal(t, enginetypes.ValidStatus, newPayloadWithBAL(ctx, t, eat, payload, bal).Status)
+
+			c.BalanceChanges = nil
+			requireBALMismatch(t, newPayloadWithBAL(ctx, t, eat, payload, bal))
+		})
+
+		t.Run("balance kept", func(t *testing.T) {
+			child, payload, bal := buildSameTxSelfdestructBlock(ctx, t, eat, 0x30, sameTxSelfdestructCall{value: 1}, sameTxSelfdestructCall{value: 1})
+			c := findAccountChanges(bal, accounts.InternAddress(child))
+			requireOnlyStorageReadsAndBalances(t, c, []common.Hash{slot0}, 1, 1, 2, 2)
+			require.Equal(t, enginetypes.ValidStatus, newPayloadWithBAL(ctx, t, eat, payload, bal).Status)
+
+			c.BalanceChanges = nil
+			requireBALMismatch(t, newPayloadWithBAL(ctx, t, eat, payload, bal))
+		})
+	})
+}
+
+// create2FactoryInitCode deploys a runtime that runs its calldata as CREATE2 init code with salt 0 and the call value.
+const create2FactoryInitCode = "600f600c60003960" + "0f6000f3" + "366000600037600036600034f55000"
+
+type sameTxSelfdestructCall struct {
+	value     uint64
+	fundChild bool
+}
+
+// buildSameTxSelfdestructBlock deploys a create2FactoryInitCode factory, then builds a block where each call either
+// creates the child through the factory or sends value to the child. The child init code reads slot 0, stores 5 in it
+// and self-destructs to beneficiaryOp (CALLER or ADDRESS).
+func buildSameTxSelfdestructBlock(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester, beneficiaryOp byte, calls ...sameTxSelfdestructCall) (common.Address, *engineapitester.MockClPayload, types.BlockAccessList) {
+	t.Helper()
+	childInitCode := []byte{0x60, 0x00, 0x54, 0x50, 0x60, 0x05, 0x60, 0x00, 0x55, beneficiaryOp, 0xff}
+	send := balLieSender(t, eat)
+	factory := deployBALLieContract(ctx, t, eat, send, create2FactoryInitCode, nil)
+	child := types.CreateAddress2(factory, [32]byte{}, accounts.InternCodeHash(crypto.Keccak256Hash(childInitCode)))
+
+	txHashes := make([]common.Hash, 0, len(calls))
+	for _, c := range calls {
+		if c.fundChild {
+			txHashes = append(txHashes, send(&child, c.value, nil).Hash())
+		} else {
+			txHashes = append(txHashes, send(&factory, c.value, childInitCode).Hash())
+		}
+	}
+	payload, bal := buildBALLiePayload(ctx, t, eat, txHashes)
+	return child, payload, bal
+}
+
+// requireOnlyStorageReadsAndBalances checks that c lists the reads and the (index, balance) pairs and no other change.
+func requireOnlyStorageReadsAndBalances(t *testing.T, c *types.AccountChanges, reads []common.Hash, indexBalancePairs ...uint64) {
+	t.Helper()
+	require.NotNil(t, c)
+	require.Equal(t, reads, c.StorageReads)
+	require.Empty(t, c.StorageChanges)
+	require.Empty(t, c.NonceChanges)
+	require.Empty(t, c.CodeChanges)
+	require.Len(t, c.BalanceChanges, len(indexBalancePairs)/2)
+	for i, bc := range c.BalanceChanges {
+		require.Equal(t, indexBalancePairs[2*i], uint64(bc.Index))
+		require.Equal(t, indexBalancePairs[2*i+1], bc.Value.Uint64())
+	}
 }
