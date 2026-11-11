@@ -346,8 +346,8 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 	finalizedBlock, hasFinalized := f.GetBlock(newState.FinalizedCheckpoint().Root)
 	parentBlock, hasParentBlock := f.GetBlock(block.ParentRoot)
 
-	// The update is built from the parent state, which the transition consumes, and kept only once the transition has
-	// verified the block's sync aggregate.
+	// The update is built from the parent state, which the transition consumes, and kept only once the block is
+	// imported: its transition has verified the block's sync aggregate.
 	var lcUpdate *cltypes.LightClientUpdate
 	if block.Version() >= clparams.AltairVersion && hasParentBlock && fullValidation && hasFinalized && f.rcfg.Beacon && !isBlockRootTheCurrentState {
 		nextSyncCommitteeBranch, err := newState.NextSyncCommitteeBranch()
@@ -403,9 +403,6 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 			}
 		}
 		f.blockRewards.Store(common.Hash(blockRoot), blockRewardsCollector)
-		if lcUpdate != nil {
-			f.recordLightClientUpdateLocked(common.Hash(blockRoot), lcUpdate)
-		}
 	}
 
 	f.currentState = newState
@@ -472,6 +469,9 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 	currentJustified := newState.CurrentJustifiedCheckpoint()
 	finalized := newState.FinalizedCheckpoint()
 
+	if lcUpdate != nil {
+		f.recordLightClientUpdateLocked(common.Hash(blockRoot), lcUpdate)
+	}
 	f.lifecycleMu.Lock()
 	f.headers.Store(common.Hash(blockRoot), header)
 	f.addValidatedChild(block.ParentRoot, common.Hash(blockRoot), block.Slot)

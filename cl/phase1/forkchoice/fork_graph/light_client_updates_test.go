@@ -22,6 +22,7 @@ import (
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -201,4 +202,32 @@ func TestFinalizationKeepsACanonicalCandidateThatArrivesAfterManySideBranchOnes(
 	got, ok := f.GetLightClientUpdate(1)
 	require.True(t, ok)
 	require.Same(t, canonicalUpdate, got)
+}
+
+// Each valid block whose parent is known records its light client update: it becomes the newest update and a candidate
+// of its period.
+func TestAddChainSegmentRecordsTheLightClientUpdateOfAValidBlock(t *testing.T) {
+	blocks, anchorState, _ := tests.GetElectraRandom()
+	require.Zero(t, anchorState.FinalizedCheckpoint().Root)
+	graph, err := NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{Beacon: true})
+	require.NoError(t, err)
+	g := graph.(*forkGraphDisk)
+	g.blocks.Store(common.Hash{}, cltypes.NewSignedBeaconBlock(g.beaconCfg, anchorState.Version()))
+	g.lowestAvailableBlock.Store(0)
+
+	for i, block := range blocks {
+		_, result, err := g.AddChainSegment(block, true)
+		require.NoError(t, err)
+		require.Equal(t, Success, result)
+		if i == 0 {
+			require.Nil(t, g.NewestLightClientUpdate(), "the first block has no known parent block")
+			continue
+		}
+		newest := g.NewestLightClientUpdate()
+		require.NotNil(t, newest)
+		require.Equal(t, block.Block.Slot, newest.SignatureSlot)
+		root, err := block.Block.HashSSZ()
+		require.NoError(t, err)
+		require.Same(t, newest, g.lightClientUpdateCandidates[common.Hash(root)])
+	}
 }
