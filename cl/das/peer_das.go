@@ -89,7 +89,9 @@ const (
 	maxBlobRecoveryResultBytes          = 16 << 20
 
 	// A recovery scheduled by a stored column starts once no column of the block has been stored for the quiet period,
-	// so gossip can deliver the remaining columns first. The slot deadline caps the wait when columns keep trickling in.
+	// so gossip can deliver the remaining columns first. A deadline caps the wait when columns keep trickling in: a
+	// quarter of the slot before Gloas. From Gloas the columns come with the envelope, so the cap is the custody grace
+	// after the payload deadline, the point where a custody node starts fetching the missing columns.
 	blobRecoveryQuietPeriod         = 150 * time.Millisecond
 	blobRecoveryDeadlineSlotDivisor = 4
 )
@@ -1449,11 +1451,18 @@ func (d *peerdas) blobRecoveryNotBefore(request recoverBlobsRequest) time.Time {
 		return time.Time{}
 	}
 	notBefore := request.lastColumn.Add(blobRecoveryQuietPeriod)
-	deadline := d.ethClock.GetSlotTime(request.slot).Add(d.slotDuration() / blobRecoveryDeadlineSlotDivisor)
+	deadline := d.ethClock.GetSlotTime(request.slot).Add(d.blobRecoveryDeadline(request.slot))
 	if deadline.Before(notBefore) {
 		return deadline
 	}
 	return notBefore
+}
+
+func (d *peerdas) blobRecoveryDeadline(slot uint64) time.Duration {
+	if d.beaconConfig.GetCurrentStateVersion(slot/d.beaconConfig.SlotsPerEpoch) < clparams.GloasVersion {
+		return d.slotDuration() / blobRecoveryDeadlineSlotDivisor
+	}
+	return time.Duration(d.payloadDueMs())*time.Millisecond + d.custodyGrace(true)
 }
 
 func (d *peerdas) TryScheduleRecover(slot uint64, blockRoot common.Hash) error {
@@ -2221,6 +2230,10 @@ func (d *peerdas) slotDuration() time.Duration {
 	return time.Duration(d.beaconConfig.SecondsPerSlot) * time.Second
 }
 
+func (d *peerdas) payloadDueMs() uint64 {
+	return d.beaconConfig.SecondsPerSlot * d.beaconConfig.PayloadDueBps / (clparams.BpsFactor / 1000)
+}
+
 // deferredColumnSyncDelay is how long gossip gets before missing columns are requested. A
 // custody node gets the custody grace; an archive node recovers from half the columns and gives
 // in-flight gossip a full slot instead.
@@ -2241,7 +2254,7 @@ func (d *peerdas) custodyGrace(gloas bool) time.Duration {
 	if !gloas {
 		return time.Duration(cfg.AttestationDueMs(false)) * time.Millisecond / 2
 	}
-	payloadDueMs := cfg.SecondsPerSlot * cfg.PayloadDueBps / (clparams.BpsFactor / 1000)
+	payloadDueMs := d.payloadDueMs()
 	return time.Duration(cfg.PayloadAttestationDueMs()-min(payloadDueMs, cfg.PayloadAttestationDueMs())) * time.Millisecond / 2
 }
 

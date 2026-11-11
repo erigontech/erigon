@@ -2600,8 +2600,9 @@ type gossipRecovery struct {
 }
 
 // startGossipRecovery runs the worker. When gated, the worker waits at its first read of the slot time until
-// releaseClock is called, so gossip can go on until the worker decides when to start.
-func startGossipRecovery(t *testing.T, gated bool) *gossipRecovery {
+// releaseClock is called, so gossip can go on until the worker decides when to start. configure may change the
+// peerdas before the worker starts.
+func startGossipRecovery(t *testing.T, gated bool, configure ...func(*recoveryRun)) *gossipRecovery {
 	t.Helper()
 	g := &gossipRecovery{firstRead: make(chan time.Time, 1)}
 	clockGate := make(chan struct{})
@@ -2623,10 +2624,28 @@ func startGossipRecovery(t *testing.T, gated bool) *gossipRecovery {
 			r.d.ethClock = clock
 			g.workerWrites = r.countColumnWrites()
 			r.d.columnStorage = &firstColumnReadStorage{DataColumnStorage: r.d.columnStorage, root: r.root, firstRead: g.firstRead}
+			for _, apply := range configure {
+				apply(r)
+			}
 		},
 	})
 	t.Cleanup(g.releaseClock)
 	return g
+}
+
+// forkToGloasAt sets the chain of the recovery to fork to Gloas at gloasForkEpoch, with every earlier fork at genesis.
+// A Gloas recovery takes the commitments and header of the block from the cache, so the cache holds the ones of the
+// stored columns.
+func forkToGloasAt(t *testing.T, r *recoveryRun, gloasForkEpoch uint64) {
+	t.Helper()
+	cfg := *r.d.beaconConfig
+	cfg.AltairForkEpoch, cfg.BellatrixForkEpoch, cfg.CapellaForkEpoch, cfg.DenebForkEpoch, cfg.ElectraForkEpoch = 0, 0, 0, 0, 0
+	cfg.GloasForkEpoch = gloasForkEpoch
+	r.d.beaconConfig = &cfg
+	gloasData, err := lru.New[common.Hash, *gloasBlockData]("gossipRecoveryGloasData", 1)
+	require.NoError(t, err)
+	gloasData.Add(r.root, &gloasBlockData{BlobKzgCommitments: r.columns[0].KzgCommitments, SignedBeaconBlockHeader: r.columns[0].SignedBlockHeader})
+	r.d.gloasDataCache = gloasData
 }
 
 // scheduleCall is the interval in which a TryScheduleRecover call ran. The call records its column inside it.
@@ -2756,17 +2775,31 @@ func TestBlobRecoveryFindsCompleteMatrixWhenGossipDeliversEveryColumn(t *testing
 	require.Never(t, func() bool { return len(g.published) > 0 }, 100*time.Millisecond, 10*time.Millisecond, "published columns")
 }
 
-// Columns that keep arriving cannot hold the recovery past a quarter of the slot.
+// Columns that keep arriving cannot hold the recovery past the deadline: a quarter of the slot before Gloas, and the
+// custody grace after the payload deadline from Gloas.
 func TestBlobRecoveryStartsAtSlotDeadlineWhileColumnsKeepArriving(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	slotEpoch := recoveryTestSlot / cfg.SlotsPerEpoch
+	slotDuration := time.Duration(cfg.SecondsPerSlot) * time.Second
+	payloadDue := slotDuration * time.Duration(cfg.PayloadDueBps) / 10_000
+	payloadAttestationDue := time.Duration(cfg.PayloadAttestationDueMs()) * time.Millisecond
+	fuluDeadline := slotDuration / 4
+	gloasDeadline := payloadDue + (payloadAttestationDue-payloadDue)/2
+	require.Equal(t, 7500*time.Millisecond, gloasDeadline)
+
 	for _, tc := range []struct {
-		name    string
-		slotAge time.Duration
+		name           string
+		gloasForkEpoch uint64
+		deadline       time.Duration
+		slotAge        time.Duration
 	}{
-		{"deadline ahead", 2500 * time.Millisecond},
-		{"deadline passed", 4 * time.Second},
+		{"fulu deadline ahead", slotEpoch + 1, fuluDeadline, fuluDeadline - 500*time.Millisecond},
+		{"fulu deadline passed", slotEpoch + 1, fuluDeadline, fuluDeadline + time.Second},
+		{"gloas deadline ahead", slotEpoch, gloasDeadline, gloasDeadline - 500*time.Millisecond},
+		{"gloas deadline passed", slotEpoch, gloasDeadline, gloasDeadline + time.Second},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			g := startGossipRecovery(t, false)
+			g := startGossipRecovery(t, false, func(r *recoveryRun) { forkToGloasAt(t, r, tc.gloasForkEpoch) })
 			scheduled := time.Now()
 			slotStart := scheduled.Add(-tc.slotAge)
 			g.slotStart.Store(slotStart.UnixNano())
@@ -2793,7 +2826,7 @@ func TestBlobRecoveryStartsAtSlotDeadlineWhileColumnsKeepArriving(t *testing.T) 
 			started := g.awaitFirstRead(t)
 			stopProducer()
 
-			deadline := slotStart.Add(g.d.slotDuration() / 4)
+			deadline := slotStart.Add(tc.deadline)
 			startNotBefore := deadline
 			if quietEnd := earliestQuietEnd(calls); quietEnd.Before(startNotBefore) {
 				startNotBefore = quietEnd
