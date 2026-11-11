@@ -307,19 +307,16 @@ func TestGetDutiesProposerFutureEpochTooFarReturnsBadRequest(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
 }
 
-func TestGetDependentRootReturnsNotFoundWhenRootUnavailable(t *testing.T) {
-	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+// Processing the empty slots after the head would carry the head root into their block roots.
+func TestGetDependentRootUsesHeadRootForSlotsAfterHead(t *testing.T) {
+	_, _, _, _, _, handler, _, syncedData, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 
-	headRoot, err := blocks[len(blocks)-1].Block.HashSSZ()
-	require.NoError(t, err)
-	fcu.HeadVal = headRoot
-	fcu.HeadSlotVal = postState.Slot()
-
-	epoch := postState.Slot()/handler.beaconChainCfg.SlotsPerEpoch + maxEpochsLookaheadForDuties*3
-	root, err := handler.getDependentRoot(epoch, false)
-	require.Error(t, err)
-	require.Equal(t, common.Hash{}, root)
-	require.Contains(t, err.Error(), "dependent root not found")
+	headEpoch := syncedData.HeadSlot() / handler.beaconChainCfg.SlotsPerEpoch
+	for _, attester := range []bool{false, true} {
+		root, err := handler.getDependentRoot(headEpoch+2, attester)
+		require.NoError(t, err)
+		require.Equal(t, syncedData.HeadRoot(), root)
+	}
 }
 
 type proposerDutiesResponse struct {

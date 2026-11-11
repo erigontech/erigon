@@ -93,6 +93,14 @@ func (s *Stream) WriteRawBytes(content []byte) {
 	s.afterValue()
 }
 
+// RawFields writes object members already encoded as `"name":value` pairs separated by commas.
+func (s *Stream) RawFields(fields []byte) {
+	s.beforeValue()
+	s.stream.SetBuffer(append(s.stream.Buffer(), fields...))
+	s.separatorPending = true
+	flushIfFull(s.stream)
+}
+
 func (s *Stream) WriteHex(b []byte) {
 	s.beforeValue()
 	buf := s.stream.Buffer()
@@ -124,12 +132,19 @@ func HexesField[S ~[]E, E ~[length.Hash]byte](s *Stream, name string, items S) {
 }
 
 // WriteHexBytes is WriteHexes for elements that are already byte slices, whose lengths vary
-// and so are summed before the single growth.
+// and so are summed before the single growth. An array that would cross the flush threshold
+// on a stream with a writer is handed over a threshold at a time instead, so it never sits in
+// memory in full; every smaller array takes the single-growth path unchanged.
 func WriteHexBytes[S ~[]E, E ~[]byte](s *Stream, items S) {
 	s.beforeValue()
 	size := 2 + len(items)
 	for i := range items {
 		size += hexutil.QuotedLen(len(items[i]))
+	}
+	if s.out != nil && size >= FlushThreshold {
+		streamHexBytes(s, items)
+		s.afterValue()
+		return
 	}
 	buf := slices.Grow(s.stream.Buffer(), size)
 	buf = append(buf, '[')
@@ -141,6 +156,25 @@ func WriteHexBytes[S ~[]E, E ~[]byte](s *Stream, items S) {
 	}
 	s.stream.SetBuffer(append(buf, ']'))
 	s.afterValue()
+}
+
+func streamHexBytes[S ~[]E, E ~[]byte](s *Stream, items S) {
+	buf := slices.Grow(s.stream.Buffer(), 2*FlushThreshold)
+	start := len(buf)
+	buf = append(buf, '[')
+	for i := range items {
+		if i > 0 {
+			buf = append(buf, ',')
+		}
+		buf = hexutil.AppendQuoted(buf, items[i])
+		if len(buf)-start >= FlushThreshold {
+			s.stream.SetBuffer(buf[:start])
+			s.writeThrough(buf[start:])
+			buf = s.stream.Buffer()
+			start = len(buf)
+		}
+	}
+	s.stream.SetBuffer(append(buf, ']'))
 }
 
 // WriteQuotedText writes v.AppendText's output as a JSON string, without an escape scan: it is

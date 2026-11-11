@@ -17,6 +17,8 @@
 package integrity
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"sync/atomic"
 
@@ -45,4 +47,9 @@ func (p *problems) verdict(check string) error {
 		return fmt.Errorf("%w: %s: found %d problem(s), listed above", ErrIntegrity, check, n)
 	}
 	return nil
+}
+
+// BudgetExhausted reports a timeout that carries no integrity failure.
+func BudgetExhausted(err error) bool {
+	return errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, ErrIntegrity)
 }

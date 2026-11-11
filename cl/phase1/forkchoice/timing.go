@@ -19,15 +19,11 @@ package forkchoice
 import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/phase1/core/caches"
+	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 )
-
-// [New in Gloas:EIP7732] Timing helper functions.
-//
-// GLOAS replaces the fixed INTERVALS_PER_SLOT division with a BPS (basis points)
-// system for finer-grained control of slot-internal deadlines. All functions are
-// epoch-aware: pre-GLOAS epochs use the legacy IntervalsPerSlot arithmetic,
-// post-GLOAS epochs use BPS constants.
 
 // getAttestationDueMs returns the attestation deadline in milliseconds from slot start.
 func (f *ForkChoiceStore) getAttestationDueMs(epoch uint64) uint64 {
@@ -73,9 +69,9 @@ func (f *ForkChoiceStore) getPayloadAttestationDueMs(_ uint64) uint64 {
 // which implements the spec's should_apply_proposer_boost for weight calculation
 // (GLOAS: complex logic with equivocation checks; pre-GLOAS: checks proposer_boost_root != zero).
 func (f *ForkChoiceStore) shouldApplyProposerBoost() bool {
-	secondsSinceGenesis := f.time.Load() - f.genesisTime
-	timeIntoSlotMs := (secondsSinceGenesis % f.beaconCfg.SecondsPerSlot) * 1000
-	epoch := f.computeEpochAtSlot(f.Slot())
+	timeMs := f.timeMs.Load()
+	timeIntoSlotMs := (timeMs - utils.SecondsToMilliseconds(f.genesisTime)) % (f.beaconCfg.SecondsPerSlot * 1000)
+	epoch := f.computeEpochAtSlot(f.slotAtTimeMs(timeMs))
 	attestationDueMs := f.getAttestationDueMs(epoch)
 	return timeIntoSlotMs < attestationDueMs
 }
@@ -97,12 +93,12 @@ func (f *ForkChoiceStore) shouldApplyProposerBoost() bool {
 // NOTE: Both elements are time-based checks on when the *block* was received.
 // PTC_TIMELINESS_INDEX records whether the block arrived before the PTC deadline
 // (75% of slot), NOT whether the PTC has voted the payload present.
-func (f *ForkChoiceStore) recordBlockTimeliness(block *cltypes.BeaconBlock, blockRoot common.Hash) {
+func (f *ForkChoiceStore) recordBlockTimeliness(block *cltypes.BeaconBlock, blockRoot common.Hash, timeMs uint64) uint64 {
 	var timeliness [clparams.NumBlockTimelinessDeadlines]bool
-	if f.Slot() == block.Slot {
-		epoch := f.computeEpochAtSlot(block.Slot)
-		secondsSinceGenesis := f.time.Load() - f.genesisTime
-		timeIntoSlotMs := (secondsSinceGenesis % f.beaconCfg.SecondsPerSlot) * 1000
+	currentSlot := f.slotAtTimeMs(timeMs)
+	if currentSlot == block.Slot {
+		epoch := f.computeEpochAtSlot(currentSlot)
+		timeIntoSlotMs := (timeMs - utils.SecondsToMilliseconds(f.genesisTime)) % (f.beaconCfg.SecondsPerSlot * 1000)
 		timeliness[clparams.AttestationTimelinessIndex] = timeIntoSlotMs < f.getAttestationDueMs(epoch)
 		if epoch >= f.beaconCfg.GloasForkEpoch {
 			timeliness[clparams.PtcTimelinessIndex] = timeIntoSlotMs < f.getPayloadAttestationDueMs(epoch)
@@ -110,10 +106,11 @@ func (f *ForkChoiceStore) recordBlockTimeliness(block *cltypes.BeaconBlock, bloc
 	}
 
 	f.blockTimeliness.Store(blockRoot, timeliness)
+	return currentSlot
 }
 
-func (f *ForkChoiceStore) getDependentRoot(root common.Hash) common.Hash {
-	epoch := f.computeEpochAtSlot(f.Slot())
+func (f *ForkChoiceStore) getDependentRoot(root common.Hash, currentSlot uint64) common.Hash {
+	epoch := f.computeEpochAtSlot(currentSlot)
 	dependentSlot := computeShufflingDependentSlot(epoch, f.beaconCfg.MinSeedLookahead, f.beaconCfg.SlotsPerEpoch)
 	return f.getAncestor(f.getNodeForRoot(root), dependentSlot).Root
 }
@@ -126,7 +123,7 @@ func computeShufflingDependentSlot(epoch, minSeedLookahead, slotsPerEpoch uint64
 }
 
 // updateProposerBoostRoot implements update_proposer_boost_root from the spec.
-func (f *ForkChoiceStore) updateProposerBoostRoot(headRoot common.Hash, blockRoot common.Hash) {
+func (f *ForkChoiceStore) updateProposerBoostRoot(headRoot common.Hash, blockRoot common.Hash, currentSlot uint64) {
 	timeliness, ok := f.getBlockTimeliness(blockRoot)
 	if !ok {
 		return
@@ -138,12 +135,12 @@ func (f *ForkChoiceStore) updateProposerBoostRoot(headRoot common.Hash, blockRoo
 		return
 	}
 
-	epoch := f.computeEpochAtSlot(f.Slot())
+	epoch := f.computeEpochAtSlot(currentSlot)
 	if f.beaconCfg.GetCurrentStateVersion(epoch) >= clparams.GloasVersion {
 		if headRoot == (common.Hash{}) {
 			return
 		}
-		if f.getDependentRoot(blockRoot) != f.getDependentRoot(headRoot) {
+		if f.getDependentRoot(blockRoot, currentSlot) != f.getDependentRoot(headRoot, currentSlot) {
 			return
 		}
 	}
@@ -262,7 +259,7 @@ func (f *ForkChoiceStore) isHeadLate(root common.Hash) bool {
 // [New in Gloas:EIP7732] This function considers equivocating validators.
 func (f *ForkChoiceStore) isHeadWeak(root common.Hash) bool {
 	justifiedCheckpoint := f.JustifiedCheckpoint()
-	checkpointState, err := f.getCheckpointState(justifiedCheckpoint)
+	checkpointState, err := f.getCheckpointStateLocked(justifiedCheckpoint)
 	if err != nil || checkpointState == nil {
 		return false
 	}
@@ -283,11 +280,11 @@ func pendingAttestationScore(ws WeightStore) func(common.Hash) uint64 {
 	}
 }
 
-func (f *ForkChoiceStore) isHeadWeakWith(root common.Hash, checkpointState *checkpointState, headWeight func(common.Hash) uint64) bool {
-	if checkpointState == nil {
+func (f *ForkChoiceStore) isHeadWeakWith(root common.Hash, justifiedState *checkpointState, headWeight func(common.Hash) uint64) bool {
+	if justifiedState == nil {
 		return false
 	}
-	committeeWeight := checkpointState.activeBalance / f.beaconCfg.SlotsPerEpoch
+	committeeWeight := justifiedState.unslashedActiveBalance / f.beaconCfg.SlotsPerEpoch
 	reorgThreshold := committeeWeight * clparams.ReorgHeadWeightThreshold / 100
 	weight := headWeight(root)
 	headBlock, ok := f.forkGraph.GetBlock(root)
@@ -296,28 +293,39 @@ func (f *ForkChoiceStore) isHeadWeakWith(root common.Hash, checkpointState *chec
 	}
 	headSlot := headBlock.Block.Slot
 
-	lenIndicies := uint64(len(checkpointState.shuffledSet))
-	if lenIndicies > 0 {
-		committeesPerSlot := checkpointState.committeeCount(lenIndicies)
-		count := committeesPerSlot * f.beaconCfg.SlotsPerEpoch
-		for ci := range committeesPerSlot {
-			index := (headSlot%f.beaconCfg.SlotsPerEpoch)*committeesPerSlot + ci
-			start := (lenIndicies * index) / count
-			end := (lenIndicies * (index + 1)) / count
-			for _, validatorIndex := range checkpointState.shuffledSet[start:end] {
-				if !f.isUnequivocating(validatorIndex) {
-					continue
-				}
-				vi := int(validatorIndex)
-				if vi < checkpointState.validatorSetSize &&
-					readFromBitset(checkpointState.actives, vi) {
-					weight += checkpointState.balances[vi]
-				}
+	if !f.hasEquivocator {
+		return weight < reorgThreshold
+	}
+
+	committeeState := f.headEpochCommitteeState(root, headSlot, justifiedState)
+	for ci := range committeeState.committeeCount(uint64(len(committeeState.shuffledSet))) {
+		committee, _ := committeeState.beaconCommittee(headSlot, ci)
+		for _, validatorIndex := range committee {
+			if !f.isUnequivocating(validatorIndex) {
+				continue
+			}
+			vi := int(validatorIndex)
+			if vi < justifiedState.validatorSetSize {
+				weight += justifiedState.balances[vi]
 			}
 		}
 	}
 
 	return weight < reorgThreshold
+}
+
+// headEpochCommitteeState returns a state exposing the head epoch's shuffling, without replaying states or reading from disk.
+func (f *ForkChoiceStore) headEpochCommitteeState(root common.Hash, headSlot uint64, justifiedState *checkpointState) *checkpointState {
+	headEpoch := f.computeEpochAtSlot(headSlot)
+	boundary := f.getAncestor(f.getNodeForRoot(root), f.computeStartSlotAtEpoch(headEpoch))
+	dependentSlot := computeShufflingDependentSlot(headEpoch, f.beaconCfg.MinSeedLookahead, f.beaconCfg.SlotsPerEpoch)
+	if shuffled, ok := caches.ShuffledIndiciesCacheGlobal.Get(headEpoch, f.getAncestor(boundary, dependentSlot).Root); ok {
+		return &checkpointState{beaconConfig: f.beaconCfg, shuffledSet: shuffled}
+	}
+	if cached, ok := f.checkpointStates.Load(solid.Checkpoint{Epoch: headEpoch, Root: boundary.Root}); ok {
+		return cached.(*checkpointState)
+	}
+	return justifiedState
 }
 
 // getBlockTimeliness returns the timeliness vector for a block root.

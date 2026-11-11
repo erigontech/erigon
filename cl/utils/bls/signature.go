@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"crypto/rand"
 	"fmt"
+	"runtime"
+	"slices"
 	"sync"
 
 	blst "github.com/supranational/blst/bindings/go"
@@ -18,6 +20,17 @@ const (
 	scalarBytes     = 32
 	randBitsEntropy = 64
 )
+
+// blst_p1s_add puts min(n, 1024) points of scratch, 144 bytes each, on the C stack, and cgo threads
+// get the libc default stack, 128 KiB on musl (https://github.com/supranational/blst/issues/142).
+// One batch of 512 keys needs 72 KiB.
+const (
+	blstP1ScratchBytes    = 144
+	muslThreadStackBytes  = 128 << 10
+	maxPublicKeysPerBatch = 512
+)
+
+const _ = uint(muslThreadStackBytes - maxPublicKeysPerBatch*blstP1ScratchBytes)
 
 // ETH2 uses BLS12381-G2 Curve
 var eth2Curve = []byte("BLS_SIG_BLS12381G2_XMD:SHA-256_SSWU_RO_POP_")
@@ -46,11 +59,42 @@ func NewSignatureFromBytes(b []byte) (*Signature, error) {
 
 // VerifyAggregate verify signature against many public keys.
 func (s Signature) VerifyAggregate(msg []byte, publicKeys []PublicKey) bool {
-	affines := make([]*blst.P1Affine, 0, len(publicKeys))
-	for _, publicKey := range publicKeys {
-		affines = append(affines, publicKey)
+	if len(publicKeys) == 0 || slices.Contains(publicKeys, nil) {
+		return false
 	}
-	return s.affine.FastAggregateVerify(true, affines, msg, eth2Curve)
+	return s.affine.Verify(true, aggregatePublicKeys(publicKeys).ToAffine(), false, msg, eth2Curve)
+}
+
+func aggregatePublicKeys(publicKeys []PublicKey) *blst.P1 {
+	chunkCount := (len(publicKeys) + maxPublicKeysPerBatch - 1) / maxPublicKeysPerBatch
+	partials := make([]*blst.P1, chunkCount)
+	workerCount := min(runtime.GOMAXPROCS(0), chunkCount)
+	addChunks := func(worker int) {
+		affines := make(blst.P1Affines, min(maxPublicKeysPerBatch, len(publicKeys)-worker*maxPublicKeysPerBatch))
+		for chunk := worker; chunk < chunkCount; chunk += workerCount {
+			start := chunk * maxPublicKeysPerBatch
+			end := min(start+maxPublicKeysPerBatch, len(publicKeys))
+			for i, publicKey := range publicKeys[start:end] {
+				affines[i] = *publicKey
+			}
+			partials[chunk] = affines[:end-start].Add()
+		}
+	}
+	if workerCount == 1 {
+		addChunks(0)
+	} else {
+		var workers sync.WaitGroup
+		for worker := range workerCount {
+			workers.Go(func() { addChunks(worker) })
+		}
+		workers.Wait()
+	}
+
+	aggregate := partials[0]
+	for _, partial := range partials[1:] {
+		aggregate.AddAssign(partial)
+	}
+	return aggregate
 }
 
 // Verify verify signature against one public key.
@@ -73,13 +117,13 @@ func VerifyAggregate(signature []byte, msg []byte, publicKeysBytes [][]byte) (bo
 		return false, err
 	}
 
-	publicKeys := []PublicKey{}
-	for _, publicKey := range publicKeysBytes {
+	publicKeys := make([]PublicKey, len(publicKeysBytes))
+	for i, publicKey := range publicKeysBytes {
 		key, err := NewPublicKeyFromBytes(publicKey)
 		if err != nil {
 			return false, err
 		}
-		publicKeys = append(publicKeys, key)
+		publicKeys[i] = key
 	}
 
 	return sig.VerifyAggregate(msg, publicKeys), nil
@@ -167,4 +211,25 @@ func AggregateSignatures(sigs [][]byte) ([]byte, error) {
 	// and take advantage of multi-threading.
 	agg.Aggregate(mulP2, false)
 	return agg.ToAffine().Compress(), nil
+}
+
+// SignatureAggregator keeps a running aggregate in uncompressed form. It does not group-check
+// added signatures, so it must only receive signatures that already passed verification.
+type SignatureAggregator struct {
+	agg blst.P2Aggregate
+}
+
+// AddValidated adds a compressed signature that has already passed signature verification.
+func (a *SignatureAggregator) AddValidated(sig []byte) error {
+	affine := new(blst.P2Affine).Uncompress(sig)
+	if affine == nil {
+		return ErrDeserializeSignature
+	}
+	a.agg.Add(affine, false)
+	return nil
+}
+
+// Compressed returns the compressed aggregate of all added signatures.
+func (a *SignatureAggregator) Compressed() [96]byte {
+	return [96]byte(a.agg.ToAffine().Compress())
 }

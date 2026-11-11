@@ -29,10 +29,12 @@ import (
 
 const (
 	opCreate    = "Create"
+	opMkdirAll  = "MkdirAll"
 	opOpen      = "Open"
 	opRemoveAll = "RemoveAll"
 	opRename    = "Rename"
 	opStat      = "Stat"
+	opSync      = "Sync"
 )
 
 var errInducedFailure = errors.New("induced filesystem failure")
@@ -94,7 +96,27 @@ func (c *countingFs) reset() {
 
 func (c *countingFs) Create(name string) (afero.File, error) {
 	c.record(opCreate, name)
-	return c.Fs.Create(name)
+	fh, err := c.Fs.Create(name)
+	if err != nil {
+		return nil, err
+	}
+	return &countingFile{File: fh, fs: c, name: name}, nil
+}
+
+func (c *countingFs) MkdirAll(path string, perm os.FileMode) error {
+	c.record(opMkdirAll, path)
+	return c.Fs.MkdirAll(path, perm)
+}
+
+type countingFile struct {
+	afero.File
+	fs   *countingFs
+	name string
+}
+
+func (f *countingFile) Sync() error {
+	f.fs.record(opSync, f.name)
+	return f.File.Sync()
 }
 
 func (c *countingFs) Open(name string) (afero.File, error) {

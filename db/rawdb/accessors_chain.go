@@ -463,16 +463,6 @@ func DeleteHeader(db kv.Putter, hash common.Hash, number uint64) {
 	}
 }
 
-// ReadBodyRLP retrieves the block body (transactions and uncles) in RLP encoding.
-func ReadBodyRLP(db kv.Tx, hash common.Hash, number uint64) rlp.RawValue {
-	body, _ := ReadBodyWithTransactions(db, hash, number)
-	bodyRlp, err := rlp.EncodeToBytes(body)
-	if err != nil {
-		log.Error("ReadBodyRLP failed", "err", err)
-	}
-	return bodyRlp
-}
-
 // Deprecated: use readBodyForStorage
 func ReadStorageBodyRLP(db kv.Getter, hash common.Hash, number uint64) rlp.RawValue {
 	bodyRlp, err := db.GetOne(kv.BlockBody, dbutils.BlockBodyKey(number, hash))
@@ -1167,45 +1157,6 @@ func WritePendingEpoch(tx kv.RwTx, blockNum uint64, blockHash common.Hash, trans
 	return tx.Put(kv.PendingEpoch, k, transitionProof)
 }
 
-// Transitioned returns true if the block number comes after POS transition or is the last POW block
-func Transitioned(db kv.Getter, blockNum uint64, terminalTotalDifficulty *uint256.Int) (trans bool, err error) {
-	if terminalTotalDifficulty == nil {
-		return false, nil
-	}
-
-	if terminalTotalDifficulty.Sign() == 0 {
-		return true, nil
-	}
-	header := ReadHeaderByNumber(db, blockNum)
-	if header == nil {
-		return false, nil
-	}
-
-	if header.Difficulty.Sign() == 0 {
-		return true, nil
-	}
-
-	headerTd, err := ReadTd(db, header.Hash(), blockNum)
-	if err != nil {
-		return false, err
-	}
-
-	return headerTd.Cmp(terminalTotalDifficulty) >= 0, nil
-}
-
-// IsPosBlock returns true if the block number comes after POS transition or is the last POW block
-func IsPosBlock(db kv.Getter, blockHash common.Hash) (trans bool, err error) {
-	header, err := ReadHeaderByHash(db, blockHash)
-	if err != nil {
-		return false, err
-	}
-	if header == nil {
-		return false, nil
-	}
-
-	return header.Difficulty.Sign() == 0, nil
-}
-
 // PruneTable has `limit` parameter to avoid too large data deletes per one sync cycle - better delete by small portions to reduce db.FreeList size
 func PruneTable(tx kv.RwTx, table string, pruneTo uint64, ctx context.Context, limit int, timeout time.Duration, logger log.Logger, logPrefix string) error {
 	t := time.Now()
@@ -1339,6 +1290,34 @@ func WriteDBCommitmentHistoryEnabled(tx kv.RwTx, enabled bool) error {
 	}
 	if err := tx.Put(kv.DatabaseInfo, kv.CommitmentLayoutFlagKey, value); err != nil {
 		return fmt.Errorf("writing DB commitment history enabled flag: %w", err)
+	}
+	return nil
+}
+
+func ReadCaplinBlobsArchiveFromSlot(tx kv.Getter) (uint64, error) {
+	v, err := tx.GetOne(kv.DatabaseInfo, kv.CaplinBlobsArchiveFromSlotKey)
+	if err != nil {
+		return 0, fmt.Errorf("reading caplin blobs archive from-slot: %w", err)
+	}
+	if len(v) == 0 {
+		return 0, nil
+	}
+	if len(v) != 8 {
+		return 0, fmt.Errorf("incorrect length of caplin blobs archive from-slot: %d", len(v))
+	}
+	return binary.BigEndian.Uint64(v), nil
+}
+
+func RaiseCaplinBlobsArchiveFromSlot(tx kv.RwTx, slot uint64) error {
+	stored, err := ReadCaplinBlobsArchiveFromSlot(tx)
+	if err != nil {
+		return err
+	}
+	if slot <= stored {
+		return nil
+	}
+	if err := tx.Put(kv.DatabaseInfo, kv.CaplinBlobsArchiveFromSlotKey, binary.BigEndian.AppendUint64(nil, slot)); err != nil {
+		return fmt.Errorf("writing caplin blobs archive from-slot: %w", err)
 	}
 	return nil
 }

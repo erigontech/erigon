@@ -18,6 +18,7 @@ package misc
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -57,7 +58,7 @@ func DequeueBuilderDepositRequests(syscall rules.SystemCall, state *state.IntraB
 	}
 	if res != nil {
 		// Just append the contract output as the request data
-		return &types.FlatRequest{Type: types.BuilderDepositRequestType, RequestData: res}, nil
+		return &types.FlatRequest{Type: types.BuilderDepositRequestType, RequestData: slices.Clone(res)}, nil
 	}
 	return nil, nil
 }
@@ -78,7 +79,7 @@ func DequeueBuilderExitRequests(syscall rules.SystemCall, state *state.IntraBloc
 	}
 	if res != nil {
 		// Just append the contract output as the request data
-		return &types.FlatRequest{Type: types.BuilderExitRequestType, RequestData: res}, nil
+		return &types.FlatRequest{Type: types.BuilderExitRequestType, RequestData: slices.Clone(res)}, nil
 	}
 	return nil, nil
 }

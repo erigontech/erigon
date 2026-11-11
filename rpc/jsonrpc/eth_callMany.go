@@ -68,6 +68,18 @@ func validateBundles(bundles []Bundle, chainID *uint256.Int) error {
 	return nil
 }
 
+// capEVMTimeout lets a client lower the server EVM timeout, never raise or remove it.
+func capEVMTimeout(serverTimeout time.Duration, clientMilliSeconds int64) time.Duration {
+	if clientMilliSeconds <= 0 {
+		return serverTimeout
+	}
+	clientTimeout := time.Duration(min(clientMilliSeconds, math.MaxInt64/int64(time.Millisecond))) * time.Millisecond
+	if serverTimeout > 0 {
+		return min(clientTimeout, serverTimeout)
+	}
+	return clientTimeout
+}
+
 // setupEVMTimeout cancels the EVM registered via the returned store func once timeout
 // elapses (or ctx is cancelled), and returns the deadline-carrying context. Callers must
 // store the EVM once created — and again whenever it is recreated — so cancellation
@@ -161,6 +173,9 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 	if simulateContext.TransactionIndex != nil {
 		transactionIndex = *simulateContext.TransactionIndex
 	}
+	if err := checkTxIndex(blockNum, transactionIndex, len(block.Transactions())); err != nil {
+		return nil, err
+	}
 
 	if transactionIndex == -1 {
 		transactionIndex = len(block.Transactions())
@@ -182,14 +197,15 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 
 	st := state.New(stateReader)
 	defer st.Close()
+	transactions.VersionedCallState(st)
 
 	header := block.HeaderNoCopy()
 
-	timeout := api.evmCallTimeout
-
-	if timeoutMilliSecondsPtr != nil && *timeoutMilliSecondsPtr > 0 {
-		timeout = time.Duration(*timeoutMilliSecondsPtr) * time.Millisecond
+	var timeoutMilliSeconds int64
+	if timeoutMilliSecondsPtr != nil {
+		timeoutMilliSeconds = *timeoutMilliSecondsPtr
 	}
+	timeout := capEVMTimeout(api.evmCallTimeout, timeoutMilliSeconds)
 
 	ctx, storeEVM, cleanup := setupEVMTimeout(ctx, timeout)
 	defer cleanup()
@@ -222,7 +238,9 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 			return nil, err
 		}
 
-		_ = st.FinalizeTx(rules, state.NewNoopWriter())
+		if err := ethapi.FinalizeCallTx(st, rules); err != nil {
+			return nil, err
+		}
 
 		if evm.Cancelled() {
 			return nil, fmt.Errorf("execution aborted (timeout = %v)", timeout)
@@ -231,42 +249,66 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 
 	// after replaying the txns, we want to overload the state
 	// overload state
+	st.SetTxContext(blockNum, len(replayTransactions))
 	if stateOverride != nil {
-		err = stateOverride.Override(evm.IntraBlockState(), nil, blockCtx.Rules(chainConfig))
+		err = stateOverride.Override(evm.IntraBlockState(), vm.ActivePrecompiledContracts(rules), rules)
 		if err != nil {
 			return nil, err
 		}
 	}
 
-	ret := make([][]map[string]any, 0)
+	ret := make([][]map[string]any, len(bundles))
 
-	for _, bundle := range bundles {
+	// Every transaction of the request gets the next index, so each sees the ones before it.
+	txIndex := st.TxnIndex()
+	gasBudget := api.GasCap // shared by the whole request, as in eth_simulateV1: return data costs memory gas
+	if gasBudget == 0 {
+		gasBudget = math.MaxUint64 / 2 // --rpc.gascap=0 means no cap
+	}
+	for bundleIdx, bundle := range bundles {
 		// first change blockContext
 		bundle.BlockOverride.OverrideBlockContext(&blockCtx, ethapi.BlockHashOverrides(overrideBlockHash))
-		results := []map[string]any{}
+		activePrecompiles, err := stateOverride.ActivePrecompiles(blockCtx.Rules(chainConfig))
+		if err != nil {
+			return nil, err
+		}
+		results := make([]map[string]any, len(bundle.Transactions))
 		for i := range bundle.Transactions {
 			txn := &bundle.Transactions[i]
+			st.SetTxContext(blockNum, txIndex)
+			txIndex++
 			if txn.Gas == nil || *txn.Gas == 0 {
-				txn.Gas = (*hexutil.Uint64)(&api.GasCap)
+				gas := hexutil.Uint64(gasBudget)
+				txn.Gas = &gas
 			}
-			msg, err := txn.ToMessage(api.GasCap, &blockCtx.BaseFee)
+			if gasBudget == 0 {
+				return nil, clientLimitExceededError("the transactions of the request used all of --rpc.gascap")
+			}
+			msg, err := txn.ToMessage(gasBudget, &blockCtx.BaseFee)
 			if err != nil {
 				return nil, err
 			}
 			msg.SetSkipExecutionGasCap(true)
 			txCtx = protocol.NewEVMTxContext(msg)
 			evm = vm.NewEVM(blockCtx, txCtx, evm.IntraBlockState(), chainConfig, vm.Config{})
+			evm.SetPrecompiles(activePrecompiles)
 			storeEVM(evm)
 			result, err := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, api.engine())
 			if err != nil {
 				return nil, err
 			}
 
-			_ = st.FinalizeTx(rules, state.NewNoopWriter())
+			if err := ethapi.FinalizeCallTx(st, rules); err != nil {
+				return nil, err
+			}
 
 			// If the timer caused an abort, return an appropriate error message
 			if evm.Cancelled() {
 				return nil, fmt.Errorf("execution aborted (timeout = %v)", timeout)
+			}
+			gasBudget -= result.ReceiptGasUsed
+			if len(result.ReturnData) > api.ReturnDataLimit {
+				return nil, fmt.Errorf("call returned result on length %d exceeding --rpc.returndata.limit %d", len(result.ReturnData), api.ReturnDataLimit)
 			}
 			jsonResult := make(map[string]any)
 			if result.Err != nil {
@@ -283,12 +325,12 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 				jsonResult["value"] = hex.EncodeToString(result.Return())
 			}
 
-			results = append(results, jsonResult)
+			results[i] = jsonResult
 		}
 
 		blockCtx.BlockNumber++
 		blockCtx.Time++
-		ret = append(ret, results)
+		ret[bundleIdx] = results
 	}
 
 	return ret, err

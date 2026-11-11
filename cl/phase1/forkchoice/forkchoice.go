@@ -41,13 +41,18 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/public_keys_registry"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/transition/impl/eth2"
+	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/cl/validator/validator_params"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 
 	lru "github.com/hashicorp/golang-lru/v2"
+	"golang.org/x/sync/singleflight"
 )
+
+var currentStateCopy = metrics.GetOrCreateSummary("caplin_forkchoice_current_state_copy")
 
 // ForkNode is a struct that represents a node in the fork choice tree.
 type ForkNode struct {
@@ -62,11 +67,14 @@ type ForkNode struct {
 }
 
 const (
-	checkpointsPerCache        = 1024
-	allowedCachedStates        = 8
-	queueCacheSize             = 128
-	pendingELPayloadsShrinkCap = 256 // drain releases the backing array when cap exceeds this
-	maxPendingELPayloads       = 1024
+	checkpointsPerCache                = 1024
+	maxCheckpointStates                = 10
+	maxConcurrentTargetCommitteeBuilds = 2
+	maxTargetCheckpointBlockAge        = 4
+	allowedCachedStates                = 8
+	queueCacheSize                     = 128
+	pendingELPayloadsShrinkCap         = 256 // drain releases the backing array when cap exceeds this
+	maxPendingELPayloads               = 1024
 )
 
 type randaoDelta struct {
@@ -87,7 +95,7 @@ type preverifiedAppendListsSizes struct {
 }
 
 type ForkChoiceStore struct {
-	time             atomic.Uint64
+	timeMs           atomic.Uint64
 	highestSeen      atomic.Uint64
 	highestSeenRoot  atomic.Value // common.Hash
 	blocksProcessing atomic.Int64
@@ -97,33 +105,39 @@ type ForkChoiceStore struct {
 	unrealizedJustifiedCheckpoint atomic.Value
 	unrealizedFinalizedCheckpoint atomic.Value
 
-	proposerBoostRoot                  atomic.Value
-	headHash                           common.Hash
-	headSlot                           uint64
-	headPayloadStatus                  cltypes.PayloadStatus
-	genesisTime                        uint64
-	genesisValidatorsRoot              common.Hash
-	anchorExecutionPayloadBuilderIndex uint64
-	anchorHasExecutionPayloadBid       bool
-	weights                            map[common.Hash]uint64
-	headSet                            map[common.Hash]struct{}
-	hotSidecars                        map[common.Hash][]*cltypes.BlobSidecar // Set of sidecars that are not yet processed.
-	verifiedExecutionPayload           *lru.Cache[common.Hash, struct{}]
-	verifiedExecutionPayloadHashes     *lru.Cache[common.Hash, common.Hash]
-	executionPayloadRoots              map[common.Hash]map[common.Hash]struct{}
-	invalidatedExecutionPayloads       *sync.Map
+	proposerBoostRoot              atomic.Value
+	headHash                       common.Hash
+	headSlot                       uint64
+	headPayloadStatus              cltypes.PayloadStatus
+	headIsFallback                 bool                           // Gloas get_head found no viable node and fell back to the justified root
+	selectedHead                   atomic.Pointer[ForkChoiceNode] // the head last published, for lock-free readers; nil after a payload decision changes
+	genesisTime                    uint64
+	genesisValidatorsRoot          common.Hash
+	anchorExecutionPayloadBid      *cltypes.ExecutionPayloadBid
+	weights                        map[common.Hash]uint64
+	headSet                        map[common.Hash]struct{}
+	hotSidecars                    map[common.Hash][]*cltypes.BlobSidecar // Set of sidecars that are not yet processed.
+	verifiedExecutionPayload       *lru.Cache[common.Hash, struct{}]
+	verifiedExecutionPayloadHashes *lru.Cache[common.Hash, common.Hash]
+	executionPayloadRoots          map[common.Hash]map[common.Hash]struct{}
+	invalidatedExecutionPayloads   *sync.Map
 	// Carries an invalid verdict until the caller makes it durable, since the bounded
 	// caches below can evict in between. Not refcounted, so the writer clears its own key.
 	inFlightInvalidPayloads *sync.Map
 	// [New in Gloas:EIP7732] Track execution payload validation status by execution block hash.
 	// Used to check if parent execution payload has been validated/invalidated for gossip validation.
-	executionPayloadStatus *lru.Cache[common.Hash, execution_client.PayloadStatus]
-	payloadStatusByRoot    *lru.Cache[common.Hash, execution_client.PayloadStatus]
+	executionPayloadStatus   *lru.Cache[common.Hash, execution_client.PayloadStatus]
+	payloadStatusByRoot      *lru.Cache[common.Hash, execution_client.PayloadStatus]
+	pendingEnvelopeApplyGate sync.Map // blockRoot -> chan struct{}: admits one apply of a parked envelope per root, closed when it ends
+	envelopeAppliesMu        sync.Mutex
+	envelopeApplies          map[common.Hash]int // envelope applies past the signature check, by block root
 	// [New in Gloas:EIP7732] Track execution payload gas_limit by execution block hash.
 	// Used for the is_gas_limit_target_compatible IGNORE check in bid gossip validation.
 	executionPayloadGasLimit *lru.Cache[common.Hash, uint64]
 	// childrens
 	childrens sync.Map
+
+	hasEquivocator bool
 
 	// Use go map because this is actually an unordered set
 	equivocatingIndicies []byte
@@ -133,12 +147,20 @@ type ForkChoiceStore struct {
 	// Per-block unrealized checkpoints (spec: store.unrealized_justifications)
 	unrealizedJustifications sync.Map // blockRoot -> solid.Checkpoint
 	unrealizedFinalizations  sync.Map // blockRoot -> solid.Checkpoint
+	// Serializes checkpointStates inserts and evictions with justified promotion,
+	// so an eviction pass never deletes the current justified state.
+	checkpointStatesMu sync.Mutex
 	// I use the cache due to the convenient auto-cleanup feauture.
 	checkpointStates   sync.Map // We keep ssz snappy of it as the full beacon state is full of rendundant data.
 	publicKeysRegistry public_keys_registry.PublicKeyRegistry
 	localValidators    *validator_params.ValidatorParams
 
+	checkpointStateBuilds singleflight.Group
+	targetStateBuildsMu   sync.Mutex
+	targetStateBuilds     map[solid.Checkpoint]*targetStateBuild
+
 	latestMessages    *latestMessagesStore
+	voteTally         voteTally
 	syncedDataManager *synced_data.SyncedDataManager
 	// We keep track of them so that we can forkchoice with EL.
 	eth2Roots *lru.Cache[common.Hash, common.Hash] // ETH2 root -> ETH1 hash
@@ -160,6 +182,7 @@ type ForkChoiceStore struct {
 	proposerLookahead *lru.Cache[uint64, solid.Uint64VectorSSZ]
 
 	mu                             sync.RWMutex
+	payloadPreparation             PayloadPreparationImports
 	executionPayloadValidationOnce sync.Once
 	executionPayloadValidation     chan struct{}
 
@@ -185,12 +208,12 @@ type ForkChoiceStore struct {
 	probabilisticHeadGetter bool
 
 	// [New in Gloas:EIP7732]
-	ptcVoteMu                   sync.Mutex // protects live payload vote updates, paired reads, and first-valid gossip tracking
-	payloadTimelinessVote       sync.Map   // map[common.Hash][clparams.PtcSize]int8 (0=unvoted, 1=true, -1=false)
-	payloadDataAvailabilityVote sync.Map   // map[common.Hash][clparams.PtcSize]int8 (0=unvoted, 1=true, -1=false)
-	payloadAttestationSeenSlot  uint64
-	payloadAttestationSeen      map[uint64]struct{}
-	payloadAttestationContexts  *payloadAttestationValidationContexts
+	ptcVoteMu                    sync.Mutex // protects live payload vote updates, paired reads, and first-valid gossip tracking
+	payloadTimelinessVote        sync.Map   // map[common.Hash][clparams.PtcSize]int8 (0=unvoted, 1=true, -1=false)
+	payloadDataAvailabilityVote  sync.Map   // map[common.Hash][clparams.PtcSize]int8 (0=unvoted, 1=true, -1=false)
+	payloadAttestationSeen       map[payloadAttestationSeenKey]struct{}
+	payloadAttestationPrunedSlot uint64
+	payloadAttestationContexts   *payloadAttestationValidationContexts
 	// [New in Gloas:EIP7732] Block timeliness tracking.
 	// Pre-GLOAS: stores [block_timely, false] (only index 0 is meaningful).
 	// Post-GLOAS: stores [block_timely, payload_timely] — two independent booleans.
@@ -205,6 +228,10 @@ type ForkChoiceStore struct {
 	// Later, when OnBlock processes the block, it checks this cache and processes any pending envelope.
 	pendingEnvelopes         *lru.Cache[common.Hash, *cltypes.SignedExecutionPayloadEnvelope]
 	envelopeGossipAdmissions ExecutionPayloadEnvelopeAdmissions
+	// Earliest time a retry of a pending envelope may run again, by block root. The background retry and
+	// a proposal's retry of its parent share it.
+	dataAvailableEnvelopeRetryAt *lru.Cache[common.Hash, time.Time]
+	dataAvailableEnvelopeRetryMu sync.Mutex // makes the due check and the booking of a retry one step
 
 	// [New in Gloas:EIP7732] Locally-produced self-build envelopes waiting for their block.
 	// Separate from pendingEnvelopes so that OnBlock replay can distinguish local origin
@@ -282,9 +309,16 @@ func NewForkChoiceStore(
 		return nil, err
 	}
 
+	slot := anchorState.Slot()
+	anchorEpoch := state.Epoch(anchorState.BeaconState)
+	if slot%anchorState.BeaconConfig().SlotsPerEpoch != 0 && anchorState.LatestBlockHeader().Slot == slot {
+		// A checkpoint block that is not at an epoch start is also the checkpoint at the next
+		// epoch start. A state advanced past its block keeps the epoch of its own slot.
+		anchorEpoch++
+	}
 	anchorCheckpoint := solid.Checkpoint{
 		Root:  anchorRoot,
-		Epoch: state.Epoch(anchorState.BeaconState),
+		Epoch: anchorEpoch,
 	}
 
 	verifiedExecutionPayload, err := lru.New[common.Hash, struct{}](65536)
@@ -371,6 +405,11 @@ func NewForkChoiceStore(
 		return nil, err
 	}
 
+	dataAvailableEnvelopeRetryAt, err := lru.New[common.Hash, time.Time](queueCacheSize)
+	if err != nil {
+		return nil, err
+	}
+
 	// [New in Gloas:EIP7732] Separate queue for locally-produced self-build envelopes
 	pendingLocalSelfBuildEnvelopes, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](queueCacheSize)
 	if err != nil {
@@ -400,7 +439,14 @@ func NewForkChoiceStore(
 	publicKeysRegistry.ResetAnchor(anchorState)
 	participation.Add(state.Epoch(anchorState.BeaconState), anchorState.CurrentEpochParticipation().Copy())
 
-	totalActiveBalances.Add(anchorRoot, anchorState.GetTotalActiveBalance())
+	// The caller's anchor state can carry a stale cached total, so take it from the fork graph's rescanned copy.
+	anchorTotalActiveBalance := anchorState.GetTotalActiveBalance()
+	if forkGraph != nil {
+		if current := forkGraph.CurrentStateLocked(anchorRoot); current != nil {
+			anchorTotalActiveBalance = current.GetTotalActiveBalance()
+		}
+	}
+	totalActiveBalances.Add(anchorRoot, anchorTotalActiveBalance)
 	r := solid.NewHashVector(int(anchorState.BeaconConfig().EpochsPerHistoricalVector))
 	anchorState.RandaoMixes().CopyTo(r)
 	randaoMixesLists.Add(anchorRoot, r)
@@ -458,6 +504,7 @@ func NewForkChoiceStore(
 		partialWithdrawals:             partialWithdrawals,
 		proposerLookahead:              proposerLookahead,
 		pendingEnvelopes:               pendingEnvelopes,
+		dataAvailableEnvelopeRetryAt:   dataAvailableEnvelopeRetryAt,
 		pendingLocalSelfBuildEnvelopes: pendingLocalSelfBuildEnvelopes,
 		executionPayloadStatus:         executionPayloadStatus,
 		payloadStatusByRoot:            payloadStatusByRoot,
@@ -467,8 +514,7 @@ func NewForkChoiceStore(
 	}
 	if anchorState.Version() >= clparams.GloasVersion {
 		if bid := anchorState.GetLatestExecutionPayloadBid(); bid != nil {
-			f.anchorExecutionPayloadBuilderIndex = bid.BuilderIndex
-			f.anchorHasExecutionPayloadBid = true
+			f.anchorExecutionPayloadBid = bid.Copy()
 		}
 	}
 	f.justifiedCheckpoint.Store(anchorCheckpoint)
@@ -483,7 +529,7 @@ func NewForkChoiceStore(
 
 	f.highestSeen.Store(anchorState.Slot())
 	f.highestSeenRoot.Store(common.Hash(anchorRoot))
-	f.time.Store(anchorState.GenesisTime() + anchorState.BeaconConfig().SecondsPerSlot*anchorState.Slot())
+	f.timeMs.Store(utils.SecondsToMilliseconds(anchorState.GenesisTime() + anchorState.BeaconConfig().SecondsPerSlot*anchorState.Slot()))
 
 	var anchorTimelinessVotes [clparams.PtcSize]int8
 	var anchorDataAvailabilityVotes [clparams.PtcSize]int8
@@ -605,6 +651,70 @@ func (f *ForkChoiceStore) HighestSeen() uint64 {
 	return f.highestSeen.Load()
 }
 
+// HasImportedDescendantAfter reports whether a block imported on top of root, on a branch that
+// passes get_head's justification and finalization filter and that an invalidation did not cut
+// off, is past slot. A correct head has no such descendant, since get_head walks down to a leaf,
+// so one means the head is stuck. When root is the selected head, its children count only on a
+// payload variant get_head could have walked to. Viability is judged on blocks, not on get_head's
+// payload nodes: a block whose children all sit on one variant and are all non-viable is dropped
+// even when its other variant is a viable leaf. That needs a long non-finality period and errs
+// toward serving duties.
+func (f *ForkChoiceStore) HasImportedDescendantAfter(root common.Hash, slot uint64) bool {
+	var pending []common.Hash
+	for _, child := range f.children(root) {
+		if !f.cutOffByInvalidation(child) && f.reachableFromSelectedHead(root, child) {
+			pending = append(pending, child)
+		}
+	}
+	if len(pending) == 0 {
+		return false
+	}
+	justified := f.justifiedCheckpoint.Load().(solid.Checkpoint)
+	currentEpoch := f.computeEpochAtSlot(f.Slot())
+	viable := make(map[common.Hash]*cltypes.BeaconBlockHeader)
+	for _, child := range pending {
+		f.markViableUncutBlocks(child, viable, currentEpoch, justified)
+	}
+	for len(pending) > 0 {
+		block := pending[len(pending)-1]
+		pending = pending[:len(pending)-1]
+		header, ok := viable[block]
+		if !ok {
+			continue
+		}
+		if header.Slot > slot {
+			return true
+		}
+		pending = append(pending, f.children(block)...)
+	}
+	return false
+}
+
+// markViableUncutBlocks collects the viable blocks of the subtree, skipping children an
+// invalidation cut off. A block whose children are all cut off is judged as a leaf, as get_head
+// judges its EMPTY node.
+func (f *ForkChoiceStore) markViableUncutBlocks(blockRoot common.Hash, blocks map[common.Hash]*cltypes.BeaconBlockHeader, currentEpoch uint64, justified solid.Checkpoint) bool {
+	header, has := f.forkGraph.GetHeader(blockRoot)
+	if !has {
+		return false
+	}
+	anyChild, anyViable := false, false
+	for _, child := range f.children(blockRoot) {
+		if f.cutOffByInvalidation(child) {
+			continue
+		}
+		anyChild = true
+		if f.markViableUncutBlocks(child, blocks, currentEpoch, justified) {
+			anyViable = true
+		}
+	}
+	if anyViable || (!anyChild && f.isViableLeaf(blockRoot, header, currentEpoch, justified)) {
+		blocks[blockRoot] = header
+		return true
+	}
+	return false
+}
+
 // BlockProcessing reports whether an OnBlock call is waiting for the store lock or is active.
 // Blocks parked between network-service retries have not entered OnBlock and are not counted.
 func (f *ForkChoiceStore) BlockProcessing() bool {
@@ -644,7 +754,11 @@ func (f *ForkChoiceStore) updateChildren(parentSlot uint64, parent, child common
 
 // Time returns current time
 func (f *ForkChoiceStore) Time() uint64 {
-	return f.time.Load()
+	return f.timeMs.Load() / 1000
+}
+
+func (f *ForkChoiceStore) GenesisTime() uint64 {
+	return f.genesisTime
 }
 
 // ProposerBoostRoot returns proposer boost root
@@ -702,11 +816,8 @@ func (f *ForkChoiceStore) GetEth1Hash(eth2Root common.Hash) common.Hash {
 func (f *ForkChoiceStore) GetFinalizedExecutionHash(eth2Root common.Hash) common.Hash {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
-	block, ok := f.forkGraph.GetBlock(eth2Root)
-	if ok && block != nil && block.Block.Body.Version >= clparams.GloasVersion {
-		if bid := block.Block.Body.GetSignedExecutionPayloadBid(); bid != nil && bid.Message != nil {
-			return bid.Message.ParentBlockHash
-		}
+	if bid := f.executionPayloadBid(eth2Root); bid != nil {
+		return bid.ParentBlockHash
 	}
 	ret, _ := f.eth2Roots.Get(eth2Root)
 	return ret
@@ -727,19 +838,80 @@ func (f *ForkChoiceStore) AnchorRoot() common.Hash {
 }
 
 func (f *ForkChoiceStore) AnchorExecutionPayloadBuilderIndex() (uint64, bool) {
-	return f.anchorExecutionPayloadBuilderIndex, f.anchorHasExecutionPayloadBid
+	if f.anchorExecutionPayloadBid == nil {
+		return 0, false
+	}
+	return f.anchorExecutionPayloadBid.BuilderIndex, true
 }
 
-func (f *ForkChoiceStore) GetStateAtBlockRoot(blockRoot common.Hash, alwaysCopy bool) (*state.CachingBeaconState, error) {
+func (f *ForkChoiceStore) copyCurrentStateLocked(blockRoot common.Hash) (*state.CachingBeaconState, bool, error) {
+	current := f.forkGraph.CurrentStateLocked(blockRoot)
+	if current == nil {
+		return nil, false, nil
+	}
+	start := time.Now()
+	defer currentStateCopy.ObserveDuration(start)
+	if f.totalActiveBalances != nil {
+		if total, ok := f.totalActiveBalances.Get(blockRoot); ok {
+			copied, err := current.CopyWithTotalActiveBalance(total)
+			return copied, true, err
+		}
+	}
+	copied, err := current.Copy()
+	return copied, true, err
+}
+
+func (f *ForkChoiceStore) copyCurrentState(blockRoot common.Hash) (*state.CachingBeaconState, bool, error) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
-	return f.forkGraph.GetState(blockRoot, alwaysCopy)
+	return f.copyCurrentStateLocked(blockRoot)
+}
+
+func (f *ForkChoiceStore) copyStateAtBlockRootLocked(blockRoot common.Hash) (*state.CachingBeaconState, error) {
+	copied, current, err := f.copyCurrentStateLocked(blockRoot)
+	if current || err != nil {
+		return copied, err
+	}
+	return f.forkGraph.ReplayState(blockRoot)
+}
+
+func (f *ForkChoiceStore) getStateLocked(blockRoot common.Hash) (*state.CachingBeaconState, error) {
+	if current := f.forkGraph.CurrentStateLocked(blockRoot); current != nil {
+		return current, nil
+	}
+	return f.forkGraph.ReplayState(blockRoot)
+}
+
+func (f *ForkChoiceStore) GetStateAtBlockRoot(blockRoot common.Hash) (*state.CachingBeaconState, error) {
+	copied, current, err := f.copyCurrentState(blockRoot)
+	if current || err != nil {
+		return copied, err
+	}
+	return f.forkGraph.ReplayState(blockRoot)
+}
+
+// GetOwnedStateAtBlockRoot is GetStateAtBlockRoot, but it also copies a replayed
+// state, because replay leaves pointers to stored block objects in it.
+func (f *ForkChoiceStore) GetOwnedStateAtBlockRoot(blockRoot common.Hash) (*state.CachingBeaconState, error) {
+	copied, current, err := f.copyCurrentState(blockRoot)
+	if current || err != nil {
+		return copied, err
+	}
+	replayed, err := f.forkGraph.ReplayState(blockRoot)
+	if replayed == nil || err != nil {
+		return replayed, err
+	}
+	return replayed.Copy()
 }
 
 func (f *ForkChoiceStore) ViewStateAtBlockRoot(blockRoot common.Hash, fn func(*state.CachingBeaconState) error) error {
 	f.mu.RLock()
-	defer f.mu.RUnlock()
-	blockState, err := f.forkGraph.GetState(blockRoot, false)
+	if current := f.forkGraph.CurrentStateLocked(blockRoot); current != nil {
+		defer f.mu.RUnlock()
+		return fn(current)
+	}
+	f.mu.RUnlock()
+	blockState, err := f.forkGraph.ReplayState(blockRoot)
 	if err != nil {
 		return err
 	}
@@ -747,6 +919,16 @@ func (f *ForkChoiceStore) ViewStateAtBlockRoot(blockRoot common.Hash, fn func(*s
 		return fmt.Errorf("block state not found for root %v", blockRoot)
 	}
 	return fn(blockState)
+}
+
+func (f *ForkChoiceStore) ViewCurrentStateAtBlockRoot(blockRoot common.Hash, fn func(*state.CachingBeaconState) error) error {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	current := f.forkGraph.CurrentStateLocked(blockRoot)
+	if current == nil {
+		return nil
+	}
+	return fn(current)
 }
 
 func (f *ForkChoiceStore) PreverifiedValidator(blockRoot common.Hash) uint64 {
@@ -833,21 +1015,29 @@ func (f *ForkChoiceStore) Participation(epoch uint64) (*solid.ParticipationBitLi
 }
 
 func (f *ForkChoiceStore) ForkNodes() []ForkNode {
+	trackGloasWeights := f.trackGloasWeights()
+	if trackGloasWeights {
+		_, _, _ = f.GetHeadNode()
+	}
 	f.mu.RLock()
 	defer f.mu.RUnlock()
-	forkNodes := make([]ForkNode, 0, len(f.weights))
-	for blockRoot, weight := range f.weights {
+	weights := f.weights
+	if trackGloasWeights {
+		weights = f.gloasWeightTree.snapshotWeights()
+	}
+	forkNodes := make([]ForkNode, 0, len(weights))
+	for blockRoot, weight := range weights {
 		header, has := f.forkGraph.GetHeader(blockRoot)
 		if !has {
 			continue
 		}
-		justifiedCheckpoint, has := f.forkGraph.GetCurrentJustifiedCheckpoint(blockRoot)
-		if !has {
-			continue
-		}
-		finalizedCheckpoint, has := f.forkGraph.GetFinalizedCheckpoint(blockRoot)
-		if !has {
-			continue
+		justifiedCheckpoint, hasJustified := f.forkGraph.GetCurrentJustifiedCheckpoint(blockRoot)
+		finalizedCheckpoint, hasFinalized := f.forkGraph.GetFinalizedCheckpoint(blockRoot)
+		if !hasJustified || !hasFinalized {
+			if blockRoot != f.forkGraph.AnchorRoot() || blockRoot != f.JustifiedCheckpoint().Root {
+				continue
+			}
+			justifiedCheckpoint, finalizedCheckpoint = f.JustifiedCheckpoint(), f.FinalizedCheckpoint()
 		}
 		blockHash, _ := f.eth2Roots.Get(blockRoot)
 
@@ -908,6 +1098,53 @@ func (f *ForkChoiceStore) HasBlockEquivocation(slot, proposerIndex uint64, excep
 // [New in Gloas:EIP7732]
 func (f *ForkChoiceStore) HasEnvelope(blockRoot common.Hash) bool {
 	return f.forkGraph.HasEnvelope(blockRoot)
+}
+
+// RejectEnvelope rejects this beacon root's envelope without invalidating its execution hash.
+// Sibling roots can reference the same execution block with different blob commitments.
+func (f *ForkChoiceStore) RejectEnvelope(blockRoot common.Hash) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.rejectEnvelopeLocked(blockRoot)
+}
+
+func (f *ForkChoiceStore) rejectEnvelopeLocked(blockRoot common.Hash) {
+	if f.IsEnvelopeRejected(blockRoot) || !f.forkGraph.RejectEnvelope(blockRoot) {
+		return
+	}
+	if bid := f.anchorExecutionPayloadBid; bid != nil && blockRoot == f.forkGraph.AnchorRoot() {
+		f.eth2Roots.Add(blockRoot, bid.ParentBlockHash)
+	}
+	if f.verifiedExecutionPayload != nil {
+		f.verifiedExecutionPayload.Remove(blockRoot)
+	}
+	if f.payloadStatusByRoot != nil {
+		f.payloadStatusByRoot.Remove(blockRoot)
+	}
+	if f.pendingEnvelopes != nil {
+		if envelope, ok := f.pendingEnvelopes.Peek(blockRoot); ok {
+			f.forgetPendingEnvelopeArrival(envelope)
+			f.pendingEnvelopes.Remove(blockRoot)
+		}
+	}
+	if f.pendingLocalSelfBuildEnvelopes != nil {
+		f.pendingLocalSelfBuildEnvelopes.Remove(blockRoot)
+	}
+	f.dataAvailableEnvelopeRetryMu.Lock()
+	if f.dataAvailableEnvelopeRetryAt != nil {
+		f.dataAvailableEnvelopeRetryAt.Remove(blockRoot)
+	}
+	f.dataAvailableEnvelopeRetryMu.Unlock()
+	f.invalidateCachedHead()
+	f.selectedHead.Store(nil)
+}
+
+func (f *ForkChoiceStore) IsEnvelopeRejected(blockRoot common.Hash) bool {
+	return f.forkGraph != nil && f.forkGraph.IsEnvelopeRejected(blockRoot)
+}
+
+func (f *ForkChoiceStore) IsBlockInvalid(blockRoot common.Hash) bool {
+	return f.forkGraph.IsBlockInvalid(blockRoot)
 }
 
 // IsPayloadVerified returns whether the execution payload for the beacon block root
@@ -1010,6 +1247,9 @@ func (f *ForkChoiceStore) markPayloadStatusIfRetainedLocked(
 	status execution_client.PayloadStatus,
 	gasLimit *uint64,
 ) (execution_client.PayloadStatus, bool) {
+	if f.IsEnvelopeRejected(blockRoot) {
+		return execution_client.PayloadStatusNone, false
+	}
 	guard, ok := f.forkGraph.(retainedBlockGuard)
 	if !ok {
 		effective := f.markPayloadStatusLocked(blockRoot, executionBlockHash, status)
@@ -1048,6 +1288,9 @@ func (f *ForkChoiceStore) markPayloadStatus(
 	status execution_client.PayloadStatus,
 	isRetained func(common.Hash) bool,
 ) execution_client.PayloadStatus {
+	if f.IsEnvelopeRejected(blockRoot) {
+		return execution_client.PayloadStatusNone
+	}
 	f.trackExecutionPayloadRootLocked(blockRoot, executionBlockHash)
 	effective := status
 	if f.invalidatedExecutionPayloads != nil {
@@ -1145,10 +1388,47 @@ func (f *ForkChoiceStore) markPayloadStatus(
 		}
 	}
 	if !known || current != effective {
-		f.headHash = common.Hash{}
-		f.headPayloadStatus = cltypes.PayloadStatusPending
+		f.invalidateCachedHead()
+		// The decision can rule out the published variant; get_head publishes again.
+		f.selectedHead.Store(nil)
 	}
 	return effective
+}
+
+// reachableFromSelectedHead reports whether get_head could reach child from root when root is
+// the selected head: a child on the other payload variant counts only while that variant is not
+// a candidate, that is, an unavailable FULL. Without a published head every child counts.
+func (f *ForkChoiceStore) reachableFromSelectedHead(root, child common.Hash) bool {
+	head := f.selectedHead.Load()
+	if head == nil || head.Root != root || (head.PayloadStatus != cltypes.PayloadStatusEmpty && head.PayloadStatus != cltypes.PayloadStatusFull) {
+		return true
+	}
+	block, ok := f.forkGraph.GetBlock(child)
+	if !ok || block == nil || block.Block == nil || block.Version() < clparams.GloasVersion {
+		return true
+	}
+	variant := f.getParentPayloadStatus(block.Block)
+	return variant == head.PayloadStatus || (variant == cltypes.PayloadStatusFull && !f.isPayloadAvailable(root))
+}
+
+// cutOffByInvalidation reports whether root has no surviving fork-choice variant.
+// A rejected Gloas payload excludes children that build on it; children that skip it can remain viable.
+func (f *ForkChoiceStore) cutOffByInvalidation(root common.Hash) bool {
+	block, ok := f.forkGraph.GetBlock(root)
+	if !ok || block == nil || block.Block == nil {
+		return false
+	}
+	if block.Version() < clparams.GloasVersion {
+		return f.forkGraph.IsBlockInvalid(root)
+	}
+	parentRoot := block.Block.ParentRoot
+	if !f.forkGraph.IsBlockInvalid(parentRoot) && !f.IsEnvelopeRejected(parentRoot) {
+		return false
+	}
+	if parent, ok := f.forkGraph.GetBlock(parentRoot); ok && parent != nil && parent.Version() < clparams.GloasVersion {
+		return true
+	}
+	return f.getParentPayloadStatus(block.Block) == cltypes.PayloadStatusFull
 }
 
 func (f *ForkChoiceStore) payloadStatusAuthority(blockRoot common.Hash) (execution_client.PayloadStatus, bool) {
@@ -1185,12 +1465,31 @@ func (f *ForkChoiceStore) ReadEnvelopeFromDisk(blockRoot common.Hash) (*cltypes.
 	return f.forkGraph.ReadEnvelopeFromDisk(blockRoot)
 }
 
+func (f *ForkChoiceStore) existingStateAtBlockRoot(blockRoot common.Hash) (*state.CachingBeaconState, error) {
+	st, err := f.GetStateAtBlockRoot(blockRoot)
+	if err != nil {
+		return nil, err
+	}
+	if st == nil {
+		return nil, fork_graph.ErrStateNotFound
+	}
+	return st, nil
+}
+
 func (f *ForkChoiceStore) GetBalances(blockRoot common.Hash) (solid.Uint64ListSSZ, error) {
-	return f.forkGraph.GetBalances(blockRoot)
+	st, err := f.existingStateAtBlockRoot(blockRoot)
+	if err != nil {
+		return nil, err
+	}
+	return st.Balances(), nil
 }
 
 func (f *ForkChoiceStore) GetInactivitiesScores(blockRoot common.Hash) (solid.Uint64ListSSZ, error) {
-	return f.forkGraph.GetInactivitiesScores(blockRoot)
+	st, err := f.existingStateAtBlockRoot(blockRoot)
+	if err != nil {
+		return nil, err
+	}
+	return st.InactivityScores(), nil
 }
 
 func (f *ForkChoiceStore) GetPreviousParticipationIndicies(blockRoot common.Hash) (*solid.ParticipationBitList, error) {
@@ -1202,7 +1501,11 @@ func (f *ForkChoiceStore) GetPreviousParticipationIndicies(blockRoot common.Hash
 }
 
 func (f *ForkChoiceStore) GetValidatorSet(blockRoot common.Hash) (*solid.ValidatorSet, error) {
-	return f.forkGraph.GetValidatorSet(blockRoot)
+	st, err := f.existingStateAtBlockRoot(blockRoot)
+	if err != nil {
+		return nil, err
+	}
+	return st.ValidatorSet(), nil
 }
 
 func (f *ForkChoiceStore) GetCurrentParticipationIndicies(blockRoot common.Hash) (*solid.ParticipationBitList, error) {
@@ -1234,147 +1537,68 @@ func (f *ForkChoiceStore) DumpBeaconStateOnDisk(bs *state.CachingBeaconState) er
 }
 
 func (f *ForkChoiceStore) addPendingConsolidations(blockRoot common.Hash, pendingConsolidations *solid.ListSSZ[*solid.PendingConsolidation]) error {
-	// first check if we already have the same list in the parent node.
-	header, ok := f.forkGraph.GetHeader(blockRoot)
-	// If there is no header, make a copy.
-	if !ok {
-		pendingConsolidationsCopy := solid.NewPendingConsolidationList(f.beaconCfg)
-		for i := 0; i < pendingConsolidations.Len(); i++ {
-			pendingConsolidationsCopy.Append(pendingConsolidations.Get(i))
+	// If the parent node has the same list, store the parent's list instead of a copy.
+	if header, ok := f.forkGraph.GetHeader(blockRoot); ok {
+		if parentConsolidations, ok := f.pendingConsolidations.Get(header.ParentRoot); ok {
+			pendingConsolidationsHash, err := pendingConsolidations.HashSSZ()
+			if err != nil {
+				return err
+			}
+			parentConsolidationsHash, err := parentConsolidations.HashSSZ()
+			if err != nil {
+				return err
+			}
+			if pendingConsolidationsHash == parentConsolidationsHash {
+				f.pendingConsolidations.Add(blockRoot, parentConsolidations)
+				return nil
+			}
 		}
-		f.pendingConsolidations.Add(blockRoot, pendingConsolidationsCopy)
-		return nil
 	}
-	parentRoot := header.ParentRoot
-	parentConsolidations, ok := f.pendingConsolidations.Get(parentRoot)
-	if !ok {
-		pendingConsolidationsCopy := solid.NewPendingConsolidationList(f.beaconCfg)
-		for i := 0; i < pendingConsolidations.Len(); i++ {
-			pendingConsolidationsCopy.Append(pendingConsolidations.Get(i))
-		}
-		f.pendingConsolidations.Add(blockRoot, pendingConsolidationsCopy)
-		return nil
-	}
-
-	// check if the two lists are equal via their hashes.
-	pendingConsolidationsHash, err := pendingConsolidations.HashSSZ()
-	if err != nil {
-		return err
-	}
-	parentConsolidationsHash, err := parentConsolidations.HashSSZ()
-	if err != nil {
-		return err
-	}
-	if pendingConsolidationsHash == parentConsolidationsHash {
-		// If they are equal, we can just store the parent consolidations.
-		f.pendingConsolidations.Add(blockRoot, parentConsolidations)
-		return nil
-	}
-	pendingConsolidationsCopy := solid.NewPendingConsolidationList(f.beaconCfg)
-	for i := 0; i < pendingConsolidations.Len(); i++ {
-		pendingConsolidationsCopy.Append(pendingConsolidations.Get(i))
-	}
-	f.pendingConsolidations.Add(blockRoot, pendingConsolidationsCopy)
+	f.pendingConsolidations.Add(blockRoot, pendingConsolidations.ShallowCopy())
 	return nil
 }
 
 func (f *ForkChoiceStore) addPendingDeposits(blockRoot common.Hash, pendingDeposits *solid.ListSSZ[*solid.PendingDeposit]) error {
-	// first check if we already have the same list in the parent node.
-	header, ok := f.forkGraph.GetHeader(blockRoot)
-	// If there is no header, make a copy.
-	if !ok {
-		pendingDepositsCopy := solid.NewPendingDepositList(f.beaconCfg)
-		for i := 0; i < pendingDeposits.Len(); i++ {
-			pendingDepositsCopy.Append(pendingDeposits.Get(i))
+	// If the parent node has the same list, store the parent's list instead of a copy.
+	if header, ok := f.forkGraph.GetHeader(blockRoot); ok {
+		if parentDeposits, ok := f.pendingDeposits.Get(header.ParentRoot); ok {
+			pendingDepositsHash, err := pendingDeposits.HashSSZ()
+			if err != nil {
+				return err
+			}
+			parentDepositsHash, err := parentDeposits.HashSSZ()
+			if err != nil {
+				return err
+			}
+			if pendingDepositsHash == parentDepositsHash {
+				f.pendingDeposits.Add(blockRoot, parentDeposits)
+				return nil
+			}
 		}
-		f.pendingDeposits.Add(blockRoot, pendingDepositsCopy)
-		return nil
 	}
-	parentRoot := header.ParentRoot
-	parentDeposits, ok := f.pendingDeposits.Get(parentRoot)
-	if !ok {
-		pendingDepositsCopy := solid.NewPendingDepositList(f.beaconCfg)
-		for i := 0; i < pendingDeposits.Len(); i++ {
-			pendingDepositsCopy.Append(pendingDeposits.Get(i))
-		}
-		f.pendingDeposits.Add(blockRoot, pendingDepositsCopy)
-		return nil
-	}
-
-	// check if the two lists are equal via their hashes.
-	pendingDepositsHash, err := pendingDeposits.HashSSZ()
-	if err != nil {
-		return err
-	}
-	parentDepositsHash, err := parentDeposits.HashSSZ()
-	if err != nil {
-		return err
-	}
-	if pendingDepositsHash == parentDepositsHash {
-		// If they are equal, we can just store the parent deposits.
-		f.pendingDeposits.Add(blockRoot, parentDeposits)
-		return nil
-	}
-	pendingDepositsCopy := solid.NewPendingDepositList(f.beaconCfg)
-	for i := 0; i < pendingDeposits.Len(); i++ {
-		pendingDepositsCopy.Append(pendingDeposits.Get(i))
-	}
-	f.pendingDeposits.Add(blockRoot, pendingDepositsCopy)
+	f.pendingDeposits.Add(blockRoot, pendingDeposits.ShallowCopy())
 	return nil
 }
 
 func (f *ForkChoiceStore) addPendingPartialWithdrawals(blockRoot common.Hash, pendingPartialWithdrawals *solid.ListSSZ[*solid.PendingPartialWithdrawal]) error {
-	// first check if we already have the same list in the parent node.
-	header, ok := f.forkGraph.GetHeader(blockRoot)
-	// If there is no header, make a copy.
-	if !ok {
-		pendingPartialWithdrawalsCopy := solid.NewPendingWithdrawalList(f.beaconCfg)
-		for i := 0; i < pendingPartialWithdrawals.Len(); i++ {
-			pendingPartialWithdrawalsCopy.Append(pendingPartialWithdrawals.Get(i))
+	// If the parent node has the same list, store the parent's list instead of a copy.
+	if header, ok := f.forkGraph.GetHeader(blockRoot); ok {
+		if parentWithdrawals, ok := f.partialWithdrawals.Get(header.ParentRoot); ok {
+			pendingPartialWithdrawalsHash, err := pendingPartialWithdrawals.HashSSZ()
+			if err != nil {
+				return err
+			}
+			parentWithdrawalsHash, err := parentWithdrawals.HashSSZ()
+			if err != nil {
+				return err
+			}
+			if pendingPartialWithdrawalsHash == parentWithdrawalsHash {
+				f.partialWithdrawals.Add(blockRoot, parentWithdrawals)
+				return nil
+			}
 		}
-		f.partialWithdrawals.Add(blockRoot, pendingPartialWithdrawalsCopy)
-		return nil
 	}
-	parentRoot := header.ParentRoot
-	parentWithdrawals, ok := f.partialWithdrawals.Get(parentRoot)
-	if !ok {
-		pendingPartialWithdrawalsCopy := solid.NewPendingWithdrawalList(f.beaconCfg)
-		for i := 0; i < pendingPartialWithdrawals.Len(); i++ {
-			pendingPartialWithdrawalsCopy.Append(pendingPartialWithdrawals.Get(i))
-		}
-		f.partialWithdrawals.Add(blockRoot, pendingPartialWithdrawalsCopy)
-		return nil
-	}
-
-	// check if the two lists are equal via their hashes.
-	pendingPartialWithdrawalsHash, err := pendingPartialWithdrawals.HashSSZ()
-	if err != nil {
-		return err
-	}
-	parentWithdrawalsHash, err := parentWithdrawals.HashSSZ()
-	if err != nil {
-		return err
-	}
-	if pendingPartialWithdrawalsHash == parentWithdrawalsHash {
-		// If they are equal, we can just store the parent withdrawals.
-		f.partialWithdrawals.Add(blockRoot, parentWithdrawals)
-		return nil
-	}
-	pendingPartialWithdrawalsCopy := solid.NewPendingWithdrawalList(f.beaconCfg)
-	for i := 0; i < pendingPartialWithdrawals.Len(); i++ {
-		pendingPartialWithdrawalsCopy.Append(pendingPartialWithdrawals.Get(i))
-	}
-	f.partialWithdrawals.Add(blockRoot, pendingPartialWithdrawalsCopy)
-	return nil
-}
-
-func (f *ForkChoiceStore) addProposerLookahead(slot uint64, proposerLookahead solid.Uint64VectorSSZ) error {
-	epoch := slot / f.beaconCfg.SlotsPerEpoch
-	if _, ok := f.proposerLookahead.Get(epoch); !ok {
-		pl := solid.NewUint64VectorSSZ(proposerLookahead.Length())
-		proposerLookahead.CopyTo(pl)
-		f.proposerLookahead.Add(epoch, pl)
-	}
+	f.partialWithdrawals.Add(blockRoot, pendingPartialWithdrawals.ShallowCopy())
 	return nil
 }
 
@@ -1405,6 +1629,9 @@ func (f *ForkChoiceStore) addPendingELPayload(block *cltypes.SignedBeaconBlock, 
 	defer f.pendingELPayloadsMu.Unlock()
 	root, ok := pendingELPayloadRoot(PendingELPayload{Block: block, Envelope: envelope})
 	if ok {
+		if f.IsEnvelopeRejected(root) {
+			return
+		}
 		for _, p := range f.pendingELPayloads {
 			if existingRoot, existingOk := pendingELPayloadRoot(p); existingOk && existingRoot == root {
 				return

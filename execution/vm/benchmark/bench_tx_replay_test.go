@@ -2,7 +2,6 @@ package benchmark
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -30,27 +29,24 @@ import (
 const txFixturesDir = "testdata/txs"
 
 // BenchmarkTxReplay replays each tx fetched into testdata/txs, as
-// eth_call runs it: a fresh state over the tx's prestate per iteration, on the
-// materializing and the noMaterialize path.
+// eth_call runs it: a pooled versioned state over the tx's prestate per iteration.
 func BenchmarkTxReplay(b *testing.B) {
 	paths, err := filepath.Glob(filepath.Join(txFixturesDir, "*.json"))
 	require.NoError(b, err)
 	for _, path := range paths {
 		name := strings.TrimSuffix(filepath.Base(path), ".json")
-		for _, noMaterialize := range []bool{false, true} {
-			b.Run(fmt.Sprintf("%s/nm=%v", name, noMaterialize), func(b *testing.B) {
-				r := newTxReplay(b, path)
-				res := r.run(b, noMaterialize)
-				// A replay that drifts from mainnet (a BLOCKHASH it cannot see, an
-				// unsupported tx type) would bench another program.
-				require.Equal(b, r.gasUsed, res.ReceiptGasUsed, "gas used vs the receipt")
-				require.Equal(b, r.failed, res.Failed(), "outcome vs the receipt")
-				b.ReportAllocs()
-				for b.Loop() {
-					r.run(b, noMaterialize)
-				}
-			})
-		}
+		b.Run(name, func(b *testing.B) {
+			r := newTxReplay(b, path)
+			res := r.run(b)
+			// A replay that drifts from mainnet (a BLOCKHASH it cannot see, an
+			// unsupported tx type) would bench another program.
+			require.Equal(b, r.gasUsed, res.ReceiptGasUsed, "gas used vs the receipt")
+			require.Equal(b, r.failed, res.Failed(), "outcome vs the receipt")
+			b.ReportAllocs()
+			for b.Loop() {
+				r.run(b)
+			}
+		})
 	}
 }
 
@@ -112,16 +108,13 @@ func newTxReplay(tb testing.TB, path string) *txReplay {
 	}
 }
 
-// run executes the tx once on a fresh state, as DoCall sets one up.
-func (r *txReplay) run(tb testing.TB, noMaterialize bool) *evmtypes.ExecutionResult {
-	ibs := state.New(r.reader)
-	defer ibs.Close()
-	if noMaterialize {
-		ibs.SetVersionMap(state.NewVersionMap(nil))
-		ibs.SetNoMaterialize(true)
-		ibs.SetTxContext(0, 0)
-		ibs.SetNoConflictDetection()
-	}
+// run executes the tx once on a pooled versioned state, as DoCall sets one up.
+func (r *txReplay) run(tb testing.TB) *evmtypes.ExecutionResult {
+	ibs := state.NewPooled(r.reader)
+	defer state.ReleasePooled(ibs)
+	ibs.SetVersionMap(state.NewVersionMap(nil))
+	ibs.SetTxContext(0, 0)
+	ibs.SetNoConflictDetection()
 	msg, err := r.txn.AsMessage(r.signer, &r.blockCtx.BaseFee, r.rules)
 	require.NoError(tb, err)
 	msg.SetCheckNonce(false)
@@ -178,10 +171,8 @@ func testReplayUsesThePrestate(t *testing.T, txFields string, gasUsed uint64) {
 	}`), 0o644))
 
 	r := newTxReplay(t, path)
-	for _, noMaterialize := range []bool{false, true} {
-		res := r.run(t, noMaterialize)
-		require.False(t, res.Failed(), "noMaterialize=%v: %v", noMaterialize, res.Err)
-		require.Equal(t, common.FromHex(slot0), res.ReturnData, "noMaterialize=%v", noMaterialize)
-		require.Equal(t, gasUsed, res.ReceiptGasUsed, "noMaterialize=%v", noMaterialize)
-	}
+	res := r.run(t)
+	require.False(t, res.Failed(), "%v", res.Err)
+	require.Equal(t, common.FromHex(slot0), res.ReturnData)
+	require.Equal(t, gasUsed, res.ReceiptGasUsed)
 }

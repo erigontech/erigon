@@ -142,6 +142,9 @@ func (arr *RawUint64List) hashBufLength() int {
 }
 
 func (arr *RawUint64List) HashSSZ() ([32]byte, error) {
+	if len(arr.u) > arr.c {
+		return [32]byte{}, fmt.Errorf("uint64 list length exceeds limit: %d > %d", len(arr.u), arr.c)
+	}
 	if arr.cachedHash != (common.Hash{}) {
 		return arr.cachedHash, nil
 	}
@@ -157,6 +160,7 @@ func (arr *RawUint64List) HashSSZ() ([32]byte, error) {
 	}
 
 	arr.hahsBuffer = arr.hahsBuffer[:arr.hashBufLength()]
+	clear(arr.hahsBuffer)
 	for i, v := range arr.u {
 		binary.LittleEndian.PutUint64(arr.hahsBuffer[i*8:], v)
 	}

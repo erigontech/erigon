@@ -18,11 +18,13 @@ package state_test
 
 import (
 	"encoding/binary"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 )
@@ -46,4 +48,86 @@ func TestComputeNextSyncCommittee_ZeroActiveValidators(t *testing.T) {
 
 	_, err := s.ComputeNextSyncCommittee()
 	require.Error(t, err)
+}
+
+func TestProposerIndexFromLookahead(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	stateEpoch := uint64(3)
+	s := state.New(&cfg)
+	require.NoError(t, s.SetSlot(stateEpoch*cfg.SlotsPerEpoch+5))
+
+	lookahead := solid.NewUint64VectorSSZ(int((cfg.MinSeedLookahead + 1) * cfg.SlotsPerEpoch))
+	for i := range lookahead.Length() {
+		lookahead.Set(i, uint64(1000+i))
+	}
+	s.SetProposerLookahead(lookahead)
+
+	s.SetVersion(clparams.ElectraVersion)
+	_, ok := s.ProposerIndexFromLookahead(stateEpoch * cfg.SlotsPerEpoch)
+	require.False(t, ok)
+
+	s.SetVersion(clparams.FuluVersion)
+	tests := []struct {
+		name string
+		slot uint64
+		want uint64
+		ok   bool
+	}{
+		{name: "first slot of state epoch", slot: stateEpoch * cfg.SlotsPerEpoch, want: 1000, ok: true},
+		{name: "slot in state epoch", slot: stateEpoch*cfg.SlotsPerEpoch + 7, want: 1007, ok: true},
+		{name: "first slot of last lookahead epoch", slot: (stateEpoch + cfg.MinSeedLookahead) * cfg.SlotsPerEpoch, want: 1000 + cfg.MinSeedLookahead*cfg.SlotsPerEpoch, ok: true},
+		{name: "last slot of last lookahead epoch", slot: (stateEpoch+cfg.MinSeedLookahead+1)*cfg.SlotsPerEpoch - 1, want: 1000 + (cfg.MinSeedLookahead+1)*cfg.SlotsPerEpoch - 1, ok: true},
+		{name: "after lookahead", slot: (stateEpoch + cfg.MinSeedLookahead + 1) * cfg.SlotsPerEpoch},
+		{name: "before state epoch", slot: stateEpoch*cfg.SlotsPerEpoch - 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := s.ProposerIndexFromLookahead(tt.slot)
+			require.Equal(t, tt.ok, ok)
+			require.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestGetIndexedPayloadAttestationLimit(t *testing.T) {
+	for _, minimal := range []bool{false, true} {
+		t.Run(fmt.Sprint("minimal=", minimal), func(t *testing.T) {
+			cfg := clparams.MainnetBeaconConfig
+			if minimal {
+				clparams.ApplyMinimalPreset(&cfg)
+			}
+			cfg.GloasForkEpoch = 0
+			s := state.New(&cfg)
+			s.SetVersion(clparams.GloasVersion)
+			ptc := s.GetPtcWindow().Get(int(cfg.SlotsPerEpoch))
+			ptc.Set(0, 3)
+			ptc.Set(1, 1)
+			ptc.Set(2, 2)
+			for _, votes := range []int{0, 3} {
+				t.Run(fmt.Sprint(votes), func(t *testing.T) {
+					payload := &cltypes.PayloadAttestation{AggregationBits: solid.NewBitVector(int(cfg.PtcSize)), Data: &cltypes.PayloadAttestationData{}, Signature: [96]byte{9}}
+					for i := range votes {
+						require.NoError(t, payload.AggregationBits.SetBitAt(i, true))
+					}
+					indexed, err := s.GetIndexedPayloadAttestation(payload)
+					require.NoError(t, err)
+					indices := []uint64{}
+					if votes > 0 {
+						indices = []uint64{1, 2, 3}
+					}
+					expected := &cltypes.IndexedPayloadAttestation{AttestingIndices: solid.NewRawUint64List(int(cfg.PtcSize), indices), Data: payload.Data, Signature: payload.Signature}
+					root, err := indexed.HashSSZ()
+					require.NoError(t, err)
+					expectedRoot, err := expected.HashSSZ()
+					require.NoError(t, err)
+					require.Equal(t, expectedRoot, root)
+					require.Equal(t, int(cfg.PtcSize), indexed.AttestingIndices.Cap())
+					require.Equal(t, votes, indexed.AttestingIndices.Length())
+					for i, v := range indices {
+						require.Equal(t, v, indexed.AttestingIndices.Get(i))
+					}
+				})
+			}
+		})
+	}
 }

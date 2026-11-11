@@ -23,6 +23,7 @@ Caplin also has an archive mode for historical states, blocks, and blobs. These 
 * `--caplin.states-archive`: Enables the storage and retrieval of historical state data, allowing access to past states of the blockchain for debugging, analytics, or other use cases.
 * `--caplin.blocks-archive`: Enables the storage of historical block data, making it possible to query or analyze full block history.
 * `--caplin.blobs-archive`: Enables the storage of historical blobs, ensuring access to additional off-chain data that might be required for specific applications.
+* `--caplin.blobs-archive-from-slot <slot>`: Bounds the blob archive to this beacon slot and later, for rollup nodes (Arbitrum Nitro, OP) that started from a snapshot and need blobs only from that point. It also enables block archival: every beacon block since genesis is downloaded and kept; only blob sidecars are bounded. The spec serving window (about 18 days) is always kept, even when the slot is newer. On first sync only blob snapshots that reach the slot or that window are downloaded; with `--caplin.custom-config` or `--caplin.custom-genesis` every blob snapshot is downloaded and the older ones are pruned afterwards. The newest blob snapshot is always kept. A rollup derives the slot from an L1 block timestamp as `(timestamp - genesis_time) / 12`. Raising it later drops the older blob snapshots; lowering it does not fetch them again. Changing an existing datadir from this bounded mode to plain `--caplin.blobs-archive`, or removing the bound, does not fetch dropped history: backfill stops at `FrozenBlobs` and `SyncSnapshots` is skipped once snapshots are local, so the range from Deneb to the first local blob segment remains unavailable.
 
 In addition, Caplin can backfill recent blobs for an op-node or other uses with the new flag:
 
@@ -34,7 +35,7 @@ With state archival enabled, Caplin's indexing database (`<datadir>/caplin/index
 
 For nodes participating in PeerDAS (EIP-7594), Caplin retains data column sidecars for a configurable window:
 
-* `--caplin.columns-keep-slots` (default: `0`): Number of slots to retain PeerDAS data column sidecars. `0` uses the chain's own spec window, `MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS × SLOTS_PER_EPOCH`, so the retained slot count and the wall-clock duration it covers both follow the chain (on Ethereum mainnet, 131072 slots, ~18 days). Increase this value for DA oracle or rollup nodes that require a longer column history.
+* `--caplin.columns-keep-slots` (default: `0`): Number of slots to retain PeerDAS data column sidecars. `0` uses the chain's own spec window, `MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS × SLOTS_PER_EPOCH`, so the retained slot count and the wall-clock duration it covers both follow the chain (on Ethereum mainnet, 131072 slots, ~18 days). Increase this value for data availability (DA) oracle or rollup nodes that require a longer column history.
 
 Caplin can also be used for [block production](../staking/caplin), aka **staking**.
 
@@ -46,7 +47,7 @@ When Caplin is running, it exposes a Beacon API that external tools can query. T
 |------|---------|-------------|
 | `--beacon.api.addr` | `localhost` | Listening address for the Beacon API |
 | `--beacon.api.port` | `5555` | Listening port for the Beacon API |
-| `--beacon.api.cors.allow-origins` | (empty) | CORS allowed origins |
+| `--beacon.api.cors.allow-origins` | (empty) | Cross-Origin Resource Sharing (CORS) allowed origins |
 | `--beacon.api.cors.allow-methods` | `GET, POST, PUT, DELETE, OPTIONS` | CORS allowed methods |
 | `--beacon.api.cors.allow-credentials` | `false` | Allow credentials in CORS requests |
 | `--beacon.api.protocol` | `tcp` | Network protocol (`tcp` or `tcp4` or `tcp6`) |

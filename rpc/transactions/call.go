@@ -25,7 +25,6 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
@@ -64,16 +63,9 @@ func DoCall(
 		}
 	*/
 
-	ibs := state.New(stateReader)
-	// Overrides end in FinalizeTx, which clears the journal; the versioned read
-	// path then serves this tx's own writes only from a resident stateObject.
-	if dbg.CallNoMaterialize && stateOverrides == nil {
-		ibs.SetVersionMap(state.NewVersionMap(nil))
-		ibs.SetNoMaterialize(true)
-		ibs.SetTxContext(0, 0)
-		ibs.SetNoConflictDetection()
-	}
-	defer ibs.Close()
+	ibs := state.NewPooled(stateReader)
+	defer state.ReleasePooled(ibs)
+	VersionedCallState(ibs)
 
 	// Setup context so it may be cancelled the call has completed
 	// or, in case of unmetered gas, setup a context with a timeout.
@@ -201,11 +193,26 @@ type ReusableCaller struct {
 // r.evm is never cleared: the timeout watcher goroutine reads it and is never awaited.
 func (r *ReusableCaller) Close() {
 	if ibs := r.evm.IntraBlockState(); ibs != nil {
-		ibs.Close()
+		state.ReleasePooled(ibs)
 	}
 }
 
 func (r *ReusableCaller) Message() *types.Message { return r.message }
+
+// VersionedCallState puts a one-shot call on the versioned state path block execution
+// uses. Reset clears the flags, so a reused state calls this again.
+func VersionedCallState(ibs *state.IntraBlockState) {
+	VersionedBlockState(ibs)
+	ibs.SetNoConflictDetection()
+}
+
+// VersionedBlockState is VersionedCallState for a state that runs several txs in order:
+// a later tx may re-create an account an earlier one destroyed, so CreateAccount keeps
+// the read that carries the balance it was given in between.
+func VersionedBlockState(ibs *state.IntraBlockState) {
+	ibs.SetVersionMap(state.NewVersionMap(nil))
+	ibs.SetTxContext(0, 0)
+}
 
 // InitialState returns the state every call runs against, rewound to the request's
 // overrides. eth_estimateGas probes the same state several times, so the state object
@@ -217,10 +224,11 @@ func (r *ReusableCaller) Message() *types.Message { return r.message }
 func (r *ReusableCaller) InitialState() (*state.IntraBlockState, vm.PrecompiledContracts, error) {
 	ibs := r.evm.IntraBlockState()
 	if ibs == nil {
-		ibs = state.New(r.stateReader)
+		ibs = state.NewPooled(r.stateReader)
 	} else {
 		ibs.Reset()
 	}
+	VersionedCallState(ibs)
 	if r.stateOverrides == nil {
 		return ibs, nil, nil
 	}
@@ -326,7 +334,7 @@ func NewReusableCaller(
 	txCtx := protocol.NewEVMTxContext(msg)
 	vmConfig := vm.Config{NoBaseFee: true, NoReceipts: true, NoBAL: true}
 
-	evm := vm.NewEVM(vm.ZeroUnpricedBaseFee(blockCtx, txCtx, vmConfig), txCtx, state.New(stateReader), chainConfig, vmConfig)
+	evm := vm.NewEVM(vm.ZeroUnpricedBaseFee(blockCtx, txCtx, vmConfig), txCtx, state.NewPooled(stateReader), chainConfig, vmConfig)
 
 	return &ReusableCaller{
 		evm:            evm,

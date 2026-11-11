@@ -1,0 +1,6 @@
+preset: mainnet
+fork: gloas
+runner: sanity
+handler: blocks
+suite: pyspec_tests
+case: builder_payment_after_missed_epochs

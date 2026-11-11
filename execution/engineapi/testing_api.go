@@ -25,24 +25,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/kv"
-	execctx "github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/protocol/params"
-	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/txnprovider"
 )
@@ -56,7 +49,7 @@ type TestingAPI interface {
 	//
 	// transactions: nil  → draw from mempool (normal builder behaviour)
 	//               []   → build an empty block (mempool bypassed, no txs)
-	//               [...] → build a block containing exactly these transactions (strict nonce check)
+	//               [...] → include every supplied transaction in order, or return an error
 	BuildBlockV1(ctx context.Context, parentHash common.Hash, payloadAttributes *engine_types.PayloadAttributes, transactions *[]hexutil.Bytes, extraData *hexutil.Bytes) (*engine_types.GetPayloadResponse, error)
 
 	// CommitBlockV1 builds a block on top of the current canonical head, inserts it into the
@@ -73,41 +66,22 @@ type TestingAPI interface {
 // testingImpl is the concrete implementation of TestingAPI.
 type testingImpl struct {
 	server *EngineServer
-	logger log.Logger
-	db     kv.TemporalRoDB
 }
 
 // NewTestingImpl returns a new TestingAPI implementation wrapping the given EngineServer.
-func NewTestingImpl(server *EngineServer, logger log.Logger, db kv.TemporalRoDB) TestingAPI {
-	return &testingImpl{server: server, logger: logger, db: db}
+func NewTestingImpl(server *EngineServer) TestingAPI {
+	return &testingImpl{server: server}
 }
 
-// decodeTxnProvider decodes raw transactions into a TxnProvider.
-// Returns nil if transactions is nil (mempool path).
-// Opens a single temporal DB transaction for all nonce lookups to avoid per-sender overhead.
-func (t *testingImpl) decodeTxnProvider(ctx context.Context, transactions *[]hexutil.Bytes, blockNumber, timestamp uint64) (txnprovider.TxnProvider, error) {
+// decodeTxnProvider decodes explicit transactions, returning nil for the mempool path.
+// Nonces are checked during execution: earlier calls can advance contract nonces.
+func (t *testingImpl) decodeTxnProvider(transactions *[]hexutil.Bytes, blockNumber, timestamp uint64) (*staticTxnProvider, error) {
 	if transactions == nil {
 		return nil, nil
 	}
 
-	var reader *state.ReaderV3
-	if t.db != nil {
-		dbTx, err := t.db.BeginTemporalRo(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("could not begin temporal transaction: %w", err)
-		}
-		defer dbTx.Rollback()
-		sd, err := execctx.NewSharedDomains(ctx, dbTx, t.logger, execctx.WithoutDeferredBranchUpdates())
-		if err != nil {
-			return nil, fmt.Errorf("NewSharedDomains error: %w", err)
-		}
-		defer sd.Close()
-		reader = state.NewReaderV3(sd.AsStateGetter(dbTx, execctxapi.StateGetterOptions{}))
-	}
-
 	decoded := make([]types.Transaction, 0, len(*transactions))
 	signer := types.MakeSigner(t.server.config, blockNumber, timestamp)
-	expectedNonce := make(map[accounts.Address]uint64, len(*transactions))
 	for i, rawTx := range *transactions {
 		tx, err := types.DecodeTransaction(rawTx)
 		if err != nil {
@@ -118,39 +92,17 @@ func (t *testingImpl) decodeTxnProvider(ctx context.Context, transactions *[]hex
 			return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("transaction %d: cannot recover sender: %v", i, err)}
 		}
 		tx.SetSender(sender)
-		if _, seen := expectedNonce[sender]; !seen {
-			var stateNonce uint64
-			if reader != nil {
-				acc, err := reader.ReadAccountData(accounts.InternAddress(sender.Value()))
-				if err != nil {
-					return nil, fmt.Errorf("ReadAccountData error: %w", err)
-				}
-				if acc != nil {
-					stateNonce = acc.Nonce
-				}
-			}
-			expectedNonce[sender] = stateNonce
-		}
-		want := expectedNonce[sender]
-		got := tx.GetNonce()
-		if got > want {
-			return nil, &rpc.CustomError{Code: rpc.ErrCodeDefault, Message: fmt.Sprintf("nonce too high: address %v, tx: %d state: %d", sender.Value(), got, want)}
-		}
-		if got < want {
-			return nil, &rpc.CustomError{Code: rpc.ErrCodeDefault, Message: fmt.Sprintf("nonce too low: address %v, tx: %d state: %d", sender.Value(), got, want)}
-		}
-		expectedNonce[sender]++
 		decoded = append(decoded, tx)
 	}
 	return &staticTxnProvider{txns: decoded}, nil
 }
 
 // NewTestingRPCEntry returns the rpc.API descriptor for the testing_ namespace.
-func NewTestingRPCEntry(server *EngineServer, logger log.Logger, db kv.TemporalRoDB) rpc.API {
+func NewTestingRPCEntry(server *EngineServer) rpc.API {
 	return rpc.API{
 		Namespace: "testing",
 		Public:    false,
-		Service:   TestingAPI(NewTestingImpl(server, logger, db)),
+		Service:   NewTestingImpl(server),
 		Version:   "1.0",
 	}
 }
@@ -266,12 +218,16 @@ func (t *testingImpl) CommitBlockV1(
 	return blockHash, nil
 }
 
-// lockedStatusPoll runs call under the engine lock, retrying while the execution
+// lockedPoll runs call under the engine lock, retrying while the execution
 // service reports busy, until the deadline expires.
-func (t *testingImpl) lockedStatusPoll(ctx context.Context, deadline time.Time, call func() (execmodule.ExecutionStatus, *string, error)) (status execmodule.ExecutionStatus, validationErr *string, busy bool, err error) {
+func (t *testingImpl) lockedPoll(ctx context.Context, deadline time.Time, call func() (bool, error)) (bool, error) {
 	t.server.lock.Lock()
 	defer t.server.lock.Unlock()
-	busy, err = waitForResponse(ctx, time.Until(deadline), func() (bool, error) {
+	return waitForResponse(ctx, time.Until(deadline), call)
+}
+
+func (t *testingImpl) lockedStatusPoll(ctx context.Context, deadline time.Time, call func() (execmodule.ExecutionStatus, *string, error)) (status execmodule.ExecutionStatus, validationErr *string, busy bool, err error) {
+	busy, err = t.lockedPoll(ctx, deadline, func() (bool, error) {
 		var callErr error
 		status, validationErr, callErr = call()
 		if callErr != nil {
@@ -313,6 +269,10 @@ func (t *testingImpl) assembleTestingBlock(
 	extraData *hexutil.Bytes,
 	deadline time.Time,
 ) (*execmodule.AssembledBlockResult, clparams.StateVersion, error) {
+	// The polling timeout cannot interrupt a blocking execution call.
+	ctx, cancel := context.WithDeadline(ctx, deadline)
+	defer cancel()
+
 	timestamp := uint64(payloadAttributes.Timestamp)
 
 	// Timestamp must be strictly greater than parent.
@@ -367,7 +327,7 @@ func (t *testingImpl) assembleTestingBlock(
 		return nil, 0, &rpc.InvalidParamsError{Message: "targetGasLimit not supported before Glamsterdam"}
 	}
 
-	customProvider, err := t.decodeTxnProvider(ctx, transactions, parentHeader.Number.Uint64()+1, timestamp)
+	customProvider, err := t.decodeTxnProvider(transactions, parentHeader.Number.Uint64()+1, timestamp)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -380,8 +340,11 @@ func (t *testingImpl) assembleTestingBlock(
 		Timestamp:             timestamp,
 		PrevRandao:            payloadAttributes.PrevRandao,
 		SuggestedFeeRecipient: payloadAttributes.SuggestedFeeRecipient,
-		CustomTxnProvider:     customProvider,
 		ExtraData:             []byte{},
+	}
+	if customProvider != nil {
+		assembleParams.CustomTxnProvider = customProvider
+		assembleParams.RequireAllTransactions = true
 	}
 	if extraData != nil {
 		assembleParams.ExtraData = *extraData
@@ -398,22 +361,14 @@ func (t *testingImpl) assembleTestingBlock(
 	}
 
 	var payloadID uint64
-	execBusy, err := func() (bool, error) {
-		t.server.lock.Lock()
-		defer t.server.lock.Unlock()
-
-		var assembled execmodule.AssembleBlockResult
-		var err error
-		busy, err := waitForResponse(ctx, time.Until(deadline), func() (bool, error) {
-			assembled, err = t.server.executionService.AssembleBlock(ctx, assembleParams)
-			if err != nil {
-				return false, err
-			}
-			return assembled.Busy, nil
-		})
+	execBusy, err := t.lockedPoll(ctx, deadline, func() (bool, error) {
+		assembled, err := t.server.executionService.AssembleBlock(ctx, assembleParams)
+		if err != nil {
+			return false, err
+		}
 		payloadID = assembled.PayloadID
-		return busy, err
-	}()
+		return assembled.Busy, nil
+	})
 	if err != nil {
 		return nil, 0, err
 	}
@@ -422,45 +377,56 @@ func (t *testingImpl) assembleTestingBlock(
 	}
 
 	var assembled execmodule.AssembledBlockResult
-	execBusy, err = func() (bool, error) {
-		t.server.lock.Lock()
-		defer t.server.lock.Unlock()
-
+	execBusy, err = t.lockedPoll(ctx, deadline, func() (bool, error) {
 		var err error
-		busy, err := waitForResponse(ctx, time.Until(deadline), func() (bool, error) {
-			assembled, err = t.server.executionService.GetAssembledBlock(ctx, payloadID)
-			if err != nil {
-				return false, err
-			}
-			return assembled.Busy, nil
-		})
-		return busy, err
-	}()
+		assembled, err = t.server.executionService.GetAssembledBlock(ctx, payloadID)
+		if err != nil {
+			return false, err
+		}
+		return assembled.Busy, nil
+	})
 	if err != nil {
 		return nil, 0, err
 	}
 	if execBusy {
 		return nil, 0, errors.New("execution service is busy retrieving assembled block")
 	}
+	// Discarding an expired build may make retrieval report an unknown payload.
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, 0, ctxErr
+	}
 	if assembled.Block == nil {
 		return nil, 0, errors.New("no assembled block data available for payload ID")
+	}
+	if customProvider != nil {
+		included := assembled.Block.Block.Transactions()
+		for i, expected := range customProvider.txns {
+			if i >= len(included) || included[i].Hash() != expected.Hash() {
+				return nil, 0, fmt.Errorf("transaction %d (%s) was not included at its requested position", i, expected.Hash())
+			}
+		}
+		if len(included) != len(customProvider.txns) {
+			return nil, 0, errors.New("assembled block contains unrequested transactions")
+		}
 	}
 
 	return &assembled, version, nil
 }
 
-// staticTxnProvider is a TxnProvider that yields a fixed transaction list exactly once,
-// then returns nil on every subsequent call. Used only by the testing_ namespace.
+// staticTxnProvider is consumed by one build goroutine. It serves every list
+// entry once, including duplicates, so execution can report the first invalid entry.
+// The original list is kept for the final check against the assembled block.
 type staticTxnProvider struct {
 	txns []types.Transaction
-	done atomic.Bool
+	next int
 }
 
-func (s *staticTxnProvider) ProvideTxns(_ context.Context, _ ...txnprovider.ProvideOption) ([]types.Transaction, error) {
-	if !s.done.CompareAndSwap(false, true) {
+func (s *staticTxnProvider) ProvideTxns(_ context.Context, opts ...txnprovider.ProvideOption) ([]types.Transaction, error) {
+	o := txnprovider.ApplyProvideOptions(opts...)
+	if s.next == len(s.txns) || o.Amount <= 0 {
 		return nil, nil
 	}
-	txns := s.txns
-	s.txns = nil // release for GC after handing off
-	return txns, nil
+	start := s.next
+	s.next += min(o.Amount, len(s.txns)-s.next)
+	return s.txns[start:s.next:s.next], nil
 }

@@ -17,10 +17,18 @@
 package commitment
 
 import (
+	"bytes"
 	"context"
+	"fmt"
+	"slices"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
 func TestWarmuperFactoryMustNotOutliveCloseAndWait(t *testing.T) {
@@ -254,4 +262,62 @@ func TestCloseLeavesWorkChannelOpen(t *testing.T) {
 		}
 	default:
 	}
+}
+
+type branchReadRecorder struct {
+	*MockState
+	read map[string]bool
+}
+
+func (r *branchReadRecorder) Branch(prefix []byte) ([]byte, kv.Step, error) {
+	r.read[string(prefix)] = true
+	return r.MockState.Branch(prefix)
+}
+
+func TestWarmupKeyReadsEveryBranchOnThePath(t *testing.T) {
+	t.Parallel()
+
+	ub := NewUpdateBuilder()
+	var newSlots [][]byte
+	for i := range 64 {
+		addr := fmt.Sprintf("%040x", i+1)
+		ub.Balance(addr, uint64(i+1))
+		slots := [...]int{300, 2, 2, 2, 2, 1, 1, 0}[i%8]
+		if slots == 0 {
+			newSlots = append(newSlots, decodeHex(addr+fmt.Sprintf("%064x", 1)))
+		}
+		for s := range slots {
+			ub.Storage(addr, fmt.Sprintf("%064x", i*1000+s+1), fmt.Sprintf("%02x", s%250+1))
+		}
+	}
+	plainKeys, updates := ub.Build()
+	_, ms := sequentialRoot(t, plainKeys, updates)
+
+	w := &Warmuper{maxDepth: WarmupMaxDepth}
+	extensionHops, storageRootExtensions := 0, 0
+	for _, pk := range append(plainKeys, newSlots...) {
+		hk := KeyToHexNibbleHash(pk)
+		want := map[string]bool{}
+		var depths []int
+		for prefix := range ms.cm {
+			if nib := nibbles.CompactToHex([]byte(prefix)); len(nib) < len(hk) && bytes.HasPrefix(hk, nib) {
+				want[prefix] = true
+				depths = append(depths, len(nib))
+			}
+		}
+		slices.Sort(depths)
+		for i := 1; i < len(depths); i++ {
+			if depths[i] > depths[i-1]+1 && (depths[i-1] >= 64 || depths[i] < 64) {
+				extensionHops++
+			}
+			if depths[i-1] < 64 && depths[i] > 64 {
+				storageRootExtensions++
+			}
+		}
+		rec := &branchReadRecorder{MockState: ms, read: map[string]bool{}}
+		w.warmupKey(rec, hk, 0)
+		require.Equal(t, want, rec.read, "plain key %x", pk)
+	}
+	require.NotZero(t, extensionHops, "fixture must carry extension nodes between branches")
+	require.NotZero(t, storageRootExtensions, "fixture must carry storage roots that are extension nodes")
 }

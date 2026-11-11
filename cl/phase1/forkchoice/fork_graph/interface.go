@@ -37,11 +37,19 @@ import (
 type ForkGraph interface {
 	// AddChainSegment processes a new block and returns the post-state.
 	AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, fullValidation bool) (*state.CachingBeaconState, ChainSegmentInsertionResult, error)
+	// BeginChainSegment and CommitChainSegment require the fork-choice write lock;
+	// ChainSegment.Transition between them needs no lock.
+	BeginChainSegment(signedBlock *cltypes.SignedBeaconBlock, fullValidation bool) (*ChainSegment, ChainSegmentInsertionResult, error)
+	CommitChainSegment(segment *ChainSegment) (*state.CachingBeaconState, ChainSegmentInsertionResult, error)
+	SetNextEpochState(parentRoot common.Hash, state *state.CachingBeaconState)
 	GetHeader(blockRoot common.Hash) (*cltypes.BeaconBlockHeader, bool)
 	GetBlock(blockRoot common.Hash) (*cltypes.SignedBeaconBlock, bool)
 	HasBlockChildAtOrAfter(blockRoot common.Hash, slot uint64) bool
 	HasBlockEquivocation(slot, proposerIndex uint64, exceptRoot common.Hash) bool
-	GetState(blockRoot common.Hash, alwaysCopy bool) (*state.CachingBeaconState, error)
+	// CurrentStateLocked is valid only while the caller holds the fork-choice lock.
+	// Mutation requires the write lock, and callers must not retain the result after unlocking.
+	CurrentStateLocked(blockRoot common.Hash) *state.CachingBeaconState
+	ReplayState(blockRoot common.Hash) (*state.CachingBeaconState, error)
 	GetCurrentJustifiedCheckpoint(blockRoot common.Hash) (solid.Checkpoint, bool)
 	GetFinalizedCheckpoint(blockRoot common.Hash) (solid.Checkpoint, bool)
 	GetSyncCommittees(period uint64) (*solid.SyncCommittee, *solid.SyncCommittee, bool)
@@ -61,9 +69,7 @@ type ForkGraph interface {
 	GetLightClientBootstrap(blockRoot common.Hash) (*cltypes.LightClientBootstrap, bool)
 	NewestLightClientUpdate() *cltypes.LightClientUpdate
 	GetLightClientUpdate(period uint64) (*cltypes.LightClientUpdate, bool)
-	GetBalances(blockRoot common.Hash) (solid.Uint64ListSSZ, error)
-	GetInactivitiesScores(blockRoot common.Hash) (solid.Uint64ListSSZ, error)
-	GetValidatorSet(blockRoot common.Hash) (*solid.ValidatorSet, error)
+	KeepFinalizedLightClientUpdates(finalized common.Hash)
 	GetCurrentParticipationIndicies(epoch uint64) (*solid.ParticipationBitList, error)
 	GetPreviousParticipationIndicies(epoch uint64) (*solid.ParticipationBitList, error)
 	DumpBeaconStateOnDisk(blockRoot common.Hash, state *state.CachingBeaconState, forced bool) error
@@ -74,4 +80,6 @@ type ForkGraph interface {
 	DumpEnvelopeOnDisk(blockRoot common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope) error
 	ReadEnvelopeFromDisk(blockRoot common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error)
 	HasEnvelope(blockRoot common.Hash) bool
+	RejectEnvelope(blockRoot common.Hash) bool
+	IsEnvelopeRejected(blockRoot common.Hash) bool
 }

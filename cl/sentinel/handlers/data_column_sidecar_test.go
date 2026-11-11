@@ -21,6 +21,7 @@ import (
 	"context"
 	"io"
 	"math"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -38,17 +39,41 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/sentinel/communication"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 )
 
 var initDataColumnSidecarTestConfig sync.Once
 
-func TestDataColumnSidecarsByRootMissingRootReturnsResourceUnavailable(t *testing.T) {
+func TestRequestCost(t *testing.T) {
+	for _, tc := range []struct {
+		name                     string
+		count, multiplier, limit uint64
+		want                     int
+	}{
+		{"zero count", 0, 6, 72, 0},
+		{"zero multiplier", 2, 0, 72, 0},
+		{"zero limit", 2, 6, 0, 0},
+		{"admission only", 1, 1, 72, 0},
+		{"small product", 2, 6, 72, 11},
+		{"at cap", 12, 6, 72, 71},
+		{"above cap", 13, 6, 72, 71},
+		{"cap not divisible by multiplier", 12, 6, 71, 70},
+		{"overflowing product", math.MaxUint64, math.MaxUint64, 72, 71},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, requestCost(tc.count, tc.multiplier, tc.limit))
+		})
+	}
+}
+
+func TestDataColumnSidecarsByRootMissingRootReturnsEmptySuccess(t *testing.T) {
 	ctx, host, host1, beaconCfg := setupDataColumnSidecarHandlerTest(t)
 
 	req := solid.NewDynamicListSSZ[*cltypes.DataColumnsByRootIdentifier](1)
@@ -66,7 +91,7 @@ func TestDataColumnSidecarsByRootMissingRootReturnsResourceUnavailable(t *testin
 	require.NoError(t, err)
 	t.Cleanup(func() { stream.Close() })
 
-	expectDataColumnSidecarResourceUnavailable(t, stream, reqBuf.Bytes())
+	expectDataColumnSidecarEmptyResponse(t, stream, reqBuf.Bytes())
 }
 
 func TestDataColumnSidecarsByRootBeforeFuluReturnsResourceUnavailable(t *testing.T) {
@@ -169,6 +194,43 @@ func TestDataColumnSidecarsByRootFoundSidecarReturnsSuccessWithoutTrailingResour
 	require.Error(t, err)
 }
 
+func TestDataColumnSidecarsByRootMissingColumnReturnsEmptySuccess(t *testing.T) {
+	ctx, host, host1, beaconCfg, indiciesDB, columnStorage := setupDataColumnSidecarHandlerTestWithStore(t, 0)
+
+	tx, err := indiciesDB.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	blocks := populateDatabaseWithBlocks(t, tests.NewMockBlockReader(), tx, getEthClock(t).GetCurrentSlot(), 0)
+	require.NoError(t, tx.Commit())
+
+	header := blocks[0].SignedBeaconBlockHeader()
+	slot := header.Header.Slot
+	blockRoot, err := header.Header.HashSSZ()
+	require.NoError(t, err)
+	storedColumnIndex := uint64(0)
+	sidecar := cltypes.NewDataColumnSidecar()
+	sidecar.Index = storedColumnIndex
+	sidecar.SignedBlockHeader.Header.Slot = slot
+	require.NoError(t, columnStorage.WriteColumnSidecars(ctx, blockRoot, int64(storedColumnIndex), sidecar))
+
+	req := solid.NewDynamicListSSZ[*cltypes.DataColumnsByRootIdentifier](1)
+	id := &cltypes.DataColumnsByRootIdentifier{
+		BlockRoot: blockRoot,
+		Columns:   solid.NewUint64ListSSZ(int(beaconCfg.NumberOfColumns)),
+	}
+	id.Columns.Append(1)
+	req.Append(id)
+
+	var reqBuf bytes.Buffer
+	require.NoError(t, ssz_snappy.EncodeAndWrite(&reqBuf, req))
+
+	stream, err := host1.NewStream(ctx, host.ID(), protocol.ID(communication.DataColumnSidecarsByRootProtocolV1))
+	require.NoError(t, err)
+	t.Cleanup(func() { stream.Close() })
+
+	expectDataColumnSidecarEmptyResponse(t, stream, reqBuf.Bytes())
+}
+
 func TestDataColumnSidecarsByRootEmptyRequestReturnsEmptySuccess(t *testing.T) {
 	ctx, host, host1, _ := setupDataColumnSidecarHandlerTest(t)
 
@@ -245,6 +307,104 @@ func TestDataColumnSidecarsByRootTooManyColumnsReturnsInvalidRequest(t *testing.
 	t.Cleanup(func() { stream.Close() })
 
 	expectDataColumnSidecarResponsePrefix(t, stream, reqBuf.Bytes(), InvalidRequestPrefix)
+}
+
+type savedColumnsStore struct {
+	blob_storage.DataColumnStorage
+	saved         func(slot uint64) []uint64
+	lookups       int
+	served        int
+	servedColumns []uint64
+}
+
+func (m *savedColumnsStore) ColumnSidecarExists(_ context.Context, slot uint64, _ common.Hash, column int64) (bool, error) {
+	m.lookups++
+	return slices.Contains(m.saved(slot), uint64(column)), nil
+}
+
+func (m *savedColumnsStore) WriteStream(_ io.Writer, _ uint64, _ common.Hash, column uint64) error {
+	m.served++
+	m.servedColumns = append(m.servedColumns, column)
+	return nil
+}
+
+type discardStream struct{ network.Stream }
+
+func (discardStream) Write(p []byte) (int, error) { return len(p), nil }
+
+func serveColumnsByRange(t *testing.T, ctx context.Context, limit, slots uint64, saved func(slot uint64) []uint64) *savedColumnsStore {
+	t.Helper()
+	store, err := serveRequestedColumns(t, ctx, limit, slots, []uint64{0, 1, 2}, saved)
+	require.NoError(t, err)
+	return store
+}
+
+func serveRequestedColumns(t *testing.T, ctx context.Context, limit, slots uint64, columns []uint64, saved func(slot uint64) []uint64) (*savedColumnsStore, error) {
+	t.Helper()
+	_, mainnetCfg := clparams.GetConfigsByNetwork(1)
+	cfg := *mainnetCfg
+	cfg.MaxRequestDataColumnSidecars = limit
+	cfg.AltairForkEpoch, cfg.BellatrixForkEpoch, cfg.CapellaForkEpoch, cfg.DenebForkEpoch, cfg.ElectraForkEpoch, cfg.FuluForkEpoch = 0, 0, 0, 0, 0, 0
+	cfg.InitializeForkSchedule()
+	_, indiciesDB := setupStore(t)
+	tx, err := indiciesDB.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	for slot := range slots {
+		require.NoError(t, beacon_indicies.MarkRootCanonical(tx, slot, common.Hash{byte(slot + 1)}))
+	}
+	store := &savedColumnsStore{saved: saved}
+	c := &ConsensusHandlers{ctx: t.Context(), beaconConfig: &cfg, dataColumnStorage: store, ethClock: eth_clock.NewEthereumClock(0, common.Hash{}, &cfg)}
+	req := &cltypes.ColumnSidecarsByRangeRequest{Columns: solid.NewUint64ListSSZ(int(cfg.NumberOfColumns))}
+	for _, column := range columns {
+		req.Columns.Append(column)
+	}
+
+	return store, c.writeColumnsByRange(ctx, discardStream{}, tx, req, 0, slots, slots)
+}
+
+func TestDataColumnSidecarsByRangeServesAfterBloblessBlocks(t *testing.T) {
+	store := serveColumnsByRange(t, t.Context(), 10, 64, func(slot uint64) []uint64 {
+		if slot == 63 {
+			return []uint64{0, 1, 2}
+		}
+		return nil
+	})
+	require.Equal(t, 3, store.served)
+}
+
+func TestDataColumnSidecarsByRangeStopsBetweenWholeBlocks(t *testing.T) {
+	store := serveColumnsByRange(t, t.Context(), 10, 32, func(uint64) []uint64 { return []uint64{0, 1, 2} })
+	require.Equal(t, 9, store.served)
+}
+
+func TestDataColumnSidecarsByRangeStopsLookupsAtTheLimit(t *testing.T) {
+	store := serveColumnsByRange(t, t.Context(), 9, 32, func(slot uint64) []uint64 {
+		if slot < 3 {
+			return []uint64{0, 1, 2}
+		}
+		return nil
+	})
+	require.Equal(t, 9, store.served)
+	require.Equal(t, 9, store.lookups)
+}
+
+func TestDataColumnSidecarsByRangeStopsAtTheDeadline(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	store, err := serveRequestedColumns(t, ctx, 10, 32, []uint64{0, 1, 2}, func(uint64) []uint64 {
+		cancel()
+		return []uint64{0, 1, 2}
+	})
+	require.ErrorIs(t, err, context.Canceled, "an aborted scan must not end as an empty success")
+	require.Equal(t, 1, store.lookups)
+	require.Zero(t, store.served)
+}
+
+func TestDataColumnSidecarsByRangeServesSortedUniqueColumns(t *testing.T) {
+	store, err := serveRequestedColumns(t, t.Context(), 10, 1, []uint64{2, 0, 2}, func(uint64) []uint64 { return []uint64{0, 1, 2} })
+	require.NoError(t, err)
+	require.Equal(t, []uint64{0, 2}, store.servedColumns)
 }
 
 func TestDataColumnSidecarsByRangeZeroCountReturnsEmptySuccess(t *testing.T) {
@@ -479,7 +639,7 @@ func setupDataColumnSidecarHandlerTestWithStore(t *testing.T, fuluForkEpoch uint
 		nil,
 		&beaconCfg,
 		ethClock,
-		nil, &mock_services.ForkChoiceStorageMock{}, nil, columnStorage, nil, true,
+		nil, &mock_services.ForkChoiceStorageMock{}, nil, columnStorage, nil, true, nil,
 	)
 	c.Start()
 
@@ -514,9 +674,8 @@ func expectDataColumnSidecarEmptyResponse(t *testing.T, stream network.Stream, r
 	_, err := stream.Write(reqData)
 	require.NoError(t, err)
 
-	require.NoError(t, stream.SetReadDeadline(time.Now().Add(200*time.Millisecond)))
 	buf := make([]byte, 1)
 	n, err := stream.Read(buf)
 	require.Zero(t, n)
-	require.Error(t, err)
+	require.ErrorIs(t, err, io.EOF)
 }
