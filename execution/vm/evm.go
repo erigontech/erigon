@@ -915,7 +915,7 @@ func (evm *EVM) GetVMContext() *tracing.VMContext {
 
 func (evm *EVM) traceIO(typ OpCode, caller accounts.Address) bool {
 	isCreate := typ == CREATE || typ == CREATE2
-	return dbg.TraceTransactionIO && (isCreate || !dbg.TraceInstructions) && (evm.intraBlockState.Trace() || dbg.TraceAccount(caller.Handle()))
+	return dbg.TraceTransactionIO && (isCreate || !dbg.TraceInstructions) && (evm.intraBlockState.Trace() || dbg.TraceAccount(caller.Value()))
 }
 
 // Frame calls sit below a synthetic transaction root. Opcode depths

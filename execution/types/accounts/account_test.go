@@ -18,9 +18,14 @@ package accounts
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/json"
+	"runtime"
+	"sync"
 	"testing"
+	"time"
 	"unique"
+	"weak"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -418,7 +423,7 @@ func TestInternSlotCollision(t *testing.T) {
 			require.Equal(t, k, InternKey(k).Value())
 		}
 		for _, a := range []common.Address{a1, a2} {
-			require.Equal(t, Address(unique.Make(a)), InternAddress(a))
+			require.True(t, Address{addressInterner.intern(a)} == InternAddress(a))
 			require.Equal(t, a, InternAddress(a).Value())
 		}
 	}
@@ -428,4 +433,86 @@ func TestInternSlotCollision(t *testing.T) {
 func TestInternSlotsSpreadLowValues(t *testing.T) {
 	require.NotSame(t, addressSlot(common.BytesToAddress([]byte{1})), addressSlot(common.BytesToAddress([]byte{2})))
 	require.NotSame(t, keySlot(common.BytesToHash([]byte{1})), keySlot(common.BytesToHash([]byte{2})))
+}
+
+func TestInternAddressColdAddressesDoNotPayPerAddressWeakRegistration(t *testing.T) {
+	var n uint32 = 1 << 30
+	allocs := testing.AllocsPerRun(640, func() {
+		var a common.Address
+		binary.BigEndian.PutUint32(a[:4], n)
+		n++
+		InternAddress(a)
+	})
+	t.Logf("allocs per cold address: %v", allocs)
+	require.Less(t, allocs, 2.0)
+}
+
+func coldAddress(prefix, i uint32) common.Address {
+	var a common.Address
+	binary.BigEndian.PutUint32(a[:4], prefix)
+	binary.BigEndian.PutUint32(a[4:8], i)
+	return a
+}
+
+// An address is canonical only while a handle holds its slab; once all are gone its index entry must go too.
+func TestSlabInternerForgetsValuesOfDeadSlabs(t *testing.T) {
+	in := newSlabInterner[common.Address](0)
+	probe := coldAddress(2<<28, slabLen)
+	for i := range uint32(3 * slabLen) {
+		in.intern(coldAddress(2<<28, i))
+	}
+	require.Eventually(t, func() bool {
+		runtime.GC()
+		_, ok := in.index.Load(probe)
+		return !ok
+	}, 10*time.Second, 10*time.Millisecond)
+}
+
+func TestSlabInternerKeepsHeldValuesCanonical(t *testing.T) {
+	in := newSlabInterner[common.Address](0)
+	first := coldAddress(3<<28, 0)
+	held := in.intern(first)
+	for i := uint32(1); i < 2*slabLen; i++ {
+		in.intern(coldAddress(3<<28, i))
+	}
+	for range 5 {
+		runtime.GC()
+		require.Same(t, held, in.intern(first))
+		require.Equal(t, first, *held)
+	}
+}
+
+func TestSlabInternerConcurrentCallersShareHandle(t *testing.T) {
+	in := newSlabInterner[common.Address](0)
+	const callers = 8
+	var wg sync.WaitGroup
+	results := make([][]*common.Address, callers)
+	for c := range callers {
+		wg.Go(func() {
+			got := make([]*common.Address, 4*slabLen)
+			for i := range got {
+				got[i] = in.intern(coldAddress(4<<28, uint32(i)))
+			}
+			results[c] = got
+		})
+	}
+	wg.Wait()
+	for c := 1; c < callers; c++ {
+		for i := range results[c] {
+			require.Same(t, results[0][i], results[c][i])
+		}
+	}
+}
+
+func TestForgetSlabKeepsEntryTakenOverByNewerSlab(t *testing.T) {
+	in := newSlabInterner[common.Address](0)
+	a := coldAddress(6<<28, 0)
+	held := in.intern(a)
+	other := new(slab[common.Address])
+	values := new(slabValues[common.Address])
+	values.values[0] = a
+	values.n.Store(1)
+	forgetSlab(deadSlab[common.Address]{in.index, weak.Make(other), values})
+	runtime.KeepAlive(other)
+	require.Same(t, held, in.intern(a))
 }

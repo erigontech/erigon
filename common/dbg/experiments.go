@@ -29,7 +29,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unique"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/estimate"
@@ -423,7 +422,7 @@ var (
 	tracedBlocks    map[uint64]struct{}
 	traceAllBlocks  bool
 	tracedTxIndexes map[int64]struct{}
-	tracedAccounts  map[unique.Handle[common.Address]]struct{}
+	tracedAccounts  map[common.Address]struct{}
 	traceAllDomains bool
 	tracedDomains   map[uint16]struct{}
 )
@@ -442,10 +441,10 @@ func initTraceMaps() {
 	for _, index := range TraceTxIndexes {
 		tracedTxIndexes[index] = struct{}{}
 	}
-	tracedAccounts = map[unique.Handle[common.Address]]struct{}{}
+	tracedAccounts = map[common.Address]struct{}{}
 	for _, account := range TraceAccounts {
 		account, _ = strings.CutPrefix(strings.ToLower(account), "Ox")
-		tracedAccounts[unique.Make(common.HexToAddress(account))] = struct{}{}
+		tracedAccounts[common.HexToAddress(account)] = struct{}{}
 	}
 	if len(traceDomains) == 1 &&
 		(strings.EqualFold(traceDomains[0], "all") || strings.EqualFold(traceDomains[0], "any") ||
@@ -514,7 +513,7 @@ func TraceTx(blockNum uint64, txIndex int) bool {
 	return true
 }
 
-func TraceAccount(addr unique.Handle[common.Address]) bool {
+func TraceAccount(addr common.Address) bool {
 	traceInit.Do(initTraceMaps)
 	if len(tracedAccounts) != 0 {
 		_, ok := tracedAccounts[addr]

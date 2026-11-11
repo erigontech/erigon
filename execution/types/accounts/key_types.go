@@ -19,23 +19,27 @@ package accounts
 import (
 	"encoding/binary"
 	"fmt"
+	"runtime"
 	"sync/atomic"
 	"unique"
+	"weak"
+
+	"github.com/puzpuzpuz/xsync/v4"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
 )
 
-type Address unique.Handle[common.Address]
+type Address struct{ p *common.Address }
 
 var (
 	ZeroAddress = InternAddress(common.Address{})
 	NilAddress  = Address{}
 )
 
-// unique drops a value at the first GC after its last handle dies, so values the next request reads again are
+// An interned value is dropped at the first GC after its last handle dies, so values the next request reads again are
 // allocated and registered again, and unique.Make parks its caller while a GC cycle finishes marking. These
-// direct-mapped tables keep the latest values alive and answer hits without unique.Make; a miss overwrites the slot.
+// direct-mapped tables keep the latest values alive and answer hits without the canonical index; a miss overwrites the slot.
 const (
 	addressTableSize = 256 * 1024
 	keyTableSize     = 1024 * 1024
@@ -57,7 +61,7 @@ func InternAddress(a common.Address) Address {
 	if h, ok := slot.Load().(Address); ok && h.Value() == a {
 		return h
 	}
-	h := Address(unique.Make(a))
+	h := Address{addressInterner.intern(a)}
 	slot.Store(h)
 	return h
 }
@@ -74,11 +78,7 @@ func (a Address) Value() common.Address {
 	if a == NilAddress {
 		return common.Address{}
 	}
-	return unique.Handle[common.Address](a).Value()
-}
-
-func (a Address) Handle() unique.Handle[common.Address] {
-	return unique.Handle[common.Address](a)
+	return *a.p
 }
 
 func (a Address) String() string {
@@ -138,6 +138,114 @@ func (a Address) Cmp(o Address) int {
 	}
 
 	return a.Value().Cmp(o.Value())
+}
+
+// slabLen makes an address slab exactly the 1280-byte size class.
+const slabLen = 64
+
+type slab[T comparable] [slabLen]T
+
+type slabRef[T comparable] struct {
+	slab weak.Pointer[slab[T]]
+	idx  uint32
+}
+
+// slabInterner gives each value one canonical pointer while any handle to it lives, like unique.Make. unique.Make
+// registers a weak pointer and a cleanup per value, and each registration walks the span's sorted list of specials:
+// quadratic over a span of small values. A slab pays one registration per slabLen values and lives while any of its
+// values has a handle.
+type slabInterner[T comparable] struct {
+	index *xsync.Map[T, slabRef[T]]
+	cur   atomic.Pointer[openSlab[T]]
+}
+
+// openSlab is the slab new values go to; next hands out its slots without a lock.
+type openSlab[T comparable] struct {
+	slab   *slab[T]
+	ref    weak.Pointer[slab[T]]
+	values *slabValues[T]
+	next   atomic.Uint32
+}
+
+// slabValues copies a slab's values, because the cleanup that removes them from the index cannot reach a dead slab.
+// n counts the written values and publishes them to the cleanup goroutine.
+type slabValues[T comparable] struct {
+	n      atomic.Uint32
+	values [slabLen]T
+}
+
+type deadSlab[T comparable] struct {
+	index  *xsync.Map[T, slabRef[T]]
+	slab   weak.Pointer[slab[T]]
+	values *slabValues[T]
+}
+
+// The index holds at least the handles addressTable keeps alive. A resize blocks every writer, and a shrink after
+// slabs die would resize again on the next burst of new addresses.
+var addressInterner = newSlabInterner[common.Address](addressTableSize)
+
+func newSlabInterner[T comparable](size int) *slabInterner[T] {
+	t := &slabInterner[T]{index: xsync.NewMap[T, slabRef[T]](xsync.WithPresize(size), xsync.WithGrowOnly())}
+	t.cur.Store(newOpenSlab(t.index))
+	return t
+}
+
+func newOpenSlab[T comparable](index *xsync.Map[T, slabRef[T]]) *openSlab[T] {
+	s := &openSlab[T]{slab: new(slab[T]), values: new(slabValues[T])}
+	s.ref = weak.Make(s.slab)
+	runtime.AddCleanup(s.slab, forgetSlab[T], deadSlab[T]{index, s.ref, s.values})
+	return s
+}
+
+func (t *slabInterner[T]) intern(v T) *T {
+	if ref, ok := t.index.Load(v); ok {
+		if s := ref.slab.Value(); s != nil {
+			return &s[ref.idx]
+		}
+	}
+	var p *T
+	t.index.Compute(v, func(old slabRef[T], loaded bool) (slabRef[T], xsync.ComputeOp) {
+		if loaded {
+			if s := old.slab.Value(); s != nil {
+				p = &s[old.idx]
+				return old, xsync.CancelOp
+			}
+		}
+		var ref slabRef[T]
+		ref, p = t.claim(v)
+		return ref, xsync.UpdateOp
+	})
+	return p
+}
+
+// claim takes a slot without a lock: the caller that overflows a slab opens the next one, later callers retry.
+func (t *slabInterner[T]) claim(v T) (slabRef[T], *T) {
+	for {
+		s := t.cur.Load()
+		i := s.next.Add(1) - 1
+		if i < slabLen {
+			s.slab[i], s.values.values[i] = v, v
+			s.values.n.Add(1)
+			return slabRef[T]{s.ref, i}, &s.slab[i]
+		}
+		if i == slabLen {
+			t.cur.Store(newOpenSlab(t.index))
+		} else {
+			runtime.Gosched()
+		}
+	}
+}
+
+// forgetSlab keeps an entry a newer slab has taken over.
+func forgetSlab[T comparable](d deadSlab[T]) {
+	for _, v := range d.values.values[:d.values.n.Load()] {
+		d.index.Compute(v, func(old slabRef[T], loaded bool) (slabRef[T], xsync.ComputeOp) {
+			if loaded && old.slab == d.slab {
+				return old, xsync.DeleteOp
+			}
+			return old, xsync.CancelOp
+		})
+	}
 }
 
 type StorageKey unique.Handle[common.Hash]

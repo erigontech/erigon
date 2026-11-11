@@ -35,7 +35,7 @@ func codeSizeFromStateObject(ibs *IntraBlockState, so *stateObject, addr account
 	if so.data.CodeHash.IsEmpty() {
 		return 0, nil
 	}
-	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle()))) {
+	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Value()))) {
 		ibs.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", ibs.blockNum, ibs.txIndex, ibs.version))
 	}
 	var readStart time.Time
@@ -61,7 +61,7 @@ func (ibs *IntraBlockState) originStorageDirect(addr accounts.Address, key accou
 	if cc, ok := ibs.versionedWriteCreateContract(addr); ok && cc {
 		return uint256.Int{}, nil
 	}
-	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle()))) {
+	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Value()))) {
 		ibs.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", ibs.blockNum, ibs.txIndex, ibs.version))
 	}
 	var readStart time.Time
@@ -101,7 +101,7 @@ func (ibs *IntraBlockState) originCodeDirect(addr accounts.Address) (accounts.Co
 	if code, ok := ibs.sharedCode(codeHash); ok {
 		return accounts.Code{Hash: codeHash, Bytes: code}, nil
 	}
-	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle()))) {
+	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Value()))) {
 		ibs.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", ibs.blockNum, ibs.txIndex, ibs.version))
 	}
 	var readStart time.Time
@@ -171,7 +171,7 @@ func (ibs *IntraBlockState) originCodeSizeDirect(addr accounts.Address) (int, er
 	if code, ok := ibs.sharedCode(codeHash); ok {
 		return len(code), nil
 	}
-	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle()))) {
+	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Value()))) {
 		ibs.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", ibs.blockNum, ibs.txIndex, ibs.version))
 	}
 	var readStart time.Time
@@ -461,7 +461,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 				if prHeader, prOK := s.versionedReads.getHeader(addr, path, key); prOK {
 					if hdr.Version.TxIndex > destructedVersion.TxIndex && hdr.Version != prHeader.Version {
 						s.dep = max(s.dep, hdr.Version.TxIndex)
-						if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
+						if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Value())) {
 							fmt.Printf("%d (%d.%d) WR DEP (%d.%d)!=(%d.%d) %x %s\n",
 								s.blockNum, s.txIndex, s.version,
 								prHeader.Version.TxIndex, prHeader.Version.Incarnation,
@@ -472,7 +472,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 					}
 				}
 			}
-			if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
+			if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Value())) {
 				fmt.Printf("%d (%d.%d) RD (%s) %x %s\n",
 					s.blockNum, s.txIndex, s.version, WriteSetRead,
 					addr, AccountKey{path, key})
@@ -493,7 +493,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 			// rewrite the recorded dep to the surviving version and hide a consumed-but-
 			// abandoned value from seal validation; pinning lets validation catch the
 			// version change and re-execute.
-			if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
+			if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Value())) {
 				fmt.Printf("%d (%d.%d) RD (%s:%s) %x %s\n",
 					s.blockNum, s.txIndex, s.version, MapRead, res.DepString(),
 					addr, AccountKey{path, key})
@@ -547,7 +547,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 		return
 
 	case MVReadResultDependency:
-		if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
+		if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Value())) {
 			fmt.Printf("%d (%d.%d) MP DEP (%d.%d) %x %s\n",
 				s.blockNum, s.txIndex, s.version,
 				res.DepIdx(), res.Incarnation(),
@@ -569,7 +569,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 		if !commited {
 			if prHeader, ok := s.versionedReads.getHeader(addr, path, key); ok {
 				if prHeader.Version == hdr.Version {
-					if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
+					if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Value())) {
 						fmt.Printf("%d (%d.%d) RD (%s) %x %s\n",
 							s.blockNum, s.txIndex, s.version, ReadSetRead,
 							addr, AccountKey{path, key})
@@ -589,7 +589,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 							return
 						}
 					}
-					if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
+					if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Value())) {
 						fmt.Printf("%d (%d.%d) RM DEP FALLTHROUGH (%d.%d)!=(%d.%d) %x %s\n",
 							s.blockNum, s.txIndex, s.version,
 							prHeader.Version.TxIndex, prHeader.Version.Incarnation,
@@ -664,7 +664,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 					ReadHeader: ReadHeader{Source: MapRead, Version: incVersion},
 					Val:        inc,
 				})
-				if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
+				if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Value())) {
 					fmt.Printf("%d (%d.%d) RD (%s) %x %s: zero (IncarnationPath written by tx %d)\n",
 						s.blockNum, s.txIndex, s.version, StorageRead,
 						addr, AccountKey{path, key}, incRes.DepIdx())

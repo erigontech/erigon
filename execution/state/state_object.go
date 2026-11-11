@@ -197,14 +197,14 @@ func (so *stateObject) GetCommittedState(key accounts.StorageKey) (uint256.Int, 
 		}
 	}
 	if so.createdContract {
-		if dbg.TraceTransactionIO && (so.db.trace || dbg.TraceAccount(so.address.Handle())) {
+		if dbg.TraceTransactionIO && (so.db.trace || dbg.TraceAccount(so.address.Value())) {
 			fmt.Printf("%d (%d.%d) GetCommittedState SKIP (createdContract) %x key=%x\n",
 				so.db.blockNum, so.db.txIndex, so.db.version, so.address, key)
 		}
 		return uint256.Int{}, nil
 	}
 	// Load from DB in case it is missing.
-	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (so.db.trace || dbg.TraceAccount(so.address.Handle()))) {
+	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (so.db.trace || dbg.TraceAccount(so.address.Value()))) {
 		so.db.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", so.db.blockNum, so.db.txIndex, so.db.version))
 	}
 	var readStart time.Time
@@ -359,7 +359,7 @@ func (so *stateObject) applyStorageChanges(stateWriter StateWriter, updatedStora
 		} else {
 			originValue = so.originStorage[key]
 		}
-		if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (so.db.trace || dbg.TraceAccount(so.address.Handle()))) {
+		if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (so.db.trace || dbg.TraceAccount(so.address.Value()))) {
 			if _, ok := stateWriter.(*NoopWriter); !ok || dbg.TraceNoopIO {
 				fmt.Printf("%d (%d.%d) Update Storage (%T): %x,%x,%s->%s\n", so.db.blockNum, so.db.txIndex, so.db.version,
 					stateWriter, so.address, key, originValue.Hex(), value.Hex())
@@ -441,7 +441,7 @@ func (so *stateObject) CodeTyped() (accounts.Code, error) {
 			return c, nil
 		}
 	}
-	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (so.db.trace || dbg.TraceAccount(so.address.Handle()))) {
+	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (so.db.trace || dbg.TraceAccount(so.address.Value()))) {
 		so.db.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", so.db.blockNum, so.db.txIndex, so.db.version))
 	}
 	var readStart time.Time

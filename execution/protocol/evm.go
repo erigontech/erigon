@@ -198,7 +198,7 @@ func GetHashFn(ref *types.Header, getHeader func(hash common.Hash, number uint64
 func CanTransfer(db evmtypes.IntraBlockState, addr accounts.Address, amount uint256.Int) (can bool, err error) {
 	balance, err := db.GetBalance(addr)
 
-	if dbg.TraceTransactionIO && db.Trace() || dbg.TraceAccount(addr.Handle()) {
+	if dbg.TraceTransactionIO && db.Trace() || dbg.TraceAccount(addr.Value()) {
 		amount := amount   // avoid capture allocation unless we're tracing
 		balance := balance // avoid capture allocation unless we're tracing
 		defer func() {
