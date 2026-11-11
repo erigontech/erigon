@@ -376,3 +376,40 @@ func TestReviewCachedBuilderPaymentWithdrawalIsolation(t *testing.T) {
 	require.NotNil(t, second)
 	require.Equal(t, want, second.GetBuilderPendingPayments().Get(0).Withdrawal.Amount, "cached builder-payment withdrawal changed through the first reader")
 }
+
+func TestReviewCachedPhase0InclusionAttestationIsolation(t *testing.T) {
+	blocks, anchorState, _ := tests.GetPhase0Random()
+	graphInterface, err := NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
+	require.NoError(t, err)
+	graph := graphInterface.(*forkGraphDisk)
+	for _, block := range blocks {
+		_, result, err := graph.AddChainSegment(block, true)
+		require.NoError(t, err)
+		require.Equal(t, Success, result)
+	}
+	root, err := blocks[0].Block.HashSSZ()
+	require.NoError(t, err)
+	require.NotEqual(t, root, graph.currentStateBlockRoot)
+	first, err := graph.ReplayState(root)
+	require.NoError(t, err)
+	require.NotNil(t, first)
+	require.Len(t, graph.replayedStates.states, 1)
+	for index := range first.ValidatorLength() {
+		attestation, err := first.ValidatorMinPreviousInclusionDelayAttestation(index)
+		require.NoError(t, err)
+		if attestation == nil {
+			continue
+		}
+		want := attestation.ProposerIndex
+		attestation.ProposerIndex = want + 99
+		second, err := graph.ReplayState(root)
+		require.NoError(t, err)
+		require.NotNil(t, second)
+		got, err := second.ValidatorMinPreviousInclusionDelayAttestation(index)
+		require.NoError(t, err)
+		require.NotNil(t, got)
+		require.Equal(t, want, got.ProposerIndex, "cached Phase0 inclusion attestation changed through the first reader")
+		return
+	}
+	t.Fatal("fixture has no previous inclusion attestation")
+}

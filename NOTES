@@ -98,3 +98,16 @@ Review round 2 fixes for commit cfcb4a2a5cb41f97cbd894c2da8bb045fa143326:
   After: signature-checks 16,303,734 ns/op; read-replay 14,590,466.5 ns/op;
   cached-read 274,434.5 ns/op. Cached reads rose about 3.5% due to copying the
   newly covered mutable state fields.
+
+Review round 3 fix for commit b534209bc1c46ecdffb3d0a76e2c927d0b6ec7c8:
+
+- Red: TestReviewCachedPhase0InclusionAttestationIsolation expected proposer
+  index 0x183 after changing the first reader; saw 0x1e6.
+- Rebinding Phase0 current and previous inclusion pointers to the copied
+  attestation lists fixes cache isolation. Reverting the rebind made the same
+  assertion fail with expected 0x183 and actual 0x1e6.
+- BenchmarkReplayStateNonHead -count 6 before: signature-checks median
+  16,720,857.5 ns/op; read-replay 14,228,833 ns/op; cached-read 269,252.5 ns/op.
+  After: signature-checks 16,436,722 ns/op; read-replay 14,501,146.5 ns/op;
+  cached-read 269,337.5 ns/op. The benchmark uses Capella states, so it does not
+  exercise the Phase0-only rebind path.

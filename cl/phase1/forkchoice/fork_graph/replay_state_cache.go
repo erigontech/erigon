@@ -57,6 +57,11 @@ func copyReplayState(source *state.CachingBeaconState) (*state.CachingBeaconStat
 	}
 	copied.SetCurrentEpochAttestations(copiedCurrentAttestations)
 	copied.SetPreviousEpochAttestations(copiedPreviousAttestations)
+	if version == clparams.Phase0Version {
+		if err := rebindReplayAttestations(source, copied); err != nil {
+			return nil, err
+		}
+	}
 	if version >= clparams.ElectraVersion {
 		pendingDeposits, err := copyReplayStateList(source.GetPendingDeposits(), int(version))
 		if err != nil {
@@ -111,6 +116,65 @@ func copyReplayState(source *state.CachingBeaconState) (*state.CachingBeaconStat
 		}
 		bid.BlobKzgCommitments = *commitments
 		copied.SetLatestExecutionPayloadBid(bid)
+	}
+	return copied, nil
+}
+
+func rebindReplayAttestations(source, copied *state.CachingBeaconState) error {
+	attestations := make(map[*solid.PendingAttestation]*solid.PendingAttestation, source.CurrentEpochAttestationsLength()+source.PreviousEpochAttestationsLength())
+	for index := range source.CurrentEpochAttestationsLength() {
+		attestations[source.CurrentEpochAttestations().Get(index)] = copied.CurrentEpochAttestations().Get(index)
+	}
+	for index := range source.PreviousEpochAttestationsLength() {
+		attestations[source.PreviousEpochAttestations().Get(index)] = copied.PreviousEpochAttestations().Get(index)
+	}
+	for index := range source.ValidatorLength() {
+		current, err := source.ValidatorMinCurrentInclusionDelayAttestation(int(index))
+		if err != nil {
+			return err
+		}
+		if current != nil {
+			original := current
+			current = attestations[original]
+			if current == nil {
+				current, err = copyReplayAttestation(original)
+				if err != nil {
+					return err
+				}
+			}
+			if err := copied.SetValidatorMinCurrentInclusionDelayAttestation(int(index), current); err != nil {
+				return err
+			}
+		}
+		previous, err := source.ValidatorMinPreviousInclusionDelayAttestation(int(index))
+		if err != nil {
+			return err
+		}
+		if previous != nil {
+			original := previous
+			previous = attestations[original]
+			if previous == nil {
+				previous, err = copyReplayAttestation(original)
+				if err != nil {
+					return err
+				}
+			}
+			if err := copied.SetValidatorMinPreviousInclusionDelayAttestation(int(index), previous); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func copyReplayAttestation(source *solid.PendingAttestation) (*solid.PendingAttestation, error) {
+	encoded, err := source.EncodeSSZ(nil)
+	if err != nil {
+		return nil, err
+	}
+	copied := source.Clone().(*solid.PendingAttestation)
+	if err := copied.DecodeSSZ(encoded, int(clparams.Phase0Version)); err != nil {
+		return nil, err
 	}
 	return copied, nil
 }
