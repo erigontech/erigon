@@ -161,6 +161,10 @@ type forkGraphDisk struct {
 	// root. Finalization moves the canonical ones into lightClientUpdates.
 	lightClientUpdateCandidates   map[uint64]map[common.Hash]*cltypes.LightClientUpdate
 	lightClientUpdateCandidatesMu sync.RWMutex
+	// lightClientFinalized is the block the last KeepFinalizedLightClientUpdates settled, guarded by
+	// lightClientUpdateCandidatesMu: a head whose chain does not hold it serves no candidates.
+	lightClientFinalized     common.Hash
+	lightClientFinalizedSlot uint64
 
 	// Envelope state is tracked in memory by beacon block root.
 	// Corrupt files in invalidEnvelopes can be replaced; rejectedEnvelopes blocks redelivery until pruning.
@@ -805,6 +809,7 @@ func (f *forkGraphDisk) KeepFinalizedLightClientUpdates(finalized common.Hash) {
 		return
 	}
 	finalizedSlot, lowest := header.Slot, header.Slot
+	f.lightClientFinalized, f.lightClientFinalizedSlot = finalized, finalizedSlot
 	for _, candidates := range f.lightClientUpdateCandidates {
 		lowest = min(lowest, lowestSignatureSlot(candidates))
 	}
@@ -874,14 +879,40 @@ func (f *forkGraphDisk) GetLightClientUpdates(startPeriod, endPeriod uint64, hea
 			lowest = min(lowest, lowestSignatureSlot(candidates))
 		}
 	}
-	for header, ok := f.GetHeader(head); ok && header.Slot >= lowest; header, ok = f.GetHeader(head) {
+	if lowest == math.MaxUint64 {
+		return updates
+	}
+	// The walk also checks that head's chain holds the last finalized block, so a head read before finalization settled
+	// another branch adds none of its candidates to that branch's settled updates.
+	found := make([]*cltypes.LightClientUpdate, len(updates))
+	onFinalizedChain := f.lightClientFinalized == (common.Hash{})
+	header, ok := f.GetHeader(head)
+	for ok && (header.Slot >= lowest || !onFinalizedChain) {
+		if !onFinalizedChain && header.Slot <= f.lightClientFinalizedSlot {
+			if head != f.lightClientFinalized {
+				return updates
+			}
+			onFinalizedChain = true
+			if header.Slot < lowest {
+				break
+			}
+		}
 		period := f.beaconCfg.SyncCommitteePeriod(header.Slot)
 		if update, isCandidate := f.lightClientUpdateCandidates[period][head]; isCandidate && period >= startPeriod && period < endPeriod {
-			if best := updates[period-startPeriod]; best == nil || lightclient_utils.IsBetterUpdate(f.beaconCfg, update, best) {
-				updates[period-startPeriod] = update
+			if best := found[period-startPeriod]; best == nil || lightclient_utils.IsBetterUpdate(f.beaconCfg, update, best) {
+				found[period-startPeriod] = update
 			}
 		}
 		head = header.ParentRoot
+		header, ok = f.GetHeader(head)
+	}
+	if !onFinalizedChain {
+		return updates
+	}
+	for i, update := range found {
+		if update != nil && (updates[i] == nil || lightclient_utils.IsBetterUpdate(f.beaconCfg, update, updates[i])) {
+			updates[i] = update
+		}
 	}
 	return updates
 }

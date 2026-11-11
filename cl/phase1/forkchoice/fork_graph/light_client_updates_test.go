@@ -362,3 +362,24 @@ func TestGetLightClientUpdateAtTheLastPeriod(t *testing.T) {
 	_, ok := f.GetLightClientUpdate(math.MaxUint64, common.Hash{})
 	require.False(t, ok)
 }
+
+// A head read before finalization settled a competing branch is not on the finalized chain: its candidates are not
+// served beside that branch's settled updates.
+func TestGetLightClientUpdatesIgnoresAHeadOffTheFinalizedChain(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	f := &forkGraphDisk{beaconCfg: cfg}
+	p := cfg.SlotsPerEpoch * cfg.EpochsPerSyncCommitteePeriod
+	fork, b1, b2, a1 := common.Hash{1}, common.Hash{2}, common.Hash{3}, common.Hash{4}
+	f.headers.Store(fork, &cltypes.BeaconBlockHeader{Slot: p + 5})
+	f.headers.Store(b1, &cltypes.BeaconBlockHeader{Slot: p + 10, ParentRoot: fork})
+	f.headers.Store(b2, &cltypes.BeaconBlockHeader{Slot: p + 40, ParentRoot: b1})
+	f.headers.Store(a1, &cltypes.BeaconBlockHeader{Slot: p + 50, ParentRoot: fork})
+	settled := lightClientTestUpdate(cfg, 400, p+9)
+	f.recordLightClientUpdateLocked(b1, settled)
+	f.recordLightClientUpdateLocked(a1, lightClientTestUpdate(cfg, int(cfg.SyncCommitteeSize), p+49))
+
+	f.KeepFinalizedLightClientUpdates(b2)
+
+	require.Equal(t, []*cltypes.LightClientUpdate{settled}, f.GetLightClientUpdates(1, 2, a1), "the stale head's candidate is not served")
+	require.Equal(t, []*cltypes.LightClientUpdate{settled}, f.GetLightClientUpdates(1, 2, b2))
+}
