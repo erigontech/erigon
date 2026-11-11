@@ -1626,7 +1626,11 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 			newerThanUnwind := bytes.Compare(storedStepInverted, unwindStepInverted) < 0
 			writtenAtDiffStep := bytes.Equal(storedStepInverted, diffStepInverted)
 			if !newerThanUnwind && !writtenAtDiffStep {
-				previous, found = value, true
+				// A partial prune may leave rows already superseded by snapshot files.
+				storedStep := kv.Step(^binary.BigEndian.Uint64(storedStepInverted))
+				if storedStep.LastTxNum(dt.stepSize) >= dt.files.EndTxNum() {
+					previous, found = value, true
+				}
 				break
 			}
 			if err := valsCursor.DeleteCurrent(); err != nil {

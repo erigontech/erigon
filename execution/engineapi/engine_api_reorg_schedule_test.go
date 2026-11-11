@@ -18,13 +18,17 @@ package engineapi_test
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
+	"maps"
 	"math/big"
 	"math/rand/v2"
 	"os"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -38,6 +42,8 @@ import (
 	"github.com/erigontech/erigon/execution/state/contracts"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
+	"github.com/erigontech/erigon/node/gointerfaces"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 )
 
 type reorgReference struct {
@@ -113,6 +119,16 @@ func TestEngineApiReorgSchedules(t *testing.T) {
 			opBounce, 16,
 		}},
 		{"restored_versions", generatedReorgSchedule(3)},
+		{"sparse_restores", []byte{
+			opSelectBranch, 113,
+			opExtend, 202,
+			opSelectBranch, 197,
+			opBounce, 114,
+		}},
+		{"requeued_transactions", []byte{
+			opExtend, 23,
+			opSelectBranch, 2,
+		}},
 	}
 	if value, ok := os.LookupEnv("ERIGON_REORG_SEED"); ok {
 		seed, err := strconv.ParseUint(value, 10, 64)
@@ -199,18 +215,34 @@ func TestEngineApiReorgSchedules(t *testing.T) {
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, eat.Close()) })
 			branch, headIndex := 0, forkIndex
+			initialized := false
 			selectHead := func(nextBranch, nextHeadIndex int) {
 				ref := branches[nextBranch]
+				payload := ref.payloads[nextHeadIndex]
+				previous := branches[branch].payloads[headIndex]
+				var stream remoteproto.KV_StateChangesClient
+				if initialized && previous.ExecutionPayload.BlockHash != payload.ExecutionPayload.BlockHash {
+					streamCtx, cancel := context.WithTimeout(ctx, time.Minute)
+					defer cancel()
+					stream, err = eat.StateChangesClient.StateChanges(streamCtx, &remoteproto.StateChangeRequest{WithStorage: true})
+					require.NoError(t, err)
+				}
 				status, err := eat.ExecutionModule.InsertBlocks(ctx, ref.blocks[:nextHeadIndex+1])
 				require.NoError(t, err)
 				require.Equal(t, execmodule.ExecutionStatusSuccess, status)
-				payload := ref.payloads[nextHeadIndex]
 				require.NoError(t, eat.MockCl.UpdateForkChoice(ctx, payload))
 				eat.ExecutionModule.Drain()
+				if stream != nil {
+					unwound := nextHeadIndex < headIndex || (nextBranch != branch && headIndex > forkIndex)
+					assertReorgStateChanges(t, stream,
+						branches[branch].states[previous.ExecutionPayload.BlockHash],
+						ref.states[payload.ExecutionPayload.BlockHash], payload.ExecutionPayload.BlockHash, unwound)
+				}
 				if slot := payload.ExecutionPayload.SlotNumber; slot != nil {
 					eat.MockCl.State().SlotNumber = max(eat.MockCl.State().SlotNumber, uint64(*slot)+1)
 				}
 				branch, headIndex = nextBranch, nextHeadIndex
+				initialized = true
 			}
 			check := func() {
 				t.Helper()
@@ -279,4 +311,54 @@ func TestEngineApiReorgSchedules(t *testing.T) {
 			churnAndAssert(ctx, t, eat, churn, 3, func(k int) int64 { return int64(9_000 + k) })
 		})
 	}
+}
+
+// Apply the stream without DB fallbacks, so a missing update cannot be hidden by
+// a consumer reading the correct value from disk after a cache miss.
+func assertReorgStateChanges(t *testing.T, stream remoteproto.KV_StateChangesClient, before, after crashRecoveryState, head common.Hash, wantUnwind bool) {
+	t.Helper()
+	nonEmpty := func(values map[string]string) map[string]string {
+		values = maps.Clone(values)
+		maps.DeleteFunc(values, func(_, value string) bool { return value == "" })
+		return values
+	}
+	accounts := nonEmpty(before.Domains[kv.AccountsDomain])
+	storage := nonEmpty(before.Domains[kv.StorageDomain])
+	set := func(values map[string]string, key string, value []byte) {
+		if len(value) == 0 {
+			delete(values, key)
+		} else {
+			values[key] = hex.EncodeToString(value)
+		}
+	}
+	sawUnwind := false
+	for {
+		batch, err := stream.Recv()
+		require.NoError(t, err, "waiting for state changes to head %s", head)
+		require.NotEmpty(t, batch.ChangeBatch)
+		for _, change := range batch.ChangeBatch {
+			sawUnwind = sawUnwind || change.Direction == remoteproto.Direction_UNWIND
+			for _, account := range change.Changes {
+				address := gointerfaces.ConvertH160toAddress(account.Address)
+				key := hex.EncodeToString(address[:])
+				switch account.Action {
+				case remoteproto.Action_REMOVE:
+					delete(accounts, key)
+					maps.DeleteFunc(storage, func(slot, _ string) bool { return strings.HasPrefix(slot, key) })
+				case remoteproto.Action_UPSERT, remoteproto.Action_UPSERT_CODE:
+					set(accounts, key, account.Data)
+				}
+				for _, slot := range account.StorageChanges {
+					location := gointerfaces.ConvertH256ToHash(slot.Location)
+					set(storage, key+hex.EncodeToString(location[:]), slot.Data)
+				}
+			}
+		}
+		if last := batch.ChangeBatch[len(batch.ChangeBatch)-1]; gointerfaces.ConvertH256ToHash(last.BlockHash) == head {
+			break
+		}
+	}
+	require.Equal(t, wantUnwind, sawUnwind, "the stream must include the canonical unwind")
+	require.Equal(t, nonEmpty(after.Domains[kv.AccountsDomain]), accounts, "streamed accounts must match clean execution")
+	require.Equal(t, nonEmpty(after.Domains[kv.StorageDomain]), storage, "streamed storage must match clean execution")
 }

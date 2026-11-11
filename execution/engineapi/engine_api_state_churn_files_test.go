@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/execution/engineapi/engineapitester"
 	"github.com/erigontech/erigon/execution/state/contracts"
 	"github.com/erigontech/erigon/node/ethconfig"
+	"github.com/erigontech/erigon/rpc"
 )
 
 // waitForDomainFilesSettled blocks until background building has produced at
@@ -220,7 +221,10 @@ func TestEngineApiUnwindToSnapshotBoundaryPreservesDeletedSlots(t *testing.T) {
 
 		// Retained changesets cannot make immutable snapshot state unwindable.
 		// Rejection must leave both reads and subsequent payload building usable.
-		require.Error(t, eat.MockCl.UpdateForkChoice(ctx, payloads[18])) // block 20
+		err = eat.MockCl.UpdateForkChoice(ctx, payloads[18]) // block 20
+		var rpcErr rpc.Error
+		require.ErrorAs(t, err, &rpcErr)
+		require.Equal(t, -38006, rpcErr.ErrorCode())
 		assertChurnState(ctx, t, eat, churn, head, headSum)
 		require.NoError(t, eat.MockCl.UpdateForkChoice(ctx, head))
 		churnAndAssert(ctx, t, eat, churn, 3, func(k int) int64 { return int64(6_000 + k) })

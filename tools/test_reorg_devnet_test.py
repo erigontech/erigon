@@ -31,9 +31,15 @@ class ReorgWaitTests(unittest.TestCase):
             with self.assertRaisesRegex(TypeError, "invalid argument"):
                 reorg.wait("RPC recovery", lambda: reorg.rpc("url", "method"))
 
+    def test_retry_accepts_empty_responses(self):
+        for response in (None, {}, []):
+            with self.subTest(response=response):
+                self.assertEqual(response, reorg.retry("read", lambda: response))
+
 
 class ReorgRecoveryTests(unittest.TestCase):
-    def run_recovery(self, next_heads):
+    def run_recovery(self, next_heads, transient_failures=()):
+        pending_failures = set(transient_failures)
         branches = ["A"] * 6
         partitioned = healed = restarted = False
         finalized_reads = 0
@@ -66,6 +72,10 @@ class ReorgRecoveryTests(unittest.TestCase):
 
         def request(url, data=None, method=None):
             nonlocal partitioned, healed, finalized_reads
+            operation = data.get("method") if data and "method" in data else url.rsplit("/", 1)[-1]
+            if operation in pending_failures:
+                pending_failures.remove(operation)
+                raise ConnectionResetError("interrupted response")
             if url.endswith("/v1/state"):
                 returning = partitioned and branches[4] == "B" and 5 in data["partitions"][0]["groups"][0]["node-index"]
                 if partitioned and (running_beacons or (returning and not votes_ready)):
@@ -133,6 +143,7 @@ class ReorgRecoveryTests(unittest.TestCase):
               redirect_stdout(output)):
             reorg.run("test")
         self.assertEqual(set(range(1, 7)), running_beacons)
+        self.assertFalse(pending_failures)
         return json.loads(output.getvalue().splitlines()[-1]), checked_heights
 
     def test_recovery_rejects_only_catching_up_to_existing_blocks(self):
@@ -144,6 +155,10 @@ class ReorgRecoveryTests(unittest.TestCase):
         self.assertEqual("recovered", result["phase"])
         self.assertGreater(int(result["height"], 16), 110)
         self.assertEqual(int(result["height"], 16), checked_heights[-1])
+
+    def test_recovery_retries_transient_reads_and_partition_updates(self):
+        result, _ = self.run_recovery([114] * 6, ("state", "eth_getBlockReceipts", "eth_getProof", "clear"))
+        self.assertEqual("recovered", result["phase"])
 
 
 if __name__ == "__main__":

@@ -188,6 +188,51 @@ func TestDomain_RepeatedUnwindKeepsVersionOrder(t *testing.T) {
 	}
 }
 
+func TestDomain_UnwindIgnoresFiledVersions(t *testing.T) {
+	const stepSize = uint64(16)
+	for _, cfg := range []statecfg.DomainCfg{statecfg.Schema.StorageDomain, statecfg.Schema.CodeDomain} {
+		t.Run(cfg.Name.String(), func(t *testing.T) {
+			db, d := testDbAndDomainOfStep(t, cfg, stepSize, log.New())
+			tx, err := db.BeginRw(t.Context())
+			require.NoError(t, err)
+			defer tx.Rollback()
+			key := []byte("key")
+			write := func(txNum uint64, value, previous []byte) []kv.DomainEntryDiff {
+				view := d.beginForTests()
+				defer view.Close()
+				writer := view.NewWriter(db)
+				defer writer.Close()
+				writer.SetDiff(&kv.DomainDiff{})
+				require.NoError(t, writer.PutWithPrev(key, value, txNum, previous))
+				diffs := writer.Diff().GetDiffSet()
+				require.NoError(t, writer.Flush(t.Context(), tx))
+				return diffs
+			}
+			write(3*stepSize+1, []byte("A"), nil)
+			write(4*stepSize+1, []byte("B"), []byte("A"))
+			for step := range kv.Step(5) {
+				require.NoError(t, d.collateBuildIntegrate(t.Context(), step, tx, background.NewProgressSet()))
+			}
+			view := d.beginForTests()
+			defer view.Close()
+			logEvery := time.NewTicker(time.Hour)
+			defer logEvery.Stop()
+			// An interrupted prune can remove the newest filed row before the older one.
+			_, err = view.Prune(t.Context(), tx, 4, 4*stepSize, 5*stepSize, 0, logEvery)
+			require.NoError(t, err)
+			value, _, _, err := view.GetLatest(key, tx)
+			require.NoError(t, err)
+			require.Equal(t, []byte("B"), value)
+			write(5*stepSize+2, []byte("A"), value)
+			diffs := write(5*stepSize+6, []byte("C"), []byte("A"))
+			require.NoError(t, view.unwind(t.Context(), tx, 5, 5*stepSize+6, diffs))
+			value, _, _, err = view.GetLatest(key, tx)
+			require.NoError(t, err)
+			require.Equal(t, []byte("A"), value)
+		})
+	}
+}
+
 func TestDomain_RepeatedUnwindRemovesRestoredVersions(t *testing.T) {
 	for _, cfg := range []statecfg.DomainCfg{statecfg.Schema.StorageDomain, statecfg.Schema.CodeDomain} {
 		for _, restored := range [][]byte{nil, {7}} {

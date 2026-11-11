@@ -2211,8 +2211,9 @@ func (a *Aggregator) BuildFilesInBackground(db kv.TemporalRoDB, txNum uint64, fi
 
 func (at *AggregatorRoTx) firstStepToBuild(tx kv.Tx) (kv.Step, error) {
 	step := kv.Step(at.TxNumsInFiles(kv.StateDomains...) / at.StepSize())
-	// An interrupted build can leave a domain without files while the state
-	// domains advance. Resume at its pending DB data, not at the state frontier.
+	stateStep := step
+	// Builds finish every entity before advancing to the next step. Resuming
+	// an older range would publish files that lower the shared state-file ceiling.
 	for _, d := range at.d {
 		if d == nil || !d.d.Enabled.Load() || d.FirstStepNotInFiles() >= step {
 			continue
@@ -2222,6 +2223,9 @@ func (at *AggregatorRoTx) firstStepToBuild(tx kv.Tx) (kv.Step, error) {
 			return 0, err
 		}
 		if found {
+			if first < stateStep && stateStep-first > 1 {
+				return 0, fmt.Errorf("cannot resume %s at step %d with state files ending at step %d: rebuild missing snapshots", d.d.Name, first, stateStep)
+			}
 			step = min(step, first)
 		}
 	}
@@ -2234,7 +2238,11 @@ func (at *AggregatorRoTx) firstStepToBuild(tx kv.Tx) (kv.Step, error) {
 			return 0, err
 		}
 		if found {
-			step = min(step, max(ii.FirstStepNotInFiles(), first))
+			first = max(ii.FirstStepNotInFiles(), first)
+			if first < stateStep && stateStep-first > 1 {
+				return 0, fmt.Errorf("cannot resume %s at step %d with state files ending at step %d: rebuild missing snapshots", ii.ii.Name, first, stateStep)
+			}
+			step = min(step, first)
 		}
 	}
 	return step, nil

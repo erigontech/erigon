@@ -45,6 +45,11 @@ def wait(description, check, timeout=600):
     raise AssertionError(f"Timed out: {description}; last response error: {last}")
 
 
+def retry(description, operation):
+    # Empty or null responses can be valid; only transport/RPC errors need a retry.
+    return wait(description, lambda: (operation(),), timeout=60)[0]
+
+
 def same_block(blocks):
     return all(block is not None for block in blocks) and len({block["hash"] for block in blocks}) == 1
 
@@ -97,14 +102,15 @@ def run(enclave):
     def check_state(blocks):
         height = blocks[0]["number"]
         assert len({b["stateRoot"] for b in blocks}) == 1, blocks
-        receipts = [rpc(url, "eth_getBlockReceipts", height) for url in execution]
+        receipts = retry(f"receipts at {height}", lambda: [rpc(url, "eth_getBlockReceipts", height) for url in execution])
         assert receipts[0], f"no transaction workload at {height}"
         assert all(rows == receipts[0] for rows in receipts), f"receipt disagreement at {height}"
         addresses = {row["from"] for row in receipts[0]}
         addresses.update(row["to"] for row in receipts[0] if row["to"])
         addresses.update(row["contractAddress"] for row in receipts[0] if row["contractAddress"])
         for address in sorted(addresses):
-            proofs = [rpc(url, "eth_getProof", address, [], height) for url in execution]
+            proofs = retry(f"proofs for {address} at {height}",
+                           lambda: [rpc(url, "eth_getProof", address, [], height) for url in execution])
             assert all(proof == proofs[0] for proof in proofs), f"state disagreement for {address} at {height}"
 
     wait("initial finality on every CL", lambda: min(finality()) >= 2, timeout=1200)
@@ -122,11 +128,11 @@ def run(enclave):
                 for container in containers:
                     docker("pause", container)
                     resume.callback(docker, "unpause", container)
-            request(disruptoor + "/v1/state", {"partitions": [{
+            retry("install network partition", lambda: request(disruptoor + "/v1/state", {"partitions": [{
                 "name": "reorg-test", "groups": [
                     {"node-index": group, "client-type": ["execution", "beacon"]} for group in groups
                 ], "scope": ["el_p2p", "cl_p2p"], "symmetric": True,
-            }]}, "PUT")
+            }]}, "PUT"))
             partitioned = True
 
     stopped_validators = set()
@@ -175,22 +181,22 @@ def run(enclave):
         wait("A has greater fork-choice weight than B", lambda: branch_weight(branch_a_node, branch_a) > branch_weight(witness, branch_b))
         partition([left, right])
         wait("witness returns from B to A", lambda: block(witness, height)["hash"] == branch_a)
-        assert block(branch_a_node, height)["hash"] == branch_a, "A's original branch was lost"
-        assert block(branch_b_node, height)["hash"] == branch_b, "B's original branch was lost"
+        assert retry("read branch A", lambda: block(branch_a_node, height))["hash"] == branch_a, "A's original branch was lost"
+        assert retry("read branch B", lambda: block(branch_b_node, height))["hash"] == branch_b, "B's original branch was lost"
         print(json.dumps({"phase": "B_to_A", "height": height, "old": branch_b, "new": branch_a}), flush=True)
     finally:
-        request(disruptoor + "/v1/state/clear", {}, "POST")
+        retry("clear network partition", lambda: request(disruptoor + "/v1/state/clear", {}, "POST"))
         for node in list(stopped_validators):
             validators(node, True)
 
     wait("healed chain advances", lambda: converged(int(height, 16) + 6))
-    after = [block(node, height) for node in node_ids]
+    after = retry("read healed branches", lambda: [block(node, height) for node in node_ids])
     assert same_block(after) and after[branch_a_node-1]["hash"] == branch_a, "healing lost the restored branch"
     check_state(after)
     for tx_hash in before[branch_b_node-1]["transactions"]:
-        receipt = rpc(execution[witness-1], "eth_getTransactionReceipt", tx_hash)
+        receipt = retry(f"receipt for {tx_hash}", lambda: rpc(execution[witness-1], "eth_getTransactionReceipt", tx_hash))
         if receipt:
-            canonical = block(witness, receipt["blockNumber"])
+            canonical = retry("receipt's canonical block", lambda: block(witness, receipt["blockNumber"]))
             assert receipt["blockHash"] == canonical["hash"], f"stale receipt for {tx_hash}"
 
     service = f"el-{witness}-erigon-{clients[witness-1]}"
@@ -200,12 +206,17 @@ def run(enclave):
     recovered = wait("restarted witness EL catches up", lambda: converged(int(height, 16) + 12))
     check_state(recovered)
     # Convergence trails the slowest node; require a block beyond every current EL head.
-    head_after_recovery = max(int(block(node)["number"], 16) for node in node_ids)
-    finalized_after_recovery = max(finality())
+    head_after_recovery = retry("heads after recovery", lambda: max(int(block(node)["number"], 16) for node in node_ids))
+    finalized_after_recovery = max(retry("finality after recovery", finality))
     recovered = wait("new execution blocks after recovery", lambda: converged(head_after_recovery + 1))
     check_state(recovered)
-    wait("new finalized epoch after recovery", lambda: min(finality()) > finalized_after_recovery, timeout=1200)
-    print(json.dumps({"phase": "recovered", "height": recovered[0]["number"], "finalized": finality()}), flush=True)
+
+    def new_finality():
+        epochs = finality()
+        return epochs if min(epochs) > finalized_after_recovery else None
+
+    finalized = wait("new finalized epoch after recovery", new_finality, timeout=1200)
+    print(json.dumps({"phase": "recovered", "height": recovered[0]["number"], "finalized": finalized}), flush=True)
 
 
 if __name__ == "__main__":

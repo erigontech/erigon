@@ -634,24 +634,26 @@ func (rs *StateV3) NotifyAccumulator(accumulator *shards.Accumulator, roTx kv.Te
 		return nil
 	}
 
-	latest := make(map[accounts.Address]accounts.Account, len(blockWrites))
-	account := func(addr accounts.Address) (accounts.Account, error) {
+	latest := make(map[accounts.Address]*accounts.Account, len(blockWrites))
+	account := func(addr accounts.Address) (*accounts.Account, error) {
 		if acc, ok := latest[addr]; ok {
 			return acc, nil
 		}
-		acc := accounts.NewAccount()
 		address := addr.Value()
 		v, _, err := rs.domains.GetLatest(kv.AccountsDomain, roTx, address[:])
 		if err != nil {
-			return accounts.Account{}, err
+			return nil, err
 		}
-		if len(v) > 0 {
-			if err := accounts.DeserialiseV3(&acc, v); err != nil {
-				return accounts.Account{}, err
-			}
+		if len(v) == 0 {
+			latest[addr] = nil
+			return nil, nil
 		}
-		latest[addr] = acc
-		return acc, nil
+		acc := accounts.NewAccount()
+		if err := accounts.DeserialiseV3(&acc, v); err != nil {
+			return nil, err
+		}
+		latest[addr] = &acc
+		return &acc, nil
 	}
 
 	// Every call for an address carries its final state, so a repeat would change nothing.
@@ -665,7 +667,11 @@ func (rs *StateV3) NotifyAccumulator(accumulator *shards.Accumulator, roTx kv.Te
 		if err != nil {
 			return err
 		}
-		accumulator.ChangeAccount(addr.Value(), acc.Incarnation, accounts.SerialiseV3(&acc))
+		if acc == nil {
+			accumulator.DeleteAccount(addr.Value())
+		} else {
+			accumulator.ChangeAccount(addr.Value(), acc.Incarnation, accounts.SerialiseV3(acc))
+		}
 		return nil
 	}
 
@@ -680,12 +686,20 @@ func (rs *StateV3) NotifyAccumulator(accumulator *shards.Accumulator, roTx kv.Te
 			if err != nil {
 				return err
 			}
+			if acc == nil {
+				accumulator.DeleteAccount(addr.Value())
+				continue
+			}
 			accumulator.ChangeCode(addr.Value(), acc.Incarnation, write.Val.Bytes)
 		}
 		for addr, byKey := range writes.Storages() {
 			acc, err := account(addr)
 			if err != nil {
 				return err
+			}
+			if acc == nil {
+				accumulator.DeleteAccount(addr.Value())
+				continue
 			}
 			for key, write := range byKey {
 				accumulator.ChangeStorage(addr.Value(), acc.Incarnation, key.Value(), write.Val.Bytes())

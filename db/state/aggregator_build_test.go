@@ -55,8 +55,9 @@ func TestAggregatorEnableDomainDuringFilePlanning(t *testing.T) {
 func TestAggregatorBuildResumesIncompleteStep(t *testing.T) {
 	const stepSize = uint64(10)
 	for _, target := range []string{"receipt", "receipt_without_history", "rcache", "logaddrs"} {
-		for _, resumeStep := range []kv.Step{0, 1} {
-			t.Run(fmt.Sprintf("%s/step_%d", target, resumeStep), func(t *testing.T) {
+		for _, test := range []struct{ resumeStep, stateSteps kv.Step }{{0, 1}, {1, 2}, {0, 3}, {1, 4}} {
+			resumeStep := test.resumeStep
+			t.Run(fmt.Sprintf("%s/step_%d/state_%d", target, resumeStep, test.stateSteps), func(t *testing.T) {
 				db, agg := testDbAndAggregatorv3(t, stepSize)
 				ctx := t.Context()
 				configure := func(agg *Aggregator) {
@@ -65,7 +66,7 @@ func TestAggregatorBuildResumesIncompleteStep(t *testing.T) {
 					agg.KeepRecentTxnsOfHistoriesWithDisabledSnapshots(0)
 				}
 				configure(agg)
-				stateFilesEnd := uint64(resumeStep+1) * stepSize
+				stateFilesEnd := uint64(test.stateSteps) * stepSize
 				lastTxNum := stateFilesEnd + stepSize
 				key, value := []byte{1}, []byte{0}
 				require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
@@ -88,7 +89,7 @@ func TestAggregatorBuildResumesIncompleteStep(t *testing.T) {
 					require.NoError(t, writer.Flush(ctx, tx))
 					return nil
 				}))
-				for step := kv.Step(0); step <= resumeStep; step++ {
+				for step := kv.Step(0); step < test.stateSteps; step++ {
 					require.NoError(t, agg.buildFiles(ctx, asTemporalRoDB(db), step, unboundedFinalityCtx, nil))
 				}
 
@@ -99,7 +100,7 @@ func TestAggregatorBuildResumesIncompleteStep(t *testing.T) {
 					defer at.Close()
 					_, err := at.d[kv.AccountsDomain].Prune(ctx, tx, resumeStep, 0, stateFilesEnd, 0, logEvery)
 					require.NoError(t, err)
-					require.Equal(t, uint64(resumeStep+1), agg.d[kv.AccountsDomain].minStepInDB(tx))
+					require.Equal(t, uint64(test.stateSteps), agg.d[kv.AccountsDomain].minStepInDB(tx))
 					_, err = at.d[kv.RCacheDomain].ht.Prune(ctx, tx, 0, stateFilesEnd, 0, false, logEvery)
 					require.NoError(t, err)
 					return nil
@@ -134,13 +135,30 @@ func TestAggregatorBuildResumesIncompleteStep(t *testing.T) {
 					require.NoError(t, at.CheckFilesDBGap(tx))
 					require.Equal(t, stateFilesEnd, at.TxNumsInFiles(kv.StateDomains...))
 					step, err := at.firstStepToBuild(tx)
-					require.NoError(t, err)
-					require.Equal(t, resumeStep, step)
+					if test.stateSteps > resumeStep+1 {
+						require.ErrorContains(t, err, "rebuild missing snapshots")
+					} else {
+						require.NoError(t, err)
+						require.Equal(t, resumeStep, step)
+					}
 					return nil
 				}))
 				finished, started := agg.buildFilesInBackground(asTemporalRoDB(db), lastTxNum, false, unboundedFinalityCtx)
 				require.True(t, started)
 				<-finished
+				if test.stateSteps > resumeStep+1 {
+					require.NoError(t, db.View(ctx, func(tx kv.Tx) error {
+						at := agg.BeginFilesRo()
+						defer at.Close()
+						require.Equal(t, stateFilesEnd, at.TxNumsInFiles(kv.StateDomains...))
+						got, _, found, err := at.d[kv.AccountsDomain].GetLatest(key, tx)
+						require.NoError(t, err)
+						require.True(t, found)
+						require.Equal(t, value, got, "rejected resume must preserve filed state")
+						return at.CheckFilesDBGap(tx)
+					}))
+					return
+				}
 				require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
 					at := agg.BeginFilesRo()
 					defer at.Close()

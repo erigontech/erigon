@@ -25,7 +25,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/execution/chain"
@@ -37,10 +36,6 @@ import (
 )
 
 func TestForkchoiceReportsAccountDeletion(t *testing.T) {
-	parallel := dbg.Exec3Parallel
-	dbg.Exec3Parallel = false
-	t.Cleanup(func() { dbg.Exec3Parallel = parallel })
-
 	key, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	sender := crypto.PubkeyToAddress(key.PublicKey)

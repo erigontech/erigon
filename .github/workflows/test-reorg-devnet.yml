@@ -21,9 +21,6 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: ./.github/actions/setup-kurtosis
-        with:
-          version: '1.22.2'
       - name: Docker Hub login
         if: github.repository == 'erigontech/erigon' && github.actor != 'dependabot[bot]'
         continue-on-error: true
@@ -31,6 +28,9 @@ jobs:
         with:
           username: ${{ secrets.DOCKERHUB_PULL_USERNAME }}
           password: ${{ secrets.DOCKERHUB_PULL_TOKEN }}
+      - uses: ./.github/actions/setup-kurtosis
+        with:
+          version: '1.22.2'
       - uses: docker/setup-buildx-action@v4
       - name: Build Erigon
         uses: docker/build-push-action@v6
@@ -42,8 +42,9 @@ jobs:
           cache-from: type=gha,scope=reorg-devnet
           cache-to: type=gha,scope=reorg-devnet,mode=max
       - name: Test devnet driver
-        run: python3 -m unittest tools/test_reorg_devnet_test.py
+        run: make test-reorg-devnet-driver
       - name: Bounce, heal and restart
+        timeout-minutes: 60
         run: make test-reorg-devnet
       - name: Collect enclave logs
         if: always()

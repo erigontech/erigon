@@ -253,17 +253,22 @@ test-short: test-filtered
 test-all: override GO_FLAGS := -timeout $(default_test_timeout) $(GO_FLAGS)
 test-all: test-filtered
 
-## test-unwind:                       reorg, snapshot and crash recovery integration tests
+## test-unwind:                       execution and storage suites across unwind modes
 .PHONY: test-unwind
-UNWIND_TEST_PATTERN ?= (Churn|Reorg|Unwind|Fork[Cc]hoice|F[Cc][Uu]|CrashRecovery|BranchRecovery|SetHead|MinimumUnwind|RenderExecOutcome|FinalizeExecV3Outcome|StartupCommitObservations|DeletedKeyNotResurrectedByFiles|DomainBuildResumeStep|AggregatorBuildResumesIncompleteStep|AggregatorEnableDomainDuringFilePlanning|MaintenanceObserver|MergeReplacementClosesAfterReaders|Accumulator|HookBeforeRunPreservesPendingNotifications)
-test-unwind: override GOTEST_PACKAGES = ./execution/engineapi ./execution/execmodule ./execution/execmodule/execmoduletester ./execution/stagedsync ./execution/stagedsync/stageloop ./execution/notifications ./db/state ./db/rawdb/rawtemporaldb
+test-unwind: override GOTEST_PACKAGES = ./execution/engineapi ./execution/execmodule ./execution/execmodule/execmoduletester ./execution/stagedsync ./execution/stagedsync/stageloop ./execution/notifications ./execution/state ./execution/commitment ./db/state ./db/state/execctx ./db/rawdb/rawtemporaldb
+test-unwind: override GO_FLAGS := -timeout=20m -count=1 $(GO_FLAGS)
 test-unwind:
-	$(GOTEST) -run '$(UNWIND_TEST_PATTERN)' -count=1 -timeout=20m
+	$(GOTEST)
 
 .PHONY: test-reorg-schedules
 test-reorg-schedules: override GOTEST_PACKAGES = ./execution/engineapi
+test-reorg-schedules: override GO_FLAGS := -timeout=25m -count=1 -run '^TestEngineApiReorgSchedules$$' -v $(GO_FLAGS)
 test-reorg-schedules:
-	$(GOTEST) -run '^TestEngineApiReorgSchedules$$' -count=1 -timeout=25m -v
+	$(GOTEST)
+
+.PHONY: test-reorg-devnet-driver
+test-reorg-devnet-driver:
+	python3 -m unittest tools/test_reorg_devnet_test.py
 
 KURTOSIS ?= kurtosis
 REORG_ENCLAVE ?= unwind-reorg

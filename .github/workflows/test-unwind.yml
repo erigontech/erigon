@@ -36,7 +36,7 @@ jobs:
       # These switches are read at package init; test-unwind disables result caching.
       - name: Compile unwind tests
         if: inputs.cache-warming-only
-        run: make test-unwind UNWIND_TEST_PATTERN='^$$'
+        run: make test-unwind GO_FLAGS='-run=^$$'
       - name: Run unwind tests
         if: '!inputs.cache-warming-only'
         run: make test-unwind

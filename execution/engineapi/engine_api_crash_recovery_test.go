@@ -227,6 +227,7 @@ func TestEngineApiCrashRecovery(t *testing.T) {
 }
 
 func configureCrashRecovery(config *ethconfig.Config) {
+	config.StateStream = true
 	config.MaxReorgDepth = stateChurnReorgDepthBudget
 	config.FcuBackgroundPrune = true
 	config.PersistReceiptsCacheV2 = true
