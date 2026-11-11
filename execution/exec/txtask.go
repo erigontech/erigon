@@ -207,8 +207,7 @@ type BlockResult struct {
 type ApplyMessage func(evm *vm.EVM, msg protocol.Message, gp *protocol.GasPool, refunds bool, gasBailout bool) (*evmtypes.ExecutionResult, error)
 
 // ReadWriteSet contains ReadSet, WriteSet and BalanceIncrease of a transaction,
-// which is processed by a single thread that writes into the ReconState1 and
-// flushes to the database
+// which is processed by a single thread that flushes to the database
 type TxTask struct {
 	TxNum              uint64
 	TxIndex            int // -1 for block initialisation
@@ -678,19 +677,6 @@ var queuePool sync.Pool
 
 func NewQueueWithRetry(capacity int) *QueueWithRetry {
 	return &QueueWithRetry{newTasks: make(chan Task, capacity), capacity: capacity}
-}
-
-func GetQueueWithRetryFromPool(capacity int) *QueueWithRetry {
-	if v := queuePool.Get(); v != nil {
-		q := v.(*QueueWithRetry)
-		if q.capacity == capacity && q.parked != nil {
-			q.closed = false
-			q.newTasks = q.parked
-			q.parked = nil
-			return q
-		}
-	}
-	return NewQueueWithRetry(capacity)
 }
 
 func (q *QueueWithRetry) NewTasksLen() int {

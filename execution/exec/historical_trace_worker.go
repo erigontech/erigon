@@ -611,12 +611,3 @@ func BlkRangeToSteps(ctx context.Context, tx kv.TemporalTx, fromBlock, toBlock u
 	stepSize := tx.Debug().StepSize()
 	return float64(fromTxNum) / float64(stepSize), float64(toTxNum) / float64(stepSize), nil
 }
-
-func BlkRangeToStepsOnDB(ctx context.Context, db kv.TemporalRoDB, fromBlock, toBlock uint64, txNumsReader rawdbv3.TxNumsReader) (float64, float64, error) {
-	tx, err := db.BeginTemporalRo(ctx)
-	if err != nil {
-		return 0, 0, err
-	}
-	defer tx.Rollback()
-	return BlkRangeToSteps(ctx, tx, fromBlock, toBlock, txNumsReader)
-}
