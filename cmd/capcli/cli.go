@@ -235,6 +235,12 @@ func retrieveAndSanitizeBlockFromRemoteEndpoint(ctx context.Context, beaconConfi
 // maxBlobSidecarJSONSize bounds one sidecar in a JSON response: the hex blob is 256 KiB.
 const maxBlobSidecarJSONSize = 512 << 10
 
+type blobStatusError int
+
+func (e blobStatusError) Error() string {
+	return fmt.Sprintf("blob retrieval failed, bad status code %d", int(e))
+}
+
 // retrieveBlobsFromRemoteEndpoint fetches the blob sidecars of root from a beacon API base URL, which
 // may carry a query such as an API key. A response with more than maxSidecars entries is refused
 // before they are decoded: an empty entry is a few bytes on the wire but a whole blob in memory.
@@ -283,7 +289,7 @@ func retrieveBlobsFromRemoteEndpoint(ctx context.Context, endpoint string, root 
 		return nil, nil
 	}
 	if r.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("blob retrieval failed, bad status code %d", r.StatusCode)
+		return nil, blobStatusError(r.StatusCode)
 	}
 
 	var blobsResponse struct {

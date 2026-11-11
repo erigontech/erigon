@@ -244,14 +244,23 @@ func TestBlobArchiveStoreFillReportsASlotWithoutCanonicalRoot(t *testing.T) {
 	require.ErrorContains(t, err, fmt.Sprint(fillTestSlot))
 }
 
-func TestBlobArchiveStoreFillDryRunFetchesAndWritesNothing(t *testing.T) {
+func TestBlobArchiveStoreFillDryRunWritesNothing(t *testing.T) {
 	f := newFillFixture(t)
 	root := f.addBlock(fillTestSlot, 1)
+	url, _ := f.endpoint(false)
+
+	require.NoError(t, f.fill(&BlobArchiveStoreFill{Endpoints: []string{url}, FromSlot: fillTestSlot, ToSlot: fillTestSlot, DryRun: true}, nil))
+	require.False(t, f.storedValid(fillTestSlot, root))
+}
+
+func TestBlobArchiveStoreFillDryRunAsksNothingOfAStoredRange(t *testing.T) {
+	f := newFillFixture(t)
+	root := f.addBlock(fillTestSlot, 1)
+	f.storeValid(root)
 	url, requests := f.endpoint(false)
 
 	require.NoError(t, f.fill(&BlobArchiveStoreFill{Endpoints: []string{url}, FromSlot: fillTestSlot, ToSlot: fillTestSlot, DryRun: true}, nil))
 	require.Zero(t, requestsFor(requests, root))
-	require.False(t, f.storedValid(fillTestSlot, root))
 }
 
 func TestBlobArchiveStoreFillFallsBackToTheNextEndpoint(t *testing.T) {
@@ -488,6 +497,54 @@ func TestBlobArchiveStoreFillDoesNotRetryABadRequest(t *testing.T) {
 	require.NoError(t, f.fill(&BlobArchiveStoreFill{Endpoints: []string{pruned.URL, good}, FromSlot: fillTestSlot, ToSlot: fillTestSlot}, nil))
 	require.True(t, f.storedValid(fillTestSlot, root))
 	require.EqualValues(t, 1, calls.Load())
+}
+
+const windowTestSlots, windowTestServedFrom = 32, 24
+
+func (f *fillFixture) prunedChain() (url string, roots []common.Hash, prunedRequests, allRequests *atomic.Int32) {
+	pruned := map[common.Hash]bool{}
+	for i := range uint64(windowTestSlots) {
+		roots = append(roots, f.addBlock(fillTestSlot+i, 1))
+		pruned[roots[i]] = i < windowTestServedFrom
+	}
+	good, _ := f.endpoint(false)
+	prunedRequests, allRequests = &atomic.Int32{}, &atomic.Int32{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		allRequests.Add(1)
+		if pruned[common.HexToHash(r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:])] {
+			prunedRequests.Add(1)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		http.Redirect(w, r, good+r.URL.Path, http.StatusTemporaryRedirect)
+	}))
+	f.t.Cleanup(srv.Close)
+	return srv.URL, roots, prunedRequests, allRequests
+}
+
+func TestBlobArchiveStoreFillSkipsSlotsBelowTheFirstSlotAnEndpointServes(t *testing.T) {
+	f := newFillFixture(t)
+	url, roots, prunedRequests, _ := f.prunedChain()
+
+	err := f.fill(&BlobArchiveStoreFill{Endpoints: []string{url}, FromSlot: fillTestSlot, ToSlot: fillTestSlot + windowTestSlots - 1}, nil)
+	require.LessOrEqual(t, prunedRequests.Load(), int32(fillWorkers+5), "every pruned slot was requested")
+	require.ErrorContains(t, err, fmt.Sprintf("%d slots with blobs are not served by any endpoint", windowTestServedFrom))
+	for i := windowTestServedFrom; i < windowTestSlots; i++ {
+		require.True(t, f.storedValid(fillTestSlot+uint64(i), roots[i]))
+	}
+}
+
+func TestBlobArchiveStoreFillDryRunFindsTheFirstSlotAnEndpointServes(t *testing.T) {
+	f := newFillFixture(t)
+	url, roots, _, allRequests := f.prunedChain()
+
+	cmd := &BlobArchiveStoreFill{Endpoints: []string{url}, FromSlot: fillTestSlot, ToSlot: fillTestSlot + windowTestSlots - 1, DryRun: true}
+	require.NoError(t, f.fill(cmd, nil))
+	require.EqualValues(t, fillTestSlot+windowTestServedFrom, cmd.windows[0].from.Load())
+	require.LessOrEqual(t, allRequests.Load(), int32(6), "more requests than a binary search over the range")
+	for i, root := range roots {
+		require.False(t, f.storedValid(fillTestSlot+uint64(i), root))
+	}
 }
 
 // Providers that authenticate with a query-string key must get the block id in the path.
