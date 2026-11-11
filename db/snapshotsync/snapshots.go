@@ -2025,6 +2025,23 @@ func (s *BaseRoSnapshots) RetireFilesAbove(blockNum uint64, onDelete func(l []st
 	return s.retireFiles(mvcc.RetireReasonAged, names...)
 }
 
+func snapshotDirEntries(dir string) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read dir %s: %w", dir, err)
+	}
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if !e.IsDir() {
+			names = append(names, e.Name())
+		}
+	}
+	return names, nil
+}
+
 func (s *BaseRoSnapshots) buildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs, chainConfig *chain.Config, workers int, logger log.Logger) (newIdxBuilt bool, err error) {
 	if s == nil {
 		return
@@ -2066,6 +2083,11 @@ func (s *BaseRoSnapshots) buildMissedIndices(logPrefix string, ctx context.Conte
 	var fmu sync.Mutex
 	failedIndexes := make(map[string]error, 0)
 
+	dirEntries, err := snapshotDirEntries(dir)
+	if err != nil {
+		return
+	}
+
 	for _, t := range s.enums {
 		s.dirty[t].Walk(func(segs []*DirtySegment) bool {
 			for _, segment := range segs {
@@ -2076,6 +2098,14 @@ func (s *BaseRoSnapshots) buildMissedIndices(logPrefix string, ctx context.Conte
 				// (type, range); otherwise claim it so we don't double-build.
 				from, to := segment.From(), segment.To()
 				if !s.TryAcquireRange(t, from, to) {
+					continue
+				}
+				// IsIndexed answers from memory, so an index that reached the
+				// directory after the folder was opened still reads as missing.
+				// Rebuilding it would replace bytes a hash may already describe.
+				_ = segment.OpenIdxIfNeed(dir, true, dirEntries)
+				if segment.IsIndexed() {
+					s.ReleaseRange(t, from, to)
 					continue
 				}
 				info := segment.FileInfo(dir)
