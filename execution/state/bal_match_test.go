@@ -229,7 +229,7 @@ func TestBlockAccessListBuilderMatchesRandomHistories(t *testing.T) {
 		other := want.Copy()
 		switch {
 		case len(other[0].StorageReads) > 0 && r.IntN(2) == 0:
-			other[0].StorageReads[0] = key(200).Value()
+			other[0].StorageReads[len(other[0].StorageReads)-1] = key(200).Value()
 		case len(other[0].StorageChanges) > 0:
 			other[0].StorageChanges[0].Changes[0].Value.AddUint64(&other[0].StorageChanges[0].Changes[0].Value, 7)
 		default:
