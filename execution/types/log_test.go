@@ -673,6 +673,10 @@ func TestLogMatchesItsTags(t *testing.T) {
 			got, err := jsonstream.Marshal(l)
 			require.NoError(t, err)
 			require.Equal(t, string(want), string(got))
+
+			got, err = jsonstream.Marshal(Logs{l})
+			require.NoError(t, err)
+			require.Equal(t, "["+string(want)+"]", string(got))
 		})
 	}
 }
