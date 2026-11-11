@@ -17,108 +17,282 @@
 package stagedsync
 
 import (
-	"context"
-	"runtime"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
+	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/kvmetrics"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
-	"github.com/holiman/uint256"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
-// TestParallelBlockEndLogsReachLogIndex is the parallel analog of
-// TestSerialBlockEndLogsReachLogIndex: a block-end system call emits a log at the
-// block's final txNum, which must reach the log indexes. It drives nextResult to
-// produce the finalize result, confirms that result carries the block-end syscall
-// log, then indexes it exactly as the apply loop does and asserts reachability via
-// IndexRange.
-//
-// This is a regression guard that the block-end logs flow through the finalize
-// result to the index — i.e. moving indexing off the exec loop did not drop them.
-// It is NOT a proof that the exec-loop/apply-loop data race is gone: both the old
-// (exec-loop) and new (apply-loop) code index these logs, so only the race
-// detector under real concurrency distinguishes them.
-func TestParallelBlockEndLogsReachLogIndex(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("mdbx InMem test databases are not supported on windows")
+func newParallelLogIndexTestExec(db kv.TemporalRwDB, domains *execctx.SharedDomains, calls int) *parallelExecutor {
+	logger := log.New()
+	return &parallelExecutor{
+		txExecutor: txExecutor{
+			cfg: ExecuteBlockCfg{
+				chainConfig: chain.TestChainBerlinConfig,
+				db:          db,
+				engine: &logEmittingSyscallEngine{
+					Engine:   ethash.NewFaker(),
+					contract: accounts.InternAddress(logIndexContract),
+					calls:    calls,
+				},
+				vmConfig: &vm.Config{},
+			},
+			doms:   domains,
+			rs:     state.NewStateV3Buffered(state.NewStateV3(domains, false, logger)),
+			logger: logger,
+		},
+		prevBlocks: state.NewPrevBlockList(),
 	}
-	ctx := context.Background()
-	db := newResumeTestDB(t)
-	config := chain.TestChainBerlinConfig
+}
 
-	// Deploy the LOG1-emitting contract the block-end syscall targets.
-	seedResumeTestDB(t, db, func(putter kv.TemporalPutDel) error {
-		return putLogEmittingContract(putter, logIndexContract)
-	})
-
-	engine := &logEmittingSyscallEngine{
-		Engine:   ethash.NewFaker(),
-		contract: accounts.InternAddress(logIndexContract),
-		calls:    3,
-	}
-
-	pe, roTx := newResumeTestExec(t, db, config)
-	pe.cfg.engine = engine
-	pe.cfg.vmConfig = &vm.Config{}
-
-	// Capture the finalize result the exec loop sends to the apply loop.
-	applyResults := make(chan applyResult, 16)
+func newLogIndexTestBlock(tasks []exec.Task) (*blockExecutor, chan applyResult) {
+	applyResults := make(chan applyResult, len(tasks)+1)
 	consumers := newResultStream()
 	consumers.register("applyResults", applyResults)
-
-	header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 10_000_000}
-	gasPool := new(protocol.GasPool).AddGas(10_000_000)
-	be := newBlockExec(1, common.Hash{}, gasPool, nil, consumers, false, nil)
-
-	// One block-end anchor task (TxIndex == len(Txs)); finalize anchors on it so
-	// the coinbase/finalize sweep lands on an unsealed versionMap cell.
-	endTask := &exec.TxTask{Header: header, TxNum: 1, TxIndex: 0, Config: config}
-	eTaskEnd := &execTask{Task: endTask, index: 0}
-	endVersion := &taskVersion{
-		execTask: eTaskEnd,
-		version:  state.Version{BlockNum: 1, TxIndex: 0, Incarnation: 1, TxNum: 1},
+	be := newBlockExec(tasks[0].Version().BlockNum, tasks[0].BlockHash(),
+		new(protocol.GasPool).AddGas(tasks[0].BlockGasLimit()), nil, consumers, false, nil)
+	be.tasks = make([]*execTask, len(tasks))
+	be.results = make([]*execResult, len(tasks))
+	for i, task := range tasks {
+		be.tasks[i] = &execTask{Task: task, index: i}
 	}
-	be.tasks = []*execTask{eTaskEnd}
-	be.results = []*execResult{{TxResult: &exec.TxResult{Task: endVersion}}}
-	be.finalizedResults[0] = &execResult{TxResult: &exec.TxResult{Task: endVersion}}
-	be.execTasks.setComplete(0)
-	be.validateTasks.setComplete(0)
-	be.publishTasks.setComplete(0)
+	return be, applyResults
+}
 
-	driveRes := &exec.TxResult{Task: endVersion}
-	_, err := be.nextResult(ctx, pe, driveRes, roTx)
+// Drive the production apply path: nextResult only publishes the writes and
+// indexes, and foldTx owns the SharedDomains mutations.
+func foldLogIndexTestResults(t *testing.T, pe *parallelExecutor, tx kv.TemporalTx, results chan applyResult) *txResult {
+	t.Helper()
+	var finalize *txResult
+	for len(results) > 0 {
+		result := (<-results).(*txResult)
+		if result.isFinalize {
+			require.Nil(t, finalize, "finalize must be published only once")
+			finalize = result
+		}
+		require.NoError(t, pe.foldTx(t.Context(), tx, result))
+	}
+	return finalize
+}
+
+// With receipt history enabled, block-end logs must reach the persisted indexes
+// at the final virtual transaction's txNum. That transaction clears the latest
+// cached receipt, while history retains the last regular receipt.
+func TestParallelBlockEndLogsWithReceiptHistory(t *testing.T) {
+	savedRCache := statecfg.Schema.RCacheDomain
+	statecfg.EnableHistoricalRCache()
+	t.Cleanup(func() { statecfg.Schema.RCacheDomain = savedRCache })
+
+	db := newResumeTestDB(t)
+	seedLogEmittingContract(t, db, logIndexContract)
+	rwTx, domains := temporaltest.NewTestTxSD(t, db)
+	pe := newParallelLogIndexTestExec(db, domains, 1)
+	pe.rs = state.NewStateV3Buffered(state.NewStateV3(domains, true, pe.logger))
+
+	tasks := newLogIndexTestTasks(pe.cfg.chainConfig)
+	txs := types.Transactions{signSelfSendTx(t, 0, 0, 1, 21_000, pe.cfg.chainConfig, 0)}
+	for i, task := range tasks {
+		txTask := task.(*exec.TxTask)
+		txTask.TxIndex = i
+		txTask.Txs = txs
+	}
+	be, applyResults := newLogIndexTestBlock(tasks)
+	regularTask, finalTask := be.tasks[0], be.tasks[1]
+	regularVersion := regularTask.Version()
+	regularVersion.Incarnation = 1
+	be.execTasks.setInProgress(0)
+	res, err := be.nextResult(t.Context(), pe, &exec.TxResult{
+		Task: &taskVersion{execTask: regularTask, version: regularVersion},
+		ExecutionResult: evmtypes.ExecutionResult{
+			ReceiptGasUsed: 21_000,
+			TxnGasUsage: mdgas.TxnGasUsage{
+				BlockExecutionGasUsed: 21_000,
+			},
+		},
+	}, rwTx)
 	require.NoError(t, err)
+	require.Nil(t, res)
+	require.Nil(t, foldLogIndexTestResults(t, pe, rwTx, applyResults))
+	cachedReceipt, _, err := domains.GetLatest(kv.RCacheDomain, rwTx, rawtemporaldb.ReceiptCacheKey)
+	require.NoError(t, err)
+	require.NotEmpty(t, cachedReceipt)
 
-	// Find the finalize result and confirm it carries the block-end syscall log.
-	var fin *txResult
-	for len(applyResults) > 0 {
-		if tr, ok := (<-applyResults).(*txResult); ok && tr.isFinalize {
-			fin = tr
+	finalVersion := finalTask.Version()
+	finalVersion.Incarnation = 1
+	be.execTasks.setInProgress(1)
+	res, err = be.nextResult(t.Context(), pe, &exec.TxResult{
+		Task: &taskVersion{execTask: finalTask, version: finalVersion},
+	}, rwTx)
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	require.NoError(t, res.Err)
+	require.NotNil(t, foldLogIndexTestResults(t, pe, rwTx, applyResults))
+	require.NoError(t, domains.Flush(t.Context(), rwTx))
+
+	priorReceipt, ok, err := rwTx.HistorySeek(kv.RCacheDomain, rawtemporaldb.ReceiptCacheKey, regularVersion.TxNum+1)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, cachedReceipt, priorReceipt)
+	latestReceipt, _, err := rwTx.GetLatest(kv.RCacheDomain, rawtemporaldb.ReceiptCacheKey, kv.GetLatestOptions{})
+	require.NoError(t, err)
+	require.Empty(t, latestReceipt)
+	require.Equal(t, []uint64{logIndexFinalTxNum}, indexedTxNums(t, rwTx, kv.LogAddrIdx, logIndexContract[:]))
+	require.Equal(t, []uint64{logIndexFinalTxNum}, indexedTxNums(t, rwTx, kv.LogTopicIdx, logIndexTopic[:]))
+}
+
+type indexCountingMemBatch struct {
+	// SharedDomains also calls changeset methods outside kv.TemporalMemBatch.
+	// Embedding the concrete batch keeps those methods available.
+	*dbstate.TemporalMemBatch
+	adds map[indexAddition]int
+}
+
+type indexAddition struct {
+	table kv.InvertedIdx
+	txNum uint64
+}
+
+func (m *indexCountingMemBatch) IndexAdd(table kv.InvertedIdx, key []byte, txNum uint64) error {
+	m.adds[indexAddition{table: table, txNum: txNum}]++
+	return m.TemporalMemBatch.IndexAdd(table, key, txNum)
+}
+
+// Finalize system calls share an IntraBlockState and txIndex, so GetRawLogs
+// returns all logs collected so far. Indexing that list after each call would
+// index earlier logs again. Count index additions before storage deduplicates
+// equal (key, txNum) pairs, which would hide that duplication in index queries.
+func TestParallelBlockEndLogsCountEachSyscallOnce(t *testing.T) {
+	const syscalls = 3
+
+	db := newResumeTestDB(t)
+	seedLogEmittingContract(t, db, logIndexContract)
+
+	logger := log.New()
+	rwTx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	t.Cleanup(rwTx.Rollback)
+	indexes := &indexCountingMemBatch{
+		TemporalMemBatch: dbstate.NewTemporalMemBatch(rwTx, db, kvmetrics.NewDomainMetrics()),
+		adds:             make(map[indexAddition]int),
+	}
+	domains, err := execctx.NewSharedDomains(t.Context(), rwTx, logger, execctx.WithMemBatch(indexes))
+	require.NoError(t, err)
+	t.Cleanup(domains.Close)
+	pe := newParallelLogIndexTestExec(db, domains, syscalls)
+	tasks := newLogIndexTestTasks(pe.cfg.chainConfig)
+	be, applyResults := newLogIndexTestBlock(tasks)
+	for i, task := range be.tasks {
+		be.execTasks.setInProgress(i)
+		version := task.Version()
+		version.Incarnation = 1
+		res, err := be.nextResult(t.Context(), pe, &exec.TxResult{
+			Task: &taskVersion{execTask: task, version: version},
+		}, rwTx)
+		require.NoError(t, err)
+		if i < len(tasks)-1 {
+			require.Nil(t, res)
+		} else {
+			require.NotNil(t, res)
+			require.NoError(t, res.Err)
 		}
 	}
-	require.NotNil(t, fin, "a finalize result must be sent")
-	require.Len(t, fin.logs, engine.calls, "the finalize result must carry each block-end syscall log once")
+	finalize := foldLogIndexTestResults(t, pe, rwTx, applyResults)
+	require.NotNil(t, finalize, "block-end logs must reach the apply loop")
+	require.Equal(t, logIndexFinalTxNum, finalize.txNum)
+	require.Len(t, finalize.logs, syscalls)
 
-	// Index it exactly as the apply loop does (skipReceiptCache for finalize), then
-	// flush and assert the block-end log is reachable in the log indexes.
-	rwTx, err := db.BeginTemporalRw(ctx)
+	require.Equal(t, map[indexAddition]int{
+		{table: kv.LogAddrIdx, txNum: logIndexFinalTxNum}:  syscalls,
+		{table: kv.LogTopicIdx, txNum: logIndexFinalTxNum}: syscalls,
+	}, indexes.adds)
+	require.NoError(t, domains.Flush(t.Context(), rwTx))
+
+	require.Equal(t, []uint64{logIndexFinalTxNum}, indexedTxNums(t, rwTx, kv.LogAddrIdx, logIndexContract[:]))
+	require.Equal(t, []uint64{logIndexFinalTxNum}, indexedTxNums(t, rwTx, kv.LogTopicIdx, logIndexTopic[:]))
+}
+
+// A tx charged at validation records one copy of its writes, kept by TxOut as well, and
+// the worker's own write-set stays free of the sender charge and the tip.
+func TestChargedTxKeepsOneCopyOfItsWrites(t *testing.T) {
+	db := newResumeTestDB(t)
+	sender := senderIsCoinbaseKey.rawAddress
+	seedResumeTestDB(t, db, func(putter kv.TemporalPutDel) error {
+		acc := accounts.NewAccount()
+		acc.Balance = *uint256.NewInt(1_000_000_000)
+		return putter.DomainPut(kv.AccountsDomain, sender[:], accounts.SerialiseV3(&acc), 0, nil)
+	})
+	rwTx, domains := temporaltest.NewTestTxSD(t, db)
+	pe := newParallelLogIndexTestExec(db, domains, 0)
+
+	coinbase := common.HexToAddress("0xc01b")
+	recipient := common.HexToAddress("0xa11ce")
+	tasks := newLogIndexTestTasks(pe.cfg.chainConfig)
+	signed, err := types.SignTx(&types.LegacyTx{
+		CommonTx: types.CommonTx{To: &recipient, GasLimit: 21_000},
+		GasPrice: *uint256.NewInt(1),
+	}, *types.MakeSigner(pe.cfg.chainConfig, 1, 0), senderIsCoinbaseKey.key)
 	require.NoError(t, err)
-	defer rwTx.Rollback()
-	rs := state.NewStateV3Buffered(state.NewStateV3(pe.doms, false, pe.logger))
-	require.NoError(t, rs.ApplyTxIndexes(rwTx, fin.txNum, fin.receipt, fin.cumulativeBlobGasUsed, fin.logs, fin.traceFroms, fin.traceTos, fin.isFinalize))
-	require.NoError(t, pe.doms.Flush(ctx, rwTx))
+	for i, task := range tasks {
+		txTask := task.(*exec.TxTask)
+		txTask.TxIndex = i
+		txTask.Txs = types.Transactions{signed}
+		txTask.Header.Coinbase = coinbase
+	}
+	be, _ := newLogIndexTestBlock(tasks)
+	regular := be.tasks[0]
 
-	require.Equal(t, []uint64{fin.txNum}, indexedTxNums(t, rwTx, kv.LogAddrIdx, logIndexContract[:]))
-	topic := common.Hash{31: 0x42}
-	require.Equal(t, []uint64{fin.txNum}, indexedTxNums(t, rwTx, kv.LogTopicIdx, topic[:]))
+	created := accounts.InternAddress(recipient)
+	workerWrites := &state.WriteSet{}
+	workerWrites.SetNonce(created, &state.VersionedWrite[uint64]{
+		WriteHeader: state.WriteHeader{Address: created, Path: state.NoncePath, Version: regular.Version()},
+		Val:         1,
+	})
+	be.versionMap.FlushVersionedWrites(workerWrites, false)
+
+	be.execTasks.setInProgress(0)
+	res, err := be.nextResult(t.Context(), pe, &exec.TxResult{
+		Task:     &taskVersion{execTask: regular, version: regular.Version()},
+		TxOut:    workerWrites,
+		Coinbase: accounts.InternAddress(coinbase),
+		ExecutionResult: evmtypes.ExecutionResult{
+			ReceiptGasUsed: 21_000,
+			FeeTipped:      *uint256.NewInt(21_000),
+			TxnGasUsage:    mdgas.TxnGasUsage{BlockExecutionGasUsed: 21_000},
+		},
+	}, rwTx)
+	require.NoError(t, err)
+	require.Nil(t, res)
+
+	finalized := be.finalizedResults[0]
+	require.NotNil(t, finalized, "the tx must reach the finalize tail")
+	recorded := be.blockIO.WriteSet(regular.Version().TxIndex)
+	require.Same(t, recorded, finalized.TxOut)
+
+	_, charged := recorded.GetBalance(accounts.InternAddress(sender))
+	require.True(t, charged, "the sender charge must be recorded")
+	_, tipped := recorded.GetBalance(accounts.InternAddress(coinbase))
+	require.True(t, tipped, "the tip must be recorded")
+	_, kept := recorded.GetNonce(created)
+	require.True(t, kept, "the worker's writes must be recorded")
+	require.Equal(t, 1, workerWrites.Count(), "the worker's write-set must stay as the worker left it")
 }

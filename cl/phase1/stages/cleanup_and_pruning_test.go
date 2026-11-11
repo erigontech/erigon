@@ -147,6 +147,45 @@ func TestCleanupAndPruningKeepsEveryBlobUnderArchiveFlags(t *testing.T) {
 	}
 }
 
+func TestCleanupAndPruningBoundedBlobArchiveKeepsFromSlotAndServingWindow(t *testing.T) {
+	const currentSlot = uint64(200_000)
+	beaconCfg := clparams.MainnetBeaconConfig
+	beaconCfg.DenebForkEpoch = 0
+	serveFloor := beaconCfg.BlobSidecarServeRangeStartSlot(currentSlot)
+	require.Positive(t, serveFloor)
+
+	for _, test := range []struct {
+		name      string
+		fromSlot  uint64
+		wantFloor uint64
+	}{
+		{name: "from slot below the serving window", fromSlot: 10_000, wantFloor: 10_000},
+		{name: "from slot inside the serving window", fromSlot: serveFloor + 1, wantFloor: serveFloor},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			blobStore := blob_mock_services.NewMockBlobStorage(ctrl)
+			peerDas := das_mock_services.NewMockPeerDas(ctrl)
+			clock := eth_clock.NewMockEthereumClock(ctrl)
+
+			clock.EXPECT().GetCurrentSlot().Return(currentSlot)
+			blobStore.EXPECT().PruneBelow(test.wantFloor).Return(nil)
+			peerDas.EXPECT().PruneBelow(gomock.Any()).Return(nil)
+
+			cfg := &Cfg{
+				indiciesDB:   mdbxtest.NewTestDB(t, dbcfg.ChainDB),
+				ethClock:     clock,
+				beaconCfg:    &beaconCfg,
+				blobStore:    blobStore,
+				peerDas:      peerDas,
+				caplinConfig: clparams.CaplinConfig{ArchiveBlobs: true, BlobsArchiveFromSlot: test.fromSlot},
+			}
+
+			require.NoError(t, cleanupAndPruning(t.Context(), log.New(), cfg, Args{}))
+		})
+	}
+}
+
 func TestCleanupAndPruningResolvesZeroColumnKeepSlotsToTheSpecWindow(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	blobStore := blob_mock_services.NewMockBlobStorage(ctrl)
@@ -299,6 +338,65 @@ func TestCleanupAndPruningKeepsExplicitColumnSlotsUnaligned(t *testing.T) {
 	require.NoError(t, cleanupAndPruning(t.Context(), log.New(), cfg, Args{}))
 }
 
+func TestCleanupAndPruningFollowsBlockArchivePolicyForEnvelopeSignatures(t *testing.T) {
+	for _, test := range []struct {
+		name          string
+		archiveBlocks bool
+		wantBefore    bool
+	}{
+		{name: "non-archive", wantBefore: false},
+		{name: "archive", archiveBlocks: true, wantBefore: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			blobStore := blob_mock_services.NewMockBlobStorage(ctrl)
+			peerDas := das_mock_services.NewMockPeerDas(ctrl)
+			clock := eth_clock.NewMockEthereumClock(ctrl)
+			db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+			const head = uint64(2_000_017)
+			windowStart := uint64(943_232)
+			slotBefore := windowStart - 1
+			slotAt := windowStart
+			rootBefore := common.Hash{1}
+			rootAt := common.Hash{2}
+			require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+				if err := beacon_indicies.WriteHighestFinalized(tx, head); err != nil {
+					return err
+				}
+				if err := beacon_indicies.WriteExecutionPayloadEnvelopeSignature(tx, slotBefore, rootBefore, common.Bytes96{1}); err != nil {
+					return err
+				}
+				return beacon_indicies.WriteExecutionPayloadEnvelopeSignature(tx, slotAt, rootAt, common.Bytes96{2})
+			}))
+
+			clock.EXPECT().GetCurrentSlot().Return(head)
+			blobStore.EXPECT().PruneBelow(gomock.Any()).Return(nil)
+			peerDas.EXPECT().PruneBelow(gomock.Any()).Return(nil)
+			cfg := &Cfg{
+				indiciesDB: db,
+				ethClock:   clock,
+				beaconCfg:  &clparams.MainnetBeaconConfig,
+				blobStore:  blobStore,
+				peerDas:    peerDas,
+				caplinConfig: clparams.CaplinConfig{
+					ArchiveBlocks: test.archiveBlocks,
+				},
+			}
+
+			require.NoError(t, cleanupAndPruning(t.Context(), log.New(), cfg, Args{seenSlot: head}))
+			require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+				_, foundBefore, err := beacon_indicies.ReadExecutionPayloadEnvelopeSignature(tx, slotBefore, rootBefore)
+				require.NoError(t, err)
+				require.Equal(t, test.wantBefore, foundBefore)
+				_, foundAt, err := beacon_indicies.ReadExecutionPayloadEnvelopeSignature(tx, slotAt, rootAt)
+				require.NoError(t, err)
+				require.True(t, foundAt)
+				return nil
+			}))
+		})
+	}
+}
+
 func runBlockPruning(t *testing.T, seenSlot, currentSlot, highestFinalized uint64, slots []uint64) map[uint64]bool {
 	t.Helper()
 	ctrl := gomock.NewController(t)
@@ -361,6 +459,55 @@ func TestCleanupAndPruningBoundsBlocksPrunedPerRun(t *testing.T) {
 	kept := runBlockPruning(t, 2_000_017, 2_000_017, 2_000_017, slots)
 	require.False(t, kept[snaptype.CaplinMergeLimit-1])
 	require.True(t, kept[snaptype.CaplinMergeLimit])
+}
+
+func TestCleanupAndPruningBoundsEnvelopeSignaturesPrunedPerRun(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	blobStore := blob_mock_services.NewMockBlobStorage(ctrl)
+	peerDas := das_mock_services.NewMockPeerDas(ctrl)
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	cfg := &Cfg{
+		indiciesDB: db,
+		ethClock:   clock,
+		beaconCfg:  &clparams.MainnetBeaconConfig,
+		blobStore:  blobStore,
+		peerDas:    peerDas,
+	}
+	const head = uint64(2_000_017)
+	root := common.Hash{1}
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		for slot := uint64(0); slot <= snaptype.CaplinMergeLimit; slot++ {
+			if err := tx.Put(kv.BeaconBlocks, dbutils.BlockBodyKey(slot, root), []byte{1}); err != nil {
+				return err
+			}
+			if err := beacon_indicies.WriteExecutionPayloadEnvelopeSignature(tx, slot, root, common.Bytes96{1}); err != nil {
+				return err
+			}
+		}
+		return beacon_indicies.WriteHighestFinalized(tx, head)
+	}))
+
+	clock.EXPECT().GetCurrentSlot().Return(head)
+	blobStore.EXPECT().PruneBelow(gomock.Any()).Return(nil)
+	peerDas.EXPECT().PruneBelow(gomock.Any()).Return(nil)
+	require.NoError(t, cleanupAndPruning(t.Context(), log.New(), cfg, Args{seenSlot: head}))
+
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		found, err := tx.Has(kv.BeaconBlocks, dbutils.BlockBodyKey(snaptype.CaplinMergeLimit-1, root))
+		require.NoError(t, err)
+		require.False(t, found)
+		found, err = tx.Has(kv.BeaconBlocks, dbutils.BlockBodyKey(snaptype.CaplinMergeLimit, root))
+		require.NoError(t, err)
+		require.True(t, found)
+		_, found, err = beacon_indicies.ReadExecutionPayloadEnvelopeSignature(tx, snaptype.CaplinMergeLimit-1, root)
+		require.NoError(t, err)
+		require.False(t, found)
+		_, found, err = beacon_indicies.ReadExecutionPayloadEnvelopeSignature(tx, snaptype.CaplinMergeLimit, root)
+		require.NoError(t, err)
+		require.True(t, found)
+		return nil
+	}))
 }
 
 func TestCleanupAndPruningUsesTheWallClockWhenItIsBehindTheStageHead(t *testing.T) {

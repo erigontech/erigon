@@ -403,13 +403,13 @@ func TestComputeEpochSecretKey(t *testing.T) {
 
 	var err error
 	_, err = ComputeEpochSecretKey([]int{0}, epochSecretKeyShares[:1], threshold)
-	assert.NotEqual(t, err, nil)
+	assert.Error(t, err)
 	_, err = ComputeEpochSecretKey([]int{0, 1, 2}, epochSecretKeyShares[:2], threshold)
-	assert.NotEqual(t, err, nil)
+	assert.Error(t, err)
 	_, err = ComputeEpochSecretKey([]int{0, 1}, epochSecretKeyShares[:1], threshold)
-	assert.NotEqual(t, err, nil)
+	assert.Error(t, err)
 	_, err = ComputeEpochSecretKey([]int{0}, epochSecretKeyShares[:2], threshold)
-	assert.NotEqual(t, err, nil)
+	assert.Error(t, err)
 
 	epochSecretKey12, err := ComputeEpochSecretKey(
 		[]int{0, 1},

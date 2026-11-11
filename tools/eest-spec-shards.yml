@@ -32,6 +32,11 @@
 #                                      the runner's RAM. Opt-in-true on purpose:
 #                                      a false-valued key is invisible to jq's
 #                                      // default and to GitHub's loose ==.
+#   evm-timeout-minutes   (optional) — wall-clock limit of the evm run. On expiry the
+#                                      run gets SIGQUIT (GOTRACEBACK=all), so a hang
+#                                      leaves its goroutine dump in the log, and the
+#                                      shard fails. Set it well above a healthy run:
+#                                      quiet stretches of over 10 min are normal.
 #   run                   (optional) — blocktest --run fork regex for race shards.
 #                                      Read by run-eest-spec-test.sh (to filter the
 #                                      run) and tools/check-eest-shard-coverage.sh
@@ -49,11 +54,11 @@
   commitment-parallel: true
 - shard: statetests-devnet-sequential
   workers: 12
-  max-allowed-failures: 0
+  max-allowed-failures: 274 # EIP-7906: https://github.com/erigontech/erigon/issues/25241
   commitment-parallel: false
 - shard: statetests-devnet-parallel
   workers: 12
-  max-allowed-failures: 0
+  max-allowed-failures: 274 # EIP-7906: https://github.com/erigontech/erigon/issues/25241
   commitment-parallel: true
 - shard: transactiontests-stable-race
   workers: 12
@@ -62,7 +67,7 @@
   no-ramdisk: true
 - shard: transactiontests-devnet-race
   workers: 12
-  max-allowed-failures: 0
+  max-allowed-failures: 17 # Upstream frame intrinsic-gas expectations: https://github.com/erigontech/erigon/issues/25241
   commitment-parallel: false
   no-ramdisk: true
 - shard: statetests-legacy-sequential
@@ -108,11 +113,11 @@
   commitment-parallel: true
 - shard: blocktests-devnet-sequential
   workers: 12
-  max-allowed-failures: 0
+  max-allowed-failures: 279 # EIP-7906: https://github.com/erigontech/erigon/issues/25241
   commitment-parallel: false
 - shard: blocktests-devnet-parallel
   workers: 12
-  max-allowed-failures: 0
+  max-allowed-failures: 279 # EIP-7906: https://github.com/erigontech/erigon/issues/25241
   commitment-parallel: true
 - shard: blocktests-legacy-consensus-sequential
   workers: 12
@@ -244,6 +249,7 @@
   max-allowed-failures: 0
   expected-tests: 111893
   commitment-parallel: true
+  evm-timeout-minutes: 25 # a healthy run takes ~12 min
   exclude:
     - *declined_eip7610_files
     - '/\.meta/'
@@ -365,11 +371,11 @@
   commitment-parallel: true
 - shard: enginextests-devnet-sequential
   workers: 8
-  max-allowed-failures: 0
+  max-allowed-failures: 279 # EIP-7906: https://github.com/erigontech/erigon/issues/25241
   commitment-parallel: false
 - shard: enginextests-devnet-parallel
   workers: 8
-  max-allowed-failures: 0
+  max-allowed-failures: 279 # EIP-7906: https://github.com/erigontech/erigon/issues/25241
   commitment-parallel: true
 - shard: enginextests-benchmark-1m-sequential
   workers: 1
@@ -465,7 +471,7 @@
   workers: 12
   max-allowed-failures: 0
   commitment-parallel: false
-  run: 'fork_(Osaka|BPO1ToBPO2|BPO2ToBPO3|BPO3ToBPO4)'
+  run: 'fork_(Osaka|BPO[12]-|BPO1ToBPO2)'
 - shard: blocktests-stable-race-amsterdam-sequential
   workers: 12
   max-allowed-failures: 0
@@ -490,7 +496,7 @@
   workers: 12
   max-allowed-failures: 0
   commitment-parallel: true
-  run: 'fork_(Osaka|BPO1ToBPO2|BPO2ToBPO3|BPO3ToBPO4)'
+  run: 'fork_(Osaka|BPO[12]-|BPO1ToBPO2)'
 - shard: blocktests-stable-race-amsterdam-parallel
   workers: 12
   max-allowed-failures: 0

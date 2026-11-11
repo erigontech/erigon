@@ -302,7 +302,6 @@ func TestOnExecutionPayloadDoesNotReplayUnavailableStateUnderForkChoiceLock(t *t
 	done := make(chan error, 1)
 	go func() { done <- store.OnExecutionPayload(t.Context(), envelope, false, true) }()
 
-	err = nil
 	select {
 	case err = <-done:
 	case <-time.After(lockScopeTimeout):
@@ -334,7 +333,7 @@ func TestApplyEnvelopeDoesNotQueueUnavailableRetry(t *testing.T) {
 
 	_, err = store.applyEnvelope(t.Context(), envelope, false, true, true, retryQueuedEnvelope, time.Now())
 
-	require.ErrorIs(t, err, errEnvelopeStateUnavailable)
+	require.ErrorIs(t, err, ErrExecutionPayloadEnvelopeStateUnavailable)
 	require.False(t, pending.Contains(envelope.Message.BeaconBlockRoot))
 }
 
@@ -355,7 +354,7 @@ func TestOnExecutionPayloadDoesNotQueueUnavailableStateAfterConcurrentApply(t *t
 
 	err = store.OnExecutionPayload(t.Context(), envelope, false, true)
 
-	require.ErrorIs(t, err, errEnvelopeStateUnavailable)
+	require.ErrorIs(t, err, ErrExecutionPayloadEnvelopeStateUnavailable)
 	require.False(t, pending.Contains(envelope.Message.BeaconBlockRoot))
 }
 
@@ -517,22 +516,26 @@ func TestValidateExecutionPayloadEnvelopeForConsensusVerifiesBuilderSignatureOnc
 
 	calls := stubBLSVerify(t)
 
-	err := store.ValidateExecutionPayloadEnvelopeForConsensus(t.Context(), envelope)
+	err := store.ValidateExecutionPayloadEnvelopeForConsensus(t.Context(), envelope, true)
 
 	require.Equal(t, 1, *calls)
 	require.NoError(t, err)
 }
 
 func TestValidateExecutionPayloadEnvelopeForConsensusRejectsInvalidBuilderSignature(t *testing.T) {
-	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
-	signAdmissionEnvelopeWithKey(t, cfg, blockState, envelope, otherSigningKey)
-	engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
-	store, _ := newEnvelopeApplicationTestStore(t, cfg, blockState, block)
-	store.engine = engine
+	for _, checkBlobData := range []bool{false, true} {
+		t.Run("checkBlobData="+strconv.FormatBool(checkBlobData), func(t *testing.T) {
+			cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
+			signAdmissionEnvelopeWithKey(t, cfg, blockState, envelope, otherSigningKey)
+			engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
+			store, _ := newEnvelopeApplicationTestStore(t, cfg, blockState, block)
+			store.engine = engine
 
-	err := store.ValidateExecutionPayloadEnvelopeForConsensus(t.Context(), envelope)
+			err := store.ValidateExecutionPayloadEnvelopeForConsensus(t.Context(), envelope, checkBlobData)
 
-	require.ErrorContains(t, err, "invalid builder signature: invalid signature")
+			require.ErrorContains(t, err, "invalid builder signature: invalid signature")
+		})
+	}
 }
 
 func TestOnExecutionPayloadRejectsInvalidBuilderSignature(t *testing.T) {

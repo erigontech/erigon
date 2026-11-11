@@ -25,13 +25,16 @@ import (
 	"math/big"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	goethkzg "github.com/crate-crypto/go-eth-kzg"
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcservices"
@@ -49,6 +52,7 @@ import (
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
@@ -146,6 +150,48 @@ func TestNewPayloadV5BoundsBALAllocations(t *testing.T) {
 	require.Less(t, after.TotalAlloc-before.TotalAlloc, uint64(1<<20))
 }
 
+func TestNewPayloadBoundsDerivedBlobHashAllocations(t *testing.T) {
+	const hashCount = 128 * 1024
+	hashes := make([]common.Hash, hashCount)
+	for i := range hashes {
+		hashes[i][0] = kzg.BlobCommitmentVersionKZG
+	}
+	tx := &types.BlobTx{
+		DynamicFeeTransaction: types.DynamicFeeTransaction{
+			// Excess transaction gas prevents asynchronous sender recovery during measurement.
+			CommonTx: types.CommonTx{GasLimit: 21_001, To: &common.Address{0x01}},
+		},
+		BlobVersionedHashes: hashes,
+	}
+	var encoded bytes.Buffer
+	require.NoError(t, tx.MarshalBinary(&encoded))
+	payload := &engine_types.ExecutionPayload{
+		LogsBloom:     make(hexutil.Bytes, types.BloomByteLength),
+		Timestamp:     1,
+		GasLimit:      21_000,
+		Transactions:  []hexutil.Bytes{encoded.Bytes()},
+		Withdrawals:   types.Withdrawals{},
+		BlobGasUsed:   new(hexutil.Uint64),
+		ExcessBlobGas: new(hexutil.Uint64),
+	}
+	srv := newTestEngineServer(prePragueChainConfig(), true)
+	ctx := t.Context()
+	measure := func(derive bool) uint64 {
+		var before, after runtime.MemStats
+		runtime.ReadMemStats(&before)
+		status, err := srv.newPayload(ctx, payload, []common.Hash{}, &common.Hash{}, nil, clparams.DenebVersion, derive)
+		runtime.ReadMemStats(&after)
+		require.NoError(t, err)
+		require.Equal(t, engine_types.InvalidStatus, status.Status)
+		require.EqualError(t, status.ValidationError.Error(), "invalid block hash")
+		return after.TotalAlloc - before.TotalAlloc
+	}
+	measure(false)
+	withoutDerivation, withDerivation := measure(false), measure(true)
+	// Decoding and hashing allocate in both paths; derivation must not add another full hash list.
+	require.Less(t, withDerivation, withoutDerivation+uint64(hashCount*len(common.Hash{})/2))
+}
+
 func TestNewPayloadV2WithdrawalsValidation(t *testing.T) {
 	t.Parallel()
 
@@ -208,7 +254,7 @@ func TestNewPayloadRejectsMoreTransactionsThanGasLimitAllows(t *testing.T) {
 		txCount       int
 		txGasLimit    uint64
 		cfg           *chain.Config
-		allowAA       bool
+		frame         bool
 		noWithdrawals bool
 		nilBlobHashes bool
 		prague        bool
@@ -220,7 +266,8 @@ func TestNewPayloadRejectsMoreTransactionsThanGasLimitAllows(t *testing.T) {
 		{name: "4 txs", txCount: 4, cfg: preCancunChainConfig(), wantStatus: engine_types.SyncingStatus},
 		{name: "5 txs", txCount: 5, cfg: preCancunChainConfig(), wantStatus: engine_types.InvalidStatus, wantErr: "gas limit reached: 5 transactions use at least 16800 gas each"},
 		{name: "1 tx above the gas limit", txCount: 1, txGasLimit: gasLimit + 1, cfg: preCancunChainConfig(), wantStatus: engine_types.InvalidStatus, wantErr: "gas limit reached"},
-		{name: "5 txs with AllowAA", txCount: 5, cfg: preCancunChainConfig(), allowAA: true, wantStatus: engine_types.SyncingStatus},
+		{name: "5 frame txs on Bogota", txCount: 5, cfg: allForksChainConfig(), frame: true, amsterdam: true, wantStatus: engine_types.SyncingStatus},
+		{name: "6 frame txs on Bogota", txCount: 6, cfg: allForksChainConfig(), frame: true, amsterdam: true, wantStatus: engine_types.InvalidStatus, wantErr: "gas limit reached: 6 transactions use at least 12000 gas each"},
 		{name: "4 txs on Prague", txCount: 4, cfg: preOsakaChainConfig(), prague: true, wantStatus: engine_types.InvalidStatus, wantErr: "gas limit reached: 4 transactions use at least 21000 gas each"},
 		{name: "5 txs on Amsterdam", txCount: 5, cfg: allForksChainConfig(), amsterdam: true, wantStatus: engine_types.SyncingStatus},
 		{name: "5 txs without withdrawals", txCount: 5, cfg: preCancunChainConfig(), noWithdrawals: true, wantErrCode: -32602},
@@ -230,11 +277,19 @@ func TestNewPayloadRejectsMoreTransactionsThanGasLimitAllows(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 
-			test.cfg.AllowAA = test.allowAA
+			if test.frame {
+				test.cfg.BogotaTime = common.NewUint64(0)
+			}
 			to := common.Address{0x1}
 			txs := make(types.Transactions, test.txCount)
 			for i := range txs {
 				txs[i] = &types.LegacyTx{CommonTx: types.CommonTx{Nonce: uint64(i), To: &to, GasLimit: cmp.Or(test.txGasLimit, 21_000)}}
+				if test.frame {
+					txs[i] = &types.FrameTransaction{
+						ChainID: *test.cfg.ChainID, NonceKeys: []uint256.Int{{}}, Nonce: uint64(i), SenderAddress: to,
+						Frames: []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000, State: gasLimit}}},
+					}
+				}
 			}
 			header := makeParentHeader(1001)
 			header.ParentHash = common.Hash{0x1}
@@ -294,6 +349,50 @@ func TestNewPayloadRejectsMoreTransactionsThanGasLimitAllows(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestNewPayloadOverBlobLimitOnBadParentWithUnknownAncestor(t *testing.T) {
+	t.Parallel()
+
+	cfg := prePragueChainConfig()
+	header := makeParentHeader(1001)
+	header.ParentHash = common.Hash{0x1}
+	blobHashes := make([]common.Hash, cfg.GetMaxBlobsPerBlock(header.Time)+1)
+	for i := range blobHashes {
+		blobHashes[i] = common.Hash{kzg.BlobCommitmentVersionKZG, byte(i)}
+	}
+	txs := types.Transactions{&types.BlobTx{
+		DynamicFeeTransaction: types.DynamicFeeTransaction{
+			CommonTx: types.CommonTx{GasLimit: 21_000, To: &common.Address{0x1}},
+			ChainID:  *uint256.NewInt(1),
+			TipCap:   *uint256.NewInt(1),
+			FeeCap:   *uint256.NewInt(1),
+		},
+		MaxFeePerBlobGas:    *uint256.NewInt(1),
+		BlobVersionedHashes: blobHashes,
+	}}
+	header.UncleHash = empty.UncleHash
+	header.TxHash = types.DeriveSha(txs)
+	withdrawals := types.Withdrawals{}
+	withdrawalsHash := types.DeriveSha(withdrawals)
+	header.WithdrawalsHash = &withdrawalsHash
+	header.BlobGasUsed = new(uint64)
+	header.ExcessBlobGas = new(uint64)
+	header.ParentBeaconBlockRoot = &common.Hash{}
+	block := types.NewBlockFromStorage(header.Hash(), header, txs, nil, withdrawals, nil)
+	payload, err := engine_types.ExecutionPayloadFromBlock(block)
+	require.NoError(t, err)
+
+	stub := &stubExecutionModule{}
+	downloader := engine_block_downloader.NewEngineBlockDownloader(t.Context(), log.New(), stub, nil, nil, cfg, ethconfig.Sync{}, nil)
+	downloader.ReportBadHeader(header.ParentHash, common.Hash{}, "invalid block")
+	srv := NewEngineServer(log.New(), cfg, stub, downloader, false, false, false, true, nil, nil, 0, 0)
+	srv.test = true
+
+	status, err := srv.NewPayloadV3(t.Context(), payload, blobHashes, header.ParentBeaconBlockRoot)
+	require.NoError(t, err)
+	require.Equal(t, engine_types.InvalidStatus, status.Status)
+	require.Nil(t, status.LatestValidHash)
 }
 
 func TestForkchoiceUpdatedV2RejectsNullWithdrawalWhenSyncing(t *testing.T) {
@@ -666,6 +765,20 @@ func TestGetBlobsV4(t *testing.T) {
 	}
 }
 
+func TestGetBlobsV4UsesPoolCells(t *testing.T) {
+	hash, bundle, _ := getBlobsV4Fixture(t, 1)
+	_, _, poolCells := getBlobsV4Fixture(t, 2)
+	bundle.Cells = (*[goethkzg.CellsPerExtBlob]*goethkzg.Cell)(poolCells)
+	client := newGetBlobsV4Client(t, blobGetterMap{hash: bundle})
+	var result []struct {
+		BlobCells []hexutil.Bytes `json:"blob_cells"`
+	}
+	require.NoError(t, client.CallContext(t.Context(), &result, "engine_getBlobsV4", []common.Hash{hash}, hexutil.Bytes(hexutil.MustDecodeHex("0x01000000000000000000000000000000"))))
+	require.Len(t, result, 1)
+	require.Len(t, result[0].BlobCells, 1)
+	require.Equal(t, hexutil.Bytes(poolCells[0][:]), result[0].BlobCells[0], "served cell 0 must be the pool's, not recomputed from the blob")
+}
+
 func TestGetBlobsV4FastJSON(t *testing.T) {
 	hash, bundle, _ := getBlobsV4Fixture(t, 1)
 	server := &EngineServer{logger: log.New(), blobGetter: blobGetterMap{hash: bundle}}
@@ -846,7 +959,8 @@ func TestGetPayloadBodiesByHashV2(t *testing.T) {
 
 	executionRpc := mockSentry.ExecModule
 	maxReorgDepth := ethconfig.Defaults.MaxReorgDepth
-	engineServer := NewEngineServer(mockSentry.Log, mockSentry.ChainConfig, executionRpc, nil, false, false, false, true, nil, nil, ethconfig.Defaults.FcuTimeout, maxReorgDepth)
+	downloader := engine_block_downloader.NewEngineBlockDownloader(t.Context(), mockSentry.Log, executionRpc, nil, nil, mockSentry.ChainConfig, ethconfig.Sync{}, nil)
+	engineServer := NewEngineServer(mockSentry.Log, mockSentry.ChainConfig, executionRpc, downloader, false, false, false, true, nil, nil, ethconfig.Defaults.FcuTimeout, maxReorgDepth)
 
 	const blockNum = 1
 	blockHash := canonicalHashAt(t, mockSentry.DB, blockNum)
@@ -976,4 +1090,153 @@ func TestValidatedPayloadStatusAnswersSyncingWhenTooFarAway(t *testing.T) {
 	require.Equal(t, engine_types.SyncingStatus, resp.Status)
 	require.Nil(t, resp.LatestValidHash)
 	require.Nil(t, resp.ValidationError)
+}
+
+func newEngineServerWithReorgDepth(t *testing.T, m *execmoduletester.ExecModuleTester, module execmodule.ExecutionModule, maxReorgDepth uint64) *EngineServer {
+	downloader := engine_block_downloader.NewEngineBlockDownloader(t.Context(), m.Log, m.ExecModule, nil, nil, m.ChainConfig, ethconfig.Sync{}, nil)
+	srv := NewEngineServer(m.Log, m.ChainConfig, module, downloader, false, false, false, true, nil, nil, 0, maxReorgDepth)
+	srv.test = true
+	return srv
+}
+
+func newPayloadV2(t *testing.T, srv *EngineServer, block *types.Block) *engine_types.PayloadStatus {
+	t.Helper()
+	payload, err := engine_types.ExecutionPayloadFromBlock(block)
+	require.NoError(t, err)
+	status, err := srv.NewPayloadV2(t.Context(), payload)
+	require.NoError(t, err)
+	return status
+}
+
+// forkchoiceV2AndWait also waits for the background commit, after which the execution module is
+// idle and validates the next payload.
+func forkchoiceV2AndWait(t *testing.T, srv *EngineServer, head common.Hash) *engine_types.PayloadStatus {
+	t.Helper()
+	r, err := srv.ForkchoiceUpdatedV2(t.Context(), &engine_types.ForkChoiceState{HeadHash: head}, nil)
+	require.NoError(t, err)
+	require.Eventually(t, func() bool {
+		ready, err := srv.executionService.Ready(t.Context())
+		return err == nil && ready
+	}, time.Minute, time.Millisecond)
+	return r.PayloadStatus
+}
+
+func payloadStatusJSON(t *testing.T, status *engine_types.PayloadStatus) string {
+	t.Helper()
+	encoded, err := json.Marshal(status)
+	require.NoError(t, err)
+	return string(encoded)
+}
+
+func bodiesServedByHash(t *testing.T, srv *EngineServer, hashes ...common.Hash) (v1, v2 []bool) {
+	t.Helper()
+	bodiesV1, err := srv.GetPayloadBodiesByHashV1(t.Context(), hashes)
+	require.NoError(t, err)
+	bodiesV2, err := srv.GetPayloadBodiesByHashV2(t.Context(), hashes)
+	require.NoError(t, err)
+	for i := range hashes {
+		v1 = append(v1, bodiesV1[i] != nil)
+		v2 = append(v2, bodiesV2[i] != nil)
+	}
+	return v1, v2
+}
+
+// storingAfterValidation stores the block again right after the first validation of its hash, as
+// a concurrent insertion of the same block can.
+type storingAfterValidation struct {
+	execmodule.ExecutionModule
+	t      *testing.T
+	block  *types.Block
+	stored atomic.Bool
+}
+
+func (m *storingAfterValidation) ValidateChain(ctx context.Context, hash common.Hash, number uint64) (execmodule.ValidationResult, error) {
+	result, err := m.ExecutionModule.ValidateChain(ctx, hash, number)
+	if hash == m.block.Hash() && m.stored.CompareAndSwap(false, true) {
+		_, insertErr := m.ExecutionModule.InsertBlocks(ctx, []*types.Block{m.block})
+		require.NoError(m.t, insertErr)
+	}
+	return result, err
+}
+
+func withHeaderChange(block *types.Block, change func(*types.Header)) *types.Block {
+	header := types.CopyHeader(block.HeaderNoCopy())
+	change(header)
+	return types.NewBlockFromStorage(header.Hash(), header, block.Transactions(), block.Uncles(), block.Withdrawals(), nil)
+}
+
+func withInvalidGasLimit(block *types.Block) *types.Block {
+	return withHeaderChange(block, func(header *types.Header) { header.GasLimit *= 2 })
+}
+
+func TestGetPayloadBodiesByHashOmitsAnInvalidBlockStoredAfterItsValidation(t *testing.T) {
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{Config: preCancunChainConfig()}))
+	chain, err := m.GenerateChain(2, func(int, *blockgen.BlockGen) {})
+	require.NoError(t, err)
+	block1, block2 := chain.Blocks[0], withInvalidGasLimit(chain.Blocks[1])
+	srv := newEngineServerWithReorgDepth(t, m, &storingAfterValidation{ExecutionModule: m.ExecModule, t: t, block: block2}, 2)
+
+	require.Equal(t, engine_types.ValidStatus, newPayloadV2(t, srv, block1).Status)
+	require.Equal(t, engine_types.ValidStatus, forkchoiceV2AndWait(t, srv, block1.Hash()).Status)
+	for _, request := range []string{"first", "repeated"} {
+		require.Equal(t, engine_types.InvalidStatus, newPayloadV2(t, srv, block2).Status, request)
+		require.NotNil(t, srv.chainRW.GetHeader(t.Context(), block2.Hash(), block2.NumberU64()), "the test needs the invalid block stored")
+
+		v1, v2 := bodiesServedByHash(t, srv, block1.Hash(), block2.Hash())
+		require.Equal(t, []bool{true, false}, v1, "%s request: V1", request)
+		require.Equal(t, []bool{true, false}, v2, "%s request: V2", request)
+	}
+}
+
+func TestGetPayloadBodiesByHashOmitsABlockRejectedByAForkchoiceUpdate(t *testing.T) {
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{Config: preCancunChainConfig()}))
+	chain, err := m.GenerateChain(1, func(int, *blockgen.BlockGen) {})
+	require.NoError(t, err)
+	block := withHeaderChange(chain.Blocks[0], func(header *types.Header) { header.Root = common.Hash{0x01} })
+	srv := newEngineServerWithReorgDepth(t, m, m.ExecModule, 1)
+
+	require.Equal(t, engine_types.AcceptedStatus, newPayloadV2(t, srv, block).Status, "the block must be stored without a validation")
+	require.Equal(t, engine_types.InvalidStatus, forkchoiceV2AndWait(t, srv, block.Hash()).Status)
+	require.NotNil(t, srv.chainRW.GetHeader(t.Context(), block.Hash(), block.NumberU64()), "the test needs the rejected block stored")
+
+	v1, v2 := bodiesServedByHash(t, srv, m.Genesis.Hash(), block.Hash())
+	require.Equal(t, []bool{true, false}, v1, "V1")
+	require.Equal(t, []bool{true, false}, v2, "V2")
+}
+
+func TestGetPayloadBodiesByHashOmitsABlockRejectedForABadAncestor(t *testing.T) {
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{Config: preCancunChainConfig()}))
+	chain, err := m.GenerateChain(5, func(int, *blockgen.BlockGen) {})
+	require.NoError(t, err)
+	block1, bad := chain.Blocks[0], withInvalidGasLimit(chain.Blocks[1])
+	child := withHeaderChange(chain.Blocks[2], func(header *types.Header) { header.ParentHash = bad.Hash() })
+	head := withHeaderChange(chain.Blocks[3], func(header *types.Header) { header.ParentHash = child.Hash() })
+	headChild := withHeaderChange(chain.Blocks[4], func(header *types.Header) { header.ParentHash = head.Hash() })
+	srv := newEngineServerWithReorgDepth(t, m, m.ExecModule, 2)
+
+	require.Equal(t, engine_types.ValidStatus, newPayloadV2(t, srv, block1).Status)
+	for _, block := range []*types.Block{bad, child, head} {
+		require.Equal(t, engine_types.AcceptedStatus, newPayloadV2(t, srv, block).Status, "the block must be stored without a validation")
+	}
+	require.Equal(t, engine_types.ValidStatus, forkchoiceV2AndWait(t, srv, block1.Hash()).Status)
+	badStatus := newPayloadV2(t, srv, bad)
+	require.Equal(t, engine_types.InvalidStatus, badStatus.Status)
+	require.Nil(t, srv.chainRW.GetHeader(t.Context(), bad.Hash(), bad.NumberU64()), "the test needs the bad ancestor removed")
+
+	rejected := forkchoiceV2AndWait(t, srv, head.Hash())
+	require.Equal(t, engine_types.InvalidStatus, rejected.Status)
+	require.Equal(t, block1.Hash(), *rejected.LatestValidHash)
+	require.EqualError(t, rejected.ValidationError.Error(), fmt.Sprintf("ancestor %s rejected: %s", bad.Hash(), badStatus.ValidationError.Error()))
+	require.NotNil(t, srv.chainRW.GetHeader(t.Context(), head.Hash(), head.NumberU64()), "the test needs the rejected block stored")
+	v1, v2 := bodiesServedByHash(t, srv, block1.Hash(), head.Hash())
+	require.Equal(t, []bool{true, false}, v1, "V1")
+	require.Equal(t, []bool{true, false}, v2, "V2")
+
+	require.JSONEq(t, payloadStatusJSON(t, rejected), payloadStatusJSON(t, forkchoiceV2AndWait(t, srv, head.Hash())), "a repeated forkchoice update")
+	require.JSONEq(t, payloadStatusJSON(t, rejected), payloadStatusJSON(t, newPayloadV2(t, srv, head)), "a later newPayload")
+
+	headChildStatus := newPayloadV2(t, srv, headChild)
+	require.Equal(t, engine_types.InvalidStatus, headChildStatus.Status)
+	require.Equal(t, block1.Hash(), *headChildStatus.LatestValidHash)
+	require.EqualError(t, headChildStatus.ValidationError.Error(), fmt.Sprintf("ancestor %s rejected: %s", head.Hash(), rejected.ValidationError.Error()))
 }

@@ -22,10 +22,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"math"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -36,6 +38,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/holiman/uint256"
 	libp2ppeer "github.com/libp2p/go-libp2p/core/peer"
+	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
@@ -43,15 +46,21 @@ import (
 	aggregation_mock "github.com/erigontech/erigon/cl/aggregation/mock_services"
 	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
+	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 	"github.com/erigontech/erigon/cl/beacon/builder"
 	builder_mock "github.com/erigontech/erigon/cl/beacon/builder/mock_services"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
+	sync_mock_services "github.com/erigontech/erigon/cl/beacon/synced_data/mock_services"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/das"
+	peerdasstate "github.com/erigontech/erigon/cl/das/state"
 	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/gossip"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
+	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	blob_storage_mock "github.com/erigontech/erigon/cl/persistence/blob_storage/mock_services"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
@@ -73,12 +82,14 @@ import (
 	sync_pool_mock "github.com/erigontech/erigon/cl/validator/sync_contribution_pool/mock_services"
 	"github.com/erigontech/erigon/cl/validator/validator_params"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	dbversion "github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/chain"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
@@ -88,6 +99,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
+	"github.com/erigontech/erigon/p2p/enode"
 )
 
 var _ serviceinterface.Service[*cltypes.SignedExecutionPayloadBid] = acceptingExecutionPayloadBidService{}
@@ -331,6 +343,7 @@ type installingForkchoice struct {
 	headers      map[common.Hash]*cltypes.BeaconBlockHeader
 	blocks       map[common.Hash]*cltypes.SignedBeaconBlock
 	onBlockCalls int
+	afterOnBlock func()
 }
 
 type conflictAfterValidationForkchoice struct {
@@ -374,6 +387,9 @@ func (f *installingForkchoice) OnBlock(_ context.Context, block *cltypes.SignedB
 	f.headers[root] = block.SignedBeaconBlockHeader().Header.Copy()
 	f.blocks[root] = block
 	f.onBlockCalls++
+	if f.afterOnBlock != nil {
+		f.afterOnBlock()
+	}
 	return nil
 }
 
@@ -2536,10 +2552,20 @@ func TestStoreBlockAndBlobsDoesNotRepeatForkchoiceAfterDatabaseFailure(t *testin
 	}
 	handler.forkchoiceStore = installing
 	handler.indiciesDB = unavailableUpdateDB{RwDB: handler.indiciesDB}
+	handler.emitters = beaconevents.NewEventEmitter()
+	indicesChanged := handler.emitters.BlockIndicesChanged()
 
 	for range 2 {
-		err := handler.storeBlockAndBlobs(t.Context(), block, nil, nil, BlockPublishingValidationGossip)
+		err := handler.storeBlockAndBlobs(t.Context(), block, nil, nil, BlockPublishingValidationGossip, func() {})
 		require.ErrorContains(t, err, "database unavailable")
+		var writeErr *clservices.AcceptedBlockWriteError
+		require.ErrorAs(t, err, &writeErr)
+		require.Same(t, block, writeErr.Block)
+	}
+	select {
+	case <-indicesChanged:
+		t.Fatal("failed writes must not notify index readers")
+	default:
 	}
 	require.Equal(t, 1, installing.onBlockCalls)
 }
@@ -2561,10 +2587,17 @@ func TestStoreBlockAndBlobsToleratesBusyForkchoice(t *testing.T) {
 		Return(nil, execution_client.ErrForkChoiceUpdateBusy)
 	handler.engine = engine
 	handler.attestationProducer = attestation_producer.New(handler.beaconChainCfg)
+	handler.emitters = beaconevents.NewEventEmitter()
+	indicesChanged := handler.emitters.BlockIndicesChanged()
 
-	err = handler.storeBlockAndBlobs(t.Context(), block, nil, nil, BlockPublishingValidationConsensus)
+	err = handler.storeBlockAndBlobs(t.Context(), block, nil, nil, BlockPublishingValidationConsensus, func() {})
 
 	require.NoError(t, err)
+	select {
+	case <-indicesChanged:
+	default:
+		t.Fatal("the committed block indices must notify readers even if fork choice is busy")
+	}
 }
 
 func TestStoreBlockAndBlobsClassifiesKnownRootMismatchAsPermanent(t *testing.T) {
@@ -2577,7 +2610,7 @@ func TestStoreBlockAndBlobsClassifiesKnownRootMismatchAsPermanent(t *testing.T) 
 	incoming := &cltypes.SignedBeaconBlock{Block: stored.Block, Signature: stored.Signature}
 	incoming.Signature[0] ^= 1
 
-	err = handler.storeBlockAndBlobs(t.Context(), incoming, nil, nil, BlockPublishingValidationConsensus)
+	err = handler.storeBlockAndBlobs(t.Context(), incoming, nil, nil, BlockPublishingValidationConsensus, func() {})
 	require.ErrorIs(t, err, forkchoice.ErrBlockInvalid)
 }
 
@@ -2586,7 +2619,7 @@ func TestStoreBlockAndBlobsClassifiesFinalizedHorizonRaceAsPermanent(t *testing.
 	block := blocks[1]
 	fcu.FinalizedSlotVal = block.Block.Slot
 
-	err := handler.storeBlockAndBlobs(t.Context(), block, nil, nil, BlockPublishingValidationConsensus)
+	err := handler.storeBlockAndBlobs(t.Context(), block, nil, nil, BlockPublishingValidationConsensus, func() {})
 	require.ErrorIs(t, err, forkchoice.ErrBlockInvalid)
 }
 
@@ -2601,8 +2634,396 @@ func TestStoreBlockAndBlobsClassifiesKnownEquivocationAsPermanent(t *testing.T) 
 	conflict.Root[0] ^= 1
 	fcu.Headers[common.Hash{0xff}] = conflict
 
-	err = handler.storeBlockAndBlobs(t.Context(), block, nil, nil, BlockPublishingValidationConsensusAndEquivocation)
+	err = handler.storeBlockAndBlobs(t.Context(), block, nil, nil, BlockPublishingValidationConsensusAndEquivocation, func() {})
 	require.ErrorIs(t, err, forkchoice.ErrBlockInvalid)
+}
+
+// publishedColumnsFixture publishes a block with one blob through a handler that imports it into fork
+// choice, stores its columns in a real column store and runs the store job on its own goroutine, so
+// -race sees the store job and column gossip run concurrently.
+type publishedColumnsFixture struct {
+	handler    *ApiHandler
+	forkchoice *installingForkchoice
+	columns    *hookedColumnStorage
+	published  *publishedGossip
+	// Closed by the gossip goroutine. Polling the recorded topics instead would share their mutex with
+	// that goroutine and, through the test goroutine, order the store's writes before later gossip,
+	// which hides a store/gossip race from -race.
+	columnsGossiped chan struct{}
+	jobs            sync.WaitGroup
+	block           *cltypes.SignedBeaconBlock
+	root            common.Hash
+	store           func(context.Context) error
+}
+
+type hookedColumnStorage struct {
+	blob_storage.DataColumnStorage
+	hook func(write func() error) error
+}
+
+func (s *hookedColumnStorage) WriteColumnSidecars(ctx context.Context, blockRoot common.Hash, columnIndex int64, sidecar *cltypes.DataColumnSidecar) error {
+	write := func() error {
+		return s.DataColumnStorage.WriteColumnSidecars(ctx, blockRoot, columnIndex, sidecar)
+	}
+	if s.hook == nil {
+		return write()
+	}
+	return s.hook(write)
+}
+
+type runningPublishedBlockJob struct {
+	done chan struct{}
+	err  error
+}
+
+func (j *runningPublishedBlockJob) Wait(ctx context.Context) error {
+	select {
+	case <-j.done:
+		return j.err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func newPublishedColumnsFixture(t *testing.T, version clparams.StateVersion) *publishedColumnsFixture {
+	t.Helper()
+	if clparams.GetBeaconConfig() == nil {
+		cfg := clparams.MainnetBeaconConfig
+		clparams.InitGlobalStaticConfig(&cfg)
+	}
+	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
+	f := &publishedColumnsFixture{
+		handler:         handler,
+		published:       &publishedGossip{topics: map[string][]byte{}},
+		columnsGossiped: make(chan struct{}),
+	}
+	t.Cleanup(f.jobs.Wait)
+	ctrl := gomock.NewController(t)
+
+	b := newTestBlob(t, 1, clparams.FuluVersion)
+	proofs := make([]common.Bytes48, len(b.proofs))
+	for i := range b.proofs {
+		proofs[i] = common.Bytes48(b.proofs[i])
+	}
+	handler.blobBundles.Add(common.Bytes48(b.commitment), BlobBundle{Commitment: common.Bytes48(b.commitment), Blob: b.blob, KzgProofs: proofs})
+	f.block = cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, version)
+	f.block.Block.Slot = blocks[1].Block.Slot
+	commitment := b.commitment
+	if version >= clparams.GloasVersion {
+		bid := f.block.Block.Body.SignedExecutionPayloadBid.Message
+		bid.BuilderIndex = clparams.BuilderIndexSelfBuild
+		bid.BlobKzgCommitments.Append(&commitment)
+	} else {
+		f.block.Block.Body.BlobKzgCommitments.Append(&commitment)
+	}
+	root, err := f.block.Block.HashSSZ()
+	require.NoError(t, err)
+	f.root = root
+
+	fcu.StateAtBlockRootVal[f.root] = postState
+	fcu.HeadVal = f.root
+	fcu.HeadSlotVal = f.block.Block.Slot
+	fcu.OnTickFn = func(uint64) {}
+	f.forkchoice = &installingForkchoice{
+		ForkChoiceStorage: fcu,
+		headers:           make(map[common.Hash]*cltypes.BeaconBlockHeader),
+		blocks:            make(map[common.Hash]*cltypes.SignedBeaconBlock),
+	}
+	handler.forkchoiceStore = f.forkchoice
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil, nil).AnyTimes()
+	handler.engine = engine
+	handler.attestationProducer = cachedAttestationDataProducer{}
+
+	gossipManager := gossip_mock.NewMockGossip(ctrl)
+	var allColumnsGossiped sync.Once
+	gossipManager.EXPECT().Publish(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, topic string, data []byte) error {
+		if err := f.published.record(ctx, topic, data); err != nil {
+			return err
+		}
+		if f.published.columnCount() == int(handler.beaconChainCfg.NumberOfColumns) {
+			allColumnsGossiped.Do(func() { close(f.columnsGossiped) })
+		}
+		return nil
+	}).AnyTimes()
+	gossipManager.EXPECT().SubscribeWithExpiry(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
+	handler.gossipManager = gossipManager
+	blockService := network_services_mock.NewMockBlockService(ctrl)
+	blockService.EXPECT().ValidateGossip(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
+	blockService.EXPECT().CommitGossipReservation(gomock.Any()).AnyTimes()
+	blockService.EXPECT().ReleaseGossipReservation(gomock.Any()).AnyTimes()
+	blockService.EXPECT().SchedulePublishedBlockForLaterProcessing(gomock.Any(), gomock.Any()).DoAndReturn(
+		func(_ *cltypes.SignedBeaconBlock, store func(context.Context) error) clservices.PublishedBlockJob {
+			f.store = store
+			job := &runningPublishedBlockJob{done: make(chan struct{})}
+			f.jobs.Go(func() {
+				defer close(job.done)
+				job.err = store(context.Background())
+			})
+			return job
+		},
+	).AnyTimes()
+	handler.blockService = blockService
+
+	f.columns = &hookedColumnStorage{DataColumnStorage: blob_storage.NewDataColumnStore(afero.NewMemMapFs(), handler.beaconChainCfg, beaconevents.NewEventEmitter())}
+	handler.columnStorage = f.columns
+	handler.peerDas = f.newPeerDas(t, clparams.CaplinConfig{})
+	return f
+}
+
+func (f *publishedColumnsFixture) newPeerDas(t *testing.T, caplinConfig clparams.CaplinConfig) das.PeerDas {
+	t.Helper()
+	networkConfig := clparams.NetworkConfigs[chainspec.MainnetChainID]
+	state := peerdasstate.NewPeerDasState(f.handler.beaconChainCfg, &networkConfig)
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	nodeDB, err := enode.OpenDB("")
+	require.NoError(t, err)
+	t.Cleanup(nodeDB.Close)
+	localNode := enode.NewLocalNode(nodeDB, key)
+	state.SetLocalNodeID(localNode)
+	return das.NewPeerDas(nil, f.handler.beaconChainCfg, &caplinConfig, f.columns, nil, nil, localNode.ID(), f.handler.ethClock, state, f.handler.gossipManager, nil, f.handler.indiciesDB)
+}
+
+func (f *publishedColumnsFixture) blockIndexed() (bool, error) {
+	var slot *uint64
+	err := f.handler.indiciesDB.View(context.Background(), func(tx kv.Tx) error {
+		var err error
+		slot, err = beacon_indicies.ReadBlockSlotByBlockRoot(tx, f.root)
+		return err
+	})
+	return slot != nil, err
+}
+
+func (f *publishedColumnsFixture) storedColumns(t *testing.T) []uint64 {
+	t.Helper()
+	saved, err := f.columns.GetSavedColumnIndex(t.Context(), f.block.Block.Slot, f.root)
+	require.NoError(t, err)
+	slices.Sort(saved)
+	return saved
+}
+
+func (f *publishedColumnsFixture) custodyColumns(t *testing.T) []uint64 {
+	t.Helper()
+	custody, err := f.handler.peerDas.StateReader().GetMyCustodyColumns()
+	require.NoError(t, err)
+	return slices.Sorted(maps.Keys(custody))
+}
+
+func requireClosed(t *testing.T, ch <-chan struct{}, msg string) {
+	t.Helper()
+	select {
+	case <-ch:
+	case <-time.After(5 * time.Second):
+		t.Fatal(msg)
+	}
+}
+
+func (p *publishedGossip) columnCount() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	columns := 0
+	for topic := range p.topics {
+		if strings.HasPrefix(topic, "data_column_sidecar_") {
+			columns++
+		}
+	}
+	return columns
+}
+
+func TestBroadcastBlockStoresAllColumnsInArchiveMode(t *testing.T) {
+	for _, version := range []clparams.StateVersion{clparams.FuluVersion, clparams.GloasVersion} {
+		t.Run(version.String(), func(t *testing.T) {
+			f := newPublishedColumnsFixture(t, version)
+			f.handler.peerDas = f.newPeerDas(t, clparams.CaplinConfig{ArchiveBlobs: true})
+
+			require.NoError(t, f.handler.broadcastBlock(t.Context(), f.block, BlockPublishingValidationGossip))
+
+			require.Len(t, f.storedColumns(t), int(f.handler.beaconChainCfg.NumberOfColumns))
+		})
+	}
+}
+
+func TestBroadcastBlockWritesColumnsAfterOnBlockAndIndexWrite(t *testing.T) {
+	for _, version := range []clparams.StateVersion{clparams.FuluVersion, clparams.GloasVersion} {
+		t.Run(version.String(), func(t *testing.T) {
+			f := newPublishedColumnsFixture(t, version)
+			var once sync.Once
+			var onBlockCalls int
+			var indexed bool
+			var indexErr error
+			f.columns.hook = func(write func() error) error {
+				once.Do(func() {
+					onBlockCalls = f.forkchoice.onBlockCalls
+					indexed, indexErr = f.blockIndexed()
+				})
+				return write()
+			}
+
+			require.NoError(t, f.handler.broadcastBlock(t.Context(), f.block, BlockPublishingValidationGossip))
+
+			require.NoError(t, indexErr)
+			require.Equal(t, 1, onBlockCalls, "OnBlock must run before the first column write")
+			require.True(t, indexed, "the block index must be written before the first column write")
+		})
+	}
+}
+
+// TestBroadcastGloasBlockHoldsColumnsUntilBlockIsServable proves Gloas column gossip waits for the
+// block to be imported, so a peer that asks for the block of a column can get it, and that a stalled
+// import holds the columns back for at most publishedBlockStoreWaitBeforeColumns.
+func TestBroadcastGloasBlockHoldsColumnsUntilBlockIsServable(t *testing.T) {
+	f := newPublishedColumnsFixture(t, clparams.GloasVersion)
+	importing, release := make(chan struct{}), make(chan struct{})
+	f.forkchoice.afterOnBlock = func() {
+		close(importing)
+		<-release
+	}
+	start := time.Now()
+	done := make(chan error, 1)
+	go func() { done <- f.handler.broadcastBlock(t.Context(), f.block, BlockPublishingValidationGossip) }()
+	defer func() {
+		close(release)
+		require.NoError(t, <-done)
+	}()
+
+	requireClosed(t, importing, "the block was not imported")
+	requireClosed(t, f.columnsGossiped, "the columns were not gossiped")
+	require.GreaterOrEqual(t, time.Since(start), publishedBlockStoreWaitBeforeColumns, "columns must wait for the block import")
+}
+
+func TestBroadcastGloasBlockGossipsColumnsOnceTheStoreJobFails(t *testing.T) {
+	f := newPublishedColumnsFixture(t, clparams.GloasVersion)
+	f.handler.forkchoiceStore = &rejectingOnBlockForkchoice{ForkChoiceStorage: f.forkchoice, err: forkchoice.ErrBlockInvalid}
+	start := time.Now()
+
+	require.ErrorIs(t, f.handler.broadcastBlock(t.Context(), f.block, BlockPublishingValidationGossip), forkchoice.ErrBlockInvalid)
+
+	requireClosed(t, f.columnsGossiped, "the columns were not gossiped")
+	require.Less(t, time.Since(start), publishedBlockStoreWaitBeforeColumns, "a failed store job must release the columns")
+}
+
+func TestBroadcastGloasBlockGossipsColumnsWhileColumnWriteBlocks(t *testing.T) {
+	f := newPublishedColumnsFixture(t, clparams.GloasVersion)
+	blocked, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	f.columns.hook = func(write func() error) error {
+		err := write()
+		once.Do(func() { close(blocked) })
+		<-release
+		return err
+	}
+	done := make(chan error, 1)
+	go func() { done <- f.handler.broadcastBlock(t.Context(), f.block, BlockPublishingValidationGossip) }()
+	defer func() {
+		close(release)
+		require.NoError(t, <-done)
+	}()
+
+	requireClosed(t, blocked, "no column was written")
+	blockedAt := time.Now()
+	requireClosed(t, f.columnsGossiped, "the columns were not gossiped")
+	require.Less(t, time.Since(blockedAt), publishedBlockStoreWaitBeforeColumns/2, "column gossip must not wait for the column writes")
+}
+
+func TestBroadcastBlockColumnWriteFailureKeepsImportedBlockAndRetries(t *testing.T) {
+	for _, version := range []clparams.StateVersion{clparams.FuluVersion, clparams.GloasVersion} {
+		t.Run(version.String(), func(t *testing.T) {
+			f := newPublishedColumnsFixture(t, version)
+			var failing atomic.Bool
+			failing.Store(true)
+			f.columns.hook = func(write func() error) error {
+				if failing.Load() {
+					return errors.New("disk full")
+				}
+				return write()
+			}
+
+			var writeErr *clservices.AcceptedBlockWriteError
+			require.ErrorAs(t, f.handler.broadcastBlock(t.Context(), f.block, BlockPublishingValidationGossip), &writeErr,
+				"the columns of an accepted block must be retried past the job expiry")
+
+			indexed, err := f.blockIndexed()
+			require.NoError(t, err)
+			require.True(t, indexed, "a block accepted by fork choice must be persisted although its columns failed")
+
+			failing.Store(false)
+			require.NoError(t, f.store(t.Context()), "the block service retries the same store job")
+			require.Equal(t, 1, f.forkchoice.onBlockCalls, "the retry must not import the block again")
+			require.Equal(t, f.custodyColumns(t), f.storedColumns(t))
+		})
+	}
+}
+
+// TestBroadcastBlockStoresCustodyRaisedByItsOwnImport proves the columns are chosen after OnBlock,
+// which may raise the custody group count.
+func TestBroadcastBlockStoresCustodyRaisedByItsOwnImport(t *testing.T) {
+	const raisedCgc = 16
+	for _, version := range []clparams.StateVersion{clparams.FuluVersion, clparams.GloasVersion} {
+		t.Run(version.String(), func(t *testing.T) {
+			f := newPublishedColumnsFixture(t, version)
+			before := f.custodyColumns(t)
+			f.forkchoice.afterOnBlock = func() { f.handler.peerDas.UpdateValidatorsCustody(raisedCgc) }
+
+			require.NoError(t, f.handler.broadcastBlock(t.Context(), f.block, BlockPublishingValidationGossip))
+
+			raised := f.custodyColumns(t)
+			require.Len(t, raised, raisedCgc)
+			require.Less(t, len(before), len(raised))
+			require.Equal(t, raised, f.storedColumns(t))
+			require.Equal(t, int(f.handler.beaconChainCfg.NumberOfColumns), f.published.columnCount(), "every column is gossiped")
+		})
+	}
+}
+
+// TestPostGloasBlockWithoutIntegrationWaitLetsStatefulEnvelopePassDA covers the v1 block POST, which
+// skips the integration wait: a stateful envelope POST that follows must find the custody columns.
+func TestPostGloasBlockWithoutIntegrationWaitLetsStatefulEnvelopePassDA(t *testing.T) {
+	f := newPublishedColumnsFixture(t, clparams.GloasVersion)
+	release := make(chan struct{})
+	releaseWrites := sync.OnceFunc(func() { close(release) })
+	t.Cleanup(releaseWrites)
+	f.columns.hook = func(write func() error) error {
+		<-release
+		return write()
+	}
+	f.forkchoice.ForkChoiceStorage.(*forkchoice_mock.ForkChoiceStorageMock).OnExecutionPayloadFn = func(_ context.Context, envelope *cltypes.SignedExecutionPayloadEnvelope, _, _ bool) error {
+		available, err := f.handler.peerDas.IsDataAvailable(f.block.Block.Slot, envelope.Message.BeaconBlockRoot)
+		if err != nil {
+			return err
+		}
+		if !available {
+			return forkchoice.ErrEIP7594ColumnDataNotAvailable
+		}
+		return nil
+	}
+
+	done := make(chan error, 1)
+	f.jobs.Go(func() {
+		done <- f.handler.broadcastBlockWithIntegrationWait(t.Context(), f.block, BlockPublishingValidationGossip, false)
+	})
+	requireClosed(t, f.columnsGossiped, "the columns were not gossiped")
+	select {
+	case <-done:
+		t.Fatal("the response must not overtake the column writes")
+	case <-time.After(100 * time.Millisecond):
+	}
+	releaseWrites()
+	require.NoError(t, <-done)
+
+	envelope := validTestSignedExecutionPayloadEnvelope(f.handler.beaconChainCfg)
+	envelope.Message.BeaconBlockRoot = f.root
+	envelope.Message.BuilderIndex = clparams.BuilderIndexSelfBuild
+	body, err := json.Marshal(envelope)
+	require.NoError(t, err)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", bytes.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
+	request.Header.Set("Eth-Blob-Data-Included", "false")
+	recorder := httptest.NewRecorder()
+	f.handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
 }
 
 func TestBroadcastBlockExactReplayCompletesMissingDataSidecars(t *testing.T) {
@@ -3099,6 +3520,100 @@ func TestPollAssembledPayloadStopsOnUnknownPayload(t *testing.T) {
 	}
 }
 
+func TestPollAssembledPayloadKeepsMostActionableFailure(t *testing.T) {
+	busy := fmt.Errorf("get payload: %w", chainreader.ErrExecutionBusy)
+	failure := errors.New("payload finalization failed")
+	laterFailure := errors.New("later payload failure")
+	for _, tc := range []struct {
+		name         string
+		responses    []error
+		want         error
+		wantLogLevel string
+	}{
+		{
+			name:         "busy before unknown payload",
+			responses:    []error{busy, &engine_helpers.UnknownPayloadErr},
+			want:         &engine_helpers.UnknownPayloadErr,
+			wantLogLevel: "lvl=warn",
+		},
+		{
+			name:         "builder failure after busy",
+			responses:    []error{busy, failure, chainreader.ErrUnknownPayload},
+			want:         failure,
+			wantLogLevel: "lvl=eror",
+		},
+		{
+			name:         "first builder failure on equal priority",
+			responses:    []error{failure, laterFailure, chainreader.ErrUnknownPayload},
+			want:         failure,
+			wantLogLevel: "lvl=eror",
+		},
+		{
+			name:         "builder cancellation after busy",
+			responses:    []error{busy, context.Canceled, chainreader.ErrUnknownPayload},
+			want:         context.Canceled,
+			wantLogLevel: "lvl=eror",
+		},
+		{
+			name:         "builder cancellation before unknown payload",
+			responses:    []error{context.Canceled, &engine_helpers.UnknownPayloadErr},
+			want:         context.Canceled,
+			wantLogLevel: "lvl=eror",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			logs := captureProductionLogs(t)
+			now := time.Now()
+			window := blockBuilderWindow{firstGetAt: now, pollUntil: now.Add(time.Second)}
+			calls := 0
+
+			payload, _, _, _, err := pollAssembledPayload(t.Context(), window, time.Millisecond,
+				func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+					err := tc.responses[calls]
+					calls++
+					return nil, nil, nil, nil, err
+				})
+
+			require.ErrorIs(t, err, tc.want)
+			require.NotErrorIs(t, err, chainreader.ErrExecutionBusy)
+			require.NotErrorIs(t, err, laterFailure)
+			if errors.Is(tc.want, context.Canceled) {
+				require.ErrorContains(t, err, "canceled while request remained active")
+			}
+			require.Equal(t, execution_client.IsUnknownPayloadError(tc.want), execution_client.IsUnknownPayloadError(err))
+			require.ErrorContains(t, err, fmt.Sprintf("%d attempts, %d failed", len(tc.responses), len(tc.responses)))
+			require.Nil(t, payload)
+			require.Equal(t, len(tc.responses), calls)
+
+			reportProductionFailure(err, 123)
+			captured := logs()
+			require.Equal(t, 1, strings.Count(captured, "BlockProduction:"), "records:\n"+captured)
+			require.Contains(t, captured, tc.wantLogLevel)
+		})
+	}
+}
+
+func TestProductionReportsBuilderCancellationAfterPollDeadline(t *testing.T) {
+	logs := captureProductionLogs(t)
+	past := time.Now().Add(-time.Second)
+	window := blockBuilderWindow{firstGetAt: past, pollUntil: past}
+	calls := 0
+
+	_, _, _, _, err := pollAssembledPayload(t.Context(), window, time.Millisecond,
+		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+			calls++
+			return nil, nil, nil, nil, context.Canceled
+		})
+
+	require.ErrorIs(t, err, context.Canceled)
+	require.Equal(t, 1, calls)
+	reportProductionFailure(err, 123)
+
+	captured := logs()
+	require.Contains(t, captured, "lvl=eror")
+	require.Contains(t, captured, "no payload after 1 attempt, 1 failed: canceled while request remained active")
+}
+
 func TestPollAssembledPayloadStopsOnInvalidResponse(t *testing.T) {
 	now := time.Now()
 	window := blockBuilderWindow{firstGetAt: now, pollUntil: now.Add(50 * time.Millisecond)}
@@ -3118,7 +3633,7 @@ func TestPollAssembledPayloadStopsOnInvalidResponse(t *testing.T) {
 func TestProductionReportsUnknownPayloadOnce(t *testing.T) {
 	logs := captureProductionLogs(t)
 
-	err := produceBlockWithFailingCollection(t, t.Context(), &engine_helpers.UnknownPayloadErr)
+	err := produceBlockWithFailingCollection(t, t.Context(), &engine_helpers.UnknownPayloadErr, nil)
 	require.Error(t, err)
 
 	captured := logs()
@@ -3820,6 +4335,7 @@ func TestGetEthV3ValidatorBlockKeepsSelfBuildEnvelopeByBlockRoot(t *testing.T) {
 	fixture := newGloasBidSelectionFixture(t, gloasBidSelectionOptions{slotOffset: 1})
 	_, _, _, _, _, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 	handler.beaconChainCfg = fixture.block.Cfg
+	startBuilderHandoffWindow(handler, fixture.block.Slot)
 	forkEpoch := state.Epoch(fixture.productionState)
 	handler.beaconChainCfg.AltairForkEpoch = forkEpoch
 	handler.beaconChainCfg.BellatrixForkEpoch = forkEpoch
@@ -3933,6 +4449,7 @@ func produceAcrossAHeadChange(t *testing.T, publish, cancel bool) (*beaconhttp.B
 	handler.beaconChainCfg.FuluForkEpoch = forkEpoch
 	handler.beaconChainCfg.GloasForkEpoch = forkEpoch
 	handler.beaconChainCfg.InitializeForkSchedule()
+	startBuilderHandoffWindow(handler, fixture.block.Slot)
 	sinceCutoff := proposalWaitCutoff(time.Unix(0, 0), handler.beaconChainCfg, clparams.GloasVersion).Sub(time.Unix(0, 0))
 	handler.ethClock = slotTimeClock{EthereumClock: handler.ethClock, slotStart: time.Now().Add(time.Second - sinceCutoff)}
 
@@ -4956,8 +5473,8 @@ func TestPollAssembledPayloadReportsAWindowThatNeverProducedOnce(t *testing.T) {
 
 	require.NotZero(t, calls)
 
-	// The reason goes to the caller, which knows the slot and owns the record, carrying the first
-	// failure - the one that says what went wrong - and how many there were.
+	// The returned error carries the highest-priority failure and poll counts.
+	// Logging belongs to the caller.
 	require.ErrorIs(t, err, boom)
 	require.Contains(t, err.Error(), "attempt")
 	require.Empty(t, logs(), "the poll does not report; its caller does")
@@ -4974,31 +5491,54 @@ func TestPollAssembledPayloadStaysQuietWhenTheCallerGoesAway(t *testing.T) {
 			return nil, nil, nil, nil, context.Canceled
 		})
 
-	// A validator client that times out, or a node shutting down, takes the slot with it. Nothing
-	// failed that anyone can act on.
+	// Caller cancellation alone is not a production failure.
 	require.Error(t, err)
 	require.NotContains(t, logs(), "lvl=eror")
 }
 
 func TestPollAssembledPayloadStillReportsFailuresThatPrecededTheCancellation(t *testing.T) {
-	ctx, cancel := context.WithCancel(t.Context())
-	window := blockBuilderWindow{firstGetAt: time.Now(), pollUntil: time.Now().Add(time.Minute)}
+	for _, tc := range []struct {
+		name string
+		err  error
+	}{
+		{name: "builder failure", err: errors.New("boom")},
+		{name: "builder cancellation", err: context.Canceled},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			logs := captureProductionLogs(t)
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			window := blockBuilderWindow{firstGetAt: time.Now(), pollUntil: time.Now().Add(time.Second)}
 
-	calls := 0
-	_, _, _, _, err := pollAssembledPayload(ctx, window, time.Millisecond,
-		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
-			calls++
-			if calls == 1 {
-				return nil, nil, nil, nil, errors.New("boom")
+			calls := 0
+			_, _, _, _, err := pollAssembledPayload(ctx, window, time.Millisecond,
+				func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+					calls++
+					if calls == 1 {
+						return nil, nil, nil, nil, tc.err
+					}
+					cancel()
+					return nil, nil, nil, nil, context.Canceled
+				})
+
+			// The caller may cancel because production is already failing. Reporting only the
+			// cancellation would hide the earlier failure.
+			require.ErrorIs(t, ctx.Err(), context.Canceled)
+			require.Equal(t, 2, calls)
+			require.ErrorIs(t, err, tc.err)
+			if errors.Is(tc.err, context.Canceled) {
+				require.ErrorIs(t, err, errProductionOperationCanceled)
+			} else {
+				require.NotErrorIs(t, err, context.Canceled)
 			}
-			cancel()
-			return nil, nil, nil, nil, context.Canceled
-		})
+			require.ErrorContains(t, err, "2 attempts, 1 failed")
+			reportProductionFailure(err, 123)
 
-	// The client may well have given up because production was failing. Reporting only the
-	// cancellation would lose the only sign of it.
-	require.NotErrorIs(t, err, context.Canceled)
-	require.Contains(t, err.Error(), "boom")
+			captured := logs()
+			require.Equal(t, 1, strings.Count(captured, "lvl=eror"), "records:\n"+captured)
+			require.Contains(t, captured, err.Error())
+		})
+	}
 }
 
 func TestFeeRecipientForProposalUsesGenesisPreferences(t *testing.T) {
@@ -5079,9 +5619,9 @@ func TestFeeRecipientForProposalIgnoresUnrelatedPreferences(t *testing.T) {
 	}
 }
 
-func TestFeeRecipientWarnsOncePerProposer(t *testing.T) {
+func TestFeeRecipientDeduplicatesWarningsWhileCached(t *testing.T) {
 	logs := captureProductionLogs(t)
-	warned, err := lru.New[uint64, struct{}]("unregisteredProposers", 8)
+	warned, err := lru.New[uint64, struct{}]("unregisteredProposers", 2)
 	require.NoError(t, err)
 	params := validator_params.NewValidatorParams()
 	a := &ApiHandler{validatorParams: params, unregisteredProposers: warned}
@@ -5091,8 +5631,7 @@ func TestFeeRecipientWarnsOncePerProposer(t *testing.T) {
 	require.Equal(t, registered, a.feeRecipientForProposal(nil, 1, 7, clparams.FuluVersion))
 	require.NotContains(t, logs(), "lvl=warn", "a registered proposer must stay quiet")
 
-	// Giving the fees away is worth saying, but only once: a chain whose validator never registers
-	// one would otherwise warn on every proposal.
+	// Repeated requests for a proposer share one warning while its entry remains cached.
 	require.Equal(t, common.Address{}, a.feeRecipientForProposal(nil, 2, 9, clparams.FuluVersion))
 	require.Equal(t, common.Address{}, a.feeRecipientForProposal(nil, 3, 9, clparams.FuluVersion))
 	require.Equal(t, 1, strings.Count(logs(), "lvl=warn"))
@@ -5100,12 +5639,17 @@ func TestFeeRecipientWarnsOncePerProposer(t *testing.T) {
 	require.Equal(t, common.Address{}, a.feeRecipientForProposal(nil, 4, 10, clparams.FuluVersion))
 	require.Equal(t, 2, strings.Count(logs(), "lvl=warn"), "a different proposer is worth saying again")
 
-	// Alternating proposers must not each reset the other: 9 has already been reported.
+	// Another proposer must not reset a cached warning while capacity remains.
 	require.Equal(t, common.Address{}, a.feeRecipientForProposal(nil, 5, 9, clparams.FuluVersion))
 	require.Equal(t, 2, strings.Count(logs(), "lvl=warn"))
+
+	// Once capacity evicts an entry, that proposer can produce another useful warning.
+	require.Equal(t, common.Address{}, a.feeRecipientForProposal(nil, 6, 11, clparams.FuluVersion))
+	require.Equal(t, common.Address{}, a.feeRecipientForProposal(nil, 7, 9, clparams.FuluVersion))
+	require.Equal(t, 4, strings.Count(logs(), "lvl=warn"))
 }
 
-func TestFeeRecipientWarnsOncePerProposerUnderConcurrentRequests(t *testing.T) {
+func TestFeeRecipientDeduplicatesConcurrentWarnings(t *testing.T) {
 	logs := captureProductionLogs(t)
 	warned, err := lru.New[uint64, struct{}]("unregisteredProposers", 8)
 	require.NoError(t, err)
@@ -5133,8 +5677,6 @@ func TestPollAssembledPayloadDoesNotCollectAfterTheCallerHasGone(t *testing.T) {
 	_, _, _, _, err := pollAssembledPayload(ctx, window, time.Microsecond,
 		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 			calls++
-			// The execution module takes its semaphore before it looks at a context, so a request
-			// made after the caller has gone comes back as contention rather than cancellation.
 			return nil, nil, nil, nil, errors.New("execution module is busy")
 		})
 
@@ -5143,10 +5685,9 @@ func TestPollAssembledPayloadDoesNotCollectAfterTheCallerHasGone(t *testing.T) {
 	require.NotContains(t, logs(), "lvl=eror")
 }
 
-// produceBlockWithFailingCollection drives a real production through to the payload collection and
-// makes that collection fail the given way, so the records the whole request emits are observable
-// rather than only those of the polling loop.
-func produceBlockWithFailingCollection(t *testing.T, ctx context.Context, collect error) error {
+// produceBlockWithFailingCollection exercises the production error boundary with controlled
+// execution-payload and sync-aggregate failures.
+func produceBlockWithFailingCollection(t *testing.T, ctx context.Context, collect, syncFailure error) error {
 	t.Helper()
 	ctrl := gomock.NewController(t)
 	_, _, _, _, postState, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
@@ -5158,6 +5699,12 @@ func produceBlockWithFailingCollection(t *testing.T, ctx context.Context, collec
 		Return(nil, nil, nil, nil, collect).AnyTimes()
 	engine.EXPECT().SupportInsertion().Return(true).AnyTimes()
 	handler.engine = engine
+	if syncFailure != nil {
+		syncPool := sync_pool_mock.NewMockSyncContributionPool(ctrl)
+		syncPool.EXPECT().GetSyncAggregate(gomock.Any(), gomock.Any()).
+			Return(nil, syncFailure).AnyTimes()
+		handler.syncMessagePool = syncPool
+	}
 
 	_, err := handler.produceBlock(ctx, 1, postState.Slot(), common.Hash{0x41}, postState,
 		postState.Slot()+1, common.Bytes96{}, common.Hash{})
@@ -5168,7 +5715,7 @@ func TestProductionReportsAFailedCollectionExactlyOnce(t *testing.T) {
 	ctx := t.Context()
 	logs := captureProductionLogs(t)
 
-	err := produceBlockWithFailingCollection(t, ctx, errors.New("boom"))
+	err := produceBlockWithFailingCollection(t, ctx, errors.New("boom"), nil)
 	require.Error(t, err)
 
 	// One record for the whole request, and it carries the cause: the generic failure the caller
@@ -5178,9 +5725,8 @@ func TestProductionReportsAFailedCollectionExactlyOnce(t *testing.T) {
 	require.Contains(t, captured, "boom")
 }
 
-func TestProductionReportsMissingPayloadIDExactlyOnce(t *testing.T) {
-	ctx := t.Context()
-	logs := captureProductionLogs(t)
+func produceBlockWithForkChoiceResult(t *testing.T, ctx context.Context, forkChoiceErr error) error {
+	t.Helper()
 	ctrl := gomock.NewController(t)
 	_, _, _, _, postState, handler, _, _, _, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
 	targetSlot := postState.Slot() + 1
@@ -5190,12 +5736,57 @@ func TestProductionReportsMissingPayloadIDExactlyOnce(t *testing.T) {
 
 	engine := execution_client.NewMockExecutionEngine(ctrl)
 	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
-		Return(nil, nil).AnyTimes()
+		Return(nil, forkChoiceErr)
 	engine.EXPECT().SupportInsertion().Return(true).AnyTimes()
 	handler.engine = engine
 
 	_, err = handler.produceBlock(ctx, 1, postState.Slot(), common.Hash{0x41}, postState,
 		targetSlot, common.Bytes96{}, common.Hash{})
+	return err
+}
+
+func TestProductionReportsForkChoiceCancellationWhileRequestRemainsActive(t *testing.T) {
+	logs := captureProductionLogs(t)
+	err := produceBlockWithForkChoiceResult(t, t.Context(), context.Canceled)
+	require.ErrorIs(t, err, context.Canceled)
+
+	captured := logs()
+	require.Equal(t, 1, strings.Count(captured, "lvl=eror"), "records:\n"+captured)
+	require.Contains(t, captured, "forkchoice update: canceled while request remained active")
+}
+
+func TestProductionReportsForkChoiceCallerCancellationAtDebug(t *testing.T) {
+	logs := captureAllProductionLogs(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	err := produceBlockWithForkChoiceResult(t, ctx, context.Canceled)
+	require.ErrorIs(t, err, context.Canceled)
+	require.NotErrorIs(t, err, errProductionOperationCanceled)
+	require.ErrorContains(t, err, "forkchoice update: context canceled")
+
+	captured := logs()
+	require.Equal(t, 1, strings.Count(captured, "BlockProduction: abandoned by its caller"), "records:\n"+captured)
+	require.Contains(t, captured, `lvl=dbug msg="BlockProduction: abandoned by its caller"`)
+	require.NotContains(t, captured, "lvl=eror")
+	require.NotContains(t, captured, "lvl=warn")
+	require.NotContains(t, captured, "canceled while request remained active")
+}
+
+func TestProductionReportsForkChoiceFailureWithOperation(t *testing.T) {
+	logs := captureProductionLogs(t)
+	err := produceBlockWithForkChoiceResult(t, t.Context(), chainreader.ErrExecutionBusy)
+	require.ErrorIs(t, err, chainreader.ErrExecutionBusy)
+	require.ErrorContains(t, err, "forkchoice update: execution module is busy")
+
+	captured := logs()
+	require.Equal(t, 1, strings.Count(captured, "lvl=eror"), "records:\n"+captured)
+	require.Contains(t, captured, "forkchoice update: execution module is busy")
+}
+
+func TestProductionReportsMissingPayloadIDExactlyOnce(t *testing.T) {
+	logs := captureProductionLogs(t)
+	err := produceBlockWithForkChoiceResult(t, t.Context(), nil)
 	require.ErrorContains(t, err, "forkchoice update returned no payload ID")
 
 	captured := logs()
@@ -5205,27 +5796,40 @@ func TestProductionReportsMissingPayloadIDExactlyOnce(t *testing.T) {
 	require.NotContains(t, captured, "failed to produce execution payload")
 }
 
-func TestProductionCollectsTwoFailingBodyStepsWithoutRacing(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	_, _, _, _, postState, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+func TestProductionPrefersExecutionFailureOnEqualPriority(t *testing.T) {
+	logs := captureProductionLogs(t)
+	executionErr := errors.New("boom")
+	syncAggregateErr := errors.New("no aggregate")
+	err := produceBlockWithFailingCollection(t, t.Context(), executionErr, syncAggregateErr)
+	require.ErrorIs(t, err, executionErr)
+	require.NotErrorIs(t, err, syncAggregateErr)
+	require.ErrorContains(t, err, "sync aggregate: no aggregate")
 
-	engine := execution_client.NewMockExecutionEngine(ctrl)
-	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
-		Return([]byte{1, 2, 3, 4, 5, 6, 7, 8}, nil).AnyTimes()
-	engine.EXPECT().GetAssembledBlock(gomock.Any(), gomock.Any(), gomock.Any()).
-		Return(nil, nil, nil, nil, errors.New("boom")).AnyTimes()
-	engine.EXPECT().SupportInsertion().Return(true).AnyTimes()
-	handler.engine = engine
+	captured := logs()
+	require.Equal(t, 1, strings.Count(captured, "lvl=eror"), "records:\n"+captured)
+	require.Contains(t, captured, executionErr.Error())
+	require.Contains(t, captured, syncAggregateErr.Error())
+}
 
-	// The body steps run concurrently, so each needs somewhere of its own to put its failure.
-	syncPool := sync_pool_mock.NewMockSyncContributionPool(ctrl)
-	syncPool.EXPECT().GetSyncAggregate(gomock.Any(), gomock.Any()).
-		Return(nil, errors.New("no aggregate")).AnyTimes()
-	handler.syncMessagePool = syncPool
+func TestProductionReportsActionableConcurrentFailure(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		collectionErr error
+	}{
+		{name: "canceled payload collection", collectionErr: context.Canceled},
+		{name: "unknown execution payload", collectionErr: &engine_helpers.UnknownPayloadErr},
+		{name: "busy execution module", collectionErr: fmt.Errorf("get payload: %w", chainreader.ErrExecutionBusy)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			logs := captureProductionLogs(t)
+			err := produceBlockWithFailingCollection(t, t.Context(), tc.collectionErr, errors.New("no aggregate"))
+			require.ErrorContains(t, err, "no aggregate")
 
-	_, err := handler.produceBlock(t.Context(), 1, postState.Slot(), common.Hash{0x41}, postState,
-		postState.Slot()+1, common.Bytes96{}, common.Hash{})
-	require.Error(t, err)
+			captured := logs()
+			require.Equal(t, 1, strings.Count(captured, "lvl=eror"), "records:\n"+captured)
+			require.Contains(t, captured, "no aggregate")
+		})
+	}
 }
 
 func TestProductionSaysNothingWhenTheRequestWasAbandoned(t *testing.T) {
@@ -5233,12 +5837,12 @@ func TestProductionSaysNothingWhenTheRequestWasAbandoned(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
-	err := produceBlockWithFailingCollection(t, ctx, context.Canceled)
+	err := produceBlockWithFailingCollection(t, ctx, context.Canceled, nil)
 	require.Error(t, err)
 
-	// A validator client that disconnects, or a node shutting down, is routine. Nothing about it is
-	// actionable, at any layer. The unregistered fee recipient this fixture also warns about is a
-	// separate matter and not what this measures.
+	// Caller cancellation is logged at Debug. During node shutdown, the API drains
+	// active requests even if the builder has stopped, so builder cancellation can
+	// still log at Error. The fee-recipient warning is unrelated to this check.
 	require.NotContains(t, logs(), "lvl=eror", "records:\n"+logs())
 }
 
@@ -5353,6 +5957,7 @@ func TestProduceBeaconBodyIncludesPTCVotesReceivedDuringPayloadWait(t *testing.T
 type cachedAttestationDataProducer struct {
 	data         solid.AttestationData
 	cached       bool
+	cacheRoot    *common.Hash
 	calls        *int
 	produceCalls *int
 }
@@ -5368,7 +5973,7 @@ func (c *doneObservedContext) Done() <-chan struct{} {
 	return c.Context.Done()
 }
 
-func (p cachedAttestationDataProducer) ProduceAndCacheAttestationData(kv.Tx, *state.CachingBeaconState, common.Hash, uint64) (solid.AttestationData, error) {
+func (p cachedAttestationDataProducer) ProduceAndCacheAttestationData(*state.CachingBeaconState, common.Hash, uint64) (solid.AttestationData, error) {
 	if p.calls != nil {
 		(*p.calls)++
 	}
@@ -5378,11 +5983,14 @@ func (p cachedAttestationDataProducer) ProduceAndCacheAttestationData(kv.Tx, *st
 	return p.data, nil
 }
 
-func (p cachedAttestationDataProducer) CachedAttestationData(uint64) (solid.AttestationData, bool, error) {
+func (p cachedAttestationDataProducer) CachedAttestationData(headRoot common.Hash, _ uint64) (solid.AttestationData, bool) {
+	if p.cacheRoot != nil {
+		*p.cacheRoot = headRoot
+	}
 	if p.calls != nil {
 		(*p.calls)++
 	}
-	return p.data, p.cached, nil
+	return p.data, p.cached
 }
 
 func requestAttestationData(t *testing.T, handler *ApiHandler, ctx context.Context, slot uint64) (int, solid.AttestationData) {
@@ -5449,6 +6057,30 @@ func TestGetEthV1ValidatorAttestationDataHeadLockBusy(t *testing.T) {
 		require.Equal(t, 2, *produceCalls)
 	})
 
+	t.Run("cached fallback does not read state", func(t *testing.T) {
+		handler, fcu, slot, produceCalls := setup(t)
+		var cacheRoot common.Hash
+		handler.attestationProducer = cachedAttestationDataProducer{
+			data:         solid.AttestationData{Slot: slot, BeaconBlockRoot: fallbackRoot},
+			cached:       true,
+			cacheRoot:    &cacheRoot,
+			produceCalls: produceCalls,
+		}
+		syncedData := sync_mock_services.NewMockSyncedData(gomock.NewController(t))
+		syncedData.EXPECT().StateHead().Return(fallbackRoot, slot-1, true).AnyTimes()
+		syncedData.EXPECT().CommitteeCount(gomock.Any()).Return(uint64(1)).AnyTimes()
+		handler.syncedData = syncedData
+		fcu.TryGetHeadNodeFn = func() (forkchoice.ForkChoiceNode, bool) {
+			return forkchoice.ForkChoiceNode{}, false
+		}
+
+		status, data := requestAttestationData(t, handler, t.Context(), slot)
+		require.Equal(t, http.StatusOK, status)
+		require.Equal(t, fallbackRoot, cacheRoot)
+		require.Equal(t, fallbackRoot, data.BeaconBlockRoot)
+		require.Zero(t, *produceCalls)
+	})
+
 	t.Run("uses fork choice when lock becomes free", func(t *testing.T) {
 		handler, fcu, slot, produceCalls := setup(t)
 		handler.attestationDataImportWait = defaultAttestationDataImportWait
@@ -5491,9 +6123,11 @@ func TestGetEthV1ValidatorAttestationDataUsesForkChoiceHead(t *testing.T) {
 		name               string
 		forkChoiceHeadRoot common.Hash
 		headAtSlot         bool
+		headAfterSlot      bool
 	}{
 		{name: "empty slot", forkChoiceHeadRoot: syncedHeadRoot},
 		{name: "head imported but not published, selected head stale, epoch start", forkChoiceHeadRoot: common.HexToHash("0x5678"), headAtSlot: true},
+		{name: "request before unpublished head", forkChoiceHeadRoot: common.HexToHash("0x5678"), headAfterSlot: true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			_, _, _, _, syncedHeadState, handler, _, syncedData, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
@@ -5524,11 +6158,23 @@ func TestGetEthV1ValidatorAttestationDataUsesForkChoiceHead(t *testing.T) {
 			}
 			fcu.HeadVal = tt.forkChoiceHeadRoot
 			fcu.HeadSlotVal = forkChoiceHeadSlot
+			attestationRoot := tt.forkChoiceHeadRoot
+			if tt.headAfterSlot {
+				fcu.HeadSlotVal = attestationSlot + 1
+				attestationRoot = common.HexToHash("0x9abc")
+				fcu.Ancestors = map[uint64]forkchoice.ForkChoiceNode{
+					attestationSlot: {Root: attestationRoot},
+				}
+			}
+			fcu.Headers[fcu.HeadVal] = &cltypes.BeaconBlockHeader{Slot: fcu.HeadSlotVal}
 			var queriedHeadRoot common.Hash
 			var queriedSlot uint64
 			fcu.AttestationDataFn = func(gotHeadRoot common.Hash, gotSlot uint64) (solid.AttestationData, bool) {
 				queriedHeadRoot = gotHeadRoot
 				queriedSlot = gotSlot
+				if gotHeadRoot != attestationRoot {
+					return solid.AttestationData{}, false
+				}
 				return solid.AttestationData{
 					Slot:            gotSlot,
 					BeaconBlockRoot: gotHeadRoot,
@@ -5543,13 +6189,134 @@ func TestGetEthV1ValidatorAttestationDataUsesForkChoiceHead(t *testing.T) {
 			status, data := requestAttestationData(t, handler, t.Context(), attestationSlot)
 			require.Equal(t, http.StatusOK, status)
 			require.Zero(t, calls)
-			require.Equal(t, tt.forkChoiceHeadRoot, queriedHeadRoot)
+			require.Equal(t, attestationRoot, queriedHeadRoot)
 			require.Equal(t, attestationSlot, queriedSlot)
-			require.Equal(t, tt.forkChoiceHeadRoot, data.BeaconBlockRoot)
+			require.Equal(t, attestationRoot, data.BeaconBlockRoot)
 			require.Equal(t, attestationSlot/handler.beaconChainCfg.SlotsPerEpoch, data.Target.Epoch)
-			require.Equal(t, tt.forkChoiceHeadRoot, data.Target.Root)
+			require.Equal(t, attestationRoot, data.Target.Root)
 		})
 	}
+}
+
+func TestGetEthV1ValidatorAttestationDataBoundsAncestorLookup(t *testing.T) {
+	slotsPerEpoch := clparams.MainnetBeaconConfig.SlotsPerEpoch
+	for _, tt := range []struct {
+		name              string
+		headSlot          uint64
+		slot              uint64
+		missingHeader     bool
+		wantAncestorCalls int64
+	}{
+		{name: "before previous epoch", headSlot: 2 * slotsPerEpoch, slot: slotsPerEpoch - 1},
+		{name: "previous epoch start", headSlot: 3*slotsPerEpoch - 1, slot: slotsPerEpoch, wantAncestorCalls: 1},
+		{name: "current epoch", headSlot: 2*slotsPerEpoch + 1, slot: 2 * slotsPerEpoch, wantAncestorCalls: 1},
+		{name: "head slot", headSlot: 2 * slotsPerEpoch, slot: 2 * slotsPerEpoch},
+		{name: "later slot in head epoch", headSlot: 2 * slotsPerEpoch, slot: 2*slotsPerEpoch + 1},
+		{name: "epoch zero", headSlot: 1, slot: 0, wantAncestorCalls: 1},
+		{name: "previous epoch zero", headSlot: slotsPerEpoch, slot: 0, wantAncestorCalls: 1},
+		{name: "epoch after head", headSlot: slotsPerEpoch - 1, slot: slotsPerEpoch},
+		{name: "head header unavailable", headSlot: 2 * slotsPerEpoch, slot: 2*slotsPerEpoch - 1, missingHeader: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			_, _, _, _, headState, handler, _, syncedData, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+			handler.aggregatePool = nil
+			publishedRoot, headRoot, ancestorRoot := common.Hash{1}, common.Hash{2}, common.Hash{3}
+			require.NoError(t, headState.SetSlot(tt.slot))
+			require.NoError(t, syncedData.OnHeadStateWithBlockRoot(headState, publishedRoot))
+			clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
+			clock.EXPECT().GetCurrentSlot().Return(tt.headSlot + 2*slotsPerEpoch).AnyTimes()
+			handler.ethClock = clock
+			fcu.HeadVal, fcu.HeadSlotVal = headRoot, tt.headSlot
+			if !tt.missingHeader {
+				fcu.Headers[headRoot] = &cltypes.BeaconBlockHeader{Slot: tt.headSlot}
+			}
+			data := solid.AttestationData{Slot: tt.slot, BeaconBlockRoot: ancestorRoot}
+			handler.attestationProducer = cachedAttestationDataProducer{data: data, cached: true}
+			fcu.AttestationDataFn = func(root common.Hash, slot uint64) (solid.AttestationData, bool) {
+				require.Equal(t, tt.slot, slot)
+				return data, root == ancestorRoot
+			}
+			fcu.AncestorFn = func(root common.Hash, slot uint64) forkchoice.ForkChoiceNode {
+				require.Equal(t, headRoot, root)
+				require.Equal(t, tt.slot, slot)
+				return forkchoice.ForkChoiceNode{Root: ancestorRoot}
+			}
+
+			status, got := requestAttestationData(t, handler, t.Context(), tt.slot)
+			require.Equal(t, http.StatusOK, status)
+			require.Equal(t, ancestorRoot, got.BeaconBlockRoot)
+			require.Equal(t, tt.wantAncestorCalls, fcu.AncestorCalls.Load())
+		})
+	}
+}
+
+func TestGetEthV1ValidatorAttestationDataCacheHeadChange(t *testing.T) {
+	for _, haveHead := range []bool{true, false} {
+		t.Run(fmt.Sprintf("fork choice head available %t", haveHead), func(t *testing.T) {
+			_, _, _, _, headState, handler, _, syncedData, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+			handler.aggregatePool = nil
+			handler.attestationDataImportWait = 0
+			slot := headState.Slot()
+			oldRoot, newRoot := common.Hash{1}, common.Hash{2}
+			targetSlot := handler.beaconChainCfg.RoundSlotToEpoch(slot)
+			targetRoot := newRoot
+			if targetSlot < slot {
+				var err error
+				targetRoot, err = headState.GetBlockRootAtSlot(targetSlot)
+				require.NoError(t, err)
+			}
+			require.NoError(t, handler.indiciesDB.Update(t.Context(), func(tx kv.RwTx) error {
+				return beacon_indicies.MarkRootCanonical(tx, targetSlot, common.Hash{3})
+			}))
+			producer := attestation_producer.New(handler.beaconChainCfg)
+			handler.attestationProducer = producer
+			_, err := producer.ProduceAndCacheAttestationData(headState, oldRoot, slot)
+			require.NoError(t, err)
+			require.NoError(t, syncedData.OnHeadStateWithBlockRoot(headState, newRoot))
+			clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
+			clock.EXPECT().GetCurrentSlot().Return(slot).AnyTimes()
+			handler.ethClock = clock
+			fcu.TryGetHeadNodeFn = func() (forkchoice.ForkChoiceNode, bool) {
+				return forkchoice.ForkChoiceNode{Root: newRoot}, haveHead
+			}
+			fcu.AttestationDataFn = func(common.Hash, uint64) (solid.AttestationData, bool) {
+				return solid.AttestationData{}, false
+			}
+
+			status, data := requestAttestationData(t, handler, t.Context(), slot)
+			require.Equal(t, http.StatusOK, status)
+			require.Equal(t, newRoot, data.BeaconBlockRoot)
+			require.Equal(t, targetRoot, data.Target.Root)
+		})
+	}
+}
+
+func TestGetEthV1ValidatorAttestationDataRejectsMismatchedHeadState(t *testing.T) {
+	_, _, _, _, headState, handler, _, syncedData, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	handler.aggregatePool = nil
+	slot := headState.Slot()
+	oldRoot, newRoot := common.Hash{1}, common.Hash{2}
+	producer := attestation_producer.New(handler.beaconChainCfg)
+	handler.attestationProducer = producer
+	_, err := producer.ProduceAndCacheAttestationData(headState, oldRoot, slot)
+	require.NoError(t, err)
+	require.NoError(t, syncedData.OnHeadStateWithBlockRoot(headState, oldRoot))
+	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
+	clock.EXPECT().GetCurrentSlot().Return(slot).AnyTimes()
+	handler.ethClock = clock
+	fcu.TryGetHeadNodeFn = func() (forkchoice.ForkChoiceNode, bool) {
+		return forkchoice.ForkChoiceNode{Root: newRoot}, true
+	}
+	fcu.AttestationDataFn = func(common.Hash, uint64) (solid.AttestationData, bool) {
+		return solid.AttestationData{}, false
+	}
+
+	status, _ := requestAttestationData(t, handler, t.Context(), slot)
+	require.Equal(t, http.StatusServiceUnavailable, status)
+	require.NoError(t, syncedData.OnHeadStateWithBlockRoot(headState, newRoot))
+	status, data := requestAttestationData(t, handler, t.Context(), slot)
+	require.Equal(t, http.StatusOK, status)
+	require.Equal(t, newRoot, data.BeaconBlockRoot)
 }
 
 func TestGetEthV1ValidatorAttestationDataWaitsForSlotImport(t *testing.T) {
@@ -5564,14 +6331,13 @@ func TestGetEthV1ValidatorAttestationDataWaitsForSlotImport(t *testing.T) {
 		highestSeenAtSlot bool
 		wantNewHead       bool
 		minWait           time.Duration
-		maxWait           time.Duration
 		wantStatus        int
 	}{
-		{name: "in-flight block finishes", claim: true, finishAfter: 20 * time.Millisecond, wantNewHead: true, minWait: 15 * time.Millisecond, maxWait: 100 * time.Millisecond},
-		{name: "no claim", maxWait: 100 * time.Millisecond},
-		{name: "claim for another slot", claim: true, claimNextSlot: true, maxWait: 100 * time.Millisecond},
-		{name: "block already seen", claim: true, highestSeenAtSlot: true, maxWait: 100 * time.Millisecond},
-		{name: "request canceled", claim: true, cancelAfter: 20 * time.Millisecond, minWait: 15 * time.Millisecond, maxWait: 100 * time.Millisecond, wantStatus: http.StatusInternalServerError},
+		{name: "in-flight block finishes", claim: true, finishAfter: 20 * time.Millisecond, wantNewHead: true, minWait: 15 * time.Millisecond},
+		{name: "no claim"},
+		{name: "claim for another slot", claim: true, claimNextSlot: true},
+		{name: "block already seen", claim: true, highestSeenAtSlot: true},
+		{name: "request canceled", claim: true, cancelAfter: 20 * time.Millisecond, minWait: 15 * time.Millisecond, wantStatus: http.StatusInternalServerError},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			_, _, _, _, headState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
@@ -5580,7 +6346,8 @@ func TestGetEthV1ValidatorAttestationDataWaitsForSlotImport(t *testing.T) {
 			clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
 			clock.EXPECT().GetCurrentSlot().Return(attestationSlot).AnyTimes()
 			handler.ethClock = clock
-			handler.attestationDataImportWait = 60 * time.Millisecond
+			const importWait = time.Second
+			handler.attestationDataImportWait = importWait
 			calls := 0
 			handler.attestationProducer = cachedAttestationDataProducer{calls: &calls}
 
@@ -5644,7 +6411,7 @@ func TestGetEthV1ValidatorAttestationDataWaitsForSlotImport(t *testing.T) {
 			}
 
 			require.GreaterOrEqual(t, elapsed, tt.minWait)
-			require.Less(t, elapsed, tt.maxWait)
+			require.NotEqual(t, attestationSlot+1, handler.attestationDataWaitedSlot.Load(), "the response came from the import-wait cap")
 			require.Zero(t, calls)
 			wantStatus := tt.wantStatus
 			if wantStatus == 0 {
@@ -5767,7 +6534,7 @@ func TestGetEthV1ValidatorAttestationDataGloasPayloadIndex(t *testing.T) {
 		blockSlot  uint64
 		status     cltypes.PayloadStatus
 		verified   bool
-		childHead  bool // the head is a child of the served root, as when attestation data was cached earlier in the slot
+		childHead  bool // the selected head is a child of the attested block
 		cached     bool
 		headErr    bool
 		forkChoice bool
@@ -5789,7 +6556,7 @@ func TestGetEthV1ValidatorAttestationDataGloasPayloadIndex(t *testing.T) {
 		{name: "optimistic FULL head from fork choice", blockSlot: attestationSlot - 2, status: cltypes.PayloadStatusFull, forkChoice: true, wantStatus: http.StatusServiceUnavailable},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+			_, _, _, _, headState, handler, _, syncedData, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 			handler.attestationDataImportWait = 20 * time.Millisecond
 			cfg := handler.beaconChainCfg
 			cfg.AltairForkEpoch, cfg.BellatrixForkEpoch, cfg.CapellaForkEpoch, cfg.DenebForkEpoch, cfg.ElectraForkEpoch, cfg.FuluForkEpoch, cfg.GloasForkEpoch = 0, 0, 0, 0, 0, 0, 0
@@ -5818,6 +6585,7 @@ func TestGetEthV1ValidatorAttestationDataGloasPayloadIndex(t *testing.T) {
 				fcu.HeadPayloadStatusVal = cltypes.PayloadStatusEmpty
 				fcu.Ancestors = map[uint64]forkchoice.ForkChoiceNode{tt.blockSlot: {Root: root, PayloadStatus: tt.status}}
 			}
+			require.NoError(t, syncedData.OnHeadStateWithBlockRoot(headState, fcu.HeadVal))
 			wantErr := "payload of the beacon block root is not verified"
 			if tt.headErr {
 				wantErr = "fork-choice head unavailable"
@@ -5854,10 +6622,10 @@ func TestGetEthV1ValidatorAttestationDataGloasPayloadIndex(t *testing.T) {
 	}
 }
 
-func TestGetEthV1ValidatorAttestationDataGloasFallbackRefreshesHead(t *testing.T) {
+func TestGetEthV1ValidatorAttestationDataGloasFallbackKeepsRequestHead(t *testing.T) {
 	const attestationSlot = uint64(10)
 	root := common.HexToHash("0xabcd")
-	oldHeadRoot := common.HexToHash("0x1111")
+	childRoot := common.HexToHash("0x1111")
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 	handler.aggregatePool = nil
 	cfg := handler.beaconChainCfg
@@ -5872,8 +6640,9 @@ func TestGetEthV1ValidatorAttestationDataGloasFallbackRefreshesHead(t *testing.T
 	}
 	fcu.Headers[root] = &cltypes.BeaconBlockHeader{Slot: attestationSlot - 1}
 	fcu.VerifiedPayloads = map[common.Hash]bool{root: true}
-	fcu.HeadVal = root
-	fcu.HeadPayloadStatusVal = cltypes.PayloadStatusFull
+	fcu.Ancestors = map[uint64]forkchoice.ForkChoiceNode{
+		attestationSlot - 1: {Root: root, PayloadStatus: cltypes.PayloadStatusEmpty},
+	}
 	fcu.AttestationDataFn = func(common.Hash, uint64) (solid.AttestationData, bool) {
 		return solid.AttestationData{}, false
 	}
@@ -5881,16 +6650,17 @@ func TestGetEthV1ValidatorAttestationDataGloasFallbackRefreshesHead(t *testing.T
 	fcu.TryGetHeadNodeFn = func() (forkchoice.ForkChoiceNode, bool) {
 		tryHeadCalls++
 		if tryHeadCalls == 1 {
-			return forkchoice.ForkChoiceNode{Root: oldHeadRoot}, true
+			return forkchoice.ForkChoiceNode{Root: root, PayloadStatus: cltypes.PayloadStatusFull}, true
 		}
-		return forkchoice.ForkChoiceNode{Root: fcu.HeadVal, PayloadStatus: fcu.HeadPayloadStatusVal}, true
+		return forkchoice.ForkChoiceNode{Root: childRoot, PayloadStatus: cltypes.PayloadStatusEmpty}, true
 	}
 
 	status, data := requestAttestationData(t, handler, t.Context(), attestationSlot)
 
 	require.Equal(t, http.StatusOK, status)
+	require.Equal(t, root, data.BeaconBlockRoot)
 	require.Equal(t, uint64(1), data.CommitteeIndex)
-	require.Equal(t, 2, tryHeadCalls)
+	require.Equal(t, 1, tryHeadCalls)
 }
 
 func TestGetEthV1ValidatorAttestationDataGloasHeadReadDoesNotBlock(t *testing.T) {
@@ -6044,4 +6814,32 @@ func TestGetEthV1ValidatorAttestationDataPinsOnlyFromElectra(t *testing.T) {
 			require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
 		})
 	}
+}
+
+// A requested slot far ahead must be rejected before the head state is advanced slot by slot to it.
+func TestGetEthV3ValidatorBlockRejectsFarFutureSlot(t *testing.T) {
+	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
+	clock.EXPECT().GetCurrentSlot().Return(uint64(100)).AnyTimes()
+	handler := &ApiHandler{ethClock: clock}
+
+	slot := fmt.Sprint(uint64(math.MaxUint64))
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet,
+		"/eth/v3/validator/blocks/"+slot+"?randao_reveal="+(common.Bytes96{}).String(), http.NoBody)
+	routeContext := chi.NewRouteContext()
+	routeContext.URLParams.Add("slot", slot)
+	request = request.WithContext(context.WithValue(request.Context(), chi.RouteCtxKey, routeContext))
+
+	_, err := handler.GetEthV3ValidatorBlock(httptest.NewRecorder(), request)
+	var endpointErr *beaconhttp.EndpointError
+	require.ErrorAs(t, err, &endpointErr)
+	require.Equal(t, http.StatusBadRequest, endpointErr.Code)
+}
+
+func TestCheckBlockProductionSlot(t *testing.T) {
+	const current = 100
+	require.NoError(t, checkBlockProductionSlot(current-1, current), "a past slot keeps today's behaviour")
+	require.NoError(t, checkBlockProductionSlot(current, current))
+	require.NoError(t, checkBlockProductionSlot(current+1, current), "a validator may ask for the next slot")
+	require.Error(t, checkBlockProductionSlot(current+2, current))
+	require.Error(t, checkBlockProductionSlot(math.MaxUint64, current))
 }

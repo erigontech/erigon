@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
@@ -81,12 +82,23 @@ func (cc *ExecutionClientDirect) NewPayload(
 	}
 
 	body := payload.Body()
-	txs, err := types.DecodeTransactions(body.Transactions)
+	txs, err := DecodePayloadTransactions(payload)
 	if err != nil {
 		// invalid block
 		return PayloadStatusInvalidated, err
 	}
 
+	if payload.Version() >= clparams.DenebVersion {
+		cfg := cc.chainRW.Config()
+		if err := misc.ValidateBlobs(payload.BlobGasUsed, cfg.GetMaxBlobGasPerBlock(payload.Time), cfg.GetMaxBlobsPerBlock(payload.Time), versionedHashes, &txs); err != nil {
+			if errors.Is(err, misc.ErrNilBlobHashes) {
+				return PayloadStatusNone, err
+			}
+			return PayloadStatusInvalidated, err
+		}
+	}
+
+	cc.chainRW.StartSendersRecovery(ctx, payload.BlockHash, header, txs)
 	startInsertBlock := time.Now()
 	if err := cc.chainRW.InsertBlock(ctx, types.NewBlockFromStorageWithBinaryTxs(payload.BlockHash, header, txs, body.Transactions, nil, body.Withdrawals, bal)); err != nil {
 		if errors.Is(err, types.ErrBlockExceedsMaxRlpSize) {
@@ -111,7 +123,7 @@ func (cc *ExecutionClientDirect) NewPayload(
 	}
 
 	startValidateChain := time.Now()
-	status, _, _, err := cc.chainRW.ValidateChain(ctx, payload.BlockHash, payload.BlockNumber)
+	status, _, lvh, err := cc.chainRW.ValidateChain(ctx, payload.BlockHash, payload.BlockNumber)
 	if err != nil {
 		return PayloadStatusNone, err
 	}
@@ -119,7 +131,11 @@ func (cc *ExecutionClientDirect) NewPayload(
 	// check status
 	switch status {
 	case execmodule.ExecutionStatusBadBlock, execmodule.ExecutionStatusInvalidForkchoice:
-		return PayloadStatusInvalidated, errors.New("bad block")
+		err := errors.New("bad block")
+		if status == execmodule.ExecutionStatusBadBlock && lvh != (common.Hash{}) {
+			return PayloadStatusInvalidated, &InvalidPayloadError{LatestValidHash: lvh, Err: err}
+		}
+		return PayloadStatusInvalidated, err
 	case execmodule.ExecutionStatusBusy, execmodule.ExecutionStatusMissingSegment, execmodule.ExecutionStatusTooFarAway:
 		return PayloadStatusNotValidated, nil
 	case execmodule.ExecutionStatusSuccess:
@@ -258,6 +274,10 @@ func (cc *ExecutionClientDirect) CurrentHeader(ctx context.Context) (*types.Head
 	return cc.chainRW.CurrentHeader(ctx), nil
 }
 
+func (cc *ExecutionClientDirect) GetHeaderByHash(ctx context.Context, hash common.Hash) (*types.Header, error) {
+	return cc.chainRW.HeaderByHash(ctx, hash)
+}
+
 func (cc *ExecutionClientDirect) IsCanonicalHash(ctx context.Context, hash common.Hash) (bool, error) {
 	return cc.chainRW.IsCanonicalHash(ctx, hash)
 }
@@ -274,6 +294,10 @@ func (cc *ExecutionClientDirect) GetBodiesByRange(ctx context.Context, start, co
 // GetBodiesByHashes gets block bodies with given hashes
 func (cc *ExecutionClientDirect) GetBodiesByHashes(ctx context.Context, hashes []common.Hash) ([]*types.RawBody, error) {
 	return cc.chainRW.GetBodiesByHashes(ctx, hashes)
+}
+
+func (cc *ExecutionClientDirect) GetPayloadBodiesByHash(ctx context.Context, hashes []common.Hash) ([]*engine_types.ExecutionPayloadBodyV2, error) {
+	return cc.chainRW.GetPayloadBodiesByHash(ctx, hashes)
 }
 
 func (cc *ExecutionClientDirect) FrozenBlocks(ctx context.Context) uint64 {

@@ -16,6 +16,7 @@ import (
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -23,6 +24,8 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol"
@@ -1295,4 +1298,511 @@ func TestSimulatedBlockUnmarshalKeepsOverrides(t *testing.T) {
 	require.NotNil(t, account.Balance)
 	assert.Equal(t, uint64(1), (*account.Balance).ToInt().Uint64())
 	require.Len(t, b.Calls, 1)
+}
+
+// A simulation on a historical base must not store head-state fields for an account it
+// changes only partly: the next simulated block reads the account back from the overlay.
+func TestSimulateV1HistoricalBasePartialAccountWriteKeepsNonce(t *testing.T) {
+	bankKey, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	require.NoError(t, err)
+	aliceKey, err := crypto.HexToECDSA("8a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
+	require.NoError(t, err)
+	bank, alice := crypto.PubkeyToAddress(bankKey.PublicKey), crypto.PubkeyToAddress(aliceKey.PublicKey)
+	funds, _ := new(big.Int).SetString("100000000000000000000", 10)
+	gspec := &types.Genesis{Config: chain.TestChainOsakaConfig.Copy(), Alloc: types.GenesisAlloc{bank: {Balance: funds}, alice: {Balance: funds}}}
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(bankKey))
+	signer := types.LatestSignerForChainID(m.ChainConfig.ChainID)
+	sink := common.HexToAddress("0x00000000000000000000000000000000c0ffee01")
+	cp, err := m.GenerateChain(3, func(i int, b *blockgen.BlockGen) {
+		txn, err := types.SignTx(&types.DynamicFeeTransaction{
+			CommonTx: types.CommonTx{Nonce: b.TxNonce(alice), To: &sink, Value: *uint256.NewInt(7), GasLimit: 21_000},
+			ChainID:  *uint256.MustFromBig(m.ChainConfig.ChainID.ToBig()),
+			FeeCap:   *uint256.NewInt(1_000_000_000_000),
+		}, *signer, aliceKey)
+		require.NoError(t, err)
+		b.AddTx(txn)
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(cp))
+
+	gas := hexutil.Uint64(21_000)
+	fee := hexutil.U256(*uint256.NewInt(1_000_000_000_000))
+	tip := hexutil.U256(*uint256.NewInt(0))
+	val := hexutil.U256(*uint256.NewInt(7))
+	bankNonce, aliceNonce := hexutil.Uint64(0), hexutil.Uint64(1)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	_, err = api.SimulateV1(context.Background(), SimulationRequest{Validation: true, BlockStateCalls: []SimulatedBlock{
+		{Calls: []ethapi.CallArgs{{From: &bank, To: &alice, Gas: &gas, Nonce: &bankNonce, MaxFeePerGas: &fee, MaxPriorityFeePerGas: &tip, Value: &val}}},
+		{Calls: []ethapi.CallArgs{{From: &alice, To: &sink, Gas: &gas, Nonce: &aliceNonce, MaxFeePerGas: &fee, MaxPriorityFeePerGas: &tip, Value: &val}}},
+	}}, rpc.BlockNumberOrHashWithNumber(1))
+	require.NoError(t, err)
+}
+
+// An account the simulation deletes stays deleted in later simulated blocks, also when the
+// canonical chain deleted it after the base block, so it is absent at head: no code, no storage
+// from the base for a contract later created at the same address, and the same state roots as
+// a chain that ran the simulated calls, also for an account the simulation leaves unchanged
+// while the canonical chain changed it after the base.
+func TestSimulateV1HistoricalBaseDeleteOfAccountGoneAtHead(t *testing.T) {
+	bankKey, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	require.NoError(t, err)
+	bank := crypto.PubkeyToAddress(bankKey.PublicKey)
+	beneficiary := common.HexToAddress("0x00000000000000000000000000000000000000be")
+	factory := common.HexToAddress("0x00000000000000000000000000000000000000fa")
+	probe := common.HexToAddress("0x00000000000000000000000000000000000000ee")
+	store := common.HexToAddress("0x00000000000000000000000000000000000000cc")
+	// runtime returns storage slot 0; initCode deploys it; factory runs CREATE2(salt 0) of initCode
+	runtime := []byte{0x60, 0x00, 0x54, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3}
+	initCode := append(append([]byte{0x6a}, runtime...), 0x60, 0x00, 0x52, 0x60, 0x0b, 0x60, 0x15, 0xf3)
+	factoryCode := append(append([]byte{0x73}, initCode...), 0x60, 0x00, 0x52, 0x60, 0x00, 0x60, 0x14, 0x60, 0x0c, 0x60, 0x00, 0xf5, 0x00)
+	doomed := types.CreateAddress2(factory, [32]byte{}, accounts.InternCodeHash(common.BytesToHash(crypto.Keccak256(initCode))))
+	selfdestruct := append(append([]byte{0x73}, beneficiary[:]...), 0xff)
+	codeSize := append(append([]byte{0x73}, doomed[:]...), 0x3b, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3)
+	funds, _ := new(big.Int).SetString("100000000000000000000", 10)
+	type send struct {
+		to    common.Address
+		value uint64
+	}
+	newChain := func(sends ...send) (*execmoduletester.ExecModuleTester, *blockgen.ChainPack) {
+		gspec := &types.Genesis{Config: chain.TestChainBerlinConfig.Copy(), Alloc: types.GenesisAlloc{
+			bank:    {Balance: funds},
+			doomed:  {Code: selfdestruct, Balance: big.NewInt(1), Storage: map[common.Hash]common.Hash{{}: common.BigToHash(big.NewInt(7))}},
+			probe:   {Code: codeSize, Balance: big.NewInt(0)},
+			factory: {Code: factoryCode, Balance: big.NewInt(0)},
+			store:   {Code: []byte{0x60, 0x01, 0x60, 0x00, 0x55, 0x00}, Balance: big.NewInt(0)}, // SSTORE(0, 1)
+		}}
+		m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(bankKey))
+		signer := types.LatestSignerForChainID(m.ChainConfig.ChainID)
+		cp, err := m.GenerateChain(len(sends), func(i int, b *blockgen.BlockGen) {
+			txn, err := types.SignTx(types.NewTransaction(b.TxNonce(bank), sends[i].to, uint256.NewInt(sends[i].value), 200_000, uint256.NewInt(1_000_000_000), nil), *signer, bankKey)
+			require.NoError(t, err)
+			b.AddTx(txn)
+		})
+		require.NoError(t, err)
+		return m, cp
+	}
+	m, cp := newChain(send{to: beneficiary}, send{to: doomed}, send{to: store, value: 1})
+	require.NoError(t, m.InsertChain(cp))
+	_, oracle := newChain(send{to: beneficiary}, send{to: doomed}, send{to: probe}, send{to: factory}, send{to: doomed}, send{to: store})
+	wants := oracle.Blocks[1:]
+
+	blocks := make([]SimulatedBlock, 0, len(wants))
+	for _, want := range wants {
+		header := want.Header()
+		gasLimit := hexutil.Uint64(header.GasLimit)
+		txn := want.Transactions()[0]
+		gas := hexutil.Uint64(txn.GetGasLimit())
+		nonce := hexutil.Uint64(txn.GetNonce())
+		blocks = append(blocks, SimulatedBlock{
+			BlockOverrides: &ethapi.BlockOverrides{Time: (*hexutil.Uint64)(&header.Time), GasLimit: &gasLimit, FeeRecipient: &header.Coinbase, PrevRandao: &header.MixDigest},
+			Calls:          []ethapi.CallArgs{{From: &bank, To: txn.GetTo(), Gas: &gas, Nonce: &nonce, GasPrice: (*hexutil.U256)(txn.GetFeeCap())}},
+		})
+	}
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	result, err := api.SimulateV1(context.Background(), SimulationRequest{BlockStateCalls: blocks, Validation: true}, rpc.BlockNumberOrHashWithNumber(1))
+	require.NoError(t, err)
+	require.Len(t, result, len(wants))
+	word := func(block int) *big.Int {
+		require.Len(t, result[block].Calls, 1)
+		require.Nil(t, result[block].Calls[0].Error)
+		ret := common.FromHex(result[block].Calls[0].ReturnData)
+		require.Len(t, ret, 32, "block %d ran the called code", block)
+		return new(big.Int).SetBytes(ret)
+	}
+	require.Zero(t, word(1).Sign(), "the destroyed account has no code")
+	require.Zero(t, word(3).Sign(), "the contract created at its address sees none of its storage")
+	for i, want := range wants {
+		require.Equal(t, want.Root(), result[i].StateRoot, "block %d", want.NumberU64())
+	}
+}
+
+// A state override on a historical base replaces the account's whole storage, including the
+// base block's slots of an account the canonical chain deleted after the base.
+func TestSimulateV1HistoricalBaseStateOverrideClearsBaseStorage(t *testing.T) {
+	bankKey, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	require.NoError(t, err)
+	bank := crypto.PubkeyToAddress(bankKey.PublicKey)
+	beneficiary := common.HexToAddress("0x00000000000000000000000000000000000000be")
+	doomed := common.HexToAddress("0x00000000000000000000000000000000000000dd")
+	funds, _ := new(big.Int).SetString("100000000000000000000", 10)
+	gspec := &types.Genesis{Config: chain.TestChainBerlinConfig.Copy(), Alloc: types.GenesisAlloc{
+		bank:   {Balance: funds},
+		doomed: {Code: append(append([]byte{0x73}, beneficiary[:]...), 0xff), Balance: big.NewInt(1), Storage: map[common.Hash]common.Hash{{}: common.BigToHash(big.NewInt(7))}},
+	}}
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(bankKey))
+	signer := types.LatestSignerForChainID(m.ChainConfig.ChainID)
+	cp, err := m.GenerateChain(2, func(i int, b *blockgen.BlockGen) {
+		to := beneficiary
+		if i == 1 {
+			to = doomed
+		}
+		txn, err := types.SignTx(types.NewTransaction(b.TxNonce(bank), to, uint256.NewInt(0), 100_000, uint256.NewInt(1_000_000_000), nil), *signer, bankKey)
+		require.NoError(t, err)
+		b.AddTx(txn)
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(cp))
+
+	readSlot0 := hexutil.Bytes{0x60, 0x00, 0x54, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3}
+	overrides := ethapi.StateOverrides{accounts.InternAddress(doomed): {Code: &readSlot0, State: &map[common.Hash]common.Hash{}}}
+	gas := hexutil.Uint64(100_000)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	result, err := api.SimulateV1(context.Background(), SimulationRequest{BlockStateCalls: []SimulatedBlock{
+		{StateOverrides: &overrides},
+		{Calls: []ethapi.CallArgs{{From: &bank, To: &doomed, Gas: &gas}}},
+	}}, rpc.BlockNumberOrHashWithNumber(1))
+	require.NoError(t, err)
+	require.Len(t, result, 2)
+	require.Len(t, result[1].Calls, 1)
+	ret := common.FromHex(result[1].Calls[0].ReturnData)
+	require.Len(t, ret, 32)
+	require.Zero(t, new(big.Int).SetBytes(ret).Sign(), "the overridden storage has no base slot")
+}
+
+// A storage-replacing override repeated in every block of a historical simulation keeps the
+// touched keys of the overridden account bounded by its base storage, and the state roots
+// follow a chain that clears the same storage.
+func TestSimulateV1HistoricalRepeatedStateOverrideKeepsTouchedKeysBounded(t *testing.T) {
+	bankKey, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	require.NoError(t, err)
+	bank := crypto.PubkeyToAddress(bankKey.PublicKey)
+	beneficiary := common.HexToAddress("0x00000000000000000000000000000000000000be")
+	cleared := common.HexToAddress("0x00000000000000000000000000000000000000cc")
+	// With calldata: SSTORE(3, 1). Without: SSTORE(0, 0) SSTORE(1, 0) SSTORE(2, 0) unless slot 0 is zero,
+	// so a call on cleared storage writes nothing.
+	clearCode := []byte{
+		0x36, 0x15, 0x60, 0x0b, 0x57, 0x60, 0x01, 0x60, 0x03, 0x55, 0x00, 0x5b,
+		0x60, 0x00, 0x54, 0x15, 0x60, 0x22, 0x57, 0x60, 0x00, 0x60, 0x00, 0x55, 0x60, 0x00, 0x60, 0x01, 0x55, 0x60, 0x00, 0x60, 0x02, 0x55, 0x5b,
+	}
+	funds, _ := new(big.Int).SetString("100000000000000000000", 10)
+	const simulatedBlocks = 8
+	newChain := func(lastData []byte, recipients ...common.Address) (*execmoduletester.ExecModuleTester, *blockgen.ChainPack) {
+		gspec := &types.Genesis{Config: chain.TestChainBerlinConfig.Copy(), Alloc: types.GenesisAlloc{
+			bank: {Balance: funds},
+			cleared: {Code: clearCode, Balance: big.NewInt(0), Storage: map[common.Hash]common.Hash{
+				common.BigToHash(big.NewInt(0)): common.BigToHash(big.NewInt(7)),
+				common.BigToHash(big.NewInt(1)): common.BigToHash(big.NewInt(8)),
+				common.BigToHash(big.NewInt(2)): common.BigToHash(big.NewInt(9)),
+			}},
+		}}
+		m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(bankKey))
+		signer := types.LatestSignerForChainID(m.ChainConfig.ChainID)
+		cp, err := m.GenerateChain(len(recipients), func(i int, b *blockgen.BlockGen) {
+			var data []byte
+			if i == len(recipients)-1 {
+				data = lastData
+			}
+			txn, err := types.SignTx(types.NewTransaction(b.TxNonce(bank), recipients[i], uint256.NewInt(0), 100_000, uint256.NewInt(0), data), *signer, bankKey)
+			require.NoError(t, err)
+			b.AddTx(txn)
+		})
+		require.NoError(t, err)
+		return m, cp
+	}
+	m, cp := newChain([]byte{1}, beneficiary, cleared) // the head writes slot 3, absent at the base
+	require.NoError(t, m.InsertChain(cp))
+	oracleRecipients := []common.Address{beneficiary}
+	for range simulatedBlocks {
+		oracleRecipients = append(oracleRecipients, cleared)
+	}
+	_, oracle := newChain(nil, oracleRecipients...)
+	wants := oracle.Blocks[1:]
+
+	overrides := ethapi.StateOverrides{accounts.InternAddress(cleared): {State: &map[common.Hash]common.Hash{}}}
+	req := SimulationRequest{Validation: true}
+	for _, want := range wants {
+		header := want.Header()
+		gasLimit := hexutil.Uint64(header.GasLimit)
+		txn := want.Transactions()[0]
+		gas := hexutil.Uint64(txn.GetGasLimit())
+		nonce := hexutil.Uint64(txn.GetNonce())
+		req.BlockStateCalls = append(req.BlockStateCalls, SimulatedBlock{
+			BlockOverrides: &ethapi.BlockOverrides{Time: (*hexutil.Uint64)(&header.Time), GasLimit: &gasLimit, FeeRecipient: &header.Coinbase, PrevRandao: &header.MixDigest},
+			StateOverrides: &overrides,
+			Calls:          []ethapi.CallArgs{{From: &bank, To: &cleared, Gas: &gas, Nonce: &nonce, GasPrice: (*hexutil.U256)(txn.GetFeeCap())}},
+		})
+	}
+
+	ctx := context.Background()
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	tx, err := m.DB.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	sim := newSimulator(&req, cp.Blocks[0].Header(), m.ChainConfig, api.dirs, api.engine(), api._txNumReader, api._blockReader, api.logger, api.GasCap, api.ReturnDataLimit, api.evmCallTimeout, false)
+	blocks, err := sim.sanitizeSimulatedBlocks(req.BlockStateCalls)
+	require.NoError(t, err)
+	headers, err := sim.makeHeaders(blocks)
+	require.NoError(t, err)
+	sharedDomains, err := newSnapshotCommitmentDomains(ctx, tx, api.logger)
+	require.NoError(t, err)
+	defer sharedDomains.Close()
+	sharedDomains.SetDeferCommitmentUpdates(false)
+
+	parent := sim.base
+	blockHashOverrides := ethapi.BlockHashOverrides{}
+	for i := range blocks {
+		result, current, err := sim.simulateBlock(ctx, tx, sharedDomains, &blocks[i], headers[i], parent, headers[:i], false, blockHashOverrides)
+		require.NoError(t, err)
+		require.Equal(t, wants[i].Root(), result.StateRoot, "block %d", wants[i].NumberU64())
+		touched := len(sim.touchedKeys[accounts.InternAddress(cleared)])
+		require.Equal(t, 3, touched, "touched keys after block %d: the base slots only", wants[i].NumberU64())
+		blockHashOverrides[current.NumberU64()] = current.Hash()
+		headers[i] = current.Header()
+		parent = current.Header()
+	}
+}
+
+var (
+	slotStoreAddress     = common.HexToAddress("0x00000000000000000000000000000000c0ffee20")
+	transferRecipient    = common.HexToAddress("0x00000000000000000000000000000000c0ffee21")
+	balanceReaderAddress = common.HexToAddress("0x00000000000000000000000000000000c0ffee22")
+)
+
+// slotStoreCode stores its calldata in slot 0 when called with calldata, and always returns slot 0.
+var slotStoreCode = []byte{
+	byte(vm.CALLDATASIZE), byte(vm.ISZERO), byte(vm.PUSH1), 0x0B, byte(vm.JUMPI),
+	byte(vm.PUSH1), 0x00, byte(vm.CALLDATALOAD), byte(vm.PUSH1), 0x00, byte(vm.SSTORE),
+	byte(vm.JUMPDEST), byte(vm.PUSH1), 0x00, byte(vm.SLOAD), byte(vm.PUSH1), 0x00, byte(vm.MSTORE),
+	byte(vm.PUSH1), 0x20, byte(vm.PUSH1), 0x00, byte(vm.RETURN),
+}
+
+func returningBalanceOf(addr common.Address) []byte {
+	code := append([]byte{byte(vm.PUSH20)}, addr[:]...)
+	return append(code, byte(vm.BALANCE), byte(vm.PUSH1), 0x00, byte(vm.MSTORE), byte(vm.PUSH1), 0x20, byte(vm.PUSH1), 0x00, byte(vm.RETURN))
+}
+
+type blockTx struct {
+	to    *common.Address
+	data  []byte
+	value uint64
+}
+
+// newHistoricalBaseChain starts a node from a fixed genesis and mines one block
+// for each entry of blocks.
+func newHistoricalBaseChain(t *testing.T, cfg *chain.Config, genesisSlot0 int64, blocks [][]blockTx) (*execmoduletester.ExecModuleTester, common.Address) {
+	t.Helper()
+	senderKey, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	require.NoError(t, err)
+	sender := crypto.PubkeyToAddress(senderKey.PublicKey)
+	slotStore := types.GenesisAccount{Balance: new(big.Int), Code: slotStoreCode}
+	if genesisSlot0 != 0 {
+		slotStore.Storage = map[common.Hash]common.Hash{{}: common.BigToHash(big.NewInt(genesisSlot0))}
+	}
+	alloc := types.GenesisAlloc{
+		sender:               {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(20), nil)},
+		slotStoreAddress:     slotStore,
+		balanceReaderAddress: {Balance: new(big.Int), Code: returningBalanceOf(transferRecipient)},
+	}
+	node := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{Config: cfg, Alloc: alloc, GasLimit: 60_000_000}), execmoduletester.WithKey(senderKey))
+	if len(blocks) == 0 {
+		return node, sender
+	}
+	signer := types.LatestSignerForChainID(node.ChainConfig.ChainID)
+	chainPack, err := node.GenerateChain(len(blocks), func(i int, b *blockgen.BlockGen) {
+		for _, tx := range blocks[i] {
+			txn, err := types.SignTx(&types.DynamicFeeTransaction{
+				CommonTx: types.CommonTx{Nonce: b.TxNonce(sender), To: tx.to, Data: tx.data, Value: *uint256.NewInt(tx.value), GasLimit: 1_000_000},
+				ChainID:  *uint256.MustFromBig(node.ChainConfig.ChainID.ToBig()),
+				FeeCap:   *uint256.NewInt(1_000_000_000_000),
+			}, *signer, senderKey)
+			require.NoError(t, err)
+			b.AddTx(txn)
+		}
+	})
+	require.NoError(t, err)
+	for _, receipts := range chainPack.Receipts {
+		for _, receipt := range receipts {
+			require.Equal(t, types.ReceiptStatusSuccessful, receipt.Status)
+		}
+	}
+	require.NoError(t, node.InsertChain(chainPack))
+	return node, sender
+}
+
+// A simulation on an old block must start from that block's state, not from the
+// latest state, even when a simulated write matches the latest value. Each case
+// is compared with the same request on a node whose latest block is the old one.
+// The old block is genesis or block 1 (which sets slot 0 to its base value), and
+// the state root is computed with and without commitment history.
+func TestSimulateV1HistoricalBaseMatchesSimulationAtBase(t *testing.T) {
+	slotStore, recipient, balanceReader := slotStoreAddress, transferRecipient, balanceReaderAddress
+	slotValue := func(v int64) hexutil.Bytes { h := common.BigToHash(big.NewInt(v)); return h[:] }
+	writeSlot := func(v int64) ethapi.CallArgs {
+		data := slotValue(v)
+		return ethapi.CallArgs{To: &slotStore, Data: &data}
+	}
+	readSlot := ethapi.CallArgs{To: &slotStore}
+	readBalance := ethapi.CallArgs{To: &balanceReader}
+	deployReturning42 := hexutil.Bytes(deployCode(returningByte(42)))
+	replaceStorage := ethapi.Account{State: &map[common.Hash]common.Hash{{31: 1}: {31: 2}}}
+	codeOverride := func(code []byte) ethapi.Account { c := hexutil.Bytes(code); return ethapi.Account{Code: &c} }
+	selfDestructCode := []byte{byte(vm.CALLER), byte(vm.SELFDESTRUCT)}
+	beforeCancun := chain.TestChainOsakaConfig.Copy()
+	beforeCancun.CancunTime, beforeCancun.PragueTime, beforeCancun.OsakaTime = nil, nil, nil
+	returns := func(values ...int64) []string {
+		encoded := make([]string, len(values))
+		for i, v := range values {
+			encoded[i] = slotValue(v).String()
+		}
+		return encoded
+	}
+	for _, tc := range []struct {
+		name                  string
+		baseSlot0             int64
+		headTxs               []blockTx
+		simulatedBlocks       [][]ethapi.CallArgs
+		slotStoreOverrides    map[int]ethapi.Account // by simulated block index
+		wantReturnData        []string
+		callsDeployedContract bool // the second block calls the contract the first block deploys
+		beforeCancun          bool // SELFDESTRUCT only wipes storage before Cancun
+	}{
+		{
+			name:            "storage write equal to head",
+			headTxs:         []blockTx{{to: &slotStore, data: slotValue(5)}},
+			simulatedBlocks: [][]ethapi.CallArgs{{writeSlot(5)}, {readSlot}},
+			wantReturnData:  returns(5, 5),
+		},
+		{
+			name:            "storage clear of a slot absent at head",
+			baseSlot0:       1,
+			headTxs:         []blockTx{{to: &slotStore, data: slotValue(0)}},
+			simulatedBlocks: [][]ethapi.CallArgs{{writeSlot(0)}, {readSlot}},
+			wantReturnData:  returns(0, 0),
+		},
+		{
+			name:            "storage cleared and set back to its base value",
+			baseSlot0:       1,
+			headTxs:         []blockTx{{to: &slotStore, data: slotValue(0)}},
+			simulatedBlocks: [][]ethapi.CallArgs{{writeSlot(0)}, {writeSlot(1)}, {readSlot}},
+			wantReturnData:  returns(0, 1, 1),
+		},
+		{
+			name:            "storage set to its head value and cleared",
+			headTxs:         []blockTx{{to: &slotStore, data: slotValue(5)}},
+			simulatedBlocks: [][]ethapi.CallArgs{{writeSlot(5)}, {writeSlot(0)}, {readSlot}},
+			wantReturnData:  returns(5, 0, 0),
+		},
+		{
+			name:            "balance equal to head",
+			headTxs:         []blockTx{{to: &recipient, value: 1}},
+			simulatedBlocks: [][]ethapi.CallArgs{{{To: &recipient, Value: (*hexutil.U256)(uint256.NewInt(1))}}, {readBalance}},
+			wantReturnData:  []string{"0x", slotValue(1).String()},
+		},
+		{
+			name:                  "contract equal to head",
+			headTxs:               []blockTx{{data: deployCode(returningByte(42))}},
+			simulatedBlocks:       [][]ethapi.CallArgs{{{Data: &deployReturning42}}, {{}}},
+			wantReturnData:        []string{hexutil.Encode(returningByte(42)), slotValue(42).String()},
+			callsDeployedContract: true,
+		},
+		{
+			name:            "nonce change of an account whose balance differs at head",
+			headTxs:         []blockTx{{to: &recipient, value: 1}},
+			simulatedBlocks: [][]ethapi.CallArgs{{{From: &recipient, To: &slotStore}}, {readBalance}},
+			wantReturnData:  returns(0, 0),
+		},
+		{
+			name:               "storage override of a slot set at base and head",
+			baseSlot0:          1,
+			headTxs:            []blockTx{{to: &recipient, value: 1}},
+			simulatedBlocks:    [][]ethapi.CallArgs{{readSlot}, {readSlot}},
+			slotStoreOverrides: map[int]ethapi.Account{0: replaceStorage},
+			wantReturnData:     returns(0, 0),
+		},
+		{
+			name:               "storage override of a slot cleared at head",
+			baseSlot0:          1,
+			headTxs:            []blockTx{{to: &slotStore, data: slotValue(0)}},
+			simulatedBlocks:    [][]ethapi.CallArgs{{readSlot}, {readSlot}},
+			slotStoreOverrides: map[int]ethapi.Account{0: replaceStorage},
+			wantReturnData:     returns(0, 0),
+		},
+		{
+			name:               "storage override after a simulated write to a slot absent at base",
+			headTxs:            []blockTx{{to: &recipient, value: 1}},
+			simulatedBlocks:    [][]ethapi.CallArgs{{writeSlot(7)}, {readSlot}, {readSlot}},
+			slotStoreOverrides: map[int]ethapi.Account{1: replaceStorage},
+			wantReturnData:     returns(7, 0, 0),
+		},
+		{
+			name:               "self-destruct of a contract whose slot is cleared at head",
+			baseSlot0:          1,
+			headTxs:            []blockTx{{to: &slotStore, data: slotValue(0)}},
+			simulatedBlocks:    [][]ethapi.CallArgs{{readSlot}, {readSlot}},
+			slotStoreOverrides: map[int]ethapi.Account{0: codeOverride(selfDestructCode), 1: codeOverride(slotStoreCode)},
+			wantReturnData:     []string{"0x", slotValue(0).String()},
+			beforeCancun:       true,
+		},
+	} {
+		configs := simulateOverrideConfigs
+		if tc.beforeCancun {
+			configs = []struct {
+				name string
+				cfg  *chain.Config
+			}{{"shanghai", beforeCancun}}
+		}
+		for _, cfg := range configs {
+			for _, variant := range []struct {
+				baseNumber        uint64
+				commitmentHistory bool
+			}{{0, false}, {0, true}, {1, false}, {1, true}} {
+				baseNumber, commitmentHistory := variant.baseNumber, variant.commitmentHistory
+				name := fmt.Sprintf("%s/%s/base_%d/commitment_history_%t", cfg.name, tc.name, baseNumber, commitmentHistory)
+				t.Run(name, func(t *testing.T) {
+					if commitmentHistory {
+						previousSchema := statecfg.Schema
+						statecfg.EnableHistoricalCommitment()
+						t.Cleanup(func() { statecfg.Schema = previousSchema })
+					}
+					genesisSlot0, baseBlocks := tc.baseSlot0, [][]blockTx(nil)
+					if baseNumber == 1 {
+						genesisSlot0, baseBlocks = 0, [][]blockTx{{{to: &slotStore, data: slotValue(tc.baseSlot0)}}}
+					}
+					node, sender := newHistoricalBaseChain(t, cfg.cfg, genesisSlot0, append(baseBlocks, tc.headTxs))
+					baseNode, _ := newHistoricalBaseChain(t, cfg.cfg, genesisSlot0, baseBlocks)
+					if commitmentHistory {
+						require.NoError(t, node.DB.Update(t.Context(), func(tx kv.RwTx) error {
+							return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
+						}))
+					}
+					deployed := types.CreateAddress(sender, baseNumber)
+					buildRequest := func() SimulationRequest {
+						gas := hexutil.Uint64(1_000_000)
+						req := SimulationRequest{}
+						for i, calls := range tc.simulatedBlocks {
+							block := SimulatedBlock{}
+							if override, ok := tc.slotStoreOverrides[i]; ok {
+								block.StateOverrides = &ethapi.StateOverrides{accounts.InternAddress(slotStore): override}
+							}
+							for _, call := range calls {
+								if tc.callsDeployedContract && call.Data == nil {
+									call.To = &deployed
+								}
+								if call.From == nil {
+									call.From = &sender
+								}
+								call.Gas = &gas
+								block.Calls = append(block.Calls, call)
+							}
+							req.BlockStateCalls = append(req.BlockStateCalls, block)
+						}
+						return req
+					}
+					historical, err := newEthApiForTest(newBaseApiForTest(node), node.DB, nil, nil).SimulateV1(t.Context(), buildRequest(), rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(baseNumber)))
+					require.NoError(t, err)
+					atBase, err := newEthApiForTest(newBaseApiForTest(baseNode), baseNode.DB, nil, nil).SimulateV1(t.Context(), buildRequest(), rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber))
+					require.NoError(t, err)
+					require.Len(t, historical, len(tc.wantReturnData))
+					for i := range historical {
+						require.Len(t, historical[i].Calls, 1)
+						call := historical[i].Calls[0]
+						require.Equal(t, uint64(types.ReceiptStatusSuccessful), uint64(call.Status), "block %d: %v", i, call.Error)
+						require.Equal(t, tc.wantReturnData[i], call.ReturnData, "block %d return data", i)
+						require.NotEqual(t, common.Hash{}, historical[i].StateRoot, "block %d state root", i)
+						require.Equal(t, atBase[i].StateRoot, historical[i].StateRoot, "block %d state root", i)
+					}
+				})
+			}
+		}
+	}
 }
