@@ -1207,14 +1207,14 @@ func TestUpdateCheckpointsKeepsFinalizedLightClientUpdates(t *testing.T) {
 	require.Equal(t, []common.Hash{finalizedRoot}, graph.keptLightClientRoots)
 }
 
-// A period's update is looked up on the selected head's chain, and only among settled updates without a selected head.
-func TestGetLightClientUpdateUsesTheSelectedHead(t *testing.T) {
+// The updates are looked up on the selected head's chain, and only among settled updates without a selected head.
+func TestGetLightClientUpdatesUsesTheSelectedHead(t *testing.T) {
 	graph := &getFinalizedExecutionHashForkGraph{}
 	store := &ForkChoiceStore{forkGraph: graph}
 
-	store.GetLightClientUpdate(1)
+	store.GetLightClientUpdates(1, 3)
 	store.selectedHead.Store(&ForkChoiceNode{Root: common.Hash{0x61}})
-	store.GetLightClientUpdate(1)
+	store.GetLightClientUpdates(1, 3)
 
 	require.Equal(t, []common.Hash{{}, {0x61}}, graph.lightClientHeads)
 }
@@ -2279,9 +2279,9 @@ func (g *getFinalizedExecutionHashForkGraph) NewestLightClientUpdate() *cltypes.
 	return g.beforeUpdate
 }
 
-func (g *getFinalizedExecutionHashForkGraph) GetLightClientUpdate(_ uint64, head common.Hash) (*cltypes.LightClientUpdate, bool) {
+func (g *getFinalizedExecutionHashForkGraph) GetLightClientUpdates(_, _ uint64, head common.Hash) []*cltypes.LightClientUpdate {
 	g.lightClientHeads = append(g.lightClientHeads, head)
-	return nil, false
+	return nil
 }
 
 func (g *getFinalizedExecutionHashForkGraph) GetBalances(common.Hash) (solid.Uint64ListSSZ, error) {

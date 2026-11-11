@@ -36,7 +36,8 @@ func TestLightClientUpdateCandidatesSkipOtherPeriods(t *testing.T) {
 	f.recordLightClientUpdateLocked(common.Hash{2}, lightClientTestUpdate(cfg, int(cfg.SyncCommitteeSize), 2*periodStart-1))
 
 	require.Len(t, f.lightClientUpdateCandidates, 1)
-	require.Contains(t, f.lightClientUpdateCandidates, common.Hash{1})
+	require.Len(t, f.lightClientUpdateCandidates[1], 1)
+	require.Contains(t, f.lightClientUpdateCandidates[1], common.Hash{1})
 }
 
 // The update of a block that passed its transition is served at once as the newest update, but its period store waits
@@ -52,7 +53,7 @@ func TestRecordLightClientUpdateWaitsForFinalizationForThePeriodStore(t *testing
 	require.Same(t, update, f.NewestLightClientUpdate())
 	_, ok := f.GetLightClientUpdate(1, common.Hash{})
 	require.False(t, ok)
-	require.Len(t, f.lightClientUpdateCandidates, 1)
+	require.Len(t, f.lightClientUpdateCandidates[1], 1)
 }
 
 func lightClientTestUpdate(cfg *clparams.BeaconChainConfig, participants int, attestedSlot uint64) *cltypes.LightClientUpdate {
@@ -94,7 +95,7 @@ func TestFinalizationKeepsOnlyCanonicalLightClientUpdates(t *testing.T) {
 	got, ok := f.GetLightClientUpdate(1, common.Hash{})
 	require.True(t, ok)
 	require.Same(t, canonicalUpdate, got)
-	require.Len(t, f.lightClientUpdateCandidates, 1, "only the candidate above the finalized slot waits")
+	require.Len(t, f.lightClientUpdateCandidates[1], 1, "only the candidate above the finalized slot waits")
 
 	f.KeepFinalizedLightClientUpdates(nextFinalized)
 
@@ -304,4 +305,27 @@ func TestGetLightClientUpdateDuringFinalization(t *testing.T) {
 			break
 		}
 	}
+}
+
+// One lookup returns every period of the range against one head: settled updates, head-chain candidates of several
+// periods, and nil for a period without either.
+func TestGetLightClientUpdatesServesARangeAgainstOneHead(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	f := &forkGraphDisk{beaconCfg: cfg}
+	p := cfg.SlotsPerEpoch * cfg.EpochsPerSyncCommitteePeriod
+	b1, b2, head := common.Hash{1}, common.Hash{2}, common.Hash{3}
+	f.headers.Store(b1, &cltypes.BeaconBlockHeader{Slot: p + 11})
+	f.headers.Store(b2, &cltypes.BeaconBlockHeader{Slot: 2*p + 11, ParentRoot: b1})
+	f.headers.Store(head, &cltypes.BeaconBlockHeader{Slot: 4*p + 1, ParentRoot: b2})
+	settled := lightClientTestUpdate(cfg, 400, 10)
+	f.lightClientUpdates.Store(uint64(0), settled)
+	first, second := lightClientTestUpdate(cfg, 400, p+10), lightClientTestUpdate(cfg, 400, 2*p+10)
+	f.recordLightClientUpdateLocked(b1, first)
+	f.recordLightClientUpdateLocked(b2, second)
+
+	require.Equal(t, []*cltypes.LightClientUpdate{settled, first, second, nil}, f.GetLightClientUpdates(0, 4, head))
+	require.Equal(t, []*cltypes.LightClientUpdate{first, second}, f.GetLightClientUpdates(1, 3, head))
+	require.Equal(t, []*cltypes.LightClientUpdate{first}, f.GetLightClientUpdates(1, 2, head), "a candidate of a later period is not one of the range")
+	require.Equal(t, []*cltypes.LightClientUpdate{settled, nil, nil, nil}, f.GetLightClientUpdates(0, 4, common.Hash{}))
+	require.Nil(t, f.GetLightClientUpdates(2, 2, head))
 }
