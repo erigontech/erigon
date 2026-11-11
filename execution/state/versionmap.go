@@ -1552,6 +1552,12 @@ func (vm *VersionMap) WritesAlreadySeeded(addr accounts.Address, ws *WriteSet) b
 	if !vm.HasBAL {
 		return false
 	}
+	// A net-zero write has no BAL cell, and a re-run may have dropped the cell a reader saw.
+	for _, vw := range ws.storage[addr] {
+		if vw.valStatus == ValueUnchanged {
+			return false
+		}
+	}
 	e := vm.load(addr)
 	return e != nil && flushAllNoOpUnderRLock(e, ws, addr, FlagDone)
 }
