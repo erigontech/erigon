@@ -109,17 +109,14 @@ func (c *ConsensusHandlers) lightClientUpdatesByRangeHandler(s network.Stream) e
 		endPeriod = c.beaconConfig.SyncCommitteePeriod(currentSlot) + 1
 	}
 
-	notFoundPrev := false
-	// Fetch from [start_period, start_period + count]
-	for i := req.StartPeriod; i < endPeriod; i++ {
-		update, has := c.forkChoiceReader.GetLightClientUpdate(i)
-		if !has {
-			notFoundPrev = true
+	// The response must include the earliest available update and use consecutive periods.
+	// Skip leading gaps, but stop once a gap would split the response.
+	for _, update := range c.forkChoiceReader.GetLightClientUpdates(req.StartPeriod, endPeriod) {
+		if update == nil {
+			if len(lightClientUpdates) > 0 {
+				break
+			}
 			continue
-		}
-		if notFoundPrev {
-			lightClientUpdates = lightClientUpdates[0:]
-			notFoundPrev = false
 		}
 
 		lightClientUpdates = append(lightClientUpdates, update)

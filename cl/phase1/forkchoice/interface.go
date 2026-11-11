@@ -81,7 +81,7 @@ type ForkChoiceStorageReader interface {
 	Synced() bool
 	GetLightClientBootstrap(blockRoot common.Hash) (*cltypes.LightClientBootstrap, bool)
 	NewestLightClientUpdate() *cltypes.LightClientUpdate
-	GetLightClientUpdate(period uint64) (*cltypes.LightClientUpdate, bool)
+	GetLightClientUpdates(startPeriod, endPeriod uint64) []*cltypes.LightClientUpdate
 	GetHeader(blockRoot common.Hash) (*cltypes.BeaconBlockHeader, bool)
 	// [New in Gloas:EIP7732] GetBlock returns the full block for a given block root.
 	GetBlock(blockRoot common.Hash) (*cltypes.SignedBeaconBlock, bool)

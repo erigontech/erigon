@@ -1027,6 +1027,18 @@ func TestUpdateCheckpointsKeepsFinalizedLightClientUpdates(t *testing.T) {
 	require.Equal(t, []common.Hash{finalizedRoot}, graph.keptLightClientRoots)
 }
 
+// The updates are looked up on the selected head's chain, and only among settled updates without a selected head.
+func TestGetLightClientUpdatesUsesTheSelectedHead(t *testing.T) {
+	graph := &getFinalizedExecutionHashForkGraph{}
+	store := &ForkChoiceStore{forkGraph: graph}
+
+	store.GetLightClientUpdates(1, 3)
+	store.selectedHead.Store(&ForkChoiceNode{Root: common.Hash{0x61}})
+	store.GetLightClientUpdates(1, 3)
+
+	require.Equal(t, []common.Hash{{}, {0x61}}, graph.lightClientHeads)
+}
+
 func TestUpdateCheckpointsPrunesOperationsWithExactFinalizedState(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	finalizedRoot := common.Hash{0x42}
@@ -1903,6 +1915,7 @@ type getFinalizedExecutionHashForkGraph struct {
 	currentStateRelease   chan struct{}
 	beforeUpdate          *cltypes.LightClientUpdate
 	afterUpdate           *cltypes.LightClientUpdate
+	lightClientHeads      []common.Hash
 	addChainSegmentStatus fork_graph.ChainSegmentInsertionResult
 	addChainSegmentErr    error
 	addChainSegmentCalled bool
@@ -2075,8 +2088,9 @@ func (g *getFinalizedExecutionHashForkGraph) NewestLightClientUpdate() *cltypes.
 	return g.beforeUpdate
 }
 
-func (g *getFinalizedExecutionHashForkGraph) GetLightClientUpdate(uint64) (*cltypes.LightClientUpdate, bool) {
-	panic("not used")
+func (g *getFinalizedExecutionHashForkGraph) GetLightClientUpdates(_, _ uint64, head common.Hash) []*cltypes.LightClientUpdate {
+	g.lightClientHeads = append(g.lightClientHeads, head)
+	return nil
 }
 
 func (g *getFinalizedExecutionHashForkGraph) GetBalances(common.Hash) (solid.Uint64ListSSZ, error) {
