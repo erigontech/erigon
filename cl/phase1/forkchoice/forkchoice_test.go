@@ -29,9 +29,11 @@ import (
 
 	lru "github.com/hashicorp/golang-lru/v2"
 	dto "github.com/prometheus/client_model/go"
+	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -499,6 +501,157 @@ func prepareEmbeddedPtcVoteBlock(
 	return store, anchorRoot, child
 }
 
+func TestValidateParentPayloadPathWithRejectedAnchor(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	clparams.ApplyMinimalPreset(&cfg)
+	cfg.GloasForkEpoch = 0
+	cfg.InitializeForkSchedule()
+	anchor := state.New(&cfg)
+	anchor.SetVersion(clparams.GloasVersion)
+	require.NoError(t, anchor.SetSlot(64))
+	anchor.SetLatestBlockHeader(&cltypes.BeaconBlockHeader{Slot: 64})
+	bid := cltypes.NewBeaconBlock(&cfg, clparams.GloasVersion).Body.SignedExecutionPayloadBid.Message
+	bid.Slot = 64
+	bid.BlockHash = common.Hash{1}
+	bid.ParentBlockHash = common.Hash{2}
+	anchor.SetLatestExecutionPayloadBid(bid)
+	graph, err := fork_graph.NewForkGraphDisk(anchor, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
+	require.NoError(t, err)
+	root := graph.AnchorRoot()
+	_, hasBlock := graph.GetBlock(root)
+	require.False(t, hasBlock)
+	store, err := NewForkChoiceStore(nil, anchor, nil, pool.NewOperationsPool(&cfg), graph, nil, nil, nil,
+		public_keys_registry.NewInMemoryPublicKeysRegistry(), nil, false, nil)
+	require.NoError(t, err)
+	store.RejectEnvelope(root)
+	require.True(t, store.IsEnvelopeRejected(root))
+
+	for _, test := range []struct {
+		name       string
+		parentHash common.Hash
+		wantErr    bool
+	}{
+		{name: "FULL", parentHash: bid.BlockHash, wantErr: true},
+		{name: "EMPTY", parentHash: bid.ParentBlockHash},
+		{name: "unrelated execution parent", parentHash: common.Hash{3}, wantErr: true},
+	} {
+		for _, requireEngineAcceptance := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/requireEngineAcceptance=%t", test.name, requireEngineAcceptance), func(t *testing.T) {
+				child := cltypes.NewBeaconBlock(&cfg, clparams.GloasVersion)
+				child.Slot = 65
+				child.ParentRoot = root
+				child.Body.SignedExecutionPayloadBid.Message.ParentBlockHash = test.parentHash
+
+				err := store.validateParentPayloadPath(child, requireEngineAcceptance)
+				if test.wantErr {
+					require.Error(t, err)
+					require.NotErrorIs(t, err, ErrParentEnvelopePending)
+				} else {
+					require.NoError(t, err)
+				}
+			})
+		}
+	}
+}
+
+func TestValidateParentPayloadPathWithInvalidAnchorAfterCacheEviction(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	clparams.ApplyMinimalPreset(&cfg)
+	cfg.GloasForkEpoch = 0
+	cfg.InitializeForkSchedule()
+	anchor := state.New(&cfg)
+	anchor.SetVersion(clparams.GloasVersion)
+	require.NoError(t, anchor.SetSlot(64))
+	anchor.SetLatestBlockHeader(&cltypes.BeaconBlockHeader{Slot: 64})
+	bid := cltypes.NewBeaconBlock(&cfg, clparams.GloasVersion).Body.SignedExecutionPayloadBid.Message
+	bid.Slot = 64
+	bid.BlockHash = common.Hash{1}
+	bid.ParentBlockHash = common.Hash{2}
+	anchor.SetLatestExecutionPayloadBid(bid)
+	graph, err := fork_graph.NewForkGraphDisk(anchor, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
+	require.NoError(t, err)
+	root := graph.AnchorRoot()
+	store, err := NewForkChoiceStore(nil, anchor, nil, pool.NewOperationsPool(&cfg), graph, nil, nil, nil,
+		public_keys_registry.NewInMemoryPublicKeysRegistry(), nil, false, nil)
+	require.NoError(t, err)
+	store.MarkPayloadInvalid(root, bid.BlockHash)
+	require.True(t, store.executionHashMarkedInvalid(bid.BlockHash))
+
+	store.verifiedExecutionPayloadHashes.Resize(1)
+	store.verifiedExecutionPayloadHashes.Add(common.Hash{3}, common.Hash{4})
+	_, marked := store.invalidatedExecutionPayloads.Load(bid.BlockHash)
+	require.False(t, marked, "evicting the last root mapping removes the hash verdict")
+	store.executionPayloadStatus.Resize(1)
+	store.executionPayloadStatus.Add(common.Hash{4}, execution_client.PayloadStatusValidated)
+	store.payloadStatusByRoot.Resize(1)
+	store.payloadStatusByRoot.Add(common.Hash{3}, execution_client.PayloadStatusValidated)
+	require.False(t, store.executionHashMarkedInvalid(bid.BlockHash))
+	require.False(t, store.payloadStatusByRoot.Contains(root))
+	require.True(t, store.IsBlockInvalid(root))
+	_, retained := graph.GetHeader(root)
+	require.True(t, retained)
+
+	for _, test := range []struct {
+		name       string
+		parentHash common.Hash
+		invalid    bool
+	}{
+		{name: "FULL", parentHash: bid.BlockHash, invalid: true},
+		{name: "EMPTY", parentHash: bid.ParentBlockHash},
+	} {
+		for _, requireEngineAcceptance := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/requireEngineAcceptance=%t", test.name, requireEngineAcceptance), func(t *testing.T) {
+				child := cltypes.NewBeaconBlock(&cfg, clparams.GloasVersion)
+				child.Slot = 65
+				child.ParentRoot = root
+				child.Body.SignedExecutionPayloadBid.Message.ParentBlockHash = test.parentHash
+
+				err := store.validateParentPayloadPath(child, requireEngineAcceptance)
+				if test.invalid {
+					require.ErrorContains(t, err, "parent execution payload is invalid")
+					require.NotErrorIs(t, err, ErrParentEnvelopePending)
+				} else {
+					require.NoError(t, err)
+				}
+			})
+		}
+	}
+}
+
+func TestParentPayloadPathWithPreGloasAnchorStateUpgradedToGloas(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	clparams.ApplyMinimalPreset(&cfg)
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = 0
+	cfg.GloasForkEpoch = 2
+	cfg.InitializeForkSchedule()
+	forkSlot := cfg.GloasForkEpoch * cfg.SlotsPerEpoch
+	anchor := state.New(&cfg)
+	anchor.SetVersion(clparams.GloasVersion)
+	require.NoError(t, anchor.SetSlot(forkSlot))
+	anchor.SetLatestBlockHeader(&cltypes.BeaconBlockHeader{Slot: forkSlot - 1})
+	bid := cltypes.NewBeaconBlock(&cfg, clparams.GloasVersion).Body.SignedExecutionPayloadBid.Message
+	bid.Slot = forkSlot - 1
+	bid.BlockHash = common.Hash{1}
+	anchor.SetLatestExecutionPayloadBid(bid)
+	graph, err := fork_graph.NewForkGraphDisk(anchor, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
+	require.NoError(t, err)
+	store, err := NewForkChoiceStore(nil, anchor, nil, pool.NewOperationsPool(&cfg), graph, nil, nil, nil,
+		public_keys_registry.NewInMemoryPublicKeysRegistry(), nil, false, nil)
+	require.NoError(t, err)
+	child := cltypes.NewBeaconBlock(&cfg, clparams.GloasVersion)
+	child.Slot = forkSlot
+	child.ParentRoot = graph.AnchorRoot()
+	child.Body.SignedExecutionPayloadBid.Message.ParentBlockHash = bid.BlockHash
+
+	require.NoError(t, store.validateParentPayloadPath(child, true))
+	require.Equal(t, cltypes.PayloadStatusEmpty, store.getParentPayloadStatus(child))
+}
+
 func TestNewForkChoiceStorePreservesAnchorExecutionPayloadBuilderIndex(t *testing.T) {
 	for _, tc := range []struct {
 		name         string
@@ -579,6 +732,12 @@ func TestNewForkChoiceStoreSeedsAnchorExecutionHash(t *testing.T) {
 			legacyHeader.BlockHash = legacyHash
 			anchor.SetLatestExecutionPayloadHeader(legacyHeader)
 			anchor.SetLatestBlockHash(latestHash)
+			if tc.version >= clparams.GloasVersion {
+				anchor.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{
+					Slot:            tc.slot,
+					ParentBlockHash: latestHash,
+				})
+			}
 			anchorRoot, err := anchor.BlockRoot()
 			require.NoError(t, err)
 			graph := &getFinalizedExecutionHashForkGraph{
@@ -911,6 +1070,8 @@ func TestBlockProcessingTracksQueuedAndOverlappingImports(t *testing.T) {
 }
 
 func TestGetFinalizedExecutionHash(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.GloasForkEpoch = 1
 	cache, err := lru.New[common.Hash, common.Hash](16)
 	require.NoError(t, err)
 
@@ -932,19 +1093,38 @@ func TestGetFinalizedExecutionHash(t *testing.T) {
 	missingExecutionHash := common.Hash{0xdd}
 	cache.Add(missingRoot, missingExecutionHash)
 
+	anchorRoot := common.Hash{0x04}
+	anchorBid := &cltypes.ExecutionPayloadBid{
+		Slot:            cfg.SlotsPerEpoch,
+		BlockHash:       common.Hash{0xee},
+		ParentBlockHash: common.Hash{0xff},
+	}
+	cache.Add(anchorRoot, anchorBid.BlockHash)
+
 	store := &ForkChoiceStore{
+		beaconCfg: &cfg,
 		forkGraph: &getFinalizedExecutionHashForkGraph{
 			blocks: map[common.Hash]*cltypes.SignedBeaconBlock{
 				gloasRoot:    gloasBlock,
 				preGloasRoot: preGloasBlock,
 			},
+			anchorRoot: anchorRoot,
+			anchorSlot: anchorBid.Slot,
 		},
-		eth2Roots: cache,
+		eth2Roots:                 cache,
+		anchorExecutionPayloadBid: anchorBid,
 	}
 
 	require.Equal(t, gloasParentBlockHash, store.GetFinalizedExecutionHash(gloasRoot))
 	require.Equal(t, preGloasExecutionHash, store.GetFinalizedExecutionHash(preGloasRoot))
 	require.Equal(t, missingExecutionHash, store.GetFinalizedExecutionHash(missingRoot))
+	t.Run("Gloas anchor", func(t *testing.T) {
+		require.Equal(t, anchorBid.ParentBlockHash, store.GetFinalizedExecutionHash(anchorRoot))
+	})
+	t.Run("pre-Gloas anchor with upgraded state", func(t *testing.T) {
+		anchorBid.Slot--
+		require.Equal(t, anchorBid.BlockHash, store.GetFinalizedExecutionHash(anchorRoot))
+	})
 }
 
 func TestAddChainSegmentDoesNotQueueLightClientEventsOnError(t *testing.T) {
@@ -2041,6 +2221,9 @@ func (g *getFinalizedExecutionHashForkGraph) IsBlockInvalid(common.Hash) bool {
 	return false
 }
 
+func (g *getFinalizedExecutionHashForkGraph) IsEnvelopeRejected(common.Hash) bool { return false }
+func (g *getFinalizedExecutionHashForkGraph) RejectEnvelope(common.Hash) bool     { return false }
+
 func (g *getFinalizedExecutionHashForkGraph) MarkPayloadUnavailable(common.Hash) {}
 func (g *getFinalizedExecutionHashForkGraph) MarkPayloadAvailable(common.Hash)   {}
 func (g *getFinalizedExecutionHashForkGraph) IsPayloadUnavailable(common.Hash) bool {
@@ -2245,6 +2428,50 @@ func TestHasImportedDescendantAfterSkipsNonViableBranches(t *testing.T) {
 			require.Equal(t, tc.viable, filtered[emptyChild] != nil)
 			store.selectedHead.Store(&ForkChoiceNode{Root: headRoot, PayloadStatus: cltypes.PayloadStatusEmpty})
 			require.Equal(t, tc.lagging, store.HasImportedDescendantAfter(headRoot, 64+store.beaconCfg.SlotsPerEpoch))
+		})
+	}
+}
+
+func TestHasImportedDescendantAfterSkipsRejectedEnvelopeBranch(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		full          bool
+		rejectSibling bool
+		wantLag       bool
+	}{
+		{name: "rejected FULL branch", full: true},
+		{name: "EMPTY branch", wantLag: true},
+		{name: "valid sibling FULL branch", full: true, rejectSibling: true, wantLag: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			v := newViabilityTree(t)
+			headRoot, childRoot, descendantRoot := common.Hash{0xbb}, common.Hash{0xcc}, common.Hash{0xdd}
+			v.add(headRoot, v.justified.Root, 64, true, true)
+			v.add(childRoot, headRoot, 65, tc.full, true)
+			v.add(descendantRoot, childRoot, 98, true, true)
+			rejectedRoot := headRoot
+			if tc.rejectSibling {
+				rejectedRoot = common.Hash{0xee}
+				v.add(rejectedRoot, v.justified.Root, 64, true, true)
+				siblingBid := v.graph.blocks[rejectedRoot].Block.Body.GetSignedExecutionPayloadBid().Message
+				siblingBid.BlockHash = v.graph.blocks[headRoot].Block.Body.GetSignedExecutionPayloadBid().Message.BlockHash
+			}
+			v.store.setLatestMessage(0, LatestMessage{Slot: 100, Root: descendantRoot})
+			toleranceSlot := uint64(64) + v.store.beaconCfg.SlotsPerEpoch
+			require.True(t, v.store.HasImportedDescendantAfter(headRoot, toleranceSlot))
+
+			v.store.RejectEnvelope(rejectedRoot)
+
+			require.True(t, v.store.IsEnvelopeRejected(rejectedRoot))
+			require.False(t, v.store.IsBlockInvalid(rejectedRoot))
+			head, _, err := v.store.GetHeadNode()
+			require.NoError(t, err)
+			if tc.wantLag {
+				require.Equal(t, descendantRoot, head.Root)
+			} else {
+				require.Equal(t, ForkChoiceNode{Root: headRoot, PayloadStatus: cltypes.PayloadStatusEmpty}, head)
+			}
+			require.Equal(t, tc.wantLag, v.store.HasImportedDescendantAfter(headRoot, toleranceSlot))
 		})
 	}
 }
