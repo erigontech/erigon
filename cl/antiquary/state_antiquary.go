@@ -83,7 +83,7 @@ func (s *Antiquary) loopStates(ctx context.Context) {
 			}
 			beforeFinalized = finalized
 
-			if err := s.IncrementBeaconState(ctx, finalized); err != nil {
+			if err := s.incrementToFinalized(ctx, finalized); err != nil {
 				if s.currentState != nil {
 					s.logger.Warn("Could not to increment beacon state, trying again later", "err", err, "slot", s.currentState.Slot())
 				} else {
@@ -191,6 +191,11 @@ func FillStaticValidatorsTableIfNeeded(logger log.Logger, stateSn *snapshotsync.
 }
 
 const stateAntiquaryMaxSlotsPerCommit uint64 = 4 * clparams.SlotsPerDump
+
+// incrementToFinalized reconstructs the historical states up to and including the finalized slot, which is final too.
+func (s *Antiquary) incrementToFinalized(ctx context.Context, finalized uint64) error {
+	return s.IncrementBeaconState(ctx, finalized+1)
+}
 
 func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	// Check if you need to fill the static validators table

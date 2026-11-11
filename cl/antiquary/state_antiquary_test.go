@@ -149,3 +149,25 @@ func TestStateAntiquaryCommitIsBounded(t *testing.T) {
 	require.Greater(t, boundedCommits, singleCommits)
 	require.GreaterOrEqual(t, boundedCommits, singleCommits+2)
 }
+
+// The finalized slot is final, so its state is reconstructed too: historical reads of the latest finalized epoch
+// start do not wait for the next finalization.
+func TestIncrementToFinalizedReachesTheFinalizedSlot(t *testing.T) {
+	blocks, preState, postState := tests.GetPhase0Random()
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	reader := tests.LoadChain(blocks, db, t)
+	sn := synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
+	require.NoError(t, sn.OnHeadState(postState))
+	ctx := context.Background()
+	a := NewAntiquary(ctx, nil, preState, state_accessors.NewStaticValidatorTable(), &clparams.MainnetBeaconConfig, datadir.New(t.TempDir()), nil, db, nil, nil, reader, sn, log.New(), true, true, true, false, nil)
+
+	finalized := blocks[len(blocks)-1].Block.Slot
+	require.NoError(t, a.incrementToFinalized(ctx, finalized))
+
+	tx, err := db.BeginRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	progress, err := state_accessors.GetStateProcessingProgress(tx)
+	require.NoError(t, err)
+	require.Equal(t, finalized, progress)
+}
