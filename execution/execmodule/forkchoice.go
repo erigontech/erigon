@@ -580,7 +580,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 					return err
 				}
 				return dispatcher.Dispatch(ctx, tx, tx, stateVersion, e.accum.Accumulator, e.accum.RecentReceipts,
-					finishProgressBefore, finishProgressBefore, nil)
+					finishProgressBefore, finishProgressBefore, nil, tx)
 			}); err != nil {
 				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 			}
@@ -972,6 +972,7 @@ func (e *ExecModule) dispatchNotificationsFromOverlay(ctx context.Context, sd *e
 		finishProgressBefore,
 		finishProgressAfter,
 		prevUnwindPoint,
+		nil, // the overlay's blocks are not committed yet
 	); err != nil {
 		return true, err
 	}

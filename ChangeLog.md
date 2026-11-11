@@ -14,6 +14,7 @@
 - db: the `chaindata` log and trace indices now store txNums in chunks: these tables are 2-6x smaller and `eth_getLogs` over recent blocks is about 10x faster. Existing datadirs need no migration, but the DB schema version becomes 7.1, so older Erigon versions and an older local `rpcdaemon --datadir` refuse the datadir. To downgrade, remove `chaindata/`. Upgrade a local `rpcdaemon` together with `erigon`. This can be a breaking change (#25304) — by @AskAlexSharov
 - rpc: `/health` on the authenticated Engine port now requires a valid JWT, like every other request on that port, and answers 403 without one. The public HTTP port is unchanged. Update monitoring that probes `/health` on the Engine port without a token. `/health` request bodies are limited to 4 KiB. This can be a breaking change (#25871) — by @lupin012
 - rpc: `--rpc.batch.limit` now applies to the authenticated Engine port too; before, batches there had no size limit. A client that sends Engine batches with more requests than the limit (default 100) now gets a batch-limit error. This can be a breaking change (#25872) — by @lupin012
+- rpc: `trace_filter` now returns `-32602` instead of `-32000` for a block range wider than `--rpc.blockrange.limit`, as `eth_getLogs` does. This can be a breaking change for clients that match on the error code (#26094) — by @lupin012
 
 ### Added
 
@@ -23,6 +24,7 @@
 
 ### Changed
 
+- engine: testing block-building APIs require every supplied transaction in the requested order. If a transaction cannot be included, the request fails with its index, hash and cause instead of returning an incomplete block (#25752).
 - caplin: nodes without `--caplin.blobs-archive` no longer download blob sidecar indexes (`*-blocksidecars.idx`) (#25879) — by @awskii
 - cmd/utils: `--exec.no-prune` is renamed to `--debug.exec.no-prune`, and Erigon logs a warning at startup while pruning is disabled by this flag or `NO_PRUNE`. The setting is for diagnostics only: chaindata grows without bound and `--prune.mode` is not enforced. `--exec.no-prune` still works as a deprecated alias and will be removed in the next release (#25772) — by @awskii
 - execution, txpool: add EIP-8141 frame transactions and EIP-8250 keyed nonces at the Bogota devnet-1 spec level, activated at the chain's Bogota fork. Deploy the nonce manager before activation or include it in genesis (#25243).

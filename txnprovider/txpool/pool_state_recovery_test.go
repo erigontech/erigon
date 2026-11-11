@@ -112,15 +112,6 @@ func TestFramePoolParksAroundFailedStateRead(t *testing.T) {
 	}
 }
 
-type failedAccountReadView struct {
-	kvcache.CacheView
-	err error
-}
-
-func (v failedAccountReadView) Get([]byte) ([]byte, error) {
-	return nil, v.err
-}
-
 func TestFramePoolFailedBlockUpdateBlocksSelection(t *testing.T) {
 	ctx, pool, sender := keyedFramePoolEnv(t)
 	initial := newBlockChangeForAccounts(common.Hash{1}, 0)
@@ -141,7 +132,7 @@ func TestFramePoolFailedBlockUpdateBlocksSelection(t *testing.T) {
 	require.Equal(t, initial.ChangeBatch[0].BlockHeight, change.ChangeBatch[0].BlockHeight)
 	readErr := errors.New("account read failed")
 	// Observe the state at lock release, before OnNewBlock's outer error handler runs.
-	_, err = pool.applyBlockUpdate(change, TxnSlots{}, TxnSlots{}, TxnSlots{}, failedAccountReadView{err: readErr}, nil)
+	_, err = pool.applyBlockUpdate(change, TxnSlots{}, TxnSlots{}, TxnSlots{}, failingFrameCacheView{err: readErr}, nil)
 	require.ErrorIs(t, err, readErr)
 	require.Equal(t, common.Hash{2}, pool.stateBlockHash)
 

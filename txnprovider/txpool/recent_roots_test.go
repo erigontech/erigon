@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/types"
@@ -133,10 +134,12 @@ func TestFramePoolRecentRootForkBoundary(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				ctx, pool, sender := keyedFramePoolEnv(t)
 				now := uint64(time.Now().Unix())
-				pool.chainConfig.BogotaTime = common.NewUint64(now + 100)
-				backend := pool.ethBackend.(*frameValidationBackend)
+				chainConfig := chain.AllProtocolChanges.Copy()
+				chainConfig.BogotaTime = common.NewUint64(now + 100)
+				ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash, chainConfig)
+				backend := &frameValidationBackend{payer: sender, balance: 1_000_000, valid: true}
+				pool.ethBackend = backend
 				initial := newBlockChangeForAccounts(common.Hash{1}, 0)
 				initial.ChangeBatch[0].BlockTime = now + tc.initialTime
 				initial.ChangeBatch[0].SlotNumber = common.NewUint64(tc.initialSlot)
@@ -184,10 +187,10 @@ func TestFramePoolRestoredRecentRootEviction(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				ctx, pool, poolDB, coreDB, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
 				now := uint64(time.Now().Unix())
-				pool.chainConfig = pool.chainConfig.Copy()
-				pool.chainConfig.BogotaTime = common.NewUint64(now)
+				chainConfig := chain.AllProtocolChanges.Copy()
+				chainConfig.BogotaTime = common.NewUint64(now)
+				ctx, pool, poolDB, coreDB, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash, chainConfig)
 				pool.chainID.SetUint64(1)
 				backend := &frameValidationBackend{payer: sender, balance: 1_000_000, valid: true}
 				if !tc.validated {
