@@ -292,5 +292,7 @@ func TestChargedTxKeepsOneCopyOfItsWrites(t *testing.T) {
 	require.True(t, charged, "the sender charge must be recorded")
 	_, tipped := recorded.GetBalance(accounts.InternAddress(coinbase))
 	require.True(t, tipped, "the tip must be recorded")
+	_, kept := recorded.GetNonce(created)
+	require.True(t, kept, "the worker's writes must be recorded")
 	require.Equal(t, 1, workerWrites.Count(), "the worker's write-set must stay as the worker left it")
 }

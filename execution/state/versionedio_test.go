@@ -2188,12 +2188,9 @@ func TestWriteSetMergeFromExtendsTheSetInPlace(t *testing.T) {
 	}
 	nonce := &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: NoncePath}, Val: 7}
 
-	ws := &WriteSet{}
-	ws.SetBalance(addr, balance(1))
-	ws.SetNonce(addr, nonce)
-	next := &WriteSet{}
+	ws := newWriteSet(balance(1), nonce)
 	nextBalance := balance(2)
-	next.SetBalance(addr, nextBalance)
+	next := newWriteSet(nextBalance)
 
 	ws.MergeFrom(next)
 
