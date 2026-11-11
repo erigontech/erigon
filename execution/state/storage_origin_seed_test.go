@@ -64,7 +64,7 @@ func TestStorageColdReadSeedsOrigin(t *testing.T) {
 
 	// The read itself is recorded at originIndex (not UnknownVersion), so it is
 	// value-validated against the shared origin rather than version-only.
-	tr, recorded := ibs.versionedReads.GetStorage(addr, key)
+	tr, recorded := ibs.txIO.GetStorage(addr, key)
 	require.True(t, recorded)
 	require.Equal(t, originIndex, tr.Version.TxIndex, "cold read must record the origin version")
 }

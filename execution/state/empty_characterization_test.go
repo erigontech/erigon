@@ -70,7 +70,7 @@ func TestEmpty_Characterization(t *testing.T) {
 		empty, err := ibs.Empty(addr)
 		require.NoError(t, err)
 		require.True(t, empty)
-		tr, ok := ibs.versionedReads.GetAddress(addr)
+		tr, ok := ibs.txIO.GetAddress(addr)
 		require.True(t, ok, "absent Empty must record an AddressPath read for OCC create/absent detection")
 		require.Nil(t, tr.Val, "the recorded AddressPath read must carry a nil account")
 	})
@@ -115,7 +115,7 @@ func TestEmptyOnAbsentAccountOnlyRecordsTheRead(t *testing.T) {
 
 	require.Empty(t, ibs.journal.entries, "a read must not grow the journal")
 	require.True(t, ibs.warmReadable(addr), "a read must not disable the read-once path")
-	read, ok := ibs.versionedReads.GetAddress(addr)
+	read, ok := ibs.txIO.GetAddress(addr)
 	require.True(t, ok, "the absence must stay in the read set for validation")
 	require.Nil(t, read.Val)
 }
@@ -187,10 +187,10 @@ func TestEmpty_WarmReadsKeepConflictTracking(t *testing.T) {
 				require.False(t, empty)
 			}
 			ibs.PublishOrigins()
-			require.Equal(t, VersionValid, vm.ValidateReadSet(3, ibs.versionedReads, validateEqualVersion, false, ""))
+			require.Equal(t, VersionValid, vm.ValidateReadSet(3, ibs.VersionedReads(), validateEqualVersion, false, ""))
 
 			writeFor(vm, addr, c.path, accounts.NilKey, Version{TxIndex: 1}, c.value, true)
-			require.Equal(t, VersionInvalid, vm.ValidateReadSet(3, ibs.versionedReads, validateEqualVersion, false, ""))
+			require.Equal(t, VersionInvalid, vm.ValidateReadSet(3, ibs.VersionedReads(), validateEqualVersion, false, ""))
 		})
 	}
 }

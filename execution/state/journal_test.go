@@ -1,6 +1,7 @@
 package state
 
 import (
+	"slices"
 	"testing"
 	"unsafe"
 
@@ -76,6 +77,7 @@ func TestJournalDirtySymmetry(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			j := newJournal()
+			j.io = &ioTable{}
 			defer j.release()
 			tc.call(j)
 
@@ -89,15 +91,15 @@ func TestJournalDirtySymmetry(t *testing.T) {
 			// names, so the constructor must have incremented exactly that.
 			wantAddr, wantDirty := j.entries[0].dirtied()
 			if !wantDirty {
-				if len(j.dirties) != 0 {
-					t.Errorf("dirtied %d accounts, but dirtied() reports the kind is clean", len(j.dirties))
+				if n := len(slices.Collect(j.dirtyAddrs())); n != 0 {
+					t.Errorf("dirtied %d accounts, but dirtied() reports the kind is clean", n)
 				}
 				return
 			}
-			if len(j.dirties) != 1 {
-				t.Fatalf("dirtied %d accounts, want exactly 1", len(j.dirties))
+			if n := len(slices.Collect(j.dirtyAddrs())); n != 1 {
+				t.Fatalf("dirtied %d accounts, want exactly 1", n)
 			}
-			if got := j.dirties[wantAddr]; got != 1 {
+			if got := j.io.find(wantAddr).dirty; got != 1 {
 				t.Errorf("dirties[%v] = %d, want 1", wantAddr, got)
 			}
 		})
@@ -115,6 +117,7 @@ func TestJournalDirtySymmetry(t *testing.T) {
 // zero allocs per op once the entries slice has warmed up.
 func BenchmarkJournalStorageChange(b *testing.B) {
 	j := newJournal()
+	j.io = &ioTable{}
 	defer j.release()
 	addr := accounts.InternAddress(common.HexToAddress("0x00000000000000000000000000000000000000aa"))
 	key := accounts.InternKey(common.HexToHash("0x01"))
@@ -140,6 +143,7 @@ func BenchmarkJournalStorageChange(b *testing.B) {
 // pinned alive by a stale entry after the journal is reused.
 func TestJournalResetDropsEntriesItReslicesPast(t *testing.T) {
 	j := newJournal()
+	j.io = &ioTable{}
 	t.Cleanup(j.release)
 
 	addr := accounts.InternAddress(common.Address{1})

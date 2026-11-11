@@ -919,7 +919,7 @@ func TestVersionMapOverwrite(t *testing.T) {
 	states[1].versionedWrites = WriteSet{}
 
 	// Tx2 read should get Tx0's value
-	states[2].versionedReads = ReadSet{}
+	states[2].txIO.clearReads()
 	v, err = states[2].GetState(addr, key)
 	assert.NoError(t, err)
 	b, err = states[2].GetBalance(addr)
@@ -942,7 +942,7 @@ func TestVersionMapOverwrite(t *testing.T) {
 	states[0].versionedWrites = WriteSet{}
 
 	// Tx2 read again should get default vals
-	states[2].versionedReads = ReadSet{}
+	states[2].txIO.clearReads()
 	v, err = states[2].GetState(addr, key)
 	assert.NoError(t, err)
 	b, err = states[2].GetBalance(addr)
@@ -1010,7 +1010,7 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	// Now that Tx1 has flushed, re-reading without stale cache simulates a
 	// re-execution that the scheduler would trigger on dependency.
 	states[2].stateObjects = map[accounts.Address]*stateObject{}
-	states[2].versionedReads = ReadSet{}
+	states[2].txIO.clearReads()
 	v, err = states[2].GetState(addr, key2)
 	assert.NoError(t, err)
 	assert.Equal(t, val2, v)
@@ -1040,7 +1040,7 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	states[2].versionedWrites = WriteSet{}
 
 	// Tx3 read
-	states[3].versionedReads = ReadSet{}
+	states[3].txIO.clearReads()
 	v, err = states[3].GetState(addr, key1)
 	assert.NoError(t, err)
 	assert.Equal(t, val1, v)
@@ -1065,7 +1065,7 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	// we need to flush the local state objects as we're not
 	// resetting the state - which is artificial for the test
 	states[3].stateObjects = map[accounts.Address]*stateObject{}
-	states[3].versionedReads = ReadSet{}
+	states[3].txIO.clearReads()
 	v, err = states[3].GetState(addr, key1)
 	assert.NoError(t, err)
 	assert.Equal(t, uint256.Int{}, v)
@@ -1083,7 +1083,7 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	states[1].versionedWrites = WriteSet{}
 
 	// Tx3 read
-	states[3].versionedReads = ReadSet{}
+	states[3].txIO.clearReads()
 	v, err = states[3].GetState(addr, key1)
 	assert.NoError(t, err)
 	assert.Equal(t, uint256.Int{}, v)
@@ -1374,7 +1374,7 @@ func TestSetCodeReusesTheLastEqualCode(t *testing.T) {
 }
 
 // A pooled IntraBlockState serves call after call: nothing of one call may be
-// visible to the next, while the read set keeps its maps.
+// visible to the next.
 func TestResetForPoolCarriesNothingToTheNextCall(t *testing.T) {
 	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
 	key := accounts.InternKey(common.HexToHash("0x01"))
@@ -1387,7 +1387,7 @@ func TestResetForPoolCarriesNothingToTheNextCall(t *testing.T) {
 	vm.FlushVersionedWrites(ibs.VersionedWrites(), true) // an address with no cell is not memoized
 	ibs.readSelfDestructMemo(addr)
 	require.NotEmpty(t, ibs.sdProbe)
-	require.NotNil(t, ibs.versionedReads.address)
+	require.NotEmpty(t, ibs.txIO.recs)
 	ibs.SetTxContext(5, 2)
 	ibs.SetVersion(3)
 
@@ -1396,8 +1396,8 @@ func TestResetForPoolCarriesNothingToTheNextCall(t *testing.T) {
 	require.Zero(t, ibs.blockNum)
 	require.Zero(t, ibs.version)
 	require.Empty(t, ibs.sdProbe)
-	require.NotNil(t, ibs.versionedReads.address, "the read set keeps its maps")
-	require.Empty(t, ibs.versionedReads.address)
+	require.Empty(t, ibs.txIO.recs)
+	require.Empty(t, ibs.txIO.idx)
 
 	ibs.stateReader = NewNoopReader()
 	balance, err := ibs.GetBalance(addr)
@@ -1436,7 +1436,7 @@ func TestResetForPoolDropsAnOversizedState(t *testing.T) {
 
 	reads := New(NewNoopReader())
 	for i := range maxPooledEntries + 1 {
-		reads.versionedReads.SetCodeSize(accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i+1)))), VersionedRead[int]{})
+		reads.txIO.SetCodeSize(accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i+1)))), VersionedRead[int]{})
 	}
 	require.False(t, reads.resetForPool(), "any read-set map counts toward the bound")
 
@@ -1580,7 +1580,7 @@ func TestResetForPoolDropsAStateWithTooManySlots(t *testing.T) {
 	ibs := New(NewNoopReader())
 	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
 	for i := range maxPooledEntries + 1 {
-		ibs.versionedReads.SetStorage(addr, accounts.InternKey(common.BigToHash(big.NewInt(int64(i)))), VersionedRead[uint256.Int]{})
+		ibs.txIO.SetStorage(addr, accounts.InternKey(common.BigToHash(big.NewInt(int64(i)))), VersionedRead[uint256.Int]{})
 	}
 	require.False(t, ibs.resetForPool(), "one address with that many slots must not be pooled")
 }

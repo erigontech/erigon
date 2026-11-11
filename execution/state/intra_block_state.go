@@ -182,7 +182,8 @@ type IntraBlockState struct {
 	// at the block level.
 	versionMap      *VersionMap
 	versionedWrites WriteSet
-	versionedReads  ReadSet
+	// txIO holds the running tx's reads, access marks and dirty counts per address.
+	txIO ioTable
 	// versionedOrigins collects committed pre-block base cells (at originIndex) that a cold
 	// read resolves this tx. Reads record here (tx-local, lock-free) instead of writing the
 	// shared versionMap mid-execution; the executor publishes them batched at flush, so the
@@ -251,6 +252,7 @@ func New(stateReader StateReader) *IntraBlockState {
 		trace:             false,
 		dep:               UnknownDep,
 	}
+	ibs.journal.io = &ibs.txIO
 	ibs.codeAccess, _ = stateReader.(codeAccessTracker)
 	ibs.revisions.init()
 	return ibs
@@ -367,7 +369,7 @@ func (ibs *IntraBlockState) Reset() {
 	// Read side rebinds to a fresh empty set: VersionedReads() at end of
 	// tx hands the per-path maps to result.TxIn, so rebinding leaves the
 	// handed-over maps intact while the next tx lazily reallocs.
-	ibs.versionedReads = ReadSet{}
+	ibs.txIO.clearReads()
 	// Write side: VersionedWrites() returns Cloned snapshots, so the
 	// originals in ibs.versionedWrites are no longer referenced after the
 	// boundary call, so recycle can take every VW back.
@@ -425,16 +427,11 @@ const maxPooledEntries = 16 * 1024
 // resetForPool clears everything one call left and reports whether ibs is
 // small enough to pool.
 func (ibs *IntraBlockState) resetForPool() bool {
-	reads := ibs.versionedReads
-	poolable := len(ibs.stateObjects)+len(ibs.nilAccounts)+ibs.accessList.entries()+reads.entries() <= maxPooledEntries
+	poolable := len(ibs.stateObjects)+len(ibs.nilAccounts)+ibs.accessList.entries()+ibs.txIO.entries() <= maxPooledEntries
 	ibs.Reset()
 	if !poolable {
 		return false
 	}
-	// One call never hands its read set out, so the maps keep their capacity
-	// instead of the empty set Reset installs.
-	reads.clearForReuse()
-	ibs.versionedReads = reads
 	// Reset only bumps the probe epoch; a pooled ibs would collect every
 	// address later calls touch.
 	clear(ibs.sdProbe)
@@ -680,7 +677,7 @@ func (ibs *IntraBlockState) Empty(addr accounts.Address) (empty bool, err error)
 		// absent account is not a real EVM balance access, so it stays out of the
 		// block access list.
 		if destructed, sdRes, ok := ibs.readSelfDestructMemo(addr); ok && sdRes.resolved() && destructed {
-			ibs.versionedReads.SetBalance(addr, VersionedRead[uint256.Int]{
+			ibs.txIO.SetBalance(addr, VersionedRead[uint256.Int]{
 				ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: sdRes.DepIdx(), Incarnation: sdRes.Incarnation()}, internal: true},
 			})
 		}
@@ -713,25 +710,25 @@ func (ibs *IntraBlockState) emptyFromWarmReads(addr accounts.Address) (empty, ok
 	if !ibs.warmReadable(addr) {
 		return false, false
 	}
-	account, ok := ibs.versionedReads.GetAddress(addr)
+	account, ok := ibs.txIO.GetAddress(addr)
 	if !ok || !warmSource(account.Source) || account.Val == nil || account.Val.IsNil() {
 		return false, false
 	}
-	balance, ok := ibs.versionedReads.GetBalance(addr)
+	balance, ok := ibs.txIO.GetBalance(addr)
 	if !ok || !warmSource(balance.Source) {
 		return false, false
 	}
 	if !balance.Val.IsZero() {
 		return false, true
 	}
-	nonce, ok := ibs.versionedReads.GetNonce(addr)
+	nonce, ok := ibs.txIO.GetNonce(addr)
 	if !ok || !warmSource(nonce.Source) {
 		return false, false
 	}
 	if nonce.Val != 0 {
 		return false, true
 	}
-	codeHash, ok := ibs.versionedReads.GetCodeHash(addr)
+	codeHash, ok := ibs.txIO.GetCodeHash(addr)
 	if !ok || !warmSource(codeHash.Source) {
 		return false, false
 	}
@@ -1226,7 +1223,7 @@ func (ibs *IntraBlockState) TouchAccount(addr accounts.Address) error {
 			return
 		}
 		ibs.recordWriteBalance(addr, uint256.Int{})
-		if _, ok := ibs.journal.dirties[addr]; !ok {
+		if !ibs.txIO.isDirty(addr) {
 			ibs.touchAccount(addr)
 		}
 	}
@@ -1337,20 +1334,20 @@ func (ibs *IntraBlockState) getVersionedAccount(addr accounts.Address, readStora
 // version map (a destruct with no revival). That verdict is final for the tx: the
 // committed record must not revive it, and validation catches a later re-creation.
 func (ibs *IntraBlockState) readAbsentFromMap(addr accounts.Address) bool {
-	tr, ok := ibs.versionedReads.GetAddress(addr)
+	tr, ok := ibs.txIO.GetAddress(addr)
 	return ok && tr.Source == MapRead && (tr.Val == nil || tr.Val.Account() == nil)
 }
 
 // readAbsentFromCommitted reports whether this tx already read addr as absent from the committed state.
 func (ibs *IntraBlockState) readAbsentFromCommitted(addr accounts.Address) bool {
-	tr, ok := ibs.versionedReads.GetAddress(addr)
+	tr, ok := ibs.txIO.GetAddress(addr)
 	return ok && tr.Source == StorageRead && (tr.Val == nil || tr.Val.Account() == nil)
 }
 
 // readAbsent is like readAbsentFromMap, but also counts an absence read from the committed state:
 // the base reader can serve a lower tx's creation later in the attempt.
 func (ibs *IntraBlockState) readAbsent(addr accounts.Address) bool {
-	tr, ok := ibs.versionedReads.GetAddress(addr)
+	tr, ok := ibs.txIO.GetAddress(addr)
 	return ok && (tr.Val == nil || tr.Val.Account() == nil)
 }
 
@@ -1361,7 +1358,7 @@ func (ibs *IntraBlockState) absenceIsFinal(addr accounts.Address) bool {
 	if !ibs.readAbsentFromMap(addr) {
 		return false
 	}
-	tr, _ := ibs.versionedReads.GetAddress(addr)
+	tr, _ := ibs.txIO.GetAddress(addr)
 	return !ibs.versionMap.destructKeptBalance(addr, tr.Version.TxIndex)
 }
 
@@ -2446,7 +2443,7 @@ func (ibs *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 				sdRes.DepIdx() >= res.DepIdx() && res.ValStatus() == ValueDeleted {
 				preTxBalance.Clear()
 				balWiped = true
-				ibs.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{
+				ibs.txIO.SetSelfDestruct(addr, VersionedRead[bool]{
 					ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: sdRes.DepIdx(), Incarnation: sdRes.Incarnation()}},
 					Val:        true,
 				})
@@ -2507,13 +2504,13 @@ func (ibs *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 	// internal read is promoted to give the balance write a block-access-list baseline.
 	ibs.MarkAddressAccess(addr, true)
 	if ibs.versionMap != nil && !ibs.noConflictDetection {
-		if vr, seen := ibs.versionedReads.GetBalance(addr); !seen && !balWiped {
-			ibs.versionedReads.SetBalance(addr, VersionedRead[uint256.Int]{ReadHeader{Source: balSource, Version: balVersion}, preTxBalance})
+		if vr, seen := ibs.txIO.GetBalance(addr); !seen && !balWiped {
+			ibs.txIO.SetBalance(addr, VersionedRead[uint256.Int]{ReadHeader{Source: balSource, Version: balVersion}, preTxBalance})
 		} else if seen && vr.internal {
 			vr.internal = false
-			ibs.versionedReads.SetBalance(addr, vr)
+			ibs.txIO.SetBalance(addr, vr)
 		}
-		ibs.versionedReads.SetIncarnation(addr, VersionedRead[uint64]{ReadHeader{Source: incSource, Version: incVersion}, prevInc})
+		ibs.txIO.SetIncarnation(addr, VersionedRead[uint64]{ReadHeader{Source: incSource, Version: incVersion}, prevInc})
 	}
 	ibs.recordWriteBalance(addr, newObj.Balance())
 	ibs.recordWriteIncarnation(addr, newObj.data.Incarnation)
@@ -2537,7 +2534,7 @@ func (ibs *IntraBlockState) PopSnapshot(snapshot int) {
 func (ibs *IntraBlockState) RevertToSnapshot(revid int, err error) {
 	var traced bool
 	if dbg.TraceTransactionIO && (ibs.trace || dbg.TracingAccounts()) {
-		for addr := range ibs.journal.dirties {
+		for addr := range ibs.journal.dirtyAddrs() {
 			if ibs.trace || dbg.TraceAccount(addr.Handle()) {
 				traced = true
 				if err == nil {
@@ -2673,7 +2670,7 @@ func (ibs *IntraBlockState) FinalizeTx(chainRules *chain.Rules, stateWriter Stat
 			}
 		}
 	}
-	for addr := range ibs.journal.dirties {
+	for addr := range ibs.journal.dirtyAddrs() {
 		so, exist := ibs.stateObjects[addr]
 		if !exist {
 			// ripeMD is 'touched' at block 1714175, in txn 0x1237f737031e40bcde4a8b7e717b2d15e3ecadfe49bb1bbc71ee9deb09c6fcf2
@@ -2718,7 +2715,7 @@ func (ibs *IntraBlockState) FinalizeTx(chainRules *chain.Rules, stateWriter Stat
 }
 
 func (ibs *IntraBlockState) SoftFinalise() {
-	for addr := range ibs.journal.dirties {
+	for addr := range ibs.journal.dirtyAddrs() {
 		// On the parallel path a write can be recorded without materializing a
 		// stateObject, so dirtiness comes from the journal, not object existence.
 		// The serial path keeps the object gate: a touched-but-reverted address
@@ -2756,7 +2753,7 @@ func (ibs *IntraBlockState) BalanceIncreaseSet() map[accounts.Address]uint256.In
 }
 
 func (ibs *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter StateWriter) error {
-	for addr := range ibs.journal.dirties {
+	for addr := range ibs.journal.dirtyAddrs() {
 		ibs.stateObjectsDirty[addr] = struct{}{}
 	}
 	for addr, stateObject := range ibs.stateObjects {
@@ -2917,7 +2914,7 @@ func (ibs *IntraBlockState) withholdCreatedEmptyAccounts(chainRules *chain.Rules
 		if !EIP161EmptyRemoval(chainRules.IsEIP161Enabled(), chainRules.IsAura, addr) {
 			continue
 		}
-		read, ok := ibs.versionedReads.GetAddress(addr)
+		read, ok := ibs.txIO.GetAddress(addr)
 		if (read.Val != nil && !read.Val.IsNil()) || !writes.createdEmpty(addr) {
 			continue
 		}
@@ -2951,7 +2948,7 @@ func (ibs *IntraBlockState) withholdCreatedEmptyAccounts(chainRules *chain.Rules
 // MergeTxIOInto folds the current transaction's reads and supplied writes into io.
 func (ibs *IntraBlockState) MergeTxIOInto(io *VersionedIO, writes *WriteSet) {
 	version := Version{BlockNum: ibs.blockNum, TxIndex: ibs.txIndex, Incarnation: ibs.version}
-	io.mergeTx(version, ibs.versionedReads, writes)
+	io.mergeTx(version, ibs.txIO.toReadSet(), writes)
 }
 
 // FlushWritesToVersionMap publishes the supplied writes to this state's version map.
@@ -3040,7 +3037,7 @@ func (ibs *IntraBlockState) WriteFlushedTo(writes *WriteSet, stateWriter StateWr
 func (ibs *IntraBlockState) Print(chainRules chain.Rules, all bool) {
 	for addr, stateObject := range ibs.stateObjects {
 		_, isDirty := ibs.stateObjectsDirty[addr]
-		_, isDirty2 := ibs.journal.dirties[addr]
+		isDirty2 := ibs.txIO.isDirty(addr)
 
 		printAccount(chainRules.IsEIP161Enabled(), chainRules.IsAura, addr, stateObject, all || isDirty || isDirty2)
 	}
@@ -3139,7 +3136,7 @@ func (ibs *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase account
 	}
 	// Reset transient storage at the beginning of transaction execution
 	clear(ibs.transientStorage)
-	ibs.versionedReads.access = nil
+	ibs.txIO.clearAccess()
 	ibs.recordAccess = true
 
 	// EIP-7928 records the EIP-3651 coinbase access even without a priority fee.
@@ -3195,17 +3192,7 @@ func (ibs *IntraBlockState) MarkAddressAccess(addr accounts.Address, revertable 
 	if !ibs.recordAccess {
 		return
 	}
-	if ibs.versionedReads.access == nil {
-		ibs.versionedReads.access = make(AccessSet)
-	}
-	if opts, ok := ibs.versionedReads.access[addr]; ok {
-		if opts.revertable && !revertable {
-			opts.revertable = false
-			ibs.versionedReads.access[addr] = opts
-		}
-	} else {
-		ibs.versionedReads.access[addr] = accessOptions{revertable: revertable}
-	}
+	ibs.txIO.markAccess(addr, revertable)
 }
 
 // StartAccessRecording enables versioned access tracking until ResetVersionedIO.
@@ -3221,7 +3208,7 @@ func (ibs *IntraBlockState) StartAccessRecording() {
 // access set, used on the NoBAL path (eth_call) where no block access list is built.
 func (ibs *IntraBlockState) StopAccessRecording() {
 	ibs.recordAccess = false
-	ibs.versionedReads.access = nil
+	ibs.txIO.clearAccess()
 }
 
 // MarkReadsInternal marks all versioned reads for addr as internal.
@@ -3230,14 +3217,13 @@ func (ibs *IntraBlockState) StopAccessRecording() {
 // a state read was performed for gas calculation but the operation
 // was rejected (e.g. CALL with value inside STATICCALL).
 func (ibs *IntraBlockState) MarkReadsInternal(addr accounts.Address) {
-	ibs.versionedReads.ScanAddr(addr, func(_ AccountPath, _ accounts.StorageKey, hdr *ReadHeader) {
+	ibs.txIO.ScanAddr(addr, func(_ AccountPath, _ accounts.StorageKey, hdr *ReadHeader) {
 		hdr.internal = true
 	})
 }
 
 func (ibs *IntraBlockState) AccessedAddr(addr accounts.Address) bool {
-	_, ok := ibs.versionedReads.access[addr]
-	return ok
+	return ibs.txIO.accessed(addr)
 }
 
 func (ibs *IntraBlockState) accountRead(addr accounts.Address, account *accounts.Account, source ReadSource, version Version) {
@@ -3259,7 +3245,7 @@ func (ibs *IntraBlockState) accountRead(addr accounts.Address, account *accounts
 				version = UnknownVersion
 			}
 		}
-		ibs.versionedReads.SetAddress(addr, VersionedRead[AccountView]{
+		ibs.txIO.SetAddress(addr, VersionedRead[AccountView]{
 			ReadHeader: ReadHeader{Source: source, Version: version},
 			Val:        NewAccountView(&data),
 		})
@@ -3534,7 +3520,7 @@ func (ibs *IntraBlockState) versionedWriteSelfDestruct(addr accounts.Address) (b
 	if !ok {
 		return false, false
 	}
-	if _, isDirty := ibs.journal.dirties[addr]; !isDirty {
+	if !ibs.txIO.isDirty(addr) {
 		return false, false
 	}
 	return vw.Val, true
@@ -3547,7 +3533,7 @@ func (ibs *IntraBlockState) versionedWriteCreateContract(addr accounts.Address) 
 	if ibs.versionMap == nil {
 		return false, false
 	}
-	if _, isDirty := ibs.journal.dirties[addr]; !isDirty {
+	if !ibs.txIO.isDirty(addr) {
 		return false, false
 	}
 	vw, ok := ibs.versionedWrites.GetCreateContract(addr)
@@ -3566,7 +3552,7 @@ func (ibs *IntraBlockState) reconstructCellFlags(obj *stateObject, addr accounts
 	if obj == nil {
 		return
 	}
-	if _, isDirty := ibs.journal.dirties[addr]; isDirty {
+	if ibs.txIO.isDirty(addr) {
 		if vw, ok := ibs.versionedWrites.GetCreateContract(addr); ok && vw.Val {
 			obj.createdContract = true
 		}
@@ -3610,7 +3596,7 @@ func (ibs *IntraBlockState) versionedWriteHit(addr accounts.Address, path Accoun
 	if ibs.versionMap == nil {
 		return false
 	}
-	if _, isDirty := ibs.journal.dirties[addr]; !isDirty {
+	if !ibs.txIO.isDirty(addr) {
 		return false
 	}
 	switch path {
@@ -3703,11 +3689,11 @@ func (ibs *IntraBlockState) Version() Version {
 // end of tx (RecordReads / TxIn), after which ResetVersionedIO rebinds
 // the IBS field to a fresh set.
 func (ibs *IntraBlockState) VersionedReads() ReadSet {
-	return ibs.versionedReads
+	return ibs.txIO.toReadSet()
 }
 
 func (ibs *IntraBlockState) ResetVersionedIO() {
-	ibs.versionedReads = ReadSet{}
+	ibs.txIO.clearReads()
 	ibs.versionedWrites.recycle()
 	ibs.dep = UnknownDep
 	ibs.recordAccess = false
@@ -3716,7 +3702,7 @@ func (ibs *IntraBlockState) ResetVersionedIO() {
 
 // ResetVersionedReads clears tracked versioned reads without affecting writes.
 func (ibs *IntraBlockState) ResetVersionedReads() {
-	ibs.versionedReads = ReadSet{}
+	ibs.txIO.clearReads()
 }
 
 // VersionedWrites returns a frozen typed snapshot of this tx's recorded writes.

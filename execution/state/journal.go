@@ -21,6 +21,7 @@ package state
 
 import (
 	"fmt"
+	"iter"
 	"sync"
 
 	"github.com/holiman/uint256"
@@ -31,9 +32,7 @@ import (
 
 var journalPool = sync.Pool{
 	New: func() any {
-		return &journal{
-			dirties: make(map[accounts.Address]int),
-		}
+		return &journal{}
 	},
 }
 
@@ -102,9 +101,9 @@ type journalEntry struct {
 // commit. These are tracked to be able to be reverted in case of an execution
 // exception or revertal request.
 type journal struct {
-	dirties map[accounts.Address]int // Dirty accounts and the number of changes
-	entries []journalEntry           // Current changes tracked by the journal
-	epoch   uint64                   // Moves on every revert, reset and unjournalled state change
+	io      *ioTable       // keeps each address's number of unreverted changes
+	entries []journalEntry // Current changes tracked by the journal
+	epoch   uint64         // Moves on every revert, reset and unjournalled state change
 }
 
 // newJournal gets a journal from the pool.
@@ -115,6 +114,7 @@ func newJournal() *journal {
 // release returns the journal to the pool after resetting it.
 func (j *journal) release() {
 	j.Reset()
+	j.io = nil
 	journalPool.Put(j)
 }
 
@@ -122,7 +122,9 @@ func (j *journal) Reset() {
 	j.epoch++
 	clear(j.entries)
 	j.entries = j.entries[:0]
-	clear(j.dirties)
+	if j.io != nil {
+		j.io.clearDirty()
+	}
 }
 
 // revert undoes a batch of journalled modifications along with any reverted
@@ -138,9 +140,7 @@ func (j *journal) revert(statedb *IntraBlockState, snapshot int) {
 
 		// Drop any dirty tracking induced by the change
 		if addr, isdirty := j.entries[i].dirtied(); isdirty {
-			if j.dirties[addr]--; j.dirties[addr] == 0 {
-				delete(j.dirties, addr)
-			}
+			j.io.find(addr).dirty--
 		}
 	}
 	clear(j.entries[snapshot:])
@@ -153,7 +153,18 @@ func (j *journal) revert(statedb *IntraBlockState, snapshot int) {
 // precompile consensus exception; CreateAccount also uses it to keep a
 // resurrected address dirty across an intra-tx revert.
 func (j *journal) dirty(addr accounts.Address) {
-	j.dirties[addr]++
+	j.io.get(addr).dirty++
+}
+
+// dirtyAddrs yields every address with unreverted changes.
+func (j *journal) dirtyAddrs() iter.Seq[accounts.Address] {
+	return func(yield func(accounts.Address) bool) {
+		for i := 0; i < len(j.io.recs); i++ {
+			if r := &j.io.recs[i]; r.dirty > 0 && !yield(r.addr) {
+				return
+			}
+		}
+	}
 }
 
 // length returns the current number of entries in the journal.
@@ -179,12 +190,12 @@ func (je *journalEntry) committed() bool { return je.flags&flagCommitted != 0 }
 
 func (j *journal) createObjectChange(account accounts.Address) {
 	j.entries = append(j.entries, journalEntry{kind: kindCreateObject, account: account})
-	j.dirties[account]++
+	j.dirty(account)
 }
 
 func (j *journal) resetObjectChange(account accounts.Address, prev *stateObject, prevWrites *createWriteSnapshot) {
 	j.entries = append(j.entries, journalEntry{kind: kindResetObject, account: account, extra: &journalExtra{prevObj: prev, prevWrites: prevWrites}})
-	j.dirties[account]++
+	j.dirty(account)
 }
 
 func (j *journal) selfdestructChange(account accounts.Address, prev bool, prevbalance uint256.Int, wasCommitted bool) {
@@ -193,7 +204,7 @@ func (j *journal) selfdestructChange(account accounts.Address, prev bool, prevba
 		flags |= flagSelfdestructPrev
 	}
 	j.entries = append(j.entries, journalEntry{kind: kindSelfdestruct, account: account, value: prevbalance, flags: flags})
-	j.dirties[account]++
+	j.dirty(account)
 }
 
 // selfdestructChangeVersioned records a self-destruct on the parallel path,
@@ -216,7 +227,7 @@ func (j *journal) selfdestructChangeVersioned(account accounts.Address, prev boo
 		e.extra = &journalExtra{prevBalanceVersioned: prevBalanceVersioned}
 	}
 	j.entries = append(j.entries, e)
-	j.dirties[account]++
+	j.dirty(account)
 }
 
 func (j *journal) balanceChange(account accounts.Address, prev uint256.Int, wasCommitted, prevDeleted bool) {
@@ -225,12 +236,12 @@ func (j *journal) balanceChange(account accounts.Address, prev uint256.Int, wasC
 		flags |= flagBalanceDeleted
 	}
 	j.entries = append(j.entries, journalEntry{kind: kindBalance, account: account, value: prev, flags: flags})
-	j.dirties[account]++
+	j.dirty(account)
 }
 
 func (j *journal) balanceIncrease(account accounts.Address, increase uint256.Int) {
 	j.entries = append(j.entries, journalEntry{kind: kindBalanceIncrease, account: account, value: increase})
-	j.dirties[account]++
+	j.dirty(account)
 }
 
 func (j *journal) balanceIncreaseTransfer(bi *BalanceIncrease) {
@@ -239,17 +250,17 @@ func (j *journal) balanceIncreaseTransfer(bi *BalanceIncrease) {
 
 func (j *journal) nonceChange(account accounts.Address, prev uint64, wasCommitted bool) {
 	j.entries = append(j.entries, journalEntry{kind: kindNonce, account: account, aux: prev, flags: commitFlag(wasCommitted)})
-	j.dirties[account]++
+	j.dirty(account)
 }
 
 func (j *journal) storageChange(account accounts.Address, key accounts.StorageKey, prevalue uint256.Int, wasCommitted bool) {
 	j.entries = append(j.entries, journalEntry{kind: kindStorage, account: account, key: key, value: prevalue, flags: commitFlag(wasCommitted)})
-	j.dirties[account]++
+	j.dirty(account)
 }
 
 func (j *journal) fakeStorageChange(account accounts.Address, key accounts.StorageKey, prevalue uint256.Int) {
 	j.entries = append(j.entries, journalEntry{kind: kindFakeStorage, account: account, key: key, value: prevalue})
-	j.dirties[account]++
+	j.dirty(account)
 }
 
 func (j *journal) codeChange(account accounts.Address, prevcode []byte, prevhash accounts.CodeHash, wasCommitted bool) {
@@ -258,7 +269,7 @@ func (j *journal) codeChange(account accounts.Address, prevcode []byte, prevhash
 		extra = &journalExtra{prevcode: prevcode, prevhash: prevhash}
 	}
 	j.entries = append(j.entries, journalEntry{kind: kindCode, account: account, flags: commitFlag(wasCommitted), extra: extra})
-	j.dirties[account]++
+	j.dirty(account)
 }
 
 func (j *journal) refundChange(prev uint64) {
@@ -267,7 +278,7 @@ func (j *journal) refundChange(prev uint64) {
 
 func (j *journal) touchAccount(account accounts.Address, wasCommitted bool, prev uint256.Int) {
 	j.entries = append(j.entries, journalEntry{kind: kindTouch, account: account, value: prev, flags: commitFlag(wasCommitted)})
-	j.dirties[account]++
+	j.dirty(account)
 }
 
 func (j *journal) accessListAddAccountChange(address accounts.Address) {

@@ -1509,7 +1509,7 @@ func TestAbsentConclusionThenCreatorFlushAborts(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, exists)
 	io := NewVersionedIO(10)
-	io.RecordReads(Version{TxIndex: 9}, ibs.versionedReads)
+	io.RecordReads(Version{TxIndex: 9}, ibs.VersionedReads())
 	require.Equal(t, VersionInvalid, vm.ValidateVersion(9, io, validateEqualVersion, true, ""))
 }
 
@@ -1541,12 +1541,12 @@ func TestColdFieldReadAfterReconciledLoadValidates(t *testing.T) {
 	ch, err := ibs.GetCodeHash(addr)
 	require.NoError(t, err)
 	require.Equal(t, code.Hash, ch)
-	if tr, ok := ibs.versionedReads.GetCodeHash(addr); ok {
+	if tr, ok := ibs.txIO.GetCodeHash(addr); ok {
 		require.NotEqual(t, ReadSetRead, tr.Source)
 	}
 	ibs.PublishOrigins()
 	io := NewVersionedIO(61)
-	io.RecordReads(Version{TxIndex: 60}, ibs.versionedReads)
+	io.RecordReads(Version{TxIndex: 60}, ibs.VersionedReads())
 	require.Equal(t, VersionValid, vm.ValidateVersion(60, io, checkVersionEqual, true, ""))
 }
 
@@ -1568,7 +1568,7 @@ func TestGetVersionedAccount_ReconcilesDBLoadedRecordRead(t *testing.T) {
 	bal, err := ibs.GetBalance(addr)
 	require.NoError(t, err)
 	assert.Equal(t, *uint256.NewInt(700), bal)
-	rd, ok := ibs.versionedReads.GetAddress(addr)
+	rd, ok := ibs.txIO.GetAddress(addr)
 	require.True(t, ok)
 	require.NotNil(t, rd.Val)
 	require.NotNil(t, rd.Val.Account())
@@ -1589,7 +1589,7 @@ func TestGetStateObject_NoRecordReadStillReconciles(t *testing.T) {
 	so, err := ibs.getStateObject(addr, false)
 	require.NoError(t, err)
 	require.NotNil(t, so)
-	rd, ok := ibs.versionedReads.GetAddress(addr)
+	rd, ok := ibs.txIO.GetAddress(addr)
 	require.True(t, ok)
 	require.NotNil(t, rd.Val)
 	require.NotNil(t, rd.Val.Account())
@@ -1793,7 +1793,7 @@ func TestCommittedReadsBeforeDestructWithBalanceOnlyRevival(t *testing.T) {
 			require.True(t, nonEmpty)
 			ibs.PublishOrigins()
 			io := NewVersionedIO(3)
-			io.RecordReads(Version{TxIndex: 2}, ibs.versionedReads)
+			io.RecordReads(Version{TxIndex: 2}, ibs.VersionedReads())
 			require.Equal(t, VersionValid, vm.ValidateVersion(2, io, validateEqualVersion, true, ""))
 
 			vm.WriteSelfDestruct(addr, Version{TxIndex: 0}, true, true)
@@ -2011,7 +2011,7 @@ func TestMetamorphicShadowedDestruct_ReaderValidatorRoundTrip(t *testing.T) {
 	}
 	validate := func(vm *VersionMap, ibs *IntraBlockState) VersionValidity {
 		io := NewVersionedIO(6)
-		io.RecordReads(Version{TxIndex: 5, Incarnation: 0}, ibs.versionedReads)
+		io.RecordReads(Version{TxIndex: 5, Incarnation: 0}, ibs.VersionedReads())
 		return vm.ValidateVersion(5, io, validateEqualVersion, true, "")
 	}
 	t.Run("code read is witnessed and a redeploy flush invalidates it", func(t *testing.T) {
@@ -2021,7 +2021,7 @@ func TestMetamorphicShadowedDestruct_ReaderValidatorRoundTrip(t *testing.T) {
 		got, err := ibs.GetCode(addr)
 		require.NoError(t, err)
 		require.Empty(t, got)
-		_, recorded := ibs.versionedReads.GetCode(addr)
+		_, recorded := ibs.txIO.GetCode(addr)
 		require.True(t, recorded)
 		require.Equal(t, VersionValid, validate(vm, ibs))
 		vm.WriteCode(addr, Version{TxIndex: 4}, accounts.NewCode(code), true)

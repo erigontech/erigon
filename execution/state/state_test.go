@@ -22,6 +22,7 @@ package state
 import (
 	"bytes"
 	"context"
+	"slices"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -220,11 +221,11 @@ func TestTouchDelete(t *testing.T) {
 	err = state.AddBalance(accounts.ZeroAddress, uint256.Int{}, tracing.BalanceChangeUnspecified)
 	require.NoError(t, err)
 
-	if len(state.journal.dirties) != 1 {
+	if len(slices.Collect(state.journal.dirtyAddrs())) != 1 {
 		t.Fatal("expected one dirty state object")
 	}
 	state.RevertToSnapshot(snapshot, nil)
-	if len(state.journal.dirties) != 0 {
+	if len(slices.Collect(state.journal.dirtyAddrs())) != 0 {
 		t.Fatal("expected no dirty state object")
 	}
 }

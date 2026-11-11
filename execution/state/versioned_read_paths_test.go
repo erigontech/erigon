@@ -217,7 +217,7 @@ func TestVersionedTouch_OwnBalanceWriteReadsNoFields(t *testing.T) {
 
 		require.NoError(t, ibs.SetBalance(addr, uint256.Int{}, 0))
 		require.NoError(t, ibs.TouchAccount(addr))
-		_, ok := ibs.versionedReads.GetNonce(addr)
+		_, ok := ibs.txIO.GetNonce(addr)
 		assert.False(t, ok, "nonce read, versioned=%v", versioned)
 	}
 }
@@ -270,7 +270,7 @@ func TestVersionedRead_C6_DestructedRecordsDepAndReturnsZero(t *testing.T) {
 	assert.True(t, bal.IsZero(), "non-committed balance read past selfdestruct returns zero")
 
 	// SelfDestructPath dep must be recorded in readSet.
-	_, ok := ibs.versionedReads.getHeader(addr, SelfDestructPath, accounts.NilKey)
+	_, ok := ibs.txIO.getHeader(addr, SelfDestructPath, accounts.NilKey)
 	assert.True(t, ok, "SelfDestructPath dependency must be recorded")
 }
 
@@ -597,7 +597,7 @@ func TestVersionedRead_G1_ReadSetReadOnSecondCall(t *testing.T) {
 	assert.True(t, v2.IsZero())
 
 	// readSet must hold the StoragePath entry.
-	_, ok := ibs.versionedReads.getHeader(addr, StoragePath, key)
+	_, ok := ibs.txIO.getHeader(addr, StoragePath, key)
 	assert.True(t, ok, "StoragePath read must be recorded")
 }
 
@@ -623,7 +623,7 @@ func TestVersionedRead_G6_StorageZeroOnIncarnationWritten(t *testing.T) {
 	assert.True(t, got.IsZero(), "unwritten slot reads zero after Incarnation rewrite")
 
 	// IncarnationPath dep must be recorded.
-	_, ok := ibs.versionedReads.getHeader(addr, IncarnationPath, accounts.NilKey)
+	_, ok := ibs.txIO.getHeader(addr, IncarnationPath, accounts.NilKey)
 	assert.True(t, ok, "IncarnationPath dependency must be recorded")
 }
 
@@ -659,7 +659,7 @@ func TestVersionedRead_G9_FieldCellFlushedBeforeFallback(t *testing.T) {
 		name     string
 		write    func(ws *WriteSet, addr accounts.Address, hdr WriteHeader)
 		read     func(ibs *IntraBlockState, addr accounts.Address) (any, error)
-		recorded func(rs *ReadSet, addr accounts.Address) (ReadHeader, any)
+		recorded func(rs *ioTable, addr accounts.Address) (ReadHeader, any)
 		want     any
 	}{
 		{
@@ -669,7 +669,7 @@ func TestVersionedRead_G9_FieldCellFlushedBeforeFallback(t *testing.T) {
 				ws.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: hdr, Val: *uint256.NewInt(1)})
 			},
 			read: func(ibs *IntraBlockState, addr accounts.Address) (any, error) { return ibs.GetBalance(addr) },
-			recorded: func(rs *ReadSet, addr accounts.Address) (ReadHeader, any) {
+			recorded: func(rs *ioTable, addr accounts.Address) (ReadHeader, any) {
 				vr, _ := rs.GetBalance(addr)
 				return vr.ReadHeader, vr.Val
 			},
@@ -682,7 +682,7 @@ func TestVersionedRead_G9_FieldCellFlushedBeforeFallback(t *testing.T) {
 				ws.SetNonce(addr, &VersionedWrite[uint64]{WriteHeader: hdr, Val: 1})
 			},
 			read: func(ibs *IntraBlockState, addr accounts.Address) (any, error) { return ibs.GetNonce(addr) },
-			recorded: func(rs *ReadSet, addr accounts.Address) (ReadHeader, any) {
+			recorded: func(rs *ioTable, addr accounts.Address) (ReadHeader, any) {
 				vr, _ := rs.GetNonce(addr)
 				return vr.ReadHeader, vr.Val
 			},
@@ -695,7 +695,7 @@ func TestVersionedRead_G9_FieldCellFlushedBeforeFallback(t *testing.T) {
 				ws.SetCodeHash(addr, &VersionedWrite[accounts.CodeHash]{WriteHeader: hdr, Val: codeHash})
 			},
 			read: func(ibs *IntraBlockState, addr accounts.Address) (any, error) { return ibs.GetCodeHash(addr) },
-			recorded: func(rs *ReadSet, addr accounts.Address) (ReadHeader, any) {
+			recorded: func(rs *ioTable, addr accounts.Address) (ReadHeader, any) {
 				vr, _ := rs.GetCodeHash(addr)
 				return vr.ReadHeader, vr.Val
 			},
@@ -708,7 +708,7 @@ func TestVersionedRead_G9_FieldCellFlushedBeforeFallback(t *testing.T) {
 				ws.SetIncarnation(addr, &VersionedWrite[uint64]{WriteHeader: hdr, Val: 1})
 			},
 			read: func(ibs *IntraBlockState, addr accounts.Address) (any, error) { return ibs.GetIncarnation(addr) },
-			recorded: func(rs *ReadSet, addr accounts.Address) (ReadHeader, any) {
+			recorded: func(rs *ioTable, addr accounts.Address) (ReadHeader, any) {
 				vr, _ := rs.GetIncarnation(addr)
 				return vr.ReadHeader, vr.Val
 			},
@@ -723,7 +723,7 @@ func TestVersionedRead_G9_FieldCellFlushedBeforeFallback(t *testing.T) {
 				ws.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: hdr, Val: *uint256.NewInt(1)})
 			},
 			read: func(ibs *IntraBlockState, addr accounts.Address) (any, error) { return ibs.GetBalance(addr) },
-			recorded: func(rs *ReadSet, addr accounts.Address) (ReadHeader, any) {
+			recorded: func(rs *ioTable, addr accounts.Address) (ReadHeader, any) {
 				vr, _ := rs.GetBalance(addr)
 				return vr.ReadHeader, vr.Val
 			},
@@ -752,7 +752,7 @@ func TestVersionedRead_G9_FieldCellFlushedBeforeFallback(t *testing.T) {
 			require.NoError(t, err)
 			require.Nil(t, vm.fieldMissHook, "the flush must land after the field probe")
 			assert.Equal(t, tt.want, got)
-			recHdr, recVal := tt.recorded(&ibs.versionedReads, addr)
+			recHdr, recVal := tt.recorded(&ibs.txIO, addr)
 			assert.Equal(t, ReadHeader{Source: MapRead, Version: Version{TxIndex: 0}}, recHdr)
 			assert.Equal(t, tt.want, recVal)
 		})
@@ -793,7 +793,7 @@ func TestVersionedRead_RevivalFlushedAfterAbsentAccountRead(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, vm.absentAccountHook, "the flush must land after the account read")
 	require.Equal(t, revived, account)
-	recorded, ok := ibs.versionedReads.GetAddress(addr)
+	recorded, ok := ibs.txIO.GetAddress(addr)
 	require.True(t, ok)
 	require.Equal(t, VersionedRead[AccountView]{ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 1}}, Val: NewAccountView(revived)}, recorded)
 }
@@ -909,7 +909,7 @@ func TestVersionedRead_RepeatedCommittedAbsenceKeepsRecordedRead(t *testing.T) {
 	empty, err := ibs.Empty(addr)
 	require.NoError(t, err)
 	require.True(t, empty)
-	_, balanceRecorded := ibs.versionedReads.GetBalance(addr)
+	_, balanceRecorded := ibs.txIO.GetBalance(addr)
 	require.False(t, balanceRecorded)
 	require.Equal(t, VersionInvalid, validateReads(vm, ibs, 2))
 }
@@ -1019,16 +1019,16 @@ func TestVersionedRead_G4_RefreshRecordsTypedDefaultInReadSet(t *testing.T) {
 	assert.Equal(t, *uint256.NewInt(1234), bal,
 		"GetBalance returns the storage-read account's balance")
 
-	balRead, ok := ibs.versionedReads.GetBalance(addr)
+	balRead, ok := ibs.txIO.GetBalance(addr)
 	require.True(t, ok, "BalancePath read must be recorded")
 	assert.Equal(t, *uint256.NewInt(1234), balRead.Val,
 		"recorded BalancePath value must be the read value, not zero")
 
-	_, ok = ibs.versionedReads.GetNonce(addr)
+	_, ok = ibs.txIO.GetNonce(addr)
 	require.False(t, ok, "NoncePath must NOT be recorded by a balance-only read")
-	_, ok = ibs.versionedReads.GetIncarnation(addr)
+	_, ok = ibs.txIO.GetIncarnation(addr)
 	require.False(t, ok, "IncarnationPath must NOT be recorded by a balance-only read")
-	_, ok = ibs.versionedReads.GetCodeHash(addr)
+	_, ok = ibs.txIO.GetCodeHash(addr)
 	require.False(t, ok, "CodeHashPath must NOT be recorded by a balance-only read")
 }
 
@@ -1139,7 +1139,7 @@ func TestVersionedRead_E2_StaleMapReadCaughtAtCommit(t *testing.T) {
 	mvhm.WriteBalance(addr, Version{TxIndex: 2, Incarnation: 0}, *uint256.NewInt(10), true)
 
 	// Manually seed readSet with a stale version (TxIndex 1).
-	ibs.versionedReads.SetBalance(addr, VersionedRead[uint256.Int]{
+	ibs.txIO.SetBalance(addr, VersionedRead[uint256.Int]{
 		ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 1, Incarnation: 0}},
 		Val:        *uint256.NewInt(99),
 	})
@@ -1232,7 +1232,7 @@ func TestVersionedRead_D1_WriteSetHitWithStaleReadSetRecordsDep(t *testing.T) {
 	mvhm.WriteBalance(addr, Version{TxIndex: 3, Incarnation: 0}, *uint256.NewInt(30), true)
 
 	// Seed a stale readSet entry at a lower version.
-	ibs.versionedReads.SetBalance(addr, VersionedRead[uint256.Int]{
+	ibs.txIO.SetBalance(addr, VersionedRead[uint256.Int]{
 		ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 1, Incarnation: 0}},
 		Val:        *uint256.NewInt(99),
 	})
@@ -1264,7 +1264,7 @@ func TestVersionedRead_E2_StorageOnWrittenAddressCaughtAtCommit(t *testing.T) {
 	mvhm.WriteStorage(addr, read, Version{TxIndex: 3, Incarnation: 0}, *uint256.NewInt(30), true)
 
 	require.NoError(t, ibs.SetState(addr, written, *uint256.NewInt(77)))
-	ibs.versionedReads.SetStorage(addr, read, VersionedRead[uint256.Int]{
+	ibs.txIO.SetStorage(addr, read, VersionedRead[uint256.Int]{
 		ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 1, Incarnation: 0}},
 		Val:        *uint256.NewInt(99),
 	})
@@ -1291,7 +1291,7 @@ func TestVersionedRead_E2_CodeSizeOnWrittenAddressCaughtAtCommit(t *testing.T) {
 	mvhm.WriteCodeSize(addr, Version{TxIndex: 3, Incarnation: 0}, 30, true)
 
 	require.NoError(t, ibs.SetBalance(addr, *uint256.NewInt(77), 0))
-	ibs.versionedReads.SetCodeSize(addr, VersionedRead[int]{
+	ibs.txIO.SetCodeSize(addr, VersionedRead[int]{
 		ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 1, Incarnation: 0}},
 		Val:        99,
 	})
