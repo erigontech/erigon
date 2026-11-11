@@ -620,7 +620,7 @@ func (p *Progress) LogExecution(rs *state.StateV3, ex executor) {
 
 		var repeatRatio float64
 
-		if repeats > 0 {
+		if repeats > 0 && execDiff > 0 {
 			repeatRatio = 100.0 * float64(repeats) / float64(execDiff)
 		}
 

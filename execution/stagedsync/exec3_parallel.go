@@ -1105,7 +1105,6 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 
 			if ok {
 				pe.lastExecutedBlockNum.Store(int64(blockResult.BlockNum))
-				pe.execCount.Add(blockExecutor.cntExec.Load())
 				pe.readCount.Add(blockExecutor.blockIO.ReadCount())
 				pe.writeCount.Add(blockExecutor.blockIO.WriteCount())
 

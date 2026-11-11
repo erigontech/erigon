@@ -262,6 +262,7 @@ func (pt *poolTask) run(p *taskPool, wk *poolWorker) bool {
 		}
 	}
 	be.cntExec.Add(1)
+	p.pe.execCount.Add(1)
 	tv.firstDepReadAt = time.Time{}
 	runStart := time.Now()
 	result := wk.w.RunTxTask(tv)
