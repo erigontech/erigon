@@ -32,10 +32,12 @@ func (a *ApiHandler) getSpec(w http.ResponseWriter, r *http.Request) (*beaconhtt
 	outSpec := struct {
 		*clparams.BeaconChainConfig
 		*clparams.NetworkConfig
+		SlotDurationMs            uint64 `json:"SLOT_DURATION_MS,string"`
 		MinEpochsForBlockRequests uint64 `json:"MIN_EPOCHS_FOR_BLOCK_REQUESTS,string"`
 	}{
 		BeaconChainConfig:         a.beaconChainCfg,
 		NetworkConfig:             a.netConfig,
+		SlotDurationMs:            a.beaconChainCfg.SecondsPerSlot * 1000,
 		MinEpochsForBlockRequests: a.beaconChainCfg.MinEpochsForBlockRequests(),
 	}
 
