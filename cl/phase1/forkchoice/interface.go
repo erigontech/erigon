@@ -87,8 +87,10 @@ type ForkChoiceStorageReader interface {
 	GetBlock(blockRoot common.Hash) (*cltypes.SignedBeaconBlock, bool)
 	HasBlockChildAtOrAfter(blockRoot common.Hash, slot uint64) bool
 	HasBlockEquivocation(slot, proposerIndex uint64, exceptRoot common.Hash) bool
-	// [New in Gloas:EIP7732] HasEnvelope checks if a signed execution payload envelope exists.
+	// [New in Gloas:EIP7732] HasEnvelope reports whether an envelope is cached for a retained root
+	// and is neither corrupt nor rejected. It does not read disk or imply EL validation.
 	HasEnvelope(blockRoot common.Hash) bool
+	IsEnvelopeRejected(blockRoot common.Hash) bool
 	IsBlockInvalid(blockRoot common.Hash) bool
 	// [New in Gloas:EIP7732] HasPendingExecutionPayloadEnvelope reports an envelope that is
 	// waiting for its block or its data columns.
