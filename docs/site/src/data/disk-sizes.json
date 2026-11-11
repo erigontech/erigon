@@ -1,5 +1,5 @@
 {
-  "ci_last_updated": "2026-11-10",
+  "ci_last_updated": "2026-11-11",
   "networks": {
     "chiado": {
       "archive": {
@@ -35,9 +35,9 @@
         "source": "ci"
       },
       "minimal": {
-        "bytes": 242814881792,
-        "display": "242.81 GB",
-        "measured_at": "2026-11-10",
+        "bytes": 244161589248,
+        "display": "244.16 GB",
+        "measured_at": "2026-11-11",
         "source": "ci"
       }
     },
@@ -75,9 +75,9 @@
         "source": "ci"
       },
       "minimal": {
-        "bytes": 627986415616,
-        "display": "627.99 GB",
-        "measured_at": "2026-11-10",
+        "bytes": 629867814912,
+        "display": "629.87 GB",
+        "measured_at": "2026-11-11",
         "source": "ci"
       }
     },
