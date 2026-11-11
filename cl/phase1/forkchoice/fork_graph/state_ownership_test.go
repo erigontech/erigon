@@ -24,11 +24,13 @@ import (
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/common"
 )
 
@@ -208,4 +210,91 @@ func TestReplayStateIgnoresBlockWithoutHeader(t *testing.T) {
 	replayed, err := graph.ReplayState(root)
 	require.NoError(t, err)
 	require.Nil(t, replayed)
+}
+
+func TestReviewCachedPendingDepositIsolation(t *testing.T) {
+	blocks, anchorState, _ := tests.GetElectraRandom()
+	graphInterface, err := NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
+	require.NoError(t, err)
+	graph := graphInterface.(*forkGraphDisk)
+	for _, block := range blocks {
+		_, result, err := graph.AddChainSegment(block, true)
+		require.NoError(t, err)
+		require.Equal(t, Success, result)
+	}
+	root, err := blocks[0].Block.HashSSZ()
+	require.NoError(t, err)
+	require.NotEqual(t, common.Hash(root), graph.currentStateBlockRoot)
+	first, err := graph.ReplayState(root)
+	require.NoError(t, err)
+	require.NotNil(t, first)
+	require.Positive(t, first.PendingDeposits().Len())
+	want := first.PendingDeposits().Get(0).Amount
+	first.PendingDeposits().Get(0).Amount = want + 99
+	second, err := graph.ReplayState(root)
+	require.NoError(t, err)
+	require.NotNil(t, second)
+	require.Equal(t, want, second.PendingDeposits().Get(0).Amount, "cached pending deposit changed through the first reader")
+}
+
+func TestReviewImportWithoutFullValidationRejectsBadSlashingSignature(t *testing.T) {
+	pre := state.New(&clparams.MainnetBeaconConfig)
+	require.NoError(t, utils.DecodeSSZSnappy(pre, anchor, int(clparams.Phase0Version)))
+	graph, err := NewForkGraphDisk(pre, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
+	require.NoError(t, err)
+	block := cltypes.NewSignedBeaconBlock(pre.BeaconConfig(), clparams.Phase0Version)
+	require.NoError(t, utils.DecodeSSZSnappy(block, block1, int(clparams.Phase0Version)))
+	block.Block.Body.ProposerSlashings.Append(&cltypes.ProposerSlashing{
+		Header1: &cltypes.SignedBeaconBlockHeader{
+			Header:    &cltypes.BeaconBlockHeader{Slot: pre.Slot(), ProposerIndex: 1},
+			Signature: common.Bytes96(bls.InfiniteSignature),
+		},
+		Header2: &cltypes.SignedBeaconBlockHeader{
+			Header:    &cltypes.BeaconBlockHeader{Slot: pre.Slot(), ProposerIndex: 1, BodyRoot: common.Hash{1}},
+			Signature: common.Bytes96(bls.InfiniteSignature),
+		},
+	})
+	_, result, err := graph.AddChainSegment(block, false)
+	require.Error(t, err, "new block with invalid slashing signatures was imported: result=%v", result)
+	require.ErrorContains(t, err, "signature")
+	require.Equal(t, InvalidBlock, result)
+}
+
+func TestReviewImportParentReplayRetainsBatchSignatures(t *testing.T) {
+	blocks, pre, _ := tests.GetCapellaRandom()
+	graphInterface, err := NewForkGraphDisk(pre, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
+	require.NoError(t, err)
+	graph := graphInterface.(*forkGraphDisk)
+	for _, block := range blocks {
+		_, result, err := graph.AddChainSegment(block, true)
+		require.NoError(t, err)
+		require.Equal(t, Success, result)
+	}
+	block := blocks[0]
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	require.Positive(t, block.Block.Body.ProposerSlashings.Len())
+	block.Block.Body.ProposerSlashings.Get(0).Header1.Signature = common.Bytes96(bls.InfiniteSignature)
+	_, err = graph.replayState(root, true)
+	require.Error(t, err, "import parent replay accepted an invalid proposer-slashing signature")
+	require.ErrorContains(t, err, "signature")
+}
+
+func TestReviewReadReplaySkipsImportedBatchSignatures(t *testing.T) {
+	blocks, pre, _ := tests.GetCapellaRandom()
+	graphInterface, err := NewForkGraphDisk(pre, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
+	require.NoError(t, err)
+	graph := graphInterface.(*forkGraphDisk)
+	for _, block := range blocks {
+		_, result, err := graph.AddChainSegment(block, true)
+		require.NoError(t, err)
+		require.Equal(t, Success, result)
+	}
+	block := blocks[0]
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	block.Block.Body.ProposerSlashings.Get(0).Header1.Signature = common.Bytes96(bls.InfiniteSignature)
+	replayed, err := graph.ReplayState(root)
+	require.NoError(t, err)
+	require.NotNil(t, replayed)
 }

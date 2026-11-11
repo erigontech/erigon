@@ -19,47 +19,70 @@ package fork_graph
 import (
 	"testing"
 
+	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
-	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/phase1/core/state"
-	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/spf13/afero"
 )
 
 func BenchmarkReplayStateNonHead(b *testing.B) {
-	anchorState := state.New(&clparams.MainnetBeaconConfig)
-	if err := utils.DecodeSSZSnappy(anchorState, anchor, int(clparams.Phase0Version)); err != nil {
-		b.Fatal(err)
+	for _, mode := range []string{"signature-checks", "read-replay", "cached-read"} {
+		b.Run(mode, func(b *testing.B) {
+			graph, root := replayBenchmarkGraph(b)
+			b.ResetTimer()
+			for b.Loop() {
+				var err error
+				switch mode {
+				case "signature-checks":
+					_, err = graph.replayState(root, true)
+				case "read-replay":
+					graph.replayedStates.clear()
+					_, err = graph.ReplayState(root)
+				case "cached-read":
+					_, err = graph.ReplayState(root)
+				}
+				if err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+func replayBenchmarkGraph(b *testing.B) (*forkGraphDisk, common.Hash) {
+	b.Helper()
+	blocks, anchorState, _ := tests.GetCapellaRandom()
+	targetIndex := -1
+	for index := 0; index < len(blocks)-1; index++ {
+		block := blocks[index]
+		if block.Block.Body.ProposerSlashings.Len() > 0 {
+			targetIndex = index
+			break
+		}
+	}
+	if targetIndex == -1 {
+		b.Fatal("fixture has no non-head block with proposer slashings")
 	}
 	graphInterface, err := NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
 	if err != nil {
 		b.Fatal(err)
 	}
 	graph := graphInterface.(*forkGraphDisk)
-	blockA := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
-	blockB := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
-	for _, fixture := range []struct {
-		block *cltypes.SignedBeaconBlock
-		data  []byte
-	}{{blockA, block1}, {blockB, block2}} {
-		if err := utils.DecodeSSZSnappy(fixture.block, fixture.data, int(clparams.Phase0Version)); err != nil {
-			b.Fatal(err)
-		}
-		if _, result, err := graph.AddChainSegment(fixture.block, true); err != nil || result != Success {
+	for _, block := range blocks[:targetIndex+2] {
+		if _, result, err := graph.AddChainSegment(block, true); err != nil || result != Success {
 			b.Fatalf("import block: result %v, error %v", result, err)
 		}
 	}
-	root, err := blockB.Block.HashSSZ()
+	target := blocks[targetIndex]
+	if target.Block.Body.ProposerSlashings.Len() == 0 {
+		b.Fatal("fixture target block has no proposer slashings")
+	}
+	root, err := target.Block.HashSSZ()
 	if err != nil {
 		b.Fatal(err)
 	}
-	graph.currentState = nil
-	b.ResetTimer()
-	for b.Loop() {
-		if _, err := graph.ReplayState(common.Hash(root)); err != nil {
-			b.Fatal(err)
-		}
+	if graph.currentStateBlockRoot == common.Hash(root) {
+		b.Fatal("fixture target is the current head")
 	}
+	return graph, common.Hash(root)
 }

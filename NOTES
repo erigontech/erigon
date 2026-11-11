@@ -43,3 +43,40 @@ TransitionState forwards its validation flag to the batch check.
   252,654; 263,654; 259,350; 259,403; 261,813 ns/op; median 259,377 ns/op.
 - BenchmarkReplayStateNonHead -count 6 after this correction: 253,276;
   255,373; 259,783; 259,822; 328,098; 377,797 ns/op; median 259,803 ns/op.
+
+Review round 1 fixes for commit 54959343c671d820a5f70bf131a6aebbbf0be03f:
+
+- Red: TestReviewOnBlockWithoutFullValidationRejectsBadSlashingSignature saw nil
+  from OnBlock; expected an invalid-signature error.
+- Red: TestReviewImportWithoutFullValidationRejectsBadSlashingSignature saw nil
+  and Success from AddChainSegment; expected InvalidBlock and a signature error.
+- Red: TestReviewImportParentReplayRetainsBatchSignatures saw nil; expected a
+  signature error during import-parent reconstruction.
+- Red: TestReviewCachedPendingDepositIsolation expected 32,000,000,000 but saw
+  32,000,000,099 after the first reader changed the cached pending deposit.
+- TransitionState now retains batch signature checks for imports. Only the
+  explicit TransitionStateForReplay route skips those checks. Read replay uses
+  that route; import-parent reconstruction and Antiquary validation keep the
+  full checks.
+- TestReviewReadReplaySkipsImportedBatchSignatures passes after an imported
+  slashing signature is corrupted. Reverting its replay-only transition call
+  made it fail with `block signature validation failed`.
+- Deep copying the SSZ lists exposed by state readers prevents shared mutable
+  list elements from crossing cache boundaries. Replacing the deep cache copy
+  with CachingBeaconState.Copy made TestReviewCachedPendingDepositIsolation
+  fail: expected 32,000,000,000, saw 32,000,000,099.
+- Reverting TransitionState's import validation made all three import-signature
+  tests fail: OnBlock and AddChainSegment accepted bad signatures, and import
+  parent replay returned nil.
+- The previous benchmark used a fixture without batch-signature work. The
+  replacement targets a genuine non-head Capella block with proposer slashings.
+  BenchmarkReplayStateNonHead -count 6, signature-checks before: 16,059,761;
+  26,607,313; 18,550,442; 15,924,715; 16,186,220; 15,929,101 ns/op; median
+  16,122,990.5 ns/op. Read replay after signature skipping: 14,031,505;
+  13,941,176; 14,001,590; 13,923,604; 14,010,770; 13,892,784 ns/op; median
+  13,971,383 ns/op. Cached reads: 257,899; 259,961; 258,276; 257,661;
+  259,154; 258,920 ns/op; median 258,598 ns/op.
+- The first full gate caught a reward regression in TestGetBlockRewards:
+  expected `attestations=332205`, saw `attestations=0`. The replay API initially
+  dropped Antiquary's BlockRewardsCollector. Passing that collector through the
+  replay wrapper restored rewards; the focused test now passes.

@@ -537,24 +537,27 @@ func (f *forkGraphDisk) replayState(blockRoot common.Hash, addChainSegment bool)
 
 	// Traverse the blocks from top to bottom.
 	for _, b := range slices.Backward(blocksInTheWay) {
-		if err := transition.TransitionState(copyReferencedState, b, nil, false); err != nil {
+		var transitionErr error
+		if addChainSegment {
+			transitionErr = transition.TransitionState(copyReferencedState, b, nil, false)
+		} else {
+			transitionErr = transition.TransitionStateForReplay(copyReferencedState, b, nil)
+		}
+		if transitionErr != nil {
 			if addChainSegment {
 				f.currentState = nil
 				f.currentStateBlockRoot = common.Hash{}
 				f.replayedStates.clear()
 			}
-			return nil, err
+			return nil, transitionErr
 		}
 	}
 	if !addChainSegment {
-		cached, err := copyReferencedState.Copy()
-		if err == nil {
-			f.lifecycleMu.RLock()
-			if header, exists := f.headers.Load(blockRoot); exists && !isBelowPrunedBoundary(header.(*cltypes.BeaconBlockHeader).Slot, f.lowestAvailableBlock.Load()) {
-				f.replayedStates.add(blockRoot, cached)
-			}
-			f.lifecycleMu.RUnlock()
+		f.lifecycleMu.RLock()
+		if header, exists := f.headers.Load(blockRoot); exists && !isBelowPrunedBoundary(header.(*cltypes.BeaconBlockHeader).Slot, f.lowestAvailableBlock.Load()) {
+			f.replayedStates.add(blockRoot, copyReferencedState)
 		}
+		f.lifecycleMu.RUnlock()
 	}
 	return copyReferencedState, nil
 }
