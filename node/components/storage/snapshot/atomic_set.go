@@ -20,6 +20,11 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+
+	"github.com/erigontech/erigon/db/snaptype"
+	// Registers the block snap types, whose declared index names are what
+	// accessorTypesOf asks for.
+	_ "github.com/erigontech/erigon/db/snaptype2"
 )
 
 // accessorExtsByPrimary maps a primary's extension to the extensions of the
@@ -48,16 +53,40 @@ func AccessorsOf(primary string, candidates []string) []string {
 	if !ok {
 		return nil
 	}
+	types := accessorTypesOf(coord.Type)
 	var out []string
 	for _, c := range candidates {
 		if !slices.Contains(exts, filepath.Ext(c)) {
 			continue
 		}
-		if cc, ok := CoordinateOf(c); ok && cc == coord {
+		cc, ok := CoordinateOf(c)
+		if !ok || cc.From != coord.From || cc.To != coord.To {
+			continue
+		}
+		if slices.Contains(types, cc.Type) {
 			out = append(out, c)
 		}
 	}
 	return out
+}
+
+// accessorTypesOf names the coordinate types an accessor of this primary can
+// carry. A segment's indexes are named after the index rather than the segment,
+// so a transactions segment owns both transactions.idx and
+// transactions-to-block.idx, and the declaring type is what lists them.
+// Everything else's accessors share the primary's own name.
+func accessorTypesOf(coordType string) []string {
+	t, ok := snaptype.ParseFileType(coordType)
+	if !ok {
+		return []string{coordType}
+	}
+	types := []string{coordType}
+	for _, idx := range t.Indexes() {
+		if !slices.Contains(types, idx.Name) {
+			types = append(types, idx.Name)
+		}
+	}
+	return types
 }
 
 // HasAccessors reports whether a file of this name is a primary that accessors

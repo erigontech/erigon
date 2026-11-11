@@ -49,6 +49,33 @@ func TestAccessorsOf_SkipsSameCoordinatePrimaries(t *testing.T) {
 	}, got)
 }
 
+// A segment's indexes are named after the index, not the segment: a
+// transactions .seg owns transactions.idx and transactions-to-block.idx. The
+// second carries a different type string, so matching the segment's own name
+// finds only half the set and leaves the other half to be measured against a
+// hash of bytes that are gone.
+func TestAccessorsOf_SegmentTakesEveryIndexItsTypeDeclares(t *testing.T) {
+	got := AccessorsOf("v1.1-003960-003970-transactions.seg", []string{
+		"v2.0-003960-003970-transactions.idx",
+		"v2.0-003960-003970-transactions-to-block.idx",
+	})
+	require.ElementsMatch(t, []string{
+		"v2.0-003960-003970-transactions.idx",
+		"v2.0-003960-003970-transactions-to-block.idx",
+	}, got)
+}
+
+// The broadened name set is the declaring type's own, so a headers segment
+// does not acquire another type's index over the same range.
+func TestAccessorsOf_SegmentDoesNotTakeAnotherTypesIndex(t *testing.T) {
+	got := AccessorsOf("v1.1-003960-003970-headers.seg", []string{
+		"v2.0-003960-003970-headers.idx",
+		"v2.0-003960-003970-bodies.idx",
+		"v2.0-003960-003970-transactions-to-block.idx",
+	})
+	require.Equal(t, []string{"v2.0-003960-003970-headers.idx"}, got)
+}
+
 func TestAccessorsOf_SkipsOtherRanges(t *testing.T) {
 	got := AccessorsOf("domain/v2.2-commitment.355-356.kv", []string{
 		"domain/v2.1-commitment.354-355.kvi",
