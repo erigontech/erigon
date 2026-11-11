@@ -159,7 +159,7 @@ type TxPool struct {
 	stateGeneration         uint64
 	stateViewStale          bool
 	stateBlockHash          common.Hash // Head of the pool's state view; pins frame validation to the same block
-	headIsBogota            bool        // Canonical activation, independent of pending-block time
+	headIsBogota            bool        // Last completed update's activation, independent of pending-block time
 	lastSeenBlock           atomic.Uint64
 	lastSeenCond            *sync.Cond
 	lastFinalizedBlock      atomic.Uint64
@@ -456,7 +456,16 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 	if err != nil {
 		return err
 	}
-	return p.revalidateFrames(ctx, frames.parked, frames.generation, frames.blockHash)
+	if err := p.revalidateFrames(ctx, frames.parked, frames.generation, frames.blockHash); err != nil {
+		return err
+	}
+	// Keep activation unchanged on failure so a retry can still detect an unwind.
+	p.lock.Lock()
+	if frames.generation == p.stateGeneration {
+		p.headIsBogota = p.chainConfig.IsBogota(stateChanges.ChangeBatch[len(stateChanges.ChangeBatch)-1].BlockTime)
+	}
+	p.lock.Unlock()
+	return nil
 }
 
 // applyBlockUpdate applies the announced state under the pool lock and returns

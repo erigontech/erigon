@@ -589,7 +589,6 @@ func (p *TxPool) parkFrameLocked(mt *metaTxn, reason string) {
 func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*metaTxn {
 	head := changes.ChangeBatch[len(changes.ChangeBatch)-1]
 	wasBogota := p.headIsBogota
-	p.headIsBogota = p.chainConfig.IsBogota(head.BlockTime)
 	if len(p.all.senderIDFrameTxn) == 0 {
 		return nil
 	}

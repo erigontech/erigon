@@ -17,6 +17,7 @@
 package txpool
 
 import (
+	"context"
 	"encoding/binary"
 	"errors"
 	"math"
@@ -29,6 +30,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
@@ -180,6 +182,127 @@ func TestFramePoolRecentRootForkBoundary(t *testing.T) {
 			})
 		})
 	}
+}
+
+type frameEvictionErrorView struct {
+	kvcache.CacheView
+	pool *TxPool
+	hash string
+	err  error
+}
+
+func (v frameEvictionErrorView) Get(address []byte) ([]byte, error) {
+	if v.pool.byHash[v.hash] == nil {
+		return nil, v.err
+	}
+	return v.CacheView.Get(address)
+}
+
+func TestFramePoolRecentRootActivationUnwindRetry(t *testing.T) {
+	now := uint64(time.Now().Unix())
+	config := chain.AllProtocolChanges.Copy()
+	config.BogotaTime = common.NewUint64(now - 1)
+	ctx, pool, _, coreDB, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash, config)
+	backend := &frameValidationBackend{payer: sender, balance: 1_000_000, valid: true}
+	pool.ethBackend = backend
+	initial := newBlockChangeForAccounts(common.Hash{1}, 0, sender)
+	initial.ChangeBatch[0].BlockTime = now
+	initial.ChangeBatch[0].SlotNumber = common.NewUint64(21)
+	require.NoError(t, pool.OnNewBlock(ctx, initial, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+
+	frame := recentRootPoolSlot(t, sender, 10, 1)
+	successor := encodeRemoteTxn(t, newTestTxnSlot(1, 0, 1, 1, 21_000))
+	var txns TxnSlots
+	txns.Append(frame, sender[:], true)
+	txns.Append(successor, sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Success}, reasons)
+	backend.calls = nil
+
+	change := newBlockChangeForAccounts(common.Hash{2}, 0, sender)
+	change.ChangeBatch[0].BlockTime = now - 2
+	change.ChangeBatch[0].SlotNumber = common.NewUint64(20)
+	change.ChangeBatch[0].Direction = remoteproto.Direction_UNWIND
+	var unwind TxnSlots
+	unwind.Append(recentRootPoolSlot(t, sender, 10, 1), sender[:], false)
+	readErr := errors.New("promotion account read failed")
+	require.NoError(t, coreDB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		view, err := pool._stateCache.View(ctx, tx)
+		require.NoError(t, err)
+		failing := frameEvictionErrorView{view, pool, string(frame.IDHash[:]), readErr}
+		_, err = pool.applyBlockUpdate(change, unwind, TxnSlots{}, TxnSlots{}, failing, nil)
+		require.ErrorIs(t, err, readErr)
+		return nil
+	}))
+	require.NotContains(t, pool.byHash, string(frame.IDHash[:]), "eviction must precede the injected promotion failure")
+	require.True(t, pool.stateViewStale)
+
+	require.NoError(t, pool.OnNewBlock(ctx, change, unwind, TxnSlots{}, TxnSlots{}))
+	require.NotContains(t, pool.byHash, string(frame.IDHash[:]), "retry must preserve activation-unwind eviction")
+	require.Empty(t, pool.frameReservations)
+	require.Empty(t, pool.all.senderIDFrameTxn)
+	require.Empty(t, backend.calls)
+	require.False(t, pool.headIsBogota)
+}
+
+func TestFramePoolActivationAfterFailedRevalidation(t *testing.T) {
+	now := uint64(time.Now().Unix())
+	config := chain.AllProtocolChanges.Copy()
+	config.BogotaTime = common.NewUint64(now - 1)
+	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash, config)
+	backend := &frameValidationBackend{payer: sender, balance: 1_000_000, valid: true}
+	pool.ethBackend = backend
+	initial := newBlockChangeForAccounts(common.Hash{1}, 0, sender)
+	initial.ChangeBatch[0].BlockTime = now
+	require.NoError(t, pool.OnNewBlock(ctx, initial, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	var txns TxnSlots
+	txns.Append(framePoolSlot(t, sender, 1, 2), sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+
+	updateCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	backend.onValidate = cancel
+	change := newBlockChangeForAccounts(common.Hash{2}, 0, sender)
+	change.ChangeBatch[0].BlockTime = now - 2
+	change.ChangeBatch[0].Direction = remoteproto.Direction_UNWIND
+	require.ErrorIs(t, pool.OnNewBlock(updateCtx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}), context.Canceled)
+	require.True(t, pool.headIsBogota, "failed revalidation must not commit the activation change")
+
+	backend.onValidate = nil
+	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	require.False(t, pool.headIsBogota)
+}
+
+func TestFramePoolSupersededUpdateKeepsActivation(t *testing.T) {
+	now := uint64(time.Now().Unix())
+	config := chain.AllProtocolChanges.Copy()
+	config.BogotaTime = common.NewUint64(now - 1)
+	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash, config)
+	backend := &frameValidationBackend{payer: sender, balance: 1_000_000, valid: true}
+	pool.ethBackend = backend
+	initial := newBlockChangeForAccounts(common.Hash{1}, 0, sender)
+	initial.ChangeBatch[0].BlockTime = now
+	require.NoError(t, pool.OnNewBlock(ctx, initial, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	var txns TxnSlots
+	txns.Append(framePoolSlot(t, sender, 1, 2), sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+
+	backend.onValidate = func() {
+		newer := newBlockChangeForAccounts(common.Hash{3}, 1, sender)
+		newer.ChangeBatch[0].BlockTime = now + 12
+		require.NoError(t, pool.OnNewBlock(ctx, newer, TxnSlots{}, TxnSlots{}, txns))
+	}
+	older := newBlockChangeForAccounts(common.Hash{2}, 0, sender)
+	older.ChangeBatch[0].BlockTime = now - 2
+	older.ChangeBatch[0].Direction = remoteproto.Direction_UNWIND
+	require.NoError(t, pool.OnNewBlock(ctx, older, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	require.Equal(t, common.Hash{3}, pool.stateBlockHash)
+	require.True(t, pool.headIsBogota, "completion of an older update must not overwrite the newer activation")
 }
 
 func TestFramePoolRestoredRecentRootEviction(t *testing.T) {
