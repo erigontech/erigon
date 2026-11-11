@@ -14,3 +14,20 @@ Commit 1: skip batched body signature verification when FullValidate is false.
   7.623, 8.168 ms/op; median 6.599 ms/op.
 - BenchmarkReplayStateNonHead -count 6 after: 3.942, 3.944, 3.974, 4.124,
   4.204, 4.268 ms/op; median 4.049 ms/op.
+
+Commit 2: retain up to four replayed states by block root and return copies.
+
+- Red: TestReplayStateCachesCopyByRoot, second fs.count assertion expected 1
+  state-file open and saw 2 before caching.
+- Red: TestReplayStatePruneDropsCachedRoot, `require.False(cached)` saw true
+  when the prune cache clear was removed.
+- Cache guard: TestReplayStateCachesCopyByRoot checks one replay and that
+  changing a returned state does not change the cached state.
+- Prune guard: TestReplayStatePruneDropsCachedRoot asserts the pruned root was
+  removed from the cache and cannot be replayed.
+- Four entries cap the cache. Mainnet beacon states are hundreds of MB, so the
+  cap bounds retained state memory to roughly 1 GB at 250 MB per state.
+- BenchmarkReplayStateNonHead -count 6 before: 3.942, 3.944, 3.974, 4.124,
+  4.204, 4.268 ms/op; median 4.049 ms/op.
+- BenchmarkReplayStateNonHead -count 6 after: 0.253, 0.259, 0.259, 0.260,
+  0.262, 0.264 ms/op; median 0.259 ms/op.

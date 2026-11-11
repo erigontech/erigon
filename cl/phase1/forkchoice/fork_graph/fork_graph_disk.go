@@ -130,6 +130,7 @@ type forkGraphDisk struct {
 
 	currentState          *state.CachingBeaconState
 	currentStateBlockRoot common.Hash // block root of the last processed block (avoids BlockRoot() zeroed-StateRoot issue)
+	replayedStates        replayStateCache
 	nextEpochParentRoot   common.Hash
 	nextEpochState        *state.CachingBeaconState
 	highestTransitionSlot uint64
@@ -476,6 +477,11 @@ func (f *forkGraphDisk) replayState(blockRoot common.Hash, addChainSegment bool)
 			return state, err
 		}
 	} else {
+		if cached, ok := f.replayedStates.get(blockRoot); ok {
+			if header, exists := f.GetHeader(blockRoot); exists && !isBelowPrunedBoundary(header.Slot, f.lowestAvailableBlock.Load()) {
+				return cached, nil
+			}
+		}
 		if _, ok := f.GetHeader(blockRoot); !ok {
 			return nil, nil
 		}
@@ -535,8 +541,19 @@ func (f *forkGraphDisk) replayState(blockRoot common.Hash, addChainSegment bool)
 			if addChainSegment {
 				f.currentState = nil
 				f.currentStateBlockRoot = common.Hash{}
+				f.replayedStates.clear()
 			}
 			return nil, err
+		}
+	}
+	if !addChainSegment {
+		cached, err := copyReferencedState.Copy()
+		if err == nil {
+			f.lifecycleMu.RLock()
+			if header, exists := f.headers.Load(blockRoot); exists && !isBelowPrunedBoundary(header.(*cltypes.BeaconBlockHeader).Slot, f.lowestAvailableBlock.Load()) {
+				f.replayedStates.add(blockRoot, cached)
+			}
+			f.lifecycleMu.RUnlock()
 		}
 	}
 	return copyReferencedState, nil
@@ -559,6 +576,7 @@ func (f *forkGraphDisk) GetFinalizedCheckpoint(blockRoot common.Hash) (solid.Che
 }
 
 func (f *forkGraphDisk) MarkHeaderAsInvalid(blockRoot common.Hash) {
+	f.replayedStates.clear()
 	slot := uint64(slotUnknown)
 	if header, ok := f.GetHeader(blockRoot); ok {
 		slot = header.Slot
@@ -677,6 +695,7 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 		f.previousIndicies.deleteKeys(previousIndexKeys)
 	}
 	f.addPruneMu.Unlock()
+	f.replayedStates.clear()
 	if f.pruneBoundaryHook != nil {
 		f.pruneBoundaryHook()
 	}

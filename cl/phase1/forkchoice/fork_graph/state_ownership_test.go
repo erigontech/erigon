@@ -32,6 +32,28 @@ import (
 	"github.com/erigontech/erigon/common"
 )
 
+type countingStateOpenFs struct {
+	afero.Fs
+	mu    sync.Mutex
+	opens int
+}
+
+func (fs *countingStateOpenFs) Open(name string) (afero.File, error) {
+	file, err := fs.Fs.Open(name)
+	if err == nil {
+		fs.mu.Lock()
+		fs.opens++
+		fs.mu.Unlock()
+	}
+	return file, err
+}
+
+func (fs *countingStateOpenFs) count() int {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	return fs.opens
+}
+
 func TestForkGraphOwnsAnchorState(t *testing.T) {
 	anchor := state.New(&clparams.MainnetBeaconConfig)
 	graph, err := NewForkGraphDisk(anchor, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
@@ -50,6 +72,70 @@ func TestForkGraphOwnsAnchorState(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, replayed)
 	require.NotSame(t, current, replayed)
+}
+
+func TestReplayStateCachesCopyByRoot(t *testing.T) {
+	anchorState := state.New(&clparams.MainnetBeaconConfig)
+	require.NoError(t, utils.DecodeSSZSnappy(anchorState, anchor, int(clparams.Phase0Version)))
+	fs := &countingStateOpenFs{Fs: afero.NewMemMapFs()}
+	graphInterface, err := NewForkGraphDisk(anchorState, nil, fs, beacon_router_configuration.RouterConfiguration{})
+	require.NoError(t, err)
+	graph := graphInterface.(*forkGraphDisk)
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+	require.NoError(t, utils.DecodeSSZSnappy(block, block1, int(clparams.Phase0Version)))
+	_, result, err := graph.AddChainSegment(block, true)
+	require.NoError(t, err)
+	require.Equal(t, Success, result)
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	graph.currentState = nil
+
+	first, err := graph.ReplayState(root)
+	require.NoError(t, err)
+	require.NotNil(t, first)
+	require.Equal(t, 1, fs.count())
+	require.NoError(t, first.SetSlot(99))
+
+	second, err := graph.ReplayState(root)
+	require.NoError(t, err)
+	require.NotNil(t, second)
+	require.Equal(t, 1, fs.count())
+	require.NotSame(t, first, second)
+	require.Equal(t, block.Block.Slot, second.Slot())
+}
+
+func TestReplayStatePruneDropsCachedRoot(t *testing.T) {
+	anchorState := state.New(&clparams.MainnetBeaconConfig)
+	require.NoError(t, utils.DecodeSSZSnappy(anchorState, anchor, int(clparams.Phase0Version)))
+	graphInterface, err := NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
+	require.NoError(t, err)
+	graph := graphInterface.(*forkGraphDisk)
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+	require.NoError(t, utils.DecodeSSZSnappy(block, block1, int(clparams.Phase0Version)))
+	_, result, err := graph.AddChainSegment(block, true)
+	require.NoError(t, err)
+	require.Equal(t, Success, result)
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	graph.currentState = nil
+	stateAtRoot, err := graph.ReplayState(root)
+	require.NoError(t, err)
+	require.NotNil(t, stateAtRoot)
+
+	newerRoot := common.Hash{0xff}
+	newerBlock := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+	newerBlock.Block.Slot = block.Block.Slot + 10
+	graph.blocks.Store(newerRoot, newerBlock)
+	require.NoError(t, graph.DumpBeaconStateOnDisk(newerRoot, stateAtRoot, true))
+	require.NoError(t, graph.Prune(block.Block.Slot+1))
+	graph.replayedStates.mu.Lock()
+	_, cached := graph.replayedStates.states[root]
+	graph.replayedStates.mu.Unlock()
+	require.False(t, cached)
+
+	pruned, err := graph.ReplayState(root)
+	require.NoError(t, err)
+	require.Nil(t, pruned)
 }
 
 func TestReplayStateRacingPruneIsCompleteOrUnavailable(t *testing.T) {
