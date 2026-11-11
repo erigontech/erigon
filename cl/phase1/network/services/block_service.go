@@ -182,7 +182,7 @@ type blockValidationContext struct {
 
 // elColumnsPublisher handles columns built from local EL blobs as if they arrived on gossip.
 type elColumnsPublisher interface {
-	PublishColumnsFromEL(ctx context.Context, sidecars []*cltypes.DataColumnSidecar)
+	PublishColumns(ctx context.Context, sidecars []*cltypes.DataColumnSidecar)
 }
 
 type blockService struct {
@@ -379,7 +379,7 @@ func (b *blockService) importColumnsFromELBlobs(ctx context.Context, block *clty
 		return
 	}
 	// The EL wait may have used up the import deadline, but the columns must still be published.
-	b.dataColumns.PublishColumnsFromEL(context.WithoutCancel(ctx), toPublish)
+	b.dataColumns.PublishColumns(context.WithoutCancel(ctx), toPublish)
 	log.Debug("[blockService] imported columns from EL blobs", "slot", block.Block.Slot, "blockRoot", common.Hash(blockRoot), "blobs", len(blobs))
 }
 
