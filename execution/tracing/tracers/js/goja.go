@@ -165,14 +165,13 @@ func newJsTracer(code string, ctx *tracers.Context, cfg json.RawMessage) (*trace
 	if err != nil {
 		return nil, err
 	}
-	if goja.IsNull(ret) || goja.IsUndefined(ret) {
-		return nil, fmt.Errorf("tracer must evaluate to an object, got %s", ret)
-	}
 	// Check tracer's interface for required and optional methods.
-	obj := ret.ToObject(vm)
-	// A getter that throws panics in obj.Get; vm.Try returns it as an error.
+	// ToObject on null/undefined and a getter that throws both panic;
+	// vm.Try returns either as an error.
+	var obj *goja.Object
 	var resultV, faultV, stepV, enterV, exitV, setupV goja.Value
 	if ex := vm.Try(func() {
+		obj = ret.ToObject(vm)
 		resultV = obj.Get("result")
 		faultV = obj.Get("fault")
 		stepV = obj.Get("step")

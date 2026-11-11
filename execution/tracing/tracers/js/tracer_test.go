@@ -464,8 +464,8 @@ func TestTracerInterfaceErrors(t *testing.T) {
 		code string
 		want string
 	}{
-		{"null", `null`, "tracer must evaluate to an object"},
-		{"undefined", `undefined`, "tracer must evaluate to an object"},
+		{"null", `null`, "Cannot convert undefined or null to object"},
+		{"undefined", `undefined`, "Cannot convert undefined or null to object"},
 		{"result getter throws", `{get result() { throw 1 }, fault: function() {}}`, "1 at"},
 		{"fault getter throws", `{result: function() {}, get fault() { throw new Error("boom") }}`, "boom"},
 		{"step getter throws", `{result: function() {}, fault: function() {}, get step() { throw new Error("boom") }}`, "boom"},
