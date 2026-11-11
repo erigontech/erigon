@@ -51,12 +51,19 @@ func NewTestTx(tb testing.TB) (kv.TemporalRwDB, kv.TemporalRwTx) {
 type Option func(*options)
 
 type options struct {
-	stepSize uint64
+	stepSize    uint64
+	rwDBWrapper func(kv.RwDB) kv.RwDB
 }
 
 func WithStepSize(stepSize uint64) Option {
 	return func(opts *options) {
 		opts.stepSize = stepSize
+	}
+}
+
+func WithRwDBWrapper(wrapper func(kv.RwDB) kv.RwDB) Option {
+	return func(opts *options) {
+		opts.rwDBWrapper = wrapper
 	}
 }
 
@@ -68,11 +75,11 @@ func NewTestDB(tb testing.TB, dirs datadir.Dirs, opts ...Option) kv.TemporalRwDB
 	for _, opt := range opts {
 		opt(&config)
 	}
-	return newTestDB(tb, dirs, config.stepSize)
+	return newTestDB(tb, dirs, config.stepSize, config.rwDBWrapper)
 }
 
 // nolint:thelper
-func newTestDB(tb testing.TB, dirs datadir.Dirs, stepSize uint64) kv.TemporalRwDB {
+func newTestDB(tb testing.TB, dirs datadir.Dirs, stepSize uint64, rwDBWrapper func(kv.RwDB) kv.RwDB) kv.TemporalRwDB {
 	if tb != nil {
 		tb.Helper()
 	}
@@ -86,6 +93,9 @@ func newTestDB(tb testing.TB, dirs datadir.Dirs, stepSize uint64) kv.TemporalRwD
 		rawDB = mdbxtest.NewTestDB(tb, dbcfg.ChainDB)
 	} else {
 		rawDB = mdbxtest.New(nil, dirs.DataDir, dbcfg.ChainDB)
+	}
+	if rwDBWrapper != nil {
+		rawDB = rwDBWrapper(rawDB)
 	}
 
 	blockSnapCfg := ethconfig.Defaults.Snapshot

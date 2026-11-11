@@ -710,25 +710,11 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 			if err := e.purgeBadChain(ctx, purgeTx, lvh, blockHash); err != nil {
 				return ValidationResult{}, err
 			}
-			if e.currentContext != nil && e.currentContext.BlockOverlay() != nil {
-				if err := e.purgeBadChain(ctx, e.currentContext.BlockOverlay(), lvh, blockHash); err != nil {
-					return ValidationResult{}, err
-				}
-			}
+		} else {
+			e.dropBadChain(blockHash, lvh)
 		}
 		e.logger.Warn("ethereumExecutionModule.ValidateChain: chain is invalid", "hash", blockHash)
 		validationStatus = ExecutionStatusBadBlock
-		missingAncestor := e.dropBadChain(blockHash, lvh)
-		if missingAncestor != (common.Hash{}) && missingAncestor != lvh {
-			if err := e.purgeBadChain(ctx, purgeTx, lvh, missingAncestor); err != nil {
-				return ValidationResult{}, err
-			}
-			if e.currentContext != nil && e.currentContext.BlockOverlay() != nil {
-				if err := e.purgeBadChain(ctx, e.currentContext.BlockOverlay(), lvh, missingAncestor); err != nil {
-					return ValidationResult{}, err
-				}
-			}
-		}
 		if e.retainedBlocks != nil {
 			side, retained, err := e.prepareSideBlocks(roTx, nil, nil, 0, 0)
 			if err != nil {
@@ -755,34 +741,54 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 }
 
 func (e *ExecModule) purgeBadChain(ctx context.Context, tx kv.RwTx, latestValidHash, headHash common.Hash) error {
-	tip, err := e.blockReader.HeaderNumber(ctx, tx, headHash)
-	if err != nil {
-		return err
-	}
-	if tip == nil {
-		// Block is not in tx — nothing to purge.
-		return nil
-	}
-
 	dbHeadHash := rawdb.ReadHeadBlockHash(tx)
+	var overlay kv.RwTx
+	if e.currentContext != nil {
+		overlay = e.currentContext.BlockOverlay()
+	}
 
 	currentHash := headHash
-	currentNumber := *tip
 	for currentHash != latestValidHash {
-		currentHeader, err := e.getHeader(ctx, tx, currentHash, currentNumber)
-		if err != nil {
-			return err
+		pending, isPending := e.pendingBlocks[currentHash]
+		currentNumber := pending.number
+		var parentHash common.Hash
+		if isPending {
+			parentHash = pending.parent
+		} else {
+			var number *uint64
+			var err error
+			if e.blockReader == nil {
+				number = rawdb.ReadHeaderNumber(tx, currentHash)
+			} else {
+				number, err = e.blockReader.HeaderNumber(ctx, tx, currentHash)
+			}
+			if err != nil {
+				return err
+			}
+			if number == nil {
+				return nil
+			}
+			currentNumber = *number
+			currentHeader, err := e.getHeader(ctx, tx, currentHash, currentNumber)
+			if err != nil {
+				return err
+			}
+			if currentHeader == nil {
+				return nil
+			}
+			parentHash = currentHeader.ParentHash
 		}
 
-		// TODO: find a better way to handle this
 		if currentHash == dbHeadHash {
-			// We can't delete the head block stored in the database as that is our canonical reconnection point.
 			return nil
 		}
 
 		rawdb.DeleteHeader(tx, currentHash, currentNumber)
-		currentHash = currentHeader.ParentHash
-		currentNumber--
+		if overlay != nil {
+			rawdb.DeleteHeader(overlay, currentHash, currentNumber)
+		}
+		delete(e.pendingBlocks, currentHash)
+		currentHash = parentHash
 	}
 	return nil
 }

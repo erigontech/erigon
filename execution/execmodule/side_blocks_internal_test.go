@@ -17,11 +17,16 @@
 package execmodule
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/dbservices"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 func TestSideBlocksToRetain(t *testing.T) {
@@ -69,4 +74,25 @@ func TestDropBadChainWithUnknownLatestValidHashKeepsAncestors(t *testing.T) {
 	require.NotContains(t, e.pendingBlocks, p)
 	require.NotContains(t, e.pendingBlocks, s)
 	require.Contains(t, e.pendingBlocks, c)
+}
+
+func TestPurgeBadChainStopsAtMissingHeader(t *testing.T) {
+	_, tx := temporaltest.NewTestTx(t)
+	missing := common.Hash{1}
+	e := &ExecModule{blockReader: nilHeaderReader{}}
+
+	require.NotPanics(t, func() {
+		require.NoError(t, e.purgeBadChain(t.Context(), tx, common.Hash{}, missing))
+	})
+}
+
+type nilHeaderReader struct{ dbservices.FullBlockReader }
+
+func (nilHeaderReader) Header(context.Context, kv.Getter, common.Hash, uint64) (*types.Header, error) {
+	return nil, nil
+}
+
+func (nilHeaderReader) HeaderNumber(context.Context, kv.Getter, common.Hash) (*uint64, error) {
+	number := uint64(1)
+	return &number, nil
 }

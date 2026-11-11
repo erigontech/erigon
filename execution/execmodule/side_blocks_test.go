@@ -32,9 +32,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
-	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
@@ -85,20 +83,17 @@ func TestForkChoiceReorgsToRetainedSideBlock(t *testing.T) {
 }
 
 func TestForkChoiceCommitFailureKeepsRetainedSideBlock(t *testing.T) {
-	m, key, _ := newMetricsTester(t)
+	var failingDB *failOnceCommitDB
+	m, key, _ := newMetricsTester(t, execmoduletester.WithRwDBWrapper(func(db kv.RwDB) kv.RwDB {
+		failingDB = &failOnceCommitDB{RwDB: db}
+		return failingDB
+	}))
 	side := generateTransferBlocks(t, m, key, 1, 0x0b)[0]
 	winner := generateTransferBlocks(t, m, key, 1, 0x0a)[0]
 	insertAndValidateBlocks(t, m, side, winner)
 	updateForkChoiceTo(t, m, winner)
 
-	db, ok := m.DB.(*temporal.DB)
-	require.True(t, ok)
-	agg, ok := db.Agg().(*dbstate.Aggregator)
-	require.True(t, ok)
-	agg.WaitForFiles()
-	failingDB := &failOnceCommitDB{RwDB: db.InternalDB()}
 	failingDB.fail.Store(true)
-	db.RwDB = failingDB
 
 	result, err := m.ExecModule.UpdateForkChoice(t.Context(), side.Hash(), common.Hash{}, common.Hash{})
 	require.Error(t, err)
@@ -504,10 +499,13 @@ func TestValidateChainPurgesPersistedSideAncestor(t *testing.T) {
 		return nil
 	}))
 	updateForkChoiceTo(t, m, alternatePack.Blocks[0])
+	_, err = m.InsertBlocks(t.Context(), []*types.Block{persisted})
+	require.NoError(t, err)
 
 	result, err := m.ValidateChain(t.Context(), badChild.Header())
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusBadBlock, result.ValidationStatus)
+	updateForkChoiceTo(t, m, canonicalHead)
 
 	for _, block := range []*types.Block{persisted, badChild} {
 		hash := block.Hash()
@@ -515,6 +513,10 @@ func TestValidateChainPurgesPersistedSideAncestor(t *testing.T) {
 		require.NoError(t, err)
 		require.False(t, has)
 	}
+	bodies, err := m.ExecModule.GetPayloadBodiesByHash(t.Context(), []common.Hash{persisted.Hash()})
+	require.NoError(t, err)
+	require.Len(t, bodies, 1)
+	require.Nil(t, bodies[0])
 }
 
 func TestForkChoiceBoundsRetainedSideBlocks(t *testing.T) {
