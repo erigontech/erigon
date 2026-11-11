@@ -35,8 +35,8 @@
         "source": "ci"
       },
       "minimal": {
-        "bytes": 243170680832,
-        "display": "243.17 GB",
+        "bytes": 244153028608,
+        "display": "244.15 GB",
         "measured_at": "2026-11-11",
         "source": "ci"
       }
@@ -75,8 +75,8 @@
         "source": "ci"
       },
       "minimal": {
-        "bytes": 628876533760,
-        "display": "628.88 GB",
+        "bytes": 632528973824,
+        "display": "632.53 GB",
         "measured_at": "2026-11-11",
         "source": "ci"
       }
