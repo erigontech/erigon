@@ -721,7 +721,7 @@ func (api *BaseAPI) buildAccessedState(
 		return nil, nil, fmt.Errorf("failed to finalize block: %w", err)
 	}
 
-	if err = ethapi.CommitCallState(ibs, blockRules, recordingState); err != nil {
+	if err = ethapi.FinalizeCallTxTo(ibs, blockRules, recordingState); err != nil {
 		return nil, nil, fmt.Errorf("failed to commit block: %w", err)
 	}
 
@@ -2305,9 +2305,9 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 		return common.Hash{}, stateless, fmt.Errorf("[statelessExec] engine.Finalize failed: %w", err)
 	}
 
-	err = ethapi.CommitCallState(ibs, blockRules, stateless)
+	err = ethapi.FinalizeCallTxTo(ibs, blockRules, stateless)
 	if err != nil {
-		return common.Hash{}, stateless, fmt.Errorf("[statelessExec] ibs.CommitBlock() failed : %w", err)
+		return common.Hash{}, stateless, fmt.Errorf("[statelessExec] FinalizeCallTxTo failed: %w", err)
 	}
 
 	// Finalize and compute the resulting state root

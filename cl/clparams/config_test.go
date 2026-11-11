@@ -490,3 +490,7 @@ func TestSnapshotBlobsFromSlotIgnoresCutoffUnderCustomConfig(t *testing.T) {
 		"a custom beacon config may widen the serving window the download filter cannot see")
 	require.Zero(t, CaplinConfig{BlobsArchiveFromSlot: 9_000_000, CustomGenesisStatePath: "genesis.ssz"}.SnapshotBlobsFromSlot())
 }
+
+func TestChiadoUsesTheGnosisPartialWithdrawalsSweep(t *testing.T) {
+	require.EqualValues(t, 6, chiadoConfig().MaxPendingPartialsPerWithdrawalsSweep)
+}

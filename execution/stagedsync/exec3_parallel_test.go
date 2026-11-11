@@ -2029,3 +2029,25 @@ func TestProcessRequestSetsVersionMapBase(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, uint64(600), acc.Balance.Uint64(), "view past txNum 16 includes its write")
 }
+
+// A block dispatches at most the window of tasks past the commit frontier, whether or not it
+// carries a block access list: speculative work past the frontier stays bounded.
+func TestDispatchLimitBoundsEveryBlock(t *testing.T) {
+	addr := common.HexToAddress("0xd15a")
+	for _, tc := range []struct {
+		name string
+		bal  types.BlockAccessList
+	}{
+		{"no access list", nil},
+		{"empty access list", types.BlockAccessList{}},
+		{"access list", types.BlockAccessList{{Address: addr, BalanceChanges: []*types.BalanceChange{{Index: 1, Value: *uint256.NewInt(1)}}}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			be := &blockExecutor{versionMap: state.NewVersionMap(tc.bal), tasks: make([]*execTask, 100)}
+			be.committedFrontier.Store(-1)
+			require.Equal(t, dispatchWindow-1, be.dispatchLimit())
+			be.committedFrontier.Store(90)
+			require.Equal(t, 99, be.dispatchLimit())
+		})
+	}
+}

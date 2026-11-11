@@ -42,7 +42,7 @@ func TestStateOverrides_MovePrecompileDeterministicError(t *testing.T) {
 
 	for i := range 500 {
 		func(i int) {
-			ibs := state.New(state.NewNoopReader())
+			ibs := newVersionedCallState(state.NewNoopReader())
 			defer ibs.Close()
 			err := so.Override(ibs, vm.PrecompiledContracts{}, &chain.Rules{})
 			require.EqualError(t, err, want, "iteration %d: error must be deterministic", i)
@@ -63,7 +63,7 @@ func TestStateOverrides_MovePrecompileSuccess(t *testing.T) {
 	}
 
 	precompiles := vm.PrecompiledContracts{src: stub}
-	ibs := state.New(state.NewNoopReader())
+	ibs := newVersionedCallState(state.NewNoopReader())
 	defer ibs.Close()
 	err := so.Override(ibs, precompiles, &chain.Rules{})
 	require.NoError(t, err)
@@ -84,12 +84,9 @@ func TestStateOverridesPreserveStorageOnlyAccounts(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
 		stateDiff bool
-		versioned bool
 	}{
 		{name: "state"},
 		{name: "stateDiff", stateDiff: true},
-		{name: "state/versioned", versioned: true},
-		{name: "stateDiff/versioned", stateDiff: true, versioned: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			storage := map[common.Hash]common.Hash{key: common.HexToHash("0x2a")}
@@ -99,13 +96,8 @@ func TestStateOverridesPreserveStorageOnlyAccounts(t *testing.T) {
 			}
 
 			overrides := StateOverrides{addr: account}
-			ibs := state.New(state.NewNoopReader())
+			ibs := newVersionedCallState(state.NewNoopReader())
 			defer ibs.Close()
-			if tc.versioned {
-				ibs.SetVersionMap(state.NewVersionMap(nil))
-				ibs.SetNoConflictDetection()
-				ibs.SetTxContext(0, 0)
-			}
 
 			rules := &chain.Rules{IsSpuriousDragon: true}
 			require.NoError(t, overrides.Override(ibs, vm.PrecompiledContracts{}, rules))
@@ -121,27 +113,20 @@ func TestStateOverridesPreserveStorageOnlyAccounts(t *testing.T) {
 	}
 }
 
-// An empty stateDiff writes no slot, so it must not create an absent account on either path.
+// An empty stateDiff writes no slot, so it must not create an absent account.
 func TestStateOverrideEmptyStateDiffKeepsAccountAbsent(t *testing.T) {
 	t.Parallel()
 
 	addr := accounts.InternAddress(common.HexToAddress("0x1000000000000000000000000000000000000003"))
-	for _, versioned := range []bool{false, true} {
-		ibs := state.New(state.NewNoopReader())
-		if versioned {
-			ibs.SetVersionMap(state.NewVersionMap(nil))
-			ibs.SetNoConflictDetection()
-			ibs.SetTxContext(0, 0)
-		}
-		empty := map[common.Hash]common.Hash{}
-		overrides := StateOverrides{addr: Account{StateDiff: &empty}}
-		require.NoError(t, overrides.Override(ibs, vm.PrecompiledContracts{}, &chain.Rules{IsSpuriousDragon: true}))
+	ibs := newVersionedCallState(state.NewNoopReader())
+	defer ibs.Close()
+	empty := map[common.Hash]common.Hash{}
+	overrides := StateOverrides{addr: Account{StateDiff: &empty}}
+	require.NoError(t, overrides.Override(ibs, vm.PrecompiledContracts{}, &chain.Rules{IsSpuriousDragon: true}))
 
-		exists, err := ibs.Exist(addr)
-		require.NoError(t, err)
-		require.False(t, exists, "versioned=%v", versioned)
-		ibs.Close()
-	}
+	exists, err := ibs.Exist(addr)
+	require.NoError(t, err)
+	require.False(t, exists)
 }
 
 func TestStateOverridesBalanceDecoding(t *testing.T) {
@@ -149,7 +134,7 @@ func TestStateOverridesBalanceDecoding(t *testing.T) {
 	addr := accounts.InternAddress(common.HexToAddress("0x00000000000000000000000000000000000000aa"))
 	var so StateOverrides
 	require.NoError(t, json.Unmarshal([]byte(`{"0x00000000000000000000000000000000000000aa":{"balance":"0x`+maxU256+`"}}`), &so))
-	ibs := state.New(state.NewNoopReader())
+	ibs := newVersionedCallState(state.NewNoopReader())
 	defer ibs.Close()
 	require.NoError(t, so.Override(ibs, vm.PrecompiledContracts{}, &chain.Rules{}))
 	balance, err := ibs.GetBalance(addr)
@@ -350,4 +335,8 @@ func TestFinalizeCallTxKeepsARecreatedEmptyAccountDeleted(t *testing.T) {
 			require.False(t, exists)
 		})
 	}
+}
+
+func TestFinalizeCallTxRejectsAStateWithoutAVersionMap(t *testing.T) {
+	require.ErrorContains(t, FinalizeCallTx(state.New(state.NewNoopReader()), &chain.Rules{}), "no version map")
 }
