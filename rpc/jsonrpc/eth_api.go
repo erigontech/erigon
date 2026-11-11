@@ -341,13 +341,12 @@ func (r canonicalViewReader) CanonicalHash(ctx context.Context, tx kv.Getter, nu
 		}
 	}
 	// Frozen mappings may be absent from MDBX, but cannot change in a reorg.
-	// Backend fallback is safe only inside a known frozen range. If that range
-	// is unknown, we cannot tell whether a missing row requires a snapshot lookup.
-	frozen, observed := r.FrozenBlocksObserved()
-	if !observed {
-		return common.Hash{}, false, errors.New("frozen block range is unavailable")
+	// Confirm that the block is frozen before consulting the backend's newer view.
+	frozen, err := r.IsFrozen(ctx, number)
+	if err != nil {
+		return common.Hash{}, false, fmt.Errorf("frozen block range is unavailable: %w", err)
 	}
-	if frozen == 0 || number > frozen {
+	if !frozen {
 		return common.Hash{}, false, nil
 	}
 	return r.FullBlockReader.CanonicalHash(ctx, tx, number)

@@ -175,7 +175,9 @@ func (r *RemoteBlockReader) FrozenBlocksObserved() (uint64, bool) {
 	if fresh {
 		return value, observed
 	}
-	refreshed := r.frozenBlocks.Go(r.fetchFrozenBlocks)
+	refreshed := r.frozenBlocks.Go(func() (uint64, bool, error) {
+		return r.fetchFrozenBlocks(context.Background())
+	})
 	if observed {
 		return value, true
 	}
@@ -187,8 +189,28 @@ func (r *RemoteBlockReader) FrozenBlocksObserved() (uint64, bool) {
 	return value, observed
 }
 
-func (r *RemoteBlockReader) fetchFrozenBlocks() (uint64, bool, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), r.frozenBlocksTimeout)
+// IsFrozen can use a cached count to confirm a frozen block, but needs a fresh
+// observation to rule one out: snapshots may have advanced since the last fetch.
+func (r *RemoteBlockReader) IsFrozen(ctx context.Context, blockNum uint64) (bool, error) {
+	frozen, observed, _ := r.frozenBlocks.Load()
+	if observed && frozen > 0 && blockNum <= frozen {
+		return true, nil
+	}
+	refresh := func() (uint64, bool, error) {
+		return r.fetchFrozenBlocks(ctx)
+	}
+	frozen, ran, err := r.frozenBlocks.Produce(ctx, refresh)
+	if !ran && err == nil && (frozen == 0 || blockNum > frozen) {
+		// A shared fetch may have started before this request's database view.
+		// Its lower count cannot rule the block out. The next fetch starts after
+		// this request, so its result is fresh even if another caller starts it.
+		frozen, _, err = r.frozenBlocks.Produce(ctx, refresh)
+	}
+	return frozen > 0 && blockNum <= frozen, err
+}
+
+func (r *RemoteBlockReader) fetchFrozenBlocks(ctx context.Context) (uint64, bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, r.frozenBlocksTimeout)
 	defer cancel()
 	reply, err := r.client.FrozenBlocks(ctx, &emptypb.Empty{})
 	if err != nil {
@@ -480,6 +502,11 @@ func (r *BlockReader) AllTypes() []snaptype.Type {
 func (r *BlockReader) FrozenBlocks() uint64 { return r.sn.BlocksAvailable() }
 
 func (r *BlockReader) FrozenBlocksObserved() (uint64, bool) { return r.sn.BlocksAvailable(), true }
+
+func (r *BlockReader) IsFrozen(_ context.Context, blockNum uint64) (bool, error) {
+	frozen := r.sn.BlocksAvailable()
+	return frozen > 0 && blockNum <= frozen, nil
+}
 
 // FrozenBlocksInView is FrozenBlocks as seen by tx: a caller that then reads the block
 // must ask the same generation it reads from, not the live set that may be ahead of it.

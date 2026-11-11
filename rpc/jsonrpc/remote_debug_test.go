@@ -19,6 +19,7 @@ package jsonrpc
 import (
 	"bytes"
 	"context"
+	"errors"
 	"math/big"
 	"slices"
 	"testing"
@@ -26,6 +27,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
+	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
@@ -44,6 +47,7 @@ import (
 	tracersConfig "github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
@@ -362,11 +366,11 @@ func TestCanonicalViewReaderFrozenFallback(t *testing.T) {
 		{name: "present_in_view", block: 12, want: viewHash},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			reader := canonicalViewReader{observedFrozenBlocks{
-				FullBlockReader: liveCanonicalReader{hash: backendHash},
-				frozen:          tc.frozen,
-				observed:        tc.observed,
-			}}
+			backend := &canonicalFrozenBackend{frozen: tc.frozen, hash: backendHash}
+			if !tc.observed {
+				backend.err = errors.New("backend unavailable")
+			}
+			reader := canonicalViewReader{freezeblocks.NewRemoteBlockReader(backend)}
 			hash, found, err := reader.CanonicalHash(t.Context(), tx, tc.block)
 			if tc.wantErr {
 				require.ErrorContains(t, err, "frozen block range is unavailable")
@@ -375,6 +379,80 @@ func TestCanonicalViewReaderFrozenFallback(t *testing.T) {
 			}
 			require.Equal(t, tc.want, hash)
 			require.Equal(t, tc.want != (common.Hash{}), found)
+		})
+	}
+}
+
+type canonicalFrozenBackend struct {
+	remoteproto.ETHBACKENDClient
+	frozen      uint64
+	hash        common.Hash
+	err         error
+	frozenCalls int
+}
+
+func (b *canonicalFrozenBackend) FrozenBlocks(ctx context.Context, _ *emptypb.Empty, _ ...grpc.CallOption) (*remoteproto.FrozenBlocksReply, error) {
+	b.frozenCalls++
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return &remoteproto.FrozenBlocksReply{FrozenBlocks: b.frozen}, b.err
+}
+
+func (b *canonicalFrozenBackend) CanonicalHash(context.Context, *remoteproto.CanonicalHashRequest, ...grpc.CallOption) (*remoteproto.CanonicalHashReply, error) {
+	return &remoteproto.CanonicalHashReply{Hash: gointerfaces.ConvertHashToH256(b.hash)}, nil
+}
+
+func TestCanonicalViewReaderRefreshesFrozenRange(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		cached uint64
+	}{
+		{name: "cached_zero"},
+		{name: "cached_below_block", cached: 500_000},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, tx := mdbxtest.NewTestTx(t)
+			backend := &canonicalFrozenBackend{frozen: tc.cached, hash: common.Hash{0x77}}
+			remote := freezeblocks.NewRemoteBlockReader(backend)
+			frozen, observed := remote.FrozenBlocksObserved()
+			require.Equal(t, tc.cached, frozen)
+			require.True(t, observed)
+			backend.frozen = 1_000_000
+
+			reader := canonicalViewReader{remote}
+			for range 2 {
+				hash, found, err := reader.CanonicalHash(t.Context(), tx, 750_000)
+				require.NoError(t, err)
+				require.True(t, found)
+				require.Equal(t, backend.hash, hash)
+			}
+			require.Equal(t, 2, backend.frozenCalls, "reuse the refreshed range once it covers the block")
+		})
+	}
+}
+
+func TestCanonicalViewReaderFrozenRangeFailure(t *testing.T) {
+	backendErr := errors.New("backend unavailable")
+	for _, wantErr := range []error{backendErr, context.Canceled} {
+		t.Run(wantErr.Error(), func(t *testing.T) {
+			_, tx := mdbxtest.NewTestTx(t)
+			backend := &canonicalFrozenBackend{hash: common.Hash{0x77}}
+			remote := freezeblocks.NewRemoteBlockReader(backend)
+			_, observed := remote.FrozenBlocksObserved()
+			require.True(t, observed)
+			backend.err = backendErr
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			if errors.Is(wantErr, context.Canceled) {
+				cancel()
+			}
+
+			hash, found, err := (canonicalViewReader{remote}).CanonicalHash(ctx, tx, 750_000)
+			require.ErrorIs(t, err, wantErr)
+			require.ErrorContains(t, err, "frozen block range is unavailable")
+			require.False(t, found)
+			require.Zero(t, hash)
 		})
 	}
 }
