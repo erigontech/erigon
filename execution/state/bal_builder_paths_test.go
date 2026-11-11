@@ -17,11 +17,16 @@
 package state
 
 import (
+	"fmt"
+	"math/big"
+	"runtime"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -70,4 +75,57 @@ func TestBlockAccessListBuilderDropsEmptyCodeOfContractCreatedInBlock(t *testing
 	bal := b.Build()
 	require.Len(t, bal, 1)
 	require.Empty(t, bal[0].CodeChanges)
+}
+
+// TestBlockAccessListBuilderReadOnlyAccountsDoNotAllocatePerAccount pins that an account
+// with only reads gets no per-account state, so a block reading many accounts does not
+// allocate one per account on the serial apply path.
+func TestBlockAccessListBuilderReadOnlyAccountsDoNotAllocatePerAccount(t *testing.T) {
+	const n = 1000
+	rs := ReadSet{access: AccessSet{}}
+	for i := range n {
+		addr := accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i + 1))))
+		rs.SetBalance(addr, VersionedRead[uint256.Int]{Val: *uint256.NewInt(7)})
+		rs.access[addr] = accessOptions{}
+	}
+	b := NewBlockAccessListBuilder()
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	b.Add(-1, rs, nil)
+	runtime.ReadMemStats(&after)
+	require.Less(t, after.Mallocs-before.Mallocs, uint64(n/10))
+
+	bal := b.Build()
+	require.Len(t, bal, n)
+	again := NewBlockAccessListBuilder()
+	again.Add(-1, rs, nil)
+	require.True(t, again.Matches(bal))
+	for i := range bal {
+		require.Equal(t, types.AccountChanges{Address: bal[i].Address}, bal[i])
+	}
+}
+
+// TestBlockAccessListBuilderReplaysReadsOfReadOnlyAccount pins that an account
+// becoming written keeps its earlier balance reads: the first one as the
+// pre-block balance, the last one as the latest balance.
+func TestBlockAccessListBuilderReplaysReadsOfReadOnlyAccount(t *testing.T) {
+	addr := accounts.InternAddress(common.Address{19: 0x42})
+	for _, write := range []uint64{10, 20, 30} {
+		t.Run(fmt.Sprint(write), func(t *testing.T) {
+			b := NewBlockAccessListBuilder()
+			want := newAccountState(addr)
+			for i, read := range []uint64{10, 20} {
+				var rs ReadSet
+				rs.SetBalance(addr, VersionedRead[uint256.Int]{Val: *uint256.NewInt(read)})
+				b.Add(i-1, rs, nil)
+				want.updateReadBalance(*uint256.NewInt(read))
+			}
+			ws := &WriteSet{}
+			ws.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: Version{TxIndex: 1}}, Val: *uint256.NewInt(write)})
+			b.Add(1, ReadSet{}, ws)
+			want.applyWriteBalance(*uint256.NewInt(write), Version{TxIndex: 1}.blockAccessIndex())
+			want.finalize()
+			require.Equal(t, types.BlockAccessList{want.changes}, b.Build())
+		})
+	}
 }
