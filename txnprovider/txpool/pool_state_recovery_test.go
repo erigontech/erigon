@@ -190,6 +190,57 @@ func TestFramePoolAdmissionWaitsForStateRecovery(t *testing.T) {
 	})
 }
 
+func TestRemoteAdmissionDefersUntilStateRecovery(t *testing.T) {
+	for _, stage := range []string{"before admission", "opening state view", "precheck", "after precheck"} {
+		t.Run(stage, func(t *testing.T) {
+			_, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+			pool.started.Store(true)
+			synctest.Test(t, func(t *testing.T) {
+				ctx, cancel := context.WithCancel(t.Context())
+				defer cancel()
+				txn := newTestTxnSlot(0, 0, 1, 2, 100_000)
+				switch stage {
+				case "before admission":
+					pool.MarkStateStale()
+				case "opening state view":
+					pool._stateCache = &stateViewProbe{Cache: pool._stateCache, onView: pool.MarkStateStale}
+				case "precheck":
+					txn = newTestSetCodeTxnSlot(0, 0, 1, 2, 100_000)
+					pool.MarkStateStale()
+				case "after precheck":
+					txn = newTestSetCodeTxnSlot(0, 0, 1, 2, 100_000)
+					txn.Txn = &authorizationReadProbe{Transaction: txn.Txn, pool: pool, onUnlocked: pool.MarkStateStale}
+				}
+				txn.IDHash = txn.Txn.Hash()
+				var txns TxnSlots
+				txns.Append(txn, sender[:], false)
+				pool.AddRemoteTxns(ctx, txns, nil, nil)
+				done := make(chan error, 1)
+				go func() { done <- pool.processRemoteTxns(ctx) }()
+				synctest.Wait()
+				select {
+				case err := <-done:
+					require.NoError(t, err)
+				default:
+					t.Fatal("remote admission blocks the maintenance loop while state is stale")
+				}
+				require.Empty(t, pool.byHash)
+				require.Equal(t, txns, *pool.unprocessedRemoteTxns)
+				require.Contains(t, pool.unprocessedRemoteByHash, string(txn.IDHash[:]))
+				require.True(t, pool.hasUnprocessedRemoteTxns.Load())
+
+				change := newBlockChangeForAccounts(common.Hash{1}, 0)
+				require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+				require.NoError(t, pool.processRemoteTxns(ctx))
+				require.Contains(t, pool.byHash, string(txn.IDHash[:]))
+				require.Empty(t, pool.unprocessedRemoteTxns.Txns)
+				require.Empty(t, pool.unprocessedRemoteByHash)
+				require.False(t, pool.hasUnprocessedRemoteTxns.Load())
+			})
+		})
+	}
+}
+
 func TestPoolRejectsSupersededIncompleteState(t *testing.T) {
 	ctx, pool, _, db, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
 	pool._stateCache = kvcache.NewLatestBatchCache()
