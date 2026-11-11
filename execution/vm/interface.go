@@ -22,12 +22,7 @@ package vm
 import (
 	"math/big"
 
-	"github.com/holiman/uint256"
-
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/state"
-	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
 // CallerContext provides a basic interface for the EVM calling conventions. The EVM
@@ -41,18 +36,4 @@ type CallerContext interface {
 	DelegateCall(env *EVM, me common.Address, addr common.Address, data []byte, gas *big.Int) ([]byte, error)
 	// Create a new contract
 	Create(env *EVM, me common.Address, data []byte, gas, value *big.Int) ([]byte, common.Address, error)
-}
-
-// VMInterface exposes the EVM interface for external callers.
-type VMInterface interface {
-	Reset(txCtx evmtypes.TxContext, ibs *state.IntraBlockState)
-	Create(caller common.Address, code []byte, gas uint64, value *uint256.Int) (ret []byte, contractAddr common.Address, leftOverGas uint64, err error)
-	Call(caller common.Address, addr common.Address, input []byte, gas uint64, value *uint256.Int, bailout bool) (ret []byte, leftOverGas uint64, err error)
-	Cancel()
-	Config() Config
-	ChainConfig() *chain.Config
-	ChainRules() *chain.Rules
-	Context() evmtypes.BlockContext
-	IntraBlockState() *state.IntraBlockState
-	TxContext() evmtypes.TxContext
 }
