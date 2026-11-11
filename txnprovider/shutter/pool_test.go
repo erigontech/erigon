@@ -38,8 +38,6 @@ import (
 	"go.uber.org/mock/gomock"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -49,6 +47,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	"github.com/erigontech/erigon/db/kv/remotedbserver"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/abi/bind"
@@ -58,6 +57,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/rpc/contracts"
@@ -444,11 +444,9 @@ func TestPoolProvideTxnsAmsterdamGasAdmission(t *testing.T) {
 }
 
 func TestPoolProvideTxnsUsesRemainingGasForAdmission(t *testing.T) {
-	stateChanges := remoteproto.NewMockKVClient(gomock.NewController(t))
-	stateChanges.EXPECT().StateChanges(gomock.Any(), gomock.Any(), gomock.Any()).
-		Return(nil, status.Error(codes.Unavailable, "no core node in this test")).AnyTimes()
-
 	poolCtx, stopPool := context.WithCancel(t.Context())
+	// Keep the subscription open so startup does not wait for state recovery.
+	stateChanges := direct.NewStateDiffClientDirect(remotedbserver.NewKvServer(poolCtx, nil, nil, nil, log.New()))
 	publicPool, err := txpool.New(poolCtx, make(chan txpool.Announcements, 1),
 		mdbxtest.NewTestPoolDB(t), temporaltest.NewTestDB(t, datadir.New(t.TempDir())),
 		txpoolcfg.DefaultConfig, kvcache.New(kvcache.DefaultCoherentConfig), chain.AllProtocolChanges,
