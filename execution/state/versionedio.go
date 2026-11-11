@@ -730,6 +730,17 @@ type VersionedWrite[T any] struct {
 	entry *AddressEntry
 }
 
+// prevFromRecord returns the slot's value before this write, empty if it had none, or nil when
+// the write recorded no origin, which makes DomainPut and DomainDel read the value themselves.
+// A recorded change from zero is ValueCreated, so ValueChanged with a zero origin is a write
+// that was never stamped.
+func prevFromRecord(w *VersionedWrite[uint256.Int]) []byte {
+	if w.valStatus == ValueChanged && w.orig.IsZero() {
+		return nil
+	}
+	return w.orig.Bytes()
+}
+
 func (w *VersionedWrite[T]) bind(e *AddressEntry, c *WriteCell[T]) { w.cell, w.entry = c, e }
 
 func cloneVW[T any](w *VersionedWrite[T]) *VersionedWrite[T] {
@@ -2197,6 +2208,14 @@ func (vr versionedStateReader) ReadAccountStorage(address accounts.Address, key 
 			// wiped to zero; only a write above it survives.
 			if val, res, ok := vr.versionMap.ReadStorage(address, key, vr.txIndex); ok &&
 				res.resolved() && res.DepIdx() > destroyedAt {
+				return val, true, nil
+			}
+			return uint256.Int{}, false, nil
+		}
+		// A creation clears the slots of the prior incarnation without writing them, and a
+		// seeded origin can hold their old values.
+		if created, res, ok := vr.versionMap.ReadCreateContract(address, vr.txIndex); ok && created && res.resolved() {
+			if val, slot, ok := liveStorageValue(vr.versionMap, address, key, vr.txIndex); ok && slot.Status() != MVReadResultNone && slot.DepIdx() >= res.DepIdx() {
 				return val, true, nil
 			}
 			return uint256.Int{}, false, nil
