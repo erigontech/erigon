@@ -95,7 +95,7 @@ func BlockIdFromRequest(r *http.Request) (*SegmentID, error) {
 
 	blockId := chi.URLParam(r, "block_id")
 	if !regex.MatchString(blockId) {
-		return nil, errors.New("invalid path variable: {block_id}")
+		return nil, NewEndpointError(http.StatusBadRequest, errors.New("invalid path variable: {block_id}"))
 	}
 
 	if blockId == "head" {
@@ -110,7 +110,7 @@ func BlockIdFromRequest(r *http.Request) (*SegmentID, error) {
 	if !strings.HasPrefix(blockId, "0x") {
 		slot, err := strconv.ParseUint(blockId, 10, 64)
 		if err != nil {
-			return nil, errors.New("invalid path variable: {block_id}")
+			return nil, NewEndpointError(http.StatusBadRequest, errors.New("invalid path variable: {block_id}"))
 		}
 		return &SegmentID{slot: &slot}, nil
 	}
@@ -125,7 +125,7 @@ func StateIdFromRequest(r *http.Request) (*SegmentID, error) {
 
 	stateId := chi.URLParam(r, "state_id")
 	if !regex.MatchString(stateId) {
-		return nil, errors.New("invalid path variable: {state_id}")
+		return nil, NewEndpointError(http.StatusBadRequest, errors.New("invalid path variable: {state_id}"))
 	}
 
 	if stateId == "head" {
@@ -143,7 +143,7 @@ func StateIdFromRequest(r *http.Request) (*SegmentID, error) {
 	if !strings.HasPrefix(stateId, "0x") {
 		slot, err := strconv.ParseUint(stateId, 10, 64)
 		if err != nil {
-			return nil, errors.New("invalid path variable: {state_id}")
+			return nil, NewEndpointError(http.StatusBadRequest, errors.New("invalid path variable: {state_id}"))
 		}
 		return &SegmentID{slot: &slot}, nil
 	}

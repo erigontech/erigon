@@ -37,9 +37,9 @@ func requestWithURLParam(t *testing.T, name, value string) *http.Request {
 func TestIdsRejectADecimalAboveUint64(t *testing.T) {
 	const tooLarge = "18446744073709551616"
 	_, err := StateIdFromRequest(requestWithURLParam(t, "state_id", tooLarge))
-	require.Error(t, err)
+	require.Equal(t, http.StatusBadRequest, WrapEndpointError(err).Code)
 	_, err = BlockIdFromRequest(requestWithURLParam(t, "block_id", tooLarge))
-	require.Error(t, err)
+	require.Equal(t, http.StatusBadRequest, WrapEndpointError(err).Code)
 
 	id, err := StateIdFromRequest(requestWithURLParam(t, "state_id", "18446744073709551615"))
 	require.NoError(t, err)

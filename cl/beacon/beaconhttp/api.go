@@ -76,9 +76,13 @@ func NewEndpointError(code int, err error) *EndpointError {
 	// b := make([]byte, 2048)
 	// n := runtime.Stack(b, false)
 	// s := string(b[:n])
+	message := err.Error()
+	if inner, ok := errors.AsType[*EndpointError](err); ok {
+		message = inner.Message // re-wrapping keeps the message without the inner "Code N:" prefix
+	}
 	return &EndpointError{
 		Code:    code,
-		Message: err.Error(),
+		Message: message,
 		//	Stacktraces: []string{s}
 		err: err,
 	}
