@@ -845,6 +845,9 @@ func (f *forkGraphDisk) storeLightClientUpdate(update *cltypes.LightClientUpdate
 
 // GetLightClientUpdate returns the best update of one sync committee period, as GetLightClientUpdates does.
 func (f *forkGraphDisk) GetLightClientUpdate(period uint64, head common.Hash) (*cltypes.LightClientUpdate, bool) {
+	if period == math.MaxUint64 {
+		return nil, false // no period+1 bounds its range
+	}
 	update := f.GetLightClientUpdates(period, period+1, head)[0]
 	return update, update != nil
 }

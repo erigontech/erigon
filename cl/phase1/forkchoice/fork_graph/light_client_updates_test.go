@@ -17,6 +17,7 @@
 package fork_graph
 
 import (
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -328,4 +329,36 @@ func TestGetLightClientUpdatesServesARangeAgainstOneHead(t *testing.T) {
 	require.Equal(t, []*cltypes.LightClientUpdate{first}, f.GetLightClientUpdates(1, 2, head), "a candidate of a later period is not one of the range")
 	require.Equal(t, []*cltypes.LightClientUpdate{settled, nil, nil, nil}, f.GetLightClientUpdates(0, 4, common.Hash{}))
 	require.Nil(t, f.GetLightClientUpdates(2, 2, head))
+}
+
+// Block import records candidates while the Beacon API handlers look them up.
+func TestLightClientUpdateCandidatesRecordAndLookupConcurrently(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	f := &forkGraphDisk{beaconCfg: cfg}
+	p := cfg.SlotsPerEpoch * cfg.EpochsPerSyncCommitteePeriod
+	head := common.Hash{0xff}
+	f.headers.Store(head, &cltypes.BeaconBlockHeader{Slot: p + 100})
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := range 200 {
+			f.recordLightClientUpdateLocked(common.Hash{byte(i), 1}, lightClientTestUpdate(cfg, 400, p+uint64(i%50)))
+		}
+	}()
+	for {
+		f.GetLightClientUpdates(0, 3, head)
+		select {
+		case <-done:
+			return
+		default:
+		}
+	}
+}
+
+// The last period has no next period to bound its range.
+func TestGetLightClientUpdateAtTheLastPeriod(t *testing.T) {
+	f := &forkGraphDisk{beaconCfg: &clparams.MainnetBeaconConfig}
+	_, ok := f.GetLightClientUpdate(math.MaxUint64, common.Hash{})
+	require.False(t, ok)
 }
