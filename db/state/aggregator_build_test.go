@@ -64,6 +64,7 @@ func TestAggregatorBuildResumesIncompleteStep(t *testing.T) {
 					agg.EnableDomain(kv.RCacheDomain)
 					agg.d[kv.ReceiptDomain].HistoryDisabled = target == "receipt_without_history"
 					agg.KeepRecentTxnsOfHistoriesWithDisabledSnapshots(0)
+					agg.ForbidVisibilityLowering()
 				}
 				configure(agg)
 				stateFilesEnd := uint64(test.stateSteps) * stepSize
