@@ -93,7 +93,6 @@ func (r *RecentReceipts) Missing(from, to uint64) []uint64 {
 	return missing
 }
 
-// evictBefore drops blocks more than limit below from; caller holds r.mu.
 // DropUpTo removes blocks at or below blockNum.
 func (r *RecentReceipts) DropUpTo(blockNum uint64) {
 	r.mu.Lock()
@@ -107,6 +106,7 @@ func (r *RecentReceipts) DropUpTo(blockNum uint64) {
 	}
 }
 
+// evictBefore drops blocks more than limit below from; caller holds r.mu.
 func (r *RecentReceipts) evictBefore(from uint64) {
 	for bn := range r.receipts {
 		if bn+r.limit < from {
@@ -128,9 +128,7 @@ func (r *RecentReceipts) NotifyLogs(n ChainEventNotifier, from, to uint64) {
 	r.evictBefore(from)
 	reply := r.removedLogs
 	for bn := from; bn < to; bn++ {
-		if receipts, ok := r.receipts[bn]; ok {
-			reply = append(reply, logNotifications(receipts, r.headers[bn], false)...)
-		}
+		reply = append(reply, logNotifications(r.receipts[bn], r.headers[bn], false)...)
 	}
 	if len(reply) > 0 {
 		n.OnLogs(reply)
