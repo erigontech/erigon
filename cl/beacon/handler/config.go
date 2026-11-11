@@ -39,6 +39,7 @@ func (a *ApiHandler) getSpec(w http.ResponseWriter, r *http.Request) (*beaconhtt
 		MaxAttesterSlashingSize          uint64                       `json:"MAX_ATTESTER_SLASHING_SIZE,string"`
 		MaxSignedAggregateAndProofSize   uint64                       `json:"MAX_SIGNED_AGGREGATE_AND_PROOF_SIZE,string"`
 		MaxSignedExecutionPayloadBidSize uint64                       `json:"MAX_SIGNED_EXECUTION_PAYLOAD_BID_SIZE,string"`
+		UpdateTimeout                    uint64                       `json:"UPDATE_TIMEOUT,string"`
 		SlotDurationMs                   uint64                       `json:"SLOT_DURATION_MS,string"`
 		MinEpochsForBlockRequests        uint64                       `json:"MIN_EPOCHS_FOR_BLOCK_REQUESTS,string"`
 	}{
@@ -50,6 +51,7 @@ func (a *ApiHandler) getSpec(w http.ResponseWriter, r *http.Request) (*beaconhtt
 		MaxAttesterSlashingSize:          gossip.MaxUncompressedSize(gossip.TopicNameAttesterSlashing, a.beaconChainCfg, a.netConfig),
 		MaxSignedAggregateAndProofSize:   gossip.MaxUncompressedSize(gossip.TopicNameBeaconAggregateAndProof, a.beaconChainCfg, a.netConfig),
 		MaxSignedExecutionPayloadBidSize: uint64(maxSignedExecutionPayloadBidSSZSize()),
+		UpdateTimeout:                    a.beaconChainCfg.SlotsPerEpoch * a.beaconChainCfg.EpochsPerSyncCommitteePeriod,
 		SlotDurationMs:                   a.beaconChainCfg.SecondsPerSlot * 1000,
 		MinEpochsForBlockRequests:        a.beaconChainCfg.MinEpochsForBlockRequests(),
 	}

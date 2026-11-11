@@ -24,6 +24,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -214,4 +215,112 @@ func TestGetSpecUsesResolvedPresetSizes(t *testing.T) {
 	require.JSONEq(t, `"196932"`, string(spec.Data["MAX_SIGNED_EXECUTION_PAYLOAD_BID_SIZE"]))
 	require.Equal(t, uint64(131536), gossip.MaxUncompressedSize(gossip.TopicNameAttesterSlashing, &config, &network))
 	require.Equal(t, uint64(1462), gossip.MaxUncompressedSize(gossip.TopicNameBeaconAggregateAndProof, &config, &network))
+}
+
+func TestReviewSpecMinimalUpdateTimeout(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	require.NoError(t, os.WriteFile(path, []byte("PRESET_BASE: minimal\nUPDATE_TIMEOUT: 64\n"), 0o644))
+	config, network, err := clparams.CustomConfig(path)
+	require.NoError(t, err)
+	want := config.SlotsPerEpoch * config.EpochsPerSyncCommitteePeriod
+	require.Equal(t, uint64(64), want)
+	h := &ApiHandler{beaconChainCfg: &config, netConfig: &network, routerCfg: &beacon_router_configuration.RouterConfiguration{Config: true}}
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/eth/v1/config/spec", nil))
+	require.Equal(t, http.StatusOK, w.Code)
+	var response struct {
+		Data map[string]json.RawMessage `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	got := string(response.Data["UPDATE_TIMEOUT"])
+	if got != strconv.Quote(strconv.FormatUint(want, 10)) {
+		t.Errorf("UPDATE_TIMEOUT: expected %d slots (SLOTS_PER_EPOCH * EPOCHS_PER_SYNC_COMMITTEE_PERIOD), got %s", want, got)
+	}
+}
+
+func TestNamedNetworkRuntimeConfigDefaults(t *testing.T) {
+	mainnetNetwork, mainnetConfig, _, err := clparams.GetConfigsByNetworkName("mainnet")
+	require.NoError(t, err)
+	require.Equal(t, clparams.AttestationDueBps, mainnetConfig.AttestationDueBps)
+	require.Equal(t, clparams.AggregateDueBps, mainnetConfig.AggregateDueBps)
+	require.Equal(t, clparams.SyncMessageDueBps, mainnetConfig.SyncMessageDueBps)
+	require.Equal(t, clparams.ContributionDueBps, mainnetConfig.ContributionDueBps)
+	require.Equal(t, clparams.AttestationDueBpsGloas, mainnetConfig.AttestationDueBpsGloas)
+	require.Equal(t, clparams.AggregateDueBpsGloas, mainnetConfig.AggregateDueBpsGloas)
+	require.Equal(t, clparams.SyncMessageDueBpsGloas, mainnetConfig.SyncMessageDueBpsGloas)
+	require.Equal(t, clparams.ContributionDueBpsGloas, mainnetConfig.ContributionDueBpsGloas)
+	require.Equal(t, clparams.PayloadAttestationDueBps, mainnetConfig.PayloadAttestationDueBps)
+	require.Equal(t, clparams.ReorgHeadWeightThreshold, mainnetConfig.ReorgHeadWeightThreshold)
+	require.Equal(t, clparams.ReorgParentWeightThreshold, mainnetConfig.ReorgParentWeightThreshold)
+	require.Equal(t, clparams.ReorgMaxEpochsSinceFinalization, mainnetConfig.ReorgMaxEpochsSinceFinalization)
+	require.Equal(t, clparams.ProposerReorgCutoffBps, mainnetConfig.ProposerReorgCutoffBps)
+	require.Equal(t, clparams.ConfirmationByzantineThreshold, mainnetConfig.ConfirmationByzantineThreshold)
+	require.Equal(t, clparams.EpochsPerSubnetSubscription, mainnetNetwork.EpochsPerSubnetSubscription)
+	require.Zero(t, mainnetNetwork.AttestationSubnetExtraBits)
+	for _, name := range []string{"mainnet", "sepolia", "hoodi", "gnosis", "chiado", "bloatnet"} {
+		t.Run(name, func(t *testing.T) {
+			network, config, _, err := clparams.GetConfigsByNetworkName(name)
+			require.NoError(t, err)
+			require.Equal(t, mainnetConfig.AttestationDueBps, config.AttestationDueBps)
+			require.Equal(t, mainnetConfig.AggregateDueBps, config.AggregateDueBps)
+			require.Equal(t, mainnetConfig.SyncMessageDueBps, config.SyncMessageDueBps)
+			require.Equal(t, mainnetConfig.ContributionDueBps, config.ContributionDueBps)
+			require.Equal(t, mainnetConfig.AttestationDueBpsGloas, config.AttestationDueBpsGloas)
+			require.Equal(t, mainnetConfig.AggregateDueBpsGloas, config.AggregateDueBpsGloas)
+			require.Equal(t, mainnetConfig.SyncMessageDueBpsGloas, config.SyncMessageDueBpsGloas)
+			require.Equal(t, mainnetConfig.ContributionDueBpsGloas, config.ContributionDueBpsGloas)
+			require.Equal(t, mainnetConfig.PayloadAttestationDueBps, config.PayloadAttestationDueBps)
+			require.Equal(t, mainnetConfig.ReorgHeadWeightThreshold, config.ReorgHeadWeightThreshold)
+			require.Equal(t, mainnetConfig.ReorgParentWeightThreshold, config.ReorgParentWeightThreshold)
+			require.Equal(t, mainnetConfig.ReorgMaxEpochsSinceFinalization, config.ReorgMaxEpochsSinceFinalization)
+			require.Equal(t, mainnetConfig.ProposerReorgCutoffBps, config.ProposerReorgCutoffBps)
+			require.Equal(t, mainnetConfig.ConfirmationByzantineThreshold, config.ConfirmationByzantineThreshold)
+			require.Equal(t, mainnetNetwork.AttestationSubnetExtraBits, network.AttestationSubnetExtraBits)
+			require.Equal(t, config.SecondsPerSlot*config.AttestationDueBps/(clparams.BpsFactor/1000), config.AttestationDueMs(false))
+			require.Equal(t, config.SecondsPerSlot*config.AttestationDueBpsGloas/(clparams.BpsFactor/1000), config.AttestationDueMs(true))
+			require.Equal(t, config.SecondsPerSlot*config.PayloadAttestationDueBps/(clparams.BpsFactor/1000), config.PayloadAttestationDueMs())
+			require.Equal(t, mainnetNetwork.EpochsPerSubnetSubscription, network.EpochsPerSubnetSubscription)
+		})
+	}
+}
+
+func TestCustomConfigOmittingAddedKeysUsesMainnetDefaults(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	require.NoError(t, os.WriteFile(configPath, []byte("CONFIG_NAME: custom\n"), 0o644))
+	config, network, err := clparams.CustomConfig(configPath)
+	require.NoError(t, err)
+	mainnetNetwork, mainnetConfig, _, err := clparams.GetConfigsByNetworkName("mainnet")
+	require.NoError(t, err)
+	require.Equal(t, mainnetConfig.AttestationDueMs(false), config.AttestationDueMs(false))
+	require.Equal(t, mainnetConfig.AttestationDueMs(true), config.AttestationDueMs(true))
+	require.Equal(t, mainnetConfig.PayloadAttestationDueMs(), config.PayloadAttestationDueMs())
+	require.Equal(t, mainnetConfig.ReorgHeadWeightThreshold, config.ReorgHeadWeightThreshold)
+	require.Equal(t, mainnetNetwork.EpochsPerSubnetSubscription, network.EpochsPerSubnetSubscription)
+
+	response, err := (&ApiHandler{beaconChainCfg: &config, netConfig: &network}).getSpec(nil, nil)
+	require.NoError(t, err)
+	encoded, err := json.Marshal(response)
+	require.NoError(t, err)
+	var spec struct {
+		Data map[string]json.RawMessage `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(encoded, &spec))
+	for _, key := range []string{
+		"SLOT_DURATION_MS", "PROPOSER_REORG_CUTOFF_BPS", "ATTESTATION_DUE_BPS", "AGGREGATE_DUE_BPS",
+		"SYNC_MESSAGE_DUE_BPS", "CONTRIBUTION_DUE_BPS", "ATTESTATION_DUE_BPS_GLOAS", "AGGREGATE_DUE_BPS_GLOAS",
+		"SYNC_MESSAGE_DUE_BPS_GLOAS", "CONTRIBUTION_DUE_BPS_GLOAS", "PAYLOAD_ATTESTATION_DUE_BPS",
+		"REORG_HEAD_WEIGHT_THRESHOLD", "REORG_PARENT_WEIGHT_THRESHOLD", "REORG_MAX_EPOCHS_SINCE_FINALIZATION",
+		"CONFIRMATION_BYZANTINE_THRESHOLD", "ATTESTATION_SUBNET_EXTRA_BITS", "EPOCHS_PER_SUBNET_SUBSCRIPTION",
+		"MAX_ATTESTER_SLASHING_SIZE", "MAX_SIGNED_AGGREGATE_AND_PROOF_SIZE", "MAX_SIGNED_EXECUTION_PAYLOAD_BID_SIZE", "UPDATE_TIMEOUT",
+	} {
+		mainnetResponse, err := (&ApiHandler{beaconChainCfg: mainnetConfig, netConfig: mainnetNetwork}).getSpec(nil, nil)
+		require.NoError(t, err)
+		mainnetEncoded, err := json.Marshal(mainnetResponse)
+		require.NoError(t, err)
+		var mainnetSpec struct {
+			Data map[string]json.RawMessage `json:"data"`
+		}
+		require.NoError(t, json.Unmarshal(mainnetEncoded, &mainnetSpec))
+		require.JSONEq(t, string(mainnetSpec.Data[key]), string(spec.Data[key]), key)
+	}
 }

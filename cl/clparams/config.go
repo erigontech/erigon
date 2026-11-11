@@ -813,7 +813,6 @@ type BeaconChainConfig struct {
 	FieldElementsPerExtBlob               uint64 `yaml:"-" json:"FIELD_ELEMENTS_PER_EXT_BLOB,string"`
 	KzgCommitmentInclusionProofDepth      uint64 `yaml:"-" json:"KZG_COMMITMENT_INCLUSION_PROOF_DEPTH,string"`
 	KzgCommitmentsInclusionProofDepth     uint64 `yaml:"-" json:"KZG_COMMITMENTS_INCLUSION_PROOF_DEPTH,string"`
-	UpdateTimeout                         uint64 `yaml:"-" json:"UPDATE_TIMEOUT,string"`
 	PendingPartialWithdrawalsLimit        uint64 `yaml:"PENDING_PARTIAL_WITHDRAWALS_LIMIT" spec:"true" json:"PENDING_PARTIAL_WITHDRAWALS_LIMIT,string"` // PendingPartialWithdrawalsLimit defines the maximum number of pending partial withdrawals.
 	PendingConsolidationsLimit            uint64 `yaml:"PENDING_CONSOLIDATIONS_LIMIT" spec:"true" json:"PENDING_CONSOLIDATIONS_LIMIT,string"`           // PendingConsolidationsLimit defines the maximum number of pending consolidations.
 	MaxBlobsPerBlockElectra               uint64 `yaml:"MAX_BLOBS_PER_BLOCK_ELECTRA" spec:"true" json:"MAX_BLOBS_PER_BLOCK_ELECTRA,string"`             // MaxBlobsPerBlockElectra defines the maximum number of blobs per block for Electra.
@@ -1260,7 +1259,6 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	FieldElementsPerExtBlob:               8192,
 	KzgCommitmentInclusionProofDepth:      17,
 	KzgCommitmentsInclusionProofDepth:     4,
-	UpdateTimeout:                         8192,
 	PendingPartialWithdrawalsLimit:        1 << 27,
 	PendingConsolidationsLimit:            1 << 18,
 	MaxBlobsPerBlockElectra:               9,
