@@ -133,7 +133,7 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 	}
 	defer ibs.Close()
 	if hsr, ok := stateReader.(state.HistoricalStateReader); ok && canTraceTxnsInParallel(config) && debugTraceBlockWorkers(block.Transactions().Len()) > 1 {
-		err := api.traceBlockParallel(ctx, block, hsr.GetTxNum(), config, chainConfig, rules, signer, stream)
+		err := api.traceBlockParallel(ctx, tx, block, hsr.GetTxNum(), config, chainConfig, rules, signer, stream)
 		if !errors.Is(err, errNoReplayReadTx) {
 			return err
 		}

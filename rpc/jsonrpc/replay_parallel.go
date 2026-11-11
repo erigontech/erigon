@@ -24,10 +24,8 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/state"
 )
@@ -50,10 +48,15 @@ func replayWorkerCount(cpus, txnCount int) int {
 // history keeps the exact state before every txNum, so the txns replay independently. Each
 // worker owns a read tx, because an MDBX tx must not be used by two goroutines. When the
 // read-tx limit leaves no tx for any worker, it returns errNoReplayReadTx and runs nothing.
-// A txn starts only when the txn window places before it is written.
-func replayTxnsParallel(ctx context.Context, db kv.TemporalRoDB, canonical dbservices.CanonicalReader, blockNum uint64, blockHash common.Hash, baseTxNum uint64, txnCount, workers, window int,
+// A txn starts only when the txn window places before it is written. The block must be
+// canonical in the view of callerTx.
+func replayTxnsParallel(ctx context.Context, db kv.TemporalRoDB, callerTx kv.TemporalTx, blockNum uint64, baseTxNum uint64, txnCount, workers, window int,
 	newWorker func(ctx context.Context, tx kv.TemporalTx) (func(txnIndex int) error, error),
 ) (*txnReplay, error) {
+	tip, err := tipCanonicalMarker(callerTx)
+	if err != nil {
+		return nil, err
+	}
 	txs, err := beginReplayReadTxs(ctx, db, workers)
 	if err != nil {
 		return nil, err
@@ -87,13 +90,14 @@ func replayTxnsParallel(ctx context.Context, db kv.TemporalRoDB, canonical dbser
 			if baseTxNum < startTxNum {
 				return fmt.Errorf("%w: requested block %d, history is available from txNum %d", state.ErrPruned, blockNum, startTxNum)
 			}
-			// After a reorg the block's txNums belong to the new fork.
-			isCanonical, err := canonical.IsCanonical(gctx, tx, blockHash, blockNum)
+			// After a reorg the block's txNums belong to the new fork. A reorg at or below
+			// the caller's tip rewrites or truncates the tip marker, so it alone covers the block.
+			tipHash, err := canonicalHashAt(tx, tip.number)
 			if err != nil {
 				return err
 			}
-			if !isCanonical {
-				return fmt.Errorf("%w: block %d %x", errBlockNotCanonical, blockNum, blockHash)
+			if tipHash != tip.hash {
+				return fmt.Errorf("%w: block %d", errBlockNotCanonical, blockNum)
 			}
 			job, err := newWorker(gctx, tx)
 			if err != nil {

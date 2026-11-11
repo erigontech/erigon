@@ -35,7 +35,7 @@ import (
 // traceBlockParallel traces every transaction of block on the history state before it, so
 // the transactions do not wait for each other. The objects are written in block order as
 // they complete.
-func (api *DebugAPIImpl) traceBlockParallel(ctx context.Context, block *types.Block, baseTxNum uint64, config *tracersConfig.TraceConfig,
+func (api *DebugAPIImpl) traceBlockParallel(ctx context.Context, tx kv.TemporalTx, block *types.Block, baseTxNum uint64, config *tracersConfig.TraceConfig,
 	chainConfig *chain.Config, rules *chain.Rules, signer *types.Signer, stream *jsonstream.Stream,
 ) error {
 	txns := block.Transactions()
@@ -51,7 +51,7 @@ func (api *DebugAPIImpl) traceBlockParallel(ctx context.Context, block *types.Bl
 
 	workers := debugTraceBlockWorkers(len(txns))
 	ctx, cancel := context.WithCancel(ctx)
-	replay, err := replayTxnsParallel(ctx, api.db, api._blockReader, header.Number.Uint64(), block.Hash(), baseTxNum, len(txns), workers, 2*workers, func(ctx context.Context, workerTx kv.TemporalTx) (func(int) error, error) {
+	replay, err := replayTxnsParallel(ctx, api.db, tx, header.Number.Uint64(), baseTxNum, len(txns), workers, 2*workers, func(ctx context.Context, workerTx kv.TemporalTx) (func(int) error, error) {
 		blockCtx := transactions.NewEVMBlockContext(engine, header, true /* requireCanonical */, workerTx, api._blockReader, chainConfig)
 		return func(txnIndex int) error {
 			txNum := baseTxNum + uint64(txnIndex)

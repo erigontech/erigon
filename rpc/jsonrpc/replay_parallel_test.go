@@ -29,6 +29,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
@@ -109,12 +110,20 @@ func TestTraceBlockParityUnderReadTxLimit(t *testing.T) {
 }
 
 // TestReplayTxnsParallelRejectsReorgedBlock pins that the workers fail, instead of replaying
-// another block's txNums, when the block is no longer canonical in their own view.
+// another block's txNums, when a reorg after the caller's read tx reaches their own view.
 func TestReplayTxnsParallelRejectsReorgedBlock(t *testing.T) {
 	m, _ := createLogIndexTestModule(t)
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	tip, err := tipCanonicalMarker(tx)
+	require.NoError(t, err)
+	require.NoError(t, m.DB.Update(m.Ctx, func(rwTx kv.RwTx) error {
+		return rawdb.WriteCanonicalHash(rwTx, common.Hash{0xff}, tip.number)
+	}))
 
 	var replayed atomic.Bool
-	r, err := replayTxnsParallel(m.Ctx, m.DB, m.BlockReader, 1, common.Hash{0xff}, 0, 4, 4, 4,
+	r, err := replayTxnsParallel(m.Ctx, m.DB, tx, 1, 0, 4, 4, 4,
 		func(context.Context, kv.TemporalTx) (func(int) error, error) {
 			return func(int) error {
 				replayed.Store(true)
@@ -130,11 +139,9 @@ func TestReplayTxnsParallelRejectsReorgedBlock(t *testing.T) {
 // or more after it, so at most a window of results waits to be written.
 func TestReplayTxnsParallelBoundsBufferedTxns(t *testing.T) {
 	m, _ := createLogIndexTestModule(t)
-	tx, err := m.DB.BeginRo(m.Ctx)
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
-	hash, _, err := m.BlockReader.CanonicalHash(m.Ctx, tx, 1)
-	require.NoError(t, err)
 
 	const txnCount, workers, window = 16, 4, 4
 	var written atomic.Int64
@@ -143,7 +150,7 @@ func TestReplayTxnsParallelBoundsBufferedTxns(t *testing.T) {
 	for i := range done {
 		done[i] = make(chan struct{})
 	}
-	r, err := replayTxnsParallel(m.Ctx, m.DB, m.BlockReader, 1, hash, 0, txnCount, workers, window,
+	r, err := replayTxnsParallel(m.Ctx, m.DB, tx, 1, 0, txnCount, workers, window,
 		func(context.Context, kv.TemporalTx) (func(int) error, error) {
 			return func(txnIndex int) error {
 				if int64(txnIndex) >= written.Load()+window {
@@ -170,15 +177,13 @@ func TestReplayTxnsParallelBoundsBufferedTxns(t *testing.T) {
 // stop when a txn before them fails, instead of waiting for a write that never comes.
 func TestReplayTxnsParallelStopsWaitingWorkersOnError(t *testing.T) {
 	m, _ := createLogIndexTestModule(t)
-	tx, err := m.DB.BeginRo(m.Ctx)
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
-	hash, _, err := m.BlockReader.CanonicalHash(m.Ctx, tx, 1)
-	require.NoError(t, err)
 
 	const txnCount, workers, window = 16, 4, 4
 	errSlowTxn := errors.New("slow txn failed")
-	r, err := replayTxnsParallel(m.Ctx, m.DB, m.BlockReader, 1, hash, 0, txnCount, workers, window,
+	r, err := replayTxnsParallel(m.Ctx, m.DB, tx, 1, 0, txnCount, workers, window,
 		func(context.Context, kv.TemporalTx) (func(int) error, error) {
 			return func(txnIndex int) error {
 				if txnIndex == 0 {
@@ -203,13 +208,11 @@ func TestReplayTxnsParallelStopsWaitingWorkersOnError(t *testing.T) {
 // with an error instead of killing the process, and that the panic value stays out of it.
 func TestReplayTxnsParallelReturnsWorkerPanic(t *testing.T) {
 	m, _ := createLogIndexTestModule(t)
-	tx, err := m.DB.BeginRo(m.Ctx)
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
-	hash, _, err := m.BlockReader.CanonicalHash(m.Ctx, tx, 1)
-	require.NoError(t, err)
 
-	r, err := replayTxnsParallel(m.Ctx, m.DB, m.BlockReader, 1, hash, 0, 4, 2, 4,
+	r, err := replayTxnsParallel(m.Ctx, m.DB, tx, 1, 0, 4, 2, 4,
 		func(context.Context, kv.TemporalTx) (func(int) error, error) {
 			return func(txnIndex int) error {
 				if txnIndex == 1 {
@@ -281,8 +284,11 @@ func TestReplayTxnsParallelRollsBackOnOpenError(t *testing.T) {
 	db := &openTxCountingDB{TemporalRoDB: m.DB, failErr: errOpen}
 	db.left.Store(2)
 	t.Cleanup(db.rollbackLeaked)
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
 
-	_, err := replayTxnsParallel(m.Ctx, db, m.BlockReader, 1, common.Hash{}, 0, 4, 4, 4,
+	_, err = replayTxnsParallel(m.Ctx, db, tx, 1, 0, 4, 4, 4,
 		func(context.Context, kv.TemporalTx) (func(int) error, error) {
 			t.Fatal("no worker may start")
 			return nil, nil
