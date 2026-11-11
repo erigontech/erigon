@@ -112,6 +112,50 @@ func TestFramePoolParksAroundFailedStateRead(t *testing.T) {
 	}
 }
 
+type failedAccountReadView struct {
+	kvcache.CacheView
+	err error
+}
+
+func (v failedAccountReadView) Get([]byte) ([]byte, error) {
+	return nil, v.err
+}
+
+func TestFramePoolFailedBlockUpdateBlocksSelection(t *testing.T) {
+	ctx, pool, sender := keyedFramePoolEnv(t)
+	initial := newBlockChangeForAccounts(common.Hash{1}, 0)
+	initial.ChangeBatch[0].SlotNumber = common.NewUint64(10)
+	require.NoError(t, pool.OnNewBlock(ctx, initial, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	frame := recentRootPoolSlot(t, sender, 10, 1)
+	var txns TxnSlots
+	txns.Append(frame, sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+	mt := pool.byHash[string(frame.IDHash[:])]
+	require.Equal(t, PendingSubPool, mt.currentSubPool)
+	reservation := pool.frameReservations[sender]
+
+	change := newBlockChangeForAccounts(common.Hash{2}, 0, sender)
+	change.ChangeBatch[0].SlotNumber = common.NewUint64(10)
+	require.Equal(t, initial.ChangeBatch[0].BlockHeight, change.ChangeBatch[0].BlockHeight)
+	readErr := errors.New("account read failed")
+	// Observe the state at lock release, before OnNewBlock's outer error handler runs.
+	_, err = pool.applyBlockUpdate(change, TxnSlots{}, TxnSlots{}, TxnSlots{}, failedAccountReadView{err: readErr}, nil)
+	require.ErrorIs(t, err, readErr)
+	require.Equal(t, common.Hash{2}, pool.stateBlockHash)
+
+	var selected TxnsRlp
+	_, count, err := pool.best(ctx, 10, &selected, change.ChangeBatch[0].BlockHeight, nil,
+		mdgas.FullMdGas{MdGas: mdgas.MdGas{Execution: 1_000_000, State: 1_000_000}}, nil, 1_000_000)
+	require.NoError(t, err)
+	require.Zero(t, count, "a failed update must block selection before releasing the pool lock")
+	require.True(t, pool.stateViewStale)
+	require.Zero(t, mt.currentSubPool)
+	require.Same(t, mt, pool.byHash[string(frame.IDHash[:])])
+	require.Equal(t, reservation, pool.frameReservations[sender])
+}
+
 func TestFramePoolAdmissionWaitsForStateRecovery(t *testing.T) {
 	_, pool, sender := keyedFramePoolEnv(t)
 	synctest.Test(t, func(t *testing.T) {

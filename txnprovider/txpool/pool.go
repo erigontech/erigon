@@ -324,6 +324,10 @@ func (p *TxPool) start(ctx context.Context) error {
 func (p *TxPool) MarkStateStale() {
 	p.lock.Lock()
 	defer p.lock.Unlock()
+	p.markStateStaleLocked()
+}
+
+func (p *TxPool) markStateStaleLocked() {
 	if p.stateViewStale {
 		return
 	}
@@ -451,11 +455,14 @@ func (p *TxPool) applyBlockUpdate(stateChanges *remoteproto.StateChangeBatch, un
 	}
 	frames.blockHash = p.stateBlockHash
 	defer func() {
-		if err == nil {
-			p.stateViewStale = false
-			p.lastSeenBlock.Store(block)
-			p.lastSeenCond.Broadcast()
+		if err != nil {
+			// Selection must not observe a partially applied update after the lock is released.
+			p.markStateStaleLocked()
+			return
 		}
+		p.stateViewStale = false
+		p.lastSeenBlock.Store(block)
+		p.lastSeenCond.Broadcast()
 	}()
 
 	pendingPre := p.pending.Len()
