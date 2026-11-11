@@ -2745,36 +2745,6 @@ func (ibs *IntraBlockState) CommitBlock(chainRules *chain.Rules, stateWriter Sta
 	return ibs.MakeWriteSet(chainRules, stateWriter)
 }
 
-// ExtractAndClearDirty snapshots the current stateObjectsDirty set and clears it.
-// Used by eth_simulateV1 to separate accounts dirtied by stateOverrides from those
-// dirtied by actual transaction execution, so CommitBlock does not apply EIP-161 to
-// override-only accounts.
-func (ibs *IntraBlockState) ExtractAndClearDirty() map[accounts.Address]struct{} {
-	dirty := maps.Clone(ibs.stateObjectsDirty)
-	clear(ibs.stateObjectsDirty)
-	return dirty
-}
-
-// CommitOverrideDirtyAccounts writes state-override accounts that were not subsequently
-// touched by any transaction (and therefore not handled by CommitBlock).  EIP-161 is
-// intentionally disabled: override accounts are simulation-only mutations and must not
-// be removed simply because they are "empty" by consensus rules.
-func (ibs *IntraBlockState) CommitOverrideDirtyAccounts(chainRules *chain.Rules, stateWriter StateWriter, overrideDirty map[accounts.Address]struct{}) error {
-	for addr := range overrideDirty {
-		if _, alsoTxDirty := ibs.stateObjectsDirty[addr]; alsoTxDirty {
-			continue // CommitBlock already handled this address
-		}
-		so, exists := ibs.stateObjects[addr]
-		if !exists || so.deleted {
-			continue
-		}
-		if err := updateAccount(false, chainRules.IsAura, stateWriter, addr, so, true, ibs.trace, ibs.tracingHooks, true, chainRules.IsAmsterdam); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func (ibs *IntraBlockState) BalanceIncreaseSet() map[accounts.Address]uint256.Int {
 	s := make(map[accounts.Address]uint256.Int, len(ibs.balanceInc))
 	for addr, bi := range ibs.balanceInc {
