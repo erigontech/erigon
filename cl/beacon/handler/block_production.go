@@ -840,6 +840,9 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 			)
 		}
 	}
+	if targetSlot < a.ethClock.GetCurrentSlot() {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("cannot produce a block for a historic slot"))
+	}
 	if err := a.refuseLaggingHead(); err != nil {
 		return nil, err
 	}
