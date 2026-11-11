@@ -57,21 +57,14 @@ func NewApp(desc string) *cli.Command {
 		if err == nil {
 			return
 		}
-		// For cli.Exit errors, print a non-empty message before exiting.
-		// Empty messages are used by handlers that have already printed their
-		// own diagnostics (for example, OnUsageError).
+		format, code := "Error: %v\n", 1
 		if exitErr, ok := errors.AsType[cli.ExitCoder](err); ok {
-			if err.Error() != "" {
-				fmt.Fprintf(errWriter(cmd.Root()), "%v\n", err)
-			}
-			cli.OsExiter(exitErr.ExitCode())
-		} else {
-			// For other errors, print them and exit
-			if err.Error() != "" {
-				fmt.Fprintf(errWriter(cmd.Root()), "Error: %v\n", err)
-			}
-			cli.OsExiter(1)
+			format, code = "%v\n", exitErr.ExitCode()
 		}
+		if err.Error() != "" {
+			fmt.Fprintf(errWriter(cmd.Root()), format, err)
+		}
+		cli.OsExiter(code)
 	}
 
 	return app
