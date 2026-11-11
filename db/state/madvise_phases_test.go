@@ -18,7 +18,6 @@ package state_test
 
 import (
 	"io/fs"
-	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -27,6 +26,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/diagnostics/syscheck"
 )
@@ -80,7 +80,7 @@ func TestMmapAdviceAcrossFilePhases(t *testing.T) {
 
 	for _, ext := range []string{".kvi", ".bt", ".kvei", ".vi", ".efi"} {
 		for _, f := range snapFiles(t, snapDir, ext) {
-			require.NoError(t, os.Remove(f))
+			require.NoError(t, dir.RemoveFile(f))
 		}
 	}
 	db, agg = reopenAggregator(t, db, agg, stepSize)
