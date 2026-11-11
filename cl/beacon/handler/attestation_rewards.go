@@ -69,6 +69,7 @@ func (a *ApiHandler) PostEthV1BeaconRewardsAttestations(w http.ResponseWriter, r
 	epoch, err := beaconhttp.EpochFromRequest(r)
 
 	// attestation rewards are always delayed by 1 extra epoch compared to other rewards
+	requestedEpoch := epoch
 	epoch += 1
 
 	if err != nil {
@@ -104,6 +105,7 @@ func (a *ApiHandler) PostEthV1BeaconRewardsAttestations(w http.ResponseWriter, r
 	// 1) finalized data
 	// 2) not finalized data
 	version := a.beaconChainCfg.GetCurrentStateVersion(epoch)
+	includeInclusionDelay := a.beaconChainCfg.GetCurrentStateVersion(requestedEpoch) == clparams.Phase0Version
 
 	// finalized data
 	if epoch > a.forkchoiceStore.LowestAvailableSlot()/a.beaconChainCfg.SlotsPerEpoch {
@@ -149,7 +151,7 @@ func (a *ApiHandler) PostEthV1BeaconRewardsAttestations(w http.ResponseWriter, r
 				return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("no finalized checkpoint found for this epoch"))
 			}
 
-			resp, err := a.computeAttestationsRewardsForAltair(validatorSet, inactivityScores, prevParticipation, a.isInactivityLeaking(epoch, finalizedCheckpoint), filterIndicies, epoch)
+			resp, err := a.computeAttestationsRewardsForAltair(validatorSet, inactivityScores, prevParticipation, a.isInactivityLeaking(epoch, finalizedCheckpoint), filterIndicies, epoch, includeInclusionDelay)
 			if err != nil {
 				return nil, err
 			}
@@ -226,6 +228,7 @@ func (a *ApiHandler) PostEthV1BeaconRewardsAttestations(w http.ResponseWriter, r
 		a.isInactivityLeaking(epoch, finalizedCheckpoint),
 		filterIndicies,
 		epoch,
+		includeInclusionDelay,
 	)
 	if err != nil {
 		return nil, err
@@ -249,7 +252,7 @@ func (a *ApiHandler) baseReward(version clparams.StateVersion, effectiveBalance,
 	return effectiveBalance * a.beaconChainCfg.BaseRewardFactor / activeBalanceRoot / a.beaconChainCfg.BaseRewardsPerEpoch
 }
 
-func (a *ApiHandler) computeAttestationsRewardsForAltair(validatorSet *solid.ValidatorSet, inactivityScores solid.Uint64ListSSZ, previousParticipation *solid.ParticipationBitList, inactivityLeak bool, filterIndicies []uint64, epoch uint64) (*beaconhttp.BeaconResponse, error) {
+func (a *ApiHandler) computeAttestationsRewardsForAltair(validatorSet *solid.ValidatorSet, inactivityScores solid.Uint64ListSSZ, previousParticipation *solid.ParticipationBitList, inactivityLeak bool, filterIndicies []uint64, epoch uint64, includeInclusionDelay bool) (*beaconhttp.BeaconResponse, error) {
 	totalActiveBalance := uint64(0)
 	prevEpoch := uint64(0)
 	if epoch > 0 {
@@ -280,6 +283,10 @@ func (a *ApiHandler) computeAttestationsRewardsForAltair(validatorSet *solid.Val
 
 	rewardDenominator := (totalActiveBalance / a.beaconChainCfg.EffectiveBalanceIncrement) * a.beaconChainCfg.WeightDenominator
 	var response *attestationsRewardsResponse
+	var inclusionDelay *int64
+	if includeInclusionDelay {
+		inclusionDelay = new(int64)
+	}
 	if len(filterIndicies) > 0 {
 		response = &attestationsRewardsResponse{
 			IdealRewards: make([]IdealReward, 0, len(filterIndicies)),
@@ -299,12 +306,12 @@ func (a *ApiHandler) computeAttestationsRewardsForAltair(validatorSet *solid.Val
 		baseReward := a.baseReward(version, effectiveBalance, totalActiveBalanceSqrt)
 		// not eligible for rewards? then all empty
 		if !(v.Active(prevEpoch) || (v.Slashed() && prevEpoch+1 < v.WithdrawableEpoch())) {
-			response.IdealRewards = append(response.IdealRewards, IdealReward{EffectiveBalance: int64(effectiveBalance)})
-			response.TotalRewards = append(response.TotalRewards, TotalReward{ValidatorIndex: int64(index)})
+			response.IdealRewards = append(response.IdealRewards, IdealReward{EffectiveBalance: int64(effectiveBalance), InclusionDelay: inclusionDelay})
+			response.TotalRewards = append(response.TotalRewards, TotalReward{ValidatorIndex: int64(index), InclusionDelay: inclusionDelay})
 			return nil
 		}
-		idealReward := IdealReward{EffectiveBalance: int64(effectiveBalance)}
-		totalReward := TotalReward{ValidatorIndex: int64(index)}
+		idealReward := IdealReward{EffectiveBalance: int64(effectiveBalance), InclusionDelay: inclusionDelay}
+		totalReward := TotalReward{ValidatorIndex: int64(index), InclusionDelay: inclusionDelay}
 		if !inactivityLeak {
 			idealReward.Head = int64(baseReward * rewardMultipliers[a.beaconChainCfg.TimelyHeadFlagIndex] / rewardDenominator)
 			idealReward.Target = int64(baseReward * rewardMultipliers[a.beaconChainCfg.TimelyTargetFlagIndex] / rewardDenominator)

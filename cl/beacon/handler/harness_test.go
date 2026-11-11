@@ -18,10 +18,17 @@ package handler
 
 import (
 	_ "embed"
+	"encoding/json"
+	"math"
+	"net/http"
+	"net/http/httptest"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/beacon/beacontest"
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 func TestHarnessPhase0(t *testing.T) {
@@ -80,4 +87,31 @@ func TestHarnessForkChoice(t *testing.T) {
 			beacontest.WithTestFromFs(Harnesses, "fork_choice"),
 		)...,
 	)
+}
+
+func TestAttestationRewardsLastPhase0EpochKeepsInclusionDelay(t *testing.T) {
+	_, blocks, _, _, _, h, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.New(), true)
+	h.beaconChainCfg.AltairForkEpoch = 5
+	h.beaconChainCfg.BellatrixForkEpoch = 5
+	fcu.HeadVal, _ = blocks[len(blocks)-1].Block.HashSSZ()
+	fcu.HeadSlotVal = blocks[len(blocks)-1].Block.Slot
+	fcu.FinalizedSlotVal = math.MaxUint64
+	require.Equal(t, clparams.Phase0Version, h.beaconChainCfg.GetCurrentStateVersion(4))
+
+	r := httptest.NewRequest(http.MethodPost, "/eth/v1/beacon/rewards/attestations/4", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var response struct {
+		Data map[string][]map[string]string `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	for _, key := range []string{"ideal_rewards", "total_rewards"} {
+		t.Run(key, func(t *testing.T) {
+			require.NotEmpty(t, response.Data[key])
+			for i, reward := range response.Data[key] {
+				require.Equal(t, "0", reward["inclusion_delay"], "%s[%d]: phase0 epoch 4 must retain inclusion_delay; got %v", key, i, reward)
+			}
+		})
+	}
 }
