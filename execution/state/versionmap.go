@@ -1940,6 +1940,9 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 			return VersionValid
 		}
 	}
+	if path == StoragePath && source == StorageRead && version == UnknownVersion && rr.DepIdx() == originIndex {
+		rr = ReadResult{depIdx: UnknownDep}
+	}
 	valid := VersionValid
 	switch rr.Status() {
 	case MVReadResultDone, MVReadResultValidated:

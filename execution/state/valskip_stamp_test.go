@@ -363,3 +363,49 @@ func TestQuietBelow_StampsSizedForLastIndex(t *testing.T) {
 	vm.mutEnd(last)
 	require.True(t, vm.QuietBelow(last, stamp), "a write by L does not block reader L")
 }
+
+func originPublishFixture() (*VersionMap, accounts.Address, accounts.StorageKey, func(int) VersionValidity) {
+	vm := newStampedMap(8)
+	addr := accounts.InternAddress(common.HexToAddress("0x920fd507"))
+	slot := accounts.InternKey(common.HexToHash("0xf41f8421"))
+	rs := ReadSet{}
+	rs.SetStorage(addr, slot, VersionedRead[uint256.Int]{
+		ReadHeader: ReadHeader{Source: StorageRead, Version: UnknownVersion},
+		Val:        *uint256.NewInt(7),
+	})
+	check := func(rv, wv Version) VersionValidity {
+		if rv != wv {
+			return VersionInvalid
+		}
+		return VersionValid
+	}
+	validate := func(txIdx int) VersionValidity { return vm.ValidateReadSet(txIdx, rs, check, false, "") }
+	return vm, addr, slot, validate
+}
+
+func TestValSkip_OriginPublishKeepsColdStorageReadValid(t *testing.T) {
+	t.Parallel()
+	vm, addr, slot, validate := originPublishFixture()
+	const i = 5
+	stamp := vm.WriteSeq()
+	require.Equal(t, VersionValid, validate(i))
+
+	vm.StoreOriginStorage(addr, slot, *uint256.NewInt(3))
+
+	require.True(t, vm.QuietBelow(i, stamp), "origin publication is unstamped")
+	require.Equal(t, VersionValid, validate(i),
+		"an unstamped origin publication must not turn a validated read stale")
+}
+
+func TestValSkip_LowerWriteAfterOriginInvalidatesColdStorageRead(t *testing.T) {
+	t.Parallel()
+	vm, addr, slot, validate := originPublishFixture()
+	const k, i = 2, 5
+	vm.StoreOriginStorage(addr, slot, *uint256.NewInt(3))
+	stamp := vm.WriteSeq()
+
+	vm.WriteStorage(addr, slot, Version{TxIndex: k}, *uint256.NewInt(9), true)
+
+	require.False(t, vm.QuietBelow(i, stamp))
+	require.Equal(t, VersionInvalid, validate(i))
+}
