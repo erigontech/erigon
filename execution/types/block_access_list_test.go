@@ -869,7 +869,7 @@ func TestBlockAccessListDecodeAcceptsOnlyCanonicalEncoding(t *testing.T) {
 			return encode(items)
 		}
 		slot := list("slot", one, list("", list("storage change", one, one)))
-		account := list("account", encode(common.Address{1}), list("", slot), list("", one),
+		account := list("account", encode(common.Address{1}), list("", slot), list("", encode(uint64(2))),
 			list("", list("balance change", one, one)),
 			list("", list("nonce change", one, one)),
 			list("", list("code change", one, encode([]byte{0x60}))))
@@ -885,8 +885,14 @@ func TestBlockAccessListDecodeAcceptsOnlyCanonicalEncoding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := decoded.Validate(); err != nil {
+		t.Fatalf("the fixture is not a valid list: %v", err)
+	}
 	if !bytes.Equal(reencoded, canonical) {
 		t.Fatalf("the fixture is not canonical: %x re-encodes to %x", canonical, reencoded)
+	}
+	if canonical[0] >= 0xf8 {
+		t.Fatalf("the fixture outgrew a short list: %x", canonical)
 	}
 	if _, err := DecodeBlockAccessListBytes(append([]byte{0xf8, canonical[0] - 0xc0}, canonical[1:]...)); err == nil {
 		t.Fatal("a list length in long form must be rejected")
