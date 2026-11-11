@@ -84,9 +84,14 @@ func TestRemoteBlockReaderIsFrozenDoesNotShareCallerCancellation(t *testing.T) {
 		synctest.Wait()
 		cancel()
 		synctest.Wait()
+		select {
+		case err := <-leader:
+			assert.ErrorIs(t, err, context.Canceled)
+		default:
+			t.Error("cancelled initiator must return before the backend finishes")
+		}
 		close(client.release)
 		require.NoError(t, <-waiter, "a different request's cancellation must not fail the shared lookup")
-		require.ErrorIs(t, <-leader, context.Canceled)
 		require.EqualValues(t, 1, client.calls.Load())
 	})
 }

@@ -202,12 +202,12 @@ func (r *RemoteBlockReader) IsFrozen(ctx context.Context, blockNum uint64) (bool
 	refresh := func() (uint64, bool, error) {
 		return r.fetchFrozenBlocks(context.WithoutCancel(ctx))
 	}
-	frozen, startedFetch, err := r.frozenBlocks.Produce(ctx, refresh)
+	frozen, startedFetch, err := r.frozenBlocks.ProduceAsync(ctx, refresh)
 	if !startedFetch && err == nil && ctx.Err() == nil && (frozen == 0 || blockNum > frozen) {
 		// A shared fetch may have started before this request's database view.
 		// Its lower count cannot rule the block out. The next fetch starts after
 		// this request, so its result is fresh even if another caller starts it.
-		frozen, _, err = r.frozenBlocks.Produce(ctx, refresh)
+		frozen, _, err = r.frozenBlocks.ProduceAsync(ctx, refresh)
 	}
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return false, ctxErr
