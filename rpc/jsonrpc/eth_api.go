@@ -758,6 +758,11 @@ func (api *BaseAPI) historyStartBlocksFromTxNum(ctx context.Context, tx kv.Tx, h
 			replay:             head,
 		}, nil
 	}
+	// Genesis writes its state at a system txNum inside block 0, and nothing precedes
+	// it, so a history starting in block 0 is complete.
+	if containingBlock == 0 {
+		return historyPruneFloors{}, nil
+	}
 	blockStartTxNum, hasStart, err := api._txNumReader.MinExact(ctx, tx, nil, containingBlock)
 	if err != nil {
 		return historyPruneFloors{}, err
