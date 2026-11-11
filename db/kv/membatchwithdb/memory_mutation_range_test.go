@@ -368,3 +368,23 @@ func TestCursorLastSkipsDeletedTailOnNestedBatch(t *testing.T) {
 	require.Equal(t, "CBAA", string(k))
 	require.Equal(t, "value2", string(v))
 }
+
+func TestCursorLastKeepsEmptyValueOnNestedBatch(t *testing.T) {
+	parent := newBatchOverDbNonDupSort(t)
+	require.NoError(t, parent.Put(kv.HeaderNumber, []byte("AAAA"), []byte{}))
+	child, err := membatchwithdb.NewMemoryBatch(parent)
+	require.NoError(t, err)
+	t.Cleanup(child.Close)
+	for _, k := range []string{"CAAA", "CBAA", "CCAA"} {
+		require.NoError(t, child.Delete(kv.HeaderNumber, []byte(k)))
+	}
+
+	c, err := child.Cursor(kv.HeaderNumber)
+	require.NoError(t, err)
+	defer c.Close()
+	k, v, err := c.Last()
+	require.NoError(t, err)
+	require.Equal(t, "AAAA", string(k))
+	require.NotNil(t, v)
+	require.Empty(t, v)
+}

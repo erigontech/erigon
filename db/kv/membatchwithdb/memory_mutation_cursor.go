@@ -420,14 +420,15 @@ func (m *memoryMutationCursor) lastLiveOnDb() ([]byte, []byte, error) {
 		}
 		return k, v, err
 	}
-	var lastK, lastV []byte
+	// Non-nil buffers: Last reads a nil value as "no db entry", so an empty value must stay empty.
+	lastK, lastV, found := []byte{}, []byte{}, false
 	k, v, err := m.cursor.First()
 	for ; k != nil && err == nil; k, v, err = m.cursor.Next() {
 		if !m.isEntryDeleted(k, v) {
-			lastK, lastV = bytes.Clone(k), bytes.Clone(v)
+			lastK, lastV, found = append(lastK[:0], k...), append(lastV[:0], v...), true
 		}
 	}
-	if err != nil {
+	if err != nil || !found {
 		return nil, nil, err
 	}
 	return lastK, lastV, nil
