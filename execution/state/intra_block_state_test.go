@@ -521,12 +521,12 @@ func TestCloseReleasesVersionedWrites(t *testing.T) {
 	state.SetTxContext(1, 0)
 
 	require.NoError(t, state.TouchAccount(accounts.InternAddress([20]byte{0xe1})))
-	require.NotZero(t, state.versionedWrites.Count())
+	require.NotZero(t, state.VersionedWrites().Count())
 
 	handedOut := state.VersionedWrites()
 	state.Close()
 
-	require.Zero(t, state.versionedWrites.Count())
+	require.Zero(t, state.VersionedWrites().Count())
 	require.NotZero(t, handedOut.Count(), "the clone handed to callers must survive Close")
 }
 
@@ -913,10 +913,10 @@ func TestVersionMapOverwrite(t *testing.T) {
 	assert.Equal(t, balance2, b)
 
 	// Tx1 delete
-	for h := range states[1].versionedWrites.AllHeaders() {
+	for h := range states[1].VersionedWrites().AllHeaders() {
 		mvhm.Delete(h.Address, h.Path, h.Key, 1, true)
 	}
-	states[1].versionedWrites = WriteSet{}
+	states[1].versionedWrites.recycle()
 
 	// Tx2 read should get Tx0's value
 	states[2].txIO.clearReads()
@@ -936,10 +936,10 @@ func TestVersionMapOverwrite(t *testing.T) {
 	assert.Equal(t, balance1, b)
 
 	// Tx0 delete
-	for h := range states[0].versionedWrites.AllHeaders() {
+	for h := range states[0].VersionedWrites().AllHeaders() {
 		mvhm.Delete(h.Address, h.Path, h.Key, 0, true)
 	}
-	states[0].versionedWrites = WriteSet{}
+	states[0].versionedWrites.recycle()
 
 	// Tx2 read again should get default vals
 	states[2].txIO.clearReads()
@@ -1034,10 +1034,10 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	assert.Equal(t, balance1, b)
 
 	// Tx2 delete
-	for h := range states[2].versionedWrites.AllHeaders() {
+	for h := range states[2].VersionedWrites().AllHeaders() {
 		mvhm.Delete(h.Address, h.Path, h.Key, 2, true)
 	}
-	states[2].versionedWrites = WriteSet{}
+	states[2].versionedWrites.recycle()
 
 	// Tx3 read
 	states[3].txIO.clearReads()
@@ -1077,10 +1077,10 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	assert.Equal(t, uint256.Int{}, b)
 
 	// Tx1 delete
-	for h := range states[1].versionedWrites.AllHeaders() {
+	for h := range states[1].VersionedWrites().AllHeaders() {
 		mvhm.Delete(h.Address, h.Path, h.Key, 1, true)
 	}
-	states[1].versionedWrites = WriteSet{}
+	states[1].versionedWrites.recycle()
 
 	// Tx3 read
 	states[3].txIO.clearReads()

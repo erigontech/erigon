@@ -2084,12 +2084,12 @@ func TestReusedReadSetBoundsTheSlotsItsMapsHeld(t *testing.T) {
 func TestArenaAddressWritesOutliveTheSlab(t *testing.T) {
 	ibs := NewWithVersionMap(NewNoopReader(), NewVersionMap(nil))
 	defer ibs.Close()
-	ibs.versionedWrites.UseArena()
+	ibs.versionedWrites.recycle()
 	addr := accounts.InternAddress(common.HexToAddress("0xacc7"))
 	ibs.recordWriteAddress(addr, &accounts.Account{Nonce: 7, Balance: *uint256.NewInt(9)})
 
 	published := ibs.VersionedWrites()
-	ibs.versionedWrites.ReleaseAndReset()
+	ibs.versionedWrites.recycle()
 	ibs.recordWriteAddress(addr, &accounts.Account{Nonce: 1})
 
 	vw, ok := published.GetAddress(addr)
@@ -2101,7 +2101,7 @@ func TestArenaAddressWritesOutliveTheSlab(t *testing.T) {
 	for i := range 128 {
 		ibs.recordWriteAddress(accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i+1)))), &accounts.Account{Nonce: uint64(i)})
 	}
-	ibs.versionedWrites.ReleaseAndReset()
+	ibs.versionedWrites.recycle()
 	acc := &accounts.Account{Nonce: 3}
 	require.Zero(t, testing.AllocsPerRun(100, func() { ibs.recordWriteAddress(addr, acc) }), "no allocation per AddressPath write")
 }

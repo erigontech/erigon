@@ -991,9 +991,9 @@ func (ibs *IntraBlockState) warmReadable(addr accounts.Address) bool {
 
 // warmField serves a repeat read of an account field without the version-map
 // probe: this tx's own write on a dirty address, else the recorded read.
-func warmField[T any](s *IntraBlockState, addr accounts.Address, writes map[accounts.Address]*VersionedWrite[T], path AccountPath, pick func(*addrIO) *VersionedRead[T]) (T, ReadSource, Version, bool) {
+func warmField[T any](s *IntraBlockState, addr accounts.Address, pickW func(*addrIO) **VersionedWrite[T], path AccountPath, pick func(*addrIO) *VersionedRead[T]) (T, ReadSource, Version, bool) {
 	if !s.warmReadable(addr) {
-		if vw, ok := writes[addr]; ok {
+		if vw, ok := getW(&s.versionedWrites, addr, pickW); ok {
 			return vw.Val, WriteSetRead, Version{TxIndex: s.txIndex, Incarnation: s.version}, true
 		}
 	}
@@ -1365,7 +1365,7 @@ func refreshCode(s *IntraBlockState, addr accounts.Address) (accounts.Code, erro
 
 // readCodeSize returns the contract code size.
 func readCodeSize(s *IntraBlockState, addr accounts.Address) (int, ReadSource, Version, error) {
-	if v, src, ver, ok := warmField(s, addr, s.versionedWrites.codeSize, CodeSizePath, pickCodeSize); ok {
+	if v, src, ver, ok := warmField(s, addr, pickWCodeSize, CodeSizePath, pickCodeSize); ok {
 		return v, src, ver, nil
 	}
 	var r readPathResult

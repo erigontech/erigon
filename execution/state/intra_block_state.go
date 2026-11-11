@@ -181,7 +181,7 @@ type IntraBlockState struct {
 	// are maintaned across transactions until they are reset
 	// at the block level.
 	versionMap      *VersionMap
-	versionedWrites WriteSet
+	versionedWrites writeView
 	// txIO holds the running tx's reads, access marks and dirty counts per address.
 	txIO ioTable
 	// versionedOrigins collects committed pre-block base cells (at originIndex) that a cold
@@ -253,6 +253,7 @@ func New(stateReader StateReader) *IntraBlockState {
 		dep:               UnknownDep,
 	}
 	ibs.journal.io = &ibs.txIO
+	ibs.versionedWrites.t = &ibs.txIO
 	ibs.codeAccess, _ = stateReader.(codeAccessTracker)
 	ibs.revisions.init()
 	return ibs
@@ -366,14 +367,10 @@ func (ibs *IntraBlockState) Reset() {
 	ibs.noConflictDetection = false
 	ibs.codeByHash = nil
 	clear(ibs.committedBase)
-	// Read side rebinds to a fresh empty set: VersionedReads() at end of
-	// tx hands the per-path maps to result.TxIn, so rebinding leaves the
-	// handed-over maps intact while the next tx lazily reallocs.
-	ibs.txIO.clearReads()
-	// Write side: VersionedWrites() returns Cloned snapshots, so the
-	// originals in ibs.versionedWrites are no longer referenced after the
-	// boundary call, so recycle can take every VW back.
+	// VersionedReads and VersionedWrites hand out copies, so nothing outside
+	// holds a record or a write cell.
 	ibs.versionedWrites.recycle()
+	ibs.txIO.clearReads()
 	ibs.versionedOrigins.ReleaseAndReset()
 	ibs.recordAccess = false
 	ibs.accountReadDuration = 0
@@ -472,7 +469,8 @@ func (ibs *IntraBlockState) Close() {
 	ibs.revisions.reset()
 	// Safe to pool: VersionedWrites/FinalizedWrites hand out deep clones, and the
 	// set is unexported, so nothing outside holds a raw VersionedWrite.
-	ibs.versionedWrites.ReleaseAndReset()
+	ibs.versionedWrites.release()
+	ibs.txIO.clearReads()
 	ibs.versionedOrigins.ReleaseAndReset()
 
 	releaseResources(stateObjects, journal)
@@ -2790,17 +2788,12 @@ func (ibs *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 		}
 	}
 
-	var reverted []accounts.Address
-
-	ibs.versionedWrites.forEachAddr(func(addr accounts.Address) {
-		if _, isDirty := ibs.stateObjectsDirty[addr]; !isDirty {
-			reverted = append(reverted, addr)
+	for i := range ibs.txIO.recs {
+		r := &ibs.txIO.recs[i]
+		if _, isDirty := ibs.stateObjectsDirty[r.addr]; !isDirty && r.hasWrites() {
+			ibs.versionMap.DeleteAll(r.addr, ibs.txIndex)
+			r.clearWrites()
 		}
-	})
-
-	for _, addr := range reverted {
-		ibs.versionMap.DeleteAll(addr, ibs.txIndex)
-		ibs.versionedWrites.deleteAddr(addr)
 	}
 
 	// Invalidate journal because reverting across transactions is not allowed.
@@ -3693,8 +3686,8 @@ func (ibs *IntraBlockState) VersionedReads() ReadSet {
 }
 
 func (ibs *IntraBlockState) ResetVersionedIO() {
-	ibs.txIO.clearReads()
 	ibs.versionedWrites.recycle()
+	ibs.txIO.clearReads()
 	ibs.dep = UnknownDep
 	ibs.recordAccess = false
 	ibs.stateReadErr = nil
