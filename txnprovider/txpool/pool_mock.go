@@ -389,6 +389,42 @@ func (c *MockPoolOnNewBlockCall) DoAndReturn(f func(context.Context, *remoteprot
 	return c
 }
 
+// RejectFramePrefix mocks base method.
+func (m *MockPool) RejectFramePrefix(hash common.Hash) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "RejectFramePrefix", hash)
+}
+
+// RejectFramePrefix indicates an expected call of RejectFramePrefix.
+func (mr *MockPoolMockRecorder) RejectFramePrefix(hash any) *MockPoolRejectFramePrefixCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RejectFramePrefix", reflect.TypeOf((*MockPool)(nil).RejectFramePrefix), hash)
+	return &MockPoolRejectFramePrefixCall{Call: call}
+}
+
+// MockPoolRejectFramePrefixCall wrap *gomock.Call
+type MockPoolRejectFramePrefixCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockPoolRejectFramePrefixCall) Return() *MockPoolRejectFramePrefixCall {
+	c.Call = c.Call.Return()
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockPoolRejectFramePrefixCall) Do(f func(common.Hash)) *MockPoolRejectFramePrefixCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockPoolRejectFramePrefixCall) DoAndReturn(f func(common.Hash)) *MockPoolRejectFramePrefixCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // Started mocks base method.
 func (m *MockPool) Started() bool {
 	m.ctrl.T.Helper()

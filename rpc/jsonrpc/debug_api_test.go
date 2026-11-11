@@ -2199,6 +2199,89 @@ func TestTraceCallRejectsTxIndexOutOfLatestBlock(t *testing.T) {
 	require.ErrorAs(t, err, &invalidParams)
 }
 
+// An explicit transaction index selects the state before that transaction, also in the head block.
+func TestTraceCallTxIndexSelectsPreStateAtHead(t *testing.T) {
+	key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	require.NoError(t, err)
+	bank := crypto.PubkeyToAddress(key.PublicKey)
+	contract := common.HexToAddress("0x00000000000000000000000000000000c0ffee20")
+	// With calldata: SSTORE(0, CALLDATALOAD(0)). Always: return SLOAD(0).
+	code := []byte{
+		byte(vm.CALLDATASIZE), byte(vm.ISZERO), byte(vm.PUSH1), 0x0B, byte(vm.JUMPI),
+		byte(vm.PUSH1), 0x00, byte(vm.CALLDATALOAD), byte(vm.PUSH1), 0x00, byte(vm.SSTORE),
+		byte(vm.JUMPDEST), byte(vm.PUSH1), 0x00, byte(vm.SLOAD), byte(vm.PUSH1), 0x00, byte(vm.MSTORE),
+		byte(vm.PUSH1), 0x20, byte(vm.PUSH1), 0x00, byte(vm.RETURN),
+	}
+	word := func(v uint64) hexutil.Bytes { return common.LeftPadBytes(new(big.Int).SetUint64(v).Bytes(), 32) }
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
+		Config: chain.TestChainOsakaConfig,
+		Alloc: types.GenesisAlloc{
+			bank:     {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(20), nil)},
+			contract: {Balance: new(big.Int), Code: code},
+		},
+	}), execmoduletester.WithKey(key))
+	signer := types.LatestSignerForChainID(m.ChainConfig.ChainID)
+	chainPack, err := m.GenerateChain(2, func(i int, b *blockgen.BlockGen) {
+		if i > 0 {
+			return
+		}
+		for _, v := range []uint64{1, 2} {
+			txn, err := types.SignTx(&types.DynamicFeeTransaction{
+				CommonTx: types.CommonTx{Nonce: b.TxNonce(bank), To: &contract, GasLimit: 100_000, Data: word(v)},
+				ChainID:  *uint256.MustFromBig(m.ChainConfig.ChainID.ToBig()),
+				FeeCap:   *uint256.NewInt(1_000_000_000_000),
+			}, *signer, key)
+			require.NoError(t, err)
+			b.AddTx(txn)
+		}
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(chainPack.Slice(0, 1)))
+	_, debugApi := newCallManyApisForTest(m)
+
+	tracer := "callTracer"
+	gas := hexutil.Uint64(100_000)
+	read := ethapi.CallArgs{From: &bank, To: &contract, Gas: &gas}
+	traceCall := func(block rpc.BlockNumberOrHash, txIndex *int) string {
+		config := &tracersConfig.TraceConfig{Tracer: &tracer}
+		if txIndex != nil {
+			config.TxIndex = new(hexutil.Uint(*txIndex))
+		}
+		var trace struct{ Output string }
+		readGasTrace(t, &trace, func(stream *jsonstream.Stream) error {
+			return debugApi.TraceCall(m.Ctx, read, &block, config, stream)
+		})
+		return trace.Output
+	}
+	traceCallMany := func(block rpc.BlockNumberOrHash, txIndex *int) string {
+		var traces [][]struct{ Output string }
+		readGasTrace(t, &traces, func(stream *jsonstream.Stream) error {
+			stateCtx := StateContext{BlockNumber: block, TransactionIndex: txIndex}
+			return debugApi.TraceCallMany(m.Ctx, []Bundle{{Transactions: []ethapi.CallArgs{read}}}, stateCtx, &tracersConfig.TraceConfig{Tracer: &tracer}, stream)
+		})
+		require.Len(t, traces, 1)
+		require.Len(t, traces[0], 1)
+		return traces[0][0].Output
+	}
+	check := func(t *testing.T, block rpc.BlockNumberOrHash) {
+		preState, postState := word(1).String(), word(2).String()
+		require.Equal(t, preState, traceCall(block, new(1)), "debug_traceCall txIndex 1")
+		require.Equal(t, preState, traceCallMany(block, new(1)), "debug_traceCallMany transactionIndex 1")
+		require.Equal(t, postState, traceCall(block, nil), "debug_traceCall without txIndex")
+		require.Equal(t, postState, traceCallMany(block, nil), "debug_traceCallMany without transactionIndex")
+		require.Equal(t, postState, traceCallMany(block, new(-1)), "debug_traceCallMany transactionIndex -1")
+	}
+
+	blockHash := chainPack.Blocks[0].Hash()
+	t.Run("head/latest", func(t *testing.T) { check(t, rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)) })
+	t.Run("head/number", func(t *testing.T) { check(t, rpc.BlockNumberOrHashWithNumber(1)) })
+	t.Run("head/hash", func(t *testing.T) { check(t, rpc.BlockNumberOrHashWithHash(blockHash, true)) })
+
+	require.NoError(t, m.InsertChain(chainPack.Slice(1, 2)))
+	t.Run("older/number", func(t *testing.T) { check(t, rpc.BlockNumberOrHashWithNumber(1)) })
+	t.Run("older/hash", func(t *testing.T) { check(t, rpc.BlockNumberOrHashWithHash(blockHash, true)) })
+}
+
 type recordingCodeStore map[string]int
 
 func (s recordingCodeStore) GetCodeByHash(h []byte) ([]byte, bool) {

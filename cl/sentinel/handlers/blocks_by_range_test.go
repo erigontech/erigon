@@ -25,6 +25,9 @@ import (
 	"io"
 	"math"
 	"testing"
+	"time"
+
+	"github.com/golang/snappy"
 
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/network"
@@ -42,6 +45,28 @@ import (
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common/snappypool"
 )
+
+func TestBeaconBlocksByRangeRequestCost(t *testing.T) {
+	for _, tc := range []struct {
+		count uint64
+		cost  int
+	}{{0, 0}, {1, 0}, {3, 2}, {96, 95}, {128, 95}} {
+		t.Run(fmt.Sprint(tc.count), func(t *testing.T) {
+			_, db := setupStore(t)
+			cfg := clparams.MainnetBeaconConfig
+			c := &ConsensusHandlers{
+				ctx: t.Context(), indiciesDB: db, beaconConfig: &cfg,
+				beaconDB: tests.NewMockBlockReader(), rateLimiter: newPeerRateLimiter(),
+			}
+			stream := newHandlerTestStream(t, communication.BeaconBlocksByRangeProtocolV2,
+				&cltypes.BeaconBlocksByRangeRequest{StartSlot: 100, Count: tc.count, Step: 1})
+			bucket := admitHandlerTestRequest(t, c, stream)
+			require.NoError(t, c.beaconBlocksByRangeHandler(stream))
+			require.Empty(t, stream.response.Bytes())
+			require.Equal(t, bucket.maxTokens-1-float64(tc.cost), bucket.tokens)
+		})
+	}
+}
 
 func TestBlocksByRootHandler(t *testing.T) {
 	ctx := context.Background()
@@ -270,5 +295,50 @@ func readBlocksByRangeSlots(t *testing.T, stream network.Stream, ethClock eth_cl
 		block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, version)
 		require.NoError(t, block.DecodeSSZ(raw, int(version)))
 		slots = append(slots, block.Block.Slot)
+	}
+}
+
+type countingStream struct {
+	network.Stream
+	r    io.Reader
+	read int
+}
+
+func (s *countingStream) Read(p []byte) (int, error) {
+	n, err := s.r.Read(p)
+	s.read += n
+	return n, err
+}
+
+// A fixed-size request whose prefix claims a large payload must be refused before that payload is read.
+func TestBlocksByRangeRefusesOversizedRequest(t *testing.T) {
+	payload := make([]byte, clparams.MaxPayloadSize)
+	var req bytes.Buffer
+	req.Write(binary.AppendUvarint(nil, uint64(len(payload))))
+	sw := snappy.NewBufferedWriter(&req)
+	_, err := sw.Write(payload)
+	require.NoError(t, err)
+	require.NoError(t, sw.Close())
+
+	s := &countingStream{r: &req}
+	require.ErrorIs(t, (&ConsensusHandlers{}).beaconBlocksByRangeHandler(s), ssz_snappy.ErrPayloadExceedsLimit)
+	require.Less(t, s.read, 64, "the handler read the claimed payload")
+}
+
+func TestOversizedFixedSizeRequestGetsInvalidRequest(t *testing.T) {
+	for _, p := range []string{
+		communication.BeaconBlocksByRangeProtocolV2,
+		communication.BeaconBlocksByHeadProtocolV1,
+		communication.BlobSidecarByRangeProtocolV1,
+		communication.LightClientBootstrapProtocolV1,
+		communication.LightClientUpdatesByRangeProtocolV1,
+	} {
+		t.Run(p, func(t *testing.T) {
+			stream, _ := newHeartbeatTestStream(t, protocol.ID(p))
+			require.NoError(t, stream.SetDeadline(time.Now().Add(5*time.Second)))
+			_, err := stream.Write(binary.AppendUvarint(nil, uint64(clparams.MaxPayloadSize)))
+			require.NoError(t, err)
+			requireResponseCode(t, stream, InvalidRequestPrefix)
+		})
 	}
 }

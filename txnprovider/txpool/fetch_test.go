@@ -39,6 +39,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/maphash"
 	"github.com/erigontech/erigon/common/u256"
@@ -401,6 +402,7 @@ func TestFramePolicyRejectionKeepsOrdinaryTransactions(t *testing.T) {
 			pool := NewMockPool(ctrl)
 			pool.EXPECT().Started().Return(true)
 			pool.EXPECT().IdHashKnown(gomock.Any(), gomock.Any()).Return(false, nil).AnyTimes()
+			pool.EXPECT().RejectFramePrefix(crypto.Keccak256Hash(encoded.Bytes()))
 			pool.EXPECT().AddRemoteTxns(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
 				Do(func(_ context.Context, slots TxnSlots, _ PeerID, _ sentryproto.SentryClient) {
 					require.Len(t, slots.Txns, len(ordinary))
@@ -423,6 +425,52 @@ func TestFramePolicyRejectionKeepsOrdinaryTransactions(t *testing.T) {
 			require.NoError(t, err)
 		})
 	}
+}
+
+func TestFramePolicyRejectionDeduplicatesGossip(t *testing.T) {
+	ctx, pool, poolDB, _ := newTestPool(t)
+	pool.started.Store(true)
+	frame := framePoolSlot(t, [20]byte{1}, 1, 2).Txn.(*types.FrameTransaction)
+	frame.Frames[0].Limits.Execution = 150_000
+	require.NoError(t, frame.Validate())
+	var encoded bytes.Buffer
+	require.NoError(t, frame.MarshalBinary(&encoded))
+	hash := crypto.Keccak256Hash(encoded.Bytes())
+	ctrl := gomock.NewController(t)
+	sentry := sentryproto.NewMockSentryServer(ctrl)
+	sentry.EXPECT().PenalizePeer(gomock.Any(), gomock.Any()).Times(0)
+	requests := 0
+	sentry.EXPECT().SendMessageById(gomock.Any(), gomock.Any()).DoAndReturn(
+		func(_ context.Context, req *sentryproto.SendMessageByIdRequest) (*sentryproto.SentPeers, error) {
+			require.Equal(t, sentryproto.MessageId_GET_POOLED_TRANSACTIONS_66, req.Data.Id)
+			requests++
+			return &sentryproto.SentPeers{Peers: []*typesproto.H512{req.PeerId}}, nil
+		}).AnyTimes()
+	client, err := direct.NewSentryClientDirect(direct.ETH68, NewMockSentry(ctx, sentry))
+	require.NoError(t, err)
+	fetch := NewFetch(ctx, []sentryproto.SentryClient{client}, pool, nil, poolDB, u256.N1, log.New())
+	tx, err := poolDB.BeginRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	announce := func() {
+		t.Helper()
+		require.NoError(t, fetch.handleInboundMessageWithTx(ctx, tx, &sentryproto.InboundMessage{
+			Id: sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_66, Data: EncodeHashes(hash[:], nil), PeerId: peerID,
+		}, client))
+	}
+	announce()
+	require.Equal(t, 1, requests)
+	require.NoError(t, fetch.handleInboundMessageWithTx(ctx, tx, &sentryproto.InboundMessage{
+		Id: sentryproto.MessageId_POOLED_TRANSACTIONS_66, Data: EncodePooledTransactions66([][]byte{encoded.Bytes()}, 1, nil), PeerId: peerID,
+	}, client))
+	announce()
+	buf := make([]byte, 128)
+	n := encodeAnnouncements([]byte{FrameTxnType}, []uint32{uint32(encoded.Len())}, hash[:], buf)
+	require.NoError(t, fetch.handleInboundMessageWithTx(ctx, tx, &sentryproto.InboundMessage{
+		Id: sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_68, Data: buf[:n], PeerId: peerID,
+	}, client))
+	require.Equal(t, 1, requests, "rejected prefixes must not be fetched again")
+	require.Empty(t, pool.unprocessedRemoteByHash)
 }
 
 func TestPenalizePeerForMalformedMessages(t *testing.T) {

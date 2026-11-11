@@ -800,7 +800,6 @@ func DeleteStateSnapshots(args DeleteStateSnapshotsArgs) error {
 
 	_maxFrom := uint64(0)
 	_maxTo := uint64(0)
-	files := make([]snaptype.FileInfo, 0)
 	commitmentFilesWithState := make([]struct {
 		file  snaptype.FileInfo
 		label string
@@ -857,6 +856,7 @@ func DeleteStateSnapshots(args DeleteStateSnapshotsArgs) error {
 	}
 
 	// Step 2: Process each candidate file (already parsed)
+	files := make([]snaptype.FileInfo, len(candidateFiles))
 	doesRmCommitment := len(domainNames) == 0 || slices.Contains(domainNames, kv.CommitmentDomain.String())
 	var snapDir string
 	for i := range candidateFiles {
@@ -881,7 +881,7 @@ func DeleteStateSnapshots(args DeleteStateSnapshotsArgs) error {
 			}
 		}
 
-		files = append(files, res)
+		files[i] = res
 		if removeLatest {
 			_maxFrom = max(_maxFrom, res.From)
 			_maxTo = max(_maxTo, res.To)
@@ -1645,12 +1645,17 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) (retErr error) {
 	defer db.Close()
 
 	var commitmentHistoryEnabled bool
+	var blobsFromSlot uint64
 	if err := chainDB.View(ctx, func(tx kv.Tx) error {
 		var err error
 		commitmentHistoryEnabled, _, err = rawdb.ReadDBCommitmentHistoryEnabled(tx)
+		if err != nil {
+			return fmt.Errorf("failed to read CommitmentHistory config: %w", err)
+		}
+		blobsFromSlot, err = rawdb.ReadCaplinBlobsArchiveFromSlot(tx)
 		return err
 	}); err != nil {
-		return fmt.Errorf("failed to read CommitmentHistory config: %w", err)
+		return fmt.Errorf("read integrity config: %w", err)
 	}
 
 	runCheck := func(ctx context.Context, chk integrity.Check) error {
@@ -1676,7 +1681,7 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) (retErr error) {
 		case integrity.CaplinStateRoots:
 			return integrity.CheckCaplinStateRoots(ctx, dirs, failFast, logger)
 		case integrity.CaplinBlobSidecars:
-			return integrity.CheckCaplinBlobSidecars(ctx, res.CaplinIndexDB, res.CaplinSnaps, res.BeaconConfig, failFast, logger)
+			return integrity.CheckCaplinBlobSidecars(ctx, res.CaplinIndexDB, res.CaplinSnaps, res.BeaconConfig, blobsFromSlot, failFast, logger)
 		case integrity.ReceiptsNoDups:
 			return integrity.CheckReceiptsNoDups(ctx, sc, db, blockReader, failFast)
 		case integrity.RCacheNoDups:

@@ -187,15 +187,7 @@ func floodUntilLagged(t *testing.T, send func() int, subscribers, limit int) {
 
 // A stream that cannot take a head event is closed, so the client reconnects instead of missing the head silently.
 func TestEventStreamClosesWhenItMissesAHeadEvent(t *testing.T) {
-	cfg := clparams.MainnetBeaconConfig
-	a := &ApiHandler{emitters: beaconevents.NewEventEmitter(), beaconChainCfg: &cfg}
-	w := &collectingStreamWriter{header: http.Header{}}
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/eth/v1/events?topics=head", nil)
-	handlerDone := make(chan struct{})
-	go func() {
-		defer close(handlerDone)
-		a.EventSourceGetV1Events(w, req)
-	}()
+	a, _, handlerDone := startTopicStream(t, "head")
 	require.Eventually(t, func() bool {
 		return a.emitters.State().SendHead(&beaconevents.HeadData{}) == 1
 	}, 5*time.Second, 10*time.Millisecond, "event stream never subscribed")
@@ -203,11 +195,7 @@ func TestEventStreamClosesWhenItMissesAHeadEvent(t *testing.T) {
 	// Fewer events than the write queue holds cannot close the stream through a queue overflow, so only the lag
 	// error can close it.
 	floodUntilLagged(t, func() int { return a.emitters.State().TrySendHead(&beaconevents.HeadData{}) }, 1, eventStreamWriteQueueSize-1)
-	select {
-	case <-handlerDone:
-	case <-time.After(5 * time.Second):
-		t.Fatal("the stream kept running after it missed a head event")
-	}
+	waitDone(t, handlerDone, "the stream kept running after it missed a head event")
 }
 
 // floodEvents sends n events from several goroutines, faster than a stream drains them.
@@ -285,6 +273,9 @@ func TestEventStreamDeliversAHeadEventOnce(t *testing.T) {
 
 	require.Equal(t, 2, a.emitters.State().SendHead(&beaconevents.HeadData{}))
 	require.Equal(t, 1, a.emitters.State().SendBlock(&beaconevents.BlockData{}))
+	// The second block follows the state feed's copy of the head in the same buffer, so once it is written that copy
+	// has been handled. The head's own buffer is read independently, so wait for it before counting.
 	require.Eventually(t, func() bool { return w.count(beaconevents.StateBlock) == 2 }, 5*time.Second, 10*time.Millisecond)
-	require.Equal(t, 1, w.count(beaconevents.StateHead))
+	require.Eventually(t, func() bool { return w.count(beaconevents.StateHead) >= 1 }, 5*time.Second, 10*time.Millisecond)
+	require.Never(t, func() bool { return w.count(beaconevents.StateHead) > 1 }, 200*time.Millisecond, 10*time.Millisecond)
 }

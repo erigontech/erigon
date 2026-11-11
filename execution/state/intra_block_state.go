@@ -662,7 +662,6 @@ func (ibs *IntraBlockState) Empty(addr accounts.Address) (empty bool, err error)
 		return false, err
 	}
 	if account == nil {
-		ibs.touchAccount(addr)
 		// Do NOT call accountRead here: versionedAccountBase already recorded the
 		// AddressPath read with Val=nil. Overwriting it with a non-nil empty
 		// account would make downstream reads treat the account as existing,
@@ -2249,9 +2248,9 @@ func (ibs *IntraBlockState) createObject(addr accounts.Address, previous *stateO
 		if _, res, ok := ibs.versionMap.ReadNonce(addr, ibs.txIndex); ok && res.resolved() {
 			ibs.recordWriteNonce(addr, newobj.data.Nonce, tracing.NonceChangeNewContract)
 		}
-		if _, res, ok := ibs.versionMap.ReadBalance(addr, ibs.txIndex); ok && res.ValStatus() == ValueDeleted {
-			ibs.recordWriteBalance(addr, newobj.data.Balance)
-		}
+		// The balance is written unconditionally: a lower tx's removal of the account can be
+		// flushed after this tx ran, and its deleted balance would then decide the account.
+		ibs.recordWriteBalance(addr, newobj.data.Balance)
 	}
 	return newobj
 }
@@ -2818,12 +2817,35 @@ func (ibs *IntraBlockState) FinalizedWrites(chainRules *chain.Rules) (*WriteSet,
 	return writes, ibs.StateReadError()
 }
 
+// createdSelfDestructEmpty decides emptiness without an account view for an account this tx created as a contract
+// and really self-destructed: the create collision rule means it had nonce 0 and no code before the tx, so its
+// balance write is the only field left to check.
+func createdSelfDestructEmpty(writes *WriteSet, realSelfDestruct map[accounts.Address]struct{}, addr accounts.Address) (empty, known bool) {
+	if _, sd := realSelfDestruct[addr]; !sd {
+		return false, false
+	}
+	if cc, ok := writes.GetCreateContract(addr); !ok || !cc.Val {
+		return false, false
+	}
+	bal, ok := writes.GetBalance(addr)
+	if !ok {
+		return false, false
+	}
+	return bal.Val.IsZero(), true
+}
+
 func (ibs *IntraBlockState) encodeExistingEmptyRemovals(chainRules *chain.Rules, writes *WriteSet, realSelfDestruct map[accounts.Address]struct{}) {
 	if chainRules == nil || ibs.versionMap == nil {
 		return
 	}
 	for addr := range writes.addrs() {
 		if !EIP161EmptyRemoval(chainRules.IsEIP161Enabled(), chainRules.IsAura, addr) {
+			continue
+		}
+		if empty, known := createdSelfDestructEmpty(writes, realSelfDestruct, addr); known {
+			if empty {
+				writes.SetContractRemoval(addr, ibs.Version())
+			}
 			continue
 		}
 		view := NewVersionedAccountView(addr, ibs.txIndex, ibs.versionMap, ibs.stateReader)
@@ -2861,8 +2883,9 @@ func (ibs *IntraBlockState) encodeExistingEmptyRemovals(chainRules *chain.Rules,
 	}
 }
 
-// withholdCreatedEmptyAccounts replaces the writes of accounts the tx observed as
-// absent and left empty (EIP-161) with the EIP-161 removal. An account that existed
+// withholdCreatedEmptyAccounts drops the writes of accounts the tx observed as absent
+// and left empty (EIP-161), or replaces them with the EIP-161 removal when the version
+// map holds cells for the account. An account that existed
 // before is kept even when it ends empty — clearing it needs an explicit delete,
 // which encodeExistingEmptyRemovals emits.
 func (ibs *IntraBlockState) withholdCreatedEmptyAccounts(chainRules *chain.Rules, writes *WriteSet) {
@@ -2888,6 +2911,12 @@ func (ibs *IntraBlockState) withholdCreatedEmptyAccounts(chainRules *chain.Rules
 			if so, soOk := ibs.stateObjects[addr]; soOk && so.original.CodeHash != (accounts.CodeHash{}) {
 				continue
 			}
+		}
+		// With no version-map cell the account is absent before and after the tx, so dropping the
+		// writes is exact; a removal stamp would make every later toucher depend on this tx.
+		if ibs.versionMap == nil || ibs.versionMap.load(addr) == nil {
+			writes.deleteAddr(addr)
+			continue
 		}
 		// Stamp the uniform removal rather than silently dropping the writes: the
 		// during-tx exec cells already live in the version map, so a bare deleteAddr

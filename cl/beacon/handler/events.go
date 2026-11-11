@@ -321,15 +321,9 @@ func subErr(sub ethevent.Subscription) <-chan error {
 }
 
 func (s *eventStreamSubscription) unsubscribe() {
-	for _, sub := range []ethevent.Subscription{s.headSub, s.headV2Sub} {
+	for _, sub := range []ethevent.Subscription{s.stateSub, s.opSub, s.headSub, s.headV2Sub} {
 		if sub != nil {
 			sub.Unsubscribe()
 		}
-	}
-	if s.stateSub != nil {
-		s.stateSub.Unsubscribe()
-	}
-	if s.opSub != nil {
-		s.opSub.Unsubscribe()
 	}
 }
