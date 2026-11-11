@@ -146,6 +146,25 @@ func (view *VersionMapView) DestroyedAt(addr accounts.Address) (txIdx int, destr
 	return destroyedAt, state != LifecycleLive
 }
 
+// HasEmptyBaseAccount reports whether the BAL lists an account that is EIP-161 empty in base. A
+// 0-value touch removes such an account, and the BAL does not show the removal.
+func (vm *VersionMap) HasEmptyBaseAccount(eip161Enabled, isAura bool, base StateReader) (bool, error) {
+	for i := range vm.bal {
+		addr := accounts.InternAddress(vm.bal[i].Address)
+		if !EIP161EmptyRemoval(eip161Enabled, isAura, addr) {
+			continue
+		}
+		acc, err := base.ReadAccountData(addr)
+		if err != nil {
+			return false, err
+		}
+		if acc != nil && acc.Empty() {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (vm *VersionMap) SeedEmptyRemovals(eip161Enabled, isAura bool, base StateReader) error {
 	var stamps []*WriteSet
 	var candidates []uint32

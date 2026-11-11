@@ -67,7 +67,7 @@ func (f fakeSnapshots) SegmentsMax() uint64 { return f.max }
 // fakeBlockReader stubs the blockReader interface for getMinimumBlocksToDownload,
 // implementing only the methods that function touches.
 type fakeBlockReader struct {
-	blockReader
+	BlockReader
 	frozenMax uint64
 	bodies    []frozenBody
 }

@@ -793,8 +793,9 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 						}
 					}
 
-					if applyResult.BlockNum > 0 && applyResult.receiptsComplete && !initialCycle && applyResult.Header != nil &&
-						pe.cfg.notifications != nil && pe.cfg.notifications.RecentReceipts != nil {
+					if applyResult.BlockNum > 0 && applyResult.receiptsComplete && applyResult.Header != nil &&
+						pe.cfg.notifications != nil && pe.cfg.notifications.RecentReceipts != nil &&
+						(!initialCycle || pe.cfg.notifications.Events.HasReceiptOrLogSubscribers()) {
 						pe.cfg.notifications.RecentReceipts.Add(applyResult.Receipts, applyResult.Txs, applyResult.Header)
 					}
 
@@ -2712,8 +2713,8 @@ func pathBit(p state.AccountPath) uint16 { return 1 << p }
 
 func cmpReaderTx(r addrReader, tx int) int { return cmp.Compare(r.tx, tx) }
 
-// balDispatchWindow bounds how far past the commit frontier a BAL block dispatches tasks.
-const balDispatchWindow = 32
+// dispatchWindow bounds how far past the commit frontier a block dispatches tasks.
+const dispatchWindow = 32
 
 // readersAbove returns the readers in the ascending list l that are > tx.
 func readersAbove(l []addrReader, tx int) []addrReader {
@@ -2943,6 +2944,7 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 					*stateReader = pe.prevBlockBase(state.NewReaderV3(pe.domainsRead().AsGetter(applyTx)), be.blockNum)
 				}
 			}
+			var ownedWrites *state.WriteSet // a copy this loop made, so it can be extended in place, unlike the worker's TxOut
 			if chainTx, ok := txTask.(*exec.TxTask); ok && chainTx.ChargesSenderAtValidation(int(txVersion.Incarnation)) {
 				senderWrites, charged, err := chargeSenderAtValidation(chainTx, txResult, txVersion, be.versionMap, *stateReader)
 				if err != nil {
@@ -2962,12 +2964,13 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 				}
 				be.blockIO.RecordReads(txVersion, reads)
 				be.versionMap.FlushVersionedWrites(senderWrites, false)
-				be.blockIO.RecordWrites(txVersion, be.blockIO.WriteSet(txVersion.TxIndex).Merge(senderWrites))
+				ownedWrites = be.blockIO.WriteSet(txVersion.TxIndex).Merge(senderWrites)
+				be.blockIO.RecordWrites(txVersion, ownedWrites)
 				be.markReadersDirty(tx, senderWrites)
 				// A charge-at-validation sender's gas debit is not in the worker's TxOut, so
 				// calcFees' coinbase/burnt override (which reads TxOut) would miss it and credit
 				// the fee onto the stale pre-charge balance when the sender is the fee recipient.
-				txResult.TxOut = txResult.TxOut.Merge(senderWrites)
+				txResult.TxOut = ownedWrites
 			}
 			tipWrites, err := txResult.calcFees(taskVer, be.versionMap, *stateReader, txTask.Rules())
 			if err != nil {
@@ -2977,9 +2980,11 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 				// Flush the tip as an Estimate; the whole tx is promoted to Done at the
 				// seal point below.
 				be.versionMap.FlushVersionedWrites(tipWrites, false)
-				existingWrites := be.blockIO.WriteSet(txVersion.TxIndex)
-				merged := existingWrites.Merge(tipWrites)
-				be.blockIO.RecordWrites(txVersion, merged)
+				if ownedWrites != nil {
+					ownedWrites.MergeFrom(tipWrites)
+				} else {
+					be.blockIO.RecordWrites(txVersion, be.blockIO.WriteSet(txVersion.TxIndex).Merge(tipWrites))
+				}
 				be.markReadersDirty(tx, tipWrites)
 			}
 		}
@@ -3049,6 +3054,13 @@ func (be *blockExecutor) finishTask(tx int) {
 
 func (be *blockExecutor) frontier() int {
 	return int(be.committedFrontier.Load())
+}
+
+// dispatchLimit is the last task that dispatch may enqueue now. It is at most window tasks past
+// the commit frontier, so results arrive close to block order and the per-result reader scans
+// stay short.
+func (be *blockExecutor) dispatchLimit() int {
+	return min(len(be.tasks)-1, be.frontier()+dispatchWindow)
 }
 
 // requeueAt registers pt to be re-queued when the frontier reaches target. Returns
@@ -3636,12 +3648,7 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 			return 0
 		}
 		budget := len(be.tasks)
-		// Dispatch at most window tasks past the commit frontier, so results arrive
-		// close to block order and the per-result reader scans stay short.
-		lastTx := len(be.tasks) - 1
-		if be.versionMap.HasBAL {
-			lastTx = min(lastTx, be.frontier()+balDispatchWindow)
-		}
+		lastTx := be.dispatchLimit()
 		for {
 			nextTx := be.execTasks.minPending()
 			if nextTx < 0 || nextTx > lastTx {

@@ -213,7 +213,7 @@ func TestBlobSidecarProposerSignatureUsesHeaderEpochForkVersion(t *testing.T) {
 	parentRoot := common.HexToHash("0x3333333333333333333333333333333333333333333333333333333333333333")
 	forkChoice := mock_services.NewForkChoiceStorageMock(t)
 	forkChoice.Headers[parentRoot] = &cltypes.BeaconBlockHeader{Slot: headState.Slot()}
-	service := NewBlobSidecarService(&cfg, forkChoice, syncedData, nil, nil, false).(*blobSidecarService)
+	service := NewBlobSidecarService(t.Context(), &cfg, forkChoice, syncedData, nil, nil, false).(*blobSidecarService)
 
 	require.NoError(t, service.verifySidecarsSignature(signedHeaderAtFork(t, &cfg, clparams.ElectraVersion, key, parentRoot)))
 }
