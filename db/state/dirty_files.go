@@ -69,6 +69,20 @@ func (df *DirtyFiles) copy() *DirtyFiles {
 	return &DirtyFiles{*df.BTreeG.Copy()}
 }
 
+// Replaced files must be retired with the outgoing visible generation, without
+// deleting the paths now owned by their replacements.
+func (df *DirtyFiles) replace(item *FilesItem) retiredFiles {
+	if item == nil {
+		return nil
+	}
+	previous, replaced := df.Set(item)
+	if !replaced || previous == item {
+		return nil
+	}
+	previous.canDelete.Store(false)
+	return retiredFiles{previous}
+}
+
 func (df *DirtyFiles) CloseItems(items []*FilesItem) {
 	for _, item := range items {
 		df.Delete(item)

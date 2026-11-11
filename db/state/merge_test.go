@@ -1154,6 +1154,51 @@ func TestMergeFiles(t *testing.T) {
 	dc.Close()
 }
 
+func TestMergeReplacementClosesAfterReaders(t *testing.T) {
+	t.Parallel()
+	const stepSize = uint64(10)
+	db, agg := testDbAndAggregatorv3(t, stepSize)
+	ranges := []testFileRange{{0, 2}}
+	generateAccountsFile(t, agg.Dirs(), ranges)
+	generateStorageFile(t, agg.Dirs(), ranges)
+	generateCodeFile(t, agg.Dirs(), ranges)
+	generateCommitmentFile(t, agg.Dirs(), ranges)
+	require.NoError(t, agg.OpenFolder(db))
+
+	reader := agg.BeginFilesRo()
+	defer reader.Close()
+	files := reader.d[kv.AccountsDomain].ht.iit.files
+	require.Len(t, files, 1)
+	original := files[0].src
+	defer original.closeFiles()
+	originalMapping := original.decompressor
+	dataPath, indexPath := originalMapping.FilePath(), original.index.FilePath()
+
+	replacement := newFilesItem(0, 2*stepSize)
+	defer replacement.closeFiles()
+	var err error
+	replacement.decompressor, err = seg.NewDecompressor(dataPath)
+	require.NoError(t, err)
+	replacement.index, err = recsplit.OpenIndex(indexPath)
+	require.NoError(t, err)
+	replacementMapping := replacement.decompressor
+	in := &MergeResult{}
+	in.dIdx[kv.AccountsDomain] = replacement
+	original.canDelete.Store(true)
+	agg.integrateMergedDirtyFiles(in)
+
+	require.True(t, originalMapping.IsOpen(), "existing readers must keep their mapping")
+	reader.Close()
+	require.False(t, originalMapping.IsOpen(), "the replaced mapping must close with its last reader")
+	require.Nil(t, original.index, "the replaced accessor must close too")
+	require.True(t, replacementMapping.IsOpen())
+	require.FileExists(t, dataPath, "retiring the old mapping must not delete the replacement")
+	require.FileExists(t, indexPath)
+
+	agg.Close()
+	require.False(t, replacementMapping.IsOpen())
+}
+
 func TestDomainMergeCancellationClosesOutput(t *testing.T) {
 	t.Parallel()
 	const stepSize = uint64(32)
