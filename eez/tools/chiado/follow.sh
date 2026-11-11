@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Follow eez-chiado (eez.dev) from its genesis with Erigon for FOLLOW minutes
-# of derivation and require the blocks it derived to be the reference L2's.
+# of derivation; require its safe block to advance meanwhile and the blocks it
+# derived to be the reference L2's.
 #
 #   ERIGON     erigon binary under test
 #   OUT        directory for the datadir and the logs
@@ -53,10 +54,11 @@ block() {
 }
 
 # check requires Erigon's block n to be the reference's, asking the public
-# reference up to three times.
+# reference up to three times; a block either side does not serve fails it.
 check() {
 	local ours ref
 	ours=$(block "$ERIGON_RPC" "$(hex "$1")")
+	[ "$ours" != "0 null" ] || fail "block $1: erigon does not serve it"
 	for _ in 1 2 3; do
 		ref=$(block "$L2_RPC" "$(hex "$1")")
 		[ "$ref" != "0 null" ] && break
@@ -95,12 +97,13 @@ until read -r safe _ < <(block "$ERIGON_RPC" safe 2> /dev/null) && [ "$safe" -gt
 	sleep 30
 done
 log "deriving: safe block $safe after $((SECONDS / 60)) minutes"
+first=$safe
 sleep $((FOLLOW * 60))
 kill -0 "$pid" 2> /dev/null || { tail -30 "$OUT/erigon.log"; fail "erigon exited"; }
 ! grep -q '\[CRIT\]' "$OUT/erigon.log" || { grep '\[CRIT\]' "$OUT/erigon.log" | tail -5; fail "critical log line"; }
 
 read -r safe hash < <(block "$ERIGON_RPC" safe)
-[ "$safe" -gt 0 ] || fail "no safe block"
+[ "$safe" -gt "$first" ] || fail "safe block $first did not advance in $FOLLOW minutes (now $safe)"
 for n in 1 $((safe / 2)) "$safe"; do
 	check "$n"
 done
