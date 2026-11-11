@@ -693,6 +693,7 @@ var hashedBatchPool = sync.Pool{New: func() any { return &hashedBatch{} }}
 
 func verifyCommitmentV3Files(ctx context.Context, a *Aggregator, logger log.Logger) error {
 	started := time.Now()
+	defer a.MadvNormal().DisableReadAhead()
 	c, err := FoldCommitmentV3(ctx, a, math.MaxUint64)
 	if err != nil {
 		return err

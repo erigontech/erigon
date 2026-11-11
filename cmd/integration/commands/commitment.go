@@ -71,6 +71,7 @@ var (
 	branchPrefixFlag string
 	txnumFlag        uint64
 	verifyAsOf       []uint
+	verifyHistory    bool
 )
 
 // visualize command flags
@@ -139,6 +140,7 @@ func init() {
 	withChain(cmdCommitmentVerify)
 	withDataDir(cmdCommitmentVerify)
 	cmdCommitmentVerify.Flags().UintSliceVar(&verifyAsOf, "asof", nil, "also fold the records as of these txNums")
+	cmdCommitmentVerify.Flags().BoolVar(&verifyHistory, "history", false, "also fold the records at the middle and the last state of every commitment history file")
 	commitmentCmd.AddCommand(cmdCommitmentVerify)
 
 	// commitment visualize
@@ -291,6 +293,7 @@ func commitmentVerify(ctx context.Context, logger log.Logger) error {
 	defer db.Close()
 	agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 	agg.DisableAllDependencies()
+	defer agg.MadvNormal().DisableReadAhead()
 	points := []uint64{math.MaxUint64}
 	for _, txNum := range verifyAsOf {
 		points = append(points, uint64(txNum))
@@ -315,7 +318,13 @@ func commitmentVerify(ctx context.Context, logger log.Logger) error {
 		logger.Info("[commitment verify] ok", "asOf", label, "block", c.BlockNum, "txNum", c.TxNum, "root", hex.EncodeToString(c.Root),
 			"records", common.PrettyCounter(c.Records), "took", time.Since(started).Round(time.Millisecond))
 	}
-	return nil
+	if !verifyHistory {
+		return nil
+	}
+	if historyDisabled {
+		return errors.New("--history: commitment history is disabled")
+	}
+	return dbstate.VerifyCommitmentV3History(ctx, agg, logger)
 }
 
 var cmdCommitmentRebuild = &cobra.Command{

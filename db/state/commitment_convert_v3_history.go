@@ -1214,31 +1214,44 @@ func convertHistoryPhase4(dirs datadir.Dirs, stage commitmentV3HistoryStage) (in
 	return moved, nil
 }
 
-func verifyCommitmentV3History(ctx context.Context, a *Aggregator, ranges []commitmentHistoryRange, logger log.Logger) error {
+func VerifyCommitmentV3History(ctx context.Context, a *Aggregator, logger log.Logger) error {
 	started := time.Now()
 	at := a.BeginFilesRo()
 	iit := at.d[kv.CommitmentDomain].ht.iit
-	stepSize := at.StepSize()
 	var samples []uint64
-	for _, r := range ranges {
-		txNums, err := appendFileTxNums(nil, iit, uint64(r.fromStep)*stepSize, uint64(r.toStep)*stepSize, commitment.KeyCommitmentV3State)
+	for _, f := range iit.files {
+		txNums, err := appendFileTxNums(nil, iit, f.startTxNum, f.endTxNum, commitment.KeyCommitmentV3State)
 		if err != nil {
 			at.Close()
 			return err
 		}
 		if len(txNums) == 0 {
 			at.Close()
-			return fmt.Errorf("commitment history %d-%d has no state entries", r.fromStep, r.toStep)
+			return fmt.Errorf("commitment history %s has no state entries", f.src.decompressor.FileName())
 		}
 		samples = append(samples, txNums[len(txNums)/2]+1, txNums[len(txNums)-1]+1)
 	}
+	files := len(iit.files)
 	at.Close()
+	defer a.MadvNormal().DisableReadAhead()
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(max(1, runtime.NumCPU()/4))
+	var done atomic.Int32
 	for _, txNum := range samples {
-		_, err := FoldCommitmentV3(ctx, a, txNum)
-		if err != nil {
-			return fmt.Errorf("as of txNum %d: %w", txNum, err)
-		}
+		g.Go(func() error {
+			sampleStarted := time.Now()
+			c, err := FoldCommitmentV3(gctx, a, txNum)
+			if err != nil {
+				return fmt.Errorf("as of txNum %d: %w", txNum, err)
+			}
+			logger.Info("[commitment_convert] v3 history sample verified", "asOf", txNum, "block", c.BlockNum, "records", common.PrettyCounter(c.Records),
+				"took", time.Since(sampleStarted).Round(time.Second), "done", fmt.Sprintf("%d/%d", done.Add(1), len(samples)))
+			return nil
+		})
 	}
-	logger.Info("[commitment_convert] v3 history verified", "files", len(ranges), "samples", len(samples), "took", time.Since(started).Round(time.Millisecond))
+	if err := g.Wait(); err != nil {
+		return err
+	}
+	logger.Info("[commitment_convert] v3 history verified", "files", files, "samples", len(samples), "took", time.Since(started).Round(time.Millisecond))
 	return nil
 }
