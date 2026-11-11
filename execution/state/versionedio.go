@@ -724,9 +724,13 @@ func (h WriteHeader) Deletes() bool { return h.valStatus == ValueDeleted }
 // step of an intra-tx oscillation.
 type VersionedWrite[T any] struct {
 	WriteHeader
-	Val  T
-	orig T
+	Val   T
+	orig  T
+	cell  *WriteCell[T]
+	entry *AddressEntry
 }
+
+func (w *VersionedWrite[T]) bind(e *AddressEntry, c *WriteCell[T]) { w.cell, w.entry = c, e }
 
 func cloneVW[T any](w *VersionedWrite[T]) *VersionedWrite[T] {
 	c := *w
@@ -785,22 +789,27 @@ func getVWStorage() *VersionedWrite[uint256.Int] {
 	return vwPoolStorage.Get().(*VersionedWrite[uint256.Int])
 }
 
+func putVW[T any](pool *sync.Pool, vw *VersionedWrite[T]) {
+	vw.cell, vw.entry = nil, nil
+	pool.Put(vw)
+}
+
 func releaseVWAddress(vw *VersionedWrite[*accounts.Account]) {
 	vw.Val = nil // unpin
-	vwPoolAddress.Put(vw)
+	putVW(&vwPoolAddress, vw)
 }
-func releaseVWBalance(vw *VersionedWrite[uint256.Int]) { vwPoolBalance.Put(vw) }
-func releaseVWNonce(vw *VersionedWrite[uint64])        { vwPoolNonce.Put(vw) }
-func releaseVWIncarnation(vw *VersionedWrite[uint64])  { vwPoolIncarnation.Put(vw) }
-func releaseVWSelfDestruct(vw *VersionedWrite[bool])   { vwPoolSelfDestruct.Put(vw) }
-func releaseVWCreateContract(vw *VersionedWrite[bool]) { vwPoolCreateContract.Put(vw) }
+func releaseVWBalance(vw *VersionedWrite[uint256.Int]) { putVW(&vwPoolBalance, vw) }
+func releaseVWNonce(vw *VersionedWrite[uint64])        { putVW(&vwPoolNonce, vw) }
+func releaseVWIncarnation(vw *VersionedWrite[uint64])  { putVW(&vwPoolIncarnation, vw) }
+func releaseVWSelfDestruct(vw *VersionedWrite[bool])   { putVW(&vwPoolSelfDestruct, vw) }
+func releaseVWCreateContract(vw *VersionedWrite[bool]) { putVW(&vwPoolCreateContract, vw) }
 func releaseVWCode(vw *VersionedWrite[accounts.Code]) {
 	vw.Val = accounts.Code{} // unpin bytecode
-	vwPoolCode.Put(vw)
+	putVW(&vwPoolCode, vw)
 }
-func releaseVWCodeHash(vw *VersionedWrite[accounts.CodeHash]) { vwPoolCodeHash.Put(vw) }
-func releaseVWCodeSize(vw *VersionedWrite[int])               { vwPoolCodeSize.Put(vw) }
-func releaseVWStorage(vw *VersionedWrite[uint256.Int])        { vwPoolStorage.Put(vw) }
+func releaseVWCodeHash(vw *VersionedWrite[accounts.CodeHash]) { putVW(&vwPoolCodeHash, vw) }
+func releaseVWCodeSize(vw *VersionedWrite[int])               { putVW(&vwPoolCodeSize, vw) }
+func releaseVWStorage(vw *VersionedWrite[uint256.Int])        { putVW(&vwPoolStorage, vw) }
 
 // Slabs double from a small first one, so a path that writes a handful of cells
 // buys a handful and a path that writes thousands still amortizes. A reusing set
@@ -2882,17 +2891,21 @@ func (b *BlockAccessListBuilder) Add(txIndex int, rs ReadSet, writes *WriteSet) 
 				account.applyWriteStorage(key, w.Val, w.Version.blockAccessIndex())
 			}
 		}
-		// EIP-7928 requires every touched address to appear; a sweep over the
-		// full address union covers the paths the value-carrying loops above
-		// didn't already register.
-		for addr := range writes.addrs() {
+		// EIP-7928 requires every touched address to appear; these paths carry
+		// no value the loops above record.
+		registerAddrs(ac, writes.address)
+		registerAddrs(ac, writes.incarnation)
+		registerAddrs(ac, writes.selfDestruct)
+		registerAddrs(ac, writes.codeHash)
+		registerAddrs(ac, writes.codeSize)
+		for addr, w := range writes.createContract {
 			if addr.IsNil() {
 				continue
 			}
 			account := ensureAccountState(ac, addr)
 			// A contract created this block has empty pre-block code; applyToCode
 			// uses this to drop a net-zero empty code change.
-			if vw, ok := writes.GetCreateContract(addr); ok && vw.Val {
+			if w.Val {
 				account.initialCodeEmpty = true
 			}
 		}
@@ -3095,6 +3108,14 @@ func (ct *changeTracker[T]) apply(applyFn func(uint32, T)) {
 	}
 }
 
+func registerAddrs[V any](ac map[accounts.Address]*accountState, writes map[accounts.Address]V) {
+	for addr := range writes {
+		if !addr.IsNil() {
+			ensureAccountState(ac, addr)
+		}
+	}
+}
+
 func newAccountState(addr accounts.Address) *accountState {
 	return &accountState{changes: types.AccountChanges{Address: addr.Value()}}
 }
@@ -3166,16 +3187,14 @@ func (account *accountState) updateReadStorage(key accounts.StorageKey, val uint
 	if account.storageReadValues == nil {
 		account.storageReadValues = make(map[accounts.StorageKey]uint256.Int)
 	}
-	if _, exists := account.storageReadValues[key]; !exists {
-		account.storageReadValues[key] = val
+	if _, seen := account.storageReadValues[key]; seen {
+		return
 	}
+	account.storageReadValues[key] = val
 	if account.hasStorageWrite(key) {
 		return
 	}
 	if account.slotReads != nil {
-		if _, seen := account.slotReads[key]; seen {
-			return
-		}
 		account.slotReads[key] = len(account.storageReads)
 	}
 	account.storageReads = append(account.storageReads, key)
@@ -3250,19 +3269,10 @@ func (account *accountState) addStorageUpdate(at int, slot accounts.StorageKey, 
 		for i := range ac.StorageChanges {
 			account.slotWrites[ac.StorageChanges[i].Slot] = i
 		}
-		// StorageReads can hold the same slot twice: below the threshold reads are
-		// appended unchecked, and Normalize is what dedups them. The index needs
-		// one entry per slot, so drop the repeats while building it.
 		account.slotReads = make(map[accounts.StorageKey]int, len(account.storageReads))
-		deduped := account.storageReads[:0]
-		for _, slot := range account.storageReads {
-			if _, seen := account.slotReads[slot]; seen {
-				continue
-			}
-			account.slotReads[slot] = len(deduped)
-			deduped = append(deduped, slot)
+		for i, slot := range account.storageReads {
+			account.slotReads[slot] = i
 		}
-		account.storageReads = deduped
 	}
 }
 

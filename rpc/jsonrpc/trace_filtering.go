@@ -774,7 +774,7 @@ func (api *TraceAPIImpl) callBlock(
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := ethapi.CommitCallState(ibs, rules, cachedWriter); err != nil {
+	if err := ethapi.FinalizeCallTxTo(ibs, rules, cachedWriter); err != nil {
 		return nil, nil, err
 	}
 
@@ -1088,7 +1088,7 @@ func (api *TraceAPIImpl) callTransaction(
 	if err != nil {
 		return nil, err
 	}
-	if err := ethapi.CommitCallState(ibs, rules, cachedWriter); err != nil {
+	if err := ethapi.FinalizeCallTxTo(ibs, rules, cachedWriter); err != nil {
 		return nil, err
 	}
 

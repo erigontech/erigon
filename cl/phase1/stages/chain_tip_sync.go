@@ -14,6 +14,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	network "github.com/erigontech/erigon/cl/phase1/network"
+	"github.com/erigontech/erigon/cl/sentinel/httpreqresp"
 	"github.com/erigontech/erigon/cl/sentinel/peers"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -96,6 +97,8 @@ func waitForExecutionEngineToBeFinished(ctx context.Context, cfg *Cfg) (ready bo
 }
 
 const (
+	// maxChainTipRequestCount keeps a by-range request under the sentinel's bulk weight, so backfill cannot park it.
+	maxChainTipRequestCount   = httpreqresp.MaxResponseChunks/2 - 1
 	ancestorLookupWindow      = 64
 	maxAncestorLookupRequests = 4
 )
@@ -153,12 +156,17 @@ func startFetchingBlocksMissedByGossipAfterSomeTime(ctx context.Context, cfg *Cf
 		if highestSeen >= 2 {
 			from = highestSeen - 2
 		}
+		from = max(from, cfg.chainTipResumeSlot.Load())
 		currentSlot := cfg.ethClock.GetCurrentSlot()
 		var count uint64
 		if currentSlot >= from {
-			count = (currentSlot - from) + 4
+			count = min((currentSlot-from)+4, maxChainTipRequestCount)
 		} else {
 			count = 4
+		}
+		var next uint64
+		if currentSlot >= from && currentSlot-from >= maxChainTipRequestCount {
+			next = from + count
 		}
 
 		// Stop fetching if the highest seen block is greater than or equal to the target slot
@@ -175,6 +183,7 @@ func startFetchingBlocksMissedByGossipAfterSomeTime(ctx context.Context, cfg *Cf
 			}
 			return
 		}
+		cfg.chainTipResumeSlot.Store(next)
 
 		// Send fetched blocks to the response channel or handle context cancellation
 		select {
@@ -270,13 +279,17 @@ func fetchLinkedAncestors(ctx context.Context, cfg *Cfg, peer string, orphan *cl
 	var fetched []*cltypes.SignedBeaconBlock
 	next, end := start, orphan.Block.Slot
 	for requests := 0; next < end && requests < maxAncestorLookupRequests; requests++ {
-		blocks, err := cfg.rpc.SendBeaconBlocksByRangeReqToPeer(ctx, peer, next, end-next)
+		count := min(end-next, maxChainTipRequestCount)
+		blocks, err := cfg.rpc.SendBeaconBlocksByRangeReqToPeer(ctx, peer, next, count)
 		switch {
 		case err != nil:
 			return nil, err
+		case len(blocks) == 0 && next+count < end:
+			next += count
+			continue
 		case len(blocks) == 0:
 			return nil, fmt.Errorf("empty response, blocks fetched before: %d", len(fetched))
-		case !slotsIncreasingWithin(blocks, next, end):
+		case !slotsIncreasingWithin(blocks, next, next+count):
 			return nil, errors.New("response slots out of range or not increasing")
 		}
 		fetched = append(fetched, blocks...)

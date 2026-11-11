@@ -793,8 +793,9 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 						}
 					}
 
-					if applyResult.BlockNum > 0 && applyResult.receiptsComplete && !initialCycle && applyResult.Header != nil &&
-						pe.cfg.notifications != nil && pe.cfg.notifications.RecentReceipts != nil {
+					if applyResult.BlockNum > 0 && applyResult.receiptsComplete && applyResult.Header != nil &&
+						pe.cfg.notifications != nil && pe.cfg.notifications.RecentReceipts != nil &&
+						(!initialCycle || pe.cfg.notifications.Events.HasReceiptOrLogSubscribers()) {
 						pe.cfg.notifications.RecentReceipts.Add(applyResult.Receipts, applyResult.Txs, applyResult.Header)
 					}
 
@@ -2961,8 +2962,8 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 					reads.SetNonce(sender, state.VersionedRead[uint64]{ReadHeader: state.ReadHeader{Source: state.StorageRead}, Val: charged.Nonce})
 				}
 				be.blockIO.RecordReads(txVersion, reads)
-				be.blockIO.RecordWrites(txVersion, be.blockIO.WriteSet(txVersion.TxIndex).Merge(senderWrites))
 				be.versionMap.FlushVersionedWrites(senderWrites, false)
+				be.blockIO.RecordWrites(txVersion, be.blockIO.WriteSet(txVersion.TxIndex).Merge(senderWrites))
 				be.markReadersDirty(tx, senderWrites)
 				// A charge-at-validation sender's gas debit is not in the worker's TxOut, so
 				// calcFees' coinbase/burnt override (which reads TxOut) would miss it and credit
@@ -2974,12 +2975,12 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 				return nil, err
 			}
 			if !tipWrites.IsEmpty() {
-				existingWrites := be.blockIO.WriteSet(txVersion.TxIndex)
-				merged := existingWrites.Merge(tipWrites)
-				be.blockIO.RecordWrites(txVersion, merged)
 				// Flush the tip as an Estimate; the whole tx is promoted to Done at the
 				// seal point below.
 				be.versionMap.FlushVersionedWrites(tipWrites, false)
+				existingWrites := be.blockIO.WriteSet(txVersion.TxIndex)
+				merged := existingWrites.Merge(tipWrites)
+				be.blockIO.RecordWrites(txVersion, merged)
 				be.markReadersDirty(tx, tipWrites)
 			}
 		}

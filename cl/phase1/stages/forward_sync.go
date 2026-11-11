@@ -170,6 +170,9 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 		if !collectExecution {
 			continue
 		}
+		if _, accepted := cfg.forkChoice.GetHeader(blockRoot); !accepted {
+			continue
+		}
 		// Add the block to the block collector (pre-GLOAS only)
 		if err = cfg.blockCollector.AddBlock(block.Block); err != nil {
 			// Return an error if adding the block to the collector fails

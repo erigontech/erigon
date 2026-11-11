@@ -4481,7 +4481,7 @@ func TestExecutionPayloadBlobCommitmentMismatchPreservesVerifiedSibling(t *testi
 			f.MarkPayloadVerified(verifiedRoot, executionHash)
 
 			if mode.consensus {
-				err = f.ValidateExecutionPayloadEnvelopeForConsensus(t.Context(), envelope)
+				err = f.ValidateExecutionPayloadEnvelopeForConsensus(t.Context(), envelope, true)
 			} else {
 				err = f.OnExecutionPayload(t.Context(), envelope, mode.checkBlobData, mode.validatePayload)
 			}
@@ -5522,6 +5522,58 @@ func TestExecutionPayloadAdmissionCancellationReconcilesConcurrentOwner(t *testi
 	}
 }
 
+func TestValidateExecutionPayloadEnvelopeForConsensusTakesBlobDataInHand(t *testing.T) {
+	cfg, blockState, block, envelope := validBlobEnvelopeFixture(t)
+	engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
+	engine.EXPECT().NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(execution_client.PayloadStatusValidated, nil)
+	store := &ForkChoiceStore{
+		beaconCfg: cfg,
+		forkGraph: dataAvailabilityForkGraph{state: blockState, block: block},
+		engine:    engine,
+	}
+	store.finalizedCheckpoint.Store(solid.Checkpoint{})
+
+	require.ErrorIs(t, store.ValidateExecutionPayloadEnvelopeForConsensus(t.Context(), envelope, true), ErrEIP7594ColumnDataNotAvailable)
+	require.NoError(t, store.ValidateExecutionPayloadEnvelopeForConsensus(t.Context(), envelope, false))
+}
+
+func TestExecutionPayloadInvalidated(t *testing.T) {
+	byRoot, err := lru.New[common.Hash, execution_client.PayloadStatus](2)
+	require.NoError(t, err)
+	byHash, err := lru.New[common.Hash, execution_client.PayloadStatus](2)
+	require.NoError(t, err)
+	store := &ForkChoiceStore{payloadStatusByRoot: byRoot, executionPayloadStatus: byHash}
+	blockRoot := common.HexToHash("0x01")
+	executionBlockHash := common.HexToHash("0x02")
+	otherRoot := common.HexToHash("0x03")
+	otherHash := common.HexToHash("0x04")
+
+	require.False(t, store.ExecutionPayloadInvalidated(blockRoot, executionBlockHash))
+	byRoot.Add(blockRoot, execution_client.PayloadStatusInvalidated)
+	require.True(t, store.ExecutionPayloadInvalidated(blockRoot, otherHash))
+	byRoot.Purge()
+	byHash.Add(executionBlockHash, execution_client.PayloadStatusInvalidated)
+	require.True(t, store.ExecutionPayloadInvalidated(otherRoot, executionBlockHash))
+}
+
+func TestValidateExecutionPayloadEnvelopeForConsensusRepeatsForAnAppliedEnvelope(t *testing.T) {
+	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
+	engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
+	engine.EXPECT().NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(execution_client.PayloadStatusValidated, nil).Times(2)
+	store := &ForkChoiceStore{
+		beaconCfg: cfg,
+		forkGraph: &persistedEnvelopeForkGraph{
+			dataAvailabilityForkGraph: dataAvailabilityForkGraph{state: blockState, block: block},
+			hasEnvelope:               true,
+		},
+		engine: engine,
+	}
+	store.finalizedCheckpoint.Store(solid.Checkpoint{})
+
+	require.NoError(t, store.ValidateExecutionPayloadEnvelopeForConsensus(t.Context(), envelope, false))
+	require.NoError(t, store.ValidateExecutionPayloadEnvelopeForConsensus(t.Context(), envelope, false))
+}
+
 func TestValidateExecutionPayloadEnvelopeForConsensusRequiresELValidation(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
@@ -5548,7 +5600,7 @@ func TestValidateExecutionPayloadEnvelopeForConsensusRequiresELValidation(t *tes
 				engine:    engine,
 			}
 			store.finalizedCheckpoint.Store(solid.Checkpoint{})
-			err := store.ValidateExecutionPayloadEnvelopeForConsensus(t.Context(), envelope)
+			err := store.ValidateExecutionPayloadEnvelopeForConsensus(t.Context(), envelope, true)
 			if tc.wantErr {
 				require.Error(t, err)
 			} else {
@@ -5577,7 +5629,7 @@ func TestValidateExecutionPayloadEnvelopeForConsensusHoldsPayloadPreparation(t *
 	}
 	store.finalizedCheckpoint.Store(solid.Checkpoint{})
 	done := make(chan error, 1)
-	go func() { done <- store.ValidateExecutionPayloadEnvelopeForConsensus(t.Context(), envelope) }()
+	go func() { done <- store.ValidateExecutionPayloadEnvelopeForConsensus(t.Context(), envelope, true) }()
 	<-started
 
 	_, _, ok := store.TryBeginPayloadPreparation(t.Context(), block.Block.Slot, block.Block.Slot+1)
@@ -5613,7 +5665,7 @@ func TestValidateExecutionPayloadEnvelopeForConsensusRechecksAfterEL(t *testing.
 					return execution_client.PayloadStatusValidated, nil
 				},
 			)
-			require.Error(t, store.ValidateExecutionPayloadEnvelopeForConsensus(t.Context(), envelope))
+			require.Error(t, store.ValidateExecutionPayloadEnvelopeForConsensus(t.Context(), envelope, true))
 		})
 	}
 }
@@ -5622,7 +5674,7 @@ func TestValidateExecutionPayloadEnvelopeForConsensusWithoutEL(t *testing.T) {
 	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
 	store := &ForkChoiceStore{beaconCfg: cfg, forkGraph: dataAvailabilityForkGraph{state: blockState, block: block}}
 	store.finalizedCheckpoint.Store(solid.Checkpoint{})
-	require.Error(t, store.ValidateExecutionPayloadEnvelopeForConsensus(t.Context(), envelope))
+	require.Error(t, store.ValidateExecutionPayloadEnvelopeForConsensus(t.Context(), envelope, true))
 }
 
 func TestValidateExecutionPayloadEnvelopeForConsensusAdmissionCancellation(t *testing.T) {
@@ -5634,7 +5686,7 @@ func TestValidateExecutionPayloadEnvelopeForConsensusAdmissionCancellation(t *te
 	store.payloadValidationAdmission <- struct{}{}
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	require.ErrorIs(t, store.ValidateExecutionPayloadEnvelopeForConsensus(ctx, envelope), context.Canceled)
+	require.ErrorIs(t, store.ValidateExecutionPayloadEnvelopeForConsensus(ctx, envelope, true), context.Canceled)
 	require.True(t, store.mu.TryLock())
 	store.mu.Unlock()
 	require.Len(t, store.payloadValidationAdmission, 1)
@@ -5668,7 +5720,7 @@ func TestExecutionPayloadEnvelopeValidationUsesFinalizedEpochStart(t *testing.T)
 				if validator == "gossip" {
 					err = store.ValidateExecutionPayloadEnvelopeForGossip(envelope)
 				} else {
-					err = store.ValidateExecutionPayloadEnvelopeForConsensus(t.Context(), envelope)
+					err = store.ValidateExecutionPayloadEnvelopeForConsensus(t.Context(), envelope, true)
 				}
 				if tc.wantErr {
 					require.ErrorContains(t, err, "before finalized slot 64")

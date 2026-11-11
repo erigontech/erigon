@@ -653,16 +653,21 @@ func (ibs *IntraBlockState) Empty(addr accounts.Address) (empty bool, err error)
 
 		return so == nil || so.deleted || so.data.Empty(), nil
 	}
+	if warmEmpty, ok := ibs.emptyFromWarmReads(addr); ok {
+		return warmEmpty, nil
+	}
 	// Existence + the self-destruct/revival gate, without reconstructing the
 	// whole account: the EIP-161 verdict needs only the current balance, nonce
 	// and code hash, read per-field below (short-circuiting), so the per-field
 	// overlay and a full-account allocation are avoided.
-	account, _, _, err := ibs.versionedAccountBase(addr, true)
+	account, source, _, err := ibs.versionedAccountBase(addr, true)
 	if err != nil {
 		return false, err
 	}
 	if account == nil {
-		ibs.touchAccount(addr)
+		if source == ReadSetRead {
+			return true, nil
+		}
 		// Do NOT call accountRead here: versionedAccountBase already recorded the
 		// AddressPath read with Val=nil. Overwriting it with a non-nil empty
 		// account would make downstream reads treat the account as existing,
@@ -700,6 +705,39 @@ func (ibs *IntraBlockState) Empty(addr accounts.Address) (empty bool, err error)
 // balance/nonce/codeHash per-field (short-circuiting on the first non-empty
 // field) instead of reconstructing the whole account. The per-field refresh
 // reads apply the same self-destruct gate as the whole-account path.
+// emptyFromWarmReads answers Empty from reads this attempt already recorded, so that a
+// repeat Empty looks each one up once. ok is false when the full path must decide: addr
+// has an own write, a read is missing, or the account read found no account (a field cell
+// can exist with no account record, so a recorded balance does not prove existence).
+func (ibs *IntraBlockState) emptyFromWarmReads(addr accounts.Address) (empty, ok bool) {
+	if !ibs.warmReadable(addr) {
+		return false, false
+	}
+	account, ok := ibs.versionedReads.GetAddress(addr)
+	if !ok || !warmSource(account.Source) || account.Val == nil || account.Val.IsNil() {
+		return false, false
+	}
+	balance, ok := ibs.versionedReads.GetBalance(addr)
+	if !ok || !warmSource(balance.Source) {
+		return false, false
+	}
+	if !balance.Val.IsZero() {
+		return false, true
+	}
+	nonce, ok := ibs.versionedReads.GetNonce(addr)
+	if !ok || !warmSource(nonce.Source) {
+		return false, false
+	}
+	if nonce.Val != 0 {
+		return false, true
+	}
+	codeHash, ok := ibs.versionedReads.GetCodeHash(addr)
+	if !ok || !warmSource(codeHash.Source) {
+		return false, false
+	}
+	return codeHash.Val == accounts.EmptyCodeHash, true
+}
+
 func (ibs *IntraBlockState) emptyFromVersionedFields(addr accounts.Address, account *accounts.Account) (bool, error) {
 	balance, _, _, err := refreshBalance(ibs, addr, account.Balance)
 	if err != nil {
@@ -1303,6 +1341,12 @@ func (ibs *IntraBlockState) readAbsentFromMap(addr accounts.Address) bool {
 	return ok && tr.Source == MapRead && (tr.Val == nil || tr.Val.Account() == nil)
 }
 
+// readAbsentFromCommitted reports whether this tx already read addr as absent from the committed state.
+func (ibs *IntraBlockState) readAbsentFromCommitted(addr accounts.Address) bool {
+	tr, ok := ibs.versionedReads.GetAddress(addr)
+	return ok && tr.Source == StorageRead && (tr.Val == nil || tr.Val.Account() == nil)
+}
+
 // readAbsent is like readAbsentFromMap, but also counts an absence read from the committed state:
 // the base reader can serve a lower tx's creation later in the attempt.
 func (ibs *IntraBlockState) readAbsent(addr accounts.Address) bool {
@@ -1342,7 +1386,10 @@ func (ibs *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 	// committed and in-block-created accounts — unless a later tx re-created it.
 	// Branch-agnostic: a burn stamps the balance ValueDeleted, so the
 	// reconstruction yields nil and this falls through.
-	if readAccount == nil {
+	// A repeat read keeps a recorded committed absence: validation rejects it if a
+	// destruct or re-creation was flushed since.
+	repeatedCommittedAbsence := readAccount == nil && source == StorageRead && ibs.readAbsentFromCommitted(addr)
+	if readAccount == nil && !repeatedCommittedAbsence {
 		if ibs.versionMap.absentAccountHook != nil {
 			ibs.versionMap.absentAccountHook()
 		}
@@ -1392,6 +1439,9 @@ func (ibs *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 			source = StorageRead
 		}
 
+		if readAccount == nil && err == nil && repeatedCommittedAbsence {
+			return nil, ReadSetRead, UnknownVersion, nil
+		}
 		if readAccount == nil || err != nil {
 			return nil, StorageRead, UnknownVersion, err
 		}
@@ -2249,9 +2299,9 @@ func (ibs *IntraBlockState) createObject(addr accounts.Address, previous *stateO
 		if _, res, ok := ibs.versionMap.ReadNonce(addr, ibs.txIndex); ok && res.resolved() {
 			ibs.recordWriteNonce(addr, newobj.data.Nonce, tracing.NonceChangeNewContract)
 		}
-		if _, res, ok := ibs.versionMap.ReadBalance(addr, ibs.txIndex); ok && res.ValStatus() == ValueDeleted {
-			ibs.recordWriteBalance(addr, newobj.data.Balance)
-		}
+		// The balance is written unconditionally: a lower tx's removal of the account can be
+		// flushed after this tx ran, and its deleted balance would then decide the account.
+		ibs.recordWriteBalance(addr, newobj.data.Balance)
 	}
 	return newobj
 }
@@ -2695,36 +2745,6 @@ func (ibs *IntraBlockState) CommitBlock(chainRules *chain.Rules, stateWriter Sta
 	return ibs.MakeWriteSet(chainRules, stateWriter)
 }
 
-// ExtractAndClearDirty snapshots the current stateObjectsDirty set and clears it.
-// Used by eth_simulateV1 to separate accounts dirtied by stateOverrides from those
-// dirtied by actual transaction execution, so CommitBlock does not apply EIP-161 to
-// override-only accounts.
-func (ibs *IntraBlockState) ExtractAndClearDirty() map[accounts.Address]struct{} {
-	dirty := maps.Clone(ibs.stateObjectsDirty)
-	clear(ibs.stateObjectsDirty)
-	return dirty
-}
-
-// CommitOverrideDirtyAccounts writes state-override accounts that were not subsequently
-// touched by any transaction (and therefore not handled by CommitBlock).  EIP-161 is
-// intentionally disabled: override accounts are simulation-only mutations and must not
-// be removed simply because they are "empty" by consensus rules.
-func (ibs *IntraBlockState) CommitOverrideDirtyAccounts(chainRules *chain.Rules, stateWriter StateWriter, overrideDirty map[accounts.Address]struct{}) error {
-	for addr := range overrideDirty {
-		if _, alsoTxDirty := ibs.stateObjectsDirty[addr]; alsoTxDirty {
-			continue // CommitBlock already handled this address
-		}
-		so, exists := ibs.stateObjects[addr]
-		if !exists || so.deleted {
-			continue
-		}
-		if err := updateAccount(false, chainRules.IsAura, stateWriter, addr, so, true, ibs.trace, ibs.tracingHooks, true, chainRules.IsAmsterdam); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func (ibs *IntraBlockState) BalanceIncreaseSet() map[accounts.Address]uint256.Int {
 	s := make(map[accounts.Address]uint256.Int, len(ibs.balanceInc))
 	for addr, bi := range ibs.balanceInc {
@@ -2818,12 +2838,35 @@ func (ibs *IntraBlockState) FinalizedWrites(chainRules *chain.Rules) (*WriteSet,
 	return writes, ibs.StateReadError()
 }
 
+// createdSelfDestructEmpty decides emptiness without an account view for an account this tx created as a contract
+// and really self-destructed: the create collision rule means it had nonce 0 and no code before the tx, so its
+// balance write is the only field left to check.
+func createdSelfDestructEmpty(writes *WriteSet, realSelfDestruct map[accounts.Address]struct{}, addr accounts.Address) (empty, known bool) {
+	if _, sd := realSelfDestruct[addr]; !sd {
+		return false, false
+	}
+	if cc, ok := writes.GetCreateContract(addr); !ok || !cc.Val {
+		return false, false
+	}
+	bal, ok := writes.GetBalance(addr)
+	if !ok {
+		return false, false
+	}
+	return bal.Val.IsZero(), true
+}
+
 func (ibs *IntraBlockState) encodeExistingEmptyRemovals(chainRules *chain.Rules, writes *WriteSet, realSelfDestruct map[accounts.Address]struct{}) {
 	if chainRules == nil || ibs.versionMap == nil {
 		return
 	}
 	for addr := range writes.addrs() {
 		if !EIP161EmptyRemoval(chainRules.IsEIP161Enabled(), chainRules.IsAura, addr) {
+			continue
+		}
+		if empty, known := createdSelfDestructEmpty(writes, realSelfDestruct, addr); known {
+			if empty {
+				writes.SetContractRemoval(addr, ibs.Version())
+			}
 			continue
 		}
 		view := NewVersionedAccountView(addr, ibs.txIndex, ibs.versionMap, ibs.stateReader)
