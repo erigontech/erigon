@@ -882,6 +882,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 			execErr = errors.Join(execErr, waitErr)
 		}
 	}
+	pe.progress.FlushReruns(&pe.txExecutor)
 
 	// Commitment is computed per-block by the calculator. Stage progress
 	// is updated in handleCommitResult when results are consumed.

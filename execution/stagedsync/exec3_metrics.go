@@ -483,6 +483,43 @@ type executor interface {
 	LogComplete(stepsInDb float64)
 }
 
+func execModeOf(te *txExecutor) string {
+	switch {
+	case te.isForkValidation:
+		return "newpayload"
+	case te.isApplyingBlocks:
+		return "applyingblocks"
+	}
+	return "other"
+}
+
+// publishReruns adds the re-runs, wasted time and void tail accumulated since its last call to the counters.
+func (p *Progress) publishReruns(te *txExecutor, execMode string) (curReruns [rerunCauses]int, wasted time.Duration, wastedByReason []string, curVoidTail time.Duration) {
+	wastedByReason = make([]string, 0, rerunCauses)
+	for cause, reason := range rerunReasons {
+		reruns, wastedNs := te.reruns[cause].Load(), te.wastedNs[cause].Load()
+		curReruns[cause] = int(reruns - p.prevReruns[cause])
+		curWasted := time.Duration(wastedNs - p.prevWastedNs[cause])
+		p.prevReruns[cause], p.prevWastedNs[cause] = reruns, wastedNs
+		wasted += curWasted
+		wastedByReason = append(wastedByReason, fmt.Sprintf("%s=%v", reason, common.Round(curWasted, 0)))
+		mxDiscardsTotal.WithLabelValues(execMode, reason).AddInt(curReruns[cause])
+		mxDiscardSecondsTotal.WithLabelValues(execMode, reason).Add(curWasted.Seconds())
+	}
+	voidTailNs := te.voidTailNs.Load()
+	curVoidTail = time.Duration(voidTailNs - p.prevVoidTailNs)
+	p.prevVoidTailNs = voidTailNs
+	mxVoidTailSecondsTotal.WithLabelValues(execMode).Add(curVoidTail.Seconds())
+	return curReruns, wasted, wastedByReason, curVoidTail
+}
+
+// FlushReruns publishes the re-run totals that accumulated after the last LogExecution.
+func (p *Progress) FlushReruns(te *txExecutor) {
+	p.logMu.Lock()
+	defer p.logMu.Unlock()
+	p.publishReruns(te, execModeOf(te))
+}
+
 func (p *Progress) LogExecution(rs *state.StateV3, ex executor) {
 	p.logMu.Lock()
 	defer p.logMu.Unlock()
@@ -590,33 +627,13 @@ func (p *Progress) LogExecution(rs *state.StateV3, ex executor) {
 
 		execDiff := execCount - p.prevExecCount
 
-		execMode := "other"
-		switch {
-		case te.isForkValidation:
-			execMode = "newpayload"
-		case te.isApplyingBlocks:
-			execMode = "applyingblocks"
-		}
+		execMode := execModeOf(te)
 
+		curReruns, wasted, wastedByReason, curVoidTail := p.publishReruns(te, execMode)
 		var repeats int
-		var curReruns [rerunCauses]int
-		var wasted time.Duration
-		wastedByReason := make([]string, 0, rerunCauses)
-		for cause, reason := range rerunReasons {
-			reruns, wastedNs := te.reruns[cause].Load(), te.wastedNs[cause].Load()
-			curReruns[cause] = int(reruns - p.prevReruns[cause])
-			curWasted := time.Duration(wastedNs - p.prevWastedNs[cause])
-			p.prevReruns[cause], p.prevWastedNs[cause] = reruns, wastedNs
-			repeats += curReruns[cause]
-			wasted += curWasted
-			wastedByReason = append(wastedByReason, fmt.Sprintf("%s=%v", reason, common.Round(curWasted, 0)))
-			mxDiscardsTotal.WithLabelValues(execMode, reason).AddInt(curReruns[cause])
-			mxDiscardSecondsTotal.WithLabelValues(execMode, reason).Add(curWasted.Seconds())
+		for _, n := range curReruns {
+			repeats += n
 		}
-		voidTailNs := te.voidTailNs.Load()
-		curVoidTail := time.Duration(voidTailNs - p.prevVoidTailNs)
-		p.prevVoidTailNs = voidTailNs
-		mxVoidTailSecondsTotal.WithLabelValues(execMode).Add(curVoidTail.Seconds())
 
 		var repeatRatio float64
 

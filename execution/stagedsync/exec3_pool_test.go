@@ -437,3 +437,21 @@ func TestPoolSettleWaitsForReadTargetUnlessBAL(t *testing.T) {
 		}
 	}
 }
+
+func TestProgressFlushRerunsPublishesWhatTheLastTickMissed(t *testing.T) {
+	var te txExecutor
+	p := &Progress{}
+	p.publishReruns(&te, execModeOf(&te))
+	discards, wasted, voidTail := sumExecMetric(mxDiscardsTotal, "abort"), sumExecMetric(mxDiscardSecondsTotal, "abort"), sumExecMetric(mxVoidTailSecondsTotal)
+
+	te.reruns[rerunAbort].Add(2)
+	te.wastedNs[rerunAbort].Add(int64(time.Millisecond))
+	te.voidTailNs.Add(int64(time.Microsecond))
+	p.FlushReruns(&te)
+	require.Equal(t, float64(2), sumExecMetric(mxDiscardsTotal, "abort")-discards)
+	require.InDelta(t, time.Millisecond.Seconds(), sumExecMetric(mxDiscardSecondsTotal, "abort")-wasted, 1e-9)
+	require.InDelta(t, time.Microsecond.Seconds(), sumExecMetric(mxVoidTailSecondsTotal)-voidTail, 1e-9)
+
+	p.FlushReruns(&te)
+	require.Equal(t, float64(2), sumExecMetric(mxDiscardsTotal, "abort")-discards, "a second flush must not count the same re-runs again")
+}
