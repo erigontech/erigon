@@ -1445,7 +1445,10 @@ func TestEngineApiBALUnchangedClaimLieShapesInvalid(t *testing.T) {
 			require.Len(t, c.StorageChanges, 1)
 			require.Len(t, c.StorageChanges[0].Changes, 2)
 			hideStorageWrites(c)
-			requireBALMismatch(t, newPayloadWithBAL(ctx, t, eat, payload, bal))
+			status := newPayloadWithBAL(ctx, t, eat, payload, bal)
+			// The second SSTORE's gas depends on the slot it reads, so a stale read can fail the gas check before the BAL one.
+			require.Equalf(t, enginetypes.InvalidStatus, status.Status, "validation error: %v", status.ValidationError)
+			require.NotNil(t, status.ValidationError)
 		})
 
 		t.Run("original value restored inside one tx", func(t *testing.T) {
