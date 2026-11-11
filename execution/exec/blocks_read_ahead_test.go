@@ -1106,3 +1106,22 @@ func TestBALAccountsKeepsAccountChangesWithoutStorage(t *testing.T) {
 	require.Equal(t, types.BlockAccessList{{Address: a1, BalanceChanges: bal[0].BalanceChanges}, {Address: a2}}, got)
 	require.Len(t, bal[0].StorageChanges, 1, "the BAL itself is unchanged")
 }
+
+func TestCachePopulatingGetterSkipsKeysTheCacheHolds(t *testing.T) {
+	account := accounts.SerialiseV3(&accounts.Account{Nonce: 1})
+	source := &sharedCodeTemporalGetter{account: account}
+	stateCache := newTestStateCache()
+	t.Cleanup(stateCache.Close)
+	existing, absent := common.Address{19: 1}, common.Address{19: 2}
+	seedFill(stateCache, kv.AccountsDomain, existing[:], account, 5)
+	seedFill(stateCache, kv.AccountsDomain, absent[:], nil, 5)
+	cpg := &cachePopulatingGetter{TemporalGetter: source, view: stateCache.View(cache.FrontierFunc(func(kv.Domain) (uint64, bool) { return 16, true })), stepSize: 16}
+
+	got, _, err := cpg.GetLatest(kv.AccountsDomain, existing[:], kv.GetLatestOptions{})
+	require.NoError(t, err)
+	require.Equal(t, account, got)
+	got, _, err = cpg.GetLatest(kv.AccountsDomain, absent[:], kv.GetLatestOptions{})
+	require.NoError(t, err)
+	require.Empty(t, got)
+	require.Zero(t, source.accountReads, "a key an exec worker already cached must not be read again")
+}
