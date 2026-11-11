@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/shards"
 )
 
@@ -82,6 +83,53 @@ func TestUnwindExecutionStageNotifications(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestUnwindExecutionStageAccountNotificationsAcrossSteps(t *testing.T) {
+	ctx, logger := t.Context(), log.New()
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()), temporaltest.WithStepSize(4))
+	tx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	br := freezeblocks.NewBlockReader(db.(freezeblocks.HasBlockFiles).DebugBlockFiles())
+	doms, err := execctx.NewSharedDomains(ctx, tx, logger)
+	require.NoError(t, err)
+	defer doms.Close()
+	address := common.Address{1}
+	var previous []byte
+	for block := uint64(0); block <= 3; block++ {
+		header := makeHeader(block, common.Hash{})
+		require.NoError(t, rawdb.WriteHeader(tx, header))
+		require.NoError(t, rawdb.WriteCanonicalHash(tx, header.Hash(), block))
+		require.NoError(t, rawdbv3.TxNums.Append(tx, block, 4*block+3))
+		cs := &changeset.StateChangeSet{}
+		if block > 0 {
+			doms.SetChangesetAccumulator(cs)
+			doms.SetTxNum(4 * block)
+			account := accounts.NewAccount()
+			account.Nonce = block
+			account.Balance.SetUint64(100 * block)
+			encoded := accounts.SerialiseV3(&account)
+			require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, address[:], encoded, 4*block, previous))
+			previous = encoded
+		}
+		require.NoError(t, changeset.WriteDiffSet(tx, block, header.Hash(), cs))
+	}
+	require.NoError(t, doms.Flush(ctx, tx))
+	accumulator := shards.NewAccumulator()
+	cfg := ExecuteBlockCfg{blockReader: br, stateStream: true, notifications: &shards.Notifications{Accumulator: accumulator}}
+	stage := &StageState{ID: stages.Execution, BlockNumber: 3, State: &Sync{mode: stages.ModeApplyingBlocks}}
+	unwind := &UnwindState{ID: stages.Execution, UnwindPoint: 1, CurrentBlockNumber: 3}
+	require.NoError(t, UnwindExecutionStage(unwind, stage, doms, tx, ctx, cfg, logger))
+	encoded, _, err := doms.GetLatest(kv.AccountsDomain, tx, address[:])
+	require.NoError(t, err)
+	var restored, notified accounts.Account
+	require.NoError(t, accounts.DeserialiseV3(&restored, encoded))
+	require.Equal(t, uint64(1), restored.Nonce, "the account itself must be restored correctly")
+	require.Len(t, accumulator.Changes(), 1)
+	require.Len(t, accumulator.Changes()[0].Changes, 1)
+	require.NoError(t, accounts.DeserialiseV3(&notified, accumulator.Changes()[0].Changes[0].Data))
+	require.Equal(t, restored, notified, "unwind notifications must describe restored account state")
 }
 
 // Pins that the unwind early-return (u.UnwindPoint >= s.BlockNumber) prunes

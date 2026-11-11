@@ -17,6 +17,7 @@
 package execmoduletester
 
 import (
+	"bytes"
 	"math/big"
 	"testing"
 
@@ -34,6 +35,104 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 )
+
+func TestReorgReportsUntouchedAccountAcrossSteps(t *testing.T) {
+	for _, validate := range []bool{false, true} {
+		name := "ForkchoiceOnly"
+		if validate {
+			name = "NewPayload"
+		}
+		t.Run(name, func(t *testing.T) {
+			const stepSize = uint64(8)
+			key, err := crypto.GenerateKey()
+			require.NoError(t, err)
+			otherKey, err := crypto.GenerateKey()
+			require.NoError(t, err)
+			sender := crypto.PubkeyToAddress(key.PublicKey)
+			otherSender := crypto.PubkeyToAddress(otherKey.PublicKey)
+			m := New(t, WithKey(key), WithStepSize(stepSize), WithGenesisSpec(&types.Genesis{
+				Config: chain.AllProtocolChanges,
+				Alloc: types.GenesisAlloc{
+					sender:      {Balance: big.NewInt(1e18)},
+					otherSender: {Balance: big.NewInt(1e18)},
+				},
+			}))
+			signer := *types.LatestSignerForChainID(m.ChainConfig.ChainID)
+			gasPrice := uint256.NewInt(m.Genesis.BaseFee().Uint64() * 2)
+			var branches [2]*blockgen.ChainPack
+			for branch := range branches {
+				branches[branch], err = m.GenerateChain(7, func(i int, b *blockgen.BlockGen) {
+					signingKey, nonce := key, uint64(i)
+					if branch == 1 && i > 0 {
+						signingKey, nonce = otherKey, uint64(i-1)
+					}
+					txn, err := types.SignTx(types.NewTransaction(nonce, common.Address{0xaa}, uint256.NewInt(1), 21_000, gasPrice, nil), signer, signingKey)
+					require.NoError(t, err)
+					b.AddTx(txn)
+				})
+				require.NoError(t, err)
+			}
+			canonical, side := branches[0], branches[1]
+			require.Equal(t, canonical.Blocks[0].Hash(), side.Blocks[0].Hash())
+			waitForHead := subscribeStateChangeHeads(t, m)
+			require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), canonical.Blocks[:1]))
+			m.ExecModule.WaitIdle(t.Context())
+			waitForHead(canonical.Blocks[0].Hash())
+			var want []byte
+			require.NoError(t, m.DB.ViewTemporal(t.Context(), func(tx kv.TemporalTx) error {
+				value, _, err := tx.GetLatest(kv.AccountsDomain, sender[:], kv.GetLatestOptions{})
+				want = bytes.Clone(value)
+				return err
+			}))
+			require.NotEmpty(t, want)
+			require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), canonical.Blocks[1:]))
+			m.ExecModule.WaitIdle(t.Context())
+			waitForHead(canonical.TopBlock.Hash())
+			require.NoError(t, m.DB.ViewTemporal(t.Context(), func(tx kv.TemporalTx) error {
+				first, err := m.BlockReader.TxnumReader().Min(t.Context(), tx, 2)
+				require.NoError(t, err)
+				last, err := m.BlockReader.TxnumReader().Max(t.Context(), tx, canonical.TopBlock.NumberU64())
+				require.NoError(t, err)
+				require.Greater(t, last/stepSize, first/stepSize, "unwind must cross state steps")
+				return nil
+			}))
+			status, err := m.InsertBlocks(t.Context(), side.Blocks[1:])
+			require.NoError(t, err)
+			require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+			if validate {
+				result, err := m.ValidateChain(t.Context(), side.TopBlock.Header())
+				require.NoError(t, err)
+				require.Equal(t, execmodule.ExecutionStatusSuccess, result.ValidationStatus)
+				require.Equal(t, side.TopBlock.Hash(), m.ForkValidator.ExtendingForkHeadHash())
+			} else {
+				require.NotEqual(t, side.TopBlock.Hash(), m.ForkValidator.ExtendingForkHeadHash())
+			}
+			result, err := m.UpdateForkChoice(t.Context(), side.TopBlock.Header())
+			require.NoError(t, err)
+			require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status)
+			m.ExecModule.WaitIdle(t.Context())
+			batch := waitForHead(side.TopBlock.Hash())
+			require.NoError(t, m.DB.ViewTemporal(t.Context(), func(tx kv.TemporalTx) error {
+				value, _, err := tx.GetLatest(kv.AccountsDomain, sender[:], kv.GetLatestOptions{})
+				require.NoError(t, err)
+				require.Equal(t, want, value, "committed account must match the common ancestor")
+				return nil
+			}))
+			var updates []*remoteproto.AccountChange
+			for _, change := range batch.ChangeBatch {
+				for _, account := range change.Changes {
+					if gointerfaces.ConvertH160toAddress(account.Address) == sender {
+						require.Equal(t, remoteproto.Direction_UNWIND, change.Direction, "the replacement branch must leave this account untouched")
+						updates = append(updates, account)
+					}
+				}
+			}
+			require.Len(t, updates, 1)
+			require.Equal(t, remoteproto.Action_UPSERT, updates[0].Action)
+			require.Equal(t, want, updates[0].Data, "notification must match the restored account")
+		})
+	}
+}
 
 func TestForkchoiceReportsAccountDeletion(t *testing.T) {
 	key, err := crypto.GenerateKey()
