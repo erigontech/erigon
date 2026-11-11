@@ -205,6 +205,15 @@ func TestConvertCommitmentFiles_V3HistorySplitChains(t *testing.T) {
 	testConvertCommitmentHistoryRoots(t)
 }
 
+func TestConvertCommitmentFiles_V3HistoryShapeTable(t *testing.T) {
+	if testing.Short() {
+		t.Skip("long-running test")
+	}
+	previousMinVersions := state.SetLegacyShapeMinVersionsForTest(1)
+	t.Cleanup(func() { state.SetLegacyShapeMinVersionsForTest(previousMinVersions) })
+	testConvertCommitmentHistoryRoots(t)
+}
+
 func testConvertCommitmentHistoryRoots(t *testing.T) {
 	t.Helper()
 	t.Cleanup(statecfg.SetCommitmentV3(false))

@@ -466,26 +466,30 @@ type legacyShapeTable struct {
 	shapes [][]byte
 }
 
-func (s *legacyShapeTable) asOf(key []byte, txNum uint64) ([]byte, bool) {
+func (s *legacyShapeTable) asOf(dst, key []byte, txNum uint64) ([]byte, bool) {
 	runs := s.runs[string(key)]
 	i, _ := slices.BinarySearchFunc(runs, txNum, func(r legacyShapeRun, t uint64) int { return cmp.Compare(r.lastTxNum, t) })
 	if i == len(runs) {
-		return nil, false
+		return dst[:0], false
 	}
-	return s.shapes[runs[i].shape], true
+	shape := s.shapes[runs[i].shape]
+	if len(shape) == 0 {
+		return dst[:0], true
+	}
+	dst, err := commitment.AppendZeroHashes(dst[:0], shape)
+	return dst, err == nil
 }
 
-func legacyBranchShape(dst, v []byte) []byte {
-	dst = append(dst[:0], v...)
-	if commitment.BranchData(dst).ForEachCell(func(_ int, c commitment.BranchCell) error {
-		clear(c.Hash)
-		clear(c.StateHash)
-		return nil
-	}) != nil {
-		return append(dst[:0], v...)
+func legacyBranchShape(dst, v []byte) ([]byte, bool) {
+	if len(v) == 0 {
+		return dst[:0], true
+	}
+	dst, err := commitment.BranchData(v).AppendWithoutHashes(dst[:0])
+	if err != nil {
+		return dst, false
 	}
 	dst[0], dst[1] = dst[2], dst[3]
-	return dst
+	return dst, true
 }
 
 type legacyHotKey struct {
@@ -577,6 +581,7 @@ func buildLegacyShapeTable(ctx context.Context, at *AggregatorRoTx, efFile visib
 			seq.Reset(efFile.startTxNum, seqBuf)
 			it.Reset(&seq, 0)
 			runs = runs[:0]
+			shaped := true
 			for rank := uint64(0); it.HasNext(); rank++ {
 				txNum, err := it.Next()
 				if err != nil {
@@ -586,13 +591,18 @@ func buildLegacyShapeTable(ctx context.Context, at *AggregatorRoTx, efFile visib
 				if err != nil {
 					return err
 				}
-				shape = legacyBranchShape(shape, v)
+				if shape, shaped = legacyBranchShape(shape, v); !shaped {
+					break
+				}
 				if len(runs) > 0 && bytes.Equal(shape, last) {
 					runs[len(runs)-1].lastTxNum = txNum
 					continue
 				}
 				last = append(last[:0], shape...)
 				runs = append(runs, legacyShapeRun{lastTxNum: txNum, shape: intern(shape)})
+			}
+			if !shaped {
+				continue
 			}
 			mu.Lock()
 			table.runs[string(h.key)] = slices.Clone(runs)
@@ -933,11 +943,12 @@ func convertCommitmentHistoryFileV3(ctx context.Context, at *AggregatorRoTx, vFi
 			return root, nil
 		}
 		var reachTxNum uint64
-		var reachKey []byte
+		var reachKey, shapeBuf []byte
 		reachCache, reachCacheBytes := map[string][]byte{}, 0
 		reach := &legacyReach{keysV2: keysV2, read: func(key []byte) ([]byte, error) {
-			if v, ok := shapes.asOf(key, reachTxNum); ok {
-				return v, nil
+			var ok bool
+			if shapeBuf, ok = shapes.asOf(shapeBuf, key, reachTxNum); ok {
+				return shapeBuf, nil
 			}
 			reachKey = binary.BigEndian.AppendUint64(append(reachKey[:0], key...), reachTxNum)
 			if v, ok := reachCache[string(reachKey)]; ok {

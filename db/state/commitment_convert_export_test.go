@@ -64,6 +64,12 @@ func SetCommitmentV3BatchBytesForTest(n int) int {
 	return old
 }
 
+func SetLegacyShapeMinVersionsForTest(n uint64) uint64 {
+	old := legacyShapeMinVersions
+	legacyShapeMinVersions = n
+	return old
+}
+
 func SetLegacyCommitTxNumsForTest(fn func(*DomainRoTx, uint64, uint64) ([]uint64, error)) {
 	if fn == nil {
 		legacyCommitTxNumsFn = legacyCommitTxNums
