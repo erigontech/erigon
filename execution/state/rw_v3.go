@@ -719,6 +719,10 @@ func (rs *StateV3) NotifyAccumulator(accumulator *shards.Accumulator, roTx kv.Te
 				return err
 			}
 		}
+		// Avoid iterator allocations when there are no self-destruct entries.
+		if ws, ok := keys.(*WriteSet); ok && (ws == nil || len(ws.selfDestruct) == 0) {
+			continue
+		}
 		for addr, write := range writes.SelfDestructs() {
 			if !write.Val {
 				continue
