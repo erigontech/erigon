@@ -1254,7 +1254,7 @@ func TestCollectDeferredUpdate_InlineFlushesAtCapacity(t *testing.T) {
 	require.Len(t, be.deferred, 1)
 }
 
-func TestCollectDeferredUpdate_NewBranchCarriesEmptyPrev(t *testing.T) {
+func TestCollectDeferredUpdate_NewBranchResolvesPrevAtWrite(t *testing.T) {
 	t.Parallel()
 	row, bm := generateCellRow(t, 4)
 	cells := generateCellEncodeDataRow(t, row, bm)
@@ -1263,8 +1263,7 @@ func TestCollectDeferredUpdate_NewBranchCarriesEmptyPrev(t *testing.T) {
 	be.setDeferUpdates(true)
 	require.NoError(t, be.CollectDeferredUpdate(&recordingCtx{}, []byte{0x33, 0x44}, bm, bm, bm, &cells, nil))
 	require.Len(t, be.deferred, 1)
-	require.NotNil(t, be.deferred[0].prev, "a new branch must carry an empty prev, or the domain reads the previous value again on apply")
-	require.Empty(t, be.deferred[0].prev)
+	require.Nil(t, be.deferred[0].prev, "the stored previous value can change before a deferred write is applied")
 	be.ClearDeferred()
 }
 

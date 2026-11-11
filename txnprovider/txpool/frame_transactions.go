@@ -616,7 +616,7 @@ func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*meta
 		keyedNonce := !frame.UsesLegacyNonce()
 		// Blob costs can change with the block context even when none
 		// of the validation's account dependencies changed.
-		affected := mt.currentSubPool == 0 || frame.GetBlobGas() != 0
+		affected := changes.StateChangesIncomplete || mt.currentSubPool == 0 || frame.GetBlobGas() != 0
 		// Helpers depend only on code. Sender and payer state can also change
 		// approval or funding; creation nonces are checked separately below.
 		for _, dependency := range previous.Dependencies {

@@ -33,6 +33,7 @@ jobs:
           version: '1.22.2'
       - uses: docker/setup-buildx-action@v4
       - name: Build Erigon
+        timeout-minutes: 20
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -47,19 +48,28 @@ jobs:
         timeout-minutes: 60
         run: make test-reorg-devnet
       - name: Collect enclave logs
+        timeout-minutes: 3
         if: always()
         continue-on-error: true
         run: kurtosis enclave dump unwind-reorg ./reorg-logs
       - uses: actions/upload-artifact@v7
+        timeout-minutes: 3
         if: always()
         with:
           name: reorg-devnet-logs
           path: reorg-logs
       - name: Remove test enclave
+        timeout-minutes: 3
         if: always()
         run: kurtosis enclave rm -f unwind-reorg
+
+  notify:
+    needs: reorg
+    if: ${{ always() && github.event_name == 'schedule' && (needs.reorg.result == 'failure' || needs.reorg.result == 'cancelled') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
       - name: Notify Discord on scheduled failure
-        if: failure() && github.event_name == 'schedule'
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -69,4 +79,4 @@ jobs:
             exit 0
           fi
           payload=$(jq -nc --arg url "$RUN_URL" '{content: ("Consensus reorg recovery failed: " + $url)}')
-          curl -fsS -H 'Content-Type: application/json' -d "$payload" "$DISCORD_WEBHOOK"
+          curl --max-time 30 -fsS -H 'Content-Type: application/json' -d "$payload" "$DISCORD_WEBHOOK"

@@ -1028,6 +1028,10 @@ func (sf AggV3StaticFiles) CleanupOnError() {
 var errStepNotReady = errors.New("step not ready")
 
 func (a *Aggregator) buildFiles(ctx context.Context, db kv.TemporalRoDB, step kv.Step, finalityCtx kv.FinalityContext, filesDone <-chan struct{}) error {
+	return a.buildFilesWithPlan(ctx, db, step, finalityCtx, filesDone, fileBuildPlan{})
+}
+
+func (a *Aggregator) buildFilesWithPlan(ctx context.Context, db kv.TemporalRoDB, step kv.Step, finalityCtx kv.FinalityContext, filesDone <-chan struct{}, plan fileBuildPlan) error {
 	// Pin worker counts while collation and building read compressor settings.
 	a.LockWorkersEditing()
 	defer a.UnlockWorkersEditing()
@@ -1070,7 +1074,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, db kv.TemporalRoDB, step kv
 	ac := a.BeginFilesRo()
 	defer ac.Close()
 	for id, d := range a.d {
-		if !d.Enabled.Load() {
+		if !d.Enabled.Load() || plan.deferredDomains[id] {
 			continue
 		}
 
@@ -1104,7 +1108,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, db kv.TemporalRoDB, step kv
 	}
 	// indices are built concurrently
 	for iikey, ii := range a.standaloneIIs() {
-		if !ii.Enabled.Load() {
+		if !ii.Enabled.Load() || plan.deferredIndices[iikey] {
 			continue
 		}
 
@@ -2209,45 +2213,53 @@ func (a *Aggregator) BuildFilesInBackground(db kv.TemporalRoDB, txNum uint64, fi
 	return finished
 }
 
-func (at *AggregatorRoTx) firstStepToBuild(tx kv.Tx) (kv.Step, error) {
-	step := kv.Step(at.TxNumsInFiles(kv.StateDomains...) / at.StepSize())
-	stateStep := step
-	// Builds finish every entity before advancing, so an interruption can leave
-	// an entity at most one step behind the state files. Rebuilding that step
-	// reaches the current state-file boundary; starting earlier would lower
-	// the shared visible-file ceiling.
-	for _, d := range at.d {
-		if d == nil || !d.d.Enabled.Load() || d.FirstStepNotInFiles() >= step {
+type fileBuildPlan struct {
+	firstStep       kv.Step
+	deferredDomains [kv.DomainLen]bool
+	deferredIndices [kv.StandaloneIdxLen]bool
+}
+
+func (at *AggregatorRoTx) planFileBuild(tx kv.Tx) (fileBuildPlan, error) {
+	stateStep := kv.Step(at.TxNumsInFiles(kv.StateDomains...) / at.StepSize())
+	plan := fileBuildPlan{firstStep: stateStep}
+	// A one-step resume reaches the existing state-file boundary. Older backfills
+	// would lower visibility, so retain their MDBX data while healthy entities advance.
+	for id, d := range at.d {
+		if d == nil || !d.d.Enabled.Load() || d.FirstStepNotInFiles() >= stateStep {
 			continue
 		}
 		first, found, err := d.d.firstStepToBuild(tx, d.FirstStepNotInFiles())
 		if err != nil {
-			return 0, err
+			return plan, err
 		}
 		if found {
 			if first < stateStep && stateStep-first > 1 {
-				return 0, fmt.Errorf("cannot resume %s at step %d with state files ending at step %d: rebuild missing snapshots", d.d.Name, first, stateStep)
+				plan.deferredDomains[id] = true
+				at.a.logger.Warn("[snapshots] missing files require rebuilding; keeping pending data in MDBX", "domain", d.d.Name, "fromStep", first, "stateStep", stateStep)
+				continue
 			}
-			step = min(step, first)
+			plan.firstStep = min(plan.firstStep, first)
 		}
 	}
-	for _, ii := range at.standaloneIIs() {
-		if ii == nil || !ii.ii.Enabled.Load() || ii.FirstStepNotInFiles() >= step {
+	for id, ii := range at.standaloneIIs() {
+		if ii == nil || !ii.ii.Enabled.Load() || ii.FirstStepNotInFiles() >= stateStep {
 			continue
 		}
 		first, found, err := ii.ii.firstStepInDB(tx)
 		if err != nil {
-			return 0, err
+			return plan, err
 		}
 		if found {
 			first = max(ii.FirstStepNotInFiles(), first)
 			if first < stateStep && stateStep-first > 1 {
-				return 0, fmt.Errorf("cannot resume %s at step %d with state files ending at step %d: rebuild missing snapshots", ii.ii.Name, first, stateStep)
+				plan.deferredIndices[id] = true
+				at.a.logger.Warn("[snapshots] missing files require rebuilding; keeping pending data in MDBX", "index", ii.ii.Name, "fromStep", first, "stateStep", stateStep)
+				continue
 			}
-			step = min(step, first)
+			plan.firstStep = min(plan.firstStep, first)
 		}
 	}
-	return step, nil
+	return plan, nil
 }
 
 // Returns a channel which is closed when aggregation is done and whether it started.
@@ -2293,12 +2305,13 @@ func (a *Aggregator) buildFilesInBackground(db kv.TemporalRoDB, txNum uint64, do
 			defer a.snapshotBuildSema.Release(1)
 		}
 
-		var step, nextStateStep kv.Step
+		var plan fileBuildPlan
+		var nextStateStep kv.Step
 		if err := db.View(a.ctx, func(tx kv.Tx) (err error) {
 			at := a.BeginFilesRo()
 			defer at.Close()
 			nextStateStep = kv.Step(at.TxNumsInFiles(kv.StateDomains...) / at.StepSize())
-			step, err = at.firstStepToBuild(tx)
+			plan, err = at.planFileBuild(tx)
 			return err
 		}); err != nil {
 			a.logger.Warn("[snapshots] first step to build", "err", err)
@@ -2306,6 +2319,7 @@ func (a *Aggregator) buildFilesInBackground(db kv.TemporalRoDB, txNum uint64, do
 			return
 		}
 
+		step := plan.firstStep
 		lastInDB := max(
 			lastIdInDB(db, a.d[kv.AccountsDomain]),
 			lastIdInDB(db, a.d[kv.CodeDomain]),
@@ -2376,7 +2390,7 @@ func (a *Aggregator) buildFilesInBackground(db kv.TemporalRoDB, txNum uint64, do
 		// - to remove old data from db as early as possible
 		// - during files build, may happen commit of new data. on each loop step getting latest id in db
 		for ; step < lastInDB; step++ { //`step` must be fully-written - means `step+1` records must be visible
-			if err := a.buildFiles(a.ctx, db, step, finalityCtx, fin); err != nil {
+			if err := a.buildFilesWithPlan(a.ctx, db, step, finalityCtx, fin, plan); err != nil {
 				if errors.Is(err, errStepNotReady) {
 					break
 				}
@@ -2921,7 +2935,11 @@ func (at *AggregatorRoTx) Unwind(ctx context.Context, tx kv.RwTx, txNumUnwindTo 
 
 	step := txNumUnwindTo / at.StepSize()
 	for idx, d := range at.d {
-		if err := d.unwind(ctx, tx, step, txNumUnwindTo, changeset[idx]); err != nil {
+		var expandBranch func([]byte, commitment.BranchData, uint64, uint64) (commitment.BranchData, error)
+		if kv.Domain(idx) == kv.CommitmentDomain {
+			expandBranch = at.replaceShortenedKeysInBranch
+		}
+		if err := d.unwind(ctx, tx, step, txNumUnwindTo, changeset[idx], expandBranch); err != nil {
 			return err
 		}
 	}

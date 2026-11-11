@@ -17,14 +17,52 @@
 package notifications
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 )
+
+type stateChangeRecorder struct {
+	batch *remoteproto.StateChangeBatch
+}
+
+func (r *stateChangeRecorder) SendStateChanges(_ context.Context, batch *remoteproto.StateChangeBatch) {
+	r.batch = batch
+}
+
+func TestAccumulatorIncompleteChangesSurviveCheckpointAndAppend(t *testing.T) {
+	acc := NewAccumulator()
+	header := &types.Header{Number: uint256.Int{70}}
+	restoreComplete := acc.Checkpoint()
+	acc.StartHeadOnlyRange(1, header)
+	restoreComplete()
+	acc.StartChange(header, nil, false)
+	recorder := &stateChangeRecorder{}
+	acc.SendAndReset(t.Context(), recorder, 0, 0, 0, 0)
+	require.False(t, recorder.batch.StateChangesIncomplete)
+
+	acc.StartHeadOnlyRange(1, header)
+	restoreIncomplete := acc.Checkpoint()
+	acc.Reset(0)
+	restoreIncomplete()
+	target := NewAccumulator()
+	acc.AppendAndReset(target)
+	target.StartChange(header, nil, false)
+	target.ChangeAccount(common.Address{1}, 0, []byte{1})
+	target.SendAndReset(t.Context(), recorder, 0, 0, 0, 0)
+	require.True(t, recorder.batch.StateChangesIncomplete)
+
+	target.StartChange(header, nil, false)
+	target.SendAndReset(t.Context(), recorder, 0, 0, 0, 0)
+	require.False(t, recorder.batch.StateChangesIncomplete, "a new batch starts complete")
+}
 
 func TestAccumulatorDeleteAccount(t *testing.T) {
 	for _, tc := range []struct {

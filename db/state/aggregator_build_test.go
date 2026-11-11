@@ -44,9 +44,9 @@ func TestAggregatorEnableDomainDuringFilePlanning(t *testing.T) {
 		})
 		defer writers.Wait()
 		for range 100 {
-			step, err := at.firstStepToBuild(tx)
+			plan, err := at.planFileBuild(tx)
 			require.NoError(t, err)
-			require.Zero(t, step)
+			require.Zero(t, plan.firstStep)
 		}
 		return nil
 	}))
@@ -135,12 +135,12 @@ func TestAggregatorBuildResumesIncompleteStep(t *testing.T) {
 					defer at.Close()
 					require.NoError(t, at.CheckFilesDBGap(tx))
 					require.Equal(t, stateFilesEnd, at.TxNumsInFiles(kv.StateDomains...))
-					step, err := at.firstStepToBuild(tx)
+					plan, err := at.planFileBuild(tx)
+					require.NoError(t, err)
 					if test.stateSteps > resumeStep+1 {
-						require.ErrorContains(t, err, "rebuild missing snapshots")
+						require.Equal(t, test.stateSteps, plan.firstStep, "an unsafe backfill must not block healthy entities")
 					} else {
-						require.NoError(t, err)
-						require.Equal(t, resumeStep, step)
+						require.Equal(t, resumeStep, plan.firstStep)
 					}
 					return nil
 				}))
@@ -148,14 +148,28 @@ func TestAggregatorBuildResumesIncompleteStep(t *testing.T) {
 				require.True(t, started)
 				<-finished
 				if test.stateSteps > resumeStep+1 {
-					require.NoError(t, db.View(ctx, func(tx kv.Tx) error {
+					require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
 						at := agg.BeginFilesRo()
 						defer at.Close()
-						require.Equal(t, stateFilesEnd, at.TxNumsInFiles(kv.StateDomains...))
+						require.Equal(t, lastTxNum, at.TxNumsInFiles(kv.StateDomains...), "healthy snapshots must keep advancing")
+						_, err := at.prune(ctx, tx, 0, true, nil)
+						require.NoError(t, err)
 						got, _, found, err := at.d[kv.AccountsDomain].GetLatest(key, tx)
 						require.NoError(t, err)
 						require.True(t, found)
 						require.Equal(t, value, got, "rejected resume must preserve filed state")
+						for _, domain := range []kv.Domain{kv.ReceiptDomain, kv.RCacheDomain} {
+							got, _, found, readErr := at.d[domain].GetLatest(key, tx)
+							require.NoError(t, readErr)
+							require.True(t, found)
+							require.Equal(t, value, got, "retain pending data for %s", domain)
+						}
+						entries, err := at.IndexRange(kv.LogAddrIdx, key, 0, int(lastTxNum), order.Asc, -1, tx)
+						require.NoError(t, err)
+						defer entries.Close()
+						txNums, err := stream.ToArray(entries)
+						require.NoError(t, err)
+						require.Equal(t, []uint64{uint64(resumeStep)*stepSize + 1}, txNums)
 						return at.CheckFilesDBGap(tx)
 					}))
 					return

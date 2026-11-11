@@ -182,6 +182,69 @@ func newTestPoolWithFundedSender(t *testing.T, codeHash accounts.CodeHash, confi
 	return ctx, pool, poolDB, coreDB, sender
 }
 
+func TestUnwindRestoresTransactionsAboveAccountLimit(t *testing.T) {
+	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+	require.NoError(t, pool.start(ctx))
+	makeSlots := func(nonce uint64) TxnSlots {
+		txn := newTestTxnSlot(nonce, 0, 2, 2, 21_000)
+		txn.IDHash[0] = byte(nonce + 1)
+		var slots TxnSlots
+		slots.Append(txn, sender[:], false)
+		return slots
+	}
+	change := func(nonce, height uint64, direction remoteproto.Direction) *remoteproto.StateChangeBatch {
+		account := accounts.Account{Nonce: nonce, Balance: *uint256.NewInt(common.Ether), CodeHash: accounts.EmptyCodeHash}
+		return &remoteproto.StateChangeBatch{
+			PendingBlockBaseFee: 1,
+			BlockGasLimit:       1_000_000,
+			ChangeBatch: []*remoteproto.StateChange{{
+				BlockHeight: height,
+				BlockHash:   gointerfaces.ConvertHashToH256(common.Hash{byte(height)}),
+				Direction:   direction,
+				Changes: []*remoteproto.AccountChange{{
+					Action: remoteproto.Action_UPSERT, Address: gointerfaces.ConvertAddressToH160(sender), Data: accounts.SerialiseV3(&account),
+				}},
+			}},
+		}
+	}
+	require.NoError(t, pool.OnNewBlock(ctx, change(1, 2, remoteproto.Direction_FORWARD), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	for nonce := uint64(1); nonce <= pool.cfg.AccountSlots+1; nonce++ {
+		pool.AddRemoteTxns(ctx, makeSlots(nonce), nil, nil)
+		require.NoError(t, pool.processRemoteTxns(ctx))
+	}
+	require.EqualValues(t, pool.cfg.AccountSlots+1, pool.pending.Len())
+
+	require.NoError(t, pool.OnNewBlock(ctx, change(0, 1, remoteproto.Direction_UNWIND), makeSlots(0), TxnSlots{}, TxnSlots{}))
+	require.EqualValues(t, pool.cfg.AccountSlots+2, pool.pending.Len(), "restoring the lowest nonce must not punish the sender or leave a gap")
+	require.Zero(t, pool.queued.Len())
+}
+
+func TestIncompleteStateChangesRefreshPendingSenders(t *testing.T) {
+	ctx, pool, _, db, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+	var txns TxnSlots
+	txn := newTestTxnSlot(0, 0, 2, 2, 21_000)
+	txn.IDHash[0] = 1
+	txns.Append(txn, sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+	require.Equal(t, 1, pool.pending.Len())
+	require.NoError(t, db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
+		doms, err := execctx.NewSharedDomains(ctx, tx, log.New())
+		require.NoError(t, err)
+		defer doms.Close()
+		account := accounts.Account{Nonce: 1, Balance: *uint256.NewInt(common.Ether), CodeHash: accounts.EmptyCodeHash}
+		require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, sender[:], accounts.SerialiseV3(&account), 1, nil))
+		return doms.Flush(ctx, tx)
+	}))
+	require.NoError(t, pool.OnNewBlock(ctx, &remoteproto.StateChangeBatch{
+		StateChangesIncomplete: true, PendingBlockBaseFee: 1, BlockGasLimit: 1_000_000,
+		ChangeBatch: []*remoteproto.StateChange{{BlockHeight: 2, BlockHash: gointerfaces.ConvertHashToH256(common.Hash{2})}},
+	}, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	require.Zero(t, pool.pending.Len(), "a mined transaction must leave the pool even when its account delta was omitted")
+	require.NotContains(t, pool.byHash, string(txn.IDHash[:]))
+}
+
 func TestIdHashKnownDiscardReasons(t *testing.T) {
 	ctx, pool, poolDB, _, _ := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
 	hash := common.Hash{1}

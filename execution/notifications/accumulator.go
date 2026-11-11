@@ -27,11 +27,12 @@ import (
 // Accumulator collects state changes per block in native Go types.
 // Protobuf conversion happens only at the gRPC boundary via ToProto methods.
 type Accumulator struct {
-	plainStateID       uint64
-	changes            []StateChange
-	latestChange       *StateChange
-	accountChangeIndex map[common.Address]int // For the latest change, allows finding account change by address
-	storageChangeIndex map[common.Address]map[common.Hash]int
+	plainStateID           uint64
+	stateChangesIncomplete bool
+	changes                []StateChange
+	latestChange           *StateChange
+	accountChangeIndex     map[common.Address]int // For the latest change, allows finding account change by address
+	storageChangeIndex     map[common.Address]map[common.Hash]int
 }
 
 func NewAccumulator() *Accumulator {
@@ -48,6 +49,7 @@ func (a *Accumulator) Reset(plainStateID uint64) {
 	a.accountChangeIndex = nil
 	a.storageChangeIndex = nil
 	a.plainStateID = plainStateID
+	a.stateChangesIncomplete = false
 }
 
 // Checkpoint saves completed block changes without copying them.
@@ -67,12 +69,13 @@ func (a *Accumulator) SendAndReset(ctx context.Context, c StateChangeConsumer, p
 		return
 	}
 	batch := &BlockBatchNotification{
-		StateVersionID:      a.plainStateID,
-		Changes:             a.changes,
-		PendingBlockBaseFee: pendingBaseFee,
-		PendingBlobFee:      pendingBlobFee,
-		BlockGasLimit:       blockGasLimit,
-		FinalizedBlock:      finalizedBlock,
+		StateVersionID:         a.plainStateID,
+		StateChangesIncomplete: a.stateChangesIncomplete,
+		Changes:                a.changes,
+		PendingBlockBaseFee:    pendingBaseFee,
+		PendingBlobFee:         pendingBlobFee,
+		BlockGasLimit:          blockGasLimit,
+		FinalizedBlock:         finalizedBlock,
 	}
 	if c != nil {
 		c.SendStateChanges(ctx, batch.ToProtoBatch())
@@ -110,6 +113,7 @@ func (a *Accumulator) StartChange(h *types.Header, txs [][]byte, unwind bool) {
 func (a *Accumulator) StartHeadOnlyRange(firstBlock uint64, lastHeader *types.Header) {
 	a.StartChange(lastHeader, nil, false)
 	a.latestChange.FirstBlockHeight = firstBlock
+	a.stateChangesIncomplete = true
 }
 
 func (a *Accumulator) HasAccountChange(address common.Address) bool {
@@ -192,6 +196,7 @@ func (a *Accumulator) ChangeStorage(address common.Address, incarnation uint64, 
 // AppendAndReset appends accumulated changes to target, then resets this instance.
 // Existing changes must stay before the appended changes, including any unwind.
 func (a *Accumulator) AppendAndReset(target *Accumulator) {
+	target.stateChangesIncomplete = target.stateChangesIncomplete || a.stateChangesIncomplete
 	if len(a.changes) > 0 {
 		if len(target.changes) == 0 {
 			target.changes = a.changes

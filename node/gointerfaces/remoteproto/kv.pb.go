@@ -523,8 +523,10 @@ type StateChangeBatch struct {
 	BlockGasLimit        uint64                 `protobuf:"varint,4,opt,name=block_gas_limit,json=blockGasLimit,proto3" json:"block_gas_limit,omitempty"`                     // GasLimit of the latest block - proxy for the gas limit of the next block to be produced
 	FinalizedBlock       uint64                 `protobuf:"varint,5,opt,name=finalized_block,json=finalizedBlock,proto3" json:"finalized_block,omitempty"`
 	PendingBlobFeePerGas uint64                 `protobuf:"varint,6,opt,name=pending_blob_fee_per_gas,json=pendingBlobFeePerGas,proto3" json:"pending_blob_fee_per_gas,omitempty"` // Base Blob Fee for the next block to be produced
-	unknownFields        protoimpl.UnknownFields
-	sizeCache            protoimpl.SizeCache
+	// Some state changes were omitted. Consumers must reload state rather than apply this batch as a complete delta.
+	StateChangesIncomplete bool `protobuf:"varint,7,opt,name=state_changes_incomplete,json=stateChangesIncomplete,proto3" json:"state_changes_incomplete,omitempty"`
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
 }
 
 func (x *StateChangeBatch) Reset() {
@@ -597,6 +599,13 @@ func (x *StateChangeBatch) GetPendingBlobFeePerGas() uint64 {
 		return x.PendingBlobFeePerGas
 	}
 	return 0
+}
+
+func (x *StateChangeBatch) GetStateChangesIncomplete() bool {
+	if x != nil {
+		return x.StateChangesIncomplete
+	}
+	return false
 }
 
 // StateChange - changes done by 1 block or by 1 unwind
@@ -2396,14 +2405,15 @@ const file_remote_kv_proto_rawDesc = "" +
 	"\x06action\x18\x03 \x01(\x0e2\x0e.remote.ActionR\x06action\x12\x12\n" +
 	"\x04data\x18\x04 \x01(\fR\x04data\x12\x12\n" +
 	"\x04code\x18\x05 \x01(\fR\x04code\x12>\n" +
-	"\x0fstorage_changes\x18\x06 \x03(\v2\x15.remote.StorageChangeR\x0estorageChanges\"\xb2\x02\n" +
+	"\x0fstorage_changes\x18\x06 \x03(\v2\x15.remote.StorageChangeR\x0estorageChanges\"\xec\x02\n" +
 	"\x10StateChangeBatch\x12(\n" +
 	"\x10state_version_id\x18\x01 \x01(\x04R\x0estateVersionId\x126\n" +
 	"\fchange_batch\x18\x02 \x03(\v2\x13.remote.StateChangeR\vchangeBatch\x123\n" +
 	"\x16pending_block_base_fee\x18\x03 \x01(\x04R\x13pendingBlockBaseFee\x12&\n" +
 	"\x0fblock_gas_limit\x18\x04 \x01(\x04R\rblockGasLimit\x12'\n" +
 	"\x0ffinalized_block\x18\x05 \x01(\x04R\x0efinalizedBlock\x126\n" +
-	"\x18pending_blob_fee_per_gas\x18\x06 \x01(\x04R\x14pendingBlobFeePerGas\"\xef\x01\n" +
+	"\x18pending_blob_fee_per_gas\x18\x06 \x01(\x04R\x14pendingBlobFeePerGas\x128\n" +
+	"\x18state_changes_incomplete\x18\a \x01(\bR\x16stateChangesIncomplete\"\xef\x01\n" +
 	"\vStateChange\x12/\n" +
 	"\tdirection\x18\x01 \x01(\x0e2\x11.remote.DirectionR\tdirection\x12!\n" +
 	"\fblock_height\x18\x02 \x01(\x04R\vblockHeight\x12*\n" +

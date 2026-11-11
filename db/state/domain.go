@@ -1584,7 +1584,7 @@ func (d *Domain) integrateDirtyFiles(sf StaticFiles, txNumFrom, txNumTo uint64) 
 
 // unwind applies the supplied domain diffs and prunes the unwound history.
 // The caller manages flushing.
-func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwindTo uint64, domainDiffs []kv.DomainEntryDiff) error {
+func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwindTo uint64, domainDiffs []kv.DomainEntryDiff, expandBranch func([]byte, commitment.BranchData, uint64, uint64) (commitment.BranchData, error)) error {
 	// fmt.Printf("[domain][%s] unwinding domain to txNum=%d, step %d\n", d.filenameBase, txNumUnwindTo, step)
 	d := dt.d
 
@@ -1648,9 +1648,17 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 		// A value already supplied by an older version needs no new entry.
 		// Otherwise that entry could outlive the changesets of this step.
 		if !found {
-			previous, _, _, _, err = dt.getLatestFromFiles(fullKey, nil, kv.NoStepBound)
+			var from, to uint64
+			previous, found, from, to, err = dt.getLatestFromFiles(fullKey, nil, kv.NoStepBound)
 			if err != nil {
 				return err
+			}
+			if found && expandBranch != nil {
+				// Changesets contain full keys, even when the file uses references.
+				previous, err = expandBranch(fullKey, previous, from, to)
+				if err != nil {
+					return err
+				}
 			}
 		}
 		if bytes.Equal(previous, diff.Value) {
