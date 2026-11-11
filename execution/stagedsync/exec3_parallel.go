@@ -2749,12 +2749,22 @@ func (be *blockExecutor) markReadersDirty(writerTx int, ws *state.WriteSet) {
 		}
 	}
 	for addr, paths := range written {
+		if be.versionMap.WritesAlreadySeeded(addr, ws) {
+			continue
+		}
 		for _, r := range readersAbove(be.readerByAddr[addr], writerTx) {
 			if r.paths&paths != 0 && !be.revalidate[r.tx] && be.blockIO.ReadSet(be.tasks[r.tx].Task.Version().TxIndex).DependsOnAt(ws, addr) {
 				be.revalidate[r.tx] = true
 			}
 		}
 	}
+}
+
+// flushFinalizeWrites publishes a tx's complete write set. It marks readers first: the
+// complete flush makes every written cell look already seeded.
+func (be *blockExecutor) flushFinalizeWrites(tx int, ws *state.WriteSet) {
+	be.markReadersDirty(tx, ws)
+	be.versionMap.FlushVersionedWrites(ws, true)
 }
 
 // invalidBlockResult wraps a block-validity failure as a *blockResult carrying Err.
@@ -2886,8 +2896,7 @@ func (be *blockExecutor) finalizeValidatedTx(pe *parallelExecutor, applyTx kv.Te
 
 		// Flush the merged writes (including fee changes) so subsequent per-tx
 		// finalizations see the full post-tx state via the versionMap fallback chain.
-		be.versionMap.FlushVersionedWrites(merged, true)
-		be.markReadersDirty(tx, merged)
+		be.flushFinalizeWrites(tx, merged)
 	}
 
 	// A read-only versionMap-slice view over the tx's raw write-set; apply and

@@ -1546,6 +1546,22 @@ func flushAllNoOpUnderRLock(e *AddressEntry, writes *WriteSet, addr accounts.Add
 	return flushAllNoOp(e, writes, addr, flag)
 }
 
+// WritesAlreadySeeded reports whether ws's writes to addr match complete cells of a BAL
+// block, so publishing them changed nothing a reader saw.
+func (vm *VersionMap) WritesAlreadySeeded(addr accounts.Address, ws *WriteSet) bool {
+	if !vm.HasBAL {
+		return false
+	}
+	// A net-zero write has no BAL cell, and a re-run may have dropped the cell a reader saw.
+	for _, vw := range ws.storage[addr] {
+		if vw.valStatus == ValueUnchanged {
+			return false
+		}
+	}
+	e := vm.load(addr)
+	return e != nil && flushAllNoOpUnderRLock(e, ws, addr, FlagDone)
+}
+
 // MarkWritesComplete advances every cell named by writes from Estimate to Done, writing
 // no values (each cell must already hold the write's value at its incarnation). It is the
 // commit-boundary check enforcing one-value-per-version — a mismatch panics.

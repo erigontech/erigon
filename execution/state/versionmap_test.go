@@ -2551,3 +2551,19 @@ func TestMarkWritesValidatedMarksACellRecreatedAtTheSameIncarnation(t *testing.T
 	vm.MarkWritesValidated(first, nil)
 	require.Equal(t, FlagValidated, balanceFlag(t, vm, addr, 3))
 }
+
+// A net-zero storage write has no BAL cell, so it must not count as already seeded.
+func TestWritesAlreadySeededRefusesANetZeroStorageWrite(t *testing.T) {
+	vm := NewVersionMap(nil)
+	vm.HasBAL = true
+	addr := accounts.InternAddress(common.HexToAddress("0xaa"))
+	seeded, netZero := accounts.InternKey(common.HexToHash("0x01")), accounts.InternKey(common.HexToHash("0x02"))
+	vm.WriteStorage(addr, seeded, Version{TxIndex: 1}, *uint256.NewInt(1), true)
+	ws := &WriteSet{}
+	ws.SetStorage(addr, netZero, &VersionedWrite[uint256.Int]{
+		WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: netZero, Version: Version{TxIndex: 1}, valStatus: ValueUnchanged},
+		Val:         *uint256.NewInt(5),
+	})
+
+	require.False(t, vm.WritesAlreadySeeded(addr, ws))
+}
