@@ -297,6 +297,9 @@ func TestWriterFallsBackAfterRingReset(t *testing.T) {
 
 		err = w.flush(true)
 		require.ErrorIs(t, err, unix.EAGAIN)
+		var pathErr *os.PathError
+		require.ErrorAs(t, err, &pathErr)
+		require.Equal(t, f.Name(), pathErr.Path)
 		require.Nil(t, w.ring)
 		_, statErr := unix.FcntlInt(uintptr(ringFD), unix.F_GETFD, 0)
 		require.NoError(t, statErr)

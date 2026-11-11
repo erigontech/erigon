@@ -157,7 +157,7 @@ func (w *Writer) flush(final bool) error {
 			}
 			r.Abandon(w.buf)
 			w.ring = nil
-			return err
+			return &os.PathError{Op: "write", Path: w.file.Name(), Err: err}
 		}
 		if len(w.buf) > 0 {
 			if res[0] < 0 {
