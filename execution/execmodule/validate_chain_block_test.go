@@ -17,7 +17,6 @@
 package execmodule_test
 
 import (
-	"bytes"
 	"context"
 	"sync/atomic"
 	"testing"
@@ -27,12 +26,10 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 )
 
 type bodyReadCounter struct {
@@ -81,47 +78,22 @@ func TestValidateChainExecutesTheGivenBlock(t *testing.T) {
 	require.Same(t, &block.Transactions()[0], &body.Transactions[0], "validation copied the bare transaction slice")
 }
 
-func TestValidateChainPreservesBlobSidecar(t *testing.T) {
-	m, key, _ := newMetricsTester(t, execmoduletester.WithTxPool())
+func TestValidateChainReturnsMissingSegmentForUnreadableStoredHeader(t *testing.T) {
+	m, _, _ := newMetricsTester(t)
 	pack, err := m.GenerateChain(1, nil)
 	require.NoError(t, err)
-	require.NoError(t, m.InsertChain(pack))
-	parent := pack.TopBlock
-	require.NoError(t, m.WaitForTxPool(t.Context(), parent.Hash()))
-	wrapped := types.MakeV1WrappedBlobTxn(m.ChainConfig.ChainID)
-	signed, err := types.SignTx(&wrapped.Tx, *types.LatestSignerForChainID(m.ChainConfig.ChainID), key)
-	require.NoError(t, err)
-	v, r, s := signed.RawSignatureValues()
-	wrapped.Tx.V.Set(v)
-	wrapped.Tx.R.Set(r)
-	wrapped.Tx.S.Set(s)
-	var before bytes.Buffer
-	require.NoError(t, wrapped.MarshalBinaryWrapped(&before))
-	added, err := m.TxPoolGrpcServer.Add(t.Context(), &txpoolproto.AddRequest{RlpTxs: [][]byte{before.Bytes()}})
-	require.NoError(t, err)
-	require.Equal(t, []string{"success"}, added.Errors)
-	payloadID, err := m.AssembleBlock(t.Context(), &builder.Parameters{
-		ParentHash:            parent.Hash(),
-		Timestamp:             parent.Time() + 1,
-		Withdrawals:           types.Withdrawals{},
-		ParentBeaconBlockRoot: &common.Hash{},
-		SlotNumber:            syntheticSlotNumber(parent),
-	})
-	require.NoError(t, err)
-	block, err := m.GetAssembledBlock(t.Context(), payloadID)
-	require.NoError(t, err)
-	require.Len(t, block.Transactions(), 1)
-	txn := block.Transactions()[0]
-	require.IsType(t, wrapped, txn)
+	header := pack.Blocks[0].Header()
+	header.BaseFee = nil
+	block := types.NewBlockFromNetwork(header, pack.Blocks[0].Body(), pack.Blocks[0].BlockAccessListSidecar())
 	status, err := m.InsertBlocks(t.Context(), []*types.Block{block})
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
 
-	result, err := m.ValidateChain(t.Context(), block)
-	require.NoError(t, err)
-	require.Equal(t, execmodule.ExecutionStatusSuccess, result.ValidationStatus)
-	require.Same(t, txn, block.Transactions()[0])
-	var after bytes.Buffer
-	require.NoError(t, block.Transactions()[0].(*types.BlobTxWrapper).MarshalBinaryWrapped(&after))
-	require.Equal(t, before.Bytes(), after.Bytes())
+	var result execmodule.ValidationResult
+	var validationErr error
+	require.NotPanics(t, func() {
+		result, validationErr = m.ValidateChain(t.Context(), block)
+	})
+	require.NoError(t, validationErr)
+	require.Equal(t, execmodule.ExecutionStatusMissingSegment, result.ValidationStatus)
 }

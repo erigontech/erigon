@@ -31,7 +31,6 @@ import (
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
-	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/blockmetrics"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
@@ -386,12 +385,6 @@ func (fv *ForkValidator) validateAndStorePayload(sd *execctx.SharedDomains, tx k
 		return
 	}
 	fv.validHashes.Add(hash, true)
-
-	_, criticalError = rawdb.WriteBodyIfNotExists(tx, hash, number, body)
-	if criticalError != nil {
-		return //nolint:nilnesserr
-	}
-
 	status = engine_types.ValidStatus
 	return
 }

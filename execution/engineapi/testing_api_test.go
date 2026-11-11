@@ -69,6 +69,7 @@ type stubExecutionModule struct {
 	getForkChoiceFunc      func(ctx context.Context) (execmodule.ForkChoiceState, error)
 	currentHeaderFunc      func(ctx context.Context) (*types.Header, error)
 	insertBlocksFunc       func(ctx context.Context, blocks []*types.Block) (execmodule.ExecutionStatus, error)
+	validateChainBlockFunc func(ctx context.Context, block *types.Block) (execmodule.ValidationResult, error)
 	validateChainFunc      func(ctx context.Context, blockHash common.Hash, blockNumber uint64) (execmodule.ValidationResult, error)
 	updateForkChoiceFunc   func(ctx context.Context, headHash, safeHash, finalizedHash common.Hash) (execmodule.ForkChoiceResult, error)
 	inclusionListFunc      func(ctx context.Context) (types.Transactions, error)
@@ -121,6 +122,9 @@ func (s *stubExecutionModule) InsertBlocks(ctx context.Context, blocks []*types.
 }
 
 func (s *stubExecutionModule) ValidateChain(ctx context.Context, block *types.Block) (execmodule.ValidationResult, error) {
+	if s.validateChainBlockFunc != nil {
+		return s.validateChainBlockFunc(ctx, block)
+	}
 	if s.validateChainFunc != nil {
 		return s.validateChainFunc(ctx, block.Hash(), block.NumberU64())
 	}
@@ -1805,16 +1809,18 @@ func TestDecodePayloadTransactionsReportsTheFirstInvalidTx(t *testing.T) {
 	rlpString := hexutil.Bytes{0x82, 0x02, 0x01}
 	srv := NewEngineServer(log.New(), config, &stubExecutionModule{}, nil, false, false, false, true, nil, nil, 0, 0)
 	for _, test := range []struct {
-		name string
-		raw  []hexutil.Bytes
-		want string
+		name      string
+		raw       []hexutil.Bytes
+		amsterdam bool
+		want      string
 	}{
-		{"decode error before RLP string", []hexutil.Bytes{signed(21_000), undecodable, rlpString}, "rlp"},
-		{"RLP string before decode error", []hexutil.Bytes{signed(21_000), rlpString, undecodable}, "typed txn marshalled as RLP string"},
-		{"gas limit before decode error", []hexutil.Bytes{signed(31_000_000), undecodable}, protocol.ErrGasLimitReached.Error()},
+		{"decode error before RLP string", []hexutil.Bytes{signed(21_000), undecodable, rlpString}, false, "rlp"},
+		{"RLP string before decode error", []hexutil.Bytes{signed(21_000), rlpString, undecodable}, false, "typed txn marshalled as RLP string"},
+		{"gas limit before decode error", []hexutil.Bytes{signed(31_000_000), undecodable}, false, protocol.ErrGasLimitReached.Error()},
+		{"Amsterdam state gas over block limit", []hexutil.Bytes{signed(30_000_001)}, true, protocol.ErrGasLimitReached.Error()},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			_, _, _, status := srv.decodePayloadTransactions(test.raw, 30_000_000, false, false, nil)
+			_, _, _, status := srv.decodePayloadTransactions(test.raw, 30_000_000, test.amsterdam, false, nil)
 			require.NotNil(t, status)
 			require.Equal(t, engine_types.InvalidStatus, status.Status)
 			require.ErrorContains(t, status.ValidationError.Error(), test.want)

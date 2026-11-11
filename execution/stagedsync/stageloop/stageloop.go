@@ -288,9 +288,6 @@ func addAndVerifyBlockStep(batch kv.RwTx, engine rules.Engine, chainReader rules
 	if err := rawdb.WriteHeadHeaderHash(batch, currentHash); err != nil {
 		return err
 	}
-	if _, err := rawdb.WriteBodyIfNotExists(batch, currentHash, currentHeight, currentBody); err != nil {
-		return err
-	}
 	if prevHash != currentHash {
 		if err := rawdbv3.TxNums.Truncate(batch, currentHeight); err != nil {
 			return err

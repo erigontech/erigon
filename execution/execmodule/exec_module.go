@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -536,20 +535,11 @@ func (e *ExecModule) ValidateChain(ctx context.Context, block *types.Block) (Val
 	e.forkValidator.ClearWithUnwind()
 	e.logger.Debug("[execmodule] validating chain", "number", blockNumber, "hash", blockHash)
 	header, body := block.HeaderNoCopy(), block.Body()
-	for i, txn := range body.Transactions {
-		if txn == txn.Unwrap() {
-			continue
-		}
-		body.Transactions = slices.Clone(body.Transactions)
-		for j := i; j < len(body.Transactions); j++ {
-			body.Transactions[j] = body.Transactions[j].Unwrap()
-		}
-		break
-	}
 	var (
 		currentBlockNumber *uint64
 		payloadExecuted    bool
 		canonical          bool
+		missingSegment     bool
 		err                error
 	)
 	alreadyExecuted := func(tx kv.Getter) (bool, error) {
@@ -572,6 +562,13 @@ func (e *ExecModule) ValidateChain(ctx context.Context, block *types.Block) (Val
 		}
 		defer roTx.Rollback()
 		overlay.UpdateTxn(roTx)
+		storedHeader, err := e.blockReader.Header(ctx, overlay, blockHash, blockNumber)
+		if err != nil {
+			return ValidationResult{}, err
+		}
+		if storedHeader == nil {
+			return ValidationResult{ValidationStatus: ExecutionStatusMissingSegment}, nil
+		}
 		e.readAheader.AddHeaderAndBody(ctx, e.db, overlay, header, body)
 		currentBlockNumber = rawdb.ReadCurrentBlockNumber(overlay)
 		payloadExecuted, err = alreadyExecuted(overlay)
@@ -580,12 +577,23 @@ func (e *ExecModule) ValidateChain(ctx context.Context, block *types.Block) (Val
 		}
 	} else {
 		if err := e.db.View(ctx, func(tx kv.Tx) error {
+			storedHeader, err := e.blockReader.Header(ctx, tx, blockHash, blockNumber)
+			if err != nil {
+				return err
+			}
+			if storedHeader == nil {
+				missingSegment = true
+				return nil
+			}
 			e.readAheader.AddHeaderAndBody(ctx, e.db, tx, header, body)
 			currentBlockNumber = rawdb.ReadCurrentBlockNumber(tx)
 			payloadExecuted, err = alreadyExecuted(tx)
 			return err
 		}); err != nil {
 			return ValidationResult{}, err
+		}
+		if missingSegment {
+			return ValidationResult{ValidationStatus: ExecutionStatusMissingSegment}, nil
 		}
 	}
 	if math.AbsoluteDifference(*currentBlockNumber, blockNumber) >= e.syncCfg.MaxReorgDepth {

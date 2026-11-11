@@ -25,6 +25,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -234,6 +235,15 @@ func (t *testingImpl) CommitBlockV1(
 
 	block := assembled.Block.Block
 	blockHash := block.Hash()
+	transactionsForValidation := slices.Clone(block.Transactions())
+	for i := range transactionsForValidation {
+		transactionsForValidation[i] = transactionsForValidation[i].Unwrap()
+	}
+	validationBlock := types.NewBlockFromNetwork(block.HeaderNoCopy(), &types.Body{
+		Transactions: transactionsForValidation,
+		Uncles:       block.Uncles(),
+		Withdrawals:  block.Withdrawals(),
+	}, block.BlockAccessListSidecar())
 
 	err = func() error {
 		t.server.lock.Lock()
@@ -245,7 +255,7 @@ func (t *testingImpl) CommitBlockV1(
 	}
 
 	status, validationErr, busy, err := t.lockedStatusPoll(ctx, deadline, func() (execmodule.ExecutionStatus, *string, error) {
-		s, v, _, err := t.server.chainRW.ValidateChain(ctx, block)
+		s, v, _, err := t.server.chainRW.ValidateChain(ctx, validationBlock)
 		return s, v, err
 	})
 	if err != nil {

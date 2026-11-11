@@ -75,6 +75,40 @@ func TestCommitBlockV1MempoolBlobTransaction(t *testing.T) {
 	require.Equal(t, hash, server.chainRW.CurrentHeader(t.Context()).Hash())
 }
 
+func TestValidateChainPreservesBlobSidecar(t *testing.T) {
+	t.Parallel()
+	const parentTimestamp = 1000
+	cfg := allForksChainConfig()
+	parentHdr := makeParentHeader(parentTimestamp)
+	parentHash := parentHdr.Hash()
+	blockHash := common.HexToHash("0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd")
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	wrapped := types.MakeV1WrappedBlobTxn(cfg.ChainID)
+	signed, err := types.SignTx(&wrapped.Tx, *types.LatestSignerForChainID(cfg.ChainID), key)
+	require.NoError(t, err)
+	v, r, s := signed.RawSignatureValues()
+	wrapped.Tx.V.Set(v)
+	wrapped.Tx.R.Set(r)
+	wrapped.Tx.S.Set(s)
+	var before bytes.Buffer
+	require.NoError(t, wrapped.MarshalBinaryWrapped(&before))
+	assembled := makeAssembledBlock(blockHash, parentHash, common.Hash{0xcc}, 101, parentTimestamp+1, nil, 30_000_000, 0, 0, 0)
+	assembled.Block = types.NewBlockFromNetwork(assembled.Block.HeaderNoCopy(), &types.Body{Transactions: types.Transactions{wrapped}}, nil)
+	rec := successRecorder()
+	stub := newCommitStub(parentHdr, assembled, rec)
+	api := newTestingAPI(cfg, stub)
+	hash, err := api.CommitBlockV1(context.Background(), validPayloadAttrs(parentTimestamp), nil, nil)
+	require.NoError(t, err)
+	require.Equal(t, blockHash, hash)
+	require.Len(t, rec.inserted, 1)
+	txn := rec.inserted[0].Transactions()[0]
+	require.IsType(t, wrapped, txn)
+	var after bytes.Buffer
+	require.NoError(t, txn.(*types.BlobTxWrapper).MarshalBinaryWrapped(&after))
+	require.Equal(t, before.Bytes(), after.Bytes())
+}
+
 // commitRecorder captures the chain mutations performed by CommitBlockV1 so
 // tests can assert on what was inserted and which fork choice was applied.
 type commitRecorder struct {
@@ -239,6 +273,24 @@ func TestCommitBlockV1(t *testing.T) {
 		assert.Equal(t, blockHash, rec.fcuHead)
 		assert.Equal(t, rec.safeHash, rec.fcuSafe, "safe hash must be preserved")
 		assert.Equal(t, rec.finalHash, rec.fcuFinal, "finalized hash must be preserved")
+	})
+
+	t.Run("validation receives bare transactions", func(t *testing.T) {
+		t.Parallel()
+		assembled := defaultAssembled()
+		wrapped := &types.BlobTxWrapper{}
+		assembled.Block = types.NewBlockFromNetwork(assembled.Block.HeaderNoCopy(), &types.Body{Transactions: types.Transactions{wrapped}}, nil)
+		rec := successRecorder()
+		stub := newCommitStub(parentHdr, assembled, rec)
+		stub.validateChainBlockFunc = func(_ context.Context, block *types.Block) (execmodule.ValidationResult, error) {
+			require.Len(t, block.Transactions(), 1)
+			require.Same(t, &wrapped.Tx, block.Transactions()[0])
+			return rec.validateRes, nil
+		}
+		api := newTestingAPI(allForksChainConfig(), stub)
+
+		_, err := api.CommitBlockV1(context.Background(), validPayloadAttrs(parentTimestamp), nil, nil)
+		require.NoError(t, err)
 	})
 
 	t.Run("extraData forwarded to the block builder", func(t *testing.T) {
