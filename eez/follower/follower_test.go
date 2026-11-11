@@ -58,18 +58,34 @@ var testConfig = follower.Config{
 	BootAttempts:  3,
 }
 
-// countingChain counts the blocks derivation builds.
+// countingChain counts the blocks derivation builds, and fails building
+// block failAt once with failErr, when set.
 type countingChain struct {
 	deriver.Chain
-	mu    sync.Mutex
-	built int
+	mu      sync.Mutex
+	built   int
+	failAt  uint64
+	failErr error
 }
 
 func (c *countingChain) Extend(ctx context.Context, parent *types.Header, in deriver.HeaderInputs, txs []types.Transaction, safe, finalized common.Hash) (*types.BlockWithReceipts, error) {
 	c.mu.Lock()
+	if c.failErr != nil && parent.Number.Uint64()+1 == c.failAt {
+		err := c.failErr
+		c.failErr = nil
+		c.mu.Unlock()
+		return nil, err
+	}
 	c.built++
 	c.mu.Unlock()
 	return c.Chain.Extend(ctx, parent, in, txs, safe, finalized)
+}
+
+// failOnce makes the next build of block n fail with err.
+func (c *countingChain) failOnce(n uint64, err error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.failAt, c.failErr = n, err
 }
 
 func (c *countingChain) Built() int {
@@ -83,7 +99,7 @@ type node struct {
 	chain    *countingChain
 	follower *follower.Follower
 	dir      string
-	// logs holds the follower's log lines in logfmt.
+	// logs holds the follower's log lines in logfmt, debug level included.
 	logs *syncBuffer
 }
 
@@ -105,7 +121,7 @@ func (n *node) restart(t *testing.T, reader l1.ChainReader, chain deriver.Chain,
 	}
 	logs := &syncBuffer{}
 	logger := log.New()
-	logger.SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(logs, log.LogfmtFormat())))
+	logger.SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StreamHandler(logs, log.LogfmtFormat())))
 	counting := &countingChain{Chain: chain}
 	f, err := follower.New(reader, counting, derivertest.Config(), cfg, logger)
 	require.NoError(t, err)

@@ -385,7 +385,14 @@ func (f *Follower) Run(ctx context.Context) error {
 		unsafeTick = t.C
 	}
 	var retry <-chan time.Time
+	// failing is when the failing streak began, reset when it fails again
+	// after a batch derived; derived is the batches derived at its last
+	// failure.
 	var failing time.Time
+	var derived uint64
+	// loud reports whether a retry of the failing streak logged above debug
+	// level; the recovery logs at debug level after a quiet streak.
+	var loud bool
 	pause := f.cfg.Retry
 	for {
 		var err error
@@ -409,15 +416,27 @@ func (f *Follower) Run(ctx context.Context) error {
 			if halts(err) {
 				return err
 			}
-			if retry == nil {
-				failing = time.Now()
+			batches, _ := f.deriver.Derived()
+			switch {
+			case retry == nil:
+				failing, loud = time.Now(), false
+			case batches != derived:
+				// A failure past a derived batch is a new one.
+				failing, pause = time.Now(), f.cfg.Retry
 			}
-			f.logRetry("[eez] follower step failed, retrying", err, failing, "event", "eez.deriver.resync.failed", "in", pause)
+			derived = batches
+			if f.logRetry("[eez] follower step failed, retrying", err, failing, "event", "eez.deriver.resync.failed", "in", pause) {
+				loud = true
+			}
 			retry, pause = time.After(pause), min(2*pause, f.cfg.MaxRetry)
 			continue
 		}
 		if retry != nil {
-			f.logger.Info("[eez] follower recovered", "event", "eez.deriver.resync.recovered", "l1Scanned", f.scanned)
+			logFn := f.logger.Debug
+			if loud {
+				logFn = f.logger.Info
+			}
+			logFn("[eez] follower recovered", "event", "eez.deriver.resync.recovered", "l1Scanned", f.scanned)
 		}
 		retry, pause = nil, f.cfg.Retry
 	}
@@ -429,6 +448,7 @@ func (f *Follower) Boot(ctx context.Context) error {
 	defer f.moving(HeadDerivation)()
 	pause := f.cfg.Retry
 	var failing time.Time
+	var derived uint64
 	for attempt := 1; ; attempt++ {
 		err := f.recover(ctx, f.boot(ctx))
 		if err == nil {
@@ -437,8 +457,9 @@ func (f *Follower) Boot(ctx context.Context) error {
 		if err == nil || halts(err) || (f.cfg.BootAttempts > 0 && attempt >= f.cfg.BootAttempts) {
 			return err
 		}
-		if attempt == 1 {
-			failing = time.Now()
+		// An attempt that failed past a derived batch failed anew.
+		if batches, _ := f.deriver.Derived(); attempt == 1 || batches != derived {
+			failing, pause, derived = time.Now(), f.cfg.Retry, batches
 		}
 		f.logRetry("[eez] boot catch-up failed, retrying", err, failing, "event", "eez.node.deriver.boot_catch_up.failed", "attempt", attempt, "in", pause)
 		select {
@@ -770,20 +791,28 @@ func (f *Follower) recover(ctx context.Context, err error) error {
 	return retryable{err}
 }
 
-// blobGrace is how long a blob may be missing before the retries log at
-// error level: a beacon node serves the blobs of a slot seconds after the L1
-// execution node has its block.
-const blobGrace = time.Minute
+// A beacon node serves the blobs of a slot seconds after the L1 execution
+// node has its block: retries of a missing blob log at debug level for
+// blobQuiet, then at warning level, and at error level after blobGrace.
+const (
+	blobQuiet = 30 * time.Second
+	blobGrace = time.Minute
+)
 
-// logRetry logs err, failing since failing, before a retry: at error level
-// once a blob is lost or missing for over blobGrace, since derivation cannot
-// pass it until an operator supplies it.
-func (f *Follower) logRetry(msg string, err error, failing time.Time, ctx ...any) {
-	logFn := f.logger.Warn
-	if errors.Is(err, l1.ErrBlobLost) || (errors.Is(err, l1.ErrBlobUnavailable) && time.Since(failing) > blobGrace) {
+// logRetry logs err, failing since failing, before a retry, and reports
+// whether it logged above debug level. A lost blob, or one missing for over
+// blobGrace, logs at error level, since derivation cannot pass it until an
+// operator supplies it.
+func (f *Follower) logRetry(msg string, err error, failing time.Time, ctx ...any) bool {
+	logFn, loud := f.logger.Warn, true
+	switch missing := errors.Is(err, l1.ErrBlobUnavailable); {
+	case errors.Is(err, l1.ErrBlobLost), missing && time.Since(failing) > blobGrace:
 		logFn = f.logger.Error
+	case missing && time.Since(failing) <= blobQuiet:
+		logFn, loud = f.logger.Debug, false
 	}
 	logFn(msg, append(ctx, "err", err)...)
+	return loud
 }
 
 // retryable marks an error whose cause may pass.

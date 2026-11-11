@@ -47,19 +47,25 @@ func composeBatches(t *testing.T, c *derivertest.Composer, n, size int) []*deriv
 	t.Helper()
 	var out []*derivertest.Batch
 	for range n {
-		blocks := make([]derivertest.Block, size)
-		for i := range blocks {
-			blocks[i] = derivertest.Block{Coinbase: alice, Extra: []byte{}, Txs: [][]byte{}}
-		}
-		blocks[0].Txs = [][]byte{c.Transfer(bob, 1)}
-		b := c.Compose([]da.Action{{
-			SourceRollupID: protocol.MainnetRollupID, TargetRollupID: 1, SourceAddress: bob, TargetAddress: alice,
-			Data: []byte{}, Success: true, ReturnData: []byte{},
-		}}, blocks...)
+		b := composeBatch(c, size)
 		c.Post(derivertest.Posting{Batch: b})
 		out = append(out, b)
 	}
 	return out
+}
+
+// composeBatch composes a batch of size blocks, its Sync block holding a
+// system transaction.
+func composeBatch(c *derivertest.Composer, size int) *derivertest.Batch {
+	blocks := make([]derivertest.Block, size)
+	for i := range blocks {
+		blocks[i] = derivertest.Block{Coinbase: alice, Extra: []byte{}, Txs: [][]byte{}}
+	}
+	blocks[0].Txs = [][]byte{c.Transfer(bob, 1)}
+	return c.Compose([]da.Action{{
+		SourceRollupID: protocol.MainnetRollupID, TargetRollupID: 1, SourceAddress: bob, TargetAddress: alice,
+		Data: []byte{}, Success: true, ReturnData: []byte{},
+	}}, blocks...)
 }
 
 func blocksOf(batches ...*derivertest.Batch) []*types.Block {
