@@ -108,7 +108,7 @@ func lastPublished(ch chan *remoteproto.SyncingReply) (last *remoteproto.Syncing
 }
 
 // requirePinDropped asserts the pin is gone and that the drop reached
-// subscribers: the LAST published reply must reflect it, since BeforeRun
+// subscribers: the LAST published reply must reflect it, since NotifySyncState
 // publishes the still-pinned state earlier.
 func requirePinDropped(t *testing.T, n *shards.Notifications, ch chan *remoteproto.SyncingReply) {
 	t.Helper()
@@ -154,7 +154,7 @@ func TestProcessFrozenBlocksClearsPinOnSnapshotsStageFailure(t *testing.T) {
 }
 
 // A publish inside the pipeline reads the Execution bump while it is still
-// uncommitted (BeforeRun publishes with the pipeline's rw tx). If the pipeline
+// uncommitted (NotifySyncState publishes with the pipeline's rw tx). If the pipeline
 // then fails, that bump rolls back, so the drop must still reach subscribers —
 // otherwise the last reply they hold claims a position the node never committed.
 func TestProcessFrozenBlocksPublishesDropAfterUncommittedBumpPublished(t *testing.T) {

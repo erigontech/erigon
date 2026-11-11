@@ -273,9 +273,7 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 		if err != nil {
 			return err
 		}
-		if err := hook.BeforeRun(tx, false); err != nil {
-			return err
-		}
+		hook.NotifySyncState(tx)
 	}
 
 	var finalityCtx kv.FinalityContext

@@ -132,9 +132,7 @@ func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
 		return fmt.Errorf("failed to set unwind point: %w", err)
 	}
 
-	if err := e.hook.BeforeRun(tx, true); err != nil {
-		return fmt.Errorf("hook BeforeRun failed: %w", err)
-	}
+	e.hook.NotifySyncState(tx)
 
 	if err := e.pipelineExecutor.RunUnwind(sd, tx); err != nil {
 		return fmt.Errorf("failed to run unwind: %w", err)

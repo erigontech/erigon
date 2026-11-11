@@ -36,7 +36,7 @@ type frozenBlocksStub uint64
 
 func (f frozenBlocksStub) FrozenBlocks() uint64 { return uint64(f) }
 
-func TestHookBeforeRunPreservesPendingNotifications(t *testing.T) {
+func TestHookNotifySyncStatePreservesPendingNotifications(t *testing.T) {
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(t.Context())
 	require.NoError(t, err)
@@ -46,7 +46,7 @@ func TestHookBeforeRunPreservesPendingNotifications(t *testing.T) {
 	notifications.Accumulator.MarkIncomplete()
 	hook := NewHook(t.Context(), notifications, nil, nil, log.New(), nil, nil, nil, nil, frozenBlocksStub(0))
 
-	require.NoError(t, hook.BeforeRun(tx, true))
+	hook.NotifySyncState(tx)
 	header := &types.Header{Time: 2}
 	notifications.Accumulator.StartChange(header, nil, false)
 	batch := notifications.Accumulator.Batch(header).ToProtoBatch()
@@ -180,10 +180,10 @@ func TestTwoHooksSharingNotificationsEmitOnce(t *testing.T) {
 	require.Len(t, drainSyncState(ch), 1, "the same synced state must be notified once across hooks")
 }
 
-// BeforeRun evaluates the sync state at cycle start, so a node that fell
+// NotifySyncState evaluates the sync state at cycle start, so a node that fell
 // behind notifies syncing=true when the catch-up cycle begins rather than
 // staying silent until (and if) a cycle ends while still behind.
-func TestHookBeforeRunEmitsWhenBehind(t *testing.T) {
+func TestHookNotifySyncStateEmitsWhenBehind(t *testing.T) {
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(t.Context())
 	require.NoError(t, err)
@@ -201,7 +201,7 @@ func TestHookBeforeRunEmitsWhenBehind(t *testing.T) {
 	require.Len(t, drainSyncState(ch), 1)
 
 	notifications.NewLastBlockSeen(500)
-	require.NoError(t, hook.BeforeRun(tx, false))
+	hook.NotifySyncState(tx)
 	emitted := drainSyncState(ch)
 	require.Len(t, emitted, 1, "cycle start with the node behind must notify")
 	require.True(t, emitted[0].Syncing)

@@ -107,16 +107,6 @@ func (h *Hook) LastNewBlockSeen(n uint64) {
 	h.notifications.NewLastBlockSeen(n)
 }
 
-func (h *Hook) BeforeRun(tx kv.Tx, _ bool) error {
-	if h == nil {
-		return nil
-	}
-	// Cycle start is where a node that fell behind first sees it; waiting for
-	// a cycle to end while still behind would miss fast catch-ups entirely.
-	h.NotifySyncState(tx)
-	return nil
-}
-
 func (h *Hook) CheckpointStateChanges() func() {
 	if h == nil || h.notifications == nil || h.notifications.Accumulator == nil {
 		return nil
@@ -189,6 +179,8 @@ func (h *Hook) ClearSnapshotDownloadPin() bool {
 
 // NotifySyncState publishes the sync status on the event bus if it changed;
 // dedup and ordering live in Notifications.PublishSyncState.
+// Publishing before execution starts exposes the transition to syncing even
+// when catch-up finishes within one cycle.
 func (h *Hook) NotifySyncState(tx kv.Tx) {
 	if h == nil || h.notifications == nil || h.notifications.Events == nil || h.frozenBlocksReader == nil {
 		return
