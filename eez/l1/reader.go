@@ -35,6 +35,12 @@ var (
 	ErrRangeTooWide = errors.New("log range too wide for the L1 source")
 	// ErrInconsistent reports a response that contradicts itself or an earlier one.
 	ErrInconsistent = errors.New("inconsistent L1 response")
+	// ErrNotCanonical reports a block off the source's canonical chain where
+	// a read requires a canonical one; errors carrying it also carry
+	// ErrNotFound.
+	ErrNotCanonical = errors.New("not on the L1 source's canonical chain")
+	// ErrReverted reports a call the L1 source executed and that reverted.
+	ErrReverted = errors.New("L1 call reverted")
 )
 
 // Header is the part of an L1 header the follower reads.
@@ -68,4 +74,23 @@ type ChainReader interface {
 	// TransactionByBlockHashAndIndex returns the transaction at index in the
 	// block with blockHash.
 	TransactionByBlockHashAndIndex(ctx context.Context, blockHash common.Hash, index uint64) (types.Transaction, error)
+}
+
+// Call is a message call from the zero address, without value.
+type Call struct {
+	To   common.Address
+	Data []byte
+}
+
+// StateReader is a ChainReader that also reads L1 state. Its reads see the
+// state after the block with blockHash, which must be canonical: a block the
+// source holds off its canonical chain is ErrNotCanonical, though a source
+// may report it as ErrNotFound only; a block it does not hold or has not
+// executed is ErrNotFound.
+type StateReader interface {
+	// CodeAt returns the code of addr, empty for an account without code.
+	CodeAt(ctx context.Context, addr common.Address, blockHash common.Hash) ([]byte, error)
+	// CallAt executes call and returns its output; a call that reverts is
+	// ErrReverted, and one that otherwise fails another error.
+	CallAt(ctx context.Context, call Call, blockHash common.Hash) ([]byte, error)
 }

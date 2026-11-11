@@ -42,11 +42,12 @@ var (
 
 // ErigonL1 returns an Erigon L1 of 11 blocks whose last three replaced an
 // earlier branch, with block 4 finalized, and the same chain as a model.
-// Every block calls both emitters.
+// Every block calls both emitters and stores a new root in Registry; block
+// CreatedAt also creates Created.
 func ErigonL1(t *testing.T) (*execmoduletester.ExecModuleTester, *recording.MemoryChain) {
 	t.Helper()
 	ctx := context.Background()
-	key, err := crypto.HexToECDSA("8a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
+	key, err := crypto.HexToECDSA(sampleKey)
 	require.NoError(t, err)
 	sender := crypto.PubkeyToAddress(key.PublicKey)
 	m := execmoduletester.New(t, execmoduletester.WithKey(key), execmoduletester.WithGenesisSpec(&types.Genesis{
@@ -56,9 +57,13 @@ func ErigonL1(t *testing.T) (*execmoduletester.ExecModuleTester, *recording.Memo
 			sender:   {Balance: new(big.Int).Lsh(big.NewInt(1), 96)},
 			EmitterA: {Balance: new(big.Int), Code: emitterACode},
 			EmitterB: {Balance: new(big.Int), Code: emitterBCode},
+			Registry: {Balance: new(big.Int), Code: registryCode},
 		},
 	}))
 	signer := types.LatestSignerForChainID(m.ChainConfig.ChainID)
+	// word is the input of call j in block i of branch; the third call
+	// stores it in Registry.
+	word := func(branch, i, j int) common.Hash { return common.BigToHash(big.NewInt(int64(1000*branch + 10*i + j))) }
 	// The fork is generated from genesis with the first seven blocks identical,
 	// since block generation executes on the latest state, not the parent's.
 	gen := func(forkAt int) func(int, *blockgen.BlockGen) {
@@ -67,10 +72,20 @@ func ErigonL1(t *testing.T) (*execmoduletester.ExecModuleTester, *recording.Memo
 			if i >= forkAt {
 				branch = 1
 			}
-			for j, to := range []common.Address{EmitterA, EmitterB} {
-				data := common.BigToHash(big.NewInt(int64(1000*branch + 10*i + j)))
-				tx, err := types.SignTx(types.NewEIP1559Transaction(*m.ChainConfig.ChainID, uint64(2*i+j), to, new(uint256.Int), 100_000,
+			nonce := uint64(3 * i)
+			if i >= CreatedAt {
+				nonce++
+			}
+			for j, to := range []common.Address{EmitterA, EmitterB, Registry} {
+				data := word(branch, i, j)
+				tx, err := types.SignTx(types.NewEIP1559Transaction(*m.ChainConfig.ChainID, nonce, to, new(uint256.Int), 100_000,
 					uint256.NewInt(1), uint256.NewInt(100_000_000_000), data[:]), *signer, key)
+				require.NoError(t, err)
+				b.AddTx(tx)
+				nonce++
+			}
+			if i+1 == CreatedAt {
+				tx, err := types.SignTx(types.NewContractCreation(nonce, new(uint256.Int), 100_000, uint256.NewInt(100_000_000_000), createCode), *signer, key)
 				require.NoError(t, err)
 				b.AddTx(tx)
 			}
@@ -81,6 +96,7 @@ func ErigonL1(t *testing.T) (*execmoduletester.ExecModuleTester, *recording.Memo
 	forked, err := m.GenerateChain(11, gen(7))
 	require.NoError(t, err)
 	require.Equal(t, first.Blocks[6].Hash(), forked.Blocks[6].Hash())
+	require.Equal(t, Created, first.Receipts[CreatedAt-1][3].ContractAddress)
 	fork := forked.Slice(7, 11)
 
 	require.NoError(t, m.InsertValidateAndUfc1By1(ctx, first.Blocks))
@@ -89,18 +105,18 @@ func ErigonL1(t *testing.T) (*execmoduletester.ExecModuleTester, *recording.Memo
 		{finalised}, {finalised}, {finalised}, {finalised},
 	})))
 
-	model, err := recording.NewMemoryChain(m.ChainConfig.ChainID.Uint64(), modelBlock(m.Genesis, nil))
+	model, err := recording.NewMemoryChain(m.ChainConfig.ChainID.Uint64(), withState(modelBlock(m.Genesis, nil), common.Hash{}))
 	require.NoError(t, err)
 	for i := range 7 {
-		require.NoError(t, model.Append(modelBlock(first.Blocks[i], first.Receipts[i])))
+		require.NoError(t, model.Append(withState(modelBlock(first.Blocks[i], first.Receipts[i]), word(0, i, 2))))
 	}
 	require.NoError(t, model.Finalize(4))
 	for i := 7; i < 10; i++ {
-		require.NoError(t, model.Append(modelBlock(first.Blocks[i], first.Receipts[i])))
+		require.NoError(t, model.Append(withState(modelBlock(first.Blocks[i], first.Receipts[i]), word(0, i, 2))))
 	}
 	branch := make([]*recording.Block, len(fork.Blocks))
 	for i := range fork.Blocks {
-		branch[i] = modelBlock(fork.Blocks[i], fork.Receipts[i])
+		branch[i] = withState(modelBlock(fork.Blocks[i], fork.Receipts[i]), word(1, 7+i, 2))
 	}
 	require.NoError(t, model.Reorg(7, branch...))
 	return m, model

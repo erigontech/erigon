@@ -19,6 +19,7 @@
 package follower
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -30,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/eez/config"
 	"github.com/erigontech/erigon/eez/deriver"
 	"github.com/erigontech/erigon/eez/l1"
+	"github.com/erigontech/erigon/eez/seqsig"
 	"github.com/erigontech/erigon/execution/chain"
 )
 
@@ -40,11 +42,21 @@ var (
 	// ErrL1Reference reports an L1 whose canonical block differs from the
 	// rollupX genesis's L1 reference.
 	ErrL1Reference = errors.New("L1 does not hold the genesis's L1 reference")
+	// ErrSeedReorged reports an L1 reorg below the finalized L1 block a sync
+	// from L2 peers seeded derivation at.
+	ErrSeedReorged = errors.New("L1 reorg below the seed at L1 finality")
+	// ErrNotOnL1Chain reports a local chain whose finalized block is not on
+	// the chain of the root L1 finalized.
+	ErrNotOnL1Chain = errors.New("datadir is not on L1's chain")
+	// ErrL1HistoryIncomplete reports L1-only derivation that needs history
+	// L1 no longer serves, or did not end holding the root L1 finalized.
+	ErrL1HistoryIncomplete = errors.New("L1 history incomplete")
 )
 
 // Config tunes a Follower.
 type Config struct {
-	// Dir holds the reconcile checkpoint; empty keeps none.
+	// Dir holds the reconcile checkpoint; empty keeps none, and so does peers
+	// mode.
 	Dir string
 	// Poll is the interval between L1 head reads.
 	Poll time.Duration
@@ -65,12 +77,35 @@ type Config struct {
 	// read every SequencerPoll, while it descends from the safe block.
 	Sequencer     Sequencer
 	SequencerPoll time.Duration
+	// Heads, when set, delivers the verified heads of the signed-head
+	// overlay; the head follows the best of them. It excludes Sequencer.
+	Heads <-chan *seqsig.VerifiedHead
+	// Fetcher fetches the missing blocks of signed heads from L2 peers;
+	// without it only heads whose blocks are local or attached are followed.
+	Fetcher BlockFetcher
+	// HeadRetry is the interval between retries of the signed heads, zero
+	// for the L2 block interval; HeadRequest bounds each peer request that
+	// fetches their missing blocks.
+	HeadRetry, HeadRequest time.Duration
 	// Blobs serves the blobs of blob-backed batches; without it the
 	// follower cannot derive them.
 	Blobs l1.BlobSource
 	// Progress is the interval between info-level progress lines; zero logs
 	// none.
 	Progress time.Duration
+	// Peers, when set, puts the follower in peers mode: boot takes the
+	// history below the root L1's finalized block holds from the chain's L2
+	// peers, never from L1, and derivation starts at that block.
+	Peers *Fetcher
+	// LoopBlockLimit is the number of blocks a sync from peers inserts
+	// between head moves; zero moves the head once, at the root.
+	LoopBlockLimit uint64
+	// PeerCount, when set, counts the connected devp2p peers the status
+	// reports, in the background at most every PeerRefresh; zero is
+	// DefaultConfig's. OverlayPeerCount, when set, counts the overlay's.
+	PeerCount        func(ctx context.Context) (uint64, error)
+	PeerRefresh      time.Duration
+	OverlayPeerCount func() int
 }
 
 // DefaultConfig is the reference client's tuning.
@@ -81,7 +116,9 @@ var DefaultConfig = Config{
 	Retry:         2 * time.Second,
 	MaxRetry:      30 * time.Second,
 	SequencerPoll: time.Second,
+	HeadRequest:   2 * time.Second,
 	Progress:      30 * time.Second,
+	PeerRefresh:   5 * time.Second,
 }
 
 // overlayLimit bounds the sequencer blocks one overlay step inserts.
@@ -95,13 +132,18 @@ type Follower struct {
 	scanner *l1.Scanner
 	watcher *l1.Watcher
 	chain   deriver.Chain
+	watch   *headWatch
 	deriver *deriver.Deriver
 	overlay *overlay
+	heads   *signedHeads
+	peers   *peerCount
 	logger  log.Logger
 	// scanned is the last L1 block whose batches were reconciled, target
 	// the L1 head to scan to and l1Finalized the latest finalized L1 block.
 	scanned, target, l1Finalized uint64
 	resumed                      bool
+	// floor is the L1 block a sync from peers seeded derivation at.
+	floor uint64
 	// progress is the state at the last progress line.
 	progress progress
 
@@ -119,29 +161,35 @@ type Status struct {
 	Cursor, Safe, Finalized uint64
 	// Last is the latest derived settlement.
 	Last *deriver.Record
-}
-
-// Status returns the follower's progress as of its latest step. It is safe
-// to call concurrently with Run.
-func (f *Follower) Status() Status {
-	f.statusMu.Lock()
-	defer f.statusMu.Unlock()
-	return f.status
+	// Mode is where boot takes the history below L1 finality from, and
+	// Phase how far the follower is.
+	Mode  SyncMode
+	Phase Phase
+	// Anchor is L1's finalized block and root as boot last read them, nil
+	// before.
+	Anchor *Anchor
+	// Peers and OverlayPeers are the connected devp2p and overlay peers;
+	// OverlayPeers is nil without an overlay.
+	Peers        uint64
+	OverlayPeers *uint64
+	// SignedHeads are the latest head of each tracked signing source,
+	// highest version first; nil without signed heads.
+	SignedHeads []*seqsig.VerifiedHead
+	// HeadSource is what moved the head last, empty while nothing has since
+	// boot.
+	HeadSource HeadSource
 }
 
 func (f *Follower) publish() {
-	s := Status{
-		L1Scanned:   f.scanned,
-		L1Finalized: f.l1Finalized,
-		Cursor:      f.deriver.Cursor(),
-		Safe:        f.deriver.Safe(),
-		Finalized:   f.deriver.Finalized(),
-	}
+	var last *deriver.Record
 	if r, ok := f.deriver.Last(); ok {
-		s.Last = &r
+		last = &r
 	}
 	f.statusMu.Lock()
-	f.status = s
+	f.status.L1Scanned, f.status.L1Finalized = f.scanned, f.l1Finalized
+	f.status.Cursor, f.status.Safe, f.status.Finalized = f.deriver.Cursor(), f.deriver.Safe(), f.deriver.Finalized()
+	f.status.Last = last
+	s := f.status
 	f.statusMu.Unlock()
 
 	f.logProgress(s)
@@ -181,7 +229,18 @@ func New(reader l1.ChainReader, chain deriver.Chain, cfg *chain.Config, c Config
 	if !ok {
 		return nil, fmt.Errorf("chain %s is not an EEZ chain", cfg.ChainName)
 	}
-	d, err := deriver.New(chain, cfg, c.Dir, c.Blobs, reader, logger)
+	if c.Sequencer != nil && c.Heads != nil {
+		return nil, errors.New("a sequencer and signed heads both set the unsafe head")
+	}
+	dir, mode := c.Dir, SyncL1Only
+	if c.Peers != nil {
+		// A checkpoint over history from peers would let an L1-only boot
+		// skip deriving it.
+		dir, mode = "", SyncPeers
+	}
+	watch := &headWatch{Chain: chain}
+	chain = watch
+	d, err := deriver.New(chain, cfg, dir, c.Blobs, reader, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -199,22 +258,88 @@ func New(reader l1.ChainReader, chain deriver.Chain, cfg *chain.Config, c Config
 		scanner: scanner,
 		watcher: l1.NewWatcher(reader, c.ReorgDepth, logger),
 		chain:   chain,
+		watch:   watch,
 		deriver: d,
 		logger:  logger,
+		status:  Status{Mode: mode, Phase: PhaseBooting},
+	}
+	watch.f = f
+	publishPhase(PhaseBooting)
+	if c.PeerCount != nil {
+		f.peers = &peerCount{count: c.PeerCount, every: cmp.Or(c.PeerRefresh, DefaultConfig.PeerRefresh)}
 	}
 	if c.Sequencer != nil {
 		f.overlay = &overlay{seq: c.Sequencer, chain: chain, deriver: d, limit: overlayLimit, logger: logger}
 	}
+	if c.Heads != nil {
+		f.heads = &signedHeads{
+			chain:   chain,
+			deriver: d,
+			fetcher: c.Fetcher,
+			retry:   cmp.Or(c.HeadRetry, time.Duration(l2.BlockInterval)*time.Second),
+			request: cmp.Or(c.HeadRequest, DefaultConfig.HeadRequest),
+			logger:  logger,
+		}
+	}
 	return f, nil
 }
 
-// StepOverlay moves the head toward the sequencer's latest block, when
-// the follower has a sequencer.
+// StepOverlay moves the head toward the unsafe-head source: the sequencer's
+// latest block, or the best of the signed heads received.
 func (f *Follower) StepOverlay(ctx context.Context) error {
-	if f.overlay == nil {
-		return nil
+	switch {
+	case f.overlay != nil:
+		defer f.moving(HeadSequencerRPC)()
+		return f.overlay.step(ctx)
+	case f.heads != nil:
+		defer f.moving(HeadSignedHead)()
+		f.drainHeads()
+		return f.heads.follow(ctx)
 	}
-	return f.overlay.step(ctx)
+	return nil
+}
+
+// drainHeads tracks every signed head received, so that one decision, and
+// one fetch, serves the newest.
+func (f *Follower) drainHeads() {
+	for {
+		select {
+		case h, ok := <-f.cfg.Heads:
+			if !ok {
+				return
+			}
+			f.heads.observe(h)
+		default:
+			return
+		}
+	}
+}
+
+// trackHeads tracks the signed heads as they arrive, through boot and long
+// derivation steps, and wakes the loop to decide on them.
+func (f *Follower) trackHeads(ctx context.Context, wake chan<- struct{}) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case h, ok := <-f.cfg.Heads:
+			if !ok {
+				return
+			}
+			f.heads.observe(h)
+			select {
+			case wake <- struct{}{}:
+			default:
+			}
+		}
+	}
+}
+
+// stepUnsafe steps the unsafe-head source, which retries on its next step.
+func (f *Follower) stepUnsafe(ctx context.Context) {
+	if err := f.StepOverlay(ctx); err != nil && ctx.Err() == nil {
+		f.logger.Warn("[eez] unsafe head step failed", "event", "eez.node.follower.advance.failed", "err", err)
+	}
 }
 
 // Deriver is the follower's deriver.
@@ -224,11 +349,19 @@ func (f *Follower) Deriver() *deriver.Deriver { return f.deriver }
 // divergence from canonical L1, an L1 reorg it cannot follow, or a boot
 // that exhausts BootAttempts.
 func (f *Follower) Run(ctx context.Context) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	var wake chan struct{}
+	if f.heads != nil {
+		wake = make(chan struct{}, 1)
+		go f.trackHeads(ctx, wake)
+	}
+	if f.peers != nil {
+		go f.peers.run(ctx)
+	}
 	if err := f.Boot(ctx); err != nil {
 		return err
 	}
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
 	events := make(chan l1.Event, 64)
 	watched := make(chan error, 1)
 	var heads <-chan struct{}
@@ -241,8 +374,13 @@ func (f *Follower) Run(ctx context.Context) error {
 	go func() { watched <- f.watcher.Run(ctx, f.cfg.Poll, f.cfg.FinalityEvery, heads, events) }()
 
 	var unsafeTick <-chan time.Time
-	if f.overlay != nil {
+	switch {
+	case f.overlay != nil:
 		t := time.NewTicker(f.cfg.SequencerPoll)
+		defer t.Stop()
+		unsafeTick = t.C
+	case f.heads != nil:
+		t := time.NewTicker(f.heads.retry)
 		defer t.Stop()
 		unsafeTick = t.C
 	}
@@ -260,10 +398,11 @@ func (f *Follower) Run(ctx context.Context) error {
 			err = f.Handle(ctx, e)
 		case <-retry:
 			err = f.Sync(ctx)
+		case <-wake:
+			f.stepUnsafe(ctx)
+			continue
 		case <-unsafeTick:
-			if err := f.overlay.step(ctx); err != nil && ctx.Err() == nil {
-				f.logger.Warn("[eez] unsafe head step failed", "err", err)
-			}
+			f.stepUnsafe(ctx)
 			continue
 		}
 		if err = f.recover(ctx, err); err != nil {
@@ -287,10 +426,14 @@ func (f *Follower) Run(ctx context.Context) error {
 // Boot resumes derivation where the local chain left it and catches up with
 // the L1 head, retrying failures that may pass.
 func (f *Follower) Boot(ctx context.Context) error {
+	defer f.moving(HeadDerivation)()
 	pause := f.cfg.Retry
 	var failing time.Time
 	for attempt := 1; ; attempt++ {
 		err := f.recover(ctx, f.boot(ctx))
+		if err == nil {
+			f.setPhase(PhaseFollowing)
+		}
 		if err == nil || halts(err) || (f.cfg.BootAttempts > 0 && attempt >= f.cfg.BootAttempts) {
 			return err
 		}
@@ -308,6 +451,9 @@ func (f *Follower) Boot(ctx context.Context) error {
 }
 
 func (f *Follower) boot(ctx context.Context) error {
+	if err := f.watch.seed(ctx); err != nil {
+		return err
+	}
 	if err := f.executeGenesis(ctx); err != nil {
 		return err
 	}
@@ -326,22 +472,46 @@ func (f *Follower) boot(ctx context.Context) error {
 			return err
 		}
 	}
+	var before *l1.Commitment
+	if f.l1Only() {
+		if before, err = f.finalizedRoot(ctx); err != nil {
+			return err
+		}
+	}
+	if !f.resumed {
+		from, err := f.start(ctx)
+		if err != nil {
+			return f.historyIncomplete(ctx, err)
+		}
+		f.scanned, f.resumed = from-1, true
+	}
+	f.setPhase(PhaseDeriving)
 	head, err := f.reader.Head(ctx)
 	if err != nil {
 		return err
-	}
-	if !f.resumed {
-		from, err := f.resume(ctx, head.Number)
-		if err != nil {
-			return err
-		}
-		f.scanned, f.resumed = from-1, true
 	}
 	f.target = head.Number
 	if err := f.Sync(ctx); err != nil {
 		return err
 	}
+	if err := f.checkRoot(ctx, before); err != nil {
+		return err
+	}
 	return f.watcher.Seed(ctx, f.scanned)
+}
+
+// start seeds derivation and returns the L1 block to scan from.
+func (f *Follower) start(ctx context.Context) (uint64, error) {
+	if f.cfg.Peers != nil {
+		f.logger.Info("[eez] booting the L2 chain", "event", "eez.node.sync.mode", "mode", "peers")
+		return f.bootFromPeers(ctx)
+	}
+	f.logger.Info("[eez] booting the L2 chain", "event", "eez.node.sync.mode", "mode", "l1_only")
+	head, err := f.reader.Head(ctx)
+	if err != nil {
+		return 0, err
+	}
+	return f.resume(ctx, head.Number)
 }
 
 // executeGenesis executes the genesis of a chain still at it, which a node
@@ -459,8 +629,14 @@ func (f *Follower) Handle(ctx context.Context, e l1.Event) error {
 }
 
 // Sync reconciles the batches of the L1 blocks up to the target and applies
-// L1 finality.
+// L1 finality. A block L1 no longer serves stops L1-only derivation, as at
+// boot.
 func (f *Follower) Sync(ctx context.Context) error {
+	return f.historyIncomplete(ctx, f.sync(ctx))
+}
+
+func (f *Follower) sync(ctx context.Context) error {
+	defer f.moving(HeadDerivation)()
 	defer f.publish()
 	defer loadMetrics().sync.ObserveDuration(time.Now())
 	if !f.resumed {
@@ -536,12 +712,16 @@ func (f *Follower) revalidate(ctx context.Context) error {
 
 // rewind drops what derivation took from the L1 blocks above ancestor.
 func (f *Follower) rewind(ctx context.Context, ancestor uint64) error {
+	defer f.moving(HeadDerivation)()
 	defer f.publish()
 	loadMetrics().reorgs.Inc()
 	f.scanned = min(f.scanned, ancestor)
 	err := f.deriver.OnReorg(ctx, ancestor)
 	if !errors.Is(err, deriver.ErrResumeReorged) {
 		return err
+	}
+	if f.cfg.Peers != nil {
+		return fmt.Errorf("%w: L1 reorg to block %d, the seed is at L1 block %d", ErrSeedReorged, ancestor, f.floor)
 	}
 	f.logger.Info("[eez] L1 reorg dropped the resume point, resuming again", "ancestor", ancestor)
 	f.resumed = false
@@ -616,5 +796,8 @@ func halts(err error) bool {
 	}
 	return errors.Is(err, deriver.ErrDiverged) || errors.Is(err, deriver.ErrFinalizedReorged) ||
 		errors.Is(err, l1.ErrReorgTooDeep) || errors.Is(err, l1.ErrFinalityViolation) ||
-		errors.Is(err, l1.ErrUndecodable) || errors.Is(err, ErrL1ChainID) || errors.Is(err, ErrL1Reference)
+		errors.Is(err, l1.ErrUndecodable) || errors.Is(err, l1.ErrUnsupported) || errors.Is(err, ErrL1ChainID) || errors.Is(err, ErrL1Reference) ||
+		errors.Is(err, ErrSeedReorged) || errors.Is(err, ErrNotOnL1Chain) || errors.Is(err, ErrL1HistoryIncomplete) ||
+		errors.Is(err, l1.ErrNoStateReads) || errors.Is(err, l1.ErrZeroRoot) || errors.Is(err, l1.ErrNotRollups) ||
+		errors.Is(err, ErrPeerHistoryRefused)
 }

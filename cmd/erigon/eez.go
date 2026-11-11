@@ -43,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/node/eth"
 	"github.com/erigontech/erigon/node/ethconfig"
+	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/node/rulesconfig"
 	"github.com/erigontech/erigon/rpc/jsonrpc/receipts"
@@ -69,36 +70,40 @@ func haltError(err error) error {
 	return err
 }
 
+// setHeadRefusal is why an EEZ node refuses debug_setHead and
+// ETHBACKEND.SetHead, which would move the head behind the follower.
+const setHeadRefusal = "the EEZ follower is the chain's only driver"
+
 // errTestingAPI rejects the API that builds blocks on a follower's chain.
 var errTestingAPI = fmt.Errorf("%w: the testing API builds blocks; the follower must be the chain's only driver", eez.ErrConfig)
 
-// configureFollowerNode keeps the chain under <datadir>/eez and the node off
-// the P2P network: the follower is the chain's only source of blocks.
+// configureFollowerNode keeps the chain under <datadir>/eez.
 func configureFollowerNode(cfg *nodecfg.Config) error {
 	if slices.Contains(cfg.Http.API, "testing") {
 		return errTestingAPI
 	}
 	cfg.Dirs = eez.Dirs(cfg.Dirs)
-	cfg.P2P.MaxPeers = 0
-	cfg.P2P.NoDiscovery = true
 	return nil
 }
 
 // configureFollowerEth turns off every other driver and source of the
-// chain: consensus layer, engine API, txpool and snapshot downloader.
+// chain: consensus layer, engine API, head moves on request, txpool and
+// snapshot downloader.
 func configureFollowerEth(cfg *ethconfig.Config) {
 	cfg.InternalCL = false
 	cfg.NoEngineAPI = true
+	cfg.SetHeadRefusal = setHeadRefusal
 	cfg.TxPool.Disable = true
 	cfg.Snapshot.NoDownloader = true
 }
 
 // allInOneConfigs returns the configuration of the EEZ chain cfg.Chain that
 // an all-in-one node runs beside the L1 chain of l1Node and l1Eth: the L1's
-// settings under eez.AllInOneDirs, off the P2P network, on its own HTTP-RPC
-// port, without private API, engine API, consensus layer, txpool, downloader
-// or MCP server, and with none of the L1's chain-specific settings.
-func allInOneConfigs(l1Node *nodecfg.Config, l1Eth *ethconfig.Config, cfg *eez.Config) (*nodecfg.Config, *ethconfig.Config, error) {
+// settings under eez.AllInOneDirs, with its own devp2p network
+// (configureAllInOneNetwork) and HTTP-RPC port, without private API, engine
+// API, consensus layer, head moves on request, txpool, downloader or MCP
+// server, and with none of the L1's chain-specific settings.
+func allInOneConfigs(ctx context.Context, l1Node *nodecfg.Config, l1Eth *ethconfig.Config, cfg *eez.Config, logger log.Logger) (*nodecfg.Config, *ethconfig.Config, error) {
 	if slices.Contains(cfg.HTTPAPI, "testing") {
 		return nil, nil, errTestingAPI
 	}
@@ -115,8 +120,6 @@ func allInOneConfigs(l1Node *nodecfg.Config, l1Eth *ethconfig.Config, cfg *eez.C
 
 	n := *l1Node
 	n.Dirs = eez.AllInOneDirs(l1Node.Dirs)
-	n.P2P.MaxPeers, n.P2P.NoDiscovery = 0, true
-	n.DisableSentry = true
 	n.PrivateApiAddr = ""
 	n.Http.Dirs, n.Http.DataDir = n.Dirs, n.Dirs.DataDir
 	n.Http.HttpPort, n.Http.WebsocketPort = cfg.HTTPPort, cfg.HTTPPort
@@ -141,23 +144,28 @@ func allInOneConfigs(l1Node *nodecfg.Config, l1Eth *ethconfig.Config, cfg *eez.C
 	e.OverrideOsakaTime, e.OverrideAmsterdamTime = nil, nil
 	e.InternalCL = false
 	e.NoEngineAPI = true
+	e.SetHeadRefusal = setHeadRefusal
 	e.TxPool.Disable = true
 	e.Shutter.Enabled = false
 	e.Ethstats, e.MCPAddress = "", ""
 	e.ExtraAPIs = nil
 	e.WarmupKzgCtxOnInit = false
+	if err := configureAllInOneNetwork(ctx, &n, &e, cfg, logger); err != nil {
+		return nil, nil, err
+	}
 	n.Http.Snap = e.Snapshot
 	return &n, &e, nil
 }
 
 // startStandalone registers on n, the node of an EEZ chain, its follower,
-// which reads the L1 node of cfg.
-func startStandalone(ctx context.Context, n *node.ErigonNode, cfg *eez.Config, api *eezrpc.API, dirs datadir.Dirs, logger log.Logger) (*follower.Service, error) {
+// which reads the L1 node of cfg and syncs from L2 peers loopBlockLimit
+// blocks at a time.
+func startStandalone(ctx context.Context, n *node.ErigonNode, cfg *eez.Config, api *eezrpc.API, dirs datadir.Dirs, loopBlockLimit uint, logger log.Logger) (*follower.Service, error) {
 	reader, err := dialL1(ctx, cfg, dirs, logger)
 	if err != nil {
 		return nil, err
 	}
-	return startFollower(ctx, n, n, reader, cfg, api, dirs, eez.Dir(dirs), logger)
+	return startFollower(ctx, n, n, reader, cfg, api, dirs, eez.Dir(dirs), loopBlockLimit, logger)
 }
 
 // allInOneTracer returns the EEZ chain's own instance of the --vmtrace tracer
@@ -183,7 +191,7 @@ func startAllInOne(ctx context.Context, l1Node *node.ErigonNode, l1Dirs datadir.
 	var svc *follower.Service
 	reader, err := localL1(ctx, l1Node.Backend(), l1Dirs, logger)
 	if err == nil {
-		svc, err = startFollower(ctx, l2Node, l1Node, reader, cfg, api, nodeCfg.Dirs, nodeCfg.Dirs.DataDir, logger)
+		svc, err = startFollower(ctx, l2Node, l1Node, reader, cfg, api, nodeCfg.Dirs, nodeCfg.Dirs.DataDir, ethCfg.Sync.LoopBlockLimit, logger)
 	}
 	if err != nil {
 		l2Node.Close()
@@ -204,7 +212,22 @@ func localL1(ctx context.Context, backend *eth.Ethereum, dirs datadir.Dirs, logg
 	blockReader, _ := backend.BlockIO()
 	engine := rulesconfig.CreateRulesEngineBareBones(ctx, chainConfig, logger)
 	gen := receipts.NewGenerator(dirs, blockReader, engine, nil, time.Minute)
-	return l1.NewLocal(db, blockReader, gen, chainConfig, backend.Notifications().Events), nil
+	return l1.NewLocal(db, blockReader, gen, engine, chainConfig, backend.Notifications().Events), nil
+}
+
+// sentryPeers counts the peers of the sentries of backend.
+func sentryPeers(backend *eth.Ethereum) func(context.Context) (uint64, error) {
+	return func(ctx context.Context) (uint64, error) {
+		var n uint64
+		for _, s := range backend.SentryControlServer().Sentries() {
+			r, err := s.PeerCount(ctx, &sentryproto.PeerCountRequest{})
+			if err != nil {
+				return 0, err
+			}
+			n += r.Count
+		}
+		return n, nil
+	}
 }
 
 // dialL1 connects to the L1 node of cfg.
@@ -218,10 +241,17 @@ func dialL1(ctx context.Context, cfg *eez.Config, dirs datadir.Dirs, logger log.
 // startFollower registers on n the follower of its EEZ chain, reading L1
 // from reader and keeping its stores in dir. When it halts on its own it
 // closes stop, the node whose exit ends the process.
-func startFollower(ctx context.Context, n *node.ErigonNode, stop interface{ Close() }, reader l1.ChainReader, cfg *eez.Config, api *eezrpc.API, dirs datadir.Dirs, dir string, logger log.Logger) (*follower.Service, error) {
+func startFollower(ctx context.Context, n *node.ErigonNode, stop interface{ Close() }, reader l1.ChainReader, cfg *eez.Config, api *eezrpc.API, dirs datadir.Dirs, dir string, loopBlockLimit uint, logger log.Logger) (*follower.Service, error) {
 	backend := n.Backend()
 	chainConfig := backend.ChainConfig()
 	if err := cfg.L2.Check(chainConfig); err != nil {
+		return nil, err
+	}
+	l1Only, err := cfg.L1Only(chainConfig)
+	if err != nil {
+		return nil, err
+	}
+	if err := cfg.CheckChain(chainConfig); err != nil {
 		return nil, err
 	}
 	db, ok := backend.ChainDB().(kv.TemporalRwDB)
@@ -248,6 +278,18 @@ func startFollower(ctx context.Context, n *node.ErigonNode, stop interface{ Clos
 			return nil, err
 		}
 	}
+	fc.PeerCount = sentryPeers(backend)
+	fetcher := follower.NewFetcher(backend.BackwardBlockDownloader(), fc.PeerCount, chain, logger)
+	if !l1Only {
+		fc.Peers = fetcher
+		fc.LoopBlockLimit = uint64(loopBlockLimit)
+	}
+	if cfg.P2PListen != nil {
+		if fc.Heads, fc.OverlayPeerCount, err = startOverlay(n, cfg, chainConfig, logger); err != nil {
+			return nil, err
+		}
+		fc.Fetcher = fetcher
+	}
 	f, err := follower.New(reader, chain, chainConfig, fc, logger)
 	if err != nil {
 		return nil, err
@@ -262,6 +304,6 @@ func startFollower(ctx context.Context, n *node.ErigonNode, stop interface{ Clos
 	if cfg.AllInOne() {
 		l1Source = "in-process"
 	}
-	logger.Info("[eez] follower mode", "chaindata", dirs.Chaindata, "l1", l1Source)
+	logger.Info("[eez] follower mode", "chaindata", dirs.Chaindata, "l1", l1Source, "l1Only", l1Only)
 	return svc, nil
 }

@@ -30,18 +30,21 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/eez/l1"
 	"github.com/erigontech/erigon/eez/l1/l1test"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/jsonrpc"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 )
 
-// TestRPCConformance is T-L1-1 against an Erigon L1 serving JSON-RPC.
-func TestRPCConformance(t *testing.T) {
-	m, model := l1test.ErigonL1(t)
+// erigonRPC returns the rpc reader of m serving JSON-RPC.
+func erigonRPC(t *testing.T, m *execmoduletester.ExecModuleTester) *l1.RPC {
+	t.Helper()
 	logger := log.New()
 	api := jsonrpc.NewEthAPI(jsonrpc.NewBaseApi(nil, m.StateCache, m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs}),
 		m.DB, nil, nil, nil, &rpccfg.EthApiConfig{
@@ -51,16 +54,50 @@ func TestRPCConformance(t *testing.T) {
 			RpcTxSyncDefaultTimeout: time.Second,
 			RpcTxSyncMaxTimeout:     time.Second,
 		}, logger)
+	return serveRPC(t, api)
+}
+
+// serveRPC returns the rpc reader of a JSON-RPC server of the eth service.
+func serveRPC(t *testing.T, service any) *l1.RPC {
+	t.Helper()
+	logger := log.New()
 	server := rpc.NewServer(50, false, false, true, logger, 100)
-	require.NoError(t, server.RegisterName("eth", api))
+	require.NoError(t, server.RegisterName("eth", service))
 	t.Cleanup(server.Stop)
 	httpServer := httptest.NewServer(server)
 	t.Cleanup(httpServer.Close)
-
 	r, err := l1.DialRPC(context.Background(), httpServer.URL, logger)
 	require.NoError(t, err)
 	t.Cleanup(r.Close)
-	l1test.Conformance(t, r, model, l1test.SampleFilters)
+	return r
+}
+
+// TestRPCConformance is T-L1-1 against an Erigon L1 serving JSON-RPC.
+func TestRPCConformance(t *testing.T) {
+	m, model := l1test.ErigonL1(t)
+	l1test.Conformance(t, erigonRPC(t, m), model, l1test.SampleFilters)
+}
+
+// reverting answers every call with an execution revert whose reason reads
+// like a missing block.
+type reverting struct{}
+
+type revertError struct{}
+
+func (revertError) Error() string  { return "execution reverted: rollup not found" }
+func (revertError) ErrorCode() int { return 3 }
+func (revertError) ErrorData() any { return hexutil.Encode(l1test.RevertReason) }
+
+func (reverting) Call(context.Context, map[string]any, map[string]any) (hexutil.Bytes, error) {
+	return nil, revertError{}
+}
+
+// TestRPCRevert: a revert is ErrReverted whatever its reason says.
+func TestRPCRevert(t *testing.T) {
+	_, err := serveRPC(t, reverting{}).CallAt(t.Context(), l1test.RevertingCall, common.Hash{1})
+	require.ErrorIs(t, err, l1.ErrReverted)
+	require.NotErrorIs(t, err, l1.ErrNotFound)
+	require.ErrorContains(t, err, "rollup not found")
 }
 
 // TestServerConformance is T-L1-1 for the rpc reader over l1test.NewServer,
@@ -95,7 +132,32 @@ func TestRPCErrorMapping(t *testing.T) {
 	}
 	err := l1.MapRPCError(errors.New("connection refused"), "call")
 	require.False(t, errors.Is(err, l1.ErrRangeTooWide) || errors.Is(err, l1.ErrNotFound))
+
+	for _, msg := range []string{`hash "0x1f" is not currently canonical`, "0x1f block is not canonical"} {
+		err = l1.MapRPCError(errors.New(msg), "call")
+		require.ErrorIs(t, err, l1.ErrNotCanonical, msg)
+		require.ErrorIs(t, err, l1.ErrNotFound, msg)
+	}
+	for _, msg := range []string{"block not found: 0x1f", "block 11 is not executed (last executed: 10)"} {
+		err = l1.MapRPCError(errors.New(msg), "call")
+		require.ErrorIs(t, err, l1.ErrNotFound, msg)
+		require.NotErrorIs(t, err, l1.ErrNotCanonical, msg)
+	}
+
+	// EIP-4444 history expiry: the source will never serve the block.
+	for _, e := range []error{errors.New("pruned history unavailable"), prunedError{}} {
+		err = l1.MapRPCError(e, "call")
+		require.ErrorIs(t, err, l1.ErrNotFound, e.Error())
+		require.ErrorIs(t, err, l1.ErrBeforeHistory, e.Error())
+	}
 }
+
+// prunedError is the JSON-RPC error of a node that expired a block's
+// history.
+type prunedError struct{}
+
+func (prunedError) Error() string  { return "history expired" }
+func (prunedError) ErrorCode() int { return 4444 }
 
 // TestRPCTransportError checks that a failed connection prints the call, the
 // socket operation, the remote address and the system error only.

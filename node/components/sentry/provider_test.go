@@ -148,6 +148,31 @@ func TestStartSharedP2PServer_DedupesAndInjects(t *testing.T) {
 	require.Same(t, p.sharedP2PServer, second.GetP2PServer())
 }
 
+func TestProviderP2PServer(t *testing.T) {
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+
+	p := &Provider{
+		logger: log.Root(),
+		cfg:    Config{SentryCtx: t.Context()},
+	}
+	require.Nil(t, p.P2PServer(), "before the shared server starts")
+	p.Servers = []*sentry.GrpcServer{helperGrpcServerWithProtocols(p2p.Protocol{Name: "eth", Version: 69, Length: 17})}
+	cfg := p2p.Config{
+		PrivateKey:      key,
+		MaxPeers:        1,
+		MaxPendingPeers: 1,
+		NoDiscovery:     true,
+		NoDial:          true,
+	}
+	require.NoError(t, p.startSharedP2PServer(&cfg, nil, ""))
+	require.NotNil(t, p.P2PServer())
+	require.Same(t, p.Servers[0].GetP2PServer(), p.P2PServer())
+
+	require.NoError(t, p.Close())
+	require.Nil(t, p.P2PServer(), "after Close")
+}
+
 // TestProviderClose_StopsSharedP2PServer mirrors the GrpcServer-side test:
 // Provider.Close must stop the shared p2p.Server it created (GrpcServer.Close
 // is a no-op for external servers by design). We bind an ephemeral listener

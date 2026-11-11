@@ -19,11 +19,13 @@ package l1test
 
 import (
 	"context"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/eez/l1"
 	"github.com/erigontech/erigon/eez/l1/recording"
 	"github.com/erigontech/erigon/execution/types"
@@ -36,7 +38,8 @@ type Filter struct {
 }
 
 // Conformance runs the T-L1-1 scenarios against r and requires the answers
-// want gives. Every implementation must pass it on the same chain.
+// want gives. Every implementation must pass it on the same chain; on a
+// chain with recorded state reads, r must be an l1.StateReader.
 func Conformance(t *testing.T, r l1.ChainReader, want *recording.MemoryChain, filters []Filter) {
 	t.Helper()
 	ctx := context.Background()
@@ -102,6 +105,65 @@ func Conformance(t *testing.T, r l1.ChainReader, want *recording.MemoryChain, fi
 		_, err := r.TransactionByBlockHashAndIndex(ctx, b.Header.Hash, uint64(len(b.Txs)))
 		require.ErrorIs(t, err, l1.ErrNotFound, "transaction past the last of block %d", b.Header.Number)
 	}
+
+	if slices.ContainsFunc(canonical, func(b *recording.Block) bool { return len(b.Code) > 0 || len(b.Calls) > 0 }) {
+		sr, ok := r.(l1.StateReader)
+		require.True(t, ok, "%T serves no state reads", r)
+		conformState(t, r, sr, want)
+	}
+}
+
+// conformState requires r to answer the state reads want records at its
+// canonical blocks, and to refuse them at orphaned and unknown ones.
+func conformState(t *testing.T, r l1.ChainReader, sr l1.StateReader, want *recording.MemoryChain) {
+	t.Helper()
+	ctx := context.Background()
+	for _, b := range want.Canonical() {
+		for addr, code := range b.Code {
+			got, err := sr.CodeAt(ctx, addr, b.Header.Hash)
+			require.NoError(t, err, "code of %x at block %d", addr, b.Header.Number)
+			require.Equal(t, hexutil.Encode(code), hexutil.Encode(got), "code of %x at block %d", addr, b.Header.Number)
+		}
+		for _, c := range b.Calls {
+			got, err := sr.CallAt(ctx, c.Call, b.Header.Hash)
+			if c.Reverted {
+				require.ErrorIs(t, err, l1.ErrReverted, "reverting call to %x at block %d", c.Call.To, b.Header.Number)
+				require.NotErrorIs(t, err, l1.ErrNotFound, "reverting call to %x at block %d", c.Call.To, b.Header.Number)
+				continue
+			}
+			require.NoError(t, err, "call to %x at block %d", c.Call.To, b.Header.Number)
+			require.Equal(t, hexutil.Encode(c.Return), hexutil.Encode(got), "call to %x at block %d", c.Call.To, b.Header.Number)
+		}
+	}
+
+	orphans := want.Orphans()
+	require.NotEmpty(t, orphans)
+	for _, b := range orphans {
+		// A source that no longer holds the block cannot tell it is orphaned.
+		_, herr := r.HeaderByHash(ctx, b.Header.Hash)
+		refused := func(err error, what string) {
+			require.ErrorIs(t, err, l1.ErrNotFound, "%s at orphan %x", what, b.Header.Hash)
+			if herr == nil {
+				require.ErrorIs(t, err, l1.ErrNotCanonical, "%s at orphan %x", what, b.Header.Hash)
+			}
+		}
+		for addr := range b.Code {
+			_, err := sr.CodeAt(ctx, addr, b.Header.Hash)
+			refused(err, "code")
+		}
+		for _, c := range b.Calls {
+			_, err := sr.CallAt(ctx, c.Call, b.Header.Hash)
+			refused(err, "call")
+		}
+	}
+
+	unknown := common.Hash{0xde, 0xad}
+	_, err := sr.CodeAt(ctx, Registry, unknown)
+	require.ErrorIs(t, err, l1.ErrNotFound, "code at an unknown block")
+	require.NotErrorIs(t, err, l1.ErrNotCanonical, "code at an unknown block")
+	_, err = sr.CallAt(ctx, RollupsCall, unknown)
+	require.ErrorIs(t, err, l1.ErrNotFound, "call at an unknown block")
+	require.NotErrorIs(t, err, l1.ErrNotCanonical, "call at an unknown block")
 }
 
 func requireLogs(t *testing.T, want, got []*types.Log, msg string, args ...any) {

@@ -92,17 +92,47 @@ func settlement(r deriver.Record) *Settlement {
 	return &Settlement{L1Block: hexutil.Uint64(r.L1Block), L1BlockHash: r.L1BlockHash, TxHash: r.TxHash, L2Block: hexutil.Uint64(r.LastL2Block)}
 }
 
-// FollowerStatus is the result of eez_followerStatus.
-type FollowerStatus struct {
-	L1Scanned      hexutil.Uint64 `json:"l1Scanned"`
-	L1Finalized    hexutil.Uint64 `json:"l1Finalized"`
-	Cursor         hexutil.Uint64 `json:"cursor"`
-	Safe           hexutil.Uint64 `json:"safe"`
-	Finalized      hexutil.Uint64 `json:"finalized"`
-	LastSettlement *Settlement    `json:"lastSettlement"`
+// Anchor is L1's finalized block and the rollup's root there, as the
+// follower's boot read them. Root is null when the rollup is not registered
+// at that block, l2Block until the local chain holds the root.
+type Anchor struct {
+	L1Block     hexutil.Uint64  `json:"l1Block"`
+	L1BlockHash common.Hash     `json:"l1BlockHash"`
+	Root        *common.Hash    `json:"root"`
+	L2Block     *hexutil.Uint64 `json:"l2Block"`
 }
 
-// FollowerStatus is eez_followerStatus: how far the follower derived.
+// SignedHead is the latest head of a signing source: a signer and the
+// epoch its signing process started at.
+type SignedHead struct {
+	Signer  common.Address `json:"signer"`
+	EpochMs hexutil.Uint64 `json:"epochMs"`
+	Counter hexutil.Uint64 `json:"counter"`
+	Number  hexutil.Uint64 `json:"number"`
+	Hash    common.Hash    `json:"hash"`
+}
+
+// FollowerStatus is the result of eez_followerStatus. OverlayPeers and
+// SignedHeads are null without the signed-head overlay, HeadSource while
+// nothing has moved the head since boot.
+type FollowerStatus struct {
+	L1Scanned      hexutil.Uint64       `json:"l1Scanned"`
+	L1Finalized    hexutil.Uint64       `json:"l1Finalized"`
+	Cursor         hexutil.Uint64       `json:"cursor"`
+	Safe           hexutil.Uint64       `json:"safe"`
+	Finalized      hexutil.Uint64       `json:"finalized"`
+	LastSettlement *Settlement          `json:"lastSettlement"`
+	SyncMode       follower.SyncMode    `json:"syncMode"`
+	Phase          follower.Phase       `json:"phase"`
+	Anchor         *Anchor              `json:"anchor"`
+	Peers          hexutil.Uint64       `json:"peers"`
+	OverlayPeers   *hexutil.Uint64      `json:"overlayPeers"`
+	SignedHeads    []SignedHead         `json:"signedHeads"`
+	HeadSource     *follower.HeadSource `json:"headSource"`
+}
+
+// FollowerStatus is eez_followerStatus: how far the follower derived, where
+// it takes its history and its head from, and its peers.
 func (a *API) FollowerStatus(context.Context) (*FollowerStatus, error) {
 	f := a.follower.Load()
 	if f == nil {
@@ -115,9 +145,38 @@ func (a *API) FollowerStatus(context.Context) (*FollowerStatus, error) {
 		Cursor:      hexutil.Uint64(s.Cursor),
 		Safe:        hexutil.Uint64(s.Safe),
 		Finalized:   hexutil.Uint64(s.Finalized),
+		SyncMode:    s.Mode,
+		Phase:       s.Phase,
+		Peers:       hexutil.Uint64(s.Peers),
 	}
 	if s.Last != nil {
 		out.LastSettlement = settlement(*s.Last)
+	}
+	if anchor := s.Anchor; anchor != nil {
+		out.Anchor = &Anchor{L1Block: hexutil.Uint64(anchor.L1Block), L1BlockHash: anchor.L1BlockHash, Root: anchor.Root}
+		if anchor.L2Block != nil {
+			n := hexutil.Uint64(*anchor.L2Block)
+			out.Anchor.L2Block = &n
+		}
+	}
+	if s.OverlayPeers != nil {
+		n := hexutil.Uint64(*s.OverlayPeers)
+		out.OverlayPeers = &n
+	}
+	if s.SignedHeads != nil {
+		out.SignedHeads = make([]SignedHead, len(s.SignedHeads))
+		for i, h := range s.SignedHeads {
+			out.SignedHeads[i] = SignedHead{
+				Signer:  h.Signer,
+				EpochMs: hexutil.Uint64(h.Head.EpochMs),
+				Counter: hexutil.Uint64(h.Head.Counter),
+				Number:  hexutil.Uint64(h.Head.Number),
+				Hash:    h.Head.BlockHash,
+			}
+		}
+	}
+	if s.HeadSource != "" {
+		out.HeadSource = &s.HeadSource
 	}
 	return out, nil
 }

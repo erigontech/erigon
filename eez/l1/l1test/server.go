@@ -19,6 +19,7 @@ package l1test
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -112,4 +113,70 @@ func (s *ethService) GetTransactionByBlockHashAndIndex(ctx context.Context, hash
 		return nil, err
 	}
 	return ethapi.NewRPCTransaction(tx, hash, h.Time, h.Number, uint64(index), nil), nil
+}
+
+func (s *ethService) GetCode(ctx context.Context, addr common.Address, at rpc.BlockNumberOrHash) (hexutil.Bytes, error) {
+	sr, hash, err := s.stateAt(at)
+	if err != nil {
+		return nil, err
+	}
+	code, err := sr.CodeAt(ctx, addr, hash)
+	if err != nil {
+		return nil, stateError(hash, err)
+	}
+	return append(hexutil.Bytes{}, code...), nil
+}
+
+func (s *ethService) Call(ctx context.Context, args ethapi.CallArgs, at rpc.BlockNumberOrHash) (hexutil.Bytes, error) {
+	sr, hash, err := s.stateAt(at)
+	if err != nil {
+		return nil, err
+	}
+	if args.To == nil {
+		return nil, errors.New("call without a recipient")
+	}
+	call := l1.Call{To: *args.To}
+	if args.Input != nil {
+		call.Data = *args.Input
+	} else if args.Data != nil {
+		call.Data = *args.Data
+	}
+	out, err := sr.CallAt(ctx, call, hash)
+	if err != nil {
+		return nil, stateError(hash, err)
+	}
+	return append(hexutil.Bytes{}, out...), nil
+}
+
+// stateAt serves state reads only at a block hash required canonical, the
+// one form the rpc reader sends.
+func (s *ethService) stateAt(at rpc.BlockNumberOrHash) (l1.StateReader, common.Hash, error) {
+	sr, ok := s.r.(l1.StateReader)
+	if !ok {
+		return nil, common.Hash{}, errors.New("state reads not served")
+	}
+	hash, ok := at.Hash()
+	if !ok || !at.RequireCanonical {
+		return nil, common.Hash{}, fmt.Errorf("state read at %s, not at a block hash required canonical", at.String())
+	}
+	return sr, hash, nil
+}
+
+// revertError is an execution revert as a JSON-RPC error.
+type revertError struct{ err error }
+
+func (e revertError) Error() string  { return "execution reverted: " + e.err.Error() }
+func (e revertError) ErrorCode() int { return 3 }
+
+// stateError words a refused state read as an Erigon L1 node does.
+func stateError(hash common.Hash, err error) error {
+	switch {
+	case errors.Is(err, l1.ErrReverted):
+		return revertError{err}
+	case errors.Is(err, l1.ErrNotCanonical):
+		return fmt.Errorf("hash %x is not currently canonical", hash)
+	case errors.Is(err, l1.ErrNotFound):
+		return rpc.BlockNotFoundErr{BlockId: hash.String()}
+	}
+	return err
 }

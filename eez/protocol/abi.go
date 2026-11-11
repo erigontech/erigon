@@ -125,13 +125,22 @@ var (
 		l2TableArgs, nil)
 	executeIncomingCrossChainCallMethod = abi.NewMethod("executeIncomingCrossChainCall", "executeIncomingCrossChainCall", abi.Function, "payable", false, true,
 		l2TableArgs, abi.Arguments{{Name: "result", Type: mustType("bytes", nil)}})
+	// The registry's public getter of mapping(uint64 => RollupConfig) rollups.
+	rollupsMethod = abi.NewMethod("rollups", "rollups", abi.Function, "view", false, false,
+		abi.Arguments{{Name: "rollupId", Type: mustType("uint64", nil)}},
+		abi.Arguments{
+			{Name: "rollupContract", Type: mustType("address", nil)},
+			{Name: "root", Type: mustType("bytes32", nil)},
+			{Name: "etherBalance", Type: mustType("uint256", nil)},
+		})
 )
 
-// Selectors of the EEZ entrypoints.
+// Selectors of the EEZ entrypoints and getters.
 var (
 	PostAndVerifyBatchSelector            = [4]byte(postAndVerifyBatchMethod.ID)
 	LoadExecutionTableSelector            = [4]byte(loadExecutionTableMethod.ID)
 	ExecuteIncomingCrossChainCallSelector = [4]byte(executeIncomingCrossChainCallMethod.ID)
+	RollupsSelector                       = [4]byte(rollupsMethod.ID)
 )
 
 func mustType(t string, components []abi.ArgumentMarshaling) abi.Type {

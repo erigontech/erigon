@@ -98,3 +98,30 @@ func TestNonceAfterBlock(t *testing.T) {
 		require.Equal(t, 1+n, nonce, "after block %d", n)
 	}
 }
+
+// TestForkChoiceRefused: a fork choice the execution module refuses is
+// ErrForkChoiceRefused, and one to a chain holding a block that fails
+// validation also ErrBadBlock.
+func TestForkChoiceRefused(t *testing.T) {
+	c := derivertest.NewComposer(t)
+	b := c.Compose(nil,
+		derivertest.Block{Coinbase: common.HexToAddress("0xa11ce"), Extra: []byte{}, Txs: [][]byte{}},
+		derivertest.Block{Coinbase: common.HexToAddress("0xa11ce"), Extra: []byte{}, Txs: [][]byte{}},
+	)
+	_, chain := derivertest.NewL2(t)
+	require.NoError(t, chain.Insert(t.Context(), b.Blocks))
+	tip := b.Blocks[1].Hash()
+	require.NoError(t, chain.ForkChoice(t.Context(), tip, tip, tip))
+	err := chain.ForkChoice(t.Context(), b.Blocks[0].Hash(), tip, tip)
+	require.ErrorIs(t, err, deriver.ErrForkChoiceRefused, "finalized above the head")
+	require.NotErrorIs(t, err, deriver.ErrBadBlock)
+
+	h := b.Blocks[0].Header()
+	h.Root = common.Hash{0x01}
+	bad := types.NewBlockFromNetwork(h, b.Blocks[0].Body(), nil)
+	_, chain = derivertest.NewL2(t)
+	require.NoError(t, chain.Insert(t.Context(), []*types.Block{bad}))
+	err = chain.ForkChoice(t.Context(), bad.Hash(), common.Hash{}, common.Hash{})
+	require.ErrorIs(t, err, deriver.ErrForkChoiceRefused)
+	require.ErrorIs(t, err, deriver.ErrBadBlock)
+}

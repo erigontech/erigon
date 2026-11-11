@@ -147,6 +147,7 @@ type Ethereum struct {
 	genesisHash  common.Hash
 
 	execModule *execmodule.ExecModule
+	bbd        *execp2p.BackwardBlockDownloader
 
 	ethBackendRPC       *privateapi2.EthBackendServer
 	ethRpcClient        rpchelper.ApiBackend
@@ -643,7 +644,7 @@ func New(
 		backend.sentryProvider.ExecutionP2PPeerPenalizer,
 		backend.sentryProvider.ExecutionP2PPeerTracker,
 	)
-	bbd := execp2p.NewBackwardBlockDownloader(logger, executionFetcher, backend.sentryProvider.ExecutionP2PPeerPenalizer, backend.sentryProvider.ExecutionP2PPeerTracker, tmpdir, execp2p.WithBALFetcher(balFetcher))
+	backend.bbd = execp2p.NewBackwardBlockDownloader(logger, executionFetcher, backend.sentryProvider.ExecutionP2PPeerPenalizer, backend.sentryProvider.ExecutionP2PPeerTracker, tmpdir, execp2p.WithBALFetcher(balFetcher))
 
 	// MultiClient is the late-binding half of the Sentry Provider — it needs
 	// construction above.
@@ -950,7 +951,7 @@ func New(
 			backend.chainDB,
 			chainConfig,
 			config.Sync,
-			bbd,
+			backend.bbd,
 		),
 		config.InternalCL && !config.CaplinConfig.EnableEngineAPI, // If the chain supports the engine API, then we should not make the server fail.
 		config.InternalCL, // Suppress "no CL" warning when any embedded CL is active.
@@ -1361,7 +1362,13 @@ func (s *Ethereum) RemoveTrustedPeer(ctx context.Context, req *remoteproto.Remov
 	return &remoteproto.RemovePeerReply{Success: true}, nil
 }
 
+// ErrSetHeadRefused reports a head move the node refuses on request.
+var ErrSetHeadRefused = errors.New("moving the head on request is refused")
+
 func (s *Ethereum) SetHead(ctx context.Context, targetBlock uint64) error {
+	if r := s.config.SetHeadRefusal; r != "" {
+		return fmt.Errorf("%w: %s", ErrSetHeadRefused, r)
+	}
 	return s.execModule.SetHead(ctx, targetBlock)
 }
 
@@ -1543,6 +1550,12 @@ func (s *Ethereum) SentryControlServer() *sentry_multi_client.MultiClient {
 	return s.sentryProvider.Client
 }
 
+// P2PServer returns the devp2p server of the local sentry; nil with an
+// external or disabled sentry.
+func (s *Ethereum) P2PServer() *p2p.Server {
+	return s.sentryProvider.P2PServer()
+}
+
 func (s *Ethereum) BlockIO() (dbservices.FullBlockReader, *blockio.BlockWriter) {
 	return s.blockReader, s.blockWriter
 }
@@ -1557,6 +1570,12 @@ func (s *Ethereum) TxPool() *txpool.TxPool {
 
 func (s *Ethereum) ExecutionModule() *execmodule.ExecModule {
 	return s.execModule
+}
+
+// BackwardBlockDownloader returns the downloader of blocks by hash from the
+// node's peers, the one the engine API server uses.
+func (s *Ethereum) BackwardBlockDownloader() *execp2p.BackwardBlockDownloader {
+	return s.bbd
 }
 
 // RemoveContents is like dir.RemoveAll, but preserve dir itself

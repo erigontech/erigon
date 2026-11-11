@@ -113,11 +113,17 @@ func runErigon(ctx context.Context, cliCtx *cli.Command) (err error) {
 		ethCfg.ExtraAPIs = append(ethCfg.ExtraAPIs, eezAPI.API())
 		configureFollowerEth(ethCfg)
 	} else if eezCfg != nil {
-		if l2NodeCfg, l2EthCfg, err = allInOneConfigs(nodeCfg, ethCfg, eezCfg); err != nil {
+		if l2NodeCfg, l2EthCfg, err = allInOneConfigs(ctx, nodeCfg, ethCfg, eezCfg, logger); err != nil {
 			return err
 		}
 		l2EthCfg.ExtraAPIs = append(l2EthCfg.ExtraAPIs, eezAPI.API())
 		if err := backup.ApplyMigrations(ctx, l2NodeCfg.Dirs, logger); err != nil {
+			return err
+		}
+	}
+
+	if standalone {
+		if err := configureFollowerNetwork(ctx, cliCtx, nodeCfg, ethCfg, logger); err != nil {
 			return err
 		}
 	}
@@ -129,7 +135,7 @@ func runErigon(ctx context.Context, cliCtx *cli.Command) (err error) {
 	}
 	var followerSvc interface{ Err() error }
 	if standalone {
-		followerSvc, err = startStandalone(ctx, ethNode, eezCfg, eezAPI, nodeCfg.Dirs, logger)
+		followerSvc, err = startStandalone(ctx, ethNode, eezCfg, eezAPI, nodeCfg.Dirs, ethCfg.Sync.LoopBlockLimit, logger)
 	} else if eezCfg != nil {
 		followerSvc, err = startAllInOne(ctx, ethNode, nodeCfg.Dirs, l2NodeCfg, l2EthCfg, eezCfg, eezAPI, logger, cliCtx)
 	}

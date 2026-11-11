@@ -24,6 +24,7 @@ import (
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/shards"
@@ -38,14 +39,16 @@ type Local struct {
 
 var (
 	_ ChainReader  = (*Local)(nil)
+	_ StateReader  = (*Local)(nil)
 	_ HeadNotifier = (*Local)(nil)
 )
 
 // NewLocal returns the reader of the L1 chain config, reading its blocks
-// through the block reader blocks from db and its receipts from receipts; the
-// chain's execution announces its heads on events.
-func NewLocal(db kv.TemporalRoDB, blocks dbservices.FullBlockReader, receipts *receipts.Generator, config *chain.Config, events *shards.Events) *Local {
-	return &Local{Native: NewNative(db, blocks, receipts, config), events: events}
+// through the block reader blocks from db and its receipts from receipts, and
+// executing calls under the rules of engine; the chain's execution announces
+// its heads on events.
+func NewLocal(db kv.TemporalRoDB, blocks dbservices.FullBlockReader, receipts *receipts.Generator, engine rules.EngineReader, config *chain.Config, events *shards.Events) *Local {
+	return &Local{Native: NewNative(db, blocks, receipts, engine, config), events: events}
 }
 
 // commitWait bounds how long Heads holds a header event until the reader

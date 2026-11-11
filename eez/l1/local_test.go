@@ -35,7 +35,7 @@ import (
 // same process, which also pushes its new heads.
 func TestLocalConformance(t *testing.T) {
 	m, model := l1test.ErigonL1(t)
-	r := l1.NewLocal(m.DB, m.BlockReader, m.ReceiptsReader, m.ChainConfig, m.Notifications.Events)
+	r := l1.NewLocal(m.DB, m.BlockReader, m.ReceiptsReader, m.Engine, m.ChainConfig, m.Notifications.Events)
 	l1test.Conformance(t, r, model, l1test.SampleFilters)
 
 	ctx, cancel := context.WithCancel(t.Context())
@@ -78,7 +78,7 @@ func TestLocalConformance(t *testing.T) {
 // its head.
 func TestLocalHeadsAfterCommit(t *testing.T) {
 	m, _ := l1test.ErigonL1(t)
-	r := l1.NewLocal(m.DB, m.BlockReader, m.ReceiptsReader, m.ChainConfig, m.Notifications.Events)
+	r := l1.NewLocal(m.DB, m.BlockReader, m.ReceiptsReader, m.Engine, m.ChainConfig, m.Notifications.Events)
 	heads, err := r.Heads(t.Context())
 	require.NoError(t, err)
 	head, err := r.Head(t.Context())

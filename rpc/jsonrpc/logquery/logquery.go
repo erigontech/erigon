@@ -39,6 +39,22 @@ import (
 // ErrTooManyLogs reports a query that matches more logs than its limit.
 var ErrTooManyLogs = errors.New("query returns too many logs")
 
+// MissingError reports the header of a block with matched logs, or a matched
+// transaction, that the node does not hold.
+type MissingError struct {
+	Block uint64
+	// TxIndex is the matched transaction's index in the block, -1 for the
+	// header.
+	TxIndex int
+}
+
+func (e *MissingError) Error() string {
+	if e.TxIndex < 0 {
+		return fmt.Sprintf("header not found: %d", e.Block)
+	}
+	return fmt.Sprintf("transaction not found at block %d, index %d", e.Block, e.TxIndex)
+}
+
 // Query reads logs through a node's block readers and receipts.
 type Query struct {
 	TxNums   rawdbv3.TxNumsReader
@@ -74,7 +90,7 @@ func (q *Query) Logs(ctx context.Context, tx kv.TemporalTx, cfg *chain.Config, b
 				return nil, err
 			}
 			if header == nil {
-				return nil, fmt.Errorf("header not found: %d", blockNum)
+				return nil, &MissingError{Block: blockNum, TxIndex: -1}
 			}
 		}
 		if isSystemTxn {
@@ -97,7 +113,7 @@ func (q *Query) Logs(ctx context.Context, tx kv.TemporalTx, cfg *chain.Config, b
 				return nil, err
 			}
 			if !ok {
-				return nil, fmt.Errorf("transaction not found at block %d, index %d", blockNum, txIndex)
+				return nil, &MissingError{Block: blockNum, TxIndex: txIndex}
 			}
 			if r, err = q.Receipts.GetReceipt(ctx, cfg, tx, header, txn, txIndex, txNum, nil); err != nil {
 				return nil, err

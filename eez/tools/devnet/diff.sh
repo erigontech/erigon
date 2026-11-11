@@ -44,7 +44,7 @@ start_erigon() {
 	"$ERIGON" --eez.enabled --datadir "$DATADIR" \
 		--eez.l1.rpc "$EEZ_DEVNET_L1_RPC" --eez.l1.poll=1s --eez.sequencer.rpc "$EEZ_DEVNET_L2_RPC" \
 		--http.api=eth,debug,eez --http.port 18545 --authrpc.port 18551 --private.api.addr 127.0.0.1:19090 \
-		--port 30399 --torrent.port 42099 --log.console.verbosity=info >> "$OUT/erigon.log" 2>&1 &
+		--port 30399 --nodiscover --eez.sync.l1only=true --torrent.port 42099 --log.console.verbosity=info >> "$OUT/erigon.log" 2>&1 &
 	ERIGON_PID=$!
 	for _ in $(seq 120); do
 		rpc "$ERIGON_RPC" eez_followerStatus '[]' 2>/dev/null | jq -e '.result.safe' > /dev/null && return
@@ -81,6 +81,10 @@ log "starting the devnet"
 bash "$K/start.sh" "$OUT/args.yaml" > "$OUT/start.log" 2>&1 || { tail -50 "$OUT/start.log"; fail "start.sh"; }
 # shellcheck disable=SC1091
 source "$K/ports.sh" > /dev/null
+# eez-node is the enclave's only reference L2 node; it starts the chain, so
+# it has no peers and derives from L1 alone.
+node_service=$(kurtosis service inspect "$KURTOSIS_ENCLAVE" eez-node)
+grep -Eq '^[[:space:]]*EEZ_SYNC_L1_ONLY: 1$' <<< "$node_service" || fail "eez-node does not run with EEZ_SYNC_L1_ONLY=1"
 kurtosis files download "$KURTOSIS_ENCLAVE" eez-deployments "$OUT/deployments" > /dev/null
 env_value() { grep -E "^$1=" "$OUT/deployments/deployments.env" | head -1 | cut -d= -f2- | tr -d '"'; }
 registry=$(env_value EEZ_REGISTRY_ADDRESS)

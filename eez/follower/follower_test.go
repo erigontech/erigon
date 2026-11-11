@@ -95,11 +95,14 @@ func newNode(t *testing.T, reader l1.ChainReader) *node {
 }
 
 // restart returns a node with a fresh follower on chain, the checkpoint
-// directory kept.
-func (n *node) restart(t *testing.T, reader l1.ChainReader, chain deriver.Chain) *node {
+// directory kept, its configuration changed by opts.
+func (n *node) restart(t *testing.T, reader l1.ChainReader, chain deriver.Chain, opts ...func(*follower.Config)) *node {
 	t.Helper()
 	cfg := testConfig
 	cfg.Dir = n.dir
+	for _, o := range opts {
+		o(&cfg)
+	}
 	logs := &syncBuffer{}
 	logger := log.New()
 	logger.SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(logs, log.LogfmtFormat())))
@@ -123,12 +126,20 @@ func (n *node) requireBlocks(t *testing.T, want ...*types.Block) {
 	}, 10*time.Second, 5*time.Millisecond)
 }
 
+// run runs the node's follower until the test ends, which waits for it to
+// stop.
 func (n *node) run(t *testing.T) (cancel func(), done <-chan error) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
-	errc := make(chan error, 1)
-	go func() { errc <- n.follower.Run(ctx) }()
-	t.Cleanup(cancel)
+	errc, stopped := make(chan error, 1), make(chan struct{})
+	go func() {
+		defer close(stopped)
+		errc <- n.follower.Run(ctx)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-stopped
+	})
 	return cancel, errc
 }
 
@@ -343,6 +354,24 @@ func TestHaltOnDivergence(t *testing.T) {
 	// A boot that meets the divergence halts too.
 	again := n.restart(t, c.L1, n.chain.Chain)
 	require.ErrorIs(t, again.follower.Boot(t.Context()), deriver.ErrDiverged)
+}
+
+// TestHaltOnUnsupportedPost: a settlement the follower cannot verify, here
+// one binding an L1 block other than its own, halts it rather than retrying.
+func TestHaltOnUnsupportedPost(t *testing.T) {
+	c := derivertest.NewComposer(t)
+	n := newNode(t, c.L1)
+	_, done := n.run(t)
+	b := c.Compose(nil, derivertest.Block{Coinbase: alice, Extra: []byte{}, Txs: transfers(c, 1)})
+	b.Batch.BlockNumber = 5
+	c.Post(derivertest.Posting{Batch: b})
+
+	select {
+	case err := <-done:
+		require.ErrorIs(t, err, l1.ErrUnsupported)
+	case <-time.After(10 * time.Second):
+		t.Fatal("follower did not halt")
+	}
 }
 
 // staleLogs serves logs and transactions from a stale copy of the chain

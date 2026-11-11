@@ -196,6 +196,10 @@ func (p *Provider) Configure(cfg Config) {
 	p.logger = cfg.Logger
 }
 
+// P2PServer returns the devp2p server the local sentries share; nil with an
+// external or disabled sentry, before Initialize and after Close.
+func (p *Provider) P2PServer() *p2p.Server { return p.sharedP2PServer }
+
 // Initialize builds the sentry stack. In external-sentry mode (P2P.SentryAddr
 // set) it dials each external address via gRPC. In local mode it constructs
 // one sentry.GrpcServer per requested protocol version, wraps each in a

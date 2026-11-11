@@ -17,11 +17,40 @@ package protocol
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
+	"math"
 	"slices"
 
 	"github.com/erigontech/erigon/common"
 )
+
+// LiveBlockNumber is the blockNumber of a live batch, which binds the
+// timestamp and parent of the L1 block that includes it. A timeless batch
+// has blockNumber zero and binds no L1 context.
+const LiveBlockNumber = math.MaxUint64
+
+// SettlementCustomData returns the custom data the rollup manager binds for a
+// batch with blockNumber, included in an L1 block with timestamp time on
+// parent: none for a timeless batch, abi.encode(uint256(time),
+// bytes32(parent)) for a live one. Any other blockNumber selects custom data
+// that depends on L1 state.
+func SettlementCustomData(blockNumber, time uint64, parent common.Hash) ([]byte, error) {
+	switch blockNumber {
+	case 0:
+		return nil, nil
+	case LiveBlockNumber:
+		if time == 0 || parent == (common.Hash{}) {
+			return nil, errors.New("live batch without an L1 timestamp and parent")
+		}
+		data := make([]byte, 64)
+		binary.BigEndian.PutUint64(data[24:32], time)
+		copy(data[32:], parent[:])
+		return data, nil
+	default:
+		return nil, fmt.Errorf("blockNumber %d is neither timeless nor live", blockNumber)
+	}
+}
 
 // RollupPublicInput is one rollup's contribution to a batch's public inputs.
 type RollupPublicInput struct {
