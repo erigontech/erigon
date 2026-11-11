@@ -18,13 +18,19 @@ package remotedbserver
 
 import (
 	"context"
+	"errors"
 	"io"
 	"testing"
+	"testing/synctest"
+	"time"
 
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/node/direct"
+	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 )
 
@@ -62,6 +68,105 @@ func TestStateChangesSubscriptionStartsIncomplete(t *testing.T) {
 		require.ErrorIs(t, err, io.EOF)
 		server.SendStateChanges(t.Context(), &remoteproto.StateChangeBatch{})
 	}
+}
+
+func TestStateChangesReconnectReceivesCurrentHead(t *testing.T) {
+	server := NewKvServer(t.Context(), nil, nil, nil, log.New())
+	first, remove := server.stateChangeStreams.Sub(nil)
+	server.SendStateChanges(t.Context(), &remoteproto.StateChangeBatch{
+		StateVersionId: 1,
+		ChangeBatch: []*remoteproto.StateChange{{
+			BlockHeight: 10, BlockHash: gointerfaces.ConvertHashToH256(common.Hash{1}),
+		}},
+	})
+	<-first
+	remove()
+
+	head := &remoteproto.StateChange{
+		BlockHeight: 10, BlockHash: gointerfaces.ConvertHashToH256(common.Hash{2}),
+		BlockTime: 120, SlotNumber: common.NewUint64(11),
+	}
+	changed := proto.Clone(head).(*remoteproto.StateChange)
+	changed.Txs = [][]byte{{1}}
+	changed.Changes = []*remoteproto.AccountChange{{Action: remoteproto.Action_REMOVE}}
+	batch := &remoteproto.StateChangeBatch{
+		StateVersionId: 2, PendingBlockBaseFee: 3, PendingBlobFeePerGas: 4,
+		BlockGasLimit: 30_000_000, FinalizedBlock: 8,
+		ChangeBatch: []*remoteproto.StateChange{
+			{Direction: remoteproto.Direction_UNWIND, BlockHeight: 9, Txs: [][]byte{{2}}},
+			changed,
+		},
+	}
+	server.SendStateChanges(t.Context(), batch)
+	second, remove := server.stateChangeStreams.Sub(nil)
+	defer remove()
+	select {
+	case event := <-second:
+		want := &remoteproto.StateChangeBatch{
+			StateVersionId: 2, StateChangesIncomplete: true,
+			PendingBlockBaseFee: 3, PendingBlobFeePerGas: 4,
+			BlockGasLimit: 30_000_000, FinalizedBlock: 8,
+			ChangeBatch: []*remoteproto.StateChange{head},
+		}
+		require.True(t, proto.Equal(want, event.batch), "reset must carry the latest head metadata without old deltas: %v", event.batch)
+		require.False(t, batch.StateChangesIncomplete, "published batches must remain unchanged")
+	default:
+		t.Fatal("reconnecting must receive the current head without another publication")
+	}
+}
+
+func TestStateChangesSnapshotDoesNotInvalidateNextPublication(t *testing.T) {
+	server := NewKvServer(t.Context(), nil, nil, nil, log.New())
+	server.SetStateChangesSnapshot(func(context.Context) (*remoteproto.StateChangeBatch, error) {
+		return &remoteproto.StateChangeBatch{StateChangesIncomplete: true}, nil
+	})
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	stream, err := direct.NewStateDiffClientDirect(server).StateChanges(ctx, &remoteproto.StateChangeRequest{})
+	require.NoError(t, err)
+	reset, err := stream.Recv()
+	require.NoError(t, err)
+	require.True(t, reset.StateChangesIncomplete)
+	server.SendStateChanges(ctx, &remoteproto.StateChangeBatch{StateVersionId: 1})
+	next, err := stream.Recv()
+	require.NoError(t, err)
+	require.False(t, next.StateChangesIncomplete, "the first publication follows the reset without a gap")
+}
+
+func TestStateChangesKeepsPublicationDuringSnapshot(t *testing.T) {
+	server := NewKvServer(t.Context(), nil, nil, nil, log.New())
+	newHead := &remoteproto.StateChange{BlockHeight: 2, BlockHash: gointerfaces.ConvertHashToH256(common.Hash{2})}
+	server.SetStateChangesSnapshot(func(context.Context) (*remoteproto.StateChangeBatch, error) {
+		server.SendStateChanges(t.Context(), &remoteproto.StateChangeBatch{StateVersionId: 2, ChangeBatch: []*remoteproto.StateChange{newHead}})
+		return &remoteproto.StateChangeBatch{StateVersionId: 1, StateChangesIncomplete: true}, nil
+	})
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	stream, err := direct.NewStateDiffClientDirect(server).StateChanges(ctx, &remoteproto.StateChangeRequest{})
+	require.NoError(t, err)
+	reset, err := stream.Recv()
+	require.NoError(t, err)
+	require.Equal(t, uint64(2), reset.StateVersionId)
+	require.True(t, reset.StateChangesIncomplete)
+	require.Len(t, reset.ChangeBatch, 1)
+	require.True(t, proto.Equal(newHead, reset.ChangeBatch[0]))
+}
+
+func TestStateChangesSnapshotError(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+		defer cancel()
+		server := NewKvServer(ctx, nil, nil, nil, log.New())
+		readErr := errors.New("snapshot read failed")
+		server.SetStateChangesSnapshot(func(context.Context) (*remoteproto.StateChangeBatch, error) {
+			return nil, readErr
+		})
+		stream, err := direct.NewStateDiffClientDirect(server).StateChanges(ctx, &remoteproto.StateChangeRequest{})
+		require.NoError(t, err)
+		_, err = stream.Recv()
+		require.ErrorIs(t, err, readErr)
+		require.NoError(t, ctx.Err(), "the setup error must arrive without waiting for cancellation")
+	})
 }
 
 func TestStateChangesSubscriberOverflow(t *testing.T) {

@@ -127,7 +127,7 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 		// the payload is delivered separately via a SignedExecutionPayloadEnvelope.
 		if block.Version() >= clparams.GloasVersion {
 			if env, ok := envelopes[blockRoot]; ok {
-				if err = processDownloadedGloasEnvelope(ctx, logger, cfg.forkChoice, cfg.blockCollector, block.Block, blockRoot, env, shouldInsert, shouldValidateForwardSyncPayload(cfg, shouldInsert)); err != nil {
+				if err = processDownloadedGloasEnvelope(ctx, logger, cfg.forkChoice, cfg.blockCollector, block.Block, blockRoot, env, shouldInsert, shouldValidateForwardSyncPayload(cfg, shouldInsert), false); err != nil {
 					return highestBlockProcessed, fmt.Errorf("%w: %w", network2.ErrUnattributableProcess, err)
 				}
 			}
@@ -168,6 +168,9 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 		if !collectExecution {
 			continue
 		}
+		if _, accepted := cfg.forkChoice.GetHeader(blockRoot); !accepted {
+			continue
+		}
 		// Add the block to the block collector (pre-GLOAS only)
 		if err = cfg.blockCollector.AddBlock(block.Block); err != nil {
 			// Return an error if adding the block to the collector fails
@@ -182,12 +185,14 @@ type gloasBlockCollector interface {
 	AddGloasBlock(*cltypes.BeaconBlock, *cltypes.SignedExecutionPayloadEnvelope) error
 }
 
-func processDownloadedGloasEnvelope(ctx context.Context, logger log.Logger, store forkchoice.ForkChoiceStorage, collector gloasBlockCollector, block *cltypes.BeaconBlock, blockRoot common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope, shouldInsert, validate bool) error {
-	err := store.OnExecutionPayload(ctx, envelope, false, validate)
+func processDownloadedGloasEnvelope(ctx context.Context, logger log.Logger, store forkchoice.ForkChoiceStorage, collector gloasBlockCollector, block *cltypes.BeaconBlock, blockRoot common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope, shouldInsert, validate, checkBlobData bool) error {
+	err := store.OnExecutionPayload(ctx, envelope, checkBlobData, validate)
 	persisted := errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeIndicesPending) ||
 		(errors.Is(err, forkchoice.ErrIgnore) && persistedEnvelopeMatches(store, blockRoot, envelope))
 	if err != nil && !persisted {
-		logger.Warn("[Caplin] forward sync: failed to process GLOAS envelope", "slot", block.Slot, "err", err)
+		if !errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
+			logger.Warn("[Caplin] forward sync: failed to process GLOAS envelope", "slot", block.Slot, "err", err)
+		}
 		return err
 	}
 	if shouldInsert {
@@ -309,10 +314,45 @@ func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) er
 	}
 	lastProgressTime := time.Now()
 	lastProgressSlot := currentSlot.Load()
+	endedAtTip := false
+	importTip := func(tip *cltypes.SignedBeaconBlock, root common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope, receivedAt time.Time) bool {
+		if _, known := cfg.forkChoice.GetHeader(root); !known {
+			return false
+		}
+		if envelope == nil {
+			return true
+		}
+		// The apply checks data availability before the signature, and may not check the signature at all.
+		err := cfg.forkChoice.ValidateExecutionPayloadEnvelopeForGossip(envelope)
+		if err == nil {
+			err = cltypes.ValidateExecutionPayloadEnvelopeBidCommitments(cfg.beaconCfg, tip, envelope)
+		}
+		if err != nil {
+			logger.Debug("[Caplin] forward sync: tip envelope failed validation", "slot", tip.Block.Slot, "root", root, "err", err)
+			return false
+		}
+		cfg.forkChoice.RecordExecutionPayloadArrival(root, tip.Block.Slot, receivedAt)
+		err = processDownloadedGloasEnvelope(ctx, logger, cfg.forkChoice, cfg.blockCollector, tip.Block, root, envelope, shouldInsert, shouldValidateForwardSyncPayload(cfg, shouldInsert), true)
+		if errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
+			logger.Debug("[Caplin] forward sync: tip envelope waits for its column data", "slot", tip.Block.Slot, "root", root)
+			// Fork choice does not schedule the download while the head is unpublished.
+			if cfg.peerDas != nil {
+				if err := cfg.peerDas.SyncColumnDataLater(tip); err != nil {
+					logger.Warn("[Caplin] forward sync: failed to schedule the tip's column download", "slot", tip.Block.Slot, "root", root, "err", err)
+				}
+			}
+			return true
+		}
+		return err == nil
+	}
 
 	// Run the log loop until the highest processed slot reaches the chain tip slot
 	for downloader.GetHighestProcessedSlot() < chainTipSlot {
-		downloader.RequestMore(ctx)
+		if downloader.RequestMore(ctx) && downloader.ImportHeldGloasTip(ctx, gloasPayloadRetryBudget, importTip) {
+			endedAtTip = true
+			logger.Info("[Caplin] Forward sync ended at a Gloas tip without a successor", "slot", downloader.GetHighestProcessedSlot())
+			break
+		}
 
 		// Detect stale progress: if no new slots processed for staleTimeout, exit.
 		// ChainTipSync will take over using gossip, which works better near the chain tip.
@@ -356,6 +396,10 @@ func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) er
 		if err := cfg.blockCollector.Flush(ctx); err != nil {
 			logger.Warn("[Caplin] Forward sync: failed to flush the block collector", "err", err)
 		}
+	}
+	if endedAtTip {
+		cfg.forwardSyncTipRoot = cfg.forkChoice.HighestSeenRoot()
+		cfg.forwardSyncTipSlot = cfg.ethClock.GetCurrentSlot()
 	}
 	requestCustodyBackfill(cfg, startSlot, currentSlot.Load())
 	return nil

@@ -257,26 +257,34 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 		}
 	}
 
-	ret := make([][]map[string]any, 0)
+	ret := make([][]map[string]any, len(bundles))
 
 	// Every transaction of the request gets the next index, so each sees the ones before it.
 	txIndex := st.TxnIndex()
-	for _, bundle := range bundles {
+	gasBudget := api.GasCap // shared by the whole request, as in eth_simulateV1: return data costs memory gas
+	if gasBudget == 0 {
+		gasBudget = math.MaxUint64 / 2 // --rpc.gascap=0 means no cap
+	}
+	for bundleIdx, bundle := range bundles {
 		// first change blockContext
 		bundle.BlockOverride.OverrideBlockContext(&blockCtx, ethapi.BlockHashOverrides(overrideBlockHash))
 		activePrecompiles, err := stateOverride.ActivePrecompiles(blockCtx.Rules(chainConfig))
 		if err != nil {
 			return nil, err
 		}
-		results := []map[string]any{}
+		results := make([]map[string]any, len(bundle.Transactions))
 		for i := range bundle.Transactions {
 			txn := &bundle.Transactions[i]
 			st.SetTxContext(blockNum, txIndex)
 			txIndex++
 			if txn.Gas == nil || *txn.Gas == 0 {
-				txn.Gas = (*hexutil.Uint64)(&api.GasCap)
+				gas := hexutil.Uint64(gasBudget)
+				txn.Gas = &gas
 			}
-			msg, err := txn.ToMessage(api.GasCap, &blockCtx.BaseFee)
+			if gasBudget == 0 {
+				return nil, clientLimitExceededError("the transactions of the request used all of --rpc.gascap")
+			}
+			msg, err := txn.ToMessage(gasBudget, &blockCtx.BaseFee)
 			if err != nil {
 				return nil, err
 			}
@@ -298,6 +306,10 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 			if evm.Cancelled() {
 				return nil, fmt.Errorf("execution aborted (timeout = %v)", timeout)
 			}
+			gasBudget -= result.ReceiptGasUsed
+			if len(result.ReturnData) > api.ReturnDataLimit {
+				return nil, fmt.Errorf("call returned result on length %d exceeding --rpc.returndata.limit %d", len(result.ReturnData), api.ReturnDataLimit)
+			}
 			jsonResult := make(map[string]any)
 			if result.Err != nil {
 				if len(result.Revert()) > 0 {
@@ -313,12 +325,12 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 				jsonResult["value"] = hex.EncodeToString(result.Return())
 			}
 
-			results = append(results, jsonResult)
+			results[i] = jsonResult
 		}
 
 		blockCtx.BlockNumber++
 		blockCtx.Time++
-		ret = append(ret, results)
+		ret[bundleIdx] = results
 	}
 
 	return ret, err

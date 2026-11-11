@@ -69,8 +69,44 @@ func TestAccumulatorAppendIncompleteChanges(t *testing.T) {
 			source.AppendAndReset(target)
 			require.Equal(t, tc.incomplete, target.stateChangesIncomplete)
 			require.False(t, source.stateChangesIncomplete)
-			target.Reset(0)
+			target.Reset()
 			require.False(t, target.stateChangesIncomplete)
+		})
+	}
+}
+
+func TestAccumulatorCheckpoint(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		incomplete bool
+	}{
+		{name: "complete"},
+		{name: "incomplete", incomplete: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			acc := NewAccumulator()
+			address, slot := common.Address{1}, common.Hash{2}
+			acc.StartChange(&types.Header{Time: 1}, [][]byte{{1}}, true)
+			acc.ChangeAccount(address, 0, []byte{2})
+			acc.ChangeStorage(address, 0, slot, []byte{3})
+			if tc.incomplete {
+				acc.MarkIncomplete()
+			}
+			want := acc.Changes()[0].ToProto()
+			restore := acc.Checkpoint()
+
+			acc.MarkIncomplete()
+			acc.StartChange(&types.Header{Time: 2}, [][]byte{{4}}, false)
+			acc.ChangeStorage(address, 0, slot, []byte{5})
+			restore()
+
+			require.Equal(t, tc.incomplete, acc.stateChangesIncomplete)
+			require.Len(t, acc.Changes(), 1)
+			require.Equal(t, want, acc.Changes()[0].ToProto())
+			require.Panics(t, func() { acc.ChangeStorage(address, 0, slot, []byte{6}) }, "restoring a checkpoint must not reopen completed changes")
+			acc.StartChange(&types.Header{Time: 3}, nil, false)
+			acc.ChangeStorage(address, 0, slot, []byte{7})
+			require.Equal(t, want, acc.Changes()[0].ToProto())
 		})
 	}
 }

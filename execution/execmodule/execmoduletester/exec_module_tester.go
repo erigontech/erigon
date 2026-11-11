@@ -679,6 +679,12 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	require.NoError(tb, err)
 	sentries := []sentryproto.SentryClient{mock.SentryClient}
 
+	notificationReceipts := execmodule.NewReceiptsLoader(mock.ChainConfig, mock.BlockReader, receipts.NewGenerator(mock.Dirs, mock.BlockReader, mock.Engine, nil, time.Minute))
+	dispatcher := execmodule.NewDispatcher(mock.ChainConfig, mock.BlockReader, mock.Notifications.Events, mock.Notifications.StateChangesConsumer, notificationReceipts, logger)
+	erigonGrpcServer.SetStateChangesSnapshot(func(ctx context.Context) (*remoteproto.StateChangeBatch, error) {
+		return dispatcher.StateChangesSnapshot(ctx, db)
+	})
+
 	if !cfg.TxPool.Disable {
 		poolCfg := txpoolcfg.DefaultConfig
 		stateChangesClient := direct.NewStateDiffClientDirect(erigonGrpcServer)
@@ -789,7 +795,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		cfg.Sync,
 		stagedsync.DefaultStages(
 			mock.Ctx,
-			stagedsync.StageSnapshotsCfg(mock.DB, mock.ChainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, mock.BlockReader, mock.Notifications, false, false, false, pruneMode, nil, nil),
+			stagedsync.StageSnapshotsCfg(mock.DB, mock.ChainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, mock.BlockReader, mock.Notifications, false, false, 0, false, pruneMode, nil, nil),
 			stagedsync.StageHeadersCfg(mock.BlockReader),
 			stagedsync.StageBodiesCfg(mock.BlockReader, blockWriter),
 			stagedsync.StageSendersCfg(mock.ChainConfig, false /* badBlockHalt */, dirs.Tmp, mock.BlockReader, readAheader),
@@ -835,7 +841,6 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	validationNotifications := shards.NewNotifications(nil)
 	validationSync := stageloop.NewInMemoryExecution(mock.Ctx, mock.DB, &cfg, mock.sentriesClient,
 		validationNotifications, mock.BlockReader, blockWriter, logger, readAheader)
-	dispatcher := execmodule.NewDispatcher(mock.ChainConfig, mock.Notifications.Events, mock.Notifications.StateChangesConsumer, logger)
 	pipelineExecutor := execmodule.NewPipelineExecutor(mock.posStagedSync, mock.DB, mock.BlockReader, mock.ChainConfig, mock.Engine, validationSync, validationNotifications, dispatcher, logger)
 
 	hook := stageloop.NewHook(mock.Ctx, mock.Notifications, mock.posStagedSync, mock.ChainConfig, logger, dispatcher, nil, nil, nil, mock.BlockReader)
@@ -1172,6 +1177,9 @@ func (emt *ExecModuleTester) insertChain(chain *blockgen.ChainPack) error {
 			}
 		}
 	}
+
+	// Notification delivery can precede FCU cleanup of shared execution state.
+	emt.ExecModule.Drain()
 
 	roTx, err := emt.DB.BeginRo(emt.Ctx)
 	if err != nil {

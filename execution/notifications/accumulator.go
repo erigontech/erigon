@@ -18,16 +18,14 @@ package notifications
 
 import (
 	"bytes"
-	"context"
+	"slices"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types"
 )
 
 // Accumulator collects state changes per block in native Go types.
-// Protobuf conversion happens only at the gRPC boundary via ToProto methods.
 type Accumulator struct {
-	plainStateID           uint64
 	changes                []StateChange
 	stateChangesIncomplete bool
 	latestChange           *StateChange
@@ -43,38 +41,38 @@ func (a *Accumulator) Changes() []StateChange {
 	return a.changes
 }
 
-func (a *Accumulator) Reset(plainStateID uint64) {
-	a.changes = nil
-	a.stateChangesIncomplete = false
+// An incomplete batch still needs dispatch without recorded block changes.
+// Before sending it, the dispatcher adds an entry for the current head so
+// consumers can identify the announced state.
+func (a *Accumulator) HasPendingChanges() bool {
+	return a != nil && (len(a.changes) > 0 || a.stateChangesIncomplete)
+}
+
+func (a *Accumulator) Reset() {
+	*a = Accumulator{}
+}
+
+// Checkpoint returns a rollback to completed block changes. Later writes must
+// start with StartChange so the saved changes remain immutable.
+func (a *Accumulator) Checkpoint() (restore func()) {
 	a.latestChange = nil
 	a.accountChangeIndex = nil
 	a.storageChangeIndex = nil
-	a.plainStateID = plainStateID
+	saved := *a
+	return func() { *a = saved }
 }
 
-// SendAndReset converts accumulated changes to protobuf and dispatches them,
-// then resets the accumulator. In-process consumers use the same messages.
-func (a *Accumulator) SendAndReset(ctx context.Context, c StateChangeConsumer, pendingBaseFee uint64, pendingBlobFee uint64, blockGasLimit uint64, finalizedBlock uint64) {
-	if a == nil || len(a.changes) == 0 {
-		return
-	}
+// Batch includes the current head without adding synthetic entries to recorded changes.
+// It shares recorded changes, which must stay unchanged until publication finishes.
+func (a *Accumulator) Batch(head *types.Header) *BlockBatchNotification {
 	batch := &BlockBatchNotification{
-		StateVersionID:         a.plainStateID,
-		Changes:                a.changes,
+		Changes:                slices.Clip(a.changes),
 		StateChangesIncomplete: a.stateChangesIncomplete,
-		PendingBlockBaseFee:    pendingBaseFee,
-		PendingBlobFee:         pendingBlobFee,
-		BlockGasLimit:          blockGasLimit,
-		FinalizedBlock:         finalizedBlock,
 	}
-	if c != nil {
-		c.SendStateChanges(ctx, batch.ToProtoBatch())
+	if len(batch.Changes) == 0 || batch.Changes[len(batch.Changes)-1].BlockHeight < head.Number.Uint64() {
+		batch.Changes = append(batch.Changes, stateChangeForHeader(head))
 	}
-	a.Reset(0)
-}
-
-func (a *Accumulator) SetStateID(stateID uint64) {
-	a.plainStateID = stateID
+	return batch
 }
 
 // MarkIncomplete records omitted state changes for the whole batch. Later
@@ -85,15 +83,8 @@ func (a *Accumulator) MarkIncomplete() {
 
 // StartChange begins accumulation of changes for a new block.
 func (a *Accumulator) StartChange(h *types.Header, txs [][]byte, unwind bool) {
-	a.changes = append(a.changes, StateChange{
-		BlockHeight: h.Number.Uint64(),
-		BlockHash:   h.Hash(),
-		BlockTime:   h.Time,
-	})
+	a.changes = append(a.changes, stateChangeForHeader(h))
 	a.latestChange = &a.changes[len(a.changes)-1]
-	if h.SlotNumber != nil {
-		a.latestChange.SlotNumber = common.NewUint64(*h.SlotNumber)
-	}
 	if unwind {
 		a.latestChange.Direction = DirectionUnwind
 	}
@@ -105,6 +96,12 @@ func (a *Accumulator) StartChange(h *types.Header, txs [][]byte, unwind bool) {
 			a.latestChange.Txs[i] = bytes.Clone(txs[i])
 		}
 	}
+}
+
+func (a *Accumulator) StartIncompleteRange(firstBlock uint64, lastHeader *types.Header) {
+	a.StartChange(lastHeader, nil, false)
+	a.latestChange.FirstBlockHeight = firstBlock
+	a.MarkIncomplete()
 }
 
 func (a *Accumulator) HasAccountChange(address common.Address) bool {
@@ -211,5 +208,5 @@ func (a *Accumulator) AppendAndReset(target *Accumulator) {
 		target.storageChangeIndex = a.storageChangeIndex
 	}
 	target.stateChangesIncomplete = target.stateChangesIncomplete || a.stateChangesIncomplete
-	a.Reset(0)
+	a.Reset()
 }

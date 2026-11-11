@@ -26,9 +26,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 
+	"github.com/erigontech/erigon/db/kv/remotedbserver"
+	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
@@ -157,9 +157,7 @@ func TestRemoteFrameSimulationDoesNotBlockOrdinaryPropagation(t *testing.T) {
 	pool.cfg.SyncToNewPeersEvery = time.Hour
 	pool.p2pFetcher.ctx = ctx
 	ctrl := gomock.NewController(t)
-	stateChanges := remoteproto.NewMockKVClient(ctrl)
-	stateChanges.EXPECT().StateChanges(gomock.Any(), gomock.Any(), gomock.Any()).
-		Return(nil, status.Error(codes.Unavailable, "no core node in this test")).AnyTimes()
+	stateChanges := direct.NewStateDiffClientDirect(remotedbserver.NewKvServer(ctx, nil, nil, nil, pool.logger))
 	pool.p2pFetcher.stateChangesClient = stateChanges
 	propagated := make(chan struct{}, 2)
 	sentry := sentryproto.NewMockSentryClient(ctrl)

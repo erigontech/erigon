@@ -152,6 +152,18 @@ func TraceTx(
 	return txnGasUsage, err
 }
 
+// traceTimeout lets a client lower the server timeout, never raise it.
+func traceTimeout(serverTimeout time.Duration, clientTimeout *string) (time.Duration, error) {
+	if clientTimeout == nil {
+		return serverTimeout, nil
+	}
+	timeout, err := time.ParseDuration(*clientTimeout)
+	if err != nil {
+		return 0, err
+	}
+	return min(timeout, serverTimeout), nil
+}
+
 func AssembleTracer(
 	ctx context.Context,
 	config *tracersConfig.TraceConfig,
@@ -166,13 +178,9 @@ func AssembleTracer(
 	switch {
 	case config != nil && config.Tracer != nil:
 		// Define a meaningful timeout of a single transaction trace
-		timeout := callTimeout
-		if config.Timeout != nil {
-			var err error
-			timeout, err = time.ParseDuration(*config.Timeout)
-			if err != nil {
-				return nil, false, func() {}, err
-			}
+		timeout, err := traceTimeout(callTimeout, config.Timeout)
+		if err != nil {
+			return nil, false, func() {}, err
 		}
 
 		// Construct the JavaScript tracer to execute with

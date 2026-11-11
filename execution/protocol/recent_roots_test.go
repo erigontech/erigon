@@ -76,8 +76,7 @@ func TestFrameValidationRecentRoot(t *testing.T) {
 				EntryHash:  common.HexToHash("0x0a0d1254c851be5a133b4c9a9e300f5602fc0f43dbe65aa6a66930d4ca0a51b8"),
 				Slot:       1,
 			}}, validation.RecentRoots)
-			refs, err := FrameTransactionRecentRoots(tx)
-			require.NoError(t, err)
+			refs := FrameTransactionRecentRoots(tx)
 			require.Equal(t, validation.RecentRoots, refs)
 		})
 	}
@@ -101,8 +100,7 @@ func TestFrameValidationRecentRootAddressAsSender(t *testing.T) {
 			require.NoError(t, result.Err)
 			require.NoError(t, validationErr)
 			require.Empty(t, validation.RecentRoots)
-			refs, err := FrameTransactionRecentRoots(tx)
-			require.NoError(t, err)
+			refs := FrameTransactionRecentRoots(tx)
 			require.Empty(t, refs)
 		})
 	}

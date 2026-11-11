@@ -120,6 +120,11 @@ type Downloader struct {
 	// responsible for fetching metainfo and executing after-add handlers.
 	downloads map[*torrent.Torrent]struct{}
 
+	// Temporary manifest torrents must be dropped before local seeding can reuse their info hashes.
+	chainTomlTorrentLock sync.Mutex
+	chainTomlSeedPending atomic.Bool
+	chainTomlCache       *cachedChainToml
+
 	// enrUpdater is an optional callback to advertise chain.toml info-hash via discv5 ENR.
 	// Set via SetENRUpdater after P2P is available.
 	enrUpdater func(enr.ChainToml)
@@ -454,7 +459,7 @@ func (d *Downloader) SetENRUpdater(fn func(enr.ChainToml)) {
 // PublishLocalChainToml generates chain.toml from local torrents + preverified registry,
 // builds its .torrent, and advertises the info-hash via ENR with AuthoritativeBlocks/KnownBlocks
 // derived from the preverified registry's ExpectBlocks.
-// It also adds the chain.toml torrent to the client for seeding so other nodes can download it.
+// It also schedules seeding so other nodes can download the manifest.
 func (d *Downloader) PublishLocalChainToml() error {
 	d.lock.RLock()
 	updater := d.enrUpdater
@@ -464,15 +469,32 @@ func (d *Downloader) PublishLocalChainToml() error {
 		return err
 	}
 
-	// Seed the chain.toml torrent so other nodes can download it by info-hash.
-	if err := d.seedChainTomlTorrent(); err != nil {
-		d.logger.Debug("[chaintoml] could not seed chain.toml torrent", "err", err)
+	if !d.chainTomlSeedPending.CompareAndSwap(false, true) {
+		return nil
+	}
+	if !d.spawn(func() {
+		if err := d.seedChainTomlTorrent(); err != nil {
+			d.logger.Debug("[chaintoml] could not seed chain.toml torrent", "err", err)
+		}
+	}) {
+		d.chainTomlSeedPending.Store(false)
 	}
 	return nil
 }
 
 // seedChainTomlTorrent adds the chain.toml torrent to the client for seeding.
 func (d *Downloader) seedChainTomlTorrent() error {
+	d.chainTomlTorrentLock.Lock()
+	defer d.chainTomlTorrentLock.Unlock()
+	// Clear before loading so later publications can queue another task with updated metadata.
+	d.chainTomlSeedPending.Store(false)
+
+	d.lock.RLock()
+	defer d.lock.RUnlock()
+	if err := d.ctx.Err(); err != nil {
+		return err
+	}
+
 	spec, err := d.torrentFS.LoadByName(ChainTomlFileName)
 	if err != nil {
 		return fmt.Errorf("loading chain.toml torrent: %w", err)
@@ -518,13 +540,14 @@ func (d *Downloader) StartChainTomlDiscovery(ctx context.Context, networkName st
 }
 
 // StartTorrentPeerManager launches the background torrent peer manager that
-// synchronizes torrent peers with the DevP2P peer set.
+// synchronizes torrent peers with the DevP2P peer set. It does not run when the
+// client does not dial peers: its reachability check would dial them anyway.
 func (d *Downloader) StartTorrentPeerManager(ctx context.Context) {
 	d.lock.RLock()
 	fn := d.nodeSourceFn
 	d.lock.RUnlock()
 
-	if fn == nil {
+	if fn == nil || !d.cfg.ClientConfig.DialForPeerConns {
 		return
 	}
 
@@ -945,8 +968,8 @@ func (d *Downloader) incDownloadRequests() {
 
 func (d *Downloader) decDownloadRequests() {
 	d.activeDownloadRequestsLock.Lock()
+	defer d.activeDownloadRequestsLock.Unlock()
 	d.activeDownloadRequests--
-	d.activeDownloadRequestsLock.Unlock()
 	if d.activeDownloadRequests == 0 {
 		d.zeroActiveDownloadRequests.Broadcast()
 	}

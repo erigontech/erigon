@@ -114,6 +114,7 @@ import (
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/contracts"
 	"github.com/erigontech/erigon/rpc/jsonrpc"
+	"github.com/erigontech/erigon/rpc/jsonrpc/receipts"
 	"github.com/erigontech/erigon/rpc/mcp"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/txnprovider"
@@ -321,6 +322,10 @@ func New(
 			return err
 		}
 
+		if err := rawdb.RaiseCaplinBlobsArchiveFromSlot(tx, config.CaplinConfig.BlobsArchiveFromSlot); err != nil {
+			return err
+		}
+
 		if config.KeepExecutionProofs {
 			statecfg.EnableHistoricalCommitment()
 		}
@@ -411,6 +416,10 @@ func New(
 	// execution-layer concern that will move to the execution component.
 	kvRPC := remotedbserver.NewKvServer(ctx, temporalDb, allSnapshots, temporalDb.Debug(), logger)
 	backend.notifications = shards.NewNotifications(kvRPC)
+	dispatcher := execmodule.NewDispatcher(chainConfig, blockReader, backend.notifications.Events, backend.notifications.StateChangesConsumer, nil, logger)
+	kvRPC.SetStateChangesSnapshot(func(ctx context.Context) (*remoteproto.StateChangeBatch, error) {
+		return dispatcher.StateChangesSnapshot(ctx, temporalDb)
+	})
 	backend.kvRPC = kvRPC
 
 	// Storage component: owns DB references, file-change callbacks, block retire.
@@ -856,7 +865,6 @@ func New(
 	validationNotifications := shards.NewNotifications(nil)
 	validationSync := stageloop.NewInMemoryExecution(backend.sentryCtx, backend.chainDB, config, backend.sentryProvider.Client,
 		validationNotifications, blockReader, blockWriter, logger, backend.readAheader)
-	dispatcher := execmodule.NewDispatcher(chainConfig, backend.notifications.Events, backend.notifications.StateChangesConsumer, logger)
 	pipelineExecutor := execmodule.NewPipelineExecutor(backend.pipelineStagedSync, backend.chainDB, blockReader, chainConfig, backend.engine, validationSync, validationNotifications, dispatcher, logger)
 
 	hook := stageloop.NewHook(backend.sentryCtx, backend.notifications, backend.stagedSync, backend.chainConfig, backend.logger, dispatcher, backend.sentryProvider.Client.SetStatus, statusDataProvider, backend.sentryProvider.ExecutionP2PPublisher, blockReader)
@@ -1023,7 +1031,7 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config) error {
 
 	var testingEntry *rpc.API
 	if slices.Contains(httpRpcCfg.API, "testing") {
-		entry := engineapi.NewTestingRPCEntry(s.engineBackendRPC, s.logger, s.chainDB)
+		entry := engineapi.NewTestingRPCEntry(s.engineBackendRPC)
 		testingEntry = &entry
 	}
 	// Eager witness cache (embedded RPC only). A datadir built with commitment history
@@ -1389,7 +1397,7 @@ func (s *Ethereum) Start() error {
 		return err
 	}
 
-	stageLoopDispatcher := execmodule.NewDispatcher(s.chainConfig, s.notifications.Events, s.notifications.StateChangesConsumer, s.logger)
+	stageLoopDispatcher := execmodule.NewDispatcher(s.chainConfig, s.blockReader, s.notifications.Events, s.notifications.StateChangesConsumer, execmodule.NewReceiptsLoader(s.chainConfig, s.blockReader, receipts.NewGenerator(s.config.Dirs, s.blockReader, s.engine, nil, 5*time.Minute)), s.logger)
 	hook := stageloop.NewHook(s.sentryCtx, s.notifications, s.stagedSync, s.chainConfig, s.logger, stageLoopDispatcher, s.sentryProvider.Client.SetStatus, s.sentryProvider.StatusDataProvider, s.sentryProvider.ExecutionP2PPublisher, s.blockReader)
 
 	currentTDProvider := func() *uint256.Int {

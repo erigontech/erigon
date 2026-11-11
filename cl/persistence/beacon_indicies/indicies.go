@@ -397,6 +397,22 @@ func WriteBeaconBlock(tx kv.RwTx, block *cltypes.SignedBeaconBlock) error {
 	return nil
 }
 
+// ReadBlockRootsAtSlot returns the roots of the blocks stored at slot, canonical or not.
+func ReadBlockRootsAtSlot(tx kv.Tx, slot uint64) ([]common.Hash, error) {
+	cursor, err := tx.Cursor(kv.BeaconBlocks)
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close()
+	prefix := dbutils.EncodeBlockNumber(slot)
+	var roots []common.Hash
+	k, _, err := cursor.Seek(prefix)
+	for ; err == nil && bytes.HasPrefix(k, prefix); k, _, err = cursor.Next() {
+		roots = append(roots, common.BytesToHash(k[len(prefix):]))
+	}
+	return roots, err
+}
+
 func WriteBeaconBlockAndIndicies(tx kv.RwTx, block *cltypes.SignedBeaconBlock, canonical bool) error {
 	blockRoot, err := block.Block.HashSSZ()
 	if err != nil {

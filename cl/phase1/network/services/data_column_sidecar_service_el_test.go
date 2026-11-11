@@ -45,7 +45,7 @@ func newELPublishTestService(t *testing.T) (*dataColumnSidecarService, *gossipmo
 	return service, publisher, clock, fcu
 }
 
-func TestPublishColumnsFromELPublishesUnseenColumnsAndMarksThemSeen(t *testing.T) {
+func TestPublishColumnsPublishesUnseenColumnsAndMarksThemSeen(t *testing.T) {
 	service, publisher, clock, _ := newELPublishTestService(t)
 	defer func(f func(uint64) uint64) { computeSubnetForDataColumnSidecar = f }(computeSubnetForDataColumnSidecar)
 	computeSubnetForDataColumnSidecar = func(index uint64) uint64 { return index % service.cfg.DataColumnSidecarSubnetCount }
@@ -59,15 +59,15 @@ func TestPublishColumnsFromELPublishesUnseenColumnsAndMarksThemSeen(t *testing.T
 	clock.EXPECT().ComputeForkDigest(uint64(100)/service.cfg.SlotsPerEpoch).Return(digest, nil).AnyTimes()
 	publisher.EXPECT().PublishToForkDigest(gomock.Any(), digest, gossip.TopicNameDataColumnSidecar(3), encoded).Return(nil).Times(1)
 
-	service.PublishColumnsFromEL(t.Context(), []*cltypes.DataColumnSidecar{fresh, seen})
+	service.PublishColumns(t.Context(), []*cltypes.DataColumnSidecar{fresh, seen})
 
 	_, ok := service.seenSidecar.Get(seenSidecarKey{slot: 100, proposerIndex: 7, index: 3})
 	require.True(t, ok)
 	// A second import of the same columns publishes nothing.
-	service.PublishColumnsFromEL(t.Context(), []*cltypes.DataColumnSidecar{fresh, seen})
+	service.PublishColumns(t.Context(), []*cltypes.DataColumnSidecar{fresh, seen})
 }
 
-func TestPublishColumnsFromELSkipsColumnsFinalityNoLongerAllows(t *testing.T) {
+func TestPublishColumnsSkipsColumnsFinalityNoLongerAllows(t *testing.T) {
 	for name, tc := range map[string]struct {
 		slot     uint64
 		ancestor common.Hash
@@ -79,7 +79,7 @@ func TestPublishColumnsFromELSkipsColumnsFinalityNoLongerAllows(t *testing.T) {
 			service, _, _, fcu := newELPublishTestService(t)
 			fcu.Ancestors[elTestFinalized.Epoch*service.cfg.SlotsPerEpoch] = forkchoice.ForkChoiceNode{Root: tc.ancestor}
 
-			service.PublishColumnsFromEL(t.Context(), []*cltypes.DataColumnSidecar{elBuiltSidecar(tc.slot, 3)})
+			service.PublishColumns(t.Context(), []*cltypes.DataColumnSidecar{elBuiltSidecar(tc.slot, 3)})
 
 			_, ok := service.seenSidecar.Get(seenSidecarKey{slot: tc.slot, proposerIndex: 7, index: 3})
 			require.False(t, ok)
@@ -88,15 +88,30 @@ func TestPublishColumnsFromELSkipsColumnsFinalityNoLongerAllows(t *testing.T) {
 }
 
 // A column that could not be published stays unclaimed, so a copy from gossip is still processed and relayed.
-func TestPublishColumnsFromELReleasesTheClaimOfAFailedPublish(t *testing.T) {
+func TestPublishColumnsReleasesTheClaimOfAFailedPublish(t *testing.T) {
 	service, publisher, clock, _ := newELPublishTestService(t)
 	defer func(f func(uint64) uint64) { computeSubnetForDataColumnSidecar = f }(computeSubnetForDataColumnSidecar)
 	computeSubnetForDataColumnSidecar = func(index uint64) uint64 { return index % service.cfg.DataColumnSidecarSubnetCount }
 	clock.EXPECT().ComputeForkDigest(gomock.Any()).Return(common.Bytes4{1, 2, 3, 4}, nil).AnyTimes()
 	publisher.EXPECT().PublishToForkDigest(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(errors.New("topic not found")).Times(1)
 
-	service.PublishColumnsFromEL(t.Context(), []*cltypes.DataColumnSidecar{elBuiltSidecar(100, 3)})
+	service.PublishColumns(t.Context(), []*cltypes.DataColumnSidecar{elBuiltSidecar(100, 3)})
 
 	_, ok := service.seenSidecar.Get(seenSidecarKey{slot: 100, proposerIndex: 7, index: 3})
+	require.False(t, ok)
+}
+
+func TestPublishColumnsReleasesTheClaimOfAFailedGloasPublish(t *testing.T) {
+	service, publisher, clock, _ := newELPublishTestService(t)
+	defer func(f func(uint64) uint64) { computeSubnetForDataColumnSidecar = f }(computeSubnetForDataColumnSidecar)
+	computeSubnetForDataColumnSidecar = func(index uint64) uint64 { return index % service.cfg.DataColumnSidecarSubnetCount }
+	clock.EXPECT().ComputeForkDigest(gomock.Any()).Return(common.Bytes4{1, 2, 3, 4}, nil).AnyTimes()
+	publisher.EXPECT().PublishToForkDigest(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(errors.New("topic not found")).Times(1)
+	sidecar := cltypes.NewDataColumnSidecarWithVersion(clparams.GloasVersion)
+	sidecar.Slot, sidecar.Index, sidecar.BeaconBlockRoot = 100, 3, common.Hash{0x22}
+
+	service.PublishColumns(t.Context(), []*cltypes.DataColumnSidecar{sidecar})
+
+	_, ok := service.seenGloasSidecar.Get(seenGloasSidecarKey{beaconBlockRoot: sidecar.BeaconBlockRoot, index: 3})
 	require.False(t, ok)
 }

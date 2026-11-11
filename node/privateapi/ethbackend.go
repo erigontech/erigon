@@ -31,7 +31,6 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/db/version"
@@ -40,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -543,18 +543,23 @@ func (s *EthBackendServer) validateFrameTransaction(ctx context.Context, frame *
 			sd = nil
 		}
 	}
-	headHash := rawdb.ReadHeadBlockHash(tx)
-	header, err := s.blockReader.HeaderByHash(ctx, tx, headHash)
+	// Head markers can lead execution. Resolve progress and the canonical header
+	// through the same view as state, including any published overlay.
+	blockNum, err := stages.GetStageProgress(tx, stages.Execution)
+	if err != nil {
+		return nil, err
+	}
+	header, err := s.blockReader.HeaderByNumber(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
 	if header == nil {
-		return nil, errors.New("frame validation: no current block")
+		return nil, errors.New("frame validation: no executed block")
 	}
-	if expectedHash != (common.Hash{}) && expectedHash != headHash {
+	if expectedHash != (common.Hash{}) && expectedHash != header.Hash() {
 		return nil, status.Error(codes.Aborted, "frame validation head changed")
 	}
-	maxTxNum, err := s.blockReader.TxnumReader().Max(ctx, tx, header.Number.Uint64())
+	maxTxNum, err := s.blockReader.TxnumReader().Max(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -569,19 +574,14 @@ func (s *EthBackendServer) validateFrameTransaction(ctx context.Context, frame *
 	ibs := state.New(reader)
 	defer ibs.Close()
 	transactions.VersionedCallState(ibs)
-	// The validation hook forbids BLOCKHASH, but cancellation does not stop
-	// the current opcode from calling GetHash.
-	rejectBlockHash := func(uint64) (common.Hash, error) {
-		return common.Hash{}, errors.New("BLOCKHASH is not allowed in frame validation")
-	}
+	// The validation hook rejects BLOCKHASH but does not stop the opcode from calling GetHash, where
+	// an error would be taken for the node's failure, not for an invalid transaction.
+	noBlockHash := func(uint64) (common.Hash, error) { return common.Hash{}, nil }
 	// State comes from the published head, but inclusion would happen in the next
 	// block. Its context must account for fee changes and fork activation.
-	blockContext := protocol.NewEVMBlockContext(header, rejectBlockHash, nil, accounts.ZeroAddress, s.chainConfig)
+	blockContext := protocol.NewEVMBlockContext(header, noBlockHash, nil, accounts.ZeroAddress, s.chainConfig)
 	blockContext.BlockNumber++
-	blockContext.SlotNumber, err = protocol.FrameValidationSlot(header.SlotNumber)
-	if err != nil {
-		return nil, err
-	}
+	blockContext.SlotNumber = protocol.FrameValidationSlot(header.SlotNumber)
 	blockContext.Time = max(header.Time+s.chainConfig.SecondsPerSlot(), uint64(time.Now().Unix()))
 	if header.BaseFee != nil {
 		blockContext.BaseFee = *misc.CalcBaseFee(s.chainConfig, header)
@@ -605,11 +605,14 @@ func (s *EthBackendServer) validateFrameTransaction(ctx context.Context, frame *
 	defer context.AfterFunc(ctx, evm.Cancel)()
 	result, err := protocol.ValidateFrameTransaction(evm, frame)
 	if err != nil {
-		if err := ctx.Err(); err != nil {
-			return nil, err
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
 		}
-		if err := ibs.StateReadError(); err != nil {
-			return nil, err
+		if stateErr := ibs.StateReadError(); stateErr != nil {
+			return nil, stateErr
+		}
+		if errors.Is(err, protocol.ErrNonceTooLow) {
+			return &remoteproto.FrameValidationReply{RejectionReason: remoteproto.FrameValidationReply_NONCE_TOO_LOW}, nil
 		}
 		return &remoteproto.FrameValidationReply{}, nil
 	}

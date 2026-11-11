@@ -417,7 +417,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 	var err error
 
 	if api.blockRangeLimit != 0 && (toBlock-fromBlock) > uint64(api.blockRangeLimit) {
-		return fmt.Errorf("%s: %d", errExceedBlockRange, api.blockRangeLimit)
+		return &rpc.InvalidParamsError{Message: fmt.Sprintf("%s: %d", errExceedBlockRange, api.blockRangeLimit)}
 	}
 
 	if fromBlock > 0 {
@@ -774,7 +774,7 @@ func (api *TraceAPIImpl) callBlock(
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := ethapi.CommitCallState(ibs, rules, cachedWriter); err != nil {
+	if err := ethapi.FinalizeCallTxTo(ibs, rules, cachedWriter); err != nil {
 		return nil, nil, err
 	}
 
@@ -1088,7 +1088,7 @@ func (api *TraceAPIImpl) callTransaction(
 	if err != nil {
 		return nil, err
 	}
-	if err := ethapi.CommitCallState(ibs, rules, cachedWriter); err != nil {
+	if err := ethapi.FinalizeCallTxTo(ibs, rules, cachedWriter); err != nil {
 		return nil, err
 	}
 

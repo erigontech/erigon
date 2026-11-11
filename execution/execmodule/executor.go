@@ -215,6 +215,15 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 	// to roll back the current value at function exit, not the original.
 	defer func() { tx.Rollback() }()
 
+	// Notifications follow database commit boundaries. Earlier committed cycles
+	// must survive a later failure.
+	restoreStateChanges := hook.CheckpointStateChanges()
+	defer func() {
+		if restoreStateChanges != nil {
+			restoreStateChanges()
+		}
+	}()
+
 	// Drop the snapshots stage's download-completion pin on every exit (see
 	// Notifications.ClearSnapshotDownloadPin for its lifecycle). Registered
 	// before the stage so a failure inside it, after the pin is published, is
@@ -264,9 +273,7 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 		if err != nil {
 			return err
 		}
-		if err := hook.BeforeRun(tx, false); err != nil {
-			return err
-		}
+		hook.NotifySyncState(tx)
 	}
 
 	var finalityCtx kv.FinalityContext
@@ -282,6 +289,7 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 			if err := sd.Commit(ctx, tx); err != nil {
 				return nil, nil, fmt.Errorf("ProcessFrozenBlocks: flush+commit: %w", err)
 			}
+			restoreStateChanges = hook.CheckpointStateChanges()
 			// Prune runs via PruneFn (sync.RunPrune); kick file building so
 			// snapshot files advance as PFB processes frozen blocks.
 			pe.db.BuildFilesInBackground(finalityCtx)
@@ -319,7 +327,7 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 	}
 
 	if hook != nil {
-		if err := pe.db.View(ctx, func(tx kv.Tx) error {
+		if err := pe.db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
 			headersProgress, err := stages.GetStageProgress(tx, stages.Headers)
 			if err != nil {
 				return err
@@ -329,6 +337,8 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 			if err := hook.SendNotifications(tx, finishStageBeforeSync); err != nil {
 				return err
 			}
+			// Restoring after publication would send the same changes again.
+			restoreStateChanges = nil
 			if err := hook.UpdateHead(tx, finishStageBeforeSync, false); err != nil {
 				return err
 			}

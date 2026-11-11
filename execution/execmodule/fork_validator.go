@@ -287,7 +287,7 @@ func (fv *ForkValidator) ValidatePayload(ctx context.Context, sd *execctx.Shared
 	// Reset accumulator and receipts to match main's behaviour of creating
 	// a fresh Sync (and thus fresh notifications) per validation call.
 	fv.extendingForkNotifications = fv.executor.ValidationNotifications()
-	fv.extendingForkNotifications.Accumulator.Reset(0)
+	fv.extendingForkNotifications.Accumulator.Reset()
 	fv.extendingForkNotifications.RecentReceipts.Clear()
 	status, latestValidHash, validationError, criticalError = fv.validateAndStorePayload(fv.sharedDom, tx, header, body, unwindPoint, headersChain, bodiesChain)
 

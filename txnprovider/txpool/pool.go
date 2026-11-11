@@ -36,6 +36,7 @@ import (
 	"github.com/google/btree"
 	"github.com/hashicorp/golang-lru/v2/simplelru"
 	"github.com/holiman/uint256"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/erigontech/erigon/common"
 	libkzg "github.com/erigontech/erigon/common/crypto/kzg"
@@ -53,6 +54,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
@@ -71,6 +73,12 @@ import (
 // by the peer.
 const txMaxBroadcastSize = 4 * 1024
 
+// Bound deferred admission work and retained network payloads independently of pool capacity.
+const (
+	remoteTxnQueueLimit     = maxTransactionsPerPacket
+	remoteTxnQueueByteLimit = 32 * 1024 * 1024
+)
+
 // Pool is interface for the transaction pool
 // This interface exists for the convenience of testing, and not yet because
 // there are multiple implementations
@@ -81,9 +89,12 @@ type Pool interface {
 	AddRemoteTxns(ctx context.Context, newTxns TxnSlots, peerID PeerID, sentry sentryproto.SentryClient)
 	AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcfg.DiscardReason, error)
 	OnNewBlock(ctx context.Context, stateChanges *remoteproto.StateChangeBatch, unwindTxns, unwindBlobTxns, minedTxns TxnSlots) error
+	MarkStateStale()
 	// IdHashKnown check whether transaction with given Id hash is known to the pool
 	IdHashKnown(tx kv.Tx, hash []byte) (bool, error)
 	FilterKnownIdHashes(tx kv.Tx, hashes Hashes) (unknownHashes Hashes, err error)
+	HeldOrQueuedIdHashes(tx kv.Tx, hashes Hashes) (held, queued Hashes, err error)
+	RejectFramePrefix(hash common.Hash)
 	Started() bool
 	GetRlp(tx kv.Tx, hash []byte) ([]byte, error)
 	GetBlobs(blobhashes []common.Hash) []PoolBlobBundle
@@ -129,9 +140,10 @@ type TxPool struct {
 	//   - batch notifications about new txns (reduced P2P spam to other nodes about txns propagation)
 	//   - and as a result reducing lock contention
 	unprocessedRemoteTxns   *TxnSlots
-	unprocessedRemotePeers  []remoteSource                                  // index-aligned with unprocessedRemoteTxns
-	unprocessedRemoteByHash map[string]*TxnSlot                             // to reject duplicates
-	byHash                  map[string]*metaTxn                             // txn_hash => txn : only those records not committed to db yet
+	unprocessedRemotePeers  []remoteSource      // index-aligned with unprocessedRemoteTxns
+	unprocessedRemoteByHash map[string]*TxnSlot // to reject duplicates
+	unprocessedRemoteBytes  uint64
+	byHash                  map[string]*metaTxn                             // All pooled transactions by hash, including parked frames
 	discardReasonsLRU       *simplelru.LRU[string, txpoolcfg.DiscardReason] // txn_hash => discard_reason : non-persisted
 	pending                 *PendingPool
 	baseFee                 *SubPool
@@ -146,8 +158,9 @@ type TxPool struct {
 	chainID                 uint256.Int
 	chainConfig             *chain.Config
 	stateGeneration         uint64
+	stateViewStale          bool
 	stateBlockHash          common.Hash // Head of the pool's state view; pins frame validation to the same block
-	headIsBogota            bool        // Canonical activation, independent of pending-block time
+	headIsBogota            bool        // Last completed update's activation, independent of pending-block time
 	lastSeenBlock           atomic.Uint64
 	lastSeenCond            *sync.Cond
 	lastFinalizedBlock      atomic.Uint64
@@ -166,6 +179,8 @@ type TxPool struct {
 	isPostOsaka             atomic.Bool
 	amsterdamTime           *uint64
 	isPostAmsterdam         atomic.Bool
+	bogotaTime              *uint64
+	isPostBogota            atomic.Bool
 	feeCalculator           FeeCalculator
 	p2pFetcher              *Fetch
 	p2pSender               *Send
@@ -179,7 +194,7 @@ type TxPool struct {
 	remoteFrames            remoteFrameQueue
 	frameReservations       map[common.Address]frameReservation
 	frameAccountsToRefresh  map[common.Address]struct{}
-	frameRejections         *simplelru.LRU[string, uint64] // txn_hash => state generation of a rejected simulation
+	frameRejections         *simplelru.LRU[string, frameRejection]
 
 	// Dormancy eviction: tracks the block number of the last on-chain state change (nonce or
 	// balance) for each sender that has transactions in the queued sub-pool. Senders absent
@@ -222,7 +237,7 @@ func New(
 	if err != nil {
 		return nil, err
 	}
-	frameRejections, err := simplelru.NewLRU[string, uint64](10_000, nil)
+	frameRejections, err := simplelru.NewLRU[string, frameRejection](10_000, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -292,6 +307,7 @@ func New(
 	res.pragueTime = chainConfig.PragueTime
 	res.osakaTime = chainConfig.OsakaTime
 	res.amsterdamTime = chainConfig.AmsterdamTime
+	res.bogotaTime = chainConfig.BogotaTime
 
 	res.p2pFetcher = NewFetch(ctx, sentryClients, res, stateChangesClient, poolDB, res.chainID, logger, opts...)
 	res.p2pSender = NewSend(ctx, sentryClients, logger, opts...)
@@ -317,19 +333,92 @@ func (p *TxPool) start(ctx context.Context) error {
 	})
 }
 
-func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.StateChangeBatch, unwindTxns, unwindBlobTxns, minedTxns TxnSlots) error {
+// MarkStateStale invalidates simulations and blocks selection and admission until
+// a notification restores a usable state view.
+func (p *TxPool) MarkStateStale() {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+	p.markStateStaleLocked()
+}
+
+func (p *TxPool) markStateStaleLocked() {
+	if p.stateViewStale {
+		return
+	}
+	p.stateViewStale = true
+	p.stateGeneration++
+	for _, mt := range p.all.senderIDFrameTxn {
+		p.parkFrameLocked(mt, "state recovery pending")
+	}
+	p.lastSeenCond.Broadcast()
+	p.publishDepthMetrics()
+}
+
+var errStateViewSuperseded = errors.New("announced state version has been superseded")
+
+// Incomplete notifications require their exact committed state: combining their
+// account changes with a newer snapshot can restore values from an orphaned block.
+// Wait without holding the pool lock or a database snapshot.
+func beginBlockState(ctx context.Context, db kv.TemporalRoDB, changes *remoteproto.StateChangeBatch) (kv.TemporalTx, error) {
+	if !changes.StateChangesIncomplete {
+		return db.BeginTemporalRo(ctx)
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	for {
+		tx, err := db.BeginTemporalRo(ctx) //nolint:gocritic // caller owns the returned transaction; stale snapshots are rolled back below
+		if err != nil {
+			return nil, err
+		}
+		version, err := rawdb.GetStateVersion(tx)
+		if err == nil && version == changes.StateVersionId {
+			return tx, nil
+		}
+		tx.Rollback()
+		if err != nil {
+			return nil, err
+		}
+		if version > changes.StateVersionId {
+			return nil, fmt.Errorf("%w: announced=%d committed=%d", errStateViewSuperseded, changes.StateVersionId, version)
+		}
+		select {
+		case <-waitCtx.Done():
+			return nil, fmt.Errorf("wait for announced state version %d: %w", changes.StateVersionId, waitCtx.Err())
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+}
+
+func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.StateChangeBatch, unwindTxns, unwindBlobTxns, minedTxns TxnSlots) (err error) {
 	defer newBlockTimer.ObserveDuration(time.Now())
+	defer func() {
+		if err != nil {
+			p.MarkStateStale()
+		}
+	}()
+	p.lock.Lock()
+	stateStale := p.stateViewStale
+	if stateChanges.StateChangesIncomplete {
+		p.markStateStaleLocked()
+	}
+	p.lock.Unlock()
+	// A complete notification cannot repair a failed update on its own. The pool
+	// needs a full refresh, without changing the batch shared with other consumers.
+	if stateStale && !stateChanges.StateChangesIncomplete {
+		stateChanges = proto.Clone(stateChanges).(*remoteproto.StateChangeBatch)
+		stateChanges.StateChangesIncomplete = true
+	}
 	for _, txn := range unwindTxns.Txns {
 		p.recoverAuthorizations(txn)
 	}
 
 	coreDB, cache := p.chainDB()
-	cache.OnNewBlock(stateChanges)
-	coreTx, err := coreDB.BeginTemporalRo(ctx)
+	coreTx, err := beginBlockState(ctx, coreDB, stateChanges)
 	if err != nil {
 		return err
 	}
 	defer coreTx.Rollback()
+	cache.OnNewBlock(stateChanges)
 
 	var poolTx kv.Tx
 	if p.poolDB != nil {
@@ -339,21 +428,6 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 		}
 		defer poolTx.Rollback()
 	}
-
-	// Update EWMA block time (α=0.1) using wall-clock measurements between consecutive blocks.
-	// Gaps >10 min are ignored: they indicate the node was paused, restarted, or fast-syncing
-	// (during fast-sync the txpool receives block batches with large wall-clock gaps between
-	// them, so individual inter-block deltas are not meaningful). As a result the EWMA only
-	// tracks real-time block arrivals at chain tip. Seeded at 12 s (Ethereum mainnet slot time);
-	// converges to actual observed block time (~13 s on mainnet due to missed slots) after ~30
-	// chain-tip blocks. Done outside the lock — atomics only.
-	nowMs := time.Now().UnixMilli()
-	if prev := p.lastBlockTimestampMs.Load(); prev > 0 {
-		if delta := nowMs - prev; delta > 0 && delta < 600_000 {
-			p.avgBlockTimeMs.Store((9*p.avgBlockTimeMs.Load() + delta) / 10)
-		}
-	}
-	p.lastBlockTimestampMs.Store(nowMs)
 
 	if err := minedTxns.Valid(); err != nil {
 		return err
@@ -368,7 +442,16 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 	if err != nil {
 		return err
 	}
-	return p.revalidateFrames(ctx, frames.parked, frames.generation, frames.blockHash)
+	if err := p.revalidateFrames(ctx, frames.parked, frames.generation, frames.blockHash); err != nil {
+		return err
+	}
+	// Keep activation unchanged on failure so a retry can still detect an unwind.
+	p.lock.Lock()
+	if frames.generation == p.stateGeneration {
+		p.headIsBogota = p.chainConfig.IsBogota(stateChanges.ChangeBatch[len(stateChanges.ChangeBatch)-1].BlockTime)
+	}
+	p.lock.Unlock()
+	return nil
 }
 
 // applyBlockUpdate applies the announced state under the pool lock and returns
@@ -389,10 +472,17 @@ func (p *TxPool) applyBlockUpdate(stateChanges *remoteproto.StateChangeBatch, un
 	}
 	frames.blockHash = p.stateBlockHash
 	defer func() {
-		if err == nil {
+		if err != nil {
+			// Selection must not observe a partially applied update after the lock is released.
+			p.markStateStaleLocked()
+		} else {
+			p.stateViewStale = false
+			if block > p.lastSeenBlock.Load() {
+				p.recordBlockTime(stateChanges.StateChangesIncomplete)
+			}
 			p.lastSeenBlock.Store(block)
-			p.lastSeenCond.Broadcast()
 		}
+		p.lastSeenCond.Broadcast()
 	}()
 
 	pendingPre := p.pending.Len()
@@ -422,6 +512,7 @@ func (p *TxPool) applyBlockUpdate(stateChanges *remoteproto.StateChangeBatch, un
 		})
 	}
 
+	unwindCells := make(blobCells)
 	for i, txn := range unwindBlobTxns.Txns {
 		if txn.HasBlobs() {
 			if poolTx == nil {
@@ -431,7 +522,7 @@ func (p *TxPool) applyBlockUpdate(stateChanges *remoteproto.StateChangeBatch, un
 			if err != nil {
 				return frames, err
 			}
-			if knownBlobTxn != nil {
+			if knownBlobTxn != nil && p.validateBlobSidecar(knownBlobTxn.TxnSlot, unwindCells) == txpoolcfg.Success {
 				unwindTxns.Append(knownBlobTxn.TxnSlot, unwindBlobTxns.Senders.At(i), false)
 			}
 		}
@@ -445,6 +536,7 @@ func (p *TxPool) applyBlockUpdate(stateChanges *remoteproto.StateChangeBatch, un
 	if err != nil {
 		return frames, err
 	}
+	maps.Copy(cells, unwindCells)
 
 	if dbg.AssertEnabled {
 		for _, txn := range unwindTxns.Txns {
@@ -459,9 +551,7 @@ func (p *TxPool) applyBlockUpdate(stateChanges *remoteproto.StateChangeBatch, un
 		}
 	}
 
-	if err := p.processMinedFinalizedBlobs(minedTxns.Txns, stateChanges.FinalizedBlock); err != nil {
-		return frames, err
-	}
+	p.processMinedFinalizedBlobs(minedTxns.Txns, stateChanges.FinalizedBlock)
 
 	if err := p.removeMined(p.all, minedTxns.Txns); err != nil {
 		return frames, err
@@ -469,8 +559,7 @@ func (p *TxPool) applyBlockUpdate(stateChanges *remoteproto.StateChangeBatch, un
 	p.restoreFramesLocked(block, unwindFrames)
 
 	var announcements Announcements
-	announcements, err = p.addTxnsOnNewBlock(block, cacheView, stateChanges, p.senders, unwindTxns, cells, /* newTxns */
-		stateChanges.BlockGasLimit, p.logger)
+	announcements, err = p.addTxnsOnNewBlock(block, cacheView, stateChanges, unwindTxns, cells)
 	if err != nil {
 		return frames, err
 	}
@@ -480,24 +569,35 @@ func (p *TxPool) applyBlockUpdate(stateChanges *remoteproto.StateChangeBatch, un
 	p.pending.EnforceWorstInvariants()
 	p.baseFee.EnforceInvariants()
 	p.queued.EnforceInvariants()
-	if err := p.promote(cacheView, pendingBaseFee, pendingBlobFee, &announcements, p.logger); err != nil {
+	if err := p.promote(cacheView, pendingBaseFee, pendingBlobFee, &announcements); err != nil {
 		return frames, err
 	}
-	p.pending.EnforceBestInvariants()
 	p.notifyPendingTxns(announcements)
 
 	p.publishDepthMetrics()
 	return frames, nil
 }
 
-// publishDepthMetrics republishes the sub-pool depth gauges. Called on every block
-// so the gauges track the pool at block cadence rather than the LogEvery tick (3
-// minutes on every node, per cmd/utils/flags.go). Caller must hold p.lock; the
-// writes are atomic stores and the Len reads are O(1).
+// Record only successful head advances, so retries and subscription resets do not
+// become block-time samples. Incomplete batches restart the clock after catch-up.
+func (p *TxPool) recordBlockTime(incomplete bool) {
+	nowMs := time.Now().UnixMilli()
+	if prev := p.lastBlockTimestampMs.Load(); prev > 0 && !incomplete {
+		// Ignore pauses over ten minutes; the EWMA (alpha=0.1) tracks arrivals at the tip.
+		if delta := nowMs - prev; delta > 0 && delta < 600_000 {
+			p.avgBlockTimeMs.Store((9*p.avgBlockTimeMs.Load() + delta) / 10)
+		}
+	}
+	p.lastBlockTimestampMs.Store(nowMs)
+}
+
+// Publish at block cadence, including parked frames as queued, as in RPC.
+// Caller must hold p.lock.
 func (p *TxPool) publishDepthMetrics() {
-	pendingSubCounter.SetInt(p.pending.Len())
-	basefeeSubCounter.SetInt(p.baseFee.Len())
-	queuedSubCounter.SetInt(p.queued.Len())
+	pending, baseFee, queued := p.countContent()
+	pendingSubCounter.SetInt(pending)
+	basefeeSubCounter.SetInt(baseFee)
+	queuedSubCounter.SetInt(queued)
 }
 
 // forgetUnusedSenders drops the id of every sender in the batch that has no
@@ -548,9 +648,11 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 func (p *TxPool) removeProcessedRemoteTxns(n int) {
 	if n == len(p.unprocessedRemoteTxns.Txns) {
 		p.unprocessedRemoteByHash = make(map[string]*TxnSlot)
+		p.unprocessedRemoteBytes = 0
 	} else {
 		for _, txn := range p.unprocessedRemoteTxns.Txns[:n] {
 			delete(p.unprocessedRemoteByHash, string(txn.IDHash[:]))
+			p.unprocessedRemoteBytes -= uint64(txn.Size)
 		}
 	}
 	p.unprocessedRemoteTxns.Txns = slices.Delete(p.unprocessedRemoteTxns.Txns, 0, n)
@@ -641,19 +743,13 @@ func (p *TxPool) idHashKnown(tx kv.Tx, hash []byte, hashS string) (bool, error) 
 	if _, ok := p.minedBlobTxnsByHash[hashS]; ok {
 		return true, nil
 	}
-	if generation, ok := p.frameRejections.Get(hashS); ok {
-		// A new state generation permits another attempt even if a rejected
-		// transaction's persisted pool row has not been removed yet.
-		return generation == p.stateGeneration, nil
+	if rejection, ok := p.frameRejections.Get(hashS); ok {
+		// Expired rejections permit a retry even if the discarded transaction's
+		// persisted pool row has not been removed yet.
+		return rejection.applies(p, p.stateGeneration), nil
 	}
 	if reason, ok := p.discardReasonsLRU.Get(hashS); ok {
-		// Retryable failures may clear before the discarded pool row is removed.
-		switch reason {
-		case txpoolcfg.NonceTooDistant, txpoolcfg.FrameValidationUnavailable, txpoolcfg.FrameStateChanged:
-			return false, nil
-		default:
-			return true, nil
-		}
+		return !refetchableDiscard(reason), nil
 	}
 	return tx.Has(kv.PoolTransaction, hash)
 }
@@ -663,6 +759,26 @@ func (p *TxPool) IdHashKnown(tx kv.Tx, hash []byte) (bool, error) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	return p.idHashKnown(tx, hash, hashS)
+}
+
+// KnownTxnReason returns AlreadyKnown only for transactions currently in the pool.
+// Otherwise it returns a cached rejection that still applies,
+// or NotSet if admission is needed.
+func (p *TxPool) KnownTxnReason(hash []byte) txpoolcfg.DiscardReason {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+	hashS := string(hash)
+	if _, ok := p.byHash[hashS]; ok {
+		return txpoolcfg.AlreadyKnown
+	}
+	if reason, ok := p.discardReasonsLRU.Get(hashS); ok && reason == txpoolcfg.InvalidAuthorizationNonce {
+		return reason
+	}
+	// Sender-policy rejections still need admission's current account-nonce check.
+	if rejection, ok := p.frameRejections.Get(hashS); ok && rejection.blocker == (common.Hash{}) && rejection.applies(p, p.stateGeneration) {
+		return rejection.reason
+	}
+	return txpoolcfg.NotSet
 }
 
 func (p *TxPool) FilterKnownIdHashes(tx kv.Tx, hashes Hashes) (unknownHashes Hashes, err error) {
@@ -678,6 +794,42 @@ func (p *TxPool) FilterKnownIdHashes(tx kv.Tx, hashes Hashes) (unknownHashes Has
 		}
 	}
 	return unknownHashes, err
+}
+
+// refetchableDiscard reports a discard another body can undo: a retryable failure (a nonce gap, frame validation) can
+// clear before the discarded pool row is removed, and a blob txn's hash does not cover its sidecar, so one peer's bad
+// sidecar says nothing about the txn.
+func refetchableDiscard(reason txpoolcfg.DiscardReason) bool {
+	switch reason {
+	case txpoolcfg.NonceTooDistant, txpoolcfg.BlobNonceGap, txpoolcfg.FrameValidationUnavailable, txpoolcfg.FrameStateChanged,
+		txpoolcfg.UnequalBlobTxExt, txpoolcfg.BlobHashCheckFail, txpoolcfg.UnmatchedBlobTxExt:
+		return true
+	}
+	return false
+}
+
+// HeldOrQueuedIdHashes splits hashes into the ones the pool holds and the ones queued for its validation.
+// A discarded txn that a refetch would drop as known counts as held; one a refetch can fix is neither.
+func (p *TxPool) HeldOrQueuedIdHashes(tx kv.Tx, hashes Hashes) (held, queued Hashes, err error) {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+	for i := 0; i < len(hashes); i += 32 {
+		hash, hashS := hashes[i:i+32], string(hashes[i:i+32])
+		_, inQueue := p.unprocessedRemoteByHash[hashS]
+		_, simulating := p.remoteFrames.pending[hashS] // a frame leaves the queue before its simulation ends
+		if inQueue || simulating {
+			queued = append(queued, hash...)
+			continue
+		}
+		known, err := p.idHashKnown(tx, hash, hashS)
+		if err != nil {
+			return held, queued, err
+		}
+		if known {
+			held = append(held, hash...)
+		}
+	}
+	return held, queued, nil
 }
 
 func (p *TxPool) getCachedBlobTxnLocked(tx kv.Tx, hash []byte) (*metaTxn, error) {
@@ -802,6 +954,10 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
+	if p.stateViewStale {
+		return false, 0, nil
+	}
+
 	best := p.pending.best
 
 	isEIP3860 := p.isShanghai()
@@ -810,8 +966,8 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 	minTxGas := mdgas.MinTxGas(isAmsterdam)
 
 	txns.Resize(uint(min(n, len(best.ms))))
-	var toRemove []*metaTxn
-	var toDiscard []*metaTxn
+	var toDiscard, toDemote []*metaTxn
+	pendingBaseFee, pendingBlobFee := p.pendingBaseFee.Load(), p.pendingBlobFee.Load()
 	count := 0
 	i := 0
 
@@ -831,6 +987,12 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 		mt := best.ms[i]
 
 		if yielded != nil && yielded.Contains(mt.TxnSlot.IDHash) {
+			continue
+		}
+		// Pending is ordered without the blob fee, so promotion only demotes a blob txn the blob fee has risen
+		// past once it is the worst one.
+		if !coversPendingFees(mt, pendingBaseFee, pendingBlobFee) {
+			toDemote = append(toDemote, mt)
 			continue
 		}
 
@@ -868,7 +1030,8 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 			return false, count, err
 		}
 		if len(rlpTxn) == 0 {
-			toRemove = append(toRemove, mt)
+			// The snapshot was taken before the pool lock was retaken; a flush in between moved the RLP to a row it does
+			// not see. The next call reads it.
 			continue
 		}
 
@@ -938,22 +1101,26 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 	}
 
 	txns.Resize(uint(count))
-	if len(toRemove) > 0 {
-		for _, mt := range toRemove {
-			p.pending.Remove(mt, "best", p.logger)
-		}
+	for _, mt := range toDemote {
+		p.pending.Remove(mt, "best", p.logger)
+		p.baseFee.Add(mt, "demote-best", p.logger)
 	}
-	if len(toDiscard) > 0 {
-		for _, mt := range toDiscard {
-			p.pending.Remove(mt, "best", p.logger)
-			p.discardLocked(mt, txpoolcfg.UnmatchedBlobTxExt)
-		}
+	for _, mt := range toDiscard {
+		p.pending.Remove(mt, "best", p.logger)
+		p.discardLocked(mt, txpoolcfg.UnmatchedBlobTxExt)
+	}
+	if len(toDemote)+len(toDiscard) > 0 {
+		p.pending.EnforceBestInvariants() // Remove swaps the last txn into the removed one's place
 	}
 
 	return true, count, nil
 }
 
 func (p *TxPool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOption) ([]types.Transaction, error) {
+	if !p.Started() {
+		return nil, ctx.Err()
+	}
+
 	provideOptions := txnprovider.ApplyProvideOptions(opts...)
 	var txnsRlp TxnsRlp
 	_, _, err := p.best(
@@ -1000,14 +1167,15 @@ func (p *TxPool) PeekBest(ctx context.Context, n int, txns *TxnsRlp, onTopOf uin
 func (p *TxPool) CountContent() (int, int, int) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
-	queued := p.queued.Len()
-	// Include parked frames in the queued count, matching their RPC listing.
-	for _, mt := range p.all.senderIDFrameTxn {
-		if mt.currentSubPool == 0 {
-			queued++
-		}
-	}
-	return p.pending.Len(), p.baseFee.Len(), queued
+	return p.countContent()
+}
+
+func (p *TxPool) countContent() (int, int, int) {
+	pending, baseFee := p.pending.Len(), p.baseFee.Len()
+	// Every indexed transaction outside pending and base-fee is queued or parked.
+	// RPC reports both as queued.
+	queued := len(p.byHash) - pending - baseFee
+	return pending, baseFee, queued
 }
 
 func (p *TxPool) AddRemoteTxns(_ context.Context, newTxns TxnSlots, peerID PeerID, sentry sentryproto.SentryClient) {
@@ -1024,6 +1192,9 @@ func (p *TxPool) AddRemoteTxns(_ context.Context, newTxns TxnSlots, peerID PeerI
 	src := remoteSource{peerID: peerID, sentry: sentry}
 	now := time.Now()
 	for i, txn := range newTxns.Txns {
+		if len(p.unprocessedRemoteTxns.Txns) >= remoteTxnQueueLimit {
+			break
+		}
 		hashS := string(txn.IDHash[:])
 		if _, ok := p.remoteFrames.pending[hashS]; ok {
 			continue
@@ -1032,10 +1203,19 @@ func (p *TxPool) AddRemoteTxns(_ context.Context, newTxns TxnSlots, peerID PeerI
 		if ok {
 			continue
 		}
+		if uint64(txn.Size) > remoteTxnQueueByteLimit-p.unprocessedRemoteBytes {
+			continue
+		}
 		if txn.TxType() == FrameTxnType && !p.remoteFrames.reserve(txn, src, now) {
 			continue
 		}
+		// Blob bundles already reference an owned copy. Other RLP slices may
+		// retain an entire network packet outside the queue's byte budget.
+		if len(txn.BlobBundles) == 0 {
+			txn.Rlp = bytes.Clone(txn.Rlp)
+		}
 		p.unprocessedRemoteByHash[hashS] = txn
+		p.unprocessedRemoteBytes += uint64(txn.Size)
 		p.unprocessedRemoteTxns.Append(txn, newTxns.Senders.At(i), false)
 		p.unprocessedRemotePeers = append(p.unprocessedRemotePeers, src)
 	}
@@ -1072,7 +1252,7 @@ func (p *TxPool) validateTxWithCells(txn *TxnSlot, isLocal bool, stateCache kvca
 			return txpoolcfg.InvalidFrame, nil
 		}
 		if txn.HasBlobs() {
-			return p.validateBlobTxn(txn, isLocal, cells), nil
+			return p.validateBlobTxnAndSidecar(txn, isLocal, cells), nil
 		}
 		return txpoolcfg.Success, nil
 	}
@@ -1208,12 +1388,20 @@ func (p *TxPool) validateTxWithCells(txn *TxnSlot, isLocal bool, stateCache kvca
 		}
 	}
 	if txn.HasBlobs() {
-		return p.validateBlobTxn(txn, isLocal, cells), nil
+		return p.validateBlobTxn(txn, isLocal), nil
 	}
 	return txpoolcfg.Success, nil
 }
 
-func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool, cellsByHash blobCells) txpoolcfg.DiscardReason {
+// validateBlobTxnAndSidecar runs both blob checks, for callers that already hold p.lock.
+func (p *TxPool) validateBlobTxnAndSidecar(txn *TxnSlot, isLocal bool, cells blobCells) txpoolcfg.DiscardReason {
+	if reason := p.validateBlobTxn(txn, isLocal); reason != txpoolcfg.Success {
+		return reason
+	}
+	return p.validateBlobSidecar(txn, cells)
+}
+
+func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardReason {
 	if !p.isCancun() {
 		return txpoolcfg.TypeNotActivated
 	}
@@ -1229,6 +1417,27 @@ func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool, cellsByHash blobCel
 		return txpoolcfg.TooManyBlobs
 	}
 
+	if !isLocal && (p.all.blobCount(txn.SenderID)+uint64(blobCount)) > p.cfg.BlobSlots {
+		if txn.Traced {
+			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx sender blob limit exceeded idHash=%x blobs=%d, limit=%d", txn.IDHash, p.all.blobCount(txn.SenderID)+uint64(blobCount), p.cfg.BlobSlots))
+		}
+		return txpoolcfg.BlobSlotsOverflow
+	}
+	if p.totalBlobsInPool.Load() >= p.cfg.TotalBlobPoolLimit {
+		if txn.Traced {
+			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx total blobs limit reached in pool limit=%d current blobs=%d", p.cfg.TotalBlobPoolLimit, p.totalBlobsInPool.Load()))
+		}
+		return txpoolcfg.BlobPoolOverflow
+	}
+
+	return txpoolcfg.Success
+}
+
+// validateBlobSidecar checks the blob sidecar against the txn and adds its cells to cellsByHash.
+// It reads no pool state, so it does not need p.lock.
+func (p *TxPool) validateBlobSidecar(txn *TxnSlot, cellsByHash blobCells) txpoolcfg.DiscardReason {
+	blobHashes := txn.GetBlobHashes()
+	blobCount := len(blobHashes)
 	if blobCount != len(txn.BlobBundles) {
 		p.logger.Debug(fmt.Sprintf("TX POOL: blobCount %d != len(blobs) %d", blobCount, len(txn.BlobBundles)))
 		return txpoolcfg.UnequalBlobTxExt
@@ -1256,19 +1465,6 @@ func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool, cellsByHash blobCel
 		if libkzg.KZGToVersionedHash(commitments[i]) != libkzg.VersionedHash(blobHashes[i]) {
 			return txpoolcfg.BlobHashCheckFail
 		}
-	}
-
-	if !isLocal && (p.all.blobCount(txn.SenderID)+uint64(blobCount)) > p.cfg.BlobSlots {
-		if txn.Traced {
-			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx sender blob limit exceeded idHash=%x blobs=%d, limit=%d", txn.IDHash, p.all.blobCount(txn.SenderID)+uint64(blobCount), p.cfg.BlobSlots))
-		}
-		return txpoolcfg.BlobSlotsOverflow
-	}
-	if p.totalBlobsInPool.Load() >= p.cfg.TotalBlobPoolLimit {
-		if txn.Traced {
-			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx total blobs limit reached in pool limit=%d current blobs=%d", p.cfg.TotalBlobPoolLimit, p.totalBlobsInPool.Load()))
-		}
-		return txpoolcfg.BlobPoolOverflow
 	}
 
 	if p.isOsaka() {
@@ -1375,6 +1571,10 @@ func (p *TxPool) isAmsterdam() bool {
 	return isTimeBasedForkActivated(&p.isPostAmsterdam, p.amsterdamTime)
 }
 
+func (p *TxPool) isBogota() bool {
+	return isTimeBasedForkActivated(&p.isPostBogota, p.bogotaTime)
+}
+
 func (p *TxPool) GetMaxBlobsPerBlock() uint64 {
 	now := time.Now().Unix()
 	return p.chainConfig.GetMaxBlobsPerBlock(uint64(now))
@@ -1459,11 +1659,23 @@ func (p *TxPool) recoverAuthorizations(tx *TxnSlot) {
 	tx.AuthAndNonces = authorities
 }
 
-func (p *TxPool) withLockedState(ctx context.Context, txns *TxnSlots, f func(kv.TemporalTx, kvcache.CacheView) error) error {
+var errStateViewStale = errors.New("pool state recovery pending")
+
+func (p *TxPool) withLockedState(ctx context.Context, txns *TxnSlots, waitForRecovery bool, f func(kv.TemporalTx, kvcache.CacheView) error) error {
 	for {
 		p.lock.Lock()
 		coreDB, cache, generation := p._chainDB, p._stateCache, p.stateGeneration
+		stale := p.stateViewStale
 		p.lock.Unlock()
+		if stale {
+			if !waitForRecovery {
+				return errStateViewStale
+			}
+			if !p.waitForStateChange(ctx, generation) {
+				return ctx.Err()
+			}
+			continue
+		}
 
 		var retry bool
 		// The cache may wait for a block update, so open the view outside the pool lock.
@@ -1474,7 +1686,7 @@ func (p *TxPool) withLockedState(ctx context.Context, txns *TxnSlots, f func(kv.
 			}
 			p.lock.Lock()
 			defer p.lock.Unlock()
-			if generation != p.stateGeneration {
+			if generation != p.stateGeneration || p.stateViewStale {
 				retry = true
 				return nil
 			}
@@ -1492,34 +1704,61 @@ func (p *TxPool) withLockedState(ctx context.Context, txns *TxnSlots, f func(kv.
 	}
 }
 
-// Precheck SetCode transactions under the pool lock, then recover their
-// authorization signers without it. The caller must validate the surviving
-// transactions again with a fresh state view before inserting them.
-func (p *TxPool) prepareAuthorizations(ctx context.Context, txns TxnSlots) ([]txpoolcfg.DiscardReason, error) {
+// Precheck SetCode and blob transactions under the pool lock, then recover
+// authorization signers and verify blob sidecars without it. The caller must
+// validate the surviving transactions again with a fresh state view before inserting them.
+func (p *TxPool) prepareTxns(ctx context.Context, txns TxnSlots, sources []remoteSource, waitForRecovery bool) ([]txpoolcfg.DiscardReason, blobCells, error) {
 	if err := txns.Valid(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	var setCode TxnSlots
+	var prechecked TxnSlots
 	var indices []int
 	for i, txn := range txns.Txns {
-		if txn.TxType() == SetCodeTxnType {
-			setCode.Append(txn, txns.Senders.At(i), txns.IsLocal[i])
+		if txn.TxType() == SetCodeTxnType || txn.TxType() == BlobTxnType {
+			prechecked.Append(txn, txns.Senders.At(i), txns.IsLocal[i])
 			indices = append(indices, i)
 		}
 	}
 	if len(indices) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
+	batchLen := len(txns.Txns)
+	hasFrames := slices.ContainsFunc(txns.Txns, func(txn *TxnSlot) bool { return txn.TxType() == FrameTxnType })
 
 	var precheckReasons []txpoolcfg.DiscardReason
 	var goodTxns TxnSlots
-	err := p.withLockedState(ctx, &setCode, func(_ kv.TemporalTx, view kvcache.CacheView) error {
+	err := p.withLockedState(ctx, &prechecked, waitForRecovery, func(_ kv.TemporalTx, view kvcache.CacheView) error {
 		var err error
-		precheckReasons, goodTxns, _, err = p.validateTxns(&setCode, view, nil, nil)
-		return err
+		precheckReasons, goodTxns, _, err = p.validateTxns(&prechecked, view, nil, nil)
+		if err != nil || p.cfg.MaxNonceGap == 0 || hasFrames {
+			return err
+		}
+		for i, txn := range prechecked.Txns {
+			if txn.TxType() != BlobTxnType || precheckReasons[i] != txpoolcfg.NotSet {
+				continue
+			}
+			reason, found := p.discardReasonsLRU.Peek(string(txn.IDHash[:]))
+			if !found || reason != txpoolcfg.NonceTooDistant || p.hasParkedLegacyFrame(txn.SenderID) {
+				continue
+			}
+			nonce, _, _, err := p.senders.info(view, txn.SenderID)
+			if err != nil {
+				return err
+			}
+			if txn.Nonce <= nonce {
+				continue
+			}
+			// Pool and batch counts overestimate how far predecessors can advance the nonce.
+			predecessors := uint64(p.all.count(txn.SenderID)) + uint64(batchLen) - 1
+			gap := txn.Nonce - nonce
+			if gap > p.cfg.MaxNonceGap && gap-p.cfg.MaxNonceGap > predecessors {
+				precheckReasons[i] = txpoolcfg.NonceTooDistant
+			}
+		}
+		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	reasons := make([]txpoolcfg.DiscardReason, len(txns.Txns))
@@ -1527,9 +1766,50 @@ func (p *TxPool) prepareAuthorizations(ctx context.Context, txns TxnSlots) ([]tx
 		reasons[index] = precheckReasons[i]
 	}
 	for _, txn := range goodTxns.Txns {
-		p.recoverAuthorizations(txn)
+		if txn.TxType() == SetCodeTxnType {
+			p.recoverAuthorizations(txn)
+		}
 	}
-	return reasons, nil
+	cells := make(blobCells)
+	offenders := kzgOffenders{sources: sources}
+	for _, i := range indices {
+		if txns.Txns[i].TxType() != BlobTxnType || reasons[i] != txpoolcfg.NotSet {
+			continue
+		}
+		remote := !txns.IsLocal[i]
+		if remote && offenders.skip(i) {
+			continue
+		}
+		reasons[i] = p.validateBlobSidecar(txns.Txns[i], cells)
+		if reasons[i] == txpoolcfg.Success {
+			reasons[i] = txpoolcfg.NotSet
+		} else if reasons[i] == txpoolcfg.UnmatchedBlobTxExt && remote {
+			offenders.add(i)
+		}
+	}
+	return reasons, cells, nil
+}
+
+// kzgOffenders tracks the remote sources of txns that failed KZG verification, so their later txns are skipped.
+type kzgOffenders struct {
+	sources   []remoteSource
+	peers     [][64]byte
+	allRemote bool // a failure without a peer ID skips every later remote txn
+}
+
+func (o *kzgOffenders) skip(i int) bool {
+	if o.allRemote {
+		return true
+	}
+	return i < len(o.sources) && o.sources[i].peerID != nil && slices.Contains(o.peers, o.sources[i].peerKey())
+}
+
+func (o *kzgOffenders) add(i int) {
+	if i < len(o.sources) && o.sources[i].peerID != nil {
+		o.peers = append(o.peers, o.sources[i].peerKey())
+	} else {
+		o.allRemote = true
+	}
 }
 
 // validateTxns returns per-slot discard reasons and the txns that passed.
@@ -1547,20 +1827,12 @@ func (p *TxPool) validateTxns(txns *TxnSlots, stateCache kvcache.CacheView, reas
 	}
 	cells = make(blobCells)
 
-	skipAllRemote := false
-	var kzgOffenders [][64]byte
-	isKZGOffender := func(i int) bool {
-		if skipAllRemote {
-			return true
-		}
-		if i >= len(sources) || sources[i].peerID == nil {
-			return false
-		}
-		return slices.Contains(kzgOffenders, sources[i].peerKey())
-	}
-
+	offenders := kzgOffenders{sources: sources}
 	for i, txn := range txns.Txns {
-		if reasons[i] != txpoolcfg.NotSet || (!txns.IsLocal[i] && isKZGOffender(i)) {
+		if reasons[i] == txpoolcfg.UnmatchedBlobTxExt && !txns.IsLocal[i] {
+			offenders.add(i)
+		}
+		if reasons[i] != txpoolcfg.NotSet || (!txns.IsLocal[i] && offenders.skip(i)) {
 			continue
 		}
 		reason, err := p.validateTxWithCells(txn, txns.IsLocal[i], stateCache, cells)
@@ -1581,13 +1853,8 @@ func (p *TxPool) validateTxns(txns *TxnSlots, stateCache kvcache.CacheView, reas
 			p.punishSpammer(txn.SenderID)
 		}
 		reasons[i] = reason
-		// On a KZG-verify failure in a remote batch, drop the rest from the same peer without re-verifying.
-		if reason == txpoolcfg.UnmatchedBlobTxExt && !txns.IsLocal[i] {
-			if i < len(sources) && sources[i].peerID != nil {
-				kzgOffenders = append(kzgOffenders, sources[i].peerKey())
-			} else {
-				skipAllRemote = true
-			}
+		if reason == txpoolcfg.UnmatchedBlobTxExt && !txns.IsLocal[i] { // a frame txn's sidecar is verified here
+			offenders.add(i)
 		}
 	}
 	return reasons, goodTxns, cells, nil
@@ -1629,28 +1896,62 @@ func fillDiscardReasons(reasons []txpoolcfg.DiscardReason, newTxns TxnSlots, dis
 	return reasons
 }
 
+const localAdmissionTimeout = 30 * time.Second
+
 func (p *TxPool) AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcfg.DiscardReason, error) {
+	ctx, cancel := context.WithTimeout(ctx, localAdmissionTimeout)
+	defer cancel()
 	return p.addNewTxns(ctx, newTxns, nil, true)
 }
 
-// State-update processing must disable waitForHead so it can continue delivering
-// the notifications needed to retry a backend head mismatch.
-func (p *TxPool) addNewTxns(ctx context.Context, newTxns TxnSlots, sources []remoteSource, waitForHead bool) ([]txpoolcfg.DiscardReason, error) {
-	reasons, err := p.prepareAuthorizations(ctx, newTxns)
+func (p *TxPool) addNewTxns(ctx context.Context, newTxns TxnSlots, sources []remoteSource, waitForRecovery bool) ([]txpoolcfg.DiscardReason, error) {
+	for {
+		reasons, err := p.tryAddNewTxns(ctx, newTxns, sources, waitForRecovery)
+		if !waitForRecovery || !errors.Is(err, errStateViewStale) {
+			return reasons, err
+		}
+		for {
+			p.lock.Lock()
+			stale, generation := p.stateViewStale, p.stateGeneration
+			p.lock.Unlock()
+			if !stale {
+				break
+			}
+			if !p.waitForStateChange(ctx, generation) {
+				return nil, ctx.Err()
+			}
+		}
+	}
+}
+
+// Head-change retries share one simulation deadline. Frame admission returns
+// errStateViewStale so recovery can wait outside that budget and restart admission.
+func (p *TxPool) tryAddNewTxns(ctx context.Context, newTxns TxnSlots, sources []remoteSource, waitForRecovery bool) ([]txpoolcfg.DiscardReason, error) {
+	reasons, preparedCells, err := p.prepareTxns(ctx, newTxns, sources, waitForRecovery)
 	if err != nil {
 		return nil, err
 	}
 	precheckReasons := reasons
+	hasFrames := slices.ContainsFunc(newTxns.Txns, func(txn *TxnSlot) bool { return txn.TxType() == FrameTxnType })
 	simulationCtx := ctx
-	if slices.ContainsFunc(newTxns.Txns, func(txn *TxnSlot) bool { return txn.TxType() == FrameTxnType }) {
+	if hasFrames {
 		var cancel context.CancelFunc
 		simulationCtx, cancel = context.WithTimeout(ctx, frameValidationTimeout)
 		defer cancel()
 	}
 	for {
-		frames := p.prepareFrames(simulationCtx, newTxns, waitForHead)
-		err = p.withLockedState(ctx, &newTxns, func(_ kv.TemporalTx, cacheView kvcache.CacheView) error {
-			preparedReasons, err := p.applyFrameValidation(simulationCtx, newTxns, frames, precheckReasons)
+		var frames frameValidationBatch
+		if hasFrames {
+			p.lock.Lock()
+			stale := p.stateViewStale
+			p.lock.Unlock()
+			if stale {
+				return nil, errStateViewStale
+			}
+			frames = p.prepareFrames(simulationCtx, newTxns)
+		}
+		err = p.withLockedState(ctx, &newTxns, waitForRecovery && !hasFrames, func(_ kv.TemporalTx, cacheView kvcache.CacheView) error {
+			preparedReasons, err := p.applyFrameValidation(simulationCtx, newTxns, frames, precheckReasons, cacheView)
 			if err != nil {
 				return err
 			}
@@ -1659,11 +1960,12 @@ func (p *TxPool) addNewTxns(ctx context.Context, newTxns TxnSlots, sources []rem
 			if err != nil {
 				return err
 			}
+			maps.Copy(cells, preparedCells)
 			reasons = validatedReasons
 			p.kickKZGOffenders(ctx, reasons, sources)
 
-			announcements, addReasons, err := p.addTxns(p.lastSeenBlock.Load(), cacheView, p.senders, goodTxns, cells,
-				p.pendingBaseFee.Load(), p.pendingBlobFee.Load(), p.blockGasLimit.Load(), true, p.logger)
+			announcements, addReasons, err := p.addTxns(p.lastSeenBlock.Load(), cacheView, goodTxns, cells,
+				p.pendingBaseFee.Load(), p.pendingBlobFee.Load(), true)
 			if err != nil {
 				return err
 			}
@@ -1695,8 +1997,8 @@ func (p *TxPool) chainDB() (kv.TemporalRoDB, kvcache.Cache) {
 	return p._chainDB, p._stateCache
 }
 
-func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView, senders *sendersBatch,
-	newTxns TxnSlots, cells blobCells, pendingBaseFee, pendingBlobFee, blockGasLimit uint64, collect bool, logger log.Logger,
+func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView,
+	newTxns TxnSlots, cells blobCells, pendingBaseFee, pendingBlobFee uint64, collect bool,
 ) (Announcements, []txpoolcfg.DiscardReason, error) {
 	if dbg.AssertEnabled {
 		for _, txn := range newTxns.Txns {
@@ -1706,10 +2008,8 @@ func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView, senders *
 		}
 	}
 
-	// This can be thought of a reverse operation from the one described before.
-	// When a block that was deemed "the best" of its height, is no longer deemed "the best", the
-	// transactions contained in it, are now viable for inclusion in other blocks, and therefore should
-	// be returned into the transaction pool.
+	// Refresh senders after inserting the batch so their nonce-chain and balance
+	// checks account for all accepted transactions in the batch.
 	sendersWithChangedState := map[uint64]struct{}{}
 	discardReasons := make([]txpoolcfg.DiscardReason, len(newTxns.Txns))
 	announcements := Announcements{}
@@ -1728,9 +2028,8 @@ func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView, senders *
 			discardReasons[i] = reason
 			continue
 		}
-		discardReasons[i] = txpoolcfg.NotSet // unnecessary
 		if txn.Traced {
-			logger.Info(fmt.Sprintf("TX TRACING: schedule sendersWithChangedState idHash=%x senderId=%d", txn.IDHash, mt.TxnSlot.SenderID))
+			p.logger.Info(fmt.Sprintf("TX TRACING: schedule sendersWithChangedState idHash=%x senderId=%d", txn.IDHash, mt.TxnSlot.SenderID))
 		}
 		sendersWithChangedState[mt.TxnSlot.SenderID] = struct{}{}
 	}
@@ -1742,24 +2041,20 @@ func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView, senders *
 		if _, ok := p.senderLastActivity[senderID]; !ok {
 			p.senderLastActivity[senderID] = blockNum
 		}
-		nonce, balance, codeHash, err := senders.info(cacheView, senderID)
-		if err != nil {
+		if err := p.refreshSender(cacheView, senderID); err != nil {
 			return announcements, discardReasons, err
 		}
-		p.onSenderStateChange(senderID, nonce, balance, codeHash, blockGasLimit, logger)
 	}
 
-	if err := p.promote(cacheView, pendingBaseFee, pendingBlobFee, &announcements, logger); err != nil {
+	if err := p.promote(cacheView, pendingBaseFee, pendingBlobFee, &announcements); err != nil {
 		return announcements, discardReasons, err
 	}
-	p.pending.EnforceBestInvariants()
-
 	return announcements, discardReasons, nil
 }
 
 // TODO: Looks like a copy of the above
 func (p *TxPool) addTxnsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView, stateChanges *remoteproto.StateChangeBatch,
-	senders *sendersBatch, newTxns TxnSlots, cells blobCells, blockGasLimit uint64, logger log.Logger,
+	newTxns TxnSlots, cells blobCells,
 ) (Announcements, error) {
 	if dbg.AssertEnabled {
 		for _, txn := range newTxns.Txns {
@@ -1789,12 +2084,12 @@ func (p *TxPool) addTxnsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView,
 	for _, changesList := range stateChanges.ChangeBatch {
 		for _, change := range changesList.Changes {
 			switch change.Action {
-			case remoteproto.Action_UPSERT, remoteproto.Action_UPSERT_CODE:
+			case remoteproto.Action_UPSERT, remoteproto.Action_UPSERT_CODE, remoteproto.Action_REMOVE:
 				if change.Incarnation > 0 {
 					continue
 				}
 				addr := gointerfaces.ConvertH160toAddress(change.Address)
-				id, ok := senders.getID(addr)
+				id, ok := p.senders.getID(addr)
 				if !ok {
 					continue
 				}
@@ -1810,33 +2105,32 @@ func (p *TxPool) addTxnsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView,
 	// queued forever, since the only re-evaluation trigger is the sender
 	// appearing in a block's stateChanges, which doesn't happen if the
 	// queued tx is the sender's only outstanding tx.
-	queuedSenders := map[uint64]struct{}{}
-	for _, mt := range p.queued.best.ms {
-		senderID := mt.TxnSlot.SenderID
-		if _, alreadyCovered := sendersWithChangedState[senderID]; alreadyCovered {
-			continue
+	sendersToRefresh := map[uint64]struct{}{}
+	if stateChanges.StateChangesIncomplete {
+		// Missing account changes can leave mined transactions spending a frame payer's balance.
+		for senderID := range p.all.senderIDTxnCount {
+			sendersToRefresh[senderID] = struct{}{}
 		}
-		queuedSenders[senderID] = struct{}{}
+	} else {
+		for _, mt := range p.queued.best.ms {
+			sendersToRefresh[mt.TxnSlot.SenderID] = struct{}{}
+		}
 	}
 
 	for senderID := range sendersWithChangedState {
+		delete(sendersToRefresh, senderID)
 		// Reset the dormancy timer: this sender had a real on-chain state change.
 		p.senderLastActivity[senderID] = blockNum
-		nonce, balance, codeHash, err := senders.info(cacheView, senderID)
-		if err != nil {
+		if err := p.refreshSender(cacheView, senderID); err != nil {
 			return announcements, err
 		}
-		p.onSenderStateChange(senderID, nonce, balance, codeHash, blockGasLimit, logger)
 	}
 
-	// Don't touch senderLastActivity for queuedSenders — these senders did not
-	// change state on-chain, so the dormancy timer should not be reset.
-	for senderID := range queuedSenders {
-		nonce, balance, codeHash, err := senders.info(cacheView, senderID)
-		if err != nil {
+	// Refreshing eligibility without an announced account change must not extend the dormancy timer.
+	for senderID := range sendersToRefresh {
+		if err := p.refreshSender(cacheView, senderID); err != nil {
 			return announcements, err
 		}
-		p.onSenderStateChange(senderID, nonce, balance, codeHash, blockGasLimit, logger)
 	}
 
 	return announcements, nil
@@ -1934,8 +2228,8 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements, cells blob
 				p.logger.Debug("Self authorization nonce should be senderNonce + 1", "authority", a.authority, "txn", fmt.Sprintf("%x", mt.TxnSlot.IDHash))
 				// This pool rule is stricter than execution. Its rejection depends only on
 				// the transaction, so cache it to avoid repeating authorization recovery.
-				p.discardReasonsLRU.Add(string(mt.TxnSlot.IDHash[:]), txpoolcfg.NonceTooLow)
-				return txpoolcfg.NonceTooLow
+				p.discardReasonsLRU.Add(string(mt.TxnSlot.IDHash[:]), txpoolcfg.InvalidAuthorizationNonce)
+				return txpoolcfg.InvalidAuthorizationNonce
 			}
 			if owner, ok := p.auths[AuthAndNonce{a.authority, a.nonce}]; ok && owner != found {
 				p.logger.Debug("setCodeTxn ", "duplicateAuthority", a.authority, "nonce", a.nonce, "txn", fmt.Sprintf("%x", mt.TxnSlot.IDHash))
@@ -2177,7 +2471,7 @@ func (p *TxPool) GetBlobs(blobHashes []common.Hash) []PoolBlobBundle {
 }
 
 // Cache recently mined blobs in anticipation of reorg, delete finalized ones
-func (p *TxPool) processMinedFinalizedBlobs(minedTxns []*TxnSlot, finalizedBlock uint64) error {
+func (p *TxPool) processMinedFinalizedBlobs(minedTxns []*TxnSlot, finalizedBlock uint64) {
 	p.lastFinalizedBlock.Store(finalizedBlock)
 	// Remove blobs in the finalized block and older, loop through all entries
 	for l := len(p.minedBlobTxnsByBlock); l > 0 && finalizedBlock > 0; l-- {
@@ -2191,18 +2485,21 @@ func (p *TxPool) processMinedFinalizedBlobs(minedTxns []*TxnSlot, finalizedBlock
 		finalizedBlock--
 	}
 
-	// Add mined blobs
+	// A retry may repeat already-applied transaction changes. Keep each cached
+	// blob transaction in only one block bucket.
 	minedBlock := p.lastSeenBlock.Load()
-	p.minedBlobTxnsByBlock[minedBlock] = make([]*metaTxn, 0)
+	if p.minedBlobTxnsByBlock[minedBlock] == nil {
+		p.minedBlobTxnsByBlock[minedBlock] = make([]*metaTxn, 0) // a same-height reorg reuses the block number, and its entries stay indexed
+	}
 	for _, txn := range minedTxns {
 		if txn.HasBlobs() {
+			p.deleteMinedBlobTxn(string(txn.IDHash[:])) // a txn mined again: finalizing its old block must not drop the new entry
 			mt := &metaTxn{TxnSlot: txn, minedBlockNum: minedBlock}
 			p.minedBlobTxnsByBlock[minedBlock] = append(p.minedBlobTxnsByBlock[minedBlock], mt)
 			mt.bestIndex = len(p.minedBlobTxnsByBlock[minedBlock]) - 1
 			p.minedBlobTxnsByHash[string(txn.IDHash[:])] = mt
 		}
 	}
-	return nil
 }
 
 // Delete individual hash entries from minedBlobTxns cache
@@ -2307,11 +2604,20 @@ func (p *TxPool) updateGasLimitMarker(mt *metaTxn, blockGasLimit uint64) {
 	}
 }
 
+func (p *TxPool) refreshSender(cacheView kvcache.CacheView, senderID uint64) error {
+	nonce, balance, codeHash, err := p.senders.info(cacheView, senderID)
+	if err != nil {
+		return err
+	}
+	p.onSenderStateChange(senderID, nonce, balance, codeHash, p.blockGasLimit.Load())
+	return nil
+}
+
 // onSenderStateChange refreshes pool eligibility and ordering for one sender.
 // Transactions using account nonces depend on earlier nonces and cumulative sender costs.
 // Keyed frames bypass that chain: simulation checks their nonces, and payer
 // reservations cover their fees.
-func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, senderBalance uint256.Int, senderCodeHash accounts.CodeHash, blockGasLimit uint64, logger log.Logger) {
+func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, senderBalance uint256.Int, senderCodeHash accounts.CodeHash, blockGasLimit uint64) {
 	sender := p.senders.senderID2Addr[senderID]
 	delete(p.frameAccountsToRefresh, sender)
 	// A legacy frame awaiting restoration or revalidation cannot advance the account
@@ -2326,6 +2632,7 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 	noGapsNonce := senderNonce
 	cumulativeRequiredBalance := uint256.NewInt(0)
 	minFeeCap := uint256.NewInt(0).SetAllOne()
+	minBlobFeeCap := uint64(math.MaxUint64)
 	minTip := uint64(math.MaxUint64)
 	followsRemote := false
 	senderHasCode := !senderCodeHash.IsEmpty()
@@ -2335,7 +2642,7 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 
 	p.all.ascend(senderID, func(mt *metaTxn) bool {
 		deleteAndContinueReasonLog := ""
-		discardReason := txpoolcfg.NonceTooLow
+		discardReason := txpoolcfg.NotSet
 		switch {
 		case !nonceChainBlocked && senderHasCode && senderTxnKept:
 			deleteAndContinueReasonLog = "delegated sender transaction limit"
@@ -2344,6 +2651,7 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 			// Keyed frames share the delegated sender limit, but not the account nonce checks.
 		case senderNonce > mt.TxnSlot.Nonce:
 			deleteAndContinueReasonLog = "low nonce"
+			discardReason = txpoolcfg.NonceTooLow
 		case !nonceChainBlocked && senderHasCode && mt.TxnSlot.Nonce != senderNonce:
 			deleteAndContinueReasonLog = "delegated sender nonce gap"
 			discardReason = txpoolcfg.DelegatedNonceGap
@@ -2352,10 +2660,11 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 			discardReason = txpoolcfg.NonceTooDistant
 		case !nonceChainBlocked && mt.TxnSlot.Nonce != noGapsNonce && mt.TxnSlot.HasBlobs(): // Discard nonce-gapped blob txns
 			deleteAndContinueReasonLog = "nonce-gapped blob txn"
+			discardReason = txpoolcfg.BlobNonceGap
 		}
 		if deleteAndContinueReasonLog != "" {
 			if mt.TxnSlot.Traced {
-				logger.Info("TX TRACING: onSenderStateChange loop iteration remove", "idHash", fmt.Sprintf("%x", mt.TxnSlot.IDHash), "senderID", senderID, "senderNonce", senderNonce, "txn.nonce", mt.TxnSlot.Nonce, "currentSubPool", mt.currentSubPool, "reason", deleteAndContinueReasonLog)
+				p.logger.Info("TX TRACING: onSenderStateChange loop iteration remove", "idHash", fmt.Sprintf("%x", mt.TxnSlot.IDHash), "senderID", senderID, "senderNonce", senderNonce, "txn.nonce", mt.TxnSlot.Nonce, "currentSubPool", mt.currentSubPool, "reason", deleteAndContinueReasonLog)
 			}
 			p.removeFromSubPool(mt, deleteAndContinueReasonLog)
 			toDel = append(toDel, mt)
@@ -2368,6 +2677,7 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 
 		if mt.keyedNonce {
 			mt.minFeeCap = *mt.TxnSlot.GetFeeCap()
+			mt.minBlobFeeCap = blobFeeCap(mt.TxnSlot, math.MaxUint64)
 			mt.minTip = math.MaxUint64
 			if mt.TxnSlot.GetTipCap().IsUint64() {
 				mt.minTip = mt.TxnSlot.GetTipCap().Uint64()
@@ -2383,6 +2693,8 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 			*minFeeCap = *mt.TxnSlot.GetFeeCap()
 		}
 		mt.minFeeCap = *minFeeCap
+		minBlobFeeCap = blobFeeCap(mt.TxnSlot, minBlobFeeCap)
+		mt.minBlobFeeCap = minBlobFeeCap
 		if mt.TxnSlot.GetTipCap().IsUint64() {
 			minTip = min(minTip, mt.TxnSlot.GetTipCap().Uint64())
 		}
@@ -2425,7 +2737,7 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 		p.updateGasLimitMarker(mt, blockGasLimit)
 
 		if mt.TxnSlot.Traced {
-			logger.Info("TX TRACING: onSenderStateChange loop iteration update", "idHash", fmt.Sprintf("%x", mt.TxnSlot.IDHash), "senderId", mt.TxnSlot.SenderID, "nonce", mt.TxnSlot.Nonce, "subPool", mt.currentSubPool)
+			p.logger.Info("TX TRACING: onSenderStateChange loop iteration update", "idHash", fmt.Sprintf("%x", mt.TxnSlot.IDHash), "senderId", mt.TxnSlot.SenderID, "nonce", mt.TxnSlot.Nonce, "subPool", mt.currentSubPool)
 		}
 
 		// Some fields of mt might have changed, need to fix the invariants in the subpool best and worst queues
@@ -2437,7 +2749,7 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 		p.discardLocked(mt, toDelReasons[i])
 	}
 
-	logger.Trace("[txpool] onSenderStateChange", "sender", senderID, "count", p.all.count(senderID), "pending", p.pending.Len(), "baseFee", p.baseFee.Len(), "queued", p.queued.Len())
+	p.logger.Trace("[txpool] onSenderStateChange", "sender", senderID, "count", p.all.count(senderID), "pending", p.pending.Len(), "baseFee", p.baseFee.Len(), "queued", p.queued.Len())
 }
 
 func (p *TxPool) notifyPendingTxns(announcements Announcements) {
@@ -2460,52 +2772,71 @@ func announceFirstPending(announcements *Announcements, mt *metaTxn) {
 
 // promote reasserts the sub-pool invariants and adds to announcements each txn that enters pending
 // for the first time.
-func (p *TxPool) promote(cacheView kvcache.CacheView, pendingBaseFee uint64, pendingBlobFee uint64, announcements *Announcements, logger log.Logger) error {
+func (p *TxPool) promote(cacheView kvcache.CacheView, pendingBaseFee uint64, pendingBlobFee uint64, announcements *Announcements) error {
 	for {
 		if err := p.refreshFrameAccounts(cacheView); err != nil {
 			return err
 		}
-		p.promoteSubPools(pendingBaseFee, pendingBlobFee, announcements, logger)
+		p.promoteSubPools(pendingBaseFee, pendingBlobFee, announcements)
 		// Eviction can release payer funds or break a sender's nonce chain.
 		// Refresh affected accounts before finishing promotion.
 		if len(p.frameAccountsToRefresh) == 0 {
+			p.pending.EnforceBestInvariants()
 			return nil
 		}
 	}
 }
 
-func (p *TxPool) promoteSubPools(pendingBaseFee uint64, pendingBlobFee uint64, announcements *Announcements, logger log.Logger) {
+// coversPendingFees reports whether a txn, and every txn before it in its sender's nonce chain, pays the pending
+// block's base fee and blob fee. The txn's own blob fee cap is checked too, as the chain minimum is only set once
+// onSenderStateChange has seen the txn.
+func coversPendingFees(mt *metaTxn, pendingBaseFee, pendingBlobFee uint64) bool {
+	return mt.minFeeCap.CmpUint64(pendingBaseFee) >= 0 && mt.minBlobFeeCap >= pendingBlobFee &&
+		(!mt.TxnSlot.HasBlobs() || mt.TxnSlot.GetBlobFeeCap().CmpUint64(pendingBlobFee) >= 0)
+}
+
+func (p *TxPool) promoteSubPools(pendingBaseFee uint64, pendingBlobFee uint64, announcements *Announcements) {
 	// Demote worst transactions that do not qualify for pending sub pool anymore, to other sub pools, or discard
-	for worst := p.pending.Worst(); p.pending.Len() > 0 && (worst.subPool < BaseFeePoolBits || worst.minFeeCap.LtUint64(pendingBaseFee) || (worst.TxnSlot.HasBlobs() && worst.TxnSlot.GetBlobFeeCap().LtUint64(pendingBlobFee))); worst = p.pending.Worst() {
+	for worst := p.pending.Worst(); p.pending.Len() > 0 && (worst.subPool < BaseFeePoolBits || !coversPendingFees(worst, pendingBaseFee, pendingBlobFee)); worst = p.pending.Worst() {
 		tx := p.pending.PopWorst()
 		if worst.subPool >= BaseFeePoolBits {
-			p.baseFee.Add(tx, "demote-pending", logger)
+			p.baseFee.Add(tx, "demote-pending", p.logger)
 		} else {
-			p.queued.Add(tx, "demote-pending", logger)
+			p.queued.Add(tx, "demote-pending", p.logger)
 		}
 	}
 
-	// Promote best transactions from base fee pool to pending pool while they qualify
-	for best := p.baseFee.Best(); p.baseFee.Len() > 0 && best.subPool >= BaseFeePoolBits && best.minFeeCap.CmpUint64(pendingBaseFee) >= 0 && (!best.TxnSlot.HasBlobs() || best.TxnSlot.GetBlobFeeCap().CmpUint64(pendingBlobFee) >= 0); best = p.baseFee.Best() {
+	// Promote best transactions from base fee pool to pending pool while they qualify. The pool is ordered by fee cap,
+	// so a txn that waits only for the blob fee, its own or that of a blob txn before it in its sender's nonce chain,
+	// is set aside rather than holding back the txns after it.
+	var blobFeeBlocked []*metaTxn
+	for best := p.baseFee.Best(); p.baseFee.Len() > 0 && best.subPool >= BaseFeePoolBits && best.minFeeCap.CmpUint64(pendingBaseFee) >= 0; best = p.baseFee.Best() {
 		tx := p.baseFee.PopBest()
+		if !coversPendingFees(tx, pendingBaseFee, pendingBlobFee) {
+			blobFeeBlocked = append(blobFeeBlocked, tx)
+			continue
+		}
 		announceFirstPending(announcements, tx)
-		p.pending.Add(tx, logger)
+		p.pending.Add(tx, p.logger)
+	}
+	for _, tx := range blobFeeBlocked {
+		p.baseFee.Add(tx, "blob-fee", p.logger)
 	}
 
 	// Demote worst transactions that do not qualify for base fee pool anymore, to queued sub pool, or discard
 	for worst := p.baseFee.Worst(); p.baseFee.Len() > 0 && worst.subPool < BaseFeePoolBits; worst = p.baseFee.Worst() {
 		tx := p.baseFee.PopWorst()
-		p.queued.Add(tx, "demote-base", logger)
+		p.queued.Add(tx, "demote-base", p.logger)
 	}
 
 	// Promote best transactions from the queued pool to either pending or base fee pool, while they qualify
 	for best := p.queued.Best(); p.queued.Len() > 0 && best.subPool >= BaseFeePoolBits; best = p.queued.Best() {
 		tx := p.queued.PopBest()
-		if best.minFeeCap.Cmp(uint256.NewInt(pendingBaseFee)) >= 0 {
+		if coversPendingFees(best, pendingBaseFee, pendingBlobFee) {
 			announceFirstPending(announcements, tx)
-			p.pending.Add(tx, logger)
+			p.pending.Add(tx, p.logger)
 		} else {
-			p.baseFee.Add(tx, "promote-queued", logger)
+			p.baseFee.Add(tx, "promote-queued", p.logger)
 		}
 	}
 
@@ -2534,7 +2865,7 @@ func (p *TxPool) promoteSubPools(pendingBaseFee uint64, pendingBlobFee uint64, a
 			}
 		}
 		for _, tx := range blocked {
-			p.queued.Remove(tx, "frame validation pending", logger)
+			p.queued.Remove(tx, "frame validation pending", p.logger)
 		}
 	}
 	for p.queued.Len() > p.queued.limit {
@@ -2542,7 +2873,7 @@ func (p *TxPool) promoteSubPools(pendingBaseFee uint64, pendingBlobFee uint64, a
 		p.discardLocked(tx, txpoolcfg.QueuedPoolOverflow)
 	}
 	for _, tx := range blocked {
-		p.queued.Add(tx, "frame validation pending", logger)
+		p.queued.Add(tx, "frame validation pending", p.logger)
 	}
 	p.enforceTotalCapacity(pendingBaseFee)
 }
@@ -2903,7 +3234,7 @@ func (p *TxPool) flushLocked(tx kv.RwTx) (err error) {
 
 func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx) error {
 	var frames frameRevalidationBatch
-	err := p.withLockedState(ctx, nil, func(coreTx kv.TemporalTx, cacheView kvcache.CacheView) error {
+	err := p.withLockedState(ctx, nil, true, func(coreTx kv.TemporalTx, cacheView kvcache.CacheView) error {
 		err := p.fromDBLocked(tx, coreTx, cacheView, &frames.parked)
 		frames.generation, frames.blockHash = p.stateGeneration, p.stateBlockHash
 		return err
@@ -2922,16 +3253,25 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx) error {
 }
 
 func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.CacheView, parked *[]*metaTxn) error {
-	if p.stateBlockHash == (common.Hash{}) {
-		// Header sync can run ahead of execution, so pin validation to the executed head.
-		p.stateBlockHash = rawdb.ReadHeadBlockHash(coreTx)
-		header, err := rawdb.ReadHeaderByHash(coreTx, p.stateBlockHash)
+	lastSeenProgress, err := stages.GetStageProgress(coreTx, stages.Execution)
+	if err != nil {
+		return err
+	}
+	initializeHead := p.stateBlockHash == (common.Hash{})
+	if initializeHead {
+		// Header and block head markers can lead execution. Derive the startup head
+		// from execution progress so it matches the state being read.
+		p.stateBlockHash, err = rawdb.ReadCanonicalHash(coreTx, lastSeenProgress)
 		if err != nil {
 			return err
 		}
-		if header != nil {
-			p.headIsBogota = p.chainConfig.IsBogota(header.Time)
-		}
+	}
+	header, err := rawdb.ReadHeaderByHash(coreTx, p.stateBlockHash)
+	if err != nil {
+		return err
+	}
+	if initializeHead && header != nil {
+		p.headIsBogota = p.chainConfig.IsBogota(header.Time)
 	}
 	if p.lastSeenBlock.Load() == 0 {
 		lastSeenBlock, err := LastSeenBlock(tx)
@@ -2945,11 +3285,6 @@ func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.
 	// this is necessary as otherwise best - which waits for sync events
 	// may wait for ever if blocks have been process before the txpool
 	// starts with an empty db
-	lastSeenProgress, err := getExecutionProgress(coreTx)
-	if err != nil {
-		return err
-	}
-
 	if p.lastSeenBlock.Load() < lastSeenProgress {
 		// TODO we need to process the blocks since the
 		// last seen to make sure that the txn pool is in
@@ -3044,6 +3379,20 @@ func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.
 
 	immediate, frames := p.splitRestoredTxns(restored)
 	*parked = p.restoreFramesLocked(p.lastSeenBlock.Load(), frames)
+	if header != nil {
+		// Expired roots must not occupy a sender's frame slot while validation is unavailable.
+		pendingSlot := protocol.FrameValidationSlot(header.SlotNumber)
+		*parked = slices.DeleteFunc(*parked, func(mt *metaTxn) bool {
+			roots := protocol.FrameTransactionRecentRoots(mt.TxnSlot.Txn.(*types.FrameTransaction))
+			invalidRoots := slices.ContainsFunc(roots, func(ref protocol.RecentRootReference) bool {
+				return !ref.ValidAt(pendingSlot)
+			})
+			if invalidRoots {
+				p.discardLocked(mt, txpoolcfg.FrameStateChanged)
+			}
+			return invalidRoots
+		})
+	}
 	var txns TxnSlots
 	cells := make(blobCells)
 	for i, txn := range immediate.Txns {
@@ -3054,6 +3403,9 @@ func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.
 		reason, err := p.validateTxWithCells(txn, isLocalTx, cacheView, cells)
 		if err != nil {
 			return err
+		}
+		if reason == txpoolcfg.Success && txn.TxType() == BlobTxnType {
+			reason = p.validateBlobSidecar(txn, cells)
 		}
 		if reason != txpoolcfg.NotSet && reason != txpoolcfg.Success {
 			// The flush-time delete needs only the hash and the sender; dropping the body frees blobs now.
@@ -3068,8 +3420,8 @@ func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.
 	if err != nil {
 		return err
 	}
-	if _, _, err := p.addTxns(p.lastSeenBlock.Load(), cacheView, p.senders, txns, cells,
-		pendingBaseFee, pendingBlobFee, blockGasLimit, false, p.logger); err != nil {
+	if _, _, err := p.addTxns(p.lastSeenBlock.Load(), cacheView, txns, cells,
+		pendingBaseFee, pendingBlobFee, false); err != nil {
 		return err
 	}
 

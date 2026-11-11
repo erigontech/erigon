@@ -113,7 +113,7 @@ func TestLocalAuthorizationRecoveryReleasesPoolLock(t *testing.T) {
 	slots.Append(txn, sender[:], true)
 	reasons, err := pool.AddLocalTxns(ctx, slots)
 	require.NoError(t, err)
-	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NonceTooLow}, reasons)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.InvalidAuthorizationNonce}, reasons)
 	require.True(t, unlocked, "authorization recovery must not hold the pool lock")
 	dbTx, err := db.BeginRo(ctx)
 	require.NoError(t, err)
@@ -323,9 +323,8 @@ func TestRejectedUnwindKeepsPooledTransaction(t *testing.T) {
 			rejected.IDHash[0] = 2
 			var unwind TxnSlots
 			unwind.Append(rejected, sender[:], false)
-			err = pool.withLockedState(ctx, &unwind, func(_ kv.TemporalTx, view kvcache.CacheView) error {
-				_, addErr := pool.addTxnsOnNewBlock(1, view, &remoteproto.StateChangeBatch{}, pool.senders, unwind, nil,
-					pool.blockGasLimit.Load(), pool.logger)
+			err = pool.withLockedState(ctx, &unwind, true, func(_ kv.TemporalTx, view kvcache.CacheView) error {
+				_, addErr := pool.addTxnsOnNewBlock(1, view, &remoteproto.StateChangeBatch{}, unwind, nil)
 				return addErr
 			})
 			require.NoError(t, err)

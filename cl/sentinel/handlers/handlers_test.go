@@ -18,7 +18,6 @@ package handlers
 
 import (
 	"errors"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -27,8 +26,19 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/sentinel/communication"
 )
+
+func TestConsumeRateLimitRejectsNegativeCost(t *testing.T) {
+	c := &ConsensusHandlers{rateLimiter: newPeerRateLimiter()}
+	stream := newHandlerTestStream(t, communication.PingProtocolV1, &cltypes.Ping{})
+	require.True(t, c.consumeRateLimit(stream, 0))
+	require.False(t, c.consumeRateLimit(stream, -1))
+	code, err := stream.response.ReadByte()
+	require.NoError(t, err)
+	require.Equal(t, byte(InvalidRequestPrefix), code)
+}
 
 type remotePeerConn struct {
 	network.Conn
@@ -72,7 +82,5 @@ func TestStreamHandlerStopsWhenDeadlineCannotBeSet(t *testing.T) {
 	require.False(t, handlerCalled)
 	require.True(t, stream.reset)
 	require.True(t, stream.closed)
-	counter, ok := c.rateLimiter.concurrency.Load(peerID.String())
-	require.True(t, ok)
-	require.Zero(t, counter.(*atomic.Int32).Load())
+	require.NotContains(t, c.rateLimiter.concurrency, peerID.String())
 }

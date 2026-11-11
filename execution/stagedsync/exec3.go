@@ -280,7 +280,7 @@ func ExecV3(ctx context.Context,
 		return out, nil
 	}
 
-	execErr = execV3Finalize(ctx, nil, cfg, doms, pe.lastCommittedTxNum.Load(), out.lastCommittedBlockNum,
+	execErr = execV3Finalize(ctx, nil, cfg, doms, startBlockNum, pe.lastCommittedTxNum.Load(), out.lastCommittedBlockNum,
 		lastHeader, shouldReportToTxPool, logPrefix, logger)
 	return finalizeExecV3Outcome(out, execErr)
 }
@@ -439,7 +439,7 @@ func execV3Serial(ctx context.Context,
 		}
 	}
 
-	return execV3Finalize(ctx, execErr, cfg, doms, se.lastCommittedTxNum.Load(), se.lastCommittedBlockNum.Load(),
+	return execV3Finalize(ctx, execErr, cfg, doms, startBlockNum, se.lastCommittedTxNum.Load(), se.lastCommittedBlockNum.Load(),
 		lastHeader, shouldReportToTxPool, execStage.LogPrefix(), logger)
 }
 
@@ -447,7 +447,7 @@ func execV3Serial(ctx context.Context,
 // BAD_BLOCK_HALT debug exit, the frozen-step commitment guard, and the tx-pool
 // block-progress notification. It never unwinds — that is the caller's job.
 func execV3Finalize(ctx context.Context, execErr error, cfg ExecuteBlockCfg, doms *execctx.SharedDomains,
-	lastCommittedTxNum, lastCommittedBlockNum uint64, lastHeader *types.Header,
+	firstBlockNum, lastCommittedTxNum, lastCommittedBlockNum uint64, lastHeader *types.Header,
 	shouldReportToTxPool bool, logPrefix string, logger log.Logger,
 ) error {
 	// If execution failed with ErrInvalidBlock, skip the step-frozen check and
@@ -480,8 +480,7 @@ func execV3Finalize(ctx context.Context, execErr error, cfg ExecuteBlockCfg, dom
 		// However, we should still at the very least report the last block number to it, so it can update its block progress.
 		// Otherwise, we can get in a deadlock situation when there is a block building request in environments where
 		// the Erigon process is the only block builder (e.g. some Hive tests, kurtosis testnets with one erigon block builder, etc.)
-		cfg.notifications.Accumulator.StartChange(lastHeader, nil, false /* unwind */)
-		cfg.notifications.Accumulator.MarkIncomplete()
+		cfg.notifications.Accumulator.StartIncompleteRange(firstBlockNum, lastHeader)
 	}
 
 	return execErr
@@ -584,10 +583,7 @@ func (te *txExecutor) getHeader(ctx context.Context, hash common.Hash, number ui
 // value, not the block-start pre-state, so the prefix cannot always be
 // reconstructed. Callers MUST treat a failure as non-fatal.
 func (te *txExecutor) reconstructPriorReceipts(ctx context.Context, applyTx kv.TemporalTx, header *types.Header, txs types.Transactions, startTxIndex int, blockStartTxNum uint64) (types.Receipts, error) {
-	priorIbs := state.New(state.NewHistoryReaderV3(applyTx, blockStartTxNum))
-	if dbg.CallNoMaterialize {
-		priorIbs.SetVersionMap(state.NewVersionMap(nil))
-	}
+	priorIbs := state.NewWithVersionMap(state.NewHistoryReaderV3(applyTx, blockStartTxNum), state.NewVersionMap(nil))
 	defer priorIbs.Close()
 	priorGp := protocol.NewGasPool(header.GasLimit, te.cfg.chainConfig.GetMaxBlobGasPerBlock(header.Time))
 	getHeader := func(hash common.Hash, number uint64) (*types.Header, error) {
@@ -848,7 +844,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			case te.execRequests <- &execRequest{
 				b.NumberU64(), b.Hash(),
 				protocol.NewGasPool(b.GasLimit(), te.cfg.chainConfig.GetMaxBlobGasPerBlock(b.Time())),
-				dbBAL, txTasks, consumers, false, exhausted,
+				dbBAL, txTasks, consumers, false, exhausted, b.BlockAccessListSidecar(),
 			}:
 			case <-ctx.Done():
 				return ctx.Err()

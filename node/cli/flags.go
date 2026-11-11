@@ -19,6 +19,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -421,7 +422,7 @@ func ApplyFlagsForNodeConfig(ctx *cli.Command, cfg *nodecfg.Config, logger log.L
 func setEmbeddedRpcDaemon(ctx *cli.Command, cfg *nodecfg.Config, logger log.Logger) {
 	jwtSecretPath := ctx.String(utils.JWTSecretPath.Name)
 	if jwtSecretPath == "" {
-		jwtSecretPath = cfg.Dirs.DataDir + "/jwt.hex"
+		jwtSecretPath = filepath.Join(cfg.Dirs.DataDir, "jwt.hex")
 	}
 
 	apis := ctx.String(utils.HTTPApiFlag.Name)

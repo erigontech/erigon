@@ -50,6 +50,10 @@ type CaplinConfig struct {
 	ArchiveStates             bool
 	ImmediateBlobsBackfilling bool
 	BlobPruningDisabled       bool
+	// BlobsArchiveFromSlot bounds ArchiveBlobs: blob sidecars are kept from the lower of this
+	// slot and the spec serving-window floor, and dropped below it. Zero keeps the whole
+	// history since Deneb.
+	BlobsArchiveFromSlot      uint64
 	SnapshotGenerationEnabled bool
 	// ColumnKeepSlots is the number of slots to keep PeerDAS data column sidecars.
 	// Zero resolves to the active chain's spec window, MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS *
@@ -115,6 +119,16 @@ func (c CaplinConfig) IsDevnet() bool {
 	return c.CustomConfigPath != "" || c.CustomGenesisStatePath != "" || c.DevValidatorSeed != ""
 }
 
+// SnapshotBlobsFromSlot is the cutoff for filtering blob snapshot downloads. The download filter
+// sizes the serving window from the built-in config of the chain, so a custom beacon config,
+// whose window may be longer, downloads every blob segment and leaves the cut to pruning.
+func (c CaplinConfig) SnapshotBlobsFromSlot() uint64 {
+	if c.IsDevnet() {
+		return 0
+	}
+	return c.BlobsArchiveFromSlot
+}
+
 func (c CaplinConfig) HaveInvalidDevnetParams() bool {
 	return c.CustomConfigPath == "" || c.CustomGenesisStatePath == ""
 }
@@ -130,6 +144,23 @@ func (c CaplinConfig) ApplyNetworkOverrides(networkConfig *NetworkConfig) {
 
 func (c CaplinConfig) RelayUrlExist() bool {
 	return c.MevRelayUrl != ""
+}
+
+func MinBlobRetentionFloor(fromSlot, serveFloor uint64) uint64 {
+	return min(fromSlot, serveFloor)
+}
+
+// BlobRetentionFloor returns the lowest slot whose blob sidecars are kept at currentSlot.
+// A bounded archive never drops below the spec serving window.
+func (c CaplinConfig) BlobRetentionFloor(beaconCfg *BeaconChainConfig, currentSlot uint64) uint64 {
+	if c.BlobPruningDisabled {
+		return 0
+	}
+	serveFloor := beaconCfg.BlobSidecarServeRangeStartSlot(currentSlot)
+	if c.ArchiveBlobs {
+		return MinBlobRetentionFloor(c.BlobsArchiveFromSlot, serveFloor)
+	}
+	return serveFloor
 }
 
 type NetworkType int
@@ -1533,6 +1564,7 @@ func gnosisConfig() BeaconChainConfig {
 func chiadoConfig() BeaconChainConfig {
 	cfg := MainnetBeaconConfig
 	cfg.PresetBase = "gnosis"
+	cfg.MaxPendingPartialsPerWithdrawalsSweep = 6
 	cfg.MinGenesisTime = 1665396000
 	cfg.MinGenesisActiveValidatorCount = 6000
 	cfg.GenesisDelay = 300
@@ -1697,11 +1729,11 @@ func (b *BeaconChainConfig) MaxBlobsPerBlockUpperBound() uint64 {
 }
 
 func (b *BeaconChainConfig) MaxRequestBlobSidecarsByVersion(v StateVersion) int {
-	switch v {
-	case DenebVersion:
-		return int(b.MaxRequestBlobSidecars)
-	case ElectraVersion, FuluVersion, GloasVersion:
+	if v >= ElectraVersion {
 		return int(b.MaxRequestBlobSidecarsElectra)
+	}
+	if v == DenebVersion {
+		return int(b.MaxRequestBlobSidecars)
 	}
 	panic("invalid version")
 }

@@ -44,8 +44,7 @@ const (
 	ActionRemove                   // account deleted
 )
 
-// StateChange holds per-block state changes in native Go types.
-// No protobuf dependencies — conversion to protobuf happens at the gRPC boundary.
+// StateChange holds a block's state changes or the head of an incomplete range.
 type StateChange struct {
 	BlockHeight uint64
 	BlockHash   common.Hash
@@ -54,6 +53,21 @@ type StateChange struct {
 	Direction   Direction
 	Txs         [][]byte
 	Changes     []AccountChange
+	// Header delivery needs the range's start even when individual state changes were omitted.
+	FirstBlockHeight uint64
+}
+
+func stateChangeForHeader(h *types.Header) StateChange {
+	change := StateChange{
+		BlockHeight:      h.Number.Uint64(),
+		FirstBlockHeight: h.Number.Uint64(),
+		BlockHash:        h.Hash(),
+		BlockTime:        h.Time,
+	}
+	if h.SlotNumber != nil {
+		change.SlotNumber = common.NewUint64(*h.SlotNumber)
+	}
+	return change
 }
 
 // AccountChange holds a single account's state change.

@@ -47,6 +47,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	"github.com/erigontech/erigon/db/kv/remotedbserver"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/abi/bind"
@@ -56,6 +57,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/rpc/contracts"
@@ -442,11 +444,21 @@ func TestPoolProvideTxnsAmsterdamGasAdmission(t *testing.T) {
 }
 
 func TestPoolProvideTxnsUsesRemainingGasForAdmission(t *testing.T) {
-	publicPool, err := txpool.New(t.Context(), make(chan txpool.Announcements, 1),
+	poolCtx, stopPool := context.WithCancel(t.Context())
+	// Keep the subscription open so startup does not wait for state recovery.
+	stateChanges := direct.NewStateDiffClientDirect(remotedbserver.NewKvServer(poolCtx, nil, nil, nil, log.New()))
+	publicPool, err := txpool.New(poolCtx, make(chan txpool.Announcements, 1),
 		mdbxtest.NewTestPoolDB(t), temporaltest.NewTestDB(t, datadir.New(t.TempDir())),
 		txpoolcfg.DefaultConfig, kvcache.New(kvcache.DefaultCoherentConfig), chain.AllProtocolChanges,
-		nil, nil, func() {}, nil, nil, log.New(), txpool.WithFeeCalculator(nil))
+		nil, stateChanges, func() {}, nil, nil, log.New(), txpool.WithFeeCalculator(nil))
 	require.NoError(t, err)
+	runDone := make(chan struct{})
+	go func() {
+		defer close(runDone)
+		_ = publicPool.Run(poolCtx)
+	}()
+	t.Cleanup(func() { stopPool(); <-runDone })
+	require.Eventually(t, publicPool.Started, 10*time.Second, time.Millisecond)
 
 	pt := PoolTest{t}
 	pt.Run(func(ctx context.Context, t *testing.T, pool *shutter.Pool, handle PoolTestHandle) {
