@@ -111,6 +111,10 @@ func (a *ApiHandler) getStateFork(w http.ResponseWriter, r *http.Request) (*beac
 	if slot == nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("could not read block slot: %x", root))
 	}
+	canonicalRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, *slot)
+	if err != nil {
+		return nil, err
+	}
 	epoch := *slot / a.beaconChainCfg.SlotsPerEpoch
 
 	stateVersion := a.beaconChainCfg.GetCurrentStateVersion(epoch)
@@ -122,7 +126,8 @@ func (a *ApiHandler) getStateFork(w http.ResponseWriter, r *http.Request) (*beac
 		PreviousVersion: utils.Uint32ToBytes4(previousVersion),
 		CurrentVersion:  utils.Uint32ToBytes4(currentVersion),
 		Epoch:           forkEpoch,
-	}).WithOptimistic(isOptimistic), nil
+	}).WithOptimistic(isOptimistic).
+		WithFinalized(canonicalRoot == root && *slot <= a.forkchoiceStore.FinalizedSlot()), nil
 }
 
 func (a *ApiHandler) getStateRoot(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {

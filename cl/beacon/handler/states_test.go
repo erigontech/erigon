@@ -54,6 +54,7 @@ func TestGetStateFork(t *testing.T) {
 	require.NoError(t, err)
 
 	fcu.HeadSlotVal = blocks[len(blocks)-1].Block.Slot
+	fcu.FinalizedSlotVal = blocks[0].Block.Slot
 
 	cases := []struct {
 		blockID string
@@ -65,6 +66,14 @@ func TestGetStateFork(t *testing.T) {
 		},
 		{
 			blockID: "head",
+			code:    http.StatusOK,
+		},
+		{
+			blockID: strconv.FormatInt(int64(blocks[0].Block.Slot), 10),
+			code:    http.StatusOK,
+		},
+		{
+			blockID: strconv.FormatInt(int64(blocks[len(blocks)-1].Block.Slot), 10),
 			code:    http.StatusOK,
 		},
 		{
@@ -98,6 +107,16 @@ func TestGetStateFork(t *testing.T) {
 			require.Equal(t, "0x00000000", data["current_version"])
 			require.Equal(t, "0x00000000", data["previous_version"])
 			require.Equal(t, "0", data["epoch"])
+
+			rootReq, err := http.NewRequestWithContext(t.Context(), "GET", server.URL+"/eth/v1/beacon/states/"+c.blockID+"/root", nil)
+			require.NoError(t, err)
+			rootResp, err := server.Client().Do(rootReq)
+			require.NoError(t, err)
+			defer rootResp.Body.Close()
+			require.Equal(t, http.StatusOK, rootResp.StatusCode)
+			rootJSON := make(map[string]any)
+			require.NoError(t, json.NewDecoder(rootResp.Body).Decode(&rootJSON))
+			require.Equal(t, rootJSON["finalized"], jsonVal["finalized"])
 		})
 	}
 }
