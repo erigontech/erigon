@@ -6,6 +6,10 @@
 #   ROLLUP0           eez-rollup0 checkout with its eez-core-protocol submodule
 #   ERIGON, EEZ       erigon and eez binaries under test
 #   OUT               directory for the logs and the diff report
+#   MODE              remote (default): the follower reads the enclave's L1
+#                     over RPC; all-in-one: Erigon joins the enclave's L1 as
+#                     an execution and consensus node and runs the EEZ chain
+#                     beside it (T-NET-16)
 #   KURTOSIS_ENCLAVE  enclave name, default eez-erigon
 #   EEZ_SKIP_NODE_BUILD, EEZ_SKIP_PROOF_SIGNER_BUILD, EEZ_SKIP_DEPLOY_BUILD
 #                     passed to start.sh; set to 1 when the images are pulled
@@ -15,6 +19,8 @@ set -euo pipefail
 
 : "${ROLLUP0:?}" "${ERIGON:?}" "${EEZ:?}" "${OUT:?}"
 export KURTOSIS_ENCLAVE="${KURTOSIS_ENCLAVE:-eez-erigon}"
+MODE="${MODE:-remote}"
+case $MODE in remote | all-in-one) ;; *) echo "MODE $MODE: remote or all-in-one" >&2; exit 2 ;; esac
 K="$ROLLUP0/testing/kurtosis"
 DATADIR="$OUT/erigon"
 ERIGON_RPC=http://127.0.0.1:18545
@@ -39,12 +45,29 @@ block() {
 
 hex() { printf '0x%x' "$1"; }
 
+# Ports apart from the defaults, so the run does not clash with a node on
+# the same host.
+PORTS=(--authrpc.port 18551 --private.api.addr 127.0.0.1:19090 --port 30399 --torrent.port 42099
+	--ws.port 18546 --mcp.port 18553 --sentinel.port 17777 --beacon.api.port 15555
+	--caplin.discovery.port 14000 --caplin.discovery.tcpport 14001 --caplin.discovery.quicport 14002)
+
 ERIGON_PID=
 start_erigon() {
-	"$ERIGON" --eez.enabled --datadir "$DATADIR" \
-		--eez.l1.rpc "$EEZ_DEVNET_L1_RPC" --eez.l1.poll=1s --eez.sequencer.rpc "$EEZ_DEVNET_L2_RPC" \
-		--http.api=eth,debug,eez --http.port 18545 --authrpc.port 18551 --private.api.addr 127.0.0.1:19090 \
-		--port 30399 --nodiscover --eez.sync.l1only=true --torrent.port 42099 --log.console.verbosity=info >> "$OUT/erigon.log" 2>&1 &
+	local args
+	if [ "$MODE" = remote ]; then
+		args=(--datadir "$DATADIR" --eez.enabled --eez.l1.rpc "$EEZ_DEVNET_L1_RPC" --eez.l1.poll=1s
+			--http.api=eth,debug,eez --http.port 18545 --nodiscover)
+	else
+		# The L1 node takes the enclave's genesis and peers, which are on a
+		# private network; the EEZ chain serves its JSON-RPC on 18545, as the
+		# remote follower does.
+		args=(--datadir "$DATADIR" --networkid "$l1_chain" --nodiscover --staticpeers "$l1_enode"
+			--caplin.custom-config "$OUT/l1-genesis/config.yaml" --caplin.custom-genesis "$OUT/l1-genesis/genesis.ssz"
+			--sentinel.staticpeers "$cl_peer" --caplin.local-discovery --http.port 18645
+			--eez.enabled --eez.chain=eez-devnet --eez.http.port 18545 --eez.port 30499)
+	fi
+	"$ERIGON" "${args[@]}" "${PORTS[@]}" --eez.sequencer.rpc "$EEZ_DEVNET_L2_RPC" --eez.sync.l1only=true \
+		--log.console.verbosity=info >> "$OUT/erigon.log" 2>&1 &
 	ERIGON_PID=$!
 	for _ in $(seq 120); do
 		rpc "$ERIGON_RPC" eez_followerStatus '[]' 2>/dev/null | jq -e '.result.safe' > /dev/null && return
@@ -91,6 +114,18 @@ registry=$(env_value EEZ_REGISTRY_ADDRESS)
 deploy_block=$(env_value EEZ_REGISTRY_DEPLOY_BLOCK)
 rollup_id=$(env_value EEZ_ROLLUP_ID)
 
+if [ "$MODE" = all-in-one ]; then
+	kurtosis files download "$KURTOSIS_ENCLAVE" el_cl_genesis_data "$OUT/l1-genesis" > /dev/null
+	l1_enode=$(rpc "$EEZ_DEVNET_L1_RPC" admin_nodeInfo '[]' | jq -r '.result.enode')
+	cl_api=$(kurtosis port print "$KURTOSIS_ENCLAVE" cl-1-lighthouse-reth http)
+	case $cl_api in http*) ;; *) cl_api="http://$cl_api" ;; esac
+	cl_peer=$(curl -sf "$cl_api/eth/v1/node/identity" | jq -r '.data.p2p_addresses[0]')
+	[ -n "$l1_enode" ] && [ "$l1_enode" != null ] && [ -n "$cl_peer" ] && [ "$cl_peer" != null ] \
+		|| fail "no L1 peers: enode '$l1_enode', beacon '$cl_peer'"
+	log "erigon init: L1 $l1_chain, peers $l1_enode and $cl_peer"
+	"$ERIGON" init --datadir "$DATADIR" "$OUT/l1-genesis/genesis.json" > "$OUT/init-l1.log" 2>&1 \
+		|| { tail -20 "$OUT/init-l1.log"; fail "erigon init of the L1"; }
+fi
 log "erigon init: registry $registry from L1 block $deploy_block, rollup $rollup_id"
 "$ERIGON" init --eez.enabled --datadir "$DATADIR" --eez.l1.chainid="$l1_chain" \
 	--eez.registry="$registry" --eez.registry.deployblock="$deploy_block" --eez.rollupid="$rollup_id" \
