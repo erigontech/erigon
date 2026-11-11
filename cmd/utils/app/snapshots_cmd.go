@@ -2679,7 +2679,11 @@ func doPublishable(ctx context.Context, dat datadir.Dirs, chainDB kv.RoDB) error
 // only after removing accessors: retained accessors must never be opened with a
 // newly generated salt. The ordinary rebuild path keeps the original salts.
 func renewSnapshotSaltFilesForRebuild(dirs datadir.Dirs, logger log.Logger) error {
-	for _, name := range []string{"salt-state.txt", "salt-state.txt.torrent", "salt-blocks.txt", "salt-blocks.txt.torrent"} {
+	for _, name := range []string{
+		"salt-state.txt", "salt-state.txt.torrent",
+		"salt.txt", "salt.txt.torrent", // legacy state salt; must not be migrated and reused
+		"salt-blocks.txt", "salt-blocks.txt.torrent",
+	} {
 		path := filepath.Join(dirs.Snap, name)
 		if err := dir2.RemoveFile(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return fmt.Errorf("rebuild: remove %s: %w", path, err)
@@ -2964,6 +2968,20 @@ func removeAccessorsForRebuild(dirs datadir.Dirs, logger log.Logger) error {
 	return nil
 }
 
+// prepareAccessorsForRebuild performs the pre-openSnaps phase of the accessor
+// command. The order matters: first invalidate every accessor that was built
+// with the old salt, then (optionally) renew the salts before index builders
+// open the snapshot files.
+func prepareAccessorsForRebuild(dirs datadir.Dirs, logger log.Logger, newSalt bool) error {
+	if err := removeAccessorsForRebuild(dirs, logger); err != nil {
+		return err
+	}
+	if newSalt {
+		return renewSnapshotSaltFilesForRebuild(dirs, logger)
+	}
+	return nil
+}
+
 func doIndicesCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs) error {
 	logger := log.Root()
 	defer logger.Info("Done")
@@ -2977,13 +2995,8 @@ func doIndicesCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dir
 	defer chainDB.Close()
 
 	if rebuild {
-		if err := removeAccessorsForRebuild(dirs, logger); err != nil {
+		if err := prepareAccessorsForRebuild(dirs, logger, newSalt); err != nil {
 			return err
-		}
-		if newSalt {
-			if err := renewSnapshotSaltFilesForRebuild(dirs, logger); err != nil {
-				return err
-			}
 		}
 	}
 

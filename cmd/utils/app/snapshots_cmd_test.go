@@ -1598,25 +1598,59 @@ func Test_DeleteBlockSnaps_NoBlockFilesSweepsTmp(t *testing.T) {
 	confirmDoesntExist(t, tmp)
 }
 
-func Test_renewSnapshotSaltFilesForRebuild(t *testing.T) {
-	dirs := datadir.New(t.TempDir())
-	for _, name := range []string{"salt-state.txt", "salt-blocks.txt"} {
-		path := filepath.Join(dirs.Snap, name)
-		require.NoError(t, os.WriteFile(path, []byte("old salt"), 0o644))
-		require.NoError(t, os.WriteFile(path+".torrent", []byte("old torrent"), 0o644))
-	}
-	dataPath := filepath.Join(dirs.Snap, "v1.0-headers.0-500.seg")
-	require.NoError(t, os.WriteFile(dataPath, []byte("snapshot"), 0o644))
+func Test_prepareAccessorsForRebuildRenewsLegacyAndCurrentSalts(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		stateSalt string
+	}{
+		{name: "current", stateSalt: "salt-state.txt"},
+		{name: "legacy", stateSalt: "salt.txt"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dirs := datadir.New(t.TempDir())
+			oldSalt := []byte{0x12, 0x34, 0x56, 0x78}
+			for _, name := range []string{tc.stateSalt, "salt-blocks.txt"} {
+				path := filepath.Join(dirs.Snap, name)
+				require.NoError(t, os.WriteFile(path, oldSalt, 0o644))
+				require.NoError(t, os.WriteFile(path+".torrent", []byte("old torrent"), 0o644))
+			}
+			// Model a previously generated accessor and a data segment. The command
+			// must remove the old accessor without ever deleting snapshot data.
+			accessor := filepath.Join(dirs.SnapDomain, "v1.0-accounts.0-64.bt")
+			require.NoError(t, os.WriteFile(accessor, []byte("old accessor"), 0o644))
+			dataPath := filepath.Join(dirs.Snap, "v1.0-headers.0-500.seg")
+			require.NoError(t, os.WriteFile(dataPath, []byte("snapshot data"), 0o644))
 
-	require.NoError(t, renewSnapshotSaltFilesForRebuild(dirs, log.New()))
-	for _, name := range []string{"salt-state.txt", "salt-blocks.txt"} {
-		path := filepath.Join(dirs.Snap, name)
-		salt, err := os.ReadFile(path)
-		require.NoError(t, err, "salt must exist before accessor rebuild")
-		require.Len(t, salt, 4, "snapshot salt must use the expected uint32 encoding")
-		require.NoFileExists(t, path+".torrent")
+			require.NoError(t, prepareAccessorsForRebuild(dirs, log.New(), true))
+			require.NoFileExists(t, accessor)
+			for _, name := range []string{"salt-state.txt", "salt-blocks.txt"} {
+				path := filepath.Join(dirs.Snap, name)
+				salt, err := os.ReadFile(path)
+				require.NoError(t, err, "salt must be generated before snapshot index rebuild")
+				require.Len(t, salt, 4)
+				require.NotEqual(t, oldSalt, salt, "the old salt must not be reused")
+				require.NoFileExists(t, path+".torrent")
+			}
+			for _, name := range []string{"salt.txt", "salt.txt.torrent"} {
+				require.NoFileExists(t, filepath.Join(dirs.Snap, name))
+			}
+			require.FileExists(t, dataPath)
+		})
 	}
-	require.FileExists(t, dataPath, "salt renewal must not delete snapshot data")
+}
+
+func Test_prepareAccessorsForRebuildPreservesSaltsWithoutNewSalt(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	oldSalt := []byte{0x12, 0x34, 0x56, 0x78}
+	for _, name := range []string{"salt-state.txt", "salt-blocks.txt"} {
+		require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, name), oldSalt, 0o644))
+	}
+	require.NoError(t, prepareAccessorsForRebuild(dirs, log.New(), false))
+	for _, name := range []string{"salt-state.txt", "salt-blocks.txt"} {
+		salt, err := os.ReadFile(filepath.Join(dirs.Snap, name))
+		require.NoError(t, err)
+		require.Equal(t, oldSalt, salt)
+	}
 }
 
 func Test_removeAccessorsForRebuild(t *testing.T) {
