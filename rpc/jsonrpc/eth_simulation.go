@@ -620,28 +620,22 @@ var _ state.StateReader = (*simOverrideReader)(nil)
 
 func commitSimOverrides(stateOverrides *ethapi.StateOverrides, base state.StateReader, precompiles vm.PrecompiledContracts, rules *chain.Rules, stateWriter state.StateWriter) (*simOverrideReader, error) {
 	overridden := make(map[accounts.Address]struct{}, len(*stateOverrides))
-	for addr := range *stateOverrides {
+	for addr, account := range *stateOverrides {
 		overridden[addr] = struct{}{}
+		// The version map hides the replaced storage from this block only; the writer must drop the stored slots.
+		if account.State != nil {
+			if err := stateWriter.CreateContract(addr); err != nil {
+				return nil, err
+			}
+		}
 	}
 	overrides := state.New(base)
 	transactions.VersionedBlockState(overrides)
-	if err := applySimOverrides(overrides, stateOverrides, precompiles, rules, stateWriter); err != nil {
+	if err := stateOverrides.OverrideTo(overrides, precompiles, rules, stateWriter); err != nil {
 		overrides.Close()
 		return nil, err
 	}
 	return &simOverrideReader{StateReader: base, overrides: overrides, overridden: overridden}, nil
-}
-
-func applySimOverrides(overrides *state.IntraBlockState, stateOverrides *ethapi.StateOverrides, precompiles vm.PrecompiledContracts, rules *chain.Rules, stateWriter state.StateWriter) error {
-	// The version map hides the replaced storage from this block only; the writer must drop the stored slots.
-	for addr, account := range *stateOverrides {
-		if account.State != nil {
-			if err := stateWriter.CreateContract(addr); err != nil {
-				return err
-			}
-		}
-	}
-	return stateOverrides.OverrideTo(overrides, precompiles, rules, stateWriter)
 }
 
 func (r *simOverrideReader) Close() { r.overrides.Close() }
