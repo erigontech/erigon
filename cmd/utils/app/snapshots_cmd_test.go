@@ -1598,7 +1598,7 @@ func Test_DeleteBlockSnaps_NoBlockFilesSweepsTmp(t *testing.T) {
 	confirmDoesntExist(t, tmp)
 }
 
-func Test_removeSnapshotSaltFilesForRebuild(t *testing.T) {
+func Test_renewSnapshotSaltFilesForRebuild(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 	for _, name := range []string{"salt-state.txt", "salt-blocks.txt"} {
 		path := filepath.Join(dirs.Snap, name)
@@ -1608,13 +1608,15 @@ func Test_removeSnapshotSaltFilesForRebuild(t *testing.T) {
 	dataPath := filepath.Join(dirs.Snap, "v1.0-headers.0-500.seg")
 	require.NoError(t, os.WriteFile(dataPath, []byte("snapshot"), 0o644))
 
-	require.NoError(t, removeSnapshotSaltFilesForRebuild(dirs))
+	require.NoError(t, renewSnapshotSaltFilesForRebuild(dirs, log.New()))
 	for _, name := range []string{"salt-state.txt", "salt-blocks.txt"} {
-		require.NoFileExists(t, filepath.Join(dirs.Snap, name))
-		require.NoFileExists(t, filepath.Join(dirs.Snap, name+".torrent"))
+		path := filepath.Join(dirs.Snap, name)
+		salt, err := os.ReadFile(path)
+		require.NoError(t, err, "salt must exist before accessor rebuild")
+		require.Len(t, salt, 4, "snapshot salt must use the expected uint32 encoding")
+		require.NoFileExists(t, path+".torrent")
 	}
 	require.FileExists(t, dataPath, "salt renewal must not delete snapshot data")
-	require.NoError(t, removeSnapshotSaltFilesForRebuild(dirs), "repeat rebuild is idempotent")
 }
 
 func Test_removeAccessorsForRebuild(t *testing.T) {

@@ -2675,15 +2675,23 @@ func doPublishable(ctx context.Context, dat datadir.Dirs, chainDB kv.RoDB) error
 	return nil
 }
 
-// removeSnapshotSaltFilesForRebuild removes both snapshot salt families. Call it
+// renewSnapshotSaltFilesForRebuild replaces both snapshot salt families. Call it
 // only after removing accessors: retained accessors must never be opened with a
 // newly generated salt. The ordinary rebuild path keeps the original salts.
-func removeSnapshotSaltFilesForRebuild(dirs datadir.Dirs) error {
+func renewSnapshotSaltFilesForRebuild(dirs datadir.Dirs, logger log.Logger) error {
 	for _, name := range []string{"salt-state.txt", "salt-state.txt.torrent", "salt-blocks.txt", "salt-blocks.txt.torrent"} {
 		path := filepath.Join(dirs.Snap, name)
 		if err := dir2.RemoveFile(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return fmt.Errorf("rebuild: remove %s: %w", path, err)
 		}
+	}
+	// The accessor builder may open snapshot salts before the downloader has
+	// a chance to recover them. Generate both here before rebuilding indices.
+	if _, err := snaptype.LoadSalt(dirs.Snap, true, logger); err != nil {
+		return fmt.Errorf("rebuild: generate block salt: %w", err)
+	}
+	if _, err := state.GetStateIndicesSalt(dirs, true, logger); err != nil {
+		return fmt.Errorf("rebuild: generate state salt: %w", err)
 	}
 	return nil
 }
@@ -2973,7 +2981,7 @@ func doIndicesCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dir
 			return err
 		}
 		if newSalt {
-			if err := removeSnapshotSaltFilesForRebuild(dirs); err != nil {
+			if err := renewSnapshotSaltFilesForRebuild(dirs, logger); err != nil {
 				return err
 			}
 		}
