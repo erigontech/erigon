@@ -3247,10 +3247,18 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx) error {
 }
 
 func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.CacheView, parked *[]*metaTxn) error {
+	lastSeenProgress, err := getExecutionProgress(coreTx)
+	if err != nil {
+		return err
+	}
 	initializeHead := p.stateBlockHash == (common.Hash{})
 	if initializeHead {
-		// Header sync can run ahead of execution, so pin validation to the executed head.
-		p.stateBlockHash = rawdb.ReadHeadBlockHash(coreTx)
+		// Header and block head markers can lead execution. Derive the startup head
+		// from execution progress so it matches the state being read.
+		p.stateBlockHash, err = rawdb.ReadCanonicalHash(coreTx, lastSeenProgress)
+		if err != nil {
+			return err
+		}
 	}
 	header, err := rawdb.ReadHeaderByHash(coreTx, p.stateBlockHash)
 	if err != nil {
@@ -3271,11 +3279,6 @@ func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.
 	// this is necessary as otherwise best - which waits for sync events
 	// may wait for ever if blocks have been process before the txpool
 	// starts with an empty db
-	lastSeenProgress, err := getExecutionProgress(coreTx)
-	if err != nil {
-		return err
-	}
-
 	if p.lastSeenBlock.Load() < lastSeenProgress {
 		// TODO we need to process the blocks since the
 		// last seen to make sure that the txn pool is in

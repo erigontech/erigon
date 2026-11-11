@@ -49,6 +49,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/gointerfaces"
@@ -1956,10 +1957,23 @@ func TestFramePoolStartupUsesExecutedHead(t *testing.T) {
 			chainConfig.BogotaTime = common.NewUint64(0)
 			ctx, pool, poolDB, coreDB, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash, chainConfig)
 			pool.chainID.SetUint64(1)
-			executedHead, headerHead := common.Hash{1}, common.Hash{2}
+			executed := &types.Header{Number: uint256.Int{20}, Time: 20}
+			ahead := &types.Header{Number: uint256.Int{22}, Time: 44}
+			executedHead := executed.Hash()
 			require.NoError(t, coreDB.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
-				rawdb.WriteHeadBlockHash(tx, executedHead)
-				return rawdb.WriteHeadHeaderHash(tx, headerHead)
+				for _, header := range []*types.Header{executed, ahead} {
+					if err := rawdb.WriteHeader(tx, header); err != nil {
+						return err
+					}
+					if err := rawdb.WriteCanonicalHash(tx, header.Hash(), header.Number.Uint64()); err != nil {
+						return err
+					}
+				}
+				rawdb.WriteHeadBlockHash(tx, ahead.Hash())
+				if err := rawdb.WriteHeadHeaderHash(tx, ahead.Hash()); err != nil {
+					return err
+				}
+				return stages.SaveStageProgress(tx, stages.Execution, executed.Number.Uint64())
 			}))
 			backend := &frameValidationBackend{payer: sender, balance: 1_000_000, valid: true}
 			pool.ethBackend = &frameValidationFuncBackend{validate: func(ctx context.Context, req *remoteproto.FrameValidationRequest) (*remoteproto.FrameValidationReply, error) {
@@ -1978,6 +1992,7 @@ func TestFramePoolStartupUsesExecutedHead(t *testing.T) {
 				}))
 			}
 			require.NoError(t, pool.start(ctx))
+			require.Equal(t, executedHead, pool.stateBlockHash)
 			if mode == "new local transaction" {
 				var txns TxnSlots
 				txns.Append(frame, sender[:], true)

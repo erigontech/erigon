@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/gointerfaces"
@@ -315,6 +316,51 @@ func recentRootPoolHeader(blockTime, slot uint64) *types.Header {
 	}
 }
 
+func TestFramePoolStartupDoesNotUnwindActivation(t *testing.T) {
+	now := uint64(time.Now().Unix())
+	config := chain.AllProtocolChanges.Copy()
+	config.BogotaTime = common.NewUint64(now)
+	ctx, pool, poolDB, coreDB, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash, config)
+	pool.chainID.SetUint64(1)
+	backend := &frameValidationBackend{payer: sender, balance: 1_000_000, valid: true, err: errors.New("backend unavailable")}
+	pool.ethBackend = backend
+	executed := recentRootPoolHeader(now-12, 20)
+	executed.Number.SetUint64(20)
+	ahead := recentRootPoolHeader(now+12, 22)
+	ahead.Number.SetUint64(22)
+	require.NoError(t, coreDB.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
+		for _, header := range []*types.Header{executed, ahead} {
+			if err := rawdb.WriteHeader(tx, header); err != nil {
+				return err
+			}
+			if err := rawdb.WriteCanonicalHash(tx, header.Hash(), header.Number.Uint64()); err != nil {
+				return err
+			}
+		}
+		rawdb.WriteHeadBlockHash(tx, ahead.Hash())
+		if err := rawdb.WriteHeadHeaderHash(tx, ahead.Hash()); err != nil {
+			return err
+		}
+		return stages.SaveStageProgress(tx, stages.Execution, executed.Number.Uint64())
+	}))
+	frame := recentRootPoolSlot(t, sender, 10, 1)
+	require.NoError(t, poolDB.Update(ctx, func(tx kv.RwTx) error {
+		return tx.Put(kv.PoolTransaction, frame.IDHash[:], append(sender[:], frame.Rlp...))
+	}))
+	require.NoError(t, pool.start(ctx))
+	require.Contains(t, pool.byHash, string(frame.IDHash[:]))
+
+	backend.err = nil
+	change := newBlockChangeForAccounts(executed.Hash(), 0, sender)
+	change.StateChangesIncomplete = true
+	head := change.ChangeBatch[0]
+	head.BlockHeight, head.BlockTime, head.SlotNumber = executed.Number.Uint64(), executed.Time, executed.SlotNumber
+	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	require.Contains(t, pool.byHash, string(frame.IDHash[:]), "the first executed-head notification must not look like an activation unwind")
+	require.Equal(t, PendingSubPool, pool.byHash[string(frame.IDHash[:])].currentSubPool)
+	require.Len(t, backend.calls, 2)
+}
+
 func TestFramePoolReloadRecentRootAge(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
@@ -342,8 +388,11 @@ func TestFramePoolReloadRecentRootAge(t *testing.T) {
 					if err := rawdb.WriteHeader(tx, header); err != nil {
 						return err
 					}
+					if err := rawdb.WriteCanonicalHash(tx, header.Hash(), header.Number.Uint64()); err != nil {
+						return err
+					}
 					rawdb.WriteHeadBlockHash(tx, header.Hash())
-					return nil
+					return stages.SaveStageProgress(tx, stages.Execution, header.Number.Uint64())
 				}))
 				if notificationFirst {
 					reset := newBlockChangeForAccounts(header.Hash(), 0, sender)
@@ -412,8 +461,11 @@ func TestFramePoolRestoredRecentRootEviction(t *testing.T) {
 					if err := rawdb.WriteHeader(tx, header); err != nil {
 						return err
 					}
+					if err := rawdb.WriteCanonicalHash(tx, header.Hash(), header.Number.Uint64()); err != nil {
+						return err
+					}
 					rawdb.WriteHeadBlockHash(tx, header.Hash())
-					return nil
+					return stages.SaveStageProgress(tx, stages.Execution, header.Number.Uint64())
 				}))
 				slot := recentRootPoolSlot(t, sender, 10, 1)
 				require.NoError(t, poolDB.Update(ctx, func(tx kv.RwTx) error {
