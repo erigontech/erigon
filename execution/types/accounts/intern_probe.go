@@ -42,6 +42,19 @@ func init() {
 	probeOn.Store(true)
 }
 
+var (
+	warmPin    = os.Getenv("WARM_PIN") == "1"
+	pinnedMu   sync.Mutex
+	pinnedWarm []Address
+)
+
+// ProbeHoldForever keeps h alive for the life of the process.
+func ProbeHoldForever(h Address) {
+	pinnedMu.Lock()
+	pinnedWarm = append(pinnedWarm, h)
+	pinnedMu.Unlock()
+}
+
 func warmIntern(n int) {
 	t0 := time.Now()
 	const workers = 8
@@ -57,7 +70,10 @@ func warmIntern(n int) {
 						a[i+j] = byte(v >> (8 * j))
 					}
 				}
-				InternAddress(a)
+				h := InternAddress(a)
+				if warmPin {
+					ProbeHoldForever(h)
+				}
 			}
 		})
 	}
