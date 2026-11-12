@@ -2713,12 +2713,12 @@ func (at *AggregatorRoTx) GetAsOf(name kv.Domain, k []byte, ts uint64, tx kv.Tx)
 	return v, ok, err
 }
 
-func (at *AggregatorRoTx) cacheLatestBranch(enabled bool, k, v []byte, step kv.Step, txNum uint64, tx kv.Tx) {
+func (at *AggregatorRoTx) cacheLatestBranch(enabled bool, k, v []byte, step kv.Step, tx kv.Tx) {
 	if !enabled || len(v) == 0 {
 		return
 	}
 	if branchCache := at.BranchCache(); branchCache != nil {
-		branchCache.Fill(k, v, uint64(step), txNum, tx.ViewID())
+		branchCache.Fill(k, v, uint64(step), tx.ViewID())
 	}
 }
 
@@ -2822,7 +2822,7 @@ func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx, opts k
 		if metrics != nil && dbg.KVReadLevelledMetrics {
 			metrics.UpdateDbReads(domain, start)
 		}
-		at.cacheLatestBranch(cacheBranch, k, v, step, step.LastTxNum(at.StepSize()), tx)
+		at.cacheLatestBranch(cacheBranch, k, v, step, tx)
 		return v, step, true, nil
 	}
 	var found bool
@@ -2837,7 +2837,7 @@ func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx, opts k
 	v, err = at.replaceShortenedKeysInBranch(k, commitment.BranchData(v), fileStartTxNum, fileEndTxNum)
 	step = kv.Step(fileEndTxNum / at.StepSize())
 	if err == nil {
-		at.cacheLatestBranch(cacheBranch, k, v, step, fileEndTxNum, tx)
+		at.cacheLatestBranch(cacheBranch, k, v, step, tx)
 	}
 	return v, step, found, err
 }

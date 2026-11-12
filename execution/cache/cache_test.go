@@ -1226,7 +1226,7 @@ func TestStateCache_PublishUnwindSerializesWithFill(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			view.Fill(kv.AccountsDomain, key, makeValue(1), 10)
+			view.Fill(kv.AccountsDomain, key, makeValue(1), 9)
 		}()
 		go func() {
 			defer wg.Done()
@@ -1256,7 +1256,7 @@ func TestStateCache_RejectedPublishUnwindStillInvalidates(t *testing.T) {
 	require.False(t, ok)
 
 	inWindow := sc.View(frontierAtVersion(101, 11))
-	inWindow.Fill(kv.AccountsDomain, key, deadForkValue, 100)
+	inWindow.Fill(kv.AccountsDomain, key, deadForkValue, 15)
 	got, ok := sc.View(nil).Get(kv.AccountsDomain, key)
 	require.True(t, ok)
 	require.Equal(t, deadForkValue, got)
@@ -1555,20 +1555,30 @@ func TestStateCache_FillCodeUsesKnownHash(t *testing.T) {
 	require.Equal(t, makeCode(1), got)
 }
 
-func TestStateCache_EmptyCodeHashUsesViewFrontierStamp(t *testing.T) {
-	b := 1 * datasize.MB
-	c := NewStateCache(b, b, b, b)
-	t.Cleanup(c.Close)
-	addr := makeAddr(1)
-	view := c.View(FrontierFunc(func(kv.Domain) (uint64, bool) { return 100, true }))
-	view.SeedAddrCodeHash(addr, [32]byte{}, 4)
-	codeHash, txNum, ok := c.getAddrCodeHashWithTxNum(addr)
-	require.True(t, ok)
-	require.Zero(t, codeHash)
-	require.Equal(t, uint64(99), txNum, "a negative mapping reflects the view, not a nonexistent value's reported step")
-	c.Applier().Unwind(99)
-	_, _, ok = c.getAddrCodeHashWithTxNum(addr)
-	require.False(t, ok)
+func TestStateCache_CodeHashUsesViewFrontierStamp(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		hash [32]byte
+	}{
+		{name: "absent"},
+		{name: "present", hash: crypto.Keccak256Hash(makeCode(1))},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			b := 1 * datasize.MB
+			c := NewStateCache(b, b, b, b)
+			t.Cleanup(c.Close)
+			addr := makeAddr(1)
+			view := c.View(frontierAt(100))
+			view.SeedAddrCodeHash(addr, tc.hash, 4)
+			codeHash, txNum, ok := c.getAddrCodeHashWithTxNum(addr)
+			require.True(t, ok)
+			require.Equal(t, tc.hash, codeHash)
+			require.Equal(t, uint64(99), txNum, "the binding must reflect the observed account state")
+			c.Applier().Unwind(99)
+			_, _, ok = c.getAddrCodeHashWithTxNum(addr)
+			require.False(t, ok)
+		})
+	}
 }
 
 // An apply-only cache (STATE_CACHE_FILLS=false) has no fill for a lowered
@@ -1710,4 +1720,25 @@ func TestAccountCodeHashes(t *testing.T) {
 	require.Nil(t, accountCodeHashes([]StateUpdate{accUpd}), "no code update")
 
 	require.Equal(t, hash[:], prepareStateUpdate(codeUpd, nil).codeHash, "no account hash falls back to hashing")
+}
+
+func TestStateCache_ReadFillUsesObservedState(t *testing.T) {
+	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
+		t.Run(domain.String(), func(t *testing.T) {
+			sc := NewStateCache(datasize.MB, datasize.MB, datasize.MB, datasize.MB)
+			t.Cleanup(sc.Close)
+			key, value := makeAddr(1), []byte{1, 2, 3}
+			sc.Applier().Initialize(1)
+			view := sc.View(frontierAtVersion(19, 1))
+			view.Fill(domain, key, value, 2)
+			_, ok := view.GetAsOf(domain, key, 18)
+			require.False(t, ok, "a read does not prove the value was valid before the observed state")
+			got, ok := view.GetAsOf(domain, key, 19)
+			require.True(t, ok)
+			require.Equal(t, value, got)
+			sc.Applier().Unwind(18)
+			_, ok = sc.View(nil).Get(domain, key)
+			require.False(t, ok)
+		})
+	}
 }
