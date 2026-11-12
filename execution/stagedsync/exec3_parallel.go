@@ -268,6 +268,12 @@ func (pe *parallelExecutor) bindBlockChangesetForFold(blockNum uint64, blockHash
 	}
 }
 
+// shortcut: dbg probes bound the block-end work before the commit starts; remove after the bound.
+var (
+	probeNoBALProcess = dbg.EnvBool("PROBE_NO_BAL_PROCESS", false)
+	probeNoAccum      = dbg.EnvBool("PROBE_NO_ACCUM", false)
+)
+
 // foldTx applies one published tx's versionMap view and indexes to sd.mem.
 // Finalize logs share the final virtual task's txNum. That task has already
 // handled the receipt cache, so finalize indexes logs without changing it.
@@ -769,6 +775,9 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					h, txIO, blockBAL := lastHeader, applyResult.TxIO, applyResult.BAL
 					go func() {
 						defer close(balDone)
+						if probeNoBALProcess {
+							return
+						}
 						computedBAL, balErr = bal.Process(blockBAL, h, built, txIO, isAmsterdam, pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir, pe.logger)
 					}()
 
@@ -776,7 +785,9 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					// keep accumulator access single-threaded. StartChange must precede
 					// NotifyAccumulator: it initialises the latestChange entry the notify
 					// writes into.
-					if pe.accumulator != nil && applyResult.Header != nil {
+					if probeNoAccum {
+						pendingAccumulatorWrites = pendingAccumulatorWrites[:0]
+					} else if pe.accumulator != nil && applyResult.Header != nil {
 						rawTxs, marshalErr := types.MarshalTransactionsBinary(applyResult.Txs)
 						if marshalErr != nil {
 							<-balDone
@@ -820,7 +831,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 						failInfra(balErr)
 						continue
 					}
-					if (isAmsterdam || pe.cfg.experimentalBAL) && pe.cfg.balSink != nil {
+					if (isAmsterdam || pe.cfg.experimentalBAL) && pe.cfg.balSink != nil && !probeNoBALProcess {
 						pe.cfg.balSink(applyResult.BlockNum, computedBAL)
 					}
 
