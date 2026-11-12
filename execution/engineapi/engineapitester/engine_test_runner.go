@@ -51,12 +51,15 @@ func (et *EngineTest) UnmarshalJSON(in []byte) error {
 		return err
 	}
 	var fixture struct {
-		Payloads []EngineXTestNewPayload `json:"engineNewPayloads"`
+		Payloads *[]EngineXTestNewPayload `json:"engineNewPayloads"`
 	}
 	if err := json.Unmarshal(in, &fixture); err != nil {
 		return err
 	}
-	et.payloads = fixture.Payloads
+	if fixture.Payloads == nil {
+		return errors.New("fixture has no engineNewPayloads")
+	}
+	et.payloads = *fixture.Payloads
 	return nil
 }
 

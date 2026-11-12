@@ -49,6 +49,40 @@ func loadEngineTest(t *testing.T, edit func(payloads []any) []any) *engineapites
 	return &test
 }
 
+// A fixture without engineNewPayloads is not an engine test; an empty list
+// is one with no payloads.
+func TestEngineTestNeedsPayloads(t *testing.T) {
+	src, err := os.ReadFile(engineFixture)
+	require.NoError(t, err)
+	var fixtures map[string]map[string]any
+	require.NoError(t, json.Unmarshal(src, &fixtures))
+	fixture := fixtures["bal_cross_block_ripemd160_state_leak"]
+	for _, tc := range []struct {
+		name     string
+		payloads any
+		wantErr  bool
+	}{
+		{"missing", nil, true},
+		{"null", json.RawMessage("null"), true},
+		{"empty", []any{}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			delete(fixture, "engineNewPayloads")
+			if tc.payloads != nil {
+				fixture["engineNewPayloads"] = tc.payloads
+			}
+			src, err := json.Marshal(fixture)
+			require.NoError(t, err)
+			err = json.Unmarshal(src, new(engineapitester.EngineTest))
+			if tc.wantErr {
+				require.ErrorContains(t, err, "fixture has no engineNewPayloads")
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
 func TestEngineTest(t *testing.T) {
 	if testing.Short() {
 		t.Skip("long-running test")
