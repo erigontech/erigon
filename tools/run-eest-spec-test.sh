@@ -67,9 +67,10 @@
 #                                              Execution is parallel in every shard.
 #
 # Each shard maps to one cmd/evm subcommand running with --jsonout. Pass/fail
-# is decided here (not by the binary's exit status): the shard fails
-# if no tests ran (unexpected — fixture path bug) or if observed failures
-# exceed EEST_SPEC_MAX_FAILURES.
+# is decided here from the JSON (exit 1 only means a test failed): the shard
+# fails if evm exits 2 (some input could not run), if no tests ran
+# (unexpected — fixture path bug) or if observed failures exceed
+# EEST_SPEC_MAX_FAILURES.
 #
 # Env overrides:
 #   EEST_SPEC_MAX_FAILURES   - failure budget; CI sets via matrix include:
@@ -272,9 +273,10 @@ fi
 
 # Don't fail on most non-zero exits — the runners report all results via JSON
 # regardless, and we want to inspect the JSON to drive the pass/fail decision
-# (crashes surface as missing/truncated JSON below). The one exception is exit
-# code 66: the Go race runtime's "data race detected" signal, emitted even when
-# the run completes and the JSON parses clean, so it must be checked explicitly.
+# (crashes surface as missing/truncated JSON below). The exceptions are exit
+# code 66, the Go race runtime's "data race detected" signal, emitted even when
+# the run completes and the JSON parses clean, and exit code 2, which drops the
+# tests of any input evm could not run.
 # The grep filter strips any init-time log lines (e.g. dbg.envLookup's
 # "[WARN] [env]" message when ERIGON_COMMITMENT_PARALLEL is set fires before cmd/evm
 # sets the log handler, and the default log handler writes to stdout) so jq
@@ -308,6 +310,11 @@ for path in "${paths[@]}"; do
 	fi
 	if (( rc == 66 )); then
 		echo "ERROR: data race detected (race runtime exit code 66); see WARNING: DATA RACE in the log above" >&2
+		exit 1
+	fi
+	# Exit 2 means some input could not run, so its tests are missing from the JSON.
+	if (( rc == 2 )); then
+		echo "ERROR: evm could not run all of $path (exit code 2); see the log above" >&2
 		exit 1
 	fi
 	grep -v '^\[[A-Z][A-Z]*\]' "$raw_file" > "$part_file"
