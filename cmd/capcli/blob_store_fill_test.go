@@ -296,6 +296,22 @@ func TestBlobArchiveStoreFillFillsBeforeAnUnresolvedGloasHead(t *testing.T) {
 	require.Zero(t, cmd.windows[0].from.Load())
 }
 
+func TestBlobArchiveStoreFillTriesTheNextEndpointForAnUnresolvedGloasHead(t *testing.T) {
+	f := newFillFixture(t)
+	f.version = clparams.GloasVersion
+	head := f.addBlock(fillTestSlot, 1)
+	empty := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"data":[]}`))
+	}))
+	t.Cleanup(empty.Close)
+	full, _ := f.endpoint(false)
+	cmd := &BlobArchiveStoreFill{Endpoints: []string{empty.URL, full}, FromSlot: fillTestSlot, ToSlot: fillTestSlot}
+
+	require.NoError(t, f.fill(cmd, nil))
+	require.True(t, f.storedValid(fillTestSlot, head))
+	require.Zero(t, cmd.windows[0].from.Load())
+}
+
 func TestBlobArchiveStoreFillKeepsAGloasBlockWhoseChildIsNotIndexed(t *testing.T) {
 	f := newFillFixture(t)
 	f.version = clparams.GloasVersion

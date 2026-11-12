@@ -334,19 +334,18 @@ func (b *BlobArchiveStoreFill) fillSlot(ctx context.Context, db kv.RoDB, blocks 
 		if ctx.Err() != nil {
 			return nil
 		}
-		if notServed(lastErr) {
-			if unresolved {
-				return nil
-			}
-			b.findWindow(ctx, db, blocks, i, slot+1)
-		} else {
+		if !notServed(lastErr) {
 			unserved = false
+		} else if !unresolved {
+			b.findWindow(ctx, db, blocks, i, slot+1)
 		}
 		log.Debug("Endpoint could not fill slot", "slot", slot, "endpoint", redactEndpoint(endpoint), "err", lastErr)
 	}
 	if unserved {
-		log.Debug("No endpoint serves slot", "slot", slot, "blockRoot", root)
-		report.add(&report.unserved, slot)
+		if !unresolved {
+			log.Debug("No endpoint serves slot", "slot", slot, "blockRoot", root)
+			report.add(&report.unserved, slot)
+		}
 		return nil
 	}
 	log.Warn("Could not fill slot", "slot", slot, "blockRoot", root, "err", lastErr)
