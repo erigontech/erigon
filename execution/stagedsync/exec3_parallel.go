@@ -2712,11 +2712,15 @@ func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasP
 	return be
 }
 
-// indexReads records taskIdx as a reader of every address and path in rs. Entries and path
-// bits only accumulate across incarnations, so the mask over-approximates the latest read
-// set; the DependsOn re-check filters stale entries at the cost of a redundant check.
+// indexReads records taskIdx as a reader of every address and path in rs, except base reads the
+// BAL covers. Entries and path bits only accumulate across incarnations, so the mask
+// over-approximates the latest read set; the DependsOn re-check filters stale entries at the cost
+// of a redundant check.
 func (be *blockExecutor) indexReads(taskIdx int, rs state.ReadSet) {
-	rs.RangeFullHeaders(func(a accounts.Address, p state.AccountPath, _ accounts.StorageKey, _ state.ReadHeader) bool {
+	rs.RangeFullHeaders(func(a accounts.Address, p state.AccountPath, _ accounts.StorageKey, h state.ReadHeader) bool {
+		if be.versionMap.BALCoversBaseRead(a, h.Source) {
+			return true
+		}
 		l := be.readerByAddr[a]
 		i, found := slices.BinarySearchFunc(l, taskIdx, cmpReaderTx)
 		if found {
