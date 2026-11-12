@@ -3,7 +3,13 @@ package clparams
 import "math"
 
 const (
-	MaxSupportedCommitteesPerSlot = 64
+	MaxSupportedCommitteesPerSlot     = 64
+	AttestationSubnetExtraBits        = uint64(0)
+	CellsPerExtBlob                   = uint64(128)
+	FieldElementsPerCell              = uint64(64)
+	FieldElementsPerExtBlob           = uint64(8192)
+	KzgCommitmentInclusionProofDepth  = uint64(17)
+	KzgCommitmentsInclusionProofDepth = uint64(4)
 
 	// non-configurable constants
 	// For Gloas

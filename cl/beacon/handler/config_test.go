@@ -23,6 +23,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strconv"
 	"testing"
@@ -136,7 +137,7 @@ func TestGetSpecIncludesMissingKeys(t *testing.T) {
 	}
 }
 
-func TestGetSpecPreservesExistingKeys(t *testing.T) {
+func TestGetSpecUsesSpecConfigKeyNames(t *testing.T) {
 	for _, name := range []string{"mainnet", "sepolia"} {
 		t.Run(name, func(t *testing.T) {
 			network, config, _, err := clparams.GetConfigsByNetworkName(name)
@@ -149,12 +150,15 @@ func TestGetSpecPreservesExistingKeys(t *testing.T) {
 				Data map[string]json.RawMessage `json:"data"`
 			}
 			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
-			for _, test := range []struct{ key, want string }{
-				{"GOSSIP_MAX_SIZE", `"10485760"`},
-				{"MAXIMUM_GOSSIP_CLOCK_DISPARITY_MILLIS", `"500"`},
-				{"PENDING_DEPOSIT_LIMIT", `"134217728"`},
+			for _, test := range []struct{ key, oldKey, want string }{
+				{"MAX_PAYLOAD_SIZE", "GOSSIP_MAX_SIZE", `"10485760"`},
+				{"MAXIMUM_GOSSIP_CLOCK_DISPARITY", "MAXIMUM_GOSSIP_CLOCK_DISPARITY_MILLIS", `"500"`},
+				{"PENDING_DEPOSITS_LIMIT", "PENDING_DEPOSIT_LIMIT", `"134217728"`},
 			} {
 				t.Run(test.key, func(t *testing.T) {
+					if _, ok := response.Data[test.oldKey]; ok {
+						t.Errorf("unexpected response key %s", test.oldKey)
+					}
 					got, ok := response.Data[test.key]
 					if !ok {
 						t.Fatalf("%s: expected %s, got <missing>", test.key, test.want)
@@ -163,6 +167,63 @@ func TestGetSpecPreservesExistingKeys(t *testing.T) {
 				})
 			}
 		})
+	}
+}
+
+func TestGetSpecUsesProtocolConstants(t *testing.T) {
+	network, config := clparams.GetConfigsByNetwork(chainspec.MainnetChainID)
+	setUint := func(target any, name string, value uint64) {
+		valueOf := reflect.ValueOf(target)
+		for valueOf.Kind() == reflect.Pointer {
+			valueOf = valueOf.Elem()
+		}
+		field := valueOf.FieldByName(name)
+		if field.IsValid() && field.CanSet() {
+			field.SetUint(value)
+		}
+	}
+	for _, test := range []struct {
+		target any
+		field  string
+		value  uint64
+	}{
+		{&config, "ReorgParentWeightThreshold", 1},
+		{&config, "ReorgMaxEpochsSinceFinalization", 1},
+		{&config, "ProposerReorgCutoffBps", 1},
+		{&config, "ConfirmationByzantineThreshold", 1},
+		{&config, "CellsPerExtBlob", 1},
+		{&config, "FieldElementsPerCell", 1},
+		{&config, "FieldElementsPerExtBlob", 1},
+		{&config, "KzgCommitmentInclusionProofDepth", 1},
+		{&config, "KzgCommitmentsInclusionProofDepth", 1},
+		{network, "AttestationSubnetExtraBits", 1},
+		{network, "EpochsPerSubnetSubscription", 1},
+	} {
+		setUint(test.target, test.field, test.value)
+	}
+	handler := &ApiHandler{beaconChainCfg: config, netConfig: network}
+	response, err := handler.getSpec(nil, nil)
+	require.NoError(t, err)
+	encoded, err := json.Marshal(response)
+	require.NoError(t, err)
+	var spec struct {
+		Data map[string]json.RawMessage `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(encoded, &spec))
+	for _, test := range []struct{ key, want string }{
+		{"REORG_PARENT_WEIGHT_THRESHOLD", `"160"`},
+		{"REORG_MAX_EPOCHS_SINCE_FINALIZATION", `"2"`},
+		{"PROPOSER_REORG_CUTOFF_BPS", `"1667"`},
+		{"CONFIRMATION_BYZANTINE_THRESHOLD", `"25"`},
+		{"CELLS_PER_EXT_BLOB", `"128"`},
+		{"FIELD_ELEMENTS_PER_CELL", `"64"`},
+		{"FIELD_ELEMENTS_PER_EXT_BLOB", `"8192"`},
+		{"KZG_COMMITMENT_INCLUSION_PROOF_DEPTH", `"17"`},
+		{"KZG_COMMITMENTS_INCLUSION_PROOF_DEPTH", `"4"`},
+		{"ATTESTATION_SUBNET_EXTRA_BITS", `"0"`},
+		{"EPOCHS_PER_SUBNET_SUBSCRIPTION", `"256"`},
+	} {
+		require.JSONEq(t, test.want, string(spec.Data[test.key]), test.key)
 	}
 }
 
@@ -239,7 +300,7 @@ func TestReviewSpecMinimalUpdateTimeout(t *testing.T) {
 }
 
 func TestNamedNetworkRuntimeConfigDefaults(t *testing.T) {
-	mainnetNetwork, mainnetConfig, _, err := clparams.GetConfigsByNetworkName("mainnet")
+	_, mainnetConfig, _, err := clparams.GetConfigsByNetworkName("mainnet")
 	require.NoError(t, err)
 	require.Equal(t, clparams.AttestationDueBps, mainnetConfig.AttestationDueBps)
 	require.Equal(t, clparams.AggregateDueBps, mainnetConfig.AggregateDueBps)
@@ -251,15 +312,9 @@ func TestNamedNetworkRuntimeConfigDefaults(t *testing.T) {
 	require.Equal(t, clparams.ContributionDueBpsGloas, mainnetConfig.ContributionDueBpsGloas)
 	require.Equal(t, clparams.PayloadAttestationDueBps, mainnetConfig.PayloadAttestationDueBps)
 	require.Equal(t, clparams.ReorgHeadWeightThreshold, mainnetConfig.ReorgHeadWeightThreshold)
-	require.Equal(t, clparams.ReorgParentWeightThreshold, mainnetConfig.ReorgParentWeightThreshold)
-	require.Equal(t, clparams.ReorgMaxEpochsSinceFinalization, mainnetConfig.ReorgMaxEpochsSinceFinalization)
-	require.Equal(t, clparams.ProposerReorgCutoffBps, mainnetConfig.ProposerReorgCutoffBps)
-	require.Equal(t, clparams.ConfirmationByzantineThreshold, mainnetConfig.ConfirmationByzantineThreshold)
-	require.Equal(t, clparams.EpochsPerSubnetSubscription, mainnetNetwork.EpochsPerSubnetSubscription)
-	require.Zero(t, mainnetNetwork.AttestationSubnetExtraBits)
 	for _, name := range []string{"mainnet", "sepolia", "hoodi", "gnosis", "chiado", "bloatnet"} {
 		t.Run(name, func(t *testing.T) {
-			network, config, _, err := clparams.GetConfigsByNetworkName(name)
+			_, config, _, err := clparams.GetConfigsByNetworkName(name)
 			require.NoError(t, err)
 			require.Equal(t, mainnetConfig.AttestationDueBps, config.AttestationDueBps)
 			require.Equal(t, mainnetConfig.AggregateDueBps, config.AggregateDueBps)
@@ -271,15 +326,9 @@ func TestNamedNetworkRuntimeConfigDefaults(t *testing.T) {
 			require.Equal(t, mainnetConfig.ContributionDueBpsGloas, config.ContributionDueBpsGloas)
 			require.Equal(t, mainnetConfig.PayloadAttestationDueBps, config.PayloadAttestationDueBps)
 			require.Equal(t, mainnetConfig.ReorgHeadWeightThreshold, config.ReorgHeadWeightThreshold)
-			require.Equal(t, mainnetConfig.ReorgParentWeightThreshold, config.ReorgParentWeightThreshold)
-			require.Equal(t, mainnetConfig.ReorgMaxEpochsSinceFinalization, config.ReorgMaxEpochsSinceFinalization)
-			require.Equal(t, mainnetConfig.ProposerReorgCutoffBps, config.ProposerReorgCutoffBps)
-			require.Equal(t, mainnetConfig.ConfirmationByzantineThreshold, config.ConfirmationByzantineThreshold)
-			require.Equal(t, mainnetNetwork.AttestationSubnetExtraBits, network.AttestationSubnetExtraBits)
 			require.Equal(t, config.SecondsPerSlot*config.AttestationDueBps/(clparams.BpsFactor/1000), config.AttestationDueMs(false))
 			require.Equal(t, config.SecondsPerSlot*config.AttestationDueBpsGloas/(clparams.BpsFactor/1000), config.AttestationDueMs(true))
 			require.Equal(t, config.SecondsPerSlot*config.PayloadAttestationDueBps/(clparams.BpsFactor/1000), config.PayloadAttestationDueMs())
-			require.Equal(t, mainnetNetwork.EpochsPerSubnetSubscription, network.EpochsPerSubnetSubscription)
 		})
 	}
 }
@@ -295,7 +344,6 @@ func TestCustomConfigOmittingAddedKeysUsesMainnetDefaults(t *testing.T) {
 	require.Equal(t, mainnetConfig.AttestationDueMs(true), config.AttestationDueMs(true))
 	require.Equal(t, mainnetConfig.PayloadAttestationDueMs(), config.PayloadAttestationDueMs())
 	require.Equal(t, mainnetConfig.ReorgHeadWeightThreshold, config.ReorgHeadWeightThreshold)
-	require.Equal(t, mainnetNetwork.EpochsPerSubnetSubscription, network.EpochsPerSubnetSubscription)
 
 	response, err := (&ApiHandler{beaconChainCfg: &config, netConfig: &network}).getSpec(nil, nil)
 	require.NoError(t, err)
