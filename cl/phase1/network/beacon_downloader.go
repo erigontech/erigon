@@ -781,9 +781,10 @@ func (f *ForwardBeaconDownloader) fetchGloasEnvelopes(
 }
 
 // ImportHeldGloasTip processes the held Gloas block, then passes it to importTip with the envelope that arrives within
-// envelopeTimeout (nil if none) and the time the fetch ended, and reports whether both succeeded. A tip that processing
-// rejects is dropped; any other tip that is not imported is tried again in the next slot. A held block that is the
-// parent of a downloaded block has a successor and is left to the batch path.
+// envelopeTimeout (nil if none) and the time the fetch ended, and reports whether both succeeded. A tip whose fetch
+// or processing is cut short by ctx cancellation is kept with its retry slot. Otherwise a tip that processing rejects is
+// dropped, and any other tip that is not imported is tried again in the next slot. A held block that is the parent of
+// a downloaded block has a successor and is left to the batch path.
 func (f *ForwardBeaconDownloader) ImportHeldGloasTip(ctx context.Context, envelopeTimeout time.Duration, importTip func(tip *cltypes.SignedBeaconBlock, root common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope, receivedAt time.Time) bool) bool {
 	f.mu.Lock()
 	tip, tipPeer, retrySlot := f.gloasLookahead, f.gloasLookaheadPeer, f.gloasTipRetrySlot
