@@ -89,7 +89,7 @@ Areas historically susceptible to races in Erigon:
 
 - After changes to the parallel executor or concurrent code paths
 - For concurrency-sensitive fixes before merging
-- Race check gate: `path=$(bash tools/create-ramdisk) && make lint && ERIGON_EXECUTION_TESTS_TMPDIR=$path make test-all-race`
+- Select local lint and command builds using [Local verification in AGENTS.md](../../../AGENTS.md#local-verification).
 
 ## CI Equivalent
 

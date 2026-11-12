@@ -18,9 +18,9 @@ Each test group has its own dedicated skill for drill-down on failures. Use thos
 
 | Group | Skill | Command | Speed | Use When |
 |-------|-------|---------|-------|----------|
-| lint | *(inline)* | `make lint` | ~1 min | Before every push |
-| unit | `erigon-test-unit` | `make test-short` | ~5 min | Pre-push gate |
-| all | `erigon-test-all` | `GOGC=80 make test-all` | ~30 min | Before PR review |
+| lint | *(inline)* | `make lintci` | varies | Broad changes, lint configuration, or full local CI verification |
+| unit | `erigon-test-unit` | `make test-short` | ~5 min | Full short test suite |
+| all | `erigon-test-all` | `GOGC=80 make test-all` | ~30 min | Full local test verification |
 | race | `erigon-test-race` | `make test-all-race` | ~60 min | Concurrency changes |
 | eest-spec | *(inline)* | `make eest-spec-<shard>` | varies | EEST state/blockchain/engine-x changes (paired shards pin `ERIGON_COMMITMENT_PARALLEL`; execution remains parallel; see `tools/eest-spec-shards.yml`) |
 | caplin spec | *(inline)* | `cd cl/spectest && make tests && make mainnet` | ~15 min | CL/consensus changes |
@@ -32,24 +32,24 @@ Each test group has its own dedicated skill for drill-down on failures. Use thos
 
 **Pitfall:** prefer `make eest-spec-<shard>` over `bash tools/run-eest-spec-test.sh <shard>`. The make target lists `evm` / `evm.race` as a prereq so stale binaries get rebuilt; the script invoked directly does not, and a stale binary against current fixtures will inflate failures or hide regressions.
 
-### Lint (run first — non-deterministic, may need multiple runs)
-```bash
-make lint
-```
+### Local verification before pushing
 
-### Quick gate (before pushing a fix)
-```bash
-make lint && make test-short
-```
+Follow [Local verification in AGENTS.md](../../../AGENTS.md#local-verification) to select package tests, lint, module checks, and command builds.
 
-### Full gate (before marking PR ready for review)
+### Full repository lint and tests
+
+When full local verification is needed:
+
 ```bash
-make lint && make erigon integration && GOGC=80 make test-all
+make lintci && GOGC=80 make test-all
 ```
 
 ### Race check (for concurrency-sensitive changes)
+
+Use the `erigon-test-race` skill to select relevant package checks or run the full race suite:
+
 ```bash
-make lint && make test-all-race
+make test-all-race
 ```
 
 ---
@@ -86,7 +86,7 @@ done
 | Unit tests                          | yes       | `erigon-test-unit` | `ci.yml` |
 | All tests                           | yes       | `erigon-test-all` | `test-all-erigon.yml` |
 | EEST spec tests                     | yes       | *(make eest-spec-…)* | `test-eest-spec.yml` |
-| Lint                                | yes       | *(make lint)* | `lint.yml` |
+| Lint                                | yes       | *(make lintci)* | `lint.yml` |
 | Test Hive                           | yes       | `erigon-test-hive` | `test-hive.yml` |
 | Kurtosis Assertoor GitHub Action    | yes       | *(remote only)* | `test-kurtosis-assertoor.yml` |
 | QA - RPC Integration Tests          | yes       | `erigon-test-rpc` | `qa-rpc-integration-tests.yml` |
@@ -120,10 +120,7 @@ gh run watch <run-id>
 
 When preparing a devnet/feature branch for review:
 
-1. **Local gate** — fast feedback before pushing:
-   ```bash
-   make lint && make erigon integration && make test-short
-   ```
+1. **Local verification** — run the checks selected under [Local verification in AGENTS.md](../../../AGENTS.md#local-verification).
 
 2. **Push branch**:
    ```bash

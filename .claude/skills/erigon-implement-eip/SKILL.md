@@ -105,7 +105,7 @@ Implement the EIP changes in the code, based on the understanding gathered in St
 
 If during implementation you discover something that is unclear or appears to contradict the spec, stop and ask for clarification rather than guessing.
 
-After making code changes, run `make lint` and fix any reported issues. The linter is non-deterministic — run it repeatedly until it is clean.
+Follow [Local verification in AGENTS.md](../../../AGENTS.md#local-verification) for lint and build checks, and fix any reported issues.
 
 ## Step 8 — Run local tests
 

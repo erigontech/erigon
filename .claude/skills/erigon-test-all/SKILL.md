@@ -1,6 +1,6 @@
 ---
 name: erigon-test-all
-description: Run the full Erigon test suite locally using GOGC=80 make test-all. Use this before marking a PR ready for review. Equivalent to the "All tests" CI workflow.
+description: Run the full Erigon test suite locally using GOGC=80 make test-all. Use for broad changes, failures in the full CI test suite, or an explicitly requested full local run. Equivalent to the "All tests" CI workflow.
 ---
 
 # Erigon Full Test Suite
@@ -126,9 +126,9 @@ Tests skipped via `-short` in `test-short` run fully here. If a test passes in `
 
 ## When to Use
 
-- Before marking a PR ready for review
+- When full local test verification is requested or needed to reproduce CI failures
 - After significant logic changes to verify no edge cases break
-- Full gate: `path=$(bash tools/create-ramdisk) && make lint && make erigon integration && ERIGON_EXECUTION_TESTS_TMPDIR=$path GOGC=80 make test-all`
+- Select local lint and command builds using [Local verification in AGENTS.md](../../../AGENTS.md#local-verification).
 
 ## CI Equivalent
 
