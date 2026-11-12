@@ -49,7 +49,7 @@ class RenderTextTests(unittest.TestCase):
         data = {"networks": {"mainnet": dict(DATA["networks"]["mainnet"]), "gnosis": DATA["networks"]["gnosis"]}}
         data["networks"]["mainnet"]["full"] = {"display": "1.2 TB", "measured_at": "2026-06-02", "method": "seg-du"}
         out = r.render_text(PAGE, data)
-        self.assertIn("{/* ds:mainnet:full */}1.2 TB" + r.SEG_DU_MARK + "{/* ds:end */}", out)
+        self.assertIn("{/* ds:mainnet:full */}1.2 TB†{/* ds:end */}", out)
         self.assertIn("{/* ds:mainnet:minimal */}360 GB{/* ds:end */}", out)
         self.assertEqual(r.render_text(out, data), out)
 
