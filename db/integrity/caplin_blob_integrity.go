@@ -23,7 +23,6 @@ import (
 	"math"
 
 	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/common"
@@ -261,9 +260,7 @@ func checkCaplinBlobSnapshotSlot(ctx context.Context, tx kv.Tx, snapshots *freez
 		expected = commitments.Len()
 	}
 	if expected > 0 && len(sidecars) == 0 && block.Version() >= clparams.GloasVersion {
-		skipped, err := freezeblocks.PayloadSkipped(tx, snapshots, block, canonicalRoot, func(next uint64) (*cltypes.SignedBeaconBlock, error) {
-			return readCanonicalBlock(ctx, tx, reader, next)
-		})
+		skipped, err := freezeblocks.PayloadSkipped(ctx, tx, snapshots, reader, block, canonicalRoot)
 		if err != nil {
 			return fmt.Errorf("blob snapshot slot %d: read child block: %w", slot, err)
 		}
@@ -303,30 +300,6 @@ func checkCaplinBlobSnapshotSlot(ctx context.Context, tx kv.Tx, snapshots *freez
 		return fmt.Errorf("blob snapshot slot %d: KZG/proof verification failed: %w", slot, err)
 	}
 	return nil
-}
-
-func readCanonicalBlock(ctx context.Context, tx kv.Tx, reader freezeblocks.BeaconSnapshotReader, slot uint64) (block *cltypes.SignedBeaconBlock, err error) {
-	defer func() {
-		if recovered := recover(); recovered != nil {
-			block, err = nil, fmt.Errorf("block at slot %d: corrupt beacon snapshot: %v", slot, recovered)
-		}
-	}()
-	block, err = reader.ReadBeaconBlockBodyBySlot(ctx, tx, slot)
-	if err != nil || block == nil {
-		return nil, err
-	}
-	root, err := block.Block.HashSSZ()
-	if err != nil {
-		return nil, err
-	}
-	canonicalRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
-	if err != nil {
-		return nil, err
-	}
-	if block.Block.Slot != slot || root != canonicalRoot {
-		return nil, fmt.Errorf("block at slot %d is not canonical", slot)
-	}
-	return block, nil
 }
 
 func checkCaplinBlobSnapshotsVisible(snapshots *freezeblocks.CaplinSnapshots, view *freezeblocks.CaplinView) error {

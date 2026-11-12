@@ -945,15 +945,17 @@ func TestBlobCountFromBlocksFollowsTheChildsPayloadStatus(t *testing.T) {
 		onChain   bool
 		stored    bool
 		childSlot uint64
+		childRoot common.Hash
 		finalized uint64
 		expected  uint64
-		dumpErr   string
+		err       string
 	}{
-		{"payload skipped", false, false, slot + 3, 0, 0, ""},
-		{"payload skipped, its blobs stored", false, true, slot + 3, 0, 0, ""},
-		{"payload on chain", true, false, slot + 3, 0, 2, "blob storage count mismatch at slot 7"},
-		{"payload skipped by a finalized child not frozen yet", false, true, unfrozen, epochEnd(unfrozen + 32), 0, ""},
-		{"payload skipped by a child after the finalized checkpoint", false, true, unfrozen, epochEnd(unfrozen), 2, ""},
+		{"payload skipped", false, false, slot + 3, common.Hash{}, 0, 0, ""},
+		{"payload skipped, its blobs stored", false, true, slot + 3, common.Hash{}, 0, 0, ""},
+		{"payload on chain", true, false, slot + 3, common.Hash{}, 0, 2, "blob storage count mismatch at slot 7"},
+		{"payload skipped by a block that is not canonical", false, true, slot + 3, common.Hash{0xee}, 0, 0, "block at slot 10 is not canonical"},
+		{"payload skipped by a finalized child not frozen yet", false, true, unfrozen, common.Hash{}, epochEnd(unfrozen + 32), 0, ""},
+		{"payload skipped by a child after the finalized checkpoint", false, true, unfrozen, common.Hash{}, epochEnd(unfrozen), 2, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := clparams.MainnetBeaconConfig
@@ -992,6 +994,9 @@ func TestBlobCountFromBlocksFollowsTheChildsPayloadStatus(t *testing.T) {
 			db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 			childRoot, err := child.Block.HashSSZ()
 			require.NoError(t, err)
+			if tc.childRoot != (common.Hash{}) {
+				childRoot = tc.childRoot
+			}
 			require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
 				require.NoError(t, beacon_indicies.MarkRootCanonical(tx, slot, root))
 				require.NoError(t, beacon_indicies.WriteHighestFinalized(tx, tc.finalized))
@@ -1003,10 +1008,15 @@ func TestBlobCountFromBlocksFollowsTheChildsPayloadStatus(t *testing.T) {
 
 			blobCount := BlobCountFromBlocks(t.Context(), sn, NewBeaconSnapshotReader(sn, nil, &cfg))
 			var n uint64
-			require.NoError(t, db.View(t.Context(), func(tx kv.Tx) (err error) {
+			err = db.View(t.Context(), func(tx kv.Tx) (err error) {
 				n, err = blobCount(tx, slot)
 				return err
-			}))
+			})
+			if tc.childRoot != (common.Hash{}) {
+				require.ErrorContains(t, err, tc.err)
+				return
+			}
+			require.NoError(t, err)
 			require.Equal(t, tc.expected, n)
 
 			store := blob_storage.NewBlobStore(db, afero.NewMemMapFs())
@@ -1014,11 +1024,27 @@ func TestBlobCountFromBlocksFollowsTheChildsPayloadStatus(t *testing.T) {
 				require.NoError(t, store.WriteBlobSidecars(t.Context(), root, []*cltypes.BlobSidecar{blobSidecar(slot, 0), blobSidecar(slot, 1)}))
 			}
 			err = DumpBlobSidecarsRange(t.Context(), db, store, 0, snaptype.CaplinMergeLimit, 0, dirs, 1, blobCount, log.LvlDebug, log.New())
-			if tc.dumpErr == "" {
-				require.NoError(t, err)
+			if tc.err != "" {
+				require.ErrorContains(t, err, tc.err)
 				return
 			}
-			require.ErrorContains(t, err, tc.dumpErr)
+			require.NoError(t, err)
+			require.Equal(t, tc.expected > 0, len(dumpedBlobWord(t, dirs, slot)) > 0)
 		})
 	}
+}
+
+func dumpedBlobWord(t *testing.T, dirs datadir.Dirs, slot uint64) []byte {
+	t.Helper()
+	f, _, ok := snaptype.ParseFileName(dirs.Snap, snaptype.BlobSidecars.FileName(version.ZeroVersion, 0, snaptype.CaplinMergeLimit))
+	require.True(t, ok)
+	d, err := seg.NewDecompressor(f.Path)
+	require.NoError(t, err)
+	defer d.Close()
+	g := d.MakeGetter()
+	for range slot {
+		g.Skip()
+	}
+	word, _ := g.Next(nil)
+	return word
 }
