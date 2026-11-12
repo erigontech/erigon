@@ -143,6 +143,7 @@ func (aa AccessSet) Merge(other AccessSet) AccessSet {
 // that occur during block's execution.
 // NOT THREAD SAFE!
 type IntraBlockState struct {
+	createStubAddr accounts.Address // probe: STUB_CREATE_ABSENT
 	stateReader StateReader
 	codeAccess  codeAccessTracker // stateReader, if it tracks code access
 
@@ -1460,9 +1461,18 @@ func (ibs *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 }
 
 // committedAccount reads the committed (pre-block) account once per tx.
+// StubCreateAbsent is a bound probe: the committed read of the current nested CREATE target returns absent.
+var StubCreateAbsent = dbg.EnvBool("STUB_CREATE_ABSENT", false)
+
+// SetCreateStubAddr names the CREATE target StubCreateAbsent answers for.
+func (ibs *IntraBlockState) SetCreateStubAddr(a accounts.Address) { ibs.createStubAddr = a }
+
 func (ibs *IntraBlockState) committedAccount(addr accounts.Address) (*accounts.Account, error) {
 	if cached, ok := ibs.committedBase[addr]; ok {
 		return cached, nil
+	}
+	if StubCreateAbsent && addr == ibs.createStubAddr {
+		return nil, nil
 	}
 	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle()))) {
 		ibs.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", ibs.blockNum, ibs.txIndex, ibs.version))

@@ -645,6 +645,9 @@ func (evm *EVM) prepareCreate(caller accounts.Address, address accounts.Address,
 	}
 	evm.intraBlockState.MarkAddressAccess(address, false)
 	if evm.chainRules.IsAmsterdam && nested {
+		if state.StubCreateAbsent {
+			evm.intraBlockState.SetCreateStubAddr(address)
+		}
 		preparation.chargeNewAccount, err = evm.intraBlockState.Empty(address)
 		if err != nil {
 			return preparation, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
