@@ -24,7 +24,6 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/engineapi"
 	"github.com/erigontech/erigon/execution/engineapi/engine_block_downloader"
 	enginetypes "github.com/erigontech/erigon/execution/engineapi/engine_types"
@@ -90,12 +89,21 @@ func (et *EngineTest) deliver(m *execmoduletester.ExecModuleTester) error {
 			return fmt.Errorf("forkchoice update to genesis: %w", err)
 		}
 	}
+	// newPayload goes through the RPC handler, which decodes and counts the
+	// params as it does for a CL.
+	rpcSrv := rpc.NewServer(1, false, false, false, m.Log, 0)
+	defer rpcSrv.Stop()
+	if err := rpcSrv.RegisterAPI(srv.API()); err != nil {
+		return err
+	}
+	client := rpc.DialInProc(rpcSrv, m.Log)
+	defer client.Close()
 	chain := chainreader.NewChainReaderEth1(m.ChainConfig, m.ExecModule, 0)
 	for i, payload := range et.payloads {
 		reject := func(hash *common.Hash, err string) {
 			et.Rejections = append(et.Rejections, testutil.Rejection{Index: i, Hash: hash, Error: err})
 		}
-		if err := sendPayload(m.Ctx, srv, chain, payload, et.SyncingTimeout, reject); err != nil {
+		if err := sendPayload(m.Ctx, client, srv, chain, payload, et.SyncingTimeout, reject); err != nil {
 			return fmt.Errorf("payload %d: %w", i, err)
 		}
 	}
@@ -105,57 +113,46 @@ func (et *EngineTest) deliver(m *execmoduletester.ExecModuleTester) error {
 
 // sendPayload calls engine_newPayloadV<n> and, for a valid payload,
 // engine_forkchoiceUpdatedV<n>.
-func sendPayload(ctx context.Context, srv *engineapi.EngineServer, chain chainreader.ChainReaderWriterEth1, p EngineXTestNewPayload, timeout time.Duration, reject func(hash *common.Hash, err string)) error {
-	var (
-		payload           enginetypes.ExecutionPayload
-		blobHashes        []common.Hash
-		parentBeaconRoot  common.Hash
-		executionRequests []hexutil.Bytes
-	)
-	targets := []any{&payload, &blobHashes, &parentBeaconRoot, &executionRequests}
+func sendPayload(ctx context.Context, client *rpc.Client, srv *engineapi.EngineServer, chain chainreader.ChainReaderWriterEth1, p EngineXTestNewPayload, timeout time.Duration, reject func(hash *common.Hash, err string)) error {
+	var payload struct {
+		BlockHash  common.Hash `json:"blockHash"`
+		ParentHash common.Hash `json:"parentHash"`
+	}
+	var hash *common.Hash
+	if len(p.Params) > 0 && json.Unmarshal(p.Params[0], &payload) == nil {
+		hash = &payload.BlockHash
+	}
+	params := make([]any, len(p.Params))
 	for i, param := range p.Params {
-		if i >= len(targets) {
-			return fmt.Errorf("unexpected param %d", i)
-		}
-		if err := json.Unmarshal(param, targets[i]); err != nil {
-			reject(nil, err.Error())
-			return fmt.Errorf("decode param %d: %w", i, err)
-		}
+		params[i] = param
 	}
 
 	parentUnknown := func() bool { return chain.GetHeaderByHash(ctx, payload.ParentHash) == nil }
 	status, err := retrySyncing(ctx, timeout, parentUnknown, func() (*enginetypes.PayloadStatus, error) {
-		switch p.NewPayloadVersion {
-		case "1":
-			return srv.NewPayloadV1(ctx, &payload)
-		case "2":
-			return srv.NewPayloadV2(ctx, &payload)
-		case "3":
-			return srv.NewPayloadV3(ctx, &payload, blobHashes, &parentBeaconRoot)
-		case "4":
-			return srv.NewPayloadV4(ctx, &payload, blobHashes, &parentBeaconRoot, executionRequests)
-		case "5":
-			return srv.NewPayloadV5(ctx, &payload, blobHashes, &parentBeaconRoot, executionRequests)
-		default:
-			return nil, fmt.Errorf("unsupported newPayload version %q", p.NewPayloadVersion)
+		var status enginetypes.PayloadStatus
+		if err := client.CallContext(ctx, &status, "engine_newPayloadV"+p.NewPayloadVersion, params...); err != nil {
+			return nil, err
 		}
+		return &status, nil
 	})
 	if errors.Is(err, errStillSyncing) {
 		return err
 	}
+	var rpcErr rpc.Error
+	isRPCErr := errors.As(err, &rpcErr)
 	switch {
-	case err != nil:
-		reject(&payload.BlockHash, rpcErrorString(err))
-	case status.Status != enginetypes.ValidStatus:
-		reject(&payload.BlockHash, statusErrorString(status))
+	case isRPCErr:
+		reject(hash, rpcErrorString(err))
+	case err == nil && status.Status == enginetypes.InvalidStatus:
+		reject(hash, statusErrorString(status))
 	}
 	expectInvalid := p.ValidationError != "" || p.ErrorCode != ""
 	switch {
-	case err != nil && expectInvalid:
+	case isRPCErr && expectInvalid:
 		return nil
 	case err != nil:
 		return err
-	case status.Status != enginetypes.ValidStatus && expectInvalid:
+	case status.Status == enginetypes.InvalidStatus && expectInvalid:
 		return nil
 	case status.Status != enginetypes.ValidStatus:
 		return statusError("payload", status)
