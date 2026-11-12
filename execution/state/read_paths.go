@@ -926,7 +926,7 @@ func SeedOrigin(vm *VersionMap, addr accounts.Address, acc *accounts.Account) {
 // StorageRead is version-only-validated). Only a genuine cold committed read seeds; a
 // versionMap or write-set hit is untouched. Mutates r so the seeded cell and read agree.
 func seedStorageOrigin(s *IntraBlockState, addr accounts.Address, key accounts.StorageKey, val uint256.Int, r *readPathResult) {
-	if s.versionMap == nil || r.source != StorageRead || r.version != UnknownVersion {
+	if s.versionMap == nil || r.source != StorageRead || r.version != UnknownVersion || stubNoStorageOrigin {
 		return
 	}
 	s.recordStorageOrigin(addr, key, val) // origin write-set, published at flush (not a mid-read versionMap write)
@@ -1521,6 +1521,7 @@ func readState(s *IntraBlockState, addr accounts.Address, key accounts.StorageKe
 // which SetState uses to decide between deleting vs. updating the
 // versioned write on revert.
 var stubSloadZero, stubSloadDirect, stubSloadMinBlk = dbg.EnvBool("STUB_SLOAD_ZERO", false), dbg.EnvBool("STUB_SLOAD_DIRECT", false), dbg.EnvUint("STUB_SLOAD_MINBLK", 0)
+var stubNoStorageOrigin = dbg.EnvBool("STUB_NO_STORAGE_ORIGIN", false)
 
 func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.StorageKey) (uint256.Int, ReadSource, Version, bool, error) {
 	if s.versionMap != nil && stubSloadZero && s.blockNum >= stubSloadMinBlk {
