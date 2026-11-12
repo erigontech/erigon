@@ -795,8 +795,11 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 							failInfra(fmt.Errorf("marshal transactions for accumulator, block %d: %w", applyResult.BlockNum, marshalErr))
 							continue
 						}
+						dbg.NpMark("apMarshal")
 						pe.accumulator.StartChange(applyResult.Header, rawTxs, false)
+						dbg.NpMark("apStartChange")
 						notifyErr := pe.rs.NotifyAccumulator(pe.accumulator, rwTx, pendingAccumulatorWrites)
+						dbg.NpMark("apNotify")
 						pendingAccumulatorWrites = pendingAccumulatorWrites[:0]
 						if notifyErr != nil {
 							<-balDone
