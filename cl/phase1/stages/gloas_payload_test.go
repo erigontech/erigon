@@ -1301,8 +1301,22 @@ func TestValidateAndRecordAnchorEnvelopeRejectsBlobMismatch(t *testing.T) {
 	require.NoError(t, err)
 	signAnchorEnvelope(t, anchor, key, envelope, bid.Slot)
 	store := newAnchorForkChoiceStore(t, cfg, anchor, nil)
+	stageCfg := &Cfg{beaconCfg: cfg, forkChoice: store}
 
-	terminal, err := validateAndRecordAnchorEnvelope(&Cfg{beaconCfg: cfg, forkChoice: store}, anchor, root, bid, envelope)
+	t.Run("wrong signing key", func(t *testing.T) {
+		wrongKey, err := bls.NewPrivateKeyFromIKM([]byte("11234567890123456789012345678901"))
+		require.NoError(t, err)
+		invalidEnvelope := *envelope
+		signAnchorEnvelope(t, anchor, wrongKey, &invalidEnvelope, bid.Slot)
+
+		terminal, err := validateAndRecordAnchorEnvelope(stageCfg, anchor, root, bid, &invalidEnvelope)
+		require.ErrorContains(t, err, "invalid builder signature")
+		require.False(t, terminal)
+		require.False(t, store.IsEnvelopeRejected(root))
+		require.False(t, store.IsBlockInvalid(root))
+	})
+
+	terminal, err := validateAndRecordAnchorEnvelope(stageCfg, anchor, root, bid, envelope)
 	require.ErrorIs(t, err, misc.ErrMismatchBlobHashes)
 	require.True(t, terminal)
 	require.True(t, store.IsEnvelopeRejected(root))
