@@ -52,6 +52,88 @@ func TestAggregatorEnableDomainDuringFilePlanning(t *testing.T) {
 	}))
 }
 
+func TestAggregatorBuildDefersNewlyEnabledEntities(t *testing.T) {
+	const stepSize = uint64(10)
+	db, agg := testDbAndAggregatorv3(t, stepSize)
+	ctx := t.Context()
+	key, value := []byte{1}, []byte{7}
+	agg.EnableDomain(kv.RCacheDomain)
+	require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
+		at := agg.BeginFilesRo()
+		defer at.Close()
+		for _, domain := range []kv.Domain{kv.AccountsDomain, kv.RCacheDomain} {
+			writer := at.d[domain].NewWriter(db)
+			t.Cleanup(writer.Close)
+			require.NoError(t, writer.PutWithPrev(key, value, 1, nil))
+			if domain == kv.AccountsDomain {
+				require.NoError(t, writer.PutWithPrev([]byte{2}, value, 3*stepSize, nil))
+				require.NoError(t, writer.PutWithPrev([]byte{3}, value, 5*stepSize, nil))
+			}
+			require.NoError(t, writer.Flush(ctx, tx))
+			writer.Close()
+		}
+		writer := at.searchII(kv.LogAddrIdx).newWriter(db, agg.dirs.Tmp, false)
+		defer writer.close()
+		require.NoError(t, writer.Add(key, 1))
+		return writer.Flush(ctx, tx)
+	}))
+
+	// Disabled entities can still have MDBX data from an earlier run.
+	agg.d[kv.RCacheDomain].Enabled.Store(false)
+	logAddrs := agg.searchII(kv.LogAddrIdx)
+	logAddrs.Enabled.Store(false)
+	for step := range kv.Step(3) {
+		require.NoError(t, agg.buildFiles(ctx, asTemporalRoDB(db), step, unboundedFinalityCtx, nil))
+	}
+	var plan fileBuildPlan
+	require.NoError(t, db.View(ctx, func(tx kv.Tx) error {
+		at := agg.BeginFilesRo()
+		defer at.Close()
+		var err error
+		plan, err = at.planFileBuild(tx)
+		return err
+	}))
+	require.Equal(t, kv.Step(3), plan.firstStep)
+	agg.EnableDomain(kv.RCacheDomain)
+	logAddrs.Enabled.Store(true)
+
+	assertPendingData := func(t *testing.T) {
+		t.Helper()
+		require.NoError(t, db.View(ctx, func(tx kv.Tx) error {
+			at := agg.BeginFilesRo()
+			defer at.Close()
+			t.Run("domain", func(t *testing.T) {
+				got, _, found, err := at.d[kv.RCacheDomain].GetLatest(key, tx)
+				require.NoError(t, err)
+				require.True(t, found)
+				require.Equal(t, value, got)
+			})
+			t.Run("index", func(t *testing.T) {
+				entries, err := at.IndexRange(kv.LogAddrIdx, key, 0, int(5*stepSize), order.Asc, -1, tx)
+				require.NoError(t, err)
+				defer entries.Close()
+				txNums, err := stream.ToArray(entries)
+				require.NoError(t, err)
+				require.Equal(t, []uint64{1}, txNums)
+			})
+			return nil
+		}))
+	}
+	t.Run("before_build", assertPendingData)
+	for step := plan.firstStep; step < 5; step++ {
+		require.NoError(t, agg.buildFilesWithPlan(ctx, asTemporalRoDB(db), step, unboundedFinalityCtx, nil, plan))
+	}
+	require.Equal(t, 5*stepSize, agg.EndTxNumMinimax(), "healthy state files must keep advancing")
+	t.Run("after_build", assertPendingData)
+	require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
+		at := agg.BeginFilesRo()
+		defer at.Close()
+		_, err := at.prune(ctx, tx, 0, true, nil)
+		return err
+	}))
+	t.Run("after_prune", assertPendingData)
+}
+
 func TestAggregatorBuildResumesIncompleteStep(t *testing.T) {
 	const stepSize = uint64(10)
 	for _, target := range []string{"receipt", "receipt_without_history", "rcache", "logaddrs"} {
