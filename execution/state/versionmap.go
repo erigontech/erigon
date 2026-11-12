@@ -479,8 +479,9 @@ func (vm *VersionMap) balListsUnchanged(addr accounts.Address) bool {
 	return ok
 }
 
-// BALCoversBaseRead reports whether a read of addr from base state needs no validation: a committed in-block write to
-// an address the BAL lists unchanged fails the block in the BAL check.
+// BALCoversBaseRead reports whether a read of addr from base state needs no validation. The BAL lists addr unchanged,
+// so after every tx its state equals the base, or the BAL check fails the block. A read of an in-block write is not
+// covered: it may come from an aborted incarnation.
 func (vm *VersionMap) BALCoversBaseRead(addr accounts.Address, source ReadSource) bool {
 	return source == StorageRead && vm.balListsUnchanged(addr)
 }
@@ -2160,8 +2161,7 @@ func (vm *VersionMap) ValidateReadSet(txIdx int, rs ReadSet, checkVersion func(r
 		}
 	}
 	for a, inner := range rs.storage {
-		// A committed in-block write to an account the BAL lists unchanged fails the block in the BAL check, so a base
-		// read of it stays valid. A read of an in-block write may come from an aborted incarnation.
+		// The storage form of BALCoversBaseRead, with the address lookup hoisted out of the slot loop.
 		unchanged := vm.balListsUnchanged(a)
 		for k, tr := range inner {
 			if unchanged && tr.Source == StorageRead {

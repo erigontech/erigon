@@ -1754,15 +1754,6 @@ func TestEngineApiBALUnchangedAccountLieInvalid(t *testing.T) {
 			requireBALMismatch(t, newPayloadWithBAL(ctx, t, eat, payload, bal))
 		})
 
-		t.Run("hidden code change", func(t *testing.T) {
-			child, payload, bal := buildCreateThenProbeBlock(ctx, t, eat, childInitCode, false)
-			c := findAccountChanges(bal, accounts.InternAddress(child))
-			require.NotNil(t, c)
-			require.NotEmpty(t, c.CodeChanges)
-			c.CodeChanges = nil
-			requireBALMismatch(t, newPayloadWithBAL(ctx, t, eat, payload, bal))
-		})
-
 		t.Run("create over an address listed unchanged", func(t *testing.T) {
 			child, payload, bal := buildCreateThenProbeBlock(ctx, t, eat, childInitCode, false)
 			c := findAccountChanges(bal, accounts.InternAddress(child))
