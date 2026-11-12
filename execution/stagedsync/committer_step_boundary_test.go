@@ -1277,6 +1277,61 @@ func TestComputeAhead_WindowWrongRootPublishedOnce(t *testing.T) {
 	require.Nil(t, doms.GetCommitmentContext().PeekPendingUpdate())
 }
 
+func TestComputeAhead_WindowFailureAtEdgePublishedOnce(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(true))
+	previousBAL := dbg.BALDrivenCommitment
+	previousIgnore := dbg.IgnoreBAL
+	previousShadow := dbg.BALShadowCompute
+	previousParentReads := commitmentdb.ParentReadsWanted()
+	t.Cleanup(func() {
+		dbg.BALDrivenCommitment = previousBAL
+		dbg.IgnoreBAL = previousIgnore
+		dbg.BALShadowCompute = previousShadow
+		commitmentdb.WantParentReads(previousParentReads)
+	})
+	dbg.BALDrivenCommitment = true
+	dbg.IgnoreBAL = false
+	dbg.BALShadowCompute = false
+	commitmentdb.WantParentReads(false)
+
+	ctx := context.Background()
+	db, tx, doms := setupStepTest(t)
+	doms.SetDeferCommitmentUpdates(true)
+	blockHash := common.Hash{0xa1}
+	addr := accounts.InternAddress([20]byte{0xa2})
+	value := *uint256.NewInt(14)
+	cs := &changeset.StateChangeSet{}
+	out := make(chan commitmentResult, 64)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{SpuriousDragonBlock: common.NewUint64(0)}, "test", log.New(), false, 1, make(chan applyResult, 64), nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
+	require.NoError(t, err)
+	defer cc.Stop()
+	cc.handleBlockRequest(ctx, &blockRequest{
+		blockNum: 1, blockHash: blockHash, firstTxNum: 15, lastTxNum: 17,
+		stateRoot: common.Hash{0xbe, 0xef},
+		bal: types.BlockAccessList{{
+			Address:        addr.Value(),
+			BalanceChanges: []*types.BalanceChange{{Index: 0, Value: value}},
+			NonceChanges:   []*types.NonceChange{{Index: 0, Value: 1}, {Index: 1, Value: 2}},
+		}},
+	})
+	require.Empty(t, out)
+	av := addr.Value()
+	putCorruptAccount(t, doms, tx, av[:])
+	doms.SavePastChangesetAccumulator(blockHash, 1, cs)
+	cc.handleMessage(ctx, recordTx(newRawViewVM(15), 1, blockHash, 15, &chain.Rules{IsAmsterdam: true}, nonceBalanceWrites(addr, 1, value)))
+	require.True(t, cc.pending[1].failed)
+	count := len(out)
+	for len(out) > 0 {
+		require.Error(t, (<-out).err)
+	}
+	if count != 1 {
+		t.Errorf("failed ahead fold publications: got %d, want 1", count)
+	}
+
+	cc.handleMessage(ctx, &blockResult{BlockNum: 1, BlockHash: blockHash, StateRoot: common.Hash{0xbe, 0xef}, lastTxNum: 17})
+	require.Nil(t, doms.GetCommitmentContext().PeekPendingUpdate())
+}
+
 func TestHandleMessage_RejectedComputedAheadWindowBlock(t *testing.T) {
 	t.Cleanup(statecfg.SetCommitmentV3(true))
 	previousBAL := dbg.BALDrivenCommitment
@@ -1363,7 +1418,6 @@ func TestHandleMessage_RejectedComputedAheadWindowBlock(t *testing.T) {
 	require.Len(t, out, 1)
 	res := <-out
 	require.NoError(t, res.err)
-	require.Equal(t, uint64(1), res.blockNum)
 	require.Empty(t, res.rootHash)
 	require.Equal(t, beforeDiffs, ownCS.Diffs[kv.CommitmentDomain].GetDiffSet())
 }

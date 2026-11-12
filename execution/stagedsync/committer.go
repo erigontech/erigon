@@ -413,9 +413,6 @@ func (cc *commitmentCalculator) ownsChangeset(n uint64) bool {
 func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResult) {
 	switch r := msg.(type) {
 	case *txResult:
-		if pb, ok := cc.pending[r.blockNum]; ok && pb.failed {
-			return
-		}
 		var base state.StateReader
 		perBlock := cc.perBlockCompute(r.blockNum)
 		if r.versionMap != nil {
@@ -428,6 +425,9 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 			}
 		}
 		cc.maybeComputeAhead(ctx, r.blockNum)
+		if pb, ok := cc.pending[r.blockNum]; ok && pb.failed {
+			return
+		}
 		if r.writes != nil && !r.writes.IsEmpty() {
 			cc.balBlock = r.rules != nil && r.rules.IsAmsterdam
 			cc.hashAtFold = !perBlock
