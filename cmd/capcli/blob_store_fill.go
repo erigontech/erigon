@@ -289,7 +289,7 @@ func (b *BlobArchiveStoreFill) fillSlot(ctx context.Context, db kv.RoDB, blocks 
 		report.add(&report.failed, slot)
 		return nil
 	}
-	blobs, _, err := expectedBlobs(ctx, db, blocks, root, block)
+	blobs, unresolved, err := expectedBlobs(ctx, db, blocks, root, block)
 	if err != nil {
 		return fmt.Errorf("read the slots after %d: %w", slot, err)
 	}
@@ -335,6 +335,9 @@ func (b *BlobArchiveStoreFill) fillSlot(ctx context.Context, db kv.RoDB, blocks 
 			return nil
 		}
 		if notServed(lastErr) {
+			if unresolved {
+				return nil
+			}
 			b.findWindow(ctx, db, blocks, i, slot+1)
 		} else {
 			unserved = false
@@ -400,7 +403,10 @@ func expectedBlobsInTx(ctx context.Context, tx kv.Tx, blocks freezeblocks.Beacon
 	if err != nil {
 		return 0, false, err
 	}
-	if child == nil || child.Block.ParentRoot != root || forkchoice.ParentPayloadStatusFromBids(block, child.Block) == cltypes.PayloadStatusFull {
+	if child == nil || child.Block.ParentRoot != root {
+		return n, true, nil
+	}
+	if forkchoice.ParentPayloadStatusFromBids(block, child.Block) == cltypes.PayloadStatusFull {
 		return n, false, nil
 	}
 	return 0, false, nil

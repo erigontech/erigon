@@ -267,6 +267,35 @@ func TestBlobArchiveStoreFillKeepsAGloasBlockWhoseSuccessorIsNotItsChild(t *test
 	require.True(t, f.storedValid(fillTestSlot, root))
 }
 
+func TestBlobArchiveStoreFillDryRunServesAGloasBlockWithANonChildSuccessor(t *testing.T) {
+	f := newFillFixture(t)
+	f.version = clparams.GloasVersion
+	root := f.addBlock(fillTestSlot, 1)
+	f.tip, f.payload = common.Hash{0xee}, common.Hash{0xdd}
+	f.addBlock(fillTestSlot+2, 1)
+	delete(f.sidecars, root)
+	url, _ := f.endpoint(false)
+	cmd := &BlobArchiveStoreFill{Endpoints: []string{url}, FromSlot: fillTestSlot, ToSlot: fillTestSlot, DryRun: true}
+
+	require.NoError(t, f.fill(cmd, nil))
+
+	require.Equal(t, uint64(fillTestSlot), cmd.windows[0].from.Load())
+}
+
+func TestBlobArchiveStoreFillFillsBeforeAnUnresolvedGloasHead(t *testing.T) {
+	f := newFillFixture(t)
+	f.version = clparams.GloasVersion
+	root := f.addBlock(fillTestSlot, 1)
+	head := f.addBlock(fillTestSlot+1, 1)
+	delete(f.sidecars, head)
+	url, _ := f.endpoint(false)
+	cmd := &BlobArchiveStoreFill{Endpoints: []string{url}, FromSlot: fillTestSlot, ToSlot: fillTestSlot + 1}
+
+	require.NoError(t, f.fill(cmd, nil))
+	require.True(t, f.storedValid(fillTestSlot, root))
+	require.Zero(t, cmd.windows[0].from.Load())
+}
+
 func TestBlobArchiveStoreFillKeepsAGloasBlockWhoseChildIsNotIndexed(t *testing.T) {
 	f := newFillFixture(t)
 	f.version = clparams.GloasVersion
