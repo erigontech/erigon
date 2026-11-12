@@ -142,6 +142,41 @@ func TestStateOverridesBalanceDecoding(t *testing.T) {
 	require.Equal(t, maxU256, balance.Hex()[2:])
 }
 
+func TestStateOverridesUnmarshalKeys(t *testing.T) {
+	for _, tc := range []struct {
+		input string
+		err   string
+	}{
+		{input: `{"0xc000000000000000000000000000000000000000":{"balance":"0x1","nonce":"0x2","code":"0x6000","state":{},"movePrecompileToAddress":"0xc100000000000000000000000000000000000000"}}`},
+		{input: `{"0xc000000000000000000000000000000000000000":{"stateDiff":{}}}`},
+		{input: `null`},
+		{input: `{}`},
+		{input: `{"0xc000000000000000000000000000000000000000":{"bogusField":"0x1"}}`, err: `unknown field "bogusField" in state override for 0xC000000000000000000000000000000000000000`},
+		{input: `{"0xc000000000000000000000000000000000000000":{"Code":"0x00"}}`},
+		{input: `{"0xc000000000000000000000000000000000000000":{"code":"0x00","Code":"0x01"}}`, err: `keys "Code" and "code" in state override for 0xC000000000000000000000000000000000000000 name the same field`},
+		{input: `{"0xc100000000000000000000000000000000000000":{"bogusField":"0x1"},"0xc000000000000000000000000000000000000000":{"bogusField":"0x1"}}`, err: `unknown field "bogusField" in state override for 0xC000000000000000000000000000000000000000`},
+	} {
+		var so StateOverrides
+		err := json.Unmarshal([]byte(tc.input), &so)
+		if tc.err == "" {
+			require.NoError(t, err, tc.input)
+		} else {
+			require.EqualError(t, err, tc.err, tc.input)
+		}
+	}
+}
+
+func TestStateOverridesUnmarshalKeepsAccounts(t *testing.T) {
+	var so StateOverrides
+	require.NoError(t, json.Unmarshal([]byte(`{"0xc000000000000000000000000000000000000000":{"Code":"0x00","balance":"0x1"}}`), &so))
+	account, ok := so[accounts.InternAddress(common.HexToAddress("0xc000000000000000000000000000000000000000"))]
+	require.True(t, ok)
+	require.NotNil(t, account.Code)
+	require.Equal(t, hexutil.Bytes{0x00}, *account.Code)
+	require.NotNil(t, account.Balance)
+	require.Equal(t, uint64(1), (*account.Balance).ToInt().Uint64())
+}
+
 func newVersionedCallState(reader state.StateReader) *state.IntraBlockState {
 	ibs := state.New(reader)
 	ibs.SetVersionMap(state.NewVersionMap(nil))
