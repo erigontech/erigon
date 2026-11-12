@@ -1451,12 +1451,13 @@ func (ibs *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 		// stale nonce/codeHash flows through the per-field refresh (which
 		// only overwrites fields a versionMap cell exists for), so Empty()
 		// returns false and the EVM misses CallNewAccountGas.
-		if ibs.versionMap.IsNetAbsent(addr, ibs.txIndex) {
+		state, destructDep := ibs.versionMap.AccountLifecycleWithDestructDep(addr, ibs.txIndex)
+		if state == LifecycleAbsent {
 			return nil, StorageRead, UnknownVersion, nil
 		}
 		// An in-flight destruct below is not net-absent yet, but the committed record predates it.
-		if _, sdRes, ok := ibs.versionMap.ReadSelfDestruct(addr, ibs.txIndex); ok && sdRes.Status() == MVReadResultDependency {
-			ibs.dep = max(ibs.dep, sdRes.DepIdx())
+		if destructDep != UnknownDep {
+			ibs.dep = max(ibs.dep, destructDep)
 		}
 	}
 
