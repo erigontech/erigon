@@ -39,7 +39,7 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-var stubTxDataView = dbg.EnvBool("STUB_TXDATA_VIEW", true)
+var stubTxDataView = dbg.EnvBool("STUB_TXDATA_VIEW", false)
 
 func decodeTxData(s *rlp.Stream) ([]byte, error) {
 	if stubTxDataView {
