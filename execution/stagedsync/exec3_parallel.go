@@ -337,15 +337,33 @@ func (a *asyncBALBuilder) finish() *state.BlockAccessListBuilder {
 	return b
 }
 
+// shortcut: dbg probes, a CPU spin as long as the fold's state or index part bounds that part; remove after the bound.
+var (
+	probeStateX2 = dbg.EnvBool("PROBE_FOLD_STATE_X2", false)
+	probeIdxX2   = dbg.EnvBool("PROBE_FOLD_IDX_X2", false)
+)
+
+func probeSpinFor(on bool, start time.Time) {
+	if !on {
+		return
+	}
+	for d, t := time.Since(start), time.Now(); time.Since(t) < d; {
+	}
+}
+
 // foldTx applies one published tx's versionMap view and indexes to sd.mem.
 // Finalize logs share the final virtual task's txNum. That task has already
 // handled the receipt cache, so finalize indexes logs without changing it.
 func (pe *parallelExecutor) foldTx(ctx context.Context, rwTx kv.TemporalTx, r *txResult) error {
 	restoreCS := pe.bindBlockChangesetForFold(r.blockNum, r.blockHash)
 	defer restoreCS()
+	stateStart := time.Now()
 	if err := pe.rs.ApplyStateWrites(ctx, rwTx, r.blockNum, r.txNum, r.writes, nil, r.rules); err != nil {
 		return fmt.Errorf("fold state block=%d txNum=%d: %w", r.blockNum, r.txNum, err)
 	}
+	probeSpinFor(probeStateX2, stateStart)
+	idxStart := time.Now()
+	defer probeSpinFor(probeIdxX2, idxStart)
 	if err := pe.rs.ApplyTxIndexes(rwTx, r.txNum, r.receipt, r.cumulativeBlobGasUsed, r.logs, r.traceFroms, r.traceTos, r.isFinalize); err != nil {
 		return fmt.Errorf("fold index block=%d txNum=%d: %w", r.blockNum, r.txNum, err)
 	}
