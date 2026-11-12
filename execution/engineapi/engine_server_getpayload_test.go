@@ -28,7 +28,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
@@ -339,7 +338,11 @@ func (s *getPayloadStubModule) AssembleBlock(_ context.Context, _ *builder.Param
 	panic("not implemented")
 }
 
-func (s *getPayloadStubModule) ViewValidatedBlock(context.Context, common.Hash, time.Duration, func(blockTx, parentTx kv.TemporalTx) error) (bool, error) {
+func (s *getPayloadStubModule) ValidateChainAndView(context.Context, *types.Block, execmodule.BlockStateView) (execmodule.ValidationResult, error) {
+	panic("not implemented")
+}
+
+func (s *getPayloadStubModule) ViewValidatedBlock(context.Context, common.Hash, time.Duration, execmodule.BlockStateView) (bool, error) {
 	panic("not implemented")
 }
 

@@ -38,7 +38,6 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/engineapi/engine_block_downloader"
@@ -199,17 +198,23 @@ func (s *stubExecutionModule) GetHeaderHashNumber(ctx context.Context, hash comm
 func (s *stubExecutionModule) GetTD(_ context.Context, _ *common.Hash, _ *uint64) (*uint256.Int, error) {
 	return nil, nil
 }
+
 func (s *stubExecutionModule) Ready(ctx context.Context) (bool, error) {
 	if s.readyFunc != nil {
 		return s.readyFunc(ctx)
 	}
 	return true, nil
 }
+
 func (s *stubExecutionModule) FrozenBlocks(_ context.Context) (uint64, bool, error) {
 	return 0, false, nil
 }
 
-func (s *stubExecutionModule) ViewValidatedBlock(context.Context, common.Hash, time.Duration, func(blockTx, parentTx kv.TemporalTx) error) (bool, error) {
+func (s *stubExecutionModule) ValidateChainAndView(ctx context.Context, block *types.Block, _ execmodule.BlockStateView) (execmodule.ValidationResult, error) {
+	return s.ValidateChain(ctx, block)
+}
+
+func (s *stubExecutionModule) ViewValidatedBlock(context.Context, common.Hash, time.Duration, execmodule.BlockStateView) (bool, error) {
 	return false, nil
 }
 

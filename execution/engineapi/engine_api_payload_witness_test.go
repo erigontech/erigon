@@ -6,7 +6,6 @@ package engineapi_test
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"io"
 	"net/http"
 	"testing"
@@ -149,23 +148,62 @@ func TestEngineApiPayloadWitnessForValidatedPayload(t *testing.T) {
 	})
 }
 
-// A payload committed before its witness was requested gets the witness rebuilt from commitment history.
+// buildCommittedChangerPayload returns a committed payload that deploys a contract, with a committed block on top
+// that calls it from the same sender.
+func buildCommittedChangerPayload(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) *engineapitester.MockClPayload {
+	transactOpts, err := bind.NewKeyedTransactorWithChainID(eat.CoinbaseKey, eat.ChainId())
+	require.NoError(t, err)
+	transactOpts.GasLimit = params.MaxTxnGasLimit
+	_, txn, changer, err := contracts.DeployChanger(transactOpts, eat.ContractBackend)
+	require.NoError(t, err)
+	payload, err := eat.MockCl.BuildCanonicalBlock(ctx)
+	require.NoError(t, err)
+	require.NoError(t, eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, payload.ExecutionPayload, txn.Hash()))
+	txn, err = changer.Change(transactOpts)
+	require.NoError(t, err)
+	child, err := eat.MockCl.BuildCanonicalBlock(ctx)
+	require.NoError(t, err)
+	require.NoError(t, eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, child.ExecutionPayload, txn.Hash()))
+	return payload
+}
+
+// A payload committed before its witness was requested gets the witness rebuilt from the committed state.
 func TestEngineApiPayloadWitnessForCommittedPayload(t *testing.T) {
 	eat := newPayloadWitnessTester(t, engineapitester.EngineApiTesterInitArgs{
 		EthConfigTweaker: func(cfg *ethconfig.Config) { cfg.KeepExecutionProofs = true },
 		EnableDebugAPI:   true,
 	})
 	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
-		transactOpts, err := bind.NewKeyedTransactorWithChainID(eat.CoinbaseKey, eat.ChainId())
-		require.NoError(t, err)
-		transactOpts.GasLimit = params.MaxTxnGasLimit
-		_, txn, _, err := contracts.DeployChanger(transactOpts, eat.ContractBackend)
-		require.NoError(t, err)
-		payload, err := eat.MockCl.BuildCanonicalBlock(ctx)
-		require.NoError(t, err)
-		require.NoError(t, eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, payload.ExecutionPayload, txn.Hash()))
+		payload := buildCommittedChangerPayload(ctx, t, eat)
 
 		requireDebugExecutionWitness(ctx, t, eat, payload, requirePayloadWitness(ctx, t, eat, payload))
+	})
+}
+
+func TestEngineApiPayloadWitnessForCommittedPayloadWithoutCommitmentHistory(t *testing.T) {
+	eat := newPayloadWitnessTester(t, engineapitester.EngineApiTesterInitArgs{})
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		payload := buildCommittedChangerPayload(ctx, t, eat)
+
+		require.NotEmpty(t, requirePayloadWitness(ctx, t, eat, payload).State)
+	})
+}
+
+// A resubmitted payload whose cached witness was evicted gets the same witness again.
+func TestEngineApiPayloadWitnessAfterCacheEviction(t *testing.T) {
+	eat := newPayloadWitnessTester(t, engineapitester.EngineApiTesterInitArgs{})
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		first, _ := buildChangerPayload(ctx, t, eat)
+		witness := requirePayloadWitness(ctx, t, eat, first)
+		require.NoError(t, eat.MockCl.UpdateForkChoice(ctx, first))
+		for range engineapi.PayloadWitnessCacheSize {
+			payload, err := eat.MockCl.BuildNewPayload(ctx)
+			require.NoError(t, err)
+			requirePayloadWitness(ctx, t, eat, payload)
+			require.NoError(t, eat.MockCl.UpdateForkChoice(ctx, payload))
+		}
+
+		require.Equal(t, witness, requirePayloadWitness(ctx, t, eat, first))
 	})
 }
 
@@ -177,24 +215,5 @@ func TestEngineApiPayloadWitnessForKnownPayload(t *testing.T) {
 		require.NoError(t, eat.MockCl.UpdateForkChoice(ctx, payload))
 
 		require.Equal(t, witness, requirePayloadWitness(ctx, t, eat, payload))
-	})
-}
-
-// A payload imported without a witness request leaves no state to build its witness
-// from once a forkchoice update commits it.
-func TestEngineApiPayloadWitnessUnavailable(t *testing.T) {
-	eat := newPayloadWitnessTester(t, engineapitester.EngineApiTesterInitArgs{})
-	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
-		payload, err := eat.MockCl.BuildCanonicalBlock(ctx)
-		require.NoError(t, err)
-
-		code, body := postPayloadWitness(ctx, t, eat, payload)
-
-		require.Equal(t, http.StatusInternalServerError, code, string(body))
-		var problem struct {
-			Type string `json:"type"`
-		}
-		require.NoError(t, json.Unmarshal(body, &problem))
-		require.Equal(t, "/engine-api/errors/internal", problem.Type)
 	})
 }

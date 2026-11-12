@@ -72,6 +72,9 @@ type ValidationResult struct {
 	ValidationError  string
 }
 
+// BlockStateView reads a block: blockTx holds the block and its executed state, parentState the latest state of its parent.
+type BlockStateView func(blockTx kv.TemporalTx, parentState kv.TemporalGetter) error
+
 // ForkChoiceResult is the native return type for UpdateForkChoice.
 type ForkChoiceResult struct {
 	Status          ExecutionStatus
@@ -143,10 +146,14 @@ type ExecutionModule interface {
 	// ValidateChain validates the chain ending at block.
 	ValidateChain(ctx context.Context, block *types.Block) (ValidationResult, error)
 
-	// ViewValidatedBlock calls fn with a view of the state after blockHash and with its
-	// parent's state, when blockHash was validated directly on top of the committed head
-	// and is not committed yet. It reports whether fn was called; a module that stays busy for wait does not call it.
-	ViewValidatedBlock(ctx context.Context, blockHash common.Hash, wait time.Duration, fn func(blockTx, parentTx kv.TemporalTx) error) (bool, error)
+	// ValidateChainAndView is ValidateChain that, for a VALID block, also calls fn as ViewValidatedBlock does
+	// before it releases the module, so no other module call can drop the validated state first.
+	ValidateChainAndView(ctx context.Context, block *types.Block, fn BlockStateView) (ValidationResult, error)
+
+	// ViewValidatedBlock calls fn with the state of blockHash, when blockHash was validated directly on top
+	// of the committed head and is not committed yet, or when it is committed and its changesets are still kept.
+	// It reports whether fn was called; a module that stays busy for wait does not call it.
+	ViewValidatedBlock(ctx context.Context, blockHash common.Hash, wait time.Duration, fn BlockStateView) (bool, error)
 
 	// --- Fork choice ------------------------------------------------------
 

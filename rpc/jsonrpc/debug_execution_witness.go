@@ -854,7 +854,7 @@ var (
 // witness build. Direct tx.GetLatest reads keep it independent of the build's
 // in-memory commitment fold.
 type headCaptureSource struct {
-	pinnedParentTx kv.TemporalTx
+	pinnedParentTx kv.TemporalGetter
 }
 
 // collapseReaderFor selects the collapse-detection state reader: plain state at block
@@ -884,19 +884,19 @@ func trieReaderFor(hc *headCaptureSource, tx kv.TemporalTx, firstTxNumInBlock ui
 // state is read from committedTx's history exactly as the durable path does; only the
 // commitment source changes. Direct tx.GetLatest reads keep the pinned commitment
 // state independent of the build's in-memory commitment fold.
-func (api *DebugAPIImpl) buildWitnessResultHeadCapture(ctx context.Context, committedTx, pinnedParentTx kv.TemporalTx, info *witnessBlockInfo, mode witnessMode) (*ExecutionWitnessResult, error) {
+func (api *DebugAPIImpl) buildWitnessResultHeadCapture(ctx context.Context, committedTx kv.TemporalTx, pinnedParentTx kv.TemporalGetter, info *witnessBlockInfo, mode witnessMode) (*ExecutionWitnessResult, error) {
 	hc := &headCaptureSource{pinnedParentTx: pinnedParentTx}
 	return api.buildWitnessResult(ctx, committedTx, hc, info, mode)
 }
 
 // ValidatedBlockWitness builds the canonical-mode witness of blockHash from blockTx, a view
-// that holds the block and its executed state, reading the parent commitment from parentTx.
-func (api *DebugAPIImpl) ValidatedBlockWitness(ctx context.Context, blockTx, parentTx kv.TemporalTx, blockHash common.Hash) (*ExecutionWitnessResult, error) {
+// that holds the block and its executed state, reading the parent commitment from parentState.
+func (api *DebugAPIImpl) ValidatedBlockWitness(ctx context.Context, blockTx kv.TemporalTx, parentState kv.TemporalGetter, blockHash common.Hash) (*ExecutionWitnessResult, error) {
 	info, err := api.resolveWitnessBlock(ctx, blockTx, rpc.BlockNumberOrHashWithHash(blockHash, false))
 	if err != nil {
 		return nil, err
 	}
-	return api.buildWitnessResultHeadCapture(ctx, blockTx, parentTx, info, witnessModeCanonical)
+	return api.buildWitnessResultHeadCapture(ctx, blockTx, parentState, info, witnessModeCanonical)
 }
 
 // buildWitnessResult runs the witness-building pipeline for an already-resolved block

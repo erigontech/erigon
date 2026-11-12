@@ -75,15 +75,16 @@ func TestViewValidatedBlockGivesUpOnABusyModule(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 	defer cancel()
-	held, err := module.ViewValidatedBlock(ctx, common.Hash{1}, 10*time.Millisecond, func(_, _ kv.TemporalTx) error { return nil })
+	held, err := module.ViewValidatedBlock(ctx, common.Hash{1}, 10*time.Millisecond, func(kv.TemporalTx, kv.TemporalGetter) error { return nil })
 	require.NoError(t, err)
 	require.False(t, held)
 }
 
 // A Ready probe or a background commit holds the module only briefly, so the view waits for it.
 func TestViewValidatedBlockWaitsForTheModule(t *testing.T) {
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	synctest.Test(t, func(t *testing.T) {
-		module := &ExecModule{semaphore: semaphore.NewWeighted(1), forkValidator: &ForkValidator{}}
+		module := &ExecModule{db: db, semaphore: semaphore.NewWeighted(1), forkValidator: &ForkValidator{}}
 		require.NoError(t, module.semaphore.Acquire(t.Context(), 1))
 		var released atomic.Bool
 		time.AfterFunc(10*time.Millisecond, func() {
@@ -91,7 +92,7 @@ func TestViewValidatedBlockWaitsForTheModule(t *testing.T) {
 			module.semaphore.Release(1)
 		})
 
-		_, err := module.ViewValidatedBlock(t.Context(), common.Hash{1}, time.Second, func(_, _ kv.TemporalTx) error { return nil })
+		_, err := module.ViewValidatedBlock(t.Context(), common.Hash{1}, time.Second, func(kv.TemporalTx, kv.TemporalGetter) error { return nil })
 		require.NoError(t, err)
 		require.True(t, released.Load())
 	})

@@ -356,6 +356,7 @@ func (e *EngineServer) decodePayloadTransactions(raw []hexutil.Bytes, gasLimit u
 
 // newPayload validates and may execute a payload. A non-nil onValid runs for a VALID payload in the same engine-lock
 // section that decided the status, so no other engine call replaces or commits the validated state before onValid reads it.
+// A validation for a non-nil onValid also caches the payload witness before it releases the execution module.
 func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.ExecutionPayload,
 	expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash,
 	executionRequests []hexutil.Bytes, version clparams.StateVersion, deriveBlobHashes bool,
@@ -618,7 +619,7 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	// via rlp.EncodeToBytes. Both slices reference the same underlying
 	// byte buffers from req.Transactions.
 	block := types.NewBlockFromStorageWithBinaryTxs(blockHash, &header, transactions, txs, nil /* uncles */, withdrawals, blockAccessList)
-	payloadStatus, err := e.HandleNewPayload(ctx, "NewPayload", block)
+	payloadStatus, err := e.HandleNewPayload(ctx, "NewPayload", block, onValid != nil)
 	if err != nil {
 		if errors.Is(err, rules.ErrInvalidBlock) {
 			return &engine_types.PayloadStatus{
@@ -1116,6 +1117,7 @@ func (e *EngineServer) HandleNewPayload(
 	ctx context.Context,
 	logPrefix string,
 	block *types.Block,
+	captureWitness bool,
 ) (*engine_types.PayloadStatus, error) {
 	e.engineLogSpamer.RecordRequest()
 
@@ -1160,7 +1162,7 @@ func (e *EngineServer) HandleNewPayload(
 			}); respondSyncing {
 				return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 			}
-			status, validationErr, latestValidHash, err := e.chainRW.ValidateChain(ctx, block)
+			status, validationErr, latestValidHash, err := e.validateChain(ctx, block, captureWitness)
 			if err != nil {
 				missingBlkHash, isMissingChainErr := execmodule.GetBlockHashFromMissingSegmentError(err)
 				if isMissingChainErr {
@@ -1202,7 +1204,7 @@ func (e *EngineServer) HandleNewPayload(
 	}
 
 	e.logger.Debug(fmt.Sprintf("[%s] New payload begin verification", logPrefix))
-	status, validationErr, latestValidHash, err := e.chainRW.ValidateChain(ctx, block)
+	status, validationErr, latestValidHash, err := e.validateChain(ctx, block, captureWitness)
 	e.logger.Debug(fmt.Sprintf("[%s] New payload verification ended", logPrefix), "status", status.String(), "err", err)
 	if err != nil {
 		missingBlkHash, isMissingChainErr := execmodule.GetBlockHashFromMissingSegmentError(err)
@@ -1220,6 +1222,29 @@ func (e *EngineServer) HandleNewPayload(
 	}
 
 	return e.validatedPayloadStatus(block, status, validationErr, latestValidHash), nil
+}
+
+// validateChain validates block. With captureWitness, the witness of a VALID block is built and cached before the
+// execution module is released, as a block insertion that takes the module next drops the validated state.
+func (e *EngineServer) validateChain(ctx context.Context, block *types.Block, captureWitness bool) (execmodule.ExecutionStatus, *string, common.Hash, error) {
+	if !captureWitness {
+		return e.chainRW.ValidateChain(ctx, block)
+	}
+	blockHash := block.Hash()
+	result, err := e.executionService.ValidateChainAndView(ctx, block, func(blockTx kv.TemporalTx, parentState kv.TemporalGetter) error {
+		if _, err := e.buildPayloadWitness(ctx, blockHash, blockTx, parentState); err != nil {
+			e.logger.Warn("[NewPayload] could not build the payload witness", "hash", blockHash, "err", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, nil, common.Hash{}, err
+	}
+	var validationErr *string
+	if len(result.ValidationError) > 0 {
+		validationErr = &result.ValidationError
+	}
+	return result.ValidationStatus, validationErr, result.LatestValidHash, nil
 }
 
 func (e *EngineServer) validatedPayloadStatus(block *types.Block, status execmodule.ExecutionStatus, validationErr *string, latestValidHash common.Hash) *engine_types.PayloadStatus {

@@ -6,4 +6,5 @@ package engineapi
 var (
 	EncodeNewPayloadEnvelope       = encodeNewPayloadEnvelope
 	DecodePayloadStatusWithWitness = decodePayloadStatusWithWitness
+	PayloadWitnessCacheSize        = payloadWitnessCacheSize
 )

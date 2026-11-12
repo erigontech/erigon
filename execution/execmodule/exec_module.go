@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/bal"
 	"github.com/erigontech/erigon/execution/builder"
@@ -518,15 +519,30 @@ const nextForkBanner = `
 `
 
 func (e *ExecModule) ValidateChain(ctx context.Context, block *types.Block) (ValidationResult, error) {
-	defer validateChainDuration.ObserveDuration(time.Now())
-	blockHash, blockNumber := block.Hash(), block.NumberU64()
+	return e.ValidateChainAndView(ctx, block, nil)
+}
+
+func (e *ExecModule) ValidateChainAndView(ctx context.Context, block *types.Block, fn BlockStateView) (ValidationResult, error) {
+	start := time.Now()
 	if !e.semaphore.TryAcquire(1) {
+		validateChainDuration.ObserveDuration(start)
 		e.logger.Trace("ethereumExecutionModule.ValidateChain: ExecutionStatus_Busy")
 		return ValidationResult{
 			ValidationStatus: ExecutionStatusBusy,
 		}, nil
 	}
 	defer e.semaphore.Release(1)
+	result, err := e.validateChain(ctx, block)
+	validateChainDuration.ObserveDuration(start)
+	if err != nil || fn == nil || result.ValidationStatus != ExecutionStatusSuccess {
+		return result, err
+	}
+	_, err = e.viewBlock(ctx, block.Hash(), fn)
+	return result, err
+}
+
+func (e *ExecModule) validateChain(ctx context.Context, block *types.Block) (ValidationResult, error) {
+	blockHash, blockNumber := block.Hash(), block.NumberU64()
 	if e.readAheader != nil {
 		defer e.readAheader.CancelWarmup()
 	}
@@ -738,7 +754,7 @@ func (e *ExecModule) ValidateChain(ctx context.Context, block *types.Block) (Val
 	return result, nil
 }
 
-func (e *ExecModule) ViewValidatedBlock(ctx context.Context, blockHash common.Hash, wait time.Duration, fn func(blockTx, parentTx kv.TemporalTx) error) (bool, error) {
+func (e *ExecModule) ViewValidatedBlock(ctx context.Context, blockHash common.Hash, wait time.Duration, fn BlockStateView) (bool, error) {
 	acquireCtx, cancel := context.WithTimeout(ctx, wait)
 	err := e.semaphore.Acquire(acquireCtx, 1)
 	cancel()
@@ -746,35 +762,80 @@ func (e *ExecModule) ViewValidatedBlock(ctx context.Context, blockHash common.Ha
 		return false, ctx.Err()
 	}
 	defer e.semaphore.Release(1)
-	head, number, sd := e.forkValidator.ExtendingFork()
-	if sd == nil || head != blockHash || number == 0 {
-		return false, nil
-	}
-	parentTx, err := e.db.BeginTemporalRo(ctx)
+	return e.viewBlock(ctx, blockHash, fn)
+}
+
+// viewBlock must run under the module semaphore.
+func (e *ExecModule) viewBlock(ctx context.Context, blockHash common.Hash, fn BlockStateView) (bool, error) {
+	tx, err := e.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return false, err
 	}
-	defer parentTx.Rollback()
-	blockTx := sd.BlockOverlayTemporalTx(parentTx)
-	if blockTx == nil {
-		return false, nil
-	}
-	header, err := e.blockReader.Header(ctx, blockTx, blockHash, number)
-	if err != nil || header == nil {
-		return false, err
-	}
-	executedTo, err := stages.GetStageProgress(parentTx, stages.Execution)
+	defer tx.Rollback()
+	executedTo, err := stages.GetStageProgress(tx, stages.Execution)
 	if err != nil {
 		return false, err
 	}
-	committedParent, err := rawdb.ReadCanonicalHash(parentTx, number-1)
+	if head, number, sd := e.forkValidator.ExtendingFork(); sd != nil && head == blockHash && number == executedTo+1 {
+		blockTx := sd.BlockOverlayTemporalTx(tx)
+		if blockTx == nil {
+			return false, nil
+		}
+		header, err := e.blockReader.Header(ctx, blockTx, blockHash, number)
+		if err != nil || header == nil {
+			return false, err
+		}
+		committedParent, err := rawdb.ReadCanonicalHash(tx, executedTo)
+		if err != nil || committedParent != header.ParentHash {
+			return false, err
+		}
+		return true, fn(blockTx, tx)
+	}
+	number := rawdb.ReadHeaderNumber(tx, blockHash)
+	if number == nil || *number == 0 || *number > executedTo {
+		return false, nil
+	}
+	canonical, err := rawdb.ReadCanonicalHash(tx, *number)
+	if err != nil || canonical != blockHash {
+		return false, err
+	}
+	return e.viewCommittedBlock(ctx, tx, *number, executedTo, fn)
+}
+
+// viewCommittedBlock reads the parent state of a committed block by unwinding, in memory, the changesets of the
+// blocks from it to the committed head. Those changesets are kept only for the blocks a reorg may still unwind.
+func (e *ExecModule) viewCommittedBlock(ctx context.Context, tx kv.TemporalTx, number, executedTo uint64, fn BlockStateView) (bool, error) {
+	var unwind *[kv.DomainLen][]kv.DomainEntryDiff
+	for n := executedTo; n >= number; n-- {
+		hash, err := rawdb.ReadCanonicalHash(tx, n)
+		if err != nil {
+			return false, err
+		}
+		diffs, ok, err := changeset.ReadDiffSet(tx, n, hash)
+		if err != nil || !ok {
+			return false, err
+		}
+		if unwind == nil {
+			unwind = &diffs
+			continue
+		}
+		for d := range diffs {
+			unwind[d] = changeset.MergeDiffSets(unwind[d], diffs[d])
+		}
+	}
+	unwindFrom, err := e.blockReader.TxnumReader().Min(ctx, tx, number)
 	if err != nil {
 		return false, err
 	}
-	if executedTo != number-1 || committedParent != header.ParentHash {
-		return false, nil
+	sd, err := execctx.NewSharedDomains(ctx, tx, e.logger, execctx.WithoutSharedBranchCache(), execctx.WithLocalCacheUnwind())
+	if sd != nil {
+		defer sd.Close()
 	}
-	return true, fn(blockTx, parentTx)
+	if err != nil {
+		return false, err
+	}
+	sd.Unwind(unwindFrom, unwind)
+	return true, fn(tx, sd.AsSnapshotGetter(tx))
 }
 
 func (e *ExecModule) purgeBadChain(ctx context.Context, tx kv.RwTx, latestValidHash, headHash common.Hash) error {

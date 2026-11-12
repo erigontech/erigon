@@ -16,7 +16,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
-func TestViewValidatedBlockRequiresCommittedParent(t *testing.T) {
+func TestViewValidatedBlock(t *testing.T) {
 	m := execmoduletester.New(t)
 	a, err := m.GenerateChainFrom(m.Genesis, 3, func(_ int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{0x81})
@@ -38,6 +38,7 @@ func TestViewValidatedBlockRequiresCommittedParent(t *testing.T) {
 		block *types.Block
 		held  bool
 	}{
+		{"the committed head", a.Blocks[0], true},
 		{"extends the committed head", a.Blocks[1], true},
 		{"extends an uncommitted block", a.Blocks[2], false},
 		{"sibling of the committed head", b.Blocks[0], false},
@@ -46,7 +47,7 @@ func TestViewValidatedBlockRequiresCommittedParent(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			requireValid(t, m, tc.block)
 			called := false
-			held, err := m.ExecModule.ViewValidatedBlock(t.Context(), tc.block.Hash(), time.Second, func(_, _ kv.TemporalTx) error {
+			held, err := m.ExecModule.ViewValidatedBlock(t.Context(), tc.block.Hash(), time.Second, func(kv.TemporalTx, kv.TemporalGetter) error {
 				called = true
 				return nil
 			})

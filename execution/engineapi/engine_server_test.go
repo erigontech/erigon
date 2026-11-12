@@ -1216,11 +1216,21 @@ type storingAfterValidation struct {
 
 func (m *storingAfterValidation) ValidateChain(ctx context.Context, block *types.Block) (execmodule.ValidationResult, error) {
 	result, err := m.ExecutionModule.ValidateChain(ctx, block)
+	m.storeAfterFirstValidation(ctx, block)
+	return result, err
+}
+
+func (m *storingAfterValidation) ValidateChainAndView(ctx context.Context, block *types.Block, fn execmodule.BlockStateView) (execmodule.ValidationResult, error) {
+	result, err := m.ExecutionModule.ValidateChainAndView(ctx, block, fn)
+	m.storeAfterFirstValidation(ctx, block)
+	return result, err
+}
+
+func (m *storingAfterValidation) storeAfterFirstValidation(ctx context.Context, block *types.Block) {
 	if block.Hash() == m.block.Hash() && m.stored.CompareAndSwap(false, true) {
 		_, insertErr := m.ExecutionModule.InsertBlocks(ctx, []*types.Block{m.block})
 		require.NoError(m.t, insertErr)
 	}
-	return result, err
 }
 
 func withHeaderChange(block *types.Block, change func(*types.Header)) *types.Block {
@@ -1250,6 +1260,37 @@ func TestGetPayloadBodiesByHashOmitsAnInvalidBlockStoredAfterItsValidation(t *te
 		require.Equal(t, []bool{true, false}, v1, "%s request: V1", request)
 		require.Equal(t, []bool{true, false}, v2, "%s request: V2", request)
 	}
+}
+
+// A block insertion that takes the execution module as soon as the validation releases it, as the background block
+// downloader can, drops the validated state; the payload witness must still be built from that state.
+func TestNewPayloadWitnessSurvivesAnInsertionAfterValidation(t *testing.T) {
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	sender := crypto.PubkeyToAddress(key.PublicKey)
+	genesis := &types.Genesis{Config: preCancunChainConfig(), Alloc: types.GenesisAlloc{sender: {Balance: big.NewInt(1e18)}}}
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(key))
+	chain, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) {
+		txn, err := types.SignTx(types.NewTransaction(0, common.Address{0x01}, uint256.NewInt(1), 21_000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil), *types.LatestSignerForChainID(nil), key)
+		require.NoError(t, err)
+		b.AddTx(txn)
+	})
+	require.NoError(t, err)
+	block := chain.Blocks[0]
+	srv := newEngineServerWithReorgDepth(t, m, &storingAfterValidation{ExecutionModule: m.ExecModule, t: t, block: block}, 2)
+	srv.witnessBuilder = jsonrpc.NewPrivateDebugAPI(jsonrpc.NewBaseApi(nil, m.StateCache, m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs}), m.DB, nil, &rpccfg.DebugApiConfig{})
+	payload, err := engine_types.ExecutionPayloadFromBlock(block)
+	require.NoError(t, err)
+
+	var witness *jsonrpc.ExecutionWitnessResult
+	var witnessErr error
+	status, err := srv.newPayload(t.Context(), payload, nil, nil, nil, clparams.CapellaVersion, false, func(blockHash common.Hash) {
+		witness, witnessErr = srv.payloadWitness(t.Context(), blockHash)
+	})
+	require.NoError(t, err)
+	require.Equal(t, engine_types.ValidStatus, status.Status)
+	require.NoError(t, witnessErr)
+	require.NotEmpty(t, witness.State)
 }
 
 func TestGetPayloadBodiesByHashOmitsABlockRejectedByAForkchoiceUpdate(t *testing.T) {
