@@ -2065,8 +2065,9 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx, maxStep kv.Step) (
 	return nil, 0, false, err
 }
 
-// GetLatest returns value, step in which the value last changed, and bool value which is true if the value
-// is present, and false if it is not present (not set or deleted)
+// GetLatest returns the latest value and its MDBX row step or snapshot file's
+// exclusive end step. The step does not establish when the value became valid.
+// The boolean can be true for an empty deletion record.
 func (dt *DomainRoTx) GetLatest(key []byte, roTx kv.Tx) ([]byte, kv.Step, bool, error) {
 	return dt.getLatest(key, roTx, kv.GetLatestOptions{})
 }
