@@ -209,6 +209,63 @@ func TestFlushFinalizeWritesFlagsTheReaderOfAChangedCell(t *testing.T) {
 	require.Equal(t, map[int]bool{2: true}, be.revalidate)
 }
 
+// A reader that read a BAL seed from the version map stays valid and clean while the writer's flush leaves the seed
+// untouched, and is flagged when the writer's value differs from the seed.
+func TestMarkReadersDirtyOnBALSeededAccountPaths(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0x00000000000000000000000000000000000000aa"))
+	writer := state.Version{TxIndex: 1}
+	seedCode, otherCode := accounts.NewCode([]byte{0x60, 0x01}), accounts.NewCode([]byte{0x60, 0x02})
+	codeWrites := func(c accounts.Code) *state.WriteSet {
+		return newWS().code(addr, writer, c).codeHash(addr, writer, c.Hash).codeSize(addr, writer, c.Len()).build()
+	}
+	cases := []struct {
+		name         string
+		path         state.AccountPath
+		seed         types.AccountChanges
+		same, differ *state.WriteSet
+	}{
+		{"balance", state.BalancePath, types.AccountChanges{BalanceChanges: []*types.BalanceChange{{Index: 2, Value: *uint256.NewInt(7)}}},
+			newWS().bal(addr, writer, *uint256.NewInt(7)).build(), newWS().bal(addr, writer, *uint256.NewInt(8)).build()},
+		{"nonce", state.NoncePath, types.AccountChanges{NonceChanges: []*types.NonceChange{{Index: 2, Value: 7}}},
+			newWS().nonce(addr, writer, 7).build(), newWS().nonce(addr, writer, 8).build()},
+		{"code", state.CodePath, types.AccountChanges{CodeChanges: []*types.CodeChange{{Index: 2, Bytecode: seedCode.Bytes}}},
+			codeWrites(seedCode), codeWrites(otherCode)},
+	}
+	for _, c := range cases {
+		newBE := func() *blockExecutor {
+			be := newDetExecutor(t, 4)
+			seed := c.seed
+			seed.Address = addr.Value()
+			be.versionMap = state.NewVersionMap(types.BlockAccessList{seed})
+			rs := state.ReadSet{}
+			rs.SetHeader(addr, c.path, accounts.NilKey, state.ReadHeader{Source: state.MapRead, Version: writer})
+			be.blockIO.RecordReads(state.Version{TxIndex: 2}, rs)
+			be.indexReads(2, rs)
+			return be
+		}
+		valid := func(be *blockExecutor) state.VersionValidity {
+			return be.versionMap.ValidateVersion(2, be.blockIO, func(rv, wv state.Version) state.VersionValidity {
+				if rv != wv {
+					return state.VersionInvalid
+				}
+				return state.VersionValid
+			}, false, "")
+		}
+		t.Run(c.name+" seed left untouched", func(t *testing.T) {
+			be := newBE()
+			require.Equal(t, state.VersionValid, valid(be))
+			be.flushFinalizeWrites(1, c.same)
+			require.Empty(t, be.revalidate)
+			require.Equal(t, state.VersionValid, valid(be))
+		})
+		t.Run(c.name+" seed overwritten", func(t *testing.T) {
+			be := newBE()
+			be.markReadersDirty(1, c.differ)
+			require.Equal(t, map[int]bool{2: true}, be.revalidate)
+		})
+	}
+}
+
 func TestMarkReadersDirty(t *testing.T) {
 	addr := accounts.InternAddress(common.HexToAddress("0x00000000000000000000000000000000000000aa"))
 	slot1 := accounts.InternKey(common.HexToHash("0x01"))
