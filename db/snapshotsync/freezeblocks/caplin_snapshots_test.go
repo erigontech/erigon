@@ -18,6 +18,7 @@ package freezeblocks
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"math"
 	"os"
@@ -1047,4 +1048,80 @@ func dumpedBlobWord(t *testing.T, dirs datadir.Dirs, slot uint64) []byte {
 	}
 	word, _ := g.Next(nil)
 	return word
+}
+
+func TestBlobCountFromBlocksRejectsABlockThatIsNotTheCanonicalOne(t *testing.T) {
+	const slot = 7
+	cfg := clparams.MainnetBeaconConfig
+	cfg.GloasForkEpoch = 0
+	block := cltypes.NewSignedBeaconBlock(&cfg, clparams.GloasVersion)
+	block.Block.Slot = slot
+	block.Block.Body.GetSignedExecutionPayloadBid().Message.BlockHash = common.Hash{0x01}
+	for range 2 {
+		block.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
+	}
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	child := cltypes.NewSignedBeaconBlock(&cfg, clparams.GloasVersion)
+	child.Block.Slot = slot + 1
+	child.Block.ParentRoot = root
+	child.Block.Body.GetSignedExecutionPayloadBid().Message.ParentBlockHash = common.Hash{0x02}
+	childRoot, err := child.Block.HashSSZ()
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		name      string
+		frozen    bool
+		canonical common.Hash
+		err       string
+	}{
+		{"canonical block missing from the beacon segment", false, root, "block at slot 7: canonical block is missing"},
+		{"frozen block not canonical at its slot", true, common.Hash{0xee}, "block at slot 7 is not canonical"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dirs := datadir.New(t.TempDir())
+			writeCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, snaptype.CaplinMergeLimit, true, func(s uint64) []byte {
+				switch {
+				case s == slot && tc.frozen:
+					return blockSnapshotWord(t, block)
+				case s == slot+1:
+					return blockSnapshotWord(t, child)
+				}
+				return nil
+			})
+			sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &cfg, dirs, log.New())
+			t.Cleanup(sn.Close)
+			require.NoError(t, sn.OpenFolder())
+
+			db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+			require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+				require.NoError(t, beacon_indicies.MarkRootCanonical(tx, slot, tc.canonical))
+				return beacon_indicies.MarkRootCanonical(tx, slot+1, childRoot)
+			}))
+			store := blob_storage.NewBlobStore(db, afero.NewMemMapFs())
+			require.NoError(t, store.WriteBlobSidecars(t.Context(), tc.canonical, []*cltypes.BlobSidecar{blobSidecar(slot, 0), blobSidecar(slot, 1)}))
+
+			blobCount := BlobCountFromBlocks(t.Context(), sn, NewBeaconSnapshotReader(sn, nil, &cfg))
+			err := DumpBlobSidecarsRange(t.Context(), db, store, 0, snaptype.CaplinMergeLimit, 0, dirs, 1, blobCount, log.LvlDebug, log.New())
+			require.ErrorContains(t, err, tc.err)
+		})
+	}
+}
+
+func TestBlobCountFromBlocksStopsOnCancel(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	dirs := datadir.New(t.TempDir())
+	writeCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, snaptype.CaplinMergeLimit, true, func(uint64) []byte { return nil })
+	sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &cfg, dirs, log.New())
+	t.Cleanup(sn.Close)
+	require.NoError(t, sn.OpenFolder())
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	blobCount := BlobCountFromBlocks(ctx, sn, NewBeaconSnapshotReader(sn, nil, &cfg))
+	err := db.View(t.Context(), func(tx kv.Tx) error {
+		_, err := blobCount(tx, 7)
+		return err
+	})
+	require.ErrorIs(t, err, context.Canceled)
 }

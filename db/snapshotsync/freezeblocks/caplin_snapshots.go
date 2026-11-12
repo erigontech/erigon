@@ -392,28 +392,21 @@ type BlobCountBySlotFn func(tx kv.Tx, slot uint64) (uint64, error)
 
 func BlobCountFromBlocks(ctx context.Context, sn *CaplinSnapshots, r BeaconSnapshotReader) BlobCountBySlotFn {
 	return func(tx kv.Tx, slot uint64) (uint64, error) {
-		block, err := r.ReadBeaconBlockBodyBySlot(ctx, nil, slot)
-		if err != nil {
-			return 0, err
+		view := sn.View()
+		_, ok := view.BeaconBlocksSegment(slot)
+		view.Close()
+		if !ok {
+			return 0, fmt.Errorf("slot %d: no frozen beacon block segment to count its blobs against", slot)
 		}
-		if block == nil {
-			view := sn.View()
-			_, ok := view.BeaconBlocksSegment(slot)
-			view.Close()
-			if !ok {
-				return 0, fmt.Errorf("slot %d: no frozen beacon block segment to count its blobs against", slot)
-			}
-			return 0, nil
+		block, root, err := readCanonicalBlock(ctx, tx, r, slot)
+		if err != nil || block == nil {
+			return 0, err
 		}
 		commitments := block.Block.Body.GetBlobKzgCommitments()
 		if commitments == nil || commitments.Len() == 0 {
 			return 0, nil
 		}
 		if block.Version() >= clparams.GloasVersion {
-			root, err := block.Block.HashSSZ()
-			if err != nil {
-				return 0, err
-			}
 			skipped, err := PayloadSkipped(ctx, tx, sn, r, block, root)
 			if err != nil || skipped {
 				return 0, err
@@ -430,7 +423,7 @@ func PayloadSkipped(ctx context.Context, tx kv.Tx, sn *CaplinSnapshots, r Beacon
 	}
 	checkpoint := finalized / sn.beaconCfg.SlotsPerEpoch * sn.beaconCfg.SlotsPerEpoch
 	for slot := block.Block.Slot + 1; slot <= max(sn.BlocksAvailable(), checkpoint); slot++ {
-		child, err := readCanonicalBlock(ctx, tx, r, slot)
+		child, _, err := readCanonicalBlock(ctx, tx, r, slot)
 		if err != nil {
 			return false, err
 		}
@@ -442,28 +435,37 @@ func PayloadSkipped(ctx context.Context, tx kv.Tx, sn *CaplinSnapshots, r Beacon
 	return false, nil
 }
 
-func readCanonicalBlock(ctx context.Context, tx kv.Tx, r BeaconSnapshotReader, slot uint64) (block *cltypes.SignedBeaconBlock, err error) {
+func readCanonicalBlock(ctx context.Context, tx kv.Tx, r BeaconSnapshotReader, slot uint64) (block *cltypes.SignedBeaconBlock, root common.Hash, err error) {
+	if err := ctx.Err(); err != nil {
+		return nil, common.Hash{}, err
+	}
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			block, err = nil, fmt.Errorf("block at slot %d: corrupt beacon snapshot: %v", slot, recovered)
+			block, root, err = nil, common.Hash{}, fmt.Errorf("block at slot %d: corrupt beacon snapshot: %v", slot, recovered)
 		}
 	}()
 	block, err = r.ReadBeaconBlockBodyBySlot(ctx, tx, slot)
-	if err != nil || block == nil {
-		return nil, err
-	}
-	root, err := block.Block.HashSSZ()
 	if err != nil {
-		return nil, err
+		return nil, common.Hash{}, err
 	}
 	canonicalRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
 	if err != nil {
-		return nil, err
+		return nil, common.Hash{}, err
+	}
+	if block == nil {
+		if canonicalRoot != (common.Hash{}) {
+			return nil, common.Hash{}, fmt.Errorf("block at slot %d: canonical block is missing", slot)
+		}
+		return nil, common.Hash{}, nil
+	}
+	root, err = block.Block.HashSSZ()
+	if err != nil {
+		return nil, common.Hash{}, err
 	}
 	if block.Block.Slot != slot || root != canonicalRoot {
-		return nil, fmt.Errorf("block at slot %d is not canonical", slot)
+		return nil, common.Hash{}, fmt.Errorf("block at slot %d is not canonical", slot)
 	}
-	return block, nil
+	return block, root, nil
 }
 
 func DumpBlobsSidecar(ctx context.Context, blobStorage blob_storage.BlobStorage, db kv.RoDB, fromSlot, toSlot uint64, salt uint32, dirs datadir.Dirs, compressWorkers int, blobCountFn BlobCountBySlotFn, lvl log.Lvl, logger log.Logger) error {
