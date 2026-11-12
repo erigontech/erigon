@@ -1266,6 +1266,14 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 	var blockStart state.StateReader
 	var scheduleable *blockExecutor
 	var executor *blockExecutor
+	dbg.NpMark("prEnter")
+	prStart := time.Now()
+	var prBal, prDeps, prDefault int
+	var prDefaultDur, prRecvDur time.Duration
+	defer func() {
+		pe.logger.Info("[dbg] process-request", "npPrTasks", len(execRequest.tasks), "npPrBal", prBal, "npPrDeps", prDeps, "npPrDefault", prDefault,
+			"npPrDefaultDur", prDefaultDur, "npPrRecvDur", prRecvDur, "npPrTotal", time.Since(prStart), "npPrBalLen", len(execRequest.accessList))
+	}()
 
 	for i, txTask := range execRequest.tasks {
 		t := &execTask{
@@ -1301,8 +1309,10 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 
 		executor.execTasks.pushPending(i)
 
+		caseStart := time.Now()
 		switch {
 		case len(t.Dependencies()) > 0:
+			prDeps++
 			for _, depTxIndex := range t.Dependencies() {
 				// Dependencies() are versionMap TxIndexes; translate to task-index space.
 				depTask := executor.taskIndexOf(depTxIndex)
@@ -1320,7 +1330,9 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 			// optimistically without needing to worry about
 			// clashes, this should signifigatly improve tx
 			// concurrency
+			prBal++
 		default:
+			prDefault++
 			sender, err := t.TxSender()
 			if err != nil {
 				return err
@@ -1335,8 +1347,11 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 				if chargedAtValidation && blockStart == nil {
 					blockStart = pe.prevBlockBase(state.NewReaderV3(pe.domainsRead().AsGetter(applyTx)), execRequest.blockNum)
 				}
-				if to := *tx.GetTo(); chargedAtValidation && protocol.RecipientCreditedAtValidation(sender, accounts.InternAddress(to),
-					executor.coinbase, *tx.GetValue(), txTask.Hooks, txTask.Rules(), blockStart) {
+				recvStart := time.Now()
+				credited := chargedAtValidation && protocol.RecipientCreditedAtValidation(sender, accounts.InternAddress(*tx.GetTo()),
+					executor.coinbase, *tx.GetValue(), txTask.Hooks, txTask.Rules(), blockStart)
+				prRecvDur += time.Since(recvStart)
+				if to := *tx.GetTo(); credited {
 					// Credited at validation: a later user of the recipient still waits for it.
 					prevAccountTx[to] = i
 				} else {
@@ -1355,6 +1370,7 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 				prevAccountTx[sender.Value()] = i
 			}
 		}
+		prDefaultDur += time.Since(caseStart)
 
 		if t.IsBlockEnd() {
 			executor.blockIO = state.NewVersionedIO(t.Version().TxIndex + 1)
