@@ -34,6 +34,7 @@ import (
 	"strings"
 	"time"
 
+	goethkzg "github.com/crate-crypto/go-eth-kzg"
 	"github.com/hashicorp/go-retryablehttp"
 	"github.com/pelletier/go-toml/v2"
 	"google.golang.org/grpc"
@@ -276,7 +277,7 @@ func retrieveSidecars(ctx context.Context, endpoint string, root common.Hash, bl
 		if err := blob.UnmarshalJSON(raw); err != nil {
 			return nil, fmt.Errorf("blob retrieval decode failed %w", err)
 		}
-		sidecars[i] = cltypes.NewBlobSidecar(uint64(i), &blob, common.Bytes48(*commitments.Get(i)), emptyKZGProof, header,
+		sidecars[i] = cltypes.NewBlobSidecar(uint64(i), &blob, common.Bytes48(*commitments.Get(i)), common.Bytes48(goethkzg.PointAtInfinity), header,
 			solid.NewHashVector(cltypes.CommitmentBranchSize))
 	}
 	return sidecars, nil
