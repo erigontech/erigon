@@ -1781,6 +1781,7 @@ type sameRootForkGraph struct {
 	hideHeader   atomic.Bool
 	failDumpOnce atomic.Bool
 	dumpCalls    atomic.Int32
+	headReads    atomic.Int32
 }
 
 func (g *sameRootForkGraph) HasEnvelope(common.Hash) bool { return g.hasEnvelope.Load() }
@@ -1793,6 +1794,7 @@ func (g *sameRootForkGraph) GetHeader(root common.Hash) (*cltypes.BeaconBlockHea
 }
 
 func (g *sameRootForkGraph) GetCurrentJustifiedCheckpoint(common.Hash) (solid.Checkpoint, bool) {
+	g.headReads.Add(1)
 	return solid.Checkpoint{}, true
 }
 

@@ -209,6 +209,13 @@ func listenToIncomingBlocksUntilANewBlockIsReceived(ctx context.Context, logger 
 	// Timer to check block presence every 20 milliseconds
 	presenceTicker := time.NewTicker(20 * time.Millisecond)
 	defer presenceTicker.Stop()
+	var headPollTicker *time.Ticker
+	var headPoll <-chan time.Time
+	if cfg.beaconCfg != nil && cfg.ethClock != nil && cfg.beaconCfg.GetCurrentStateVersion(cfg.ethClock.GetCurrentEpoch()) >= clparams.GloasVersion {
+		headPollTicker = time.NewTicker(sleepForSlotHeadPollInterval)
+		defer headPollTicker.Stop()
+		headPoll = headPollTicker.C
+	}
 
 	// Map to keep track of seen block roots
 	seenBlockRoots := make(map[common.Hash]struct{})
@@ -225,6 +232,7 @@ MainLoop:
 			if cfg.forkChoice.HighestSeen() >= args.targetSlot {
 				break MainLoop
 			}
+		case <-headPoll:
 			head, headSlot, err := cfg.forkChoice.GetHeadNode()
 			if err == nil {
 				isGloas := cfg.beaconCfg.GetCurrentStateVersion(headSlot/cfg.beaconCfg.SlotsPerEpoch) >= clparams.GloasVersion

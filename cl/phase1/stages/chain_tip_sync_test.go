@@ -256,6 +256,61 @@ func TestChainTipSyncRoutesForUnpublishedHeadRoot(t *testing.T) {
 	require.Equal(t, ForkChoice, ConsensusClStages().Stages[ChainTipSync].TransitionFunc(f.cfg, args, nil))
 }
 
+func TestChainTipSyncPollsForkChoiceHeadOnlyForGloas(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		gloasForkEpoch uint64
+		maxReads       int32
+	}{
+		{name: "gloas", gloasForkEpoch: 0, maxReads: 2},
+		{name: "pre-gloas", gloasForkEpoch: math.MaxUint64, maxReads: 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newSameRootFixture(t, tc.gloasForkEpoch, 32)
+			status := cltypes.PayloadStatusPending
+			statusName := "full"
+			if tc.gloasForkEpoch == 0 {
+				status = cltypes.PayloadStatusEmpty
+				statusName = "empty"
+			}
+			f.setHeadStatus(t, status)
+			f.cfg.headEvents = headEventPublication{root: f.headRoot, payloadStatus: statusName}
+			f.graph.headReads.Store(0)
+
+			stop := make(chan struct{})
+			done := make(chan struct{})
+			var resets atomic.Uint32
+			go func() {
+				ticker := time.NewTicker(20 * time.Millisecond)
+				defer ticker.Stop()
+				defer close(done)
+				for {
+					select {
+					case <-ticker.C:
+						root := common.Hash{0xee, byte(resets.Add(1))}
+						f.cfg.forkChoice.MarkPayloadStatus(root, root, execution_client.PayloadStatusNotValidated)
+					case <-stop:
+						return
+					}
+				}
+			}()
+
+			ctx, cancel := context.WithTimeout(t.Context(), 300*time.Millisecond)
+			err := listenToIncomingBlocksUntilANewBlockIsReceived(
+				ctx, log.Root(), f.cfg,
+				Args{seenSlot: f.headSlot, targetSlot: f.headSlot + 1},
+				make(chan *peers.PeeredObject[[]*cltypes.SignedBeaconBlock], 1), make(chan error, 1),
+			)
+			cancel()
+			close(stop)
+			<-done
+
+			require.ErrorIs(t, err, context.DeadlineExceeded)
+			require.LessOrEqual(t, f.graph.headReads.Load(), tc.maxReads)
+		})
+	}
+}
+
 func TestChainTipSyncLeavesBlockWaitForUnpublishedPayloadStatus(t *testing.T) {
 	f := newSameRootFixture(t, 0, 32)
 	f.setHeadStatus(t, cltypes.PayloadStatusEmpty)
@@ -283,7 +338,7 @@ func TestChainTipSyncLeavesBlockWaitForUnpublishedPayloadStatus(t *testing.T) {
 	<-done
 	require.False(t, f.cfg.forkChoiceRerunAt.IsZero())
 	f.cfg.forkChoiceRerunAt = time.Now().Add(-sleepForSlotRewakeInterval)
-	secondCtx, secondCancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	secondCtx, secondCancel := context.WithTimeout(t.Context(), 300*time.Millisecond)
 	err = listenToIncomingBlocksUntilANewBlockIsReceived(
 		secondCtx, log.Root(), f.cfg,
 		Args{seenSlot: f.headSlot, targetSlot: f.headSlot + 1},
