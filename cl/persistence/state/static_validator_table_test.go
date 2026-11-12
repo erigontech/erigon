@@ -81,3 +81,27 @@ func TestStaticValidatorTable(t *testing.T) {
 		return true
 	})
 }
+
+func (s *StaticValidatorTable) GetInPlace(validatorIndex uint64, slot uint64, v solid.Validator) {
+	s.sync.RLock()
+	defer s.sync.RUnlock()
+	s.validatorTable[validatorIndex].ToValidator(v, slot)
+}
+
+func (s *StaticValidatorTable) WithdrawalCredentials(validatorIndex uint64, slot uint64) common.Hash {
+	s.sync.RLock()
+	defer s.sync.RUnlock()
+	return s.validatorTable[validatorIndex].WithdrawalCredentials(slot)
+}
+
+func (s *StaticValidatorTable) ExitEpoch(validatorIndex uint64, slot uint64) uint64 {
+	s.sync.RLock()
+	defer s.sync.RUnlock()
+	return s.validatorTable[validatorIndex].ExitEpoch(slot)
+}
+
+func (s *StaticValidatorTable) WithdrawableEpoch(validatorIndex uint64, slot uint64) uint64 {
+	s.sync.RLock()
+	defer s.sync.RUnlock()
+	return s.validatorTable[validatorIndex].WithdrawableEpoch(slot)
+}
