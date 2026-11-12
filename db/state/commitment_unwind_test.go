@@ -154,25 +154,20 @@ func TestCommitmentFilesRepeatedUnwind(t *testing.T) {
 				clean, err := execctx.NewSharedDomains(ctx, cleanTx, log.New(), execctx.WithParaTrieDB(cleanDB))
 				require.NoError(t, err)
 				defer clean.Close()
+				expectedValues := make([][]byte, len(keys))
+				for i := range keys {
+					acc := accounts.Account{Nonce: 4 * stepSize, Balance: *uint256.NewInt((4*stepSize-1)*100_000 + uint64(i)), CodeHash: accounts.EmptyCodeHash}
+					expectedValues[i] = accounts.SerialiseV3(&acc)
+				}
+				expectedValues[other] = account(1)
 				for round, changed := range []int{x, y} {
-					_, actual := write(tx, filesEnd+stepSize+6+uint64(round), keys[changed], account(2000+1000*uint64(round)))
+					expectedValues[changed] = account(2000 + 1000*uint64(round))
+					_, actual := write(tx, filesEnd+stepSize+6+uint64(round), keys[changed], expectedValues[changed])
 					for i, key := range keys {
-						acc := accounts.Account{Nonce: 4 * stepSize, Balance: *uint256.NewInt((4*stepSize-1)*100_000 + uint64(i)), CodeHash: accounts.EmptyCodeHash}
-						if i == other {
-							acc.Nonce = 1
-							acc.Balance.SetUint64(1)
-						}
-						if i == x {
-							acc.Nonce, acc.Balance = 2000, *uint256.NewInt(2000)
-						}
-						if i == y && round == 1 {
-							acc.Nonce, acc.Balance = 3000, *uint256.NewInt(3000)
-						}
-						value := accounts.SerialiseV3(&acc)
 						got, _, err := tx.GetLatest(kv.AccountsDomain, key, kv.GetLatestOptions{})
 						require.NoError(t, err)
-						require.Equalf(t, value, got, "replacement block %d, account %x", round+1, key)
-						require.NoError(t, clean.DomainPut(kv.AccountsDomain, cleanTx, key, value, uint64(round+1), nil))
+						require.Equalf(t, expectedValues[i], got, "replacement block %d, account %x", round+1, key)
+						require.NoError(t, clean.DomainPut(kv.AccountsDomain, cleanTx, key, expectedValues[i], uint64(round+1), nil))
 					}
 					expected, err := clean.ComputeCommitment(ctx, cleanTx, false, 0, uint64(round+1), "", nil)
 					require.NoError(t, err)
