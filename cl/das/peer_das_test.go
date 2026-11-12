@@ -2724,6 +2724,26 @@ func TestBlobRecoveryWaitRestartsWithEachStoredColumn(t *testing.T) {
 	require.False(t, started.Before(earliestQuietEnd(calls)), "the worker started before the last column restarted the wait")
 }
 
+// A column stored after the worker claimed the request restarts the wait, even when the wait the worker claimed has
+// already passed.
+func TestBlobRecoveryWaitRestartsWithAColumnStoredAfterTheClaim(t *testing.T) {
+	g := startGossipRecovery(t, true)
+
+	first := g.schedule(t)
+	require.Eventually(t, func() bool {
+		g.d.recoveringMutex.Lock()
+		defer g.d.recoveringMutex.Unlock()
+		return g.d.isRecovering[g.root]
+	}, 30*time.Second, time.Millisecond, "the worker did not claim the recovery")
+	time.Sleep(time.Until(first.end.Add(wantQuietPeriod)))
+	second := g.schedule(t)
+	g.releaseClock()
+	started := g.awaitFirstRead(t)
+
+	require.False(t, started.Before(second.begin.Add(wantQuietPeriod)), "the worker started before the column stored after the claim restarted the wait")
+	require.Less(t, started.Sub(second.end), wantQuietPeriod+startSlack)
+}
+
 // earliestQuietEnd returns the earliest time the worker may start after the calls, which ran one after the other. A
 // call restarts the wait only if it ended within half the quiet period of the previous call's start; the other half
 // covers a worker that reads the request a little before it decides. Otherwise the worker may already have started, so
@@ -2853,9 +2873,9 @@ func TestBlobRecoveryWithMetadataDoesNotWait(t *testing.T) {
 	requireBlobRecoveryReleased(t, g.d, g.root)
 }
 
-// The worker parks the gossip request it claimed. A request with metadata that arrives before the wait ends replaces
-// it, so the recovery that follows the wait is not lost.
-func TestBlobRecoveryWithMetadataArrivingDuringQuietWaitIsRecovered(t *testing.T) {
+// A request with metadata that arrives after the worker claimed the gossip request and before it decides starts without
+// the quiet wait, and its recovery is not lost.
+func TestBlobRecoveryWithMetadataArrivingBeforeTheDecisionIsRecovered(t *testing.T) {
 	g := startGossipRecovery(t, true)
 	g.schedule(t)
 	require.Eventually(t, func() bool {
@@ -2886,23 +2906,74 @@ func TestBlobRecoveryStartsOnTimeBehindOverdueRetries(t *testing.T) {
 	require.Less(t, started.Sub(scheduled.end), wantQuietPeriod+startSlack)
 }
 
-func claimedBlobRecovery(t *testing.T) (d *peerdas, request recoverBlobsRequest) {
+func claimedBlobRecovery(t *testing.T) (*peerdas, recoverBlobsRequest) {
 	t.Helper()
-	d = &peerdas{
+	return claimedBlobRecoveryOf(t, recoverBlobsRequest{slot: 10, blockRoot: common.Hash{1}, lastColumn: time.Now().Add(time.Hour)})
+}
+
+func claimedBlobRecoveryOf(t *testing.T, request recoverBlobsRequest) (*peerdas, recoverBlobsRequest) {
+	t.Helper()
+	d := &peerdas{
 		recoverBlobsQueue: make(chan recoverBlobsRequest, 1),
 		isRecovering:      make(map[common.Hash]bool),
 	}
-	request = recoverBlobsRequest{slot: 10, blockRoot: common.Hash{1}}
 	require.NoError(t, d.enqueueBlobRecovery(request))
 	_, _, ok := d.claimBlobRecovery(<-d.recoverBlobsQueue)
 	require.True(t, ok)
 	return d, request
 }
 
+// The worker decides to park on the newest request the root owns, which may differ from the one it claimed.
+func TestParkBlobRecoveryDecidesOnTheNewestOwnedRequest(t *testing.T) {
+	root := common.Hash{1}
+	longAgo := time.Now().Add(-time.Hour)
+	farDeadline := time.Now().Add(time.Hour)
+	for _, tc := range []struct {
+		name     string
+		claimed  time.Time
+		newest   *recoverBlobsRequest
+		deadline time.Time
+		parks    bool
+	}{
+		{"nothing newer", longAgo, nil, farDeadline, false},
+		{"newer column", longAgo, &recoverBlobsRequest{lastColumn: time.Now().Add(time.Hour)}, farDeadline, true},
+		{"metadata replaces the request", time.Now(), &recoverBlobsRequest{metadata: &blobRecoveryMetadata{}}, farDeadline, false},
+		{"deadline passed", time.Now(), nil, longAgo, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d, _ := claimedBlobRecoveryOf(t, recoverBlobsRequest{slot: 10, blockRoot: root, lastColumn: tc.claimed})
+			if tc.newest != nil {
+				tc.newest.slot, tc.newest.blockRoot = 10, root
+				require.NoError(t, d.enqueueBlobRecovery(*tc.newest))
+			}
+
+			parked := d.parkBlobRecovery(root, tc.deadline)
+
+			d.recoveringMutex.Lock()
+			defer d.recoveringMutex.Unlock()
+			require.Equal(t, tc.parks, parked)
+			require.Equal(t, !tc.parks, d.isRecovering[root], "the claim after the decision")
+		})
+	}
+}
+
+// A request with metadata that replaces a parked root is the one the timer puts back.
+func TestParkedBlobRecoveryRequeuesTheMetadataRequestThatReplacedIt(t *testing.T) {
+	d, request := claimedBlobRecovery(t)
+	require.True(t, d.parkBlobRecovery(request.blockRoot, time.Now().Add(time.Hour)))
+	withMetadata := recoverBlobsRequest{slot: request.slot, blockRoot: request.blockRoot, metadata: &blobRecoveryMetadata{}}
+	require.NoError(t, d.enqueueBlobRecovery(withMetadata))
+
+	d.requeueParkedBlobRecovery(request.blockRoot)
+
+	require.Len(t, d.recoverBlobsQueue, 1)
+	require.Equal(t, withMetadata, <-d.recoverBlobsQueue)
+}
+
 // A parked recovery that finds the queue full is delayed instead of lost.
 func TestParkedBlobRecoveryIsDelayedWhenTheQueueIsFull(t *testing.T) {
 	d, request := claimedBlobRecovery(t)
-	d.parkBlobRecovery(request.blockRoot, time.Now().Add(time.Hour))
+	require.True(t, d.parkBlobRecovery(request.blockRoot, time.Now().Add(time.Hour)))
 	d.recoverBlobsQueue <- recoverBlobsRequest{slot: 10, blockRoot: common.Hash{2}}
 
 	d.requeueParkedBlobRecovery(request.blockRoot)
@@ -2918,7 +2989,7 @@ func TestParkedBlobRecoveryLeavesRetryPacingAlone(t *testing.T) {
 	d.recoveryRetryAfter = retryAfter
 	d.recoveryPreferRetry = true
 
-	d.parkBlobRecovery(request.blockRoot, time.Now().Add(time.Hour))
+	require.True(t, d.parkBlobRecovery(request.blockRoot, time.Now().Add(time.Hour)))
 	d.requeueParkedBlobRecovery(request.blockRoot)
 
 	require.Equal(t, retryAfter, d.recoveryRetryAfter)

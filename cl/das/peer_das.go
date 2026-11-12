@@ -890,13 +890,18 @@ func (d *peerdas) delayBlobRecovery(request recoverBlobsRequest) bool {
 	return true
 }
 
-// parkBlobRecovery releases the claim on the root but keeps it owned: the root sits in no queue until the timer puts
-// its newest request back.
-func (d *peerdas) parkBlobRecovery(blockRoot common.Hash, notBefore time.Time) {
+// parkBlobRecovery releases the claim until the root's newest request has been quiet, and reports whether it parked.
+func (d *peerdas) parkBlobRecovery(blockRoot common.Hash, deadline time.Time) bool {
 	d.recoveringMutex.Lock()
+	notBefore := blobRecoveryNotBefore(d.recoveryRequests[blockRoot], deadline)
+	if !time.Now().Before(notBefore) {
+		d.recoveringMutex.Unlock()
+		return false
+	}
 	d.isRecovering[blockRoot] = false
 	d.recoveringMutex.Unlock()
 	time.AfterFunc(time.Until(notBefore), func() { d.requeueParkedBlobRecovery(blockRoot) })
+	return true
 }
 
 func (d *peerdas) requeueParkedBlobRecovery(blockRoot common.Hash) {
@@ -1417,10 +1422,11 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 		}
 
 		var retryScheduled bool
-		if notBefore := d.blobRecoveryNotBefore(toRecover); time.Now().Before(notBefore) {
-			d.parkBlobRecovery(toRecover.blockRoot, notBefore)
+		switch {
+		case !toRecover.lastColumn.IsZero() &&
+			d.parkBlobRecovery(toRecover.blockRoot, d.ethClock.GetSlotTime(toRecover.slot).Add(d.blobRecoveryDeadline(toRecover.slot))):
 			retryScheduled = true
-		} else if toRecover.metadata != nil {
+		case toRecover.metadata != nil:
 			validation, _ := d.storedBlobRecoveryValidation(ctx, toRecover.metadata)
 			switch validation {
 			case blobRecoveryUnavailable:
@@ -1430,7 +1436,7 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 			case blobRecoveryInvalid:
 				retryScheduled = recover(toRecover)
 			}
-		} else {
+		default:
 			count, err := d.blobStorage.KzgCommitmentsCount(ctx, toRecover.blockRoot)
 			if err != nil {
 				if ctx.Err() == nil {
@@ -1446,12 +1452,11 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 	}
 }
 
-func (d *peerdas) blobRecoveryNotBefore(request recoverBlobsRequest) time.Time {
+func blobRecoveryNotBefore(request recoverBlobsRequest, deadline time.Time) time.Time {
 	if request.lastColumn.IsZero() {
 		return time.Time{}
 	}
 	notBefore := request.lastColumn.Add(blobRecoveryQuietPeriod)
-	deadline := d.ethClock.GetSlotTime(request.slot).Add(d.blobRecoveryDeadline(request.slot))
 	if deadline.Before(notBefore) {
 		return deadline
 	}
