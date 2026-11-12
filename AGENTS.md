@@ -28,11 +28,11 @@ make gen                 # Generate all auto-generated code (mocks, grpc, etc.)
 
 Before committing, pushing, or opening/updating a PR, select checks for the change:
 
-- **Go changes:** run relevant tests and full configured lint on affected packages. Include affected callers when APIs or shared behavior change. Pass package paths to limit lint work while retaining the repository's configured checks.
+- **Go changes:** run relevant tests and full configured lint on affected packages. Include affected callers when APIs or shared behavior change. Pass package paths to limit lint work while retaining the repository's configured checks. Comment-only edits to Go files are Go changes.
 - **Imports or dependencies:** also run `go mod tidy -diff` in each affected module and resolve any reported changes.
 - **Command wiring, build configuration, native code, or runtime testing:** build the affected executable with its Makefile target. Build `integration` when that command is affected or needed for validation.
 - **Broad changes or linter configuration/rules:** run `make lintci` for full repository lint and the module check.
-- **Documentation-only changes:** check the diff and relevant links or document tooling; Go lint and builds are not required.
+- **Documentation-only changes (no `.go` files):** check the diff and relevant links or document tooling; Go lint and builds are not required.
 
 For example, from the repository root, replace `./execution/types` with the affected package paths:
 
