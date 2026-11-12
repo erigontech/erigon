@@ -68,7 +68,7 @@ type ForkGraph interface {
 	LowestAvailableSlot() uint64
 	GetLightClientBootstrap(blockRoot common.Hash) (*cltypes.LightClientBootstrap, bool)
 	NewestLightClientUpdate() *cltypes.LightClientUpdate
-	GetLightClientUpdate(period uint64) (*cltypes.LightClientUpdate, bool)
+	GetLightClientUpdates(startPeriod, endPeriod uint64, head common.Hash) []*cltypes.LightClientUpdate
 	KeepFinalizedLightClientUpdates(finalized common.Hash)
 	GetCurrentParticipationIndicies(epoch uint64) (*solid.ParticipationBitList, error)
 	GetPreviousParticipationIndicies(epoch uint64) (*solid.ParticipationBitList, error)
@@ -80,4 +80,6 @@ type ForkGraph interface {
 	DumpEnvelopeOnDisk(blockRoot common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope) error
 	ReadEnvelopeFromDisk(blockRoot common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error)
 	HasEnvelope(blockRoot common.Hash) bool
+	RejectEnvelope(blockRoot common.Hash) bool
+	IsEnvelopeRejected(blockRoot common.Hash) bool
 }

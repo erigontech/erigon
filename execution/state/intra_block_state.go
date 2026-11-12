@@ -2821,6 +2821,10 @@ func (ibs *IntraBlockState) FinalizedWrites(chainRules *chain.Rules) (*WriteSet,
 	// to remember to publish separately.
 	ibs.PublishOrigins()
 	writes := ibs.versionedWrites.Finalize()
+	var replaced map[accounts.Address]struct{}
+	if chainRules != nil && chainRules.IsAmsterdam {
+		replaced = ibs.publishCreateDestructAsBalances(writes)
+	}
 	// Snapshot the accounts the tx really self-destructed (a SELFDESTRUCT opcode)
 	// before the removal encoders synthesize their own SelfDestruct cells, so the
 	// contract-vs-EOA removal verdict reads the genuine signal, not a synthesized one.
@@ -2834,8 +2838,40 @@ func (ibs *IntraBlockState) FinalizedWrites(chainRules *chain.Rules) (*WriteSet,
 		}
 	}
 	ibs.withholdCreatedEmptyAccounts(chainRules, writes)
-	ibs.encodeExistingEmptyRemovals(chainRules, writes, realSelfDestruct)
+	ibs.encodeExistingEmptyRemovals(chainRules, writes, realSelfDestruct, replaced)
 	return writes, ibs.StateReadError()
+}
+
+// publishCreateDestructAsBalances replaces the writes of a contract the tx created at an absent
+// address and destroyed with those of a new account holding its kept balance: under EIP-8246 that
+// balance is all the tx leaves, and withholdCreatedEmptyAccounts then treats it like any created
+// account. An address that existed may hold storage, which only the destruct's cells wipe, so it
+// keeps them. It returns the replaced addresses.
+func (ibs *IntraBlockState) publishCreateDestructAsBalances(writes *WriteSet) map[accounts.Address]struct{} {
+	var replaced map[accounts.Address]struct{}
+	for addr, sd := range writes.selfDestruct {
+		if cc, ok := writes.createContract[addr]; !sd.Val || !ok || !cc.Val {
+			continue
+		}
+		balance, ok := writes.balance[addr]
+		if !ok || balance.Deletes() {
+			continue // a burning destruct leaves no balance-only account
+		}
+		if !ibs.readAbsent(addr) {
+			continue
+		}
+		version := ibs.Version()
+		writes.deleteAddr(addr)
+		created := accounts.NewAccount()
+		writes.SetAddress(addr, &VersionedWrite[*accounts.Account]{WriteHeader: WriteHeader{Address: addr, Path: AddressPath, Version: version}, Val: &created})
+		writes.SetCodeHash(addr, &VersionedWrite[accounts.CodeHash]{WriteHeader: WriteHeader{Address: addr, Path: CodeHashPath, Version: version}, Val: accounts.EmptyCodeHash})
+		writes.SetBalance(addr, balance)
+		if replaced == nil {
+			replaced = map[accounts.Address]struct{}{}
+		}
+		replaced[addr] = struct{}{}
+	}
+	return replaced
 }
 
 // createdSelfDestructEmpty decides emptiness without an account view for an account this tx created as a contract
@@ -2855,13 +2891,16 @@ func createdSelfDestructEmpty(writes *WriteSet, realSelfDestruct map[accounts.Ad
 	return bal.Val.IsZero(), true
 }
 
-func (ibs *IntraBlockState) encodeExistingEmptyRemovals(chainRules *chain.Rules, writes *WriteSet, realSelfDestruct map[accounts.Address]struct{}) {
+func (ibs *IntraBlockState) encodeExistingEmptyRemovals(chainRules *chain.Rules, writes *WriteSet, realSelfDestruct, replaced map[accounts.Address]struct{}) {
 	if chainRules == nil || ibs.versionMap == nil {
 		return
 	}
 	for addr := range writes.addrs() {
 		if !EIP161EmptyRemoval(chainRules.IsEIP161Enabled(), chainRules.IsAura, addr) {
 			continue
+		}
+		if _, ok := replaced[addr]; ok {
+			continue // absent before the tx, so withholdCreatedEmptyAccounts settled it
 		}
 		if empty, known := createdSelfDestructEmpty(writes, realSelfDestruct, addr); known {
 			if empty {
