@@ -60,7 +60,7 @@ func TestGetStateValidatorUnknownIndexIsNotFound(t *testing.T) {
 	}
 }
 
-func TestGetLighthouseValidatorInclusionUnknownIndexIsNotFound(t *testing.T) {
+func TestGetLighthouseValidatorInclusionUnknownIndexReturnsNullData(t *testing.T) {
 	_, _, _, _, postState, h, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	fcu.FinalizedSlotVal = ^uint64(0)
 
