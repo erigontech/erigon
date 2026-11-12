@@ -1,4 +1,4 @@
-// Copyright 2024 The Erigon Authors
+// Copyright 2026 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -37,11 +37,28 @@ func requestWithURLParam(t *testing.T, name, value string) *http.Request {
 func TestIdsRejectADecimalAboveUint64(t *testing.T) {
 	const tooLarge = "18446744073709551616"
 	_, err := StateIdFromRequest(requestWithURLParam(t, "state_id", tooLarge))
-	require.Equal(t, http.StatusBadRequest, WrapEndpointError(err).Code)
+	requireBadRequest(t, err)
 	_, err = BlockIdFromRequest(requestWithURLParam(t, "block_id", tooLarge))
-	require.Equal(t, http.StatusBadRequest, WrapEndpointError(err).Code)
+	requireBadRequest(t, err)
 
 	id, err := StateIdFromRequest(requestWithURLParam(t, "state_id", "18446744073709551615"))
 	require.NoError(t, err)
 	require.Equal(t, uint64(18446744073709551615), *id.GetSlot())
+}
+
+// An invalid or out-of-range {epoch} is a bad request, as an invalid block or state id is.
+func TestEpochFromRequestRejectsInvalidEpochs(t *testing.T) {
+	for _, epoch := range []string{"not-an-epoch", "-1", "18446744073709551616"} {
+		_, err := EpochFromRequest(requestWithURLParam(t, "epoch", epoch))
+		requireBadRequest(t, err)
+	}
+	epoch, err := EpochFromRequest(requestWithURLParam(t, "epoch", "18446744073709551615"))
+	require.NoError(t, err)
+	require.Equal(t, uint64(18446744073709551615), epoch)
+}
+
+func requireBadRequest(t *testing.T, err error) {
+	t.Helper()
+	require.Error(t, err)
+	require.Equal(t, http.StatusBadRequest, WrapEndpointError(err).Code)
 }

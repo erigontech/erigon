@@ -73,11 +73,11 @@ func EpochFromRequest(r *http.Request) (uint64, error) {
 	regex := regexp.MustCompile(`^\d+$`)
 	epoch := chi.URLParam(r, "epoch")
 	if !regex.MatchString(epoch) {
-		return 0, errors.New("invalid path variable: {epoch}")
+		return 0, NewEndpointError(http.StatusBadRequest, errors.New("invalid path variable: {epoch}"))
 	}
 	epochMaybe, err := strconv.ParseUint(epoch, 10, 64)
 	if err != nil {
-		return 0, err
+		return 0, NewEndpointError(http.StatusBadRequest, errors.New("invalid path variable: {epoch}"))
 	}
 	return epochMaybe, nil
 }
