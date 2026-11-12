@@ -918,12 +918,12 @@ func TestDecodeBlockAccessListAcrossDecodeChunks(t *testing.T) {
 	}
 	items := uint64(2 * len(bal)) // one account and one storage read each
 
-	got, err := DecodeBlockAccessListSidecarForHeader(raw, items*BalItemCost)
-	if err != nil {
-		t.Fatalf("decode BAL at the item limit: %v", err)
+	got, ok := decodeBlockAccessListParallel(raw, &blockAccessListDecodeBudget{remaining: 2 * items, maxIndex: 1})
+	if !ok || !reflect.DeepEqual(got, bal) {
+		t.Fatalf("parallel decode: ok=%v, equal=%v", ok, reflect.DeepEqual(got, bal))
 	}
-	if !reflect.DeepEqual(got.BlockAccessList(), bal) {
-		t.Fatal("decoded BAL differs from the encoded one")
+	if _, err := DecodeBlockAccessListSidecarForHeader(raw, items*BalItemCost); err != nil {
+		t.Fatalf("decode BAL at the item limit: %v", err)
 	}
 
 	if _, err := DecodeBlockAccessListSidecarForHeader(raw, (items-1)*BalItemCost); !errors.Is(err, ErrInvalidBlockAccessList) || !strings.Contains(err.Error(), "too large") {
@@ -935,6 +935,9 @@ func TestDecodeBlockAccessListAcrossDecodeChunks(t *testing.T) {
 	raw, err = EncodeBlockAccessListBytes(swapped)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if _, ok := decodeBlockAccessListParallel(raw, &blockAccessListDecodeBudget{remaining: 2 * items, maxIndex: 1}); ok {
+		t.Fatal("parallel decode accepted accounts out of order")
 	}
 	if _, err := DecodeBlockAccessListSidecarForHeader(raw, items*BalItemCost); !errors.Is(err, ErrInvalidBlockAccessList) || !strings.Contains(err.Error(), "strictly increasing") {
 		t.Fatalf("decode BAL with accounts out of order at a chunk edge: got %v, want invalid ordering", err)
