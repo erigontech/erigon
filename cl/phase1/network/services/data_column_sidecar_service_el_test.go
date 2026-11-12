@@ -40,6 +40,7 @@ func newELPublishTestService(t *testing.T) (*dataColumnSidecarService, *gossipmo
 	clock := eth_clock.NewMockEthereumClock(ctrl)
 	fcu := forkchoicemock.NewForkChoiceStorageMock(t)
 	fcu.FinalizedCheckpointVal = elTestFinalized
+	fcu.FinalizedSlotVal = elTestFinalized.Epoch * cfg.SlotsPerEpoch
 	fcu.Ancestors[elTestFinalized.Epoch*cfg.SlotsPerEpoch] = forkchoice.ForkChoiceNode{Root: elTestFinalized.Root}
 	service := NewDataColumnSidecarService(t.Context(), &cfg, clock, fcu, nil, nil, nil, publisher).(*dataColumnSidecarService)
 	return service, publisher, clock, fcu

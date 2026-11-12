@@ -269,8 +269,7 @@ func processBlock(ctx context.Context, cfg *Cfg, block *cltypes.SignedBeaconBloc
 
 func persistAcceptedBlock(ctx context.Context, cfg *Cfg, block *cltypes.SignedBeaconBlock) error {
 	if err := cfg.indiciesDB.Update(ctx, func(tx kv.RwTx) error {
-		finalizedEpoch := cfg.forkChoice.FinalizedCheckpoint().Epoch
-		if err := beacon_indicies.WriteHighestFinalized(tx, finalizedEpoch*cfg.beaconCfg.SlotsPerEpoch+(cfg.beaconCfg.SlotsPerEpoch-1)); err != nil {
+		if err := beacon_indicies.WriteHighestFinalized(tx, cfg.forkChoice.FinalizedSlot()); err != nil {
 			return err
 		}
 		return beacon_indicies.WriteBeaconBlockAndIndicies(tx, block, false)

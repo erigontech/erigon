@@ -3292,8 +3292,7 @@ func (a *ApiHandler) storeBlockAndBlobs(
 	a.cacheExecutionBody(block.Block.Body.ExecutionPayload)
 
 	if err := a.indiciesDB.Update(ctx, func(tx kv.RwTx) error {
-		finalizedEpoch := a.forkchoiceStore.FinalizedCheckpoint().Epoch
-		if err := beacon_indicies.WriteHighestFinalized(tx, finalizedEpoch*a.beaconChainCfg.SlotsPerEpoch+(a.beaconChainCfg.SlotsPerEpoch-1)); err != nil {
+		if err := beacon_indicies.WriteHighestFinalized(tx, a.forkchoiceStore.FinalizedSlot()); err != nil {
 			return err
 		}
 		return beacon_indicies.WriteBeaconBlockAndIndicies(tx, block, false)

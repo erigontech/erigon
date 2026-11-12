@@ -1156,8 +1156,7 @@ func (b *blockService) processAndStoreBlock(ctx context.Context, block *cltypes.
 	}
 
 	if err := b.db.Update(ctx, func(tx kv.RwTx) error {
-		finalizedEpoch := b.forkchoiceStore.FinalizedCheckpoint().Epoch
-		return beacon_indicies.WriteHighestFinalized(tx, finalizedEpoch*b.beaconCfg.SlotsPerEpoch+(b.beaconCfg.SlotsPerEpoch-1))
+		return beacon_indicies.WriteHighestFinalized(tx, b.forkchoiceStore.FinalizedSlot())
 	}); err != nil && !isCallerCancellation(ctx, err) {
 		// Import has succeeded; failure to update this local index is not a peer fault.
 		log.Warn("Failed to update highest finalized after block import", "slot", block.Block.Slot, "err", err)

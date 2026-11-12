@@ -214,16 +214,8 @@ func (s *dataColumnSidecarService) processFuluMessage(ctx context.Context, subne
 		return ErrIgnore
 	}
 
-	// One finalized checkpoint for both finality checks below, so that a checkpoint update between
-	// them cannot turn an ignored sidecar into a rejected one.
 	finalizedCheckpoint := s.forkChoice.FinalizedCheckpoint()
-	// [IGNORE] The sidecar is from a slot greater than the latest finalized slot -- i.e. validate that
-	// block_header.slot > compute_start_slot_at_epoch(store.finalized_checkpoint.epoch).
-	// FinalizedSlot() is the last slot of the finalized epoch, so it is not this bound.
-	finalizedStartSlot, ok := safeMultiplyUint64(finalizedCheckpoint.Epoch, s.cfg.SlotsPerEpoch)
-	if !ok {
-		return errors.New("finalized checkpoint slot is not representable")
-	}
+	finalizedStartSlot := s.forkChoice.FinalizedSlot()
 	if blockHeader.Slot <= finalizedStartSlot {
 		return ErrIgnore
 	}
@@ -355,8 +347,8 @@ func (s *dataColumnSidecarService) afterFinality(sidecar *cltypes.DataColumnSide
 	}
 	header := sidecar.SignedBlockHeader.Header
 	finalizedCheckpoint := s.forkChoice.FinalizedCheckpoint()
-	finalizedStartSlot, ok := safeMultiplyUint64(finalizedCheckpoint.Epoch, s.cfg.SlotsPerEpoch)
-	if !ok || header.Slot <= finalizedStartSlot {
+	finalizedStartSlot := s.forkChoice.FinalizedSlot()
+	if header.Slot <= finalizedStartSlot {
 		return header.Slot, false
 	}
 	return header.Slot, s.forkChoice.Ancestor(header.ParentRoot, max(finalizedStartSlot, s.forkChoice.AnchorSlot())).Root == finalizedCheckpoint.Root

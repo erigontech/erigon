@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -30,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/persistence/base_encoding"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
 	"github.com/erigontech/erigon/cl/persistence/state/historical_states_reader"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
@@ -38,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 )
 
 func TestShouldBackoffHistoricalStateRead(t *testing.T) {
@@ -89,6 +92,61 @@ func TestStateAntiquaryBellatrix(t *testing.T) {
 func TestStateAntiquaryPhase0(t *testing.T) {
 	blocks, preState, postState := tests.GetPhase0Random()
 	runTest(t, blocks, preState, postState)
+}
+
+func TestLoopStatesReconstructsFinalizedSlot(t *testing.T) {
+	blocks, preState, postState := tests.GetCapellaRandom()
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	reader := tests.LoadChain(blocks, db, t)
+	syncedData := synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
+	require.NoError(t, syncedData.OnHeadState(postState))
+	finalized := blocks[len(blocks)-1].Block.Slot
+	require.Greater(t, finalized, uint64(0))
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return beacon_indicies.WriteHighestFinalized(tx, finalized-1)
+	}))
+
+	a := NewAntiquary(t.Context(), nil, preState, state_accessors.NewStaticValidatorTable(), &clparams.MainnetBeaconConfig, datadir.New(t.TempDir()), nil, db, nil, nil, reader, syncedData, log.New(), true, true, true, false, nil)
+	a.sn = &freezeblocks.CaplinSnapshots{}
+	a.backfilled.Store(true)
+	require.False(t, syncedData.Syncing())
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		a.loopStates(ctx)
+		close(done)
+	}()
+	defer func() {
+		cancel()
+		<-done
+	}()
+	time.Sleep(time.Second)
+	require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
+		return beacon_indicies.WriteHighestFinalized(tx, finalized)
+	}))
+
+	var progress uint64
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if err := db.View(ctx, func(tx kv.Tx) error {
+			var err error
+			progress, err = state_accessors.GetStateProcessingProgress(tx)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if progress >= finalized-1 {
+			break
+		}
+		select {
+		case <-done:
+			t.Fatal("state loop stopped before reconstructing the finalized slot")
+		default:
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	require.Equal(t, finalized, progress)
 }
 
 type commitCountingDB struct {
