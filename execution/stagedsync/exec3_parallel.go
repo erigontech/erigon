@@ -280,6 +280,9 @@ var balBuildJobs = sync.OnceValue(func() chan<- balBuildJob {
 	return jobs
 })
 
+// balBuildJobHook runs before each tx job on the builder goroutine; tests use it to delay one.
+var balBuildJobHook func(*asyncBALBuilder)
+
 type balBuildJob struct {
 	a      *asyncBALBuilder
 	io     *state.VersionedIO
@@ -297,6 +300,9 @@ func (j balBuildJob) run() {
 		return
 	}
 	defer func() { a.err = recover() }()
+	if h := balBuildJobHook; h != nil {
+		h(a)
+	}
 	for a.b.Next()+1 < j.sealed {
 		i := a.b.Next()
 		a.b.Add(i, j.io.ReadSet(i), j.io.WriteSet(i))
