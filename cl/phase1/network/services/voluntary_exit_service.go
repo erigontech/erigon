@@ -106,12 +106,21 @@ func (s *voluntaryExitService) ProcessMessage(ctx context.Context, subnet *uint6
 	}
 	// ref: https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/p2p-interface.md#voluntary_exit
 	voluntaryExit := msg.SignedVoluntaryExit.VoluntaryExit
+	checkPendingWithdrawals := func(state *state.CachingBeaconState) error {
+		if state.Version() >= clparams.ElectraVersion && eth2.GetPendingBalanceToWithdraw(state, voluntaryExit.ValidatorIndex) != 0 {
+			return errors.New("validator has pending withdrawals in the queue")
+		}
+		return nil
+	}
 
 	// [IGNORE] The voluntary exit is the first valid voluntary exit received for the validator with index signed_voluntary_exit.message.validator_index.
-	if _, ok := s.seen.Get(voluntaryExit.ValidatorIndex); ok {
-		return ErrIgnore
-	}
-	if s.operationsPool.VoluntaryExitsPool.Has(voluntaryExit.ValidatorIndex) {
+	_, seen := s.seen.Get(voluntaryExit.ValidatorIndex)
+	if seen || s.operationsPool.VoluntaryExitsPool.Has(voluntaryExit.ValidatorIndex) {
+		if msg.ImmediateVerification {
+			if err := s.syncedDataManager.ViewHeadState(checkPendingWithdrawals); err != nil {
+				return err
+			}
+		}
 		return ErrIgnore
 	}
 
@@ -167,9 +176,9 @@ func (s *voluntaryExitService) ProcessMessage(ctx context.Context, subnet *uint6
 			return errors.New("verify the validator has been active long enough")
 		}
 
-		if state.Version() >= clparams.ElectraVersion && eth2.GetPendingBalanceToWithdraw(state, voluntaryExit.ValidatorIndex) != 0 {
+		if err := checkPendingWithdrawals(state); err != nil {
 			if msg.ImmediateVerification {
-				return errors.New("validator has pending withdrawals in the queue")
+				return err
 			}
 			return ErrIgnore
 		}

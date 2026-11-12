@@ -476,6 +476,40 @@ func (t *voluntaryExitTestSuite) TestImmediateInitiatedExitReturnsValidationErro
 	t.Require().False(t.operationsPool.VoluntaryExitsPool.Has(10))
 }
 
+func (t *voluntaryExitTestSuite) TestCachedExitPendingWithdrawals() {
+	for _, cache := range []string{"seen", "pool"} {
+		t.Run(cache, func() {
+			t.SetupTest()
+			service, msg := t.exitAtEpochs(256, 256, 0, 256, math.MaxUint64)
+			var head *state.CachingBeaconState
+			t.Require().NoError(t.syncedData.ViewHeadState(func(st *state.CachingBeaconState) error {
+				var err error
+				head, err = st.Copy()
+				return err
+			}))
+			head.SetVersion(clparams.ElectraVersion)
+			t.Require().NoError(t.syncedData.OnHeadStateWithBlockRoot(head, common.Hash{}))
+			t.Require().NoError(service.ProcessMessage(t.T().Context(), nil, msg))
+			if cache == "seen" {
+				t.Require().True(t.operationsPool.VoluntaryExitsPool.DeleteIfExist(10))
+			} else {
+				t.Require().True(service.seen.Remove(10))
+			}
+
+			head.AppendPendingPartialWithdrawal(&solid.PendingPartialWithdrawal{
+				ValidatorIndex: 10, Amount: 1, WithdrawableEpoch: math.MaxUint64,
+			})
+			t.Require().NoError(head.SetSlot(head.Slot() + 1))
+			t.Require().NoError(t.syncedData.OnHeadStateWithBlockRoot(head, common.Hash{}))
+			t.Require().EqualError(service.ProcessMessage(t.T().Context(), nil, msg), "validator has pending withdrawals in the queue")
+
+			msg.ImmediateVerification = false
+			t.syncedData.UnsetHeadState()
+			t.Require().ErrorIs(service.ProcessMessage(t.T().Context(), nil, msg), ErrIgnore)
+		})
+	}
+}
+
 func TestVoluntaryExitPendingWithdrawals(t *testing.T) {
 	for _, tc := range []struct {
 		name            string
@@ -540,8 +574,14 @@ func TestVoluntaryExitPendingWithdrawals(t *testing.T) {
 				require.NoError(t, err)
 			}
 			require.Equal(t, !tc.blocked, verified)
-			require.Equal(t, !tc.blocked, service.seen.Contains(0))
-			require.Equal(t, !tc.blocked, operations.VoluntaryExitsPool.Has(0))
+			if !tc.blocked && !tc.immediate {
+				require.Eventually(t, func() bool {
+					return service.seen.Contains(0) && operations.VoluntaryExitsPool.Has(0)
+				}, time.Second, time.Millisecond)
+			} else {
+				require.Equal(t, !tc.blocked, service.seen.Contains(0))
+				require.Equal(t, !tc.blocked, operations.VoluntaryExitsPool.Has(0))
+			}
 		})
 	}
 }
