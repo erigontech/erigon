@@ -456,7 +456,7 @@ func coldAddress(prefix, i uint32) common.Address {
 
 // An address is canonical only while a handle holds its slab; once all are gone its index entry must go too.
 func TestSlabInternerForgetsValuesOfDeadSlabs(t *testing.T) {
-	in := newSlabInterner[common.Address](0)
+	in := newSlabInterner[common.Address]()
 	probe := coldAddress(2<<28, slabLen)
 	for i := range uint32(3 * slabLen) {
 		in.intern(coldAddress(2<<28, i))
@@ -469,7 +469,7 @@ func TestSlabInternerForgetsValuesOfDeadSlabs(t *testing.T) {
 }
 
 func TestSlabInternerKeepsHeldValuesCanonical(t *testing.T) {
-	in := newSlabInterner[common.Address](0)
+	in := newSlabInterner[common.Address]()
 	first := coldAddress(3<<28, 0)
 	held := in.intern(first)
 	for i := uint32(1); i < 2*slabLen; i++ {
@@ -483,7 +483,7 @@ func TestSlabInternerKeepsHeldValuesCanonical(t *testing.T) {
 }
 
 func TestSlabInternerConcurrentCallersShareHandle(t *testing.T) {
-	in := newSlabInterner[common.Address](0)
+	in := newSlabInterner[common.Address]()
 	const callers = 8
 	var wg sync.WaitGroup
 	results := make([][]*common.Address, callers)
@@ -505,7 +505,7 @@ func TestSlabInternerConcurrentCallersShareHandle(t *testing.T) {
 }
 
 func TestForgetSlabKeepsEntryTakenOverByNewerSlab(t *testing.T) {
-	in := newSlabInterner[common.Address](0)
+	in := newSlabInterner[common.Address]()
 	a := coldAddress(6<<28, 0)
 	held := in.intern(a)
 	other := new(slab[common.Address])
@@ -515,4 +515,10 @@ func TestForgetSlabKeepsEntryTakenOverByNewerSlab(t *testing.T) {
 	forgetSlab(deadSlab[common.Address]{in.index, weak.Make(other), values})
 	runtime.KeepAlive(other)
 	require.Same(t, held, in.intern(a))
+}
+
+// A fresh process must not reserve the index for every handle addressTable can hold: its untouched pages fault in
+// during the first blocks.
+func TestAddressIndexIsNotReservedUpFront(t *testing.T) {
+	require.Less(t, addressInterner.index.Stats().Capacity, addressTableSize/4)
 }

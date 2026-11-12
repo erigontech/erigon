@@ -180,12 +180,11 @@ type deadSlab[T comparable] struct {
 	values *slabValues[T]
 }
 
-// The index holds at least the handles addressTable keeps alive. A resize blocks every writer, and a shrink after
-// slabs die would resize again on the next burst of new addresses.
-var addressInterner = newSlabInterner[common.Address](addressTableSize)
+// A shrink after slabs die would resize again on the next burst of new addresses, and a resize blocks every writer.
+var addressInterner = newSlabInterner[common.Address]()
 
-func newSlabInterner[T comparable](size int) *slabInterner[T] {
-	t := &slabInterner[T]{index: xsync.NewMap[T, slabRef[T]](xsync.WithPresize(size), xsync.WithGrowOnly())}
+func newSlabInterner[T comparable]() *slabInterner[T] {
+	t := &slabInterner[T]{index: xsync.NewMap[T, slabRef[T]](xsync.WithGrowOnly())}
 	t.cur.Store(newOpenSlab(t.index))
 	return t
 }
