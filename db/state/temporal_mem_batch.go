@@ -377,6 +377,10 @@ func (sd *TemporalMemBatch) getLatest(sh *latestShard, domain kv.Domain, key []b
 	return unwoundLatest(domain, common.ToStringZeroCopy(key))
 }
 
+// publishTreeDegree keeps nodes small: each write after a Copy clones its path, and the cloned bytes
+// grow with node size times depth, (2d-1)*log(n)/log(d), which is about 7x smaller at 8 than at 128.
+const publishTreeDegree = 8
+
 // publish sets key in the domain's tree and publishes a copy of it. The caller holds key's shard lock.
 func (sd *TemporalMemBatch) publish(domain kv.Domain, key string, v dataWithTxNum) {
 	if sd.unwindChangeset != nil {
@@ -385,7 +389,7 @@ func (sd *TemporalMemBatch) publish(domain kv.Domain, key string, v dataWithTxNu
 	sd.publishMu[domain].Lock()
 	defer sd.publishMu[domain].Unlock()
 	if sd.publishTree[domain] == nil {
-		sd.publishTree[domain] = btree2.NewMap[string, dataWithTxNum](128)
+		sd.publishTree[domain] = btree2.NewMap[string, dataWithTxNum](publishTreeDegree)
 	}
 	sd.publishTree[domain].Set(key, v)
 	sd.published[domain].Store(sd.publishTree[domain].Copy())
@@ -402,7 +406,7 @@ func (sd *TemporalMemBatch) republishAll() {
 			sd.publishMu[d].Unlock()
 			continue
 		}
-		t := btree2.NewMap[string, dataWithTxNum](128)
+		t := btree2.NewMap[string, dataWithTxNum](publishTreeDegree)
 		if kv.Domain(d) == kv.StorageDomain {
 			sd.storage.Scan(func(k string, entries []dataWithTxNum) bool {
 				t.Set(k, entries[len(entries)-1])
@@ -431,7 +435,7 @@ func (sd *TemporalMemBatch) publishMerged(other *TemporalMemBatch) {
 		sd.publishMu[d].Lock()
 		t := sd.publishTree[d]
 		if t == nil {
-			t = btree2.NewMap[string, dataWithTxNum](128)
+			t = btree2.NewMap[string, dataWithTxNum](publishTreeDegree)
 			sd.publishTree[d] = t
 		}
 		if kv.Domain(d) == kv.StorageDomain {
