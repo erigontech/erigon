@@ -169,6 +169,8 @@ func TestOnAttestationLockedUsesBlockStateOnlyWithTargetShuffling(t *testing.T) 
 		providerIndices []uint64
 		providerErr     error
 		wantErr         string
+		fromBlock       bool
+		keepHeadState   bool
 		wantValidator   uint64
 		rejectValidator uint64
 		wantStateRead   bool
@@ -176,6 +178,7 @@ func TestOnAttestationLockedUsesBlockStateOnlyWithTargetShuffling(t *testing.T) 
 		{
 			name:            "side branch target uses target checkpoint state",
 			targetRoot:      fixture.targetRoot,
+			fromBlock:       true,
 			wantValidator:   fixture.targetValidator,
 			rejectValidator: fixture.headValidator,
 			wantStateRead:   true,
@@ -184,6 +187,7 @@ func TestOnAttestationLockedUsesBlockStateOnlyWithTargetShuffling(t *testing.T) 
 			name:            "block branch target uses provider indices",
 			targetRoot:      fixture.headTargetRoot,
 			providerIndices: []uint64{fixture.targetValidator},
+			fromBlock:       true,
 			wantValidator:   fixture.targetValidator,
 			rejectValidator: fixture.headValidator,
 		},
@@ -192,13 +196,23 @@ func TestOnAttestationLockedUsesBlockStateOnlyWithTargetShuffling(t *testing.T) 
 			targetRoot:  fixture.headTargetRoot,
 			providerErr: providerErr,
 			wantErr:     providerErr.Error(),
+			fromBlock:   true,
+		},
+		{
+			name:            "gossip ignores block source",
+			targetRoot:      fixture.headTargetRoot,
+			providerIndices: []uint64{fixture.targetValidator},
+			wantErr:         "invalid aggregate signature",
+			keepHeadState:   true,
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			graph := fixture.forkGraph(false)
 			graph.states[fixture.targetRoot] = fixture.targetState
 			store := newAttestationTestStore(t, fixture.cfg, fixture.headState, fixture.headRoot, fixture.attestationSlot, graph)
-			store.syncedDataManager.UnsetHeadState()
+			if !test.keepHeadState {
+				store.syncedDataManager.UnsetHeadState()
+			}
 			attestation := &solid.Attestation{
 				AggregationBits: aggregationBits(fixture.committeeSize(t, test.targetRoot), int(fixture.cfg.MaxValidatorsPerCommittee), fixture.committeePosition),
 				Signature:       common.Bytes96(bls.InfiniteSignature),
@@ -216,7 +230,7 @@ func TestOnAttestationLockedUsesBlockStateOnlyWithTargetShuffling(t *testing.T) 
 			}
 
 			store.mu.Lock()
-			err := store.onAttestationLocked(attestation, true, source)
+			err := store.onAttestationLocked(attestation, test.fromBlock, source)
 			store.mu.Unlock()
 
 			if test.wantErr != "" {

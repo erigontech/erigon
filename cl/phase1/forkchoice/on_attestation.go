@@ -49,8 +49,8 @@ type blockAttestationSource struct {
 	attestingIndices preparedAttestingIndices
 }
 
-// onAttestationLocked validates the attestation and updates latest messages. It takes indices from source when
-// source's post-state has the target's shuffling.
+// onAttestationLocked validates the attestation and updates latest messages. It takes indices from source when the
+// attestation is from the block and source's post-state has the target's shuffling.
 func (f *ForkChoiceStore) onAttestationLocked(
 	attestation *solid.Attestation,
 	fromBlock bool,
@@ -78,7 +78,7 @@ func (f *ForkChoiceStore) onAttestationLocked(
 	target := data.Target
 
 	useCheckpointState := f.syncedDataManager.Syncing()
-	if source != nil && f.HeadStateHasTargetShuffling(source.state, source.root, target) {
+	if source != nil && fromBlock && f.HeadStateHasTargetShuffling(source.state, source.root, target) {
 		useCheckpointState = false
 		attestationIndicies, err = source.attestingIndices.indices, source.attestingIndices.err
 	} else if !useCheckpointState {
