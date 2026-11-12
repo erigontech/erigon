@@ -328,8 +328,11 @@ func (a *ApiHandler) GetLighthouseValidatorInclusion(w http.ResponseWriter, r *h
 }
 
 func (a *ApiHandler) computeLighthouseValidatorInclusion(idx int, prevEpoch, epoch uint64, validatorSet *solid.ValidatorSet, currentEpochParticipation, previousEpochParticipation *solid.ParticipationBitList) (*LighthouseValidatorInclusion, error) {
-	if idx < 0 || idx >= validatorSet.Length() || idx >= currentEpochParticipation.Length() || idx >= previousEpochParticipation.Length() {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("validator not found"))
+	if idx < 0 || idx >= validatorSet.Length() {
+		return nil, nil
+	}
+	if idx >= currentEpochParticipation.Length() || idx >= previousEpochParticipation.Length() {
+		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, errors.New("participation data inconsistent with validator set"))
 	}
 
 	validator := validatorSet.Get(idx)

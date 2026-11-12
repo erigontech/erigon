@@ -26,6 +26,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -65,41 +66,31 @@ func TestGetLighthouseValidatorInclusionUnknownIndexIsNotFound(t *testing.T) {
 
 	server := httptest.NewServer(h.mux)
 	defer server.Close()
-	get := func(epoch uint64, idx int) (int, string, error) {
-		url := server.URL + "/lighthouse/validator_inclusion/" + strconv.FormatUint(epoch, 10) + "/" + strconv.Itoa(idx)
+	get := func(t *testing.T, epoch uint64, validatorID string) (int, string) {
+		url := server.URL + "/lighthouse/validator_inclusion/" + strconv.FormatUint(epoch, 10) + "/" + validatorID
 		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, url, nil)
-		if err != nil {
-			return 0, "", err
-		}
+		require.NoError(t, err)
 		resp, err := server.Client().Do(req)
-		if err != nil {
-			return 0, "", err
-		}
+		require.NoError(t, err)
 		defer resp.Body.Close()
 		body, err := io.ReadAll(resp.Body)
-		return resp.StatusCode, string(body), err
+		require.NoError(t, err)
+		return resp.StatusCode, string(body)
 	}
 
 	validatorCount := postState.ValidatorLength()
-	status, body, err := get(4, 1)
-	require.NoError(t, err)
-	require.Equal(t, http.StatusOK, status)
-	want, err := testData.ReadFile("test_data/harness_inclusion_local_1.json")
-	require.NoError(t, err)
-	require.JSONEq(t, string(want), body)
-
-	status, _, err = get(4, validatorCount-1)
-	require.NoError(t, err)
+	status, _ := get(t, 4, strconv.Itoa(validatorCount-1))
 	require.Equal(t, http.StatusOK, status)
 
-	for _, idx := range []int{validatorCount, validatorCount + 10} {
-		status, body, err = get(4, idx)
-		if err != nil {
-			status = 0
-			body = err.Error()
-		}
-		require.Equal(t, http.StatusNotFound, status, "response: %s", body)
-		require.True(t, strings.Contains(body, "validator not found"), "response: %s", body)
+	for _, validatorID := range []string{
+		strconv.Itoa(validatorCount),
+		strconv.Itoa(validatorCount + 10),
+		"0x" + strings.Repeat("ff", 48),
+		strconv.FormatUint(^uint64(0), 10),
+	} {
+		status, body := get(t, 4, validatorID)
+		require.Equal(t, http.StatusOK, status, "validator id: %s", validatorID)
+		require.JSONEq(t, `{"data":null}`, body, "validator id: %s", validatorID)
 	}
 }
 
@@ -112,28 +103,35 @@ func TestComputeLighthouseValidatorInclusionRejectsShortData(t *testing.T) {
 	}
 	shortParticipation := solid.NewParticipationBitList(validatorCount-1, validatorCount-1)
 	fullParticipation := solid.NewParticipationBitList(validatorCount, validatorCount)
-	compute := func(set *solid.ValidatorSet, current, previous *solid.ParticipationBitList) (err error) {
-		defer func() {
-			if recover() != nil {
-				err = nil
-			}
-		}()
-		_, err = h.computeLighthouseValidatorInclusion(validatorCount-1, 0, 1, set, current, previous)
-		return err
-	}
 
 	for _, tc := range []struct {
 		name     string
 		set      *solid.ValidatorSet
 		current  *solid.ParticipationBitList
 		previous *solid.ParticipationBitList
+		code     int
 	}{
-		{name: "earlier registry", set: earlierValidatorSet, current: shortParticipation, previous: shortParticipation},
-		{name: "current participation", set: postState.Validators(), current: shortParticipation, previous: fullParticipation},
-		{name: "previous participation", set: postState.Validators(), current: fullParticipation, previous: shortParticipation},
+		{name: "earlier registry", set: earlierValidatorSet, current: fullParticipation, previous: fullParticipation},
+		{name: "current participation", set: postState.Validators(), current: shortParticipation, previous: fullParticipation, code: http.StatusInternalServerError},
+		{name: "previous participation", set: postState.Validators(), current: fullParticipation, previous: shortParticipation, code: http.StatusInternalServerError},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			require.ErrorContains(t, compute(tc.set, tc.current, tc.previous), "validator not found")
+			inclusion, err := h.computeLighthouseValidatorInclusion(validatorCount-1, 0, 1, tc.set, tc.current, tc.previous)
+			require.Nil(t, inclusion)
+			if tc.code == 0 {
+				require.NoError(t, err)
+				return
+			}
+			var endpointError *beaconhttp.EndpointError
+			require.ErrorAs(t, err, &endpointError)
+			require.Equal(t, tc.code, endpointError.Code)
+			require.EqualError(t, err, "Code 500: participation data inconsistent with validator set")
 		})
 	}
+
+	t.Run("negative index", func(t *testing.T) {
+		inclusion, err := h.computeLighthouseValidatorInclusion(-1, 0, 1, postState.Validators(), fullParticipation, fullParticipation)
+		require.NoError(t, err)
+		require.Nil(t, inclusion)
+	})
 }
