@@ -53,11 +53,13 @@ func addressSlot(a common.Address) *atomic.Value {
 }
 
 func InternAddress(a common.Address) Address {
+	probeCountCall()
 	slot := addressSlot(a)
 	if h, ok := slot.Load().(Address); ok && h.Value() == a {
 		return h
 	}
 	h := Address(unique.Make(a))
+	probeCountMake(a, h)
 	slot.Store(h)
 	return h
 }

@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/erigontech/erigon/common/npprof"
+	"os"
 	"reflect"
 	"runtime"
 	"slices"
@@ -64,6 +65,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/merge"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/node/shards"
 	"github.com/erigontech/erigon/rpc"
@@ -350,6 +352,12 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	defer engineNewPayloadDuration.ObserveDuration(time.Now())
 	defer npprof.End(time.Now())
 	defer npprof.Begin()()
+	accounts.ProbeBeginBlock()
+	defer func() {
+		if s := accounts.ProbeEndBlock(); s != "" {
+			e.logger.Info("[intern-probe] " + s)
+		}
+	}()
 	if req == nil {
 		return nil, &rpc.InvalidParamsError{Message: "missing payload"}
 	}
@@ -462,6 +470,14 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		}
 		balBytes := *req.BlockAccessList
 		blockAccessList, blockAccessListErr = types.DecodeBlockAccessListSidecarForBlock(balBytes, header.GasLimit, len(req.Transactions))
+		if blockAccessListErr == nil && os.Getenv("STUB_PREINTERN") == "1" {
+			bal := blockAccessList.BlockAccessList()
+			addrs := make([]common.Address, len(bal))
+			for i := range bal {
+				addrs[i] = bal[i].Address
+			}
+			accounts.ProbePreintern(addrs)
+		}
 		if blockAccessListErr != nil && !errors.Is(blockAccessListErr, types.ErrInvalidBlockAccessList) {
 			e.logger.Debug("[NewPayload] failed to decode blockAccessList", "err", blockAccessListErr, "raw", hex.EncodeToString(balBytes))
 			return &engine_types.PayloadStatus{
