@@ -1877,7 +1877,9 @@ func TestPrecompileCallRunsOutOfGas(t *testing.T) {
 		return types.NewMessage(sender, sha256, 0, uint256.NewInt(1), gas, uint256.NewInt(0), uint256.NewInt(0), uint256.NewInt(0),
 			words, nil, false, false, true, false, nil)
 	}
+	// From Prague the calldata floor leaves execution more gas than this precompile price, so the boundary needs earlier rules.
+	beforeFloor := &chain.Rules{IsHomestead: true, IsIstanbul: true, IsBerlin: true}
 	need := params.TxGas + uint64(len(words))*params.TxDataZeroGas + params.Sha256BaseGas + 2*params.Sha256PerWordGas
-	require.True(t, PrecompileCallRunsOutOfGas(hash(need-1), rules), "the per-word price counts")
-	require.False(t, PrecompileCallRunsOutOfGas(hash(need), rules))
+	require.True(t, PrecompileCallRunsOutOfGas(hash(need-1), beforeFloor), "the per-word price counts")
+	require.False(t, PrecompileCallRunsOutOfGas(hash(need), beforeFloor))
 }
