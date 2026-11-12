@@ -2637,6 +2637,18 @@ func TestWritesAlreadySeededKeepsTheSeedThroughValidation(t *testing.T) {
 	require.True(t, vm.WritesAlreadySeeded(addr, storageWriteSet(addr, slot, 0, 42, ValueChanged)))
 }
 
+// Completion moves the seeded Done cell to Done again through a CAS that must keep the seed bit.
+func TestWritesAlreadySeededKeepsTheSeedThroughCompletion(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0xbe, 0xef})
+	slot := accounts.InternKey(common.Hash{0x04})
+	vm := NewVersionMap(seededSlotBAL(addr, slot))
+	ws := storageWriteSet(addr, slot, 0, 42, ValueChanged)
+	vm.FlushVersionedWrites(ws, false)
+	vm.MarkWritesComplete(ws)
+
+	require.True(t, vm.WritesAlreadySeeded(addr, storageWriteSet(addr, slot, 0, 42, ValueChanged)))
+}
+
 func TestWritesAlreadySeededRefusesACellATxOverwrote(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xbe, 0xef})
 	slot := accounts.InternKey(common.Hash{0x04})
