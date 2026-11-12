@@ -458,11 +458,17 @@ func readCanonicalBlock(ctx context.Context, tx kv.Tx, r BeaconSnapshotReader, s
 		}
 		return nil, common.Hash{}, nil
 	}
+	if block.Block.Slot != slot {
+		return nil, common.Hash{}, fmt.Errorf("block at slot %d is not canonical", slot)
+	}
+	if block.Version() < clparams.GloasVersion {
+		return block, canonicalRoot, nil
+	}
 	root, err = block.Block.HashSSZ()
 	if err != nil {
 		return nil, common.Hash{}, err
 	}
-	if block.Block.Slot != slot || root != canonicalRoot {
+	if root != canonicalRoot {
 		return nil, common.Hash{}, fmt.Errorf("block at slot %d is not canonical", slot)
 	}
 	return block, root, nil
