@@ -17,6 +17,7 @@
 package antiquary
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -38,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 )
 
 func TestShouldBackoffHistoricalStateRead(t *testing.T) {
@@ -170,4 +172,46 @@ func TestIncrementToFinalizedReachesTheFinalizedSlot(t *testing.T) {
 	progress, err := state_accessors.GetStateProcessingProgress(tx)
 	require.NoError(t, err)
 	require.Equal(t, finalized, progress)
+}
+
+func newElectraAntiquaryForFinality(t *testing.T) (*Antiquary, kv.RwDB, []*cltypes.SignedBeaconBlock, *state.CachingBeaconState, *state.CachingBeaconState, freezeblocks.BeaconSnapshotReader, synced_data.SyncedData) {
+	t.Helper()
+	blocks, preState, postState := tests.GetElectraRandom()
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	reader := tests.LoadChain(blocks, db, t)
+	sn := synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
+	require.NoError(t, sn.OnHeadState(postState))
+	genesis, err := preState.Copy()
+	require.NoError(t, err)
+	a := NewAntiquary(context.Background(), nil, preState, state_accessors.NewStaticValidatorTable(), &clparams.MainnetBeaconConfig, datadir.New(t.TempDir()), nil, db, nil, nil, reader, sn, log.New(), true, true, true, false, nil)
+	return a, db, blocks, genesis, postState, reader, sn
+}
+
+// The finalized epoch start of this fixture has no block (blocks at 8258 and 8290). Two passes, one per finalization,
+// reconstruct the same balances as one, and the progress reaches the finalized slot after the first.
+func TestIncrementToFinalizedOverAMissedEpochStart(t *testing.T) {
+	a, db, blocks, genesis, postState, reader, sn := newElectraAntiquaryForFinality(t)
+	const missed = 8288
+	require.Equal(t, uint64(8258), blocks[len(blocks)-2].Block.Slot)
+	require.Equal(t, uint64(8290), blocks[len(blocks)-1].Block.Slot)
+	ctx := context.Background()
+
+	require.NoError(t, a.incrementToFinalized(ctx, missed))
+	require.NoError(t, db.View(ctx, func(tx kv.Tx) error {
+		progress, err := state_accessors.GetStateProcessingProgress(tx)
+		require.NoError(t, err)
+		require.Equal(t, uint64(missed), progress, "the scanned finalized slot is reconstructed")
+		return nil
+	}))
+
+	require.NoError(t, a.incrementToFinalized(ctx, missed+32))
+	require.NoError(t, db.View(ctx, func(tx kv.Tx) error {
+		validators := state_accessors.NewStaticValidatorTable()
+		require.NoError(t, state_accessors.ReadValidatorsTable(tx, validators))
+		historical := historical_states_reader.NewHistoricalStatesReader(&clparams.MainnetBeaconConfig, reader, validators, genesis, nil, sn)
+		got, err := historical.ReadHistoricalState(ctx, tx, 8290)
+		require.NoError(t, err)
+		require.True(t, bytes.Equal(postState.RawBalances(), got.RawBalances()), "historical balances at 8290 differ from the post-state")
+		return nil
+	}))
 }

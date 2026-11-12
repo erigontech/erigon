@@ -261,7 +261,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	start := time.Now()
 
 	// Use this as the event slot (it will be incremented by 1 each time we process a block)
-	slot := s.currentState.Slot() + 1
+	slot := max(s.currentState.Slot(), s.stateScannedThrough) + 1
 
 	events := state_accessors.NewStateEvents()
 	slashingOccurred := false
@@ -367,7 +367,9 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 
 	startLoop := time.Now()
 
-	commitBatch := func() error {
+	// commitBatch records progress through scanned, the last slot this pass went through: slots after the last block
+	// are reconstructed too.
+	commitBatch := func(scanned uint64) error {
 		rwTx, err := s.mainDB.BeginRw(ctx)
 		if err != nil {
 			return err
@@ -376,7 +378,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		if err := stateAntiquaryCollector.flush(ctx, rwTx); err != nil {
 			return err
 		}
-		if err := state_accessors.SetStateProcessingProgress(rwTx, s.currentState.Slot()); err != nil {
+		if err := state_accessors.SetStateProcessingProgress(rwTx, max(s.currentState.Slot(), scanned)); err != nil {
 			return err
 		}
 		s.validatorsTable.SetSlot(s.currentState.Slot())
@@ -414,7 +416,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		// flush + commit them and start a fresh collector, so no single commit
 		// carries a huge retired-page list.
 		if slot-lastCommitSlot >= s.maxSlotsPerCommit {
-			if err := commitBatch(); err != nil {
+			if err := commitBatch(slot - 1); err != nil {
 				return err
 			}
 			stateAntiquaryCollector.close()
@@ -626,9 +628,10 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	log.Log(logLvl, "Stopped Caplin to load states")
 	start = time.Now()
 	// Flush + commit the remaining slots since the last in-loop commit.
-	if err := commitBatch(); err != nil {
+	if err := commitBatch(slot - 1); err != nil {
 		return err
 	}
+	s.stateScannedThrough = slot - 1
 	endTime := time.Since(start)
 	stateRoot, err := s.currentState.HashSSZ()
 	if err != nil {
@@ -826,6 +829,7 @@ func (s *Antiquary) initializeStateAntiquaryIfNeeded(ctx context.Context, tx kv.
 
 	s.balances32 = s.balances32[:0]
 	s.balances32 = append(s.balances32, s.currentState.RawBalances()...)
+	s.stateScannedThrough = 0
 	return s.currentState.InitBeaconState()
 }
 
