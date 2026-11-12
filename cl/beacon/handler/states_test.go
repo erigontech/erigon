@@ -685,6 +685,15 @@ func TestGetRandaoMissingPreviousEpochMix(t *testing.T) {
 	require.Equal(t, http.StatusNotFound, rec.Code, "unavailable previous-epoch mix must return 404: GET %s returned %d: %s", path, rec.Code, rec.Body.String())
 }
 
+func TestGetRandaoEpochOutOfRange(t *testing.T) {
+	_, _, _, _, post, h, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), false)
+	epoch := post.Slot() / h.beaconChainCfg.SlotsPerEpoch
+	path := fmt.Sprintf("/eth/v1/beacon/states/%d/randao?epoch=%d", post.Slot(), epoch+1)
+	rec := httptest.NewRecorder()
+	h.mux.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil))
+	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+}
+
 func TestGetCommitteesMissingRandaoMixReturns404(t *testing.T) {
 	db, _, _, _, post, h, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	fcu.FinalizedSlotVal = post.Slot() + 1
@@ -714,6 +723,21 @@ func TestGetCommitteesMissingRandaoMixReturns404(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(missing.Body.Bytes(), &response))
 	require.Contains(t, response.Message, "randao mix")
+}
+
+func TestGetCommitteesMalformedRandaoMixReturns500(t *testing.T) {
+	db, _, _, _, post, h, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	fcu.FinalizedSlotVal = post.Slot() + 1
+	epoch := post.Slot()/h.beaconChainCfg.SlotsPerEpoch - 1
+	path := fmt.Sprintf("/eth/v1/beacon/states/%d/committees?epoch=%d", post.Slot(), epoch)
+	mixEpoch := epoch - h.beaconChainCfg.MinSeedLookahead - 1
+	key := base_encoding.Encode64ToBytes4(mixEpoch * h.beaconChainCfg.SlotsPerEpoch)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return tx.Put(kv.RandaoMixes, key, make([]byte, 31))
+	}))
+	rec := httptest.NewRecorder()
+	h.mux.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil))
+	require.Equal(t, http.StatusInternalServerError, rec.Code, rec.Body.String())
 }
 
 func TestGetPendingQueuesConsensusVersionHeader(t *testing.T) {
