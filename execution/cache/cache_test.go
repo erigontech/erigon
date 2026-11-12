@@ -1522,7 +1522,12 @@ func TestStateCache_CodeHashHitBindsAddress(t *testing.T) {
 	t.Cleanup(c.Close)
 	firstAddr, secondAddr, code := makeAddr(1), makeAddr(2), makeCode(1)
 	codeHash := crypto.Keccak256Hash(code)
-	view := c.View(FrontierFunc(func(kv.Domain) (uint64, bool) { return 100, true }))
+	view := c.View(FrontierFunc(func(d kv.Domain) (uint64, bool) {
+		if d == kv.CodeDomain {
+			return 11, true
+		}
+		return 100, true
+	}))
 	view.Fill(kv.CodeDomain, firstAddr, code, 10)
 	view.SeedAddrCodeHash(secondAddr, codeHash, 11)
 	_, ok := c.View(nil).Get(kv.CodeDomain, secondAddr)
@@ -1533,7 +1538,7 @@ func TestStateCache_CodeHashHitBindsAddress(t *testing.T) {
 	got, ok = c.View(nil).Get(kv.CodeDomain, secondAddr)
 	require.True(t, ok, "the hash hit must populate the addr-keyed code binding")
 	require.Equal(t, code, got)
-	c.Applier().Unwind(11)
+	c.Applier().Unwind(50)
 	_, ok = c.View(nil).Get(kv.CodeDomain, secondAddr)
 	require.False(t, ok, "the derived binding must keep the mapping stamp for unwind invalidation")
 }
@@ -1729,13 +1734,26 @@ func TestStateCache_ReadFillUsesObservedState(t *testing.T) {
 			t.Cleanup(sc.Close)
 			key, value := makeAddr(1), []byte{1, 2, 3}
 			sc.Applier().Initialize(1)
-			view := sc.View(frontierAtVersion(19, 1))
+			view := sc.View(FrontierWithStateVersion(FrontierFunc(func(d kv.Domain) (uint64, bool) {
+				if domain == kv.CodeDomain && d == kv.AccountsDomain {
+					return 29, true
+				}
+				return 19, true
+			}), 1))
 			view.Fill(domain, key, value, 2)
 			_, ok := view.GetAsOf(domain, key, 18)
 			require.False(t, ok, "a read does not prove the value was valid before the observed state")
 			got, ok := view.GetAsOf(domain, key, 19)
 			require.True(t, ok)
 			require.Equal(t, value, got)
+			_, _, ok = sc.View(frontierAtVersion(11, 1)).GetVisible(domain, key)
+			require.False(t, ok, "an older snapshot must not serve the read fill")
+
+			futureKey := makeAddr(2)
+			sc.Applier().Publish(1, 2, []StateUpdate{{Domain: domain, Key: futureKey, Value: value, TxNum: 29}})
+			_, _, ok = view.GetVisible(domain, futureKey)
+			require.False(t, ok, "a newer committed value must stay outside the snapshot")
+
 			sc.Applier().Unwind(18)
 			_, ok = sc.View(nil).Get(domain, key)
 			require.False(t, ok)

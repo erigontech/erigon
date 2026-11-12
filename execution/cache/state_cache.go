@@ -302,7 +302,9 @@ func (c *StateCache) fillCodeWithHashIfFresh(key, value, codeHash []byte, readTx
 		accountsVisibleEnd < c.appliedEnd[kv.AccountsDomain] {
 		return
 	}
-	codeCache.PutWithCodeHashIfAbsent(key, value, codeHash, readFillStamp(readTxNum, max(visibleEnd, accountsVisibleEnd)))
+	// The accounts frontier gates admission, but code read fills use the code frontier.
+	// A binding derived from an account already carries its bound in readTxNum.
+	codeCache.PutWithCodeHashIfAbsent(key, value, codeHash, readFillStamp(readTxNum, visibleEnd))
 }
 
 // deleteKey removes the data for the given domain and key. The authoritative
