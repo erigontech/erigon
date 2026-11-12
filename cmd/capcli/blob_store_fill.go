@@ -383,14 +383,17 @@ func expectedBlobs(ctx context.Context, db kv.RoDB, blocks freezeblocks.BeaconSn
 		return 0, err
 	}
 	for slot := block.Block.Slot + 1; slot <= head; slot++ {
-		_, next, err := readSlot(ctx, db, blocks, slot)
+		nextRoot, next, err := readSlot(ctx, db, blocks, slot)
 		if err != nil {
 			return 0, err
 		}
-		if next == nil {
+		if next == nil && nextRoot == (common.Hash{}) {
 			continue
 		}
-		if next.Block.ParentRoot == root && next.Block.Body.SignedExecutionPayloadBid.Message.ParentBlockHash != block.Block.Body.SignedExecutionPayloadBid.Message.BlockHash {
+		if next == nil || nextRoot == (common.Hash{}) || next.Block.ParentRoot != root {
+			return n, nil
+		}
+		if next.Block.Body.SignedExecutionPayloadBid.Message.ParentBlockHash != block.Block.Body.SignedExecutionPayloadBid.Message.BlockHash {
 			return 0, nil
 		}
 		return n, nil

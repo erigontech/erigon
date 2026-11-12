@@ -249,6 +249,22 @@ func TestBlobArchiveStoreFillKeepsAGloasBlockWhoseSuccessorIsNotItsChild(t *test
 	require.True(t, f.storedValid(fillTestSlot, root))
 }
 
+func TestBlobArchiveStoreFillKeepsAGloasBlockWhoseChildIsNotIndexed(t *testing.T) {
+	f := newFillFixture(t)
+	f.version = clparams.GloasVersion
+	root := f.addBlock(fillTestSlot, 1)
+	child := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+	child.Block.Slot, child.Block.ParentRoot = fillTestSlot+1, root
+	child.Block.Body.SignedExecutionPayloadBid.Message.ParentBlockHash = common.Hash{0xdd}
+	f.blocks.blocks[fillTestSlot+1] = child
+	f.addBlock(fillTestSlot+2, 0)
+	url, _ := f.endpoint(false)
+
+	require.NoError(t, f.fill(&BlobArchiveStoreFill{Endpoints: []string{url}, FromSlot: fillTestSlot, ToSlot: fillTestSlot}, nil))
+
+	require.True(t, f.storedValid(fillTestSlot, root))
+}
+
 func newSkippedPayloadFixture(t *testing.T, gap uint64) (*fillFixture, common.Hash, common.Hash) {
 	f := newFillFixture(t)
 	f.version = clparams.GloasVersion
