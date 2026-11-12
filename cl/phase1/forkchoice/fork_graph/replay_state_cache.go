@@ -43,26 +43,10 @@ func (c *replayStateCache) getCache() *lru.Cache[common.Hash, *state.CachingBeac
 }
 
 func (c *replayStateCache) get(root common.Hash) (*state.CachingBeaconState, bool) {
-	cached, ok := c.getCache().Get(root)
-	if !ok {
-		return nil, false
-	}
-	copy, err := cached.Copy()
-	if err != nil {
-		return nil, false
-	}
-	return copy, true
+	return c.getCache().Get(root)
 }
 
 func (c *replayStateCache) add(root common.Hash, bs *state.CachingBeaconState) {
-	copy, err := bs.Copy()
-	if err != nil {
-		return
-	}
-	c.addCopy(root, copy)
-}
-
-func (c *replayStateCache) addCopy(root common.Hash, bs *state.CachingBeaconState) {
 	c.getCache().Add(root, bs)
 }
 

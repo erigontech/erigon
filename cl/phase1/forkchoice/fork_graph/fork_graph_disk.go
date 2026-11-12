@@ -477,14 +477,22 @@ func (f *forkGraphDisk) replayState(blockRoot common.Hash, addChainSegment bool)
 			return state, err
 		}
 	} else {
+		var cached *state.CachingBeaconState
 		f.lifecycleMu.RLock()
 		if f.retainedBlock(blockRoot) {
-			if cached, ok := f.replayedStates.get(blockRoot); ok && f.retainedBlock(blockRoot) {
-				f.lifecycleMu.RUnlock()
-				return cached, nil
-			}
+			cached, _ = f.replayedStates.get(blockRoot)
 		}
 		f.lifecycleMu.RUnlock()
+		if cached != nil {
+			if cachedCopy, copyErr := cached.Copy(); copyErr == nil {
+				f.lifecycleMu.RLock()
+				retained := f.retainedBlock(blockRoot)
+				f.lifecycleMu.RUnlock()
+				if retained {
+					return cachedCopy, nil
+				}
+			}
+		}
 		if _, ok := f.GetHeader(blockRoot); !ok {
 			return nil, nil
 		}
@@ -559,7 +567,7 @@ func (f *forkGraphDisk) replayState(blockRoot common.Hash, addChainSegment bool)
 		if copyErr == nil {
 			f.lifecycleMu.RLock()
 			if f.retainedBlock(blockRoot) {
-				f.replayedStates.addCopy(blockRoot, cacheCopy)
+				f.replayedStates.add(blockRoot, cacheCopy)
 			}
 			f.lifecycleMu.RUnlock()
 		}
