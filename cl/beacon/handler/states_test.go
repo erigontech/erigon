@@ -656,6 +656,15 @@ func TestGetRandao(t *testing.T) {
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	require.Equal(t, http.StatusNotFound, resp.StatusCode)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return tx.Put(kv.IntraRandaoMixes, base_encoding.Encode64ToBytes4(postState.Slot()), make([]byte, 31))
+	}))
+	req, err = http.NewRequestWithContext(t.Context(), "GET", server.URL+"/eth/v1/beacon/states/"+strconv.FormatInt(int64(postState.Slot()), 10)+"/randao", nil)
+	require.NoError(t, err)
+	resp, err = server.Client().Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusInternalServerError, resp.StatusCode)
 }
 
 func TestGetRandaoMissingPreviousEpochMix(t *testing.T) {
@@ -676,7 +685,7 @@ func TestGetRandaoMissingPreviousEpochMix(t *testing.T) {
 	require.Equal(t, http.StatusNotFound, rec.Code, "unavailable previous-epoch mix must return 404: GET %s returned %d: %s", path, rec.Code, rec.Body.String())
 }
 
-func TestRandaoFixPreservesCommitteeMissingMixResponse(t *testing.T) {
+func TestGetCommitteesMissingRandaoMixReturns404(t *testing.T) {
 	db, _, _, _, post, h, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	fcu.FinalizedSlotVal = post.Slot() + 1
 	epoch := post.Slot()/h.beaconChainCfg.SlotsPerEpoch - 1
