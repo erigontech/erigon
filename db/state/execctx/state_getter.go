@@ -45,7 +45,7 @@ func (g *stateGetter) GetLatest(name kv.Domain, k []byte, opts kv.GetLatestOptio
 	if metrics == nil {
 		metrics = g.m
 	}
-	return g.sd.getLatest(name, g.tx, k, metrics, start, opts.MaxStep(), g.view, getLatestOptions{})
+	return g.sd.getLatest(name, g.tx, k, metrics, start, opts.MaxStep(), g.view, getLatestOptions{published: true})
 }
 
 func (g *stateGetter) GetCode(addr []byte, txNum uint64) ([]byte, bool, error) {

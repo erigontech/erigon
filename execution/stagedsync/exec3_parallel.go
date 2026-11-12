@@ -394,6 +394,10 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 	prevInMemHistoryReads := pe.rs.Domains().InMemHistoryReads()
 	pe.rs.Domains().SetInMemHistoryReads(true)
 	defer pe.rs.Domains().SetInMemHistoryReads(prevInMemHistoryReads)
+	// Exec readers resolve in-block writes in the version maps, so they need a block's writes in the
+	// shared domain only from its RemoveTail on: publish them once per block, not per write.
+	pe.rs.Domains().DeferPublish()
+	defer pe.rs.Domains().Publish()
 
 	// The calculator installs its own asOfStateReader on the shared commitment
 	// context; restore the prior reader on exit so it doesn't leak GetAsOf reads
@@ -681,6 +685,8 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					blockApplyCount += writeCount
 					pe.rs.SetTrace(false)
 				case *blockResult:
+					pe.rs.Domains().Publish()
+					pe.rs.Domains().DeferPublish()
 					built := balBuilder
 					balBuilder = nil
 					if finalized {

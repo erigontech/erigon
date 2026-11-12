@@ -74,7 +74,15 @@ func (w *witnessMemBatch) DomainDel(domain kv.Domain, k string, txNum uint64, pr
 }
 
 func (w *witnessMemBatch) GetLatest(domain kv.Domain, key []byte) ([]byte, kv.Step, bool) {
-	if v, step, ok := w.TemporalMemBatch.GetLatest(domain, key); ok {
+	return w.withWitness(domain, key, w.TemporalMemBatch.GetLatest)
+}
+
+func (w *witnessMemBatch) GetLatestPublished(domain kv.Domain, key []byte) ([]byte, kv.Step, bool) {
+	return w.withWitness(domain, key, w.TemporalMemBatch.GetLatestPublished)
+}
+
+func (w *witnessMemBatch) withWitness(domain kv.Domain, key []byte, get func(kv.Domain, []byte) ([]byte, kv.Step, bool)) ([]byte, kv.Step, bool) {
+	if v, step, ok := get(domain, key); ok {
 		return v, step, true
 	}
 	if m := w.witness[domain]; m != nil {
