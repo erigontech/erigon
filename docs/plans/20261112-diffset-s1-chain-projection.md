@@ -89,7 +89,10 @@ NOTES:
 - [x] `dataWithTxNum` carries `prev []byte`, set per I-1 and I-4. `putLatestLocked` receives the prev.
 - [x] `putHistory` no longer calls `PutWithPrev` / `DeleteWithPrev` / `PutWithPrevDiff` / `DeleteWithPrevDiff` for history. It keeps the `addValue` call (T4 moves it) and calls `diff.DomainUpdate(k, step, prev)` itself when the writer's diff, or `PutCommitmentBranchDiff`'s explicit diff, is set. A same-txNum update records nothing.
 - [x] `Flush`, before `flushWriters`: for every chain entry of every domain, `domainWriters[d].h.AddPrevValue(key, txNum, prev)`.
-- [x] `Merge` concatenates chains instead of replacing them: the receiver's entries below the other's first txNum, then the other's chain.
+- [x] `Merge` projects every unflushed receiver entry trimmed by the other's first txNum into the receiver's writers, then appends the other's chain unchanged.
+- [x] Review: overlapping merges project trimmed receiver entries and append the other chain unchanged.
+- [x] Review: discarded child entries are marked history/value flushed.
+- [x] Review: storage same-txNum updates preserve the first prev.
 - [x] Red first: a `GetAsOf` test on a merged batch, at a ts inside the receiver's range for a key both batches wrote. It fails on the base (whole-chain replace) and passes here.
 - [x] Goldens: `forward`, `discard`, `merge`, and `reflush` unchanged. `unwind` changes only by removing old history rows at txNum 5..6.
 - [x] Direction:
@@ -104,6 +107,7 @@ NOTES:
 - LSP found `TemporalMemBatch` as the only in-package caller of `PutWithPrev`, `PutWithPrevDiff`, `DeleteWithPrev`, and `DeleteWithPrevDiff`; `db/state/commitment_convert.go:489` calls `DomainBufferedWriter.PutWithPrev` directly and keeps its behavior.
 - `unsafe.Sizeof(dataWithTxNum{})` is 32 bytes before T3 and 64 bytes after T3.
 - The direct `dumpCommitmentStep` path projects the chains before collating history because it intentionally bypasses `Flush`.
+- Overlapping merges project the receiver's trimmed history and per-step values before appending the other chain; discarded child entries are marked flushed so they do not emit rows. The storage same-txNum path keeps the first prev, like the sharded map path.
 
 ### T4: values from the chains at flush
 
@@ -117,11 +121,18 @@ NOTES:
 - LSP found `DomainBufferedWriter.addValue` callers outside `TemporalMemBatch` in `db/state/domain.go:588`, `db/state/domain.go:610`, and `db/state/domain_test.go:1001`; these retain their behavior.
 - `unsafe.Sizeof(dataWithTxNum{})` is 64 bytes after splitting `flushed` into `histFlushed` and `valFlushed`.
 - The eight deleted rows are `AccountVals\t720000000000000000000000000000000000008d\tfffffffffffffffa7205`, `AccountVals\t730000000000000000000000000000000000008c\tfffffffffffffff97306`, `AccountVals\t730000000000000000000000000000000000008c\tfffffffffffffffa`, `StorageVals\t720000000000000000000000000000000000008d12000000000000000000000000000000000000000000000000000000000000ed\tfffffffffffffffa8205`, `StorageVals\t730000000000000000000000000000000000008c13000000000000000000000000000000000000000000000000000000000000ec\tfffffffffffffff98306`, `StorageVals\t730000000000000000000000000000000000008c13000000000000000000000000000000000000000000000000000000000000ec\tfffffffffffffffa`, `CodeVals\t730000000000000000000000000000000000008cfffffffffffffff9\t9306`, and `CodeVals\t730000000000000000000000000000000000008cfffffffffffffffa\t`.
+- The T3 review fixes project trimmed overlap rows, preserve discarded-child rows as absent, and cover the storage same-txNum first-prev rule.
+- `shouldUnwindStoredValue` removes the eight old-only value rows in `unwind.txt` that value projection alone would retain. Replay skips those key/step entries because they exist only in the unflushed in-memory chain and were never written to MDBX.
 
 ### T5: Merge keeps no domain writers
 
-- [ ] After T4 the other batch's domain writers hold nothing. `Merge` closes them instead of moving them, and `pastDomainWriters` is deleted. The II writers (`pastIIWriters`, standalone indices via `IndexAdd`) stay.
-- [ ] Goldens unchanged.
+- [x] After T4 the other batch's domain writers hold nothing. `Merge` checks and closes them instead of moving them; `pastDomainWriters` is retained only on the receiver for existing writer state. The II writers (`pastIIWriters`, standalone indices via `IndexAdd`) stay.
+- [x] Goldens unchanged.
+
+NOTES:
+
+- LSP found the only production write into a `TemporalMemBatch` domain writer outside chain projection at `db/state/commitment_convert.go:489` through the writer initialized at `:424-425`; direct test writers are used at `db/state/domain_test.go:328` and `:331`, while `db/state/squeeze.go:1257-1265` and `db/state/domain.go:913-915` only project and collate. The field references were checked with gopls.
+- The parent `b16730c6c44` value rows for the overlap test are one `AccountVals` row per case: key `910000000000000000000000000000000000006e`, value `ffffffffffffffff09`.
 
 ## Checkpoints (supervisor)
 

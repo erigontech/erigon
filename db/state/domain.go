@@ -643,6 +643,13 @@ type DomainBufferedWriter struct {
 	h *historyBufferedWriter
 }
 
+func (w *DomainBufferedWriter) hasBufferedData() bool {
+	if w == nil {
+		return false
+	}
+	return w.values != nil || (w.h != nil && (w.h.historyVals != nil || (w.h.ii != nil && (w.h.ii.index != nil || w.h.ii.indexKeys != nil))))
+}
+
 func (w *DomainBufferedWriter) Close() {
 	if w == nil {
 		return

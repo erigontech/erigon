@@ -2087,3 +2087,136 @@ func TestSharedDomain_MergeUnwindKeepsDeeperTarget(t *testing.T) {
 	mergeAndCheck(deepTarget, shallowTarget)
 	mergeAndCheck(shallowTarget, deepTarget)
 }
+
+func t3ReviewBatch(t *testing.T) (kv.TemporalRwTx, *execctx.SharedDomains) {
+	t.Helper()
+	db := newTestDb(t, 4)
+	tx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	t.Cleanup(tx.Rollback)
+	sd, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
+	require.NoError(t, err)
+	t.Cleanup(sd.Close)
+	return tx, sd
+}
+
+func TestT3HistoryOwnsEqualPrev(t *testing.T) {
+	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain} {
+		for _, source := range []string{"caller", "transaction"} {
+			t.Run(domain.String()+"/"+source, func(t *testing.T) {
+				tx, sd := t3ReviewBatch(t)
+				key := flushGoldenAddress(0x91)
+				if domain == kv.StorageDomain {
+					key = flushGoldenStorageKey(key, 1)
+				}
+				mem := sd.GetMemBatch()
+				require.NoError(t, mem.DomainPut(domain, string(key), []byte("first"), 1, nil))
+				prev := []byte("first")
+				if source == "transaction" {
+					require.NoError(t, mem.Flush(t.Context(), tx))
+					var err error
+					prev, _, err = tx.GetLatest(domain, key, kv.GetLatestOptions{})
+					require.NoError(t, err)
+				}
+				owned, _, ok := mem.GetLatest(domain, key)
+				require.True(t, ok)
+				require.Equal(t, owned, prev)
+				require.NotEqual(t, fmt.Sprintf("%p", &owned[0]), fmt.Sprintf("%p", &prev[0]))
+				require.NoError(t, mem.DomainPut(domain, string(key), []byte("second"), 2, prev))
+				copy(prev, "xxxxx")
+				require.Equal(t, "first", string(owned))
+				require.NoError(t, mem.Flush(t.Context(), tx))
+				got, ok, err := tx.HistorySeek(domain, key, 2)
+				require.NoError(t, err)
+				require.True(t, ok)
+				if !bytes.Equal(got, []byte("first")) {
+					t.Fatalf("history prev at txNum 2: want %q, got %q", "first", got)
+				}
+			})
+		}
+	}
+}
+
+func TestT3MergePreservesParentHistory(t *testing.T) {
+	for _, last := range []uint64{2, 3} {
+		t.Run(fmt.Sprintf("receiverThrough%d", last), func(t *testing.T) {
+			tx, sd := t3ReviewBatch(t)
+			key := flushGoldenAddress(0x91)
+			mem := sd.GetMemBatch()
+			for i := uint64(1); i <= last; i++ {
+				require.NoError(t, mem.DomainPut(kv.AccountsDomain, string(key), []byte{byte(i)}, i, []byte{byte(i - 1)}))
+			}
+			child, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
+			require.NoError(t, err)
+			defer child.Close()
+			child.SetParent(sd)
+			flushGoldenPut(t, child, tx, kv.AccountsDomain, key, []byte{9}, 2)
+			require.NoError(t, mem.Merge(child.GetMemBatch()))
+			require.NoError(t, mem.Flush(t.Context(), tx))
+			var got []string
+			cursor, err := tx.Cursor(kv.TblAccountHistoryVals)
+			require.NoError(t, err)
+			defer cursor.Close()
+			for k, v, err := cursor.First(); k != nil; k, v, err = cursor.Next() {
+				require.NoError(t, err)
+				got = append(got, fmt.Sprintf("%x", v))
+			}
+			want := []string{"000000000000000100", "000000000000000201", fmt.Sprintf("0000000000000002%02x", last)}
+			if last == 3 {
+				want = append(want, "000000000000000302")
+			}
+			if fmt.Sprint(want) != fmt.Sprint(got) {
+				t.Errorf("parent history rows: want %v, got %v", want, got)
+			}
+			n, err := tx.Count(kv.TblAccountHistoryKeys)
+			require.NoError(t, err)
+			if n != last {
+				t.Errorf("parent history-key rows: want %d, got %d", last, n)
+			}
+			valueCursor, err := tx.CursorDupSort(kv.TblAccountVals)
+			require.NoError(t, err)
+			defer valueCursor.Close()
+			valueKey, value, err := valueCursor.SeekExact(key)
+			require.NoError(t, err)
+			require.Equal(t, key, valueKey)
+			wantValue := append(bytes.Repeat([]byte{0xff}, 8), 9)
+			if !bytes.Equal(wantValue, value) {
+				t.Errorf("parent value row: want %x, got %x", wantValue, value)
+			}
+			valueKey, value, err = valueCursor.NextDup()
+			require.NoError(t, err)
+			require.Nil(t, valueKey)
+			require.Nil(t, value)
+			if last == 3 {
+				value, ok, err := tx.GetAsOf(kv.AccountsDomain, key, 3)
+				require.NoError(t, err)
+				require.True(t, ok)
+				if !bytes.Equal(value, []byte{2}) {
+					t.Errorf("GetAsOf at txNum 3: want 02, got %x", value)
+				}
+			}
+		})
+	}
+}
+
+func TestT3MergeKeepsChildDiscarded(t *testing.T) {
+	tx, sd := t3ReviewBatch(t)
+	key := flushGoldenAddress(0x91)
+	mem := sd.GetMemBatch()
+	require.NoError(t, mem.DomainPut(kv.AccountsDomain, string(key), []byte{1}, 1, nil))
+	child, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
+	require.NoError(t, err)
+	defer child.Close()
+	child.SetParent(sd)
+	flushGoldenPut(t, child, tx, kv.AccountsDomain, key, []byte{2}, 2)
+	child.DiscardWrites(kv.AccountsDomain)
+	require.NoError(t, mem.Merge(child.GetMemBatch()))
+	require.NoError(t, mem.Flush(t.Context(), tx))
+	for _, table := range []string{kv.TblAccountHistoryVals, kv.TblAccountHistoryKeys} {
+		n, err := tx.Count(table)
+		require.NoError(t, err)
+		if n != 1 {
+			t.Errorf("%s rows after merging discarded child: want 1, got %d", table, n)
+		}
+	}
+}

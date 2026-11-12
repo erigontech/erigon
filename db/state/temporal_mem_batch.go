@@ -732,6 +732,27 @@ func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch) error {
 	defer sd.unlockAllDomains()
 	other.rlockAllDomains()
 	defer other.runlockAllDomains()
+	for domain, writer := range other.domainWriters {
+		if writer.hasBufferedData() {
+			return fmt.Errorf("can't merge domain %s with buffered writes", kv.Domain(domain))
+		}
+	}
+	for domain, writers := range other.pastDomainWriters {
+		for _, writer := range writers {
+			if writer.hasBufferedData() {
+				return fmt.Errorf("can't merge domain %s with buffered writes", kv.Domain(domain))
+			}
+		}
+	}
+	var otherDiscarded [kv.DomainLen]bool
+	for domain, writer := range other.domainWriters {
+		otherDiscarded[domain] = writer != nil && writer.discard
+	}
+	for domain, writers := range other.pastDomainWriters {
+		for _, writer := range writers {
+			otherDiscarded[domain] = otherDiscarded[domain] || writer != nil && writer.discard
+		}
+	}
 
 	for d := range other.latest {
 		for i := range other.latest[d] {
@@ -744,24 +765,48 @@ func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch) error {
 				sh.m = make(map[string][]dataWithTxNum, len(otherEntries))
 			}
 			for key, entries := range otherEntries {
-				sh.m[key] = mergeChain(sh.m[key], entries)
+				if otherDiscarded[d] {
+					entries = discardedChain(entries)
+				}
+				merged, err := sd.mergeChain(kv.Domain(d), key, sh.m[key], entries)
+				if err != nil {
+					return err
+				}
+				sh.m[key] = merged
 			}
 		}
 	}
 
-	other.storage.Scan(func(key string, value []dataWithTxNum) bool {
-		receiver, _ := sd.storage.Get(key)
-		sd.storage.Set(key, mergeChain(receiver, value))
-		return true
-	})
+	if other.storage != nil {
+		var mergeErr error
+		other.storage.Scan(func(key string, value []dataWithTxNum) bool {
+			if otherDiscarded[kv.StorageDomain] {
+				value = discardedChain(value)
+			}
+			receiver, _ := sd.storage.Get(key)
+			var merged []dataWithTxNum
+			merged, mergeErr = sd.mergeChain(kv.StorageDomain, key, receiver, value)
+			if mergeErr == nil {
+				sd.storage.Set(key, merged)
+			}
+			return mergeErr == nil
+		})
+		if mergeErr != nil {
+			return mergeErr
+		}
+	}
 
 	for domain, writer := range other.domainWriters {
-		sd.pastDomainWriters[domain] = append(sd.pastDomainWriters[domain], writer)
+		if writer != nil {
+			writer.Close()
+		}
 		other.domainWriters[domain] = nil
 	}
 
 	for domain, writers := range other.pastDomainWriters {
-		sd.pastDomainWriters[domain] = append(sd.pastDomainWriters[domain], writers...)
+		for _, writer := range writers {
+			writer.Close()
+		}
 		other.pastDomainWriters[domain] = nil
 	}
 
@@ -838,27 +883,58 @@ func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch) error {
 	return nil
 }
 
-func mergeChain(receiver, other []dataWithTxNum) []dataWithTxNum {
+func discardedChain(entries []dataWithTxNum) []dataWithTxNum {
+	marked := append([]dataWithTxNum(nil), entries...)
+	for i := range marked {
+		marked[i].histFlushed = true
+		marked[i].valFlushed = true
+	}
+	return marked
+}
+
+func (sd *TemporalMemBatch) projectTrimmed(domain kv.Domain, key string, entries []dataWithTxNum) error {
+	writer := sd.domainWriters[domain]
+	if writer == nil {
+		return nil
+	}
+	for i := range entries {
+		entry := &entries[i]
+		if !entry.histFlushed {
+			if err := writer.h.AddPrevValue(common.ToBytesZeroCopy(key), entry.txNum, entry.prev); err != nil {
+				return err
+			}
+		}
+		if entry.valFlushed {
+			continue
+		}
+		step := kv.Step(entry.txNum / sd.stepSize)
+		if i+1 < len(entries) && kv.Step(entries[i+1].txNum/sd.stepSize) == step {
+			continue
+		}
+		if err := writer.addValue(common.ToBytesZeroCopy(key), entry.data, step); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (sd *TemporalMemBatch) mergeChain(domain kv.Domain, key string, receiver, other []dataWithTxNum) ([]dataWithTxNum, error) {
 	if len(other) == 0 {
-		return receiver
+		return receiver, nil
 	}
 	firstTxNum := other[0].txNum
 	keep := 0
 	for keep < len(receiver) && receiver[keep].txNum < firstTxNum {
 		keep++
 	}
+	if keep < len(receiver) {
+		if err := sd.projectTrimmed(domain, key, receiver[keep:]); err != nil {
+			return nil, err
+		}
+	}
 	merged := make([]dataWithTxNum, 0, keep+len(other))
 	merged = append(merged, receiver[:keep]...)
-	if keep < len(receiver) && receiver[keep].txNum == firstTxNum {
-		first := other[0]
-		first.prev = receiver[keep].prev
-		first.histFlushed = receiver[keep].histFlushed
-		first.valFlushed = false
-		merged = append(merged, first)
-		merged = append(merged, other[1:]...)
-		return merged
-	}
-	return append(merged, other...)
+	return append(merged, other...), nil
 }
 
 // Flush writes the mem-batch to tx. With kv.WithFlushCallback options, the

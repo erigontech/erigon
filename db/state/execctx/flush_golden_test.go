@@ -140,6 +140,8 @@ func buildForward(t *testing.T, domains *execctx.SharedDomains, tx kv.TemporalRw
 		flushGoldenPut(t, domains, tx, kv.AccountsDomain, accountA, []byte{0xa1, 0x02}, 2)
 		flushGoldenPut(t, domains, tx, kv.AccountsDomain, accountC, []byte{0xc1, 0x02}, 2)
 		flushGoldenPut(t, domains, tx, kv.AccountsDomain, accountC, []byte{0xc1, 0x03}, 2)
+		flushGoldenPut(t, domains, tx, kv.StorageDomain, storageB, []byte{0xb2, 0x02}, 2)
+		flushGoldenPut(t, domains, tx, kv.StorageDomain, storageB, []byte{0xb2, 0x03}, 2)
 		require.NoError(t, rawtemporaldb.AppendReceiptMetadata(domains.AsPutDel(tx), 2, 20, 200, 2))
 		require.NoError(t, rawtemporaldb.AppendReceiptMetadata(domains.AsPutDel(tx), 3, 21, 201, 2))
 	})
