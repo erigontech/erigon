@@ -720,6 +720,42 @@ func (r *fillReadCounter) ReadBeaconBlockBodyBySlot(ctx context.Context, tx kv.T
 	return r.BeaconSnapshotReader.ReadBeaconBlockBodyBySlot(ctx, tx, slot)
 }
 
+type failingFillReader struct {
+	freezeblocks.BeaconSnapshotReader
+	calls  atomic.Uint64
+	failAt uint64
+	err    error
+}
+
+func (r *failingFillReader) ReadBeaconBlockBodyBySlot(ctx context.Context, tx kv.Tx, slot uint64) (*cltypes.SignedBeaconBlock, error) {
+	if r.calls.Add(1) == r.failAt {
+		return nil, r.err
+	}
+	return r.BeaconSnapshotReader.ReadBeaconBlockBodyBySlot(ctx, tx, slot)
+}
+
+func TestBlobArchiveStoreFillStopsWhenWindowReadFails(t *testing.T) {
+	for _, dryRun := range []bool{true, false} {
+		t.Run(fmt.Sprint(dryRun), func(t *testing.T) {
+			f := newFillFixture(t)
+			f.addBlock(fillTestSlot, 1)
+			toSlot := fillTestSlot
+			if !dryRun {
+				f.addBlock(fillTestSlot+1, 1)
+				toSlot++
+			}
+			url, _ := f.endpoint(true)
+			readErr := errors.New("window read failed")
+			reader := &failingFillReader{BeaconSnapshotReader: f.blocks, failAt: 2, err: readErr}
+			cmd := &BlobArchiveStoreFill{Endpoints: []string{url}, FromSlot: fillTestSlot, ToSlot: toSlot, DryRun: dryRun, windows: make([]endpointWindow, 1)}
+
+			err := cmd.fillSlot(t.Context(), f.db, reader, &writeErrRecorder{BlobStorage: f.store}, fillTestSlot, &fillReport{})
+			require.ErrorIs(t, err, readErr)
+			require.ErrorContains(t, err, "find the window of endpoint 1")
+		})
+	}
+}
+
 func TestBlobArchiveStoreFillSparseWindowReads(t *testing.T) {
 	const slots = uint64(65_536)
 	f := newFillFixture(t)

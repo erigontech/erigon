@@ -72,6 +72,7 @@ type BlobArchiveStoreFill struct {
 type endpointWindow struct {
 	once sync.Once
 	from atomic.Uint64
+	err  error
 }
 
 var errNoSidecars = errors.New("the endpoint has no sidecars for the block")
@@ -299,7 +300,9 @@ func (b *BlobArchiveStoreFill) fillSlot(ctx context.Context, db kv.RoDB, blocks 
 	if b.DryRun {
 		served := len(b.Endpoints) == 0
 		for i := range b.Endpoints {
-			b.findWindow(ctx, db, blocks, i, b.FromSlot)
+			if err := b.findWindow(ctx, db, blocks, i, b.FromSlot); err != nil {
+				return fmt.Errorf("find the window of endpoint %d: %w", i+1, err)
+			}
 			served = served || slot >= b.windows[i].from.Load()
 		}
 		log.Info("Slot needs its sidecars", "slot", slot, "blockRoot", root, "blobs", blobs, "served", served)
@@ -330,7 +333,9 @@ func (b *BlobArchiveStoreFill) fillSlot(ctx context.Context, db kv.RoDB, blocks 
 			return nil
 		}
 		if notServed(lastErr) {
-			b.findWindow(ctx, db, blocks, i, slot+1)
+			if err := b.findWindow(ctx, db, blocks, i, slot+1); err != nil {
+				return fmt.Errorf("find the window of endpoint %d: %w", i+1, err)
+			}
 		} else {
 			unserved = false
 		}
@@ -372,14 +377,21 @@ func notServed(err error) bool {
 	return errors.Is(err, errNoSidecars) || ok && status == http.StatusBadRequest
 }
 
-func (b *BlobArchiveStoreFill) findWindow(ctx context.Context, db kv.RoDB, blocks freezeblocks.BeaconSnapshotReader, i int, lo uint64) {
+func (b *BlobArchiveStoreFill) findWindow(ctx context.Context, db kv.RoDB, blocks freezeblocks.BeaconSnapshotReader, i int, lo uint64) error {
 	w := &b.windows[i]
 	w.once.Do(func() {
 		scanned := map[uint64]uint64{}
 		answers := map[common.Hash]bool{}
 		n := sort.Search(int(b.ToSlot+1-lo), func(n int) bool {
+			if w.err != nil {
+				return true
+			}
 			root, block, err := nextSlotWithBlobs(ctx, db, blocks, lo+uint64(n), b.ToSlot, scanned)
-			if err != nil || block == nil {
+			if err != nil {
+				w.err = err
+				return true
+			}
+			if block == nil {
 				return true
 			}
 			if served, ok := answers[root]; ok {
@@ -392,8 +404,12 @@ func (b *BlobArchiveStoreFill) findWindow(ctx context.Context, db kv.RoDB, block
 			answers[root] = !notServed(err)
 			return answers[root]
 		})
+		if w.err != nil {
+			return
+		}
 		_, block, err := nextSlotWithBlobs(ctx, db, blocks, lo+uint64(n), b.ToSlot, scanned)
 		if err != nil {
+			w.err = err
 			return
 		}
 		if block == nil {
@@ -404,6 +420,7 @@ func (b *BlobArchiveStoreFill) findWindow(ctx context.Context, db kv.RoDB, block
 		w.from.Store(block.Block.Slot)
 		log.Info("First slot the endpoint serves", "endpoint", redactEndpoint(b.Endpoints[i]), "slot", w.from.Load())
 	})
+	return w.err
 }
 
 func nextSlotWithBlobs(ctx context.Context, db kv.RoDB, blocks freezeblocks.BeaconSnapshotReader, from, to uint64, scanned map[uint64]uint64) (common.Hash, *cltypes.SignedBeaconBlock, error) {
