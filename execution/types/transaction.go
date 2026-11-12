@@ -30,6 +30,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	libcrypto "github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/chain"
@@ -37,6 +38,15 @@ import (
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
+
+var stubTxDataView = dbg.EnvBool("STUB_TXDATA_VIEW", false)
+
+func decodeTxData(s *rlp.Stream) ([]byte, error) {
+	if stubTxDataView {
+		return s.ViewBytes()
+	}
+	return s.Bytes()
+}
 
 var (
 	ErrInvalidSig           = errors.New("invalid transaction v, r, s values")

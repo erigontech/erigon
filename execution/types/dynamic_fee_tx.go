@@ -253,7 +253,7 @@ func (tx *DynamicFeeTransaction) DecodeRLP(s *rlp.Stream) error {
 	if err := s.ReadUint256(&tx.Value); err != nil {
 		return err
 	}
-	if tx.Data, err = s.Bytes(); err != nil {
+	if tx.Data, err = decodeTxData(s); err != nil {
 		return err
 	}
 	// decode AccessList

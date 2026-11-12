@@ -164,9 +164,11 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.Block) (E
 		if err := rawdb.WriteTd(blockOverlay, blockHash, height, td); err != nil {
 			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeTd: %w", err)
 		}
+		bodyStart := time.Now()
 		if _, err := rawdb.WriteRawBodyIfNotExists(blockOverlay, blockHash, height, body); err != nil {
 			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeBody: %w", err)
 		}
+		e.logger.Info("[dbg] insert-body", "blk", height, "npBody", time.Since(bodyStart), "npIns", time.Since(start), "npTxs", len(body.Transactions))
 		if blockAccessList != nil {
 			if err := rawdb.WriteBlockAccessListBytes(blockOverlay, blockHash, height, blockAccessListBytes); err != nil {
 				return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeBlockAccessList, block %d: %w", height, err)

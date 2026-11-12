@@ -290,7 +290,7 @@ func (tx *LegacyTx) DecodeRLP(s *rlp.Stream) error {
 	if err = s.ReadUint256(&tx.Value); err != nil {
 		return fmt.Errorf("read Value: %w", err)
 	}
-	if tx.Data, err = s.Bytes(); err != nil {
+	if tx.Data, err = decodeTxData(s); err != nil {
 		return fmt.Errorf("read Data: %w", err)
 	}
 	if err = s.ReadUint256(&tx.V); err != nil {

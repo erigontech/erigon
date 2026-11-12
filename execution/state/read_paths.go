@@ -1520,7 +1520,16 @@ func readState(s *IntraBlockState, addr accounts.Address, key accounts.StorageKe
 // additional "clean" bool (the second return of stateObject.GetState),
 // which SetState uses to decide between deleting vs. updating the
 // versioned write on revert.
+var stubSloadZero, stubSloadDirect = dbg.EnvBool("STUB_SLOAD_ZERO", false), dbg.EnvBool("STUB_SLOAD_DIRECT", false)
+
 func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.StorageKey) (uint256.Int, ReadSource, Version, bool, error) {
+	if s.versionMap != nil && stubSloadZero {
+		return uint256.Int{}, StorageRead, UnknownVersion, false, nil
+	}
+	if s.versionMap != nil && stubSloadDirect {
+		v, err := s.originStorageDirect(addr, key)
+		return v, StorageRead, UnknownVersion, false, err
+	}
 	if s.versionMap == nil {
 		so, err := s.getStateObject(addr, true)
 		if err != nil || so == nil || so.deleted {

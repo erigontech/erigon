@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"reflect"
 	"runtime"
+	runtimemetrics "runtime/metrics"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -347,6 +348,15 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	executionRequests []hexutil.Bytes, version clparams.StateVersion, deriveBlobHashes bool,
 ) (*engine_types.PayloadStatus, error) {
 	defer engineNewPayloadDuration.ObserveDuration(time.Now())
+	npStart := time.Now()
+	npM := []runtimemetrics.Sample{{Name: "/gc/heap/allocs:bytes"}, {Name: "/gc/cycles/total:gc-cycles"}}
+	runtimemetrics.Read(npM)
+	npA0, npG0 := npM[0].Value.Uint64(), npM[1].Value.Uint64()
+	var npDecode, npSha time.Duration
+	defer func() {
+		runtimemetrics.Read(npM)
+		e.logger.Info("[dbg] np-alloc", "npAllocB", npM[0].Value.Uint64()-npA0, "npGcs", npM[1].Value.Uint64()-npG0, "npDecode", npDecode, "npSha", npSha, "npHandler", time.Since(npStart))
+	}()
 	if req == nil {
 		return nil, &rpc.InvalidParamsError{Message: "missing payload"}
 	}
@@ -506,13 +516,17 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	if deriveBlobHashes {
 		expectedBlobHashes = make([]common.Hash, 0, e.config.GetMaxBlobsPerBlock(header.Time))
 	}
+	decodeStart := time.Now()
 	txs, transactions, expectedBlobHashes, invalidTransactionStatus := e.decodePayloadTransactions(req.Transactions, uint64(req.GasLimit), e.config.IsAmsterdam(uint64(req.Timestamp)), deriveBlobHashes, expectedBlobHashes)
 
 	var sendersRecovery *exec.SendersRecovery
 	if invalidTransactionStatus == nil && len(transactions) > 0 {
 		sendersRecovery = exec.StartSendersRecovery(ctx, types.MakeSigner(e.config, req.BlockNumber.Uint64(), uint64(req.Timestamp)), transactions)
 	}
+	npDecode = time.Since(decodeStart)
+	shaStart := time.Now()
 	header.TxHash = types.DeriveSha(types.BinaryTransactions(txs))
+	npSha = time.Since(shaStart)
 
 	blockHash := req.BlockHash
 	if header.Hash() != blockHash {
