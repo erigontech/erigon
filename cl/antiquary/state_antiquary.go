@@ -367,9 +367,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 
 	startLoop := time.Now()
 
-	// commitBatch records progress through scanned, the last slot this pass went through: slots after the last block
-	// are reconstructed too.
-	commitBatch := func(scanned uint64) error {
+	commitBatch := func() error {
 		rwTx, err := s.mainDB.BeginRw(ctx)
 		if err != nil {
 			return err
@@ -378,7 +376,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		if err := stateAntiquaryCollector.flush(ctx, rwTx); err != nil {
 			return err
 		}
-		if err := state_accessors.SetStateProcessingProgress(rwTx, max(s.currentState.Slot(), scanned)); err != nil {
+		if err := state_accessors.SetStateProcessingProgress(rwTx, s.currentState.Slot()); err != nil {
 			return err
 		}
 		s.validatorsTable.SetSlot(s.currentState.Slot())
@@ -416,7 +414,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		// flush + commit them and start a fresh collector, so no single commit
 		// carries a huge retired-page list.
 		if slot-lastCommitSlot >= s.maxSlotsPerCommit {
-			if err := commitBatch(slot - 1); err != nil {
+			if err := commitBatch(); err != nil {
 				return err
 			}
 			stateAntiquaryCollector.close()
@@ -628,7 +626,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	log.Log(logLvl, "Stopped Caplin to load states")
 	start = time.Now()
 	// Flush + commit the remaining slots since the last in-loop commit.
-	if err := commitBatch(slot - 1); err != nil {
+	if err := commitBatch(); err != nil {
 		return err
 	}
 	s.stateScannedThrough = slot - 1

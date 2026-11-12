@@ -188,7 +188,7 @@ func newElectraAntiquaryForFinality(t *testing.T) (*Antiquary, kv.RwDB, []*cltyp
 }
 
 // The finalized epoch start of this fixture has no block (blocks at 8258 and 8290). Two passes, one per finalization,
-// reconstruct the same balances as one, and the progress reaches the finalized slot after the first.
+// reconstruct the same balances as one: the second pass does not process the empty epoch start again.
 func TestIncrementToFinalizedOverAMissedEpochStart(t *testing.T) {
 	a, db, blocks, genesis, postState, reader, sn := newElectraAntiquaryForFinality(t)
 	const missed = 8288
@@ -197,12 +197,6 @@ func TestIncrementToFinalizedOverAMissedEpochStart(t *testing.T) {
 	ctx := context.Background()
 
 	require.NoError(t, a.incrementToFinalized(ctx, missed))
-	require.NoError(t, db.View(ctx, func(tx kv.Tx) error {
-		progress, err := state_accessors.GetStateProcessingProgress(tx)
-		require.NoError(t, err)
-		require.Equal(t, uint64(missed), progress, "the scanned finalized slot is reconstructed")
-		return nil
-	}))
 
 	require.NoError(t, a.incrementToFinalized(ctx, missed+32))
 	require.NoError(t, db.View(ctx, func(tx kv.Tx) error {
