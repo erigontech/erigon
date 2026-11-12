@@ -3088,6 +3088,46 @@ func TestDomainContext_findShortenedKey(t *testing.T) {
 	}
 }
 
+func TestCanBuild(t *testing.T) {
+	db, d := testDbAndDomain(t, log.New())
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	d.HistoryLargeValues = true
+	domainRoTx := d.beginForTests()
+	defer domainRoTx.Close()
+
+	domainRoTx.files = append(domainRoTx.files, visibleFile{startTxNum: 0, endTxNum: d.stepSize})
+
+	writer := domainRoTx.NewWriter(db)
+	defer writer.Close()
+
+	k, v := []byte{1}, []byte{1}
+	// db has data which already in files
+	_ = writer.PutWithPrev(k, v, 0, nil)
+	_ = writer.Flush(t.Context(), tx)
+	canBuild := domainRoTx.canBuild(tx)
+	require.NoError(t, err)
+	require.False(t, canBuild)
+
+	// db has data which already in files and next step. still not enough - we need full step in db.
+	_ = writer.PutWithPrev(k, v, d.stepSize, nil)
+	_ = writer.Flush(t.Context(), tx)
+	canBuild = domainRoTx.canBuild(tx)
+	require.NoError(t, err)
+	require.False(t, canBuild)
+	_ = writer.PutWithPrev(k, v, d.stepSize, nil)
+
+	// db has: 1. data which already in files 2. full next step 3. a bit of next-next step. -> can build
+	_ = writer.PutWithPrev(k, v, d.stepSize*2, nil)
+	_ = writer.Flush(t.Context(), tx)
+	canBuild = domainRoTx.canBuild(tx)
+	require.NoError(t, err)
+	require.True(t, canBuild)
+	_ = writer.PutWithPrev(k, hexutil.EncodeTs(d.stepSize*2+1), d.stepSize*2, nil)
+}
+
 func TestTraceKey_SmallVals(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow test")
@@ -4389,4 +4429,9 @@ func (d *Domain) beginFilesRo(dv *domainVisible, hf visibleFiles, hiv *iiVisible
 	dt := &DomainRoTx{}
 	d.initFilesRo(dt, &HistoryRoTx{}, &InvertedIndexRoTx{}, dv, hf, hiv)
 	return dt
+}
+
+func (dt *DomainRoTx) canBuild(dbtx kv.Tx) bool { //nolint
+	maxStepInFiles := kv.Step(dt.files.EndTxNum() / dt.stepSize)
+	return maxStepInFiles < dt.d.maxStepInDB(dbtx)
 }
