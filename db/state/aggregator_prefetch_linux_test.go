@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"unsafe"
@@ -178,17 +179,16 @@ func TestPrefetchLatestReportsLookupsLeftAtTheWaveCap(t *testing.T) {
 	require.ErrorIs(t, err, kv.ErrPrefetchIncomplete)
 }
 
-// Expanding a branch reads the cold file pages its shortened keys point to in one batch, and leaves no probe behind.
-func TestReadReferencePagesReadsColdReferencedPages(t *testing.T) {
-	prev := mmap.BatchPrefetch
-	mmap.BatchPrefetch = true
-	t.Cleanup(func() { mmap.BatchPrefetch = prev })
+// refsFixture writes uncompressed address-sized words over pages+1 pages and returns the open file with
+// each word's offset and the file's mappings.
+func refsFixture(t *testing.T, pages int) (*seg.Decompressor, []uint64, []fileMapping) {
+	t.Helper()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "refs.kv")
 	c, err := seg.NewCompressor(t.Context(), t.Name(), path, dir, seg.DefaultCfg, log.LvlDebug, log.New())
 	require.NoError(t, err)
 	key := make([]byte, length.Addr)
-	const words = 4096
+	words := (pages+1)*os.Getpagesize()/len(key) + 1
 	for i := range words {
 		binary.BigEndian.PutUint32(key, uint32(i))
 		require.NoError(t, c.AddUncompressedWord(key))
@@ -197,28 +197,70 @@ func TestReadReferencePagesReadsColdReferencedPages(t *testing.T) {
 	c.Close()
 	d, err := seg.NewDecompressor(path)
 	require.NoError(t, err)
-	defer d.Close()
-
+	t.Cleanup(d.Close)
 	offsets := make([]uint64, words)
 	g := d.MakeGetter()
 	for i := 1; i < words; i++ {
 		offsets[i], _ = g.Skip()
 	}
+	maps := fileMappings(t, dir)
+	require.NotEmpty(t, maps)
+	return d, offsets, maps
+}
+
+// wordInPage returns the first word that starts past the middle of page.
+func wordInPage(offsets []uint64, page int) int {
+	pg := uint64(os.Getpagesize())
+	at, _ := slices.BinarySearch(offsets, uint64(page)*pg+pg/2)
+	return at
+}
+
+func refsBranch(offsets ...uint64) commitment.BranchData {
 	const accountKeyField = 2 // commitment.fieldAccountAddr
 	branch := []byte{0, 0x0f, 0, 0x0f}
-	for _, word := range []int{1, 1000, 2000, 3000} {
-		ref := EncodeReferenceKey(nil, offsets[word])
+	for _, off := range offsets {
+		ref := EncodeReferenceKey(nil, off)
 		branch = append(branch, accountKeyField)
 		branch = binary.AppendUvarint(branch, uint64(len(ref)))
 		branch = append(branch, ref...)
 	}
+	return branch
+}
 
-	maps := fileMappings(t, dir)
-	require.NotEmpty(t, maps)
-	pageOut(t, dir, maps)
-	before := residentPages(t, maps)
+// coldPagesOf returns the distinct non-resident pages of the words at offsets.
+func coldPagesOf(t *testing.T, r *seg.Reader, offsets ...uint64) []uintptr {
+	t.Helper()
+	pr := mmap.NewProbe()
+	require.NotNil(t, pr)
+	var cold []uintptr
+	for _, off := range offsets {
+		if page, isCold := probeWordPage(r, pr, off); isCold && !slices.Contains(cold, page) {
+			cold = append(cold, page)
+		}
+	}
+	return cold
+}
+
+// Expanding a branch reads the cold file pages its shortened keys point to in one batch, and leaves no probe behind.
+// Page-out is best-effort, so the expected count is the referenced pages it actually left cold.
+func TestReadReferencePagesReadsColdReferencedPages(t *testing.T) {
+	prev := mmap.BatchPrefetch
+	mmap.BatchPrefetch = true
+	t.Cleanup(func() { mmap.BatchPrefetch = prev })
+	d, offsets, maps := refsFixture(t, 4)
+	refs := []uint64{offsets[wordInPage(offsets, 0)], offsets[wordInPage(offsets, 1)], offsets[wordInPage(offsets, 2)], offsets[wordInPage(offsets, 3)]}
+
+	pageOut(t, filepath.Dir(maps[0].path), maps)
 	r := seg.NewReader(d.MakeGetter(), seg.CompressNone)
-	require.Equal(t, 4, readReferencePages(commitment.BranchData(branch), r, r))
-	require.GreaterOrEqual(t, residentPages(t, maps), before+4, "the referenced pages were read")
+	cold := coldPagesOf(t, r, refs...)
+	want := len(cold)
+	if want < 2 {
+		want = 0
+	}
+	require.Equal(t, want, readReferencePages(refsBranch(refs...), r, r))
+	if want > 0 {
+		require.Empty(t, coldPagesOf(t, r, refs...), "the referenced pages were read")
+	}
 	require.Nil(t, r.Probe())
 }
+
