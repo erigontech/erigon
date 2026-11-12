@@ -54,19 +54,12 @@ const commitmentV3Batch = 1024
 var commitmentV3BatchBytes = 1 << 20
 
 type kvBatch struct {
-	seq   uint64
 	buf   []byte
 	pairs [][2][]byte
 }
 
 func (b *kvBatch) reset() {
 	b.buf, b.pairs = b.buf[:0], b.pairs[:0]
-}
-
-func (b *kvBatch) own(word []byte) []byte {
-	start := len(b.buf)
-	b.buf = append(b.buf, word...)
-	return b.buf[start:]
 }
 
 const commitmentV3Collectors = 4
