@@ -558,7 +558,7 @@ func TestApplySubFieldWrites_BlockBeginCodeHashKeepsOwnIndex(t *testing.T) {
 }
 
 // A wiped read after a destruct and a revival records the SelfDestruct memo it
-// reads through, so HasSelfdestructed in the same tx must see the revival.
+// reads through, which must hold the revival.
 func TestWipedReadAfterRevivalKeepsSelfDestructFalse(t *testing.T) {
 	t.Parallel()
 	addr := getAddress(120)
@@ -587,9 +587,9 @@ func TestWipedReadAfterRevivalKeepsSelfDestructFalse(t *testing.T) {
 			ibs.SetTxContext(1, 3)
 			ibs.SetVersion(0)
 			require.NoError(t, tc.read(ibs))
-			destructed, err := ibs.HasSelfdestructed(addr)
-			require.NoError(t, err)
-			require.False(t, destructed, "the account was revived by tx 2, so it is not self-destructed")
+			destructed, ok := ibs.versionedReads.GetSelfDestruct(addr)
+			require.True(t, ok)
+			require.False(t, destructed.Val, "the account was revived by tx 2, so it is not self-destructed")
 		})
 	}
 }
