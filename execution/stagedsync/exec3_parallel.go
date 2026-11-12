@@ -2688,7 +2688,12 @@ func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasP
 // indexReads records taskIdx as a reader of every address and path in rs. Entries and path
 // bits only accumulate across incarnations, so the mask over-approximates the latest read
 // set; the DependsOn re-check filters stale entries at the cost of a redundant check.
+var probeNoIdx = dbg.EnvBool("EAQ_NOIDX", false)
+
 func (be *blockExecutor) indexReads(taskIdx int, rs state.ReadSet) {
+	if probeNoIdx {
+		return
+	}
 	rs.RangeFullHeaders(func(a accounts.Address, p state.AccountPath, _ accounts.StorageKey, _ state.ReadHeader) bool {
 		l := be.readerByAddr[a]
 		i, found := slices.BinarySearchFunc(l, taskIdx, cmpReaderTx)
