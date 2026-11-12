@@ -3011,15 +3011,18 @@ func (b *BlockAccessListBuilder) Build() types.BlockAccessList {
 	type sortKey struct {
 		hi, mid uint64
 		lo      uint32
-		account *accountState
+		account *accountState // nil for a read-only account, which has no changes
+	}
+	keyOf := func(a *common.Address, account *accountState) sortKey {
+		return sortKey{binary.BigEndian.Uint64(a[:8]), binary.BigEndian.Uint64(a[8:16]), binary.BigEndian.Uint32(a[16:]), account}
+	}
+	keys := make([]sortKey, 0, len(b.ac)+len(b.readOnly))
+	for _, account := range b.ac {
+		keys = append(keys, keyOf(&account.changes.Address, account))
 	}
 	for addr := range b.readOnly {
-		b.state(addr)
-	}
-	keys := make([]sortKey, 0, len(b.ac))
-	for _, account := range b.ac {
-		a := &account.changes.Address
-		keys = append(keys, sortKey{binary.BigEndian.Uint64(a[:8]), binary.BigEndian.Uint64(a[8:16]), binary.BigEndian.Uint32(a[16:]), account})
+		a := addr.Value()
+		keys = append(keys, keyOf(&a, nil))
 	}
 	slices.SortFunc(keys, func(a, b sortKey) int {
 		if c := cmp.Compare(a.hi, b.hi); c != 0 {
@@ -3033,6 +3036,15 @@ func (b *BlockAccessListBuilder) Build() types.BlockAccessList {
 
 	bal := make(types.BlockAccessList, 0, len(keys))
 	for _, k := range keys {
+		if k.account == nil {
+			var ac types.AccountChanges
+			binary.BigEndian.PutUint64(ac.Address[:8], k.hi)
+			binary.BigEndian.PutUint64(ac.Address[8:16], k.mid)
+			binary.BigEndian.PutUint32(ac.Address[16:], k.lo)
+			ac.Normalize()
+			bal = append(bal, ac)
+			continue
+		}
 		k.account.finalize()
 		bal = append(bal, k.account.changes)
 	}

@@ -129,3 +129,24 @@ func TestBlockAccessListBuilderReplaysReadsOfReadOnlyAccount(t *testing.T) {
 		})
 	}
 }
+
+func TestBlockAccessListBuilderBuildKeepsReadOnlyAccountsFlat(t *testing.T) {
+	read, written := accounts.InternAddress(common.Address{19: 0x01}), accounts.InternAddress(common.Address{19: 0x02})
+	rs := ReadSet{access: AccessSet{}}
+	rs.SetBalance(read, VersionedRead[uint256.Int]{Val: *uint256.NewInt(7)})
+	rs.access[read] = accessOptions{}
+	ws := &WriteSet{}
+	ws.SetBalance(written, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: written, Path: BalancePath}, Val: *uint256.NewInt(9)})
+	b := NewBlockAccessListBuilder()
+	b.Add(-1, rs, ws)
+
+	bal := b.Build()
+
+	require.Len(t, bal, 2)
+	require.Equal(t, read.Value(), bal[0].Address)
+	require.Empty(t, bal[0].BalanceChanges)
+	require.Equal(t, written.Value(), bal[1].Address)
+	require.NotEmpty(t, bal[1].BalanceChanges)
+	require.NotContains(t, b.ac, read, "Build promoted a read-only account")
+	require.True(t, b.Matches(bal))
+}
