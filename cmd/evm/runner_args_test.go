@@ -97,6 +97,26 @@ func TestRunnersRejectMissingPathArgument(t *testing.T) {
 	}
 }
 
+// A fixture file that holds null instead of an object of fixtures cannot run,
+// so the run exits 2.
+func TestRunnersRejectNullFixtureFile(t *testing.T) {
+	if testing.Short() {
+		t.Skip("too slow for testing.Short")
+	}
+	path := filepath.Join(t.TempDir(), "null.json")
+	require.NoError(t, os.WriteFile(path, []byte("null"), 0o644))
+	for _, command := range []string{"blocktest", "enginetest"} {
+		t.Run(command, func(t *testing.T) {
+			tt := cmdtest.NewTestCmd(t, nil)
+			tt.Run("evm-test", command, "--jsonout", path)
+			tt.Output()
+			tt.WaitExit()
+			require.Equal(t, exitIncompleteRun, tt.ExitStatus())
+			require.Contains(t, tt.StderrText(), "not a JSON object of fixtures")
+		})
+	}
+}
+
 // A fixture that cannot be decoded fails on its own with the decoder's error,
 // also on stderr; the other fixtures in its file run as usual, and the run
 // exits 2.

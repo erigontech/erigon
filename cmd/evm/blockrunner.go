@@ -349,6 +349,9 @@ func splitFixtures(src []byte) ([]string, map[string]json.RawMessage, error) {
 	if err := json.Unmarshal(src, &fixtures); err != nil {
 		return nil, nil, err
 	}
+	if fixtures == nil {
+		return nil, nil, errors.New("not a JSON object of fixtures")
+	}
 	return slices.Sorted(maps.Keys(fixtures)), fixtures, nil
 }
 
