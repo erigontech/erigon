@@ -2214,7 +2214,8 @@ func (a *Aggregator) BuildFilesInBackground(db kv.TemporalRoDB, txNum uint64, fi
 }
 
 type fileBuildPlan struct {
-	firstStep       kv.Step
+	firstStep kv.Step
+	// Entities enabled after planning must wait for a fresh plan to check their pending data.
 	deferredDomains [kv.DomainLen]bool
 	deferredIndices [kv.StandaloneIdxLen]bool
 }
@@ -2225,7 +2226,11 @@ func (at *AggregatorRoTx) planFileBuild(tx kv.Tx) (fileBuildPlan, error) {
 	// A one-step resume reaches the existing state-file boundary. Older backfills
 	// would lower visibility, so retain their MDBX data while healthy entities advance.
 	for id, d := range at.d {
-		if d == nil || !d.d.Enabled.Load() || d.FirstStepNotInFiles() >= stateStep {
+		if d == nil || !d.d.Enabled.Load() {
+			plan.deferredDomains[id] = true
+			continue
+		}
+		if d.FirstStepNotInFiles() >= stateStep {
 			continue
 		}
 		first, found, err := d.d.firstStepToBuild(tx, d.FirstStepNotInFiles())
@@ -2242,7 +2247,11 @@ func (at *AggregatorRoTx) planFileBuild(tx kv.Tx) (fileBuildPlan, error) {
 		}
 	}
 	for id, ii := range at.standaloneIIs() {
-		if ii == nil || !ii.ii.Enabled.Load() || ii.FirstStepNotInFiles() >= stateStep {
+		if ii == nil || !ii.ii.Enabled.Load() {
+			plan.deferredIndices[id] = true
+			continue
+		}
+		if ii.FirstStepNotInFiles() >= stateStep {
 			continue
 		}
 		first, found, err := ii.ii.firstStepInDB(tx)
