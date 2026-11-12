@@ -242,17 +242,31 @@ func TestCommittedFallbackDependsOnInFlightDestruct(t *testing.T) {
 		&VersionedWrite[bool]{WriteHeader: header(SelfDestructPath, ValueChanged), Val: true},
 		&VersionedWrite[uint256.Int]{WriteHeader: header(BalancePath, ValueDeleted)},
 	), true)
-	vm.absentAccountHook = func() {
-		vm.absentAccountHook = nil
-		vm.FlushVersionedWrites(destruct(), false)
-	}
+	// Flush inside the committed read, so no later field read can supply the dependency instead.
+	flushing := &flushOnReadReader{accountStateReader: reader, onRead: func() { vm.FlushVersionedWrites(destruct(), false) }}
 
-	ibs := newAmsterdamIBS(reader, vm, 1)
+	ibs := NewWithVersionMap(flushing, vm)
+	ibs.SetTxContext(1, 1)
+	ibs.SetVersion(0)
 	defer ibs.Close()
-	_, err := ibs.Empty(addr)
+	_, err := ibs.Exist(addr)
 	require.NoError(t, err)
-	require.Nil(t, vm.absentAccountHook, "the flush must land after the account read")
+	require.Nil(t, flushing.onRead, "the flush must land inside the committed read")
 	require.Equal(t, 0, ibs.DepTxIndex())
+}
+
+// flushOnReadReader runs onRead once, inside the committed account read.
+type flushOnReadReader struct {
+	*accountStateReader
+	onRead func()
+}
+
+func (r *flushOnReadReader) ReadAccountData(addr accounts.Address) (*accounts.Account, error) {
+	if r.onRead != nil {
+		r.onRead()
+		r.onRead = nil
+	}
+	return r.accountStateReader.ReadAccountData(addr)
 }
 
 func TestWipedFieldOutcomeDependsOnInFlightDestruct(t *testing.T) {
