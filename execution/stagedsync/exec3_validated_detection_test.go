@@ -214,7 +214,9 @@ func TestFlushFinalizeWritesFlagsTheReaderOfAChangedCell(t *testing.T) {
 func TestMarkReadersDirtyOnBALSeededAccountPaths(t *testing.T) {
 	addr := accounts.InternAddress(common.HexToAddress("0x00000000000000000000000000000000000000aa"))
 	writer := state.Version{TxIndex: 1}
+	slot := accounts.InternKey(common.HexToHash("0x01"))
 	seedCode, otherCode := accounts.NewCode([]byte{0x60, 0x01}), accounts.NewCode([]byte{0x60, 0x02})
+	codeSeed := types.AccountChanges{CodeChanges: []*types.CodeChange{{Index: 2, Bytecode: seedCode.Bytes}}}
 	codeWrites := func(c accounts.Code) *state.WriteSet {
 		return newWS().code(addr, writer, c).codeHash(addr, writer, c.Hash).codeSize(addr, writer, c.Len()).build()
 	}
@@ -228,8 +230,13 @@ func TestMarkReadersDirtyOnBALSeededAccountPaths(t *testing.T) {
 			newWS().bal(addr, writer, *uint256.NewInt(7)).build(), newWS().bal(addr, writer, *uint256.NewInt(8)).build()},
 		{"nonce", state.NoncePath, types.AccountChanges{NonceChanges: []*types.NonceChange{{Index: 2, Value: 7}}},
 			newWS().nonce(addr, writer, 7).build(), newWS().nonce(addr, writer, 8).build()},
-		{"code", state.CodePath, types.AccountChanges{CodeChanges: []*types.CodeChange{{Index: 2, Bytecode: seedCode.Bytes}}},
-			codeWrites(seedCode), codeWrites(otherCode)},
+		{"code", state.CodePath, codeSeed, codeWrites(seedCode), codeWrites(otherCode)},
+		{"code hash", state.CodeHashPath, codeSeed,
+			newWS().codeHash(addr, writer, seedCode.Hash).build(), newWS().codeHash(addr, writer, otherCode.Hash).build()},
+		{"code size", state.CodeSizePath, codeSeed,
+			newWS().codeSize(addr, writer, seedCode.Len()).build(), newWS().codeSize(addr, writer, seedCode.Len()+1).build()},
+		{"storage", state.StoragePath, types.AccountChanges{StorageChanges: []types.SlotChanges{{Slot: slot, Changes: []*types.StorageChange{{Index: 2, Value: *uint256.NewInt(7)}}}}},
+			newWS().stor(addr, slot, writer, *uint256.NewInt(7)).build(), newWS().stor(addr, slot, writer, *uint256.NewInt(8)).build()},
 	}
 	for _, c := range cases {
 		newBE := func() *blockExecutor {
@@ -238,7 +245,11 @@ func TestMarkReadersDirtyOnBALSeededAccountPaths(t *testing.T) {
 			seed.Address = addr.Value()
 			be.versionMap = state.NewVersionMap(types.BlockAccessList{seed})
 			rs := state.ReadSet{}
-			rs.SetHeader(addr, c.path, accounts.NilKey, state.ReadHeader{Source: state.MapRead, Version: writer})
+			key := accounts.NilKey
+			if c.path == state.StoragePath {
+				key = slot
+			}
+			rs.SetHeader(addr, c.path, key, state.ReadHeader{Source: state.MapRead, Version: writer})
 			be.blockIO.RecordReads(state.Version{TxIndex: 2}, rs)
 			be.indexReads(2, rs)
 			return be
