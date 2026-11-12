@@ -109,6 +109,15 @@ func TestLookupStorage(t *testing.T) {
 					}
 				}
 			}
+			// Delete the transactions and check purge
+			for i, txn := range txs {
+				if err := rawdb.DeleteTxLookupEntry(tx, txn.Hash()); err != nil {
+					t.Fatal(err)
+				}
+				if txn2, _, _, _, _, _ := readTransactionByHash(tx, txn.Hash(), br); txn2 != nil {
+					t.Fatalf("txn #%d [%x]: deleted transaction returned: %v", i, txn.Hash(), txn2)
+				}
+			}
 		})
 	}
 }

@@ -1,4 +1,7 @@
-// Copyright 2026 The Erigon Authors
+// Copyright 2018 The go-ethereum Authors
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -32,4 +35,9 @@ func TxnByIdxInBlock(db kv.Getter, blockHash common.Hash, blockNum uint64, txIdx
 		return nil, false, err
 	}
 	return txn, true, nil
+}
+
+// DeleteTxLookupEntry removes all transaction data associated with a hash.
+func DeleteTxLookupEntry(db kv.Putter, hash common.Hash) error {
+	return db.Delete(kv.TxLookup, hash[:])
 }
