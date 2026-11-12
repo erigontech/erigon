@@ -33,7 +33,7 @@ func matchTestBuilder() *BlockAccessListBuilder {
 	addr := func(n byte) accounts.Address { return accounts.InternAddress(common.Address{19: n}) }
 	key := func(n int) accounts.StorageKey { return accounts.InternKey(common.Hash{30: byte(n >> 8), 31: byte(n)}) }
 
-	ensureAccountState(b.ac, addr(1)).updateReadBalance(*uint256.NewInt(7))
+	b.readBalance(addr(1), *uint256.NewInt(7))
 
 	writer := ensureAccountState(b.ac, addr(2))
 	writer.updateReadBalance(*uint256.NewInt(100))
@@ -130,6 +130,22 @@ func TestBlockAccessListBuilderMatchesAgreesWithHash(t *testing.T) {
 			bal[0].StorageChanges = []types.SlotChanges{{Slot: key}}
 			return bal
 		},
+		"balance of a read-only account": func(bal types.BlockAccessList) types.BlockAccessList {
+			bal[0].BalanceChanges = []*types.BalanceChange{{Index: 1, Value: *uint256.NewInt(8)}}
+			return bal
+		},
+		"nonce of a read-only account": func(bal types.BlockAccessList) types.BlockAccessList {
+			bal[0].NonceChanges = []*types.NonceChange{{Index: 1, Value: 1}}
+			return bal
+		},
+		"code of a read-only account": func(bal types.BlockAccessList) types.BlockAccessList {
+			bal[0].CodeChanges = []*types.CodeChange{{Index: 1, Bytecode: []byte{0x60}}}
+			return bal
+		},
+		"storage change of a read-only account": func(bal types.BlockAccessList) types.BlockAccessList {
+			bal[0].StorageChanges = []types.SlotChanges{{Slot: key, Changes: []*types.StorageChange{{Index: 1, Value: *uint256.NewInt(1)}}}}
+			return bal
+		},
 	}
 	for name, p := range perturb {
 		t.Run(name, func(t *testing.T) {
@@ -159,11 +175,13 @@ func TestBlockAccessListBuilderMatchesAcrossWorkers(t *testing.T) {
 	build := func() *BlockAccessListBuilder {
 		b := NewBlockAccessListBuilder()
 		for i, a := range addrs {
+			if i%7 != 0 {
+				b.readBalance(a, *uint256.NewInt(uint64(i)))
+				continue
+			}
 			account := ensureAccountState(b.ac, a)
 			account.updateReadBalance(*uint256.NewInt(uint64(i)))
-			if i%7 == 0 {
-				account.applyWriteBalance(*uint256.NewInt(uint64(i) + 1), uint32(i%5+1))
-			}
+			account.applyWriteBalance(*uint256.NewInt(uint64(i) + 1), uint32(i%5+1))
 		}
 		return b
 	}
@@ -173,6 +191,10 @@ func TestBlockAccessListBuilderMatchesAcrossWorkers(t *testing.T) {
 	changed := want.Copy()
 	changed[2*matchesPerWorker+3].BalanceChanges = []*types.BalanceChange{{Index: 1, Value: *uint256.NewInt(9)}}
 	require.False(t, build().Matches(changed))
+
+	readOnlyRead := want.Copy()
+	readOnlyRead[matchesPerWorker+2].StorageReads = []common.Hash{{31: 1}}
+	require.False(t, build().Matches(readOnlyRead))
 
 	swapped := want.Copy()
 	swapped[matchesPerWorker], swapped[matchesPerWorker+1] = swapped[matchesPerWorker+1], swapped[matchesPerWorker]
