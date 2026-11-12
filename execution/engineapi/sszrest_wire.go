@@ -12,6 +12,7 @@
 package engineapi
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
 
@@ -226,25 +227,27 @@ const (
 	sszMaxBytesPerHeader      = 1 << 10
 )
 
-// PayloadStatusWithWitness is {payload_status: PayloadStatus, witness: Optional[ExecutionWitness]}.
-// TransactionsSSZ gives Optional[T] = List[T, 1] its offset-prefixed encoding.
+// PayloadStatusWithWitness is {payload_status: PayloadStatus, witness: Optional[ExecutionWitness]}, with
+// Optional[T] = List[T, 1]. The witness is appended to the output once, as it can reach hundreds of MB.
 func encodePayloadStatusWithWitness(status *engine_types.PayloadStatus, witness *jsonrpc.ExecutionWitnessResult) ([]byte, error) {
-	var optional [][]byte
-	if witness != nil {
-		if err := errors.Join(
-			checkByteLists("state", witness.State, sszMaxWitnessItems, sszMaxBytesPerWitnessNode),
-			checkByteLists("codes", witness.Codes, sszMaxWitnessItems, sszMaxBytesPerCode),
-			checkByteLists("headers", witness.Headers, sszMaxWitnessHeaders, sszMaxBytesPerHeader),
-		); err != nil {
-			return nil, err
-		}
-		enc, err := ssz2.MarshalSSZ(nil, newTransactionsSSZ(witness.State), newTransactionsSSZ(witness.Codes), newTransactionsSSZ(witness.Headers))
-		if err != nil {
-			return nil, err
-		}
-		optional = [][]byte{enc}
+	out, err := status.EncodeSSZ(make([]byte, 8))
+	if err != nil {
+		return nil, err
 	}
-	return ssz2.MarshalSSZ(nil, status, solid.NewTransactionsSSZFromTransactions(optional))
+	binary.LittleEndian.PutUint32(out[0:], 8)
+	binary.LittleEndian.PutUint32(out[4:], uint32(len(out)))
+	if witness == nil {
+		return out, nil
+	}
+	if err := errors.Join(
+		checkByteLists("state", witness.State, sszMaxWitnessItems, sszMaxBytesPerWitnessNode),
+		checkByteLists("codes", witness.Codes, sszMaxWitnessItems, sszMaxBytesPerCode),
+		checkByteLists("headers", witness.Headers, sszMaxWitnessHeaders, sszMaxBytesPerHeader),
+	); err != nil {
+		return nil, err
+	}
+	out = binary.LittleEndian.AppendUint32(out, 4)
+	return ssz2.MarshalSSZ(out, newTransactionsSSZ(witness.State), newTransactionsSSZ(witness.Codes), newTransactionsSSZ(witness.Headers))
 }
 
 func checkByteLists(name string, items []hexutil.Bytes, maxItems, maxBytes int) error {

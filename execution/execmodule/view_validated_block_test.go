@@ -5,6 +5,7 @@ package execmodule_test
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -45,7 +46,7 @@ func TestViewValidatedBlockRequiresCommittedParent(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			requireValid(t, m, tc.block)
 			called := false
-			held, err := m.ExecModule.ViewValidatedBlock(t.Context(), tc.block.Hash(), func(_, _ kv.TemporalTx) error {
+			held, err := m.ExecModule.ViewValidatedBlock(t.Context(), tc.block.Hash(), time.Second, func(_, _ kv.TemporalTx) error {
 				called = true
 				return nil
 			})

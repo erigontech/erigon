@@ -561,25 +561,30 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		}
 	}
 
-	if onValid != nil {
-		e.lock.Lock()
-		defer e.lock.Unlock()
-	}
 	possibleStatus, err := e.getQuickPayloadStatusIfPossible(ctx, blockHash, uint64(req.BlockNumber), header.ParentHash, nil, true, defaultReadinessWait)
 	if err != nil {
 		return nil, err
 	}
-	if possibleStatus != nil {
+	if possibleStatus != nil && (onValid == nil || possibleStatus.Status != engine_types.ValidStatus) {
 		e.logger.Debug("[NewPayload] got quick payload status", "payloadStatus", possibleStatus)
-		if onValid != nil && possibleStatus.Status == engine_types.ValidStatus {
-			onValid(blockHash)
-		}
 		return possibleStatus, nil
 	}
 
-	if onValid == nil {
-		e.lock.Lock()
-		defer e.lock.Unlock()
+	e.lock.Lock()
+	defer e.lock.Unlock()
+
+	if possibleStatus != nil {
+		// Decided without the lock: a forkchoice update or another payload may have changed the validated state since.
+		if possibleStatus, err = e.getQuickPayloadStatusIfPossible(ctx, blockHash, uint64(req.BlockNumber), header.ParentHash, nil, true, defaultReadinessWait); err != nil {
+			return nil, err
+		}
+		if possibleStatus != nil {
+			e.logger.Debug("[NewPayload] got quick payload status", "payloadStatus", possibleStatus)
+			if possibleStatus.Status == engine_types.ValidStatus {
+				onValid(blockHash)
+			}
+			return possibleStatus, nil
+		}
 	}
 
 	e.logger.Debug("[NewPayload] sending block", "height", header.Number, "hash", blockHash)

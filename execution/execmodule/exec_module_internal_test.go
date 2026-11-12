@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -66,17 +67,34 @@ type sideForkReader struct {
 	forkBody      *types.Body
 }
 
-// The payload witness view runs under the engine lock, so a busy module must not make it wait.
-func TestViewValidatedBlockDoesNotWaitForABusyModule(t *testing.T) {
+// The payload witness view runs under the engine lock, so a module that stays busy must not make it wait longer than its wait.
+func TestViewValidatedBlockGivesUpOnABusyModule(t *testing.T) {
 	module := &ExecModule{semaphore: semaphore.NewWeighted(1)}
 	require.NoError(t, module.semaphore.Acquire(t.Context(), 1))
 	t.Cleanup(func() { module.semaphore.Release(1) })
 
 	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 	defer cancel()
-	held, err := module.ViewValidatedBlock(ctx, common.Hash{1}, func(_, _ kv.TemporalTx) error { return nil })
+	held, err := module.ViewValidatedBlock(ctx, common.Hash{1}, 10*time.Millisecond, func(_, _ kv.TemporalTx) error { return nil })
 	require.NoError(t, err)
 	require.False(t, held)
+}
+
+// A Ready probe or a background commit holds the module only briefly, so the view waits for it.
+func TestViewValidatedBlockWaitsForTheModule(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		module := &ExecModule{semaphore: semaphore.NewWeighted(1), forkValidator: &ForkValidator{}}
+		require.NoError(t, module.semaphore.Acquire(t.Context(), 1))
+		var released atomic.Bool
+		time.AfterFunc(10*time.Millisecond, func() {
+			released.Store(true)
+			module.semaphore.Release(1)
+		})
+
+		_, err := module.ViewValidatedBlock(t.Context(), common.Hash{1}, time.Second, func(_, _ kv.TemporalTx) error { return nil })
+		require.NoError(t, err)
+		require.True(t, released.Load())
+	})
 }
 
 func TestDrainWaitsForInFlightExecution(t *testing.T) {

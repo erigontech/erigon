@@ -141,6 +141,13 @@ func (c *witnessResultCache) store(num uint64, hash common.Hash, r *ExecutionWit
 	c.feed.publish(witnessPush{num: num, hash: hash, result: r})
 }
 
+// AddPayloadWitness caches r without Keys and headerByNumber, which the payload-witness route never serves.
+func (c *witnessResultCache) AddPayloadWitness(hash common.Hash, r *ExecutionWitnessResult) {
+	r.Keys = nil
+	r.headerByNumber = nil
+	c.Add(hash, r)
+}
+
 type witnessStoreFunc func(r *ExecutionWitnessResult, took time.Duration)
 
 func (c *witnessResultCache) buildOnce(ctx context.Context, hash common.Hash, build func(context.Context) (*ExecutionWitnessResult, error), store witnessStoreFunc) (*ExecutionWitnessResult, error) {

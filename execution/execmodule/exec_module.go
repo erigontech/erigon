@@ -744,9 +744,12 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 	return result, nil
 }
 
-func (e *ExecModule) ViewValidatedBlock(ctx context.Context, blockHash common.Hash, fn func(blockTx, parentTx kv.TemporalTx) error) (bool, error) {
-	if !e.semaphore.TryAcquire(1) {
-		return false, nil
+func (e *ExecModule) ViewValidatedBlock(ctx context.Context, blockHash common.Hash, wait time.Duration, fn func(blockTx, parentTx kv.TemporalTx) error) (bool, error) {
+	acquireCtx, cancel := context.WithTimeout(ctx, wait)
+	err := e.semaphore.Acquire(acquireCtx, 1)
+	cancel()
+	if err != nil {
+		return false, ctx.Err()
 	}
 	defer e.semaphore.Release(1)
 	head, number, sd := e.forkValidator.ExtendingFork()

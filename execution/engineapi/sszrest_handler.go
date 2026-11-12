@@ -310,14 +310,12 @@ func (e *EngineServer) handleSSZNewPayloadWithWitness(w http.ResponseWriter, r *
 	writeSSZBytes(w, out)
 }
 
-var errPayloadWitnessUnavailable = errors.New("payload witness unavailable: the payload's state is no longer held")
-
 func (e *EngineServer) payloadWitness(ctx context.Context, blockHash common.Hash) (*jsonrpc.ExecutionWitnessResult, error) {
 	if witness, ok := e.payloadWitnesses.Get(blockHash); ok {
 		return witness, nil
 	}
 	var witness *jsonrpc.ExecutionWitnessResult
-	held, err := e.executionService.ViewValidatedBlock(ctx, blockHash, func(blockTx, parentTx kv.TemporalTx) error {
+	held, err := e.executionService.ViewValidatedBlock(ctx, blockHash, defaultReadinessWait, func(blockTx, parentTx kv.TemporalTx) error {
 		var err error
 		witness, err = e.witnessBuilder.ValidatedBlockWitness(ctx, blockTx, parentTx, blockHash)
 		return err
@@ -329,10 +327,10 @@ func (e *EngineServer) payloadWitness(ctx context.Context, blockHash common.Hash
 		// A committed payload's witness is rebuilt from commitment history.
 		mode := "canonical"
 		if witness, err = e.witnessBuilder.ExecutionWitness(ctx, rpc.BlockNumberOrHashWithHash(blockHash, true), &mode); err != nil {
-			return nil, fmt.Errorf("%w: %w", errPayloadWitnessUnavailable, err)
+			return nil, fmt.Errorf("payload witness unavailable: the payload's state is no longer held: %w", err)
 		}
 	}
-	e.payloadWitnesses.Add(blockHash, witness)
+	e.payloadWitnesses.AddPayloadWitness(blockHash, witness)
 	return witness, nil
 }
 

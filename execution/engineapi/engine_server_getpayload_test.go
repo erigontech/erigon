@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/binary"
 	"testing"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -338,7 +339,7 @@ func (s *getPayloadStubModule) AssembleBlock(_ context.Context, _ *builder.Param
 	panic("not implemented")
 }
 
-func (s *getPayloadStubModule) ViewValidatedBlock(context.Context, common.Hash, func(blockTx, parentTx kv.TemporalTx) error) (bool, error) {
+func (s *getPayloadStubModule) ViewValidatedBlock(context.Context, common.Hash, time.Duration, func(blockTx, parentTx kv.TemporalTx) error) (bool, error) {
 	panic("not implemented")
 }
 

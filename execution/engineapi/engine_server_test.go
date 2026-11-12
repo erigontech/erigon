@@ -283,6 +283,44 @@ func TestNewPayloadRunsOnValidUnderTheEngineLock(t *testing.T) {
 	require.True(t, lockHeld)
 }
 
+// The readiness wait of the witness route runs before the engine lock is taken, so a busy module does not stall a
+// forkchoice update.
+func TestNewPayloadWaitsForReadinessWithoutTheEngineLock(t *testing.T) {
+	parent := makeParentHeader(1000)
+	parent.Number.SetUint64(99)
+	header := makeParentHeader(1001)
+	header.ParentHash = parent.Hash()
+	header.UncleHash = empty.UncleHash
+	header.TxHash = empty.RootHash
+	withdrawalsHash := types.DeriveSha(types.Withdrawals{})
+	header.WithdrawalsHash = &withdrawalsHash
+	block := types.NewBlockFromStorage(header.Hash(), header, nil, nil, types.Withdrawals{}, nil)
+	payload, err := engine_types.ExecutionPayloadFromBlock(block)
+	require.NoError(t, err)
+
+	cfg := preCancunChainConfig()
+	stub := &stubExecutionModule{
+		getHeaderFunc:     getHeaderReturning(parent.Hash(), parent),
+		currentHeaderFunc: func(context.Context) (*types.Header, error) { return parent, nil },
+	}
+	downloader := engine_block_downloader.NewEngineBlockDownloader(t.Context(), log.New(), stub, nil, nil, cfg, ethconfig.Sync{}, nil)
+	srv := NewEngineServer(log.New(), cfg, stub, downloader, false, false, false, true, nil, nil, 0, 64)
+	var lockHeldInReady bool
+	stub.readyFunc = func(context.Context) (bool, error) {
+		if srv.lock.TryLock() {
+			srv.lock.Unlock()
+		} else {
+			lockHeldInReady = true
+		}
+		return true, nil
+	}
+
+	status, err := srv.newPayload(t.Context(), payload, nil, nil, nil, clparams.CapellaVersion, false, func(common.Hash) {})
+	require.NoError(t, err)
+	require.Equal(t, engine_types.ValidStatus, status.Status)
+	require.False(t, lockHeldInReady)
+}
+
 func TestNewPayloadRejectsMoreTransactionsThanGasLimitAllows(t *testing.T) {
 	t.Parallel()
 
