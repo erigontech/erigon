@@ -64,7 +64,7 @@ type ExecutionClient interface {
 	// Ranges
 	GetBodiesByRange(ctx context.Context, in *GetBodiesByRangeRequest, opts ...grpc.CallOption) (*GetBodiesBatchResponse, error)
 	GetBodiesByHashes(ctx context.Context, in *GetBodiesByHashesRequest, opts ...grpc.CallOption) (*GetBodiesBatchResponse, error)
-	// Payload bodies with block access lists (EIP-7928)
+	// Payload bodies
 	GetPayloadBodiesByHash(ctx context.Context, in *GetPayloadBodiesByHashRequest, opts ...grpc.CallOption) (*GetPayloadBodiesBatchResponse, error)
 	GetPayloadBodiesByRange(ctx context.Context, in *GetPayloadBodiesByRangeRequest, opts ...grpc.CallOption) (*GetPayloadBodiesBatchResponse, error)
 	// Chain checkers
@@ -298,7 +298,7 @@ type ExecutionServer interface {
 	// Ranges
 	GetBodiesByRange(context.Context, *GetBodiesByRangeRequest) (*GetBodiesBatchResponse, error)
 	GetBodiesByHashes(context.Context, *GetBodiesByHashesRequest) (*GetBodiesBatchResponse, error)
-	// Payload bodies with block access lists (EIP-7928)
+	// Payload bodies
 	GetPayloadBodiesByHash(context.Context, *GetPayloadBodiesByHashRequest) (*GetPayloadBodiesBatchResponse, error)
 	GetPayloadBodiesByRange(context.Context, *GetPayloadBodiesByRangeRequest) (*GetPayloadBodiesBatchResponse, error)
 	// Chain checkers

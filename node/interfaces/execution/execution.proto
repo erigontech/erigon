@@ -212,7 +212,7 @@ service Execution {
     // Ranges
     rpc GetBodiesByRange(GetBodiesByRangeRequest) returns(GetBodiesBatchResponse);
     rpc GetBodiesByHashes(GetBodiesByHashesRequest) returns(GetBodiesBatchResponse);
-    // Payload bodies with block access lists (EIP-7928)
+    // Payload bodies
     rpc GetPayloadBodiesByHash(GetPayloadBodiesByHashRequest) returns(GetPayloadBodiesBatchResponse);
     rpc GetPayloadBodiesByRange(GetPayloadBodiesByRangeRequest) returns(GetPayloadBodiesBatchResponse);
     // Chain checkers
