@@ -283,7 +283,7 @@ func TestFramePoolRecentRootRevalidatedAcrossMissingHistory(t *testing.T) {
 				unwind := newBlockChangeForAccounts(common.Hash{2}, 0)
 				unwind.StateChangesIncomplete = true
 				unwind.ChangeBatch[0].Direction = remoteproto.Direction_UNWIND
-				unwind.ChangeBatch[0].BlockTime = now - 2
+				unwind.ChangeBatch[0].BlockTime = now
 				unwind.ChangeBatch[0].SlotNumber = common.NewUint64(20)
 				require.ErrorIs(t, pool.OnNewBlock(ctx, unwind, TxnSlots{}, TxnSlots{}, TxnSlots{}), errStateViewSuperseded)
 			}
@@ -300,6 +300,79 @@ func TestFramePoolRecentRootRevalidatedAcrossMissingHistory(t *testing.T) {
 				require.NotContains(t, pool.byHash, string(frame.IDHash[:]))
 				require.Empty(t, pool.frameReservations)
 			}
+		})
+	}
+}
+
+func TestFetchRecentRootActivationUnwind(t *testing.T) {
+	for _, delivery := range []string{"combined", "superseded unwind", "superseded unwind and reactivation", "superseded activation then unwind"} {
+		t.Run(delivery, func(t *testing.T) {
+			now := uint64(time.Now().Unix())
+			config := chain.AllProtocolChanges.Copy()
+			config.BogotaTime = common.NewUint64(now - 1)
+			ctx, pool, poolDB, coreDB, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash, config)
+			fetch := NewFetch(ctx, nil, pool, nil, poolDB, pool.chainID, pool.logger)
+			backend := &frameValidationBackend{payer: sender, balance: 1_000_000, valid: true}
+			pool.ethBackend = backend
+			initial := newBlockChangeForAccounts(common.Hash{1}, 0, sender)
+			initial.ChangeBatch[0].BlockTime = now
+			initial.ChangeBatch[0].SlotNumber = common.NewUint64(21)
+			if delivery == "superseded activation then unwind" {
+				initial.ChangeBatch[0].BlockTime = now - 2
+				initial.ChangeBatch[0].SlotNumber = common.NewUint64(20)
+			}
+			require.NoError(t, fetch.handleStateChangesRequest(ctx, initial))
+			frame := recentRootPoolSlot(t, sender, 10, 1)
+			var txns TxnSlots
+			txns.Append(frame, sender[:], true)
+			reasons, err := pool.AddLocalTxns(ctx, txns)
+			require.NoError(t, err)
+			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+			backend.calls = nil
+			require.NoError(t, coreDB.Update(ctx, func(tx kv.RwTx) error {
+				return tx.Put(kv.Sequence, kv.PlainStateVersion, binary.BigEndian.AppendUint64(nil, 1))
+			}))
+
+			unwind := newBlockChangeForAccounts(common.Hash{2}, 0)
+			unwind.StateChangesIncomplete = true
+			unwind.ChangeBatch[0].Direction = remoteproto.Direction_UNWIND
+			unwind.ChangeBatch[0].BlockTime = now - 2
+			unwind.ChangeBatch[0].SlotNumber = common.NewUint64(20)
+			replacement := newBlockChangeForAccounts(common.Hash{3}, 0, sender)
+			replacement.StateVersionId = 1
+			replacement.ChangeBatch[0].BlockTime = now + 12
+			replacement.ChangeBatch[0].SlotNumber = common.NewUint64(22)
+			switch delivery {
+			case "combined":
+				replacement.ChangeBatch = append(unwind.ChangeBatch, replacement.ChangeBatch...)
+			case "superseded unwind":
+				require.ErrorIs(t, fetch.handleStateChangesRequest(ctx, unwind), errStateViewSuperseded)
+			case "superseded unwind and reactivation":
+				unwind.ChangeBatch = append(unwind.ChangeBatch, replacement.ChangeBatch...)
+				require.ErrorIs(t, fetch.handleStateChangesRequest(ctx, unwind), errStateViewSuperseded)
+			case "superseded activation then unwind":
+				activation := newBlockChangeForAccounts(common.Hash{4}, 0)
+				activation.StateChangesIncomplete = true
+				activation.ChangeBatch[0].BlockTime = now
+				activation.ChangeBatch[0].SlotNumber = common.NewUint64(21)
+				require.ErrorIs(t, fetch.handleStateChangesRequest(ctx, activation), errStateViewSuperseded)
+				require.ErrorIs(t, fetch.handleStateChangesRequest(ctx, unwind), errStateViewSuperseded)
+			}
+			require.NoError(t, fetch.handleStateChangesRequest(ctx, replacement))
+			require.NotContains(t, pool.byHash, string(frame.IDHash[:]), "activation-unwind eviction must not depend on batch delivery")
+			require.Empty(t, pool.frameReservations)
+			require.Empty(t, pool.all.senderIDFrameTxn)
+			require.Empty(t, backend.calls, "a valid root still requires eviction after an activation unwind")
+
+			reasons, err = pool.AddLocalTxns(ctx, txns)
+			require.NoError(t, err)
+			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+			next := newBlockChangeForAccounts(common.Hash{5}, 0)
+			next.StateVersionId = 1
+			next.ChangeBatch[0].BlockTime = now + 24
+			next.ChangeBatch[0].SlotNumber = common.NewUint64(23)
+			require.NoError(t, fetch.handleStateChangesRequest(ctx, next))
+			require.Contains(t, pool.byHash, string(frame.IDHash[:]), "an applied activation unwind must not evict later admissions")
 		})
 	}
 }

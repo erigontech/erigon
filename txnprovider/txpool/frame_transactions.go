@@ -583,11 +583,30 @@ func (p *TxPool) parkFrameLocked(mt *metaTxn, reason string) {
 	}
 }
 
+type bogotaActivation struct {
+	active  bool
+	unwound bool
+}
+
+func (p *TxPool) bogotaActivationAfter(changes *remoteproto.StateChangeBatch) bogotaActivation {
+	activation := bogotaActivation{active: p.headIsBogota}
+	if p.pendingActivation != nil {
+		activation = *p.pendingActivation
+	}
+	// Reactivation must not hide an earlier activation unwind. Missing history
+	// alone requires revalidation against the recovered state.
+	for _, change := range changes.ChangeBatch {
+		active := p.chainConfig.IsBogota(change.BlockTime)
+		activation.unwound = activation.unwound || activation.active && !active
+		activation.active = active
+	}
+	return activation
+}
+
 // invalidateFrames drops expired transactions and parks those whose validation may be stale.
 // The caller holds the pool lock; revalidateFrames performs the EVM work later.
 func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*metaTxn {
 	head := changes.ChangeBatch[len(changes.ChangeBatch)-1]
-	wasBogota := p.headIsBogota
 	if len(p.all.senderIDFrameTxn) == 0 {
 		return nil
 	}
@@ -600,13 +619,8 @@ func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*meta
 	accountChanges := make(map[common.Address][]byte)
 	nonceSlots := make(map[common.Hash]struct{})
 	rootSlots := make(map[common.Hash]struct{})
-	// Reactivation later in the batch must not hide an earlier activation unwind.
-	// Missing history requires revalidation against the recovered state.
-	activationUnwound := false
+	activationUnwound := p.bogotaActivationAfter(changes).unwound
 	for _, batch := range changes.ChangeBatch {
-		isBogota := p.chainConfig.IsBogota(batch.BlockTime)
-		activationUnwound = activationUnwound || wasBogota && !isBogota
-		wasBogota = isBogota
 		for _, change := range batch.Changes {
 			address := gointerfaces.ConvertH160toAddress(change.Address)
 			touched[address] = struct{}{}

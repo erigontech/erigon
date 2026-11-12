@@ -158,8 +158,9 @@ type TxPool struct {
 	chainConfig             *chain.Config
 	stateGeneration         uint64
 	stateViewStale          bool
-	stateBlockHash          common.Hash // Head of the pool's state view; pins frame validation to the same block
-	headIsBogota            bool        // Last completed update's activation, independent of pending-block time
+	stateBlockHash          common.Hash       // Head of the pool's state view; pins frame validation to the same block
+	headIsBogota            bool              // Last completed update's activation, independent of pending-block time
+	pendingActivation       *bogotaActivation // Activation observations from superseded batches, retained until an update succeeds
 	lastSeenBlock           atomic.Uint64
 	lastSeenCond            *sync.Cond
 	lastFinalizedBlock      atomic.Uint64
@@ -391,7 +392,13 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 	defer newBlockTimer.ObserveDuration(time.Now())
 	defer func() {
 		if err != nil {
-			p.MarkStateStale()
+			p.lock.Lock()
+			defer p.lock.Unlock()
+			p.markStateStaleLocked()
+			if errors.Is(err, errStateViewSuperseded) {
+				activation := p.bogotaActivationAfter(stateChanges)
+				p.pendingActivation = &activation
+			}
 		}
 	}()
 	p.lock.Lock()
@@ -448,10 +455,11 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 	if err := p.revalidateFrames(ctx, frames.parked, frames.generation, frames.blockHash); err != nil {
 		return err
 	}
-	// Keep activation unchanged on failure so a retry can still detect an unwind.
+	// Retained activation transitions must survive failed or superseded updates.
 	p.lock.Lock()
 	if frames.generation == p.stateGeneration {
 		p.headIsBogota = p.chainConfig.IsBogota(stateChanges.ChangeBatch[len(stateChanges.ChangeBatch)-1].BlockTime)
+		p.pendingActivation = nil
 	}
 	p.lock.Unlock()
 	return nil
