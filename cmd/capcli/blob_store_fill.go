@@ -52,6 +52,8 @@ import (
 // sidecars, a few MB.
 const fillWorkers = 8
 
+const payloadLookahead = 64
+
 // fillRequestTimeout bounds one endpoint request. A full response, 21 blobs of hex JSON, is about
 // 6 MB. A variable so tests can shorten it.
 var fillRequestTimeout = time.Minute
@@ -287,7 +289,10 @@ func (b *BlobArchiveStoreFill) fillSlot(ctx context.Context, db kv.RoDB, blocks 
 		report.add(&report.failed, slot)
 		return nil
 	}
-	blobs := blobCount(block)
+	blobs, err := expectedBlobs(ctx, db, blocks, block)
+	if err != nil {
+		return fmt.Errorf("read the slots after %d: %w", slot, err)
+	}
 	if blobs == 0 {
 		return nil
 	}
@@ -367,6 +372,27 @@ func blobCount(block *cltypes.SignedBeaconBlock) int {
 	return 0
 }
 
+func expectedBlobs(ctx context.Context, db kv.RoDB, blocks freezeblocks.BeaconSnapshotReader, block *cltypes.SignedBeaconBlock) (int, error) {
+	n := blobCount(block)
+	if n == 0 || block.Version() < clparams.GloasVersion {
+		return n, nil
+	}
+	for slot := block.Block.Slot + 1; slot <= block.Block.Slot+payloadLookahead; slot++ {
+		_, next, err := readSlot(ctx, db, blocks, slot)
+		if err != nil {
+			return 0, err
+		}
+		if next == nil {
+			continue
+		}
+		if next.Block.Body.SignedExecutionPayloadBid.Message.ParentBlockHash != block.Block.Body.SignedExecutionPayloadBid.Message.BlockHash {
+			return 0, nil
+		}
+		return n, nil
+	}
+	return n, nil
+}
+
 func notServed(err error) bool {
 	status, ok := errors.AsType[blobStatusError](err)
 	return errors.Is(err, errNoSidecars) || ok && status == http.StatusBadRequest
@@ -415,7 +441,11 @@ func nextSlotWithBlobs(ctx context.Context, db kv.RoDB, blocks freezeblocks.Beac
 			}
 		}
 		root, block, err := readSlot(ctx, db, blocks, slot)
-		if err != nil || blobCount(block) > 0 {
+		n := 0
+		if err == nil {
+			n, err = expectedBlobs(ctx, db, blocks, block)
+		}
+		if err != nil || n > 0 {
 			scanned[from] = slot
 			return root, block, err
 		}

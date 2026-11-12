@@ -61,7 +61,8 @@ type fillFixture struct {
 	store    blob_storage.BlobStorage
 	sidecars map[common.Hash][]*cltypes.BlobSidecar
 	tip      common.Hash // the last block added; the next one builds on it
-	frozen   uint64      // the frozen blob frontier
+	payload  common.Hash
+	frozen   uint64 // the frozen blob frontier
 	version  clparams.StateVersion
 }
 
@@ -90,6 +91,11 @@ func (f *fillFixture) addBlockWithTransactions(slot uint64, blobs int, txs bool)
 	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, f.version)
 	block.Block.Slot = slot
 	block.Block.ParentRoot = f.tip
+	if f.version >= clparams.GloasVersion {
+		bid := block.Block.Body.SignedExecutionPayloadBid.Message
+		bid.ParentBlockHash, bid.BlockHash = f.payload, common.Hash{byte(slot >> 8), byte(slot)}
+		f.payload = bid.BlockHash
+	}
 	if txs {
 		block.Block.Body.ExecutionPayload.Transactions = solid.NewTransactionsSSZFromTransactions([][]byte{{0x02, 0x01}})
 	}
@@ -204,6 +210,23 @@ func TestBlobArchiveStoreFillBuildsGloasSidecarsFromBlobs(t *testing.T) {
 	require.NoError(t, f.fill(&BlobArchiveStoreFill{Endpoints: []string{url}, FromSlot: fillTestSlot, ToSlot: fillTestSlot}, nil))
 
 	require.True(t, f.storedValid(fillTestSlot, root))
+}
+
+func TestBlobArchiveStoreFillSkipsAGloasBlockWhosePayloadIsNotOnChain(t *testing.T) {
+	f := newFillFixture(t)
+	f.version = clparams.GloasVersion
+	before := f.addBlock(fillTestSlot, 1)
+	onChain := f.payload
+	skipped := f.addBlock(fillTestSlot+1, 2)
+	delete(f.sidecars, skipped)
+	f.payload = onChain
+	after := f.addBlock(fillTestSlot+2, 1)
+	url, _ := f.endpoint(false)
+
+	require.NoError(t, f.fill(&BlobArchiveStoreFill{Endpoints: []string{url}, FromSlot: fillTestSlot, ToSlot: fillTestSlot + 2}, nil))
+
+	require.True(t, f.storedValid(fillTestSlot, before))
+	require.True(t, f.storedValid(fillTestSlot+2, after))
 }
 
 func TestBlobArchiveStoreFillFetchesOnlyMissingSlots(t *testing.T) {
