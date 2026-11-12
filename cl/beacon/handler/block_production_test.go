@@ -545,7 +545,7 @@ func TestProduceBlockUsesConfiguredBuilderWhenLocalExecutionIsUnavailable(t *tes
 	externalBid.Message.ParentBlockRoot = baseRoot
 	externalBid.Message.FeeRecipient = common.Address{}
 	externalBid.Message.GasLimit = parentBid.GasLimit
-	builderClient := relayClient(ctrl)
+	builderClient := builder_mock.NewMockBuilderClient(ctrl)
 	builderClient.EXPECT().RequestExecutionPayloadBid(
 		gomock.Any(), "https://builder.example", targetSlot, parentBid.ParentBlockHash, baseRoot, gomock.Any(), gomock.Any(), gomock.Any(),
 	).Return(externalBid, nil)
