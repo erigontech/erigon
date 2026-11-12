@@ -1206,8 +1206,6 @@ func TestCloneReadsSourceSnapshot(t *testing.T) {
 			_, v, err := c.SeekExact([]byte("k"))
 			require.NoError(t, err)
 			require.Equal(t, u64tob(1), v)
-			c.Close()
-			worker.Rollback()
 		}()
 	}
 	worker, err := source.(*mdbx.MdbxTx).Clone(t.Context())
