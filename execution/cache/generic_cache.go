@@ -17,6 +17,7 @@
 package cache
 
 import (
+	"github.com/erigontech/erigon/common/dbg"
 	"math"
 	"sync"
 	"sync/atomic"
@@ -70,6 +71,9 @@ type GenericCache[T any] struct {
 }
 
 const putStripeCount = 256
+
+// stubPutNoLock is a bound probe: puts skip the stripe lock (unsafe against a concurrent Clear).
+var stubPutNoLock = dbg.EnvBool("STUB_GC_PUT_NOLOCK", false)
 
 // NewGenericCache creates a cache bounded by capacityBytes, drawing its
 // reservation from the shared envelope as it fills. mode selects ModeEvictLRU
@@ -174,9 +178,11 @@ func (c *GenericCache[T]) PutIfAbsent(key []byte, value T, txNum uint64) {
 
 func (c *GenericCache[T]) put(key []byte, value T, txNum uint64, overwrite bool) {
 	h := maphash.Hash(key)
-	mu := &c.putStripes[h&(putStripeCount-1)]
-	mu.Lock()
-	defer mu.Unlock()
+	if !stubPutNoLock {
+		mu := &c.putStripes[h&(putStripeCount-1)]
+		mu.Lock()
+		defer mu.Unlock()
+	}
 	newSize := len(key) + c.sizeFunc(value)
 	c.data.compute(h, func(existing entry[T], found bool) (entry[T], otter.ComputeOp) {
 		sameKey := found && existing.key == string(key)
