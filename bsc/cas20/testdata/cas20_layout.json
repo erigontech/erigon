@@ -1,0 +1,331 @@
+{
+  "_comment": "Authoritative CAS20 storage layout, and consensus-critical: a slot number decides the state root, so two implementations that disagree here diverge on the first token operation that touches it. TestCAS20LayoutFixtureFollowsTheCode holds every namespace, root and slot against the Go constants in both directions, so this file cannot drift from the implementation. BEP-702 3.17 is rendered from it \u2014 the namespace table, the field table, the derivation rules, the packed-word lanes and the not-persisted list, in that order \u2014 so a change here has to be carried into that section in the same commit.",
+  "erc7201": "keccak256(abi.encode(uint256(keccak256(namespace)) - 1)) & ~bytes32(uint256(0xff))",
+  "derivation": {
+    "fixed_field": "root + offset",
+    "mapping_value_key": "keccak256(pad32(key) ++ slot)",
+    "mapping_string_key": "keccak256(bytes(key) ++ slot)   // unpadded, unlike a value key",
+    "nested_mapping": "outer key first: members[id][account] = keccak256(pad32(account) ++ keccak256(pad32(id) ++ slot))",
+    "string_short": "content in the high bytes, low byte = 2*len",
+    "string_long": "slot = 2*len+1, data at keccak256(slot)",
+    "string_malformed": "a length word no write could have produced reads as the empty string; an implementation MUST NOT fault on it",
+    "string_max_len": 16777216,
+    "dynamic_array": "slot = element count, data at keccak256(slot)"
+  },
+  "namespaces": [
+    {
+      "name": "bsc.cas20",
+      "held_by": "every token, both variants",
+      "root": "0x562aafeb82006b6968827b59606253289ba8bc22c7d434d71765d5b3a068af00",
+      "fields": [
+        {
+          "slot": 0,
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "slot": 1,
+          "name": "symbol",
+          "type": "string"
+        },
+        {
+          "slot": 2,
+          "name": "contractURI",
+          "type": "string"
+        },
+        {
+          "slot": 3,
+          "name": "totalSupply",
+          "type": "uint256"
+        },
+        {
+          "slot": 4,
+          "name": "balances",
+          "type": "mapping(address => uint256)"
+        },
+        {
+          "slot": 5,
+          "name": "allowances",
+          "type": "mapping(address => mapping(address => uint256))"
+        },
+        {
+          "slot": 6,
+          "name": "roles",
+          "type": "mapping(bytes32 => mapping(address => bool))"
+        },
+        {
+          "slot": 7,
+          "name": "roleAdmins",
+          "type": "mapping(bytes32 => bytes32)"
+        },
+        {
+          "slot": 8,
+          "name": "adminCount",
+          "type": "uint256"
+        },
+        {
+          "slot": 9,
+          "name": "transferPolicies",
+          "type": "packed 4x uint64"
+        },
+        {
+          "slot": 10,
+          "name": "mintPolicy",
+          "type": "packed 4x uint64"
+        },
+        {
+          "slot": 11,
+          "name": "paused",
+          "type": "uint256 bitmask"
+        },
+        {
+          "slot": 12,
+          "name": "supplyCap",
+          "type": "uint256"
+        },
+        {
+          "slot": 13,
+          "name": "nonces",
+          "type": "mapping(address => uint256)"
+        },
+        {
+          "slot": 14,
+          "name": "seizePolicies",
+          "type": "packed 4x uint64"
+        }
+      ]
+    },
+    {
+      "name": "bsc.cas20.asset",
+      "held_by": "the Asset variant",
+      "root": "0xff1f981cfcfd1795c7002397f3fa439537651c7544b1d579931b62466060ae00",
+      "fields": [
+        {
+          "slot": 0,
+          "name": "decimals",
+          "type": "uint8"
+        },
+        {
+          "slot": 1,
+          "name": "multiplier",
+          "type": "uint256"
+        },
+        {
+          "slot": 2,
+          "name": "announcements",
+          "type": "mapping(string => bool)"
+        },
+        {
+          "slot": 3,
+          "name": "extraMetadata",
+          "type": "mapping(string => string)"
+        },
+        {
+          "slot": 4,
+          "name": "pendingMultiplier",
+          "type": "packed uint128 + uint64"
+        }
+      ]
+    },
+    {
+      "name": "bsc.cas20.stablecoin",
+      "held_by": "the Stablecoin variant",
+      "root": "0xd88f59ff5f54ab199d582c5de9fd2a11ddf31b4380c891c97fe80c42868a1600",
+      "fields": [
+        {
+          "slot": 0,
+          "name": "currency",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "name": "bsc.policy_registry",
+      "held_by": "the PolicyRegistry singleton",
+      "root": "0x2e7731329603a38e578303ba37c039549397ad42853922c474dfc3cb33d7b000",
+      "fields": [
+        {
+          "slot": 0,
+          "name": "policies",
+          "type": "mapping(uint64 => packed word)"
+        },
+        {
+          "slot": 1,
+          "name": "members",
+          "type": "mapping(uint64 => mapping(address => bool))"
+        },
+        {
+          "slot": 2,
+          "name": "pendingAdmins",
+          "type": "mapping(uint64 => address)"
+        },
+        {
+          "slot": 3,
+          "name": "counter",
+          "type": "uint64"
+        },
+        {
+          "slot": 4,
+          "name": "children",
+          "type": "mapping(uint64 => uint64[])"
+        }
+      ]
+    },
+    {
+      "name": "bsc.activation_registry",
+      "held_by": "the ActivationRegistry singleton",
+      "root": "0xa8970030726ea4c1e5fe64bf3ba11683da0b59f818265a7369e5570e9fc0bd00",
+      "fields": [
+        {
+          "slot": 0,
+          "name": "features",
+          "type": "mapping(bytes32 => bool)"
+        },
+        {
+          "slot": 1,
+          "name": "admin",
+          "type": "address"
+        }
+      ]
+    }
+  ],
+  "packed_words": [
+    {
+      "where": "bsc.cas20 slot 9",
+      "lanes": [
+        {
+          "name": "transferSenderPolicy",
+          "bit_offset": 0,
+          "width": 64
+        },
+        {
+          "name": "transferReceiverPolicy",
+          "bit_offset": 64,
+          "width": 64
+        },
+        {
+          "name": "transferExecutorPolicy",
+          "bit_offset": 128,
+          "width": 64
+        },
+        {
+          "name": "reserved",
+          "bit_offset": 192,
+          "width": 64
+        }
+      ]
+    },
+    {
+      "where": "bsc.cas20 slot 10",
+      "lanes": [
+        {
+          "name": "mintReceiverPolicy",
+          "bit_offset": 0,
+          "width": 64
+        },
+        {
+          "name": "reserved",
+          "bit_offset": 64,
+          "width": 64
+        },
+        {
+          "name": "reserved",
+          "bit_offset": 128,
+          "width": 64
+        },
+        {
+          "name": "reserved",
+          "bit_offset": 192,
+          "width": 64
+        }
+      ],
+      "note": "the free lanes belong to future mint-side policy types, which is why seize takes a slot of its own"
+    },
+    {
+      "where": "bsc.cas20 slot 14",
+      "lanes": [
+        {
+          "name": "seizeExemptPolicy",
+          "bit_offset": 0,
+          "width": 64
+        },
+        {
+          "name": "seizeReceiverPolicy",
+          "bit_offset": 64,
+          "width": 64
+        },
+        {
+          "name": "reserved",
+          "bit_offset": 128,
+          "width": 64
+        },
+        {
+          "name": "reserved",
+          "bit_offset": 192,
+          "width": 64
+        }
+      ]
+    },
+    {
+      "where": "bsc.cas20.asset slot 4",
+      "lanes": [
+        {
+          "bit_offset": 0,
+          "width": 128,
+          "name": "pendingMultiplier"
+        },
+        {
+          "bit_offset": 128,
+          "width": 64,
+          "name": "effectiveAt"
+        }
+      ],
+      "note": "a zero effectiveAt means no schedule is recorded"
+    },
+    {
+      "where": "bsc.policy_registry slot 0, the mapping value",
+      "lanes": [
+        {
+          "bit_offset": 255,
+          "width": 1,
+          "name": "exists"
+        },
+        {
+          "bit_offset": 0,
+          "width": 160,
+          "name": "admin"
+        }
+      ],
+      "note": "the exists bit survives renouncing, so a renounced policy stays distinguishable from one never created"
+    },
+    {
+      "where": "bsc.policy_registry slot 4, the array data words",
+      "lanes": [
+        {
+          "bit_offset": 0,
+          "width": 64,
+          "name": "child[4k+0]"
+        },
+        {
+          "bit_offset": 64,
+          "width": 64,
+          "name": "child[4k+1]"
+        },
+        {
+          "bit_offset": 128,
+          "width": 64,
+          "name": "child[4k+2]"
+        },
+        {
+          "bit_offset": 192,
+          "width": 64,
+          "name": "child[4k+3]"
+        }
+      ],
+      "note": "a shrink rewrites the whole word, so orphaned lanes are zeroed"
+    }
+  ],
+  "not_storage": [
+    "`adminRenounced` is per-frame only, so a bootstrap bundle cannot renounce the last admin and then grant again (\u00a73.4)"
+  ]
+}
