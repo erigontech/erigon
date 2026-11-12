@@ -406,11 +406,36 @@ func BlobCountFromBlocks(ctx context.Context, sn *CaplinSnapshots, r BeaconSnaps
 			return 0, nil
 		}
 		commitments := block.Block.Body.GetBlobKzgCommitments()
-		if commitments == nil {
+		if commitments == nil || commitments.Len() == 0 {
 			return 0, nil
+		}
+		skipped, err := payloadSkipped(ctx, sn, r, block)
+		if err != nil || skipped {
+			return 0, err
 		}
 		return uint64(commitments.Len()), nil
 	}
+}
+
+func payloadSkipped(ctx context.Context, sn *CaplinSnapshots, r BeaconSnapshotReader, block *cltypes.SignedBeaconBlock) (bool, error) {
+	if block.Version() < clparams.GloasVersion {
+		return false, nil
+	}
+	root, err := block.Block.HashSSZ()
+	if err != nil {
+		return false, err
+	}
+	for slot := block.Block.Slot + 1; slot <= sn.BlocksAvailable(); slot++ {
+		child, err := r.ReadBeaconBlockBodyBySlot(ctx, nil, slot)
+		if err != nil {
+			return false, err
+		}
+		if child == nil {
+			continue
+		}
+		return child.Block.ParentRoot == root && child.Block.Body.GetSignedExecutionPayloadBid().Message.ParentBlockHash != block.Block.Body.GetSignedExecutionPayloadBid().Message.BlockHash, nil
+	}
+	return false, nil
 }
 
 func DumpBlobsSidecar(ctx context.Context, blobStorage blob_storage.BlobStorage, db kv.RoDB, fromSlot, toSlot uint64, salt uint32, dirs datadir.Dirs, compressWorkers int, blobCountFn BlobCountBySlotFn, lvl log.Lvl, logger log.Logger) error {

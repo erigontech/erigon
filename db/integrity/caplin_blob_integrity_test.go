@@ -679,3 +679,62 @@ func encodeBeaconBlockSnapshotWithBodyRoot(t *testing.T, block *cltypes.SignedBe
 	require.NoError(t, writer.Close())
 	return encoded.Bytes()
 }
+
+func TestCheckCaplinBlobSidecarsFollowsTheChildsPayloadStatus(t *testing.T) {
+	const slot = uint64(7)
+	for _, tc := range []struct {
+		name    string
+		onChain bool
+		err     string
+	}{
+		{"payload skipped", false, ""},
+		{"payload on chain", true, "expected 1 sidecars, got 0"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := denebBlobIntegrityConfig()
+			cfg.ElectraForkEpoch = 0
+			cfg.FuluForkEpoch = 0
+			cfg.GloasForkEpoch = 0
+			block, _, _ := gloasBlobIntegrityData(t, &cfg, slot)
+			block.Block.Body.GetSignedExecutionPayloadBid().Message.BlockHash = common.Hash{0x01}
+			root, err := block.Block.HashSSZ()
+			require.NoError(t, err)
+			child := cltypes.NewSignedBeaconBlock(&cfg, clparams.GloasVersion)
+			child.Block.Slot = slot + 2
+			child.Block.ParentRoot = root
+			child.Block.Body.SyncAggregate = cltypes.NewSyncAggregate()
+			child.Block.Body.GetSignedExecutionPayloadBid().Message.ParentBlockHash = common.Hash{0x02}
+			if tc.onChain {
+				child.Block.Body.GetSignedExecutionPayloadBid().Message.ParentBlockHash = common.Hash{0x01}
+			}
+
+			err = checkCaplinBlobIntegrityChain(t, &cfg, block, child)
+			if tc.err == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.ErrorContains(t, err, tc.err)
+		})
+	}
+}
+
+func checkCaplinBlobIntegrityChain(t *testing.T, cfg *clparams.BeaconChainConfig, blocks ...*cltypes.SignedBeaconBlock) error {
+	t.Helper()
+	words := map[uint64][]byte{}
+	db := mdbxtest.NewTestDB(t, dbcfg.CaplinDB)
+	for _, block := range blocks {
+		words[block.Block.Slot] = encodeBeaconBlockSnapshot(t, block)
+		root, err := block.Block.HashSSZ()
+		require.NoError(t, err)
+		require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+			return beacon_indicies.MarkRootCanonical(tx, block.Block.Slot, root)
+		}))
+	}
+	dirs := datadir.New(t.TempDir())
+	writeCaplinIntegritySegment(t, dirs, snaptype.BeaconBlocks, 0, snaptype.CaplinMergeLimit, func(slot uint64) []byte { return words[slot] })
+	writeCaplinIntegritySegment(t, dirs, snaptype.BlobSidecars, 0, snaptype.CaplinMergeLimit, func(uint64) []byte { return nil })
+	snapshots := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, cfg, dirs, log.New())
+	t.Cleanup(snapshots.Close)
+	require.NoError(t, snapshots.OpenFolder())
+	return CheckCaplinBlobSidecars(t.Context(), db, snapshots, cfg, 0, true, log.New())
+}

@@ -932,3 +932,70 @@ func TestRetireBlobsBelowWaitsForOverlapCleanup(t *testing.T) {
 	require.False(t, retired)
 	require.Equal(t, uint64(3*limit), sn.FrozenBlobs())
 }
+
+func TestBlobCountFromBlocksFollowsTheChildsPayloadStatus(t *testing.T) {
+	const slot = 7
+	for _, tc := range []struct {
+		name     string
+		onChain  bool
+		expected uint64
+		dumpErr  string
+	}{
+		{"payload skipped", false, 0, ""},
+		{"payload on chain", true, 2, "blob storage count mismatch at slot 7"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := clparams.MainnetBeaconConfig
+			cfg.GloasForkEpoch = 0
+			block := cltypes.NewSignedBeaconBlock(&cfg, clparams.GloasVersion)
+			block.Block.Slot = slot
+			bid := block.Block.Body.GetSignedExecutionPayloadBid().Message
+			bid.BlockHash = common.Hash{0x01}
+			for range 2 {
+				block.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
+			}
+			root, err := block.Block.HashSSZ()
+			require.NoError(t, err)
+			child := cltypes.NewSignedBeaconBlock(&cfg, clparams.GloasVersion)
+			child.Block.Slot = slot + 3
+			child.Block.ParentRoot = root
+			child.Block.Body.GetSignedExecutionPayloadBid().Message.ParentBlockHash = common.Hash{0x02}
+			if tc.onChain {
+				child.Block.Body.GetSignedExecutionPayloadBid().Message.ParentBlockHash = bid.BlockHash
+			}
+
+			dirs := datadir.New(t.TempDir())
+			writeCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, snaptype.CaplinMergeLimit, true, func(s uint64) []byte {
+				switch s {
+				case slot:
+					return blockSnapshotWord(t, block)
+				case slot + 3:
+					return blockSnapshotWord(t, child)
+				}
+				return nil
+			})
+			sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &cfg, dirs, log.New())
+			t.Cleanup(sn.Close)
+			require.NoError(t, sn.OpenFolder())
+
+			blobCount := BlobCountFromBlocks(t.Context(), sn, NewBeaconSnapshotReader(sn, nil, &cfg))
+			n, err := blobCount(slot)
+			require.NoError(t, err)
+			require.Equal(t, tc.expected, n)
+
+			db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+			childRoot, err := child.Block.HashSSZ()
+			require.NoError(t, err)
+			for s, r := range map[uint64]common.Hash{slot: root, slot + 3: childRoot} {
+				require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error { return beacon_indicies.MarkRootCanonical(tx, s, r) }))
+			}
+			store := blob_storage.NewBlobStore(db, afero.NewMemMapFs())
+			err = DumpBlobSidecarsRange(t.Context(), db, store, 0, snaptype.CaplinMergeLimit, 0, dirs, 1, blobCount, log.LvlDebug, log.New())
+			if tc.dumpErr == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.ErrorContains(t, err, tc.dumpErr)
+		})
+	}
+}
