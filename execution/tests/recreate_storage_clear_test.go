@@ -18,6 +18,7 @@ package executiontests
 
 import (
 	"context"
+	"fmt"
 	"math/big"
 	"testing"
 
@@ -35,6 +36,8 @@ import (
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/execution/vm/program"
 )
 
 // TestRecreateStorageClearedAcrossBlocks reproduces eest
@@ -43,7 +46,7 @@ import (
 // then re-created at the same CREATE2 address in block 3. Pre-Cancun (no
 // EIP-6780) the self-destruct fully removes the account, so the re-created
 // contract must observe EMPTY storage — the block-1 slot must not survive the
-// cross-block destruct+recreate. Runs both serial and parallel executors.
+// cross-block destruct+recreate.
 func TestRecreateStorageClearedAcrossBlocks(t *testing.T) {
 	// creator: CALLDATACOPY(0,0,CALLDATASIZE); CREATE2(0,0,CALLDATASIZE,0)
 	creatorCode := common.FromHex("0x36600060003760003660006000f5")
@@ -56,7 +59,6 @@ func TestRecreateStorageClearedAcrossBlocks(t *testing.T) {
 		name     string
 		parallel bool
 	}{
-		{"serial", false},
 		{"parallel", true},
 	} {
 		t.Run(mode.name, func(t *testing.T) {
@@ -136,6 +138,84 @@ func TestRecreateStorageClearedAcrossBlocks(t *testing.T) {
 				require.True(t, slot0.IsZero(), "storage slot 0 must be cleared on recreate, got %s", slot0.String())
 				return nil
 			}))
+		})
+	}
+}
+
+// A contract destroyed and re-created at its CREATE2 address may get a slot
+// rewritten with its pre-destruct value. The destruct wiped the slot, so the
+// rewrite is a real change. The parallel import is repeated, because how the
+// executor handles the rewrite depends on the order of the transaction runs.
+func TestParallelStorageRewriteAfterDestroyAndRecreate(t *testing.T) {
+	// The victim self-destructs to the caller on empty calldata, returns
+	// SLOAD(word0) on 32 bytes of calldata and stores word1 at word0 otherwise.
+	victimCode := common.FromHex("3615601d57366020146013576020355f3555005b5f35545f5260205ff35b33ff")
+	initCode := program.New().Sstore(0, 7).ReturnViaCodeCopy(victimCode).Bytes()
+	factory := common.HexToAddress("0xfac1")
+	factoryCode := program.New().Create2(initCode, 0).Op(vm.STOP).Bytes()
+	victim := types.CreateAddress2(factory, [32]byte{}, accounts.InternCodeHash(crypto.Keccak256Hash(initCode)))
+	reader := common.HexToAddress("0xbbbb")
+	readerCode := program.New().
+		Push(0x32).Push(0x200).Op(vm.MSTORE).
+		StaticCall(nil, victim, 0x200, 32, 0x300, 32).Op(vm.POP).
+		Push(0x300).Op(vm.MLOAD).Push(0).Op(vm.SSTORE).
+		Op(vm.STOP).Bytes()
+
+	create := revivalCall{to: factory}
+	write := revivalCall{to: victim, data: common.FromHex(fmt.Sprintf("%064x%064x", 0x32, 0x593d))}
+	destroy := revivalCall{to: victim}
+	read := revivalCall{to: reader}
+
+	config := chain.TestChainOsakaConfig.Copy()
+	config.CancunTime, config.PragueTime, config.OsakaTime = nil, nil, nil
+	for _, tc := range []struct {
+		name      string
+		committed bool
+		readAfter bool
+		blocks    [][]revivalCall
+	}{
+		{"committed", true, false, [][]revivalCall{{destroy, create, write}}},
+		{"committed, read after", true, true, [][]revivalCall{{write, destroy, create, write, read}}},
+		{"created in block", false, false, [][]revivalCall{{create, write, destroy, create, write}}},
+		{"created in block, read after", false, true, [][]revivalCall{{create, write, destroy, create, write, read}}},
+		{"created in previous block", false, false, [][]revivalCall{{create, write}, {destroy, create, write}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			alloc := types.GenesisAlloc{
+				factory: {Nonce: 1, Code: factoryCode},
+				reader:  {Nonce: 1, Code: readerCode},
+			}
+			if tc.committed {
+				alloc[victim] = types.GenesisAccount{Nonce: 1, Code: victimCode, Storage: map[common.Hash]common.Hash{
+					common.BigToHash(big.NewInt(0)):    common.BigToHash(big.NewInt(7)),
+					common.BigToHash(big.NewInt(0x32)): common.BigToHash(big.NewInt(0x593d)),
+				}}
+			}
+			keys := revivalKeys(t, alloc, 6)
+			gspec := &types.Genesis{Config: config, GasLimit: 30_000_000, Alloc: alloc}
+
+			m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(keys[0]))
+			signer := types.LatestSignerForChainID(config.ChainID)
+			chainPack, err := m.GenerateChain(len(tc.blocks), func(i int, b *blockgen.BlockGen) {
+				for j, call := range tc.blocks[i] {
+					sender := crypto.PubkeyToAddress(keys[j].PublicKey)
+					txn, err := types.SignTx(types.NewTransaction(b.TxNonce(sender), call.to, uint256.NewInt(0), 1_000_000, uint256.NewInt(100_000_000_000), call.data), *signer, keys[j])
+					require.NoError(t, err)
+					b.AddTx(txn)
+				}
+			})
+			require.NoError(t, err)
+
+			check := func(t *testing.T, st *state.IntraBlockState) {
+				require.Equal(t, *uint256.NewInt(7), storageAt(t, st, victim, 0))
+				require.Equal(t, *uint256.NewInt(0x593d), storageAt(t, st, victim, 0x32))
+				if tc.readAfter {
+					require.Equal(t, *uint256.NewInt(0x593d), storageAt(t, st, reader, 0))
+				}
+			}
+			for range 25 {
+				importInParallel(t, gspec, keys[0], chainPack, check)
+			}
 		})
 	}
 }

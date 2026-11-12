@@ -181,7 +181,7 @@ func TestRemoteRulesEngineInitL2(t *testing.T) {
 			}))
 
 			e := &remoteRulesEngine{}
-			err := e.init(db, nil, nil, log.New())
+			err := e.init(db, nil, log.New())
 			if tc.err != "" {
 				require.ErrorContains(t, err, tc.err)
 				return
@@ -333,6 +333,37 @@ func TestAuthenticatedRpcServerRequiresJwtForGraphQL(t *testing.T) {
 		require.NoError(t, err)
 		resp.Body.Close()
 		require.Equal(t, http.StatusForbidden, resp.StatusCode, path)
+	}
+}
+
+func TestAuthenticatedRpcServerListensOnIPv6(t *testing.T) {
+	for _, listenAddr := range []string{"::1", "[::1]"} {
+		t.Run(listenAddr, func(t *testing.T) {
+			cfg := &httpcfg.HttpCfg{
+				AuthRpcHTTPListenAddress: listenAddr,
+				JWTSecretPath:            filepath.Join(t.TempDir(), "jwt.hex"),
+			}
+			listener, engineSrv, addr, err := createEngineListener(cfg, nil, log.New())
+			require.NoError(t, err)
+			t.Cleanup(func() {
+				engineSrv.Stop()
+				_ = listener.Close()
+			})
+			host, _, err := net.SplitHostPort(addr)
+			require.NoError(t, err)
+			require.Equal(t, "::1", host)
+		})
+	}
+}
+
+func TestListenHostPort(t *testing.T) {
+	for _, tc := range []struct{ host, want string }{
+		{"::1", "[::1]:8545"},
+		{"[::1]", "[::1]:8545"},
+		{"127.0.0.1", "127.0.0.1:8545"},
+		{"", ":8545"},
+	} {
+		require.Equal(t, tc.want, listenHostPort(tc.host, 8545), tc.host)
 	}
 }
 

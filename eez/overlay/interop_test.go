@@ -213,7 +213,7 @@ func TestGossipSettings(t *testing.T) {
 		"IWantFollowupTime": int64(3 * time.Second), "IDontWantMessageThreshold": 1000,
 	} {
 		f := params.FieldByName(name)
-		got := int64(0)
+		var got int64
 		if f.CanInt() {
 			got = f.Int()
 		} else {

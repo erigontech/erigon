@@ -169,7 +169,7 @@ func TestNew(t *testing.T) {
 	difficulty := e.CalcDifficulty(nil, 0, 0, *uint256.NewInt(1), 0, common.Hash{}, common.Hash{}, 0)
 	require.True(t, difficulty.IsZero())
 	h := &types.Header{Difficulty: *uint256.NewInt(1)}
-	require.NoError(t, e.Prepare(nil, h, nil))
+	require.NoError(t, e.Prepare(nil, h))
 	require.True(t, h.Difficulty.IsZero())
 
 	_, err = New(&chain.Config{})

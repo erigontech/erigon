@@ -335,13 +335,15 @@ func LoadSnapshotsHashes(ctx context.Context, dirs datadir.Dirs, chainName strin
 		if err != nil {
 			return err
 		}
-		snapcfg.SetToml(chainName, haveToml, true)
+		if err := snapcfg.SetToml(chainName, haveToml, true); err != nil {
+			return fmt.Errorf("%s: %w", preverifiedPath, err)
+		}
 	} else {
 		// Fetch the snapshot hashes from the web
 		err := snapcfg.LoadRemotePreverified(ctx, chainName, forceChainTomlURL)
 		if err != nil {
 			log.Root().Crit("Snapshot hashes for supported networks was not loaded. Please check your network connection and/or GitHub status here https://www.githubstatus.com/", "chain", chainName, "err", err)
-			return fmt.Errorf("failed to fetch remote snapshot hashes for chain %s", chainName)
+			return fmt.Errorf("failed to fetch remote snapshot hashes for chain %s: %w", chainName, err)
 		}
 	}
 	cfg.Local = initialDownloadComplete
@@ -369,7 +371,7 @@ func getIpv6Enabled() bool {
 			return false
 		}
 		fileContent := strings.TrimSpace(string(file))
-		return fileContent != "0"
+		return fileContent == "0"
 	}
 
 	// TODO hotfix: for platforms other than linux disable ipv6

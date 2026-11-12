@@ -131,7 +131,7 @@ func TestBackwardBlockDownloader(t *testing.T) {
 	cfg.StateCacheBudget = datasize.MB
 	backend, err := New(t.Context(), stack, &cfg, logger, nil)
 	require.NoError(t, err)
-	require.NoError(t, backend.Init(stack, &cfg, backend.ChainConfig()))
+	require.NoError(t, backend.Init(stack, &cfg))
 	require.NoError(t, stack.Start())
 	t.Cleanup(func() { require.NoError(t, stack.Close()) })
 

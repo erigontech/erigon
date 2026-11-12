@@ -39,16 +39,22 @@ func (f *ForkChoiceStore) OnAttestation(
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.onAttestationLocked(attestation, fromBlock, nil, common.Hash{})
+	return f.onAttestationLocked(attestation, fromBlock, nil)
 }
 
-// onAttestationLocked reads the committees from blockState, the post-state of the block at blockRoot, when it
-// has the target's shuffling.
+// blockAttestationSource supplies prepared indices from an importing block's post-state.
+type blockAttestationSource struct {
+	state            *state.CachingBeaconState
+	root             common.Hash
+	attestingIndices preparedAttestingIndices
+}
+
+// onAttestationLocked validates the attestation and updates latest messages. It takes indices from source when the
+// attestation is from the block and source's post-state has the target's shuffling.
 func (f *ForkChoiceStore) onAttestationLocked(
 	attestation *solid.Attestation,
 	fromBlock bool,
-	blockState *state.CachingBeaconState,
-	blockRoot common.Hash,
+	source *blockAttestationSource,
 ) error {
 	f.headHash = common.Hash{} // reset current head hash to force recomputation on next GetHead
 	f.headPayloadStatus = cltypes.PayloadStatusPending
@@ -72,9 +78,9 @@ func (f *ForkChoiceStore) onAttestationLocked(
 	target := data.Target
 
 	useCheckpointState := f.syncedDataManager.Syncing()
-	if blockState != nil && f.HeadStateHasTargetShuffling(blockState, blockRoot, target) {
+	if source != nil && fromBlock && f.HeadStateHasTargetShuffling(source.state, source.root, target) {
 		useCheckpointState = false
-		attestationIndicies, err = f.verifyAttestationWithState(blockState, attestation, fromBlock)
+		attestationIndicies, err = source.attestingIndices.indices, source.attestingIndices.err
 	} else if !useCheckpointState {
 		if err := f.syncedDataManager.ViewHeadStateWithIdentity(func(headState *state.CachingBeaconState, headRoot common.Hash, _ uint64) error {
 			if !f.HeadStateHasTargetShuffling(headState, headRoot, target) {
@@ -260,8 +266,8 @@ func (f *ForkChoiceStore) verifyAttestationWithState(
 
 func (f *ForkChoiceStore) setLatestMessage(index uint64, message LatestMessage) {
 	f.latestMessages.set(int(index), message)
-	f.gloasWeightTree.markDirty(index)
-	f.voteTally.markDirty(index)
+	f.gloasWeightTree.update(index)
+	f.voteTally.update(f, index)
 }
 
 func (f *ForkChoiceStore) trackGloasWeights() bool {
@@ -305,8 +311,9 @@ func (f *ForkChoiceStore) setUnequivocating(validatorIndex uint64) {
 	}
 	subIndex := int(validatorIndex) % 8
 	f.equivocatingIndicies[index] |= 1 << uint(subIndex)
-	f.gloasWeightTree.markDirty(validatorIndex)
-	f.voteTally.markDirty(validatorIndex)
+	f.hasEquivocator = true
+	f.gloasWeightTree.update(validatorIndex)
+	f.voteTally.update(f, validatorIndex)
 }
 
 func (f *ForkChoiceStore) updateLatestMessages(
@@ -401,9 +408,8 @@ func (f *ForkChoiceStore) ValidateOnAttestation(attestation *solid.Attestation) 
 		if blockHeader.Slot == attestation.Data.Slot && attestation.Data.CommitteeIndex != 0 {
 			return errors.New("attestation index must be 0 when block_slot equals attestation_slot")
 		}
-		// PTC attestation (index 1): payload must be verified
-		if attestation.Data.CommitteeIndex == 1 && !f.IsPayloadVerified(attestation.Data.BeaconBlockRoot) {
-			return errors.New("PTC attestation requires verified payload envelope")
+		if attestation.Data.CommitteeIndex == 1 && !f.isPayloadAvailable(attestation.Data.BeaconBlockRoot) {
+			return errors.New("attestation with index 1 requires an imported payload")
 		}
 	}
 

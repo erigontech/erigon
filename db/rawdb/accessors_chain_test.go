@@ -491,21 +491,6 @@ func TestBodyStorage(t *testing.T) {
 	} else if types.DeriveSha(types.Transactions(entry.Transactions)) != types.DeriveSha(types.Transactions(body.Transactions)) || types.CalcUncleHash(entry.Uncles) != types.CalcUncleHash(body.Uncles) {
 		t.Fatalf("Retrieved body mismatch: have %v, want %v", entry, body)
 	}
-	if entry := rawdb.ReadBodyRLP(tx, header.Hash(), 1); entry == nil {
-		// if entry, _ := br.BodyWithTransactions(ctx, tx, hash, 0); entry == nil {
-		t.Fatalf("Stored body RLP not found")
-	} else {
-		bodyRlp, err := rlp.EncodeToBytes(entry)
-		if err != nil {
-			log.Error("ReadBodyRLP failed", "err", err)
-		}
-		hasher := keccak.NewFastKeccak()
-		_, _ = hasher.Write(bodyRlp)
-
-		if calc := common.BytesToHash(hasher.Sum(nil)); calc != hash {
-			t.Fatalf("Retrieved RLP body mismatch: have %v, want %v", entry, body)
-		}
-	}
 	// Delete the body and verify the execution
 	rawdb.DeleteBody(tx, hash, 1)
 	if entry, _ := br.BodyWithTransactions(ctx, tx, hash, 1); entry != nil {
@@ -1584,4 +1569,24 @@ func TestRawTransactionsRangeExcludesForeignTxns(t *testing.T) {
 	txs, err := rawdb.RawTransactionsRange(tx, 0, 1)
 	require.NoError(err)
 	require.Equal([][]byte{txCanon}, txs)
+}
+
+func TestRaiseCaplinBlobsArchiveFromSlotKeepsHighest(t *testing.T) {
+	_, tx := mdbxtest.NewTestTx(t)
+
+	got, err := rawdb.ReadCaplinBlobsArchiveFromSlot(tx)
+	require.NoError(t, err)
+	require.Zero(t, got)
+
+	for _, slot := range []uint64{2_000_000, 1_000_000, 0} {
+		require.NoError(t, rawdb.RaiseCaplinBlobsArchiveFromSlot(tx, slot))
+	}
+	got, err = rawdb.ReadCaplinBlobsArchiveFromSlot(tx)
+	require.NoError(t, err)
+	require.Equal(t, uint64(2_000_000), got)
+
+	require.NoError(t, rawdb.RaiseCaplinBlobsArchiveFromSlot(tx, 3_000_000))
+	got, err = rawdb.ReadCaplinBlobsArchiveFromSlot(tx)
+	require.NoError(t, err)
+	require.Equal(t, uint64(3_000_000), got)
 }

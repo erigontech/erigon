@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"math/rand"
 	"testing"
 
@@ -55,6 +56,24 @@ func setupTestDB(t *testing.T) kv.RwDB {
 	return db
 }
 
+func TestCustodyRaiseSlotNeverDecreases(t *testing.T) {
+	db := setupTestDB(t)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		if err := WriteCustodyRaiseSlot(tx, 1000); err != nil {
+			return err
+		}
+		return WriteCustodyRaiseSlot(tx, 0)
+	}))
+
+	var got uint64
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		var err error
+		got, err = ReadCustodyRaiseSlot(tx)
+		return err
+	}))
+	require.Equal(t, uint64(1000), got)
+}
+
 func TestHighestCustodyGroupCountNeverDecreases(t *testing.T) {
 	db := setupTestDB(t)
 	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
@@ -82,6 +101,94 @@ func TestHighestCustodyGroupCountDefaultsToZero(t *testing.T) {
 		return err
 	}))
 	require.Zero(t, got)
+}
+
+func TestReadExecutionPayloadEnvelopeSignatureNotFound(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		signature, found, err := ReadExecutionPayloadEnvelopeSignature(tx, 12, common.Hash{1})
+		require.NoError(t, err)
+		require.False(t, found)
+		require.Zero(t, signature)
+		return nil
+	}))
+}
+
+func TestExecutionPayloadEnvelopeSignatureRoundTrip(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	const slot = uint64(12)
+	root := common.Hash{1}
+	signature := common.Bytes96{2, 3, 4}
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return WriteExecutionPayloadEnvelopeSignature(tx, slot, root, signature)
+	}))
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		got, found, err := ReadExecutionPayloadEnvelopeSignature(tx, slot, root)
+		require.NoError(t, err)
+		require.True(t, found)
+		require.Equal(t, signature, got)
+		return nil
+	}))
+}
+
+func TestReadExecutionPayloadEnvelopeSignatureTreatsWrongLengthAsAbsent(t *testing.T) {
+	for _, length := range []int{0, 95, 97} {
+		t.Run(fmt.Sprintf("length=%d", length), func(t *testing.T) {
+			db := setupTestDB(t)
+			defer db.Close()
+
+			const slot = uint64(12)
+			root := common.Hash{1}
+			require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+				return tx.Put(kv.ExecutionPayloadEnvelopeSignatures, dbutils.BlockBodyKey(slot, root), make([]byte, length))
+			}))
+			require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+				signature, found, err := ReadExecutionPayloadEnvelopeSignature(tx, slot, root)
+				require.NoError(t, err)
+				require.False(t, found)
+				require.Zero(t, signature)
+				return nil
+			}))
+		})
+	}
+}
+
+func TestWriteExecutionPayloadEnvelopeSignatureIfAbsent(t *testing.T) {
+	validSignature := common.Bytes96{1}
+	for _, test := range []struct {
+		name     string
+		stored   []byte
+		expected common.Bytes96
+	}{
+		{name: "malformed row is replaced", stored: make([]byte, 95), expected: common.Bytes96{2}},
+		{name: "valid row is kept", stored: validSignature[:], expected: validSignature},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			db := setupTestDB(t)
+			defer db.Close()
+
+			const slot = uint64(12)
+			root := common.Hash{1}
+			replacement := common.Bytes96{2}
+			require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+				if err := tx.Put(kv.ExecutionPayloadEnvelopeSignatures, dbutils.BlockBodyKey(slot, root), test.stored); err != nil {
+					return err
+				}
+				return WriteExecutionPayloadEnvelopeSignatureIfAbsent(tx, slot, root, replacement)
+			}))
+			require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+				signature, found, err := ReadExecutionPayloadEnvelopeSignature(tx, slot, root)
+				require.NoError(t, err)
+				require.True(t, found)
+				require.Equal(t, test.expected, signature)
+				return nil
+			}))
+		})
+	}
 }
 
 func TestWriteBlockRoot(t *testing.T) {
@@ -334,6 +441,60 @@ func TestPruneBlocksRemovesAllBlocksBeforeSlot(t *testing.T) {
 		}
 		require.NotEmpty(t, body)
 	}
+}
+
+func TestReadBlockRootsAtSlotListsEveryStoredBlockOfTheSlot(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	store := func(slot, proposer uint64) common.Hash {
+		block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+		block.Block.Slot = slot
+		block.Block.ProposerIndex = proposer
+		root, err := block.Block.HashSSZ()
+		require.NoError(t, err)
+		require.NoError(t, WriteBeaconBlock(tx, block))
+		return root
+	}
+	store(3, 0)
+	first, second := store(4, 0), store(4, 1)
+	store(5, 0)
+
+	roots, err := ReadBlockRootsAtSlot(tx, 4)
+	require.NoError(t, err)
+	require.ElementsMatch(t, []common.Hash{first, second}, roots)
+
+	roots, err = ReadBlockRootsAtSlot(tx, 6)
+	require.NoError(t, err)
+	require.Empty(t, roots)
+}
+
+func TestPruneBlocksPrunesExecutionPayloadEnvelopeSignaturesBeforeSlot(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	rootBefore := common.Hash{1}
+	rootAt := common.Hash{2}
+	require.NoError(t, WriteExecutionPayloadEnvelopeSignature(tx, 11, rootBefore, common.Bytes96{1}))
+	require.NoError(t, WriteExecutionPayloadEnvelopeSignature(tx, 12, rootAt, common.Bytes96{2}))
+
+	require.NoError(t, PruneBlocks(tx, 12))
+
+	_, found, err := ReadExecutionPayloadEnvelopeSignature(tx, 11, rootBefore)
+	require.NoError(t, err)
+	require.False(t, found)
+	signature, found, err := ReadExecutionPayloadEnvelopeSignature(tx, 12, rootAt)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, common.Bytes96{2}, signature)
 }
 
 func TestPruneBlocksLimitRemovesBoundedNumberOfBlocks(t *testing.T) {

@@ -318,6 +318,65 @@ func TestReplayGateMatchesReaderAtHistoryStart(t *testing.T) {
 	}
 }
 
+func TestIndexedStateReadRequiresTransactionBounds(t *testing.T) {
+	t.Parallel()
+	for _, mapping := range []struct {
+		name   string
+		offset uint64
+	}{
+		{"current", 0},
+		{"preceding", 1},
+	} {
+		t.Run(mapping.name, func(t *testing.T) {
+			ctx := t.Context()
+			apis, chainInfo := setupPruneGating(t, pruneGatingConfig{mode: prune.ArchiveMode})
+			api, ref := apis.debug, chainInfo.old
+			block := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(ref.num))
+			cases := []struct {
+				name string
+				call func() (any, error)
+			}{
+				{"debug_accountAt", func() (any, error) {
+					return api.AccountAt(ctx, ref.hash, 0, testAddr)
+				}},
+				{"debug_storageRangeAt", func() (any, error) {
+					return api.StorageRangeAt(ctx, ref.hash, 0, testAddr, nil, 1)
+				}},
+				{"debug_traceCall", func() (any, error) {
+					return streamedResult(func(stream *jsonstream.Stream) error {
+						return api.TraceCall(ctx, pruneGatingCallArgs(), &block, &tracersConfig.TraceConfig{TxIndex: new(hexutil.Uint)}, stream)
+					})
+				}},
+				{"debug_traceCallMany", func() (any, error) {
+					bundles, simulate := pruneGatingBundle(ref.num)
+					simulate.TransactionIndex = new(int)
+					return streamedResult(func(stream *jsonstream.Stream) error {
+						return api.TraceCallMany(ctx, bundles, simulate, nil, stream)
+					})
+				}},
+			}
+			for _, tc := range cases {
+				_, err := tc.call()
+				require.NoError(t, err, "%s must succeed with complete mappings", tc.name)
+			}
+
+			require.NoError(t, apis.rwDB.Update(ctx, func(tx kv.RwTx) error {
+				return tx.Delete(kv.MaxTxNum, hexutil.EncodeTs(ref.num-mapping.offset))
+			}))
+			require.NoError(t, apis.rwDB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+				return api.checkPruneTransactionHistoryAtIndex(ctx, tx, ref.num, 0)
+			}), "the history gate must still admit this position without the bounds check")
+
+			for _, tc := range cases {
+				t.Run(tc.name, func(t *testing.T) {
+					_, err := tc.call()
+					require.ErrorIs(t, err, state.ErrPruned)
+				})
+			}
+		})
+	}
+}
+
 func TestIndexedHistoryGateMatchesReader(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
@@ -373,24 +432,31 @@ func TestIndexedHistoryGateMatchesReader(t *testing.T) {
 	require.Contains(t, err.Error(), fmt.Sprintf("history is available from txNum %d", view.startTxNum))
 	api.db = historyFloorDB{TemporalRoDB: api.db, startTxNum: view.startTxNum}
 
+	t.Run("gate_index_bounds", func(t *testing.T) {
+		lastPosition := uint64(len(block.Transactions()))
+		require.NoError(t, api.checkPruneTransactionHistoryAtIndex(ctx, view, block.NumberU64(), lastPosition))
+		require.ErrorIs(t, api.checkPruneTransactionHistoryAtIndex(ctx, view, block.NumberU64(), lastPosition+1), state.ErrPruned)
+	})
+
 	for _, tc := range []struct {
-		name string
-		call func(*DebugAPIImpl, uint64) (any, error)
+		name       string
+		largeIndex uint64
+		call       func(*DebugAPIImpl, uint64) (any, error)
 	}{
-		{"accountAt", func(api *DebugAPIImpl, index uint64) (any, error) {
+		{"accountAt", math.MaxUint64 - 1, func(api *DebugAPIImpl, index uint64) (any, error) {
 			return api.AccountAt(ctx, block.Hash(), index, testAddr)
 		}},
-		{"storageRangeAt", func(api *DebugAPIImpl, index uint64) (any, error) {
+		{"storageRangeAt", math.MaxUint64 - 1, func(api *DebugAPIImpl, index uint64) (any, error) {
 			return api.StorageRangeAt(ctx, block.Hash(), index, storageAddr, nil, 1)
 		}},
-		{"traceCall", func(api *DebugAPIImpl, index uint64) (any, error) {
+		{"traceCall", math.MaxUint64 - 1, func(api *DebugAPIImpl, index uint64) (any, error) {
 			ref := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(block.NumberU64()))
 			txIndex := hexutil.Uint(index)
 			return streamedResult(func(stream *jsonstream.Stream) error {
 				return api.TraceCall(ctx, pruneGatingCallArgs(), &ref, &tracersConfig.TraceConfig{TxIndex: &txIndex}, stream)
 			})
 		}},
-		{"traceCallMany", func(api *DebugAPIImpl, index uint64) (any, error) {
+		{"traceCallMany", math.MaxInt, func(api *DebugAPIImpl, index uint64) (any, error) {
 			bundles, simulate := pruneGatingBundle(block.NumberU64())
 			txIndex := int(index)
 			simulate.TransactionIndex = &txIndex
@@ -409,9 +475,19 @@ func TestIndexedHistoryGateMatchesReader(t *testing.T) {
 			require.ErrorIs(t, err, state.ErrPruned, "the preceding transaction's pre-state is pruned")
 			_, err = tc.call(api, uint64(len(block.Transactions())))
 			require.NoError(t, err, "the position after the last user transaction is valid")
-			for _, index := range []uint64{uint64(len(block.Transactions()) + 1), 10_000, math.MaxUint64 - 1} {
-				_, err = tc.call(api, index)
-				require.ErrorIs(t, err, state.ErrPruned, "index %d must not bypass the history floor", index)
+			for _, index := range []uint64{uint64(len(block.Transactions()) + 1), 10_000, tc.largeIndex} {
+				for _, variant := range []struct {
+					name string
+					api  *DebugAPIImpl
+				}{
+					{"baseline", baseline},
+					{"pruned", api},
+				} {
+					_, err = tc.call(variant.api, index)
+					var invalidParams *rpc.InvalidParamsError
+					require.ErrorAs(t, err, &invalidParams, "%s, index %d", variant.name, index)
+					require.Equal(t, fmt.Sprintf("transaction index %d out of range for block %d", index, block.NumberU64()), invalidParams.Message, variant.name)
+				}
 			}
 		})
 	}
@@ -1911,7 +1987,7 @@ func TestBlockReceiptsGateCombinesBothBoundaries(t *testing.T) {
 	}
 }
 
-// TestUsesLogIndex pins the predicate against getTopicsBitmapV3, which skips
+// TestUsesLogIndex pins the predicate against logquery.IndexClauses, which skips
 // empty topic positions: a criteria whose every position is empty matches any
 // topic and searches no index.
 func TestUsesLogIndex(t *testing.T) {

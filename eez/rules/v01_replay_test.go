@@ -17,7 +17,6 @@
 package rules_test
 
 import (
-	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -54,7 +53,7 @@ func TestV01Replay(t *testing.T) {
 					headers[j] = b.Header()
 				}
 				err := m.InsertChain(&blockgen.ChainPack{Blocks: chunk, Headers: headers, TopBlock: chunk[len(chunk)-1]})
-				require.NoError(t, err, fmt.Sprintf("blocks %d-%d", chunk[0].NumberU64(), chunk[len(chunk)-1].NumberU64()))
+				require.NoError(t, err, "blocks %d-%d", chunk[0].NumberU64(), chunk[len(chunk)-1].NumberU64())
 			}
 			require.Equal(t, fixture.Head, m.Current(nil).Hash())
 		})

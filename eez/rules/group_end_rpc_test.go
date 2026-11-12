@@ -129,72 +129,58 @@ func TestGroupEndBurnRPCReplay(t *testing.T) {
 // balances the contract created at index 2 logged and deployed.
 func checkGroupEndRPCReplay(t *testing.T, m *execmoduletester.ExecModuleTester, block *types.Block, initCode []byte, created common.Address, want hexutil.Bytes) {
 	base := jsonrpc.NewBaseApi(nil, m.StateCache, m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
-	// The versioned call state answers a read with the writes flushed to its version map.
-	forEachCallState := func(t *testing.T, run func(t *testing.T)) {
-		for _, versioned := range []bool{false, true} {
-			t.Run(fmt.Sprintf("versioned=%v", versioned), func(t *testing.T) {
-				defer func(prev bool) { dbg.CallNoMaterialize = prev }(dbg.CallNoMaterialize)
-				dbg.CallNoMaterialize = versioned
-				run(t)
-			})
-		}
-	}
 
 	t.Run("debug_traceBlockByNumber", func(t *testing.T) {
-		forEachCallState(t, func(t *testing.T) {
-			api := jsonrpc.NewPrivateDebugAPI(base, m.DB, nil, &rpccfg.DebugApiConfig{})
-			tracer := "callTracer"
-			var buf bytes.Buffer
-			stream := jsonstream.New(&buf)
-			require.NoError(t, api.TraceBlockByNumber(t.Context(), rpc.BlockNumber(1), &tracersConfig.TraceConfig{Tracer: &tracer}, stream))
-			require.NoError(t, stream.Flush())
-			var traces []struct {
-				Result struct {
-					Output hexutil.Bytes `json:"output"`
-				} `json:"result"`
-			}
-			require.NoError(t, json.Unmarshal(buf.Bytes(), &traces), buf.String())
-			require.Len(t, traces, 3)
-			require.Equal(t, want, traces[2].Result.Output)
-		})
+		api := jsonrpc.NewPrivateDebugAPI(base, m.DB, nil, &rpccfg.DebugApiConfig{})
+		tracer := "callTracer"
+		var buf bytes.Buffer
+		stream := jsonstream.New(&buf)
+		require.NoError(t, api.TraceBlockByNumber(t.Context(), rpc.BlockNumber(1), &tracersConfig.TraceConfig{Tracer: &tracer}, stream))
+		require.NoError(t, stream.Flush())
+		var traces []struct {
+			Result struct {
+				Output hexutil.Bytes `json:"output"`
+			} `json:"result"`
+		}
+		require.NoError(t, json.Unmarshal(buf.Bytes(), &traces), buf.String())
+		require.Len(t, traces, 3)
+		require.Equal(t, want, traces[2].Result.Output)
 	})
 
 	t.Run("prestateTracer diffMode", func(t *testing.T) {
-		forEachCallState(t, func(t *testing.T) {
-			api := jsonrpc.NewPrivateDebugAPI(base, m.DB, nil, &rpccfg.DebugApiConfig{})
-			tracer, tracerCfg := "prestateTracer", json.RawMessage(`{"diffMode":true}`)
-			cfg := &tracersConfig.TraceConfig{Tracer: &tracer, TracerConfig: &tracerCfg}
+		api := jsonrpc.NewPrivateDebugAPI(base, m.DB, nil, &rpccfg.DebugApiConfig{})
+		tracer, tracerCfg := "prestateTracer", json.RawMessage(`{"diffMode":true}`)
+		cfg := &tracersConfig.TraceConfig{Tracer: &tracer, TracerConfig: &tracerCfg}
+		var buf bytes.Buffer
+		stream := jsonstream.New(&buf)
+		require.NoError(t, api.TraceBlockByNumber(t.Context(), rpc.BlockNumber(1), cfg, stream))
+		require.NoError(t, stream.Flush())
+		var traces []struct {
+			Result json.RawMessage `json:"result"`
+		}
+		require.NoError(t, json.Unmarshal(buf.Bytes(), &traces), buf.String())
+		require.Len(t, traces, 3)
+		// The burn belongs to the transaction ending the group: it empties the
+		// native system address and leaves EEZL2 as it found it.
+		var diff struct {
+			Pre  map[common.Address]struct{} `json:"pre"`
+			Post map[common.Address]struct {
+				Balance *hexutil.U256 `json:"balance"`
+			} `json:"post"`
+		}
+		require.NoError(t, json.Unmarshal(traces[1].Result, &diff))
+		require.NotContains(t, diff.Post, protocol.RollupXEEZL2Address, "%s", traces[1].Result)
+		require.Contains(t, diff.Pre, protocol.NativeSystemAddress, "%s", traces[1].Result)
+		native, ok := diff.Post[protocol.NativeSystemAddress]
+		require.True(t, ok, "%s", traces[1].Result)
+		require.Equal(t, &hexutil.U256{}, native.Balance, "%s", traces[1].Result)
+		for i, txn := range block.Transactions() {
 			var buf bytes.Buffer
 			stream := jsonstream.New(&buf)
-			require.NoError(t, api.TraceBlockByNumber(t.Context(), rpc.BlockNumber(1), cfg, stream))
+			require.NoError(t, api.TraceTransaction(t.Context(), txn.Hash(), cfg, stream))
 			require.NoError(t, stream.Flush())
-			var traces []struct {
-				Result json.RawMessage `json:"result"`
-			}
-			require.NoError(t, json.Unmarshal(buf.Bytes(), &traces), buf.String())
-			require.Len(t, traces, 3)
-			// The burn belongs to the transaction ending the group: it empties the
-			// native system address and leaves EEZL2 as it found it.
-			var diff struct {
-				Pre  map[common.Address]struct{} `json:"pre"`
-				Post map[common.Address]struct {
-					Balance *hexutil.U256 `json:"balance"`
-				} `json:"post"`
-			}
-			require.NoError(t, json.Unmarshal(traces[1].Result, &diff))
-			require.NotContains(t, diff.Post, protocol.RollupXEEZL2Address, "%s", traces[1].Result)
-			require.Contains(t, diff.Pre, protocol.NativeSystemAddress, "%s", traces[1].Result)
-			native, ok := diff.Post[protocol.NativeSystemAddress]
-			require.True(t, ok, "%s", traces[1].Result)
-			require.Equal(t, &hexutil.U256{}, native.Balance, "%s", traces[1].Result)
-			for i, txn := range block.Transactions() {
-				var buf bytes.Buffer
-				stream := jsonstream.New(&buf)
-				require.NoError(t, api.TraceTransaction(t.Context(), txn.Hash(), cfg, stream))
-				require.NoError(t, stream.Flush())
-				require.JSONEq(t, string(traces[i].Result), buf.String(), "transaction %d", i)
-			}
-		})
+			require.JSONEq(t, string(traces[i].Result), buf.String(), "transaction %d", i)
+		}
 	})
 
 	t.Run("trace_replayBlockTransactions", func(t *testing.T) {
@@ -241,41 +227,38 @@ func checkGroupEndRPCReplay(t *testing.T, m *execmoduletester.ExecModuleTester, 
 	})
 
 	t.Run("eth_callMany", func(t *testing.T) {
-		forEachCallState(t, func(t *testing.T) {
-			api := jsonrpc.NewEthAPI(base, m.DB, nil, nil, nil, &rpccfg.EthApiConfig{GasCap: 5_000_000, ReturnDataLimit: 100_000}, log.New())
-			from, data, index := derivertest.UserAddress(), hexutil.Bytes(initCode), 2
-			feeCap, tipCap := hexutil.U256(*uint256.NewInt(groupEndFeeCap)), hexutil.U256{}
-			call := ethapi.CallArgs{From: &from, Data: &data, MaxFeePerGas: &feeCap, MaxPriorityFeePerGas: &tipCap}
-			res, err := api.CallMany(t.Context(), []jsonrpc.Bundle{{Transactions: []ethapi.CallArgs{call}}},
-				jsonrpc.StateContext{BlockNumber: rpc.BlockNumberOrHashWithNumber(1), TransactionIndex: &index}, nil, nil)
-			require.NoError(t, err)
-			require.Len(t, res, 1)
-			require.Len(t, res[0], 1)
-			require.Equal(t, hex.EncodeToString(want), res[0][0]["value"], "%v", res[0][0])
-		})
+		api := jsonrpc.NewEthAPI(base, m.DB, nil, nil, nil, &rpccfg.EthApiConfig{GasCap: 5_000_000, ReturnDataLimit: 100_000}, log.New())
+		from, data, index := derivertest.UserAddress(), hexutil.Bytes(initCode), 2
+		feeCap, tipCap := hexutil.U256(*uint256.NewInt(groupEndFeeCap)), hexutil.U256{}
+		call := ethapi.CallArgs{From: &from, Data: &data, MaxFeePerGas: &feeCap, MaxPriorityFeePerGas: &tipCap}
+		res, err := api.CallMany(t.Context(), []jsonrpc.Bundle{{Transactions: []ethapi.CallArgs{call}}},
+			jsonrpc.StateContext{BlockNumber: rpc.BlockNumberOrHashWithNumber(1), TransactionIndex: &index}, nil, nil)
+		require.NoError(t, err)
+		require.Len(t, res, 1)
+		require.Len(t, res[0], 1)
+		require.Equal(t, hex.EncodeToString(want), res[0][0]["value"], "%v", res[0][0])
 	})
 
 	// After the block, the block-end burn has cleared what the creation tipped.
 	t.Run("eth_callMany after the block", func(t *testing.T) {
-		forEachCallState(t, func(t *testing.T) {
-			api := jsonrpc.NewEthAPI(base, m.DB, nil, nil, nil, &rpccfg.EthApiConfig{GasCap: 5_000_000, ReturnDataLimit: 100_000}, log.New())
-			from, data := derivertest.UserAddress(), hexutil.Bytes(initCode)
-			feeCap, tipCap := hexutil.U256(*uint256.NewInt(groupEndFeeCap)), hexutil.U256{}
-			call := ethapi.CallArgs{From: &from, Data: &data, MaxFeePerGas: &feeCap, MaxPriorityFeePerGas: &tipCap}
-			after := -1
-			for _, index := range []*int{nil, &after} {
-				res, err := api.CallMany(t.Context(), []jsonrpc.Bundle{{Transactions: []ethapi.CallArgs{call}}},
-					jsonrpc.StateContext{BlockNumber: rpc.BlockNumberOrHashWithNumber(1), TransactionIndex: index}, nil, nil)
-				require.NoError(t, err)
-				require.Len(t, res, 1)
-				require.Len(t, res[0], 1)
-				require.Equal(t, hex.EncodeToString(make([]byte, 64)), res[0][0]["value"], "%v", res[0][0])
-			}
-		})
+		api := jsonrpc.NewEthAPI(base, m.DB, nil, nil, nil, &rpccfg.EthApiConfig{GasCap: 5_000_000, ReturnDataLimit: 100_000}, log.New())
+		from, data := derivertest.UserAddress(), hexutil.Bytes(initCode)
+		feeCap, tipCap := hexutil.U256(*uint256.NewInt(groupEndFeeCap)), hexutil.U256{}
+		call := ethapi.CallArgs{From: &from, Data: &data, MaxFeePerGas: &feeCap, MaxPriorityFeePerGas: &tipCap}
+		after := -1
+		for _, index := range []*int{nil, &after} {
+			res, err := api.CallMany(t.Context(), []jsonrpc.Bundle{{Transactions: []ethapi.CallArgs{call}}},
+				jsonrpc.StateContext{BlockNumber: rpc.BlockNumberOrHashWithNumber(1), TransactionIndex: index}, nil, nil)
+			require.NoError(t, err)
+			require.Len(t, res, 1)
+			require.Len(t, res[0], 1)
+			require.Equal(t, hex.EncodeToString(make([]byte, 64)), res[0][0]["value"], "%v", res[0][0])
+		}
 	})
 
+	// Overlay replays refuse a gas limit above the cap; native transactions declare 2^24.
 	overlay := func() *jsonrpc.OverlayAPIImpl {
-		return jsonrpc.NewOverlayAPI(base, m.DB, &rpccfg.OverlayApiConfig{GasCap: 5_000_000}, jsonrpc.NewOtterscanAPI(base, m.DB, 25))
+		return jsonrpc.NewOverlayAPI(base, m.DB, &rpccfg.OverlayApiConfig{GasCap: 50_000_000}, jsonrpc.NewOtterscanAPI(base, m.DB, 25))
 	}
 
 	t.Run("overlay_getLogs", func(t *testing.T) {
@@ -323,7 +306,8 @@ func TestOverlayGetLogsFailedNative(t *testing.T) {
 	require.Equal(t, hexutil.Bytes(make([]byte, 32)), want, "native system address empty")
 
 	base := jsonrpc.NewBaseApi(nil, m.StateCache, m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
-	api := jsonrpc.NewOverlayAPI(base, m.DB, &rpccfg.OverlayApiConfig{GasCap: 5_000_000}, jsonrpc.NewOtterscanAPI(base, m.DB, 25))
+	// Overlay replays refuse a gas limit above the cap; native transactions declare 2^24.
+	api := jsonrpc.NewOverlayAPI(base, m.DB, &rpccfg.OverlayApiConfig{GasCap: 50_000_000}, jsonrpc.NewOtterscanAPI(base, m.DB, 25))
 	hash := built.Block.Hash()
 	logs, err := api.GetLogs(t.Context(), filters.FilterCriteria{BlockHash: &hash}, nil, nil)
 	require.NoError(t, err)

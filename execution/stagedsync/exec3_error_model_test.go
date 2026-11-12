@@ -3,6 +3,7 @@ package stagedsync
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -21,6 +22,8 @@ func TestIsOnlyLoopExhausted(t *testing.T) {
 	require.False(t, IsOnlyLoopExhausted(errors.Join(exhausted, errors.New("boom"))))
 	require.False(t, IsOnlyLoopExhausted(errors.New("boom")))
 	require.False(t, IsOnlyLoopExhausted(nil))
+	require.True(t, IsOnlyLoopExhausted(fmt.Errorf("apply loop: %w", exhausted)))
+	require.False(t, IsOnlyLoopExhausted(errors.Join(exhausted, context.Canceled)))
 }
 
 // TestSavesExecProgress pins the stage-progress gate: a clean or purely-exhausted

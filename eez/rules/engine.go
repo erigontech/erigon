@@ -342,7 +342,7 @@ func systemType(t byte) bool {
 }
 
 // Prepare sets the proof-of-stake difficulty.
-func (e *Engine) Prepare(_ rules.ChainHeaderReader, header *types.Header, _ *state.IntraBlockState) error {
+func (e *Engine) Prepare(_ rules.ChainHeaderReader, header *types.Header) error {
 	header.Difficulty.Clear()
 	return nil
 }

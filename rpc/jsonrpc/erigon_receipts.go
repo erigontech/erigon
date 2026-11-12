@@ -29,7 +29,6 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
-	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/ethutils"
@@ -100,25 +99,25 @@ func logRangeLatestOnly(tx kv.Tx, crit filters.FilterCriteria) (begin, end uint6
 	if err != nil {
 		return 0, 0, err
 	}
-	begin, err = resolveLogBound(crit.FromBlock, 0, "FromBlock")
+	begin, err = resolveLogBound(crit.FromBlock, 0, latest, "FromBlock")
 	if err != nil {
 		return 0, 0, err
 	}
-	end, err = resolveLogBound(crit.ToBlock, latest, "ToBlock")
+	end, err = resolveLogBound(crit.ToBlock, latest, latest, "ToBlock")
 	if err != nil {
 		return 0, 0, err
 	}
 	return begin, end, nil
 }
 
-func resolveLogBound(bound *big.Int, def uint64, name string) (uint64, error) {
+func resolveLogBound(bound *big.Int, def, latest uint64, name string) (uint64, error) {
 	switch {
 	case bound == nil:
 		return def, nil
 	case bound.Sign() >= 0:
 		return bound.Uint64(), nil
 	case bound.IsInt64() && bound.Int64() == int64(rpc.LatestBlockNumber):
-		return def, nil
+		return latest, nil
 	default:
 		return 0, &rpc.CustomError{Message: fmt.Sprintf("negative value for %s: %v", name, bound), Code: rpc.ErrCodeInvalidParams}
 	}
@@ -203,6 +202,8 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 		return nil, beginErr
 	}
 	defer tx.Rollback()
+	// Committed view only: GetReceipt must not wrap this tx in a newer overlay.
+	tx = rpchelper.PinToOverlay(tx, nil)
 
 	rpcLogs := types.Logs{}
 
@@ -226,8 +227,13 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 		return nil, &rpc.CustomError{Message: fmt.Sprintf("invalid block range: end (%d) < begin (%d)", end, begin), Code: rpc.ErrCodeInvalidParams}
 	}
 
-	if !userProvidedCountLimit && api.blockRangeLimit != 0 && (end-begin) > uint64(api.blockRangeLimit) {
-		return nil, &rpc.CustomError{Message: fmt.Sprintf("%s: %d", errExceedBlockRange, api.blockRangeLimit), Code: rpc.ErrCodeInvalidParams}
+	if api.blockRangeLimit != 0 && (end-begin) > uint64(api.blockRangeLimit) {
+		if userProvidedCountLimit {
+			// A count asks for the latest logs, so the scan keeps the newest blocks of the range.
+			begin = end - uint64(api.blockRangeLimit)
+		} else {
+			return nil, &rpc.CustomError{Message: fmt.Sprintf("%s: %d", errExceedBlockRange, api.blockRangeLimit), Code: rpc.ErrCodeInvalidParams}
+		}
 	}
 
 	// A count-limited scan may finish before reaching the pruned part of its range.
@@ -257,9 +263,6 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 	if err != nil {
 		return nil, err
 	}
-	exec := exec.NewTraceWorker(tx, chainConfig, api.engine(), api._blockReader, nil)
-	defer exec.Close()
-
 	// The Logs should retrieve from latest to oldest order=Descend
 	txNumbers, err := logquery.MatchingTxNums(api._txNumReader, tx, begin, end, crit, order.Desc)
 	if err != nil {
@@ -322,16 +325,12 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 				return nil, fmt.Errorf("header not found: %d", blockNum)
 			}
 			blockHash = header.Hash()
-			exec.ChangeBlock(header)
 			timestamp = header.Time
 			blockCount++
 		}
 		if isSystemTxn {
 			continue
 		}
-		var logIndex uint
-		var blockLogs types.Logs
-
 		txn, ok, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txIndex)
 		if err != nil {
 			return nil, err
@@ -345,16 +344,11 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 				return nil, err
 			}
 		}
-		err = exec.ExecTxn(txNum, txIndex, txn, true)
+		receipt, err := api.receiptsGenerator.GetReceipt(ctx, chainConfig, tx, header, txn, txIndex, txNum, nil)
 		if err != nil {
 			return nil, err
 		}
-
-		blockLogs = exec.GetRawLogs(txIndex)
-		for _, log := range blockLogs {
-			log.Index = hexutil.Uint(logIndex)
-			logIndex++
-		}
+		blockLogs := receipt.Logs
 		var filtered types.Logs
 		var maxLogCount uint64
 		maxLogCount = 0
@@ -370,10 +364,7 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 			continue
 		}
 
-		for i := range filtered {
-			filtered[i].TxIndex = hexutil.Uint(txIndex)
-			logCount++
-		}
+		logCount += uint64(len(filtered))
 
 		if len(blockLogs) == 0 {
 			continue

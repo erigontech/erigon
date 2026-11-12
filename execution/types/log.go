@@ -253,8 +253,8 @@ func (logs Logs) FilterWith(f *LogFilter, maxLogs uint64) Logs {
 	return o
 }
 
-// AppendFilteredLogs appends the logs matching f to dst,
-// adding a timestamp to each entry. It stops once dst holds limit entries, so a caller
+// AppendFilteredLogs appends the logs matching f to dst, each carrying timestamp: a log already
+// stamped with it is appended as it is, any other is copied. It stops once dst holds limit entries, so a caller
 // enforcing a result cap never converts more logs than it can use; limit 0 is unlimited.
 func (logs Logs) AppendFilteredLogs(dst Logs, f *LogFilter, timestamp uint64, limit int) Logs {
 	start := len(dst)
@@ -267,20 +267,50 @@ func (logs Logs) AppendFilteredLogs(dst Logs, f *LogFilter, timestamp uint64, li
 		}
 	}
 	matched := dst[start:]
-	if len(matched) == 0 {
+	unstamped := 0
+	for _, l := range matched {
+		if !l.stampedAt(timestamp) {
+			unstamped++
+		}
+	}
+	if unstamped == 0 {
 		return dst
 	}
 	stamped := make([]struct {
 		log       Log
 		timestamp hexutil.Uint64
-	}, len(matched))
+	}, unstamped)
 	for i, l := range matched {
-		s := &stamped[i]
+		if l.stampedAt(timestamp) {
+			continue
+		}
+		s := &stamped[len(stamped)-unstamped]
+		unstamped--
 		s.log, s.timestamp = *l, hexutil.Uint64(timestamp)
 		s.log.BlockTimestamp = &s.timestamp
 		matched[i] = &s.log
 	}
 	return dst
+}
+
+func (l *Log) stampedAt(timestamp uint64) bool {
+	return l.BlockTimestamp != nil && uint64(*l.BlockTimestamp) == timestamp
+}
+
+// SetBlockTimestamp stamps the logs in place, so it is only for logs no other goroutine sees yet.
+// Logs already carrying timestamp are left untouched.
+func (logs Logs) SetBlockTimestamp(timestamp uint64) {
+	var at []hexutil.Uint64
+	for _, l := range logs {
+		if l.stampedAt(timestamp) {
+			continue
+		}
+		if at == nil {
+			at = make([]hexutil.Uint64, 0, len(logs))
+		}
+		at = append(at, hexutil.Uint64(timestamp))
+		l.BlockTimestamp = &at[len(at)-1]
+	}
 }
 
 func (logs Logs) Filter(addrs []common.Address, topics [][]common.Hash, maxLogs uint64) Logs {

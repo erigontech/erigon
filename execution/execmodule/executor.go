@@ -18,10 +18,12 @@ package execmodule
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/erigontech/erigon/common/dbg"
+	commonerrors "github.com/erigontech/erigon/common/errors"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/dbservices"
@@ -344,7 +346,7 @@ func (pe *PipelineExecutor) lastValidationExecStageTiming() time.Duration {
 
 // ValidateBlock executes a fork validation by running the pipeline block-by-block
 // over a side fork. All pipeline execution goes through PipelineExecutor.
-func (pe *PipelineExecutor) ValidateBlock(sd *execctx.SharedDomains, tx kv.TemporalRwTx, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody) error {
+func (pe *PipelineExecutor) ValidateBlock(sd *execctx.SharedDomains, tx kv.TemporalRwTx, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.Body) error {
 	// Use a terse logger to suppress low-level noise during fork validation.
 	// Defaults to LvlWarn (matching the original hard-coded level), but can
 	// be overridden via dbg.ExecTerseLoggerLevel for debugging — Erigon's
@@ -363,7 +365,11 @@ func (pe *PipelineExecutor) ValidateBlock(sd *execctx.SharedDomains, tx kv.Tempo
 	}
 
 	if err := stageloop.StateStep(chainReader, pe.engine, sd, tx, pe.validationSync, unwindPoint, headersChain, bodiesChain); err != nil {
-		pe.logger.Warn("Could not validate block", "err", err)
+		if errors.Is(err, stageloop.ErrStateStepHasMoreWork) {
+			pe.logger.Debug("Could not validate block", "err", err)
+		} else if !commonerrors.IsOnlyCanceled(err) {
+			pe.logger.Warn("Could not validate block", "err", err)
+		}
 		return err
 	}
 

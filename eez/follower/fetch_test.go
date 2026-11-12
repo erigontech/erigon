@@ -280,7 +280,7 @@ func newFetcher(t *testing.T, s *peerSentry, chain deriver.Chain) *follower.Fetc
 		}
 		return !s.connected || s.untracked || len(tracker.ListPeers()) == 1
 	}, 10*time.Second, 5*time.Millisecond)
-	bbd := execp2p.NewBackwardBlockDownloader(logger, fetcher, penalizer, tracker, t.TempDir())
+	bbd := execp2p.NewBackwardBlockDownloader(logger, fetcher, tracker, t.TempDir())
 	return follower.NewFetcher(bbd, sentryPeers(mux), chain, logger)
 }
 

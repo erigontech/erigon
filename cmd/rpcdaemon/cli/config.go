@@ -19,6 +19,7 @@ package cli
 import (
 	"context"
 	"crypto/rand"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -27,6 +28,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -148,6 +150,7 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	rootCmd.PersistentFlags().StringSliceVar(&cfg.HttpCORSDomain, "http.corsdomain", []string{}, "Comma separated list of domains from which to accept cross origin requests (browser enforced)")
 	rootCmd.PersistentFlags().StringSliceVar(&cfg.HttpVirtualHost, "http.vhosts", nodecfg.DefaultConfig.HTTPVirtualHosts, "Comma separated list of virtual hostnames from which to accept requests (server enforced). Accepts '*' wildcard.")
 	rootCmd.PersistentFlags().BoolVar(&cfg.HttpCompression, "http.compression", true, "Enable http compression enabled by default. Use --http.compression=false to disable it")
+	rootCmd.PersistentFlags().BoolVar(&cfg.HttpCompressionLoopback, utils.HttpCompressionLoopbackFlag.Name, utils.HttpCompressionLoopbackFlag.Value, utils.HttpCompressionLoopbackFlag.Usage)
 	rootCmd.PersistentFlags().BoolVar(&cfg.WebsocketEnabled, "ws", false, "Enable Websockets - Same port as HTTP[S]")
 	rootCmd.PersistentFlags().BoolVar(&cfg.WebsocketCompression, "ws.compression", true, "Enable Websocket compression (RFC 7692) enabled by default is Websockets is enabled. Use --ws.compression=false to disable it")
 	rootCmd.PersistentFlags().IntVar(&cfg.WebsocketPort, "ws.port", nodecfg.DefaultWSPort, "rpc WebSocket server listening port")
@@ -601,7 +604,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 			rootCancel()
 		}
 		if remoteCE != nil {
-			if err := remoteCE.init(db, blockReader, remoteKvClient, logger); err != nil {
+			if err := remoteCE.init(db, remoteKvClient, logger); err != nil {
 				logger.Error("Failed to initialize remote rules engine", "err", err)
 				rootCancel()
 			}
@@ -729,7 +732,7 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 	} else {
 		logger.Info("RPC admission control enabled", "max_concurrent_requests", rpcConcurrencyLimit, "db.read.concurrency", cfg.DBReadConcurrency)
 	}
-	httpHandler := node.NewHTTPHandlerStack(srv, cfg.HttpCORSDomain, cfg.HttpVirtualHost, cfg.HttpCompression, rpcConcurrencyLimit, true)
+	httpHandler := node.NewHTTPHandlerStack(srv, cfg.HttpCORSDomain, cfg.HttpVirtualHost, cfg.HttpCompression, cfg.HttpCompressionLoopback, rpcConcurrencyLimit, true)
 	var wsHandler http.Handler
 	if cfg.WebsocketEnabled {
 		// With a CORS list, NewWSOriginHandler checks origins; the handshake validator only keeps
@@ -750,7 +753,7 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 
 	// Separate Websocket handler if websocket port flag specified
 	if cfg.WebsocketEnabled && cfg.WebsocketPort != cfg.HttpPort {
-		wsEndpoint := fmt.Sprintf("tcp://%s:%d", cfg.HttpListenAddress, cfg.WebsocketPort)
+		wsEndpoint := "tcp://" + listenHostPort(cfg.HttpListenAddress, cfg.WebsocketPort)
 		wsApiHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if isWebsocket(r) {
 				wsHandler.ServeHTTP(w, r)
@@ -770,7 +773,7 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 	}
 
 	if cfg.HttpServerEnabled {
-		httpEndpoint := fmt.Sprintf("tcp://%s:%d", cfg.HttpListenAddress, cfg.HttpPort)
+		httpEndpoint := "tcp://" + listenHostPort(cfg.HttpListenAddress, cfg.HttpPort)
 		if cfg.HttpURL != "" {
 			httpEndpoint = cfg.HttpURL
 		}
@@ -781,7 +784,7 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 		if err != nil {
 			return fmt.Errorf("could not start RPC api: %w", err)
 		}
-		info = append(info, "http.url", httpAddr, "http.compression", cfg.HttpCompression)
+		info = append(info, "http.url", httpAddr, "http.compression", cfg.HttpCompression, "http.compression.loopback", cfg.HttpCompressionLoopback)
 		defer func() {
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
@@ -796,7 +799,7 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 		if cfg.HttpsPort == 0 {
 			cfg.HttpsPort = cfg.HttpPort + 363
 		}
-		httpsEndpoint := fmt.Sprintf("tcp://%s:%d", cfg.HttpsListenAddress, cfg.HttpsPort)
+		httpsEndpoint := "tcp://" + listenHostPort(cfg.HttpsListenAddress, cfg.HttpsPort)
 		if cfg.HttpsURL != "" {
 			httpsEndpoint = cfg.HttpsURL
 		}
@@ -825,7 +828,7 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 		grpcEndpoint string
 	)
 	if cfg.GRPCServerEnabled {
-		grpcEndpoint = fmt.Sprintf("%s:%d", cfg.GRPCListenAddress, cfg.GRPCPort)
+		grpcEndpoint = listenHostPort(cfg.GRPCListenAddress, cfg.GRPCPort)
 		if grpcListener, err = net.Listen("tcp", grpcEndpoint); err != nil { //nolint:noctx
 			return fmt.Errorf("could not start GRPC listener: %w", err)
 		}
@@ -916,7 +919,7 @@ func ObtainJWTSecret(cfg *httpcfg.HttpCfg, logger log.Logger) ([]byte, error) {
 }
 
 func newGraphQLHandler(cfg *httpcfg.HttpCfg, graphQLSrv http.Handler, rpcConcurrencyLimit int64) http.Handler {
-	return node.NewHTTPHandlerStack(graphQLSrv, cfg.HttpCORSDomain, cfg.HttpVirtualHost, false, rpcConcurrencyLimit, true)
+	return node.NewHTTPHandlerStack(graphQLSrv, cfg.HttpCORSDomain, cfg.HttpVirtualHost, false, false, rpcConcurrencyLimit, true)
 }
 
 func createHandler(cfg *httpcfg.HttpCfg, apiList []rpc.API, httpHandler http.Handler, wsHandler http.Handler, graphQLHandler http.Handler, jwtSecret []byte) (http.Handler, error) {
@@ -925,12 +928,26 @@ func createHandler(cfg *httpcfg.HttpCfg, apiList []rpc.API, httpHandler http.Han
 			return
 		}
 
-		// adding a healthcheck here
-		if health.ProcessHealthcheckIfNeeded(w, r, apiList) {
-			return
-		}
 		if cfg.WebsocketEnabled && wsHandler != nil && isWebsocket(r) {
 			wsHandler.ServeHTTP(w, r)
+			return
+		}
+
+		if jwtSecret != nil && AuthenticatedEngineRESTHandler != nil && strings.HasPrefix(r.URL.Path, "/engine/") {
+			if err := rpc.ValidateJWT(r, jwtSecret); err != nil {
+				w.Header().Set("Cache-Control", "no-store")
+				w.Header().Set("Content-Type", "application/problem+json")
+				w.WriteHeader(http.StatusForbidden)
+				problem := struct {
+					Type   string `json:"type"`
+					Detail string `json:"detail"`
+				}{Type: "/engine-api/errors/authentication-error", Detail: err.Error()}
+				if err := json.NewEncoder(w).Encode(problem); err != nil {
+					log.Debug("[SSZ-REST] failed to write authentication problem response", "err", err)
+				}
+				return
+			}
+			AuthenticatedEngineRESTHandler.ServeHTTP(w, r)
 			return
 		}
 
@@ -938,11 +955,9 @@ func createHandler(cfg *httpcfg.HttpCfg, apiList []rpc.API, httpHandler http.Han
 			return
 		}
 
-		if jwtSecret != nil && AuthenticatedEngineRESTHandler != nil && strings.HasPrefix(r.URL.Path, "/engine/") {
-			AuthenticatedEngineRESTHandler.ServeHTTP(w, r)
+		if health.ProcessHealthcheckIfNeeded(w, r, apiList) {
 			return
 		}
-
 		httpHandler.ServeHTTP(w, r)
 	})
 
@@ -953,10 +968,19 @@ func createHandler(cfg *httpcfg.HttpCfg, apiList []rpc.API, httpHandler http.Han
 // server and is invoked only after the same JWT check as authenticated JSON-RPC.
 var AuthenticatedEngineRESTHandler http.Handler
 
+// listenHostPort accepts IPv6 hosts with or without brackets.
+func listenHostPort(host string, port int) string {
+	if len(host) > 2 && host[0] == '[' && host[len(host)-1] == ']' {
+		host = host[1 : len(host)-1]
+	}
+	return net.JoinHostPort(host, strconv.Itoa(port))
+}
+
 func createEngineListener(cfg *httpcfg.HttpCfg, engineApi []rpc.API, logger log.Logger) (*http.Server, *rpc.Server, string, error) {
-	engineHttpEndpoint := fmt.Sprintf("tcp://%s:%d", cfg.AuthRpcHTTPListenAddress, cfg.AuthRpcPort)
+	engineHttpEndpoint := "tcp://" + listenHostPort(cfg.AuthRpcHTTPListenAddress, cfg.AuthRpcPort)
 
 	engineSrv := rpc.NewServer(cfg.RpcBatchConcurrency, cfg.TraceRequests, cfg.DebugSingleRequest, true, logger, cfg.RPCSlowLogThreshold)
+	engineSrv.SetBatchLimit(cfg.BatchLimit)
 	engineSrv.SetSubscriptionLimit(cfg.SubscriptionLimit)
 
 	if err := node.RegisterApisFromWhitelist(engineApi, nil, engineSrv, true, logger); err != nil {
@@ -974,7 +998,7 @@ func createEngineListener(cfg *httpcfg.HttpCfg, engineApi []rpc.API, logger log.
 	// so execution-engine DB operations use blocking Acquire instead of fail-fast TryAcquire.
 	// Compression is always off here: engine responses (getBlobs, getPayload) are multi-MB and
 	// latency-critical, and gzip costs far more time than the transfer it saves.
-	engineHttpHandler := node.NewHTTPHandlerStack(engineSrv, nil /* authCors */, cfg.AuthRpcVirtualHost, false /* compression */, 0, false)
+	engineHttpHandler := node.NewHTTPHandlerStack(engineSrv, nil /* authCors */, cfg.AuthRpcVirtualHost, false /* compression */, false, 0, false)
 
 	engineApiHandler, err := createHandler(cfg, engineApi, engineHttpHandler, wsHandler, nil, jwtSecret)
 	if err != nil {
@@ -982,8 +1006,9 @@ func createEngineListener(cfg *httpcfg.HttpCfg, engineApi []rpc.API, logger log.
 	}
 
 	engineListener, engineAddr, err := node.StartHTTPEndpoint(engineHttpEndpoint, &node.HttpEndpointConfig{
-		Timeouts: cfg.AuthRpcTimeouts,
-		Listener: cfg.AuthRpcListener,
+		Timeouts:              cfg.AuthRpcTimeouts,
+		Listener:              cfg.AuthRpcListener,
+		AllowUnencryptedHTTP2: true,
 	}, engineApiHandler)
 	if err != nil {
 		return nil, nil, "", fmt.Errorf("could not start RPC api: %w", err)
@@ -1023,7 +1048,7 @@ func (e *remoteRulesEngine) validateEngineReady() error {
 // service startup or in a background goroutine, so that we do not depend on the liveness of other services when
 // starting up rpcdaemon and do not block startup (avoiding "cascade outage" scenario). In this case the DB dependency
 // can be a remote DB service running on another machine.
-func (e *remoteRulesEngine) init(db kv.RoDB, blockReader dbservices.FullBlockReader, remoteKV remoteproto.KVClient, logger log.Logger) error {
+func (e *remoteRulesEngine) init(db kv.RoDB, remoteKV remoteproto.KVClient, logger log.Logger) error {
 	cc, err := readChainConfigFromDB(context.Background(), db)
 	if err != nil {
 		return err
@@ -1146,7 +1171,7 @@ func (e *remoteRulesEngine) VerifyUncles(_ rules.ChainReader, _ *types.Header, _
 	panic("remoteRulesEngine.VerifyUncles not supported")
 }
 
-func (e *remoteRulesEngine) Prepare(_ rules.ChainHeaderReader, _ *types.Header, _ *state.IntraBlockState) error {
+func (e *remoteRulesEngine) Prepare(_ rules.ChainHeaderReader, _ *types.Header) error {
 	panic("remoteRulesEngine.Prepare not supported")
 }
 

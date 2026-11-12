@@ -27,7 +27,7 @@ import (
 // needCompare - if false - doesn't call Erigon and doesn't compare responses
 //
 //	use false value - to generate the pattern files (vegeta_*.txt and <method>.jsonl), it's faster
-func BenchOtsGetBlockTransactions(erigonURL, gethURL string, needCompare, visitAllPages bool, latest bool, blockFrom, blockTo uint64, recordFileName string, errorFileName string) (err error) {
+func BenchOtsGetBlockTransactions(erigonURL, gethURL string, needCompare, visitAllPages bool, blockFrom, blockTo uint64, recordFileName string, errorFileName string) (err error) {
 	setRoutes(erigonURL, gethURL)
 
 	rec, _, cleanup, err := openWriters(recordFileName, errorFileName)

@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/rpc/transactions"
@@ -633,6 +634,8 @@ func (api *BaseAPI) buildAccessedState(
 	// Create the in-block state with the recording state as reader
 	ibs := state.New(recordingState)
 	defer ibs.Close()
+	transactions.VersionedBlockState(ibs)
+	ibs.SetTxContext(blockNum, -1)
 
 	// Get header for block context
 	header := block.HeaderNoCopy()
@@ -661,7 +664,7 @@ func (api *BaseAPI) buildAccessedState(
 	if err = fullEngine.Initialize(chainConfig, chainReader, header, ibs, systemCallCustom, log.Root(), nil); err != nil {
 		return nil, nil, fmt.Errorf("failed to initialize block: %w", err)
 	}
-	if err = ibs.FinalizeTx(blockRules, recordingState); err != nil {
+	if err = ethapi.FinalizeCallTxTo(ibs, blockRules, recordingState); err != nil {
 		return nil, nil, fmt.Errorf("failed to finalize engine.Initialize tx: %w", err)
 	}
 
@@ -694,7 +697,7 @@ func (api *BaseAPI) buildAccessedState(
 			return nil, nil, fmt.Errorf("failed to post-process tx %d: %w", txIndex, err)
 		}
 
-		if err = ibs.FinalizeTx(blockRules, recordingState); err != nil {
+		if err = ethapi.FinalizeCallTxTo(ibs, blockRules, recordingState); err != nil {
 			return nil, nil, fmt.Errorf("failed to finalize tx %d: %w", txIndex, err)
 		}
 	}
@@ -702,6 +705,7 @@ func (api *BaseAPI) buildAccessedState(
 	syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
 		return protocol.SysCallContract(contract, data, chainConfig, ibs, header, fullEngine, false /* constCall */, vm.Config{})
 	}
+	ibs.SetTxContext(blockNum, len(block.Transactions()))
 
 	// Collect logs accumulated during transaction execution into a synthetic receipt
 	// so that Finalize can parse EIP-6110 deposit requests from them.
@@ -714,7 +718,7 @@ func (api *BaseAPI) buildAccessedState(
 		return nil, nil, fmt.Errorf("failed to finalize block: %w", err)
 	}
 
-	if err = ibs.CommitBlock(blockRules, recordingState); err != nil {
+	if err = ethapi.FinalizeCallTxTo(ibs, blockRules, recordingState); err != nil {
 		return nil, nil, fmt.Errorf("failed to commit block: %w", err)
 	}
 
@@ -1344,8 +1348,6 @@ func buildWitnessTrie(
 	accessed *accessedState,
 	produceExclusionProofs bool,
 ) (encodedNodes []hexutil.Bytes, err error) {
-	encodedNodes = []hexutil.Bytes{}
-
 	sdCtx.SetStateReader(trieReaderFor(hc, tx, firstTxNumInBlock))
 	if _, _, err := domains.SeekCommitment(ctx, tx); err != nil {
 		return nil, fmt.Errorf("failed to reset commitment for regular witness: %w", err)
@@ -1370,8 +1372,9 @@ func buildWitnessTrie(
 		return nil, fmt.Errorf("collapse witness root mismatch: calculated=%x, expected=%x", common.BytesToHash(witnessRoot), expectedParentRoot)
 	}
 
-	for _, node := range witnessNodes {
-		encodedNodes = append(encodedNodes, node)
+	encodedNodes = make([]hexutil.Bytes, len(witnessNodes))
+	for i, node := range witnessNodes {
+		encodedNodes[i] = node
 	}
 	return encodedNodes, nil
 }
@@ -2080,6 +2083,8 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 	defer ibs.Close()
 	header := block.HeaderNoCopy()
 	blockNum := block.NumberU64()
+	transactions.VersionedBlockState(ibs)
+	ibs.SetTxContext(blockNum, -1)
 
 	// Create EVM block context - pass header.Coinbase as the author/beneficiary
 	// This ensures gas fees go to the correct address based on the block header
@@ -2095,7 +2100,7 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 	if err = engine.Initialize(chainConfig, nil /* chainReader */, header, ibs, systemCallCustom, log.Root(), nil); err != nil {
 		return common.Hash{}, stateless, fmt.Errorf("verification: failed to initialize block: %w", err)
 	}
-	if err = ibs.FinalizeTx(blockRules, stateless); err != nil {
+	if err = ethapi.FinalizeCallTxTo(ibs, blockRules, stateless); err != nil {
 		return common.Hash{}, stateless, fmt.Errorf("verification: failed to finalize engine.Initialize tx: %w", err)
 	}
 
@@ -2122,7 +2127,7 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 		}
 
 		// Finalize tx - state changes go to the witness stateless
-		if err = ibs.FinalizeTx(blockRules, stateless); err != nil {
+		if err = ethapi.FinalizeCallTxTo(ibs, blockRules, stateless); err != nil {
 			return common.Hash{}, stateless, fmt.Errorf("[statelessExec] failed to finalize tx %d: %w", txIndex, err)
 		}
 	}
@@ -2130,6 +2135,7 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 	syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
 		return protocol.SysCallContract(contract, data, chainConfig, ibs, header, engine, false /* constCall */, vm.Config{})
 	}
+	ibs.SetTxContext(blockNum, len(block.Transactions()))
 	// Collect logs accumulated during transaction execution into a synthetic receipt
 	// so that Finalize can parse EIP-6110 deposit requests from them.
 	allLogs := ibs.Logs()
@@ -2143,9 +2149,9 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 		return common.Hash{}, stateless, fmt.Errorf("[statelessExec] engine.Finalize failed: %w", err)
 	}
 
-	err = ibs.CommitBlock(blockRules, stateless)
+	err = ethapi.FinalizeCallTxTo(ibs, blockRules, stateless)
 	if err != nil {
-		return common.Hash{}, stateless, fmt.Errorf("[statelessExec] ibs.CommitBlock() failed : %w", err)
+		return common.Hash{}, stateless, fmt.Errorf("[statelessExec] FinalizeCallTxTo failed: %w", err)
 	}
 
 	// Finalize and compute the resulting state root

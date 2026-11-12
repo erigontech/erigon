@@ -34,6 +34,8 @@ type taggedTx struct{ *types.DynamicFeeTransaction }
 
 func (taggedTx) Type() byte { return taggedTxType }
 
+func (tx taggedTx) Unwrap() types.Transaction { return tx }
+
 func renderedKeys(t *testing.T, txn types.Transaction) map[string]any {
 	t.Helper()
 	b, err := json.Marshal(NewRPCTransaction(txn, common.Hash{1}, 0, 1, 0, uint256.NewInt(1)))

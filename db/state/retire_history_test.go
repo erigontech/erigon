@@ -30,7 +30,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
-	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 )
@@ -65,21 +64,10 @@ func generateStandaloneIIFile(t *testing.T, name kv.InvertedIdx, dirs datadir.Di
 	ver := version.V1_0_standart
 	stepSize := uint64(10)
 	schema := NewE3SnapSchemaBuilder(statecfg.AccessorHashMap, stepSize).
-		Data(dirs.SnapIdx, name.String(), DataExtensionEf, seg.CompressNone, ver).
+		Data(dirs.SnapIdx, name.String(), DataExtensionEf, ver).
 		Accessor(dirs.SnapAccessors, ver).
 		Build()
-	createConfig := SnapshotCreationConfig{
-		RootNumPerStep: stepSize,
-		MergeStages:    []uint64{20, 40},
-		MinimumSize:    10,
-		SafetyMargin:   5,
-	}
-	repo := NewSnapshotRepo(name.String(), FromII(name), &SnapshotConfig{
-		SnapshotCreationConfig: &createConfig,
-		Schema:                 schema,
-	}, log.New())
-	t.Cleanup(repo.Close)
-	populateFiles2(t, dirs, repo, ranges)
+	populateFiles2(t, dirs, schema, stepSize, ranges)
 }
 
 // TestRetire_RetiresFrozenFileEntirelyBelowCutoff pins that a
@@ -130,6 +118,34 @@ func TestRetire_RetiresFrozenFileEntirelyBelowCutoff(t *testing.T) {
 	require.Len(t, hf, 1)
 	require.Equal(t, uint64(2), hf[0].startTxNum/stepSize)
 	require.Equal(t, uint64(3), hf[0].endTxNum/stepSize)
+}
+
+// A Retire through an older view must report only the files it detached, not
+// the ones another view already retired.
+func TestRetire_StaleViewReportsOnlyDetachedFiles(t *testing.T) {
+	stepSize, stepsInFrozenFile := uint64(10), uint64(2)
+	db, agg := testDbAndAggregatorSmallFrozen(t, stepSize, stepsInFrozenFile)
+	ranges := []testFileRange{{0, 2}, {2, 4}, {4, 5}}
+	generateAccountsFile(t, agg.Dirs(), ranges)
+	generateCodeFile(t, agg.Dirs(), ranges)
+	generateStorageFile(t, agg.Dirs(), ranges)
+	require.NoError(t, agg.OpenFolder(db))
+
+	var deleted []string
+	agg.OnFilesChange(nil, func(paths []string) { deleted = append(deleted, paths...) })
+
+	stale := agg.BeginFilesRo()
+	defer stale.Close()
+	_, err := aggRetire(t, agg, kv.RetireCutoffs{Default: 2 * stepSize})
+	require.NoError(t, err)
+
+	deleted = nil
+	_, err = stale.Retire(kv.RetireCutoffs{Default: 4 * stepSize})
+	require.NoError(t, err)
+	require.NotEmpty(t, deleted)
+	for _, p := range deleted {
+		require.NotContains(t, p, ".0-2.", "already retired by another view: %s", p)
+	}
 }
 
 // TestEntirelyBeforeStep_BoundaryStraddlingFileKept is a direct unit test of

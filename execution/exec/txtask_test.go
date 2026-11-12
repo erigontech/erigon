@@ -18,6 +18,7 @@ package exec
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -301,6 +302,7 @@ func (registeredTxn) Type() byte { return registeredTxType }
 func TestChargesSenderAtValidation(t *testing.T) {
 	to := common.HexToAddress("0x2222222222222222222222222222222222222222")
 	plain := &types.DynamicFeeTransaction{CommonTx: types.CommonTx{To: &to, GasLimit: 21_000}}
+	plain.SetSender(accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111")))
 	for _, tc := range []struct {
 		name string
 		txn  types.Transaction
@@ -314,7 +316,6 @@ func TestChargesSenderAtValidation(t *testing.T) {
 				Header: &types.Header{},
 				Txs:    types.Transactions{tc.txn},
 				Config: chain.TestChainOsakaConfig,
-				sender: accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111")),
 			}
 			require.Equal(t, tc.want, task.ChargesSenderAtValidation(0))
 		})
@@ -379,4 +380,72 @@ func TestBindBlockGas(t *testing.T) {
 	require.True(t, stale)
 	require.Equal(t, uint64(10_000_000), task.InclusionGas())
 	require.Equal(t, uint64(10_000_000), task.GasPool().ExecutionGasAvailable())
+}
+
+// A value call is charged at validation like a zero-value call: its run does not debit
+// the sender.
+func TestChargesSenderAtValidationIncludesValueCall(t *testing.T) {
+	sender := accounts.InternAddress(common.HexToAddress("0xaa"))
+	to := common.HexToAddress("0xbb")
+	task := func(value uint64) *TxTask {
+		txn := &types.LegacyTx{CommonTx: types.CommonTx{To: &to, Value: *uint256.NewInt(value), GasLimit: 21000}, GasPrice: *uint256.NewInt(1)}
+		txn.SetSender(sender)
+		return &TxTask{Header: &types.Header{}, Config: chain.TestChainBerlinConfig, Txs: types.Transactions{txn}}
+	}
+	require.True(t, task(0).ChargesSenderAtValidation(0))
+	require.True(t, task(1).ChargesSenderAtValidation(0))
+}
+
+// A signature the workers cannot recover makes the block invalid, not the node failed.
+func TestTxSenderInvalidSignatureInvalidatesBlock(t *testing.T) {
+	to := common.HexToAddress("0xbb")
+	txn := &types.LegacyTx{CommonTx: types.CommonTx{To: &to, GasLimit: 21000, V: *uint256.NewInt(27)}, GasPrice: *uint256.NewInt(1)}
+	task := &TxTask{Header: &types.Header{}, Config: chain.TestChainBerlinConfig, Txs: types.Transactions{txn}}
+	_, err := task.TxSender()
+	require.ErrorIs(t, err, rules.ErrInvalidBlock)
+}
+
+// A bad signature must win over the tx's own validity checks, as it did when senders were recovered before execution.
+func TestTxMessageReportsBadSignatureFirst(t *testing.T) {
+	to := common.HexToAddress("0xbb")
+	txn := &types.SetCodeTransaction{DynamicFeeTransaction: types.DynamicFeeTransaction{CommonTx: types.CommonTx{To: &to, GasLimit: 21000, V: *uint256.NewInt(1)}, ChainID: *uint256.NewInt(1)}}
+	task := &TxTask{Header: &types.Header{BaseFee: uint256.NewInt(1)}, Config: chain.AllProtocolChanges, Txs: types.Transactions{txn}}
+	_, err := task.TxMessage()
+	require.ErrorIs(t, err, rules.ErrInvalidBlock)
+}
+
+// A creation takes its address from the tx nonce, which validation checks against the
+// sender's nonce, so a creation can run before its predecessor.
+func TestChargesSenderAtValidationIncludesCreation(t *testing.T) {
+	sender := accounts.InternAddress(common.HexToAddress("0xaa"))
+	task := func(value uint64) *TxTask {
+		txn := &types.LegacyTx{CommonTx: types.CommonTx{Value: *uint256.NewInt(value), GasLimit: 100000}, GasPrice: *uint256.NewInt(1)}
+		txn.SetSender(sender)
+		return &TxTask{Header: &types.Header{}, Config: chain.TestChainBerlinConfig, Txs: types.Transactions{txn}}
+	}
+	require.True(t, task(0).ChargesSenderAtValidation(0))
+	require.True(t, task(1).ChargesSenderAtValidation(0))
+}
+
+type failingAccountWriter struct {
+	*state.NoopWriter
+	err error
+}
+
+func (w failingAccountWriter) UpdateAccountData(accounts.Address, *accounts.Account, *accounts.Account) error {
+	return w.err
+}
+
+// A failed write says nothing about the block, so it must stop the stage rather than crash the node or condemn the block.
+func TestExecuteReportsFailedWriteSetAsOperational(t *testing.T) {
+	want := errors.New("disk error")
+	ibs := state.New(state.NewNoopReader())
+	defer ibs.Close()
+	require.NoError(t, ibs.AddBalance(accounts.InternAddress(common.HexToAddress("0xaa")), *uint256.NewInt(1), tracing.BalanceChangeUnspecified))
+
+	task := &TxTask{TxNum: 1, TxIndex: 0, Header: &types.Header{}, Config: chain.TestChainBerlinConfig}
+	result := task.Execute(nil, nil, nil, ibs, failingAccountWriter{state.NewNoopWriter(), want}, chain.TestChainBerlinConfig, nil, datadir.Dirs{}, true)
+
+	require.ErrorIs(t, result.Err, want)
+	require.True(t, result.Operational)
 }

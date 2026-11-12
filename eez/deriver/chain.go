@@ -273,7 +273,7 @@ func (c *ExecChain) Extend(ctx context.Context, parent *types.Header, in HeaderI
 		return nil, fmt.Errorf("insert block %d: %s", in.Number, status)
 	}
 	v, err := retryBusy(ctx, func() (execmodule.ValidationResult, bool, error) {
-		v, err := c.exec.ValidateChain(ctx, block.Hash(), in.Number)
+		v, err := c.exec.ValidateChain(ctx, block)
 		return v, v.ValidationStatus == execmodule.ExecutionStatusBusy, err
 	})
 	switch {

@@ -24,7 +24,6 @@ import (
 	"github.com/davecgh/go-spew/spew"
 
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/execution/chain"
@@ -99,7 +98,7 @@ func NewL2RulesEngine(ctx context.Context, chainConfig *chain.Config, logger log
 }
 
 func CreateRulesEngine(ctx context.Context, nodeConfig *nodecfg.Config, chainConfig *chain.Config, config any, noVerify bool,
-	blockReader dbservices.FullBlockReader, readonly bool, logger log.Logger,
+	readonly bool, logger log.Logger,
 ) rules.Engine {
 	eng, err := NewL2RulesEngine(ctx, chainConfig, logger)
 	if err != nil {
@@ -173,5 +172,5 @@ func CreateRulesEngineBareBones(ctx context.Context, chainConfig *chain.Config, 
 	}
 
 	return CreateRulesEngine(ctx, &nodecfg.Config{}, chainConfig, consensusConfig, true, /* noVerify */
-		nil /* blockReader */, false /* readonly */, logger)
+		false /* readonly */, logger)
 }

@@ -170,7 +170,11 @@ func NewP2Pmanager(ctx context.Context, cfg *P2PConfig, logger log.Logger, ethCl
 	}()
 	// pubsub
 	pubsub.TimeCacheDuration = gossipSubSeenTTL * gossipSubHeartbeatInterval
-	p.pubsub, err = pubsub.NewGossipSub(p2pCtx, host, p.pubsubOptions(cfg.BeaconConfig)...)
+	psOpts, err := p.pubsubOptions(cfg.BeaconConfig)
+	if err != nil {
+		return nil, err
+	}
+	p.pubsub, err = pubsub.NewGossipSub(p2pCtx, host, psOpts...)
 	if err != nil {
 		return nil, err
 	}

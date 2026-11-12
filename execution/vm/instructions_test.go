@@ -66,14 +66,6 @@ var (
 	twoOpMethods map[string]executionFunc
 )
 
-type contractRef struct {
-	addr common.Address
-}
-
-func (c contractRef) Address() common.Address {
-	return c.addr
-}
-
 func init() {
 	// Params is a list of common edgecases that should be used for some common tests
 	params := []string{
@@ -282,6 +274,37 @@ func TestAddMod(t *testing.T) {
 			t.Errorf("Testcase %d, expected  %x, got %x", i, expected, actual)
 		}
 	}
+}
+
+// MULMOD reuses a modulus's reciprocal across calls, so changing the modulus must not reuse a stale one.
+func TestMulModAcrossModuli(t *testing.T) {
+	t.Parallel()
+	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.AllProtocolChanges, Config{})
+	callContext := &CallContext{}
+	hex := func(s string) *big.Int { v, _ := new(big.Int).SetString(s, 16); return v }
+	m1 := hex("fffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f")
+	m2 := hex("30644e72e131a029b85045b68181585d97816a916871ca8d3c208c16d87cfd47")
+	m3 := hex("ffffffff")
+	x := hex("d4c3b2a1f0e9d8c7b6a5948372615049382716051f2e3d4c5b6a798897a6b5c4")
+	y := hex("1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef")
+	for i, m := range []*big.Int{m1, m1, m2, m1, m3, m2} {
+		want := new(big.Int).Mod(new(big.Int).Mul(x, y), m)
+		callContext.Stack.push(*uint256.MustFromBig(m))
+		callContext.Stack.push(*uint256.MustFromBig(y))
+		callContext.Stack.push(*uint256.MustFromBig(x))
+		opMulmod(0, evm, callContext)
+		got := callContext.Stack.popCopy()
+		require.Zero(t, want.Cmp(got.ToBig()), "call %d", i)
+	}
+
+	cached := callContext.mulmodModulus
+	callContext.Stack.push(*uint256.MustFromBig(m1))
+	callContext.Stack.push(*uint256.MustFromBig(y))
+	callContext.Stack.push(uint256.Int{})
+	opMulmod(0, evm, callContext)
+	got := callContext.Stack.popCopy()
+	require.True(t, got.IsZero())
+	require.Equal(t, cached, callContext.mulmodModulus, "a zero product must not replace the cached modulus")
 }
 
 // getResult is a convenience function to generate the expected values
@@ -1308,4 +1331,34 @@ func TestContextAddressWordsReusedFrame(t *testing.T) {
 		}
 		evm.putCallContext(scope)
 	}
+}
+
+// A context idle in the pool must not pin interned keys: a handle keeps its canonical
+// map entry alive.
+func TestPutReleasesFrameSlotKeys(t *testing.T) {
+	var evm EVM
+	ctx := evm.getCallContext(Contract{}, nil, mdgas.MdGas{})
+	ctx.slots.key[0] = accounts.InternKey(common.Hash{1})
+	ctx.slots.key[1] = accounts.InternKey(common.Hash{2})
+	evm.putCallContext(ctx)
+	require.Equal(t, [2]accounts.StorageKey{}, ctx.slots.key)
+}
+
+// A failed header read is the node's failure, not the transaction's. BLOCKHASH records it as a
+// state read error, so the executor does not judge the block by the call it aborted.
+func TestBlockhashRecordsAHeaderReadError(t *testing.T) {
+	t.Parallel()
+	ibs := state.New(state.NewNoopReader())
+	defer ibs.Close()
+	readErr := errors.New("header read failed")
+	blockCtx := gasTraceBlockContext()
+	blockCtx.BlockNumber = 10
+	blockCtx.GetHash = func(uint64) (common.Hash, error) { return common.Hash{}, readErr }
+	evm := NewEVM(blockCtx, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
+	c := NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
+	c.Code = []byte{byte(PUSH1), 9, byte(BLOCKHASH)}
+
+	_, _, _, err := evm.run(*c, mdgas.MdGas{Execution: 100_000}, nil, false, false, false)
+	require.ErrorIs(t, err, readErr)
+	require.ErrorIs(t, ibs.StateReadError(), readErr)
 }

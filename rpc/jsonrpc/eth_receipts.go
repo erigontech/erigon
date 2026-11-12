@@ -101,18 +101,9 @@ func exceedsLogQueryLimit(crit filters.FilterCriteria, limit int) bool {
 }
 
 // usesLogIndex reports whether the filter makes the query search LogAddrIdx or
-// LogTopicIdx. It tracks applyFiltersV3, which skips topic positions that are
-// empty because those match any topic.
+// LogTopicIdx.
 func usesLogIndex(crit filters.FilterCriteria) bool {
-	if len(crit.Addresses) > 0 {
-		return true
-	}
-	for _, position := range crit.Topics {
-		if len(position) > 0 {
-			return true
-		}
-	}
-	return false
+	return len(logquery.IndexClauses(crit)) > 0
 }
 
 // errBlockHashNotFound marks a by-hash selector that names no canonical block
@@ -192,9 +183,12 @@ func (api *BaseAPI) resolveLogsRange(ctx context.Context, tx kv.Tx, crit filters
 	end = latest
 	if crit.ToBlock != nil {
 		toBlock := crit.ToBlock.Int64()
-		if toBlock > 0 {
+		switch {
+		case toBlock > 0:
 			end = uint64(toBlock)
-		} else {
+		case crit.FromBlock != nil && crit.FromBlock.Int64() == toBlock:
+			end = begin
+		default:
 			blockNum := rpc.BlockNumber(toBlock)
 			end, _, _, err = rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNum), tx, api._blockReader)
 			if err != nil {
@@ -220,6 +214,8 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 		return nil, beginErr
 	}
 	defer tx.Rollback()
+	// Committed view only: GetReceipt must not wrap this tx in a newer overlay.
+	tx = rpchelper.PinToOverlay(tx, nil)
 
 	if exceedsLogQueryLimit(crit, api.logQueryLimit) {
 		return nil, &rpc.CustomError{Message: fmt.Sprintf(errExceedLogQueryLimit, api.logQueryLimit), Code: rpc.ErrCodeInvalidParams}

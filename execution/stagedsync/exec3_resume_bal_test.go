@@ -69,6 +69,7 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/node/ethconfig"
+	"github.com/erigontech/erigon/node/shards"
 )
 
 // Genesis occupies txNums 0 and 1; block 1 then spans 2 (block start), 3 (tx0),
@@ -395,7 +396,7 @@ func (fx *resumeBALFixture) assembleBlock(t *testing.T, txs types.Transactions, 
 	tx, err := db.BeginTemporalRo(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
-	domains, err := execctx.NewSharedDomains(ctx, tx, logger)
+	domains, err := execctx.NewSharedDomains(ctx, tx, logger, execctx.WithParaTrieDB(db))
 	require.NoError(t, err)
 	defer domains.Close()
 	txNum, _, err := domains.SeekCommitment(ctx, tx)
@@ -424,7 +425,7 @@ func (fx *resumeBALFixture) assembleBlock(t *testing.T, txs types.Transactions, 
 
 	blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, nil), fx.engine, accounts.NilAddress, fx.config)
 	blockRules := blockContext.Rules(fx.config)
-	for _, ws := range ba.BalIO().Outputs() {
+	for _, ws := range ba.WriteSets() {
 		if ws == nil || ws.IsEmpty() {
 			continue
 		}
@@ -561,7 +562,7 @@ func (fx *resumeBALFixture) exec(t *testing.T, block *types.Block, point resumeP
 	rwTx, err := db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	t.Cleanup(rwTx.Rollback)
-	domains, err := execctx.NewSharedDomains(ctx, rwTx, logger)
+	domains, err := execctx.NewSharedDomains(ctx, rwTx, logger, execctx.WithParaTrieDB(db))
 	require.NoError(t, err)
 	t.Cleanup(domains.Close)
 	if fx.fromStateFiles {
@@ -640,6 +641,7 @@ func (fx *resumeBALFixture) execSerial(t *testing.T, block *types.Block, point r
 		wipeHistoryTables(t, db)
 	}
 	cfg := fx.execCfg(t, db, dirs, block)
+	cfg.notifications = shards.NewNotifications(nil)
 	rwTx, err := db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	t.Cleanup(rwTx.Rollback)
@@ -664,7 +666,7 @@ func (fx *resumeBALFixture) execSerial(t *testing.T, block *types.Block, point r
 		}
 		txNum++
 	}
-	if _, err := se.executeBlock(ctx, tasks, true, false); err != nil {
+	if _, err := se.executeBlock(ctx, tasks, true); err != nil {
 		return err
 	}
 	if fx.inspect != nil {
@@ -691,11 +693,15 @@ func TestResumedBlockValidatesBlockAccessList(t *testing.T) {
 		point        resumePoint
 		wantMismatch bool
 	}{
+		{"full/no sidecar, valid", fx.block.WithBlockAccessListSidecar(nil), fromBlockStart, false},
+		{"full/no sidecar, phantom account", phantom.WithBlockAccessListSidecar(nil), fromBlockStart, true},
 		{"full/valid", fx.block, fromBlockStart, false},
 		{"full/phantom account", phantom, fromBlockStart, true},
 		{"full/dropped block-start writes", droppedInit, fromBlockStart, true},
 		{"after tx0/valid", fx.block, afterTx0, false},
 		{"after tx0/phantom account", phantom, afterTx0, true},
+		{"after tx0/no sidecar, valid", fx.block.WithBlockAccessListSidecar(nil), afterTx0, false},
+		{"after tx0/no sidecar, phantom account", phantom.WithBlockAccessListSidecar(nil), afterTx0, true},
 		{"after block start/valid", fx.block, afterBlockInit, false},
 		{"after block start/dropped block-start writes", droppedInit, afterBlockInit, true},
 		{"before block end/valid", fx.block, beforeBlockEnd, false},
@@ -1500,7 +1506,7 @@ func TestParallelResumedAtOtherTask(t *testing.T) {
 	txs := types.Transactions{signSelfSendTx(t, 0, 0, 1, 21_000, config, 0), signSelfSendTx(t, 1, 0, 1, 21_000, config, 0)}
 	header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 30_000_000}
 	task := otherTask{&exec.TxTask{TxNum: 4, TxIndex: 1, Txs: txs, Header: header, Config: config}}
-	err := pe.processRequest(t.Context(), roTx, &execRequest{blockNum: 1, tasks: []exec.Task{task}})
+	err := pe.processRequest(t.Context(), &execRequest{blockNum: 1, tasks: []exec.Task{task}}, roTx)
 	require.ErrorContains(t, err, "otherTask")
 }
 

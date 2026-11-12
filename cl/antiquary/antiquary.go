@@ -42,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/diagnostics/metrics"
+	"github.com/erigontech/erigon/execution/chain"
 )
 
 const (
@@ -163,6 +164,7 @@ func (s *Antiquary) Loop() error {
 	if err := s.sn.OpenFolder(); err != nil {
 		return err
 	}
+	s.removeBlockOverlaps()
 	if s.stateSn != nil {
 		if err := s.stateSn.OpenFolder(); err != nil {
 			return err
@@ -212,6 +214,10 @@ func (s *Antiquary) retirementLoop() error {
 		run:     s.antiquate,
 		onError: func(err error) { log.Warn("[Antiquary] Failed to antiquate", "err", err) },
 	}
+	merges := &retirementStep{
+		run:     s.mergeBlocks,
+		onError: func(err error) { log.Warn("[Antiquary] Failed to merge beacon blocks", "err", err) },
+	}
 	blobs := &retirementStep{
 		run:     s.antiquateBlobs,
 		onError: func(err error) { log.Error("[Antiquary] Failed to antiquate blobs", "err", err) },
@@ -222,18 +228,19 @@ func (s *Antiquary) retirementLoop() error {
 	for {
 		select {
 		case <-retirementTicker.C:
-			s.retirementTick(blocks, blobs)
+			s.retirementTick(blocks, merges, blobs)
 		case <-s.ctx.Done():
 			return nil
 		}
 	}
 }
 
-func (s *Antiquary) retirementTick(blocks, blobs *retirementStep) {
+func (s *Antiquary) retirementTick(blocks, merges, blobs *retirementStep) {
 	if !s.backfilled.Load() {
 		return
 	}
 	blocks.attempt(s.shuttingDown)
+	merges.attempt(s.shuttingDown)
 
 	if s.cfg.DenebForkEpoch == math.MaxUint64 {
 		return
@@ -427,6 +434,13 @@ func (s *Antiquary) antiquate() error {
 	from = (from / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
 	to = min(to, to-safetyMargin) // We don't want to retire snapshots that are too close to the finalized head
 	to = (to / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
+	s.sn.WalkDirtySegments(snaptype.CaplinEnums.BeaconBlocks, func(sn *snapshotsync.DirtySegment) bool {
+		if segFrom, _ := sn.GetRange(); segFrom >= from && sn.IsIndexed() {
+			to = min(to, segFrom)
+			return false
+		}
+		return true
+	})
 
 	if from >= to || to-from < snaptype.CaplinMergeLimit {
 		return nil
@@ -451,6 +465,7 @@ func (s *Antiquary) antiquate() error {
 	if err := s.sn.OpenFolder(); err != nil {
 		return err
 	}
+	s.removeBlockOverlaps()
 
 	paths := s.sn.SegFileNames(from, to)
 	if s.downloader != nil {
@@ -463,6 +478,38 @@ func (s *Antiquary) antiquate() error {
 	return nil
 }
 
+func (s *Antiquary) mergeBlocks() error {
+	if !s.snapgen {
+		return nil
+	}
+	merger := snapshotsync.NewMerger(s.dirs.Tmp, 1, log.LvlDebug, nil, &chain.Config{}, s.logger)
+	ranges := merger.FindMergeRanges(s.sn.Ranges(false), snaptype.CaplinEnums.BeaconBlocks)
+	if len(ranges) == 0 {
+		return nil
+	}
+	var onMerge func([]string) error
+	var onDelete func(context.Context, []string) error
+	if s.downloader != nil {
+		onMerge = func(l []string) error { return s.downloader.Seed(s.ctx, l) }
+		onDelete = s.downloader.Delete
+	}
+	if err := merger.Merge(s.ctx, &s.sn.BaseRoSnapshots, []snaptype.Type{snaptype.BeaconBlocks}, ranges[:1], s.sn.Dir(), true, onMerge, onDelete); err != nil {
+		return err
+	}
+	s.removeBlockOverlaps()
+	return nil
+}
+
+func (s *Antiquary) removeBlockOverlaps() {
+	var onDelete func(l []string) error
+	if s.downloader != nil {
+		onDelete = func(l []string) error { return s.downloader.Delete(s.ctx, l) }
+	}
+	if err := s.sn.RemoveOverlaps(onDelete); err != nil {
+		s.logger.Warn("[Antiquary] Failed to remove block overlaps", "err", err)
+	}
+}
+
 func (s *Antiquary) NotifyBackfilled() {
 	// we set up the range for [lowestRawSlot, finalized]
 	s.backfilled.Store(true) // this is the lowest slot not in snapshots
@@ -470,6 +517,20 @@ func (s *Antiquary) NotifyBackfilled() {
 
 func (s *Antiquary) NotifyBlobBackfilled(completed bool) {
 	s.blobBackfilled.Store(completed)
+}
+
+// RetireBlobSnapshotsBelow drops blob snapshot segments that hold nothing at or above floor
+// and stops seeding them.
+func (s *Antiquary) RetireBlobSnapshotsBelow(floor uint64) error {
+	if s == nil || s.sn == nil {
+		return nil
+	}
+	var onDelete func([]string) error
+	if s.downloader != nil {
+		onDelete = func(paths []string) error { return s.downloader.Delete(s.ctx, paths) }
+	}
+	_, err := s.sn.RetireBlobsBelow(floor, onDelete)
+	return err
 }
 
 const caplinSnapshotBuildSemaWeight int64 = 1
@@ -564,6 +625,7 @@ func (s *Antiquary) antiquateBlobs() error {
 	if err := s.sn.OpenFolder(); err != nil {
 		return err
 	}
+	s.removeBlockOverlaps()
 
 	paths := s.sn.SegFileNames(currentBlobsProgress, to)
 	if s.downloader != nil {

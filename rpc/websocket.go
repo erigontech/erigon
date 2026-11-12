@@ -50,7 +50,7 @@ import (
 const (
 	wsPingInterval     = 60 * time.Second
 	wsPingWriteTimeout = 5 * time.Second
-	wsMessageSizeLimit = maxRequestContentLength
+	wsMessageSizeLimit = MaxRequestContentLength
 	heldWriteLimit     = int(64 * datasize.KB) // held bytes past which a coalesced batch writes out early
 )
 
@@ -231,7 +231,7 @@ func DialWebsocket(ctx context.Context, endpoint, origin string, logger log.Logg
 	if err != nil {
 		return nil, err
 	}
-	return newClient(ctx, cfg, connect, logger)
+	return newClient(ctx, connect, logger)
 }
 
 func newClientTransportWS(endpoint string, cfg *clientConfig) (reconnectFunc, error) {

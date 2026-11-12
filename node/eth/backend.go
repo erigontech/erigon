@@ -114,17 +114,13 @@ import (
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/contracts"
 	"github.com/erigontech/erigon/rpc/jsonrpc"
+	"github.com/erigontech/erigon/rpc/jsonrpc/receipts"
 	"github.com/erigontech/erigon/rpc/mcp"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/txnprovider"
 	"github.com/erigontech/erigon/txnprovider/shutter"
 	"github.com/erigontech/erigon/txnprovider/txpool"
 )
-
-// Config contains the configuration options of the ETH protocol.
-//
-// Deprecated: use ethconfig.Config instead.
-type Config = ethconfig.Config
 
 // Ethereum implements the Ethereum full node service.
 type Ethereum struct {
@@ -209,7 +205,7 @@ type Ethereum struct {
 	kzgWarmupDone  chan struct{}
 }
 
-func checkAndSetCommitmentHistoryFlag(tx kv.RwTx, logger log.Logger, dirs datadir.Dirs, cfg *ethconfig.Config) error {
+func checkAndSetCommitmentHistoryFlag(tx kv.RwTx, dirs datadir.Dirs, cfg *ethconfig.Config) error {
 	isCommitmentHistoryEnabled, ok, err := rawdb.ReadDBCommitmentHistoryEnabled(tx)
 	if err != nil {
 		return err
@@ -326,7 +322,11 @@ func New(
 			statecfg.EnableHistoricalRCache()
 		}
 
-		if err := checkAndSetCommitmentHistoryFlag(tx, logger, dirs, config); err != nil {
+		if err := checkAndSetCommitmentHistoryFlag(tx, dirs, config); err != nil {
+			return err
+		}
+
+		if err := rawdb.RaiseCaplinBlobsArchiveFromSlot(tx, config.CaplinConfig.BlobsArchiveFromSlot); err != nil {
 			return err
 		}
 
@@ -378,46 +378,10 @@ func New(
 		return nil, err
 	}
 
-	var chainConfig *chain.Config
-	var genesis *types.Block
-	var compatErr *chain.ConfigCompatError
-	if err := rawChainDB.Update(context.Background(), func(tx kv.RwTx) error {
-		genesisConfig, err := rawdb.ReadGenesis(tx)
-		if err != nil {
-			return err
-		}
-
-		if genesisConfig != nil {
-			config.Genesis = genesisConfig
-		}
-
-		if tracer != nil && tracer.Hooks != nil && tracer.Hooks.OnBlockchainInit != nil {
-			tracer.Hooks.OnBlockchainInit(config.Genesis.Config)
-		}
-
-		h, err := rawdb.ReadCanonicalHash(tx, 0)
-		if err != nil {
-			return err
-		}
-		genesisSpec := config.Genesis
-		if h != (common.Hash{}) { // fallback to db content
-			genesisSpec = nil
-		}
-		var genesisErr error
-		chainConfig, genesis, genesisErr = genesiswrite.WriteGenesisBlock(tx, genesisSpec, config.Snapshot.ChainName, config.OverrideOsakaTime, config.OverrideAmsterdamTime, config.KeepStoredChainConfig, dirs, logger)
-		if genesisErr != nil && !errors.As(genesisErr, &compatErr) {
-			return genesisErr
-		}
-		return nil
-	}); err != nil {
+	chainConfig, genesis, err := setupGenesis(rawChainDB, config, dirs, logger, tracer)
+	if err != nil {
 		return nil, err
 	}
-	// The rejected config is not written, so starting would run this process on a schedule
-	// the database contradicts, with no path back to agreement short of a rewind.
-	if compatErr != nil {
-		return nil, fmt.Errorf("incompatible chain config: %w", compatErr)
-	}
-	chainConfig.AllowAA = config.AllowAA
 	backend.chainConfig = chainConfig
 	backend.genesisBlock = genesis
 	backend.genesisHash = genesis.Hash()
@@ -434,7 +398,7 @@ func New(
 
 	// Check if we have an already initialized chain and fall back to
 	// that if so. Otherwise we need to generate a new genesis spec.
-	blockReader, blockWriter, allSnapshots, temporalDb, err := SetUpBlockReader(ctx, rawChainDB, config.Dirs, config, chainConfig, stack.Config().Http.DBReadConcurrency, logger, segmentsBuildLimiter)
+	blockReader, blockWriter, allSnapshots, temporalDb, err := SetUpBlockReader(ctx, rawChainDB, config.Dirs, config, chainConfig, logger, segmentsBuildLimiter)
 	if err != nil {
 		return nil, err
 	}
@@ -624,7 +588,7 @@ func New(
 		rulesConfig = &config.Ethash
 	}
 
-	backend.engine = rulesconfig.CreateRulesEngine(ctx, stack.Config(), chainConfig, rulesConfig, false /* noVerify */, blockReader, false /* readonly */, logger)
+	backend.engine = rulesconfig.CreateRulesEngine(ctx, stack.Config(), chainConfig, rulesConfig, false /* noVerify */, false /* readonly */, logger)
 
 	// ForkValidator is created later, after pipelineStagedSync and PipelineExecutor are ready.
 
@@ -647,7 +611,7 @@ func New(
 		backend.sentryProvider.ExecutionP2PPeerPenalizer,
 		backend.sentryProvider.ExecutionP2PPeerTracker,
 	)
-	backend.bbd = execp2p.NewBackwardBlockDownloader(logger, executionFetcher, backend.sentryProvider.ExecutionP2PPeerPenalizer, backend.sentryProvider.ExecutionP2PPeerTracker, tmpdir, execp2p.WithBALFetcher(balFetcher))
+	backend.bbd = execp2p.NewBackwardBlockDownloader(logger, executionFetcher, backend.sentryProvider.ExecutionP2PPeerTracker, tmpdir, execp2p.WithBALFetcher(balFetcher))
 
 	// MultiClient is the late-binding half of the Sentry Provider — it needs
 	// construction above.
@@ -901,7 +865,7 @@ func New(
 	validationNotifications := shards.NewNotifications(nil)
 	validationSync := stageloop.NewInMemoryExecution(backend.sentryCtx, backend.chainDB, config, backend.sentryProvider.Client,
 		validationNotifications, blockReader, blockWriter, logger, backend.readAheader)
-	dispatcher := execmodule.NewDispatcher(chainConfig, backend.notifications.Events, backend.notifications.StateChangesConsumer, logger)
+	dispatcher := execmodule.NewDispatcher(chainConfig, backend.notifications.Events, backend.notifications.StateChangesConsumer, nil, logger)
 	pipelineExecutor := execmodule.NewPipelineExecutor(backend.pipelineStagedSync, backend.chainDB, blockReader, chainConfig, backend.engine, validationSync, validationNotifications, dispatcher, logger)
 
 	hook := stageloop.NewHook(backend.sentryCtx, backend.notifications, backend.stagedSync, backend.chainConfig, backend.logger, dispatcher, backend.sentryProvider.Client.SetStatus, statusDataProvider, backend.sentryProvider.ExecutionP2PPublisher, blockReader)
@@ -1037,7 +1001,7 @@ func New(
 	return backend, nil
 }
 
-func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig *chain.Config) error {
+func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config) error {
 	blockReader := s.blockReader
 	ctx := s.sentryCtx
 	chainKv := s.chainDB
@@ -1069,7 +1033,7 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 
 	var testingEntry *rpc.API
 	if slices.Contains(httpRpcCfg.API, "testing") {
-		entry := engineapi.NewTestingRPCEntry(s.engineBackendRPC, s.logger, s.chainDB)
+		entry := engineapi.NewTestingRPCEntry(s.engineBackendRPC)
 		testingEntry = &entry
 	}
 	// Eager witness cache (embedded RPC only). A datadir built with commitment history
@@ -1190,6 +1154,56 @@ func (s *Ethereum) RegisterMinedBlockObserver(callback func(msg *types.Block)) e
 
 func (s *Ethereum) ChainKV() kv.RwDB            { return s.chainDB }
 func (s *Ethereum) NetVersion() (uint64, error) { return s.networkID, nil }
+
+func setupGenesis(db kv.RwDB, config *ethconfig.Config, dirs datadir.Dirs, logger log.Logger, tracer *tracers.Tracer) (*chain.Config, *types.Block, error) {
+	var chainConfig *chain.Config
+	var genesisBlock *types.Block
+	if err := db.Update(context.Background(), func(tx kv.RwTx) error {
+		genesisSpec, err := selectGenesis(tx, config)
+		if err != nil {
+			return err
+		}
+
+		chainConfig, genesisBlock, err = genesiswrite.WriteGenesisBlock(tx, genesisSpec, config.Snapshot.ChainName, config.OverrideOsakaTime, config.OverrideAmsterdamTime, config.KeepStoredChainConfig, dirs, logger)
+		return err
+	}); err != nil {
+		if _, ok := errors.AsType[*chain.ConfigCompatError](err); ok {
+			// The rejected config is not written, so starting would run this process on a schedule
+			// the database contradicts, with no path back to agreement short of a rewind.
+			return nil, nil, fmt.Errorf("incompatible chain config: %w", err)
+		}
+		return nil, nil, err
+	}
+	if tracer != nil && tracer.Hooks != nil && tracer.Hooks.OnBlockchainInit != nil {
+		tracer.Hooks.OnBlockchainInit(chainConfig)
+	}
+	return chainConfig, genesisBlock, nil
+}
+
+// selectGenesis returns an explicit genesis for the writer to validate.
+// Otherwise, any stored genesis replaces config.Genesis. If block 0 exists,
+// this path returns nil so the writer uses the stored block.
+func selectGenesis(tx kv.Tx, config *ethconfig.Config) (*types.Genesis, error) {
+	if config.GenesisFromFile {
+		return config.Genesis, nil
+	}
+	storedGenesis, err := rawdb.ReadGenesis(tx)
+	if err != nil {
+		return nil, err
+	}
+	if storedGenesis != nil {
+		config.Genesis = storedGenesis
+	}
+	storedHash, err := rawdb.ReadCanonicalHash(tx, 0)
+	if err != nil {
+		return nil, err
+	}
+	if storedHash != (common.Hash{}) { // fallback to db content
+		return nil, nil
+	}
+	return config.Genesis, nil
+}
+
 func (s *Ethereum) NetPeerCount() (uint64, error) {
 	var sentryPc uint64 = 0
 
@@ -1248,7 +1262,7 @@ func (s *Ethereum) NodesInfo(limit int) (*remoteproto.NodesInfoReply, error) {
 	return nodesInfo, nil
 }
 
-func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConfig *ethconfig.Config, chainConfig *chain.Config, dbReadConcurrency int, logger log.Logger, blockSnapBuildSema *semaphore.Weighted) (*freezeblocks.BlockReader, *blockio.BlockWriter, *blocksnapshots.RoSnapshots, kv.TemporalRwDB, error) {
+func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConfig *ethconfig.Config, chainConfig *chain.Config, logger log.Logger, blockSnapBuildSema *semaphore.Weighted) (*freezeblocks.BlockReader, *blockio.BlockWriter, *blocksnapshots.RoSnapshots, kv.TemporalRwDB, error) {
 	snConfig.Snapshot.ChainName = chainConfig.ChainName
 	allSnapshots := blocksnapshots.NewRoSnapshots(snConfig.Snapshot, dirs.Snap, logger)
 	blockReader := freezeblocks.NewBlockReader(allSnapshots)
@@ -1283,7 +1297,8 @@ func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 			Logger(logger).
 			SanityOldNaming().
 			GenSaltIfNeed(createNewSaltFileIfNeeded).
-			WithErigonDBSettings(erigonDBSettings)
+			WithErigonDBSettings(erigonDBSettings).
+			BtIndexInMem() // only the node opens here: integration and other tools pass their own *temporal.DB
 		if snConfig.ErigondbDomainStepsInFrozenFile != nil {
 			v := *snConfig.ErigondbDomainStepsInFrozenFile
 			stepsStr := "Inf"
@@ -1397,7 +1412,7 @@ func (s *Ethereum) Start() error {
 		return err
 	}
 
-	stageLoopDispatcher := execmodule.NewDispatcher(s.chainConfig, s.notifications.Events, s.notifications.StateChangesConsumer, s.logger)
+	stageLoopDispatcher := execmodule.NewDispatcher(s.chainConfig, s.notifications.Events, s.notifications.StateChangesConsumer, execmodule.NewReceiptsLoader(s.chainConfig, s.blockReader, receipts.NewGenerator(s.config.Dirs, s.blockReader, s.engine, nil, 5*time.Minute)), s.logger)
 	hook := stageloop.NewHook(s.sentryCtx, s.notifications, s.stagedSync, s.chainConfig, s.logger, stageLoopDispatcher, s.sentryProvider.Client.SetStatus, s.sentryProvider.StatusDataProvider, s.sentryProvider.ExecutionP2PPublisher, s.blockReader)
 
 	currentTDProvider := func() *uint256.Int {
