@@ -1214,48 +1214,20 @@ func convertHistoryPhase4(dirs datadir.Dirs, stage commitmentV3HistoryStage) (in
 	return moved, nil
 }
 
-const commitmentV3HistoryGroup = 8
-
-func VerifyCommitmentV3History(ctx context.Context, a *Aggregator, logger log.Logger) error {
-	started := time.Now()
+func commitmentV3HistorySamples(a *Aggregator) ([]uint64, error) {
 	at := a.BeginFilesRo()
+	defer at.Close()
 	iit := at.d[kv.CommitmentDomain].ht.iit
 	var samples []uint64
 	for _, f := range iit.files {
 		txNums, err := appendFileTxNums(nil, iit, f.startTxNum, f.endTxNum, commitment.KeyCommitmentV3State)
 		if err != nil {
-			at.Close()
-			return err
+			return nil, err
 		}
 		if len(txNums) == 0 {
-			at.Close()
-			return fmt.Errorf("commitment history %s has no state entries", f.src.decompressor.FileName())
+			return nil, fmt.Errorf("commitment history %s has no state entries", f.src.decompressor.FileName())
 		}
 		samples = append(samples, txNums[len(txNums)/2]+1, txNums[len(txNums)-1]+1)
 	}
-	at.Close()
-	defer a.MadvNormal().DisableReadAhead()
-	groups := (len(samples) + commitmentV3HistoryGroup - 1) / commitmentV3HistoryGroup
-	logged := time.Now()
-	for gi := range groups {
-		group := samples[gi*commitmentV3HistoryGroup : min((gi+1)*commitmentV3HistoryGroup, len(samples))]
-		groupStarted := time.Now()
-		checks, err := FoldCommitmentV3AsOf(ctx, a, group, func(done, total int) {
-			if time.Since(logged) < 30*time.Second {
-				return
-			}
-			logged = time.Now()
-			logger.Info("[commitment_convert] v3 history verify", "group", fmt.Sprintf("%d/%d", gi+1, groups), "ranges", fmt.Sprintf("%d/%d", done, total),
-				"progress", fmt.Sprintf("%.1f%%", 100*(float64(gi)+float64(done)/float64(total))/float64(groups)), "elapsed", time.Since(started).Round(time.Second))
-		})
-		if err != nil {
-			return err
-		}
-		for i, c := range checks {
-			logger.Info("[commitment_convert] v3 history sample verified", "asOf", group[i], "block", c.BlockNum, "records", common.PrettyCounter(c.Records),
-				"took", time.Since(groupStarted).Round(time.Second), "done", fmt.Sprintf("%d/%d", gi*commitmentV3HistoryGroup+i+1, len(samples)))
-		}
-	}
-	logger.Info("[commitment_convert] v3 history verified", "files", len(samples)/2, "samples", len(samples), "took", time.Since(started).Round(time.Millisecond))
-	return nil
+	return samples, nil
 }

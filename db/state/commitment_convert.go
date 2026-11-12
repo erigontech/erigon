@@ -807,13 +807,8 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 		return commitmentRestoreError("phase 5 ReloadFiles", reloadErr)
 	}
 	if opts.TargetV3 {
-		if err := verifyCommitmentV3Files(ctx, at.a, logger); err != nil {
+		if err := VerifyCommitmentV3(ctx, at.a, nil, len(historyRanges) > 0, logger); err != nil {
 			return commitmentRestoreError("v3 verification", err)
-		}
-		if len(historyRanges) > 0 {
-			if err := VerifyCommitmentV3History(ctx, at.a, logger); err != nil {
-				return commitmentRestoreError("v3 history verification", err)
-			}
 		}
 	}
 

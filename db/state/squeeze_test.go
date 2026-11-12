@@ -433,9 +433,9 @@ func rebuildCommitmentFromScratch(t *testing.T, db kv.TemporalRwDB, agg *state.A
 
 	require.Equal(t, rootInFiles, finalRoot)
 	if foldV3 {
-		check, err := state.FoldCommitmentV3(ctx, agg, math.MaxUint64)
+		checks, err := state.FoldCommitmentV3(ctx, agg, []uint64{math.MaxUint64}, nil)
 		require.NoError(t, err)
-		require.Equal(t, finalRoot, check.Root)
+		require.Equal(t, finalRoot, checks[0].Root)
 	}
 }
 
@@ -636,10 +636,10 @@ func testRebuildCommitmentWithHistory(t *testing.T, v3 bool, filedSteps uint64, 
 		if last >= filesEnd {
 			break
 		}
-		check, err := state.FoldCommitmentV3(ctx, agg, last+1)
+		checks, err := state.FoldCommitmentV3(ctx, agg, []uint64{last + 1}, nil)
 		require.NoError(t, err, "block %d", b)
-		require.Equal(t, uint64(b), check.BlockNum)
-		require.Equal(t, roots[uint64(b)], common.Hash(check.Root), "block %d", b)
+		require.Equal(t, uint64(b), checks[0].BlockNum)
+		require.Equal(t, roots[uint64(b)], common.Hash(checks[0].Root), "block %d", b)
 	}
 }
 

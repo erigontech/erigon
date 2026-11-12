@@ -97,7 +97,7 @@ func TestCommitmentVerifyRejectsAsOfBelowHistory(t *testing.T) {
 	t.Cleanup(func() { datadirCli, chaindata, verifyAsOf = previousDatadir, previousChaindata, previousVerifyAsOf })
 
 	db, dirs := dbWithV3State(t)
-	latest, err := state.FoldCommitmentV3(t.Context(), db.(state.HasAgg).Agg().(*state.Aggregator), math.MaxUint64)
+	checks, err := state.FoldCommitmentV3(t.Context(), db.(state.HasAgg).Agg().(*state.Aggregator), []uint64{math.MaxUint64}, nil)
 	require.NoError(t, err)
 	db.Close()
 	var pruned []string
@@ -112,7 +112,7 @@ func TestCommitmentVerifyRejectsAsOfBelowHistory(t *testing.T) {
 	}
 
 	datadirCli, chaindata = dirs.DataDir, dirs.Chaindata
-	for _, asOf := range []uint64{1, latest.TxNum} {
+	for _, asOf := range []uint64{1, checks[0].TxNum} {
 		verifyAsOf = []uint{uint(asOf)}
 		openSnapshotOnce = sync.Once{}
 		require.ErrorContains(t, commitmentVerify(t.Context(), log.New()), fmt.Sprintf("no commitment history covers txNum %d", asOf))

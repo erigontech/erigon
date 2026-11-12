@@ -184,9 +184,9 @@ func TestConvertCommitmentFiles_V3HistoryOrphanStorageRoot(t *testing.T) {
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, lastFrozenCommit, uint64(3))
 	for txNum := range lastFrozenCommit + 1 {
-		check, rootErr := state.FoldCommitmentV3(ctx, agg, txNum+1)
+		checks, rootErr := state.FoldCommitmentV3(ctx, agg, []uint64{txNum + 1}, nil)
 		require.NoErrorf(t, rootErr, "records as of txNum %d", txNum+1)
-		require.Equalf(t, roots[txNum], check.Root, "root as of txNum %d", txNum+1)
+		require.Equalf(t, roots[txNum], checks[0].Root, "root as of txNum %d", txNum+1)
 	}
 }
 
@@ -250,13 +250,10 @@ func requireCommitmentHistoryRoots(t *testing.T, db kv.TemporalRwDB, agg *state.
 			break
 		}
 		asOf = append(asOf, txNum+1)
-		check, rootErr := state.FoldCommitmentV3(t.Context(), agg, txNum+1)
-		require.NoErrorf(t, rootErr, "records as of txNum %d", txNum+1)
-		require.Equalf(t, roots[txNum], check.Root, "root as of txNum %d", txNum+1)
 	}
 	require.Greater(t, len(asOf), 90)
 	defer state.SetCommitmentV3FoldRangesForTest(state.SetCommitmentV3FoldRangesForTest(5))
-	checks, err := state.FoldCommitmentV3AsOf(t.Context(), agg, append(asOf, math.MaxUint64), nil)
+	checks, err := state.FoldCommitmentV3(t.Context(), agg, append(asOf, math.MaxUint64), nil)
 	require.NoError(t, err)
 	for i, txNum := range asOf {
 		require.Equalf(t, roots[txNum-1], checks[i].Root, "root as of txNum %d in one fold of %d", txNum, len(asOf))
@@ -651,7 +648,7 @@ func TestConvertCommitmentFiles_V3HistoryStaleStorageBranchOfRecreatedAccount(t 
 	runOrchestrator(t, db, state.ConvertOpts{TargetV3: true})
 
 	for txNum := uint64(1); txNum <= stepSize*steps; txNum++ {
-		_, err := state.FoldCommitmentV3(ctx, agg, txNum)
+		_, err := state.FoldCommitmentV3(ctx, agg, []uint64{txNum}, nil)
 		require.NoErrorf(t, err, "records as of txNum %d", txNum)
 	}
 }
@@ -723,9 +720,9 @@ func TestConvertCommitmentFiles_V3HistoryExtensionRoot(t *testing.T) {
 		if txNum >= stepSize*(steps-1) {
 			break
 		}
-		check, err := state.FoldCommitmentV3(t.Context(), agg, txNum+1)
+		checks, err := state.FoldCommitmentV3(t.Context(), agg, []uint64{txNum + 1}, nil)
 		require.NoErrorf(t, err, "records as of txNum %d", txNum+1)
-		require.Equalf(t, roots[txNum], check.Root, "root as of txNum %d", txNum+1)
+		require.Equalf(t, roots[txNum], checks[0].Root, "root as of txNum %d", txNum+1)
 	}
 }
 
@@ -760,9 +757,9 @@ func TestConvertCommitmentFiles_V3HistoryRootWithOnlyDirectLeaves(t *testing.T) 
 		if txNum >= stepSize*(steps-1) {
 			break
 		}
-		check, err := state.FoldCommitmentV3(t.Context(), agg, txNum+1)
+		checks, err := state.FoldCommitmentV3(t.Context(), agg, []uint64{txNum + 1}, nil)
 		require.NoErrorf(t, err, "records as of txNum %d", txNum+1)
-		require.Equalf(t, roots[txNum], check.Root, "root as of txNum %d", txNum+1)
+		require.Equalf(t, roots[txNum], checks[0].Root, "root as of txNum %d", txNum+1)
 	}
 }
 

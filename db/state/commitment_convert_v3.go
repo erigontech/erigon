@@ -684,15 +684,47 @@ func (b *hashedBatch) expect(key, hash []byte) error {
 
 var hashedBatchPool = sync.Pool{New: func() any { return &hashedBatch{} }}
 
-func verifyCommitmentV3Files(ctx context.Context, a *Aggregator, logger log.Logger) error {
+const commitmentV3VerifyGroup = 8
+
+func VerifyCommitmentV3(ctx context.Context, a *Aggregator, asOf []uint64, history bool, logger log.Logger) error {
 	started := time.Now()
-	defer a.MadvNormal().DisableReadAhead()
-	c, err := FoldCommitmentV3(ctx, a, math.MaxUint64)
-	if err != nil {
-		return err
+	if (history || len(asOf) > 0) && statecfg.Schema.GetDomainCfg(kv.CommitmentDomain).Hist.HistoryDisabled {
+		return errors.New("commitment history is disabled")
 	}
-	logger.Info("[commitment_convert] v3 records verified", "root", fmt.Sprintf("%x", c.Root), "block", c.BlockNum, "txNum", c.TxNum,
-		"records", common.PrettyCounter(c.Records), "took", time.Since(started).Round(time.Millisecond))
+	points := append([]uint64{math.MaxUint64}, asOf...)
+	if history {
+		samples, err := commitmentV3HistorySamples(a)
+		if err != nil {
+			return err
+		}
+		points = append(points, samples...)
+	}
+	defer a.MadvNormal().DisableReadAhead()
+	groups := (len(points) + commitmentV3VerifyGroup - 1) / commitmentV3VerifyGroup
+	logged := time.Now()
+	for gi := range groups {
+		group := points[gi*commitmentV3VerifyGroup : min((gi+1)*commitmentV3VerifyGroup, len(points))]
+		groupStarted := time.Now()
+		checks, err := FoldCommitmentV3(ctx, a, group, func(done, total int) {
+			if time.Since(logged) < 30*time.Second {
+				return
+			}
+			logged = time.Now()
+			logger.Info("[commitment verify] progress", "group", fmt.Sprintf("%d/%d", gi+1, groups), "ranges", fmt.Sprintf("%d/%d", done, total),
+				"progress", fmt.Sprintf("%.1f%%", 100*(float64(gi)+float64(done)/float64(total))/float64(groups)), "elapsed", time.Since(started).Round(time.Second))
+		})
+		if err != nil {
+			return err
+		}
+		for i, c := range checks {
+			if group[i] != math.MaxUint64 && c.TxNum >= group[i] {
+				return fmt.Errorf("%s: no commitment history covers txNum %d", asOfLabel(group[i]), group[i])
+			}
+			logger.Info("[commitment verify] ok", "asOf", asOfLabel(group[i]), "block", c.BlockNum, "txNum", c.TxNum, "root", fmt.Sprintf("%x", c.Root),
+				"records", common.PrettyCounter(c.Records), "took", time.Since(groupStarted).Round(time.Second), "done", fmt.Sprintf("%d/%d", gi*commitmentV3VerifyGroup+i+1, len(points)))
+		}
+	}
+	logger.Info("[commitment verify] done", "points", len(points), "history", history, "took", time.Since(started).Round(time.Millisecond))
 	return nil
 }
 
@@ -703,21 +735,13 @@ type CommitmentV3Check struct {
 
 var commitmentV3FoldRanges uint64 = 8192
 
-func FoldCommitmentV3(ctx context.Context, a *Aggregator, asOfTxNum uint64) (CommitmentV3Check, error) {
-	checks, err := FoldCommitmentV3AsOf(ctx, a, []uint64{asOfTxNum}, nil)
-	if err != nil {
-		return CommitmentV3Check{}, err
-	}
-	return checks[0], nil
-}
-
 type foldedRange struct {
 	seq     int
 	batches []*hashedBatch
 	states  [][]byte
 }
 
-func FoldCommitmentV3AsOf(ctx context.Context, a *Aggregator, asOf []uint64, progress func(done, total int)) ([]CommitmentV3Check, error) {
+func FoldCommitmentV3(ctx context.Context, a *Aggregator, asOf []uint64, progress func(done, total int)) ([]CommitmentV3Check, error) {
 	at := a.BeginFilesRo()
 	ranges := commitmentV3KeyRanges(at.d[kv.CommitmentDomain], commitmentV3FoldRanges)
 	at.Close()
