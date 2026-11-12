@@ -234,19 +234,7 @@ func (p *TxPool) precheckFrame(txn *TxnSlot, isLocal bool, senderID uint64) fram
 // Head publication can precede pool updates. Waiting on the generation also
 // covers recovery and same-height reorgs without polling the backend.
 func (p *TxPool) waitForStateChange(ctx context.Context, generation uint64) bool {
-	p.lock.Lock()
-	defer p.lock.Unlock()
-	// Serialize cancellation with Wait so its wakeup cannot be lost.
-	stop := context.AfterFunc(ctx, func() {
-		p.lock.Lock()
-		p.lastSeenCond.Broadcast()
-		p.lock.Unlock()
-	})
-	defer stop()
-	for generation == p.stateGeneration && ctx.Err() == nil {
-		p.lastSeenCond.Wait()
-	}
-	return generation != p.stateGeneration
+	return p.waitForCondition(ctx, func() bool { return generation != p.stateGeneration })
 }
 
 // applyFrameValidation requires the pool lock. Stale batches and cleared sender

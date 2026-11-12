@@ -1989,19 +1989,9 @@ func (p *TxPool) waitForStartup(ctx context.Context) error {
 	if p.Started() {
 		return ctx.Err()
 	}
-	p.lock.Lock()
-	defer p.lock.Unlock()
-	stop := context.AfterFunc(ctx, func() {
-		p.lock.Lock()
-		p.lastSeenCond.Broadcast()
-		p.lock.Unlock()
-	})
-	defer stop()
 	// The first state batch can arrive before persisted transactions are restored.
 	// Admission must see those transactions for nonce and replacement checks.
-	for !p.Started() && ctx.Err() == nil {
-		p.lastSeenCond.Wait()
-	}
+	p.waitForCondition(ctx, p.Started)
 	return ctx.Err()
 }
 
@@ -2018,17 +2008,27 @@ func (p *TxPool) addNewTxns(ctx context.Context, newTxns TxnSlots, sources []rem
 }
 
 func (p *TxPool) waitForStateRecovery(ctx context.Context) error {
-	for {
-		p.lock.Lock()
-		stale, generation := p.stateViewStale, p.stateGeneration
-		p.lock.Unlock()
-		if !stale {
-			return nil
-		}
-		if !p.waitForStateChange(ctx, generation) {
-			return ctx.Err()
-		}
+	if p.waitForCondition(ctx, func() bool { return !p.stateViewStale }) {
+		return nil
 	}
+	return ctx.Err()
+}
+
+// The condition is evaluated with the pool lock held.
+func (p *TxPool) waitForCondition(ctx context.Context, ready func() bool) bool {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+	// Serialize cancellation with Wait so its wakeup cannot be lost.
+	stop := context.AfterFunc(ctx, func() {
+		p.lock.Lock()
+		p.lastSeenCond.Broadcast()
+		p.lock.Unlock()
+	})
+	defer stop()
+	for !ready() && ctx.Err() == nil {
+		p.lastSeenCond.Wait()
+	}
+	return ready()
 }
 
 // Head-change retries share one simulation deadline. Frame admission returns
