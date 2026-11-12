@@ -23,6 +23,7 @@ import (
 	"slices"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	g "github.com/anacrolix/generics"
 	"github.com/holiman/uint256"
@@ -79,6 +80,20 @@ func (rs *StateV3) SetTxNum(txNum uint64) {
 // domains — the single write-set commit path shared by the parallel executor and
 // block production. Writes carry complete account state, so no domain reads are
 // needed to reconstruct the serialised account.
+// shortcut: dbg probes, a CPU spin as long as each account prev read or domain put bounds it; remove after the bound.
+var (
+	probeGetLatestX2 = dbg.EnvBool("PROBE_GETLATEST_X2", false)
+	probeDomainPutX2 = dbg.EnvBool("PROBE_DOMAINPUT_X2", false)
+)
+
+func probeSpinFor(on bool, start time.Time) {
+	if !on {
+		return
+	}
+	for d, t := time.Since(start), time.Now(); time.Since(t) < d; {
+	}
+}
+
 func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.TemporalTx, blockNum, txNum uint64, balanceIncreases map[accounts.Address]uint256.Int, rules *chain.Rules, trace bool) error {
 	if writes != nil && !writes.IsEmpty() {
 		// One buffer for every storage key this call writes: consumers copy what they keep.
@@ -241,7 +256,9 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 				acc := accounts.NewAccount()
 				var prev []byte
 				if !d.selfDestruct {
+					t0 := time.Now()
 					v, _, err := domains.GetLatest(kv.AccountsDomain, roTx, address[:])
+					probeSpinFor(probeGetLatestX2, t0)
 					if err != nil {
 						return err
 					}
@@ -270,7 +287,10 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 					fmt.Printf("%d apply:put account: %x balance:%s,nonce:%d,codehash:%x\n", blockNum, addr, acc.Balance.String(), acc.Nonce, acc.CodeHash)
 				}
 				enc := accounts.SerialiseV3(&acc)
-				if err := domains.DomainPut(kv.AccountsDomain, roTx, address[:], enc, txNum, prev); err != nil {
+				t0 := time.Now()
+				err := domains.DomainPut(kv.AccountsDomain, roTx, address[:], enc, txNum, prev)
+				probeSpinFor(probeDomainPutX2, t0)
+				if err != nil {
 					return err
 				}
 			}
@@ -312,7 +332,10 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 					if dbg.TraceApply && (trace || dbg.TraceAccount(addr.Handle())) {
 						fmt.Printf("%d apply:put storage: %x %x %x\n", blockNum, addr, item.key, v)
 					}
-					if err := domains.DomainPut(kv.StorageDomain, roTx, composite, v, txNum, item.prev); err != nil {
+					t0 := time.Now()
+					err := domains.DomainPut(kv.StorageDomain, roTx, composite, v, txNum, item.prev)
+					probeSpinFor(probeDomainPutX2, t0)
+					if err != nil {
 						return err
 					}
 				}
