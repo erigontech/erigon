@@ -68,6 +68,7 @@ type ForkGraph interface {
 	LowestAvailableSlot() uint64
 	GetLightClientBootstrap(blockRoot common.Hash) (*cltypes.LightClientBootstrap, bool)
 	NewestLightClientUpdate() *cltypes.LightClientUpdate
+	NewestLightClientFinalityUpdate() *cltypes.LightClientUpdate
 	GetLightClientUpdates(startPeriod, endPeriod uint64, head common.Hash) []*cltypes.LightClientUpdate
 	KeepFinalizedLightClientUpdates(finalized common.Hash)
 	GetCurrentParticipationIndicies(epoch uint64) (*solid.ParticipationBitList, error)
