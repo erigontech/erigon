@@ -208,10 +208,11 @@ func BenchmarkEphemeralParallelReplay(b *testing.B) {
 		execErr := r.exec(tx, doms)
 
 		b.StopTimer()
-		require.NoError(b, execErr)
-		require.NoError(b, r.verify(tx, doms, ws, expected))
+		verifyErr := r.verify(tx, doms, ws, expected)
 		doms.Close()
 		tx.Rollback()
+		require.NoError(b, execErr)
+		require.NoError(b, verifyErr)
 	}
 }
 
@@ -237,10 +238,10 @@ func BenchmarkEphemeralBALRoundTrip(b *testing.B) {
 	derive := func(seed types.BlockAccessList) types.BlockAccessList {
 		captured = nil
 		tx, doms, ws := r.newDomains(b, fx)
+		defer tx.Rollback()
+		defer doms.Close()
 		require.NoError(b, r.execSeeded(tx, doms, seed))
 		require.NoError(b, r.verify(tx, doms, ws, expected))
-		doms.Close()
-		tx.Rollback()
 		require.NotNil(b, captured, "no BAL derived (experimentalBAL not honored?)")
 		return captured
 	}
