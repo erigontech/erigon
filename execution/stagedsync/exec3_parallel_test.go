@@ -9,6 +9,7 @@ import (
 	"math/rand"
 	"os"
 	"runtime"
+	"sync"
 	"testing"
 	"time"
 
@@ -2167,4 +2168,51 @@ func TestAsyncBALBuilderFinishWaitsForLastJob(t *testing.T) {
 	time.AfterFunc(50*time.Millisecond, func() { close(release) })
 	b := a.finish()
 	require.Equal(t, txs, b.Next())
+}
+
+// The builder goroutine is shared by every executor: two blocks fed at once each get their own list, and a panic in one
+// block skips none of the other block's jobs.
+func TestAsyncBALBuilderExecutorsShareTheWorker(t *testing.T) {
+	const txs = 200
+	io := mixedBALIO(txs)
+	serial := state.NewBlockAccessListBuilder()
+	serial.AddRemaining(io)
+	want, err := types.EncodeBlockAccessListBytes(serial.Build())
+	require.NoError(t, err)
+
+	var good, bad asyncBALBuilder
+	var got []byte
+	var goodErr error
+	var goodAdded int
+	var badPanic any
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for sealed := 1; sealed <= txs; sealed++ {
+			good.add(io, sealed)
+		}
+		b := good.finish()
+		goodAdded = b.Next()
+		b.AddRemaining(io)
+		got, goodErr = types.EncodeBlockAccessListBytes(b.Build())
+	}()
+	go func() {
+		defer wg.Done()
+		defer func() { badPanic = recover() }()
+		for sealed := 1; sealed <= txs; sealed++ {
+			if sealed == txs/2 {
+				bad.add(nil, sealed)
+				continue
+			}
+			bad.add(io, sealed)
+		}
+		bad.finish()
+	}()
+	wg.Wait()
+
+	require.NotNil(t, badPanic, "the panicking block must raise its panic on its own caller")
+	require.Equal(t, txs-1, goodAdded, "the shared worker skipped jobs of the block that did not panic")
+	require.NoError(t, goodErr)
+	require.Equal(t, want, got)
 }
