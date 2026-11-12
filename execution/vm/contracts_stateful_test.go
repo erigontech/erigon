@@ -141,23 +141,33 @@ func TestStatefulPrecompileResolver(t *testing.T) {
 	routed := accounts.InternAddress(common.HexToAddress("0xca52000000000000000000000000000000000001"))
 	other := accounts.InternAddress(common.HexToAddress("0xca52000000000000000000000000000000000002"))
 	probe := &probePrecompile{}
-	var gotRules *chain.Rules
-	prev := statefulPrecompiles
-	SetStatefulPrecompiles(func(rules *chain.Rules, addr accounts.Address) (StatefulPrecompile, bool) {
-		gotRules = rules
-		return probe, addr == routed
-	})
-	t.Cleanup(func() { statefulPrecompiles = prev })
+	on := true
+	prevEnabled, prevResolve := statefulEnabled, statefulResolve
+	SetStatefulPrecompiles(
+		func(*chain.Rules) bool { return on },
+		func(addr accounts.Address) (StatefulPrecompile, bool) { return probe, addr == routed },
+	)
+	t.Cleanup(func() { statefulEnabled, statefulResolve = prevEnabled, prevResolve })
+	call := func(evm *EVM, addr accounts.Address) {
+		probe.got = PrecompileEnv{}
+		_, _, _, err := evm.Call(accounts.ZeroAddress, addr, nil, mdgas.MdGas{Execution: 10_000}, uint256.Int{}, true)
+		require.NoError(t, err)
+	}
 
 	evm, _ := newProbeEVM(t)
-	_, _, _, err := evm.Call(accounts.ZeroAddress, routed, nil, mdgas.MdGas{Execution: 10_000}, uint256.Int{}, true)
-	require.NoError(t, err)
-	require.Same(t, evm.ChainRules(), gotRules)
+	call(evm, routed)
 	require.Equal(t, routed, probe.got.Self)
 	require.NotContains(t, ActivePrecompiles(evm.ChainRules()), routed)
-
-	probe.got = PrecompileEnv{}
-	_, _, _, err = evm.Call(accounts.ZeroAddress, other, nil, mdgas.MdGas{Execution: 10_000}, uint256.Int{}, true)
-	require.NoError(t, err)
+	call(evm, other)
 	require.Nil(t, probe.got.EVM)
+
+	on = false
+	evm, _ = newProbeEVM(t)
+	call(evm, routed)
+	require.Nil(t, probe.got.EVM)
+
+	on = true
+	evm.ResetBetweenBlocks(evm.Context, evmtypes.TxContext{}, evm.IntraBlockState(), Config{}, evm.ChainRules())
+	call(evm, routed)
+	require.Equal(t, routed, probe.got.Self)
 }

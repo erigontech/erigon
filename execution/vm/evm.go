@@ -40,13 +40,11 @@ import (
 )
 
 func (evm *EVM) precompile(addr accounts.Address) (PrecompiledContract, bool) {
-	if p, ok := evm.precompiles[addr]; ok {
-		return p, true
+	p, ok := evm.precompiles[addr]
+	if ok || !evm.statefulPrecompiles {
+		return p, ok
 	}
-	if statefulPrecompiles != nil {
-		return statefulPrecompiles(evm.chainRules, addr)
-	}
-	return nil, false
+	return statefulResolve(addr)
 }
 
 // runPrecompile puts the identity output into the buffer a RETURN of the callee frame would use.
@@ -64,14 +62,9 @@ func (evm *EVM) runPrecompile(p PrecompiledContract, env PrecompileEnv, input []
 	if buf == nil {
 		return RunPrecompiledContract(p, input, gas, tracer)
 	}
-	gasCost := p.RequiredGas(input)
-	if gas.Execution < gasCost {
-		return nil, gas, ErrOutOfGas
-	}
-	remaining := gas
-	remaining.Execution -= gasCost
-	if tracer.HasGasChangeHook() {
-		tracer.EmitGasChange(gas, remaining, tracing.GasChangeCallPrecompiledContract)
+	remaining, err := chargePrecompile(p, input, gas, tracer)
+	if err != nil {
+		return nil, remaining, err
 	}
 	*buf = append((*buf)[:0], input...)
 	return slices.Clip(*buf), remaining, nil
@@ -121,8 +114,10 @@ type EVM struct {
 	// replaced wholesale by SetPrecompiles for state-override RPC calls.
 	precompiles PrecompiledContracts
 
-	readOnly   bool   // Whether to throw on stateful modifications
-	returnData []byte // Last CALL's return data for subsequent reuse
+	readOnly bool // Whether to throw on stateful modifications
+	// statefulPrecompiles is whether the chain rules route stateful precompiles.
+	statefulPrecompiles bool
+	returnData          []byte // Last CALL's return data for subsequent reuse
 
 	spareFrame *CallContext // a finished nested frame's context, see putCallContext
 }
@@ -159,6 +154,7 @@ func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, ibs *state
 	}
 	evm.jt = jumpTable(evm.chainRules, vmConfig)
 	evm.precompiles = Precompiles(evm.chainRules)
+	evm.statefulPrecompiles = statefulPrecompilesOn(evm.chainRules)
 
 	return evm
 }
@@ -190,6 +186,7 @@ func (evm *EVM) ResetForSystemCall(blockCtx evmtypes.BlockContext, txCtx evmtype
 	evm.returnData = nil
 	evm.jt = jumpTable(chainRules, vmConfig)
 	evm.precompiles = Precompiles(chainRules)
+	evm.statefulPrecompiles = statefulPrecompilesOn(chainRules)
 }
 
 // Cancel requests cancellation without waiting for execution to stop.

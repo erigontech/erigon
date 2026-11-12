@@ -36,11 +36,8 @@ type cas20Precompile interface {
 	RunStateful(ctx *PrecompileContext, input []byte) ([]byte, error)
 }
 
-// Resolve routes the CAS20 addresses to their precompiles from Jenner on.
-func Resolve(rules *chain.Rules, addr accounts.Address) (vm.StatefulPrecompile, bool) {
-	if !enabled(rules) {
-		return nil, false
-	}
+// Resolve routes the CAS20 addresses to their precompiles; Enabled gates it.
+func Resolve(addr accounts.Address) (vm.StatefulPrecompile, bool) {
 	p, ok := resolveCAS20(addr.Value())
 	if !ok {
 		return nil, false
@@ -48,9 +45,9 @@ func Resolve(rules *chain.Rules, addr accounts.Address) (vm.StatefulPrecompile, 
 	return vmPrecompiles[p], true
 }
 
-// enabled gates CAS20 on Jenner, and on BSC, so that a non-BSC config with a
+// Enabled gates CAS20 on Jenner, and on BSC, so that a non-BSC config with a
 // Jenner time does not route the reserved address space.
-func enabled(rules *chain.Rules) bool { return rules.IsParlia && rules.IsJenner }
+func Enabled(rules *chain.Rules) bool { return rules.IsParlia && rules.IsJenner }
 
 var vmPrecompiles = map[cas20Precompile]vm.StatefulPrecompile{
 	cas20Factory:    vmPrecompile{cas20Factory},

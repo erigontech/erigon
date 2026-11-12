@@ -29,24 +29,26 @@ type PrecompileEnv struct {
 	DirectCall bool
 }
 
-var statefulPrecompiles func(*chain.Rules, accounts.Address) (StatefulPrecompile, bool)
+var (
+	statefulEnabled func(*chain.Rules) bool
+	statefulResolve func(accounts.Address) (StatefulPrecompile, bool)
+)
 
-// SetStatefulPrecompiles installs a resolver for stateful precompiles that are
-// not in the precompile map, so they are neither warm nor listed as active.
-// Call it once, at init.
-func SetStatefulPrecompiles(resolve func(*chain.Rules, accounts.Address) (StatefulPrecompile, bool)) {
-	statefulPrecompiles = resolve
+// SetStatefulPrecompiles installs stateful precompiles that are not in the
+// precompile map, so they are neither warm nor listed as active. resolve is
+// consulted only under rules for which enabled is true. Call it once, at init.
+func SetStatefulPrecompiles(enabled func(*chain.Rules) bool, resolve func(accounts.Address) (StatefulPrecompile, bool)) {
+	statefulEnabled, statefulResolve = enabled, resolve
+}
+
+func statefulPrecompilesOn(rules *chain.Rules) bool {
+	return statefulEnabled != nil && statefulEnabled(rules)
 }
 
 func (evm *EVM) runStatefulPrecompile(p StatefulPrecompile, env PrecompileEnv, input []byte, gas mdgas.MdGas, tracer *tracing.Hooks) ([]byte, mdgas.MdGas, error) {
-	gasCost := p.RequiredGas(input)
-	if gas.Execution < gasCost {
-		return nil, gas, ErrOutOfGas
-	}
-	remaining := gas
-	remaining.Execution -= gasCost
-	if tracer.HasGasChangeHook() {
-		tracer.EmitGasChange(gas, remaining, tracing.GasChangeCallPrecompiledContract)
+	remaining, err := chargePrecompile(p, input, gas, tracer)
+	if err != nil {
+		return nil, remaining, err
 	}
 	env.EVM = evm
 	env.Gas = &remaining

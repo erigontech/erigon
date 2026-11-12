@@ -142,7 +142,6 @@ func TestCAS20StorageGasAgainstBytecode(t *testing.T) {
 				run := func(native bool, budget uint64) result {
 					sdb := setup()
 					evm := newTestEVM(cas20BlockContext(1), sdb, cas20TestChainConfig())
-					defer evm.Release()
 					if native {
 						evm.SetPrecompiles(map[common.Address]cas20Precompile{addr: program})
 					}

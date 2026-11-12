@@ -30,7 +30,6 @@ import (
 // in the results; Err reports the first one.
 type StateDB interface {
 	GetCodeHash(addr common.Address) common.Hash
-	GetCode(addr common.Address) []byte
 	SetCode(addr common.Address, code []byte, reason tracing.CodeChangeReason)
 	AddLog(log *types.Log)
 	AddressInAccessList(addr common.Address) bool
@@ -64,12 +63,6 @@ func (s *ibsState) GetCodeHash(addr common.Address) common.Hash {
 	h, err := s.ibs.GetCodeHash(accounts.InternAddress(addr))
 	s.keep(err)
 	return h.Value()
-}
-
-func (s *ibsState) GetCode(addr common.Address) []byte {
-	code, err := s.ibs.GetCode(accounts.InternAddress(addr))
-	s.keep(err)
-	return code
 }
 
 func (s *ibsState) SetCode(addr common.Address, code []byte, reason tracing.CodeChangeReason) {

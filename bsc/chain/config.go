@@ -56,5 +56,5 @@ var (
 func init() {
 	chainspec.RegisterChainSpec(networkname.BSC, BSC)
 	chainspec.RegisterChainSpec(networkname.Chapel, Chapel)
-	vm.SetStatefulPrecompiles(cas20.Resolve)
+	vm.SetStatefulPrecompiles(cas20.Enabled, cas20.Resolve)
 }

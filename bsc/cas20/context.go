@@ -68,19 +68,16 @@ type frameAccounting struct {
 }
 
 func newPrecompileContext(env *vm.PrecompileEnv) *PrecompileContext {
-	ctx := &PrecompileContext{
+	return &PrecompileContext{
 		evm:        env.EVM,
 		StateDB:    newIBSState(env.EVM.IntraBlockState()),
 		Self:       env.Self.Value(),
 		Caller:     env.Caller.Value(),
 		ReadOnly:   env.ReadOnly,
 		DirectCall: env.DirectCall,
+		Value:      &env.Value,
 		gas:        env.Gas,
 	}
-	if !env.Value.IsZero() {
-		ctx.Value = &env.Value
-	}
-	return ctx
 }
 
 func (ctx *PrecompileContext) tracer() *tracing.Hooks {

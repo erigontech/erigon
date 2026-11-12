@@ -46,6 +46,14 @@ func newTestStateDB(t testing.TB) *testState {
 	return &testState{ibsState: newIBSState(ibs), txs: map[common.Hash]int{}}
 }
 
+func (s *testState) GetCode(addr common.Address) []byte {
+	code, err := s.ibs.GetCode(accounts.InternAddress(addr))
+	if err != nil {
+		panic(err)
+	}
+	return code
+}
+
 func (s *testState) GetRefund() uint64 { return s.ibs.GetRefund() }
 
 func (s *testState) Logs() []*types.Log { return s.ibs.Logs() }
@@ -108,7 +116,7 @@ func cas20Call(sel [4]byte, args ...common.Hash) []byte {
 }
 
 func TestMain(m *testing.M) {
-	vm.SetStatefulPrecompiles(Resolve)
+	vm.SetStatefulPrecompiles(Enabled, Resolve)
 	os.Exit(m.Run())
 }
 
@@ -149,8 +157,6 @@ func newTestEVM(bc evmtypes.BlockContext, s *testState, cfg *chain.Config) *test
 	}
 	return &testEVM{vm.NewEVM(bc, evmtypes.TxContext{}, ibs, cfg, vm.Config{})}
 }
-
-func (e *testEVM) Release() {}
 
 func (e *testEVM) SetPrecompiles(set map[common.Address]cas20Precompile) {
 	out := make(vm.PrecompiledContracts, len(set))
@@ -246,10 +252,13 @@ func (s *testState) run(f func()) {
 	s.ibs.RevertToSnapshot(snap, nil)
 }
 
-func (e *testEVM) cas20Enabled() bool { return enabled(e.ChainRules()) }
+func (e *testEVM) cas20Enabled() bool { return Enabled(e.ChainRules()) }
 
 func (e *testEVM) precompile(addr common.Address) (vm.StatefulPrecompile, bool) {
-	return Resolve(e.ChainRules(), accounts.InternAddress(addr))
+	if !Enabled(e.ChainRules()) {
+		return nil, false
+	}
+	return Resolve(accounts.InternAddress(addr))
 }
 
 func runStatefulPrecompiledContract(evm *testEVM, p cas20Precompile, caller, self common.Address, input []byte, gas mdgas.MdGas, readOnly, directCall bool, value *uint256.Int) ([]byte, mdgas.MdGas, error) {
