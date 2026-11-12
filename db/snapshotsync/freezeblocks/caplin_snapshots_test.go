@@ -938,11 +938,13 @@ func TestBlobCountFromBlocksFollowsTheChildsPayloadStatus(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
 		onChain  bool
+		stored   bool
 		expected uint64
 		dumpErr  string
 	}{
-		{"payload skipped", false, 0, ""},
-		{"payload on chain", true, 2, "blob storage count mismatch at slot 7"},
+		{"payload skipped", false, false, 0, ""},
+		{"payload skipped, its blobs stored", false, true, 0, ""},
+		{"payload on chain", true, false, 2, "blob storage count mismatch at slot 7"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := clparams.MainnetBeaconConfig
@@ -990,6 +992,9 @@ func TestBlobCountFromBlocksFollowsTheChildsPayloadStatus(t *testing.T) {
 				require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error { return beacon_indicies.MarkRootCanonical(tx, s, r) }))
 			}
 			store := blob_storage.NewBlobStore(db, afero.NewMemMapFs())
+			if tc.stored {
+				require.NoError(t, store.WriteBlobSidecars(t.Context(), root, []*cltypes.BlobSidecar{blobSidecar(slot, 0), blobSidecar(slot, 1)}))
+			}
 			err = DumpBlobSidecarsRange(t.Context(), db, store, 0, snaptype.CaplinMergeLimit, 0, dirs, 1, blobCount, log.LvlDebug, log.New())
 			if tc.dumpErr == "" {
 				require.NoError(t, err)

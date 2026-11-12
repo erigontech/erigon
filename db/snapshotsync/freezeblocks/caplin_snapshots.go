@@ -294,22 +294,22 @@ func DumpBlobSidecarsRange(ctx context.Context, db kv.RoDB, storage blob_storage
 			return err
 		}
 
-		commitmentsCount, err := storage.KzgCommitmentsCount(ctx, blockRoot)
+		blobCount, err := blobCountFn(i)
 		if err != nil {
 			return err
 		}
-		blobCount, err := blobCountFn(i)
+		if blobCount == 0 {
+			if err := sn.AddWord(nil); err != nil {
+				return err
+			}
+			continue
+		}
+		commitmentsCount, err := storage.KzgCommitmentsCount(ctx, blockRoot)
 		if err != nil {
 			return err
 		}
 		if blobCount != uint64(commitmentsCount) {
 			return fmt.Errorf("blob storage count mismatch at slot %d: %d != %d", i, blobCount, commitmentsCount)
-		}
-		if commitmentsCount == 0 {
-			if err := sn.AddWord(nil); err != nil {
-				return err
-			}
-			continue
 		}
 		sidecars, found, err := storage.ReadBlobSidecars(ctx, i, blockRoot)
 		if err != nil {
@@ -409,24 +409,25 @@ func BlobCountFromBlocks(ctx context.Context, sn *CaplinSnapshots, r BeaconSnaps
 		if commitments == nil || commitments.Len() == 0 {
 			return 0, nil
 		}
-		skipped, err := payloadSkipped(ctx, sn, r, block)
-		if err != nil || skipped {
-			return 0, err
+		if block.Version() >= clparams.GloasVersion {
+			root, err := block.Block.HashSSZ()
+			if err != nil {
+				return 0, err
+			}
+			skipped, err := PayloadSkipped(block, root, sn.BlocksAvailable(), func(slot uint64) (*cltypes.SignedBeaconBlock, error) {
+				return r.ReadBeaconBlockBodyBySlot(ctx, nil, slot)
+			})
+			if err != nil || skipped {
+				return 0, err
+			}
 		}
 		return uint64(commitments.Len()), nil
 	}
 }
 
-func payloadSkipped(ctx context.Context, sn *CaplinSnapshots, r BeaconSnapshotReader, block *cltypes.SignedBeaconBlock) (bool, error) {
-	if block.Version() < clparams.GloasVersion {
-		return false, nil
-	}
-	root, err := block.Block.HashSSZ()
-	if err != nil {
-		return false, err
-	}
-	for slot := block.Block.Slot + 1; slot <= sn.BlocksAvailable(); slot++ {
-		child, err := r.ReadBeaconBlockBodyBySlot(ctx, nil, slot)
+func PayloadSkipped(block *cltypes.SignedBeaconBlock, root common.Hash, lastSlot uint64, read func(slot uint64) (*cltypes.SignedBeaconBlock, error)) (bool, error) {
+	for slot := block.Block.Slot + 1; slot <= lastSlot; slot++ {
+		child, err := read(slot)
 		if err != nil {
 			return false, err
 		}

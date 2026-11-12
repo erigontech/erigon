@@ -23,6 +23,7 @@ import (
 	"math"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/common"
@@ -101,12 +102,11 @@ func CheckCaplinBlobSidecars(ctx context.Context, db kv.RoDB, snapshots *freezeb
 		logger.Error("[integrity] CaplinBlobSidecars", "err", err)
 		return err
 	}
-	blobCount := freezeblocks.BlobCountFromBlocks(ctx, snapshots, freezeblocks.NewBeaconSnapshotReader(snapshots, nil, beaconCfg))
 	return db.View(ctx, func(tx kv.Tx) error {
 		for _, segment := range view.BlobSidecars() {
 			from, to := segment.Src().GetRange()
 			for slot := from; slot < to; slot++ {
-				if slotErr := checkCaplinBlobSnapshotSlot(ctx, tx, snapshots, blobCount, slot); slotErr != nil {
+				if slotErr := checkCaplinBlobSnapshotSlot(ctx, tx, snapshots, slot); slotErr != nil {
 					if errors.Is(slotErr, context.Canceled) || errors.Is(slotErr, context.DeadlineExceeded) {
 						return slotErr
 					}
@@ -205,7 +205,7 @@ func checkCaplinSnapshotSegment(ctx context.Context, name string, segment *snaps
 	return nil
 }
 
-func checkCaplinBlobSnapshotSlot(ctx context.Context, tx kv.Tx, snapshots *freezeblocks.CaplinSnapshots, blobCount freezeblocks.BlobCountBySlotFn, slot uint64) error {
+func checkCaplinBlobSnapshotSlot(ctx context.Context, tx kv.Tx, snapshots *freezeblocks.CaplinSnapshots, slot uint64) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -255,11 +255,22 @@ func checkCaplinBlobSnapshotSlot(ctx context.Context, tx kv.Tx, snapshots *freez
 		return fmt.Errorf("blob snapshot slot %d: beacon snapshot root does not match canonical root", slot)
 	}
 	commitments := block.GetBlobKzgCommitments()
-	expected, err := blobCount(slot)
-	if err != nil {
-		return fmt.Errorf("blob snapshot slot %d: count blobs: %w", slot, err)
+	expected := 0
+	if commitments != nil {
+		expected = commitments.Len()
 	}
-	if uint64(len(sidecars)) != expected {
+	if expected > 0 && block.Version() >= clparams.GloasVersion {
+		skipped, err := freezeblocks.PayloadSkipped(block, canonicalRoot, snapshots.BlocksAvailable(), func(next uint64) (*cltypes.SignedBeaconBlock, error) {
+			return readCanonicalFrozenBlock(tx, snapshots, next)
+		})
+		if err != nil {
+			return fmt.Errorf("blob snapshot slot %d: read child block: %w", slot, err)
+		}
+		if skipped {
+			expected = 0
+		}
+	}
+	if len(sidecars) != expected {
 		return fmt.Errorf("blob snapshot slot %d: expected %d sidecars, got %d", slot, expected, len(sidecars))
 	}
 	for i, sidecar := range sidecars {
@@ -291,6 +302,25 @@ func checkCaplinBlobSnapshotSlot(ctx context.Context, tx kv.Tx, snapshots *freez
 		return fmt.Errorf("blob snapshot slot %d: KZG/proof verification failed: %w", slot, err)
 	}
 	return nil
+}
+
+func readCanonicalFrozenBlock(tx kv.Tx, snapshots *freezeblocks.CaplinSnapshots, slot uint64) (*cltypes.SignedBeaconBlock, error) {
+	block, err := snapshots.ReadFrozenBeaconBlockBodyForIntegrity(slot)
+	if err != nil || block == nil {
+		return nil, err
+	}
+	root, err := block.Block.HashSSZ()
+	if err != nil {
+		return nil, err
+	}
+	canonicalRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
+	if err != nil {
+		return nil, err
+	}
+	if block.Block.Slot != slot || root != canonicalRoot {
+		return nil, fmt.Errorf("block at slot %d is not canonical", slot)
+	}
+	return block, nil
 }
 
 func checkCaplinBlobSnapshotsVisible(snapshots *freezeblocks.CaplinSnapshots, view *freezeblocks.CaplinView) error {

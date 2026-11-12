@@ -683,12 +683,14 @@ func encodeBeaconBlockSnapshotWithBodyRoot(t *testing.T, block *cltypes.SignedBe
 func TestCheckCaplinBlobSidecarsFollowsTheChildsPayloadStatus(t *testing.T) {
 	const slot = uint64(7)
 	for _, tc := range []struct {
-		name    string
-		onChain bool
-		err     string
+		name      string
+		onChain   bool
+		canonical map[uint64]common.Hash
+		err       string
 	}{
-		{"payload skipped", false, ""},
-		{"payload on chain", true, "expected 1 sidecars, got 0"},
+		{"payload skipped", false, nil, ""},
+		{"payload on chain", true, nil, "expected 1 sidecars, got 0"},
+		{"payload skipped by a block that is not canonical", false, map[uint64]common.Hash{slot + 2: {0xee}}, "blob snapshot slot 7: read child block: block at slot 9 is not canonical"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := denebBlobIntegrityConfig()
@@ -708,7 +710,7 @@ func TestCheckCaplinBlobSidecarsFollowsTheChildsPayloadStatus(t *testing.T) {
 				child.Block.Body.GetSignedExecutionPayloadBid().Message.ParentBlockHash = common.Hash{0x01}
 			}
 
-			err = checkCaplinBlobIntegrityChain(t, &cfg, block, child)
+			err = checkCaplinBlobIntegrityChain(t, &cfg, tc.canonical, block, child)
 			if tc.err == "" {
 				require.NoError(t, err)
 				return
@@ -718,7 +720,7 @@ func TestCheckCaplinBlobSidecarsFollowsTheChildsPayloadStatus(t *testing.T) {
 	}
 }
 
-func checkCaplinBlobIntegrityChain(t *testing.T, cfg *clparams.BeaconChainConfig, blocks ...*cltypes.SignedBeaconBlock) error {
+func checkCaplinBlobIntegrityChain(t *testing.T, cfg *clparams.BeaconChainConfig, canonical map[uint64]common.Hash, blocks ...*cltypes.SignedBeaconBlock) error {
 	t.Helper()
 	words := map[uint64][]byte{}
 	db := mdbxtest.NewTestDB(t, dbcfg.CaplinDB)
@@ -726,6 +728,9 @@ func checkCaplinBlobIntegrityChain(t *testing.T, cfg *clparams.BeaconChainConfig
 		words[block.Block.Slot] = encodeBeaconBlockSnapshot(t, block)
 		root, err := block.Block.HashSSZ()
 		require.NoError(t, err)
+		if override, ok := canonical[block.Block.Slot]; ok {
+			root = override
+		}
 		require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
 			return beacon_indicies.MarkRootCanonical(tx, block.Block.Slot, root)
 		}))
