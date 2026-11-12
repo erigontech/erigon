@@ -1,0 +1,104 @@
+# Diffset S1: history and values projected from the mem-batch chains at flush
+
+Research log: `~/org/mode/e/research/diffset-pipeline.org`, idea I2, next step N5. Base: `origin/main` `f9da00be8fb`.
+
+## Problem
+
+- Every put into `TemporalMemBatch` is held up to five times before flush:
+  - the per-key chain (`putLatest`)
+  - the history-values ETL collector, `history.go` `AddPrevValue`
+  - the history-keys ETL collector, also in `AddPrevValue`
+  - the values ETL collector (`domain.go` `addValue`)
+  - the per-block `DomainDiff` (`db/kv/helpers.go` `DomainUpdate`)
+- The chains already hold every version of every key in node runs:
+  - `ERIGON_IN_MEM_HISTORY` defaults to true (`execution/execmodule/exec_module.go:63`)
+  - parallel exec forces it on (`execution/stagedsync/exec3_parallel.go:395`)
+- The three ETL collectors are fed on the exec path, inside the parallel apply loop. They duplicate what the chains hold.
+
+## Goal
+
+- The put path keeps the chain entry and the `DomainDiff` update only.
+- `Flush` feeds the existing history and values writers from the chains, then flushes them as today.
+- Every MDBX row and every `ChangeSets3` entry stays byte-identical to `f9da00be8fb` (T1's golden).
+- Out of scope:
+  - replacing the ETL collectors with one sorted pass (S2)
+  - deriving `ChangeSets3` from the chains
+  - any on-disk format change
+
+## Invariants
+
+- I-1: a same-txNum update replaces the chain entry's value and keeps its first prev. History and `DomainDiff` record the first prev (`temporal_mem_batch.go:224-235`).
+- I-2: values rows are last-wins per (key, step). History rows are one per (key, txNum), with the prev exactly as passed to `TemporalMemBatch.DomainPut`/`DomainDel`, so history bytes are identical by construction. Rows are never derived from the previous chain entry.
+- I-3: a discarded domain (`DiscardWrites`, `!d.Enabled`) or a history-disabled domain writes what it writes today. Feeding the writers at flush keeps their own `discard` checks.
+- I-4: a chain entry owns its bytes (`temporal_mem_batch.go:240-242`). The prev is cloned unless it equals the previous entry's data; when it does, it shares that slice.
+
+## Perf
+
+- Arms: the branch head vs `f9da00be8fb`.
+- Bench: M5 Max, `evm enginextest --run test_ether_transfers` and `test_storage`, stage time.
+- Discipline: 8v8 ABBA under `lockf /Volumes/dev/tmp/m5-bench.lock`. Harness pattern: `~/org/mode/e/research/vm-bench-bal-on/snd/ab-et/run.sh`.
+- First measured after T3 by the supervisor, and again after T4.
+- Number to beat: the base arm's stage time on each fill.
+- Stop line: if `ab-verdict` after T4 is not a stage win on `test_ether_transfers`, stop. The win then needs S2's sorted pass, and these tasks do not merge alone.
+- RAM: before T2 merges, a heap profile at flush on `integration stage_exec` with and without the toggle, on the same batch. That covers the only runs where chains are off today.
+
+## Tasks
+
+### T1: flush golden oracle (test only)
+
+- [ ] `db/state/execctx/flush_golden_test.go`: a seeded write script through `SharedDomains`, flushed into a temporal MDBX tx. The dump holds every row of every table each domain owns, plus `ChangeSets3`, as sorted hex lines, compared against `testdata/flush_golden/<case>.txt`. A `-update` flag regenerates the file.
+- [ ] Use the domain set the existing `execctx` tests open; pick a step size small enough that the script crosses at least three steps.
+- [ ] Cases, one golden each:
+  - [ ] `forward`: Accounts, Storage, Code and Commitment, plus RCache if the test setup enables it. Several blocks, each with `SetChangesetAccumulator` / `SavePastChangesetAccumulator` as `exec3_serial.go:111-225` does. Include:
+    - put, then put of the same key at a later txNum
+    - put-put and del-put at the same txNum
+    - delete of an existing key, and delete of an absent key
+    - a key written in two steps
+    - an account delete that cascades to storage (`DomainDel` on Accounts)
+  - [ ] `discard`: `forward` with `DiscardWrites` on Accounts/Storage/Code, as `db/state/squeeze.go:549` does.
+  - [ ] `unwind`: forward over blocks 1..6, then the in-memory `Unwind` to block 4's end, using the changeset `unwindDomsToBlock` builds (`execution/stagedsync/stage_execute.go:527`). Then blocks 5'..6' with different writes, then flush.
+  - [ ] `merge`: a receiver batch over blocks 1..3 and an extending-fork batch over blocks 4..5, merged as `ForkValidator.MergeExtendingFork` does (`execution/execmodule/fork_validator.go:143`), then flush. The fork batch reads through the receiver: build it the way the fork validator does.
+- [ ] `NOTES` answers: does the `unwind` golden hold history or values rows from the unwound blocks 5..6 that 5'..6' did not overwrite? Does `GetAsOf` on the merged batch, at a ts inside the receiver's range for a key both batches wrote, return the receiver's value?
+
+### T2: chains always complete
+
+- [ ] Delete the `inMemHistoryReads` toggle:
+  - `TemporalMemBatch.SetInMemHistoryReads` / `InMemHistoryReads`, the `kv` interface method, `kv.ErrInMemHistoryDisabled`
+  - `ERIGON_IN_MEM_HISTORY`
+  - every setter: integration commands, `squeeze.go:552`, execmodule, `exec3_parallel.go:395`
+  - the readers that tolerate `ErrInMemHistoryDisabled`
+- [ ] `putLatestLocked` keeps one entry per txNum in every run.
+- [ ] Tests that asserted the disabled behaviour are removed, not rewritten to pass. Name them under `NOTES`.
+- [ ] `NOTES`: how often `squeeze.go` (`openDomains`, `rebuildCommitmentShard`) writes one key at distinct txNums. That is its chain growth.
+- [ ] T1 goldens unchanged.
+
+### T3: history from the chains at flush
+
+- [ ] `dataWithTxNum` carries `prev []byte`, set per I-1 and I-4. `putLatestLocked` receives the prev.
+- [ ] `putHistory` no longer calls `PutWithPrev` / `DeleteWithPrev` / `PutWithPrevDiff` / `DeleteWithPrevDiff` for history. It keeps the `addValue` call (T4 moves it) and calls `diff.DomainUpdate(k, step, prev)` itself when the writer's diff, or `PutCommitmentBranchDiff`'s explicit diff, is set. A same-txNum update records nothing.
+- [ ] `Flush`, before `flushWriters`: for every chain entry of every domain, `domainWriters[d].h.AddPrevValue(key, txNum, prev)`.
+- [ ] `Merge` concatenates chains instead of replacing them: the receiver's entries below the other's first txNum, then the other's chain.
+- [ ] Red first: a `GetAsOf` test on a merged batch, at a ts inside the receiver's range for a key both batches wrote. It fails on the base (whole-chain replace) and passes here.
+- [ ] Goldens: `forward`, `discard` and `merge` unchanged. `unwind` is decided at the T1 checkpoint.
+- [ ] Direction:
+  - Writers of the chains: `putLatestLocked` under the shard lock (exec loop, apply loop, commitment calculator), `Unwind` and `Merge` under every lock.
+  - Writers of the history collectors after T3: `Flush` only, under `rlockAllDomains`.
+  - `DomainDiff`: written at put time as today, swapped under `changesetMu`.
+  - Before the first line: prove with the LSP that no `TemporalMemBatch` is written to or flushed again after `Flush` (callers of `SharedDomains.Flush` / `Commit` / `flushMem`, and the `o.mem` reuse at `domain_shared.go:359`). If one is, a flushed-txNum watermark limits the feed to new entries. Answer under `NOTES`.
+
+### T4: values from the chains at flush
+
+- [ ] `putHistory` drops `addValue`. `PutCommitmentBranchDiff` keeps only `putLatest` and the diff update.
+- [ ] `Flush`: for every chain, the last entry per step goes to `domainWriters[d].addValue(key, data, step)`, before `flushWriters`.
+- [ ] Goldens unchanged.
+
+### T5: Merge keeps no domain writers
+
+- [ ] After T4 the other batch's domain writers hold nothing. `Merge` closes them instead of moving them, and `pastDomainWriters` is deleted. The II writers (`pastIIWriters`, standalone indices via `IndexAdd`) stay.
+- [ ] Goldens unchanged.
+
+## Checkpoints (supervisor)
+
+- After T1: read the goldens and the `NOTES`. If the `unwind` golden holds rows from the unwound blocks, that is a bug on main: file it, and decide whether T3 fixes it (and the golden changes) or keeps the bytes.
+- After T3: first ABBA.
+- After T4: second ABBA, then the stop line.
