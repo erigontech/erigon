@@ -414,9 +414,9 @@ func (s *dataColumnSidecarService) processGloasMessage(ctx context.Context, subn
 
 	// [IGNORE] A valid block for the sidecar's slot has been seen.
 	// Only checks recent blocks in forkChoice memory - older blocks don't need sidecar validation.
-	block, ok := s.forkChoice.GetBlock(blockRoot)
+	block, ok, notImportable := s.lookupBlock(slot, blockRoot)
 	if !ok {
-		if !store || s.blockNotImportable(slot) {
+		if !store || notImportable {
 			return ErrIgnore
 		}
 		return errGloasSidecarBlockUnavailable
@@ -503,6 +503,24 @@ func (s *dataColumnSidecarService) verifyProposerSignature(proposerIndex uint64,
 	return valid, nil
 }
 
+// lookupBlock returns the block of root once fork choice has imported it, else whether it can never be imported.
+// Fork choice holds a block while its state transition runs, and publishes the header only after the transition
+// succeeds. The importability sample precedes the last lookup, so a miss after a "not importable" sample is final.
+func (s *dataColumnSidecarService) lookupBlock(slot uint64, root common.Hash) (block *cltypes.SignedBeaconBlock, ok, notImportable bool) {
+	if block, ok = s.importedBlock(root); ok || !s.blockNotImportable(slot) {
+		return block, ok, false
+	}
+	block, ok = s.importedBlock(root)
+	return block, ok, !ok
+}
+
+func (s *dataColumnSidecarService) importedBlock(root common.Hash) (*cltypes.SignedBeaconBlock, bool) {
+	if _, ok := s.forkChoice.GetHeader(root); !ok {
+		return nil, false
+	}
+	return s.forkChoice.GetBlock(root)
+}
+
 // blockNotImportable reports whether fork choice rejects a block at slot, as at or below the finalized checkpoint
 // start slot or the anchor slot. A Gloas sidecar whose block is unknown at such a slot can never be validated.
 func (s *dataColumnSidecarService) blockNotImportable(slot uint64) bool {
@@ -533,8 +551,8 @@ func (s *dataColumnSidecarService) tryProcessPendingGloasSidecar(
 	_ common.Hash,
 	sidecar *cltypes.DataColumnSidecar,
 ) pendingJobDecision {
-	if _, ok := s.forkChoice.GetBlock(sidecar.BeaconBlockRoot); !ok {
-		if s.blockNotImportable(sidecar.Slot) {
+	if _, ok, notImportable := s.lookupBlock(sidecar.Slot, sidecar.BeaconBlockRoot); !ok {
+		if notImportable {
 			log.Debug("[dataColumnSidecarService] pending GLOAS sidecar's block can no longer be imported",
 				"slot", sidecar.Slot, "blockRoot", sidecar.BeaconBlockRoot.String(), "index", sidecar.Index)
 			return pendingJobRemove
