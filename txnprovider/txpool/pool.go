@@ -3326,21 +3326,9 @@ func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.
 	if err != nil {
 		return err
 	}
-	initializeHead := p.stateBlockHash == (common.Hash{})
-	if initializeHead {
-		// Header and block head markers can lead execution. Derive the startup head
-		// from execution progress so it matches the state being read.
-		p.stateBlockHash, err = rawdb.ReadCanonicalHash(coreTx, lastSeenProgress)
-		if err != nil {
-			return err
-		}
-	}
 	header, err := rawdb.ReadHeaderByHash(coreTx, p.stateBlockHash)
 	if err != nil {
 		return err
-	}
-	if initializeHead && header != nil {
-		p.headIsBogota = p.chainConfig.IsBogota(header.Time)
 	}
 	if p.lastSeenBlock.Load() == 0 {
 		lastSeenBlock, err := LastSeenBlock(tx)

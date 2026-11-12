@@ -494,8 +494,7 @@ func TestFromDBSkipsInvalidTransactions(t *testing.T) {
 	require.NotContains(t, pool.byHash, string(invalidHash[:]))
 }
 
-// A restart reaches fromDB before any OnNewBlock sets the block gas limit.
-func TestFromDBRestoresPersistedTxnsBeforeAnyBlock(t *testing.T) {
+func TestFromDBRestoresPersistedTxnsAfterInitialReset(t *testing.T) {
 	ctx, pool, poolDB, coreDB := newTestPool(t)
 	sender := common.Address{1}
 	account := accounts.Account{Balance: *uint256.NewInt(common.Ether), CodeHash: accounts.EmptyCodeHash}
@@ -509,6 +508,10 @@ func TestFromDBRestoresPersistedTxnsBeforeAnyBlock(t *testing.T) {
 		return tx.Put(kv.PoolTransaction, hash[:], append(sender[:], encoded.Bytes()...))
 	}))
 
+	reset := newBlockChangeForAccounts(common.Hash{1}, 0, sender)
+	reset.StateVersionId = 1
+	reset.StateChangesIncomplete = true
+	require.NoError(t, pool.OnNewBlock(ctx, reset, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 	require.NoError(t, pool.fromDB(ctx))
 
 	require.Contains(t, pool.byHash, string(hash[:]))

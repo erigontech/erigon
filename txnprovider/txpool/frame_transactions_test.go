@@ -1950,7 +1950,7 @@ func TestFramePoolRestoredTransactionsReleaseLock(t *testing.T) {
 	}
 }
 
-func TestFramePoolStartupUsesExecutedHead(t *testing.T) {
+func TestFramePoolStartupUsesAnnouncedHead(t *testing.T) {
 	for _, mode := range []string{"new local transaction", "restored local transaction"} {
 		t.Run(mode, func(t *testing.T) {
 			chainConfig := chain.AllProtocolChanges.Copy()
@@ -1975,6 +1975,11 @@ func TestFramePoolStartupUsesExecutedHead(t *testing.T) {
 				}
 				return stages.SaveStageProgress(tx, stages.Execution, executed.Number.Uint64())
 			}))
+			reset := newBlockChangeForAccounts(executedHead, 0, sender)
+			reset.StateChangesIncomplete = true
+			reset.ChangeBatch[0].BlockHeight = executed.Number.Uint64()
+			reset.ChangeBatch[0].BlockTime = executed.Time
+			require.NoError(t, pool.OnNewBlock(ctx, reset, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 			backend := &frameValidationBackend{payer: sender, balance: 1_000_000, valid: true}
 			pool.ethBackend = &frameValidationFuncBackend{validate: func(ctx context.Context, req *remoteproto.FrameValidationRequest) (*remoteproto.FrameValidationReply, error) {
 				if req.ExpectedBlockHash == nil || gointerfaces.ConvertH256ToHash(req.ExpectedBlockHash) != executedHead {
