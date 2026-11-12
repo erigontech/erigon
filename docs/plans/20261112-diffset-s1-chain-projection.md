@@ -94,7 +94,7 @@ NOTES:
 - [x] Review: discarded child entries are marked history/value flushed.
 - [x] Review: storage same-txNum updates preserve the first prev.
 - [x] Red first: a `GetAsOf` test on a merged batch, at a ts inside the receiver's range for a key both batches wrote. It fails on the base (whole-chain replace) and passes here.
-- [x] Goldens: `forward`, `discard`, `merge`, and `reflush` unchanged. `unwind` changes only by removing old history rows at txNum 5..6.
+- [x] Goldens: `forward`, `discard`, and `merge` stay byte-identical; `reflush` adds the storage same-txNum row; `unwind` keeps two `AccountVals`, two `StorageVals`, and one `CodeVals` row from full raw replay.
 - [x] Direction:
   - Writers of the chains: `putLatestLocked` under the shard lock (exec loop, apply loop, commitment calculator), `Unwind` and `Merge` under every lock.
   - Writers of the history collectors after T3: `Flush`, plus direct commitment dump projection, under the existing domain locks.
@@ -112,27 +112,29 @@ NOTES:
 ### T4: values from the chains at flush
 
 - [x] `putHistory` drops `addValue`. `PutCommitmentBranchDiff` keeps only `putLatest` and the diff update.
-- [x] `Flush`: for every chain, the last entry per step goes to `domainWriters[d].addValue(key, data, step)`, before `flushWriters`.
-- [x] Goldens: `forward`, `discard`, `merge`, and `reflush` stay byte-identical. `unwind` only deletes the eight old-only value rows in `AccountVals`, `StorageVals`, and `CodeVals` at steps 5 and 6.
+- [x] `Flush`: for every chain, the last unflushed entry per step run goes to `domainWriters[d].addValue(key, data, step)`, before `flushWriters`.
+- [x] Goldens: `forward`, `discard`, and `merge` stay byte-identical; `reflush` includes the storage same-txNum update; `unwind` keeps the five value-table rows restored by full raw replay.
 
 NOTES:
 
 - `dumpCommitmentStep` is called from the direct branch of `flushDomainsAndRebuild` at `db/state/squeeze.go:610`; it closes the domains and rolls back the write transaction immediately after, so no later `Flush` can collect its projected values twice. `dumpStepRangeToPath` also projects for `rebuildCommitmentShard` at `db/state/squeeze.go:1223` and commitment conversion at `db/state/commitment_convert.go:510`; both use a batch that is closed or discarded without a later `Flush`.
 - LSP found `DomainBufferedWriter.addValue` callers outside `TemporalMemBatch` in `db/state/domain.go:588`, `db/state/domain.go:610`, and `db/state/domain_test.go:1001`; these retain their behavior.
 - `unsafe.Sizeof(dataWithTxNum{})` is 64 bytes after splitting `flushed` into `histFlushed` and `valFlushed`.
-- The eight deleted rows are `AccountVals\t720000000000000000000000000000000000008d\tfffffffffffffffa7205`, `AccountVals\t730000000000000000000000000000000000008c\tfffffffffffffff97306`, `AccountVals\t730000000000000000000000000000000000008c\tfffffffffffffffa`, `StorageVals\t720000000000000000000000000000000000008d12000000000000000000000000000000000000000000000000000000000000ed\tfffffffffffffffa8205`, `StorageVals\t730000000000000000000000000000000000008c13000000000000000000000000000000000000000000000000000000000000ec\tfffffffffffffff98306`, `StorageVals\t730000000000000000000000000000000000008c13000000000000000000000000000000000000000000000000000000000000ec\tfffffffffffffffa`, `CodeVals\t730000000000000000000000000000000000008cfffffffffffffff9\t9306`, and `CodeVals\t730000000000000000000000000000000000008cfffffffffffffffa\t`.
 - The T3 review fixes project trimmed overlap rows, preserve discarded-child rows as absent, and cover the storage same-txNum first-prev rule.
-- `shouldUnwindStoredValue` removes the eight old-only value rows in `unwind.txt` that value projection alone would retain. Replay skips those key/step entries because they exist only in the unflushed in-memory chain and were never written to MDBX.
+- Full raw replay restores these five value-table rows for unwound txNums: `AccountVals\t720000000000000000000000000000000000008d\tfffffffffffffffa`, `AccountVals\t730000000000000000000000000000000000008c\tfffffffffffffffa`, `StorageVals\t720000000000000000000000000000000000008d12000000000000000000000000000000000000000000000000000000000000ed\tfffffffffffffffa`, `StorageVals\t730000000000000000000000000000000000008c13000000000000000000000000000000000000000000000000000000000000ec\tfffffffffffffffa`, and `CodeVals\t730000000000000000000000000000000000008cfffffffffffffffa\t`. The final old-only counts are 2, 2, and 1 respectively; history counts remain zero.
+- The unwind filter was removed because a raw `(key, step)` entry can come from an earlier committed batch and must be replayed even when the current in-memory chain has no flushed entry.
+- Value projection selects the last unflushed entry in each step run so a discarded child's flushed marker cannot hide the receiver's value.
 
 ### T5: Merge keeps no domain writers
 
-- [x] After T4 the other batch's domain writers hold nothing. `Merge` checks and closes them instead of moving them; `pastDomainWriters` is retained only on the receiver for existing writer state. The II writers (`pastIIWriters`, standalone indices via `IndexAdd`) stay.
-- [x] Goldens unchanged.
+- [x] After T4 the other batch's domain writers hold nothing. `Merge` closes them instead of moving them, and `pastDomainWriters` is deleted. The II writers (`pastIIWriters`, standalone indices via `IndexAdd`) stay.
+- [ ] Goldens unchanged; item 4 changes `forward.txt` and `discard.txt`.
 
 NOTES:
 
-- LSP found the only production write into a `TemporalMemBatch` domain writer outside chain projection at `db/state/commitment_convert.go:489` through the writer initialized at `:424-425`; direct test writers are used at `db/state/domain_test.go:328` and `:331`, while `db/state/squeeze.go:1257-1265` and `db/state/domain.go:913-915` only project and collate. The field references were checked with gopls.
+- LSP found the only production write into a `TemporalMemBatch` domain writer outside chain projection at `db/state/commitment_convert.go:489` through the writer initialized at `:424-425`; direct test writers are used at `db/state/domain_test.go:317`, `:328`, `:331`, and `:376`, plus `db/state/temporal_mem_batch_test.go:90`, while `db/state/squeeze.go:1257-1265` and `db/state/domain.go:913-915` only project and collate. The field references were checked with gopls.
 - The parent `b16730c6c44` value rows for the overlap test are one `AccountVals` row per case: key `910000000000000000000000000000000000006e`, value `ffffffffffffffff09`.
+- `pastDomainWriters` was deleted after T4 because no code appended to it; the receiver keeps only the II writer history.
 
 ## Checkpoints (supervisor)
 

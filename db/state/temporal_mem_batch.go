@@ -68,8 +68,7 @@ type TemporalMemBatch struct {
 	domainWriters [kv.DomainLen]*DomainBufferedWriter
 	iiWriters     []*InvertedIndexBufferedWriter
 
-	pastDomainWriters [kv.DomainLen][]*DomainBufferedWriter
-	pastIIWriters     []*InvertedIndexBufferedWriter
+	pastIIWriters []*InvertedIndexBufferedWriter
 
 	currentChangesAccumulator *changeset.StateChangeSet
 	// pastChangesAccumulator is read by the parallel commitment calculator
@@ -580,35 +579,6 @@ func (sd *TemporalMemBatch) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockN
 	return changeset.ReadDiffSet(tx, blockNumber, blockHash)
 }
 
-func (sd *TemporalMemBatch) shouldUnwindStoredValue(domain kv.Domain, key string, step kv.Step) bool {
-	var entries []dataWithTxNum
-	if domain == kv.StorageDomain {
-		var ok bool
-		entries, ok = sd.storage.Get(key)
-		if !ok {
-			return true
-		}
-	} else {
-		sh := sd.shard(domain, key)
-		var ok bool
-		entries, ok = sh.m[key]
-		if !ok {
-			return true
-		}
-	}
-	foundStep := false
-	for _, entry := range entries {
-		if kv.Step(entry.txNum/sd.stepSize) != step {
-			continue
-		}
-		foundStep = true
-		if entry.valFlushed {
-			return true
-		}
-	}
-	return !foundStep
-}
-
 // Unwind drops [unwindToTxNum, ∞)
 func (sd *TemporalMemBatch) Unwind(unwindToTxNum uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) {
 	sd.lockAllDomains()
@@ -631,10 +601,7 @@ func (sd *TemporalMemBatch) Unwind(unwindToTxNum uint64, changeset *[kv.DomainLe
 			for _, change := range changes {
 				key := change.Key[:len(change.Key)-8]
 				unwindChangeset[domain][key] = change
-				step := kv.Step(^binary.BigEndian.Uint64([]byte(change.Key[len(change.Key)-8:])))
-				if sd.shouldUnwindStoredValue(kv.Domain(domain), key, step) {
-					unwindChangesetRaw[domain] = append(unwindChangesetRaw[domain], change)
-				}
+				unwindChangesetRaw[domain] = append(unwindChangesetRaw[domain], change)
 			}
 		}
 	}
@@ -704,11 +671,6 @@ func (sd *TemporalMemBatch) Close() {
 			d.Close()
 		}
 	}
-	for _, ds := range sd.pastDomainWriters {
-		for _, d := range ds {
-			d.Close()
-		}
-	}
 	for _, iiWriter := range sd.iiWriters {
 		iiWriter.close()
 	}
@@ -737,21 +699,9 @@ func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch) error {
 			return fmt.Errorf("can't merge domain %s with buffered writes", kv.Domain(domain))
 		}
 	}
-	for domain, writers := range other.pastDomainWriters {
-		for _, writer := range writers {
-			if writer.hasBufferedData() {
-				return fmt.Errorf("can't merge domain %s with buffered writes", kv.Domain(domain))
-			}
-		}
-	}
 	var otherDiscarded [kv.DomainLen]bool
 	for domain, writer := range other.domainWriters {
 		otherDiscarded[domain] = writer != nil && writer.discard
-	}
-	for domain, writers := range other.pastDomainWriters {
-		for _, writer := range writers {
-			otherDiscarded[domain] = otherDiscarded[domain] || writer != nil && writer.discard
-		}
 	}
 
 	for d := range other.latest {
@@ -801,13 +751,6 @@ func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch) error {
 			writer.Close()
 		}
 		other.domainWriters[domain] = nil
-	}
-
-	for domain, writers := range other.pastDomainWriters {
-		for _, writer := range writers {
-			writer.Close()
-		}
-		other.pastDomainWriters[domain] = nil
 	}
 
 	sd.pastIIWriters = append(sd.pastIIWriters, other.iiWriters...)
@@ -904,16 +847,24 @@ func (sd *TemporalMemBatch) projectTrimmed(domain kv.Domain, key string, entries
 				return err
 			}
 		}
-		if entry.valFlushed {
-			continue
+	}
+	for i := 0; i < len(entries); {
+		step := kv.Step(entries[i].txNum / sd.stepSize)
+		end := i + 1
+		for end < len(entries) && kv.Step(entries[end].txNum/sd.stepSize) == step {
+			end++
 		}
-		step := kv.Step(entry.txNum / sd.stepSize)
-		if i+1 < len(entries) && kv.Step(entries[i+1].txNum/sd.stepSize) == step {
-			continue
+		for j := end; j > i; j-- {
+			entry := &entries[j-1]
+			if entry.valFlushed {
+				continue
+			}
+			if err := writer.addValue(common.ToBytesZeroCopy(key), entry.data, step); err != nil {
+				return err
+			}
+			break
 		}
-		if err := writer.addValue(common.ToBytesZeroCopy(key), entry.data, step); err != nil {
-			return err
-		}
+		i = end
 	}
 	return nil
 }
@@ -946,6 +897,7 @@ func (sd *TemporalMemBatch) Flush(ctx context.Context, tx kv.RwTx, opts ...kv.Fl
 	sd.rlockAllDomains()
 	defer sd.runlockAllDomains()
 
+	// unwindChangesetRaw preserves every (key, step) entry — Flush needs the full list to delete every orphan step entry from MDBX.
 	if sd.unwindChangesetRaw != nil {
 		for domain := range sd.unwindChangesetRaw {
 			slices.SortFunc(sd.unwindChangesetRaw[domain], func(a, b kv.DomainEntryDiff) int {
@@ -1048,18 +1000,23 @@ func (sd *TemporalMemBatch) projectValues() error {
 		if writer == nil {
 			return nil
 		}
-		for i := range entries {
-			entry := &entries[i]
-			step := kv.Step(entry.txNum / sd.stepSize)
-			if i+1 < len(entries) && kv.Step(entries[i+1].txNum/sd.stepSize) == step {
-				continue
+		for i := 0; i < len(entries); {
+			step := kv.Step(entries[i].txNum / sd.stepSize)
+			end := i + 1
+			for end < len(entries) && kv.Step(entries[end].txNum/sd.stepSize) == step {
+				end++
 			}
-			if entry.valFlushed {
-				continue
+			for j := end; j > i; j-- {
+				entry := &entries[j-1]
+				if entry.valFlushed {
+					continue
+				}
+				if err := writer.addValue(common.ToBytesZeroCopy(key), entry.data, step); err != nil {
+					return err
+				}
+				break
 			}
-			if err := writer.addValue(common.ToBytesZeroCopy(key), entry.data, step); err != nil {
-				return err
-			}
+			i = end
 		}
 		return nil
 	}
@@ -1117,14 +1074,6 @@ func (sd *TemporalMemBatch) flushDiffSet(_ context.Context, tx kv.RwTx) error {
 
 func (sd *TemporalMemBatch) flushWriters(ctx context.Context, tx kv.RwTx) error {
 	aggTx := AggTx(tx)
-	for _, ws := range sd.pastDomainWriters {
-		for _, w := range slices.Backward(ws) {
-			if err := w.Flush(ctx, tx); err != nil {
-				return err
-			}
-			w.Close()
-		}
-	}
 	for di, w := range sd.domainWriters {
 		if w == nil {
 			continue
@@ -1156,12 +1105,6 @@ func (sd *TemporalMemBatch) flushWriters(ctx context.Context, tx kv.RwTx) error 
 func (sd *TemporalMemBatch) DiscardWrites(domain kv.Domain) {
 	sd.domainWriters[domain].discard = true
 	sd.domainWriters[domain].h.discard = true
-	if ws := sd.pastDomainWriters[domain]; len(ws) > 0 {
-		for _, w := range ws {
-			w.discard = true
-			w.h.discard = true
-		}
-	}
 }
 
 func AggTx(tx kv.Tx) *AggregatorRoTx {

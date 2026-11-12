@@ -2202,14 +2202,18 @@ func TestT3MergePreservesParentHistory(t *testing.T) {
 func TestT3MergeKeepsChildDiscarded(t *testing.T) {
 	tx, sd := t3ReviewBatch(t)
 	key := flushGoldenAddress(0x91)
+	storageKey := flushGoldenStorageKey(key, 1)
 	mem := sd.GetMemBatch()
 	require.NoError(t, mem.DomainPut(kv.AccountsDomain, string(key), []byte{1}, 1, nil))
+	require.NoError(t, mem.DomainPut(kv.StorageDomain, string(storageKey), []byte{1}, 1, nil))
 	child, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
 	require.NoError(t, err)
 	defer child.Close()
 	child.SetParent(sd)
 	flushGoldenPut(t, child, tx, kv.AccountsDomain, key, []byte{2}, 2)
+	flushGoldenPut(t, child, tx, kv.StorageDomain, storageKey, []byte{2}, 2)
 	child.DiscardWrites(kv.AccountsDomain)
+	child.DiscardWrites(kv.StorageDomain)
 	require.NoError(t, mem.Merge(child.GetMemBatch()))
 	require.NoError(t, mem.Flush(t.Context(), tx))
 	for _, table := range []string{kv.TblAccountHistoryVals, kv.TblAccountHistoryKeys} {
@@ -2218,5 +2222,107 @@ func TestT3MergeKeepsChildDiscarded(t *testing.T) {
 		if n != 1 {
 			t.Errorf("%s rows after merging discarded child: want 1, got %d", table, n)
 		}
+	}
+	storageHistoryRows, err := tx.Count(kv.TblStorageHistoryVals)
+	require.NoError(t, err)
+	if storageHistoryRows != 1 {
+		t.Errorf("storage history rows after merging discarded child: want 1, got %d", storageHistoryRows)
+	}
+	storageValueRows, err := tx.Count(kv.TblStorageVals)
+	require.NoError(t, err)
+	if storageValueRows != 1 {
+		t.Errorf("storage value rows after merging discarded child: want 1, got %d", storageValueRows)
+	}
+}
+
+func TestT4UnwindEarlierCommittedBatch(t *testing.T) {
+	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain, kv.CommitmentDomain} {
+		t.Run(domain.String(), func(t *testing.T) {
+			db := newTestDb(t, 4)
+			tx, err := db.BeginTemporalRw(t.Context())
+			require.NoError(t, err)
+			defer func() { tx.Rollback() }()
+			domains, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
+			require.NoError(t, err)
+			key := flushGoldenAddress(0x91)
+			if domain == kv.StorageDomain {
+				key = flushGoldenStorageKey(key, 1)
+			} else if domain == kv.CommitmentDomain {
+				key = []byte{0xa0, 0x01}
+			}
+			want := []byte{0x10}
+			flushGoldenPut(t, domains, tx, domain, key, want, 1)
+			older := executeGoldenBlock(t, domains, tx, "t4", 2, func() {
+				flushGoldenPut(t, domains, tx, domain, key, []byte{0x20}, 2)
+			})
+			require.NoError(t, domains.Flush(t.Context(), tx))
+			require.NoError(t, tx.Commit())
+			domains.Close()
+
+			tx, err = db.BeginTemporalRw(t.Context())
+			require.NoError(t, err)
+			defer tx.Rollback()
+			domains, err = execctx.NewSharedDomains(t.Context(), tx, log.New())
+			require.NoError(t, err)
+			defer domains.Close()
+			newer := executeGoldenBlock(t, domains, tx, "t4", 3, func() {
+				flushGoldenPut(t, domains, tx, domain, key, []byte{0x30}, 3)
+			})
+			var diffs [kv.DomainLen][]kv.DomainEntryDiff
+			for d := range diffs {
+				diffs[d] = changeset.MergeDiffSets(newer.Diffs[d].GetDiffSet(), older.Diffs[d].GetDiffSet())
+			}
+			domains.Unwind(2, &diffs)
+			require.NoError(t, domains.Flush(t.Context(), tx))
+			require.NoError(t, tx.Commit())
+			roTx, err := db.BeginTemporalRo(t.Context())
+			require.NoError(t, err)
+			defer roTx.Rollback()
+			got, _, err := roTx.GetLatest(domain, key, kv.GetLatestOptions{})
+			require.NoError(t, err)
+			if !bytes.Equal(want, got) {
+				t.Fatalf("committed GetLatest after unwind: want %x, got %x", want, got)
+			}
+		})
+	}
+}
+
+func TestT4UnwindSameTxAfterFlush(t *testing.T) {
+	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain, kv.CommitmentDomain} {
+		t.Run(domain.String(), func(t *testing.T) {
+			db := newTestDb(t, 1)
+			tx, err := db.BeginTemporalRw(t.Context())
+			require.NoError(t, err)
+			defer tx.Rollback()
+			domains, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
+			require.NoError(t, err)
+			defer domains.Close()
+			key := flushGoldenAddress(0x91)
+			if domain == kv.StorageDomain {
+				key = flushGoldenStorageKey(key, 1)
+			} else if domain == kv.CommitmentDomain {
+				key = []byte{0xa0, 0x01}
+			}
+			want := []byte{0x10}
+			flushGoldenPut(t, domains, tx, domain, key, want, 1)
+			change := executeGoldenBlock(t, domains, tx, "t4", 2, func() {
+				flushGoldenPut(t, domains, tx, domain, key, []byte{0x20}, 2)
+			})
+			require.NoError(t, domains.Flush(t.Context(), tx))
+			flushGoldenPut(t, domains, tx, domain, key, []byte{0x30}, 2)
+			var diffs [kv.DomainLen][]kv.DomainEntryDiff
+			diffs[domain] = change.Diffs[domain].GetDiffSet()
+			domains.Unwind(2, &diffs)
+			require.NoError(t, domains.Flush(t.Context(), tx))
+			require.NoError(t, tx.Commit())
+			roTx, err := db.BeginTemporalRo(t.Context())
+			require.NoError(t, err)
+			defer roTx.Rollback()
+			got, _, err := roTx.GetLatest(domain, key, kv.GetLatestOptions{})
+			require.NoError(t, err)
+			if !bytes.Equal(want, got) {
+				t.Fatalf("committed GetLatest after same-tx unwind: want %x, got %x", want, got)
+			}
+		})
 	}
 }
