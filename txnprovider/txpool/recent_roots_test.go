@@ -247,13 +247,18 @@ func TestFramePoolRecentRootActivationUnwindRetry(t *testing.T) {
 	require.False(t, pool.headIsBogota)
 }
 
-func TestFramePoolRecentRootActivationUnwindAcrossMissingHistory(t *testing.T) {
-	for _, superseded := range []bool{false, true} {
-		name := "delivery gap"
-		if superseded {
-			name = "superseded unwind"
-		}
-		t.Run(name, func(t *testing.T) {
+func TestFramePoolRecentRootRevalidatedAcrossMissingHistory(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		superseded bool
+		valid      bool
+	}{
+		{"delivery gap, root still valid", false, true},
+		{"delivery gap, root gone", false, false},
+		{"superseded unwind, root still valid", true, true},
+		{"superseded unwind, root gone", true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			now := uint64(time.Now().Unix())
 			config := chain.AllProtocolChanges.Copy()
 			config.BogotaTime = common.NewUint64(now - 1)
@@ -270,11 +275,11 @@ func TestFramePoolRecentRootActivationUnwindAcrossMissingHistory(t *testing.T) {
 			reasons, err := pool.AddLocalTxns(ctx, txns)
 			require.NoError(t, err)
 			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
-			backend.calls = nil
+			backend.valid, backend.calls = tc.valid, nil
 			require.NoError(t, coreDB.Update(ctx, func(tx kv.RwTx) error {
 				return tx.Put(kv.Sequence, kv.PlainStateVersion, binary.BigEndian.AppendUint64(nil, 1))
 			}))
-			if superseded {
+			if tc.superseded {
 				unwind := newBlockChangeForAccounts(common.Hash{2}, 0)
 				unwind.StateChangesIncomplete = true
 				unwind.ChangeBatch[0].Direction = remoteproto.Direction_UNWIND
@@ -284,13 +289,17 @@ func TestFramePoolRecentRootActivationUnwindAcrossMissingHistory(t *testing.T) {
 			}
 			replacement := newBlockChangeForAccounts(common.Hash{3}, 0, sender)
 			replacement.StateVersionId = 1
-			replacement.StateChangesIncomplete = !superseded
+			replacement.StateChangesIncomplete = !tc.superseded
 			replacement.ChangeBatch[0].BlockTime = now + 12
 			replacement.ChangeBatch[0].SlotNumber = common.NewUint64(22)
 			require.NoError(t, pool.OnNewBlock(ctx, replacement, TxnSlots{}, TxnSlots{}, TxnSlots{}))
-			require.NotContains(t, pool.byHash, string(frame.IDHash[:]), "current validity cannot rule out a missed activation unwind")
-			require.Empty(t, backend.calls)
-			require.Empty(t, pool.frameReservations)
+			require.Equal(t, []common.Hash{frame.IDHash}, backend.calls, "missing history must force revalidation at the replacement head")
+			if tc.valid {
+				require.Contains(t, pool.byHash, string(frame.IDHash[:]))
+			} else {
+				require.NotContains(t, pool.byHash, string(frame.IDHash[:]))
+				require.Empty(t, pool.frameReservations)
+			}
 		})
 	}
 }
@@ -401,6 +410,7 @@ func TestFramePoolStartupDoesNotUnwindActivation(t *testing.T) {
 	head := change.ChangeBatch[0]
 	head.BlockHeight, head.BlockTime, head.SlotNumber = executed.Number.Uint64(), executed.Time, executed.SlotNumber
 	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	pool.started.Store(false)
 	require.NoError(t, pool.start(ctx))
 	require.Contains(t, pool.byHash, string(frame.IDHash[:]))
 
@@ -451,6 +461,7 @@ func TestFramePoolReloadRecentRootAge(t *testing.T) {
 			reset.ChangeBatch[0].BlockTime = header.Time
 			reset.ChangeBatch[0].SlotNumber = header.SlotNumber
 			require.NoError(t, pool.OnNewBlock(ctx, reset, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+			pool.started.Store(false)
 			require.NoError(t, pool.start(ctx))
 			mt := pool.byHash[string(slot.IDHash[:])]
 			if tc.keep {
@@ -520,6 +531,7 @@ func TestFramePoolRestoredRecentRootEviction(t *testing.T) {
 				reset.ChangeBatch[0].BlockTime = header.Time
 				reset.ChangeBatch[0].SlotNumber = header.SlotNumber
 				require.NoError(t, pool.OnNewBlock(ctx, reset, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+				pool.started.Store(false)
 				require.NoError(t, pool.start(ctx))
 				mt := pool.byHash[string(slot.IDHash[:])]
 				require.NotNil(t, mt)

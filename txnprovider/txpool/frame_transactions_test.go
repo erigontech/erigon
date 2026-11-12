@@ -1914,6 +1914,7 @@ func TestFramePoolReloadValidationBudgets(t *testing.T) {
 				return nil, ctx.Err()
 			}
 		}}
+		pool.started.Store(false)
 		require.NoError(t, pool.start(t.Context()))
 		for _, frame := range frames {
 			mt := pool.byHash[string(frame.IDHash[:])]
@@ -1942,6 +1943,7 @@ func TestFramePoolRestoredTransactionsReleaseLock(t *testing.T) {
 				require.NoError(t, pool.poolDB.Update(ctx, func(tx kv.RwTx) error {
 					return tx.Put(kv.PoolTransaction, frame.IDHash[:], append(sender[:], frame.Rlp...))
 				}))
+				pool.started.Store(false)
 				require.NoError(t, pool.start(ctx))
 			}
 			require.Contains(t, pool.byHash, string(frame.IDHash[:]))
@@ -1996,6 +1998,7 @@ func TestFramePoolStartupUsesAnnouncedHead(t *testing.T) {
 					return tx.Put(kv.RecentLocalTransaction, make([]byte, 8), frame.IDHash[:])
 				}))
 			}
+			pool.started.Store(false)
 			require.NoError(t, pool.start(ctx))
 			require.Equal(t, executedHead, pool.stateBlockHash)
 			if mode == "new local transaction" {
@@ -2049,6 +2052,7 @@ func TestFramePoolReloadDeletesRejectedRows(t *testing.T) {
 			backend.valid, backend.err = tc.valid, tc.backendErr
 			backend.calls = nil
 
+			pool.started.Store(false)
 			require.NoError(t, pool.start(ctx))
 			if tc.alreadyPooled {
 				require.Empty(t, backend.calls)
@@ -2105,6 +2109,7 @@ func TestFramePoolReloadDeletesRejectedNonceSuccessor(t *testing.T) {
 		return nil
 	}))
 
+	pool.started.Store(false)
 	require.NoError(t, pool.start(ctx))
 	require.Contains(t, pool.byHash, string(frame.IDHash[:]))
 	require.NotContains(t, pool.byHash, string(ordinary.IDHash[:]))
@@ -2129,6 +2134,7 @@ func TestFramePoolReloadErrorRetainsTransaction(t *testing.T) {
 		return tx.Put(kv.PoolTransaction, frame.IDHash[:], append(sender[:], frame.Rlp...))
 	}))
 	backend.err = errors.New("validation backend unavailable")
+	pool.started.Store(false)
 	require.NoError(t, pool.start(ctx))
 	require.Contains(t, pool.byHash, string(frame.IDHash[:]))
 	require.Zero(t, pool.byHash[string(frame.IDHash[:])].currentSubPool)

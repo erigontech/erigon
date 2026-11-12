@@ -19,6 +19,7 @@ package txpool
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"sync"
@@ -30,6 +31,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -58,18 +60,15 @@ type startupReadDB struct {
 	kv.RwDB
 	reads      int
 	readers    int
-	pool       *TxPool
-	beforeRead func()
+	beforeRead func() error
 }
 
 func (db *startupReadDB) View(ctx context.Context, f func(kv.Tx) error) error {
 	db.reads++
-	if !db.pool.lock.TryLock() {
-		return errors.New("opening a database reader must not hold the pool lock")
-	}
-	db.pool.lock.Unlock()
 	if db.beforeRead != nil {
-		db.beforeRead()
+		if err := db.beforeRead(); err != nil {
+			return err
+		}
 	}
 	return db.RwDB.View(ctx, func(tx kv.Tx) error {
 		db.readers++
@@ -82,12 +81,20 @@ func TestPoolStartupWaitsWithoutDatabaseReader(t *testing.T) {
 	for _, staleAtStart := range []bool{true, false} {
 		t.Run(fmt.Sprintf("staleAtStart=%t", staleAtStart), func(t *testing.T) {
 			_, pool, poolDB, _ := newTestPool(t)
-			db := &startupReadDB{RwDB: poolDB, pool: pool}
+			pool.started.Store(false)
+			db := &startupReadDB{RwDB: poolDB}
 			pool.poolDB = db
+			markStale := sync.OnceFunc(pool.MarkStateStale)
 			if staleAtStart {
-				pool.MarkStateStale()
-			} else {
-				db.beforeRead = sync.OnceFunc(pool.MarkStateStale)
+				markStale()
+			}
+			db.beforeRead = func() error {
+				if !pool.lock.TryLock() {
+					return errors.New("opening a database reader must not hold the pool lock")
+				}
+				pool.lock.Unlock()
+				markStale()
+				return nil
 			}
 			synctest.Test(t, func(t *testing.T) {
 				ctx, cancel := context.WithCancel(t.Context())
@@ -109,6 +116,60 @@ func TestPoolStartupWaitsWithoutDatabaseReader(t *testing.T) {
 			})
 		})
 	}
+}
+
+func TestLocalAdmissionWaitsForStartupRestore(t *testing.T) {
+	ctx, pool, poolDB, coreDB := newTestPool(t)
+	pool.started.Store(false)
+	sender := common.Address{1}
+	account := accounts.Account{Balance: *uint256.NewInt(common.Ether), CodeHash: accounts.EmptyCodeHash}
+	writeTestSenderState(t, ctx, coreDB, pool.logger, sender, accounts.SerialiseV3(&account), 1)
+	original := encodeRemoteTxn(t, newTestTxnSlot(0, 0, 100, 200, 21_000))
+	replacement := encodeRemoteTxn(t, newTestTxnSlot(0, 0, 101, 202, 21_000))
+	require.NoError(t, poolDB.Update(ctx, func(tx kv.RwTx) error {
+		return tx.Put(kv.PoolTransaction, original.IDHash[:], append(sender[:], original.Rlp...))
+	}))
+	pool.MarkStateStale()
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		reading, resume := make(chan struct{}), make(chan struct{})
+		unblock := sync.OnceFunc(func() { close(resume) })
+		defer unblock()
+		pool.poolDB = &startupReadDB{RwDB: poolDB, beforeRead: func() error {
+			close(reading)
+			<-resume
+			return nil
+		}}
+		started := make(chan error, 1)
+		go func() { started <- pool.start(ctx) }()
+		var txns TxnSlots
+		txns.Append(replacement, sender[:], true)
+		admitted := make(chan []txpoolcfg.DiscardReason, 1)
+		addErr := make(chan error, 1)
+		go func() {
+			reasons, err := pool.AddLocalTxns(ctx, txns)
+			admitted <- reasons
+			addErr <- err
+		}()
+		synctest.Wait()
+		reset := newBlockChangeForAccounts(common.Hash{1}, 0, sender)
+		require.NoError(t, coreDB.View(ctx, func(tx kv.Tx) error {
+			var err error
+			reset.StateVersionId, err = rawdb.GetStateVersion(tx)
+			return err
+		}))
+		require.NoError(t, pool.OnNewBlock(ctx, reset, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+		<-reading
+		synctest.Wait()
+		require.Empty(t, admitted, "a usable state view must not release admission before persisted transactions are restored")
+		unblock()
+		require.NoError(t, <-started)
+		require.NoError(t, <-addErr)
+		require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NotReplaced}, <-admitted)
+		require.Contains(t, pool.byHash, string(original.IDHash[:]))
+		require.NotContains(t, pool.byHash, string(replacement.IDHash[:]))
+	})
 }
 
 func TestFramePoolReconcilesMinedKeyedNonces(t *testing.T) {
@@ -158,10 +219,18 @@ func TestFramePoolReconcilesMinedKeyedNonces(t *testing.T) {
 	}
 }
 
-func TestFetchReconcilesRetainedUnwindFrameAfterGap(t *testing.T) {
+func TestFetchReconcilesRetainedFrameAfterGap(t *testing.T) {
 	for _, withBlobs := range []bool{false, true} {
-		for _, consumed := range []bool{false, true} {
-			t.Run(fmt.Sprintf("blobs=%t/consumed=%t", withBlobs, consumed), func(t *testing.T) {
+		for _, tc := range []struct {
+			direction remoteproto.Direction
+			consumed  bool
+		}{
+			{remoteproto.Direction_UNWIND, false},
+			{remoteproto.Direction_UNWIND, true},
+			{remoteproto.Direction_FORWARD, false},
+			{remoteproto.Direction_FORWARD, true},
+		} {
+			t.Run(fmt.Sprintf("%s/blobs=%t/consumed=%t", tc.direction, withBlobs, tc.consumed), func(t *testing.T) {
 				ctx, pool, sender := keyedFramePoolEnv(t)
 				pool.chainID.SetUint64(1)
 				backend := pool.ethBackend.(*frameValidationBackend)
@@ -202,7 +271,7 @@ func TestFetchReconcilesRetainedUnwindFrameAfterGap(t *testing.T) {
 						return initErr
 					}
 					defer domains.Close()
-					if consumed {
+					if tc.consumed {
 						slot := types.FrameNonceSlot(sender, uint256.Int{5})
 						if writeErr := domains.DomainPut(kv.StorageDomain, tx, append(types.FrameNonceManager[:], slot[:]...), []byte{1}, 1, nil); writeErr != nil {
 							return writeErr
@@ -219,7 +288,7 @@ func TestFetchReconcilesRetainedUnwindFrameAfterGap(t *testing.T) {
 				require.NoError(t, frame.Txn.MarshalBinary(&encoded))
 				stale := newBlockChangeForAccounts(common.Hash{2}, 0)
 				stale.StateChangesIncomplete = true
-				stale.ChangeBatch[0].Direction = remoteproto.Direction_UNWIND
+				stale.ChangeBatch[0].Direction = tc.direction
 				stale.ChangeBatch[0].Txs = [][]byte{encoded.Bytes()}
 				require.ErrorIs(t, fetch.handleStateChangesRequest(ctx, stale), errStateViewSuperseded)
 				require.Len(t, fetch.pendingTxnChanges, 1)
@@ -235,14 +304,17 @@ func TestFetchReconcilesRetainedUnwindFrameAfterGap(t *testing.T) {
 				backend.err = context.DeadlineExceeded
 				require.NoError(t, fetch.handleStateChangesRequest(ctx, reset))
 				require.Empty(t, fetch.pendingTxnChanges)
-				if !consumed {
+				if !tc.consumed {
 					restored := pool.byHash[string(frame.IDHash[:])]
 					require.NotNil(t, restored, "a usable nonce must survive a backend failure")
 					require.Zero(t, restored.currentSubPool)
+					require.Equal(t, frame.BlobBundles, restored.TxnSlot.BlobBundles)
 					return
 				}
 				require.NotContains(t, pool.byHash, string(frame.IDHash[:]), "a consumed nonce must not be restored while validation is unavailable")
 				require.Empty(t, backend.calls, "committed nonce state is enough to reject restoration")
+				_, knownSender := pool.senders.getID(sender)
+				require.False(t, knownSender, "a rejected restoration must not leave an unused sender")
 
 				backend.err = nil
 				var next TxnSlots
@@ -660,4 +732,76 @@ func TestPoolBlockTimeTracksAdvancingHeads(t *testing.T) {
 		require.NoError(t, pool.OnNewBlock(t.Context(), change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 		require.Equal(t, int64(11_400), pool.avgBlockTimeMs.Load(), "new blocks must still update the moving average")
 	})
+}
+
+func TestLocalAdmissionStartupWaitDeadline(t *testing.T) {
+	_, pool, _, _ := newTestPool(t)
+	pool.started.Store(false)
+	synctest.Test(t, func(t *testing.T) {
+		var txns TxnSlots
+		sender := common.Address{1}
+		txns.Append(newTestTxnSlot(0, 0, 100, 200, 21_000), sender[:], true)
+		start := time.Now()
+		_, err := pool.AddLocalTxns(t.Context(), txns)
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+		require.Equal(t, 30*time.Second, time.Since(start))
+		require.Empty(t, pool.byHash)
+	})
+}
+
+func TestStartupKeepsAnnouncedFees(t *testing.T) {
+	ctx, pool, poolDB, _ := newTestPool(t)
+	pool.started.Store(false)
+	require.NoError(t, poolDB.Update(ctx, func(tx kv.RwTx) error {
+		fee := make([]byte, 8)
+		binary.BigEndian.PutUint64(fee, 999)
+		require.NoError(t, tx.Put(kv.PoolInfo, PoolPendingBaseFeeKey, fee))
+		return tx.Put(kv.PoolInfo, PoolPendingBlobFeeKey, fee)
+	}))
+	reset := newBlockChangeForAccounts(common.Hash{1}, 0)
+	reset.PendingBlockBaseFee = 7
+	reset.PendingBlobFeePerGas = 11
+	reset.BlockGasLimit = 25_000_000
+	require.NoError(t, pool.OnNewBlock(ctx, reset, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	require.NoError(t, pool.start(ctx))
+	require.Equal(t, uint64(7), pool.pendingBaseFee.Load())
+	require.Equal(t, uint64(11), pool.pendingBlobFee.Load())
+	require.Equal(t, uint64(25_000_000), pool.blockGasLimit.Load())
+}
+
+func TestIncompleteBatchRestoresSetCodeAuthorities(t *testing.T) {
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	authority := crypto.PubkeyToAddress(key.PublicKey)
+	ctx, pool, _, coreDB, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+	auth, err := types.SignAuthorization(key, pool.chainID, common.Address{2}, 0)
+	require.NoError(t, err)
+	txn := newTestSetCodeTxnSlot(0, 0, 0, 2, 100_000).Txn.(*types.SetCodeTransaction)
+	txn.ChainID = pool.chainID
+	txn.Authorizations = []types.Authorization{auth}
+	var encoded bytes.Buffer
+	require.NoError(t, txn.MarshalBinary(&encoded))
+	parser := NewTxnParseContext(pool.chainID)
+	parser.WithSender(false)
+	var slot TxnSlot
+	_, err = parser.ParseTransaction(encoded.Bytes(), 0, &slot, nil, false, false, nil)
+	require.NoError(t, err)
+	require.Empty(t, slot.AuthAndNonces)
+
+	funded := accounts.Account{Balance: *uint256.NewInt(common.Ether), CodeHash: accounts.EmptyCodeHash}
+	writeTestSenderState(t, ctx, coreDB, pool.logger, sender, accounts.SerialiseV3(&funded), 1)
+	reset := newBlockChangeForAccounts(common.Hash{2}, 0)
+	reset.StateChangesIncomplete = true
+	require.NoError(t, coreDB.View(ctx, func(tx kv.Tx) error {
+		var err error
+		reset.StateVersionId, err = rawdb.GetStateVersion(tx)
+		return err
+	}))
+	var mined TxnSlots
+	mined.Append(&slot, sender[:], false)
+	require.NoError(t, pool.OnNewBlock(ctx, reset, TxnSlots{}, TxnSlots{}, mined))
+	restored := pool.byHash[string(slot.IDHash[:])]
+	require.NotNil(t, restored)
+	require.Equal(t, []AuthAndNonce{{authority, 0}}, restored.TxnSlot.AuthAndNonces)
+	require.Contains(t, pool.auths, AuthAndNonce{authority, 0})
 }

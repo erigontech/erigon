@@ -323,8 +323,11 @@ func (p *TxPool) start(ctx context.Context) error {
 	if err := p.fromDB(ctx); err != nil {
 		return fmt.Errorf("loading pool from DB: %w", err)
 	}
+	p.lock.Lock()
+	defer p.lock.Unlock()
 	if p.started.CompareAndSwap(false, true) {
 		p.logger.Info("[txpool] Started")
+		p.lastSeenCond.Broadcast()
 	}
 	return nil
 }
@@ -1969,7 +1972,30 @@ const localAdmissionTimeout = 30 * time.Second
 func (p *TxPool) AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcfg.DiscardReason, error) {
 	ctx, cancel := context.WithTimeout(ctx, localAdmissionTimeout)
 	defer cancel()
+	if err := p.waitForStartup(ctx); err != nil {
+		return nil, err
+	}
 	return p.addNewTxns(ctx, newTxns, nil, true)
+}
+
+func (p *TxPool) waitForStartup(ctx context.Context) error {
+	if p.Started() {
+		return ctx.Err()
+	}
+	p.lock.Lock()
+	defer p.lock.Unlock()
+	stop := context.AfterFunc(ctx, func() {
+		p.lock.Lock()
+		p.lastSeenCond.Broadcast()
+		p.lock.Unlock()
+	})
+	defer stop()
+	// The first state batch can arrive before persisted transactions are restored.
+	// Admission must see those transactions for nonce and replacement checks.
+	for !p.Started() && ctx.Err() == nil {
+		p.lastSeenCond.Wait()
+	}
+	return ctx.Err()
 }
 
 func (p *TxPool) addNewTxns(ctx context.Context, newTxns TxnSlots, sources []remoteSource, waitForRecovery bool) ([]txpoolcfg.DiscardReason, error) {
@@ -3380,50 +3406,55 @@ func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.
 		p.isLocalLRU.Add(string(v), struct{}{})
 	}
 
-	var pendingBaseFee, pendingBlobFee, minBlobGasPrice, blockGasLimit uint64
+	pendingBaseFee, pendingBlobFee := p.pendingBaseFee.Load(), p.pendingBlobFee.Load()
+	// A state reset supplies fees and gas limits for the restored state. Only fall
+	// back to the database when startup has not received a block notification.
+	if p.blockGasLimit.Load() == 0 {
+		var minBlobGasPrice, blockGasLimit uint64
 
-	if p.feeCalculator != nil {
-		pendingBaseFee, pendingBlobFee, minBlobGasPrice, blockGasLimit, err = p.feeCalculator.CurrentFees(p.chainConfig, coreTx)
-		if err != nil {
-			return err
+		if p.feeCalculator != nil {
+			pendingBaseFee, pendingBlobFee, minBlobGasPrice, blockGasLimit, err = p.feeCalculator.CurrentFees(p.chainConfig, coreTx)
+			if err != nil {
+				return err
+			}
 		}
-	}
 
-	if pendingBaseFee == 0 {
-		v, err := tx.GetOne(kv.PoolInfo, PoolPendingBaseFeeKey)
-		if err != nil {
-			return err
+		if pendingBaseFee == 0 {
+			v, err := tx.GetOne(kv.PoolInfo, PoolPendingBaseFeeKey)
+			if err != nil {
+				return err
+			}
+			if len(v) > 0 {
+				pendingBaseFee = binary.BigEndian.Uint64(v)
+			}
 		}
-		if len(v) > 0 {
-			pendingBaseFee = binary.BigEndian.Uint64(v)
+
+		if pendingBlobFee == 0 {
+			v, err := tx.GetOne(kv.PoolInfo, PoolPendingBlobFeeKey)
+			if err != nil {
+				return err
+			}
+			if len(v) > 0 {
+				pendingBlobFee = binary.BigEndian.Uint64(v)
+			}
 		}
-	}
 
-	if pendingBlobFee == 0 {
-		v, err := tx.GetOne(kv.PoolInfo, PoolPendingBlobFeeKey)
-		if err != nil {
-			return err
+		if pendingBlobFee == 0 {
+			pendingBlobFee = minBlobGasPrice
 		}
-		if len(v) > 0 {
-			pendingBlobFee = binary.BigEndian.Uint64(v)
+
+		if blockGasLimit == 0 {
+			blockGasLimit = ethconfig.DefaultBlockGasLimitByChain(p.chainConfig)
 		}
-	}
 
-	if pendingBlobFee == 0 {
-		pendingBlobFee = minBlobGasPrice
+		// The validation and insertion below read these from p, so publish them first.
+		var pendingBaseFee256 uint256.Int
+		pendingBaseFee256.SetUint64(pendingBaseFee)
+		p.setPendingBaseFeeOnQueues(pendingBaseFee256)
+		p.pendingBaseFee.Store(pendingBaseFee)
+		p.pendingBlobFee.Store(pendingBlobFee)
+		p.blockGasLimit.Store(blockGasLimit)
 	}
-
-	if blockGasLimit == 0 {
-		blockGasLimit = ethconfig.DefaultBlockGasLimitByChain(p.chainConfig)
-	}
-
-	// The validation and insertion below read these from p, so publish them first.
-	var pendingBaseFee256 uint256.Int
-	pendingBaseFee256.SetUint64(pendingBaseFee)
-	p.setPendingBaseFeeOnQueues(pendingBaseFee256)
-	p.pendingBaseFee.Store(pendingBaseFee)
-	p.pendingBlobFee.Store(pendingBlobFee)
-	p.blockGasLimit.Store(blockGasLimit)
 
 	var restored TxnSlots
 	parseCtx := NewTxnParseContext(p.chainID)

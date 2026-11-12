@@ -129,9 +129,10 @@ func (d *Dispatcher) StateChangesSnapshot(ctx context.Context, db kv.TemporalRoD
 		if err != nil {
 			return err
 		}
-		if batch != nil {
-			result = batch.ToProtoBatch()
+		if batch == nil {
+			return fmt.Errorf("executed header %d unavailable for state snapshot", height)
 		}
+		result = batch.ToProtoBatch()
 		return nil
 	})
 	return result, err

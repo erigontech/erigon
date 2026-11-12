@@ -389,6 +389,7 @@ func TestGrpcServerAddRetriesNonceGapAfterStateUpdate(t *testing.T) {
 			pool, err := New(ctx, make(chan Announcements, 1), poolDB, coreDB, cfg, kvcache.NewLatestBatchCache(),
 				chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, logger, WithFeeCalculator(nil))
 			require.NoError(t, err)
+			pool.started.Store(true)
 			key, err := crypto.GenerateKey()
 			require.NoError(t, err)
 			sender := crypto.PubkeyToAddress(key.PublicKey)
@@ -632,6 +633,8 @@ func TestQueryAllWithoutPanicUnknown(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new pool: %v", err)
 	}
+
+	pool.started.Store(true)
 
 	// Seed minimal chain state so the pool accepts local txns
 	var stateVersionID uint64 = 0

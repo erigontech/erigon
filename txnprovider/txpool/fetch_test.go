@@ -403,6 +403,7 @@ func TestFetchSnapshotFailureBackoff(t *testing.T) {
 
 func TestFetchRefreshesSupersededSnapshot(t *testing.T) {
 	ctx, pool, poolDB, coreDB := newTestPool(t)
+	pool.started.Store(false)
 	key, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	sender := crypto.PubkeyToAddress(key.PublicKey)

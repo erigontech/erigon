@@ -120,7 +120,7 @@ func TestStateChangesSnapshotDoesNotInvalidateNextPublication(t *testing.T) {
 	server.SetStateChangesSnapshot(func(context.Context) (*remoteproto.StateChangeBatch, error) {
 		return &remoteproto.StateChangeBatch{StateChangesIncomplete: true}, nil
 	})
-	ctx, cancel := context.WithCancel(t.Context())
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	stream, err := direct.NewStateDiffClientDirect(server).StateChanges(ctx, &remoteproto.StateChangeRequest{})
 	require.NoError(t, err)
@@ -140,7 +140,7 @@ func TestStateChangesKeepsPublicationDuringSnapshot(t *testing.T) {
 		server.SendStateChanges(t.Context(), &remoteproto.StateChangeBatch{StateVersionId: 2, ChangeBatch: []*remoteproto.StateChange{newHead}})
 		return &remoteproto.StateChangeBatch{StateVersionId: 1, StateChangesIncomplete: true}, nil
 	})
-	ctx, cancel := context.WithCancel(t.Context())
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	stream, err := direct.NewStateDiffClientDirect(server).StateChanges(ctx, &remoteproto.StateChangeRequest{})
 	require.NoError(t, err)

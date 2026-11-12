@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
@@ -47,6 +48,54 @@ import (
 
 type stateChangesCapture struct {
 	batch *remoteproto.StateChangeBatch
+}
+
+func TestStateChangesSnapshotMissingExecutedHeader(t *testing.T) {
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return stages.SaveStageProgress(tx, stages.Execution, 1)
+	}))
+	dispatcher := NewDispatcher(chain.AllProtocolChanges, freezeblocks.NewBlockReader(nil), nil, nil, nil, log.New())
+	_, err := dispatcher.StateChangesSnapshot(t.Context(), db)
+	require.ErrorContains(t, err, "executed header 1")
+
+	header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 30_000_000, BaseFee: uint256.NewInt(1_000_000_000)}
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		if writeErr := rawdb.WriteHeader(tx, header); writeErr != nil {
+			return writeErr
+		}
+		return rawdb.WriteCanonicalHash(tx, header.Hash(), 1)
+	}))
+	batch, err := dispatcher.StateChangesSnapshot(t.Context(), db)
+	require.NoError(t, err)
+	require.Len(t, batch.ChangeBatch, 1)
+	require.Equal(t, uint64(1), batch.ChangeBatch[0].BlockHeight)
+}
+
+func TestStateChangesSnapshotUsesExecutionProgress(t *testing.T) {
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	finished := &types.Header{Number: *uint256.NewInt(1), GasLimit: 30_000_000, BaseFee: uint256.NewInt(1_000_000_000)}
+	executed := types.CopyHeader(finished)
+	executed.Number.SetUint64(2)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		for _, header := range []*types.Header{finished, executed} {
+			if err := rawdb.WriteHeader(tx, header); err != nil {
+				return err
+			}
+			if err := rawdb.WriteCanonicalHash(tx, header.Hash(), header.Number.Uint64()); err != nil {
+				return err
+			}
+		}
+		if err := stages.SaveStageProgress(tx, stages.Finish, 1); err != nil {
+			return err
+		}
+		return stages.SaveStageProgress(tx, stages.Execution, 2)
+	}))
+	dispatcher := NewDispatcher(chain.AllProtocolChanges, freezeblocks.NewBlockReader(nil), nil, nil, nil, log.New())
+	batch, err := dispatcher.StateChangesSnapshot(t.Context(), db)
+	require.NoError(t, err)
+	require.Len(t, batch.ChangeBatch, 1)
+	require.Equal(t, gointerfaces.ConvertHashToH256(executed.Hash()), batch.ChangeBatch[0].BlockHash)
 }
 
 func (c *stateChangesCapture) SendStateChanges(_ context.Context, batch *remoteproto.StateChangeBatch) {
