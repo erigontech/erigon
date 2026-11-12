@@ -129,3 +129,30 @@ func TestBlockAccessListBuilderReplaysReadsOfReadOnlyAccount(t *testing.T) {
 		})
 	}
 }
+
+// TestBlockAccessListBuilderSizedFromBALAddsReadOnlyAccountsWithoutAllocating pins that a
+// builder sized from the block's access list does not grow while it registers the accounts.
+func TestBlockAccessListBuilderSizedFromBALAddsReadOnlyAccountsWithoutAllocating(t *testing.T) {
+	const n = 1000
+	rs := ReadSet{access: AccessSet{}}
+	bal := make(types.BlockAccessList, n)
+	for i := range bal {
+		bal[i].Address = common.BigToAddress(big.NewInt(int64(i + 1)))
+		addr := accounts.InternAddress(bal[i].Address)
+		rs.SetBalance(addr, VersionedRead[uint256.Int]{Val: *uint256.NewInt(7)})
+		rs.access[addr] = accessOptions{}
+	}
+	const runs = 10
+	vm := NewVersionMap(bal)
+	builders := make([]*BlockAccessListBuilder, runs+1) // AllocsPerRun makes one warm-up call
+	for i := range builders {
+		builders[i] = NewBlockAccessListBuilderFor(vm)
+	}
+	next := 0
+	allocs := testing.AllocsPerRun(runs, func() {
+		builders[next].Add(-1, rs, nil)
+		next++
+	})
+	require.Zero(t, allocs)
+	require.True(t, builders[0].Matches(bal))
+}

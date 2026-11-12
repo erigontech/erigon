@@ -2785,8 +2785,20 @@ type readOnlyAccount struct {
 	emptyCodeHashRead         bool
 }
 
-func NewBlockAccessListBuilder() *BlockAccessListBuilder {
-	return &BlockAccessListBuilder{ac: make(map[accounts.Address]*accountState), readOnly: make(map[accounts.Address]int), next: -1}
+func NewBlockAccessListBuilder() *BlockAccessListBuilder { return newBlockAccessListBuilder(0) }
+
+// NewBlockAccessListBuilderFor returns a builder for the block whose access list seeds vm.
+func NewBlockAccessListBuilderFor(vm *VersionMap) *BlockAccessListBuilder {
+	return newBlockAccessListBuilder(len(vm.bal))
+}
+
+func newBlockAccessListBuilder(accountsHint int) *BlockAccessListBuilder {
+	return &BlockAccessListBuilder{
+		ac:               make(map[accounts.Address]*accountState),
+		readOnly:         make(map[accounts.Address]int, accountsHint),
+		readOnlyAccounts: make([]readOnlyAccount, 0, accountsHint),
+		next:             -1,
+	}
 }
 
 // readsOf returns the reads of addr, or nil when addr has an accountState.
