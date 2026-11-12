@@ -584,7 +584,7 @@ func (sd *SharedDomains) AsStateGetter(tx kv.TemporalTx, opts execctxapi.StateGe
 	if !dbg.KVReadLevelledMetrics {
 		metrics = nil
 	}
-	g := &stateGetter{sd: sd, tx: tx, m: metrics, view: sd.cacheViewFor(tx), codeBuf: opts.CodeBuf()}
+	g := &stateGetter{sd: sd, tx: tx, m: metrics, view: sd.cacheViewFor(tx), codeBuf: opts.CodeBuf(), published: opts.PublishedView()}
 	if g.codeBuf == nil {
 		g.codeBuf = &g.ownCodeBuf
 	}

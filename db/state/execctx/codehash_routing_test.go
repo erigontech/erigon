@@ -9,6 +9,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -169,4 +170,39 @@ func TestCodeHashForAddr_ViewSourcedRecordSeedsMapping(t *testing.T) {
 	h, ok := sc.View(nil).GetAddrCodeHash(addr[:])
 	require.True(t, ok, "a view-sourced record must seed the mapping")
 	require.Equal(t, [32]byte(codeHash), h)
+}
+
+// Inside a DeferPublish window only a getter that asks for the published view lags the writer; every other getter,
+// the commitment reader among them, reads the batch's latest writes.
+func TestStateGetterReadsDeferredWritesUnlessAskedForThePublishedView(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	db := newTestDb(t, 16)
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	sd, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+
+	var addr common.Address
+	addr[0] = 0xd1
+	before := accounts.Account{Nonce: 1, CodeHash: accounts.EmptyCodeHash}
+	require.NoError(t, sd.DomainPut(kv.AccountsDomain, rwTx, addr[:], accounts.SerialiseV3(&before), 1, nil))
+	sd.DeferPublish()
+	after := accounts.Account{Nonce: 2, CodeHash: accounts.EmptyCodeHash}
+	require.NoError(t, sd.DomainPut(kv.AccountsDomain, rwTx, addr[:], accounts.SerialiseV3(&after), 2, nil))
+
+	latest, _, err := sd.AsStateGetter(rwTx, execctxapi.StateGetterOptions{}).GetLatest(kv.AccountsDomain, addr[:], kv.GetLatestOptions{})
+	require.NoError(t, err)
+	require.Equal(t, accounts.SerialiseV3(&after), latest)
+
+	published, _, err := sd.AsStateGetter(rwTx, execctxapi.StateGetterOptions{}.WithPublishedView()).GetLatest(kv.AccountsDomain, addr[:], kv.GetLatestOptions{})
+	require.NoError(t, err)
+	require.Equal(t, accounts.SerialiseV3(&before), published)
+
+	sd.Publish()
+	published, _, err = sd.AsStateGetter(rwTx, execctxapi.StateGetterOptions{}.WithPublishedView()).GetLatest(kv.AccountsDomain, addr[:], kv.GetLatestOptions{})
+	require.NoError(t, err)
+	require.Equal(t, accounts.SerialiseV3(&after), published)
 }
