@@ -214,6 +214,48 @@ func (pe *parallelExecutor) cancelOperational(blockNum uint64, err error) {
 	pe.cancelExecLoop(&stopCause{block: blockNum, kind: stopOperational, err: err})
 }
 
+type accumulatorNotice struct {
+	header *types.Header
+	txs    types.Transactions
+	writes []state.WriteSetView
+	latest map[accounts.Address]accounts.Account
+}
+
+// accumulatorNotifier is the only goroutine that touches the accumulator while the
+// apply loop runs; it takes blocks in apply order, so the change order is kept.
+type accumulatorNotifier struct {
+	notices chan accumulatorNotice
+	done    chan struct{}
+	err     error
+}
+
+func startAccumulatorNotifier(accumulator *shards.Accumulator) *accumulatorNotifier {
+	n := &accumulatorNotifier{notices: make(chan accumulatorNotice), done: make(chan struct{})}
+	go func() {
+		defer close(n.done)
+		for b := range n.notices {
+			if n.err != nil {
+				continue
+			}
+			rawTxs, err := types.MarshalTransactionsBinary(b.txs)
+			if err != nil {
+				n.err = fmt.Errorf("marshal transactions for accumulator, block %d: %w", b.header.Number.Uint64(), err)
+				continue
+			}
+			accumulator.StartChange(b.header, rawTxs, false)
+			state.NotifyAccumulatorFrom(accumulator, b.latest, b.writes)
+		}
+	}()
+	return n
+}
+
+// wait returns after every sent block is in the accumulator.
+func (n *accumulatorNotifier) wait() error {
+	close(n.notices)
+	<-n.done
+	return n.err
+}
+
 // ensureChangesetAccumulator makes pe.currentChangeSet point at a fresh,
 // block-specific StateChangeSet, to be saved by hash and bound transiently by
 // the apply fold and the committer. Idempotent; a no-op outside the changeset
@@ -467,6 +509,16 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 
 		if pe.enableChaosMonkey && pe.chaosFaults.ApplyLoopPanic != nil {
 			panic(pe.chaosFaults.ApplyLoopPanic)
+		}
+
+		var notifier *accumulatorNotifier
+		if pe.accumulator != nil {
+			notifier = startAccumulatorNotifier(pe.accumulator)
+			defer func() {
+				if notifyErr := notifier.wait(); err == nil {
+					err = notifyErr
+				}
+			}()
 		}
 
 		// appliedBlocks tracks blockNums that completed full apply-loop processing
@@ -772,25 +824,16 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 						computedBAL, balErr = bal.Process(blockBAL, h, built, txIO, isAmsterdam, pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir, pe.logger)
 					}()
 
-					// StartChange + NotifyAccumulator both run in the apply goroutine to
-					// keep accumulator access single-threaded. StartChange must precede
-					// NotifyAccumulator: it initialises the latestChange entry the notify
-					// writes into.
 					if pe.accumulator != nil && applyResult.Header != nil {
-						rawTxs, marshalErr := types.MarshalTransactionsBinary(applyResult.Txs)
-						if marshalErr != nil {
-							<-balDone
-							failInfra(fmt.Errorf("marshal transactions for accumulator, block %d: %w", applyResult.BlockNum, marshalErr))
-							continue
-						}
-						pe.accumulator.StartChange(applyResult.Header, rawTxs, false)
-						notifyErr := pe.rs.NotifyAccumulator(pe.accumulator, rwTx, pendingAccumulatorWrites)
-						pendingAccumulatorWrites = pendingAccumulatorWrites[:0]
+						writes := pendingAccumulatorWrites
+						pendingAccumulatorWrites = nil
+						latest, notifyErr := pe.rs.AccumulatorAccounts(rwTx, writes)
 						if notifyErr != nil {
 							<-balDone
 							failInfra(fmt.Errorf("notify accumulator, block %d: %w", applyResult.BlockNum, notifyErr))
 							continue
 						}
+						notifier.notices <- accumulatorNotice{header: applyResult.Header, txs: applyResult.Txs, writes: writes, latest: latest}
 					}
 
 					if applyResult.BlockNum > 0 && applyResult.receiptsComplete && applyResult.Header != nil &&

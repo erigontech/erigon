@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/notifications"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
@@ -389,4 +390,70 @@ func BenchmarkNotifyAccumulator(b *testing.B) {
 			}
 		})
 	}
+}
+
+// TestAccumulatorNotifierMatchesSerial pins that the background notifier gives the
+// accumulator the same changes, in the same order, as a serial StartChange +
+// NotifyAccumulator per block, although later blocks reach the domain before it runs.
+func TestAccumulatorNotifierMatchesSerial(t *testing.T) {
+	a := accounts.InternAddress(common.HexToAddress("0xa1"))
+	b := accounts.InternAddress(common.HexToAddress("0xb2"))
+	key1 := accounts.InternKey(common.HexToHash("0x01"))
+	key2 := accounts.InternKey(common.HexToHash("0x02"))
+	code := accounts.NewCode([]byte{0x60, 0x02})
+	blocks := [][]state.WriteSetView{
+		{
+			newWS().bal(a, state.Version{}, *uint256.NewInt(200)).stor(a, key1, state.Version{}, *uint256.NewInt(7)).build(),
+			newWS().nonce(b, state.Version{}, 1).codeHash(b, state.Version{}, code.Hash).code(b, state.Version{}, code).build(),
+		},
+		{
+			newWS().bal(a, state.Version{}, *uint256.NewInt(300)).inc(a, state.Version{}, 2).build(),
+			newWS().stor(b, key2, state.Version{}, *uint256.NewInt(9)).bal(b, state.Version{}, *uint256.NewInt(5)).build(),
+		},
+		{
+			newWS().nonce(a, state.Version{}, 4).stor(a, key1, state.Version{}, *uint256.NewInt(8)).build(),
+		},
+	}
+
+	run := func(async bool) []notifications.StateChange {
+		tx, domains := setup2CacheTest(t)
+		rs := state.NewStateV3Buffered(state.NewStateV3(domains, false, log.New()))
+		for _, addr := range []accounts.Address{a, b} {
+			seed := accounts.Account{Balance: *uint256.NewInt(100), Incarnation: 1}
+			v := addr.Value()
+			require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, v[:], accounts.SerialiseV3(&seed), 0, nil))
+		}
+		accumulator := shards.NewAccumulator()
+		var notifier *accumulatorNotifier
+		if async {
+			notifier = startAccumulatorNotifier(accumulator)
+		}
+		txNum := uint64(0)
+		for i, block := range blocks {
+			for _, ws := range block {
+				txNum++
+				require.NoError(t, rs.ApplyStateWrites(context.Background(), tx, uint64(i+1), txNum, ws, nil, &chain.Rules{}))
+			}
+			hdr := &types.Header{}
+			hdr.Number.SetUint64(uint64(i + 1))
+			if async {
+				latest, err := rs.AccumulatorAccounts(tx, block)
+				require.NoError(t, err)
+				notifier.notices <- accumulatorNotice{header: hdr, writes: block, latest: latest}
+				continue
+			}
+			rawTxs, err := types.MarshalTransactionsBinary(nil)
+			require.NoError(t, err)
+			accumulator.StartChange(hdr, rawTxs, false)
+			require.NoError(t, rs.NotifyAccumulator(accumulator, tx, block))
+		}
+		if async {
+			require.NoError(t, notifier.wait())
+		}
+		return accumulator.Changes()
+	}
+
+	serial := run(false)
+	require.Len(t, serial, len(blocks))
+	require.Equal(t, serial, run(true))
 }

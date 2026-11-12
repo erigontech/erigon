@@ -637,76 +637,110 @@ func (rs *StateV3) NotifyAccumulator(accumulator *shards.Accumulator, roTx kv.Te
 	if accumulator == nil {
 		return nil
 	}
+	latest, err := rs.AccumulatorAccounts(roTx, blockWrites)
+	if err != nil {
+		return err
+	}
+	NotifyAccumulatorFrom(accumulator, latest, blockWrites)
+	return nil
+}
 
+// AccumulatorAccounts reads the latest account of every address NotifyAccumulatorFrom
+// looks up for blockWrites. It is the only part of the notify that reads the tx.
+func (rs *StateV3) AccumulatorAccounts(roTx kv.TemporalTx, blockWrites []WriteSetView) (map[accounts.Address]accounts.Account, error) {
 	latest := make(map[accounts.Address]accounts.Account, len(blockWrites))
-	account := func(addr accounts.Address) (accounts.Account, error) {
-		if acc, ok := latest[addr]; ok {
-			return acc, nil
+	read := func(addr accounts.Address) error {
+		if _, ok := latest[addr]; ok {
+			return nil
 		}
 		acc := accounts.NewAccount()
 		address := addr.Value()
 		v, _, err := rs.domains.GetLatest(kv.AccountsDomain, roTx, address[:])
 		if err != nil {
-			return accounts.Account{}, err
+			return err
 		}
 		if len(v) > 0 {
 			if err := accounts.DeserialiseV3(&acc, v); err != nil {
-				return accounts.Account{}, err
+				return err
 			}
 		}
 		latest[addr] = acc
-		return acc, nil
-	}
-
-	// Every call for an address carries its final state, so a repeat would change nothing.
-	changed := make(map[accounts.Address]struct{}, len(blockWrites))
-	changeAccount := func(addr accounts.Address) error {
-		if _, ok := changed[addr]; ok {
-			return nil
-		}
-		changed[addr] = struct{}{}
-		acc, err := account(addr)
-		if err != nil {
-			return err
-		}
-		accumulator.ChangeAccount(addr.Value(), acc.Incarnation, accounts.SerialiseV3(&acc))
 		return nil
 	}
-
 	for _, writes := range blockWrites {
-		// Balance and nonce writes only name the account: range the keys, not the resolved values.
-		keys := writes
-		if v, ok := writes.(*versionMapWriteView); ok {
-			keys = v.keys
-		}
-		for addr, write := range writes.Codes() {
-			acc, err := account(addr)
-			if err != nil {
-				return err
+		keys := accumulatorKeys(writes)
+		for addr := range keys.Codes() {
+			if err := read(addr); err != nil {
+				return nil, err
 			}
-			accumulator.ChangeCode(addr.Value(), acc.Incarnation, write.Val.Bytes)
 		}
-		for addr, byKey := range writes.Storages() {
-			acc, err := account(addr)
-			if err != nil {
-				return err
-			}
-			for key, write := range byKey {
-				accumulator.ChangeStorage(addr.Value(), acc.Incarnation, key.Value(), write.Val.Bytes())
+		for addr := range keys.Storages() {
+			if err := read(addr); err != nil {
+				return nil, err
 			}
 		}
 		for addr := range keys.Balances() {
-			if err := changeAccount(addr); err != nil {
-				return err
+			if err := read(addr); err != nil {
+				return nil, err
 			}
 		}
 		for addr := range keys.Nonces() {
-			if err := changeAccount(addr); err != nil {
-				return err
+			if err := read(addr); err != nil {
+				return nil, err
 			}
 		}
 	}
-	return nil
+	return latest, nil
+}
+
+// accumulatorKeys returns the key-set of writes: balance and nonce writes only name the
+// account, so their resolved values are not needed.
+func accumulatorKeys(writes WriteSetView) WriteSetView {
+	if v, ok := writes.(*versionMapWriteView); ok {
+		return v.keys
+	}
+	return writes
+}
+
+// NotifyAccumulatorFrom sends a block's state changes to the accumulator, taking each
+// account from latest (see AccumulatorAccounts). It touches no tx.
+func NotifyAccumulatorFrom(accumulator *shards.Accumulator, latest map[accounts.Address]accounts.Account, blockWrites []WriteSetView) {
+	account := func(addr accounts.Address) accounts.Account {
+		acc, ok := latest[addr]
+		if !ok {
+			panic(fmt.Sprintf("accumulator: no latest account for %x", addr.Value()))
+		}
+		return acc
+	}
+	// Every call for an address carries its final state, so a repeat would change nothing.
+	changed := make(map[accounts.Address]struct{}, len(blockWrites))
+	changeAccount := func(addr accounts.Address) {
+		if _, ok := changed[addr]; ok {
+			return
+		}
+		changed[addr] = struct{}{}
+		acc := account(addr)
+		accumulator.ChangeAccount(addr.Value(), acc.Incarnation, accounts.SerialiseV3(&acc))
+	}
+
+	for _, writes := range blockWrites {
+		keys := accumulatorKeys(writes)
+		for addr, write := range writes.Codes() {
+			accumulator.ChangeCode(addr.Value(), account(addr).Incarnation, write.Val.Bytes)
+		}
+		for addr, byKey := range writes.Storages() {
+			incarnation := account(addr).Incarnation
+			for key, write := range byKey {
+				accumulator.ChangeStorage(addr.Value(), incarnation, key.Value(), write.Val.Bytes())
+			}
+		}
+		for addr := range keys.Balances() {
+			changeAccount(addr)
+		}
+		for addr := range keys.Nonces() {
+			changeAccount(addr)
+		}
+	}
 }
 
 // Writer - used by parallel workers to accumulate updates and then send them to conflict-resolution.
