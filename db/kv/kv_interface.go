@@ -353,11 +353,6 @@ func (c *RwCursorPseudoDupSort) CountDuplicates() (uint64, error) {
 
 const Unlim int = -1 // const Unbounded/EOF/EndOfTable []byte = nil
 
-type StatelessRwTx interface {
-	Getter
-	Putter
-}
-
 type GetPut interface {
 	Getter
 	Putter
