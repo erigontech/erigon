@@ -39,9 +39,6 @@ type LighthouseValidatorInclusionGlobal struct {
 
 // the block root hash of the highest numbered slot that actually exists
 func (a *ApiHandler) findEpochRoot(tx kv.Tx, epoch uint64) (common.Hash, error) {
-	if epochSlotOverflows(epoch, a.beaconChainCfg.SlotsPerEpoch) {
-		return common.Hash{}, nil
-	}
 	firstSlot := epoch * a.beaconChainCfg.SlotsPerEpoch
 	var currentBlockRoot common.Hash
 	var err error

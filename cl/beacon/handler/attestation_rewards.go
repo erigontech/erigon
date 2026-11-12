@@ -97,9 +97,6 @@ func (a *ApiHandler) PostEthV1BeaconRewardsAttestations(w http.ResponseWriter, r
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("epoch is in the future"))
 	}
 	epoch++
-	if epochSlotOverflows(epoch, a.beaconChainCfg.SlotsPerEpoch) {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("epoch slot range overflows"))
-	}
 	// Few cases to handle:
 	// 1) finalized data
 	// 2) not finalized data
