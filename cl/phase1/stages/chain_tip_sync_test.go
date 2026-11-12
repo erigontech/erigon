@@ -233,6 +233,29 @@ func TestChainTipSyncRoutesForUnpublishedPayloadStatus(t *testing.T) {
 	require.Equal(t, ForkChoice, ConsensusClStages().Stages[ChainTipSync].TransitionFunc(f.cfg, args, nil))
 }
 
+func TestChainTipSyncRoutesForUnpublishedHeadRoot(t *testing.T) {
+	f := newSameRootFixture(t, 0, 32)
+	f.setHeadStatus(t, cltypes.PayloadStatusEmpty)
+	require.NoError(t, f.runPass())
+	f.cfg.rpc = rpc.NewBeaconRpcP2P(t.Context(), &statusSentinel{}, f.cfg.beaconCfg, f.cfg.ethClock)
+	f.cfg.hasDownloaded = true
+	parentRoot := f.headState.LatestBlockHeader().ParentRoot
+	require.NoError(t, f.cfg.syncedData.OnHeadStateWithBlockRoot(f.headState, parentRoot))
+
+	head, _, err := f.cfg.forkChoice.GetHeadNode()
+	require.NoError(t, err)
+	require.Equal(t, f.headRoot, head.Root)
+	require.Equal(t, parentRoot, f.cfg.syncedData.HeadRoot())
+	require.Equal(t, headEventPublication{root: f.headRoot, payloadStatus: "empty"}, f.cfg.headEvents)
+
+	args := ConsensusClStages().ArgsFunc(t.Context(), f.cfg)
+	args.peers = 1
+	args.seenSlot = args.targetSlot - 1
+	args.seenEpoch = args.targetEpoch
+	require.True(t, args.headUnpublished)
+	require.Equal(t, ForkChoice, ConsensusClStages().Stages[ChainTipSync].TransitionFunc(f.cfg, args, nil))
+}
+
 func TestChainTipSyncLeavesBlockWaitForUnpublishedPayloadStatus(t *testing.T) {
 	f := newSameRootFixture(t, 0, 32)
 	f.setHeadStatus(t, cltypes.PayloadStatusEmpty)

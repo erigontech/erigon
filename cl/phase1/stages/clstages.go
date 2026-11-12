@@ -116,7 +116,7 @@ type Args struct {
 	targetSlot, seenSlot   uint64
 
 	hasDownloaded bool
-	// headUnpublished is set while the fork choice head differs from the head the beacon API serves.
+	// headUnpublished is set while the fork choice head root differs from the head the beacon API serves or its head event is unpublished.
 	headUnpublished bool
 	// atForwardSyncTip is set for less than an epoch after ForwardSync imported a Gloas tip without a successor, while no newer block is seen.
 	atForwardSyncTip bool
@@ -366,7 +366,7 @@ func ConsensusClStages() *clstages.StageGraph[*Cfg, Args] {
 			if head, headSlot, err := cfg.forkChoice.GetHeadNode(); err != nil {
 				log.Debug("[Caplin] failed to read the fork choice head", "err", err)
 			} else {
-				args.headUnpublished = headEventUnpublished(cfg.beaconCfg, head, headSlot, cfg.headEvents)
+				args.headUnpublished = head.Root != cfg.syncedData.HeadRoot() || headEventUnpublished(cfg.beaconCfg, head, headSlot, cfg.headEvents)
 			}
 			// Note that the target epoch is always one behind. this is because we are always behind in the current epoch, so it would not be very useful.
 			// Guard against uint64 underflow at genesis (GetCurrentEpoch() == 0).
