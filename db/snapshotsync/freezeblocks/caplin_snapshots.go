@@ -436,6 +436,9 @@ func PayloadSkipped(ctx context.Context, tx kv.Tx, sn *CaplinSnapshots, r Beacon
 		if child == nil {
 			continue
 		}
+		if child.Version() < clparams.GloasVersion {
+			return false, fmt.Errorf("block at slot %d: pre-Gloas block after a Gloas block", slot)
+		}
 		return child.Block.ParentRoot == root && child.Block.Body.GetSignedExecutionPayloadBid().Message.ParentBlockHash != block.Block.Body.GetSignedExecutionPayloadBid().Message.BlockHash, nil
 	}
 	return false, nil

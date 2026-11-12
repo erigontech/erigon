@@ -1209,3 +1209,46 @@ func TestBlobCountFromBlocksDumpsACanonicalDenebBlockWithTransactions(t *testing
 	require.NotEmpty(t, dumpedBlobWord(t, dirs, slot))
 	require.Empty(t, dumpedBlobWord(t, dirs, slot+1))
 }
+
+func TestBlobCountFromBlocksRejectsAPreGloasChildOfAGloasBlock(t *testing.T) {
+	const slot = 7
+	cfg := clparams.MainnetBeaconConfig
+	cfg.GloasForkEpoch = 0
+	block := cltypes.NewSignedBeaconBlock(&cfg, clparams.GloasVersion)
+	block.Block.Slot = slot
+	for range 2 {
+		block.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
+	}
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	child := cltypes.NewSignedBeaconBlock(&cfg, clparams.DenebVersion)
+	child.Block.Slot = slot + 1
+	child.Block.ParentRoot = root
+
+	dirs := datadir.New(t.TempDir())
+	writeCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, snaptype.CaplinMergeLimit, true, func(s uint64) []byte {
+		switch s {
+		case slot:
+			return blockSnapshotWord(t, block)
+		case slot + 1:
+			return blockSnapshotWord(t, child)
+		}
+		return nil
+	})
+	sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &cfg, dirs, log.New())
+	t.Cleanup(sn.Close)
+	require.NoError(t, sn.OpenFolder())
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return beacon_indicies.MarkRootCanonical(tx, slot, root)
+	}))
+
+	blobCount := BlobCountFromBlocks(t.Context(), sn, NewBeaconSnapshotReader(sn, nil, &cfg))
+	require.NotPanics(t, func() {
+		err = db.View(t.Context(), func(tx kv.Tx) error {
+			_, _, countErr := blobCount(tx, slot)
+			return countErr
+		})
+	})
+	require.ErrorContains(t, err, "block at slot 8: pre-Gloas block after a Gloas block")
+}
