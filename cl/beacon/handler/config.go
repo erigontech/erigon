@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/execution/protocol/params"
 )
 
 func (a *ApiHandler) getSpec(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
@@ -59,13 +60,13 @@ func (a *ApiHandler) getSpec(w http.ResponseWriter, r *http.Request) (*beaconhtt
 		ReorgMaxEpochsSinceFinalization:   clparams.ReorgMaxEpochsSinceFinalization,
 		ProposerReorgCutoffBps:            clparams.ProposerReorgCutoffBps,
 		ConfirmationByzantineThreshold:    clparams.ConfirmationByzantineThreshold,
-		CellsPerExtBlob:                   clparams.CellsPerExtBlob,
-		FieldElementsPerCell:              clparams.FieldElementsPerCell,
-		FieldElementsPerExtBlob:           clparams.FieldElementsPerExtBlob,
-		KzgCommitmentInclusionProofDepth:  clparams.KzgCommitmentInclusionProofDepth,
-		KzgCommitmentsInclusionProofDepth: clparams.KzgCommitmentsInclusionProofDepth,
-		MaxAttesterSlashingSize:           gossip.MaxUncompressedSize(gossip.TopicNameAttesterSlashing, a.beaconChainCfg, a.netConfig),
-		MaxSignedAggregateAndProofSize:    gossip.MaxUncompressedSize(gossip.TopicNameBeaconAggregateAndProof, a.beaconChainCfg, a.netConfig),
+		CellsPerExtBlob:                   params.CellsPerExtBlob,
+		FieldElementsPerCell:              params.FieldElementsPerCell,
+		FieldElementsPerExtBlob:           params.FieldElementsPerExtBlob,
+		KzgCommitmentInclusionProofDepth:  cltypes.CommitmentBranchSize,
+		KzgCommitmentsInclusionProofDepth: cltypes.KzgCommitmentsInclusionProofDepth,
+		MaxAttesterSlashingSize:           gossip.MaxSSZSize(gossip.TopicNameAttesterSlashing, a.beaconChainCfg),
+		MaxSignedAggregateAndProofSize:    gossip.MaxSSZSize(gossip.TopicNameBeaconAggregateAndProof, a.beaconChainCfg),
 		MaxSignedExecutionPayloadBidSize:  uint64(maxSignedExecutionPayloadBidSSZSize()),
 		UpdateTimeout:                     a.beaconChainCfg.SlotsPerEpoch * a.beaconChainCfg.EpochsPerSyncCommitteePeriod,
 		SlotDurationMs:                    a.beaconChainCfg.SecondsPerSlot * 1000,

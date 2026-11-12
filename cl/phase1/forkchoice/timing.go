@@ -32,9 +32,9 @@ func (f *ForkChoiceStore) getAttestationDueMs(epoch uint64) uint64 {
 
 func (f *ForkChoiceStore) getAggregateDueMs(epoch uint64) uint64 {
 	if epoch >= f.beaconCfg.GloasForkEpoch {
-		return f.beaconCfg.SecondsPerSlot * f.beaconCfg.AggregateDueBpsGloas / (clparams.BpsFactor / 1000)
+		return f.beaconCfg.BpsToMs(f.beaconCfg.AggregateDueBpsGloas)
 	}
-	return f.beaconCfg.SecondsPerSlot * f.beaconCfg.AggregateDueBps / (clparams.BpsFactor / 1000)
+	return f.beaconCfg.BpsToMs(f.beaconCfg.AggregateDueBps)
 }
 
 func (f *ForkChoiceStore) getSyncMessageDueMs(epoch uint64) uint64 {
@@ -42,7 +42,7 @@ func (f *ForkChoiceStore) getSyncMessageDueMs(epoch uint64) uint64 {
 	if epoch >= f.beaconCfg.GloasForkEpoch {
 		bps = f.beaconCfg.SyncMessageDueBpsGloas
 	}
-	return f.beaconCfg.SecondsPerSlot * bps / (clparams.BpsFactor / 1000)
+	return f.beaconCfg.BpsToMs(bps)
 }
 
 func (f *ForkChoiceStore) getContributionDueMs(epoch uint64) uint64 {
@@ -50,7 +50,7 @@ func (f *ForkChoiceStore) getContributionDueMs(epoch uint64) uint64 {
 	if epoch >= f.beaconCfg.GloasForkEpoch {
 		bps = f.beaconCfg.ContributionDueBpsGloas
 	}
-	return f.beaconCfg.SecondsPerSlot * bps / (clparams.BpsFactor / 1000)
+	return f.beaconCfg.BpsToMs(bps)
 }
 
 // getPayloadAttestationDueMs returns the PTC payload attestation deadline in milliseconds.

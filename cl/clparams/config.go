@@ -944,14 +944,18 @@ func (b *BeaconChainConfig) AttestationDueMs(gloas bool) uint64 {
 		return 0
 	}
 	if gloas {
-		return b.SecondsPerSlot * b.AttestationDueBpsGloas / (BpsFactor / 1000)
+		return b.BpsToMs(b.AttestationDueBpsGloas)
 	}
-	return b.SecondsPerSlot * b.AttestationDueBps / (BpsFactor / 1000)
+	return b.BpsToMs(b.AttestationDueBps)
+}
+
+func (b *BeaconChainConfig) BpsToMs(bps uint64) uint64 {
+	return b.SecondsPerSlot * bps / (BpsFactor / 1000)
 }
 
 // PayloadAttestationDueMs returns the Gloas PTC deadline in milliseconds from slot start.
 func (b *BeaconChainConfig) PayloadAttestationDueMs() uint64 {
-	return b.SecondsPerSlot * b.PayloadAttestationDueBps / (BpsFactor / 1000)
+	return b.BpsToMs(b.PayloadAttestationDueBps)
 }
 
 // InitializeForkSchedule initializes the schedules forks baked into the config.

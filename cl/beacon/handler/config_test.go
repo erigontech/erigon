@@ -23,9 +23,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"reflect"
 	"slices"
-	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -35,6 +33,19 @@ import (
 	"github.com/erigontech/erigon/cl/gossip"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 )
+
+func specData(t *testing.T, cfg *clparams.BeaconChainConfig, net *clparams.NetworkConfig) map[string]json.RawMessage {
+	t.Helper()
+	response, err := (&ApiHandler{beaconChainCfg: cfg, netConfig: net}).getSpec(nil, nil)
+	require.NoError(t, err)
+	encoded, err := json.Marshal(response)
+	require.NoError(t, err)
+	var spec struct {
+		Data map[string]json.RawMessage `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(encoded, &spec))
+	return spec.Data
+}
 
 func TestGetSpecIncludesGasLimitSchedule(t *testing.T) {
 	for _, test := range []struct {
@@ -62,33 +73,17 @@ func TestGetSpecIncludesGasLimitSchedule(t *testing.T) {
 				require.NoError(t, err)
 				network, config = &networkCfg, &beaconCfg
 			}
-			handler := &ApiHandler{beaconChainCfg: config, netConfig: network}
-			response, err := handler.getSpec(nil, nil)
-			require.NoError(t, err)
-			encoded, err := json.Marshal(response)
-			require.NoError(t, err)
-			var spec struct {
-				Data map[string]json.RawMessage `json:"data"`
-			}
-			require.NoError(t, json.Unmarshal(encoded, &spec))
+			spec := specData(t, config, network)
 
-			require.Contains(t, spec.Data, "GAS_LIMIT_SCHEDULE")
-			require.JSONEq(t, test.schedule, string(spec.Data["GAS_LIMIT_SCHEDULE"]))
+			require.Contains(t, spec, "GAS_LIMIT_SCHEDULE")
+			require.JSONEq(t, test.schedule, string(spec["GAS_LIMIT_SCHEDULE"]))
 		})
 	}
 }
 
 func TestGetSpecIncludesMissingKeys(t *testing.T) {
 	network, config := clparams.GetConfigsByNetwork(chainspec.MainnetChainID)
-	handler := &ApiHandler{beaconChainCfg: config, netConfig: network}
-	response, err := handler.getSpec(nil, nil)
-	require.NoError(t, err)
-	encoded, err := json.Marshal(response)
-	require.NoError(t, err)
-	var spec struct {
-		Data map[string]json.RawMessage `json:"data"`
-	}
-	require.NoError(t, json.Unmarshal(encoded, &spec))
+	spec := specData(t, config, network)
 
 	expected := map[string]string{
 		"SLOT_DURATION_MS":                      `"12000"`,
@@ -132,8 +127,8 @@ func TestGetSpecIncludesMissingKeys(t *testing.T) {
 	}
 	slices.Sort(keys)
 	for _, key := range keys {
-		require.Contains(t, spec.Data, key, key)
-		require.JSONEq(t, expected[key], string(spec.Data[key]), key)
+		require.Contains(t, spec, key, key)
+		require.JSONEq(t, expected[key], string(spec[key]), key)
 	}
 }
 
@@ -170,89 +165,24 @@ func TestGetSpecUsesSpecConfigKeyNames(t *testing.T) {
 	}
 }
 
-func TestGetSpecUsesProtocolConstants(t *testing.T) {
-	network, config := clparams.GetConfigsByNetwork(chainspec.MainnetChainID)
-	setUint := func(target any, name string, value uint64) {
-		valueOf := reflect.ValueOf(target)
-		for valueOf.Kind() == reflect.Pointer {
-			valueOf = valueOf.Elem()
-		}
-		field := valueOf.FieldByName(name)
-		if field.IsValid() && field.CanSet() {
-			field.SetUint(value)
-		}
-	}
-	for _, test := range []struct {
-		target any
-		field  string
-		value  uint64
-	}{
-		{&config, "ReorgParentWeightThreshold", 1},
-		{&config, "ReorgMaxEpochsSinceFinalization", 1},
-		{&config, "ProposerReorgCutoffBps", 1},
-		{&config, "ConfirmationByzantineThreshold", 1},
-		{&config, "CellsPerExtBlob", 1},
-		{&config, "FieldElementsPerCell", 1},
-		{&config, "FieldElementsPerExtBlob", 1},
-		{&config, "KzgCommitmentInclusionProofDepth", 1},
-		{&config, "KzgCommitmentsInclusionProofDepth", 1},
-		{network, "AttestationSubnetExtraBits", 1},
-		{network, "EpochsPerSubnetSubscription", 1},
-	} {
-		setUint(test.target, test.field, test.value)
-	}
-	handler := &ApiHandler{beaconChainCfg: config, netConfig: network}
-	response, err := handler.getSpec(nil, nil)
-	require.NoError(t, err)
-	encoded, err := json.Marshal(response)
-	require.NoError(t, err)
-	var spec struct {
-		Data map[string]json.RawMessage `json:"data"`
-	}
-	require.NoError(t, json.Unmarshal(encoded, &spec))
-	for _, test := range []struct{ key, want string }{
-		{"REORG_PARENT_WEIGHT_THRESHOLD", `"160"`},
-		{"REORG_MAX_EPOCHS_SINCE_FINALIZATION", `"2"`},
-		{"PROPOSER_REORG_CUTOFF_BPS", `"1667"`},
-		{"CONFIRMATION_BYZANTINE_THRESHOLD", `"25"`},
-		{"CELLS_PER_EXT_BLOB", `"128"`},
-		{"FIELD_ELEMENTS_PER_CELL", `"64"`},
-		{"FIELD_ELEMENTS_PER_EXT_BLOB", `"8192"`},
-		{"KZG_COMMITMENT_INCLUSION_PROOF_DEPTH", `"17"`},
-		{"KZG_COMMITMENTS_INCLUSION_PROOF_DEPTH", `"4"`},
-		{"ATTESTATION_SUBNET_EXTRA_BITS", `"0"`},
-		{"EPOCHS_PER_SUBNET_SUBSCRIPTION", `"256"`},
-	} {
-		require.JSONEq(t, test.want, string(spec.Data[test.key]), test.key)
-	}
-}
-
 func TestGetSpecCustomTimingMatchesRuntime(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.yaml")
 	require.NoError(t, os.WriteFile(configPath, []byte("ATTESTATION_DUE_BPS: 2500\nPAYLOAD_ATTESTATION_DUE_BPS: 6000\nREORG_HEAD_WEIGHT_THRESHOLD: 10\nREORG_PARENT_WEIGHT_THRESHOLD: 80\nREORG_MAX_EPOCHS_SINCE_FINALIZATION: 1\nPROPOSER_REORG_CUTOFF_BPS: 900\nCONFIRMATION_BYZANTINE_THRESHOLD: 12\nEPOCHS_PER_SUBNET_SUBSCRIPTION: 128\nATTESTATION_SUBNET_EXTRA_BITS: 3\n"), 0o644))
 	config, network, err := clparams.CustomConfig(configPath)
 	require.NoError(t, err)
-	handler := &ApiHandler{beaconChainCfg: &config, netConfig: &network}
-	response, err := handler.getSpec(nil, nil)
-	require.NoError(t, err)
-	encoded, err := json.Marshal(response)
-	require.NoError(t, err)
-	var spec struct {
-		Data map[string]json.RawMessage `json:"data"`
-	}
-	require.NoError(t, json.Unmarshal(encoded, &spec))
+	spec := specData(t, &config, &network)
 
-	require.JSONEq(t, `"2500"`, string(spec.Data["ATTESTATION_DUE_BPS"]))
+	require.JSONEq(t, `"2500"`, string(spec["ATTESTATION_DUE_BPS"]))
 	require.Equal(t, uint64(3000), config.AttestationDueMs(false))
-	require.JSONEq(t, `"6000"`, string(spec.Data["PAYLOAD_ATTESTATION_DUE_BPS"]))
+	require.JSONEq(t, `"6000"`, string(spec["PAYLOAD_ATTESTATION_DUE_BPS"]))
 	require.Equal(t, uint64(7200), config.PayloadAttestationDueMs())
-	require.JSONEq(t, `"10"`, string(spec.Data["REORG_HEAD_WEIGHT_THRESHOLD"]))
-	require.JSONEq(t, `"160"`, string(spec.Data["REORG_PARENT_WEIGHT_THRESHOLD"]))
-	require.JSONEq(t, `"2"`, string(spec.Data["REORG_MAX_EPOCHS_SINCE_FINALIZATION"]))
-	require.JSONEq(t, `"1667"`, string(spec.Data["PROPOSER_REORG_CUTOFF_BPS"]))
-	require.JSONEq(t, `"25"`, string(spec.Data["CONFIRMATION_BYZANTINE_THRESHOLD"]))
-	require.JSONEq(t, `"256"`, string(spec.Data["EPOCHS_PER_SUBNET_SUBSCRIPTION"]))
-	require.JSONEq(t, `"0"`, string(spec.Data["ATTESTATION_SUBNET_EXTRA_BITS"]))
+	require.JSONEq(t, `"10"`, string(spec["REORG_HEAD_WEIGHT_THRESHOLD"]))
+	require.JSONEq(t, `"160"`, string(spec["REORG_PARENT_WEIGHT_THRESHOLD"]))
+	require.JSONEq(t, `"2"`, string(spec["REORG_MAX_EPOCHS_SINCE_FINALIZATION"]))
+	require.JSONEq(t, `"1667"`, string(spec["PROPOSER_REORG_CUTOFF_BPS"]))
+	require.JSONEq(t, `"25"`, string(spec["CONFIRMATION_BYZANTINE_THRESHOLD"]))
+	require.JSONEq(t, `"256"`, string(spec["EPOCHS_PER_SUBNET_SUBSCRIPTION"]))
+	require.JSONEq(t, `"0"`, string(spec["ATTESTATION_SUBNET_EXTRA_BITS"]))
 }
 
 func TestGetSpecUsesResolvedPresetSizes(t *testing.T) {
@@ -260,31 +190,34 @@ func TestGetSpecUsesResolvedPresetSizes(t *testing.T) {
 	require.NoError(t, os.WriteFile(configPath, []byte("PRESET_BASE: minimal\n"), 0o644))
 	config, network, err := clparams.CustomConfig(configPath)
 	require.NoError(t, err)
-	handler := &ApiHandler{beaconChainCfg: &config, netConfig: &network}
-	response, err := handler.getSpec(nil, nil)
-	require.NoError(t, err)
-	encoded, err := json.Marshal(response)
-	require.NoError(t, err)
-	var spec struct {
-		Data map[string]json.RawMessage `json:"data"`
-	}
-	require.NoError(t, json.Unmarshal(encoded, &spec))
+	spec := specData(t, &config, &network)
 
 	require.Equal(t, uint64(4), config.MaxCommitteesPerSlot)
-	require.JSONEq(t, `"131536"`, string(spec.Data["MAX_ATTESTER_SLASHING_SIZE"]))
-	require.JSONEq(t, `"1462"`, string(spec.Data["MAX_SIGNED_AGGREGATE_AND_PROOF_SIZE"]))
-	require.JSONEq(t, `"196932"`, string(spec.Data["MAX_SIGNED_EXECUTION_PAYLOAD_BID_SIZE"]))
+	require.JSONEq(t, `"131536"`, string(spec["MAX_ATTESTER_SLASHING_SIZE"]))
+	require.JSONEq(t, `"1462"`, string(spec["MAX_SIGNED_AGGREGATE_AND_PROOF_SIZE"]))
+	require.JSONEq(t, `"196932"`, string(spec["MAX_SIGNED_EXECUTION_PAYLOAD_BID_SIZE"]))
 	require.Equal(t, uint64(131536), gossip.MaxUncompressedSize(gossip.TopicNameAttesterSlashing, &config, &network))
 	require.Equal(t, uint64(1462), gossip.MaxUncompressedSize(gossip.TopicNameBeaconAggregateAndProof, &config, &network))
 }
 
-func TestReviewSpecMinimalUpdateTimeout(t *testing.T) {
+func TestGetSpecUsesUncappedPresetSizes(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	require.NoError(t, os.WriteFile(configPath, []byte("MAX_PAYLOAD_SIZE: 1048576\n"), 0o644))
+	config, network, err := clparams.CustomConfig(configPath)
+	require.NoError(t, err)
+	spec := specData(t, &config, &network)
+
+	require.JSONEq(t, `"2097616"`, string(spec["MAX_ATTESTER_SLASHING_SIZE"]))
+	require.JSONEq(t, `"16829"`, string(spec["MAX_SIGNED_AGGREGATE_AND_PROOF_SIZE"]))
+	require.Equal(t, uint64(1048576), gossip.MaxUncompressedSize(gossip.TopicNameAttesterSlashing, &config, &network))
+	require.Equal(t, uint64(16829), gossip.MaxUncompressedSize(gossip.TopicNameBeaconAggregateAndProof, &config, &network))
+}
+
+func TestGetSpecDerivesUpdateTimeout(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	require.NoError(t, os.WriteFile(path, []byte("PRESET_BASE: minimal\nUPDATE_TIMEOUT: 64\n"), 0o644))
+	require.NoError(t, os.WriteFile(path, []byte("PRESET_BASE: minimal\n"), 0o644))
 	config, network, err := clparams.CustomConfig(path)
 	require.NoError(t, err)
-	want := config.SlotsPerEpoch * config.EpochsPerSyncCommitteePeriod
-	require.Equal(t, uint64(64), want)
 	h := &ApiHandler{beaconChainCfg: &config, netConfig: &network, routerCfg: &beacon_router_configuration.RouterConfiguration{Config: true}}
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/eth/v1/config/spec", nil))
@@ -293,10 +226,7 @@ func TestReviewSpecMinimalUpdateTimeout(t *testing.T) {
 		Data map[string]json.RawMessage `json:"data"`
 	}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
-	got := string(response.Data["UPDATE_TIMEOUT"])
-	if got != strconv.Quote(strconv.FormatUint(want, 10)) {
-		t.Errorf("UPDATE_TIMEOUT: expected %d slots (SLOTS_PER_EPOCH * EPOCHS_PER_SYNC_COMMITTEE_PERIOD), got %s", want, got)
-	}
+	require.JSONEq(t, `"64"`, string(response.Data["UPDATE_TIMEOUT"]))
 }
 
 func TestNamedNetworkRuntimeConfigDefaults(t *testing.T) {
@@ -345,14 +275,8 @@ func TestCustomConfigOmittingAddedKeysUsesMainnetDefaults(t *testing.T) {
 	require.Equal(t, mainnetConfig.PayloadAttestationDueMs(), config.PayloadAttestationDueMs())
 	require.Equal(t, mainnetConfig.ReorgHeadWeightThreshold, config.ReorgHeadWeightThreshold)
 
-	response, err := (&ApiHandler{beaconChainCfg: &config, netConfig: &network}).getSpec(nil, nil)
-	require.NoError(t, err)
-	encoded, err := json.Marshal(response)
-	require.NoError(t, err)
-	var spec struct {
-		Data map[string]json.RawMessage `json:"data"`
-	}
-	require.NoError(t, json.Unmarshal(encoded, &spec))
+	spec := specData(t, &config, &network)
+	mainnetSpec := specData(t, mainnetConfig, mainnetNetwork)
 	for _, key := range []string{
 		"SLOT_DURATION_MS", "PROPOSER_REORG_CUTOFF_BPS", "ATTESTATION_DUE_BPS", "AGGREGATE_DUE_BPS",
 		"SYNC_MESSAGE_DUE_BPS", "CONTRIBUTION_DUE_BPS", "ATTESTATION_DUE_BPS_GLOAS", "AGGREGATE_DUE_BPS_GLOAS",
@@ -361,14 +285,6 @@ func TestCustomConfigOmittingAddedKeysUsesMainnetDefaults(t *testing.T) {
 		"CONFIRMATION_BYZANTINE_THRESHOLD", "ATTESTATION_SUBNET_EXTRA_BITS", "EPOCHS_PER_SUBNET_SUBSCRIPTION",
 		"MAX_ATTESTER_SLASHING_SIZE", "MAX_SIGNED_AGGREGATE_AND_PROOF_SIZE", "MAX_SIGNED_EXECUTION_PAYLOAD_BID_SIZE", "UPDATE_TIMEOUT",
 	} {
-		mainnetResponse, err := (&ApiHandler{beaconChainCfg: mainnetConfig, netConfig: mainnetNetwork}).getSpec(nil, nil)
-		require.NoError(t, err)
-		mainnetEncoded, err := json.Marshal(mainnetResponse)
-		require.NoError(t, err)
-		var mainnetSpec struct {
-			Data map[string]json.RawMessage `json:"data"`
-		}
-		require.NoError(t, json.Unmarshal(mainnetEncoded, &mainnetSpec))
-		require.JSONEq(t, string(mainnetSpec.Data[key]), string(spec.Data[key]), key)
+		require.JSONEq(t, string(mainnetSpec[key]), string(spec[key]), key)
 	}
 }
