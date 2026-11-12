@@ -347,8 +347,21 @@ func (sd *TemporalMemBatch) GetLatestPublished(domain kv.Domain, key []byte) (v 
 	return sd.GetLatest(domain, key)
 }
 
-// DeferPublish holds back publishing the account, storage and code writes until Publish.
-func (sd *TemporalMemBatch) DeferPublish() { sd.publishDeferred.Store(true) }
+// DeferPublish holds back publishing the account, storage and code writes until Publish. A domain
+// with no published view yet gets one, so readers do not fall back to the writer's lock meanwhile.
+func (sd *TemporalMemBatch) DeferPublish() {
+	sd.publishDeferred.Store(true)
+	for _, d := range deferrableDomains {
+		sd.publishMu[d].Lock()
+		if sd.published[d].Load() == nil && sd.unwindChangeset == nil {
+			if sd.publishTree[d] == nil {
+				sd.publishTree[d] = btree2.NewMap[string, dataWithTxNum](publishTreeDegree)
+			}
+			sd.published[d].Store(sd.publishTree[d].Copy())
+		}
+		sd.publishMu[d].Unlock()
+	}
+}
 
 // Publish publishes every write held back since DeferPublish.
 func (sd *TemporalMemBatch) Publish() {

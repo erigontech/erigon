@@ -246,6 +246,37 @@ func TestGetLatestPublishedDoesNotWaitForWriterLock(t *testing.T) {
 	}
 }
 
+// A batch that defers publishing before its first write still serves exec readers without the
+// writer's lock: they see the batch as empty until it publishes.
+func TestDeferredEmptyBatchDoesNotWaitForWriterLock(t *testing.T) {
+	t.Parallel()
+	sd := &TemporalMemBatch{
+		stepSize: 16,
+		storage:  btree2.NewMap[string, []dataWithTxNum](128),
+		metrics:  &kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
+	}
+	sd.DeferPublish()
+	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
+		sd.putLatest(domain, "k", []byte("v1"), 1)
+
+		sh := sd.shard(domain, "k")
+		sh.Lock()
+		got := make(chan bool, 1)
+		go func() {
+			_, _, ok := sd.GetLatestPublished(domain, []byte("k"))
+			got <- ok
+		}()
+		select {
+		case ok := <-got:
+			require.False(t, ok, "domain %s: the unpublished write is visible", domain)
+		case <-time.After(5 * time.Second):
+			t.Errorf("domain %s: GetLatestPublished waited for the writer's lock", domain)
+		}
+		sh.Unlock()
+	}
+	sd.Publish()
+}
+
 // A reader sees whole published versions in write order: a later read of a key never
 // returns an older value than an earlier read did.
 func TestGetLatestPublishedSeesVersionsInOrder(t *testing.T) {
