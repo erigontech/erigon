@@ -66,7 +66,7 @@ shadow mode or for the head-capture handoff, and no tests.
 
 Files: `execution/stagedsync/committer.go`, tests.
 
-- [ ] Tests first, each red for the stated reason before the change:
+- [x] Tests first, each red for the stated reason before the change:
   - a window BAL block: after its `blockRequest` and first `txResult` it is folded (`computedAhead`), the root
     equals the header's, nothing was published, the pending update carries the block's number and hash; its
     `blockResult` runs no second fold; after the pending update is flushed, the commitment diff in the block's
@@ -77,11 +77,11 @@ Files: `execution/stagedsync/committer.go`, tests.
     `commitmentdb.ParentReadsWanted()` is true.
   - a window BAL block whose BAL root differs from the header's: `ErrWrongTrieRoot` is published and no pending
     update remains.
-- [ ] `maybeComputeAhead`: the window rule of the design; the pre-window rule untouched.
-- [ ] `handleMessage`: try the fold at each `txResult`, before the result is accumulated.
-- [ ] `computeBlockFromBAL`: no publish on success for a changeset-owning block.
-- [ ] One line under `logNpPhases`: `[np-phase] ahead` with `blk` and `window`.
-- [ ] Guards: the first test fails when the window rule is removed and when the success publish is restored; the
+- [x] `maybeComputeAhead`: the window rule of the design; the pre-window rule untouched.
+- [x] `handleMessage`: try the fold at each `txResult`, before the result is accumulated.
+- [x] `computeBlockFromBAL`: no publish on success for a changeset-owning block.
+- [x] One line under `logNpPhases`: `[np-phase] ahead` with `blk` and `window`.
+- [x] Guards: the first test fails when the window rule is removed and when the success publish is restored; the
       second fails when the `n-1` condition is dropped; the third fails when either switch is ignored.
 
 ### Task 2: a rejected block that was folded ahead
