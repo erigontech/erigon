@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
@@ -43,14 +44,22 @@ func TestExecutionPathReporter(t *testing.T) {
 	block := chain.Blocks[0]
 
 	cases := []struct {
+		name    string
 		workers int
+		serial  bool
 		want    ethconfig.BlockExecutionPath
 	}{
-		{2, ethconfig.BlockExecutionPath{Path: "parallel"}},
-		{1, ethconfig.BlockExecutionPath{Path: "sequential", Reason: "single-worker"}},
+		{"parallel", 2, false, ethconfig.BlockExecutionPath{Path: "parallel"}},
+		{"one worker", 1, false, ethconfig.BlockExecutionPath{Path: "sequential", Reason: "single-worker"}},
+		{"serial exec", 2, true, ethconfig.BlockExecutionPath{Path: "sequential", Reason: "serial-exec"}},
 	}
 	for _, tc := range cases {
-		t.Run(tc.want.Path, func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.serial {
+				prevParallel := dbg.Exec3Parallel
+				dbg.Exec3Parallel = false
+				t.Cleanup(func() { dbg.Exec3Parallel = prevParallel })
+			}
 			var (
 				mu      sync.Mutex
 				reports []ethconfig.BlockExecutionPath
