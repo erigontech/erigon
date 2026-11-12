@@ -87,13 +87,8 @@ func (et *EngineTest) deliver(m *execmoduletester.ExecModuleTester) error {
 		ethconfig.Defaults.FcuTimeout,
 		ethconfig.Defaults.MaxReorgDepth,
 	)
-	if len(et.payloads) > 0 {
-		if err := forkchoiceUpdated(m.Ctx, srv, m.Genesis.Hash(), et.payloads[0].FcuVersion, et.SyncingTimeout); err != nil {
-			return fmt.Errorf("forkchoice update to genesis: %w", err)
-		}
-	}
-	// newPayload goes through the RPC handler, which decodes and counts the
-	// params as it does for a CL.
+	// Calls go through the RPC handler, which decodes and counts the params as
+	// it does for a CL.
 	rpcSrv := rpc.NewServer(1, false, false, false, m.Log, 0)
 	defer rpcSrv.Stop()
 	if err := rpcSrv.RegisterAPI(srv.API()); err != nil {
@@ -101,12 +96,14 @@ func (et *EngineTest) deliver(m *execmoduletester.ExecModuleTester) error {
 	}
 	client := rpc.DialInProc(rpcSrv, m.Log)
 	defer client.Close()
+	if len(et.payloads) > 0 {
+		if err := forkchoiceUpdated(m.Ctx, client, m.Genesis.Hash(), et.payloads[0].FcuVersion, et.SyncingTimeout); err != nil {
+			return fmt.Errorf("forkchoice update to genesis: %w", err)
+		}
+	}
 	chain := chainreader.NewChainReaderEth1(m.ChainConfig, m.ExecModule, 0)
 	for i, payload := range et.payloads {
-		reject := func(hash *common.Hash, err string) {
-			et.Rejections = append(et.Rejections, testutil.Rejection{Index: i, Hash: hash, Error: err})
-		}
-		if err := sendPayload(m.Ctx, client, srv, chain, payload, et.SyncingTimeout, reject); err != nil {
+		if err := et.sendPayload(m.Ctx, client, chain, i, payload); err != nil {
 			return fmt.Errorf("payload %d: %w", i, err)
 		}
 	}
@@ -114,9 +111,9 @@ func (et *EngineTest) deliver(m *execmoduletester.ExecModuleTester) error {
 	return nil
 }
 
-// sendPayload calls engine_newPayloadV<n> and, for a valid payload,
-// engine_forkchoiceUpdatedV<n>.
-func sendPayload(ctx context.Context, client *rpc.Client, srv *engineapi.EngineServer, chain chainreader.ChainReaderWriterEth1, p EngineXTestNewPayload, timeout time.Duration, reject func(hash *common.Hash, err string)) error {
+// sendPayload calls engine_newPayloadV<n> with the fixture's payload i and,
+// for a valid payload, engine_forkchoiceUpdatedV<n>.
+func (et *EngineTest) sendPayload(ctx context.Context, client *rpc.Client, chain chainreader.ChainReaderWriterEth1, i int, p EngineXTestNewPayload) error {
 	var payload struct {
 		BlockHash  common.Hash `json:"blockHash"`
 		ParentHash common.Hash `json:"parentHash"`
@@ -131,7 +128,7 @@ func sendPayload(ctx context.Context, client *rpc.Client, srv *engineapi.EngineS
 	}
 
 	parentUnknown := func() bool { return chain.GetHeaderByHash(ctx, payload.ParentHash) == nil }
-	status, err := retrySyncing(ctx, timeout, parentUnknown, func() (*enginetypes.PayloadStatus, error) {
+	status, err := retrySyncing(ctx, et.SyncingTimeout, parentUnknown, func() (*enginetypes.PayloadStatus, error) {
 		var status enginetypes.PayloadStatus
 		if err := client.CallContext(ctx, &status, "engine_newPayloadV"+p.NewPayloadVersion, params...); err != nil {
 			return nil, err
@@ -145,9 +142,9 @@ func sendPayload(ctx context.Context, client *rpc.Client, srv *engineapi.EngineS
 	isRPCErr := errors.As(err, &rpcErr)
 	switch {
 	case isRPCErr:
-		reject(hash, rpcErrorString(err))
+		et.Reject(i, hash, rpcErrorString(rpcErr))
 	case err == nil && status.Status == enginetypes.InvalidStatus:
-		reject(hash, statusErrorString(status))
+		et.Reject(i, hash, statusErrorString(status))
 	}
 	expectInvalid := p.ValidationError != "" || p.ErrorCode != ""
 	switch {
@@ -162,29 +159,14 @@ func sendPayload(ctx context.Context, client *rpc.Client, srv *engineapi.EngineS
 	case expectInvalid:
 		return fmt.Errorf("payload is valid, expected %s%s", p.ValidationError, p.ErrorCode)
 	}
-	return forkchoiceUpdated(ctx, srv, payload.BlockHash, p.FcuVersion, timeout)
+	return forkchoiceUpdated(ctx, client, payload.BlockHash, p.FcuVersion, et.SyncingTimeout)
 }
 
-func forkchoiceUpdated(ctx context.Context, srv *engineapi.EngineServer, head common.Hash, version string, timeout time.Duration) error {
+func forkchoiceUpdated(ctx context.Context, client *rpc.Client, head common.Hash, version string, timeout time.Duration) error {
 	state := &enginetypes.ForkChoiceState{HeadHash: head}
 	status, err := retrySyncing(ctx, timeout, nil, func() (*enginetypes.PayloadStatus, error) {
-		var (
-			r   *enginetypes.ForkChoiceUpdatedResponse
-			err error
-		)
-		switch version {
-		case "1":
-			r, err = srv.ForkchoiceUpdatedV1(ctx, state, nil)
-		case "2":
-			r, err = srv.ForkchoiceUpdatedV2(ctx, state, nil)
-		case "3":
-			r, err = srv.ForkchoiceUpdatedV3(ctx, state, nil)
-		case "4":
-			r, err = srv.ForkchoiceUpdatedV4(ctx, state, nil, nil)
-		default:
-			return nil, fmt.Errorf("unsupported forkchoiceUpdated version %q", version)
-		}
-		if err != nil {
+		var r enginetypes.ForkChoiceUpdatedResponse
+		if err := client.CallContext(ctx, &r, "engine_forkchoiceUpdatedV"+version, state); err != nil {
 			return nil, err
 		}
 		return r.PayloadStatus, nil
@@ -198,23 +180,22 @@ func forkchoiceUpdated(ctx context.Context, srv *engineapi.EngineServer, head co
 	return nil
 }
 
-// rpcErrorString renders err as a JSON-RPC client would see it: code, message
-// and any data.
-func rpcErrorString(err error) string {
-	jsonErr := rpc.NewJsonErrorFromErr(err).(interface {
-		rpc.Error
-		rpc.DataError
-	})
-	s := fmt.Sprintf("%d: %s", jsonErr.ErrorCode(), err.Error())
-	switch data := jsonErr.ErrorData().(type) {
+// rpcErrorString renders err as a JSON-RPC client sees it: code, message and
+// any data.
+func rpcErrorString(err rpc.Error) string {
+	s := fmt.Sprintf("%d: %s", err.ErrorCode(), err.Error())
+	var dataErr rpc.DataError
+	if !errors.As(err, &dataErr) {
+		return s
+	}
+	switch data := dataErr.ErrorData().(type) {
 	case nil:
 	case string:
 		s += ": " + data
 	default:
-		if encoded, jsonErr := json.Marshal(data); jsonErr == nil {
+		// The data was decoded from JSON, so it encodes again.
+		if encoded, err := json.Marshal(data); err == nil {
 			s += ": " + string(encoded)
-		} else {
-			s += fmt.Sprintf(": %v", data)
 		}
 	}
 	return s

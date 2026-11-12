@@ -18,8 +18,6 @@ package engineapitester
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"testing"
 	"time"
 
@@ -37,15 +35,13 @@ func (e dataError) ErrorData() any { return e.data }
 
 func TestRPCErrorString(t *testing.T) {
 	for _, tc := range []struct {
-		err  error
+		err  rpc.Error
 		want string
 	}{
-		{errors.New("plain"), fmt.Sprintf("%d: plain", rpc.ErrCodeDefault)},
 		{&rpc.InvalidParamsError{Message: "bad params"}, "-32602: bad params"},
 		{dataError{nil}, "-38005: payload rejected"},
 		{dataError{"the cause"}, "-38005: payload rejected: the cause"},
 		{dataError{map[string]string{"err": "the cause"}}, `-38005: payload rejected: {"err":"the cause"}`},
-		{fmt.Errorf("wrapped: %w", dataError{"the cause"}), "-38005: wrapped: payload rejected: the cause"},
 	} {
 		require.Equal(t, tc.want, rpcErrorString(tc.err))
 	}
