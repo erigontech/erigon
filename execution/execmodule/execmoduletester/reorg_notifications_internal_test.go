@@ -645,6 +645,7 @@ func TestBelowFinalityForkchoiceKeepsPendingNotifications(t *testing.T) {
 		var err error
 		committed, err = stages.GetStageProgress(tx, stages.Finish)
 		require.NoError(t, err)
+		require.Equal(t, chain.Blocks[committed-1].Hash(), rawdb.ReadCurrentHeader(tx).Hash())
 		return err
 	}))
 	require.Greater(t, committed, uint64(2))

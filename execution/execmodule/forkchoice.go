@@ -166,6 +166,37 @@ func forkChoiceHashesMatch(tx kv.Getter, blockHash, safeHash, finalizedHash comm
 		(finalizedHash == (common.Hash{}) || rawdb.ReadForkchoiceFinalized(tx) == finalizedHash)
 }
 
+// A rejected catch-up must leave startup at the last committed execution checkpoint.
+// Keep downloaded blocks by hash so a later forkchoice can select their valid prefix.
+func (e *ExecModule) discardUnexecutedCanonical(ctx context.Context) (head common.Hash, err error) {
+	err = e.db.Update(ctx, func(tx kv.RwTx) error {
+		finish, err := stages.GetStageProgress(tx, stages.Finish)
+		if err != nil {
+			return err
+		}
+		head, _, err = e.blockReader.CanonicalHash(ctx, tx, finish)
+		if err != nil {
+			return err
+		}
+		if head == (common.Hash{}) {
+			return fmt.Errorf("missing canonical hash at committed block %d", finish)
+		}
+		if err := rawdb.TruncateCanonicalChain(tx, finish+1); err != nil {
+			return err
+		}
+		if err := rawdbv3.TxNums.Truncate(tx, finish+1); err != nil {
+			return err
+		}
+		for _, stage := range []stages.SyncStage{stages.Headers, stages.BlockHashes, stages.Bodies, stages.Senders} {
+			if err := stages.SaveStageProgress(tx, stage, finish); err != nil {
+				return err
+			}
+		}
+		return writeForkChoiceHashes(tx, head, common.Hash{}, common.Hash{})
+	})
+	return head, err
+}
+
 // currentFinalisedBlockNum returns zero when finality is unset,
 // or nil when the stored finalized hash has no known block number.
 func (e *ExecModule) currentFinalisedBlockNum(ctx context.Context, tx kv.Getter) (*uint64, error) {
@@ -684,6 +715,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	const smallBlockJumpThreshold = 16
 	headNum := fcuHeader.Number.Uint64()
 	initialCycle := headNum > finishProgressBefore && headNum-finishProgressBefore > smallBlockJumpThreshold
+	catchupCommitted := false
 
 	tx, currentContext, err = e.pipelineExecutor.RunLoop(ctx, currentContext, tx, RunLoopConfig{
 		InitialCycle: initialCycle,
@@ -719,6 +751,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 				return nil, nil, fmt.Errorf("updateForkChoice: flush+commit sd after hasMore: %w", err)
 			}
 			checkpointStateChanges()
+			catchupCommitted = true
 			restoreRecentReceipts = nil
 			e.observeStateTransition(ctx, StateTransitionFCUCatchupCommitComplete)
 			// Fresh RO snapshot + SharedDomains + block overlay on the committed state.
@@ -754,10 +787,20 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		err = fmt.Errorf("updateForkChoice: %w", err)
 		e.logger.Warn("Cannot update chain head", "hash", blockHash, "err", err)
 		if errors.Is(err, rules.ErrInvalidBlock) {
+			latestValidHash := rawdb.ReadHeadBlockHash(roTx)
+			if catchupCommitted {
+				teardownOverlay()
+				roTx.Rollback()
+				var cleanupErr error
+				latestValidHash, cleanupErr = e.discardUnexecutedCanonical(ctx)
+				if cleanupErr != nil {
+					return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, cleanupErr, stateFlushingInParallel)
+				}
+			}
 			sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
 				Status:          ExecutionStatusBadBlock,
 				ValidationError: err.Error(),
-				LatestValidHash: rawdb.ReadHeadBlockHash(tx),
+				LatestValidHash: latestValidHash,
 			}, stateFlushingInParallel)
 			return nil
 		}

@@ -19,8 +19,7 @@ package execmodule
 import "context"
 
 // StateTransitionPoint identifies where an integration test may pause RPC view
-// binding or forkchoice processing. Catch-up points cover FCU execution only,
-// not startup execution.
+// binding, forkchoice processing or startup execution.
 type StateTransitionPoint uint8
 
 const (
@@ -48,6 +47,12 @@ const (
 	// StateTransitionFCUCatchupCommitComplete means that cycle is durable, before
 	// opening the next read view. Final forkchoice markers may still be pending.
 	StateTransitionFCUCatchupCommitComplete
+	// StateTransitionStartupCommitReady follows flushing a startup execution cycle,
+	// before its MDBX transaction commits.
+	StateTransitionStartupCommitReady
+	// StateTransitionStartupCommitComplete means that startup cycle is durable,
+	// before file building or the next execution cycle starts.
+	StateTransitionStartupCommitComplete
 )
 
 // StateTransitionObserver is an integration-test hook that runs inline at each
@@ -55,7 +60,11 @@ const (
 type StateTransitionObserver func(context.Context, StateTransitionPoint)
 
 func (e *ExecModule) observeStateTransition(ctx context.Context, point StateTransitionPoint) {
-	if e.stateTransitionObserver != nil {
-		e.stateTransitionObserver(ctx, point)
+	e.pipelineExecutor.observeStateTransition(ctx, point)
+}
+
+func (pe *PipelineExecutor) observeStateTransition(ctx context.Context, point StateTransitionPoint) {
+	if pe.stateTransitionObserver != nil {
+		pe.stateTransitionObserver(ctx, point)
 	}
 }
