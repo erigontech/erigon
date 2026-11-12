@@ -45,6 +45,7 @@ shadow mode or for the head-capture handoff, and no tests.
   forgets the block (`pending`, `computedAhead`, `balRoots`). Nothing else runs in that calculator: the apply loop
   cancels the run; at the tip the validation's `SharedDomains` is closed (`fork_validator.go:294-298`); in a stage
   run the unwind calls `ResetPendingUpdates` and `SeekCommitment` (`stage_execute.go:555`, `:600`).
+- A failed ahead fold is final for that block in the calculator and is never retried.
 - A window block that straddles an unfrozen step edge checkpoints from the BAL (`checkpointStepsFromBAL`), into
   its own changeset.
 
@@ -96,10 +97,10 @@ Files: `execution/stagedsync/committer.go`, tests.
 
 ### Task 3: a window block across a step edge
 
-- [ ] Test, mirroring `TestComputeAhead_StepBoundaryCheckpointMidBlock` for a changeset-owning block: the
+- [x] Test, mirroring `TestComputeAhead_StepBoundaryCheckpointMidBlock` for a changeset-owning block: the
       checkpoint at the edge is written into the block's own changeset, the block-end root equals the header's,
       and the `txResult` at the edge runs no second checkpoint.
-- [ ] Fix what the test shows; if it passes as written, the task is the test.
+- [x] Fix what the test shows; if it passes as written, the task is the test.
 
 ### Task 4: remove this plan
 

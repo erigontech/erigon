@@ -45,8 +45,9 @@ type commitComputeRequest struct{}
 // pendingBlock is a blockRequest the calculator has received but not yet
 // computed, together with the mode selected for it.
 type pendingBlock struct {
-	req  *blockRequest
-	mode calcMode
+	req    *blockRequest
+	mode   calcMode
+	failed bool
 }
 
 // computedAheadCount counts BAL compute-ahead computations across all calculators;
@@ -412,6 +413,9 @@ func (cc *commitmentCalculator) ownsChangeset(n uint64) bool {
 func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResult) {
 	switch r := msg.(type) {
 	case *txResult:
+		if pb, ok := cc.pending[r.blockNum]; ok && pb.failed {
+			return
+		}
 		var base state.StateReader
 		perBlock := cc.perBlockCompute(r.blockNum)
 		if r.versionMap != nil {
@@ -446,6 +450,14 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		}
 
 	case *blockResult:
+		if pb, ok := cc.pending[r.BlockNum]; ok && pb.failed {
+			cc.doms.GetCommitmentContext().ResetPendingUpdates()
+			delete(cc.pending, r.BlockNum)
+			delete(cc.computedAhead, r.BlockNum)
+			delete(cc.balRoots, r.BlockNum)
+			cc.clearTouched()
+			return
+		}
 		// A rejected block: skip commitment. sd.mem may hold partial-tx writes
 		// from txs that succeeded before the failing one (root would be
 		// non-canonical), and emitting an ErrWrongTrieRoot here would race the
@@ -577,7 +589,7 @@ func (cc *commitmentCalculator) computeAheadGateOpen(n uint64) bool {
 // execution. Idempotent (computedAhead guard).
 func (cc *commitmentCalculator) maybeComputeAhead(ctx context.Context, n uint64) {
 	pb, ok := cc.pending[n]
-	if !ok || pb.mode != calcModeBALDriven || cc.computedAhead[n] {
+	if !ok || pb.failed || pb.mode != calcModeBALDriven || cc.computedAhead[n] {
 		return
 	}
 	// Cap compute-ahead at the batch's coalesce block so commitment cannot outrun
@@ -613,43 +625,47 @@ func (cc *commitmentCalculator) computeBlockFromBAL(ctx context.Context, pb *pen
 		StateRoot: req.stateRoot,
 		lastTxNum: req.lastTxNum,
 	}
+	fail := func(err error) {
+		pb.failed = true
+		cc.fail(ctx, br, err)
+	}
 	vm := state.NewVersionMap(req.bal)
 	vm.SetBaseTxNum(req.firstTxNum)
 	eip161Enabled := req.blockNum != 0 && cc.chainConfig.IsEIP161Enabled(req.blockNum)
 	isAura := cc.chainConfig.Aura != nil
 	base := cc.asOfReader.dr.StateReaderAt(req.firstTxNum)
 	if ambiguous, err := vm.HasEmptyBaseAccount(eip161Enabled, isAura, base); err != nil {
-		cc.fail(ctx, br, fmt.Errorf("BAL-driven compute-ahead block %d: %w", req.blockNum, err))
+		fail(fmt.Errorf("BAL-driven compute-ahead block %d: %w", req.blockNum, err))
 		return
 	} else if ambiguous {
 		pb.mode = calcModeIncremental
 		return
 	}
 	if err := vm.SeedEmptyRemovals(eip161Enabled, isAura, base); err != nil {
-		cc.fail(ctx, br, fmt.Errorf("BAL-driven compute-ahead block %d: %w", req.blockNum, err))
+		fail(fmt.Errorf("BAL-driven compute-ahead block %d: %w", req.blockNum, err))
 		return
 	}
 	// A block straddling an unfrozen step edge must checkpoint at that edge, else
 	// the step's commitment .kv lags its account/storage .kv. The per-tx BAL lets
 	// compute-ahead do this mid-block.
 	if err := cc.checkpointStepsFromBAL(ctx, req, vm); err != nil {
-		cc.fail(ctx, br, err)
+		fail(err)
 		return
 	}
 	rh, flushOwn, err := cc.computeRootFromBAL(ctx, req, vm, math.MaxUint32, targetOf(br))
 	if err != nil {
-		cc.fail(ctx, br, fmt.Errorf("BAL-driven compute-ahead block %d: %w", req.blockNum, err))
+		fail(fmt.Errorf("BAL-driven compute-ahead block %d: %w", req.blockNum, err))
 		return
 	}
 	if !bytes.Equal(rh, req.stateRoot[:]) {
 		cc.doms.GetCommitmentContext().ResetPendingUpdates()
-		cc.fail(ctx, br, fmt.Errorf("%w: BAL-driven block %d root %x expected %x",
+		fail(fmt.Errorf("%w: BAL-driven block %d root %x expected %x",
 			ErrWrongTrieRoot, req.blockNum, rh, req.stateRoot))
 		return
 	}
 	if flushOwn != nil {
 		if err := flushOwn(); err != nil {
-			cc.fail(ctx, br, fmt.Errorf("BAL-driven compute-ahead block %d flush: %w", req.blockNum, err))
+			fail(fmt.Errorf("BAL-driven compute-ahead block %d flush: %w", req.blockNum, err))
 			return
 		}
 	}
