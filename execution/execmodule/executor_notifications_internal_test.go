@@ -81,6 +81,28 @@ func TestProcessFrozenBlocksKeepsCommittedNotifications(t *testing.T) {
 	}
 }
 
+func TestProcessFrozenBlocksKeepsIncompleteFlagWhenDomainsAhead(t *testing.T) {
+	const snapshotBlock = uint64(100)
+	var notifications *shards.Notifications
+	pe, hook, n := newPinTestExecutor(t, func(_ bool, _ *stagedsync.StageState, _ stagedsync.Unwinder, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
+		require.Nil(t, sd, "startup must stop after the snapshots stage")
+		require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, snapshotBlock))
+		notifications.Accumulator.MarkIncomplete()
+		require.True(t, execctx.IsDomainAheadOfBlocks(t.Context(), tx, logger))
+		return nil
+	})
+	notifications = n
+
+	require.NoError(t, pe.ProcessFrozenBlocks(t.Context(), hook, false))
+	require.NoError(t, pe.db.View(t.Context(), func(tx kv.Tx) error {
+		progress, err := stages.GetStageProgress(tx, stages.Execution)
+		require.Equal(t, snapshotBlock, progress, "snapshot progress must be committed")
+		return err
+	}))
+	batch := notifications.Accumulator.Batch(&types.Header{Number: *uint256.NewInt(snapshotBlock)})
+	require.True(t, batch.StateChangesIncomplete, "the committed snapshot reset must remain pending")
+}
+
 func TestProcessFrozenBlocksDoesNotRestorePublishedNotifications(t *testing.T) {
 	header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 30_000_000}
 	var notifications *shards.Notifications

@@ -257,7 +257,11 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 
 	// If domains are ahead of block files, nothing to execute.
 	if execctx.IsDomainAheadOfBlocks(ctx, tx, pe.logger) {
-		return tx.Commit()
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+		restoreStateChanges = nil
+		return nil
 	}
 
 	doms, err := execctx.NewSharedDomains(ctx, tx, pe.logger)
