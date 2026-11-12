@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"runtime"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -496,8 +497,34 @@ func (vm *VersionMap) StorageKeys(addr accounts.Address) []accounts.StorageKey {
 // WriteChanges pre-populates the version map from a BAL (EIP-7928), routing each
 // per-path change through the typed Write primitive so the value type is enforced at
 // compile time.
+var balSeedPar = dbg.EnvBool("BAL_SEED_PAR", false)
+
+// forEachBALAccount runs fn for every account index; accounts are independent cells.
+func forEachBALAccount(n int, fn func(i int)) {
+	const chunk = 64
+	if !balSeedPar || n <= chunk {
+		for i := range n {
+			fn(i)
+		}
+		return
+	}
+	chunks := (n + chunk - 1) / chunk
+	var next atomic.Int64
+	var wg sync.WaitGroup
+	for range min(runtime.GOMAXPROCS(0), chunks) {
+		wg.Go(func() {
+			for c := int(next.Add(1) - 1); c < chunks; c = int(next.Add(1) - 1) {
+				for i := c * chunk; i < min((c+1)*chunk, n); i++ {
+					fn(i)
+				}
+			}
+		})
+	}
+	wg.Wait()
+}
+
 func (vm *VersionMap) WriteChanges(changes types.BlockAccessList) {
-	for i := range changes {
+	forEachBALAccount(len(changes), func(i int) {
 		accountChanges := &changes[i]
 		if dbg.TraceBALFeed {
 			fmt.Printf(
@@ -512,7 +539,7 @@ func (vm *VersionMap) WriteChanges(changes types.BlockAccessList) {
 		}
 		if len(accountChanges.StorageChanges) == 0 && len(accountChanges.BalanceChanges) == 0 &&
 			len(accountChanges.NonceChanges) == 0 && len(accountChanges.CodeChanges) == 0 {
-			continue
+			return
 		}
 		addr := accounts.InternAddress(accountChanges.Address)
 		for _, storageChanges := range accountChanges.StorageChanges {
@@ -563,7 +590,7 @@ func (vm *VersionMap) WriteChanges(changes types.BlockAccessList) {
 			vm.WriteCodeHash(addr, v, code.Hash, true)
 			vm.WriteCodeSize(addr, v, code.Len(), true)
 		}
-	}
+	})
 }
 
 // Typed Write primitives. Each takes the AccountPath-contracted value type directly so

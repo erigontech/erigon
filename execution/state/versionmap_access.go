@@ -235,17 +235,17 @@ func (vm *VersionMap) SeedEmptyRemovals(eip161Enabled, isAura bool, base StateRe
 // base read: the AddressPath is marked AccountFromBAL, so field reads still fall back to
 // the committed base for a base-present account's untouched fields.
 func (vm *VersionMap) SeedAddresses() {
-	for i := range vm.bal {
+	forEachBALAccount(len(vm.bal), func(i int) {
 		minIdx := balNextChangeIndex(&vm.bal[i], 0)
 		if minIdx == 0 {
-			continue
+			return
 		}
 		addr := accounts.InternAddress(vm.bal[i].Address)
 		av := VersionedAccountView{addr: addr, txIdx: int(minIdx), vm: vm}
 		if acc := av.Account(); acc != nil {
 			vm.WriteAddressExists(addr, Version{TxIndex: int(minIdx) - 1}, acc)
 		}
-	}
+	})
 }
 
 func balChangeIndexes(ac *types.AccountChanges, fn func(uint32)) {
