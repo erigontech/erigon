@@ -838,14 +838,49 @@ func TestAccountChangesCount(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := accountChangesCount(body, uint64(len(body))); got != 3 {
+	if got := accountChangesCount(body, uint64(len(body)), nil); got != 3 {
 		t.Fatalf("valid list: got %d entries, want 3", got)
 	}
-	if got := accountChangesCount(nil, uint64(len(body))); got != 0 {
+	if got := accountChangesCount(nil, uint64(len(body)), nil); got != 0 {
 		t.Fatalf("no slice: got %d entries, want 0", got)
 	}
 	short := bytes.Repeat([]byte{0x01}, 10*minAccountChangesLen)
-	if got := accountChangesCount(short, uint64(len(short))); got != 10 {
+	if got := accountChangesCount(short, uint64(len(short)), nil); got != 10 {
 		t.Fatalf("values shorter than an entry: got %d, want 10", got)
+	}
+}
+
+func TestDecodeBlockAccessListAllocatesOnce(t *testing.T) {
+	bal := make(BlockAccessList, 5)
+	for i := range bal {
+		bal[i].Address[0] = byte(i + 1)
+	}
+	enc, err := EncodeBlockAccessListBytes(bal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := DecodeBlockAccessListBytes(enc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 5 || cap(got) != 5 {
+		t.Fatalf("decoded len %d cap %d, want 5 and 5", len(got), cap(got))
+	}
+}
+
+func TestDecodeBlockAccessListReservesNoMoreThanTheBudget(t *testing.T) {
+	body := bytes.Repeat([]byte{0x01}, 2_700_000)
+	enc := make([]byte, rlp.ListPrefixLen(len(body)))
+	rlp.EncodeListPrefixToBuf(len(body), enc)
+	enc = append(enc, body...)
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	_, err := DecodeBlockAccessListSidecarForHeader(enc, 0)
+	runtime.ReadMemStats(&after)
+	if err == nil {
+		t.Fatal("decoded a list the budget does not allow")
+	}
+	if grew := after.TotalAlloc - before.TotalAlloc; grew > 64*1024 {
+		t.Fatalf("a zero budget reserved %d bytes for a malformed list", grew)
 	}
 }

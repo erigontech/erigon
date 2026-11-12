@@ -788,7 +788,7 @@ func decodeBlockAccessList(out *BlockAccessList, s *rlp.Stream, budget *blockAcc
 		return err
 	}
 	// EIP-7928: a genuine empty list (0xc0) decodes to an initialized empty slice, not nil.
-	bal := make(BlockAccessList, 0, accountChangesCount(s.Peek(), size))
+	bal := make(BlockAccessList, 0, accountChangesCount(s.Peek(), size, budget))
 	for s.MoreDataInList() {
 		if err := budget.takeItem(); err != nil {
 			return err
@@ -813,8 +813,9 @@ func decodeBlockAccessList(out *BlockAccessList, s *rlp.Stream, budget *blockAcc
 const minAccountChangesLen = 1 + 1 + length.Addr + 5
 
 // accountChangesCount returns how many entries a list body holds, so decoding allocates once; it is 0 when the stream
-// is not slice-backed. Values too short to be an entry do not count, so a malformed list cannot force a large allocation.
-func accountChangesCount(body []byte, size uint64) int {
+// is not slice-backed. The count is capped by size/minAccountChangesLen and by the items the budget still allows, so a
+// malformed list cannot reserve more than it could decode.
+func accountChangesCount(body []byte, size uint64, budget *blockAccessListDecodeBudget) int {
 	if uint64(len(body)) < size {
 		return 0
 	}
@@ -822,7 +823,11 @@ func accountChangesCount(body []byte, size uint64) int {
 	if err != nil {
 		return 0
 	}
-	return min(n, int(size/minAccountChangesLen))
+	limit := size / minAccountChangesLen
+	if budget != nil {
+		limit = min(limit, budget.remaining)
+	}
+	return int(min(uint64(n), limit))
 }
 
 // DecodeBlockAccessListBytes decodes a syntactically valid RLP block access list.
