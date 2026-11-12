@@ -194,6 +194,21 @@ func TestRevalCandidates_BALKeepsReadersOfDroppedWrite(t *testing.T) {
 	require.Equal(t, []int{1}, be.revalCandidates(0, newWS().build(), oldW))
 }
 
+func TestFlushFinalizeWritesFlagsTheReaderOfAChangedCell(t *testing.T) {
+	be := newDetExecutor(t, 4)
+	be.versionMap.HasBAL = true
+	addr := accounts.InternAddress(common.HexToAddress("0x00000000000000000000000000000000000000aa"))
+	slot := accounts.InternKey(common.HexToHash("0x01"))
+	reads := state.ReadSet{}
+	reads.SetHeader(addr, state.StoragePath, slot, state.ReadHeader{Source: state.StorageRead})
+	be.blockIO.RecordReads(state.Version{TxIndex: 2}, reads)
+	be.indexReads(2, reads)
+
+	be.flushFinalizeWrites(1, newWS().stor(addr, slot, state.Version{TxIndex: 1}, *uint256.NewInt(1)).build())
+
+	require.Equal(t, map[int]bool{2: true}, be.revalidate)
+}
+
 func TestMarkReadersDirty(t *testing.T) {
 	addr := accounts.InternAddress(common.HexToAddress("0x00000000000000000000000000000000000000aa"))
 	slot1 := accounts.InternKey(common.HexToHash("0x01"))
@@ -228,6 +243,47 @@ func TestMarkReadersDirty(t *testing.T) {
 		read(be, 2, 1, slot2)
 		be.markReadersDirty(1, newWS().stor(addr, slot1, writer, *uint256.NewInt(1)).build())
 		require.Empty(t, be.revalidate)
+	})
+	seeded := types.BlockAccessList{{Address: addr.Value(), StorageChanges: []types.SlotChanges{{Slot: slot1, Changes: []*types.StorageChange{{Index: 2, Value: *uint256.NewInt(1)}}}}}}
+	t.Run("a write the BAL already holds leaves the readers clean", func(t *testing.T) {
+		be := newBE()
+		be.versionMap = state.NewVersionMap(seeded)
+		be.markReadersDirty(1, newWS().stor(addr, slot1, writer, *uint256.NewInt(1)).build())
+		require.Empty(t, be.revalidate)
+	})
+	t.Run("a write the BAL holds leaves the readers clean after validation", func(t *testing.T) {
+		be := newBE()
+		be.versionMap = state.NewVersionMap(seeded)
+		ws := newWS().stor(addr, slot1, writer, *uint256.NewInt(1)).build()
+		be.versionMap.FlushVersionedWrites(ws, false)
+		be.versionMap.MarkWritesValidated(ws, func(accounts.Address) bool { return false })
+		be.markReadersDirty(1, ws)
+		require.Empty(t, be.revalidate)
+	})
+	t.Run("a Done cell a re-run left with the BAL value flags the readers", func(t *testing.T) {
+		be := newBE()
+		be.versionMap = state.NewVersionMap(seeded)
+		be.versionMap.WriteStorage(addr, slot1, state.Version{TxIndex: 1, Incarnation: 2}, *uint256.NewInt(1), true)
+		be.markReadersDirty(1, newWS().stor(addr, slot1, state.Version{TxIndex: 1, Incarnation: 3}, *uint256.NewInt(1)).build())
+		require.Equal(t, map[int]bool{2: true}, be.revalidate)
+	})
+	t.Run("a write the BAL does not hold flags the readers", func(t *testing.T) {
+		be := newBE()
+		be.versionMap = state.NewVersionMap(types.BlockAccessList{{Address: addr.Value(), StorageChanges: []types.SlotChanges{{Slot: slot2, Changes: []*types.StorageChange{{Index: 2, Value: *uint256.NewInt(1)}}}}}})
+		be.markReadersDirty(1, newWS().stor(addr, slot1, writer, *uint256.NewInt(1)).build())
+		require.Equal(t, map[int]bool{2: true}, be.revalidate)
+	})
+	t.Run("a write that differs from the BAL flags the readers", func(t *testing.T) {
+		be := newBE()
+		be.versionMap = state.NewVersionMap(seeded)
+		be.markReadersDirty(1, newWS().stor(addr, slot1, writer, *uint256.NewInt(2)).build())
+		require.Equal(t, map[int]bool{2: true}, be.revalidate)
+	})
+	t.Run("a BAL block still flags readers of a lifecycle write", func(t *testing.T) {
+		be := newBE()
+		be.versionMap = state.NewVersionMap(seeded)
+		be.markReadersDirty(1, newWS().stor(addr, slot1, writer, *uint256.NewInt(1)).selfDestruct(addr, writer, true).build())
+		require.Equal(t, map[int]bool{2: true, 3: true}, be.revalidate)
 	})
 	writes := map[state.AccountPath]*state.WriteSet{
 		state.BalancePath:  newWS().bal(addr, writer, *uint256.NewInt(1)).build(),
