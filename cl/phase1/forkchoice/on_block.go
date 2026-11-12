@@ -165,8 +165,8 @@ func (f *ForkChoiceStore) ValidateBlockForPublishing(block *cltypes.SignedBeacon
 	return nil
 }
 
-// invalidateCachedHead forces the next GetHead to recompute. A GetHead running while f.mu
-// was released caches a head that predates this block.
+// invalidateCachedHead forces the next GetHead to recompute. Heads cached while validation
+// releases f.mu can be stale after block or payload updates. The caller must hold f.mu.
 func (f *ForkChoiceStore) invalidateCachedHead() {
 	f.headHash = common.Hash{}
 	f.headPayloadStatus = cltypes.PayloadStatusPending
@@ -739,6 +739,9 @@ func (f *ForkChoiceStore) rebookPendingEnvelopeRetry(root common.Hash, booked, n
 }
 
 func (f *ForkChoiceStore) HasPendingExecutionPayloadEnvelope(blockRoot common.Hash) bool {
+	if f.IsEnvelopeRejected(blockRoot) {
+		return false
+	}
 	return f.pendingEnvelopes != nil && f.pendingEnvelopes.Contains(blockRoot) ||
 		f.pendingLocalSelfBuildEnvelopes != nil && f.pendingLocalSelfBuildEnvelopes.Contains(blockRoot)
 }
@@ -1015,18 +1018,19 @@ func (f *ForkChoiceStore) addChainSegmentAndQueueLightClientEvents(block *cltype
 	if err != nil {
 		return nil, status, err
 	}
-	f.queueLightClientEvents(lcUpdateBefore, block.Version().String())
+	f.queueLightClientEvents(lcUpdateBefore)
 	return lastProcessedState, status, nil
 }
 
 // queueLightClientEvents emits the light client events for an update stored by
 // AddChainSegment. The fork graph runs under f.mu and must not send events
 // itself, so OnBlock detects a freshly stored update and queues the sends.
-func (f *ForkChoiceStore) queueLightClientEvents(before *cltypes.LightClientUpdate, version string) {
+func (f *ForkChoiceStore) queueLightClientEvents(before *cltypes.LightClientUpdate) {
 	lcUpdate := f.forkGraph.NewestLightClientUpdate()
 	if lcUpdate == nil || lcUpdate == before {
 		return
 	}
+	version := lcUpdate.AttestedHeader.Version().String()
 	f.queueEmit(func() {
 		f.emitters.State().SendLightClientFinalityUpdate(&beaconevents.LightClientFinalityUpdateData{
 			Version: version,

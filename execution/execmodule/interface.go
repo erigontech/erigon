@@ -140,9 +140,8 @@ type ExecutionModule interface {
 
 	// --- Chain validation -------------------------------------------------
 
-	// ValidateChain validates the chain ending at the block identified by
-	// blockHash and blockNumber.
-	ValidateChain(ctx context.Context, blockHash common.Hash, blockNumber uint64) (ValidationResult, error)
+	// ValidateChain validates the chain ending at block.
+	ValidateChain(ctx context.Context, block *types.Block) (ValidationResult, error)
 
 	// ViewValidatedBlock calls fn with a view of the state after blockHash and with its
 	// parent's state, when blockHash was validated directly on top of the committed head
@@ -167,6 +166,8 @@ type ExecutionModule interface {
 
 	// AssembleBlock initiates building a block. Busy reports that the execution module is occupied;
 	// otherwise PayloadID identifies the new build.
+	// Unfinished explicit-list builds (RequireAllTransactions) are discarded when ctx ends.
+	// Ordinary payload builds remain available for later retrieval after the requesting call ends.
 	AssembleBlock(ctx context.Context, params *builder.Parameters) (AssembleBlockResult, error)
 
 	// GetAssembledBlock stops and waits for payloadID's builder. Busy reports that the execution
