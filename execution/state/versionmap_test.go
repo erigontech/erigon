@@ -2593,3 +2593,47 @@ func TestNewVersionMapSeedsLargeBAL(t *testing.T) {
 	_, _, ok := vm.ReadAddress(lastRecipient, n+1)
 	require.True(t, ok)
 }
+
+// A panic on a seed worker falls back to a serial seed on the caller.
+func TestNewVersionMapSeedWorkerPanicFallsBackToSerial(t *testing.T) {
+	const n = 3000
+	bal := transfersBAL(n)
+	NewVersionMap(bal) // starts the seed workers
+	var panicked atomic.Bool
+	balSeedJobHook = func() {
+		if panicked.CompareAndSwap(false, true) {
+			panic("crafted account")
+		}
+	}
+	defer func() { balSeedJobHook = nil }()
+
+	var vm *VersionMap
+	for range 100 { // a job reaches a worker only when one is idle
+		if vm = NewVersionMap(bal); panicked.Load() {
+			break
+		}
+	}
+	require.True(t, panicked.Load(), "no seed job ran on a worker")
+	coinbase := accounts.InternAddress(common.BigToAddress(big.NewInt(n + 1)))
+	for tx := range n {
+		v, res, ok := vm.ReadBalance(coinbase, tx+1)
+		require.True(t, ok)
+		require.Equal(t, MVReadResultDone, res.Status())
+		require.Equal(t, uint64(tx), v.Uint64())
+	}
+}
+
+// Seeding many small accounts in parallel allocates no more per account than the serial seed did: 12.1 allocations
+// per account for this list.
+func TestNewVersionMapSeedAllocatesNoMoreThanTheSerialSeed(t *testing.T) {
+	const n = 20000
+	bal := make(types.BlockAccessList, n)
+	for i := range bal {
+		bal[i].Address[0], bal[i].Address[1], bal[i].Address[2] = byte(i>>16), byte(i>>8), byte(i)
+		bal[i].StorageChanges = []types.SlotChanges{{Slot: accounts.InternKey(common.Hash{31: 1}), Changes: []*types.StorageChange{{Index: 1, Value: *uint256.NewInt(1)}}}}
+		bal[i].BalanceChanges = []*types.BalanceChange{{Index: 1, Value: *uint256.NewInt(1)}}
+	}
+	NewVersionMap(bal)
+	allocs := testing.AllocsPerRun(5, func() { newVersionMapSink = NewVersionMap(bal) })
+	require.LessOrEqual(t, allocs/n, 12.1)
+}

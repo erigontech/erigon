@@ -603,9 +603,12 @@ var balSeedWorkers = sync.OnceValue(func() chan func() {
 	return jobs
 })
 
+// balSeedJobHook, when set by a test, runs at the start of each seed job on a worker.
+var balSeedJobHook func()
+
 // forEachBALChunk runs fn over account ranges [lo, hi) of about balSeedChunkCells cells
 // each, on the caller and on any idle seed worker; an account heavier than that is a
-// range of its own.
+// range of its own. fn must be safe to run again over a range a worker already ran.
 func forEachBALChunk(n int, cellsOf func(i int) int, fn func(lo, hi int)) {
 	bounds := []int{0}
 	for i, w := 0, 0; i < n; i++ {
@@ -626,9 +629,18 @@ func forEachBALChunk(n int, cellsOf func(i int) int, fn func(lo, hi int)) {
 		}
 	}
 	var wg sync.WaitGroup
+	var panicked atomic.Bool
 	jobs := balSeedWorkers()
 	job := func() {
 		defer wg.Done()
+		defer func() {
+			if recover() != nil {
+				panicked.Store(true)
+			}
+		}()
+		if balSeedJobHook != nil {
+			balSeedJobHook()
+		}
 		run()
 	}
 	for range min(runtime.GOMAXPROCS(0), chunks) - 1 {
@@ -641,6 +653,10 @@ func forEachBALChunk(n int, cellsOf func(i int) int, fn func(lo, hi int)) {
 	}
 	run()
 	wg.Wait()
+	// A panic on a worker would kill the process; the serial rerun raises it on the caller instead.
+	if panicked.Load() {
+		fn(0, n)
+	}
 }
 
 // Typed Write primitives. Each takes the AccountPath-contracted value type directly so
