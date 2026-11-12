@@ -307,11 +307,11 @@ func (b *BlobArchiveStoreFill) fillSlot(ctx context.Context, db kv.RoDB, blocks 
 			b.findWindow(ctx, db, blocks, i, b.FromSlot)
 			served = served || slot >= b.windows[i].from.Load()
 		}
+		log.Info("Slot needs its sidecars", "slot", slot, "blockRoot", root, "blobs", blobs, "served", served)
 		if !served {
 			report.add(&report.unserved, slot)
 			return nil
 		}
-		log.Info("Slot needs its sidecars", "slot", slot, "blockRoot", root, "blobs", blobs)
 		return nil
 	}
 	var lastErr error

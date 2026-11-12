@@ -44,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto/kzg"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -734,6 +735,23 @@ func TestBlobArchiveStoreFillDryRunFindsTheFirstSlotAnEndpointServes(t *testing.
 	}
 }
 
+func TestBlobArchiveStoreFillDryRunLogsSlotsBelowTheFirstSlotAnEndpointServes(t *testing.T) {
+	f := newFillFixture(t)
+	url, _, _, _ := f.prunedChain(notServedAnswers["400"])
+	cmd := &BlobArchiveStoreFill{Endpoints: []string{url}, FromSlot: fillTestSlot, ToSlot: fillTestSlot + windowTestSlots - 1, DryRun: true}
+	var logs bytes.Buffer
+	oldHandler := log.Root().GetHandler()
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.SyncHandler(log.StreamHandler(&logs, log.LogfmtFormat()))))
+	t.Cleanup(func() { log.Root().SetHandler(oldHandler) })
+
+	require.NoError(t, f.fill(cmd, nil))
+	output := logs.String()
+	for i := range windowTestServedFrom {
+		require.Contains(t, output, fmt.Sprintf("msg=\"Slot needs its sidecars\" slot=%d", fillTestSlot+uint64(i)))
+	}
+	require.Equal(t, windowTestServedFrom, strings.Count(output, "served=false"))
+}
+
 // Providers that authenticate with a query-string key must get the block id in the path.
 func TestBlobArchiveStoreFillKeepsTheEndpointQuery(t *testing.T) {
 	f := newFillFixture(t)
@@ -882,9 +900,8 @@ func TestBlobArchiveStoreFillSparseWindowReads(t *testing.T) {
 	url, _ := f.endpoint(false)
 	reader := &fillReadCounter{BeaconSnapshotReader: f.blocks}
 	cmd := &BlobArchiveStoreFill{Endpoints: []string{url}, FromSlot: fillTestSlot, ToSlot: fillTestSlot + slots - 1, DryRun: true}
-	start := time.Now()
 	require.NoError(t, cmd.fill(t.Context(), f.db, reader, f.store, 0))
-	t.Logf("sparse slots=%d reads=%d elapsed_ns=%d", slots, reader.reads.Load(), time.Since(start).Nanoseconds())
+	t.Logf("sparse slots=%d reads=%d", slots, reader.reads.Load())
 	require.LessOrEqual(t, reader.reads.Load(), 2*slots+64, "the window search scanned a blob-free interval more than once")
 }
 
@@ -921,9 +938,8 @@ func TestBlobArchiveStoreFillDenseWindowReads(t *testing.T) {
 	url, _, _, requests := f.prunedChain(notServedAnswers["400"])
 	reader := &fillReadCounter{BeaconSnapshotReader: f.blocks}
 	cmd := &BlobArchiveStoreFill{Endpoints: []string{url}, FromSlot: fillTestSlot, ToSlot: fillTestSlot + windowTestSlots - 1, DryRun: true}
-	start := time.Now()
 	require.NoError(t, cmd.fill(t.Context(), f.db, reader, f.store, 0))
-	t.Logf("dense slots=%d reads=%d requests=%d elapsed_ns=%d", windowTestSlots, reader.reads.Load(), requests.Load(), time.Since(start).Nanoseconds())
+	t.Logf("dense slots=%d reads=%d requests=%d", windowTestSlots, reader.reads.Load(), requests.Load())
 	require.EqualValues(t, fillTestSlot+windowTestServedFrom, cmd.windows[0].from.Load())
 	require.LessOrEqual(t, reader.reads.Load(), uint64(windowTestSlots+64))
 }
