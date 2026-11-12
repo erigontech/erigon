@@ -212,12 +212,6 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 		nil,
 		nil,
 	) // TODO: add tests
-	h.Init()
+	h.o.Do(h.init)
 	return
-}
-
-func (a *ApiHandler) Init() {
-	a.o.Do(func() {
-		a.init()
-	})
 }
