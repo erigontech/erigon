@@ -420,6 +420,7 @@ func (rw *WorkerContext) RunTxTaskNoLock(txTask Task) *TxResult {
 		return &TxResult{
 			Task: txTask,
 			Err:  err,
+			Dep:  state.UnknownDep,
 		}
 	}
 	// Task reset may clear EVM cancellation, so check the worker context afterward.

@@ -272,3 +272,23 @@ func TestValidationCreditsOnlyCodelessRecipient(t *testing.T) {
 		require.Nil(t, ws, "a credit that wraps the balance skipped the empty-account cleanup of a full run")
 	})
 }
+
+type specRunCanceller struct{ n int }
+
+func (c *specRunCanceller) Cancel() { c.n++ }
+
+// A scheduled block's version map must take speculative runs, or a read dependency never cancels one.
+func TestScheduledBlockCancelsASpeculativeRunOnADependency(t *testing.T) {
+	a := accounts.InternAddress(common.HexToAddress("0xa0"))
+	b := accounts.InternAddress(common.HexToAddress("0xb1"))
+	s := newDepsTest(t, valueTransfers([]accounts.Address{a, b}, []accounts.Address{b, a}))
+	run := &specRunCanceller{}
+	s.be.versionMap.SetSpecRun(1, &state.SpecRun{Run: run})
+	s.be.versionMap.WriteBalance(a, state.Version{TxIndex: 0}, *uint256.NewInt(1), false) // tx 0 still runs
+	ibs := state.NewWithVersionMap(state.NewNoopReader(), s.be.versionMap)
+	defer ibs.Close()
+	ibs.SetTxContext(1, 1)
+	_, err := ibs.GetBalance(a)
+	require.NoError(t, err)
+	require.Equal(t, 1, run.n)
+}
