@@ -123,6 +123,9 @@ func readAheadGetter(ttx kv.TemporalTx, sc *cache.StateCache) execctxapi.StateGe
 // stubWarmNoCodeSeed is a bound probe: the BAL warmup does not seed the address-to-code-hash cache.
 var stubWarmNoCodeSeed = dbg.EnvBool("STUB_WARM_NO_CODESEED", false)
 
+// warmCodeSeedContractsOnly: the warmup seeds the address-to-code-hash cache only for accounts with code.
+var warmCodeSeedContractsOnly = dbg.EnvBool("WARM_CODESEED_CONTRACTS_ONLY", false)
+
 func (cpg *cachePopulatingGetter) GetLatest(name kv.Domain, k []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
 	v, step, err := cpg.TemporalGetter.GetLatest(name, k, opts)
 	if err == nil && opts.MaxStep() == kv.NoStepBound {
@@ -131,7 +134,9 @@ func (cpg *cachePopulatingGetter) GetLatest(name kv.Domain, k []byte, opts kv.Ge
 		if name == kv.AccountsDomain && !stubWarmNoCodeSeed {
 			var codeHash common.Hash
 			copy(codeHash[:], accounts.DeserialiseV3CodeHash(v))
-			cpg.view.SeedAddrCodeHash(k, codeHash, readTxNum)
+			if !warmCodeSeedContractsOnly || codeHash != (common.Hash{}) {
+				cpg.view.SeedAddrCodeHash(k, codeHash, readTxNum)
+			}
 		}
 	}
 	return v, step, err
