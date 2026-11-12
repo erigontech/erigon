@@ -30,6 +30,7 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/c2h5oh/datasize"
 	goethkzg "github.com/crate-crypto/go-eth-kzg"
 	"github.com/holiman/uint256"
 
@@ -109,7 +110,7 @@ type EngineServer struct {
 // One witness can reach hundreds of MB, so the byte bound is the one that matters.
 const (
 	payloadWitnessCacheSize  = 8
-	payloadWitnessCacheBytes = 256 << 20
+	payloadWitnessCacheBytes = int(256 * datasize.MB)
 )
 
 func NewEngineServer(
