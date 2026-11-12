@@ -1575,7 +1575,7 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, txNumUnwindTo ui
 	for _, diff := range domainDiffs {
 		key := common.ToBytesZeroCopy(diff.Key)
 		diffStepInverted, fullKey := key[len(key)-8:], key[:len(key)-8]
-		var previous []byte
+		var retainedValue []byte
 		var found bool
 		k, v, err := valsCursor.Seek(fullKey)
 		for err == nil && k != nil {
@@ -1598,7 +1598,7 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, txNumUnwindTo ui
 				// A partial prune may leave rows already superseded by snapshot files.
 				storedStep := kv.Step(^binary.BigEndian.Uint64(storedStepInverted))
 				if storedStep.LastTxNum(dt.stepSize) >= dt.files.EndTxNum() {
-					previous, found = value, true
+					retainedValue, found = value, true
 				}
 				break
 			}
@@ -1618,24 +1618,24 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, txNumUnwindTo ui
 		// Otherwise that entry could outlive the changesets of this step.
 		if !found {
 			var from, to uint64
-			previous, found, from, to, err = dt.getLatestFromFiles(fullKey, nil, kv.NoStepBound)
+			retainedValue, found, from, to, err = dt.getLatestFromFiles(fullKey, nil, kv.NoStepBound)
 			if err != nil {
 				return err
 			}
 			if found && expandBranch != nil {
 				// Changesets contain full keys, even when the file uses references.
-				previous, err = expandBranch(fullKey, previous, from, to)
+				retainedValue, err = expandBranch(fullKey, retainedValue, from, to)
 				if err != nil {
 					return err
 				}
 			}
 		}
-		if bytes.Equal(previous, diff.Value) {
+		if bytes.Equal(retainedValue, diff.Value) {
 			continue
 		}
 		// New trie branches record an empty previous value without reading storage.
 		// An older branch tombstone already represents that same empty state.
-		if d.Name == kv.CommitmentDomain && len(diff.Value) == 0 && len(previous) == 4 && commitment.BranchData(previous).ChildCount() == 0 {
+		if d.Name == kv.CommitmentDomain && len(diff.Value) == 0 && len(retainedValue) == 4 && commitment.BranchData(retainedValue).ChildCount() == 0 {
 			continue
 		}
 		if d.LargeValues {

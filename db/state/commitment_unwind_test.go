@@ -36,8 +36,12 @@ import (
 )
 
 func TestCommitmentFilesRepeatedUnwind(t *testing.T) {
-	const stepSize = uint64(10)
-	const filesEnd = 5 * stepSize
+	const (
+		stepSize           = uint64(10)
+		filesEnd           = 5 * stepSize
+		deepUnwindTxNum    = filesEnd + stepSize + 6
+		shallowUnwindTxNum = filesEnd + 2*stepSize + 3
+	)
 	for _, references := range []bool{false, true} {
 		for _, branch := range []string{"existing", "recreated_db", "recreated_files"} {
 			t.Run(fmt.Sprintf("references_%t/%s", references, branch), func(t *testing.T) {
@@ -46,25 +50,25 @@ func TestCommitmentFilesRepeatedUnwind(t *testing.T) {
 				agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, references)
 				keys := mkAddrs(0x10, 24)
 				nibble := func(key []byte) byte { return crypto.Keccak256(key)[0] >> 4 }
-				x, y, other := -1, -1, -1
+				targetIdx, siblingIdx, otherBranchIdx := -1, -1, -1
 				var buckets [16][]int
 				for i, key := range keys {
 					buckets[nibble(key)] = append(buckets[nibble(key)], i)
 				}
 				for _, bucket := range buckets {
 					if len(bucket) == 2 && crypto.Keccak256(keys[bucket[0]])[0] != crypto.Keccak256(keys[bucket[1]])[0] {
-						x, y = bucket[0], bucket[1]
+						targetIdx, siblingIdx = bucket[0], bucket[1]
 						break
 					}
 				}
-				require.NotEqual(t, -1, x, "need exactly two accounts below a one-nibble branch")
+				require.NotEqual(t, -1, targetIdx, "need exactly two accounts below a one-nibble branch")
 				for i := range keys {
-					if nibble(keys[i]) != nibble(keys[x]) {
-						other = i
+					if nibble(keys[i]) != nibble(keys[targetIdx]) {
+						otherBranchIdx = i
 						break
 					}
 				}
-				require.NotEqual(t, -1, other, "need an account in another branch")
+				require.NotEqual(t, -1, otherBranchIdx, "need an account in another branch")
 				account := func(nonce uint64) []byte {
 					acc := accounts.Account{Nonce: nonce, Balance: *uint256.NewInt(nonce), CodeHash: accounts.EmptyCodeHash}
 					return accounts.SerialiseV3(&acc)
@@ -92,9 +96,9 @@ func TestCommitmentFilesRepeatedUnwind(t *testing.T) {
 				writeStepsKeys(t, db, agg, keys, 0, 4)
 				require.NoError(t, db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
 					if branch == "recreated_files" {
-						write(tx, filesEnd-1, keys[x], nil)
+						write(tx, filesEnd-1, keys[targetIdx], nil)
 					}
-					write(tx, filesEnd+1, keys[other], account(1))
+					write(tx, filesEnd+1, keys[otherBranchIdx], account(1))
 					return nil
 				}))
 				require.NoError(t, agg.BuildFiles(db, filesEnd+stepSize, unboundedFinalityCtx))
@@ -127,10 +131,10 @@ func TestCommitmentFilesRepeatedUnwind(t *testing.T) {
 				}
 
 				if branch == "recreated_db" {
-					write(tx, filesEnd+6, keys[x], nil)
+					write(tx, filesEnd+6, keys[targetIdx], nil)
 				}
 				if branch != "existing" {
-					prefix := nibbles.HexToCompact([]byte{nibble(keys[x])})
+					prefix := nibbles.HexToCompact([]byte{nibble(keys[targetIdx])})
 					tombstone, _, err := tx.GetLatest(kv.CommitmentDomain, prefix, kv.GetLatestOptions{})
 					require.NoError(t, err)
 					require.Len(t, tombstone, 4)
@@ -142,10 +146,10 @@ func TestCommitmentFilesRepeatedUnwind(t *testing.T) {
 
 				// The deeper unwind touches another subtree, so it cannot remove an
 				// unnecessary restore left by the first unwind in this subtree.
-				first, _ := write(tx, filesEnd+stepSize+6, keys[other], account(500))
-				second, _ := write(tx, filesEnd+2*stepSize+3, keys[x], account(1000))
-				unwind(filesEnd+2*stepSize+3, second)
-				unwind(filesEnd+stepSize+6, first)
+				deepChanges, _ := write(tx, deepUnwindTxNum, keys[otherBranchIdx], account(500))
+				shallowChanges, _ := write(tx, shallowUnwindTxNum, keys[targetIdx], account(1000))
+				unwind(shallowUnwindTxNum, shallowChanges)
+				unwind(deepUnwindTxNum, deepChanges)
 
 				cleanDB, _ := testDbAndAggregatorv3(t, stepSize)
 				cleanTx, err := cleanDB.BeginTemporalRw(ctx)
@@ -159,10 +163,10 @@ func TestCommitmentFilesRepeatedUnwind(t *testing.T) {
 					acc := accounts.Account{Nonce: 4 * stepSize, Balance: *uint256.NewInt((4*stepSize-1)*100_000 + uint64(i)), CodeHash: accounts.EmptyCodeHash}
 					expectedValues[i] = accounts.SerialiseV3(&acc)
 				}
-				expectedValues[other] = account(1)
-				for round, changed := range []int{x, y} {
+				expectedValues[otherBranchIdx] = account(1)
+				for round, changed := range []int{targetIdx, siblingIdx} {
 					expectedValues[changed] = account(2000 + 1000*uint64(round))
-					_, actual := write(tx, filesEnd+stepSize+6+uint64(round), keys[changed], expectedValues[changed])
+					_, actual := write(tx, deepUnwindTxNum+uint64(round), keys[changed], expectedValues[changed])
 					for i, key := range keys {
 						got, _, err := tx.GetLatest(kv.AccountsDomain, key, kv.GetLatestOptions{})
 						require.NoError(t, err)
