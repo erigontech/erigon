@@ -266,12 +266,12 @@ type readPathResult struct {
 // when the account is absent (reads as the zero value).
 func wipedFieldOutcome(s *IntraBlockState, addr accounts.Address) readPathOutcome {
 	state, destructDep := s.versionMap.AccountLifecycleWithDestructDep(addr, s.txIndex)
-	if state == LifecycleRevived {
-		return outcomeReturnEmpty
-	}
 	// A destruct back in flight is not counted by the lifecycle, so the verdict may be stale.
 	if destructDep != UnknownDep {
 		s.dep = max(s.dep, destructDep)
+	}
+	if state == LifecycleRevived {
+		return outcomeReturnEmpty
 	}
 	return outcomeReturnZero
 }

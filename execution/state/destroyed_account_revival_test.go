@@ -258,16 +258,35 @@ func TestCommittedFallbackDependsOnInFlightDestruct(t *testing.T) {
 func TestWipedFieldOutcomeDependsOnInFlightDestruct(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress(common.HexToAddress("0x8246AE"))
-	reader := newAccountStateReader(addr)
-	vm := NewVersionMap(nil)
-	destruct := newWriteSet(
-		&VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: Version{TxIndex: 0}}, Val: true},
-	)
-	vm.FlushVersionedWrites(destruct, true)
-	vm.FlushVersionedWrites(destruct, false)
+	destruct := func(txIdx int) *WriteSet {
+		return newWriteSet(&VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: Version{TxIndex: txIdx}}, Val: true})
+	}
+	// A validated destruct can still be re-run, and the re-run's flush puts it back in flight.
+	backInFlight := func(vm *VersionMap, ws *WriteSet) {
+		vm.FlushVersionedWrites(ws, false)
+		vm.MarkWritesValidated(ws, func(accounts.Address) bool { return false })
+		vm.FlushVersionedWrites(ws, false)
+	}
+	t.Run("absent", func(t *testing.T) {
+		vm := NewVersionMap(nil)
+		backInFlight(vm, destruct(0))
 
-	ibs := newAmsterdamIBS(reader, vm, 1)
-	defer ibs.Close()
-	require.Equal(t, outcomeReturnZero, wipedFieldOutcome(ibs, addr))
-	require.Equal(t, 0, ibs.DepTxIndex())
+		ibs := newAmsterdamIBS(newAccountStateReader(addr), vm, 1)
+		defer ibs.Close()
+		require.Equal(t, outcomeReturnZero, wipedFieldOutcome(ibs, addr))
+		require.Equal(t, 0, ibs.DepTxIndex())
+	})
+	t.Run("revived", func(t *testing.T) {
+		vm := NewVersionMap(nil)
+		vm.FlushVersionedWrites(destruct(0), true)
+		revival := &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: Version{TxIndex: 1}}, Val: *uint256.NewInt(5)}
+		revival.valStatus = ValueChanged
+		vm.FlushVersionedWrites(newWriteSet(revival), true)
+		backInFlight(vm, destruct(2))
+
+		ibs := newAmsterdamIBS(newAccountStateReader(addr), vm, 3)
+		defer ibs.Close()
+		require.Equal(t, outcomeReturnEmpty, wipedFieldOutcome(ibs, addr))
+		require.Equal(t, 2, ibs.DepTxIndex())
+	})
 }
