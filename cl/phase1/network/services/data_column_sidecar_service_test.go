@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/mock/gomock"
 
@@ -194,6 +195,58 @@ func TestDataColumnSidecarService(t *testing.T) {
 	suite.Run(t, &dataColumnSidecarTestSuite{})
 }
 
+type advancingColumnFinality struct {
+	*forkchoice_mock.ForkChoiceStorageMock
+	next          solid.Checkpoint
+	slotsPerEpoch uint64
+}
+
+func (f *advancingColumnFinality) FinalizedCheckpoint() solid.Checkpoint {
+	checkpoint := f.ForkChoiceStorageMock.FinalizedCheckpoint()
+	f.FinalizedCheckpointVal = f.next
+	f.FinalizedSlotVal = f.next.Epoch * f.slotsPerEpoch
+	return checkpoint
+}
+
+func (t *dataColumnSidecarTestSuite) TestProcessMessageFinalityAdvanceKeepsValidFuluSidecar() {
+	t.setupFinalizedAncestorTest(testFinalizedRoot)
+	old := solid.Checkpoint{Epoch: 7, Root: testFinalizedRoot}
+	next := solid.Checkpoint{Epoch: 8, Root: common.Hash{0xf2}}
+	t.mockForkChoice.FinalizedCheckpointVal = old
+	t.mockForkChoice.FinalizedSlotVal = old.Epoch * testSlotsPerEpoch
+	t.mockForkChoice.Ancestors[old.Epoch*testSlotsPerEpoch] = forkchoice.ForkChoiceNode{Root: old.Root}
+	t.mockForkChoice.Ancestors[next.Epoch*testSlotsPerEpoch] = forkchoice.ForkChoiceNode{Root: next.Root}
+	t.mockForkChoice.Headers[testParentRoot] = &cltypes.BeaconBlockHeader{Slot: testSlot - 1}
+	service := t.dataColumnSidecarService.(*dataColumnSidecarService)
+	service.forkChoice = &advancingColumnFinality{t.mockForkChoice, next, testSlotsPerEpoch}
+	verifyDataColumnSidecarInclusionProof = func(*cltypes.DataColumnSidecar) bool { return true }
+	verifyDataColumnSidecarKZGProofs = func(*cltypes.DataColumnSidecar) bool { return true }
+	t.mockColumnSidecarStorage.EXPECT().WriteColumnSidecars(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
+	t.mockPeerDas.EXPECT().TryScheduleRecover(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
+
+	err := service.ProcessMessage(t.T().Context(), nil, createMockDataColumnSidecar(testSlot, 0, clparams.FuluVersion))
+
+	t.Require().NoError(err, "slot 321 descends from both finalized checkpoints at slots 224 and 256")
+}
+
+func TestPublishColumnsFinalityAdvanceKeepsValidFuluSidecar(t *testing.T) {
+	service, publisher, clock, fcu := newELPublishTestService(t)
+	defer func(f func(uint64) uint64) { computeSubnetForDataColumnSidecar = f }(computeSubnetForDataColumnSidecar)
+	computeSubnetForDataColumnSidecar = func(index uint64) uint64 { return index % service.cfg.DataColumnSidecarSubnetCount }
+	next := solid.Checkpoint{Epoch: 2, Root: common.Hash{0xf2}}
+	fcu.Ancestors[next.Epoch*service.cfg.SlotsPerEpoch] = forkchoice.ForkChoiceNode{Root: next.Root}
+	service.forkChoice = &advancingColumnFinality{fcu, next, service.cfg.SlotsPerEpoch}
+	clock.EXPECT().ComputeForkDigest(gomock.Any()).Return(common.Bytes4{1}, nil).AnyTimes()
+	var published int
+	publisher.EXPECT().PublishToForkDigest(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(context.Context, common.Bytes4, string, []byte) error {
+		published++
+		return nil
+	}).AnyTimes()
+	service.PublishColumns(t.Context(), []*cltypes.DataColumnSidecar{elBuiltSidecar(100, 3)})
+
+	require.Equal(t, 1, published, "slot 100 descends from both finalized checkpoints at slots 32 and 64; column must be published")
+}
+
 // TestProcessMessage_WhenSyncing_ReturnsErrIgnore tests that the service returns ErrIgnore when syncing
 func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenSyncing_ReturnsErrIgnore() {
 	// Setup
@@ -356,7 +409,6 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenSlotTooOld_ReturnsEr
 
 	// The finalized checkpoint starts after the sidecar's slot, so the sidecar is too old
 	t.mockForkChoice.FinalizedCheckpointVal = solid.Checkpoint{Epoch: (testSlot + 100) / testSlotsPerEpoch}
-	t.mockForkChoice.FinalizedSlotVal = t.mockForkChoice.FinalizedCheckpointVal.Epoch * testSlotsPerEpoch
 
 	// Execute
 	sidecar := createMockDataColumnSidecar(testSlot, 0, clparams.FuluVersion)
@@ -375,7 +427,6 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenSlotIsFinalizedEpoch
 	t.mockEthClock.EXPECT().GetCurrentSlot().Return(testSlot).AnyTimes()
 	finalizedEpoch := testSlot / testSlotsPerEpoch
 	t.mockForkChoice.FinalizedCheckpointVal = solid.Checkpoint{Epoch: finalizedEpoch}
-	t.mockForkChoice.FinalizedSlotVal = finalizedEpoch * testSlotsPerEpoch
 
 	sidecar := createMockDataColumnSidecar(finalizedEpoch*testSlotsPerEpoch, 0, clparams.FuluVersion)
 	err := t.dataColumnSidecarService.ProcessMessage(context.Background(), nil, sidecar)
@@ -423,7 +474,7 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenSlotAfterFinalizedEp
 	finalizedEpoch := testSlot / testSlotsPerEpoch
 	t.Require().Greater(testSlot, finalizedEpoch*testSlotsPerEpoch)
 	t.mockForkChoice.Ancestors[finalizedEpoch*testSlotsPerEpoch] = forkchoice.ForkChoiceNode{Root: testFinalizedRoot}
-	t.mockForkChoice.FinalizedSlotVal = finalizedEpoch * testSlotsPerEpoch
+	t.mockForkChoice.FinalizedSlotVal = finalizedEpoch*testSlotsPerEpoch + testSlotsPerEpoch - 1
 
 	sidecar := createMockDataColumnSidecar(testSlot, 0, clparams.FuluVersion)
 	err := t.dataColumnSidecarService.ProcessMessage(context.Background(), nil, sidecar)
@@ -441,7 +492,6 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenAnchorAfterFinalized
 	checkpointRoot := common.Hash{0x0f}
 	t.setupFinalizedAncestorTest(checkpointRoot)
 	t.mockForkChoice.FinalizedCheckpointVal = solid.Checkpoint{Epoch: finalizedEpoch, Root: checkpointRoot}
-	t.mockForkChoice.FinalizedSlotVal = finalizedEpoch * testSlotsPerEpoch
 	// Fork choice starts mid-epoch, so the epoch start slot is not in its history.
 	anchorSlot := finalizedEpoch*testSlotsPerEpoch + 5
 	t.mockForkChoice.AnchorSlotVal = anchorSlot
@@ -467,7 +517,6 @@ func (t *dataColumnSidecarTestSuite) setupFinalizedAncestorTest(checkpointRoot c
 	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "BlsVerify", gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).AnyTimes()
 	t.mockForkChoice.Headers[testParentRoot] = &cltypes.BeaconBlockHeader{}
 	t.mockForkChoice.FinalizedCheckpointVal = solid.Checkpoint{Epoch: testSlot / testSlotsPerEpoch, Root: checkpointRoot}
-	t.mockForkChoice.FinalizedSlotVal = t.mockForkChoice.FinalizedCheckpointVal.Epoch * testSlotsPerEpoch
 	t.mockSyncedData.EXPECT().ViewHeadState(gomock.Any()).DoAndReturn(func(fn synced_data.ViewHeadStateFn) error {
 		return nil
 	}).Return(nil).AnyTimes()
