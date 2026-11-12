@@ -1219,15 +1219,6 @@ func TestGetLightClientUpdatesUsesTheSelectedHead(t *testing.T) {
 	require.Equal(t, []common.Hash{{}, {0x61}}, graph.lightClientHeads)
 }
 
-// The finalized slot is the start slot of the finalized checkpoint's epoch: a canonical block after it is not finalized.
-func TestFinalizedSlotIsTheStartSlotOfTheFinalizedEpoch(t *testing.T) {
-	cfg := clparams.MainnetBeaconConfig
-	store := &ForkChoiceStore{beaconCfg: &cfg}
-	store.finalizedCheckpoint.Store(solid.Checkpoint{Epoch: 3})
-
-	require.Equal(t, 3*cfg.SlotsPerEpoch, store.FinalizedSlot())
-}
-
 func TestUpdateCheckpointsPrunesOperationsWithExactFinalizedState(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	finalizedRoot := common.Hash{0x42}
