@@ -23,7 +23,6 @@ import (
 	"bytes"
 	"fmt"
 	"math/big"
-	"os"
 	"strings"
 	"testing"
 	"unsafe"
@@ -45,7 +44,6 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
-	"github.com/erigontech/erigon/execution/tracing/tracers/logger"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
@@ -631,7 +629,6 @@ func TestEip2929Cases(t *testing.T) {
 		id++
 		cfg := &Config{
 			EVMConfig: vm.Config{
-				Tracer:    logger.NewMarkdownLogger(nil, os.Stdout).Hooks(),
 				ExtraEips: []int{2929},
 			},
 		}
