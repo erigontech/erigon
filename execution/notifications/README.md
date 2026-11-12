@@ -27,13 +27,16 @@ exec3 block execution (execution/stagedsync/exec3_serial.go, exec3_parallel.go)
 
 Dispatcher.Dispatch()  (execution/execmodule/notification_dispatcher.go)
   → prepareStateChanges()
-    → Accumulator.Batch(currentHeader)
+    → Accumulator.Batch(executedHeader)
     → set state version, pending fees, gas limit and finalized height
     → BlockBatchNotification.RefreshAccounts(state)
   → publish headers, receipts and logs
   → StateChangeConsumer.SendStateChanges(batch.ToProtoBatch())
   → Accumulator.Reset()
 ```
+
+Normal dispatch uses the header at Finish stage progress so the announced head
+matches the supplied state. Stored head markers can be ahead of execution.
 
 Preparation keeps recorded execution changes intact. Synthetic head entries and
 final account values are added only to the output batch. A preparation failure
@@ -70,8 +73,8 @@ StateChangeConsumer.SendStateChanges(StateChangeBatch)  [protobuf]
 TxPool uses transaction directions to track mined and unwound transactions, and
 account/storage/code changes to refresh sender state and invalidate frame validations.
 
-On subscription, the KV server reads a reset from committed execution state. Under
-the publication lock, it selects the newer of this reset and the latest published
+On subscription, the KV server reads a reset at committed Execution stage progress.
+Under the publication lock, it selects the newer of this reset and the latest published
 head, keeping the head and state version together. It sends that reset before later
 batches, including when the latest publication is still awaiting commit.
 
