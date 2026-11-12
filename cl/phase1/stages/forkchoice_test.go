@@ -1861,7 +1861,8 @@ func TestPostForkchoiceSameRootAfterOtherWriterRunsPerPassSteps(t *testing.T) {
 	require.Equal(t, f.headSlot, f.cfg.blobDownloader.HeadSlot())
 	highestFinalized, err := beacon_indicies.ReadHighestFinalized(f.tx)
 	require.NoError(t, err)
-	require.Equal(t, f.cfg.forkChoice.FinalizedSlot(), highestFinalized)
+	finalizedEpoch := f.cfg.forkChoice.FinalizedCheckpoint().Epoch
+	require.Equal(t, finalizedEpoch*f.cfg.beaconCfg.SlotsPerEpoch+(f.cfg.beaconCfg.SlotsPerEpoch-1), highestFinalized)
 	headV2Statuses, headEvents := f.drainHeadEvents()
 	require.Equal(t, []string{"empty"}, headV2Statuses)
 	require.Equal(t, 1, headEvents)

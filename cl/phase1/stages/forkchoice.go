@@ -514,7 +514,8 @@ func saveFinalizedStateOnDiskIfNeeded(fc forkchoice.ForkChoiceStorageReader, bea
 func postForkchoiceOperations(tx kv.RwTx, logger log.Logger, cfg *Cfg, headSlot uint64, headRoot common.Hash) error {
 	headEventEmitted := emitHeadEventBeforeStateCopy(cfg.beaconCfg, cfg.forkChoice, cfg.emitter, headSlot, headRoot)
 	cfg.blobDownloader.SetHeadSlot(headSlot)
-	if err := beacon_indicies.WriteHighestFinalized(tx, cfg.forkChoice.FinalizedSlot()); err != nil {
+	finalizedEpoch := cfg.forkChoice.FinalizedCheckpoint().Epoch
+	if err := beacon_indicies.WriteHighestFinalized(tx, finalizedEpoch*cfg.beaconCfg.SlotsPerEpoch+(cfg.beaconCfg.SlotsPerEpoch-1)); err != nil {
 		return err
 	}
 	var headState *state.CachingBeaconState
