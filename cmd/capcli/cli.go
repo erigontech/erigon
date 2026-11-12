@@ -1150,7 +1150,8 @@ func storeCheckFloor(beaconConfig *clparams.BeaconChainConfig, frozenBlobs uint6
 }
 
 // checkBlobStore reports how many blob-bearing slots hold a different number of sidecars than
-// their block commits to, and how many could not be checked at all. Unresolved slots are an error:
+// their block commits to (a Gloas block whose payload was skipped may also hold none), and how many
+// could not be checked at all. Unresolved slots are an error:
 // an audit that silently skips them reports completeness it never established.
 func checkBlobStore(ctx context.Context, tx kv.Tx, snr freezeblocks.BeaconSnapshotReader, blobStorage blob_storage.BlobStorage, fromSlot, targetSlot uint64, removeMismatched bool) (uint64, uint64, error) {
 	var mismatched, unresolved uint64
@@ -1189,6 +1190,9 @@ func checkBlobStore(ctx context.Context, tx kv.Tx, snr freezeblocks.BeaconSnapsh
 		wantBlobs, err := expectedBlobsInTx(ctx, tx, snr, blockRoot, blk)
 		if err != nil {
 			return mismatched, unresolved, err
+		}
+		if wantBlobs == 0 && haveBlobs > 0 {
+			wantBlobs = blobCount(blk)
 		}
 		// A count row does not prove its sidecar files are on disk, so a matching count is not
 		// evidence the store can still serve the slot. Stat each expected file rather than reading

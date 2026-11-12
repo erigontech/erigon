@@ -866,3 +866,24 @@ func TestBlobArchiveStoreCheckPassesAfterFillingASkippedGloasPayload(t *testing.
 	require.NoError(t, err)
 	require.Zero(t, mismatched)
 }
+
+func TestBlobArchiveStoreCheckKeepsTheBlobsOfASkippedGloasPayload(t *testing.T) {
+	f := newFillFixture(t)
+	f.version = clparams.GloasVersion
+	before := f.addBlock(fillTestSlot, 1)
+	onChain := f.payload
+	skipped := f.addBlock(fillTestSlot+1, 2)
+	f.payload = onChain
+	after := f.addBlock(fillTestSlot+2, 1)
+	for _, root := range []common.Hash{before, skipped, after} {
+		f.storeValid(root)
+	}
+
+	tx, err := f.db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	mismatched, _, err := checkBlobStore(t.Context(), tx, f.blocks, f.store, fillTestSlot+2, fillTestSlot, true)
+	require.NoError(t, err)
+	require.Zero(t, mismatched)
+	require.True(t, f.storedValid(fillTestSlot+1, skipped))
+}
