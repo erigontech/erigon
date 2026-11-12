@@ -436,9 +436,20 @@ func NewVersionMap(changes types.BlockAccessList) *VersionMap {
 		HasBAL: len(changes) > 0,
 		bal:    changes,
 	}
+	if vmOriginPresize && len(changes) > 0 {
+		slots := 0
+		for i := range changes {
+			slots += len(changes[i].StorageChanges) + len(changes[i].StorageReads)
+		}
+		vm.originAccounts.Store(xsync.NewMap[accounts.Address, *accounts.Account](xsync.WithPresize(len(changes))))
+		vm.originStorage.Store(xsync.NewMap[originStorageKey, uint256.Int](xsync.WithPresize(slots)))
+	}
 	vm.WriteChanges(changes)
 	return vm
 }
+
+// vmOriginPresize is a probe: a BAL block sizes its committed-origin maps from the BAL's account and slot counts.
+var vmOriginPresize = dbg.EnvBool("VM_ORIGIN_PRESIZE", false)
 
 // seededStorage returns the value the access list seeds for addr's slot key at txIdx. The access
 // list is validated, so its accounts, slots and changes are in increasing order.
