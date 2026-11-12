@@ -810,12 +810,15 @@ func TestBlobCountFromBlocksRejectsSlotsWithoutBlockSegment(t *testing.T) {
 	require.Equal(t, uint64(30_000), sn.VisibleSegmentsMaxTo(snaptype.BeaconBlocks.Enum()))
 
 	blobCount := BlobCountFromBlocks(t.Context(), sn, NewBeaconSnapshotReader(sn, nil, &clparams.MainnetBeaconConfig))
-	n, err := blobCount(25_000)
-	require.NoError(t, err, "an empty slot inside a frozen block segment is blobless")
-	require.Zero(t, n)
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		n, err := blobCount(tx, 25_000)
+		require.NoError(t, err, "an empty slot inside a frozen block segment is blobless")
+		require.Zero(t, n)
+		return nil
+	}))
 
 	store := blob_storage.NewBlobStore(db, afero.NewMemMapFs())
-	err = DumpBlobSidecarsRange(t.Context(), db, store, 10_000, 20_000, 0, dirs, 1, blobCount, log.LvlDebug, log.New())
+	err := DumpBlobSidecarsRange(t.Context(), db, store, 10_000, 20_000, 0, dirs, 1, blobCount, log.LvlDebug, log.New())
 	require.ErrorContains(t, err, "no frozen beacon block segment")
 }
 
@@ -935,16 +938,21 @@ func TestRetireBlobsBelowWaitsForOverlapCleanup(t *testing.T) {
 
 func TestBlobCountFromBlocksFollowsTheChildsPayloadStatus(t *testing.T) {
 	const slot = 7
+	const unfrozen = snaptype.CaplinMergeLimit + 1
 	for _, tc := range []struct {
-		name     string
-		onChain  bool
-		stored   bool
-		expected uint64
-		dumpErr  string
+		name      string
+		onChain   bool
+		stored    bool
+		childSlot uint64
+		finalized uint64
+		expected  uint64
+		dumpErr   string
 	}{
-		{"payload skipped", false, false, 0, ""},
-		{"payload skipped, its blobs stored", false, true, 0, ""},
-		{"payload on chain", true, false, 2, "blob storage count mismatch at slot 7"},
+		{"payload skipped", false, false, slot + 3, 0, 0, ""},
+		{"payload skipped, its blobs stored", false, true, slot + 3, 0, 0, ""},
+		{"payload on chain", true, false, slot + 3, 0, 2, "blob storage count mismatch at slot 7"},
+		{"payload skipped by a finalized child not frozen yet", false, true, unfrozen, unfrozen, 0, ""},
+		{"payload skipped by a child not finalized yet", false, true, unfrozen, unfrozen - 1, 2, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := clparams.MainnetBeaconConfig
@@ -959,7 +967,7 @@ func TestBlobCountFromBlocksFollowsTheChildsPayloadStatus(t *testing.T) {
 			root, err := block.Block.HashSSZ()
 			require.NoError(t, err)
 			child := cltypes.NewSignedBeaconBlock(&cfg, clparams.GloasVersion)
-			child.Block.Slot = slot + 3
+			child.Block.Slot = tc.childSlot
 			child.Block.ParentRoot = root
 			child.Block.Body.GetSignedExecutionPayloadBid().Message.ParentBlockHash = common.Hash{0x02}
 			if tc.onChain {
@@ -971,7 +979,7 @@ func TestBlobCountFromBlocksFollowsTheChildsPayloadStatus(t *testing.T) {
 				switch s {
 				case slot:
 					return blockSnapshotWord(t, block)
-				case slot + 3:
+				case tc.childSlot:
 					return blockSnapshotWord(t, child)
 				}
 				return nil
@@ -980,17 +988,26 @@ func TestBlobCountFromBlocksFollowsTheChildsPayloadStatus(t *testing.T) {
 			t.Cleanup(sn.Close)
 			require.NoError(t, sn.OpenFolder())
 
-			blobCount := BlobCountFromBlocks(t.Context(), sn, NewBeaconSnapshotReader(sn, nil, &cfg))
-			n, err := blobCount(slot)
-			require.NoError(t, err)
-			require.Equal(t, tc.expected, n)
-
 			db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 			childRoot, err := child.Block.HashSSZ()
 			require.NoError(t, err)
-			for s, r := range map[uint64]common.Hash{slot: root, slot + 3: childRoot} {
-				require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error { return beacon_indicies.MarkRootCanonical(tx, s, r) }))
-			}
+			require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+				require.NoError(t, beacon_indicies.MarkRootCanonical(tx, slot, root))
+				require.NoError(t, beacon_indicies.WriteHighestFinalized(tx, tc.finalized))
+				if tc.childSlot < snaptype.CaplinMergeLimit {
+					return beacon_indicies.MarkRootCanonical(tx, tc.childSlot, childRoot)
+				}
+				return beacon_indicies.WriteBeaconBlockAndIndicies(tx, child, true)
+			}))
+
+			blobCount := BlobCountFromBlocks(t.Context(), sn, NewBeaconSnapshotReader(sn, nil, &cfg))
+			var n uint64
+			require.NoError(t, db.View(t.Context(), func(tx kv.Tx) (err error) {
+				n, err = blobCount(tx, slot)
+				return err
+			}))
+			require.Equal(t, tc.expected, n)
+
 			store := blob_storage.NewBlobStore(db, afero.NewMemMapFs())
 			if tc.stored {
 				require.NoError(t, store.WriteBlobSidecars(t.Context(), root, []*cltypes.BlobSidecar{blobSidecar(slot, 0), blobSidecar(slot, 1)}))

@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/seg"
@@ -186,7 +187,7 @@ func TestDumpBlobSegmentKeepsOldFilesWhenTheDumpFails(t *testing.T) {
 		writeSegment(t, dirs, name)
 	}
 
-	err := dumpBlobSegment(t.Context(), db, store, 30_000, 0, dirs, func(uint64) (uint64, error) { return 1, nil })
+	err := dumpBlobSegment(t.Context(), db, store, 30_000, 0, dirs, func(kv.Tx, uint64) (uint64, error) { return 1, nil })
 	require.ErrorContains(t, err, "count mismatch")
 
 	for _, name := range old {
@@ -207,7 +208,7 @@ func TestDumpBlobSegmentKeepsOldFilesWhenCompressFails(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	err := dumpBlobSegment(ctx, db, store, 30_000, 0, dirs, func(slot uint64) (uint64, error) {
+	err := dumpBlobSegment(ctx, db, store, 30_000, 0, dirs, func(_ kv.Tx, slot uint64) (uint64, error) {
 		if slot == 40_000-1 {
 			cancel()
 		}
@@ -235,7 +236,7 @@ func TestDumpBlobSegmentReplacesOldFiles(t *testing.T) {
 		writeSegment(t, dirs, name)
 	}
 
-	require.NoError(t, dumpBlobSegment(t.Context(), db, store, 30_000, 0, dirs, func(uint64) (uint64, error) { return 0, nil }))
+	require.NoError(t, dumpBlobSegment(t.Context(), db, store, 30_000, 0, dirs, func(kv.Tx, uint64) (uint64, error) { return 0, nil }))
 
 	entries, err := os.ReadDir(dirs.Snap)
 	require.NoError(t, err)

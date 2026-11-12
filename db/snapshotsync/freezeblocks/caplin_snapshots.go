@@ -294,7 +294,7 @@ func DumpBlobSidecarsRange(ctx context.Context, db kv.RoDB, storage blob_storage
 			return err
 		}
 
-		blobCount, err := blobCountFn(i)
+		blobCount, err := blobCountFn(tx, i)
 		if err != nil {
 			return err
 		}
@@ -388,10 +388,10 @@ func DumpBeaconBlocks(ctx context.Context, db kv.RoDB, fromSlot, toSlot uint64, 
 	return nil
 }
 
-type BlobCountBySlotFn func(slot uint64) (uint64, error)
+type BlobCountBySlotFn func(tx kv.Tx, slot uint64) (uint64, error)
 
 func BlobCountFromBlocks(ctx context.Context, sn *CaplinSnapshots, r BeaconSnapshotReader) BlobCountBySlotFn {
-	return func(slot uint64) (uint64, error) {
+	return func(tx kv.Tx, slot uint64) (uint64, error) {
 		block, err := r.ReadBeaconBlockBodyBySlot(ctx, nil, slot)
 		if err != nil {
 			return 0, err
@@ -414,8 +414,8 @@ func BlobCountFromBlocks(ctx context.Context, sn *CaplinSnapshots, r BeaconSnaps
 			if err != nil {
 				return 0, err
 			}
-			skipped, err := PayloadSkipped(block, root, sn.BlocksAvailable(), func(slot uint64) (*cltypes.SignedBeaconBlock, error) {
-				return r.ReadBeaconBlockBodyBySlot(ctx, nil, slot)
+			skipped, err := PayloadSkipped(tx, sn, block, root, func(slot uint64) (*cltypes.SignedBeaconBlock, error) {
+				return r.ReadBeaconBlockBodyBySlot(ctx, tx, slot)
 			})
 			if err != nil || skipped {
 				return 0, err
@@ -425,8 +425,12 @@ func BlobCountFromBlocks(ctx context.Context, sn *CaplinSnapshots, r BeaconSnaps
 	}
 }
 
-func PayloadSkipped(block *cltypes.SignedBeaconBlock, root common.Hash, lastSlot uint64, read func(slot uint64) (*cltypes.SignedBeaconBlock, error)) (bool, error) {
-	for slot := block.Block.Slot + 1; slot <= lastSlot; slot++ {
+func PayloadSkipped(tx kv.Tx, sn *CaplinSnapshots, block *cltypes.SignedBeaconBlock, root common.Hash, read func(slot uint64) (*cltypes.SignedBeaconBlock, error)) (bool, error) {
+	finalized, err := beacon_indicies.ReadHighestFinalized(tx)
+	if err != nil {
+		return false, err
+	}
+	for slot := block.Block.Slot + 1; slot <= max(sn.BlocksAvailable(), finalized); slot++ {
 		child, err := read(slot)
 		if err != nil {
 			return false, err
