@@ -255,6 +255,11 @@ func IsBetterUpdate(cfg *clparams.BeaconChainConfig, newUpdate, oldUpdate *cltyp
 	return newUpdate.SignatureSlot < oldUpdate.SignatureSlot
 }
 
+// IsFinalityUpdate implements is_finality_update: whether the update proves a finalized header.
+func IsFinalityUpdate(update *cltypes.LightClientUpdate) bool {
+	return !isZeroBranch(update.FinalityBranch)
+}
+
 func hasRelevantSyncCommittee(cfg *clparams.BeaconChainConfig, update *cltypes.LightClientUpdate) bool {
 	return !isZeroBranch(update.NextSyncCommitteeBranch) &&
 		cfg.SyncCommitteePeriod(update.AttestedHeader.Beacon.Slot) == cfg.SyncCommitteePeriod(update.SignatureSlot)

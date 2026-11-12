@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/lightclient_utils"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/common"
@@ -519,4 +520,41 @@ func TestGetLightClientUpdatesServesCandidatesBeforeTheFirstFinalization(t *test
 	f.recordLightClientUpdateLocked(head, candidate)
 
 	require.Equal(t, []*cltypes.LightClientUpdate{candidate}, f.GetLightClientUpdates(1, 2, head))
+}
+
+// The newest finality update is the last recorded update that has finality; a later update without it is only the
+// newest update.
+func TestNewestLightClientFinalityUpdateKeepsTheLastUpdateWithFinality(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	f := &forkGraphDisk{beaconCfg: cfg}
+	p := cfg.SlotsPerEpoch * cfg.EpochsPerSyncCommitteePeriod
+	withFinality := lightClientTestUpdate(cfg, 400, p+10)
+	withFinality.FinalityBranch.Set(0, common.Hash{1})
+	withoutFinality := lightClientTestUpdate(cfg, 400, p+20)
+
+	f.recordLightClientUpdateLocked(common.Hash{1}, withFinality)
+	f.recordLightClientUpdateLocked(common.Hash{2}, withoutFinality)
+
+	require.Same(t, withoutFinality, f.NewestLightClientUpdate())
+	require.Same(t, withFinality, f.NewestLightClientFinalityUpdate())
+}
+
+// A block whose parent state's finalized block is not in memory, as after a restart into non-finality, still records
+// its light client update, without finality.
+func TestAddChainSegmentRecordsAnUpdateWithoutTheFinalizedBlock(t *testing.T) {
+	blocks, anchorState, _ := tests.GetElectraRandom()
+	graph, err := NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{Beacon: true})
+	require.NoError(t, err)
+	g := graph.(*forkGraphDisk)
+	g.lowestAvailableBlock.Store(0) // the anchor's finalized block is not stored
+
+	for _, block := range blocks {
+		_, result, err := g.AddChainSegment(block, true)
+		require.NoError(t, err)
+		require.Equal(t, Success, result)
+	}
+	update := g.NewestLightClientUpdate()
+	require.NotNil(t, update)
+	require.False(t, lightclient_utils.IsFinalityUpdate(update))
+	require.Nil(t, g.NewestLightClientFinalityUpdate())
 }
