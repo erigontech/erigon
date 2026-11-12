@@ -2635,6 +2635,9 @@ func TestValidateReadSet_BALReadOnlyAccountSkipsAccountValidation(t *testing.T) 
 		{"code size read, code written by a lower tx", func(rs *ReadSet, addr accounts.Address, hdr ReadHeader) {
 			rs.SetCodeSize(addr, VersionedRead[int]{ReadHeader: hdr})
 		}, CodeSizePath, 3},
+		{"code read, code wiped by a lower tx's destruct", func(rs *ReadSet, addr accounts.Address, hdr ReadHeader) {
+			rs.SetCode(addr, VersionedRead[accounts.Code]{ReadHeader: hdr, Val: accounts.NewCode([]byte{0x01})})
+		}, SelfDestructPath, true},
 	} {
 		for _, c := range []struct {
 			name    string

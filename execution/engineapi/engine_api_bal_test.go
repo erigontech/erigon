@@ -1782,30 +1782,11 @@ func TestEngineApiBALUnchangedAccountLieInvalid(t *testing.T) {
 			require.Equalf(t, enginetypes.InvalidStatus, status.Status, "validation error: %v", status.ValidationError)
 			require.NotNil(t, status.ValidationError)
 		})
-
-		t.Run("self-destruct of an address listed unchanged", func(t *testing.T) {
-			send := balLieSender(t, eat)
-			probe := deployBALLieContract(ctx, t, eat, send, accountProbeInitCode, nil)
-			victim := deployBALLieContract(ctx, t, eat, send, selfdestructOnCalldataInitCode, nil)
-			send(&victim, 1, nil)
-			_, err := eat.MockCl.BuildCanonicalBlock(ctx)
-			require.NoError(t, err)
-			payload, bal := buildBALLiePayload(ctx, t, eat, []common.Hash{send(&victim, 0, []byte{1}).Hash(), probeAccount(send, probe, victim)})
-			c := findAccountChanges(bal, accounts.InternAddress(victim))
-			require.NotNil(t, c)
-			require.NotEmpty(t, c.BalanceChanges)
-			c.BalanceChanges = nil
-			requireUnchanged(t, c)
-			requireBALMismatch(t, newPayloadWithBAL(ctx, t, eat, payload, bal))
-		})
 	})
 }
 
 // accountProbeInitCode deploys a runtime that reads BALANCE, EXTCODEHASH and EXTCODESIZE of the calldata address.
 const accountProbeInitCode = "600c600c600039600c6000f3" + "600035803150803f503b5000"
-
-// selfdestructOnCalldataInitCode deploys a runtime that self-destructs to the caller on non-empty calldata.
-const selfdestructOnCalldataInitCode = "6009600c60003960096000f3" + "361560075733ff5b00"
 
 func probeAccount(send func(to *common.Address, value uint64, data []byte) types.Transaction, probe, target common.Address) common.Hash {
 	return send(&probe, 0, common.LeftPadBytes(target[:], 32)).Hash()
