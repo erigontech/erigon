@@ -271,7 +271,8 @@ func (pe *parallelExecutor) bindBlockChangesetForFold(blockNum uint64, blockHash
 // balBuildJobs feeds one builder goroutine, started once and shared: it adds sealed txs
 // to their block access list in publish order, off the apply goroutine.
 var balBuildJobs = sync.OnceValue(func() chan<- balBuildJob {
-	jobs := make(chan balBuildJob, 1024)
+	// Above the 1078-job peak measured on a 300M max-tx BAL block; a full buffer blocks the apply goroutine.
+	jobs := make(chan balBuildJob, 2*1024)
 	go func() {
 		for j := range jobs {
 			j.run()
