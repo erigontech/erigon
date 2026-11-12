@@ -89,6 +89,11 @@ func (b *BlobArchiveStoreFill) Run(ctx context.Context) error {
 	if len(b.Endpoints) == 0 && !b.DryRun {
 		return errors.New("--endpoint is required unless --dry-run is set")
 	}
+	for i, endpoint := range b.Endpoints {
+		if !validEndpoint(endpoint) {
+			return fmt.Errorf("--endpoint %d is not an http or https URL with a host", i+1)
+		}
+	}
 
 	// Open, not New: New creates the datadir's directories, and a dry run writes nothing.
 	dirs := datadir.Open(b.Datadir)

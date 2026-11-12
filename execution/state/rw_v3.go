@@ -84,6 +84,10 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 		// One buffer for every storage key this call writes: consumers copy what they keep.
 		// Made on the first slot, since an array here escapes even when unused.
 		var storageKey []byte
+		type foldedSlot struct {
+			storageItem
+			prev []byte // see prevFromRecord
+		}
 		type addrState struct {
 			balance        g.Option[uint256.Int]
 			balanceDeleted bool
@@ -94,7 +98,7 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 			codeWritten    bool
 			selfDestruct   bool
 			createContract bool
-			storage        []storageItem
+			storage        []foldedSlot
 		}
 
 		perAddr := make(map[accounts.Address]*addrState)
@@ -136,7 +140,7 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 		for a, byKey := range writes.StorageChanges() {
 			d := ensure(a)
 			for k, vw := range byKey {
-				d.storage = append(d.storage, storageItem{k, vw.Val})
+				d.storage = append(d.storage, foldedSlot{storageItem{k, vw.Val}, prevFromRecord(vw)})
 			}
 		}
 
@@ -301,14 +305,14 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 					if dbg.TraceApply && (trace || dbg.TraceAccount(addr.Handle())) {
 						fmt.Printf("%d apply:del storage: %x %x\n", blockNum, addr, item.key)
 					}
-					if err := domains.DomainDel(kv.StorageDomain, roTx, composite, txNum, nil); err != nil {
+					if err := domains.DomainDel(kv.StorageDomain, roTx, composite, txNum, item.prev); err != nil {
 						return err
 					}
 				} else {
 					if dbg.TraceApply && (trace || dbg.TraceAccount(addr.Handle())) {
 						fmt.Printf("%d apply:put storage: %x %x %x\n", blockNum, addr, item.key, v)
 					}
-					if err := domains.DomainPut(kv.StorageDomain, roTx, composite, v, txNum, nil); err != nil {
+					if err := domains.DomainPut(kv.StorageDomain, roTx, composite, v, txNum, item.prev); err != nil {
 						return err
 					}
 				}

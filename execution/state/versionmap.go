@@ -177,7 +177,8 @@ func putCell[T any](vm *VersionMap, cells *btree.Map[int, *WriteCell[T]], addr a
 		if have > incarnation {
 			panic(fmt.Errorf("existing transaction value does not have lower incarnation: %x %s, %v", addr, path, txIdx))
 		}
-		if dbg.AssertEnabled && haveFlag == FlagDone && flag == FlagEstimate && ci.accSource != AccountFromBAL {
+		// On a BAL block an unsealed Done cell is a seed, which a speculative run may still change.
+		if dbg.AssertEnabled && !vm.HasBAL && haveFlag == FlagDone && flag == FlagEstimate {
 			panic(fmt.Errorf("versionMap: Done->Estimate downgrade addr=%x path=%s txIdx=%d inc %d->%d", addr, path, txIdx, have, incarnation))
 		}
 		ci.setState(incarnation, flag)
@@ -1589,9 +1590,10 @@ func (vm *VersionMap) MarkWritesComplete(writes *WriteSet) {
 
 // MarkWritesValidated flips every cell named by writes Estimate->Validated: the tx
 // validated its read-set out-of-order but is not yet sealed, so a reader continues on it
-// (early break) while it stays revertible until the in-order seal. A fee recipient's
-// Address, Balance and SelfDestruct cells are left Estimate: calcFees credits its fee,
-// and may undo its EIP-161 removal, at the same version, so readers keep pausing until the seal.
+// (early break) while it stays revertible until the in-order seal. A fee recipient's cells
+// are left Estimate, so readers keep pausing until the seal. calcFees credits its fee, and
+// may undo its EIP-161 removal, at the same version; while its SelfDestruct cell is Estimate,
+// a reader cannot tell that the destruct wipes the tx's other writes.
 func (vm *VersionMap) MarkWritesValidated(writes *WriteSet, isFeeRecipient func(accounts.Address) bool) {
 	vm.markWrites(writes, FlagValidated, isFeeRecipient)
 }
@@ -1609,31 +1611,31 @@ func (vm *VersionMap) markWrites(writes *WriteSet, flag statusFlag, isFeeRecipie
 	}
 	m := cellMarks{vm: vm, flag: flag, fee: isFeeRecipient}
 	for addr, vw := range writes.address {
-		markCell(&m, addr, vw, true)
+		markCell(&m, addr, vw)
 	}
 	for addr, vw := range writes.selfDestruct {
-		markCell(&m, addr, vw, true)
+		markCell(&m, addr, vw)
 	}
 	for addr, vw := range writes.balance {
-		markCell(&m, addr, vw, true)
+		markCell(&m, addr, vw)
 	}
 	for addr, vw := range writes.nonce {
-		markCell(&m, addr, vw, false)
+		markCell(&m, addr, vw)
 	}
 	for addr, vw := range writes.incarnation {
-		markCell(&m, addr, vw, false)
+		markCell(&m, addr, vw)
 	}
 	for addr, vw := range writes.code {
-		markCell(&m, addr, vw, false)
+		markCell(&m, addr, vw)
 	}
 	for addr, vw := range writes.codeHash {
-		markCell(&m, addr, vw, false)
+		markCell(&m, addr, vw)
 	}
 	for addr, vw := range writes.codeSize {
-		markCell(&m, addr, vw, false)
+		markCell(&m, addr, vw)
 	}
 	for addr, vw := range writes.createContract {
-		markCell(&m, addr, vw, false)
+		markCell(&m, addr, vw)
 	}
 	for addr, inner := range writes.storage {
 		for _, vw := range inner {
@@ -1642,16 +1644,16 @@ func (vm *VersionMap) markWrites(writes *WriteSet, flag statusFlag, isFeeRecipie
 			if vm.HasBAL && vw.valStatus == ValueUnchanged {
 				continue
 			}
-			markCell(&m, addr, vw, false)
+			markCell(&m, addr, vw)
 		}
 	}
 	for addr := range m.locked {
-		vm.markAccountLocked(addr, writes, flag, isFeeRecipient)
+		vm.markAccountLocked(addr, writes, flag)
 	}
 }
 
-func markCell[T any](m *cellMarks, addr accounts.Address, vw *VersionedWrite[T], feePath bool) {
-	if feePath && m.fee != nil && m.fee(addr) {
+func markCell[T any](m *cellMarks, addr accounts.Address, vw *VersionedWrite[T]) {
+	if m.fee != nil && m.fee(addr) {
 		return
 	}
 	c, e := vw.cell, vw.entry
@@ -1678,7 +1680,7 @@ func (m *cellMarks) lock(addr accounts.Address) {
 	m.locked[addr] = struct{}{}
 }
 
-func (vm *VersionMap) markAccountLocked(addr accounts.Address, writes *WriteSet, flag statusFlag, isFeeRecipient func(accounts.Address) bool) {
+func (vm *VersionMap) markAccountLocked(addr accounts.Address, writes *WriteSet, flag statusFlag) {
 	e := vm.load(addr)
 	if e == nil {
 		panic(fmt.Sprintf("mark: no entry addr=%x", addr.Value()))
@@ -1696,14 +1698,13 @@ func (vm *VersionMap) markAccountLocked(addr accounts.Address, writes *WriteSet,
 		vm.mutBegin(wtx)
 		defer vm.mutEnd(wtx)
 	}
-	feeAddr := isFeeRecipient != nil && isFeeRecipient(addr)
-	if vw, ok := writes.address[addr]; ok && !feeAddr {
+	if vw, ok := writes.address[addr]; ok {
 		markLocked(e.Address, addr, AddressPath, accounts.NilKey, vw, flag)
 	}
-	if vw, ok := writes.selfDestruct[addr]; ok && !feeAddr {
+	if vw, ok := writes.selfDestruct[addr]; ok {
 		markLocked(e.SelfDestruct, addr, SelfDestructPath, accounts.NilKey, vw, flag)
 	}
-	if vw, ok := writes.balance[addr]; ok && !feeAddr {
+	if vw, ok := writes.balance[addr]; ok {
 		markLocked(e.Balance, addr, BalancePath, accounts.NilKey, vw, flag)
 	}
 	if vw, ok := writes.nonce[addr]; ok {
@@ -2291,6 +2292,11 @@ func (c *WriteCell[T]) mark(want Incarnation, flag statusFlag) (Incarnation, mar
 		}
 		if want >= 0 && inc > want {
 			return inc, markStale
+		}
+		// Done covers Validated, as it covers an Estimate flush (setFlagUnlessDone): a BAL-seeded
+		// cell that the tx's flush matched stays Done.
+		if f == FlagDone && flag == FlagValidated {
+			return inc, marked
 		}
 		if c.state.CompareAndSwap(old, markedState(old, inc, flag)) {
 			return inc, marked

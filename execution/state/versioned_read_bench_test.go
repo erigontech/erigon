@@ -110,3 +110,33 @@ func BenchmarkWarmExtCodeHashAbsent(b *testing.B) {
 		}
 	}
 }
+
+// BenchmarkWarmEmptyExisting measures a repeat Empty on an existing account with
+// no own write, by the field that decides the verdict.
+func BenchmarkWarmEmptyExisting(b *testing.B) {
+	cases := []struct {
+		name string
+		set  func(a *accounts.Account)
+	}{
+		{"balance", func(a *accounts.Account) { a.Balance = *uint256.NewInt(100) }},
+		{"nonce", func(a *accounts.Account) { a.Nonce = 1 }},
+		{"code", func(a *accounts.Account) { a.CodeHash = accounts.InternCodeHash([32]byte{0xaa}) }},
+		{"truly-empty", func(a *accounts.Account) {}},
+	}
+	for _, c := range cases {
+		b.Run(c.name, func(b *testing.B) {
+			addr := accounts.InternAddress([20]byte{0xC0, 0xDE})
+			account := accounts.NewAccount()
+			c.set(&account)
+			reader := &accountStateReader{accounts: map[accounts.Address]*accounts.Account{addr: &account}}
+			s := NewWithVersionMap(reader, NewVersionMap(nil))
+			s.txIndex = 1
+			_, _ = s.Empty(addr)
+
+			b.ReportAllocs()
+			for b.Loop() {
+				_, _ = s.Empty(addr)
+			}
+		})
+	}
+}

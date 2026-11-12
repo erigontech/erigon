@@ -714,13 +714,27 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 	var ok, cached bool
 	if haveHead {
 		attestationData, ok = a.forkchoiceStore.AttestationData(head.Root, *slot)
+		if !ok {
+			if header, known := a.forkchoiceStore.GetHeader(head.Root); known {
+				headEpoch := header.Slot / a.beaconChainCfg.SlotsPerEpoch
+				slotEpoch := *slot / a.beaconChainCfg.SlotsPerEpoch
+				if *slot < header.Slot && headEpoch-slotEpoch <= 1 {
+					ancestor := a.forkchoiceStore.Ancestor(head.Root, *slot)
+					if ancestor.Root != (common.Hash{}) && ancestor.Root != head.Root {
+						attestationData, ok = a.forkchoiceStore.AttestationData(ancestor.Root, *slot)
+					}
+				}
+			}
+		}
 	}
-	forkChoiceData := ok
 	if !ok {
-		attestationData, ok, err = a.attestationProducer.CachedAttestationData(*slot)
-		cached = ok
-		if err != nil {
-			log.Warn("Failed to get attestation data", "err", err)
+		cacheHeadRoot, haveCacheHead := head.Root, haveHead
+		if !haveCacheHead {
+			cacheHeadRoot, _, haveCacheHead = a.syncedData.StateHead()
+		}
+		if haveCacheHead {
+			attestationData, ok = a.attestationProducer.CachedAttestationData(cacheHeadRoot, *slot)
+			cached = ok
 		}
 	}
 
@@ -752,14 +766,11 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 	}
 
 	if !ok {
-		tx, err := a.indiciesDB.BeginRo(r.Context())
-		if err != nil {
-			return nil, err
-		}
-		defer tx.Rollback()
 		if err := a.viewHeadStateWithIdentity(func(headState *state.CachingBeaconState, headRoot common.Hash, _ uint64) error {
+			if haveHead && headRoot != head.Root {
+				return synced_data.ErrNotSynced
+			}
 			attestationData, err = a.attestationProducer.ProduceAndCacheAttestationData(
-				tx,
 				headState,
 				headRoot,
 				*slot,
@@ -779,10 +790,11 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 		}
 	}
 
-	// The cached attestation data has CommitteeIndex=0 (shared across all committees for the same slot), but the VC
-	// expects it to match the requested committee_index. In Gloas the field signals payload presence instead.
+	// Cached data is shared across committees and keeps CommitteeIndex at zero.
+	// The API returns the requested index before Electra, leaves it zero in Electra
+	// and Fulu, and uses it to signal payload presence from Gloas.
 	if clversion.AfterOrEqual(clparams.GloasVersion) {
-		attestationData.CommitteeIndex, err = a.gloasAttestationIndex(*slot, attestationData.BeaconBlockRoot, head, forkChoiceData)
+		attestationData.CommitteeIndex, err = a.gloasAttestationIndex(*slot, attestationData.BeaconBlockRoot, head, haveHead)
 		if err != nil {
 			return nil, err
 		}
@@ -816,8 +828,8 @@ func (a *ApiHandler) gloasAttestationIndex(slot uint64, root common.Hash, head f
 			)
 		}
 	}
-	// Attestation data is cached per slot, so the served root can be an ancestor of the head; take the payload status
-	// the head's chain gives it.
+	// The attested block can be an ancestor of the selected head. Its payload status
+	// must come from that head's chain.
 	if head.Root != root {
 		head = a.forkchoiceStore.Ancestor(head.Root, header.Slot)
 	}
@@ -3317,10 +3329,7 @@ func (a *ApiHandler) storeBlockAndBlobs(
 		log.Debug("BlockProduction: forkchoice update deferred while storing block", "root", headRoot, "err", err)
 	}
 
-	if err := a.indiciesDB.View(ctx, func(tx kv.Tx) error {
-		_, err := a.attestationProducer.ProduceAndCacheAttestationData(tx, headState, headRoot, block.Block.Slot)
-		return err
-	}); err != nil {
+	if _, err := a.attestationProducer.ProduceAndCacheAttestationData(headState, headRoot, block.Block.Slot); err != nil {
 		return err
 	}
 	if err := a.syncedData.OnHeadStateWithBlockRoot(headState, headRoot); err != nil {

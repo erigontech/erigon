@@ -2492,6 +2492,31 @@ func TestMarkWritesValidatedLocksADestructedAccount(t *testing.T) {
 	require.Equal(t, FlagValidated, balanceFlag(t, vm, addr, 3))
 }
 
+// A flush that matches a BAL-seeded Done cell leaves it Done; marking the tx validated must not
+// demote it, on the lock-free path and on the locked one a lower destruct takes.
+func TestMarkWritesValidatedKeepsASeededDoneCell(t *testing.T) {
+	t.Parallel()
+	for name, destructed := range map[string]bool{"lock-free": false, "locked": true} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			addr := accounts.InternAddress(common.HexToAddress("0x15"))
+			vm := NewVersionMap(types.BlockAccessList{{Address: addr.Value(), BalanceChanges: []*types.BalanceChange{{Index: 4, Value: *uint256.NewInt(7)}}}})
+			if destructed {
+				vm.MarkWritesValidated(flushPath(vm, addr, 1, SelfDestructPath), nil)
+			}
+			ws := balanceWrite(addr, Version{TxIndex: 3}, 7)
+			vm.FlushVersionedWrites(ws, false)
+			require.Equal(t, FlagDone, balanceFlag(t, vm, addr, 3), "a flush that matches the seed is a no-op")
+			vm.MarkWritesValidated(ws, nil)
+			require.Equal(t, FlagDone, balanceFlag(t, vm, addr, 3))
+			if destructed {
+				state, _, _, _ := vm.ResolvedAccountLifecycleAt(addr, 5)
+				require.Equal(t, LifecycleRevived, state, "the seeded balance revives the account")
+			}
+		})
+	}
+}
+
 func TestMarkWritesValidatedPanicsOnANewerIncarnation(t *testing.T) {
 	t.Parallel()
 	vm := NewVersionMap(nil)
