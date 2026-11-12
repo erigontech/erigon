@@ -18,15 +18,14 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 
 	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/engineapi/engineapitester"
+	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
 
@@ -76,52 +75,17 @@ func engineTestCmd(_ context.Context, ctx *cli.Command) error {
 	}
 	files = filter.filterFiles(files)
 	var incomplete incompleteRun
-	results, err := runTestFilesParallel(files, workers, incomplete.wrap(func(fname string) ([]testResult, error) {
+	results := incomplete.run(files, workers, func(fname string) ([]testResult, error) {
 		return runEngineTest(ctx, fname, filter, reportPath)
-	}))
-	if err != nil {
-		return err
-	}
+	})
 	report(ctx, results)
 	return incomplete.status(anyFailed(results))
 }
 
-// runEngineTest runs the fixtures in fname. Its error names a fixture that
-// cannot be decoded, which also gets a failed result, or the file itself.
+// runEngineTest runs the blockchain engine test fixtures in fname.
 func runEngineTest(ctx *cli.Command, fname string, filter testFilter, reportPath func(ethconfig.BlockExecutionPath)) ([]testResult, error) {
-	src, err := os.ReadFile(fname)
-	if err != nil {
-		return nil, err
-	}
-	names, fixtures, err := splitFixtures(src)
-	if err != nil {
-		return nil, err
-	}
-
-	results := make([]testResult, 0, len(names))
-	var unreadable []error
-	for _, name := range names {
-		if !filter.includeCase(fname, name) {
-			continue
-		}
-		test := new(engineapitester.EngineTest)
-		if err := json.Unmarshal(fixtures[name], test); err != nil {
-			results = append(results, unreadableFixture(name, err))
-			unreadable = append(unreadable, fmt.Errorf("fixture %s: %w", name, err))
-			continue
-		}
-		if ctx.Bool(BALSequentialFlag.Name) {
-			test.ExecWorkers = 1
-		}
-		test.ExecutionPathReporter = reportPath
-		test.SyncingTimeout = ctx.Duration(SyncingTimeoutFlag.Name)
-		result := testResult{Name: name, Pass: true}
-		if err := test.RunCLI(); err != nil {
-			result.Pass = false
-			result.Error = err.Error()
-		}
-		result.Rejections = rejections(test.Rejections)
-		results = append(results, result)
-	}
-	return results, errors.Join(unreadable...)
+	return runFixtures(ctx, fname, filter, reportPath, func() (fixture, *testutil.BlockTest) {
+		test := &engineapitester.EngineTest{SyncingTimeout: ctx.Duration(SyncingTimeoutFlag.Name)}
+		return test, &test.BlockTest
+	})
 }

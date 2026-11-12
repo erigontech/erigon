@@ -85,11 +85,9 @@ func blockTestCmd(_ context.Context, ctx *cli.Command) error {
 		if err != nil {
 			return exitIncomplete(err)
 		}
-		collected := filter.filterFiles(files)
-		results, err := runBlockTestsParallel(ctx, collected, workers, filter, reportPath, &incomplete)
-		if err != nil {
-			return err
-		}
+		results := incomplete.run(filter.filterFiles(files), workers, func(path string) ([]testResult, error) {
+			return runBlockTest(ctx, path, filter, reportPath)
+		})
 		report(ctx, results)
 		return incomplete.status(anyFailed(results))
 	}
@@ -118,12 +116,6 @@ type fileResult struct {
 	index   int
 	results []testResult
 	err     error
-}
-
-func runBlockTestsParallel(ctx *cli.Command, files []string, workers uint64, filter testFilter, reportPath func(ethconfig.BlockExecutionPath), incomplete *incompleteRun) ([]testResult, error) {
-	return runTestFilesParallel(files, workers, incomplete.wrap(func(path string) ([]testResult, error) {
-		return runBlockTest(ctx, path, filter, reportPath)
-	}))
 }
 
 func runTestFilesParallel(files []string, workers uint64, runner func(string) ([]testResult, error)) ([]testResult, error) {
@@ -211,21 +203,19 @@ func (r *incompleteRun) wrap(runner func(string) ([]testResult, error)) func(str
 	}
 }
 
-// err returns the error that exits with exitIncompleteRun, or nil if the run
-// ran all of its input.
-func (r *incompleteRun) err() error {
-	if !r.seen.Load() {
-		return nil
-	}
-	return exitIncomplete(errors.New("could not run all of the input"))
+// run runs runner over files on workers, recording any file it cannot run.
+func (r *incompleteRun) run(files []string, workers uint64, runner func(string) ([]testResult, error)) []testResult {
+	// wrap never returns an error, so neither does the parallel run.
+	results, _ := runTestFilesParallel(files, workers, r.wrap(runner))
+	return results
 }
 
 // status returns the error that sets the run's exit status: exitIncompleteRun
 // when it could not run all of its input, else exitFailedRun when a fixture
 // failed, else nil.
 func (r *incompleteRun) status(failed bool) error {
-	if err := r.err(); err != nil {
-		return err
+	if r.seen.Load() {
+		return exitIncomplete(errors.New("could not run all of the input"))
 	}
 	if failed {
 		return cli.Exit("", exitFailedRun)
@@ -254,7 +244,7 @@ func exitIncomplete(err error) error {
 func collectArgFiles(ctx *cli.Command) ([]string, error) {
 	files := make([]string, 0, ctx.Args().Len())
 	for _, path := range ctx.Args().Slice() {
-		found, err := jsonFiles(path)
+		found, err := collectFiles(path)
 		if err != nil {
 			return nil, err
 		}
@@ -270,40 +260,10 @@ func collectArgFiles(ctx *cli.Command) ([]string, error) {
 	return files, nil
 }
 
-// collectFiles walks the given path and returns all JSON files.
-// If path is a file, it returns that file directly.
-func collectFiles(path string) []string {
-	info, err := os.Stat(path)
-	if err != nil {
-		return nil
-	}
-
-	if !info.IsDir() {
-		return []string{path}
-	}
-
-	// Pre-allocate with a reasonable estimate to avoid repeated slice growth
-	out := make([]string, 0, 256)
-	err = filepath.WalkDir(path, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if !d.IsDir() && filepath.Ext(path) == ".json" {
-			out = append(out, path)
-		}
-		return nil
-	})
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error walking path %s: %v\n", path, err)
-	}
-
-	return out
-}
-
-// jsonFiles is collectFiles for blocktest and enginetest: it returns the walk's
-// error and follows a path that is a symlink to a directory, which WalkDir does
-// not descend into.
-func jsonFiles(path string) ([]string, error) {
+// collectFiles returns path if it is a file, else every JSON file under it. It
+// follows a path that is a symlink to a directory, which WalkDir does not
+// descend into.
+func collectFiles(path string) ([]string, error) {
 	root, err := filepath.EvalSymlinks(path)
 	if err != nil {
 		return nil, err
@@ -328,9 +288,23 @@ func jsonFiles(path string) ([]string, error) {
 	return out, err
 }
 
-// runBlockTest runs the fixtures in fname. Its error names a fixture that
-// cannot be decoded, which also gets a failed result, or the file itself.
+// runBlockTest runs the blockchain test fixtures in fname.
 func runBlockTest(ctx *cli.Command, fname string, filter testFilter, reportPath func(ethconfig.BlockExecutionPath)) ([]testResult, error) {
+	return runFixtures(ctx, fname, filter, reportPath, func() (fixture, *testutil.BlockTest) {
+		test := new(testutil.BlockTest)
+		return test, test
+	})
+}
+
+// A fixture decodes from JSON and runs on the BlockTest newTest returns with it.
+type fixture interface {
+	RunCLI() error
+}
+
+// runFixtures runs the fixtures in fname, each decoded into a new fixture from
+// newTest. Its error names a fixture that cannot be decoded, which also gets a
+// failed result, or the file itself.
+func runFixtures(ctx *cli.Command, fname string, filter testFilter, reportPath func(ethconfig.BlockExecutionPath), newTest func() (fixture, *testutil.BlockTest)) ([]testResult, error) {
 	src, err := os.ReadFile(fname)
 	if err != nil {
 		return nil, err
@@ -346,25 +320,23 @@ func runBlockTest(ctx *cli.Command, fname string, filter testFilter, reportPath 
 		if !filter.includeCase(fname, name) {
 			continue
 		}
-		test := new(testutil.BlockTest)
+		test, bt := newTest()
 		if err := json.Unmarshal(fixtures[name], test); err != nil {
 			results = append(results, unreadableFixture(name, err))
 			unreadable = append(unreadable, fmt.Errorf("fixture %s: %w", name, err))
 			continue
 		}
-
 		if ctx.Bool(BALSequentialFlag.Name) {
-			test.ExecWorkers = 1
+			bt.ExecWorkers = 1
 		}
-		test.ExecutionPathReporter = reportPath
-		result := &testResult{Name: name, Pass: true}
+		bt.ExecutionPathReporter = reportPath
+		result := testResult{Name: name, Pass: true}
 		if err := test.RunCLI(); err != nil {
 			result.Pass = false
 			result.Error = err.Error()
 		}
-		result.Rejections = rejections(test.Rejections)
-
-		results = append(results, *result)
+		result.Rejections = rejections(bt.Rejections)
+		results = append(results, result)
 	}
 
 	return results, errors.Join(unreadable...)
