@@ -289,7 +289,7 @@ func (b *BlobArchiveStoreFill) fillSlot(ctx context.Context, db kv.RoDB, blocks 
 		report.add(&report.failed, slot)
 		return nil
 	}
-	blobs, err := expectedBlobs(ctx, db, blocks, root, block)
+	blobs, _, err := expectedBlobs(ctx, db, blocks, root, block)
 	if err != nil {
 		return fmt.Errorf("read the slots after %d: %w", slot, err)
 	}
@@ -372,18 +372,18 @@ func blobCount(block *cltypes.SignedBeaconBlock) int {
 	return 0
 }
 
-func expectedBlobs(ctx context.Context, db kv.RoDB, blocks freezeblocks.BeaconSnapshotReader, root common.Hash, block *cltypes.SignedBeaconBlock) (n int, err error) {
+func expectedBlobs(ctx context.Context, db kv.RoDB, blocks freezeblocks.BeaconSnapshotReader, root common.Hash, block *cltypes.SignedBeaconBlock) (n int, unresolved bool, err error) {
 	err = db.View(ctx, func(tx kv.Tx) error {
-		n, err = expectedBlobsInTx(ctx, tx, blocks, root, block)
+		n, unresolved, err = expectedBlobsInTx(ctx, tx, blocks, root, block)
 		return err
 	})
-	return n, err
+	return n, unresolved, err
 }
 
-func expectedBlobsInTx(ctx context.Context, tx kv.Tx, blocks freezeblocks.BeaconSnapshotReader, root common.Hash, block *cltypes.SignedBeaconBlock) (int, error) {
+func expectedBlobsInTx(ctx context.Context, tx kv.Tx, blocks freezeblocks.BeaconSnapshotReader, root common.Hash, block *cltypes.SignedBeaconBlock) (int, bool, error) {
 	n := blobCount(block)
 	if n == 0 || block.Version() < clparams.GloasVersion {
-		return n, nil
+		return n, false, nil
 	}
 	var childSlot uint64
 	var childRoot common.Hash
@@ -391,19 +391,19 @@ func expectedBlobsInTx(ctx context.Context, tx kv.Tx, blocks freezeblocks.Beacon
 		childSlot, childRoot = slot, root
 		return false
 	}); err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	if childRoot == (common.Hash{}) {
-		return n, nil
+		return n, true, nil
 	}
 	child, err := blocks.ReadBeaconBlockBodyBySlot(ctx, tx, childSlot)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	if child == nil || child.Block.ParentRoot != root || forkchoice.ParentPayloadStatusFromBids(block, child.Block) == cltypes.PayloadStatusFull {
-		return n, nil
+		return n, false, nil
 	}
-	return 0, nil
+	return 0, false, nil
 }
 
 func notServed(err error) bool {
@@ -417,7 +417,7 @@ func (b *BlobArchiveStoreFill) findWindow(ctx context.Context, db kv.RoDB, block
 		scanned := map[uint64]uint64{}
 		answers := map[common.Hash]bool{}
 		n := sort.Search(int(b.ToSlot+1-lo), func(n int) bool {
-			root, block, err := nextSlotWithBlobs(ctx, db, blocks, lo+uint64(n), b.ToSlot, scanned)
+			root, block, unresolved, err := nextSlotWithBlobs(ctx, db, blocks, lo+uint64(n), b.ToSlot, scanned)
 			if err != nil || block == nil {
 				return true
 			}
@@ -425,13 +425,13 @@ func (b *BlobArchiveStoreFill) findWindow(ctx context.Context, db kv.RoDB, block
 				return served
 			}
 			sidecars, err := retrieveSidecars(ctx, b.Endpoints[i], root, block)
-			if err == nil && len(sidecars) == 0 {
+			if err == nil && len(sidecars) == 0 && !unresolved {
 				err = errNoSidecars
 			}
 			answers[root] = !notServed(err)
 			return answers[root]
 		})
-		_, block, err := nextSlotWithBlobs(ctx, db, blocks, lo+uint64(n), b.ToSlot, scanned)
+		_, block, _, err := nextSlotWithBlobs(ctx, db, blocks, lo+uint64(n), b.ToSlot, scanned)
 		if err != nil {
 			return
 		}
@@ -445,7 +445,7 @@ func (b *BlobArchiveStoreFill) findWindow(ctx context.Context, db kv.RoDB, block
 	})
 }
 
-func nextSlotWithBlobs(ctx context.Context, db kv.RoDB, blocks freezeblocks.BeaconSnapshotReader, from, to uint64, scanned map[uint64]uint64) (common.Hash, *cltypes.SignedBeaconBlock, error) {
+func nextSlotWithBlobs(ctx context.Context, db kv.RoDB, blocks freezeblocks.BeaconSnapshotReader, from, to uint64, scanned map[uint64]uint64) (common.Hash, *cltypes.SignedBeaconBlock, bool, error) {
 	for slot := from; slot <= to; slot++ {
 		for start, end := range scanned {
 			if start <= slot && slot < end {
@@ -455,16 +455,17 @@ func nextSlotWithBlobs(ctx context.Context, db kv.RoDB, blocks freezeblocks.Beac
 		}
 		root, block, err := readSlot(ctx, db, blocks, slot)
 		n := 0
+		unresolved := false
 		if err == nil {
-			n, err = expectedBlobs(ctx, db, blocks, root, block)
+			n, unresolved, err = expectedBlobs(ctx, db, blocks, root, block)
 		}
 		if err != nil || n > 0 {
 			scanned[from] = slot
-			return root, block, err
+			return root, block, unresolved, err
 		}
 	}
 	scanned[from] = to
-	return common.Hash{}, nil, nil
+	return common.Hash{}, nil, false, nil
 }
 
 func fetchAndStoreBlobs(ctx context.Context, store blob_storage.BlobStorage, endpoint string, root common.Hash, block *cltypes.SignedBeaconBlock) error {

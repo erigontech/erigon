@@ -1187,7 +1187,7 @@ func checkBlobStore(ctx context.Context, tx kv.Tx, snr freezeblocks.BeaconSnapsh
 		if err != nil {
 			return mismatched, unresolved, err
 		}
-		wantBlobs, err := expectedBlobsInTx(ctx, tx, snr, blockRoot, blk)
+		wantBlobs, _, err := expectedBlobsInTx(ctx, tx, snr, blockRoot, blk)
 		if err != nil {
 			return mismatched, unresolved, err
 		}

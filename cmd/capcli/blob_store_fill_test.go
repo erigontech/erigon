@@ -163,6 +163,10 @@ func (f *fillFixture) endpoint(missing bool) (string, *sync.Map) {
 		var data any = sidecars
 		switch {
 		case missing || !ok:
+			if !missing && f.version >= clparams.GloasVersion && strings.Contains(r.URL.Path, "/eth/v1/beacon/blobs/") {
+				data = []*cltypes.Blob{}
+				break
+			}
 			w.WriteHeader(http.StatusNotFound)
 			return
 		case strings.Contains(r.URL.Path, "/eth/v1/beacon/blobs/"):
@@ -230,6 +234,20 @@ func TestBlobArchiveStoreFillDryRunProbesPastASkippedGloasPayload(t *testing.T) 
 	f, _, _ := newSkippedPayloadFixture(t, 1)
 	url, _ := f.endpoint(false)
 	cmd := &BlobArchiveStoreFill{Endpoints: []string{url}, FromSlot: fillTestSlot, ToSlot: fillTestSlot + 2, DryRun: true}
+
+	require.NoError(t, f.fill(cmd, nil))
+
+	require.Equal(t, uint64(fillTestSlot), cmd.windows[0].from.Load())
+}
+
+func TestBlobArchiveStoreFillDryRunServesAnUnresolvedGloasHead(t *testing.T) {
+	f := newFillFixture(t)
+	f.version = clparams.GloasVersion
+	f.addBlock(fillTestSlot, 1)
+	head := f.addBlock(fillTestSlot+1, 1)
+	delete(f.sidecars, head)
+	url, _ := f.endpoint(false)
+	cmd := &BlobArchiveStoreFill{Endpoints: []string{url}, FromSlot: fillTestSlot, ToSlot: fillTestSlot + 1, DryRun: true}
 
 	require.NoError(t, f.fill(cmd, nil))
 
