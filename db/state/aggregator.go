@@ -2933,13 +2933,12 @@ func (at *AggregatorRoTx) Unwind(ctx context.Context, tx kv.RwTx, txNumUnwindTo 
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 
-	step := txNumUnwindTo / at.StepSize()
 	for idx, d := range at.d {
 		var expandBranch func([]byte, commitment.BranchData, uint64, uint64) (commitment.BranchData, error)
 		if kv.Domain(idx) == kv.CommitmentDomain {
 			expandBranch = at.replaceShortenedKeysInBranch
 		}
-		if err := d.unwind(ctx, tx, step, txNumUnwindTo, changeset[idx], expandBranch); err != nil {
+		if err := d.unwind(ctx, tx, txNumUnwindTo, changeset[idx], expandBranch); err != nil {
 			return err
 		}
 	}

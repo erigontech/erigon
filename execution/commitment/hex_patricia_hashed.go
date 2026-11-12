@@ -2056,8 +2056,8 @@ func (hph *HexPatriciaHashed) collectDeleteUpdate(updateKey []byte, row int) err
 
 func (hph *HexPatriciaHashed) previousBranch(row int, updateKey []byte) ([]byte, error) {
 	if !hph.branchBefore[row] {
-		// A new branch has no merge base. Resolve its stored previous value at
-		// write time, after any deferred deletion, to record the correct undo data.
+		// A new branch has no merge base, even if storage still contains a
+		// branch whose deletion is pending among the deferred writes.
 		return nil, nil
 	}
 	if len(hph.rowBranch[row]) > 0 {

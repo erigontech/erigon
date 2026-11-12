@@ -1582,11 +1582,12 @@ func (d *Domain) integrateDirtyFiles(sf StaticFiles, txNumFrom, txNumTo uint64) 
 	d.dirtyFiles.Set(fi)
 }
 
-// unwind applies the supplied domain diffs and prunes the unwound history.
-// The caller manages flushing.
-func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwindTo uint64, domainDiffs []kv.DomainEntryDiff, expandBranch func([]byte, commitment.BranchData, uint64, uint64) (commitment.BranchData, error)) error {
+// unwind restores the state before txNumUnwindTo using the supplied diffs
+// and prunes history from txNumUnwindTo onward. The caller manages flushing.
+func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, txNumUnwindTo uint64, domainDiffs []kv.DomainEntryDiff, expandBranch func([]byte, commitment.BranchData, uint64, uint64) (commitment.BranchData, error)) error {
 	// fmt.Printf("[domain][%s] unwinding domain to txNum=%d, step %d\n", d.filenameBase, txNumUnwindTo, step)
 	d := dt.d
+	step := txNumUnwindTo / dt.stepSize
 
 	sf := time.Now()
 	defer mxUnwindTook.ObserveDuration(sf)
@@ -1606,7 +1607,7 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 	for _, diff := range domainDiffs {
 		key := common.ToBytesZeroCopy(diff.Key)
 		diffStepInverted, fullKey := key[len(key)-8:], key[:len(key)-8]
-		var previous []byte
+		var retainedValue []byte
 		var found bool
 		k, v, err := valsCursor.Seek(fullKey)
 		for err == nil && k != nil {
@@ -1629,7 +1630,7 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 				// A partial prune may leave rows already superseded by snapshot files.
 				storedStep := kv.Step(^binary.BigEndian.Uint64(storedStepInverted))
 				if storedStep.LastTxNum(dt.stepSize) >= dt.files.EndTxNum() {
-					previous, found = value, true
+					retainedValue, found = value, true
 				}
 				break
 			}
@@ -1649,19 +1650,24 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 		// Otherwise that entry could outlive the changesets of this step.
 		if !found {
 			var from, to uint64
-			previous, found, from, to, err = dt.getLatestFromFiles(fullKey, nil, kv.NoStepBound)
+			retainedValue, found, from, to, err = dt.getLatestFromFiles(fullKey, nil, kv.NoStepBound)
 			if err != nil {
 				return err
 			}
 			if found && expandBranch != nil {
 				// Changesets contain full keys, even when the file uses references.
-				previous, err = expandBranch(fullKey, previous, from, to)
+				retainedValue, err = expandBranch(fullKey, retainedValue, from, to)
 				if err != nil {
 					return err
 				}
 			}
 		}
-		if bytes.Equal(previous, diff.Value) {
+		if bytes.Equal(retainedValue, diff.Value) {
+			continue
+		}
+		// New trie branches record an empty previous value without reading storage.
+		// An older empty branch record already represents that same empty state.
+		if d.Name == kv.CommitmentDomain && len(diff.Value) == 0 && commitment.BranchData(retainedValue).IsEmptyBranchRecord() {
 			continue
 		}
 		if d.LargeValues {
