@@ -28,38 +28,49 @@ import (
 	"github.com/erigontech/erigon/node/ethconfig"
 )
 
-func loadDeliveredAccessListTest(t *testing.T, name string) (*testutil.BlockTest, *[]ethconfig.BlockExecutionPath) {
+func loadDeliveredAccessListTest(t *testing.T, name string, edit func(fixture map[string]any)) (*testutil.BlockTest, *[]ethconfig.BlockExecutionPath) {
 	t.Helper()
 	src, err := os.ReadFile(filepath.Join("testdata", "delivered_access_list", name+".json"))
 	require.NoError(t, err)
-	var tests map[string]*testutil.BlockTest
-	require.NoError(t, json.Unmarshal(src, &tests))
+	var fixtures map[string]map[string]any
+	require.NoError(t, json.Unmarshal(src, &fixtures))
+	fixture := fixtures[name]
+	if edit != nil {
+		edit(fixture)
+	}
+	src, err = json.Marshal(fixture)
+	require.NoError(t, err)
+	bt := new(testutil.BlockTest)
+	require.NoError(t, json.Unmarshal(src, bt))
 	var paths []ethconfig.BlockExecutionPath
-	bt := tests[name]
 	bt.ExecWorkers = 2
 	bt.ExecutionPathReporter = func(p ethconfig.BlockExecutionPath) { paths = append(paths, p) }
 	return bt, &paths
 }
 
-// The valid and mismatched_list fixtures carry the same valid block. In
-// mismatched_list, one value in its delivered access list is changed, so the
-// list's hash differs from the header's. The block test drops that list, as
-// sync drops a peer's, and the block imports and runs without it, reported as
-// "bad-access-list".
+// The valid fixture's block, delivered as is and with one value in its access
+// list changed, so the list's hash differs from the header's. The block test
+// drops that list, as sync drops a peer's, and the block imports and runs
+// without it, reported as "bad-access-list".
 func TestBlockTestDropsMismatchedBlockAccessList(t *testing.T) {
 	if testing.Short() {
 		t.Skip("long-running test")
 	}
 	for _, tc := range []struct {
 		name       string
+		edit       func(fixture map[string]any)
 		accessList bool
 		reason     string
 	}{
-		{"valid", true, ""},
-		{"mismatched_list", false, "bad-access-list"},
+		{"valid", nil, true, ""},
+		{"mismatched_list", func(fixture map[string]any) {
+			block := fixture["blocks"].([]any)[0].(map[string]any)
+			account := block["blockAccessList"].([]any)[16].(map[string]any)
+			account["nonceChanges"].([]any)[1].(map[string]any)["postNonce"] = "0x03"
+		}, false, "bad-access-list"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			bt, paths := loadDeliveredAccessListTest(t, tc.name)
+			bt, paths := loadDeliveredAccessListTest(t, "valid", tc.edit)
 			require.NoError(t, bt.Run(t))
 			require.Len(t, *paths, 1)
 			require.Equal(t, "parallel", (*paths)[0].Path)
@@ -72,7 +83,7 @@ func TestBlockTestDropsMismatchedBlockAccessList(t *testing.T) {
 	// matches, so it is attached, and the block is rejected before it runs; a
 	// dropped list would have let it run and print a line.
 	t.Run("invalid_list", func(t *testing.T) {
-		bt, paths := loadDeliveredAccessListTest(t, "invalid_list")
+		bt, paths := loadDeliveredAccessListTest(t, "invalid_list", nil)
 		require.NoError(t, bt.Run(t))
 		require.Empty(t, *paths)
 	})

@@ -48,9 +48,9 @@ func TestRunnersRunEveryPathArgument(t *testing.T) {
 		paths   []string
 		want    int
 	}{
-		{"blocktest", []string{blockFixtures + "valid.json", blockFixtures + "mismatched_list.json"}, 2},
-		// A symlink to a directory runs the directory's three fixtures.
-		{"blocktest", []string{linkedDir}, 3},
+		{"blocktest", []string{blockFixtures + "valid.json", blockFixtures + "invalid_list.json"}, 2},
+		// A symlink to a directory runs the directory's two fixtures.
+		{"blocktest", []string{linkedDir}, 2},
 		// The directory holds the file and one more fixture.
 		{"enginetest", []string{engineFixtures + "bal_cross_block_ripemd160_state_leak.json", engineFixtures}, 3},
 	} {
