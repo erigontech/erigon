@@ -404,6 +404,23 @@ func BlobCountFromBlocks(ctx context.Context, sn *CaplinSnapshots, r BeaconSnaps
 		}
 		commitments := block.Block.Body.GetBlobKzgCommitments()
 		if commitments == nil || commitments.Len() == 0 {
+			if block.Version() >= clparams.GloasVersion {
+				return 0, nil
+			}
+			header, _, _, err := sn.ReadHeader(slot, nil)
+			if err != nil {
+				return 0, err
+			}
+			if header == nil {
+				return 0, fmt.Errorf("block at slot %d is not canonical", slot)
+			}
+			headerRoot, err := header.Header.HashSSZ()
+			if err != nil {
+				return 0, err
+			}
+			if headerRoot != root {
+				return 0, fmt.Errorf("block at slot %d is not canonical", slot)
+			}
 			return 0, nil
 		}
 		if block.Version() >= clparams.GloasVersion {

@@ -1072,6 +1072,9 @@ func TestBlobCountFromBlocksRejectsABlockThatIsNotTheCanonicalOne(t *testing.T) 
 	other.Block.Slot = slot - 1
 	otherRoot, err := other.Block.HashSSZ()
 	require.NoError(t, err)
+	blobless := cltypes.NewSignedBeaconBlock(&cfg, clparams.DenebVersion)
+	blobless.Block.Slot = slot
+	blobless.Block.Body.ExecutionPayload.Transactions = solid.NewTransactionsSSZFromTransactions([][]byte{{0x01}})
 	for _, tc := range []struct {
 		name      string
 		stored    *cltypes.SignedBeaconBlock
@@ -1081,6 +1084,7 @@ func TestBlobCountFromBlocksRejectsABlockThatIsNotTheCanonicalOne(t *testing.T) 
 		{"canonical block missing from the beacon segment", nil, root, "block at slot 7: canonical block is missing"},
 		{"frozen block not canonical at its slot", block, common.Hash{0xee}, "block at slot 7 is not canonical"},
 		{"frozen block of another slot", other, otherRoot, "block at slot 7 is not canonical"},
+		{"frozen blobless Deneb block not canonical at its slot", blobless, common.Hash{0xee}, "block at slot 7 is not canonical"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dirs := datadir.New(t.TempDir())
@@ -1142,11 +1146,19 @@ func TestBlobCountFromBlocksDumpsACanonicalDenebBlockWithTransactions(t *testing
 	}
 	root, err := block.Block.HashSSZ()
 	require.NoError(t, err)
+	blobless := cltypes.NewSignedBeaconBlock(&cfg, clparams.DenebVersion)
+	blobless.Block.Slot = slot + 1
+	blobless.Block.Body.ExecutionPayload.Transactions = solid.NewTransactionsSSZFromTransactions([][]byte{{0x03}})
+	blobLessRoot, err := blobless.Block.HashSSZ()
+	require.NoError(t, err)
 
 	dirs := datadir.New(t.TempDir())
 	writeCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, snaptype.CaplinMergeLimit, true, func(s uint64) []byte {
-		if s == slot {
+		switch s {
+		case slot:
 			return blockSnapshotWord(t, block)
+		case slot + 1:
+			return blockSnapshotWord(t, blobless)
 		}
 		return nil
 	})
@@ -1156,6 +1168,7 @@ func TestBlobCountFromBlocksDumpsACanonicalDenebBlockWithTransactions(t *testing
 
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		require.NoError(t, beacon_indicies.MarkRootCanonical(tx, slot+1, blobLessRoot))
 		return beacon_indicies.MarkRootCanonical(tx, slot, root)
 	}))
 	store := blob_storage.NewBlobStore(db, afero.NewMemMapFs())
@@ -1164,4 +1177,5 @@ func TestBlobCountFromBlocksDumpsACanonicalDenebBlockWithTransactions(t *testing
 	blobCount := BlobCountFromBlocks(t.Context(), sn, NewBeaconSnapshotReader(sn, nil, &cfg))
 	require.NoError(t, DumpBlobSidecarsRange(t.Context(), db, store, 0, snaptype.CaplinMergeLimit, 0, dirs, 1, blobCount, log.LvlDebug, log.New()))
 	require.NotEmpty(t, dumpedBlobWord(t, dirs, slot))
+	require.Empty(t, dumpedBlobWord(t, dirs, slot+1))
 }
