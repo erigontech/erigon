@@ -125,16 +125,18 @@ NOTES:
 - The unwind filter was removed because a raw `(key, step)` entry can come from an earlier committed batch and must be replayed even when the current in-memory chain has no flushed entry.
 - Value projection selects the last unflushed entry in each step run so a discarded child's flushed marker cannot hide the receiver's value.
 
-### T5: Merge keeps no domain writers
+### T5 (dropped): Merge keeps no domain writers
 
-- [x] After T4 the other batch's domain writers hold nothing. `Merge` closes them instead of moving them, and `pastDomainWriters` is deleted. The II writers (`pastIIWriters`, standalone indices via `IndexAdd`) stay.
-- [ ] Goldens unchanged; item 4 changes `forward.txt` and `discard.txt`.
+- [ ] dropped: the other batch's domain writers move again because overlapping and flushed children retain collectors that the receiver must flush. `pastDomainWriters` remains, and the II writers (`pastIIWriters`, standalone indices via `IndexAdd`) stay.
+- [ ] dropped: Goldens unchanged; item 4 changes `forward.txt` and `discard.txt`.
 
 NOTES:
 
 - LSP found the only production write into a `TemporalMemBatch` domain writer outside chain projection at `db/state/commitment_convert.go:489` through the writer initialized at `:424-425`; direct test writers are used at `db/state/domain_test.go:317`, `:328`, `:331`, and `:376`, plus `db/state/temporal_mem_batch_test.go:90`, while `db/state/squeeze.go:1257-1265` and `db/state/domain.go:913-915` only project and collate. The field references were checked with gopls.
 - The parent `b16730c6c44` value rows for the overlap test are one `AccountVals` row per case: key `910000000000000000000000000000000000006e`, value `ffffffffffffffff09`.
-- `pastDomainWriters` was deleted after T4 because no code appended to it; the receiver keeps only the II writer history.
+- T5 is dropped because an overlapping grandchild leaves projected rows in its domain writers and a flushed child retains drained collectors. `Merge` moves current and past domain writers back to `pastDomainWriters`.
+- `Merge` rejects explicit discarded writes on receiver or other writable domains before changing either batch. The permanently disabled RCache writer is excluded because its discard bit is configuration state, not `DiscardWrites`.
+- `TestT3MergeKeepsChildDiscarded` and `TestReviewDiscardedChildDomains` now assert the discarded-write merge error, unchanged receiver chains, and receiver-only rows after `Flush`.
 
 ## Checkpoints (supervisor)
 
