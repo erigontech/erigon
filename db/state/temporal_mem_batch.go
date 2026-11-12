@@ -381,9 +381,15 @@ func (sd *TemporalMemBatch) getLatest(sh *latestShard, domain kv.Domain, key []b
 // grow with node size times depth, (2d-1)*log(n)/log(d), which is about 7x smaller at 8 than at 128.
 const publishTreeDegree = 8
 
+// execReadDomain reports whether exec workers read the domain; only those domains get a published view, so the
+// commitment fold does not pay a tree copy per branch write.
+func execReadDomain(d kv.Domain) bool {
+	return d == kv.AccountsDomain || d == kv.StorageDomain || d == kv.CodeDomain
+}
+
 // publish sets key in the domain's tree and publishes a copy of it. The caller holds key's shard lock.
 func (sd *TemporalMemBatch) publish(domain kv.Domain, key string, v dataWithTxNum) {
-	if sd.unwindChangeset != nil {
+	if sd.unwindChangeset != nil || !execReadDomain(domain) {
 		return
 	}
 	sd.publishMu[domain].Lock()
@@ -399,6 +405,9 @@ func (sd *TemporalMemBatch) publish(domain kv.Domain, key string, v dataWithTxNu
 // while an unwind changeset is pending. The caller excludes all writers.
 func (sd *TemporalMemBatch) republishAll() {
 	for d := range sd.latest {
+		if !execReadDomain(kv.Domain(d)) {
+			continue
+		}
 		sd.publishMu[d].Lock()
 		if sd.unwindChangeset != nil {
 			sd.publishTree[d] = nil
@@ -435,6 +444,9 @@ func (sd *TemporalMemBatch) publishMerged(other *TemporalMemBatch) {
 		return
 	}
 	for d := range other.latest {
+		if !execReadDomain(kv.Domain(d)) {
+			continue
+		}
 		sd.publishMu[d].Lock()
 		t := sd.publishTree[d]
 		if t == nil {
