@@ -429,7 +429,7 @@ efficiently, the set of keys being resolved will be converted into a sorted list
 processes a key, it maintains references to two consecutive keys from that sorted list - one "LTE" (Less Than or Equal
 to the currently processed key), and another "GT" (Greater Than the currently processed key). If max common prefix is
 also prefix of either LTE or GT, then `BRANCH` opcode is emitted, otherwise, `BRANCHHASH` opcode is emitted. This is
-implemented by the type `RetainList` in [execution/commitment/trie/retain_list.go](../../execution/commitment/trie/retain_list.go)
+defined by the `RetainDecider` interface in [execution/commitment/trie/retain_list.go](../../execution/commitment/trie/retain_list.go)
 
 ### Extension of the structure to support contracts with contract storage
 
