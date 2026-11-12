@@ -226,17 +226,30 @@ func TestMarkReadersDirtyOnBALSeededAccountPaths(t *testing.T) {
 		seed         types.AccountChanges
 		same, differ *state.WriteSet
 	}{
-		{"balance", state.BalancePath, types.AccountChanges{BalanceChanges: []*types.BalanceChange{{Index: 2, Value: *uint256.NewInt(7)}}},
-			newWS().bal(addr, writer, *uint256.NewInt(7)).build(), newWS().bal(addr, writer, *uint256.NewInt(8)).build()},
-		{"nonce", state.NoncePath, types.AccountChanges{NonceChanges: []*types.NonceChange{{Index: 2, Value: 7}}},
-			newWS().nonce(addr, writer, 7).build(), newWS().nonce(addr, writer, 8).build()},
+		{
+			"balance", state.BalancePath,
+			types.AccountChanges{BalanceChanges: []*types.BalanceChange{{Index: 2, Value: *uint256.NewInt(7)}}},
+			newWS().bal(addr, writer, *uint256.NewInt(7)).build(), newWS().bal(addr, writer, *uint256.NewInt(8)).build(),
+		},
+		{
+			"nonce", state.NoncePath,
+			types.AccountChanges{NonceChanges: []*types.NonceChange{{Index: 2, Value: 7}}},
+			newWS().nonce(addr, writer, 7).build(), newWS().nonce(addr, writer, 8).build(),
+		},
 		{"code", state.CodePath, codeSeed, codeWrites(seedCode), codeWrites(otherCode)},
-		{"code hash", state.CodeHashPath, codeSeed,
-			newWS().codeHash(addr, writer, seedCode.Hash).build(), newWS().codeHash(addr, writer, otherCode.Hash).build()},
-		{"code size", state.CodeSizePath, codeSeed,
-			newWS().codeSize(addr, writer, seedCode.Len()).build(), newWS().codeSize(addr, writer, seedCode.Len()+1).build()},
-		{"storage", state.StoragePath, types.AccountChanges{StorageChanges: []types.SlotChanges{{Slot: slot, Changes: []*types.StorageChange{{Index: 2, Value: *uint256.NewInt(7)}}}}},
-			newWS().stor(addr, slot, writer, *uint256.NewInt(7)).build(), newWS().stor(addr, slot, writer, *uint256.NewInt(8)).build()},
+		{
+			"code hash", state.CodeHashPath, codeSeed,
+			newWS().codeHash(addr, writer, seedCode.Hash).build(), newWS().codeHash(addr, writer, otherCode.Hash).build(),
+		},
+		{
+			"code size", state.CodeSizePath, codeSeed,
+			newWS().codeSize(addr, writer, seedCode.Len()).build(), newWS().codeSize(addr, writer, seedCode.Len()+1).build(),
+		},
+		{
+			"storage", state.StoragePath,
+			types.AccountChanges{StorageChanges: []types.SlotChanges{{Slot: slot, Changes: []*types.StorageChange{{Index: 2, Value: *uint256.NewInt(7)}}}}},
+			newWS().stor(addr, slot, writer, *uint256.NewInt(7)).build(), newWS().stor(addr, slot, writer, *uint256.NewInt(8)).build(),
+		},
 	}
 	for _, c := range cases {
 		newBE := func() *blockExecutor {
