@@ -1207,7 +1207,7 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 }
 
 // hasBlobTxn reports whether a Transactions payload contains a blob transaction
-// or a frame transaction wrapped with blobs. Malformed payloads, and payloads
+// or a frame transaction that carries blobs, wrapped or bare. Malformed payloads, and payloads
 // over maxTransactionsPerPacket, report false and are left to the regular parser.
 func hasBlobTxn(payload []byte) bool {
 	pos, _, err := rlp.ParseList(payload, 0)
@@ -1231,15 +1231,32 @@ func hasBlobTxn(payload []byte) bool {
 }
 
 // isBlobEnvelope reports whether a typed transaction envelope carries blobs:
-// any type-3 transaction, or a frame transaction whose first list element is
-// the inner body, as in ParseTransaction's frame wrapper check.
+// any type-3 transaction, or a frame transaction that is either wrapped (its
+// first list element is the inner body, as in ParseTransaction's frame wrapper
+// check) or bare with a nonempty BlobVersionedHashes, its last body field.
 func isBlobEnvelope(txBytes []byte) bool {
 	switch txBytes[0] {
 	case BlobTxnType:
 		return true
 	case FrameTxnType:
 		bodyPos, bodyLen, err := rlp.ParseList(txBytes, 1)
-		return err == nil && bodyLen > 0 && txBytes[bodyPos] >= 0xc0
+		if err != nil || bodyLen == 0 {
+			return false
+		}
+		if txBytes[bodyPos] >= 0xc0 {
+			return true
+		}
+		var lastLen int
+		var lastIsList bool
+		for pos, end := bodyPos, bodyPos+bodyLen; pos < end; {
+			dataPos, dataLen, isList, err := rlp.Prefix(txBytes, pos)
+			if err != nil {
+				return false
+			}
+			lastLen, lastIsList = dataLen, isList
+			pos = dataPos + dataLen
+		}
+		return lastIsList && lastLen > 0
 	}
 	return false
 }

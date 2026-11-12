@@ -1368,15 +1368,35 @@ func makeWrappedFrameBlobTxnRlp(t *testing.T) []byte {
 	return encoded.Bytes()
 }
 
+func makeBareFrameBlobTxnRlp(t *testing.T) []byte {
+	frame := framePoolSlot(t, common.Address{1}, 1, 2).Txn.(*types.FrameTransaction)
+	frame.BlobVersionedHashes = []common.Hash{{1}}
+	var encoded bytes.Buffer
+	require.NoError(t, frame.MarshalBinary(&encoded))
+	return encoded.Bytes()
+}
+
+func TestHasBlobTxnBareFrame(t *testing.T) {
+	frame := framePoolSlot(t, common.Address{1}, 1, 2).Txn.(*types.FrameTransaction)
+	frame.BlobVersionedHashes = nil
+	var plain bytes.Buffer
+	require.NoError(t, frame.MarshalBinary(&plain))
+	require.False(t, hasBlobTxn(EncodeTransactions([][]byte{plain.Bytes()}, nil)))
+	require.True(t, hasBlobTxn(EncodeTransactions([][]byte{makeBareFrameBlobTxnRlp(t)}, nil)))
+}
+
 func TestPenalizePeerForBroadcastBlobTxn(t *testing.T) {
 	t.Parallel()
-	for _, kind := range []string{"blob", "frame-blob"} {
+	for _, kind := range []string{"blob", "frame-blob", "bare-frame-blob"} {
 		for _, known := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/known=%t", kind, known), func(t *testing.T) {
 				t.Parallel()
 				blobTxnRlp := makeWrappedBlobTxnRlpWithCellProofs(t, uint256.NewInt(1), 1)
-				if kind == "frame-blob" {
+				switch kind {
+				case "frame-blob":
 					blobTxnRlp = makeWrappedFrameBlobTxnRlp(t)
+				case "bare-frame-blob":
+					blobTxnRlp = makeBareFrameBlobTxnRlp(t)
 				}
 				testPenalizePeerForBroadcastBlobTxn(t, known, blobTxnRlp)
 			})
