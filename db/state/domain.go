@@ -1632,6 +1632,11 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 		if bytes.Equal(previous, diff.Value) {
 			continue
 		}
+		// New trie branches record an empty previous value without reading storage.
+		// An older branch tombstone already represents that same empty state.
+		if d.Name == kv.CommitmentDomain && len(diff.Value) == 0 && len(previous) == 4 && commitment.BranchData(previous).ChildCount() == 0 {
+			continue
+		}
 		if d.LargeValues {
 			err = rwTx.Put(d.ValuesTable, key, diff.Value)
 		} else {

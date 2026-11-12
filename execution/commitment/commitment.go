@@ -449,8 +449,8 @@ func (be *BranchEncoder) setMetrics(metrics *Metrics) {
 	be.metrics = metrics
 }
 
-// prev is the branch to merge with, if it existed when unfolded. A new branch
-// passes nil so PutBranch resolves its undo value when the write is applied.
+// prev is the branch read during unfold, empty when the branch is new.
+// Pass a non-nil empty value to PutBranch to avoid reading it again.
 func (be *BranchEncoder) CollectUpdate(
 	ctx PatriciaContext,
 	prefix []byte,
@@ -460,6 +460,9 @@ func (be *BranchEncoder) CollectUpdate(
 ) error {
 	if be.deferUpdates {
 		return be.CollectDeferredUpdate(ctx, prefix, bitmap, touchMap, afterMap, cells, prev)
+	}
+	if prev == nil {
+		prev = []byte{}
 	}
 	update, err := be.EncodeBranch(bitmap, touchMap, afterMap, cells)
 	if err != nil {
@@ -503,6 +506,10 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 		}
 		be.ClearDeferred()
 	}
+	if prev == nil {
+		prev = []byte{}
+	}
+
 	raw, err := be.EncodeBranch(bitmap, touchMap, afterMap, cells)
 	if err != nil {
 		return err
