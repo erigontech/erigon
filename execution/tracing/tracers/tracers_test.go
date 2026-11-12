@@ -140,3 +140,23 @@ func TestPrestateTracerCreate2(t *testing.T) {
 		t.Fatalf("Expected NOT present 0x60f3f640a8508fc6a86d45df051962668e1e8ac7 in result because empty")
 	}
 }
+
+// A js tracer that is rejected must show why, instead of a bare "tracer not found".
+func TestNewReportsJSTracerError(t *testing.T) {
+	cases := []struct {
+		name, code, want string
+	}{
+		{"null", "null", "Cannot convert undefined or null to object"},
+		{"throwing getter", "{get result() { throw 1 }, fault: function() {}}", "1 at result"},
+		{"typo in native name", "callTracr", "ReferenceError: callTracr is not defined"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tr, err := tracers.New(tc.code, &tracers.Context{}, json.RawMessage("{}"))
+			require.Nil(t, tr)
+			require.Error(t, err)
+			require.ErrorContains(t, err, "tracer not found")
+			require.ErrorContains(t, err, tc.want)
+		})
+	}
+}
