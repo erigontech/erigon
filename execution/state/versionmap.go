@@ -2256,9 +2256,6 @@ func (c *WriteCell[T]) setState(inc Incarnation, flag statusFlag) {
 }
 
 func markedState(old uint32, inc Incarnation, flag statusFlag) uint32 {
-	if flag == flagDeleted {
-		return packCellState(inc, flag)
-	}
 	return packCellState(inc, flag) | old&seededCell
 }
 

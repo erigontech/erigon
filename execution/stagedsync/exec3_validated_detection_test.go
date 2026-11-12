@@ -194,7 +194,7 @@ func TestRevalCandidates_BALKeepsReadersOfDroppedWrite(t *testing.T) {
 	require.Equal(t, []int{1}, be.revalCandidates(0, newWS().build(), oldW))
 }
 
-func TestFlushFinalizeWritesFlagsTheReaderOfAChangedCell(t *testing.T) {
+func TestFinalizeFlushFlagsTheReaderOfAChangedCell(t *testing.T) {
 	be := newDetExecutor(t, 4)
 	be.versionMap.HasBAL = true
 	addr := accounts.InternAddress(common.HexToAddress("0x00000000000000000000000000000000000000aa"))
@@ -204,7 +204,9 @@ func TestFlushFinalizeWritesFlagsTheReaderOfAChangedCell(t *testing.T) {
 	be.blockIO.RecordReads(state.Version{TxIndex: 2}, reads)
 	be.indexReads(2, reads)
 
-	be.flushFinalizeWrites(1, newWS().stor(addr, slot, state.Version{TxIndex: 1}, *uint256.NewInt(1)).build())
+	ws := newWS().stor(addr, slot, state.Version{TxIndex: 1}, *uint256.NewInt(1)).build()
+	be.versionMap.FlushVersionedWrites(ws, true)
+	be.markReadersDirty(1, ws)
 
 	require.Equal(t, map[int]bool{2: true}, be.revalidate)
 }
@@ -278,7 +280,8 @@ func TestMarkReadersDirtyOnBALSeededAccountPaths(t *testing.T) {
 		t.Run(c.name+" seed left untouched", func(t *testing.T) {
 			be := newBE()
 			require.Equal(t, state.VersionValid, valid(be))
-			be.flushFinalizeWrites(1, c.same)
+			be.versionMap.FlushVersionedWrites(c.same, true)
+			be.markReadersDirty(1, c.same)
 			require.Empty(t, be.revalidate)
 			require.Equal(t, state.VersionValid, valid(be))
 		})

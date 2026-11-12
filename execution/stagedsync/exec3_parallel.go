@@ -2752,12 +2752,6 @@ func (be *blockExecutor) markReadersDirty(writerTx int, ws *state.WriteSet) {
 	}
 }
 
-// flushFinalizeWrites publishes a tx's complete write set.
-func (be *blockExecutor) flushFinalizeWrites(tx int, ws *state.WriteSet) {
-	be.markReadersDirty(tx, ws)
-	be.versionMap.FlushVersionedWrites(ws, true)
-}
-
 // invalidBlockResult wraps a block-validity failure as a *blockResult carrying Err.
 // Returning this (rather than (nil, err)) lets the apply loop see the block
 // completed with a rejection rather than treating the dangling tx-results as a
@@ -2887,7 +2881,8 @@ func (be *blockExecutor) finalizeValidatedTx(pe *parallelExecutor, applyTx kv.Te
 
 		// Flush the merged writes (including fee changes) so subsequent per-tx
 		// finalizations see the full post-tx state via the versionMap fallback chain.
-		be.flushFinalizeWrites(tx, merged)
+		be.versionMap.FlushVersionedWrites(merged, true)
+		be.markReadersDirty(tx, merged)
 	}
 
 	// A read-only versionMap-slice view over the tx's raw write-set; apply and

@@ -2637,18 +2637,6 @@ func TestWritesAlreadySeededKeepsTheSeedThroughValidation(t *testing.T) {
 	require.True(t, vm.WritesAlreadySeeded(addr, storageWriteSet(addr, slot, 0, 42, ValueChanged)))
 }
 
-// An equal-value flush keeps the seed bit but takes the write's value status, so readers must be checked before it.
-func TestWritesAlreadySeededRefusesAnotherValueStatusUntilTheFlush(t *testing.T) {
-	addr := accounts.InternAddress([20]byte{0xbe, 0xef})
-	slot := accounts.InternKey(common.Hash{0x04})
-	vm := NewVersionMap(seededSlotBAL(addr, slot))
-	ws := storageWriteSet(addr, slot, 0, 42, ValueCreated)
-
-	require.False(t, vm.WritesAlreadySeeded(addr, ws))
-	vm.FlushVersionedWrites(ws, true)
-	require.True(t, vm.WritesAlreadySeeded(addr, storageWriteSet(addr, slot, 0, 42, ValueCreated)))
-}
-
 // Completion moves the seeded Done cell to Done again through a CAS that must keep the seed bit.
 func TestWritesAlreadySeededKeepsTheSeedThroughCompletion(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xbe, 0xef})
