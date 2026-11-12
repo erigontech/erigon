@@ -142,6 +142,16 @@ func TestAccountOnlyDeleteDoesNotBlockUnrelatedCodeFill(t *testing.T) {
 	cached, ok := stateCache.View(nil).Get(kv.CodeDomain, contractAddr)
 	require.True(t, ok, "an account-only deletion must not block unrelated code fills")
 	require.Equal(t, code, cached)
+
+	counted := &countingLatestTx{TemporalTx: freshTx}
+	getter := execctx.NewCachedTemporalTxStateGetter(counted, stateCache)
+	for range 2 {
+		got, found, err := getter.GetCode(contractAddr, 21)
+		require.NoError(t, err)
+		require.True(t, found)
+		require.Equal(t, code, got)
+	}
+	require.Zero(t, counted.reads, "code filled from this snapshot must be reusable by that snapshot")
 }
 
 func TestGetCodeSizeColdReadDoesNotCacheCode(t *testing.T) {
