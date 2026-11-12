@@ -31,7 +31,31 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
+
+func TestFindEpochRootEmptyEpochZero(t *testing.T) {
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	a := &ApiHandler{beaconChainCfg: &clparams.MainnetBeaconConfig}
+	var root common.Hash
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		var err error
+		root, err = a.findEpochRoot(tx, 0)
+		return err
+	}))
+	require.Zero(t, root, "findEpochRoot on empty epoch zero must return the zero hash")
+}
+
+func TestPostAttestationRewardsRejectsMaxEpoch(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), false)
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/rewards/attestations/18446744073709551615", http.NoBody)
+	handler.mux.ServeHTTP(recorder, request)
+	require.Equal(t, http.StatusNotFound, recorder.Code)
+	require.Contains(t, recorder.Body.String(), "epoch is in the future")
+}
 
 func TestGetBlockRewards(t *testing.T) {
 	_, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), false)
