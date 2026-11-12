@@ -385,7 +385,7 @@ func (b *BlobArchiveStoreFill) findWindow(ctx context.Context, db kv.RoDB, block
 			if served, ok := answers[root]; ok {
 				return served
 			}
-			sidecars, err := retrieveBlobsFromRemoteEndpoint(ctx, b.Endpoints[i], root, blobCount(block))
+			sidecars, err := retrieveSidecars(ctx, b.Endpoints[i], root, block)
 			if err == nil && len(sidecars) == 0 {
 				err = errNoSidecars
 			}
@@ -426,7 +426,7 @@ func nextSlotWithBlobs(ctx context.Context, db kv.RoDB, blocks freezeblocks.Beac
 
 func fetchAndStoreBlobs(ctx context.Context, store blob_storage.BlobStorage, endpoint string, root common.Hash, block *cltypes.SignedBeaconBlock) error {
 	commitments := block.Block.Body.GetBlobKzgCommitments()
-	sidecars, err := retrieveBlobsFromRemoteEndpoint(ctx, endpoint, root, commitments.Len())
+	sidecars, err := retrieveSidecars(ctx, endpoint, root, block)
 	if err != nil {
 		return err
 	}

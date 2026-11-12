@@ -100,18 +100,20 @@ func (f *fillFixture) addBlockWithTransactions(slot uint64, blobs int, txs bool)
 		var err error
 		commitments[i], err = kzg.Ctx().BlobToKZGCommitment(&data[i], 0)
 		require.NoError(t, err)
-		block.Block.Body.BlobKzgCommitments.Append((*cltypes.KZGCommitment)(&commitments[i]))
+		block.Block.Body.GetBlobKzgCommitments().Append((*cltypes.KZGCommitment)(&commitments[i]))
 	}
 	root, err := block.Block.HashSSZ()
 	require.NoError(t, err)
 	for i := range data {
 		proof, err := kzg.Ctx().ComputeBlobKZGProof(&data[i], commitments[i], 0)
 		require.NoError(t, err)
-		branch, err := block.Block.Body.KzgCommitmentMerkleProof(i)
-		require.NoError(t, err)
 		inclusion := solid.NewHashVector(cltypes.CommitmentBranchSize)
-		for j := range branch {
-			inclusion.Set(j, common.Hash(branch[j]))
+		if f.version < clparams.GloasVersion {
+			branch, err := block.Block.Body.KzgCommitmentMerkleProof(i)
+			require.NoError(t, err)
+			for j := range branch {
+				inclusion.Set(j, common.Hash(branch[j]))
+			}
 		}
 		f.sidecars[root] = append(f.sidecars[root], cltypes.NewBlobSidecar(uint64(i), (*cltypes.Blob)(&data[i]),
 			common.Bytes48(commitments[i]), common.Bytes48(proof), block.SignedBeaconBlockHeader(), inclusion))
@@ -144,7 +146,7 @@ func (f *fillFixture) storedValid(slot uint64, root common.Hash) bool {
 	return storedBlobsValid(f.t.Context(), f.store, slot, root, f.blocks.blocks[slot])
 }
 
-// endpoint serves the fixture's sidecars, or 404s when missing is set, and counts requests per root.
+// endpoint serves the fixture's sidecars, only their blobs for Gloas, or 404s when missing is set, and counts requests per root.
 func (f *fillFixture) endpoint(missing bool) (string, *sync.Map) {
 	requests := &sync.Map{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -152,11 +154,25 @@ func (f *fillFixture) endpoint(missing bool) (string, *sync.Map) {
 		counter, _ := requests.LoadOrStore(id, &atomic.Int32{})
 		counter.(*atomic.Int32).Add(1)
 		sidecars, ok := f.sidecars[common.HexToHash(id)]
-		if missing || !ok || !strings.Contains(r.URL.Path, "/eth/v1/beacon/blob_sidecars/") {
+		var data any = sidecars
+		switch {
+		case missing || !ok:
 			w.WriteHeader(http.StatusNotFound)
 			return
+		case strings.Contains(r.URL.Path, "/eth/v1/beacon/blobs/"):
+			blobs := make([]*cltypes.Blob, len(sidecars))
+			for i, sidecar := range sidecars {
+				blobs[i] = &sidecar.Blob
+			}
+			data = blobs
+		case !strings.Contains(r.URL.Path, "/eth/v1/beacon/blob_sidecars/"):
+			w.WriteHeader(http.StatusNotFound)
+			return
+		case f.version >= clparams.GloasVersion:
+			w.WriteHeader(http.StatusBadRequest)
+			return
 		}
-		if err := json.NewEncoder(w).Encode(map[string]any{"data": sidecars}); err != nil {
+		if err := json.NewEncoder(w).Encode(map[string]any{"data": data}); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}
 	}))
@@ -177,6 +193,17 @@ func (f *fillFixture) fill(cmd *BlobArchiveStoreFill, store blob_storage.BlobSto
 		store = f.store
 	}
 	return cmd.fill(f.t.Context(), f.db, f.blocks, store, f.frozen)
+}
+
+func TestBlobArchiveStoreFillBuildsGloasSidecarsFromBlobs(t *testing.T) {
+	f := newFillFixture(t)
+	f.version = clparams.GloasVersion
+	root := f.addBlock(fillTestSlot, 2)
+	url, _ := f.endpoint(false)
+
+	require.NoError(t, f.fill(&BlobArchiveStoreFill{Endpoints: []string{url}, FromSlot: fillTestSlot, ToSlot: fillTestSlot}, nil))
+
+	require.True(t, f.storedValid(fillTestSlot, root))
 }
 
 func TestBlobArchiveStoreFillFetchesOnlyMissingSlots(t *testing.T) {

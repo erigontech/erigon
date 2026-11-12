@@ -43,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/clparams/initial_state"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
@@ -245,14 +246,50 @@ func (e blobStatusError) Error() string {
 // may carry a query such as an API key. A response with more than maxSidecars entries is refused
 // before they are decoded: an empty entry is a few bytes on the wire but a whole blob in memory.
 func retrieveBlobsFromRemoteEndpoint(ctx context.Context, endpoint string, root common.Hash, maxSidecars int) ([]*cltypes.BlobSidecar, error) {
+	data, err := getBeaconData(ctx, endpoint, fmt.Sprintf("eth/v1/beacon/blob_sidecars/0x%x", root), maxSidecars)
+	if err != nil {
+		return nil, err
+	}
+	sidecars := make([]*cltypes.BlobSidecar, len(data))
+	for i, raw := range data {
+		sidecars[i] = &cltypes.BlobSidecar{}
+		if err := sidecars[i].UnmarshalJSON(raw); err != nil {
+			return nil, fmt.Errorf("blob retrieval decode failed %w", err)
+		}
+	}
+	return sidecars, nil
+}
+
+func retrieveSidecars(ctx context.Context, endpoint string, root common.Hash, block *cltypes.SignedBeaconBlock) ([]*cltypes.BlobSidecar, error) {
+	if block.Version() < clparams.GloasVersion {
+		return retrieveBlobsFromRemoteEndpoint(ctx, endpoint, root, blobCount(block))
+	}
+	commitments := block.Block.Body.GetBlobKzgCommitments()
+	data, err := getBeaconData(ctx, endpoint, fmt.Sprintf("eth/v1/beacon/blobs/0x%x", root), blobCount(block))
+	if err != nil {
+		return nil, err
+	}
+	header := block.SignedBeaconBlockHeader()
+	sidecars := make([]*cltypes.BlobSidecar, len(data))
+	for i, raw := range data {
+		var blob cltypes.Blob
+		if err := blob.UnmarshalJSON(raw); err != nil {
+			return nil, fmt.Errorf("blob retrieval decode failed %w", err)
+		}
+		sidecars[i] = cltypes.NewBlobSidecar(uint64(i), &blob, common.Bytes48(*commitments.Get(i)), emptyKZGProof, header,
+			solid.NewHashVector(cltypes.CommitmentBranchSize))
+	}
+	return sidecars, nil
+}
+
+func getBeaconData(ctx context.Context, endpoint, path string, maxEntries int) ([]json.RawMessage, error) {
 	base, err := url.Parse(endpoint)
 	if err != nil {
 		return nil, redactURLError(err)
 	}
-	blobUri := base.JoinPath("eth/v1/beacon/blob_sidecars", fmt.Sprintf("0x%x", root))
-	log.Debug("[Blob Retrieval] Requesting blob sidecars", "endpoint", redactURL(base), "blockRoot", root)
+	log.Debug("[Blob Retrieval] Requesting", "endpoint", redactURL(base), "path", path)
 
-	req, err := retryablehttp.NewRequestWithContext(ctx, http.MethodGet, blobUri.String(), nil)
+	req, err := retryablehttp.NewRequestWithContext(ctx, http.MethodGet, base.JoinPath(path).String(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -272,7 +309,7 @@ func retrieveBlobsFromRemoteEndpoint(ctx context.Context, endpoint string, root 
 	var raw []byte
 	req.SetResponseHandler(func(r *http.Response) (err error) {
 		if r.StatusCode == http.StatusOK {
-			raw, err = io.ReadAll(io.LimitReader(r.Body, int64(maxSidecars+1)*maxBlobSidecarJSONSize))
+			raw, err = io.ReadAll(io.LimitReader(r.Body, int64(maxEntries+1)*maxBlobSidecarJSONSize))
 		}
 		return err
 	})
@@ -292,23 +329,16 @@ func retrieveBlobsFromRemoteEndpoint(ctx context.Context, endpoint string, root 
 		return nil, blobStatusError(r.StatusCode)
 	}
 
-	var blobsResponse struct {
+	var response struct {
 		Data []json.RawMessage `json:"data"`
 	}
-	if err := json.NewDecoder(bytes.NewReader(raw)).Decode(&blobsResponse); err != nil {
+	if err := json.NewDecoder(bytes.NewReader(raw)).Decode(&response); err != nil {
 		return nil, fmt.Errorf("blob retrieval decode failed %w", err)
 	}
-	if len(blobsResponse.Data) > maxSidecars {
-		return nil, fmt.Errorf("blob response has %d sidecars, the block has %d commitments", len(blobsResponse.Data), maxSidecars)
+	if len(response.Data) > maxEntries {
+		return nil, fmt.Errorf("blob response has %d sidecars, the block has %d commitments", len(response.Data), maxEntries)
 	}
-	sidecars := make([]*cltypes.BlobSidecar, len(blobsResponse.Data))
-	for i, raw := range blobsResponse.Data {
-		sidecars[i] = &cltypes.BlobSidecar{}
-		if err := sidecars[i].UnmarshalJSON(raw); err != nil {
-			return nil, fmt.Errorf("blob retrieval decode failed %w", err)
-		}
-	}
-	return sidecars, nil
+	return response.Data, nil
 }
 
 func (c *ChainEndpoint) Run(ctx context.Context) error {
