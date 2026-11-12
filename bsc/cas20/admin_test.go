@@ -290,3 +290,18 @@ func TestCAS20PauseDecodesBeforeAuthorizing(t *testing.T) {
 		t.Errorf("returndata = %x, want AccessControlUnauthorizedAccount", out)
 	}
 }
+
+func TestCAS20ConstantGettersReturnACopy(t *testing.T) {
+	_, _, run := newTokenWithEVM(t, 1, nil)
+	for _, sel := range [][4]byte{selDefaultAdminRole, selMintRole, selTransferSenderScope} {
+		ret, err := run(cas20Alice, sel[:])
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := bytes.Clone(ret)
+		clear(ret)
+		if again, _ := run(cas20Alice, sel[:]); !bytes.Equal(again, want) {
+			t.Fatalf("%x: a caller writing into the result changed the constant: %x, want %x", sel, again, want)
+		}
+	}
+}

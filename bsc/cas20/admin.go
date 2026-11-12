@@ -90,19 +90,19 @@ var (
 func (t cas20Token) dispatchAdmin(sel [4]byte, args []byte) (ret []byte, err error, ok bool) {
 	switch sel {
 	case selDefaultAdminRole:
-		return roleDefaultAdmin[:], nil, true
+		return hashBytes(roleDefaultAdmin), nil, true
 	case selMintRole:
-		return roleMint[:], nil, true
+		return hashBytes(roleMint), nil, true
 	case selBurnRole:
-		return roleBurn[:], nil, true
+		return hashBytes(roleBurn), nil, true
 	case selSeizeRole:
-		return roleSeize[:], nil, true
+		return hashBytes(roleSeize), nil, true
 	case selPauseRole:
-		return rolePause[:], nil, true
+		return hashBytes(rolePause), nil, true
 	case selUnpauseRole:
-		return roleUnpause[:], nil, true
+		return hashBytes(roleUnpause), nil, true
 	case selMetadataRole:
-		return roleMetadata[:], nil, true
+		return hashBytes(roleMetadata), nil, true
 
 	case selHasRole:
 		role, err := readWord(args, 0)
@@ -222,17 +222,17 @@ func (t cas20Token) dispatchAdmin(sel [4]byte, args []byte) (ret []byte, err err
 		}
 		return nil, t.updatePolicy(scope, id), true
 	case selTransferSenderScope:
-		return scopeTransferSender[:], nil, true
+		return hashBytes(scopeTransferSender), nil, true
 	case selTransferReceiverScope:
-		return scopeTransferReceiver[:], nil, true
+		return hashBytes(scopeTransferReceiver), nil, true
 	case selTransferExecutorScope:
-		return scopeTransferExecutor[:], nil, true
+		return hashBytes(scopeTransferExecutor), nil, true
 	case selMintReceiverScope:
-		return scopeMintReceiver[:], nil, true
+		return hashBytes(scopeMintReceiver), nil, true
 	case selSeizeExemptScope:
-		return scopeSeizeExempt[:], nil, true
+		return hashBytes(scopeSeizeExempt), nil, true
 	case selSeizeReceiverScope:
-		return scopeSeizeReceiver[:], nil, true
+		return hashBytes(scopeSeizeReceiver), nil, true
 	case selPolicyId:
 		scope, err := readWord(args, 0)
 		if err != nil {

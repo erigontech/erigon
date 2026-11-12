@@ -226,7 +226,7 @@ func dispatchAsset(tok cas20Token, ext assetExt, input []byte) (ret []byte, err 
 	case selMaxUIMultiplier:
 		return encU256(cas20U128Mask), nil, true
 	case selOperatorRole:
-		return roleOperator[:], nil, true
+		return hashBytes(roleOperator), nil, true
 	case selNewUIMultiplier:
 		// With no live schedule it answers as uiMultiplier does (ERC-8056).
 		mul, at := ext.pending()
