@@ -95,7 +95,7 @@ func runPoolReplay(t *testing.T, ctx context.Context, fx *blockreplay.Fixture, w
 	r, closeFn := setupEphemeralReplay(t, fx)
 	defer closeFn()
 	r.ctx = ctx
-	tx, doms := r.newDomains(t, fx)
+	tx, doms, _ := r.newDomains(t, fx)
 	defer tx.Rollback()
 	defer doms.Close()
 	if err := r.exec(tx, doms); err != nil {
@@ -197,7 +197,7 @@ func TestPoolShutdownMidBlockDoesNotHang(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	r.ctx = ctx
-	tx, doms := r.newDomains(t, fx)
+	tx, doms, _ := r.newDomains(t, fx)
 	t.Cleanup(tx.Rollback)
 	t.Cleanup(doms.Close)
 	c := countPool(t)
@@ -356,11 +356,11 @@ func TestPoolBALSeededBlockMatchesUnseeded(t *testing.T) {
 
 	derive := func(seed types.BlockAccessList) types.BlockAccessList {
 		captured = nil
-		tx, doms := r.newDomains(t, fx)
+		tx, doms, ws := r.newDomains(t, fx)
 		defer tx.Rollback()
 		defer doms.Close()
 		require.NoError(t, r.execSeeded(tx, doms, seed))
-		require.NoError(t, r.verify(tx, doms, fx.Outputs))
+		require.NoError(t, r.verify(tx, doms, ws, fx.Outputs))
 		require.NotNil(t, captured, "no BAL derived")
 		return captured
 	}

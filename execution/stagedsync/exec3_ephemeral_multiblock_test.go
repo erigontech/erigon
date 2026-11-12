@@ -141,7 +141,7 @@ func TestEphemeralMultiBlockReplay(t *testing.T) {
 		}
 		tx, err := db.BeginTemporalRw(ctx) //nolint:gocritic
 		require.NoError(t, err)
-		doms, err := blockreplay.NewWitnessDomains(ctx, tx, merged, seedTxNum, logger)
+		doms, _, err := blockreplay.NewWitnessDomains(ctx, tx, merged, seedTxNum, logger)
 		require.NoError(t, err)
 		doms.SetTxNum(rng.inputTxNum)
 
@@ -255,7 +255,7 @@ func TestEphemeralMultiBlockPerBlock(t *testing.T) {
 	tx, err := db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
-	doms, err := blockreplay.NewWitnessDomains(ctx, tx, merged, seedTxNum, logger)
+	doms, _, err := blockreplay.NewWitnessDomains(ctx, tx, merged, seedTxNum, logger)
 	require.NoError(t, err)
 	defer doms.Close()
 

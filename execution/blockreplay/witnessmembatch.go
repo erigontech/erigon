@@ -1,6 +1,8 @@
 package blockreplay
 
 import (
+	"bytes"
+	"fmt"
 	"sort"
 	"strings"
 
@@ -18,21 +20,37 @@ import (
 type witnessMemBatch struct {
 	kv.TemporalMemBatch // delegate: exec writes + all non-overridden methods
 	witness             map[kv.Domain]map[string][]byte
-	sealed              bool
+	// writes records the domain keys written after Seal — the replay's actual
+	// write-set, used to check the replay wrote exactly the reference key set (an
+	// extra or missing write is a correctness bug that commitment-off replay,
+	// which validates neither receipts nor trie root, otherwise cannot see).
+	writes map[kv.Domain]map[string]struct{}
+	sealed bool
 }
 
 func newWitnessMemBatch(delegate kv.TemporalMemBatch) *witnessMemBatch {
 	return &witnessMemBatch{
 		TemporalMemBatch: delegate,
 		witness:          map[kv.Domain]map[string][]byte{},
+		writes:           map[kv.Domain]map[string]struct{}{},
 	}
 }
 
 // Seal ends witness loading; subsequent writes go to the delegate.
 func (w *witnessMemBatch) Seal() { w.sealed = true }
 
+func (w *witnessMemBatch) recordWrite(domain kv.Domain, k string) {
+	m := w.writes[domain]
+	if m == nil {
+		m = map[string]struct{}{}
+		w.writes[domain] = m
+	}
+	m[k] = struct{}{}
+}
+
 func (w *witnessMemBatch) DomainPut(domain kv.Domain, k string, v []byte, txNum uint64, preval []byte) error {
 	if w.sealed {
+		w.recordWrite(domain, k)
 		return w.TemporalMemBatch.DomainPut(domain, k, v, txNum, preval)
 	}
 	m := w.witness[domain]
@@ -46,6 +64,7 @@ func (w *witnessMemBatch) DomainPut(domain kv.Domain, k string, v []byte, txNum 
 
 func (w *witnessMemBatch) DomainDel(domain kv.Domain, k string, txNum uint64, preval []byte) error {
 	if w.sealed {
+		w.recordWrite(domain, k)
 		return w.TemporalMemBatch.DomainDel(domain, k, txNum, preval)
 	}
 	if m := w.witness[domain]; m != nil {
@@ -113,6 +132,73 @@ func (w *witnessMemBatch) IteratePrefix(domain kv.Domain, prefix []byte, roTx kv
 		}
 	}
 	return nil
+}
+
+// writeSetDiff reports extra STATE the replay produced that the reference output
+// set (want) does not cover: an account/storage/code key the replay wrote that is
+// not in want AND whose post-block value actually differs from its pre-block
+// witness base. That is the corruption a commitment-off replay (no trie root, no
+// receipts) cannot otherwise see. It deliberately does NOT require an exact
+// key-set match: the serial reference capture records touched-but-unchanged
+// (no-op) writes that the parallel replay skips, so an exact match is infeasible
+// and those benign differences must not fail. A deleted account's per-slot
+// storage/code clears (recorded only at the account level in want.Deleted) are
+// likewise excluded. Commitment/receipt-cache domains are recomputed and ignored.
+func (w *witnessMemBatch) writeSetDiff(want *Outputs) []string {
+	deleted := map[string]struct{}{}
+	for a := range want.Deleted {
+		deleted[string(a[:])] = struct{}{}
+	}
+	wantAcct := map[string]struct{}{}
+	for a := range want.Accounts {
+		wantAcct[string(a[:])] = struct{}{}
+	}
+	for a := range want.Deleted {
+		wantAcct[string(a[:])] = struct{}{}
+	}
+	wantCode := map[string]struct{}{}
+	for a := range want.Code {
+		wantCode[string(a[:])] = struct{}{}
+	}
+	wantStorage := map[string]struct{}{}
+	for a, slots := range want.Storage {
+		for k := range slots {
+			wantStorage[string(a[:])+string(k[:])] = struct{}{}
+		}
+	}
+
+	var diffs []string
+	// extraStateChanges flags replay writes outside want whose value changed vs
+	// the pre-block witness base — real state the reference is missing.
+	extraStateChanges := func(kind string, domain kv.Domain, wantKeys map[string]struct{}, deletedPrefixLen int) {
+		base := w.witness[domain]
+		for k := range w.writes[domain] {
+			if _, ok := wantKeys[k]; ok {
+				continue // in want — its value is checked by the output diff
+			}
+			post, _, _ := w.TemporalMemBatch.GetLatest(domain, []byte(k))
+			if deletedPrefixLen > 0 && len(k) >= deletedPrefixLen {
+				if _, del := deleted[k[:deletedPrefixLen]]; del {
+					// Every slot/code write under a self-destructed account must
+					// be a tombstone; a surviving live value is a real divergence
+					// (CollectOutputs never rescans deleted accounts, so this is
+					// the only place it is caught).
+					if len(post) > 0 {
+						diffs = append(diffs, fmt.Sprintf("live %s write under deleted account: %x", kind, k))
+					}
+					continue
+				}
+			}
+			if !bytes.Equal(post, base[k]) {
+				diffs = append(diffs, fmt.Sprintf("extra %s write changes state: %x", kind, k))
+			}
+		}
+	}
+	extraStateChanges("account", kv.AccountsDomain, wantAcct, 0)
+	extraStateChanges("code", kv.CodeDomain, wantCode, 20)
+	extraStateChanges("storage", kv.StorageDomain, wantStorage, 20)
+	sort.Strings(diffs)
+	return diffs
 }
 
 // changesetHolder is the structural view of the concrete mem batch's changeset
