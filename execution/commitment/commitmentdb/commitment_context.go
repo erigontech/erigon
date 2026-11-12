@@ -786,18 +786,18 @@ func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(foldCtx 
 	// Workers without their own reader on the required snapshot share this one.
 	// Construct it before workers start because construction may access the
 	// source transaction. The same lock also protects snapshot cloning.
-	var pinnedMu sync.Mutex
-	var pinnedMetrics *kvmetrics.DomainMetrics
-	var pinned *syncStateReader
+	var sourceMu sync.Mutex
+	var fallbackMetrics *kvmetrics.DomainMetrics
+	var fallbackReader *syncStateReader
 	if sharedSource || (tx != nil && !caller.writer) {
-		pinnedMetrics = kvmetrics.NewDomainMetrics()
+		fallbackMetrics = kvmetrics.NewDomainMetrics()
 		src := sdc.stateReader
 		if src != nil {
-			src = src.CloneForWorker(kvmetrics.ContextWithMetrics(foldCtx, pinnedMetrics), tx)
+			src = src.CloneForWorker(kvmetrics.ContextWithMetrics(foldCtx, fallbackMetrics), tx)
 		} else {
-			src = NewLatestStateReader(tx, sdc.sharedDomains, LatestStateReaderOptions{}.WithMetrics(pinnedMetrics))
+			src = NewLatestStateReader(tx, sdc.sharedDomains, LatestStateReaderOptions{}.WithMetrics(fallbackMetrics))
 		}
-		pinned = newSyncStateReader(&pinnedMu, src)
+		fallbackReader = newSyncStateReader(&sourceMu, src)
 	}
 
 	factory := func(ctx context.Context) (commitment.PatriciaContext, func()) {
@@ -812,9 +812,9 @@ func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(foldCtx 
 				// Close the unused view first so cloning cannot wait for a reader
 				// slot still held by the view it replaces.
 				roTx.Rollback()
-				pinnedMu.Lock()
+				sourceMu.Lock()
 				roTx, err = cloner.CloneState(ctx)
-				pinnedMu.Unlock()
+				sourceMu.Unlock()
 				if err != nil && !errors.Is(err, kv.ErrSnapshotCloneUnsupported) {
 					return &errorTrieContext{err: err}, func() {}
 				}
@@ -833,24 +833,24 @@ func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(foldCtx 
 		// (a race) or take the global metrics lock. Folded in at teardown.
 		wm := kvmetrics.NewDomainMetrics()
 		workerCtx := kvmetrics.ContextWithMetrics(ctx, wm)
-		warmupCtx := &TrieContext{
+		trieCtx := &TrieContext{
 			stepSize:       stepSize,
 			txNum:          txNum,
 			localCollector: collector,
 			traceW:         sdc.traceW,
 		}
 		if roTx != nil {
-			warmupCtx.putter = sdc.sharedDomains.AsPutDel(roTx)
+			trieCtx.putter = sdc.sharedDomains.AsPutDel(roTx)
 		}
 		switch {
-		case pinned != nil && caller.mayDrift(roTx):
+		case fallbackReader != nil && caller.mayDrift(roTx):
 			// Fallback workers share the reader and lock, but each needs its own
 			// buffer so another worker's read cannot overwrite returned bytes.
-			warmupCtx.stateReader = pinned.CloneForWorker(workerCtx, roTx)
+			trieCtx.stateReader = fallbackReader.CloneForWorker(workerCtx, roTx)
 		case sdc.stateReader != nil:
-			warmupCtx.stateReader = sdc.stateReader.CloneForWorker(workerCtx, roTx)
+			trieCtx.stateReader = sdc.stateReader.CloneForWorker(workerCtx, roTx)
 		default:
-			warmupCtx.stateReader = NewLatestStateReader(roTx, sdc.sharedDomains, LatestStateReaderOptions{}.WithMetrics(wm))
+			trieCtx.stateReader = NewLatestStateReader(roTx, sdc.sharedDomains, LatestStateReaderOptions{}.WithMetrics(wm))
 		}
 		cleanup := func() {
 			sdc.sharedDomains.MergeMetrics(kvmetrics.SourceWarmup, wm)
@@ -858,15 +858,15 @@ func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(foldCtx 
 				roTx.Rollback()
 			}
 		}
-		return warmupCtx, cleanup
+		return trieCtx, cleanup
 	}
 
 	drain := func() []*etl.Collector {
 		mu.Lock()
 		defer mu.Unlock()
-		if pinnedMetrics != nil {
-			sdc.sharedDomains.MergeMetrics(kvmetrics.SourceWarmup, pinnedMetrics)
-			pinnedMetrics = nil
+		if fallbackMetrics != nil {
+			sdc.sharedDomains.MergeMetrics(kvmetrics.SourceWarmup, fallbackMetrics)
+			fallbackMetrics = nil
 		}
 		c := collectors
 		collectors = nil
