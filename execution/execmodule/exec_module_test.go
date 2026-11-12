@@ -221,7 +221,7 @@ func TestValidateChainWithLastTxNumOfBlockAtStepBoundary(t *testing.T) {
 	insertRes, err := m.InsertBlocks(ctx, chainPack.Blocks)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, insertRes)
-	validationReceipt, err := m.ValidateChain(ctx, chainPack.Blocks[0].Header())
+	validationReceipt, err := m.ValidateChain(ctx, chainPack.Blocks[0])
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, validationReceipt.ValidationStatus)
 	require.Equal(t, "", validationReceipt.ValidationError)
@@ -302,7 +302,7 @@ func TestUpdateForkChoiceParallelFlushingAcceptsAncestorHashes(t *testing.T) {
 	_, err = m.InsertBlocks(t.Context(), chainPack.Blocks)
 	require.NoError(t, err)
 	head := chainPack.Blocks[1]
-	validation, err := m.ValidateChain(t.Context(), head.Header())
+	validation, err := m.ValidateChain(t.Context(), head)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
 	result, err := m.ExecModule.UpdateForkChoice(t.Context(), head.Hash(), chainPack.Blocks[0].Hash(), m.Genesis.Hash())
@@ -461,7 +461,7 @@ func validateForkPayloadOffNonTipCanonicalBlock(t *testing.T) {
 	insertStatus, err := m.InsertBlocks(t.Context(), fork.Blocks)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, insertStatus)
-	validation, err := m.ValidateChain(t.Context(), fork.Blocks[0].Header())
+	validation, err := m.ValidateChain(t.Context(), fork.Blocks[0])
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
 	extendingHash, extendingNumber, extendingDomains := m.ForkValidator.ExtendingFork()
@@ -471,7 +471,7 @@ func validateForkPayloadOffNonTipCanonicalBlock(t *testing.T) {
 	fcuResult, err := m.UpdateForkChoice(t.Context(), fork.Blocks[0].Header())
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, fcuResult.Status)
-	validation, err = m.ValidateChain(t.Context(), fork.Blocks[1].Header())
+	validation, err = m.ValidateChain(t.Context(), fork.Blocks[1])
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
 	fcuResult, err = m.UpdateForkChoice(t.Context(), fork.Blocks[1].Header())
@@ -506,7 +506,7 @@ func TestValidateChainAlreadyCanonicalExecutedAfterPrune(t *testing.T) {
 	insertStatus, err := m.InsertBlocks(ctx, []*types.Block{canonical})
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, insertStatus)
-	validation, err := m.ValidateChain(ctx, canonical.Header())
+	validation, err := m.ValidateChain(ctx, canonical)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
 	require.Equal(t, canonical.Hash(), validation.LatestValidHash)
@@ -523,7 +523,7 @@ func TestValidateChainAlreadyCanonicalExecutedAfterPrune(t *testing.T) {
 	insertStatus, err = m.InsertBlocks(ctx, []*types.Block{later})
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, insertStatus)
-	validation, err = m.ValidateChain(ctx, later.Header())
+	validation, err = m.ValidateChain(ctx, later)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
 	fcuResult, err := m.UpdateForkChoice(ctx, later.Header())
@@ -550,7 +550,7 @@ func TestValidateChainCanonicalNotExecutedAfterPrune(t *testing.T) {
 	insertStatus, err := m.InsertBlocks(ctx, []*types.Block{canonical})
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, insertStatus)
-	_, err = m.ValidateChain(ctx, canonical.Header())
+	_, err = m.ValidateChain(ctx, canonical)
 	require.ErrorContains(t, err, "too far unwind")
 }
 
@@ -579,7 +579,7 @@ func TestValidateChainResentSideBlockSkipsUnwind(t *testing.T) {
 	insertStatus, err := m.InsertBlocks(ctx, []*types.Block{sideBlock})
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, insertStatus)
-	validation, err := m.ValidateChain(ctx, sideBlock.Header())
+	validation, err := m.ValidateChain(ctx, sideBlock)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
 
@@ -600,7 +600,7 @@ func TestValidateChainResentSideBlockSkipsUnwind(t *testing.T) {
 	insertStatus, err = m.InsertBlocks(ctx, []*types.Block{sideBlock})
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, insertStatus)
-	validation, err = m.ValidateChain(ctx, sideBlock.Header())
+	validation, err = m.ValidateChain(ctx, sideBlock)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
 	require.Equal(t, sideBlock.Hash(), validation.LatestValidHash)
@@ -702,7 +702,7 @@ func TestValidateChainDoesNotTrustCanonicalMarkerAboveFinalized(t *testing.T) {
 		return nil
 	}))
 
-	_, err = m.ValidateChain(ctx, canonicalButUnexecuted.Header())
+	_, err = m.ValidateChain(ctx, canonicalButUnexecuted)
 	require.ErrorContains(t, err, "too far unwind")
 }
 
@@ -1008,7 +1008,7 @@ func TestReorgBackAndForwardIntoCanonicalChain(t *testing.T) {
 				require.Equalf(t, execmodule.ExecutionStatusSuccess, insRes, "insert block %d", n)
 
 				h := headerAt(n)
-				vr, err := m.ValidateChain(ctx, h)
+				vr, err := m.ValidateChain(ctx, chainPack.Blocks[n-1])
 				require.NoError(t, err)
 				require.Equalf(t, execmodule.ExecutionStatusSuccess, vr.ValidationStatus, "validate block %d", n)
 				ur, err := m.UpdateForkChoice(ctx, h)
@@ -1398,7 +1398,7 @@ func testAssembleBlockWithSiblingCommit(t *testing.T, commitSibling bool) {
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
 	// Check that the built block is valid on its original parent, even if the head changed.
-	validation, err := m.ValidateChain(ctx, built.Header())
+	validation, err := m.ValidateChain(ctx, built)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus, validation.ValidationError)
 }
@@ -3348,7 +3348,7 @@ func TestValidateChainBadBlockIsDroppedFromOverlay(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, inserted, "InsertBlocks must make the header readable through the overlay")
 
-	validation, err := m.ValidateChain(ctx, badBlock.Header())
+	validation, err := m.ValidateChain(ctx, badBlock)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusBadBlock, validation.ValidationStatus)
 
@@ -3373,13 +3373,13 @@ func TestValidateChainBadBlockKeepsValidSiblingInOverlay(t *testing.T) {
 
 	_, err = m.InsertBlocks(ctx, []*types.Block{valid})
 	require.NoError(t, err)
-	validation, err := m.ValidateChain(ctx, valid.Header())
+	validation, err := m.ValidateChain(ctx, valid)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
 
 	_, err = m.InsertBlocks(ctx, []*types.Block{badBlock})
 	require.NoError(t, err)
-	validation, err = m.ValidateChain(ctx, badBlock.Header())
+	validation, err = m.ValidateChain(ctx, badBlock)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusBadBlock, validation.ValidationStatus)
 
@@ -4422,7 +4422,7 @@ func TestValidateChainAnswersTooFarAwayWhenStateIsAheadOfTxNums(t *testing.T) {
 	_, err = m.InsertBlocks(ctx, []*types.Block{next})
 	require.NoError(t, err)
 
-	validation, err := m.ValidateChain(ctx, next.Header())
+	validation, err := m.ValidateChain(ctx, next)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusTooFarAway, validation.ValidationStatus)
 }

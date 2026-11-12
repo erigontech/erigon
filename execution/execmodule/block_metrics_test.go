@@ -237,7 +237,7 @@ func TestSlowBlockMetricsSkipReorgForkchoice(t *testing.T) {
 	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
 
 	tip := sideFork.Blocks[len(sideFork.Blocks)-1].Header()
-	result, err := m.ValidateChain(t.Context(), tip)
+	result, err := m.ValidateChain(t.Context(), sideFork.Blocks[len(sideFork.Blocks)-1])
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, result.ValidationStatus)
 	_, err = m.UpdateForkChoice(t.Context(), tip)
@@ -265,8 +265,8 @@ func TestSlowBlockMetricsSkipSupersededValidation(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
 
-	tipA := siblingA.Blocks[len(siblingA.Blocks)-1].Header()
-	tipB := siblingB.Blocks[len(siblingB.Blocks)-1].Header()
+	tipA := siblingA.Blocks[len(siblingA.Blocks)-1]
+	tipB := siblingB.Blocks[len(siblingB.Blocks)-1]
 
 	// Both validate at the same height, so both leave a record; B validates
 	// last, so the extending fork head is B when the forkchoice picks A.
@@ -279,7 +279,7 @@ func TestSlowBlockMetricsSkipSupersededValidation(t *testing.T) {
 
 	collector := installCollector(t)
 
-	_, err = m.UpdateForkChoice(t.Context(), tipA)
+	_, err = m.UpdateForkChoice(t.Context(), tipA.Header())
 	require.NoError(t, err)
 
 	assert.Empty(t, collector.records(t),
@@ -306,7 +306,7 @@ func TestSlowBlockMetricsSkipMultiBlockForkValidation(t *testing.T) {
 	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
 
 	tip := fork.Blocks[len(fork.Blocks)-1].Header()
-	result, err := m.ValidateChain(t.Context(), tip)
+	result, err := m.ValidateChain(t.Context(), fork.Blocks[len(fork.Blocks)-1])
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, result.ValidationStatus)
 	_, err = m.UpdateForkChoice(t.Context(), tip)
