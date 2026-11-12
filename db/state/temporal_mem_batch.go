@@ -22,10 +22,12 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"github.com/erigontech/erigon/common/dbg"
 	"hash/maphash"
 	"maps"
 	"slices"
 	"sync"
+	"time"
 	"unsafe"
 
 	btree2 "github.com/tidwall/btree"
@@ -195,8 +197,27 @@ func (sd *TemporalMemBatch) runlockAllDomains() {
 }
 
 func (sd *TemporalMemBatch) DomainPut(domain kv.Domain, k string, v []byte, txNum uint64, preval []byte) error {
+	t0 := time.Now()
 	sameTxNumUpdate := sd.putLatest(domain, k, v, txNum)
-	return sd.putHistory(domain, common.ToBytesZeroCopy(k), v, txNum, preval, sameTxNumUpdate)
+	probeSpinFor(probePutLatestX2, t0)
+	t1 := time.Now()
+	err := sd.putHistory(domain, common.ToBytesZeroCopy(k), v, txNum, preval, sameTxNumUpdate)
+	probeSpinFor(probePutHistoryX2, t1)
+	return err
+}
+
+// shortcut: dbg probes, a CPU spin as long as each latest or history put bounds it; remove after the bound.
+var (
+	probePutLatestX2  = dbg.EnvBool("PROBE_PUTLATEST_X2", false)
+	probePutHistoryX2 = dbg.EnvBool("PROBE_PUTHISTORY_X2", false)
+)
+
+func probeSpinFor(on bool, start time.Time) {
+	if !on {
+		return
+	}
+	for d, t := time.Since(start), time.Now(); time.Since(t) < d; {
+	}
 }
 
 func (sd *TemporalMemBatch) DomainDel(domain kv.Domain, k string, txNum uint64, preval []byte) error {
