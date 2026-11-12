@@ -7,14 +7,17 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -825,8 +828,93 @@ func DecodeBlockAccessListBytes(data []byte) (BlockAccessList, error) {
 	return decodeBlockAccessListBytes(data, nil)
 }
 
+var balDecodeBytes, balDecodePar = dbg.EnvBool("BAL_DECODE_BYTES", false), dbg.EnvBool("BAL_DECODE_PAR", false)
+
+const balDecodeChunk = 64
+
+// decodeBlockAccessListPar decodes the account entries in parallel chunks; each chunk
+// spends a private copy of the budget and the sum is checked against the shared one.
+func decodeBlockAccessListPar(data []byte, budget *blockAccessListDecodeBudget) (BlockAccessList, error) {
+	content, rest, err := rlp.SplitList(data)
+	if err != nil {
+		return nil, err
+	}
+	if len(rest) != 0 {
+		return nil, errors.New("trailing bytes after block access list")
+	}
+	var items [][]byte
+	for len(content) > 0 {
+		_, _, r, err := rlp.Split(content)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, content[:len(content)-len(r)])
+		content = r
+	}
+	if len(items) == 0 {
+		return make(BlockAccessList, 0), nil
+	}
+	bal := make(BlockAccessList, len(items))
+	nChunks := (len(items) + balDecodeChunk - 1) / balDecodeChunk
+	errs := make([]error, nChunks)
+	used := make([]uint64, nChunks)
+	var next atomic.Int64
+	var wg sync.WaitGroup
+	for range min(runtime.GOMAXPROCS(0), nChunks) {
+		wg.Go(func() {
+			for c := int(next.Add(1) - 1); c < nChunks; c = int(next.Add(1) - 1) {
+				var b *blockAccessListDecodeBudget
+				if budget != nil {
+					b = &blockAccessListDecodeBudget{remaining: budget.remaining, maxIndex: budget.maxIndex}
+				}
+				for i := c * balDecodeChunk; i < min((c+1)*balDecodeChunk, len(items)); i++ {
+					if errs[c] = b.takeItem(); errs[c] != nil {
+						break
+					}
+					st := rlp.NewBytesStream(items[i])
+					errs[c] = bal[i].decodeRLP(st, b)
+					rlp.PutStream(st)
+					if errs[c] != nil {
+						break
+					}
+				}
+				if b != nil {
+					used[c] = budget.remaining - b.remaining
+				}
+			}
+		})
+	}
+	wg.Wait()
+	var total uint64
+	for c := range nChunks {
+		if errs[c] != nil {
+			return nil, errs[c]
+		}
+		total += used[c]
+	}
+	if budget != nil {
+		if total > budget.remaining {
+			return nil, fmt.Errorf("%w: block access list too large", ErrInvalidBlockAccessList)
+		}
+		budget.remaining -= total
+		for i := 1; i < len(bal); i++ {
+			if bytes.Compare(bal[i-1].Address[:], bal[i].Address[:]) >= 0 {
+				return nil, fmt.Errorf("%w: account addresses must be strictly increasing", ErrInvalidBlockAccessList)
+			}
+		}
+	}
+	return bal, nil
+}
+
 func decodeBlockAccessListBytes(data []byte, budget *blockAccessListDecodeBudget) (BlockAccessList, error) {
+	if balDecodePar {
+		return decodeBlockAccessListPar(data, budget)
+	}
 	stream := rlp.NewStream(bytes.NewReader(data), 0)
+	if balDecodeBytes {
+		stream = rlp.NewBytesStream(data)
+		defer rlp.PutStream(stream)
+	}
 	var bal BlockAccessList
 	if err := decodeBlockAccessList(&bal, stream, budget); err != nil {
 		return nil, err
