@@ -150,3 +150,20 @@ func TestBlockAccessListBuilderBuildKeepsReadOnlyAccountsFlat(t *testing.T) {
 	require.NotContains(t, b.ac, read, "Build promoted a read-only account")
 	require.True(t, b.Matches(bal))
 }
+
+// TestBlockAccessListBuilderReplaysEmptyCodeHashReadOfReadOnlyAccount pins that an empty
+// code-hash read made while the account had only reads still marks its pre-block code empty,
+// so a later change back to empty code is net-zero and stays out of the list.
+func TestBlockAccessListBuilderReplaysEmptyCodeHashReadOfReadOnlyAccount(t *testing.T) {
+	addr := accounts.InternAddress(common.Address{19: 0x44})
+	b := NewBlockAccessListBuilder()
+	var rs ReadSet
+	rs.SetCodeHash(addr, VersionedRead[accounts.CodeHash]{Val: accounts.EmptyCodeHash})
+	b.Add(-1, rs, nil)
+	ws := &WriteSet{}
+	ws.SetCode(addr, &VersionedWrite[accounts.Code]{WriteHeader: WriteHeader{Address: addr, Path: CodePath, Version: Version{TxIndex: 0}}, Val: accounts.NewCode(nil)})
+	b.Add(0, ReadSet{}, ws)
+	bal := b.Build()
+	require.Len(t, bal, 1)
+	require.Empty(t, bal[0].CodeChanges)
+}
