@@ -1289,23 +1289,32 @@ func TestAnchorPayloadDecodeFailureIsTerminal(t *testing.T) {
 	}
 }
 
-func TestValidateAnchorEnvelopeRejectsBlobMismatch(t *testing.T) {
-	cfg, anchor, bid, envelope, root := validAnchorEnvelopeFixture(t, 1)
-	result, err := validateAnchorEnvelope(cfg, anchor, root, bid, envelope)
-	require.NoError(t, err)
-	require.Equal(t, anchorEnvelopePendingExecution, result)
+func TestValidateAndRecordAnchorEnvelopeRejectsBlobMismatch(t *testing.T) {
+	cfg, anchor, bid, envelope, _ := validAnchorEnvelopeFixture(t, 1)
 	bid.BlobKzgCommitments.Append(&cltypes.KZGCommitment{1})
-	result, err = validateAnchorEnvelope(cfg, anchor, root, bid, envelope)
+	anchor.SetLatestExecutionPayloadBid(bid)
+	anchor.SetLatestBlockHash(bid.ParentBlockHash)
+	root, err := anchor.BlockRoot()
+	require.NoError(t, err)
+	envelope.Message.BeaconBlockRoot = root
+	key, err := bls.NewPrivateKeyFromIKM([]byte("01234567890123456789012345678901"))
+	require.NoError(t, err)
+	signAnchorEnvelope(t, anchor, key, envelope, bid.Slot)
+	store := newAnchorForkChoiceStore(t, cfg, anchor, nil)
+
+	terminal, err := validateAndRecordAnchorEnvelope(&Cfg{beaconCfg: cfg, forkChoice: store}, anchor, root, bid, envelope)
 	require.ErrorIs(t, err, misc.ErrMismatchBlobHashes)
-	require.Equal(t, anchorEnvelopeBlobMismatch, result)
+	require.True(t, terminal)
+	require.True(t, store.IsEnvelopeRejected(root))
+	require.False(t, store.IsBlockInvalid(root))
 }
 
-func TestValidateAnchorEnvelope(t *testing.T) {
+func TestValidateAndRecordAnchorEnvelope(t *testing.T) {
 	cfg, st, bid, env, anchorRoot := validAnchorEnvelopeFixture(t, 1)
 
-	result, err := validateAnchorEnvelope(cfg, st, anchorRoot, bid, env)
+	terminal, err := validateAndRecordAnchorEnvelope(&Cfg{beaconCfg: cfg}, st, anchorRoot, bid, env)
 	require.NoError(t, err)
-	require.Equal(t, anchorEnvelopePendingExecution, result)
+	require.False(t, terminal)
 
 	t.Run("different fee recipients", func(t *testing.T) {
 		cfg, st, bid, env, anchorRoot := validAnchorEnvelopeFixture(t, 1)
@@ -1317,9 +1326,9 @@ func TestValidateAnchorEnvelope(t *testing.T) {
 		require.NoError(t, err)
 		signAnchorEnvelope(t, st, privKey, env, bid.Slot)
 
-		result, err := validateAnchorEnvelope(cfg, st, anchorRoot, bid, env)
+		terminal, err := validateAndRecordAnchorEnvelope(&Cfg{beaconCfg: cfg}, st, anchorRoot, bid, env)
 		require.NoError(t, err)
-		require.Equal(t, anchorEnvelopePendingExecution, result)
+		require.False(t, terminal)
 	})
 
 	tests := []struct {
@@ -1410,9 +1419,9 @@ func TestValidateAnchorEnvelope(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			_, st, bid, env, anchorRoot := validAnchorEnvelopeFixture(t, 1)
 			tt.mutate(bid, env)
-			result, err := validateAnchorEnvelope(cfg, st, anchorRoot, bid, env)
+			terminal, err := validateAndRecordAnchorEnvelope(&Cfg{beaconCfg: cfg}, st, anchorRoot, bid, env)
 			require.ErrorContains(t, err, tt.wantErr)
-			require.Equal(t, anchorEnvelopeUnauthenticated, result)
+			require.False(t, terminal)
 		})
 	}
 }
