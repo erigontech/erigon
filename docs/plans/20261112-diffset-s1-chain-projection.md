@@ -46,19 +46,25 @@ Research log: `~/org/mode/e/research/diffset-pipeline.org`, idea I2, next step N
 
 ### T1: flush golden oracle (test only)
 
-- [ ] `db/state/execctx/flush_golden_test.go`: a seeded write script through `SharedDomains`, flushed into a temporal MDBX tx. The dump holds every row of every table each domain owns, plus `ChangeSets3`, as sorted hex lines, compared against `testdata/flush_golden/<case>.txt`. A `-update` flag regenerates the file.
-- [ ] Use the domain set the existing `execctx` tests open; pick a step size small enough that the script crosses at least three steps.
-- [ ] Cases, one golden each:
-  - [ ] `forward`: Accounts, Storage, Code and Commitment, plus RCache if the test setup enables it. Several blocks, each with `SetChangesetAccumulator` / `SavePastChangesetAccumulator` as `exec3_serial.go:111-225` does. Include:
+- [x] `db/state/execctx/flush_golden_test.go`: a seeded write script through `SharedDomains`, flushed into a temporal MDBX tx. The dump holds every row of every table each domain owns, plus `ChangeSets3`, as sorted hex lines, compared against `testdata/flush_golden/<case>.txt`. A `-update` flag regenerates the file.
+- [x] Use the domain set the existing `execctx` tests open; pick a step size small enough that the script crosses at least three steps.
+- [x] Cases, one golden each:
+  - [x] `forward`: Accounts, Storage, Code and Commitment, plus RCache if the test setup enables it. Several blocks, each with `SetChangesetAccumulator` / `SavePastChangesetAccumulator` as `exec3_serial.go:111-225` does. Include:
     - put, then put of the same key at a later txNum
     - put-put and del-put at the same txNum
     - delete of an existing key, and delete of an absent key
     - a key written in two steps
     - an account delete that cascades to storage (`DomainDel` on Accounts)
-  - [ ] `discard`: `forward` with `DiscardWrites` on Accounts/Storage/Code, as `db/state/squeeze.go:549` does.
-  - [ ] `unwind`: forward over blocks 1..6, then the in-memory `Unwind` to block 4's end, using the changeset `unwindDomsToBlock` builds (`execution/stagedsync/stage_execute.go:527`). Then blocks 5'..6' with different writes, then flush.
-  - [ ] `merge`: a receiver batch over blocks 1..3 and an extending-fork batch over blocks 4..5, merged as `ForkValidator.MergeExtendingFork` does (`execution/execmodule/fork_validator.go:143`), then flush. The fork batch reads through the receiver: build it the way the fork validator does.
-- [ ] `NOTES` answers: does the `unwind` golden hold history or values rows from the unwound blocks 5..6 that 5'..6' did not overwrite? Does `GetAsOf` on the merged batch, at a ts inside the receiver's range for a key both batches wrote, return the receiver's value?
+  - [x] `discard`: `forward` with `DiscardWrites` on Accounts/Storage/Code, as `db/state/squeeze.go:549` does.
+  - [x] `unwind`: forward over blocks 1..6, then the in-memory `Unwind` to block 4's end, using the changeset `unwindDomsToBlock` builds (`execution/stagedsync/stage_execute.go:527`). Then blocks 5'..6' with different writes, then flush.
+  - [x] `merge`: a receiver batch over blocks 1..3 and an extending-fork batch over blocks 4..5, merged as `ForkValidator.MergeExtendingFork` does (`execution/execmodule/fork_validator.go:143`), then flush. The fork batch reads through the receiver: build it the way the fork validator does.
+- [x] `NOTES` answers: does the `unwind` golden hold history or values rows from the unwound blocks 5..6 that 5'..6' did not overwrite? Does `GetAsOf` on the merged batch, at a ts inside the receiver's range for a key both batches wrote, return the receiver's value?
+
+NOTES:
+
+- The unwind golden retains old-only rows at txNums 5..6: AccountVals 3, AccountHistoryVals 2, AccountHistoryKeys 2, StorageVals 3, StorageHistoryVals 2, StorageHistoryKeys 2, CodeVals 2, CodeHistoryVals 1, and CodeHistoryKeys 1. The old-only rows are from the pre-unwind writes and were not written by 5'..6'.
+- The merged batch's `GetAsOf` for the shared account at ts 3 returns `(nil, false, nil)`, falling through to the unflushed transaction instead of returning the receiver value. This is not asserted because it is the behavior T3 is meant to change.
+- The test copies the minimal unwind sequence from `execution/stagedsync/stage_execute.go:527` and the receiver/child merge sequence from `execution/execmodule/fork_validator.go:143`; it does not import `execution/...`.
 
 ### T2: chains always complete
 
