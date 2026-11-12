@@ -113,6 +113,7 @@ func TestAttestationRewardsAltairRulesOmitInclusionDelay(t *testing.T) {
 				slot := 6 * h.beaconChainCfg.SlotsPerEpoch
 				tx, err := db.BeginRw(t.Context())
 				require.NoError(t, err)
+				defer tx.Rollback()
 				epochData, err := tx.GetOne(kv.EpochData, base_encoding.Encode64ToBytes4(slot-h.beaconChainCfg.SlotsPerEpoch))
 				require.NoError(t, err)
 				require.NotEmpty(t, epochData)
