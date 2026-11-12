@@ -120,6 +120,13 @@ func TestReplayStateCachesCopyByRoot(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, originalSlashed, secondValidator.Slashed())
 	require.Equal(t, originalAttestationCount, second.PreviousEpochAttestationsLength())
+	require.NoError(t, second.SetSlot(99))
+
+	third, err := graph.ReplayState(root)
+	require.NoError(t, err)
+	require.NotNil(t, third)
+	require.Equal(t, 1, fs.count())
+	require.Equal(t, block.Block.Slot, third.Slot())
 }
 
 func TestReplayStateCacheEvictsLeastRecentlyUsed(t *testing.T) {
