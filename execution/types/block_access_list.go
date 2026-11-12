@@ -845,6 +845,19 @@ func takeBudgetBatch(shared *atomic.Uint64) uint64 {
 
 const balDecodeChunk = 64 // accounts per parallel decode task
 
+// balDecodeWorkers is a fixed set of decode goroutines, started once and shared by every parallel decode.
+var balDecodeWorkers = sync.OnceValue(func() chan<- func() {
+	jobs := make(chan func())
+	for range runtime.GOMAXPROCS(0) {
+		go func() {
+			for job := range jobs {
+				job()
+			}
+		}()
+	}
+	return jobs
+})
+
 // decodeBlockAccessListBytes decodes large lists in parallel; any failure there is
 // decoded again serially, so errors and the item budget match the serial decoder.
 func decodeBlockAccessListBytes(data []byte, budget *blockAccessListDecodeBudget) (BlockAccessList, error) {
@@ -861,8 +874,12 @@ func decodeBlockAccessListParallel(data []byte, budget *blockAccessListDecodeBud
 	}
 	var items [][]byte
 	for len(content) > 0 {
-		_, _, r, err := rlp.Split(content)
-		if err != nil {
+		// Past the budget the serial decoder fails at once, so it reports the error without this index.
+		if budget != nil && uint64(len(items)) == budget.remaining {
+			return nil, false
+		}
+		k, _, r, err := rlp.Split(content)
+		if err != nil || k != rlp.List {
 			return nil, false
 		}
 		items = append(items, content[:len(content)-len(r)])
@@ -881,8 +898,12 @@ func decodeBlockAccessListParallel(data []byte, budget *blockAccessListDecodeBud
 	var next atomic.Int64
 	var failed atomic.Bool
 	var wg sync.WaitGroup
-	for range min(runtime.GOMAXPROCS(0), chunks) {
-		wg.Go(func() {
+	jobs := balDecodeWorkers()
+	workers := min(runtime.GOMAXPROCS(0), chunks)
+	wg.Add(workers)
+	for range workers {
+		jobs <- func() {
+			defer wg.Done()
 			var local *blockAccessListDecodeBudget
 			if budget != nil {
 				local = &blockAccessListDecodeBudget{maxIndex: budget.maxIndex, shared: shared}
@@ -895,7 +916,7 @@ func decodeBlockAccessListParallel(data []byte, budget *blockAccessListDecodeBud
 					}
 				}
 			}
-		})
+		}
 	}
 	wg.Wait()
 	if failed.Load() {

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"math"
 	"reflect"
 	"runtime"
 	"slices"
@@ -941,5 +942,47 @@ func TestDecodeBlockAccessListAcrossDecodeChunks(t *testing.T) {
 	}
 	if _, err := DecodeBlockAccessListSidecarForHeader(raw, items*BalItemCost); !errors.Is(err, ErrInvalidBlockAccessList) || !strings.Contains(err.Error(), "strictly increasing") {
 		t.Fatalf("decode BAL with accounts out of order at a chunk edge: got %v, want invalid ordering", err)
+	}
+}
+
+// A malformed sidecar with more entries than the decode budget fails as the serial decoder does, without
+// indexing or decoding past the budget and without starting goroutines.
+func TestDecodeBlockAccessListParallelStaysWithinTheBudgetOnMalformedInput(t *testing.T) {
+	body := bytes.Repeat([]byte{0xc1, 0x80}, 1_000_000) // lists that are not account entries
+	prefix := make([]byte, rlp.ListPrefixLen(len(body)))
+	rlp.EncodeListPrefixToBuf(len(body), prefix)
+	enc := bytes.Join([][]byte{prefix, body}, nil)
+	const gasLimit = 1000 * BalItemCost
+	_, want := decodeBlockAccessListSerial(enc, &blockAccessListDecodeBudget{remaining: gasLimit / BalItemCost, maxIndex: math.MaxUint32})
+	if want == nil {
+		t.Fatal("the serial decoder accepted a malformed list")
+	}
+	valid := make(BlockAccessList, 4*balDecodeChunk)
+	for i := range valid {
+		valid[i].Address[0], valid[i].Address[1] = byte(i>>8), byte(i)
+	}
+	validEnc, err := EncodeBlockAccessListBytes(valid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := DecodeBlockAccessListBytes(validEnc); err != nil { // starts the shared decode workers
+		t.Fatal(err)
+	}
+	goroutines := runtime.NumGoroutine()
+	if _, err := DecodeBlockAccessListBytes(validEnc); err != nil {
+		t.Fatal(err)
+	}
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	_, err = DecodeBlockAccessListSidecarForHeader(enc, gasLimit)
+	runtime.ReadMemStats(&after)
+	if err == nil || err.Error() != want.Error() {
+		t.Fatalf("got error %v, want %v", err, want)
+	}
+	if grew := after.TotalAlloc - before.TotalAlloc; grew > 256*1024 {
+		t.Fatalf("a malformed list over a 1000-item budget allocated %d bytes", grew)
+	}
+	if n := runtime.NumGoroutine(); n > goroutines {
+		t.Fatalf("decode left %d goroutines, had %d", n, goroutines)
 	}
 }
