@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/felixge/fgprof"
+	"github.com/google/pprof/profile"
 
 	"github.com/erigontech/erigon/common/log/v3"
 )
@@ -34,6 +35,23 @@ func Begin() func() {
 			return func() {}
 		}
 		return func() { pprof.StopCPUProfile(); keep("npcpu", buf.Bytes()) }
+	case "allocs":
+		base := allocsSnapshot()
+		return func() {
+			end := allocsSnapshot()
+			if base == nil || end == nil {
+				return
+			}
+			base.Scale(-1)
+			d, err := profile.Merge([]*profile.Profile{end, base})
+			if err != nil {
+				return
+			}
+			var out bytes.Buffer
+			if d.Write(&out) == nil {
+				keep("npalloc", out.Bytes())
+			}
+		}
 	case "fgprof":
 		stop := fgprof.Start(&buf, fgprof.FormatPprof)
 		return func() {
@@ -43,6 +61,26 @@ func Begin() func() {
 		}
 	}
 	return func() {}
+}
+
+func init() {
+	if mode == "allocs" {
+		runtime.MemProfileRate = 4096
+	}
+}
+
+// allocsSnapshot forces a GC so the allocs profile includes every allocation made so far.
+func allocsSnapshot() *profile.Profile {
+	runtime.GC()
+	var b bytes.Buffer
+	if pprof.Lookup("allocs").WriteTo(&b, 0) != nil {
+		return nil
+	}
+	p, err := profile.Parse(&b)
+	if err != nil {
+		return nil
+	}
+	return p
 }
 
 var lastFaults [2]int64

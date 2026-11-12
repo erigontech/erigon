@@ -136,11 +136,13 @@ func ProbeEndBlock() string {
 	if probeGC {
 		end := gcSamples()
 		metrics.Read(end)
-		gc = fmt.Sprintf(" npGc=%d npGcCpu=%.1fms npCpu=%.1fms npHeap=%dMB",
+		gc = fmt.Sprintf(" npGc=%d npGcCpu=%.1fms npCpu=%.1fms npHeap=%dMB npAllocMB=%.1f npAllocs=%d",
 			end[0].Value.Uint64()-gcBegin[0].Value.Uint64(),
 			1e3*(end[1].Value.Float64()-gcBegin[1].Value.Float64()),
 			1e3*(end[2].Value.Float64()-gcBegin[2].Value.Float64()),
-			end[3].Value.Uint64()>>20)
+			end[3].Value.Uint64()>>20,
+			float64(end[4].Value.Uint64()-gcBegin[4].Value.Uint64())/(1<<20),
+			end[5].Value.Uint64()-gcBegin[5].Value.Uint64())
 	}
 	if !probeCount && probePre.Load() == 0 {
 		return gc
@@ -175,5 +177,5 @@ var (
 )
 
 func gcSamples() []metrics.Sample {
-	return []metrics.Sample{{Name: "/gc/cycles/total:gc-cycles"}, {Name: "/cpu/classes/gc/total:cpu-seconds"}, {Name: "/cpu/classes/total:cpu-seconds"}, {Name: "/gc/heap/live:bytes"}}
+	return []metrics.Sample{{Name: "/gc/cycles/total:gc-cycles"}, {Name: "/cpu/classes/gc/total:cpu-seconds"}, {Name: "/cpu/classes/total:cpu-seconds"}, {Name: "/gc/heap/live:bytes"}, {Name: "/gc/heap/allocs:bytes"}, {Name: "/gc/heap/allocs:objects"}}
 }

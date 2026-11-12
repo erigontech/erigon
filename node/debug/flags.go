@@ -355,6 +355,7 @@ func StartPProf(address string, metricsMux *http.ServeMux) *http.ServeMux {
 		pprofMux.HandleFunc("/debug/pprof/trace", pprof.Trace)
 		pprofMux.Handle("/debug/fgprof", fgprof.Handler())
 		pprofMux.HandleFunc("/debug/pprof/npcpu", npprof.Handler("npcpu"))
+		pprofMux.HandleFunc("/debug/pprof/npalloc", npprof.Handler("npalloc"))
 		pprofMux.HandleFunc("/debug/pprof/npfg", npprof.Handler("npfg"))
 
 		pprofServer := &http.Server{
@@ -377,6 +378,7 @@ func StartPProf(address string, metricsMux *http.ServeMux) *http.ServeMux {
 		metricsMux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
 		metricsMux.HandleFunc("/debug/pprof/trace", pprof.Trace)
 		metricsMux.HandleFunc("/debug/pprof/npcpu", npprof.Handler("npcpu"))
+		metricsMux.HandleFunc("/debug/pprof/npalloc", npprof.Handler("npalloc"))
 		metricsMux.HandleFunc("/debug/pprof/npfg", npprof.Handler("npfg"))
 
 		return metricsMux
