@@ -76,7 +76,8 @@ type Rejection struct {
 	Error string       `json:"error"`
 }
 
-func (bt *BlockTest) reject(index int, hash *common.Hash, err string) {
+// Reject records that the block or payload at index was rejected with err.
+func (bt *BlockTest) Reject(index int, hash *common.Hash, err string) {
 	bt.Rejections = append(bt.Rejections, Rejection{Index: index, Hash: hash, Error: err})
 }
 
@@ -450,7 +451,7 @@ func (bt *BlockTest) insertBlocks(m *execmoduletester.ExecModuleTester) ([]btBlo
 	for bi, b := range bt.json.Blocks {
 		cb, err := b.decode()
 		if err != nil {
-			bt.reject(bi, nil, err.Error())
+			bt.Reject(bi, nil, err.Error())
 			if b.BlockHeader == nil {
 				continue // OK - block is supposed to be invalid, continue with next block
 			} else {
@@ -474,7 +475,7 @@ func (bt *BlockTest) insertBlocks(m *execmoduletester.ExecModuleTester) ([]btBlo
 		err1 := m.InsertChain(chain)
 		if err1 != nil {
 			hash := cb.Hash()
-			bt.reject(bi, &hash, err1.Error())
+			bt.Reject(bi, &hash, err1.Error())
 			if b.BlockHeader == nil {
 				continue // OK - block is supposed to be invalid, continue with next block
 			} else {
@@ -495,7 +496,7 @@ func (bt *BlockTest) insertBlocks(m *execmoduletester.ExecModuleTester) ([]btBlo
 				}
 				if receiptsErr != nil {
 					hash := cb.Hash()
-					bt.reject(bi, &hash, receiptsErr.Error())
+					bt.Reject(bi, &hash, receiptsErr.Error())
 					if err := restoreForkChoice(m, previousHead.Hash()); err != nil {
 						return nil, err
 					}
