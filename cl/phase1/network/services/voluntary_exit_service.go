@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/pool"
+	"github.com/erigontech/erigon/cl/transition/impl/eth2"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
@@ -164,6 +165,13 @@ func (s *voluntaryExitService) ProcessMessage(ctx context.Context, subnet *uint6
 				return ErrIgnore
 			}
 			return errors.New("verify the validator has been active long enough")
+		}
+
+		if state.Version() >= clparams.ElectraVersion && eth2.GetPendingBalanceToWithdraw(state, voluntaryExit.ValidatorIndex) != 0 {
+			if msg.ImmediateVerification {
+				return errors.New("validator has pending withdrawals in the queue")
+			}
+			return ErrIgnore
 		}
 
 		// Verify signature
