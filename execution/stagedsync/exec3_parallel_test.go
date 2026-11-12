@@ -2050,3 +2050,41 @@ func TestDispatchLimitBoundsEveryBlock(t *testing.T) {
 		})
 	}
 }
+
+func TestAsyncBALBuilderWorkerSurvivesPanic(t *testing.T) {
+	var a asyncBALBuilder
+	a.add(nil, 1)
+	require.Panics(t, func() { a.finish() })
+
+	a.add(state.NewVersionedIO(1), 1)
+	b := a.finish()
+	require.NotNil(t, b)
+	require.Equal(t, 0, b.Next())
+}
+
+// serialBALBuilderSink keeps the serial builder on the heap, as the apply loop did.
+var serialBALBuilderSink *state.BlockAccessListBuilder
+
+func TestAsyncBALBuilderAllocatesAsSerial(t *testing.T) {
+	const txs = 64
+	io := state.NewVersionedIO(txs)
+	for i := range txs {
+		addr := accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i + 1))))
+		v := state.Version{TxIndex: i, Incarnation: 1}
+		ws := &state.WriteSet{}
+		ws.SetBalance(addr, &state.VersionedWrite[uint256.Int]{WriteHeader: state.WriteHeader{Address: addr, Path: state.BalancePath, Key: accounts.NilKey, Version: v}, Val: *uint256.NewInt(uint64(i))})
+		io.RecordWrites(v, ws)
+	}
+	serial := testing.AllocsPerRun(100, func() {
+		serialBALBuilderSink = state.NewBlockAccessListBuilder()
+		serialBALBuilderSink.AddRemaining(io)
+	})
+	var a asyncBALBuilder
+	async := testing.AllocsPerRun(100, func() {
+		for sealed := 1; sealed <= txs+1; sealed++ {
+			a.add(io, sealed)
+		}
+		a.finish()
+	})
+	require.LessOrEqual(t, async, serial)
+}
