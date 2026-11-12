@@ -541,8 +541,8 @@ const caplinSnapshotBuildSemaWeight int64 = 1
 // One worker keeps steady-state retirement from competing with execution. Catching up may use the
 // full estimate, but only while holding the limiter that admits one kind of snapshot build at a
 // time, since EL retirement sizes its own workers from the same estimate of the host. A limiter it
-// cannot take drops the dump to one worker rather than skipping it: the blob gate stays shut until
-// the whole range lands, so retiring slowly beats not retiring.
+// cannot take drops the dump to one worker rather than skipping it, since retiring slowly beats not
+// retiring.
 func (s *Antiquary) blobCompressWorkers(from, to uint64) (int, func()) {
 	noop := func() {}
 	if !isBlobBacklog(from, to) {
