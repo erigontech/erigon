@@ -260,7 +260,7 @@ func checkCaplinBlobSnapshotSlot(ctx context.Context, tx kv.Tx, snapshots *freez
 	if commitments != nil {
 		expected = commitments.Len()
 	}
-	if expected > 0 && block.Version() >= clparams.GloasVersion {
+	if expected > 0 && len(sidecars) == 0 && block.Version() >= clparams.GloasVersion {
 		skipped, err := freezeblocks.PayloadSkipped(tx, snapshots, block, canonicalRoot, func(next uint64) (*cltypes.SignedBeaconBlock, error) {
 			return readCanonicalBlock(ctx, tx, reader, next)
 		})
@@ -305,8 +305,13 @@ func checkCaplinBlobSnapshotSlot(ctx context.Context, tx kv.Tx, snapshots *freez
 	return nil
 }
 
-func readCanonicalBlock(ctx context.Context, tx kv.Tx, reader freezeblocks.BeaconSnapshotReader, slot uint64) (*cltypes.SignedBeaconBlock, error) {
-	block, err := reader.ReadBeaconBlockBodyBySlot(ctx, tx, slot)
+func readCanonicalBlock(ctx context.Context, tx kv.Tx, reader freezeblocks.BeaconSnapshotReader, slot uint64) (block *cltypes.SignedBeaconBlock, err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			block, err = nil, fmt.Errorf("block at slot %d: corrupt beacon snapshot: %v", slot, recovered)
+		}
+	}()
+	block, err = reader.ReadBeaconBlockBodyBySlot(ctx, tx, slot)
 	if err != nil || block == nil {
 		return nil, err
 	}

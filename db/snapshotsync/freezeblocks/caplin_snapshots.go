@@ -430,7 +430,8 @@ func PayloadSkipped(tx kv.Tx, sn *CaplinSnapshots, block *cltypes.SignedBeaconBl
 	if err != nil {
 		return false, err
 	}
-	for slot := block.Block.Slot + 1; slot <= max(sn.BlocksAvailable(), finalized); slot++ {
+	checkpoint := finalized / sn.beaconCfg.SlotsPerEpoch * sn.beaconCfg.SlotsPerEpoch
+	for slot := block.Block.Slot + 1; slot <= max(sn.BlocksAvailable(), checkpoint); slot++ {
 		child, err := read(slot)
 		if err != nil {
 			return false, err

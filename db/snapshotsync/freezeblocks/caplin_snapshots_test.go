@@ -939,6 +939,7 @@ func TestRetireBlobsBelowWaitsForOverlapCleanup(t *testing.T) {
 func TestBlobCountFromBlocksFollowsTheChildsPayloadStatus(t *testing.T) {
 	const slot = 7
 	const unfrozen = snaptype.CaplinMergeLimit + 1
+	epochEnd := func(slot uint64) uint64 { return slot/32*32 + 31 }
 	for _, tc := range []struct {
 		name      string
 		onChain   bool
@@ -951,8 +952,8 @@ func TestBlobCountFromBlocksFollowsTheChildsPayloadStatus(t *testing.T) {
 		{"payload skipped", false, false, slot + 3, 0, 0, ""},
 		{"payload skipped, its blobs stored", false, true, slot + 3, 0, 0, ""},
 		{"payload on chain", true, false, slot + 3, 0, 2, "blob storage count mismatch at slot 7"},
-		{"payload skipped by a finalized child not frozen yet", false, true, unfrozen, unfrozen, 0, ""},
-		{"payload skipped by a child not finalized yet", false, true, unfrozen, unfrozen - 1, 2, ""},
+		{"payload skipped by a finalized child not frozen yet", false, true, unfrozen, epochEnd(unfrozen + 32), 0, ""},
+		{"payload skipped by a child after the finalized checkpoint", false, true, unfrozen, epochEnd(unfrozen), 2, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := clparams.MainnetBeaconConfig
