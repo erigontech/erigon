@@ -311,6 +311,34 @@ func countStatements(it *IPTracker) (map[netip.AddrPort]int, int) {
 }
 
 // This checks that statements with an invalid host or endpoint are ignored.
+// Among endpoints with equal counts the current prediction is kept, also when a repeated statement reorders the
+// endpoints of the top count, so the predicted endpoint does not flip on unrelated churn.
+func TestIPTrackerKeepsThePredictionOnATie(t *testing.T) {
+	var (
+		clock mclock.Simulated
+		it    = NewIPTracker(10*time.Second, 10*time.Second, 2)
+		a     = netip.MustParseAddrPort("2.0.0.1:9000")
+		b     = netip.MustParseAddrPort("2.0.0.2:9000")
+	)
+	it.clock = &clock
+	it.AddStatement(netip.MustParseAddr("1.0.1.1"), a)
+	it.AddStatement(netip.MustParseAddr("1.0.2.1"), a)
+	if pred := it.PredictEndpoint(); pred != a {
+		t.Fatalf("prediction %v, want %v", pred, a)
+	}
+	it.AddStatement(netip.MustParseAddr("1.0.3.1"), b)
+	it.AddStatement(netip.MustParseAddr("1.0.4.1"), b)
+	if pred := it.PredictEndpoint(); pred != a {
+		t.Fatalf("prediction %v after a tie, want %v", pred, a)
+	}
+
+	clock.Run(time.Second)
+	it.AddStatement(netip.MustParseAddr("1.0.1.1"), a)
+	if pred := it.PredictEndpoint(); pred != a {
+		t.Fatalf("prediction %v after a repeated statement, want %v", pred, a)
+	}
+}
+
 func TestIPTrackerInvalidStatement(t *testing.T) {
 	it := NewIPTracker(10*time.Second, 10*time.Second, 1)
 	it.AddStatement(netip.Addr{}, netip.MustParseAddrPort("[2001:db8::1]:8000"))
