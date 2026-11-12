@@ -22,6 +22,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"github.com/erigontech/erigon/common/dbg"
 	"hash/maphash"
 	"maps"
 	"slices"
@@ -45,6 +46,8 @@ type dataWithTxNum struct {
 const latestShards = 32
 
 var latestShardSeed = maphash.MakeSeed()
+
+var b2NoHistory = dbg.EnvBool("B2_NO_HISTORY", false)
 
 type latestShard struct {
 	sync.RWMutex
@@ -225,7 +228,8 @@ func (sd *TemporalMemBatch) putHistory(domain kv.Domain, k, v []byte, txNum uint
 	// A same-txNum update only rewrites the value: history and the unwind diff
 	// record the value as of BEFORE txNum, which the first write already did —
 	// this write's preval is the intra-txNum intermediate, not a real prev.
-	if sameTxNumUpdate {
+	// shortcut: B2 probe, skips domain history and unwind-diff writes (reorg and historical reads break); remove after the bound.
+	if sameTxNumUpdate || b2NoHistory {
 		return sd.domainWriters[domain].addValue(k, v, kv.Step(txNum/sd.stepSize))
 	}
 	if len(v) == 0 {

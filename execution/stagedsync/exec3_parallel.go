@@ -268,6 +268,11 @@ func (pe *parallelExecutor) bindBlockChangesetForFold(blockNum uint64, blockHash
 	}
 }
 
+var (
+	b2NoTxIndexes   = dbg.EnvBool("B2_NO_TX_INDEXES", false)
+	b2NoReceiptRoot = dbg.EnvBool("B2_NO_RECEIPT_ROOT", false)
+)
+
 // foldTx applies one published tx's versionMap view and indexes to sd.mem.
 // Finalize logs share the final virtual task's txNum. That task has already
 // handled the receipt cache, so finalize indexes logs without changing it.
@@ -276,6 +281,10 @@ func (pe *parallelExecutor) foldTx(ctx context.Context, rwTx kv.TemporalTx, r *t
 	defer restoreCS()
 	if err := pe.rs.ApplyStateWrites(ctx, rwTx, r.blockNum, r.txNum, r.writes, nil, r.rules); err != nil {
 		return fmt.Errorf("fold state block=%d txNum=%d: %w", r.blockNum, r.txNum, err)
+	}
+	// shortcut: B2 probe, skips receipt and log/trace index domain writes; remove after the bound.
+	if b2NoTxIndexes {
+		return nil
 	}
 	if err := pe.rs.ApplyTxIndexes(rwTx, r.txNum, r.receipt, r.cumulativeBlobGasUsed, r.logs, r.traceFroms, r.traceTos, r.isFinalize); err != nil {
 		return fmt.Errorf("fold index block=%d txNum=%d: %w", r.blockNum, r.txNum, err)
@@ -727,7 +736,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					pe.prevBlocks.RemoveTail()
 					var blockValidatorWaiter *blockValidator
 					if applyResult.BlockNum > 0 && !applyResult.isPartial { // Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
-						checkBloom := !pe.cfg.vmConfig.StatelessExec && !pe.cfg.vmConfig.NoReceipts
+						checkBloom := !b2NoReceiptRoot && !pe.cfg.vmConfig.StatelessExec && !pe.cfg.vmConfig.NoReceipts
 						checkReceipts := checkBloom && pe.cfg.chainConfig.IsByzantium(applyResult.BlockNum)
 
 						header, txs := applyResult.Header, applyResult.Txs
