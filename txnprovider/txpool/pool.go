@@ -54,7 +54,6 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
-	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
@@ -3366,32 +3365,9 @@ func (p *TxPool) fromDB(ctx context.Context) error {
 }
 
 func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.CacheView, parked *[]*metaTxn) error {
-	lastSeenProgress, err := stages.GetStageProgress(coreTx, stages.Execution)
-	if err != nil {
-		return err
-	}
 	header, err := rawdb.ReadHeaderByHash(coreTx, p.stateBlockHash)
 	if err != nil {
 		return err
-	}
-	if p.lastSeenBlock.Load() == 0 {
-		lastSeenBlock, err := LastSeenBlock(tx)
-		if err != nil {
-			return err
-		}
-
-		p.lastSeenBlock.Store(lastSeenBlock)
-	}
-
-	// this is necessary as otherwise best - which waits for sync events
-	// may wait for ever if blocks have been process before the txpool
-	// starts with an empty db
-	if p.lastSeenBlock.Load() < lastSeenProgress {
-		// TODO we need to process the blocks since the
-		// last seen to make sure that the txn pool is in
-		// sync with the processed blocks
-
-		p.lastSeenBlock.Store(lastSeenProgress)
 	}
 
 	it, err := tx.Range(kv.RecentLocalTransaction, nil, nil, order.Asc, kv.Unlim)

@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/gointerfaces"
@@ -747,6 +748,49 @@ func TestLocalAdmissionStartupWaitDeadline(t *testing.T) {
 		require.Equal(t, 30*time.Second, time.Since(start))
 		require.Empty(t, pool.byHash)
 	})
+}
+
+func TestStartupKeepsAnnouncedGenesisHead(t *testing.T) {
+	ctx, pool, poolDB, _ := newTestPool(t)
+	pool.started.Store(false)
+	require.NoError(t, poolDB.Update(ctx, func(tx kv.RwTx) error {
+		return PutLastSeenBlock(tx, 100, nil)
+	}))
+	head := common.Hash{1}
+	reset := newBlockChangeForAccounts(head, 0)
+	reset.StateChangesIncomplete = true
+	require.NoError(t, pool.OnNewBlock(ctx, reset, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	require.Zero(t, pool.lastSeenBlock.Load())
+
+	require.NoError(t, pool.start(ctx))
+
+	require.Equal(t, head, pool.stateBlockHash)
+	require.Zero(t, pool.lastSeenBlock.Load(), "genesis is an announced head, not an unset height")
+}
+
+func TestStartupKeepsAnnouncedHeadAfterNewCommit(t *testing.T) {
+	ctx, pool, _, coreDB := newTestPool(t)
+	pool.started.Store(false)
+	pool._stateCache = kvcache.NewLatestBatchCache()
+	require.NoError(t, coreDB.Update(ctx, func(tx kv.RwTx) error {
+		return stages.SaveStageProgress(tx, stages.Execution, 1)
+	}))
+	head := common.Hash{1}
+	reset := newBlockChangeForAccounts(head, 0)
+	reset.ChangeBatch[0].BlockHeight = 1
+	reset.StateChangesIncomplete = true
+	require.NoError(t, pool.OnNewBlock(ctx, reset, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	require.NoError(t, coreDB.Update(ctx, func(tx kv.RwTx) error {
+		if _, err := rawdb.IncrementStateVersion(tx); err != nil {
+			return err
+		}
+		return stages.SaveStageProgress(tx, stages.Execution, 2)
+	}))
+
+	require.NoError(t, pool.start(ctx))
+
+	require.Equal(t, head, pool.stateBlockHash)
+	require.Equal(t, uint64(1), pool.lastSeenBlock.Load(), "head height must advance with its state notification")
 }
 
 func TestStartupKeepsAnnouncedFees(t *testing.T) {

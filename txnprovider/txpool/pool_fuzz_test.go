@@ -562,6 +562,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 
 		p2, err := New(ctx, ch, db, coreDB, txpoolcfg.DefaultConfig, sendersCache, chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 		require.NoError(err)
+		require.NoError(p2.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 
 		p2.senders = pool.senders // senders are not persisted
 		err = p2.withLockedState(ctx, nil, true, func(coreTx kv.TemporalTx, cacheView kvcache.CacheView) error {
