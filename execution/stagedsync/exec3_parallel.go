@@ -283,6 +283,8 @@ func (pe *parallelExecutor) foldTx(ctx context.Context, rwTx kv.TemporalTx, r *t
 	return nil
 }
 
+var stubAccumSkip, stubRecentReceiptsSkip = dbg.EnvBool("STUB_ACCUM_SKIP", false), dbg.EnvBool("STUB_RECENT_RECEIPTS_SKIP", false)
+
 func (pe *parallelExecutor) exec(ctx context.Context,
 	startBlockNum uint64, offsetFromBlockBeginning uint64, maxBlockNum uint64, blockLimit uint64,
 	initialTxNum uint64, inputTxNum uint64, initialCycle bool, rwTx kv.TemporalRwTx,
@@ -786,7 +788,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					// keep accumulator access single-threaded. StartChange must precede
 					// NotifyAccumulator: it initialises the latestChange entry the notify
 					// writes into.
-					if pe.accumulator != nil && applyResult.Header != nil {
+					if pe.accumulator != nil && applyResult.Header != nil && !stubAccumSkip {
 						rawTxs, marshalErr := types.MarshalTransactionsBinary(applyResult.Txs)
 						if marshalErr != nil {
 							<-balDone
@@ -803,7 +805,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 						}
 					}
 
-					if applyResult.BlockNum > 0 && applyResult.receiptsComplete && applyResult.Header != nil &&
+					if !stubRecentReceiptsSkip && applyResult.BlockNum > 0 && applyResult.receiptsComplete && applyResult.Header != nil &&
 						pe.cfg.notifications != nil && pe.cfg.notifications.RecentReceipts != nil &&
 						(!initialCycle || pe.cfg.notifications.Events.HasReceiptOrLogSubscribers()) {
 						pe.cfg.notifications.RecentReceipts.Add(applyResult.Receipts, applyResult.Txs, applyResult.Header)
