@@ -529,6 +529,29 @@ func TestPoolBlockTimeIgnoresSubscriptionReset(t *testing.T) {
 	})
 }
 
+func TestPoolBlockTimeRestartsAfterCatchUp(t *testing.T) {
+	_, pool, _, _ := newTestPool(t)
+	synctest.Test(t, func(t *testing.T) {
+		ctx := t.Context()
+		change := newBlockChangeForAccounts(common.Hash{1}, 0)
+		change.ChangeBatch[0].BlockHeight = 1
+		require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+
+		time.Sleep(time.Second)
+		change.ChangeBatch[0].BlockHeight = 10
+		change.StateChangesIncomplete = true
+		require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+		require.Equal(t, int64(12_000), pool.avgBlockTimeMs.Load(), "catch-up is not a block-time sample")
+		require.Equal(t, time.Now().UnixMilli(), pool.lastBlockTimestampMs.Load(), "catch-up restarts the clock")
+
+		time.Sleep(6 * time.Second)
+		change.ChangeBatch[0].BlockHeight = 11
+		change.StateChangesIncomplete = false
+		require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+		require.Equal(t, int64(11_400), pool.avgBlockTimeMs.Load(), "the next block is measured from the reset")
+	})
+}
+
 func TestPoolBlockTimeTracksAdvancingHeads(t *testing.T) {
 	_, pool, _, _ := newTestPool(t)
 	synctest.Test(t, func(t *testing.T) {
