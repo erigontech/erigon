@@ -126,9 +126,9 @@ func (cpg *cachePopulatingGetter) GetLatest(name kv.Domain, k []byte, opts kv.Ge
 		readTxNum := cache.ClampFillTxNum(cpg.snapshot, name, step.LastTxNum(cpg.stepSize))
 		cpg.view.Fill(name, k, v, readTxNum)
 		if name == kv.AccountsDomain {
-			var codeHash common.Hash
-			copy(codeHash[:], accounts.DeserialiseV3CodeHash(v))
-			cpg.view.SeedAddrCodeHash(k, codeHash, readTxNum)
+			if h := accounts.DeserialiseV3CodeHash(v); h != nil {
+				cpg.view.SeedAddrCodeHash(k, common.Hash(h), readTxNum)
+			}
 		}
 	}
 	return v, step, err
