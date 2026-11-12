@@ -638,27 +638,29 @@ func (rs *StateV3) NotifyAccumulator(accumulator *shards.Accumulator, roTx kv.Te
 		return nil
 	}
 
-	latest := make(map[accounts.Address]accounts.Account, len(blockWrites))
-	account := func(addr accounts.Address) (accounts.Account, error) {
+	latest := make(map[accounts.Address]*accounts.Account, len(blockWrites))
+	account := func(addr accounts.Address) (*accounts.Account, error) {
 		if acc, ok := latest[addr]; ok {
 			return acc, nil
 		}
-		acc := accounts.NewAccount()
 		address := addr.Value()
 		v, _, err := rs.domains.GetLatest(kv.AccountsDomain, roTx, address[:])
 		if err != nil {
-			return accounts.Account{}, err
+			return nil, err
 		}
-		if len(v) > 0 {
-			if err := accounts.DeserialiseV3(&acc, v); err != nil {
-				return accounts.Account{}, err
-			}
+		if len(v) == 0 {
+			latest[addr] = nil
+			return nil, nil
 		}
-		latest[addr] = acc
-		return acc, nil
+		acc := accounts.NewAccount()
+		if err := accounts.DeserialiseV3(&acc, v); err != nil {
+			return nil, err
+		}
+		latest[addr] = &acc
+		return &acc, nil
 	}
 
-	// Every call for an address carries its final state, so a repeat would change nothing.
+	// Account fields are final for the block; deduplicate them until a removal resets the change.
 	changed := make(map[accounts.Address]struct{}, len(blockWrites))
 	changeAccount := func(addr accounts.Address) error {
 		if _, ok := changed[addr]; ok {
@@ -669,7 +671,11 @@ func (rs *StateV3) NotifyAccumulator(accumulator *shards.Accumulator, roTx kv.Te
 		if err != nil {
 			return err
 		}
-		accumulator.ChangeAccount(addr.Value(), acc.Incarnation, accounts.SerialiseV3(&acc))
+		if acc == nil {
+			accumulator.DeleteAccount(addr.Value())
+		} else {
+			accumulator.ChangeAccount(addr.Value(), acc.Incarnation, accounts.SerialiseV3(acc))
+		}
 		return nil
 	}
 
@@ -684,12 +690,20 @@ func (rs *StateV3) NotifyAccumulator(accumulator *shards.Accumulator, roTx kv.Te
 			if err != nil {
 				return err
 			}
+			if acc == nil {
+				accumulator.DeleteAccount(addr.Value())
+				continue
+			}
 			accumulator.ChangeCode(addr.Value(), acc.Incarnation, write.Val.Bytes)
 		}
 		for addr, byKey := range writes.Storages() {
 			acc, err := account(addr)
 			if err != nil {
 				return err
+			}
+			if acc == nil {
+				accumulator.DeleteAccount(addr.Value())
+				continue
 			}
 			for key, write := range byKey {
 				accumulator.ChangeStorage(addr.Value(), acc.Incarnation, key.Value(), write.Val.Bytes())
@@ -701,6 +715,21 @@ func (rs *StateV3) NotifyAccumulator(accumulator *shards.Accumulator, roTx kv.Te
 			}
 		}
 		for addr := range keys.Nonces() {
+			if err := changeAccount(addr); err != nil {
+				return err
+			}
+		}
+		// Avoid iterator allocations when there are no self-destruct entries.
+		if ws, ok := keys.(*WriteSet); ok && (ws == nil || len(ws.selfDestruct) == 0) {
+			continue
+		}
+		for addr, write := range writes.SelfDestructs() {
+			if !write.Val {
+				continue
+			}
+			// A removal clears storage even if a later transaction recreates the account.
+			accumulator.DeleteAccount(addr.Value())
+			delete(changed, addr)
 			if err := changeAccount(addr); err != nil {
 				return err
 			}
@@ -826,6 +855,9 @@ func (w *Writer) DeleteAccount(address accounts.Address, original *accounts.Acco
 	addressValue := address.Value()
 	if err := w.tx.DomainDel(kv.AccountsDomain, addressValue[:], w.txNum, nil); err != nil {
 		return err
+	}
+	if w.accumulator != nil {
+		w.accumulator.DeleteAccount(addressValue)
 	}
 	return nil
 }

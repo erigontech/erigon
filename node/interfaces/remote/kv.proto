@@ -145,6 +145,8 @@ message StateChangeBatch {
   uint64 block_gas_limit = 4; // GasLimit of the latest block - proxy for the gas limit of the next block to be produced
   uint64 finalized_block = 5;
   uint64 pending_blob_fee_per_gas = 6;  // Base Blob Fee for the next block to be produced
+  // Some state changes were omitted. Consumers must reload state rather than apply this batch as a complete delta.
+  bool state_changes_incomplete = 7;
 }
 
 // StateChange - changes done by 1 block or by 1 unwind

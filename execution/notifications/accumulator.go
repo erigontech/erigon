@@ -27,11 +27,12 @@ import (
 // Accumulator collects state changes per block in native Go types.
 // Protobuf conversion happens only at the gRPC boundary via ToProto methods.
 type Accumulator struct {
-	plainStateID       uint64
-	changes            []StateChange
-	latestChange       *StateChange
-	accountChangeIndex map[common.Address]int // For the latest change, allows finding account change by address
-	storageChangeIndex map[common.Address]map[common.Hash]int
+	plainStateID           uint64
+	stateChangesIncomplete bool
+	changes                []StateChange
+	latestChange           *StateChange
+	accountChangeIndex     map[common.Address]int // For the latest change, allows finding account change by address
+	storageChangeIndex     map[common.Address]map[common.Hash]int
 }
 
 func NewAccumulator() *Accumulator {
@@ -48,6 +49,17 @@ func (a *Accumulator) Reset(plainStateID uint64) {
 	a.accountChangeIndex = nil
 	a.storageChangeIndex = nil
 	a.plainStateID = plainStateID
+	a.stateChangesIncomplete = false
+}
+
+// Checkpoint saves completed block changes without copying them.
+// Recording changes, including after restore, requires StartChange.
+func (a *Accumulator) Checkpoint() (restore func()) {
+	a.latestChange = nil
+	a.accountChangeIndex = nil
+	a.storageChangeIndex = nil
+	saved := *a
+	return func() { *a = saved }
 }
 
 // SendAndReset dispatches accumulated changes to both remote (gRPC/protobuf) and
@@ -57,17 +69,18 @@ func (a *Accumulator) SendAndReset(ctx context.Context, c StateChangeConsumer, p
 		return
 	}
 	batch := &BlockBatchNotification{
-		StateVersionID:      a.plainStateID,
-		Changes:             a.changes,
-		PendingBlockBaseFee: pendingBaseFee,
-		PendingBlobFee:      pendingBlobFee,
-		BlockGasLimit:       blockGasLimit,
-		FinalizedBlock:      finalizedBlock,
+		StateVersionID:         a.plainStateID,
+		StateChangesIncomplete: a.stateChangesIncomplete,
+		Changes:                a.changes,
+		PendingBlockBaseFee:    pendingBaseFee,
+		PendingBlobFee:         pendingBlobFee,
+		BlockGasLimit:          blockGasLimit,
+		FinalizedBlock:         finalizedBlock,
 	}
 	if c != nil {
 		c.SendStateChanges(ctx, batch.ToProtoBatch())
 	}
-	a.Reset(0) // reset here for GC, but there will be another Reset with correct viewID
+	a.Reset(0)
 }
 
 func (a *Accumulator) SetStateID(stateID uint64) {
@@ -77,9 +90,10 @@ func (a *Accumulator) SetStateID(stateID uint64) {
 // StartChange begins accumulation of changes for a new block.
 func (a *Accumulator) StartChange(h *types.Header, txs [][]byte, unwind bool) {
 	a.changes = append(a.changes, StateChange{
-		BlockHeight: h.Number.Uint64(),
-		BlockHash:   h.Hash(),
-		BlockTime:   h.Time,
+		BlockHeight:      h.Number.Uint64(),
+		FirstBlockHeight: h.Number.Uint64(),
+		BlockHash:        h.Hash(),
+		BlockTime:        h.Time,
 	})
 	a.latestChange = &a.changes[len(a.changes)-1]
 	if unwind {
@@ -95,34 +109,45 @@ func (a *Accumulator) StartChange(h *types.Header, txs [][]byte, unwind bool) {
 	}
 }
 
+// StartHeadOnlyRange records the head of an executed range without individual state changes.
+func (a *Accumulator) StartHeadOnlyRange(firstBlock uint64, lastHeader *types.Header) {
+	a.StartChange(lastHeader, nil, false)
+	a.latestChange.FirstBlockHeight = firstBlock
+	a.stateChangesIncomplete = true
+}
+
 func (a *Accumulator) HasAccountChange(address common.Address) bool {
 	i, ok := a.accountChangeIndex[address]
 	return ok && a.latestChange.Changes[i].Action != ActionStorage
 }
 
-// ChangeAccount adds modification of account balance or nonce (or both) to the latest change.
-func (a *Accumulator) ChangeAccount(address common.Address, incarnation uint64, data []byte) {
+func (a *Accumulator) accountChange(address common.Address, incarnation uint64) *AccountChange {
 	i, ok := a.accountChangeIndex[address]
-	if !ok || incarnation > a.latestChange.Changes[i].Incarnation {
+	if !ok || a.latestChange.Changes[i].Action == ActionRemove || incarnation > a.latestChange.Changes[i].Incarnation {
 		i = len(a.latestChange.Changes)
 		a.latestChange.Changes = append(a.latestChange.Changes, AccountChange{Address: address})
 		a.accountChangeIndex[address] = i
 		delete(a.storageChangeIndex, address)
 	}
 	accountChange := &a.latestChange.Changes[i]
+	accountChange.Incarnation = incarnation
+	return accountChange
+}
+
+// ChangeAccount adds modification of account balance or nonce (or both) to the latest change.
+func (a *Accumulator) ChangeAccount(address common.Address, incarnation uint64, data []byte) {
+	accountChange := a.accountChange(address, incarnation)
 	switch accountChange.Action {
 	case ActionStorage:
 		accountChange.Action = ActionUpsert
 	case ActionCode:
 		accountChange.Action = ActionUpsertCode
-	case ActionRemove:
-		//panic("")
 	}
-	accountChange.Incarnation = incarnation
 	accountChange.Data = data
 }
 
-// DeleteAccount marks account as deleted.
+// DeleteAccount invalidates the account and all its storage. Later recreation must
+// keep the removal as a separate change so consumers also drop untouched slots.
 func (a *Accumulator) DeleteAccount(address common.Address) {
 	i, ok := a.accountChangeIndex[address]
 	if !ok {
@@ -131,9 +156,6 @@ func (a *Accumulator) DeleteAccount(address common.Address) {
 		a.accountChangeIndex[address] = i
 	}
 	accountChange := &a.latestChange.Changes[i]
-	if accountChange.Action != ActionStorage {
-		panic("")
-	}
 	accountChange.Data = nil
 	accountChange.Code = nil
 	accountChange.StorageChanges = nil
@@ -143,37 +165,19 @@ func (a *Accumulator) DeleteAccount(address common.Address) {
 
 // ChangeCode adds code to the latest change.
 func (a *Accumulator) ChangeCode(address common.Address, incarnation uint64, code []byte) {
-	i, ok := a.accountChangeIndex[address]
-	if !ok || incarnation > a.latestChange.Changes[i].Incarnation {
-		i = len(a.latestChange.Changes)
-		a.latestChange.Changes = append(a.latestChange.Changes, AccountChange{Address: address, Action: ActionCode})
-		a.accountChangeIndex[address] = i
-		delete(a.storageChangeIndex, address)
-	}
-	accountChange := &a.latestChange.Changes[i]
+	accountChange := a.accountChange(address, incarnation)
 	switch accountChange.Action {
 	case ActionStorage:
 		accountChange.Action = ActionCode
 	case ActionUpsert:
 		accountChange.Action = ActionUpsertCode
-	case ActionRemove:
-		//panic("")
 	}
-	accountChange.Incarnation = incarnation
 	accountChange.Code = code
 }
 
 // ChangeStorage adds a storage slot change to the latest change.
 func (a *Accumulator) ChangeStorage(address common.Address, incarnation uint64, location common.Hash, data []byte) {
-	i, ok := a.accountChangeIndex[address]
-	if !ok || incarnation > a.latestChange.Changes[i].Incarnation {
-		i = len(a.latestChange.Changes)
-		a.latestChange.Changes = append(a.latestChange.Changes, AccountChange{Address: address, Action: ActionStorage})
-		a.accountChangeIndex[address] = i
-		delete(a.storageChangeIndex, address)
-	}
-	accountChange := &a.latestChange.Changes[i]
-	accountChange.Incarnation = incarnation
+	accountChange := a.accountChange(address, incarnation)
 	si, ok1 := a.storageChangeIndex[address]
 	if !ok1 {
 		si = make(map[common.Hash]int)
@@ -189,14 +193,19 @@ func (a *Accumulator) ChangeStorage(address common.Address, incarnation uint64, 
 	accountChange.StorageChanges[j].Data = data
 }
 
-// CopyAndReset moves accumulated data from this instance into target, then resets this instance.
-func (a *Accumulator) CopyAndReset(target *Accumulator) {
-	target.changes = a.changes
-	a.changes = nil
-	target.latestChange = a.latestChange
-	a.latestChange = nil
-	target.accountChangeIndex = a.accountChangeIndex
-	a.accountChangeIndex = nil
-	target.storageChangeIndex = a.storageChangeIndex
-	a.storageChangeIndex = nil
+// AppendAndReset appends accumulated changes to target, then resets this instance.
+// Existing changes must stay before the appended changes, including any unwind.
+func (a *Accumulator) AppendAndReset(target *Accumulator) {
+	target.stateChangesIncomplete = target.stateChangesIncomplete || a.stateChangesIncomplete
+	if len(a.changes) > 0 {
+		if len(target.changes) == 0 {
+			target.changes = a.changes
+		} else {
+			target.changes = append(target.changes, a.changes...)
+		}
+		target.latestChange = &target.changes[len(target.changes)-1]
+		target.accountChangeIndex = a.accountChangeIndex
+		target.storageChangeIndex = a.storageChangeIndex
+	}
+	a.Reset(0)
 }

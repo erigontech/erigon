@@ -28,6 +28,7 @@ import (
 	btree2 "github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/node/gointerfaces"
@@ -215,11 +216,11 @@ func (c *Coherent) selectOrCreateRoot(versionID uint64) *CoherentRoot {
 }
 
 // advanceRoot - used for advancing root onNewBlock
-func (c *Coherent) advanceRoot(stateVersionID uint64) (r *CoherentRoot) {
+func (c *Coherent) advanceRoot(stateVersionID uint64, incomplete bool) (r *CoherentRoot) {
 	r, rootExists := c.roots[stateVersionID]
 
 	// if nothing has progressed just return the existing root
-	if c.latestStateVersionID == stateVersionID && rootExists {
+	if c.latestStateVersionID == stateVersionID && rootExists && !incomplete {
 		return r
 	}
 
@@ -228,14 +229,14 @@ func (c *Coherent) advanceRoot(stateVersionID uint64) (r *CoherentRoot) {
 		c.roots[stateVersionID] = r
 	}
 
-	if prevView, ok := c.roots[stateVersionID-1]; ok && prevView.isCanonical {
+	if prevView, ok := c.roots[stateVersionID-1]; !incomplete && ok && prevView.isCanonical {
 		//log.Info("advance: clone", "from", viewID-1, "to", viewID)
 		r.cache = prevView.cache.Copy()
 		r.codeCache = prevView.codeCache.Copy()
 	} else {
 		c.stateEvict.Init()
 		c.codeEvict.Init()
-		if r.cache == nil {
+		if r.cache == nil || incomplete {
 			//log.Info("advance: new", "to", viewID)
 			r.cache = btree2.NewBTreeG(Less)
 			r.codeCache = btree2.NewBTreeG(Less)
@@ -272,9 +273,13 @@ func (c *Coherent) OnNewBlock(stateChanges *remoteproto.StateChangeBatch) {
 	defer c.lock.Unlock()
 	c.waitExceededCount.Store(0) // reset the circuit breaker
 	id := stateChanges.StateVersionId
-	r := c.advanceRoot(id)
+	r := c.advanceRoot(id, stateChanges.StateChangesIncomplete)
 
-	for _, sc := range stateChanges.ChangeBatch {
+	changes := stateChanges.ChangeBatch
+	if stateChanges.StateChangesIncomplete {
+		changes = nil
+	}
+	for _, sc := range changes {
 		for i := range sc.Changes {
 			switch sc.Changes[i].Action {
 			case remoteproto.Action_UPSERT:
@@ -289,6 +294,7 @@ func (c *Coherent) OnNewBlock(stateChanges *remoteproto.StateChangeBatch) {
 				c.addCode(k[:], sc.Changes[i].Code, r, id)
 			case remoteproto.Action_REMOVE:
 				addr := gointerfaces.ConvertH160toAddress(sc.Changes[i].Address)
+				c.evictStorage(addr[:], r)
 				c.add(addr[:], nil, r, id)
 			case remoteproto.Action_STORAGE:
 				// skip, will check later
@@ -428,6 +434,16 @@ func (c *Coherent) evictKey(k []byte, r *CoherentRoot) {
 	if e, ok := r.cache.Delete(&Element{K: k}); ok {
 		c.stateEvict.Remove(e)
 	}
+}
+
+func (c *Coherent) evictStorage(address []byte, r *CoherentRoot) {
+	first := append(bytes.Clone(address), make([]byte, length.Hash)...)
+	last := append(bytes.Clone(address), bytes.Repeat([]byte{0xff}, length.Hash)...)
+	deleted := r.cache.DeleteRange(&Element{K: first}, &Element{K: last}, &btree2.DeleteRangeOptions{MaxInclusive: true})
+	deleted.Scan(func(e *Element) bool {
+		c.stateEvict.Remove(e)
+		return true
+	})
 }
 
 func (c *Coherent) removeOldest(r *CoherentRoot) {

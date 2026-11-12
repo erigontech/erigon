@@ -228,7 +228,7 @@ func unwindExec3(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwT
 	if err != nil {
 		return err
 	}
-	if err := stateChangesStreamAtUnwind(ctx, rwTx, u.UnwindPoint, dropFromTxNum, accumulator, changeSet, logger); err != nil {
+	if err := stateChangesStreamAtUnwind(ctx, rwTx, doms, u.UnwindPoint, dropFromTxNum, accumulator, changeSet, logger); err != nil {
 		return fmt.Errorf("stateChangesStreamAtUnwind(%d->%d): %w, took %s", s.BlockNumber, u.UnwindPoint, err, time.Since(t))
 	}
 	if err := rawdb.DeleteNewerEpochs(rwTx, dropStateFromBlockNum); err != nil {
@@ -242,6 +242,7 @@ var mxState3Unwind = metrics.GetOrCreateSummary("state3_unwind")
 // stateChangesStreamAtUnwind sending state changes to `accumulator`
 func stateChangesStreamAtUnwind(ctx context.Context,
 	tx kv.TemporalRwTx,
+	doms *execctx.SharedDomains,
 	blockUnwindTo, txUnwindTo uint64,
 	accumulator *shards.Accumulator,
 	changeset *[kv.DomainLen][]kv.DomainEntryDiff, logger log.Logger,
@@ -249,9 +250,16 @@ func stateChangesStreamAtUnwind(ctx context.Context,
 	var currentInc uint64
 
 	handle := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-		// Value changes from previous steps arrive with nil values, which are
-		// indistinguishable from a delete here.
 		if len(k) == length.Addr {
+			if accumulator == nil {
+				return nil
+			}
+			// Diffs contain undo values for individual steps. The restored view
+			// gives the account at the unwind target even across several steps.
+			v, _, err := doms.GetLatest(kv.AccountsDomain, tx, k)
+			if err != nil {
+				return fmt.Errorf("read unwound account %x: %w", k, err)
+			}
 			if len(v) > 0 {
 				var account accounts.Account
 				if err := accounts.DeserialiseV3(&account, v); err != nil {
@@ -260,15 +268,11 @@ func stateChangesStreamAtUnwind(ctx context.Context,
 				var address common.Address
 				copy(address[:], k)
 				newV := accounts.SerialiseV3(&account)
-				if accumulator != nil {
-					accumulator.ChangeAccount(address, account.Incarnation, newV)
-				}
+				accumulator.ChangeAccount(address, account.Incarnation, newV)
 			} else {
 				var address common.Address
 				copy(address[:], k)
-				if accumulator != nil {
-					accumulator.DeleteAccount(address)
-				}
+				accumulator.DeleteAccount(address)
 			}
 			return nil
 		}
@@ -554,7 +558,9 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDom
 	}
 
 	var accumulator *shards.Accumulator
-	if cfg.stateStream && s.BlockNumber-u.UnwindPoint < stateStreamLimit {
+	// Fork choice announces the canonical unwind if the validated fork is adopted.
+	notify := s.SyncMode() != stages.ModeForkValidation
+	if notify && cfg.stateStream && s.BlockNumber-u.UnwindPoint < stateStreamLimit {
 		accumulator = cfg.notifications.Accumulator
 
 		hash, ok, err := cfg.blockReader.CanonicalHash(ctx, rwTx, u.UnwindPoint)
@@ -571,7 +577,8 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDom
 		if header == nil {
 			return fmt.Errorf("canonical header for unwind point not found: %s", hash)
 		}
-		txs, err := cfg.blockReader.RawTransactions(ctx, rwTx, u.UnwindPoint, s.BlockNumber)
+		// Transactions in the unwind target remain canonical.
+		txs, err := cfg.blockReader.RawTransactions(ctx, rwTx, u.UnwindPoint+1, s.BlockNumber)
 		if err != nil {
 			return err
 		}

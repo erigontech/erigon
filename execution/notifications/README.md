@@ -63,8 +63,11 @@ StateChangeConsumer.SendStateChanges(StateChangeBatch)  [protobuf]
         → kvcache.Coherent.OnNewBlock()  (updates remote state cache)
 ```
 
-Protobuf `StateChangeBatch` contains the full `AccountChange` list with
-`H160`/`H256` types, needed by remote `kvcache` to update its state cache.
+Protobuf `StateChangeBatch` carries account, storage and code changes with
+`H160`/`H256` types. Catch-up may omit individual changes and set
+`state_changes_incomplete`. Consumers must then discard cached state and read
+from the matching database view, even when the state version is consecutive.
+The txpool also refreshes pending senders and frame validations in this case.
 In embedded mode, `execmodule.Cache` replaces `kvcache` and its `OnNewBlock`
 is a no-op.
 
@@ -72,7 +75,7 @@ is a no-op.
 
 | Consumer | Mode | Reads | Ignores |
 |----------|------|-------|---------|
-| TxPool | local | Txs, Direction, fees | AccountChange, StorageChange |
+| TxPool | local or remote | Txs, Direction, fees, changed accounts, completeness | — |
 | kvcache.Coherent | remote | AccountChange, StorageChange, Code | Txs |
 | execmodule.Cache | local | nothing (no-op) | everything |
 

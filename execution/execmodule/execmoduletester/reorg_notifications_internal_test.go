@@ -22,30 +22,35 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/notifications"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon/txnprovider/txpool"
 )
 
 // Every block above genesis calls logEmitter once, so each block has exactly one log.
 var logEmitter = common.Address{0xbb}
 
 type reorgSubscriptions struct {
-	headers  [][]byte
-	logs     []*notifications.LogNotification
-	receipts []*notifications.ReceiptNotification
+	headers      [][]byte
+	logs         []*notifications.LogNotification
+	receipts     []*notifications.ReceiptNotification
+	stateChanges *remoteproto.StateChangeBatch
 }
 
 func collectReorgSubscriptions(headers <-chan [][]byte, logs <-chan []*notifications.LogNotification, receipts <-chan []*notifications.ReceiptNotification) *reorgSubscriptions {
@@ -111,17 +116,17 @@ var reorgCases = []reorgCase{
 	{name: "NineBlockForkViaForkchoiceOnly", forkLen: 9, newPayload: false},
 }
 
-func newReorgChains(t *testing.T, canonicalLen, sideLen int) (*ExecModuleTester, *blockgen.ChainPack, *blockgen.ChainPack) {
+func newReorgChains(t *testing.T, canonicalLen, sideLen int, opts ...Option) (*ExecModuleTester, *blockgen.ChainPack, *blockgen.ChainPack) {
 	key, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	sender := crypto.PubkeyToAddress(key.PublicKey)
-	m := New(t, WithGenesisSpec(&types.Genesis{
+	m := New(t, append([]Option{WithGenesisSpec(&types.Genesis{
 		Config: chain.AllProtocolChanges,
 		Alloc: types.GenesisAlloc{
 			sender:     {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
 			logEmitter: {Code: []byte{0x60, 0x00, 0x60, 0x00, 0xa0, 0x00}}, // PUSH1 0 PUSH1 0 LOG0 STOP
 		},
-	}), WithKey(key))
+	}), WithKey(key)}, opts...)...)
 	signer := *types.LatestSignerForChainID(m.ChainConfig.ChainID)
 	gasPrice := uint256.NewInt(m.Genesis.BaseFee().Uint64() * 2)
 	sign := func(txn types.Transaction) types.Transaction {
@@ -149,7 +154,7 @@ func newReorgChains(t *testing.T, canonicalLen, sideLen int) (*ExecModuleTester,
 	return m, canonical, side
 }
 
-func subscribeStateChangeHeads(t *testing.T, m *ExecModuleTester) func(common.Hash) {
+func subscribeStateChangeHeads(t *testing.T, m *ExecModuleTester) func(common.Hash) *remoteproto.StateChangeBatch {
 	batches := make(chan *remoteproto.StateChangeBatch, 16)
 	stream, err := m.stateChangesClient.StateChanges(t.Context(), &remoteproto.StateChangeRequest{}, grpc.WaitForReady(true))
 	require.NoError(t, err)
@@ -162,7 +167,7 @@ func subscribeStateChangeHeads(t *testing.T, m *ExecModuleTester) func(common.Ha
 			batches <- batch
 		}
 	}()
-	return func(head common.Hash) {
+	return func(head common.Hash) *remoteproto.StateChangeBatch {
 		t.Helper()
 		deadline := time.After(10 * time.Second)
 		for {
@@ -170,7 +175,7 @@ func subscribeStateChangeHeads(t *testing.T, m *ExecModuleTester) func(common.Ha
 			case batch := <-batches:
 				last := batch.ChangeBatch[len(batch.ChangeBatch)-1]
 				if gointerfaces.ConvertH256ToHash(last.BlockHash) == head {
-					return
+					return batch
 				}
 			case <-deadline:
 				t.Fatalf("no state-change batch announced head %x", head)
@@ -223,64 +228,127 @@ func runReorg(t *testing.T, tc reorgCase) (oldHead *types.Block, forkBlocks []*t
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, fcu.Status)
 	m.ExecModule.WaitIdle(t.Context())
-	waitForBatchWithHead(newHead.Hash())
+	batch := waitForBatchWithHead(newHead.Hash())
 
-	return oldHead, forkBlocks, collectReorgSubscriptions(headers, logs, receipts)
+	got = collectReorgSubscriptions(headers, logs, receipts)
+	got.stateChanges = batch
+	return oldHead, forkBlocks, got
 }
 
-func TestReorgAnnouncesNewCanonicalHeaders(t *testing.T) {
-	for _, tc := range reorgCases {
-		t.Run(tc.name, func(t *testing.T) {
-			_, forkBlocks, got := runReorg(t, tc)
-			want := make([]common.Hash, 0, len(forkBlocks))
-			for _, b := range forkBlocks {
-				want = append(want, b.Hash())
-			}
-			require.ElementsMatch(t, want, got.headerHashes(t), "newHeads subscribers were not told about the new canonical blocks")
-		})
-	}
-}
-
-func TestReorgMarksOldHeadLogsRemoved(t *testing.T) {
+func TestReorgNotifications(t *testing.T) {
 	for _, tc := range reorgCases {
 		t.Run(tc.name, func(t *testing.T) {
 			oldHead, forkBlocks, got := runReorg(t, tc)
-			require.Equal(t, 1, got.logCount(oldHead.Hash(), true), "old head's log was not reported as removed")
-			for _, b := range forkBlocks {
-				require.Zero(t, got.logCount(b.Hash(), true), "log of new canonical block %d reported as removed", b.NumberU64())
-			}
-		})
-	}
-}
 
-func TestReorgAnnouncesNewCanonicalLogs(t *testing.T) {
-	for _, tc := range reorgCases {
-		t.Run(tc.name, func(t *testing.T) {
-			oldHead, forkBlocks, got := runReorg(t, tc)
-			for _, b := range forkBlocks {
-				require.Equal(t, 1, got.logCount(b.Hash(), false), "log of new canonical block %d was not reported", b.NumberU64())
-			}
-			require.Zero(t, got.logCount(oldHead.Hash(), false), "old head's log was reported again as added")
-		})
-	}
-}
-
-func TestReorgAnnouncesTransactionReceipts(t *testing.T) {
-	for _, tc := range reorgCases {
-		t.Run(tc.name, func(t *testing.T) {
-			oldHead, forkBlocks, got := runReorg(t, tc)
-			wantCount := 0
-			for _, tx := range oldHead.Transactions() {
-				require.Zero(t, got.receiptCount(oldHead.Hash(), tx.Hash()))
-			}
-			for _, block := range forkBlocks {
-				wantCount += len(block.Transactions())
-				for _, tx := range block.Transactions() {
-					require.Equal(t, 1, got.receiptCount(block.Hash(), tx.Hash()))
+			t.Run("state_changes", func(t *testing.T) {
+				changes := got.stateChanges.ChangeBatch
+				require.Len(t, changes, 1+len(forkBlocks))
+				require.Equal(t, remoteproto.Direction_UNWIND, changes[0].Direction)
+				require.Equal(t, oldHead.ParentHash(), common.Hash(gointerfaces.ConvertH256ToHash(changes[0].BlockHash)))
+				var unwound []common.Hash
+				for _, raw := range changes[0].Txs {
+					txn, err := types.DecodeTransaction(raw)
+					require.NoError(t, err)
+					unwound = append(unwound, txn.Hash())
 				}
-			}
-			require.Len(t, got.receipts, wantCount)
+				var want []common.Hash
+				for _, txn := range oldHead.Transactions() {
+					want = append(want, txn.Hash())
+				}
+				require.ElementsMatch(t, want, unwound, "only transactions above the common ancestor may be restored")
+				for i, block := range forkBlocks {
+					require.Equal(t, remoteproto.Direction_FORWARD, changes[i+1].Direction)
+					require.Equal(t, block.Hash(), common.Hash(gointerfaces.ConvertH256ToHash(changes[i+1].BlockHash)))
+				}
+			})
+			t.Run("headers", func(t *testing.T) {
+				want := make([]common.Hash, 0, len(forkBlocks))
+				for _, b := range forkBlocks {
+					want = append(want, b.Hash())
+				}
+				require.ElementsMatch(t, want, got.headerHashes(t), "newHeads subscribers were not told about the new canonical blocks")
+			})
+			t.Run("removed_logs", func(t *testing.T) {
+				require.Equal(t, 1, got.logCount(oldHead.Hash(), true), "old head's log was not reported as removed")
+				for _, b := range forkBlocks {
+					require.Zero(t, got.logCount(b.Hash(), true), "log of new canonical block %d reported as removed", b.NumberU64())
+				}
+			})
+			t.Run("added_logs", func(t *testing.T) {
+				for _, b := range forkBlocks {
+					require.Equal(t, 1, got.logCount(b.Hash(), false), "log of new canonical block %d was not reported", b.NumberU64())
+				}
+				require.Zero(t, got.logCount(oldHead.Hash(), false), "old head's log was reported again as added")
+			})
+			t.Run("receipts", func(t *testing.T) {
+				wantCount := 0
+				for _, tx := range oldHead.Transactions() {
+					require.Zero(t, got.receiptCount(oldHead.Hash(), tx.Hash()))
+				}
+				for _, block := range forkBlocks {
+					wantCount += len(block.Transactions())
+					for _, tx := range block.Transactions() {
+						require.Equal(t, 1, got.receiptCount(block.Hash(), tx.Hash()))
+					}
+				}
+				require.Len(t, got.receipts, wantCount)
+			})
 		})
+	}
+}
+
+func TestReorgRestoresUnminedTransactions(t *testing.T) {
+	for _, tc := range []reorgCase{
+		{name: "NewPayload", newPayload: true},
+		{name: "ForkchoiceOnly"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m, canonical, side := newReorgChains(t, 2, 2, WithTxPool())
+			require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), canonical.Blocks))
+			require.NoError(t, m.WaitForTxPool(t.Context(), canonical.TopBlock.Hash()))
+			status, err := m.InsertBlocks(t.Context(), side.Blocks[1:])
+			require.NoError(t, err)
+			require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+			if tc.newPayload {
+				validation, err := m.ValidateChain(t.Context(), side.TopBlock.Header())
+				require.NoError(t, err)
+				require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
+			}
+			fcu, err := m.UpdateForkChoice(t.Context(), side.TopBlock.Header())
+			require.NoError(t, err)
+			require.Equal(t, execmodule.ExecutionStatusSuccess, fcu.Status)
+			extraTransfer := canonical.TopBlock.Transactions()[1]
+			require.EventuallyWithT(t, func(check *assert.CollectT) {
+				var pending txpool.TxnsRlp
+				onTime, err := m.TxPool.PeekBest(t.Context(), 10, &pending, side.TopBlock.NumberU64())
+				require.NoError(check, err)
+				require.True(check, onTime)
+				require.Len(check, pending.Txns, 1)
+				require.Equal(check, extraTransfer.Hash(), pending.ParsedTxn[0].Hash())
+			}, time.Minute, time.Millisecond, "the reorged-out transfer must be selectable without resubmission")
+		})
+	}
+}
+
+func TestSideForkValidationDoesNotAnnounceUnwindForExtension(t *testing.T) {
+	m, canonical, side := newReorgChains(t, 3, 2)
+	waitForBatchWithHead := subscribeStateChangeHeads(t, m)
+	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), canonical.Blocks[:2]))
+	m.ExecModule.WaitIdle(t.Context())
+	waitForBatchWithHead(canonical.Blocks[1].Hash())
+	require.Empty(t, m.Notifications.Accumulator.Changes())
+	status, err := m.InsertBlocks(t.Context(), side.Blocks[1:])
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+	validation, err := m.ValidateChain(t.Context(), side.TopBlock.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
+	require.Empty(t, m.Notifications.Accumulator.Changes(), "validation must not change canonical notifications")
+
+	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), canonical.Blocks[2:]))
+	batch := waitForBatchWithHead(canonical.TopBlock.Hash())
+	for _, change := range batch.ChangeBatch {
+		require.Equal(t, remoteproto.Direction_FORWARD, change.Direction, "validation must not announce a canonical unwind")
 	}
 }
 
@@ -442,7 +510,7 @@ func TestMissingSegmentForkchoicePreservesCanonicalRemovedLogs(t *testing.T) {
 	require.Equal(t, 1, got.logCount(a3.Hash(), true))
 }
 
-func TestRejectedUnwindingForkchoicePreservesCanonicalRemovedLogs(t *testing.T) {
+func TestRejectedUnwindingForkchoicePreservesCanonicalNotifications(t *testing.T) {
 	m, canonical, side := newReorgChains(t, 2, 2)
 	b1, a2 := canonical.Blocks[0], canonical.Blocks[1]
 	b2 := side.Blocks[1]
@@ -467,14 +535,19 @@ func TestRejectedUnwindingForkchoicePreservesCanonicalRemovedLogs(t *testing.T) 
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, fcu.Status)
 	m.ExecModule.WaitIdle(t.Context())
-	waitForBatchWithHead(b2.Hash())
+	batch := waitForBatchWithHead(b2.Hash())
+	require.Equal(t, 2, len(batch.ChangeBatch), "only the accepted reorg's changes must be announced")
+	require.Equal(t, remoteproto.Direction_UNWIND, batch.ChangeBatch[0].Direction)
+	require.Equal(t, b1.Hash(), common.Hash(gointerfaces.ConvertH256ToHash(batch.ChangeBatch[0].BlockHash)))
+	require.Equal(t, remoteproto.Direction_FORWARD, batch.ChangeBatch[1].Direction)
+	require.Equal(t, b2.Hash(), common.Hash(gointerfaces.ConvertH256ToHash(batch.ChangeBatch[1].BlockHash)))
 
 	got := collectReorgSubscriptions(nil, logs, nil)
 	require.Equal(t, 1, got.logCount(b2.Hash(), false))
 	require.Equal(t, 1, got.logCount(a2.Hash(), true), "replaced canonical block's log was not reported as removed")
 }
 
-func TestRejectedUnwindingForkchoiceDoesNotReportCanonicalLogsRemoved(t *testing.T) {
+func TestRejectedUnwindingForkchoiceDoesNotAnnounceCanonicalUnwind(t *testing.T) {
 	m, canonical, _ := newReorgChains(t, 3, 3)
 	b1, a2, a3 := canonical.Blocks[0], canonical.Blocks[1], canonical.Blocks[2]
 	waitForBatchWithHead := subscribeStateChangeHeads(t, m)
@@ -493,9 +566,234 @@ func TestRejectedUnwindingForkchoiceDoesNotReportCanonicalLogsRemoved(t *testing
 	m.Notifications.Events.EmptyLogSubscription(false)
 	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), []*types.Block{a3}))
 	m.ExecModule.WaitIdle(t.Context())
-	waitForBatchWithHead(a3.Hash())
+	batch := waitForBatchWithHead(a3.Hash())
+	require.Equal(t, 1, len(batch.ChangeBatch), "the rejected forkchoice must not leave changes for the next extension")
+	require.Equal(t, remoteproto.Direction_FORWARD, batch.ChangeBatch[0].Direction)
 
 	got := collectReorgSubscriptions(nil, logs, nil)
 	require.Equal(t, 1, got.logCount(a3.Hash(), false))
 	require.Zero(t, got.logCount(a2.Hash(), true), "canonical block's log was reported as removed")
+}
+
+func TestFailedForkchoiceUnwindAllowsCanonicalExtension(t *testing.T) {
+	m, canonical, side := newReorgChains(t, 4, 3)
+	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), canonical.Blocks[:3]))
+	m.ExecModule.WaitIdle(t.Context())
+	status, err := m.InsertBlocks(t.Context(), side.Blocks)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+	missing := dbutils.BlockBodyKey(2, canonical.Blocks[1].Hash())
+	require.NoError(t, m.DB.Update(t.Context(), func(tx kv.RwTx) error {
+		value, err := tx.GetOne(kv.ChangeSets3, missing)
+		require.NoError(t, err)
+		require.NotEmpty(t, value)
+		return tx.Delete(kv.ChangeSets3, missing)
+	}))
+	_, err = m.UpdateForkChoice(t.Context(), side.TopBlock.Header())
+	require.ErrorContains(t, err, "missing diffset for executed block 2")
+	m.ExecModule.WaitIdle(t.Context())
+	require.NoError(t, m.DB.View(t.Context(), func(tx kv.Tx) error {
+		require.Equal(t, canonical.Blocks[2].Hash(), rawdb.ReadHeadBlockHash(tx))
+		return nil
+	}))
+	status, err = m.InsertBlocks(t.Context(), canonical.Blocks[3:])
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+	result, err := m.UpdateForkChoice(t.Context(), canonical.TopBlock.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status)
+	m.ExecModule.WaitIdle(t.Context())
+	require.NoError(t, m.DB.View(t.Context(), func(tx kv.Tx) error {
+		require.Equal(t, canonical.TopBlock.Hash(), rawdb.ReadHeadBlockHash(tx))
+		value, err := tx.GetOne(kv.ChangeSets3, missing)
+		require.NoError(t, err)
+		require.Empty(t, value, "extension must not need to repair the failed unwind")
+		return nil
+	}))
+}
+
+func TestBelowFinalityForkchoiceKeepsPendingNotifications(t *testing.T) {
+	m := New(t, WithStepSize(16), WithLoopBlockLimit(8))
+	chain, err := m.GenerateChain(27, nil)
+	require.NoError(t, err)
+	waitForBatchWithHead := subscribeStateChangeHeads(t, m)
+	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), chain.Blocks[:2]))
+	m.ExecModule.WaitIdle(t.Context())
+	waitForBatchWithHead(chain.Blocks[1].Hash())
+	fcu, err := m.UpdateForkChoice(t.Context(), chain.Blocks[1].Header(), WithFinalisedHash(chain.Blocks[1].Hash()))
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, fcu.Status)
+	m.ExecModule.WaitIdle(t.Context())
+
+	header := types.CopyHeader(chain.TopBlock.HeaderNoCopy())
+	header.Root[0] ^= 1
+	badTip := types.NewBlockFromNetwork(header, chain.TopBlock.Body(), chain.TopBlock.BlockAccessListSidecar())
+	blocks := append([]*types.Block(nil), chain.Blocks[2:]...)
+	blocks[len(blocks)-1] = badTip
+	status, err := m.InsertBlocks(t.Context(), blocks)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+	fcu, err = m.UpdateForkChoice(t.Context(), badTip.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusBadBlock, fcu.Status)
+	m.ExecModule.WaitIdle(t.Context())
+
+	retained := append([]notifications.StateChange(nil), m.Notifications.Accumulator.Changes()...)
+	require.NotEmpty(t, retained)
+	var committed uint64
+	require.NoError(t, m.DB.View(t.Context(), func(tx kv.Tx) error {
+		var err error
+		committed, err = stages.GetStageProgress(tx, stages.Finish)
+		require.NoError(t, err)
+		return err
+	}))
+	require.Greater(t, committed, uint64(2))
+	require.Less(t, committed, badTip.NumberU64())
+	fcu, err = m.UpdateForkChoice(t.Context(), chain.Blocks[0].Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, fcu.Status)
+	m.ExecModule.WaitIdle(t.Context())
+	require.Equal(t, retained, m.Notifications.Accumulator.Changes(), "an ignored head must not dispatch retained changes")
+
+	accepted := chain.Blocks[committed-1]
+	fcu, err = m.UpdateForkChoice(t.Context(), accepted.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, fcu.Status)
+	m.ExecModule.WaitIdle(t.Context())
+	batch := waitForBatchWithHead(accepted.Hash())
+	for _, change := range batch.ChangeBatch {
+		require.LessOrEqual(t, change.BlockHeight, committed)
+	}
+	require.Empty(t, m.Notifications.Accumulator.Changes())
+}
+
+func TestRejectedHeadOnlyCatchupRetainsHeaderRange(t *testing.T) {
+	m := New(t, WithStepSize(16), WithLoopBlockLimit(8))
+	chain, err := m.GenerateChain(100, nil)
+	require.NoError(t, err)
+	waitForBatchWithHead := subscribeStateChangeHeads(t, m)
+	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), chain.Blocks[:2]))
+	m.ExecModule.WaitIdle(t.Context())
+	waitForBatchWithHead(chain.Blocks[1].Hash())
+
+	header := types.CopyHeader(chain.TopBlock.HeaderNoCopy())
+	header.Root[0] ^= 1
+	badTip := types.NewBlockFromNetwork(header, chain.TopBlock.Body(), chain.TopBlock.BlockAccessListSidecar())
+	blocks := append([]*types.Block(nil), chain.Blocks[2:]...)
+	blocks[len(blocks)-1] = badTip
+	status, err := m.InsertBlocks(t.Context(), blocks)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+	fcu, err := m.UpdateForkChoice(t.Context(), badTip.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusBadBlock, fcu.Status)
+	m.ExecModule.WaitIdle(t.Context())
+
+	var committed uint64
+	require.NoError(t, m.DB.View(t.Context(), func(tx kv.Tx) error {
+		var err error
+		committed, err = stages.GetStageProgress(tx, stages.Finish)
+		return err
+	}))
+	require.Greater(t, committed, uint64(10))
+	require.Greater(t, m.Notifications.Accumulator.Changes()[0].BlockHeight, uint64(3), "catch-up must omit individual block changes")
+	headers, unsubscribe := m.Notifications.Events.AddHeaderSubscription()
+	t.Cleanup(unsubscribe)
+	accepted := chain.Blocks[committed-1]
+	fcu, err = m.UpdateForkChoice(t.Context(), accepted.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, fcu.Status)
+	m.ExecModule.WaitIdle(t.Context())
+	waitForBatchWithHead(accepted.Hash())
+	var want []common.Hash
+	for _, block := range chain.Blocks[2:committed] {
+		want = append(want, block.Hash())
+	}
+	require.Equal(t, want, collectReorgSubscriptions(headers, nil, nil).headerHashes(t), "all committed catch-up headers must be announced")
+}
+
+func TestRejectedCatchupForkchoiceKeepsCommittedNotifications(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		sameHead bool
+	}{
+		{name: "committed head", sameHead: true},
+		{name: "new head"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m, canonical, side := newReorgChains(t, 2, 27, WithStepSize(16), WithLoopBlockLimit(8))
+			waitForBatchWithHead := subscribeStateChangeHeads(t, m)
+			require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), canonical.Blocks))
+			m.ExecModule.WaitIdle(t.Context())
+			waitForBatchWithHead(canonical.TopBlock.Hash())
+
+			header := types.CopyHeader(side.TopBlock.HeaderNoCopy())
+			header.Root[0] ^= 1
+			badTip := types.NewBlockFromNetwork(header, side.TopBlock.Body(), side.TopBlock.BlockAccessListSidecar())
+			blocks := append([]*types.Block(nil), side.Blocks[1:]...)
+			blocks[len(blocks)-1] = badTip
+			status, err := m.InsertBlocks(t.Context(), blocks)
+			require.NoError(t, err)
+			require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+			fcu, err := m.UpdateForkChoice(t.Context(), badTip.Header())
+			require.NoError(t, err)
+			require.Equal(t, execmodule.ExecutionStatusBadBlock, fcu.Status)
+			m.ExecModule.WaitIdle(t.Context())
+
+			var committed uint64
+			require.NoError(t, m.DB.View(t.Context(), func(tx kv.Tx) error {
+				var err error
+				committed, err = stages.GetStageProgress(tx, stages.Finish)
+				return err
+			}))
+			require.Greater(t, committed, canonical.TopBlock.NumberU64(), "catch-up must commit before the rejected cycle")
+			require.Less(t, committed, side.TopBlock.NumberU64()-1, "the failed cycle must also contain a valid, uncommitted block")
+			changes := m.Notifications.Accumulator.Changes()
+			require.Equal(t, int(committed), len(changes), "retain the canonical unwind and committed blocks, without the failed cycle")
+			require.Equal(t, notifications.DirectionUnwind, changes[0].Direction)
+			require.Equal(t, side.Blocks[0].Hash(), changes[0].BlockHash)
+			for i, change := range changes[1:] {
+				require.Equal(t, notifications.DirectionForward, change.Direction)
+				require.Equal(t, side.Blocks[i+1].Hash(), change.BlockHash)
+			}
+
+			headers, unsubscribe := m.Notifications.Events.AddHeaderSubscription()
+			t.Cleanup(unsubscribe)
+			newHead := side.TopBlock
+			if tc.sameHead {
+				newHead = side.Blocks[committed-1]
+			} else {
+				status, err = m.InsertBlocks(t.Context(), []*types.Block{newHead})
+				require.NoError(t, err)
+				require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+			}
+			fcu, err = m.UpdateForkChoice(t.Context(), newHead.Header())
+			require.NoError(t, err)
+			require.Equal(t, execmodule.ExecutionStatusSuccess, fcu.Status)
+			m.ExecModule.WaitIdle(t.Context())
+			require.Zero(t, len(m.Notifications.Accumulator.Changes()), "successful forkchoice must dispatch retained changes")
+			batch := waitForBatchWithHead(newHead.Hash())
+			require.Equal(t, int(newHead.NumberU64()), len(batch.ChangeBatch), "committed and retried changes must be delivered once")
+			require.Equal(t, remoteproto.Direction_UNWIND, batch.ChangeBatch[0].Direction)
+			for i, change := range batch.ChangeBatch {
+				require.Equal(t, side.Blocks[i].Hash(), common.Hash(gointerfaces.ConvertH256ToHash(change.BlockHash)))
+				if i > 0 {
+					require.Equal(t, remoteproto.Direction_FORWARD, change.Direction)
+				}
+			}
+			var wantHeaders []common.Hash
+			for _, block := range side.Blocks[1:newHead.NumberU64()] {
+				wantHeaders = append(wantHeaders, block.Hash())
+			}
+			got := collectReorgSubscriptions(headers, nil, nil)
+			require.Equal(t, wantHeaders, got.headerHashes(t), "headers from committed catch-up cycles must also be delivered")
+
+			fcu, err = m.UpdateForkChoice(t.Context(), newHead.Header())
+			require.NoError(t, err)
+			require.Equal(t, execmodule.ExecutionStatusSuccess, fcu.Status)
+			m.ExecModule.WaitIdle(t.Context())
+			require.Empty(t, m.Notifications.Accumulator.Changes())
+			require.Empty(t, collectReorgSubscriptions(headers, nil, nil).headers, "repeated forkchoice must not repeat delivered headers")
+		})
+	}
 }

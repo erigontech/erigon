@@ -401,10 +401,21 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	}()
 
 	defer UpdateForkChoiceDuration(time.Now())
+	var restoreStateChanges func()
+	// Roll back only uncommitted changes; earlier catch-up commits still need delivery.
+	checkpointStateChanges := func() {
+		if e.accum != nil && e.accum.Accumulator != nil {
+			restoreStateChanges = e.accum.Accumulator.Checkpoint()
+		}
+	}
+	checkpointStateChanges()
 	// The next semaphore acquirer must observe settled state, so the bg-prune
 	// path runs this eagerly before handing the semaphore to its goroutine.
 	cleanupBeforeSemaRelease := sync.OnceFunc(func() {
 		e.pipelineExecutor.Sync().CancelUnwind()
+		if restoreStateChanges != nil {
+			restoreStateChanges()
+		}
 		e.currentContext.ResetPendingUpdates()
 		e.forkValidator.ClearWithUnwind()
 	})
@@ -565,6 +576,23 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		if err != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 		}
+		dispatcher := e.pipelineExecutor.Dispatcher()
+		hasPendingChanges := e.accum != nil && e.accum.Accumulator != nil && len(e.accum.Accumulator.Changes()) > 0
+		// An ignored ancestor request must leave pending canonical notifications intact.
+		if !belowFinality && result.Status == ExecutionStatusSuccess && dispatcher != nil && hasPendingChanges {
+			// The marker commit may have closed roTx, so read the committed state again.
+			if err := e.db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+				stateVersion, err := rawdb.GetStateVersion(tx)
+				if err != nil {
+					return err
+				}
+				return dispatcher.Dispatch(ctx, tx, stateVersion, e.accum.Accumulator, e.accum.RecentReceipts,
+					finishProgressBefore, finishProgressBefore, nil, tx)
+			}); err != nil {
+				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+			}
+			restoreStateChanges = nil
+		}
 		sendForkchoiceResultWithoutWaiting(outcomeCh, result, false)
 		return nil
 	}
@@ -599,6 +627,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		if err := currentContext.Commit(ctx, commitRwTx); err != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 		}
+		checkpointStateChanges()
 		restoreRecentReceipts = nil
 		sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
 			LatestValidHash: common.Hash{},
@@ -689,6 +718,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			}); err != nil {
 				return nil, nil, fmt.Errorf("updateForkChoice: flush+commit sd after hasMore: %w", err)
 			}
+			checkpointStateChanges()
 			restoreRecentReceipts = nil
 			e.observeStateTransition(ctx, StateTransitionFCUCatchupCommitComplete)
 			// Fresh RO snapshot + SharedDomains + block overlay on the committed state.
@@ -815,6 +845,10 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		if dispatchErr != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, fmt.Errorf("fcu: dispatch notifications: %w", dispatchErr), stateFlushingInParallel)
 		}
+		if published {
+			// Already delivered changes must not be restored after a commit error.
+			restoreStateChanges = nil
+		}
 
 		// Hand the semaphore to a background goroutine: FCU cleanup runs first,
 		// so the next acquirer observes settled state whenever it gets in.
@@ -836,6 +870,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		if err != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 		}
+		checkpointStateChanges()
 		restoreRecentReceipts = nil
 		// Update head and announce block range (notifications already dispatched).
 		if e.hook != nil {

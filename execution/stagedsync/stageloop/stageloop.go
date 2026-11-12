@@ -107,7 +107,8 @@ func (h *Hook) beforeRun(tx kv.Tx, inSync bool) error {
 		if err != nil {
 			h.logger.Error("problem reading plain state version", "err", err)
 		}
-		notifications.Accumulator.Reset(stateVersion)
+		// Pending canonical changes belong to the next dispatch, even across runs.
+		notifications.Accumulator.SetStateID(stateVersion)
 	}
 	return nil
 }
@@ -127,6 +128,13 @@ func (h *Hook) BeforeRun(tx kv.Tx, inSync bool) error {
 	// a cycle to end while still behind would miss fast catch-ups entirely.
 	h.NotifySyncState(tx)
 	return h.beforeRun(tx, inSync)
+}
+
+func (h *Hook) CheckpointStateChanges() (restore func()) {
+	if h == nil || h.notifications == nil || h.notifications.Accumulator == nil {
+		return nil
+	}
+	return h.notifications.Accumulator.Checkpoint()
 }
 
 // SendNotifications dispatches all pending notifications (state changes,

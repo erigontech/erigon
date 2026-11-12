@@ -1174,6 +1174,9 @@ func (emt *ExecModuleTester) insertChain(chain *blockgen.ChainPack) error {
 		}
 	}
 
+	// Notification delivery can precede FCU cleanup of shared execution state.
+	emt.ExecModule.Drain()
+
 	roTx, err := emt.DB.BeginRo(emt.Ctx)
 	if err != nil {
 		return err

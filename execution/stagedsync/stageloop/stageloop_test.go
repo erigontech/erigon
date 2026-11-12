@@ -17,6 +17,7 @@
 package stageloop
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -27,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/shards"
 )
@@ -34,6 +36,33 @@ import (
 type frozenBlocksStub uint64
 
 func (f frozenBlocksStub) FrozenBlocks() uint64 { return uint64(f) }
+
+type stateChangeCapture struct {
+	batch *remoteproto.StateChangeBatch
+}
+
+func (c *stateChangeCapture) SendStateChanges(_ context.Context, batch *remoteproto.StateChangeBatch) {
+	c.batch = batch
+}
+
+func TestHookBeforeRunPreservesPendingNotifications(t *testing.T) {
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	notifications := shards.NewNotifications(nil)
+	notifications.Accumulator.StartChange(&types.Header{Time: 1}, nil, true)
+	hook := NewHook(t.Context(), notifications, nil, nil, log.New(), nil, nil, nil, nil, frozenBlocksStub(0))
+
+	require.NoError(t, hook.BeforeRun(tx, true))
+	notifications.Accumulator.StartChange(&types.Header{Time: 2}, nil, false)
+	var consumer stateChangeCapture
+	notifications.Accumulator.SendAndReset(t.Context(), &consumer, 0, 0, 0, 0)
+	require.NotNil(t, consumer.batch)
+	require.Len(t, consumer.batch.ChangeBatch, 2)
+	require.Equal(t, remoteproto.Direction_UNWIND, consumer.batch.ChangeBatch[0].Direction)
+	require.Equal(t, remoteproto.Direction_FORWARD, consumer.batch.ChangeBatch[1].Direction)
+}
 
 func drainSyncState(ch chan *remoteproto.SyncingReply) []*remoteproto.SyncingReply {
 	var got []*remoteproto.SyncingReply
