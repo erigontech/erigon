@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -38,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -375,30 +377,27 @@ func expectedBlobs(ctx context.Context, db kv.RoDB, blocks freezeblocks.BeaconSn
 	if n == 0 || block.Version() < clparams.GloasVersion {
 		return n, nil
 	}
-	var head uint64
-	if err := db.View(ctx, func(tx kv.Tx) (err error) {
-		head, _, err = beacon_indicies.ReadCanonicalHead(tx)
-		return err
+	var childSlot uint64
+	var childRoot common.Hash
+	if err := db.View(ctx, func(tx kv.Tx) error {
+		return beacon_indicies.RangeBlockRoots(tx, block.Block.Slot+1, math.MaxUint64, func(slot uint64, root common.Hash) bool {
+			childSlot, childRoot = slot, root
+			return false
+		})
 	}); err != nil {
 		return 0, err
 	}
-	for slot := block.Block.Slot + 1; slot <= head; slot++ {
-		nextRoot, next, err := readSlot(ctx, db, blocks, slot)
-		if err != nil {
-			return 0, err
-		}
-		if next == nil && nextRoot == (common.Hash{}) {
-			continue
-		}
-		if next == nil || nextRoot == (common.Hash{}) || next.Block.ParentRoot != root {
-			return n, nil
-		}
-		if next.Block.Body.SignedExecutionPayloadBid.Message.ParentBlockHash != block.Block.Body.SignedExecutionPayloadBid.Message.BlockHash {
-			return 0, nil
-		}
+	if childRoot == (common.Hash{}) {
 		return n, nil
 	}
-	return n, nil
+	_, child, err := readSlot(ctx, db, blocks, childSlot)
+	if err != nil {
+		return 0, err
+	}
+	if child == nil || child.Block.ParentRoot != root || forkchoice.ParentPayloadStatusFromBids(block, child.Block) == cltypes.PayloadStatusFull {
+		return n, nil
+	}
+	return 0, nil
 }
 
 func notServed(err error) bool {
