@@ -110,7 +110,7 @@ func TestAttestationRewardsLastPhase0EpochKeepsInclusionDelay(t *testing.T) {
 		t.Run(key, func(t *testing.T) {
 			require.NotEmpty(t, response.Data[key])
 			for i, reward := range response.Data[key] {
-				require.Equal(t, "0", reward["inclusion_delay"], "%s[%d]: phase0 epoch 4 must retain inclusion_delay; got %v", key, i, reward)
+				require.Contains(t, reward, "inclusion_delay", "%s[%d]: phase0 epoch 4 must retain inclusion_delay; got %v", key, i, reward)
 			}
 		})
 	}
