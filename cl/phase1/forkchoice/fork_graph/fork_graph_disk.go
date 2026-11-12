@@ -155,6 +155,8 @@ type forkGraphDisk struct {
 	lowestAvailableBlock atomic.Uint64
 
 	newestLightClientUpdate atomic.Value
+	// newestLightClientFinalityUpdate is the newest recorded update that has finality (is_finality_update).
+	newestLightClientFinalityUpdate atomic.Pointer[cltypes.LightClientUpdate]
 	// the lightclientUpdates leaks memory, but it's not a big deal since new data is added every 27 hours.
 	lightClientUpdates sync.Map // period -> lightclientupdate
 	// lightClientUpdateCandidates holds the updates of blocks that are not finalized yet, by period and signature block
@@ -771,6 +773,10 @@ func (f *forkGraphDisk) GetLightClientBootstrap(blockRoot common.Hash) (*cltypes
 	return obj.(*cltypes.LightClientBootstrap), true
 }
 
+func (f *forkGraphDisk) NewestLightClientFinalityUpdate() *cltypes.LightClientUpdate {
+	return f.newestLightClientFinalityUpdate.Load()
+}
+
 func (f *forkGraphDisk) NewestLightClientUpdate() *cltypes.LightClientUpdate {
 	if f.newestLightClientUpdate.Load() == nil {
 		return nil
@@ -782,6 +788,9 @@ func (f *forkGraphDisk) NewestLightClientUpdate() *cltypes.LightClientUpdate {
 // candidate of its period if it is signed in the period of its attested header. The caller holds addPruneMu.
 func (f *forkGraphDisk) recordLightClientUpdateLocked(signatureBlock common.Hash, update *cltypes.LightClientUpdate) {
 	f.newestLightClientUpdate.Store(update)
+	if lightclient_utils.IsFinalityUpdate(update) {
+		f.newestLightClientFinalityUpdate.Store(update)
+	}
 	if f.beaconCfg.SyncCommitteePeriod(update.AttestedHeader.Beacon.Slot) != f.beaconCfg.SyncCommitteePeriod(update.SignatureSlot) {
 		return
 	}

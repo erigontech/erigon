@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/lightclient_utils"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/transition/impl/eth2"
@@ -447,4 +448,20 @@ func TestBeginChainSegmentMovesStatesIntoSegment(t *testing.T) {
 	require.Same(t, advanced, seg.precomputedState)
 	require.Nil(t, graph.currentState)
 	require.Nil(t, graph.nextEpochState)
+}
+
+// A block whose parent state's finalized block is not in memory, as after a restart into non-finality, still records
+// its light client update, without finality.
+func TestAddChainSegmentRecordsAnUpdateWithoutTheFinalizedBlock(t *testing.T) {
+	g, blocks := newLightClientGraph(t)
+	g.blocks.Delete(common.Hash{}) // the anchor's finalized block
+	for _, block := range blocks {
+		_, result, err := g.AddChainSegment(block, true)
+		require.NoError(t, err)
+		require.Equal(t, Success, result)
+	}
+	update := g.NewestLightClientUpdate()
+	require.NotNil(t, update)
+	require.False(t, lightclient_utils.IsFinalityUpdate(update))
+	require.Nil(t, g.NewestLightClientFinalityUpdate())
 }

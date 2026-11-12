@@ -1013,35 +1013,39 @@ func (f *ForkChoiceStore) retryPendingEnvelopeError(err error, pending *cltypes.
 }
 
 func (f *ForkChoiceStore) addChainSegmentAndQueueLightClientEvents(block *cltypes.SignedBeaconBlock, fullValidation bool) (*state.CachingBeaconState, fork_graph.ChainSegmentInsertionResult, error) {
-	lcUpdateBefore := f.forkGraph.NewestLightClientUpdate()
+	lcUpdateBefore, finalityUpdateBefore := f.forkGraph.NewestLightClientUpdate(), f.forkGraph.NewestLightClientFinalityUpdate()
 	lastProcessedState, status, err := f.forkGraph.AddChainSegment(block, fullValidation)
 	if err != nil {
 		return nil, status, err
 	}
-	f.queueLightClientEvents(lcUpdateBefore)
+	f.queueLightClientEvents(lcUpdateBefore, finalityUpdateBefore)
 	return lastProcessedState, status, nil
 }
 
 // queueLightClientEvents emits the light client events for an update stored by
 // AddChainSegment. The fork graph runs under f.mu and must not send events
 // itself, so OnBlock detects a freshly stored update and queues the sends.
-func (f *ForkChoiceStore) queueLightClientEvents(before *cltypes.LightClientUpdate) {
+func (f *ForkChoiceStore) queueLightClientEvents(before, finalityBefore *cltypes.LightClientUpdate) {
 	lcUpdate := f.forkGraph.NewestLightClientUpdate()
 	if lcUpdate == nil || lcUpdate == before {
 		return
 	}
 	version := lcUpdate.AttestedHeader.Version().String()
+	finalityUpdate := f.forkGraph.NewestLightClientFinalityUpdate()
+	sendFinality := finalityUpdate == lcUpdate && finalityUpdate != finalityBefore
 	f.queueEmit(func() {
-		f.emitters.State().SendLightClientFinalityUpdate(&beaconevents.LightClientFinalityUpdateData{
-			Version: version,
-			Data: cltypes.LightClientFinalityUpdate{
-				AttestedHeader:  lcUpdate.AttestedHeader,
-				FinalizedHeader: lcUpdate.FinalizedHeader,
-				FinalityBranch:  lcUpdate.FinalityBranch,
-				SyncAggregate:   lcUpdate.SyncAggregate,
-				SignatureSlot:   lcUpdate.SignatureSlot,
-			},
-		})
+		if sendFinality {
+			f.emitters.State().SendLightClientFinalityUpdate(&beaconevents.LightClientFinalityUpdateData{
+				Version: version,
+				Data: cltypes.LightClientFinalityUpdate{
+					AttestedHeader:  lcUpdate.AttestedHeader,
+					FinalizedHeader: lcUpdate.FinalizedHeader,
+					FinalityBranch:  lcUpdate.FinalityBranch,
+					SyncAggregate:   lcUpdate.SyncAggregate,
+					SignatureSlot:   lcUpdate.SignatureSlot,
+				},
+			})
+		}
 		f.emitters.State().SendLightClientOptimisticUpdate(&beaconevents.LightClientOptimisticUpdateData{
 			Version: version,
 			Data: cltypes.LightClientOptimisticUpdate{

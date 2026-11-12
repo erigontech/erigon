@@ -437,3 +437,20 @@ func TestGetLightClientUpdatesServesCandidatesBeforeTheFirstFinalization(t *test
 
 	require.Equal(t, []*cltypes.LightClientUpdate{candidate}, f.GetLightClientUpdates(1, 2, head))
 }
+
+// The newest finality update is the last recorded update that has finality; a later update without it is only the
+// newest update.
+func TestNewestLightClientFinalityUpdateKeepsTheLastUpdateWithFinality(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	f := &forkGraphDisk{beaconCfg: cfg}
+	p := cfg.SlotsPerEpoch * cfg.EpochsPerSyncCommitteePeriod
+	withFinality := lightClientTestUpdate(cfg, 400, p+10)
+	withFinality.FinalityBranch.Set(0, common.Hash{1})
+	withoutFinality := lightClientTestUpdate(cfg, 400, p+20)
+
+	f.recordLightClientUpdateLocked(common.Hash{1}, withFinality)
+	f.recordLightClientUpdateLocked(common.Hash{2}, withoutFinality)
+
+	require.Same(t, withoutFinality, f.NewestLightClientUpdate())
+	require.Same(t, withFinality, f.NewestLightClientFinalityUpdate())
+}

@@ -1070,6 +1070,11 @@ func (f *ForkChoiceStore) GetLightClientBootstrap(blockRoot common.Hash) (*cltyp
 	return f.forkGraph.GetLightClientBootstrap(blockRoot)
 }
 
+// NewestLightClientFinalityUpdate returns the newest light client update that has finality.
+func (f *ForkChoiceStore) NewestLightClientFinalityUpdate() *cltypes.LightClientUpdate {
+	return f.forkGraph.NewestLightClientFinalityUpdate()
+}
+
 func (f *ForkChoiceStore) NewestLightClientUpdate() *cltypes.LightClientUpdate {
 	return f.forkGraph.NewestLightClientUpdate()
 }
