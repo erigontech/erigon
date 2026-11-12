@@ -423,14 +423,14 @@ func (b *BlobArchiveStoreFill) findWindow(ctx context.Context, db kv.RoDB, block
 		answers := map[common.Hash]bool{}
 		n := sort.Search(int(b.ToSlot+1-lo), func(n int) bool {
 			root, block, unresolved, err := nextSlotWithBlobs(ctx, db, blocks, lo+uint64(n), b.ToSlot, scanned)
-			if err != nil || block == nil {
+			if err != nil || block == nil || unresolved {
 				return true
 			}
 			if served, ok := answers[root]; ok {
 				return served
 			}
 			sidecars, err := retrieveSidecars(ctx, b.Endpoints[i], root, block)
-			if err == nil && len(sidecars) == 0 && !unresolved {
+			if err == nil && len(sidecars) == 0 {
 				err = errNoSidecars
 			}
 			answers[root] = !notServed(err)

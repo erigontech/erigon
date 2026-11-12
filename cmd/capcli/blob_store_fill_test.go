@@ -241,17 +241,28 @@ func TestBlobArchiveStoreFillDryRunProbesPastASkippedGloasPayload(t *testing.T) 
 }
 
 func TestBlobArchiveStoreFillDryRunServesAnUnresolvedGloasHead(t *testing.T) {
-	f := newFillFixture(t)
-	f.version = clparams.GloasVersion
-	f.addBlock(fillTestSlot, 1)
-	head := f.addBlock(fillTestSlot+1, 1)
-	delete(f.sidecars, head)
-	url, _ := f.endpoint(false)
-	cmd := &BlobArchiveStoreFill{Endpoints: []string{url}, FromSlot: fillTestSlot, ToSlot: fillTestSlot + 1, DryRun: true}
+	for name, notServed := range notServedAnswers {
+		t.Run(name, func(t *testing.T) {
+			f := newFillFixture(t)
+			f.version = clparams.GloasVersion
+			f.addBlock(fillTestSlot, 1)
+			head := f.addBlock(fillTestSlot+1, 1)
+			good, _ := f.endpoint(false)
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if common.HexToHash(r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]) == head {
+					notServed(w, r)
+					return
+				}
+				http.Redirect(w, r, good+r.URL.Path, http.StatusTemporaryRedirect)
+			}))
+			t.Cleanup(srv.Close)
+			cmd := &BlobArchiveStoreFill{Endpoints: []string{srv.URL}, FromSlot: fillTestSlot, ToSlot: fillTestSlot + 1, DryRun: true}
 
-	require.NoError(t, f.fill(cmd, nil))
+			require.NoError(t, f.fill(cmd, nil))
 
-	require.Equal(t, uint64(fillTestSlot), cmd.windows[0].from.Load())
+			require.Equal(t, uint64(fillTestSlot), cmd.windows[0].from.Load())
+		})
+	}
 }
 
 func TestBlobArchiveStoreFillKeepsAGloasBlockWhoseSuccessorIsNotItsChild(t *testing.T) {
