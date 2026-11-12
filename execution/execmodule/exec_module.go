@@ -60,8 +60,6 @@ import (
 
 var ErrMissingChainSegment = errors.New("missing chain segment")
 
-var inMemHistoryReads = dbg.EnvBool("ERIGON_IN_MEM_HISTORY", true)
-
 func makeErrMissingChainSegment(blockHash common.Hash) error {
 	return errors.Join(ErrMissingChainSegment, errors.New("block hash: "+blockHash.String()))
 }
@@ -635,7 +633,6 @@ func (e *ExecModule) ValidateChain(ctx context.Context, block *types.Block) (Val
 	// Do not defer doms.Close(): on the success path ownership transfers to
 	// forkValidator.sharedDom inside ValidatePayload and later phases close it,
 	// so we Close explicitly only on the early-return error paths below.
-	doms.SetInMemHistoryReads(inMemHistoryReads)
 	if err := doms.InitBlockOverlay(roTx); err != nil {
 		doms.Close()
 		return ValidationResult{}, fmt.Errorf("ValidateChain: init block overlay: %w", err)

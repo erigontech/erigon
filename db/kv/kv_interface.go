@@ -689,8 +689,6 @@ type TemporalMemBatch interface {
 	Unwind(txNumUnwindTo uint64, changeset *[DomainLen][]DomainEntryDiff)
 	GetAsOf(domain Domain, key []byte, ts uint64) (v []byte, ok bool, err error)
 	HistorySeek(domain Domain, key []byte, ts uint64) (v []byte, ok bool, err error)
-	SetInMemHistoryReads(v bool)
-	InMemHistoryReads() bool
 }
 
 type WithFreezeInfo interface {
@@ -926,11 +924,6 @@ var ErrReadTxLimitExceeded = errors.New("read-tx limit exceeded: too many concur
 
 // ErrPrefetchIncomplete reports a batch prefetch that stopped with key lookups still pending.
 var ErrPrefetchIncomplete = errors.New("batch prefetch stopped with lookups pending")
-
-// ErrInMemHistoryDisabled is returned by TemporalMemBatch history reads when the batch keeps only
-// the latest value per key, so no historical answer exists in memory. Overlay read views treat it as
-// a miss and fall through to their backing transaction; every other reader error stays fatal.
-var ErrInMemHistoryDisabled = errors.New("GetAsOf called on TemporalMemBatch with inMemHistoryReads disabled")
 
 type nonBlockingAcquireKey struct{}
 

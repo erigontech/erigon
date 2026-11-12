@@ -355,14 +355,11 @@ func TestEmbeddedRPCCacheViewUsesSelectedOverlayGeneration(t *testing.T) {
 
 func TestEmbeddedRPCCacheViewHistoricalReads(t *testing.T) {
 	for _, tc := range []struct {
-		name    string
-		history bool
-		pinned  bool
+		name   string
+		pinned bool
 	}{
-		{"pinned/history enabled", true, true},
-		{"pinned/history disabled", false, true},
-		{"unpinned/history enabled", true, false},
-		{"unpinned/history disabled", false, false},
+		{"pinned", true},
+		{"unpinned", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := t.Context()
@@ -385,12 +382,11 @@ func TestEmbeddedRPCCacheViewHistoricalReads(t *testing.T) {
 			tx, err := db.BeginTemporalRo(ctx)
 			require.NoError(t, err)
 			defer tx.Rollback()
-			newDomains := func(value byte, history bool) *execctx.SharedDomains {
+			newDomains := func(value byte) *execctx.SharedDomains {
 				t.Helper()
 				domains, createErr := execctx.NewSharedDomains(ctx, tx, log.New())
 				require.NoError(t, createErr)
 				t.Cleanup(domains.Close)
-				domains.SetInMemHistoryReads(history)
 				require.NoError(t, domains.InitBlockOverlay(tx))
 				domains.SetTxNum(20)
 				require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, address[:], encAccount(uint64(value)), 20, encAccount(1)))
@@ -400,8 +396,8 @@ func TestEmbeddedRPCCacheViewHistoricalReads(t *testing.T) {
 				require.NoError(t, domains.DomainPut(kv.StorageDomain, tx, storageKey, []byte{value + 1}, 22, []byte{value}))
 				return domains
 			}
-			selected := newDomains(2, tc.history)
-			published := newDomains(4, tc.history || tc.pinned)
+			selected := newDomains(2)
+			published := newDomains(4)
 
 			rpcTx := tx
 			want := uint64(4)
@@ -421,20 +417,12 @@ func TestEmbeddedRPCCacheViewHistoricalReads(t *testing.T) {
 				t.Run(phase, func(t *testing.T) {
 					t.Run("account", func(t *testing.T) {
 						account, err := reader.ReadAccountByPlainAddr(address)
-						if !tc.history {
-							require.ErrorIs(t, err, kv.ErrInMemHistoryDisabled)
-							return
-						}
 						require.NoError(t, err)
 						require.NotNil(t, account)
 						require.Equal(t, want, account.Nonce)
 					})
 					t.Run("storage", func(t *testing.T) {
 						value, found, err := reader.ReadAccountStorage(accounts.InternAddress(address), accounts.InternKey(slot))
-						if !tc.history {
-							require.ErrorIs(t, err, kv.ErrInMemHistoryDisabled)
-							return
-						}
 						require.NoError(t, err)
 						require.True(t, found)
 						require.Equal(t, *uint256.NewInt(want), value)

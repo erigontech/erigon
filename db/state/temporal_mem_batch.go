@@ -60,12 +60,6 @@ func latestShardIndex(key string) uint64 {
 type TemporalMemBatch struct {
 	stepSize uint64
 
-	// inMemHistoryReads: accumulate all writes with txNums so GetAsOf can answer time-travel
-	// queries from in-flight state (needed for RPC reads during live chain-tip execution).
-	// Distinct from DomainBufferedWriter which also holds history in mem but only for writing.
-	// Disable for offline commands (stage_exec etc.) — history reads come from disk anyway.
-	inMemHistoryReads bool
-
 	latest  [kv.DomainLen][latestShards]latestShard
 	storage *btree2.Map[string, []dataWithTxNum] // TODO: replace hardcoded domain name to per-config configuration of available Guarantees/AccessMethods (range vs get)
 
@@ -104,9 +98,8 @@ type TemporalMemBatch struct {
 
 func NewTemporalMemBatch(tx kv.TemporalTx, db kv.RoDB, ioMetrics any) *TemporalMemBatch {
 	sd := &TemporalMemBatch{
-		storage:           btree2.NewMap[string, []dataWithTxNum](128),
-		metrics:           ioMetrics.(*kvmetrics.DomainMetrics),
-		inMemHistoryReads: true,
+		storage: btree2.NewMap[string, []dataWithTxNum](128),
+		metrics: ioMetrics.(*kvmetrics.DomainMetrics),
 	}
 	aggTx := AggTx(tx)
 	sd.stepSize = aggTx.StepSize()
@@ -123,9 +116,6 @@ func NewTemporalMemBatch(tx kv.TemporalTx, db kv.RoDB, ioMetrics any) *TemporalM
 
 	return sd
 }
-
-func (sd *TemporalMemBatch) SetInMemHistoryReads(v bool) { sd.inMemHistoryReads = v }
-func (sd *TemporalMemBatch) InMemHistoryReads() bool     { return sd.inMemHistoryReads }
 
 // shard returns the key's lock and map; the storage btree is guarded by shard 0 of its domain.
 func (sd *TemporalMemBatch) shard(domain kv.Domain, key string) *latestShard {
@@ -258,13 +248,9 @@ func (sd *TemporalMemBatch) putLatestLocked(domain kv.Domain, key string, valWit
 				putValueSize += len(val) - len(old[len(old)-1].data)
 				old[len(old)-1] = valWithStep
 				sd.storage.Set(key, old)
-			case sd.inMemHistoryReads:
+			default:
 				sd.storage.Set(key, append(old, valWithStep))
 				putValueSize += len(val)
-			default:
-				putValueSize += len(val) - len(old[len(old)-1].data)
-				old[0] = valWithStep
-				sd.storage.Set(key, old[:1])
 			}
 		} else {
 			sd.storage.Set(key, []dataWithTxNum{valWithStep})
@@ -285,13 +271,9 @@ func (sd *TemporalMemBatch) putLatestLocked(domain kv.Domain, key string, valWit
 			putValueSize += len(val) - len(old[len(old)-1].data)
 			old[len(old)-1] = valWithStep
 			sh.m[key] = old
-		case sd.inMemHistoryReads:
+		default:
 			sh.m[key] = append(old, valWithStep)
 			putValueSize += len(val)
-		default:
-			putValueSize += len(val) - len(old[len(old)-1].data)
-			old[0] = valWithStep
-			sh.m[key] = old[:1]
 		}
 	} else {
 		sh.m[key] = []dataWithTxNum{valWithStep}
@@ -364,9 +346,6 @@ func (sd *TemporalMemBatch) getLatest(sh *latestShard, domain kv.Domain, key []b
 }
 
 func (sd *TemporalMemBatch) GetAsOf(domain kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
-	if !sd.inMemHistoryReads && domain != kv.ReceiptDomain {
-		return nil, false, kv.ErrInMemHistoryDisabled
-	}
 	sh := sd.shard(domain, common.ToStringZeroCopy(key))
 	sh.RLock()
 	defer sh.RUnlock()

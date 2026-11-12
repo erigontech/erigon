@@ -68,15 +68,20 @@ NOTES:
 
 ### T2: chains always complete
 
-- [ ] Delete the `inMemHistoryReads` toggle:
+- [x] Delete the `inMemHistoryReads` toggle:
   - `TemporalMemBatch.SetInMemHistoryReads` / `InMemHistoryReads`, the `kv` interface method, `kv.ErrInMemHistoryDisabled`
   - `ERIGON_IN_MEM_HISTORY`
   - every setter: integration commands, `squeeze.go:552`, execmodule, `exec3_parallel.go:395`
   - the readers that tolerate `ErrInMemHistoryDisabled`
-- [ ] `putLatestLocked` keeps one entry per txNum in every run.
-- [ ] Tests that asserted the disabled behaviour are removed, not rewritten to pass. Name them under `NOTES`.
-- [ ] `NOTES`: how often `squeeze.go` (`openDomains`, `rebuildCommitmentShard`) writes one key at distinct txNums. That is its chain growth.
-- [ ] T1 goldens unchanged.
+- [x] `putLatestLocked` keeps one entry per txNum in every run.
+- [x] Tests that asserted the disabled behaviour are removed, not rewritten to pass. Name them under `NOTES`.
+- [x] `NOTES`: how often `squeeze.go` (`openDomains`, `rebuildCommitmentShard`) writes one key at distinct txNums. That is its chain growth.
+- [x] T1 goldens unchanged.
+
+NOTES:
+
+- Deleted `TestHistoryDisabledFallsThrough` in `db/kv/membatchwithdb/memory_mutation_test.go`. Removed the `pinned/history disabled` and `unpinned/history disabled` subcases from `TestEmbeddedRPCCacheViewHistoricalReads` in `db/state/execctx_test/statecache_rpc_integration_test.go`.
+- `openDomains` only creates and configures the shared domains. Its caller reuses the same domains and write transaction for each block in a step; `finalizeBlock` sets the block txNum and calls `ComputeCommitment`, so a key touched in multiple blocks is written at each of those distinct txNums in one batch. `rebuildCommitmentShard` calls `ComputeCommitment` once at `cfg.TxnNumber` for a shard, and shard key ranges do not overlap, so each key is written once per shard batch.
 
 ### T3: history from the chains at flush
 
