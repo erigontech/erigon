@@ -131,6 +131,35 @@ func TestSelfdestructParallel_AbsentAccount(t *testing.T) {
 	assert.Empty(t, ibs.stateObjects, "absent-account Selfdestruct must not materialize a stateObject")
 }
 
+// An earlier transaction's SELFDESTRUCT leaves a deleted account, which a later
+// transaction of the block has not self-destructed.
+func TestHasSelfdestructed_EarlierTxDestruct(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0xDE, 0xAD})
+	acc := accounts.NewAccount()
+	acc.Balance = *uint256.NewInt(100)
+	acc.Nonce = 1
+	reader := &sdAccountReader{addr: addr, account: &acc}
+	rules := &chain.Rules{IsSpuriousDragon: true}
+	vm := NewVersionMap(nil)
+
+	destroyer := NewWithVersionMap(reader, vm)
+	destroyer.SetTxContext(1, 0)
+	destroyed, err := destroyer.Selfdestruct(addr, false)
+	require.NoError(t, err)
+	require.True(t, destroyed)
+	vm.FlushVersionedWrites(finalizedWrites(t, destroyer, rules), true)
+
+	ibs := NewWithVersionMap(reader, vm)
+	ibs.SetTxContext(1, 1)
+	// The first call records the destruct; the second is served from that record.
+	for range 2 {
+		destructed, err := ibs.HasSelfdestructed(addr)
+		require.NoError(t, err)
+		require.False(t, destructed)
+	}
+}
+
 // A self-destructed address whose write set also holds field, code and storage
 // writes must be applied as a pure delete: no account record is left, and its
 // code and its pre-block and same-tx storage are gone.
