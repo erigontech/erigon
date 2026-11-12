@@ -69,15 +69,15 @@ func TestCheckCaplinBlobSidecarsRejectsMissingSidecar(t *testing.T) {
 	t.Cleanup(snapshots.Close)
 	require.NoError(t, snapshots.OpenFolder())
 
-	err = CheckCaplinBlobSidecars(t.Context(), db, snapshots, &cfg, true, log.New())
+	err = CheckCaplinBlobSidecars(t.Context(), db, snapshots, &cfg, 0, true, log.New())
 	require.ErrorContains(t, err, "slot 7")
 	require.ErrorContains(t, err, "expected 1 sidecars, got 0")
-	err = CheckCaplinBlobSidecars(t.Context(), db, snapshots, &cfg, false, log.New())
+	err = CheckCaplinBlobSidecars(t.Context(), db, snapshots, &cfg, 0, false, log.New())
 	require.ErrorContains(t, err, "expected 1 sidecars, got 0")
 }
 
 func TestCheckCaplinBlobSidecarsRejectsUnavailableSnapshots(t *testing.T) {
-	err := CheckCaplinBlobSidecars(t.Context(), nil, nil, &clparams.MainnetBeaconConfig, true, log.New())
+	err := CheckCaplinBlobSidecars(t.Context(), nil, nil, &clparams.MainnetBeaconConfig, 0, true, log.New())
 	require.ErrorContains(t, err, "caplin snapshots are unavailable")
 }
 
@@ -169,9 +169,123 @@ func TestCheckCaplinBlobSidecarsRejectsMissingBlobSnapshotRange(t *testing.T) {
 	t.Cleanup(snapshots.Close)
 	require.NoError(t, snapshots.OpenFolder())
 
-	err := CheckCaplinBlobSidecars(t.Context(), db, snapshots, &cfg, true, log.New())
+	err := CheckCaplinBlobSidecars(t.Context(), db, snapshots, &cfg, 0, true, log.New())
 	require.ErrorContains(t, err, "missing blob snapshot coverage")
 	require.ErrorContains(t, err, "0-10000")
+}
+
+func TestCheckCaplinBlobSidecarsAcceptsBlobSnapshotsFromArchiveSlot(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+
+	dirs := datadir.New(t.TempDir())
+	writeCaplinIntegritySegment(t, dirs, snaptype.BeaconBlocks, 0, limit, func(uint64) []byte { return nil })
+	writeCaplinIntegritySegment(t, dirs, snaptype.BeaconBlocks, limit, 2*limit, func(uint64) []byte { return nil })
+	writeCaplinIntegritySegment(t, dirs, snaptype.BlobSidecars, limit, 2*limit, func(uint64) []byte { return nil })
+
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	cfg := clparams.MainnetBeaconConfig
+	cfg.DenebForkEpoch = 0
+	snapshots := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &cfg, dirs, log.New())
+	t.Cleanup(snapshots.Close)
+	require.NoError(t, snapshots.OpenFolder())
+
+	require.NoError(t, CheckCaplinBlobSidecars(t.Context(), db, snapshots, &cfg, limit+limit/2, true, log.New()))
+}
+
+func TestCheckCaplinBlobSidecarsRejectsMissingBlobSnapshotRangeAboveArchiveSlot(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+
+	dirs := datadir.New(t.TempDir())
+	writeCaplinIntegritySegment(t, dirs, snaptype.BeaconBlocks, 0, limit, func(uint64) []byte { return nil })
+	writeCaplinIntegritySegment(t, dirs, snaptype.BeaconBlocks, limit, 2*limit, func(uint64) []byte { return nil })
+	writeCaplinIntegritySegment(t, dirs, snaptype.BlobSidecars, limit, 2*limit, func(uint64) []byte { return nil })
+
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	cfg := clparams.MainnetBeaconConfig
+	cfg.DenebForkEpoch = 0
+	snapshots := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &cfg, dirs, log.New())
+	t.Cleanup(snapshots.Close)
+	require.NoError(t, snapshots.OpenFolder())
+
+	err := CheckCaplinBlobSidecars(t.Context(), db, snapshots, &cfg, limit/2, true, log.New())
+	require.ErrorContains(t, err, "missing blob snapshot coverage 5000-10000")
+}
+
+func TestCheckCaplinBlobSidecarsRejectsPreDenebBlobSnapshotBelowArchiveSlot(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+
+	dirs := datadir.New(t.TempDir())
+	writeCaplinIntegritySegment(t, dirs, snaptype.BeaconBlocks, 0, limit, func(uint64) []byte { return nil })
+	writeCaplinIntegritySegment(t, dirs, snaptype.BeaconBlocks, limit, 2*limit, func(uint64) []byte { return nil })
+	writeCaplinIntegritySegment(t, dirs, snaptype.BlobSidecars, 0, limit, func(uint64) []byte { return nil })
+
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	cfg := clparams.MainnetBeaconConfig
+	cfg.DenebForkEpoch = limit/cfg.SlotsPerEpoch + 1
+	snapshots := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &cfg, dirs, log.New())
+	t.Cleanup(snapshots.Close)
+	require.NoError(t, snapshots.OpenFolder())
+
+	err := CheckCaplinBlobSidecars(t.Context(), db, snapshots, &cfg, limit+limit/2, true, log.New())
+	require.ErrorContains(t, err, "pre-Deneb blob snapshot range 0-10000")
+}
+
+func TestCheckCaplinBlobSidecarsAcceptsBlobSnapshotsFromDenebBelowArchiveSlot(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+
+	dirs := datadir.New(t.TempDir())
+	writeCaplinIntegritySegment(t, dirs, snaptype.BeaconBlocks, 0, limit, func(uint64) []byte { return nil })
+	writeCaplinIntegritySegment(t, dirs, snaptype.BeaconBlocks, limit, 2*limit, func(uint64) []byte { return nil })
+	writeCaplinIntegritySegment(t, dirs, snaptype.BlobSidecars, limit, 2*limit, func(uint64) []byte { return nil })
+
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	cfg := clparams.MainnetBeaconConfig
+	cfg.DenebForkEpoch = limit/cfg.SlotsPerEpoch + 1
+	snapshots := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &cfg, dirs, log.New())
+	t.Cleanup(snapshots.Close)
+	require.NoError(t, snapshots.OpenFolder())
+
+	require.NoError(t, CheckCaplinBlobSidecars(t.Context(), db, snapshots, &cfg, limit+limit/2, true, log.New()))
+}
+
+func TestCheckCaplinBlobSidecarsAcceptsRetainedBlobSnapshotBelowArchiveSlot(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+
+	dirs := datadir.New(t.TempDir())
+	writeCaplinIntegritySegment(t, dirs, snaptype.BeaconBlocks, 0, limit, func(uint64) []byte { return nil })
+	writeCaplinIntegritySegment(t, dirs, snaptype.BeaconBlocks, limit, 2*limit, func(uint64) []byte { return nil })
+	writeCaplinIntegritySegment(t, dirs, snaptype.BeaconBlocks, 2*limit, 3*limit, func(uint64) []byte { return nil })
+	writeCaplinIntegritySegment(t, dirs, snaptype.BlobSidecars, 0, limit, func(uint64) []byte { return nil })
+
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	cfg := clparams.MainnetBeaconConfig
+	cfg.DenebForkEpoch = 0
+	snapshots := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &cfg, dirs, log.New())
+	t.Cleanup(snapshots.Close)
+	require.NoError(t, snapshots.OpenFolder())
+
+	require.NoError(t, CheckCaplinBlobSidecars(t.Context(), db, snapshots, &cfg, 2*limit+limit/2, true, log.New()))
+}
+
+func TestCheckCaplinBlobSidecarsRejectsBlobSnapshotHiddenPastGapBelowArchiveSlot(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+
+	dirs := datadir.New(t.TempDir())
+	writeCaplinIntegritySegment(t, dirs, snaptype.BeaconBlocks, 0, limit, func(uint64) []byte { return nil })
+	writeCaplinIntegritySegment(t, dirs, snaptype.BeaconBlocks, limit, 2*limit, func(uint64) []byte { return nil })
+	writeCaplinIntegritySegment(t, dirs, snaptype.BeaconBlocks, 2*limit, 3*limit, func(uint64) []byte { return nil })
+	writeCaplinIntegritySegment(t, dirs, snaptype.BlobSidecars, 0, limit, func(uint64) []byte { return nil })
+	writeCaplinIntegritySegment(t, dirs, snaptype.BlobSidecars, 2*limit, 3*limit, func(uint64) []byte { return nil })
+
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	cfg := clparams.MainnetBeaconConfig
+	cfg.DenebForkEpoch = 0
+	snapshots := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &cfg, dirs, log.New())
+	t.Cleanup(snapshots.Close)
+	require.NoError(t, snapshots.OpenFolder())
+
+	err := CheckCaplinBlobSidecars(t.Context(), db, snapshots, &cfg, 2*limit+limit/2, true, log.New())
+	require.ErrorContains(t, err, "blob snapshot segment 20000-30000 is not visible")
 }
 
 func TestCheckCaplinBlobSidecarsRejectsMissingBlobSnapshotIndex(t *testing.T) {
@@ -187,7 +301,7 @@ func TestCheckCaplinBlobSidecarsRejectsMissingBlobSnapshotIndex(t *testing.T) {
 	snapshots := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &cfg, dirs, log.New())
 	t.Cleanup(snapshots.Close)
 	require.NoError(t, snapshots.OpenFolder())
-	err := CheckCaplinBlobSidecars(t.Context(), db, snapshots, &cfg, true, log.New())
+	err := CheckCaplinBlobSidecars(t.Context(), db, snapshots, &cfg, 0, true, log.New())
 	require.ErrorContains(t, err, "blob snapshot segment 0-10000: index is missing")
 }
 
@@ -203,7 +317,7 @@ func TestCheckCaplinBlobSidecarsRejectsMissingBeaconSnapshotIndexAfterDeneb(t *t
 	snapshots := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &cfg, dirs, log.New())
 	t.Cleanup(snapshots.Close)
 	require.NoError(t, snapshots.OpenFolder())
-	err := CheckCaplinBlobSidecars(t.Context(), db, snapshots, &cfg, true, log.New())
+	err := CheckCaplinBlobSidecars(t.Context(), db, snapshots, &cfg, 0, true, log.New())
 	require.ErrorContains(t, err, "beacon snapshot segment 0-10000: index is missing")
 }
 
@@ -219,7 +333,7 @@ func TestCheckCaplinBlobSidecarsIgnoresMissingPreDenebBeaconIndex(t *testing.T) 
 	snapshots := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &cfg, dirs, log.New())
 	t.Cleanup(snapshots.Close)
 	require.NoError(t, snapshots.OpenFolder())
-	require.NoError(t, CheckCaplinBlobSidecars(t.Context(), db, snapshots, &cfg, true, log.New()))
+	require.NoError(t, CheckCaplinBlobSidecars(t.Context(), db, snapshots, &cfg, 0, true, log.New()))
 }
 
 func TestCheckCaplinBlobSidecarsRejectsMalformedRecord(t *testing.T) {
@@ -255,7 +369,7 @@ func TestCheckCaplinBlobSidecarsRejectsMalformedRecord(t *testing.T) {
 	snapshots := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &cfg, dirs, log.New())
 	t.Cleanup(snapshots.Close)
 	require.NoError(t, snapshots.OpenFolder())
-	err = CheckCaplinBlobSidecars(t.Context(), db, snapshots, &cfg, true, log.New())
+	err = CheckCaplinBlobSidecars(t.Context(), db, snapshots, &cfg, 0, true, log.New())
 	require.ErrorContains(t, err, "slot 7")
 	require.ErrorContains(t, err, "invalid sidecar list length")
 }
@@ -386,7 +500,7 @@ func TestCheckCaplinBlobSidecarsRejectsBlobSegmentWithExtraWord(t *testing.T) {
 	t.Cleanup(snapshots.Close)
 	require.NoError(t, snapshots.OpenFolder())
 
-	err := CheckCaplinBlobSidecars(t.Context(), db, snapshots, &cfg, true, log.New())
+	err := CheckCaplinBlobSidecars(t.Context(), db, snapshots, &cfg, 0, true, log.New())
 	require.ErrorContains(t, err, "expected 10000 words, got 10001")
 }
 
@@ -439,7 +553,7 @@ func checkCaplinBlobIntegrityFixture(t *testing.T, cfg *clparams.BeaconChainConf
 	snapshots := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, cfg, dirs, log.New())
 	t.Cleanup(snapshots.Close)
 	require.NoError(t, snapshots.OpenFolder())
-	return CheckCaplinBlobSidecars(t.Context(), db, snapshots, cfg, true, log.New())
+	return CheckCaplinBlobSidecars(t.Context(), db, snapshots, cfg, 0, true, log.New())
 }
 
 func validBlobIntegrityData(t *testing.T, cfg *clparams.BeaconChainConfig, slot uint64) (*cltypes.SignedBeaconBlock, *cltypes.BlobSidecar, common.Hash) {

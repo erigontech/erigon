@@ -5,7 +5,10 @@ import (
 	"github.com/erigontech/erigon/common"
 )
 
-const MaxShuffledIndiciesCacheSize = 8
+const (
+	MaxShuffledIndiciesCacheSize          = 8
+	MaxLookaheadShuffledIndiciesCacheSize = 4
+)
 
 type shuffledIndiciesCacheKey struct {
 	epoch uint64
@@ -16,10 +19,13 @@ type ShuffledIndiciesCache struct {
 	cache *lru.Cache[shuffledIndiciesCacheKey, []uint64]
 }
 
-var ShuffledIndiciesCacheGlobal = NewShuffledIndiciesCache(MaxShuffledIndiciesCacheSize)
+var (
+	ShuffledIndiciesCacheGlobal          = NewShuffledIndiciesCache("shuffled_indicies", MaxShuffledIndiciesCacheSize)
+	LookaheadShuffledIndiciesCacheGlobal = NewShuffledIndiciesCache("lookahead_shuffled_indicies", MaxLookaheadShuffledIndiciesCacheSize)
+)
 
-func NewShuffledIndiciesCache(size int) *ShuffledIndiciesCache {
-	cache, err := lru.New[shuffledIndiciesCacheKey, []uint64]("shuffled_indicies", size)
+func NewShuffledIndiciesCache(name string, size int) *ShuffledIndiciesCache {
+	cache, err := lru.New[shuffledIndiciesCacheKey, []uint64](name, size)
 	if err != nil {
 		panic(err)
 	}

@@ -57,19 +57,12 @@ jobs:
           # Unique namespace for this workflow execution
           RUN_ID="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
 
-          # Decide whether to run geth:
-          # - schedule: only on Sunday (UTC)
-          # - workflow_dispatch: controlled by input
+          # Geth runs on every schedule, never on push; workflow_dispatch controls it via input
           RUN_GETH="false"
           if [ "${{ github.event_name }}" = "schedule" ]; then
-            DOW="$(date -u +%w)"
-            if [ "$DOW" = "0" ]; then  # Sunday, (0..6 = Sun..Sat)
-              RUN_GETH="true"
-            fi
+            RUN_GETH="true"
           elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            if [ "$INPUT_RUN_GETH" = "true" ]; then
-              RUN_GETH="true"
-            fi
+            RUN_GETH="${INPUT_RUN_GETH:-false}"
           fi
           
           # Variables
@@ -294,7 +287,7 @@ jobs:
           if [ "$CLIENT" == "erigon" ]; then
             commit=$(git -C "$RUNNER_WS/erigon" rev-parse --short HEAD)
           else
-            commit=$(git -C $GETH_INSTALL_DIR rev-parse --short HEAD)
+            commit=$(git -c safe.directory="$GETH_INSTALL_DIR" -C "$GETH_INSTALL_DIR" rev-parse --short HEAD || echo no-version)
           fi
           
           # Prepare historical test results directory
@@ -322,6 +315,12 @@ jobs:
             cd $workspace/rpc-tests/perf
             rm -rf ./reports/$network
 
+            # Erigon is served by a standalone rpcdaemon; other clients run under their own process name
+            process_name_flag=()
+            if [ "$client" == "erigon" ]; then
+              process_name_flag=(--process-name rpcdaemon)
+            fi
+
             # Move to home dir of rpc-tests
             cd ..
             ./build/bin/rpc_perf --blockchain "$network" \
@@ -333,7 +332,7 @@ jobs:
                                       --test-report \
                                       --json-report $result_dir/$result_file \
                                       --testing-client $client \
-                                      --process-name rpcdaemon
+                                      "${process_name_flag[@]}"
           
             # Capture test runner script exit status
             perf_exit_status=$?

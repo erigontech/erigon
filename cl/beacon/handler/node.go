@@ -158,26 +158,35 @@ func (a *ApiHandler) GetEthV1NodeIdentity(w http.ResponseWriter, r *http.Request
 		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 	}
 
+	metadata := map[string]any{
+		"seq_number": strconv.FormatUint(id.Metadata.Seq, 10),
+		"attnets":    "0x" + id.Metadata.Attnets,
+		"syncnets":   "0x" + id.Metadata.Syncnets,
+	}
+	if a.ethClock.GetCurrentEpoch() >= a.beaconChainCfg.FuluForkEpoch {
+		metadata["custody_group_count"] = strconv.FormatUint(a.peerDas.StateReader().GetAdvertisedCgc(), 10)
+	}
 	return newBeaconResponse(map[string]any{
 		"peer_id":             id.Pid,
 		"enr":                 id.Enr,
 		"p2p_addresses":       id.P2PAddresses,
 		"discovery_addresses": id.DiscoveryAddresses,
-		"metadata": map[string]any{
-			"seq":      strconv.FormatUint(id.Metadata.Seq, 10),
-			"attnets":  id.Metadata.Attnets,
-			"syncnets": id.Metadata.Syncnets,
-		},
+		"metadata":            metadata,
 	}), nil
 }
 
 func (a *ApiHandler) GetEthV1NodeSyncing(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
 	currentSlot := a.ethClock.GetCurrentSlot()
+	headSlot := a.syncedData.HeadSlot()
+	var syncDistance uint64
+	if currentSlot > headSlot {
+		syncDistance = currentSlot - headSlot
+	}
 
 	return newBeaconResponse(
 		map[string]any{
-			"head_slot":     strconv.FormatUint(a.syncedData.HeadSlot(), 10),
-			"sync_distance": strconv.FormatUint(currentSlot-a.syncedData.HeadSlot(), 10),
+			"head_slot":     strconv.FormatUint(headSlot, 10),
+			"sync_distance": strconv.FormatUint(syncDistance, 10),
 			"is_syncing":    a.headLagsBehind(),
 			"is_optimistic": false, // needs to change
 			"el_offline":    false,

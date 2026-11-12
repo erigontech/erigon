@@ -50,6 +50,10 @@ type CaplinConfig struct {
 	ArchiveStates             bool
 	ImmediateBlobsBackfilling bool
 	BlobPruningDisabled       bool
+	// BlobsArchiveFromSlot bounds ArchiveBlobs: blob sidecars are kept from the lower of this
+	// slot and the spec serving-window floor, and dropped below it. Zero keeps the whole
+	// history since Deneb.
+	BlobsArchiveFromSlot      uint64
 	SnapshotGenerationEnabled bool
 	// ColumnKeepSlots is the number of slots to keep PeerDAS data column sidecars.
 	// Zero resolves to the active chain's spec window, MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS *
@@ -115,6 +119,16 @@ func (c CaplinConfig) IsDevnet() bool {
 	return c.CustomConfigPath != "" || c.CustomGenesisStatePath != "" || c.DevValidatorSeed != ""
 }
 
+// SnapshotBlobsFromSlot is the cutoff for filtering blob snapshot downloads. The download filter
+// sizes the serving window from the built-in config of the chain, so a custom beacon config,
+// whose window may be longer, downloads every blob segment and leaves the cut to pruning.
+func (c CaplinConfig) SnapshotBlobsFromSlot() uint64 {
+	if c.IsDevnet() {
+		return 0
+	}
+	return c.BlobsArchiveFromSlot
+}
+
 func (c CaplinConfig) HaveInvalidDevnetParams() bool {
 	return c.CustomConfigPath == "" || c.CustomGenesisStatePath == ""
 }
@@ -132,6 +146,23 @@ func (c CaplinConfig) RelayUrlExist() bool {
 	return c.MevRelayUrl != ""
 }
 
+func MinBlobRetentionFloor(fromSlot, serveFloor uint64) uint64 {
+	return min(fromSlot, serveFloor)
+}
+
+// BlobRetentionFloor returns the lowest slot whose blob sidecars are kept at currentSlot.
+// A bounded archive never drops below the spec serving window.
+func (c CaplinConfig) BlobRetentionFloor(beaconCfg *BeaconChainConfig, currentSlot uint64) uint64 {
+	if c.BlobPruningDisabled {
+		return 0
+	}
+	serveFloor := beaconCfg.BlobSidecarServeRangeStartSlot(currentSlot)
+	if c.ArchiveBlobs {
+		return MinBlobRetentionFloor(c.BlobsArchiveFromSlot, serveFloor)
+	}
+	return serveFloor
+}
+
 type NetworkType int
 
 const CustomNetwork NetworkType = -1
@@ -140,6 +171,7 @@ const (
 	MaxDialTimeout               = 15 * time.Second
 	VersionLength  int           = 4
 	MaxChunkSize   uint64        = 15 * 1024 * 1024
+	MaxPayloadSize uint64        = 10 * 1024 * 1024
 	ReqTimeout     time.Duration = 5 * time.Second
 	RespTimeout    time.Duration = 10 * time.Second
 	// ExecutionPayload transactions bounds from consensus specs.
@@ -224,7 +256,7 @@ var (
 )
 
 type NetworkConfig struct {
-	GossipMaxSize                   uint64             `yaml:"GOSSIP_MAX_SIZE" json:"GOSSIP_MAX_SIZE,string"`                                       // The maximum allowed size of uncompressed gossip messages.
+	GossipMaxSize                   uint64             `yaml:"MAX_PAYLOAD_SIZE" json:"GOSSIP_MAX_SIZE,string"`                                      // The maximum allowed size of uncompressed gossip messages.
 	GossipMaxSizeBellatrix          uint64             `yaml:"GOSSIP_MAX_SIZE_BELLATRIX" json:"GOSSIP_MAX_SIZE_BELLATRIX,string"`                   // The maximum allowed size of bellatrix uncompressed gossip messages.
 	MaxChunkSize                    uint64             `yaml:"MAX_CHUNK_SIZE" json:"MAX_CHUNK_SIZE,string"`                                         // The maximum allowed size of uncompressed req/resp chunked responses.
 	AttestationSubnetCount          uint64             `yaml:"ATTESTATION_SUBNET_COUNT" json:"ATTESTATION_SUBNET_COUNT,string"`                     // The number of attestation subnets used in the gossipsub protocol.
@@ -246,6 +278,18 @@ type NetworkConfig struct {
 
 	BootNodes   []string `yaml:"-" json:"-"`
 	StaticPeers []string `yaml:"-" json:"-"`
+}
+
+// MaxCompressedPayloadSize is the spec's max_compressed_len(MAX_PAYLOAD_SIZE): the largest
+// snappy encoding of a payload within the uncompressed limit.
+func (n *NetworkConfig) MaxCompressedPayloadSize() uint64 {
+	return 32 + n.GossipMaxSize + n.GossipMaxSize/6
+}
+
+// MaxGossipMessageSize is the spec's max_message_size(): the largest gossipsub RPC frame
+// a peer may send, max_compressed_len(payload) plus 1024 bytes of framing, at least 1 MiB.
+func (n *NetworkConfig) MaxGossipMessageSize() uint64 {
+	return max(n.MaxCompressedPayloadSize()+1024, 1<<20)
 }
 
 var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig{
@@ -421,6 +465,11 @@ func (b *BeaconChainConfig) MinEpochsForBlockRequests() uint64 {
 // MinSlotsForBlobsSidecarsRequest returns the configured blob-serving window in slots.
 func (b *BeaconChainConfig) MinSlotsForBlobsSidecarsRequest() uint64 {
 	return b.MinEpochsForBlobSidecarsRequests * b.SlotsPerEpoch
+}
+
+// BlockServeRangeStartSlot returns the first slot in the mandatory block-serving range.
+func (b *BeaconChainConfig) BlockServeRangeStartSlot(currentSlot uint64) uint64 {
+	return serveRangeStartSlot(currentSlot, b.SlotsPerEpoch, b.MinEpochsForBlockRequests(), 0)
 }
 
 // BlobSidecarServeRangeStartSlot returns the first slot in the mandatory blob-serving range.
@@ -1380,8 +1429,6 @@ func hoodiConfig() BeaconChainConfig {
 	cfg.ElectraForkVersion = 0x60000910
 	cfg.FuluForkEpoch = 50688
 	cfg.FuluForkVersion = 0x70000910
-	cfg.GloasForkEpoch = 132352
-	cfg.GloasForkVersion = 0x80000910
 	cfg.TerminalTotalDifficulty = "0"
 	cfg.TerminalBlockHash = [32]byte{}
 	cfg.TerminalBlockHashActivationEpoch = math.MaxUint64
@@ -1401,9 +1448,6 @@ func hoodiConfig() BeaconChainConfig {
 	cfg.BlobSchedule = []BlobParameters{
 		{52480, 15},
 		{54016, 21},
-	}
-	cfg.GasLimitSchedule = []GasLimitScheduleEntry{
-		{Epoch: 132352, GasLimit: 200_000_000},
 	}
 
 	cfg.InitializeForkSchedule()
@@ -1520,6 +1564,7 @@ func gnosisConfig() BeaconChainConfig {
 func chiadoConfig() BeaconChainConfig {
 	cfg := MainnetBeaconConfig
 	cfg.PresetBase = "gnosis"
+	cfg.MaxPendingPartialsPerWithdrawalsSweep = 6
 	cfg.MinGenesisTime = 1665396000
 	cfg.MinGenesisActiveValidatorCount = 6000
 	cfg.GenesisDelay = 300
@@ -1684,11 +1729,11 @@ func (b *BeaconChainConfig) MaxBlobsPerBlockUpperBound() uint64 {
 }
 
 func (b *BeaconChainConfig) MaxRequestBlobSidecarsByVersion(v StateVersion) int {
-	switch v {
-	case DenebVersion:
-		return int(b.MaxRequestBlobSidecars)
-	case ElectraVersion, FuluVersion, GloasVersion:
+	if v >= ElectraVersion {
 		return int(b.MaxRequestBlobSidecarsElectra)
+	}
+	if v == DenebVersion {
+		return int(b.MaxRequestBlobSidecars)
 	}
 	panic("invalid version")
 }

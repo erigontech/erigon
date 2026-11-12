@@ -117,7 +117,7 @@ type clientConn struct {
 func (c *Client) newClientConn(conn ServerCodec) *clientConn {
 	ctx := context.WithValue(context.Background(), clientContextKey{}, c)
 	ctx = context.WithValue(ctx, peerInfoContextKey{}, conn.peerInfo())
-	handler := newHandler(ctx, conn, randomIDGenerator(), c.services, 0, 0, nil, 50, false /* traceRequests */, c.logger, 0)
+	handler := newHandler(ctx, conn, randomIDGenerator(), c.services, 0, nil, 50, false /* traceRequests */, c.logger, 0)
 	return &clientConn{conn, handler}
 }
 
@@ -215,7 +215,7 @@ func DialOptions(ctx context.Context, rawurl string, logger log.Logger, options 
 	default:
 		return nil, fmt.Errorf("no known transport for URL scheme %q", u.Scheme)
 	}
-	return newClient(ctx, cfg, reconnect, logger)
+	return newClient(ctx, reconnect, logger)
 }
 
 // ClientFromContext retrieves the client from the context, if any. This can be used to perform
@@ -225,17 +225,17 @@ func ClientFromContext(ctx context.Context) (*Client, bool) {
 	return client, ok
 }
 
-func newClient(initctx context.Context, cfg *clientConfig, connect reconnectFunc, logger log.Logger) (*Client, error) {
+func newClient(initctx context.Context, connect reconnectFunc, logger log.Logger) (*Client, error) {
 	conn, err := connect(initctx)
 	if err != nil {
 		return nil, err
 	}
-	c := initClient(conn, cfg, logger)
+	c := initClient(conn, logger)
 	c.reconnectFunc = connect
 	return c, nil
 }
 
-func initClient(conn ServerCodec, cfg *clientConfig, logger log.Logger) *Client {
+func initClient(conn ServerCodec, logger log.Logger) *Client {
 	_, isHTTP := conn.(*httpConn)
 	c := &Client{
 		isHTTP:      isHTTP,
@@ -706,7 +706,7 @@ func (c *Client) drainRead() {
 // read decodes RPC messages from a codec, feeding them into dispatch.
 func (c *Client) read(codec ServerCodec) {
 	for {
-		msgs, batch, err := readBatch(codec, c.logger)
+		msgs, batch, err := readBatch(codec, 0, c.logger)
 		if err != nil {
 			c.readErr <- err
 			return
@@ -716,8 +716,8 @@ func (c *Client) read(codec ServerCodec) {
 }
 
 // readBatch reads the next message or batch, answering a JSON syntax error before returning it.
-func readBatch(codec ServerCodec, logger log.Logger) ([]*jsonrpcMessage, bool, error) {
-	msgs, batch, err := codec.ReadBatch()
+func readBatch(codec ServerCodec, batchLimit int, logger log.Logger) ([]*jsonrpcMessage, bool, error) {
+	msgs, batch, err := codec.ReadBatch(batchLimit)
 	if _, ok := errors.AsType[*json.SyntaxError](err); ok {
 		if writeErr := codec.WriteJSON(context.Background(), errorMessage(&parseError{err.Error()})); writeErr != nil {
 			logger.Trace("RPC failed to write parse error response", "err", writeErr)

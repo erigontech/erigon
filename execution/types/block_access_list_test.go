@@ -25,7 +25,7 @@ func TestBlockAccessListCopy(t *testing.T) {
 			Slot:    accounts.InternKey(common.Hash{2}),
 			Changes: []*StorageChange{{Index: 1, Value: *uint256.NewInt(3)}},
 		}},
-		StorageReads:   []accounts.StorageKey{accounts.InternKey(common.Hash{4})},
+		StorageReads:   []common.Hash{{4}},
 		BalanceChanges: []*BalanceChange{{Index: 2, Value: *uint256.NewInt(5)}},
 		NonceChanges:   []*NonceChange{{Index: 3, Value: 6}},
 		CodeChanges:    []*CodeChange{{Index: 4, Bytecode: []byte{7}}},
@@ -44,7 +44,7 @@ func TestBlockAccessListCopy(t *testing.T) {
 	}
 
 	bal[0].StorageChanges[0].Changes[0].Index = 10
-	bal[0].StorageReads[0] = accounts.InternKey(common.Hash{11})
+	bal[0].StorageReads[0] = common.Hash{11}
 	bal[0].BalanceChanges[0].Index = 12
 	bal[0].NonceChanges[0].Index = 13
 	bal[0].CodeChanges[0].Bytecode[0] = 14
@@ -63,7 +63,7 @@ func TestDecodeBlockAccessListSidecarForHeaderRejectsDuplicateItems(t *testing.T
 			{Slot: accounts.ZeroKey, Changes: []*StorageChange{{}}},
 			{Slot: accounts.ZeroKey, Changes: []*StorageChange{{}}},
 		}}}},
-		{name: "storage reads", bal: BlockAccessList{{StorageReads: []accounts.StorageKey{accounts.ZeroKey, accounts.ZeroKey}}}},
+		{name: "storage reads", bal: BlockAccessList{{StorageReads: []common.Hash{{}, {}}}}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			raw, err := EncodeBlockAccessListBytes(tt.bal)
@@ -282,9 +282,9 @@ func TestBlockAccessListCodecLeavesSemanticValidationToValidateForBlock(t *testi
 			name: "storage read order",
 			bal: BlockAccessList{{
 				Address: common.Address{1},
-				StorageReads: []accounts.StorageKey{
-					accounts.InternKey(common.Hash{2}),
-					accounts.InternKey(common.Hash{1}),
+				StorageReads: []common.Hash{
+					{2},
+					{1},
 				},
 			}},
 			wantError: "storage reads must be strictly increasing",
@@ -417,8 +417,8 @@ func TestBlockAccessListRLPEncoding(t *testing.T) {
 					},
 				},
 			},
-			StorageReads: []accounts.StorageKey{
-				accounts.InternKey(common.HexToHash("0x02")),
+			StorageReads: []common.Hash{
+				common.HexToHash("0x02"),
 			},
 			BalanceChanges: []*BalanceChange{
 				{Index: 1, Value: *uint256.NewInt(4)},
@@ -454,49 +454,23 @@ func TestBlockAccessListRLPEncoding(t *testing.T) {
 	}
 }
 
-func TestBlockAccessListRLPSizeLimit(t *testing.T) {
-	const limit = 10 << 20
-	code := make([]byte, limit)
+// EIP-7928 bounds the BAL by the block gas limit only, not by its encoded size.
+func TestBlockAccessListAbove10MiB(t *testing.T) {
+	code := make([]byte, 10<<20)
 	bal := BlockAccessList{{CodeChanges: []*CodeChange{{Index: 1, Bytecode: code}}}}
 	raw, err := EncodeBlockAccessListBytes(bal)
 	if err != nil {
 		t.Fatalf("encode BAL: %v", err)
 	}
-	overhead := len(raw) - len(code)
-	for _, tt := range []struct {
-		name string
-		size int
-	}{
-		{name: "below limit", size: limit - 1},
-		{name: "at limit", size: limit},
-		{name: "above limit", size: limit + 1},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			bal[0].CodeChanges[0].Bytecode = code[:tt.size-overhead]
-			raw, err := EncodeBlockAccessListBytes(bal)
-			if err != nil {
-				t.Fatalf("encode BAL: %v", err)
-			}
-			if len(raw) != tt.size {
-				t.Fatalf("RLP size = %d, want %d", len(raw), tt.size)
-			}
-			sidecar, err := DecodeBlockAccessListSidecarForBlock(raw, 10_000_000_000, len(bal))
-			if tt.size > limit {
-				if err == nil || !strings.Contains(err.Error(), "block access list RLP exceeds maximum size") {
-					t.Fatalf("decode BAL: got %v, want RLP size error", err)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("decode BAL: %v", err)
-			}
-			if err := sidecar.ValidateForBlock(10_000_000_000, len(bal)); err != nil {
-				t.Fatalf("validate BAL: %v", err)
-			}
-			if !reflect.DeepEqual(sidecar.BlockAccessList(), bal) {
-				t.Fatal("decoded BAL differs")
-			}
-		})
+	sidecar, err := DecodeBlockAccessListSidecarForBlock(raw, 60_000_000, len(bal))
+	if err != nil {
+		t.Fatalf("decode BAL: %v", err)
+	}
+	if err := sidecar.ValidateForBlock(60_000_000, len(bal)); err != nil {
+		t.Fatalf("validate BAL: %v", err)
+	}
+	if !reflect.DeepEqual(sidecar.BlockAccessList(), bal) {
+		t.Fatal("decoded BAL differs")
 	}
 }
 
@@ -508,11 +482,11 @@ func TestBlockAccessListLargeLists(t *testing.T) {
 		{
 			name: "storage reads",
 			bal: func() BlockAccessList {
-				reads := make([]accounts.StorageKey, 1<<18+1)
+				reads := make([]common.Hash, 1<<18+1)
 				for i := range reads {
 					key := common.Hash{0: 1}
 					binary.BigEndian.PutUint64(key[24:], uint64(i))
-					reads[i] = accounts.InternKey(key)
+					reads[i] = key
 				}
 				return BlockAccessList{{StorageReads: reads}}
 			},
@@ -612,7 +586,7 @@ func TestBlockAccessListValidateForHeaderRejectsOversizedEarly(t *testing.T) {
 			Changes: []*StorageChange{{Index: 1}},
 		}
 	}
-	bal := BlockAccessList{{StorageChanges: slots, StorageReads: []accounts.StorageKey{accounts.ZeroKey}}}
+	bal := BlockAccessList{{StorageChanges: slots, StorageReads: []common.Hash{{}}}}
 	var before, after runtime.MemStats
 	runtime.ReadMemStats(&before)
 	err := bal.ValidateForHeader(BalItemCost)
@@ -632,12 +606,12 @@ func TestBlockAccessListValidateMaxItems(t *testing.T) {
 			var addr common.Address
 			addr[18] = byte(i >> 8)
 			addr[19] = byte(i)
-			reads := make([]accounts.StorageKey, slotsPerAccount)
+			reads := make([]common.Hash, slotsPerAccount)
 			for j := range reads {
 				var h common.Hash
 				h[30] = byte(j >> 8)
 				h[31] = byte(j)
-				reads[j] = accounts.InternKey(h)
+				reads[j] = h
 			}
 			bal[i] = AccountChanges{
 				Address:      addr,
@@ -677,7 +651,7 @@ func TestBlockAccessListSlotUniqueness(t *testing.T) {
 				Changes: []*StorageChange{{Index: 0, Value: *uint256.NewInt(1)}},
 			},
 		},
-		StorageReads: []accounts.StorageKey{accounts.InternKey(slot)},
+		StorageReads: []common.Hash{slot},
 	}
 	bal := BlockAccessList{*ac}
 	if err := bal.Validate(); err == nil {
@@ -848,5 +822,84 @@ func TestAccountChangesDecodeRLPClearsStorageChanges(t *testing.T) {
 	}
 	if len(ac.StorageChanges) != 0 {
 		t.Fatalf("decode kept %d storage changes from the previous payload", len(ac.StorageChanges))
+	}
+}
+
+func TestAccountChangesEqualComparesAddressAndCode(t *testing.T) {
+	base := func() *AccountChanges {
+		return &AccountChanges{
+			Address:        common.Address{1},
+			StorageChanges: []SlotChanges{{Slot: accounts.InternKey(common.Hash{1}), Changes: []*StorageChange{{Index: 1, Value: *uint256.NewInt(7)}}}},
+			NonceChanges:   []*NonceChange{{Index: 1, Value: 7}},
+			CodeChanges:    []*CodeChange{{Index: 1, Bytecode: []byte{0x60}}},
+		}
+	}
+	if !base().Equal(base()) {
+		t.Fatal("identical changes must be equal")
+	}
+	for name, change := range map[string]func(*AccountChanges){
+		"address":              func(ac *AccountChanges) { ac.Address = common.Address{2} },
+		"storage change index": func(ac *AccountChanges) { ac.StorageChanges[0].Changes[0].Index = 2 },
+		"nonce change index":   func(ac *AccountChanges) { ac.NonceChanges[0].Index = 2 },
+		"code change index":    func(ac *AccountChanges) { ac.CodeChanges[0].Index = 2 },
+		"code bytes":           func(ac *AccountChanges) { ac.CodeChanges[0].Bytecode = []byte{0x61} },
+	} {
+		other := base()
+		change(other)
+		if base().Equal(other) {
+			t.Fatalf("a different %s must not be equal", name)
+		}
+	}
+}
+
+func TestBlockAccessListDecodeAcceptsOnlyCanonicalEncoding(t *testing.T) {
+	encode := func(v any) rlp.RawValue {
+		raw, err := rlp.EncodeToBytes(v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return raw
+	}
+	one := encode(uint64(1))
+	build := func(extraIn string) []byte {
+		list := func(name string, items ...rlp.RawValue) rlp.RawValue {
+			if name == extraIn {
+				items = append(items, one)
+			}
+			return encode(items)
+		}
+		slot := list("slot", one, list("", list("storage change", one, one)))
+		account := list("account", encode(common.Address{1}), list("", slot), list("", encode(uint64(2))),
+			list("", list("balance change", one, one)),
+			list("", list("nonce change", one, one)),
+			list("", list("code change", one, encode([]byte{0x60}))))
+		return list("", account)
+	}
+
+	canonical := build("none")
+	decoded, err := DecodeBlockAccessListBytes(canonical)
+	if err != nil {
+		t.Fatalf("canonical list: %v", err)
+	}
+	reencoded, err := EncodeBlockAccessListBytes(decoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := decoded.Validate(); err != nil {
+		t.Fatalf("the fixture is not a valid list: %v", err)
+	}
+	if !bytes.Equal(reencoded, canonical) {
+		t.Fatalf("the fixture is not canonical: %x re-encodes to %x", canonical, reencoded)
+	}
+	if canonical[0] >= 0xf8 {
+		t.Fatalf("the fixture outgrew a short list: %x", canonical)
+	}
+	if _, err := DecodeBlockAccessListBytes(append([]byte{0xf8, canonical[0] - 0xc0}, canonical[1:]...)); err == nil {
+		t.Fatal("a list length in long form must be rejected")
+	}
+	for _, name := range []string{"account", "slot", "storage change", "balance change", "nonce change", "code change"} {
+		if _, err := DecodeBlockAccessListBytes(build(name)); err == nil {
+			t.Fatalf("an extra element in a %s list must be rejected", name)
+		}
 	}
 }

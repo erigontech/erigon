@@ -21,7 +21,7 @@ import (
 )
 
 func (b *CachingBeaconState) ValidatorIndexByPubkey(key [48]byte) (uint64, bool) {
-	return b.publicKeyIndicies.Get(key[:])
+	return b.publicKeyIndices.get(key)
 }
 
 // PreviousStateRoot gets the previously saved state root and then deletes it.

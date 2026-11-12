@@ -23,7 +23,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/c2h5oh/datasize"
+	"github.com/golang/snappy"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common/snappypool"
@@ -31,6 +31,9 @@ import (
 )
 
 var errCompressedPayloadLimit = errors.New("compressed payload exceeds maximum size")
+
+// ErrPayloadExceedsLimit is returned when the length prefix of a payload is above the caller's limit.
+var ErrPayloadExceedsLimit = errors.New("payload size exceeds limit")
 
 type compressedPayloadReader struct {
 	r         io.Reader
@@ -89,15 +92,26 @@ func EncodeAndWrite(w io.Writer, val ssz.Marshaler, prefix ...byte) error {
 }
 
 func DecodeAndReadNoForkDigest(r io.Reader, val ssz.EncodableSSZ, version clparams.StateVersion) error {
-	return decodeAndReadNoForkDigest(r, val, version, nil)
+	return decodeAndReadNoForkDigest(r, val, version, nil, clparams.MaxPayloadSize)
+}
+
+// DecodeAndReadFixedSizeNoForkDigest refuses a payload larger than val's fixed size before decoding it.
+func DecodeAndReadFixedSizeNoForkDigest(r io.Reader, val ssz.EncodableSSZ, version clparams.StateVersion) error {
+	return DecodeAndReadNoForkDigestMax(r, val, version, uint64(val.EncodingSizeSSZ()))
+}
+
+// DecodeAndReadNoForkDigestMax decodes a payload whose uncompressed size is at most maxSize.
+// The length prefix is checked before any decompression, and ErrPayloadExceedsLimit is returned when it is too big.
+func DecodeAndReadNoForkDigestMax(r io.Reader, val ssz.EncodableSSZ, version clparams.StateVersion, maxSize uint64) error {
+	return decodeAndReadNoForkDigest(r, val, version, nil, min(maxSize, clparams.MaxPayloadSize))
 }
 
 // DecodeAndReadNoForkDigestExact decodes a payload with an exact uncompressed size and no trailing data.
 func DecodeAndReadNoForkDigestExact(r io.Reader, val ssz.EncodableSSZ, version clparams.StateVersion, expectedSize uint64) error {
-	return decodeAndReadNoForkDigest(r, val, version, &expectedSize)
+	return decodeAndReadNoForkDigest(r, val, version, &expectedSize, clparams.MaxPayloadSize)
 }
 
-func decodeAndReadNoForkDigest(r io.Reader, val ssz.EncodableSSZ, version clparams.StateVersion, expectedSize *uint64) error {
+func decodeAndReadNoForkDigest(r io.Reader, val ssz.EncodableSSZ, version clparams.StateVersion, expectedSize *uint64, maxSize uint64) error {
 	// Read varint for length of message.
 	encodedLn, err := ReadUvarint(r)
 	if err != nil {
@@ -106,19 +120,13 @@ func decodeAndReadNoForkDigest(r io.Reader, val ssz.EncodableSSZ, version clpara
 	if expectedSize != nil && encodedLn != *expectedSize {
 		return fmt.Errorf("unexpected payload size: got %d, want %d", encodedLn, *expectedSize)
 	}
-	if encodedLn > uint64(16*datasize.MB) {
-		return errors.New("payload too big")
+	if encodedLn > maxSize {
+		return fmt.Errorf("%w: payload too big: got %d, max %d", ErrPayloadExceedsLimit, encodedLn, maxSize)
 	}
 
-	compressedInput := r
-	var compressedReader *compressedPayloadReader
-	var maxCompressedSize uint64
-	if expectedSize != nil {
-		maxCompressedSize = 32 + encodedLn + encodedLn/6
-		compressedReader = &compressedPayloadReader{r: r, remaining: maxCompressedSize}
-		compressedInput = compressedReader
-	}
-	sr := snappypool.Reader(compressedInput)
+	maxCompressedSize := uint64(snappy.MaxEncodedLen(int(encodedLn)))
+	compressedReader := &compressedPayloadReader{r: r, remaining: maxCompressedSize}
+	sr := snappypool.Reader(compressedReader)
 	defer snappypool.PutReader(sr)
 	raw, err := io.ReadAll(io.LimitReader(sr, int64(encodedLn)))
 	if err == nil && uint64(len(raw)) != encodedLn {

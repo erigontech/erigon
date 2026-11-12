@@ -98,6 +98,18 @@ func (mr *MockP2PManagerMockRecorder) SetDialPolicy(arg0 any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetDialPolicy", reflect.TypeOf((*MockP2PManager)(nil).SetDialPolicy), arg0)
 }
 
+// SetENRAttSubnets mocks base method.
+func (m *MockP2PManager) SetENRAttSubnets(subnets []uint64) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "SetENRAttSubnets", subnets)
+}
+
+// SetENRAttSubnets indicates an expected call of SetENRAttSubnets.
+func (mr *MockP2PManagerMockRecorder) SetENRAttSubnets(subnets any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetENRAttSubnets", reflect.TypeOf((*MockP2PManager)(nil).SetENRAttSubnets), subnets)
+}
+
 // UDPv5Listener mocks base method.
 func (m *MockP2PManager) UDPv5Listener() *discover.UDPv5 {
 	m.ctrl.T.Helper()
@@ -110,18 +122,6 @@ func (m *MockP2PManager) UDPv5Listener() *discover.UDPv5 {
 func (mr *MockP2PManagerMockRecorder) UDPv5Listener() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UDPv5Listener", reflect.TypeOf((*MockP2PManager)(nil).UDPv5Listener))
-}
-
-// UpdateENRAttSubnets mocks base method.
-func (m *MockP2PManager) UpdateENRAttSubnets(subnetIndex int, on bool) {
-	m.ctrl.T.Helper()
-	m.ctrl.Call(m, "UpdateENRAttSubnets", subnetIndex, on)
-}
-
-// UpdateENRAttSubnets indicates an expected call of UpdateENRAttSubnets.
-func (mr *MockP2PManagerMockRecorder) UpdateENRAttSubnets(subnetIndex, on any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateENRAttSubnets", reflect.TypeOf((*MockP2PManager)(nil).UpdateENRAttSubnets), subnetIndex, on)
 }
 
 // UpdateENRSyncNets mocks base method.

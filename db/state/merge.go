@@ -32,7 +32,7 @@ import (
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datastruct/btindex"
-	"github.com/erigontech/erigon/db/datastruct/existence"
+	"github.com/erigontech/erigon/db/datastruct/posidx"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/mvcc"
 	"github.com/erigontech/erigon/db/recsplit/multiencseq"
@@ -158,6 +158,9 @@ func findMergeRangeInFiles(files visibleFiles, stepSize, maxEndTxNum, maxSpan ui
 // as soon as it is found. Files are sorted by endTxNum ascending, so the first
 // file with endTxNum > start is the only straddler candidate.
 func clipMergeStartToFileBoundary(files visibleFiles, start uint64) uint64 {
+	if len(files) > 0 && start < files[0].startTxNum { // files below were retired
+		return files[0].startTxNum
+	}
 	for _, f := range files {
 		if f.endTxNum <= start {
 			continue
@@ -565,7 +568,26 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	if dt.d.Accessors.Has(statecfg.AccessorBTree) {
 		btPath := dt.d.kvBtAccessorNewFilePath(fromStep, toStep)
 		kveiPath := dt.d.kvExistenceIdxNewFilePath(fromStep, toStep)
-		valuesIn.bindex, err = btindex.CreateBtreeIndexWithDecompressor(btPath, kveiPath, dt.dataReader(valuesIn.decompressor), *dt.salt, ps, dt.d.dirs.Tmp, dt.d.logger, dt.d.noFsync, dt.d.Accessors)
+		budget := dt.d.btBudget
+		var inputs []*btindex.BtIndex
+		if budget != nil {
+			// The merged index replaces the inputs; their bytes leave the budget when they close.
+			for _, item := range domainFiles {
+				inputs = append(inputs, item.bindex)
+			}
+			budget.setRetiring(inputs, true)
+			defer func() {
+				if err != nil {
+					budget.setRetiring(inputs, false)
+				}
+			}()
+		}
+		valuesIn.bindex, err = dt.d.buildBtIndex(btPath, kveiPath, dt.dataReader(valuesIn.decompressor), *dt.salt, ps)
+		if err == nil && budget != nil {
+			// Closing a merged index that was never integrated (another domain's merge failed) gives its inputs
+			// back; after integration the inputs close first and this does nothing.
+			valuesIn.bindex.OnClose(func() { budget.setRetiring(inputs, false) })
+		}
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("merge %s btindex [%d-%d]: %w", dt.d.FilenameBase, r.values.from, r.values.to, err)
 		}
@@ -586,7 +608,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 			return nil, nil, nil, fmt.Errorf("merge %s FileExist err [%d-%d]: %w", dt.d.FilenameBase, r.values.from, r.values.to, err)
 		}
 		if exists {
-			valuesIn.existence, err = existence.OpenFilter(bloomIndexPath, false)
+			valuesIn.existence, err = dt.d.openExistenceFilter(bloomIndexPath)
 			if err != nil {
 				return nil, nil, nil, fmt.Errorf("merge %s existence [%d-%d]: %w", dt.d.FilenameBase, r.values.from, r.values.to, err)
 			}
@@ -920,7 +942,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 			return nil, nil, err
 		}
 
-		if historyIn.index, err = ht.h.openHashMapAccessor(idxPath); err != nil {
+		if historyIn.vAccessor, err = posidx.Open(idxPath); err != nil {
 			return nil, nil, fmt.Errorf("open %s idx: %w", ht.h.FilenameBase, err)
 		}
 	}
@@ -958,8 +980,7 @@ func (dt *DomainRoTx) cleanAfterMerge(mergedDomain, mergedHist, mergedIdx *Files
 	for _, out := range outs { // collect file names before files descriptors closed
 		deleted = append(deleted, out.FilePaths(dt.d.dirs.Snap)...)
 	}
-	retire(mvcc.RetireReasonMerged, dt.d.dirtyFiles, outs, dt.d.FilenameBase, dt.d.logger)
-	retired = append(retired, outs...)
+	retired = append(retired, retire(mvcc.RetireReasonMerged, dt.d.dirtyFiles, outs, dt.d.FilenameBase, dt.d.logger)...)
 	return deleted, retired
 }
 
@@ -977,8 +998,7 @@ func (ht *HistoryRoTx) cleanAfterMerge(merged, mergedIdx *FilesItem) (deleted []
 	for _, out := range outs { // collect file names before files descriptors closed
 		deleted = append(deleted, out.FilePaths(ht.h.dirs.Snap)...)
 	}
-	retire(mvcc.RetireReasonMerged, ht.h.dirtyFiles, outs, ht.h.FilenameBase, ht.h.logger)
-	retired = append(retired, outs...)
+	retired = append(retired, retire(mvcc.RetireReasonMerged, ht.h.dirtyFiles, outs, ht.h.FilenameBase, ht.h.logger)...)
 	return deleted, retired
 }
 
@@ -991,8 +1011,7 @@ func (iit *InvertedIndexRoTx) cleanAfterMerge(merged *FilesItem) (deleted []stri
 	for _, out := range outs { // collect file names before files descriptors closed
 		deleted = append(deleted, out.FilePaths(iit.ii.dirs.Snap)...)
 	}
-	retire(mvcc.RetireReasonMerged, iit.ii.dirtyFiles, outs, iit.ii.FilenameBase, iit.ii.logger)
-	retired = append(retired, outs...)
+	retired = append(retired, retire(mvcc.RetireReasonMerged, iit.ii.dirtyFiles, outs, iit.ii.FilenameBase, iit.ii.logger)...)
 	return deleted, retired
 }
 

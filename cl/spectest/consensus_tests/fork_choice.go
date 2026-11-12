@@ -17,7 +17,9 @@
 package consensus_tests
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"math/big"
@@ -26,6 +28,7 @@ import (
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
@@ -57,59 +60,78 @@ import (
 	"github.com/erigontech/erigon/p2p/enode"
 )
 
-type forkChoiceSpectestEngine struct{}
-
-func (forkChoiceSpectestEngine) NewPayload(context.Context, *cltypes.Eth1Block, *common.Hash, []common.Hash, []hexutil.Bytes) (execution_client.PayloadStatus, error) {
-	return execution_client.PayloadStatusValidated, nil
+type forkChoiceSpectestEngine struct {
+	statuses map[common.Hash]ForkChoicePayloadStatus
 }
 
-func (forkChoiceSpectestEngine) ForkChoiceUpdate(context.Context, common.Hash, common.Hash, common.Hash, *engine_types.PayloadAttributes, clparams.StateVersion) ([]byte, error) {
+func (e *forkChoiceSpectestEngine) NewPayload(_ context.Context, payload *cltypes.Eth1Block, _ *common.Hash, _ []common.Hash, _ []hexutil.Bytes) (execution_client.PayloadStatus, error) {
+	status, ok := e.statuses[payload.BlockHash]
+	if !ok {
+		return execution_client.PayloadStatusValidated, nil
+	}
+	clStatus, _ := status.clStatus()
+	err := status.err()
+	if lvh := common.HexToHash(status.LatestValidHash); engine_types.EngineStatus(status.Status) == engine_types.InvalidStatus && lvh != (common.Hash{}) {
+		err = &execution_client.InvalidPayloadError{LatestValidHash: lvh, Err: err}
+	}
+	return clStatus, err
+}
+
+func (*forkChoiceSpectestEngine) ForkChoiceUpdate(context.Context, common.Hash, common.Hash, common.Hash, *engine_types.PayloadAttributes, clparams.StateVersion) ([]byte, error) {
 	return nil, nil
 }
 
-func (forkChoiceSpectestEngine) SupportInsertion() bool { return false }
+func (*forkChoiceSpectestEngine) SupportInsertion() bool { return false }
 
-func (forkChoiceSpectestEngine) InsertBlocks(context.Context, []*types.Block) error {
+func (*forkChoiceSpectestEngine) InsertBlocks(context.Context, []*types.Block) error {
 	return nil
 }
 
-func (forkChoiceSpectestEngine) InsertBlock(context.Context, *types.Block) error { return nil }
+func (*forkChoiceSpectestEngine) InsertBlock(context.Context, *types.Block) error { return nil }
 
-func (forkChoiceSpectestEngine) CurrentHeader(context.Context) (*types.Header, error) {
+func (*forkChoiceSpectestEngine) CurrentHeader(context.Context) (*types.Header, error) {
 	return nil, nil
 }
 
-func (forkChoiceSpectestEngine) IsCanonicalHash(context.Context, common.Hash) (bool, error) {
+func (*forkChoiceSpectestEngine) GetHeaderByHash(context.Context, common.Hash) (*types.Header, error) {
+	return nil, nil
+}
+
+func (*forkChoiceSpectestEngine) IsCanonicalHash(context.Context, common.Hash) (bool, error) {
 	return false, nil
 }
 
-func (forkChoiceSpectestEngine) Ready(context.Context) (bool, error) { return true, nil }
+func (*forkChoiceSpectestEngine) Ready(context.Context) (bool, error) { return true, nil }
 
-func (forkChoiceSpectestEngine) GetBodiesByRange(context.Context, uint64, uint64) ([]*types.RawBody, error) {
+func (*forkChoiceSpectestEngine) GetBodiesByRange(context.Context, uint64, uint64) ([]*types.RawBody, error) {
 	return nil, nil
 }
 
-func (forkChoiceSpectestEngine) GetBodiesByHashes(context.Context, []common.Hash) ([]*types.RawBody, error) {
+func (*forkChoiceSpectestEngine) GetBodiesByHashes(context.Context, []common.Hash) ([]*types.RawBody, error) {
 	return nil, nil
 }
 
-func (forkChoiceSpectestEngine) HasBlock(context.Context, common.Hash) (bool, error) {
+func (*forkChoiceSpectestEngine) GetPayloadBodiesByHash(context.Context, []common.Hash) ([]*engine_types.ExecutionPayloadBodyV2, error) {
+	return nil, nil
+}
+
+func (*forkChoiceSpectestEngine) HasBlock(context.Context, common.Hash) (bool, error) {
 	return false, nil
 }
 
-func (forkChoiceSpectestEngine) FrozenBlocks(context.Context) uint64 { return 0 }
+func (*forkChoiceSpectestEngine) FrozenBlocks(context.Context) uint64 { return 0 }
 
-func (forkChoiceSpectestEngine) HasGapInSnapshots(context.Context) bool { return false }
+func (*forkChoiceSpectestEngine) HasGapInSnapshots(context.Context) bool { return false }
 
-func (forkChoiceSpectestEngine) GetAssembledBlock(context.Context, []byte, clparams.StateVersion) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+func (*forkChoiceSpectestEngine) GetAssembledBlock(context.Context, []byte, clparams.StateVersion) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 	return nil, nil, nil, nil, nil
 }
 
-func (forkChoiceSpectestEngine) GetBlobs(context.Context, []common.Hash, clparams.StateVersion) ([][]byte, [][][]byte, error) {
+func (*forkChoiceSpectestEngine) GetBlobs(context.Context, []common.Hash, clparams.StateVersion) ([][]byte, [][][]byte, error) {
 	return nil, nil, nil
 }
 
-func (forkChoiceSpectestEngine) GetClientVersionV1(context.Context, *engine_types.ClientVersionV1) ([]engine_types.ClientVersionV1, error) {
+func (*forkChoiceSpectestEngine) GetClientVersionV1(context.Context, *engine_types.ClientVersionV1) ([]engine_types.ClientVersionV1, error) {
 	return nil, nil
 }
 
@@ -132,6 +154,9 @@ func (f *ForkChoiceStep) StepType() string {
 	if f.Attestation != nil {
 		return "attestation"
 	}
+	if f.PayloadAttestationMessage != nil {
+		return "on_payload_attestation_message"
+	}
 	if f.Tick != nil {
 		return "on_tick"
 	}
@@ -142,18 +167,19 @@ func (f *ForkChoiceStep) StepType() string {
 }
 
 type ForkChoiceStep struct {
-	Tick             *int                     `yaml:"tick,omitempty"`
-	Valid            *bool                    `yaml:"valid,omitempty"`
-	Attestation      *string                  `yaml:"attestation,omitempty"`
-	Block            *BlockData               `yaml:",inline"`
-	Blobs            *string                  `yaml:"blobs,omitempty"`
-	Proofs           []string                 `yaml:"proofs,omitempty"`
-	PowBlock         *string                  `yaml:"pow_block,omitempty"`
-	AttesterSlashing *string                  `yaml:"attester_slashing,omitempty"`
-	BlockHash        *string                  `yaml:"block_hash,omitempty"`
-	PayloadStatus    *ForkChoicePayloadStatus `yaml:"payload_status,omitempty"`
-	ExecutionPayload *string                  `yaml:"execution_payload,omitempty"`
-	Checks           *ForkChoiceChecks        `yaml:"checks,omitempty"`
+	Tick                      *int                     `yaml:"tick,omitempty"`
+	Valid                     *bool                    `yaml:"valid,omitempty"`
+	Attestation               *string                  `yaml:"attestation,omitempty"`
+	Block                     *BlockData               `yaml:",inline"`
+	Blobs                     *string                  `yaml:"blobs,omitempty"`
+	Proofs                    []string                 `yaml:"proofs,omitempty"`
+	PowBlock                  *string                  `yaml:"pow_block,omitempty"`
+	AttesterSlashing          *string                  `yaml:"attester_slashing,omitempty"`
+	BlockHash                 *string                  `yaml:"block_hash,omitempty"`
+	PayloadStatus             *ForkChoicePayloadStatus `yaml:"payload_status,omitempty"`
+	ExecutionPayload          *string                  `yaml:"execution_payload,omitempty"`
+	PayloadAttestationMessage *string                  `yaml:"payload_attestation_message,omitempty"`
+	Checks                    *ForkChoiceChecks        `yaml:"checks,omitempty"`
 }
 
 type BlockData struct {
@@ -262,7 +288,14 @@ type ForkChoiceChecks struct {
 		Epoch *int         `yaml:"epoch,omitempty"`
 		Root  *common.Hash `yaml:"root,omitempty"`
 	} `yaml:"finalized_checkpoint,omitempty"`
-	ProposerBoostRoot *common.Hash `yaml:"proposer_boost_root,omitempty"`
+	ProposerBoostRoot           *common.Hash        `yaml:"proposer_boost_root,omitempty"`
+	PayloadTimelinessVote       *ForkChoicePTCVotes `yaml:"payload_timeliness_vote,omitempty"`
+	PayloadDataAvailabilityVote *ForkChoicePTCVotes `yaml:"payload_data_availability_vote,omitempty"`
+}
+
+type ForkChoicePTCVotes struct {
+	BlockRoot common.Hash `yaml:"block_root"`
+	Votes     []*bool     `yaml:"votes"`
 }
 
 type ForkChoicePayloadStatus struct {
@@ -271,20 +304,28 @@ type ForkChoicePayloadStatus struct {
 	ValidationError string `yaml:"validation_error"`
 }
 
+func (s ForkChoicePayloadStatus) clStatus() (execution_client.PayloadStatus, bool) {
+	switch engine_types.EngineStatus(s.Status) {
+	case engine_types.ValidStatus:
+		return execution_client.PayloadStatusValidated, true
+	case engine_types.SyncingStatus, engine_types.AcceptedStatus:
+		return execution_client.PayloadStatusNotValidated, true
+	case engine_types.InvalidStatus, engine_types.InvalidBlockHashStatus:
+		return execution_client.PayloadStatusInvalidated, true
+	}
+	return execution_client.PayloadStatusNone, false
+}
+
+func (s ForkChoicePayloadStatus) err() error {
+	if s.ValidationError == "" {
+		return nil
+	}
+	return errors.New(s.ValidationError)
+}
+
 type ForkChoice struct{}
 
 func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err error) {
-	// Skip GLOAS wrong_withdrawals fork choice test: the Python test generator modifies
-	// block_state.payload_expected_withdrawals at runtime (injecting a fake withdrawal)
-	// before applying the envelope, but this state modification is not captured in the
-	// serialized SSZ fixtures. The test uses identical fixtures to the valid test case,
-	// so there is no way to reproduce the expected mismatch from fixture data alone.
-	// TODO: remove if consensus-specs adds explicit fixture support for runtime state mutations.
-	if c.ForkPhaseName == "gloas" && c.HandlerName == "on_execution_payload_envelope" &&
-		c.CaseName == "on_execution_payload_envelope__wrong_withdrawals" {
-		t.Skip("fixture limitation: Python test modifies block_state.payload_expected_withdrawals at runtime; not representable in SSZ fixtures")
-	}
-
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel) // cancel PeerDas worker goroutines when the test finishes
 
@@ -309,10 +350,11 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 	peerDas := das.NewPeerDas(nil, &clparams.MainnetBeaconConfig, &clparams.CaplinConfig{}, columnStorage, blobStorage, nil, enode.ID{}, ethClock, peerDasState, nil, nil, nil)
 	localValidators := validator_params.NewValidatorParams()
 
+	engine := &forkChoiceSpectestEngine{statuses: map[common.Hash]ForkChoicePayloadStatus{}}
 	forkGraphDisk, err := fork_graph.NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
 	require.NoError(t, err)
 	forkStore, err := forkchoice.NewForkChoiceStore(
-		ethClock, anchorState, forkChoiceSpectestEngine{}, pool.NewOperationsPool(&clparams.MainnetBeaconConfig),
+		ethClock, anchorState, engine, pool.NewOperationsPool(&clparams.MainnetBeaconConfig),
 		forkGraphDisk,
 		emitters, synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true), blobStorage, public_keys_registry.NewInMemoryPublicKeysRegistry(),
 		localValidators, false, nil,
@@ -321,16 +363,18 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 	forkStore.SetSynced(true)
 	forkStore.InitPeerDas(peerDas)
 
-	var steps []ForkChoiceStep
-	err = spectest.ReadYml(root, "steps.yaml", &steps)
+	steps, err := readForkChoiceSteps(root)
 	require.NoError(t, err)
 
 	for stepIdx, step := range steps {
 		stepstr := fmt.Sprintf("step %d: %s", stepIdx, step.StepType())
 		switch step.StepType() {
 		case "on_payload_info":
-			// we are not doing engine level mocking, so simply return the test when this is received
-			return nil
+			require.NotNil(t, step.BlockHash, stepstr)
+			status := *step.GetPayloadStatus()
+			_, known := status.clStatus()
+			require.True(t, known, "%s: unsupported payload status %q", stepstr, status.Status)
+			engine.statuses[common.HexToHash(step.GetBlockHash())] = status
 		case "on_attester_slashing":
 			data := &cltypes.AttesterSlashing{}
 			err := spectest.ReadSsz(root, c.Version(), step.GetAttesterSlashing()+".ssz_snappy", data)
@@ -342,6 +386,7 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 				require.Error(t, err, stepstr)
 			}
 		case "on_merge_block":
+			t.Logf("%s: terminal PoW block validation is not implemented, remaining steps not run", stepstr)
 			return nil
 		case "on_block":
 			blk := cltypes.NewSignedBeaconBlock(anchorState.BeaconConfig(), c.Version())
@@ -356,7 +401,7 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 				} else if len(step.Proofs) != blobs.Len() || len(step.Proofs) != blk.Block.Body.GetBlobKzgCommitments().Len() {
 					continue
 				}
-				blobSidecarService := services.NewBlobSidecarService(&clparams.MainnetBeaconConfig, forkStore, nil, ethClock, emitters, true)
+				blobSidecarService := services.NewBlobSidecarService(ctx, &clparams.MainnetBeaconConfig, forkStore, nil, ethClock, emitters, true)
 
 				blobs.Range(func(index int, value *cltypes.Blob, length int) bool {
 					var proof common.Bytes48
@@ -424,22 +469,42 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 			} else {
 				require.Error(t, err, stepstr)
 			}
+		case "on_payload_attestation_message":
+			msg := &cltypes.PayloadAttestationMessage{Data: &cltypes.PayloadAttestationData{}}
+			err := spectest.ReadSsz(root, c.Version(), *step.PayloadAttestationMessage+".ssz_snappy", msg)
+			require.NoError(t, err, stepstr)
+			err = forkStore.OnPayloadAttestationMessage(ctx, msg)
+			if step.GetValid() {
+				require.NoError(t, err, stepstr)
+			} else {
+				require.Error(t, err, stepstr)
+			}
 		case "on_tick":
+			require.True(t, step.GetValid(), "%s: invalid on_tick is not supported by the runner", stepstr)
 			forkStore.OnTick(uint64(step.GetTick()) * 1000)
-			// TODO: onTick needs to be able to return error
-		//	if step.GetValid() {
-		//		require.NoError(t, err)
-		//	} else {
-		//		require.Error(t, err)
-		//	}
 		case "checks":
 			chk := step.GetChecks()
 			doCheck(t, stepstr, forkStore, chk)
 		default:
+			t.Fatalf("%s: unsupported fork choice step", stepstr)
 		}
 	}
 
 	return nil
+}
+
+func readForkChoiceSteps(root fs.FS) ([]ForkChoiceStep, error) {
+	data, err := fs.ReadFile(root, "steps.yaml")
+	if err != nil {
+		return nil, err
+	}
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	decoder.KnownFields(true)
+	var steps []ForkChoiceStep
+	if err := decoder.Decode(&steps); err != nil {
+		return nil, fmt.Errorf("decode steps.yaml: %w", err)
+	}
+	return steps, nil
 }
 
 func doCheck(t *testing.T, stepstr string, store *forkchoice.ForkChoiceStore, e *ForkChoiceChecks) {
@@ -459,10 +524,9 @@ func doCheck(t *testing.T, stepstr string, store *forkchoice.ForkChoiceStore, e 
 	if e.Time != nil {
 		assert.EqualValues(t, *e.Time, store.Time(), stepstr)
 	}
-	/*if e.GenesisTime != nil {
-		// TODO:  what value to use here??
-		//assert.EqualValues(t, e.Time, store.GenesisTime())
-	}*/
+	if e.GenesisTime != nil {
+		assert.EqualValues(t, *e.GenesisTime, store.GenesisTime(), stepstr)
+	}
 	if e.ProposerBoostRoot != nil {
 		assert.Equal(t, *e.ProposerBoostRoot, store.ProposerBoostRoot(), stepstr)
 	}
@@ -485,4 +549,29 @@ func doCheck(t *testing.T, stepstr string, store *forkchoice.ForkChoiceStore, e 
 			assert.EqualValues(t, *e.JustifiedCheckpoint.Epoch, cp.Epoch, stepstr)
 		}
 	}
+	if e.PayloadTimelinessVote != nil {
+		timeliness, _, present, _ := store.PayloadAttestationVotes(e.PayloadTimelinessVote.BlockRoot)
+		require.True(t, present, "payload timeliness vote entry missing for %x: %s", e.PayloadTimelinessVote.BlockRoot, stepstr)
+		assert.Equal(t, expectedPTCVotes(t, stepstr, e.PayloadTimelinessVote), timeliness, stepstr)
+	}
+	if e.PayloadDataAvailabilityVote != nil {
+		_, dataAvailability, _, present := store.PayloadAttestationVotes(e.PayloadDataAvailabilityVote.BlockRoot)
+		require.True(t, present, "payload data availability vote entry missing for %x: %s", e.PayloadDataAvailabilityVote.BlockRoot, stepstr)
+		assert.Equal(t, expectedPTCVotes(t, stepstr, e.PayloadDataAvailabilityVote), dataAvailability, stepstr)
+	}
+}
+
+func expectedPTCVotes(t *testing.T, stepstr string, votes *ForkChoicePTCVotes) [clparams.PtcSize]int8 {
+	require.Len(t, votes.Votes, int(clparams.PtcSize), stepstr)
+	var expected [clparams.PtcSize]int8
+	for i, vote := range votes.Votes {
+		switch {
+		case vote == nil:
+		case *vote:
+			expected[i] = 1
+		default:
+			expected[i] = -1
+		}
+	}
+	return expected
 }

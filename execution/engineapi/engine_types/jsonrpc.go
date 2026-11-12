@@ -97,25 +97,32 @@ func BlobsBundleFromTransactions(txs types.Transactions) (*BlobsBundle, error) {
 		Blobs:       make([]hexutil.Bytes, 0),
 	}
 	for i, txn := range txs {
-		if txn.Type() != types.BlobTxType {
+		if txn.Type() != types.BlobTxType && txn.GetBlobGas() == 0 {
 			continue
 		}
-		blobTx, ok := txn.(*types.BlobTxWrapper)
-		if !ok {
-			return nil, fmt.Errorf("expected BlobTxWrapper for tx %d, got %T", i, txn)
+		var blobs types.Blobs
+		var commitments types.BlobKzgs
+		var proofs types.KZGProofs
+		switch tx := txn.(type) {
+		case *types.BlobTxWrapper:
+			blobs, commitments, proofs = tx.Blobs, tx.Commitments, tx.Proofs
+		case *types.FrameTxWrapper:
+			blobs, commitments, proofs = tx.Blobs, tx.Commitments, tx.Proofs
+		default:
+			return nil, fmt.Errorf("missing blob sidecar for tx %d (%T)", i, txn)
 		}
-		for _, c := range blobTx.Commitments {
+		for _, c := range commitments {
 			cp := make([]byte, len(c))
 			copy(cp, c[:])
 			bundle.Commitments = append(bundle.Commitments, cp)
 		}
-		for _, p := range blobTx.Proofs {
+		for _, p := range proofs {
 			pp := make([]byte, len(p))
 			copy(pp, p[:])
 			bundle.Proofs = append(bundle.Proofs, pp)
 		}
 		//nolint:gocritic // rangeValCopy: iterating over 128KB blob byte array directly
-		for _, b := range blobTx.Blobs {
+		for _, b := range blobs {
 			bp := make([]byte, len(b))
 			copy(bp, b[:])
 			bundle.Blobs = append(bundle.Blobs, bp)
@@ -399,4 +406,11 @@ func ConvertPayloadId(payloadId uint64) *hexutil.Bytes {
 	binary.BigEndian.PutUint64(encodedPayloadId, payloadId)
 	ret := hexutil.Bytes(encodedPayloadId)
 	return &ret
+}
+
+func DecodePayloadID(payloadID []byte) (uint64, error) {
+	if len(payloadID) != 8 {
+		return 0, errors.New("invalid payload id: expected 8 bytes")
+	}
+	return binary.BigEndian.Uint64(payloadID), nil
 }

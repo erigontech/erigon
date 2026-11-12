@@ -104,6 +104,11 @@ func (api *APIImpl) FillTransaction(ctx context.Context, args ethapi.CallArgs) (
 		}
 	}
 
+	if args.BlobVersionedHashes == nil {
+		// The calls reject a blob fee cap without blob hashes; a filled non-blob transaction has none.
+		args.MaxFeePerBlobGas = nil
+	}
+
 	if args.AuthorizationList != nil && len(args.AuthorizationList) == 0 {
 		return nil, errors.New("need at least one authorization for a set-code transaction")
 	}

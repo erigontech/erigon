@@ -200,6 +200,7 @@ func TestTraceTxCompletionV2(t *testing.T) {
 			require.EqualValues(t, params.StateGasPerStorageSet, received.BlockStateGasUsed)
 			require.Equal(t, receivedReceipt.GasUsed, received.BlockExecutionGasUsed+received.BlockStateGasUsed)
 			require.Zero(t, received.GasRefund)
+			require.False(t, ibs.AccessedAddr(recipient), "tracing does not build a block access list")
 		})
 	}
 }
@@ -257,7 +258,6 @@ func TestFinalizeCallTxPublishesWritesToNextTx(t *testing.T) {
 	ibs := state.New(state.NewNoopReader())
 	defer ibs.Close()
 	ibs.SetVersionMap(state.NewVersionMap(nil))
-	ibs.SetNoMaterialize(true)
 	ibs.SetNoConflictDetection()
 	ibs.SetTxContext(0, 0)
 	require.NoError(t, ibs.SetState(addr, key, *uint256.NewInt(7)))
@@ -292,16 +292,15 @@ func TestFinalizeCallTxRemovesTouchedEmptyAccount(t *testing.T) {
 	ibs := state.New(emptyAccountReader{NoopReader: state.NewNoopReader(), addr: addr})
 	defer ibs.Close()
 	ibs.SetVersionMap(state.NewVersionMap(nil))
-	ibs.SetNoMaterialize(true)
 	ibs.SetNoConflictDetection()
-	ibs.SetTxContext(0, 0)
+	ibs.SetTxContext(1, 0)
 	exists, err := ibs.Exist(addr)
 	require.NoError(t, err)
 	require.True(t, exists)
 	require.NoError(t, ibs.TouchAccount(addr))
 	require.NoError(t, ethapi.FinalizeCallTx(ibs, &chain.Rules{IsSpuriousDragon: true}))
 
-	ibs.SetTxContext(0, 1)
+	ibs.SetTxContext(1, 1)
 	exists, err = ibs.Exist(addr)
 	require.NoError(t, err)
 	require.False(t, exists)
@@ -314,15 +313,14 @@ func TestFinalizeCallTxKeepsARecreatedEmptyAccountDeleted(t *testing.T) {
 	ibs := state.New(emptyAccountReader{NoopReader: state.NewNoopReader(), addr: addr})
 	defer ibs.Close()
 	ibs.SetVersionMap(state.NewVersionMap(nil))
-	ibs.SetNoMaterialize(true)
 	ibs.SetNoConflictDetection()
 	rules := &chain.Rules{IsSpuriousDragon: true}
 
-	ibs.SetTxContext(0, 0)
+	ibs.SetTxContext(1, 0)
 	require.NoError(t, ibs.TouchAccount(addr))
 	require.NoError(t, ethapi.FinalizeCallTx(ibs, rules))
 
-	ibs.SetTxContext(0, 1)
+	ibs.SetTxContext(1, 1)
 	exists, err := ibs.Exist(addr)
 	require.NoError(t, err)
 	require.False(t, exists)
@@ -330,8 +328,81 @@ func TestFinalizeCallTxKeepsARecreatedEmptyAccountDeleted(t *testing.T) {
 	require.NoError(t, ibs.TouchAccount(addr))
 	require.NoError(t, ethapi.FinalizeCallTx(ibs, rules))
 
-	ibs.SetTxContext(0, 2)
+	ibs.SetTxContext(1, 2)
 	exists, err = ibs.Exist(addr)
 	require.NoError(t, err)
 	require.False(t, exists)
+}
+
+func BenchmarkTraceTxAccountReads(b *testing.B) {
+	for _, count := range []int{1, 100, 1000} {
+		b.Run(fmt.Sprint(count), func(b *testing.B) {
+			sender := accounts.InternAddress(common.HexToAddress("0x1111"))
+			recipient := accounts.InternAddress(common.HexToAddress("0x2222"))
+			code := make([]byte, 0, count*5+1)
+			for i := range count {
+				code = append(code, byte(vm.PUSH2), byte((i+0x3000)>>8), byte(i+0x3000), byte(vm.BALANCE), byte(vm.POP))
+			}
+			code = append(code, byte(vm.STOP))
+			ibs := state.NewPooled(state.NewNoopReader())
+			defer state.ReleasePooled(ibs)
+			msg := types.NewMessage(sender, recipient, 0, uint256.NewInt(0), 10_000_000,
+				uint256.NewInt(0), uint256.NewInt(0), uint256.NewInt(0), nil, nil, false, false, true, false, nil)
+			txn := types.NewTransaction(0, recipient.Value(), uint256.NewInt(0), 10_000_000, uint256.NewInt(0), nil)
+			blockCtx := evmtypes.BlockContext{CanTransfer: protocol.CanTransfer, Transfer: misc.Transfer, GasLimit: 30_000_000}
+			name := "callTracer"
+			config := &tracersConfig.TraceConfig{Tracer: &name}
+			b.ReportAllocs()
+			for b.Loop() {
+				ibs.Reset()
+				VersionedCallState(ibs)
+				if err := ibs.SetCode(recipient, code, tracing.CodeChangeUnspecified); err != nil {
+					b.Fatal(err)
+				}
+				_, err := TraceTx(b.Context(), nil, txn, msg, blockCtx, protocol.NewEVMTxContext(msg),
+					uint256.NewInt(0), common.Hash{}, 0, ibs, config, chain.TestChainOsakaConfig,
+					jsonstream.New(io.Discard), time.Minute, nil)
+				if err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+func TestTraceTimeoutCannotExceedTheServerTimeout(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		client string
+		want   time.Duration
+	}{
+		{"1h", 5 * time.Second},
+		{"1s", time.Second},
+		{"5s", 5 * time.Second},
+	} {
+		got, err := traceTimeout(5*time.Second, &tc.client)
+		require.NoError(t, err)
+		require.Equal(t, tc.want, got, tc.client)
+	}
+	got, err := traceTimeout(5*time.Second, nil)
+	require.NoError(t, err)
+	require.Equal(t, 5*time.Second, got)
+	bad := "soon"
+	_, err = traceTimeout(5*time.Second, &bad)
+	require.Error(t, err)
+}
+
+func TestAssembleTracerCapsTheClientTimeout(t *testing.T) {
+	t.Parallel()
+	code, timeout := "{result: function() { return 1 }, fault: function() {}}", "1h"
+	config := &tracersConfig.TraceConfig{Tracer: &code, Timeout: &timeout}
+
+	tracer, _, cancel, err := AssembleTracer(t.Context(), config, common.Hash{}, nil, common.Hash{}, 0, jsonstream.New(io.Discard), 50*time.Millisecond)
+	require.NoError(t, err)
+	defer cancel()
+
+	require.Eventually(t, func() bool {
+		_, err := tracer.GetResult()
+		return err != nil
+	}, 5*time.Second, 10*time.Millisecond, "the server timeout must stop the tracer")
 }

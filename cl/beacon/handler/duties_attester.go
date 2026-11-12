@@ -69,7 +69,7 @@ func (a *ApiHandler) getDependentRoot(epoch uint64, attester bool) (common.Hash,
 	)
 	return dependentRoot, a.syncedData.ViewHeadState(func(s *state.CachingBeaconState) error {
 		dependentRootSlot := computeDependentRootSlot(epoch, a.beaconChainCfg.SlotsPerEpoch, attester)
-		if !a.syncedData.Syncing() && dependentRootSlot == a.syncedData.HeadSlot() {
+		if !a.syncedData.Syncing() && dependentRootSlot >= a.syncedData.HeadSlot() {
 			dependentRoot = a.syncedData.HeadRoot()
 			return nil
 		}

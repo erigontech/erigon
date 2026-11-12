@@ -353,6 +353,62 @@ func TestFindNearestSlotBackwards_NoRoots(t *testing.T) {
 	require.Equal(t, uint64(0), result)
 }
 
+func TestPtcWindowEpochReconstructionStart(t *testing.T) {
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	cfg := clparams.MainnetBeaconConfig
+	cfg.GloasForkEpoch = 1000
+	forkSlot := cfg.GloasForkEpoch * cfg.SlotsPerEpoch
+	lastPreForkEpochStart := forkSlot - cfg.SlotsPerEpoch
+	require.NoError(t, beacon_indicies.MarkRootCanonical(tx, lastPreForkEpochStart, common.Hash{1}))
+	const targetSlot = uint64(1_000_000)
+
+	missing := func(string, []byte) ([]byte, error) { return nil, nil }
+	attempt, forced, err := ptcWindowEpochReconstructionStart(tx, &cfg, 0, targetSlot, missing)
+	require.NoError(t, err)
+	require.True(t, forced)
+	require.Equal(t, lastPreForkEpochStart, attempt)
+
+	present := func(table string, key []byte) ([]byte, error) {
+		require.Equal(t, kv.PtcWindowEpochTable, table)
+		require.Equal(t, base_encoding.Encode64ToBytes4(forkSlot), key)
+		return []byte{1}, nil
+	}
+	attempt, forced, err = ptcWindowEpochReconstructionStart(tx, &cfg, 0, targetSlot, present)
+	require.NoError(t, err)
+	require.False(t, forced)
+	require.Equal(t, targetSlot, attempt)
+
+	t.Run("nothing processed", func(t *testing.T) {
+		cfg.GloasForkEpoch = 0
+		getter := func(string, []byte) ([]byte, error) {
+			t.Fatal("unexpected PtcWindowEpoch lookup")
+			return nil, nil
+		}
+		attempt, forced, err := ptcWindowEpochReconstructionStart(tx, &cfg, 0, 0, getter)
+		require.NoError(t, err)
+		require.False(t, forced)
+		require.Zero(t, attempt)
+	})
+
+	t.Run("post-fork anchor", func(t *testing.T) {
+		cfg.GloasForkEpoch = 0
+		const anchorSlot = uint64(128)
+		presentAtAnchor := func(table string, key []byte) ([]byte, error) {
+			require.Equal(t, kv.PtcWindowEpochTable, table)
+			require.Equal(t, base_encoding.Encode64ToBytes4(anchorSlot), key)
+			return []byte{1}, nil
+		}
+		attempt, forced, err := ptcWindowEpochReconstructionStart(tx, &cfg, anchorSlot, targetSlot, presentAtAnchor)
+		require.NoError(t, err)
+		require.False(t, forced)
+		require.Equal(t, targetSlot, attempt)
+	})
+}
+
 func TestComputeSlotToBeRequested(t *testing.T) {
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(context.Background())

@@ -186,18 +186,16 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Paramete
 	// A stopped builder is still worth reusing: it holds the payload it was stopped for, which is
 	// exactly what a repeated request is asking for. Only one that cannot produce - failed, or
 	// discarded with its work still winding down - has to be passed over.
-	if previousID, ok := e.buildersByTimestamp[params.Timestamp]; ok {
-		if previous := e.builders[previousID]; previous != nil && previous.builder != nil &&
+	for previousID, previous := range e.builders {
+		if previous != nil && previous.params != nil && previous.params.Timestamp == params.Timestamp && previous.builder != nil &&
 			!previous.builder.Failed() && !previous.builder.Discarded() {
 			if sameBuildRequest(previous.params, params) {
+				e.buildersByTimestamp[params.Timestamp] = previousID
 				e.logger.Info("[ForkChoiceUpdated] duplicate build request")
 				return AssembleBlockResult{PayloadID: previousID}, nil
 			}
 		}
 	}
-	// A superseded builder keeps running to its own deadline. The timestamp index moves to the new
-	// one, so nothing reaches it by dedup, while an id already handed out goes on answering with a
-	// payload that is still growing.
 	e.evictOldBuilders()
 
 	e.nextPayloadId++
@@ -205,10 +203,20 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Paramete
 	ownedParams.PayloadId = e.nextPayloadId
 
 	secondsPerSlot := e.config.SecondsPerSlot()
+	maxBuildTime := buildDuration(params.Timestamp, time.Now(), secondsPerSlot)
+	// Explicit lists use the request budget, independent of the payload timestamp.
+	if ownedParams.RequireAllTransactions {
+		if deadline, ok := ctx.Deadline(); ok {
+			maxBuildTime = time.Until(deadline)
+		}
+	}
 	e.builders[e.nextPayloadId] = &builderEntry{
 		builder: builder.NewBlockBuilder(e.backgroundCtx, e.builderFunc, ownedParams,
-			buildDuration(params.Timestamp, time.Now(), secondsPerSlot), stopGraceDuration(secondsPerSlot)),
+			maxBuildTime, stopGraceDuration(secondsPerSlot)),
 		params: ownedParams,
+	}
+	if ownedParams.RequireAllTransactions {
+		context.AfterFunc(ctx, e.builders[e.nextPayloadId].builder.Discard)
 	}
 	e.buildersByTimestamp[params.Timestamp] = e.nextPayloadId
 	e.logger.Info("[ForkChoiceUpdated] BlockBuilder added", "payload", e.nextPayloadId)

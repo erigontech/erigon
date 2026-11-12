@@ -241,6 +241,63 @@ func TestAuthenticatedRpcServerAppliesSubscriptionLimit(t *testing.T) {
 	require.Equal(t, rpc.ErrCodeServerOverloaded, second.Code)
 }
 
+func TestAuthenticatedRpcServerRequiresJwtForGraphQL(t *testing.T) {
+	ln, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	cfg := &httpcfg.HttpCfg{
+		GraphQLEnabled:  true,
+		AuthRpcListener: ln,
+		JWTSecretPath:   filepath.Join(t.TempDir(), "jwt.hex"),
+	}
+	listener, engineSrv, _, err := createEngineListener(cfg, []rpc.API{{Namespace: "test", Service: subscribingService{}}}, log.New())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		engineSrv.Stop()
+		_ = listener.Close()
+	})
+
+	for _, path := range []string{"/graphql", "/graphql/ui"} {
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "http://"+ln.Addr().String()+path, strings.NewReader(`{"query":"{block{number}}"}`))
+		require.NoError(t, err)
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		resp.Body.Close()
+		require.Equal(t, http.StatusForbidden, resp.StatusCode, path)
+	}
+}
+
+func TestAuthenticatedRpcServerListensOnIPv6(t *testing.T) {
+	for _, listenAddr := range []string{"::1", "[::1]"} {
+		t.Run(listenAddr, func(t *testing.T) {
+			cfg := &httpcfg.HttpCfg{
+				AuthRpcHTTPListenAddress: listenAddr,
+				JWTSecretPath:            filepath.Join(t.TempDir(), "jwt.hex"),
+			}
+			listener, engineSrv, addr, err := createEngineListener(cfg, nil, log.New())
+			require.NoError(t, err)
+			t.Cleanup(func() {
+				engineSrv.Stop()
+				_ = listener.Close()
+			})
+			host, _, err := net.SplitHostPort(addr)
+			require.NoError(t, err)
+			require.Equal(t, "::1", host)
+		})
+	}
+}
+
+func TestListenHostPort(t *testing.T) {
+	for _, tc := range []struct{ host, want string }{
+		{"::1", "[::1]:8545"},
+		{"[::1]", "[::1]:8545"},
+		{"127.0.0.1", "127.0.0.1:8545"},
+		{"", ":8545"},
+	} {
+		require.Equal(t, tc.want, listenHostPort(tc.host, 8545), tc.host)
+	}
+}
+
 func TestGraphQLHandlerAdmissionControl(t *testing.T) {
 	started := make(chan struct{})
 	release := make(chan struct{})
