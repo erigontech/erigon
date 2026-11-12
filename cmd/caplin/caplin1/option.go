@@ -40,16 +40,14 @@ func WithBuilder(mevRelayURL string, beaconConfig *clparams.BeaconChainConfig, p
 func builderOptionForConfig(config *clparams.CaplinConfig, beaconConfig *clparams.BeaconChainConfig) (CaplinOption, bool) {
 	legacyRelayURL := ""
 	skippedLegacy := false
-	config.BeaconAPIRouter.BuilderNamespace = config.BeaconAPIRouter.Builder
 	if config.BeaconAPIRouter.Builder {
 		if config.RelayUrlExist() {
 			legacyRelayURL = config.MevRelayUrl
 		} else {
-			config.BeaconAPIRouter.Builder = false
 			skippedLegacy = true
 		}
 	}
-	if !config.BeaconAPIRouter.Validator && !config.BeaconAPIRouter.Builder {
+	if !config.BeaconAPIRouter.Validator && legacyRelayURL == "" {
 		return nil, skippedLegacy
 	}
 	return WithBuilder(legacyRelayURL, beaconConfig, builderTargetPolicyForConfig(config)), skippedLegacy

@@ -35,15 +35,14 @@ type RouterConfiguration struct {
 	IdleTimeout     time.Duration
 	WriteTimeout    time.Duration
 
-	Beacon           bool
-	Builder          bool
-	BuilderNamespace bool
-	Config           bool
-	Debug            bool
-	Events           bool
-	Node             bool
-	Validator        bool
-	Lighthouse       bool
+	Beacon     bool
+	Builder    bool
+	Config     bool
+	Debug      bool
+	Events     bool
+	Node       bool
+	Validator  bool
+	Lighthouse bool
 
 	// PreserveGraffiti uses caller-supplied graffiti verbatim instead of prefixing it with
 	// the EL+CL identification segment.

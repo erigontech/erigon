@@ -22,33 +22,48 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
+	builder_mock "github.com/erigontech/erigon/cl/beacon/builder/mock_services"
 )
 
-func TestBuilderRoutesWithoutRelay(t *testing.T) {
-	t.Run("builder namespace enabled", func(t *testing.T) {
-		handler := &ApiHandler{routerCfg: &beacon_router_configuration.RouterConfiguration{
-			Beacon:           true,
-			BuilderNamespace: true,
-			Validator:        true,
-		}}
-		handler.Init()
-
-		route := chi.NewRouteContext()
-		require.True(t, handler.mux.Match(route, http.MethodGet, "/eth/v1/builder/states/head/expected_withdrawals"))
-		for _, path := range []string{
-			"/eth/v1/beacon/blinded_blocks",
-			"/eth/v2/beacon/blinded_blocks",
-			"/eth/v1/validator/register_validator",
-		} {
-			require.False(t, handler.mux.Match(chi.NewRouteContext(), http.MethodPost, path), path)
-		}
-	})
-
-	t.Run("builder namespace disabled", func(t *testing.T) {
-		handler := &ApiHandler{routerCfg: &beacon_router_configuration.RouterConfiguration{Beacon: true, Validator: true}}
-		handler.Init()
-		require.False(t, handler.mux.Match(chi.NewRouteContext(), http.MethodGet, "/eth/v1/builder/states/head/expected_withdrawals"))
-	})
+func TestBuilderRoutes(t *testing.T) {
+	routes := []struct {
+		method string
+		path   string
+	}{
+		{http.MethodGet, "/eth/v1/builder/states/head/expected_withdrawals"},
+		{http.MethodPost, "/eth/v1/beacon/blinded_blocks"},
+		{http.MethodPost, "/eth/v2/beacon/blinded_blocks"},
+		{http.MethodPost, "/eth/v1/validator/register_validator"},
+	}
+	for _, tc := range []struct {
+		name            string
+		builderEnabled  bool
+		relayConfigured bool
+		want            []bool
+	}{
+		{name: "builder namespace without relay", builderEnabled: true, want: []bool{true, false, false, false}},
+		{name: "builder namespace with relay", builderEnabled: true, relayConfigured: true, want: []bool{true, true, true, true}},
+		{name: "builder namespace disabled", relayConfigured: true, want: []bool{false, false, false, false}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client := builder_mock.NewMockBuilderClient(gomock.NewController(t))
+			client.EXPECT().RelayConfigured().Return(tc.relayConfigured).AnyTimes()
+			handler := &ApiHandler{
+				routerCfg: &beacon_router_configuration.RouterConfiguration{
+					Beacon:    true,
+					Builder:   tc.builderEnabled,
+					Validator: true,
+				},
+				builderClient: client,
+			}
+			handler.Init()
+			for i, route := range routes {
+				matched := handler.mux.Match(chi.NewRouteContext(), route.method, route.path)
+				require.Equal(t, tc.want[i], matched, route.path)
+			}
+		})
+	}
 }
