@@ -1329,15 +1329,25 @@ func (f *Fetch) handleStateChanges(ctx context.Context, client StateChangesClien
 	if err != nil {
 		return err
 	}
+	var refreshSnapshot *time.Timer
 	for req, err := stream.Recv(); ; req, err = stream.Recv() {
+		if refreshSnapshot != nil {
+			refreshSnapshot.Stop()
+			refreshSnapshot = nil
+		}
 		if err != nil {
 			return err
 		}
 		if req == nil {
 			return nil
 		}
-		if err := f.handleStateChangesRequest(ctx, req); err != nil && !errors.Is(err, errStateViewSuperseded) {
-			return err
+		if err := f.handleStateChangesRequest(ctx, req); err != nil {
+			if !errors.Is(err, errStateViewSuperseded) {
+				return err
+			}
+			// A newer commit may have no notification. Drain queued batches, but
+			// reconnect for a fresh snapshot if the stream stays idle.
+			refreshSnapshot = time.AfterFunc(time.Second, cancel)
 		}
 
 		if f.wg != nil { // to help tests

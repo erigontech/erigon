@@ -445,8 +445,13 @@ func TestPoolProvideTxnsAmsterdamGasAdmission(t *testing.T) {
 
 func TestPoolProvideTxnsUsesRemainingGasForAdmission(t *testing.T) {
 	poolCtx, stopPool := context.WithCancel(t.Context())
-	// Keep the subscription open so startup does not wait for state recovery.
-	stateChanges := direct.NewStateDiffClientDirect(remotedbserver.NewKvServer(poolCtx, nil, nil, nil, log.New()))
+	kvServer := remotedbserver.NewKvServer(poolCtx, nil, nil, nil, log.New())
+	kvServer.SetStateChangesSnapshot(func(context.Context) (*remoteproto.StateChangeBatch, error) {
+		return &remoteproto.StateChangeBatch{ChangeBatch: []*remoteproto.StateChange{{
+			BlockHash: gointerfaces.ConvertHashToH256(common.Hash{}),
+		}}}, nil
+	})
+	stateChanges := direct.NewStateDiffClientDirect(kvServer)
 	publicPool, err := txpool.New(poolCtx, make(chan txpool.Announcements, 1),
 		mdbxtest.NewTestPoolDB(t), temporaltest.NewTestDB(t, datadir.New(t.TempDir())),
 		txpoolcfg.DefaultConfig, kvcache.New(kvcache.DefaultCoherentConfig), chain.AllProtocolChanges,
