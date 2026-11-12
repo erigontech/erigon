@@ -31,8 +31,10 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/testlog"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/direct"
@@ -603,6 +605,50 @@ func TestFetcherFetchBodies(t *testing.T) {
 			require.NotNil(t, body)
 			require.NoError(t, body.MatchesHeader(mockHeaders[i]))
 		}
+	})
+}
+
+func TestFetcherFetchBodiesWithEmptyBlobHashes(t *testing.T) {
+	t.Parallel()
+
+	signer := types.LatestSignerForChainID(uint256.NewInt(1))
+	key, err := crypto.HexToECDSA("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+	require.NoError(t, err)
+	txn, err := types.SignTx(&types.BlobTx{
+		DynamicFeeTransaction: *types.NewEIP1559Transaction(
+			*uint256.NewInt(1), 0, common.Address{1}, uint256.NewInt(0), 21_000,
+			uint256.NewInt(1), uint256.NewInt(2), nil,
+		),
+		MaxFeePerBlobGas: *uint256.NewInt(1),
+	}, *signer, key)
+	require.NoError(t, err)
+	body := &types.Body{Transactions: types.Transactions{txn}}
+	header := newMockHeaderForBody(1, body)
+	peerId := PeerIdFromUint64(1)
+	requestId := uint64(1234)
+
+	test := newFetcherTest(t, newMockRequestGenerator(requestId))
+	test.mockSentryStreams(requestResponseMock{
+		requestId:         requestId,
+		wantRequestPeerId: peerId,
+		wantRequestHashes: []common.Hash{header.Hash()},
+		mockResponseInboundMessages: []*sentryproto.InboundMessage{{
+			Id:     sentryproto.MessageId_BLOCK_BODIES_66,
+			PeerId: peerId.H512(),
+			Data:   newMockBlockBodiesPacketBytes(t, requestId, body),
+		}},
+	})
+	test.run(func(ctx context.Context, t *testing.T) {
+		bodies, err := test.fetcher.FetchBodies(ctx, []*types.Header{header}, peerId)
+		require.NoError(t, err)
+		require.Len(t, bodies.Data, 1)
+		require.NoError(t, bodies.Data[0].MatchesHeader(header))
+		require.Len(t, bodies.Data[0].Transactions, 1)
+		decoded := bodies.Data[0].Transactions[0]
+		require.Equal(t, txn.Hash(), decoded.Hash())
+		require.Empty(t, decoded.GetBlobHashes())
+		_, err = decoded.AsMessage(*signer, nil, &chain.Rules{IsCancun: true})
+		require.ErrorIs(t, err, types.ErrBlobTxnEmptyBlobs)
 	})
 }
 
