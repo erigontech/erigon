@@ -282,6 +282,25 @@ func TestChainTipSyncLeavesBlockWaitForUnpublishedPayloadStatus(t *testing.T) {
 	require.Less(t, time.Since(started), 300*time.Millisecond)
 	<-done
 	require.False(t, f.cfg.forkChoiceRerunAt.IsZero())
+	f.cfg.forkChoiceRerunAt = time.Now().Add(-sleepForSlotRewakeInterval)
+	secondCtx, secondCancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	err = listenToIncomingBlocksUntilANewBlockIsReceived(
+		secondCtx, log.Root(), f.cfg,
+		Args{seenSlot: f.headSlot, targetSlot: f.headSlot + 1},
+		make(chan *peers.PeeredObject[[]*cltypes.SignedBeaconBlock], 1), make(chan error, 1),
+	)
+	secondCancel()
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+
+	f.cfg.headEvents = headEventPublication{root: common.Hash{0xdd}, payloadStatus: "full"}
+	thirdCtx, thirdCancel := context.WithTimeout(t.Context(), 300*time.Millisecond)
+	defer thirdCancel()
+	err = listenToIncomingBlocksUntilANewBlockIsReceived(
+		thirdCtx, log.Root(), f.cfg,
+		Args{seenSlot: f.headSlot, targetSlot: f.headSlot + 1},
+		make(chan *peers.PeeredObject[[]*cltypes.SignedBeaconBlock], 1), make(chan error, 1),
+	)
+	require.NoError(t, err)
 }
 
 // ChainTipSync can wait a slot or longer for the next block, and validators attest to the head the beacon API serves

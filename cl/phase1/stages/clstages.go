@@ -95,6 +95,8 @@ type Cfg struct {
 	// EL adoption. Tolerated FCU timeouts still update it; an FCU the EL turned away as busy does not.
 	executionHead               common.Hash
 	forkChoiceRerunAt           time.Time
+	forkChoiceRerunHead         headEventPublication
+	forkChoiceRerunHeadEvents   headEventPublication
 	forkChoiceWaitingForIndices bool
 	forkChoiceIndicesChanged    <-chan struct{}
 	chainTipRejections          *chainTipRejections

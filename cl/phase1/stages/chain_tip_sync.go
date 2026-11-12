@@ -226,9 +226,17 @@ MainLoop:
 				break MainLoop
 			}
 			head, headSlot, err := cfg.forkChoice.GetHeadNode()
-			if err == nil && headEventUnpublished(cfg.beaconCfg, head, headSlot, cfg.headEvents) && time.Since(cfg.forkChoiceRerunAt) >= sleepForSlotRewakeInterval {
-				cfg.forkChoiceRerunAt = time.Now()
-				break MainLoop
+			if err == nil {
+				isGloas := cfg.beaconCfg.GetCurrentStateVersion(headSlot/cfg.beaconCfg.SlotsPerEpoch) >= clparams.GloasVersion
+				headPublication := headEventPublication{root: head.Root, payloadStatus: headPayloadStatus(head, isGloas)}
+				if headEventUnpublished(cfg.beaconCfg, head, headSlot, cfg.headEvents) &&
+					(headPublication != cfg.forkChoiceRerunHead || cfg.headEvents != cfg.forkChoiceRerunHeadEvents) &&
+					time.Since(cfg.forkChoiceRerunAt) >= sleepForSlotRewakeInterval {
+					cfg.forkChoiceRerunAt = time.Now()
+					cfg.forkChoiceRerunHead = headPublication
+					cfg.forkChoiceRerunHeadEvents = cfg.headEvents
+					break MainLoop
+				}
 			}
 		case <-ctx.Done():
 			// Handle context cancellation
