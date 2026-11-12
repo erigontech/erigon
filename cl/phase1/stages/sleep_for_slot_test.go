@@ -148,6 +148,24 @@ func TestSleepForSlotGloasHeadChangeWakesEarlyAndTransitionsToForkChoice(t *test
 	require.Equal(t, ForkChoice, sleepForSlotNextStage(headChanged, readySleepForSlotArgs()))
 }
 
+func TestSleepForSlotUsesHeadSlotForHeadEventPayloadStatus(t *testing.T) {
+	beaconCfg := sleepForSlotConfig(10)
+	head := common.Hash{1}
+	headSlot := beaconCfg.SlotsPerEpoch*10 - 1
+	clock := sleepForSlotClockFake{currentEpoch: 10, currentSlot: headSlot, nextSlot: time.Now().Add(5 * sleepForSlotHeadPollInterval)}
+
+	_, headChanged, err := waitForNextSlotOrHeadChange(
+		t.Context(), headSlot+1, beaconCfg,
+		sleepForSlotForkChoiceFake{head: head, headSlot: headSlot, payloadStatus: cltypes.PayloadStatusEmpty},
+		sleepForSlotSyncedDataFake{head: head},
+		clock,
+		sleepForSlotWake{}, common.Hash{}, headEventPublication{root: head, payloadStatus: "full"},
+	)
+
+	require.NoError(t, err)
+	require.False(t, headChanged)
+}
+
 func TestSleepForSlotGloasEqualHeadsWaitsAndTransitionsToChainTipSync(t *testing.T) {
 	head := common.Hash{1}
 	wait := 5 * sleepForSlotHeadPollInterval
@@ -160,7 +178,7 @@ func TestSleepForSlotGloasEqualHeadsWaitsAndTransitionsToChainTipSync(t *testing
 		sleepForSlotForkChoiceFake{head: head, calls: &calls},
 		sleepForSlotSyncedDataFake{head: head},
 		clock,
-		sleepForSlotWake{}, common.Hash{}, headEventPublication{root: head, payloadStatus: "empty"},
+		sleepForSlotWake{}, common.Hash{}, headEventPublication{root: head, payloadStatus: "full"},
 	)
 
 	require.NoError(t, err)
@@ -190,7 +208,7 @@ func TestSleepForSlotGloasRetriesDataAvailableEnvelopesFromHeadOrPreviousSlot(t 
 				sleepForSlotForkChoiceFake{head: head, headSlot: tt.headSlot, retryMinSlots: &retryMinSlots, retryDeadlines: &retryDeadlines},
 				sleepForSlotSyncedDataFake{head: head},
 				clock,
-				sleepForSlotWake{}, common.Hash{}, headEventPublication{root: head, payloadStatus: "empty"},
+				sleepForSlotWake{}, common.Hash{}, headEventPublication{root: head, payloadStatus: "full"},
 			)
 
 			require.NoError(t, err)
@@ -417,6 +435,7 @@ func readySleepForSlotArgs() Args {
 
 func sleepForSlotConfig(gloasForkEpoch uint64) *clparams.BeaconChainConfig {
 	return &clparams.BeaconChainConfig{
+		SlotsPerEpoch:      32,
 		AltairForkEpoch:    0,
 		BellatrixForkEpoch: 0,
 		CapellaForkEpoch:   0,

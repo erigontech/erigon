@@ -102,6 +102,7 @@ func waitForNextSlotOrHeadChange(
 			if err != nil {
 				continue
 			}
+			headIsGloas := beaconCfg.GetCurrentStateVersion(headSlot/beaconCfg.SlotsPerEpoch) >= clparams.GloasVersion
 			executionHead, ready := forkChoice.GetExecutionHead(head)
 			// Both fork-choice reads can block past cancellation or the slot boundary.
 			select {
@@ -112,7 +113,7 @@ func waitForNextSlotOrHeadChange(
 			if !time.Now().Before(nextSlotTime) {
 				return sleepForSlotWake{}, false, nil
 			}
-			headEventChanged := head.Root != lastHeadEvent.root || headPayloadStatus(head, isGloas) != lastHeadEvent.payloadStatus
+			headEventChanged := head.Root != lastHeadEvent.root || headPayloadStatus(head, headIsGloas) != lastHeadEvent.payloadStatus
 			changed := head.Root != syncedData.HeadRoot() || (ready && executionHead != lastExecutionHead) || headEventChanged
 			if changed && (head.Root != lastWake.root || (ready && executionHead != lastWake.executionHead) || time.Since(lastWake.at) >= sleepForSlotRewakeInterval) {
 				return sleepForSlotWake{root: head.Root, executionHead: executionHead, at: time.Now()}, true, nil
