@@ -216,3 +216,74 @@ func TestMergeRejectedBatchKeepsReceiverUnchanged(t *testing.T) {
 		require.False(t, ok, "receiverHasAccumulator=%v", receiverHasAccumulator)
 	}
 }
+
+// Exec workers read the latest values while the apply loop writes them, so a read must not
+// wait for a writer that holds the key's lock.
+func TestGetLatestDoesNotWaitForWriterLock(t *testing.T) {
+	t.Parallel()
+	sd := &TemporalMemBatch{
+		stepSize: 16,
+		storage:  btree2.NewMap[string, []dataWithTxNum](128),
+		metrics:  &kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
+	}
+	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain} {
+		sd.putLatest(domain, "k", []byte("v1"), 1)
+
+		sh := sd.shard(domain, "k")
+		sh.Lock()
+		got := make(chan string, 1)
+		go func() {
+			v, _, _ := sd.GetLatest(domain, []byte("k"))
+			got <- string(v)
+		}()
+		select {
+		case v := <-got:
+			require.Equal(t, "v1", v, "domain %s", domain)
+		case <-time.After(5 * time.Second):
+			t.Errorf("domain %s: GetLatest waited for the writer's lock", domain)
+		}
+		sh.Unlock()
+	}
+}
+
+// A reader sees whole published versions in write order: a later read of a key never
+// returns an older value than an earlier read did.
+func TestGetLatestSeesPublishedVersionsInOrder(t *testing.T) {
+	t.Parallel()
+	sd := &TemporalMemBatch{
+		stepSize: 16,
+		storage:  btree2.NewMap[string, []dataWithTxNum](128),
+		metrics:  &kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
+	}
+	const writes = 2000
+	var wg sync.WaitGroup
+	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain} {
+		wg.Go(func() {
+			for i := 1; i <= writes; i++ {
+				sd.putLatest(domain, "k", []byte(fmt.Sprintf("%06d", i)), uint64(i))
+			}
+		})
+		for range 4 {
+			wg.Go(func() {
+				last := ""
+				for range writes {
+					v, _, ok := sd.GetLatest(domain, []byte("k"))
+					if !ok {
+						continue
+					}
+					if string(v) < last {
+						t.Errorf("domain %s: read %s after %s", domain, v, last)
+						return
+					}
+					last = string(v)
+				}
+			})
+		}
+	}
+	wg.Wait()
+	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain} {
+		v, _, ok := sd.GetLatest(domain, []byte("k"))
+		require.True(t, ok)
+		require.Equal(t, fmt.Sprintf("%06d", writes), string(v))
+	}
+}
