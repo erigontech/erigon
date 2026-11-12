@@ -376,3 +376,59 @@ func TestDeferPublishHoldsBackTheBatchFromPublishedReads(t *testing.T) {
 	require.Equal(t, "b1", string(v), "the fold reads its own branch writes through the published view")
 	sd.Publish()
 }
+
+// newPublishTestBatch keeps every value of a key, as the parallel executor does, so an unwind without a changeset
+// restores the value before the unwound txNum.
+func newPublishTestBatch() *TemporalMemBatch {
+	return &TemporalMemBatch{
+		stepSize:          16,
+		inMemHistoryReads: true,
+		storage:           btree2.NewMap[string, []dataWithTxNum](128),
+		metrics:           &kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
+	}
+}
+
+// After an unwind, exec readers see the value from before the unwound block, not the block's published write.
+func TestUnwindRepublishesTheValueBeforeTheUnwoundBlock(t *testing.T) {
+	t.Parallel()
+	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
+		sd := newPublishTestBatch()
+		sd.putLatest(domain, "k", []byte("before"), 1)
+
+		sd.DeferPublish()
+		sd.putLatest(domain, "k", []byte("unwound"), 17)
+		sd.Publish()
+		v, _, _ := sd.GetLatestPublished(domain, []byte("k"))
+		require.Equal(t, "unwound", string(v), "domain %s", domain)
+
+		sd.Unwind(17, nil)
+		v, _, ok := sd.GetLatestPublished(domain, []byte("k"))
+		require.True(t, ok, "domain %s", domain)
+		require.Equal(t, "before", string(v), "domain %s: exec readers see the unwound block", domain)
+		locked, _, _ := sd.GetLatest(domain, []byte("k"))
+		require.Equal(t, string(locked), string(v), "domain %s", domain)
+	}
+}
+
+// A block attempt unwound before its writes are published leaves nothing behind: when the block runs again and
+// publishes, exec readers see only the new attempt's writes.
+func TestUnwindDropsTheUnpublishedWritesOfAnAttempt(t *testing.T) {
+	t.Parallel()
+	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
+		sd := newPublishTestBatch()
+		sd.putLatest(domain, "k", []byte("before"), 1)
+
+		sd.DeferPublish()
+		sd.putLatest(domain, "k", []byte("first attempt"), 17)
+		sd.putLatest(domain, "only first attempt", []byte("x"), 17)
+		sd.Unwind(17, nil)
+
+		sd.DeferPublish()
+		sd.putLatest(domain, "k", []byte("second attempt"), 17)
+		sd.Publish()
+		v, _, _ := sd.GetLatestPublished(domain, []byte("k"))
+		require.Equal(t, "second attempt", string(v), "domain %s", domain)
+		_, _, ok := sd.GetLatestPublished(domain, []byte("only first attempt"))
+		require.False(t, ok, "domain %s: exec readers see a write of the unwound attempt", domain)
+	}
+}

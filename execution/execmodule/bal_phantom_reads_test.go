@@ -284,7 +284,7 @@ func testNextBlockReadsThePreviousBlockWrite(t *testing.T, amsterdam bool) {
 	signer := types.LatestSignerForChainID(config.ChainID)
 	blocks, err := gen.GenerateChain(16, func(i int, b *blockgen.BlockGen) {
 		gasPrice := new(uint256.Int).Add(b.GetHeader().BaseFee, uint256.NewInt(1_000))
-		txn, err := types.SignTx(types.NewTransaction(uint64(i), counter, uint256.NewInt(0), 100_000, gasPrice, nil), *signer, key)
+		txn, err := types.SignTx(types.NewTransaction(uint64(i), counter, uint256.NewInt(0), 1_000_000, gasPrice, nil), *signer, key)
 		require.NoError(t, err)
 		b.AddTx(txn)
 	})
@@ -413,8 +413,8 @@ func testFirstBlockAfterUnwind(t *testing.T, amsterdam, viaNewPayload, canonical
 }
 
 // A block executed again after a failed attempt must not see that attempt's writes: by newPayload, the failed
-// sibling at the same height ran the same tx; by forkchoice, the good block ran in the same batch as a failing
-// child and runs again after the batch is unwound. A leftover slot value makes the good block write a wrong root.
+// sibling at the same height ran the same tx on a parent that is still in memory; by forkchoice, the good block ran
+// in the same batch as a failing child and runs again. A leftover slot value makes the good block write a wrong root.
 func TestBlockExecutedAgainDoesNotSeeItsEarlierAttempt(t *testing.T) {
 	for _, amsterdam := range []bool{false, true} {
 		for _, viaNewPayload := range []bool{true, false} {
@@ -431,18 +431,18 @@ func testBlockExecutedAgain(t *testing.T, amsterdam, viaNewPayload bool) {
 	for i := 2; i < len(blocks); i += 2 {
 		good, next := blocks[i], blocks[i+1]
 		if viaNewPayload {
-			bad := tamperBlockGasUsed(t, good, 21_000)
-			status, err := c.m.InsertBlocks(t.Context(), []*types.Block{bad, good})
+			// good is validated without a forkchoice, so the attempts at next read it from the fork validator's batch.
+			status, err := c.m.InsertBlocks(t.Context(), []*types.Block{good})
 			require.NoError(t, err)
 			require.Equal(t, execmodule.ExecutionStatusSuccess, status)
-			vr, err := c.m.ValidateChain(t.Context(), bad)
-			require.NoError(t, err)
-			require.Equal(t, execmodule.ExecutionStatusBadBlock, vr.ValidationStatus, "tampered block %d", bad.NumberU64())
 			c.requireValid(t, good)
-			c.requireHead(t, good)
-			status, err = c.m.InsertBlocks(t.Context(), []*types.Block{next})
+			badNext := tamperBlockGasUsed(t, next, 21_000)
+			status, err = c.m.InsertBlocks(t.Context(), []*types.Block{badNext, next})
 			require.NoError(t, err)
 			require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+			vr, err := c.m.ValidateChain(t.Context(), badNext)
+			require.NoError(t, err)
+			require.Equal(t, execmodule.ExecutionStatusBadBlock, vr.ValidationStatus, "tampered block %d", badNext.NumberU64())
 			c.requireValid(t, next)
 			c.requireHead(t, next)
 			continue
