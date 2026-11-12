@@ -1150,9 +1150,9 @@ type storingAfterValidation struct {
 	stored atomic.Bool
 }
 
-func (m *storingAfterValidation) ValidateChain(ctx context.Context, hash common.Hash, number uint64) (execmodule.ValidationResult, error) {
-	result, err := m.ExecutionModule.ValidateChain(ctx, hash, number)
-	if hash == m.block.Hash() && m.stored.CompareAndSwap(false, true) {
+func (m *storingAfterValidation) ValidateChain(ctx context.Context, block *types.Block) (execmodule.ValidationResult, error) {
+	result, err := m.ExecutionModule.ValidateChain(ctx, block)
+	if block.Hash() == m.block.Hash() && m.stored.CompareAndSwap(false, true) {
 		_, insertErr := m.ExecutionModule.InsertBlocks(ctx, []*types.Block{m.block})
 		require.NoError(m.t, insertErr)
 	}

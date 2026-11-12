@@ -46,7 +46,6 @@ func TestSetCodeClearDelegationPurgesCodeDomain(t *testing.T) {
 		name     string
 		parallel bool
 	}{
-		{"serial", false},
 		{"parallel", true},
 	} {
 		t.Run(mode.name, func(t *testing.T) {
@@ -153,7 +152,6 @@ func TestSetCodeDelegateAndClearInOneTx(t *testing.T) {
 		name     string
 		parallel bool
 	}{
-		{"serial", false},
 		{"parallel", true},
 	} {
 		t.Run(mode.name, func(t *testing.T) {

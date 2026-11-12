@@ -1074,8 +1074,15 @@ func (f *ForkChoiceStore) NewestLightClientUpdate() *cltypes.LightClientUpdate {
 	return f.forkGraph.NewestLightClientUpdate()
 }
 
-func (f *ForkChoiceStore) GetLightClientUpdate(period uint64) (*cltypes.LightClientUpdate, bool) {
-	return f.forkGraph.GetLightClientUpdate(period)
+// GetLightClientUpdates returns the best update of each sync committee period in [startPeriod, endPeriod) on the
+// canonical chain, nil for a period without one: the one finalization settled, or a better one on the selected head's
+// chain for a period that finalization has not settled yet. The whole range is read against one head.
+func (f *ForkChoiceStore) GetLightClientUpdates(startPeriod, endPeriod uint64) []*cltypes.LightClientUpdate {
+	var head common.Hash
+	if node := f.selectedHead.Load(); node != nil {
+		head = node.Root
+	}
+	return f.forkGraph.GetLightClientUpdates(startPeriod, endPeriod, head)
 }
 
 func (f *ForkChoiceStore) GetHeader(blockRoot common.Hash) (*cltypes.BeaconBlockHeader, bool) {

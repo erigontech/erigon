@@ -24,24 +24,18 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
-	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 // Before Spurious Dragon, paying the coinbase a zero fee creates it as an
 // empty account, so a later CALL to the coinbase in the same block does not
-// pay the new-account gas. Parallel import must accept the block that serial
-// execution built.
+// pay the new-account gas. Parallel import must accept the block.
 func TestZeroFeeCreatesCoinbaseBeforeSpuriousDragon(t *testing.T) {
-	prevParallel, prevWorkers := dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount
-	t.Cleanup(func() { dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount = prevParallel, prevWorkers })
-
 	config := &chain.Config{ChainID: uint256.NewInt(1), HomesteadBlock: common.NewUint64(0), TangerineWhistleBlock: common.NewUint64(0)}
 	signer := types.MakeFrontierSigner()
 	coinbase := common.HexToAddress("0xc0ffee")
@@ -51,7 +45,6 @@ func TestZeroFeeCreatesCoinbaseBeforeSpuriousDragon(t *testing.T) {
 	senders := []common.Address{crypto.PubkeyToAddress(keys[0].PublicKey), crypto.PubkeyToAddress(keys[1].PublicKey)}
 	gspec := &types.Genesis{Config: config, GasLimit: 30_000_000, Alloc: alloc}
 
-	dbg.Exec3Parallel = false
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(keys[0]))
 	chainPack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) {
 		b.SetCoinbase(coinbase)
@@ -63,6 +56,7 @@ func TestZeroFeeCreatesCoinbaseBeforeSpuriousDragon(t *testing.T) {
 		b.AddTx(call)
 	})
 	require.NoError(t, err)
+	require.Equal(t, uint64(21_720), chainPack.Receipts[0][1].GasUsed)
 	require.NoError(t, m.InsertChain(chainPack))
 
 	importInParallel(t, gspec, keys[0], chainPack, func(t *testing.T, st *state.IntraBlockState) {

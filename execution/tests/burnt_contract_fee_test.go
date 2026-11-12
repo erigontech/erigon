@@ -18,6 +18,7 @@ package executiontests
 
 import (
 	"crypto/ecdsa"
+	"math/big"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -25,8 +26,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/dbg"
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/state"
@@ -34,17 +33,13 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
-	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 // A chain config with a burnt-fee contract credits the base fee to that
 // contract. The contract may also be the coinbase, a sender or a callee of the
-// block; parallel import must accept the block that serial execution built and
-// end with the same balances.
+// block; parallel import must accept the block and end with the balances the
+// fees and transfers give.
 func TestBurntContractFeeRecipients(t *testing.T) {
-	prevParallel, prevWorkers := dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount
-	t.Cleanup(func() { dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount = prevParallel, prevWorkers })
-
 	alloc := types.GenesisAlloc{}
 	keys := revivalKeys(t, alloc, 2)
 	sender := crypto.PubkeyToAddress(keys[0].PublicKey)
@@ -74,7 +69,6 @@ func TestBurntContractFeeRecipients(t *testing.T) {
 				return txn
 			}
 
-			dbg.Exec3Parallel = false
 			m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(keys[0]))
 			chainPack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) {
 				b.SetCoinbase(coinbase)
@@ -82,34 +76,28 @@ func TestBurntContractFeeRecipients(t *testing.T) {
 				b.AddTx(transfer(keys[1], 2_000, 5))
 			})
 			require.NoError(t, err)
-			require.NoError(t, m.InsertChain(chainPack))
-			want := balancesOf(t, m, watched)
+			baseFee, used0, used1 := int64(chainPack.TopBlock.BaseFee().Uint64()), int64(chainPack.Receipts[0][0].GasUsed), int64(chainPack.Receipts[0][1].GasUsed)
+			want := make(map[common.Address]*big.Int, len(watched))
+			for _, addr := range watched {
+				want[addr] = new(big.Int)
+				if balance := alloc[addr].Balance; balance != nil {
+					want[addr].Set(balance)
+				}
+			}
+			credit := func(addr common.Address, amount int64) { want[addr].Add(want[addr], big.NewInt(amount)) }
+			credit(sender, -used0*(baseFee+3))
+			credit(crypto.PubkeyToAddress(keys[1].PublicKey), -used1*(baseFee+5)-2_000)
+			credit(coinbase, used0*3+used1*5)
+			credit(callee, 2_000)
+			credit(tc.burnt, (used0+used1)*baseFee)
 
 			importInParallel(t, gspec, keys[0], chainPack, func(t *testing.T, st *state.IntraBlockState) {
-				for i, addr := range watched {
+				for _, addr := range watched {
 					bal, err := st.GetBalance(accounts.InternAddress(addr))
 					require.NoError(t, err)
-					require.Equal(t, want[i], bal, "balance of %x", addr)
+					require.Equal(t, *uint256.MustFromBig(want[addr]), bal, "balance of %x", addr)
 				}
 			})
 		})
 	}
-}
-
-func balancesOf(t *testing.T, m *execmoduletester.ExecModuleTester, addrs []common.Address) []uint256.Int {
-	t.Helper()
-	out := make([]uint256.Int, len(addrs))
-	require.NoError(t, m.DB.ViewTemporal(t.Context(), func(tx kv.TemporalTx) error {
-		st := state.New(m.NewStateReader(tx))
-		defer st.Close()
-		for i, addr := range addrs {
-			bal, err := st.GetBalance(accounts.InternAddress(addr))
-			if err != nil {
-				return err
-			}
-			out[i] = bal
-		}
-		return nil
-	}))
-	return out
 }
