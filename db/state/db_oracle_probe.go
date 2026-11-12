@@ -15,6 +15,9 @@ import (
 // table scan on first use and extended by every DomainBufferedWriter.Flush.
 var dbOracleScope = dbg.EnvString("DB_ORACLE", "")
 
+// dbOracleScanOnly builds the set (and so reads the whole table once) but never skips a seek.
+var dbOracleScanOnly = dbg.EnvBool("DB_ORACLE_SCANONLY", false)
+
 type dbKeyOracle struct {
 	once  sync.Once
 	mu    sync.RWMutex
@@ -49,7 +52,7 @@ func (dt *DomainRoTx) dbOracleSkip(key []byte, roTx kv.Tx) bool {
 		return false
 	}
 	_, ok := o.keys[string(key)]
-	return !ok
+	return !ok && !dbOracleScanOnly
 }
 
 func (o *dbKeyOracle) build(d *Domain, roTx kv.Tx) {
