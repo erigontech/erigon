@@ -819,13 +819,11 @@ func (api *TraceAPIImpl) callBlock(
 	}
 
 	var traces []*TraceCallResult
-	var cmErr error
-	parallel := isHistoricalStateReader && !hasStateDiff && !hasVmTrace && len(txs) > 1
-	if parallel {
+	cmErr := errNoReplayReadTx
+	if isHistoricalStateReader && !hasStateDiff && !hasVmTrace && len(txs) > 1 {
 		traces, cmErr = api.doCallBlockParallel(ctx, dbtx, baseTxNum, txs, msgs, callParams, header, gasBailOut, traceConfig)
-		parallel = !errors.Is(cmErr, errNoReplayReadTx)
 	}
-	if !parallel {
+	if errors.Is(cmErr, errNoReplayReadTx) {
 		traces, _, cmErr = api.doCallBlock(ctx, dbtx, stateReader, stateCache, cachedWriter, ibs, txs, msgs, callParams,
 			header, true /* requireCanonical */, gasBailOut /* gasBailout */, true /* advanceTxNum */, false /* noBaseFee */, traceConfig, nil /* overrides */)
 	}
