@@ -2740,7 +2740,11 @@ func (be *blockExecutor) markReadersDirty(writerTx int, ws *state.WriteSet) {
 		}
 	}
 	for addr, paths := range written {
-		for _, r := range readersAbove(be.readerByAddr[addr], writerTx) {
+		readers := readersAbove(be.readerByAddr[addr], writerTx)
+		if len(readers) == 0 || be.versionMap.WritesAlreadySeeded(addr, ws) {
+			continue
+		}
+		for _, r := range readers {
 			if r.paths&paths != 0 && !be.revalidate[r.tx] && be.blockIO.ReadSet(be.tasks[r.tx].Task.Version().TxIndex).DependsOnAt(ws, addr) {
 				be.revalidate[r.tx] = true
 			}

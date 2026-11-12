@@ -36,6 +36,9 @@ const FlagValidated statusFlag = 2
 
 const flagDeleted statusFlag = 3
 
+// flagSeeded asks noOpBind for the Done cell WriteChanges seeded, untouched since.
+const flagSeeded statusFlag = 4
+
 // valueStatus is the cell's value transition relative to what the writing tx read:
 // the leaf effect a write has. Stamped at write time from (prev-presence, prev, value),
 // never re-derived. Only the domain/commitment projection skips Unchanged; the BAL and
@@ -545,6 +548,9 @@ func (vm *VersionMap) seedAccount(ac *types.AccountChanges) {
 		e.Code, _ = putCell(vm, e.Code, addr, CodePath, txIdx, 0, FlagDone, code, ValueChanged)
 		e.CodeHash, _ = putCell(vm, e.CodeHash, addr, CodeHashPath, txIdx, 0, FlagDone, code.Hash, ValueChanged)
 		e.CodeSize, _ = putCell(vm, e.CodeSize, addr, CodeSizePath, txIdx, 0, FlagDone, code.Len(), ValueChanged)
+		seed(e.Code, txIdx)
+		seed(e.CodeHash, txIdx)
+		seed(e.CodeSize, txIdx)
 	}
 }
 
@@ -558,6 +564,7 @@ func seedCells[C, T any](vm *VersionMap, cells *btree.Map[int, *WriteCell[T]], a
 		for _, c := range changes {
 			idx, v := get(c)
 			cells, _ = putCell(vm, cells, addr, path, int(idx)-1, 0, FlagDone, v, ValueChanged)
+			seed(cells, int(idx)-1)
 		}
 		return cells
 	}
@@ -567,6 +574,7 @@ func seedCells[C, T any](vm *VersionMap, cells *btree.Map[int, *WriteCell[T]], a
 		idx, v := get(c)
 		slab[i].Value = v
 		slab[i].setState(0, FlagDone)
+		slab[i].state.Or(seededCell)
 		cells.Load(int(idx)-1, &slab[i])
 	}
 	return cells
@@ -657,6 +665,11 @@ func forEachBALChunk(n int, cellsOf func(i int) int, fn func(lo, hi int)) {
 	if panicked.Load() {
 		fn(0, n)
 	}
+}
+
+func seed[T any](cells *btree.Map[int, *WriteCell[T]], txIdx int) {
+	c, _ := cells.Get(txIdx)
+	c.state.Or(seededCell)
 }
 
 // Typed Write primitives. Each takes the AccountPath-contracted value type directly so
@@ -1451,8 +1464,11 @@ func noOpBind[T any](e *AddressEntry, cells *btree.Map[int, *WriteCell[T]], vw *
 	if !ok || !eq(ci.Value, vw.Val) || ci.valStatus != vw.valStatus || ci.accSource != AccountFromBase {
 		return false
 	}
-	f := ci.loadFlag()
-	if f != flag && !(f == FlagDone && flag == FlagEstimate) {
+	if flag == flagSeeded {
+		if !ci.seeded() {
+			return false
+		}
+	} else if f := ci.loadFlag(); f != flag && !(f == FlagDone && flag == FlagEstimate) {
 		return false
 	}
 	vw.bind(e, ci)
@@ -1638,6 +1654,22 @@ func flushAllNoOpUnderRLock(e *AddressEntry, writes *WriteSet, addr accounts.Add
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	return flushAllNoOp(e, writes, addr, flag)
+}
+
+// WritesAlreadySeeded reports whether ws's writes to addr match BAL seed cells no value store
+// has replaced, so publishing them changed nothing a reader saw.
+func (vm *VersionMap) WritesAlreadySeeded(addr accounts.Address, ws *WriteSet) bool {
+	if !vm.HasBAL {
+		return false
+	}
+	// A net-zero write has no BAL cell, and a re-run may have dropped the cell a reader saw.
+	for _, vw := range ws.storage[addr] {
+		if vw.valStatus == ValueUnchanged {
+			return false
+		}
+	}
+	e := vm.load(addr)
+	return e != nil && flushAllNoOpUnderRLock(e, ws, addr, flagSeeded)
 }
 
 // MarkWritesComplete advances every cell named by writes from Estimate to Done, writing
@@ -2284,6 +2316,10 @@ type WriteCell[T any] struct {
 	Value     T
 }
 
+// seededCell marks a cell WriteChanges seeded from the BAL. A value store or a delete drops it and a
+// status mark keeps it, so a set bit means every reader of the cell saw the seed.
+const seededCell uint32 = 1 << 24
+
 func packCellState(inc Incarnation, flag statusFlag) uint32 {
 	return uint32(uint16(inc))<<8 | uint32(flag)
 }
@@ -2293,6 +2329,8 @@ func unpackCellState(w uint32) (Incarnation, statusFlag) {
 }
 
 func (c *WriteCell[T]) loadState() (Incarnation, statusFlag) { return unpackCellState(c.state.Load()) }
+
+func (c *WriteCell[T]) seeded() bool { return c.state.Load()&seededCell != 0 }
 
 func (c *WriteCell[T]) loadFlag() statusFlag {
 	_, f := c.loadState()
@@ -2308,6 +2346,10 @@ func (c *WriteCell[T]) setState(inc Incarnation, flag statusFlag) {
 	c.state.Store(packCellState(inc, flag))
 }
 
+func markedState(old uint32, inc Incarnation, flag statusFlag) uint32 {
+	return packCellState(inc, flag) | old&seededCell
+}
+
 func (c *WriteCell[T]) setFlagUnlessDone(flag statusFlag) bool {
 	for {
 		old := c.state.Load()
@@ -2315,7 +2357,7 @@ func (c *WriteCell[T]) setFlagUnlessDone(flag statusFlag) bool {
 		if have == FlagDone && flag != FlagDone {
 			return false
 		}
-		if c.state.CompareAndSwap(old, packCellState(inc, flag)) {
+		if c.state.CompareAndSwap(old, markedState(old, inc, flag)) {
 			return true
 		}
 	}
@@ -2344,7 +2386,7 @@ func (c *WriteCell[T]) mark(want Incarnation, flag statusFlag) (Incarnation, mar
 		if f == FlagDone && flag == FlagValidated {
 			return inc, marked
 		}
-		if c.state.CompareAndSwap(old, packCellState(inc, flag)) {
+		if c.state.CompareAndSwap(old, markedState(old, inc, flag)) {
 			return inc, marked
 		}
 	}
