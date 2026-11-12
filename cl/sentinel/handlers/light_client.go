@@ -113,9 +113,8 @@ func (c *ConsensusHandlers) lightClientUpdatesByRangeHandler(s network.Stream) e
 
 	// The response must include the earliest available update and use consecutive periods.
 	// Skip leading gaps, but stop once a gap would split the response.
-	for i := req.StartPeriod; i < endPeriod; i++ {
-		update, has := c.forkChoiceReader.GetLightClientUpdate(i)
-		if !has {
+	for _, update := range c.forkChoiceReader.GetLightClientUpdates(req.StartPeriod, endPeriod) {
+		if update == nil {
 			if len(lightClientUpdates) > 0 {
 				break
 			}
