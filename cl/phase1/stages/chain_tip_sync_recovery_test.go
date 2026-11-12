@@ -389,6 +389,7 @@ func TestChainTipSyncVerifiesStoredGloasPayloadWhileBehind(t *testing.T) {
 	delete(graph.parents, headRoot)
 	graph.insertOnAdd = true
 	require.NoError(t, cfg.forkChoice.OnBlock(t.Context(), headBlock, false, false, false))
+	cfg.headEvents = headEventPublication{root: headRoot, payloadStatus: "full"}
 
 	selectedRoot, _, err := cfg.forkChoice.GetHead(nil)
 	require.NoError(t, err)

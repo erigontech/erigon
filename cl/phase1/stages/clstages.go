@@ -363,10 +363,10 @@ func ConsensusClStages() *clstages.StageGraph[*Cfg, Args] {
 				cfg.forwardSyncTipRoot == cfg.forkChoice.HighestSeenRoot() &&
 				args.targetSlot < cfg.forwardSyncTipSlot+cfg.beaconCfg.SlotsPerEpoch
 			cfg.forkChoice.OnTick(uint64(cfg.ethClock.GetSlotTime(args.targetSlot).UnixMilli()))
-			if head, _, err := cfg.forkChoice.GetHead(nil); err != nil {
+			if head, headSlot, err := cfg.forkChoice.GetHeadNode(); err != nil {
 				log.Debug("[Caplin] failed to read the fork choice head", "err", err)
 			} else {
-				args.headUnpublished = head != cfg.syncedData.HeadRoot()
+				args.headUnpublished = headEventUnpublished(cfg.beaconCfg, head, headSlot, cfg.headEvents)
 			}
 			// Note that the target epoch is always one behind. this is because we are always behind in the current epoch, so it would not be very useful.
 			// Guard against uint64 underflow at genesis (GetCurrentEpoch() == 0).

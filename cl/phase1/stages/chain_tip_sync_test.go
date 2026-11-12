@@ -17,6 +17,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/execution_client/block_collector"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/rpc"
@@ -207,6 +208,57 @@ func TestStartFetchingBlocksMissedByGossipReturnsAfterCancelWithoutErrorReader(t
 	case <-time.After(5 * time.Second):
 		t.Fatal("fetch goroutine did not return after cancellation")
 	}
+}
+
+func TestChainTipSyncRoutesForUnpublishedPayloadStatus(t *testing.T) {
+	f := newSameRootFixture(t, 0, 32)
+	f.setHeadStatus(t, cltypes.PayloadStatusEmpty)
+	require.NoError(t, f.runPass())
+	f.cfg.rpc = rpc.NewBeaconRpcP2P(t.Context(), &statusSentinel{}, f.cfg.beaconCfg, f.cfg.ethClock)
+	f.cfg.hasDownloaded = true
+	f.setHeadStatus(t, cltypes.PayloadStatusFull)
+
+	head, _, err := f.cfg.forkChoice.GetHeadNode()
+	require.NoError(t, err)
+	require.Equal(t, f.headRoot, head.Root)
+	require.Equal(t, cltypes.PayloadStatusFull, head.PayloadStatus)
+	require.Equal(t, f.headRoot, f.cfg.syncedData.HeadRoot())
+	require.Equal(t, headEventPublication{root: f.headRoot, payloadStatus: "empty"}, f.cfg.headEvents)
+
+	args := ConsensusClStages().ArgsFunc(t.Context(), f.cfg)
+	args.peers = 1
+	args.seenSlot = args.targetSlot - 1
+	args.seenEpoch = args.targetEpoch
+	require.True(t, args.headUnpublished)
+	require.Equal(t, ForkChoice, ConsensusClStages().Stages[ChainTipSync].TransitionFunc(f.cfg, args, nil))
+}
+
+func TestChainTipSyncLeavesBlockWaitForUnpublishedPayloadStatus(t *testing.T) {
+	f := newSameRootFixture(t, 0, 32)
+	f.setHeadStatus(t, cltypes.PayloadStatusEmpty)
+	require.NoError(t, f.runPass())
+	reset := f.headResets + 1
+	done := make(chan struct{})
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		f.graph.hasEnvelope.Store(true)
+		f.cfg.forkChoice.MarkPayloadStatus(common.Hash{0xee, reset}, common.Hash{0xee, reset}, execution_client.PayloadStatusNotValidated)
+		close(done)
+	}()
+
+	ctx, cancel := context.WithTimeout(t.Context(), 400*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	err := listenToIncomingBlocksUntilANewBlockIsReceived(
+		ctx, log.Root(), f.cfg,
+		Args{seenSlot: f.headSlot, targetSlot: f.headSlot + 1},
+		make(chan *peers.PeeredObject[[]*cltypes.SignedBeaconBlock], 1), make(chan error, 1),
+	)
+
+	require.NoError(t, err)
+	require.Less(t, time.Since(started), 300*time.Millisecond)
+	<-done
+	require.False(t, f.cfg.forkChoiceRerunAt.IsZero())
 }
 
 // ChainTipSync can wait a slot or longer for the next block, and validators attest to the head the beacon API serves

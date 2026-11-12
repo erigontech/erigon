@@ -225,6 +225,11 @@ MainLoop:
 			if cfg.forkChoice.HighestSeen() >= args.targetSlot {
 				break MainLoop
 			}
+			head, headSlot, err := cfg.forkChoice.GetHeadNode()
+			if err == nil && headEventUnpublished(cfg.beaconCfg, head, headSlot, cfg.headEvents) && time.Since(cfg.forkChoiceRerunAt) >= sleepForSlotRewakeInterval {
+				cfg.forkChoiceRerunAt = time.Now()
+				break MainLoop
+			}
 		case <-ctx.Done():
 			// Handle context cancellation
 			return ctx.Err()
