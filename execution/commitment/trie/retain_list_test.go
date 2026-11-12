@@ -21,7 +21,6 @@ package trie
 
 import (
 	"bytes"
-	"fmt"
 	"sort"
 
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -56,14 +55,8 @@ func (rl *RetainList) Swap(i, j int) {
 }
 
 // AddKey adds a new key (in KEY encoding) to the list
-func (rl *RetainList) AddKey(key []byte) []byte {
-	nibbles := make([]byte, 2*len(key))
-	for i, b := range key {
-		nibbles[i*2] = b / 16
-		nibbles[i*2+1] = b % 16
-	}
-	rl.hexes = append(rl.hexes, nibbles)
-	return nibbles
+func (rl *RetainList) AddKey(key []byte) {
+	rl.hexes = append(rl.hexes, nibblizeKey(key, false))
 }
 
 func (rl *RetainList) IsCodeTouched(accounts.CodeHash) bool {
@@ -112,8 +105,4 @@ func (rl *RetainList) Retain(prefix []byte) bool {
 		}
 	}
 	return false
-}
-
-func (rl *RetainList) String() string {
-	return fmt.Sprintf("%x", rl.hexes)
 }
