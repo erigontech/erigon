@@ -392,8 +392,8 @@ func (sd *TemporalMemBatch) Publish() {
 	}
 }
 
-// deferrableDomains are the domains only the apply loop writes; the commitment fold reads back its
-// own branch writes through the published view, so commitment publishes on every write.
+// deferrableDomains are the domains exec workers read. Only they get a published view, so the commitment fold
+// pays no tree copy per branch write and reads its own writes through the locked maps.
 var deferrableDomains = [...]kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain}
 
 func (sd *TemporalMemBatch) GetLatest(domain kv.Domain, key []byte) (v []byte, step kv.Step, ok bool) {
@@ -439,15 +439,9 @@ func (sd *TemporalMemBatch) getLatest(sh *latestShard, domain kv.Domain, key []b
 // grow with node size times depth, (2d-1)*log(n)/log(d), which is about 7x smaller at 8 than at 128.
 const publishTreeDegree = 8
 
-// execReadDomain reports whether exec workers read the domain; only those domains get a published view, so the
-// commitment fold does not pay a tree copy per branch write.
-func execReadDomain(d kv.Domain) bool {
-	return d == kv.AccountsDomain || d == kv.StorageDomain || d == kv.CodeDomain
-}
-
 // publish sets key in the domain's tree and publishes a copy of it. The caller holds key's shard lock.
 func (sd *TemporalMemBatch) publish(domain kv.Domain, key string, v dataWithTxNum) {
-	if sd.unwindChangeset != nil || !execReadDomain(domain) {
+	if sd.unwindChangeset != nil || !slices.Contains(deferrableDomains[:], domain) {
 		return
 	}
 	sd.publishMu[domain].Lock()
@@ -456,7 +450,7 @@ func (sd *TemporalMemBatch) publish(domain kv.Domain, key string, v dataWithTxNu
 		sd.publishTree[domain] = btree2.NewMap[string, dataWithTxNum](publishTreeDegree)
 	}
 	sd.publishTree[domain].Set(key, v)
-	if sd.publishDeferred.Load() && slices.Contains(deferrableDomains[:], domain) {
+	if sd.publishDeferred.Load() {
 		sd.publishDirty[domain] = true
 		return
 	}
@@ -467,7 +461,7 @@ func (sd *TemporalMemBatch) publish(domain kv.Domain, key string, v dataWithTxNu
 // while an unwind changeset is pending. The caller excludes all writers.
 func (sd *TemporalMemBatch) republishAll() {
 	for d := range sd.latest {
-		if !execReadDomain(kv.Domain(d)) {
+		if !slices.Contains(deferrableDomains[:], kv.Domain(d)) {
 			continue
 		}
 		sd.publishMu[d].Lock()
@@ -506,7 +500,7 @@ func (sd *TemporalMemBatch) publishMerged(other *TemporalMemBatch) {
 		return
 	}
 	for d := range other.latest {
-		if !execReadDomain(kv.Domain(d)) {
+		if !slices.Contains(deferrableDomains[:], kv.Domain(d)) {
 			continue
 		}
 		sd.publishMu[d].Lock()
