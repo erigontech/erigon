@@ -190,6 +190,12 @@ func CreateHistoryStateReader(ctx context.Context, tx kv.TemporalTx, blockNumber
 		return nil, err
 	}
 	txNum := uint64(int(minTxNum) + txnIndex + /* 1 system txNum in beginning of block */ 1)
+	return CreateHistoryStateReaderAtTxNum(ctx, tx, blockNumber, txNum, txNumsReader)
+}
+
+// CreateHistoryStateReaderAtTxNum checks history availability at an already resolved txNum.
+// blockNumber is used only in pruning errors.
+func CreateHistoryStateReaderAtTxNum(ctx context.Context, tx kv.TemporalTx, blockNumber, txNum uint64, txNumsReader rawdbv3.TxNumsReader) (state.StateReader, error) {
 	minHistoryTxNum, err := state.StateHistoryStartTxNum(tx)
 	if err != nil {
 		return nil, err

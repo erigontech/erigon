@@ -26,7 +26,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
@@ -34,7 +33,6 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
-	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 // A CREATE before Spurious Dragon that returns empty code leaves an empty
@@ -43,12 +41,7 @@ import (
 // on serial. The slow first transaction finishes last, so the parallel executor
 // usually validates the touch and the credit in one pass.
 func TestTouchedEmptyAccountCreditedInSameBlock(t *testing.T) {
-	prevParallel, prevWorkers := dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount
-	t.Cleanup(func() {
-		dbg.Exec3Parallel = prevParallel
-		ethconfig.Defaults.Sync.ExecWorkerCount = prevWorkers
-	})
-	ethconfig.Defaults.Sync.ExecWorkerCount = 4
+	setExecWorkers(t, 4)
 
 	var keys [3]*ecdsa.PrivateKey
 	var senders [3]common.Address
@@ -97,7 +90,7 @@ func TestTouchedEmptyAccountCreditedInSameBlock(t *testing.T) {
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			dbg.Exec3Parallel = false
+			setExecWorkers(t, 1)
 			serial := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(keys[0]))
 			chainPack, err := serial.GenerateChain(2, func(i int, b *blockgen.BlockGen) {
 				sign := func(txn types.Transaction, from int) {
@@ -136,7 +129,7 @@ func TestTouchedEmptyAccountCreditedInSameBlock(t *testing.T) {
 			require.False(t, want.Balance.IsZero())
 			require.Zero(t, want.Incarnation)
 
-			dbg.Exec3Parallel = true
+			setExecWorkers(t, 4)
 			parallel := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(keys[0]))
 			require.NoError(t, parallel.InsertChain(chainPack))
 			require.Equal(t, *want, *record(parallel))

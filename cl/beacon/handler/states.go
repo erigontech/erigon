@@ -459,6 +459,9 @@ func (a *ApiHandler) getRandao(w http.ResponseWriter, r *http.Request) (*beaconh
 	stateGetter := state_accessors.GetValFnTxAndSnapshot(tx, snRoTx)
 	mix, err := a.stateReader.ReadRandaoMixBySlotAndIndex(stateGetter, slot, epoch%a.beaconChainCfg.EpochsPerHistoricalVector)
 	if err != nil {
+		if errors.Is(err, historical_states_reader.ErrRandaoMixUnavailable) {
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("could not read randao mix: %w", err))
+		}
 		return nil, err
 	}
 	return newBeaconResponse(randaoResponse{Randao: mix}).
