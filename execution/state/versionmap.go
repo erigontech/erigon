@@ -669,6 +669,54 @@ func (vm *VersionMap) LatestTxIndex(addr accounts.Address, path AccountPath, key
 // (catches same-tx metamorphic SD+CREATE2, where both land at the same TxIdx) or
 // any of {Balance,Nonce,CodeHash} > destroyedAt. A destroyed-and-not-revived
 // account reads as gone.
+// AccountLifecycleWithDestructDep is AccountLifecycle plus, unless the account is destroyed, the index
+// of a destruct below txIdx that is still in flight, or UnknownDep. Both come from one lock, so a mark
+// cannot move the destruct's flag between the two answers.
+func (vm *VersionMap) AccountLifecycleWithDestructDep(addr accounts.Address, txIdx int) (destroyed, revived bool, dep int) {
+	if vm == nil {
+		return false, false, UnknownDep
+	}
+	e := vm.load(addr)
+	if e == nil {
+		return false, false, UnknownDep
+	}
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	destroyedAt, sd := floorCell(e.SelfDestruct, txIdx)
+	if sd == nil {
+		return false, false, UnknownDep
+	}
+	if sd.flag != FlagDone {
+		return false, false, destroyedAt
+	}
+	if !sd.Value {
+		return false, false, UnknownDep
+	}
+	limit := txIdx - 1
+	if hi, ok := highestCellAtOrBelow(e.Address, limit); ok && hi >= destroyedAt {
+		return true, true, UnknownDep
+	}
+	for _, hi := range [...]int{highestIndex(e.Balance, limit), highestIndex(e.Nonce, limit), highestIndex(e.CodeHash, limit)} {
+		if hi > destroyedAt {
+			return true, true, UnknownDep
+		}
+	}
+	return true, false, UnknownDep
+}
+
+func highestCellAtOrBelow[T any](cells *btree.Map[int, *WriteCell[T]], limit int) (int, bool) {
+	hi, ok := UnknownDep, false
+	if cells != nil {
+		cells.Descend(limit, func(k int, _ *WriteCell[T]) bool { hi, ok = k, true; return false })
+	}
+	return hi, ok
+}
+
+func highestIndex[T any](cells *btree.Map[int, *WriteCell[T]], limit int) int {
+	hi, _ := highestCellAtOrBelow(cells, limit)
+	return hi
+}
+
 func (vm *VersionMap) AccountLifecycle(addr accounts.Address, txIdx int) (destroyed bool, destroyedAt int, revived bool) {
 	if vm == nil {
 		return false, 0, false
