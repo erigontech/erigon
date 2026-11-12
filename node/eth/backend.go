@@ -94,6 +94,7 @@ import (
 	"github.com/erigontech/erigon/node"
 	sentrycomp "github.com/erigontech/erigon/node/components/sentry"
 	storagecomp "github.com/erigontech/erigon/node/components/storage"
+	txpoolcomp "github.com/erigontech/erigon/node/components/txpool"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/ethstats"
@@ -640,31 +641,27 @@ func New(
 
 	var txnProvider txnprovider.TxnProvider
 	var blobGetter txpool.BlobGetter
-	if config.TxPool.Disable {
-		backend.txPoolGrpcServer = &txpool.GrpcDisabled{}
-	} else {
-		sentries := backend.sentryProvider.Client.Sentries()
-		blockBuilderNotifyNewTxns := func() {
+	if err := backend.components.BuildTxPool(txpoolcomp.Deps{
+		Ctx:          ctx,
+		Config:       config.TxPool,
+		ChainDB:      backend.chainDB,
+		Cache:        kvcache.NewLatestBatchCache(),
+		Sentries:     backend.sentryProvider.Client.Sentries(),
+		StateChanges: backend.stateDiffClient,
+		NotifyNewTxns: func() {
 			select {
 			case backend.blockBuilderNotifyNewTxns <- struct{}{}:
 			default:
 			}
-		}
-		backend.txPool, backend.txPoolGrpcServer, err = txpool.Assemble(
-			ctx,
-			config.TxPool,
-			backend.chainDB,
-			kvcache.NewLatestBatchCache(),
-			sentries,
-			backend.stateDiffClient,
-			blockBuilderNotifyNewTxns,
-			logger,
-			direct.NewEthBackendClientDirect(backend.ethBackendRPC),
-		)
-		if err != nil {
-			return nil, err
-		}
-
+		},
+		EthBackend: direct.NewEthBackendClientDirect(backend.ethBackendRPC),
+		Logger:     logger,
+	}); err != nil {
+		return nil, err
+	}
+	backend.txPool = backend.components.TxPool.Pool
+	backend.txPoolGrpcServer = backend.components.TxPool.GrpcServer
+	if backend.txPool != nil {
 		txnProvider = backend.txPool
 		blobGetter = backend.txPool
 	}

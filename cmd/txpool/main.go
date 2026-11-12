@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/remotedb"
 	"github.com/erigontech/erigon/db/kv/remotedbserver"
+	txpoolcomp "github.com/erigontech/erigon/node/components/txpool"
 	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/gointerfaces"
@@ -196,20 +197,21 @@ func doTxpool(ctx context.Context, logger log.Logger) error {
 	}
 
 	notifyMiner := func() {}
-	txPool, txpoolGrpcServer, err := txpool.Assemble(
-		ctx,
-		cfg,
-		coreDB,
-		kvcache.New(cacheConfig),
-		sentryClients,
-		kvClient,
-		notifyMiner,
-		logger,
-		ethBackendClient,
-	)
-	if err != nil {
+	var txPoolProvider txpoolcomp.Provider
+	if err := txPoolProvider.Initialize(txpoolcomp.Deps{
+		Ctx:           ctx,
+		Config:        cfg,
+		ChainDB:       coreDB,
+		Cache:         kvcache.New(cacheConfig),
+		Sentries:      sentryClients,
+		StateChanges:  kvClient,
+		NotifyNewTxns: notifyMiner,
+		EthBackend:    ethBackendClient,
+		Logger:        logger,
+	}); err != nil {
 		return err
 	}
+	txPool, txpoolGrpcServer := txPoolProvider.Pool, txPoolProvider.GrpcServer
 
 	miningGrpcServer := privateapi.NewMiningServer(ctx, privateapi.NoMining{}, nil, logger)
 	grpcServer, err := txpool.StartGrpc(ctx, txpoolGrpcServer, miningGrpcServer, txpoolApiAddr, nil, logger)
