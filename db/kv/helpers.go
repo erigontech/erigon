@@ -255,7 +255,8 @@ func (d *DomainDiff) Len() int {
 	return len(d.prevValues)
 }
 
-// DomainUpdate records the previous value on the first change to a key in a step.
+// DomainUpdate keeps the first previous value recorded for each (key, step)
+// pair within this diff.
 func (d *DomainDiff) DomainUpdate(k []byte, step Step, prevValue []byte) {
 	if d.prevValues == nil {
 		d.prevValues = make(map[string][]byte, 16)

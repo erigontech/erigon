@@ -109,7 +109,8 @@ type PatriciaContext interface {
 	Branch(prefix []byte) ([]byte, kv.Step, error)
 	// Implementations must copy prefix and data rather than retain them: callers may pass
 	// pooled buffers that are recycled for a later, unrelated update.
-	// A nil prevData asks the writer to read the previous value; an empty slice means known absent.
+	// A nil prevData asks the writer to read the previous value.
+	// A non-nil empty slice means the previous branch is known to be absent.
 	PutBranch(prefix []byte, data []byte, prevData []byte) error
 	Account(plainKey []byte) (*Update, error)
 	Storage(plainKey []byte) (*Update, error)
@@ -450,7 +451,7 @@ func (be *BranchEncoder) setMetrics(metrics *Metrics) {
 }
 
 // prev is the branch read during unfold, empty when the branch is new.
-// Pass a non-nil empty value to PutBranch to avoid reading it again.
+// A nil prev is passed to PutBranch as a non-nil empty slice to avoid a storage read.
 func (be *BranchEncoder) CollectUpdate(
 	ctx PatriciaContext,
 	prefix []byte,

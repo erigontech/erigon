@@ -1550,8 +1550,8 @@ func (d *Domain) integrateDirtyFiles(sf StaticFiles, txNumFrom, txNumTo uint64) 
 	d.dirtyFiles.Set(fi)
 }
 
-// unwind applies the supplied domain diffs and prunes the unwound history.
-// The caller manages flushing.
+// unwind restores the state before txNumUnwindTo using the supplied diffs
+// and prunes history from txNumUnwindTo onward. The caller manages flushing.
 func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, txNumUnwindTo uint64, domainDiffs []kv.DomainEntryDiff, expandBranch func([]byte, commitment.BranchData, uint64, uint64) (commitment.BranchData, error)) error {
 	// fmt.Printf("[domain][%s] unwinding domain to txNum=%d, step %d\n", d.filenameBase, txNumUnwindTo, step)
 	d := dt.d
