@@ -667,11 +667,10 @@ type QueueWithRetry struct {
 	newTasks chan Task
 	retires  Queue[Task]
 	lock     sync.Mutex
-	capacity int
 }
 
 func NewQueueWithRetry(capacity int) *QueueWithRetry {
-	return &QueueWithRetry{newTasks: make(chan Task, capacity), capacity: capacity}
+	return &QueueWithRetry{newTasks: make(chan Task, capacity)}
 }
 
 func (q *QueueWithRetry) NewTasksLen() int {
@@ -679,7 +678,6 @@ func (q *QueueWithRetry) NewTasksLen() int {
 	defer q.lock.Unlock()
 	return len(q.newTasks)
 }
-func (q *QueueWithRetry) Capacity() int { return q.capacity }
 func (q *QueueWithRetry) RetriesLen() (l int) {
 	q.lock.Lock()
 	l = q.retires.Len()
@@ -841,24 +839,6 @@ func (q *QueueWithRetry) Close() {
 		newTasks := q.newTasks
 		close(newTasks)
 	}
-}
-
-func (q *QueueWithRetry) Release() {
-	q.lock.Lock()
-	if q.newTasks == nil || q.closed {
-		q.lock.Unlock()
-		return
-	}
-	q.closed = true
-	// Drain channel.
-	for len(q.newTasks) > 0 {
-		<-q.newTasks
-	}
-	// Clear retry heap, keep backing array.
-	clear(q.retires)
-	q.retires = q.retires[:0]
-	q.newTasks = nil
-	q.lock.Unlock()
 }
 
 // ResultsQueue thread-safe priority-queue of execution results
