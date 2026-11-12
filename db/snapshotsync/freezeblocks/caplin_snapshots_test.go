@@ -812,7 +812,7 @@ func TestBlobCountFromBlocksRejectsSlotsWithoutBlockSegment(t *testing.T) {
 
 	blobCount := BlobCountFromBlocks(t.Context(), sn, NewBeaconSnapshotReader(sn, nil, &clparams.MainnetBeaconConfig))
 	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
-		n, err := blobCount(tx, 25_000)
+		n, _, err := blobCount(tx, 25_000)
 		require.NoError(t, err, "an empty slot inside a frozen block segment is blobless")
 		require.Zero(t, n)
 		return nil
@@ -1009,8 +1009,9 @@ func TestBlobCountFromBlocksFollowsTheChildsPayloadStatus(t *testing.T) {
 
 			blobCount := BlobCountFromBlocks(t.Context(), sn, NewBeaconSnapshotReader(sn, nil, &cfg))
 			var n uint64
+			var skipped bool
 			err = db.View(t.Context(), func(tx kv.Tx) (err error) {
-				n, err = blobCount(tx, slot)
+				n, skipped, err = blobCount(tx, slot)
 				return err
 			})
 			if tc.childRoot != (common.Hash{}) {
@@ -1019,6 +1020,7 @@ func TestBlobCountFromBlocksFollowsTheChildsPayloadStatus(t *testing.T) {
 			}
 			require.NoError(t, err)
 			require.Equal(t, tc.expected, n)
+			require.Equal(t, tc.expected == 0, skipped)
 
 			store := blob_storage.NewBlobStore(db, afero.NewMemMapFs())
 			if tc.stored {
@@ -1075,23 +1077,34 @@ func TestBlobCountFromBlocksRejectsABlockThatIsNotTheCanonicalOne(t *testing.T) 
 	blobless := cltypes.NewSignedBeaconBlock(&cfg, clparams.DenebVersion)
 	blobless.Block.Slot = slot
 	blobless.Block.Body.ExecutionPayload.Transactions = solid.NewTransactionsSSZFromTransactions([][]byte{{0x01}})
+	deneb := cltypes.NewSignedBeaconBlock(&cfg, clparams.DenebVersion)
+	deneb.Block.Slot = slot
+	deneb.Block.Body.ExecutionPayload.Transactions = solid.NewTransactionsSSZFromTransactions([][]byte{{0x01}})
+	for range 2 {
+		deneb.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
+	}
+	denebRoot, err := deneb.Block.HashSSZ()
+	require.NoError(t, err)
+	denebBodyRoot, err := deneb.Block.Body.HashSSZ()
+	require.NoError(t, err)
 	for _, tc := range []struct {
 		name      string
-		stored    *cltypes.SignedBeaconBlock
+		word      []byte
 		canonical common.Hash
 		err       string
 	}{
-		{"canonical block missing from the beacon segment", nil, root, "block at slot 7: canonical block is missing"},
-		{"frozen block not canonical at its slot", block, common.Hash{0xee}, "block at slot 7 is not canonical"},
-		{"frozen block of another slot", other, otherRoot, "block at slot 7 is not canonical"},
-		{"frozen blobless Deneb block not canonical at its slot", blobless, common.Hash{0xee}, "block at slot 7 is not canonical"},
+		{"canonical block missing from the beacon segment", nil, root, "blob storage count mismatch at slot 7: 0 != 2"},
+		{"frozen block not canonical at its slot", blockSnapshotWord(t, block), common.Hash{0xee}, "block at slot 7 is not canonical"},
+		{"frozen block of another slot", blockSnapshotWord(t, other), otherRoot, "blob storage count mismatch at slot 7: 0 != 2"},
+		{"frozen blobless Deneb block not canonical at its slot", blockSnapshotWord(t, blobless), common.Hash{0xee}, "blob storage count mismatch at slot 7: 0 != 2"},
+		{"frozen Deneb word whose body lost its commitments", withBodyRoot(t, blockSnapshotWord(t, blobless), denebBodyRoot), denebRoot, "blob storage count mismatch at slot 7: 0 != 2"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dirs := datadir.New(t.TempDir())
 			writeCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, snaptype.CaplinMergeLimit, true, func(s uint64) []byte {
 				switch {
-				case s == slot && tc.stored != nil:
-					return blockSnapshotWord(t, tc.stored)
+				case s == slot:
+					return tc.word
 				case s == slot+1:
 					return blockSnapshotWord(t, child)
 				}
@@ -1116,6 +1129,23 @@ func TestBlobCountFromBlocksRejectsABlockThatIsNotTheCanonicalOne(t *testing.T) 
 	}
 }
 
+func withBodyRoot(t *testing.T, word []byte, bodyRoot common.Hash) []byte {
+	t.Helper()
+	dec, err := zstd.NewReader(nil)
+	require.NoError(t, err)
+	raw, err := dec.DecodeAll(word, nil)
+	dec.Close()
+	require.NoError(t, err)
+	copy(raw[1:1+len(bodyRoot)], bodyRoot[:])
+	var b bytes.Buffer
+	enc, err := zstd.NewWriter(&b)
+	require.NoError(t, err)
+	_, err = enc.Write(raw)
+	require.NoError(t, err)
+	require.NoError(t, enc.Close())
+	return b.Bytes()
+}
+
 func TestBlobCountFromBlocksStopsOnCancel(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	dirs := datadir.New(t.TempDir())
@@ -1129,7 +1159,7 @@ func TestBlobCountFromBlocksStopsOnCancel(t *testing.T) {
 	cancel()
 	blobCount := BlobCountFromBlocks(ctx, sn, NewBeaconSnapshotReader(sn, nil, &cfg))
 	err := db.View(t.Context(), func(tx kv.Tx) error {
-		_, err := blobCount(tx, 7)
+		_, _, err := blobCount(tx, 7)
 		return err
 	})
 	require.ErrorIs(t, err, context.Canceled)

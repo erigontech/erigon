@@ -187,7 +187,7 @@ func TestDumpBlobSegmentKeepsOldFilesWhenTheDumpFails(t *testing.T) {
 		writeSegment(t, dirs, name)
 	}
 
-	err := dumpBlobSegment(t.Context(), db, store, 30_000, 0, dirs, func(kv.Tx, uint64) (uint64, error) { return 1, nil })
+	err := dumpBlobSegment(t.Context(), db, store, 30_000, 0, dirs, func(kv.Tx, uint64) (uint64, bool, error) { return 1, false, nil })
 	require.ErrorContains(t, err, "count mismatch")
 
 	for _, name := range old {
@@ -208,11 +208,11 @@ func TestDumpBlobSegmentKeepsOldFilesWhenCompressFails(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	err := dumpBlobSegment(ctx, db, store, 30_000, 0, dirs, func(_ kv.Tx, slot uint64) (uint64, error) {
+	err := dumpBlobSegment(ctx, db, store, 30_000, 0, dirs, func(_ kv.Tx, slot uint64) (uint64, bool, error) {
 		if slot == 40_000-1 {
 			cancel()
 		}
-		return 0, nil
+		return 0, false, nil
 	})
 	require.ErrorIs(t, err, context.Canceled)
 
@@ -236,7 +236,7 @@ func TestDumpBlobSegmentReplacesOldFiles(t *testing.T) {
 		writeSegment(t, dirs, name)
 	}
 
-	require.NoError(t, dumpBlobSegment(t.Context(), db, store, 30_000, 0, dirs, func(kv.Tx, uint64) (uint64, error) { return 0, nil }))
+	require.NoError(t, dumpBlobSegment(t.Context(), db, store, 30_000, 0, dirs, func(kv.Tx, uint64) (uint64, bool, error) { return 0, false, nil }))
 
 	entries, err := os.ReadDir(dirs.Snap)
 	require.NoError(t, err)
