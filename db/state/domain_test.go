@@ -4422,12 +4422,8 @@ func TestDomainCloseFilesAfterStep(t *testing.T) {
 // entities. Production code goes through Aggregator.BeginFilesRo.
 func (d *Domain) beginForTests() *DomainRoTx {
 	dv, hv, iv := d.calcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
-	return d.beginFilesRo(dv, hv, iv)
-}
-
-func (d *Domain) beginFilesRo(dv *domainVisible, hf visibleFiles, hiv *iiVisible) *DomainRoTx {
 	dt := &DomainRoTx{}
-	d.initFilesRo(dt, &HistoryRoTx{}, &InvertedIndexRoTx{}, dv, hf, hiv)
+	d.initFilesRo(dt, &HistoryRoTx{}, &InvertedIndexRoTx{}, dv, hv, iv)
 	return dt
 }
 
