@@ -77,43 +77,7 @@ message ExecutionPayload {
   repeated Withdrawal withdrawals = 16;
   optional uint64 blob_gas_used = 17;
   optional uint64 excess_blob_gas = 18;
-  optional H256 block_access_list_hash = 19; // added in Amsterdam (EIP-7928)
-  repeated BlockAccessListAccount block_access_list = 20; // added in Amsterdam (EIP-7928)
   optional uint64 slot_number = 21;                  // added in Amsterdam (EIP-7843)
-}
-
-message BlockAccessListStorageChange {
-  uint32 index = 1;
-  H256 value = 2;
-}
-
-message BlockAccessListSlotChanges {
-  H256 slot = 1;
-  repeated BlockAccessListStorageChange changes = 2;
-}
-
-message BlockAccessListBalanceChange {
-  uint32 index = 1;
-  H256 value = 2;
-}
-
-message BlockAccessListNonceChange {
-  uint32 index = 1;
-  uint64 value = 2;
-}
-
-message BlockAccessListCodeChange {
-  uint32 index = 1;
-  bytes data = 2;
-}
-
-message BlockAccessListAccount {
-  H160 address = 1;
-  repeated BlockAccessListSlotChanges storage_changes = 2;
-  repeated H256 storage_reads = 3;
-  repeated BlockAccessListBalanceChange balance_changes = 4;
-  repeated BlockAccessListNonceChange nonce_changes = 5;
-  repeated BlockAccessListCodeChange code_changes = 6;
 }
 
 message Withdrawal {
@@ -169,7 +133,6 @@ message PeerInfo {
 message ExecutionPayloadBody {
   repeated bytes transactions = 1;
   repeated Withdrawal withdrawals = 2;
-  bytes block_access_list = 3;
 }
 
 message Authorization {

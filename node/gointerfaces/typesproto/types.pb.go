@@ -399,30 +399,28 @@ func (x *VersionReply) GetPatch() uint32 {
 // Engine API types
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine
 type ExecutionPayload struct {
-	state               protoimpl.MessageState    `protogen:"open.v1"`
-	Version             uint32                    `protobuf:"varint,1,opt,name=version,proto3" json:"version,omitempty"` // v1 - no withdrawals, v2 - with withdrawals, v3 - with blob gas
-	ParentHash          *H256                     `protobuf:"bytes,2,opt,name=parent_hash,json=parentHash,proto3" json:"parent_hash,omitempty"`
-	Coinbase            *H160                     `protobuf:"bytes,3,opt,name=coinbase,proto3" json:"coinbase,omitempty"`
-	StateRoot           *H256                     `protobuf:"bytes,4,opt,name=state_root,json=stateRoot,proto3" json:"state_root,omitempty"`
-	ReceiptRoot         *H256                     `protobuf:"bytes,5,opt,name=receipt_root,json=receiptRoot,proto3" json:"receipt_root,omitempty"`
-	LogsBloom           *H2048                    `protobuf:"bytes,6,opt,name=logs_bloom,json=logsBloom,proto3" json:"logs_bloom,omitempty"`
-	PrevRandao          *H256                     `protobuf:"bytes,7,opt,name=prev_randao,json=prevRandao,proto3" json:"prev_randao,omitempty"`
-	BlockNumber         uint64                    `protobuf:"varint,8,opt,name=block_number,json=blockNumber,proto3" json:"block_number,omitempty"`
-	GasLimit            uint64                    `protobuf:"varint,9,opt,name=gas_limit,json=gasLimit,proto3" json:"gas_limit,omitempty"`
-	GasUsed             uint64                    `protobuf:"varint,10,opt,name=gas_used,json=gasUsed,proto3" json:"gas_used,omitempty"`
-	Timestamp           uint64                    `protobuf:"varint,11,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
-	ExtraData           []byte                    `protobuf:"bytes,12,opt,name=extra_data,json=extraData,proto3" json:"extra_data,omitempty"`
-	BaseFeePerGas       *H256                     `protobuf:"bytes,13,opt,name=base_fee_per_gas,json=baseFeePerGas,proto3" json:"base_fee_per_gas,omitempty"`
-	BlockHash           *H256                     `protobuf:"bytes,14,opt,name=block_hash,json=blockHash,proto3" json:"block_hash,omitempty"`
-	Transactions        [][]byte                  `protobuf:"bytes,15,rep,name=transactions,proto3" json:"transactions,omitempty"`
-	Withdrawals         []*Withdrawal             `protobuf:"bytes,16,rep,name=withdrawals,proto3" json:"withdrawals,omitempty"`
-	BlobGasUsed         *uint64                   `protobuf:"varint,17,opt,name=blob_gas_used,json=blobGasUsed,proto3,oneof" json:"blob_gas_used,omitempty"`
-	ExcessBlobGas       *uint64                   `protobuf:"varint,18,opt,name=excess_blob_gas,json=excessBlobGas,proto3,oneof" json:"excess_blob_gas,omitempty"`
-	BlockAccessListHash *H256                     `protobuf:"bytes,19,opt,name=block_access_list_hash,json=blockAccessListHash,proto3,oneof" json:"block_access_list_hash,omitempty"` // added in Amsterdam (EIP-7928)
-	BlockAccessList     []*BlockAccessListAccount `protobuf:"bytes,20,rep,name=block_access_list,json=blockAccessList,proto3" json:"block_access_list,omitempty"`                     // added in Amsterdam (EIP-7928)
-	SlotNumber          *uint64                   `protobuf:"varint,21,opt,name=slot_number,json=slotNumber,proto3,oneof" json:"slot_number,omitempty"`                               // added in Amsterdam (EIP-7843)
-	unknownFields       protoimpl.UnknownFields
-	sizeCache           protoimpl.SizeCache
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Version       uint32                 `protobuf:"varint,1,opt,name=version,proto3" json:"version,omitempty"` // v1 - no withdrawals, v2 - with withdrawals, v3 - with blob gas
+	ParentHash    *H256                  `protobuf:"bytes,2,opt,name=parent_hash,json=parentHash,proto3" json:"parent_hash,omitempty"`
+	Coinbase      *H160                  `protobuf:"bytes,3,opt,name=coinbase,proto3" json:"coinbase,omitempty"`
+	StateRoot     *H256                  `protobuf:"bytes,4,opt,name=state_root,json=stateRoot,proto3" json:"state_root,omitempty"`
+	ReceiptRoot   *H256                  `protobuf:"bytes,5,opt,name=receipt_root,json=receiptRoot,proto3" json:"receipt_root,omitempty"`
+	LogsBloom     *H2048                 `protobuf:"bytes,6,opt,name=logs_bloom,json=logsBloom,proto3" json:"logs_bloom,omitempty"`
+	PrevRandao    *H256                  `protobuf:"bytes,7,opt,name=prev_randao,json=prevRandao,proto3" json:"prev_randao,omitempty"`
+	BlockNumber   uint64                 `protobuf:"varint,8,opt,name=block_number,json=blockNumber,proto3" json:"block_number,omitempty"`
+	GasLimit      uint64                 `protobuf:"varint,9,opt,name=gas_limit,json=gasLimit,proto3" json:"gas_limit,omitempty"`
+	GasUsed       uint64                 `protobuf:"varint,10,opt,name=gas_used,json=gasUsed,proto3" json:"gas_used,omitempty"`
+	Timestamp     uint64                 `protobuf:"varint,11,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+	ExtraData     []byte                 `protobuf:"bytes,12,opt,name=extra_data,json=extraData,proto3" json:"extra_data,omitempty"`
+	BaseFeePerGas *H256                  `protobuf:"bytes,13,opt,name=base_fee_per_gas,json=baseFeePerGas,proto3" json:"base_fee_per_gas,omitempty"`
+	BlockHash     *H256                  `protobuf:"bytes,14,opt,name=block_hash,json=blockHash,proto3" json:"block_hash,omitempty"`
+	Transactions  [][]byte               `protobuf:"bytes,15,rep,name=transactions,proto3" json:"transactions,omitempty"`
+	Withdrawals   []*Withdrawal          `protobuf:"bytes,16,rep,name=withdrawals,proto3" json:"withdrawals,omitempty"`
+	BlobGasUsed   *uint64                `protobuf:"varint,17,opt,name=blob_gas_used,json=blobGasUsed,proto3,oneof" json:"blob_gas_used,omitempty"`
+	ExcessBlobGas *uint64                `protobuf:"varint,18,opt,name=excess_blob_gas,json=excessBlobGas,proto3,oneof" json:"excess_blob_gas,omitempty"`
+	SlotNumber    *uint64                `protobuf:"varint,21,opt,name=slot_number,json=slotNumber,proto3,oneof" json:"slot_number,omitempty"` // added in Amsterdam (EIP-7843)
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ExecutionPayload) Reset() {
@@ -581,369 +579,11 @@ func (x *ExecutionPayload) GetExcessBlobGas() uint64 {
 	return 0
 }
 
-func (x *ExecutionPayload) GetBlockAccessListHash() *H256 {
-	if x != nil {
-		return x.BlockAccessListHash
-	}
-	return nil
-}
-
-func (x *ExecutionPayload) GetBlockAccessList() []*BlockAccessListAccount {
-	if x != nil {
-		return x.BlockAccessList
-	}
-	return nil
-}
-
 func (x *ExecutionPayload) GetSlotNumber() uint64 {
 	if x != nil && x.SlotNumber != nil {
 		return *x.SlotNumber
 	}
 	return 0
-}
-
-type BlockAccessListStorageChange struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Index         uint32                 `protobuf:"varint,1,opt,name=index,proto3" json:"index,omitempty"`
-	Value         *H256                  `protobuf:"bytes,2,opt,name=value,proto3" json:"value,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *BlockAccessListStorageChange) Reset() {
-	*x = BlockAccessListStorageChange{}
-	mi := &file_types_types_proto_msgTypes[8]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *BlockAccessListStorageChange) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*BlockAccessListStorageChange) ProtoMessage() {}
-
-func (x *BlockAccessListStorageChange) ProtoReflect() protoreflect.Message {
-	mi := &file_types_types_proto_msgTypes[8]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use BlockAccessListStorageChange.ProtoReflect.Descriptor instead.
-func (*BlockAccessListStorageChange) Descriptor() ([]byte, []int) {
-	return file_types_types_proto_rawDescGZIP(), []int{8}
-}
-
-func (x *BlockAccessListStorageChange) GetIndex() uint32 {
-	if x != nil {
-		return x.Index
-	}
-	return 0
-}
-
-func (x *BlockAccessListStorageChange) GetValue() *H256 {
-	if x != nil {
-		return x.Value
-	}
-	return nil
-}
-
-type BlockAccessListSlotChanges struct {
-	state         protoimpl.MessageState          `protogen:"open.v1"`
-	Slot          *H256                           `protobuf:"bytes,1,opt,name=slot,proto3" json:"slot,omitempty"`
-	Changes       []*BlockAccessListStorageChange `protobuf:"bytes,2,rep,name=changes,proto3" json:"changes,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *BlockAccessListSlotChanges) Reset() {
-	*x = BlockAccessListSlotChanges{}
-	mi := &file_types_types_proto_msgTypes[9]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *BlockAccessListSlotChanges) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*BlockAccessListSlotChanges) ProtoMessage() {}
-
-func (x *BlockAccessListSlotChanges) ProtoReflect() protoreflect.Message {
-	mi := &file_types_types_proto_msgTypes[9]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use BlockAccessListSlotChanges.ProtoReflect.Descriptor instead.
-func (*BlockAccessListSlotChanges) Descriptor() ([]byte, []int) {
-	return file_types_types_proto_rawDescGZIP(), []int{9}
-}
-
-func (x *BlockAccessListSlotChanges) GetSlot() *H256 {
-	if x != nil {
-		return x.Slot
-	}
-	return nil
-}
-
-func (x *BlockAccessListSlotChanges) GetChanges() []*BlockAccessListStorageChange {
-	if x != nil {
-		return x.Changes
-	}
-	return nil
-}
-
-type BlockAccessListBalanceChange struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Index         uint32                 `protobuf:"varint,1,opt,name=index,proto3" json:"index,omitempty"`
-	Value         *H256                  `protobuf:"bytes,2,opt,name=value,proto3" json:"value,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *BlockAccessListBalanceChange) Reset() {
-	*x = BlockAccessListBalanceChange{}
-	mi := &file_types_types_proto_msgTypes[10]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *BlockAccessListBalanceChange) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*BlockAccessListBalanceChange) ProtoMessage() {}
-
-func (x *BlockAccessListBalanceChange) ProtoReflect() protoreflect.Message {
-	mi := &file_types_types_proto_msgTypes[10]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use BlockAccessListBalanceChange.ProtoReflect.Descriptor instead.
-func (*BlockAccessListBalanceChange) Descriptor() ([]byte, []int) {
-	return file_types_types_proto_rawDescGZIP(), []int{10}
-}
-
-func (x *BlockAccessListBalanceChange) GetIndex() uint32 {
-	if x != nil {
-		return x.Index
-	}
-	return 0
-}
-
-func (x *BlockAccessListBalanceChange) GetValue() *H256 {
-	if x != nil {
-		return x.Value
-	}
-	return nil
-}
-
-type BlockAccessListNonceChange struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Index         uint32                 `protobuf:"varint,1,opt,name=index,proto3" json:"index,omitempty"`
-	Value         uint64                 `protobuf:"varint,2,opt,name=value,proto3" json:"value,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *BlockAccessListNonceChange) Reset() {
-	*x = BlockAccessListNonceChange{}
-	mi := &file_types_types_proto_msgTypes[11]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *BlockAccessListNonceChange) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*BlockAccessListNonceChange) ProtoMessage() {}
-
-func (x *BlockAccessListNonceChange) ProtoReflect() protoreflect.Message {
-	mi := &file_types_types_proto_msgTypes[11]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use BlockAccessListNonceChange.ProtoReflect.Descriptor instead.
-func (*BlockAccessListNonceChange) Descriptor() ([]byte, []int) {
-	return file_types_types_proto_rawDescGZIP(), []int{11}
-}
-
-func (x *BlockAccessListNonceChange) GetIndex() uint32 {
-	if x != nil {
-		return x.Index
-	}
-	return 0
-}
-
-func (x *BlockAccessListNonceChange) GetValue() uint64 {
-	if x != nil {
-		return x.Value
-	}
-	return 0
-}
-
-type BlockAccessListCodeChange struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Index         uint32                 `protobuf:"varint,1,opt,name=index,proto3" json:"index,omitempty"`
-	Data          []byte                 `protobuf:"bytes,2,opt,name=data,proto3" json:"data,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *BlockAccessListCodeChange) Reset() {
-	*x = BlockAccessListCodeChange{}
-	mi := &file_types_types_proto_msgTypes[12]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *BlockAccessListCodeChange) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*BlockAccessListCodeChange) ProtoMessage() {}
-
-func (x *BlockAccessListCodeChange) ProtoReflect() protoreflect.Message {
-	mi := &file_types_types_proto_msgTypes[12]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use BlockAccessListCodeChange.ProtoReflect.Descriptor instead.
-func (*BlockAccessListCodeChange) Descriptor() ([]byte, []int) {
-	return file_types_types_proto_rawDescGZIP(), []int{12}
-}
-
-func (x *BlockAccessListCodeChange) GetIndex() uint32 {
-	if x != nil {
-		return x.Index
-	}
-	return 0
-}
-
-func (x *BlockAccessListCodeChange) GetData() []byte {
-	if x != nil {
-		return x.Data
-	}
-	return nil
-}
-
-type BlockAccessListAccount struct {
-	state          protoimpl.MessageState          `protogen:"open.v1"`
-	Address        *H160                           `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
-	StorageChanges []*BlockAccessListSlotChanges   `protobuf:"bytes,2,rep,name=storage_changes,json=storageChanges,proto3" json:"storage_changes,omitempty"`
-	StorageReads   []*H256                         `protobuf:"bytes,3,rep,name=storage_reads,json=storageReads,proto3" json:"storage_reads,omitempty"`
-	BalanceChanges []*BlockAccessListBalanceChange `protobuf:"bytes,4,rep,name=balance_changes,json=balanceChanges,proto3" json:"balance_changes,omitempty"`
-	NonceChanges   []*BlockAccessListNonceChange   `protobuf:"bytes,5,rep,name=nonce_changes,json=nonceChanges,proto3" json:"nonce_changes,omitempty"`
-	CodeChanges    []*BlockAccessListCodeChange    `protobuf:"bytes,6,rep,name=code_changes,json=codeChanges,proto3" json:"code_changes,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
-}
-
-func (x *BlockAccessListAccount) Reset() {
-	*x = BlockAccessListAccount{}
-	mi := &file_types_types_proto_msgTypes[13]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *BlockAccessListAccount) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*BlockAccessListAccount) ProtoMessage() {}
-
-func (x *BlockAccessListAccount) ProtoReflect() protoreflect.Message {
-	mi := &file_types_types_proto_msgTypes[13]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use BlockAccessListAccount.ProtoReflect.Descriptor instead.
-func (*BlockAccessListAccount) Descriptor() ([]byte, []int) {
-	return file_types_types_proto_rawDescGZIP(), []int{13}
-}
-
-func (x *BlockAccessListAccount) GetAddress() *H160 {
-	if x != nil {
-		return x.Address
-	}
-	return nil
-}
-
-func (x *BlockAccessListAccount) GetStorageChanges() []*BlockAccessListSlotChanges {
-	if x != nil {
-		return x.StorageChanges
-	}
-	return nil
-}
-
-func (x *BlockAccessListAccount) GetStorageReads() []*H256 {
-	if x != nil {
-		return x.StorageReads
-	}
-	return nil
-}
-
-func (x *BlockAccessListAccount) GetBalanceChanges() []*BlockAccessListBalanceChange {
-	if x != nil {
-		return x.BalanceChanges
-	}
-	return nil
-}
-
-func (x *BlockAccessListAccount) GetNonceChanges() []*BlockAccessListNonceChange {
-	if x != nil {
-		return x.NonceChanges
-	}
-	return nil
-}
-
-func (x *BlockAccessListAccount) GetCodeChanges() []*BlockAccessListCodeChange {
-	if x != nil {
-		return x.CodeChanges
-	}
-	return nil
 }
 
 type Withdrawal struct {
@@ -958,7 +598,7 @@ type Withdrawal struct {
 
 func (x *Withdrawal) Reset() {
 	*x = Withdrawal{}
-	mi := &file_types_types_proto_msgTypes[14]
+	mi := &file_types_types_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -970,7 +610,7 @@ func (x *Withdrawal) String() string {
 func (*Withdrawal) ProtoMessage() {}
 
 func (x *Withdrawal) ProtoReflect() protoreflect.Message {
-	mi := &file_types_types_proto_msgTypes[14]
+	mi := &file_types_types_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -983,7 +623,7 @@ func (x *Withdrawal) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Withdrawal.ProtoReflect.Descriptor instead.
 func (*Withdrawal) Descriptor() ([]byte, []int) {
-	return file_types_types_proto_rawDescGZIP(), []int{14}
+	return file_types_types_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *Withdrawal) GetIndex() uint64 {
@@ -1027,7 +667,7 @@ type BlobsBundle struct {
 
 func (x *BlobsBundle) Reset() {
 	*x = BlobsBundle{}
-	mi := &file_types_types_proto_msgTypes[15]
+	mi := &file_types_types_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1039,7 +679,7 @@ func (x *BlobsBundle) String() string {
 func (*BlobsBundle) ProtoMessage() {}
 
 func (x *BlobsBundle) ProtoReflect() protoreflect.Message {
-	mi := &file_types_types_proto_msgTypes[15]
+	mi := &file_types_types_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1052,7 +692,7 @@ func (x *BlobsBundle) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BlobsBundle.ProtoReflect.Descriptor instead.
 func (*BlobsBundle) Descriptor() ([]byte, []int) {
-	return file_types_types_proto_rawDescGZIP(), []int{15}
+	return file_types_types_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *BlobsBundle) GetCommitments() [][]byte {
@@ -1085,7 +725,7 @@ type RequestsBundle struct {
 
 func (x *RequestsBundle) Reset() {
 	*x = RequestsBundle{}
-	mi := &file_types_types_proto_msgTypes[16]
+	mi := &file_types_types_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1097,7 +737,7 @@ func (x *RequestsBundle) String() string {
 func (*RequestsBundle) ProtoMessage() {}
 
 func (x *RequestsBundle) ProtoReflect() protoreflect.Message {
-	mi := &file_types_types_proto_msgTypes[16]
+	mi := &file_types_types_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1110,7 +750,7 @@ func (x *RequestsBundle) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RequestsBundle.ProtoReflect.Descriptor instead.
 func (*RequestsBundle) Descriptor() ([]byte, []int) {
-	return file_types_types_proto_rawDescGZIP(), []int{16}
+	return file_types_types_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *RequestsBundle) GetRequests() [][]byte {
@@ -1130,7 +770,7 @@ type NodeInfoPorts struct {
 
 func (x *NodeInfoPorts) Reset() {
 	*x = NodeInfoPorts{}
-	mi := &file_types_types_proto_msgTypes[17]
+	mi := &file_types_types_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1142,7 +782,7 @@ func (x *NodeInfoPorts) String() string {
 func (*NodeInfoPorts) ProtoMessage() {}
 
 func (x *NodeInfoPorts) ProtoReflect() protoreflect.Message {
-	mi := &file_types_types_proto_msgTypes[17]
+	mi := &file_types_types_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1155,7 +795,7 @@ func (x *NodeInfoPorts) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NodeInfoPorts.ProtoReflect.Descriptor instead.
 func (*NodeInfoPorts) Descriptor() ([]byte, []int) {
-	return file_types_types_proto_rawDescGZIP(), []int{17}
+	return file_types_types_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *NodeInfoPorts) GetDiscovery() uint32 {
@@ -1187,7 +827,7 @@ type NodeInfoReply struct {
 
 func (x *NodeInfoReply) Reset() {
 	*x = NodeInfoReply{}
-	mi := &file_types_types_proto_msgTypes[18]
+	mi := &file_types_types_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1199,7 +839,7 @@ func (x *NodeInfoReply) String() string {
 func (*NodeInfoReply) ProtoMessage() {}
 
 func (x *NodeInfoReply) ProtoReflect() protoreflect.Message {
-	mi := &file_types_types_proto_msgTypes[18]
+	mi := &file_types_types_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1212,7 +852,7 @@ func (x *NodeInfoReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NodeInfoReply.ProtoReflect.Descriptor instead.
 func (*NodeInfoReply) Descriptor() ([]byte, []int) {
-	return file_types_types_proto_rawDescGZIP(), []int{18}
+	return file_types_types_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *NodeInfoReply) GetId() string {
@@ -1282,7 +922,7 @@ type PeerInfo struct {
 
 func (x *PeerInfo) Reset() {
 	*x = PeerInfo{}
-	mi := &file_types_types_proto_msgTypes[19]
+	mi := &file_types_types_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1294,7 +934,7 @@ func (x *PeerInfo) String() string {
 func (*PeerInfo) ProtoMessage() {}
 
 func (x *PeerInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_types_types_proto_msgTypes[19]
+	mi := &file_types_types_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1307,7 +947,7 @@ func (x *PeerInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PeerInfo.ProtoReflect.Descriptor instead.
 func (*PeerInfo) Descriptor() ([]byte, []int) {
-	return file_types_types_proto_rawDescGZIP(), []int{19}
+	return file_types_types_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *PeerInfo) GetId() string {
@@ -1381,17 +1021,16 @@ func (x *PeerInfo) GetConnIsStatic() bool {
 }
 
 type ExecutionPayloadBody struct {
-	state           protoimpl.MessageState `protogen:"open.v1"`
-	Transactions    [][]byte               `protobuf:"bytes,1,rep,name=transactions,proto3" json:"transactions,omitempty"`
-	Withdrawals     []*Withdrawal          `protobuf:"bytes,2,rep,name=withdrawals,proto3" json:"withdrawals,omitempty"`
-	BlockAccessList []byte                 `protobuf:"bytes,3,opt,name=block_access_list,json=blockAccessList,proto3" json:"block_access_list,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Transactions  [][]byte               `protobuf:"bytes,1,rep,name=transactions,proto3" json:"transactions,omitempty"`
+	Withdrawals   []*Withdrawal          `protobuf:"bytes,2,rep,name=withdrawals,proto3" json:"withdrawals,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ExecutionPayloadBody) Reset() {
 	*x = ExecutionPayloadBody{}
-	mi := &file_types_types_proto_msgTypes[20]
+	mi := &file_types_types_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1403,7 +1042,7 @@ func (x *ExecutionPayloadBody) String() string {
 func (*ExecutionPayloadBody) ProtoMessage() {}
 
 func (x *ExecutionPayloadBody) ProtoReflect() protoreflect.Message {
-	mi := &file_types_types_proto_msgTypes[20]
+	mi := &file_types_types_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1416,7 +1055,7 @@ func (x *ExecutionPayloadBody) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExecutionPayloadBody.ProtoReflect.Descriptor instead.
 func (*ExecutionPayloadBody) Descriptor() ([]byte, []int) {
-	return file_types_types_proto_rawDescGZIP(), []int{20}
+	return file_types_types_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *ExecutionPayloadBody) GetTransactions() [][]byte {
@@ -1429,13 +1068,6 @@ func (x *ExecutionPayloadBody) GetTransactions() [][]byte {
 func (x *ExecutionPayloadBody) GetWithdrawals() []*Withdrawal {
 	if x != nil {
 		return x.Withdrawals
-	}
-	return nil
-}
-
-func (x *ExecutionPayloadBody) GetBlockAccessList() []byte {
-	if x != nil {
-		return x.BlockAccessList
 	}
 	return nil
 }
@@ -1454,7 +1086,7 @@ type Authorization struct {
 
 func (x *Authorization) Reset() {
 	*x = Authorization{}
-	mi := &file_types_types_proto_msgTypes[21]
+	mi := &file_types_types_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1466,7 +1098,7 @@ func (x *Authorization) String() string {
 func (*Authorization) ProtoMessage() {}
 
 func (x *Authorization) ProtoReflect() protoreflect.Message {
-	mi := &file_types_types_proto_msgTypes[21]
+	mi := &file_types_types_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1479,7 +1111,7 @@ func (x *Authorization) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Authorization.ProtoReflect.Descriptor instead.
 func (*Authorization) Descriptor() ([]byte, []int) {
-	return file_types_types_proto_rawDescGZIP(), []int{21}
+	return file_types_types_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *Authorization) GetChainId() uint64 {
@@ -1587,7 +1219,7 @@ const file_types_types_proto_rawDesc = "" +
 	"\fVersionReply\x12\x14\n" +
 	"\x05major\x18\x01 \x01(\rR\x05major\x12\x14\n" +
 	"\x05minor\x18\x02 \x01(\rR\x05minor\x12\x14\n" +
-	"\x05patch\x18\x03 \x01(\rR\x05patch\"\xec\a\n" +
+	"\x05patch\x18\x03 \x01(\rR\x05patch\"\xbf\x06\n" +
 	"\x10ExecutionPayload\x12\x18\n" +
 	"\aversion\x18\x01 \x01(\rR\aversion\x12,\n" +
 	"\vparent_hash\x18\x02 \x01(\v2\v.types.H256R\n" +
@@ -1613,37 +1245,12 @@ const file_types_types_proto_rawDesc = "" +
 	"\ftransactions\x18\x0f \x03(\fR\ftransactions\x123\n" +
 	"\vwithdrawals\x18\x10 \x03(\v2\x11.types.WithdrawalR\vwithdrawals\x12'\n" +
 	"\rblob_gas_used\x18\x11 \x01(\x04H\x00R\vblobGasUsed\x88\x01\x01\x12+\n" +
-	"\x0fexcess_blob_gas\x18\x12 \x01(\x04H\x01R\rexcessBlobGas\x88\x01\x01\x12E\n" +
-	"\x16block_access_list_hash\x18\x13 \x01(\v2\v.types.H256H\x02R\x13blockAccessListHash\x88\x01\x01\x12I\n" +
-	"\x11block_access_list\x18\x14 \x03(\v2\x1d.types.BlockAccessListAccountR\x0fblockAccessList\x12$\n" +
-	"\vslot_number\x18\x15 \x01(\x04H\x03R\n" +
+	"\x0fexcess_blob_gas\x18\x12 \x01(\x04H\x01R\rexcessBlobGas\x88\x01\x01\x12$\n" +
+	"\vslot_number\x18\x15 \x01(\x04H\x02R\n" +
 	"slotNumber\x88\x01\x01B\x10\n" +
 	"\x0e_blob_gas_usedB\x12\n" +
-	"\x10_excess_blob_gasB\x19\n" +
-	"\x17_block_access_list_hashB\x0e\n" +
-	"\f_slot_number\"W\n" +
-	"\x1cBlockAccessListStorageChange\x12\x14\n" +
-	"\x05index\x18\x01 \x01(\rR\x05index\x12!\n" +
-	"\x05value\x18\x02 \x01(\v2\v.types.H256R\x05value\"|\n" +
-	"\x1aBlockAccessListSlotChanges\x12\x1f\n" +
-	"\x04slot\x18\x01 \x01(\v2\v.types.H256R\x04slot\x12=\n" +
-	"\achanges\x18\x02 \x03(\v2#.types.BlockAccessListStorageChangeR\achanges\"W\n" +
-	"\x1cBlockAccessListBalanceChange\x12\x14\n" +
-	"\x05index\x18\x01 \x01(\rR\x05index\x12!\n" +
-	"\x05value\x18\x02 \x01(\v2\v.types.H256R\x05value\"H\n" +
-	"\x1aBlockAccessListNonceChange\x12\x14\n" +
-	"\x05index\x18\x01 \x01(\rR\x05index\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\x04R\x05value\"E\n" +
-	"\x19BlockAccessListCodeChange\x12\x14\n" +
-	"\x05index\x18\x01 \x01(\rR\x05index\x12\x12\n" +
-	"\x04data\x18\x02 \x01(\fR\x04data\"\x98\x03\n" +
-	"\x16BlockAccessListAccount\x12%\n" +
-	"\aaddress\x18\x01 \x01(\v2\v.types.H160R\aaddress\x12J\n" +
-	"\x0fstorage_changes\x18\x02 \x03(\v2!.types.BlockAccessListSlotChangesR\x0estorageChanges\x120\n" +
-	"\rstorage_reads\x18\x03 \x03(\v2\v.types.H256R\fstorageReads\x12L\n" +
-	"\x0fbalance_changes\x18\x04 \x03(\v2#.types.BlockAccessListBalanceChangeR\x0ebalanceChanges\x12F\n" +
-	"\rnonce_changes\x18\x05 \x03(\v2!.types.BlockAccessListNonceChangeR\fnonceChanges\x12C\n" +
-	"\fcode_changes\x18\x06 \x03(\v2 .types.BlockAccessListCodeChangeR\vcodeChanges\"\x8a\x01\n" +
+	"\x10_excess_blob_gasB\x0e\n" +
+	"\f_slot_number\"\x8a\x01\n" +
 	"\n" +
 	"Withdrawal\x12\x14\n" +
 	"\x05index\x18\x01 \x01(\x04R\x05index\x12'\n" +
@@ -1678,11 +1285,10 @@ const file_types_types_proto_rawDesc = "" +
 	"\x0fconn_is_inbound\x18\b \x01(\bR\rconnIsInbound\x12&\n" +
 	"\x0fconn_is_trusted\x18\t \x01(\bR\rconnIsTrusted\x12$\n" +
 	"\x0econn_is_static\x18\n" +
-	" \x01(\bR\fconnIsStatic\"\x9b\x01\n" +
+	" \x01(\bR\fconnIsStatic\"o\n" +
 	"\x14ExecutionPayloadBody\x12\"\n" +
 	"\ftransactions\x18\x01 \x03(\fR\ftransactions\x123\n" +
-	"\vwithdrawals\x18\x02 \x03(\v2\x11.types.WithdrawalR\vwithdrawals\x12*\n" +
-	"\x11block_access_list\x18\x03 \x01(\fR\x0fblockAccessList\"\x91\x01\n" +
+	"\vwithdrawals\x18\x02 \x03(\v2\x11.types.WithdrawalR\vwithdrawals\"\x91\x01\n" +
 	"\rAuthorization\x12\x19\n" +
 	"\bchain_id\x18\x01 \x01(\x04R\achainId\x12\x18\n" +
 	"\aaddress\x18\x02 \x01(\fR\aaddress\x12\x14\n" +
@@ -1706,31 +1312,25 @@ func file_types_types_proto_rawDescGZIP() []byte {
 	return file_types_types_proto_rawDescData
 }
 
-var file_types_types_proto_msgTypes = make([]protoimpl.MessageInfo, 22)
+var file_types_types_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
 var file_types_types_proto_goTypes = []any{
-	(*H128)(nil),                         // 0: types.H128
-	(*H160)(nil),                         // 1: types.H160
-	(*H256)(nil),                         // 2: types.H256
-	(*H512)(nil),                         // 3: types.H512
-	(*H1024)(nil),                        // 4: types.H1024
-	(*H2048)(nil),                        // 5: types.H2048
-	(*VersionReply)(nil),                 // 6: types.VersionReply
-	(*ExecutionPayload)(nil),             // 7: types.ExecutionPayload
-	(*BlockAccessListStorageChange)(nil), // 8: types.BlockAccessListStorageChange
-	(*BlockAccessListSlotChanges)(nil),   // 9: types.BlockAccessListSlotChanges
-	(*BlockAccessListBalanceChange)(nil), // 10: types.BlockAccessListBalanceChange
-	(*BlockAccessListNonceChange)(nil),   // 11: types.BlockAccessListNonceChange
-	(*BlockAccessListCodeChange)(nil),    // 12: types.BlockAccessListCodeChange
-	(*BlockAccessListAccount)(nil),       // 13: types.BlockAccessListAccount
-	(*Withdrawal)(nil),                   // 14: types.Withdrawal
-	(*BlobsBundle)(nil),                  // 15: types.BlobsBundle
-	(*RequestsBundle)(nil),               // 16: types.RequestsBundle
-	(*NodeInfoPorts)(nil),                // 17: types.NodeInfoPorts
-	(*NodeInfoReply)(nil),                // 18: types.NodeInfoReply
-	(*PeerInfo)(nil),                     // 19: types.PeerInfo
-	(*ExecutionPayloadBody)(nil),         // 20: types.ExecutionPayloadBody
-	(*Authorization)(nil),                // 21: types.Authorization
-	(*descriptorpb.FileOptions)(nil),     // 22: google.protobuf.FileOptions
+	(*H128)(nil),                     // 0: types.H128
+	(*H160)(nil),                     // 1: types.H160
+	(*H256)(nil),                     // 2: types.H256
+	(*H512)(nil),                     // 3: types.H512
+	(*H1024)(nil),                    // 4: types.H1024
+	(*H2048)(nil),                    // 5: types.H2048
+	(*VersionReply)(nil),             // 6: types.VersionReply
+	(*ExecutionPayload)(nil),         // 7: types.ExecutionPayload
+	(*Withdrawal)(nil),               // 8: types.Withdrawal
+	(*BlobsBundle)(nil),              // 9: types.BlobsBundle
+	(*RequestsBundle)(nil),           // 10: types.RequestsBundle
+	(*NodeInfoPorts)(nil),            // 11: types.NodeInfoPorts
+	(*NodeInfoReply)(nil),            // 12: types.NodeInfoReply
+	(*PeerInfo)(nil),                 // 13: types.PeerInfo
+	(*ExecutionPayloadBody)(nil),     // 14: types.ExecutionPayloadBody
+	(*Authorization)(nil),            // 15: types.Authorization
+	(*descriptorpb.FileOptions)(nil), // 16: google.protobuf.FileOptions
 }
 var file_types_types_proto_depIdxs = []int32{
 	0,  // 0: types.H160.hi:type_name -> types.H128
@@ -1750,30 +1350,18 @@ var file_types_types_proto_depIdxs = []int32{
 	2,  // 14: types.ExecutionPayload.prev_randao:type_name -> types.H256
 	2,  // 15: types.ExecutionPayload.base_fee_per_gas:type_name -> types.H256
 	2,  // 16: types.ExecutionPayload.block_hash:type_name -> types.H256
-	14, // 17: types.ExecutionPayload.withdrawals:type_name -> types.Withdrawal
-	2,  // 18: types.ExecutionPayload.block_access_list_hash:type_name -> types.H256
-	13, // 19: types.ExecutionPayload.block_access_list:type_name -> types.BlockAccessListAccount
-	2,  // 20: types.BlockAccessListStorageChange.value:type_name -> types.H256
-	2,  // 21: types.BlockAccessListSlotChanges.slot:type_name -> types.H256
-	8,  // 22: types.BlockAccessListSlotChanges.changes:type_name -> types.BlockAccessListStorageChange
-	2,  // 23: types.BlockAccessListBalanceChange.value:type_name -> types.H256
-	1,  // 24: types.BlockAccessListAccount.address:type_name -> types.H160
-	9,  // 25: types.BlockAccessListAccount.storage_changes:type_name -> types.BlockAccessListSlotChanges
-	2,  // 26: types.BlockAccessListAccount.storage_reads:type_name -> types.H256
-	10, // 27: types.BlockAccessListAccount.balance_changes:type_name -> types.BlockAccessListBalanceChange
-	11, // 28: types.BlockAccessListAccount.nonce_changes:type_name -> types.BlockAccessListNonceChange
-	12, // 29: types.BlockAccessListAccount.code_changes:type_name -> types.BlockAccessListCodeChange
-	1,  // 30: types.Withdrawal.address:type_name -> types.H160
-	17, // 31: types.NodeInfoReply.ports:type_name -> types.NodeInfoPorts
-	14, // 32: types.ExecutionPayloadBody.withdrawals:type_name -> types.Withdrawal
-	22, // 33: types.service_major_version:extendee -> google.protobuf.FileOptions
-	22, // 34: types.service_minor_version:extendee -> google.protobuf.FileOptions
-	22, // 35: types.service_patch_version:extendee -> google.protobuf.FileOptions
-	36, // [36:36] is the sub-list for method output_type
-	36, // [36:36] is the sub-list for method input_type
-	36, // [36:36] is the sub-list for extension type_name
-	33, // [33:36] is the sub-list for extension extendee
-	0,  // [0:33] is the sub-list for field type_name
+	8,  // 17: types.ExecutionPayload.withdrawals:type_name -> types.Withdrawal
+	1,  // 18: types.Withdrawal.address:type_name -> types.H160
+	11, // 19: types.NodeInfoReply.ports:type_name -> types.NodeInfoPorts
+	8,  // 20: types.ExecutionPayloadBody.withdrawals:type_name -> types.Withdrawal
+	16, // 21: types.service_major_version:extendee -> google.protobuf.FileOptions
+	16, // 22: types.service_minor_version:extendee -> google.protobuf.FileOptions
+	16, // 23: types.service_patch_version:extendee -> google.protobuf.FileOptions
+	24, // [24:24] is the sub-list for method output_type
+	24, // [24:24] is the sub-list for method input_type
+	24, // [24:24] is the sub-list for extension type_name
+	21, // [21:24] is the sub-list for extension extendee
+	0,  // [0:21] is the sub-list for field type_name
 }
 
 func init() { file_types_types_proto_init() }
@@ -1788,7 +1376,7 @@ func file_types_types_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_types_types_proto_rawDesc), len(file_types_types_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   22,
+			NumMessages:   16,
 			NumExtensions: 3,
 			NumServices:   0,
 		},

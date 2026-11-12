@@ -65,47 +65,6 @@ message Header {
   optional bytes aura_seal = 24;
 }
 
-// Block Access List structures (EIP-7928)
-message BlockAccessListStorageChange {
-  uint32 index = 1;
-  types.H256 value = 2;
-}
-
-message BlockAccessListSlotChanges {
-  types.H256 slot = 1;
-  repeated BlockAccessListStorageChange changes = 2;
-}
-
-message BlockAccessListBalanceChange {
-  uint32 index = 1;
-  types.H256 value = 2;
-}
-
-message BlockAccessListNonceChange {
-  uint32 index = 1;
-  uint64 value = 2;
-}
-
-message BlockAccessListCodeChange {
-  uint32 index = 1;
-  bytes data = 2;
-}
-
-message BlockAccessListAccount {
-  types.H160 address = 1;
-  repeated BlockAccessListSlotChanges storage_changes = 2;
-  repeated types.H256 storage_reads = 3;
-  repeated BlockAccessListBalanceChange balance_changes = 4;
-  repeated BlockAccessListNonceChange nonce_changes = 5;
-  repeated BlockAccessListCodeChange code_changes = 6;
-}
-
-message BlockAccessListEntry {
-  types.H256 block_hash = 1;
-  uint64 block_number = 2;
-  bytes block_access_list = 3;
-}
-
 // Body is a block body for execution
 message BlockBody {
   types.H256 block_hash = 1;
@@ -145,7 +104,6 @@ message GetSegmentRequest {
 
 message InsertBlocksRequest {
     repeated Block blocks = 1;
-    repeated BlockAccessListEntry block_access_lists = 2;
 }
 
 
