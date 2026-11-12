@@ -58,8 +58,3 @@ func WriteTxLookupEntries(db kv.Putter, block *types.Block, txNum uint64) {
 		}
 	}
 }
-
-// DeleteTxLookupEntry removes all transaction data associated with a hash.
-func DeleteTxLookupEntry(db kv.Putter, hash common.Hash) error {
-	return db.Delete(kv.TxLookup, hash[:])
-}
