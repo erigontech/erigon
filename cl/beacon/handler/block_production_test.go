@@ -4067,20 +4067,12 @@ func TestGetBuilderPayloadWithoutRelay(t *testing.T) {
 	_, _, _, _, postState, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
 	client := builder_mock.NewMockBuilderClient(gomock.NewController(t))
 	client.EXPECT().RelayConfigured().Return(false)
-	var getHeaderCalls int
-	client.EXPECT().GetHeader(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
-		func(context.Context, int64, common.Hash, common.Bytes48) (*builder.ExecutionHeader, error) {
-			getHeaderCalls++
-			return nil, errors.New("GetHeader called without a relay")
-		},
-	).AnyTimes()
 	handler.routerCfg.Builder = true
 	handler.builderClient = client
 
 	_, _, err := handler.getBuilderPayload(t.Context(), postState, postState.Slot()+1)
 
 	require.ErrorIs(t, err, errBuilderNotEnabled)
-	require.Zero(t, getHeaderCalls)
 }
 
 func TestProcessProducedBlockFallsBackWithoutCandidateStateLeak(t *testing.T) {
