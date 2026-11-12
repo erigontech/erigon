@@ -904,6 +904,12 @@ func decodeBlockAccessListParallel(data []byte, budget *blockAccessListDecodeBud
 	for range workers {
 		jobs <- func() {
 			defer wg.Done()
+			// A panic here would kill the process; the serial re-decode raises it on the caller instead.
+			defer func() {
+				if recover() != nil {
+					failed.Store(true)
+				}
+			}()
 			var local *blockAccessListDecodeBudget
 			if budget != nil {
 				local = &blockAccessListDecodeBudget{maxIndex: budget.maxIndex, shared: shared}
@@ -932,7 +938,13 @@ func decodeBlockAccessListParallel(data []byte, budget *blockAccessListDecodeBud
 	return bal, true
 }
 
+// decodeAccountChangesItemHook, when set by a test, runs before each item of a parallel decode.
+var decodeAccountChangesItemHook func()
+
 func decodeAccountChangesItem(ac *AccountChanges, item []byte, budget *blockAccessListDecodeBudget) bool {
+	if decodeAccountChangesItemHook != nil {
+		decodeAccountChangesItemHook()
+	}
 	if budget.takeItem() != nil {
 		return false
 	}

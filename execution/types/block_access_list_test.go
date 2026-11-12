@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -984,5 +985,35 @@ func TestDecodeBlockAccessListParallelStaysWithinTheBudgetOnMalformedInput(t *te
 	}
 	if n := runtime.NumGoroutine(); n > goroutines {
 		t.Fatalf("decode left %d goroutines, had %d", n, goroutines)
+	}
+}
+
+// A panic while decoding an item in parallel falls back to the serial decoder, which raises it on the caller.
+func TestDecodeBlockAccessListParallelPanicFallsBackToSerial(t *testing.T) {
+	bal := make(BlockAccessList, 4*balDecodeChunk)
+	for i := range bal {
+		bal[i].Address[0], bal[i].Address[1] = byte(i>>8), byte(i)
+	}
+	enc, err := EncodeBlockAccessListBytes(bal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var panicked atomic.Bool
+	decodeAccountChangesItemHook = func() {
+		if panicked.CompareAndSwap(false, true) {
+			panic("crafted item")
+		}
+	}
+	defer func() { decodeAccountChangesItemHook = nil }()
+
+	got, err := DecodeBlockAccessListBytes(enc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !panicked.Load() {
+		t.Fatal("the parallel path did not run")
+	}
+	if len(got) != len(bal) || got[len(got)-1].Address != bal[len(bal)-1].Address {
+		t.Fatalf("serial fallback decoded %d entries, want %d", len(got), len(bal))
 	}
 }
