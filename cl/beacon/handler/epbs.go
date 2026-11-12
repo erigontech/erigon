@@ -1457,13 +1457,13 @@ func (a *ApiHandler) emitFullHeadV2(block *cltypes.SignedBeaconBlock, blockRoot 
 	if err != nil || event == nil {
 		return
 	}
-	a.emitters.EmitHeadV2IfCurrent(event, func() bool {
+	a.emitters.WithHeadEventLock(func() {
 		currentHead, currentSlot, err := a.forkchoiceStore.GetHeadNode()
 		if err != nil || currentHead != head || currentSlot != headSlot ||
 			a.forkchoiceStore.IsRootOptimistic(currentHead.Root) != optimistic {
-			return false
+			return
 		}
-		return true
+		a.emitters.State().SendHeadV2(event)
 	})
 }
 

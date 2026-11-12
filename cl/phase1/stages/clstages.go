@@ -67,6 +67,7 @@ type Cfg struct {
 	sn                           *freezeblocks.CaplinSnapshots
 	blobStore                    blob_storage.BlobStorage
 	peerDas                      das.PeerDas
+	headEvents                   headEventPublication
 	blobDownloader               *network2.BlobHistoryDownloader
 	attestationDataProducer      attestation_producer.AttestationDataProducer
 	caplinConfig                 clparams.CaplinConfig

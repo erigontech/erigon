@@ -38,6 +38,13 @@ import (
 
 var errBlockIndicesPending = errors.New("block indices are not yet available")
 
+type headEventPublication struct {
+	mu            sync.Mutex
+	root          common.Hash
+	payloadStatus string
+	published     bool
+}
+
 // computeAndNotifyServicesOfNewForkChoice calculates the new head of the fork choice and notifies relevant services.
 // It updates the fork choice if possible and sets the status in the RPC. It returns the head slot, head root, and any error encountered.
 func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Logger, cfg *Cfg) (headSlot uint64, headRoot common.Hash, err error) {
@@ -276,7 +283,7 @@ func headPayloadStatus(head forkchoice.ForkChoiceNode, isGloas bool) string {
 }
 
 // emitHeadEvent emits the head event with the given head slot, head root, and head state.
-func emitHeadEvent(beaconCfg *clparams.BeaconChainConfig, store forkchoice.ForkChoiceStorageReader, emitter *beaconevents.EventEmitter, headSlot uint64, headRoot common.Hash, headState *state.CachingBeaconState) error {
+func emitHeadEvent(beaconCfg *clparams.BeaconChainConfig, store forkchoice.ForkChoiceStorageReader, emitter *beaconevents.EventEmitter, publication *headEventPublication, headSlot uint64, headRoot common.Hash, headState *state.CachingBeaconState) error {
 	stateRoot := headState.PeekPreviousStateRoot()
 	if stateRoot == (common.Hash{}) {
 		var err error
@@ -301,11 +308,11 @@ func emitHeadEvent(beaconCfg *clparams.BeaconChainConfig, store forkchoice.ForkC
 	if err != nil {
 		return err
 	}
-	_, err = emitHeadEventsIfCurrent(emitter, headEvent, headSlot, headRoot, stateRoot, currentHeadSnapshot(store, isGloas))
+	_, err = emitHeadEventsIfCurrent(publication, emitter, headEvent, headSlot, headRoot, stateRoot, currentHeadSnapshot(store, isGloas))
 	return err
 }
 
-func emitHeadEventBeforeStateCopy(beaconCfg *clparams.BeaconChainConfig, store forkchoice.ForkChoiceStorageReader, emitter *beaconevents.EventEmitter, headSlot uint64, headRoot common.Hash) bool {
+func emitHeadEventBeforeStateCopy(beaconCfg *clparams.BeaconChainConfig, store forkchoice.ForkChoiceStorageReader, emitter *beaconevents.EventEmitter, publication *headEventPublication, headSlot uint64, headRoot common.Hash) bool {
 	head, current, executionOptimistic, err := headEventSnapshot(store, headSlot, headRoot)
 	if err != nil || !current {
 		return false
@@ -324,11 +331,11 @@ func emitHeadEventBeforeStateCopy(beaconCfg *clparams.BeaconChainConfig, store f
 	if err != nil || headEvent == nil {
 		return false
 	}
-	emitted, _ := emitHeadEventsIfCurrent(emitter, headEvent, headSlot, headRoot, stateRoot, currentHeadSnapshot(store, isGloas))
+	emitted, _ := emitHeadEventsIfCurrent(publication, emitter, headEvent, headSlot, headRoot, stateRoot, currentHeadSnapshot(store, isGloas))
 	return emitted
 }
 
-func emitHeadEventsIfCurrent(emitter *beaconevents.EventEmitter, headEvent *beaconevents.HeadV2Data, headSlot uint64, headRoot, stateRoot common.Hash, getHead func() (common.Hash, uint64, string, bool, error)) (bool, error) {
+func emitHeadEventsIfCurrent(publication *headEventPublication, emitter *beaconevents.EventEmitter, headEvent *beaconevents.HeadV2Data, headSlot uint64, headRoot, stateRoot common.Hash, getHead func() (common.Hash, uint64, string, bool, error)) (bool, error) {
 	var validationErr error
 	current := func() bool {
 		currentRoot, currentSlot, payloadStatus, executionOptimistic, err := getHead()
@@ -338,15 +345,32 @@ func emitHeadEventsIfCurrent(emitter *beaconevents.EventEmitter, headEvent *beac
 		}
 		return currentRoot == headRoot && currentSlot == headSlot && executionOptimistic == headEvent.Data.ExecutionOptimistic && payloadStatus == headEvent.Data.PayloadStatus
 	}
-	emitted := emitter.EmitHeadEventsIfCurrent(&beaconevents.HeadData{
-		Slot:                      headSlot,
-		Block:                     headRoot,
-		State:                     stateRoot,
-		EpochTransition:           headEvent.Data.EpochTransition,
-		PreviousDutyDependentRoot: headEvent.Data.CurrentEpochDependentRoot,
-		CurrentDutyDependentRoot:  headEvent.Data.NextEpochDependentRoot,
-		ExecutionOptimistic:       headEvent.Data.ExecutionOptimistic,
-	}, headEvent, current)
+	emitted := false
+	publication.mu.Lock()
+	defer publication.mu.Unlock()
+	emitter.WithHeadEventLock(func() {
+		if !current() {
+			return
+		}
+		if !publication.published || publication.root != headRoot {
+			emitter.State().TrySendHead(&beaconevents.HeadData{
+				Slot:                      headSlot,
+				Block:                     headRoot,
+				State:                     stateRoot,
+				EpochTransition:           headEvent.Data.EpochTransition,
+				PreviousDutyDependentRoot: headEvent.Data.CurrentEpochDependentRoot,
+				CurrentDutyDependentRoot:  headEvent.Data.NextEpochDependentRoot,
+				ExecutionOptimistic:       headEvent.Data.ExecutionOptimistic,
+			})
+		}
+		if !publication.published || publication.root != headRoot || publication.payloadStatus != headEvent.Data.PayloadStatus {
+			emitter.State().SendHeadV2(headEvent)
+		}
+		publication.root = headRoot
+		publication.payloadStatus = headEvent.Data.PayloadStatus
+		publication.published = true
+		emitted = true
+	})
 	return emitted, validationErr
 }
 
@@ -504,7 +528,7 @@ func saveFinalizedStateOnDiskIfNeeded(fc forkchoice.ForkChoiceStorageReader, bea
 // postForkchoiceOperations performs the post fork choice operations such as updating the head state, producing and caching attestation data,
 // these sets of operations can take as long as they need to run, as by-now we are already synced.
 func postForkchoiceOperations(tx kv.RwTx, logger log.Logger, cfg *Cfg, headSlot uint64, headRoot common.Hash) error {
-	headEventEmitted := emitHeadEventBeforeStateCopy(cfg.beaconCfg, cfg.forkChoice, cfg.emitter, headSlot, headRoot)
+	headEventEmitted := emitHeadEventBeforeStateCopy(cfg.beaconCfg, cfg.forkChoice, cfg.emitter, &cfg.headEvents, headSlot, headRoot)
 	cfg.blobDownloader.SetHeadSlot(headSlot)
 	if err := beacon_indicies.WriteHighestFinalized(tx, cfg.forkChoice.FinalizedSlot()); err != nil {
 		return err
@@ -522,7 +546,7 @@ func postForkchoiceOperations(tx kv.RwTx, logger log.Logger, cfg *Cfg, headSlot 
 		}
 		// First emit events that depend on the head state.
 		if !headEventEmitted {
-			if err := emitHeadEvent(cfg.beaconCfg, cfg.forkChoice, cfg.emitter, headSlot, headRoot, headState); err != nil {
+			if err := emitHeadEvent(cfg.beaconCfg, cfg.forkChoice, cfg.emitter, &cfg.headEvents, headSlot, headRoot, headState); err != nil {
 				logger.Warn("failed to emit head event", "err", err)
 			}
 		}
