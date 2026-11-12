@@ -1410,6 +1410,7 @@ func (c *CheckBlobsSnapshotsCount) Run(ctx context.Context) error {
 	}
 	to := csn.FrozenBlobs()
 	snr := freezeblocks.NewBeaconSnapshotReader(csn, nil, beaconConfig)
+	blobCountFn := freezeblocks.BlobCountFromBlocks(ctx, csn, snr)
 	start := max(beaconConfig.SlotsPerEpoch*beaconConfig.DenebForkEpoch+1, c.From)
 	slotsToRegen := map[uint64]struct{}{}
 	for i := start; i < to; i++ {
@@ -1428,6 +1429,15 @@ func (c *CheckBlobsSnapshotsCount) Run(ctx context.Context) error {
 		wantCommitments := 0
 		if c := bBlock.Block.Body.GetBlobKzgCommitments(); c != nil {
 			wantCommitments = c.Len()
+		}
+		if wantCommitments > 0 {
+			count, payloadSkipped, err := blobCountFn(tx, i)
+			if err != nil {
+				return err
+			}
+			if payloadSkipped {
+				wantCommitments = int(count)
+			}
 		}
 		if len(sds) != wantCommitments {
 			if !c.CheckNeedRegen {
