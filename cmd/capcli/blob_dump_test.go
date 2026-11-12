@@ -266,10 +266,12 @@ func TestDumpBlobSegmentReplacesOldFiles(t *testing.T) {
 func TestCheckBlobsSnapshotsCountUsesZeroForSkippedPayload(t *testing.T) {
 	for name, tc := range map[string]struct {
 		skipped bool
+		stored  bool
 		err     string
 	}{
-		"skipped payload":     {skipped: true},
-		"non-skipped payload": {err: "blob count mismatch, have 0, want 1"},
+		"skipped payload":                 {skipped: true},
+		"skipped payload, stored sidecar": {skipped: true, stored: true},
+		"non-skipped payload":             {err: "blob count mismatch, have 0, want 1"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, cfg, _, err := clparams.GetConfigsByNetworkName(networkname.Sepolia)
@@ -308,7 +310,17 @@ func TestCheckBlobsSnapshotsCountUsesZeroForSkippedPayload(t *testing.T) {
 					return nil
 				}
 			})
-			writeCapcliSnapshotSegment(t, dirs, snaptype.BlobSidecars, from, to, func(uint64) []byte { return nil })
+			var blobWord []byte
+			if tc.stored {
+				blobWord, err = blobSidecarAt(0).EncodeSSZ(nil)
+				require.NoError(t, err)
+			}
+			writeCapcliSnapshotSegment(t, dirs, snaptype.BlobSidecars, from, to, func(current uint64) []byte {
+				if tc.stored && current == slot {
+					return blobWord
+				}
+				return nil
+			})
 
 			db, err := openCaplinDB(t.Context(), dirs.CaplinIndexing, false)
 			require.NoError(t, err)

@@ -1396,6 +1396,7 @@ func (c *CheckBlobsSnapshotsCount) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	defer db.Close()
 	tx, err := db.BeginRo(ctx)
 	if err != nil {
 		return err
@@ -1408,6 +1409,7 @@ func (c *CheckBlobsSnapshotsCount) Run(ctx context.Context) error {
 	if err := csn.OpenFolder(); err != nil {
 		return err
 	}
+	defer csn.Close()
 	to := csn.FrozenBlobs()
 	snr := freezeblocks.NewBeaconSnapshotReader(csn, nil, beaconConfig)
 	blobCountFn := freezeblocks.BlobCountFromBlocks(ctx, csn, snr)
@@ -1430,7 +1432,7 @@ func (c *CheckBlobsSnapshotsCount) Run(ctx context.Context) error {
 		if c := bBlock.Block.Body.GetBlobKzgCommitments(); c != nil {
 			wantCommitments = c.Len()
 		}
-		if wantCommitments > 0 {
+		if wantCommitments > 0 && len(sds) == 0 {
 			count, payloadSkipped, err := blobCountFn(tx, i)
 			if err != nil {
 				return err
