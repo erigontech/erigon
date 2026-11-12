@@ -2250,7 +2250,7 @@ func TestT3MergeRejectsReceiverDiscarded(t *testing.T) {
 	require.EqualError(t, sd.GetMemBatch().Merge(child.GetMemBatch()), "can't merge batches with discarded writes in accounts")
 }
 
-func TestMergeOverlapValuesMatchMain(t *testing.T) {
+func TestMergeOverlapAdoptsChildValues(t *testing.T) {
 	tx, receiver := t3ReviewBatch(t)
 	keyA := flushGoldenAddress(0x91)
 	keyB := flushGoldenAddress(0x92)

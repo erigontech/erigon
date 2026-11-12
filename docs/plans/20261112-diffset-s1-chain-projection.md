@@ -137,6 +137,7 @@ NOTES:
 - T5 is dropped because an overlapping grandchild leaves projected rows in its domain writers and a flushed child retains drained collectors. `Merge` moves current and past domain writers back to `pastDomainWriters`.
 - `Merge` rejects explicit discarded writes on receiver or other writable domains before changing either batch. The permanently disabled RCache writer is excluded because its discard bit is configuration state, not `DiscardWrites`.
 - `TestT3MergeKeepsChildDiscarded` and `TestReviewDiscardedChildDomains` now assert the discarded-write merge error, unchanged receiver chains, and receiver-only rows after `Flush`.
+- `TestMergeOverlapAdoptsChildValues`: history rows match `f9da00be8fb`; value rows do not. For a (key, step) both batches wrote, the branch writes the child's value (`fffffffffffffffe15`, `fffffffffffffffe25`) and main writes the receiver's trimmed one (`fffffffffffffffe14`, a delete), so main's latest disagrees with its own in-memory read. Production does not merge into a non-empty receiver (research log F15).
 
 ## Checkpoints (supervisor)
 
