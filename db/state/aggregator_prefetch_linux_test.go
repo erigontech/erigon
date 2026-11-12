@@ -264,3 +264,17 @@ func TestReadReferencePagesReadsColdReferencedPages(t *testing.T) {
 	require.Nil(t, r.Probe())
 }
 
+// Two references on one cold page are one page to read, so they take the single-page path.
+func TestReadReferencePagesCountsEachColdPageOnce(t *testing.T) {
+	prev := mmap.BatchPrefetch
+	mmap.BatchPrefetch = true
+	t.Cleanup(func() { mmap.BatchPrefetch = prev })
+	d, offsets, maps := refsFixture(t, 2)
+	w := wordInPage(offsets, 1)
+	refs := []uint64{offsets[w], offsets[w+1]}
+
+	pageOut(t, filepath.Dir(maps[0].path), maps)
+	r := seg.NewReader(d.MakeGetter(), seg.CompressNone)
+	require.Len(t, coldPagesOf(t, r, refs...), 1, "page-out left the page resident")
+	require.Zero(t, readReferencePages(refsBranch(refs...), r, r))
+}

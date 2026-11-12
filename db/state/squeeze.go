@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -339,7 +340,7 @@ func readReferencePages(branch commitment.BranchData, accounts, storage *seg.Rea
 			r, plainLen = storage, length.Addr+length.Hash
 		}
 		if len(key) > 0 && len(key) != plainLen {
-			if page, isCold := probeWordPage(r, pr, DecodeReferenceKey(key)); isCold {
+			if page, isCold := probeWordPage(r, pr, DecodeReferenceKey(key)); isCold && !slices.Contains(cold, page) {
 				cold = append(cold, page)
 			}
 		}
