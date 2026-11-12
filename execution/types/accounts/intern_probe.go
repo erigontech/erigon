@@ -5,6 +5,7 @@ import (
 	"math/rand/v2"
 	"os"
 	"runtime"
+	"runtime/metrics"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -120,6 +121,9 @@ func ProbeHold(h Address) {
 }
 
 func ProbeBeginBlock() {
+	if probeGC {
+		metrics.Read(gcBegin)
+	}
 	probeHeldMu.Lock()
 	probeHeld = nil
 	probeHeldMu.Unlock()
@@ -128,10 +132,20 @@ func ProbeBeginBlock() {
 
 // ProbeEndBlock returns the counts of the block and resets them.
 func ProbeEndBlock() string {
-	if !probeCount && probePre.Load() == 0 {
-		return ""
+	gc := ""
+	if probeGC {
+		end := gcSamples()
+		metrics.Read(end)
+		gc = fmt.Sprintf(" npGc=%d npGcCpu=%.1fms npCpu=%.1fms npHeap=%dMB",
+			end[0].Value.Uint64()-gcBegin[0].Value.Uint64(),
+			1e3*(end[1].Value.Float64()-gcBegin[1].Value.Float64()),
+			1e3*(end[2].Value.Float64()-gcBegin[2].Value.Float64()),
+			end[3].Value.Uint64()>>20)
 	}
-	return fmt.Sprintf("npCalls=%d npMake=%d npNew=%d npExisting=%d npRecBlock=%d npRecOld=%d npPre=%s",
+	if !probeCount && probePre.Load() == 0 {
+		return gc
+	}
+	return gc + " " + fmt.Sprintf("npCalls=%d npMake=%d npNew=%d npExisting=%d npRecBlock=%d npRecOld=%d npPre=%s",
 		probeCalls.Swap(0), probeMake.Swap(0), probeNew.Swap(0), probeExisting.Swap(0), probeRecreatedBlock.Swap(0), probeRecreatedOld.Swap(0), time.Duration(probePre.Swap(0)))
 }
 
@@ -153,4 +167,13 @@ func ProbePreintern(addrs []common.Address) {
 	probeHeld = append(probeHeld, held...)
 	probeHeldMu.Unlock()
 	probePre.Store(int64(time.Since(t0)))
+}
+
+var (
+	probeGC = os.Getenv("PROBE_GC") == "1"
+	gcBegin = gcSamples()
+)
+
+func gcSamples() []metrics.Sample {
+	return []metrics.Sample{{Name: "/gc/cycles/total:gc-cycles"}, {Name: "/cpu/classes/gc/total:cpu-seconds"}, {Name: "/cpu/classes/total:cpu-seconds"}, {Name: "/gc/heap/live:bytes"}}
 }
