@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"runtime"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -436,7 +437,18 @@ func NewVersionMap(changes types.BlockAccessList) *VersionMap {
 		HasBAL: len(changes) > 0,
 		bal:    changes,
 	}
-	vm.WriteChanges(changes)
+	if len(changes) > 0 {
+		changed := 0
+		for i := range changes {
+			if balCellCount(&changes[i]) > 0 {
+				changed++
+			}
+		}
+		if changed > 0 {
+			vm.s.Store(xsync.NewMap[accounts.Address, *AddressEntry](xsync.WithPresize(changed)))
+		}
+		vm.seedChanges(changes)
+	}
 	return vm
 }
 
@@ -493,76 +505,165 @@ func (vm *VersionMap) StorageKeys(addr accounts.Address) []accounts.StorageKey {
 	return keys
 }
 
-// WriteChanges pre-populates the version map from a BAL (EIP-7928), routing each
-// per-path change through the typed Write primitive so the value type is enforced at
-// compile time.
-func (vm *VersionMap) WriteChanges(changes types.BlockAccessList) {
-	for i := range changes {
-		accountChanges := &changes[i]
-		if dbg.TraceBALFeed {
-			fmt.Printf(
-				"BAL-ACCT %x storage=%d balance=%d nonce=%d code=%d reads=%d\n",
-				accountChanges.Address,
-				len(accountChanges.StorageChanges),
-				len(accountChanges.BalanceChanges),
-				len(accountChanges.NonceChanges),
-				len(accountChanges.CodeChanges),
-				len(accountChanges.StorageReads),
-			)
+// seedChanges pre-populates a new version map from a BAL (EIP-7928). Accounts are
+// independent entries, so chunks of them are seeded in parallel.
+func (vm *VersionMap) seedChanges(changes types.BlockAccessList) {
+	forEachBALChunk(len(changes), func(i int) int { return balCellCount(&changes[i]) }, func(lo, hi int) {
+		for i := lo; i < hi; i++ {
+			vm.seedAccount(&changes[i])
 		}
-		if len(accountChanges.StorageChanges) == 0 && len(accountChanges.BalanceChanges) == 0 &&
-			len(accountChanges.NonceChanges) == 0 && len(accountChanges.CodeChanges) == 0 {
-			continue
+	})
+}
+
+func balCellCount(ac *types.AccountChanges) int {
+	n := len(ac.BalanceChanges) + len(ac.NonceChanges) + 3*len(ac.CodeChanges)
+	for _, sc := range ac.StorageChanges {
+		n += len(sc.Changes)
+	}
+	return n
+}
+
+// seedAccount writes one account's BAL changes as Done cells under a single entry lock.
+// It skips the write stamps and the seal check: the map is not shared yet.
+func (vm *VersionMap) seedAccount(ac *types.AccountChanges) {
+	if dbg.TraceBALFeed {
+		traceBALAccount(ac)
+	}
+	if len(ac.StorageChanges) == 0 && len(ac.BalanceChanges) == 0 &&
+		len(ac.NonceChanges) == 0 && len(ac.CodeChanges) == 0 {
+		return
+	}
+	addr := accounts.InternAddress(ac.Address)
+	e := vm.entryOrCreate(addr)
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if len(ac.StorageChanges) > 0 && e.Storage == nil {
+		e.Storage = make(map[accounts.StorageKey]*btree.Map[int, *WriteCell[uint256.Int]], len(ac.StorageChanges))
+	}
+	for _, sc := range ac.StorageChanges {
+		e.Storage[sc.Slot] = seedCells(vm, e.Storage[sc.Slot], addr, StoragePath, sc.Changes, func(c *types.StorageChange) (uint32, uint256.Int) { return c.Index, c.Value })
+	}
+	e.Balance = seedCells(vm, e.Balance, addr, BalancePath, ac.BalanceChanges, func(c *types.BalanceChange) (uint32, uint256.Int) { return c.Index, c.Value })
+	e.Nonce = seedCells(vm, e.Nonce, addr, NoncePath, ac.NonceChanges, func(c *types.NonceChange) (uint32, uint64) { return c.Index, c.Value })
+	for _, cc := range ac.CodeChanges {
+		// Seed the whole code trio together: a CodePath cell without its
+		// CodeHashPath/CodeSizePath siblings lets a reader see code but no code hash.
+		code := accounts.NewCode(cc.Bytecode)
+		txIdx := int(cc.Index) - 1
+		e.Code, _ = putCell(vm, e.Code, addr, CodePath, txIdx, 0, FlagDone, code, ValueChanged)
+		e.CodeHash, _ = putCell(vm, e.CodeHash, addr, CodeHashPath, txIdx, 0, FlagDone, code.Hash, ValueChanged)
+		e.CodeSize, _ = putCell(vm, e.CodeSize, addr, CodeSizePath, txIdx, 0, FlagDone, code.Len(), ValueChanged)
+	}
+}
+
+// seedCells adds a Done cell per change. A new map is bulk-loaded from one cell slab:
+// the BAL lists a path's changes in increasing index order, so each Load appends.
+func seedCells[C, T any](vm *VersionMap, cells *btree.Map[int, *WriteCell[T]], addr accounts.Address, path AccountPath, changes []C, get func(C) (uint32, T)) *btree.Map[int, *WriteCell[T]] {
+	if len(changes) == 0 {
+		return cells
+	}
+	if cells != nil {
+		for _, c := range changes {
+			idx, v := get(c)
+			cells, _ = putCell(vm, cells, addr, path, int(idx)-1, 0, FlagDone, v, ValueChanged)
 		}
-		addr := accounts.InternAddress(accountChanges.Address)
-		for _, storageChanges := range accountChanges.StorageChanges {
-			for _, change := range storageChanges.Changes {
-				if dbg.TraceBALFeed {
-					fmt.Printf(
-						"BAL-CELL %x storage[%x] balIdx=%d cell=%d val=%s\n",
-						accountChanges.Address,
-						storageChanges.Slot,
-						change.Index,
-						int(change.Index)-1,
-						change.Value.Hex(),
-					)
-				}
-				vm.WriteStorage(addr, storageChanges.Slot, Version{TxIndex: int(change.Index) - 1}, change.Value, true)
+		return cells
+	}
+	cells = &btree.Map[int, *WriteCell[T]]{}
+	slab := make([]WriteCell[T], len(changes))
+	for i, c := range changes {
+		idx, v := get(c)
+		slab[i].Value = v
+		slab[i].setState(0, FlagDone)
+		cells.Load(int(idx)-1, &slab[i])
+	}
+	return cells
+}
+
+func traceBALAccount(ac *types.AccountChanges) {
+	fmt.Printf("BAL-ACCT %x storage=%d balance=%d nonce=%d code=%d reads=%d\n",
+		ac.Address, len(ac.StorageChanges), len(ac.BalanceChanges), len(ac.NonceChanges), len(ac.CodeChanges), len(ac.StorageReads))
+	for _, sc := range ac.StorageChanges {
+		for _, c := range sc.Changes {
+			fmt.Printf("BAL-CELL %x storage[%x] balIdx=%d cell=%d val=%s\n", ac.Address, sc.Slot, c.Index, int(c.Index)-1, c.Value.Hex())
+		}
+	}
+	for _, c := range ac.BalanceChanges {
+		fmt.Printf("BAL-CELL %x balance balIdx=%d cell=%d val=%v\n", ac.Address, c.Index, int(c.Index)-1, &c.Value)
+	}
+	for _, c := range ac.NonceChanges {
+		fmt.Printf("BAL-CELL %x nonce balIdx=%d cell=%d val=%d\n", ac.Address, c.Index, int(c.Index)-1, c.Value)
+	}
+}
+
+const balSeedChunkCells = 512
+
+// balSeedWorkers is a fixed set of goroutines, started once and shared by every parallel BAL seed.
+var balSeedWorkers = sync.OnceValue(func() chan func() {
+	jobs := make(chan func())
+	for range runtime.GOMAXPROCS(0) - 1 {
+		go func() {
+			for job := range jobs {
+				job()
 			}
+		}()
+	}
+	return jobs
+})
+
+// balSeedJobHook, when set by a test, runs at the start of each seed job on a worker.
+var balSeedJobHook func()
+
+// forEachBALChunk runs fn over account ranges [lo, hi) of about balSeedChunkCells cells
+// each, on the caller and on any idle seed worker; an account heavier than that is a
+// range of its own. fn must be safe to run again over a range a worker already ran.
+func forEachBALChunk(n int, cellsOf func(i int) int, fn func(lo, hi int)) {
+	bounds := []int{0}
+	for i, w := 0, 0; i < n; i++ {
+		if w += cellsOf(i); w >= balSeedChunkCells || i == n-1 {
+			bounds = append(bounds, i+1)
+			w = 0
 		}
-		for _, balanceChange := range accountChanges.BalanceChanges {
-			if dbg.TraceBALFeed {
-				fmt.Printf(
-					"BAL-CELL %x balance balIdx=%d cell=%d val=%v\n",
-					accountChanges.Address,
-					balanceChange.Index,
-					int(balanceChange.Index)-1,
-					&balanceChange.Value,
-				)
+	}
+	chunks := len(bounds) - 1
+	if chunks <= 1 {
+		fn(0, n)
+		return
+	}
+	var next atomic.Int64
+	run := func() {
+		for c := int(next.Add(1) - 1); c < chunks; c = int(next.Add(1) - 1) {
+			fn(bounds[c], bounds[c+1])
+		}
+	}
+	var wg sync.WaitGroup
+	var panicked atomic.Bool
+	jobs := balSeedWorkers()
+	job := func() {
+		defer wg.Done()
+		defer func() {
+			if recover() != nil {
+				panicked.Store(true)
 			}
-			vm.WriteBalance(addr, Version{TxIndex: int(balanceChange.Index) - 1}, balanceChange.Value, true)
+		}()
+		if balSeedJobHook != nil {
+			balSeedJobHook()
 		}
-		for _, nonceChange := range accountChanges.NonceChanges {
-			if dbg.TraceBALFeed {
-				fmt.Printf(
-					"BAL-CELL %x nonce balIdx=%d cell=%d val=%d\n",
-					accountChanges.Address,
-					nonceChange.Index,
-					int(nonceChange.Index)-1,
-					nonceChange.Value,
-				)
-			}
-			vm.WriteNonce(addr, Version{TxIndex: int(nonceChange.Index) - 1}, nonceChange.Value, true)
+		run()
+	}
+	for range min(runtime.GOMAXPROCS(0), chunks) - 1 {
+		wg.Add(1)
+		select {
+		case jobs <- job:
+		default:
+			wg.Done()
 		}
-		for _, codeChange := range accountChanges.CodeChanges {
-			// Seed the whole code trio together: a CodePath cell without its
-			// CodeHashPath/CodeSizePath siblings lets a reader see code but no code hash.
-			code := accounts.NewCode(codeChange.Bytecode)
-			v := Version{TxIndex: int(codeChange.Index) - 1}
-			vm.WriteCode(addr, v, code, true)
-			vm.WriteCodeHash(addr, v, code.Hash, true)
-			vm.WriteCodeSize(addr, v, code.Len(), true)
-		}
+	}
+	run()
+	wg.Wait()
+	// A panic on a worker would kill the process; the serial rerun raises it on the caller instead.
+	if panicked.Load() {
+		fn(0, n)
 	}
 }
 
