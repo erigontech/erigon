@@ -1013,26 +1013,25 @@ func (f *ForkChoiceStore) retryPendingEnvelopeError(err error, pending *cltypes.
 }
 
 func (f *ForkChoiceStore) addChainSegmentAndQueueLightClientEvents(block *cltypes.SignedBeaconBlock, fullValidation bool) (*state.CachingBeaconState, fork_graph.ChainSegmentInsertionResult, error) {
-	lcUpdateBefore, finalityUpdateBefore := f.forkGraph.NewestLightClientUpdate(), f.forkGraph.NewestLightClientFinalityUpdate()
+	lcUpdateBefore := f.forkGraph.NewestLightClientUpdate()
 	lastProcessedState, status, err := f.forkGraph.AddChainSegment(block, fullValidation)
 	if err != nil {
 		return nil, status, err
 	}
-	f.queueLightClientEvents(lcUpdateBefore, finalityUpdateBefore)
+	f.queueLightClientEvents(lcUpdateBefore)
 	return lastProcessedState, status, nil
 }
 
 // queueLightClientEvents emits the light client events for an update stored by
 // AddChainSegment. The fork graph runs under f.mu and must not send events
 // itself, so OnBlock detects a freshly stored update and queues the sends.
-func (f *ForkChoiceStore) queueLightClientEvents(before, finalityBefore *cltypes.LightClientUpdate) {
+func (f *ForkChoiceStore) queueLightClientEvents(before *cltypes.LightClientUpdate) {
 	lcUpdate := f.forkGraph.NewestLightClientUpdate()
 	if lcUpdate == nil || lcUpdate == before {
 		return
 	}
 	version := lcUpdate.AttestedHeader.Version().String()
-	finalityUpdate := f.forkGraph.NewestLightClientFinalityUpdate()
-	sendFinality := finalityUpdate == lcUpdate && finalityUpdate != finalityBefore
+	sendFinality := f.forkGraph.NewestLightClientFinalityUpdate() == lcUpdate
 	f.queueEmit(func() {
 		if sendFinality {
 			f.emitters.State().SendLightClientFinalityUpdate(&beaconevents.LightClientFinalityUpdateData{

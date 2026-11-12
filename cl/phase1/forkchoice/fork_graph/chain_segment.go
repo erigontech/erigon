@@ -152,8 +152,8 @@ func (f *forkGraphDisk) beginChainSegmentLocked(signedBlock *cltypes.SignedBeaco
 		)
 		return nil, MissingSegment, nil
 	}
-	// The finalized block may be gone from memory, as after a restart into non-finality: the update is then built
-	// without finality, as create_light_client_update allows.
+	// The finalized block may be unavailable; the update is then built without finality, as create_light_client_update
+	// allows.
 	finalizedBlock, _ := f.GetBlock(parentState.FinalizedCheckpoint().Root)
 	parentBlock, hasParentBlock := f.GetBlock(block.ParentRoot)
 	seg := &ChainSegment{

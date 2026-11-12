@@ -233,8 +233,8 @@ func IsBetterUpdate(cfg *clparams.BeaconChainConfig, newUpdate, oldUpdate *cltyp
 		return newHasRelevantSyncCommittee
 	}
 
-	newHasFinality := !isZeroBranch(newUpdate.FinalityBranch)
-	if oldHasFinality := !isZeroBranch(oldUpdate.FinalityBranch); newHasFinality != oldHasFinality {
+	newHasFinality := IsFinalityUpdate(newUpdate)
+	if oldHasFinality := IsFinalityUpdate(oldUpdate); newHasFinality != oldHasFinality {
 		return newHasFinality
 	}
 

@@ -450,8 +450,7 @@ func TestBeginChainSegmentMovesStatesIntoSegment(t *testing.T) {
 	require.Nil(t, graph.nextEpochState)
 }
 
-// A block whose parent state's finalized block is not in memory, as after a restart into non-finality, still records
-// its light client update, without finality.
+// A block whose parent state's finalized block is unavailable still records its light client update, without finality.
 func TestAddChainSegmentRecordsAnUpdateWithoutTheFinalizedBlock(t *testing.T) {
 	g, blocks := newLightClientGraph(t)
 	g.blocks.Delete(common.Hash{}) // the anchor's finalized block
