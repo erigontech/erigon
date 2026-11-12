@@ -271,7 +271,7 @@ func (pe *parallelExecutor) bindBlockChangesetForFold(blockNum uint64, blockHash
 // balBuildJobs feeds one builder goroutine, started once and shared: it adds sealed txs
 // to their block access list in publish order, off the apply goroutine.
 var balBuildJobs = sync.OnceValue(func() chan<- balBuildJob {
-	jobs := make(chan balBuildJob, 1024)
+	jobs := make(chan balBuildJob, 64*1024)
 	go func() {
 		for j := range jobs {
 			j.run()
@@ -309,6 +309,8 @@ type asyncBALBuilder struct {
 	b    *state.BlockAccessListBuilder
 	err  any
 	done chan struct{}
+	// shortcut: dbg probe counters of the job queue; remove after the measurement.
+	queueMax, queueBlocked int
 }
 
 func (a *asyncBALBuilder) add(io *state.VersionedIO, sealed int) {
@@ -318,7 +320,14 @@ func (a *asyncBALBuilder) add(io *state.VersionedIO, sealed int) {
 	if a.done == nil {
 		a.done = make(chan struct{}, 1)
 	}
-	balBuildJobs() <- balBuildJob{a: a, io: io, sealed: sealed}
+	jobs := balBuildJobs()
+	if n := len(jobs); n > a.queueMax {
+		a.queueMax = n
+	}
+	if len(jobs) == cap(jobs) {
+		a.queueBlocked++
+	}
+	jobs <- balBuildJob{a: a, io: io, sealed: sealed}
 }
 
 // finish waits for the block's queued txs and returns its builder, nil when none was
@@ -327,6 +336,8 @@ func (a *asyncBALBuilder) finish() *state.BlockAccessListBuilder {
 	if a.b == nil {
 		return nil
 	}
+	log.Info("[balq]", "npQueueMax", a.queueMax, "npQueueBlocked", a.queueBlocked)
+	a.queueMax, a.queueBlocked = 0, 0
 	balBuildJobs() <- balBuildJob{a: a, flush: true}
 	<-a.done
 	b, err := a.b, a.err
