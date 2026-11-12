@@ -175,7 +175,7 @@ func TestBoundedGetLatestDoesNotPopulateBranchCache(t *testing.T) {
 	require.False(t, ok)
 }
 
-func TestSnapshotBranchCacheEntrySurvivesLegalUnwind(t *testing.T) {
+func TestSnapshotBranchReadNeedsRefillAfterUnwind(t *testing.T) {
 	const stepSize = uint64(16)
 	db, key, frozenValue := commitmentFileFixture(t, stepSize)
 	roTx, err := db.BeginTemporalRo(t.Context())
@@ -192,8 +192,10 @@ func TestSnapshotBranchCacheEntrySurvivesLegalUnwind(t *testing.T) {
 	require.Equal(t, frozenValue, got)
 	require.Equal(t, kv.Step(1), step)
 	branchCache.Unwind(20)
-	got, _, ok := branchCache.Get(key)
-	require.True(t, ok)
+	_, _, ok := branchCache.Get(key)
+	require.False(t, ok)
+	got, _, err = sd.GetLatest(kv.CommitmentDomain, roTx, key)
+	require.NoError(t, err)
 	require.Equal(t, frozenValue, got)
 }
 

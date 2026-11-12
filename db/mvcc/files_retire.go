@@ -7,6 +7,7 @@ const (
 	RetireReasonMerged RetireReason = iota + 1
 	RetireReasonAged
 	RetireReasonWasDeletedFromDisk // imagine you are external RPCDaemon. It subscribing to `OnSnapshotsChanged` event. Erigon can delete from disk files which you still open - it's valid case.
+	RetireReasonIncomplete         // Keep files on disk until matching domain data is available.
 	// TODO: add one more reason for "we downloaded too much files - let's remove several recent files" case. We have it in stage_snapshots
 )
 
@@ -18,6 +19,8 @@ func (r RetireReason) String() string {
 		return "aged"
 	case RetireReasonWasDeletedFromDisk:
 		return "was-deleted-from-disk"
+	case RetireReasonIncomplete:
+		return "incomplete"
 	default:
 		return "unknown"
 	}

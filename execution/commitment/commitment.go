@@ -109,7 +109,8 @@ type PatriciaContext interface {
 	Branch(prefix []byte) ([]byte, kv.Step, error)
 	// Implementations must copy prefix and data rather than retain them: callers may pass
 	// pooled buffers that are recycled for a later, unrelated update.
-	// A nil prevData asks the writer to read the previous value; an empty slice means known absent.
+	// A nil prevData asks the writer to read the previous value.
+	// A non-nil empty slice means the previous branch is known to be absent.
 	PutBranch(prefix []byte, data []byte, prevData []byte) error
 	Account(plainKey []byte) (*Update, error)
 	Storage(plainKey []byte) (*Update, error)
@@ -449,8 +450,8 @@ func (be *BranchEncoder) setMetrics(metrics *Metrics) {
 	be.metrics = metrics
 }
 
-// prev is the branch to merge with, if it existed when unfolded. A new branch
-// passes nil so PutBranch resolves its undo value when the write is applied.
+// prev is the branch read during unfold, empty when the branch is new.
+// A nil prev is passed to PutBranch as a non-nil empty slice to avoid a storage read.
 func (be *BranchEncoder) CollectUpdate(
 	ctx PatriciaContext,
 	prefix []byte,
@@ -460,6 +461,9 @@ func (be *BranchEncoder) CollectUpdate(
 ) error {
 	if be.deferUpdates {
 		return be.CollectDeferredUpdate(ctx, prefix, bitmap, touchMap, afterMap, cells, prev)
+	}
+	if prev == nil {
+		prev = []byte{}
 	}
 	update, err := be.EncodeBranch(bitmap, touchMap, afterMap, cells)
 	if err != nil {
@@ -503,6 +507,10 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 		}
 		be.ClearDeferred()
 	}
+	if prev == nil {
+		prev = []byte{}
+	}
+
 	raw, err := be.EncodeBranch(bitmap, touchMap, afterMap, cells)
 	if err != nil {
 		return err
@@ -625,6 +633,10 @@ func (branchData BranchData) ChildCount() int {
 }
 
 func (branchData BranchData) IsTombstone() bool { return len(branchData) == 0 }
+
+func (branchData BranchData) IsEmptyBranchRecord() bool {
+	return len(branchData) == 4 && branchData.ChildCount() == 0
+}
 
 func (branchData BranchData) String() string {
 	if branchData.IsTombstone() {
