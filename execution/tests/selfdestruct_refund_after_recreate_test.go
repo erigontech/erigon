@@ -61,7 +61,8 @@ func TestSelfdestructRefundAfterRecreate(t *testing.T) {
 	for _, fork := range []struct {
 		name   string
 		config *chain.Config
-	}{{"petersburg", petersburg}, {"berlin", chain.TestChainBerlinConfig}} {
+		gas    uint64
+	}{{"petersburg", petersburg, 99_373}, {"berlin", chain.TestChainBerlinConfig, 105_973}} {
 		t.Run(fork.name, func(t *testing.T) {
 			alloc := types.GenesisAlloc{
 				factory: {Code: factoryCode},
@@ -75,6 +76,7 @@ func TestSelfdestructRefundAfterRecreate(t *testing.T) {
 				{to: donor},
 				{to: factory, value: 1},
 			})
+			require.Equal(t, fork.gas, chainPack.Receipts[0][3].GasUsed, "the re-created X earns the SELFDESTRUCT refund")
 			importInParallel(t, gspec, keys[0], chainPack, func(t *testing.T, st *state.IntraBlockState) {
 				exists, err := st.Exist(accounts.InternAddress(x))
 				require.NoError(t, err)
