@@ -853,3 +853,16 @@ func TestBlobArchiveStoreFillDenseWindowReads(t *testing.T) {
 	require.EqualValues(t, fillTestSlot+windowTestServedFrom, cmd.windows[0].from.Load())
 	require.LessOrEqual(t, reader.reads.Load(), uint64(windowTestSlots+64))
 }
+
+func TestBlobArchiveStoreCheckPassesAfterFillingASkippedGloasPayload(t *testing.T) {
+	f, _, _ := newSkippedPayloadFixture(t, 1)
+	url, _ := f.endpoint(false)
+	require.NoError(t, f.fill(&BlobArchiveStoreFill{Endpoints: []string{url}, FromSlot: fillTestSlot, ToSlot: fillTestSlot + 2}, nil))
+
+	tx, err := f.db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	mismatched, _, err := checkBlobStore(t.Context(), tx, f.blocks, f.store, fillTestSlot+2, fillTestSlot, false)
+	require.NoError(t, err)
+	require.Zero(t, mismatched)
+}

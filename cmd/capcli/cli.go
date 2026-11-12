@@ -1186,9 +1186,9 @@ func checkBlobStore(ctx context.Context, tx kv.Tx, snr freezeblocks.BeaconSnapsh
 		if err != nil {
 			return mismatched, unresolved, err
 		}
-		wantBlobs := 0
-		if c := blk.Block.Body.GetBlobKzgCommitments(); c != nil {
-			wantBlobs = c.Len()
+		wantBlobs, err := expectedBlobsInTx(ctx, tx, snr, blockRoot, blk)
+		if err != nil {
+			return mismatched, unresolved, err
 		}
 		// A count row does not prove its sidecar files are on disk, so a matching count is not
 		// evidence the store can still serve the slot. Stat each expected file rather than reading
@@ -1196,7 +1196,7 @@ func checkBlobStore(ctx context.Context, tx kv.Tx, snr freezeblocks.BeaconSnapsh
 		// an absent file is the failure this has to catch.
 		missingIndex := -1
 		if haveBlobs == uint32(wantBlobs) {
-			for idx := 0; idx < wantBlobs; idx++ {
+			for idx := range wantBlobs {
 				present, err := blobStorage.BlobSidecarExists(ctx, i, blockRoot, uint64(idx))
 				if err != nil {
 					return mismatched, unresolved, err

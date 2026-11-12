@@ -372,25 +372,31 @@ func blobCount(block *cltypes.SignedBeaconBlock) int {
 	return 0
 }
 
-func expectedBlobs(ctx context.Context, db kv.RoDB, blocks freezeblocks.BeaconSnapshotReader, root common.Hash, block *cltypes.SignedBeaconBlock) (int, error) {
+func expectedBlobs(ctx context.Context, db kv.RoDB, blocks freezeblocks.BeaconSnapshotReader, root common.Hash, block *cltypes.SignedBeaconBlock) (n int, err error) {
+	err = db.View(ctx, func(tx kv.Tx) error {
+		n, err = expectedBlobsInTx(ctx, tx, blocks, root, block)
+		return err
+	})
+	return n, err
+}
+
+func expectedBlobsInTx(ctx context.Context, tx kv.Tx, blocks freezeblocks.BeaconSnapshotReader, root common.Hash, block *cltypes.SignedBeaconBlock) (int, error) {
 	n := blobCount(block)
 	if n == 0 || block.Version() < clparams.GloasVersion {
 		return n, nil
 	}
 	var childSlot uint64
 	var childRoot common.Hash
-	if err := db.View(ctx, func(tx kv.Tx) error {
-		return beacon_indicies.RangeBlockRoots(tx, block.Block.Slot+1, math.MaxUint64, func(slot uint64, root common.Hash) bool {
-			childSlot, childRoot = slot, root
-			return false
-		})
+	if err := beacon_indicies.RangeBlockRoots(tx, block.Block.Slot+1, math.MaxUint64, func(slot uint64, root common.Hash) bool {
+		childSlot, childRoot = slot, root
+		return false
 	}); err != nil {
 		return 0, err
 	}
 	if childRoot == (common.Hash{}) {
 		return n, nil
 	}
-	_, child, err := readSlot(ctx, db, blocks, childSlot)
+	child, err := blocks.ReadBeaconBlockBodyBySlot(ctx, tx, childSlot)
 	if err != nil {
 		return 0, err
 	}
