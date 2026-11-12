@@ -33,10 +33,9 @@ import (
 func TestExecutionPathReporterLines(t *testing.T) {
 	hash := common.HexToHash("0xabcdef")
 	for _, tc := range []struct {
-		name       string
-		sequential bool
-		path       ethconfig.BlockExecutionPath
-		want       string
+		name string
+		path ethconfig.BlockExecutionPath
+		want string
 	}{
 		{
 			name: "parallel with access list",
@@ -49,32 +48,19 @@ func TestExecutionPathReporterLines(t *testing.T) {
 			want: `{"event":"balExecution","block":12,"hash":"0x0000000000000000000000000000000000000000000000000000000000abcdef","path":"parallel","reason":"","scheduler":"optimistic"}`,
 		},
 		{
-			name:       "single worker under --bal-sequential",
-			sequential: true,
-			path:       ethconfig.BlockExecutionPath{Number: 12, Hash: hash, Path: "sequential", Reason: "single-worker", AccessList: true},
-			want:       `{"event":"balExecution","block":12,"hash":"0x0000000000000000000000000000000000000000000000000000000000abcdef","path":"sequential","reason":"disabled","scheduler":"bal"}`,
+			name: "sequential under --bal-sequential",
+			path: ethconfig.BlockExecutionPath{Number: 12, Hash: hash, Path: "sequential", Reason: "disabled", AccessList: true},
+			want: `{"event":"balExecution","block":12,"hash":"0x0000000000000000000000000000000000000000000000000000000000abcdef","path":"sequential","reason":"disabled","scheduler":"bal"}`,
 		},
 		{
-			name:       "dropped access list under --bal-sequential",
-			sequential: true,
-			path:       ethconfig.BlockExecutionPath{Number: 12, Hash: hash, Path: "sequential", Reason: "bad-access-list"},
-			want:       `{"event":"balExecution","block":12,"hash":"0x0000000000000000000000000000000000000000000000000000000000abcdef","path":"sequential","reason":"bad-access-list","scheduler":"optimistic"}`,
-		},
-		{
-			name: "single worker by configuration",
-			path: ethconfig.BlockExecutionPath{Number: 12, Hash: hash, Path: "sequential", Reason: "single-worker", AccessList: true},
-			want: `{"event":"balExecution","block":12,"hash":"0x0000000000000000000000000000000000000000000000000000000000abcdef","path":"sequential","reason":"single-worker","scheduler":"bal"}`,
-		},
-		{
-			name:       "withheld access list under --bal-sequential",
-			sequential: true,
-			path:       ethconfig.BlockExecutionPath{Number: 12, Hash: hash, Path: "sequential", Reason: "withheld"},
-			want:       `{"event":"balExecution","block":12,"hash":"0x0000000000000000000000000000000000000000000000000000000000abcdef","path":"sequential","reason":"withheld","scheduler":"optimistic"}`,
+			name: "dropped access list",
+			path: ethconfig.BlockExecutionPath{Number: 12, Hash: hash, Path: "sequential", Reason: "bad-access-list"},
+			want: `{"event":"balExecution","block":12,"hash":"0x0000000000000000000000000000000000000000000000000000000000abcdef","path":"sequential","reason":"bad-access-list","scheduler":"optimistic"}`,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var out bytes.Buffer
-			executionPathReporter(&out, tc.sequential)(tc.path)
+			executionPathReporter(&out)(tc.path)
 			require.Equal(t, tc.want+"\n", out.String())
 		})
 	}

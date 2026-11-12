@@ -43,12 +43,12 @@ func runnerExecutionPathReporter(ctx *cli.Command) func(ethconfig.BlockExecution
 	if !ctx.Bool(BALReportFlag.Name) {
 		return nil
 	}
-	return executionPathReporter(os.Stderr, ctx.Bool(BALSequentialFlag.Name))
+	return executionPathReporter(os.Stderr)
 }
 
 // executionPathReporter writes each executed block's path to w as one JSON
 // line. blocktest has already named a withheld or dropped list in the reason.
-func executionPathReporter(w io.Writer, sequential bool) func(ethconfig.BlockExecutionPath) {
+func executionPathReporter(w io.Writer) func(ethconfig.BlockExecutionPath) {
 	var mu sync.Mutex
 	return func(p ethconfig.BlockExecutionPath) {
 		line := executionPathLine{
@@ -58,9 +58,6 @@ func executionPathReporter(w io.Writer, sequential bool) func(ethconfig.BlockExe
 			Path:      p.Path,
 			Reason:    p.Reason,
 			Scheduler: "optimistic",
-		}
-		if sequential && line.Reason == "single-worker" {
-			line.Reason = "disabled"
 		}
 		if p.AccessList {
 			line.Scheduler = "bal"
