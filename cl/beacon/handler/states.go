@@ -115,6 +115,7 @@ func (a *ApiHandler) getStateFork(w http.ResponseWriter, r *http.Request) (*beac
 	if err != nil {
 		return nil, err
 	}
+	finalizedSlot := a.forkchoiceStore.FinalizedCheckpoint().Epoch * a.beaconChainCfg.SlotsPerEpoch
 	epoch := *slot / a.beaconChainCfg.SlotsPerEpoch
 
 	stateVersion := a.beaconChainCfg.GetCurrentStateVersion(epoch)
@@ -127,7 +128,7 @@ func (a *ApiHandler) getStateFork(w http.ResponseWriter, r *http.Request) (*beac
 		CurrentVersion:  utils.Uint32ToBytes4(currentVersion),
 		Epoch:           forkEpoch,
 	}).WithOptimistic(isOptimistic).
-		WithFinalized(canonicalRoot == root && *slot <= a.forkchoiceStore.FinalizedSlot()), nil
+		WithFinalized(canonicalRoot == root && *slot <= finalizedSlot), nil
 }
 
 func (a *ApiHandler) getStateRoot(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {

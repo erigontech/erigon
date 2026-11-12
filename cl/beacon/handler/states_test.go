@@ -54,7 +54,9 @@ func TestGetStateFork(t *testing.T) {
 	require.NoError(t, err)
 
 	fcu.HeadSlotVal = blocks[len(blocks)-1].Block.Slot
-	fcu.FinalizedSlotVal = blocks[0].Block.Slot
+	finalizedEpoch := blocks[len(blocks)-1].Block.Slot / handler.beaconChainCfg.SlotsPerEpoch
+	fcu.FinalizedCheckpointVal = solid.Checkpoint{Epoch: finalizedEpoch}
+	fcu.FinalizedSlotVal = (finalizedEpoch+1)*handler.beaconChainCfg.SlotsPerEpoch - 1
 
 	nonCanonicalBlock := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.Phase0Version)
 	nonCanonicalBlock.Block.Slot = blocks[0].Block.Slot
