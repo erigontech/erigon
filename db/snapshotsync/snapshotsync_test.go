@@ -19,6 +19,9 @@ package snapshotsync
 import (
 	"context"
 	"fmt"
+	"math"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -64,7 +67,7 @@ func (f fakeSnapshots) SegmentsMax() uint64 { return f.max }
 // fakeBlockReader stubs the blockReader interface for getMinimumBlocksToDownload,
 // implementing only the methods that function touches.
 type fakeBlockReader struct {
-	blockReader
+	BlockReader
 	frozenMax uint64
 	bodies    []frozenBody
 }
@@ -651,4 +654,94 @@ func TestReceiptsSegmentRetentionCutoff_FollowsHistoryWindow(t *testing.T) {
 	require.Equal(t, uint64(head-config3.MinimalPruneDistance),
 		receiptsSegmentRetentionCutoff(prune.MinimalMode, nil, head, "idx/v1.0-logaddrs.100-200.ef"))
 	require.Zero(t, receiptsSegmentRetentionCutoff(prune.ArchiveMode, nil, head, "idx/v1.0-logaddrs.100-200.ef"))
+}
+
+func TestBlobSidecarDownloadFilter(t *testing.T) {
+	seg := "v1.1-008620-008630-blobsidecars.seg"
+	idx := "v1.1-008620-008630-blocksidecars.idx"
+	require.True(t, isBlobSidecarFile(seg))
+	require.True(t, isBlobSidecarFile(idx), "the blob index is named blocksidecars and must follow its segment")
+	require.False(t, isBlobSidecarFile("v1.1-008620-008630-beaconblocks.seg"))
+	require.False(t, isBlobSidecarFile("v1.1-000000-000500-bodies.seg"))
+
+	for _, name := range []string{seg, idx} {
+		require.False(t, blobSegmentBelow(name, 0), "zero keeps every segment")
+		require.True(t, blobSegmentBelow(name, 8_630_000), "a segment ending at the start slot holds nothing kept")
+		require.False(t, blobSegmentBelow(name, 8_629_999), "the segment holding the start slot is kept")
+		require.False(t, blobSegmentBelow(name, 8_000_000))
+	}
+}
+
+func TestBlobRetentionDownloadFloorKeepsTheServingWindow(t *testing.T) {
+	const window = 131_072 + 32
+	items := snapcfg.PreverifiedItems{
+		{Name: "v1.1-000000-000500-bodies.seg"},
+		{Name: "v1.1-008620-008630-blobsidecars.seg"},
+		{Name: "v1.1-008620-008630-blocksidecars.idx"},
+		{Name: "v1.1-013560-013570-blobsidecars.seg"},
+		{Name: "v1.1-013560-013570-blocksidecars.idx"},
+	}
+	const tip = 13_570_000
+	for _, tc := range []struct {
+		name string
+		r    BlobRetention
+		want uint64
+	}{
+		{name: "no bound downloads everything", r: BlobRetention{ServeWindowSlots: window}, want: 0},
+		{name: "old start slot is the floor", r: BlobRetention{FromSlot: 9_000_000, ServeWindowSlots: window}, want: 9_000_000},
+		{name: "start slot inside the serving window keeps the window", r: BlobRetention{FromSlot: tip - 10, ServeWindowSlots: window}, want: tip - window},
+		{name: "unknown window downloads everything", r: BlobRetention{FromSlot: 9_000_000, ServeWindowSlots: math.MaxUint64}, want: 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.r.SnapshotDir = t.TempDir()
+			floor, err := tc.r.downloadFloor(items)
+			require.NoError(t, err)
+			require.Equal(t, uint64(tc.want), floor)
+		})
+	}
+}
+
+func TestBlobRetentionDownloadFloorKeepsLocalSegmentsContiguous(t *testing.T) {
+	const tip = 13_570_000
+	const window = 131_072 + 32
+	items := snapcfg.PreverifiedItems{}
+	for from := 8_990_000; from < tip; from += 10_000 {
+		items = append(items,
+			snapcfg.PreverifiedItem{Name: fmt.Sprintf("v1.1-%06d-%06d-blobsidecars.seg", from/1000, (from+10_000)/1000)},
+			snapcfg.PreverifiedItem{Name: fmt.Sprintf("v1.1-%06d-%06d-blocksidecars.idx", from/1000, (from+10_000)/1000)},
+		)
+	}
+	r := BlobRetention{SnapshotDir: t.TempDir(), FromSlot: tip, ServeWindowSlots: window}
+	floor, err := r.downloadFloor(items)
+	require.NoError(t, err)
+	require.Equal(t, uint64(tip-window), floor)
+
+	for _, name := range []string{
+		"v1.1-009020-009030-blobsidecars.seg",
+		"v1.1-009000-009010-blobsidecars.seg",
+		"v1.1-009000-009010-blocksidecars.idx",
+		"v1.1-008000-008010-beaconblocks.seg",
+		"v1.1-008500-008510-blocksidecars.idx",
+	} {
+		require.NoError(t, os.WriteFile(filepath.Join(r.SnapshotDir, name), []byte("segment"), 0o644))
+	}
+	floor, err = r.downloadFloor(items)
+	require.NoError(t, err)
+	for _, p := range items {
+		require.Equal(t, strings.Contains(p.Name, "008990-009000"), skipBlobDownload(p.Name, true, floor),
+			"only segments and indexes before the local prefix may be skipped: %s", p.Name)
+	}
+	require.Equal(t, uint64(9_000_000), floor)
+}
+
+func TestSkipBlobDownload(t *testing.T) {
+	for _, name := range []string{"v1.1-008620-008630-blobsidecars.seg", "v1.1-008620-008630-blocksidecars.idx"} {
+		require.True(t, skipBlobDownload(name, false, 0), "a node without a blob archive downloads no blob file: %s", name)
+		require.False(t, skipBlobDownload(name, true, 0), name)
+		require.True(t, skipBlobDownload(name, true, 8_630_000), name)
+		require.False(t, skipBlobDownload(name, true, 8_629_999), name)
+	}
+	for _, name := range []string{"v1.1-008620-008630-beaconblocks.seg", "v1.1-000000-000500-bodies.seg"} {
+		require.False(t, skipBlobDownload(name, false, 8_630_000), name)
+	}
 }

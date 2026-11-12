@@ -98,6 +98,7 @@ type ForkChoiceStorageMock struct {
 	envelopesMu                                        sync.RWMutex
 	executionPayloadMu                                 sync.RWMutex
 	HasEnvelopeFunc                                    func(common.Hash) bool
+	IsEnvelopeRejectedFunc                             func(common.Hash) bool
 	InvalidBlocks                                      map[common.Hash]struct{}
 	ExecutionPayloadReceivedAt                         map[common.Hash]time.Time
 	VerifiedPayloads                                   map[common.Hash]bool
@@ -111,6 +112,7 @@ type ForkChoiceStorageMock struct {
 	ValidateBlockForPublishingFn                       func(*cltypes.SignedBeaconBlock, bool) error
 	OnTickFn                                           func(uint64)
 	ValidateExecutionPayloadEnvelopeErr                error
+	ValidateExecutionPayloadEnvelopeFunc               func(context.Context, *cltypes.SignedExecutionPayloadEnvelope) error
 	ValidateExecutionPayloadEnvelopeForGossipErr       error
 	ValidateExecutionPayloadEnvelopeForGossipCalled    bool
 	ValidateExecutionPayloadEnvelopeForGossipFunc      func(*cltypes.SignedExecutionPayloadEnvelope) error
@@ -563,7 +565,10 @@ func (f *ForkChoiceStorageMock) OnExecutionPayloadAt(ctx context.Context, signed
 	return f.OnExecutionPayload(ctx, signedEnvelope, checkBlobData, validatePayload)
 }
 
-func (f *ForkChoiceStorageMock) ValidateExecutionPayloadEnvelope(_ context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error {
+func (f *ForkChoiceStorageMock) ValidateExecutionPayloadEnvelope(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error {
+	if f.ValidateExecutionPayloadEnvelopeFunc != nil {
+		return f.ValidateExecutionPayloadEnvelopeFunc(ctx, signedEnvelope)
+	}
 	return f.ValidateExecutionPayloadEnvelopeErr
 }
 
@@ -653,9 +658,13 @@ func (f *ForkChoiceStorageMock) ForgetExecutionPayloadEnvelopeForGossip(beaconBl
 	f.EnvelopeGossipAdmissions.ForgetSeen(beaconBlockRoot, builderIndex)
 }
 
-func (f *ForkChoiceStorageMock) ValidateExecutionPayloadEnvelopeForConsensus(_ context.Context, _ *cltypes.SignedExecutionPayloadEnvelope) error {
+func (f *ForkChoiceStorageMock) ValidateExecutionPayloadEnvelopeForConsensus(_ context.Context, _ *cltypes.SignedExecutionPayloadEnvelope, _ bool) error {
 	f.ValidateExecutionPayloadEnvelopeForConsensusCalled = true
 	return f.ValidateExecutionPayloadEnvelopeForConsensusErr
+}
+
+func (f *ForkChoiceStorageMock) ExecutionPayloadInvalidated(common.Hash, common.Hash) bool {
+	return false
 }
 
 func (f *ForkChoiceStorageMock) ApplyLocalSelfBuildEnvelope(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error {
@@ -745,10 +754,12 @@ func (f *ForkChoiceStorageMock) NewestLightClientUpdate() *cltypes.LightClientUp
 	return f.NewestLCUpdate
 }
 
-func (f *ForkChoiceStorageMock) GetLightClientUpdate(
-	period uint64,
-) (*cltypes.LightClientUpdate, bool) {
-	return f.LCUpdates[period], f.LCUpdates[period] != nil
+func (f *ForkChoiceStorageMock) GetLightClientUpdates(startPeriod, endPeriod uint64) []*cltypes.LightClientUpdate {
+	var updates []*cltypes.LightClientUpdate
+	for period := startPeriod; period < endPeriod; period++ {
+		updates = append(updates, f.LCUpdates[period])
+	}
+	return updates
 }
 
 func (f *ForkChoiceStorageMock) GetHeader(
@@ -800,6 +811,10 @@ func (f *ForkChoiceStorageMock) HasEnvelope(blockRoot common.Hash) bool {
 	defer f.envelopesMu.RUnlock()
 	_, ok := f.Envelopes[blockRoot]
 	return ok
+}
+
+func (f *ForkChoiceStorageMock) IsEnvelopeRejected(blockRoot common.Hash) bool {
+	return f.IsEnvelopeRejectedFunc != nil && f.IsEnvelopeRejectedFunc(blockRoot)
 }
 
 func (f *ForkChoiceStorageMock) ExecutionPayloadReceivedBefore(blockRoot common.Hash, deadline time.Time) bool {

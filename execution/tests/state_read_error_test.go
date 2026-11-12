@@ -25,7 +25,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
@@ -103,12 +102,8 @@ func corruptAccountRecord(t *testing.T, m *execmoduletester.ExecModuleTester, ad
 }
 
 // executeStoredBlocks runs the execution stage up to block toBlock.
-func executeStoredBlocks(t *testing.T, m *execmoduletester.ExecModuleTester, engine rules.Engine, parallel bool, toBlock uint64) error {
+func executeStoredBlocks(t *testing.T, m *execmoduletester.ExecModuleTester, engine rules.Engine, toBlock uint64) error {
 	t.Helper()
-	prevParallel := dbg.Exec3Parallel
-	defer func() { dbg.Exec3Parallel = prevParallel }()
-	dbg.Exec3Parallel = parallel
-
 	ctx := context.Background()
 	tx, err := m.DB.BeginTemporalRw(ctx)
 	require.NoError(t, err)
@@ -160,55 +155,47 @@ func (e creditingEngine) Finalize(config *chain.Config, header *types.Header, ib
 // A state read that fails says nothing about the block: execution must stop
 // with the read error, not reject the block as invalid.
 func TestStateReadErrorIsNotInvalidBlock(t *testing.T) {
-	for _, parallel := range []bool{false, true} {
-		t.Run(map[bool]string{false: "serial", true: "parallel"}[parallel], func(t *testing.T) {
-			t.Run("tx", func(t *testing.T) {
-				m := execmoduletester.New(t)
-				to := common.Address{0xbb, 19: 1}
-				storeUnexecutedBlocks(t, m, transferInBlock2(t, m, to))
-				corruptAccountRecord(t, m, to)
-				err := executeStoredBlocks(t, m, m.Engine, parallel, 2)
-				require.ErrorContains(t, err, "deserialse2")
-				require.NotErrorIs(t, err, rules.ErrInvalidBlock)
-			})
-			t.Run("finalize", func(t *testing.T) {
-				m := execmoduletester.New(t)
-				storeUnexecutedBlocks(t, m, transferInBlock2(t, m, common.Address{0xaa}))
-				beneficiary := common.Address{19: 0x42}
-				corruptAccountRecord(t, m, beneficiary)
-				err := executeStoredBlocks(t, m, creditingEngine{Engine: m.Engine, beneficiary: beneficiary}, parallel, 2)
-				require.ErrorContains(t, err, "deserialse2")
-				require.NotErrorIs(t, err, rules.ErrInvalidBlock)
-			})
-		})
-	}
+	t.Run("tx", func(t *testing.T) {
+		m := execmoduletester.New(t)
+		to := common.Address{0xbb, 19: 1}
+		storeUnexecutedBlocks(t, m, transferInBlock2(t, m, to))
+		corruptAccountRecord(t, m, to)
+		err := executeStoredBlocks(t, m, m.Engine, 2)
+		require.ErrorContains(t, err, "deserialse2")
+		require.NotErrorIs(t, err, rules.ErrInvalidBlock)
+	})
+	t.Run("finalize", func(t *testing.T) {
+		m := execmoduletester.New(t)
+		storeUnexecutedBlocks(t, m, transferInBlock2(t, m, common.Address{0xaa}))
+		beneficiary := common.Address{19: 0x42}
+		corruptAccountRecord(t, m, beneficiary)
+		err := executeStoredBlocks(t, m, creditingEngine{Engine: m.Engine, beneficiary: beneficiary}, 2)
+		require.ErrorContains(t, err, "deserialse2")
+		require.NotErrorIs(t, err, rules.ErrInvalidBlock)
+	})
 }
 
 // The corrupt record is first read through Exist and Empty, by a value CALL
 // from a contract, not through a balance read.
 func TestStateReadErrorInCallIsNotInvalidBlock(t *testing.T) {
-	for _, parallel := range []bool{false, true} {
-		t.Run(map[bool]string{false: "serial", true: "parallel"}[parallel], func(t *testing.T) {
-			corrupt := common.Address{0xcc, 19: 1}
-			payer := common.HexToAddress("0xc0de")
-			alloc := types.GenesisAlloc{payer: {Code: callCode(corrupt, 1), Balance: big.NewInt(1)}}
-			keys := revivalKeys(t, alloc, 1)
-			gspec := &types.Genesis{Config: chain.TestChainOsakaConfig, GasLimit: 30_000_000, Alloc: alloc}
-			m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(keys[0]))
-			signer := types.LatestSignerForChainID(gspec.Config.ChainID)
-			chainPack, err := m.GenerateChain(2, func(i int, b *blockgen.BlockGen) {
-				if i == 1 {
-					txn, err := types.SignTx(types.NewTransaction(b.TxNonce(m.Address), payer, uint256.NewInt(0), 200_000, uint256.NewInt(10_000_000_000), nil), *signer, m.Key)
-					require.NoError(t, err)
-					b.AddTx(txn)
-				}
-			})
+	corrupt := common.Address{0xcc, 19: 1}
+	payer := common.HexToAddress("0xc0de")
+	alloc := types.GenesisAlloc{payer: {Code: callCode(corrupt, 1), Balance: big.NewInt(1)}}
+	keys := revivalKeys(t, alloc, 1)
+	gspec := &types.Genesis{Config: chain.TestChainOsakaConfig, GasLimit: 30_000_000, Alloc: alloc}
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(keys[0]))
+	signer := types.LatestSignerForChainID(gspec.Config.ChainID)
+	chainPack, err := m.GenerateChain(2, func(i int, b *blockgen.BlockGen) {
+		if i == 1 {
+			txn, err := types.SignTx(types.NewTransaction(b.TxNonce(m.Address), payer, uint256.NewInt(0), 200_000, uint256.NewInt(10_000_000_000), nil), *signer, m.Key)
 			require.NoError(t, err)
-			storeUnexecutedBlocks(t, m, chainPack)
-			corruptAccountRecord(t, m, corrupt)
-			err = executeStoredBlocks(t, m, m.Engine, parallel, 2)
-			require.ErrorContains(t, err, "deserialse2")
-			require.NotErrorIs(t, err, rules.ErrInvalidBlock)
-		})
-	}
+			b.AddTx(txn)
+		}
+	})
+	require.NoError(t, err)
+	storeUnexecutedBlocks(t, m, chainPack)
+	corruptAccountRecord(t, m, corrupt)
+	err = executeStoredBlocks(t, m, m.Engine, 2)
+	require.ErrorContains(t, err, "deserialse2")
+	require.NotErrorIs(t, err, rules.ErrInvalidBlock)
 }

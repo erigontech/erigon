@@ -1,6 +1,7 @@
 package p2p
 
 import (
+	"encoding/hex"
 	"math"
 	"time"
 
@@ -31,7 +32,11 @@ func scoreDecay(totalDurationDecay time.Duration, beaconConfig *clparams.BeaconC
 	return math.Pow(gossip.DecayToZero, 1/float64(numOfTimes))
 }
 
-func (p *p2pManager) pubsubOptions(beaconConfig *clparams.BeaconChainConfig) []pubsub.Option {
+func (p *p2pManager) pubsubOptions(beaconConfig *clparams.BeaconChainConfig) ([]pubsub.Option, error) {
+	forkDigests, err := p.scheduledForkDigests(beaconConfig)
+	if err != nil {
+		return nil, err
+	}
 	oneSlotDuration := time.Duration(beaconConfig.SecondsPerSlot) * time.Second
 	oneEpochDuration := time.Duration(beaconConfig.SlotsPerEpoch) * oneSlotDuration
 
@@ -69,8 +74,81 @@ func (p *p2pManager) pubsubOptions(beaconConfig *clparams.BeaconChainConfig) []p
 		pubsub.WithValidateQueueSize(pubsubQueueSize),
 		pubsub.WithPeerScore(scoreParams, thresholds),
 		pubsub.WithGossipSubParams(pubsubGossipParam()),
+		pubsub.WithSubscriptionFilter(gossipSubscriptionFilter(forkDigests, gossipTopicNames(p.cfg.NetworkConfig, beaconConfig))),
 	}
-	return psOpts
+	return psOpts, nil
+}
+
+// maxSubscriptionsPerRPC is above what an honest peer sends for all subnets of two fork digests.
+const maxSubscriptionsPerRPC = 500
+
+// gossipTopicNames lists every gossip topic name. Gossipsub keeps each topic a peer subscribes to until it
+// disconnects, so the accepted set has to be finite. A topic missing here can be neither joined nor seen from peers.
+func gossipTopicNames(networkConfig *clparams.NetworkConfig, beaconConfig *clparams.BeaconChainConfig) []string {
+	fixedNames := []string{
+		gossip.TopicNameBeaconBlock,
+		gossip.TopicNameBeaconAggregateAndProof,
+		gossip.TopicNameVoluntaryExit,
+		gossip.TopicNameProposerSlashing,
+		gossip.TopicNameAttesterSlashing,
+		gossip.TopicNameBlsToExecutionChange,
+		gossip.TopicNameSyncCommitteeContributionAndProof,
+		gossip.TopicNameLightClientFinalityUpdate,
+		gossip.TopicNameLightClientOptimisticUpdate,
+		gossip.TopicNameExecutionPayload,
+		gossip.TopicNameExecutionPayloadBid,
+		gossip.TopicNamePayloadAttestation,
+		gossip.TopicNameProposerPreferences,
+	}
+	blobSubnets := max(beaconConfig.BlobSidecarSubnetCount, beaconConfig.BlobSidecarSubnetCountElectra)
+	names := make([]string, 0, uint64(len(fixedNames))+networkConfig.AttestationSubnetCount+beaconConfig.SyncCommitteeSubnetCount+blobSubnets+beaconConfig.DataColumnSidecarSubnetCount)
+	names = append(names, fixedNames...)
+	for i := range networkConfig.AttestationSubnetCount {
+		names = append(names, gossip.TopicNameBeaconAttestation(i))
+	}
+	for i := range beaconConfig.SyncCommitteeSubnetCount {
+		names = append(names, gossip.TopicNameSyncCommittee(int(i)))
+	}
+	for i := range blobSubnets {
+		names = append(names, gossip.TopicNameBlobSidecar(i))
+	}
+	for i := range beaconConfig.DataColumnSidecarSubnetCount {
+		names = append(names, gossip.TopicNameDataColumnSidecar(i))
+	}
+	return names
+}
+
+// scheduledForkDigests returns the digest of every fork and blob parameter change in the schedule.
+func (p *p2pManager) scheduledForkDigests(beaconConfig *clparams.BeaconChainConfig) ([]string, error) {
+	epochs := make([]uint64, 0, len(beaconConfig.ForkVersionSchedule)+len(beaconConfig.BlobSchedule))
+	for _, fork := range beaconConfig.ForkVersionSchedule {
+		if fork.Epoch != beaconConfig.FarFutureEpoch {
+			epochs = append(epochs, fork.Epoch)
+		}
+	}
+	for _, blobParameters := range beaconConfig.BlobSchedule {
+		epochs = append(epochs, blobParameters.Epoch)
+	}
+	digests := make([]string, 0, len(epochs))
+	for _, epoch := range epochs {
+		digest, err := p.ethClock.ComputeForkDigest(epoch)
+		if err != nil {
+			return nil, err
+		}
+		digests = append(digests, hex.EncodeToString(digest[:]))
+	}
+	return digests, nil
+}
+
+// gossipSubscriptionFilter accepts only gossip topics of the scheduled forks and refuses oversized batches.
+func gossipSubscriptionFilter(forkDigests, topicNames []string) pubsub.SubscriptionFilter {
+	topics := make([]string, 0, len(forkDigests)*len(topicNames))
+	for _, digest := range forkDigests {
+		for _, name := range topicNames {
+			topics = append(topics, "/eth2/"+digest+"/"+name+"/"+gossip.SSZSnappyCodec)
+		}
+	}
+	return pubsub.WrapLimitSubscriptionFilter(pubsub.NewAllowlistSubscriptionFilter(topics...), maxSubscriptionsPerRPC)
 }
 
 // creates a custom gossipsub parameter set.
