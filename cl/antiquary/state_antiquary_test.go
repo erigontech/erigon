@@ -17,9 +17,11 @@
 package antiquary
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -94,9 +96,38 @@ func TestStateAntiquaryPhase0(t *testing.T) {
 	runTest(t, blocks, preState, postState)
 }
 
+type finalityReadDB struct {
+	kv.RwDB
+	firstFinalityRead     chan struct{}
+	firstFinalityReadOnce sync.Once
+}
+
+func (d *finalityReadDB) BeginRo(ctx context.Context) (kv.Tx, error) {
+	tx, err := d.RwDB.BeginRo(ctx) //nolint:gocritic
+	if err != nil {
+		return nil, err
+	}
+	return &finalityReadTx{Tx: tx, onRead: func() {
+		d.firstFinalityReadOnce.Do(func() { close(d.firstFinalityRead) })
+	}}, nil
+}
+
+type finalityReadTx struct {
+	kv.Tx
+	onRead func()
+}
+
+func (tx *finalityReadTx) GetOne(table string, key []byte) ([]byte, error) {
+	value, err := tx.Tx.GetOne(table, key)
+	if table == kv.HighestFinalized {
+		tx.onRead()
+	}
+	return value, err
+}
+
 func TestLoopStatesReconstructsFinalizedSlot(t *testing.T) {
 	blocks, preState, postState := tests.GetCapellaRandom()
-	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	db := &finalityReadDB{RwDB: mdbxtest.NewTestDB(t, dbcfg.ChainDB), firstFinalityRead: make(chan struct{})}
 	reader := tests.LoadChain(blocks, db, t)
 	syncedData := synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
 	require.NoError(t, syncedData.OnHeadState(postState))
@@ -121,32 +152,64 @@ func TestLoopStatesReconstructsFinalizedSlot(t *testing.T) {
 		cancel()
 		<-done
 	}()
-	time.Sleep(time.Second)
+	timer := time.NewTimer(10 * time.Second)
+	defer timer.Stop()
+	select {
+	case <-db.firstFinalityRead:
+	case <-done:
+		t.Fatal("state loop stopped before its first finality read")
+	case <-timer.C:
+		t.Fatal("state loop did not perform its first finality read")
+	}
 	require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
 		return beacon_indicies.WriteHighestFinalized(tx, finalized)
 	}))
 
 	var progress uint64
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
-		if err := db.View(ctx, func(tx kv.Tx) error {
+	var viewErr error
+	require.Eventually(t, func() bool {
+		viewErr = db.View(ctx, func(tx kv.Tx) error {
 			var err error
 			progress, err = state_accessors.GetStateProcessingProgress(tx)
 			return err
-		}); err != nil {
-			t.Fatal(err)
-		}
-		if progress >= finalized-1 {
-			break
-		}
-		select {
-		case <-done:
-			t.Fatal("state loop stopped before reconstructing the finalized slot")
-		default:
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+		})
+		return viewErr == nil && progress >= finalized
+	}, 10*time.Second, 20*time.Millisecond)
+	require.NoError(t, viewErr)
 	require.Equal(t, finalized, progress)
+}
+
+func newElectraAntiquaryForFinality(t *testing.T) (*Antiquary, kv.RwDB, []*cltypes.SignedBeaconBlock, *state.CachingBeaconState, *state.CachingBeaconState, freezeblocks.BeaconSnapshotReader, synced_data.SyncedData) {
+	t.Helper()
+	blocks, preState, postState := tests.GetElectraRandom()
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	reader := tests.LoadChain(blocks, db, t)
+	sn := synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
+	require.NoError(t, sn.OnHeadState(postState))
+	genesis, err := preState.Copy()
+	require.NoError(t, err)
+	a := NewAntiquary(context.Background(), nil, preState, state_accessors.NewStaticValidatorTable(), &clparams.MainnetBeaconConfig, datadir.New(t.TempDir()), nil, db, nil, nil, reader, sn, log.New(), true, true, true, false, nil)
+	return a, db, blocks, genesis, postState, reader, sn
+}
+
+func TestIncrementToFinalizedOverAMissedEpochStart(t *testing.T) {
+	a, db, blocks, genesis, postState, reader, sn := newElectraAntiquaryForFinality(t)
+	const missed = 8288
+	require.Equal(t, uint64(8258), blocks[len(blocks)-2].Block.Slot)
+	require.Equal(t, uint64(8290), blocks[len(blocks)-1].Block.Slot)
+	ctx := context.Background()
+
+	require.NoError(t, a.IncrementBeaconState(ctx, missed+1))
+	require.NoError(t, a.IncrementBeaconState(ctx, missed+33))
+	require.NoError(t, db.View(ctx, func(tx kv.Tx) error {
+		validators := state_accessors.NewStaticValidatorTable()
+		require.NoError(t, state_accessors.ReadValidatorsTable(tx, validators))
+		historical := historical_states_reader.NewHistoricalStatesReader(&clparams.MainnetBeaconConfig, reader, validators, genesis, nil, sn)
+		got, err := historical.ReadHistoricalState(ctx, tx, 8290)
+		require.NoError(t, err)
+		require.True(t, bytes.Equal(postState.RawBalances(), got.RawBalances()), "historical balances at 8290 differ from the post-state")
+		return nil
+	}))
 }
 
 type commitCountingDB struct {

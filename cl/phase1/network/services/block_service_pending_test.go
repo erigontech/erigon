@@ -410,7 +410,7 @@ func TestBlockServiceSharesStorageBackoffAcrossPendingWrites(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		db := &blockWriteOutageDB{RwDB: mdbxtest.NewTestDB(t, dbcfg.ChainDB)}
 		db.failing.Store(true)
-		service := &blockService{db: db, forkchoiceStore: mock_services.NewForkChoiceStorageMock(t), beaconCfg: &clparams.MainnetBeaconConfig}
+		service := &blockService{db: db, forkchoiceStore: mock_services.NewForkChoiceStorageMock(t)}
 		var roots [][32]byte
 		for slot := uint64(1); slot <= 8; slot++ {
 			block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
@@ -469,7 +469,7 @@ func TestBlockServiceExpiresJobsDuringStorageFailure(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		db := &blockWriteOutageDB{RwDB: mdbxtest.NewTestDB(t, dbcfg.ChainDB)}
 		db.failing.Store(true)
-		service := &blockService{db: db, forkchoiceStore: mock_services.NewForkChoiceStorageMock(t), beaconCfg: &clparams.MainnetBeaconConfig}
+		service := &blockService{db: db, forkchoiceStore: mock_services.NewForkChoiceStorageMock(t)}
 		handles := make(map[[32]byte]PublishedBlockJob)
 		for slot := uint64(1); slot <= 8; slot++ {
 			block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
@@ -570,7 +570,7 @@ func TestPublishedBlockJobUpgradeResetsExecutionBackoff(t *testing.T) {
 			require.NoError(t, err)
 			fcu := mock_services.NewForkChoiceStorageMock(t)
 			fcu.OnBlockErr = forkchoice.ErrNewPayloadNoStatus
-			service := &blockService{db: mdbxtest.NewTestDB(t, dbcfg.ChainDB), forkchoiceStore: fcu, beaconCfg: &clparams.MainnetBeaconConfig}
+			service := &blockService{db: mdbxtest.NewTestDB(t, dbcfg.ChainDB), forkchoiceStore: fcu}
 			if previousStore == "block-only" {
 				service.ScheduleBlockForLaterProcessing(block)
 			} else {

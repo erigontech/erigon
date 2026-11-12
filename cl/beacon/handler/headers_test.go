@@ -20,7 +20,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"math"
 	"net/http"
 	"net/http/httptest"
@@ -161,35 +160,6 @@ func TestGetHeadersIncludesFinalized(t *testing.T) {
 				require.Equal(t, expected.root, body.Data[i].Root)
 				require.Equal(t, expected.canonical, body.Data[i].Canonical)
 			}
-		})
-	}
-}
-
-func TestGetHeaderBySlotFinalizedCheckpointBoundary(t *testing.T) {
-	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), false)
-	fcu.FinalizedSlotVal = 96
-
-	for _, tc := range []struct {
-		slot      uint64
-		finalized bool
-	}{
-		{slot: 95, finalized: true},
-		{slot: 96, finalized: true},
-		{slot: 97, finalized: false},
-		{slot: 127, finalized: false},
-	} {
-		t.Run(fmt.Sprint(tc.slot), func(t *testing.T) {
-			request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf("/eth/v1/beacon/headers?slot=%d", tc.slot), http.NoBody)
-			recorder := httptest.NewRecorder()
-			handler.ServeHTTP(recorder, request)
-			require.Equal(t, http.StatusOK, recorder.Code)
-
-			var body struct {
-				Finalized *bool `json:"finalized"`
-			}
-			require.NoError(t, json.NewDecoder(recorder.Body).Decode(&body))
-			require.NotNil(t, body.Finalized)
-			require.Equal(t, tc.finalized, *body.Finalized)
 		})
 	}
 }

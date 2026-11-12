@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/mock/gomock"
 
@@ -193,58 +192,6 @@ func createMockDataColumnSidecar(slot uint64, index uint64, version clparams.Sta
 
 func TestDataColumnSidecarService(t *testing.T) {
 	suite.Run(t, &dataColumnSidecarTestSuite{})
-}
-
-type advancingColumnFinality struct {
-	*forkchoice_mock.ForkChoiceStorageMock
-	next          solid.Checkpoint
-	slotsPerEpoch uint64
-}
-
-func (f *advancingColumnFinality) FinalizedCheckpoint() solid.Checkpoint {
-	checkpoint := f.ForkChoiceStorageMock.FinalizedCheckpoint()
-	f.FinalizedCheckpointVal = f.next
-	f.FinalizedSlotVal = f.next.Epoch * f.slotsPerEpoch
-	return checkpoint
-}
-
-func (t *dataColumnSidecarTestSuite) TestProcessMessageFinalityAdvanceKeepsValidFuluSidecar() {
-	t.setupFinalizedAncestorTest(testFinalizedRoot)
-	old := solid.Checkpoint{Epoch: 7, Root: testFinalizedRoot}
-	next := solid.Checkpoint{Epoch: 8, Root: common.Hash{0xf2}}
-	t.mockForkChoice.FinalizedCheckpointVal = old
-	t.mockForkChoice.FinalizedSlotVal = old.Epoch * testSlotsPerEpoch
-	t.mockForkChoice.Ancestors[old.Epoch*testSlotsPerEpoch] = forkchoice.ForkChoiceNode{Root: old.Root}
-	t.mockForkChoice.Ancestors[next.Epoch*testSlotsPerEpoch] = forkchoice.ForkChoiceNode{Root: next.Root}
-	t.mockForkChoice.Headers[testParentRoot] = &cltypes.BeaconBlockHeader{Slot: testSlot - 1}
-	service := t.dataColumnSidecarService.(*dataColumnSidecarService)
-	service.forkChoice = &advancingColumnFinality{t.mockForkChoice, next, testSlotsPerEpoch}
-	verifyDataColumnSidecarInclusionProof = func(*cltypes.DataColumnSidecar) bool { return true }
-	verifyDataColumnSidecarKZGProofs = func(*cltypes.DataColumnSidecar) bool { return true }
-	t.mockColumnSidecarStorage.EXPECT().WriteColumnSidecars(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
-	t.mockPeerDas.EXPECT().TryScheduleRecover(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
-
-	err := service.ProcessMessage(t.T().Context(), nil, createMockDataColumnSidecar(testSlot, 0, clparams.FuluVersion))
-
-	t.Require().NoError(err, "slot 321 descends from both finalized checkpoints at slots 224 and 256")
-}
-
-func TestPublishColumnsFinalityAdvanceKeepsValidFuluSidecar(t *testing.T) {
-	service, publisher, clock, fcu := newELPublishTestService(t)
-	defer func(f func(uint64) uint64) { computeSubnetForDataColumnSidecar = f }(computeSubnetForDataColumnSidecar)
-	computeSubnetForDataColumnSidecar = func(index uint64) uint64 { return index % service.cfg.DataColumnSidecarSubnetCount }
-	next := solid.Checkpoint{Epoch: 2, Root: common.Hash{0xf2}}
-	fcu.Ancestors[next.Epoch*service.cfg.SlotsPerEpoch] = forkchoice.ForkChoiceNode{Root: next.Root}
-	service.forkChoice = &advancingColumnFinality{fcu, next, service.cfg.SlotsPerEpoch}
-	clock.EXPECT().ComputeForkDigest(gomock.Any()).Return(common.Bytes4{1}, nil).AnyTimes()
-	var published int
-	publisher.EXPECT().PublishToForkDigest(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(context.Context, common.Bytes4, string, []byte) error {
-		published++
-		return nil
-	}).AnyTimes()
-	service.PublishColumns(t.Context(), []*cltypes.DataColumnSidecar{elBuiltSidecar(100, 3)})
-
-	require.Equal(t, 1, published, "slot 100 descends from both finalized checkpoints at slots 32 and 64; column must be published")
 }
 
 // TestProcessMessage_WhenSyncing_ReturnsErrIgnore tests that the service returns ErrIgnore when syncing

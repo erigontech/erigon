@@ -1357,7 +1357,7 @@ func TestScheduledBlockRepairsDatabaseWhenHeaderAlreadyExists(t *testing.T) {
 	root, err := block.Block.HashSSZ()
 	require.NoError(t, err)
 	fcu.Headers[root] = block.SignedBeaconBlockHeader().Header.Copy()
-	service := &blockService{db: db, forkchoiceStore: fcu, beaconCfg: &clparams.MainnetBeaconConfig}
+	service := &blockService{db: db, forkchoiceStore: fcu}
 
 	service.ScheduleBlockForLaterProcessing(block)
 	jobValue, ok := service.blocksScheduledForLaterExecution.Load(root)
@@ -1559,7 +1559,7 @@ func TestPublishedBlockUpgradeSurvivesStaleBlockOnlyWorker(t *testing.T) {
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	fcu := mock_services.NewForkChoiceStorageMock(t)
 	fcu.Headers[root] = block.SignedBeaconBlockHeader().Header.Copy()
-	service := &blockService{db: db, forkchoiceStore: fcu, beaconCfg: &clparams.MainnetBeaconConfig}
+	service := &blockService{db: db, forkchoiceStore: fcu}
 	service.ScheduleBlockForLaterProcessing(block)
 	staleValue, ok := service.blocksScheduledForLaterExecution.Load(root)
 	require.True(t, ok)
