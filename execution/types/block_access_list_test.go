@@ -909,6 +909,7 @@ func TestAccountChangesCount(t *testing.T) {
 	for i := range bal {
 		bal[i].Address[0] = byte(i + 1)
 	}
+	bal[0].CodeChanges = []*CodeChange{{Index: 1, Bytecode: make([]byte, 32)}}
 	enc, err := EncodeBlockAccessListBytes(bal)
 	if err != nil {
 		t.Fatal(err)
@@ -916,6 +917,9 @@ func TestAccountChangesCount(t *testing.T) {
 	_, body, _, err := rlp.Split(enc)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if uint64(len(body))/minAccountChangesLen <= 3 {
+		t.Fatal("the size limit must exceed the entry count, or the count is never checked")
 	}
 	if got := accountChangesCount(body, uint64(len(body)), nil); got != 3 {
 		t.Fatalf("valid list: got %d entries, want 3", got)
