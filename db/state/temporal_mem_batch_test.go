@@ -432,3 +432,29 @@ func TestUnwindDropsTheUnpublishedWritesOfAnAttempt(t *testing.T) {
 		require.False(t, ok, "domain %s: exec readers see a write of the unwound attempt", domain)
 	}
 }
+
+// Exec workers read only accounts, storage and code, so only those domains pay for a published copy-on-write view.
+// The commitment fold writes a branch per key and reads its own writes through the locked maps.
+func TestOnlyExecReadDomainsArePublished(t *testing.T) {
+	sd := &TemporalMemBatch{
+		stepSize: 16,
+		storage:  btree2.NewMap[string, []dataWithTxNum](128),
+		metrics:  &kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
+	}
+	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain, kv.CommitmentDomain} {
+		sd.putLatest(domain, "k", []byte("v"), 1)
+		v, _, ok := sd.GetLatest(domain, []byte("k"))
+		require.True(t, ok, "domain %s", domain)
+		require.Equal(t, "v", string(v), "domain %s", domain)
+	}
+	require.NotNil(t, sd.published[kv.AccountsDomain].Load())
+	require.NotNil(t, sd.published[kv.StorageDomain].Load())
+	require.NotNil(t, sd.published[kv.CodeDomain].Load())
+	require.Nil(t, sd.published[kv.CommitmentDomain].Load(), "a commitment write must not publish a view")
+
+	sd.republishAll()
+	require.Nil(t, sd.published[kv.CommitmentDomain].Load(), "republishAll must not publish a commitment view")
+	v, _, ok := sd.GetLatest(kv.CommitmentDomain, []byte("k"))
+	require.True(t, ok)
+	require.Equal(t, "v", string(v))
+}
