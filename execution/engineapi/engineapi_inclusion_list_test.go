@@ -87,6 +87,21 @@ func TestGetInclusionListV1(t *testing.T) {
 	}
 }
 
+func TestGetInclusionListV1JSONRPCClient(t *testing.T) {
+	t.Parallel()
+
+	txns := types.Transactions{types.NewTransaction(0, common.Address{1}, uint256.NewInt(0), 21_000, uint256.NewInt(1), nil)}
+	client := &JsonRpcClient{rpcClient: newGetInclusionListClient(t, func(context.Context) (types.Transactions, error) {
+		return txns, nil
+	})}
+
+	result, err := client.GetInclusionListV1(t.Context())
+	require.NoError(t, err)
+	want, err := types.MarshalTransactionsBinary(txns)
+	require.NoError(t, err)
+	require.Equal(t, []hexutil.Bytes{want[0]}, result)
+}
+
 func TestGetInclusionListV1RejectsBeforeBogota(t *testing.T) {
 	t.Parallel()
 
