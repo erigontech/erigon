@@ -52,8 +52,6 @@ import (
 // sidecars, a few MB.
 const fillWorkers = 8
 
-const payloadLookahead = 64
-
 // fillRequestTimeout bounds one endpoint request. A full response, 21 blobs of hex JSON, is about
 // 6 MB. A variable so tests can shorten it.
 var fillRequestTimeout = time.Minute
@@ -289,7 +287,7 @@ func (b *BlobArchiveStoreFill) fillSlot(ctx context.Context, db kv.RoDB, blocks 
 		report.add(&report.failed, slot)
 		return nil
 	}
-	blobs, err := expectedBlobs(ctx, db, blocks, block)
+	blobs, err := expectedBlobs(ctx, db, blocks, root, block)
 	if err != nil {
 		return fmt.Errorf("read the slots after %d: %w", slot, err)
 	}
@@ -372,12 +370,19 @@ func blobCount(block *cltypes.SignedBeaconBlock) int {
 	return 0
 }
 
-func expectedBlobs(ctx context.Context, db kv.RoDB, blocks freezeblocks.BeaconSnapshotReader, block *cltypes.SignedBeaconBlock) (int, error) {
+func expectedBlobs(ctx context.Context, db kv.RoDB, blocks freezeblocks.BeaconSnapshotReader, root common.Hash, block *cltypes.SignedBeaconBlock) (int, error) {
 	n := blobCount(block)
 	if n == 0 || block.Version() < clparams.GloasVersion {
 		return n, nil
 	}
-	for slot := block.Block.Slot + 1; slot <= block.Block.Slot+payloadLookahead; slot++ {
+	var head uint64
+	if err := db.View(ctx, func(tx kv.Tx) (err error) {
+		head, _, err = beacon_indicies.ReadCanonicalHead(tx)
+		return err
+	}); err != nil {
+		return 0, err
+	}
+	for slot := block.Block.Slot + 1; slot <= head; slot++ {
 		_, next, err := readSlot(ctx, db, blocks, slot)
 		if err != nil {
 			return 0, err
@@ -385,7 +390,7 @@ func expectedBlobs(ctx context.Context, db kv.RoDB, blocks freezeblocks.BeaconSn
 		if next == nil {
 			continue
 		}
-		if next.Block.Body.SignedExecutionPayloadBid.Message.ParentBlockHash != block.Block.Body.SignedExecutionPayloadBid.Message.BlockHash {
+		if next.Block.ParentRoot == root && next.Block.Body.SignedExecutionPayloadBid.Message.ParentBlockHash != block.Block.Body.SignedExecutionPayloadBid.Message.BlockHash {
 			return 0, nil
 		}
 		return n, nil
@@ -443,7 +448,7 @@ func nextSlotWithBlobs(ctx context.Context, db kv.RoDB, blocks freezeblocks.Beac
 		root, block, err := readSlot(ctx, db, blocks, slot)
 		n := 0
 		if err == nil {
-			n, err = expectedBlobs(ctx, db, blocks, block)
+			n, err = expectedBlobs(ctx, db, blocks, root, block)
 		}
 		if err != nil || n > 0 {
 			scanned[from] = slot

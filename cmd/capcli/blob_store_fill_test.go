@@ -213,6 +213,43 @@ func TestBlobArchiveStoreFillBuildsGloasSidecarsFromBlobs(t *testing.T) {
 }
 
 func TestBlobArchiveStoreFillSkipsAGloasBlockWhosePayloadIsNotOnChain(t *testing.T) {
+	for _, gap := range []uint64{1, 200} {
+		t.Run(fmt.Sprintf("next block %d slots later", gap), func(t *testing.T) {
+			f, before, after := newSkippedPayloadFixture(t, gap)
+			url, _ := f.endpoint(false)
+
+			require.NoError(t, f.fill(&BlobArchiveStoreFill{Endpoints: []string{url}, FromSlot: fillTestSlot, ToSlot: fillTestSlot + 1 + gap}, nil))
+
+			require.True(t, f.storedValid(fillTestSlot, before))
+			require.True(t, f.storedValid(fillTestSlot+1+gap, after))
+		})
+	}
+}
+
+func TestBlobArchiveStoreFillDryRunProbesPastASkippedGloasPayload(t *testing.T) {
+	f, _, _ := newSkippedPayloadFixture(t, 1)
+	url, _ := f.endpoint(false)
+	cmd := &BlobArchiveStoreFill{Endpoints: []string{url}, FromSlot: fillTestSlot, ToSlot: fillTestSlot + 2, DryRun: true}
+
+	require.NoError(t, f.fill(cmd, nil))
+
+	require.Equal(t, uint64(fillTestSlot), cmd.windows[0].from.Load())
+}
+
+func TestBlobArchiveStoreFillKeepsAGloasBlockWhoseSuccessorIsNotItsChild(t *testing.T) {
+	f := newFillFixture(t)
+	f.version = clparams.GloasVersion
+	root := f.addBlock(fillTestSlot, 1)
+	f.tip, f.payload = common.Hash{0xee}, common.Hash{0xdd}
+	f.addBlock(fillTestSlot+2, 1)
+	url, _ := f.endpoint(false)
+
+	require.NoError(t, f.fill(&BlobArchiveStoreFill{Endpoints: []string{url}, FromSlot: fillTestSlot, ToSlot: fillTestSlot}, nil))
+
+	require.True(t, f.storedValid(fillTestSlot, root))
+}
+
+func newSkippedPayloadFixture(t *testing.T, gap uint64) (*fillFixture, common.Hash, common.Hash) {
 	f := newFillFixture(t)
 	f.version = clparams.GloasVersion
 	before := f.addBlock(fillTestSlot, 1)
@@ -220,13 +257,8 @@ func TestBlobArchiveStoreFillSkipsAGloasBlockWhosePayloadIsNotOnChain(t *testing
 	skipped := f.addBlock(fillTestSlot+1, 2)
 	delete(f.sidecars, skipped)
 	f.payload = onChain
-	after := f.addBlock(fillTestSlot+2, 1)
-	url, _ := f.endpoint(false)
-
-	require.NoError(t, f.fill(&BlobArchiveStoreFill{Endpoints: []string{url}, FromSlot: fillTestSlot, ToSlot: fillTestSlot + 2}, nil))
-
-	require.True(t, f.storedValid(fillTestSlot, before))
-	require.True(t, f.storedValid(fillTestSlot+2, after))
+	after := f.addBlock(fillTestSlot+1+gap, 1)
+	return f, before, after
 }
 
 func TestBlobArchiveStoreFillFetchesOnlyMissingSlots(t *testing.T) {
