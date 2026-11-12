@@ -86,11 +86,11 @@ Files: `execution/stagedsync/committer.go`, tests.
 
 ### Task 2: a rejected block that was folded ahead
 
-- [ ] Test first: a window BAL block folded ahead, then its `blockResult` with `Err`: no pending update remains
+- [x] Test first: a window BAL block folded ahead, then its `blockResult` with `Err`: no pending update remains
       (`PeekPendingUpdate() == nil`), the block is gone from `pending`, `computedAhead` and `balRoots`, and the
       calculator published nothing for it.
-- [ ] `handleMessage`, `blockResult` with `Err`: the reset above when the block was folded ahead.
-- [ ] If the package has a test that drives a whole invalid block through the executor, add the BAL case: the
+- [x] `handleMessage`, `blockResult` with `Err`: the reset above when the block was folded ahead.
+- [x] If the package has a test that drives a whole invalid block through the executor, add the BAL case: the
       invalid block is reported invalid and a valid block at the same height, executed afterwards, gets its
       header root. If there is none, say so in the turn's notes; the unit test stands.
 

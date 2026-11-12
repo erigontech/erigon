@@ -19,6 +19,7 @@ package stagedsync
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"math/rand"
 	"regexp"
@@ -1104,6 +1105,97 @@ func TestComputeAhead_WindowBlockWrongRoot(t *testing.T) {
 	require.Len(t, out, 1)
 	require.ErrorIs(t, (<-out).err, ErrWrongTrieRoot)
 	require.Nil(t, doms.GetCommitmentContext().PeekPendingUpdate())
+}
+
+func TestHandleMessage_RejectedComputedAheadWindowBlock(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(true))
+	previousBAL := dbg.BALDrivenCommitment
+	previousIgnore := dbg.IgnoreBAL
+	previousShadow := dbg.BALShadowCompute
+	previousParentReads := commitmentdb.ParentReadsWanted()
+	t.Cleanup(func() {
+		dbg.BALDrivenCommitment = previousBAL
+		dbg.IgnoreBAL = previousIgnore
+		dbg.BALShadowCompute = previousShadow
+		commitmentdb.WantParentReads(previousParentReads)
+	})
+	dbg.BALDrivenCommitment = false
+	dbg.IgnoreBAL = false
+	dbg.BALShadowCompute = false
+	commitmentdb.WantParentReads(false)
+
+	ctx := context.Background()
+	blockHash := common.Hash{0xb1}
+	addr := accounts.InternAddress([20]byte{0xb2})
+	value := *uint256.NewInt(17)
+	addrValue := addr.Value()
+	bal := types.BlockAccessList{{
+		Address:        addrValue,
+		BalanceChanges: []*types.BalanceChange{{Index: 0, Value: value}},
+		NonceChanges:   []*types.NonceChange{{Index: 0, Value: 1}},
+	}}
+	ws := nonceBalanceWrites(addr, 1, value)
+
+	probe := func() []byte {
+		db, tx, doms := setupStepTest(t)
+		doms.SetDeferCommitmentUpdates(true)
+		doms.SavePastChangesetAccumulator(blockHash, 1, &changeset.StateChangeSet{})
+		out := make(chan commitmentResult, 64)
+		cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", log.New(), false, 1, make(chan applyResult, 64), nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
+		require.NoError(t, err)
+		defer cc.Stop()
+		acc := accounts.Account{Nonce: 0, Balance: *uint256.NewInt(3), CodeHash: accounts.EmptyCodeHash}
+		require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addrValue[:], accounts.SerialiseV3(&acc), 1, nil))
+		cc.handleBlockRequest(ctx, &blockRequest{blockNum: 1, blockHash: blockHash, firstTxNum: 1, lastTxNum: 1, stateRoot: common.Hash{}, bal: bal})
+		cc.handleMessage(ctx, recordTx(newRawViewVM(1), 1, blockHash, 1, &chain.Rules{}, ws))
+		cc.handleMessage(ctx, &blockResult{BlockNum: 1, BlockHash: blockHash, StateRoot: common.Hash{}, lastTxNum: 1})
+		res := <-out
+		require.ErrorIs(t, res.err, ErrWrongTrieRoot)
+		require.NotEmpty(t, res.rootHash)
+		return res.rootHash
+	}
+
+	root := probe()
+	dbg.BALDrivenCommitment = true
+
+	db, tx, doms := setupStepTest(t)
+	doms.SetDeferCommitmentUpdates(true)
+	ownCS := &changeset.StateChangeSet{}
+	out := make(chan commitmentResult, 64)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", log.New(), false, 1, make(chan applyResult, 64), nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
+	require.NoError(t, err)
+	defer cc.Stop()
+	acc := accounts.Account{Nonce: 0, Balance: *uint256.NewInt(3), CodeHash: accounts.EmptyCodeHash}
+	require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addrValue[:], accounts.SerialiseV3(&acc), 1, nil))
+	req := &blockRequest{blockNum: 1, blockHash: blockHash, firstTxNum: 1, lastTxNum: 1, stateRoot: common.BytesToHash(root), bal: bal}
+	cc.handleBlockRequest(ctx, req)
+	require.False(t, cc.computedAhead[1])
+	doms.SavePastChangesetAccumulator(blockHash, 1, ownCS)
+	cc.handleMessage(ctx, recordTx(newRawViewVM(1), 1, blockHash, 1, &chain.Rules{}, ws))
+	require.True(t, cc.computedAhead[1])
+	require.NotNil(t, doms.GetCommitmentContext().PeekPendingUpdate())
+	_, pending := cc.pending[1]
+	require.True(t, pending)
+	require.True(t, cc.computedAhead[1])
+	require.Contains(t, cc.balRoots, uint64(1))
+	require.Empty(t, out)
+
+	beforeDiffs := ownCS.Diffs[kv.CommitmentDomain].GetDiffSet()
+	cc.handleMessage(ctx, &blockResult{BlockNum: 1, BlockHash: blockHash, Err: errors.New("invalid block"), StateRoot: common.BytesToHash(root), lastTxNum: 1})
+	require.Nil(t, doms.GetCommitmentContext().PeekPendingUpdate())
+	_, pending = cc.pending[1]
+	require.False(t, pending)
+	require.False(t, cc.computedAhead[1])
+	require.NotContains(t, cc.balRoots, uint64(1))
+	require.Empty(t, out)
+
+	cc.handleMessage(ctx, &commitComputeRequest{})
+	require.Len(t, out, 1)
+	res := <-out
+	require.NoError(t, res.err)
+	require.Equal(t, uint64(1), res.blockNum)
+	require.Empty(t, res.rootHash)
+	require.Equal(t, beforeDiffs, ownCS.Diffs[kv.CommitmentDomain].GetDiffSet())
 }
 
 // TestLoop_BlockRequestBeatsSameNumberedResult pins that loop() handles a block's

@@ -451,6 +451,12 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		// non-canonical), and emitting an ErrWrongTrieRoot here would race the
 		// apply loop's Err return and mask the original validation diagnostic.
 		if r.Err != nil {
+			if cc.computedAhead[r.BlockNum] {
+				cc.doms.GetCommitmentContext().ResetPendingUpdates()
+				delete(cc.pending, r.BlockNum)
+				delete(cc.computedAhead, r.BlockNum)
+				delete(cc.balRoots, r.BlockNum)
+			}
 			return
 		}
 
