@@ -24,7 +24,7 @@ import (
 	"github.com/erigontech/erigon/common"
 )
 
-const replayStateCacheSize = 4
+const replayStateCacheSize = 1
 
 type replayStateCache struct {
 	once   sync.Once
@@ -59,13 +59,13 @@ func (c *replayStateCache) add(root common.Hash, bs *state.CachingBeaconState) {
 	if err != nil {
 		return
 	}
-	c.getCache().Add(root, copy)
+	c.addCopy(root, copy)
+}
+
+func (c *replayStateCache) addCopy(root common.Hash, bs *state.CachingBeaconState) {
+	c.getCache().Add(root, bs)
 }
 
 func (c *replayStateCache) clear() {
 	c.getCache().Purge()
-}
-
-func (c *replayStateCache) remove(root common.Hash) {
-	c.getCache().Remove(root)
 }

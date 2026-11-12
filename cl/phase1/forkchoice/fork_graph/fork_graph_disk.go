@@ -477,11 +477,14 @@ func (f *forkGraphDisk) replayState(blockRoot common.Hash, addChainSegment bool)
 			return state, err
 		}
 	} else {
-		if cached, ok := f.replayedStates.get(blockRoot); ok {
-			if header, exists := f.GetHeader(blockRoot); exists && !isBelowPrunedBoundary(header.Slot, f.lowestAvailableBlock.Load()) {
+		f.lifecycleMu.RLock()
+		if f.retainedBlock(blockRoot) {
+			if cached, ok := f.replayedStates.get(blockRoot); ok && f.retainedBlock(blockRoot) {
+				f.lifecycleMu.RUnlock()
 				return cached, nil
 			}
 		}
+		f.lifecycleMu.RUnlock()
 		if _, ok := f.GetHeader(blockRoot); !ok {
 			return nil, nil
 		}
@@ -547,17 +550,19 @@ func (f *forkGraphDisk) replayState(blockRoot common.Hash, addChainSegment bool)
 			if addChainSegment {
 				f.currentState = nil
 				f.currentStateBlockRoot = common.Hash{}
-				f.replayedStates.clear()
 			}
 			return nil, transitionErr
 		}
 	}
 	if !addChainSegment {
-		f.lifecycleMu.RLock()
-		if header, exists := f.headers.Load(blockRoot); exists && !isBelowPrunedBoundary(header.(*cltypes.BeaconBlockHeader).Slot, f.lowestAvailableBlock.Load()) {
-			f.replayedStates.add(blockRoot, copyReferencedState)
+		cacheCopy, copyErr := copyReferencedState.Copy()
+		if copyErr == nil {
+			f.lifecycleMu.RLock()
+			if f.retainedBlock(blockRoot) {
+				f.replayedStates.addCopy(blockRoot, cacheCopy)
+			}
+			f.lifecycleMu.RUnlock()
 		}
-		f.lifecycleMu.RUnlock()
 	}
 	return copyReferencedState, nil
 }
@@ -579,7 +584,6 @@ func (f *forkGraphDisk) GetFinalizedCheckpoint(blockRoot common.Hash) (solid.Che
 }
 
 func (f *forkGraphDisk) MarkHeaderAsInvalid(blockRoot common.Hash) {
-	f.replayedStates.clear()
 	slot := uint64(slotUnknown)
 	if header, ok := f.GetHeader(blockRoot); ok {
 		slot = header.Slot
@@ -593,16 +597,10 @@ func (f *forkGraphDisk) IsBlockInvalid(blockRoot common.Hash) bool {
 }
 
 func (f *forkGraphDisk) MarkPayloadUnavailable(blockRoot common.Hash) {
-	if _, unavailable := f.unavailablePayloads.Load(blockRoot); !unavailable {
-		f.replayedStates.remove(blockRoot)
-	}
 	f.unavailablePayloads.Store(blockRoot, struct{}{})
 }
 
 func (f *forkGraphDisk) MarkPayloadAvailable(blockRoot common.Hash) {
-	if _, unavailable := f.unavailablePayloads.Load(blockRoot); unavailable {
-		f.replayedStates.remove(blockRoot)
-	}
 	f.unavailablePayloads.Delete(blockRoot)
 }
 
@@ -612,16 +610,10 @@ func (f *forkGraphDisk) IsPayloadUnavailable(blockRoot common.Hash) bool {
 }
 
 func (f *forkGraphDisk) MarkPayloadAccepted(blockRoot common.Hash, verified bool) {
-	if previous, accepted := f.acceptedPayloads.Load(blockRoot); !accepted || previous.(bool) != verified {
-		f.replayedStates.remove(blockRoot)
-	}
 	f.acceptedPayloads.Store(blockRoot, verified)
 }
 
 func (f *forkGraphDisk) ClearPayloadAccepted(blockRoot common.Hash) {
-	if _, accepted := f.acceptedPayloads.Load(blockRoot); accepted {
-		f.replayedStates.remove(blockRoot)
-	}
 	f.acceptedPayloads.Delete(blockRoot)
 }
 

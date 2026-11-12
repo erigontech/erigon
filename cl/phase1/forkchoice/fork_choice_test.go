@@ -602,7 +602,7 @@ func TestForkChoiceChainBellatrix(t *testing.T) {
 	require.Equal(t, common.Hash(bsRoot), common.HexToHash("0x58a3f366bcefe6c30fb3a6506bed726f9a51bb272c77a8a3ed88c34435d44cb7"))
 }
 
-func TestReviewOnBlockWithoutFullValidationRejectsBadSlashingSignature(t *testing.T) {
+func TestOnBlockWithoutFullValidationRejectsBadSlashingSignature(t *testing.T) {
 	blocks, pre, _ := tests.GetPhase0Random()
 	block := blocks[0]
 	require.Positive(t, block.Block.Body.ProposerSlashings.Len())

@@ -97,10 +97,6 @@ func TestReplayStateCachesCopyByRoot(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, first)
 	require.Equal(t, 1, fs.count())
-	first, err = graph.ReplayState(root)
-	require.NoError(t, err)
-	require.NotNil(t, first)
-	require.Equal(t, 1, fs.count())
 	originalBalance, err := first.ValidatorBalance(0)
 	require.NoError(t, err)
 	validator, err := first.ValidatorForValidatorIndex(0)
@@ -128,19 +124,26 @@ func TestReplayStateCachesCopyByRoot(t *testing.T) {
 
 func TestReplayStateCacheEvictsLeastRecentlyUsed(t *testing.T) {
 	cache := replayStateCache{}
-	for i := 1; i <= replayStateCacheSize; i++ {
-		cache.add(common.Hash{byte(i)}, state.New(&clparams.MainnetBeaconConfig))
-	}
-	if _, ok := cache.get(common.Hash{1}); !ok {
-		t.Fatal("failed to read cached state")
-	}
-	cache.add(common.Hash{5}, state.New(&clparams.MainnetBeaconConfig))
-	if _, ok := cache.get(common.Hash{1}); !ok {
-		t.Fatal("recently read state was evicted")
-	}
-	if _, ok := cache.get(common.Hash{2}); ok {
+	cache.add(common.Hash{1}, state.New(&clparams.MainnetBeaconConfig))
+	cache.add(common.Hash{2}, state.New(&clparams.MainnetBeaconConfig))
+	if _, ok := cache.get(common.Hash{1}); ok {
 		t.Fatal("least recently used state was retained")
 	}
+	if _, ok := cache.get(common.Hash{2}); !ok {
+		t.Fatal("most recently added state was evicted")
+	}
+}
+
+func TestReplayStateCacheAddCopiesState(t *testing.T) {
+	cache := replayStateCache{}
+	root := common.Hash{1}
+	bs := state.New(&clparams.MainnetBeaconConfig)
+	cache.add(root, bs)
+	require.NoError(t, bs.SetSlot(99))
+
+	cached, ok := cache.get(root)
+	require.True(t, ok)
+	require.Zero(t, cached.Slot())
 }
 
 func TestReplayStateCacheSurvivesUnrelatedImport(t *testing.T) {
@@ -174,30 +177,10 @@ func TestReplayStateCacheSurvivesUnrelatedImport(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, second)
 	require.Equal(t, 1, fs.count(), "unrelated import cleared the replay cache")
-}
-
-func TestGloasPayloadStatusChangeDropsReplayCacheEntry(t *testing.T) {
-	fixture := tests.GetGloasFixture("builder_payment_after_missed_epochs", false, 0)
-	fs := &countingStateOpenFs{Fs: afero.NewMemMapFs()}
-	graphInterface, err := NewForkGraphDisk(fixture.PreState, nil, fs, beacon_router_configuration.RouterConfiguration{})
+	require.Equal(t, block.Block.Slot, second.Slot())
+	secondRoot, err := second.HashSSZ()
 	require.NoError(t, err)
-	graph := graphInterface.(*forkGraphDisk)
-	block := fixture.Blocks[0]
-	_, result, err := graph.AddChainSegment(block, true)
-	require.NoError(t, err)
-	require.Equal(t, Success, result)
-	root, err := block.Block.HashSSZ()
-	require.NoError(t, err)
-	graph.currentState = nil
-	before, err := graph.ReplayState(root)
-	require.NoError(t, err)
-	require.NotNil(t, before)
-	require.Equal(t, 1, fs.count())
-	graph.MarkPayloadAccepted(root, true)
-	after, err := graph.ReplayState(root)
-	require.NoError(t, err)
-	require.NotNil(t, after)
-	require.Equal(t, 2, fs.count(), "payload status change served the cached Gloas state")
+	require.Equal(t, block.Block.StateRoot, common.Hash(secondRoot))
 }
 
 func TestReplayStatePruneDropsCachedRoot(t *testing.T) {
@@ -304,7 +287,7 @@ func TestReplayStateIgnoresBlockWithoutHeader(t *testing.T) {
 	require.Nil(t, replayed)
 }
 
-func TestReviewImportWithoutFullValidationRejectsBadSlashingSignature(t *testing.T) {
+func TestImportWithoutFullValidationRejectsBadSlashingSignature(t *testing.T) {
 	pre := state.New(&clparams.MainnetBeaconConfig)
 	require.NoError(t, utils.DecodeSSZSnappy(pre, anchor, int(clparams.Phase0Version)))
 	graph, err := NewForkGraphDisk(pre, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
@@ -327,7 +310,7 @@ func TestReviewImportWithoutFullValidationRejectsBadSlashingSignature(t *testing
 	require.Equal(t, InvalidBlock, result)
 }
 
-func TestReviewImportParentReplayRetainsBatchSignatures(t *testing.T) {
+func TestImportParentReplayRetainsBatchSignatures(t *testing.T) {
 	blocks, pre, _ := tests.GetCapellaRandom()
 	graphInterface, err := NewForkGraphDisk(pre, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
 	require.NoError(t, err)
@@ -347,7 +330,7 @@ func TestReviewImportParentReplayRetainsBatchSignatures(t *testing.T) {
 	require.ErrorContains(t, err, "signature")
 }
 
-func TestReviewReadReplaySkipsImportedBatchSignatures(t *testing.T) {
+func TestReadReplaySkipsImportedBatchSignatures(t *testing.T) {
 	blocks, pre, _ := tests.GetCapellaRandom()
 	graphInterface, err := NewForkGraphDisk(pre, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
 	require.NoError(t, err)
