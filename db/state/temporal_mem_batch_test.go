@@ -219,7 +219,7 @@ func TestMergeRejectedBatchKeepsReceiverUnchanged(t *testing.T) {
 
 // Exec workers read the latest values while the apply loop writes them, so a read must not
 // wait for a writer that holds the key's lock.
-func TestGetLatestDoesNotWaitForWriterLock(t *testing.T) {
+func TestGetLatestPublishedDoesNotWaitForWriterLock(t *testing.T) {
 	t.Parallel()
 	sd := &TemporalMemBatch{
 		stepSize: 16,
@@ -233,22 +233,53 @@ func TestGetLatestDoesNotWaitForWriterLock(t *testing.T) {
 		sh.Lock()
 		got := make(chan string, 1)
 		go func() {
-			v, _, _ := sd.GetLatest(domain, []byte("k"))
+			v, _, _ := sd.GetLatestPublished(domain, []byte("k"))
 			got <- string(v)
 		}()
 		select {
 		case v := <-got:
 			require.Equal(t, "v1", v, "domain %s", domain)
 		case <-time.After(5 * time.Second):
-			t.Errorf("domain %s: GetLatest waited for the writer's lock", domain)
+			t.Errorf("domain %s: GetLatestPublished waited for the writer's lock", domain)
 		}
 		sh.Unlock()
 	}
 }
 
+// A batch that defers publishing before its first write still serves exec readers without the
+// writer's lock: they see the batch as empty until it publishes.
+func TestDeferredEmptyBatchDoesNotWaitForWriterLock(t *testing.T) {
+	t.Parallel()
+	sd := &TemporalMemBatch{
+		stepSize: 16,
+		storage:  btree2.NewMap[string, []dataWithTxNum](128),
+		metrics:  &kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
+	}
+	sd.DeferPublish()
+	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
+		sd.putLatest(domain, "k", []byte("v1"), 1)
+
+		sh := sd.shard(domain, "k")
+		sh.Lock()
+		got := make(chan bool, 1)
+		go func() {
+			_, _, ok := sd.GetLatestPublished(domain, []byte("k"))
+			got <- ok
+		}()
+		select {
+		case ok := <-got:
+			require.False(t, ok, "domain %s: the unpublished write is visible", domain)
+		case <-time.After(5 * time.Second):
+			t.Errorf("domain %s: GetLatestPublished waited for the writer's lock", domain)
+		}
+		sh.Unlock()
+	}
+	sd.Publish()
+}
+
 // A reader sees whole published versions in write order: a later read of a key never
 // returns an older value than an earlier read did.
-func TestGetLatestSeesPublishedVersionsInOrder(t *testing.T) {
+func TestGetLatestPublishedSeesVersionsInOrder(t *testing.T) {
 	t.Parallel()
 	sd := &TemporalMemBatch{
 		stepSize: 16,
@@ -267,7 +298,7 @@ func TestGetLatestSeesPublishedVersionsInOrder(t *testing.T) {
 			wg.Go(func() {
 				last := ""
 				for range writes {
-					v, _, ok := sd.GetLatest(domain, []byte("k"))
+					v, _, ok := sd.GetLatestPublished(domain, []byte("k"))
 					if !ok {
 						continue
 					}
@@ -303,14 +334,45 @@ func TestGetLatestDuringMergeNeverReturnsTheReplacedValue(t *testing.T) {
 
 		var during string
 		mergeCopiedHook = func(b *TemporalMemBatch) {
-			v, _, _ := b.GetLatest(domain, []byte("k"))
+			v, _, _ := b.GetLatestPublished(domain, []byte("k"))
 			during = string(v)
 		}
 		require.NoError(t, sd.Merge(other))
 		mergeCopiedHook = nil
 
 		require.Equal(t, "merged", during, "domain %s: a read inside Merge returned the replaced value", domain)
-		v, _, _ := sd.GetLatest(domain, []byte("k"))
+		v, _, _ := sd.GetLatestPublished(domain, []byte("k"))
 		require.Equal(t, "merged", string(v), "domain %s", domain)
 	}
+}
+
+// The apply loop reads its own writes (previous values, account bases), while exec readers see a
+// block's writes only when the whole block is published.
+func TestDeferPublishHoldsBackTheBatchFromPublishedReads(t *testing.T) {
+	t.Parallel()
+	sd := &TemporalMemBatch{
+		stepSize: 16,
+		storage:  btree2.NewMap[string, []dataWithTxNum](128),
+		metrics:  &kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
+	}
+	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
+		sd.putLatest(domain, "k", []byte("v1"), 1)
+
+		sd.DeferPublish()
+		sd.putLatest(domain, "k", []byte("v2"), 2)
+		v, _, _ := sd.GetLatest(domain, []byte("k"))
+		require.Equal(t, "v2", string(v), "domain %s: the writer sees its own write", domain)
+		v, _, _ = sd.GetLatestPublished(domain, []byte("k"))
+		require.Equal(t, "v1", string(v), "domain %s: exec readers see the last published block", domain)
+
+		sd.Publish()
+		v, _, _ = sd.GetLatestPublished(domain, []byte("k"))
+		require.Equal(t, "v2", string(v), "domain %s", domain)
+	}
+
+	sd.DeferPublish()
+	sd.putLatest(kv.CommitmentDomain, "branch", []byte("b1"), 3)
+	v, _, _ := sd.GetLatestPublished(kv.CommitmentDomain, []byte("branch"))
+	require.Equal(t, "b1", string(v), "the fold reads its own branch writes through the published view")
+	sd.Publish()
 }
