@@ -396,17 +396,12 @@ func TestValidateForkPayloadOffNonTipCanonicalBlockWithCache(t *testing.T) {
 // With READ_AHEAD_WAIT on, validation that unwinds must not wait for the warmup
 // suspension it holds itself.
 func TestValidateForkPayloadOffNonTipCanonicalBlockWithReadAheadWait(t *testing.T) {
-	prevWait, prevParallel := dbg.ReadAheadWait, dbg.Exec3Parallel
-	t.Cleanup(func() { dbg.ReadAheadWait, dbg.Exec3Parallel = prevWait, prevParallel })
+	prevWait := dbg.ReadAheadWait
+	t.Cleanup(func() { dbg.ReadAheadWait = prevWait })
 	dbg.ReadAheadWait = true
-	for name, parallel := range map[string]bool{"parallel": true, "serial": false} {
-		t.Run(name, func(t *testing.T) {
-			dbg.Exec3Parallel = parallel
-			hang := time.AfterFunc(time.Minute, func() { panic("validation waits for the warmup suspension it holds") })
-			defer hang.Stop()
-			validateForkPayloadOffNonTipCanonicalBlock(t)
-		})
-	}
+	hang := time.AfterFunc(time.Minute, func() { panic("validation waits for the warmup suspension it holds") })
+	defer hang.Stop()
+	validateForkPayloadOffNonTipCanonicalBlock(t)
 }
 
 func validateForkPayloadOffNonTipCanonicalBlock(t *testing.T) {

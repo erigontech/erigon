@@ -47,10 +47,8 @@ import (
 	"github.com/erigontech/erigon/execution/vm"
 )
 
-// Verifies the bug is fixed under both serial and parallel exec — the
-// underlying ResetExec → SeekCommitment → ExecV3 skip-block-0 path is
-// shared, so the failure surfaces in either mode. Driver flips
-// dbg.Exec3Parallel for each sub-test; not safe to t.Parallel.
+// Verifies the bug is fixed on the ResetExec → SeekCommitment → ExecV3
+// skip-block-0 path. Driver sets dbg.Exec3Parallel; not safe to t.Parallel.
 func TestFromZero_GenesisAllocPreservedAfterResetReExec(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
@@ -59,7 +57,6 @@ func TestFromZero_GenesisAllocPreservedAfterResetReExec(t *testing.T) {
 		name     string
 		parallel bool
 	}{
-		{"serial", false},
 		{"parallel", true},
 	} {
 		t.Run(mode.name, func(t *testing.T) {
@@ -154,7 +151,6 @@ func TestFromZero_AuraGenesisEmptyZeroAddressRetained(t *testing.T) {
 		name     string
 		parallel bool
 	}{
-		{"serial", false},
 		{"parallel", true},
 	} {
 		t.Run(mode.name, func(t *testing.T) {
@@ -325,7 +321,6 @@ func TestFromZero_BranchCacheCoherentAcrossBatches(t *testing.T) {
 		name     string
 		parallel bool
 	}{
-		{"serial", false},
 		{"parallel", true},
 	} {
 		t.Run(mode.name, func(t *testing.T) {

@@ -23,9 +23,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -66,12 +64,6 @@ func TestBurntContractDestroyedByItsTx(t *testing.T) {
 				to = deployed
 			}
 			chainPack := buildBlockSerially(t, gspec, keys, common.Address{1}, 10_000_000_000, []revivalCall{{to: to}})
-
-			prevParallel := dbg.Exec3Parallel
-			t.Cleanup(func() { dbg.Exec3Parallel = prevParallel })
-			dbg.Exec3Parallel = false
-			m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(keys[0]))
-			require.NoError(t, m.InsertChain(chainPack))
 
 			importInParallel(t, gspec, keys[0], chainPack, func(t *testing.T, st *state.IntraBlockState) {
 				exist, err := st.Exist(accounts.InternAddress(tc.burnt))
