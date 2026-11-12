@@ -306,8 +306,9 @@ type simulator struct {
 	validation        bool
 	fullTransactions  bool
 	// Without commitment history, each block's root is replayed from the base block, so it needs the keys of all earlier simulated blocks.
-	touchedKeys  keysByAccount
-	sweptStorage map[accounts.Address]struct{}
+	touchedKeys   keysByAccount
+	sweptStorage  map[accounts.Address]struct{}
+	replacedSlots int
 }
 
 func newSimulator(
@@ -618,46 +619,79 @@ type simOverrideReader struct {
 
 var _ state.StateReader = (*simOverrideReader)(nil)
 
+// maxSimReplacedSlots bounds the "state" overrides of one request: replacing an account's storage loads all its stored slots into memory.
+const maxSimReplacedSlots = 100_000
+
+func (s *simulator) checkStorageReplacements(ctx context.Context, stateOverrides *ethapi.StateOverrides, sd *execctx.SharedDomains, tx kv.TemporalTx, latest bool, firstMinTxNum uint64, limit int) error {
+	for addr, account := range *stateOverrides {
+		if account.State == nil {
+			continue
+		}
+		addrValue := addr.Value()
+		budget := limit - s.replacedSlots
+		replaced := make(map[string]struct{})
+		add := func(key []byte) bool {
+			replaced[string(key)] = struct{}{}
+			return len(replaced) <= budget
+		}
+		if err := sd.IteratePrefix(kv.StorageDomain, addrValue[:], tx, func(k, _ []byte) (bool, error) {
+			return add(k), ctx.Err()
+		}); err != nil {
+			return err
+		}
+		if _, swept := s.sweptStorage[addr]; !latest && !swept && len(replaced) <= budget {
+			if err := visitStorageSlotsAsOf(ctx, tx, addrValue[:], firstMinTxNum, add); err != nil {
+				return err
+			}
+		}
+		if len(replaced) > budget {
+			return clientLimitExceededError(fmt.Sprintf("state overrides replace more than %d storage slots", limit))
+		}
+		s.replacedSlots += len(replaced)
+	}
+	return nil
+}
+
+func visitStorageSlotsAsOf(ctx context.Context, tx kv.TemporalTx, prefix []byte, txNum uint64, visit func(key []byte) bool) error {
+	to, _ := kv.NextSubtree(prefix)
+	it, err := tx.RangeAsOf(kv.StorageDomain, prefix, to, txNum, order.Asc, kv.Unlim)
+	if err != nil {
+		return err
+	}
+	defer it.Close()
+	for it.HasNext() {
+		k, enc, err := it.Next()
+		if err != nil {
+			return err
+		}
+		if len(enc) > 0 && !visit(k) {
+			return nil
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func commitSimOverrides(stateOverrides *ethapi.StateOverrides, base state.StateReader, precompiles vm.PrecompiledContracts, rules *chain.Rules, stateWriter state.StateWriter) (*simOverrideReader, error) {
 	overridden := make(map[accounts.Address]struct{}, len(*stateOverrides))
-	for addr := range *stateOverrides {
+	for addr, account := range *stateOverrides {
 		overridden[addr] = struct{}{}
+		// The version map hides the replaced storage from this block only; the writer must drop the stored slots.
+		if account.State != nil {
+			if err := stateWriter.CreateContract(addr); err != nil {
+				return nil, err
+			}
+		}
 	}
 	overrides := state.New(base)
 	transactions.VersionedBlockState(overrides)
-	if err := applySimOverrides(overrides, stateOverrides, precompiles, rules, stateWriter); err != nil {
+	if err := stateOverrides.OverrideTo(overrides, precompiles, rules, stateWriter); err != nil {
 		overrides.Close()
 		return nil, err
 	}
 	return &simOverrideReader{StateReader: base, overrides: overrides, overridden: overridden}, nil
-}
-
-func applySimOverrides(overrides *state.IntraBlockState, stateOverrides *ethapi.StateOverrides, precompiles vm.PrecompiledContracts, rules *chain.Rules, stateWriter state.StateWriter) error {
-	if overrides.IsVersioned() {
-		// The version map hides the replaced storage from this block only; the writer must drop the stored slots.
-		for addr, account := range *stateOverrides {
-			if account.State != nil {
-				if err := stateWriter.CreateContract(addr); err != nil {
-					return err
-				}
-			}
-		}
-		return stateOverrides.OverrideTo(overrides, precompiles, rules, stateWriter)
-	}
-	if err := stateOverrides.Override(overrides, precompiles, rules); err != nil {
-		return err
-	}
-	dirty := overrides.ExtractAndClearDirty()
-	for addr, account := range *stateOverrides {
-		// An empty storage replacement journals nothing, but must still clear the stored slots.
-		if account.State != nil {
-			dirty[addr] = struct{}{}
-		}
-	}
-	if err := overrides.CommitOverrideDirtyAccounts(rules, stateWriter, dirty); err != nil {
-		return fmt.Errorf("committing override accounts: %w", err)
-	}
-	return nil
 }
 
 func (r *simOverrideReader) Close() { r.overrides.Close() }
@@ -776,6 +810,9 @@ func (s *simulator) simulateBlock(
 
 	// Override the state before block execution.
 	if bsc.StateOverrides != nil {
+		if err := s.checkStorageReplacements(ctx, bsc.StateOverrides, sharedDomains, tx, latest, firstMinTxNum, maxSimReplacedSlots); err != nil {
+			return nil, nil, err
+		}
 		overrideReader, err := commitSimOverrides(bsc.StateOverrides, stateReader, activePrecompiles, rules, stateWriter)
 		if err != nil {
 			return nil, nil, err

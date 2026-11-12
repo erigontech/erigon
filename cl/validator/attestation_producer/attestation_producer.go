@@ -20,17 +20,14 @@ import (
 	"errors"
 	"fmt"
 	"sync"
-	"time"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/kv"
 )
 
 var (
@@ -40,18 +37,30 @@ var (
 
 const attestationsCacheSize = 21
 
+type attestationCacheKey struct {
+	epoch    uint64
+	headRoot common.Hash
+}
+
+type blockRootCacheKey struct {
+	slot     uint64
+	headRoot common.Hash
+}
+
 type attestationProducer struct {
 	beaconCfg *clparams.BeaconChainConfig
 
 	attCacheMutex              sync.RWMutex
-	attestationsCache          *lru.CacheWithTTL[uint64, solid.AttestationData] // Epoch => Base AttestationData
-	blockRootsUsedForSlotCache *lru.Cache[uint64, common.Hash]                  // Slot => BlockRoot
+	attestationsCache          *lru.Cache[attestationCacheKey, solid.AttestationData]
+	blockRootsUsedForSlotCache *lru.Cache[blockRootCacheKey, common.Hash]
 }
 
 func New(beaconCfg *clparams.BeaconChainConfig) AttestationDataProducer {
-	ttl := time.Duration(beaconCfg.SecondsPerSlot) * time.Second / 2
-	attestationsCache := lru.NewWithTTL[uint64, solid.AttestationData]("attestations", attestationsCacheSize, ttl)
-	blockRootsUsedForSlotCache, err := lru.New[uint64, common.Hash]("blockRootsUsedForSlot", attestationsCacheSize)
+	attestationsCache, err := lru.New[attestationCacheKey, solid.AttestationData]("attestations", attestationsCacheSize)
+	if err != nil {
+		panic(err)
+	}
+	blockRootsUsedForSlotCache, err := lru.New[blockRootCacheKey, common.Hash]("blockRootsUsedForSlot", attestationsCacheSize)
 	if err != nil {
 		panic(err)
 	}
@@ -64,7 +73,8 @@ func New(beaconCfg *clparams.BeaconChainConfig) AttestationDataProducer {
 }
 
 func (ap *attestationProducer) beaconBlockRootForSlot(baseState *state.CachingBeaconState, baseBlockRoot common.Hash, slot uint64) (common.Hash, error) {
-	if blockRoot, ok := ap.blockRootsUsedForSlotCache.Get(slot); ok {
+	key := blockRootCacheKey{slot: slot, headRoot: baseBlockRoot}
+	if blockRoot, ok := ap.blockRootsUsedForSlotCache.Get(key); ok {
 		return blockRoot, nil
 	}
 	if baseState.Slot() > slot {
@@ -72,31 +82,18 @@ func (ap *attestationProducer) beaconBlockRootForSlot(baseState *state.CachingBe
 		if err != nil {
 			return common.Hash{}, fmt.Errorf("failed to get block root at slot %d: %w", slot, err)
 		}
-		ap.blockRootsUsedForSlotCache.Add(slot, blockRoot)
+		ap.blockRootsUsedForSlotCache.Add(key, blockRoot)
 		return blockRoot, nil
 	}
-	ap.blockRootsUsedForSlotCache.Add(slot, baseBlockRoot)
+	ap.blockRootsUsedForSlotCache.Add(key, baseBlockRoot)
 	return baseBlockRoot, nil
 }
 
-func (ap *attestationProducer) computeTargetCheckpoint(tx kv.Tx, baseState *state.CachingBeaconState, baseStateBlockRoot common.Hash, slot uint64) (solid.Checkpoint, error) {
+func (ap *attestationProducer) computeTargetCheckpoint(baseState *state.CachingBeaconState, baseStateBlockRoot common.Hash, slot uint64) (solid.Checkpoint, error) {
 	var err error
 	targetEpoch := slot / ap.beaconCfg.SlotsPerEpoch
-	epochStartTargetSlot := targetEpoch * ap.beaconCfg.SlotsPerEpoch
+	epochStartTargetSlot := ap.beaconCfg.RoundSlotToEpoch(slot)
 	var targetRoot common.Hash
-	if tx != nil {
-		targetRoot, err = beacon_indicies.ReadCanonicalBlockRoot(tx, epochStartTargetSlot)
-		if err != nil {
-			return solid.Checkpoint{}, fmt.Errorf("failed to get targetRoot at slot from db %d: %w", epochStartTargetSlot, err)
-		}
-		if targetRoot != (common.Hash{}) {
-			return solid.Checkpoint{
-				Root:  targetRoot,
-				Epoch: targetEpoch,
-			}, nil
-		}
-	}
-
 	if epochStartTargetSlot >= baseState.Slot() {
 		targetRoot = baseStateBlockRoot
 	} else {
@@ -117,57 +114,46 @@ func (ap *attestationProducer) computeTargetCheckpoint(tx kv.Tx, baseState *stat
 	}, nil
 }
 
-func (ap *attestationProducer) CachedAttestationData(slot uint64) (solid.AttestationData, bool, error) {
+func (ap *attestationProducer) CachedAttestationData(headRoot common.Hash, slot uint64) (solid.AttestationData, bool) {
 	epoch := slot / ap.beaconCfg.SlotsPerEpoch
 	ap.attCacheMutex.RLock()
 	defer ap.attCacheMutex.RUnlock()
-	if baseAttestationData, ok := ap.attestationsCache.Get(epoch); ok {
-		beaconBlockRoot, ok := ap.blockRootsUsedForSlotCache.Get(slot)
+	if baseAttestationData, ok := ap.attestationsCache.Get(attestationCacheKey{epoch: epoch, headRoot: headRoot}); ok {
+		beaconBlockRoot, ok := ap.blockRootsUsedForSlotCache.Get(blockRootCacheKey{slot: slot, headRoot: headRoot})
 		if !ok {
-			return solid.AttestationData{}, false, nil
+			return solid.AttestationData{}, false
 		}
-		return solid.AttestationData{
-			Slot:            slot,
-			BeaconBlockRoot: beaconBlockRoot,
-			Source:          baseAttestationData.Source,
-			Target:          baseAttestationData.Target,
-		}, true, nil
+		baseAttestationData.Slot = slot
+		baseAttestationData.BeaconBlockRoot = beaconBlockRoot
+		return baseAttestationData, true
 	}
-	return solid.AttestationData{}, false, nil
+	return solid.AttestationData{}, false
 }
 
-func (ap *attestationProducer) ProduceAndCacheAttestationData(tx kv.Tx, baseState *state.CachingBeaconState, baseStateBlockRoot common.Hash, slot uint64) (solid.AttestationData, error) {
+func (ap *attestationProducer) ProduceAndCacheAttestationData(baseState *state.CachingBeaconState, baseStateBlockRoot common.Hash, slot uint64) (solid.AttestationData, error) {
 	epoch := slot / ap.beaconCfg.SlotsPerEpoch
+	key := attestationCacheKey{epoch: epoch, headRoot: baseStateBlockRoot}
 	var err error
 	ap.attCacheMutex.RLock()
-	if baseAttestationData, ok := ap.attestationsCache.Get(epoch); ok {
+	if baseAttestationData, ok := ap.attestationsCache.Get(key); ok {
 		ap.attCacheMutex.RUnlock()
 		beaconBlockRoot, err := ap.beaconBlockRootForSlot(baseState, baseStateBlockRoot, slot)
 		if err != nil {
 			return solid.AttestationData{}, err
 		}
-		targetCheckpoint, err := ap.computeTargetCheckpoint(tx, baseState, baseStateBlockRoot, slot)
-		if err != nil {
-			log.Debug("Failed to compute target checkpoint - falling back to the cached one", "slot", slot, "err", err)
-			targetCheckpoint = baseAttestationData.Target
-		}
-		return solid.AttestationData{
-			Slot:            slot,
-			BeaconBlockRoot: beaconBlockRoot,
-			Source:          baseAttestationData.Source,
-			Target:          targetCheckpoint,
-		}, nil
+		baseAttestationData.Slot = slot
+		baseAttestationData.BeaconBlockRoot = beaconBlockRoot
+		return baseAttestationData, nil
 	}
 	ap.attCacheMutex.RUnlock()
 
-	// in case the target epoch is not found, let's generate it with lock to avoid everyone trying to generate it
-	// at the same time, which would be a waste of memory resources
+	// Serialize cache misses to limit peak memory use during state copying and epoch processing.
 	ap.attCacheMutex.Lock()
 	defer ap.attCacheMutex.Unlock()
 
 	stateEpoch := state.Epoch(baseState)
-	if baseState.Slot() > slot {
-		return solid.AttestationData{}, errors.New("head state slot is bigger than requested slot, the attestation should have been cached, try again later")
+	if epoch < state.PreviousEpoch(baseState) {
+		return solid.AttestationData{}, errors.New("head state is more than one epoch ahead")
 	}
 	if stateEpoch < epoch {
 		baseState, err = baseState.Copy()
@@ -175,30 +161,32 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(tx kv.Tx, baseStat
 			log.Warn("Failed to copy base state", "slot", slot, "err", err)
 			return solid.AttestationData{}, err
 		}
-		if err := transition.DefaultMachine.ProcessSlots(baseState, (epoch*ap.beaconCfg.SlotsPerEpoch)+1); err != nil {
+		// Reaching the first slot of the target epoch also completes the epoch transition.
+		if err := transition.DefaultMachine.ProcessSlots(baseState, ap.beaconCfg.RoundSlotToEpoch(slot)); err != nil {
 			log.Warn("Failed to process slots", "slot", slot, "err", err)
 			return solid.AttestationData{}, err
 		}
 	}
 
-	targetCheckpoint, err := ap.computeTargetCheckpoint(tx, baseState, baseStateBlockRoot, slot)
+	targetCheckpoint, err := ap.computeTargetCheckpoint(baseState, baseStateBlockRoot, slot)
 	if err != nil {
 		return solid.AttestationData{}, err
 	}
-	baseAttestationData := solid.AttestationData{
-		Slot:            0,             // slot will be filled in later
-		CommitteeIndex:  0,             // committee index is deprecated after Electra
-		BeaconBlockRoot: common.Hash{}, // beacon block root will be filled in later
-		Source:          baseState.CurrentJustifiedCheckpoint(),
-		Target:          targetCheckpoint,
+	beaconBlockRoot, err := ap.beaconBlockRootForSlot(baseState, baseStateBlockRoot, slot)
+	if err != nil {
+		return solid.AttestationData{}, err
 	}
-	ap.attestationsCache.Add(epoch, baseAttestationData)
-	ap.blockRootsUsedForSlotCache.Add(slot, baseStateBlockRoot)
+	sourceCheckpoint := baseState.CurrentJustifiedCheckpoint()
+	if epoch < stateEpoch {
+		sourceCheckpoint = baseState.PreviousJustifiedCheckpoint()
+	}
+	baseAttestationData := solid.AttestationData{
+		Source: sourceCheckpoint,
+		Target: targetCheckpoint,
+	}
+	ap.attestationsCache.Add(key, baseAttestationData)
 
-	return solid.AttestationData{
-		Slot:            slot,
-		BeaconBlockRoot: baseStateBlockRoot,
-		Source:          baseAttestationData.Source,
-		Target:          targetCheckpoint,
-	}, nil
+	baseAttestationData.Slot = slot
+	baseAttestationData.BeaconBlockRoot = beaconBlockRoot
+	return baseAttestationData, nil
 }
