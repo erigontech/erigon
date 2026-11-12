@@ -158,6 +158,103 @@ func TestFramePoolReconcilesMinedKeyedNonces(t *testing.T) {
 	}
 }
 
+func TestFetchReconcilesRetainedUnwindFrameAfterGap(t *testing.T) {
+	for _, withBlobs := range []bool{false, true} {
+		for _, consumed := range []bool{false, true} {
+			t.Run(fmt.Sprintf("blobs=%t/consumed=%t", withBlobs, consumed), func(t *testing.T) {
+				ctx, pool, sender := keyedFramePoolEnv(t)
+				pool.chainID.SetUint64(1)
+				backend := pool.ethBackend.(*frameValidationBackend)
+				backend.balance = common.Ether
+				fetch := NewFetch(ctx, nil, pool, nil, pool.poolDB, pool.chainID, pool.logger)
+				frame := framePoolSlot(t, sender, 1, 2, uint256.Int{5})
+				if withBlobs {
+					wrapped, err := types.DecodeWrappedTransaction(makeWrappedBlobTxnRlpWithCellProofs(t, &pool.chainID, 1))
+					require.NoError(t, err)
+					blob := wrapped.(*types.BlobTxWrapper)
+					txn := frame.Txn.(*types.FrameTransaction)
+					txn.BlobVersionedHashes = blob.Tx.BlobVersionedHashes
+					txn.Fees.BlobFeeCap.SetUint64(10)
+					wrapper := &types.FrameTxWrapper{
+						FrameTransaction: txn, WrapperVersion: 1,
+						Blobs: blob.Blobs, Commitments: blob.Commitments, Proofs: blob.Proofs,
+					}
+					var encoded bytes.Buffer
+					require.NoError(t, wrapper.MarshalBinaryWrapped(&encoded))
+					frame = &TxnSlot{}
+					parser := NewTxnParseContext(pool.chainID)
+					parser.WithSender(false)
+					_, err = parser.ParseTransaction(encoded.Bytes(), 0, frame, nil, false, true, nil)
+					require.NoError(t, err)
+				}
+				var txns TxnSlots
+				txns.Append(frame, sender[:], true)
+				reasons, err := pool.AddLocalTxns(ctx, txns)
+				require.NoError(t, err)
+				require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+				require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{1}, 0, sender), TxnSlots{}, TxnSlots{}, txns))
+				require.Empty(t, pool.byHash)
+
+				coreDB := pool._chainDB.(kv.TemporalRwDB)
+				require.NoError(t, coreDB.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
+					domains, initErr := execctx.NewSharedDomains(ctx, tx, pool.logger)
+					if initErr != nil {
+						return initErr
+					}
+					defer domains.Close()
+					if consumed {
+						slot := types.FrameNonceSlot(sender, uint256.Int{5})
+						if writeErr := domains.DomainPut(kv.StorageDomain, tx, append(types.FrameNonceManager[:], slot[:]...), []byte{1}, 1, nil); writeErr != nil {
+							return writeErr
+						}
+					}
+					if flushErr := domains.Flush(ctx, tx); flushErr != nil {
+						return flushErr
+					}
+					_, versionErr := rawdb.IncrementStateVersion(tx)
+					return versionErr
+				}))
+
+				var encoded bytes.Buffer
+				require.NoError(t, frame.Txn.MarshalBinary(&encoded))
+				stale := newBlockChangeForAccounts(common.Hash{2}, 0)
+				stale.StateChangesIncomplete = true
+				stale.ChangeBatch[0].Direction = remoteproto.Direction_UNWIND
+				stale.ChangeBatch[0].Txs = [][]byte{encoded.Bytes()}
+				require.ErrorIs(t, fetch.handleStateChangesRequest(ctx, stale), errStateViewSuperseded)
+				require.Len(t, fetch.pendingTxnChanges, 1)
+
+				reset := newBlockChangeForAccounts(common.Hash{3}, 0, sender)
+				reset.StateChangesIncomplete = true
+				require.NoError(t, coreDB.View(ctx, func(tx kv.Tx) error {
+					var readErr error
+					reset.StateVersionId, readErr = rawdb.GetStateVersion(tx)
+					return readErr
+				}))
+				backend.calls = nil
+				backend.err = context.DeadlineExceeded
+				require.NoError(t, fetch.handleStateChangesRequest(ctx, reset))
+				require.Empty(t, fetch.pendingTxnChanges)
+				if !consumed {
+					restored := pool.byHash[string(frame.IDHash[:])]
+					require.NotNil(t, restored, "a usable nonce must survive a backend failure")
+					require.Zero(t, restored.currentSubPool)
+					return
+				}
+				require.NotContains(t, pool.byHash, string(frame.IDHash[:]), "a consumed nonce must not be restored while validation is unavailable")
+				require.Empty(t, backend.calls, "committed nonce state is enough to reject restoration")
+
+				backend.err = nil
+				var next TxnSlots
+				next.Append(framePoolSlotWithNonce(t, sender, 1, 1, 2, uint256.Int{5}), sender[:], true)
+				reasons, err = pool.AddLocalTxns(ctx, next)
+				require.NoError(t, err)
+				require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+			})
+		}
+	}
+}
+
 func TestFramePoolParksAroundFailedStateRead(t *testing.T) {
 	for _, incomplete := range []bool{false, true} {
 		t.Run(fmt.Sprintf("incomplete=%t", incomplete), func(t *testing.T) {

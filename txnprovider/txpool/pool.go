@@ -557,6 +557,24 @@ func (p *TxPool) applyBlockUpdate(stateChanges *remoteproto.StateChangeBatch, un
 	if err := p.senders.registerNewSenders(&unwindTxns, p.logger); err != nil {
 		return frames, err
 	}
+	if stateChanges.StateChangesIncomplete {
+		// A retained unwind may have been re-mined in an omitted block. Reconcile
+		// its nonce before parking it, even when frame validation is unavailable.
+		defer p.forgetUnusedSenders(senderIDsOf(&unwindTxns))
+		var unconsumed TxnSlots
+		for i, txn := range unwindTxns.Txns {
+			used, err := p.nonceConsumed(txn, cacheView)
+			if err != nil {
+				return frames, err
+			}
+			if used {
+				minedTxns.Append(txn, unwindTxns.Senders.At(i), false)
+			} else {
+				unconsumed.Append(txn, unwindTxns.Senders.At(i), false)
+			}
+		}
+		unwindTxns = unconsumed
+	}
 	unwindTxns, unwindFrames := p.splitRestoredTxns(unwindTxns)
 
 	_, unwindTxns, cells, err := p.validateTxns(&unwindTxns, cacheView, nil, nil)
