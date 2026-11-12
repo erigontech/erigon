@@ -870,9 +870,9 @@ func TestDecodeBlockAccessListAllocatesOnce(t *testing.T) {
 
 func TestDecodeBlockAccessListReservesNoMoreThanTheBudget(t *testing.T) {
 	body := bytes.Repeat([]byte{0x01}, 2_700_000)
-	enc := make([]byte, rlp.ListPrefixLen(len(body)))
-	rlp.EncodeListPrefixToBuf(len(body), enc)
-	enc = append(enc, body...)
+	prefix := make([]byte, rlp.ListPrefixLen(len(body)))
+	rlp.EncodeListPrefixToBuf(len(body), prefix)
+	enc := bytes.Join([][]byte{prefix, body}, nil)
 	var before, after runtime.MemStats
 	runtime.ReadMemStats(&before)
 	_, err := DecodeBlockAccessListSidecarForHeader(enc, 0)
