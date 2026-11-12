@@ -268,10 +268,20 @@ func (pe *parallelExecutor) bindBlockChangesetForFold(blockNum uint64, blockHash
 	}
 }
 
+// shortcut: dbg probe, a CPU spin as long as each fold bounds the fold cost on the newPayload path; remove after the bound.
+var probeFoldX2 = dbg.EnvBool("PROBE_FOLD_X2", false)
+
 // foldTx applies one published tx's versionMap view and indexes to sd.mem.
 // Finalize logs share the final virtual task's txNum. That task has already
 // handled the receipt cache, so finalize indexes logs without changing it.
 func (pe *parallelExecutor) foldTx(ctx context.Context, rwTx kv.TemporalTx, r *txResult) error {
+	if probeFoldX2 {
+		start := time.Now()
+		defer func() {
+			for d, t := time.Since(start), time.Now(); time.Since(t) < d; {
+			}
+		}()
+	}
 	restoreCS := pe.bindBlockChangesetForFold(r.blockNum, r.blockHash)
 	defer restoreCS()
 	if err := pe.rs.ApplyStateWrites(ctx, rwTx, r.blockNum, r.txNum, r.writes, nil, r.rules); err != nil {
