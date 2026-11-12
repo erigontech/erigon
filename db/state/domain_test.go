@@ -3088,46 +3088,6 @@ func TestDomainContext_findShortenedKey(t *testing.T) {
 	}
 }
 
-func TestCanBuild(t *testing.T) {
-	db, d := testDbAndDomain(t, log.New())
-	tx, err := db.BeginRw(t.Context())
-	require.NoError(t, err)
-	defer tx.Rollback()
-
-	d.HistoryLargeValues = true
-	domainRoTx := d.beginForTests()
-	defer domainRoTx.Close()
-
-	domainRoTx.files = append(domainRoTx.files, visibleFile{startTxNum: 0, endTxNum: d.stepSize})
-
-	writer := domainRoTx.NewWriter(db)
-	defer writer.Close()
-
-	k, v := []byte{1}, []byte{1}
-	// db has data which already in files
-	_ = writer.PutWithPrev(k, v, 0, nil)
-	_ = writer.Flush(t.Context(), tx)
-	canBuild := domainRoTx.canBuild(tx)
-	require.NoError(t, err)
-	require.False(t, canBuild)
-
-	// db has data which already in files and next step. still not enough - we need full step in db.
-	_ = writer.PutWithPrev(k, v, d.stepSize, nil)
-	_ = writer.Flush(t.Context(), tx)
-	canBuild = domainRoTx.canBuild(tx)
-	require.NoError(t, err)
-	require.False(t, canBuild)
-	_ = writer.PutWithPrev(k, v, d.stepSize, nil)
-
-	// db has: 1. data which already in files 2. full next step 3. a bit of next-next step. -> can build
-	_ = writer.PutWithPrev(k, v, d.stepSize*2, nil)
-	_ = writer.Flush(t.Context(), tx)
-	canBuild = domainRoTx.canBuild(tx)
-	require.NoError(t, err)
-	require.True(t, canBuild)
-	_ = writer.PutWithPrev(k, hexutil.EncodeTs(d.stepSize*2+1), d.stepSize*2, nil)
-}
-
 func TestTraceKey_SmallVals(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow test")
@@ -4414,4 +4374,19 @@ func TestDomainCloseFilesAfterStep(t *testing.T) {
 	for _, df := range all {
 		require.Equal(t, []string{"0-2"}, stepRanges(t, df.Items(), d.stepSize))
 	}
+}
+
+// beginForTests recomputes visible files from dirtyFiles directly instead of
+// using Aggregator's published snapshot. Unsafe to mix with an Aggregator,
+// because it can observe an unsynchronized/torn view of dirtyFiles across
+// entities. Production code goes through Aggregator.BeginFilesRo.
+func (d *Domain) beginForTests() *DomainRoTx {
+	dv, hv, iv := d.calcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
+	return d.beginFilesRo(dv, hv, iv)
+}
+
+func (d *Domain) beginFilesRo(dv *domainVisible, hf visibleFiles, hiv *iiVisible) *DomainRoTx {
+	dt := &DomainRoTx{}
+	d.initFilesRo(dt, &HistoryRoTx{}, &InvertedIndexRoTx{}, dv, hf, hiv)
+	return dt
 }
