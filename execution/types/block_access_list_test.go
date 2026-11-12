@@ -6,6 +6,7 @@ import (
 	"errors"
 	"reflect"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -901,5 +902,41 @@ func TestBlockAccessListDecodeAcceptsOnlyCanonicalEncoding(t *testing.T) {
 		if _, err := DecodeBlockAccessListBytes(build(name)); err == nil {
 			t.Fatalf("an extra element in a %s list must be rejected", name)
 		}
+	}
+}
+
+func TestDecodeBlockAccessListAcrossDecodeChunks(t *testing.T) {
+	bal := make(BlockAccessList, 3*balDecodeChunk+5)
+	for i := range bal {
+		binary.BigEndian.PutUint64(bal[i].Address[12:], uint64(i+1))
+		bal[i].StorageReads = []common.Hash{{31: byte(i)}}
+		bal[i].BalanceChanges = []*BalanceChange{{Index: 1, Value: *uint256.NewInt(uint64(i))}}
+	}
+	raw, err := EncodeBlockAccessListBytes(bal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := uint64(2 * len(bal)) // one account and one storage read each
+
+	got, err := DecodeBlockAccessListSidecarForHeader(raw, items*BalItemCost)
+	if err != nil {
+		t.Fatalf("decode BAL at the item limit: %v", err)
+	}
+	if !reflect.DeepEqual(got.BlockAccessList(), bal) {
+		t.Fatal("decoded BAL differs from the encoded one")
+	}
+
+	if _, err := DecodeBlockAccessListSidecarForHeader(raw, (items-1)*BalItemCost); !errors.Is(err, ErrInvalidBlockAccessList) || !strings.Contains(err.Error(), "too large") {
+		t.Fatalf("decode BAL one item over the limit: got %v, want item limit error", err)
+	}
+
+	swapped := slices.Clone(bal)
+	swapped[balDecodeChunk-1], swapped[balDecodeChunk] = swapped[balDecodeChunk], swapped[balDecodeChunk-1]
+	raw, err = EncodeBlockAccessListBytes(swapped)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := DecodeBlockAccessListSidecarForHeader(raw, items*BalItemCost); !errors.Is(err, ErrInvalidBlockAccessList) || !strings.Contains(err.Error(), "strictly increasing") {
+		t.Fatalf("decode BAL with accounts out of order at a chunk edge: got %v, want invalid ordering", err)
 	}
 }

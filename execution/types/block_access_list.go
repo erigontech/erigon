@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	"github.com/holiman/uint256"
@@ -194,11 +196,17 @@ const BalItemCost = 2000
 type blockAccessListDecodeBudget struct {
 	remaining uint64
 	maxIndex  uint64
+	shared    *atomic.Uint64 // items not yet taken by any parallel decoder
 }
+
+const balBudgetBatch = 256
 
 func (budget *blockAccessListDecodeBudget) takeItem() error {
 	if budget == nil {
 		return nil
+	}
+	if budget.remaining == 0 && budget.shared != nil {
+		budget.remaining = takeBudgetBatch(budget.shared)
 	}
 	if budget.remaining == 0 {
 		return fmt.Errorf("%w: block access list too large", ErrInvalidBlockAccessList)
@@ -825,7 +833,94 @@ func DecodeBlockAccessListBytes(data []byte) (BlockAccessList, error) {
 	return decodeBlockAccessListBytes(data, nil)
 }
 
+func takeBudgetBatch(shared *atomic.Uint64) uint64 {
+	for {
+		have := shared.Load()
+		n := min(have, balBudgetBatch)
+		if n == 0 || shared.CompareAndSwap(have, have-n) {
+			return n
+		}
+	}
+}
+
+const balDecodeChunk = 64 // accounts per parallel decode task
+
+// decodeBlockAccessListBytes decodes large lists in parallel; any failure there is
+// decoded again serially, so errors and the item budget match the serial decoder.
 func decodeBlockAccessListBytes(data []byte, budget *blockAccessListDecodeBudget) (BlockAccessList, error) {
+	if bal, ok := decodeBlockAccessListParallel(data, budget); ok {
+		return bal, nil
+	}
+	return decodeBlockAccessListSerial(data, budget)
+}
+
+func decodeBlockAccessListParallel(data []byte, budget *blockAccessListDecodeBudget) (BlockAccessList, bool) {
+	content, rest, err := rlp.SplitList(data)
+	if err != nil || len(rest) != 0 {
+		return nil, false
+	}
+	var items [][]byte
+	for len(content) > 0 {
+		_, _, r, err := rlp.Split(content)
+		if err != nil {
+			return nil, false
+		}
+		items = append(items, content[:len(content)-len(r)])
+		content = r
+	}
+	if len(items) <= balDecodeChunk {
+		return nil, false
+	}
+	var shared *atomic.Uint64
+	if budget != nil {
+		shared = new(atomic.Uint64)
+		shared.Store(budget.remaining)
+	}
+	bal := make(BlockAccessList, len(items))
+	chunks := (len(items) + balDecodeChunk - 1) / balDecodeChunk
+	var next atomic.Int64
+	var failed atomic.Bool
+	var wg sync.WaitGroup
+	for range min(runtime.GOMAXPROCS(0), chunks) {
+		wg.Go(func() {
+			var local *blockAccessListDecodeBudget
+			if budget != nil {
+				local = &blockAccessListDecodeBudget{maxIndex: budget.maxIndex, shared: shared}
+			}
+			for c := int(next.Add(1) - 1); c < chunks && !failed.Load(); c = int(next.Add(1) - 1) {
+				for i := c * balDecodeChunk; i < min((c+1)*balDecodeChunk, len(items)); i++ {
+					if !decodeAccountChangesItem(&bal[i], items[i], local) {
+						failed.Store(true)
+						return
+					}
+				}
+			}
+		})
+	}
+	wg.Wait()
+	if failed.Load() {
+		return nil, false
+	}
+	if budget != nil {
+		for i := 1; i < len(bal); i++ {
+			if bytes.Compare(bal[i-1].Address[:], bal[i].Address[:]) >= 0 {
+				return nil, false
+			}
+		}
+	}
+	return bal, true
+}
+
+func decodeAccountChangesItem(ac *AccountChanges, item []byte, budget *blockAccessListDecodeBudget) bool {
+	if budget.takeItem() != nil {
+		return false
+	}
+	s := rlp.NewBytesStream(item)
+	defer rlp.PutStream(s)
+	return ac.decodeRLP(s, budget) == nil
+}
+
+func decodeBlockAccessListSerial(data []byte, budget *blockAccessListDecodeBudget) (BlockAccessList, error) {
 	stream := rlp.NewStream(bytes.NewReader(data), 0)
 	var bal BlockAccessList
 	if err := decodeBlockAccessList(&bal, stream, budget); err != nil {
