@@ -4419,7 +4419,7 @@ func TestDomain_MayContainInFilesKeepsKeysOfMappedFilters(t *testing.T) {
 	}
 }
 
-func TestDomainCloseFilesAfterStep(t *testing.T) {
+func TestDomainRetireFilesAfterStep(t *testing.T) {
 	t.Parallel()
 	d := emptyTestDomain(t, 1)
 	d.scanDirtyFiles([]string{"v1.0-accounts.0-2.kv", "v1.0-accounts.2-4.kv"})
@@ -4427,11 +4427,11 @@ func TestDomainCloseFilesAfterStep(t *testing.T) {
 	d.History.InvertedIndex.scanDirtyFiles([]string{"v1.0-accounts.0-2.ef", "v1.0-accounts.2-4.ef"})
 	all := []*DirtyFiles{d.dirtyFiles, d.History.dirtyFiles, d.History.InvertedIndex.dirtyFiles}
 
-	d.closeFilesAfterStep(3)
+	reclaimFiles(d.retireFilesAfterStep(3))
 	for _, df := range all {
 		require.Equal(t, []string{"0-2", "2-4"}, stepRanges(t, df.Items(), d.stepSize))
 	}
-	d.closeFilesAfterStep(2)
+	reclaimFiles(d.retireFilesAfterStep(2))
 	for _, df := range all {
 		require.Equal(t, []string{"0-2"}, stepRanges(t, df.Items(), d.stepSize))
 	}
