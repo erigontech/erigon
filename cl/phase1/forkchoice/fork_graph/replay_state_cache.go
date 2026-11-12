@@ -20,21 +20,30 @@ import (
 	"sync"
 
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/common"
 )
 
 const replayStateCacheSize = 4
 
 type replayStateCache struct {
-	mu     sync.Mutex
-	states map[common.Hash]*state.CachingBeaconState
-	order  []common.Hash
+	once   sync.Once
+	states *lru.Cache[common.Hash, *state.CachingBeaconState]
+}
+
+func (c *replayStateCache) getCache() *lru.Cache[common.Hash, *state.CachingBeaconState] {
+	c.once.Do(func() {
+		var err error
+		c.states, err = lru.New[common.Hash, *state.CachingBeaconState]("fork_graph_replayed_states", replayStateCacheSize)
+		if err != nil {
+			panic(err)
+		}
+	})
+	return c.states
 }
 
 func (c *replayStateCache) get(root common.Hash) (*state.CachingBeaconState, bool) {
-	c.mu.Lock()
-	cached, ok := c.states[root]
-	c.mu.Unlock()
+	cached, ok := c.getCache().Get(root)
 	if !ok {
 		return nil, false
 	}
@@ -50,44 +59,13 @@ func (c *replayStateCache) add(root common.Hash, bs *state.CachingBeaconState) {
 	if err != nil {
 		return
 	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.states == nil {
-		c.states = make(map[common.Hash]*state.CachingBeaconState, replayStateCacheSize)
-	}
-	if _, ok := c.states[root]; ok {
-		for i, cachedRoot := range c.order {
-			if cachedRoot == root {
-				c.order = append(c.order[:i], c.order[i+1:]...)
-				break
-			}
-		}
-	} else if len(c.order) == replayStateCacheSize {
-		delete(c.states, c.order[0])
-		c.order = c.order[1:]
-	}
-	c.states[root] = copy
-	c.order = append(c.order, root)
+	c.getCache().Add(root, copy)
 }
 
 func (c *replayStateCache) clear() {
-	c.mu.Lock()
-	c.states = nil
-	c.order = nil
-	c.mu.Unlock()
+	c.getCache().Purge()
 }
 
 func (c *replayStateCache) remove(root common.Hash) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if _, ok := c.states[root]; !ok {
-		return
-	}
-	delete(c.states, root)
-	for i, cachedRoot := range c.order {
-		if cachedRoot == root {
-			c.order = append(c.order[:i], c.order[i+1:]...)
-			return
-		}
-	}
+	c.getCache().Remove(root)
 }

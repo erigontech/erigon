@@ -126,6 +126,23 @@ func TestReplayStateCachesCopyByRoot(t *testing.T) {
 	require.Equal(t, originalAttestationCount, second.PreviousEpochAttestationsLength())
 }
 
+func TestReplayStateCacheEvictsLeastRecentlyUsed(t *testing.T) {
+	cache := replayStateCache{}
+	for i := 1; i <= replayStateCacheSize; i++ {
+		cache.add(common.Hash{byte(i)}, state.New(&clparams.MainnetBeaconConfig))
+	}
+	if _, ok := cache.get(common.Hash{1}); !ok {
+		t.Fatal("failed to read cached state")
+	}
+	cache.add(common.Hash{5}, state.New(&clparams.MainnetBeaconConfig))
+	if _, ok := cache.get(common.Hash{1}); !ok {
+		t.Fatal("recently read state was evicted")
+	}
+	if _, ok := cache.get(common.Hash{2}); ok {
+		t.Fatal("least recently used state was retained")
+	}
+}
+
 func TestReplayStateCacheSurvivesUnrelatedImport(t *testing.T) {
 	anchorState := state.New(&clparams.MainnetBeaconConfig)
 	require.NoError(t, utils.DecodeSSZSnappy(anchorState, anchor, int(clparams.Phase0Version)))
@@ -207,9 +224,7 @@ func TestReplayStatePruneDropsCachedRoot(t *testing.T) {
 	graph.blocks.Store(newerRoot, newerBlock)
 	require.NoError(t, graph.DumpBeaconStateOnDisk(newerRoot, stateAtRoot, true))
 	require.NoError(t, graph.Prune(block.Block.Slot+1))
-	graph.replayedStates.mu.Lock()
-	_, cached := graph.replayedStates.states[root]
-	graph.replayedStates.mu.Unlock()
+	cached := graph.replayedStates.getCache().Contains(root)
 	require.False(t, cached)
 
 	pruned, err := graph.ReplayState(root)
