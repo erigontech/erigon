@@ -36,9 +36,9 @@ func Begin() func() {
 		}
 		return func() { pprof.StopCPUProfile(); keep("npcpu", buf.Bytes()) }
 	case "allocs":
-		base := allocsSnapshot()
+		base := allocsSnapshot(false)
 		return func() {
-			end := allocsSnapshot()
+			end := allocsSnapshot(true)
 			if base == nil || end == nil {
 				return
 			}
@@ -69,9 +69,12 @@ func init() {
 	}
 }
 
-// allocsSnapshot forces a GC so the allocs profile includes every allocation made so far.
-func allocsSnapshot() *profile.Profile {
-	runtime.GC()
+// allocsSnapshot reads the allocs profile as of the last GC; gc forces one first.
+// The begin snapshot does not force a GC: that would empty the sync.Pools the block reuses.
+func allocsSnapshot(gc bool) *profile.Profile {
+	if gc {
+		runtime.GC()
+	}
 	var b bytes.Buffer
 	if pprof.Lookup("allocs").WriteTo(&b, 0) != nil {
 		return nil
