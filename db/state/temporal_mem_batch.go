@@ -425,6 +425,9 @@ func (sd *TemporalMemBatch) republishAll() {
 	}
 }
 
+// mergeCopiedHook, when set by a test, runs in Merge after the latest values are copied and before they are published.
+var mergeCopiedHook func(*TemporalMemBatch)
+
 // publishMerged adds the latest values of a merged batch to the published trees. The caller excludes all writers.
 func (sd *TemporalMemBatch) publishMerged(other *TemporalMemBatch) {
 	if sd.unwindChangeset != nil {
@@ -806,6 +809,10 @@ func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch) error {
 		return fmt.Errorf("can't merge from batch with non-nil currentChangesAccumulator")
 	}
 
+	// Readers fall back to the locked maps until the merged values are published.
+	for d := range sd.published {
+		sd.published[d].Store(nil)
+	}
 	for d := range other.latest {
 		for i := range other.latest[d] {
 			otherEntries := other.latest[d][i].m
@@ -824,6 +831,9 @@ func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch) error {
 		sd.storage.Set(key, value)
 		return true
 	})
+	if mergeCopiedHook != nil {
+		mergeCopiedHook(sd)
+	}
 
 	for domain, writer := range other.domainWriters {
 		sd.pastDomainWriters[domain] = append(sd.pastDomainWriters[domain], writer)

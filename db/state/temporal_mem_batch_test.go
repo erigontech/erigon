@@ -287,3 +287,30 @@ func TestGetLatestSeesPublishedVersionsInOrder(t *testing.T) {
 		require.Equal(t, fmt.Sprintf("%06d", writes), string(v))
 	}
 }
+
+func TestGetLatestDuringMergeNeverReturnsTheReplacedValue(t *testing.T) {
+	newBatch := func() *TemporalMemBatch {
+		return &TemporalMemBatch{
+			stepSize: 16,
+			storage:  btree2.NewMap[string, []dataWithTxNum](128),
+			metrics:  &kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
+		}
+	}
+	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain} {
+		sd, other := newBatch(), newBatch()
+		sd.putLatest(domain, "k", []byte("old"), 1)
+		other.putLatest(domain, "k", []byte("merged"), 2)
+
+		var during string
+		mergeCopiedHook = func(b *TemporalMemBatch) {
+			v, _, _ := b.GetLatest(domain, []byte("k"))
+			during = string(v)
+		}
+		require.NoError(t, sd.Merge(other))
+		mergeCopiedHook = nil
+
+		require.Equal(t, "merged", during, "domain %s: a read inside Merge returned the replaced value", domain)
+		v, _, _ := sd.GetLatest(domain, []byte("k"))
+		require.Equal(t, "merged", string(v), "domain %s", domain)
+	}
+}
