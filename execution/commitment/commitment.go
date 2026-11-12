@@ -634,6 +634,10 @@ func (branchData BranchData) ChildCount() int {
 
 func (branchData BranchData) IsTombstone() bool { return len(branchData) == 0 }
 
+func (branchData BranchData) IsEmptyBranchRecord() bool {
+	return len(branchData) == 4 && branchData.ChildCount() == 0
+}
+
 func (branchData BranchData) String() string {
 	if branchData.IsTombstone() {
 		return ""

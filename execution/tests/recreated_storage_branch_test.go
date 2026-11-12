@@ -25,7 +25,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
@@ -59,10 +58,6 @@ func TestRecreatedStorageBranchSurvivesNextBlock(t *testing.T) {
 	keys := revivalKeys(t, alloc, 6)
 	gspec := &types.Genesis{Config: config, GasLimit: 30_000_000, Alloc: alloc}
 
-	prevParallel := dbg.Exec3Parallel
-	t.Cleanup(func() { dbg.Exec3Parallel = prevParallel })
-
-	dbg.Exec3Parallel = false
 	gen := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(keys[0]))
 	signer := types.LatestSignerForChainID(config.ChainID)
 	chainPack, err := gen.GenerateChain(len(blocks), func(i int, b *blockgen.BlockGen) {
@@ -74,8 +69,6 @@ func TestRecreatedStorageBranchSurvivesNextBlock(t *testing.T) {
 		}
 	})
 	require.NoError(t, err)
-
-	dbg.Exec3Parallel = prevParallel
 
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(keys[0]))
 	for blk := range len(blocks) {

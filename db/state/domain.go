@@ -1634,8 +1634,8 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, txNumUnwindTo ui
 			continue
 		}
 		// New trie branches record an empty previous value without reading storage.
-		// An older branch tombstone already represents that same empty state.
-		if d.Name == kv.CommitmentDomain && len(diff.Value) == 0 && len(retainedValue) == 4 && commitment.BranchData(retainedValue).ChildCount() == 0 {
+		// An older empty branch record already represents that same empty state.
+		if d.Name == kv.CommitmentDomain && len(diff.Value) == 0 && commitment.BranchData(retainedValue).IsEmptyBranchRecord() {
 			continue
 		}
 		if d.LargeValues {

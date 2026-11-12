@@ -135,13 +135,12 @@ func TestCommitmentFilesRepeatedUnwind(t *testing.T) {
 				}
 				if branch != "existing" {
 					prefix := nibbles.HexToCompact([]byte{nibble(keys[targetIdx])})
-					tombstone, _, err := tx.GetLatest(kv.CommitmentDomain, prefix, kv.GetLatestOptions{})
+					emptyBranch, _, err := tx.GetLatest(kv.CommitmentDomain, prefix, kv.GetLatestOptions{})
 					require.NoError(t, err)
-					require.Len(t, tombstone, 4)
-					require.Zero(t, commitment.BranchData(tombstone).ChildCount())
+					require.Truef(t, commitment.BranchData(emptyBranch).IsEmptyBranchRecord(), "expected an empty branch record, got %x", emptyBranch)
 					_, _, inDB, err := tx.Debug().GetLatestFromDB(kv.CommitmentDomain, prefix)
 					require.NoError(t, err)
-					require.Equal(t, branch == "recreated_db", inDB, "exercise the requested tombstone source")
+					require.Equal(t, branch == "recreated_db", inDB, "exercise the requested empty branch source")
 				}
 
 				// The deeper unwind touches another subtree, so it cannot remove an
