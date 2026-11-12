@@ -93,7 +93,7 @@ func TestSharedDomain_Unwind(t *testing.T) {
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New(), execctx.WithParaTrieDB(db))
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -112,7 +112,7 @@ Loop:
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New())
+	domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New(), execctx.WithParaTrieDB(db))
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -371,7 +371,7 @@ func TestNewSharedDomains_StateAheadOfBlocks(t *testing.T) {
 		require.NoError(rawdbv3.TxNums.Append(rwTx, blockNum, maxTxNum))
 	}
 
-	doms, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	doms, err := execctx.NewSharedDomains(ctx, rwTx, log.New(), execctx.WithParaTrieDB(db))
 	require.NoError(err)
 
 	addr := make([]byte, length.Addr)
@@ -401,7 +401,7 @@ func TestNewSharedDomains_StateAheadOfBlocks(t *testing.T) {
 	require.Less(lastBn, lastBlock, "TxNums must be behind commitment block for the test to be meaningful")
 
 	// Phase 3: NewSharedDomains must return ErrBehindCommitment AND a fully-initialized SD.
-	doms, err = execctx.NewSharedDomains(ctx, rwTx, log.New())
+	doms, err = execctx.NewSharedDomains(ctx, rwTx, log.New(), execctx.WithParaTrieDB(db))
 	require.ErrorIs(err, commitmentdb.ErrBehindCommitment, "expected ErrBehindCommitment signal")
 	require.NotNil(doms, "SD must be returned alongside the signal error")
 	defer doms.Close()
@@ -473,7 +473,7 @@ func TestSharedDomain_RepeatedUnwindAcrossStepBoundary(t *testing.T) {
 		require.NoError(rawdbv3.TxNums.Append(rwTx, bn, bn))
 	}
 
-	doms, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	doms, err := execctx.NewSharedDomains(ctx, rwTx, log.New(), execctx.WithParaTrieDB(db))
 	require.NoError(err)
 	defer doms.Close()
 
@@ -587,7 +587,7 @@ func TestSharedDomain_MergeUnwindAcrossStepBoundary(t *testing.T) {
 	for bn := uint64(0); bn <= lastBlock; bn++ {
 		require.NoError(rawdbv3.TxNums.Append(rwTx, bn, bn))
 	}
-	doms, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	doms, err := execctx.NewSharedDomains(ctx, rwTx, log.New(), execctx.WithParaTrieDB(db))
 	require.NoError(err)
 	addr := make([]byte, length.Addr)
 	var perBlockDiffs [lastBlock + 1]*changeset.StateChangeSet
@@ -642,12 +642,12 @@ func TestSharedDomain_MergeUnwindAcrossStepBoundary(t *testing.T) {
 	require.NoError(err)
 	defer rwTx.Rollback()
 
-	sd1, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	sd1, err := execctx.NewSharedDomains(ctx, rwTx, log.New(), execctx.WithParaTrieDB(db))
 	require.NoError(err)
 	sd1.Unwind(unwindTarget, mergeRange(unwindTarget+1, 9))
 	sd1.SetTxNum(unwindTarget)
 
-	sd2, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	sd2, err := execctx.NewSharedDomains(ctx, rwTx, log.New(), execctx.WithParaTrieDB(db))
 	require.NoError(err)
 	sd2.Unwind(unwindTarget, mergeRange(10, lastBlock))
 	sd2.SetTxNum(unwindTarget)
@@ -742,7 +742,7 @@ func TestSharedDomain_UnwindAcrossStepBoundary(t *testing.T) {
 	}
 
 	// Phase 2: forward execution of all 15 blocks — write accounts + commitment per block.
-	doms, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	doms, err := execctx.NewSharedDomains(ctx, rwTx, log.New(), execctx.WithParaTrieDB(db))
 	require.NoError(err)
 	stateChangeset := &changeset.StateChangeSet{}
 	doms.SetChangesetAccumulator(stateChangeset)
@@ -884,7 +884,7 @@ func TestSharedDomain_UnwindWithDeleteAcrossStepBoundary(t *testing.T) {
 		require.NoError(rawdbv3.TxNums.Append(rwTx, bn, bn))
 	}
 
-	doms, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	doms, err := execctx.NewSharedDomains(ctx, rwTx, log.New(), execctx.WithParaTrieDB(db))
 	require.NoError(err)
 	defer doms.Close()
 
@@ -1011,7 +1011,7 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New(), execctx.WithParaTrieDB(db))
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -1090,7 +1090,7 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(rwTx.Rollback)
 
-	domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New())
+	domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New(), execctx.WithParaTrieDB(db))
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -1171,7 +1171,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		require.NoError(err)
 	}
 
-	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New(), execctx.WithParaTrieDB(db))
 	require.NoError(err)
 	defer domains.Close()
 
@@ -1201,7 +1201,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		require.NoError(err)
 		domains.Close()
 
-		domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New())
+		domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New(), execctx.WithParaTrieDB(db))
 		require.NoError(err)
 		defer domains.Close()
 		require.Equal(int(stepSize), iterCount(domains))
@@ -1210,7 +1210,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 	{ // delete marker is in RAM
 		require.NoError(domains.Flush(ctx, rwTx))
 		domains.Close()
-		domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New())
+		domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New(), execctx.WithParaTrieDB(db))
 		require.NoError(err)
 		defer domains.Close()
 		require.Equal(int(stepSize), iterCount(domains))
@@ -1240,7 +1240,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		require.NoError(err)
 		domains.Close()
 
-		domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New())
+		domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New(), execctx.WithParaTrieDB(db))
 		require.NoError(err)
 		defer domains.Close()
 		require.Equal(int(stepSize*2+2-2), iterCount(domains))
@@ -1261,7 +1261,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		_, err := ac.PruneSmallBatches(ctx, time.Hour, rwTx)
 		require.NoError(err)
 
-		domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New())
+		domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New(), execctx.WithParaTrieDB(db))
 		require.NoError(err)
 		defer domains.Close()
 		require.Equal(int(stepSize*2+2-2), iterCount(domains))
@@ -1270,7 +1270,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 	{ // delete/update more keys in RAM
 		require.NoError(domains.Flush(ctx, rwTx))
 		domains.Close()
-		domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New())
+		domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New(), execctx.WithParaTrieDB(db))
 		require.NoError(err)
 		defer domains.Close()
 
@@ -1290,7 +1290,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		require.NoError(err)
 		domains.Close()
 
-		domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New())
+		domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New(), execctx.WithParaTrieDB(db))
 		require.NoError(err)
 		defer domains.Close()
 		require.Equal(int(stepSize*2+2-3), iterCount(domains))
@@ -1300,7 +1300,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		require.NoError(err)
 		domains.Close()
 
-		domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New())
+		domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New(), execctx.WithParaTrieDB(db))
 		require.NoError(err)
 		defer domains.Close()
 		err := domains.DomainDelPrefix(kv.StorageDomain, rwTx, []byte{}, txNum+1)
@@ -1881,7 +1881,7 @@ func TestSharedDomain_ZeroUpdateCommitmentAdvancesProgress(t *testing.T) {
 	require.NoError(t, rawdbv3.TxNums.Append(rwTx1, block1, txNum1))
 	require.NoError(t, rawdbv3.TxNums.Append(rwTx1, block2, txNum2))
 
-	domains1, err := execctx.NewSharedDomains(ctx, rwTx1, log.New())
+	domains1, err := execctx.NewSharedDomains(ctx, rwTx1, log.New(), execctx.WithParaTrieDB(db))
 	require.NoError(t, err)
 
 	addr := make([]byte, length.Addr)
@@ -1951,6 +1951,7 @@ func TestSharedDomain_ZeroUpdateCommitmentAdvancesProgress(t *testing.T) {
 		ctx,
 		rwTx2,
 		log.New(),
+		execctx.WithParaTrieDB(db),
 	)
 	require.NoError(t, err)
 
