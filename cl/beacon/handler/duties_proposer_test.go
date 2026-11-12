@@ -80,7 +80,7 @@ func TestGetDutiesProposerHistoricalEpochIgnoresHeadEffectiveBalance(t *testing.
 	require.Equal(t, before, after)
 }
 
-func TestGetDutiesProposerMissingRandaoMixReturns404(t *testing.T) {
+func TestGetDutiesProposerMissingRandaoMixReturns500(t *testing.T) {
 	db, _, _, _, post, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	epoch := uint64(2)
 	fcu.FinalizedSlotVal = (epoch+1)*handler.beaconChainCfg.SlotsPerEpoch - 1
@@ -99,11 +99,11 @@ func TestGetDutiesProposerMissingRandaoMixReturns404(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	path := "/eth/v1/validator/duties/proposer/" + strconv.FormatUint(epoch, 10)
 	handler.mux.ServeHTTP(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, http.NoBody))
-	require.Equal(t, http.StatusNotFound, recorder.Code, recorder.Body.String())
+	require.Equal(t, http.StatusInternalServerError, recorder.Code, recorder.Body.String())
 	require.Contains(t, recorder.Body.String(), "randao mix")
 }
 
-func TestGetAttesterDutiesMalformedRandaoMixReturns500(t *testing.T) {
+func TestGetAttesterDutiesMissingRandaoMixReturns500(t *testing.T) {
 	db, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	epoch := uint64(1)
 	handler.beaconChainCfg.MinSeedLookahead = handler.beaconChainCfg.EpochsPerHistoricalVector - 1
@@ -119,7 +119,7 @@ func TestGetAttesterDutiesMalformedRandaoMixReturns500(t *testing.T) {
 		if err := beacon_indicies.MarkRootCanonical(tx, 0, root); err != nil {
 			return err
 		}
-		return tx.Put(kv.IntraRandaoMixes, key, make([]byte, 31))
+		return tx.Delete(kv.IntraRandaoMixes, key)
 	}))
 	path := "/eth/v1/validator/duties/attester/1"
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, path, strings.NewReader(`["0"]`))

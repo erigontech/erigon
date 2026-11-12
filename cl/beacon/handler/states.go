@@ -432,11 +432,11 @@ func (a *ApiHandler) getRandao(w http.ResponseWriter, r *http.Request) (*beaconh
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("could not read block slot: %x", blockRoot))
 	}
 	slot := *slotPtr
-	epoch := slot / a.beaconChainCfg.SlotsPerEpoch
+	stateEpoch := slot / a.beaconChainCfg.SlotsPerEpoch
+	epoch := stateEpoch
 	if epochReq != nil {
 		epoch = *epochReq
 	}
-	stateEpoch := slot / a.beaconChainCfg.SlotsPerEpoch
 	if epoch > stateEpoch || stateEpoch-epoch >= a.beaconChainCfg.EpochsPerHistoricalVector {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("epoch is out of range for the randao_mixes of the state"))
 	}
