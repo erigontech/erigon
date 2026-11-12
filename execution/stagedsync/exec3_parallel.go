@@ -268,6 +268,9 @@ func (pe *parallelExecutor) bindBlockChangesetForFold(blockNum uint64, blockHash
 	}
 }
 
+// shortcut: dbg probe, skips the receipts root and bloom checks; remove after the bound.
+var probeNoReceiptRoot = dbg.EnvBool("PROBE_NO_RECEIPT_ROOT", false)
+
 // foldTx applies one published tx's versionMap view and indexes to sd.mem.
 // Finalize logs share the final virtual task's txNum. That task has already
 // handled the receipt cache, so finalize indexes logs without changing it.
@@ -727,7 +730,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					pe.prevBlocks.RemoveTail()
 					var blockValidatorWaiter *blockValidator
 					if applyResult.BlockNum > 0 && !applyResult.isPartial { // Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
-						checkBloom := !pe.cfg.vmConfig.StatelessExec && !pe.cfg.vmConfig.NoReceipts
+						checkBloom := !probeNoReceiptRoot && !pe.cfg.vmConfig.StatelessExec && !pe.cfg.vmConfig.NoReceipts
 						checkReceipts := checkBloom && pe.cfg.chainConfig.IsByzantium(applyResult.BlockNum)
 
 						header, txs := applyResult.Header, applyResult.Txs

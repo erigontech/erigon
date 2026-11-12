@@ -21,6 +21,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon/common/dbg"
 	"reflect"
 	"runtime"
 	"slices"
@@ -101,6 +102,8 @@ type EngineServer struct {
 	engineLogSpamer *engine_logs_spammer.EngineLogsSpammer
 	maxReorgDepth   uint64
 }
+
+var probeTxRootX2 = dbg.EnvBool("PROBE_TXROOT_X2", false)
 
 func NewEngineServer(
 	logger log.Logger,
@@ -513,6 +516,10 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		sendersRecovery = exec.StartSendersRecovery(ctx, types.MakeSigner(e.config, req.BlockNumber.Uint64(), uint64(req.Timestamp)), transactions)
 	}
 	header.TxHash = types.DeriveSha(types.BinaryTransactions(txs))
+	// shortcut: dbg probe, a second tx root bounds its newPayload cost; remove after the bound.
+	if probeTxRootX2 {
+		header.TxHash = types.DeriveSha(types.BinaryTransactions(txs))
+	}
 
 	blockHash := req.BlockHash
 	if header.Hash() != blockHash {
