@@ -165,17 +165,18 @@ func (r *RemoteBlockReader) FrozenBlocks() uint64 {
 	return value
 }
 
-// FrozenBlocksObserved reports the count and whether the backend ever answered. The
-// context-free signature leaves no way to honor cancellation, so a fetch is bounded by an
-// internal timeout and runs on a goroutine of its own: this getter is reached with a read
-// transaction open, so a caller that has a value to serve must not pay for the next one.
-// The count only grows, so a stale-low answer stays conservative for the availability gates.
+// FrozenBlocksObserved reports the count and whether it was successfully observed.
+// Stale observations are served while a refresh runs in the background; before
+// the first observation, it waits at most one fetch timeout. Failed attempts
+// back off for the cache TTL.
 func (r *RemoteBlockReader) FrozenBlocksObserved() (uint64, bool) {
 	value, observed, fresh := r.frozenBlocks.Load()
 	if fresh {
 		return value, observed
 	}
-	refreshed := r.frozenBlocks.Go(r.fetchFrozenBlocks)
+	refreshed := r.frozenBlocks.Go(func() (uint64, bool, error) {
+		return r.fetchFrozenBlocks(context.Background())
+	})
 	if observed {
 		return value, true
 	}
@@ -187,8 +188,35 @@ func (r *RemoteBlockReader) FrozenBlocksObserved() (uint64, bool) {
 	return value, observed
 }
 
-func (r *RemoteBlockReader) fetchFrozenBlocks() (uint64, bool, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), r.frozenBlocksTimeout)
+// The frozen range only grows, so a cached positive answer remains valid.
+func (r *RemoteBlockReader) IsFrozen(ctx context.Context, blockNum uint64) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	frozen, observed, _ := r.frozenBlocks.Load()
+	if observed && frozen > 0 && blockNum <= frozen {
+		return true, nil
+	}
+	// One caller's cancellation must not fail a shared refresh or start its
+	// failure backoff. The fetch retains its own timeout.
+	refresh := func() (uint64, bool, error) {
+		return r.fetchFrozenBlocks(context.WithoutCancel(ctx))
+	}
+	frozen, startedFetch, err := r.frozenBlocks.ProduceAsync(ctx, refresh)
+	if !startedFetch && err == nil && ctx.Err() == nil && (frozen == 0 || blockNum > frozen) {
+		// A shared fetch may have started before this request's database view.
+		// Its lower count cannot rule the block out. The next fetch starts after
+		// this request, so its result is fresh even if another caller starts it.
+		frozen, _, err = r.frozenBlocks.ProduceAsync(ctx, refresh)
+	}
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return false, ctxErr
+	}
+	return frozen > 0 && blockNum <= frozen, err
+}
+
+func (r *RemoteBlockReader) fetchFrozenBlocks(ctx context.Context) (uint64, bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, r.frozenBlocksTimeout)
 	defer cancel()
 	reply, err := r.client.FrozenBlocks(ctx, &emptypb.Empty{})
 	if err != nil {
@@ -480,6 +508,11 @@ func (r *BlockReader) AllTypes() []snaptype.Type {
 func (r *BlockReader) FrozenBlocks() uint64 { return r.sn.BlocksAvailable() }
 
 func (r *BlockReader) FrozenBlocksObserved() (uint64, bool) { return r.sn.BlocksAvailable(), true }
+
+func (r *BlockReader) IsFrozen(_ context.Context, blockNum uint64) (bool, error) {
+	frozen := r.sn.BlocksAvailable()
+	return frozen > 0 && blockNum <= frozen, nil
+}
 
 // FrozenBlocksInView is FrozenBlocks as seen by tx: a caller that then reads the block
 // must ask the same generation it reads from, not the live set that may be ahead of it.
