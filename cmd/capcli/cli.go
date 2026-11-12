@@ -1188,9 +1188,14 @@ func checkBlobStore(ctx context.Context, tx kv.Tx, snr freezeblocks.BeaconSnapsh
 		if err != nil {
 			return mismatched, unresolved, err
 		}
-		wantBlobs, _, err := expectedBlobsInTx(ctx, tx, snr, blockRoot, blk)
+		wantBlobs, payloadUnresolved, err := expectedBlobsInTx(ctx, tx, snr, blockRoot, blk)
 		if err != nil {
 			return mismatched, unresolved, err
+		}
+		if payloadUnresolved && haveBlobs == 0 {
+			unresolved++
+			log.Warn("Slot has an unknown payload status, cannot be checked", "slot", i, "blockRoot", fmt.Sprintf("%x", blockRoot))
+			continue
 		}
 		if wantBlobs == 0 && haveBlobs > 0 {
 			wantBlobs = blobCount(blk)
@@ -1225,7 +1230,7 @@ func checkBlobStore(ctx context.Context, tx kv.Tx, snr freezeblocks.BeaconSnapsh
 		}
 	}
 	if unresolved > 0 {
-		return mismatched, unresolved, fmt.Errorf("%d slots could not be checked: no canonical block root, so the index is incomplete over this range", unresolved)
+		return mismatched, unresolved, fmt.Errorf("%d slots could not be checked: no canonical block root or unknown payload status, so the audit is incomplete over this range", unresolved)
 	}
 	return mismatched, unresolved, nil
 }
