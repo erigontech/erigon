@@ -65,13 +65,15 @@ func waitForNextSlotOrHeadChange(
 	clock sleepForSlotClock,
 	lastWake sleepForSlotWake,
 	lastExecutionHead common.Hash,
+	lastHeadEvent headEventPublication,
 ) (sleepForSlotWake, bool, error) {
 	nextSlotTime := clock.GetSlotTime(nextSlot)
 	timer := time.NewTimer(time.Until(nextSlotTime))
 	defer timer.Stop()
 
 	var tick <-chan time.Time
-	if beaconCfg.GetCurrentStateVersion(clock.GetCurrentEpoch()) >= clparams.GloasVersion {
+	isGloas := beaconCfg.GetCurrentStateVersion(clock.GetCurrentEpoch()) >= clparams.GloasVersion
+	if isGloas {
 		ticker := time.NewTicker(sleepForSlotHeadPollInterval)
 		defer ticker.Stop()
 		tick = ticker.C
@@ -110,7 +112,8 @@ func waitForNextSlotOrHeadChange(
 			if !time.Now().Before(nextSlotTime) {
 				return sleepForSlotWake{}, false, nil
 			}
-			changed := head.Root != syncedData.HeadRoot() || (ready && executionHead != lastExecutionHead)
+			headEventChanged := head.Root != lastHeadEvent.root || headPayloadStatus(head, isGloas) != lastHeadEvent.payloadStatus
+			changed := head.Root != syncedData.HeadRoot() || (ready && executionHead != lastExecutionHead) || headEventChanged
 			if changed && (head.Root != lastWake.root || (ready && executionHead != lastWake.executionHead) || time.Since(lastWake.at) >= sleepForSlotRewakeInterval) {
 				return sleepForSlotWake{root: head.Root, executionHead: executionHead, at: time.Now()}, true, nil
 			}

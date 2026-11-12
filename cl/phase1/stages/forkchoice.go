@@ -39,10 +39,8 @@ import (
 var errBlockIndicesPending = errors.New("block indices are not yet available")
 
 type headEventPublication struct {
-	mu            sync.Mutex
 	root          common.Hash
 	payloadStatus string
-	published     bool
 }
 
 // computeAndNotifyServicesOfNewForkChoice calculates the new head of the fork choice and notifies relevant services.
@@ -346,13 +344,11 @@ func emitHeadEventsIfCurrent(publication *headEventPublication, emitter *beacone
 		return currentRoot == headRoot && currentSlot == headSlot && executionOptimistic == headEvent.Data.ExecutionOptimistic && payloadStatus == headEvent.Data.PayloadStatus
 	}
 	emitted := false
-	publication.mu.Lock()
-	defer publication.mu.Unlock()
 	emitter.WithHeadEventLock(func() {
 		if !current() {
 			return
 		}
-		if !publication.published || publication.root != headRoot {
+		if publication.root != headRoot {
 			emitter.State().TrySendHead(&beaconevents.HeadData{
 				Slot:                      headSlot,
 				Block:                     headRoot,
@@ -363,12 +359,11 @@ func emitHeadEventsIfCurrent(publication *headEventPublication, emitter *beacone
 				ExecutionOptimistic:       headEvent.Data.ExecutionOptimistic,
 			})
 		}
-		if !publication.published || publication.root != headRoot || publication.payloadStatus != headEvent.Data.PayloadStatus {
+		if publication.root != headRoot || publication.payloadStatus != headEvent.Data.PayloadStatus {
 			emitter.State().SendHeadV2(headEvent)
 		}
 		publication.root = headRoot
 		publication.payloadStatus = headEvent.Data.PayloadStatus
-		publication.published = true
 		emitted = true
 	})
 	return emitted, validationErr

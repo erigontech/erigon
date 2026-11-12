@@ -732,6 +732,83 @@ func TestPostForkchoiceHeadEventsFollowEnvelopeIntegration(t *testing.T) {
 		require.Equal(t, 1, headCount)
 		require.Equal(t, []string{"full"}, statuses)
 	})
+
+	t.Run("new root with the same empty payload status", func(t *testing.T) {
+		cfg, root, headBlock, _, events, tx := setup(t)
+		pass(t, cfg, tx, root, headBlock.Block.Slot)
+		headCount, statuses := drain(events)
+		require.Equal(t, 1, headCount)
+		require.Equal(t, []string{"empty"}, statuses)
+
+		child := cltypes.NewSignedBeaconBlock(cfg.beaconCfg, clparams.GloasVersion)
+		child.Block.Slot = headBlock.Block.Slot + 1
+		child.Block.ParentRoot = root
+		child.Block.Body.GetSignedExecutionPayloadBid().Message.ParentBlockHash = headBlock.Block.Body.GetSignedExecutionPayloadBid().Message.ParentBlockHash
+		require.NoError(t, cfg.forkChoice.OnBlock(t.Context(), child, false, false, false))
+		newHead, newSlot, err := cfg.forkChoice.GetHeadNode()
+		require.NoError(t, err)
+		require.NotEqual(t, root, newHead.Root)
+		pass(t, cfg, tx, newHead.Root, newSlot)
+		headCount, statuses = drain(events)
+		require.Equal(t, 1, headCount)
+		require.Equal(t, []string{"empty"}, statuses)
+	})
+}
+
+type beginRwErrorOnceDB struct {
+	kv.RwDB
+	err      error
+	failures atomic.Int32
+}
+
+func (db *beginRwErrorOnceDB) BeginRw(ctx context.Context) (kv.RwTx, error) {
+	if db.failures.CompareAndSwap(1, 0) {
+		return nil, db.err
+	}
+	return db.RwDB.BeginRw(ctx)
+}
+
+func TestForkChoiceWakeAfterFailedFullHeadPublication(t *testing.T) {
+	cfg, _, root, headBlock, envelope, _ := newGloasCanonicalForkChoiceFixture(t, false)
+	cfg.blobDownloader = &network2.BlobHistoryDownloader{}
+	cfg.attestationDataProducer = noOpAttestationDataProducer{}
+	cfg.dirs = datadir.New(t.TempDir())
+	events := make(chan *beaconevents.EventStream, 16)
+	subscription := cfg.emitter.State().Subscribe(events)
+	defer subscription.Unsubscribe()
+	require.NoError(t, persistAcceptedBlock(t.Context(), cfg, headBlock))
+	require.NoError(t, doForkchoiceRoutine(t.Context(), log.New(), cfg, Args{}))
+	require.Equal(t, beaconevents.StateHead, receiveStateEvent(t, events).Event)
+	require.Equal(t, "empty", receiveStateEvent(t, events).Data.(*beaconevents.HeadV2Data).Data.PayloadStatus)
+
+	bid := headBlock.Block.Body.GetSignedExecutionPayloadBid().Message
+	require.NoError(t, cfg.forkChoice.OnExecutionPayloadAt(t.Context(), envelope, false, false, time.Now()))
+	db := cfg.indiciesDB
+	failingDB := &beginRwErrorOnceDB{RwDB: db, err: errors.New("begin failed")}
+	failingDB.failures.Store(1)
+	cfg.indiciesDB = failingDB
+	require.ErrorContains(t, doForkchoiceRoutine(t.Context(), log.New(), cfg, Args{}), "begin failed")
+	require.Equal(t, bid.BlockHash, cfg.executionHead)
+	requireNoHeadEvents(t, events)
+
+	cfg.sleepForSlotLastWake = sleepForSlotWake{root: root, executionHead: bid.BlockHash, at: time.Now().Add(-sleepForSlotRewakeInterval)}
+	wake, changed, err := waitForNextSlotOrHeadChange(
+		t.Context(), headBlock.Block.Slot+1, cfg.beaconCfg, cfg.forkChoice,
+		sleepForSlotSyncedDataFake{head: root},
+		sleepForSlotClockFake{currentEpoch: 0, currentSlot: headBlock.Block.Slot, nextSlot: time.Now().Add(5 * sleepForSlotHeadPollInterval)},
+		cfg.sleepForSlotLastWake, cfg.executionHead, cfg.headEvents,
+	)
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Equal(t, root, wake.root)
+	require.Equal(t, bid.BlockHash, wake.executionHead)
+
+	cfg.indiciesDB = db
+	require.NoError(t, doForkchoiceRoutine(t.Context(), log.New(), cfg, Args{}))
+	event := receiveStateEvent(t, events)
+	require.Equal(t, beaconevents.StateHeadV2, event.Event)
+	require.Equal(t, "full", event.Data.(*beaconevents.HeadV2Data).Data.PayloadStatus)
+	requireNoHeadEvents(t, events)
 }
 
 func TestComputeForkChoiceSendsGloasFullExecutionHeadWithoutVerification(t *testing.T) {
@@ -824,7 +901,7 @@ func TestGloasForkChoiceRejectedAsBusyIsResent(t *testing.T) {
 			t.Context(), headBlock.Block.Slot+1, cfg.beaconCfg, cfg.forkChoice,
 			sleepForSlotSyncedDataFake{head: headRoot},
 			sleepForSlotClockFake{currentSlot: headBlock.Block.Slot, nextSlot: started.Add(2 * sleepForSlotRewakeInterval)},
-			cfg.sleepForSlotLastWake, cfg.executionHead,
+			cfg.sleepForSlotLastWake, cfg.executionHead, headEventPublication{},
 		)
 		require.NoError(t, err)
 		require.True(t, changed, "the unapplied execution head must wake fork choice before the next slot")
@@ -887,7 +964,7 @@ func TestGloasExecutionHeadChangeBypassesThrottleAfterDifferentStageDecision(t *
 					sleepForSlotForkChoiceFake{head: headRoot, executionHead: wakeHead, ready: &ready},
 					sleepForSlotSyncedDataFake{head: headRoot},
 					sleepForSlotClockFake{currentSlot: headBlock.Block.Slot, nextSlot: started.Add(2 * sleepForSlotRewakeInterval)},
-					cfg.sleepForSlotLastWake, cfg.executionHead,
+					cfg.sleepForSlotLastWake, cfg.executionHead, headEventPublication{},
 				)
 				require.NoError(t, err)
 				require.True(t, changed)
@@ -912,7 +989,7 @@ func TestGloasExecutionHeadChangeWakesAndSendsFullHash(t *testing.T) {
 		t.Context(), headBlock.Block.Slot+1, sleepForSlotConfig(0), cfg.forkChoice,
 		sleepForSlotSyncedDataFake{head: headRoot},
 		sleepForSlotClockFake{currentEpoch: 0, currentSlot: headBlock.Block.Slot, nextSlot: time.Now().Add(5 * sleepForSlotHeadPollInterval)},
-		sleepForSlotWake{}, cfg.executionHead,
+		sleepForSlotWake{}, cfg.executionHead, headEventPublication{},
 	)
 	require.NoError(t, err)
 	require.True(t, changed)
