@@ -187,7 +187,8 @@ func TestEngineApiCrashRecovery(t *testing.T) {
 			} {
 				t.Run(window.name, func(t *testing.T) {
 					if dir := os.Getenv("ERIGON_EXECUTION_TESTS_TMPDIR"); dir != "" && runtime.GOOS == "windows" {
-						t.Setenv("GOTMPDIR", dir)
+						t.Setenv("TMP", dir)
+						t.Setenv("TEMP", dir)
 					}
 					request := crashRecoveryRequest{
 						Genesis:     genesis,
