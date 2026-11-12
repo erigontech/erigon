@@ -65,7 +65,7 @@ func TestStateChangesSubscriptionStartsIncomplete(t *testing.T) {
 		}
 		cancel()
 		_, err = stream.Recv()
-		require.ErrorIs(t, err, io.EOF)
+		require.ErrorIs(t, err, context.Canceled)
 		server.SendStateChanges(t.Context(), &remoteproto.StateChangeBatch{})
 	}
 }
@@ -166,6 +166,36 @@ func TestStateChangesSnapshotError(t *testing.T) {
 		_, err = stream.Recv()
 		require.ErrorIs(t, err, readErr)
 		require.NoError(t, ctx.Err(), "the setup error must arrive without waiting for cancellation")
+	})
+}
+
+func TestStateChangesDirectSubscriberBackpressure(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+		defer cancel()
+		server := NewKvServer(ctx, nil, nil, nil, log.New())
+		stream, err := direct.NewStateDiffClientDirect(server).StateChanges(ctx, &remoteproto.StateChangeRequest{})
+		require.NoError(t, err)
+
+		const updates = 20
+		for id := uint64(1); id <= updates; id++ {
+			server.SendStateChanges(ctx, &remoteproto.StateChangeBatch{StateVersionId: id})
+			synctest.Wait()
+		}
+
+		var previous uint64
+		var gap bool
+		for previous < updates {
+			batch, err := stream.Recv()
+			require.NoError(t, err)
+			require.Greater(t, batch.StateVersionId, previous)
+			if batch.StateVersionId > previous+1 {
+				gap = true
+				require.True(t, batch.StateChangesIncomplete, "the first delivery after a queue gap must trigger recovery")
+			}
+			previous = batch.StateVersionId
+		}
+		require.True(t, gap, "a stalled direct client must use the bounded server queue instead of retaining every batch")
 	})
 }
 
