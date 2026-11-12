@@ -701,7 +701,7 @@ func TestRequestConfiguredBuilderBidsAppliesLocalProposalPolicy(t *testing.T) {
 			bid.Message.FeeRecipient = tc.feeRecipient
 			bid.Message.GasLimit = tc.gasLimit
 			bid.Message.ExecutionPayment = tc.execPayment
-			builderClient := relayClient(ctrl)
+			builderClient := builder_mock.NewMockBuilderClient(ctrl)
 			builderClient.EXPECT().RequestExecutionPayloadBid(
 				gomock.Any(), "https://builder.example", targetSlot, parentBid.ParentBlockHash, parentBid.ParentBlockRoot,
 				gomock.Any(), gomock.Any(), gomock.Any(),
@@ -1073,7 +1073,7 @@ func TestGloasProductionFallsBackToEmptyWithoutMEVBoost(t *testing.T) {
 		BlockHash:       common.Hash{0xb2},
 		Slot:            postState.Slot(),
 	})
-	builderClient := relayClient(ctrl)
+	builderClient := builder_mock.NewMockBuilderClient(ctrl)
 	builderClient.EXPECT().GetHeader(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
 	handler.builderClient = builderClient
 	stopErr := errors.New("stop after EMPTY-parent fork-choice update")
@@ -1638,7 +1638,7 @@ func TestPostEthV2BeaconBlocksForwardsGloasBlockToWinningBuilder(t *testing.T) {
 	blockService.EXPECT().CommitGossipReservation(gomock.Any())
 	blockService.EXPECT().SchedulePublishedBlockForLaterProcessing(gomock.Any(), gomock.Any()).Return(completedPublishedBlockJob{})
 	handler.blockService = blockService
-	builderClient := relayClient(ctrl)
+	builderClient := builder_mock.NewMockBuilderClient(ctrl)
 	builderURL := "https://builder.example"
 	blockRoot, err := block.Block.HashSSZ()
 	require.NoError(t, err)
@@ -1691,7 +1691,7 @@ func TestPostEthV2BeaconBlocksBuilderHandoffOutlivesIntegrationCancellation(t *t
 	require.NoError(t, err)
 	require.True(t, handler.builderRoutes.Add(blockRoot, builderURL))
 	forwarded := make(chan struct{})
-	builderClient := relayClient(ctrl)
+	builderClient := builder_mock.NewMockBuilderClient(ctrl)
 	builderClient.EXPECT().SubmitSignedBeaconBlock(gomock.Any(), builderURL, gomock.Any()).DoAndReturn(
 		func(context.Context, string, *cltypes.SignedBeaconBlock) error {
 			close(forwarded)
@@ -1739,7 +1739,7 @@ func TestPostEthV2BeaconBlocksForwardsUnboundBuilderRoute(t *testing.T) {
 	blockService.EXPECT().CommitGossipReservation(gomock.Any())
 	blockService.EXPECT().SchedulePublishedBlockForLaterProcessing(gomock.Any(), gomock.Any()).Return(completedPublishedBlockJob{})
 	handler.blockService = blockService
-	client := relayClient(ctrl)
+	client := builder_mock.NewMockBuilderClient(ctrl)
 	client.EXPECT().SubmitSignedBeaconBlockPublic(gomock.Any(), builderURL, gomock.Any()).DoAndReturn(
 		func(context.Context, string, *cltypes.SignedBeaconBlock) error {
 			close(forwarded)
@@ -1787,7 +1787,7 @@ func TestPostEthV2BeaconBlocksReturnsAcceptedAndForwardsBuilderAfterPermanentInt
 
 	builderURL := "https://builder.example"
 	forwarded := make(chan struct{})
-	client := relayClient(gomock.NewController(t))
+	client := builder_mock.NewMockBuilderClient(gomock.NewController(t))
 	client.EXPECT().SubmitSignedBeaconBlockPublic(gomock.Any(), builderURL, gomock.Any()).DoAndReturn(
 		func(context.Context, string, *cltypes.SignedBeaconBlock) error {
 			close(forwarded)
@@ -1942,7 +1942,7 @@ func TestForwardPublishedBlockToBuilderOnlyOnce(t *testing.T) {
 	require.True(t, handler.builderRoutes.Add(blockRoot, builderURL))
 
 	ctrl := gomock.NewController(t)
-	builderClient := relayClient(ctrl)
+	builderClient := builder_mock.NewMockBuilderClient(ctrl)
 	forwardedCh := make(chan struct{})
 	release := make(chan struct{})
 	builderClient.EXPECT().SubmitSignedBeaconBlock(gomock.Any(), builderURL, block).DoAndReturn(
@@ -1981,7 +1981,7 @@ func TestForwardPublishedBlockTrustedReservationSupersedesUnboundClaim(t *testin
 	require.True(t, handler.builderRoutes.CommitReservation(blockRoot, builderURL))
 
 	ctrl := gomock.NewController(t)
-	builderClient := relayClient(ctrl)
+	builderClient := builder_mock.NewMockBuilderClient(ctrl)
 	forwarded := make(chan struct{})
 	release := make(chan struct{})
 	builderClient.EXPECT().SubmitSignedBeaconBlock(gomock.Any(), builderURL, block).DoAndReturn(
@@ -2017,7 +2017,7 @@ func TestForwardPublishedBlockToBuilderDoesNotForwardPreGloasBlock(t *testing.T)
 	require.NoError(t, err)
 	builderURL := "https://builder.example"
 	require.True(t, handler.builderRoutes.Add(blockRoot, builderURL))
-	handler.builderClient = relayClient(gomock.NewController(t))
+	handler.builderClient = builder_mock.NewMockBuilderClient(gomock.NewController(t))
 
 	handler.forwardPublishedBlockToBuilder(builderURL, block)
 
@@ -2037,7 +2037,7 @@ func TestForwardPublishedBlockToBuilderDoesNotStartPastPayloadDeadline(t *testin
 	clock := eth_clock.NewMockEthereumClock(ctrl)
 	clock.EXPECT().GetSlotTime(block.Block.Slot).Return(time.Now().Add(-time.Minute))
 	handler.ethClock = clock
-	handler.builderClient = relayClient(ctrl)
+	handler.builderClient = builder_mock.NewMockBuilderClient(ctrl)
 
 	handler.forwardPublishedBlockToBuilder(builderURL, block)
 
@@ -2060,7 +2060,7 @@ func TestForwardPublishedBlockToBuilderStopsAtPayloadDeadline(t *testing.T) {
 	clock.EXPECT().GetSlotTime(block.Block.Slot).Return(time.Now()).AnyTimes()
 	handler.ethClock = clock
 	started := make(chan struct{})
-	builderClient := relayClient(ctrl)
+	builderClient := builder_mock.NewMockBuilderClient(ctrl)
 	builderClient.EXPECT().SubmitSignedBeaconBlock(gomock.Any(), builderURL, block).DoAndReturn(
 		func(context.Context, string, *cltypes.SignedBeaconBlock) error {
 			close(started)
@@ -2087,7 +2087,7 @@ func TestConfiguredBuilderReservationCancelsPreemptedUntrustedHandoff(t *testing
 	started := make(chan struct{})
 	canceled := make(chan struct{})
 	ctrl := gomock.NewController(t)
-	builderClient := relayClient(ctrl)
+	builderClient := builder_mock.NewMockBuilderClient(ctrl)
 	builderClient.EXPECT().SubmitSignedBeaconBlockPublic(gomock.Any(), "https://untrusted.example", block).DoAndReturn(
 		func(ctx context.Context, _ string, _ *cltypes.SignedBeaconBlock) error {
 			close(started)
@@ -2121,7 +2121,7 @@ func TestForwardPublishedBlockToBuilderRetriesAfterFailure(t *testing.T) {
 	require.True(t, handler.builderRoutes.Add(blockRoot, builderURL))
 
 	ctrl := gomock.NewController(t)
-	builderClient := relayClient(ctrl)
+	builderClient := builder_mock.NewMockBuilderClient(ctrl)
 	firstStarted := make(chan struct{})
 	releaseFirst := make(chan struct{})
 	thirdDone := make(chan struct{})
@@ -2177,10 +2177,6 @@ func relayClient(ctrl *gomock.Controller) *builder_mock.MockBuilderClient {
 
 func (c *publicBuilderSubmitter) SubmitSignedBeaconBlockPublic(ctx context.Context, builderURL string, block *cltypes.SignedBeaconBlock) error {
 	return c.submit(ctx, builderURL, block)
-}
-
-func (c *publicBuilderSubmitter) RelayConfigured() bool {
-	return false
 }
 
 func TestForwardPublishedBlockUnboundFailuresConsumeRouteBudget(t *testing.T) {
@@ -3133,7 +3129,7 @@ func TestPublishBlindedBlocksRejectsPreBellatrix(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			h := &ApiHandler{
 				beaconChainCfg: &clparams.MainnetBeaconConfig,
-				builderClient:  relayClient(ctrl),
+				builderClient:  builder_mock.NewMockBuilderClient(ctrl),
 			}
 			block := cltypes.NewSignedBlindedBeaconBlock(&clparams.MainnetBeaconConfig, version)
 			body, err := json.Marshal(block)
@@ -3168,7 +3164,7 @@ func TestPublishBlindedBlocksRejectsUnsupportedContentType(t *testing.T) {
 
 func TestPublishBlindedBlocksAcceptsEmptyFuluBuilderResponse(t *testing.T) {
 	ctrl := gomock.NewController(t)
-	builderClient := relayClient(ctrl)
+	builderClient := builder_mock.NewMockBuilderClient(ctrl)
 	builderClient.EXPECT().SubmitBlindedBlocks(gomock.Any(), gomock.Any()).DoAndReturn(
 		func(_ context.Context, block *cltypes.SignedBlindedBeaconBlock) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *cltypes.ExecutionRequests, error) {
 			require.Equal(t, cltypes.NewEth1Header(clparams.FuluVersion).EncodingSizeSSZ(), block.Block.Body.ExecutionPayload.EncodingSizeSSZ())
@@ -3193,7 +3189,7 @@ func TestPublishBlindedBlocksAcceptsEmptyFuluBuilderResponse(t *testing.T) {
 
 func TestPublishBlindedBlocksRejectsMissingPreFuluPayload(t *testing.T) {
 	ctrl := gomock.NewController(t)
-	builderClient := relayClient(ctrl)
+	builderClient := builder_mock.NewMockBuilderClient(ctrl)
 	builderClient.EXPECT().SubmitBlindedBlocks(gomock.Any(), gomock.Any()).Return(nil, nil, nil, nil)
 	h := &ApiHandler{
 		beaconChainCfg: &clparams.MainnetBeaconConfig,
@@ -3258,7 +3254,7 @@ func TestPublishBlindedBlocksRejectsMalformedRequest(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctrl := gomock.NewController(t)
-			builderClient := relayClient(ctrl)
+			builderClient := builder_mock.NewMockBuilderClient(ctrl)
 			h := &ApiHandler{
 				beaconChainCfg: &clparams.MainnetBeaconConfig,
 				builderClient:  builderClient,
@@ -4065,6 +4061,26 @@ func TestGetBuilderPayloadRejectsInvalidBlockValue(t *testing.T) {
 			require.ErrorContains(t, err, "invalid builder block value")
 		})
 	}
+}
+
+func TestGetBuilderPayloadWithoutRelay(t *testing.T) {
+	_, _, _, _, postState, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	client := builder_mock.NewMockBuilderClient(gomock.NewController(t))
+	client.EXPECT().RelayConfigured().Return(false)
+	var getHeaderCalls int
+	client.EXPECT().GetHeader(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+		func(context.Context, int64, common.Hash, common.Bytes48) (*builder.ExecutionHeader, error) {
+			getHeaderCalls++
+			return nil, errors.New("GetHeader called without a relay")
+		},
+	).AnyTimes()
+	handler.routerCfg.Builder = true
+	handler.builderClient = client
+
+	_, _, err := handler.getBuilderPayload(t.Context(), postState, postState.Slot()+1)
+
+	require.ErrorIs(t, err, errBuilderNotEnabled)
+	require.Zero(t, getHeaderCalls)
 }
 
 func TestProcessProducedBlockFallsBackWithoutCandidateStateLeak(t *testing.T) {
