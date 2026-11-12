@@ -694,6 +694,39 @@ func TestGetRandaoEpochOutOfRange(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
 }
 
+func TestGetRandaoHistoricalEpochBoundary(t *testing.T) {
+	db, blocks, _, _, _, h, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), false)
+	stateEpoch := uint64(65541)
+	oldestValidEpoch := stateEpoch - h.beaconChainCfg.EpochsPerHistoricalVector + 1
+	stateSlot := stateEpoch * h.beaconChainCfg.SlotsPerEpoch
+	root, err := blocks[len(blocks)-1].Block.HashSSZ()
+	require.NoError(t, err)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		if err := beacon_indicies.WriteHeaderSlot(tx, root, stateSlot); err != nil {
+			return err
+		}
+		if err := beacon_indicies.MarkRootCanonical(tx, stateSlot, root); err != nil {
+			return err
+		}
+		if err := tx.Put(kv.RandaoMixes, base_encoding.Encode64ToBytes4(oldestValidEpoch*h.beaconChainCfg.SlotsPerEpoch), make([]byte, 32)); err != nil {
+			return err
+		}
+		return tx.Put(kv.IntraRandaoMixes, base_encoding.Encode64ToBytes4(stateSlot), make([]byte, 32))
+	}))
+	for _, tc := range []struct {
+		epoch uint64
+		code  int
+	}{
+		{oldestValidEpoch - 1, http.StatusBadRequest},
+		{oldestValidEpoch, http.StatusOK},
+	} {
+		path := fmt.Sprintf("/eth/v1/beacon/states/%d/randao?epoch=%d", stateSlot, tc.epoch)
+		rec := httptest.NewRecorder()
+		h.mux.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil))
+		require.Equal(t, tc.code, rec.Code, rec.Body.String())
+	}
+}
+
 func TestGetCommitteesMissingRandaoMixReturns404(t *testing.T) {
 	db, _, _, _, post, h, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	fcu.FinalizedSlotVal = post.Slot() + 1
