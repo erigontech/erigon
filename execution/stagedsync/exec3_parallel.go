@@ -1882,7 +1882,7 @@ func (result *execResult) finalize(cumulativeGasUsed uint64, firstLogIndex uint3
 	txIncarnation := task.Version().Incarnation
 
 	txTrace := dbg.TraceTransactionIO &&
-		(dbg.TraceTx(blockNum, txIndex) || dbg.TraceAccount(result.Coinbase.Value()) || dbg.TraceAccount(result.ExecutionResult.BurntContractAddress.Value()))
+		(dbg.TraceTx(blockNum, txIndex) || dbg.TraceAccount(result.Coinbase.Value()) || (!result.ExecutionResult.BurntContractAddress.IsNil() && dbg.TraceAccount(result.ExecutionResult.BurntContractAddress.Value())))
 
 	if txTrace {
 		tracePrefix := fmt.Sprintf("%d (%d.%d)", blockNum, txIndex, txIncarnation)
