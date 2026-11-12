@@ -47,7 +47,7 @@ func TestExecutionPathReporter(t *testing.T) {
 		want    ethconfig.BlockExecutionPath
 	}{
 		{2, ethconfig.BlockExecutionPath{Path: "parallel"}},
-		{1, ethconfig.BlockExecutionPath{Path: "sequential", Reason: "single-worker"}},
+		{1, ethconfig.BlockExecutionPath{Path: "sequential", Reason: "disabled"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.want.Path, func(t *testing.T) {

@@ -510,14 +510,14 @@ func warmTxsHashes(block *types.Block, chainID *uint256.Int) {
 }
 
 // reportExecutionPath skips genesis, which is never executed.
-func (te *txExecutor) reportExecutionPath(b *types.Block, path, reason string, accessList bool) {
+func (te *txExecutor) reportExecutionPath(number uint64, hash common.Hash, path, reason string, accessList bool) {
 	report := te.cfg.syncCfg.ExecutionPathReporter
-	if report == nil || b.NumberU64() == 0 {
+	if report == nil || number == 0 {
 		return
 	}
 	report(ethconfig.BlockExecutionPath{
-		Number:     b.NumberU64(),
-		Hash:       b.Hash(),
+		Number:     number,
+		Hash:       hash,
 		Path:       path,
 		Reason:     reason,
 		AccessList: accessList,
@@ -621,11 +621,6 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 
 			txs := b.Transactions()
 			header := b.HeaderNoCopy()
-			if te.cfg.syncCfg.ExecWorkerCount <= 1 {
-				te.reportExecutionPath(b, "sequential", "single-worker", len(dbBAL) > 0)
-			} else {
-				te.reportExecutionPath(b, "parallel", "", len(dbBAL) > 0)
-			}
 
 			// BlockContext: workers override GetHash with their own per-worker
 			// function (installWorkerGetHash) using their own roTx; this
