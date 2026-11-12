@@ -64,6 +64,12 @@ func SetCommitmentV3BatchBytesForTest(n int) int {
 	return old
 }
 
+func SetCommitmentV3FoldRangesForTest(n uint64) uint64 {
+	old := commitmentV3FoldRanges
+	commitmentV3FoldRanges = n
+	return old
+}
+
 func SetLegacyShapeMinVersionsForTest(n uint64) uint64 {
 	old := legacyShapeMinVersions
 	legacyShapeMinVersions = n

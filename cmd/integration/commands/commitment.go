@@ -310,7 +310,7 @@ func commitmentVerify(ctx context.Context, logger log.Logger) error {
 		started := time.Now()
 		c, err := dbstate.FoldCommitmentV3(ctx, agg, asOf)
 		if err != nil {
-			return fmt.Errorf("as of %s: %w", label, err)
+			return err
 		}
 		if asOf != math.MaxUint64 && c.TxNum >= asOf {
 			return fmt.Errorf("as of %s: no commitment history covers txNum %d", label, asOf)

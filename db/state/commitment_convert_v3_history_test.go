@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"math"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -243,17 +244,23 @@ func requireCommitmentHistoryRoots(t *testing.T, db kv.TemporalRwDB, agg *state.
 	_, lastFrozenCommit, _, err := commitment.DecodeCommitmentV3State(latestState)
 	require.NoError(t, err)
 	tx.Rollback()
-	checked := 0
+	var asOf []uint64
 	for _, txNum := range slices.Sorted(maps.Keys(roots)) {
 		if txNum > lastFrozenCommit {
 			break
 		}
-		checked++
+		asOf = append(asOf, txNum+1)
 		check, rootErr := state.FoldCommitmentV3(t.Context(), agg, txNum+1)
 		require.NoErrorf(t, rootErr, "records as of txNum %d", txNum+1)
 		require.Equalf(t, roots[txNum], check.Root, "root as of txNum %d", txNum+1)
 	}
-	require.Greater(t, checked, 90)
+	require.Greater(t, len(asOf), 90)
+	defer state.SetCommitmentV3FoldRangesForTest(state.SetCommitmentV3FoldRangesForTest(5))
+	checks, err := state.FoldCommitmentV3AsOf(t.Context(), agg, append(asOf, math.MaxUint64), nil)
+	require.NoError(t, err)
+	for i, txNum := range asOf {
+		require.Equalf(t, roots[txNum-1], checks[i].Root, "root as of txNum %d in one fold of %d", txNum, len(asOf))
+	}
 }
 
 func TestConvertCommitmentFiles_V3HistoryContinueSkipsConvertedFiles(t *testing.T) {
