@@ -1146,3 +1146,10 @@ func TestBlobHistoryDownloaderDoesNotCompleteWhileASlotIsUnindexed(t *testing.T)
 	require.Contains(t, reader.slots, head, "the slot was not revisited after its index row appeared")
 	require.True(t, downloader.backfillCompleted.Load(), "a fully indexed and stored range must complete")
 }
+
+func (r blobRetryRange) intervalCount() int {
+	if r.intervals == nil {
+		return 1
+	}
+	return r.intervals.Len()
+}

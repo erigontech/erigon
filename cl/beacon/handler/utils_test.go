@@ -215,3 +215,9 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 	h.Init()
 	return
 }
+
+func (a *ApiHandler) Init() {
+	a.o.Do(func() {
+		a.init()
+	})
+}
