@@ -238,14 +238,14 @@ func (c *ExecChain) Extend(ctx context.Context, parent *types.Header, in HeaderI
 	}
 	gasLimit := in.GasLimit
 	params := &builder.Parameters{
-		ParentHash:            parent.Hash(),
-		Timestamp:             in.Time,
-		SuggestedFeeRecipient: in.Coinbase,
-		PrevRandao:            in.MixDigest,
-		TargetGasLimit:        &gasLimit,
-		ExtraData:             extra,
-		CustomTxnProvider:     staticTxns(txs),
-		Strict:                true,
+		ParentHash:             parent.Hash(),
+		Timestamp:              in.Time,
+		SuggestedFeeRecipient:  in.Coinbase,
+		PrevRandao:             in.MixDigest,
+		TargetGasLimit:         &gasLimit,
+		ExtraData:              extra,
+		CustomTxnProvider:      &staticTxns{txs: txs},
+		RequireAllTransactions: true,
 	}
 	if c.config.IsShanghai(in.Time) {
 		params.Withdrawals = []*types.Withdrawal{}
@@ -291,6 +291,10 @@ func (c *ExecChain) Extend(ctx context.Context, parent *types.Header, in HeaderI
 }
 
 func (c *ExecChain) assemble(ctx context.Context, number uint64, params *builder.Parameters) (*types.BlockWithReceipts, error) {
+	// The exec module registers the discard of an explicit-list build on the
+	// caller's context; a context of this call releases it on return.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	id, err := retryBusy(ctx, func() (uint64, bool, error) {
 		r, err := c.exec.AssembleBlock(ctx, params)
 		return r.PayloadID, r.Busy, err
@@ -368,9 +372,16 @@ func retryBusy[T any](ctx context.Context, f func() (T, bool, error)) (T, error)
 	}
 }
 
-// staticTxns provides the same transactions to every request.
-type staticTxns []types.Transaction
+// staticTxns yields its transactions once, in order, at most the amount each
+// request asks for.
+type staticTxns struct {
+	txs  []types.Transaction
+	next int
+}
 
-func (s staticTxns) ProvideTxns(context.Context, ...txnprovider.ProvideOption) ([]types.Transaction, error) {
-	return s, nil
+func (s *staticTxns) ProvideTxns(_ context.Context, opts ...txnprovider.ProvideOption) ([]types.Transaction, error) {
+	n := min(max(txnprovider.ApplyProvideOptions(opts...).Amount, 0), len(s.txs)-s.next)
+	txs := s.txs[s.next : s.next+n : s.next+n]
+	s.next += n
+	return txs, nil
 }

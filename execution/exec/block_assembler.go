@@ -23,9 +23,16 @@ import (
 	"github.com/erigontech/erigon/db/dbservices"
 )
 
-// ErrTxnNotIncluded reports a transaction a strict assembly could not
-// include.
+// ErrTxnNotIncluded reports a transaction an assembly with
+// RequireAllTransactions could not include.
 var ErrTxnNotIncluded = errors.New("transaction not included")
+
+// txnNotIncludedError matches ErrTxnNotIncluded without changing the message
+// of the error it wraps.
+type txnNotIncludedError struct{ error }
+
+func (e txnNotIncludedError) Is(target error) bool { return target == ErrTxnNotIncluded }
+func (e txnNotIncludedError) Unwrap() error        { return e.error }
 
 type AssemblerCfg struct {
 	ChainConfig            *chain.Config
@@ -33,9 +40,6 @@ type AssemblerCfg struct {
 	BlockReader            dbservices.FullBlockReader
 	ExperimentalBAL        bool
 	RequireAllTransactions bool
-	// Strict makes AddTransactions fail on the first transaction it cannot
-	// include instead of skipping it.
-	Strict bool
 }
 
 type AssembledBlock struct {
@@ -196,7 +200,7 @@ func (ba *BlockAssembler) AddTransactions(
 	// based on position in the block's transaction list).
 	txnIdx := len(ba.Txns)
 	inclusionError := func(txn types.Transaction, err error) error {
-		return fmt.Errorf("transaction %d (%s): %w", txnIdx, txn.Hash(), err)
+		return txnNotIncludedError{fmt.Errorf("transaction %d (%s): %w", txnIdx, txn.Hash(), err)}
 	}
 	header := ba.AssembledBlock.Header
 	// EIP-8037: execution and state gas pools deplete independently. The
@@ -282,9 +286,6 @@ func (ba *BlockAssembler) AddTransactions(
 	}()
 
 	minTxGas := mdgas.MinTxGas(ba.cfg.ChainConfig.IsAmsterdam(header.Time))
-	notIncluded := func(txn types.Transaction, reason error) error {
-		return fmt.Errorf("[%s] %w: %x: %w", logPrefix, ErrTxnNotIncluded, txn.Hash(), reason)
-	}
 
 	done := false
 
@@ -314,9 +315,6 @@ LOOP:
 		// Transactions can have a zero state gas limit, so only the execution
 		// pool bounds this early exit.
 		if gasPool.Gas() < minTxGas {
-			if ba.cfg.Strict {
-				return nil, true, notIncluded(txn, protocol.ErrGasLimitReached)
-			}
 			if ba.cfg.RequireAllTransactions {
 				return coalescedLogs, true, inclusionError(txn, protocol.ErrGasLimitReached)
 			}
@@ -327,8 +325,8 @@ LOOP:
 
 		bound, err := protocol.BindTxGas(ba.cfg.Engine, ba.cfg.ChainConfig.IsAmsterdam(header.Time), txn, gasPool)
 		if err != nil {
-			if ba.cfg.Strict {
-				return nil, true, notIncluded(txn, err)
+			if ba.cfg.RequireAllTransactions {
+				return coalescedLogs, true, inclusionError(txn, err)
 			}
 			logger.Debug(fmt.Sprintf("[%s] Could not bind transaction gas", logPrefix), "hash", txn.Hash(), "err", err)
 			continue
@@ -336,9 +334,6 @@ LOOP:
 		txn = bound
 
 		rlpSpacePostTxn := ba.AvailableRlpSpace(ba.cfg.ChainConfig, txn)
-		if rlpSpacePostTxn < 0 && ba.cfg.Strict {
-			return nil, true, notIncluded(txn, errors.New("block size limit"))
-		}
 		if rlpSpacePostTxn < 0 {
 			if ba.cfg.RequireAllTransactions {
 				return coalescedLogs, true, inclusionError(txn, errors.New("exceeds block RLP size limit"))
@@ -355,9 +350,6 @@ LOOP:
 
 		// We use the eip155 signer regardless of the env hf.
 		from, err := txn.Sender(*signer)
-		if err != nil && ba.cfg.Strict {
-			return nil, true, notIncluded(txn, err)
-		}
 		if err != nil {
 			if ba.cfg.RequireAllTransactions {
 				return coalescedLogs, true, inclusionError(txn, err)
@@ -369,9 +361,6 @@ LOOP:
 		// Check whether the txn is replay protected. If we're not in the EIP155 (Spurious Dragon) hf
 		// phase, start ignoring the sender until we do.
 		if txn.Protected() && !ba.cfg.ChainConfig.IsSpuriousDragon(header.Number.Uint64()) {
-			if ba.cfg.Strict {
-				return nil, true, notIncluded(txn, errors.New("replay-protected before EIP-155"))
-			}
 			if ba.cfg.RequireAllTransactions {
 				return coalescedLogs, true, inclusionError(txn, errors.New("replay protection is not active"))
 			}
@@ -387,9 +376,6 @@ LOOP:
 			}
 		} else {
 			clearTxIO()
-			if ba.cfg.Strict {
-				return nil, true, notIncluded(txn, err)
-			}
 			if ba.cfg.RequireAllTransactions {
 				return coalescedLogs, true, inclusionError(txn, err)
 			}

@@ -44,10 +44,6 @@ type Parameters struct {
 	RequireAllTransactions bool
 	// ExtraData overrides the builder's configured extra data when non-nil.
 	ExtraData []byte
-	// Strict makes the block exactly the transactions CustomTxnProvider yields
-	// in one call, in order: none is filtered, and one that cannot be included
-	// fails the build instead of being skipped.
-	Strict bool
 }
 
 // Copy returns parameters that share nothing mutable with the receiver, except CustomTxnProvider:

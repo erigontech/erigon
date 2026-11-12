@@ -59,7 +59,6 @@ type BuilderExecCfg struct {
 	payloadId              uint64
 	txnProvider            txnprovider.TxnProvider
 	requireAllTransactions bool
-	strict                 bool
 }
 
 func StageBuilderExecCfg(
@@ -73,7 +72,6 @@ func StageBuilderExecCfg(
 	txnProvider txnprovider.TxnProvider,
 	requireAllTransactions bool,
 	blockReader dbservices.FullBlockReader,
-	strict bool,
 ) BuilderExecCfg {
 	return BuilderExecCfg{
 		builderState:           builderState,
@@ -86,7 +84,6 @@ func StageBuilderExecCfg(
 		payloadId:              payloadId,
 		txnProvider:            txnProvider,
 		requireAllTransactions: requireAllTransactions,
-		strict:                 strict,
 	}
 }
 
@@ -150,7 +147,6 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 		BlockReader:            cfg.blockReader,
 		ExperimentalBAL:        execCfg.IsExperimentalBAL(),
 		RequireAllTransactions: cfg.requireAllTransactions,
-		Strict:                 cfg.strict,
 	}, current)
 
 	ibs.SetVersionMap(state.NewVersionMap(nil))
@@ -185,18 +181,7 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 	interrupt := cfg.interrupt
 	const amount = 50
 	filtration := &filtrationStats{}
-	if cfg.strict {
-		txns, err := cfg.txnProvider.ProvideTxns(ctx)
-		if err != nil {
-			return err
-		}
-		logs, _, err := ba.AddTransactions(ctx, getHeader, txns, coinbase, cfg.vmConfig, ibs, nil, logPrefix, logger)
-		if err != nil {
-			return err
-		}
-		NotifyPendingLogs(logPrefix, cfg.notifier, logs, logger)
-	}
-	for !cfg.strict {
+	for {
 		txns, provided, err := getNextTransactions(ctx, cfg, chainID, current.Header, ba.CumulativeGasUsed(), amount, executionAt, yielded, nonceTooHigh, filterReader, filterWriter, readNonce, logger, filtration)
 		if err != nil {
 			return err

@@ -4260,7 +4260,7 @@ func (p *onceTxnProvider) ProvideTxns(context.Context, ...txnprovider.ProvideOpt
 	return p.txns, nil
 }
 
-func TestAssembleBlockStrict(t *testing.T) {
+func TestAssembleBlockRequireAllTransactions(t *testing.T) {
 	ctx := t.Context()
 	key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	require.NoError(t, err)
@@ -4277,24 +4277,24 @@ func TestAssembleBlockStrict(t *testing.T) {
 		require.NoError(t, err)
 		return tx
 	}
-	build := func(strict bool, txns ...types.Transaction) (*types.Block, error) {
+	build := func(requireAll bool, txns ...types.Transaction) (*types.Block, error) {
 		beaconRoot := common.Hash{1}
 		id, err := m.AssembleBlock(ctx, &builder.Parameters{
-			ParentHash:            parent.Hash(),
-			Timestamp:             parent.Time() + 1,
-			SuggestedFeeRecipient: common.Address{4},
-			Withdrawals:           []*types.Withdrawal{},
-			ParentBeaconBlockRoot: &beaconRoot,
-			SlotNumber:            syntheticSlotNumber(parent),
-			CustomTxnProvider:     &onceTxnProvider{txns: txns},
-			Strict:                strict,
+			ParentHash:             parent.Hash(),
+			Timestamp:              parent.Time() + 1,
+			SuggestedFeeRecipient:  common.Address{4},
+			Withdrawals:            []*types.Withdrawal{},
+			ParentBeaconBlockRoot:  &beaconRoot,
+			SlotNumber:             syntheticSlotNumber(parent),
+			CustomTxnProvider:      &onceTxnProvider{txns: txns},
+			RequireAllTransactions: requireAll,
 		})
 		require.NoError(t, err)
 		return m.GetAssembledBlock(ctx, id)
 	}
 
-	// The filter would drop a transaction whose sender is not cached; strict
-	// assembly takes the list as given.
+	// The filter would drop a transaction whose sender is not cached; an
+	// explicit list is taken as given.
 	txs := []types.Transaction{transfer(0), transfer(1)}
 	built, err := build(true, txs...)
 	require.NoError(t, err)
@@ -4302,7 +4302,7 @@ func TestAssembleBlockStrict(t *testing.T) {
 
 	gap := []types.Transaction{transfer(0), transfer(5)}
 	_, err = build(true, gap...)
-	require.ErrorContains(t, err, exec.ErrTxnNotIncluded.Error())
+	require.ErrorIs(t, err, exec.ErrTxnNotIncluded)
 	require.ErrorContains(t, err, "nonce too high")
 
 	gap[0].SetSender(accounts.InternAddress(m.Address))
