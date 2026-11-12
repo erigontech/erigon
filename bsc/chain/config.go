@@ -19,10 +19,12 @@ package chain
 import (
 	"embed"
 
+	"github.com/erigontech/erigon/bsc/cas20"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/execution/vm"
 )
 
 //go:embed chainspecs
@@ -54,4 +56,5 @@ var (
 func init() {
 	chainspec.RegisterChainSpec(networkname.BSC, BSC)
 	chainspec.RegisterChainSpec(networkname.Chapel, Chapel)
+	vm.SetStatefulPrecompiles(cas20.Resolve)
 }
