@@ -32,8 +32,6 @@ import (
 	"github.com/erigontech/erigon/common/crypto/kzg"
 )
 
-var emptyKZGProof = common.Bytes48{0xc0}
-
 // storeBlobsForBlock fetches and stores the sidecars a block needs, and fails if the store does
 // not hold all of them afterwards.
 func (c *ChainEndpoint) storeBlobsForBlock(
@@ -101,7 +99,7 @@ func storeRemoteBlobs(
 		if common.Bytes48(*commitments.Get(int(sidecar.Index))) != sidecar.KzgCommitment {
 			return fmt.Errorf("blob sidecar at index %d carries a commitment the block does not reference", sidecar.Index)
 		}
-		if sidecar.KzgProof == emptyKZGProof {
+		if sidecar.KzgProof == common.Bytes48(goethkzg.PointAtInfinity) {
 			proof, err := kzg.Ctx().ComputeBlobKZGProof((*goethkzg.Blob)(&sidecar.Blob), goethkzg.KZGCommitment(sidecar.KzgCommitment), 0)
 			if err != nil {
 				return fmt.Errorf("blob sidecar at index %d: compute its KZG proof: %w", sidecar.Index, err)
