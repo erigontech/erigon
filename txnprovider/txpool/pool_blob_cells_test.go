@@ -220,9 +220,7 @@ func TestFromDBAmsterdamRestoresCells(t *testing.T) {
 	require.NoError(t, pool.poolDB.Update(ctx, func(tx kv.RwTx) error {
 		return tx.Put(kv.PoolTransaction, make([]byte, 32), append(sender[:], raw...))
 	}))
-	require.NoError(t, pool.poolDB.View(ctx, func(tx kv.Tx) error {
-		return pool.fromDB(ctx, tx)
-	}))
+	require.NoError(t, pool.fromDB(ctx))
 
 	bundles := pool.GetBlobs(template.GetBlobHashes())
 	require.Len(t, bundles, len(template.BlobBundles))

@@ -788,6 +788,7 @@ func (f *Fetch) ConnectSentries() {
 }
 
 func (f *Fetch) ConnectCore() {
+	f.pool.MarkStateStale()
 	f.connectWg.Go(func() {
 		for {
 			select {
@@ -796,15 +797,14 @@ func (f *Fetch) ConnectCore() {
 			default:
 			}
 			if err := f.handleStateChanges(f.ctx, f.stateChangesClient); err != nil {
-				if grpcutil.IsRetryLater(err) || grpcutil.IsEndOfStream(err) {
-					select {
-					case <-f.ctx.Done():
-						return
-					case <-time.After(3 * time.Second):
-					}
-					continue
+				if !grpcutil.IsRetryLater(err) && !grpcutil.IsEndOfStream(err) {
+					f.logger.Warn("[txpool.handleStateChanges]", "err", err)
 				}
-				f.logger.Warn("[txpool.handleStateChanges]", "err", err)
+			}
+			select {
+			case <-f.ctx.Done():
+				return
+			case <-time.After(3 * time.Second):
 			}
 		}
 	})

@@ -33,7 +33,9 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
@@ -50,6 +52,110 @@ func (db stateReadHookDB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, e
 		return nil, err
 	}
 	return db.TemporalRoDB.BeginTemporalRo(ctx)
+}
+
+type startupReadDB struct {
+	kv.RwDB
+	reads      int
+	readers    int
+	pool       *TxPool
+	beforeRead func()
+}
+
+func (db *startupReadDB) View(ctx context.Context, f func(kv.Tx) error) error {
+	db.reads++
+	if !db.pool.lock.TryLock() {
+		return errors.New("opening a database reader must not hold the pool lock")
+	}
+	db.pool.lock.Unlock()
+	if db.beforeRead != nil {
+		db.beforeRead()
+	}
+	return db.RwDB.View(ctx, func(tx kv.Tx) error {
+		db.readers++
+		defer func() { db.readers-- }()
+		return f(tx)
+	})
+}
+
+func TestPoolStartupWaitsWithoutDatabaseReader(t *testing.T) {
+	for _, staleAtStart := range []bool{true, false} {
+		t.Run(fmt.Sprintf("staleAtStart=%t", staleAtStart), func(t *testing.T) {
+			_, pool, poolDB, _ := newTestPool(t)
+			db := &startupReadDB{RwDB: poolDB, pool: pool}
+			pool.poolDB = db
+			if staleAtStart {
+				pool.MarkStateStale()
+			} else {
+				db.beforeRead = sync.OnceFunc(pool.MarkStateStale)
+			}
+			synctest.Test(t, func(t *testing.T) {
+				ctx, cancel := context.WithCancel(t.Context())
+				defer cancel()
+				done := make(chan error, 1)
+				go func() { done <- pool.start(ctx) }()
+				synctest.Wait()
+				require.Zero(t, db.readers, "waiting for recovery must not hold a pool database reader")
+				if staleAtStart {
+					require.Zero(t, db.reads, "wait for the initial reset before opening the database")
+				} else {
+					require.Equal(t, 1, db.reads)
+				}
+				require.False(t, pool.Started())
+				require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{1}, 0), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+				require.NoError(t, <-done)
+				require.True(t, pool.Started())
+				require.Zero(t, db.readers)
+			})
+		})
+	}
+}
+
+func TestFramePoolReconcilesMinedKeyedNonces(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		key      uint256.Int
+		sequence uint256.Int
+		consumed bool
+	}{
+		{"unused", uint256.Int{5}, uint256.Int{}, false},
+		{"first key consumed", uint256.Int{5}, uint256.Int{1}, true},
+		{"second key consumed", uint256.Int{7}, uint256.Int{1}, true},
+		{"full width sequence", uint256.Int{5}, uint256.Int{0, 1}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, pool, sender := keyedFramePoolEnv(t)
+			frame := framePoolSlot(t, sender, 1, 2, uint256.Int{5}, uint256.Int{7})
+			var txns TxnSlots
+			txns.Append(frame, sender[:], true)
+			reasons, err := pool.AddLocalTxns(ctx, txns)
+			require.NoError(t, err)
+			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+			coreDB := pool._chainDB.(kv.TemporalRwDB)
+			require.NoError(t, coreDB.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
+				domains, err := execctx.NewSharedDomains(ctx, tx, pool.logger)
+				if err != nil {
+					return err
+				}
+				defer domains.Close()
+				slot := types.FrameNonceSlot(sender, tc.key)
+				if err := domains.DomainPut(kv.StorageDomain, tx, append(types.FrameNonceManager[:], slot[:]...), tc.sequence.Bytes(), 1, nil); err != nil {
+					return err
+				}
+				return domains.Flush(ctx, tx)
+			}))
+			reset := newBlockChangeForAccounts(common.Hash{2}, 0, sender)
+			reset.StateChangesIncomplete = true
+			require.NoError(t, coreDB.View(ctx, func(tx kv.Tx) error {
+				var err error
+				reset.StateVersionId, err = rawdb.GetStateVersion(tx)
+				return err
+			}))
+			require.NoError(t, pool.OnNewBlock(ctx, reset, TxnSlots{}, TxnSlots{}, txns))
+			_, present := pool.byHash[string(frame.IDHash[:])]
+			require.Equal(t, !tc.consumed, present)
+		})
+	}
 }
 
 func TestFramePoolParksAroundFailedStateRead(t *testing.T) {

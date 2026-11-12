@@ -49,6 +49,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/direct"
@@ -352,6 +353,53 @@ func TestFetchDisconnectParksFrames(t *testing.T) {
 	require.Equal(t, reservation, pool.frameReservations[sender])
 }
 
+func TestFetchConnectCoreStartsStale(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		ctrl := gomock.NewController(t)
+		pool := NewMockPool(ctrl)
+		var stale atomic.Bool
+		pool.EXPECT().MarkStateStale().Do(func() { stale.Store(true) }).AnyTimes()
+		client := remoteproto.NewMockKVClient(ctrl)
+		client.EXPECT().StateChanges(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+			func(ctx context.Context, _ *remoteproto.StateChangeRequest, _ ...grpc.CallOption) (remoteproto.KV_StateChangesClient, error) {
+				<-ctx.Done()
+				return nil, ctx.Err()
+			}).AnyTimes()
+		fetch := NewFetch(ctx, nil, pool, client, nil, u256.N1, log.New())
+		fetch.ConnectCore()
+		require.True(t, stale.Load(), "restoration must start with a stale view before the subscription worker runs")
+		cancel()
+		fetch.Wait()
+	})
+}
+
+func TestFetchSnapshotFailureBackoff(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		ctrl := gomock.NewController(t)
+		pool := NewMockPool(ctrl)
+		pool.EXPECT().MarkStateStale().AnyTimes()
+		client := remoteproto.NewMockKVClient(ctrl)
+		var attempts []time.Time
+		client.EXPECT().StateChanges(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+			func(context.Context, *remoteproto.StateChangeRequest, ...grpc.CallOption) (remoteproto.KV_StateChangesClient, error) {
+				attempts = append(attempts, time.Now())
+				if len(attempts) == 2 {
+					cancel()
+				}
+				return nil, errors.New("snapshot read failed")
+			}).Times(2)
+		fetch := NewFetch(ctx, nil, pool, client, nil, u256.N1, log.New())
+		fetch.ConnectCore()
+		fetch.Wait()
+		require.GreaterOrEqual(t, attempts[1].Sub(attempts[0]), 3*time.Second)
+		require.Equal(t, attempts[1], time.Now(), "cancellation must interrupt the reconnect delay")
+	})
+}
+
 func TestFetchRevalidatesFramesAfterFailedStateChange(t *testing.T) {
 	ctx, pool, sender := keyedFramePoolEnv(t)
 	initial := newBlockChangeForAccounts(common.Hash{1}, 0)
@@ -597,6 +645,73 @@ func TestFetchRetainedForwardThenUnwindKeepsReplacement(t *testing.T) {
 
 	require.Contains(t, pool.byHash, string(replacement.IDHash[:]), "an orphaned transaction must not evict its pooled replacement")
 	require.NotContains(t, pool.byHash, string(original.IDHash[:]))
+}
+
+func TestFetchReconcilesRetainedForwardAfterGap(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		consumed    bool
+		replacement bool
+	}{
+		{"orphan with replacement", false, true},
+		{"orphan without replacement", false, false},
+		{"consumed nonce", true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, pool, poolDB, coreDB := newTestPool(t)
+			fetch := NewFetch(ctx, nil, pool, nil, poolDB, pool.chainID, log.New())
+			key, err := crypto.GenerateKey()
+			require.NoError(t, err)
+			sender := crypto.PubkeyToAddress(key.PublicKey)
+			account := accounts.Account{Balance: *uint256.NewInt(common.Ether), CodeHash: accounts.EmptyCodeHash}
+			writeTestSenderState(t, ctx, coreDB, pool.logger, sender, accounts.SerialiseV3(&account), 1)
+			initial := newBlockChangeForAccounts(common.Hash{1}, 0)
+			require.NoError(t, pool.OnNewBlock(ctx, initial, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+			makeTxn := func(price uint64) *TxnSlot {
+				txn, signErr := types.SignTx(types.NewTransaction(0, common.Address{2}, uint256.NewInt(0), 21_000, uint256.NewInt(price), nil), *types.LatestSignerForChainID(&pool.chainID), key)
+				require.NoError(t, signErr)
+				return encodeRemoteTxn(t, &TxnSlot{Txn: txn, IDHash: txn.Hash()})
+			}
+			original, replacement := makeTxn(2), makeTxn(20)
+			if tc.replacement {
+				var txns TxnSlots
+				txns.Append(replacement, sender[:], true)
+				reasons, err := pool.AddLocalTxns(ctx, txns)
+				require.NoError(t, err)
+				require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+			}
+
+			stale := newBlockChangeForAccounts(common.Hash{2}, 0)
+			stale.StateChangesIncomplete = true
+			stale.ChangeBatch[0].Direction = remoteproto.Direction_FORWARD
+			stale.ChangeBatch[0].Txs = [][]byte{original.Rlp}
+			require.NoError(t, coreDB.Update(ctx, func(tx kv.RwTx) error {
+				return tx.Put(kv.Sequence, kv.PlainStateVersion, binary.BigEndian.AppendUint64(nil, 1))
+			}))
+			require.ErrorIs(t, fetch.handleStateChangesRequest(ctx, stale), errStateViewSuperseded)
+
+			// The retained direction is only a hint after a gap. The current nonce
+			// decides whether to remove the replacement or keep it.
+			if tc.consumed {
+				account.Nonce = 1
+				writeTestSenderState(t, ctx, coreDB, pool.logger, sender, accounts.SerialiseV3(&account), 2)
+			}
+			reset := newBlockChangeForAccounts(common.Hash{3}, 0)
+			reset.StateChangesIncomplete = true
+			reset.ChangeBatch[0].Direction = remoteproto.Direction_FORWARD
+			require.NoError(t, coreDB.View(ctx, func(tx kv.Tx) error {
+				var err error
+				reset.StateVersionId, err = rawdb.GetStateVersion(tx)
+				return err
+			}))
+			require.NoError(t, fetch.handleStateChangesRequest(ctx, reset))
+			_, present := pool.byHash[string(replacement.IDHash[:])]
+			require.Equal(t, tc.replacement && !tc.consumed, present)
+			_, restored := pool.byHash[string(original.IDHash[:])]
+			require.Equal(t, !tc.replacement && !tc.consumed, restored)
+			require.Empty(t, fetch.pendingTxnChanges)
+		})
+	}
 }
 
 func TestFetchStateChangesUseLastTransactionDirection(t *testing.T) {

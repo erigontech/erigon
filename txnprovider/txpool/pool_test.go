@@ -486,9 +486,7 @@ func TestFromDBSkipsInvalidTransactions(t *testing.T) {
 		return nil
 	}))
 
-	require.NoError(t, poolDB.View(ctx, func(poolTx kv.Tx) error {
-		return pool.fromDB(ctx, poolTx)
-	}))
+	require.NoError(t, pool.fromDB(ctx))
 
 	validHash := validTxn.Txn.Hash()
 	invalidHash := invalidTxn.Txn.Hash()
@@ -511,9 +509,7 @@ func TestFromDBRestoresPersistedTxnsBeforeAnyBlock(t *testing.T) {
 		return tx.Put(kv.PoolTransaction, hash[:], append(sender[:], encoded.Bytes()...))
 	}))
 
-	require.NoError(t, poolDB.View(ctx, func(poolTx kv.Tx) error {
-		return pool.fromDB(ctx, poolTx)
-	}))
+	require.NoError(t, pool.fromDB(ctx))
 
 	require.Contains(t, pool.byHash, string(hash[:]))
 }
@@ -543,9 +539,7 @@ func TestFromDBDeletesRejectedRows(t *testing.T) {
 		return nil
 	}))
 
-	require.NoError(t, poolDB.View(ctx, func(poolTx kv.Tx) error {
-		return pool.fromDB(ctx, poolTx)
-	}))
+	require.NoError(t, pool.fromDB(ctx))
 	_, err := pool.flush(ctx)
 	require.NoError(t, err)
 
@@ -595,9 +589,7 @@ func TestFromDBSkipsUnderpricedBlobTxns(t *testing.T) {
 		return tx.Put(kv.PoolTransaction, underpricedHash[:], underpriced)
 	}))
 
-	require.NoError(t, poolDB.View(ctx, func(poolTx kv.Tx) error {
-		return pool.fromDB(ctx, poolTx)
-	}))
+	require.NoError(t, pool.fromDB(ctx))
 
 	require.Contains(t, pool.byHash, string(pricedHash[:]))
 	require.NotContains(t, pool.byHash, string(underpricedHash[:]))
@@ -616,9 +608,7 @@ func TestFromDBSkipsBlobTxnWithBadSidecar(t *testing.T) {
 		return tx.Put(kv.PoolTransaction, hash[:], append(sender[:], encoded.Bytes()...))
 	}))
 
-	require.NoError(t, poolDB.View(ctx, func(poolTx kv.Tx) error {
-		return pool.fromDB(ctx, poolTx)
-	}))
+	require.NoError(t, pool.fromDB(ctx))
 
 	require.NotContains(t, pool.byHash, string(hash[:]))
 }
@@ -3380,9 +3370,7 @@ func TestFromDBBlobsOutliveReadTx(t *testing.T) {
 	require.NoError(poolDB.Update(ctx, func(tx kv.RwTx) error {
 		return tx.Put(kv.PoolTransaction, slot.IDHash[:], append(sender[:], txnRlp...))
 	}))
-	require.NoError(poolDB.View(ctx, func(poolTx kv.Tx) error {
-		return pool.fromDB(ctx, poolTx)
-	}))
+	require.NoError(pool.fromDB(ctx))
 
 	bundles := pool.GetBlobs(blobHashes)
 	require.Len(bundles, len(blobHashes))

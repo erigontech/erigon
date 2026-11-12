@@ -600,11 +600,13 @@ func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*meta
 	accountChanges := make(map[common.Address][]byte)
 	nonceSlots := make(map[common.Hash]struct{})
 	rootSlots := make(map[common.Hash]struct{})
-	// Reactivation later in the batch must not hide an earlier activation unwind.
-	activationUnwound := false
+	// Missing history can hide an activation unwind followed by reactivation.
+	// Revalidation cannot recover that transition, so evict recent-root frames
+	// conservatively unless Bogota is active at every possible block timestamp.
+	activationMayHaveUnwound := changes.StateChangesIncomplete && !p.chainConfig.IsBogota(0)
 	for _, batch := range changes.ChangeBatch {
 		isBogota := p.chainConfig.IsBogota(batch.BlockTime)
-		activationUnwound = activationUnwound || wasBogota && !isBogota
+		activationMayHaveUnwound = activationMayHaveUnwound || wasBogota && !isBogota
 		wasBogota = isBogota
 		for _, change := range batch.Changes {
 			address := gointerfaces.ConvertH160toAddress(change.Address)
@@ -640,7 +642,7 @@ func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*meta
 			roots = protocol.FrameTransactionRecentRoots(frame)
 		}
 		invalidRoots := slices.ContainsFunc(roots, func(ref protocol.RecentRootReference) bool {
-			return activationUnwound || !ref.ValidAt(pendingSlot)
+			return activationMayHaveUnwound || !ref.ValidAt(pendingSlot)
 		})
 		if invalidRoots {
 			p.removeFromSubPool(mt, "recent root no longer usable")

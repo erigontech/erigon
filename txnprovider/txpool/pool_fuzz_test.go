@@ -564,7 +564,10 @@ func FuzzOnNewBlocks(f *testing.F) {
 		require.NoError(err)
 
 		p2.senders = pool.senders // senders are not persisted
-		err = p2.fromDB(ctx, tx)
+		err = p2.withLockedState(ctx, nil, true, func(coreTx kv.TemporalTx, cacheView kvcache.CacheView) error {
+			var parked []*metaTxn
+			return p2.fromDBLocked(tx, coreTx, cacheView, &parked)
+		})
 		require.NoError(err)
 		for _, txn := range p2.byHash {
 			assert.Nil(txn.TxnSlot.Rlp)

@@ -866,7 +866,8 @@ func TestP2PPropagationContinuesWhileOnAddSubscriberStalls(t *testing.T) {
 		Peers(gomock.Any(), gomock.Any(), gomock.Any()).
 		Return(&sentryproto.PeersReply{}, nil).AnyTimes()
 
-	stateChanges := direct.NewStateDiffClientDirect(remotedbserver.NewKvServer(ctx, nil, nil, nil, logger))
+	kvServer := remotedbserver.NewKvServer(ctx, nil, nil, nil, logger)
+	stateChanges := direct.NewStateDiffClientDirect(kvServer)
 
 	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	poolDB := mdbxtest.NewTestPoolDB(t)
@@ -904,7 +905,9 @@ func TestP2PPropagationContinuesWhileOnAddSubscriberStalls(t *testing.T) {
 			}},
 		}},
 	}
-	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	kvServer.SetStateChangesSnapshot(func(context.Context) (*remoteproto.StateChangeBatch, error) {
+		return change, nil
+	})
 
 	runDone := make(chan struct{})
 	go func() {
