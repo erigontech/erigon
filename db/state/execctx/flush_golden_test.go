@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
@@ -137,6 +138,8 @@ func buildForward(t *testing.T, domains *execctx.SharedDomains, tx kv.TemporalRw
 		flushGoldenPut(t, domains, tx, kv.AccountsDomain, accountA, []byte{0xa1, 0x02}, 2)
 		flushGoldenPut(t, domains, tx, kv.AccountsDomain, accountC, []byte{0xc1, 0x02}, 2)
 		flushGoldenPut(t, domains, tx, kv.AccountsDomain, accountC, []byte{0xc1, 0x03}, 2)
+		require.NoError(t, rawtemporaldb.AppendReceiptMetadata(domains.AsPutDel(tx), 2, 20, 200, 2))
+		require.NoError(t, rawtemporaldb.AppendReceiptMetadata(domains.AsPutDel(tx), 3, 21, 201, 2))
 	})
 	executeGoldenBlock(t, domains, tx, label, 3, func() {
 		flushGoldenDel(t, domains, tx, kv.AccountsDomain, accountD, 3)
@@ -174,6 +177,23 @@ func buildForward(t *testing.T, domains *execctx.SharedDomains, tx kv.TemporalRw
 	})
 	executeGoldenBlock(t, domains, tx, label, 12, func() {
 		flushGoldenPut(t, domains, tx, kv.CommitmentDomain, commitmentKey, []byte{0xcc, 0x0c}, 12)
+	})
+	multiAccount := flushGoldenAddress(0x77)
+	multiStorage := flushGoldenStorageKey(multiAccount, 0x03)
+	executeGoldenTxns(t, domains, tx, label, 13, []uint64{13, 14, 15}, func(txNum uint64) {
+		switch txNum {
+		case 13, 14:
+			flushGoldenPut(t, domains, tx, kv.AccountsDomain, multiAccount, []byte{0x77, byte(txNum)}, txNum)
+			flushGoldenPut(t, domains, tx, kv.StorageDomain, multiStorage, []byte{0x87, byte(txNum)}, txNum)
+		case 15:
+			flushGoldenPut(t, domains, tx, kv.CommitmentDomain, []byte{0xa0, 0x0d}, []byte{0xcd, 0x0f}, txNum)
+		}
+	})
+	crossAccount := flushGoldenAddress(0x78)
+	crossStorage := flushGoldenStorageKey(crossAccount, 0x04)
+	executeGoldenTxns(t, domains, tx, label, 16, []uint64{15, 16}, func(txNum uint64) {
+		flushGoldenPut(t, domains, tx, kv.AccountsDomain, crossAccount, []byte{0x78, byte(txNum)}, txNum)
+		flushGoldenPut(t, domains, tx, kv.StorageDomain, crossStorage, []byte{0x88, byte(txNum)}, txNum)
 	})
 }
 
@@ -295,6 +315,19 @@ func executeGoldenBlock(t *testing.T, domains *execctx.SharedDomains, tx kv.Temp
 	return changes
 }
 
+func executeGoldenTxns(t *testing.T, domains *execctx.SharedDomains, tx kv.TemporalRwTx, label string, block uint64, txNums []uint64, write func(uint64)) *changeset.StateChangeSet {
+	t.Helper()
+	changes := &changeset.StateChangeSet{}
+	domains.SetChangesetAccumulator(changes)
+	for _, txNum := range txNums {
+		domains.SetTxNum(txNum)
+		write(txNum)
+	}
+	domains.SavePastChangesetAccumulator(flushGoldenHash(label, block), block, changes)
+	domains.SetChangesetAccumulator(nil)
+	return changes
+}
+
 func flushGoldenPut(t *testing.T, domains *execctx.SharedDomains, tx kv.TemporalRwTx, domain kv.Domain, key, value []byte, txNum uint64) {
 	t.Helper()
 	prev, _, err := domains.GetLatest(domain, tx, key)
@@ -334,7 +367,7 @@ func flushGoldenStorageKey(address []byte, slot byte) []byte {
 func dumpFlushGoldenRows(t *testing.T, tx kv.TemporalRwTx) []flushGoldenRow {
 	t.Helper()
 	var rows []flushGoldenRow
-	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain, kv.CommitmentDomain} {
+	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain, kv.CommitmentDomain, kv.ReceiptDomain} {
 		for _, table := range statecfg.Schema.GetDomainCfg(domain).Tables() {
 			cursor, err := tx.Cursor(table)
 			require.NoError(t, err)
@@ -345,7 +378,15 @@ func dumpFlushGoldenRows(t *testing.T, tx kv.TemporalRwTx) []flushGoldenRow {
 			}
 		}
 	}
-	cursor, err := tx.Cursor(kv.ChangeSets3)
+	cursor, err := tx.Cursor(kv.Sequence)
+	require.NoError(t, err)
+	t.Cleanup(cursor.Close)
+	key, value, err := cursor.First()
+	for ; key != nil; key, value, err = cursor.Next() {
+		require.NoError(t, err)
+		rows = append(rows, flushGoldenRow{table: kv.Sequence, key: bytes.Clone(key), value: bytes.Clone(value)})
+	}
+	cursor, err = tx.Cursor(kv.ChangeSets3)
 	require.NoError(t, err)
 	t.Cleanup(cursor.Close)
 	for key, value, err := cursor.First(); key != nil; key, value, err = cursor.Next() {

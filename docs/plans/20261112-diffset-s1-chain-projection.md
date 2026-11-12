@@ -65,6 +65,7 @@ NOTES:
 - The unwind golden retains old-only rows at txNums 5..6: AccountVals 3, AccountHistoryVals 2, AccountHistoryKeys 2, StorageVals 3, StorageHistoryVals 2, StorageHistoryKeys 2, CodeVals 2, CodeHistoryVals 1, and CodeHistoryKeys 1. The old-only rows are from the pre-unwind writes and were not written by 5'..6'.
 - The merged batch's `GetAsOf` for the shared account at ts 3 returns `(nil, false, nil)`, falling through to the unflushed transaction instead of returning the receiver value. This is not asserted because it is the behavior T3 is meant to change.
 - The test copies the minimal unwind sequence from `execution/stagedsync/stage_execute.go:527` and the receiver/child merge sequence from `execution/execmodule/fork_validator.go:143`; it does not import `execution/...`.
+- review fixes: Sequence table, multi-txNum blocks, Receipt domain
 
 ### T2: chains always complete
 
