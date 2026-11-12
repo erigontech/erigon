@@ -17,7 +17,9 @@
 package state
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
 	"fmt"
 	"sync"
 	"testing"
@@ -28,11 +30,22 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/kvmetrics"
 )
+
+type temporalMemBatchFlushTx struct {
+	kv.RwTx
+	aggTx *AggregatorRoTx
+}
+
+func (tx temporalMemBatchFlushTx) AggTx() any { return tx.aggTx }
 
 // A reorg unwind restores domain values from the diffset, so a domain missing
 // from GetDiffset is silently never rolled back.
@@ -52,6 +65,48 @@ func TestGetDiffsetCoversAllDomains(t *testing.T) {
 	for d := range kv.DomainLen {
 		require.NotEmpty(t, diffs[d], "domain %s missing from GetDiffset", d)
 	}
+}
+
+func TestTemporalMemBatchPrevDoesNotAliasCaller(t *testing.T) {
+	ctx := t.Context()
+	dirs := datadir.New(t.TempDir())
+	db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, log.New()), dirs.Chaindata).MustOpen()
+	t.Cleanup(db.Close)
+	agg := NewTest(dirs).StepSize(4).Logger(log.New()).MustOpen(ctx)
+	t.Cleanup(agg.Close)
+	require.NoError(t, agg.OpenFolder(db))
+	aggTx := agg.BeginFilesRo()
+	t.Cleanup(aggTx.Close)
+	rwTx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	batch := &TemporalMemBatch{
+		storage:  btree2.NewMap[string, []dataWithTxNum](128),
+		metrics:  &kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
+		stepSize: agg.StepSize(),
+	}
+	for domain, d := range aggTx.d {
+		batch.domainWriters[domain] = d.NewWriter(db)
+	}
+	defer batch.Close()
+	key := []byte{0x91}
+	first := []byte{0x10, 0x11}
+	second := []byte{0x20, 0x21}
+	preval := bytes.Clone(first)
+	require.NoError(t, batch.DomainPut(kv.AccountsDomain, string(key), first, 1, nil))
+	require.NoError(t, batch.DomainPut(kv.AccountsDomain, string(key), second, 2, preval))
+	preval[0] = 0xff
+	preval[1] = 0xee
+	flushTx := temporalMemBatchFlushTx{RwTx: rwTx, aggTx: aggTx}
+	require.NoError(t, batch.Flush(ctx, flushTx))
+
+	cursor, err := flushTx.CursorDupSort(kv.TblAccountHistoryVals)
+	require.NoError(t, err)
+	defer cursor.Close()
+	value, err := cursor.SeekBothRange(key, binary.BigEndian.AppendUint64(nil, 2))
+	require.NoError(t, err)
+	require.Equal(t, append([]byte{0, 0, 0, 0, 0, 0, 0, 2}, first...), value)
 }
 
 func TestTemporalMemBatchConcurrentDomainAccess(t *testing.T) {

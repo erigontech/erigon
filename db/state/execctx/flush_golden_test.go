@@ -272,6 +272,7 @@ func buildReflush(t *testing.T, domains *execctx.SharedDomains, tx kv.TemporalRw
 	flushGoldenPut(t, domains, tx, kv.AccountsDomain, account, []byte{0x91, 0x01}, 1)
 	flushGoldenPut(t, domains, tx, kv.StorageDomain, storage, []byte{0xa1, 0x01}, 1)
 	require.NoError(t, domains.Flush(t.Context(), tx))
+	flushGoldenPut(t, domains, tx, kv.AccountsDomain, account, []byte{0x91, 0x11}, 1)
 
 	changes := &changeset.StateChangeSet{}
 	domains.SetChangesetAccumulator(changes)
@@ -463,10 +464,13 @@ func assertUnwindRows(t *testing.T, rows []flushGoldenRow) {
 	oldStorage5 := flushGoldenStorageKey(oldAccount5, 0x12)
 	oldStorage6 := flushGoldenStorageKey(oldAccount6, 0x13)
 	counts := map[string]int{
+		kv.TblAccountVals:        0,
 		kv.TblAccountHistoryVals: 0,
 		kv.TblAccountHistoryKeys: 0,
+		kv.TblStorageVals:        0,
 		kv.TblStorageHistoryVals: 0,
 		kv.TblStorageHistoryKeys: 0,
+		kv.TblCodeVals:           0,
 		kv.TblCodeHistoryVals:    0,
 		kv.TblCodeHistoryKeys:    0,
 	}
@@ -519,13 +523,13 @@ func assertUnwindRows(t *testing.T, rows []flushGoldenRow) {
 		}
 	}
 	require.Equal(t, map[string]int{
-		kv.TblAccountVals:        3,
+		kv.TblAccountVals:        0,
 		kv.TblAccountHistoryVals: 0,
 		kv.TblAccountHistoryKeys: 0,
-		kv.TblStorageVals:        3,
+		kv.TblStorageVals:        0,
 		kv.TblStorageHistoryVals: 0,
 		kv.TblStorageHistoryKeys: 0,
-		kv.TblCodeVals:           2,
+		kv.TblCodeVals:           0,
 		kv.TblCodeHistoryVals:    0,
 		kv.TblCodeHistoryKeys:    0,
 	}, counts)

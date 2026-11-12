@@ -107,9 +107,16 @@ NOTES:
 
 ### T4: values from the chains at flush
 
-- [ ] `putHistory` drops `addValue`. `PutCommitmentBranchDiff` keeps only `putLatest` and the diff update.
-- [ ] `Flush`: for every chain, the last entry per step goes to `domainWriters[d].addValue(key, data, step)`, before `flushWriters`.
-- [ ] Goldens unchanged.
+- [x] `putHistory` drops `addValue`. `PutCommitmentBranchDiff` keeps only `putLatest` and the diff update.
+- [x] `Flush`: for every chain, the last entry per step goes to `domainWriters[d].addValue(key, data, step)`, before `flushWriters`.
+- [x] Goldens: `forward`, `discard`, `merge`, and `reflush` stay byte-identical. `unwind` only deletes the eight old-only value rows in `AccountVals`, `StorageVals`, and `CodeVals` at steps 5 and 6.
+
+NOTES:
+
+- `dumpCommitmentStep` is called from the direct branch of `flushDomainsAndRebuild` at `db/state/squeeze.go:610`; it closes the domains and rolls back the write transaction immediately after, so no later `Flush` can collect its projected values twice. `dumpStepRangeToPath` also projects for `rebuildCommitmentShard` at `db/state/squeeze.go:1223` and commitment conversion at `db/state/commitment_convert.go:510`; both use a batch that is closed or discarded without a later `Flush`.
+- LSP found `DomainBufferedWriter.addValue` callers outside `TemporalMemBatch` in `db/state/domain.go:588`, `db/state/domain.go:610`, and `db/state/domain_test.go:1001`; these retain their behavior.
+- `unsafe.Sizeof(dataWithTxNum{})` is 64 bytes after splitting `flushed` into `histFlushed` and `valFlushed`.
+- The eight deleted rows are `AccountVals\t720000000000000000000000000000000000008d\tfffffffffffffffa7205`, `AccountVals\t730000000000000000000000000000000000008c\tfffffffffffffff97306`, `AccountVals\t730000000000000000000000000000000000008c\tfffffffffffffffa`, `StorageVals\t720000000000000000000000000000000000008d12000000000000000000000000000000000000000000000000000000000000ed\tfffffffffffffffa8205`, `StorageVals\t730000000000000000000000000000000000008c13000000000000000000000000000000000000000000000000000000000000ec\tfffffffffffffff98306`, `StorageVals\t730000000000000000000000000000000000008c13000000000000000000000000000000000000000000000000000000000000ec\tfffffffffffffffa`, `CodeVals\t730000000000000000000000000000000000008cfffffffffffffff9\t9306`, and `CodeVals\t730000000000000000000000000000000000008cfffffffffffffffa\t`.
 
 ### T5: Merge keeps no domain writers
 

@@ -1258,6 +1258,9 @@ func dumpCommitmentStep(ctx context.Context, a *Aggregator, sd *execctx.SharedDo
 	if err := mem.projectHistory(); err != nil {
 		return err
 	}
+	if err := mem.projectValues(); err != nil {
+		return err
+	}
 	defer wal.Close()
 	coll, err := d.collateETL(ctx, step, step+1, wal.valsCollector(), nil, "")
 	if err != nil {
