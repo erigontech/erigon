@@ -438,7 +438,15 @@ func NewVersionMap(changes types.BlockAccessList) *VersionMap {
 		bal:    changes,
 	}
 	if len(changes) > 0 {
-		vm.s.Store(xsync.NewMap[accounts.Address, *AddressEntry](xsync.WithPresize(len(changes))))
+		changed := 0
+		for i := range changes {
+			if balCellCount(&changes[i]) > 0 {
+				changed++
+			}
+		}
+		if changed > 0 {
+			vm.s.Store(xsync.NewMap[accounts.Address, *AddressEntry](xsync.WithPresize(changed)))
+		}
 		vm.seedChanges(changes)
 	}
 	return vm

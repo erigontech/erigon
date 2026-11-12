@@ -2637,3 +2637,17 @@ func TestNewVersionMapSeedAllocatesNoMoreThanTheSerialSeed(t *testing.T) {
 	allocs := testing.AllocsPerRun(5, func() { newVersionMapSink = NewVersionMap(bal) })
 	require.LessOrEqual(t, allocs/n, 12.1)
 }
+
+// Accounts a BAL lists with reads only get no version-map entry, so seeding them reserves nothing.
+func TestNewVersionMapReservesNothingForReadOnlyAccounts(t *testing.T) {
+	const n = 20000
+	bal := make(types.BlockAccessList, n)
+	for i := range bal {
+		bal[i].Address[0], bal[i].Address[1], bal[i].Address[2] = byte(i>>16), byte(i>>8), byte(i)
+	}
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	newVersionMapSink = NewVersionMap(bal)
+	runtime.ReadMemStats(&after)
+	require.Less(t, after.TotalAlloc-before.TotalAlloc, uint64(64*1024))
+}
