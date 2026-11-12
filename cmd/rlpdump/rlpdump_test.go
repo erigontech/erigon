@@ -37,6 +37,10 @@ func TestRoundtrip(t *testing.T) {
 		"0xf880806482520894d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0a1010000000000000000000000000000000000000000000000000000000000000001801ba0c16787a8e25e941d67691954642876c08f00996163ae7dfadbbfd6cd436f549da06180e5626cae31590f40641fe8f63734316c4bfeb4cdfab6714198c1044d2e28",
 		"0xd5c0d3cb84746573742a2a808213378667617a6f6e6b",
 		"0xc780c0c1c0825208",
+		"0x80",
+		"0xc0",
+		"0x8200ff",
+		"0x82225c",
 	} {
 		var out strings.Builder
 		in := newInStream(bytes.NewReader(common.FromHex(want)), 0)
@@ -88,6 +92,15 @@ func TestTextToRlp(t *testing.T) {
 		want string
 	}
 	cases := []tc{
+		{text: `"cat"`, want: "0x83636174"},
+		{text: `"cat",`, want: "0x83636174"},
+		{text: "00ff", want: "0x8200ff"},
+		{text: "00ff,", want: "0x8200ff"},
+		{text: "0Xf,", want: "0x0f"},
+		{text: "f", want: "0x0f"},
+		{text: "[]", want: "0xc0"},
+		{text: "[],", want: "0xc0"},
+		{text: "[\n]\n", want: "0xc0"},
 		{
 			text: `[
   "",
@@ -109,5 +122,42 @@ func TestTextToRlp(t *testing.T) {
 		if hexutil.Encode(have) != tc.want {
 			t.Errorf("test %d:\nhave %v\nwant %v", i, hexutil.Encode(have), tc.want)
 		}
+	}
+}
+
+func TestTextToRlpRejectsMalformedInput(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		text string
+	}{
+		{"empty input", ""},
+		{"whitespace", " \n\t\n"},
+		{"unexpected list end", "]"},
+		{"unexpected list end with comma", "],"},
+		{"single character", "x"},
+		{"comma only", ","},
+		{"quote only", `"`},
+		{"unclosed list", "[\n01,"},
+		{"unclosed nested list", "[\n[\n01,\n]"},
+		{"multiple roots", "01,\n02,"},
+		{"extra list end", "[\n]\n]"},
+		{"invalid hex", "zz,"},
+		{"extra comma", "01,,"},
+		{"missing closing quote", `"abc,`},
+		{"empty quoted token", `",`},
+		{"invalid escape", `"\q",`},
+		{"extra text after string", `"a"b,`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			data, err := textToRlp(strings.NewReader(tc.text))
+			if err == nil {
+				t.Fatalf("expected an error, got data %x and error %v", data, err)
+			}
+			if data != nil {
+				t.Fatalf("expected no data on error, got %x", data)
+			}
+		})
 	}
 }

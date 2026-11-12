@@ -2,6 +2,7 @@ package temporal
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
@@ -70,6 +72,66 @@ func TestCloneStateKeepsSourceSnapshot(t *testing.T) {
 	require.Equal(t, []byte{1}, v)
 }
 
+type failingHistoryStartTx struct {
+	kv.RwTx
+	err       error
+	failFirst bool
+}
+
+func (tx failingHistoryStartTx) Cursor(table string) (kv.Cursor, error) {
+	if !tx.failFirst {
+		return nil, tx.err
+	}
+	cursor, err := tx.RwTx.Cursor(table) //nolint:gocritic // The caller closes the returned cursor wrapper.
+	if err != nil {
+		return nil, err
+	}
+	return failingHistoryStartCursor{Cursor: cursor, err: tx.err}, nil
+}
+
+type failingHistoryStartCursor struct {
+	kv.Cursor
+	err error
+}
+
+func (c failingHistoryStartCursor) First() ([]byte, []byte, error) {
+	return nil, nil, c.err
+}
+
+func TestHistoryStartFromPropagatesDBError(t *testing.T) {
+	_, dbTx := mdbxtest.NewTestTx(t)
+	agg := state.NewTest(datadir.New(t.TempDir())).StepSize(16).MustOpen(t.Context())
+	defer agg.Close()
+	files := agg.BeginFilesRo()
+	defer files.Close()
+	wantErr := errors.New("history cursor failed")
+
+	for _, tc := range []struct {
+		name      string
+		failFirst bool
+	}{
+		{"cursor", false},
+		{"first", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			failingTx := failingHistoryStartTx{RwTx: dbTx, err: wantErr, failFirst: tc.failFirst}
+			for _, reader := range []struct {
+				name string
+				tx   kv.TemporalDebugTx
+			}{
+				{"read_only", &Tx{Tx: failingTx, tx: tx{aggtx: files}}},
+				{"read_write", &RwTx{RwTx: failingTx, tx: tx{aggtx: files}}},
+			} {
+				t.Run(reader.name, func(t *testing.T) {
+					start, err := reader.tx.HistoryStartFrom(kv.AccountsDomain)
+					require.ErrorIs(t, err, wantErr)
+					require.Zero(t, start)
+				})
+			}
+		})
+	}
+}
+
 func TestTemporalMemBatchPrefetchReuse(t *testing.T) {
 	mdbxDB := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	agg := state.NewTest(datadir.New(t.TempDir())).StepSize(16).MustOpen(t.Context())
@@ -92,9 +154,11 @@ func TestTemporalMemBatchPrefetchReuse(t *testing.T) {
 		err := batch.Flush(ctx, tx)
 		cancel()
 		require.NoError(t, err)
-		n, err := tx.Count(kv.TblTracesToIdx)
+		it, err := tx.IndexRange(kv.TracesToIdx, []byte("key"), -1, -1, order.Asc, -1)
 		require.NoError(t, err)
-		require.Equal(t, txNum+1, n)
+		txNums, err := stream.ToArrayU64(it)
+		require.NoError(t, err)
+		require.Len(t, txNums, int(txNum+1))
 	}
 }
 

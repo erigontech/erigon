@@ -17,6 +17,7 @@
 package engine_types
 
 import (
+	"bytes"
 	"encoding/json"
 	"testing"
 
@@ -46,6 +47,10 @@ func TestBlobsBundleV2MarshalFastJSONMatchesReflection(t *testing.T) {
 			got, err := jsonstream.Marshal(bundle)
 			require.NoError(t, err)
 			require.Equal(t, string(want), string(got))
+
+			var streamed bytes.Buffer
+			require.NoError(t, jsonstream.MarshalTo(&streamed, bundle))
+			require.Equal(t, string(want), streamed.String(), "the streamed encoding differs from the buffered one")
 		})
 	}
 }
@@ -74,6 +79,10 @@ func TestBlobsBundleV3MarshalFastJSONMatchesReflection(t *testing.T) {
 			got, err := jsonstream.Marshal(bundle)
 			require.NoError(t, err)
 			require.Equal(t, string(want), string(got))
+
+			var streamed bytes.Buffer
+			require.NoError(t, jsonstream.MarshalTo(&streamed, bundle))
+			require.Equal(t, string(want), streamed.String(), "the streamed encoding differs from the buffered one")
 		})
 	}
 }
@@ -93,6 +102,10 @@ func TestBlobsBundleV1MarshalFastJSONMatchesReflection(t *testing.T) {
 			got, err := jsonstream.Marshal(bundle)
 			require.NoError(t, err)
 			require.Equal(t, string(want), string(got))
+
+			var streamed bytes.Buffer
+			require.NoError(t, jsonstream.MarshalTo(&streamed, bundle))
+			require.Equal(t, string(want), streamed.String(), "the streamed encoding differs from the buffered one")
 		})
 	}
 }

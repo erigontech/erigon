@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"math/rand"
 	"testing"
 
@@ -55,6 +56,141 @@ func setupTestDB(t *testing.T) kv.RwDB {
 	return db
 }
 
+func TestCustodyRaiseSlotNeverDecreases(t *testing.T) {
+	db := setupTestDB(t)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		if err := WriteCustodyRaiseSlot(tx, 1000); err != nil {
+			return err
+		}
+		return WriteCustodyRaiseSlot(tx, 0)
+	}))
+
+	var got uint64
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		var err error
+		got, err = ReadCustodyRaiseSlot(tx)
+		return err
+	}))
+	require.Equal(t, uint64(1000), got)
+}
+
+func TestHighestCustodyGroupCountNeverDecreases(t *testing.T) {
+	db := setupTestDB(t)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		if err := WriteHighestCustodyGroupCount(tx, 96); err != nil {
+			return err
+		}
+		return WriteHighestCustodyGroupCount(tx, 8)
+	}))
+
+	var got uint64
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		var err error
+		got, err = ReadHighestCustodyGroupCount(tx)
+		return err
+	}))
+	require.Equal(t, uint64(96), got)
+}
+
+func TestHighestCustodyGroupCountDefaultsToZero(t *testing.T) {
+	db := setupTestDB(t)
+	var got uint64
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		var err error
+		got, err = ReadHighestCustodyGroupCount(tx)
+		return err
+	}))
+	require.Zero(t, got)
+}
+
+func TestReadExecutionPayloadEnvelopeSignatureNotFound(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		signature, found, err := ReadExecutionPayloadEnvelopeSignature(tx, 12, common.Hash{1})
+		require.NoError(t, err)
+		require.False(t, found)
+		require.Zero(t, signature)
+		return nil
+	}))
+}
+
+func TestExecutionPayloadEnvelopeSignatureRoundTrip(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	const slot = uint64(12)
+	root := common.Hash{1}
+	signature := common.Bytes96{2, 3, 4}
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return WriteExecutionPayloadEnvelopeSignature(tx, slot, root, signature)
+	}))
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		got, found, err := ReadExecutionPayloadEnvelopeSignature(tx, slot, root)
+		require.NoError(t, err)
+		require.True(t, found)
+		require.Equal(t, signature, got)
+		return nil
+	}))
+}
+
+func TestReadExecutionPayloadEnvelopeSignatureTreatsWrongLengthAsAbsent(t *testing.T) {
+	for _, length := range []int{0, 95, 97} {
+		t.Run(fmt.Sprintf("length=%d", length), func(t *testing.T) {
+			db := setupTestDB(t)
+			defer db.Close()
+
+			const slot = uint64(12)
+			root := common.Hash{1}
+			require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+				return tx.Put(kv.ExecutionPayloadEnvelopeSignatures, dbutils.BlockBodyKey(slot, root), make([]byte, length))
+			}))
+			require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+				signature, found, err := ReadExecutionPayloadEnvelopeSignature(tx, slot, root)
+				require.NoError(t, err)
+				require.False(t, found)
+				require.Zero(t, signature)
+				return nil
+			}))
+		})
+	}
+}
+
+func TestWriteExecutionPayloadEnvelopeSignatureIfAbsent(t *testing.T) {
+	validSignature := common.Bytes96{1}
+	for _, test := range []struct {
+		name     string
+		stored   []byte
+		expected common.Bytes96
+	}{
+		{name: "malformed row is replaced", stored: make([]byte, 95), expected: common.Bytes96{2}},
+		{name: "valid row is kept", stored: validSignature[:], expected: validSignature},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			db := setupTestDB(t)
+			defer db.Close()
+
+			const slot = uint64(12)
+			root := common.Hash{1}
+			replacement := common.Bytes96{2}
+			require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+				if err := tx.Put(kv.ExecutionPayloadEnvelopeSignatures, dbutils.BlockBodyKey(slot, root), test.stored); err != nil {
+					return err
+				}
+				return WriteExecutionPayloadEnvelopeSignatureIfAbsent(tx, slot, root, replacement)
+			}))
+			require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+				signature, found, err := ReadExecutionPayloadEnvelopeSignature(tx, slot, root)
+				require.NoError(t, err)
+				require.True(t, found)
+				require.Equal(t, test.expected, signature)
+				return nil
+			}))
+		})
+	}
+}
+
 func TestWriteBlockRoot(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
@@ -67,7 +203,7 @@ func TestWriteBlockRoot(t *testing.T) {
 	block.Block.Slot = 56
 	block.EncodingSizeSSZ()
 
-	require.NoError(t, WriteBeaconBlockHeaderAndIndicies(context.Background(), tx, block.SignedBeaconBlockHeader(), false))
+	require.NoError(t, WriteBeaconBlockHeaderAndIndicies(tx, block.SignedBeaconBlockHeader(), false))
 
 	// Try to retrieve the block's slot by its blockRoot and verify
 	blockRoot, err := block.Block.HashSSZ()
@@ -81,7 +217,7 @@ func TestWriteBlockRoot(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, common.Hash{}, canonicalRoot)
 
-	err = MarkRootCanonical(context.Background(), tx, *retrievedSlot, blockRoot)
+	err = MarkRootCanonical(tx, *retrievedSlot, blockRoot)
 	require.NoError(t, err)
 
 	canonicalRoot, err = ReadCanonicalBlockRoot(tx, *retrievedSlot)
@@ -102,7 +238,7 @@ func TestWriteBeaconBlockStoresCompleteZstdFrame(t *testing.T) {
 
 	blockRoot, err := block.Block.HashSSZ()
 	require.NoError(t, err)
-	require.NoError(t, WriteBeaconBlock(context.Background(), tx, block))
+	require.NoError(t, WriteBeaconBlock(tx, block))
 
 	stored, err := tx.GetOne(kv.BeaconBlocks, dbutils.BlockBodyKey(block.Block.Slot, blockRoot))
 	require.NoError(t, err)
@@ -131,13 +267,13 @@ func TestReadParentBlockRoot(t *testing.T) {
 	block.Block.ParentRoot = mockParentRoot
 	block.EncodingSizeSSZ()
 
-	require.NoError(t, WriteBeaconBlockHeaderAndIndicies(context.Background(), tx, block.SignedBeaconBlockHeader(), false))
+	require.NoError(t, WriteBeaconBlockHeaderAndIndicies(tx, block.SignedBeaconBlockHeader(), false))
 
 	// Try to retrieve the block's slot by its blockRoot and verify
 	blockRoot, err := block.Block.HashSSZ()
 	require.NoError(t, err)
 
-	retrieveParentRoot, err := ReadParentBlockRoot(context.Background(), tx, blockRoot)
+	retrieveParentRoot, err := ReadParentBlockRoot(tx, blockRoot)
 	require.NoError(t, err)
 	require.Equal(t, mockParentRoot, retrieveParentRoot)
 }
@@ -156,7 +292,7 @@ func TestTruncateCanonicalChain(t *testing.T) {
 	block.Block.ParentRoot = mockParentRoot
 	block.EncodingSizeSSZ()
 
-	require.NoError(t, WriteBeaconBlockHeaderAndIndicies(context.Background(), tx, block.SignedBeaconBlockHeader(), true))
+	require.NoError(t, WriteBeaconBlockHeaderAndIndicies(tx, block.SignedBeaconBlockHeader(), true))
 
 	// Try to retrieve the block's slot by its blockRoot and verify
 	blockRoot, err := block.Block.HashSSZ()
@@ -166,7 +302,7 @@ func TestTruncateCanonicalChain(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, common.Hash(blockRoot), canonicalRoot)
 
-	require.NoError(t, TruncateCanonicalChain(context.Background(), tx, 0))
+	require.NoError(t, TruncateCanonicalChain(tx, 0))
 
 	canonicalRoot, err = ReadCanonicalBlockRoot(tx, block.Block.Slot)
 	require.NoError(t, err)
@@ -188,9 +324,9 @@ func TestReadCanonicalHead(t *testing.T) {
 	root10 := common.Hash{0x10}
 	root12 := common.Hash{0x12}
 	root11 := common.Hash{0x11}
-	require.NoError(t, MarkRootCanonical(context.Background(), tx, 10, root10))
-	require.NoError(t, MarkRootCanonical(context.Background(), tx, 12, root12))
-	require.NoError(t, MarkRootCanonical(context.Background(), tx, 11, root11))
+	require.NoError(t, MarkRootCanonical(tx, 10, root10))
+	require.NoError(t, MarkRootCanonical(tx, 12, root12))
+	require.NoError(t, MarkRootCanonical(tx, 11, root11))
 
 	slot, root, err = ReadCanonicalHead(tx)
 	require.NoError(t, err)
@@ -217,13 +353,13 @@ func TestReadBeaconBlockHeader(t *testing.T) {
 	canonical := true
 	block.EncodingSizeSSZ()
 
-	require.NoError(t, WriteBeaconBlockHeaderAndIndicies(context.Background(), tx, block.SignedBeaconBlockHeader(), canonical))
+	require.NoError(t, WriteBeaconBlockHeaderAndIndicies(tx, block.SignedBeaconBlockHeader(), canonical))
 
 	// Try to retrieve the block's slot by its blockRoot and verify
 	blockRoot, err := block.Block.HashSSZ()
 	require.NoError(t, err)
 
-	header, isCanonical, err := ReadSignedHeaderByBlockRoot(context.Background(), tx, blockRoot)
+	header, isCanonical, err := ReadSignedHeaderByBlockRoot(tx, blockRoot)
 	require.NoError(t, err)
 	require.Equal(t, isCanonical, canonical)
 	require.NotNil(t, header)
@@ -289,12 +425,12 @@ func TestPruneBlocksRemovesAllBlocksBeforeSlot(t *testing.T) {
 
 		root, err := block.Block.HashSSZ()
 		require.NoError(t, err)
-		require.NoError(t, WriteBeaconBlockAndIndicies(context.Background(), tx, block, false))
+		require.NoError(t, WriteBeaconBlockAndIndicies(tx, block, false))
 
 		blocks = append(blocks, storedBlock{slot: slot, root: root})
 	}
 
-	require.NoError(t, PruneBlocks(context.Background(), tx, 3))
+	require.NoError(t, PruneBlocks(tx, 3))
 
 	for _, block := range blocks {
 		body, err := tx.GetOne(kv.BeaconBlocks, dbutils.BlockBodyKey(block.slot, block.root))
@@ -305,6 +441,60 @@ func TestPruneBlocksRemovesAllBlocksBeforeSlot(t *testing.T) {
 		}
 		require.NotEmpty(t, body)
 	}
+}
+
+func TestReadBlockRootsAtSlotListsEveryStoredBlockOfTheSlot(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	store := func(slot, proposer uint64) common.Hash {
+		block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+		block.Block.Slot = slot
+		block.Block.ProposerIndex = proposer
+		root, err := block.Block.HashSSZ()
+		require.NoError(t, err)
+		require.NoError(t, WriteBeaconBlock(tx, block))
+		return root
+	}
+	store(3, 0)
+	first, second := store(4, 0), store(4, 1)
+	store(5, 0)
+
+	roots, err := ReadBlockRootsAtSlot(tx, 4)
+	require.NoError(t, err)
+	require.ElementsMatch(t, []common.Hash{first, second}, roots)
+
+	roots, err = ReadBlockRootsAtSlot(tx, 6)
+	require.NoError(t, err)
+	require.Empty(t, roots)
+}
+
+func TestPruneBlocksPrunesExecutionPayloadEnvelopeSignaturesBeforeSlot(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	rootBefore := common.Hash{1}
+	rootAt := common.Hash{2}
+	require.NoError(t, WriteExecutionPayloadEnvelopeSignature(tx, 11, rootBefore, common.Bytes96{1}))
+	require.NoError(t, WriteExecutionPayloadEnvelopeSignature(tx, 12, rootAt, common.Bytes96{2}))
+
+	require.NoError(t, PruneBlocks(tx, 12))
+
+	_, found, err := ReadExecutionPayloadEnvelopeSignature(tx, 11, rootBefore)
+	require.NoError(t, err)
+	require.False(t, found)
+	signature, found, err := ReadExecutionPayloadEnvelopeSignature(tx, 12, rootAt)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, common.Bytes96{2}, signature)
 }
 
 func TestPruneBlocksLimitRemovesBoundedNumberOfBlocks(t *testing.T) {
@@ -328,12 +518,12 @@ func TestPruneBlocksLimitRemovesBoundedNumberOfBlocks(t *testing.T) {
 
 		root, err := block.Block.HashSSZ()
 		require.NoError(t, err)
-		require.NoError(t, WriteBeaconBlockAndIndicies(context.Background(), tx, block, false))
+		require.NoError(t, WriteBeaconBlockAndIndicies(tx, block, false))
 
 		blocks = append(blocks, storedBlock{slot: slot, root: root})
 	}
 
-	deleted, hasMore, err := PruneBlocksLimit(context.Background(), tx, 4, 2)
+	deleted, hasMore, err := PruneBlocksLimit(tx, 4, 2)
 	require.NoError(t, err)
 	require.Equal(t, 2, deleted)
 	require.True(t, hasMore)
@@ -348,7 +538,7 @@ func TestPruneBlocksLimitRemovesBoundedNumberOfBlocks(t *testing.T) {
 		require.NotEmpty(t, body)
 	}
 
-	deleted, hasMore, err = PruneBlocksLimit(context.Background(), tx, 4, 2)
+	deleted, hasMore, err = PruneBlocksLimit(tx, 4, 2)
 	require.NoError(t, err)
 	require.Equal(t, 1, deleted)
 	require.False(t, hasMore)
@@ -366,10 +556,10 @@ func TestPruneBlocksLimitExactLimitHasNoMore(t *testing.T) {
 		block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
 		block.Block.Slot = slot
 		block.EncodingSizeSSZ()
-		require.NoError(t, WriteBeaconBlockAndIndicies(context.Background(), tx, block, false))
+		require.NoError(t, WriteBeaconBlockAndIndicies(tx, block, false))
 	}
 
-	deleted, hasMore, err := PruneBlocksLimit(context.Background(), tx, 3, 2)
+	deleted, hasMore, err := PruneBlocksLimit(tx, 3, 2)
 	require.NoError(t, err)
 	require.Equal(t, 2, deleted)
 	require.False(t, hasMore)
@@ -398,7 +588,7 @@ func TestWriteBeaconBlockMatchesReferenceEncoderOptions(t *testing.T) {
 	blockRoot, err := block.Block.HashSSZ()
 	require.NoError(t, err)
 
-	require.NoError(t, WriteBeaconBlock(context.Background(), tx, block))
+	require.NoError(t, WriteBeaconBlock(tx, block))
 	stored, err := tx.GetOne(kv.BeaconBlocks, dbutils.BlockBodyKey(block.Block.Slot, blockRoot))
 	require.NoError(t, err)
 

@@ -396,6 +396,7 @@ The following table shows the current implementation status of Erigon's RPC daem
 | txpool_content                             | Yes     | `remote`                                              |
 | txpool_contentFrom                         | Yes     | `remote`                                              |
 | txpool_status                              | Yes     | `remote`                                              |
+| txpool_inspect                             | Yes     | `remote`                                              |
 |                                            |         |                                                       |
 | eth_getCompilers                           | No      | deprecated                                            |
 | eth_compileLLL                             | No      | deprecated                                            |

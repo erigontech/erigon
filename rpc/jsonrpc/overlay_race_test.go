@@ -1230,8 +1230,8 @@ func TestTraceFilter_UsesCommittedFromTag(t *testing.T) {
 
 	stream := jsonstream.New(nil)
 
-	from := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
-	to := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(overlayRaceChainSize))
+	from := rpc.LatestBlockNumber
+	to := rpc.BlockNumber(overlayRaceChainSize)
 	err := api.Filter(h.m.Ctx, TraceFilterRequest{FromBlock: &from, ToBlock: &to}, new(bool), nil, stream)
 	require.NoError(t, err)
 }
@@ -1465,6 +1465,16 @@ func requireBlockRangeIntoFuture(t *testing.T, err error) {
 	require.EqualError(t, err, ErrBlockRangeIntoFuture)
 }
 
+// requireResourceNotFound checks the -32001 a blockHash selector returns for a
+// block it cannot serve, and that the message names why.
+func requireResourceNotFound(t *testing.T, err error, message string) {
+	t.Helper()
+	var rpcErr rpc.Error
+	require.ErrorAs(t, err, &rpcErr)
+	require.Equal(t, rpc.ErrCodeResourceNotFound, rpcErr.ErrorCode())
+	require.ErrorContains(t, err, message)
+}
+
 // TestTraceFilter_FutureToBlockErrors pins that an explicit toBlock past the
 // executed head is invalid params, even when its canonical header resolves or
 // the forkchoice head ("latest") is ahead of execution, instead of silently
@@ -1472,13 +1482,12 @@ func requireBlockRangeIntoFuture(t *testing.T, err error) {
 // head block look empty.
 func TestTraceFilter_FutureToBlockErrors(t *testing.T) {
 	t.Parallel()
-	m, aheadHash := newBlockAheadOfExecutionTester(t)
+	m, _ := newBlockAheadOfExecutionTester(t)
 	api := newTraceApiForTest(m)
 
-	for name, to := range map[string]rpc.BlockNumberOrHash{
-		"number": rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(overlayRaceChainSize + 1)),
-		"hash":   rpc.BlockNumberOrHashWithHash(aheadHash, true),
-		"latest": rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber),
+	for name, to := range map[string]rpc.BlockNumber{
+		"number": rpc.BlockNumber(overlayRaceChainSize + 1),
+		"latest": rpc.LatestBlockNumber,
 	} {
 		t.Run(name, func(t *testing.T) {
 			err := api.Filter(m.Ctx, TraceFilterRequest{ToBlock: &to}, new(bool), nil, jsonstream.New(nil))
@@ -1489,13 +1498,12 @@ func TestTraceFilter_FutureToBlockErrors(t *testing.T) {
 
 func TestTraceFilter_FutureFromBlockErrors(t *testing.T) {
 	t.Parallel()
-	m, aheadHash := newBlockAheadOfExecutionTester(t)
+	m, _ := newBlockAheadOfExecutionTester(t)
 	api := newTraceApiForTest(m)
 
-	for name, from := range map[string]rpc.BlockNumberOrHash{
-		"number": rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(overlayRaceChainSize + 1)),
-		"hash":   rpc.BlockNumberOrHashWithHash(aheadHash, true),
-		"latest": rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber),
+	for name, from := range map[string]rpc.BlockNumber{
+		"number": rpc.BlockNumber(overlayRaceChainSize + 1),
+		"latest": rpc.LatestBlockNumber,
 	} {
 		t.Run(name, func(t *testing.T) {
 			err := api.Filter(m.Ctx, TraceFilterRequest{FromBlock: &from}, new(bool), nil, jsonstream.New(nil))
@@ -1504,55 +1512,38 @@ func TestTraceFilter_FutureFromBlockErrors(t *testing.T) {
 	}
 }
 
-func TestTraceFilter_RejectsOverlayOnlyHead(t *testing.T) {
+// TestTraceFilter_BlockHashUsesCommittedView pins that blockHash selects only
+// a block of the committed view, as eth_getLogs does: a published head that is
+// not committed yet, or an overlay reorg at an executed height, is not found
+// (-32001).
+func TestTraceFilter_BlockHashUsesCommittedView(t *testing.T) {
 	base, m, overlayHeader := newOverlayAheadTestAPI(t)
-	api := NewTraceAPI(base, m.DB, &rpccfg.TraceApiConfig{})
-
-	stream := jsonstream.New(nil)
-	to := rpc.BlockNumberOrHashWithHash(overlayHeader.Hash(), true)
-	err := api.Filter(m.Ctx, TraceFilterRequest{ToBlock: &to}, new(bool), nil, stream)
-	require.ErrorContains(t, err, "not executed")
-}
-
-func TestTraceFilter_RejectsOverlayReorgAtExecutedHeight(t *testing.T) {
-	base, m, _ := newOverlayAheadTestAPI(t)
 	reorgHeader := writeOverlayReorgHeader(t, base, m)
 	api := NewTraceAPI(base, m.DB, &rpccfg.TraceApiConfig{})
 
-	stream := jsonstream.New(nil)
-	to := rpc.BlockNumberOrHashWithHash(reorgHeader.Hash(), true)
-	err := api.Filter(m.Ctx, TraceFilterRequest{ToBlock: &to}, new(bool), nil, stream)
-	require.ErrorContains(t, err, "not available in the committed view")
+	for name, hash := range map[string]common.Hash{
+		"overlay head":  overlayHeader.Hash(),
+		"overlay reorg": reorgHeader.Hash(),
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := api.Filter(m.Ctx, TraceFilterRequest{BlockHash: &hash}, new(bool), nil, jsonstream.New(nil))
+			requireResourceNotFound(t, err, fmt.Sprintf("block not found: %x", hash))
+		})
+	}
 }
 
-func TestTraceFilter_PropagatesOverlayProbeError(t *testing.T) {
-	base, m, overlayHeader := newOverlayAheadTestAPI(t)
-	wantErr := errors.New("overlay header lookup failed")
-	base._blockReader = failOverlayHeaderNumberBlockReader{FullBlockReader: base._blockReader, err: wantErr}
-	api := NewTraceAPI(base, m.DB, &rpccfg.TraceApiConfig{})
-
-	stream := jsonstream.New(nil)
-	to := rpc.BlockNumberOrHashWithHash(overlayHeader.Hash(), true)
-	err := api.Filter(m.Ctx, TraceFilterRequest{ToBlock: &to}, new(bool), nil, stream)
-	require.ErrorIs(t, err, wantErr)
-}
-
-// TestTraceFilter_UnknownBlockErrors pins that a bound naming no known block
+// TestTraceFilter_UnknownBlockErrors pins that a selector naming no known block
 // is an error, not an empty result.
 func TestTraceFilter_UnknownBlockErrors(t *testing.T) {
 	base, m, overlayHeader := newOverlayAheadTestAPI(t)
 	api := NewTraceAPI(base, m.DB, &rpccfg.TraceApiConfig{})
-	unknownHash := rpc.BlockNumberOrHashWithHash(common.Hash{0xff}, true)
+	unknownHash := common.Hash{0xff}
 	// Past the overlay head too, so neither view knows the block.
-	unknownNumber := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(overlayHeader.Number.Uint64() + 1))
+	unknownNumber := rpc.BlockNumber(overlayHeader.Number.Uint64() + 1)
 
-	t.Run("fromBlock hash", func(t *testing.T) {
-		err := api.Filter(m.Ctx, TraceFilterRequest{FromBlock: &unknownHash}, new(bool), nil, jsonstream.New(nil))
-		require.ErrorAs(t, err, &rpc.BlockNotFoundErr{})
-	})
-	t.Run("toBlock hash", func(t *testing.T) {
-		err := api.Filter(m.Ctx, TraceFilterRequest{ToBlock: &unknownHash}, new(bool), nil, jsonstream.New(nil))
-		require.ErrorAs(t, err, &rpc.BlockNotFoundErr{})
+	t.Run("blockHash", func(t *testing.T) {
+		err := api.Filter(m.Ctx, TraceFilterRequest{BlockHash: &unknownHash}, new(bool), nil, jsonstream.New(nil))
+		requireResourceNotFound(t, err, fmt.Sprintf("block not found: %x", unknownHash))
 	})
 	t.Run("fromBlock number", func(t *testing.T) {
 		err := api.Filter(m.Ctx, TraceFilterRequest{FromBlock: &unknownNumber}, new(bool), nil, jsonstream.New(nil))
@@ -2027,7 +2018,8 @@ func commitOverlayBlockE(h *overlayAheadHarness) error {
 	return rwTx.Commit()
 }
 
-// beginHookDB runs a hook right after each BeginTemporalRo returns, simulating
+// beginHookDB runs a hook right after each BeginTemporalRo or plain BeginRo
+// (the one Filters.BeginRoWithOverlay opens on InternalDB) returns, simulating
 // commit/publish activity landing while a request acquires its tx. Hooks also
 // run on the oracle's errgroup goroutines (via Fork), so they must not use
 // testify's FailNow family; failures are reported with the goroutine-safe
@@ -2043,9 +2035,31 @@ func (db *beginHookDB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, erro
 	if err != nil {
 		return nil, err
 	}
+	db.runHook()
+	return tx, nil
+}
+
+func (db *beginHookDB) runHook() {
 	if hookErr := db.hook(); hookErr != nil {
 		db.t.Errorf("begin hook: %v", hookErr)
 	}
+}
+
+func (db *beginHookDB) InternalDB() kv.RwDB {
+	return &beginHookRwDB{RwDB: db.TemporalRoDB.(interface{ InternalDB() kv.RwDB }).InternalDB(), parent: db}
+}
+
+type beginHookRwDB struct {
+	kv.RwDB
+	parent *beginHookDB
+}
+
+func (db *beginHookRwDB) BeginRo(ctx context.Context) (kv.Tx, error) {
+	tx, err := db.RwDB.BeginRo(ctx) //nolint:gocritic
+	if err != nil {
+		return nil, err
+	}
+	db.parent.runHook()
 	return tx, nil
 }
 
@@ -2269,6 +2283,70 @@ func TestGasPrice_CachedRequestSkipsCanonicalScan(t *testing.T) {
 		"a request served from the tip cache must not scan the canonical table")
 }
 
+type countTemporalBeginsDB struct {
+	kv.TemporalRoDB
+	begins *atomic.Int64
+}
+
+func (db *countTemporalBeginsDB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
+	db.begins.Add(1)
+	return db.TemporalRoDB.BeginTemporalRo(ctx) //nolint:gocritic
+}
+
+func (db *countTemporalBeginsDB) BeginRo(ctx context.Context) (kv.Tx, error) {
+	db.begins.Add(1)
+	return db.TemporalRoDB.BeginRo(ctx) //nolint:gocritic
+}
+
+func (db *countTemporalBeginsDB) InternalDB() kv.RwDB {
+	return db.TemporalRoDB.(interface{ InternalDB() kv.RwDB }).InternalDB()
+}
+
+// TestGasPrice_CachedRequestOpensNoTemporalTx pins that a request the tip cache
+// answers reads the head markers on a plain db tx: opening a temporal tx pins
+// every state and block file, which dominates the cost of a cached answer.
+func TestGasPrice_CachedRequestOpensNoTemporalTx(t *testing.T) {
+	t.Parallel()
+	h := newOverlayAheadHarness(t, false)
+	var begins atomic.Int64
+	api := newEthApiForTest(h.base, &countTemporalBeginsDB{TemporalRoDB: h.m.DB, begins: &begins}, nil, nil)
+
+	_, err := api.GasPrice(h.m.Ctx)
+	require.NoError(t, err)
+	cold := begins.Load()
+
+	_, err = api.GasPrice(h.m.Ctx)
+	require.NoError(t, err)
+	_, err = api.MaxPriorityFeePerGas(h.m.Ctx)
+	require.NoError(t, err)
+	require.Equal(t, cold, begins.Load(),
+		"a request served from the tip cache must not open a temporal tx")
+}
+
+// TestGasPrice_OverlayHeadInvalidatesCachedTip pins that the cache check sees
+// the published overlay: a tip cached at the committed head must not answer
+// once an overlay publishes a newer head.
+func TestGasPrice_OverlayHeadInvalidatesCachedTip(t *testing.T) {
+	t.Parallel()
+	h := newOverlayAheadHarness(t, false)
+	api := newEthApiForTest(h.base, h.m.DB, nil, nil)
+	h.events.PublishOverlay(nil)
+
+	committed, err := api.GasPrice(h.m.Ctx)
+	require.NoError(t, err)
+
+	publishOverlayHead(t, h, h.overlayHeader)
+	got, err := api.GasPrice(h.m.Ctx)
+	require.NoError(t, err)
+	tip, err := api.MaxPriorityFeePerGas(h.m.Ctx)
+	require.NoError(t, err)
+
+	want := new(big.Int).Add(tip.ToInt(), h.overlayHeader.BaseFee.ToBig())
+	require.NotEqual(t, committed.ToInt(), want)
+	require.Equal(t, want, got.ToInt(),
+		"the price must come from the overlay head, not the tip cached at the committed head")
+}
+
 // TestBeginTemporalRoWithOverlay_ChurnPinsNoOverlay pins that a capture which never
 // stabilizes ends on an explicit no-overlay pin. Serving the last capture instead
 // would layer an overlay generation over a database snapshot the helper just failed
@@ -2375,6 +2453,49 @@ func TestBlockNumber_PublishCycleDuringTxAcquisition(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, hexutil.Uint64(h.overlayHeader.Number.Uint64()), got,
 		"a publish/commit/unpublish cycle during tx acquisition must not hide the head block")
+}
+
+// TestBlockNumber_OpensNoTemporalTx pins that eth_blockNumber and
+// erigon_blockNumber read the head markers on a plain db tx: opening a temporal
+// tx pins every state and block file, which these lookups never read.
+func TestBlockNumber_OpensNoTemporalTx(t *testing.T) {
+	t.Parallel()
+	h := newOverlayAheadHarness(t, false)
+	overlay := h.doms.BlockOverlay()
+	rawdb.WriteForkchoiceSafe(overlay, h.overlayHeader.Hash())
+	rawdb.WriteForkchoiceFinalized(overlay, h.overlayHeader.Hash())
+	var begins atomic.Int64
+	db := &countTemporalBeginsDB{TemporalRoDB: h.m.DB, begins: &begins}
+
+	_, err := newEthApiForTest(h.base, db, nil, nil).BlockNumber(h.m.Ctx)
+	require.NoError(t, err)
+	erigon := NewErigonAPI(h.base, db, nil)
+	_, err = erigon.BlockNumber(h.m.Ctx, nil)
+	require.NoError(t, err)
+	for _, tag := range []rpc.BlockNumber{rpc.LatestBlockNumber, rpc.SafeBlockNumber, rpc.FinalizedBlockNumber, rpc.PendingBlockNumber} {
+		_, err = erigon.BlockNumber(h.m.Ctx, &tag)
+		require.NoError(t, err, tag)
+	}
+	require.Zero(t, begins.Load(), "a block number lookup must not open a temporal tx")
+}
+
+// TestErigonBlockNumber_ExecutedReadsOverlay pins that the latest executed block
+// comes from the published overlay, like the forkchoice head: the overlay block
+// is executed and RPC already serves its state.
+func TestErigonBlockNumber_ExecutedReadsOverlay(t *testing.T) {
+	t.Parallel()
+	h := newOverlayAheadHarness(t, false)
+	overlayNumber := h.overlayHeader.Number.Uint64()
+	require.NoError(t, stages.SaveStageProgress(h.doms.BlockOverlay(), stages.Execution, overlayNumber))
+	api := NewErigonAPI(h.base, h.m.DB, nil)
+
+	got, err := api.BlockNumber(h.m.Ctx, nil)
+	require.NoError(t, err)
+	require.Equal(t, hexutil.Uint64(overlayNumber), got)
+	pending := rpc.PendingBlockNumber
+	got, err = api.BlockNumber(h.m.Ctx, &pending)
+	require.NoError(t, err)
+	require.Equal(t, hexutil.Uint64(overlayNumber), got)
 }
 
 // TestBaseFee_PublishCycleDuringTxAcquisition pins the same atomic acquisition
@@ -2754,4 +2875,17 @@ func TestGraphQLCall_PublishCycleDuringTxAcquisition(t *testing.T) {
 		ethapi.CallArgs{From: &h.m.Address, To: &to})
 	require.NoError(t, err,
 		"a publish/commit/unpublish cycle during tx acquisition must not hide the head block")
+}
+
+func TestGetModifiedAccountsByHash_NonCanonicalErrors(t *testing.T) {
+	t.Parallel()
+	m := execmoduletester.New(t)
+	c := insertOverlayRaceChain(t, m)
+	api := newDebugApiForTest(m)
+
+	_, err := api.GetModifiedAccountsByHash(m.Ctx, writeForkHeader(t, m.Ctx, m, 1), nil)
+	require.ErrorContains(t, err, "not currently canonical")
+	forkEnd := writeForkHeader(t, m.Ctx, m, 2)
+	_, err = api.GetModifiedAccountsByHash(m.Ctx, c.Blocks[0].Hash(), &forkEnd)
+	require.ErrorContains(t, err, "not currently canonical")
 }

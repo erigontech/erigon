@@ -156,6 +156,38 @@ func (api *DebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash common.Ha
 	}
 	defer tx.Rollback()
 
+	return readWithStableTxView(ctx, tx, func() (StorageRangeResult, error) {
+		return api.storageRangeAt(ctx, tx, blockHash, txIndex, contractAddress, keyStart, maxResult)
+	})
+}
+
+// Remote cursor operations can renew the database view even on Close.
+// ViewID is always checked; history generation is also checked when the backend
+// provides it, because file retirement need not change MDBX's ViewID.
+// The callback must be safe to repeat and must close its cursors before returning.
+// Results and errors from reads that cross either change are discarded.
+func readWithStableTxView[T any](ctx context.Context, tx kv.TemporalTx, read func() (T, error)) (T, error) {
+	for range 3 {
+		if err := ctx.Err(); err != nil {
+			var zero T
+			return zero, err
+		}
+		viewID := tx.ViewID()
+		generation, hasGeneration := historyFilesGeneration(tx)
+		result, err := read()
+		currentGeneration, hasCurrentGeneration := historyFilesGeneration(tx)
+		if tx.ViewID() == viewID && hasCurrentGeneration == hasGeneration && currentGeneration == generation {
+			return result, err
+		}
+	}
+	var zero T
+	if err := ctx.Err(); err != nil {
+		return zero, err
+	}
+	return zero, errors.New("database view changed repeatedly during read; retry the request")
+}
+
+func (api *DebugAPIImpl) storageRangeAt(ctx context.Context, tx kv.TemporalTx, blockHash common.Hash, txIndex uint64, contractAddress common.Address, keyStart hexutil.Bytes, maxResult int) (StorageRangeResult, error) {
 	if maxResult < 0 {
 		maxResult = 0
 	}
@@ -171,13 +203,12 @@ func (api *DebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash common.Ha
 	if err := rpchelper.CheckBlockExecuted(tx, blockNumber); err != nil {
 		return StorageRangeResult{}, err
 	}
-
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber)
+	minTxNum, _, err := checkTxIndexInBlock(ctx, api.BaseAPI, tx, blockNumber, txIndex)
 	if err != nil {
 		return StorageRangeResult{}, err
 	}
 
-	minTxNum, err := api._txNumReader.Min(ctx, tx, blockNumber)
+	err = api.BaseAPI.checkPruneTransactionHistoryAtIndex(ctx, tx, blockNumber, txIndex)
 	if err != nil {
 		return StorageRangeResult{}, err
 	}
@@ -257,7 +288,7 @@ func (api *DebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash rpc.Blo
 		return state.IteratorDump{}, err
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber)
+	err = api.BaseAPI.checkPruneState(ctx, tx, blockNumber)
 	if err != nil {
 		return state.IteratorDump{}, err
 	}
@@ -520,9 +551,9 @@ func (api *DebugAPIImpl) GetModifiedAccountsByHash(ctx context.Context, startHas
 		return nil, err
 	}
 
-	startNum, err := api.headerNumberByHash(ctx, tx, startHash)
+	startNum, _, _, err := rpchelper.GetCanonicalBlockNumber(ctx, rpc.BlockNumberOrHashWithHash(startHash, true), tx, api._blockReader)
 	if err != nil {
-		return nil, fmt.Errorf("start block %x not found", startHash)
+		return nil, fmt.Errorf("start block: %w", err)
 	}
 	if startNum > latestBlock {
 		return nil, fmt.Errorf("start block (%d) is later than the latest block (%d)", startNum, latestBlock)
@@ -545,9 +576,9 @@ func (api *DebugAPIImpl) GetModifiedAccountsByHash(ctx context.Context, startHas
 	}
 
 	// Two params: Geth compares state at startNum vs endNum → blocks (startNum, endNum].
-	endNum, err := api.headerNumberByHash(ctx, tx, *endHash)
+	endNum, _, _, err := rpchelper.GetCanonicalBlockNumber(ctx, rpc.BlockNumberOrHashWithHash(*endHash, true), tx, api._blockReader)
 	if err != nil {
-		return nil, fmt.Errorf("end block %x not found", *endHash)
+		return nil, fmt.Errorf("end block: %w", err)
 	}
 	if endNum > latestBlock {
 		return nil, fmt.Errorf("end block (%d) is later than the latest block (%d)", endNum, latestBlock)
@@ -582,42 +613,46 @@ func (api *DebugAPIImpl) AccountAt(ctx context.Context, blockHash common.Hash, t
 	}
 	defer tx.Rollback()
 
-	// Committed view: the canonical-hash check and the GetAsOf reads below all
-	// go through this plain tx.
-	blockNumber, err := api._blockReader.HeaderNumber(ctx, tx, blockHash)
+	return readWithStableTxView(ctx, tx, func() (*AccountResult, error) {
+		return api.accountAt(ctx, tx, blockHash, txIndex, address)
+	})
+}
+
+func (api *DebugAPIImpl) accountAt(ctx context.Context, tx kv.TemporalTx, blockHash common.Hash, txIndex uint64, address common.Address) (*AccountResult, error) {
+	// The requested hash and the indexed state must belong to the same canonical view.
+	reader := canonicalViewReader{api._blockReader}
+	blockNumber, err := reader.HeaderNumber(ctx, tx, blockHash)
 	if err != nil {
 		return nil, err
 	}
 	if blockNumber == nil {
 		return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
 	}
-	canonicalHash, ok, err := api._blockReader.CanonicalHash(ctx, tx, *blockNumber)
+	canonicalHash, ok, err := reader.CanonicalHash(ctx, tx, *blockNumber)
 	if err != nil {
 		return nil, err
 	}
 	if !ok {
 		return nil, fmt.Errorf("canonical hash not found %d", *blockNumber)
 	}
-	isCanonical := canonicalHash == blockHash
-	if !isCanonical {
+	if canonicalHash != blockHash {
 		return nil, errors.New("block hash is not canonical")
 	}
 	if err := rpchelper.CheckBlockExecuted(tx, *blockNumber); err != nil {
 		return nil, err
 	}
-
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, *blockNumber)
+	minTxNum, _, err := checkTxIndexInBlock(ctx, api.BaseAPI, tx, *blockNumber, txIndex)
 	if err != nil {
 		return nil, err
 	}
 
-	minTxNum, err := api._txNumReader.Min(ctx, tx, *blockNumber)
+	err = api.BaseAPI.checkPruneTransactionHistoryAtIndex(ctx, tx, *blockNumber, txIndex)
 	if err != nil {
 		return nil, err
 	}
-	ttx := tx
+
 	asOfTxNum := minTxNum + txIndex + 1
-	v, ok, err := ttx.GetAsOf(kv.AccountsDomain, address[:], asOfTxNum)
+	v, ok, err := tx.GetAsOf(kv.AccountsDomain, address[:], asOfTxNum)
 	if err != nil {
 		return nil, err
 	}
@@ -634,7 +669,7 @@ func (api *DebugAPIImpl) AccountAt(ctx context.Context, blockHash common.Hash, t
 	result.Nonce = hexutil.Uint64(a.Nonce)
 	result.CodeHash = a.CodeHash.Value()
 
-	code, _, err := ttx.GetAsOf(kv.CodeDomain, address[:], asOfTxNum)
+	code, _, err := tx.GetAsOf(kv.CodeDomain, address[:], asOfTxNum)
 	if err != nil {
 		return nil, err
 	}

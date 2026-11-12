@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/state"
@@ -128,6 +129,8 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 		return err
 	}
 	defer ibs.Close()
+	transactions.VersionedCallState(ibs)
+	api.shareCodeByHash(ibs)
 
 	var precompiles vm.PrecompiledContracts
 	if config.BlockOverrides != nil {
@@ -146,6 +149,7 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 	stream.WriteArrayStart()
 
 	txns := block.Transactions()
+	firstTxIndex := ibs.TxnIndex()
 
 	var gasUsed protocol.GasUsed
 	for txnIndex, txn := range txns {
@@ -158,7 +162,7 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 		case <-ctx.Done():
 			return ctx.Err()
 		}
-		ibs.SetTxContext(blockCtx.BlockNumber, txnIndex)
+		ibs.SetTxContext(blockCtx.BlockNumber, firstTxIndex+txnIndex)
 
 		// A transaction's error is answered inside its own object; the block trace goes on.
 		_ = rpc.WriteFieldOrError(stream, "result", func(s *jsonstream.Stream) error {
@@ -175,13 +179,16 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 			txnGasUsage, traceErr := transactions.TraceTx(ctx, engine, txn, msg, blockCtx, txCtx, &block.HeaderNoCopy().Number, block.Hash(), txnIndex, ibs, config, chainConfig, s, api.evmCallTimeout, precompiles)
 			gasUsed.BlockExecution += txnGasUsage.BlockExecutionGasUsed
 			gasUsed.BlockState += txnGasUsage.BlockStateGasUsed
-			if traceErr != nil {
-				return traceErr
-			}
-			return ibs.FinalizeTx(rules, state.NewNoopWriter())
+			return traceErr
 		})
 
 		stream.WriteObjectEnd()
+
+		// Trace output can fail after execution. Finalize even then so the next
+		// transaction starts with its own storage originals, journal and refunds.
+		if err := ethapi.FinalizeCallTx(ibs, rules); err != nil {
+			return err
+		}
 
 		if err := stream.Flush(); err != nil { // Client can use result of 1 tx-trace
 			return err
@@ -228,8 +235,7 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 		return fmt.Errorf("genesis is not traceable")
 	}
 
-	// check pruning to ensure we have the block and the history at this block level
-	err = api.BaseAPI.checkBlockHistoryAvailable(ctx, tx, blockNum)
+	err = api.BaseAPI.checkPruneBlocks(ctx, tx, blockNum)
 	if err != nil {
 		return err
 	}
@@ -250,6 +256,9 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 	if txnIndex >= block.Transactions().Len() {
 		return fmt.Errorf("transaction %#x not found", hash)
 	}
+	if err := api.checkPruneTransactionHistoryAtIndex(ctx, tx, blockNum, uint64(txnIndex)); err != nil {
+		return err
+	}
 	engine := api.engine()
 
 	ibs, blockCtx, _, rules, signer, err := transactions.ComputeBlockContext(ctx, engine, block.HeaderNoCopy(), chainConfig, api._blockReader, nil, api._txNumReader, tx, txnIndex)
@@ -257,6 +266,8 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 		return err
 	}
 	defer ibs.Close()
+	transactions.VersionedCallState(ibs)
+	api.shareCodeByHash(ibs)
 
 	// The state is built from history at txnIndex, so the earlier transactions of
 	// the block never ran and the log counter they left has to be handed in.
@@ -276,21 +287,79 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 		if config.StateOverrides != nil {
 			rules = blockCtx.Rules(chainConfig)
 			precompiles = vm.ActivePrecompiledContracts(rules)
-			if err := config.StateOverrides.Override(ibs, precompiles, rules); err != nil {
-				return err
-			}
 		}
 	}
 
-	msg, txCtx, err := transactions.ComputeTxContext(ibs, engine, rules, signer, block, chainConfig, txnIndex)
+	msg, txCtx, err := transactions.ComputeTxContext(ibs, rules, signer, block, txnIndex)
 	if err != nil {
 		return err
 	}
 	txCtx.TxHash = hash
+	// The overrides take the transaction's index, so the transaction runs after them.
+	if config != nil && config.StateOverrides != nil {
+		if err := config.StateOverrides.Override(ibs, precompiles, rules); err != nil {
+			return err
+		}
+	}
 
 	// Trace the transaction and return
 	_, err = transactions.TraceTx(ctx, engine, block.Transactions()[txnIndex], msg, blockCtx, txCtx, &block.HeaderNoCopy().Number, block.Hash(), txnIndex, ibs, config, chainConfig, stream, api.evmCallTimeout, precompiles)
 	return err
+}
+
+type traceCallState struct {
+	header *types.Header
+	reader state.StateReader
+}
+
+// Resolve and validate again if setup renews the remote view. Only setup may be
+// retried: tracing writes to the response stream and cannot be safely replayed.
+func prepareTraceCallState[I int | hexutil.Uint](ctx context.Context, api *DebugAPIImpl, tx kv.TemporalTx, block rpc.BlockNumberOrHash, txIndex *I) (traceCallState, error) {
+	return readWithStableTxView(ctx, tx, func() (traceCallState, error) {
+		var result traceCallState
+		blockNumber, hash, isLatest, err := rpchelper.GetCanonicalBlockNumber(ctx, block, tx, canonicalViewReader{api._blockReader})
+		if err != nil {
+			return result, fmt.Errorf("get block number: %w", err)
+		}
+		if err := rpchelper.CheckBlockExecuted(tx, blockNumber); err != nil {
+			return result, err
+		}
+		var minTxNum uint64
+		var index int
+		if txIndex != nil {
+			minTxNum, index, err = checkTxIndexInBlock(ctx, api.BaseAPI, tx, blockNumber, *txIndex)
+			if err != nil {
+				return result, err
+			}
+		}
+		postState := txIndex == nil || index == -1
+		if postState {
+			err = api.checkPruneState(ctx, tx, blockNumber)
+		} else {
+			err = api.checkPruneTransactionHistoryAtIndex(ctx, tx, blockNumber, uint64(index))
+		}
+		if err != nil {
+			return result, err
+		}
+		if postState {
+			result.reader, err = rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, tx, blockNumber, isLatest, -1, api._txNumReader)
+		} else {
+			// User transaction zero reads just after the initial system transaction.
+			txNum := minTxNum + uint64(index) + 1
+			result.reader, err = rpchelper.CreateHistoryStateReaderAtTxNum(ctx, tx, blockNumber, txNum, api._txNumReader)
+		}
+		if err != nil {
+			return result, fmt.Errorf("create state reader: %w", err)
+		}
+		result.header, err = api.headerByHashAndNumber(ctx, tx, hash, blockNumber)
+		if err != nil {
+			return result, fmt.Errorf("could not fetch header %d(%x): %w", blockNumber, hash, err)
+		}
+		if result.header == nil {
+			return result, fmt.Errorf("block %d(%x) not found", blockNumber, hash)
+		}
+		return result, nil
+	})
 }
 
 // TraceCall implements debug_traceCall. Returns Geth style call traces.
@@ -314,39 +383,18 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, re
 	}
 	engine := api.engine()
 
-	blockNumber, hash, isLatest, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, dbtx, api._blockReader)
-	if err != nil {
-		return fmt.Errorf("get block number: %w", err)
+	var txIndex *hexutil.Uint
+	if config != nil {
+		txIndex = config.TxIndex
 	}
-
-	err = api.BaseAPI.checkPruneHistory(ctx, dbtx, blockNumber)
-	if err != nil {
-		return err
-	}
-
-	err = rpchelper.CheckBlockExecuted(dbtx, blockNumber)
+	prepared, err := prepareTraceCallState(ctx, api, dbtx, blockNrOrHash, txIndex)
 	if err != nil {
 		return err
 	}
-
-	var stateReader state.StateReader
-	if config == nil || config.TxIndex == nil || isLatest {
-		stateReader, err = rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, dbtx, blockNumber, isLatest, -1, api._txNumReader)
-	} else {
-		stateReader, err = rpchelper.CreateHistoryStateReader(ctx, dbtx, blockNumber, int(*config.TxIndex), api._txNumReader)
-	}
-	if err != nil {
-		return fmt.Errorf("create state reader: %w", err)
-	}
-	header, err := api.headerByHashAndNumber(ctx, dbtx, hash, blockNumber)
-	if err != nil {
-		return fmt.Errorf("could not fetch header %d(%x): %w", blockNumber, hash, err)
-	}
-	if header == nil {
-		return fmt.Errorf("block %d(%x) not found", blockNumber, hash)
-	}
-	ibs := state.New(stateReader)
+	header := prepared.header
+	ibs := state.New(prepared.reader)
 	defer ibs.Close()
+	transactions.VersionedCallState(ibs)
 
 	baseFee := overrideBaseFee(config, header.BaseFee)
 
@@ -354,6 +402,7 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, re
 	if err != nil {
 		return fmt.Errorf("convert args to msg: %w", err)
 	}
+	msg.SetSkipExecutionGasCap(true)
 	transaction, err := args.ToTransaction(api.GasCap, baseFee)
 	if err != nil {
 		return fmt.Errorf("convert args to msg: %w", err)
@@ -361,7 +410,8 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, re
 
 	var precompiles vm.PrecompiledContracts
 
-	blockCtx := transactions.NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, dbtx, api._blockReader, chainConfig)
+	getHash := transactions.MakeBlockHashProvider(ctx, dbtx, canonicalViewReader{api._blockReader}, nil)
+	blockCtx := protocol.NewEVMBlockContext(header, getHash, engine, accounts.NilAddress, chainConfig)
 	if config != nil {
 		if config.BlockOverrides != nil {
 			err := config.BlockOverrides.Override(&blockCtx)
@@ -387,7 +437,8 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, re
 	return err
 }
 
-// TraceCall implements debug_traceCallMany. Returns Geth style call traces.
+// TraceCallMany implements debug_traceCallMany and returns Geth-style call traces.
+// A transaction index of -1 selects post-block state, including the final system transaction.
 func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, simulateContext StateContext, config *tracersConfig.TraceConfig, stream *jsonstream.Stream) error {
 	if err := requireBlockSelector(simulateContext.BlockNumber); err != nil {
 		return err
@@ -396,7 +447,6 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 		return err
 	}
 	var (
-		hash              common.Hash
 		evm               *vm.EVM
 		blockCtx          evmtypes.BlockContext
 		txCtx             evmtypes.TxContext
@@ -423,46 +473,16 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 
 	defer func(start time.Time) { log.Trace("Tracing CallMany finished", "runtime", time.Since(start)) }(time.Now())
 
-	blockNum, hash, isLatest, err := rpchelper.GetCanonicalBlockNumber(ctx, simulateContext.BlockNumber, tx, api._blockReader)
+	prepared, err := prepareTraceCallState(ctx, api, tx, simulateContext.BlockNumber, simulateContext.TransactionIndex)
 	if err != nil {
 		return err
 	}
-
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
-	if err != nil {
-		return err
-	}
-
-	var header *types.Header
-	header, err = api.headerByHashAndNumber(ctx, tx, hash, blockNum)
-	if err != nil {
-		return err
-	}
-	if header == nil {
-		return fmt.Errorf("block %d(%x) not found", blockNum, hash)
-	}
-
-	var stateReader state.StateReader
-
-	err = rpchelper.CheckBlockExecuted(tx, blockNum)
-	if err != nil {
-		return err
-	}
-
-	if simulateContext.TransactionIndex == nil || *simulateContext.TransactionIndex == -1 || isLatest {
-		stateReader, err = rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, tx, blockNum, isLatest, -1, api._txNumReader)
-	} else {
-		stateReader, err = rpchelper.CreateHistoryStateReader(ctx, tx, blockNum, *simulateContext.TransactionIndex, api._txNumReader)
-	}
-
-	if err != nil {
-		return err
-	}
-
-	ibs := state.New(stateReader)
+	header := prepared.header
+	ibs := state.New(prepared.reader)
 	defer ibs.Close()
+	transactions.VersionedCallState(ibs)
 
-	getHash := transactions.MakeBlockHashProvider(ctx, tx, api._blockReader, overrideBlockHash)
+	getHash := transactions.MakeBlockHashProvider(ctx, tx, canonicalViewReader{api._blockReader}, overrideBlockHash)
 
 	blockCtx = protocol.NewEVMBlockContext(header, getHash, api.engine(), accounts.NilAddress /* author */, chainConfig)
 	// Apply global block overrides as the baseline for all bundles.
@@ -475,21 +495,25 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 	evm = vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{})
 	rules := evm.ChainRules()
 
-	var precompiles vm.PrecompiledContracts
 	// after replaying the txns, we want to overload the state
 	if config.StateOverrides != nil {
-		precompiles = vm.ActivePrecompiledContracts(rules)
-		err = config.StateOverrides.Override(ibs, precompiles, rules)
+		err = config.StateOverrides.Override(ibs, vm.ActivePrecompiledContracts(rules), rules)
 		if err != nil {
 			return err
 		}
 	}
 
 	stream.WriteArrayStart()
+	// Every transaction of the request gets the next index, so each sees the ones before it.
+	txIndex := ibs.TxnIndex()
 	for _, bundle := range bundles {
 		stream.WriteArrayStart()
 		// first change block context
 		bundle.BlockOverride.OverrideBlockContext(&blockCtx, overrideBlockHash)
+		precompiles, err := config.StateOverrides.ActivePrecompiles(blockCtx.Rules(chainConfig))
+		if err != nil {
+			return err
+		}
 		// A bundle is a block of its own, so its logs number from zero. Only the
 		// logs are reset: the overrides and state changes have to survive.
 		ibs.ResetLogs()
@@ -502,19 +526,23 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 			if err != nil {
 				return err
 			}
+			msg.SetSkipExecutionGasCap(true)
 			transaction, err := txn.ToTransaction(api.GasCap, &blockCtx.BaseFee)
 			if err != nil {
 				return err
 			}
 			txCtx = protocol.NewEVMTxContext(msg)
 			ibs := evm.IntraBlockState()
-			ibs.SetTxContext(blockCtx.BlockNumber, txnIndex)
+			ibs.SetTxContext(blockCtx.BlockNumber, txIndex)
+			txIndex++
 			_, err = transactions.TraceTx(ctx, api.engine(), transaction, msg, blockCtx, txCtx, nil, common.Hash{}, txnIndex, evm.IntraBlockState(), config, chainConfig, stream, api.evmCallTimeout, precompiles)
 			if err != nil {
 				return err
 			}
 
-			_ = ibs.FinalizeTx(rules, state.NewNoopWriter())
+			if err := ethapi.FinalizeCallTx(ibs, rules); err != nil {
+				return err
+			}
 
 		}
 		stream.WriteArrayEnd()

@@ -43,7 +43,7 @@ import (
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
-func seedBlobKZGTestPool(t *testing.T, ctx context.Context) *TxPool {
+func seedBlobKZGTestPool(t testing.TB, ctx context.Context) *TxPool {
 	t.Helper()
 	ch := make(chan Announcements, 5)
 	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
@@ -96,61 +96,53 @@ func makeBlobSlot(idHashByte byte, breakKZG bool) TxnSlot {
 	return s
 }
 
-// validateTxns must stop validating subsequent remote (IsLocal=false) txns
+// prepareTxns must stop verifying subsequent blob txns from a remote peer
 // once one fails KZG verify; local txns keep per-tx semantics.
-func TestValidateTxnsBlobKZGShortCircuit(t *testing.T) {
+func TestPrepareTxnsBlobKZGShortCircuit(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	pool := seedBlobKZGTestPool(t, ctx)
-
-	runValidate := func(t *testing.T, slots TxnSlots) ([]txpoolcfg.DiscardReason, TxnSlots) {
-		t.Helper()
-		coreDb, cache := pool.chainDB()
-		coreTx, err := coreDb.BeginTemporalRo(ctx)
-		require.NoError(t, err)
-		defer coreTx.Rollback()
-		cacheView, err := cache.View(ctx, coreTx)
-		require.NoError(t, err)
-
-		pool.lock.Lock()
-		defer pool.lock.Unlock()
-		require.NoError(t, pool.senders.registerNewSenders(&slots, pool.logger))
-		reasons, goodTxns, err := pool.validateTxns(&slots, cacheView)
-		require.NoError(t, err)
-		return reasons, goodTxns
-	}
+	peer := remoteSource{peerID: gointerfaces.ConvertHashToH512([64]byte{0x41})}
 
 	t.Run("remote short-circuits after first KZG failure", func(t *testing.T) {
 		var slots TxnSlots
 		s0 := makeBlobSlot(0x10, true)
-		s1 := makeBlobSlot(0x11, false)
+		s1 := makeBlobSlot(0x11, true)
 		a0, a1 := [20]byte{1}, [20]byte{2}
 		slots.Append(&s0, a0[:], false)
 		slots.Append(&s1, a1[:], false)
 
-		reasons, goodTxns := runValidate(t, slots)
+		reasons, _, err := pool.prepareTxns(ctx, slots, []remoteSource{peer, peer})
+		require.NoError(t, err)
+		assert.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.NotSet}, reasons,
+			"txn[1] should not have been verified")
+	})
 
-		require.Len(t, reasons, 2)
-		assert.Equal(t, txpoolcfg.UnmatchedBlobTxExt, reasons[0])
-		assert.Equal(t, txpoolcfg.NotSet, reasons[1], "txn[1] should not have been validated")
-		assert.Empty(t, goodTxns.Txns, "neither txn should be in goodTxns")
+	t.Run("remote without sources short-circuits after first KZG failure", func(t *testing.T) {
+		var slots TxnSlots
+		s0 := makeBlobSlot(0x30, true)
+		s1 := makeBlobSlot(0x31, true)
+		a0, a1 := [20]byte{1}, [20]byte{2}
+		slots.Append(&s0, a0[:], false)
+		slots.Append(&s1, a1[:], false)
+
+		reasons, _, err := pool.prepareTxns(ctx, slots, nil)
+		require.NoError(t, err)
+		assert.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.NotSet}, reasons,
+			"txn[1] should not have been verified")
 	})
 
 	t.Run("local keeps per-tx semantics", func(t *testing.T) {
 		var slots TxnSlots
 		s0 := makeBlobSlot(0x20, true)
-		s1 := makeBlobSlot(0x21, false)
+		s1 := makeBlobSlot(0x21, true)
 		a0, a1 := [20]byte{3}, [20]byte{4}
 		slots.Append(&s0, a0[:], true)
 		slots.Append(&s1, a1[:], true)
 
-		reasons, goodTxns := runValidate(t, slots)
-
-		require.Len(t, reasons, 2)
-		assert.Equal(t, txpoolcfg.UnmatchedBlobTxExt, reasons[0])
-		assert.Equal(t, txpoolcfg.NotSet, reasons[1])
-		require.Len(t, goodTxns.Txns, 1, "valid txn[1] should be in goodTxns")
-		assert.Equal(t, byte(0x21), goodTxns.Txns[0].IDHash[0])
+		reasons, _, err := pool.prepareTxns(ctx, slots, nil)
+		require.NoError(t, err)
+		assert.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.UnmatchedBlobTxExt}, reasons)
 	})
 }
 
@@ -196,5 +188,205 @@ func TestProcessRemoteTxnsKicksKZGOffender(t *testing.T) {
 	case <-kicked:
 	case <-time.After(5 * time.Second):
 		t.Fatal("PenalizePeer was not called within 5s")
+	}
+}
+
+func TestProcessRemoteTxnsKZGOffenderDoesNotDropOtherPeersTxns(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	ctrl := gomock.NewController(t)
+
+	attackerPeerID := gointerfaces.ConvertHashToH512([64]byte{0x41})
+	honestPeerID := gointerfaces.ConvertHashToH512([64]byte{0x42})
+
+	kicked := make(chan struct{}, 1)
+	sentryServer := sentryproto.NewMockSentryServer(ctrl)
+	sentryServer.EXPECT().
+		PenalizePeer(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, req *sentryproto.PenalizePeerRequest) (*emptypb.Empty, error) {
+			assert.Equal(t, attackerPeerID, req.PeerId)
+			kicked <- struct{}{}
+			return &emptypb.Empty{}, nil
+		}).
+		Times(1)
+	sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, NewMockSentry(ctx, sentryServer))
+	require.NoError(t, err)
+
+	pool := seedBlobKZGTestPool(t, ctx)
+	require.NoError(t, pool.start(ctx))
+
+	bad := makeBlobSlot(0x50, true)
+	good := makeBlobSlot(0x51, false)
+	trailing := makeBlobSlot(0x52, false)
+	a0, a1, a2 := [20]byte{1}, [20]byte{2}, [20]byte{3}
+
+	var fromAttacker TxnSlots
+	fromAttacker.Append(&bad, a0[:], false)
+	badPeerFrame := framePoolSlot(t, common.Address(a0), 300_000, 300_000)
+	fromAttacker.Append(badPeerFrame, a0[:], false)
+	pool.AddRemoteTxns(ctx, fromAttacker, attackerPeerID, sentryClient)
+
+	var fromHonest TxnSlots
+	honestFrame := framePoolSlot(t, common.Address(a1), 300_000, 300_000)
+	fromHonest.Append(honestFrame, a1[:], false)
+	fromHonest.Append(&good, a1[:], false)
+	pool.AddRemoteTxns(ctx, fromHonest, honestPeerID, sentryClient)
+
+	var trailingFromAttacker TxnSlots
+	trailingFromAttacker.Append(&trailing, a2[:], false)
+	pool.AddRemoteTxns(ctx, trailingFromAttacker, gointerfaces.ConvertHashToH512([64]byte{0x41}), sentryClient)
+
+	require.NoError(t, pool.processRemoteTxns(ctx))
+	require.Len(t, pool.remoteFrames.ready, 1, "do not simulate frames from a peer whose KZG proof failed")
+	queued := <-pool.remoteFrames.ready
+	require.Same(t, honestFrame, queued.txn)
+	require.Equal(t, PeerID(honestPeerID), queued.source.peerID)
+	require.NotContains(t, pool.remoteFrames.pending, string(badPeerFrame.IDHash[:]))
+
+	select {
+	case <-kicked:
+	case <-time.After(5 * time.Second):
+		t.Fatal("PenalizePeer was not called within 5s")
+	}
+
+	pool.lock.Lock()
+	defer pool.lock.Unlock()
+	assert.NotContains(t, pool.byHash, string(bad.IDHash[:]))
+	assert.Contains(t, pool.byHash, string(good.IDHash[:]), "valid txn from another peer must not be dropped")
+	assert.NotContains(t, pool.byHash, string(trailing.IDHash[:]), "trailing txn from the KZG offender must be skipped")
+}
+
+func TestRemoteKZGSkipPreservesAdmissionReasons(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	pool := seedBlobKZGTestPool(t, ctx)
+	require.NoError(t, pool.start(ctx))
+	a0, a1, a2 := [20]byte{1}, [20]byte{2}, [20]byte{3}
+
+	pooled := newTestTxnSlot(0, 0, 300_000, 300_000, 100_000)
+	pooled.IDHash[0] = 0x60
+	var local TxnSlots
+	local.Append(pooled, a2[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, local)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+
+	bad := makeBlobSlot(0x61, true)
+	skipped := newTestTxnSlot(0, 0, 300_000, 300_000, 100_000)
+	skipped.IDHash[0] = 0x62
+	var fromAttacker TxnSlots
+	fromAttacker.Append(&bad, a0[:], false)
+	fromAttacker.Append(skipped, a1[:], false)
+	pool.AddRemoteTxns(ctx, fromAttacker, gointerfaces.ConvertHashToH512([64]byte{0x41}), nil)
+
+	replacement := newTestTxnSlot(0, 0, 300_000, 300_000, 100_000)
+	replacement.IDHash[0] = 0x63
+	var fromHonest TxnSlots
+	fromHonest.Append(replacement, a2[:], false)
+	pool.AddRemoteTxns(ctx, fromHonest, gointerfaces.ConvertHashToH512([64]byte{0x42}), nil)
+
+	reasons, err = pool.processRemoteBatch(ctx)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{
+		txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.Success, txpoolcfg.NotReplaced,
+	}, reasons)
+}
+
+func TestBlobPoolLimitsCheckedBeforeKZG(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		limit  func(cfg *txpoolcfg.Config)
+		reason txpoolcfg.DiscardReason
+	}{
+		{"total", func(cfg *txpoolcfg.Config) { cfg.TotalBlobPoolLimit = 0 }, txpoolcfg.BlobPoolOverflow},
+		{"per-sender", func(cfg *txpoolcfg.Config) { cfg.BlobSlots = 0 }, txpoolcfg.BlobSlotsOverflow},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			t.Cleanup(cancel)
+			pool := seedBlobKZGTestPool(t, ctx)
+			require.NoError(t, pool.start(ctx))
+			tc.limit(&pool.cfg)
+
+			bad := makeBlobSlot(0x80, true)
+			a0 := [20]byte{1}
+			var slots TxnSlots
+			slots.Append(&bad, a0[:], false)
+			pool.AddRemoteTxns(ctx, slots, nil, nil)
+
+			reasons, err := pool.processRemoteBatch(ctx)
+			require.NoError(t, err)
+			require.Equal(t, []txpoolcfg.DiscardReason{tc.reason}, reasons)
+		})
+	}
+}
+
+func TestBlobKZGVerifiedOutsidePoolLock(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	pool := seedBlobKZGTestPool(t, ctx)
+	require.NoError(t, pool.start(ctx))
+	a0 := [20]byte{1}
+
+	t.Run("locked validation does not verify proofs", func(t *testing.T) {
+		bad := makeBlobSlot(0x90, true)
+		var slots TxnSlots
+		slots.Append(&bad, a0[:], false)
+		coreDb, cache := pool.chainDB()
+		coreTx, err := coreDb.BeginTemporalRo(ctx)
+		require.NoError(t, err)
+		defer coreTx.Rollback()
+		cacheView, err := cache.View(ctx, coreTx)
+		require.NoError(t, err)
+
+		pool.lock.Lock()
+		defer pool.lock.Unlock()
+		require.NoError(t, pool.senders.registerNewSenders(&slots, pool.logger))
+		reasons, goodTxns, _, err := pool.validateTxns(&slots, cacheView, nil, nil)
+		require.NoError(t, err)
+		assert.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NotSet}, reasons)
+		assert.Len(t, goodTxns.Txns, 1)
+	})
+
+	t.Run("bad proof is still rejected", func(t *testing.T) {
+		bad := makeBlobSlot(0x91, true)
+		var slots TxnSlots
+		slots.Append(&bad, a0[:], true)
+		reasons, err := pool.AddLocalTxns(ctx, slots)
+		require.NoError(t, err)
+		assert.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.UnmatchedBlobTxExt}, reasons)
+	})
+}
+
+func TestBlobSlotsOverflowDoesNotPunishSender(t *testing.T) {
+	ctx := t.Context()
+	pool := seedBlobKZGTestPool(t, ctx)
+	require.NoError(t, pool.start(ctx))
+	sender := common.Address{1}
+	var local TxnSlots
+	for nonce := range uint64(2) {
+		slot := makeBlobSlot(byte(nonce+1), false)
+		slot.Nonce = nonce
+		slot.Txn.(*types.BlobTx).Nonce = nonce
+		slot.Txn.(*types.BlobTx).GasLimit = 100_000
+		local.Append(&slot, sender[:], true)
+	}
+	reasons, err := pool.AddLocalTxns(ctx, local)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Success}, reasons)
+	pool.cfg.BlobSlots = pool.totalBlobsInPool.Load()
+	overflow := makeBlobSlot(3, false)
+	overflow.Nonce = 2
+	overflow.Txn.(*types.BlobTx).Nonce = 2
+	overflow.Txn.(*types.BlobTx).GasLimit = 100_000
+	var remote TxnSlots
+	remote.Append(&overflow, sender[:], false)
+	pool.AddRemoteTxns(ctx, remote, nil, nil)
+	reasons, err = pool.processRemoteBatch(ctx)
+	require.NoError(t, err)
+	require.Len(t, pool.byHash, 2)
+	require.Equal(t, txpoolcfg.BlobSlotsOverflow, reasons[0])
+	for _, slot := range local.Txns {
+		require.Contains(t, pool.byHash, string(slot.IDHash[:]))
 	}
 }

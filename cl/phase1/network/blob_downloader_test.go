@@ -89,6 +89,7 @@ func TestNewBlobHistoryDownloaderRequiresClock(t *testing.T) {
 			nil,
 			nil,
 			false,
+			0,
 			false,
 			log.New(),
 		)
@@ -126,9 +127,10 @@ func TestBlobHistoryDownloaderFuluColumnRecoveryIsBounded(t *testing.T) {
 	fulu.Block.Slot = 100
 	fulu.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
 
+	blocks := rootedBlocks(t, fulu)
 	done := make(chan struct{})
 	go func() {
-		b.recoverFuluColumns(rootedBlocks(t, fulu))
+		b.recoverFuluColumns(blocks)
 		close(done)
 	}()
 
@@ -160,8 +162,9 @@ func TestBlobHistoryDownloaderFuluInitialStorageCheckUsesBlockTimeout(t *testing
 		columnBackfillTimeout: 20 * time.Millisecond,
 		logger:                log.New(),
 	}
+	blocks := rootedBlocks(t, block)
 	done := make(chan bool, 1)
-	go func() { done <- downloader.recoverFuluColumns(rootedBlocks(t, block)) }()
+	go func() { done <- downloader.recoverFuluColumns(blocks) }()
 
 	bounded := false
 	select {
@@ -1120,7 +1123,7 @@ func TestCollectIncompleteBlocksSkipsSlotsCompleteUnderTheCanonicalRoot(t *testi
 	downloader.blobStorage = blobStorage
 	// Override the fixture's root for this slot so it is not the block's own hash.
 	require.NoError(t, downloader.indiciesDB.(kv.RwDB).Update(context.Background(), func(tx kv.RwTx) error {
-		return beacon_indicies.MarkRootCanonical(context.Background(), tx, slot, canonical)
+		return beacon_indicies.MarkRootCanonical(tx, slot, canonical)
 	}))
 
 	batch, _, err := downloader.collectIncompleteBlocks(slot, slot, 0)
@@ -1128,10 +1131,9 @@ func TestCollectIncompleteBlocksSkipsSlotsCompleteUnderTheCanonicalRoot(t *testi
 	require.Empty(t, batch, "a slot already complete in the store must not be queued for download")
 }
 
-// PruneBelow removes sidecar files but leaves their BlockRootToKzgCommitments rows, so a datadir
-// pruned as non-archive and later reopened with --caplin.blobs-archive carries counts that no file
-// backs. A matching count is then not evidence the store can serve the slot, and skipping it lets
-// the pass report completion and move its target past work an archive node still owes.
+// A BlockRootToKzgCommitments row does not prove its sidecar files are on disk, so a matching count
+// is not evidence the store can serve the slot, and skipping it lets the pass report completion and
+// move its target past work an archive node still owes.
 func TestCollectIncompleteBlocksQueuesArchiveSlotsWhoseFilesWerePruned(t *testing.T) {
 	block, sidecar := validDenebRecoverySidecar(t, 100)
 	blockRoot, err := block.Block.HashSSZ()
@@ -1140,9 +1142,8 @@ func TestCollectIncompleteBlocksQueuesArchiveSlotsWhoseFilesWerePruned(t *testin
 	fs := afero.NewMemMapFs()
 	storage := blob_storage.NewBlobStore(db, fs)
 	require.NoError(t, storage.WriteBlobSidecars(t.Context(), blockRoot, []*cltypes.BlobSidecar{sidecar}))
-	require.NoError(t, storage.PruneBelow(10_000))
+	require.NoError(t, fs.RemoveAll("0"))
 
-	// The count row survives pruning; the file does not.
 	count, err := storage.KzgCommitmentsCount(t.Context(), blockRoot)
 	require.NoError(t, err)
 	require.Equal(t, uint32(1), count)
@@ -1191,7 +1192,7 @@ func TestCollectIncompleteBlocksQueuesArchiveSlotsMissingALaterSidecarFile(t *te
 }
 
 // A retention expansion can make a previously pruned bucket mandatory again after restart, while
-// its commitment-count row still makes the slot look complete.
+// a commitment-count row whose files are gone still makes the slot look complete.
 func TestCollectIncompleteBlocksQueuesPrunedNonArchiveSlotInsideSelectedRange(t *testing.T) {
 	block, sidecar := validDenebRecoverySidecar(t, 100)
 	blockRoot, err := block.Block.HashSSZ()
@@ -1200,7 +1201,7 @@ func TestCollectIncompleteBlocksQueuesPrunedNonArchiveSlotInsideSelectedRange(t 
 	fs := afero.NewMemMapFs()
 	storage := blob_storage.NewBlobStore(db, fs)
 	require.NoError(t, storage.WriteBlobSidecars(t.Context(), blockRoot, []*cltypes.BlobSidecar{sidecar}))
-	require.NoError(t, storage.PruneBelow(10_000))
+	require.NoError(t, fs.RemoveAll("0"))
 	storage = blob_storage.NewBlobStore(db, fs)
 
 	downloader := newBoundaryDownloader(t, block.Block.Slot, 0, block.Block.Slot, &boundaryBlockReader{block: block})
@@ -1371,7 +1372,7 @@ func TestReadRetryBlockReturnsTheCanonicalRoot(t *testing.T) {
 
 	downloader := newBoundaryDownloader(t, slot, 0, slot, &boundaryBlockReader{block: block})
 	require.NoError(t, downloader.indiciesDB.(kv.RwDB).Update(t.Context(), func(tx kv.RwTx) error {
-		return beacon_indicies.MarkRootCanonical(t.Context(), tx, slot, canonical)
+		return beacon_indicies.MarkRootCanonical(tx, slot, canonical)
 	}))
 
 	got, root, err := downloader.readRetryBlock(slot)

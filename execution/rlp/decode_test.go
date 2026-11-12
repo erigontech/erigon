@@ -1321,7 +1321,7 @@ func TestStreamResetAfterBytesStream(t *testing.T) {
 
 // TestStreamResetSliceRdrCoherency pins the invariant readFull's fast path
 // relies on: after any Reset, sliceRdr is non-nil if and only if s.r points at
-// it, so the field and the reader can never be different cursors.
+// it. s.r is never read while sliceRdr is non-nil; reads advance off.
 func TestStreamResetSliceRdrCoherency(t *testing.T) {
 	data := []byte{0x82, 0xaa, 0xbb}
 	check := func(t *testing.T, s *Stream, wantSlice bool) {
@@ -1396,7 +1396,7 @@ func TestDecodeListSliceNoAmplification(t *testing.T) {
 	defer PutStream(s)
 	size, err := s.List()
 	require.NoError(t, err)
-	require.Equal(t, items, countItems(s.Peek()[:size]), "payload really is one-byte items")
+	require.Equal(t, items, CountItems(s.Peek()[:size]), "payload really is one-byte items")
 	require.LessOrEqual(t, sliceHint(s, elem, size)*int(elem.Size()), maxSliceHintBytes,
 		"a pre-allocation must stay within the hint budget")
 }

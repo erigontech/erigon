@@ -47,12 +47,13 @@ func TestImportedEnvelopeEventsSurvivePartialColumnStorage(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	if clparams.GetBeaconConfig() == nil {
 		cfg := clparams.MainnetBeaconConfig
-		clparams.InitGlobalStaticConfig(&cfg, &clparams.CaplinConfig{})
+		clparams.InitGlobalStaticConfig(&cfg)
 	}
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	currentSlot := handler.ethClock.GetCurrentSlot()
 	clock := eth_clock.NewMockEthereumClock(ctrl)
 	clock.EXPECT().GetCurrentSlot().Return(currentSlot).AnyTimes()
+	clock.EXPECT().ComputeForkDigest(gomock.Any()).Return(common.Bytes4{}, nil).AnyTimes()
 	handler.ethClock = clock
 	handler.beaconChainCfg.GloasForkEpoch = 0
 

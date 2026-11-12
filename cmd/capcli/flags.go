@@ -63,6 +63,7 @@ func commands() []*cli.Command {
 		(&ArchiveSanitizer{}).command(),
 		(&BenchmarkNode{}).command(),
 		(&BlobArchiveStoreCheck{}).command(),
+		(&BlobArchiveStoreFill{}).command(),
 		(&DumpBlobsSnapshots{}).command(),
 		(&CheckBlobsSnapshots{}).command(),
 		(&CheckBlobsSnapshotsCount{}).command(),
@@ -246,6 +247,42 @@ func (b *BlobArchiveStoreCheck) fromCmd(cmd *cli.Command) error {
 	return nil
 }
 
+var (
+	blobStoreFillEndpointFlag = &cli.StringSliceFlag{Name: "endpoint", Usage: "beacon API URL to fetch blob sidecars from; repeat it to fall back to further endpoints"}
+	blobStoreFillFromSlotFlag = &cli.Uint64Flag{Name: "from-slot", Usage: "first slot to fill", Required: true}
+	blobStoreFillToSlotFlag   = &cli.Uint64Flag{Name: "to-slot", Usage: "last slot to fill", Required: true}
+	blobStoreFillDryRunFlag   = &cli.BoolFlag{Name: "dry-run", Usage: "only report the slots whose sidecars are missing or invalid"}
+)
+
+func (b *BlobArchiveStoreFill) fromCmd(cmd *cli.Command) error {
+	b.chainCfg.fromCmd(cmd)
+	if err := b.outputFolder.fromCmd(cmd); err != nil {
+		return err
+	}
+	b.Endpoints = cmd.StringSlice(blobStoreFillEndpointFlag.Name)
+	b.FromSlot = cmd.Uint64(blobStoreFillFromSlotFlag.Name)
+	b.ToSlot = cmd.Uint64(blobStoreFillToSlotFlag.Name)
+	b.DryRun = cmd.Bool(blobStoreFillDryRunFlag.Name)
+	return nil
+}
+
+func (b *BlobArchiveStoreFill) command() *cli.Command {
+	return &cli.Command{
+		Name:  "blob-archive-store-fill",
+		Usage: "refill missing or invalid blob sidecars of a slot range from beacon API endpoints; stop the node first, erigon or standalone caplin",
+		Flags: []cli.Flag{
+			&cliutils.ChainFlag, &cliutils.DataDirFlag,
+			blobStoreFillEndpointFlag, blobStoreFillFromSlotFlag, blobStoreFillToSlotFlag, blobStoreFillDryRunFlag,
+		},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			if err := b.fromCmd(cmd); err != nil {
+				return err
+			}
+			return b.Run(ctx)
+		},
+	}
+}
+
 func (b *BlobArchiveStoreCheck) command() *cli.Command {
 	return &cli.Command{
 		Name:  "blob-archive-store-check",
@@ -261,16 +298,20 @@ func (b *BlobArchiveStoreCheck) command() *cli.Command {
 }
 
 func (c *DumpBlobsSnapshots) command() *cli.Command {
+	from := &cli.Uint64Flag{Name: "from", Usage: "slot to start dumping from, a segment boundary; defaults to the segment holding the Deneb fork"}
+	overwrite := &cli.BoolFlag{Name: "overwrite", Usage: "rewrite current-version segments already on disk; refuse ranges pinned by the preverified lock or covered by other-version segments"}
 	return &cli.Command{
 		Name:  "dump-blobs-snapshots",
-		Usage: "dump blobs snapshots",
-		Flags: []cli.Flag{&cliutils.ChainFlag, &cliutils.DataDirFlag, toSlotFlag},
+		Usage: "dump the blob segments missing from disk and from the preverified lock, up to the frozen beacon-block frontier; existing segments are skipped without verification, even if damaged: run 'erigon snapshots integrity --check=CaplinBlobSidecars' to check them, then use --overwrite to repair eligible segments",
+		Flags: []cli.Flag{&cliutils.ChainFlag, &cliutils.DataDirFlag, from, toSlotFlag, overwrite},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			c.chainCfg.fromCmd(cmd)
 			if err := c.outputFolder.fromCmd(cmd); err != nil {
 				return err
 			}
+			c.From = cmd.Uint64(from.Name)
 			c.To = cmd.Uint64(toSlotFlag.Name)
+			c.Overwrite = cmd.Bool(overwrite.Name)
 			return c.Run(ctx)
 		},
 	}

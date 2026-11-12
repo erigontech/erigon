@@ -48,6 +48,9 @@ jobs:
     # GitHub-hosted standard runner — free with unlimited minutes on this public
     # repo. (Self-hosted/larger runners are the only ones that would cost money.)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
     # Generous backstop so a long manual `fuzztime` (e.g. up to ~1h) is not
     # killed; the nightly default (120s) finishes in a few minutes.
     timeout-minutes: 70
@@ -88,18 +91,28 @@ jobs:
       - uses: ./.github/actions/setup-erigon
         id: erigon
         with:
-          build-cache-extra-key: fuzz-${{ matrix.name }}
+          go-cache: 'false'
 
-      # Per-target corpus, persisted across runs so each night builds on the
-      # inputs the previous run discovered. Restored AFTER setup-erigon (which
-      # caches all of GOCACHE), so this dedicated entry wins for $GOCACHE/fuzz.
+      # The Actions cache evicts an idle entry within hours, so the per-target corpus lives in
+      # artifacts: each run continues from the newest one of its ref. A fork's branch can have
+      # the same name, so forks are excluded. A failure here stops the leg, because fuzzing from
+      # an empty corpus would replace the kept one.
       - name: Restore fuzz corpus
-        uses: actions/cache@v6
-        with:
-          path: ${{ steps.erigon.outputs.build }}/fuzz
-          key: fuzz-corpus-${{ matrix.name }}-${{ github.run_id }}
-          restore-keys: |
-            fuzz-corpus-${{ matrix.name }}-
+        id: restore
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NAME: ${{ matrix.name }}
+          CORPUS: ${{ steps.erigon.outputs.build }}/fuzz
+        run: |
+          mkdir -p "$CORPUS"
+          run=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=fuzz-corpus-$NAME&per_page=100" \
+            --jq '[.artifacts[] | select(.expired | not) | select(.workflow_run.head_branch == env.GITHUB_REF_NAME and .workflow_run.head_repository_id == .workflow_run.repository_id)] | sort_by(.created_at) | last | .workflow_run.id // empty')
+          if [ -z "$run" ]; then
+            echo "::warning::No previous corpus for $NAME"
+            exit 0
+          fi
+          gh run download "$run" --repo "$GITHUB_REPOSITORY" --name "fuzz-corpus-$NAME" --dir "$CORPUS"
+          echo "Corpus restored from run $run: $(find "$CORPUS" -type f | wc -l) files"
 
       - name: Fuzz ${{ matrix.fn }}
         env:
@@ -182,11 +195,17 @@ jobs:
           path: fuzz-failure/${{ matrix.name }}.tsv
           if-no-files-found: ignore
 
-      # Keep $GOCACHE/fuzz: the corpus cache entry above is saved after this step.
-      - uses: ./.github/actions/cleanup-erigon
-        if: always()
+      # On fuzz failure too, so a run that finds a crash keeps the rest of its corpus.
+      # Never after a failed restore: a partial corpus would become the newest one.
+      - name: Upload fuzz corpus
+        if: ${{ always() && steps.restore.outcome == 'success' }}
+        uses: actions/upload-artifact@v7
         with:
-          clean-fuzzcache: 'false'
+          name: fuzz-corpus-${{ matrix.name }}
+          path: ${{ steps.erigon.outputs.build }}/fuzz
+          retention-days: 30
+          if-no-files-found: ignore
+          overwrite: true
 
   notify:
     needs: [fuzz]

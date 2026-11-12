@@ -127,6 +127,10 @@ func (back *RemoteBackend) FrozenBlocksObserved() (uint64, bool) {
 	return back.blockReader.FrozenBlocksObserved()
 }
 
+func (back *RemoteBackend) IsFrozen(ctx context.Context, blockNum uint64) (bool, error) {
+	return back.blockReader.IsFrozen(ctx, blockNum)
+}
+
 func (back *RemoteBackend) FrozenBlocksInView(tx kv.Getter) uint64 {
 	return back.blockReader.FrozenBlocksInView(tx)
 }
@@ -341,6 +345,10 @@ func (back *RemoteBackend) BodyWithTransactions(ctx context.Context, tx kv.Gette
 	return back.blockReader.BodyWithTransactions(ctx, tx, hash, blockNum)
 }
 
+func (back *RemoteBackend) BodyWithRawTransactions(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (*types.RawBody, error) {
+	return back.blockReader.BodyWithRawTransactions(ctx, tx, hash, blockNum)
+}
+
 func (back *RemoteBackend) BodyRlp(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (bodyRlp rlp.RawValue, err error) {
 	return back.blockReader.BodyRlp(ctx, tx, hash, blockNum)
 }
@@ -377,8 +385,8 @@ func (back *RemoteBackend) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, bl
 	return back.blockReader.TxnByIdxInBlock(ctx, tx, blockNum, i)
 }
 
-func (back *RemoteBackend) TxnHashByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, i int) (common.Hash, bool, error) {
-	return back.blockReader.TxnHashByIdxInBlock(ctx, tx, blockNum, i)
+func (back *RemoteBackend) TxnHashByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum, txNum uint64, i int) (common.Hash, bool, error) {
+	return back.blockReader.TxnHashByIdxInBlock(ctx, tx, blockNum, txNum, i)
 }
 
 func (back *RemoteBackend) NodeInfo(ctx context.Context, limit uint32) ([]p2p.NodeInfo, error) {

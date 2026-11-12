@@ -12,7 +12,6 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
-	"github.com/erigontech/erigon/execution/protocol/aa"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -20,16 +19,16 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
-	"github.com/erigontech/erigon/execution/vm/evmtypes"
 
 	"github.com/erigontech/erigon/db/dbservices"
 )
 
 type AssemblerCfg struct {
-	ChainConfig     *chain.Config
-	Engine          rules.Engine
-	BlockReader     dbservices.FullBlockReader
-	ExperimentalBAL bool
+	ChainConfig            *chain.Config
+	Engine                 rules.Engine
+	BlockReader            dbservices.FullBlockReader
+	ExperimentalBAL        bool
+	RequireAllTransactions bool
 }
 
 type AssembledBlock struct {
@@ -114,69 +113,58 @@ func (mb *AssembledBlock) TxnsRlpSize(withAdditional ...types.Transaction) int {
 
 type BlockAssembler struct {
 	*AssembledBlock
-	cfg         AssemblerCfg
-	balIO       *state.VersionedIO
-	blockRules  *chain.Rules
-	stateWriter state.StateWriter // optional: if set, domain writes go here instead of NoopWriter
-	gasUsed     protocol.GasUsed  // EIP-8037: cumulative per-dimension gas across AddTransactions calls
+	cfg        AssemblerCfg
+	balIO      *state.VersionedIO // nil when the block carries no access list
+	writeSets  []*state.WriteSet  // per-phase writes, applied by the builder in order
+	blockRules *chain.Rules
+	gasUsed    protocol.GasUsed // EIP-8037: cumulative per-dimension gas across AddTransactions calls
 }
 
 func (ba *BlockAssembler) CumulativeGasUsed() protocol.GasUsed { return ba.gasUsed }
 
 func NewBlockAssembler(cfg AssemblerCfg, block *AssembledBlock) *BlockAssembler {
 	ba := &BlockAssembler{AssembledBlock: block, cfg: cfg}
-	if cfg.ChainConfig.IsAmsterdam(block.Header.Time) || cfg.ExperimentalBAL {
+	if ba.HasBAL() {
 		ba.balIO = &state.VersionedIO{}
-		blockContext := protocol.NewEVMBlockContext(
-			block.Header, protocol.GetHashFn(block.Header, nil), cfg.Engine, accounts.NilAddress, cfg.ChainConfig,
-		)
-		ba.blockRules = blockContext.Rules(cfg.ChainConfig)
 	}
+	blockContext := protocol.NewEVMBlockContext(
+		block.Header, protocol.GetHashFn(block.Header, nil), cfg.Engine, accounts.NilAddress, cfg.ChainConfig,
+	)
+	ba.blockRules = blockContext.Rules(cfg.ChainConfig)
 	return ba
 }
 
+// HasBAL reports whether the assembled block carries a block access list.
 func (ba *BlockAssembler) HasBAL() bool {
-	return ba.balIO != nil
+	return ba.cfg.ChainConfig.IsAmsterdam(ba.Header.Time) || ba.cfg.ExperimentalBAL
 }
 
-// SetStateWriter sets a real state writer for domain writes during block assembly.
-// When set, state changes are written to the backing store (e.g. SharedDomains)
-// instead of being discarded via NoopWriter. This enables computing state root
-// directly from the assembled block without re-executing via ExecV3.
-func (ba *BlockAssembler) SetStateWriter(w state.StateWriter) {
-	ba.stateWriter = w
+func (ba *BlockAssembler) WriteSets() []*state.WriteSet {
+	return ba.writeSets
 }
 
-func (ba *BlockAssembler) writer() state.StateWriter {
-	if ba.stateWriter != nil {
-		return ba.stateWriter
+// recordPhase keeps a finished phase's writes for the builder and, for a block with an access list, its I/O.
+func (ba *BlockAssembler) recordPhase(ibs *state.IntraBlockState, writes *state.WriteSet) {
+	ba.writeSets = append(ba.writeSets, writes)
+	if ba.balIO != nil {
+		ibs.MergeTxIOInto(ba.balIO, writes)
 	}
-	return state.NewNoopWriter()
-}
-
-func (ba *BlockAssembler) BalIO() *state.VersionedIO {
-	return ba.balIO
 }
 
 func (ba *BlockAssembler) Initialize(ibs *state.IntraBlockState, tx kv.TemporalTx, logger log.Logger) error {
-	// Use NoopWriter for FinalizeTx during initialization. Intermediate state
-	// writes to SharedDomains would become stale if later system calls (e.g.
-	// EIP-7002 dequeue) revert storage slots back to their original values,
-	// because CommitBlock's blockOriginStorage==dirtyStorage check skips the
-	// undo write. All final state is correctly written by CommitBlock in
-	// AssembleBlock using the real writer.
 	if err := protocol.InitializeBlockExecution(ba.cfg.Engine,
 		NewChainReader(ba.cfg.ChainConfig, tx, ba.cfg.BlockReader, logger), ba.Header, ba.cfg.ChainConfig, ibs, state.NewNoopWriter(), logger, nil); err != nil {
 		return err
 	}
-	if ba.HasBAL() {
-		writes := ibs.FinalizedWrites(ba.blockRules)
-		ibs.MergeTxIOInto(ba.balIO, writes)
-		// Publish block-init writes (EIP-4788, etc.) to the versionMap so the
-		// first tx observes them across the ResetVersionedIO below.
-		ibs.FlushWritesToVersionMap(writes)
-		ibs.ResetVersionedIO()
+	writes, err := ibs.FinalizedWrites(ba.blockRules)
+	if err != nil {
+		return err
 	}
+	ba.recordPhase(ibs, writes)
+	// Publish block-init writes (EIP-4788, etc.) to the versionMap so the
+	// first tx observes them across the ResetVersionedIO below.
+	ibs.FlushWritesToVersionMap(writes)
+	ibs.ResetVersionedIO()
 	return nil
 }
 
@@ -200,6 +188,9 @@ func (ba *BlockAssembler) AddTransactions(
 	// matches the validator's parallel executor (which assigns txIndex
 	// based on position in the block's transaction list).
 	txnIdx := len(ba.Txns)
+	inclusionError := func(txn types.Transaction, err error) error {
+		return fmt.Errorf("transaction %d (%s): %w", txnIdx, txn.Hash(), err)
+	}
 	header := ba.AssembledBlock.Header
 	// EIP-8037: execution and state gas pools deplete independently. The
 	// builder calls AddTransactions repeatedly with batches from the txpool,
@@ -218,25 +209,20 @@ func (ba *BlockAssembler) AddTransactions(
 	signer := types.MakeSigner(ba.cfg.ChainConfig, header.Number.Uint64(), header.Time)
 
 	var coalescedLogs types.Logs
-	// Use NoopWriter for FinalizeTx after each user transaction. See
-	// Initialize comment for rationale — intermediate writes to
-	// SharedDomains become stale when system calls revert storage slots.
-	// CommitBlock in AssembleBlock writes all final state correctly.
-	writer := state.NewNoopWriter()
-	recordTxIO := func() {
-		if ba.HasBAL() {
-			writes := ibs.FinalizedWrites(ba.blockRules)
-			ibs.MergeTxIOInto(ba.balIO, writes)
-			// Publish this tx's writes to the versionMap so the next tx observes them;
-			// ResetVersionedIO below clears the per-tx write set used for BAL recording.
-			ibs.FlushWritesToVersionMap(writes)
+	writer := state.NewNoopWriter() // the builder applies the recorded write sets
+	recordTxIO := func() error {
+		writes, err := ibs.FinalizedWrites(ba.blockRules)
+		if err != nil {
+			return err
 		}
+		ba.recordPhase(ibs, writes)
+		// Publish this tx's writes to the versionMap so the next tx observes them;
+		// ResetVersionedIO below clears the per-tx write set used for BAL recording.
+		ibs.FlushWritesToVersionMap(writes)
 		ibs.ResetVersionedIO()
+		return nil
 	}
 	clearTxIO := func() {
-		if !ba.HasBAL() {
-			return
-		}
 		ibs.ResetVersionedIO()
 	}
 
@@ -254,38 +240,6 @@ func (ba *BlockAssembler) AddTransactions(
 		blobGasSnap := gasPool.BlobGas()
 		snap := ibs.PushSnapshot()
 		defer ibs.PopSnapshot(snap)
-
-		if txn.Type() == types.AccountAbstractionTxType {
-			aaTxn := txn.(*types.AccountAbstractionTransaction)
-			blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, getHeader), ba.cfg.Engine, coinbase, chainConfig)
-			evm := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, chainConfig, *vmConfig)
-			paymasterContext, validationGasUsed, err := aa.ValidateAATransaction(aaTxn, ibs, gasPool, header, evm, chainConfig)
-			if err != nil {
-				ibs.RevertToSnapshot(snap, err)
-				gasPool = protocol.NewBlockGasPool(executionGasSnap, stateGasSnap, blobGasSnap)
-				return nil, err
-			}
-
-			status, aaGasUsed, err := aa.ExecuteAATransaction(aaTxn, paymasterContext, validationGasUsed, gasPool, evm, header, ibs)
-			if err != nil {
-				ibs.RevertToSnapshot(snap, err)
-				gasPool = protocol.NewBlockGasPool(executionGasSnap, stateGasSnap, blobGasSnap)
-				return nil, err
-			}
-
-			// EIP-8037: AA txns don't go through protocol.ApplyTransaction, so
-			// update cumulative gas manually. We attribute aaGasUsed entirely to
-			// execution gas (AA has no state-gas dimension yet).
-			gasUsed.BlockExecution += aaGasUsed
-			gasUsed.Blob += txn.GetBlobGas()
-			protocol.SetGasUsed(header, gasUsed)
-			logs := ibs.GetLogs(ibs.TxnIndex(), txn.Hash(), header.Number.Uint64(), header.Hash())
-			receipt := aa.CreateAAReceipt(txn.Hash(), status, aaGasUsed, header.GasUsed, header.Number.Uint64(), uint64(ibs.TxnIndex()), logs)
-
-			current.AddTxn(txn)
-			current.Receipts = append(current.Receipts, receipt)
-			return receipt.Logs, nil
-		}
 
 		// Snapshot cumulative gas so we can restore on tx failure.
 		gasSnapshot := *gasUsed
@@ -333,15 +287,19 @@ LOOP:
 			return nil, true, err
 		}
 
-		if interrupt != nil && interrupt.Load() && stopped == nil {
+		// Explicit lists must finish before a result can be returned. Their build
+		// context still handles cancellation and the build timeout.
+		if !ba.cfg.RequireAllTransactions && interrupt != nil && interrupt.Load() && stopped == nil {
 			logger.Debug("Transaction adding was requested to stop", "payload", ba.PayloadId)
 			// ensure we run for at least 500ms after the request to stop comes in from GetPayload
 			stopped = time.NewTicker(500 * time.Millisecond)
 		}
-		// If we don't have enough gas for any further transactions then we're done.
-		// Only the execution dimension bounds this exit: AA txns draw solely on the
-		// execution pool, so a state-gas exit would drop ones that still fit.
+		// Transactions can have a zero state gas limit, so only the execution
+		// pool bounds this early exit.
 		if gasPool.Gas() < minTxGas {
+			if ba.cfg.RequireAllTransactions {
+				return coalescedLogs, true, inclusionError(txn, protocol.ErrGasLimitReached)
+			}
 			logger.Debug(fmt.Sprintf("[%s] Not enough gas for further transactions", logPrefix), "have", gasPool, "want", minTxGas)
 			done = true
 			break
@@ -349,6 +307,9 @@ LOOP:
 
 		rlpSpacePostTxn := ba.AvailableRlpSpace(ba.cfg.ChainConfig, txn)
 		if rlpSpacePostTxn < 0 {
+			if ba.cfg.RequireAllTransactions {
+				return coalescedLogs, true, inclusionError(txn, errors.New("exceeds block RLP size limit"))
+			}
 			rlpSpacePreTxn := ba.AvailableRlpSpace(ba.cfg.ChainConfig)
 			logger.Debug(
 				fmt.Sprintf("[%s] Skipping transaction since it does not fit in available rlp space", logPrefix),
@@ -362,6 +323,9 @@ LOOP:
 		// We use the eip155 signer regardless of the env hf.
 		from, err := txn.Sender(*signer)
 		if err != nil {
+			if ba.cfg.RequireAllTransactions {
+				return coalescedLogs, true, inclusionError(txn, err)
+			}
 			logger.Warn(fmt.Sprintf("[%s] Could not recover transaction sender", logPrefix), "hash", txn.Hash(), "err", err)
 			continue
 		}
@@ -369,6 +333,9 @@ LOOP:
 		// Check whether the txn is replay protected. If we're not in the EIP155 (Spurious Dragon) hf
 		// phase, start ignoring the sender until we do.
 		if txn.Protected() && !ba.cfg.ChainConfig.IsSpuriousDragon(header.Number.Uint64()) {
+			if ba.cfg.RequireAllTransactions {
+				return coalescedLogs, true, inclusionError(txn, errors.New("replay protection is not active"))
+			}
 			logger.Debug(fmt.Sprintf("[%s] Ignoring replay protected transaction", logPrefix), "hash", txn.Hash(), "eip155", ba.cfg.ChainConfig.SpuriousDragonBlock)
 			continue
 		}
@@ -376,9 +343,14 @@ LOOP:
 		// Start executing the transaction
 		logs, err := commitTx(txn, coinbase, vmConfig, ba.cfg.ChainConfig, ibs, ba.AssembledBlock)
 		if err == nil {
-			recordTxIO()
+			if ioErr := recordTxIO(); ioErr != nil {
+				return coalescedLogs, true, ioErr
+			}
 		} else {
 			clearTxIO()
+			if ba.cfg.RequireAllTransactions {
+				return coalescedLogs, true, inclusionError(txn, err)
+			}
 		}
 		switch {
 		case errors.Is(err, protocol.ErrGasLimitReached):
@@ -402,19 +374,17 @@ LOOP:
 func (ba *BlockAssembler) AssembleBlock(ibs *state.IntraBlockState, tx kv.TemporalTx, logger log.Logger) (block *types.Block, err error) {
 	chainReader := NewChainReader(ba.cfg.ChainConfig, tx, ba.cfg.BlockReader, logger)
 
-	if err := ba.cfg.Engine.Prepare(chainReader, ba.Header, ibs); err != nil {
+	if err := ba.cfg.Engine.Prepare(chainReader, ba.Header); err != nil {
 		return nil, err
 	}
 
-	if ba.HasBAL() {
-		// Set block-end tx context so that system-call I/O (withdrawals, EIP-7002,
-		// EIP-7251, etc.) is recorded at TxIndex = len(userTxns), matching the
-		// validator path (exec3_parallel.go: ibs.SetTxContext(finalVersion.BlockNum, finalVersion.TxIndex)).
-		ibs.SetTxContext(ba.Header.Number.Uint64(), len(ba.Txns))
-		ibs.ResetVersionedIO()
-	}
+	// Set block-end tx context so that system-call I/O (withdrawals, EIP-7002,
+	// EIP-7251, etc.) is recorded at TxIndex = len(userTxns), matching the
+	// validator path (exec3_parallel.go: ibs.SetTxContext(finalVersion.BlockNum, finalVersion.TxIndex)).
+	ibs.SetTxContext(ba.Header.Number.Uint64(), len(ba.Txns))
+	ibs.ResetVersionedIO()
 	block, ba.Requests, err = protocol.FinalizeBlockExecution(ba.cfg.Engine, ba.Header, ba.Txns, ba.Uncles,
-		ba.writer(), ba.cfg.ChainConfig, ibs, ba.Receipts, ba.Withdrawals, chainReader, true, logger)
+		state.NewNoopWriter(), ba.cfg.ChainConfig, ibs, ba.Receipts, ba.Withdrawals, chainReader, true, logger)
 	if err != nil {
 		return nil, fmt.Errorf("cannot finalize block execution: %w", err)
 	}
@@ -422,17 +392,20 @@ func (ba *BlockAssembler) AssembleBlock(ibs *state.IntraBlockState, tx kv.Tempor
 	// Note: NewBlock (called by FinalizeBlockExecution) copies the header,
 	// so we must modify the block's header directly, not ba.Header.
 	header := block.HeaderNoCopy()
+	writes, err := ibs.FinalizedWrites(ba.blockRules)
+	if err != nil {
+		return nil, err
+	}
+	// Record finalize system call I/O (EIP-7002, EIP-7251, etc.)
+	ba.recordPhase(ibs, writes)
+	// Publish finalize-phase writes to the versionMap, mirroring the init and
+	// per-tx phases: the versioned commit loop normalizes each phase against the
+	// map and prefers the map value, so a finalize update to an address already
+	// written earlier in the block (fee recipient, withdrawal target) must be
+	// visible there or the commit reuses the stale pre-finalize value.
+	ibs.FlushWritesToVersionMap(writes)
+	ibs.ResetVersionedIO()
 	if ba.HasBAL() {
-		writes := ibs.FinalizedWrites(ba.blockRules)
-		// Record finalize system call I/O (EIP-7002, EIP-7251, etc.)
-		ibs.MergeTxIOInto(ba.balIO, writes)
-		// Publish finalize-phase writes to the versionMap, mirroring the init and
-		// per-tx phases: the versioned commit loop normalizes each phase against the
-		// map and prefers the map value, so a finalize update to an address already
-		// written earlier in the block (fee recipient, withdrawal target) must be
-		// visible there or the commit reuses the stale pre-finalize value.
-		ibs.FlushWritesToVersionMap(writes)
-		ibs.ResetVersionedIO()
 		ba.BlockAccessList = ba.balIO.AsBlockAccessList()
 		// Only embed the BAL hash in the header for Amsterdam+ chains.
 		// For pre-Amsterdam chains with ExperimentalBAL, the BAL is computed

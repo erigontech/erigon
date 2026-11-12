@@ -36,7 +36,6 @@ import (
 	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
-	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto/kzg"
@@ -48,6 +47,7 @@ type blobSidecarService struct {
 	syncedDataManager *synced_data.SyncedDataManager
 	ethClock          eth_clock.EthereumClock
 	emitters          *beaconevents.EventEmitter
+	expectedProposer  func(ctx context.Context, parentRoot common.Hash, parentSlot, slot uint64) (uint64, error)
 
 	test bool
 }
@@ -69,6 +69,7 @@ func NewBlobSidecarService(
 		test:              test,
 		ethClock:          ethClock,
 		emitters:          emitters,
+		expectedProposer:  newExpectedProposers(ctx, beaconCfg, forkchoiceStore, syncedDataManager).get,
 	}
 	return b
 }
@@ -87,7 +88,7 @@ func (b *blobSidecarService) IsMyGossipMessage(name string) bool {
 
 func (b *blobSidecarService) DecodeGossipMessage(_ peer.ID, data []byte, version clparams.StateVersion) (*cltypes.BlobSidecar, error) {
 	obj := &cltypes.BlobSidecar{}
-	if err := obj.DecodeSSZ(data, int(version)); err != nil {
+	if err := decodeGossipSSZ(obj, data, version); err != nil {
 		return nil, err
 	}
 	return obj, nil
@@ -96,7 +97,7 @@ func (b *blobSidecarService) DecodeGossipMessage(_ peer.ID, data []byte, version
 // ProcessMessage processes a blob sidecar message
 func (b *blobSidecarService) ProcessMessage(ctx context.Context, subnetId *uint64, msg *cltypes.BlobSidecar) error {
 	if b.test {
-		return b.verifyAndStoreBlobSidecar(msg)
+		return b.verifyAndStoreBlobSidecar(ctx, msg, 0)
 	}
 
 	sidecarVersion := b.beaconCfg.GetCurrentStateVersion(msg.SignedBlockHeader.Header.Slot / b.beaconCfg.SlotsPerEpoch)
@@ -140,18 +141,18 @@ func (b *blobSidecarService) ProcessMessage(ctx context.Context, subnetId *uint6
 		return ErrInvalidSidecarSlot
 	}
 
-	if err := b.verifyAndStoreBlobSidecar(msg); err != nil {
+	if err := b.verifyAndStoreBlobSidecar(ctx, msg, parentHeader.Slot); err != nil {
 		return err
 	}
 	b.emitters.Operation().SendBlobSidecar(msg)
 	return nil
 }
 
-func (b *blobSidecarService) verifyAndStoreBlobSidecar(msg *cltypes.BlobSidecar) error {
+func (b *blobSidecarService) verifyAndStoreBlobSidecar(ctx context.Context, msg *cltypes.BlobSidecar, parentSlot uint64) error {
 	kzgCtx := kzg.Ctx()
 
 	if !b.test && !cltypes.VerifyCommitmentInclusionProof(msg.KzgCommitment, msg.CommitmentInclusionProof, msg.Index,
-		clparams.DenebVersion, msg.SignedBlockHeader.Header.BodyRoot) {
+		msg.SignedBlockHeader.Header.BodyRoot) {
 		return ErrCommitmentsInclusionProofFailed
 	}
 
@@ -164,19 +165,25 @@ func (b *blobSidecarService) verifyAndStoreBlobSidecar(msg *cltypes.BlobSidecar)
 		if err := b.verifySidecarsSignature(msg.SignedBlockHeader); err != nil {
 			return err
 		}
+		// Verify proofs and the signature first so unavailable proposer state
+		// cannot turn an invalid sidecar into IGNORE.
+		header := msg.SignedBlockHeader.Header
+		expectedProposer, err := b.expectedProposer(ctx, header.ParentRoot, parentSlot, header.Slot)
+		if err != nil {
+			return err
+		}
+		if header.ProposerIndex != expectedProposer {
+			return fmt.Errorf("blob sidecar proposer index %d does not match expected proposer %d", header.ProposerIndex, expectedProposer)
+		}
 	}
 	monitor.ObserveBlobVerificationTime(start)
-	// operation is not thread safe from here.
 	return b.forkchoiceStore.AddPreverifiedBlobSidecar(msg)
 }
 
 func (b *blobSidecarService) verifySidecarsSignature(header *cltypes.SignedBeaconBlockHeader) error {
-	parentHeader, ok := b.forkchoiceStore.GetHeader(header.Header.ParentRoot)
-	if !ok {
+	if _, ok := b.forkchoiceStore.GetHeader(header.Header.ParentRoot); !ok {
 		return errors.New("parent header not found")
 	}
-	currentVersion := b.beaconCfg.GetCurrentStateVersion(parentHeader.Slot / b.beaconCfg.SlotsPerEpoch)
-	forkVersion := b.beaconCfg.GetForkVersionByVersion(currentVersion)
 
 	var (
 		domain []byte
@@ -185,7 +192,7 @@ func (b *blobSidecarService) verifySidecarsSignature(header *cltypes.SignedBeaco
 	)
 	// Load head state
 	if err := b.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
-		domain, err = fork.ComputeDomain(b.beaconCfg.DomainBeaconProposer[:], utils.Uint32ToBytes4(forkVersion), headState.GenesisValidatorsRoot())
+		domain, err = fork.ComputeDomainAtEpoch(b.beaconCfg, b.beaconCfg.DomainBeaconProposer, header.Header.Slot/b.beaconCfg.SlotsPerEpoch, headState.GenesisValidatorsRoot())
 		if err != nil {
 			return err
 		}
@@ -204,7 +211,8 @@ func (b *blobSidecarService) verifySidecarsSignature(header *cltypes.SignedBeaco
 		return err
 	}
 
-	if ok, err = bls.Verify(header.Signature[:], sigRoot[:], pk[:]); err != nil {
+	ok, err := bls.Verify(header.Signature[:], sigRoot[:], pk[:])
+	if err != nil {
 		return err
 	}
 	if !ok {

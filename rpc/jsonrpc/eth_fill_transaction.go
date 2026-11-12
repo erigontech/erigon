@@ -27,7 +27,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
@@ -51,7 +50,7 @@ func (api *APIImpl) FillTransaction(ctx context.Context, args ethapi.CallArgs) (
 		return nil, errors.New("maxFeePerBlobGas, if specified, must be non-zero")
 	}
 
-	// The pinned view keeps ReadCurrentHeader and the gas-oracle fee defaults
+	// The pinned view keeps the current header and the gas-oracle fee defaults
 	// on one head (including the in-flight overlay block); the nonce and
 	// gas-estimate sub-calls still open their own txs.
 	overlayTx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
@@ -64,7 +63,10 @@ func (api *APIImpl) FillTransaction(ctx context.Context, args ethapi.CallArgs) (
 	if err != nil {
 		return nil, err
 	}
-	head := rawdb.ReadCurrentHeader(overlayTx)
+	head, err := api.currentHeader(ctx, overlayTx)
+	if err != nil {
+		return nil, err
+	}
 	if head == nil {
 		return nil, errors.New("missing current header")
 	}
@@ -100,6 +102,11 @@ func (api *APIImpl) FillTransaction(ctx context.Context, args ethapi.CallArgs) (
 		} else if n > params.MaxBlobsPerTxn {
 			return nil, fmt.Errorf("too many blobs in transaction (have=%d, max=%d)", n, params.MaxBlobsPerTxn)
 		}
+	}
+
+	if args.BlobVersionedHashes == nil {
+		// The calls reject a blob fee cap without blob hashes; a filled non-blob transaction has none.
+		args.MaxFeePerBlobGas = nil
 	}
 
 	if args.AuthorizationList != nil && len(args.AuthorizationList) == 0 {
@@ -270,7 +277,7 @@ func parse48[T ~[types.LEN_48]byte](field string, in []hexutil.Bytes) ([]T, erro
 
 func (api *APIImpl) newGasOracle(dbTx kv.TemporalTx) *gasprice.Oracle {
 	backend := NewGasPriceOracleBackend(api.db, dbTx, api.BaseAPI)
-	return gasprice.NewOracle(backend, ethconfig.Defaults.GPO, api.gasCache, api.feeHistoryCache, api.logger.New("app", "gasPriceOracle"))
+	return gasprice.NewOracle(backend, ethconfig.Defaults.GPO, api.gasCache, api.feeHistoryCache, api.gasOracleLogger)
 }
 
 func (api *APIImpl) fillFeeDefaults(ctx context.Context, args *ethapi.CallArgs, head *types.Header, dbTx kv.TemporalTx) error {

@@ -27,7 +27,9 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/empty"
+	commonerrors "github.com/erigontech/erigon/common/errors"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
@@ -87,7 +89,7 @@ func (f *balFetcher) Fetch(ctx context.Context, reqs []BALRequest, peerId *PeerI
 	defer cancel()
 	fetch := func(ctx context.Context, rs []BALRequest, p *PeerId) map[common.Hash]*types.BlockAccessListSidecar {
 		got, err := f.fetchFromPeer(ctx, rs, p, requestTimeout)
-		if err != nil {
+		if err != nil && !commonerrors.IsOnlyCanceled(err) {
 			f.logger.Debug("[p2p.bal] peer did not serve BALs", "peerId", p, "err", err)
 		}
 		return got
@@ -197,15 +199,19 @@ func (f *balFetcher) fetchFromPeer(ctx context.Context, reqs []BALRequest, peerI
 		f.logger.Debug("[p2p.bal] penalizing peer for bad BAL response", "peerId", peerId, "err", err)
 		f.penalize(ctx, peerId)
 	}
-	// An answered-but-undelivered entry (explicit 0x80 or a skipped violation)
-	// means the peer does not have that BAL; entries beyond the response length
-	// are only truncation and say nothing.
+	// A discarded BAL can still match the header commitment, so absence from out
+	// does not prove that the peer lacks it. Only explicit unavailable entries
+	// update the tracker; a truncated response also gives no availability evidence.
 	for i := 0; i < len(response) && i < len(reqs); i++ {
-		if _, ok := out[reqs[i].Hash]; !ok {
+		if isUnavailableBALEntry(response[i]) {
 			f.peerTracker.BALNumMissing(peerId, reqs[i].Number)
 		}
 	}
 	return out, err
+}
+
+func isUnavailableBALEntry(entry rlp.RawValue) bool {
+	return len(entry) == 0 || (len(entry) == 1 && entry[0] == 0x80)
 }
 
 // validateBALResponse maps a positional EIP-8159 BlockAccessLists response onto
@@ -226,7 +232,7 @@ func validateBALResponse(reqs []BALRequest, response []rlp.RawValue) (map[common
 		expected := reqs[i].ExpectedHash
 		// EIP-8159: 0x80 = "not available", 0xc0 = "genuinely empty BAL",
 		// anything else = BAL bytes that must keccak256 to the committed hash.
-		if len(entry) == 0 || (len(entry) == 1 && entry[0] == 0x80) {
+		if isUnavailableBALEntry(entry) {
 			continue
 		}
 		if len(entry) == 1 && entry[0] == 0xc0 {
@@ -236,26 +242,18 @@ func validateBALResponse(reqs []BALRequest, response []rlp.RawValue) (map[common
 				continue
 			}
 		}
-		bal, err := types.DecodeBlockAccessListSidecarOwned(entry)
-		if err != nil {
-			badPeer = true
-			responseErr = fmt.Errorf("%w: req %d returned malformed BAL: %w", ErrBadBALResponse, i, err)
-			continue
-		}
-		hash, err := bal.Hash()
-		if err != nil {
-			badPeer = true
-			responseErr = fmt.Errorf("%w: req %d could not hash BAL: %w", ErrBadBALResponse, i, err)
-			continue
-		}
+		hash := crypto.Keccak256Hash(entry)
 		if hash != expected {
 			badPeer = true
 			responseErr = fmt.Errorf("%w: req %d wanted %x got %x", ErrBadBALResponse, i, expected, hash)
 			continue
 		}
-		if err = bal.ValidateForBlock(reqs[i].GasLimit); err != nil {
-			badPeer = true
-			responseErr = fmt.Errorf("%w: req %d returned invalid BAL: %w", ErrBadBALResponse, i, err)
+		// Once the hash matches, invalid BAL contents are a block fault.
+		bal, err := types.DecodeBlockAccessListSidecarForHeader(entry, reqs[i].GasLimit)
+		if err != nil {
+			continue
+		}
+		if err = bal.ValidateForHeader(reqs[i].GasLimit); err != nil {
 			continue
 		}
 		out[reqs[i].Hash] = bal

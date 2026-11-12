@@ -256,11 +256,7 @@ func (a *Account) EncodeForHashing(buffer []byte) {
 
 // Copy makes `a` a full, independent (meaning that if the `image` changes in any way, it does not affect `a`) copy of the account `image`.
 func (a *Account) Copy(image *Account) {
-	a.Nonce = image.Nonce
-	a.Balance.Set(&image.Balance)
-	copy(a.Root[:], image.Root[:])
-	a.CodeHash = image.CodeHash
-	a.Incarnation = image.Incarnation
+	*a = *image
 }
 
 func (a *Account) Empty() bool {
@@ -575,9 +571,8 @@ func DecodeIncarnationFromStorage(enc []byte) (uint64, error) {
 }
 
 func (a *Account) SelfCopy() *Account {
-	newAcc := NewAccount()
-	newAcc.Copy(a)
-	return &newAcc
+	c := *a
+	return &c
 }
 
 func (a *Account) DecodeRLP(s *rlp.Stream) error {

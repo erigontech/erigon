@@ -35,7 +35,8 @@ func syncingEvent(t *testing.T, reply *remoteproto.SyncingReply) *remoteproto.Su
 
 func TestSyncingEventReachesSubscribers(t *testing.T) {
 	f := newTestFilters(t)
-	ch, id := f.SubscribeSyncing(8, ProtocolWS)
+	ch, id, err := f.SubscribeSyncing(8, ProtocolWS)
+	require.NoError(t, err)
 	defer f.UnsubscribeSyncing(id)
 
 	f.OnNewEvent(syncingEvent(t, &remoteproto.SyncingReply{Syncing: true, CurrentBlock: 42, LastNewBlockSeen: 100}))
@@ -52,7 +53,8 @@ func TestSyncingEventReachesSubscribers(t *testing.T) {
 
 func TestSyncingEventAfterUnsubscribeIsNotDelivered(t *testing.T) {
 	f := newTestFilters(t)
-	ch, id := f.SubscribeSyncing(8, ProtocolWS)
+	ch, id, err := f.SubscribeSyncing(8, ProtocolWS)
+	require.NoError(t, err)
 	require.True(t, f.UnsubscribeSyncing(id))
 
 	f.OnNewEvent(syncingEvent(t, &remoteproto.SyncingReply{Syncing: false}))
@@ -69,7 +71,8 @@ func TestSyncingEventAfterUnsubscribeIsNotDelivered(t *testing.T) {
 // transition is not re-published and would otherwise be lost for good.
 func TestSyncingSlowSubscriberStillGetsLatestEvent(t *testing.T) {
 	f := newTestFilters(t)
-	ch, id := f.SubscribeSyncing(8, ProtocolWS)
+	ch, id, err := f.SubscribeSyncing(8, ProtocolWS)
+	require.NoError(t, err)
 	defer f.UnsubscribeSyncing(id)
 
 	for block := uint64(1); block <= 12; block++ {
@@ -98,7 +101,8 @@ func TestSubscribeSyncingSeedsFromLastStreamEvent(t *testing.T) {
 	f := newTestFilters(t)
 	f.OnNewEvent(syncingEvent(t, &remoteproto.SyncingReply{Syncing: false, CurrentBlock: 100, LastNewBlockSeen: 100}))
 
-	ch, id := f.SubscribeSyncing(8, ProtocolWS)
+	ch, id, err := f.SubscribeSyncing(8, ProtocolWS)
+	require.NoError(t, err)
 	defer f.UnsubscribeSyncing(id)
 
 	select {
@@ -112,7 +116,8 @@ func TestSubscribeSyncingSeedsFromLastStreamEvent(t *testing.T) {
 
 func TestSubscribeSyncingBeforeAnyEventHasNoSeed(t *testing.T) {
 	f := newTestFilters(t)
-	ch, id := f.SubscribeSyncing(8, ProtocolWS)
+	ch, id, err := f.SubscribeSyncing(8, ProtocolWS)
+	require.NoError(t, err)
 	defer f.UnsubscribeSyncing(id)
 
 	select {
@@ -124,7 +129,8 @@ func TestSubscribeSyncingBeforeAnyEventHasNoSeed(t *testing.T) {
 
 func TestSubscribeSyncingIsTracked(t *testing.T) {
 	f := newTestFilters(t)
-	_, id := f.SubscribeSyncing(8, ProtocolWS)
+	_, id, err := f.SubscribeSyncing(8, ProtocolWS)
+	require.NoError(t, err)
 	require.True(t, f.hasTrackedSub(SubscriptionID(id)))
 
 	require.True(t, f.UnsubscribeSyncing(id))
@@ -133,7 +139,8 @@ func TestSubscribeSyncingIsTracked(t *testing.T) {
 
 func TestEvictStaleSubscriptionsRemovesIdleSyncingFilter(t *testing.T) {
 	f := newTestFilters(t)
-	ch, id := f.SubscribeSyncing(8, ProtocolHTTP)
+	ch, id, err := f.SubscribeSyncing(8, ProtocolHTTP)
+	require.NoError(t, err)
 
 	sub, ok := f.syncingSubs.Get(id)
 	require.True(t, ok)
@@ -150,7 +157,8 @@ func TestEvictStaleSubscriptionsRemovesIdleSyncingFilter(t *testing.T) {
 
 func TestSyncingEventWithCorruptPayloadIsDropped(t *testing.T) {
 	f := newTestFilters(t)
-	ch, id := f.SubscribeSyncing(8, ProtocolWS)
+	ch, id, err := f.SubscribeSyncing(8, ProtocolWS)
+	require.NoError(t, err)
 	defer f.UnsubscribeSyncing(id)
 
 	f.OnNewEvent(&remoteproto.SubscribeReply{Type: remoteproto.Event_SYNCING, Data: []byte{0xff, 0xff, 0xff}})

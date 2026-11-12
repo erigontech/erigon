@@ -54,17 +54,19 @@ type Contract struct {
 
 	value uint256.Int
 
-	// selfBalance memoizes SELFBALANCE for the lifetime of this frame.
-	// Invalidated after opcodes that return control to this frame and may have
-	// changed the account's balance via a nested execution (CALL, CALLCODE,
-	// DELEGATECALL, CREATE, CREATE2). STATICCALL is exempt (whole subtree is
-	// read-only). SELFDESTRUCT is exempt because the frame halts.
+	// selfBalance memoizes SELFBALANCE until nested execution may change the
+	// account's balance. STATICCALL is exempt only outside frame transactions,
+	// where it cannot approve payment. SELFDESTRUCT halts the call.
 	selfBalance       uint256.Int
 	selfBalanceCached bool
 }
 
 // around 64MB cache in the worst case.
-var jumpDestCache = cache.NewGenericCache[bitvec](64*datasize.MB, func(v bitvec) int { return len(v) }, cache.ModeEvictLRU)
+var jumpDestCache = newJumpDestCache()
+
+func newJumpDestCache() *cache.GenericCache[bitvec] {
+	return cache.NewGenericCache[bitvec](64*datasize.MB, func(v bitvec) int { return len(v) * 8 }, cache.ModeEvictLRU)
+}
 
 // NewContract returns a new contract environment for the execution of EVM.
 func NewContract(caller accounts.Address, callerAddress accounts.Address, addr accounts.Address, value uint256.Int) *Contract {
@@ -86,6 +88,12 @@ func (c *Contract) validJumpdest(dest *uint256.Int) bool {
 		c.analysis = c.jumpdestAnalysis()
 	}
 	return c.analysis.isJumpdest(udest)
+}
+
+// analysedJumpdest is validJumpdest without the lazy analysis, small enough to
+// inline. It reports false while the analysis is missing.
+func (c *Contract) analysedJumpdest(dest *uint256.Int) bool {
+	return c.analysis != nil && dest.IsUint64() && dest.Uint64() < uint64(len(c.Code)) && c.analysis.isJumpdest(dest.Uint64())
 }
 
 // jumpdestAnalysis returns the cached JUMPDEST analysis of the code or computes it.

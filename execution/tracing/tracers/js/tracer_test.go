@@ -20,6 +20,7 @@
 package js
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -426,4 +427,62 @@ func TestSetup(t *testing.T) {
 	if string(have) != `"bar"` {
 		t.Errorf("tracer returned wrong result. have: %s, want: \"bar\"\n", string(have))
 	}
+}
+
+func TestGetCodeBufferDoesNotAliasState(t *testing.T) {
+	tracer, err := newJsTracer(`{done: false, step: function(log, db) {
+		if (this.done) { return; }
+		var code = db.getCode(log.contract.getAddress());
+		for (var i = 0; i < code.length; i++) { code[i] = 0xfe; }
+		this.done = true;
+	}, fault: function() {}, result: function() { return this.done; }}`, nil, nil)
+	require.NoError(t, err)
+	code := []byte{byte(vm.PUSH1), 0x1, byte(vm.POP), byte(vm.STOP)}
+	want := bytes.Clone(code)
+	ibs := state.New(state.NewNoopReader())
+	t.Cleanup(ibs.Close)
+	addr := accounts.InternAddress(common.HexToAddress("0x1000"))
+	require.NoError(t, ibs.SetCode(addr, code, tracing.CodeChangeUnspecified))
+
+	env := vm.NewEVM(evmtypes.BlockContext{Transfer: misc.Transfer}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, vm.Config{Tracer: tracer.Hooks})
+	tracer.OnTxStart(env.GetVMContext(), types.NewTransaction(0, addr.Value(), nil, 100_000, nil, nil), accounts.ZeroAddress)
+	_, _, _, err = env.Call(accounts.ZeroAddress, addr, nil, mdgas.MdGas{Execution: 100_000}, uint256.Int{}, false)
+	require.NoError(t, err)
+	tracer.EmitTxEnd(&types.Receipt{}, mdgas.TxnGasUsage{}, nil)
+	result, err := tracer.GetResult()
+	require.NoError(t, err)
+	require.JSONEq(t, `true`, string(result))
+
+	got, err := ibs.GetCode(addr)
+	require.NoError(t, err)
+	require.Equal(t, want, got)
+}
+
+func TestTracerInterfaceErrors(t *testing.T) {
+	tests := []struct {
+		name string
+		code string
+		want string
+	}{
+		{"null", `null`, "Cannot convert undefined or null to object"},
+		{"undefined", `undefined`, "Cannot convert undefined or null to object"},
+		{"result getter throws", `{get result() { throw 1 }, fault: function() {}}`, "1 at"},
+		{"fault getter throws", `{result: function() {}, get fault() { throw new Error("boom") }}`, "boom"},
+		{"step getter throws", `{result: function() {}, fault: function() {}, get step() { throw new Error("boom") }}`, "boom"},
+		{"exit getter throws", `{result: function() {}, fault: function() {}, enter: function() {}, get exit() { throw new Error("boom") }}`, "boom"},
+		{"setup getter throws", `{result: function() {}, fault: function() {}, get setup() { throw new Error("boom") }}`, "boom"},
+		{"primitive", `1`, "trace object must expose a function result()"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var err error
+			require.NotPanics(t, func() {
+				_, err = newJsTracer(tt.code, new(tracers.Context), nil)
+			})
+			require.ErrorContains(t, err, tt.want)
+		})
+	}
+
+	_, err := newJsTracer(`{result: function() {}, fault: function() {}}`, new(tracers.Context), nil)
+	require.NoError(t, err)
 }

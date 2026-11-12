@@ -20,7 +20,10 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"time"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
 
@@ -28,11 +31,14 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
-	"github.com/erigontech/erigon/execution/protocol/aa"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
@@ -44,6 +50,7 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/node/shards"
+	"github.com/erigontech/erigon/rpc/transactions"
 )
 
 // EthBackendAPIVersion
@@ -56,7 +63,9 @@ import (
 // 3.3.0 - merge EngineGetBlobsBundleV1 into EngineGetPayload
 // 4.0.0 - remove BorTxnLookup and BorEvents
 // 4.1.0 - add FrozenBlocks function
-var EthBackendAPIVersion = &typesproto.VersionReply{Major: 4, Minor: 1, Patch: 0}
+// 4.2.0 - add BlockBody function
+// 5.0.0 - replace AAValidation with FrameValidation
+var EthBackendAPIVersion = &typesproto.VersionReply{Major: 5, Minor: 0, Patch: 0}
 
 type EthBackendServer struct {
 	remoteproto.UnimplementedETHBACKENDServer // must be embedded to have forward compatible implementations.
@@ -289,7 +298,7 @@ func (s *EthBackendServer) ProtocolVersion(_ context.Context, _ *remoteproto.Pro
 }
 
 func (s *EthBackendServer) ClientVersion(_ context.Context, _ *remoteproto.ClientVersionRequest) (*remoteproto.ClientVersionReply, error) {
-	return &remoteproto.ClientVersionReply{NodeName: common.MakeName("erigon", version.VersionNoMeta)}, nil
+	return &remoteproto.ClientVersionReply{NodeName: common.MakeName("erigon", version.VersionWithCommit(version.GitCommit))}, nil
 }
 
 func (s *EthBackendServer) TxnLookup(ctx context.Context, req *remoteproto.TxnLookupRequest) (*remoteproto.TxnLookupReply, error) {
@@ -352,6 +361,35 @@ func (s *EthBackendServer) Block(ctx context.Context, req *remoteproto.BlockRequ
 		copy(sendersBytes[i*20:], sender[:])
 	}
 	return &remoteproto.BlockReply{BlockRlp: blockRlp, Senders: sendersBytes}, nil
+}
+
+func (s *EthBackendServer) BlockBody(ctx context.Context, req *remoteproto.BlockRequest) (*remoteproto.BlockBodyReply, error) {
+	hash := req.GetBlockHash()
+	if hash == nil || hash.Hi == nil || hash.Lo == nil {
+		return nil, status.Error(codes.InvalidArgument, "block hash is required")
+	}
+	blockHash := gointerfaces.ConvertH256ToHash(hash)
+	if blockHash == (common.Hash{}) {
+		return nil, status.Error(codes.InvalidArgument, "block hash must be non-zero")
+	}
+	tx, err := s.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	body, txCount, err := s.blockReader.Body(ctx, tx, blockHash, req.BlockHeight)
+	if err != nil {
+		return nil, err
+	}
+	if body == nil {
+		return &remoteproto.BlockBodyReply{}, nil
+	}
+	bodyRlp, err := rlp.EncodeToBytes(body)
+	if err != nil {
+		return nil, err
+	}
+	return &remoteproto.BlockBodyReply{BodyRlp: bodyRlp, TxCount: txCount}, nil
 }
 
 func (s *EthBackendServer) CanonicalBodyForStorage(ctx context.Context, req *remoteproto.CanonicalBodyForStorageRequest) (*remoteproto.CanonicalBodyForStorageReply, error) {
@@ -459,63 +497,134 @@ func (s *EthBackendServer) SubscribeReceipts(server remoteproto.ETHBACKEND_Subsc
 	return errors.New("no receipts filter available")
 }
 
-func (s *EthBackendServer) AAValidation(ctx context.Context, req *remoteproto.AAValidationRequest) (*remoteproto.AAValidationReply, error) {
+// FrameValidation evaluates the pool validation prefix against the published head,
+// including state announced before database commit. It returns the payer and state
+// dependencies needed for admission and later revalidation.
+func (s *EthBackendServer) FrameValidation(ctx context.Context, req *remoteproto.FrameValidationRequest) (*remoteproto.FrameValidationReply, error) {
+	txn, err := types.DecodeTransaction(req.Transaction)
+	if err != nil {
+		return &remoteproto.FrameValidationReply{}, nil
+	}
+	frame, ok := txn.(*types.FrameTransaction)
+	if !ok {
+		return &remoteproto.FrameValidationReply{}, nil
+	}
+	var expectedHash common.Hash
+	if req.ExpectedBlockHash != nil {
+		if req.ExpectedBlockHash.Hi == nil || req.ExpectedBlockHash.Lo == nil {
+			return nil, status.Error(codes.InvalidArgument, "invalid expected block hash")
+		}
+		expectedHash = gointerfaces.ConvertH256ToHash(req.ExpectedBlockHash)
+	}
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		sd, seq := s.notifications.Events.OverlaySnapshot()
+		result, err := s.validateFrameTransaction(ctx, frame, sd, expectedHash)
+		// Notifications precede commit. Retry if the published head changes while
+		// we open the database snapshot or validate against its overlay.
+		if _, current := s.notifications.Events.OverlaySnapshot(); current == seq {
+			return result, err
+		}
+	}
+}
+
+func (s *EthBackendServer) validateFrameTransaction(ctx context.Context, frame *types.FrameTransaction, sd *execctx.SharedDomains, expectedHash common.Hash) (*remoteproto.FrameValidationReply, error) {
 	tx, err := s.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-
-	currentBlock, err := s.blockReader.CurrentBlock(tx)
+	if sd != nil {
+		if overlay := sd.BlockOverlay(); overlay != nil {
+			tx = overlay.NewReadView(tx)
+		} else {
+			sd = nil
+		}
+	}
+	headHash := rawdb.ReadHeadBlockHash(tx)
+	header, err := s.blockReader.HeaderByHash(ctx, tx, headHash)
 	if err != nil {
 		return nil, err
 	}
-	if currentBlock == nil {
-		return nil, errors.New("AAValidation: no current block")
+	if header == nil {
+		return nil, errors.New("frame validation: no current block")
 	}
-	header := currentBlock.HeaderNoCopy()
-
-	aaTxn := types.FromProto(req.Tx)
-	txNumsReader := s.blockReader.TxnumReader()
-	maxTxNum, err := txNumsReader.Max(ctx, tx, header.Number.Uint64())
+	if expectedHash != (common.Hash{}) && expectedHash != headHash {
+		return nil, status.Error(codes.Aborted, "frame validation head changed")
+	}
+	maxTxNum, err := s.blockReader.TxnumReader().Max(ctx, tx, header.Number.Uint64())
 	if err != nil {
 		return nil, err
 	}
-
-	ibs := state.New(state.NewHistoryReaderV3(tx, maxTxNum))
-
-	blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, nil), nil, accounts.ZeroAddress, s.chainConfig)
-
-	senderCodeSize, err := ibs.GetCodeSize(aaTxn.SenderAddress)
+	var reader state.StateReader
+	if sd != nil {
+		latest := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
+		latest.SetTxNum(maxTxNum + 1)
+		reader = latest
+	} else {
+		reader = state.NewHistoryReaderV3(tx, maxTxNum+1)
+	}
+	ibs := state.New(reader)
+	defer ibs.Close()
+	transactions.VersionedCallState(ibs)
+	// The validation hook rejects BLOCKHASH but does not stop the opcode from calling GetHash, where
+	// an error would be taken for the node's failure, not for an invalid transaction.
+	noBlockHash := func(uint64) (common.Hash, error) { return common.Hash{}, nil }
+	// State comes from the published head, but inclusion would happen in the next
+	// block. Its context must account for fee changes and fork activation.
+	blockContext := protocol.NewEVMBlockContext(header, noBlockHash, nil, accounts.ZeroAddress, s.chainConfig)
+	blockContext.BlockNumber++
+	blockContext.Time = max(header.Time+s.chainConfig.SecondsPerSlot(), uint64(time.Now().Unix()))
+	if header.BaseFee != nil {
+		blockContext.BaseFee = *misc.CalcBaseFee(s.chainConfig, header)
+	}
+	if frame.GetBlobGas() != 0 {
+		excess := misc.CalcExcessBlobGas(s.chainConfig, header, blockContext.Time)
+		blockContext.BlobBaseFee, err = misc.GetBlobGasPrice(s.chainConfig, excess, blockContext.Time)
+		if err != nil {
+			return nil, err
+		}
+	}
+	// Fee eligibility belongs to pool admission. Clamp fees here so low fee caps
+	// do not become cached failures of prefix validation.
+	if blockContext.BaseFee.Gt(frame.GetFeeCap()) {
+		blockContext.BaseFee.Set(frame.GetFeeCap())
+	}
+	if blockContext.BlobBaseFee.Gt(&frame.Fees.BlobFeeCap) {
+		blockContext.BlobBaseFee.Set(&frame.Fees.BlobFeeCap)
+	}
+	evm := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, s.chainConfig, vm.Config{})
+	defer context.AfterFunc(ctx, evm.Cancel)()
+	result, err := protocol.ValidateFrameTransaction(evm, frame)
 	if err != nil {
-		return nil, err
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
+		if stateErr := ibs.StateReadError(); stateErr != nil {
+			return nil, stateErr
+		}
+		if errors.Is(err, protocol.ErrNonceTooLow) {
+			return &remoteproto.FrameValidationReply{RejectionReason: remoteproto.FrameValidationReply_NONCE_TOO_LOW}, nil
+		}
+		return &remoteproto.FrameValidationReply{}, nil
 	}
-
-	validationTracer := aa.NewValidationRulesTracer(aaTxn.SenderAddress, senderCodeSize != 0)
-	evm := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, s.chainConfig, vm.Config{Tracer: validationTracer.Hooks(), ReadOnly: true})
-	ibs.SetHooks(validationTracer.Hooks())
-
-	vmConfig := evm.Config()
-	rules := evm.ChainRules()
-	hasEIP3860 := vmConfig.HasEip3860(rules)
-
-	preTxCost, err := aaTxn.PreTransactionGasCost(rules, hasEIP3860)
-	if err != nil {
-		return nil, err
+	dependencies := make([]*typesproto.H160, len(result.Dependencies))
+	for i := range result.Dependencies {
+		dependencies[i] = gointerfaces.ConvertAddressToH160(result.Dependencies[i])
 	}
-
-	totalGasLimit, ok := aaTxn.TotalGasLimit(preTxCost)
-	if !ok {
-		log.Info("RIP-7560 validation err", "err", "gas limits sum overflows uint64")
-		return &remoteproto.AAValidationReply{Valid: false}, nil
+	creationNonces := make([]*remoteproto.FrameCreationNonce, len(result.CreationNonces))
+	for i, dependency := range result.CreationNonces {
+		creationNonces[i] = &remoteproto.FrameCreationNonce{
+			Address: gointerfaces.ConvertAddressToH160(dependency.Address), MinNonce: dependency.MinNonce, MaxNonce: dependency.MaxNonce,
+		}
 	}
-	_, _, err = aa.ValidateAATransaction(aaTxn, ibs, new(protocol.GasPool).AddGas(totalGasLimit), header, evm, s.chainConfig)
-	if err != nil {
-		log.Info("RIP-7560 validation err", "err", err.Error())
-		return &remoteproto.AAValidationReply{Valid: false}, nil
-	}
-
-	return &remoteproto.AAValidationReply{Valid: validationTracer.Err() == nil}, nil
+	return &remoteproto.FrameValidationReply{
+		Valid: true, Payer: gointerfaces.ConvertAddressToH160(result.Payer),
+		MaxCost: gointerfaces.ConvertUint256IntToH256(&result.MaxCost), PayerBalance: gointerfaces.ConvertUint256IntToH256(&result.PayerBalance),
+		Paymaster: result.Paymaster, Deadline: result.Deadline, Dependencies: dependencies, CreationNonces: creationNonces,
+	}, nil
 }
 
 func (s *EthBackendServer) BlockForTxNum(ctx context.Context, req *remoteproto.BlockForTxNumRequest) (*remoteproto.BlockForTxNumResponse, error) {

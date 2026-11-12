@@ -21,11 +21,15 @@ package ethapi
 
 import (
 	"bytes"
+	"encoding"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
+	"strings"
 
 	"github.com/holiman/uint256"
+	"github.com/valyala/fastjson"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -62,9 +66,169 @@ type CallArgs struct {
 	AuthorizationList    []types.JsonAuthorization `json:"authorizationList"`
 }
 
+var callArgsParsers fastjson.ParserPool
+
+type callArgs CallArgs
+
 // UnmarshalJSON decodes a call object and rejects one whose data and input disagree.
+// Fields are decoded straight from one fastjson parse: encoding/json would scan a large
+// calldata string twice, once to validate and once to decode.
 func (args *CallArgs) UnmarshalJSON(raw []byte) error {
-	type callArgs CallArgs
+	// fastjson unescapes strings, while the hexutil types reject escaped text.
+	if bytes.IndexByte(raw, '\\') >= 0 {
+		return args.unmarshalStd(raw)
+	}
+	p := callArgsParsers.Get()
+	defer callArgsParsers.Put(p)
+	v, err := p.ParseBytes(raw)
+	if err != nil || v.Type() != fastjson.TypeObject {
+		return args.unmarshalStd(raw)
+	}
+	ok := true
+	v.GetObject().Visit(func(key []byte, f *fastjson.Value) {
+		ok = ok && args.setField(key, f)
+	})
+	if !ok {
+		return args.unmarshalStd(raw)
+	}
+	return CheckCallData(args.Data, args.Input)
+}
+
+// setField decodes one member as encoding/json would, and reports false where it cannot
+// promise the same result: a field without a case here, a key matching a field only case-insensitively,
+// or a value encoding/json would reject (so the caller gets encoding/json's error).
+func (args *CallArgs) setField(key []byte, f *fastjson.Value) bool {
+	switch string(key) {
+	case "from":
+		return setText(&args.From, f)
+	case "to":
+		return setText(&args.To, f)
+	case "gas":
+		return setText(&args.Gas, f)
+	case "gasPrice":
+		return setText(&args.GasPrice, f)
+	case "maxPriorityFeePerGas":
+		return setText(&args.MaxPriorityFeePerGas, f)
+	case "maxFeePerGas":
+		return setText(&args.MaxFeePerGas, f)
+	case "maxFeePerBlobGas":
+		return setText(&args.MaxFeePerBlobGas, f)
+	case "value":
+		return setText(&args.Value, f)
+	case "nonce":
+		return setText(&args.Nonce, f)
+	case "data":
+		return setText(&args.Data, f)
+	case "input":
+		return setText(&args.Input, f)
+	case "chainId":
+		return setText(&args.ChainID, f)
+	case "accessList":
+		return setAccessList(&args.AccessList, f)
+	}
+	for _, name := range callArgsJSONNames {
+		if bytes.EqualFold(key, []byte(name)) {
+			return false
+		}
+	}
+	return true // encoding/json ignores unknown members
+}
+
+var callArgsJSONNames = func() (names []string) {
+	for f := range reflect.TypeFor[CallArgs]().Fields() {
+		name, _, _ := strings.Cut(f.Tag.Get("json"), ",")
+		names = append(names, name)
+	}
+	return names
+}()
+
+// setText decodes a JSON string member through T's UnmarshalText; null clears the field.
+func setText[T any, PT interface {
+	*T
+	encoding.TextUnmarshaler
+}](dst **T, f *fastjson.Value) bool {
+	if f.Type() == fastjson.TypeNull {
+		*dst = nil
+		return true
+	}
+	s, err := f.StringBytes()
+	if err != nil {
+		return false
+	}
+	v := PT(new(T))
+	if v.UnmarshalText(s) != nil {
+		return false
+	}
+	*dst = (*T)(v)
+	return true
+}
+
+// setAccessList decodes an access list; a repeated "accessList" member goes to encoding/json,
+// which reuses the earlier slice.
+func setAccessList(dst **types.AccessList, f *fastjson.Value) bool {
+	if f.Type() == fastjson.TypeNull {
+		*dst = nil
+		return true
+	}
+	arr, err := f.Array()
+	if err != nil || *dst != nil {
+		return false
+	}
+	al := make(types.AccessList, len(arr))
+	for i, e := range arr {
+		if !setAccessTuple(&al[i], e) {
+			return false
+		}
+	}
+	*dst = &al
+	return true
+}
+
+func setAccessTuple(dst *types.AccessTuple, f *fastjson.Value) bool {
+	o, err := f.Object()
+	if err != nil {
+		return false
+	}
+	ok := true
+	o.Visit(func(key []byte, v *fastjson.Value) {
+		if !ok {
+			return
+		}
+		switch string(key) {
+		case "address":
+			s, err := v.StringBytes()
+			ok = err == nil && dst.Address.UnmarshalText(s) == nil
+		case "storageKeys":
+			ok = setStorageKeys(&dst.StorageKeys, v)
+		default:
+			ok = !bytes.EqualFold(key, []byte("address")) && !bytes.EqualFold(key, []byte("storageKeys"))
+		}
+	})
+	return ok
+}
+
+func setStorageKeys(dst *[]common.Hash, f *fastjson.Value) bool {
+	if f.Type() == fastjson.TypeNull {
+		*dst = nil
+		return true
+	}
+	arr, err := f.Array()
+	if err != nil {
+		return false
+	}
+	keys := make([]common.Hash, len(arr))
+	for i, e := range arr {
+		s, err := e.StringBytes()
+		if err != nil || keys[i].UnmarshalText(s) != nil {
+			return false
+		}
+	}
+	*dst = keys
+	return true
+}
+
+// unmarshalStd decodes with encoding/json alone, so malformed input gets its error messages.
+func (args *CallArgs) unmarshalStd(raw []byte) error {
 	if err := json.Unmarshal(raw, (*callArgs)(args)); err != nil {
 		return err
 	}
@@ -197,9 +361,12 @@ func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (*typ
 	}
 
 	msg := types.NewMessage(addr, to, nonce, value, gas, gasPrice, gasFeeCap, gasTipCap, data, accessList, false /* checkNonce */, false /* checkTransaction */, false /* checkGas */, false /* isFree */, maxFeePerBlobGas)
+	msg.SetDynamicFeeArgs(args.MaxFeePerGas != nil || args.MaxPriorityFeePerGas != nil)
 
 	if args.BlobVersionedHashes != nil {
 		msg.SetBlobVersionedHashes(args.BlobVersionedHashes)
+	} else if args.MaxFeePerBlobGas != nil {
+		return nil, ErrBlobFeeCapWithoutBlobHashes
 	}
 
 	if args.AuthorizationList != nil {
@@ -217,17 +384,20 @@ func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (*typ
 	return msg, nil
 }
 
-// BlobsUnpriced reports whether the caller named blob fields but put no price on
+// ErrBlobFeeCapWithoutBlobHashes rejects a call that sets maxFeePerBlobGas without
+// blobVersionedHashes: only a blob transaction carries a blob fee cap, and it carries at
+// least one versioned hash.
+var ErrBlobFeeCapWithoutBlobHashes = fmt.Errorf("maxFeePerBlobGas requires blobVersionedHashes: %w", types.ErrBlobTxnEmptyBlobs)
+
+// BlobsUnpriced reports whether the caller named blob hashes but put no price on
 // them.
 func (args *CallArgs) BlobsUnpriced() bool {
 	blobFeeCap := (*uint256.Int)(args.MaxFeePerBlobGas)
-	namesBlobs := blobFeeCap != nil || args.BlobVersionedHashes != nil
-	cappedAtZero := blobFeeCap == nil || blobFeeCap.IsZero()
-	return namesBlobs && cappedAtZero
+	return args.BlobVersionedHashes != nil && (blobFeeCap == nil || blobFeeCap.IsZero())
 }
 
 // ZeroUnpricedBlobBaseFee drops the block's blob fee when the caller named blob
-// fields but put no price on them, the way BaseFee is dropped for a call with no
+// hashes but put no price on them, the way BaseFee is dropped for a call with no
 // gas price.
 func (args *CallArgs) ZeroUnpricedBlobBaseFee(blockCtx *evmtypes.BlockContext) {
 	if args.BlobsUnpriced() {
@@ -417,11 +587,6 @@ type ExecutionResult struct {
 // StructLogRes stores a structured log emitted by the EVM while replaying a
 // transaction in debug mode
 type StructLogRes = logger.StructLogRes
-
-// FormatLogs formats EVM returned structured logs for json output
-func FormatLogs(logs []logger.StructLog) []StructLogRes {
-	return logger.FormatLogs(logs)
-}
 
 //go:generate go run github.com/erigontech/erigon/cmd/tools/jsongen -type RPCHeader -out gen_rpcheader_json.go
 
@@ -669,6 +834,10 @@ func (r SignTransactionResult) MarshalJSON() ([]byte, error) {
 // RPCTransaction represents a transaction that will serialize to the RPC representation of a transaction.
 // Numeric fields may alias the source transaction; they are read-only after construction.
 type RPCTransaction struct {
+	NonceKeys            types.FrameNonceKeys    `json:"nonceKeys,omitempty" ethjson:"objects"`
+	Sender               *common.Address         `json:"sender,omitempty" ethjson:"data"`
+	Frames               types.Frames            `json:"frames,omitempty" ethjson:"objects"`
+	Signatures           *types.FrameSignatures  `json:"signatures,omitempty" ethjson:"objects"`
 	BlockHash            *common.Hash            `json:"blockHash" ethjson:"data"`
 	BlockNumber          *hexutil.U256           `json:"blockNumber" ethjson:"quantity"`
 	BlockTimestamp       *hexutil.Uint64         `json:"blockTimestamp" ethjson:"quantity"`
@@ -719,9 +888,7 @@ func newRPCTransaction(txn types.Transaction, baseFee *uint256.Int) *RPCTransact
 		To:    txn.GetTo(),
 		Value: (*hexutil.U256)(txn.GetValue()),
 	}
-	if t, ok := txn.(*types.BlobTxWrapper); ok {
-		txn = &t.Tx
-	}
+	txn = txn.Unwrap()
 
 	v, r, s := txn.RawSignatureValues()
 	// For LegacyTx, v=r=s=0 means an unsigned system/protocol transaction (e.g. EIP-4788);
@@ -762,11 +929,25 @@ func newRPCTransaction(txn types.Transaction, baseFee *uint256.Int) *RPCTransact
 			result.MaxFeePerGas = (*hexutil.U256)(txn.GetFeeCap())
 		}
 
-		if txn.Type() == types.BlobTxType {
+		switch txn.Type() {
+		case types.BlobTxType:
 			blobTx := txn.(*types.BlobTx)
 			result.MaxFeePerBlobGas = (*hexutil.U256)(&blobTx.MaxFeePerBlobGas)
 			result.BlobVersionedHashes = blobTx.BlobVersionedHashes
-		} else if txn.Type() == types.SetCodeTxType {
+		case types.FrameTxType:
+			frame := txn.(*types.FrameTransaction)
+			result.Sender = &frame.SenderAddress
+			result.NonceKeys = frame.NonceKeys
+			result.Frames = frame.Frames
+			signatures := types.FrameSignatures(frame.Signatures)
+			if signatures == nil {
+				signatures = types.FrameSignatures{}
+			}
+			result.Signatures = &signatures
+			result.MaxFeePerBlobGas = (*hexutil.U256)(&frame.Fees.BlobFeeCap)
+			result.BlobVersionedHashes = frame.BlobVersionedHashes
+			result.Accesses, result.YParity, result.V, result.R, result.S = nil, nil, nil, nil, nil
+		case types.SetCodeTxType:
 			setCodeTx := txn.(*types.SetCodeTransaction)
 			auths := setCodeTx.GetAuthorizations()
 			ats := make(types.AuthorizationList, len(auths))

@@ -19,6 +19,8 @@
 
 package vm
 
+//go:generate go run ./vmgen
+
 import (
 	"errors"
 	"fmt"
@@ -32,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -42,6 +45,7 @@ type Config struct {
 	NoRecursion   bool // Disables call, callcode, delegate call and create
 	NoBaseFee     bool // Skips the EIP-1559 and EIP-4844 fee cap checks (needed for 0 price calls)
 	NoReceipts    bool // Do not calculate receipts
+	NoBAL         bool // Do not record the accesses an EIP-7928 block access list needs
 	ReadOnly      bool // Do no perform any block finalisation
 	StatelessExec bool // true is certain conditions (like state trie root hash matching) need to be relaxed for stateless EVM execution
 	RestoreState  bool // Revert all changes made to the state (useful for constant system calls)
@@ -53,12 +57,23 @@ func (vmConfig *Config) HasEip3860(rules *chain.Rules) bool {
 	return slices.Contains(vmConfig.ExtraEips, 3860) || rules.IsShanghai
 }
 
-// CallContext contains the things that are per-call, such as stack and memory,
-// but not transients like pc and gas
+type addressWordIndex uint8
+
+const (
+	addressWordSelf addressWordIndex = iota
+	addressWordOrigin
+	addressWordCaller
+	addressWordCoinbase
+	addressWordCount
+)
+
+// CallContext contains the things that are per-call, such as stack and memory.
 type CallContext struct {
 	gas               uint64
+	savedPC           uint64 // run's pc across an out-of-line call
 	stateGas          uint64
 	stateGasSpill     uint64
+	frameContext      *state.FrameContext
 	newAccountCharged bool
 	input             []byte
 	Memory            Memory
@@ -76,12 +91,75 @@ type CallContext struct {
 	cachedKey     accounts.StorageKey
 	cachedAddr    accounts.Address
 
+	// mulmodModulus is the last full-width MULMOD modulus and mulmodReciprocal its
+	// reciprocal: a contract reduces many products by one modulus.
+	mulmodModulus    uint256.Int
+	mulmodReciprocal [5]uint64
+
 	// Contract carries pointers, so it must precede the pointer-free Stack:
 	// the GC scans a struct only up to its last pointer word (PtrBytes), and
 	// Stack.data is 32 KB it can skip entirely.
-	Contract Contract
-	create   createGasPreparation
-	Stack    Stack
+	Contract        Contract
+	create          createGasPreparation
+	slots           frameSlots
+	Stack           Stack
+	addressWords    [addressWordCount]uint256.Int
+	addressWordsSet [addressWordCount]bool
+}
+
+// maxFrameSlotMisses is how many fills a frame makes without a hit before it stops caching.
+const maxFrameSlotMisses = 8
+
+// frameSlots holds the frame's last two storage reads by stack word, ahead of key interning:
+// the frame's storage address is fixed. A read under the current stamp also means the slot
+// is warm, because warming it is journalled and so changed the stamp before the read.
+type frameSlots struct {
+	on bool // reads can be cached; fixed for the frame unless it keeps missing
+	// fills since the last hit: a frame that only reads new slots turns the cache off
+	misses int
+	stamp  state.ReadStamp
+	next   int
+	// The gas function's lookup, for the op that follows it; valid while memoGen == cacheGen.
+	memoGen uint64
+	memo    int
+	ok      [2]bool
+	key     [2]accounts.StorageKey
+	word    [2]uint256.Int
+	val     [2]uint256.Int
+}
+
+// lookupSlot returns the frame's entry for the top-of-stack word, or -1; called only when
+// slots.on. It records the result for the op, and a hit's interned key for peekStorageKey.
+func (ctx *CallContext) lookupSlot(evm *EVM) int {
+	f := &ctx.slots
+	i := -1
+	if stamp, _ := evm.IntraBlockState().ReadStamp(); f.stamp == stamp {
+		word := ctx.Stack.peek()
+		for j := range f.ok {
+			if f.ok[j] && f.word[j] == *word {
+				i = j
+				f.misses = 0
+				ctx.cachedKey, ctx.cachedKeyGen = f.key[j], ctx.cacheGen
+				break
+			}
+		}
+	}
+	f.memo, f.memoGen = i, ctx.cacheGen
+	return i
+}
+
+func (f *frameSlots) put(stamp state.ReadStamp, word uint256.Int, key accounts.StorageKey, v uint256.Int) {
+	if f.misses++; f.misses > maxFrameSlotMisses {
+		f.on = false
+		return
+	}
+	if f.stamp != stamp {
+		f.ok = [2]bool{}
+		f.stamp = stamp
+	}
+	i := f.next
+	f.next ^= 1
+	f.ok[i], f.key[i], f.word[i], f.val[i] = true, key, word, v
 }
 
 // peekStorageKey returns the top-of-stack value as an interned StorageKey.
@@ -101,7 +179,7 @@ func (ctx *CallContext) peekStorageKey(evm *EVM) accounts.StorageKey {
 // peekAddress, to keep the two peek functions inside the inlining budget.
 // Folding either back into its caller costs about 10% on the call benchmarks.
 func (ctx *CallContext) memoStorageKey(evm *EVM) accounts.StorageKey {
-	ctx.cachedKey = evm.internStorageKey(ctx.Stack.peek())
+	ctx.cachedKey = evm.intraBlockState.InternStorageKey(ctx.Stack.peek())
 	ctx.cachedKeyGen = ctx.cacheGen
 	return ctx.cachedKey
 }
@@ -116,7 +194,7 @@ func (ctx *CallContext) peekAddress(evm *EVM) accounts.Address {
 }
 
 func (ctx *CallContext) memoAddress(evm *EVM) accounts.Address {
-	ctx.cachedAddr = evm.internAddress(ctx.Stack.peek())
+	ctx.cachedAddr = evm.intraBlockState.InternAddress(ctx.Stack.peek())
 	ctx.cachedAddrGen = ctx.cacheGen
 	return ctx.cachedAddr
 }
@@ -127,28 +205,41 @@ var contextPool = sync.Pool{
 	},
 }
 
-func getCallContext(contract Contract, input []byte, gas mdgas.MdGas) *CallContext {
-	ctx, ok := contextPool.Get().(*CallContext)
-	if !ok {
-		log.Error("Type assertion failure", "err", "cannot get CallContext from contextPool")
+func (evm *EVM) getCallContext(contract Contract, input []byte, gas mdgas.MdGas) *CallContext {
+	ctx := evm.spareFrame
+	evm.spareFrame = nil
+	if ctx == nil {
+		var ok bool
+		if ctx, ok = contextPool.Get().(*CallContext); !ok {
+			log.Error("Type assertion failure", "err", "cannot get CallContext from contextPool")
+		}
 	}
 
 	ctx.gas = gas.Execution
 	ctx.stateGas = gas.State
 	ctx.stateGasSpill = 0
+	ctx.frameContext = evm.FrameContext
 	ctx.newAccountCharged = false
+	ctx.addressWordsSet = [addressWordCount]bool{}
 	ctx.input = input
 	ctx.Contract = contract
 	return ctx
 }
 
-func (ctx *CallContext) put() {
+// putCallContext parks one nested frame's context on the EVM so the next nested
+// frame takes it without the pool; the spare is not tied to the depth that left
+// it. The outermost frame returns both contexts to the pool.
+func (evm *EVM) putCallContext(ctx *CallContext) {
+	ctx.frameContext = nil
 	ctx.Memory.reset()
 	ctx.Stack.Reset()
 	ctx.cacheGen = 0
 	ctx.stateGasSpill = 0
 	ctx.newAccountCharged = false
 	ctx.create = createGasPreparation{}
+	ctx.slots.ok = [2]bool{}                 // the next frame may have another storage address
+	ctx.slots.key = [2]accounts.StorageKey{} // like cachedKey below: release the canonMap pins
+	ctx.slots.memoGen = ^uint64(0)
 	// Use sentinel values so that a peek call before the first cacheGen++ is
 	// always a miss rather than returning a stale handle from a prior use.
 	ctx.cachedKeyGen = ^uint64(0)
@@ -159,10 +250,30 @@ func (ctx *CallContext) put() {
 	ctx.cachedAddr = accounts.NilAddress
 	ctx.input = nil
 	ctx.Contract = Contract{}
+	if evm.depth > 1 && evm.spareFrame == nil {
+		evm.spareFrame = ctx
+		return
+	}
 	contextPool.Put(ctx)
+	if evm.depth == 1 && evm.spareFrame != nil {
+		contextPool.Put(evm.spareFrame)
+		evm.spareFrame = nil
+	}
 }
 
 func (ctx *CallContext) useMdGas(gas uint64, t mdgas.MdGasType, tracer *tracing.Hooks, reason tracing.GasChangeReason) (ok bool) {
+	if ctx.frameContext != nil && t == mdgas.StateGas {
+		// All EVM calls within a transaction frame share its state-gas budget.
+		// State charges cannot borrow execution gas or use a per-call reservoir.
+		old := ctx.Gas()
+		if !ctx.frameContext.ChargeStateGas(gas) {
+			return false
+		}
+		if reason != tracing.GasChangeIgnored && tracer.HasGasChangeHook() {
+			tracer.EmitGasChange(old, ctx.Gas(), reason)
+		}
+		return true
+	}
 	remaining, stateSpill, ok := useMdGas(ctx.Gas(), gas, t, tracer, reason)
 	if ok {
 		ctx.gas = remaining.Execution
@@ -175,6 +286,9 @@ func (ctx *CallContext) useMdGas(gas uint64, t mdgas.MdGasType, tracer *tracing.
 // mergeChildStateGas takes over the child's state-gas spill, then absorbs state
 // gas the child left in the reservoir, up to the spill available in this frame.
 func (ctx *CallContext) mergeChildStateGas(childSpill uint64, tracer *tracing.Hooks) {
+	if ctx.frameContext != nil {
+		return
+	}
 	ctx.stateGasSpill += childSpill
 	misplaced := min(ctx.stateGas, ctx.stateGasSpill)
 	if misplaced == 0 {
@@ -193,6 +307,14 @@ func (ctx *CallContext) mergeChildStateGas(childSpill uint64, tracer *tracing.Ho
 }
 
 func (ctx *CallContext) refillStateGas(amount uint64, tracer *tracing.Hooks, reason tracing.GasChangeReason) {
+	if ctx.frameContext != nil {
+		old := ctx.Gas()
+		ctx.frameContext.RefillStateGas(amount)
+		if reason != tracing.GasChangeIgnored && tracer.HasGasChangeHook() {
+			tracer.EmitGasChange(old, ctx.Gas(), reason)
+		}
+		return
+	}
 	remaining := ctx.Gas()
 	gasTracing := reason != tracing.GasChangeIgnored && tracer.HasGasChangeHook()
 	var old mdgas.MdGas
@@ -263,6 +385,9 @@ func (ctx *CallContext) CodeHash() accounts.CodeHash {
 }
 
 func (ctx *CallContext) Gas() mdgas.MdGas {
+	if ctx.frameContext != nil {
+		return mdgas.MdGas{Execution: ctx.gas, State: ctx.frameContext.StateGasLeft()}
+	}
 	return mdgas.MdGas{
 		Execution: ctx.gas,
 		State:     ctx.stateGas,
@@ -292,6 +417,9 @@ func (ctx *CallContext) restoreChildGas(returnGas mdgas.MdGas, tracer *tracing.H
 }
 
 func (ctx *CallContext) forwardStateGas(tracer *tracing.Hooks) {
+	if ctx.frameContext != nil {
+		return
+	}
 	if ctx.stateGas == 0 {
 		return
 	}
@@ -309,7 +437,7 @@ func (ctx *CallContext) forwardStateGas(tracer *tracing.Hooks) {
 func (ctx *CallContext) callGas(evm *EVM) mdgas.MdGas {
 	return mdgas.MdGas{
 		Execution: evm.CallGasTemp(),
-		State:     ctx.stateGas,
+		State:     ctx.Gas().State,
 	}
 }
 
@@ -326,6 +454,8 @@ func LookupInstructionSet(rules *chain.Rules) JumpTable {
 func jumpTable(chainRules *chain.Rules, cfg Config) *JumpTable {
 	var jt *JumpTable
 	switch {
+	case chainRules.IsBogota:
+		jt = &bogotaInstructionSet
 	case chainRules.IsAmsterdam:
 		jt = &amsterdamInstructionSet
 	case chainRules.IsOsaka:
@@ -399,14 +529,28 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 	if len(contract.Code) == 0 {
 		return nil, gas, mdgas.MdGasUsage{}, nil
 	}
+	tracer := evm.config.Tracer
+	debug := tracer != nil && (tracer.HasOpcodeHook() || tracer.HasGasChangeHook() || tracer.HasFaultHook())
+	trace := dbg.TraceInstructions && evm.intraBlockState.Trace()
+	if debug || trace || dbg.TraceDynamicGas {
+		return evm.runTraced(contract, gas, input, readOnly, debug, trace)
+	}
+	return evm.run(contract, gas, input, readOnly, false, false)
+}
 
+// anyTrace is true here; execution/vm/vmgen sets it to false in run.
+const anyTrace = true
+
+// runTraced is Run's loop with the tracing code. execution/vm/vmgen generates
+// run in vm_run_gen.go from it, with anyTrace false and the fast-path switch.
+func (evm *EVM) runTraced(contract Contract, gas mdgas.MdGas, input []byte, readOnly, debug, trace bool) (ret []byte, gasRemaining mdgas.MdGas, gasUsed mdgas.MdGasUsage, err error) {
 	// Reset the previous call's return data. It's unimportant to preserve the old buffer
 	// as every returning call will return new data anyway.
 	evm.returnData = nil
 
 	var (
 		op          OpCode // current opcode
-		callContext = getCallContext(contract, input, gas)
+		callContext = evm.getCallContext(contract, input, gas)
 		// For optimisation reason we're using uint64 as the program counter.
 		// It's theoretically possible to go above 2^64. The YP defines the PC
 		// to be uint256. Practically much less so feasible.
@@ -419,9 +563,9 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 		logged  bool   // deferred Tracer should ignore already logged steps
 		res     []byte // result of the opcode execution function
 		tracer  = evm.config.Tracer
-		debug   = tracer != nil && (tracer.HasOpcodeHook() || tracer.HasGasChangeHook() || tracer.HasFaultHook())
-		trace   = dbg.TraceInstructions && evm.intraBlockState.Trace()
 	)
+	_, callContext.slots.on = evm.intraBlockState.ReadStamp()
+	callContext.slots.misses = 0
 
 	// Make sure the readOnly is only set if we aren't in readOnly yet.
 	// This makes also sure that the readOnly flag isn't removed for child calls.
@@ -440,8 +584,8 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 		// derived uniformly by evm.call/evm.create's defer from the final
 		// gasRemaining (covers precompile/no-code paths and the revert burn).
 		gasUsed.StateSpill = callContext.stateGasSpill
-		gasUsed.State = int64(gas.State) - int64(callContext.stateGas) + int64(callContext.stateGasSpill)
-		callContext.put()
+		gasUsed.State = int64(gas.State) - int64(callContext.Gas().State) + int64(callContext.stateGasSpill)
+		evm.putCallContext(callContext)
 		if restoreReadonly {
 			evm.readOnly = false
 		}
@@ -450,7 +594,7 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 
 	// Registered after the cleanup defer so LIFO runs it first: the tracer needs
 	// the stacks before callContext.put() returns them to the pool.
-	if debug {
+	if anyTrace && debug {
 		defer func() {
 			if err == nil {
 				return
@@ -470,13 +614,31 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 	// parent context.
 
 	// Hoist to locals so the compiler sees them as loop-invariant.
-	anyTrace := dbg.TraceDynamicGas || debug || trace
 	stack := &callContext.Stack
 	jt := evm.jt
+	// The fast path keeps gas in a register. It is stored back before the generic
+	// path and after the loop, and reloaded after each generic op.
+	gasLeft := callContext.gas
 
+run:
 	for {
+		// Past the end of the code is STOP. Exiting here, out of line, spares
+		// every op a taken jump in GetOp.
+		if !anyTrace && pc >= uint64(len(contract.Code)) {
+			res, err = nil, errStopToken
+			break run
+		}
+		op = contract.GetOp(pc)
+		// The hottest constant-gas opcodes run inline, without the jump table and
+		// its indirect call. A failed check falls through to the generic path,
+		// which reports the error.
+		if !anyTrace {
+			// execution/vm/vmgen inserts the fastOps switch here.
+			callContext.gas = gasLeft
+		}
 		callContext.cacheGen++
-		if debug {
+		callContext.savedPC = pc
+		if anyTrace && debug {
 			// Capture pre-execution values for tracing.
 			logged = false
 			pcCopy = pc
@@ -484,7 +646,6 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 		}
 		// Get the operation from the jump table and validate the stack to ensure there are
 		// enough stack items available to perform the operation.
-		op = contract.GetOp(pc)
 		operation := &jt[op]
 		cost = mdgas.MdGasCost{Execution: operation.constantGas} // For tracing
 		// Valid iff numPop <= sLen <= maxStack, as one unsigned range check:
@@ -542,18 +703,13 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= dynamicCost.Execution
-			if dynamicCost.State > 0 {
-				ok := callContext.useMdGas(uint64(dynamicCost.State), mdgas.StateGas, nil, tracing.GasChangeIgnored)
-				if !ok {
-					return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
-				}
-			} else if dynamicCost.State < 0 {
-				callContext.refillStateGas(uint64(-dynamicCost.State), nil, tracing.GasChangeIgnored)
+			if dynamicCost.State != 0 && !applyStateGas(callContext, dynamicCost.State) {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 		}
 
 		// Do gas tracing before memory expansion
-		if debug {
+		if anyTrace && debug {
 			if tracer.HasGasChangeHook() {
 				tracer.EmitGasChange(oldGas, callContext.Gas(), tracing.GasChangeCallOpCode)
 			}
@@ -569,7 +725,7 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 
 		// TODO - move this to a trace & set in the worker
 
-		if trace {
+		if anyTrace && trace {
 			var opstr string
 			if operation.string != nil {
 				opstr = operation.string(pc, callContext)
@@ -582,12 +738,14 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 		}
 
 		// execute the operation
-		pc, res, err = operation.execute(pc, evm, callContext)
+		pc, res, err = operation.execute(callContext.savedPC, evm, callContext)
+		gasLeft = callContext.gas
 		if err != nil {
-			break
+			break run
 		}
 		pc++
 	}
+	callContext.gas = gasLeft
 
 	if errors.Is(err, errStopToken) {
 		err = nil // clear stop token error

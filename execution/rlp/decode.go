@@ -366,7 +366,7 @@ func sliceHint(s *Stream, elem reflect.Type, size uint64) int {
 	if uint64(len(raw)) < size {
 		return 0
 	}
-	n := countItems(raw[:size])
+	n := CountItems(raw[:size])
 	if elemSize := elem.Size(); elemSize > 0 {
 		n = min(n, maxSliceHintBytes/int(elemSize))
 	}
@@ -649,6 +649,10 @@ type Stream struct {
 
 	// Inline storage for NewBytesStream so the slice header doesn't escape per call.
 	sliceRdr sliceReader
+	// Reads advance off instead of reslicing sliceRdr: Stream lives on the heap, so
+	// moving the slice pointer costs a GC write barrier on every read. s.r stays at
+	// the slice start, so byte-backed reads must not go through s.r.
+	off int
 
 	remaining uint64   // number of bytes remaining to be read from r
 	size      uint64   // size of value ahead
@@ -712,7 +716,7 @@ func NewBytesStream(b []byte) *Stream {
 
 // Peek returns the unread bytes of a slice-backed stream without consuming them,
 // nil for any other reader. The result aliases the input: read only.
-func (s *Stream) Peek() []byte { return s.sliceRdr }
+func (s *Stream) Peek() []byte { return s.sliceRdr[s.off:] }
 
 // PutStream returns a Stream to the pool.
 func PutStream(stream *Stream) {
@@ -755,7 +759,6 @@ func (s *Stream) ViewBytes() ([]byte, error) {
 	if s.sliceRdr == nil {
 		return s.Bytes()
 	}
-	sr := &s.sliceRdr
 	kind, size, err := s.Kind()
 	if err != nil {
 		return nil, err
@@ -768,11 +771,12 @@ func (s *Stream) ViewBytes() ([]byte, error) {
 		if err := s.willRead(size); err != nil {
 			return nil, err
 		}
-		if uint64(len(*sr)) < size {
+		if uint64(len(s.sliceRdr)-s.off) < size {
 			return nil, io.ErrUnexpectedEOF
 		}
-		b := (*sr)[:size:size]
-		*sr = (*sr)[size:]
+		end := s.off + int(size)
+		b := s.sliceRdr[s.off:end:end]
+		s.off = end
 		if size == 1 && b[0] < 128 {
 			return nil, ErrCanonSize
 		}
@@ -1169,6 +1173,7 @@ func (s *Stream) Reset(r io.Reader, inputLimit uint64) {
 	} else {
 		s.sliceRdr = nil
 	}
+	s.off = 0
 	s.r = bufr
 	// Reset the decoding context.
 	s.stack = s.stack[:0]
@@ -1304,8 +1309,8 @@ func (s *Stream) readFull(buf []byte) (err error) {
 		return err
 	}
 	if s.sliceRdr != nil {
-		n := copy(buf, s.sliceRdr)
-		s.sliceRdr = s.sliceRdr[n:]
+		n := copy(buf, s.sliceRdr[s.off:])
+		s.off += n
 		if n < len(buf) {
 			return io.ErrUnexpectedEOF
 		}
@@ -1333,10 +1338,13 @@ func (s *Stream) readByte() (byte, error) {
 	if err := s.willRead(1); err != nil {
 		return 0, err
 	}
-	if len(s.sliceRdr) > 0 {
-		b := s.sliceRdr[0]
-		s.sliceRdr = s.sliceRdr[1:]
-		return b, nil
+	if s.sliceRdr != nil {
+		if s.off < len(s.sliceRdr) {
+			b := s.sliceRdr[s.off]
+			s.off++
+			return b, nil
+		}
+		return 0, io.ErrUnexpectedEOF
 	}
 	b, err := s.r.ReadByte()
 	if errors.Is(err, io.EOF) {

@@ -19,7 +19,6 @@ package handlers
 import (
 	"context"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon/cl/sentinel/communication"
@@ -38,6 +37,7 @@ type tokenBucket struct {
 	maxTokens  float64
 	refillRate float64 // tokens per second
 	lastRefill time.Time
+	inUse      bool
 }
 
 func newTokenBucket(maxTokens float64, refillRate float64) *tokenBucket {
@@ -54,7 +54,17 @@ func (tb *tokenBucket) tryConsume(n int) bool {
 	tb.mu.Lock()
 	defer tb.mu.Unlock()
 
-	now := time.Now()
+	tb.refill(time.Now())
+
+	cost := float64(n)
+	if tb.tokens >= cost {
+		tb.tokens -= cost
+		return true
+	}
+	return false
+}
+
+func (tb *tokenBucket) refill(now time.Time) {
 	elapsed := now.Sub(tb.lastRefill).Seconds()
 	if elapsed > 0 {
 		tb.tokens += elapsed * tb.refillRate
@@ -66,19 +76,39 @@ func (tb *tokenBucket) tryConsume(n int) bool {
 	// If elapsed <= 0, lastRefill is in the future (set by punishment). No
 	// tokens are refilled and lastRefill stays advanced until real time
 	// catches up, preventing burst regeneration during punishment.
+}
 
-	cost := float64(n)
-	if tb.tokens >= cost {
-		tb.tokens -= cost
-		return true
+func (tb *tokenBucket) tryStartRebuild(now time.Time) bool {
+	tb.mu.Lock()
+	defer tb.mu.Unlock()
+	if tb.inUse {
+		return false
 	}
-	return false
+	tb.refill(now)
+	if tb.tokens < 0 {
+		return false
+	}
+	tb.inUse = true
+	return true
+}
+
+func (tb *tokenBucket) finishRebuild(now time.Time, held float64, charge bool) {
+	tb.mu.Lock()
+	defer tb.mu.Unlock()
+	if charge {
+		tb.tokens -= held
+		tb.lastRefill = now
+	}
+	tb.inUse = false
 }
 
 // protocolRateConfig defines the rate limit for a protocol.
 type protocolRateConfig struct {
 	maxTokens  float64 // burst capacity
 	refillRate float64 // tokens per second
+	// noPunishment is for messages peers send on every connection: an
+	// exhausted bucket must recover at refillRate, not lock the peer out.
+	noPunishment bool
 }
 
 // maxConcurrentRequestsPerPeer is the maximum number of concurrent in-flight
@@ -96,11 +126,6 @@ const bucketIdleExpiry = 10 * time.Minute
 
 // peerRateLimiter enforces per-peer, per-protocol rate limits and per-peer
 // concurrent stream caps on incoming ReqResp handlers.
-//
-// Rate limits are counted per response item, aligned with Lighthouse's approach.
-// The wrapper pre-consumes 1 token for admission; batch handlers (blocks-by-range,
-// blobs-by-range, etc.) consume additional tokens proportional to the requested
-// item count after decoding the request.
 type peerRateLimiter struct {
 	// protocolLimits maps protocol name -> rate config
 	protocolLimits map[string]protocolRateConfig
@@ -109,28 +134,40 @@ type peerRateLimiter struct {
 	buckets sync.Map // map[peerProtocolKey]*tokenBucket
 
 	// concurrency maps peerID -> current in-flight request count
-	concurrency sync.Map // map[string]*atomic.Int32
+	concurrencyMu sync.Mutex
+	concurrency   map[string]int // an idle peer has no entry
 
 	// punished maps (peerID, protocol) -> punishment expiry time
 	punished sync.Map // map[peerProtocolKey]time.Time
+
+	now func() time.Time
 }
+
+const envelopeRebuildKey = "envelope_rebuild"
+
+// blockRateBurst is the token bucket capacity of the block protocols.
+const blockRateBurst = 128
 
 func newPeerRateLimiter() *peerRateLimiter {
 	rl := &peerRateLimiter{
 		protocolLimits: make(map[string]protocolRateConfig),
+		concurrency:    make(map[string]int),
+		now:            time.Now,
 	}
 
-	// Rate limits aligned with Lighthouse/Lodestar.
+	// Rate limits aligned with other consensus clients.
 	// Format: maxTokens (burst), refillRate (tokens/second)
-	// Lighthouse uses ~128 tokens per 10s for block requests, 5/15s for status, etc.
-	blockRate := protocolRateConfig{maxTokens: 128, refillRate: 12.8}       // 128 per 10s
-	blobRate := protocolRateConfig{maxTokens: 72, refillRate: 7.2}          // 72 per 10s
-	dataColRate := protocolRateConfig{maxTokens: 16384, refillRate: 1638.4} // 16384 per 10s (proportional to blockRate × NumberOfColumns)
-	lcRate := protocolRateConfig{maxTokens: 128, refillRate: 12.8}          // 128 per 10s
-	pingRate := protocolRateConfig{maxTokens: 2, refillRate: 0.2}           // 2 per 10s
-	goodbyeRate := protocolRateConfig{maxTokens: 1, refillRate: 0.1}        // 1 per 10s
-	statusRate := protocolRateConfig{maxTokens: 5, refillRate: 0.33}        // 5 per 15s
-	metadataRate := protocolRateConfig{maxTokens: 2, refillRate: 0.2}       // 2 per 10s
+	blockRate := protocolRateConfig{maxTokens: blockRateBurst, refillRate: 12.8}       // 128 per 10s
+	blobRate := protocolRateConfig{maxTokens: 72, refillRate: 7.2}                     // 72 per 10s
+	dataColRate := protocolRateConfig{maxTokens: 16384, refillRate: 1638.4}            // 16384 per 10s (proportional to blockRate × NumberOfColumns)
+	lcRate := protocolRateConfig{maxTokens: 128, refillRate: 12.8}                     // 128 per 10s
+	pingRate := protocolRateConfig{maxTokens: 2, refillRate: 0.2}                      // 2 per 10s
+	goodbyeRate := protocolRateConfig{maxTokens: 1, refillRate: 1, noPunishment: true} // 1 per second
+	statusRate := protocolRateConfig{maxTokens: 5, refillRate: 1, noPunishment: true}  // 5 burst, 1 per second
+	metadataRate := protocolRateConfig{maxTokens: 2, refillRate: 0.2}                  // 2 per 10s
+
+	// A rebuild limit can cut an admitted response short, so the retry must wait for refill instead of being punished.
+	envelopeRate := protocolRateConfig{maxTokens: 128, refillRate: 12.8, noPunishment: true} // 128 per 10s
 
 	rl.protocolLimits[communication.BeaconBlocksByRangeProtocolV2] = blockRate
 	rl.protocolLimits[communication.BeaconBlocksByRootProtocolV2] = blockRate
@@ -139,8 +176,8 @@ func newPeerRateLimiter() *peerRateLimiter {
 	rl.protocolLimits[communication.BlobSidecarByRootProtocolV1] = blobRate
 	rl.protocolLimits[communication.DataColumnSidecarsByRangeProtocolV1] = dataColRate
 	rl.protocolLimits[communication.DataColumnSidecarsByRootProtocolV1] = dataColRate
-	rl.protocolLimits[communication.ExecutionPayloadEnvelopesByRangeProtocolV1] = blockRate
-	rl.protocolLimits[communication.ExecutionPayloadEnvelopesByRootProtocolV1] = blockRate
+	rl.protocolLimits[communication.ExecutionPayloadEnvelopesByRangeProtocolV1] = envelopeRate
+	rl.protocolLimits[communication.ExecutionPayloadEnvelopesByRootProtocolV1] = envelopeRate
 	rl.protocolLimits[communication.PingProtocolV1] = pingRate
 	rl.protocolLimits[communication.GoodbyeProtocolV1] = goodbyeRate
 	rl.protocolLimits[communication.StatusProtocolV1] = statusRate
@@ -152,8 +189,30 @@ func newPeerRateLimiter() *peerRateLimiter {
 	rl.protocolLimits[communication.LightClientFinalityUpdateProtocolV1] = lcRate
 	rl.protocolLimits[communication.LightClientBootstrapProtocolV1] = lcRate
 	rl.protocolLimits[communication.LightClientUpdatesByRangeProtocolV1] = lcRate
-
 	return rl
+}
+
+func (rl *peerRateLimiter) envelopeRebuildBucket(peerID string) *tokenBucket {
+	key := peerProtocolKey{peerID: peerID, protocol: envelopeRebuildKey}
+	if bucket, ok := rl.buckets.Load(key); ok {
+		return bucket.(*tokenBucket)
+	}
+	newBucket := newTokenBucket(1, 1) // One second of credit per second bounds sustained slot use to half.
+	newBucket.lastRefill = rl.now()
+	bucket, _ := rl.buckets.LoadOrStore(key, newBucket)
+	return bucket.(*tokenBucket)
+}
+
+func (rl *peerRateLimiter) tryStartEnvelopeRebuild(peerID string) *tokenBucket {
+	bucket := rl.envelopeRebuildBucket(peerID)
+	if !bucket.tryStartRebuild(rl.now()) {
+		return nil
+	}
+	return bucket
+}
+
+func (rl *peerRateLimiter) finishEnvelopeRebuild(bucket *tokenBucket, elapsed time.Duration, charge bool) {
+	bucket.finishRebuild(rl.now(), elapsed.Seconds(), charge)
 }
 
 // allowRequest checks whether a request from peerID on the given protocol should be allowed.
@@ -173,13 +232,13 @@ func (rl *peerRateLimiter) allowRequest(peerID string, protocol string, cost int
 	return rl.consumeTokens(peerID, protocol, cost)
 }
 
-// consumeTokens attempts to consume cost tokens from the bucket for the given
-// peer and protocol. If the bucket is exhausted, the peer is punished and false
-// is returned. Batch handlers call this after decoding the request to charge for
-// the actual number of response items.
+// consumeTokens charges cost tokens for the given peer and protocol.
+// If there are too few tokens, it returns false and punishes the peer unless
+// noPunishment is set. Zero costs succeed and negative costs are rejected.
 func (rl *peerRateLimiter) consumeTokens(peerID string, protocol string, cost int) bool {
+	// Negative costs may be caused by overflow and must never bypass charging.
 	if cost <= 0 {
-		return true
+		return cost == 0
 	}
 	key := peerProtocolKey{peerID: peerID, protocol: protocol}
 	cfg, hasCfg := rl.protocolLimits[protocol]
@@ -192,6 +251,9 @@ func (rl *peerRateLimiter) consumeTokens(peerID string, protocol string, cost in
 	}
 	bucket := bucketI.(*tokenBucket)
 	if !bucket.tryConsume(cost) {
+		if cfg.noPunishment {
+			return false
+		}
 		// Drain the bucket and suppress refill during punishment. Advance
 		// lastRefill so only tokens accumulated *after* the punishment
 		// expires are available. We leave a small grace window (enough for
@@ -212,25 +274,24 @@ func (rl *peerRateLimiter) consumeTokens(peerID string, protocol string, cost in
 // acquireConcurrency tries to increment the in-flight count for a peer.
 // Returns true if the request is allowed (under the concurrency cap).
 func (rl *peerRateLimiter) acquireConcurrency(peerID string) bool {
-	counterI, _ := rl.concurrency.LoadOrStore(peerID, &atomic.Int32{})
-	counter := counterI.(*atomic.Int32)
-	for {
-		cur := counter.Load()
-		if cur >= int32(maxConcurrentRequestsPerPeer) {
-			return false
-		}
-		if counter.CompareAndSwap(cur, cur+1) {
-			return true
-		}
+	rl.concurrencyMu.Lock()
+	defer rl.concurrencyMu.Unlock()
+	if rl.concurrency[peerID] >= maxConcurrentRequestsPerPeer {
+		return false
 	}
+	rl.concurrency[peerID]++
+	return true
 }
 
 // releaseConcurrency decrements the in-flight count for a peer.
 func (rl *peerRateLimiter) releaseConcurrency(peerID string) {
-	if counterI, ok := rl.concurrency.Load(peerID); ok {
-		counter := counterI.(*atomic.Int32)
-		counter.Add(-1)
+	rl.concurrencyMu.Lock()
+	defer rl.concurrencyMu.Unlock()
+	if rl.concurrency[peerID] <= 1 {
+		delete(rl.concurrency, peerID)
+		return
 	}
+	rl.concurrency[peerID]--
 }
 
 // startCleanup runs a background goroutine that periodically evicts stale
@@ -273,10 +334,4 @@ func (rl *peerRateLimiter) cleanup() {
 		}
 		return true
 	})
-
-	// Concurrency entries are not cleaned up. Each is a single *atomic.Int32
-	// per peer (~40 bytes), so even over the lifetime of a long-running node
-	// the memory is negligible. Cleaning them up would require synchronization
-	// with acquireConcurrency/releaseConcurrency that adds complexity for no
-	// practical benefit.
 }

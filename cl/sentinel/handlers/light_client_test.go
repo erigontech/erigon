@@ -22,6 +22,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"math"
 	"testing"
 
 	"github.com/libp2p/go-libp2p"
@@ -35,13 +36,69 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/sentinel/communication"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
-	"github.com/erigontech/erigon/cl/sentinel/peers"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/snappypool"
+	"github.com/erigontech/erigon/common/ssz"
 )
 
 var altairSlot = clparams.MainnetBeaconConfig.AltairForkEpoch*clparams.MainnetBeaconConfig.SlotsPerEpoch + 1
+
+func TestLightClientUpdatesRequestCost(t *testing.T) {
+	for _, tc := range []struct {
+		count uint64
+		cost  int
+	}{{0, 0}, {1, 0}, {3, 2}, {100, 99}, {101, 99}, {math.MaxUint64 - 1, 99}} {
+		t.Run(fmt.Sprint(tc.count), func(t *testing.T) {
+			cfg := clparams.MainnetBeaconConfig
+			c := &ConsensusHandlers{
+				beaconConfig: &cfg, ethClock: getEthClock(t),
+				forkChoiceReader: mock_services.NewForkChoiceStorageMock(t), rateLimiter: newPeerRateLimiter(),
+			}
+			stream := newHandlerTestStream(t, communication.LightClientUpdatesByRangeProtocolV1,
+				&cltypes.LightClientUpdatesByRangeRequest{StartPeriod: 1, Count: tc.count})
+			bucket := admitHandlerTestRequest(t, c, stream)
+			require.NoError(t, c.lightClientUpdatesByRangeHandler(stream))
+			require.Empty(t, stream.response.Bytes())
+			require.Equal(t, bucket.maxTokens-1-float64(tc.cost), bucket.tokens)
+		})
+	}
+}
+
+func TestLightClientUpdatesRejectsOverflow(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	c := &ConsensusHandlers{beaconConfig: &cfg, ethClock: getEthClock(t), rateLimiter: newPeerRateLimiter()}
+	stream := newHandlerTestStream(t, communication.LightClientUpdatesByRangeProtocolV1,
+		&cltypes.LightClientUpdatesByRangeRequest{StartPeriod: math.MaxUint64 - 1, Count: 2})
+	require.NoError(t, c.lightClientUpdatesByRangeHandler(stream))
+	code, err := stream.response.ReadByte()
+	require.NoError(t, err)
+	require.Equal(t, byte(InvalidRequestPrefix), code)
+}
+
+func TestLightClientUpdatesStopsAtGap(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	f := mock_services.NewForkChoiceStorageMock(t)
+	start := cfg.SyncCommitteePeriod(altairSlot) + 1
+	for _, offset := range []uint64{0, 2, 3} {
+		update := cltypes.NewLightClientUpdate(clparams.AltairVersion, &cfg)
+		update.AttestedHeader.Beacon.Slot = (start + offset) * cfg.SlotsPerEpoch * cfg.EpochsPerSyncCommitteePeriod
+		f.LCUpdates[start+offset] = update
+	}
+	c := &ConsensusHandlers{beaconConfig: &cfg, ethClock: getEthClock(t), forkChoiceReader: f, rateLimiter: newPeerRateLimiter()}
+	stream := newHandlerTestStream(t, communication.LightClientUpdatesByRangeProtocolV1,
+		&cltypes.LightClientUpdatesByRangeRequest{StartPeriod: start - 1, Count: 5})
+
+	require.NoError(t, c.lightClientUpdatesByRangeHandler(stream))
+	code, err := stream.response.ReadByte()
+	require.NoError(t, err)
+	require.Equal(t, byte(SuccessfulResponsePrefix), code)
+	update := cltypes.NewLightClientUpdate(clparams.AltairVersion, &cfg)
+	require.NoError(t, decodeAndRead(&stream.response, update, c.ethClock))
+	require.Equal(t, f.LCUpdates[start], update)
+	require.Zero(t, stream.response.Len())
+}
 
 func TestLightClientOptimistic(t *testing.T) {
 	ctx := context.Background()
@@ -60,7 +117,6 @@ func TestLightClientOptimistic(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	peersPool := peers.NewPool(host)
 	beaconDB, indiciesDB := setupStore(t)
 
 	f := mock_services.NewForkChoiceStorageMock(t)
@@ -84,12 +140,11 @@ func TestLightClientOptimistic(t *testing.T) {
 		beaconDB,
 		indiciesDB,
 		host,
-		peersPool,
 		&clparams.NetworkConfig{},
 		nil,
 		beaconCfg,
 		ethClock,
-		nil, f, nil, nil, nil, true,
+		nil, f, nil, nil, nil, true, nil,
 	)
 	c.Start()
 
@@ -106,7 +161,7 @@ func TestLightClientOptimistic(t *testing.T) {
 
 	optimistic := &cltypes.LightClientOptimisticUpdate{}
 
-	err = ssz_snappy.DecodeAndRead(stream, optimistic, &clparams.MainnetBeaconConfig, ethClock)
+	err = decodeAndRead(stream, optimistic, ethClock)
 	require.NoError(t, err)
 
 	require.Equal(t, f.NewestLCUpdate.AttestedHeader, optimistic.AttestedHeader)
@@ -131,7 +186,6 @@ func TestLightClientFinality(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	peersPool := peers.NewPool(host)
 	beaconDB, indiciesDB := setupStore(t)
 
 	f := mock_services.NewForkChoiceStorageMock(t)
@@ -154,12 +208,11 @@ func TestLightClientFinality(t *testing.T) {
 		beaconDB,
 		indiciesDB,
 		host,
-		peersPool,
 		&clparams.NetworkConfig{},
 		nil,
 		beaconCfg,
 		ethClock,
-		nil, f, nil, nil, nil, true,
+		nil, f, nil, nil, nil, true, nil,
 	)
 	c.Start()
 
@@ -176,7 +229,7 @@ func TestLightClientFinality(t *testing.T) {
 
 	got := &cltypes.LightClientFinalityUpdate{}
 
-	err = ssz_snappy.DecodeAndRead(stream, got, &clparams.MainnetBeaconConfig, ethClock)
+	err = decodeAndRead(stream, got, ethClock)
 	require.NoError(t, err)
 
 	require.Equal(t, got.AttestedHeader, f.NewestLCUpdate.AttestedHeader)
@@ -204,7 +257,6 @@ func TestLightClientBootstrap(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	peersPool := peers.NewPool(host)
 	beaconDB, indiciesDB := setupStore(t)
 
 	f := mock_services.NewForkChoiceStorageMock(t)
@@ -232,12 +284,11 @@ func TestLightClientBootstrap(t *testing.T) {
 		beaconDB,
 		indiciesDB,
 		host,
-		peersPool,
 		&clparams.NetworkConfig{},
 		nil,
 		beaconCfg,
 		ethClock,
-		nil, f, nil, nil, nil, true,
+		nil, f, nil, nil, nil, true, nil,
 	)
 	c.Start()
 
@@ -261,7 +312,7 @@ func TestLightClientBootstrap(t *testing.T) {
 
 	got := &cltypes.LightClientBootstrap{}
 
-	err = ssz_snappy.DecodeAndRead(stream, got, &clparams.MainnetBeaconConfig, ethClock)
+	err = decodeAndRead(stream, got, ethClock)
 	require.NoError(t, err)
 
 	expected := f.LightClientBootstraps[reqRoot]
@@ -287,7 +338,6 @@ func TestLightClientUpdates(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	peersPool := peers.NewPool(host)
 	beaconDB, indiciesDB := setupStore(t)
 
 	f := mock_services.NewForkChoiceStorageMock(t)
@@ -307,12 +357,11 @@ func TestLightClientUpdates(t *testing.T) {
 		beaconDB,
 		indiciesDB,
 		host,
-		peersPool,
 		&clparams.NetworkConfig{},
 		nil,
 		beaconCfg,
 		ethClock,
-		nil, f, nil, nil, nil, true,
+		nil, f, nil, nil, nil, true, nil,
 	)
 	c.Start()
 
@@ -352,7 +401,7 @@ func TestLightClientUpdates(t *testing.T) {
 			}
 		}
 
-		encodedLn, _, err := ssz_snappy.ReadUvarint(stream)
+		encodedLn, err := ssz_snappy.ReadUvarint(stream)
 		require.NoError(t, err)
 
 		raw := make([]byte, encodedLn)
@@ -392,4 +441,16 @@ func TestLightClientUpdates(t *testing.T) {
 	if err != io.EOF { //nolint:errorlint // intentional bare sentinel check
 		t.Fatal("Stream is not empty")
 	}
+}
+
+func decodeAndRead(r io.Reader, val ssz.EncodableSSZ, ethClock eth_clock.EthereumClock) error {
+	var forkDigest [4]byte
+	if _, err := io.ReadFull(r, forkDigest[:]); err != nil {
+		return err
+	}
+	version, err := ethClock.StateVersionByForkDigest(forkDigest)
+	if err != nil {
+		return err
+	}
+	return ssz_snappy.DecodeAndReadNoForkDigest(r, val, version)
 }

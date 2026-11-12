@@ -19,6 +19,7 @@ package network
 import (
 	"context"
 	"errors"
+	"slices"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -39,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/db/snaptype"
 )
 
 func TestBlobHistoryDownloaderProcessesFirstUnfrozenSlot(t *testing.T) {
@@ -92,6 +94,38 @@ func TestBlobHistoryDownloaderRefreshesFrozenBoundaryAfterRetry(t *testing.T) {
 	require.Empty(t, downloader.retryRanges)
 	require.True(t, downloader.backfillCompleted.Load())
 	require.True(t, notified)
+}
+
+func TestBlobHistoryDownloaderBoundedArchiveStopsAtFloor(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.DenebForkEpoch = 0
+	cfg.MinEpochsForBlobSidecarsRequests = 1
+	const head = uint64(100)
+	serveFloor := cfg.BlobSidecarServeRangeStartSlot(head)
+	require.Equal(t, uint64(64), serveFloor)
+
+	for _, tc := range []struct {
+		name      string
+		fromSlot  uint64
+		wantFloor uint64
+	}{
+		{name: "full archive", fromSlot: 0, wantFloor: 0},
+		{name: "from slot below the serving window", fromSlot: 50, wantFloor: 50},
+		{name: "from slot inside the serving window keeps the window", fromSlot: 90, wantFloor: serveFloor},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reader := &boundaryBlockReader{}
+			downloader := newBoundaryDownloader(t, head, 0, 0, reader)
+			downloader.beaconCfg = &cfg
+			downloader.archiveFromSlot = tc.fromSlot
+
+			require.NoError(t, downloader.downloadOnce(false))
+			require.NotEmpty(t, reader.slots)
+			require.Equal(t, head, reader.slots[0])
+			require.Equal(t, tc.wantFloor, slices.Min(reader.slots))
+			require.True(t, downloader.backfillCompleted.Load())
+		})
+	}
 }
 
 func TestBlobHistoryDownloaderRunsWithSinglePeer(t *testing.T) {
@@ -981,7 +1015,7 @@ func seedCanonicalRoots(t *testing.T, db kv.RwDB, headSlot uint64, reader *bound
 			}
 			root, err := block.Block.HashSSZ()
 			require.NoError(t, err)
-			if err := beacon_indicies.MarkRootCanonical(context.Background(), tx, slot, root); err != nil {
+			if err := beacon_indicies.MarkRootCanonical(tx, slot, root); err != nil {
 				return err
 			}
 		}
@@ -1044,13 +1078,16 @@ func (p *boundarySequencePeerCounter) SendBlobsSidecarByIdentifierReq(context.Co
 
 type boundarySnapshot uint64
 
-func (s boundarySnapshot) FrozenBlobs() uint64 { return uint64(s) }
+func (s boundarySnapshot) FrozenBlobs() uint64                       { return uint64(s) }
+func (s boundarySnapshot) VisibleSegmentsMaxTo(snaptype.Enum) uint64 { return uint64(s) }
 
 type boundaryMutableSnapshot struct {
 	frozen atomic.Uint64
 }
 
 func (s *boundaryMutableSnapshot) FrozenBlobs() uint64 { return s.frozen.Load() }
+
+func (s *boundaryMutableSnapshot) VisibleSegmentsMaxTo(snaptype.Enum) uint64 { return s.frozen.Load() }
 
 type boundarySyncedChecker bool
 
@@ -1101,7 +1138,7 @@ func TestBlobHistoryDownloaderDoesNotCompleteWhileASlotIsUnindexed(t *testing.T)
 	root, err := block.Block.HashSSZ()
 	require.NoError(t, err)
 	require.NoError(t, db.Update(context.Background(), func(tx kv.RwTx) error {
-		return beacon_indicies.MarkRootCanonical(context.Background(), tx, head, root)
+		return beacon_indicies.MarkRootCanonical(tx, head, root)
 	}))
 	reader.slots = nil
 

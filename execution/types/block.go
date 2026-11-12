@@ -844,7 +844,7 @@ type Block struct {
 
 // Copy transaction senders from body into the transactions
 func (b *Body) SendersToTxs(senders []common.Address) {
-	if senders == nil {
+	if len(senders) == 0 {
 		return
 	}
 	for i, txn := range b.Transactions {
@@ -1416,9 +1416,7 @@ func (b *Block) HeaderNoCopy() *Header { return b.header }
 
 // Body returns the non-header content of the block.
 func (b *Block) Body() *Body {
-	bd := &Body{Transactions: b.transactions, Uncles: b.uncles, Withdrawals: b.withdrawals}
-	bd.SendersFromTxs()
-	return bd
+	return &Body{Transactions: b.transactions, Uncles: b.uncles, Withdrawals: b.withdrawals}
 }
 
 func (b *Block) SendersToTxs(senders []common.Address) {
@@ -1440,6 +1438,94 @@ func rlpFromBinaryTxn(binaryTxn []byte) []byte {
 	wrapped := make([]byte, rlp.StringLen(binaryTxn))
 	rlp.EncodeStringToBuf(binaryTxn, wrapped)
 	return wrapped
+}
+
+// BinaryFromStoredTxn is the inverse of rlpFromBinaryTxn: it returns the binary (canonical
+// EIP-2718) encoding of a stored transaction, a subslice of stored, without decoding its fields.
+// Only the framing is checked, never a field's content, so this is weaker than DecodeTransaction:
+// a record with the right envelope and field count but a non-canonical field is returned as it is.
+func BinaryFromStoredTxn(stored []byte) ([]byte, error) {
+	binary := stored
+	if TypedTransactionMarshalledAsRlpString(stored) {
+		content, rest, err := rlp.SplitString(stored)
+		if err != nil {
+			return nil, err
+		}
+		if len(rest) > 0 {
+			return nil, fmt.Errorf("stored txn: %d bytes after the wrapped transaction", len(rest))
+		}
+		if len(content) == 0 || content[0] >= 0x80 {
+			return nil, errors.New("stored txn: wrapped content is not a typed transaction")
+		}
+		binary = content
+	}
+	if err := checkTxnShape(binary); err != nil {
+		return nil, err
+	}
+	return binary, nil
+}
+
+// txnFieldCount is how many RLP fields each transaction type carries. An unknown type is not
+// listed, so checkTxnShape decodes it in full rather than guessing.
+var txnFieldCount = map[byte]int{
+	LegacyTxType:     9,
+	AccessListTxType: 11,
+	DynamicFeeTxType: 12,
+	BlobTxType:       14,
+	SetCodeTxType:    13,
+	FrameTxType:      8,
+}
+
+// checkTxnShape reports whether binary is framed as one transaction of a type this code knows: the
+// right number of well-formed RLP fields, and nothing after them. The fields are not read, so their
+// contents are not checked. A type it does not know is decoded instead, so a new transaction type is
+// served only once it is understood.
+func checkTxnShape(binary []byte) error {
+	if len(binary) == 0 {
+		return errors.New("stored txn: empty")
+	}
+	txnType := byte(LegacyTxType)
+	fields := binary
+	if binary[0] < 0x80 { // EIP-2718 type byte, and legacy is the absence of one
+		if binary[0] == LegacyTxType {
+			return errors.New("stored txn: 0x00 is not a transaction type")
+		}
+		txnType, fields = binary[0], binary[1:]
+	}
+	want, known := txnFieldCount[txnType]
+	if !known {
+		_, err := DecodeTransaction(binary)
+		return err
+	}
+	content, rest, err := rlp.SplitList(fields)
+	if err != nil {
+		return fmt.Errorf("stored txn: %w", err)
+	}
+	if len(rest) > 0 {
+		return fmt.Errorf("stored txn: %d bytes after the field list", len(rest))
+	}
+	n := 0
+	for len(content) > 0 {
+		if n++; n > want {
+			return fmt.Errorf("stored txn: type %d has more than %d fields", txnType, want)
+		}
+		if _, _, content, err = rlp.Split(content); err != nil {
+			return fmt.Errorf("stored txn: field %d: %w", n-1, err)
+		}
+	}
+	if n != want {
+		return fmt.Errorf("stored txn: type %d has %d fields, want %d", txnType, n, want)
+	}
+	return nil
+}
+
+// BinaryRawBody is b with its transactions in their binary (canonical EIP-2718) encoding.
+func (b *Body) BinaryRawBody() (*RawBody, error) {
+	txs, err := MarshalTransactionsBinary(b.Transactions)
+	if err != nil {
+		return nil, err
+	}
+	return &RawBody{Transactions: txs, Uncles: b.Uncles, Withdrawals: b.Withdrawals}, nil
 }
 
 // RawBody creates a RawBody based on the block. It is not very efficient, so
@@ -1541,14 +1627,18 @@ func CopyTxs(in Transactions) Transactions {
 		panic(fmt.Errorf("DecodeTransactions failed: %w", err))
 	}
 	for i, txn := range in {
-		if txWrapper, ok := txn.(*BlobTxWrapper); ok {
+		switch txWrapper := txn.(type) {
+		case *BlobTxWrapper:
 			blobTx := out[i].(*BlobTx)
 			out[i] = &BlobTxWrapper{
-				Tx:          blobTx.copyData(),
-				Commitments: txWrapper.Commitments.copy(),
-				Blobs:       txWrapper.Blobs.copy(),
-				Proofs:      txWrapper.Proofs.copy(),
+				Tx:             blobTx.copyData(),
+				WrapperVersion: txWrapper.WrapperVersion,
+				Commitments:    txWrapper.Commitments.copy(),
+				Blobs:          txWrapper.Blobs.copy(),
+				Proofs:         txWrapper.Proofs.copy(),
 			}
+		case *FrameTxWrapper:
+			out[i] = &FrameTxWrapper{FrameTransaction: out[i].(*FrameTransaction), WrapperVersion: txWrapper.WrapperVersion, Blobs: txWrapper.Blobs.copy(), Commitments: txWrapper.Commitments.copy(), Proofs: txWrapper.Proofs.copy()}
 		}
 	}
 	return out
