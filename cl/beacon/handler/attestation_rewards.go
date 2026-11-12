@@ -280,10 +280,6 @@ func (a *ApiHandler) computeAttestationsRewardsForAltair(validatorSet *solid.Val
 
 	rewardDenominator := (totalActiveBalance / a.beaconChainCfg.EffectiveBalanceIncrement) * a.beaconChainCfg.WeightDenominator
 	var response *attestationsRewardsResponse
-	var inclusionDelay *int64
-	if a.beaconChainCfg.GetCurrentStateVersion(prevEpoch) == clparams.Phase0Version {
-		inclusionDelay = new(int64)
-	}
 	if len(filterIndicies) > 0 {
 		response = &attestationsRewardsResponse{
 			IdealRewards: make([]IdealReward, 0, len(filterIndicies)),
@@ -303,18 +299,17 @@ func (a *ApiHandler) computeAttestationsRewardsForAltair(validatorSet *solid.Val
 		baseReward := a.baseReward(version, effectiveBalance, totalActiveBalanceSqrt)
 		// not eligible for rewards? then all empty
 		if !(v.Active(prevEpoch) || (v.Slashed() && prevEpoch+1 < v.WithdrawableEpoch())) {
-			response.IdealRewards = append(response.IdealRewards, IdealReward{EffectiveBalance: int64(effectiveBalance), InclusionDelay: inclusionDelay})
-			response.TotalRewards = append(response.TotalRewards, TotalReward{ValidatorIndex: int64(index), InclusionDelay: inclusionDelay})
+			response.IdealRewards = append(response.IdealRewards, IdealReward{EffectiveBalance: int64(effectiveBalance)})
+			response.TotalRewards = append(response.TotalRewards, TotalReward{ValidatorIndex: int64(index)})
 			return nil
 		}
-		idealReward := IdealReward{EffectiveBalance: int64(effectiveBalance), InclusionDelay: inclusionDelay}
-		totalReward := TotalReward{ValidatorIndex: int64(index), InclusionDelay: inclusionDelay}
+		idealReward := IdealReward{EffectiveBalance: int64(effectiveBalance)}
+		totalReward := TotalReward{ValidatorIndex: int64(index)}
 		if !inactivityLeak {
 			idealReward.Head = int64(baseReward * rewardMultipliers[a.beaconChainCfg.TimelyHeadFlagIndex] / rewardDenominator)
 			idealReward.Target = int64(baseReward * rewardMultipliers[a.beaconChainCfg.TimelyTargetFlagIndex] / rewardDenominator)
 			idealReward.Source = int64(baseReward * rewardMultipliers[a.beaconChainCfg.TimelySourceFlagIndex] / rewardDenominator)
 		}
-		// Note: for altair, we don't have the inclusion delay, always 0.
 		for flagIdx := range weights {
 			if flagsUnslashedIndiciesSet[flagIdx][index] {
 				switch flagIdx {
