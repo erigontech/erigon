@@ -249,3 +249,46 @@ func phantomReadFixture(tb testing.TB, workload string, workers int) (*execmodul
 	}
 	return m, block
 }
+
+// Each block's tx adds 1 to a slot the previous block wrote. Imported as one chain, the next block reads that slot
+// across the block boundary, so the previous block's write must be visible to it, with and without access lists.
+func TestNextBlockReadsThePreviousBlockWrite(t *testing.T) {
+	t.Run("pre_amsterdam", func(t *testing.T) { testNextBlockReadsThePreviousBlockWrite(t, false) })
+	t.Run("amsterdam", func(t *testing.T) { testNextBlockReadsThePreviousBlockWrite(t, true) })
+}
+
+func testNextBlockReadsThePreviousBlockWrite(t *testing.T, amsterdam bool) {
+	prevParallel := dbg.Exec3Parallel
+	t.Cleanup(func() { dbg.Exec3Parallel = prevParallel })
+
+	config := chain.AllProtocolChanges.Copy()
+	if !amsterdam {
+		config.CancunTime = nil
+		config.PragueTime = nil
+		config.OsakaTime = nil
+		config.AmsterdamTime = nil
+	}
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	sender := crypto.PubkeyToAddress(key.PublicKey)
+	counter := common.Address{0x77}
+	code := []byte{byte(vm.PUSH1), 0, byte(vm.SLOAD), byte(vm.PUSH1), 1, byte(vm.ADD), byte(vm.PUSH1), 0, byte(vm.SSTORE), byte(vm.STOP)}
+	genesis := &types.Genesis{Config: config, Alloc: types.GenesisAlloc{
+		sender:  {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
+		counter: {Code: code},
+	}}
+
+	gen := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(key))
+	signer := types.LatestSignerForChainID(config.ChainID)
+	blocks, err := gen.GenerateChain(16, func(i int, b *blockgen.BlockGen) {
+		gasPrice := new(uint256.Int).Add(b.GetHeader().BaseFee, uint256.NewInt(1_000))
+		txn, err := types.SignTx(types.NewTransaction(uint64(i), counter, uint256.NewInt(0), 100_000, gasPrice, nil), *signer, key)
+		require.NoError(t, err)
+		b.AddTx(txn)
+	})
+	require.NoError(t, err)
+
+	dbg.Exec3Parallel = true
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(key))
+	require.NoError(t, m.InsertChain(blocks))
+}

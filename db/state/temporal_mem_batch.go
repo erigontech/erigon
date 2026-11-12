@@ -363,6 +363,22 @@ func (sd *TemporalMemBatch) DeferPublish() {
 	}
 }
 
+// HasUnpublished reports whether writes held back since DeferPublish are not published yet.
+func (sd *TemporalMemBatch) HasUnpublished() bool {
+	for _, d := range deferrableDomains {
+		if sd.publishPending(d) {
+			return true
+		}
+	}
+	return false
+}
+
+func (sd *TemporalMemBatch) publishPending(d kv.Domain) bool {
+	sd.publishMu[d].Lock()
+	defer sd.publishMu[d].Unlock()
+	return sd.publishDirty[d]
+}
+
 // Publish publishes every write held back since DeferPublish.
 func (sd *TemporalMemBatch) Publish() {
 	sd.publishDeferred.Store(false)

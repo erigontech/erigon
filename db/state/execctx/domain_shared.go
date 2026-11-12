@@ -890,6 +890,9 @@ func (sd *SharedDomains) DeferPublish() { sd.mem.DeferPublish() }
 // Publish shows the writes held back since DeferPublish to exec-side readers.
 func (sd *SharedDomains) Publish() { sd.mem.Publish() }
 
+// HasUnpublished reports whether writes held back since DeferPublish are not published yet.
+func (sd *SharedDomains) HasUnpublished() bool { return sd.mem.HasUnpublished() }
+
 // BlockOverlay returns the in-memory overlay for block-level metadata (headers, bodies,
 // canonical hashes, TD, stage progress, forkchoice markers). Callers can use this
 // as a kv.RwTx to route rawdb writes through the overlay instead of a real RwTx.
