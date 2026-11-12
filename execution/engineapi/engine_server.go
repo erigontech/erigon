@@ -137,7 +137,8 @@ func NewEngineServer(
 	return srv
 }
 
-func (e *EngineServer) engineAPI() rpc.API {
+// API returns the engine namespace as the RPC server registers it.
+func (e *EngineServer) API() rpc.API {
 	return rpc.API{
 		Namespace: "engine",
 		Public:    true,
@@ -181,7 +182,7 @@ func (e *EngineServer) Start(
 			Service:   jsonrpc.EthAPI(ethImpl),
 			Version:   "1.0",
 		},
-		e.engineAPI(),
+		e.API(),
 	}
 
 	eg.Go(func() error {

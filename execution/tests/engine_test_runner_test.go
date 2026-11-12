@@ -104,4 +104,44 @@ func TestEngineTest(t *testing.T) {
 		test := loadEngineTest(t, func(payloads []any) []any { return payloads[1:] })
 		require.ErrorContains(t, test.RunCLI(), "payload 0: payload status SYNCING")
 	})
+
+	// SYNCING is not a rejection, so an expected-invalid payload answered
+	// SYNCING still fails the fixture.
+	t.Run("unknown parent of an invalid payload", func(t *testing.T) {
+		test := loadEngineTest(t, func(payloads []any) []any {
+			payloads[1].(map[string]any)["validationError"] = "BlockException.INVALID_BLOCK_HASH"
+			return payloads[1:]
+		})
+		require.ErrorContains(t, test.RunCLI(), "payload 0: payload status SYNCING")
+		require.Empty(t, test.Rejections)
+	})
+
+	// The RPC handler answers a param it cannot decode, or one too many, with
+	// -32602. The bad payload comes last, so the chain still ends where the
+	// fixture expects.
+	for _, tc := range []struct {
+		name string
+		edit func(params []any) []any
+	}{
+		{"undecodable param", func(params []any) []any {
+			params[0].(map[string]any)["blockHash"] = "0xzz"
+			return params
+		}},
+		{"extra param", func(params []any) []any { return append(params, "0x") }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			test := loadEngineTest(t, func(payloads []any) []any {
+				var bad map[string]any
+				src, err := json.Marshal(payloads[0])
+				require.NoError(t, err)
+				require.NoError(t, json.Unmarshal(src, &bad))
+				bad["params"] = tc.edit(bad["params"].([]any))
+				bad["errorCode"] = "-32602"
+				return append(payloads, bad)
+			})
+			require.NoError(t, test.RunCLI())
+			require.Len(t, test.Rejections, 1)
+			require.Contains(t, test.Rejections[0].Error, "-32602: ")
+		})
+	}
 }

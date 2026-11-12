@@ -31,7 +31,7 @@ func newEngineInProcClient(t *testing.T, e *EngineServer) *rpc.Client {
 	t.Helper()
 	srv := rpc.NewServer(1, false, false, false, e.logger, 0)
 	t.Cleanup(srv.Stop)
-	require.NoError(t, srv.RegisterAPI(e.engineAPI()))
+	require.NoError(t, srv.RegisterAPI(e.API()))
 	client := rpc.DialInProc(srv, e.logger)
 	t.Cleanup(client.Close)
 	return client
