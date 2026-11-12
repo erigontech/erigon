@@ -125,9 +125,10 @@ func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 	return tx, nil
 }
 
-// CloneState opens an independent reader on the same database and state-file
-// snapshots, without block-file reads. The source must stay open and unused
-// until CloneState returns.
+// CloneState opens an independent reader on the source's database and state-file
+// snapshots. Block-file reads are not supported. The source must not be accessed
+// or closed until CloneState returns. The clone remains valid after the source
+// closes.
 func (tx *Tx) CloneState(ctx context.Context) (kv.TemporalTx, error) {
 	if tx.Tx == nil {
 		return nil, errors.New("cannot clone a closed transaction")

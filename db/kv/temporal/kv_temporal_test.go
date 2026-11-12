@@ -29,8 +29,8 @@ import (
 
 var unboundedFinalityCtx = execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums)
 
-// A cloned reader must keep both the source's database state and its snapshot
-// files when newer data is committed and frozen while the source is open.
+// A clone must keep the source's database and file snapshots even when newer
+// commits and files exist, and remain readable after the source closes.
 func TestCloneStateKeepsSourceSnapshot(t *testing.T) {
 	mdbxDB := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	agg := state.NewTest(datadir.New(t.TempDir())).StepSize(1).MustOpen(t.Context())

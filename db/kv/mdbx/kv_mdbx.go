@@ -830,8 +830,9 @@ func (db *MdbxKV) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 	return db.beginRo(ctx, nil)
 }
 
-// Clone opens an independent read transaction on the same snapshot. The source
-// must remain open and unused until Clone returns.
+// Clone opens an independent read-only transaction on the source's snapshot.
+// The source must also be read-only and must not be accessed or closed until
+// Clone returns. The clone remains valid after the source closes.
 func (tx *MdbxTx) Clone(ctx context.Context) (kv.Tx, error) {
 	if !tx.readOnly || tx.tx == nil {
 		return nil, errors.New("clone requires an open read-only transaction")

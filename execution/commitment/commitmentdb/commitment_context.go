@@ -681,10 +681,9 @@ type filesPinner interface {
 	Pin() kv.TemporalFilesPin
 }
 
-// beginWorkerRo opens a per-worker read tx for parallel/warmup commitment reads,
-// bound to the pinned file snapshot when one is available so all workers observe
-// the main tx's generation. Falls back to an independent snapshot when the
-// backend can't pin files.
+// beginWorkerRo opens a read transaction at the current database snapshot.
+// When pin is non-nil, its state-file readers use that pinned generation.
+// Pinning files does not pin the database snapshot.
 func beginWorkerRo(ctx context.Context, db kv.TemporalRoDB, pin kv.TemporalFilesPin) (kv.TemporalTx, error) {
 	if pin != nil {
 		return pin.BeginTemporalRo(ctx)
@@ -769,9 +768,8 @@ func (sdc *SharedDomainsCommitmentContext) warmupTrieContextFactory(db kv.Tempor
 	}
 }
 
-// concurrentTrieContextFactory is like warmupTrieContextFactory but blocking, and also creates a per-goroutine
-// etl.Collector for each context so that PutBranch writes are isolated (no shared writer race).
-// Returns the factory and a drain function that collects all created collectors.
+// concurrentTrieContextFactory gives each fold worker a reader on the required
+// snapshot and its own branch-update collector.
 func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(foldCtx context.Context, db kv.TemporalRoDB, pin kv.TemporalFilesPin, tx kv.TemporalTx, txNum uint64) (commitment.TrieContextFactory, func() []*etl.Collector) {
 	stepSize := sdc.sharedDomains.StepSize()
 	var mu sync.Mutex
@@ -785,10 +783,9 @@ func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(foldCtx 
 		CloneState(context.Context) (kv.TemporalTx, error)
 	})
 
-	// Workers that cannot read on their own view fall back to this one reader
-	// over the caller's tx, taken in turns. It is built here and not in the
-	// factory because the factory runs inside each worker goroutine, and
-	// building a reader touches tx: AsStateGetter reads the state version off it.
+	// Workers without their own reader on the required snapshot share this one.
+	// Construct it before workers start because construction may access the
+	// source transaction. The same lock also protects snapshot cloning.
 	var pinnedMu sync.Mutex
 	var pinnedMetrics *kvmetrics.DomainMetrics
 	var pinned *syncStateReader
@@ -812,9 +809,9 @@ func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(foldCtx 
 				return &errorTrieContext{err: err}, func() {}
 			}
 			if cloner != nil && sdc.stateReader == nil && !caller.writer && caller.mayDrift(roTx) {
-				// Release the fresh view's reader slot before acquiring one for the clone.
+				// Close the unused view first so cloning cannot wait for a reader
+				// slot still held by the view it replaces.
 				roTx.Rollback()
-				// Cloning must not overlap other uses of the source transaction.
 				pinnedMu.Lock()
 				roTx, err = cloner.CloneState(ctx)
 				pinnedMu.Unlock()
@@ -847,10 +844,8 @@ func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(foldCtx 
 		}
 		switch {
 		case pinned != nil && caller.mayDrift(roTx):
-			// A read view opened at fold time sits at the then-current head, which
-			// is the caller's snapshot only while no commit can land between them.
-			// Clones share the reader and its lock; only the scratch buffer is
-			// per worker.
+			// Fallback workers share the reader and lock, but each needs its own
+			// buffer so another worker's read cannot overwrite returned bytes.
 			warmupCtx.stateReader = pinned.CloneForWorker(workerCtx, roTx)
 		case sdc.stateReader != nil:
 			warmupCtx.stateReader = sdc.stateReader.CloneForWorker(workerCtx, roTx)

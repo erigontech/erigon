@@ -192,8 +192,8 @@ func (tx *cloneableSnapshotTx) CloneState(context.Context) (kv.TemporalTx, error
 	return clone, nil
 }
 
-// After a newer commit, workers must read the original state independently,
-// without taking turns reading through the caller's transaction.
+// When cloning is supported, workers must read the original state independently
+// after a newer commit, without reading through the caller's transaction.
 func TestConcurrentTrieContextsCloneCallerSnapshot(t *testing.T) {
 	t.Parallel()
 	caller := &cloneableSnapshotTx{snapshotTx: &snapshotTx{viewID: 7, val: []byte("caller-snapshot")}}
@@ -270,8 +270,8 @@ func TestConcurrentTrieContextReadsCallerSnapshot(t *testing.T) {
 	require.Equal(t, []byte("caller-snapshot"), enc)
 }
 
-// Under the semaphore no commit can land, the worker view is the caller's
-// snapshot, and workers must keep their own read views.
+// Matching snapshots need no extra clone: workers must keep using their
+// existing read views.
 func TestConcurrentTrieContextKeepsWorkerTxOnSameSnapshot(t *testing.T) {
 	t.Parallel()
 	caller := &cloneableSnapshotTx{snapshotTx: &snapshotTx{viewID: 7, val: []byte("caller-snapshot")}}
