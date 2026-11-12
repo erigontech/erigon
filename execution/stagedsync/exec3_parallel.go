@@ -771,6 +771,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 							lastHeader, txs, pe.cfg.chainConfig, pe.logger)
 					}
 
+					dbg.NpMark("apBlockResult")
 					isAmsterdam := pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime)
 					var computedBAL types.BlockAccessList
 					var balErr error
@@ -816,8 +817,10 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 
 					blockUpdateCount = 0
 					blockApplyCount = 0
+					dbg.NpMark("apAccumReceipts")
 
 					<-balDone
+					dbg.NpMark("apBalProcess")
 					// Join the per-block validator spawned above; its verdict wins over
 					// a bal.Process error.
 					if err := blockValidatorWaiter.Wait(); err != nil {
@@ -825,6 +828,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 						continue
 					}
 
+					dbg.NpMark("apValidator")
 					if balErr != nil {
 						failInfra(balErr)
 						continue
@@ -878,6 +882,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 		}
 	}()
 
+	dbg.NpMark("piLoopEnd")
 	executorCancel(nil)
 
 	if !hasLoggedExecution {
@@ -893,6 +898,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 		}
 	}
 
+	dbg.NpMark("piWait")
 	// Commitment is computed per-block by the calculator. Stage progress
 	// is updated in handleCommitResult when results are consumed.
 

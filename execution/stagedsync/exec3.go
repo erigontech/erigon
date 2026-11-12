@@ -264,6 +264,7 @@ func ExecV3(ctx context.Context,
 	var lastHeader *types.Header
 	lastHeader, applyTx, execErr = pe.exec(ctx, startBlockNum, offsetFromBlockBeginning, maxBlockNum, blockLimit,
 		initialTxNum, inputTxNum, initialCycle, applyTx, stepsInDb, accumulator, readAhead, logEvery)
+	dbg.NpMark("ev3PeExec")
 
 	out = execV3Outcome{
 		applyTx:               applyTx,
@@ -286,6 +287,7 @@ func ExecV3(ctx context.Context,
 
 	execErr = execV3Finalize(ctx, nil, cfg, doms, pe.lastCommittedTxNum.Load(), out.lastCommittedBlockNum,
 		lastHeader, shouldReportToTxPool, logPrefix, logger)
+	dbg.NpMark("ev3Finalize")
 	return finalizeExecV3Outcome(out, execErr)
 }
 

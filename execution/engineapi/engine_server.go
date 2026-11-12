@@ -471,6 +471,7 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		}
 		balBytes := *req.BlockAccessList
 		blockAccessList, blockAccessListErr = types.DecodeBlockAccessListSidecarForBlock(balBytes, header.GasLimit, len(req.Transactions))
+		dbg.NpMark("npBalDecode")
 		if blockAccessListErr != nil && !errors.Is(blockAccessListErr, types.ErrInvalidBlockAccessList) {
 			e.logger.Debug("[NewPayload] failed to decode blockAccessList", "err", blockAccessListErr, "raw", hex.EncodeToString(balBytes))
 			return &engine_types.PayloadStatus{
@@ -488,6 +489,7 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 			}
 		}
 		header.BlockAccessListHash = &hash
+		dbg.NpMark("npBalHash")
 		if req.SlotNumber != nil {
 			slotNumber := uint64(*req.SlotNumber)
 			header.SlotNumber = &slotNumber
