@@ -2576,3 +2576,20 @@ func TestMarkWritesValidatedMarksACellRecreatedAtTheSameIncarnation(t *testing.T
 	vm.MarkWritesValidated(first, nil)
 	require.Equal(t, FlagValidated, balanceFlag(t, vm, addr, 3))
 }
+
+func TestNewVersionMapSeedsLargeBAL(t *testing.T) {
+	t.Parallel()
+	const n = 3000
+	vm := NewVersionMap(transfersBAL(n))
+	vm.SeedAddresses()
+	coinbase := accounts.InternAddress(common.BigToAddress(big.NewInt(n + 1)))
+	for tx := range n {
+		v, res, ok := vm.ReadBalance(coinbase, tx+1)
+		require.True(t, ok)
+		require.Equal(t, MVReadResultDone, res.Status())
+		require.Equal(t, uint64(tx), v.Uint64())
+	}
+	lastRecipient := accounts.InternAddress(common.BigToAddress(big.NewInt(2*n + 1)))
+	_, _, ok := vm.ReadAddress(lastRecipient, n+1)
+	require.True(t, ok)
+}
