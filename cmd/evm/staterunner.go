@@ -111,7 +111,11 @@ func stateTestCmd(_ context.Context, ctx *cli.Command) error {
 
 	path := ctx.Args().First()
 	if len(path) != 0 {
-		collected := filter.filterFiles(collectFiles(path))
+		files, err := collectFiles(path)
+		if err != nil {
+			return err
+		}
+		collected := filter.filterFiles(files)
 		results, err := runStateTestsParallel(ctx, cfg, traceOut, collected, workers, filter)
 		if err != nil {
 			return err
