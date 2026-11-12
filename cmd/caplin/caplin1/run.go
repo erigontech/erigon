@@ -194,6 +194,7 @@ func upgradeGenesisState(s *state.CachingBeaconState, from, to clparams.StateVer
 func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngine, config clparams.CaplinConfig,
 	dirs datadir.Dirs, eth1Getter snapshot_format.ExecutionBlockReaderByNumber,
 	snDownloader dbservices.DownloaderClient, creds credentials.TransportCredentials, snBuildSema *semaphore.Weighted,
+	options ...CaplinOption,
 ) error {
 	var networkConfig *clparams.NetworkConfig
 	var beaconConfig *clparams.BeaconChainConfig
@@ -317,7 +318,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		}
 	}
 
-	caplinOptions := []CaplinOption{}
+	caplinOptions := slices.Clone(options)
 	if builderOption, skippedLegacy := builderOptionForConfig(&config, beaconConfig); builderOption != nil {
 		caplinOptions = append(caplinOptions, builderOption)
 		if skippedLegacy {
@@ -357,6 +358,9 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		logger.Warn("[CaplinSnapshots] could not sweep leftover .tmp files", "err", err)
 	}
 	rcsn := freezeblocks.NewBeaconSnapshotReader(csn, eth1Getter, beaconConfig)
+	if option.blobReader != nil {
+		option.blobReader.open(ethClock, indexDB, blobStorage, csn)
+	}
 
 	epbsPool := pool.NewEpbsPool()
 	pool := pool.NewOperationsPool(beaconConfig)

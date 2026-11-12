@@ -1,21 +1,17 @@
 name: EEZ devnet
 
-# T-CI-2: follow the eez-rollup0 Kurtosis devnet with Erigon and require the
-# two L2 chains to agree (eez/tools/devnet/diff.sh), on the images
-# eez-devnet-images.yml built at ROLLUP0_REF. T-CI-5 runs the same against
-# eez-rollup0 main with the images built in the job; it reports and never
-# gates.
+# T-CI-2: follow the eez-rollup0 Kurtosis devnet with Erigon, as a follower
+# reading the enclave's L1 over RPC and as an all-in-one node joining it, and
+# require the L2 chains to agree (eez/tools/devnet/diff.sh), on the images
+# eez-devnet-images.yml built at ROLLUP0_REF. T-CI-5 runs the remote follower
+# against eez-rollup0 main with the images built in the job; it reports and
+# never gates.
 #
-# schedule and workflow_dispatch run the default branch's copy of this file,
-# so main carries a copy; that copy checks out <prefix>/eez.
+# eez-ci-gate.yml calls it: on pushes to <prefix>/eez and on request on any
+# branch. main carries no copy, so it takes no trigger of its own.
 
 on:
-  push:
-    branches:
-      - '*/eez'
-  schedule:
-    - cron: '17 2 * * *'
-  workflow_dispatch:
+  workflow_call:
     inputs:
       drift:
         description: "Also run against eez-rollup0 main (T-CI-5)"
@@ -27,10 +23,6 @@ env:
   KURTOSIS_VERSION: 1.22.1
   FOUNDRY_VERSION: v1.7.1
   KURTOSIS_ENCLAVE: eez-erigon
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
 
 permissions: {}
 
@@ -68,7 +60,7 @@ jobs:
           done
 
   devnet:
-    name: devnet (${{ matrix.reference }})
+    name: devnet (${{ matrix.mode }}, ${{ matrix.reference }})
     needs: images
     runs-on: ubuntu-latest
     timeout-minutes: ${{ matrix.reference == 'pinned' && 90 || 180 }}
@@ -79,15 +71,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        reference: ${{ fromJSON((github.event_name == 'schedule' || inputs.drift) && '["pinned","main"]' || '["pinned"]') }}
+        include: ${{ fromJSON(inputs.drift && '[{"mode":"remote","reference":"pinned"},{"mode":"all-in-one","reference":"pinned"},{"mode":"remote","reference":"main"}]' || '[{"mode":"remote","reference":"pinned"},{"mode":"all-in-one","reference":"pinned"}]') }}
     steps:
       - name: Check out Erigon
         uses: actions/checkout@v7
         with:
-          ref: ${{ github.event_name == 'schedule' && 'canepat/eez' || '' }}
           persist-credentials: false
 
-      # Not setup-erigon: it checks out github.ref again, main on a schedule.
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
@@ -139,6 +129,7 @@ jobs:
           ERIGON: ${{ github.workspace }}/build/bin/erigon
           EEZ: ${{ github.workspace }}/build/bin/eez
           OUT: ${{ github.workspace }}/devnet
+          MODE: ${{ matrix.mode }}
           SKIP_BUILD: ${{ matrix.reference == 'pinned' && '1' || '0' }}
         run: |
           EEZ_SKIP_NODE_BUILD=$SKIP_BUILD EEZ_SKIP_PROOF_SIGNER_BUILD=$SKIP_BUILD EEZ_SKIP_DEPLOY_BUILD=$SKIP_BUILD \
@@ -152,12 +143,13 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: eez-devnet-${{ matrix.reference }}-${{ github.run_id }}-${{ github.run_attempt }}
+          name: eez-devnet-${{ matrix.mode }}-${{ matrix.reference }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             devnet/*.log
             devnet/*.txt
             devnet/args.yaml
             devnet/deployments
+            devnet/l1-genesis/config.yaml
             devnet/enclave
           if-no-files-found: warn
           retention-days: 7

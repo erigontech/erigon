@@ -23,9 +23,17 @@ import (
 
 type option struct {
 	builderClient builder.BuilderClient
+	blobReader    *BlobReader
 }
 
 type CaplinOption func(*option)
+
+// WithBlobReader opens r on the stores of the Caplin instance.
+func WithBlobReader(r *BlobReader) CaplinOption {
+	return func(o *option) {
+		o.blobReader = r
+	}
+}
 
 func WithBuilder(mevRelayURL string, beaconConfig *clparams.BeaconChainConfig, policy builder.BuilderTargetPolicy) CaplinOption {
 	return func(o *option) {

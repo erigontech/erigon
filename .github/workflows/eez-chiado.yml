@@ -1,0 +1,60 @@
+name: EEZ Chiado
+
+# Follow eez-chiado (eez.dev), a live rollupX network, from its genesis with
+# Erigon and require the derived blocks to be eez.dev's
+# (eez/tools/chiado/follow.sh): as a follower reading the public Chiado L1
+# over RPC and, on a runner named by the caller, as an all-in-one node that
+# syncs Chiado itself, which a hosted runner has no disk for.
+#
+# eez-ci-gate.yml calls it: on pushes to <prefix>/eez and on request on any
+# branch.
+
+on:
+  workflow_call:
+    inputs:
+      all-in-one-runner:
+        description: "Runner label for the all-in-one run (archive Chiado, about 40 GB); empty skips it"
+        type: string
+        default: ""
+
+permissions: {}
+
+jobs:
+  follow:
+    name: chiado (${{ matrix.mode }})
+    runs-on: ${{ matrix.mode == 'remote' && 'ubuntu-latest' || inputs.all-in-one-runner }}
+    timeout-minutes: ${{ matrix.mode == 'remote' && 150 || 330 }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: ${{ fromJSON(inputs.all-in-one-runner != '' && '["remote","all-in-one"]' || '["remote"]') }}
+    steps:
+      - name: Check out Erigon
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Build erigon
+        run: go build -o build/bin/ ./cmd/erigon
+
+      - name: Follow eez-chiado
+        env:
+          ERIGON: ${{ github.workspace }}/build/bin/erigon
+          OUT: ${{ github.workspace }}/chiado
+          MODE: ${{ matrix.mode }}
+        run: bash eez/tools/chiado/follow.sh
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: eez-chiado-${{ matrix.mode }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: chiado/erigon.log
+          if-no-files-found: warn
+          retention-days: 7
