@@ -2601,6 +2601,17 @@ func TestWritesAlreadySeededRefusesARecreatedCell(t *testing.T) {
 	require.False(t, vm.WritesAlreadySeeded(addr, storageWriteSet(addr, slot, 4, 42, ValueChanged)))
 }
 
+func TestWritesAlreadySeededKeepsTheSeedThroughValidation(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0xbe, 0xef})
+	slot := accounts.InternKey(common.Hash{0x04})
+	vm := NewVersionMap(seededSlotBAL(addr, slot))
+	ws := storageWriteSet(addr, slot, 0, 42, ValueChanged)
+	vm.FlushVersionedWrites(ws, false)
+	vm.MarkWritesValidated(ws, func(accounts.Address) bool { return false })
+
+	require.True(t, vm.WritesAlreadySeeded(addr, storageWriteSet(addr, slot, 0, 42, ValueChanged)))
+}
+
 func TestWritesAlreadySeededRefusesACellATxOverwrote(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xbe, 0xef})
 	slot := accounts.InternKey(common.Hash{0x04})

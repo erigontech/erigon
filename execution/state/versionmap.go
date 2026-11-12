@@ -1564,8 +1564,8 @@ func flushAllNoOpUnderRLock(e *AddressEntry, writes *WriteSet, addr accounts.Add
 	return flushAllNoOp(e, writes, addr, flag)
 }
 
-// WritesAlreadySeeded reports whether ws's writes to addr match complete cells of a BAL
-// block, so publishing them changed nothing a reader saw.
+// WritesAlreadySeeded reports whether ws's writes to addr match BAL seed cells no value store
+// has replaced, so publishing them changed nothing a reader saw.
 func (vm *VersionMap) WritesAlreadySeeded(addr accounts.Address, ws *WriteSet) bool {
 	if !vm.HasBAL {
 		return false
@@ -2224,8 +2224,8 @@ type WriteCell[T any] struct {
 	Value     T
 }
 
-// seededCell marks a cell WriteChanges seeded from the BAL. Every later store or CAS of the
-// state drops it, so a set bit means every reader of the cell saw the seed.
+// seededCell marks a cell WriteChanges seeded from the BAL. A value store or a delete drops it and a
+// status mark keeps it, so a set bit means every reader of the cell saw the seed.
 const seededCell uint32 = 1 << 24
 
 func packCellState(inc Incarnation, flag statusFlag) uint32 {
@@ -2254,6 +2254,13 @@ func (c *WriteCell[T]) setState(inc Incarnation, flag statusFlag) {
 	c.state.Store(packCellState(inc, flag))
 }
 
+func markedState(old uint32, inc Incarnation, flag statusFlag) uint32 {
+	if flag == flagDeleted {
+		return packCellState(inc, flag)
+	}
+	return packCellState(inc, flag) | old&seededCell
+}
+
 func (c *WriteCell[T]) setFlagUnlessDone(flag statusFlag) bool {
 	for {
 		old := c.state.Load()
@@ -2261,7 +2268,7 @@ func (c *WriteCell[T]) setFlagUnlessDone(flag statusFlag) bool {
 		if have == FlagDone && flag != FlagDone {
 			return false
 		}
-		if c.state.CompareAndSwap(old, packCellState(inc, flag)) {
+		if c.state.CompareAndSwap(old, markedState(old, inc, flag)) {
 			return true
 		}
 	}
@@ -2285,7 +2292,7 @@ func (c *WriteCell[T]) mark(want Incarnation, flag statusFlag) (Incarnation, mar
 		if want >= 0 && inc > want {
 			return inc, markStale
 		}
-		if c.state.CompareAndSwap(old, packCellState(inc, flag)) {
+		if c.state.CompareAndSwap(old, markedState(old, inc, flag)) {
 			return inc, marked
 		}
 	}

@@ -251,6 +251,15 @@ func TestMarkReadersDirty(t *testing.T) {
 		be.markReadersDirty(1, newWS().stor(addr, slot1, writer, *uint256.NewInt(1)).build())
 		require.Empty(t, be.revalidate)
 	})
+	t.Run("a write the BAL holds leaves the readers clean after validation", func(t *testing.T) {
+		be := newBE()
+		be.versionMap = state.NewVersionMap(seeded)
+		ws := newWS().stor(addr, slot1, writer, *uint256.NewInt(1)).build()
+		be.versionMap.FlushVersionedWrites(ws, false)
+		be.versionMap.MarkWritesValidated(ws, func(accounts.Address) bool { return false })
+		be.markReadersDirty(1, ws)
+		require.Empty(t, be.revalidate)
+	})
 	t.Run("a Done cell a re-run left with the BAL value flags the readers", func(t *testing.T) {
 		be := newBE()
 		be.versionMap = state.NewVersionMap(seeded)
@@ -260,22 +269,19 @@ func TestMarkReadersDirty(t *testing.T) {
 	})
 	t.Run("a write the BAL does not hold flags the readers", func(t *testing.T) {
 		be := newBE()
-		be.versionMap.HasBAL = true
-		be.versionMap.WriteStorage(addr, slot2, writer, *uint256.NewInt(1), true)
+		be.versionMap = state.NewVersionMap(types.BlockAccessList{{Address: addr.Value(), StorageChanges: []types.SlotChanges{{Slot: slot2, Changes: []*types.StorageChange{{Index: 2, Value: *uint256.NewInt(1)}}}}}})
 		be.markReadersDirty(1, newWS().stor(addr, slot1, writer, *uint256.NewInt(1)).build())
 		require.Equal(t, map[int]bool{2: true}, be.revalidate)
 	})
 	t.Run("a write that differs from the BAL flags the readers", func(t *testing.T) {
 		be := newBE()
-		be.versionMap.HasBAL = true
-		be.versionMap.WriteStorage(addr, slot1, writer, *uint256.NewInt(1), true)
+		be.versionMap = state.NewVersionMap(seeded)
 		be.markReadersDirty(1, newWS().stor(addr, slot1, writer, *uint256.NewInt(2)).build())
 		require.Equal(t, map[int]bool{2: true}, be.revalidate)
 	})
 	t.Run("a BAL block still flags readers of a lifecycle write", func(t *testing.T) {
 		be := newBE()
-		be.versionMap.HasBAL = true
-		be.versionMap.WriteStorage(addr, slot1, writer, *uint256.NewInt(1), true)
+		be.versionMap = state.NewVersionMap(seeded)
 		be.markReadersDirty(1, newWS().stor(addr, slot1, writer, *uint256.NewInt(1)).selfDestruct(addr, writer, true).build())
 		require.Equal(t, map[int]bool{2: true, 3: true}, be.revalidate)
 	})

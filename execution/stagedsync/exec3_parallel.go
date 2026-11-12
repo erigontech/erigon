@@ -2751,8 +2751,7 @@ func (be *blockExecutor) markReadersDirty(writerTx int, ws *state.WriteSet) {
 	}
 }
 
-// flushFinalizeWrites publishes a tx's complete write set. It marks readers first: the
-// complete flush makes every written cell look already seeded.
+// flushFinalizeWrites publishes a tx's complete write set.
 func (be *blockExecutor) flushFinalizeWrites(tx int, ws *state.WriteSet) {
 	be.markReadersDirty(tx, ws)
 	be.versionMap.FlushVersionedWrites(ws, true)
