@@ -274,6 +274,9 @@ func TestChainTipSyncPollsForkChoiceHeadOnlyForGloas(t *testing.T) {
 				statusName = "empty"
 			}
 			f.setHeadStatus(t, status)
+			if tc.gloasForkEpoch != 0 {
+				f.graph.hideHeader.Store(false)
+			}
 			f.cfg.headEvents = headEventPublication{root: f.headRoot, payloadStatus: statusName}
 			f.graph.headReads.Store(0)
 

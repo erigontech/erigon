@@ -209,12 +209,11 @@ func listenToIncomingBlocksUntilANewBlockIsReceived(ctx context.Context, logger 
 	// Timer to check block presence every 20 milliseconds
 	presenceTicker := time.NewTicker(20 * time.Millisecond)
 	defer presenceTicker.Stop()
-	var headPollTicker *time.Ticker
 	var headPoll <-chan time.Time
-	if cfg.beaconCfg != nil && cfg.ethClock != nil && cfg.beaconCfg.GetCurrentStateVersion(cfg.ethClock.GetCurrentEpoch()) >= clparams.GloasVersion {
-		headPollTicker = time.NewTicker(sleepForSlotHeadPollInterval)
-		defer headPollTicker.Stop()
-		headPoll = headPollTicker.C
+	if cfg.beaconCfg.GetCurrentStateVersion(cfg.ethClock.GetCurrentEpoch()) >= clparams.GloasVersion {
+		ticker := time.NewTicker(sleepForSlotHeadPollInterval)
+		defer ticker.Stop()
+		headPoll = ticker.C
 	}
 
 	// Map to keep track of seen block roots

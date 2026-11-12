@@ -373,6 +373,7 @@ func newChainTipBatchFixtureWithBlob(t *testing.T, replayStatus execution_client
 
 	stageCfg := &Cfg{
 		beaconCfg:             beaconCfg,
+		ethClock:              clock,
 		forkChoice:            store,
 		emitter:               emitter,
 		syncedData:            syncedData,
