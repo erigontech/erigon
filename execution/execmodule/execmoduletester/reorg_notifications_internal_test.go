@@ -17,6 +17,7 @@
 package execmoduletester
 
 import (
+	"bytes"
 	"context"
 	"math/big"
 	"testing"
@@ -28,13 +29,17 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/remotedbserver"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/notifications"
+	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
@@ -42,6 +47,10 @@ import (
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon/node/privateapi"
+	"github.com/erigontech/erigon/txnprovider/txpool"
+	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
 // Every block above genesis calls logEmitter once, so each block has exactly one log.
@@ -330,16 +339,35 @@ func TestReorgAccountNotificationAcrossSteps(t *testing.T) {
 	}))
 }
 
-func TestReorgCodeRollbackMarksNotificationsIncomplete(t *testing.T) {
+func TestReorgCodeRollbackPreservesRecentRoots(t *testing.T) {
 	key, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	sender := crypto.PubkeyToAddress(key.PublicKey)
 	contract := types.CreateAddress(sender, 1)
+	cfg := chain.AllProtocolChanges.Copy()
+	cfg.BogotaTime = common.NewUint64(1)
+	frameSender := common.Address{0xcc}
+	data := make([]byte, 72)
+	data[0], data[39], data[71] = 1, 1, 2
+	frame := &types.FrameTransaction{
+		NonceKeys: []uint256.Int{{}}, ChainID: *cfg.ChainID, SenderAddress: frameSender,
+		Frames: []types.Frame{
+			{Mode: types.FrameVerify, Target: &types.FrameRecentRootVerifier, Data: data, Limits: mdgas.MdGas{Execution: 20_000}},
+			{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
+		},
+		Fees: types.FrameFees{FeeCap: *uint256.NewInt(10_000_000_000)},
+	}
+	refs := protocol.FrameTransactionRecentRoots(frame)
+	require.Len(t, refs, 1)
 	m := New(t, WithKey(key), WithGenesisSpec(&types.Genesis{
-		Config: chain.AllProtocolChanges,
+		Config: cfg, SlotNumber: common.NewUint64(0),
 		Alloc: types.GenesisAlloc{
-			sender:   {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
-			contract: {Balance: big.NewInt(1)},
+			sender:      {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
+			contract:    {Balance: big.NewInt(1)},
+			frameSender: {Balance: big.NewInt(1_000_000_000_000_000_000), Code: []byte{0x60, 3, 0x5f, 0x5f, 0xaa}},
+			types.FrameRecentRootVerifier: {Code: protocol.RecentRootCode, Storage: map[common.Hash]common.Hash{
+				refs[0].StorageKey: refs[0].EntryHash,
+			}},
 		},
 	}))
 	signer := *types.LatestSignerForChainID(m.ChainConfig.ChainID)
@@ -362,7 +390,20 @@ func TestReorgCodeRollbackMarksNotificationsIncomplete(t *testing.T) {
 	waitForBatchWithHead := subscribeStateChangeHeads(t, m)
 	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), canonical.Blocks))
 	m.ExecModule.WaitIdle(t.Context())
-	waitForBatchWithHead(canonical.TopBlock.Hash())
+	initial := waitForBatchWithHead(canonical.TopBlock.Hash())
+	ctx, logger := t.Context(), log.New()
+	backend := privateapi.NewEthBackendServer(ctx, nil, m.DB, m.Notifications, m.BlockReader, logger, nil, cfg)
+	poolDB := mdbxtest.NewTestPoolDB(t)
+	pool, err := txpool.New(ctx, make(chan txpool.Announcements, 1), poolDB, m.DB, txpoolcfg.DefaultConfig,
+		kvcache.NewLatestBatchCache(), cfg, nil, nil, func() {}, nil, direct.NewEthBackendClientDirect(backend), logger, txpool.WithFeeCalculator(nil))
+	require.NoError(t, err)
+	require.NoError(t, pool.OnNewBlock(ctx, initial, txpool.TxnSlots{}, txpool.TxnSlots{}, txpool.TxnSlots{}))
+	var encoded bytes.Buffer
+	require.NoError(t, frame.MarshalBinary(&encoded))
+	server := txpool.NewGrpcServer(ctx, pool, poolDB, nil, *cfg.ChainID, logger)
+	reply, err := server.Add(ctx, &txpoolproto.AddRequest{RlpTxs: [][]byte{encoded.Bytes()}})
+	require.NoError(t, err)
+	require.Equal(t, []txpoolproto.ImportResult{txpoolproto.ImportResult_SUCCESS}, reply.Imported, "%v", reply.Errors)
 	require.NoError(t, m.DB.ViewTemporal(t.Context(), func(tx kv.TemporalTx) error {
 		code, _, err := tx.GetLatest(kv.CodeDomain, contract[:], kv.GetLatestOptions{})
 		require.NoError(t, err)
@@ -377,7 +418,24 @@ func TestReorgCodeRollbackMarksNotificationsIncomplete(t *testing.T) {
 	require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status)
 	m.ExecModule.WaitIdle(t.Context())
 	batch := waitForBatchWithHead(side.TopBlock.Hash())
-	require.True(t, batch.StateChangesIncomplete, "omitted code changes must invalidate code-only frame dependencies")
+	require.NoError(t, pool.OnNewBlock(ctx, batch, txpool.TxnSlots{}, txpool.TxnSlots{}, txpool.TxnSlots{}))
+	hash := frame.Hash()
+	require.Equal(t, txpoolcfg.AlreadyKnown, pool.KnownTxnReason(hash[:]), "the unrelated deployment rollback must keep the recent-root transaction pooled")
+	require.False(t, batch.StateChangesIncomplete, "a streamed code rollback must preserve unrelated frame validations")
+	var restored *remoteproto.AccountChange
+	for _, change := range batch.ChangeBatch {
+		if change.Direction != remoteproto.Direction_UNWIND {
+			continue
+		}
+		for _, account := range change.Changes {
+			if gointerfaces.ConvertH160toAddress(account.Address) == contract {
+				restored = account
+			}
+		}
+	}
+	require.NotNil(t, restored)
+	require.Equal(t, remoteproto.Action_UPSERT_CODE, restored.Action)
+	require.Empty(t, restored.Code)
 	require.NoError(t, m.DB.ViewTemporal(t.Context(), func(tx kv.TemporalTx) error {
 		code, _, err := tx.GetLatest(kv.CodeDomain, contract[:], kv.GetLatestOptions{})
 		require.NoError(t, err)
