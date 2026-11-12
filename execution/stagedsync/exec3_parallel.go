@@ -268,6 +268,54 @@ func (pe *parallelExecutor) bindBlockChangesetForFold(blockNum uint64, blockHash
 	}
 }
 
+// asyncBALBuilder adds a block's sealed txs to its access list in publish order,
+// off the apply goroutine: the apply loop is the newPayload critical path.
+type asyncBALBuilder struct {
+	feed chan sealedTxIO
+	done chan *state.BlockAccessListBuilder
+	err  any
+}
+
+type sealedTxIO struct {
+	io     *state.VersionedIO
+	sealed int
+}
+
+func startAsyncBALBuilder() *asyncBALBuilder {
+	a := &asyncBALBuilder{feed: make(chan sealedTxIO, 256), done: make(chan *state.BlockAccessListBuilder, 1)}
+	go func() {
+		b := state.NewBlockAccessListBuilder()
+		defer func() {
+			a.err = recover()
+			a.done <- b
+		}()
+		for f := range a.feed {
+			for b.Next()+1 < f.sealed {
+				i := b.Next()
+				b.Add(i, f.io.ReadSet(i), f.io.WriteSet(i))
+			}
+		}
+	}()
+	return a
+}
+
+func (a *asyncBALBuilder) add(io *state.VersionedIO, sealed int) {
+	a.feed <- sealedTxIO{io: io, sealed: sealed}
+}
+
+// finish waits for every queued tx and returns the builder, re-raising a builder panic on the caller.
+func (a *asyncBALBuilder) finish() *state.BlockAccessListBuilder {
+	if a == nil {
+		return nil
+	}
+	close(a.feed)
+	b := <-a.done
+	if a.err != nil {
+		panic(a.err)
+	}
+	return b
+}
+
 // foldTx applies one published tx's versionMap view and indexes to sd.mem.
 // Finalize logs share the final virtual task's txNum. That task has already
 // handled the receipt cache, so finalize indexes logs without changing it.
@@ -503,8 +551,9 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 		// Collect per-tx writes to notify the accumulator AFTER StartChange (which
 		// arrives with the blockResult, after all txResults).
 		var pendingAccumulatorWrites []state.WriteSetView
-		// balBuilder holds the current block's access list up to its last published tx.
-		var balBuilder *state.BlockAccessListBuilder
+		// balBuilder builds the current block's access list from its published txs.
+		var balBuilder *asyncBALBuilder
+		defer func() { balBuilder.finish() }()
 		// foldErr is the first per-tx fold error of the current block, surfaced at
 		// its blockResult.
 		var foldErr error
@@ -668,12 +717,9 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					}
 					if applyResult.txIO != nil {
 						if balBuilder == nil {
-							balBuilder = state.NewBlockAccessListBuilder()
+							balBuilder = startAsyncBALBuilder()
 						}
-						for balBuilder.Next()+1 < applyResult.balSealed {
-							i := balBuilder.Next()
-							balBuilder.Add(i, applyResult.txIO.ReadSet(i), applyResult.txIO.WriteSet(i))
-						}
+						balBuilder.add(applyResult.txIO, applyResult.balSealed)
 					}
 					if pe.accumulator != nil {
 						pendingAccumulatorWrites = append(pendingAccumulatorWrites, applyResult.writes)
@@ -681,7 +727,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					blockApplyCount += writeCount
 					pe.rs.SetTrace(false)
 				case *blockResult:
-					built := balBuilder
+					built := balBuilder.finish()
 					balBuilder = nil
 					if finalized {
 						appliedBlocks[applyResult.BlockNum] = struct{}{}
