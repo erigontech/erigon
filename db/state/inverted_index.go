@@ -302,13 +302,18 @@ func (ii *InvertedIndex) missedMapAccessors(source []*FilesItem, dl dirListing) 
 	})
 }
 
-func (ii *InvertedIndex) buildEfAccessor(ctx context.Context, item *FilesItem, ps *background.ProgressSet) (err error) {
+func (ii *InvertedIndex) buildEfAccessor(ctx context.Context, item *FilesItem, ps *background.ProgressSet, publish accessorPublisher) (err error) {
 	if item.decompressor == nil {
 		fromStep, toStep := item.StepRange(ii.stepSize)
 		return fmt.Errorf("buildEfAccessor: passed item with nil decompressor %s %d-%d", ii.FilenameBase, fromStep, toStep)
 	}
 	// v4-aware: v4-tail items rebuild their .efi at raw-txN paths.
-	return ii.buildMapAccessorAt(ctx, ii.efAccessorPathForItem(item), item.decompressor, ps)
+	idxPath := ii.efAccessorPathForItem(item)
+	if err := ii.buildMapAccessorAt(ctx, stagedAccessorPath(idxPath), item.decompressor, ps); err != nil {
+		discardStagedAccessors(idxPath)
+		return err
+	}
+	return publish(ii.dirtyFiles, item, idxPath)
 }
 func (ii *InvertedIndex) dataReader(f *seg.Decompressor) *seg.Reader {
 	if !strings.Contains(f.FileName(), ".ef") {
@@ -333,10 +338,10 @@ func (iit *InvertedIndexRoTx) dataWriter(f *seg.Compressor, forceNoCompress bool
 }
 
 // BuildMissedAccessors - produce .efi/.vi/.kvi from .ef/.v/.kv
-func (ii *InvertedIndex) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet, iiFiles *MissedAccessorIIFiles) {
+func (ii *InvertedIndex) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet, iiFiles *MissedAccessorIIFiles, publish accessorPublisher) {
 	for _, item := range iiFiles.missedMapAccessors() {
 		g.Go(func() error {
-			return ii.buildEfAccessor(ctx, item, ps)
+			return ii.buildEfAccessor(ctx, item, ps, publish)
 		})
 	}
 }

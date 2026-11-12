@@ -280,7 +280,7 @@ func (h *History) missedMapAccessors(source []*FilesItem, dl dirListing) (l []*F
 	})
 }
 
-func (h *History) buildVi(ctx context.Context, item *FilesItem, ps *background.ProgressSet) (err error) {
+func (h *History) buildVi(ctx context.Context, item *FilesItem, ps *background.ProgressSet, publish accessorPublisher) (err error) {
 	if item.decompressor == nil {
 		fromStep, toStep := item.StepRange(h.stepSize)
 		return fmt.Errorf("buildVI: passed item with nil decompressor %s %d-%d", h.FilenameBase, fromStep, toStep)
@@ -299,11 +299,12 @@ func (h *History) buildVi(ctx context.Context, item *FilesItem, ps *background.P
 	// v4-aware: v4-tail items rebuild their .vi at raw-txN paths.
 	idxPath := h.vAccessorPathForItem(item)
 
-	err = h.buildVI(ctx, idxPath, item.decompressor, iiItem.decompressor, iiItem.startTxNum, ps)
+	err = h.buildVI(ctx, stagedAccessorPath(idxPath), item.decompressor, iiItem.decompressor, iiItem.startTxNum, ps)
 	if err != nil {
+		discardStagedAccessors(idxPath)
 		return fmt.Errorf("buildVI: %w", err)
 	}
-	return nil
+	return publish(h.dirtyFiles, item, idxPath)
 }
 
 func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHist *seg.Decompressor, efBaseTxNum uint64, ps *background.ProgressSet) error {
@@ -440,11 +441,11 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 	return nil
 }
 
-func (h *History) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet, historyFiles *MissedAccessorHistoryFiles) {
-	h.InvertedIndex.BuildMissedAccessors(ctx, g, ps, historyFiles.ii)
+func (h *History) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet, historyFiles *MissedAccessorHistoryFiles, publish accessorPublisher) {
+	h.InvertedIndex.BuildMissedAccessors(ctx, g, ps, historyFiles.ii, publish)
 	for _, item := range historyFiles.missedMapAccessors() {
 		g.Go(func() error {
-			return h.buildVi(ctx, item, ps)
+			return h.buildVi(ctx, item, ps, publish)
 		})
 	}
 }

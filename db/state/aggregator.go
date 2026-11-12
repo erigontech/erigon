@@ -1094,6 +1094,29 @@ func (a *Aggregator) WaitForBuildAndMerge(ctx context.Context) chan struct{} {
 	return res
 }
 
+// publishAccessors renames an item's finished accessors from their staging
+// paths into place, under the lock that retirement runs beneath. A primary
+// dropped from dirtyFiles while its accessors were being written has no set
+// left for them to join, so they are discarded instead: an accessor whose
+// primary is being deleted would index bytes that are going away, and nothing
+// would ever remove it. All of an item's accessors publish in one lock hold,
+// so a reader never sees part of a set.
+func (a *Aggregator) publishAccessors(dirtyFiles *DirtyFiles, item *FilesItem, finals ...string) error {
+	a.dirtyFilesLock.Lock()
+	defer a.dirtyFilesLock.Unlock()
+
+	if live, ok := dirtyFiles.Get(item); !ok || live != item {
+		discardStagedAccessors(finals...)
+		return nil
+	}
+	for _, f := range finals {
+		if err := os.Rename(stagedAccessorPath(f), f); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (a *Aggregator) BuildMissedAccessors(ctx context.Context, db kv.RoDB, workers int, opts ...kv.BuildAccessorsOption) error {
 	rotx := a.DebugBeginDirtyFilesRo()
 	defer rotx.Close()
@@ -1133,11 +1156,11 @@ func (a *Aggregator) BuildMissedAccessors(ctx context.Context, db kv.RoDB, worke
 	}()
 
 	for _, d := range a.d {
-		d.BuildMissedAccessors(ctx, g, ps, missedFilesItems.domain[d.Name])
+		d.BuildMissedAccessors(ctx, g, ps, missedFilesItems.domain[d.Name], a.publishAccessors)
 	}
 
 	for _, ii := range a.standaloneIIs() {
-		ii.BuildMissedAccessors(ctx, g, ps, missedFilesItems.ii[ii.Name])
+		ii.BuildMissedAccessors(ctx, g, ps, missedFilesItems.ii[ii.Name], a.publishAccessors)
 	}
 
 	err := g.Wait()

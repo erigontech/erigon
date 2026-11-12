@@ -61,6 +61,23 @@ type DirtyFiles struct {
 	btree2.BTreeG[*FilesItem]
 }
 
+// accessorStagingExt marks an accessor that is written but not yet published.
+// The directory sweeps match on a known extension, so a staged file is invisible
+// to them until it is renamed into place.
+const accessorStagingExt = ".building"
+
+func stagedAccessorPath(final string) string { return final + accessorStagingExt }
+
+func discardStagedAccessors(finals ...string) {
+	for _, f := range finals {
+		_ = dir.RemoveFile(stagedAccessorPath(f))
+	}
+}
+
+// accessorPublisher moves an item's finished accessors into place, or discards
+// them if the primary they index was retired while they were being written.
+type accessorPublisher func(dirtyFiles *DirtyFiles, item *FilesItem, finals ...string) error
+
 func newDirtyFiles() *DirtyFiles {
 	return &DirtyFiles{*btree2.NewBTreeGOptions(filesItemLess, btree2.Options{Degree: 128, NoLocks: false})}
 }

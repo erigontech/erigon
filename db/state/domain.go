@@ -1462,37 +1462,39 @@ func (d *Domain) missedMapAccessors(source []*FilesItem, dl dirListing) (l []*Fi
 }
 
 // BuildMissedAccessors - produce .efi/.vi/.kvi from .ef/.v/.kv
-func (d *Domain) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet, domainFiles *MissedAccessorDomainFiles) {
-	d.History.BuildMissedAccessors(ctx, g, ps, domainFiles.history)
+func (d *Domain) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet, domainFiles *MissedAccessorDomainFiles, publish accessorPublisher) {
+	d.History.BuildMissedAccessors(ctx, g, ps, domainFiles.history, publish)
 	for _, item := range domainFiles.missedBtreeAccessors() {
-		if item.decompressor == nil {
-			fromStep, toStep := item.StepRange(d.stepSize)
-			log.Warn(fmt.Sprintf("[dbg] BuildMissedAccessors: item with nil decompressor %s %d-%d", d.FilenameBase, fromStep, toStep))
-		}
-		item := item
-
 		g.Go(func() error {
+			if item.decompressor == nil {
+				fromStep, toStep := item.StepRange(d.stepSize)
+				return fmt.Errorf("BuildMissedAccessors: item with nil decompressor %s %d-%d", d.FilenameBase, fromStep, toStep)
+			}
 			idxPath := d.kvBtAccessorPathForItem(item)
 			kveiPath := d.kvExistenceIdxPathForItem(item)
-			if err := btindex.BuildBtreeIndexWithDecompressor(idxPath, kveiPath, d.dataReader(item.decompressor), ps, d.dirs.Tmp, *d.salt.Load(), d.logger, d.noFsync, d.Accessors); err != nil {
+			finals := []string{idxPath}
+			if d.Accessors.Has(statecfg.AccessorExistence) {
+				finals = append(finals, kveiPath)
+			}
+			if err := btindex.BuildBtreeIndexWithDecompressor(stagedAccessorPath(idxPath), stagedAccessorPath(kveiPath), d.dataReader(item.decompressor), ps, d.dirs.Tmp, *d.salt.Load(), d.logger, d.noFsync, d.Accessors); err != nil {
+				discardStagedAccessors(idxPath, kveiPath)
 				return fmt.Errorf("failed to build btree index for %s:  %w", item.decompressor.FileName(), err)
 			}
-			return nil
+			return publish(d.dirtyFiles, item, finals...)
 		})
 	}
 	for _, item := range domainFiles.missedMapAccessors() {
-		if item.decompressor == nil {
-			fromStep, toStep := item.StepRange(d.stepSize)
-			log.Warn(fmt.Sprintf("[dbg] BuildMissedAccessors: item with nil decompressor %s %d-%d", d.FilenameBase, fromStep, toStep))
-		}
-		item := item
 		g.Go(func() error {
+			if item.decompressor == nil {
+				fromStep, toStep := item.StepRange(d.stepSize)
+				return fmt.Errorf("BuildMissedAccessors: item with nil decompressor %s %d-%d", d.FilenameBase, fromStep, toStep)
+			}
 			idxPath := d.kviAccessorPathForItem(item)
-			err := d.buildHashMapAccessorAt(ctx, idxPath, item.decompressor, ps)
-			if err != nil {
+			if err := d.buildHashMapAccessorAt(ctx, stagedAccessorPath(idxPath), item.decompressor, ps); err != nil {
+				discardStagedAccessors(idxPath)
 				return fmt.Errorf("build %s values recsplit index: %w", d.FilenameBase, err)
 			}
-			return nil
+			return publish(d.dirtyFiles, item, idxPath)
 		})
 	}
 }
