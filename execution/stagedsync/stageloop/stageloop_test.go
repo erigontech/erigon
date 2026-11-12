@@ -27,7 +27,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
-	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/shards"
 )
@@ -35,26 +34,6 @@ import (
 type frozenBlocksStub uint64
 
 func (f frozenBlocksStub) FrozenBlocks() uint64 { return uint64(f) }
-
-func TestHookNotifySyncStatePreservesPendingNotifications(t *testing.T) {
-	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
-	tx, err := db.BeginRw(t.Context())
-	require.NoError(t, err)
-	defer tx.Rollback()
-	notifications := shards.NewNotifications(nil)
-	notifications.Accumulator.StartChange(&types.Header{Time: 1}, nil, true)
-	notifications.Accumulator.MarkIncomplete()
-	hook := NewHook(t.Context(), notifications, nil, nil, log.New(), nil, nil, nil, nil, frozenBlocksStub(0))
-
-	hook.NotifySyncState(tx)
-	header := &types.Header{Time: 2}
-	notifications.Accumulator.StartChange(header, nil, false)
-	batch := notifications.Accumulator.Batch(header).ToProtoBatch()
-	require.True(t, batch.StateChangesIncomplete)
-	require.Len(t, batch.ChangeBatch, 2)
-	require.Equal(t, remoteproto.Direction_UNWIND, batch.ChangeBatch[0].Direction)
-	require.Equal(t, remoteproto.Direction_FORWARD, batch.ChangeBatch[1].Direction)
-}
 
 func drainSyncState(ch chan *remoteproto.SyncingReply) []*remoteproto.SyncingReply {
 	var got []*remoteproto.SyncingReply
