@@ -778,12 +778,12 @@ func (api *BaseAPI) historyStartBlocksFromTxNum(ctx context.Context, tx kv.Tx, h
 	}
 	if !hasStart || startTxNum > blockStartTxNum {
 		floors.wholeBlock = min(containingBlock+1, head)
-	} else if containingBlock > 0 {
+	} else {
 		floors.postState = containingBlock - 1
 	}
 	if !hasStart || startTxNum > blockStartTxNum+1 {
 		floors.replay = min(containingBlock+1, head)
-	} else if containingBlock > 0 {
+	} else {
 		floors.stateAfterSystemTx = containingBlock - 1
 	}
 	return floors, nil
