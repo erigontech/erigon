@@ -209,6 +209,14 @@ func TestChargedValueTransferDoesNotWaitForRecipient(t *testing.T) {
 	s = newDepsTest(t, valueTransfers([]accounts.Address{a, b, c}, []accounts.Address{f, p, p}))
 	require.False(t, s.be.execTasks.isBlocked(2))
 	require.True(t, s.be.selfLoopDispatched[2])
+	// A failed frame still reads the precompile, so it waits for the last funded transfer to it, but not for another failed one.
+	mixed := valueTransfers([]accounts.Address{a, b, c, d}, []accounts.Address{f, p, p, p})
+	mixed[1].(*types.LegacyTx).GasLimit = params.TxGas + params.EcrecoverGas
+	s = newDepsTest(t, mixed)
+	require.True(t, s.be.execTasks.isBlocked(2) && s.be.execTasks.isBlocked(3))
+	s.deliverTx(0, 0, state.ReadSet{})
+	s.deliverTx(1, 0, state.ReadSet{})
+	require.True(t, s.be.selfLoopDispatched[2] && s.be.selfLoopDispatched[3])
 	// A tracer that follows balances or gas keeps the transfer frame, so the transfer still waits.
 	for name, hooks := range map[string]*tracing.Hooks{
 		"balance_hook": {OnBalanceChange: func(accounts.Address, uint256.Int, uint256.Int, tracing.BalanceChangeReason) {}},

@@ -915,9 +915,9 @@ func intrinsicGas(msg Message, rules *chain.Rules, isEIP3860 bool) (mdgas.Intrin
 	})
 }
 
-// PrecompileCallRunsOutOfGas reports whether a call to a precompile cannot pay the precompile gas
-// after the intrinsic charge. Such a frame fails and reverts the transfer, so it writes nothing to
-// the recipient.
+// PrecompileCallRunsOutOfGas reports whether a value transfer to a precompile cannot pay the precompile
+// gas after the intrinsic charge. Such a frame fails and reverts the transfer, so it writes nothing to
+// the recipient, but it still reads it.
 func PrecompileCallRunsOutOfGas(msg Message, rules *chain.Rules) bool {
 	p, ok := vm.Precompiles(rules)[msg.To()]
 	if !ok || len(msg.Authorizations()) > 0 {

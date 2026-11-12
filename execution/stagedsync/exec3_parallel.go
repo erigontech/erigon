@@ -1318,7 +1318,12 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 					executor.coinbase, *tx.GetValue(), txTask.Hooks, txTask.Rules(), blockStart) {
 					// Credited at validation: a later user of the recipient still waits for it.
 					prevAccountTx[to] = i
-				} else if !ok || !precompileCallRunsOutOfGas(txTask, accounts.InternAddress(to)) {
+				} else if ok && precompileCallRunsOutOfGas(txTask, accounts.InternAddress(to)) {
+					// The failed frame still reads the recipient: wait for its last writer, without becoming one.
+					if prev, ok := prevAccountTx[to]; ok && executor.execTasks.addDependency(prev, i) {
+						executor.execTasks.clearPending(i)
+					}
+				} else {
 					addresses = append(addresses, to)
 				}
 			}
