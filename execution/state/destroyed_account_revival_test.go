@@ -254,3 +254,20 @@ func TestCommittedFallbackDependsOnInFlightDestruct(t *testing.T) {
 	require.Nil(t, vm.absentAccountHook, "the flush must land after the account read")
 	require.Equal(t, 0, ibs.DepTxIndex())
 }
+
+func TestWipedFieldOutcomeDependsOnInFlightDestruct(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress(common.HexToAddress("0x8246AE"))
+	reader := newAccountStateReader(addr)
+	vm := NewVersionMap(nil)
+	destruct := newWriteSet(
+		&VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: Version{TxIndex: 0}}, Val: true},
+	)
+	vm.FlushVersionedWrites(destruct, true)
+	vm.FlushVersionedWrites(destruct, false)
+
+	ibs := newAmsterdamIBS(reader, vm, 1)
+	defer ibs.Close()
+	require.Equal(t, outcomeReturnZero, wipedFieldOutcome(ibs, addr))
+	require.Equal(t, 0, ibs.DepTxIndex())
+}

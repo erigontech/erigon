@@ -268,6 +268,10 @@ func wipedFieldOutcome(s *IntraBlockState, addr accounts.Address) readPathOutcom
 	if state, _, _, _ := s.versionMap.AccountLifecycleAt(addr, s.txIndex); state == LifecycleRevived {
 		return outcomeReturnEmpty
 	}
+	// A destruct back in flight is not counted by the lifecycle, so the verdict may be stale.
+	if _, sdRes, ok := s.versionMap.ReadSelfDestruct(addr, s.txIndex); ok && sdRes.Status() == MVReadResultDependency {
+		s.dep = max(s.dep, sdRes.DepIdx())
+	}
 	return outcomeReturnZero
 }
 
