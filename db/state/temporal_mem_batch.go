@@ -23,7 +23,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"hash/maphash"
-	"maps"
 	"slices"
 	"sync"
 	"unsafe"
@@ -38,8 +37,10 @@ import (
 )
 
 type dataWithTxNum struct {
-	data  []byte
-	txNum uint64
+	data    []byte
+	prev    []byte
+	txNum   uint64
+	flushed bool
 }
 
 const latestShards = 32
@@ -185,12 +186,12 @@ func (sd *TemporalMemBatch) runlockAllDomains() {
 }
 
 func (sd *TemporalMemBatch) DomainPut(domain kv.Domain, k string, v []byte, txNum uint64, preval []byte) error {
-	sameTxNumUpdate := sd.putLatest(domain, k, v, txNum)
+	sameTxNumUpdate := sd.putLatest(domain, k, v, txNum, preval)
 	return sd.putHistory(domain, common.ToBytesZeroCopy(k), v, txNum, preval, sameTxNumUpdate)
 }
 
 func (sd *TemporalMemBatch) DomainDel(domain kv.Domain, k string, txNum uint64, preval []byte) error {
-	sameTxNumUpdate := sd.putLatest(domain, k, nil, txNum)
+	sameTxNumUpdate := sd.putLatest(domain, k, nil, txNum, preval)
 	return sd.putHistory(domain, common.ToBytesZeroCopy(k), nil, txNum, preval, sameTxNumUpdate)
 }
 
@@ -200,36 +201,30 @@ func (sd *TemporalMemBatch) DomainDel(domain kv.Domain, k string, txNum uint64, 
 // calculator, one block at a time), so routing its diff this way needs no
 // lock against SetChangesetAccumulator, unlike DomainPut/DomainDel.
 func (sd *TemporalMemBatch) PutCommitmentBranchDiff(k string, v []byte, txNum uint64, preval []byte, diff *kv.DomainDiff) error {
-	sameTxNumUpdate := sd.putLatest(kv.CommitmentDomain, k, v, txNum)
+	sameTxNumUpdate := sd.putLatest(kv.CommitmentDomain, k, v, txNum, preval)
 	kb := common.ToBytesZeroCopy(k)
-	if sameTxNumUpdate {
-		return sd.domainWriters[kv.CommitmentDomain].addValue(kb, v, kv.Step(txNum/sd.stepSize))
+	step := kv.Step(txNum / sd.stepSize)
+	if !sameTxNumUpdate && diff != nil {
+		diff.DomainUpdate(kb, step, preval)
 	}
-	if len(v) == 0 {
-		return sd.domainWriters[kv.CommitmentDomain].DeleteWithPrevDiff(kb, txNum, preval, diff)
-	}
-	return sd.domainWriters[kv.CommitmentDomain].PutWithPrevDiff(kb, v, txNum, preval, diff)
+	return sd.domainWriters[kv.CommitmentDomain].addValue(kb, v, step)
 }
 
 func (sd *TemporalMemBatch) putHistory(domain kv.Domain, k, v []byte, txNum uint64, preval []byte, sameTxNumUpdate bool) error {
-	// A same-txNum update only rewrites the value: history and the unwind diff
-	// record the value as of BEFORE txNum, which the first write already did —
-	// this write's preval is the intra-txNum intermediate, not a real prev.
-	if sameTxNumUpdate {
-		return sd.domainWriters[domain].addValue(k, v, kv.Step(txNum/sd.stepSize))
+	writer := sd.domainWriters[domain]
+	step := kv.Step(txNum / sd.stepSize)
+	if !sameTxNumUpdate && writer.diff != nil {
+		writer.diff.DomainUpdate(k, step, preval)
 	}
-	if len(v) == 0 {
-		return sd.domainWriters[domain].DeleteWithPrev(k, txNum, preval)
-	}
-	return sd.domainWriters[domain].PutWithPrev(k, v, txNum, preval)
+	return writer.addValue(k, v, step)
 }
 
 // putLatest reports whether this write is a same-txNum update of the key,
 // replacing the key's last entry in place instead of appending a version.
-func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, txNum uint64) (sameTxNumUpdate bool) {
+func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, txNum uint64, preval []byte) (sameTxNumUpdate bool) {
 	// Own the bytes now: val may alias a .kv mmap (the foreground exec tx's file generation)
 	// that a background merge can munmap while a concurrent commitment worker reads sd.mem.
-	valWithStep := dataWithTxNum{data: bytes.Clone(val), txNum: txNum}
+	valWithStep := dataWithTxNum{data: bytes.Clone(val), prev: preval, txNum: txNum}
 	sameTxNumUpdate, putKeySize, putValueSize := sd.putLatestLocked(domain, key, valWithStep)
 	sd.updatePutMetrics(domain, putKeySize, putValueSize)
 	return sameTxNumUpdate
@@ -246,13 +241,17 @@ func (sd *TemporalMemBatch) putLatestLocked(domain kv.Domain, key string, valWit
 			case old[len(old)-1].txNum == txNum:
 				sameTxNumUpdate = true
 				putValueSize += len(val) - len(old[len(old)-1].data)
-				old[len(old)-1] = valWithStep
+				old[len(old)-1].data = valWithStep.data
 				sd.storage.Set(key, old)
 			default:
+				if !bytes.Equal(valWithStep.prev, old[len(old)-1].data) {
+					valWithStep.prev = bytes.Clone(valWithStep.prev)
+				}
 				sd.storage.Set(key, append(old, valWithStep))
 				putValueSize += len(val)
 			}
 		} else {
+			valWithStep.prev = bytes.Clone(valWithStep.prev)
 			sd.storage.Set(key, []dataWithTxNum{valWithStep})
 			putKeySize += len(key)
 			putValueSize += len(val)
@@ -269,13 +268,17 @@ func (sd *TemporalMemBatch) putLatestLocked(domain kv.Domain, key string, valWit
 		case old[len(old)-1].txNum == txNum:
 			sameTxNumUpdate = true
 			putValueSize += len(val) - len(old[len(old)-1].data)
-			old[len(old)-1] = valWithStep
+			old[len(old)-1].data = valWithStep.data
 			sh.m[key] = old
 		default:
+			if !bytes.Equal(valWithStep.prev, old[len(old)-1].data) {
+				valWithStep.prev = bytes.Clone(valWithStep.prev)
+			}
 			sh.m[key] = append(old, valWithStep)
 			putValueSize += len(val)
 		}
 	} else {
+		valWithStep.prev = bytes.Clone(valWithStep.prev)
 		sh.m[key] = []dataWithTxNum{valWithStep}
 		putKeySize += len(key)
 		putValueSize += len(val)
@@ -688,6 +691,10 @@ func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch) error {
 	if other.currentChangesAccumulator != nil {
 		return fmt.Errorf("can't merge from batch with non-nil currentChangesAccumulator")
 	}
+	sd.lockAllDomains()
+	defer sd.unlockAllDomains()
+	other.rlockAllDomains()
+	defer other.runlockAllDomains()
 
 	for d := range other.latest {
 		for i := range other.latest[d] {
@@ -699,12 +706,15 @@ func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch) error {
 			if sh.m == nil {
 				sh.m = make(map[string][]dataWithTxNum, len(otherEntries))
 			}
-			maps.Copy(sh.m, otherEntries)
+			for key, entries := range otherEntries {
+				sh.m[key] = mergeChain(sh.m[key], entries)
+			}
 		}
 	}
 
 	other.storage.Scan(func(key string, value []dataWithTxNum) bool {
-		sd.storage.Set(key, value)
+		receiver, _ := sd.storage.Get(key)
+		sd.storage.Set(key, mergeChain(receiver, value))
 		return true
 	})
 
@@ -791,6 +801,28 @@ func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch) error {
 	return nil
 }
 
+func mergeChain(receiver, other []dataWithTxNum) []dataWithTxNum {
+	if len(other) == 0 {
+		return receiver
+	}
+	firstTxNum := other[0].txNum
+	keep := 0
+	for keep < len(receiver) && receiver[keep].txNum < firstTxNum {
+		keep++
+	}
+	merged := make([]dataWithTxNum, 0, keep+len(other))
+	merged = append(merged, receiver[:keep]...)
+	if keep < len(receiver) && receiver[keep].txNum == firstTxNum {
+		first := other[0]
+		first.prev = receiver[keep].prev
+		first.flushed = receiver[keep].flushed
+		merged = append(merged, first)
+		merged = append(merged, other[1:]...)
+		return merged
+	}
+	return append(merged, other...)
+}
+
 // Flush writes the mem-batch to tx. With kv.WithFlushCallback options, the
 // registered per-domain callback is invoked for every (key, value, step, txNum)
 // tuple after the MDBX write succeeds, so a downstream cache can never be left
@@ -813,9 +845,13 @@ func (sd *TemporalMemBatch) Flush(ctx context.Context, tx kv.RwTx, opts ...kv.Fl
 	if err := sd.flushDiffSet(ctx, tx); err != nil {
 		return err
 	}
+	if err := sd.projectHistory(); err != nil {
+		return err
+	}
 	if err := sd.flushWriters(ctx, tx); err != nil {
 		return err
 	}
+	sd.markFlushed()
 	// PlainStateVersion advances here with the domain writes; metadata overlays
 	// must not advance it independently.
 	if _, err := rawdb.IncrementStateVersion(tx); err != nil {
@@ -852,6 +888,60 @@ func (sd *TemporalMemBatch) Flush(ctx context.Context, tx kv.RwTx, opts ...kv.Fl
 	}
 
 	return nil
+}
+
+func (sd *TemporalMemBatch) projectHistory() error {
+	project := func(domain kv.Domain, key string, entries []dataWithTxNum) error {
+		writer := sd.domainWriters[domain]
+		if writer == nil {
+			return nil
+		}
+		for i := range entries {
+			entry := &entries[i]
+			if entry.flushed {
+				continue
+			}
+			if err := writer.h.AddPrevValue(common.ToBytesZeroCopy(key), entry.txNum, entry.prev); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	for domain := range sd.latest {
+		for i := range sd.latest[domain] {
+			for key, entries := range sd.latest[domain][i].m {
+				if err := project(kv.Domain(domain), key, entries); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	var err error
+	sd.storage.Scan(func(key string, entries []dataWithTxNum) bool {
+		err = project(kv.StorageDomain, key, entries)
+		return err == nil
+	})
+	return err
+}
+
+func (sd *TemporalMemBatch) markFlushed() {
+	mark := func(entries []dataWithTxNum) {
+		for i := range entries {
+			entries[i].flushed = true
+		}
+	}
+	for domain := range sd.latest {
+		for i := range sd.latest[domain] {
+			for _, entries := range sd.latest[domain][i].m {
+				mark(entries)
+			}
+		}
+	}
+	sd.storage.Scan(func(_ string, entries []dataWithTxNum) bool {
+		mark(entries)
+		return true
+	})
 }
 
 func (sd *TemporalMemBatch) flushDiffSet(_ context.Context, tx kv.RwTx) error {

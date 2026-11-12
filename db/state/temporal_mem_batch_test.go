@@ -70,7 +70,7 @@ func TestTemporalMemBatchConcurrentDomainAccess(t *testing.T) {
 		wg.Go(func() {
 			for i := range keysPerDomain {
 				key := fmt.Sprintf("%s-%03d", domain, i)
-				sd.putLatest(domain, key, []byte(key), uint64(i))
+				sd.putLatest(domain, key, []byte(key), uint64(i), nil)
 			}
 		})
 		wg.Go(func() {
@@ -111,7 +111,7 @@ func TestFlushDoesNotBlockReaders(t *testing.T) {
 		storage:  btree2.NewMap[string, []dataWithTxNum](128),
 		metrics:  &kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
 	}
-	sd.putLatest(kv.AccountsDomain, "acc", []byte("v"), 1)
+	sd.putLatest(kv.AccountsDomain, "acc", []byte("v"), 1, nil)
 
 	flushing := make(chan struct{})
 	readerDone := make(chan struct{})
@@ -168,12 +168,12 @@ func TestPutLatest_NeverRewritesValuesInPlace(t *testing.T) {
 		for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
 			key := "k-" + domain.String() + "-" + next.name
 			first := []byte("first-and-long-enough-to-be-reused")
-			sd.putLatest(domain, key, first, 1)
+			sd.putLatest(domain, key, first, 1, nil)
 			borrowed, _, ok := sd.GetLatest(domain, []byte(key))
 			require.True(t, ok)
 			require.Equal(t, first, borrowed)
 
-			sd.putLatest(domain, key, []byte(next.val), next.txNum)
+			sd.putLatest(domain, key, []byte(next.val), next.txNum, nil)
 
 			require.Equal(t, first, borrowed,
 				"%s/%s: a borrowed value must survive a later write to its key", domain, next.name)
@@ -192,7 +192,7 @@ func TestMergeRejectedBatchKeepsReceiverUnchanged(t *testing.T) {
 	}
 	for _, receiverHasAccumulator := range []bool{false, true} {
 		sd, other := newBatch(), newBatch()
-		other.putLatest(kv.AccountsDomain, "k", []byte("v"), 1)
+		other.putLatest(kv.AccountsDomain, "k", []byte("v"), 1, nil)
 		if receiverHasAccumulator {
 			sd.currentChangesAccumulator = &changeset.StateChangeSet{}
 		} else {

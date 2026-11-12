@@ -86,17 +86,24 @@ NOTES:
 
 ### T3: history from the chains at flush
 
-- [ ] `dataWithTxNum` carries `prev []byte`, set per I-1 and I-4. `putLatestLocked` receives the prev.
-- [ ] `putHistory` no longer calls `PutWithPrev` / `DeleteWithPrev` / `PutWithPrevDiff` / `DeleteWithPrevDiff` for history. It keeps the `addValue` call (T4 moves it) and calls `diff.DomainUpdate(k, step, prev)` itself when the writer's diff, or `PutCommitmentBranchDiff`'s explicit diff, is set. A same-txNum update records nothing.
-- [ ] `Flush`, before `flushWriters`: for every chain entry of every domain, `domainWriters[d].h.AddPrevValue(key, txNum, prev)`.
-- [ ] `Merge` concatenates chains instead of replacing them: the receiver's entries below the other's first txNum, then the other's chain.
-- [ ] Red first: a `GetAsOf` test on a merged batch, at a ts inside the receiver's range for a key both batches wrote. It fails on the base (whole-chain replace) and passes here.
-- [ ] Goldens: `forward`, `discard` and `merge` unchanged. `unwind` is decided at the T1 checkpoint.
-- [ ] Direction:
+- [x] `dataWithTxNum` carries `prev []byte`, set per I-1 and I-4. `putLatestLocked` receives the prev.
+- [x] `putHistory` no longer calls `PutWithPrev` / `DeleteWithPrev` / `PutWithPrevDiff` / `DeleteWithPrevDiff` for history. It keeps the `addValue` call (T4 moves it) and calls `diff.DomainUpdate(k, step, prev)` itself when the writer's diff, or `PutCommitmentBranchDiff`'s explicit diff, is set. A same-txNum update records nothing.
+- [x] `Flush`, before `flushWriters`: for every chain entry of every domain, `domainWriters[d].h.AddPrevValue(key, txNum, prev)`.
+- [x] `Merge` concatenates chains instead of replacing them: the receiver's entries below the other's first txNum, then the other's chain.
+- [x] Red first: a `GetAsOf` test on a merged batch, at a ts inside the receiver's range for a key both batches wrote. It fails on the base (whole-chain replace) and passes here.
+- [x] Goldens: `forward`, `discard`, `merge`, and `reflush` unchanged. `unwind` changes only by removing old history rows at txNum 5..6.
+- [x] Direction:
   - Writers of the chains: `putLatestLocked` under the shard lock (exec loop, apply loop, commitment calculator), `Unwind` and `Merge` under every lock.
-  - Writers of the history collectors after T3: `Flush` only, under `rlockAllDomains`.
+  - Writers of the history collectors after T3: `Flush`, plus direct commitment dump projection, under the existing domain locks.
   - `DomainDiff`: written at put time as today, swapped under `changesetMu`.
-  - Before the first line: prove with the LSP that no `TemporalMemBatch` is written to or flushed again after `Flush` (callers of `SharedDomains.Flush` / `Commit` / `flushMem`, and the `o.mem` reuse at `domain_shared.go:359`). If one is, a flushed-txNum watermark limits the feed to new entries. Answer under `NOTES`.
+  - Before the first line: prove with the LSP whether production writes to or flushes a `TemporalMemBatch` again after `Flush` (callers of `SharedDomains.Flush` / `Commit` / `flushMem`, and the `o.mem` reuse at `domain_shared.go:359`). If one is, a per-entry flushed flag; a txNum watermark is wrong after an unwind. Answer under `NOTES`.
+
+NOTES:
+
+- Production reuses a batch after `Flush`: `SharedDomains.Flush` calls `flushMem` at `db/state/execctx/domain_shared.go:1101`, which calls `sd.mem.Flush` at `:1118`; `SharedDomains.Commit` calls `flushMem` at `:1200` and `:1245`. `NewSharedDomains` reuses `o.mem` at `domain_shared.go:359`, and direct tests flush one shared domain repeatedly at `db/state/execctx/domain_shared_test.go:498`, `:500`, `:504`, `:506`, `:510`, and `:512`. The per-entry flushed flag is required because an unwind can re-execute an old txNum.
+- LSP found `TemporalMemBatch` as the only in-package caller of `PutWithPrev`, `PutWithPrevDiff`, `DeleteWithPrev`, and `DeleteWithPrevDiff`; `db/state/commitment_convert.go:489` calls `DomainBufferedWriter.PutWithPrev` directly and keeps its behavior.
+- `unsafe.Sizeof(dataWithTxNum{})` is 32 bytes before T3 and 64 bytes after T3.
+- The direct `dumpCommitmentStep` path projects the chains before collating history because it intentionally bypasses `Flush`.
 
 ### T4: values from the chains at flush
 

@@ -48,7 +48,7 @@ type flushGoldenRow struct {
 }
 
 func TestFlushGolden(t *testing.T) {
-	for _, name := range []string{"forward", "discard", "unwind", "merge"} {
+	for _, name := range []string{"forward", "discard", "unwind", "merge", "reflush"} {
 		t.Run(name, func(t *testing.T) {
 			rows := buildFlushGoldenBatch(t, name)
 
@@ -92,6 +92,8 @@ func buildFlushGoldenBatch(t *testing.T, name string) []flushGoldenRow {
 		buildUnwind(t, domains, tx)
 	case "merge":
 		buildMerge(t, domains, tx)
+	case "reflush":
+		buildReflush(t, domains, tx)
 	default:
 		t.Fatalf("unknown golden case %q", name)
 	}
@@ -261,6 +263,36 @@ func buildUnwind(t *testing.T, domains *execctx.SharedDomains, tx kv.TemporalRwT
 	})
 }
 
+func buildReflush(t *testing.T, domains *execctx.SharedDomains, tx kv.TemporalRwTx) {
+	t.Helper()
+	account := flushGoldenAddress(0x91)
+	storage := flushGoldenStorageKey(account, 0x05)
+
+	domains.SetTxNum(1)
+	flushGoldenPut(t, domains, tx, kv.AccountsDomain, account, []byte{0x91, 0x01}, 1)
+	flushGoldenPut(t, domains, tx, kv.StorageDomain, storage, []byte{0xa1, 0x01}, 1)
+	require.NoError(t, domains.Flush(t.Context(), tx))
+
+	changes := &changeset.StateChangeSet{}
+	domains.SetChangesetAccumulator(changes)
+	domains.SetTxNum(5)
+	flushGoldenPut(t, domains, tx, kv.AccountsDomain, account, []byte{0x91, 0x05}, 5)
+	flushGoldenPut(t, domains, tx, kv.StorageDomain, storage, []byte{0xa1, 0x05}, 5)
+	domains.SavePastChangesetAccumulator(flushGoldenHash("reflush", 5), 5, changes)
+	domains.SetChangesetAccumulator(nil)
+	require.NoError(t, domains.Flush(t.Context(), tx))
+
+	var unwindDiffs [kv.DomainLen][]kv.DomainEntryDiff
+	for domain, diff := range changes.Diffs {
+		unwindDiffs[domain] = diff.GetDiffSet()
+	}
+	domains.Unwind(4, &unwindDiffs)
+	domains.SetTxNum(4)
+	flushGoldenPut(t, domains, tx, kv.AccountsDomain, account, []byte{0x91, 0x04}, 4)
+	flushGoldenPut(t, domains, tx, kv.StorageDomain, storage, []byte{0xa1, 0x04}, 4)
+	require.NoError(t, domains.Flush(t.Context(), tx))
+}
+
 func buildMerge(t *testing.T, receiver *execctx.SharedDomains, tx kv.TemporalRwTx) {
 	t.Helper()
 	key := flushGoldenAddress(0x81)
@@ -300,6 +332,8 @@ func buildMerge(t *testing.T, receiver *execctx.SharedDomains, tx kv.TemporalRwT
 	require.NoError(t, receiver.Merge(t.Context(), 3, fork, 5))
 	value, ok, err := receiver.GetAsOf(kv.AccountsDomain, key, 3)
 	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, []byte{0x81, 0x02}, value)
 	t.Logf("merged GetAsOf at ts=3 for shared key: value=%x ok=%t", value, ok)
 	fork.Close()
 }
@@ -428,7 +462,14 @@ func assertUnwindRows(t *testing.T, rows []flushGoldenRow) {
 	oldAccount6 := flushGoldenAddress(0x73)
 	oldStorage5 := flushGoldenStorageKey(oldAccount5, 0x12)
 	oldStorage6 := flushGoldenStorageKey(oldAccount6, 0x13)
-	counts := map[string]int{}
+	counts := map[string]int{
+		kv.TblAccountHistoryVals: 0,
+		kv.TblAccountHistoryKeys: 0,
+		kv.TblStorageHistoryVals: 0,
+		kv.TblStorageHistoryKeys: 0,
+		kv.TblCodeHistoryVals:    0,
+		kv.TblCodeHistoryKeys:    0,
+	}
 	for _, row := range rows {
 		switch row.table {
 		case kv.TblAccountVals:
@@ -479,14 +520,14 @@ func assertUnwindRows(t *testing.T, rows []flushGoldenRow) {
 	}
 	require.Equal(t, map[string]int{
 		kv.TblAccountVals:        3,
-		kv.TblAccountHistoryVals: 2,
-		kv.TblAccountHistoryKeys: 2,
+		kv.TblAccountHistoryVals: 0,
+		kv.TblAccountHistoryKeys: 0,
 		kv.TblStorageVals:        3,
-		kv.TblStorageHistoryVals: 2,
-		kv.TblStorageHistoryKeys: 2,
+		kv.TblStorageHistoryVals: 0,
+		kv.TblStorageHistoryKeys: 0,
 		kv.TblCodeVals:           2,
-		kv.TblCodeHistoryVals:    1,
-		kv.TblCodeHistoryKeys:    1,
+		kv.TblCodeHistoryVals:    0,
+		kv.TblCodeHistoryKeys:    0,
 	}, counts)
 	t.Logf("unwind rows for old-only keys at txNums 5..6: %v", counts)
 }
