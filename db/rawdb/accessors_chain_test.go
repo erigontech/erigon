@@ -1047,18 +1047,40 @@ func TestReadReceiptsCacheV2UnorderedTxIndex(t *testing.T) {
 
 func TestReadReceiptsCacheV2DerivesTxHashes(t *testing.T) {
 	t.Parallel()
+	txns, rs := readCachedReceipts(t, 3)
+	for i, r := range rs {
+		require.Equal(t, txns[i].Hash(), r.TxHash)
+		require.Len(t, r.Logs, 1)
+		require.Equal(t, txns[i].Hash(), r.Logs[0].TxHash)
+	}
+}
+
+func TestReadReceiptsCacheV2DerivesBlooms(t *testing.T) {
+	t.Parallel()
+	_, rs := readCachedReceipts(t, 35)
+	for i, r := range rs {
+		require.Len(t, r.Logs, 1)
+		var want types.Bloom
+		want.Add(r.Logs[0].Address[:])
+		require.Equal(t, want, r.Bloom, "receipt %d", i)
+	}
+}
+
+// readCachedReceipts writes a block of n transactions with one log per receipt
+// to the receipt cache and reads the receipts back with ReadReceiptsCacheV2.
+func readCachedReceipts(t *testing.T, n int) (types.Transactions, types.Receipts) {
+	t.Helper()
 	m := execmoduletester.New(t, execmoduletester.WithEnableDomain(kv.RCacheDomain))
 	tx, err := m.DB.BeginTemporalRw(m.Ctx)
 	require.NoError(t, err)
-	defer tx.Rollback()
+	t.Cleanup(tx.Rollback)
 	br := m.BlockReader
 	txNumReader := br.TxnumReader()
 	ctx := m.Ctx
 
-	txns := types.Transactions{
-		newTestLegacyTx(1, common.HexToAddress("0x1"), u256.Num1, 1, u256.Num1),
-		newTestLegacyTx(2, common.HexToAddress("0x2"), u256.Num2, 2, u256.Num2),
-		newTestLegacyTx(3, common.HexToAddress("0x3"), u256.Num1, 3, u256.Num1),
+	txns := make(types.Transactions, n)
+	for i := range txns {
+		txns[i] = newTestLegacyTx(uint64(i+1), common.BytesToAddress([]byte{byte(i + 1)}), u256.Num1, 1, u256.Num1)
 	}
 	header := &types.Header{Number: *common.Num1}
 	hash := header.Hash()
@@ -1072,7 +1094,7 @@ func TestReadReceiptsCacheV2DerivesTxHashes(t *testing.T) {
 	blockNum := header.Number.Uint64()
 	sd, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithParaTrieDB(m.DB))
 	require.NoError(t, err)
-	defer sd.Close()
+	t.Cleanup(sd.Close)
 	base, err := txNumReader.Min(t.Context(), tx, blockNum)
 	require.NoError(t, err)
 	require.NoError(t, rawdb.WriteReceiptCacheV2(sd.AsPutDel(tx), nil, base))
@@ -1081,7 +1103,7 @@ func TestReadReceiptsCacheV2DerivesTxHashes(t *testing.T) {
 			Status:            types.ReceiptStatusSuccessful,
 			CumulativeGasUsed: uint64(i + 1),
 			GasUsed:           1,
-			Logs:              []*types.Log{{Address: common.BytesToAddress([]byte{byte(i + 1)})}},
+			Logs:              []*types.Log{{Address: common.BytesToAddress([]byte{0xa, byte(i + 1)})}},
 			TransactionIndex:  uint(i),
 		}
 		require.NoError(t, rawdb.WriteReceiptCacheV2(sd.AsPutDel(tx), r, base+1+uint64(i)))
@@ -1098,11 +1120,7 @@ func TestReadReceiptsCacheV2DerivesTxHashes(t *testing.T) {
 	rs, err := rawdb.ReadReceiptsCacheV2(tx, b, txNumReader)
 	require.NoError(t, err)
 	require.Len(t, rs, len(txns))
-	for i, r := range rs {
-		require.Equal(t, txns[i].Hash(), r.TxHash)
-		require.Len(t, r.Logs, 1)
-		require.Equal(t, txns[i].Hash(), r.Logs[0].TxHash)
-	}
+	return txns, rs
 }
 
 // Tests block storage and retrieval operations with withdrawals.

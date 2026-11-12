@@ -1387,6 +1387,23 @@ func ReadReceiptsCacheV2(tx kv.TemporalTx, block *types.Block, txNumReader rawdb
 		}
 	}()
 	defer func() { <-hashed }()
+	// The blooms of each batch of receipts are built while the next receipts are read.
+	const bloomBatch = 16
+	toBloom := make(chan types.Receipts, len(transactions)/bloomBatch+1)
+	bloomed := make(chan struct{})
+	go func() {
+		defer close(bloomed)
+		for batch := range toBloom {
+			for _, r := range batch {
+				r.Bloom = types.CreateBloom(types.Receipts{r})
+			}
+		}
+	}()
+	closeToBloom := sync.OnceFunc(func() { close(toBloom) })
+	defer func() {
+		closeToBloom()
+		<-bloomed
+	}()
 
 	minTxNum, err := txNumReader.Min(context.Background(), tx, blockNum)
 	if err != nil {
@@ -1423,15 +1440,23 @@ func ReadReceiptsCacheV2(tx kv.TemporalTx, block *types.Block, txNumReader rawdb
 			return nil, nil
 		}
 		res = append(res, x)
+		if len(res)%bloomBatch == 0 {
+			toBloom <- res[len(res)-bloomBatch:]
+		}
 		receiptIdx++
 	}
 	if receiptIdx != len(transactions) {
 		// Block receipt RPCs require the full ordered receipt set.
 		return nil, nil
 	}
+	if rest := len(res) % bloomBatch; rest > 0 {
+		toBloom <- res[len(res)-rest:]
+	}
+	closeToBloom()
+	<-bloomed
 	<-hashed
 	for i, x := range res {
-		x.DeriveFieldsV4ForCachedReceipt(blockHash, blockNum, transactions[i].Hash(), true)
+		x.DeriveFieldsV4ForCachedReceipt(blockHash, blockNum, transactions[i].Hash(), false)
 	}
 	return res, nil
 }
