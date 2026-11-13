@@ -680,7 +680,6 @@ func (sd *TemporalMemBatch) detachPreUnwindWriters() {
 			sd.preUnwindDomainWriters[d] = append(sd.preUnwindDomainWriters[d], w.detach())
 		}
 	}
-	slices.Reverse(sd.pastIIWriters)
 	sd.preUnwindIIWriters = append(sd.preUnwindIIWriters, sd.pastIIWriters...)
 	sd.pastIIWriters = nil
 	for _, w := range sd.iiWriters {
