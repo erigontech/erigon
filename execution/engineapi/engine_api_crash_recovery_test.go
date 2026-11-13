@@ -39,9 +39,9 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/testlog"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/execution/abi/bind"
@@ -72,7 +72,8 @@ type crashRecoveryRequest struct {
 	Deadline       time.Time
 	Canonical      []*engineapitester.MockClPayload
 	Replacement    []*engineapitester.MockClPayload
-	CatchupCycle   int // One-based catch-up cycle; zero selects tip-mode crash windows.
+	CatchupCycle   int // One-based FCU catch-up cycle.
+	StartupCycle   int // One-based startup cycle on an existing crashed datadir.
 	Downloaded     []crashRecoveryBlock
 }
 
@@ -90,13 +91,7 @@ type crashRecoveryState struct {
 	StateRoot       common.Hash
 	Domains         map[kv.Domain]map[string]string
 	TxLookup        map[string]string
-	History         map[kv.Domain][]crashRecoveryHistoryEntry
-}
-
-type crashRecoveryHistoryEntry struct {
-	Key    string
-	TxNum  uint64
-	Before string
+	History         map[kv.Domain][]temporaltest.HistoryEntry
 }
 
 type crashRecoveryChain struct {
@@ -226,6 +221,7 @@ func TestEngineApiCrashRecovery(t *testing.T) {
 }
 
 func configureCrashRecovery(config *ethconfig.Config) {
+	config.StateStream = true
 	config.MaxReorgDepth = stateChurnReorgDepthBudget
 	config.FcuBackgroundPrune = true
 	config.PersistReceiptsCacheV2 = true
@@ -341,7 +337,7 @@ func readCrashRecoveryTx(t *testing.T, tx kv.TemporalTx) crashRecoveryState {
 		StageProgress:  make(map[stages.SyncStage]uint64),
 		Domains:        make(map[kv.Domain]map[string]string),
 		TxLookup:       make(map[string]string),
-		History:        make(map[kv.Domain][]crashRecoveryHistoryEntry),
+		History:        make(map[kv.Domain][]temporaltest.HistoryEntry),
 	}
 	for block := uint64(0); block <= lastBlock; block++ {
 		state.Canonical[block], err = rawdb.ReadCanonicalHash(tx, block)
@@ -370,56 +366,16 @@ func readCrashRecoveryTx(t *testing.T, tx kv.TemporalTx) crashRecoveryState {
 	require.NotNil(t, header)
 	require.Equal(t, header.Root, state.StateRoot, "persisted commitment root must match its canonical header")
 	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain, kv.CommitmentDomain, kv.ReceiptDomain, kv.RCacheDomain} {
-		state.Domains[domain] = readCrashRecoveryDomain(t, tx, domain)
+		state.Domains[domain] = temporaltest.ReadDomain(t, tx, domain)
 	}
 	require.NoError(t, tx.ForEach(kv.TxLookup, nil, func(key, value []byte) error {
 		state.TxLookup[hex.EncodeToString(key)] = hex.EncodeToString(value)
 		return nil
 	}))
 	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain, kv.ReceiptDomain, kv.RCacheDomain} {
-		state.History[domain] = readCrashRecoveryHistory(t, tx, domain)
+		state.History[domain] = temporaltest.ReadHistory(t, tx, domain)
 	}
 	return state
-}
-
-func readCrashRecoveryDomain(t *testing.T, tx kv.TemporalTx, domain kv.Domain) map[string]string {
-	t.Helper()
-	entries, err := tx.Debug().RangeLatest(domain, nil, nil, kv.Unlim)
-	require.NoError(t, err)
-	defer entries.Close()
-	state := make(map[string]string)
-	for entries.HasNext() {
-		key, value, nextErr := entries.Next()
-		require.NoError(t, nextErr)
-		if len(value) != 0 {
-			state[hex.EncodeToString(key)] = hex.EncodeToString(value)
-		}
-	}
-	entries.Close()
-	return state
-}
-
-func readCrashRecoveryHistory(t *testing.T, tx kv.TemporalTx, domain kv.Domain) []crashRecoveryHistoryEntry {
-	t.Helper()
-	// An unbounded scan also catches history left above the recovered head.
-	entries, err := tx.Debug().HistoryKeyTxNumRange(domain, -1, -1, order.Asc, kv.Unlim)
-	require.NoError(t, err)
-	defer entries.Close()
-	var history []crashRecoveryHistoryEntry
-	for entries.HasNext() {
-		key, txNum, nextErr := entries.Next()
-		require.NoError(t, nextErr)
-		before, ok, readErr := tx.HistorySeek(domain, key, txNum)
-		require.NoError(t, readErr)
-		require.True(t, ok, "history index must have a matching value")
-		history = append(history, crashRecoveryHistoryEntry{
-			Key:    hex.EncodeToString(key),
-			TxNum:  txNum,
-			Before: hex.EncodeToString(before),
-		})
-	}
-	entries.Close()
-	return history
 }
 
 func assertCrashRecoveryState(t *testing.T, want, got crashRecoveryState) {
@@ -505,8 +461,17 @@ func runUnwindCrashChild(t *testing.T) {
 	transitions := newStateTransitionController()
 	clientTimeout := time.Until(request.Deadline)
 	require.Positive(t, clientTimeout)
+	var startupBoundary *stateTransitionHold
+	if request.StartupCycle > 0 {
+		seen := 0
+		startupBoundary = transitions.holdMatching(t, request.Point, 1, func(context.Context) bool {
+			seen++
+			return seen == request.StartupCycle
+		})
+		t.Cleanup(func() { os.Exit(crashRecoveryFailureExitCode) })
+	}
 	// Node lifetime belongs to the process. Test cancellation must not release
-	// a pre-commit barrier and let shutdown persist the parked FCU.
+	// a pre-commit barrier and let shutdown persist the parked transaction.
 	eat, err := engineapitester.InitialiseEngineApiTester(context.Background(), engineapitester.EngineApiTesterInitArgs{
 		Logger:                  testlog.Logger(t, log.LvlError),
 		DataDir:                 request.DataDir,
@@ -516,7 +481,7 @@ func runUnwindCrashChild(t *testing.T) {
 		EngineApiClientTimeout:  &clientTimeout,
 		StateTransitionObserver: transitions.observe,
 		EthConfigTweaker: func(config *ethconfig.Config) {
-			if request.CatchupCycle > 0 {
+			if request.CatchupCycle > 0 || request.StartupCycle > 0 {
 				configureCatchupCrashRecovery(config)
 			} else {
 				configureCrashRecovery(config)
@@ -525,6 +490,11 @@ func runUnwindCrashChild(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
+	if startupBoundary != nil {
+		require.NoError(t, waitCrashRecoveryTransition(ctx, startupBoundary, nil, true), "startup cycle %d", request.StartupCycle)
+		waitForCrashKill(t, ctx, request.ControlAddress, request.Deadline, int(startupBoundary.point))
+		return
+	}
 	startForkchoice := func(head common.Hash) <-chan error {
 		response := make(chan error, 1)
 		go func() {
@@ -636,41 +606,60 @@ func crashRecoveryExitError(err error) error {
 	return fmt.Errorf("child exited without the expected kill: %w", err)
 }
 
-func (request crashRecoveryRequest) validateMode() error {
+func (request crashRecoveryRequest) validate() error {
+	if request.StartupCycle < 0 {
+		return errors.New("startup cycle must not be negative")
+	}
+	if request.StartupCycle > 0 {
+		if request.CatchupCycle != 0 || len(request.Canonical)+len(request.Replacement)+len(request.Downloaded) != 0 {
+			return errors.New("startup recovery must use the existing datadir without importing blocks")
+		}
+		if request.Point != execmodule.StateTransitionStartupCommitReady && request.Point != execmodule.StateTransitionStartupCommitComplete {
+			return fmt.Errorf("startup recovery requires a startup commit boundary, got %d", request.Point)
+		}
+		return nil
+	}
 	if request.CatchupCycle < 0 {
 		return errors.New("catch-up cycle must not be negative")
+	}
+	if len(request.Canonical) == 0 {
+		return errors.New("forkchoice crash requests require canonical blocks")
 	}
 	if request.CatchupCycle > 0 {
 		if request.Point != execmodule.StateTransitionFCUCatchupCommitReady && request.Point != execmodule.StateTransitionFCUCatchupCommitComplete {
 			return fmt.Errorf("catch-up mode requires a catch-up commit boundary, got %d", request.Point)
 		}
-	} else {
-		switch request.Point {
-		case execmodule.StateTransitionUnwindComplete, execmodule.StateTransitionOverlayPublished,
-			execmodule.StateTransitionCommitReady, execmodule.StateTransitionCommitComplete, execmodule.StateTransitionOverlayCleared:
-		default:
-			return fmt.Errorf("tip mode requires a tip FCU boundary, got %d", request.Point)
+		if len(request.Replacement) > 0 {
+			return errors.New("catch-up imports use only the downloaded blocks")
 		}
-		if len(request.Downloaded) > 0 {
-			return errors.New("tip-mode crash requests must not include downloaded blocks")
+		if len(request.Downloaded) == 0 {
+			return errors.New("catch-up crash requests require downloaded blocks")
 		}
+		return nil
+	}
+	switch request.Point {
+	case execmodule.StateTransitionUnwindComplete, execmodule.StateTransitionOverlayPublished,
+		execmodule.StateTransitionCommitReady, execmodule.StateTransitionCommitComplete, execmodule.StateTransitionOverlayCleared:
+	default:
+		return fmt.Errorf("tip mode requires a tip FCU boundary, got %d", request.Point)
+	}
+	if len(request.Downloaded) > 0 {
+		return errors.New("tip-mode crash requests must not include downloaded blocks")
+	}
+	if len(request.Replacement) == 0 {
+		return errors.New("tip-mode crash requests require replacement blocks")
+	}
+	canonicalHead := request.Canonical[len(request.Canonical)-1].ExecutionPayload.BlockNumber
+	replacementHead := request.Replacement[len(request.Replacement)-1].ExecutionPayload.BlockNumber
+	if replacementHead > canonicalHead {
+		return fmt.Errorf("replacement FCU must stay in tip mode: head %d exceeds canonical head %d", replacementHead, canonicalHead)
 	}
 	return nil
 }
 
 func killAtUnwindBoundary(t *testing.T, request crashRecoveryRequest) {
 	t.Helper()
-	require.NoError(t, request.validateMode())
-	require.NotEmpty(t, request.Canonical)
-	canonicalHead := request.Canonical[len(request.Canonical)-1].ExecutionPayload.BlockNumber
-	if request.CatchupCycle > 0 {
-		require.Empty(t, request.Replacement, "catch-up imports use only the downloaded blocks")
-		require.NotEmpty(t, request.Downloaded)
-	} else {
-		require.NotEmpty(t, request.Replacement)
-		replacementHead := request.Replacement[len(request.Replacement)-1].ExecutionPayload.BlockNumber
-		require.LessOrEqual(t, replacementHead, canonicalHead, "the replacement FCU must stay in tip mode, without catch-up commits")
-	}
+	require.NoError(t, request.validate())
 	killAtCrashBoundary(t, "TestEngineApiCrashRecovery", unwindCrashChild, int(request.Point), func(address string, deadline time.Time) any {
 		request.ControlAddress, request.Deadline = address, deadline
 		return request

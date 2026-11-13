@@ -90,14 +90,8 @@ func recordTx(vm *state.VersionMap, blockNum uint64, blockHash common.Hash, txNu
 	return &txResult{blockNum: blockNum, blockHash: blockHash, txNum: txNum, rules: rules, writes: writes, versionMap: vm}
 }
 
-// TestHandleMessage_StepBoundaryCheckpointMidBlock pins the parallel-exec
-// step-boundary commitment bug: a block whose txNum range straddles a step
-// edge must leave a commitment checkpoint at that edge, otherwise the step's
-// commitment .kv lags its account/storage domain .kv. The calculator runs in
-// pure batch mode (no per-block compute), so without the step-boundary hook in
-// handleMessage's txResult case NO commitment state is written at the mid-block
-// step edge: the checkpoint never advances to stepEnd and no step-0 branches
-// are produced to verify against the account domain written through that step.
+// A step edge inside an unfinished block must already have a commitment
+// checkpoint matching its account/storage state, regardless of batching mode.
 func TestHandleMessage_StepBoundaryCheckpointMidBlock(t *testing.T) {
 	ctx := context.Background()
 	logger := log.New()
@@ -111,9 +105,8 @@ func TestHandleMessage_StepBoundaryCheckpointMidBlock(t *testing.T) {
 	require.NoError(t, err)
 
 	// Block 1: txNums 1..10, fully before the step-0 edge (txNum 15).
-	// Block 2: txNums 11..20, straddling the edge at txNum 15.
+	// Block 2 reaches the step edge before its block-end result arrives.
 	const block1End = uint64(10)
-	const block2End = uint64(20)
 	const stepEdgeTxNum = stepSize - 1 // 15, where (txNum+1)%stepSize==0
 
 	rnd := rand.New(rand.NewSource(42))
@@ -128,9 +121,7 @@ func TestHandleMessage_StepBoundaryCheckpointMidBlock(t *testing.T) {
 		acc := accounts.Account{Nonce: txNum, Balance: bal, CodeHash: accounts.EmptyCodeHash}
 		buf := accounts.SerialiseV3(&acc)
 		require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addrBytes, buf, txNum, nil))
-		if txNum <= stepEdgeTxNum {
-			accountValues[string(addrBytes)] = buf
-		}
+		accountValues[string(addrBytes)] = buf
 		blockNum, vm := uint64(1), vm1
 		if txNum > block1End {
 			blockNum, vm = 2, vm2
@@ -143,16 +134,13 @@ func TestHandleMessage_StepBoundaryCheckpointMidBlock(t *testing.T) {
 	}
 	cc.handleMessage(ctx, &blockResult{BlockNum: 1, BlockHash: common.Hash{0x01}, lastTxNum: block1End})
 
-	for txNum := block1End + 1; txNum <= block2End; txNum++ {
+	for txNum := block1End + 1; txNum <= stepEdgeTxNum; txNum++ {
 		writeAccount(txNum)
 	}
-	cc.handleMessage(ctx, &blockResult{BlockNum: 2, BlockHash: common.Hash{0x02}, lastTxNum: block2End})
 
 	cc.Stop()
 
-	// Batch mode computes commitment only on an explicit request, which this
-	// stream never sends; the sole writer of a checkpoint is the step-boundary
-	// hook at txNum 15, so the latest checkpoint must decode to that edge.
+	// Read before the block end can replace this checkpoint with a later one.
 	stateBlob, _, err := doms.GetLatest(kv.CommitmentDomain, tx, commitmentdb.KeyCommitmentState)
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, len(stateBlob), 16,

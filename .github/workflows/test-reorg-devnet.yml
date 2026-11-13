@@ -1,0 +1,82 @@
+name: Consensus reorg recovery
+
+on:
+  schedule:
+    - cron: '30 3 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  reorg:
+    if: github.repository == 'erigontech/erigon' || github.event_name != 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Docker Hub login
+        if: github.repository == 'erigontech/erigon' && github.actor != 'dependabot[bot]'
+        continue-on-error: true
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_PULL_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_PULL_TOKEN }}
+      - uses: ./.github/actions/setup-kurtosis
+        with:
+          version: '1.22.2'
+      - uses: docker/setup-buildx-action@v4
+      - name: Build Erigon
+        timeout-minutes: 20
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: test/erigon:current
+          build-args: BINARIES=erigon
+          cache-from: type=gha,scope=reorg-devnet
+          cache-to: type=gha,scope=reorg-devnet,mode=max
+      - name: Test devnet driver
+        run: make test-reorg-devnet-driver
+      - name: Bounce, heal and restart
+        timeout-minutes: 60
+        run: make test-reorg-devnet
+      - name: Collect enclave logs
+        timeout-minutes: 3
+        if: always()
+        continue-on-error: true
+        run: kurtosis enclave dump unwind-reorg ./reorg-logs
+      - uses: actions/upload-artifact@v7
+        timeout-minutes: 3
+        if: always()
+        with:
+          name: reorg-devnet-logs
+          path: reorg-logs
+      - name: Remove test enclave
+        timeout-minutes: 3
+        if: always()
+        run: kurtosis enclave rm -f unwind-reorg
+
+  notify:
+    needs: reorg
+    if: ${{ always() && github.event_name == 'schedule' && (needs.reorg.result == 'failure' || needs.reorg.result == 'cancelled') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Notify Discord on scheduled failure
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [ -z "${DISCORD_WEBHOOK:-}" ]; then
+            echo "::warning::DISCORD_WEBHOOK is not configured; see this failed run."
+            exit 0
+          fi
+          payload=$(jq -nc --arg url "$RUN_URL" '{content: ("Consensus reorg recovery failed: " + $url)}')
+          curl --max-time 30 -fsS -H 'Content-Type: application/json' -d "$payload" "$DISCORD_WEBHOOK"

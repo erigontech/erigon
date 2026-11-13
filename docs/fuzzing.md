@@ -78,6 +78,23 @@ go test ./db/seg/ -run '^FuzzCompress$'
 
 ## Nightly CI
 
+`TestEngineApiReorgSchedules` generates bounded schedules of extension, branch
+changes, fork bounces, restart, pruning and invalid payloads. It compares every
+resulting head with a branch executed without reorgs, including state, history,
+canonical metadata and transaction indexes. Fixed schedules run in
+`make test-unwind`; the nightly workflow runs 100 additional seeds.
+
+These node integration tests use a seeded generator because file builds and
+restarts can exceed Go's native fuzz worker limit of ten seconds per input.
+The failing subtest name contains its seed. Replay it with:
+
+```bash
+ERIGON_REORG_SEED=123 go test ./execution/engineapi -run '^TestEngineApiReorgSchedules$/seed_123$' -count=1 -timeout=10m
+```
+
+Set `ERIGON_REORG_CASES` to test more consecutive seeds, starting at
+`ERIGON_REORG_SEED`.
+
 [`.github/workflows/test-fuzz.yml`](../.github/workflows/test-fuzz.yml) runs
 every target nightly (03:00 UTC) on a free GitHub-hosted runner, each for a
 short `fuzztime`, with a per-target corpus kept for 30 days as a `fuzz-corpus-<target>`

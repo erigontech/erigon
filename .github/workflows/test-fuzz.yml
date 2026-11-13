@@ -207,17 +207,72 @@ jobs:
           if-no-files-found: ignore
           overwrite: true
 
+  reorg:
+    if: github.repository == 'erigontech/erigon' || github.event_name != 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-erigon
+        with:
+          build-cache-extra-key: reorg-schedules
+      - name: Run seeded reorg schedules
+        timeout-minutes: 30
+        env:
+          SEED_BASE: ${{ github.run_id }}
+          SHARD: ${{ matrix.shard }}
+          ERIGON_REORG_CASES: '25'
+        run: |
+          export ERIGON_REORG_SEED=$((SEED_BASE + SHARD * ERIGON_REORG_CASES))
+          make test-reorg-schedules 2>&1 | tee reorg-schedules.log
+      - name: Record failure
+        if: failure()
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: |
+          python3 - <<'PYTHON'
+          import os, pathlib, re
+          log = pathlib.Path("reorg-schedules.log")
+          failures = sorted(set(re.findall(r"--- FAIL: TestEngineApiReorgSchedules/(seed_\d+)", log.read_text()))) if log.exists() else []
+          directory = pathlib.Path("fuzz-failure")
+          directory.mkdir(exist_ok=True)
+          rows = [f"engine-reorg-{os.environ['SHARD']}\texecution/engineapi\tTestEngineApiReorgSchedules/{seed}\tseed\n" for seed in failures]
+          if not rows:
+              rows = [f"engine-reorg-{os.environ['SHARD']}\texecution/engineapi\tTestEngineApiReorgSchedules\tno-reproducer\n"]
+          (directory / f"engine-reorg-{os.environ['SHARD']}.tsv").write_text("".join(rows))
+          PYTHON
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: reorg-schedules-log-${{ matrix.shard }}
+          path: reorg-schedules.log
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: fuzz-failure-engine-reorg-${{ matrix.shard }}
+          path: fuzz-failure/engine-reorg-${{ matrix.shard }}.tsv
+      - uses: ./.github/actions/cleanup-erigon
+        if: always()
+
   notify:
-    needs: [fuzz]
+    needs: [fuzz, reorg]
     # Only alert on scheduled failures: manual/dispatch runs are watched by
     # whoever triggered them. `always()` lets this run despite `fuzz` failing.
-    if: ${{ always() && needs.fuzz.result == 'failure' && github.event_name == 'schedule' }}
+    if: ${{ always() && (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')) && github.event_name == 'schedule' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
       issues: write
     steps:
       - name: Download failure markers
+        continue-on-error: true
         uses: actions/download-artifact@v8
         with:
           pattern: fuzz-failure-*
@@ -231,6 +286,7 @@ jobs:
         run: |
           list=""
           crashes=0
+          seeds=0
           norepro=0
           for f in fuzz-failures/*.tsv; do
             [ -e "$f" ] || continue
@@ -238,6 +294,10 @@ jobs:
               if [ "$kind" = crash ]; then
                 list="${list}- \`${name}\` — ${fn} (${pkg}): **crash, reproducer attached** (artifact \`fuzz-crash-${name}\`)"$'\n'
                 crashes=$((crashes + 1))
+              elif [ "$kind" = seed ]; then
+                seed=${fn##*/seed_}
+                list="${list}- \`${name}\` — ${fn} (${pkg}): replay with \`ERIGON_REORG_SEED=${seed} make test-reorg-schedules\`"$'\n'
+                seeds=$((seeds + 1))
               else
                 list="${list}- \`${name}\` — ${fn} (${pkg}): **failed without a reproducer** — read the step log"$'\n'
                 norepro=$((norepro + 1))
@@ -250,6 +310,7 @@ jobs:
             printf '%s' "$list"
             echo "MARKERS_EOF"
             echo "crashes=$crashes"
+            echo "seeds=$seeds"
             echo "norepro=$norepro"
           } >> "$GITHUB_OUTPUT"
 
@@ -272,7 +333,8 @@ jobs:
           Failed targets:
           ${FAILED_LIST}
           Legs marked **crash** have a minimized reproducer uploaded as a
-          \`fuzz-crash-<target>\` artifact on the run. Legs with **no reproducer**
+          \`fuzz-crash-<target>\` artifact on the run. Seeded reorg failures include
+          their replay command above. Legs with **no reproducer**
           failed some other way — a failing seed corpus entry, a build error, the
           runner running out of memory — and the step log says which.
 
@@ -302,15 +364,16 @@ jobs:
           ISSUE_URL: ${{ steps.issue.outputs.url }}
           FAILED_LIST: ${{ steps.summary.outputs.list }}
           CRASHES: ${{ steps.summary.outputs.crashes }}
+          SEEDS: ${{ steps.summary.outputs.seeds }}
           NOREPRO: ${{ steps.summary.outputs.norepro }}
         run: |
-          echo "::notice title=Nightly fuzz tracking issue::${ISSUE_URL} — ${CRASHES} crash(es), ${NOREPRO} no-reproducer leg(s). See job summary for the target list."
+          echo "::notice title=Nightly fuzz tracking issue::${ISSUE_URL} — ${CRASHES} crash(es), ${SEEDS} failing seed(s), ${NOREPRO} no-reproducer leg(s). See job summary for the target list."
           {
             echo "## Nightly fuzz failure"
             echo ""
             echo "Tracking issue: ${ISSUE_URL}"
             echo ""
-            echo "Crashes: ${CRASHES} · no reproducer: ${NOREPRO}"
+            echo "Crashes: ${CRASHES} · failing seeds: ${SEEDS} · no reproducer: ${NOREPRO}"
             echo ""
             echo "### Failed targets"
             echo ""
@@ -318,19 +381,21 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Notify Discord
+        if: always()
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           ISSUE_URL: ${{ steps.issue.outputs.url }}
           CRASHES: ${{ steps.summary.outputs.crashes }}
+          SEEDS: ${{ steps.summary.outputs.seeds }}
           NOREPRO: ${{ steps.summary.outputs.norepro }}
         run: |
           if [ -z "${DISCORD_WEBHOOK:-}" ]; then
             echo "DISCORD_WEBHOOK not set — skipping Discord notification."
             exit 0
           fi
-          msg=":x: **Nightly fuzz failure** — ${CRASHES} crash(es), ${NOREPRO} no-reproducer leg(s).\nRun: ${RUN_URL}\nIssue: ${ISSUE_URL}\nReproducers are uploaded as \`fuzz-crash-*\` artifacts."
+          msg=":x: **Nightly fuzz failure** — ${CRASHES} crash(es), ${SEEDS} failing seed(s), ${NOREPRO} no-reproducer leg(s).\nRun: ${RUN_URL}\nIssue: ${ISSUE_URL}\nSee the run summary for reproducer artifacts and seed replay commands."
           payload=$(printf '{"content": "%s"}' "$msg")
-          curl -sS -f -H "Content-Type: application/json" -d "$payload" "$DISCORD_WEBHOOK" \
+          curl --max-time 30 -sS -f -H "Content-Type: application/json" -d "$payload" "$DISCORD_WEBHOOK" \
             && echo "Discord notified." \
             || echo "::warning::Discord notification failed (webhook unreachable or invalid)."

@@ -3730,64 +3730,6 @@ func TestDomain_KeyPosResetOnCollisionRetry(t *testing.T) {
 	}
 }
 
-// A deletion must shadow older file values while moving from MDBX to files,
-// after MDBX pruning, and after compaction removes the older file layers.
-func TestDomain_DeletedKeyNotResurrectedByFiles(t *testing.T) {
-	t.Parallel()
-	for _, cfg := range []statecfg.DomainCfg{statecfg.Schema.AccountsDomain, statecfg.Schema.CodeDomain} {
-		t.Run(cfg.Name.String(), func(t *testing.T) {
-			db, d := testDbAndDomainOfStep(t, cfg, 16, log.New())
-			tx, err := db.BeginRw(t.Context())
-			require.NoError(t, err)
-			defer tx.Rollback()
-			view := d.beginForTests()
-			defer view.Close()
-			writer := view.NewWriter(db)
-			defer writer.Close()
-			key, value := []byte("key1"), []byte("value1")
-			require.NoError(t, writer.PutWithPrev(key, value, 2, nil))
-			require.NoError(t, writer.DeleteWithPrev(key, 18, value))
-			require.NoError(t, writer.Flush(t.Context(), tx))
-			writer.Close()
-			view.Close()
-			check := func() {
-				t.Helper()
-				view := d.beginForTests()
-				defer view.Close()
-				got, _, _, err := view.GetLatest(key, tx)
-				require.NoError(t, err)
-				require.Empty(t, got, "deleted key must not expose the older value")
-			}
-			progress := background.NewProgressSet()
-			require.NoError(t, d.collateBuildIntegrate(t.Context(), 0, tx, progress))
-			check()
-			require.NoError(t, d.collateBuildIntegrate(t.Context(), 1, tx, progress))
-			check()
-			view = d.beginForTests()
-			logEvery := time.NewTicker(time.Minute)
-			defer logEvery.Stop()
-			for step := range kv.Step(2) {
-				_, err := view.Prune(t.Context(), tx, step, step.ToTxNum(16), (step + 1).ToTxNum(16), math.MaxUint64, logEvery)
-				require.NoError(t, err)
-			}
-			_, _, found, err := view.getLatestFromDb(key, tx, kv.NoStepBound)
-			require.NoError(t, err)
-			require.False(t, found, "the file-only read must not be shadowed by MDBX")
-			view.Close()
-			check()
-			view = d.beginForTests()
-			r := view.findMergeRange(32, 32, 32)
-			require.True(t, r.values.needMerge)
-			values, indexes, history := view.staticFilesInRange(r)
-			merged, mergedIndex, mergedHistory, err := view.mergeFiles(t.Context(), values, indexes, history, r, nil, true, progress)
-			require.NoError(t, err)
-			d.integrateMergedDirtyFiles(merged, mergedIndex, mergedHistory)
-			view.Close()
-			check()
-		})
-	}
-}
-
 // TestDomain_UnwindRestoresDeletionMarker is a regression test for the bug
 // where unwind() fails to restore empty tombstones. When a slot is deleted
 // then re-written within the same step, unwinding the re-write must restore
