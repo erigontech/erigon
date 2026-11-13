@@ -1365,7 +1365,7 @@ type getLatestOptions struct {
 	codeHash    []byte
 	buf         []byte
 	hashFromMem bool
-	unfilled    *bool // non-nil: a fillable miss returns the decoded bytes without filling the cache and sets *unfilled
+	noFill      bool // decode the code into buf and leave the cache as it is
 }
 
 // getLatest is the read implementation. wm is the caller's lock-free
@@ -1474,9 +1474,9 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 	if useBranchCache && !sd.hasLocalCacheUnwind() {
 		getOpts = getOpts.WithBranchCache()
 	}
-	willFill := !sd.hasLocalCacheUnwind() && maxStep == kv.NoStepBound && sd.stateCache != nil && sd.stateCache.Caches(domain)
+	willFill := !opts.noFill && !sd.hasLocalCacheUnwind() && maxStep == kv.NoStepBound && sd.stateCache != nil && sd.stateCache.Caches(domain)
 	fillsCode := willFill && len(opts.codeHash) == len(common.Hash{})
-	if fillsCode {
+	if fillsCode || opts.noFill {
 		getOpts = getOpts.WithBuf(opts.buf)
 	}
 
@@ -1498,8 +1498,6 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 			fillView = fillView.WithFrontier(sd.cacheFrontierFor(tx))
 		}
 		switch {
-		case fillsCode && opts.unfilled != nil:
-			*opts.unfilled = len(v) > 0
 		case fillsCode && opts.hashFromMem:
 			fillView.Fill(domain, k, v, readTxNum)
 			v = bytes.Clone(v)
@@ -1656,9 +1654,9 @@ func (sd *SharedDomains) getCode(tx kv.TemporalTx, view cache.ReadView, addr []b
 
 // codeForSegment returns the code of addr for a segment copy: the code-cache bytes on a hit, else a
 // decode into buf that does not fill the cache. ok is false when the in-memory batch holds the code
-// or the read cannot fill.
+// or the account has none.
 func (sd *SharedDomains) codeForSegment(tx kv.TemporalTx, view cache.ReadView, addr []byte, txNum uint64, buf []byte, memo *accounts.Code) (code []byte, ok bool, err error) {
-	if tx == nil || sd.stateCache == nil {
+	if tx == nil {
 		return nil, false, nil
 	}
 	codeHash := sd.codeHashForAddr(tx, view, addr, txNum)
@@ -1672,8 +1670,8 @@ func (sd *SharedDomains) codeForSegment(tx kv.TemporalTx, view cache.ReadView, a
 		return memo.Bytes, true, nil
 	}
 	memo.Bytes = nil // a failed decode may leave buf half written
-	v, _, err := sd.getLatest(kv.CodeDomain, tx, addr, nil, time.Time{}, kv.NoStepBound, view, getLatestOptions{codeHash: codeHash, buf: buf, unfilled: &ok})
-	if err != nil || !ok {
+	v, _, err := sd.getLatest(kv.CodeDomain, tx, addr, nil, time.Time{}, kv.NoStepBound, view, getLatestOptions{codeHash: codeHash, buf: buf, noFill: true})
+	if err != nil || len(v) == 0 {
 		return nil, false, err
 	}
 	memo.Bytes = v

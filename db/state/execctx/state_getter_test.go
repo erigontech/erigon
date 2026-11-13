@@ -832,6 +832,36 @@ func TestStateGetterCodeSegmentLeavesTheCacheEmpty(t *testing.T) {
 	require.Len(t, lentCaps, decodes, "a cache hit must not decode")
 }
 
+// Without a bound state cache the segment copy still works: it decodes into the caller's buffer.
+func TestStateGetterCodeSegmentWorksWithoutAStateCache(t *testing.T) {
+	ctx := t.Context()
+	db := newTestDb(t, 16)
+	addr := make([]byte, 20)
+	addr[0] = 0x1b
+	code := bytes.Repeat([]byte{0x1b}, 1024)
+	commitAccount(t, db, nil, addr, accounts.SerialiseV3(&accounts.Account{Nonce: 1, CodeHash: accounts.InternCodeHash(crypto.Keccak256Hash(code))}), 1)
+
+	roTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	var lentCaps []int
+	tx := codeBufTx{TemporalTx: roTx, code: map[string][]byte{string(addr): code}, lentCaps: &lentCaps}
+	sd, err := execctx.NewSharedDomains(ctx, tx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+
+	var buf []byte
+	borrower := sd.AsStateGetter(tx, execctxapi.StateGetterOptions{}.WithCodeBuf(&buf)).(interface {
+		ReadCodeSegmentTo(addr []byte, txNum, from uint64, dst []byte) (bool, error)
+	})
+	got := make([]byte, len(code))
+	borrowed, err := borrower.ReadCodeSegmentTo(addr, 5, 0, got)
+	require.NoError(t, err)
+	require.True(t, borrowed, "the segment copy must not need a state cache")
+	require.Equal(t, code, got)
+	require.Len(t, lentCaps, 1, "the decode goes into the caller's buffer")
+}
+
 func TestStateGetterCodeSegmentRefusesAnAccountWrittenInTheBatch(t *testing.T) {
 	ctx := t.Context()
 	db := newTestDb(t, 16)
