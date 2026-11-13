@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/maphash"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/grpcutil"
@@ -971,6 +972,11 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentryproto.Sen
 				seenNewBlocks = newBlocks
 			}
 			if _, seen := seenLRU.Get(req.Data); seen {
+				// A repeated blob broadcast from another peer is still a protocol violation.
+				if req.Id == sentryproto.MessageId_TRANSACTIONS_66 && hasBlobTxn(req.Data) {
+					f.logger.Debug("[txpool] penalizing peer for broadcast blob tx", "peer", req.PeerId)
+					f.penalizePeer(streamCtx, sentryClient, req.PeerId)
+				}
 				if f.wg != nil {
 					f.wg.Done()
 				}
@@ -1119,6 +1125,11 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 		txns := TxnSlots{}
 		switch req.Id {
 		case sentryproto.MessageId_TRANSACTIONS_66:
+			if hasBlobTxn(req.Data) {
+				f.logger.Debug("[txpool] penalizing peer for broadcast blob tx", "peer", req.PeerId)
+				f.penalizePeer(ctx, sentryClient, req.PeerId)
+				return nil
+			}
 			if err := f.threadSafeParsePooledTxn(func(parseContext *TxnParseContext) error {
 				if _, err := ParseTransactions(req.Data, 0, parseContext, &txns, func(hash []byte) error {
 					known, err := f.pool.IdHashKnown(tx, hash)
@@ -1169,9 +1180,7 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 		}
 		// Post-parse peer-behaviour checks. checkPooledTxnAnnouncement only
 		// applies to the POOLED_TRANSACTIONS_66 (pull) path since TRANSACTIONS_66
-		// has no prior announcement to compare against; checkBlobSidecar applies
-		// to both because a peer can ship a blob-tx wrapper with mismatched
-		// commitments via either message and must be kicked either way.
+		// has no prior announcement to compare against.
 		for i := range txns.Txns {
 			if req.Id == sentryproto.MessageId_POOLED_TRANSACTIONS_66 {
 				if err := f.checkPooledTxnAnnouncement(req.PeerId, txns.Txns[i]); err != nil {
@@ -1195,6 +1204,72 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 	}
 
 	return nil
+}
+
+// frameTxnBodyFields is the number of fields in a bare frame transaction body:
+// chain id, nonce, sender, frames, max priority fee, max fee, max fee per blob
+// gas and blob versioned hashes.
+const frameTxnBodyFields = 8
+
+// hasBlobTxn reports whether a Transactions payload contains a blob transaction
+// or a frame transaction that carries blobs, wrapped or bare. Malformed payloads, and payloads
+// over maxTransactionsPerPacket, report false and are left to the regular parser.
+func hasBlobTxn(payload []byte) bool {
+	pos, _, err := rlp.ParseList(payload, 0)
+	if err != nil {
+		return false
+	}
+	for count := 0; pos < len(payload); count++ {
+		if count == maxTransactionsPerPacket {
+			return false
+		}
+		dataPos, dataLen, isList, err := rlp.Prefix(payload, pos)
+		if err != nil {
+			return false
+		}
+		if !isList && dataPos > pos && dataLen > 0 && isBlobEnvelope(payload[dataPos:dataPos+dataLen]) {
+			return true
+		}
+		pos = dataPos + dataLen
+	}
+	return false
+}
+
+// isBlobEnvelope reports whether a typed transaction envelope carries blobs:
+// any type-3 transaction, or a frame transaction that is either wrapped (its
+// first list element is the inner body, as in ParseTransaction's frame wrapper
+// check) or bare with a nonempty BlobVersionedHashes, its last body field.
+func isBlobEnvelope(txBytes []byte) bool {
+	switch txBytes[0] {
+	case BlobTxnType:
+		return true
+	case FrameTxnType:
+		bodyPos, bodyLen, err := rlp.ParseList(txBytes, 1)
+		if err != nil || bodyLen == 0 {
+			return false
+		}
+		if txBytes[bodyPos] >= 0xc0 {
+			return true
+		}
+		var lastLen int
+		var lastIsList bool
+		fields := 0
+		for pos, end := bodyPos, bodyPos+bodyLen; pos < end; fields++ {
+			// A bare frame body has exactly frameTxnBodyFields fields; leave
+			// anything longer to the regular parser.
+			if fields == frameTxnBodyFields {
+				return false
+			}
+			dataPos, dataLen, isList, err := rlp.Prefix(txBytes, pos)
+			if err != nil {
+				return false
+			}
+			lastLen, lastIsList = dataLen, isList
+			pos = dataPos + dataLen
+		}
+		return lastIsList && lastLen > 0
+	}
+	return false
 }
 
 func (f *Fetch) receivePeerLoop(sentryClient sentryproto.SentryClient) {

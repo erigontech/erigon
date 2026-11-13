@@ -33,12 +33,14 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/maphash"
@@ -1355,6 +1357,138 @@ func TestFetchSerializesBatchFlushes(t *testing.T) {
 		messages <- nil
 		require.NoError(t, <-done)
 	})
+}
+
+func makeWrappedFrameBlobTxnRlp(t *testing.T) []byte {
+	frame := framePoolSlot(t, common.Address{1}, 1, 2).Txn.(*types.FrameTransaction)
+	frame.BlobVersionedHashes = []common.Hash{{1}}
+	wrapped := &types.FrameTxWrapper{FrameTransaction: frame, WrapperVersion: 1, Blobs: types.Blobs{{}}, Commitments: types.BlobKzgs{{}}, Proofs: make(types.KZGProofs, 128)}
+	var encoded bytes.Buffer
+	require.NoError(t, wrapped.MarshalBinaryWrapped(&encoded))
+	return encoded.Bytes()
+}
+
+func makeBareFrameBlobTxnRlp(t *testing.T) []byte {
+	frame := framePoolSlot(t, common.Address{1}, 1, 2).Txn.(*types.FrameTransaction)
+	frame.BlobVersionedHashes = []common.Hash{{1}}
+	var encoded bytes.Buffer
+	require.NoError(t, frame.MarshalBinary(&encoded))
+	return encoded.Bytes()
+}
+
+func TestHasBlobTxnBareFrame(t *testing.T) {
+	frame := framePoolSlot(t, common.Address{1}, 1, 2).Txn.(*types.FrameTransaction)
+	frame.BlobVersionedHashes = nil
+	var plain bytes.Buffer
+	require.NoError(t, frame.MarshalBinary(&plain))
+	require.False(t, hasBlobTxn(EncodeTransactions([][]byte{plain.Bytes()}, nil)))
+	require.True(t, hasBlobTxn(EncodeTransactions([][]byte{makeBareFrameBlobTxnRlp(t)}, nil)))
+}
+
+func TestHasBlobTxnBareFrameFieldLimit(t *testing.T) {
+	// A type-6 body of many empty strings followed by a nonempty list is not a
+	// valid frame body; the scan must give up instead of walking every field.
+	body := bytes.Repeat([]byte{0x80}, frameTxnBodyFields)
+	body = append(body, 0xc1, 0x01)
+	rlpList := func(b []byte) []byte { return append([]byte{0xc0 + byte(len(b))}, b...) }
+	require.False(t, isBlobEnvelope(append([]byte{FrameTxnType}, rlpList(body)...)))
+	// Exactly frameTxnBodyFields fields with a nonempty last list is a blob frame.
+	body = append(bytes.Repeat([]byte{0x80}, frameTxnBodyFields-1), 0xc1, 0x01)
+	require.True(t, isBlobEnvelope(append([]byte{FrameTxnType}, rlpList(body)...)))
+}
+
+func TestPenalizePeerForBroadcastBlobTxn(t *testing.T) {
+	t.Parallel()
+	for _, kind := range []string{"blob", "frame-blob", "bare-frame-blob"} {
+		for _, known := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/known=%t", kind, known), func(t *testing.T) {
+				t.Parallel()
+				blobTxnRlp := makeWrappedBlobTxnRlpWithCellProofs(t, uint256.NewInt(1), 1)
+				switch kind {
+				case "frame-blob":
+					blobTxnRlp = makeWrappedFrameBlobTxnRlp(t)
+				case "bare-frame-blob":
+					blobTxnRlp = makeBareFrameBlobTxnRlp(t)
+				}
+				testPenalizePeerForBroadcastBlobTxn(t, known, blobTxnRlp)
+			})
+		}
+	}
+}
+
+func TestHasBlobTxnStopsAtTransactionLimit(t *testing.T) {
+	blobTxnRlp := []byte{BlobTxnType, 0xc0} // only the type byte is inspected
+	ordinary := tpEncodeTests[1].txns[0]
+	txns := make([][]byte, maxTransactionsPerPacket, maxTransactionsPerPacket+1)
+	for i := range txns {
+		txns[i] = ordinary
+	}
+	require.True(t, hasBlobTxn(EncodeTransactions(append(txns[:maxTransactionsPerPacket-1:maxTransactionsPerPacket-1], blobTxnRlp), nil)))
+	require.False(t, hasBlobTxn(EncodeTransactions(append(txns, blobTxnRlp), nil)))
+}
+
+func TestPenalizeEveryPeerForDuplicateBroadcastBlobTxn(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		pool := NewMockPool(ctrl)
+		pool.EXPECT().Started().Return(true).AnyTimes()
+		client := sentryproto.NewMockSentryClient(ctrl)
+		secondPeer := gointerfaces.ConvertHashToH512([64]byte{2})
+		client.EXPECT().
+			PenalizePeer(gomock.Any(), gomock.Any()).
+			DoAndReturn(func(_ context.Context, req *sentryproto.PenalizePeerRequest, _ ...grpc.CallOption) (*emptypb.Empty, error) {
+				assert.Equal(t, secondPeer, req.PeerId)
+				assert.Equal(t, sentryproto.PenaltyKind_Kick, req.Penalty)
+				return &emptypb.Empty{}, nil
+			}).
+			Times(1)
+		// No db: the batched first message is dropped unhandled, so only the duplicate path can kick.
+		fetch := NewFetch(t.Context(), nil, pool, nil, nil, u256.N1, log.New())
+		payload := EncodeTransactions([][]byte{makeWrappedBlobTxnRlpWithCellProofs(t, uint256.NewInt(1), 1)}, nil)
+		messages := []*sentryproto.InboundMessage{
+			{Id: sentryproto.MessageId_TRANSACTIONS_66, Data: payload, PeerId: peerID},
+			{Id: sentryproto.MessageId_TRANSACTIONS_66, Data: payload, PeerId: secondPeer},
+		}
+		stream := &boundedBatchStream{recv: func() (*sentryproto.InboundMessage, error) {
+			if len(messages) == 0 {
+				return nil, nil
+			}
+			req := messages[0]
+			messages = messages[1:]
+			return req, nil
+		}}
+		client.EXPECT().Messages(gomock.Any(), gomock.Any(), gomock.Any()).Return(stream, nil)
+		require.NoError(t, fetch.receiveMessage(t.Context(), client))
+	})
+}
+
+func testPenalizePeerForBroadcastBlobTxn(t *testing.T, known bool, blobTxnRlp []byte) {
+	ctx := t.Context()
+
+	ctrl := gomock.NewController(t)
+	sentryServer := sentryproto.NewMockSentryServer(ctrl)
+	pool := NewMockPool(ctrl)
+	pool.EXPECT().Started().Return(true)
+	pool.EXPECT().IdHashKnown(gomock.Any(), gomock.Any()).Return(known, nil).AnyTimes()
+	pool.EXPECT().AddRemoteTxns(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
+	sentryServer.EXPECT().
+		PenalizePeer(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, req *sentryproto.PenalizePeerRequest) (*emptypb.Empty, error) {
+			assert.Equal(t, sentryproto.PenaltyKind_Kick, req.Penalty)
+			return &emptypb.Empty{}, nil
+		}).
+		Times(1)
+
+	sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, NewMockSentry(ctx, sentryServer))
+	require.NoError(t, err)
+	fetch := NewFetch(ctx, []sentryproto.SentryClient{sentryClient}, pool, nil, nil, u256.N1, log.New())
+
+	err = fetch.handleInboundMessageWithTx(ctx, nil, &sentryproto.InboundMessage{
+		Id:     sentryproto.MessageId_TRANSACTIONS_66,
+		Data:   EncodeTransactions([][]byte{tpEncodeTests[1].txns[0], blobTxnRlp}, nil),
+		PeerId: peerID,
+	}, sentryClient)
+	require.NoError(t, err)
 }
 
 func TestAlternateRequestedWhenKnownHashLookupFails(t *testing.T) {
