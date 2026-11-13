@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"math/big"
 	"math/rand"
+	"slices"
 	"sort"
 	"testing"
 	"unsafe"
@@ -1652,6 +1653,61 @@ func TestVersionedIO_PresentAccountClearedDelegationKept(t *testing.T) {
 	bal := io.AsBlockAccessList()
 	require.Len(t, bal, 1)
 	require.Len(t, bal[0].CodeChanges, 1, "\n%s", bal.DebugString())
+}
+
+// Tx 0's removal of the empty authority is flushed during tx 1's first code-hash read, after the
+// read has probed for a destruct. Tx 1 sets and clears the delegation: no code change.
+func TestVersionedIO_RemovalFlushedDuringCodeHashReadEmptyCodeChangeOmitted(t *testing.T) {
+	t.Parallel()
+	authority := accounts.InternAddress(common.HexToAddress("0xc0f6dcc"))
+	delegate := accounts.InternAddress(common.HexToAddress("0xcafe"))
+	empty := accounts.NewAccount()
+	vm := NewVersionMap(types.BlockAccessList{{Address: authority.Value(), NonceChanges: []*types.NonceChange{{Index: 2, Value: 2}}}})
+	ibs := NewWithVersionMap(&emptyAccountReader{addr: authority, acc: &empty}, vm)
+	defer ibs.Close()
+	ibs.SetTxContext(1, 1)
+	removal := &WriteSet{}
+	removal.SetEmptyRemoval(authority, Version{TxIndex: 0})
+	vm.fieldMissHook = func() {
+		vm.fieldMissHook = nil
+		vm.FlushVersionedWrites(removal, true)
+	}
+
+	for i, target := range []accounts.Address{delegate, accounts.ZeroAddress} {
+		codeHash, err := ibs.GetCodeHash(authority)
+		require.NoError(t, err)
+		if i == 0 {
+			require.Nil(t, vm.fieldMissHook, "the flush must land in the first code-hash read")
+		}
+		if !codeHash.IsEmpty() {
+			_, ok, err := ibs.GetDelegatedDesignation(authority)
+			require.NoError(t, err)
+			require.True(t, ok)
+		}
+		nonce, err := ibs.GetNonce(authority)
+		require.NoError(t, err)
+		require.Equal(t, uint64(i), nonce)
+		_, err = ibs.Exist(authority)
+		require.NoError(t, err)
+		var code []byte
+		if target != accounts.ZeroAddress {
+			code = types.AddressToDelegation(target)
+		}
+		require.NoError(t, ibs.SetCode(authority, code, tracing.CodeChangeAuthorization))
+		require.NoError(t, ibs.SetNonce(authority, nonce+1, tracing.NonceChangeAuthorization))
+	}
+	require.Equal(t, VersionValid, validateReads(vm, ibs, 1))
+
+	writes, err := ibs.FinalizedWrites(&chain.Rules{IsSpuriousDragon: true, IsByzantium: true, IsCancun: true, IsPrague: true, IsAmsterdam: true})
+	require.NoError(t, err)
+	io := NewVersionedIO(2)
+	io.RecordReads(Version{TxIndex: 1}, ibs.VersionedReads())
+	io.RecordWrites(Version{TxIndex: 1}, writes)
+	bal := io.AsBlockAccessList()
+	idx := slices.IndexFunc(bal, func(ac types.AccountChanges) bool { return ac.Address == authority.Value() })
+	require.GreaterOrEqual(t, idx, 0, "\n%s", bal.DebugString())
+	require.Equal(t, []*types.NonceChange{{Index: 2, Value: 2}}, bal[idx].NonceChanges, "\n%s", bal.DebugString())
+	require.Empty(t, bal[idx].CodeChanges, "\n%s", bal.DebugString())
 }
 
 func TestVersionedIO_MidBlockEmptyCodeHashReadMustNotDropRealClear(t *testing.T) {
