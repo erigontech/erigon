@@ -124,10 +124,10 @@ func TestStartRetriesIndicesWhileBeaconNodeIsSyncing(t *testing.T) {
 
 func TestStartReturnsOnCancelWhileBeaconNodeIsSyncing(t *testing.T) {
 	var calls atomic.Int32
-	retried := make(chan struct{})
+	requested := make(chan struct{})
 	service, _ := startFixture(t, func(w http.ResponseWriter, _ *ValidatorKey) {
-		if calls.Add(1) == 2 {
-			close(retried)
+		if calls.Add(1) == 1 {
+			close(requested)
 		}
 		http.Error(w, syncingBody, http.StatusServiceUnavailable)
 	})
@@ -136,14 +136,24 @@ func TestStartReturnsOnCancelWhileBeaconNodeIsSyncing(t *testing.T) {
 	defer cancel()
 	done := startService(ctx, service)
 	select {
-	case <-retried:
+	case <-requested:
+	case <-done:
+		t.Fatal("Start returned before requesting the validators")
+	case <-time.After(30 * time.Second):
+		t.Fatal("validators not requested")
+	}
+	// Cancel inside the backoff, once the client has read the 503.
+	select {
 	case <-done:
 		t.Fatal("Start returned while the beacon node was syncing")
-	case <-time.After(30 * time.Second):
-		t.Fatal("validators not requested again while the beacon node was syncing")
+	case <-time.After(headStateRetryInterval / 10):
 	}
 	cancel()
-	waitStopped(t, done)
+	select {
+	case <-done:
+	case <-time.After(headStateRetryInterval / 2):
+		t.Fatal("Start did not return during the retry backoff")
+	}
 }
 
 func TestStartDoesNotRetryValidatorsServerError(t *testing.T) {
