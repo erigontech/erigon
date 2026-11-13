@@ -239,7 +239,6 @@ func TestFetchReconcilesRetainedFrameAfterGap(t *testing.T) {
 					blob := wrapped.(*types.BlobTxWrapper)
 					txn := frame.Txn.(*types.FrameTransaction)
 					txn.BlobVersionedHashes = blob.Tx.BlobVersionedHashes
-					txn.Fees.BlobFeeCap.SetUint64(10)
 					wrapper := &types.FrameTxWrapper{
 						FrameTransaction: txn, WrapperVersion: 1,
 						Blobs: blob.Blobs, Commitments: blob.Commitments, Proofs: blob.Proofs,

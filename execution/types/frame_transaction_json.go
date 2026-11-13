@@ -53,7 +53,7 @@ func (frame *Frame) UnmarshalJSON(input []byte) error {
 	if err := json.Unmarshal(input, &dec); err != nil {
 		return err
 	}
-	if dec.Mode > FramePostTx || dec.Flags >= 8 {
+	if dec.Mode > FrameAssert || dec.Flags >= 8 {
 		return errors.New("invalid frame mode or flags")
 	}
 	*frame = Frame{uint8(dec.Mode), uint8(dec.Flags), dec.Target, mdgas.MdGas{Execution: uint64(dec.GasLimit), State: uint64(dec.StateGasLimit)}, uint256.Int(dec.Value), dec.Data}
@@ -92,8 +92,7 @@ type frameTransactionJSON struct {
 	Frames               []Frame          `json:"frames"`
 	Signatures           []FrameSignature `json:"signatures"`
 	MaxPriorityFeePerGas *hexutil.U256    `json:"maxPriorityFeePerGas"`
-	MaxFeePerGas         *hexutil.U256    `json:"maxFeePerGas"`
-	MaxFeePerBlobGas     *hexutil.U256    `json:"maxFeePerBlobGas"`
+	MaxFee               *hexutil.U256    `json:"maxFee"`
 	BlobVersionedHashes  []common.Hash    `json:"blobVersionedHashes"`
 	Hash                 common.Hash      `json:"hash"`
 }
@@ -103,7 +102,7 @@ func (tx *FrameTransaction) MarshalJSON() ([]byte, error) {
 		Type: FrameTxType, ChainID: (*hexutil.U256)(&tx.ChainID), Nonce: (*hexutil.Uint64)(&tx.Nonce), Sender: &tx.SenderAddress,
 		NonceKeys: tx.NonceKeys,
 		Frames:    tx.Frames, Signatures: tx.Signatures, MaxPriorityFeePerGas: (*hexutil.U256)(&tx.Fees.TipCap),
-		MaxFeePerGas: (*hexutil.U256)(&tx.Fees.FeeCap), MaxFeePerBlobGas: (*hexutil.U256)(&tx.Fees.BlobFeeCap),
+		MaxFee:              (*hexutil.U256)(&tx.Fees.MaxFee),
 		BlobVersionedHashes: tx.BlobVersionedHashes, Hash: tx.Hash(),
 	})
 }
@@ -113,14 +112,14 @@ func (tx *FrameTransaction) UnmarshalJSON(input []byte) error {
 	if err := json.Unmarshal(input, &dec); err != nil {
 		return err
 	}
-	if dec.ChainID == nil || dec.Nonce == nil || dec.Sender == nil || dec.Frames == nil || dec.MaxFeePerGas == nil || dec.MaxPriorityFeePerGas == nil || dec.MaxFeePerBlobGas == nil {
+	if dec.ChainID == nil || dec.NonceKeys == nil || dec.Nonce == nil || dec.Sender == nil || dec.Frames == nil || dec.MaxFee == nil || dec.MaxPriorityFeePerGas == nil {
 		return errors.New("missing required frame transaction field")
 	}
 	*tx = FrameTransaction{
 		ChainID: uint256.Int(*dec.ChainID), Nonce: uint64(*dec.Nonce), SenderAddress: *dec.Sender,
 		NonceKeys: dec.NonceKeys,
 		Frames:    dec.Frames, Signatures: dec.Signatures, BlobVersionedHashes: dec.BlobVersionedHashes,
-		Fees: FrameFees{uint256.Int(*dec.MaxPriorityFeePerGas), uint256.Int(*dec.MaxFeePerGas), uint256.Int(*dec.MaxFeePerBlobGas)},
+		Fees: FrameFees{MaxFee: uint256.Int(*dec.MaxFee), TipCap: uint256.Int(*dec.MaxPriorityFeePerGas)},
 	}
 	return tx.Validate()
 }

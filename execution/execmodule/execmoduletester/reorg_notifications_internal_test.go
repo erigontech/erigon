@@ -350,12 +350,12 @@ func TestReorgCodeRollbackPreservesRecentRoots(t *testing.T) {
 	data := make([]byte, 72)
 	data[0], data[39], data[71] = 1, 1, 2
 	frame := &types.FrameTransaction{
-		NonceKeys: []uint256.Int{{}}, ChainID: *cfg.ChainID, SenderAddress: frameSender,
+		NonceKeys: nil, ChainID: *cfg.ChainID, SenderAddress: frameSender,
 		Frames: []types.Frame{
 			{Mode: types.FrameVerify, Target: &types.FrameRecentRootVerifier, Data: data, Limits: mdgas.MdGas{Execution: 20_000}},
 			{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
 		},
-		Fees: types.FrameFees{FeeCap: *uint256.NewInt(10_000_000_000)},
+		Fees: types.FrameFees{MaxFee: *uint256.NewInt(10_000_000_000)},
 	}
 	refs := protocol.FrameTransactionRecentRoots(frame)
 	require.Len(t, refs, 1)

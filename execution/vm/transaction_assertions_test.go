@@ -17,7 +17,6 @@
 package vm
 
 import (
-	"errors"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -25,8 +24,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/protocol/mdgas"
-	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
@@ -34,65 +31,66 @@ import (
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
-func TestTxDiffChargesBeforeDynamicWork(t *testing.T) {
-	for _, traced := range []bool{false, true} {
-		name := "untraced"
-		if traced {
-			name = "traced"
-		}
-		t.Run(name, func(t *testing.T) {
-			ibs := state.New(state.NewNoopReader())
-			t.Cleanup(ibs.Close)
-			cfg := chain.AllProtocolChanges.Copy()
-			cfg.BogotaTime = common.NewUint64(0)
-			config := Config{}
-			if traced {
-				config.Tracer = &tracing.Hooks{OnOpcode: func(uint64, byte, uint64, uint64, tracing.OpContext, []byte, int, error) {}}
-			}
-			evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, cfg, config)
-			table := *evm.jt
-			evm.jt = &table
-			called := false
-			dynamicGas := table[TXDIFF].dynamicGas
-			table[TXDIFF].dynamicGas = func(evm *EVM, call *CallContext, gas mdgas.MdGas, memory uint64) (mdgas.MdGasCost, error) {
-				called = true
-				return dynamicGas(evm, call, gas, memory)
-			}
-			contract := Contract{Code: []byte{byte(PUSH0), byte(PUSH0), byte(PUSH0), byte(TXDIFF)}}
-			_, _, _, err := evm.Run(contract, mdgas.MdGas{Execution: 3*GasQuickStep + params.WarmStorageReadCostEIP2929 - 1}, nil, true)
-			require.ErrorIs(t, err, ErrOutOfGas)
-			require.False(t, called, "insufficient gas must reject TXDIFF before interning operands")
+func TestTxTraceNonceChanges(t *testing.T) {
+	ibs := state.New(state.NewNoopReader())
+	t.Cleanup(ibs.Close)
+	address := accounts.InternAddress(common.Address{19: 1})
+	require.NoError(t, ibs.SetNonce(address, 7, tracing.NonceChangeUnspecified))
+	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
+	evm.FrameContext = ibs.NewFrameContext(&types.FrameTransaction{Frames: []types.Frame{{Mode: types.FrameAssert}}}, uint256.Int{})
+	require.NoError(t, ibs.SetNonce(address, 8, tracing.NonceChangeUnspecified))
+	for _, test := range []struct {
+		name  string
+		param uint64
+		want  uint256.Int
+	}{
+		{"count", 3, uint256.Int{1}},
+		{"address", 14, uint256.Int{1}},
+		{"before", 15, uint256.Int{7}},
+		{"after", 16, uint256.Int{8}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			call := &CallContext{}
+			call.Stack.push(uint256.Int{})
+			call.Stack.push(uint256.Int{test.param})
+			_, _, err := opTxTrace(0, evm, call)
+			require.NoError(t, err)
+			require.Equal(t, test.want, *call.Stack.peek())
 		})
 	}
 }
 
-func TestTxDiffAccountReadErrors(t *testing.T) {
-	for _, tc := range []struct {
+func TestTxTraceCodeChanges(t *testing.T) {
+	ibs := state.New(state.NewNoopReader())
+	t.Cleanup(ibs.Close)
+	address := accounts.InternAddress(common.Address{19: 1})
+	before, after := []byte{byte(STOP)}, []byte{byte(PUSH0), byte(STOP)}
+	require.NoError(t, ibs.SetCode(address, before, tracing.CodeChangeUnspecified))
+	beforeHash, err := ibs.GetCodeHash(address)
+	require.NoError(t, err)
+	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
+	evm.FrameContext = ibs.NewFrameContext(&types.FrameTransaction{Frames: []types.Frame{{Mode: types.FrameAssert}}}, uint256.Int{})
+	require.NoError(t, ibs.SetCode(address, after, tracing.CodeChangeUnspecified))
+	afterHash, err := ibs.GetCodeHash(address)
+	require.NoError(t, err)
+	beforeValue, afterValue := beforeHash.Value(), afterHash.Value()
+	for _, test := range []struct {
 		name  string
 		param uint64
+		want  uint256.Int
 	}{
-		{"balance before", 2},
-		{"balance after", 3},
-		{"code hash before", 4},
-		{"code hash after", 5},
+		{"count", 2, uint256.Int{1}},
+		{"address", 11, uint256.Int{1}},
+		{"before", 12, *new(uint256.Int).SetBytes(beforeValue[:])},
+		{"after", 13, *new(uint256.Int).SetBytes(afterValue[:])},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			address := common.HexToAddress("0x2000")
-			readErr := errors.New("account read failed")
-			ibs := state.New(beneficiaryErrReader{
-				StateReader: state.NewNoopReader(), fail: accounts.InternAddress(address), err: readErr,
-			})
-			defer ibs.Close()
-			evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
-			evm.FrameContext = ibs.NewFrameContext(&types.FrameTransaction{Frames: []types.Frame{{Mode: types.FramePostTx}}}, uint256.Int{})
+		t.Run(test.name, func(t *testing.T) {
 			call := &CallContext{}
 			call.Stack.push(uint256.Int{})
-			call.Stack.push(*new(uint256.Int).SetBytes(address[:]))
-			call.Stack.push(*uint256.NewInt(tc.param))
-
-			_, _, err := opTxDiff(0, evm, call)
-			require.ErrorIs(t, err, readErr)
-			require.ErrorIs(t, err, ErrIntraBlockStateFailed)
+			call.Stack.push(uint256.Int{test.param})
+			_, _, err := opTxTrace(0, evm, call)
+			require.NoError(t, err)
+			require.Equal(t, test.want, *call.Stack.peek())
 		})
 	}
 }

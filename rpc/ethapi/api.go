@@ -834,7 +834,7 @@ func (r SignTransactionResult) MarshalJSON() ([]byte, error) {
 // RPCTransaction represents a transaction that will serialize to the RPC representation of a transaction.
 // Numeric fields may alias the source transaction; they are read-only after construction.
 type RPCTransaction struct {
-	NonceKeys            types.FrameNonceKeys    `json:"nonceKeys,omitempty" ethjson:"objects"`
+	NonceKeys            *types.FrameNonceKeys   `json:"nonceKeys,omitempty" ethjson:"objects"`
 	Sender               *common.Address         `json:"sender,omitempty" ethjson:"data"`
 	Frames               types.Frames            `json:"frames,omitempty" ethjson:"objects"`
 	Signatures           *types.FrameSignatures  `json:"signatures,omitempty" ethjson:"objects"`
@@ -846,6 +846,7 @@ type RPCTransaction struct {
 	GasPrice             hexutil.U256            `json:"gasPrice" ethjson:"quantity"`
 	MaxPriorityFeePerGas *hexutil.U256           `json:"maxPriorityFeePerGas,omitempty" ethjson:"quantity"`
 	MaxFeePerGas         *hexutil.U256           `json:"maxFeePerGas,omitempty" ethjson:"quantity"`
+	MaxFee               *hexutil.U256           `json:"maxFee,omitempty" ethjson:"quantity"`
 	Hash                 common.Hash             `json:"hash" ethjson:"data"`
 	Input                hexutil.Bytes           `json:"input" ethjson:"data"`
 	Nonce                hexutil.Uint64          `json:"nonce" ethjson:"quantity"`
@@ -937,14 +938,16 @@ func newRPCTransaction(txn types.Transaction, baseFee *uint256.Int) *RPCTransact
 		case types.FrameTxType:
 			frame := txn.(*types.FrameTransaction)
 			result.Sender = &frame.SenderAddress
-			result.NonceKeys = frame.NonceKeys
+			keys := types.FrameNonceKeys(frame.NonceKeys)
+			result.NonceKeys = &keys
 			result.Frames = frame.Frames
 			signatures := types.FrameSignatures(frame.Signatures)
 			if signatures == nil {
 				signatures = types.FrameSignatures{}
 			}
 			result.Signatures = &signatures
-			result.MaxFeePerBlobGas = (*hexutil.U256)(&frame.Fees.BlobFeeCap)
+			result.MaxFeePerGas = nil
+			result.MaxFee = (*hexutil.U256)(&frame.Fees.MaxFee)
 			result.BlobVersionedHashes = frame.BlobVersionedHashes
 			result.Accesses, result.YParity, result.V, result.R, result.S = nil, nil, nil, nil, nil
 		case types.SetCodeTxType:

@@ -505,7 +505,7 @@ func filterBadTransactions(transactions []types.Transaction, chainID *uint256.In
 			}
 		}
 
-		if config.IsLondon(blockNumber) {
+		if config.IsLondon(blockNumber) && !isFrame {
 			baseFee256 := header.BaseFee
 			// Make sure the transaction gasFeeCap is greater than the block's baseFee.
 			if !transaction.GetFeeCap().IsZero() || !transaction.GetTipCap().IsZero() {

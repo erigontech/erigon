@@ -22,6 +22,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -29,7 +30,7 @@ import (
 
 func TestFrameRPCReceipt(t *testing.T) {
 	payer := common.Address{1}
-	tx := &types.FrameTransaction{NonceKeys: []uint256.Int{{}}, SenderAddress: payer, Frames: []types.Frame{{}}}
+	tx := &types.FrameTransaction{NonceKeys: nil, SenderAddress: payer, Frames: []types.Frame{{}}}
 	receipt := &types.Receipt{Type: types.FrameTxType, Payer: &payer, BlockNumber: uint256.NewInt(1), FrameReceipts: []types.FrameReceipt{{Status: 1, Logs: types.Logs{}}}}
 	result := MarshalReceipt(receipt, tx, chain.AllProtocolChanges, &types.Header{Number: *uint256.NewInt(1), BaseFee: uint256.NewInt(0)}, true, false)
 	data, err := json.Marshal(result)
@@ -159,6 +160,26 @@ func TestMarshalReceiptWithoutLogs(t *testing.T) {
 			for _, l := range logs {
 				require.Equal(t, stampedAt(42), l.BlockTimestamp, "the cached log keeps its timestamp")
 			}
+		})
+	}
+}
+
+func TestFrameReceiptEffectiveGasPrice(t *testing.T) {
+	for _, blobs := range []bool{false, true} {
+		t.Run(map[bool]string{false: "unused gas backs tip", true: "blob fee uses budget"}[blobs], func(t *testing.T) {
+			tx := &types.FrameTransaction{Frames: []types.Frame{{Limits: mdgas.MdGas{Execution: 100_000}}}, Fees: types.FrameFees{TipCap: uint256.Int{2}}}
+			header := &types.Header{Number: *uint256.NewInt(1), BaseFee: uint256.NewInt(10)}
+			used, want := uint64(25_000), uint64(12)
+			if blobs {
+				tx.BlobVersionedHashes = []common.Hash{{1}}
+				header.ExcessBlobGas = common.NewUint64(0)
+				used = tx.GetGasLimit()
+				want = 10
+			}
+			tx.Fees.MaxFee.SetUint64(tx.GetGasLimit()*10 + tx.GetBlobGas())
+			receipt := &types.Receipt{Type: types.FrameTxType, BlockNumber: uint256.NewInt(1), GasUsed: used}
+			got := MarshalReceipt(receipt, tx, chain.AllProtocolChanges, header, false, false)
+			require.Equal(t, want, (*uint256.Int)(got.EffectiveGasPrice).Uint64())
 		})
 	}
 }

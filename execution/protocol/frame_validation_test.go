@@ -39,11 +39,12 @@ func TestFrameValidationStopsAfterPayment(t *testing.T) {
 	ibs := evm.IntraBlockState()
 	sender := accounts.InternAddress(tx.SenderAddress)
 	require.NoError(t, ibs.SetCode(sender, []byte{0x60, 3, 0x5f, 0x5f, 0xaa}, tracing.CodeChangeUnspecified))
-	tx.Fees.FeeCap.SetUint64(2)
+	tx.Fees.TipCap.SetUint64(2)
 	tx.Frames = []types.Frame{
 		{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
 		{Mode: types.FrameSender, Limits: mdgas.MdGas{Execution: 10_000}},
 	}
+	tx.Fees.MaxFee.SetUint64(tx.GetGasLimit() * 2)
 	result, err := ValidateFrameTransaction(evm, tx)
 	require.NoError(t, err)
 	require.Equal(t, tx.SenderAddress, result.Payer)

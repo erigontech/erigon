@@ -286,7 +286,7 @@ func TestNewPayloadRejectsMoreTransactionsThanGasLimitAllows(t *testing.T) {
 				txs[i] = &types.LegacyTx{CommonTx: types.CommonTx{Nonce: uint64(i), To: &to, GasLimit: cmp.Or(test.txGasLimit, 21_000)}}
 				if test.frame {
 					txs[i] = &types.FrameTransaction{
-						ChainID: *test.cfg.ChainID, NonceKeys: []uint256.Int{{}}, Nonce: uint64(i), SenderAddress: to,
+						ChainID: *test.cfg.ChainID, NonceKeys: nil, Nonce: uint64(i), SenderAddress: to,
 						Frames: []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000, State: gasLimit}}},
 					}
 				}

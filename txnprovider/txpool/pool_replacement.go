@@ -20,6 +20,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
@@ -81,11 +82,23 @@ func (p *TxPool) checkReplacement(replacement, previous *metaTxn) replacementDec
 // Frame replacements must strictly increase fees, even when the configured
 // percentage would round down to no increase.
 func validateFrameReplacement(previous, replacement *TxnSlot, priceBump, blobPriceBump uint64) txpoolcfg.DiscardReason {
-	if !frameReplacementFee(previous.GetTipCap(), replacement.GetTipCap(), priceBump) || !frameReplacementFee(previous.GetFeeCap(), replacement.GetFeeCap(), priceBump) {
+	oldCap, newCap := previous.GetFeeCap(), replacement.GetFeeCap()
+	oldFrame, oldIsFrame := previous.Txn.(*types.FrameTransaction)
+	newFrame, newIsFrame := replacement.Txn.(*types.FrameTransaction)
+	if oldIsFrame && newIsFrame {
+		oldCap, newCap = &oldFrame.Fees.MaxFee, &newFrame.Fees.MaxFee
+	}
+	if !frameReplacementFee(previous.GetTipCap(), replacement.GetTipCap(), priceBump) || !frameReplacementFee(oldCap, newCap, priceBump) {
 		return txpoolcfg.NotReplaced
 	}
-	if replacement.HasBlobs() && previous.HasBlobs() && !frameReplacementFee(previous.GetBlobFeeCap(), replacement.GetBlobFeeCap(), blobPriceBump) {
-		return txpoolcfg.ReplaceUnderpriced
+	if replacement.HasBlobs() && previous.HasBlobs() {
+		oldBlobCap, newBlobCap := previous.GetBlobFeeCap(), replacement.GetBlobFeeCap()
+		if oldIsFrame && newIsFrame {
+			oldBlobCap, newBlobCap = oldCap, newCap
+		}
+		if !frameReplacementFee(oldBlobCap, newBlobCap, blobPriceBump) {
+			return txpoolcfg.ReplaceUnderpriced
+		}
 	}
 	return txpoolcfg.Success
 }

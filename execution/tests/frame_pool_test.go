@@ -90,8 +90,12 @@ func TestFramePoolConsumedNonceReply(t *testing.T) {
 			frame := &types.FrameTransaction{
 				NonceKeys: []uint256.Int{tc.key}, ChainID: *cfg.ChainID, SenderAddress: sender,
 				Frames: []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}}},
-				Fees:   types.FrameFees{FeeCap: *uint256.NewInt(10_000_000_000)},
+				Fees:   types.FrameFees{MaxFee: *uint256.NewInt(10_000_000_000)},
 			}
+			if tc.key.IsZero() {
+				frame.NonceKeys = nil
+			}
+			frame.Fees.MaxFee.Mul(&frame.Fees.MaxFee, uint256.NewInt(frame.GetGasLimit()))
 			var encoded bytes.Buffer
 			require.NoError(t, frame.MarshalBinary(&encoded))
 			server := txpool.NewGrpcServer(ctx, pool, poolDB, nil, *cfg.ChainID, logger)

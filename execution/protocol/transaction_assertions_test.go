@@ -33,7 +33,7 @@ import (
 	"github.com/erigontech/erigon/execution/vm/program"
 )
 
-func TestPostTxRollback(t *testing.T) {
+func TestAssertRollback(t *testing.T) {
 	t.Parallel()
 	evm, tx := frameTestEnv(t)
 	ibs := evm.IntraBlockState()
@@ -43,13 +43,13 @@ func TestPostTxRollback(t *testing.T) {
 	require.NoError(t, ibs.SetCode(sender, program.New().Push(types.FrameApproveBoth).Push0().Push0().Op(vm.APPROVE).Bytes(), tracing.CodeChangeUnspecified))
 	require.NoError(t, ibs.SetCode(accounts.InternAddress(body), program.New().Sstore(0, 1).Push0().Push0().Op(vm.LOG0).Bytes(), tracing.CodeChangeUnspecified))
 	require.NoError(t, ibs.SetCode(accounts.InternAddress(assertion), program.New().Push0().Push0().Op(vm.REVERT).Bytes(), tracing.CodeChangeUnspecified))
-	tx.Fees.FeeCap.SetUint64(1)
+	tx.Fees.MaxFee.SetUint64(1_000_000)
 	tx.Fees.TipCap.SetUint64(1)
 	tx.Frames = []types.Frame{
 		{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
 		{Mode: types.FrameSender, Target: &body, Limits: mdgas.MdGas{Execution: 20_000, State: params.StateGasPerStorageSet}},
-		{Mode: types.FramePostTx, Target: &assertion, Limits: mdgas.MdGas{Execution: 10_000}},
-		{Mode: types.FramePostTx, Target: &assertion, Limits: mdgas.MdGas{Execution: 10_000}},
+		{Mode: types.FrameAssert, Target: &assertion, Limits: mdgas.MdGas{Execution: 10_000}},
+		{Mode: types.FrameAssert, Target: &assertion, Limits: mdgas.MdGas{Execution: 10_000}},
 	}
 	result, err := applyFrameTest(t, evm, tx)
 	require.NoError(t, err)
@@ -75,17 +75,18 @@ func TestPostTxRollback(t *testing.T) {
 	require.Equal(t, uint256.NewInt(10_000_000-result.ReceiptGasUsed), &balance)
 }
 
-func TestPostTxRollbackPreservesLaterSnapshot(t *testing.T) {
+func TestAssertRollbackPreservesLaterSnapshot(t *testing.T) {
 	evm, tx := frameTestEnv(t)
 	ibs := evm.IntraBlockState()
 	sender := accounts.InternAddress(tx.SenderAddress)
 	assertion := common.HexToAddress("0x3000")
 	require.NoError(t, ibs.SetCode(sender, program.New().Push(types.FrameApproveBoth).Push0().Push0().Op(vm.APPROVE).Bytes(), tracing.CodeChangeUnspecified))
 	require.NoError(t, ibs.SetCode(accounts.InternAddress(assertion), program.New().Push0().Push0().Op(vm.REVERT).Bytes(), tracing.CodeChangeUnspecified))
-	tx.Fees.FeeCap.SetUint64(1)
+	tx.Fees.MaxFee.SetUint64(1_000_000)
+	tx.Fees.TipCap.SetUint64(1)
 	tx.Frames = []types.Frame{
 		{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
-		{Mode: types.FramePostTx, Target: &assertion, Limits: mdgas.MdGas{Execution: 10_000}},
+		{Mode: types.FrameAssert, Target: &assertion, Limits: mdgas.MdGas{Execution: 10_000}},
 	}
 	snapshot := -1
 	ibs.SetHooks(&tracing.Hooks{OnBalanceChange: func(_ accounts.Address, _, _ uint256.Int, reason tracing.BalanceChangeReason) {
@@ -100,7 +101,7 @@ func TestPostTxRollbackPreservesLaterSnapshot(t *testing.T) {
 	require.NotPanics(t, func() { ibs.RevertToSnapshot(snapshot, nil) })
 }
 
-func TestPostTxBalanceTrace(t *testing.T) {
+func TestAssertBalanceTrace(t *testing.T) {
 	t.Parallel()
 	evm, tx := frameTestEnv(t)
 	ibs := evm.IntraBlockState()
@@ -113,7 +114,7 @@ func TestPostTxBalanceTrace(t *testing.T) {
 	tx.Frames = []types.Frame{
 		{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
 		{Mode: types.FrameSender, Target: &target, Value: *uint256.NewInt(5), Limits: mdgas.MdGas{Execution: 20_000, State: params.StateGasNewAccount}},
-		{Mode: types.FramePostTx, Target: &assertion, Limits: mdgas.MdGas{Execution: 10_000}},
+		{Mode: types.FrameAssert, Target: &assertion, Limits: mdgas.MdGas{Execution: 10_000}},
 	}
 	result, err := applyFrameTest(t, evm, tx)
 	require.NoError(t, err)
@@ -123,22 +124,22 @@ func TestPostTxBalanceTrace(t *testing.T) {
 	}
 }
 
-func TestTxDiffValidationErrors(t *testing.T) {
+func TestTxTraceValidationErrors(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
 		mode  uint8
 		index uint64
 		want  error
 	}{
-		{"outside-post-tx", types.FrameSender, 0, vm.ErrFrameContext},
-		{"reserved-input", types.FramePostTx, 1, vm.ErrFrameParameter},
+		{"outside-assert", types.FrameSender, 0, vm.ErrFrameContext},
+		{"reserved-input", types.FrameAssert, 1, vm.ErrFrameParameter},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			evm, tx := frameTestEnv(t)
 			ibs := evm.IntraBlockState()
 			target := common.HexToAddress("0x2000")
 			require.NoError(t, ibs.SetCode(accounts.InternAddress(tx.SenderAddress), program.New().Push(types.FrameApproveBoth).Push0().Push0().Op(vm.APPROVE).Bytes(), tracing.CodeChangeUnspecified))
-			code := program.New().Push(tc.index).Push0().Push(2).Op(vm.TXDIFF, vm.STOP).Bytes()
+			code := program.New().Push(tc.index).Push(2).Op(vm.TXTRACE, vm.STOP).Bytes()
 			require.NoError(t, ibs.SetCode(accounts.InternAddress(target), code, tracing.CodeChangeUnspecified))
 			tx.Frames = []types.Frame{
 				{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
@@ -152,21 +153,17 @@ func TestTxDiffValidationErrors(t *testing.T) {
 	}
 }
 
-func TestPostTxStateReadErrorAbortsTransaction(t *testing.T) {
+func TestAssertStateReadErrorAbortsTransaction(t *testing.T) {
 	target := common.HexToAddress("0x2000")
 	body := common.HexToAddress("0x3000")
 	parent := common.HexToAddress("0x4000")
 	for _, tc := range []struct {
-		name  string
-		op    vm.OpCode
-		args  *program.Program
-		trace bool
+		name string
+		op   vm.OpCode
+		args *program.Program
 	}{
-		{"TXTRACE", vm.TXTRACE, program.New().Push0().Push0(), true},
-		{"TXDIFF trace", vm.TXDIFF, program.New().Push0().Push0().Push(6), true},
-		{"EVENTDATACOPY", vm.EVENTDATACOPY, program.New().Push0().Push0().Push0().Push0(), true},
-		{"TXDIFF storage before", vm.TXDIFF, program.New().Push0().Push(target).Push0(), false},
-		{"TXDIFF storage after", vm.TXDIFF, program.New().Push0().Push(target).Push(1), false},
+		{"TXTRACE", vm.TXTRACE, program.New().Push0().Push0()},
+		{"EVENTDATACOPY", vm.EVENTDATACOPY, program.New().Push0().Push0().Push0().Push0()},
 	} {
 		for _, caller := range []struct {
 			name string
@@ -193,7 +190,7 @@ func TestPostTxStateReadErrorAbortsTransaction(t *testing.T) {
 				tx.Frames = []types.Frame{
 					{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
 					{Mode: types.FrameSender, Target: &body, Limits: mdgas.MdGas{Execution: 20_000, State: params.StateGasPerStorageSet}},
-					{Mode: types.FramePostTx, Target: &frameTarget, Limits: mdgas.MdGas{Execution: 20_000}},
+					{Mode: types.FrameAssert, Target: &frameTarget, Limits: mdgas.MdGas{Execution: 20_000}},
 				}
 
 				var readErr, frameErr error
@@ -203,14 +200,8 @@ func TestPostTxStateReadErrorAbortsTransaction(t *testing.T) {
 						if vm.OpCode(op) != tc.op {
 							return
 						}
-						address := accounts.InternAddress(target)
+						address := accounts.InternAddress(body)
 						key := accounts.InternKey(common.Hash{})
-						if tc.trace {
-							address = accounts.InternAddress(body)
-						} else {
-							_, err := evm.FrameContext.TransactionTrace(ibs)
-							require.NoError(t, err)
-						}
 						// A materialized account in versioned mode triggers an internal read
 						// error without setting StateReadError. Inject it only for this opcode.
 						ibs.SetVersionMap(state.NewVersionMap(nil))
@@ -262,13 +253,11 @@ func TestTxTraceOmitsRestoredBalance(t *testing.T) {
 	require.NoError(t, ibs.SetCode(accounts.InternAddress(relay), program.New().Call(uint256.NewInt(0), sink, 5, 0, 0, 0, 0).Op(vm.POP, vm.STOP).Bytes(), tracing.CodeChangeUnspecified))
 	code := program.New().Push0().Push0().Op(vm.TXTRACE)
 	assertStackWord(code, 2) // payer and sink
-	code.Push0().Push(relay).Push(0x0a).Op(vm.TXDIFF)
-	assertStackWord(code, 0)
 	require.NoError(t, ibs.SetCode(accounts.InternAddress(assertion), code.Op(vm.STOP).Bytes(), tracing.CodeChangeUnspecified))
 	tx.Frames = []types.Frame{
 		{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
 		{Mode: types.FrameSender, Target: &relay, Value: *uint256.NewInt(5), Limits: mdgas.MdGas{Execution: 50_000}},
-		{Mode: types.FramePostTx, Target: &assertion, Limits: mdgas.MdGas{Execution: 20_000}},
+		{Mode: types.FrameAssert, Target: &assertion, Limits: mdgas.MdGas{Execution: 20_000}},
 	}
 	result, err := applyFrameTest(t, evm, tx)
 	require.NoError(t, err)
@@ -276,28 +265,4 @@ func TestTxTraceOmitsRestoredBalance(t *testing.T) {
 	balance, err := ibs.GetBalance(accounts.InternAddress(sink))
 	require.NoError(t, err)
 	require.Equal(t, uint256.NewInt(6), &balance)
-}
-
-func TestTxDiffTopicViewListsEventOnce(t *testing.T) {
-	t.Parallel()
-	evm, tx := frameTestEnv(t)
-	ibs := evm.IntraBlockState()
-	body := common.HexToAddress("0x2000")
-	assertion := common.HexToAddress("0x3000")
-	topic := common.HexToHash("0xaa")
-	require.NoError(t, ibs.SetCode(accounts.InternAddress(tx.SenderAddress), program.New().Push(types.FrameApproveBoth).Push0().Push0().Op(vm.APPROVE).Bytes(), tracing.CodeChangeUnspecified))
-	// One event carries the same value in two indexed positions.
-	require.NoError(t, ibs.SetCode(accounts.InternAddress(body), program.New().Push(topic).Push(topic).Push(1).Push0().Push0().Op(vm.LOG3, vm.STOP).Bytes(), tracing.CodeChangeUnspecified))
-	code := program.New().Push0().Push(topic).Push(0x0b).Op(vm.TXDIFF)
-	assertStackWord(code, 1)
-	require.NoError(t, ibs.SetCode(accounts.InternAddress(assertion), code.Op(vm.STOP).Bytes(), tracing.CodeChangeUnspecified))
-	tx.Frames = []types.Frame{
-		{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
-		{Mode: types.FrameSender, Target: &body, Limits: mdgas.MdGas{Execution: 20_000}},
-		{Mode: types.FramePostTx, Target: &assertion, Limits: mdgas.MdGas{Execution: 20_000}},
-	}
-	result, err := applyFrameTest(t, evm, tx)
-	require.NoError(t, err)
-	require.NoError(t, result.Err)
-	require.Len(t, result.FrameReceipts[1].Logs, 1)
 }

@@ -127,7 +127,7 @@ func TestFrameFilterAllowsSponsoredSender(t *testing.T) {
 			if deployed {
 				sim.account = &accounts.Account{CodeHash: accounts.InternCodeHash(common.Hash{1})}
 			}
-			tx := &types.FrameTransaction{NonceKeys: []uint256.Int{{}}, ChainID: *uint256.NewInt(1), SenderAddress: common.Address{1}, Frames: []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth}}, Fees: types.FrameFees{FeeCap: *uint256.NewInt(1)}}
+			tx := &types.FrameTransaction{NonceKeys: nil, ChainID: *uint256.NewInt(1), SenderAddress: common.Address{1}, Frames: []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth}}, Fees: types.FrameFees{MaxFee: *uint256.NewInt(1)}}
 			got, nonceTooHigh, err := filterBadTransactions([]types.Transaction{tx}, uint256.NewInt(1), chain.AllProtocolChanges, 1, &types.Header{BaseFee: uint256.NewInt(0)}, sim, sim, sim.GetNonce, log.New(), nil)
 			require.NoError(t, err)
 			require.Len(t, got, 1)
@@ -159,7 +159,7 @@ func TestFrameFilterKeyedNonce(t *testing.T) {
 			frame := &types.FrameTransaction{
 				NonceKeys: []uint256.Int{{1}}, Nonce: test.seq, ChainID: *uint256.NewInt(1), SenderAddress: common.Address{1},
 				Frames: []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth}},
-				Fees:   types.FrameFees{FeeCap: *uint256.NewInt(1)},
+				Fees:   types.FrameFees{MaxFee: *uint256.NewInt(1)},
 			}
 			var tx types.Transaction = frame
 			if test.wrapped {
@@ -192,7 +192,7 @@ func TestGetNextTransactionsFrameNonceRetry(t *testing.T) {
 			frame := &types.FrameTransaction{
 				NonceKeys: []uint256.Int{*uint256.NewInt(test.key)}, Nonce: 1, ChainID: *uint256.NewInt(1), SenderAddress: common.Address{1},
 				Frames: []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth}},
-				Fees:   types.FrameFees{FeeCap: *uint256.NewInt(1)},
+				Fees:   types.FrameFees{MaxFee: *uint256.NewInt(1)},
 			}
 			var tx types.Transaction = frame
 			if test.wrapped {
@@ -243,7 +243,7 @@ func TestGetNextTransactionsFrameReleasesNonceGap(t *testing.T) {
 			frame := &types.FrameTransaction{
 				NonceKeys: []uint256.Int{*uint256.NewInt(test.key)}, ChainID: *chain.AllProtocolChanges.ChainID, SenderAddress: sender.Value(),
 				Frames: []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth}},
-				Fees:   types.FrameFees{FeeCap: *uint256.NewInt(1)},
+				Fees:   types.FrameFees{MaxFee: *uint256.NewInt(1)},
 			}
 			var tx types.Transaction = frame
 			if test.wrapped {

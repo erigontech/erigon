@@ -68,7 +68,7 @@ func frameTraceTestEnv(t *testing.T) (*vm.EVM, *types.FrameTransaction) {
 	blockCtx := evmtypes.BlockContext{CanTransfer: protocol.CanTransfer, Transfer: misc.Transfer, GasLimit: 30_000_000, BlockNumber: 1}
 	evm := vm.NewEVM(blockCtx, evmtypes.TxContext{}, ibs, cfg, vm.Config{NoBaseFee: true})
 	tx := &types.FrameTransaction{
-		ChainID: *cfg.ChainID, NonceKeys: []uint256.Int{{}}, SenderAddress: sender,
+		ChainID: *cfg.ChainID, NonceKeys: nil, SenderAddress: sender,
 		Frames: []types.Frame{
 			{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
 			{Mode: types.FrameSender, Target: &target, Limits: mdgas.MdGas{Execution: 10_000}},
@@ -107,14 +107,16 @@ func TestFrameTraceBlockAfterTracerError(t *testing.T) {
 		// even when producing the earlier transaction's trace fails.
 		for nonce, value := range []uint64{1, 0} {
 			data := common.BigToHash(new(big.Int).SetUint64(value))
-			b.AddTx(&types.FrameTransaction{
-				ChainID: *cfg.ChainID, NonceKeys: []uint256.Int{{}}, Nonce: uint64(nonce), SenderAddress: sender,
-				Fees: types.FrameFees{FeeCap: uint256.Int{1}},
+			tx := &types.FrameTransaction{
+				ChainID: *cfg.ChainID, NonceKeys: nil, Nonce: uint64(nonce), SenderAddress: sender,
+				Fees: types.FrameFees{MaxFee: uint256.Int{1}},
 				Frames: []types.Frame{
 					{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
 					{Mode: types.FrameSender, Target: &target, Data: data[:], Limits: mdgas.MdGas{Execution: 100_000, State: params.StateGasPerStorageSet}},
 				},
-			})
+			}
+			tx.Fees.MaxFee.Mul(&tx.Fees.MaxFee, uint256.NewInt(tx.GetGasLimit()))
+			b.AddTx(tx)
 		}
 	})
 	require.NoError(t, err)
@@ -191,7 +193,7 @@ func TestFrameCallTracerDefaultVerification(t *testing.T) {
 	require.NoError(t, err)
 	tx.SenderAddress = crypto.PubkeyToAddress(key.PublicKey)
 	require.NoError(t, evm.IntraBlockState().SetBalance(accounts.InternAddress(tx.SenderAddress), uint256.Int{10_000_000}, tracing.BalanceChangeUnspecified))
-	tx.Signatures = []types.FrameSignature{{Scheme: types.FrameSignatureSecp256k1}}
+	tx.Signatures = []types.FrameSignature{{Scheme: types.FrameSignatureSecp256k1, Signature: make([]byte, 65)}}
 	hash := tx.SigningHash(nil)
 	sig, err := crypto.Sign(hash[:], key)
 	require.NoError(t, err)
@@ -498,13 +500,14 @@ func newFrameTraceChain(t *testing.T) (*execmoduletester.ExecModuleTester, *type
 		},
 	}))
 	frameTx := &types.FrameTransaction{
-		ChainID: *cfg.ChainID, NonceKeys: []uint256.Int{{}}, SenderAddress: sender,
-		Fees: types.FrameFees{FeeCap: uint256.Int{1}},
+		ChainID: *cfg.ChainID, NonceKeys: nil, SenderAddress: sender,
+		Fees: types.FrameFees{MaxFee: uint256.Int{1}},
 		Frames: []types.Frame{
 			{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
 			{Mode: types.FrameSender, Target: &target, Limits: mdgas.MdGas{Execution: 10_000}},
 		},
 	}
+	frameTx.Fees.MaxFee.Mul(&frameTx.Fees.MaxFee, uint256.NewInt(frameTx.GetGasLimit()))
 	return m, frameTx
 }
 
@@ -526,6 +529,7 @@ func TestFrameRawTransactionGasCap(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			txn.Frames[1].Limits = mdgas.MdGas{Execution: tc.execution, State: tc.state}
+			txn.Fees.MaxFee.SetUint64(txn.GetGasLimit())
 			var encoded bytes.Buffer
 			require.NoError(t, txn.MarshalBinary(&encoded))
 			api := NewTraceAPI(newBaseApiForTest(m), m.DB, &rpccfg.TraceApiConfig{GasCap: tc.cap})
@@ -754,17 +758,16 @@ func TestFrameFlatCallTracerFailedFrame(t *testing.T) {
 	require.Nil(t, result[2].Result)
 }
 
-func TestPostTxParityTracer(t *testing.T) {
+func TestAssertParityTracer(t *testing.T) {
 	evm, tx := frameTraceTestEnv(t)
 	body := accounts.InternAddress(*tx.Frames[1].Target)
 	code := program.New().Push(0xaabbccdd).Push0().Op(vm.MSTORE).Push(4).Push(28).Op(vm.LOG0).Bytes()
 	require.NoError(t, evm.IntraBlockState().SetCode(body, code, tracing.CodeChangeUnspecified))
 	assertion := common.HexToAddress("0x3000")
 	code = program.New().Push0().Push0().Op(vm.TXTRACE, vm.POP).
-		Push0().Push(tx.SenderAddress).Push(0x0a).Op(vm.TXDIFF, vm.POP).
 		Push(4).Push0().Push(32).Push0().Op(vm.EVENTDATACOPY, vm.STOP).Bytes()
 	require.NoError(t, evm.IntraBlockState().SetCode(accounts.InternAddress(assertion), code, tracing.CodeChangeUnspecified))
-	tx.Frames = append(tx.Frames, types.Frame{Mode: types.FramePostTx, Target: &assertion, Limits: mdgas.MdGas{Execution: 10_000}})
+	tx.Frames = append(tx.Frames, types.Frame{Mode: types.FrameAssert, Target: &assertion, Limits: mdgas.MdGas{Execution: 10_000}})
 	result, receipt := traceParityFrame(t, evm, tx, true)
 	require.Equal(t, types.ReceiptStatusSuccessful, receipt.Status)
 	seen := 0
@@ -773,74 +776,12 @@ func TestPostTxParityTracer(t *testing.T) {
 		case "TXTRACE":
 			require.Equal(t, []string{"0x0"}, op.Ex.Push)
 			seen++
-		case "TXDIFF":
-			require.Equal(t, []string{"0x1"}, op.Ex.Push)
-			seen++
 		case "EVENTDATACOPY":
 			require.Equal(t, &VmTraceMem{Off: 32, Data: "0xaabbccdd"}, op.Ex.Mem)
 			seen++
 		}
 	}
-	require.Equal(t, 3, seen)
-}
-
-func TestPostTxPrestateTracer(t *testing.T) {
-	evm, tx := frameTraceTestEnv(t)
-	queried := common.HexToAddress("0x3000")
-	key := common.HexToHash("0x07")
-	ibs := evm.IntraBlockState()
-	require.NoError(t, ibs.SetBalance(accounts.InternAddress(queried), uint256.Int{1}, tracing.BalanceChangeUnspecified))
-	require.NoError(t, ibs.SetState(accounts.InternAddress(queried), accounts.InternKey(key), uint256.Int{42}))
-	code := program.New().Push(key).Push(queried).Push0().Op(vm.TXDIFF, vm.POP, vm.STOP).Bytes()
-	require.NoError(t, ibs.SetCode(accounts.InternAddress(*tx.Frames[1].Target), code, tracing.CodeChangeUnspecified))
-	tx.Frames[1].Mode = types.FramePostTx
-	var trace map[common.Address]struct {
-		Storage map[common.Hash]common.Hash `json:"storage"`
-	}
-	require.NoError(t, json.Unmarshal(traceFrameRPC(t, evm, tx, "prestateTracer", json.RawMessage(`{}`)), &trace))
-	require.Contains(t, trace, queried)
-	require.Equal(t, common.HexToHash("0x2a"), trace[queried].Storage[key])
-}
-
-func TestPrestateTracerNestedTxDiff(t *testing.T) {
-	for _, tc := range []struct {
-		name       string
-		mode       uint8
-		param      uint64
-		operand    uint64
-		wantAccess bool
-	}{
-		{name: "valid POST_TX storage read", mode: types.FramePostTx, param: 0, operand: 7, wantAccess: true},
-		{name: "outside POST_TX", mode: types.FrameSender, param: 0, operand: 7},
-		{name: "reserved balance before operand", mode: types.FramePostTx, param: 2, operand: 1},
-		{name: "reserved balance after operand", mode: types.FramePostTx, param: 3, operand: 1},
-		{name: "reserved code hash before operand", mode: types.FramePostTx, param: 4, operand: 1},
-		{name: "reserved code hash after operand", mode: types.FramePostTx, param: 5, operand: 1},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			evm, tx := frameTraceTestEnv(t)
-			ibs := evm.IntraBlockState()
-			child, queried := common.HexToAddress("0x4000"), common.HexToAddress("0x5000")
-			require.NoError(t, ibs.SetBalance(accounts.InternAddress(queried), uint256.Int{1}, tracing.BalanceChangeUnspecified))
-			require.NoError(t, ibs.SetState(accounts.InternAddress(queried), accounts.InternKey(common.HexToHash("0x07")), uint256.Int{42}))
-			code := program.New().Push(tc.operand).Push(queried).Push(tc.param).Op(vm.TXDIFF, vm.POP, vm.STOP).Bytes()
-			require.NoError(t, ibs.SetCode(accounts.InternAddress(child), code, tracing.CodeChangeUnspecified))
-			code = program.New().StaticCall(uint256.NewInt(10_000), child, 0, 0, 0, 0).Op(vm.POP, vm.STOP).Bytes()
-			require.NoError(t, ibs.SetCode(accounts.InternAddress(*tx.Frames[1].Target), code, tracing.CodeChangeUnspecified))
-			tx.Frames[1].Mode = tc.mode
-			tx.Frames[1].Limits.Execution = 30_000
-
-			var trace map[common.Address]struct {
-				Storage map[common.Hash]common.Hash `json:"storage"`
-			}
-			require.NoError(t, json.Unmarshal(traceFrameRPC(t, evm, tx, "prestateTracer", json.RawMessage(`{}`)), &trace))
-			_, recorded := trace[queried]
-			require.Equal(t, tc.wantAccess, recorded, "only valid TXDIFF reads belong in the prestate")
-			if tc.wantAccess {
-				require.Equal(t, common.HexToHash("0x2a"), trace[queried].Storage[common.HexToHash("0x07")])
-			}
-		})
-	}
+	require.Equal(t, 2, seen)
 }
 
 func TestFrameCallTracerFailedAssertion(t *testing.T) {
@@ -850,8 +791,8 @@ func TestFrameCallTracerFailedAssertion(t *testing.T) {
 	require.NoError(t, evm.IntraBlockState().SetCode(accounts.InternAddress(body), program.New().Push0().Push0().Op(vm.LOG0, vm.STOP).Bytes(), tracing.CodeChangeUnspecified))
 	require.NoError(t, evm.IntraBlockState().SetCode(accounts.InternAddress(assertion), program.New().Push0().Push0().Op(vm.REVERT).Bytes(), tracing.CodeChangeUnspecified))
 	tx.Frames = append(tx.Frames,
-		types.Frame{Mode: types.FramePostTx, Target: &assertion, Limits: mdgas.MdGas{Execution: 10_000}},
-		types.Frame{Mode: types.FramePostTx, Target: &assertion, Limits: mdgas.MdGas{Execution: 10_000}},
+		types.Frame{Mode: types.FrameAssert, Target: &assertion, Limits: mdgas.MdGas{Execution: 10_000}},
+		types.Frame{Mode: types.FrameAssert, Target: &assertion, Limits: mdgas.MdGas{Execution: 10_000}},
 	)
 	var trace frameCallTrace
 	require.NoError(t, json.Unmarshal(traceFrameRPC(t, evm, tx, "callTracer", json.RawMessage(`{"withLog":true}`)), &trace))

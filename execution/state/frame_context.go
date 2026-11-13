@@ -25,7 +25,7 @@ import (
 )
 
 // FrameContext shares transaction-wide approvals and gas accounting across frames
-// and nested calls. State rollback, including POST_TX body rollback, restores
+// and nested calls. State rollback, including ASSERT body rollback, restores
 // journaled approvals and state-gas charges to the chosen snapshot. Execution gas
 // remains charged.
 type FrameContext struct {
