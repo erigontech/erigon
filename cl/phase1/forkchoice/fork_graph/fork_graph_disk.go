@@ -350,8 +350,8 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 		)
 		return nil, MissingSegment, nil
 	}
-	// The finalized block may be gone from memory, as after a restart into non-finality: the update is then built
-	// without finality, as create_light_client_update allows.
+	// The finalized block may be unavailable; the update is then built without finality, as create_light_client_update
+	// allows.
 	finalizedBlock, _ := f.GetBlock(newState.FinalizedCheckpoint().Root)
 	parentBlock, hasParentBlock := f.GetBlock(block.ParentRoot)
 
@@ -1048,7 +1048,8 @@ func (f *forkGraphDisk) storeLightClientUpdate(update *cltypes.LightClientUpdate
 
 // GetLightClientUpdates returns the best update of each sync committee period in [startPeriod, endPeriod), nil for a
 // period without one: the update finalization settled, or a better candidate whose signature block is on head's chain.
-// A zero head gives the settled updates only. One walk down head's chain serves every period of the range.
+// A zero head, or a head whose chain does not hold the last finalized block, gives the settled updates only, even when
+// that chain holds a better candidate. One walk down head's chain serves every period of the range.
 func (f *forkGraphDisk) GetLightClientUpdates(startPeriod, endPeriod uint64, head common.Hash) []*cltypes.LightClientUpdate {
 	if endPeriod <= startPeriod {
 		return nil

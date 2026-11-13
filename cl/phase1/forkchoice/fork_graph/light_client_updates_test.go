@@ -481,6 +481,24 @@ func TestGetLightClientUpdatesServesCandidatesWhenTheFinalizedHeaderIsPruned(t *
 	require.Equal(t, []*cltypes.LightClientUpdate{candidate}, f.GetLightClientUpdates(1, 2, head))
 }
 
+// The walk goes on below the lowest candidate until it reaches the finalized block, so blocks without a candidate
+// between them do not hide that the head is on the finalized chain.
+func TestGetLightClientUpdatesServesCandidatesAboveBlocksWithoutOne(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	f := &forkGraphDisk{beaconCfg: cfg}
+	p := cfg.SlotsPerEpoch * cfg.EpochsPerSyncCommitteePeriod
+	fin, x, c, head := common.Hash{1}, common.Hash{2}, common.Hash{3}, common.Hash{4}
+	f.headers.Store(fin, &cltypes.BeaconBlockHeader{Slot: p + 10})
+	f.headers.Store(x, &cltypes.BeaconBlockHeader{Slot: p + 20, ParentRoot: fin})
+	f.headers.Store(c, &cltypes.BeaconBlockHeader{Slot: p + 40, ParentRoot: x})
+	f.headers.Store(head, &cltypes.BeaconBlockHeader{Slot: p + 50, ParentRoot: c})
+	candidate := lightClientTestUpdate(cfg, 400, p+39)
+	f.recordLightClientUpdateLocked(c, candidate)
+	f.KeepFinalizedLightClientUpdates(fin)
+
+	require.Equal(t, []*cltypes.LightClientUpdate{candidate}, f.GetLightClientUpdates(1, 2, head))
+}
+
 // lightClientUpdateAt returns the best update of one period, as a range lookup of that period does.
 func lightClientUpdateAt(f *forkGraphDisk, period uint64, head common.Hash) (*cltypes.LightClientUpdate, bool) {
 	update := f.GetLightClientUpdates(period, period+1, head)[0]
@@ -539,8 +557,7 @@ func TestNewestLightClientFinalityUpdateKeepsTheLastUpdateWithFinality(t *testin
 	require.Same(t, withFinality, f.NewestLightClientFinalityUpdate())
 }
 
-// A block whose parent state's finalized block is not in memory, as after a restart into non-finality, still records
-// its light client update, without finality.
+// A block whose parent state's finalized block is unavailable still records its light client update, without finality.
 func TestAddChainSegmentRecordsAnUpdateWithoutTheFinalizedBlock(t *testing.T) {
 	blocks, anchorState, _ := tests.GetElectraRandom()
 	graph, err := NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{Beacon: true})
