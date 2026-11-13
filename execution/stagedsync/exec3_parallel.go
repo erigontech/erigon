@@ -256,7 +256,9 @@ func (pe *parallelExecutor) clearChangesetAccumulator() {
 // first folded tx to its block result, or to the apply loop's exit.
 // Returns a restore closure, or nil if the block has no saved changeset yet.
 func (pe *parallelExecutor) bindBlockChangesetForFold(blockNum uint64, blockHash common.Hash) (restore func()) {
+	t0 := time.Now()
 	pe.domains().LockChangesetAccumulator()
+	probeFoldBindWait.Add(int64(time.Since(t0)))
 	defer pe.domains().UnlockChangesetAccumulator()
 	cs := pe.domains().GetChangesetByHash(blockNum, blockHash)
 	if cs == nil {
@@ -264,10 +266,28 @@ func (pe *parallelExecutor) bindBlockChangesetForFold(blockNum uint64, blockHash
 	}
 	unswap := pe.domains().SwapChangesetAccumulatorLocked(cs)
 	return func() {
+		t0 := time.Now()
 		pe.domains().LockChangesetAccumulator()
+		probeFoldUnbindWait.Add(int64(time.Since(t0)))
 		unswap()
 		pe.domains().UnlockChangesetAccumulator()
 	}
+}
+
+var probeFoldBindWait, probeFoldUnbindWait, probeFlushWait, probeFlushHold, probeFlushN atomic.Int64
+
+// probeLockedFlush runs f under changesetMu and records the lock wait and hold.
+func probeLockedFlush(lock, unlock func(), f func() error) error {
+	t0 := time.Now()
+	lock()
+	t1 := time.Now()
+	defer func() {
+		unlock()
+		probeFlushWait.Add(int64(t1.Sub(t0)))
+		probeFlushHold.Add(int64(time.Since(t1)))
+		probeFlushN.Add(1)
+	}()
+	return f()
 }
 
 // bindFoldChangeset keeps a block's changeset bound across its txs. The apply
@@ -702,6 +722,12 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					pe.rs.SetTrace(false)
 				case *blockResult:
 					pe.unbindFoldChangeset()
+					pe.logger.Info("[fold-wait] probe", "blk", applyResult.BlockNum,
+						"npFoldBindWait", time.Duration(probeFoldBindWait.Swap(0)),
+						"npFoldUnbindWait", time.Duration(probeFoldUnbindWait.Swap(0)),
+						"cpFlushWait", time.Duration(probeFlushWait.Swap(0)),
+						"cpFlushHold", time.Duration(probeFlushHold.Swap(0)),
+						"cpFlushN", probeFlushN.Swap(0))
 					built := balBuilder
 					balBuilder = nil
 					if finalized {

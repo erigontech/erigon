@@ -903,12 +903,10 @@ func (cc *commitmentCalculator) computeIsolated(ctx context.Context, t commitTar
 	// diff is swapped to nil for the flush so that when that block owns no saved
 	// changeset the flush does not leak its branch deltas into the live
 	// accumulator (a later window block's changeset).
-	if err := func() error {
-		cc.doms.LockChangesetAccumulator()
-		defer cc.doms.UnlockChangesetAccumulator()
+	if err := probeLockedFlush(cc.doms.LockChangesetAccumulator, cc.doms.UnlockChangesetAccumulator, func() error {
 		defer cc.doms.SwapCommitmentDiffLocked(nil)()
 		return cc.doms.FlushPendingUpdatesLocked(cc.roTx)
-	}(); err != nil {
+	}); err != nil {
 		return nil, nil, err
 	}
 
@@ -926,12 +924,10 @@ func (cc *commitmentCalculator) computeIsolated(ctx context.Context, t commitTar
 func (cc *commitmentCalculator) flushPendingUpdatesWithoutChangeset(ctx context.Context, br *blockResult) {
 	// The closure bounds the locked window: publish must stay outside it, since
 	// its send can block on the apply loop, which contends on changesetMu.
-	err := func() error {
-		cc.doms.LockChangesetAccumulator()
-		defer cc.doms.UnlockChangesetAccumulator()
+	err := probeLockedFlush(cc.doms.LockChangesetAccumulator, cc.doms.UnlockChangesetAccumulator, func() error {
 		defer cc.doms.SwapCommitmentDiffLocked(nil)()
 		return cc.doms.FlushPendingUpdatesLocked(cc.roTx)
-	}()
+	})
 	if err != nil {
 		cc.publish(ctx, commitmentResult{
 			blockNum: br.BlockNum,
@@ -979,11 +975,9 @@ func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context,
 	// Flush block N-1's own pending update (hash-routed to N-1's saved changeset,
 	// independent of N's diff below) — the one remaining changesetMu window, brief
 	// rather than spanning the fold that follows.
-	if err := func() error {
-		cc.doms.LockChangesetAccumulator()
-		defer cc.doms.UnlockChangesetAccumulator()
+	if err := probeLockedFlush(cc.doms.LockChangesetAccumulator, cc.doms.UnlockChangesetAccumulator, func() error {
 		return cc.doms.FlushPendingUpdatesLocked(cc.roTx)
-	}(); err != nil {
+	}); err != nil {
 		return nil, err
 	}
 
