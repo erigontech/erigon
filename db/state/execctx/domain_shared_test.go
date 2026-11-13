@@ -1542,7 +1542,7 @@ func TestSharedDomain_TouchChangedKeysFromHistory(t *testing.T) {
 	db1RwTx, err := db1.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	t.Cleanup(db1RwTx.Rollback)
-	sd1, err := execctx.NewSharedDomains(ctx, db1RwTx, log.New())
+	sd1, err := execctx.NewSharedDomains(ctx, db1RwTx, log.New(), execctx.WithParaTrieDB(db1))
 	require.NoError(t, err)
 	t.Cleanup(sd1.Close)
 
@@ -1630,9 +1630,7 @@ func TestSharedDomain_TouchChangedKeysFromHistory(t *testing.T) {
 		t.Cleanup(db1RoTx.Rollback)
 		require.Equal(t, uint64(0), db1RoTx.Debug().TxNumsInFiles(kv.StorageDomain))
 		expectedRootHash, err := sd1.ComputeCommitment(ctx, db1RoTx, false, blockNum, toTxNum, "", nil)
-		if err != nil {
-			return
-		}
+		require.NoError(t, err)
 		require.NoError(t, err)
 
 		// now create a new empty database db2 and SharedDomains sd2 over it
@@ -1640,7 +1638,7 @@ func TestSharedDomain_TouchChangedKeysFromHistory(t *testing.T) {
 		roTx2, err := db2.BeginTemporalRo(ctx)
 		require.NoError(t, err)
 		t.Cleanup(roTx2.Rollback)
-		sd2, err := execctx.NewSharedDomains(ctx, roTx2, log.New())
+		sd2, err := execctx.NewSharedDomains(ctx, roTx2, log.New(), execctx.WithParaTrieDB(db2))
 		require.NoError(t, err)
 		t.Cleanup(sd2.Close)
 
@@ -1651,9 +1649,7 @@ func TestSharedDomain_TouchChangedKeysFromHistory(t *testing.T) {
 
 		// double-check: if we try to compute the initial commitment trie root in db2, it is empty
 		initialRootHash, err = sd2.ComputeCommitment(ctx, roTx2, false, blockNum, toTxNum, "", nil)
-		if err != nil {
-			return
-		}
+		require.NoError(t, err)
 		require.NoError(t, err)
 		require.Equal(t, empty.RootHash[:], initialRootHash)
 
@@ -1666,9 +1662,7 @@ func TestSharedDomain_TouchChangedKeysFromHistory(t *testing.T) {
 		// compute the commitment trie root in sd2 reading state for touched keys from db1
 		sd2.GetCommitmentContext().SetStateReader(commitmentdb.NewLatestStateReader(db1RoTx, sd1, commitmentdb.LatestStateReaderOptions{}))
 		rootHash, err := sd2.ComputeCommitment(ctx, roTx2, false, blockNum, toTxNum, "", nil)
-		if err != nil {
-			return
-		}
+		require.NoError(t, err)
 		require.NoError(t, err)
 		require.Equal(t, expectedRootHash, rootHash)
 	}
