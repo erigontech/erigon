@@ -53,7 +53,7 @@ func (frame *Frame) UnmarshalJSON(input []byte) error {
 	if err := json.Unmarshal(input, &dec); err != nil {
 		return err
 	}
-	if dec.Mode > FrameSender || dec.Flags >= 8 {
+	if dec.Mode > FramePostTx || dec.Flags >= 8 {
 		return errors.New("invalid frame mode or flags")
 	}
 	*frame = Frame{uint8(dec.Mode), uint8(dec.Flags), dec.Target, mdgas.MdGas{Execution: uint64(dec.GasLimit), State: uint64(dec.StateGasLimit)}, uint256.Int(dec.Value), dec.Data}

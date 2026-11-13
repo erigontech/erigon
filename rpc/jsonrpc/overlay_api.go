@@ -543,8 +543,10 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 		evm.TxContext = txCtx
 
 		// Without overrides, later transactions must observe canonical fee effects,
-		// even when an earlier transaction failed.
-		res, err := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, hasStateOverrides /* gasBailout */, api.engine())
+		// even when an earlier transaction failed. Frame assertions also depend on
+		// fee debits, so their replays keep fee accounting under overrides.
+		gasBailout := hasStateOverrides && msg.FrameTransaction() == nil
+		res, err := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailout, api.engine())
 		if err != nil {
 			log.Error(err.Error())
 			return nil, err

@@ -3219,6 +3219,13 @@ func (ibs *IntraBlockState) AddSlotToAccessList(addr accounts.Address, slot acco
 	return addrMod, slotMod
 }
 
+// AddSlotOnlyToAccessList preserves account coldness for EIP-7906 storage lookups.
+func (ibs *IntraBlockState) AddSlotOnlyToAccessList(addr accounts.Address, slot accounts.StorageKey) {
+	if ibs.accessList.AddSlotOnly(addr, slot) {
+		ibs.journal.accessListAddSlotOnlyChange(addr, slot)
+	}
+}
+
 // AddressInAccessList returns true if the given address is in the access list.
 func (ibs *IntraBlockState) AddressInAccessList(addr accounts.Address) bool {
 	return ibs.accessList.ContainsAddress(addr)

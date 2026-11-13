@@ -31,7 +31,7 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// FrameEntryPoint supplies the protocol caller for DEFAULT and VERIFY frames.
+// FrameEntryPoint supplies the protocol caller for DEFAULT, VERIFY and POST_TX frames.
 // Frames enter their targets directly, without executing an entry-point contract.
 var FrameEntryPoint = accounts.InternAddress(common.HexToAddress("0xaa"))
 
@@ -42,6 +42,9 @@ var ErrFrameSkipped = errors.New("frame skipped")
 func opApprove(pc uint64, evm *EVM, call *CallContext) (uint64, []byte, error) {
 	if evm.FrameContext == nil {
 		return pc, nil, ErrFrameContext
+	}
+	if evm.FrameContext.Transaction.Frames[evm.FrameContext.Index].Mode == types.FramePostTx {
+		return pc, nil, ErrWriteProtection
 	}
 	offset, length := call.Stack.pop2Uint64()
 	scope := call.Stack.pop()
@@ -177,7 +180,7 @@ func (evm *EVM) ExecuteTransactionFrame() (ret []byte, executionLeft uint64, err
 				return
 			}
 			typ := CALL
-			if frame.Mode == types.FrameVerify {
+			if frame.IsStatic() {
 				typ = STATICCALL
 			}
 			evm.captureBegin(0, typ, caller, target, false, frame.Data, frame.Limits, frame.Value, nil)
@@ -262,7 +265,7 @@ func (evm *EVM) ExecuteTransactionFrame() (ret []byte, executionLeft uint64, err
 	gas.State = ctx.StateGasLeft()
 	var left mdgas.MdGas
 	entered = true
-	if frame.Mode == types.FrameVerify {
+	if frame.IsStatic() {
 		ret, left, _, err = evm.StaticCall(caller, target, frame.Data, gas)
 	} else {
 		ret, left, _, err = evm.Call(caller, target, frame.Data, gas, frame.Value, bailout)
@@ -280,7 +283,7 @@ func (evm *EVM) TraceSkippedFrame(index int) {
 	caller, typ := FrameEntryPoint, CALL
 	if frame.Mode == types.FrameSender {
 		caller = accounts.InternAddress(tx.SenderAddress)
-	} else if frame.Mode == types.FrameVerify {
+	} else if frame.IsStatic() {
 		typ = STATICCALL
 	}
 	tracer.EmitEnter(1, byte(typ), caller, accounts.InternAddress(frame.ResolvedTarget(tx.SenderAddress)), false, frame.Data, frame.Limits, frame.Value, nil)

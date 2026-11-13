@@ -20,6 +20,7 @@
 ### Added
 
 - txpool: support EIP-8272 recent-root verifier prefixes for frame transactions at the Bogota devnet-1 spec level, with dependency revalidation and root expiry (#25515).
+- execution, rpc: add EIP-7906 transaction assertions (`POST_TX`, `TXTRACE`, `TXDIFF`, and `EVENTDATACOPY`) at the Bogota devnet-1 spec level. Activation requires EIP-8253's state cleanup (#26280) to be in effect (#25602).
 - engine: the authenticated Engine port supports cleartext HTTP/2 (h2c) with prior knowledge alongside HTTP/1.1. JWT authentication applies to both protocols (#21729) — by @yperbasis
 - caplin: add `--caplin.blobs-archive-from-slot` to bound the blob archive; it implies `--caplin.blobs-archive` and cannot be combined with `--caplin.snapgen` (#25879) — by @awskii
 
