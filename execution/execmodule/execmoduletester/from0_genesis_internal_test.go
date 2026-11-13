@@ -52,10 +52,6 @@ func TestFromZero_GenesisAllocPreservedAfterResetReExec(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
-	runFromZeroGenesisAllocPreservedAfterResetReExec(t)
-}
-
-func runFromZeroGenesisAllocPreservedAfterResetReExec(t *testing.T) {
 	// Untouched-after-genesis address mirroring 0xA1E4380A's role on mainnet.
 	dormantAddr := accounts.InternAddress(common.HexToAddress("0xA1E4380A3B1f749673E270229993eE55F35663b4"))
 	dormantFunds := new(big.Int).Mul(big.NewInt(2000), new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)) // 2000 ETH
@@ -134,10 +130,6 @@ func runFromZeroGenesisAllocPreservedAfterResetReExec(t *testing.T) {
 // zero address. Re-executing from block 0 must keep it, as the genesis runs with
 // EIP-161 disabled; removing it changes every later state root.
 func TestFromZero_AuraGenesisEmptyZeroAddressRetained(t *testing.T) {
-	runAuraGenesisEmptyZeroAddressRetained(t)
-}
-
-func runAuraGenesisEmptyZeroAddressRetained(t *testing.T) {
 	key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	require.NoError(t, err)
 	keyAddr := crypto.PubkeyToAddress(key.PublicKey)
@@ -292,10 +284,6 @@ func TestFromZero_BranchCacheCoherentAcrossBatches(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
-	runBranchCacheCoherentAcrossBatches(t)
-}
-
-func runBranchCacheCoherentAcrossBatches(t *testing.T) {
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	keyAddr := crypto.PubkeyToAddress(key.PublicKey)
 	keyFunds := new(big.Int).Mul(big.NewInt(1_000_000), new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil))

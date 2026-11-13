@@ -46,8 +46,8 @@ func TestSelfdestructedThenFundedThenTouched(t *testing.T) {
 		name    string
 		workers int
 	}{
-		{"parallel/workers=1", 1},
-		{"parallel/workers=4", 4},
+		{"workers=1", 1},
+		{"workers=4", 4},
 	} {
 		t.Run(mode.name, func(t *testing.T) {
 			previousWorkers := ethconfig.Defaults.Sync.ExecWorkerCount
