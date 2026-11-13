@@ -319,24 +319,18 @@ func commitmentVerify(ctx context.Context, logger log.Logger) error {
 }
 
 var cmdCommitmentRebuild = &cobra.Command{
-	Use:   "rebuild",
-	Short: "",
-	Run: func(cmd *cobra.Command, args []string) {
+	Use:          "rebuild",
+	Short:        "",
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
 		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
 		skipFilesDBGapCheck = statecfg.ExperimentalCommitmentV3
 		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), true, logger)
 		if err != nil {
-			logger.Error("Opening DB", "error", err)
-			return
+			return fmt.Errorf("opening DB: %w", err)
 		}
 		defer db.Close()
-
-		if err := commitmentRebuild(db, cmd.Context(), logger); err != nil {
-			if !errors.Is(err, context.Canceled) {
-				logger.Error(err.Error())
-			}
-			return
-		}
+		return commitmentRebuild(db, cmd.Context(), logger)
 	},
 }
 
