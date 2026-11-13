@@ -46,21 +46,13 @@ func (c *CommitteeSubscribeMgmt) RunProposalWindows(ctx context.Context) {
 }
 
 func (c *CommitteeSubscribeMgmt) subscribeForUpcomingProposal() {
-	validators := c.validatorParams.GetValidators()
-	if len(validators) == 0 {
-		return
-	}
-	local := make(map[uint64]struct{}, len(validators))
-	for _, index := range validators {
-		local[index] = struct{}{}
-	}
 	currentSlot := c.ethClock.GetCurrentSlot()
 	var (
 		proposalSlot uint64
 		found        bool
 	)
 	if err := c.syncedData.ViewHeadState(func(s *state.CachingBeaconState) error {
-		proposalSlot, found = lastLocalProposal(s.ProposerIndexFromLookahead, local, currentSlot)
+		proposalSlot, found = lastLocalProposal(s.ProposerIndexFromLookahead, c.validatorParams.HasAttachedValidator, currentSlot)
 		return nil
 	}); err != nil || !found {
 		return
@@ -76,13 +68,9 @@ func (c *CommitteeSubscribeMgmt) subscribeForUpcomingProposal() {
 
 // lastLocalProposal returns the last slot after currentSlot, up to proposalWindowSlots ahead, whose proposer is a
 // local validator. Slots beyond the proposer lookahead are skipped.
-func lastLocalProposal(proposerAt func(slot uint64) (uint64, bool), local map[uint64]struct{}, currentSlot uint64) (uint64, bool) {
+func lastLocalProposal(proposerAt func(slot uint64) (uint64, bool), isLocal func(validatorIndex uint64) bool, currentSlot uint64) (uint64, bool) {
 	for slot := currentSlot + proposalWindowSlots; slot > currentSlot; slot-- {
-		proposer, ok := proposerAt(slot)
-		if !ok {
-			continue
-		}
-		if _, isLocal := local[proposer]; isLocal {
+		if proposer, ok := proposerAt(slot); ok && isLocal(proposer) {
 			return slot, true
 		}
 	}

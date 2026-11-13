@@ -111,7 +111,7 @@ func TestProposalWindowDoesNotSubscribeWithoutAHeadState(t *testing.T) {
 
 // One subscription covers every local proposal of the window, so a later proposal does not end it early.
 func TestLastLocalProposalReturnsTheLastLocalProposalOfTheWindow(t *testing.T) {
-	local := map[uint64]struct{}{testLocalProposer: {}}
+	isLocal := func(index uint64) bool { return index == testLocalProposer }
 	proposers := map[uint64]uint64{105: testLocalProposer, 110: testLocalProposer, 117: testLocalProposer}
 	proposerAt := func(slot uint64) (uint64, bool) {
 		if slot == 112 {
@@ -123,12 +123,12 @@ func TestLastLocalProposalReturnsTheLastLocalProposalOfTheWindow(t *testing.T) {
 		return testOtherProposer, true
 	}
 
-	slot, ok := lastLocalProposal(proposerAt, local, 100)
+	slot, ok := lastLocalProposal(proposerAt, isLocal, 100)
 	require.True(t, ok)
 	require.Equal(t, uint64(110), slot)
 
-	_, ok = lastLocalProposal(proposerAt, local, 110)
+	_, ok = lastLocalProposal(proposerAt, isLocal, 110)
 	require.True(t, ok, "117 is within the window of slot 110")
-	_, ok = lastLocalProposal(proposerAt, local, 117)
+	_, ok = lastLocalProposal(proposerAt, isLocal, 117)
 	require.False(t, ok, "the proposal slot itself is too late to subscribe for")
 }
