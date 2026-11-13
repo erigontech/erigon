@@ -378,48 +378,53 @@ func (ac *AccountChanges) DecodeRLP(s *rlp.Stream) error {
 }
 
 func (ac *AccountChanges) decodeRLP(s *rlp.Stream, budget *blockAccessListDecodeBudget, arena *blockAccessListArena) error {
-	if _, err := s.List(); err != nil {
+	b, err := s.ViewList()
+	if err != nil {
 		return err
 	}
-
-	address, err := s.Addr()
+	address, b, err := rlp.SplitString(b)
 	if err != nil {
 		return fmt.Errorf("read Address: %w", err)
 	}
-	ac.Address = address
-	slots, err := decodeSlotChangesList(s, budget, arena)
+	if len(address) != length.Addr {
+		return fmt.Errorf("read Address: input value has wrong size %d, want %d", len(address), length.Addr)
+	}
+	ac.Address = common.Address(address)
+
+	var list []byte
+	if list, b, err = rlp.SplitList(b); err == nil {
+		ac.StorageChanges, err = decodeSlotChangesList(list, budget, arena)
+	}
 	if err != nil {
 		return fmt.Errorf("read StorageChanges: %w", err)
 	}
-	ac.StorageChanges = slots
-
-	reads, err := decodeStorageKeys(s, budget, arena)
+	if list, b, err = rlp.SplitList(b); err == nil {
+		ac.StorageReads, err = decodeStorageKeys(list, budget, arena)
+	}
 	if err != nil {
 		return fmt.Errorf("read StorageReads: %w", err)
 	}
-	ac.StorageReads = reads
-
-	tmpBalances, err := decodeChangeList(s, budget, &arena.balances, &arena.balancePtrs, (*BalanceChange).decodeContent)
+	if list, b, err = rlp.SplitList(b); err == nil {
+		ac.BalanceChanges, err = decodeChangeList(list, budget, &arena.balances, &arena.balancePtrs, (*BalanceChange).decodeContent)
+	}
 	if err != nil {
 		return fmt.Errorf("read BalanceChanges: %w", err)
 	}
-	ac.BalanceChanges = tmpBalances
-
-	nonces, err := decodeChangeList(s, budget, &arena.nonces, &arena.noncePtrs, (*NonceChange).decodeContent)
+	if list, b, err = rlp.SplitList(b); err == nil {
+		ac.NonceChanges, err = decodeChangeList(list, budget, &arena.nonces, &arena.noncePtrs, (*NonceChange).decodeContent)
+	}
 	if err != nil {
 		return fmt.Errorf("read NonceChanges: %w", err)
 	}
-	ac.NonceChanges = nonces
-
-	codes, err := decodeChangeList(s, budget, &arena.codes, &arena.codePtrs, func(cc *CodeChange, b []byte) error {
-		return cc.decodeContent(b, arena.viewInput)
-	})
+	if list, b, err = rlp.SplitList(b); err == nil {
+		ac.CodeChanges, err = decodeChangeList(list, budget, &arena.codes, &arena.codePtrs, func(cc *CodeChange, b []byte) error {
+			return cc.decodeContent(b, arena.viewInput)
+		})
+	}
 	if err != nil {
 		return fmt.Errorf("read CodeChanges: %w", err)
 	}
-	ac.CodeChanges = codes
-
-	return s.ListEnd()
+	return requireEnd(b)
 }
 
 func (ac *AccountChanges) Normalize() {
@@ -491,25 +496,28 @@ func (sc *SlotChanges) EncodeRLP(w io.Writer) error {
 }
 
 func (sc *SlotChanges) DecodeRLP(s *rlp.Stream) error {
-	return sc.decodeRLP(s, nil, &blockAccessListArena{})
-}
-
-func (sc *SlotChanges) decodeRLP(s *rlp.Stream, budget *blockAccessListDecodeBudget, arena *blockAccessListArena) error {
-	if _, err := s.List(); err != nil {
+	b, err := s.ViewList()
+	if err != nil {
 		return err
 	}
-	slot, err := decodeMinimalHash(s)
+	return sc.decodeContent(b, nil, &blockAccessListArena{})
+}
+
+func (sc *SlotChanges) decodeContent(b []byte, budget *blockAccessListDecodeBudget, arena *blockAccessListArena) error {
+	var slot uint256.Int
+	b, err := rlp.SplitUint256(b, &slot)
 	if err != nil {
 		return fmt.Errorf("read Slot: %w", err)
 	}
-	sc.Slot = accounts.InternKey(slot)
-	changes, err := decodeChangeList(s, budget, &arena.storage, &arena.storagePtrs, (*StorageChange).decodeContent)
+	sc.Slot = accounts.InternKey(slot.Bytes32())
+	var list []byte
+	if list, b, err = rlp.SplitList(b); err == nil {
+		sc.Changes, err = decodeChangeList(list, budget, &arena.storage, &arena.storagePtrs, (*StorageChange).decodeContent)
+	}
 	if err != nil {
 		return fmt.Errorf("read Changes: %w", err)
 	}
-	sc.Changes = changes
-
-	return s.ListEnd()
+	return requireEnd(b)
 }
 
 func (sc *StorageChange) EncodingSize() int {
@@ -549,7 +557,7 @@ func (sc *StorageChange) decodeContent(b []byte) (err error) {
 	if b, err = rlp.SplitUint256(b, &sc.Value); err != nil {
 		return fmt.Errorf("read Value: %w", err)
 	}
-	return endOfChange(b)
+	return requireEnd(b)
 }
 
 func (bc *BalanceChange) EncodingSize() int {
@@ -589,7 +597,7 @@ func (bc *BalanceChange) decodeContent(b []byte) (err error) {
 	if b, err = rlp.SplitUint256(b, &bc.Value); err != nil {
 		return fmt.Errorf("read Value: %w", err)
 	}
-	return endOfChange(b)
+	return requireEnd(b)
 }
 
 func (nc *NonceChange) EncodingSize() int {
@@ -627,7 +635,7 @@ func (nc *NonceChange) decodeContent(b []byte) (err error) {
 	if nc.Value, b, err = rlp.SplitUint64(b); err != nil {
 		return fmt.Errorf("read Value: %w", err)
 	}
-	return endOfChange(b)
+	return requireEnd(b)
 }
 
 func (cc *CodeChange) EncodingSize() int {
@@ -669,7 +677,7 @@ func (cc *CodeChange) decodeContent(b []byte, viewInput bool) (err error) {
 	if !viewInput {
 		cc.Bytecode = bytes.Clone(cc.Bytecode)
 	}
-	return endOfChange(b)
+	return requireEnd(b)
 }
 
 func splitBlockAccessIndex(b []byte) (uint32, []byte, error) {
@@ -683,11 +691,11 @@ func splitBlockAccessIndex(b []byte) (uint32, []byte, error) {
 	return uint32(idx), rest, nil
 }
 
-var errTrailingChangeData = errors.New("rlp: trailing data in block access list change")
+var errTrailingBlockAccessListData = errors.New("rlp: trailing data in a block access list item")
 
-func endOfChange(rest []byte) error {
+func requireEnd(rest []byte) error {
 	if len(rest) > 0 {
-		return errTrailingChangeData
+		return errTrailingBlockAccessListData
 	}
 	return nil
 }
@@ -1005,18 +1013,20 @@ func encodeAccountChanges(list []AccountChanges, w io.Writer, b []byte) error {
 	return nil
 }
 
-func decodeSlotChangesList(s *rlp.Stream, budget *blockAccessListDecodeBudget, arena *blockAccessListArena) ([]SlotChanges, error) {
-	if _, err := s.List(); err != nil {
-		return nil, err
-	}
+func decodeSlotChangesList(list []byte, budget *blockAccessListDecodeBudget, arena *blockAccessListArena) ([]SlotChanges, error) {
 	start := len(arena.slots)
-	for s.MoreDataInList() {
+	for len(list) > 0 {
 		if err := budget.takeItem(); err != nil {
 			return nil, err
 		}
+		item, rest, err := rlp.SplitList(list)
+		if err != nil {
+			return nil, err
+		}
+		list = rest
 		arena.slots = append(arena.slots, SlotChanges{})
 		sc := &arena.slots[len(arena.slots)-1]
-		if err := sc.decodeRLP(s, budget, arena); err != nil {
+		if err := sc.decodeContent(item, budget, arena); err != nil {
 			return nil, err
 		}
 		if budget != nil && len(sc.Changes) == 0 {
@@ -1026,27 +1036,21 @@ func decodeSlotChangesList(s *rlp.Stream, budget *blockAccessListDecodeBudget, a
 			return nil, fmt.Errorf("%w: slots must be strictly increasing", ErrInvalidBlockAccessList)
 		}
 	}
-	if err := s.ListEnd(); err != nil {
-		return nil, err
-	}
 	return clipArena(arena.slots, start), nil
 }
 
 func decodeChangeList[T any, P interface {
 	*T
 	GetIndex() uint32
-}](s *rlp.Stream, budget *blockAccessListDecodeBudget, values *[]T, ptrs *[]*T, decode func(P, []byte) error) ([]*T, error) {
-	list, err := s.ViewList()
-	if err != nil {
-		return nil, err
-	}
+}](list []byte, budget *blockAccessListDecodeBudget, values *[]T, ptrs *[]*T, decode func(P, []byte) error) ([]*T, error) {
 	start := len(*ptrs)
 	var lastIndex uint32
 	for len(list) > 0 {
-		var item []byte
-		if item, list, err = rlp.SplitList(list); err != nil {
+		item, rest, err := rlp.SplitList(list)
+		if err != nil {
 			return nil, err
 		}
+		list = rest
 		var zero T
 		*values = append(*values, zero)
 		change := &(*values)[len(*values)-1]
@@ -1068,26 +1072,22 @@ func decodeChangeList[T any, P interface {
 	return clipArena(*ptrs, start), nil
 }
 
-func decodeStorageKeys(s *rlp.Stream, budget *blockAccessListDecodeBudget, arena *blockAccessListArena) ([]common.Hash, error) {
-	if _, err := s.List(); err != nil {
-		return nil, err
-	}
+func decodeStorageKeys(list []byte, budget *blockAccessListDecodeBudget, arena *blockAccessListArena) ([]common.Hash, error) {
 	start := len(arena.reads)
-	for s.MoreDataInList() {
+	for len(list) > 0 {
 		if err := budget.takeItem(); err != nil {
 			return nil, err
 		}
-		h, err := decodeMinimalHash(s)
-		if err != nil {
+		var v uint256.Int
+		var err error
+		if list, err = rlp.SplitUint256(list, &v); err != nil {
 			return nil, err
 		}
+		h := common.Hash(v.Bytes32())
 		if budget != nil && len(arena.reads) > start && arena.reads[len(arena.reads)-1].Cmp(h) >= 0 {
 			return nil, fmt.Errorf("%w: storage reads must be strictly increasing", ErrInvalidBlockAccessList)
 		}
 		arena.reads = append(arena.reads, h)
-	}
-	if err := s.ListEnd(); err != nil {
-		return nil, err
 	}
 	return clipArena(arena.reads, start), nil
 }
