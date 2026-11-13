@@ -7,6 +7,7 @@ import (
 	"os"
 	"runtime"
 	"runtime/pprof"
+	"runtime/trace"
 	"sync"
 	"syscall"
 	"time"
@@ -34,6 +35,11 @@ func Begin() func() {
 			return func() {}
 		}
 		return func() { pprof.StopCPUProfile(); keep("npcpu", buf.Bytes()) }
+	case "trace":
+		if trace.Start(&buf) != nil {
+			return func() {}
+		}
+		return func() { trace.Stop(); keep("nptrace", buf.Bytes()) }
 	case "fgprof":
 		stop := fgprof.Start(&buf, fgprof.FormatPprof)
 		return func() {
