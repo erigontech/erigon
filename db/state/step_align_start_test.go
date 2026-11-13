@@ -129,3 +129,12 @@ func generatePlainCommitmentFile(t *testing.T, dirs datadir.Dirs, ranges []testF
 		require.NoError(t, os.Rename(path, filepath.Join(dirs.SnapDomain, "v2.2-"+strings.TrimPrefix(filepath.Base(path), "v1.0-"))))
 	}
 }
+
+func TestStepAlignedEndRefusesOverlappingFiles(t *testing.T) {
+	t.Parallel()
+	db, agg := testDbAndAggregatorv3(t, 10)
+	generateStandaloneIIFile(t, kv.LogAddrIdx, agg.Dirs(), []testFileRange{{0, 2}, {1, 3}, {2, 4}})
+	require.NoError(t, agg.OpenFolder(db))
+	_, err := agg.StepAlignedEnd(20)
+	require.ErrorContains(t, err, "no visible file for txNum 20-10")
+}

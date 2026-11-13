@@ -152,6 +152,13 @@ func (at *AggregatorRoTx) stepAlignedEnd(stepSize uint64) (uint64, error) {
 			break
 		}
 	}
+	for _, files := range lists {
+		for i := 1; i < len(files) && files[i].startTxNum < end; i++ {
+			if prev := files[i-1].endTxNum; files[i].startTxNum != prev {
+				return 0, fmt.Errorf("%s: no visible file for txNum %d-%d", files[i].Fullpath(), prev, files[i].startTxNum)
+			}
+		}
+	}
 	if com := at.d[kv.CommitmentDomain]; com != nil && com.d.Enabled {
 		for _, d := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain} {
 			if dt := at.d[d]; dt != nil && dt.d.Enabled && !slices.Equal(fileRangesUpTo(dt.files, end), fileRangesUpTo(com.files, end)) {
