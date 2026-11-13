@@ -2055,7 +2055,12 @@ func TestDispatchLimitBoundsEveryBlock(t *testing.T) {
 func TestAsyncBALBuilderWorkerSurvivesPanic(t *testing.T) {
 	var a asyncBALBuilder
 	a.add(nil, 1)
-	require.Panics(t, func() { a.finish() })
+	var raised any
+	func() {
+		defer func() { raised = recover() }()
+		a.finish()
+	}()
+	require.Contains(t, fmt.Sprint(raised), "ReadSet", "the raised panic keeps the stack of the builder goroutine")
 
 	a.add(state.NewVersionedIO(1), 1)
 	b := a.finish()

@@ -8,6 +8,7 @@ import (
 	"maps"
 	"math"
 	"os"
+	"runtime/debug"
 	"runtime/pprof"
 	"slices"
 	"sort"
@@ -300,7 +301,11 @@ func (j balBuildJob) run() {
 	if a.err != nil {
 		return
 	}
-	defer func() { a.err = recover() }()
+	defer func() {
+		if r := recover(); r != nil {
+			a.err = fmt.Errorf("%v\n%s", r, debug.Stack())
+		}
+	}()
 	if h := balBuildJobHook; h != nil {
 		h(a)
 	}
