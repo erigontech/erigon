@@ -28,6 +28,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v3"
 
+	"github.com/erigontech/erigon/cmd/utils/cmdtest"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -58,6 +59,23 @@ func TestNewStateTestSharedDomainsUsesSelectedCommitment(t *testing.T) {
 			require.Equal(t, tc.variant, sd.GetCommitmentCtx().Trie().Variant())
 		})
 	}
+}
+
+// erigon logs its env overrides while its packages initialize, before a
+// runner sets up logging. They must stay off stdout, which carries only the
+// results.
+func TestEnvOverrideWarningsStayOffStdout(t *testing.T) {
+	tt := cmdtest.NewTestCmd(t, nil)
+	tt.Env = []string{"ERIGON_MERGE_THROTTLE_MS=0"}
+	tt.Run("evm-test", "statetest", "--jsonout", filepath.Join("testdata", "statetest.json"))
+	stdout := tt.Output()
+	tt.WaitExit()
+	require.Equal(t, 0, tt.ExitStatus())
+
+	var results []testResult
+	require.NoError(t, json.Unmarshal(stdout, &results), string(stdout))
+	require.NotEmpty(t, results)
+	require.Contains(t, tt.StderrText(), "ERIGON_MERGE_THROTTLE_MS")
 }
 
 // Batch mode reuses one scratch DB for every file on stdin, so a subtest's

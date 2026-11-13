@@ -23,25 +23,32 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
 	"slices"
 	"sync"
+	"sync/atomic"
 
 	"github.com/urfave/cli/v3"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/tests/testutil"
+	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 var blockTestCommand = cli.Command{
 	Action:    blockTestCmd,
 	Name:      "blocktest",
-	Usage:     "Executes the given blockchain tests. Filenames can be fed via standard input (batch mode) or as an argument (one-off execution).",
-	ArgsUsage: "<path>",
+	Usage:     "Executes the given blockchain tests. Paths (files or directories) are given as arguments, or filenames fed via standard input (batch mode).",
+	ArgsUsage: "<path>...",
 	Flags: []cli.Flag{
+		&BALReportFlag,
+		&BALSequentialFlag,
+		&BALWithholdFlag,
 		&DumpFlag,
 		&JSONOutputFlag,
 		&RunFlag,
@@ -52,8 +59,6 @@ var blockTestCommand = cli.Command{
 }
 
 func blockTestCmd(_ context.Context, ctx *cli.Command) error {
-	path := ctx.Args().First()
-
 	// Set up logging
 	if ctx.Int(VerbosityFlag.Name) > 0 {
 		log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(ctx.Int(VerbosityFlag.Name)), log.StderrHandler))
@@ -70,29 +75,40 @@ func blockTestCmd(_ context.Context, ctx *cli.Command) error {
 		return err
 	}
 
-	if len(path) != 0 {
-		collected := filter.filterFiles(collectFiles(path))
-		results, err := runBlockTestsParallel(collected, workers, filter)
+	if ctx.Bool(BALWithholdFlag.Name) {
+		dbg.SetIgnoreBAL(true)
+	}
+	reportPath := runnerExecutionPathReporter(ctx)
+	var incomplete incompleteRun
+	if ctx.Args().Present() {
+		files, err := collectArgFiles(ctx)
 		if err != nil {
-			return err
+			return exitIncomplete(err)
 		}
+		results := incomplete.run(filter.filterFiles(files), workers, func(path string) ([]testResult, error) {
+			return runBlockTest(ctx, path, filter, reportPath)
+		})
 		report(ctx, results)
-		return nil
+		return incomplete.status(anyFailed(results))
 	}
 	// Otherwise, read filenames from stdin and execute back-to-back.
+	runFile := incomplete.wrap(func(path string) ([]testResult, error) {
+		return runBlockTest(ctx, path, filter, reportPath)
+	})
+	failed := false
 	scanner := bufio.NewScanner(os.Stdin)
 	for scanner.Scan() {
 		fname := scanner.Text()
 		if len(fname) == 0 {
-			return nil
+			break
 		}
-		results, err := runBlockTest(fname, filter)
-		if err != nil {
-			return err
+		// A file that cannot be read or decoded has no results to report.
+		if results, _ := runFile(fname); results != nil {
+			report(ctx, results)
+			failed = failed || anyFailed(results)
 		}
-		report(ctx, results)
 	}
-	return nil
+	return incomplete.status(failed)
 }
 
 // fileResult holds the results from processing a single fixture file.
@@ -100,12 +116,6 @@ type fileResult struct {
 	index   int
 	results []testResult
 	err     error
-}
-
-func runBlockTestsParallel(files []string, workers uint64, filter testFilter) ([]testResult, error) {
-	return runTestFilesParallel(files, workers, func(path string) ([]testResult, error) {
-		return runBlockTest(path, filter)
-	})
 }
 
 func runTestFilesParallel(files []string, workers uint64, runner func(string) ([]testResult, error)) ([]testResult, error) {
@@ -168,21 +178,105 @@ func runTestFilesParallel(files []string, workers uint64, runner func(string) ([
 	return results, nil
 }
 
-// collectFiles walks the given path and returns all JSON files.
-// If path is a file, it returns that file directly.
-func collectFiles(path string) []string {
-	info, err := os.Stat(path)
+// The exit statuses of a blocktest or enginetest run in which a fixture
+// failed, and of one that could not run all of its input.
+const (
+	exitFailedRun     = 1
+	exitIncompleteRun = 2
+)
+
+// incompleteRun records the fixture files and fixtures a run could not decode.
+type incompleteRun struct {
+	seen atomic.Bool
+}
+
+// wrap reports a file or fixture that runner cannot decode on stderr and
+// keeps the run going with the results it has.
+func (r *incompleteRun) wrap(runner func(string) ([]testResult, error)) func(string) ([]testResult, error) {
+	return func(path string) ([]testResult, error) {
+		results, err := runner(path)
+		if err != nil {
+			r.seen.Store(true)
+			fmt.Fprintf(os.Stderr, "%s: %v\n", path, err)
+		}
+		return results, nil
+	}
+}
+
+// run runs runner over files on workers, recording any file it cannot run.
+func (r *incompleteRun) run(files []string, workers uint64, runner func(string) ([]testResult, error)) []testResult {
+	// wrap never returns an error, so neither does the parallel run.
+	results, _ := runTestFilesParallel(files, workers, r.wrap(runner))
+	return results
+}
+
+// status returns the error that sets the run's exit status: exitIncompleteRun
+// when it could not run all of its input, else exitFailedRun when a fixture
+// failed, else nil.
+func (r *incompleteRun) status(failed bool) error {
+	if r.seen.Load() {
+		return exitIncomplete(errors.New("could not run all of the input"))
+	}
+	if failed {
+		return cli.Exit("", exitFailedRun)
+	}
+	return nil
+}
+
+func anyFailed(results []testResult) bool {
+	for _, r := range results {
+		if !r.Pass {
+			return true
+		}
+	}
+	return false
+}
+
+// exitIncomplete reports err on stderr and returns the error that exits with
+// exitIncompleteRun; erigon's exit handler prints nothing for an exit code.
+func exitIncomplete(err error) error {
+	fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+	return cli.Exit("", exitIncompleteRun)
+}
+
+// collectArgFiles returns the fixture files under every path argument, or an
+// error for a path that cannot be read.
+func collectArgFiles(ctx *cli.Command) ([]string, error) {
+	files := make([]string, 0, ctx.Args().Len())
+	for _, path := range ctx.Args().Slice() {
+		found, err := collectFiles(path)
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, found...)
+	}
+	for _, path := range files {
+		f, err := os.Open(path)
+		if err != nil {
+			return nil, err
+		}
+		f.Close()
+	}
+	return files, nil
+}
+
+// collectFiles returns path if it is a file, else every JSON file under it. It
+// follows a path that is a symlink to a directory, which WalkDir does not
+// descend into.
+func collectFiles(path string) ([]string, error) {
+	root, err := filepath.EvalSymlinks(path)
 	if err != nil {
-		return nil
+		return nil, err
 	}
-
+	info, err := os.Stat(root)
+	if err != nil {
+		return nil, err
+	}
 	if !info.IsDir() {
-		return []string{path}
+		return []string{path}, nil
 	}
-
-	// Pre-allocate with a reasonable estimate to avoid repeated slice growth
-	out := make([]string, 0, 256)
-	err = filepath.WalkDir(path, func(path string, d os.DirEntry, err error) error {
+	var out []string
+	err = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -191,42 +285,76 @@ func collectFiles(path string) []string {
 		}
 		return nil
 	})
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error walking path %s: %v\n", path, err)
-	}
-
-	return out
+	return out, err
 }
 
-func runBlockTest(fname string, filter testFilter) ([]testResult, error) {
+// runBlockTest runs the blockchain test fixtures in fname.
+func runBlockTest(ctx *cli.Command, fname string, filter testFilter, reportPath func(ethconfig.BlockExecutionPath)) ([]testResult, error) {
+	return runFixtures(ctx, fname, filter, reportPath, func() (fixture, *testutil.BlockTest) {
+		test := new(testutil.BlockTest)
+		return test, test
+	})
+}
+
+// A fixture decodes from JSON and runs on the BlockTest newTest returns with it.
+type fixture interface {
+	RunCLI() error
+}
+
+// runFixtures runs the fixtures in fname, each decoded into a new fixture from
+// newTest. Its error names a fixture that cannot be decoded, which also gets a
+// failed result, or the file itself.
+func runFixtures(ctx *cli.Command, fname string, filter testFilter, reportPath func(ethconfig.BlockExecutionPath), newTest func() (fixture, *testutil.BlockTest)) ([]testResult, error) {
 	src, err := os.ReadFile(fname)
 	if err != nil {
 		return nil, err
 	}
-
-	var tests map[string]*testutil.BlockTest
-	if err := json.Unmarshal(src, &tests); err != nil {
+	names, fixtures, err := splitFixtures(src)
+	if err != nil {
 		return nil, err
 	}
 
-	// Pull out keys to sort and ensure tests are run in order
-	keys := slices.Sorted(maps.Keys(tests))
-
-	// Run all the tests
-	results := make([]testResult, 0, len(keys))
-	for _, name := range keys {
+	results := make([]testResult, 0, len(names))
+	var unreadable []error
+	for _, name := range names {
 		if !filter.includeCase(fname, name) {
 			continue
 		}
-
-		result := &testResult{Name: name, Pass: true}
-		if err := tests[name].RunCLI(); err != nil {
+		test, bt := newTest()
+		if err := json.Unmarshal(fixtures[name], test); err != nil {
+			results = append(results, unreadableFixture(name, err))
+			unreadable = append(unreadable, fmt.Errorf("fixture %s: %w", name, err))
+			continue
+		}
+		if ctx.Bool(BALSequentialFlag.Name) {
+			bt.ExecWorkers = 1
+		}
+		bt.ExecutionPathReporter = reportPath
+		result := testResult{Name: name, Pass: true}
+		if err := test.RunCLI(); err != nil {
 			result.Pass = false
 			result.Error = err.Error()
 		}
-
-		results = append(results, *result)
+		result.Rejections = rejections(bt.Rejections)
+		results = append(results, result)
 	}
 
-	return results, nil
+	return results, errors.Join(unreadable...)
+}
+
+// splitFixtures splits a fixture file into its fixtures and their sorted
+// names, so a fixture that cannot be decoded fails alone.
+func splitFixtures(src []byte) ([]string, map[string]json.RawMessage, error) {
+	var fixtures map[string]json.RawMessage
+	if err := json.Unmarshal(src, &fixtures); err != nil {
+		return nil, nil, err
+	}
+	if fixtures == nil {
+		return nil, nil, errors.New("not a JSON object of fixtures")
+	}
+	return slices.Sorted(maps.Keys(fixtures)), fixtures, nil
+}
+
+func unreadableFixture(name string, err error) testResult {
+	return testResult{Name: name, Error: err.Error(), Rejections: rejections(nil)}
 }

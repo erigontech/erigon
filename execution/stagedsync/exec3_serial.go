@@ -144,6 +144,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			se.logger.Error(fmt.Sprintf("[%s] BLOCK PROCESSING FAILED: Amsterdam processing is not supported by serial exec", se.logPrefix), "fork-block", blockNum)
 			return nil, rwTx, fmt.Errorf("amsterdam processing is not supported by serial exec from block: %d", blockNum)
 		}
+		se.reportExecutionPath(b.NumberU64(), b.Hash(), "sequential", "serial-exec", false)
 
 		blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, func(hash common.Hash, number uint64) (*types.Header, error) {
 			getHashFnMutex.Lock()

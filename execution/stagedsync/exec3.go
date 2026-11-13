@@ -47,6 +47,7 @@ import (
 	"github.com/erigontech/erigon/execution/tests/chaos_monkey"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/shards"
 )
 
@@ -672,6 +673,21 @@ func (te *txExecutor) readHookBlock(ctx context.Context, tx kv.Tx, blockHash com
 		err = fmt.Errorf("block %d %x not found", blockNum, blockHash)
 	}
 	return b, err
+}
+
+// reportExecutionPath skips genesis, which is never executed.
+func (te *txExecutor) reportExecutionPath(number uint64, hash common.Hash, path, reason string, accessList bool) {
+	report := te.cfg.syncCfg.ExecutionPathReporter
+	if report == nil || number == 0 {
+		return
+	}
+	report(ethconfig.BlockExecutionPath{
+		Number:     number,
+		Hash:       hash,
+		Path:       path,
+		Reason:     reason,
+		AccessList: accessList,
+	})
 }
 
 func blockAccessList(blockTx kv.Getter, block *types.Block, blockNum uint64) (types.BlockAccessList, error) {

@@ -1379,6 +1379,13 @@ func (pe *parallelExecutor) startBlock(ctx context.Context, be *blockExecutor) e
 			return fmt.Errorf("seed EIP-161 removals of block %d: %w", be.blockNum, err)
 		}
 	}
+	if be.execStarted.IsZero() {
+		if pe.cfg.syncCfg.ExecWorkerCount <= 1 {
+			pe.reportExecutionPath(be.blockNum, be.blockHash, "sequential", "disabled", be.versionMap.HasBAL)
+		} else {
+			pe.reportExecutionPath(be.blockNum, be.blockHash, "parallel", "", be.versionMap.HasBAL)
+		}
+	}
 	be.execStarted = time.Now()
 	be.scheduleExecution(ctx, pe)
 	return nil

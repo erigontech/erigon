@@ -249,7 +249,10 @@ func printTimings(results []testResult) {
 // to be a valid engine-x fixture; an unmarshal error is treated as a hard
 // failure rather than silently skipped.
 func loadEngineXGroups(path string, re *regexp.Regexp) (map[engineXGroupKey][]engineXNamedTest, int, error) {
-	files := collectFiles(path)
+	files, err := collectFiles(path)
+	if err != nil {
+		return nil, 0, err
+	}
 	groups := make(map[engineXGroupKey][]engineXNamedTest)
 	total := 0
 	for _, fname := range files {

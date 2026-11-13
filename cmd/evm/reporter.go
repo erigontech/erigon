@@ -29,6 +29,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tests/testutil"
 )
 
 const (
@@ -39,13 +40,22 @@ const (
 // testResult contains the execution status after running a block test, any
 // error that might have occurred and a dump of the final state if requested.
 type testResult struct {
-	Name  string       `json:"name"`
-	Pass  bool         `json:"pass"`
-	Root  *common.Hash `json:"stateRoot,omitempty"`
-	Fork  string       `json:"fork,omitempty"`
-	Error string       `json:"error"`
-	State *state.Dump  `json:"state,omitempty"`
-	Stats *execStats   `json:"benchStats,omitempty"`
+	Name       string                `json:"name"`
+	Pass       bool                  `json:"pass"`
+	Root       *common.Hash          `json:"stateRoot,omitempty"`
+	Fork       string                `json:"fork,omitempty"`
+	Error      string                `json:"error"`
+	Rejections *[]testutil.Rejection `json:"rejections,omitempty"`
+	State      *state.Dump           `json:"state,omitempty"`
+	Stats      *execStats            `json:"benchStats,omitempty"`
+}
+
+// rejections returns r for a result, with no rejections as an empty list.
+func rejections(r []testutil.Rejection) *[]testutil.Rejection {
+	if r == nil {
+		r = []testutil.Rejection{}
+	}
+	return &r
 }
 
 func (r testResult) String() string {
