@@ -43,33 +43,34 @@ func TestCommitmentFilesRepeatedUnwind(t *testing.T) {
 		deepUnwindTxNum    = filesEnd + stepSize + 6
 		shallowUnwindTxNum = filesEnd + 2*stepSize + 3
 	)
+	keys := mkAddrs(0x10, 24)
+	nibble := func(key []byte) byte { return crypto.Keccak256(key)[0] >> 4 }
+	targetIdx, siblingIdx, otherBranchIdx := -1, -1, -1
+	var buckets [16][]int
+	for i, key := range keys {
+		buckets[nibble(key)] = append(buckets[nibble(key)], i)
+	}
+	for _, bucket := range buckets {
+		if len(bucket) == 2 && crypto.Keccak256(keys[bucket[0]])[0] != crypto.Keccak256(keys[bucket[1]])[0] {
+			targetIdx, siblingIdx = bucket[0], bucket[1]
+			break
+		}
+	}
+	require.NotEqual(t, -1, targetIdx, "need exactly two accounts below a one-nibble branch")
+	for i := range keys {
+		if nibble(keys[i]) != nibble(keys[targetIdx]) {
+			otherBranchIdx = i
+			break
+		}
+	}
+	require.NotEqual(t, -1, otherBranchIdx, "need an account in another branch")
+
 	for _, references := range []bool{false, true} {
 		for _, branch := range []string{"existing", "recreated_db", "recreated_files"} {
 			t.Run(fmt.Sprintf("references_%t/%s", references, branch), func(t *testing.T) {
 				ctx := t.Context()
 				db, agg := testDbAndAggregatorv3(t, stepSize)
 				agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, references)
-				keys := mkAddrs(0x10, 24)
-				nibble := func(key []byte) byte { return crypto.Keccak256(key)[0] >> 4 }
-				targetIdx, siblingIdx, otherBranchIdx := -1, -1, -1
-				var buckets [16][]int
-				for i, key := range keys {
-					buckets[nibble(key)] = append(buckets[nibble(key)], i)
-				}
-				for _, bucket := range buckets {
-					if len(bucket) == 2 && crypto.Keccak256(keys[bucket[0]])[0] != crypto.Keccak256(keys[bucket[1]])[0] {
-						targetIdx, siblingIdx = bucket[0], bucket[1]
-						break
-					}
-				}
-				require.NotEqual(t, -1, targetIdx, "need exactly two accounts below a one-nibble branch")
-				for i := range keys {
-					if nibble(keys[i]) != nibble(keys[targetIdx]) {
-						otherBranchIdx = i
-						break
-					}
-				}
-				require.NotEqual(t, -1, otherBranchIdx, "need an account in another branch")
 				account := func(nonce uint64) []byte {
 					acc := accounts.Account{Nonce: nonce, Balance: *uint256.NewInt(nonce), CodeHash: accounts.EmptyCodeHash}
 					return accounts.SerialiseV3(&acc)
