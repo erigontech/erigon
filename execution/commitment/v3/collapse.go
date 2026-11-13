@@ -18,7 +18,6 @@ package v3
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"math/bits"
 	"slices"
@@ -29,8 +28,6 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
-
-var errReadOnlyContext = errors.New("commitment v3: read-only branch context")
 
 type collapseCell struct {
 	hext             []byte
@@ -429,12 +426,6 @@ func (r branchReader) Branch(key []byte) ([]byte, kv.Step, error) {
 	data, err := r(key)
 	return data, 0, err
 }
-
-func (branchReader) PutBranch([]byte, []byte, []byte) error { return errReadOnlyContext }
-
-func (branchReader) Account([]byte) (*commitment.Update, error) { return nil, errReadOnlyContext }
-
-func (branchReader) Storage([]byte) (*commitment.Update, error) { return nil, errReadOnlyContext }
 
 func (t *Trie) BranchChildCount(read func([]byte) ([]byte, error), nibblePrefix []byte) (int, error) {
 	ctx := branchReader(read)

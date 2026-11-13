@@ -235,7 +235,7 @@ func (m *RecordMatcher) startStoragePlane() error {
 	}
 	m.rootsFile = f
 	w := bufio.NewWriter(f)
-	if err := etl.MergeLoad("commitment v3 verify", []*etl.Collector{m.roots}, func(k, v []byte) error {
+	if err := m.roots.Load(nil, "", func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
 		if _, err := w.Write(k); err != nil {
 			return err
 		}

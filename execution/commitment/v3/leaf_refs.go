@@ -26,7 +26,7 @@ type leafRefSource interface {
 	LeafRefs(key, data []byte) *commitment.LeafRefs
 }
 
-func leafRefsOf(ctx commitment.PatriciaContext, key, data []byte) *commitment.LeafRefs {
+func leafRefsOf(ctx brancher, key, data []byte) *commitment.LeafRefs {
 	if s, ok := ctx.(leafRefSource); ok {
 		return s.LeafRefs(key, data)
 	}

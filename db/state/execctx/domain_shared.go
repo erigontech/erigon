@@ -886,30 +886,26 @@ func (sd *SharedDomains) unwindCollectedTouches(diffs *[kv.DomainLen][]kv.Domain
 	if updates.Mode() != commitment.ModeCollect {
 		return
 	}
-	retouch := func(domain kv.Domain, key string) {
+	retouch := func(key string) {
+		domain := kv.StorageDomain
+		if len(key) == length.Addr {
+			domain = kv.AccountsDomain
+		}
 		if v, _, _, ok := sd.latestFromMem(domain, []byte(key)); ok {
 			sd.sdCtx.TouchKey(domain, key, v)
 		}
 	}
 	if diffs == nil {
 		for _, key := range updates.UntouchAll() {
-			if len(key) == length.Addr {
-				retouch(kv.AccountsDomain, key)
-			} else {
-				retouch(kv.StorageDomain, key)
-			}
+			retouch(key)
 		}
 		return
 	}
 	for _, d := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
-		domain := kv.AccountsDomain
-		if d == kv.StorageDomain {
-			domain = kv.StorageDomain
-		}
 		for _, diff := range diffs[d] {
 			key := diff.Key[:len(diff.Key)-8]
 			if updates.Untouch(key) {
-				retouch(domain, strings.Clone(key))
+				retouch(strings.Clone(key))
 			}
 		}
 	}
