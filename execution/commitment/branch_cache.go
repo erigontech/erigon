@@ -83,7 +83,7 @@ type BranchCache struct {
 
 type branchCacheEntry struct {
 	data  []byte
-	step  uint64 // on-disk file step; 0 = untracked
+	step  uint64 // MDBX row step or snapshot file's exclusive end step; 0 also represents untracked
 	txN   uint64 // validity bound for published or pinned entries
 	epoch uint32
 	// Read fills have no logical txNum bound: an unwind can reuse an older row.
@@ -581,7 +581,9 @@ func (c *BranchCache) Get(prefix []byte) ([]byte, uint64, bool) {
 	return c.GetBefore(prefix, ^uint64(0))
 }
 
-// GetBefore rejects newer entries without evicting them from other readers.
+// GetBefore rejects entries at or above txNum, leaving otherwise valid entries cached.
+// It also rejects read fills, whose write time is unknown, unless txNum is
+// ^uint64(0) (unbounded).
 func (c *BranchCache) GetBefore(prefix []byte, txNum uint64) ([]byte, uint64, bool) {
 	if isCommitmentStateKey(prefix) {
 		return nil, 0, false
@@ -623,8 +625,9 @@ func (c *BranchCache) Put(prefix []byte, data []byte, step, txN uint64) {
 	})
 }
 
-// Fill copies a branch read through MDBX txn viewID. It drops the read if that txn is older than the latest
-// committed publication or unwind, or if an Unwind or Clear ran during the read.
+// Fill copies a branch read through MDBX txn viewID. The view ID rejects snapshots
+// older than the latest committed publication or unwind. Before storing the copy,
+// it rechecks the epoch to detect Unwind or Clear since Fill started.
 func (c *BranchCache) Fill(prefix []byte, data []byte, step, viewID uint64) {
 	epoch := c.coh.Epoch()
 	if viewID < c.committedView.Load() || isCommitmentStateKey(prefix) {

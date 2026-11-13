@@ -1583,8 +1583,13 @@ func (d *Domain) integrateDirtyFiles(sf StaticFiles, txNumFrom, txNumTo uint64) 
 
 // unwind restores the state before txNumUnwindTo using the supplied diffs
 // and prunes history from txNumUnwindTo onward. The caller manages flushing.
-func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, txNumUnwindTo uint64, domainDiffs []kv.DomainEntryDiff, expandBranch func([]byte, commitment.BranchData, uint64, uint64) (commitment.BranchData, error)) error {
-	// fmt.Printf("[domain][%s] unwinding domain to txNum=%d, step %d\n", d.filenameBase, txNumUnwindTo, step)
+func (dt *DomainRoTx) unwind(
+	ctx context.Context,
+	rwTx kv.RwTx,
+	txNumUnwindTo uint64,
+	domainDiffs []kv.DomainEntryDiff,
+	expandBranch func([]byte, commitment.BranchData, uint64, uint64) (commitment.BranchData, error),
+) error {
 	d := dt.d
 	step := txNumUnwindTo / dt.stepSize
 
@@ -1604,20 +1609,20 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, txNumUnwindTo ui
 	binary.BigEndian.PutUint64(unwindStepInverted, ^uint64(step))
 
 	for _, diff := range domainDiffs {
-		key := common.ToBytesZeroCopy(diff.Key)
-		diffStepInverted, fullKey := key[len(key)-8:], key[:len(key)-8]
+		diffKey := common.ToBytesZeroCopy(diff.Key)
+		diffStepInverted, domainKey := diffKey[len(diffKey)-8:], diffKey[:len(diffKey)-8]
 		var retainedValue []byte
 		var found bool
-		k, v, err := valsCursor.Seek(fullKey)
+		k, v, err := valsCursor.Seek(domainKey)
 		for err == nil && k != nil {
 			var storedStepInverted, value []byte
 			if d.LargeValues {
-				if len(k) != len(fullKey)+8 || !bytes.Equal(k[:len(fullKey)], fullKey) {
+				if len(k) != len(domainKey)+8 || !bytes.Equal(k[:len(domainKey)], domainKey) {
 					break
 				}
-				storedStepInverted, value = k[len(fullKey):], v
+				storedStepInverted, value = k[len(domainKey):], v
 			} else {
-				if !bytes.Equal(k, fullKey) {
+				if !bytes.Equal(k, domainKey) {
 					break
 				}
 				storedStepInverted, value = v[:8], v[8:]
@@ -1645,17 +1650,22 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, txNumUnwindTo ui
 		if diff.Value == nil || txNumUnwindTo%dt.stepSize == 0 || !bytes.Equal(diffStepInverted, unwindStepInverted) {
 			continue
 		}
+		// A branch absent from the trie may still have unreachable bytes in storage.
+		// Creating an empty version for it would leave a restore no retained update owns.
+		if d.Name == kv.CommitmentDomain && len(diff.Value) == 0 {
+			continue
+		}
 		// A value already supplied by an older version needs no new entry.
 		// Otherwise that entry could outlive the changesets of this step.
 		if !found {
-			var from, to uint64
-			retainedValue, found, from, to, err = dt.getLatestFromFiles(fullKey, nil, kv.NoStepBound)
+			var fileStartTxNum, fileEndTxNum uint64
+			retainedValue, found, fileStartTxNum, fileEndTxNum, err = dt.getLatestFromFiles(domainKey, nil, kv.NoStepBound)
 			if err != nil {
 				return err
 			}
 			if found && expandBranch != nil {
 				// Changesets contain full keys, even when the file uses references.
-				retainedValue, err = expandBranch(fullKey, retainedValue, from, to)
+				retainedValue, err = expandBranch(domainKey, retainedValue, fileStartTxNum, fileEndTxNum)
 				if err != nil {
 					return err
 				}
@@ -1664,15 +1674,10 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, txNumUnwindTo ui
 		if bytes.Equal(retainedValue, diff.Value) {
 			continue
 		}
-		// New trie branches record an empty previous value without reading storage.
-		// An older empty branch record already represents that same empty state.
-		if d.Name == kv.CommitmentDomain && len(diff.Value) == 0 && commitment.BranchData(retainedValue).IsEmptyBranchRecord() {
-			continue
-		}
 		if d.LargeValues {
-			err = rwTx.Put(d.ValuesTable, key, diff.Value)
+			err = rwTx.Put(d.ValuesTable, diffKey, diff.Value)
 		} else {
-			err = valsCursor.Put(fullKey, append(unwindStepInverted, diff.Value...)) //nolint:makezero
+			err = valsCursor.Put(domainKey, append(unwindStepInverted, diff.Value...)) //nolint:makezero
 		}
 		if err != nil {
 			return err
@@ -2096,8 +2101,9 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx, maxStep kv.Step) (
 	return nil, 0, false, err
 }
 
-// GetLatest returns value, step in which the value last changed, and bool value which is true if the value
-// is present, and false if it is not present (not set or deleted)
+// GetLatest returns the latest value and its MDBX row step or snapshot file's
+// exclusive end step. The step does not establish when the value became valid.
+// The boolean can be true for an empty deletion record.
 func (dt *DomainRoTx) GetLatest(key []byte, roTx kv.Tx) ([]byte, kv.Step, bool, error) {
 	return dt.getLatest(key, roTx, kv.GetLatestOptions{})
 }

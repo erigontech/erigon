@@ -148,10 +148,8 @@ func (p *ContractTrunkPreloadParallel) Run(
 			endStep = true
 			return false
 		}
-		// step=0: a storage-trunk branch resolved across merged files has no single
-		// source step, and the pinTxNum stamp already gives unwind coherence — the
-		// floor drops a preloaded pin before the cStep<=maxStep gate is consulted,
-		// so leaving step unset only keeps that gate trivially true for live pins.
+		// A branch resolved across merged files has no single source step.
+		// pinTxNum bounds its validity; step-bounded reads bypass the branch cache.
 		cache.PinEntry(pk.key, v, 0, p.pinTxNum)
 		p.usedBytes += cost
 		p.pinned++

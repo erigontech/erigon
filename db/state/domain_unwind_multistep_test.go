@@ -188,7 +188,41 @@ func TestDomain_RepeatedUnwindKeepsVersionOrder(t *testing.T) {
 	}
 }
 
-func TestDomain_UnwindKeepsOlderEmptyBranchRecord(t *testing.T) {
+func TestDomain_UnwindDoesNotRestoreAbsentBranch(t *testing.T) {
+	for _, oldBranch := range [][]byte{{0, 1, 0, 0}, {0, 1, 0, 1, 0}} {
+		t.Run(fmt.Sprintf("old_%x", oldBranch), func(t *testing.T) {
+			db, d := testDbAndDomainOfStep(t, statecfg.Schema.CommitmentDomain, 16, log.New())
+			tx, err := db.BeginRw(t.Context())
+			require.NoError(t, err)
+			defer tx.Rollback()
+			view := d.beginForTests()
+			defer view.Close()
+			writer := view.NewWriter(db)
+			defer writer.Close()
+
+			key := []byte("key")
+			require.NoError(t, writer.PutWithPrev(key, oldBranch, 2, nil))
+			writer.SetDiff(&kv.DomainDiff{})
+			// A branch absent from the trie can still have an old record in storage.
+			require.NoError(t, writer.PutWithPrev(key, []byte{0, 2, 0, 2, 0}, 34, []byte{}))
+			diffs := writer.Diff().GetDiffSet()
+			require.NoError(t, writer.Flush(t.Context(), tx))
+			require.NoError(t, view.unwind(t.Context(), tx, 33, diffs, nil))
+			// This key has no diff in the deeper unwound range.
+			require.NoError(t, view.unwind(t.Context(), tx, 20, nil, nil))
+
+			replacement := []byte{0, 4, 0, 4, 0}
+			writer.SetDiff(nil)
+			require.NoError(t, writer.PutWithPrev(key, replacement, 21, oldBranch))
+			require.NoError(t, writer.Flush(t.Context(), tx))
+			value, _, _, err := view.GetLatest(key, tx)
+			require.NoError(t, err)
+			require.Equal(t, replacement, value)
+		})
+	}
+}
+
+func TestDomain_UnwindRestoresExistingBranch(t *testing.T) {
 	db, d := testDbAndDomainOfStep(t, statecfg.Schema.CommitmentDomain, 16, log.New())
 	tx, err := db.BeginRw(t.Context())
 	require.NoError(t, err)
@@ -198,24 +232,17 @@ func TestDomain_UnwindKeepsOlderEmptyBranchRecord(t *testing.T) {
 	writer := view.NewWriter(db)
 	defer writer.Close()
 
-	key, emptyBranch := []byte("key"), []byte{0, 1, 0, 0}
-	require.NoError(t, writer.PutWithPrev(key, emptyBranch, 2, nil))
+	key, oldBranch, previous := []byte("key"), []byte{0, 1, 0, 0}, []byte{0, 1, 0, 1, 0}
+	require.NoError(t, writer.PutWithPrev(key, oldBranch, 2, nil))
+	require.NoError(t, writer.PutWithPrev(key, previous, 33, oldBranch))
 	writer.SetDiff(&kv.DomainDiff{})
-	// New trie branches record an empty previous value without reading the older record.
-	require.NoError(t, writer.PutWithPrev(key, []byte{0, 1, 0, 1, 0}, 34, []byte{}))
+	require.NoError(t, writer.PutWithPrev(key, []byte{0, 2, 0, 2, 0}, 35, previous))
 	diffs := writer.Diff().GetDiffSet()
 	require.NoError(t, writer.Flush(t.Context(), tx))
-	require.NoError(t, view.unwind(t.Context(), tx, 33, diffs, nil))
-	// This key has no diff in the deeper unwound range.
-	require.NoError(t, view.unwind(t.Context(), tx, 20, nil, nil))
-
-	replacement := []byte{0, 2, 0, 2, 0}
-	writer.SetDiff(nil)
-	require.NoError(t, writer.PutWithPrev(key, replacement, 21, emptyBranch))
-	require.NoError(t, writer.Flush(t.Context(), tx))
+	require.NoError(t, view.unwind(t.Context(), tx, 35, diffs, nil))
 	value, _, _, err := view.GetLatest(key, tx)
 	require.NoError(t, err)
-	require.Equal(t, replacement, value)
+	require.Equal(t, previous, value)
 }
 
 func TestDomain_UnwindRestoresDeletionOverBranchShapedValue(t *testing.T) {

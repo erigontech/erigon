@@ -248,10 +248,10 @@ func (v ReadView) GetAddrCodeHash(addr []byte) ([32]byte, bool) {
 	return v.c.getAddrCodeHash(addr)
 }
 
-// GetCodeByAddressHash resolves the durable addr→codeHash mapping and then
-// probes the content-addressed code cache. On a hit it also fills the
-// addr-keyed code binding with the mapping's original txNum, avoiding both a
-// database read and a redundant keccak of the cached code.
+// GetCodeByAddressHash resolves the cached addr→codeHash mapping and then probes
+// the content-addressed code cache, avoiding a database read and another keccak.
+// On a hit it also offers an addr-keyed binding stamped with the greater of the
+// mapping's validity stamp and the code view's last visible txNum.
 func (v ReadView) GetCodeByAddressHash(addr []byte) ([]byte, bool) {
 	if v.c == nil {
 		return nil, false

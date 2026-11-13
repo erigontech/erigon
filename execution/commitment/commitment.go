@@ -110,7 +110,8 @@ type PatriciaContext interface {
 	// Implementations must copy prefix and data rather than retain them: callers may pass
 	// pooled buffers that are recycled for a later, unrelated update.
 	// A nil prevData asks the writer to read the previous value.
-	// A non-nil empty slice means the previous branch is known to be absent.
+	// A non-nil empty slice means the branch was absent from the trie,
+	// even if an unreachable record remains in storage.
 	PutBranch(prefix []byte, data []byte, prevData []byte) error
 	Account(plainKey []byte) (*Update, error)
 	Storage(plainKey []byte) (*Update, error)
@@ -233,7 +234,7 @@ func getDeferredUpdate(prefix []byte, raw, prev []byte) *DeferredBranchUpdate {
 
 // reuseBytes copies src into dst's backing array, matching bytes.Clone's nil handling:
 // a nil src yields nil, so pool history cannot change the result's nil-ness. Callers
-// distinguish a nil prev ("look it up") from an empty one ("known absent").
+// distinguish a nil prev ("look it up") from an empty one ("absent from the trie").
 func reuseBytes(dst, src []byte) []byte {
 	if src == nil {
 		return nil
@@ -633,10 +634,6 @@ func (branchData BranchData) ChildCount() int {
 }
 
 func (branchData BranchData) IsTombstone() bool { return len(branchData) == 0 }
-
-func (branchData BranchData) IsEmptyBranchRecord() bool {
-	return len(branchData) == 4 && branchData.ChildCount() == 0
-}
 
 func (branchData BranchData) String() string {
 	if branchData.IsTombstone() {
