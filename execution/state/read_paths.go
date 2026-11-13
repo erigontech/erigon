@@ -1289,12 +1289,6 @@ type codeSegment struct {
 func readCodeSegment(s *IntraBlockState, addr accounts.Address, seg *codeSegment) (accounts.Code, ReadSource, Version, error) {
 	if s.warmReadable(addr) {
 		if tr, ok := s.versionedReads.GetCode(addr); ok && warmSource(tr.Source) {
-			if seg != nil && codeBytesDropped(tr.Val) {
-				if _, copied, err := s.readOriginCodeSegmentTo(addr, seg.from, seg.dst); err != nil || copied {
-					seg.copied = copied
-					return tr.Val, tr.Source, tr.Version, err
-				}
-			}
 			code, err := s.recordedCode(addr, tr)
 			return code, tr.Source, tr.Version, err
 		}
