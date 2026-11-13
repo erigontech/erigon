@@ -449,6 +449,13 @@ func (w *historyBufferedWriter) close() {
 	}
 }
 
+func (w *historyBufferedWriter) detach() *historyBufferedWriter {
+	detached := *w
+	detached.ii = w.ii.detach()
+	w.historyVals = nil
+	return &detached
+}
+
 func (ht *HistoryRoTx) newWriter(db kv.RoDB, tmpdir string, discard bool) *historyBufferedWriter {
 	w := &historyBufferedWriter{
 		discard: discard,

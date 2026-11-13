@@ -342,6 +342,68 @@ func TestSharedDomain_UnwindPrunesBoundaryTxNum(t *testing.T) {
 	require.Equal(t, keptVal, v, "write below the boundary txNum must survive")
 }
 
+func TestSharedDomain_UnwindDropsWritesBufferedBeforeUnwind(t *testing.T) {
+	t.Parallel()
+
+	addr := common.HexToAddress("0xdac17f958d2ee523a2206206994597c13d831ec7")
+	slot := common.HexToHash("0x01")
+	keys := map[kv.Domain][]byte{
+		kv.AccountsDomain:   addr[:],
+		kv.StorageDomain:    composite(addr[:], slot[:]),
+		kv.CodeDomain:       addr[:],
+		kv.CommitmentDomain: {0xa0, 0x01},
+	}
+	for domain, key := range keys {
+		t.Run(domain.String(), func(t *testing.T) {
+			t.Parallel()
+			ctx := t.Context()
+			db := newTestDb(t, 4)
+			committed := []byte{0x10}
+
+			rwTx, err := db.BeginTemporalRw(ctx)
+			require.NoError(t, err)
+			defer rwTx.Rollback()
+			domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+			require.NoError(t, err)
+			require.NoError(t, domains.DomainPut(domain, rwTx, key, committed, 1, nil))
+			require.NoError(t, domains.Flush(ctx, rwTx))
+			domains.Close()
+			require.NoError(t, rwTx.Commit())
+
+			rwTx, err = db.BeginTemporalRw(ctx)
+			require.NoError(t, err)
+			defer rwTx.Rollback()
+			domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New())
+			require.NoError(t, err)
+			defer domains.Close()
+			const unwindTo = 2
+			unwound := &changeset.StateChangeSet{}
+			domains.SetChangesetAccumulator(unwound)
+			domains.SetTxNum(unwindTo)
+			require.NoError(t, domains.DomainPut(domain, rwTx, key, []byte{0x20}, unwindTo, committed))
+			domains.SetChangesetAccumulator(nil)
+			var diffs [kv.DomainLen][]kv.DomainEntryDiff
+			for d := range diffs {
+				diffs[d] = unwound.Diffs[d].GetDiffSet()
+			}
+			domains.Unwind(unwindTo, &diffs)
+			require.NoError(t, domains.Flush(ctx, rwTx))
+			require.NoError(t, rwTx.Commit())
+
+			roTx, err := db.BeginTemporalRo(ctx)
+			require.NoError(t, err)
+			defer roTx.Rollback()
+			got, _, err := roTx.GetLatest(domain, key, kv.GetLatestOptions{})
+			require.NoError(t, err)
+			require.Equal(t, committed, got, "latest after unwinding a write buffered before the unwind")
+			history, err := roTx.HistoryRange(domain, unwindTo, -1, order.Asc, -1)
+			require.NoError(t, err)
+			defer history.Close()
+			require.False(t, history.HasNext(), "history rows at txNum >= %d after unwind", unwindTo)
+		})
+	}
+}
+
 // TestNewSharedDomains_StateAheadOfBlocks verifies that when the persisted
 // commitment state is ahead of the TxNums index (catch-up scenario),
 // NewSharedDomains returns ErrBehindCommitment but the SharedDomains itself

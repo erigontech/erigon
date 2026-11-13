@@ -653,6 +653,13 @@ func (w *DomainBufferedWriter) Close() {
 	}
 }
 
+func (w *DomainBufferedWriter) detach() *DomainBufferedWriter {
+	detached := *w
+	detached.h = w.h.detach()
+	w.values = nil
+	return &detached
+}
+
 func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 	if w.discard {
 		return nil

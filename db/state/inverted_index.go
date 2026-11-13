@@ -473,6 +473,12 @@ func (w *InvertedIndexBufferedWriter) close() {
 	}
 }
 
+func (w *InvertedIndexBufferedWriter) detach() *InvertedIndexBufferedWriter {
+	detached := *w
+	w.index, w.indexKeys = nil, nil
+	return &detached
+}
+
 func (iit *InvertedIndexRoTx) newWriter(db kv.RoDB, tmpdir string, discard bool) *InvertedIndexBufferedWriter {
 	if iit.ii.stepSize != iit.stepSize {
 		panic(fmt.Sprintf("assert: %d %d", iit.ii.stepSize, iit.stepSize))
