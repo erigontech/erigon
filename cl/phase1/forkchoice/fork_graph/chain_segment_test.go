@@ -181,9 +181,11 @@ func TestAddChainSegmentLightClientUpdateReachesPeriodStoreAtFinalization(t *tes
 	update := g.NewestLightClientUpdate()
 	require.NotNil(t, update)
 	period := g.beaconCfg.SyncCommitteePeriod(update.AttestedHeader.Beacon.Slot)
+	head := common.Hash(mustBlockRoot(t, blocks[len(blocks)-1]))
 	require.Nil(t, g.GetLightClientUpdates(period, period+1, common.Hash{})[0], "served before finalization")
+	require.Same(t, update, g.GetLightClientUpdates(period, period+1, head)[0])
 
-	g.KeepFinalizedLightClientUpdates(common.Hash(mustBlockRoot(t, blocks[len(blocks)-1])))
+	g.KeepFinalizedLightClientUpdates(head)
 
 	require.Same(t, update, g.GetLightClientUpdates(period, period+1, common.Hash{})[0])
 }
