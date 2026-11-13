@@ -674,7 +674,6 @@ func (sd *TemporalMemBatch) Unwind(unwindToTxNum uint64, changeset *[kv.DomainLe
 
 func (sd *TemporalMemBatch) detachPreUnwindWriters() {
 	for d, w := range sd.domainWriters {
-		slices.Reverse(sd.pastDomainWriters[d])
 		sd.preUnwindDomainWriters[d] = append(sd.preUnwindDomainWriters[d], sd.pastDomainWriters[d]...)
 		sd.pastDomainWriters[d] = nil
 		if w != nil {
@@ -760,14 +759,14 @@ func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch) error {
 		return true
 	})
 
-	for domain, writer := range other.domainWriters {
-		sd.pastDomainWriters[domain] = append(sd.pastDomainWriters[domain], writer)
-		other.domainWriters[domain] = nil
-	}
-
-	for domain, writers := range other.pastDomainWriters {
-		sd.pastDomainWriters[domain] = append(sd.pastDomainWriters[domain], writers...)
+	for domain, writer := range sd.domainWriters {
+		if writer != nil {
+			sd.pastDomainWriters[domain] = append(sd.pastDomainWriters[domain], writer.detach())
+		}
+		sd.pastDomainWriters[domain] = append(sd.pastDomainWriters[domain], other.pastDomainWriters[domain]...)
+		sd.pastDomainWriters[domain] = append(sd.pastDomainWriters[domain], other.domainWriters[domain])
 		other.pastDomainWriters[domain] = nil
+		other.domainWriters[domain] = nil
 	}
 
 	sd.pastIIWriters = append(sd.pastIIWriters, other.iiWriters...)
@@ -952,7 +951,7 @@ func (sd *TemporalMemBatch) flushPreUnwindWriters(ctx context.Context, tx kv.RwT
 func (sd *TemporalMemBatch) flushWriters(ctx context.Context, tx kv.RwTx) error {
 	aggTx := AggTx(tx)
 	for _, ws := range sd.pastDomainWriters {
-		for _, w := range slices.Backward(ws) {
+		for _, w := range ws {
 			if err := w.Flush(ctx, tx); err != nil {
 				return err
 			}

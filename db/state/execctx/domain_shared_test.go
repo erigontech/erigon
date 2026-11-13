@@ -475,6 +475,57 @@ func TestSharedDomain_DiscardWritesCoversWritesBufferedBeforeUnwind(t *testing.T
 	require.Empty(t, got, "discarded domain written before an unwind")
 }
 
+func TestSharedDomain_MergeFlushesValuesInWriteOrder(t *testing.T) {
+	t.Parallel()
+
+	addr := common.HexToAddress("0xdac17f958d2ee523a2206206994597c13d831ec7")
+	key := addr[:]
+	older, newest := []byte{0x14}, []byte{0x15}
+	for _, name := range []string{"receiver wrote first", "two merges", "merged batch wrote after its own merge"} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			ctx := t.Context()
+			db := newTestDb(t, 4)
+			rwTx, err := db.BeginTemporalRw(ctx)
+			require.NoError(t, err)
+			defer rwTx.Rollback()
+			newBatch := func() *execctx.SharedDomains {
+				sd, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+				require.NoError(t, err)
+				t.Cleanup(sd.Close)
+				return sd
+			}
+			put := func(sd *execctx.SharedDomains, val []byte, txNum uint64) {
+				require.NoError(t, sd.DomainPut(kv.AccountsDomain, rwTx, key, val, txNum, nil))
+			}
+			merge := func(into, from *execctx.SharedDomains, txNum uint64) {
+				require.NoError(t, into.Merge(ctx, 0, from, txNum))
+			}
+
+			receiver, other := newBatch(), newBatch()
+			switch name {
+			case "receiver wrote first":
+				put(receiver, older, 4)
+			case "two merges":
+				first := newBatch()
+				put(first, older, 4)
+				merge(receiver, first, 4)
+			case "merged batch wrote after its own merge":
+				child := newBatch()
+				put(child, older, 4)
+				merge(other, child, 4)
+			}
+			put(other, newest, 5)
+			merge(receiver, other, 5)
+			require.NoError(t, receiver.Flush(ctx, rwTx))
+
+			got, _, err := rwTx.GetLatest(kv.AccountsDomain, key, kv.GetLatestOptions{})
+			require.NoError(t, err)
+			require.Equal(t, newest, got, "latest after merging a newer write to the same step")
+		})
+	}
+}
+
 // TestNewSharedDomains_StateAheadOfBlocks verifies that when the persisted
 // commitment state is ahead of the TxNums index (catch-up scenario),
 // NewSharedDomains returns ErrBehindCommitment but the SharedDomains itself
