@@ -424,7 +424,7 @@ func TestFoldBindRacesCommitmentFlush(t *testing.T) {
 	defer roTx.Rollback()
 	// A state write while the flusher holds a swapped commitment diff keeps the fold's bound target.
 	require.NoError(t, pe.foldTx(t.Context(), rwTx, &txResult{blockNum: 2, blockHash: common.Hash{2}, txNum: 20}))
-	inSwap, release, swapDone := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	inSwap, release, swapDone, writeDone := make(chan struct{}), make(chan struct{}), make(chan struct{}), make(chan struct{})
 	go func() {
 		defer close(swapDone)
 		domains.LockChangesetAccumulator()
@@ -437,18 +437,27 @@ func TestFoldBindRacesCommitmentFlush(t *testing.T) {
 	<-inSwap
 	wrote := make(chan error, 1)
 	go func() {
+		defer close(writeDone)
 		addr := common.Address{2, 0}
 		wrote <- domains.DomainPut(kv.AccountsDomain, rwTx, addr[:], []byte{1}, 20, []byte{})
 	}()
+	released := false
+	releaseSwap := func() {
+		if !released {
+			released = true
+			close(release)
+		}
+		<-swapDone
+		<-writeDone
+	}
+	defer releaseSwap()
 	select {
 	case err := <-wrote:
 		require.NoError(t, err)
 	case <-time.After(10 * time.Second):
-		close(release)
 		t.Fatal("a state write blocked while the commitment diff was swapped")
 	}
-	close(release)
-	<-swapDone
+	releaseSwap()
 
 	folded := make(chan struct{})
 	flushed := make(chan error, 1)
