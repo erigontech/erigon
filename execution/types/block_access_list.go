@@ -72,7 +72,7 @@ func DecodeBlockAccessListSidecarForBlock(data []byte, gasLimit uint64, txCount 
 }
 
 func decodeBlockAccessListSidecar(data []byte, budget *blockAccessListDecodeBudget) (*BlockAccessListSidecar, error) {
-	bal, err := decodeBlockAccessListBytes(data, budget)
+	bal, err := decodeBlockAccessListBytes(data, budget, true)
 	if err != nil {
 		return nil, err
 	}
@@ -399,19 +399,21 @@ func (ac *AccountChanges) decodeRLP(s *rlp.Stream, budget *blockAccessListDecode
 	}
 	ac.StorageReads = reads
 
-	tmpBalances, err := decodeChangeList(s, budget, &arena.balances, &arena.balancePtrs)
+	tmpBalances, err := decodeChangeList(s, budget, &arena.balances, &arena.balancePtrs, (*BalanceChange).DecodeRLP)
 	if err != nil {
 		return fmt.Errorf("read BalanceChanges: %w", err)
 	}
 	ac.BalanceChanges = tmpBalances
 
-	nonces, err := decodeChangeList(s, budget, &arena.nonces, &arena.noncePtrs)
+	nonces, err := decodeChangeList(s, budget, &arena.nonces, &arena.noncePtrs, (*NonceChange).DecodeRLP)
 	if err != nil {
 		return fmt.Errorf("read NonceChanges: %w", err)
 	}
 	ac.NonceChanges = nonces
 
-	codes, err := decodeChangeList(s, budget, &arena.codes, &arena.codePtrs)
+	codes, err := decodeChangeList(s, budget, &arena.codes, &arena.codePtrs, func(cc *CodeChange, s *rlp.Stream) error {
+		return cc.decodeRLP(s, arena.viewInput)
+	})
 	if err != nil {
 		return fmt.Errorf("read CodeChanges: %w", err)
 	}
@@ -501,7 +503,7 @@ func (sc *SlotChanges) decodeRLP(s *rlp.Stream, budget *blockAccessListDecodeBud
 		return fmt.Errorf("read Slot: %w", err)
 	}
 	sc.Slot = accounts.InternKey(slot)
-	changes, err := decodeChangeList(s, budget, &arena.storage, &arena.storagePtrs)
+	changes, err := decodeChangeList(s, budget, &arena.storage, &arena.storagePtrs, (*StorageChange).DecodeRLP)
 	if err != nil {
 		return fmt.Errorf("read Changes: %w", err)
 	}
@@ -651,6 +653,11 @@ func (cc *CodeChange) EncodeRLP(w io.Writer) error {
 }
 
 func (cc *CodeChange) DecodeRLP(s *rlp.Stream) error {
+	return cc.decodeRLP(s, false)
+}
+
+// decodeRLP aliases the bytecode into the input when viewInput is set, so the input must outlive the change.
+func (cc *CodeChange) decodeRLP(s *rlp.Stream, viewInput bool) error {
 	if _, err := s.List(); err != nil {
 		return err
 	}
@@ -662,7 +669,11 @@ func (cc *CodeChange) DecodeRLP(s *rlp.Stream) error {
 		return fmt.Errorf("read Index: value %d exceeds uint32", idx)
 	}
 	cc.Index = uint32(idx)
-	data, err := s.Bytes()
+	read := s.Bytes
+	if viewInput {
+		read = s.ViewBytes
+	}
+	data, err := read()
 	if err != nil {
 		return fmt.Errorf("read Bytecode: %w", err)
 	}
@@ -774,7 +785,7 @@ func encodingSizeHashList(hashes []common.Hash) int {
 // ErrInvalidBlockAccessList marks a well-formed but semantically invalid block access list.
 var ErrInvalidBlockAccessList = errors.New("invalid block access list")
 
-func decodeBlockAccessList(out *BlockAccessList, s *rlp.Stream, budget *blockAccessListDecodeBudget) error {
+func decodeBlockAccessList(out *BlockAccessList, s *rlp.Stream, budget *blockAccessListDecodeBudget, viewInput bool) error {
 	size, err := s.List()
 	if err != nil {
 		return err
@@ -782,6 +793,7 @@ func decodeBlockAccessList(out *BlockAccessList, s *rlp.Stream, budget *blockAcc
 	// EIP-7928: a genuine empty list (0xc0) decodes to an initialized empty slice, not nil.
 	bal := make(BlockAccessList, 0, accountChangesCount(s.Peek(), size, budget))
 	arena := newBlockAccessListArena(s.Peek(), size, budget)
+	arena.viewInput = viewInput
 	for s.MoreDataInList() {
 		if err := budget.takeItem(); err != nil {
 			return err
@@ -835,6 +847,7 @@ type blockAccessListArena struct {
 	noncePtrs   []*NonceChange
 	codes       []CodeChange
 	codePtrs    []*CodeChange
+	viewInput   bool
 }
 
 // newBlockAccessListArena sizes each kind from a walk of the list body. The walk only counts items present in the body,
@@ -934,14 +947,14 @@ func clipArena[T any](arena []T, start int) []T {
 
 // DecodeBlockAccessListBytes decodes a syntactically valid RLP block access list.
 func DecodeBlockAccessListBytes(data []byte) (BlockAccessList, error) {
-	return decodeBlockAccessListBytes(data, nil)
+	return decodeBlockAccessListBytes(data, nil, false)
 }
 
-func decodeBlockAccessListBytes(data []byte, budget *blockAccessListDecodeBudget) (BlockAccessList, error) {
+func decodeBlockAccessListBytes(data []byte, budget *blockAccessListDecodeBudget, viewInput bool) (BlockAccessList, error) {
 	stream := rlp.NewBytesStream(data)
 	defer rlp.PutStream(stream)
 	var bal BlockAccessList
-	if err := decodeBlockAccessList(&bal, stream, budget); err != nil {
+	if err := decodeBlockAccessList(&bal, stream, budget, viewInput); err != nil {
 		return nil, err
 	}
 	// The payload must be exactly one RLP list; trailing bytes (e.g. 0xc000) are
@@ -1010,9 +1023,8 @@ func decodeSlotChangesList(s *rlp.Stream, budget *blockAccessListDecodeBudget, a
 
 func decodeChangeList[T any, P interface {
 	*T
-	DecodeRLP(*rlp.Stream) error
 	GetIndex() uint32
-}](s *rlp.Stream, budget *blockAccessListDecodeBudget, values *[]T, ptrs *[]*T) ([]*T, error) {
+}](s *rlp.Stream, budget *blockAccessListDecodeBudget, values *[]T, ptrs *[]*T, decode func(P, *rlp.Stream) error) ([]*T, error) {
 	if _, err := s.List(); err != nil {
 		return nil, err
 	}
@@ -1022,7 +1034,7 @@ func decodeChangeList[T any, P interface {
 		var zero T
 		*values = append(*values, zero)
 		change := &(*values)[len(*values)-1]
-		if err := P(change).DecodeRLP(s); err != nil {
+		if err := decode(change, s); err != nil {
 			return nil, err
 		}
 		if budget != nil {

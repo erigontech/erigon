@@ -1023,3 +1023,28 @@ func TestDecodeBlockAccessListChangeArenaReservesNoMoreThanTheBudget(t *testing.
 		t.Fatalf("a one-item budget reserved %d bytes for a malformed change list", grew)
 	}
 }
+
+func TestDecodeBlockAccessListCodeAliasesOnlyOwnedInput(t *testing.T) {
+	bal := BlockAccessList{{Address: common.Address{1}, CodeChanges: []*CodeChange{{Index: 1, Bytecode: bytes.Repeat([]byte{0x60}, 64)}}}}
+	enc, err := EncodeBlockAccessListBytes(bal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aliases := func(code []byte) bool {
+		return &code[0] == &enc[len(enc)-len(code)]
+	}
+	sidecar, err := DecodeBlockAccessListSidecarForBlock(enc, 30_000_000, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !aliases(sidecar.BlockAccessList()[0].CodeChanges[0].Bytecode) {
+		t.Fatal("an owned sidecar copied its bytecode")
+	}
+	decoded, err := DecodeBlockAccessListBytes(enc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if aliases(decoded[0].CodeChanges[0].Bytecode) {
+		t.Fatal("decoding borrowed bytes aliased the bytecode")
+	}
+}
