@@ -2080,14 +2080,15 @@ func TestAsyncBALBuilderAllocatesAsSerial(t *testing.T) {
 		serialBALBuilderSink = state.NewBlockAccessListBuilder()
 		serialBALBuilderSink.AddRemaining(io)
 	})
-	var a asyncBALBuilder
 	async := testing.AllocsPerRun(100, func() {
+		var a asyncBALBuilder
 		for sealed := 1; sealed <= txs+1; sealed++ {
 			a.add(io, sealed)
 		}
 		a.finish()
 	})
-	require.LessOrEqual(t, async, serial)
+	const builderAndDoneChannel = 2
+	require.LessOrEqual(t, async, serial+builderAndDoneChannel)
 }
 
 // mixedBALIO records txs that read and write balance, nonce, code and storage, with one self-destruct.
