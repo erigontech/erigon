@@ -833,6 +833,18 @@ func DecodeBlockAccessListBytes(data []byte) (BlockAccessList, error) {
 	return decodeBlockAccessListBytes(data, nil)
 }
 
+// newSharedBudget adds one batch per worker: a worker strands less than a batch, so a list within the
+// budget never runs out. Workers give back what they did not use, and overSharedBudget checks the exact count.
+func newSharedBudget(remaining uint64, workers int) *atomic.Uint64 {
+	shared := new(atomic.Uint64)
+	shared.Store(remaining + uint64(workers)*balBudgetBatch)
+	return shared
+}
+
+func overSharedBudget(shared *atomic.Uint64, workers int) bool {
+	return shared.Load() < uint64(workers)*balBudgetBatch
+}
+
 func takeBudgetBatch(shared *atomic.Uint64) uint64 {
 	for {
 		have := shared.Load()
@@ -888,11 +900,6 @@ func decodeBlockAccessListParallel(data []byte, budget *blockAccessListDecodeBud
 	if len(items) <= balDecodeChunk {
 		return nil, false
 	}
-	var shared *atomic.Uint64
-	if budget != nil {
-		shared = new(atomic.Uint64)
-		shared.Store(budget.remaining)
-	}
 	bal := make(BlockAccessList, len(items))
 	chunks := (len(items) + balDecodeChunk - 1) / balDecodeChunk
 	var next atomic.Int64
@@ -900,6 +907,10 @@ func decodeBlockAccessListParallel(data []byte, budget *blockAccessListDecodeBud
 	var wg sync.WaitGroup
 	jobs := balDecodeWorkers()
 	workers := min(runtime.GOMAXPROCS(0), chunks)
+	var shared *atomic.Uint64
+	if budget != nil {
+		shared = newSharedBudget(budget.remaining, workers)
+	}
 	wg.Add(workers)
 	for range workers {
 		jobs <- func() {
@@ -913,6 +924,7 @@ func decodeBlockAccessListParallel(data []byte, budget *blockAccessListDecodeBud
 			var local *blockAccessListDecodeBudget
 			if budget != nil {
 				local = &blockAccessListDecodeBudget{maxIndex: budget.maxIndex, shared: shared}
+				defer func() { shared.Add(local.remaining) }()
 			}
 			for c := int(next.Add(1) - 1); c < chunks && !failed.Load(); c = int(next.Add(1) - 1) {
 				for i := c * balDecodeChunk; i < min((c+1)*balDecodeChunk, len(items)); i++ {
@@ -929,6 +941,9 @@ func decodeBlockAccessListParallel(data []byte, budget *blockAccessListDecodeBud
 		return nil, false
 	}
 	if budget != nil {
+		if overSharedBudget(shared, workers) {
+			return nil, false
+		}
 		for i := 1; i < len(bal); i++ {
 			if bytes.Compare(bal[i-1].Address[:], bal[i].Address[:]) >= 0 {
 				return nil, false

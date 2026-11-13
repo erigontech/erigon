@@ -920,7 +920,7 @@ func TestDecodeBlockAccessListAcrossDecodeChunks(t *testing.T) {
 	}
 	items := uint64(2 * len(bal)) // one account and one storage read each
 
-	got, ok := decodeBlockAccessListParallel(raw, &blockAccessListDecodeBudget{remaining: 2 * items, maxIndex: 1})
+	got, ok := decodeBlockAccessListParallel(raw, &blockAccessListDecodeBudget{remaining: items, maxIndex: 1})
 	if !ok || !reflect.DeepEqual(got, bal) {
 		t.Fatalf("parallel decode: ok=%v, equal=%v", ok, reflect.DeepEqual(got, bal))
 	}
@@ -938,11 +938,27 @@ func TestDecodeBlockAccessListAcrossDecodeChunks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := decodeBlockAccessListParallel(raw, &blockAccessListDecodeBudget{remaining: 2 * items, maxIndex: 1}); ok {
+	if _, ok := decodeBlockAccessListParallel(raw, &blockAccessListDecodeBudget{remaining: items, maxIndex: 1}); ok {
 		t.Fatal("parallel decode accepted accounts out of order")
 	}
 	if _, err := DecodeBlockAccessListSidecarForHeader(raw, items*BalItemCost); !errors.Is(err, ErrInvalidBlockAccessList) || !strings.Contains(err.Error(), "strictly increasing") {
 		t.Fatalf("decode BAL with accounts out of order at a chunk edge: got %v, want invalid ordering", err)
+	}
+}
+
+// A worker that holds unused items from its last batch does not make another worker run out within the budget.
+func TestSharedDecodeBudgetIsNotExhaustedByAnotherWorkersBatch(t *testing.T) {
+	const remaining = balBudgetBatch + balBudgetBatch/2
+	shared := newSharedBudget(remaining, 2)
+	holder := &blockAccessListDecodeBudget{shared: shared}
+	if err := holder.takeItem(); err != nil {
+		t.Fatal(err)
+	}
+	other := &blockAccessListDecodeBudget{shared: shared}
+	for i := range remaining - 1 {
+		if err := other.takeItem(); err != nil {
+			t.Fatalf("item %d of %d: %v", i+2, remaining, err)
+		}
 	}
 }
 
