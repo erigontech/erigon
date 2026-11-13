@@ -46,6 +46,8 @@ import (
 	"github.com/erigontech/erigon/node/ethconfig"
 )
 
+var integrationRoot = sync.OnceValue(RootCommand)
+
 func TestCommitmentConvertReturnsErrors(t *testing.T) {
 	enabled := statecfg.ExperimentalCommitmentV3
 	t.Cleanup(func() {
@@ -53,7 +55,7 @@ func TestCommitmentConvertReturnsErrors(t *testing.T) {
 		cmdCommitmentConvert.Flags().Lookup("squeeze").Changed = false
 		cmdCommitmentConvert.Flags().Lookup("nibbles.v2").Changed = false
 	})
-	root := RootCommand()
+	root := integrationRoot()
 	root.SetArgs([]string{"--log.dir.disable", "commitment", "convert", "--datadir", t.TempDir(), "--chain", "mainnet", "--restore", "--continue"})
 	require.ErrorContains(t, root.ExecuteContext(t.Context()), "--continue is mutually exclusive with --restore")
 
@@ -96,6 +98,7 @@ func TestCommitmentVerifyRejectsAsOfWithoutHistory(t *testing.T) {
 	datadirCli = dirs.DataDir
 	chaindata = dbPath
 	verifyAsOf = []uint{0}
+	openSnapshotOnce = sync.Once{}
 	require.ErrorContains(t, commitmentVerify(t.Context(), log.New()), "history is disabled")
 }
 
