@@ -2234,6 +2234,8 @@ func (vr versionedStateReader) ReadAccountCode(address accounts.Address) ([]byte
 func (vr versionedStateReader) ReadAccountCodeSize(address accounts.Address) (int, error) {
 	if r, ok := vr.reads.GetCode(address); ok && r.Val.Bytes != nil {
 		return len(r.Val.Bytes), nil
+	} else if ok && codeBytesDropped(r.Val) && vr.stateReader != nil {
+		return vr.stateReader.ReadAccountCodeSize(address)
 	}
 
 	if vr.versionMap != nil {

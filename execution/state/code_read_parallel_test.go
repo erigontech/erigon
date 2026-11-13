@@ -380,7 +380,11 @@ func TestCodeSegment_RefreshKeepsTheFirstReadCode(t *testing.T) {
 
 func TestCodeSegment_VersionedReaderKeepsTheFirstReadCode(t *testing.T) {
 	ibs, vm, addr, code := segmentReadThenLowerCodeWrite(t)
-	got, err := NewVersionedStateReader(5, ibs.VersionedReads(), vm, ibs.stateReader).ReadAccountCode(addr)
+	vr := NewVersionedStateReader(5, ibs.VersionedReads(), vm, ibs.stateReader)
+	got, err := vr.ReadAccountCode(addr)
 	require.NoError(t, err)
 	require.Equal(t, code, got)
+	size, err := vr.ReadAccountCodeSize(addr)
+	require.NoError(t, err)
+	require.Equal(t, len(code), size)
 }
