@@ -26,6 +26,8 @@ type poolTask struct {
 	result     *exec.TxResult
 	reruns     int
 
+	st taskStamps
+
 	mu      sync.Mutex
 	parked  bool
 	pending bool
@@ -97,6 +99,7 @@ func (p *taskPool) push(pt *poolTask) {
 	p.mu.Lock()
 	if logNpPhases {
 		p.tick()
+		stampNow(&pt.st.push)
 	}
 	heap.Push(&p.queue, pt)
 	p.mu.Unlock()
@@ -130,6 +133,12 @@ func (p *taskPool) workerLoop(wk *poolWorker) {
 		}
 	}()
 	for pt := p.pop(); pt != nil; pt = p.pop() {
+		if logNpPhases {
+			stampNow(&pt.st.pick)
+			if pt.next == psRecheck {
+				pt.st.kind.Store(workRecheck)
+			}
+		}
 		pt.step(p, wk)
 		if logNpPhases && dbg.KVReadLevelledMetrics {
 			hit, miss := wk.w.ReadDurations()
@@ -166,6 +175,7 @@ func (pe *parallelExecutor) dispatchPoolTask(be *blockExecutor, tv *taskVersion)
 }
 
 func (pt *poolTask) send(p *taskPool, r *exec.TxResult) {
+	stampNow(&pt.st.send)
 	select {
 	case p.pe.results <- r:
 	case <-p.pe.workersCtx.Done():
@@ -256,6 +266,9 @@ func (pt *poolTask) run(p *taskPool, wk *poolWorker) bool {
 	}
 	if poolOnRun != nil {
 		poolOnRun(int(tv.version.Incarnation) + 1)
+	}
+	if logNpPhases {
+		pt.st.kind.Store(workFirst + min(int32(tv.version.Incarnation), 1))
 	}
 	result := wk.w.RunTxTask(tv)
 	if txTask, ok := tv.Task.(*exec.TxTask); ok && txTask.ChargesSenderAtValidation(int(tv.version.Incarnation)) &&

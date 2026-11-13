@@ -122,3 +122,73 @@ func (p *taskPool) endIdleWindow(be *blockExecutor) (win time.Duration, acc [idl
 	p.idle.be, p.idle.acc, p.idle.allIdle = nil, [idleReasons]time.Duration{}, 0
 	return win, acc, allIdle, p.workers
 }
+
+// Critical-path split (NEWPAYLOAD_PHASES only): each commit-frontier step F -> F+1 is cut by
+// the events of task F+1 inside it: push, pick by a worker, send of its final result, receive
+// by the exec loop, commit.
+const (
+	workFirst = iota
+	workRerun
+	workRecheck
+)
+
+type taskStamps struct {
+	push, pick, send, recv atomic.Int64
+	kind                   atomic.Int32
+}
+
+type critPath struct {
+	lastCommit                      time.Time
+	spineOnly, spine, handoff, wake time.Duration
+	pre                             time.Duration
+	work                            [3]time.Duration
+	steps, workSteps3               [3]int
+}
+
+func stampNow(a *atomic.Int64) {
+	if logNpPhases {
+		a.Store(time.Now().UnixNano())
+	}
+}
+
+func (be *blockExecutor) noteCommitted(tx int) {
+	if !logNpPhases || be.poolTasks == nil || be.poolTasks[tx] == nil {
+		return
+	}
+	cp := &be.crit
+	now := time.Now()
+	cF := cp.lastCommit
+	if cF.IsZero() {
+		cF = be.execStarted
+	}
+	cp.lastCommit = now
+	st := &be.poolTasks[tx].st
+	at := func(a *atomic.Int64) time.Time { return time.Unix(0, a.Load()) }
+	maxT := func(a, b time.Time) time.Time {
+		if a.After(b) {
+			return a
+		}
+		return b
+	}
+	p, q, s, r := at(&st.push), at(&st.pick), at(&st.send), at(&st.recv)
+	if !r.After(cF) {
+		cp.spineOnly += now.Sub(cF)
+		cp.steps[0]++
+		return
+	}
+	cp.spine += now.Sub(r)
+	cp.handoff += r.Sub(maxT(s, cF))
+	if !s.After(cF) {
+		cp.steps[1]++
+		return
+	}
+	cp.steps[2]++
+	k := st.kind.Load()
+	cp.workSteps3[k]++
+	cp.work[k] += s.Sub(maxT(q, cF))
+	if q.After(cF) {
+		pp := maxT(p, cF)
+		cp.wake += q.Sub(pp)
+		cp.pre += pp.Sub(cF)
+	}
+}
