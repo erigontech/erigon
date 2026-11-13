@@ -101,9 +101,11 @@ type cachePopulatingGetter struct {
 	view     cache.ReadView
 	snapshot cache.Frontier
 	stepSize uint64 // for the read txNum upper bound (last txNum of the read's step)
+	// Exec derives an account's code hash from its cached record; the addr→codeHash seed only serves warmup code reads.
+	skipCodeHashSeed bool
 }
 
-func readAheadGetter(ttx kv.TemporalTx, sc *cache.StateCache) execctxapi.StateGetter {
+func readAheadGetter(ttx kv.TemporalTx, sc *cache.StateCache, readsCode bool) execctxapi.StateGetter {
 	if sc == nil {
 		return execctx.NewTemporalTxStateGetter(ttx)
 	}
@@ -113,7 +115,7 @@ func readAheadGetter(ttx kv.TemporalTx, sc *cache.StateCache) execctxapi.StateGe
 		return execctx.NewTemporalTxStateGetter(ttx)
 	}
 	frontier := cache.FrontierWithStateVersion(debug, stateVersion)
-	getter := &cachePopulatingGetter{TemporalGetter: ttx, view: sc.View(frontier), stepSize: debug.StepSize()}
+	getter := &cachePopulatingGetter{TemporalGetter: ttx, view: sc.View(frontier), stepSize: debug.StepSize(), skipCodeHashSeed: !readsCode}
 	if !kv.UnderlyingTxIsWritable(ttx) {
 		getter.snapshot = frontier
 	}
@@ -125,7 +127,7 @@ func (cpg *cachePopulatingGetter) GetLatest(name kv.Domain, k []byte, opts kv.Ge
 	if err == nil && opts.MaxStep() == kv.NoStepBound {
 		readTxNum := cache.ClampFillTxNum(cpg.snapshot, name, step.LastTxNum(cpg.stepSize))
 		cpg.view.Fill(name, k, v, readTxNum)
-		if name == kv.AccountsDomain {
+		if name == kv.AccountsDomain && !cpg.skipCodeHashSeed {
 			var codeHash common.Hash
 			copy(codeHash[:], accounts.DeserialiseV3CodeHash(v))
 			cpg.view.SeedAddrCodeHash(k, codeHash, readTxNum)
@@ -544,7 +546,7 @@ func (bra *BlockReadAheader) warmBALState(ctx context.Context, db kv.RoDB, bal t
 			if !ok {
 				return errors.New("BAL warmup requires a temporal read transaction")
 			}
-			stateReader := state.NewReaderV3(readAheadGetter(ttx, bra.stateCache))
+			stateReader := state.NewReaderV3(readAheadGetter(ttx, bra.stateCache, codeMode != balCodeWarmupNone))
 			tasksProcessed := 0
 			for {
 				select {
@@ -601,7 +603,7 @@ func (bra *BlockReadAheader) warmTxns(ctx context.Context, db kv.RoDB, txns type
 			if !ok {
 				return errors.New("transaction warmup requires a temporal read transaction")
 			}
-			stateReader := state.NewReaderV3(readAheadGetter(ttx, bra.stateCache))
+			stateReader := state.NewReaderV3(readAheadGetter(ttx, bra.stateCache, true))
 			for txIdx := start; txIdx < end; txIdx++ {
 				select {
 				case <-workerCtx.Done():
