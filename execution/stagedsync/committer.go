@@ -313,8 +313,7 @@ func (cc *commitmentCalculator) Stop() {
 	cc.wg.Wait()
 	if p := cc.branchPrefetch; p != nil {
 		p.close()
-		cc.logger.Debug("["+cc.logPrefix+"] commitment branch prefetch", "bytes", p.bytes.Load(),
-			"hits", p.hits.Load(), "misses", p.misses.Load(), "dropped", p.dropped.Load(), "drained", p.drained.Load())
+		cc.logger.Debug("["+cc.logPrefix+"] commitment branch prefetch", "bytes", p.bytes.Load(), "dropped", p.dropped.Load(), "drained", p.drained.Load())
 		if commitmentdb.ParentReadsWanted() {
 			if r := cc.parentRecords(); r != nil {
 				commitmentdb.PublishParentRecords(r)
@@ -1129,13 +1128,7 @@ func (r *asOfStateReader) prefetchedBranch(key []byte) ([]byte, kv.Step, bool) {
 	if _, maxStep, inMem := r.sd.GetLatestFromMemory(kv.CommitmentDomain, key); inMem || maxStep != kv.NoStepBound {
 		return nil, 0, false
 	}
-	data, step, ok := r.prefetched.get(key)
-	if ok {
-		r.prefetched.hits.Add(1)
-	} else {
-		r.prefetched.misses.Add(1)
-	}
-	return data, step, ok
+	return r.prefetched.get(key)
 }
 
 func (r *asOfStateReader) LeafRefs(key, data []byte) *commitment.LeafRefs {

@@ -69,8 +69,8 @@ type branchPrefetcher struct {
 	shards [branchPrefetchShards]prefetchedShard
 	bytes  atomic.Int64
 
-	pausing                        atomic.Bool
-	hits, misses, dropped, drained atomic.Uint64
+	pausing          atomic.Bool
+	dropped, drained atomic.Uint64
 }
 
 func newBranchPrefetcher(ctx context.Context, db kv.TemporalRoDB) *branchPrefetcher {

@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	v3 "github.com/erigontech/erigon/execution/commitment/v3"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -63,9 +64,6 @@ func TestPrefetchedBranchesYieldToMemBatch(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, got)
 
-	require.Equal(t, uint64(1), p.hits.Load(), "only the untouched key is served from the map")
-	require.Equal(t, uint64(1), p.misses.Load(), "only the absent key falls through the map")
-
 	outside := []byte{0x40, 0x78, 0x02}
 	var unwound [kv.DomainLen][]kv.DomainEntryDiff
 	unwound[kv.CommitmentDomain] = []kv.DomainEntryDiff{{Key: string(outside) + string(binary.BigEndian.AppendUint64(nil, ^uint64(2)))}}
@@ -77,7 +75,6 @@ func TestPrefetchedBranchesYieldToMemBatch(t *testing.T) {
 	got, _, err = r.Read(kv.CommitmentDomain, outside, 16)
 	require.NoError(t, err)
 	require.Empty(t, got)
-	require.Equal(t, uint64(1), p.hits.Load())
 }
 
 func TestBranchPrefetcherStopsAtByteCap(t *testing.T) {
@@ -252,6 +249,7 @@ func TestComputeAheadReadsPrefetchedBranches(t *testing.T) {
 	addr := common.Address{19: 1}
 	acc := accounts.Account{Nonce: 1, Balance: *uint256.NewInt(5), CodeHash: accounts.EmptyCodeHash}
 	require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addr[:], accounts.SerialiseV3(&acc), 1, nil))
+	p.put([]byte{0x40, 0x00}, []byte{0x0f}, 0)
 	cc.handleBlockRequest(ctx, &blockRequest{
 		blockNum:   1,
 		firstTxNum: 1,
@@ -264,5 +262,6 @@ func TestComputeAheadReadsPrefetchedBranches(t *testing.T) {
 		}},
 	})
 
-	require.NotZero(t, p.hits.Load()+p.misses.Load(), "compute-ahead must read commitment records through the prefetch map")
+	require.Len(t, out, 1)
+	require.ErrorIs(t, (<-out).err, v3.ErrRecordFormat, "compute-ahead must read commitment records through the prefetch map")
 }
