@@ -1161,15 +1161,14 @@ func requireStateVersion(tx kv.Tx, expected uint64) error {
 // committing the shared-domain state. Tying cache population to commit success
 // makes it impossible by construction for an aggregator-lifetime cache to hold a
 // value a failed commit rolled back — so no caller clears a cache or reaches into
-// the SD's internal caches after committing. Entries are stamped with the value's
-// per-key write txNum (delivered by the callback) as the unwind floor, so
-// invalidation is tx-precise: an unwind to a txNum inside the latest step drops
-// exactly the entries above it, not the whole step. All caches honor the
-// same (txNum, epoch) model. tx MUST be a flush-specific transaction: it is
-// committed here. Commit is terminal for this SharedDomains value; continue
-// with a new one on a fresh transaction. The domain flush advances
-// PlainStateVersion exactly once; Commit verifies both its starting version and
-// the version it will publish.
+// the SD's internal caches after committing. Committed writes carry their per-key
+// txNum. Read fills use conservative view bounds in StateCache and expire on every
+// unwind in BranchCache. Invalidation can discard additional entries because the
+// unwind floor stays at the lowest unwind point until the cache is reset.
+// tx MUST be a flush-specific transaction: it is committed here. Commit is
+// terminal for this SharedDomains value; continue with a new one on a fresh
+// transaction. The domain flush advances PlainStateVersion exactly once;
+// Commit verifies both its starting version and the version it will publish.
 // Validation callbacks run after the domain flush and before the MDBX commit.
 // A callback error leaves the transaction uncommitted for the caller to roll back.
 func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...func(tx kv.RwTx) error) error {
