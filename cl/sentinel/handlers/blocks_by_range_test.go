@@ -43,6 +43,28 @@ import (
 	"github.com/erigontech/erigon/common/snappypool"
 )
 
+func TestBeaconBlocksByRangeRequestCost(t *testing.T) {
+	for _, tc := range []struct {
+		count uint64
+		cost  int
+	}{{0, 0}, {1, 0}, {3, 2}, {96, 95}, {128, 95}} {
+		t.Run(fmt.Sprint(tc.count), func(t *testing.T) {
+			_, db := setupStore(t)
+			cfg := clparams.MainnetBeaconConfig
+			c := &ConsensusHandlers{
+				ctx: t.Context(), indiciesDB: db, beaconConfig: &cfg,
+				beaconDB: tests.NewMockBlockReader(), rateLimiter: newPeerRateLimiter(),
+			}
+			stream := newHandlerTestStream(t, communication.BeaconBlocksByRangeProtocolV2,
+				&cltypes.BeaconBlocksByRangeRequest{StartSlot: 100, Count: tc.count, Step: 1})
+			bucket := admitHandlerTestRequest(t, c, stream)
+			require.NoError(t, c.beaconBlocksByRangeHandler(stream))
+			require.Empty(t, stream.response.Bytes())
+			require.Equal(t, bucket.maxTokens-1-float64(tc.cost), bucket.tokens)
+		})
+	}
+}
+
 func TestBlocksByRootHandler(t *testing.T) {
 	ctx := context.Background()
 

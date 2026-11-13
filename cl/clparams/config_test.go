@@ -421,6 +421,25 @@ func TestMaxBlobsPerBlockUpperBound(t *testing.T) {
 	require.EqualValues(t, 9, noSchedule.MaxBlobsPerBlockUpperBound())
 }
 
+func TestMaxRequestBlobSidecarsByVersion(t *testing.T) {
+	cfg := BeaconChainConfig{MaxRequestBlobSidecars: 768, MaxRequestBlobSidecarsElectra: 1152}
+	for _, tc := range []struct {
+		version StateVersion
+		want    int
+	}{
+		{DenebVersion, 768},
+		{ElectraVersion, 1152},
+		{FuluVersion, 1152},
+		{GloasVersion, 1152},
+		{HezeVersion, 1152},
+	} {
+		t.Run(tc.version.String(), func(t *testing.T) {
+			require.Equal(t, tc.want, cfg.MaxRequestBlobSidecarsByVersion(tc.version))
+		})
+	}
+	require.Panics(t, func() { cfg.MaxRequestBlobSidecarsByVersion(CapellaVersion) })
+}
+
 func TestForkSchemaMatchesSlot(t *testing.T) {
 	cfg := MainnetBeaconConfig
 	cfg.AltairForkEpoch = 0

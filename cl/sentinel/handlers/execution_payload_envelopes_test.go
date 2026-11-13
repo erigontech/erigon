@@ -528,6 +528,7 @@ func TestExecutionPayloadEnvelopesByRootHandler(t *testing.T) {
 	reqRoots := solid.NewHashList(int(beaconCfg.MaxRequestPayloads))
 	for _, root := range blockRoots {
 		reqRoots.Append(root)
+		reqRoots.Append(root) // duplicates are served once
 	}
 	var reqBuf bytes.Buffer
 	err = ssz_snappy.EncodeAndWrite(&reqBuf, reqRoots)
