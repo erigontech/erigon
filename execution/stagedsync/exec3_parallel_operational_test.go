@@ -196,7 +196,7 @@ func TestParallelFinalizeClassifiesRulesEngineError(t *testing.T) {
 			require.NoError(t, err)
 			require.NotNil(t, result)
 			require.ErrorIs(t, result.Err, rules.ErrInvalidBlock)
-			require.ErrorContains(t, result.Err, cause.Error())
+			require.ErrorIs(t, result.Err, cause)
 			require.False(t, result.Operational)
 		})
 	}

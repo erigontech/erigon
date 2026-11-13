@@ -40,7 +40,6 @@ import (
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/params"
-	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/receipts"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
@@ -280,7 +279,7 @@ func ExecV3(ctx context.Context,
 		return out, nil
 	}
 
-	execErr = execV3Finalize(ctx, nil, cfg, doms, pe.lastCommittedTxNum.Load(), out.lastCommittedBlockNum,
+	execErr = execV3Finalize(ctx, cfg, doms, pe.lastCommittedTxNum.Load(), out.lastCommittedBlockNum,
 		lastHeader, shouldReportToTxPool, logPrefix, logger)
 	return finalizeExecV3Outcome(out, execErr)
 }
@@ -293,21 +292,12 @@ func finalizeExecV3Outcome(out execV3Outcome, err error) (execV3Outcome, error) 
 	return out, err
 }
 
-// execV3Finalize runs the post-exec tail of ExecV3: the
-// BAD_BLOCK_HALT debug exit, the frozen-step commitment guard, and the tx-pool
-// block-progress notification. It never unwinds — that is the caller's job.
-func execV3Finalize(ctx context.Context, execErr error, cfg ExecuteBlockCfg, doms *execctx.SharedDomains,
+// execV3Finalize runs the post-exec tail of ExecV3: the frozen-step commitment guard and the
+// tx-pool block-progress notification. It never unwinds — that is the caller's job.
+func execV3Finalize(ctx context.Context, cfg ExecuteBlockCfg, doms *execctx.SharedDomains,
 	lastCommittedTxNum, lastCommittedBlockNum uint64, lastHeader *types.Header,
 	shouldReportToTxPool bool, logPrefix string, logger log.Logger,
 ) error {
-	// If execution failed with ErrInvalidBlock, skip the step-frozen check and
-	// propagate the error so the caller can unwind. The step-frozen check only
-	// makes sense when execution succeeded and we need to persist the commitment.
-	if execErr != nil && errors.Is(execErr, rules.ErrInvalidBlock) {
-		haltOnBadBlockDebug(cfg, logPrefix, execErr, logger)
-		return execErr
-	}
-
 	lastCommittedStep := kv.Step(lastCommittedTxNum / doms.StepSize())
 	// applyTx may be stale after parallel execution (the underlying mdbx tx
 	// was invalidated by Flush/CommitAndBegin). Use a fresh roTx for the check.
@@ -333,7 +323,7 @@ func execV3Finalize(ctx context.Context, execErr error, cfg ExecuteBlockCfg, dom
 		cfg.notifications.Accumulator.StartChange(lastHeader, nil, false /* unwind */)
 	}
 
-	return execErr
+	return nil
 }
 
 type txExecutor struct {
