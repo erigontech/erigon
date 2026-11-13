@@ -31,6 +31,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 
+	"github.com/erigontech/erigon/common"
 	libkzg "github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -804,10 +805,8 @@ func (f *Fetch) ConnectCore() {
 					f.logger.Warn("[txpool.handleStateChanges]", "err", err)
 				}
 			}
-			select {
-			case <-f.ctx.Done():
+			if common.Sleep(f.ctx, 3*time.Second) != nil {
 				return
-			case <-time.After(3 * time.Second):
 			}
 		}
 	})
@@ -1387,10 +1386,8 @@ func (f *Fetch) handleStateChangesRequest(ctx context.Context, req *remoteproto.
 			f.logger.Warn("[fetch] onNewBlock", "err", applyErr)
 		}
 		// Retry the failed batch: recovery must not depend on another block arriving.
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(time.Second):
+		if err := common.Sleep(ctx, time.Second); err != nil {
+			return err
 		}
 	}
 }

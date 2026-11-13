@@ -381,10 +381,8 @@ func beginBlockState(ctx context.Context, db kv.TemporalRoDB, changes *remotepro
 		if version > changes.StateVersionId {
 			return nil, fmt.Errorf("%w: announced=%d committed=%d", errStateViewSuperseded, changes.StateVersionId, version)
 		}
-		select {
-		case <-waitCtx.Done():
-			return nil, fmt.Errorf("wait for announced state version %d: %w", changes.StateVersionId, waitCtx.Err())
-		case <-time.After(10 * time.Millisecond):
+		if err := common.Sleep(waitCtx, 10*time.Millisecond); err != nil {
+			return nil, fmt.Errorf("wait for announced state version %d: %w", changes.StateVersionId, err)
 		}
 	}
 }
@@ -527,18 +525,10 @@ func (p *TxPool) applyBlockUpdate(stateChanges *remoteproto.StateChangeBatch, un
 		// A missed unwind can leave an orphaned transaction marked as mined.
 		// Check the recovered nonce state before removing pooled replacements.
 		// An unused nonce alone does not establish an unwind or restore pool membership.
-		var consumed TxnSlots
-		for i, txn := range minedTxns.Txns {
-			used, err := p.nonceConsumed(txn, cacheView)
-			if err != nil {
-				return frames, err
-			}
-			sender := minedTxns.Senders.At(i)
-			if used {
-				consumed.Append(txn, sender, false)
-			}
+		minedTxns, _, err = p.partitionByNonceState(minedTxns, cacheView)
+		if err != nil {
+			return frames, err
 		}
-		minedTxns = consumed
 	}
 	unwindCells := make(blobCells)
 	for i, txn := range unwindBlobTxns.Txns {
@@ -562,19 +552,14 @@ func (p *TxPool) applyBlockUpdate(stateChanges *remoteproto.StateChangeBatch, un
 		// A retained unwind may have been re-mined in an omitted block. Reconcile
 		// its nonce before parking it, even when frame validation is unavailable.
 		defer p.forgetUnusedSenders(senderIDsOf(&unwindTxns))
-		var unconsumed TxnSlots
-		for i, txn := range unwindTxns.Txns {
-			used, err := p.nonceConsumed(txn, cacheView)
-			if err != nil {
-				return frames, err
-			}
-			if used {
-				minedTxns.Append(txn, unwindTxns.Senders.At(i), false)
-			} else {
-				unconsumed.Append(txn, unwindTxns.Senders.At(i), false)
-			}
+		var consumed TxnSlots
+		consumed, unwindTxns, err = p.partitionByNonceState(unwindTxns, cacheView)
+		if err != nil {
+			return frames, err
 		}
-		unwindTxns = unconsumed
+		for i, txn := range consumed.Txns {
+			minedTxns.Append(txn, consumed.Senders.At(i), false)
+		}
 	}
 	unwindTxns, unwindFrames := p.splitRestoredTxns(unwindTxns)
 
@@ -621,6 +606,21 @@ func (p *TxPool) applyBlockUpdate(stateChanges *remoteproto.StateChangeBatch, un
 
 	p.publishDepthMetrics()
 	return frames, nil
+}
+
+func (p *TxPool) partitionByNonceState(txns TxnSlots, view kvcache.CacheView) (consumed, unconsumed TxnSlots, err error) {
+	for i, txn := range txns.Txns {
+		used, err := p.nonceConsumed(txn, view)
+		if err != nil {
+			return consumed, unconsumed, err
+		}
+		if used {
+			consumed.Append(txn, txns.Senders.At(i), false)
+		} else {
+			unconsumed.Append(txn, txns.Senders.At(i), false)
+		}
+	}
+	return consumed, unconsumed, nil
 }
 
 func (p *TxPool) nonceConsumed(txn *TxnSlot, view kvcache.CacheView) (bool, error) {
