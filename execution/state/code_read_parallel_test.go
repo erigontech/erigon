@@ -1,6 +1,7 @@
 package state
 
 import (
+	"bytes"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -375,6 +376,28 @@ func segmentReadThenLowerCodeWrite(t *testing.T) (*IntraBlockState, *VersionMap,
 	ws.SetCode(addr, &VersionedWrite[accounts.Code]{WriteHeader: WriteHeader{Address: addr, Path: CodePath, Version: Version{TxIndex: 1}, valStatus: ValueChanged}, Val: accounts.NewCode([]byte{0x60, 0x00})})
 	vm.FlushVersionedWrites(ws, true)
 	return ibs, vm, addr, code
+}
+
+// Code an earlier tx of the block wrote (a CREATE2 deploy, a 7702 delegation) is what a later tx's EXTCODECOPY copies,
+// not the committed code, and the copy does not go through the segment reader.
+func TestCodeSegment_CopiesCodeAnEarlierTxWrote(t *testing.T) {
+	for name, written := range map[string][]byte{
+		"create2 deploy":  {0x60, 0x2a, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3},
+		"7702 delegation": append([]byte{0xef, 0x01, 0x00}, bytes.Repeat([]byte{0x44}, 20)...),
+	} {
+		t.Run(name, func(t *testing.T) {
+			vm := NewVersionMap(nil)
+			ibs, reader, addr, _ := newSegmentRead(t, vm)
+			ws := &WriteSet{}
+			ws.SetCode(addr, &VersionedWrite[accounts.Code]{WriteHeader: WriteHeader{Address: addr, Path: CodePath, Version: Version{TxIndex: 1}, valStatus: ValueChanged}, Val: accounts.NewCode(written)})
+			vm.FlushVersionedWrites(ws, true)
+
+			got, err := segmentOf(ibs, addr, len(written)+2)
+			require.NoError(t, err)
+			require.Equal(t, append(bytes.Clone(written), 0, 0), got)
+			require.Zero(t, reader.segmentReads, "code from the version map must not be read from the committed state")
+		})
+	}
 }
 
 // A read without bytes stands for the code the transaction first read, not a later write of a lower transaction.
