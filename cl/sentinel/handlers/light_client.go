@@ -47,7 +47,7 @@ func (c *ConsensusHandlers) optimisticLightClientUpdateHandler(s network.Stream)
 }
 
 func (c *ConsensusHandlers) finalityLightClientUpdateHandler(s network.Stream) error {
-	lc := c.forkChoiceReader.NewestLightClientUpdate()
+	lc := c.forkChoiceReader.NewestLightClientFinalityUpdate()
 	if lc == nil {
 		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavailablePrefix)
 	}

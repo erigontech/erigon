@@ -121,17 +121,29 @@ func readAheadGetter(ttx kv.TemporalTx, sc *cache.StateCache) execctxapi.StateGe
 }
 
 func (cpg *cachePopulatingGetter) GetLatest(name kv.Domain, k []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
+	if opts.MaxStep() == kv.NoStepBound {
+		if v, txNum, ok := cpg.view.GetVisible(name, k); ok {
+			if name == kv.AccountsDomain {
+				cpg.seedCodeHash(k, v, txNum)
+			}
+			return v, kv.Step(txNum / cpg.stepSize), nil
+		}
+	}
 	v, step, err := cpg.TemporalGetter.GetLatest(name, k, opts)
 	if err == nil && opts.MaxStep() == kv.NoStepBound {
 		readTxNum := cache.ClampFillTxNum(cpg.snapshot, name, step.LastTxNum(cpg.stepSize))
 		cpg.view.Fill(name, k, v, readTxNum)
 		if name == kv.AccountsDomain {
-			if h := accounts.DeserialiseV3CodeHash(v); h != nil {
-				cpg.view.SeedAddrCodeHash(k, common.Hash(h), readTxNum)
-			}
+			cpg.seedCodeHash(k, v, readTxNum)
 		}
 	}
 	return v, step, err
+}
+
+func (cpg *cachePopulatingGetter) seedCodeHash(addr, account []byte, txNum uint64) {
+	if h := accounts.DeserialiseV3CodeHash(account); h != nil {
+		cpg.view.SeedAddrCodeHash(addr, common.Hash(h), txNum)
+	}
 }
 
 func (cpg *cachePopulatingGetter) GetCode(addr []byte, _ uint64) ([]byte, bool, error) {

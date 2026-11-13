@@ -190,7 +190,7 @@ func TestLightClientFinality(t *testing.T) {
 
 	f := mock_services.NewForkChoiceStorageMock(t)
 
-	f.NewestLCUpdate = &cltypes.LightClientUpdate{
+	f.NewestLCFinalityUpdate = &cltypes.LightClientUpdate{
 		AttestedHeader:          cltypes.NewLightClientHeader(clparams.AltairVersion),
 		NextSyncCommittee:       solid.NewSyncCommittee(),
 		SignatureSlot:           altairSlot,
@@ -199,7 +199,7 @@ func TestLightClientFinality(t *testing.T) {
 		FinalityBranch:          solid.NewHashVector(cltypes.FinalizedBranchSize),
 		NextSyncCommitteeBranch: solid.NewHashVector(cltypes.SyncCommitteeBranchSize),
 	}
-	f.NewestLCUpdate.AttestedHeader.Beacon.Slot = altairSlot
+	f.NewestLCFinalityUpdate.AttestedHeader.Beacon.Slot = altairSlot
 	ethClock := getEthClock(t)
 
 	_, beaconCfg := clparams.GetConfigsByNetwork(1)
@@ -232,11 +232,11 @@ func TestLightClientFinality(t *testing.T) {
 	err = decodeAndRead(stream, got, ethClock)
 	require.NoError(t, err)
 
-	require.Equal(t, got.AttestedHeader, f.NewestLCUpdate.AttestedHeader)
-	require.Equal(t, got.SyncAggregate, f.NewestLCUpdate.SyncAggregate)
-	require.Equal(t, got.FinalizedHeader, f.NewestLCUpdate.FinalizedHeader)
-	require.Equal(t, got.FinalityBranch, f.NewestLCUpdate.FinalityBranch)
-	require.Equal(t, got.SignatureSlot, f.NewestLCUpdate.SignatureSlot)
+	require.Equal(t, got.AttestedHeader, f.NewestLCFinalityUpdate.AttestedHeader)
+	require.Equal(t, got.SyncAggregate, f.NewestLCFinalityUpdate.SyncAggregate)
+	require.Equal(t, got.FinalizedHeader, f.NewestLCFinalityUpdate.FinalizedHeader)
+	require.Equal(t, got.FinalityBranch, f.NewestLCFinalityUpdate.FinalityBranch)
+	require.Equal(t, got.SignatureSlot, f.NewestLCFinalityUpdate.SignatureSlot)
 }
 
 func TestLightClientBootstrap(t *testing.T) {
