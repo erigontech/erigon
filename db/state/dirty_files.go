@@ -69,6 +69,20 @@ func (df *DirtyFiles) copy() *DirtyFiles {
 	return &DirtyFiles{*df.BTreeG.Copy()}
 }
 
+// Replaced files must be retired with the outgoing visible generation, without
+// deleting the paths now owned by their replacements.
+func (df *DirtyFiles) replace(item *FilesItem) retiredFiles {
+	if item == nil {
+		return nil
+	}
+	previous, replaced := df.Set(item)
+	if !replaced || previous == item {
+		return nil
+	}
+	previous.canDelete.Store(false)
+	return retiredFiles{previous}
+}
+
 func (df *DirtyFiles) CloseItems(items []*FilesItem) {
 	for _, item := range items {
 		df.Delete(item)
@@ -380,6 +394,8 @@ func retire(reason mvcc.RetireReason, dirtyFiles *DirtyFiles, outs []*FilesItem,
 		canDelete = true // our merge/prune output is still on disk and must be removed
 	case mvcc.RetireReasonWasDeletedFromDisk:
 		canDelete = false // an external actor already deleted it: close only, never re-delete
+	case mvcc.RetireReasonIncomplete:
+		canDelete = false // retain incomplete files for a later reopen
 	default:
 		panic(fmt.Sprintf("retire: unknown reason %d", reason))
 	}

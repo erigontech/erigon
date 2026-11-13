@@ -308,6 +308,76 @@ func TestAggregatorOpenFolderReclaimKeepsRecreatedFile(t *testing.T) {
 	require.True(t, exists, "reclaiming a vanished file must not delete a same-name recreation")
 }
 
+func TestDomainOpenListKeepsPinnedHistory(t *testing.T) {
+	t.Parallel()
+	db, agg := testDbAndAggregatorv3(t, 10)
+	ctx := t.Context()
+	key, previous := []byte{1}, []byte{7}
+	require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
+		at := agg.BeginFilesRo()
+		defer at.Close()
+		writer := at.d[kv.AccountsDomain].NewWriter(db)
+		defer writer.Close()
+		require.NoError(t, writer.PutWithPrev(key, previous, 1, nil))
+		require.NoError(t, writer.PutWithPrev(key, []byte{8}, 2, previous))
+		return writer.Flush(ctx, tx)
+	}))
+	require.NoError(t, agg.buildFiles(ctx, asTemporalRoDB(db), 0, unboundedFinalityCtx, nil))
+
+	reader := agg.BeginFilesRo()
+	defer reader.Close()
+	domain := reader.d[kv.AccountsDomain]
+	require.Len(t, domain.files, 1)
+	require.Len(t, domain.ht.files, 1)
+	require.Len(t, domain.ht.iit.files, 1)
+	files := []*FilesItem{domain.files[0].src, domain.ht.files[0].src, domain.ht.iit.files[0].src}
+	var paths []string
+	for _, file := range files {
+		t.Cleanup(file.closeFiles)
+		paths = append(paths, file.decompressor.FilePath())
+	}
+	assertHistory := func() {
+		t.Helper()
+		got, found, err := domain.ht.historySeekInFiles(key, 2)
+		require.NoError(t, err)
+		require.True(t, found)
+		require.Equal(t, previous, got)
+	}
+	assertHistory()
+
+	scan, err := scanDirs(agg.Dirs())
+	require.NoError(t, err)
+	// An incomplete scan models a missing domain file without unlinking a mapped file.
+	scan.domainFiles = nil
+	func() {
+		agg.dirtyFilesLock.Lock()
+		defer agg.dirtyFilesLock.Unlock()
+		retired, err := agg.d[kv.AccountsDomain].openList(ctx, *scan)
+		agg.recalcVisibleFiles(retired)
+		require.NoError(t, err)
+	}()
+	for _, file := range files {
+		require.NotNil(t, file.decompressor, "pinned readers must keep their mappings")
+		require.True(t, file.decompressor.IsOpen())
+	}
+	assertHistory()
+
+	fresh := agg.BeginFilesRo()
+	defer fresh.Close()
+	require.Empty(t, fresh.d[kv.AccountsDomain].files)
+	require.Empty(t, fresh.d[kv.AccountsDomain].ht.files)
+	require.Empty(t, fresh.d[kv.AccountsDomain].ht.iit.files)
+	reader.Close()
+	for _, file := range files {
+		require.Nil(t, file.decompressor, "retired mappings must close after the last reader")
+		require.Nil(t, file.index)
+		require.Nil(t, file.vAccessor)
+	}
+	for _, path := range paths {
+		require.FileExists(t, path, "retiring incomplete files must leave them on disk")
+	}
+}
+
 func domainFileBySuffix(t *testing.T, snapDir, suffix string) string {
 	t.Helper()
 	files, err := dir.ListFiles(snapDir, ".kv")

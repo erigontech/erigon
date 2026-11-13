@@ -108,13 +108,13 @@ func (a *Aggregator) mergeStepAlignedRange(ctx context.Context, m stepAlignedMer
 func (at *AggregatorRoTx) stepAlignedFileLists() []visibleFiles {
 	var lists []visibleFiles
 	for _, d := range at.d {
-		if d == nil || !d.d.Enabled {
+		if d == nil || !d.d.Enabled.Load() {
 			continue
 		}
 		lists = append(lists, d.files, d.ht.files, d.ht.iit.files)
 	}
 	for _, ii := range at.iis {
-		if ii == nil || !ii.ii.Enabled {
+		if ii == nil || !ii.ii.Enabled.Load() {
 			continue
 		}
 		lists = append(lists, ii.files)
@@ -159,9 +159,9 @@ func (at *AggregatorRoTx) stepAlignedEnd(stepSize uint64) (uint64, error) {
 			}
 		}
 	}
-	if com := at.d[kv.CommitmentDomain]; com != nil && com.d.Enabled {
+	if com := at.d[kv.CommitmentDomain]; com != nil && com.d.Enabled.Load() {
 		for _, d := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain} {
-			if dt := at.d[d]; dt != nil && dt.d.Enabled && !slices.Equal(fileRangesUpTo(dt.files, end), fileRangesUpTo(com.files, end)) {
+			if dt := at.d[d]; dt != nil && dt.d.Enabled.Load() && !slices.Equal(fileRangesUpTo(dt.files, end), fileRangesUpTo(com.files, end)) {
 				return 0, fmt.Errorf("%s and commitment files differ below txNum %d", d, end)
 			}
 		}
@@ -227,7 +227,7 @@ func (at *AggregatorRoTx) stepAlignedMerges(stepSize, end uint64) ([]stepAligned
 	}
 	coupled := make(map[[2]uint64]int)
 	for id, d := range at.d {
-		if d == nil || !d.d.Enabled {
+		if d == nil || !d.d.Enabled.Load() {
 			continue
 		}
 		for _, mr := range stepAlignedMergeRanges(d.files, stepSize, end) {
@@ -259,7 +259,7 @@ func (at *AggregatorRoTx) stepAlignedMerges(stepSize, end uint64) ([]stepAligned
 		}
 	}
 	for id, ii := range at.iis {
-		if ii == nil || !ii.ii.Enabled {
+		if ii == nil || !ii.ii.Enabled.Load() {
 			continue
 		}
 		for _, mr := range stepAlignedMergeRanges(ii.files, stepSize, end) {

@@ -103,6 +103,58 @@ func testDbAndDomainOfStep(t testing.TB, domainCfg statecfg.DomainCfg, aggStep u
 	return db, d
 }
 
+func TestDomainBuildResumeStep(t *testing.T) {
+	configs := []statecfg.DomainCfg{statecfg.Schema.AccountsDomain, statecfg.Schema.CommitmentDomain, statecfg.Schema.RCacheDomain}
+	for i := range configs {
+		cfg := &configs[i]
+		cfg.Hist.IiCfg.Enabled = true
+		for _, tc := range []struct {
+			name          string
+			steps         []uint64
+			filesEnd      kv.Step
+			minResumeStep kv.Step
+			want          kv.Step
+		}{
+			{name: "empty", filesEnd: 2},
+			{name: "no_files", steps: []uint64{4, 1}, want: 1},
+			{name: "before_files", steps: []uint64{1, 0}, filesEnd: 2, want: 2},
+			{name: "at_files", steps: []uint64{2, 1}, filesEnd: 2, want: 2},
+			{name: "after_files", steps: []uint64{4, 3}, filesEnd: 2, want: 3},
+			{name: "deferred", steps: []uint64{4, 1}, minResumeStep: 6, want: 1},
+			{name: "resume_boundary", steps: []uint64{3, 1}, minResumeStep: 3, want: 1},
+			{name: "safe_resume", steps: []uint64{4, 3}, minResumeStep: 3, want: 3},
+			{name: "file_bound_before_resume", steps: []uint64{4, 1}, filesEnd: 2, minResumeStep: 3, want: 2},
+			{name: "file_bound_after_resume", steps: []uint64{4, 1}, filesEnd: 3, minResumeStep: 2, want: 3},
+		} {
+			t.Run(fmt.Sprintf("%s/%s", cfg.Name, tc.name), func(t *testing.T) {
+				db, d := testDbAndDomainOfStep(t, *cfg, 16, log.New())
+				tx, err := db.BeginRw(t.Context())
+				require.NoError(t, err)
+				defer tx.Rollback()
+				view := d.beginForTests()
+				defer view.Close()
+				writer := view.NewWriter(db)
+				defer writer.Close()
+				for i, step := range tc.steps {
+					require.NoError(t, writer.PutWithPrev([]byte{byte(i)}, []byte{1}, step*d.stepSize+1, nil))
+				}
+				require.NoError(t, writer.Flush(t.Context(), tx))
+				first, found, err := d.firstStepToBuild(tx, tc.filesEnd, tc.minResumeStep)
+				require.NoError(t, err)
+				require.Equal(t, len(tc.steps) != 0, found)
+				if found {
+					if tc.want < tc.minResumeStep {
+						require.GreaterOrEqual(t, first, tc.want)
+						require.Less(t, first, tc.minResumeStep, "pending data below the safe resume boundary must defer the build")
+					} else {
+						require.Equal(t, tc.want, first)
+					}
+				}
+			})
+		}
+	}
+}
+
 // requireFileNameMatches asserts the file name shape - base, step range and
 // extension - without pinning the schema version, which bumps independently.
 func requireFileNameMatches(t *testing.T, path, mask string) {
@@ -157,9 +209,16 @@ func TestDomain_OpenFolder(t *testing.T) {
 
 	scanDirsRes, err := scanDirs(d.dirs)
 	require.NoError(t, err)
-	_, err = d.openFolder(t.Context(), scanDirsRes)
+	retired, err := d.openFolder(t.Context(), scanDirsRes)
+	reclaimFiles(retired)
 	require.NoError(t, err)
 	d.Close()
+	require.NotEmpty(t, retired)
+	for _, file := range retired {
+		require.Nil(t, file.decompressor, "retired data mappings must be closed")
+		require.Nil(t, file.index, "retired index mappings must be closed")
+		require.Nil(t, file.vAccessor, "retired history accessors must be closed")
+	}
 }
 
 func testCollationBuild(t *testing.T, compressDomainVals bool) {
@@ -1557,8 +1616,8 @@ func TestDomain_OpenFilesWithDeletions(t *testing.T) {
 
 	scanDirsRes, err := scanDirs(dom.dirs)
 	require.NoError(t, err)
-	_, err = dom.openFolder(t.Context(), scanDirsRes)
-
+	retired, err := dom.openFolder(t.Context(), scanDirsRes)
+	reclaimFiles(retired)
 	require.NoError(t, err)
 
 	domRoTx = dom.beginForTests()
@@ -1609,6 +1668,12 @@ func TestDomain_OpenFilesWithDeletions(t *testing.T) {
 	}
 
 	dom.Close()
+	require.NotEmpty(t, retired)
+	for _, file := range retired {
+		require.Nil(t, file.decompressor, "retired data mappings must be closed")
+		require.Nil(t, file.index, "retired index mappings must be closed")
+		require.Nil(t, file.vAccessor, "retired history accessors must be closed")
+	}
 }
 
 func emptyTestDomain(t testing.TB, aggStep uint64) *Domain {
@@ -3689,15 +3754,8 @@ func TestDomain_KeyPosResetOnCollisionRetry(t *testing.T) {
 	}
 }
 
-// TestDomain_DeletedKeyNotResurrectedByFiles is a regression test for the bug
-// where getLatestFromDb discards deletion entries whose step is already covered
-// by frozen files. Since frozen files lack tombstones, the fallthrough to
-// getLatestFromFiles returns a stale pre-deletion value.
+// A deletion in the latest snapshot must shadow values in older snapshots.
 func TestDomain_DeletedKeyNotResurrectedByFiles(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-
 	t.Parallel()
 
 	// Cover both DupSort (LargeValues=false) and non-DupSort (LargeValues=true) paths.
@@ -3757,11 +3815,7 @@ func TestDomain_DeletedKeyNotResurrectedByFiles(t *testing.T) {
 
 			v, _, found, err := domainRoTx.GetLatest(key, roTx)
 			require.NoError(err)
-			// The key was deleted at step 1. The deletion entry in DB must be
-			// authoritative even though step 1 is covered by frozen files.
-			// Without the fix, getLatestFromDb discards the deletion entry and
-			// getLatestFromFiles returns stale "value1" from the step 0 file.
-			require.True(found, "deletion entry should be found in DB")
+			require.True(found, "deletion record should be found")
 			require.Empty(v, "deleted key should have empty value, got %q", v)
 		})
 	}
@@ -4398,7 +4452,7 @@ func TestDomain_MayContainInFilesKeepsKeysOfMappedFilters(t *testing.T) {
 	}
 }
 
-func TestDomainCloseFilesAfterStep(t *testing.T) {
+func TestDomainRetireFilesAfterStep(t *testing.T) {
 	t.Parallel()
 	d := emptyTestDomain(t, 1)
 	d.scanDirtyFiles([]string{"v1.0-accounts.0-2.kv", "v1.0-accounts.2-4.kv"})
@@ -4406,11 +4460,11 @@ func TestDomainCloseFilesAfterStep(t *testing.T) {
 	d.History.InvertedIndex.scanDirtyFiles([]string{"v1.0-accounts.0-2.ef", "v1.0-accounts.2-4.ef"})
 	all := []*DirtyFiles{d.dirtyFiles, d.History.dirtyFiles, d.History.InvertedIndex.dirtyFiles}
 
-	d.closeFilesAfterStep(3)
+	reclaimFiles(d.retireFilesAfterStep(3))
 	for _, df := range all {
 		require.Equal(t, []string{"0-2", "2-4"}, stepRanges(t, df.Items(), d.stepSize))
 	}
-	d.closeFilesAfterStep(2)
+	reclaimFiles(d.retireFilesAfterStep(2))
 	for _, df := range all {
 		require.Equal(t, []string{"0-2"}, stepRanges(t, df.Items(), d.stepSize))
 	}

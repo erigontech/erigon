@@ -60,6 +60,9 @@ import (
 
 type InvertedIndex struct {
 	statecfg.InvIdxCfg
+
+	// Enabled is runtime state; InvIdxCfg.Enabled supplies only its initial value.
+	Enabled atomic.Bool
 	dirs    datadir.Dirs
 	salt    *atomic.Pointer[uint32]
 	noFsync bool // fsync is enabled by default, but tests can manually disable
@@ -113,6 +116,7 @@ func NewInvertedIndex(cfg statecfg.InvIdxCfg, stepSize, stepsInFrozenFile uint64
 		stepSize:          stepSize,
 		stepsInFrozenFile: stepsInFrozenFile,
 	}
+	ii.Enabled.Store(cfg.Enabled)
 	if ii.stepSize == 0 {
 		panic("assert: empty `stepSize`")
 	}
@@ -205,7 +209,7 @@ func (ii *InvertedIndex) openList(ctx context.Context, fNames, accessorFiles []s
 }
 
 func (ii *InvertedIndex) openFolder(ctx context.Context, r *ScanDirsResult) (retiredFiles, error) {
-	if !ii.Enabled {
+	if !ii.Enabled.Load() {
 		return nil, nil
 	}
 	return ii.openList(ctx, r.iiFiles, r.accessorFiles)
@@ -332,7 +336,7 @@ func (iit *InvertedIndexRoTx) Files() (res VisibleFiles) {
 }
 
 func (iit *InvertedIndexRoTx) NewWriter(db kv.RoDB) *InvertedIndexBufferedWriter {
-	return iit.newWriter(db, iit.ii.dirs.Tmp, !iit.ii.Enabled)
+	return iit.newWriter(db, iit.ii.dirs.Tmp, !iit.ii.Enabled.Load())
 }
 
 type InvertedIndexBufferedWriter struct {
@@ -1356,6 +1360,14 @@ func (ii *InvertedIndex) minTxNumInDB(tx kv.Tx) (uint64, error) {
 		return binary.BigEndian.Uint64(fst), nil
 	}
 	return 0, nil
+}
+
+func (ii *InvertedIndex) firstStepInDB(tx kv.Tx) (kv.Step, bool, error) {
+	first, err := kv.FirstKey(tx, ii.KeysTable)
+	if err != nil || len(first) == 0 {
+		return 0, false, err
+	}
+	return kv.Step(binary.BigEndian.Uint64(first) / ii.stepSize), true, nil
 }
 
 func (ii *InvertedIndex) lastTxNumInDB(tx kv.Tx) (uint64, bool) {
