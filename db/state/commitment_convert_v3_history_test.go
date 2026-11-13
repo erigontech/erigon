@@ -314,6 +314,17 @@ func TestConvertCommitmentFiles_V3HistoryRejectsAsOfOrphans(t *testing.T) {
 	require.ErrorContains(t, err, "orphan records")
 }
 
+func TestVerifyCommitmentV3_RejectsOrphanInLastGroup(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	db, agg, _ := testDbAggregatorWithCommitmentHistory(t, 7, 2)
+	runOrchestrator(t, db, state.ConvertOpts{TargetV3: true})
+	orphanTx := injectCommitmentHistoryOrphan(t, db, agg)
+	clean := orphanTx + 1
+	require.NoError(t, state.VerifyCommitmentV3(t.Context(), agg, []uint64{clean, clean, clean}, false, log.New()))
+	err := state.VerifyCommitmentV3(t.Context(), agg, []uint64{clean, clean, clean, orphanTx}, false, log.New())
+	require.ErrorContains(t, err, "orphan records")
+}
+
 func TestConvertCommitmentFiles_V3HistoryOversizedBatch(t *testing.T) {
 	t.Cleanup(statecfg.SetCommitmentV3(false))
 	db, _, _ := testDbAggregatorWithCommitmentHistory(t, 7, 4)
@@ -383,7 +394,7 @@ type commitmentHistoryPair struct {
 	key, value []byte
 }
 
-func injectCommitmentHistoryOrphan(t *testing.T, db kv.TemporalRwDB, agg *state.Aggregator) {
+func injectCommitmentHistoryOrphan(t *testing.T, db kv.TemporalRwDB, agg *state.Aggregator) uint64 {
 	t.Helper()
 	dirs := agg.Dirs()
 	historyPaths, err := filepath.Glob(filepath.Join(dirs.SnapHistory, "*-commitment.*.v"))
@@ -446,6 +457,7 @@ func injectCommitmentHistoryOrphan(t *testing.T, db kv.TemporalRwDB, agg *state.
 	rewriteCommitmentHistoryIndex(t, dirs, idxPath, idxPairs, cfg)
 	require.NoError(t, agg.ReloadFiles())
 	require.NoError(t, agg.BuildMissedAccessors(t.Context(), db, 1))
+	return orphanTx
 }
 
 func readCommitmentHistoryValues(t *testing.T, path string, cfg statecfg.HistCfg) []commitmentHistoryPair {
