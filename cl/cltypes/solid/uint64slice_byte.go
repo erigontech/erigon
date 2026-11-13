@@ -19,6 +19,7 @@ package solid
 import (
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"slices"
 	"strconv"
 
@@ -306,6 +307,9 @@ func (arr *byteBasedUint64Slice) EncodeSSZ(buf []byte) ([]byte, error) {
 func (arr *byteBasedUint64Slice) DecodeSSZ(buf []byte, _ int) error {
 	if len(buf)%8 > 0 {
 		return ssz.ErrBadDynamicLength
+	}
+	if l := len(buf) / 8; l > arr.c {
+		return fmt.Errorf("uint64 list length exceeds limit: %d > %d", l, arr.c)
 	}
 	arr.l = len(buf) / 8
 	bufferLength := length.Hash*((arr.l-1)/4) + length.Hash

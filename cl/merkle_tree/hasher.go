@@ -60,6 +60,9 @@ func (m *merkleHasher) merkleizeTrieLeavesFlat(leaves []byte, out []byte, limit 
 }
 
 func (m *merkleHasher) merkleizeTrieLeavesFlatWithStart(leaves []byte, out []byte, limit, start uint64) (err error) {
+	if chunks := uint64(len(leaves)+31) / 32; chunks > 0 && ((chunks-1)<<start)+1 > limit {
+		return fmt.Errorf("merkleize: %d chunks at level %d exceed limit %d", chunks, start, limit)
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	layer := m.getBufferFromFlat(leaves)

@@ -18,6 +18,7 @@ package solid
 
 import (
 	"encoding/json"
+	"fmt"
 	"slices"
 
 	"github.com/erigontech/erigon/cl/merkle_tree"
@@ -200,6 +201,9 @@ func (v *ValidatorSet) CopyTo(t *ValidatorSet) {
 func (v *ValidatorSet) DecodeSSZ(buf []byte, _ int) error {
 	if len(buf)%validatorSize > 0 {
 		return ssz.ErrBufferNotRounded
+	}
+	if l := len(buf) / validatorSize; l > v.c {
+		return fmt.Errorf("validator set length exceeds limit: %d > %d", l, v.c)
 	}
 	v.expandBuffer(len(buf) / validatorSize)
 	copy(v.buffer, buf)
