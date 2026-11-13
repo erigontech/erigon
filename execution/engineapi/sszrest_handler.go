@@ -21,7 +21,6 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/protocol/misc"
@@ -314,28 +313,11 @@ func (e *EngineServer) payloadWitness(ctx context.Context, blockHash common.Hash
 	if witness, ok := e.payloadWitnesses.Get(blockHash); ok {
 		return witness, nil
 	}
-	var witness *jsonrpc.ExecutionWitnessResult
-	held, err := e.executionService.ViewValidatedBlock(ctx, blockHash, defaultReadinessWait, func(blockTx kv.TemporalTx, parentState kv.TemporalGetter) error {
-		var err error
-		witness, err = e.buildPayloadWitness(ctx, blockHash, blockTx, parentState)
-		return err
-	})
-	if err != nil || held {
-		return witness, err
-	}
 	// Without the payload's state held or its changesets kept, only commitment history can rebuild the witness.
 	mode := "canonical"
-	if witness, err = e.witnessBuilder.ExecutionWitness(ctx, rpc.BlockNumberOrHashWithHash(blockHash, true), &mode); err != nil {
-		return nil, fmt.Errorf("payload witness unavailable: the payload's state is no longer held: %w", err)
-	}
-	e.payloadWitnesses.AddPayloadWitness(blockHash, witness)
-	return witness, nil
-}
-
-func (e *EngineServer) buildPayloadWitness(ctx context.Context, blockHash common.Hash, blockTx kv.TemporalTx, parentState kv.TemporalGetter) (*jsonrpc.ExecutionWitnessResult, error) {
-	witness, err := e.witnessBuilder.ValidatedBlockWitness(ctx, blockTx, parentState, blockHash)
+	witness, err := e.witnessBuilder.ExecutionWitness(ctx, rpc.BlockNumberOrHashWithHash(blockHash, true), &mode)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("payload witness unavailable: the payload's state is no longer held: %w", err)
 	}
 	e.payloadWitnesses.AddPayloadWitness(blockHash, witness)
 	return witness, nil

@@ -356,7 +356,8 @@ func (e *EngineServer) decodePayloadTransactions(raw []hexutil.Bytes, gasLimit u
 
 // newPayload validates and may execute a payload. A non-nil onValid runs for a VALID payload in the same engine-lock
 // section that decided the status, so no other engine call replaces or commits the validated state before onValid reads it.
-// A validation for a non-nil onValid also caches the payload witness before it releases the execution module.
+// For a non-nil onValid the execution module builds and caches the payload witness before it is released, also for
+// a known VALID payload whose witness is not cached.
 func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.ExecutionPayload,
 	expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash,
 	executionRequests []hexutil.Bytes, version clparams.StateVersion, deriveBlobHashes bool,
@@ -598,6 +599,12 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	e.lock.Lock()
 	defer e.lock.Unlock()
 
+	// Pass `txs` (the binary tx encodings from the CL) through as the Block's
+	// binaryTransactions cache so the downstream Block.RawBody() invocation
+	// inside InsertBlocks doesn't re-encode every tx
+	// via rlp.EncodeToBytes. Both slices reference the same underlying
+	// byte buffers from req.Transactions.
+	block := types.NewBlockFromStorageWithBinaryTxs(blockHash, &header, transactions, txs, nil /* uncles */, withdrawals, blockAccessList)
 	if possibleStatus != nil {
 		// Decided without the lock: a forkchoice update or another payload may have changed the validated state since.
 		if possibleStatus, err = e.getQuickPayloadStatusIfPossible(ctx, blockHash, uint64(req.BlockNumber), header.ParentHash, nil, true, defaultReadinessWait); err != nil {
@@ -605,20 +612,24 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		}
 		if possibleStatus != nil {
 			e.logger.Debug("[NewPayload] got quick payload status", "payloadStatus", possibleStatus)
-			if possibleStatus.Status == engine_types.ValidStatus {
-				onValid(blockHash)
+			if possibleStatus.Status != engine_types.ValidStatus {
+				return possibleStatus, nil
 			}
+			if _, cached := e.payloadWitnesses.Get(blockHash); !cached {
+				status, validationErr, latestValidHash, err := e.validateChain(ctx, block, true)
+				if err != nil {
+					return nil, err
+				}
+				if possibleStatus = e.validatedPayloadStatus(block, status, validationErr, latestValidHash); possibleStatus.Status != engine_types.ValidStatus {
+					return possibleStatus, nil
+				}
+			}
+			onValid(blockHash)
 			return possibleStatus, nil
 		}
 	}
 
 	e.logger.Debug("[NewPayload] sending block", "height", header.Number, "hash", blockHash)
-	// Pass `txs` (the binary tx encodings from the CL) through as the Block's
-	// binaryTransactions cache so the downstream Block.RawBody() invocation
-	// inside InsertBlocks doesn't re-encode every tx
-	// via rlp.EncodeToBytes. Both slices reference the same underlying
-	// byte buffers from req.Transactions.
-	block := types.NewBlockFromStorageWithBinaryTxs(blockHash, &header, transactions, txs, nil /* uncles */, withdrawals, blockAccessList)
 	payloadStatus, err := e.HandleNewPayload(ctx, "NewPayload", block, onValid != nil)
 	if err != nil {
 		if errors.Is(err, rules.ErrInvalidBlock) {
@@ -1231,10 +1242,13 @@ func (e *EngineServer) validateChain(ctx context.Context, block *types.Block, ca
 		return e.chainRW.ValidateChain(ctx, block)
 	}
 	blockHash := block.Hash()
-	result, err := e.executionService.ValidateChainAndView(ctx, block, func(blockTx kv.TemporalTx, parentState kv.TemporalGetter) error {
-		if _, err := e.buildPayloadWitness(ctx, blockHash, blockTx, parentState); err != nil {
+	result, err := e.executionService.ValidateChainAndView(ctx, block, defaultReadinessWait, func(blockTx kv.TemporalTx, parentState kv.TemporalGetter) error {
+		witness, err := e.witnessBuilder.ValidatedBlockWitness(ctx, blockTx, parentState, blockHash)
+		if err != nil {
 			e.logger.Warn("[NewPayload] could not build the payload witness", "hash", blockHash, "err", err)
+			return nil
 		}
+		e.payloadWitnesses.AddPayloadWitness(blockHash, witness)
 		return nil
 	})
 	if err != nil {

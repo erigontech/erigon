@@ -217,3 +217,38 @@ func TestEngineApiPayloadWitnessForKnownPayload(t *testing.T) {
 		require.Equal(t, witness, requirePayloadWitness(ctx, t, eat, payload))
 	})
 }
+
+// A forkchoice update back to the committed head unwinds a payload, which leaves it a known VALID payload with no
+// state and its child a child of an uncommitted payload.
+func TestEngineApiPayloadWitnessForAnUnwoundPayloadAndItsChild(t *testing.T) {
+	eat := newPayloadWitnessTester(t, engineapitester.EngineApiTesterInitArgs{
+		EthConfigTweaker: func(cfg *ethconfig.Config) { cfg.KeepExecutionProofs = true },
+		EnableDebugAPI:   true,
+	})
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		parent, changerAddr := buildChangerPayload(ctx, t, eat)
+		committedHead := parent.ExecutionPayload.ParentHash
+		status, err := eat.MockCl.InsertNewPayload(ctx, parent)
+		require.NoError(t, err)
+		require.Equal(t, enginetypes.ValidStatus, status.Status)
+		require.NoError(t, eat.MockCl.UpdateForkChoice(ctx, parent))
+		transactOpts, err := bind.NewKeyedTransactorWithChainID(eat.CoinbaseKey, eat.ChainId())
+		require.NoError(t, err)
+		transactOpts.GasLimit = params.MaxTxnGasLimit
+		changer, err := contracts.NewChanger(changerAddr, eat.ContractBackend)
+		require.NoError(t, err)
+		_, err = changer.Change(transactOpts)
+		require.NoError(t, err)
+		child, err := eat.MockCl.BuildNewPayload(ctx)
+		require.NoError(t, err)
+		require.Len(t, child.ExecutionPayload.Transactions, 1)
+		require.NoError(t, eat.MockCl.UpdateForkChoiceByHash(ctx, committedHead))
+
+		parentWitness := requirePayloadWitness(ctx, t, eat, parent)
+		childWitness := requirePayloadWitness(ctx, t, eat, child)
+
+		require.NoError(t, eat.MockCl.UpdateForkChoiceByHash(ctx, child.ExecutionPayload.BlockHash))
+		requireDebugExecutionWitness(ctx, t, eat, parent, parentWitness)
+		requireDebugExecutionWitness(ctx, t, eat, child, childWitness)
+	})
+}

@@ -936,11 +936,15 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 	// Use the proof infrastructure from the commitment context.
 	// Witness generation requires the sequential HexPatriciaHashed (Witness()
 	// type-asserts it); the parallel trie cannot serve it.
-	domains, err := newSnapshotCommitmentDomains(ctx, tx, log.New())
-	if err != nil {
+	domains, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithoutDeferredBranchUpdates(), execctx.WithoutSharedBranchCache(), execctx.WithSequentialCommitment())
+	if domains != nil {
+		defer domains.Close()
+	}
+	// A side-fork view has TxNums only up to its tip, below the committed commitment. Head-capture seeks the
+	// commitment on the pinned parent instead.
+	if err != nil && (hc == nil || !errors.Is(err, commitmentdb.ErrBehindCommitment)) {
 		return nil, err
 	}
-	defer domains.Close()
 	sdCtx := domains.GetCommitmentContext()
 
 	// Get the expected parent state root for verification

@@ -183,8 +183,9 @@ type HasDiff interface {
 // payload when required chain data is unavailable. Before a fork unwind it
 // invokes ensureReadAheadSuspended, which must idempotently acquire a
 // caller-owned suspension lasting until validation stops reading staged state;
-// an acquisition error aborts validation before the unwind.
-func (fv *ForkValidator) ValidatePayload(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalRwTx, header *types.Header, body *types.Body, ensureReadAheadSuspended func() error, logger log.Logger) (status engine_types.EngineStatus, latestValidHash common.Hash, validationError error, criticalError error) {
+// an acquisition error aborts validation before the unwind. With revalidate, a
+// payload that passed validation before is executed again, so sd holds its state.
+func (fv *ForkValidator) ValidatePayload(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalRwTx, header *types.Header, body *types.Body, revalidate bool, ensureReadAheadSuspended func() error, logger log.Logger) (status engine_types.EngineStatus, latestValidHash common.Hash, validationError error, criticalError error) {
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
 	if fv.executor == nil {
@@ -195,7 +196,7 @@ func (fv *ForkValidator) ValidatePayload(ctx context.Context, sd *execctx.Shared
 	number := header.Number.Uint64()
 
 	// If the block is stored within the side fork it means it was already validated.
-	if _, ok := fv.validHashes.Get(hash); ok {
+	if _, ok := fv.validHashes.Get(hash); ok && !revalidate {
 		status = engine_types.ValidStatus
 		latestValidHash = hash
 		return
