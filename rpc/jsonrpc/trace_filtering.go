@@ -832,7 +832,7 @@ func (api *TraceAPIImpl) callBlock(
 
 	var traces []*TraceCallResult
 	cmErr := errNoReplayReadTx
-	if isHistoricalStateReader && !hasStateDiff && !hasVmTrace && len(txs) > 1 {
+	if isHistoricalStateReader && !hasStateDiff && !hasVmTrace && len(txs) > 1 && !api.remoteBlocks {
 		traces, cmErr = api.doCallBlockParallel(ctx, dbtx, baseTxNum, txs, msgs, callParams, header, gasBailOut, traceConfig)
 	}
 	if errors.Is(cmErr, errNoReplayReadTx) {

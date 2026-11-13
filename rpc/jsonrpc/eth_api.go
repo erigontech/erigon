@@ -173,6 +173,9 @@ type BaseAPI struct {
 	_blocksPruneFloor     pruneFloorCache[uint64]
 
 	_blockReader dbservices.FullBlockReader
+	// remoteBlocks is set when block lookups go to the backend over gRPC (rpcdaemon without
+	// --datadir): each one opens a backend read tx.
+	remoteBlocks bool
 	_txNumReader rawdbv3.TxNumsReader
 	_txnReader   dbservices.TxnReader
 	_engine      rules.EngineReader
@@ -249,6 +252,7 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader dbse
 		getLogsMaxResults: conf.GetLogsMaxResults,
 		logQueryLimit:     conf.LogQueryLimit,
 	}
+	_, api.remoteBlocks = blockReader.(*freezeblocks.RemoteBlockReader)
 	api._preMergeData.SetTTL(defaultPreMergeDataTTL)
 	api._preMergeUnsettledTTL = defaultUnsettledPreMergeTTL
 	return api

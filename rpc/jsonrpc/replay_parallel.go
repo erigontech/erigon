@@ -51,7 +51,8 @@ func replayWorkerCount(cpus, txnCount int) int {
 func replayTxnsParallel(ctx context.Context, db kv.TemporalRoDB, callerTx kv.TemporalTx, blockNum uint64, baseTxNum uint64, txnCount, workers, window int,
 	newWorker func(ctx context.Context, tx kv.TemporalTx) (func(txnIndex int) error, error),
 ) (*txnReplay, error) {
-	tip, err := tipCanonicalMarker(callerTx)
+	// A block keeps its txNums while it keeps its hash, since every block hashes its parent.
+	blockHash, err := canonicalHashAt(callerTx, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -83,13 +84,12 @@ func replayTxnsParallel(ctx context.Context, db kv.TemporalRoDB, callerTx kv.Tem
 			if baseTxNum < startTxNum {
 				return fmt.Errorf("%w: requested block %d, history is available from txNum %d", state.ErrPruned, blockNum, startTxNum)
 			}
-			// After a reorg the block's txNums belong to the new fork. A reorg at or below
-			// the caller's tip rewrites or truncates the tip marker, so it alone covers the block.
-			tipHash, err := canonicalHashAt(tx, tip.number)
+			// After a reorg the block's txNums belong to the new fork.
+			workerHash, err := canonicalHashAt(tx, blockNum)
 			if err != nil {
 				return err
 			}
-			if tipHash != tip.hash {
+			if workerHash != blockHash {
 				return fmt.Errorf("%w: block %d", errBlockNotCanonical, blockNum)
 			}
 			job, err := newWorker(gctx, tx)

@@ -116,10 +116,8 @@ func TestReplayTxnsParallelRejectsReorgedBlock(t *testing.T) {
 	tx, err := m.DB.BeginTemporalRo(m.Ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
-	tip, err := tipCanonicalMarker(tx)
-	require.NoError(t, err)
 	require.NoError(t, m.DB.Update(m.Ctx, func(rwTx kv.RwTx) error {
-		return rawdb.WriteCanonicalHash(rwTx, common.Hash{0xff}, tip.number)
+		return rawdb.WriteCanonicalHash(rwTx, common.Hash{0xff}, 1)
 	}))
 
 	var replayed atomic.Bool
@@ -133,6 +131,82 @@ func TestReplayTxnsParallelRejectsReorgedBlock(t *testing.T) {
 	require.NoError(t, err)
 	require.ErrorIs(t, r.Wait(), errBlockNotCanonical)
 	require.False(t, replayed.Load())
+}
+
+// TestReplayTxnsParallelKeepsBlockAfterReorgAboveIt pins that a reorg above the traced block,
+// which leaves the block and its txNums unchanged, does not fail the workers.
+func TestReplayTxnsParallelKeepsBlockAfterReorgAboveIt(t *testing.T) {
+	m, _ := createLogIndexTestModule(t)
+	// a canonical marker above block 1, so that the caller's tip is not the traced block
+	require.NoError(t, m.DB.Update(m.Ctx, func(rwTx kv.RwTx) error {
+		return rawdb.WriteCanonicalHash(rwTx, common.Hash{0xaa}, 2)
+	}))
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	require.NoError(t, m.DB.Update(m.Ctx, func(rwTx kv.RwTx) error {
+		return rawdb.WriteCanonicalHash(rwTx, common.Hash{0xbb}, 2)
+	}))
+
+	var replayed atomic.Int32
+	r, err := replayTxnsParallel(m.Ctx, m.DB, tx, 1, 0, 4, 4, 4,
+		func(context.Context, kv.TemporalTx) (func(int) error, error) {
+			return func(int) error {
+				replayed.Add(1)
+				return nil
+			}, nil
+		})
+	require.NoError(t, err)
+	for range 4 {
+		r.written()
+	}
+	require.NoError(t, r.Wait())
+	require.EqualValues(t, 4, replayed.Load())
+}
+
+// TestTraceBlockOnRemoteBlockReaderIsSequential pins that debug_traceBlock and trace_block open
+// no worker read tx when block lookups go to a remote backend: a worker's BLOCKHASH would open
+// one more backend read tx while it holds one, and could wait for it until the request times out.
+func TestTraceBlockOnRemoteBlockReaderIsSequential(t *testing.T) {
+	m, _ := createLogIndexTestModule(t)
+	const readTxs = 100
+	opened := func(db *readTxLimitDB) int32 { return readTxs - db.left.Load() }
+
+	t.Run("debug_traceBlock", func(t *testing.T) {
+		trace := func(t *testing.T, api *DebugAPIImpl) string {
+			var buf bytes.Buffer
+			stream := jsonstream.New(&buf)
+			require.NoError(t, api.TraceBlockByNumber(m.Ctx, rpc.BlockNumber(1), withLogCallTracer(), stream))
+			require.NoError(t, stream.Flush())
+			return buf.String()
+		}
+		withReplayCPUs(t, 1)
+		want := trace(t, newDebugApiForTest(m))
+
+		withReplayCPUs(t, 16)
+		api := newDebugApiForTest(m)
+		api.remoteBlocks = true
+		db := newReadTxLimitDB(m.DB, readTxs)
+		api.db = db
+		require.Equal(t, want, trace(t, api))
+		require.EqualValues(t, 1, opened(db))
+	})
+
+	t.Run("trace_block", func(t *testing.T) {
+		withReplayCPUs(t, 1)
+		want, err := newTraceApiForTest(m).Block(m.Ctx, 1, nil, nil)
+		require.NoError(t, err)
+
+		withReplayCPUs(t, 16)
+		api := newTraceApiForTest(m)
+		api.remoteBlocks = true
+		db := newReadTxLimitDB(m.DB, readTxs)
+		api.kv = db
+		got, err := api.Block(m.Ctx, 1, nil, nil)
+		require.NoError(t, err)
+		require.Equal(t, want, got)
+		require.EqualValues(t, 1, opened(db))
+	})
 }
 
 // TestReplayTxnsParallelBoundsBufferedTxns pins that a slow txn holds back every txn a window
