@@ -222,6 +222,24 @@ func TestMakeBALWarmupTasksSplitsStorageHeavyAccount(t *testing.T) {
 	}, tasks)
 }
 
+func TestMakeBALWarmupPlanIOAccountsFirstThenStorageRoundRobin(t *testing.T) {
+	bal := types.BlockAccessList{
+		{StorageChanges: make([]types.SlotChanges, 10), StorageReads: make([]common.Hash, 2)},
+		{},
+		{StorageReads: make([]common.Hash, 3)},
+	}
+	tasks, workers := makeBALWarmupPlanIO(bal, 16)
+	require.Equal(t, 6, workers)
+	require.Equal(t, []balWarmupTask{
+		{accountIndex: 0},
+		{accountIndex: 1},
+		{accountIndex: 2},
+		{accountIndex: 0, slotFrom: 0, slotTo: 8, storageOnly: true},
+		{accountIndex: 2, slotFrom: 0, slotTo: 3, storageOnly: true},
+		{accountIndex: 0, slotFrom: 8, slotTo: 12, storageOnly: true},
+	}, tasks)
+}
+
 func TestBALCodeWarmupModeForFlags(t *testing.T) {
 	tests := []struct {
 		name        string

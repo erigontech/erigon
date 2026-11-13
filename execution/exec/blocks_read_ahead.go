@@ -359,6 +359,35 @@ type balWarmupTask struct {
 	accountIndex uint32
 	slotFrom     uint32
 	slotTo       uint32
+	storageOnly  bool
+}
+
+var balWarmIO = dbg.EnvBool("BAL_WARM_IO", false)
+
+const balWarmupIOBatch = 8
+
+// makeBALWarmupPlanIO reads every account first, then storage in batches of 8 slots taken round-robin across accounts.
+func makeBALWarmupPlanIO(bal types.BlockAccessList, workers int) ([]balWarmupTask, int) {
+	tasks := make([]balWarmupTask, 0, len(bal))
+	var active []int
+	for i := range bal {
+		tasks = append(tasks, balWarmupTask{accountIndex: uint32(i)})
+		if len(bal[i].StorageChanges)+len(bal[i].StorageReads) > 0 {
+			active = append(active, i)
+		}
+	}
+	for from := 0; len(active) > 0; from += balWarmupIOBatch {
+		next := active[:0]
+		for _, i := range active {
+			slots := len(bal[i].StorageChanges) + len(bal[i].StorageReads)
+			tasks = append(tasks, balWarmupTask{accountIndex: uint32(i), slotFrom: uint32(from), slotTo: uint32(min(from+balWarmupIOBatch, slots)), storageOnly: true})
+			if from+balWarmupIOBatch < slots {
+				next = append(next, i)
+			}
+		}
+		active = next
+	}
+	return tasks, min(workers, len(tasks))
 }
 
 func balCodeWarmupModeForFlags(warmBALCode, warmTxCode bool) balCodeWarmupMode {
@@ -372,6 +401,9 @@ func balCodeWarmupModeForFlags(warmBALCode, warmTxCode bool) balCodeWarmupMode {
 }
 
 func makeBALWarmupPlan(bal types.BlockAccessList, workers int) ([]balWarmupTask, int) {
+	if balWarmIO {
+		return makeBALWarmupPlanIO(bal, workers)
+	}
 	taskCount := 0
 	for i := range bal {
 		slots := len(bal[i].StorageChanges) + len(bal[i].StorageReads)
@@ -408,7 +440,8 @@ func uniqueTransactionDestinations(txns types.Transactions) map[accounts.Address
 func warmBALStateTask(ctx context.Context, stateReader *state.ReaderV3, account *types.AccountChanges, task balWarmupTask, codeMode balCodeWarmupMode, txCodeDestinations map[accounts.Address]struct{}) error {
 	address := accounts.InternAddress(account.Address)
 	var accountData *accounts.Account
-	if task.slotFrom == 0 {
+	readAccount := task.slotFrom == 0 && !task.storageOnly
+	if readAccount {
 		var err error
 		accountData, err = stateReader.ReadAccountData(address)
 		if err != nil {
@@ -430,7 +463,7 @@ func warmBALStateTask(ctx context.Context, stateReader *state.ReaderV3, account 
 			return err
 		}
 	}
-	if task.slotFrom != 0 || codeMode == balCodeWarmupNone {
+	if !readAccount || codeMode == balCodeWarmupNone {
 		return nil
 	}
 	warmCode := false
@@ -471,6 +504,11 @@ func (bra *BlockReadAheader) warmBody(ctx context.Context, db kv.RoDB, header *t
 }
 
 func (bra *BlockReadAheader) warmBAL(ctx context.Context, db kv.RoDB, bal types.BlockAccessList, txns types.Transactions, codeMode balCodeWarmupMode, workers int) error {
+	started := time.Now()
+	var stateElapsed time.Duration
+	defer func() {
+		log.Info("[warmBAL] probe done", "elapsed", time.Since(started), "npWarmState", stateElapsed, "accounts", len(bal), "workers", workers, "io", balWarmIO)
+	}()
 	var txCodeDestinations map[accounts.Address]struct{}
 	if codeMode == balCodeWarmupTxnDestinations {
 		txCodeDestinations = uniqueTransactionDestinations(txns)
@@ -504,7 +542,9 @@ func (bra *BlockReadAheader) warmBAL(ctx context.Context, db kv.RoDB, bal types.
 				warmTasks, warmWorkers = makeBALWarmupPlan(warm, workers)
 			}
 		}
-		return bra.warmBALState(ctx, db, warm, warmTasks, codeMode, txCodeDestinations, warmWorkers)
+		err := bra.warmBALState(ctx, db, warm, warmTasks, codeMode, txCodeDestinations, warmWorkers)
+		stateElapsed = time.Since(started)
+		return err
 	})
 	return group.Wait()
 }
