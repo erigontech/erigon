@@ -906,6 +906,8 @@ func Test_BtreeIndex_OrdinalLookupAfterNext(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, c.Next())
 	c.Close()
+	require.Nil(t, c.Key())
+	require.Nil(t, c.Value())
 
 	k, v, _, err := bt.dataLookup(0, getter)
 	require.NoError(t, err)
