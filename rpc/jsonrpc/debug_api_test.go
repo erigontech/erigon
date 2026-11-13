@@ -42,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/order"
+	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -2184,6 +2185,78 @@ func TestCallRejectsTxIndexOutOfBlock(t *testing.T) {
 	})
 }
 
+func TestTraceCallSetupErrors(t *testing.T) {
+	m, aheadHash := newHeaderAheadTester(t)
+	var hash common.Hash
+	require.NoError(t, m.DB.View(m.Ctx, func(tx kv.Tx) error {
+		var err error
+		hash, err = rawdb.ReadCanonicalHash(tx, 1)
+		return err
+	}))
+	readErr := errors.New("test read failure")
+	for _, tc := range []struct {
+		name      string
+		block     rpc.BlockNumberOrHash
+		configure func(*BaseAPI)
+		message   string
+		cause     error
+	}{
+		{
+			name: "unknown_block", block: rpc.BlockNumberOrHashWithNumber(overlayRaceChainSize + 2),
+			message: "get block number: ",
+		},
+		{
+			name: "not_executed", block: rpc.BlockNumberOrHashWithHash(aheadHash, true),
+			message: "not executed",
+		},
+		{
+			name: "reader_error", block: rpc.BlockNumberOrHashWithNumber(1),
+			configure: func(api *BaseAPI) {
+				api._txNumReader = api._txNumReader.WithCustomReadTxNumFunc(rejectTxNumsAboveIndex{err: readErr})
+			},
+			message: "create state reader: ", cause: readErr,
+		},
+		{
+			name: "header_error", block: rpc.BlockNumberOrHashWithNumber(1),
+			configure: func(api *BaseAPI) {
+				api._blockReader = failHeaderReadBlockReader{FullBlockReader: api._blockReader, hash: hash, blockNumber: 1, err: readErr}
+			},
+			message: fmt.Sprintf("could not fetch header 1(%x): ", hash), cause: readErr,
+		},
+		{
+			name: "missing_header", block: rpc.BlockNumberOrHashWithNumber(1),
+			configure: func(api *BaseAPI) {
+				api._blockReader = hideHeaderBlockReader{FullBlockReader: api._blockReader, blockNumber: 1}
+			},
+			message: fmt.Sprintf("block 1(%x) not found", hash),
+		},
+	} {
+		for _, endpoint := range []string{"traceCall", "traceCallMany"} {
+			t.Run(tc.name+"/"+endpoint, func(t *testing.T) {
+				api := newDebugApiForTest(m)
+				if tc.configure != nil {
+					tc.configure(api.BaseAPI)
+				}
+				args := ethapi.CallArgs{From: &m.Address, To: &m.Address, Gas: new(hexutil.Uint64(100_000))}
+				var output bytes.Buffer
+				stream := jsonstream.New(&output)
+				var err error
+				if endpoint == "traceCall" {
+					err = api.TraceCall(m.Ctx, args, &tc.block, nil, stream)
+				} else {
+					err = api.TraceCallMany(m.Ctx, []Bundle{{Transactions: []ethapi.CallArgs{args}}}, StateContext{BlockNumber: tc.block}, nil, stream)
+				}
+				require.ErrorContains(t, err, tc.message)
+				if tc.cause != nil {
+					require.ErrorIs(t, err, tc.cause)
+				}
+				require.Empty(t, stream.Buffer())
+				require.Empty(t, output.Bytes())
+			})
+		}
+	}
+}
+
 func TestTraceCallRejectsTxIndexOutOfLatestBlock(t *testing.T) {
 	m, _, calls := gasTracingTestChain(t)
 	_, debugApi := newCallManyApisForTest(m)
@@ -2197,6 +2270,140 @@ func TestTraceCallRejectsTxIndexOutOfLatestBlock(t *testing.T) {
 	config := &tracersConfig.TraceConfig{TxIndex: new(hexutil.Uint(500))}
 	err := debugApi.TraceCall(m.Ctx, calls[0], &latest, config, jsonstream.New(&bytes.Buffer{}))
 	require.ErrorAs(t, err, &invalidParams)
+}
+
+// An explicit transaction index selects the state before that transaction, also in the head block.
+func TestTraceCallTxIndexSelectsPreStateAtHead(t *testing.T) {
+	key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	require.NoError(t, err)
+	bank := crypto.PubkeyToAddress(key.PublicKey)
+	contract := common.HexToAddress("0x00000000000000000000000000000000c0ffee20")
+	// With calldata: SSTORE(0, CALLDATALOAD(0)). Always: return SLOAD(0).
+	code := []byte{
+		byte(vm.CALLDATASIZE), byte(vm.ISZERO), byte(vm.PUSH1), 0x0B, byte(vm.JUMPI),
+		byte(vm.PUSH1), 0x00, byte(vm.CALLDATALOAD), byte(vm.PUSH1), 0x00, byte(vm.SSTORE),
+		byte(vm.JUMPDEST), byte(vm.PUSH1), 0x00, byte(vm.SLOAD), byte(vm.PUSH1), 0x00, byte(vm.MSTORE),
+		byte(vm.PUSH1), 0x20, byte(vm.PUSH1), 0x00, byte(vm.RETURN),
+	}
+	word := func(v uint64) hexutil.Bytes { return common.LeftPadBytes(new(big.Int).SetUint64(v).Bytes(), 32) }
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
+		Config: chain.TestChainOsakaConfig,
+		Alloc: types.GenesisAlloc{
+			bank:     {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(20), nil)},
+			contract: {Balance: new(big.Int), Code: code},
+		},
+	}), execmoduletester.WithKey(key))
+	signer := types.LatestSignerForChainID(m.ChainConfig.ChainID)
+	chainPack, err := m.GenerateChain(2, func(i int, b *blockgen.BlockGen) {
+		if i > 0 {
+			return
+		}
+		for _, v := range []uint64{1, 2} {
+			txn, err := types.SignTx(&types.DynamicFeeTransaction{
+				CommonTx: types.CommonTx{Nonce: b.TxNonce(bank), To: &contract, GasLimit: 100_000, Data: word(v)},
+				ChainID:  *uint256.MustFromBig(m.ChainConfig.ChainID.ToBig()),
+				FeeCap:   *uint256.NewInt(1_000_000_000_000),
+			}, *signer, key)
+			require.NoError(t, err)
+			b.AddTx(txn)
+		}
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(chainPack.Slice(0, 1)))
+	_, debugApi := newCallManyApisForTest(m)
+
+	tracer := "callTracer"
+	gas := hexutil.Uint64(100_000)
+	read := ethapi.CallArgs{From: &bank, To: &contract, Gas: &gas}
+	traceCall := func(block rpc.BlockNumberOrHash, txIndex *int) string {
+		config := &tracersConfig.TraceConfig{Tracer: &tracer}
+		if txIndex != nil {
+			config.TxIndex = new(hexutil.Uint(*txIndex))
+		}
+		var trace struct{ Output string }
+		readGasTrace(t, &trace, func(stream *jsonstream.Stream) error {
+			return debugApi.TraceCall(m.Ctx, read, &block, config, stream)
+		})
+		return trace.Output
+	}
+	traceCallMany := func(block rpc.BlockNumberOrHash, txIndex *int) string {
+		var traces [][]struct{ Output string }
+		readGasTrace(t, &traces, func(stream *jsonstream.Stream) error {
+			stateCtx := StateContext{BlockNumber: block, TransactionIndex: txIndex}
+			return debugApi.TraceCallMany(m.Ctx, []Bundle{{Transactions: []ethapi.CallArgs{read}}}, stateCtx, &tracersConfig.TraceConfig{Tracer: &tracer}, stream)
+		})
+		require.Len(t, traces, 1)
+		require.Len(t, traces[0], 1)
+		return traces[0][0].Output
+	}
+	check := func(t *testing.T, block rpc.BlockNumberOrHash) {
+		preState, postState := word(1).String(), word(2).String()
+		require.Equal(t, preState, traceCall(block, new(1)), "debug_traceCall txIndex 1")
+		require.Equal(t, preState, traceCallMany(block, new(1)), "debug_traceCallMany transactionIndex 1")
+		require.Equal(t, postState, traceCall(block, nil), "debug_traceCall without txIndex")
+		require.Equal(t, postState, traceCallMany(block, nil), "debug_traceCallMany without transactionIndex")
+		require.Equal(t, postState, traceCallMany(block, new(-1)), "debug_traceCallMany transactionIndex -1")
+	}
+
+	blockHash := chainPack.Blocks[0].Hash()
+	t.Run("head/latest", func(t *testing.T) { check(t, rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)) })
+	t.Run("head/number", func(t *testing.T) { check(t, rpc.BlockNumberOrHashWithNumber(1)) })
+	t.Run("head/hash", func(t *testing.T) { check(t, rpc.BlockNumberOrHashWithHash(blockHash, true)) })
+
+	require.NoError(t, m.InsertChain(chainPack.Slice(1, 2)))
+	t.Run("older/number", func(t *testing.T) { check(t, rpc.BlockNumberOrHashWithNumber(1)) })
+	t.Run("older/hash", func(t *testing.T) { check(t, rpc.BlockNumberOrHashWithHash(blockHash, true)) })
+}
+
+func TestIndexedTraceRejectsPrunedHistoryAtForkchoiceHead(t *testing.T) {
+	apis, chainInfo := setupPhysicallyPrunedHistory(t, prunedHistoryConfig{mode: prune.Mode{
+		Initialised: true, History: prunedHistoryDistance, Blocks: prune.KeepAllBlocksPruneMode,
+	}})
+	ctx := t.Context()
+	require.NoError(t, apis.rwDB.Update(ctx, func(tx kv.RwTx) error {
+		rawdb.WriteForkchoiceHead(tx, chainInfo.old.hash)
+		return nil
+	}))
+	tx, err := apis.debug.db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	head, err := rpchelper.GetLatestBlockNumber(tx)
+	require.NoError(t, err)
+	require.Equal(t, chainInfo.old.num, head)
+	require.Less(t, head, chainInfo.head)
+	require.NoError(t, rpchelper.CheckBlockExecuted(tx, chainInfo.head))
+	_, err = rpchelper.CreateHistoryStateReader(ctx, tx, head, 0, apis.debug._txNumReader)
+	require.ErrorIs(t, err, state.ErrPruned)
+
+	for _, selector := range []struct {
+		name  string
+		block rpc.BlockNumberOrHash
+	}{
+		{"latest", rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)},
+		{"number", rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(head))},
+		{"hash", rpc.BlockNumberOrHashWithHash(chainInfo.old.hash, true)},
+	} {
+		for _, endpoint := range []string{"traceCall", "traceCallMany"} {
+			t.Run(selector.name+"/"+endpoint, func(t *testing.T) {
+				bundles, simulate := pruneGatingBundle(head)
+				simulate.BlockNumber = selector.block
+				simulate.TransactionIndex = new(0)
+				config := &tracersConfig.TraceConfig{TxIndex: new(hexutil.Uint(0)), Tracer: new("callTracer")}
+				var output bytes.Buffer
+				stream := jsonstream.New(&output)
+				var err error
+				if endpoint == "traceCall" {
+					err = apis.debug.TraceCall(ctx, bundles[0].Transactions[0], &selector.block, config, stream)
+				} else {
+					err = apis.debug.TraceCallMany(ctx, bundles, simulate, config, stream)
+				}
+				require.ErrorIs(t, err, state.ErrPruned)
+				require.ErrorContains(t, err, fmt.Sprintf("requested block %d", head))
+				require.Empty(t, output.Bytes())
+				require.Empty(t, stream.Buffer(), "history must be checked before trace output starts")
+			})
+		}
+	}
 }
 
 type recordingCodeStore map[string]int

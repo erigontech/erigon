@@ -25,6 +25,7 @@ import (
 	"math/big"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -958,7 +959,8 @@ func TestGetPayloadBodiesByHashV2(t *testing.T) {
 
 	executionRpc := mockSentry.ExecModule
 	maxReorgDepth := ethconfig.Defaults.MaxReorgDepth
-	engineServer := NewEngineServer(mockSentry.Log, mockSentry.ChainConfig, executionRpc, nil, false, false, false, true, nil, nil, ethconfig.Defaults.FcuTimeout, maxReorgDepth)
+	downloader := engine_block_downloader.NewEngineBlockDownloader(t.Context(), mockSentry.Log, executionRpc, nil, nil, mockSentry.ChainConfig, ethconfig.Sync{}, nil)
+	engineServer := NewEngineServer(mockSentry.Log, mockSentry.ChainConfig, executionRpc, downloader, false, false, false, true, nil, nil, ethconfig.Defaults.FcuTimeout, maxReorgDepth)
 
 	const blockNum = 1
 	blockHash := canonicalHashAt(t, mockSentry.DB, blockNum)
@@ -1088,4 +1090,153 @@ func TestValidatedPayloadStatusAnswersSyncingWhenTooFarAway(t *testing.T) {
 	require.Equal(t, engine_types.SyncingStatus, resp.Status)
 	require.Nil(t, resp.LatestValidHash)
 	require.Nil(t, resp.ValidationError)
+}
+
+func newEngineServerWithReorgDepth(t *testing.T, m *execmoduletester.ExecModuleTester, module execmodule.ExecutionModule, maxReorgDepth uint64) *EngineServer {
+	downloader := engine_block_downloader.NewEngineBlockDownloader(t.Context(), m.Log, m.ExecModule, nil, nil, m.ChainConfig, ethconfig.Sync{}, nil)
+	srv := NewEngineServer(m.Log, m.ChainConfig, module, downloader, false, false, false, true, nil, nil, 0, maxReorgDepth)
+	srv.test = true
+	return srv
+}
+
+func newPayloadV2(t *testing.T, srv *EngineServer, block *types.Block) *engine_types.PayloadStatus {
+	t.Helper()
+	payload, err := engine_types.ExecutionPayloadFromBlock(block)
+	require.NoError(t, err)
+	status, err := srv.NewPayloadV2(t.Context(), payload)
+	require.NoError(t, err)
+	return status
+}
+
+// forkchoiceV2AndWait also waits for the background commit, after which the execution module is
+// idle and validates the next payload.
+func forkchoiceV2AndWait(t *testing.T, srv *EngineServer, head common.Hash) *engine_types.PayloadStatus {
+	t.Helper()
+	r, err := srv.ForkchoiceUpdatedV2(t.Context(), &engine_types.ForkChoiceState{HeadHash: head}, nil)
+	require.NoError(t, err)
+	require.Eventually(t, func() bool {
+		ready, err := srv.executionService.Ready(t.Context())
+		return err == nil && ready
+	}, time.Minute, time.Millisecond)
+	return r.PayloadStatus
+}
+
+func payloadStatusJSON(t *testing.T, status *engine_types.PayloadStatus) string {
+	t.Helper()
+	encoded, err := json.Marshal(status)
+	require.NoError(t, err)
+	return string(encoded)
+}
+
+func bodiesServedByHash(t *testing.T, srv *EngineServer, hashes ...common.Hash) (v1, v2 []bool) {
+	t.Helper()
+	bodiesV1, err := srv.GetPayloadBodiesByHashV1(t.Context(), hashes)
+	require.NoError(t, err)
+	bodiesV2, err := srv.GetPayloadBodiesByHashV2(t.Context(), hashes)
+	require.NoError(t, err)
+	for i := range hashes {
+		v1 = append(v1, bodiesV1[i] != nil)
+		v2 = append(v2, bodiesV2[i] != nil)
+	}
+	return v1, v2
+}
+
+// storingAfterValidation stores the block again right after the first validation of its hash, as
+// a concurrent insertion of the same block can.
+type storingAfterValidation struct {
+	execmodule.ExecutionModule
+	t      *testing.T
+	block  *types.Block
+	stored atomic.Bool
+}
+
+func (m *storingAfterValidation) ValidateChain(ctx context.Context, block *types.Block) (execmodule.ValidationResult, error) {
+	result, err := m.ExecutionModule.ValidateChain(ctx, block)
+	if block.Hash() == m.block.Hash() && m.stored.CompareAndSwap(false, true) {
+		_, insertErr := m.ExecutionModule.InsertBlocks(ctx, []*types.Block{m.block})
+		require.NoError(m.t, insertErr)
+	}
+	return result, err
+}
+
+func withHeaderChange(block *types.Block, change func(*types.Header)) *types.Block {
+	header := types.CopyHeader(block.HeaderNoCopy())
+	change(header)
+	return types.NewBlockFromStorage(header.Hash(), header, block.Transactions(), block.Uncles(), block.Withdrawals(), nil)
+}
+
+func withInvalidGasLimit(block *types.Block) *types.Block {
+	return withHeaderChange(block, func(header *types.Header) { header.GasLimit *= 2 })
+}
+
+func TestGetPayloadBodiesByHashOmitsAnInvalidBlockStoredAfterItsValidation(t *testing.T) {
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{Config: preCancunChainConfig()}))
+	chain, err := m.GenerateChain(2, func(int, *blockgen.BlockGen) {})
+	require.NoError(t, err)
+	block1, block2 := chain.Blocks[0], withInvalidGasLimit(chain.Blocks[1])
+	srv := newEngineServerWithReorgDepth(t, m, &storingAfterValidation{ExecutionModule: m.ExecModule, t: t, block: block2}, 2)
+
+	require.Equal(t, engine_types.ValidStatus, newPayloadV2(t, srv, block1).Status)
+	require.Equal(t, engine_types.ValidStatus, forkchoiceV2AndWait(t, srv, block1.Hash()).Status)
+	for _, request := range []string{"first", "repeated"} {
+		require.Equal(t, engine_types.InvalidStatus, newPayloadV2(t, srv, block2).Status, request)
+		require.NotNil(t, srv.chainRW.GetHeader(t.Context(), block2.Hash(), block2.NumberU64()), "the test needs the invalid block stored")
+
+		v1, v2 := bodiesServedByHash(t, srv, block1.Hash(), block2.Hash())
+		require.Equal(t, []bool{true, false}, v1, "%s request: V1", request)
+		require.Equal(t, []bool{true, false}, v2, "%s request: V2", request)
+	}
+}
+
+func TestGetPayloadBodiesByHashOmitsABlockRejectedByAForkchoiceUpdate(t *testing.T) {
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{Config: preCancunChainConfig()}))
+	chain, err := m.GenerateChain(1, func(int, *blockgen.BlockGen) {})
+	require.NoError(t, err)
+	block := withHeaderChange(chain.Blocks[0], func(header *types.Header) { header.Root = common.Hash{0x01} })
+	srv := newEngineServerWithReorgDepth(t, m, m.ExecModule, 1)
+
+	require.Equal(t, engine_types.AcceptedStatus, newPayloadV2(t, srv, block).Status, "the block must be stored without a validation")
+	require.Equal(t, engine_types.InvalidStatus, forkchoiceV2AndWait(t, srv, block.Hash()).Status)
+	require.NotNil(t, srv.chainRW.GetHeader(t.Context(), block.Hash(), block.NumberU64()), "the test needs the rejected block stored")
+
+	v1, v2 := bodiesServedByHash(t, srv, m.Genesis.Hash(), block.Hash())
+	require.Equal(t, []bool{true, false}, v1, "V1")
+	require.Equal(t, []bool{true, false}, v2, "V2")
+}
+
+func TestGetPayloadBodiesByHashOmitsABlockRejectedForABadAncestor(t *testing.T) {
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{Config: preCancunChainConfig()}))
+	chain, err := m.GenerateChain(5, func(int, *blockgen.BlockGen) {})
+	require.NoError(t, err)
+	block1, bad := chain.Blocks[0], withInvalidGasLimit(chain.Blocks[1])
+	child := withHeaderChange(chain.Blocks[2], func(header *types.Header) { header.ParentHash = bad.Hash() })
+	head := withHeaderChange(chain.Blocks[3], func(header *types.Header) { header.ParentHash = child.Hash() })
+	headChild := withHeaderChange(chain.Blocks[4], func(header *types.Header) { header.ParentHash = head.Hash() })
+	srv := newEngineServerWithReorgDepth(t, m, m.ExecModule, 2)
+
+	require.Equal(t, engine_types.ValidStatus, newPayloadV2(t, srv, block1).Status)
+	for _, block := range []*types.Block{bad, child, head} {
+		require.Equal(t, engine_types.AcceptedStatus, newPayloadV2(t, srv, block).Status, "the block must be stored without a validation")
+	}
+	require.Equal(t, engine_types.ValidStatus, forkchoiceV2AndWait(t, srv, block1.Hash()).Status)
+	badStatus := newPayloadV2(t, srv, bad)
+	require.Equal(t, engine_types.InvalidStatus, badStatus.Status)
+	require.Nil(t, srv.chainRW.GetHeader(t.Context(), bad.Hash(), bad.NumberU64()), "the test needs the bad ancestor removed")
+
+	rejected := forkchoiceV2AndWait(t, srv, head.Hash())
+	require.Equal(t, engine_types.InvalidStatus, rejected.Status)
+	require.Equal(t, block1.Hash(), *rejected.LatestValidHash)
+	require.EqualError(t, rejected.ValidationError.Error(), fmt.Sprintf("ancestor %s rejected: %s", bad.Hash(), badStatus.ValidationError.Error()))
+	require.NotNil(t, srv.chainRW.GetHeader(t.Context(), head.Hash(), head.NumberU64()), "the test needs the rejected block stored")
+	v1, v2 := bodiesServedByHash(t, srv, block1.Hash(), head.Hash())
+	require.Equal(t, []bool{true, false}, v1, "V1")
+	require.Equal(t, []bool{true, false}, v2, "V2")
+
+	require.JSONEq(t, payloadStatusJSON(t, rejected), payloadStatusJSON(t, forkchoiceV2AndWait(t, srv, head.Hash())), "a repeated forkchoice update")
+	require.JSONEq(t, payloadStatusJSON(t, rejected), payloadStatusJSON(t, newPayloadV2(t, srv, head)), "a later newPayload")
+
+	headChildStatus := newPayloadV2(t, srv, headChild)
+	require.Equal(t, engine_types.InvalidStatus, headChildStatus.Status)
+	require.Equal(t, block1.Hash(), *headChildStatus.LatestValidHash)
+	require.EqualError(t, headChildStatus.ValidationError.Error(), fmt.Sprintf("ancestor %s rejected: %s", head.Hash(), rejected.ValidationError.Error()))
 }

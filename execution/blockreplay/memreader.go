@@ -88,11 +88,9 @@ func newMemBlockReader(blocks []*types.Block, senders [][]common.Address, parent
 	return r, nil
 }
 
-// headerAt serves headers the BLOCKHASH walk needs. It must not return nil for
-// a number in the walk range: a nil header becomes Number 0, and Number-1 then
-// underflows to MaxUint64, wedging the walk in an infinite loop. For ancestors
-// at or below the parent it returns a synthetic header carrying the right Number
-// and the captured parent-hash link.
+// headerAt serves headers the BLOCKHASH walk needs: a nil header for a number in
+// the walk range fails the lookup. For ancestors at or below the parent it returns
+// a synthetic header carrying the right Number and the captured parent-hash link.
 func (r *memBlockReader) headerAt(number uint64) *types.Header {
 	switch {
 	case number >= r.lo && number <= r.hi:
@@ -280,6 +278,8 @@ func (r *memBlockReader) CanPruneTo(currentBlockInDB uint64) uint64 { return 0 }
 func (r *memBlockReader) Snapshots() dbservices.BlockSnapshots      { return nil }
 func (r *memBlockReader) AllTypes() []snaptype.Type                 { return nil }
 func (r *memBlockReader) TxnumReader() rawdbv3.TxNumsReader         { return rawdbv3.TxNums }
+
+func (r *memBlockReader) IsFrozen(context.Context, uint64) (bool, error) { return false, nil }
 
 func (r *memBlockReader) Ready(ctx context.Context) <-chan error {
 	ch := make(chan error, 1)

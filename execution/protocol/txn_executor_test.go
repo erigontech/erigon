@@ -28,6 +28,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
@@ -808,7 +809,7 @@ func TestEIP8037IntrinsicGasCapWithoutCheckGas(t *testing.T) {
 				msg.SetSkipExecutionGasCap(skipExecutionGasCap)
 				gp := NewGasPool(gasLimit, 0)
 				executor := NewTxnExecutor(newTestEVM(ibs, chain.AllProtocolChanges, gasLimit), msg, gp)
-				intrinsic, overflow := executor.calcIntrinsicGas(false, nil, test.accessList)
+				intrinsic, overflow := intrinsicGas(msg, executor.evm.ChainRules(), false)
 				require.False(t, overflow)
 				require.Equal(t, test.wantErr, max(intrinsic.ExecutionGas, intrinsic.FloorGasCost) > params.MaxTxnGasLimit)
 
@@ -1814,4 +1815,71 @@ func TestRecipientCreditedAtValidationReportsCallToTracer(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, balance.IsZero(), "the run credited the recipient; validation must do it")
 	require.Equal(t, []frame{{depth: 0, typ: byte(vm.CALL), to: recipient, value: *uint256.NewInt(5), exitSeen: true}}, frames)
+}
+
+// TestApplyTransactionTxEndSeesTxWrites pins that a tracer reading state at tx end sees the tx's own writes.
+func TestApplyTransactionTxEndSeesTxWrites(t *testing.T) {
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	sender := accounts.InternAddress(crypto.PubkeyToAddress(key.PublicKey))
+	to := common.HexToAddress("0x2222222222222222222222222222222222222222")
+	coinbase := accounts.InternAddress(common.HexToAddress("0x3333333333333333333333333333333333333333"))
+	cfg := chain.TestChainOsakaConfig
+	signer := types.MakeSigner(cfg, 1, 0)
+	txn, err := types.SignTx(types.NewTransaction(0, to, uint256.NewInt(7), 100_000, uint256.NewInt(0), nil), *signer, key)
+	require.NoError(t, err)
+	for _, versioned := range []bool{false, true} {
+		t.Run(fmt.Sprintf("versioned=%v", versioned), func(t *testing.T) {
+			ibs := state.New(state.NewNoopReader())
+			if versioned {
+				ibs = state.NewWithVersionMap(state.NewNoopReader(), state.NewVersionMap(nil))
+			}
+			defer ibs.Close()
+			ibs.SetTxContext(1, 0)
+			require.NoError(t, ibs.SetBalance(sender, *uint256.NewInt(1e18), tracing.BalanceChangeUnspecified))
+			var balance uint256.Int
+			var nonce uint64
+			hooks := &tracing.Hooks{OnTxEndV2: func(*types.Receipt, mdgas.TxnGasUsage, error) {
+				balance, err = ibs.GetBalance(accounts.InternAddress(to))
+				require.NoError(t, err)
+				nonce, err = ibs.GetNonce(sender)
+				require.NoError(t, err)
+			}}
+			header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 30_000_000, BaseFee: uint256.NewInt(0)}
+			_, err := ApplyTransaction(cfg, func(uint64) (common.Hash, error) { return common.Hash{}, nil }, nil, coinbase,
+				NewGasPool(header.GasLimit, 0), ibs, state.NewNoopWriter(), header, txn, &GasUsed{}, vm.Config{Tracer: hooks, NoBaseFee: true})
+			require.NoError(t, err)
+			require.Equal(t, uint64(7), balance.Uint64())
+			require.Equal(t, uint64(1), nonce)
+		})
+	}
+}
+
+// A precompile frame that cannot pay the precompile gas fails and reverts the transfer, so the
+// call writes nothing to the recipient.
+func TestPrecompileCallRunsOutOfGas(t *testing.T) {
+	rules := &chain.Rules{IsHomestead: true, IsIstanbul: true, IsBerlin: true, IsPrague: true, IsOsaka: true}
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	ecrecover := accounts.InternAddress(common.BytesToAddress([]byte{1}))
+	plain := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
+	call := func(to accounts.Address, gas uint64) Message {
+		return types.NewMessage(sender, to, 0, uint256.NewInt(1), gas, uint256.NewInt(0), uint256.NewInt(0), uint256.NewInt(0),
+			nil, nil, false, false, true, false, nil)
+	}
+	require.True(t, PrecompileCallRunsOutOfGas(call(ecrecover, params.TxGas), rules))
+	require.True(t, PrecompileCallRunsOutOfGas(call(ecrecover, params.TxGas+params.EcrecoverGas-1), rules))
+	require.False(t, PrecompileCallRunsOutOfGas(call(ecrecover, params.TxGas+params.EcrecoverGas), rules))
+	require.False(t, PrecompileCallRunsOutOfGas(call(plain, params.TxGas), rules))
+
+	sha256 := accounts.InternAddress(common.BytesToAddress([]byte{2}))
+	words := make([]byte, 64)
+	hash := func(gas uint64) Message {
+		return types.NewMessage(sender, sha256, 0, uint256.NewInt(1), gas, uint256.NewInt(0), uint256.NewInt(0), uint256.NewInt(0),
+			words, nil, false, false, true, false, nil)
+	}
+	// From Prague the calldata floor leaves execution more gas than this precompile price, so the boundary needs earlier rules.
+	beforeFloor := &chain.Rules{IsHomestead: true, IsIstanbul: true, IsBerlin: true}
+	need := params.TxGas + uint64(len(words))*params.TxDataZeroGas + params.Sha256BaseGas + 2*params.Sha256PerWordGas
+	require.True(t, PrecompileCallRunsOutOfGas(hash(need-1), beforeFloor), "the per-word price counts")
+	require.False(t, PrecompileCallRunsOutOfGas(hash(need), beforeFloor))
 }

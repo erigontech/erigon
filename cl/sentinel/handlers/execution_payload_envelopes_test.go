@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"maps"
 	"os"
@@ -675,6 +676,38 @@ func TestExecutionPayloadEnvelopesByRootHandler(t *testing.T) {
 	require.ErrorIs(t, err, io.EOF, "stream should be empty after all envelopes")
 }
 
+func TestExecutionPayloadEnvelopesByRootDeduplicates(t *testing.T) {
+	for _, source := range []string{"stored", "rebuilt"} {
+		t.Run(source, func(t *testing.T) {
+			c, cfg, roots, envelopes, rebuilder, _ := newRangeHistoryHandler(t, 2, 2)
+			reads := 0
+			if source == "stored" {
+				fc := c.forkChoiceReader.(*mock_services.ForkChoiceStorageMock)
+				for root, envelope := range envelopes {
+					fc.SetEnvelope(root, envelope)
+				}
+				fc.ReadEnvelopeFromDiskFunc = func(root common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+					reads++
+					return envelopes[root], nil
+				}
+			}
+			req := solid.NewHashList(4)
+			for _, root := range roots {
+				req.Append(root)
+				req.Append(root)
+			}
+			stream := newRootHandlerTestStream(req, peer.ID("history-peer"))
+			response := stream.run(t, c)
+			if source == "stored" {
+				require.Equal(t, 2, reads)
+			} else {
+				require.Equal(t, roots, rebuilder.called)
+			}
+			require.Equal(t, []uint64{0, 1}, readEnvelopeBuilderIndices(t, response, cfg))
+		})
+	}
+}
+
 func TestExecutionPayloadEnvelopesByRootRebuildsMissingCanonicalEnvelope(t *testing.T) {
 	ctx := t.Context()
 	_, indiciesDB := setupStore(t)
@@ -705,6 +738,57 @@ func TestExecutionPayloadEnvelopesByRootRebuildsMissingCanonicalEnvelope(t *test
 	stream := newRootHandlerTestStream(roots, peer.ID("history-peer"))
 	require.Equal(t, byte(SuccessfulResponsePrefix), stream.run(t, c)[0])
 	require.Len(t, rebuilder.called, 1)
+}
+
+func TestExecutionPayloadEnvelopesByRootDoesNotRebuildRejectedRoot(t *testing.T) {
+	c, cfg, roots, rebuilder := newRootHistoryHandler(t)
+	fc := c.forkChoiceReader.(*mock_services.ForkChoiceStorageMock)
+	fc.IsEnvelopeRejectedFunc = func(root common.Hash) bool { return root == roots[0] }
+
+	data := runRootHistoryRequest(t, c, cfg, roots[:2])
+	require.Equal(t, []uint64{1}, readEnvelopeBuilderIndices(t, data, cfg))
+	require.Equal(t, []common.Hash{roots[1]}, rebuilder.called)
+}
+
+func TestExecutionPayloadEnvelopesByRootRechecksRejectionAfterLookup(t *testing.T) {
+	for _, source := range []string{"disk", "rebuild"} {
+		t.Run(source, func(t *testing.T) {
+			c, cfg, roots, rebuilder := newRootHistoryHandler(t)
+			fc := c.forkChoiceReader.(*mock_services.ForkChoiceStorageMock)
+			rejected := false
+			fc.IsEnvelopeRejectedFunc = func(root common.Hash) bool { return root == roots[0] && rejected }
+			if source == "disk" {
+				fc.SetEnvelope(roots[0], rebuilder.envelopes[roots[0]])
+				fc.ReadEnvelopeFromDiskFunc = func(root common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+					rejected = true
+					return rebuilder.envelopes[root], nil
+				}
+			} else {
+				rebuilder.onRebuild = func() { rejected = true }
+			}
+
+			data := runRootHistoryRequest(t, c, cfg, roots[:2])
+			require.True(t, rejected)
+			require.Equal(t, []uint64{1}, readEnvelopeBuilderIndices(t, data, cfg))
+		})
+	}
+}
+
+func TestExecutionPayloadEnvelopesByRootDoesNotRebuildRootRejectedAfterQueueing(t *testing.T) {
+	c, cfg, roots, rebuilder := newRootHistoryHandler(t)
+	fc := c.forkChoiceReader.(*mock_services.ForkChoiceStorageMock)
+	rejected := false
+	fc.IsEnvelopeRejectedFunc = func(root common.Hash) bool { return root == roots[0] && rejected }
+	fc.SetEnvelope(roots[1], rebuilder.envelopes[roots[1]])
+	fc.ReadEnvelopeFromDiskFunc = func(root common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+		rejected = true
+		return rebuilder.envelopes[root], nil
+	}
+
+	data := runRootHistoryRequest(t, c, cfg, roots[:2])
+	require.True(t, rejected)
+	require.Equal(t, []uint64{1}, readEnvelopeBuilderIndices(t, data, cfg))
+	require.Empty(t, rebuilder.called)
 }
 
 func TestExecutionPayloadEnvelopesByRootServesStoredEnvelopesBeforeRebuilds(t *testing.T) {
@@ -1067,6 +1151,49 @@ func TestExecutionPayloadEnvelopesByRangeStopsAtUnavailableEnvelope(t *testing.T
 				return
 			}
 			require.Equal(t, test.wantIndices, readEnvelopeBuilderIndices(t, data, cfg))
+		})
+	}
+}
+
+func TestExecutionPayloadEnvelopesByRangeDoesNotRebuildRejectedRoot(t *testing.T) {
+	for _, rejectedIndex := range []int{0, 1} {
+		t.Run(fmt.Sprintf("index=%d", rejectedIndex), func(t *testing.T) {
+			c, cfg, roots, _, rebuilder, stream := newRangeHistoryHandler(t, 4, 3)
+			fc := c.forkChoiceReader.(*mock_services.ForkChoiceStorageMock)
+			fc.IsEnvelopeRejectedFunc = func(root common.Hash) bool { return root == roots[rejectedIndex] }
+
+			data := stream.run(t, c)
+			if rejectedIndex == 0 {
+				require.Equal(t, byte(ResourceUnavailablePrefix), data[0])
+				require.Empty(t, rebuilder.called)
+			} else {
+				require.Equal(t, []uint64{0}, readEnvelopeBuilderIndices(t, data, cfg))
+				require.Equal(t, []common.Hash{roots[0]}, rebuilder.called)
+			}
+		})
+	}
+}
+
+func TestExecutionPayloadEnvelopesByRangeRechecksRejectionAfterLookup(t *testing.T) {
+	for _, source := range []string{"disk", "rebuild"} {
+		t.Run(source, func(t *testing.T) {
+			c, _, roots, envelopes, rebuilder, stream := newRangeHistoryHandler(t, 3, 2)
+			fc := c.forkChoiceReader.(*mock_services.ForkChoiceStorageMock)
+			rejected := false
+			fc.IsEnvelopeRejectedFunc = func(root common.Hash) bool { return root == roots[0] && rejected }
+			if source == "disk" {
+				fc.SetEnvelope(roots[0], envelopes[roots[0]])
+				fc.ReadEnvelopeFromDiskFunc = func(root common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+					rejected = true
+					return envelopes[root], nil
+				}
+			} else {
+				rebuilder.onRebuild = func() { rejected = true }
+			}
+
+			data := stream.run(t, c)
+			require.True(t, rejected)
+			require.Equal(t, byte(ResourceUnavailablePrefix), data[0])
 		})
 	}
 }

@@ -18,6 +18,8 @@ package txpool
 
 import (
 	"context"
+	"fmt"
+	"sync"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -35,6 +37,33 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
+
+func BenchmarkCountContent(b *testing.B) {
+	for _, frames := range []int{0, 100, 10_000} {
+		b.Run(fmt.Sprintf("frames=%d", frames), func(b *testing.B) {
+			pool := &TxPool{
+				lock:    new(sync.Mutex),
+				pending: NewPendingSubPool(PendingSubPool, frames),
+				baseFee: NewSubPool(BaseFeeSubPool, frames),
+				queued:  NewSubPool(QueuedSubPool, frames),
+				byHash:  make(map[string]*metaTxn, frames),
+				all:     &BySenderAndNonce{senderIDFrameTxn: make(map[uint64]*metaTxn, frames)},
+			}
+			for i := range frames {
+				mt := &metaTxn{}
+				pool.byHash[fmt.Sprint(i)] = mt
+				pool.all.senderIDFrameTxn[uint64(i)] = mt
+			}
+			pending, baseFee, queued := pool.CountContent()
+			require.Zero(b, pending+baseFee)
+			require.Equal(b, frames, queued)
+			b.ReportAllocs()
+			for b.Loop() {
+				pool.CountContent()
+			}
+		})
+	}
+}
 
 func BenchmarkProcessRemoteTxns(b *testing.B) {
 	require := require.New(b)
@@ -116,4 +145,46 @@ func BenchmarkProcessRemoteTxns(b *testing.B) {
 	// Log final pool statistics after processing all transactions
 	pending, baseFee, queued := pool.CountContent()
 	b.Logf("Final pool stats - pending: %d, baseFee: %d, queued: %d", pending, baseFee, queued)
+}
+
+func BenchmarkNonceRetryPrepare(b *testing.B) {
+	for _, tc := range []struct {
+		name, fork    string
+		nonce         uint64
+		cached, mixed bool
+	}{
+		{"fresh_blob_cancun", "Cancun", 0, false, false},
+		{"distant_cancun", "Cancun", 1000, true, false},
+		{"eligible_cancun", "Cancun", 1000, true, false},
+		{"mixed_distant_cancun", "Cancun", 1000, true, true},
+		{"fresh_blob_osaka", "Osaka", 0, false, false},
+		{"distant_osaka", "Osaka", 1000, true, false},
+		{"eligible_osaka", "Osaka", 1000, true, false},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			pool, slot := nonceRetryBlob(b, tc.fork, tc.nonce)
+			sender := common.Address{1}
+			var txns TxnSlots
+			txns.Append(slot, sender[:], false)
+			if tc.cached {
+				reasons, err := pool.AddLocalTxns(b.Context(), txns)
+				require.NoError(b, err)
+				require.Equal(b, []txpoolcfg.DiscardReason{txpoolcfg.NonceTooDistant}, reasons)
+			}
+			if tc.name == "eligible_cancun" || tc.name == "eligible_osaka" {
+				nonceRetrySender(b, pool, tc.nonce)
+			}
+			if tc.mixed {
+				txns.Append(newTestTxnSlot(0, 0, 300_000, 300_000, 100_000), sender[:], false)
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for b.Loop() {
+				_, _, err := pool.prepareTxns(b.Context(), txns, nil)
+				if err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
 }

@@ -45,7 +45,7 @@ import (
 )
 
 const (
-	maxRequestContentLength = 1024 * 1024 * 32 // 32MB
+	MaxRequestContentLength = 1024 * 1024 * 32 // 32MB
 	contentType             = "application/json"
 	jwtTokenExpiry          = 60 * time.Second
 )
@@ -79,7 +79,7 @@ func (hc *httpConn) remoteAddr() string {
 	return hc.url
 }
 
-func (hc *httpConn) ReadBatch() ([]*jsonrpcMessage, bool, error) {
+func (hc *httpConn) ReadBatch(int) ([]*jsonrpcMessage, bool, error) {
 	<-hc.closeCh
 	return nil, false, io.EOF
 }
@@ -248,6 +248,7 @@ func newHTTPServerConn(r *http.Request, w http.ResponseWriter, body io.Reader) S
 	// if the request is a GET request, and the body is empty, we turn the request into fake json rpc request, see below
 	// https://www.jsonrpc.org/historical/json-rpc-over-http.html#encoded-parameters
 	// we however allow for non base64 encoded parameters to be passed
+	var encodeErr error
 	if r.Method == http.MethodGet && r.ContentLength == 0 {
 		// default id 1
 		id := `1`
@@ -262,7 +263,7 @@ func newHTTPServerConn(r *http.Request, w http.ResponseWriter, body io.Reader) S
 			param = pb
 		}
 		buf := new(bytes.Buffer)
-		_ = json.NewEncoder(buf).Encode(jsonrpcMessage{ //nolint:errchkjson
+		encodeErr = json.NewEncoder(buf).Encode(jsonrpcMessage{
 			ID:     json.RawMessage(id),
 			Method: method_up,
 			Params: param,
@@ -270,11 +271,14 @@ func newHTTPServerConn(r *http.Request, w http.ResponseWriter, body io.Reader) S
 		conn.Reader = buf
 	} else {
 		// it's a post request or whatever, so just process it like normal
-		conn.Reader = io.LimitReader(body, maxRequestContentLength)
+		conn.Reader = io.LimitReader(body, MaxRequestContentLength)
 	}
 	// The body holds one message, so it can be read in one go and checked once.
 	// ServeHTTP holds the body's budget charge for the whole request.
 	readFrame := func() ([]byte, func(), error) {
+		if encodeErr != nil {
+			return nil, nil, encodeErr
+		}
 		// The hint stops at the uncharged size: a declared size costs the peer nothing
 		// until the bytes arrive, so it must not drive an allocation.
 		hint := 0
@@ -458,8 +462,8 @@ func validateRequest(r *http.Request) (int, error) {
 	if r.Method == http.MethodPut || r.Method == http.MethodDelete {
 		return http.StatusMethodNotAllowed, errors.New("method not allowed")
 	}
-	if r.ContentLength > maxRequestContentLength {
-		err := fmt.Errorf("content length too large (%d>%d)", r.ContentLength, maxRequestContentLength)
+	if r.ContentLength > MaxRequestContentLength {
+		err := fmt.Errorf("content length too large (%d>%d)", r.ContentLength, MaxRequestContentLength)
 		return http.StatusRequestEntityTooLarge, err
 	}
 	if r.Method == http.MethodOptions {

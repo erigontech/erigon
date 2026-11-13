@@ -24,6 +24,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -54,10 +56,10 @@ func TestSeedEmptyRemovals(t *testing.T) {
 	require.NoError(t, vm.SeedEmptyRemovals(true, false, reader))
 
 	// GetAccount reads the seeded removal deterministically — no SetRules.
-	_, ok := vm.View(1, reader).GetAccount(emptied)
+	_, ok, _ := vm.View(1, reader).GetAccount(emptied)
 	require.False(t, ok, "a touched account drained to empty is removed via the seeded self-destruct")
 
-	acc, ok := vm.View(1, reader).GetAccount(survives)
+	acc, ok, _ := vm.View(1, reader).GetAccount(survives)
 	require.True(t, ok, "a balance-zeroed account with a non-zero base nonce is NOT empty and survives")
 	require.Equal(t, uint64(5), acc.Nonce)
 }
@@ -99,7 +101,7 @@ func TestSeedEmptyRemovalsReadsBaseWhenLastChangeClears(t *testing.T) {
 	require.NoError(t, vm.SeedEmptyRemovals(true, false, reader))
 	require.Equal(t, 3, reader.reads)
 	for _, a := range []accounts.Address{drained, renonced, uncoded} {
-		_, ok := vm.View(2, reader).GetAccount(a)
+		_, ok, _ := vm.View(2, reader).GetAccount(a)
 		require.False(t, ok, a)
 	}
 }
@@ -237,12 +239,70 @@ func TestAuthoritativeAddressWriteDropsBALSource(t *testing.T) {
 	}
 	for name, build := range cases {
 		t.Run(name, func(t *testing.T) {
-			got, ok := build().View(1, reader).GetAccount(a)
+			got, ok, _ := build().View(1, reader).GetAccount(a)
 			require.True(t, ok)
 			require.Equal(t, uint64(9), got.Nonce)
 			require.Equal(t, *uint256.NewInt(7), got.Balance)
 		})
 	}
+}
+
+// TestEstimateFlushReplacesBALAddressMarker pins that the creating tx's in-flight flush may
+// replace its Done existence marker with an Estimate (the marker value is a placeholder),
+// and that its complete flush then publishes the tx value as Done.
+func TestEstimateFlushReplacesBALAddressMarker(t *testing.T) {
+	prevAssert := dbg.AssertEnabled
+	dbg.AssertEnabled = true
+	t.Cleanup(func() { dbg.AssertEnabled = prevAssert })
+
+	a := accounts.InternAddress(common.HexToAddress("0xacc5"))
+	other := accounts.InternAddress(common.HexToAddress("0x07e5"))
+	marker := accounts.NewAccount()
+	marker.Balance = *uint256.NewInt(7)
+	inFlight := accounts.NewAccount()
+
+	vm := NewVersionMap(types.BlockAccessList{{Address: other.Value(), NonceChanges: []*types.NonceChange{{Index: 1, Value: 1}}}})
+	vm.WriteAddressExists(a, Version{TxIndex: 0}, &marker)
+	ws := &WriteSet{}
+	ws.SetAddress(a, &VersionedWrite[*accounts.Account]{WriteHeader: WriteHeader{Address: a, Path: AddressPath, Version: Version{TxIndex: 0}}, Val: &inFlight})
+
+	vm.FlushVersionedWrites(ws, false)
+	_, res, ok := vm.ReadAddress(a, 1)
+	require.True(t, ok)
+	require.Equal(t, MVReadResultDependency, res.Status())
+
+	vm.FlushVersionedWrites(ws, true)
+	got, res, ok := vm.ReadAddress(a, 1)
+	require.True(t, ok)
+	require.Equal(t, MVReadResultDone, res.Status())
+	require.Equal(t, inFlight.Balance, got.Balance)
+}
+
+// TestEstimateFlushKeepsBALSeededCode pins that the deploying tx's in-flight flush of the
+// code its BAL entry already seeded leaves the seeded Done code cells in place.
+func TestEstimateFlushKeepsBALSeededCode(t *testing.T) {
+	prevAssert := dbg.AssertEnabled
+	dbg.AssertEnabled = true
+	t.Cleanup(func() { dbg.AssertEnabled = prevAssert })
+
+	a := accounts.InternAddress(common.HexToAddress("0xc0de"))
+	bytecode := []byte{0x60, 0x00}
+	vm := NewVersionMap(types.BlockAccessList{{Address: a.Value(), CodeChanges: []*types.CodeChange{{Index: 1, Bytecode: bytecode}}}})
+	code := accounts.NewCode(bytecode)
+	v := Version{TxIndex: 0}
+	ws := &WriteSet{}
+	ws.SetCode(a, &VersionedWrite[accounts.Code]{WriteHeader: WriteHeader{Address: a, Path: CodePath, Version: v}, Val: code})
+	ws.SetCodeSize(a, &VersionedWrite[int]{WriteHeader: WriteHeader{Address: a, Path: CodeSizePath, Version: v}, Val: code.Len()})
+
+	vm.FlushVersionedWrites(ws, false)
+	got, res, ok := vm.ReadCode(a, 1)
+	require.True(t, ok)
+	require.Equal(t, MVReadResultDone, res.Status())
+	require.Equal(t, code.Hash, got.Hash)
+	size, res, ok := vm.ReadCodeSize(a, 1)
+	require.True(t, ok)
+	require.Equal(t, MVReadResultDone, res.Status())
+	require.Equal(t, len(bytecode), size)
 }
 
 func TestBALMarkedAccountReadsCommittedBaseOncePerBlock(t *testing.T) {
@@ -310,17 +370,48 @@ func TestSeedEmptyRemovals_DrainThenRefund(t *testing.T) {
 	vm := NewVersionMap(bal)
 	require.NoError(t, vm.SeedEmptyRemovals(true, false, reader))
 
-	_, ok := vm.View(1, reader).GetAccount(refunded)
+	_, ok, _ := vm.View(1, reader).GetAccount(refunded)
 	require.False(t, ok, "drained to empty at index 1: absent before the re-fund")
-	acc, ok := vm.View(2, reader).GetAccount(refunded)
+	acc, ok, _ := vm.View(2, reader).GetAccount(refunded)
 	require.True(t, ok, "funded again at index 2: present at block end")
 	require.Equal(t, *uint256.NewInt(7), acc.Balance)
 
-	_, ok = vm.View(1, reader).GetAccount(recreated)
+	_, ok, _ = vm.View(1, reader).GetAccount(recreated)
 	require.False(t, ok, "drained to empty at index 1")
-	acc, ok = vm.View(2, reader).GetAccount(recreated)
+	acc, ok, _ = vm.View(2, reader).GetAccount(recreated)
 	require.True(t, ok, "re-created at index 2: present at block end")
 	require.Equal(t, uint64(1), acc.Nonce)
+}
+
+func TestHasEmptyBaseAccount(t *testing.T) {
+	t.Parallel()
+	addr := func(s string) accounts.Address { return accounts.InternAddress(common.HexToAddress(s)) }
+	empty, absent, funded := addr("0xe1"), addr("0xa1"), addr("0xf1")
+	emptyAcc, systemAcc, fundedAcc := accounts.NewAccount(), accounts.NewAccount(), accounts.NewAccount()
+	fundedAcc.Balance = *uint256.NewInt(1)
+	reader := &accountStateReader{accounts: map[accounts.Address]*accounts.Account{
+		empty: &emptyAcc, params.SystemAddress: &systemAcc, funded: &fundedAcc,
+	}}
+	listed := func(a accounts.Address) types.AccountChanges { return types.AccountChanges{Address: a.Value()} }
+	changed := listed(empty)
+	changed.BalanceChanges = []*types.BalanceChange{{Index: 2, Value: *uint256.NewInt(1)}}
+	for _, tc := range []struct {
+		name         string
+		eip161, aura bool
+		bal          types.BlockAccessList
+		want         bool
+	}{
+		{"empty", true, false, types.BlockAccessList{listed(empty)}, true},
+		{"empty with a change", true, false, types.BlockAccessList{changed}, true},
+		{"absent and funded", true, false, types.BlockAccessList{listed(absent), listed(funded)}, false},
+		{"before EIP-161", false, false, types.BlockAccessList{listed(empty)}, false},
+		{"Aura system address", true, true, types.BlockAccessList{listed(params.SystemAddress)}, false},
+		{"system address", true, false, types.BlockAccessList{listed(params.SystemAddress)}, true},
+	} {
+		got, err := NewVersionMap(tc.bal).HasEmptyBaseAccount(tc.eip161, tc.aura, reader)
+		require.NoError(t, err)
+		require.Equal(t, tc.want, got, tc.name)
+	}
 }
 
 // A BAL existence marker at the index that drains the account is not a revival.

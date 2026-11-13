@@ -111,9 +111,11 @@ func (a *ApiHandler) liveness(w http.ResponseWriter, r *http.Request) (*beaconht
 		live.IsLive = currentEpochParticipation.Get(int(idx)) != 0
 	}
 
-	resp := []*live{}
+	resp := make([]*live, len(liveSet))
+	i := 0
 	for _, v := range liveSet {
-		resp = append(resp, v)
+		resp[i] = v
+		i++
 	}
 	slices.SortFunc(resp, func(a, b *live) int {
 		return cmp.Compare(a.Index, b.Index)

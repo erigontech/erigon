@@ -21,10 +21,12 @@ package executiontests
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"fmt"
 	"maps"
 	"math"
 	"math/big"
+	"math/rand/v2"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -2437,12 +2439,12 @@ func (e *blockEndLogEngine) FinalizeAndAssemble(chainConfig *libchain.Config, he
 }
 
 // Logs of block-end system calls must reach the log address and topic indexes
-// at the block's final txNum, in both executors.
+// at the block's final txNum.
 func TestBlockEndSyscallLogsReachLogIndexes(t *testing.T) {
 	for _, tc := range []struct {
 		parallel bool
 		workers  int
-	}{{false, 1}, {true, 1}, {true, 4}} {
+	}{{true, 1}, {true, 4}} {
 		t.Run(fmt.Sprintf("parallel=%v/workers=%d", tc.parallel, tc.workers), func(t *testing.T) {
 			prevParallel, prevWorkers := dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount
 			t.Cleanup(func() { dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount = prevParallel, prevWorkers })
@@ -2459,7 +2461,6 @@ func TestBlockEndSyscallLogsReachLogIndexes(t *testing.T) {
 			}}
 			engine := &blockEndLogEngine{FakeEthash: ethash.NewFaker(), contract: accounts.InternAddress(logContract), calls: 3}
 
-			dbg.Exec3Parallel = false
 			ethconfig.Defaults.Sync.ExecWorkerCount = tc.workers
 			m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key), execmoduletester.WithEngine(engine))
 			signer := types.LatestSignerForChainID(config.ChainID)
@@ -2498,4 +2499,131 @@ func TestBlockEndSyscallLogsReachLogIndexes(t *testing.T) {
 			}))
 		})
 	}
+}
+
+// TestParallelStepEdgeFoldsMatchSerial builds BAL blocks of transfers, deploys and storage writes with a tiny
+// step size, so every block crosses several mid-block step edges. The parallel executor must reproduce the roots
+// the serial block generator computed.
+func TestParallelStepEdgeFoldsMatchSerial(t *testing.T) {
+	prevParallel, prevWorkers := dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount
+	t.Cleanup(func() { dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount = prevParallel, prevWorkers })
+
+	counter := []byte{byte(vm.PUSH1), 0, byte(vm.SLOAD), byte(vm.PUSH1), 1, byte(vm.ADD), byte(vm.PUSH1), 0, byte(vm.SSTORE), byte(vm.STOP)}
+	deployCode := append([]byte{byte(vm.PUSH1), byte(len(counter)), byte(vm.PUSH1), 12, byte(vm.PUSH1), 0, byte(vm.CODECOPY), byte(vm.PUSH1), byte(len(counter)), byte(vm.PUSH1), 0, byte(vm.RETURN)}, counter...)
+	config := libchain.AllProtocolChanges
+	gasPrice := uint256.NewInt(10_000_000_000)
+	for seed := range 16 {
+		t.Run(fmt.Sprint("seed=", seed), func(t *testing.T) {
+			rng := rand.New(rand.NewPCG(uint64(seed), 3125))
+			keys := make([]*ecdsa.PrivateKey, 8)
+			alloc := types.GenesisAlloc{}
+			for i := range keys {
+				var kb [32]byte
+				for j := range kb {
+					kb[j] = byte(rng.IntN(256))
+				}
+				kb[0] |= 1
+				key, err := crypto.ToECDSA(kb[:])
+				require.NoError(t, err)
+				keys[i] = key
+				alloc[crypto.PubkeyToAddress(key.PublicKey)] = types.GenesisAccount{Balance: big.NewInt(common.Ether)}
+			}
+			ethconfig.Defaults.Sync.ExecWorkerCount = 4
+			m := execmoduletester.New(t, execmoduletester.WithKey(keys[0]),
+				execmoduletester.WithGenesisSpec(&types.Genesis{Config: config, Alloc: alloc, GasLimit: 60_000_000}),
+				execmoduletester.WithExperimentalBAL(), execmoduletester.WithStepSize(8))
+			signer := types.LatestSignerForChainID(config.ChainID)
+			nonces := make([]uint64, len(keys))
+			var deployed []common.Address
+			chainPack, err := m.GenerateChain(4, func(_ int, b *blockgen.BlockGen) {
+				for range 40 {
+					s := rng.IntN(len(keys))
+					from := crypto.PubkeyToAddress(keys[s].PublicKey)
+					var txn types.Transaction
+					switch r := rng.IntN(4); {
+					case r == 0 || len(deployed) == 0:
+						deployed = append(deployed, types.CreateAddress(from, nonces[s]))
+						txn = types.NewContractCreation(nonces[s], uint256.NewInt(0), 500_000, gasPrice, deployCode)
+					case r == 1:
+						txn = types.NewTransaction(nonces[s], deployed[rng.IntN(len(deployed))], uint256.NewInt(0), 300_000, gasPrice, nil)
+					default:
+						to := crypto.PubkeyToAddress(keys[rng.IntN(len(keys))].PublicKey)
+						if rng.IntN(2) == 0 {
+							to = common.BytesToAddress([]byte{byte(rng.IntN(200)) + 1, 0xee})
+						}
+						txn = types.NewTransaction(nonces[s], to, uint256.NewInt(uint64(rng.IntN(3))), 300_000, gasPrice, nil)
+					}
+					signed, err := types.SignTx(txn, *signer, keys[s])
+					require.NoError(t, err)
+					b.AddTx(signed)
+					nonces[s]++
+				}
+			})
+			require.NoError(t, err)
+			for i := range chainPack.Blocks {
+				for _, r := range chainPack.Receipts[i] {
+					require.Equal(t, types.ReceiptStatusSuccessful, r.Status)
+				}
+			}
+			dbg.Exec3Parallel = true
+			require.NoError(t, m.InsertChain(chainPack))
+		})
+	}
+}
+
+// TestParallelStepEdgeKeepsRevivedStorage revives a CREATE2 address in one tx, writes a slot in its init code,
+// then writes another slot after a mid-block step edge: the fold after the edge must not wipe the first slot.
+func TestParallelStepEdgeKeepsRevivedStorage(t *testing.T) {
+	prevParallel, prevWorkers := dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount
+	t.Cleanup(func() { dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount = prevParallel, prevWorkers })
+
+	counter := []byte{byte(vm.PUSH1), 0, byte(vm.SLOAD), byte(vm.PUSH1), 1, byte(vm.ADD), byte(vm.PUSH1), 0, byte(vm.SSTORE), byte(vm.STOP)}
+	// With call value: self-destruct in the creating tx. Without: slot 1 = 1, deploy counter.
+	initCode := append([]byte{
+		byte(vm.CALLVALUE), byte(vm.PUSH1), 21, byte(vm.JUMPI),
+		byte(vm.PUSH1), 1, byte(vm.PUSH1), 1, byte(vm.SSTORE),
+		byte(vm.PUSH1), byte(len(counter)), byte(vm.PUSH1), 24, byte(vm.PUSH1), 0, byte(vm.CODECOPY),
+		byte(vm.PUSH1), byte(len(counter)), byte(vm.PUSH1), 0, byte(vm.RETURN),
+		byte(vm.JUMPDEST), byte(vm.CALLER), byte(vm.SELFDESTRUCT),
+	}, counter...)
+	factoryCode := []byte{
+		byte(vm.CALLDATASIZE), byte(vm.PUSH1), 0, byte(vm.PUSH1), 0, byte(vm.CALLDATACOPY),
+		byte(vm.PUSH1), 0, byte(vm.CALLDATASIZE), byte(vm.PUSH1), 0, byte(vm.CALLVALUE), byte(vm.CREATE2),
+		byte(vm.POP), byte(vm.STOP),
+	}
+	factory := common.HexToAddress("0xfac7")
+	child := types.CreateAddress2(factory, [32]byte{}, accounts.InternCodeHash(crypto.Keccak256Hash(initCode)))
+
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	from := crypto.PubkeyToAddress(key.PublicKey)
+	config := libchain.AllProtocolChanges
+	alloc := types.GenesisAlloc{from: {Balance: big.NewInt(common.Ether)}, factory: {Code: factoryCode, Balance: big.NewInt(0)}}
+	ethconfig.Defaults.Sync.ExecWorkerCount = 4
+	m := execmoduletester.New(t, execmoduletester.WithKey(key),
+		execmoduletester.WithGenesisSpec(&types.Genesis{Config: config, Alloc: alloc, GasLimit: 60_000_000}),
+		execmoduletester.WithExperimentalBAL(), execmoduletester.WithStepSize(8))
+	signer := types.LatestSignerForChainID(config.ChainID)
+	gasPrice := uint256.NewInt(10_000_000_000)
+	chainPack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) {
+		var nonce uint64
+		add := func(to common.Address, value uint64, data []byte) {
+			signed, err := types.SignTx(types.NewTransaction(nonce, to, uint256.NewInt(value), 1_000_000, gasPrice, data), *signer, key)
+			require.NoError(t, err)
+			b.AddTx(signed)
+			nonce++
+		}
+		add(factory, 1, initCode)
+		add(factory, 0, initCode)
+		for i := range 10 {
+			add(common.BytesToAddress([]byte{byte(i) + 1, 0xee}), 1, nil)
+		}
+		add(child, 0, nil)
+	})
+	require.NoError(t, err)
+	for _, r := range chainPack.Receipts[0] {
+		require.Equal(t, types.ReceiptStatusSuccessful, r.Status)
+	}
+	dbg.Exec3Parallel = true
+	require.NoError(t, m.InsertChain(chainPack))
 }

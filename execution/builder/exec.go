@@ -49,15 +49,16 @@ import (
 )
 
 type BuilderExecCfg struct {
-	builderState BuilderState
-	notifier     stagedsync.ChainEventNotifier
-	chainConfig  *chain.Config
-	engine       rules.Engine
-	blockReader  dbservices.FullBlockReader
-	vmConfig     *vm.Config
-	interrupt    *atomic.Bool
-	payloadId    uint64
-	txnProvider  txnprovider.TxnProvider
+	builderState           BuilderState
+	notifier               stagedsync.ChainEventNotifier
+	chainConfig            *chain.Config
+	engine                 rules.Engine
+	blockReader            dbservices.FullBlockReader
+	vmConfig               *vm.Config
+	interrupt              *atomic.Bool
+	payloadId              uint64
+	txnProvider            txnprovider.TxnProvider
+	requireAllTransactions bool
 }
 
 func StageBuilderExecCfg(
@@ -69,18 +70,20 @@ func StageBuilderExecCfg(
 	interrupt *atomic.Bool,
 	payloadId uint64,
 	txnProvider txnprovider.TxnProvider,
+	requireAllTransactions bool,
 	blockReader dbservices.FullBlockReader,
 ) BuilderExecCfg {
 	return BuilderExecCfg{
-		builderState: builderState,
-		notifier:     notifier,
-		chainConfig:  chainConfig,
-		engine:       engine,
-		blockReader:  blockReader,
-		vmConfig:     vmConfig,
-		interrupt:    interrupt,
-		payloadId:    payloadId,
-		txnProvider:  txnProvider,
+		builderState:           builderState,
+		notifier:               notifier,
+		chainConfig:            chainConfig,
+		engine:                 engine,
+		blockReader:            blockReader,
+		vmConfig:               vmConfig,
+		interrupt:              interrupt,
+		payloadId:              payloadId,
+		txnProvider:            txnProvider,
+		requireAllTransactions: requireAllTransactions,
 	}
 }
 
@@ -139,10 +142,11 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 
 	current.PayloadId = cfg.payloadId
 	ba := exec.NewBlockAssembler(exec.AssemblerCfg{
-		ChainConfig:     cfg.chainConfig,
-		Engine:          cfg.engine,
-		BlockReader:     cfg.blockReader,
-		ExperimentalBAL: execCfg.IsExperimentalBAL(),
+		ChainConfig:            cfg.chainConfig,
+		Engine:                 cfg.engine,
+		BlockReader:            cfg.blockReader,
+		ExperimentalBAL:        execCfg.IsExperimentalBAL(),
+		RequireAllTransactions: cfg.requireAllTransactions,
 	}, current)
 
 	ibs.SetVersionMap(state.NewVersionMap(nil))
@@ -203,6 +207,9 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 
 		// if we yielded less than the count we wanted, assume the txpool has run dry now
 		if len(txns) < amount {
+			if cfg.requireAllTransactions {
+				break
+			}
 			if interrupt != nil && !interrupt.Load() {
 				// if we are in interrupt mode, then keep on poking the txpool until we get interrupted
 				// since there may be new txns that can arrive
@@ -285,6 +292,9 @@ func getNextTransactions(
 	logger log.Logger,
 	stats *filtrationStats,
 ) ([]types.Transaction, int, error) {
+	if cfg.txnProvider == nil {
+		return nil, 0, nil
+	}
 	availableRlpSpace := cfg.builderState.BuiltBlock.AvailableRlpSpace(cfg.chainConfig)
 	remainingBlobGas := uint64(0)
 	if header.BlobGasUsed != nil {
@@ -314,6 +324,11 @@ func getNextTransactions(
 	allTxns, err := cfg.txnProvider.ProvideTxns(ctx, provideOpts...)
 	if err != nil {
 		return nil, 0, err
+	}
+	if cfg.requireAllTransactions {
+		// Explicit lists must be checked against each preceding transaction's actual
+		// writes. The pool filter predicts nonces and can reorder dependent transactions.
+		return allTxns, len(allTxns), nil
 	}
 
 	blockNum := executionAt + 1

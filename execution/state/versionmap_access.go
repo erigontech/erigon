@@ -59,22 +59,22 @@ func (view *VersionMapView) txIdx() int {
 // to the base domain as a delete — and an account with no live cell here that the base
 // also reports absent does not exist (in a cross-block batch the touched union carries
 // accounts removed in an earlier block; the base resolves them as absent). Otherwise the
-// composed account is present. No self-destruct / EIP / lifecycle reasoning crosses into
-// the read; it is the why-free add/remove projection.
-func (view *VersionMapView) GetAccount(addr accounts.Address) (accounts.Account, bool) {
+// composed account is present. wasDeleted reports a self-destruct or EIP-161 removal at
+// or below the view's txNum, the commitment's signal to drop the whole storage subtree.
+func (view *VersionMapView) GetAccount(addr accounts.Address) (acc accounts.Account, ok, wasDeleted bool) {
 	f := view.vm.accountFloorsAt(addr, view.txIdx())
 	if f.balanceDeleted {
-		return accounts.Account{}, false
+		return accounts.Account{}, false, f.wasDeleted
 	}
 	base, err := view.baseAccount(addr, &f)
 	if err != nil {
 		view.err = cmp.Or(view.err, err)
-		return accounts.Account{}, false
+		return accounts.Account{}, false, f.wasDeleted
 	}
 	if base == nil && !f.hasBalance && !f.hasNonce && !f.hasIncarnation && !f.hasCodeHash {
-		return accounts.Account{}, false
+		return accounts.Account{}, false, f.wasDeleted
 	}
-	acc := accounts.NewAccount()
+	acc = accounts.NewAccount()
 	if base != nil {
 		acc = *base
 	}
@@ -90,7 +90,7 @@ func (view *VersionMapView) GetAccount(addr accounts.Address) (accounts.Account,
 	if f.hasCodeHash {
 		acc.CodeHash = f.codeHash
 	}
-	return acc, true
+	return acc, true, f.wasDeleted
 }
 
 // baseAccount is the record the field cells overlay: a non-BAL address cell, else the
@@ -131,12 +131,38 @@ func (view *VersionMapView) GetStorage(addr accounts.Address, key accounts.Stora
 	return uint256.Int{}, false
 }
 
-// WasDestroyed reports whether addr was destroyed or removed (self-destruct or EIP-161
-// touched-empty removal) at or below the view's txNum — the lifecycle verdict the
-// commitment uses to delete the account's whole storage subtree.
-func (view *VersionMapView) WasDestroyed(addr accounts.Address) bool {
-	state, _, _, _ := view.vm.AccountLifecycleAt(addr, view.txIdx())
-	return state != LifecycleLive
+// GetCode returns addr's code written in this map at or below the view's txNum; false ok means
+// no tx of the map wrote it, and the caller reads its base.
+func (view *VersionMapView) GetCode(addr accounts.Address) ([]byte, bool) {
+	code, _, ok := view.vm.ReadCode(addr, view.txIdx())
+	return code.Bytes, ok
+}
+
+// DestroyedAt reports whether addr was destroyed or removed (self-destruct or EIP-161
+// touched-empty removal) at or below the view's txNum, and the tx index of that destruct —
+// the lifecycle verdict the commitment uses to delete the account's whole storage subtree.
+func (view *VersionMapView) DestroyedAt(addr accounts.Address) (txIdx int, destroyed bool) {
+	state, _, destroyedAt, _ := view.vm.AccountLifecycleAt(addr, view.txIdx())
+	return destroyedAt, state != LifecycleLive
+}
+
+// HasEmptyBaseAccount reports whether the BAL lists an account that is EIP-161 empty in base. A
+// 0-value touch removes such an account, and the BAL does not show the removal.
+func (vm *VersionMap) HasEmptyBaseAccount(eip161Enabled, isAura bool, base StateReader) (bool, error) {
+	for i := range vm.bal {
+		addr := accounts.InternAddress(vm.bal[i].Address)
+		if !EIP161EmptyRemoval(eip161Enabled, isAura, addr) {
+			continue
+		}
+		acc, err := base.ReadAccountData(addr)
+		if err != nil {
+			return false, err
+		}
+		if acc != nil && acc.Empty() {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (vm *VersionMap) SeedEmptyRemovals(eip161Enabled, isAura bool, base StateReader) error {
@@ -144,14 +170,14 @@ func (vm *VersionMap) SeedEmptyRemovals(eip161Enabled, isAura bool, base StateRe
 	var candidates []uint32
 	for i := range vm.bal {
 		ac := &vm.bal[i]
-		addr := accounts.InternAddress(ac.Address)
-		if !EIP161EmptyRemoval(eip161Enabled, isAura, addr) {
-			continue
-		}
 		var maxIdx uint32
 		balChangeIndexes(ac, func(idx uint32) { maxIdx = max(maxIdx, idx) })
 		if maxIdx == 0 {
 			continue // only reads, no field change — not a removal candidate
+		}
+		addr := accounts.InternAddress(ac.Address)
+		if !EIP161EmptyRemoval(eip161Enabled, isAura, addr) {
+			continue
 		}
 		if len(ac.BalanceChanges) == 0 && len(ac.NonceChanges) == 0 && len(ac.CodeChanges) == 0 {
 			continue
