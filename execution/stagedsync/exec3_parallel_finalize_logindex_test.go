@@ -357,6 +357,8 @@ func TestFoldTxBindsChangesetSavedAfterFirstTx(t *testing.T) {
 func TestApplyLoopRestoresChangesetTargetAtBlockResult(t *testing.T) {
 	fx := newResumeBALFixture(t)
 	run := fx.prepare(t, fx.block, fromBlockStart)
+	prev := &changeset.StateChangeSet{}
+	run.domains.SetChangesetAccumulator(prev)
 	var atBlockResult []*changeset.StateChangeSet
 	run.cfg.SetBALSink(func(uint64, types.BlockAccessList) {
 		atBlockResult = append(atBlockResult, run.domains.GetChangesetAccumulator())
@@ -364,7 +366,7 @@ func TestApplyLoopRestoresChangesetTargetAtBlockResult(t *testing.T) {
 	verdict, err := run.run(t.Context(), t)
 	require.NoError(t, err)
 	require.Nil(t, verdict)
-	require.Equal(t, []*changeset.StateChangeSet{nil}, atBlockResult)
+	require.Equal(t, []*changeset.StateChangeSet{prev}, atBlockResult)
 }
 
 // failFinalizeEngine fails the exec loop at block end once the apply loop has
@@ -372,6 +374,7 @@ func TestApplyLoopRestoresChangesetTargetAtBlockResult(t *testing.T) {
 type failFinalizeEngine struct {
 	rules.Engine
 	domains *execctx.SharedDomains
+	prev    *changeset.StateChangeSet
 	bound   bool
 }
 
@@ -379,7 +382,7 @@ func (e *failFinalizeEngine) Finalize(*chain.Config, *types.Header, *state.Intra
 	types.Receipts, []*types.Withdrawal, rules.ChainReader, rules.SystemCall, bool, log.Logger,
 ) (types.FlatRequests, error) {
 	for deadline := time.Now().Add(5 * time.Second); !e.bound && time.Now().Before(deadline); time.Sleep(time.Millisecond) {
-		e.bound = e.domains.GetChangesetAccumulator() != nil
+		e.bound = e.domains.GetChangesetAccumulator() != e.prev
 	}
 	panic("finalize failed")
 }
@@ -387,7 +390,9 @@ func (e *failFinalizeEngine) Finalize(*chain.Config, *types.Header, *state.Intra
 func TestApplyLoopRestoresChangesetTargetOnMidBlockExit(t *testing.T) {
 	fx := newResumeBALFixture(t)
 	run := fx.prepare(t, fx.block, fromBlockStart)
-	engine := &failFinalizeEngine{Engine: run.cfg.engine, domains: run.domains}
+	prev := &changeset.StateChangeSet{}
+	run.domains.SetChangesetAccumulator(prev)
+	engine := &failFinalizeEngine{Engine: run.cfg.engine, domains: run.domains, prev: prev}
 	run.cfg.engine = engine
 	blockResults := 0
 	run.cfg.SetBALSink(func(uint64, types.BlockAccessList) { blockResults++ })
@@ -396,7 +401,7 @@ func TestApplyLoopRestoresChangesetTargetOnMidBlockExit(t *testing.T) {
 	require.ErrorContains(t, err, "finalize failed")
 	require.True(t, engine.bound, "the fold must bind the block changeset before the exit")
 	require.Zero(t, blockResults, "the apply loop must exit inside the block")
-	require.Nil(t, run.domains.GetChangesetAccumulator())
+	require.Same(t, prev, run.domains.GetChangesetAccumulator())
 }
 
 // The commitment calculator flushes earlier blocks' branch updates into their
