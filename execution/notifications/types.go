@@ -44,15 +44,30 @@ const (
 	ActionRemove                   // account deleted
 )
 
-// StateChange holds per-block state changes in native Go types.
-// No protobuf dependencies — conversion to protobuf happens at the gRPC boundary.
+// StateChange holds a block's state changes or the head of an incomplete range.
 type StateChange struct {
 	BlockHeight uint64
 	BlockHash   common.Hash
 	BlockTime   uint64
+	SlotNumber  *uint64
 	Direction   Direction
 	Txs         [][]byte
 	Changes     []AccountChange
+	// Header delivery needs the range's start even when individual state changes were omitted.
+	FirstBlockHeight uint64
+}
+
+func stateChangeForHeader(h *types.Header) StateChange {
+	change := StateChange{
+		BlockHeight:      h.Number.Uint64(),
+		FirstBlockHeight: h.Number.Uint64(),
+		BlockHash:        h.Hash(),
+		BlockTime:        h.Time,
+	}
+	if h.SlotNumber != nil {
+		change.SlotNumber = common.NewUint64(*h.SlotNumber)
+	}
+	return change
 }
 
 // AccountChange holds a single account's state change.
@@ -71,15 +86,15 @@ type StorageChange struct {
 	Data     []byte
 }
 
-// BlockBatchNotification carries state changes for a batch of blocks.
-// This is the primary notification type for local (in-process) consumers.
+// BlockBatchNotification holds a batch in native Go types before protobuf conversion.
 type BlockBatchNotification struct {
-	StateVersionID      uint64
-	Changes             []StateChange
-	PendingBlockBaseFee uint64
-	PendingBlobFee      uint64
-	BlockGasLimit       uint64
-	FinalizedBlock      uint64
+	StateVersionID         uint64
+	Changes                []StateChange
+	StateChangesIncomplete bool
+	PendingBlockBaseFee    uint64
+	PendingBlobFee         uint64
+	BlockGasLimit          uint64
+	FinalizedBlock         uint64
 }
 
 // LogNotification carries a log event in native types.
@@ -95,8 +110,6 @@ type ReceiptNotification struct {
 	Tx      types.Transaction
 	Header  *types.Header
 }
-
-// Proto conversion methods — used at the gRPC boundary only.
 
 func directionToProto(d Direction) remoteproto.Direction {
 	if d == DirectionUnwind {
@@ -128,6 +141,7 @@ func (sc *StateChange) ToProto() *remoteproto.StateChange {
 		BlockHeight: sc.BlockHeight,
 		BlockHash:   gointerfaces.ConvertHashToH256(sc.BlockHash),
 		BlockTime:   sc.BlockTime,
+		SlotNumber:  sc.SlotNumber,
 		Direction:   directionToProto(sc.Direction),
 	}
 	if sc.Txs != nil {
@@ -166,11 +180,12 @@ func (sc *StorageChange) ToProto() *remoteproto.StorageChange {
 // ToProtoBatch converts a BlockBatchNotification to a protobuf StateChangeBatch.
 func (b *BlockBatchNotification) ToProtoBatch() *remoteproto.StateChangeBatch {
 	batch := &remoteproto.StateChangeBatch{
-		StateVersionId:       b.StateVersionID,
-		PendingBlockBaseFee:  b.PendingBlockBaseFee,
-		PendingBlobFeePerGas: b.PendingBlobFee,
-		BlockGasLimit:        b.BlockGasLimit,
-		FinalizedBlock:       b.FinalizedBlock,
+		StateVersionId:         b.StateVersionID,
+		StateChangesIncomplete: b.StateChangesIncomplete,
+		PendingBlockBaseFee:    b.PendingBlockBaseFee,
+		PendingBlobFeePerGas:   b.PendingBlobFee,
+		BlockGasLimit:          b.BlockGasLimit,
+		FinalizedBlock:         b.FinalizedBlock,
 	}
 	for i := range b.Changes {
 		batch.ChangeBatch = append(batch.ChangeBatch, b.Changes[i].ToProto())

@@ -25,10 +25,13 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -90,6 +93,60 @@ func TestSendRawTransaction(t *testing.T) {
 	// time.Sleep(time.Second)
 	// sent := m.SentMessage(0)
 	// require.Equal(eth.ToProto[m.MultiClient.Protocol()][eth.NewPooledTransactionHashesMsg], sent.Id)
+}
+
+type submissionReadDB struct {
+	kv.TemporalRoDB
+	readers int
+}
+
+func (db *submissionReadDB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
+	tx, err := db.TemporalRoDB.BeginTemporalRo(ctx) //nolint:gocritic // The returned transaction belongs to the caller.
+	if err != nil {
+		return nil, err
+	}
+	db.readers++
+	return &submissionReadTx{TemporalTx: tx, HasBlockFilesRoTx: tx.(freezeblocks.HasBlockFilesRoTx), db: db}, nil
+}
+
+type submissionReadTx struct {
+	kv.TemporalTx
+	freezeblocks.HasBlockFilesRoTx
+	db *submissionReadDB
+}
+
+func (tx *submissionReadTx) Rollback() {
+	tx.db.readers--
+	tx.TemporalTx.Rollback()
+}
+
+type submissionPoolClient struct {
+	txpoolproto.TxpoolClient
+	onAdd func()
+}
+
+func (c submissionPoolClient) Add(context.Context, *txpoolproto.AddRequest, ...grpc.CallOption) (*txpoolproto.AddReply, error) {
+	c.onAdd()
+	return &txpoolproto.AddReply{Imported: []txpoolproto.ImportResult{txpoolproto.ImportResult_SUCCESS}}, nil
+}
+
+func TestSendRawTransactionReleasesReadBeforeAdmission(t *testing.T) {
+	m := execmoduletester.New(t)
+	db := &submissionReadDB{TemporalRoDB: m.DB}
+	called := false
+	client := submissionPoolClient{onAdd: func() {
+		called = true
+		require.Zero(t, db.readers, "pool recovery must be able to acquire a database reader during admission")
+	}}
+	api := newEthApiForTest(newBaseApiForTest(m), db, client, nil)
+	txn, err := types.SignTx(types.NewTransaction(0, common.Address{1}, uint256.NewInt(1), params.TxGas, uint256.NewInt(10*common.GWei), nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
+	require.NoError(t, err)
+	var encoded bytes.Buffer
+	require.NoError(t, txn.MarshalBinary(&encoded))
+	_, err = api.SendRawTransaction(t.Context(), encoded.Bytes())
+	require.NoError(t, err)
+	require.True(t, called)
+	require.Zero(t, db.readers, "each database reader must be released exactly once")
 }
 
 func TestSendRawTransactionUnprotected(t *testing.T) {

@@ -18,20 +18,19 @@ package notifications
 
 import (
 	"bytes"
-	"context"
+	"slices"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types"
 )
 
 // Accumulator collects state changes per block in native Go types.
-// Protobuf conversion happens only at the gRPC boundary via ToProto methods.
 type Accumulator struct {
-	plainStateID       uint64
-	changes            []StateChange
-	latestChange       *StateChange
-	accountChangeIndex map[common.Address]int // For the latest change, allows finding account change by address
-	storageChangeIndex map[common.Address]map[common.Hash]int
+	changes                []StateChange
+	stateChangesIncomplete bool
+	latestChange           *StateChange
+	accountChangeIndex     map[common.Address]int // For the latest change, allows finding account change by address
+	storageChangeIndex     map[common.Address]map[common.Hash]int
 }
 
 func NewAccumulator() *Accumulator {
@@ -42,45 +41,49 @@ func (a *Accumulator) Changes() []StateChange {
 	return a.changes
 }
 
-func (a *Accumulator) Reset(plainStateID uint64) {
-	a.changes = nil
+// An incomplete batch still needs dispatch without recorded block changes.
+// Before sending it, the dispatcher adds an entry for the executed head so
+// consumers can identify the announced state.
+func (a *Accumulator) HasPendingChanges() bool {
+	return a != nil && (len(a.changes) > 0 || a.stateChangesIncomplete)
+}
+
+func (a *Accumulator) Reset() {
+	*a = Accumulator{}
+}
+
+// Checkpoint returns a rollback to completed block changes. Later writes must
+// start with StartChange so the saved changes remain immutable.
+func (a *Accumulator) Checkpoint() (restore func()) {
 	a.latestChange = nil
 	a.accountChangeIndex = nil
 	a.storageChangeIndex = nil
-	a.plainStateID = plainStateID
+	saved := *a
+	return func() { *a = saved }
 }
 
-// SendAndReset dispatches accumulated changes to both remote (gRPC/protobuf) and
-// local (in-process/native) consumers, then resets the accumulator.
-func (a *Accumulator) SendAndReset(ctx context.Context, c StateChangeConsumer, pendingBaseFee uint64, pendingBlobFee uint64, blockGasLimit uint64, finalizedBlock uint64) {
-	if a == nil || len(a.changes) == 0 {
-		return
-	}
+// Batch includes the supplied executed head without adding synthetic entries to recorded changes.
+// It shares recorded changes, which must stay unchanged until publication finishes.
+func (a *Accumulator) Batch(head *types.Header) *BlockBatchNotification {
 	batch := &BlockBatchNotification{
-		StateVersionID:      a.plainStateID,
-		Changes:             a.changes,
-		PendingBlockBaseFee: pendingBaseFee,
-		PendingBlobFee:      pendingBlobFee,
-		BlockGasLimit:       blockGasLimit,
-		FinalizedBlock:      finalizedBlock,
+		Changes:                slices.Clip(a.changes),
+		StateChangesIncomplete: a.stateChangesIncomplete,
 	}
-	if c != nil {
-		c.SendStateChanges(ctx, batch.ToProtoBatch())
+	if len(batch.Changes) == 0 || batch.Changes[len(batch.Changes)-1].BlockHeight < head.Number.Uint64() {
+		batch.Changes = append(batch.Changes, stateChangeForHeader(head))
 	}
-	a.Reset(0) // reset here for GC, but there will be another Reset with correct viewID
+	return batch
 }
 
-func (a *Accumulator) SetStateID(stateID uint64) {
-	a.plainStateID = stateID
+// MarkIncomplete records omitted state changes for the whole batch. Later
+// complete blocks cannot restore completeness; only a reset starts a new batch.
+func (a *Accumulator) MarkIncomplete() {
+	a.stateChangesIncomplete = true
 }
 
 // StartChange begins accumulation of changes for a new block.
 func (a *Accumulator) StartChange(h *types.Header, txs [][]byte, unwind bool) {
-	a.changes = append(a.changes, StateChange{
-		BlockHeight: h.Number.Uint64(),
-		BlockHash:   h.Hash(),
-		BlockTime:   h.Time,
-	})
+	a.changes = append(a.changes, stateChangeForHeader(h))
 	a.latestChange = &a.changes[len(a.changes)-1]
 	if unwind {
 		a.latestChange.Direction = DirectionUnwind
@@ -93,6 +96,12 @@ func (a *Accumulator) StartChange(h *types.Header, txs [][]byte, unwind bool) {
 			a.latestChange.Txs[i] = bytes.Clone(txs[i])
 		}
 	}
+}
+
+func (a *Accumulator) StartIncompleteRange(firstBlock uint64, lastHeader *types.Header) {
+	a.StartChange(lastHeader, nil, false)
+	a.latestChange.FirstBlockHeight = firstBlock
+	a.MarkIncomplete()
 }
 
 func (a *Accumulator) HasAccountChange(address common.Address) bool {
@@ -189,14 +198,15 @@ func (a *Accumulator) ChangeStorage(address common.Address, incarnation uint64, 
 	accountChange.StorageChanges[j].Data = data
 }
 
-// CopyAndReset moves accumulated data from this instance into target, then resets this instance.
-func (a *Accumulator) CopyAndReset(target *Accumulator) {
-	target.changes = a.changes
-	a.changes = nil
-	target.latestChange = a.latestChange
-	a.latestChange = nil
-	target.accountChangeIndex = a.accountChangeIndex
-	a.accountChangeIndex = nil
-	target.storageChangeIndex = a.storageChangeIndex
-	a.storageChangeIndex = nil
+// AppendAndReset appends accumulated changes to target, then resets this instance.
+// Existing changes must stay before the appended changes, including any unwind.
+func (a *Accumulator) AppendAndReset(target *Accumulator) {
+	if len(a.changes) > 0 {
+		target.changes = append(target.changes, a.changes...)
+		target.latestChange = &target.changes[len(target.changes)-1]
+		target.accountChangeIndex = a.accountChangeIndex
+		target.storageChangeIndex = a.storageChangeIndex
+	}
+	target.stateChangesIncomplete = target.stateChangesIncomplete || a.stateChangesIncomplete
+	a.Reset()
 }

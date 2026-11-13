@@ -31,7 +31,6 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/db/version"
@@ -40,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -543,18 +543,23 @@ func (s *EthBackendServer) validateFrameTransaction(ctx context.Context, frame *
 			sd = nil
 		}
 	}
-	headHash := rawdb.ReadHeadBlockHash(tx)
-	header, err := s.blockReader.HeaderByHash(ctx, tx, headHash)
+	// Head markers can lead execution. Resolve progress and the canonical header
+	// through the same view as state, including any published overlay.
+	blockNum, err := stages.GetStageProgress(tx, stages.Execution)
+	if err != nil {
+		return nil, err
+	}
+	header, err := s.blockReader.HeaderByNumber(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
 	if header == nil {
-		return nil, errors.New("frame validation: no current block")
+		return nil, errors.New("frame validation: no executed block")
 	}
-	if expectedHash != (common.Hash{}) && expectedHash != headHash {
+	if expectedHash != (common.Hash{}) && expectedHash != header.Hash() {
 		return nil, status.Error(codes.Aborted, "frame validation head changed")
 	}
-	maxTxNum, err := s.blockReader.TxnumReader().Max(ctx, tx, header.Number.Uint64())
+	maxTxNum, err := s.blockReader.TxnumReader().Max(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -576,6 +581,7 @@ func (s *EthBackendServer) validateFrameTransaction(ctx context.Context, frame *
 	// block. Its context must account for fee changes and fork activation.
 	blockContext := protocol.NewEVMBlockContext(header, noBlockHash, nil, accounts.ZeroAddress, s.chainConfig)
 	blockContext.BlockNumber++
+	blockContext.SlotNumber = protocol.FrameValidationSlot(header.SlotNumber)
 	blockContext.Time = max(header.Time+s.chainConfig.SecondsPerSlot(), uint64(time.Now().Unix()))
 	if header.BaseFee != nil {
 		blockContext.BaseFee = *misc.CalcBaseFee(s.chainConfig, header)

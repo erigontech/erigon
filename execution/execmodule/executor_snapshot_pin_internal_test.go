@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/chain"
@@ -68,7 +69,7 @@ func newPinTestExecutor(t *testing.T, forward stagedsync.ExecFunc) (*PipelineExe
 		nil, nil, logger, stages.ModeApplyingBlocks,
 	)
 
-	dispatcher := NewDispatcher(chainConfig, notifications.Events, notifications.StateChangesConsumer, nil, logger)
+	dispatcher := NewDispatcher(chainConfig, freezeblocks.NewBlockReader(nil), notifications.Events, notifications.StateChangesConsumer, nil, logger)
 	pe := NewPipelineExecutor(sync, db, pinTestBlockReader{}, chainConfig, nil, nil, nil, dispatcher, logger)
 	hook := stageloop.NewHook(t.Context(), notifications, sync, chainConfig, logger, dispatcher, nil, nil, nil, pinTestBlockReader{})
 	return pe, hook, notifications
@@ -108,7 +109,7 @@ func lastPublished(ch chan *remoteproto.SyncingReply) (last *remoteproto.Syncing
 }
 
 // requirePinDropped asserts the pin is gone and that the drop reached
-// subscribers: the LAST published reply must reflect it, since BeforeRun
+// subscribers: the LAST published reply must reflect it, since NotifySyncState
 // publishes the still-pinned state earlier.
 func requirePinDropped(t *testing.T, n *shards.Notifications, ch chan *remoteproto.SyncingReply) {
 	t.Helper()
@@ -154,7 +155,7 @@ func TestProcessFrozenBlocksClearsPinOnSnapshotsStageFailure(t *testing.T) {
 }
 
 // A publish inside the pipeline reads the Execution bump while it is still
-// uncommitted (BeforeRun publishes with the pipeline's rw tx). If the pipeline
+// uncommitted (NotifySyncState publishes with the pipeline's rw tx). If the pipeline
 // then fails, that bump rolls back, so the drop must still reach subscribers —
 // otherwise the last reply they hold claims a position the node never committed.
 func TestProcessFrozenBlocksPublishesDropAfterUncommittedBumpPublished(t *testing.T) {

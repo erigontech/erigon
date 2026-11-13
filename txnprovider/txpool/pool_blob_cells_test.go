@@ -48,6 +48,7 @@ func newPoolWithBlobTxn(t *testing.T, fork string) (context.Context, *TxPool, *T
 	pool, err := New(ctx, make(chan Announcements, 5), mdbxtest.NewTestPoolDB(t), coreDB, txpoolcfg.DefaultConfig,
 		kvcache.New(kvcache.DefaultCoherentConfig), chainConfig, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 	require.NoError(t, err)
+	pool.started.Store(true)
 
 	sender := common.Address{1}
 	acc := accounts.Account{Balance: *uint256.NewInt(common.Ether), CodeHash: accounts.EmptyCodeHash, Incarnation: 1}
@@ -220,9 +221,7 @@ func TestFromDBAmsterdamRestoresCells(t *testing.T) {
 	require.NoError(t, pool.poolDB.Update(ctx, func(tx kv.RwTx) error {
 		return tx.Put(kv.PoolTransaction, make([]byte, 32), append(sender[:], raw...))
 	}))
-	require.NoError(t, pool.poolDB.View(ctx, func(tx kv.Tx) error {
-		return pool.fromDB(ctx, tx)
-	}))
+	require.NoError(t, pool.fromDB(ctx))
 
 	bundles := pool.GetBlobs(template.GetBlobHashes())
 	require.Len(t, bundles, len(template.BlobBundles))

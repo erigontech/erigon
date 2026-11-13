@@ -53,6 +53,7 @@ func TestJournalDirtySymmetry(t *testing.T) {
 		{"touchAccount", kindTouch, func(j *journal) { j.touchAccount(addr, false, val) }},
 		{"accessListAddAccountChange", kindAccessListAddAccount, func(j *journal) { j.accessListAddAccountChange(addr) }},
 		{"accessListAddSlotChange", kindAccessListAddSlot, func(j *journal) { j.accessListAddSlotChange(addr, key) }},
+		{"accessListAddSlotOnlyChange", kindAccessListAddSlot, func(j *journal) { j.accessListAddSlotOnlyChange(addr, key) }},
 		{"transientStorageChange", kindTransientStorage, func(j *journal) { j.transientStorageChange(addr, 0, val) }},
 		{"frameApproval", kindFrameApproval, func(j *journal) {
 			ctx := (&IntraBlockState{journal: j}).NewFrameContext(&types.FrameTransaction{}, uint256.Int{})

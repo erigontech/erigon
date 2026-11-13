@@ -145,6 +145,9 @@ message StateChangeBatch {
   uint64 block_gas_limit = 4; // GasLimit of the latest block - proxy for the gas limit of the next block to be produced
   uint64 finalized_block = 5;
   uint64 pending_blob_fee_per_gas = 6;  // Base Blob Fee for the next block to be produced
+  // State changes may be missing from this batch or earlier deliveries.
+  // Absent entries do not imply unchanged state.
+  bool state_changes_incomplete = 7;
 }
 
 // StateChange - changes done by 1 block or by 1 unwind
@@ -155,6 +158,7 @@ message StateChange {
   repeated AccountChange changes = 4;
   repeated bytes txs = 5;     // enable by withTransactions=true
   uint64 block_time = 6;
+  optional uint64 slot_number = 7;
 }
 
 message StateChangeRequest {

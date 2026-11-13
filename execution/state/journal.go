@@ -69,6 +69,7 @@ const (
 	flagSelfdestructHadIncarnation uint8 = 1 << 2 // kindSelfdestruct: a versioned incarnation write predated the destruct
 	flagSelfdestructHadBalance     uint8 = 1 << 3 // kindSelfdestruct: a versioned balance write predated the destruct
 	flagBalanceDeleted             uint8 = 1 << 4
+	flagSlotOnly                   uint8 = 1 << 5
 )
 
 // journalExtra holds the fields needed only by the infrequent entry kinds,
@@ -276,6 +277,10 @@ func (j *journal) accessListAddAccountChange(address accounts.Address) {
 
 func (j *journal) accessListAddSlotChange(address accounts.Address, slot accounts.StorageKey) {
 	j.entries = append(j.entries, journalEntry{kind: kindAccessListAddSlot, account: address, key: slot})
+}
+
+func (j *journal) accessListAddSlotOnlyChange(address accounts.Address, slot accounts.StorageKey) {
+	j.entries = append(j.entries, journalEntry{kind: kindAccessListAddSlot, account: address, key: slot, flags: flagSlotOnly})
 }
 
 func (j *journal) transientStorageChange(account accounts.Address, slot int, prevalue uint256.Int) {
@@ -569,7 +574,11 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 		return nil
 
 	case kindAccessListAddSlot:
-		s.accessList.DeleteSlot(je.account, je.key)
+		if je.flags&flagSlotOnly != 0 {
+			delete(s.accessList.slotsOnly, frameStorageSlot{je.account, je.key})
+		} else {
+			s.accessList.DeleteSlot(je.account, je.key)
+		}
 		return nil
 	}
 	panic(fmt.Sprintf("revert: unknown journal entry kind %d", je.kind))

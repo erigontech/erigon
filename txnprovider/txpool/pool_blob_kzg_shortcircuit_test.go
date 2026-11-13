@@ -112,7 +112,7 @@ func TestPrepareTxnsBlobKZGShortCircuit(t *testing.T) {
 		slots.Append(&s0, a0[:], false)
 		slots.Append(&s1, a1[:], false)
 
-		reasons, _, err := pool.prepareTxns(ctx, slots, []remoteSource{peer, peer})
+		reasons, _, err := pool.prepareTxns(ctx, slots, []remoteSource{peer, peer}, true)
 		require.NoError(t, err)
 		assert.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.NotSet}, reasons,
 			"txn[1] should not have been verified")
@@ -126,7 +126,7 @@ func TestPrepareTxnsBlobKZGShortCircuit(t *testing.T) {
 		slots.Append(&s0, a0[:], false)
 		slots.Append(&s1, a1[:], false)
 
-		reasons, _, err := pool.prepareTxns(ctx, slots, nil)
+		reasons, _, err := pool.prepareTxns(ctx, slots, nil, true)
 		require.NoError(t, err)
 		assert.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.NotSet}, reasons,
 			"txn[1] should not have been verified")
@@ -140,7 +140,7 @@ func TestPrepareTxnsBlobKZGShortCircuit(t *testing.T) {
 		slots.Append(&s0, a0[:], true)
 		slots.Append(&s1, a1[:], true)
 
-		reasons, _, err := pool.prepareTxns(ctx, slots, nil)
+		reasons, _, err := pool.prepareTxns(ctx, slots, nil, true)
 		require.NoError(t, err)
 		assert.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.UnmatchedBlobTxExt}, reasons)
 	})

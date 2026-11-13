@@ -44,6 +44,7 @@ const (
 	FrameDefault = iota
 	FrameVerify
 	FrameSender
+	FramePostTx
 )
 
 const (
@@ -69,6 +70,8 @@ var (
 var FrameExpiryVerifier = common.HexToAddress("0x81413f0cF12e9b6a49B1D0439E081c577D57FfFf")
 
 var FrameNonceManager = common.HexToAddress("0x8250968C12e01A19d6F667b9B2F3b3A4d0e51cB7")
+
+var FrameRecentRootVerifier = common.HexToAddress("0x8272D9679689Ea2f307140CdF9002D27dC00Ffff")
 
 // Frame is a call with its own caller mode, approval scope and gas budgets.
 // A nil target denotes the transaction sender; creation happens inside a frame call.
@@ -128,8 +131,18 @@ func (frame *Frame) ResolvedTarget(sender common.Address) common.Address {
 	return *frame.Target
 }
 
+// IsStatic selects STATICCALL execution. VERIFY still allows APPROVE to change
+// nonce and payment state; POST_TX forbids APPROVE.
+func (frame *Frame) IsStatic() bool {
+	return frame.Mode == FrameVerify || frame.Mode == FramePostTx
+}
+
 func (frame *Frame) IsExpiryVerifier() bool {
 	return frame.Mode == FrameVerify && frame.Target != nil && *frame.Target == FrameExpiryVerifier
+}
+
+func (frame *Frame) IsRecentRootVerifier() bool {
+	return frame.Mode == FrameVerify && frame.Flags == 0 && frame.Target != nil && *frame.Target == FrameRecentRootVerifier
 }
 
 func (sig *FrameSignature) VerificationGas() uint64 {
@@ -230,8 +243,11 @@ func (tx *FrameTransaction) Validate() error {
 	var expirySeen bool
 	for i := range tx.Frames {
 		frame := &tx.Frames[i]
-		if frame.Mode > FrameSender || frame.Flags >= 8 {
+		if frame.Mode > FramePostTx || frame.Flags >= 8 {
 			return fmt.Errorf("invalid frame %d mode or flags", i)
+		}
+		if i > 0 && tx.Frames[i-1].Mode == FramePostTx && frame.Mode != FramePostTx {
+			return fmt.Errorf("invalid frame %d mode or flags: POST_TX frames must form a trailing suffix", i)
 		}
 		if frame.Mode != FrameSender && !frame.Value.IsZero() {
 			return fmt.Errorf("frame %d value requires sender mode", i)
@@ -240,7 +256,7 @@ func (tx *FrameTransaction) Validate() error {
 			return fmt.Errorf("frame %d execution approval requires sender target", i)
 		}
 		atomic := frame.Flags&FrameAtomicBatch != 0
-		if atomic && (frame.Mode == FrameVerify || i+1 == len(tx.Frames) || tx.Frames[i+1].Mode == FrameVerify) {
+		if atomic && (frame.IsStatic() || i+1 == len(tx.Frames) || tx.Frames[i+1].IsStatic()) {
 			return fmt.Errorf("invalid atomic batch at frame %d", i)
 		}
 		if (atomic || i > 0 && tx.Frames[i-1].Flags&FrameAtomicBatch != 0) && frame.Flags&FrameApproveBoth != 0 {

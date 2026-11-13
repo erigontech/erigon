@@ -74,12 +74,12 @@ func TestFinalizeMinedBlobsAfterDeletion(t *testing.T) {
 	for i := range txns {
 		txns[i] = newTestBlobTxnSlot(uint64(i), 1, 1, 1, 21000)
 		txns[i].IDHash[0] = byte(i + 1)
-		require.NoError(t, pool.processMinedFinalizedBlobs(txns[i:i+1], uint64(i+1), 0))
+		pool.processMinedFinalizedBlobs(txns[i:i+1], uint64(i+1), 0)
 	}
 
 	pool.deleteMinedBlobTxn(string(txns[1].IDHash[:]))
 	pool.deleteMinedBlobTxn(string(txns[2].IDHash[:]))
-	require.NoError(t, pool.processMinedFinalizedBlobs(nil, 5, 3))
+	pool.processMinedFinalizedBlobs(nil, 5, 3)
 
 	for i := range 3 {
 		require.NotContains(t, pool.minedBlobTxnsByBlock, uint64(i+1))
@@ -89,6 +89,28 @@ func TestFinalizeMinedBlobsAfterDeletion(t *testing.T) {
 	require.Len(t, pool.minedBlobTxnsByHash, 1)
 	require.Same(t, txns[3], pool.minedBlobTxnsByBlock[4][0].TxnSlot)
 	require.Same(t, pool.minedBlobTxnsByBlock[4][0], pool.minedBlobTxnsByHash[string(txns[3].IDHash[:])])
+}
+
+func TestMinedBlobBatchReplayKeepsOneCacheEntry(t *testing.T) {
+	pool := &TxPool{
+		minedBlobTxnsByBlock: make(map[uint64][]*metaTxn),
+		minedBlobTxnsByHash:  make(map[string]*metaTxn),
+	}
+	txn := newTestBlobTxnSlot(0, 1, 1, 1, 21_000)
+	txn.IDHash[0] = 1
+	for _, head := range []uint64{1, 2, 2} {
+		pool.processMinedFinalizedBlobs([]*TxnSlot{txn}, head, 0)
+	}
+	entries := 0
+	for _, items := range pool.minedBlobTxnsByBlock {
+		entries += len(items)
+	}
+	require.Equal(t, 1, entries, "retrying an applied batch must not duplicate its mined blobs")
+	pool.deleteMinedBlobTxn(string(txn.IDHash[:]))
+	require.Empty(t, pool.minedBlobTxnsByHash)
+	for _, items := range pool.minedBlobTxnsByBlock {
+		require.Empty(t, items)
+	}
 }
 
 // Mined txns come from the state-change stream without blobs, so only the pooled
@@ -124,6 +146,7 @@ func newMinedBlobReorgPool(t *testing.T) *minedBlobReorgTest {
 	require.NoError(t, err)
 	r := &minedBlobReorgTest{ctx: ctx, pool: pool, sender: common.Address{1}}
 	require.NoError(t, pool.OnNewBlock(ctx, r.block(0, 2, remoteproto.Direction_FORWARD), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	require.NoError(t, pool.start(ctx))
 
 	// Parsed, so Rlp and blobs share one buffer as in production.
 	wrapped := types.MakeWrappedBlobTxn(chainConfig.ChainID)
@@ -199,7 +222,6 @@ func TestMinedQueuedRemoteBlobTxnReturnsWithBlobsAfterUnwind(t *testing.T) {
 	r := newMinedBlobReorgPool(t)
 	var remote TxnSlots
 	remote.Append(&r.blobTxn, r.sender[:], false)
-	r.pool.started.Store(true)
 	r.pool.AddRemoteTxns(r.ctx, remote, nil, nil)
 	r.mine(t, 1, 3)
 	require.NoError(t, r.pool.processRemoteTxns(r.ctx))
@@ -237,7 +259,7 @@ func TestMinedBlobTxnKeepsRlpAfterReloadFlushAndUnwind(t *testing.T) {
 	require.NoError(t, err)
 	r.pool = reloaded
 	require.NoError(t, r.pool.OnNewBlock(r.ctx, r.block(0, 2, remoteproto.Direction_FORWARD), TxnSlots{}, TxnSlots{}, TxnSlots{}))
-	require.NoError(t, r.pool.poolDB.View(r.ctx, func(tx kv.Tx) error { return r.pool.fromDB(r.ctx, tx) }))
+	require.NoError(t, r.pool.start(r.ctx))
 	require.Contains(t, r.pool.byHash, r.hash)
 
 	r.mine(t, 1, 3)
@@ -390,13 +412,13 @@ func TestMinedBlobTxnMinedAgainSurvivesFinalizingItsOldBlock(t *testing.T) {
 	blobTxn.IDHash[0] = 1
 	hash := string(blobTxn.IDHash[:])
 	mineAt := func(block uint64) {
-		require.NoError(t, pool.processMinedFinalizedBlobs([]*TxnSlot{blobTxn}, block, 0))
+		pool.processMinedFinalizedBlobs([]*TxnSlot{blobTxn}, block, 0)
 	}
 	mineAt(5)
 	mineAt(5) // a same-height reorg to a block with the same txn
 	mineAt(7)
 
-	require.NoError(t, pool.processMinedFinalizedBlobs(nil, 7, 5))
+	pool.processMinedFinalizedBlobs(nil, 7, 5)
 
 	require.Contains(t, pool.minedBlobTxnsByHash, hash, "block 7 is not finalized")
 	require.Equal(t, uint64(7), pool.minedBlobTxnsByHash[hash].minedBlockNum)

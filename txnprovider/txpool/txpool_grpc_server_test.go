@@ -23,6 +23,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -41,10 +42,12 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	"github.com/erigontech/erigon/db/kv/remotedbserver"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 	accounts3 "github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
@@ -57,6 +60,7 @@ type addMockTxPool struct {
 	knownTxnCalls    int
 	addReasons       []txpoolcfg.DiscardReason
 	addLocalSlotsLen int
+	addLocalCalls    int
 }
 
 func (m *addMockTxPool) PeekBest(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64) (bool, error) {
@@ -64,6 +68,7 @@ func (m *addMockTxPool) PeekBest(ctx context.Context, n int, txns *TxnsRlp, onTo
 }
 func (m *addMockTxPool) GetRlp(tx kv.Tx, hash []byte) ([]byte, error) { return nil, nil }
 func (m *addMockTxPool) AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcfg.DiscardReason, error) {
+	m.addLocalCalls++
 	m.addLocalSlotsLen = len(newTxns.Txns)
 	return m.addReasons, nil
 }
@@ -104,6 +109,28 @@ func TestMapDiscardReasonToProto(t *testing.T) {
 	} {
 		t.Run(tc.reason.String(), func(t *testing.T) {
 			require.Equal(t, tc.want, mapDiscardReasonToProto(tc.reason))
+		})
+	}
+}
+
+func TestGrpcServerAddDoesNotAdmitEmptySlots(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		rlps  [][]byte
+		known bool
+		want  []txpoolproto.ImportResult
+	}{
+		{"empty", nil, false, []txpoolproto.ImportResult{}},
+		{"invalid", [][]byte{{0xff}}, false, []txpoolproto.ImportResult{txpoolproto.ImportResult_INVALID}},
+		{"known", [][]byte{hexutil.MustDecodeHex(TxnParseMainnetTests[0].PayloadStr)}, true, []txpoolproto.ImportResult{txpoolproto.ImportResult_ALREADY_EXISTS}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pool := &addMockTxPool{knownByCall: []bool{tc.known}}
+			server := NewGrpcServer(t.Context(), pool, nil, nil, uint256.Int{1}, log.New())
+			reply, err := server.Add(t.Context(), &txpoolproto.AddRequest{RlpTxs: tc.rlps})
+			require.NoError(t, err)
+			require.Equal(t, tc.want, reply.Imported)
+			require.Zero(t, pool.addLocalCalls, "rejected submissions must not wait for pool recovery")
 		})
 	}
 }
@@ -161,6 +188,37 @@ func TestGrpcServerAddDuplicateDuringAdmission(t *testing.T) {
 		Imported: []txpoolproto.ImportResult{txpoolproto.ImportResult_ALREADY_EXISTS},
 		Errors:   []string{"already known"},
 	}, reply)
+}
+
+func TestGrpcServerAddUnavailablePool(t *testing.T) {
+	for _, starting := range []bool{false, true} {
+		name := "recovering"
+		if starting {
+			name = "starting"
+		}
+		t.Run(name, func(t *testing.T) {
+			_, pool, poolDB, _ := newTestPool(t)
+			if starting {
+				pool.started.Store(false)
+			} else {
+				pool.MarkStateStale()
+			}
+			synctest.Test(t, func(t *testing.T) {
+				ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+				defer cancel()
+				server := NewGrpcServer(ctx, pool, poolDB, nil, uint256.Int{1}, pool.logger)
+				start := time.Now()
+				reply, err := server.Add(ctx, &txpoolproto.AddRequest{
+					RlpTxs: [][]byte{hexutil.MustDecodeHex(TxnParseMainnetTests[0].PayloadStr)},
+				})
+				require.Equal(t, codes.Unavailable, status.Code(err))
+				require.ErrorContains(t, err, "retry later")
+				require.Zero(t, time.Since(start), "unavailable admission must not wait for recovery")
+				require.Nil(t, reply)
+				require.Empty(t, pool.byHash)
+			})
+		})
+	}
 }
 
 func TestGrpcServerAddNonceTooLow(t *testing.T) {
@@ -363,6 +421,7 @@ func TestGrpcServerAddRetriesNonceGapAfterStateUpdate(t *testing.T) {
 			pool, err := New(ctx, make(chan Announcements, 1), poolDB, coreDB, cfg, kvcache.NewLatestBatchCache(),
 				chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, logger, WithFeeCalculator(nil))
 			require.NoError(t, err)
+			pool.started.Store(true)
 			key, err := crypto.GenerateKey()
 			require.NoError(t, err)
 			sender := crypto.PubkeyToAddress(key.PublicKey)
@@ -607,6 +666,8 @@ func TestQueryAllWithoutPanicUnknown(t *testing.T) {
 		t.Fatalf("new pool: %v", err)
 	}
 
+	pool.started.Store(true)
+
 	// Seed minimal chain state so the pool accepts local txns
 	var stateVersionID uint64 = 0
 	pendingBaseFee := uint64(200000)
@@ -840,10 +901,8 @@ func TestP2PPropagationContinuesWhileOnAddSubscriberStalls(t *testing.T) {
 		Peers(gomock.Any(), gomock.Any(), gomock.Any()).
 		Return(&sentryproto.PeersReply{}, nil).AnyTimes()
 
-	stateChanges := remoteproto.NewMockKVClient(ctrl)
-	stateChanges.EXPECT().
-		StateChanges(gomock.Any(), gomock.Any(), gomock.Any()).
-		Return(nil, status.Error(codes.Unavailable, "no core node in this test")).AnyTimes()
+	kvServer := remotedbserver.NewKvServer(ctx, nil, nil, nil, logger)
+	stateChanges := direct.NewStateDiffClientDirect(kvServer)
 
 	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	poolDB := mdbxtest.NewTestPoolDB(t)
@@ -881,7 +940,9 @@ func TestP2PPropagationContinuesWhileOnAddSubscriberStalls(t *testing.T) {
 			}},
 		}},
 	}
-	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	kvServer.SetStateChangesSnapshot(func(context.Context) (*remoteproto.StateChangeBatch, error) {
+		return change, nil
+	})
 
 	runDone := make(chan struct{})
 	go func() {
@@ -893,6 +954,7 @@ func TestP2PPropagationContinuesWhileOnAddSubscriberStalls(t *testing.T) {
 	stalled := newStalledOnAddStream(ctx)
 	go grpcServer.OnAdd(&txpoolproto.OnAddRequest{}, stalled) //nolint:errcheck // ends with ctx
 	awaitSubscribed(t, newSlotsStreams, func() { <-stalled.entered })
+	require.Eventually(t, pool.Started, 5*time.Second, time.Millisecond)
 
 	slot := newTestTxnSlot(0, 0, 300_000, 300_000, 100_000)
 	slot.IDHash[0] = 1

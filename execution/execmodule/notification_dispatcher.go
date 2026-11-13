@@ -33,6 +33,8 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	sharedreceipts "github.com/erigontech/erigon/execution/receipts"
 	"github.com/erigontech/erigon/execution/stagedsync"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/shards"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 )
@@ -49,11 +51,12 @@ func NewAccumulation() *Accumulation {
 // Shared between the DevP2P StageLoop path (via Hook) and the Engine API path
 // (via PipelineExecutor).
 //
-// Key design: reads block metadata from a kv.Tx which can be either the SD's
-// blockOverlay (before commit) or a committed DB tx. The state version is
-// supplied separately because only the durable state flush owns that value.
+// Block metadata comes from the SD's block overlay or a committed database transaction.
+// The domain flush advances the state version, so callers supply it separately.
+// Before commit, notifications carry the projected version of that flush.
 type Dispatcher struct {
 	chainConfig         *chain.Config
+	headerReader        dbservices.HeaderReader
 	events              *shards.Events
 	stateChangeConsumer notifications.StateChangeConsumer
 	loadReceipts        ReceiptsLoader
@@ -92,6 +95,7 @@ func NewReceiptsLoader(cfg *chain.Config, blockReader dbservices.FullBlockReader
 
 func NewDispatcher(
 	chainConfig *chain.Config,
+	headerReader dbservices.HeaderReader,
 	events *shards.Events,
 	stateChangeConsumer notifications.StateChangeConsumer,
 	loadReceipts ReceiptsLoader,
@@ -99,6 +103,7 @@ func NewDispatcher(
 ) *Dispatcher {
 	return &Dispatcher{
 		chainConfig:         chainConfig,
+		headerReader:        headerReader,
 		events:              events,
 		stateChangeConsumer: stateChangeConsumer,
 		loadReceipts:        loadReceipts,
@@ -106,14 +111,43 @@ func NewDispatcher(
 	}
 }
 
+// StateChangesSnapshot builds a subscription reset from one committed execution view.
+func (d *Dispatcher) StateChangesSnapshot(ctx context.Context, db kv.TemporalRoDB) (*remoteproto.StateChangeBatch, error) {
+	var result *remoteproto.StateChangeBatch
+	err := db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		height, err := stages.GetStageProgress(tx, stages.Execution)
+		if err != nil {
+			return err
+		}
+		version, err := rawdb.GetStateVersion(tx)
+		if err != nil {
+			return err
+		}
+		accumulator := notifications.NewAccumulator()
+		accumulator.MarkIncomplete()
+		batch, err := d.prepareStateChanges(ctx, tx, tx, version, height, accumulator)
+		if err != nil {
+			return err
+		}
+		if batch == nil {
+			return fmt.Errorf("executed header %d unavailable for state snapshot", height)
+		}
+		result = batch.ToProtoBatch()
+		return nil
+	})
+	return result, err
+}
+
 // Dispatch sends all pending notifications. The tx parameter is the data source
 // for headers and forkchoice markers — it can be the SD's blockOverlay
-// (MemoryMutation) for pre-commit dispatch, or a committed DB tx.
+// (MemoryMutation) for pre-commit dispatch, or a committed DB tx. The state getter
+// must include all account writes at the announced head, including uncommitted ones.
 //
 // Parameters:
 //   - ctx: context for cancellation
 //   - tx: data source (overlay or committed tx)
-//   - stateVersion: durable version represented by the accumulated state changes
+//   - state: final state at the announced head
+//   - stateVersion: announced state version, which may not yet be committed
 //   - accumulator: state change accumulator (may be nil)
 //   - recentReceipts: receipt/log cache (may be nil)
 //   - finishProgressBefore: Finish stage progress before the sync run
@@ -124,6 +158,7 @@ func NewDispatcher(
 func (d *Dispatcher) Dispatch(
 	ctx context.Context,
 	tx kv.Tx,
+	state kv.TemporalGetter,
 	stateVersion uint64,
 	accumulator *notifications.Accumulator,
 	recentReceipts *notifications.RecentReceipts,
@@ -132,14 +167,31 @@ func (d *Dispatcher) Dispatch(
 	prevUnwindPoint *uint64,
 	committedTx kv.TemporalTx,
 ) error {
+	batch, err := d.prepareStateChanges(ctx, tx, state, stateVersion, finishProgressAfter, accumulator)
+	if err != nil {
+		return err
+	}
+	var recordedChanges []notifications.StateChange
 	if accumulator != nil {
-		accumulator.SetStateID(stateVersion)
+		recordedChanges = accumulator.Changes()
 	}
 
 	if d.events != nil {
 		base := finishProgressBefore
 		if prevUnwindPoint != nil && *prevUnwindPoint < finishProgressBefore {
 			base = *prevUnwindPoint
+		}
+		// Undelivered commits may predate this run. Only recorded changes extend
+		// the header range; synthetic head entries do not announce a new block.
+		for _, change := range recordedChanges {
+			before := change.BlockHeight
+			if change.Direction == notifications.DirectionForward {
+				before = change.FirstBlockHeight
+				if before > 0 {
+					before--
+				}
+			}
+			base = min(base, before)
 		}
 		var notifyFrom uint64
 		switch {
@@ -170,29 +222,48 @@ func (d *Dispatcher) Dispatch(
 		}
 	}
 
-	currentHeader := rawdb.ReadCurrentHeader(tx)
-	if accumulator != nil && currentHeader != nil {
-		if changes := accumulator.Changes(); len(changes) == 0 || changes[len(changes)-1].BlockHeight < currentHeader.Number.Uint64() {
-			accumulator.StartChange(currentHeader, nil, false)
+	if batch != nil {
+		if d.stateChangeConsumer != nil {
+			d.stateChangeConsumer.SendStateChanges(ctx, batch.ToProtoBatch())
 		}
-
-		pendingBaseFee := misc.CalcBaseFee(d.chainConfig, currentHeader)
-		pendingBlobFee := d.chainConfig.GetMinBlobGasPrice()
-		if currentHeader.ExcessBlobGas != nil {
-			nextBlockTime := currentHeader.Time + d.chainConfig.SecondsPerSlot()
-			excessBlobGas := misc.CalcExcessBlobGas(d.chainConfig, currentHeader, nextBlockTime)
-			f, err := misc.GetBlobGasPrice(d.chainConfig, excessBlobGas, nextBlockTime)
-			if err != nil {
-				return err
-			}
-			pendingBlobFee = f.Uint64()
-		}
-
-		finalizedBlock := common.Deref(rawdb.ReadHeaderNumber(tx, rawdb.ReadForkchoiceFinalized(tx)))
-
-		accumulator.SendAndReset(ctx, d.stateChangeConsumer, pendingBaseFee.Uint64(), pendingBlobFee, currentHeader.GasLimit, finalizedBlock)
+		accumulator.Reset()
 	}
 	return nil
+}
+
+// Preparation can fail on account reads. Complete it before publishing any events,
+// and keep recorded changes intact so a failed dispatch can be retried.
+func (d *Dispatcher) prepareStateChanges(ctx context.Context, tx kv.Tx, state kv.TemporalGetter, stateVersion, finishProgress uint64, accumulator *notifications.Accumulator) (*notifications.BlockBatchNotification, error) {
+	if accumulator == nil {
+		return nil, nil
+	}
+	// Head markers can lead execution. The announced head must match the supplied state.
+	header, err := d.headerReader.HeaderByNumber(ctx, tx, finishProgress)
+	if err != nil {
+		return nil, err
+	}
+	if header == nil {
+		return nil, nil
+	}
+	batch := accumulator.Batch(header)
+	batch.StateVersionID = stateVersion
+	batch.PendingBlockBaseFee = misc.CalcBaseFee(d.chainConfig, header).Uint64()
+	batch.PendingBlobFee = d.chainConfig.GetMinBlobGasPrice()
+	if header.ExcessBlobGas != nil {
+		nextBlockTime := header.Time + d.chainConfig.SecondsPerSlot()
+		excessBlobGas := misc.CalcExcessBlobGas(d.chainConfig, header, nextBlockTime)
+		fee, err := misc.GetBlobGasPrice(d.chainConfig, excessBlobGas, nextBlockTime)
+		if err != nil {
+			return nil, err
+		}
+		batch.PendingBlobFee = fee.Uint64()
+	}
+	batch.BlockGasLimit = header.GasLimit
+	batch.FinalizedBlock = common.Deref(rawdb.ReadHeaderNumber(tx, rawdb.ReadForkchoiceFinalized(tx)))
+	if err := batch.RefreshAccounts(state); err != nil {
+		return nil, err
+	}
+	return batch, nil
 }
 
 // cacheMissingReceipts regenerates from committedTx the receipts of the blocks in [from,to) the cache lacks.
