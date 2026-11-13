@@ -786,18 +786,18 @@ func TestValidateRejectsUnsafeDepths(t *testing.T) {
 	t.Run("depth 64", func(t *testing.T) {
 		data := commitmenttest.Record(&commitmenttest.RecordSpec{ChildMask: 1, LeafMask: 1, Leaves: [16]commitmenttest.Leaf{0: {Suffix: bytes.Repeat([]byte{1}, 31), Value: []byte{2}}}})
 		require.NotPanics(t, func() {
-			require.Error(t, Validate(data, 64))
+			require.ErrorIs(t, Validate(data, 64), ErrRecordRoot)
 		})
 	})
 
 	t.Run("child extension reaches suffix", func(t *testing.T) {
 		data := commitmenttest.Record(&commitmenttest.RecordSpec{
 			Flags:         hdrHasChildExt,
-			ChildMask:     1,
+			ChildMask:     0b11,
 			ExtensionMask: 1,
 			Extensions:    [16][]byte{0: extFixture(bytes.Repeat([]byte{1}, 63))},
 		})
-		require.Error(t, Validate(data, 0))
+		require.ErrorIs(t, Validate(data, 0), ErrRecordTrailer)
 	})
 
 	t.Run("self extension over 63", func(t *testing.T) {
@@ -817,7 +817,7 @@ func TestEnumerateRecordChildrenRejectsUnsafeDepth(t *testing.T) {
 	require.NotPanics(t, func() {
 		err = enumerateRecordChildren(nil, [32]byte{}, nil, data, 64, &records)
 	})
-	require.Error(t, err)
+	require.ErrorIs(t, err, ErrRecordRoot)
 }
 
 func TestComputeLeafRefsSkipsInlineStorageLeaves(t *testing.T) {
