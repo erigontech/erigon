@@ -29,6 +29,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -2394,6 +2395,38 @@ func TestHistoryStreamsKeepInvariant2(t *testing.T) {
 		defer it.Close()
 		streamtest.RequireInvariant2KV(t, it)
 	})
+}
+
+func TestHistorySeekFromCachedPages(t *testing.T) {
+	db, h, txs := filledHistory(t, false, log.New())
+	collateAndMergeHistory(t, db, h, txs, true)
+	roTx, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer roTx.Rollback()
+
+	seekAll := func() (vals []string) {
+		hc := h.beginForTests()
+		defer hc.Close()
+		for keyNum := uint64(1); keyNum <= 32; keyNum++ {
+			var k [8]byte
+			binary.BigEndian.PutUint64(k[:], keyNum)
+			k[0] = 1
+			for txNum := uint64(1); txNum <= txs; txNum += 7 {
+				v, ok, err := hc.HistorySeek(k[:], txNum, roTx)
+				require.NoError(t, err)
+				vals = append(vals, fmt.Sprintf("%t:%x", ok, v))
+			}
+		}
+		return vals
+	}
+	h.pages = nil
+	want := seekAll()
+
+	h.pages = newHistoryPageCache(datasize.MB)
+	defer h.pages.Close()
+	require.Equal(t, want, seekAll(), "values decompressed into the cache")
+	require.Positive(t, h.pages.Len())
+	require.Equal(t, want, seekAll(), "values served from cached pages")
 }
 
 // A v1 .vi is a perfect hash over txNum+key. Read-only consumers cannot rebuild
