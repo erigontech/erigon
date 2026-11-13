@@ -152,9 +152,6 @@ func (at *AggregatorRoTx) stepAlignedEnd(stepSize uint64) (uint64, error) {
 			break
 		}
 	}
-	if err := at.refuseFilesHiddenByAGap(); err != nil {
-		return 0, err
-	}
 	if com := at.d[kv.CommitmentDomain]; com != nil && com.d.Enabled {
 		for _, d := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain} {
 			if dt := at.d[d]; dt != nil && dt.d.Enabled && !slices.Equal(fileRangesUpTo(dt.files, end), fileRangesUpTo(com.files, end)) {
@@ -163,50 +160,6 @@ func (at *AggregatorRoTx) stepAlignedEnd(stepSize uint64) (uint64, error) {
 		}
 	}
 	return end, nil
-}
-
-// refuseFilesHiddenByAGap stops a rebase that would otherwise end at a gap and ignore the files after it.
-func (at *AggregatorRoTx) refuseFilesHiddenByAGap() error {
-	at.a.dirtyFilesLock.Lock()
-	defer at.a.dirtyFilesLock.Unlock()
-	ceiling := at.a.dirtyFilesEndTxNumMinimax()
-	refuse := func(files visibleFiles, dirty *DirtyFiles) (err error) {
-		if len(files) == 0 {
-			return nil
-		}
-		end := files.EndTxNum()
-		dirty.Scan(func(f *FilesItem) bool {
-			if f.startTxNum > end && f.endTxNum <= ceiling {
-				err = fmt.Errorf("%s: no visible file for txNum %d-%d", files[len(files)-1].Fullpath(), end, f.startTxNum)
-				return false
-			}
-			return true
-		})
-		return err
-	}
-	for _, d := range at.d {
-		if d == nil || !d.d.Enabled {
-			continue
-		}
-		if err := refuse(d.files, d.d.dirtyFiles); err != nil {
-			return err
-		}
-		if err := refuse(d.ht.files, d.d.History.dirtyFiles); err != nil {
-			return err
-		}
-		if err := refuse(d.ht.iit.files, d.d.History.InvertedIndex.dirtyFiles); err != nil {
-			return err
-		}
-	}
-	for _, ii := range at.iis {
-		if ii == nil || !ii.ii.Enabled {
-			continue
-		}
-		if err := refuse(ii.files, ii.ii.dirtyFiles); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func fileRangesUpTo(files visibleFiles, end uint64) (ranges [][2]uint64) {

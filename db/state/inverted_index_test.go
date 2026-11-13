@@ -1038,7 +1038,7 @@ func TestCtxFiles(t *testing.T) {
 		"v1.0-accounts.0-4.ef",
 		"v1.0-accounts.2-3.ef",
 		"v1.0-accounts.3-4.ef",
-		"v1.0-accounts.4-5.ef",     // no overlap
+		"v1.0-accounts.4-5.ef", // no overlap
 		"v1.0-accounts.5-480.ef",
 		"v1.0-accounts.480-484.ef", // overlap with same `startTxNum=480`
 		"v1.0-accounts.480-488.ef",
