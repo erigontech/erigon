@@ -931,7 +931,7 @@ func TestAggregatorOpenFolderOpensAccessors(t *testing.T) {
 }
 
 func TestAggregatorOpenFolderHidesDataOnlyDomainFile(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	db, agg := testDbAndAggregatorv3(t, 10)
 	ranges := []testFileRange{{0, 1}, {1, 2}, {2, 3}}
 	generateAccountsFile(t, agg.Dirs(), ranges)
