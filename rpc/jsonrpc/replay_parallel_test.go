@@ -30,11 +30,13 @@ import (
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcservices"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/jsonstream"
@@ -169,6 +171,104 @@ func TestReplayTxnsParallelKeepsBlockAfterReorgAboveIt(t *testing.T) {
 	}
 	require.NoError(t, r.Wait())
 	require.EqualValues(t, 4, replayed.Load())
+}
+
+// TestReplayTxnsParallelKeepsBlockAfterMarkerPrune pins that a frozen block whose canonical
+// marker is pruned after the caller's read tx does not fail the workers: the prune deletes the
+// lowest markers only, while a reorg deletes the markers from the block up.
+func TestReplayTxnsParallelKeepsBlockAfterMarkerPrune(t *testing.T) {
+	m, _ := createLogIndexTestModule(t)
+	require.NoError(t, m.DB.Update(m.Ctx, func(rwTx kv.RwTx) error {
+		return rawdb.WriteCanonicalHash(rwTx, common.Hash{0xaa}, 2)
+	}))
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	require.NoError(t, m.DB.Update(m.Ctx, func(rwTx kv.RwTx) error {
+		return rwTx.Delete(kv.HeaderCanonical, hexutil.EncodeTs(1))
+	}))
+
+	r, err := replayTxnsParallel(m.Ctx, m.DB, tx, 1, 0, 4, 4, 4,
+		func(context.Context, kv.TemporalTx) (func(int) error, error) {
+			return func(int) error { return nil }, nil
+		})
+	require.NoError(t, err)
+	for range 4 {
+		r.written()
+	}
+	require.NoError(t, r.Wait())
+}
+
+// TestReplayTxnsParallelRejectsTruncatedBlock pins that the workers fail when a reorg after the
+// caller's read tx deletes the block's canonical marker and every marker above it.
+func TestReplayTxnsParallelRejectsTruncatedBlock(t *testing.T) {
+	m, _ := createLogIndexTestModule(t)
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	require.NoError(t, m.DB.Update(m.Ctx, func(rwTx kv.RwTx) error {
+		return rawdb.TruncateCanonicalChain(rwTx, 1)
+	}))
+
+	r, err := replayTxnsParallel(m.Ctx, m.DB, tx, 1, 0, 4, 4, 4,
+		func(context.Context, kv.TemporalTx) (func(int) error, error) {
+			return func(int) error { return nil }, nil
+		})
+	require.NoError(t, err)
+	require.ErrorIs(t, r.Wait(), errBlockNotCanonical)
+}
+
+// TestReplayTxnsParallelRejectsReorgBelowBlock pins that the workers fail when a reorg after
+// the caller's read tx replaces a block below the traced one, which changes the traced block's hash.
+func TestReplayTxnsParallelRejectsReorgBelowBlock(t *testing.T) {
+	m, _ := createLogIndexTestModule(t)
+	writeMarkers := func(markers map[uint64]common.Hash) {
+		require.NoError(t, m.DB.Update(m.Ctx, func(rwTx kv.RwTx) error {
+			for num, hash := range markers {
+				if err := rawdb.WriteCanonicalHash(rwTx, hash, num); err != nil {
+					return err
+				}
+			}
+			return nil
+		}))
+	}
+	writeMarkers(map[uint64]common.Hash{2: {0xa2}, 3: {0xa3}})
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	require.NoError(t, m.DB.Update(m.Ctx, func(rwTx kv.RwTx) error {
+		return rawdb.TruncateCanonicalChain(rwTx, 1)
+	}))
+	writeMarkers(map[uint64]common.Hash{1: {0xb1}, 2: {0xb2}, 3: {0xb3}})
+
+	r, err := replayTxnsParallel(m.Ctx, m.DB, tx, 2, 0, 4, 4, 4,
+		func(context.Context, kv.TemporalTx) (func(int) error, error) {
+			return func(int) error { return nil }, nil
+		})
+	require.NoError(t, err)
+	require.ErrorIs(t, r.Wait(), errBlockNotCanonical)
+}
+
+// TestReplayTxnsParallelRejectsPrunedHistory pins that the workers fail with ErrPruned when the
+// state history in their view starts after the block, as when pruning moves on after the caller's read tx.
+func TestReplayTxnsParallelRejectsPrunedHistory(t *testing.T) {
+	m, _ := createLogIndexTestModule(t)
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	var replayed atomic.Bool
+	db := historyFloorDB{TemporalRoDB: m.DB, startTxNum: 100}
+	r, err := replayTxnsParallel(m.Ctx, db, tx, 1, 5, 4, 4, 4,
+		func(context.Context, kv.TemporalTx) (func(int) error, error) {
+			return func(int) error {
+				replayed.Store(true)
+				return nil
+			}, nil
+		})
+	require.NoError(t, err)
+	require.ErrorIs(t, r.Wait(), state.ErrPruned)
+	require.False(t, replayed.Load())
 }
 
 // TestTraceBlockOnRemoteBlockReaderIsSequential pins that debug_traceBlock and trace_block open

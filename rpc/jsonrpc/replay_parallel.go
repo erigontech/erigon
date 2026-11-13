@@ -18,13 +18,16 @@ package jsonrpc
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"sync/atomic"
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/state"
@@ -85,11 +88,11 @@ func replayTxnsParallel(ctx context.Context, db kv.TemporalRoDB, callerTx kv.Tem
 				return fmt.Errorf("%w: requested block %d, history is available from txNum %d", state.ErrPruned, blockNum, startTxNum)
 			}
 			// After a reorg the block's txNums belong to the new fork.
-			workerHash, err := canonicalHashAt(tx, blockNum)
+			canonical, err := stillCanonical(tx, blockNum, blockHash)
 			if err != nil {
 				return err
 			}
-			if workerHash != blockHash {
+			if !canonical {
 				return fmt.Errorf("%w: block %d", errBlockNotCanonical, blockNum)
 			}
 			job, err := newWorker(gctx, tx)
@@ -115,6 +118,25 @@ func replayTxnsParallel(ctx context.Context, db kv.TemporalRoDB, callerTx kv.Tem
 		})
 	}
 	return &txnReplay{Group: g, ctx: gctx, writtenTxns: writtenTxns}, nil
+}
+
+// stillCanonical reports whether blockNum still has the canonical hash hash in tx. A reorg
+// rewrites the block's marker or deletes it with all the markers above it, while the prune of
+// frozen blocks deletes the lowest markers only, so a missing marker with one above it is pruned.
+func stillCanonical(tx kv.Tx, blockNum uint64, hash common.Hash) (bool, error) {
+	c, err := tx.Cursor(kv.HeaderCanonical)
+	if err != nil {
+		return false, err
+	}
+	defer c.Close()
+	k, v, err := c.Seek(hexutil.EncodeTs(blockNum))
+	if err != nil || k == nil {
+		return false, err
+	}
+	if binary.BigEndian.Uint64(k) > blockNum {
+		return true, nil
+	}
+	return common.BytesToHash(v) == hash, nil
 }
 
 type txnReplay struct {
