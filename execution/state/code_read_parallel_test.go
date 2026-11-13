@@ -199,7 +199,12 @@ func TestRefreshCodeAssertsHashPresent(t *testing.T) {
 
 type segmentCodeReader struct {
 	codeReader
-	segmentReads int
+	segmentReads, fullReads int
+}
+
+func (r *segmentCodeReader) ReadAccountCode(addr accounts.Address) ([]byte, error) {
+	r.fullReads++
+	return r.codeReader.ReadAccountCode(addr)
 }
 
 func (r *segmentCodeReader) ReadAccountCodeSegmentTo(addr accounts.Address, from uint64, dst []byte) (bool, error) {
@@ -334,17 +339,19 @@ func TestCodeSegment_UncommittedCodeStaysOnTheNormalPath(t *testing.T) {
 	})
 }
 
-func TestCodeSegment_RepeatedReadKeepsTheBytes(t *testing.T) {
+// A repeated segment read copies again, from the worker's last decode, instead of reading the full code.
+func TestCodeSegment_RepeatedReadCopiesAgain(t *testing.T) {
 	ibs, reader, addr, code := newSegmentRead(t, NewVersionMap(nil))
 	for range 3 {
 		got, err := segmentOf(ibs, addr, len(code))
 		require.NoError(t, err)
 		require.Equal(t, code, got)
 	}
-	require.Equal(t, 1, reader.segmentReads, "a repeated read must not decode again")
+	require.Zero(t, reader.fullReads, "a repeated segment read must not read the full code")
+	require.Equal(t, 3, reader.segmentReads)
 	read, ok := ibs.versionedReads.GetCode(addr)
 	require.True(t, ok)
-	require.Equal(t, code, read.Val.Bytes)
+	require.True(t, codeBytesDropped(read.Val), "the read stays recorded without bytes")
 }
 
 func TestCodeSegment_CopiesFromTheOffsetAndZeroPads(t *testing.T) {

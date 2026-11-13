@@ -58,11 +58,11 @@ func (g *stateGetter) GetCode(addr []byte, txNum uint64) ([]byte, bool, error) {
 	return code, ok, err
 }
 
-// ReadCodeSegmentTo copies the code of addr from offset from into dst, zero-padded, when the
-// code misses the code cache; the decode does not fill the cache. ok is false when the caller
+// ReadCodeSegmentTo copies the code of addr from offset from into dst, zero-padded: from the code
+// cache on a hit, else from a decode that does not fill the cache. ok is false when the caller
 // must read the code normally.
 func (g *stateGetter) ReadCodeSegmentTo(addr []byte, txNum, from uint64, dst []byte) (ok bool, err error) {
-	code, ok, err := g.sd.decodeUncachedCode(g.tx, g.view, addr, txNum, *g.codeBuf, &g.memo)
+	code, ok, err := g.sd.codeForSegment(g.tx, g.view, addr, txNum, *g.codeBuf, &g.memo)
 	if ok {
 		common.CopySegment(dst, code, from)
 	}

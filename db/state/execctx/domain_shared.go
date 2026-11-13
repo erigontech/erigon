@@ -1654,9 +1654,10 @@ func (sd *SharedDomains) getCode(tx kv.TemporalTx, view cache.ReadView, addr []b
 	return v, true, nil
 }
 
-// decodeUncachedCode decodes a code-cache miss into buf without filling the cache. ok is
-// false when any cache or the in-memory batch holds the code, or the read cannot fill.
-func (sd *SharedDomains) decodeUncachedCode(tx kv.TemporalTx, view cache.ReadView, addr []byte, txNum uint64, buf []byte, memo *accounts.Code) (code []byte, ok bool, err error) {
+// codeForSegment returns the code of addr for a segment copy: the code-cache bytes on a hit, else a
+// decode into buf that does not fill the cache. ok is false when the in-memory batch holds the code
+// or the read cannot fill.
+func (sd *SharedDomains) codeForSegment(tx kv.TemporalTx, view cache.ReadView, addr []byte, txNum uint64, buf []byte, memo *accounts.Code) (code []byte, ok bool, err error) {
 	if tx == nil || sd.stateCache == nil {
 		return nil, false, nil
 	}
@@ -1664,12 +1665,13 @@ func (sd *SharedDomains) decodeUncachedCode(tx kv.TemporalTx, view cache.ReadVie
 	if len(codeHash) == 0 || sd.uncommittedCodeInMem(addr) {
 		return nil, false, nil
 	}
-	if _, ok := view.GetCodeByHash(codeHash); ok {
-		return nil, false, nil
+	if cached, ok := view.GetCodeByHash(codeHash); ok {
+		return cached, true, nil
 	}
 	if h := memo.Hash.Value(); memo.Bytes != nil && bytes.Equal(h[:], codeHash) {
 		return memo.Bytes, true, nil
 	}
+	memo.Bytes = nil // a failed decode may leave buf half written
 	v, _, err := sd.getLatest(kv.CodeDomain, tx, addr, nil, time.Time{}, kv.NoStepBound, view, getLatestOptions{codeHash: codeHash, buf: buf, unfilled: &ok})
 	if err != nil || !ok {
 		return nil, false, err

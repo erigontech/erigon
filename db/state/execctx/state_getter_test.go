@@ -175,8 +175,6 @@ func (tx codeBufTx) GetLatest(domain kv.Domain, key []byte, opts kv.GetLatestOpt
 	return append(opts.Buf()[:0], tx.code[string(key)]...), 0, nil
 }
 
-// A caller-owned buffer outlives each getter, so a later getter decodes into it
-// instead of growing its own.
 // Identical code at many addresses is decoded once; any other read into the buffer ends the reuse.
 func TestStateGetterCodeSegmentReusesTheLastDecode(t *testing.T) {
 	ctx := t.Context()
@@ -227,6 +225,8 @@ func TestStateGetterCodeSegmentReusesTheLastDecode(t *testing.T) {
 	borrow(1, code, decodes+1)
 }
 
+// A caller-owned buffer outlives each getter, so a later getter decodes into it
+// instead of growing its own.
 func TestStateGetterCallerCodeBufOutlivesGetter(t *testing.T) {
 	ctx := t.Context()
 	db := newTestDb(t, 16)
@@ -823,9 +823,13 @@ func TestStateGetterCodeSegmentLeavesTheCacheEmpty(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, ok)
 	require.Equal(t, code, got)
-	borrowed, err = borrower.ReadCodeSegmentTo(addr, 5, 0, nil)
+	decodes := len(lentCaps)
+	got = make([]byte, len(code))
+	borrowed, err = borrower.ReadCodeSegmentTo(addr, 5, 0, got)
 	require.NoError(t, err)
-	require.False(t, borrowed, "a cached code stays on the normal path")
+	require.True(t, borrowed, "a cached code is copied from the cache")
+	require.Equal(t, code, got)
+	require.Len(t, lentCaps, decodes, "a cache hit must not decode")
 }
 
 func TestStateGetterCodeSegmentRefusesAnAccountWrittenInTheBatch(t *testing.T) {

@@ -1365,10 +1365,11 @@ func TestBlockhashRecordsAHeaderReadError(t *testing.T) {
 
 type borrowingCodeReader struct {
 	state.NoopReader
-	addr    accounts.Address
-	code    []byte
-	borrows int
-	refuse  bool
+	addr     accounts.Address
+	code     []byte
+	borrows  int
+	attempts int
+	refuse   bool
 }
 
 func (r *borrowingCodeReader) ReadAccountData(addr accounts.Address) (*accounts.Account, error) {
@@ -1390,6 +1391,7 @@ func (r *borrowingCodeReader) ReadAccountCode(addr accounts.Address) ([]byte, er
 }
 
 func (r *borrowingCodeReader) ReadAccountCodeSegmentTo(addr accounts.Address, from uint64, dst []byte) (bool, error) {
+	r.attempts++
 	if r.refuse {
 		return false, nil
 	}
@@ -1401,7 +1403,7 @@ func (r *borrowingCodeReader) ReadAccountCodeSegmentTo(addr accounts.Address, fr
 	return true, nil
 }
 
-func runExtCodeCopy(t *testing.T, borrow bool, memOffset, codeOffset, length uint256.Int, memSize uint64) ([]byte, int) {
+func runExtCodeCopy(t *testing.T, borrow bool, memOffset, codeOffset, length uint256.Int, memSize uint64) (mem []byte, attempts, borrows int) {
 	t.Helper()
 
 	addrBytes := common.Address{0xC0, 0xDE}
@@ -1428,7 +1430,7 @@ func runExtCodeCopy(t *testing.T, borrow bool, memOffset, codeOffset, length uin
 
 	_, _, err := opExtCodeCopy(0, evm, callContext)
 	require.NoError(t, err)
-	return bytes.Clone(callContext.Memory.store), reader.borrows
+	return bytes.Clone(callContext.Memory.store), reader.attempts, reader.borrows
 }
 
 func TestOpExtCodeCopyBorrowMatchesNormalPath(t *testing.T) {
@@ -1442,10 +1444,19 @@ func TestOpExtCodeCopyBorrowMatchesNormalPath(t *testing.T) {
 		{name: "offset overflow", memOffset: *uint256.NewInt(0), codeOffset: *new(uint256.Int).Lsh(uint256.NewInt(1), 70), length: *uint256.NewInt(16), memSize: 32},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			want, offBorrows := runExtCodeCopy(t, false, tc.memOffset, tc.codeOffset, tc.length, tc.memSize)
-			have, onBorrows := runExtCodeCopy(t, true, tc.memOffset, tc.codeOffset, tc.length, tc.memSize)
-			require.Equal(t, want, have)
-			require.Zero(t, offBorrows, "a refused borrow must take the normal path")
+			want := bytes.Repeat([]byte{0xff}, int(tc.memSize))
+			for i := uint64(0); i < tc.length.Uint64(); i++ {
+				var b byte
+				if src, overflow := new(uint256.Int).AddOverflow(&tc.codeOffset, uint256.NewInt(i)); !overflow && src.IsUint64() && src.Uint64() < 64 {
+					b = byte(src.Uint64() + 1)
+				}
+				want[tc.memOffset.Uint64()+i] = b
+			}
+			off, offAttempts, _ := runExtCodeCopy(t, false, tc.memOffset, tc.codeOffset, tc.length, tc.memSize)
+			on, _, onBorrows := runExtCodeCopy(t, true, tc.memOffset, tc.codeOffset, tc.length, tc.memSize)
+			require.Equal(t, want, off, "a refused borrow must take the normal path")
+			require.Equal(t, want, on)
+			require.Equal(t, 1, offAttempts, "the refused run must try the segment read")
 			require.Equal(t, 1, onBorrows, "the miss must be borrowed")
 		})
 	}
