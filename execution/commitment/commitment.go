@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"math/bits"
 	"reflect"
 	"slices"
@@ -1738,6 +1739,15 @@ func (t *Updates) Untouch(plainKey string) bool {
 	_, ok := t.treeIdx[plainKey]
 	delete(t.treeIdx, plainKey)
 	return ok
+}
+
+func (t *Updates) UntouchAll() []string {
+	if t.mode != ModeCollect {
+		return nil
+	}
+	keys := slices.Collect(maps.Keys(t.treeIdx))
+	clear(t.treeIdx)
+	return keys
 }
 
 func (t *Updates) TouchHashedKey(hashedKey []byte) {

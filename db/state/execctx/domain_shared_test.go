@@ -2128,9 +2128,9 @@ func TestUnwindRevertsCollectedTouches(t *testing.T) {
 		acc.Balance = *uint256.NewInt(b)
 		return accounts.SerialiseV3(&acc)
 	}
-	for _, v3 := range []bool{false, true} {
-		t.Run(fmt.Sprintf("v3=%t", v3), func(t *testing.T) {
-			t.Cleanup(statecfg.SetCommitmentV3(v3))
+	for _, tc := range []struct{ v3, changeset bool }{{false, true}, {true, true}, {false, false}, {true, false}} {
+		t.Run(fmt.Sprintf("v3=%t/changeset=%t", tc.v3, tc.changeset), func(t *testing.T) {
+			t.Cleanup(statecfg.SetCommitmentV3(tc.v3))
 			ctx := t.Context()
 			open := func() (*execctx.SharedDomains, kv.TemporalRwTx) {
 				rw, err := newTestDb(t, 1).BeginTemporalRw(ctx)
@@ -2162,7 +2162,11 @@ func TestUnwindRevertsCollectedTouches(t *testing.T) {
 			for d := range unwound.Diffs {
 				diffs[d] = unwound.Diffs[d].GetDiffSet()
 			}
-			sd.Unwind(2, &diffs)
+			if tc.changeset {
+				sd.Unwind(2, &diffs)
+			} else {
+				sd.Unwind(2, nil)
+			}
 
 			got, err := sd.ComputeCommitment(ctx, rw, false, 1, 1, "", nil)
 			require.NoError(t, err)

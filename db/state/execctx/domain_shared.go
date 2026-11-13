@@ -30,6 +30,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
@@ -882,7 +883,22 @@ func (sd *SharedDomains) Unwind(txNumUnwindTo uint64, changeset *[kv.DomainLen][
 
 func (sd *SharedDomains) unwindCollectedTouches(diffs *[kv.DomainLen][]kv.DomainEntryDiff) {
 	updates := sd.sdCtx.GetUpdates()
-	if diffs == nil || updates.Mode() != commitment.ModeCollect {
+	if updates.Mode() != commitment.ModeCollect {
+		return
+	}
+	retouch := func(domain kv.Domain, key string) {
+		if v, _, _, ok := sd.latestFromMem(domain, []byte(key)); ok {
+			sd.sdCtx.TouchKey(domain, key, v)
+		}
+	}
+	if diffs == nil {
+		for _, key := range updates.UntouchAll() {
+			if len(key) == length.Addr {
+				retouch(kv.AccountsDomain, key)
+			} else {
+				retouch(kv.StorageDomain, key)
+			}
+		}
 		return
 	}
 	for _, d := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
@@ -892,11 +908,8 @@ func (sd *SharedDomains) unwindCollectedTouches(diffs *[kv.DomainLen][]kv.Domain
 		}
 		for _, diff := range diffs[d] {
 			key := diff.Key[:len(diff.Key)-8]
-			if !updates.Untouch(key) {
-				continue
-			}
-			if v, _, _, ok := sd.latestFromMem(domain, []byte(key)); ok {
-				sd.sdCtx.TouchKey(domain, strings.Clone(key), v)
+			if updates.Untouch(key) {
+				retouch(domain, strings.Clone(key))
 			}
 		}
 	}
