@@ -176,6 +176,9 @@ func (pt *poolTask) waitThen(t, next int) bool {
 
 const poolNamedReruns = 3
 
+// probeNoSettleWait is a dbg probe: a valid non-BAL result publishes at once, as on BAL blocks.
+var probeNoSettleWait = dbg.EnvBool("PROBE_NO_SETTLE_WAIT", false)
+
 func (pt *poolTask) rerunAfter(named int) bool {
 	t := pt.tv.index - 1
 	if pt.reruns < poolNamedReruns {
@@ -278,7 +281,7 @@ func (pt *poolTask) run(p *taskPool, wk *poolWorker) bool {
 
 func (pt *poolTask) settle(p *taskPool, result *exec.TxResult, target int) bool {
 	pt.result = result
-	if !pt.be.versionMap.HasBAL {
+	if !pt.be.versionMap.HasBAL && !probeNoSettleWait {
 		return pt.waitThen(target, psRecheck)
 	}
 	return pt.publish(p)
