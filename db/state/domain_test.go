@@ -209,9 +209,16 @@ func TestDomain_OpenFolder(t *testing.T) {
 
 	scanDirsRes, err := scanDirs(d.dirs)
 	require.NoError(t, err)
-	_, err = d.openFolder(t.Context(), scanDirsRes)
+	retired, err := d.openFolder(t.Context(), scanDirsRes)
+	reclaimFiles(retired)
 	require.NoError(t, err)
 	d.Close()
+	require.NotEmpty(t, retired)
+	for _, file := range retired {
+		require.Nil(t, file.decompressor, "retired data mappings must be closed")
+		require.Nil(t, file.index, "retired index mappings must be closed")
+		require.Nil(t, file.vAccessor, "retired history accessors must be closed")
+	}
 }
 
 func testCollationBuild(t *testing.T, compressDomainVals bool) {
@@ -1609,8 +1616,8 @@ func TestDomain_OpenFilesWithDeletions(t *testing.T) {
 
 	scanDirsRes, err := scanDirs(dom.dirs)
 	require.NoError(t, err)
-	_, err = dom.openFolder(t.Context(), scanDirsRes)
-
+	retired, err := dom.openFolder(t.Context(), scanDirsRes)
+	reclaimFiles(retired)
 	require.NoError(t, err)
 
 	domRoTx = dom.beginForTests()
@@ -1661,6 +1668,12 @@ func TestDomain_OpenFilesWithDeletions(t *testing.T) {
 	}
 
 	dom.Close()
+	require.NotEmpty(t, retired)
+	for _, file := range retired {
+		require.Nil(t, file.decompressor, "retired data mappings must be closed")
+		require.Nil(t, file.index, "retired index mappings must be closed")
+		require.Nil(t, file.vAccessor, "retired history accessors must be closed")
+	}
 }
 
 func emptyTestDomain(t testing.TB, aggStep uint64) *Domain {
