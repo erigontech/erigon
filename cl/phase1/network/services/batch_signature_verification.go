@@ -90,10 +90,6 @@ func (b *BatchSignatureVerifier) AsyncVerifySyncContribution(data *AggregateVeri
 	b.syncContributionVerify <- data
 }
 
-func (b *BatchSignatureVerifier) AsyncVerifySyncCommitteeMessage(data *AggregateVerificationData) {
-	b.syncCommitteeMessage <- data
-}
-
 func (b *BatchSignatureVerifier) VerifySyncCommitteeMessage(ctx context.Context, data *AggregateVerificationData) error {
 	return b.verifyAndWait(ctx, b.syncCommitteeMessage, data)
 }

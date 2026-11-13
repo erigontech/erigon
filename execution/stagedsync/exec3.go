@@ -608,6 +608,9 @@ func (te *txExecutor) getHeader(ctx context.Context, hash common.Hash, number ui
 // reconstructed. Callers MUST treat a failure as non-fatal.
 func (te *txExecutor) reconstructPriorReceipts(ctx context.Context, applyTx kv.TemporalTx, header *types.Header, txs types.Transactions, startTxIndex int, blockStartTxNum uint64) (types.Receipts, error) {
 	priorIbs := state.New(state.NewHistoryReaderV3(applyTx, blockStartTxNum), state.WithStorageOverrides(te.cfg.engine))
+	if dbg.CallNoMaterialize {
+		priorIbs.SetVersionMap(state.NewVersionMap(nil))
+	}
 	defer priorIbs.Close()
 	priorGp := protocol.NewGasPool(header.GasLimit, te.cfg.chainConfig.GetMaxBlobGasPerBlock(header.Time))
 	getHeader := func(hash common.Hash, number uint64) (*types.Header, error) {

@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -232,4 +233,28 @@ func TestRecoverSignersNilChainIDIsChainZero(t *testing.T) {
 	if signers[1] != crypto.PubkeyToAddress(key.PublicKey) || errs[1] != nil {
 		t.Errorf("chain-0 auth: got %v, %v", signers[1], errs[1])
 	}
+}
+
+func TestMessageAuthoritiesPublishesItsRecovery(t *testing.T) {
+	t.Parallel()
+
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	auth, err := SignAuthorization(key, *uint256.NewInt(1), common.Address{1}, 0)
+	require.NoError(t, err)
+	tx := &SetCodeTransaction{Authorizations: []Authorization{auth}}
+	msg := &Message{authorizations: tx.Authorizations, authorities: &tx.authorities}
+
+	r := msg.Authorities(uint256.NewInt(1))
+	require.Equal(t, crypto.PubkeyToAddress(key.PublicKey), r.Signers[0])
+	require.Same(t, r, tx.authorities.Load(), "a re-execution and the pre-pass reuse the executor's recovery")
+	require.Same(t, r, msg.Authorities(uint256.NewInt(1)))
+}
+
+func TestMessageAuthoritiesReusesRecoveryWithoutAllocating(t *testing.T) {
+	tx := &SetCodeTransaction{}
+	msg := &Message{authorities: &tx.authorities}
+	chainID := uint256.NewInt(1)
+	msg.Authorities(chainID)
+	require.Zero(t, testing.AllocsPerRun(10, func() { msg.Authorities(chainID) }))
 }

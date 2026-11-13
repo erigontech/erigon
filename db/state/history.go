@@ -461,9 +461,6 @@ func (ht *HistoryRoTx) newWriter(db kv.RoDB, tmpdir string, discard bool) *histo
 	return w
 }
 
-func (w *historyBufferedWriter) init() {
-}
-
 func (w *historyBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 	if w.discard {
 		return nil
@@ -1036,12 +1033,13 @@ func (ht *HistoryRoTx) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txTo u
 	minIdxTx, _ := ht.iit.ii.minTxNumInDB(tx)
 	maxIdxTx := ht.iit.ii.maxTxNumInDB(tx)
 
+	var pruneInProgress bool
 	stat, err := GetPruneValProgress(tx, []byte(ht.h.ValuesTable))
 	if err != nil {
 		ht.h.logger.Warn("CanPrune GetPruneValProgress error", "err", err)
+	} else {
+		pruneInProgress = (stat.KeyProgress != prune.Done || stat.ValueProgress != prune.Done) && untilTx == stat.TxTo
 	}
-
-	pruneInProgress := (stat.KeyProgress != prune.Done || stat.ValueProgress != prune.Done) && untilTx == stat.TxTo
 
 	if ht.h.SnapshotsDisabled {
 		if ht.h.KeepRecentTxnInDB >= maxIdxTx {
@@ -1138,15 +1136,6 @@ func (ht *HistoryRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, li
 	}
 
 	return ht.iit.TableScanningPrune(ctx, rwTx, txFrom, txTo, limit, logEvery, forced, valsCP, &ht.h.ValuesTable, mxPruneSizeHistory, mode)
-}
-
-// Prune [txFrom; txTo)
-// `force` flag to prune even if canPruneUntil returns false (when Unwind is needed, canPruneUntil always returns false)
-// `useProgress` flag to restore and update prune progress.
-//   - E.g. Unwind can't use progress, because it's not linear
-//     and will wrongly update progress of steps cleaning and could end up with inconsistent history.
-func (ht *HistoryRoTx) OldPrune(ctx context.Context, tx kv.RwTx, txFrom, txTo, limit uint64, forced bool, logEvery *time.Ticker) (*InvertedIndexPruneStat, error) {
-	return ht.Prune(ctx, tx, txFrom, txTo, limit, forced, logEvery)
 }
 
 func (ht *HistoryRoTx) Close() {
@@ -1375,7 +1364,7 @@ func (ht *HistoryRoTx) iterateChangedFrozen(fromTxNum, toTxNum int, asc order.By
 
 	s := &HistoryChangesIterFiles{
 		hc:         ht,
-		startTxNum: max(0, uint64(fromTxNum)),
+		startTxNum: uint64(max(0, fromTxNum)),
 		endTxNum:   toTxNum,
 		limit:      limit,
 	}
