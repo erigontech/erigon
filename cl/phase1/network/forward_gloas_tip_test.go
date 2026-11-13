@@ -393,6 +393,48 @@ func TestForwardBeaconDownloaderKeepsHeldGloasTipWhenContextIsCancelled(t *testi
 	require.Same(t, tip, downloader.gloasLookahead)
 }
 
+func TestForwardBeaconDownloaderKeepsPeersWhenContextIsCancelledDuringRequestMore(t *testing.T) {
+	previousInterval := forwardBeaconRequestInterval
+	forwardBeaconRequestInterval = time.Millisecond
+	t.Cleanup(func() { forwardBeaconRequestInterval = previousInterval })
+
+	for name, holdTip := range map[string]bool{"plain batch": false, "held tip": true} {
+		t.Run(name, func(t *testing.T) {
+			tip := makeGloasBlock(10, hash(0xaa), common.Hash{})
+			successor := makeGloasBlock(11, hash(0xbb), common.Hash{})
+			grandchild := makeGloasBlock(12, hash(0xcc), common.Hash{})
+			linkBeaconBlocks(t, tip, successor, grandchild)
+			response := []*cltypes.SignedBeaconBlock{successor, grandchild}
+			downloader := newHeldTipDownloader(t, gloasFromGenesisConfig(), nil, tip, "tip-peer")
+			if !holdTip {
+				downloader.clearGloasScan()
+				response = []*cltypes.SignedBeaconBlock{tip, successor}
+			}
+			downloader.SetCurrentSlotSampler(func() uint64 { return 50 })
+			downloader.requestBlocksByRange = func(context.Context, uint64, uint64) ([]*cltypes.SignedBeaconBlock, string, error) {
+				return response, "range-peer", nil
+			}
+			var banned []string
+			downloader.banPeer = func(peer string) { banned = append(banned, peer) }
+			ctx, cancel := context.WithCancel(t.Context())
+			var processed bool
+			downloader.SetProcessFunction(func(highest uint64, _ []*cltypes.SignedBeaconBlock, _ map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) (uint64, error) {
+				processed = true
+				cancel()
+				return highest, fmt.Errorf("failed to read signed header: %w", context.Canceled)
+			})
+
+			downloader.RequestMore(ctx)
+			require.True(t, processed)
+			require.Empty(t, banned)
+			if holdTip {
+				require.Same(t, tip, downloader.gloasLookahead)
+				require.Equal(t, "tip-peer", downloader.gloasLookaheadPeer)
+			}
+		})
+	}
+}
+
 func TestForwardBeaconDownloaderKeepsHeldGloasTipWhenContextIsCancelledDuringProcessing(t *testing.T) {
 	cfg := gloasFromGenesisConfig()
 	tip := makeGloasBlock(11, hash(0xaa), common.Hash{})
