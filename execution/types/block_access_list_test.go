@@ -8,6 +8,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"unsafe"
+	"weak"
 
 	"github.com/holiman/uint256"
 
@@ -1022,4 +1024,52 @@ func TestDecodeBlockAccessListChangeArenaReservesNoMoreThanTheBudget(t *testing.
 	if grew := after.TotalAlloc - before.TotalAlloc; grew > 64*1024 {
 		t.Fatalf("a one-item budget reserved %d bytes for a malformed change list", grew)
 	}
+}
+
+// A decoded BAL's arenas are freed with the BAL, while the bytecode that the state cache keeps stays alive.
+func TestDecodedBlockAccessListArenasAreFreedWithTheBAL(t *testing.T) {
+	const gasLimit = 60_000_000
+	bal, txCount := budgetBlockAccessList(gasLimit)
+	bal[0].CodeChanges = []*CodeChange{{Index: 1, Bytecode: bytes.Repeat([]byte{0x60}, 64)}}
+	enc, err := EncodeBlockAccessListBytes(bal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sidecar, err := DecodeBlockAccessListSidecarForBlock(enc, gasLimit, txCount)
+	if err != nil {
+		t.Fatal(err)
+	}
+	enc = nil
+
+	decoded := sidecar.BlockAccessList()
+	first := &decoded[0]
+	arenas := map[string]func() bool{
+		"accounts":     weakAlive(unsafe.SliceData(decoded)),
+		"slots":        weakAlive(unsafe.SliceData(first.StorageChanges)),
+		"storage":      weakAlive(first.StorageChanges[0].Changes[0]),
+		"storage ptrs": weakAlive(unsafe.SliceData(first.StorageChanges[0].Changes)),
+		"reads":        weakAlive(unsafe.SliceData(first.StorageReads)),
+		"balances":     weakAlive(first.BalanceChanges[0]),
+		"balance ptrs": weakAlive(unsafe.SliceData(first.BalanceChanges)),
+		"nonces":       weakAlive(first.NonceChanges[0]),
+		"nonce ptrs":   weakAlive(unsafe.SliceData(first.NonceChanges)),
+		"codes":        weakAlive(first.CodeChanges[0]),
+		"code ptrs":    weakAlive(unsafe.SliceData(first.CodeChanges)),
+	}
+	code := first.CodeChanges[0].Bytecode
+	sidecar, decoded, first = nil, nil, nil
+	runtime.GC()
+	for name, alive := range arenas {
+		if alive() {
+			t.Errorf("the %s arena outlives its BAL", name)
+		}
+	}
+	if len(code) != 64 {
+		t.Fatal("the kept bytecode changed")
+	}
+}
+
+func weakAlive[T any](p *T) func() bool {
+	w := weak.Make(p)
+	return func() bool { return w.Value() != nil }
 }

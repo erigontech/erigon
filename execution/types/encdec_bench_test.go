@@ -417,18 +417,44 @@ func BenchmarkDecodeAccessList(b *testing.B) {
 	}
 }
 
+func balBenchAddress(i int) (a common.Address) {
+	a[0], a[1], a[2] = byte(i>>16), byte(i>>8), byte(i)
+	return a
+}
+
+func balBenchSlot(i int) (h common.Hash) {
+	binary.BigEndian.PutUint32(h[:], uint32(i))
+	h[31] = 0xab
+	return h
+}
+
+func balBenchValue(i int) uint256.Int { return *uint256.NewInt(uint64(i)*1_000_003 + 1e18) }
+
+// budgetBlockAccessList fills the decode budget of gasLimit: gasLimit/BalItemCost items split in thirds between accounts,
+// written slots and storage reads. Each of the gasLimit/21000 txs changes one sender's balance and nonce and the
+// coinbase balance; each written slot has one change.
+func budgetBlockAccessList(gasLimit uint64) (bal BlockAccessList, txCount int) {
+	items, txCount := int(gasLimit/BalItemCost), int(gasLimit/21_000)
+	bal = make(BlockAccessList, items/3)
+	for i := range bal {
+		bal[i].Address = balBenchAddress(i)
+		bal[i].StorageChanges = []SlotChanges{{Slot: accounts.InternKey(balBenchSlot(0)), Changes: []*StorageChange{{Index: uint32(i%txCount + 1), Value: balBenchValue(i)}}}}
+		bal[i].StorageReads = []common.Hash{balBenchSlot(1)}
+	}
+	for i := range min(txCount, len(bal)-1) {
+		bal[i].BalanceChanges = []*BalanceChange{{Index: uint32(i + 1), Value: balBenchValue(i)}}
+		bal[i].NonceChanges = []*NonceChange{{Index: uint32(i + 1), Value: uint64(i)}}
+	}
+	coinbase := &bal[len(bal)-1]
+	for i := range txCount {
+		coinbase.BalanceChanges = append(coinbase.BalanceChanges, &BalanceChange{Index: uint32(i + 1), Value: balBenchValue(i)})
+	}
+	return bal, txCount
+}
+
 func BenchmarkDecodeBlockAccessListSidecar(b *testing.B) {
 	const accountCount, txCount = 98 * 1024, 14_000
-	address := func(i int) (a common.Address) {
-		a[0], a[1], a[2] = byte(i>>16), byte(i>>8), byte(i)
-		return a
-	}
-	slot := func(i int) (h common.Hash) {
-		binary.BigEndian.PutUint32(h[:], uint32(i))
-		h[31] = 0xab
-		return h
-	}
-	value := func(i int) uint256.Int { return *uint256.NewInt(uint64(i)*1_000_003 + 1e18) }
+	address, slot, value := balBenchAddress, balBenchSlot, balBenchValue
 
 	addrOnly := make(BlockAccessList, accountCount)
 	for i := range addrOnly {
@@ -459,17 +485,27 @@ func BenchmarkDecodeBlockAccessListSidecar(b *testing.B) {
 		}
 	}
 
+	budget60, txs60 := budgetBlockAccessList(60_000_000)
+	budget300, txs300 := budgetBlockAccessList(300_000_000)
 	for _, c := range []struct {
-		name string
-		bal  BlockAccessList
-	}{{"addr-only", addrOnly}, {"transfers", transfers}, {"storage", storage}} {
+		name     string
+		bal      BlockAccessList
+		gasLimit uint64
+		txCount  int
+	}{
+		{"addr-only", addrOnly, 300_000_000, txCount},
+		{"transfers", transfers, 300_000_000, txCount},
+		{"storage", storage, 300_000_000, txCount},
+		{"budget-60M", budget60, 60_000_000, txs60},
+		{"budget-300M", budget300, 300_000_000, txs300},
+	} {
 		enc, err := EncodeBlockAccessListBytes(c.bal)
 		require.NoError(b, err)
 		b.Run(c.name, func(b *testing.B) {
 			b.ReportAllocs()
 			b.SetBytes(int64(len(enc)))
 			for b.Loop() {
-				if _, err := DecodeBlockAccessListSidecarForBlock(enc, 300_000_000, txCount); err != nil {
+				if _, err := DecodeBlockAccessListSidecarForBlock(enc, c.gasLimit, c.txCount); err != nil {
 					b.Fatal(err)
 				}
 			}
