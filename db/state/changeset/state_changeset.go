@@ -17,9 +17,11 @@
 package changeset
 
 import (
+	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
 	"math"
+	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -302,12 +304,35 @@ type threadSafeBuf struct {
 
 var writeDiffsetBuf = &threadSafeBuf{}
 
+var diffsetDumpPath = dbg.EnvString("CS_DUMP", "")
+
+// dumpDiffSet appends the serialized diffset's hash and per-domain sizes; callers hold writeDiffsetBuf.
+func dumpDiffSet(blockNumber uint64, blockHash common.Hash, diffSet *StateChangeSet, keys []byte) {
+	f, err := os.OpenFile(diffsetDumpPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		panic(err)
+	}
+	defer f.Close()
+	var sizes strings.Builder
+	if diffSet != nil {
+		for d := range diffSet.Diffs {
+			fmt.Fprintf(&sizes, " %d", diffSet.Diffs[d].Len())
+		}
+	}
+	if _, err := fmt.Fprintf(f, "%d %x %d %x%s\n", blockNumber, blockHash, len(keys), sha256.Sum256(keys), sizes.String()); err != nil {
+		panic(err)
+	}
+}
+
 func WriteDiffSet(tx kv.RwTx, blockNumber uint64, blockHash common.Hash, diffSet *StateChangeSet) error {
 	writeDiffsetBuf.Lock()
 	defer writeDiffsetBuf.Unlock()
 
 	writeDiffsetBuf.b = diffSet.serializeKeys(writeDiffsetBuf.b[:0], blockNumber)
 	keys := writeDiffsetBuf.b
+	if diffsetDumpPath != "" {
+		dumpDiffSet(blockNumber, blockHash, diffSet, keys)
+	}
 
 	c, err := tx.RwCursor(kv.ChangeSets3)
 	if err != nil {
