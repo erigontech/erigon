@@ -399,20 +399,20 @@ func (ac *AccountChanges) decodeRLP(s *rlp.Stream, budget *blockAccessListDecode
 	}
 	ac.StorageReads = reads
 
-	tmpBalances, err := decodeChangeList(s, budget, &arena.balances, &arena.balancePtrs, (*BalanceChange).DecodeRLP)
+	tmpBalances, err := decodeChangeList(s, budget, &arena.balances, &arena.balancePtrs, (*BalanceChange).decodeContent)
 	if err != nil {
 		return fmt.Errorf("read BalanceChanges: %w", err)
 	}
 	ac.BalanceChanges = tmpBalances
 
-	nonces, err := decodeChangeList(s, budget, &arena.nonces, &arena.noncePtrs, (*NonceChange).DecodeRLP)
+	nonces, err := decodeChangeList(s, budget, &arena.nonces, &arena.noncePtrs, (*NonceChange).decodeContent)
 	if err != nil {
 		return fmt.Errorf("read NonceChanges: %w", err)
 	}
 	ac.NonceChanges = nonces
 
-	codes, err := decodeChangeList(s, budget, &arena.codes, &arena.codePtrs, func(cc *CodeChange, s *rlp.Stream) error {
-		return cc.decodeRLP(s, arena.viewInput)
+	codes, err := decodeChangeList(s, budget, &arena.codes, &arena.codePtrs, func(cc *CodeChange, b []byte) error {
+		return cc.decodeContent(b, arena.viewInput)
 	})
 	if err != nil {
 		return fmt.Errorf("read CodeChanges: %w", err)
@@ -503,7 +503,7 @@ func (sc *SlotChanges) decodeRLP(s *rlp.Stream, budget *blockAccessListDecodeBud
 		return fmt.Errorf("read Slot: %w", err)
 	}
 	sc.Slot = accounts.InternKey(slot)
-	changes, err := decodeChangeList(s, budget, &arena.storage, &arena.storagePtrs, (*StorageChange).DecodeRLP)
+	changes, err := decodeChangeList(s, budget, &arena.storage, &arena.storagePtrs, (*StorageChange).decodeContent)
 	if err != nil {
 		return fmt.Errorf("read Changes: %w", err)
 	}
@@ -533,23 +533,23 @@ func (sc *StorageChange) EncodeRLP(w io.Writer) error {
 }
 
 func (sc *StorageChange) DecodeRLP(s *rlp.Stream) error {
-	if _, err := s.List(); err != nil {
+	b, err := s.ViewList()
+	if err != nil {
 		return err
 	}
-	idx, err := s.Uint64()
-	if err != nil {
-		return fmt.Errorf("read Index: %w", err)
+	return sc.decodeContent(b)
+}
+
+func (sc *StorageChange) decodeContent(b []byte) (err error) {
+	if sc.Index, b, err = splitBlockAccessIndex(b); err != nil {
+		return err
 	}
-	if idx > math.MaxUint32 {
-		return fmt.Errorf("read Index: value %d exceeds uint32", idx)
-	}
-	sc.Index = uint32(idx)
-	// ReadUint256 enforces canonical (minimal) integer encoding, matching the
+	// SplitUint256 enforces canonical (minimal) integer encoding, matching the
 	// encoder and rejecting non-canonical values (leading zero bytes).
-	if err := s.ReadUint256(&sc.Value); err != nil {
+	if b, err = rlp.SplitUint256(b, &sc.Value); err != nil {
 		return fmt.Errorf("read Value: %w", err)
 	}
-	return s.ListEnd()
+	return endOfChange(b)
 }
 
 func (bc *BalanceChange) EncodingSize() int {
@@ -573,23 +573,23 @@ func (bc *BalanceChange) EncodeRLP(w io.Writer) error {
 }
 
 func (bc *BalanceChange) DecodeRLP(s *rlp.Stream) error {
-	if _, err := s.List(); err != nil {
+	b, err := s.ViewList()
+	if err != nil {
 		return err
 	}
-	idx, err := s.Uint64()
-	if err != nil {
-		return fmt.Errorf("read Index: %w", err)
+	return bc.decodeContent(b)
+}
+
+func (bc *BalanceChange) decodeContent(b []byte) (err error) {
+	if bc.Index, b, err = splitBlockAccessIndex(b); err != nil {
+		return err
 	}
-	if idx > math.MaxUint32 {
-		return fmt.Errorf("read Index: value %d exceeds uint32", idx)
-	}
-	bc.Index = uint32(idx)
-	// ReadUint256 enforces canonical (minimal) integer encoding, matching the
+	// SplitUint256 enforces canonical (minimal) integer encoding, matching the
 	// encoder and rejecting non-canonical values (leading zero bytes).
-	if err := s.ReadUint256(&bc.Value); err != nil {
+	if b, err = rlp.SplitUint256(b, &bc.Value); err != nil {
 		return fmt.Errorf("read Value: %w", err)
 	}
-	return s.ListEnd()
+	return endOfChange(b)
 }
 
 func (nc *NonceChange) EncodingSize() int {
@@ -613,23 +613,21 @@ func (nc *NonceChange) EncodeRLP(w io.Writer) error {
 }
 
 func (nc *NonceChange) DecodeRLP(s *rlp.Stream) error {
-	if _, err := s.List(); err != nil {
+	b, err := s.ViewList()
+	if err != nil {
 		return err
 	}
-	idx, err := s.Uint64()
-	if err != nil {
-		return fmt.Errorf("read Index: %w", err)
+	return nc.decodeContent(b)
+}
+
+func (nc *NonceChange) decodeContent(b []byte) (err error) {
+	if nc.Index, b, err = splitBlockAccessIndex(b); err != nil {
+		return err
 	}
-	if idx > math.MaxUint32 {
-		return fmt.Errorf("read Index: value %d exceeds uint32", idx)
-	}
-	nc.Index = uint32(idx)
-	value, err := s.Uint64()
-	if err != nil {
+	if nc.Value, b, err = rlp.SplitUint64(b); err != nil {
 		return fmt.Errorf("read Value: %w", err)
 	}
-	nc.Value = value
-	return s.ListEnd()
+	return endOfChange(b)
 }
 
 func (cc *CodeChange) EncodingSize() int {
@@ -653,32 +651,45 @@ func (cc *CodeChange) EncodeRLP(w io.Writer) error {
 }
 
 func (cc *CodeChange) DecodeRLP(s *rlp.Stream) error {
-	return cc.decodeRLP(s, false)
-}
-
-// decodeRLP aliases the bytecode into the input when viewInput is set, so the input must outlive the change.
-func (cc *CodeChange) decodeRLP(s *rlp.Stream, viewInput bool) error {
-	if _, err := s.List(); err != nil {
+	b, err := s.ViewList()
+	if err != nil {
 		return err
 	}
-	idx, err := s.Uint64()
-	if err != nil {
-		return fmt.Errorf("read Index: %w", err)
+	return cc.decodeContent(b, false)
+}
+
+// decodeContent aliases the bytecode into b when viewInput is set, so b must outlive the change.
+func (cc *CodeChange) decodeContent(b []byte, viewInput bool) (err error) {
+	if cc.Index, b, err = splitBlockAccessIndex(b); err != nil {
+		return err
 	}
-	if idx > math.MaxUint32 {
-		return fmt.Errorf("read Index: value %d exceeds uint32", idx)
-	}
-	cc.Index = uint32(idx)
-	read := s.Bytes
-	if viewInput {
-		read = s.ViewBytes
-	}
-	data, err := read()
-	if err != nil {
+	if cc.Bytecode, b, err = rlp.SplitString(b); err != nil {
 		return fmt.Errorf("read Bytecode: %w", err)
 	}
-	cc.Bytecode = data
-	return s.ListEnd()
+	if !viewInput {
+		cc.Bytecode = bytes.Clone(cc.Bytecode)
+	}
+	return endOfChange(b)
+}
+
+func splitBlockAccessIndex(b []byte) (uint32, []byte, error) {
+	idx, rest, err := rlp.SplitUint64(b)
+	if err != nil {
+		return 0, b, fmt.Errorf("read Index: %w", err)
+	}
+	if idx > math.MaxUint32 {
+		return 0, b, fmt.Errorf("read Index: value %d exceeds uint32", idx)
+	}
+	return uint32(idx), rest, nil
+}
+
+var errTrailingChangeData = errors.New("rlp: trailing data in block access list change")
+
+func endOfChange(rest []byte) error {
+	if len(rest) > 0 {
+		return errTrailingChangeData
+	}
+	return nil
 }
 
 func dedupByIndex[T interface{ GetIndex() uint32 }](changes []T) []T {
@@ -1024,17 +1035,22 @@ func decodeSlotChangesList(s *rlp.Stream, budget *blockAccessListDecodeBudget, a
 func decodeChangeList[T any, P interface {
 	*T
 	GetIndex() uint32
-}](s *rlp.Stream, budget *blockAccessListDecodeBudget, values *[]T, ptrs *[]*T, decode func(P, *rlp.Stream) error) ([]*T, error) {
-	if _, err := s.List(); err != nil {
+}](s *rlp.Stream, budget *blockAccessListDecodeBudget, values *[]T, ptrs *[]*T, decode func(P, []byte) error) ([]*T, error) {
+	list, err := s.ViewList()
+	if err != nil {
 		return nil, err
 	}
 	start := len(*ptrs)
 	var lastIndex uint32
-	for s.MoreDataInList() {
+	for len(list) > 0 {
+		var item []byte
+		if item, list, err = rlp.SplitList(list); err != nil {
+			return nil, err
+		}
 		var zero T
 		*values = append(*values, zero)
 		change := &(*values)[len(*values)-1]
-		if err := decode(change, s); err != nil {
+		if err := decode(change, item); err != nil {
 			return nil, err
 		}
 		if budget != nil {
@@ -1048,9 +1064,6 @@ func decodeChangeList[T any, P interface {
 			lastIndex = index
 		}
 		*ptrs = append(*ptrs, change)
-	}
-	if err := s.ListEnd(); err != nil {
-		return nil, err
 	}
 	return clipArena(*ptrs, start), nil
 }
