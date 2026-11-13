@@ -2626,7 +2626,10 @@ func TestNewVersionMapSeedWorkerPanicFallsBackToSerial(t *testing.T) {
 	}
 	defer func() { balSeedJobHook = nil }()
 
-	vm := NewVersionMap(bal)
+	var vm *VersionMap
+	for attempt := 0; attempt < 1000 && !panicked.Load(); attempt++ { // the caller may take every chunk before the worker starts
+		vm = NewVersionMap(bal)
+	}
 	require.True(t, panicked.Load(), "no seed chunk ran on a worker")
 	for i := range bal {
 		addr := accounts.InternAddress(bal[i].Address)
