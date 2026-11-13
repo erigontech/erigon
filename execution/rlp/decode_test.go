@@ -1456,3 +1456,54 @@ func TestSliceHintOnCorruptInput(t *testing.T) {
 		}
 	}
 }
+
+func TestStreamViewList(t *testing.T) {
+	input := unhex("C4C2010203")
+	for _, s := range []*Stream{NewBytesStream(input), NewStream(bytes.NewReader(input), 0)} {
+		if _, err := s.List(); err != nil {
+			t.Fatal(err)
+		}
+		b, err := s.ViewList()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := unhex("0102"); !bytes.Equal(b, want) {
+			t.Fatalf("content mismatch: got %x, want %x", b, want)
+		}
+		if cap(b) != len(b) {
+			t.Fatalf("view cap %d must be clamped to len %d so appends cannot scribble the input", cap(b), len(b))
+		}
+		if aliases := &b[0] == &input[2]; aliases != (s.sliceRdr != nil) {
+			t.Fatalf("aliases the input: %v, want it only for a bytes-backed stream", aliases)
+		}
+		if v, err := s.Uint64(); err != nil || v != 3 {
+			t.Fatalf("value after the list: got %d, %v, want 3", v, err)
+		}
+		if err := s.ListEnd(); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestStreamViewListErrors(t *testing.T) {
+	for _, test := range []struct {
+		input  string
+		inList bool
+		err    error
+	}{
+		{"8101", false, ErrExpectedList},
+		{"C2C20102", true, ErrElemTooLarge},
+		{"C3", false, ErrValueTooLarge},
+	} {
+		s := NewBytesStream(unhex(test.input))
+		if test.inList {
+			if _, err := s.List(); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if _, err := s.ViewList(); !errors.Is(err, test.err) {
+			t.Errorf("input %s: got %v, want %v", test.input, err, test.err)
+		}
+		PutStream(s)
+	}
+}
