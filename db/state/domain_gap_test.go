@@ -259,3 +259,46 @@ func TestCheckFilesDBGapRefusesFilesPastTheSharedCeiling(t *testing.T) {
 	require.EqualValues(t, 10, at.d[kv.AccountsDomain].files.EndTxNum())
 	require.ErrorContains(t, at.CheckFilesDBGap(tx), "gap between snapshot files and DB")
 }
+
+func TestCheckFilesDBGapRefusesPrunedRangeInCeilingHiddenFile(t *testing.T) {
+	t.Parallel()
+	db, agg := testDbAndAggregatorv3(t, 10)
+	dirs := agg.Dirs()
+	ranges := []testFileRange{{0, 2}, {2, 4}}
+	generateAccountsFile(t, dirs, ranges)
+	generateStorageFile(t, dirs, ranges)
+	generatePlainCommitmentFile(t, dirs, ranges)
+	generateStandaloneIIFile(t, kv.LogAddrIdx, dirs, []testFileRange{{0, 3}})
+	require.NoError(t, agg.OpenFolder(db))
+
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	require.NoError(t, SavePruneValProgress(tx, agg.d[kv.AccountsDomain].ValuesTable, &prune.Stat{TxTo: 30}))
+
+	at := agg.BeginFilesRo()
+	defer at.Close()
+	require.EqualValues(t, 20, at.d[kv.AccountsDomain].files.EndTxNum())
+	require.ErrorContains(t, at.CheckFilesDBGap(tx), "gap between snapshot files and DB")
+}
+
+func TestCheckFilesDBGapRefusesPrunedRangeInDependencyHiddenFile(t *testing.T) {
+	t.Parallel()
+	db, agg := testDbAndAggregatorv3(t, 10)
+	dirs := agg.Dirs()
+	split := []testFileRange{{0, 4}, {4, 6}, {6, 8}, {8, 12}}
+	generateAccountsFile(t, dirs, split)
+	generateStorageFile(t, dirs, split)
+	generatePlainCommitmentFile(t, dirs, []testFileRange{{0, 4}, {4, 8}, {8, 12}})
+	require.NoError(t, agg.OpenFolder(db))
+
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	require.NoError(t, SavePruneValProgress(tx, agg.d[kv.AccountsDomain].ValuesTable, &prune.Stat{TxTo: 120}))
+
+	at := agg.BeginFilesRo()
+	defer at.Close()
+	require.EqualValues(t, 40, at.d[kv.AccountsDomain].files.EndTxNum())
+	require.ErrorContains(t, at.CheckFilesDBGap(tx), "gap between snapshot files and DB")
+}

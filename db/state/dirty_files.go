@@ -65,10 +65,11 @@ func newDirtyFiles() *DirtyFiles {
 	return &DirtyFiles{*btree2.NewBTreeGOptions(filesItemLess, btree2.Options{Degree: 128, NoLocks: false})}
 }
 
-// coversWithoutHole reports whether opened data files cover [from,to), with or without their accessors.
-func (df *DirtyFiles) coversWithoutHole(from, to uint64) bool {
+// coversWithoutHole reports whether data files that become visible once their accessors exist cover [from,to).
+func (df *DirtyFiles) coversWithoutHole(from, to, toTxNum uint64, checker func(startTxNum, endTxNum uint64) bool) bool {
 	df.Scan(func(f *FilesItem) bool {
-		if f.decompressor != nil && f.startTxNum <= from && from < f.endTxNum {
+		eligible := f.decompressor != nil && !f.canDelete.Load() && f.endTxNum <= toTxNum && (checker == nil || checker(f.startTxNum, f.endTxNum))
+		if eligible && f.startTxNum <= from && from < f.endTxNum {
 			from = f.endTxNum
 		}
 		return true
