@@ -1270,13 +1270,16 @@ func TestComputeAhead_WindowFailureAtEdgePublishedOnce(t *testing.T) {
 	av := addr.Value()
 	putCorruptAccount(t, doms, tx, av[:])
 	doms.SavePastChangesetAccumulator(blockHash, 1, cs)
+	previous := &commitment.PendingCommitmentUpdate{BlockNum: 0}
+	doms.GetCommitmentContext().SetPendingUpdate(previous)
 	cc.handleMessage(ctx, recordTx(newRawViewVM(15), 1, blockHash, 15, &chain.Rules{IsAmsterdam: true}, nonceBalanceWrites(addr, 1, value)))
 	require.True(t, cc.pending[1].failed)
 	require.Len(t, out, 1)
 	require.Error(t, (<-out).err)
 
 	cc.handleMessage(ctx, &blockResult{BlockNum: 1, BlockHash: blockHash, StateRoot: common.Hash{0xbe, 0xef}, lastTxNum: 17})
-	require.Nil(t, doms.GetCommitmentContext().PeekPendingUpdate())
+	require.Empty(t, out)
+	require.Same(t, previous, doms.GetCommitmentContext().PeekPendingUpdate())
 }
 
 func TestHandleMessage_RejectedComputedAheadWindowBlock(t *testing.T) {

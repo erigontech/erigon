@@ -184,8 +184,8 @@ type commitmentCalculator struct {
 
 	// lastComputedAheadBlock is the highest block computed ahead so far.
 	// Compute-ahead reads the commitment domain for its baseline, so it may only
-	// run when the preceding block advanced the domain (was itself computed ahead,
-	// or is the batch's first block) — otherwise it would read a stale trie
+	// run when the preceding block's commitment is already in the domain (or the
+	// block is the batch's first) — otherwise it would read a stale trie
 	// across a block whose BAL sidecar was missing.
 	lastComputedAheadBlock uint64
 	hasComputedAhead       bool
@@ -450,7 +450,9 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 
 	case *blockResult:
 		if pb, ok := cc.pending[r.BlockNum]; ok && pb.failed {
-			cc.doms.GetCommitmentContext().ResetPendingUpdates()
+			if upd := cc.doms.GetCommitmentContext().PeekPendingUpdate(); upd != nil && upd.BlockNum == r.BlockNum {
+				cc.doms.GetCommitmentContext().ResetPendingUpdates()
+			}
 			delete(cc.pending, r.BlockNum)
 			delete(cc.computedAhead, r.BlockNum)
 			delete(cc.balRoots, r.BlockNum)
@@ -481,9 +483,9 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		switch {
 		case cc.computedAhead[r.BlockNum]:
 			// Already computed ahead from its BAL. In shadow mode, recompute
-			// incrementally and cross-check; otherwise the verified root was already
-			// published. Either way clear the per-block dirty flags so a later
-			// transition compute doesn't re-flush them.
+			// incrementally and cross-check; otherwise the root is verified, and was
+			// published unless the block owns a changeset. Either way clear the
+			// per-block dirty flags so a later transition compute doesn't re-flush them.
 			if dbg.BALShadowCompute {
 				cc.shadowCrossCheck(ctx, r)
 			} else {
