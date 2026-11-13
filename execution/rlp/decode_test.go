@@ -215,6 +215,88 @@ testfor:
 	}
 }
 
+// TestBytesStreamMatchesReader pins the slice-backed fast paths to the regular
+// reader path: every call must return the same value, error and Remaining.
+func TestBytesStreamMatchesReader(t *testing.T) {
+	ops := map[string]func(*Stream) (any, error){
+		"Kind": func(s *Stream) (any, error) {
+			k, size, err := s.Kind()
+			return [2]any{k, size}, err
+		},
+		"List":    func(s *Stream) (any, error) { return s.List() },
+		"ListEnd": func(s *Stream) (any, error) { return nil, s.ListEnd() },
+		"More":    func(s *Stream) (any, error) { return s.MoreDataInList(), nil },
+		"Uint64":  func(s *Stream) (any, error) { return s.Uint64() },
+		"Uint8":   func(s *Stream) (any, error) { return s.Uint8() },
+		"Bytes":   func(s *Stream) (any, error) { return s.Bytes() },
+		"Addr":    func(s *Stream) (any, error) { return s.Addr() },
+		"Hash":    func(s *Stream) (any, error) { return s.ReadHash() },
+		"U256": func(s *Stream) (any, error) {
+			var v uint256.Int
+			err := s.ReadUint256(&v)
+			return v, err
+		},
+	}
+	h := func(n int, b byte) string { return strings.Repeat(fmt.Sprintf("%02X", b), n) }
+	tests := []struct {
+		input string
+		calls []string
+	}{
+		{"C0", []string{"List", "More", "Uint64", "ListEnd", "List"}},
+		{"C0", []string{"Kind", "List", "ListEnd"}},
+		{"C3C2010201", []string{"List", "List", "Uint64", "Uint64", "ListEnd", "Uint64", "ListEnd", "Uint64"}},
+		{"C8C9010101010101010101", []string{"List", "List"}},
+		{"C801", []string{"List", "Uint64", "Uint64"}},
+		{"C1C0", []string{"List", "List", "ListEnd", "ListEnd"}},
+		{"C201C0", []string{"List", "Uint64", "List"}},
+		{"C3800102", []string{"List", "Uint64", "Uint8", "Uint64", "More", "ListEnd"}},
+		{"00", []string{"Uint64"}},
+		{"7F", []string{"Uint64"}},
+		{"8100", []string{"Uint64"}},
+		{"8180", []string{"Uint64", "Uint64"}},
+		{"820001", []string{"Uint64"}},
+		{"820100", []string{"Uint8"}},
+		{"88FFFFFFFFFFFFFFFF", []string{"Uint64"}},
+		{"89000000000000000001", []string{"Uint64"}},
+		{"C2820102", []string{"List", "Uint64"}},
+		{"94" + h(20, 0xAB), []string{"Addr", "Addr"}},
+		{"94" + h(19, 0xAB), []string{"Addr"}},
+		{"C5" + "94" + h(20, 0xAB), []string{"List", "Addr"}},
+		{"D5" + "94" + h(20, 0xAB), []string{"List", "Addr", "ListEnd"}},
+		{"93" + h(19, 0xAB), []string{"Addr"}},
+		{"A0" + h(32, 0xCD), []string{"Hash"}},
+		{"A0" + h(31, 0xCD), []string{"Hash"}},
+		{"9F" + h(31, 0xCD), []string{"Hash"}},
+		{"00", []string{"U256"}},
+		{"7F", []string{"U256"}},
+		{"80", []string{"U256"}},
+		{"8100", []string{"U256"}},
+		{"8180", []string{"U256"}},
+		{"A0" + h(32, 0xFF), []string{"U256"}},
+		{"A0" + "00" + h(31, 0xFF), []string{"U256"}},
+		{"A1" + h(33, 0xFF), []string{"U256"}},
+		{"C3" + "A0" + h(32, 0xFF), []string{"List", "U256"}},
+		{"F800", []string{"List"}},
+		{"F838" + h(56, 0x01), []string{"List", "Uint64", "More"}},
+		{"C483010203", []string{"List", "Bytes", "ListEnd"}},
+	}
+	for _, tt := range tests {
+		input := unhex(tt.input)
+		got := NewBytesStream(input)
+		want := NewStream(newPlainReader(input), uint64(len(input)))
+		for j, call := range tt.calls {
+			gv, gerr := ops[call](got)
+			wv, werr := ops[call](want)
+			if !reflect.DeepEqual(gv, wv) || fmt.Sprint(gerr) != fmt.Sprint(werr) || got.Remaining() != want.Remaining() {
+				t.Errorf("%s: call %d (%s): got (%v, %v, rem %d), want (%v, %v, rem %d)",
+					tt.input, j, call, gv, gerr, got.Remaining(), wv, werr, want.Remaining())
+				break
+			}
+		}
+		PutStream(got)
+	}
+}
+
 func TestStreamList(t *testing.T) {
 	s := NewStream(bytes.NewReader(unhex("C80102030405060708")), 0)
 

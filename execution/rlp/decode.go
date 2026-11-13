@@ -889,6 +889,23 @@ func (s *Stream) Uint8() (uint8, error) {
 }
 
 func (s *Stream) uint(maxbits int) (uint64, error) {
+	if b, ok := s.nextHeader(); ok {
+		if b > 0 && b < SingleByteThreshold && s.fits(1) {
+			s.skip(1)
+			return uint64(b), nil
+		}
+		if n := int(b) - EmptyStringCode; n >= 0 && n <= maxbits/8 && s.fits(1+n) {
+			v := s.sliceRdr[s.off+1 : s.off+1+n]
+			if n == 0 || (n == 1 && v[0] >= SingleByteThreshold) || (n > 1 && v[0] != 0) {
+				s.skip(1 + n)
+				var x uint64
+				for _, c := range v {
+					x = x<<8 | uint64(c)
+				}
+				return x, nil
+			}
+		}
+	}
 	kind, size, err := s.Kind()
 	if err != nil {
 		return 0, err
@@ -943,6 +960,15 @@ func (s *Stream) Bool() (bool, error) {
 // list, the returned error will be ErrExpectedList. When the list's
 // end has been reached, any Stream operation will return EOL.
 func (s *Stream) List() (size uint64, err error) {
+	if b, ok := s.nextHeader(); ok && b >= EmptyListCode && b <= LongListCode {
+		size = uint64(b - EmptyListCode)
+		if s.fits(1 + int(size)) {
+			s.skip(1)
+			s.stack = append(s.stack, s.listRem-size)
+			s.listRem = size
+			return size, nil
+		}
+	}
 	kind, size, err := s.Kind()
 	if err != nil {
 		return 0, err
@@ -988,6 +1014,11 @@ func (s *Stream) MoreDataInList() bool {
 // through the stream's scratch buffer, so unlike ReadBytes it never forces
 // the destination to escape to the heap.
 func (s *Stream) Addr() (a common.Address, err error) {
+	if b, ok := s.nextHeader(); ok && b == EmptyStringCode+byte(len(a)) && s.fits(1+len(a)) {
+		copy(a[:], s.sliceRdr[s.off+1:])
+		s.skip(1 + len(a))
+		return a, nil
+	}
 	kind, size, err := s.Kind()
 	switch {
 	case err != nil:
@@ -1010,6 +1041,11 @@ func (s *Stream) Addr() (a common.Address, err error) {
 // reads through the stream's scratch buffer and never forces the destination
 // to escape to the heap.
 func (s *Stream) ReadHash() (h common.Hash, err error) {
+	if b, ok := s.nextHeader(); ok && b == EmptyStringCode+byte(len(h)) && s.fits(1+len(h)) {
+		copy(h[:], s.sliceRdr[s.off+1:])
+		s.skip(1 + len(h))
+		return h, nil
+	}
 	kind, size, err := s.Kind()
 	switch {
 	case err != nil:
@@ -1030,6 +1066,21 @@ func (s *Stream) ReadHash() (h common.Hash, err error) {
 
 // ReadUint256 decodes the next value as a uint256.
 func (s *Stream) ReadUint256(dst *uint256.Int) error {
+	if b, ok := s.nextHeader(); ok {
+		if b > 0 && b < SingleByteThreshold && s.fits(1) {
+			s.skip(1)
+			dst.SetUint64(uint64(b))
+			return nil
+		}
+		if n := int(b) - EmptyStringCode; n >= 0 && n <= 32 && s.fits(1+n) {
+			v := s.sliceRdr[s.off+1 : s.off+1+n]
+			if n == 0 || (n == 1 && v[0] >= SingleByteThreshold) || (n > 1 && v[0] != 0) {
+				s.skip(1 + n)
+				dst.SetBytes(v)
+				return nil
+			}
+		}
+	}
 	var buffer []byte
 	kind, size, err := s.Kind()
 	switch {
@@ -1372,6 +1423,35 @@ func (s *Stream) willRead(n uint64) error {
 		s.remaining -= n
 	}
 	return nil
+}
+
+// nextHeader returns the next header byte of a slice-backed stream whose Kind is
+// not cached. Fast paths built on it accept only well-formed values that fit, and
+// leave everything else to the regular path so that errors stay the same.
+func (s *Stream) nextHeader() (byte, bool) {
+	if s.kind < 0 && s.off < len(s.sliceRdr) {
+		return s.sliceRdr[s.off], true
+	}
+	return 0, false
+}
+
+// fits reports whether the next n input bytes are present and within the list
+// and input limits.
+func (s *Stream) fits(n int) bool {
+	return len(s.sliceRdr)-s.off >= n &&
+		(len(s.stack) == 0 || uint64(n) <= s.listRem) &&
+		(!s.limited || uint64(n) <= s.remaining)
+}
+
+// skip consumes n bytes that fits accepted.
+func (s *Stream) skip(n int) {
+	s.off += n
+	if len(s.stack) > 0 {
+		s.listRem -= uint64(n)
+	}
+	if s.limited {
+		s.remaining -= uint64(n)
+	}
 }
 
 // listLimit returns the amount of data remaining in the innermost list.
