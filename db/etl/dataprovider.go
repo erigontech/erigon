@@ -139,9 +139,10 @@ func (p *fileDataProvider) Next() ([]byte, []byte, error) {
 		_ = discardSpillRange(p.file, p.mmapData, p.discarded, end)
 		p.discarded = end
 	}
-	if p.prefetched < len(p.mmapData) && p.mmapReader.pos+spillPrefetch/2 >= p.prefetched {
-		end := min(p.prefetched+spillPrefetch, len(p.mmapData))
-		for off := p.prefetched; off < end; off += spillPrefetchCall {
+	if pos := p.mmapReader.pos; pos < len(p.mmapData) && p.prefetched < len(p.mmapData) && pos+spillPrefetch/2 >= p.prefetched {
+		start := max(p.prefetched, pos/os.Getpagesize()*os.Getpagesize())
+		end := min(start+spillPrefetch, len(p.mmapData))
+		for off := start; off < end; off += spillPrefetchCall {
 			_ = mmap.MadviseWillNeed(p.mmapData[off:min(off+spillPrefetchCall, end)])
 		}
 		p.prefetched = end
