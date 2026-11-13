@@ -657,7 +657,8 @@ type Stream struct {
 	remaining uint64   // number of bytes remaining to be read from r
 	size      uint64   // size of value ahead
 	kinderr   error    // error from last readKind
-	stack     []uint64 // list sizes
+	stack     []uint64 // enclosing list sizes; len(stack) is the list depth
+	listRem   uint64   // remaining size of the innermost list, valid when len(stack) > 0
 	uintbuf   [32]byte // auxiliary buffer for integer decoding
 	kind      Kind     // kind of value ahead
 	byteval   byte     // value of single byte in type tag
@@ -950,13 +951,11 @@ func (s *Stream) List() (size uint64, err error) {
 		return 0, ErrExpectedList
 	}
 
-	// Remove size of inner list from outer list before pushing the new size
-	// onto the stack. This ensures that the remaining outer list size will
-	// be correct after the matching call to ListEnd.
-	if inList, limit := s.listLimit(); inList {
-		s.stack[len(s.stack)-1] = limit - size
-	}
-	s.stack = append(s.stack, size)
+	// Remove size of inner list from outer list before pushing it onto the
+	// stack. This ensures that the remaining outer list size will be correct
+	// after the matching call to ListEnd.
+	s.stack = append(s.stack, s.listRem-size)
+	s.listRem = size
 	s.kind = -1
 	s.size = 0
 	return size, nil
@@ -971,7 +970,8 @@ func (s *Stream) ListEnd() error {
 	} else if listLimit > 0 {
 		return errNotAtEOL
 	}
-	s.stack = s.stack[:len(s.stack)-1] // pop
+	s.listRem = s.stack[len(s.stack)-1]
+	s.stack = s.stack[:len(s.stack)-1]
 	s.kind = -1
 	s.size = 0
 	return nil
@@ -1177,6 +1177,7 @@ func (s *Stream) Reset(r io.Reader, inputLimit uint64) {
 	s.r = bufr
 	// Reset the decoding context.
 	s.stack = s.stack[:0]
+	s.listRem = 0
 	s.size = 0
 	s.kind = -1
 	s.kinderr = nil
@@ -1362,7 +1363,7 @@ func (s *Stream) willRead(n uint64) error {
 		if n > limit {
 			return ErrElemTooLarge
 		}
-		s.stack[len(s.stack)-1] = limit - n
+		s.listRem = limit - n
 	}
 	if s.limited {
 		if n > s.remaining {
@@ -1378,7 +1379,7 @@ func (s *Stream) listLimit() (inList bool, limit uint64) {
 	if len(s.stack) == 0 {
 		return false, 0
 	}
-	return true, s.stack[len(s.stack)-1]
+	return true, s.listRem
 }
 
 type sliceReader []byte
