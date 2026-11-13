@@ -16,21 +16,24 @@ type blockValidator struct {
 }
 
 func newBlockValidator(engine rules.Engine, blockGasUsed, blobGasUsed uint64, checkReceipts, checkBloom bool, receipts types.Receipts,
-	header *types.Header, txns types.Transactions,
+	lanes any, laneTxs []rules.LaneTx, header *types.Header, txns types.Transactions,
 	chainConfig *chain.Config, logger log.Logger,
 ) *blockValidator {
 	bv := &blockValidator{done: make(chan error, 1)}
 	go func() {
-		bv.done <- validateBlockPostExecution(engine, chainConfig, header, blockGasUsed, blobGasUsed, checkReceipts, checkBloom, receipts, txns, logger)
+		bv.done <- validateBlockPostExecution(engine, chainConfig, header, blockGasUsed, blobGasUsed, checkReceipts, checkBloom, receipts, lanes, laneTxs, txns, logger)
 	}()
 	return bv
 }
 
 func validateBlockPostExecution(engine rules.Engine, chainConfig *chain.Config, header *types.Header,
 	gasUsed, blobGasUsed uint64, checkReceipts, checkBloom bool,
-	receipts types.Receipts, txns types.Transactions, logger log.Logger,
+	receipts types.Receipts, lanes any, laneTxs []rules.LaneTx, txns types.Transactions, logger log.Logger,
 ) error {
 	err := engine.ValidateBlockPostExecution(chainConfig, header, gasUsed, blobGasUsed, checkReceipts, checkBloom, receipts, txns, logger)
+	if laneEngine, ok := engine.(rules.LaneEngine); ok && err == nil {
+		err = laneEngine.VerifyLanes(header, lanes, txns, laneTxs)
+	}
 	switch {
 	case err != nil && dbg.LogHashMismatchReason():
 		ethutils.LogReceipts(log.LvlWarn, "post-execution validation failed", receipts, txns, chainConfig, header, logger)

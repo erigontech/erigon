@@ -18,6 +18,7 @@ package chain_test
 
 import (
 	"maps"
+	"math"
 	"math/big"
 	"slices"
 	"strconv"
@@ -171,6 +172,23 @@ func TestChapelIsPasteur(t *testing.T) {
 	assert.False(t, cfg.IsPasteur(*cfg.LondonBlock-1, *cfg.PasteurTime))
 }
 
+func TestChapelIsJenner(t *testing.T) {
+	t.Parallel()
+
+	spec, err := chainspec.ChainSpecByName(networkname.Chapel)
+	require.NoError(t, err)
+	cfg := spec.Config
+
+	require.NotNil(t, cfg.JennerTime)
+	assert.Equal(t, uint64(1793241000), *cfg.JennerTime)
+	assert.False(t, cfg.IsJenner(139533775, 1793240999))
+	assert.True(t, cfg.IsJenner(139533776, 1793241000))
+	assert.False(t, cfg.IsJenner(*cfg.LondonBlock-1, *cfg.JennerTime))
+
+	assert.False(t, (&evmtypes.BlockContext{BlockNumber: 139533775, Time: 1793240999}).Rules(cfg).IsJenner)
+	assert.True(t, (&evmtypes.BlockContext{BlockNumber: 139533776, Time: 1793241000}).Rules(cfg).IsJenner)
+}
+
 // TestChapelPasteurPrecompiles pins the Pasteur precompile set on the first Pasteur
 // block: the legacy Tendermint precompiles are deprecated and the CometBFT light-block
 // precompile is priced per input byte.
@@ -211,6 +229,37 @@ func TestChapelPasteurPrecompiles(t *testing.T) {
 			assert.Equal(t, tc.cometBFTGas, set[cometBFT].RequiredGas(input))
 		})
 	}
+}
+
+// TestChapelJennerPrecompiles pins the Jenner precompile set on the first Jenner
+// block: the Pasteur set with double-sign evidence priced per input byte and the
+// millisecond-timestamp precompile at 0x70.
+func TestChapelJennerPrecompiles(t *testing.T) {
+	t.Parallel()
+
+	spec, err := chainspec.ChainSpecByName(networkname.Chapel)
+	require.NoError(t, err)
+
+	addr := func(b ...byte) accounts.Address { return accounts.InternAddress(common.BytesToAddress(b)) }
+	doubleSign, milliTimestamp := addr(0x68), addr(0x70)
+	input := make([]byte, 1000)
+
+	pasteur := evmtypes.BlockContext{BlockNumber: 139533775, Time: 1793240999}
+	set := vm.Precompiles(pasteur.Rules(spec.Config))
+	assert.Equal(t, "VerifyDoubleSignEvidence", set[doubleSign].Name())
+	assert.Equal(t, params.DoubleSignEvidenceVerifyGas, set[doubleSign].RequiredGas(input))
+	assert.NotContains(t, set, milliTimestamp)
+
+	jenner := evmtypes.BlockContext{BlockNumber: 139533776, Time: 1793241000}
+	rules := jenner.Rules(spec.Config)
+	set = vm.Precompiles(rules)
+	assert.ElementsMatch(t, slices.Collect(maps.Keys(set)), vm.ActivePrecompiles(rules))
+	assert.ElementsMatch(t, append(slices.Collect(maps.Keys(vm.PrecompiledContractsPasteurForBSC)), milliTimestamp), vm.ActivePrecompiles(rules))
+
+	assert.Equal(t, "VerifyDoubleSignEvidenceJenner", set[doubleSign].Name())
+	assert.Equal(t, params.DoubleSignEvidenceVerifyGas+16*1000, set[doubleSign].RequiredGas(input))
+	assert.Equal(t, "MilliTimestamp", set[milliTimestamp].Name())
+	assert.Equal(t, uint64(20), set[milliTimestamp].RequiredGas(input))
 }
 
 func TestChapelSpec(t *testing.T) {
@@ -389,6 +438,17 @@ func TestBSCIsPasteur(t *testing.T) {
 	assert.False(t, cfg.IsPasteur(*cfg.LondonBlock-1, *cfg.PasteurTime))
 }
 
+func TestBSCHasNoJenner(t *testing.T) {
+	t.Parallel()
+
+	spec, err := chainspec.ChainSpecByName(networkname.BSC)
+	require.NoError(t, err)
+	cfg := spec.Config
+
+	assert.Nil(t, cfg.JennerTime)
+	assert.False(t, cfg.IsJenner(math.MaxUint64, math.MaxUint64))
+}
+
 func TestBSCPasteurPrecompiles(t *testing.T) {
 	t.Parallel()
 
@@ -451,6 +511,9 @@ func TestParliaUpgradeSchedule(t *testing.T) {
 					want[strconv.FormatUint(*v, 10)] = struct{}{}
 				}
 			}
+			if cfg.JennerTime != nil {
+				want[strconv.FormatUint(*cfg.JennerTime, 10)] = struct{}{}
+			}
 			got := map[string]struct{}{}
 			for k := range cfg.Parlia.BlockAlloc {
 				got[k] = struct{}{}
@@ -458,4 +521,35 @@ func TestParliaUpgradeSchedule(t *testing.T) {
 			assert.Equal(t, want, got)
 		})
 	}
+}
+
+func TestBSCSpecsForkOrder(t *testing.T) {
+	t.Parallel()
+
+	for _, network := range []string{networkname.BSC, networkname.Chapel} {
+		spec, err := chainspec.ChainSpecByName(network)
+		require.NoError(t, err)
+		require.NoError(t, spec.Config.CheckConfigForkOrder(), network)
+	}
+}
+
+func TestChapelTimestampForkChangeIsIncompatible(t *testing.T) {
+	t.Parallel()
+
+	spec, err := chainspec.ChainSpecByName(networkname.Chapel)
+	require.NoError(t, err)
+	stored := spec.Config
+	head, headTime := uint64(139533775), uint64(1793240999)
+
+	require.Nil(t, stored.CheckCompatible(stored, head, headTime))
+
+	movedPasteur := *stored
+	movedPasteur.PasteurTime = common.NewUint64(*stored.PasteurTime + 1)
+	compatErr := stored.CheckCompatible(&movedPasteur, head, headTime)
+	require.NotNil(t, compatErr)
+	assert.Equal(t, *stored.PasteurTime-1, compatErr.RewindToTime)
+
+	laterJenner := *stored
+	laterJenner.JennerTime = common.NewUint64(*stored.JennerTime + 1)
+	require.Nil(t, stored.CheckCompatible(&laterJenner, head, headTime))
 }

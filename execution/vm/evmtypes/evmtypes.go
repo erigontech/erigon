@@ -45,13 +45,15 @@ type BlockContext struct {
 	Coinbase    accounts.Address // Provides information for COINBASE
 	GasLimit    uint64           // Provides information for GASLIMIT
 	MaxGasLimit bool             // Use GasLimit override for 2^256-1 (to be compatible with OpenEthereum's trace_call)
-	BlockNumber uint64           // Provides information for NUMBER
-	Time        uint64           // Provides information for TIME
-	Difficulty  uint256.Int      // Provides information for DIFFICULTY
-	BaseFee     uint256.Int      // Provides information for BASEFEE
-	PrevRanDao  *common.Hash     // Provides information for PREVRANDAO
-	BlobBaseFee uint256.Int      // Provides information for BLOBBASEFEE
-	SlotNumber  uint64           // Provides information for SLOTNUM
+	// Milliseconds is the sub-second part of the block time on chains that carry one (BSC, below 1000).
+	Milliseconds uint16
+	BlockNumber  uint64       // Provides information for NUMBER
+	Time         uint64       // Provides information for TIME
+	Difficulty   uint256.Int  // Provides information for DIFFICULTY
+	BaseFee      uint256.Int  // Provides information for BASEFEE
+	PrevRanDao   *common.Hash // Provides information for PREVRANDAO
+	BlobBaseFee  uint256.Int  // Provides information for BLOBBASEFEE
+	SlotNumber   uint64       // Provides information for SLOTNUM
 
 	// L2Version is populated by the chain's engine/block-context construction
 	// for L2 chains; zero otherwise.

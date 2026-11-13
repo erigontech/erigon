@@ -26,6 +26,7 @@ import (
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/bsc/parlia/seal"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/execution/chain"
@@ -83,6 +84,11 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (comm
 		slotNumber = *header.SlotNumber
 	}
 
+	var milliseconds uint16
+	if config.Parlia != nil {
+		milliseconds = uint16(seal.Milliseconds(header))
+	}
+
 	blockContext := evmtypes.BlockContext{
 		CanTransfer:      CanTransfer,
 		Transfer:         transferFunc,
@@ -97,6 +103,7 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (comm
 		PrevRanDao:       prevRandDao,
 		BlobBaseFee:      blobBaseFee,
 		SlotNumber:       slotNumber,
+		Milliseconds:     milliseconds,
 	}
 	return blockContext
 }

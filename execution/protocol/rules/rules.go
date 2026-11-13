@@ -99,6 +99,24 @@ type AuthorityBlocker interface {
 	BlocksAuthority(authority accounts.Address) bool
 }
 
+// LaneEngine is implemented by engines (Parlia) whose blocks reserve gas for a lane of
+// transactions. For a block with lanes, the executor calls LoadLanes on the parent post-state
+// before Initialize and InspectTx on the state each non-system transaction starts from, and
+// passes the results to VerifyLanes with the post-execution checks of the fully executed
+// block. lanes is nil when the block start was not executed in this run.
+type LaneEngine interface {
+	HasLanes(header *types.Header) bool
+	LoadLanes(chain ChainHeaderReader, header *types.Header, ibs *state.IntraBlockState) (lanes any, err error)
+	InspectTx(tx types.Transaction, ibs *state.IntraBlockState) (info any, err error)
+	VerifyLanes(header *types.Header, lanes any, txs types.Transactions, laneTxs []LaneTx) error
+}
+
+// LaneTx is an executed transaction's block gas and its InspectTx result.
+type LaneTx struct {
+	GasUsed uint64
+	Info    any
+}
+
 // RewardKind - The kind of block reward.
 // Depending on the rules engine the allocated block reward might have
 // different semantics which could lead e.g. to different reward values.

@@ -113,6 +113,10 @@ type TxResult struct {
 	Receipt *types.Receipt
 	Logs    []*types.Log
 
+	// Lanes and LaneTxInfo are recorded for a rules.LaneEngine.
+	Lanes      any
+	LaneTxInfo any
+
 	TraceFroms map[accounts.Address]struct{}
 	TraceTos   map[accounts.Address]struct{}
 
@@ -545,6 +549,11 @@ func (t *TxTask) Execute(evm *vm.EVM,
 			ret, err := protocol.SysCallContractWithEVM(evm, contract, data, chainConfig, ibs, header, engine, constCall /* constCall */, evm.Config())
 			return ret, err
 		}
+		if lanes, ok := laneEngine(engine, header); ok {
+			if result.Lanes, result.Err = lanes.LoadLanes(chainReader, header, ibs); result.Err != nil {
+				break
+			}
+		}
 		result.Err = engine.Initialize(chainConfig, chainReader, header, ibs, syscall, t.Logger, nil)
 		if result.Err == nil && !ibs.IsVersioned() {
 			// The versionMap path finalizes from the write-set after the switch;
@@ -583,6 +592,12 @@ func (t *TxTask) Execute(evm *vm.EVM,
 		}
 
 		result.Coinbase = evm.Context.Coinbase
+
+		if lanes, ok := laneEngine(engine, t.Header); ok {
+			if result.LaneTxInfo, result.Err = lanes.InspectTx(t.Tx(), ibs); result.Err != nil {
+				break
+			}
+		}
 
 		// MA applytx
 		result.ExecutionResult, result.Err = func() (evmtypes.ExecutionResult, error) {

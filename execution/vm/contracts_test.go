@@ -355,6 +355,7 @@ var precompileSuccessVectors = map[string]string{
 	"0a": "pointEvaluation", "0b": "blsG1Add", "0c": "blsG1MultiExp", "0d": "blsG2Add",
 	"0e": "blsG2MultiExp", "0f": "blsPairing", "10": "blsMapG1", "11": "blsMapG2",
 	"100": "p256Verify", "a100": "p256Verify-EIP-7951",
+	"68": "doubleSignEvidence", "69": "secp256k1SignatureRecover",
 }
 
 // precompiledContractSets is every fork's live precompile set.
@@ -362,6 +363,19 @@ var precompiledContractSets = []PrecompiledContracts{
 	PrecompiledContractsHomestead, PrecompiledContractsByzantium, PrecompiledContractsIstanbul,
 	PrecompiledContractsBerlin, PrecompiledContractsCancun, PrecompiledContractsPrague,
 	PrecompiledContractsOsaka,
+}
+
+// uncached returns set with the result-cache wrappers removed, so tests can compare
+// the implementations a fork selects.
+func uncached(set PrecompiledContracts) PrecompiledContracts {
+	out := make(PrecompiledContracts, len(set))
+	for addr, p := range set {
+		if cached, ok := p.(*cachedPrecompile); ok {
+			p = cached.PrecompiledContract
+		}
+		out[addr] = p
+	}
+	return out
 }
 
 // checkNoAlias runs p against rawInput from a backing array with a spare tail,
@@ -434,10 +448,7 @@ func TestPrecompileOutputDoesNotAliasInput(t *testing.T) {
 		seenTypes[reflect.TypeOf(p)] = true
 	}
 	for _, set := range precompiledContractSets {
-		for addr, p := range set {
-			if cached, ok := p.(*cachedPrecompile); ok {
-				p = cached.PrecompiledContract
-			}
+		for addr, p := range uncached(set) {
 			typ := reflect.TypeOf(p)
 			if seenTypes[typ] {
 				continue

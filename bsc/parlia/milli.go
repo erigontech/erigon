@@ -17,13 +17,11 @@
 package parlia
 
 import (
-	"encoding/binary"
-
+	"github.com/erigontech/erigon/bsc/parlia/seal"
 	"github.com/erigontech/erigon/execution/types"
 )
 
-// MilliTimestamp returns the header time in milliseconds. From Lorentz on, the
-// sub-second part is stored in the low bytes of MixDigest.
+// MilliTimestamp returns the header time in milliseconds.
 func MilliTimestamp(h *types.Header) uint64 {
-	return h.Time*1000 + binary.BigEndian.Uint64(h.MixDigest[24:])
+	return h.Time*1000 + seal.Milliseconds(h)
 }

@@ -123,6 +123,7 @@ type Config struct {
 	FermiTime      *uint64 `json:"fermiTime,omitempty"`
 	MendelTime     *uint64 `json:"mendelTime,omitempty"` // also activates BSC Osaka (same timestamp)
 	PasteurTime    *uint64 `json:"pasteurTime,omitempty"`
+	JennerTime     *uint64 `json:"jennerTime,omitempty"`
 
 	// (Optional) governance contract where EIP-1559 fees will be sent to, which otherwise would be burnt since the London fork.
 	// A key corresponds to the block number, starting from which the fees are sent to the address (map value).
@@ -493,6 +494,10 @@ func (c *Config) IsPasteur(num, time uint64) bool {
 	return c.IsLondon(num) && isForked(c.PasteurTime, time)
 }
 
+func (c *Config) IsJenner(num, time uint64) bool {
+	return c.IsLondon(num) && isForked(c.JennerTime, time)
+}
+
 func (c *Config) GetBurntContract(num uint64) accounts.Address {
 	if len(c.BurntContract) == 0 {
 		return accounts.NilAddress
@@ -707,9 +712,22 @@ type forkTimestamp struct {
 func (c *Config) forkTimestamps() []forkTimestamp {
 	return []forkTimestamp{
 		{name: "shanghaiTime", what: "Shanghai fork timestamp", timestamp: c.ShanghaiTime},
+		{name: "keplerTime", what: "Kepler fork timestamp", timestamp: c.KeplerTime},
+		{name: "feynmanTime", what: "Feynman fork timestamp", timestamp: c.FeynmanTime},
+		{name: "feynmanFixTime", what: "FeynmanFix fork timestamp", timestamp: c.FeynmanFixTime},
 		{name: "cancunTime", what: "Cancun fork timestamp", timestamp: c.CancunTime},
+		{name: "haberTime", what: "Haber fork timestamp", timestamp: c.HaberTime},
+		{name: "haberFixTime", what: "HaberFix fork timestamp", timestamp: c.HaberFixTime},
+		{name: "bohrTime", what: "Bohr fork timestamp", timestamp: c.BohrTime},
+		{name: "pascalTime", what: "Pascal fork timestamp", timestamp: c.PascalTime},
 		{name: "pragueTime", what: "Prague fork timestamp", timestamp: c.PragueTime},
+		{name: "lorentzTime", what: "Lorentz fork timestamp", timestamp: c.LorentzTime},
+		{name: "maxwellTime", what: "Maxwell fork timestamp", timestamp: c.MaxwellTime},
+		{name: "fermiTime", what: "Fermi fork timestamp", timestamp: c.FermiTime},
 		{name: "osakaTime", what: "Osaka fork timestamp", timestamp: c.OsakaTime},
+		{name: "mendelTime", what: "Mendel fork timestamp", timestamp: c.MendelTime},
+		{name: "pasteurTime", what: "Pasteur fork timestamp", timestamp: c.PasteurTime},
+		{name: "jennerTime", what: "Jenner fork timestamp", timestamp: c.JennerTime},
 		{name: "bpo1Time", what: "BPO1 fork timestamp", timestamp: c.Bpo1Time},
 		{name: "bpo2Time", what: "BPO2 fork timestamp", timestamp: c.Bpo2Time},
 		{name: "bpo3Time", what: "BPO3 fork timestamp", timestamp: c.Bpo3Time},
@@ -1028,7 +1046,7 @@ type Rules struct {
 	IsAura                                            bool
 	IsParlia, IsNano, IsMoran, IsPlanck               bool
 	IsLuban, IsPlato, IsHertz, IsFeynman, IsHaber     bool
-	IsPasteur                                         bool
+	IsPasteur, IsJenner                               bool
 
 	// L2Version is the L2 stack's own upgrade version (e.g. an ArbOS-style
 	// version ladder), resolved per block by the chain's L2Config oracle.

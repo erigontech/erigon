@@ -764,7 +764,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 						// Spawn per-block validation concurrently; joined via Wait() below
 						// after the other per-result work has run alongside it.
 						blockValidatorWaiter = newBlockValidator(pe.cfg.engine, applyResult.BlockGasUsed, applyResult.BlobGasUsed, checkReceipts, checkBloom, applyResult.Receipts,
-							lastHeader, txs, pe.cfg.chainConfig, pe.logger)
+							applyResult.Lanes, applyResult.LaneTxs, lastHeader, txs, pe.cfg.chainConfig, pe.logger)
 					}
 
 					isAmsterdam := pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime)
@@ -1664,6 +1664,8 @@ type blockResult struct {
 	ApplyCount       int
 	TxIO             *state.VersionedIO
 	Receipts         types.Receipts
+	Lanes            any
+	LaneTxs          []rules.LaneTx
 	Stats            map[int]ExecutionStat
 	Deps             *state.DAG
 	AllDeps          map[int]map[int]bool
@@ -3383,6 +3385,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		txTask := be.tasks[len(be.tasks)-1].Task
 
 		var blockReceipts types.Receipts
+		var lanes any
+		var laneTxs []rules.LaneTx
 		for i := range be.results {
 			// Prefer the finalized snapshot: a worker may overwrite be.results[i]
 			// with a later receiptless incarnation after finalize set the receipt on
@@ -3391,8 +3395,12 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			if txResult == nil {
 				txResult = be.results[i]
 			}
+			if txResult.Lanes != nil {
+				lanes = txResult.Lanes
+			}
 			if receipt := txResult.Receipt; receipt != nil {
 				blockReceipts = append(blockReceipts, receipt)
+				laneTxs = append(laneTxs, rules.LaneTx{GasUsed: txResult.ExecutionResult.BlockExecutionGasUsed, Info: txResult.LaneTxInfo})
 			}
 		}
 
@@ -3572,6 +3580,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			ApplyCount:       be.applyCount,
 			TxIO:             be.blockIO,
 			Receipts:         blockReceipts,
+			Lanes:            lanes,
+			LaneTxs:          laneTxs,
 			receiptsComplete: receiptsComplete,
 			Stats:            be.stats,
 			Deps:             &deps,
