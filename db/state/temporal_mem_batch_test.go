@@ -327,37 +327,6 @@ func TestGetLatestPublishedSeesVersionsInOrder(t *testing.T) {
 	}
 }
 
-func TestGetLatestDuringMergeNeverReturnsTheReplacedValue(t *testing.T) {
-	newBatch := func() *TemporalMemBatch {
-		return &TemporalMemBatch{
-			stepSize: 16,
-			storage:  btree2.NewMap[string, []dataWithTxNum](128),
-			metrics:  &kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
-		}
-	}
-	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain} {
-		sd, other := newBatch(), newBatch()
-		sd.DeferPublish()
-		sd.putLatest(domain, "k", []byte("old"), 1)
-		sd.Publish()
-		v, _, _ := sd.GetLatestPublished(domain, []byte("k"))
-		require.Equal(t, "old", string(v), "domain %s: the receiver must serve a published view before Merge", domain)
-		other.putLatest(domain, "k", []byte("merged"), 2)
-
-		var during string
-		mergeCopiedHook = func(b *TemporalMemBatch) {
-			got, _, _ := b.GetLatestPublished(domain, []byte("k"))
-			during = string(got)
-		}
-		require.NoError(t, sd.Merge(other))
-		mergeCopiedHook = nil
-
-		require.Equal(t, "merged", during, "domain %s: a read inside Merge returned the replaced value", domain)
-		v, _, _ = sd.GetLatestPublished(domain, []byte("k"))
-		require.Equal(t, "merged", string(v), "domain %s", domain)
-	}
-}
-
 // The apply loop reads its own writes (previous values, account bases), while exec readers see a
 // block's writes only when the whole block is published.
 func TestDeferPublishHoldsBackTheBatchFromPublishedReads(t *testing.T) {
@@ -403,7 +372,7 @@ func newPublishTestBatch() *TemporalMemBatch {
 // After an unwind, exec readers see the value from before the unwound block, not the block's published write.
 func TestUnwindRepublishesTheValueBeforeTheUnwoundBlock(t *testing.T) {
 	t.Parallel()
-	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
+	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain} {
 		sd := newPublishTestBatch()
 		sd.putLatest(domain, "k", []byte("before"), 1)
 
@@ -426,7 +395,7 @@ func TestUnwindRepublishesTheValueBeforeTheUnwoundBlock(t *testing.T) {
 // publishes, exec readers see only the new attempt's writes.
 func TestUnwindDropsTheUnpublishedWritesOfAnAttempt(t *testing.T) {
 	t.Parallel()
-	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
+	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain} {
 		sd := newPublishTestBatch()
 		sd.putLatest(domain, "k", []byte("before"), 1)
 
@@ -445,7 +414,7 @@ func TestUnwindDropsTheUnpublishedWritesOfAnAttempt(t *testing.T) {
 	}
 }
 
-// Exec workers read only accounts, storage and code, so only those domains pay for a published copy-on-write view.
+// Exec workers read accounts and storage through the published view, so only those domains pay for it; code goes through the locked maps.
 // The commitment fold writes a branch per key and reads its own writes through the locked maps.
 func TestOnlyExecReadDomainsArePublished(t *testing.T) {
 	sd := &TemporalMemBatch{
@@ -496,21 +465,6 @@ func TestWriteOutsideDeferPublishCopiesNoTree(t *testing.T) {
 		v, _, _ = sd.GetLatestPublished(domain, []byte("k"))
 		require.Equal(t, "v2", string(v), "domain %s", domain)
 	}
-}
-
-func TestSizeEstimateCountsThePublishedTree(t *testing.T) {
-	sd := &TemporalMemBatch{
-		stepSize: 16,
-		storage:  btree2.NewMap[string, []dataWithTxNum](128),
-		metrics:  &kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
-	}
-	const keys = 1000
-	sd.DeferPublish()
-	for i := range keys {
-		sd.putLatest(kv.StorageDomain, fmt.Sprintf("%052d", i), make([]byte, 32), 1)
-	}
-	sd.Publish()
-	require.Equal(t, uint64(sd.metrics.CachePutSize)+keys*publishedTreeBytesPerKey, sd.SizeEstimate())
 }
 
 // An unwind with a pending changeset drops the published trees, so a later Publish has nothing to copy.

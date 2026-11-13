@@ -884,7 +884,7 @@ func (sd *SharedDomains) GetLatestFromMemory(domain kv.Domain, key []byte) (v []
 // falling through to the underlying tx/aggregator.
 func (sd *SharedDomains) SetParent(parent *SharedDomains) { sd.parent = parent }
 
-// DeferPublish holds back the exec-side view of this batch's account, storage and code writes until Publish.
+// DeferPublish holds back the exec-side view of this batch's account and storage writes until Publish.
 func (sd *SharedDomains) DeferPublish() { sd.mem.DeferPublish() }
 
 // Publish shows the writes held back since DeferPublish to exec-side readers.

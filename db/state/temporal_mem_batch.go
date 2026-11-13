@@ -72,11 +72,9 @@ type TemporalMemBatch struct {
 
 	// published serves GetLatest without a lock: the latest value of every key, as a copy of
 	// the domain's copy-on-write tree. It is nil while an unwind changeset is pending.
-	published   [kv.DomainLen]atomic.Pointer[btree2.Map[string, dataWithTxNum]]
-	publishMu   [kv.DomainLen]sync.Mutex
-	publishTree [kv.DomainLen]*btree2.Map[string, dataWithTxNum]
-	// publishDirty marks a tree with writes held back by DeferPublish; guarded by publishMu.
-	publishDirty    [kv.DomainLen]bool
+	published       [kv.DomainLen]atomic.Pointer[btree2.Map[string, dataWithTxNum]]
+	publishMu       [kv.DomainLen]sync.Mutex
+	publishTree     [kv.DomainLen]*btree2.Map[string, dataWithTxNum]
 	publishDeferred atomic.Bool
 
 	domainWriters [kv.DomainLen]*DomainBufferedWriter
@@ -347,7 +345,7 @@ func (sd *TemporalMemBatch) GetLatestPublished(domain kv.Domain, key []byte) (v 
 	return sd.GetLatest(domain, key)
 }
 
-// DeferPublish holds back publishing the account, storage and code writes until Publish. A domain
+// DeferPublish holds back publishing the account and storage writes until Publish. A domain
 // with no published view yet gets one, so readers do not fall back to the writer's lock meanwhile.
 func (sd *TemporalMemBatch) DeferPublish() {
 	sd.publishDeferred.Store(true)
@@ -358,19 +356,18 @@ func (sd *TemporalMemBatch) DeferPublish() {
 				sd.publishTree[d] = btree2.NewMap[string, dataWithTxNum](publishTreeDegree)
 			}
 			sd.published[d].Store(sd.publishTree[d].Copy())
-			sd.publishDirty[d] = false
 		}
 		sd.publishMu[d].Unlock()
 	}
 }
 
-// Publish publishes every write held back since DeferPublish.
+// Publish publishes every write held back since DeferPublish. Copy is O(1); the next write clones its path.
+// A nil tree means an unwind changeset is pending, and readers stay on the locked maps.
 func (sd *TemporalMemBatch) Publish() {
 	sd.publishDeferred.Store(false)
 	for _, d := range deferrableDomains {
 		sd.publishMu[d].Lock()
-		if sd.publishDirty[d] {
-			sd.publishDirty[d] = false
+		if sd.publishTree[d] != nil {
 			sd.published[d].Store(sd.publishTree[d].Copy())
 		}
 		sd.publishMu[d].Unlock()
@@ -424,9 +421,6 @@ func (sd *TemporalMemBatch) getLatest(sh *latestShard, domain kv.Domain, key []b
 // grow with node size times depth, (2d-1)*log(n)/log(d), which is about 7x smaller at 8 than at 128.
 const publishTreeDegree = 8
 
-// publishedTreeBytesPerKey is the measured heap of a published tree per key; it shares keys and values with the latest maps.
-const publishedTreeBytesPerKey = 106
-
 // publish sets key in the domain's tree. Outside DeferPublish it turns the view off instead of copying the
 // tree, which would clone the written path on every later write; readers use the locked maps until the next
 // DeferPublish. The caller holds key's shard lock.
@@ -440,7 +434,6 @@ func (sd *TemporalMemBatch) publish(domain kv.Domain, key string, v dataWithTxNu
 		sd.publishTree[domain] = btree2.NewMap[string, dataWithTxNum](publishTreeDegree)
 	}
 	sd.publishTree[domain].Set(key, v)
-	sd.publishDirty[domain] = true
 	if !sd.publishDeferred.Load() {
 		sd.published[domain].Store(nil)
 	}
@@ -456,7 +449,6 @@ func (sd *TemporalMemBatch) republishAll() {
 		sd.publishMu[d].Lock()
 		if sd.unwindChangeset != nil {
 			sd.publishTree[d] = nil
-			sd.publishDirty[d] = false
 			sd.published[d].Store(nil)
 			sd.publishMu[d].Unlock()
 			continue
@@ -479,9 +471,6 @@ func (sd *TemporalMemBatch) republishAll() {
 		sd.publishMu[d].Unlock()
 	}
 }
-
-// mergeCopiedHook, when set by a test, runs in Merge after the latest values are copied and before they are published.
-var mergeCopiedHook func(*TemporalMemBatch)
 
 // publishMerged adds the latest values of a merged batch to the published trees. The caller excludes all writers.
 func (sd *TemporalMemBatch) publishMerged(other *TemporalMemBatch) {
@@ -590,23 +579,7 @@ func (sd *TemporalMemBatch) SizeEstimate() uint64 {
 	// lock (not the domain locks, which guard the domains maps, not this counter).
 	sd.metrics.RLock()
 	defer sd.metrics.RUnlock()
-	return uint64(sd.metrics.CachePutSize) + sd.publishedTreeSize()
-}
-
-func (sd *TemporalMemBatch) publishedTreeSize() (size uint64) {
-	for _, d := range deferrableDomains {
-		size += sd.publishedTreeLen(d) * publishedTreeBytesPerKey
-	}
-	return size
-}
-
-func (sd *TemporalMemBatch) publishedTreeLen(d kv.Domain) uint64 {
-	sd.publishMu[d].Lock()
-	defer sd.publishMu[d].Unlock()
-	if sd.publishTree[d] == nil {
-		return 0
-	}
-	return uint64(sd.publishTree[d].Len())
+	return uint64(sd.metrics.CachePutSize)
 }
 
 func (sd *TemporalMemBatch) IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.Tx, it func(k []byte, v []byte) (cont bool, err error)) error {
@@ -883,10 +856,6 @@ func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch) error {
 		return fmt.Errorf("can't merge from batch with non-nil currentChangesAccumulator")
 	}
 
-	// Readers fall back to the locked maps until the merged values are published.
-	for d := range sd.published {
-		sd.published[d].Store(nil)
-	}
 	for d := range other.latest {
 		for i := range other.latest[d] {
 			otherEntries := other.latest[d][i].m
@@ -905,9 +874,6 @@ func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch) error {
 		sd.storage.Set(key, value)
 		return true
 	})
-	if mergeCopiedHook != nil {
-		mergeCopiedHook(sd)
-	}
 
 	for domain, writer := range other.domainWriters {
 		sd.pastDomainWriters[domain] = append(sd.pastDomainWriters[domain], writer)
