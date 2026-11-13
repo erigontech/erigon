@@ -27,6 +27,8 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
+	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
@@ -131,13 +133,17 @@ func TestFramePoolRecentRootForkBoundary(t *testing.T) {
 		initialSlot uint64
 		direction   remoteproto.Direction
 		activeHead  bool
+		incomplete  bool
 		evict       bool
 	}{
-		{"before first Bogota block", 76, 19, remoteproto.Direction_FORWARD, false, false},
-		{"first activation in batch", 76, 19, remoteproto.Direction_FORWARD, true, false},
-		{"retained forward history after active snapshot", 100, 21, remoteproto.Direction_FORWARD, true, false},
-		{"head crosses back before activation", 100, 21, remoteproto.Direction_UNWIND, false, true},
-		{"activation unwind followed by active head", 100, 21, remoteproto.Direction_UNWIND, true, true},
+		{"before first Bogota block", 76, 19, remoteproto.Direction_FORWARD, false, false, false},
+		{"first activation in batch", 76, 19, remoteproto.Direction_FORWARD, true, false, false},
+		{"retained forward history after active snapshot", 100, 21, remoteproto.Direction_FORWARD, true, false, false},
+		{"head crosses back before activation", 100, 21, remoteproto.Direction_UNWIND, false, false, true},
+		{"activation unwind followed by active head", 100, 21, remoteproto.Direction_UNWIND, true, false, true},
+		{"reset crosses back before activation", 100, 21, remoteproto.Direction_FORWARD, false, true, true},
+		{"reset before first Bogota block", 76, 19, remoteproto.Direction_FORWARD, false, true, false},
+		{"incomplete forward history after active snapshot", 100, 21, remoteproto.Direction_FORWARD, true, true, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
@@ -161,6 +167,7 @@ func TestFramePoolRecentRootForkBoundary(t *testing.T) {
 
 				backend.calls = nil
 				change := newBlockChangeForAccounts(common.Hash{2}, 0)
+				change.StateChangesIncomplete = tc.incomplete
 				change.ChangeBatch[0].BlockTime = now + 88
 				change.ChangeBatch[0].SlotNumber = common.NewUint64(20)
 				change.ChangeBatch[0].Direction = tc.direction
@@ -172,7 +179,11 @@ func TestFramePoolRecentRootForkBoundary(t *testing.T) {
 				}
 				require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 				require.Equal(t, tc.activeHead, pool.headIsBogota)
-				require.Empty(t, backend.calls, "activation and age checks do not require simulation")
+				if tc.incomplete && !tc.evict {
+					require.Equal(t, []common.Hash{slot.IDHash}, backend.calls, "missing history requires revalidation")
+				} else {
+					require.Empty(t, backend.calls, "activation and age checks do not require simulation")
+				}
 				if tc.evict {
 					require.NotContains(t, pool.byHash, string(slot.IDHash[:]))
 					require.Empty(t, pool.frameReservations)
@@ -306,7 +317,7 @@ func TestFramePoolRecentRootRevalidatedAcrossMissingHistory(t *testing.T) {
 }
 
 func TestFetchRecentRootActivationUnwind(t *testing.T) {
-	for _, delivery := range []string{"combined", "superseded unwind", "superseded unwind and reactivation", "superseded activation then unwind"} {
+	for _, delivery := range []string{"combined", "superseded unwind", "superseded unwind and reactivation", "superseded activation then unwind", "expired refresh"} {
 		t.Run(delivery, func(t *testing.T) {
 			now := uint64(time.Now().Unix())
 			config := chain.AllProtocolChanges.Copy()
@@ -358,6 +369,23 @@ func TestFetchRecentRootActivationUnwind(t *testing.T) {
 				activation.ChangeBatch[0].SlotNumber = common.NewUint64(21)
 				require.ErrorIs(t, fetch.handleStateChangesRequest(ctx, activation), errStateViewSuperseded)
 				require.ErrorIs(t, fetch.handleStateChangesRequest(ctx, unwind), errStateViewSuperseded)
+			case "expired refresh":
+				synctest.Test(t, func(t *testing.T) {
+					ctrl := gomock.NewController(t)
+					stream := remoteproto.NewMockKV_StateChangesClient[*remoteproto.StateChangeBatch](ctrl)
+					initial.StateChangesIncomplete = true
+					stream.EXPECT().Recv().Return(initial, nil)
+					client := remoteproto.NewMockKVClient(ctrl)
+					client.EXPECT().StateChanges(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+						func(streamCtx context.Context, _ *remoteproto.StateChangeRequest, _ ...grpc.CallOption) (remoteproto.KV_StateChangesClient, error) {
+							stream.EXPECT().Recv().DoAndReturn(func() (*remoteproto.StateChangeBatch, error) {
+								<-streamCtx.Done()
+								return unwind, nil
+							})
+							return stream, nil
+						})
+					require.ErrorIs(t, fetch.handleStateChanges(ctx, client), context.Canceled)
+				})
 			}
 			require.NoError(t, fetch.handleStateChangesRequest(ctx, replacement))
 			require.NotContains(t, pool.byHash, string(frame.IDHash[:]), "activation-unwind eviction must not depend on batch delivery")

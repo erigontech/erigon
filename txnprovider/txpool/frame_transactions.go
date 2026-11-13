@@ -580,18 +580,29 @@ type bogotaActivation struct {
 	unwound bool
 }
 
+func (p *TxPool) RetainBogotaActivation(changes *remoteproto.StateChangeBatch) {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+	activation := p.bogotaActivationAfter(changes)
+	p.pendingActivation = &activation
+}
+
 func (p *TxPool) bogotaActivationAfter(changes *remoteproto.StateChangeBatch) bogotaActivation {
 	activation := bogotaActivation{active: p.headIsBogota}
 	if p.pendingActivation != nil {
 		activation = *p.pendingActivation
 	}
-	// Forward history can overlap a subscription reset. Only unwind entries prove
-	// a reorg across activation, which a later reactivation must not hide.
+	activeBefore := activation.active
+	// Forward history can overlap a subscription reset. Intermediate forward entries
+	// do not prove a reorg; an explicit unwind must survive later reactivation.
 	for _, change := range changes.ChangeBatch {
 		active := p.chainConfig.IsBogota(change.BlockTime)
 		activation.unwound = activation.unwound || change.Direction == remoteproto.Direction_UNWIND && activation.active && !active
 		activation.active = active
 	}
+	// An incomplete reset may omit the unwind entries, but its final head still
+	// proves a crossing back before hardfork activation.
+	activation.unwound = activation.unwound || changes.StateChangesIncomplete && activeBefore && !activation.active
 	return activation
 }
 

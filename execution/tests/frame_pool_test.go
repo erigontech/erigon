@@ -21,6 +21,7 @@ import (
 	"context"
 	"math/big"
 	"testing"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -85,6 +86,7 @@ func TestFramePoolConsumedNonceReply(t *testing.T) {
 				cancel()
 				require.ErrorIs(t, <-runDone, context.Canceled)
 			})
+			require.Eventually(t, pool.Started, 5*time.Second, time.Millisecond)
 			frame := &types.FrameTransaction{
 				NonceKeys: []uint256.Int{tc.key}, ChainID: *cfg.ChainID, SenderAddress: sender,
 				Frames: []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}}},

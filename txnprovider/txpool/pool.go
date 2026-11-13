@@ -89,6 +89,7 @@ type Pool interface {
 	AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcfg.DiscardReason, error)
 	OnNewBlock(ctx context.Context, stateChanges *remoteproto.StateChangeBatch, unwindTxns, unwindBlobTxns, minedTxns TxnSlots) error
 	MarkStateStale()
+	RetainBogotaActivation(changes *remoteproto.StateChangeBatch)
 	// IdHashKnown check whether transaction with given Id hash is known to the pool
 	IdHashKnown(tx kv.Tx, hash []byte) (bool, error)
 	FilterKnownIdHashes(tx kv.Tx, hashes Hashes) (unknownHashes Hashes, err error)
@@ -160,7 +161,7 @@ type TxPool struct {
 	stateViewStale          bool
 	stateBlockHash          common.Hash       // Head of the pool's state view; pins frame validation to the same block
 	headIsBogota            bool              // Last completed update's activation, independent of pending-block time
-	pendingActivation       *bogotaActivation // Activation observations from superseded batches, retained until an update succeeds
+	pendingActivation       *bogotaActivation // Activation observations from skipped batches, retained until an update succeeds
 	lastSeenBlock           atomic.Uint64
 	lastSeenCond            *sync.Cond
 	lastFinalizedBlock      atomic.Uint64

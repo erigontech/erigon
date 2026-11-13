@@ -585,6 +585,7 @@ func TestFetchExpiredRefreshDoesNotApplyReceivedBatch(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		pool := NewMockPool(ctrl)
 		pool.EXPECT().MarkStateStale()
+		pool.EXPECT().RetainBogotaActivation(gomock.Any())
 		applied := 0
 		pool.EXPECT().OnNewBlock(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
 			func(context.Context, *remoteproto.StateChangeBatch, TxnSlots, TxnSlots, TxnSlots) error {

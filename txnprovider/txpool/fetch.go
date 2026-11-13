@@ -1334,9 +1334,10 @@ func (f *Fetch) handleStateChanges(ctx context.Context, client StateChangesClien
 		if refreshSnapshot != nil {
 			if !refreshSnapshot.Stop() {
 				// The callback may still cancel the stream after Recv returns.
-				// Keep transaction hints, but recover state through a fresh subscription.
+				// Keep transaction and activation observations, but recover state through a fresh subscription.
 				if req != nil {
 					f.collectStateChangeTxns(req)
+					f.pool.RetainBogotaActivation(req)
 				}
 				return context.Canceled
 			}

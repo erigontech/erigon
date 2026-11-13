@@ -954,6 +954,7 @@ func TestP2PPropagationContinuesWhileOnAddSubscriberStalls(t *testing.T) {
 	stalled := newStalledOnAddStream(ctx)
 	go grpcServer.OnAdd(&txpoolproto.OnAddRequest{}, stalled) //nolint:errcheck // ends with ctx
 	awaitSubscribed(t, newSlotsStreams, func() { <-stalled.entered })
+	require.Eventually(t, pool.Started, 5*time.Second, time.Millisecond)
 
 	slot := newTestTxnSlot(0, 0, 300_000, 300_000, 100_000)
 	slot.IDHash[0] = 1
