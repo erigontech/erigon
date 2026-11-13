@@ -182,6 +182,7 @@ func (pt *poolTask) rerunAfter(named int) bool {
 		t = named
 	}
 	pt.reruns++
+	pt.be.n18[1].Add(1)
 	return pt.waitThen(t, psReexec)
 }
 
@@ -191,6 +192,7 @@ func (pt *poolTask) rerunAfterWriter(named int) bool {
 		return pt.rerunAfter(named)
 	}
 	pt.reruns++
+	pt.be.n18[0].Add(1)
 	pt.next = psReexec
 	return !pt.be.requeueAtValidated(pt.tv.index, named, pt)
 }

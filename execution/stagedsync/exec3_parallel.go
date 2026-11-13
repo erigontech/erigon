@@ -1125,6 +1125,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 						"tasks", len(blockExecutor.tasks), "exec", blockExecutor.cntExec,
 						"spec", blockExecutor.cntSpecExec,
 						"valFail", blockExecutor.cntValidationFail,
+						"n18named", blockExecutor.n18[0].Load(), "n18pred", blockExecutor.n18[1].Load(), "n18early", blockExecutor.n18[2].Load(),
 						"spineUsPerIter", fmt.Sprintf("%.1f", float64(npProc.Nanoseconds())/float64(max(1, blockExecutor.cntExec))/1e3))
 					npWait, npProc = 0, 0
 				}
@@ -2648,6 +2649,7 @@ type blockExecutor struct {
 	// result; validated marks writers published since their last re-exec signal.
 	wakeValidated map[int][]*poolTask
 	validated     map[int]bool
+	n18           [3]atomic.Int64 // dbg: named re-runs, predecessor re-runs, early wakes
 	// poolTasks[i] is task i's pool state. After sending its result a task is parked
 	// (no goroutine); the committed-dependent re-check re-queues it to re-execute.
 	poolTasks []*poolTask
@@ -3087,6 +3089,7 @@ func (be *blockExecutor) signalValidated(tx int) {
 	waiters := be.wakeValidated[tx]
 	delete(be.wakeValidated, tx)
 	be.wakeMu.Unlock()
+	be.n18[2].Add(int64(len(waiters)))
 	for _, pt := range waiters {
 		be.pool.push(pt)
 	}
@@ -3099,7 +3102,11 @@ func (be *blockExecutor) requeueAtValidated(tx, target int, pt *poolTask) bool {
 	}
 	be.wakeMu.Lock()
 	defer be.wakeMu.Unlock()
-	if int(be.committedFrontier.Load()) >= target || be.validated[target] {
+	if int(be.committedFrontier.Load()) >= target {
+		return false
+	}
+	if be.validated[target] {
+		be.n18[2].Add(1)
 		return false
 	}
 	be.wakeValidated[target] = append(be.wakeValidated[target], pt)
