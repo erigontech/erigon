@@ -19,7 +19,6 @@ package state
 import (
 	"fmt"
 	"math/big"
-	"runtime"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -88,12 +87,10 @@ func TestBlockAccessListBuilderReadOnlyAccountsDoNotAllocatePerAccount(t *testin
 		rs.SetBalance(addr, VersionedRead[uint256.Int]{Val: *uint256.NewInt(7)})
 		rs.access[addr] = accessOptions{}
 	}
+	allocs := testing.AllocsPerRun(1, func() { NewBlockAccessListBuilder().Add(-1, rs, nil) })
+	require.Less(t, allocs, float64(n/10))
 	b := NewBlockAccessListBuilder()
-	var before, after runtime.MemStats
-	runtime.ReadMemStats(&before)
 	b.Add(-1, rs, nil)
-	runtime.ReadMemStats(&after)
-	require.Less(t, after.Mallocs-before.Mallocs, uint64(n/10))
 
 	bal := b.Build()
 	require.Len(t, bal, n)

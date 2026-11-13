@@ -3053,7 +3053,6 @@ func (b *BlockAccessListBuilder) Build() types.BlockAccessList {
 			binary.BigEndian.PutUint64(ac.Address[:8], k.hi)
 			binary.BigEndian.PutUint64(ac.Address[8:16], k.mid)
 			binary.BigEndian.PutUint32(ac.Address[16:], k.lo)
-			ac.Normalize()
 			bal = append(bal, ac)
 			continue
 		}
