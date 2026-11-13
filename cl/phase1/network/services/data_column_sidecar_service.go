@@ -347,12 +347,14 @@ func (s *dataColumnSidecarService) PublishColumns(ctx context.Context, sidecars 
 	}
 }
 
-// afterFinality returns the sidecar's slot and whether the gossip finality rules allow the sidecar. For Fulu, its
-// slot is after the finalized epoch start and the finalized checkpoint is an ancestor of its block. Gloas has no such
-// rules.
+// afterFinality returns the sidecar's slot and whether peers would still accept the sidecar. For Fulu, its slot is
+// after the finalized epoch start and the finalized checkpoint is an ancestor of its block. Gloas has no finality
+// rules, but its block must be imported or still importable: recovery also runs for blocks backfilled below finality,
+// whose columns peers no longer need.
 func (s *dataColumnSidecarService) afterFinality(sidecar *cltypes.DataColumnSidecar) (uint64, bool) {
 	if sidecar.Version() >= clparams.GloasVersion {
-		return sidecar.Slot, true
+		_, _, notImportable := s.lookupBlock(sidecar.Slot, sidecar.BeaconBlockRoot)
+		return sidecar.Slot, !notImportable
 	}
 	header := sidecar.SignedBlockHeader.Header
 	finalizedCheckpoint := s.forkChoice.FinalizedCheckpoint()
@@ -505,13 +507,15 @@ func (s *dataColumnSidecarService) verifyProposerSignature(proposerIndex uint64,
 
 // lookupBlock returns the block of root once fork choice has imported it, else whether it can never be imported.
 // Fork choice holds a block while its state transition runs, and publishes the header only after the transition
-// succeeds. The importability sample precedes the last lookup, so a miss after a "not importable" sample is final.
+// succeeds. The importability sample waits for an import in progress and precedes the last lookup, so that lookup
+// sees a block imported meanwhile, and a miss after a "not importable" sample is final.
 func (s *dataColumnSidecarService) lookupBlock(slot uint64, root common.Hash) (block *cltypes.SignedBeaconBlock, ok, notImportable bool) {
-	if block, ok = s.importedBlock(root); ok || !s.blockNotImportable(slot) {
-		return block, ok, false
+	if block, ok = s.importedBlock(root); ok {
+		return block, true, false
 	}
+	notImportable = s.blockNotImportable(slot)
 	block, ok = s.importedBlock(root)
-	return block, ok, !ok
+	return block, ok, !ok && notImportable
 }
 
 func (s *dataColumnSidecarService) importedBlock(root common.Hash) (*cltypes.SignedBeaconBlock, bool) {
