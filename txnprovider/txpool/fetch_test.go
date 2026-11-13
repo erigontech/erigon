@@ -386,7 +386,7 @@ func (ms *MockSentry) PeerEvents(_ *sentryproto.PeerEventsRequest, stream sentry
 
 func TestFramePolicyRejectionKeepsOrdinaryTransactions(t *testing.T) {
 	frame := framePoolSlot(t, [20]byte{1}, 1, 2).Txn.(*types.FrameTransaction)
-	frame.Frames[0].Limits.Execution = 150_000
+	frame.Frames[0].Limits.Execution = 350_000
 	require.NoError(t, frame.Validate())
 	var encoded bytes.Buffer
 	require.NoError(t, frame.MarshalBinary(&encoded))
@@ -431,7 +431,7 @@ func TestFramePolicyRejectionDeduplicatesGossip(t *testing.T) {
 	ctx, pool, poolDB, _ := newTestPool(t)
 	pool.started.Store(true)
 	frame := framePoolSlot(t, [20]byte{1}, 1, 2).Txn.(*types.FrameTransaction)
-	frame.Frames[0].Limits.Execution = 150_000
+	frame.Frames[0].Limits.Execution = 350_000
 	require.NoError(t, frame.Validate())
 	var encoded bytes.Buffer
 	require.NoError(t, frame.MarshalBinary(&encoded))

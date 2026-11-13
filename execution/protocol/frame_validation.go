@@ -74,7 +74,7 @@ type frameCreationTrace struct {
 }
 
 const (
-	maxFrameValidationExecutionGas = 100_000
+	maxFrameValidationExecutionGas = 300_000
 	maxFrameValidationStateGas     = 500_000
 )
 

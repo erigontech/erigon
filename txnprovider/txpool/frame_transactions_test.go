@@ -164,10 +164,10 @@ func TestFramePoolPrecheckBeforeSignatures(t *testing.T) {
 		limits     mdgas.MdGas
 		want       string
 	}{
-		{"signatures", 15, mdgas.MdGas{Execution: 100}, "frame signature validation exceeds gas limit"},
-		{"prefix execution", 1, mdgas.MdGas{Execution: 93_301}, "frame validation exceeds gas limit"},
+		{"signatures", 45, mdgas.MdGas{Execution: 100}, "frame signature validation exceeds gas limit"},
+		{"prefix execution", 1, mdgas.MdGas{Execution: 293_301}, "frame validation exceeds gas limit"},
 		{"prefix state", 1, mdgas.MdGas{Execution: 100, State: 500_001}, "frame validation exceeds gas limit"},
-		{"within budget", 1, mdgas.MdGas{Execution: 93_300, State: 500_000}, "invalid frame signature 0"},
+		{"within budget", 1, mdgas.MdGas{Execution: 293_300, State: 500_000}, "invalid frame signature 0"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			frame := framePoolSlot(t, common.Address{1}, 1, 2).Txn.(*types.FrameTransaction)
@@ -264,7 +264,7 @@ func TestFramePoolBudgetDoesNotRestrictMinedTransactions(t *testing.T) {
 	s.FillBytes(signature[32:64])
 	copy(signature[64:], pub)
 	frame := framePoolSlot(t, sender, 1, 2).Txn.(*types.FrameTransaction)
-	frame.Signatures = make([]types.FrameSignature, 15)
+	frame.Signatures = make([]types.FrameSignature, 45)
 	for i := range frame.Signatures {
 		frame.Signatures[i] = types.FrameSignature{Scheme: types.FrameSignatureP256, Signer: signer[:], Message: message[:], Signature: signature}
 	}

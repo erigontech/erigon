@@ -559,7 +559,7 @@ func TestGrpcServerFramePrefixRejectionKnownToGossip(t *testing.T) {
 	ctx, pool, sender := keyedFramePoolEnv(t)
 	pool.chainID.SetUint64(1)
 	frame := framePoolSlot(t, sender, 1, 2).Txn.(*types.FrameTransaction)
-	frame.Frames[0].Limits.Execution = 150_000
+	frame.Frames[0].Limits.Execution = 350_000
 	var encoded bytes.Buffer
 	require.NoError(t, frame.MarshalBinary(&encoded))
 	hash := crypto.Keccak256Hash(encoded.Bytes())
