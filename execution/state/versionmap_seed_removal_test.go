@@ -78,8 +78,7 @@ func TestSeedEmptyRemovalsSkipsBaseReadForProvenNonEmpty(t *testing.T) {
 	}
 	reader := &countingAccountReader{}
 
-	vm := NewVersionMap(bal)
-	vm.SeedAddresses()
+	vm := NewBALReadVersionMap(bal)
 	require.NoError(t, vm.SeedEmptyRemovals(true, false, reader))
 	require.Zero(t, reader.reads)
 }
@@ -106,13 +105,12 @@ func TestSeedEmptyRemovalsReadsBaseWhenLastChangeClears(t *testing.T) {
 	}
 }
 
-// TestSeedAddresses pins the DB-free existence seed. The BAL carries no address record, so
-// a block-created account (absent in the committed base) has only field cells; the address
-// existence read consults the AddressPath (not the field cells), so unseeded it reads absent
-// and the EIP-161 withhold path stamps a spurious removal. SeedAddresses marks existence
-// straight from the BAL — no base reader — marking the AddressPath AccountFromBAL so the
-// authoritative value still defers to the committed base.
-func TestSeedAddresses(t *testing.T) {
+// TestBALExistence pins the DB-free existence read. The BAL carries no address record, so a
+// block-created account (absent in the committed base) would read absent and the EIP-161
+// withhold path would stamp a spurious removal. The address read takes existence straight
+// from the BAL — no base reader — as an AccountFromBAL marker, so the authoritative value
+// still defers to the committed base.
+func TestBALExistence(t *testing.T) {
 	t.Parallel()
 
 	created := accounts.InternAddress(common.HexToAddress("0xc0ffee")) // absent in base, created this block
@@ -120,13 +118,13 @@ func TestSeedAddresses(t *testing.T) {
 
 	bal := types.BlockAccessList{
 		{
+			Address:        existing.Value(),
+			BalanceChanges: []*types.BalanceChange{{Index: 2, Value: *uint256.NewInt(7)}},
+		},
+		{
 			Address:      created.Value(),
 			NonceChanges: []*types.NonceChange{{Index: 3, Value: 1}},
 			CodeChanges:  []*types.CodeChange{{Index: 3, Bytecode: []byte{0x60, 0x00}}},
-		},
-		{
-			Address:        existing.Value(),
-			BalanceChanges: []*types.BalanceChange{{Index: 2, Value: *uint256.NewInt(7)}},
 		},
 	}
 
@@ -135,18 +133,13 @@ func TestSeedAddresses(t *testing.T) {
 	existingBase.Nonce = 9
 	reader.accounts[existing] = &existingBase // `created` is intentionally absent from the base
 
-	vm := NewVersionMap(bal)
+	vm := NewBALReadVersionMap(bal)
 
-	// Before seeding the BAL leaves only field cells, so the created account's address
-	// read is absent even though it exists — the bug SeedAddresses fixes.
-	if _, _, ok := vm.ReadAddress(created, 5); ok {
-		t.Fatal("precondition: a BAL-created account's address read should be absent before SeedAddresses")
+	if _, _, ok := vm.ReadAddress(created, 2); ok {
+		t.Fatal("a BAL-created account is absent before its first change")
 	}
-
-	vm.SeedAddresses() // no base reader: existence comes from the BAL alone
-
 	if _, _, ok := vm.ReadAddress(created, 5); !ok {
-		t.Fatal("SeedAddresses marks a BAL-created account present with no base lookup")
+		t.Fatal("a BAL-created account reads present with no base lookup")
 	}
 	if _, _, ok := vm.ReadAddress(existing, 5); !ok {
 		t.Fatal("a touched base-present account also reads present")
@@ -163,11 +156,11 @@ func TestSeedAddresses(t *testing.T) {
 	require.Equal(t, uint64(1), cr.Nonce, "a created account composes from its field cells")
 }
 
-// TestSeedAddressesDoesNotLeakLaterCode pins the CREATE2-onto-funded fix: an account funded
+// TestBALExistenceDoesNotLeakLaterCode pins the CREATE2-onto-funded fix: an account funded
 // (balance) at an early tx and given code at a later tx must, before the deploying tx,
-// compose with empty code. Seeding existence must not drag the later CodeHash into earlier
+// compose with empty code. Existence must not drag the later CodeHash into earlier
 // reads — the collision that made the proposer and validator disagree.
-func TestSeedAddressesDoesNotLeakLaterCode(t *testing.T) {
+func TestBALExistenceDoesNotLeakLaterCode(t *testing.T) {
 	t.Parallel()
 
 	proxy := accounts.InternAddress(common.HexToAddress("0xc0ffee")) // funded early, CREATE2'd later
@@ -183,8 +176,7 @@ func TestSeedAddressesDoesNotLeakLaterCode(t *testing.T) {
 
 	reader := &accountStateReader{accounts: map[accounts.Address]*accounts.Account{}} // proxy absent in base
 
-	vm := NewVersionMap(bal)
-	vm.SeedAddresses()
+	vm := NewBALReadVersionMap(bal)
 
 	// Compose after funding (BAL index 2 → TxIndex 1) but before the code deploy (index 5
 	// → TxIndex 4): the funded, still-codeless account the CREATE2 collision check must see.
@@ -312,8 +304,7 @@ func TestBALMarkedAccountReadsCommittedBaseOncePerBlock(t *testing.T) {
 	acc.Balance = *uint256.NewInt(100)
 	reader := &countingAccountReader{staticAccountReader: staticAccountReader{addr: a, acc: &acc}}
 	bal := types.BlockAccessList{{Address: a.Value(), BalanceChanges: []*types.BalanceChange{{Index: 1, Value: *uint256.NewInt(50)}}}}
-	vm := NewVersionMap(bal)
-	vm.SeedAddresses()
+	vm := NewBALReadVersionMap(bal)
 	ibs := NewWithVersionMap(reader, vm)
 	defer ibs.Close()
 	for txIndex := 1; txIndex <= 5; txIndex++ {
@@ -422,8 +413,7 @@ func TestSeededRemovalAtMarkerIndexStaysAbsent(t *testing.T) {
 	baseAcc.Balance = *uint256.NewInt(5)
 	reader := &accountStateReader{accounts: map[accounts.Address]*accounts.Account{x: &baseAcc}}
 	bal := types.BlockAccessList{{Address: x.Value(), BalanceChanges: []*types.BalanceChange{{Index: 1, Value: uint256.Int{}}}}}
-	vm := NewVersionMap(bal)
-	vm.SeedAddresses()
+	vm := NewBALReadVersionMap(bal)
 	require.NoError(t, vm.SeedEmptyRemovals(true, false, reader))
 
 	lc, _, _, _ := vm.AccountLifecycleAt(x, 1)
@@ -446,8 +436,7 @@ func TestVersionedReaderServesBALMarkedAccountFromOrigin(t *testing.T) {
 	acc.Balance = *uint256.NewInt(100)
 	reader := &countingAccountReader{staticAccountReader: staticAccountReader{addr: a, acc: &acc}}
 	bal := types.BlockAccessList{{Address: a.Value(), BalanceChanges: []*types.BalanceChange{{Index: 1, Value: *uint256.NewInt(50)}}}}
-	vm := NewVersionMap(bal)
-	vm.SeedAddresses()
+	vm := NewBALReadVersionMap(bal)
 	SeedOrigin(vm, a, &acc)
 
 	for txIndex := 1; txIndex <= 3; txIndex++ {
@@ -458,4 +447,87 @@ func TestVersionedReaderServesBALMarkedAccountFromOrigin(t *testing.T) {
 		require.Equal(t, *uint256.NewInt(50), got.Balance, "txIndex %d: the BAL balance cell overlays the origin", txIndex)
 	}
 	require.Zero(t, reader.reads, "the stored origin answers every tx")
+}
+
+// TestBALReadVersionMapReadsLatestChangeBelowTx pins the BAL read rule: tx i reads the change with
+// the highest block-access index < i+1, else the pre-block state. A flushed write of an earlier tx
+// does not change what it reads.
+func TestBALReadVersionMapReadsLatestChangeBelowTx(t *testing.T) {
+	t.Parallel()
+
+	a := accounts.InternAddress(common.HexToAddress("0xba1"))
+	slot := accounts.InternKey(common.HexToHash("0x05"))
+	code := []byte{0x60, 0x01}
+	bal := types.BlockAccessList{{
+		Address:        a.Value(),
+		StorageChanges: []types.SlotChanges{{Slot: slot, Changes: []*types.StorageChange{{Index: 2, Value: *uint256.NewInt(5)}}}},
+		BalanceChanges: []*types.BalanceChange{{Index: 1, Value: *uint256.NewInt(10)}, {Index: 3, Value: *uint256.NewInt(30)}},
+		NonceChanges:   []*types.NonceChange{{Index: 3, Value: 1}},
+		CodeChanges:    []*types.CodeChange{{Index: 2, Bytecode: code}},
+	}}
+	vm := NewBALReadVersionMap(bal)
+
+	_, _, ok := vm.ReadBalance(a, 0)
+	require.False(t, ok, "tx 0 reads the pre-block balance")
+	for txIdx, want := range map[int]uint64{1: 10, 2: 10, 3: 30, 4: 30} {
+		b, res, ok := vm.ReadBalance(a, txIdx)
+		require.True(t, ok)
+		require.Equal(t, want, b.Uint64(), "tx %d", txIdx)
+		require.Equal(t, MVReadResultDone, res.Status())
+	}
+	_, _, ok = vm.ReadStorage(a, slot, 1)
+	require.False(t, ok, "tx 1 reads the pre-block slot")
+	s, _, ok := vm.ReadStorage(a, slot, 2)
+	require.True(t, ok)
+	require.Equal(t, uint64(5), s.Uint64())
+	n, _, ok := vm.ReadNonce(a, 3)
+	require.True(t, ok)
+	require.Equal(t, uint64(1), n)
+	c, _, ok := vm.ReadCode(a, 2)
+	require.True(t, ok)
+	require.Equal(t, code, c.Bytes)
+
+	vm.WriteBalance(a, Version{TxIndex: 1}, *uint256.NewInt(99), true)
+	b, _, _ := vm.ReadBalance(a, 2)
+	require.Equal(t, uint64(10), b.Uint64(), "a flushed write is not a BAL change")
+}
+
+// TestBALReadVersionMapReadStaysValid pins that a flush of an earlier tx never invalidates a
+// BAL-served read: the BAL hash check, not re-execution, rejects a wrong list.
+func TestBALReadVersionMapReadStaysValid(t *testing.T) {
+	t.Parallel()
+
+	a := accounts.InternAddress(common.HexToAddress("0xba2"))
+	bal := types.BlockAccessList{{
+		Address:        a.Value(),
+		BalanceChanges: []*types.BalanceChange{{Index: 1, Value: *uint256.NewInt(10)}},
+	}}
+	vm := NewBALReadVersionMap(bal)
+
+	io := NewVersionedIO(3)
+	rs := ReadSet{}
+	rs.SetBalance(a, VersionedRead[uint256.Int]{
+		ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 0}},
+		Val:        *uint256.NewInt(10),
+	})
+	io.RecordReads(Version{TxIndex: 2}, rs)
+	vm.WriteBalance(a, Version{TxIndex: 1}, *uint256.NewInt(99), false)
+	require.Equal(t, VersionValid, vm.ValidateVersion(2, io, validateEqualVersion, false, ""))
+}
+
+// TestReadersSkipWrites pins which flushes can reach a reader of a BAL-read map: only a
+// lifecycle write, since BAL-listed paths are read from the access list.
+func TestReadersSkipWrites(t *testing.T) {
+	t.Parallel()
+
+	a := accounts.InternAddress(common.HexToAddress("0xba3"))
+	bal := types.BlockAccessList{{Address: a.Value(), BalanceChanges: []*types.BalanceChange{{Index: 1, Value: *uint256.NewInt(1)}}}}
+	fields := &WriteSet{}
+	fields.SetBalance(a, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: a, Path: BalancePath, Version: Version{TxIndex: 0}}})
+	lifecycle := &WriteSet{}
+	lifecycle.SetSelfDestruct(a, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: a, Path: SelfDestructPath, Version: Version{TxIndex: 0}}, Val: true})
+
+	require.True(t, NewBALReadVersionMap(bal).ReadersSkipWrites(a, fields))
+	require.False(t, NewBALReadVersionMap(bal).ReadersSkipWrites(a, lifecycle))
+	require.False(t, NewVersionMap(nil).ReadersSkipWrites(a, fields), "a map without a BAL serves reads from cells")
 }

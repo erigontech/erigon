@@ -2674,8 +2674,7 @@ func (be *blockExecutor) sendResult(ctx context.Context, r applyResult, mustDeli
 }
 
 func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasPool, accessList types.BlockAccessList, consumers *resultStream, profile bool, exhausted *ErrLoopExhausted) *blockExecutor {
-	versionMap := state.NewVersionMap(accessList)
-	versionMap.SeedAddresses()
+	versionMap := state.NewBALReadVersionMap(accessList)
 	be := &blockExecutor{
 		blockNum:            blockNum,
 		blockHash:           blockHash,
@@ -2754,7 +2753,7 @@ func (be *blockExecutor) markReadersDirty(writerTx int, ws *state.WriteSet) {
 	}
 	for addr, paths := range written {
 		readers := readersAbove(be.readerByAddr[addr], writerTx)
-		if len(readers) == 0 || be.versionMap.WritesAlreadySeeded(addr, ws) {
+		if len(readers) == 0 || be.versionMap.ReadersSkipWrites(addr, ws) {
 			continue
 		}
 		for _, r := range readers {

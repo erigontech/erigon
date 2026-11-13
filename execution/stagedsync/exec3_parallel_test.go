@@ -2017,6 +2017,9 @@ func TestProcessRequestSetsVersionMapBase(t *testing.T) {
 	header := &types.Header{Number: *uint256.NewInt(1)}
 	task := &exec.TxTask{Header: header, Config: config, TxNum: 11, TxIndex: 0}
 	require.NoError(t, pe.processRequest(t.Context(), &execRequest{blockNum: 1, accessList: bal, tasks: []exec.Task{task}}, roTx))
+	vm := pe.blockExecutors[1].versionMap
+	vm.WriteBalance(addr, state.Version{TxIndex: 0}, *uint256.NewInt(100), true)
+	vm.WriteBalance(addr, state.Version{TxIndex: 5}, *uint256.NewInt(600), true)
 
 	const edgeTxNum = 15
 	view := pe.blockExecutors[1].versionMap.View(edgeTxNum, state.NewNoopReader())

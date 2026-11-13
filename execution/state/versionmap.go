@@ -35,9 +35,6 @@ const FlagValidated statusFlag = 2
 
 const flagDeleted statusFlag = 3
 
-// flagSeeded asks noOpBind for the Done cell WriteChanges seeded, untouched since.
-const flagSeeded statusFlag = 4
-
 // valueStatus is the cell's value transition relative to what the writing tx read:
 // the leaf effect a write has. Stamped at write time from (prev-presence, prev, value),
 // never re-derived. Only the domain/commitment projection skips Unchanged; the BAL and
@@ -269,6 +266,9 @@ type VersionMap struct {
 	nonEmpty atomic.Bool
 	HasBAL   bool // When true, all significant writes are pre-populated from BAL
 	bal      types.BlockAccessList
+	// balReads: BAL-listed paths read from bal, not from cells (NewBALReadVersionMap).
+	balReads bool
+	balCodes [][]balCode
 
 	// Origin layer: the committed base before the first unpublished tx (published txs are already
 	// folded into it); every reader of it has a higher tx index. Immutable and
@@ -518,7 +518,6 @@ func (vm *VersionMap) WriteChanges(changes types.BlockAccessList) {
 			continue
 		}
 		addr := accounts.InternAddress(accountChanges.Address)
-		e := vm.entryOrCreate(addr)
 		for _, storageChanges := range accountChanges.StorageChanges {
 			for _, change := range storageChanges.Changes {
 				if dbg.TraceBALFeed {
@@ -532,7 +531,6 @@ func (vm *VersionMap) WriteChanges(changes types.BlockAccessList) {
 					)
 				}
 				vm.WriteStorage(addr, storageChanges.Slot, Version{TxIndex: int(change.Index) - 1}, change.Value, true)
-				seed(e.Storage[storageChanges.Slot], int(change.Index)-1)
 			}
 		}
 		for _, balanceChange := range accountChanges.BalanceChanges {
@@ -546,7 +544,6 @@ func (vm *VersionMap) WriteChanges(changes types.BlockAccessList) {
 				)
 			}
 			vm.WriteBalance(addr, Version{TxIndex: int(balanceChange.Index) - 1}, balanceChange.Value, true)
-			seed(e.Balance, int(balanceChange.Index)-1)
 		}
 		for _, nonceChange := range accountChanges.NonceChanges {
 			if dbg.TraceBALFeed {
@@ -559,7 +556,6 @@ func (vm *VersionMap) WriteChanges(changes types.BlockAccessList) {
 				)
 			}
 			vm.WriteNonce(addr, Version{TxIndex: int(nonceChange.Index) - 1}, nonceChange.Value, true)
-			seed(e.Nonce, int(nonceChange.Index)-1)
 		}
 		for _, codeChange := range accountChanges.CodeChanges {
 			// Seed the whole code trio together: a CodePath cell without its
@@ -569,16 +565,8 @@ func (vm *VersionMap) WriteChanges(changes types.BlockAccessList) {
 			vm.WriteCode(addr, v, code, true)
 			vm.WriteCodeHash(addr, v, code.Hash, true)
 			vm.WriteCodeSize(addr, v, code.Len(), true)
-			seed(e.Code, v.TxIndex)
-			seed(e.CodeHash, v.TxIndex)
-			seed(e.CodeSize, v.TxIndex)
 		}
 	}
-}
-
-func seed[T any](cells *btree.Map[int, *WriteCell[T]], txIdx int) {
-	c, _ := cells.Get(txIdx)
-	c.state.Or(seededCell)
 }
 
 // Typed Write primitives. Each takes the AccountPath-contracted value type directly so
@@ -833,6 +821,10 @@ func (vm *VersionMap) applySubFieldWrites(addr accounts.Address, txIdx int, acco
 	if vm == nil {
 		return
 	}
+	if vm.balServes(addr) {
+		vm.applyBALFields(addr, txIdx, account)
+		return
+	}
 	e := vm.load(addr)
 	if e == nil {
 		return
@@ -922,6 +914,16 @@ func readFloorLife[T any](vm *VersionMap, addr accounts.Address, txIdx int, sel 
 
 // ReadStorageLife is ReadStorage folded with the lifecycle verdict (one RLock).
 func (vm *VersionMap) ReadStorageLife(addr accounts.Address, key accounts.StorageKey, txIdx int) (uint256.Int, ReadResult, bool, lifecycleVerdict) {
+	if vm.balServes(addr) {
+		life := lifecycleVerdict{state: LifecycleLive}
+		if v, res, ok := vm.balStorage(addr, key, txIdx); ok {
+			return v, res, true, life
+		}
+		if ov, seeded := vm.LoadOriginStorage(addr, key); seeded {
+			return ov, ReadResult{depIdx: originIndex}, true, life
+		}
+		return uint256.Int{}, balMiss(), false, life
+	}
 	val, res, ok, life := readFloorLife(vm, addr, txIdx, func(e *AddressEntry) *btree.Map[int, *WriteCell[uint256.Int]] {
 		if e.Storage == nil {
 			return nil
@@ -939,21 +941,38 @@ func (vm *VersionMap) ReadStorageLife(addr accounts.Address, key accounts.Storag
 
 // ReadNonceLife is ReadNonce folded with the lifecycle verdict (one RLock).
 func (vm *VersionMap) ReadNonceLife(addr accounts.Address, txIdx int) (uint64, ReadResult, bool, lifecycleVerdict) {
+	if vm.balServes(addr) {
+		v, res, ok := vm.balNonce(addr, txIdx)
+		return v, res, ok, lifecycleVerdict{state: LifecycleLive}
+	}
 	return readFloorLife(vm, addr, txIdx, func(e *AddressEntry) *btree.Map[int, *WriteCell[uint64]] { return e.Nonce })
 }
 
 // ReadCodeLife is ReadCode folded with the lifecycle verdict (one RLock).
 func (vm *VersionMap) ReadCodeLife(addr accounts.Address, txIdx int) (accounts.Code, ReadResult, bool, lifecycleVerdict) {
+	if vm.balServes(addr) {
+		v, res, ok := vm.balCode(addr, txIdx)
+		return v, res, ok, lifecycleVerdict{state: LifecycleLive}
+	}
 	return readFloorLife(vm, addr, txIdx, func(e *AddressEntry) *btree.Map[int, *WriteCell[accounts.Code]] { return e.Code })
 }
 
 // ReadCodeSizeLife is ReadCodeSize folded with the lifecycle verdict (one RLock).
 func (vm *VersionMap) ReadCodeSizeLife(addr accounts.Address, txIdx int) (int, ReadResult, bool, lifecycleVerdict) {
+	if vm.balServes(addr) {
+		v, res, ok := vm.balCode(addr, txIdx)
+		return v.Len(), res, ok, lifecycleVerdict{state: LifecycleLive}
+	}
 	return readFloorLife(vm, addr, txIdx, func(e *AddressEntry) *btree.Map[int, *WriteCell[int]] { return e.CodeSize })
 }
 
 func (vm *VersionMap) ReadAddress(addr accounts.Address, txIdx int) (*accounts.Account, ReadResult, bool) {
 	val, res, ok := readFloor(vm, addr, txIdx, func(e *AddressEntry) *btree.Map[int, *WriteCell[*accounts.Account]] { return e.Address })
+	if vm != nil && vm.balReads {
+		if bacc, bres, bok := vm.balExistence(addr, txIdx); bok && (!ok || bres.depIdx > res.depIdx) {
+			return bacc, bres, true
+		}
+	}
 	if ok {
 		return val, res, true
 	}
@@ -971,10 +990,16 @@ func (vm *VersionMap) ReadSelfDestruct(addr accounts.Address, txIdx int) (bool, 
 }
 
 func (vm *VersionMap) ReadBalance(addr accounts.Address, txIdx int) (uint256.Int, ReadResult, bool) {
+	if vm.balServes(addr) {
+		return vm.balBalance(addr, txIdx)
+	}
 	return readFloor(vm, addr, txIdx, func(e *AddressEntry) *btree.Map[int, *WriteCell[uint256.Int]] { return e.Balance })
 }
 
 func (vm *VersionMap) ReadNonce(addr accounts.Address, txIdx int) (uint64, ReadResult, bool) {
+	if vm.balServes(addr) {
+		return vm.balNonce(addr, txIdx)
+	}
 	return readFloor(vm, addr, txIdx, func(e *AddressEntry) *btree.Map[int, *WriteCell[uint64]] { return e.Nonce })
 }
 
@@ -983,14 +1008,25 @@ func (vm *VersionMap) ReadIncarnation(addr accounts.Address, txIdx int) (uint64,
 }
 
 func (vm *VersionMap) ReadCode(addr accounts.Address, txIdx int) (accounts.Code, ReadResult, bool) {
+	if vm.balServes(addr) {
+		return vm.balCode(addr, txIdx)
+	}
 	return readFloor(vm, addr, txIdx, func(e *AddressEntry) *btree.Map[int, *WriteCell[accounts.Code]] { return e.Code })
 }
 
 func (vm *VersionMap) ReadCodeHash(addr accounts.Address, txIdx int) (accounts.CodeHash, ReadResult, bool) {
+	if vm.balServes(addr) {
+		c, res, ok := vm.balCode(addr, txIdx)
+		return c.Hash, res, ok
+	}
 	return readFloor(vm, addr, txIdx, func(e *AddressEntry) *btree.Map[int, *WriteCell[accounts.CodeHash]] { return e.CodeHash })
 }
 
 func (vm *VersionMap) ReadCodeSize(addr accounts.Address, txIdx int) (int, ReadResult, bool) {
+	if vm.balServes(addr) {
+		c, res, ok := vm.balCode(addr, txIdx)
+		return c.Len(), res, ok
+	}
 	return readFloor(vm, addr, txIdx, func(e *AddressEntry) *btree.Map[int, *WriteCell[int]] { return e.CodeSize })
 }
 
@@ -999,6 +1035,15 @@ func (vm *VersionMap) ReadCreateContract(addr accounts.Address, txIdx int) (bool
 }
 
 func (vm *VersionMap) ReadStorage(addr accounts.Address, key accounts.StorageKey, txIdx int) (uint256.Int, ReadResult, bool) {
+	if vm.balServes(addr) {
+		if v, res, ok := vm.balStorage(addr, key, txIdx); ok {
+			return v, res, true
+		}
+		if ov, seeded := vm.LoadOriginStorage(addr, key); seeded {
+			return ov, ReadResult{depIdx: originIndex}, true
+		}
+		return uint256.Int{}, balMiss(), false
+	}
 	val, res, ok := readFloor(vm, addr, txIdx, func(e *AddressEntry) *btree.Map[int, *WriteCell[uint256.Int]] {
 		if e.Storage == nil {
 			return nil
@@ -1398,11 +1443,7 @@ func noOpBind[T any](e *AddressEntry, cells *btree.Map[int, *WriteCell[T]], vw *
 	if !ok || !eq(ci.Value, vw.Val) || ci.valStatus != vw.valStatus || ci.accSource != AccountFromBase {
 		return false
 	}
-	if flag == flagSeeded {
-		if !ci.seeded() {
-			return false
-		}
-	} else if f := ci.loadFlag(); f != flag && !(f == FlagDone && flag == FlagEstimate) {
+	if f := ci.loadFlag(); f != flag && !(f == FlagDone && flag == FlagEstimate) {
 		return false
 	}
 	vw.bind(e, ci)
@@ -1590,20 +1631,10 @@ func flushAllNoOpUnderRLock(e *AddressEntry, writes *WriteSet, addr accounts.Add
 	return flushAllNoOp(e, writes, addr, flag)
 }
 
-// WritesAlreadySeeded reports whether ws's writes to addr match BAL seed cells no value store
-// has replaced, so publishing them changed nothing a reader saw.
-func (vm *VersionMap) WritesAlreadySeeded(addr accounts.Address, ws *WriteSet) bool {
-	if !vm.HasBAL {
-		return false
-	}
-	// A net-zero write has no BAL cell, and a re-run may have dropped the cell a reader saw.
-	for _, vw := range ws.storage[addr] {
-		if vw.valStatus == ValueUnchanged {
-			return false
-		}
-	}
-	e := vm.load(addr)
-	return e != nil && flushAllNoOpUnderRLock(e, ws, addr, flagSeeded)
+// ReadersSkipWrites reports whether no reader of addr depends on ws: on a BAL-read map a
+// reader takes the BAL-listed paths from the access list, so only a lifecycle write reaches it.
+func (vm *VersionMap) ReadersSkipWrites(addr accounts.Address, ws *WriteSet) bool {
+	return vm.balServes(addr) && !writesAccountLifecycle(ws, addr)
 }
 
 // MarkWritesComplete advances every cell named by writes from Estimate to Done, writing
@@ -1969,6 +2000,9 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 	checkVersion func(readVersion, writeVersion Version) VersionValidity,
 	traceInvalid bool, tracePrefix string, recursive bool,
 ) VersionValidity {
+	if !recursive && balReadPath(path) && vm.balServes(addr) {
+		return VersionValid
+	}
 	if !recursive && source == MapRead && wipedByDestruct(path) {
 		// A field read wiped by a destruct is recorded at the destruct's version. It
 		// stays valid while that destruct holds and no later write revives the field.
@@ -1997,19 +2031,9 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 		case source != MapRead && recursive:
 			// Synthetic cross-validate probe: the outer entry's validation covers it.
 		case source != MapRead && (path != StoragePath || version == UnknownVersion):
-			// No concrete version to compare (only storage carries a seeded origin). A
-			// BAL-seeded Done cell is a no-op, so stays valid — unless an in-range removal
-			// wiped the slot (EIP-7928 has no removal field); otherwise invalidate
-			// conservatively. Concrete-version storage reads fall to checkVersion below.
-			balTrusted := vm.HasBAL && path.BALSeeded()
-			if balTrusted && path == StoragePath {
-				if _, removed := vm.selfDestructInRange(addr, version.TxIndex+1, txIndex, true); removed {
-					balTrusted = false
-				}
-			}
-			if !balTrusted {
-				valid = VersionInvalid
-			}
+			// No concrete version to compare (only storage carries a seeded origin):
+			// invalidate conservatively. Concrete-version storage reads fall to checkVersion below.
+			valid = VersionInvalid
 		default:
 			valid = checkVersion(version, rr.Version())
 			// An origin AddressPath read is the committed baseline; re-run the create/
@@ -2250,10 +2274,6 @@ type WriteCell[T any] struct {
 	Value     T
 }
 
-// seededCell marks a cell WriteChanges seeded from the BAL. A value store or a delete drops it and a
-// status mark keeps it, so a set bit means every reader of the cell saw the seed.
-const seededCell uint32 = 1 << 24
-
 func packCellState(inc Incarnation, flag statusFlag) uint32 {
 	return uint32(uint16(inc))<<8 | uint32(flag)
 }
@@ -2263,8 +2283,6 @@ func unpackCellState(w uint32) (Incarnation, statusFlag) {
 }
 
 func (c *WriteCell[T]) loadState() (Incarnation, statusFlag) { return unpackCellState(c.state.Load()) }
-
-func (c *WriteCell[T]) seeded() bool { return c.state.Load()&seededCell != 0 }
 
 func (c *WriteCell[T]) loadFlag() statusFlag {
 	_, f := c.loadState()
@@ -2281,7 +2299,7 @@ func (c *WriteCell[T]) setState(inc Incarnation, flag statusFlag) {
 }
 
 func markedState(old uint32, inc Incarnation, flag statusFlag) uint32 {
-	return packCellState(inc, flag) | old&seededCell
+	return packCellState(inc, flag)
 }
 
 func (c *WriteCell[T]) setFlagUnlessDone(flag statusFlag) bool {

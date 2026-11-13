@@ -217,13 +217,12 @@ func TestCommittedFallbackDependsOnInFlightDestruct(t *testing.T) {
 	addr := accounts.InternAddress(common.HexToAddress("0x8246AE"))
 	reader := newAccountStateReader(addr)
 	reader.accounts[addr].Balance = *uint256.NewInt(100)
-	vm := NewVersionMap(types.BlockAccessList{{
+	vm := NewBALReadVersionMap(types.BlockAccessList{{
 		Address:        addr.Value(),
 		BalanceChanges: []*types.BalanceChange{{Index: 1}},
 		NonceChanges:   []*types.NonceChange{{Index: 2, Value: 1}},
 		CodeChanges:    []*types.CodeChange{{Index: 2, Bytecode: []byte{0x60, 0x01}}},
 	}})
-	vm.SeedAddresses()
 
 	header := func(path AccountPath, status valueStatus) WriteHeader {
 		h := WriteHeader{Address: addr, Path: path, Version: Version{TxIndex: 0}}

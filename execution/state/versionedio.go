@@ -2009,7 +2009,10 @@ func (vr *versionedStateReader) TracePrefix() string {
 
 func (vr *versionedStateReader) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
 	if r, ok := vr.reads.GetAddress(address); ok && r.Val != nil && !r.Val.IsNil() && r.accSource != AccountFromBAL {
-		account := r.Val.Account()
+		account, err := vr.withBaseFields(address, r.Val.Account())
+		if err != nil {
+			return nil, err
+		}
 		updated := vr.applyVersionedUpdates(address, *account)
 		return &updated, nil
 	}
@@ -2036,6 +2039,10 @@ func (vr *versionedStateReader) ReadAccountData(address accounts.Address) (*acco
 			return nil, nil
 		}
 		if acc, ok := versionedUpdateAddress(vr.versionMap, address, vr.txIndex); ok && acc != nil {
+			acc, err := vr.withBaseFields(address, acc)
+			if err != nil {
+				return nil, err
+			}
 			updated := vr.applyVersionedUpdates(address, *acc)
 			return &updated, nil
 		}
@@ -2166,6 +2173,21 @@ func versionedUpdateStorage(vm *VersionMap, addr accounts.Address, key accounts.
 		return val, true
 	}
 	return uint256.Int{}, false
+}
+
+// withBaseFields is IntraBlockState.withBaseFields for an in-block address record read here.
+func (vr versionedStateReader) withBaseFields(address accounts.Address, acc *accounts.Account) (*accounts.Account, error) {
+	if !vr.versionMap.balServes(address) {
+		return acc, nil
+	}
+	base, ok := vr.versionMap.LoadOriginAccount(address)
+	if !ok && vr.stateReader != nil {
+		var err error
+		if base, err = vr.stateReader.ReadAccountData(address); err != nil {
+			return nil, err
+		}
+	}
+	return baseFields(acc, base), nil
 }
 
 // applyVersionedUpdates overlays versionMap field cells onto account, so field-only updates from prior txs are not missed when only a subset of fields was read.

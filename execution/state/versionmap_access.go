@@ -227,27 +227,6 @@ func (vm *VersionMap) SeedEmptyRemovals(eip161Enabled, isAura bool, base StateRe
 	return nil
 }
 
-// SeedAddresses marks each BAL account as existing at its creating tx, so the address
-// existence read resolves present. The BAL
-// writes only field cells (not an AddressPath), so a block-created account would
-// otherwise read absent — the EIP-161 withhold path then stamps a spurious removal. The
-// existence is taken straight from the BAL (the account's first change index), with no
-// base read: the AddressPath is marked AccountFromBAL, so field reads still fall back to
-// the committed base for a base-present account's untouched fields.
-func (vm *VersionMap) SeedAddresses() {
-	for i := range vm.bal {
-		minIdx := balNextChangeIndex(&vm.bal[i], 0)
-		if minIdx == 0 {
-			continue
-		}
-		addr := accounts.InternAddress(vm.bal[i].Address)
-		av := VersionedAccountView{addr: addr, txIdx: int(minIdx), vm: vm}
-		if acc := av.Account(); acc != nil {
-			vm.WriteAddressExists(addr, Version{TxIndex: int(minIdx) - 1}, acc)
-		}
-	}
-}
-
 func balChangeIndexes(ac *types.AccountChanges, fn func(uint32)) {
 	for _, c := range ac.BalanceChanges {
 		fn(c.Index)

@@ -710,6 +710,15 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 				versionedReadCore(s, addr, path, key, commited, skipStorage, r)
 				return
 			}
+			if readAccount != nil && path != IncarnationPath && s.versionMap.balServes(addr) {
+				if readAccount, err = s.withBaseFields(addr, readAccount); err != nil {
+					r.err = err
+					r.outcome = outcomeReturnDefault
+					r.source = StorageRead
+					r.version = UnknownVersion
+					return
+				}
+			}
 			if readAccount != nil {
 				hdr.Source = accSource
 				hdr.Version = accVersion
@@ -910,6 +919,34 @@ func readAccountInternal(s *IntraBlockState, addr accounts.Address) (*accounts.A
 	default:
 		panic(fmt.Sprintf("readAccountInternal: unexpected outcome %d for %x", r.outcome, addr))
 	}
+}
+
+// withBaseFields returns acc with the pre-block balance, nonce and code hash. On a BAL-read map a
+// field the access list does not change reads the pre-block state, never an in-block address
+// record: a record written at creation keeps the fields it had then.
+func (ibs *IntraBlockState) withBaseFields(addr accounts.Address, acc *accounts.Account) (*accounts.Account, error) {
+	base, ok := ibs.versionMap.LoadOriginAccount(addr)
+	if !ok {
+		var err error
+		if base, err = ibs.committedAccount(addr); err != nil {
+			return nil, err
+		}
+		if base != nil {
+			origin := *base
+			ibs.recordAddressOrigin(addr, &origin)
+		}
+	}
+	return baseFields(acc, base), nil
+}
+
+func baseFields(acc, base *accounts.Account) *accounts.Account {
+	fields := accounts.NewAccount()
+	if base != nil {
+		fields = *base
+	}
+	out := *acc
+	out.Balance, out.Nonce, out.CodeHash = fields.Balance, fields.Nonce, fields.CodeHash
+	return &out
 }
 
 // SeedOrigin publishes acc as addr's committed origin (at originIndex) for the one
