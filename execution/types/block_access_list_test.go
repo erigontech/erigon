@@ -1048,3 +1048,14 @@ func TestDecodeBlockAccessListCodeAliasesOnlyOwnedInput(t *testing.T) {
 		t.Fatal("decoding borrowed bytes aliased the bytecode")
 	}
 }
+
+func TestDecodeBlockAccessListRejectsWrongAddressSize(t *testing.T) {
+	for _, size := range []int{19, 21} {
+		entry := append([]byte{0xc0 + byte(size+6), 0x80 + byte(size)}, make([]byte, size)...)
+		entry = append(entry, 0xc0, 0xc0, 0xc0, 0xc0, 0xc0)
+		enc := append([]byte{0xc0 + byte(len(entry))}, entry...)
+		if _, err := DecodeBlockAccessListBytes(enc); err == nil || !strings.Contains(err.Error(), "read Address") {
+			t.Fatalf("address of %d bytes: got %v, want a read Address error", size, err)
+		}
+	}
+}
