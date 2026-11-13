@@ -227,7 +227,9 @@ func TestGetLatestPublishedDoesNotWaitForWriterLock(t *testing.T) {
 		metrics:  &kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
 	}
 	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain} {
+		sd.DeferPublish()
 		sd.putLatest(domain, "k", []byte("v1"), 1)
+		sd.Publish()
 
 		sh := sd.shard(domain, "k")
 		sh.Lock()
@@ -256,7 +258,7 @@ func TestDeferredEmptyBatchDoesNotWaitForWriterLock(t *testing.T) {
 		metrics:  &kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
 	}
 	sd.DeferPublish()
-	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
+	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain} {
 		sd.putLatest(domain, "k", []byte("v1"), 1)
 
 		sh := sd.shard(domain, "k")
@@ -355,7 +357,7 @@ func TestDeferPublishHoldsBackTheBatchFromPublishedReads(t *testing.T) {
 		storage:  btree2.NewMap[string, []dataWithTxNum](128),
 		metrics:  &kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
 	}
-	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
+	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain} {
 		sd.putLatest(domain, "k", []byte("v1"), 1)
 
 		sd.DeferPublish()
@@ -447,9 +449,11 @@ func TestOnlyExecReadDomainsArePublished(t *testing.T) {
 		require.True(t, ok, "domain %s", domain)
 		require.Equal(t, "v", string(v), "domain %s", domain)
 	}
+	sd.DeferPublish()
+	sd.Publish()
 	require.NotNil(t, sd.published[kv.AccountsDomain].Load())
 	require.NotNil(t, sd.published[kv.StorageDomain].Load())
-	require.NotNil(t, sd.published[kv.CodeDomain].Load())
+	require.Nil(t, sd.published[kv.CodeDomain].Load(), "exec workers read code through the locked maps")
 	require.Nil(t, sd.published[kv.CommitmentDomain].Load(), "a commitment write must not publish a view")
 
 	sd.republishAll()
@@ -457,4 +461,44 @@ func TestOnlyExecReadDomainsArePublished(t *testing.T) {
 	v, _, ok := sd.GetLatest(kv.CommitmentDomain, []byte("k"))
 	require.True(t, ok)
 	require.Equal(t, "v", string(v))
+}
+
+// Outside DeferPublish a write turns the view off instead of copying the tree, so the next write clones no path.
+func TestWriteOutsideDeferPublishCopiesNoTree(t *testing.T) {
+	sd := &TemporalMemBatch{
+		stepSize: 16,
+		storage:  btree2.NewMap[string, []dataWithTxNum](128),
+		metrics:  &kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
+	}
+	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain} {
+		sd.DeferPublish()
+		sd.putLatest(domain, "k", []byte("v1"), 1)
+		sd.Publish()
+		require.NotNil(t, sd.published[domain].Load(), "domain %s", domain)
+
+		sd.putLatest(domain, "k", []byte("v2"), 2)
+		require.Nil(t, sd.published[domain].Load(), "domain %s", domain)
+		v, _, _ := sd.GetLatestPublished(domain, []byte("k"))
+		require.Equal(t, "v2", string(v), "domain %s", domain)
+
+		sd.DeferPublish()
+		sd.Publish()
+		v, _, _ = sd.GetLatestPublished(domain, []byte("k"))
+		require.Equal(t, "v2", string(v), "domain %s", domain)
+	}
+}
+
+func TestSizeEstimateCountsThePublishedTree(t *testing.T) {
+	sd := &TemporalMemBatch{
+		stepSize: 16,
+		storage:  btree2.NewMap[string, []dataWithTxNum](128),
+		metrics:  &kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
+	}
+	const keys = 1000
+	sd.DeferPublish()
+	for i := range keys {
+		sd.putLatest(kv.StorageDomain, fmt.Sprintf("%052d", i), make([]byte, 32), 1)
+	}
+	sd.Publish()
+	require.Equal(t, uint64(sd.metrics.CachePutSize)+keys*publishedTreeBytesPerKey, sd.SizeEstimate())
 }

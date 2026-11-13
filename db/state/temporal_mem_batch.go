@@ -358,25 +358,10 @@ func (sd *TemporalMemBatch) DeferPublish() {
 				sd.publishTree[d] = btree2.NewMap[string, dataWithTxNum](publishTreeDegree)
 			}
 			sd.published[d].Store(sd.publishTree[d].Copy())
+			sd.publishDirty[d] = false
 		}
 		sd.publishMu[d].Unlock()
 	}
-}
-
-// HasUnpublished reports whether writes held back since DeferPublish are not published yet.
-func (sd *TemporalMemBatch) HasUnpublished() bool {
-	for _, d := range deferrableDomains {
-		if sd.publishPending(d) {
-			return true
-		}
-	}
-	return false
-}
-
-func (sd *TemporalMemBatch) publishPending(d kv.Domain) bool {
-	sd.publishMu[d].Lock()
-	defer sd.publishMu[d].Unlock()
-	return sd.publishDirty[d]
 }
 
 // Publish publishes every write held back since DeferPublish.
@@ -392,9 +377,9 @@ func (sd *TemporalMemBatch) Publish() {
 	}
 }
 
-// deferrableDomains are the domains exec workers read. Only they get a published view, so the commitment fold
-// pays no tree copy per branch write and reads its own writes through the locked maps.
-var deferrableDomains = [...]kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain}
+// deferrableDomains are the domains exec workers read through the published view (code goes through the
+// locked maps). Only they get a view, so the commitment fold pays no tree copy per branch write.
+var deferrableDomains = [...]kv.Domain{kv.AccountsDomain, kv.StorageDomain}
 
 func (sd *TemporalMemBatch) GetLatest(domain kv.Domain, key []byte) (v []byte, step kv.Step, ok bool) {
 	sh := sd.shard(domain, common.ToStringZeroCopy(key))
@@ -439,7 +424,12 @@ func (sd *TemporalMemBatch) getLatest(sh *latestShard, domain kv.Domain, key []b
 // grow with node size times depth, (2d-1)*log(n)/log(d), which is about 7x smaller at 8 than at 128.
 const publishTreeDegree = 8
 
-// publish sets key in the domain's tree and publishes a copy of it. The caller holds key's shard lock.
+// publishedTreeBytesPerKey is the measured heap of a published tree per key; it shares keys and values with the latest maps.
+const publishedTreeBytesPerKey = 106
+
+// publish sets key in the domain's tree. Outside DeferPublish it turns the view off instead of copying the
+// tree, which would clone the written path on every later write; readers use the locked maps until the next
+// DeferPublish. The caller holds key's shard lock.
 func (sd *TemporalMemBatch) publish(domain kv.Domain, key string, v dataWithTxNum) {
 	if sd.unwindChangeset != nil || !slices.Contains(deferrableDomains[:], domain) {
 		return
@@ -450,11 +440,10 @@ func (sd *TemporalMemBatch) publish(domain kv.Domain, key string, v dataWithTxNu
 		sd.publishTree[domain] = btree2.NewMap[string, dataWithTxNum](publishTreeDegree)
 	}
 	sd.publishTree[domain].Set(key, v)
-	if sd.publishDeferred.Load() {
-		sd.publishDirty[domain] = true
-		return
+	sd.publishDirty[domain] = true
+	if !sd.publishDeferred.Load() {
+		sd.published[domain].Store(nil)
 	}
-	sd.published[domain].Store(sd.publishTree[domain].Copy())
 }
 
 // republishAll rebuilds every domain's tree from the latest maps, or stops serving lock-free reads
@@ -600,7 +589,23 @@ func (sd *TemporalMemBatch) SizeEstimate() uint64 {
 	// lock (not the domain locks, which guard the domains maps, not this counter).
 	sd.metrics.RLock()
 	defer sd.metrics.RUnlock()
-	return uint64(sd.metrics.CachePutSize)
+	return uint64(sd.metrics.CachePutSize) + sd.publishedTreeSize()
+}
+
+func (sd *TemporalMemBatch) publishedTreeSize() (size uint64) {
+	for _, d := range deferrableDomains {
+		size += sd.publishedTreeLen(d) * publishedTreeBytesPerKey
+	}
+	return size
+}
+
+func (sd *TemporalMemBatch) publishedTreeLen(d kv.Domain) uint64 {
+	sd.publishMu[d].Lock()
+	defer sd.publishMu[d].Unlock()
+	if sd.publishTree[d] == nil {
+		return 0
+	}
+	return uint64(sd.publishTree[d].Len())
 }
 
 func (sd *TemporalMemBatch) IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.Tx, it func(k []byte, v []byte) (cont bool, err error)) error {

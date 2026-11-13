@@ -730,9 +730,6 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					if tb, ok := pe.prevBlocks.TailBlockNum(); ok && tb != applyResult.BlockNum {
 						panic(fmt.Sprintf("prevBlocks tail block %d != committed block %d", tb, applyResult.BlockNum))
 					}
-					if pe.rs.Domains().HasUnpublished() {
-						panic(fmt.Sprintf("block %d leaves the prev-block list before its writes are published", applyResult.BlockNum))
-					}
 					pe.prevBlocks.RemoveTail()
 					var blockValidatorWaiter *blockValidator
 					if applyResult.BlockNum > 0 && !applyResult.isPartial { // Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec

@@ -683,7 +683,6 @@ type TemporalMemBatch interface {
 	GetLatestPublished(domain Domain, key []byte) (v []byte, step Step, ok bool)
 	DeferPublish()
 	Publish()
-	HasUnpublished() bool
 	GetDiffset(tx RwTx, blockHash common.Hash, blockNumber uint64) ([DomainLen][]DomainEntryDiff, bool, error)
 	Merge(other TemporalMemBatch) error
 	IndexAdd(table InvertedIdx, key []byte, txNum uint64) (err error)
