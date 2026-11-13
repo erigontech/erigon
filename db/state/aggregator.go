@@ -2235,43 +2235,47 @@ func (at *AggregatorRoTx) planFileBuild(tx kv.Tx) (fileBuildPlan, error) {
 			plan.deferredDomains[id] = true
 			continue
 		}
-		if d.FirstStepNotInFiles() >= stateStep {
+		filesEnd := d.FirstStepNotInFiles()
+		if filesEnd >= stateStep {
 			continue
 		}
-		first, found, err := d.d.firstStepToBuild(tx, d.FirstStepNotInFiles(), minResumeStep)
+		first, found, err := d.d.firstStepToBuild(tx, filesEnd, minResumeStep)
 		if err != nil {
 			return plan, err
 		}
-		if found {
-			if first < minResumeStep {
-				plan.deferredDomains[id] = true
-				at.a.logger.Warn("[snapshots] missing files require rebuilding; keeping pending data in MDBX", "domain", d.d.Name, "pendingStep", first, "stateStep", stateStep)
-				continue
-			}
-			plan.firstStep = min(plan.firstStep, first)
+		if !found {
+			continue
 		}
+		if first < minResumeStep {
+			plan.deferredDomains[id] = true
+			at.a.logger.Warn("[snapshots] missing files require rebuilding; keeping pending data in MDBX", "domain", d.d.Name, "pendingStep", first, "stateStep", stateStep)
+			continue
+		}
+		plan.firstStep = min(plan.firstStep, first)
 	}
 	for id, ii := range at.standaloneIIs() {
 		if ii == nil || !ii.ii.Enabled.Load() {
 			plan.deferredIndices[id] = true
 			continue
 		}
-		if ii.FirstStepNotInFiles() >= stateStep {
+		filesEnd := ii.FirstStepNotInFiles()
+		if filesEnd >= stateStep {
 			continue
 		}
 		first, found, err := ii.ii.firstStepInDB(tx)
 		if err != nil {
 			return plan, err
 		}
-		if found {
-			first = max(ii.FirstStepNotInFiles(), first)
-			if first < minResumeStep {
-				plan.deferredIndices[id] = true
-				at.a.logger.Warn("[snapshots] missing files require rebuilding; keeping pending data in MDBX", "index", ii.ii.Name, "fromStep", first, "stateStep", stateStep)
-				continue
-			}
-			plan.firstStep = min(plan.firstStep, first)
+		if !found {
+			continue
 		}
+		first = max(filesEnd, first)
+		if first < minResumeStep {
+			plan.deferredIndices[id] = true
+			at.a.logger.Warn("[snapshots] missing files require rebuilding; keeping pending data in MDBX", "index", ii.ii.Name, "fromStep", first, "stateStep", stateStep)
+			continue
+		}
+		plan.firstStep = min(plan.firstStep, first)
 	}
 	return plan, nil
 }

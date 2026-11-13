@@ -464,9 +464,9 @@ func (d *Domain) minStepInDB(tx kv.Tx) uint64 {
 }
 
 // firstStepToBuild returns the earliest pending step, clamped to filesEnd.
-// A result below minStep need not be the earliest: it already proves that
+// A result below minResumeStep need not be the earliest: it already proves that
 // the build must be deferred, so the values scan can stop early.
-func (d *Domain) firstStepToBuild(tx kv.Tx, filesEnd, minStep kv.Step) (kv.Step, bool, error) {
+func (d *Domain) firstStepToBuild(tx kv.Tx, filesEnd, minResumeStep kv.Step) (kv.Step, bool, error) {
 	if !d.HistoryDisabled && !d.SnapshotsDisabled {
 		first, found, err := d.InvertedIndex.firstStepInDB(tx)
 		return max(filesEnd, first), found, err
@@ -490,7 +490,7 @@ func (d *Domain) firstStepToBuild(tx kv.Tx, filesEnd, minStep kv.Step) (kv.Step,
 		} else {
 			first = min(first, kv.Step(^binary.BigEndian.Uint64(value[:8])))
 		}
-		if first <= filesEnd || first < minStep {
+		if first <= filesEnd || first < minResumeStep {
 			break
 		}
 	}

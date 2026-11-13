@@ -17,7 +17,6 @@
 package state
 
 import (
-	"fmt"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -163,9 +162,17 @@ func (c *buildPlanningCursor) Next() ([]byte, []byte, error) {
 func TestAggregatorBuildResumesIncompleteStep(t *testing.T) {
 	const stepSize = uint64(10)
 	for _, target := range []string{"receipt", "receipt_without_history", "rcache", "logaddrs"} {
-		for _, test := range []struct{ resumeStep, stateSteps kv.Step }{{0, 1}, {1, 2}, {0, 3}, {1, 4}} {
+		for _, test := range []struct {
+			name                   string
+			resumeStep, stateSteps kv.Step
+		}{
+			{name: "resume_from_step_0", resumeStep: 0, stateSteps: 1},
+			{name: "resume_from_step_1", resumeStep: 1, stateSteps: 2},
+			{name: "defer_from_step_0", resumeStep: 0, stateSteps: 3},
+			{name: "defer_from_step_1", resumeStep: 1, stateSteps: 4},
+		} {
 			resumeStep := test.resumeStep
-			t.Run(fmt.Sprintf("%s/step_%d/state_%d", target, resumeStep, test.stateSteps), func(t *testing.T) {
+			t.Run(target+"/"+test.name, func(t *testing.T) {
 				deferred := test.stateSteps > resumeStep+1
 				db, agg := testDbAndAggregatorv3(t, stepSize)
 				ctx := t.Context()
