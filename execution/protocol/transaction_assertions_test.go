@@ -75,6 +75,31 @@ func TestPostTxRollback(t *testing.T) {
 	require.Equal(t, uint256.NewInt(10_000_000-result.ReceiptGasUsed), &balance)
 }
 
+func TestPostTxRollbackPreservesLaterSnapshot(t *testing.T) {
+	evm, tx := frameTestEnv(t)
+	ibs := evm.IntraBlockState()
+	sender := accounts.InternAddress(tx.SenderAddress)
+	assertion := common.HexToAddress("0x3000")
+	require.NoError(t, ibs.SetCode(sender, program.New().Push(types.FrameApproveBoth).Push0().Push0().Op(vm.APPROVE).Bytes(), tracing.CodeChangeUnspecified))
+	require.NoError(t, ibs.SetCode(accounts.InternAddress(assertion), program.New().Push0().Push0().Op(vm.REVERT).Bytes(), tracing.CodeChangeUnspecified))
+	tx.Fees.FeeCap.SetUint64(1)
+	tx.Frames = []types.Frame{
+		{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
+		{Mode: types.FramePostTx, Target: &assertion, Limits: mdgas.MdGas{Execution: 10_000}},
+	}
+	snapshot := -1
+	ibs.SetHooks(&tracing.Hooks{OnBalanceChange: func(_ accounts.Address, _, _ uint256.Int, reason tracing.BalanceChangeReason) {
+		if reason == tracing.BalanceIncreaseGasReturn {
+			snapshot = ibs.PushSnapshot()
+		}
+	}})
+	result, err := applyFrameTest(t, evm, tx)
+	require.NoError(t, err)
+	require.ErrorIs(t, result.Err, vm.ErrExecutionReverted)
+	require.NotEqual(t, -1, snapshot)
+	require.NotPanics(t, func() { ibs.RevertToSnapshot(snapshot, nil) })
+}
+
 func TestPostTxBalanceTrace(t *testing.T) {
 	t.Parallel()
 	evm, tx := frameTestEnv(t)
@@ -222,4 +247,57 @@ func assertStackWord(code *program.Program, expected uint64) {
 	destination := code.Size() + 7
 	code.Op(vm.PUSH2).Append([]byte{byte(destination >> 8), byte(destination)}).Op(vm.JUMPI).
 		Push0().Push0().Op(vm.REVERT, vm.JUMPDEST)
+}
+
+func TestTxTraceOmitsRestoredBalance(t *testing.T) {
+	t.Parallel()
+	evm, tx := frameTestEnv(t)
+	ibs := evm.IntraBlockState()
+	relay := common.HexToAddress("0x2000")
+	assertion := common.HexToAddress("0x3000")
+	sink := common.HexToAddress("0x4000")
+	require.NoError(t, ibs.SetCode(accounts.InternAddress(tx.SenderAddress), program.New().Push(types.FrameApproveBoth).Push0().Push0().Op(vm.APPROVE).Bytes(), tracing.CodeChangeUnspecified))
+	require.NoError(t, ibs.SetBalance(accounts.InternAddress(sink), *uint256.NewInt(1), tracing.BalanceChangeUnspecified))
+	// The relay forwards the value it receives, so its own balance ends unchanged.
+	require.NoError(t, ibs.SetCode(accounts.InternAddress(relay), program.New().Call(uint256.NewInt(0), sink, 5, 0, 0, 0, 0).Op(vm.POP, vm.STOP).Bytes(), tracing.CodeChangeUnspecified))
+	code := program.New().Push0().Push0().Op(vm.TXTRACE)
+	assertStackWord(code, 2) // payer and sink
+	code.Push0().Push(relay).Push(0x0a).Op(vm.TXDIFF)
+	assertStackWord(code, 0)
+	require.NoError(t, ibs.SetCode(accounts.InternAddress(assertion), code.Op(vm.STOP).Bytes(), tracing.CodeChangeUnspecified))
+	tx.Frames = []types.Frame{
+		{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
+		{Mode: types.FrameSender, Target: &relay, Value: *uint256.NewInt(5), Limits: mdgas.MdGas{Execution: 50_000}},
+		{Mode: types.FramePostTx, Target: &assertion, Limits: mdgas.MdGas{Execution: 20_000}},
+	}
+	result, err := applyFrameTest(t, evm, tx)
+	require.NoError(t, err)
+	require.NoError(t, result.Err)
+	balance, err := ibs.GetBalance(accounts.InternAddress(sink))
+	require.NoError(t, err)
+	require.Equal(t, uint256.NewInt(6), &balance)
+}
+
+func TestTxDiffTopicViewListsEventOnce(t *testing.T) {
+	t.Parallel()
+	evm, tx := frameTestEnv(t)
+	ibs := evm.IntraBlockState()
+	body := common.HexToAddress("0x2000")
+	assertion := common.HexToAddress("0x3000")
+	topic := common.HexToHash("0xaa")
+	require.NoError(t, ibs.SetCode(accounts.InternAddress(tx.SenderAddress), program.New().Push(types.FrameApproveBoth).Push0().Push0().Op(vm.APPROVE).Bytes(), tracing.CodeChangeUnspecified))
+	// One event carries the same value in two indexed positions.
+	require.NoError(t, ibs.SetCode(accounts.InternAddress(body), program.New().Push(topic).Push(topic).Push(1).Push0().Push0().Op(vm.LOG3, vm.STOP).Bytes(), tracing.CodeChangeUnspecified))
+	code := program.New().Push0().Push(topic).Push(0x0b).Op(vm.TXDIFF)
+	assertStackWord(code, 1)
+	require.NoError(t, ibs.SetCode(accounts.InternAddress(assertion), code.Op(vm.STOP).Bytes(), tracing.CodeChangeUnspecified))
+	tx.Frames = []types.Frame{
+		{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
+		{Mode: types.FrameSender, Target: &body, Limits: mdgas.MdGas{Execution: 20_000}},
+		{Mode: types.FramePostTx, Target: &assertion, Limits: mdgas.MdGas{Execution: 20_000}},
+	}
+	result, err := applyFrameTest(t, evm, tx)
+	require.NoError(t, err)
+	require.NoError(t, result.Err)
+	require.Len(t, result.FrameReceipts[1].Logs, 1)
 }

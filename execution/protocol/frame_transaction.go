@@ -221,6 +221,7 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 			// Assertions preserve the complete payment-approval frame, including
 			// its state changes after APPROVE returns from a nested call.
 			st.state.RevertToSnapshot(bodySnapshot, frameErr)
+			bodySnapshot = -1
 			for j := bodyStart; j <= i; j++ {
 				ctx.Receipts[j].Logs = nil
 			}

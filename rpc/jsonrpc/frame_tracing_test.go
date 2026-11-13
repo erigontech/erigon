@@ -842,3 +842,26 @@ func TestPrestateTracerNestedTxDiff(t *testing.T) {
 		})
 	}
 }
+
+func TestFrameCallTracerFailedAssertion(t *testing.T) {
+	evm, tx := frameTraceTestEnv(t)
+	body := *tx.Frames[1].Target
+	assertion := common.HexToAddress("0x3000")
+	require.NoError(t, evm.IntraBlockState().SetCode(accounts.InternAddress(body), program.New().Push0().Push0().Op(vm.LOG0, vm.STOP).Bytes(), tracing.CodeChangeUnspecified))
+	require.NoError(t, evm.IntraBlockState().SetCode(accounts.InternAddress(assertion), program.New().Push0().Push0().Op(vm.REVERT).Bytes(), tracing.CodeChangeUnspecified))
+	tx.Frames = append(tx.Frames,
+		types.Frame{Mode: types.FramePostTx, Target: &assertion, Limits: mdgas.MdGas{Execution: 10_000}},
+		types.Frame{Mode: types.FramePostTx, Target: &assertion, Limits: mdgas.MdGas{Execution: 10_000}},
+	)
+	var trace frameCallTrace
+	require.NoError(t, json.Unmarshal(traceFrameRPC(t, evm, tx, "callTracer", json.RawMessage(`{"withLog":true}`)), &trace))
+	require.Len(t, trace.Calls, len(tx.Frames))
+	require.NotEmpty(t, trace.Error)
+	require.Empty(t, trace.Calls[1].Error)
+	require.Empty(t, trace.Calls[1].Logs, "the body rollback removes the logs of a successful frame")
+	require.Equal(t, "STATICCALL", trace.Calls[2].Type)
+	require.Equal(t, "execution reverted", trace.Calls[2].Error)
+	require.Equal(t, "STATICCALL", trace.Calls[3].Type)
+	require.Equal(t, "frame skipped", trace.Calls[3].Error)
+	require.Zero(t, trace.Calls[3].GasUsed)
+}

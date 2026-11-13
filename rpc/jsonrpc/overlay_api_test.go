@@ -251,37 +251,32 @@ func TestOverlayGetLogsKeepsSuccessfulFrameLogs(t *testing.T) {
 		name      string
 		gasCap    uint64
 		overrides *ethapi.StateOverrides
-		wantData  []byte
-		wantErr   bool
+		wantErr   string
 	}{
 		{name: "within cap", gasCap: 1_000_000},
-		{name: "below consumed gas", gasCap: receipt.GasUsed - 1, wantErr: true},
-		{name: "below execution budget", gasCap: limits.Execution - 1, wantErr: true},
+		{name: "below consumed gas", gasCap: receipt.GasUsed - 1, wantErr: "exceeds the RPC gas cap"},
+		{name: "below execution budget", gasCap: limits.Execution - 1, wantErr: "exceeds the RPC gas cap"},
 		{name: "at execution budget", gasCap: limits.Execution},
 		{name: "unlimited", gasCap: 0},
 		{name: "empty overrides", gasCap: limits.Execution, overrides: &ethapi.StateOverrides{}},
 		{
 			name: "underfunded balance override", gasCap: limits.Execution,
 			overrides: &ethapi.StateOverrides{accounts.InternAddress(sender): {Balance: &overrideBalance}},
-			wantData:  common.LeftPadBytes([]byte{1}, 32),
+			wantErr:   "verification frame 0 failed",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			api := NewOverlayAPI(base, m.DB, &rpccfg.OverlayApiConfig{GasCap: tc.gasCap}, NewOtterscanAPI(base, m.DB, 25))
 			logs, err := api.GetLogs(m.Ctx, filters.FilterCriteria{FromBlock: blockNumber, ToBlock: blockNumber}, tc.overrides, nil)
-			if tc.wantErr {
-				require.ErrorContains(t, err, "exceeds the RPC gas cap")
+			if tc.wantErr != "" {
+				require.ErrorContains(t, err, tc.wantErr)
 				require.Empty(t, logs)
 				return
 			}
 			require.NoError(t, err)
 			require.Len(t, logs, 1)
 			require.Equal(t, successfulTarget, logs[0].Address)
-			wantData := tc.wantData
-			if wantData == nil {
-				wantData = receipt.Logs[0].Data
-			}
-			require.Equal(t, wantData, []byte(logs[0].Data))
+			require.Equal(t, []byte(receipt.Logs[0].Data), []byte(logs[0].Data))
 		})
 	}
 }

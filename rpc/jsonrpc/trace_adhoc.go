@@ -1725,7 +1725,7 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 		if tracer != nil && tracer.Hooks.OnTxStart != nil {
 			tracer.Hooks.OnTxStart(evm.GetVMContext(), txns[txIndex], msg.From())
 		}
-		execResult, err := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailout /* gasBailout */, engine)
+		execResult, err := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailout && msg.FrameTransaction() == nil, engine)
 		if err != nil {
 			if tracer != nil {
 				tracer.Hooks.EmitTxEnd(nil, mdgas.TxnGasUsage{}, err)
@@ -1856,7 +1856,7 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 	if vmConfig.Tracer != nil && vmConfig.Tracer.OnTxStart != nil {
 		vmConfig.Tracer.OnTxStart(evm.GetVMContext(), txn, msg.From())
 	}
-	execResult, err := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailout /*gasBailout*/, engine)
+	execResult, err := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailout && msg.FrameTransaction() == nil, engine)
 	if err != nil {
 		vmConfig.Tracer.EmitTxEnd(nil, mdgas.TxnGasUsage{}, err)
 		return nil, fmt.Errorf("first run for txIndex %d error: %w", txIndex, err)

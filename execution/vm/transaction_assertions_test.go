@@ -25,11 +25,46 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
+
+func TestTxDiffChargesBeforeDynamicWork(t *testing.T) {
+	for _, traced := range []bool{false, true} {
+		name := "untraced"
+		if traced {
+			name = "traced"
+		}
+		t.Run(name, func(t *testing.T) {
+			ibs := state.New(state.NewNoopReader())
+			t.Cleanup(ibs.Close)
+			cfg := chain.AllProtocolChanges.Copy()
+			cfg.BogotaTime = common.NewUint64(0)
+			config := Config{}
+			if traced {
+				config.Tracer = &tracing.Hooks{OnOpcode: func(uint64, byte, uint64, uint64, tracing.OpContext, []byte, int, error) {}}
+			}
+			evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, cfg, config)
+			table := *evm.jt
+			evm.jt = &table
+			called := false
+			dynamicGas := table[TXDIFF].dynamicGas
+			table[TXDIFF].dynamicGas = func(evm *EVM, call *CallContext, gas mdgas.MdGas, memory uint64) (mdgas.MdGasCost, error) {
+				called = true
+				return dynamicGas(evm, call, gas, memory)
+			}
+			contract := Contract{Code: []byte{byte(PUSH0), byte(PUSH0), byte(PUSH0), byte(TXDIFF)}}
+			_, _, _, err := evm.Run(contract, mdgas.MdGas{Execution: 3*GasQuickStep + params.WarmStorageReadCostEIP2929 - 1}, nil, true)
+			require.ErrorIs(t, err, ErrOutOfGas)
+			require.False(t, called, "insufficient gas must reject TXDIFF before interning operands")
+		})
+	}
+}
 
 func TestTxDiffAccountReadErrors(t *testing.T) {
 	for _, tc := range []struct {
