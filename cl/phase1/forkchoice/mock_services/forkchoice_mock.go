@@ -90,6 +90,7 @@ type ForkChoiceStorageMock struct {
 	WeightsMock                                        []forkchoice.ForkNode
 	LightClientBootstraps                              map[common.Hash]*cltypes.LightClientBootstrap
 	NewestLCUpdate                                     *cltypes.LightClientUpdate
+	NewestLCFinalityUpdate                             *cltypes.LightClientUpdate
 	LCUpdates                                          map[uint64]*cltypes.LightClientUpdate
 	SyncContributionPool                               sync_contribution_pool.SyncContributionPool
 	Headers                                            map[common.Hash]*cltypes.BeaconBlockHeader
@@ -748,6 +749,10 @@ func (f *ForkChoiceStorageMock) GetLightClientBootstrap(
 	blockRoot common.Hash,
 ) (*cltypes.LightClientBootstrap, bool) {
 	return f.LightClientBootstraps[blockRoot], f.LightClientBootstraps[blockRoot] != nil
+}
+
+func (f *ForkChoiceStorageMock) NewestLightClientFinalityUpdate() *cltypes.LightClientUpdate {
+	return f.NewestLCFinalityUpdate
 }
 
 func (f *ForkChoiceStorageMock) NewestLightClientUpdate() *cltypes.LightClientUpdate {
