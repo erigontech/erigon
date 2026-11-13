@@ -96,6 +96,7 @@ func TestStreamErrors(t *testing.T) {
 		{"80", calls{"List"}, nil, ErrExpectedList},
 		{"C0", calls{"List", "Uint64"}, nil, EOL},
 		{"C8C9010101010101010101", calls{"List", "Kind"}, nil, ErrElemTooLarge},
+		{"C2B805", calls{"List", "Kind"}, nil, ErrCanonSize},
 		{"C3C2010201", calls{"List", "List", "Uint64", "Uint64", "ListEnd", "Uint64"}, nil, EOL},
 		{"00", calls{"ListEnd"}, nil, errNotInList},
 		{"C401020304", calls{"List", "Uint64", "ListEnd"}, nil, errNotAtEOL},
@@ -1635,5 +1636,23 @@ func TestSliceHintOnCorruptInput(t *testing.T) {
 				require.Equal(t, control, hinted, "byte %d = %#x", i, b)
 			}
 		}
+	}
+}
+
+func TestKindReadErrorIsSticky(t *testing.T) {
+	s := NewStream(newPlainReader(unhex("C301")), 10)
+	if _, err := s.List(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Uint64(); err != nil {
+		t.Fatal(err)
+	}
+	for i := range 3 {
+		if _, _, err := s.Kind(); !errors.Is(err, io.ErrUnexpectedEOF) {
+			t.Fatalf("Kind call %d: got %v, want %v", i, err, io.ErrUnexpectedEOF)
+		}
+	}
+	if err := s.ListEnd(); err == nil {
+		t.Fatal("ListEnd accepted a truncated list")
 	}
 }
