@@ -338,3 +338,16 @@ func TestFoldTxRebindsChangesetPerBlock(t *testing.T) {
 	pe.unbindFoldChangeset()
 	require.Nil(t, domains.GetChangesetAccumulator())
 }
+
+func TestFoldTxBindsChangesetSavedAfterFirstTx(t *testing.T) {
+	db := newResumeTestDB(t)
+	rwTx, domains := temporaltest.NewTestTxSD(t, db)
+	pe := newParallelLogIndexTestExec(db, domains, 0)
+	defer pe.unbindFoldChangeset()
+
+	require.NoError(t, pe.foldTx(t.Context(), rwTx, &txResult{blockNum: 1, blockHash: common.Hash{1}, txNum: 10}))
+	cs := &changeset.StateChangeSet{}
+	domains.SavePastChangesetAccumulator(common.Hash{1}, 1, cs)
+	require.NoError(t, pe.foldTx(t.Context(), rwTx, &txResult{blockNum: 1, blockHash: common.Hash{1}, txNum: 11}))
+	require.Same(t, cs, domains.GetChangesetAccumulator())
+}

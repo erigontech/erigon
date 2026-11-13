@@ -255,13 +255,13 @@ func (pe *parallelExecutor) clearChangesetAccumulator() {
 // apply fold's DomainPuts record account/storage/code diffs into it — letting
 // unwind revert state, not just commitment. The bind is transient and
 // self-restoring under changesetMu; nothing installs a persistent global.
-// Returns a restore closure; a no-op if the block has no saved changeset.
+// Returns a restore closure, or nil if the block has no saved changeset yet.
 func (pe *parallelExecutor) bindBlockChangesetForFold(blockNum uint64, blockHash common.Hash) (restore func()) {
 	pe.domains().LockChangesetAccumulator()
 	defer pe.domains().UnlockChangesetAccumulator()
 	cs := pe.domains().GetChangesetByHash(blockNum, blockHash)
 	if cs == nil {
-		return func() {}
+		return nil
 	}
 	unswap := pe.domains().SwapChangesetAccumulatorLocked(cs)
 	return func() {
