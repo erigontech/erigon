@@ -2592,6 +2592,9 @@ func TestValidateReadSet_BaseReadOfQuietAccountSkipsValidation(t *testing.T) {
 		{"no cells", 0, nil, base, VersionValid},
 		{"storage write", StoragePath, *uint256.NewInt(8), base, VersionInvalid},
 		{"self-destruct", SelfDestructPath, true, base, VersionInvalid},
+		{"address write", AddressPath, &accounts.Account{Incarnation: 1}, base, VersionValid},
+		{"incarnation write", IncarnationPath, uint64(1), base, VersionInvalid},
+		{"create contract", CreateContractPath, true, base, VersionValid},
 		{"read of a removed write", 0, nil, ReadHeader{Source: MapRead, Version: Version{TxIndex: 1}}, VersionInvalid},
 		{"read of an aborted write", StoragePath, *uint256.NewInt(8), ReadHeader{Source: MapRead, Version: Version{TxIndex: 1, Incarnation: 1}}, VersionInvalid},
 	} {
@@ -2615,8 +2618,8 @@ func TestValidateReadSet_BaseReadOfQuietAccountSkipsValidation(t *testing.T) {
 				return validateEqualVersion(read, write)
 			}
 			require.Equal(t, tc.want, vm.ValidateReadSet(3, rs, countChecks, false, ""))
-			if tc.value == nil && tc.read.Source == StorageRead {
-				require.Zero(t, checks, "a base read of a quiet account is not validated")
+			if tc.read == base {
+				require.Equal(t, tc.value != nil, checks > 0, "only a quiet account skips the version checks")
 			}
 		})
 	}
