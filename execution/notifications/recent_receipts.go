@@ -24,6 +24,9 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
+// MaxNotifiedBlocks is the longest block span one notification dispatch covers.
+const MaxNotifiedBlocks = 1024
+
 // RecentReceipts caches recent block receipts for notification dispatch.
 //
 // Requirements:
@@ -37,6 +40,13 @@ type RecentReceipts struct {
 	removedLogs []*LogNotification
 	limit       uint64
 	mu          sync.Mutex
+}
+
+// BlockReceipts is one block's receipts with the transactions and header their notifications carry.
+type BlockReceipts struct {
+	Receipts types.Receipts
+	Txs      []types.Transaction
+	Header   *types.Header
 }
 
 func NewRecentReceipts(limit uint64) *RecentReceipts {
@@ -70,6 +80,43 @@ func (r *RecentReceipts) Snapshot() (restore func()) {
 	}
 }
 
+// Missing returns the blocks in [from,to) that have no cached receipts.
+func (r *RecentReceipts) Missing(from, to uint64) []uint64 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var missing []uint64
+	for bn := from; bn < to; bn++ {
+		if _, ok := r.receipts[bn]; !ok {
+			missing = append(missing, bn)
+		}
+	}
+	return missing
+}
+
+// DropUpTo removes blocks at or below blockNum.
+func (r *RecentReceipts) DropUpTo(blockNum uint64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for bn := range r.receipts {
+		if bn <= blockNum {
+			delete(r.receipts, bn)
+			delete(r.txs, bn)
+			delete(r.headers, bn)
+		}
+	}
+}
+
+// evictBefore drops blocks more than limit below from; caller holds r.mu.
+func (r *RecentReceipts) evictBefore(from uint64) {
+	for bn := range r.receipts {
+		if bn+r.limit < from {
+			delete(r.receipts, bn)
+			delete(r.txs, bn)
+			delete(r.headers, bn)
+		}
+	}
+}
+
 // NotifyLogs sends moved-aside logs as removed, then added logs in ascending block order for [from,to).
 func (r *RecentReceipts) NotifyLogs(n ChainEventNotifier, from, to uint64) {
 	r.mu.Lock()
@@ -78,17 +125,9 @@ func (r *RecentReceipts) NotifyLogs(n ChainEventNotifier, from, to uint64) {
 	if !n.HasLogSubscriptions() {
 		return
 	}
+	r.evictBefore(from)
 	reply := r.removedLogs
-	for _, bn := range slices.Sorted(maps.Keys(r.receipts)) {
-		if bn+r.limit < from { // evict old
-			delete(r.receipts, bn)
-			delete(r.txs, bn)
-			delete(r.headers, bn)
-			continue
-		}
-		if bn < from || bn >= to {
-			continue
-		}
+	for bn := from; bn < to; bn++ {
 		reply = append(reply, logNotifications(r.receipts[bn], r.headers[bn], false)...)
 	}
 	if len(reply) > 0 {
@@ -159,13 +198,7 @@ func (r *RecentReceipts) Add(receipts types.Receipts, txs []types.Transaction, h
 	if len(r.receipts) <= int(r.limit) {
 		return
 	}
-	for bn := range r.receipts {
-		if bn+r.limit < blockNum {
-			delete(r.receipts, bn)
-			delete(r.txs, bn)
-			delete(r.headers, bn)
-		}
-	}
+	r.evictBefore(blockNum)
 }
 
 // NotifyReceipts sends added receipts in one batch, in ascending block order for [from,to).
@@ -176,21 +209,10 @@ func (r *RecentReceipts) NotifyReceipts(n ChainEventNotifier, from, to uint64) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	r.evictBefore(from)
 	var reply []*ReceiptNotification
-	for _, blockNum := range slices.Sorted(maps.Keys(r.receipts)) {
-		if blockNum+r.limit < from { // evict old
-			delete(r.receipts, blockNum)
-			delete(r.txs, blockNum)
-			delete(r.headers, blockNum)
-			continue
-		}
-		if blockNum < from || blockNum >= to {
-			continue
-		}
-
-		receipts := r.receipts[blockNum]
-		txs := r.txs[blockNum]
-		header := r.headers[blockNum]
+	for blockNum := from; blockNum < to; blockNum++ {
+		receipts, txs, header := r.receipts[blockNum], r.txs[blockNum], r.headers[blockNum]
 		if len(receipts) == 0 || len(txs) == 0 || header == nil {
 			continue
 		}

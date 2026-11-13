@@ -174,3 +174,41 @@ func TestLayerVersionMaps_Storage(t *testing.T) {
 	assert.True(t, ok)
 	assert.Equal(t, uint64(200), v.Uint64(), "prevBlock storage wins over base")
 }
+
+func TestLayerVersionMaps_CreationKeepsOnlySlotsWrittenFromIt(t *testing.T) {
+	t.Parallel()
+	addr := getAddress(8)
+	written := accounts.InternKey(common.HexToHash("0x01"))
+	cleared := accounts.InternKey(common.HexToHash("0x02"))
+	base := &fakeBaseReader{storage: map[accounts.Address]map[accounts.StorageKey]uint256.Int{
+		addr: {written: *uint256.NewInt(100), cleared: *uint256.NewInt(50)},
+	}}
+	prevBlock := NewVersionMap(nil)
+	prevBlock.StoreOriginStorage(addr, cleared, *uint256.NewInt(50))
+	prevBlock.WriteCreateContract(addr, Version{TxIndex: 1}, true, true)
+	prevBlock.WriteStorage(addr, written, Version{TxIndex: 1}, *uint256.NewInt(200), true)
+	prevBlock.SealUpTo(1)
+
+	r := layerVersionMaps(base, []*VersionMap{prevBlock})
+	v, ok, err := r.ReadAccountStorage(addr, written)
+	require.NoError(t, err)
+	assert.True(t, ok)
+	assert.Equal(t, uint64(200), v.Uint64(), "the creating tx wrote this slot")
+	v, _, err = r.ReadAccountStorage(addr, cleared)
+	require.NoError(t, err)
+	assert.True(t, v.IsZero(), "the creation cleared this slot, got %s", v.String())
+}
+
+// An Estimate slot cell written after the creation is a value the next reader must see, as on the path without a creation.
+func TestLayerVersionMaps_CreationKeepsAnEstimateSlotWrittenAfterIt(t *testing.T) {
+	addr := getAddress(7)
+	slot := accounts.InternKey(common.HexToHash("0x01"))
+	vm := NewVersionMap(nil)
+	vm.WriteCreateContract(addr, Version{TxIndex: 0}, true, true)
+	vm.WriteStorage(addr, slot, Version{TxIndex: 1}, *uint256.NewInt(7), false)
+
+	val, ok, err := NewVersionedStateReader(2, ReadSet{}, vm, nil).ReadAccountStorage(addr, slot)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, *uint256.NewInt(7), val)
+}

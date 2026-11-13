@@ -484,3 +484,32 @@ func TestConstructorStopsWhenCancelled(t *testing.T) {
 		})
 	}
 }
+
+func TestTracerInterfaceErrors(t *testing.T) {
+	tests := []struct {
+		name string
+		code string
+		want string
+	}{
+		{"null", `null`, "Cannot convert undefined or null to object"},
+		{"undefined", `undefined`, "Cannot convert undefined or null to object"},
+		{"result getter throws", `{get result() { throw 1 }, fault: function() {}}`, "1 at"},
+		{"fault getter throws", `{result: function() {}, get fault() { throw new Error("boom") }}`, "boom"},
+		{"step getter throws", `{result: function() {}, fault: function() {}, get step() { throw new Error("boom") }}`, "boom"},
+		{"exit getter throws", `{result: function() {}, fault: function() {}, enter: function() {}, get exit() { throw new Error("boom") }}`, "boom"},
+		{"setup getter throws", `{result: function() {}, fault: function() {}, get setup() { throw new Error("boom") }}`, "boom"},
+		{"primitive", `1`, "trace object must expose a function result()"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var err error
+			require.NotPanics(t, func() {
+				_, err = newJsTracer(tt.code, new(tracers.Context), nil)
+			})
+			require.ErrorContains(t, err, tt.want)
+		})
+	}
+
+	_, err := newJsTracer(`{result: function() {}, fault: function() {}}`, new(tracers.Context), nil)
+	require.NoError(t, err)
+}

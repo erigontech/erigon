@@ -406,10 +406,21 @@ func (api *TraceAPIImpl) resolveFilterBlockHash(ctx context.Context, tx kv.Tx, h
 
 func unknownBlockAsResourceNotFound(err error) error {
 	var unresolvedTag *rpc.CustomError
-	if errors.As(err, &rpc.BlockNotFoundErr{}) || (errors.As(err, &unresolvedTag) && unresolvedTag.Code == rpchelper.UnknownBlockCode) {
+	if errors.As(err, &rpc.BlockNotFoundErr{}) || errors.As(err, &rpchelper.NonCanonicalHashError{}) ||
+		(errors.As(err, &unresolvedTag) && unresolvedTag.Code == rpchelper.UnknownBlockCode) {
 		return &rpc.ResourceNotFoundError{Message: err.Error()}
 	}
 	return err
+}
+
+// callBlockError maps a block selector failure of trace_call and trace_callMany.
+// A hash selects a non-canonical block unless requireCanonical is set, but its
+// state is not kept, so the block is known and its state unavailable.
+func callBlockError(err error, block rpc.BlockNumberOrHash) error {
+	if !block.RequireCanonical && errors.As(err, &rpchelper.NonCanonicalHashError{}) {
+		return &rpc.CustomError{Code: 4444, Message: err.Error()}
+	}
+	return unknownBlockAsResourceNotFound(err)
 }
 
 func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromBlock, toBlock uint64, req TraceFilterRequest, stream *jsonstream.Stream, gasBailOut bool, traceConfig *config.TraceConfig) error {
@@ -417,7 +428,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 	var err error
 
 	if api.blockRangeLimit != 0 && (toBlock-fromBlock) > uint64(api.blockRangeLimit) {
-		return fmt.Errorf("%s: %d", errExceedBlockRange, api.blockRangeLimit)
+		return &rpc.InvalidParamsError{Message: fmt.Sprintf("%s: %d", errExceedBlockRange, api.blockRangeLimit)}
 	}
 
 	if fromBlock > 0 {
@@ -774,7 +785,7 @@ func (api *TraceAPIImpl) callBlock(
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := ethapi.CommitCallState(ibs, rules, cachedWriter); err != nil {
+	if err := ethapi.FinalizeCallTxTo(ibs, rules, cachedWriter); err != nil {
 		return nil, nil, err
 	}
 
@@ -1088,7 +1099,7 @@ func (api *TraceAPIImpl) callTransaction(
 	if err != nil {
 		return nil, err
 	}
-	if err := ethapi.CommitCallState(ibs, rules, cachedWriter); err != nil {
+	if err := ethapi.FinalizeCallTxTo(ibs, rules, cachedWriter); err != nil {
 		return nil, err
 	}
 

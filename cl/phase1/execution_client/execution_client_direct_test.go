@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -62,7 +63,7 @@ func (s *newPayloadModuleStub) CurrentHeader(context.Context) (*types.Header, er
 	return &types.Header{}, nil
 }
 
-func (s *newPayloadModuleStub) ValidateChain(context.Context, common.Hash, uint64) (execmodule.ValidationResult, error) {
+func (s *newPayloadModuleStub) ValidateChain(context.Context, *types.Block) (execmodule.ValidationResult, error) {
 	s.validationCalls++
 	return s.validation, nil
 }
@@ -82,20 +83,22 @@ func TestDirectNewPayloadTransactionEncoding(t *testing.T) {
 	for _, tc := range []struct {
 		name         string
 		transactions [][]byte
-		wrapped      bool
+		invalid      bool
 	}{
 		{name: "empty"},
 		{name: "legacy", transactions: transactions[:1]},
 		{name: "typed", transactions: transactions[1:]},
 		{name: "mixed", transactions: transactions},
-		{name: "wrapped short", transactions: [][]byte{wrappedShort}, wrapped: true},
-		{name: "wrapped long", transactions: [][]byte{wrappedLong}, wrapped: true},
-		{name: "wrapped after canonical", transactions: [][]byte{transactions[0], transactions[1], wrappedLong}, wrapped: true},
+		{name: "wrapped short", transactions: [][]byte{wrappedShort}, invalid: true},
+		{name: "wrapped long", transactions: [][]byte{wrappedLong}, invalid: true},
+		{name: "wrapped after canonical", transactions: [][]byte{transactions[0], transactions[1], wrappedLong}, invalid: true},
+		{name: "malformed legacy", transactions: [][]byte{{0xc1, 0x80}}, invalid: true},
+		{name: "malformed access list", transactions: [][]byte{{types.AccessListTxType, 0xc0}}, invalid: true},
+		{name: "malformed dynamic fee", transactions: [][]byte{{types.DynamicFeeTxType, 0xc0}}, invalid: true},
+		{name: "malformed set code", transactions: [][]byte{{types.SetCodeTxType, 0xc0}}, invalid: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			module := &newPayloadModuleStub{}
-			client, err := NewExecutionClientDirect(chainreader.NewChainReaderEth1(chain.AllProtocolChanges, module, time.Second), nil)
-			require.NoError(t, err)
+			client, module := newDirectClientForNewPayload(t)
 
 			payload := cltypes.NewEth1Block(clparams.FuluVersion, &clparams.MainnetBeaconConfig)
 			payload.BlockNumber = 1
@@ -103,11 +106,12 @@ func TestDirectNewPayloadTransactionEncoding(t *testing.T) {
 			payload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(clparams.MainnetBeaconConfig.MaxWithdrawalsPerPayload), 44)
 			payload.Transactions = solid.NewTransactionsSSZFromTransactions(tc.transactions)
 			parentRoot := common.Hash{}
-			payload.BlockHash, err = payload.ComputeBlockHash(&parentRoot, cltypes.ComputeExecutionRequestHash(nil), nil)
+			payloadHash, err := payload.ComputeBlockHash(&parentRoot, cltypes.ComputeExecutionRequestHash(nil), nil)
 			require.NoError(t, err)
+			payload.BlockHash = payloadHash
 
-			status, err := client.NewPayload(t.Context(), payload, &parentRoot, nil, nil)
-			if tc.wrapped {
+			status, err := client.NewPayload(t.Context(), payload, &parentRoot, []common.Hash{}, nil)
+			if tc.invalid {
 				require.EqualValues(t, PayloadStatusInvalidated, status)
 				require.Error(t, err)
 				require.Empty(t, module.inserted)
@@ -145,7 +149,7 @@ func TestDirectNewPayloadRegistersSendersRecovery(t *testing.T) {
 	module := &newPayloadModuleStub{}
 	client, err := NewExecutionClientDirect(chainreader.NewChainReaderEth1(chain.AllProtocolChanges, module, time.Second), nil)
 	require.NoError(t, err)
-	_, err = client.NewPayload(t.Context(), payload, &parentRoot, nil, nil)
+	_, err = client.NewPayload(t.Context(), payload, &parentRoot, []common.Hash{}, nil)
 	require.NoError(t, err)
 
 	r, ok := module.recoveries[payload.BlockHash]
@@ -181,7 +185,7 @@ func TestDirectNewPayloadCarriesLatestValidHash(t *testing.T) {
 			payload.BlockHash, err = payload.ComputeBlockHash(&parentRoot, cltypes.ComputeExecutionRequestHash(nil), nil)
 			require.NoError(t, err)
 
-			status, err := client.NewPayload(t.Context(), payload, &parentRoot, nil, nil)
+			status, err := client.NewPayload(t.Context(), payload, &parentRoot, []common.Hash{}, nil)
 			require.EqualValues(t, PayloadStatusInvalidated, status)
 			require.Error(t, err)
 			var invalid *InvalidPayloadError
@@ -266,6 +270,76 @@ func TestRetryAssembleBlockRejectsNoAttempts(t *testing.T) {
 		return 1, nil
 	})
 	require.EqualError(t, err, "assemble block requires at least one attempt")
+}
+
+func newDirectClientForNewPayload(t *testing.T) (*ExecutionClientDirect, *newPayloadModuleStub) {
+	t.Helper()
+	module := &newPayloadModuleStub{}
+	client, err := NewExecutionClientDirect(chainreader.NewChainReaderEth1(chain.AllProtocolChanges, module, time.Second), nil)
+	require.NoError(t, err)
+	return client, module
+}
+
+func gloasPayloadWithBlobTx(t *testing.T, blobHashes ...common.Hash) *cltypes.Eth1Block {
+	t.Helper()
+	txn := &types.BlobTx{
+		DynamicFeeTransaction: types.DynamicFeeTransaction{CommonTx: types.CommonTx{GasLimit: 21_000, To: &common.Address{1}}},
+		BlobVersionedHashes:   blobHashes,
+	}
+	raw, err := types.MarshalTransactionsBinary(types.Transactions{txn})
+	require.NoError(t, err)
+	payload := gloas(&clparams.MainnetBeaconConfig, []byte{0xc0})
+	payload.Transactions = solid.NewProgressiveTransactionsSSZFromTransactions(raw)
+	payload.BlobGasUsed = misc.GetBlobGasUsed(len(blobHashes))
+	bal, err := DecodeAndValidateBlockAccessList(payload)
+	require.NoError(t, err)
+	payload.BlockHash, err = payload.ComputeBlockHash(&common.Hash{}, cltypes.ComputeExecutionRequestHash(nil), bal)
+	require.NoError(t, err)
+	return payload
+}
+
+func TestDirectNewPayloadRejectsBlobHashesTheBidDidNotCommitTo(t *testing.T) {
+	v, w := common.Hash{0x01, 0x0a}, common.Hash{0x01, 0x0b}
+	for _, tc := range []struct {
+		name      string
+		inPayload []common.Hash
+		expected  []common.Hash
+	}{
+		{"missing", []common.Hash{v}, []common.Hash{}},
+		{"different", []common.Hash{v}, []common.Hash{w}},
+		{"reordered", []common.Hash{v, w}, []common.Hash{w, v}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client, module := newDirectClientForNewPayload(t)
+
+			status, err := client.NewPayload(t.Context(), gloasPayloadWithBlobTx(t, tc.inPayload...), &common.Hash{}, tc.expected, nil)
+
+			require.ErrorIs(t, err, misc.ErrMismatchBlobHashes)
+			require.EqualValues(t, PayloadStatusInvalidated, status)
+			require.Empty(t, module.inserted)
+		})
+	}
+}
+
+func TestDirectNewPayloadAcceptsMatchingBlobHashes(t *testing.T) {
+	v := common.Hash{0x01, 0x0a}
+	client, module := newDirectClientForNewPayload(t)
+
+	status, err := client.NewPayload(t.Context(), gloasPayloadWithBlobTx(t, v), &common.Hash{}, []common.Hash{v}, nil)
+
+	require.NoError(t, err)
+	require.EqualValues(t, PayloadStatusValidated, status)
+	require.Len(t, module.inserted, 1)
+}
+
+func TestDirectNewPayloadTreatsNilBlobHashesAsACallerError(t *testing.T) {
+	client, module := newDirectClientForNewPayload(t)
+
+	status, err := client.NewPayload(t.Context(), gloasPayloadWithBlobTx(t, common.Hash{0x01}), &common.Hash{}, nil, nil)
+
+	require.ErrorIs(t, err, misc.ErrNilBlobHashes)
+	require.EqualValues(t, PayloadStatusNone, status)
+	require.Empty(t, module.inserted)
 }
 
 // The usual contention is the forkchoice update's own commit, which ends within tens of
