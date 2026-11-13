@@ -839,7 +839,7 @@ func (db *MdbxKV) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 		return nil, errors.New("db closed")
 	}
 
-	if kv.IsNonBlockingAcquire(ctx) || kv.IsTryAcquire(ctx) {
+	if kv.IsNonBlockingAcquire(ctx) {
 		if !db.roTxsLimiter.TryAcquire(1) {
 			db.trackTxEnd()
 			dbRoTxOverloaded.Inc()

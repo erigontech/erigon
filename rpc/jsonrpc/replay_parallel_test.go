@@ -44,7 +44,7 @@ import (
 )
 
 // readTxLimitDB opens the first n read txs; past them it acts as a full read-tx semaphore:
-// it fails under kv.WithNonBlockingAcquire or kv.WithTryAcquire and blocks until ctx is done otherwise.
+// it fails under kv.WithNonBlockingAcquire and blocks until ctx is done otherwise.
 type readTxLimitDB struct {
 	kv.TemporalRoDB
 	left atomic.Int32
@@ -58,7 +58,7 @@ func newReadTxLimitDB(db kv.TemporalRoDB, n int32) *readTxLimitDB {
 
 func (db *readTxLimitDB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 	if db.left.Add(-1) < 0 {
-		if kv.IsNonBlockingAcquire(ctx) || kv.IsTryAcquire(ctx) {
+		if kv.IsNonBlockingAcquire(ctx) {
 			return nil, kv.ErrReadTxLimitExceeded
 		}
 		<-ctx.Done()

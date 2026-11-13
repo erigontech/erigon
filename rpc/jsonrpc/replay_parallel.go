@@ -155,7 +155,7 @@ func (r *txnReplay) written() {
 // beginReplayReadTxs opens up to n read txs and stops at the read-tx limit. It never waits for
 // a slot: the caller already holds a read tx, and waiting while holding it can deadlock.
 func beginReplayReadTxs(ctx context.Context, db kv.TemporalRoDB, n int) ([]kv.TemporalTx, error) {
-	ctx = kv.WithTryAcquire(ctx)
+	ctx = kv.WithNonBlockingAcquire(ctx)
 	txs := make([]kv.TemporalTx, 0, n)
 	for range n {
 		tx, err := db.BeginTemporalRo(ctx) //nolint:gocritic // each tx is rolled back by its worker

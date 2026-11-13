@@ -32,7 +32,6 @@ import (
 	mdbxgo "github.com/erigontech/mdbx-go/mdbx"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -1499,14 +1498,4 @@ func TestCursorUnknownTable(t *testing.T) {
 	defer tx.Rollback()
 	_, err = tx.Cursor("NoSuchTable")
 	require.Error(t, err)
-}
-
-func TestBeginRoTryAcquireAtReadTxLimit(t *testing.T) {
-	db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, log.New()), t.TempDir()).RoTxsLimiter(semaphore.NewWeighted(0)).MustOpen()
-	t.Cleanup(db.Close)
-
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
-	_, err := db.BeginRo(kv.WithTryAcquire(ctx)) //nolint:gocritic // no tx is opened
-	require.ErrorIs(t, err, kv.ErrReadTxLimitExceeded)
 }
