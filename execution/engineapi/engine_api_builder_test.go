@@ -62,7 +62,6 @@ func TestEngineApiClearsFreshTouchedEmptyAccount(t *testing.T) {
 }
 
 func testEngineApiClearsFreshTouchedEmptyAccount(t *testing.T, experimentalBAL bool) {
-
 	ctx := t.Context()
 	logger := testlog.Logger(t, log.LvlError)
 	genesis, coinbaseKey, err := engineapitester.DefaultEngineApiTesterGenesis()
@@ -135,7 +134,6 @@ func testEngineApiClearsFreshTouchedEmptyAccount(t *testing.T, experimentalBAL b
 }
 
 func TestEngineApiClearsFreshZeroAmountWithdrawal(t *testing.T) {
-
 	ctx := t.Context()
 	logger := testlog.Logger(t, log.LvlError)
 	genesis, coinbaseKey, err := engineapitester.DefaultEngineApiTesterGenesis()

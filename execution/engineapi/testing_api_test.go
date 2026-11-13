@@ -1821,7 +1821,6 @@ func TestNewPayloadRegistersSendersRecovery(t *testing.T) {
 }
 
 func TestNewPayloadRegistersSendersRecoveryForBALPayload(t *testing.T) {
-
 	config := allForksChainConfig()
 	config.TerminalTotalDifficulty = nil
 	key, err := crypto.GenerateKey()
