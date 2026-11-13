@@ -25,6 +25,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
@@ -618,4 +619,26 @@ func TestResumedBlockWithWrongRequestsHashIsInvalid(t *testing.T) {
 		require.NotNil(t, verdict, "resume point %d", point)
 		require.ErrorIs(t, verdict.err, rules.ErrInvalidBlock, "resume point %d", point)
 	}
+}
+
+// panicFinalizeEngine panics the exec loop at block end, after the apply loop
+// has had time to take the block's tx results.
+type panicFinalizeEngine struct{ rules.Engine }
+
+func (panicFinalizeEngine) Finalize(*chain.Config, *types.Header, *state.IntraBlockState, []*types.Header,
+	types.Receipts, []*types.Withdrawal, rules.ChainReader, rules.SystemCall, bool, log.Logger,
+) (types.FlatRequests, error) {
+	time.Sleep(50 * time.Millisecond)
+	panic("finalize failed")
+}
+
+// TestExecLoopPanicMidBlockIsNotInvalidBlock pins that an exec-loop panic after
+// the block's tx results reached the apply loop is an internal error, not a verdict.
+func TestExecLoopPanicMidBlockIsNotInvalidBlock(t *testing.T) {
+	fx := newResumeBALFixture(t)
+	fx.engine = panicFinalizeEngine{Engine: fx.engine}
+	verdict, err := fx.exec(t, fx.block, fromBlockStart)
+	require.Nil(t, verdict)
+	require.ErrorContains(t, err, "finalize failed")
+	require.NotErrorIs(t, err, rules.ErrInvalidBlock)
 }
