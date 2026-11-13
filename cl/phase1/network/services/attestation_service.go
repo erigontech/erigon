@@ -223,7 +223,7 @@ func NewAttestationService(
 		netCfg:                 netCfg,
 		emitters:               emitters,
 		batchSignatureVerifier: batchSignatureVerifier,
-		validatorVotes:         newValidatorVotes(),
+		validatorVotes:         newValidatorVotes(validatorVoteEpochs(beaconCfg, netCfg)),
 		targetStateBuildClaims: newTargetStateBuildClaims(),
 		awaitingBlock:          newBlockArrivalQueue(forkchoiceStore, maxAttestationsAwaitingBlock, time.Duration(beaconCfg.SecondsPerSlot)*time.Second),
 	}
@@ -304,17 +304,6 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		signature = att.Attestation.Signature
 		data = att.Attestation.Data
 	}
-
-	// Commented because we have a check in validatorVotes that does the same thing.
-
-	// key, err := att.Attestation.HashSSZ()
-	// if err != nil {
-	// 	return err
-	// }
-	// if _, ok := s.attestationProcessed.Get(key); ok {
-	// 	return ErrIgnore
-	// }
-	// s.attestationProcessed.Add(key, struct{}{})
 
 	// [IGNORE] attestation.data.slot is within the last ATTESTATION_PROPAGATION_SLOT_RANGE slots (within a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance) --
 	// i.e. attestation.data.slot + ATTESTATION_PROPAGATION_SLOT_RANGE >= current_slot >= attestation.data.slot (a client MAY queue future attestations for processing at the appropriate slot).

@@ -16,18 +16,29 @@
 
 package services
 
-import "sync"
+import (
+	"sync"
 
-// validatorVotes records, per target epoch, the validators that already have a valid attestation on gossip. Gossip
-// accepts attestations of the previous and the current epoch only, so it keeps the two newest epochs.
+	"github.com/erigontech/erigon/cl/clparams"
+)
+
+// validatorVotes records, per target epoch, the validators that already have a valid attestation on gossip. It keeps
+// the newest epochs that the propagation range can still admit; a vote for an older epoch is never new.
 type validatorVotes struct {
 	mu       sync.RWMutex
 	byEpoch  map[uint64][]uint64 // target epoch -> bitset by validator index
 	maxEpoch uint64
+	epochs   uint64
 }
 
-func newValidatorVotes() *validatorVotes {
-	return &validatorVotes{byEpoch: make(map[uint64][]uint64)}
+// validatorVoteEpochs is the number of target epochs the propagation range can span, plus one for an epoch that
+// starts before the head reaches it.
+func validatorVoteEpochs(beaconCfg *clparams.BeaconChainConfig, netCfg *clparams.NetworkConfig) uint64 {
+	return (netCfg.AttestationPropagationSlotRange+beaconCfg.SlotsPerEpoch-1)/beaconCfg.SlotsPerEpoch + 1
+}
+
+func newValidatorVotes(epochs uint64) *validatorVotes {
+	return &validatorVotes{byEpoch: make(map[uint64][]uint64), epochs: epochs}
 }
 
 func (v *validatorVotes) seen(validatorIndex, epoch uint64) bool {
@@ -42,13 +53,13 @@ func (v *validatorVotes) seen(validatorIndex, epoch uint64) bool {
 func (v *validatorVotes) claim(validatorIndex, epoch uint64) bool {
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	if epoch+1 < v.maxEpoch {
-		return true
+	if epoch+v.epochs <= v.maxEpoch {
+		return false
 	}
 	if epoch > v.maxEpoch {
 		v.maxEpoch = epoch
 		for e := range v.byEpoch {
-			if e+1 < epoch {
+			if e+v.epochs <= epoch {
 				delete(v.byEpoch, e)
 			}
 		}
