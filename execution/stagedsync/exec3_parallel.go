@@ -106,9 +106,6 @@ type parallelExecutor struct {
 	// cancelExecLoop publishes the stop cause on execLoopCtx. Normal stops finish
 	// work up to the coalesce block; failures can abort speculative work in progress.
 	cancelExecLoop context.CancelCauseFunc
-	// execLoopErr is the exec loop's internal failure. It is set before the apply channels close
-	// and read only after, so it needs no lock, and it wins whatever stop cause came first.
-	execLoopErr error
 	// cancelWorkers stops the OCC worker pool via workersCtx (child of execLoopCtx):
 	// the explicit ordered halt the exec loop calls once it has produced up to the
 	// coalesce block.
@@ -625,9 +622,6 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					if _, isStop := stopCauseOf(executorContext); !isStop && executorContext.Err() != nil {
 						return context.Cause(executorContext)
 					}
-					if pe.execLoopErr != nil {
-						return pe.execLoopErr
-					}
 					if missing := applyLoopMissingBlocks(txResultBlocks, appliedBlocks); len(missing) > 0 {
 						pe.verdict = &blockVerdict{blockNum: lastBlockResult.BlockNum, err: fmt.Errorf("%w: apply loop exited (lastBlockResult=%d maxBlockNum=%d) but %d block(s) had tx-results without a blockResult: %v",
 							rules.ErrInvalidBlock, lastBlockResult.BlockNum, pe.maxBlockNum, len(missing), missing)}
@@ -975,14 +969,8 @@ func (pe *parallelExecutor) prevBlockBase(raw state.StateReader, blockNum uint64
 	return state.PrevBlockBase(raw, pe.prevBlocks, blockNum)
 }
 
-// execLoopStartHook, when set by a test, runs at the start of each exec loop.
-var execLoopStartHook func(*parallelExecutor)
-
 func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 	pprof.SetGoroutineLabels(pprof.WithLabels(ctx, pprof.Labels("sub", "exec-loop")))
-	if execLoopStartHook != nil {
-		execLoopStartHook(pe)
-	}
 	// The exec loop owns shutdown sequencing: on exit it closes commitResults then
 	// applyResults, draining the calculator and apply loop. It owns the workers'
 	// inner context too — whatever exit path it takes, the workers must not outlive it.
@@ -1012,8 +1000,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 		}
 		// The errgroup cancels with err only after closeApplyChannels; publish it first
 		// so the apply loop does not read the leftover tx results as an invalid block.
-		if err != nil && !errors.Is(err, rules.ErrInvalidBlock) && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
-			pe.execLoopErr = err
+		if err != nil && !errors.Is(err, rules.ErrInvalidBlock) {
 			pe.cancelOperational(0, err)
 		}
 	}()
@@ -1622,7 +1609,6 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 
 	pe.taskExecMetrics = exec.NewWorkerMetrics()
 	pe.blockExecMetrics = newBlockExecMetrics()
-	pe.execLoopErr = nil
 
 	// execLoopCtx (outer) carries the stopCause signal and runs the exec loop.
 	// workersCtx (inner, its child) runs the OCC workers, so the exec loop decides

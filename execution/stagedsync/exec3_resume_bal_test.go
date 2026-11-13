@@ -24,7 +24,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -104,7 +103,6 @@ type resumeBALFixture struct {
 	// fromStateFiles moves the seeded state into the files of the first step and
 	// empties the state tables, as a snapshot sync leaves them.
 	fromStateFiles bool
-	exhausted      *ErrLoopExhausted // set by exec on a resumable partial batch
 }
 
 func newResumeBALFixture(t *testing.T) *resumeBALFixture {
@@ -498,7 +496,6 @@ func (fx *resumeBALFixture) exec(t *testing.T, block *types.Block, point resumeP
 	}
 	src := &singleBlockSource{block: block, num: 1, parent: fx.genesis.Header(), bal: block.BlockAccessList()}
 	out, err := ExecV3(ctx, cfg, domains, rwTx, stages.ModeForkValidation, false, "resume-bal", rng, src, logger)
-	fx.exhausted = out.exhausted
 	if err != nil {
 		require.Nil(t, out.verdict)
 		return nil, err
@@ -625,59 +622,23 @@ func TestResumedBlockWithWrongRequestsHashIsInvalid(t *testing.T) {
 }
 
 // panicFinalizeEngine panics the exec loop at block end, after the apply loop
-// has had time to take the block's tx results. beforePanic runs first.
-type panicFinalizeEngine struct {
-	rules.Engine
-	beforePanic func()
-}
+// has had time to take the block's tx results.
+type panicFinalizeEngine struct{ rules.Engine }
 
-func (e panicFinalizeEngine) Finalize(*chain.Config, *types.Header, *state.IntraBlockState, []*types.Header,
+func (panicFinalizeEngine) Finalize(*chain.Config, *types.Header, *state.IntraBlockState, []*types.Header,
 	types.Receipts, []*types.Withdrawal, rules.ChainReader, rules.SystemCall, bool, log.Logger,
 ) (types.FlatRequests, error) {
-	if e.beforePanic != nil {
-		e.beforePanic()
-	}
 	time.Sleep(50 * time.Millisecond)
 	panic("finalize failed")
 }
 
 // TestExecLoopPanicMidBlockIsNotInvalidBlock pins that an exec-loop panic after
-// the block's tx results reached the apply loop is an internal error, not a verdict,
-// also when a stop cause was published before the panic.
+// the block's tx results reached the apply loop is an internal error, not a verdict.
 func TestExecLoopPanicMidBlockIsNotInvalidBlock(t *testing.T) {
-	for _, tc := range []struct {
-		name      string
-		stopFirst *stopCause
-	}{
-		{"no stop cause", nil},
-		{"after a reached-max stop", &stopCause{block: 1, kind: stopReachedMax}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			var pe atomic.Pointer[parallelExecutor]
-			execLoopStartHook = func(p *parallelExecutor) { pe.Store(p) }
-			defer func() { execLoopStartHook = nil }()
-			fx := newResumeBALFixture(t)
-			engine := panicFinalizeEngine{Engine: fx.engine}
-			if tc.stopFirst != nil {
-				engine.beforePanic = func() { pe.Load().cancelExecLoop(tc.stopFirst) }
-			}
-			fx.engine = engine
-			verdict, err := fx.exec(t, fx.block, fromBlockStart)
-			require.Nil(t, verdict)
-			require.ErrorContains(t, err, "finalize failed")
-			require.NotErrorIs(t, err, rules.ErrInvalidBlock)
-		})
-	}
-}
-
-// TestExecLoopCancelAfterStopForMoreWorkResumes pins that a context error the exec loop
-// returns after a stop for more work keeps the batch resumable instead of failing it.
-func TestExecLoopCancelAfterStopForMoreWorkResumes(t *testing.T) {
-	execLoopStartHook = func(pe *parallelExecutor) { pe.cancelExecLoop(&stopCause{kind: stopMoreWork}) }
-	defer func() { execLoopStartHook = nil }()
 	fx := newResumeBALFixture(t)
+	fx.engine = panicFinalizeEngine{Engine: fx.engine}
 	verdict, err := fx.exec(t, fx.block, fromBlockStart)
-	require.NoError(t, err)
 	require.Nil(t, verdict)
-	require.NotNil(t, fx.exhausted)
+	require.ErrorContains(t, err, "finalize failed")
+	require.NotErrorIs(t, err, rules.ErrInvalidBlock)
 }
